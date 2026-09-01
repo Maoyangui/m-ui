@@ -146,6 +146,10 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		if err := s.dryRunLine(&line); err != nil {
+			badRequest(w, err)
+			return
+		}
 		line.Id = 0
 		if line.Sort == 0 {
 			var maxSort int
@@ -183,6 +187,10 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 		}
 		line.Id = id
 		if err := s.validateLine(&line); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if err := s.dryRunLine(&line); err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -300,6 +308,10 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		if err := s.dryRunUpstream(&up); err != nil {
+			badRequest(w, err)
+			return
+		}
 		up.Id = 0
 		if err := s.db.Create(&up).Error; err != nil {
 			badRequest(w, err)
@@ -313,6 +325,9 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
+	if s.dispatchUpstreamSubroute(w, r) {
+		return
+	}
 	id, err := pathID(r, "/upstreams/")
 	if err != nil {
 		badRequest(w, err)
@@ -327,6 +342,10 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 		}
 		up.Id = id
 		if err := s.validateUpstream(&up); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if err := s.dryRunUpstream(&up); err != nil {
 			badRequest(w, err)
 			return
 		}

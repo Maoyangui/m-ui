@@ -58,11 +58,14 @@
     <!-- 上游 -->
     <section id="tab-upstreams" hidden>
       <div class="bar">
-        <h2>上游落地</h2>
-        <button class="primary" onclick="editUpstream(null)">新增上游</button>
+        <h2>上游落地 <small>线路的出口;支持粘贴链接导入与一键测试</small></h2>
+        <div class="row">
+          <button id="btn-test-all" onclick="testAllUpstreams()">测试全部</button>
+          <button class="primary" onclick="editUpstream(null)">新增上游</button>
+        </div>
       </div>
       <table class="grid">
-        <thead><tr><th>名称</th><th>类型</th><th>服务器</th><th></th></tr></thead>
+        <thead><tr><th>名称</th><th>类型</th><th>服务器</th><th>状态 / 延迟</th><th></th></tr></thead>
         <tbody id="upstreams-body"></tbody>
       </table>
     </section>

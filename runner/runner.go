@@ -54,10 +54,16 @@ func (r *Runner) setting(key string) string {
 
 // nodeCert 读取本机证书材料(各机各签,路径固定)。
 func (r *Runner) nodeCert() render.NodeCert {
+	// 数据面证书优先用 certFile/keyFile(证书页签发的固定路径),
+	// 未设置时回落到面板证书,兼容从旧库导入的配置。
+	certPath, keyPath := r.setting("certFile"), r.setting("keyFile")
+	if certPath == "" || keyPath == "" {
+		certPath, keyPath = r.setting("webCertFile"), r.setting("webKeyFile")
+	}
 	return render.NodeCert{
 		ServerName: r.setting("webDomain"),
-		CertPath:   r.setting("webCertFile"),
-		KeyPath:    r.setting("webKeyFile"),
+		CertPath:   certPath,
+		KeyPath:    keyPath,
 	}
 }
 
@@ -126,11 +132,17 @@ func (r *Runner) ReloadUsers() error {
 func (r *Runner) ReloadAll() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.core.Stop()
 	raw, err := render.BuildConfig(r.db, r.nodeCert())
 	if err != nil {
 		return fmt.Errorf("渲染配置: %w", err)
 	}
+	// 先干跑校验新配置;不通过就让旧数据面继续服务——绝不为一条坏配置断掉所有用户。
+	if r.core.IsRunning() {
+		if err := core.ValidateConfig(raw); err != nil {
+			return fmt.Errorf("新配置未通过校验,数据面保持原状: %w", err)
+		}
+	}
+	r.core.Stop()
 	if err := r.core.Start(raw); err != nil {
 		return fmt.Errorf("重启 sing-box: %w", err)
 	}
@@ -157,6 +169,23 @@ func (r *Runner) OnlineIPs(user string) []string {
 	}
 	return nil
 }
+
+// TestUpstream 通过运行中的数据面,经指定上游真实发一次 HTTP 请求,返回延迟或错误。
+// 这是最可信的健康检查:连 WARP 本地代理是否真的通都能测出来。
+func (r *Runner) TestUpstream(name, testURL string) core.CheckOutboundResult {
+	// 先等进行中的重载结束,保证"刚保存就测试"测的是新配置而不是撞上重启窗口。
+	r.mu.Lock()
+	running := r.core.IsRunning()
+	ctx := r.core.GetCtx()
+	r.mu.Unlock()
+	if !running {
+		return core.CheckOutboundResult{Error: "数据面未运行"}
+	}
+	return core.CheckOutbound(ctx, name, testURL)
+}
+
+// NodeCert 暴露本机数据面证书材料(面板保存前的干跑校验需要)。
+func (r *Runner) NodeCert() render.NodeCert { return r.nodeCert() }
 
 // applyLimits 把用户表里的限速与设备数策略下发给数据面。
 func (r *Runner) applyLimits() {

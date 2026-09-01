@@ -4,7 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
+	"github.com/fangjunsheng555/m-ui/certutil"
 	"github.com/fangjunsheng555/m-ui/core"
 	"github.com/fangjunsheng555/m-ui/database"
 	"github.com/fangjunsheng555/m-ui/importer"
@@ -55,6 +57,23 @@ func main() {
 			fmt.Fprintln(os.Stderr, "导入失败:", err)
 			os.Exit(1)
 		}
+	case "selfsign":
+		fs := flag.NewFlagSet("selfsign", flag.ExitOnError)
+		hosts := fs.String("hosts", "", "域名或 IP,逗号分隔(必填)")
+		cert := fs.String("cert", "cert/main.crt", "证书输出路径")
+		key := fs.String("key", "cert/main.key", "私钥输出路径")
+		days := fs.Int("days", 365, "有效天数")
+		fs.Parse(os.Args[2:])
+		if *hosts == "" {
+			fmt.Fprintln(os.Stderr, "缺少 -hosts 参数")
+			fs.Usage()
+			os.Exit(2)
+		}
+		if err := certutil.GenerateSelfSigned(strings.Split(*hosts, ","), *cert, *key, *days); err != nil {
+			fmt.Fprintln(os.Stderr, "自签失败:", err)
+			os.Exit(1)
+		}
+		fmt.Println("自签证书已生成:", *cert, *key)
 	case "render":
 		fs := flag.NewFlagSet("render", flag.ExitOnError)
 		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")

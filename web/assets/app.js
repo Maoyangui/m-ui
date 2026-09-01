@@ -209,48 +209,202 @@ async function delLine(id) {
 }
 
 // ---- 上游 ----
+const UP_TYPE_LABELS = { tuic: 'TUIC', hysteria2: 'Hysteria2', shadowsocks: 'Shadowsocks', socks: 'SOCKS5(含 WARP 本地代理)' };
+const SS_METHODS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-ietf-poly1305',
+  '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305', 'none'];
+// 表单直接管理的键;其余键保留在"高级参数"里原样回写,编辑不丢字段
+const UP_FORM_KEYS = {
+  tuic: ['server', 'server_port', 'uuid', 'password', 'congestion_control', 'udp_relay_mode', 'zero_rtt_handshake', 'udp_over_stream', 'tls'],
+  hysteria2: ['server', 'server_port', 'password', 'tls', 'up_mbps', 'down_mbps', 'obfs'],
+  shadowsocks: ['server', 'server_port', 'method', 'password'],
+  socks: ['server', 'server_port', 'version', 'username', 'password'],
+};
+let UP_TEST = {}; // id → 最近一次测试结果
+
+function parseOpts(o) { try { return typeof o === 'string' ? JSON.parse(o) : (o || {}); } catch { return {}; } }
+const fv = id => ((document.getElementById(id) || {}).value || '');
+const fchk = id => !!(document.getElementById(id) || {}).checked;
+
+function upResultHTML(id) {
+  const r = UP_TEST[id];
+  if (!r) return '<span class="tag">未测</span>';
+  if (r.testing) return '<span class="tag">测试中…</span>';
+  if (r.ok) return `<span class="tag on">${r.delayMs} ms</span>${r.method === 'tcp' ? ' <span class="tag" title="数据面未运行,仅端口探测">TCP</span>' : ''}`;
+  return `<span class="tag off">故障</span><div class="sub-url">${esc(r.error)}</div>`;
+}
+
 async function loadUpstreams() {
   UPSTREAMS = await api('upstreams');
+  renderUpstreams();
+}
+
+function renderUpstreams() {
   document.getElementById('upstreams-body').innerHTML = UPSTREAMS.map(u => {
-    let srv = '';
-    try {
-      const o = typeof u.options === 'string' ? JSON.parse(u.options) : u.options;
-      if (o && o.server) srv = o.server + (o.server_port ? ':' + o.server_port : '');
-    } catch {}
+    const o = parseOpts(u.options);
+    const srv = o.server ? o.server + (o.server_port ? ':' + o.server_port : '') : '';
     return `<tr>
-      <td>${esc(u.name)}</td><td>${esc(u.type)}</td><td class="mono">${esc(srv)}</td>
+      <td>${esc(u.name)}</td><td>${esc(UP_TYPE_LABELS[u.type] || u.type)}</td><td class="mono">${esc(srv)}</td>
+      <td id="up-res-${u.id}">${upResultHTML(u.id)}</td>
       <td>
+        <button onclick="testUpstream(${u.id})">测试</button>
         <button onclick="editUpstream(${u.id})">编辑</button>
         <button class="danger" onclick="delUpstream(${u.id})">删除</button>
       </td></tr>`;
   }).join('');
 }
 
+function setUpResult(id, r) {
+  UP_TEST[id] = r;
+  const cell = document.getElementById('up-res-' + id);
+  if (cell) cell.innerHTML = upResultHTML(id);
+}
+
+async function testUpstream(id) {
+  setUpResult(id, { testing: true });
+  try { setUpResult(id, await api('upstreams/' + id + '/test', { method: 'POST' })); }
+  catch (e) { setUpResult(id, { ok: false, error: e.message }); }
+}
+
+async function testAllUpstreams() {
+  const btn = document.getElementById('btn-test-all');
+  btn.disabled = true; btn.textContent = '测试中…';
+  UPSTREAMS.forEach(u => setUpResult(u.id, { testing: true }));
+  try {
+    const results = await api('upstreams/test', { method: 'POST' });
+    results.forEach(r => setUpResult(r.id, r));
+    const bad = results.filter(r => !r.ok).length;
+    toast(bad ? `测试完成:${bad} 个上游故障` : '测试完成:全部正常');
+  } catch (e) { toast('测试失败:' + e.message); }
+  btn.disabled = false; btn.textContent = '测试全部';
+}
+
+// 各类型的可视化字段(参照现有上游的真实配置项)
+function upstreamFieldsHTML(type, o) {
+  const tls = o.tls || {};
+  const alpn = Array.isArray(tls.alpn) ? tls.alpn.join(',') : (tls.alpn || 'h3');
+  const common = `
+    <label>服务器地址<input id="f-server" value="${esc(o.server || '')}" placeholder="域名或 IP"></label>
+    <label>端口<input id="f-port" type="number" value="${o.server_port || ''}"></label>`;
+  const tlsFields = `
+    <label>SNI(留空=服务器地址)<input id="f-sni" value="${esc(tls.server_name || '')}"></label>
+    <label>ALPN<input id="f-alpn" value="${esc(alpn)}"></label>
+    <label class="check"><input type="checkbox" id="f-insecure" ${tls.insecure ? 'checked' : ''}> 跳过证书验证</label>`;
+  switch (type) {
+    case 'tuic': return common + `
+      <label>UUID<input id="f-uuid" value="${esc(o.uuid || '')}"></label>
+      <label>密码<input id="f-password" value="${esc(o.password || '')}"></label>
+      <label>拥塞控制<select id="f-cc">${['cubic', 'bbr', 'new_reno'].map(x => `<option ${(o.congestion_control || 'cubic') === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+      <label>UDP 中继模式<select id="f-relay"><option value="">默认</option>${['native', 'quic'].map(x => `<option value="${x}" ${o.udp_relay_mode === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+      ${tlsFields}
+      <label class="check"><input type="checkbox" id="f-zrtt" ${o.zero_rtt_handshake ? 'checked' : ''}> 0-RTT 握手</label>
+      <label class="check"><input type="checkbox" id="f-uos" ${o.udp_over_stream ? 'checked' : ''}> UDP over stream</label>`;
+    case 'hysteria2': return common + `
+      <label>密码<input id="f-password" value="${esc(o.password || '')}"></label>
+      ${tlsFields}
+      <label>上行 Mbps(0=不设)<input id="f-up" type="number" value="${o.up_mbps || 0}"></label>
+      <label>下行 Mbps(0=不设)<input id="f-down" type="number" value="${o.down_mbps || 0}"></label>
+      <label>混淆密码(salamander,留空=不用)<input id="f-obfs" value="${esc((o.obfs && o.obfs.password) || '')}"></label>`;
+    case 'shadowsocks': return common + `
+      <label>加密方式<select id="f-method">${SS_METHODS.map(x => `<option ${(o.method || 'aes-256-gcm') === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+      <label>密码<input id="f-password" value="${esc(o.password || '')}"></label>`;
+    case 'socks': return common + `
+      <label>版本<select id="f-version">${['5', '4a', '4'].map(x => `<option ${(o.version || '5') === x ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
+      <label>用户名(可空)<input id="f-username" value="${esc(o.username || '')}"></label>
+      <label>密码(可空)<input id="f-password" value="${esc(o.password || '')}"></label>`;
+  }
+  return common;
+}
+
+function readUpstreamFields(type) {
+  const o = { server: fv('f-server').trim(), server_port: Number(fv('f-port')) };
+  const tlsOf = () => {
+    const t = { enabled: true, server_name: fv('f-sni').trim() || o.server };
+    const alpn = fv('f-alpn').split(',').map(s => s.trim()).filter(Boolean);
+    if (alpn.length) t.alpn = alpn;
+    if (fchk('f-insecure')) t.insecure = true;
+    return t;
+  };
+  switch (type) {
+    case 'tuic':
+      Object.assign(o, { uuid: fv('f-uuid').trim(), password: fv('f-password'), congestion_control: fv('f-cc'), tls: tlsOf() });
+      if (fv('f-relay')) o.udp_relay_mode = fv('f-relay');
+      if (fchk('f-zrtt')) o.zero_rtt_handshake = true;
+      if (fchk('f-uos')) o.udp_over_stream = true;
+      break;
+    case 'hysteria2':
+      Object.assign(o, { password: fv('f-password'), tls: tlsOf() });
+      if (Number(fv('f-up')) > 0) o.up_mbps = Number(fv('f-up'));
+      if (Number(fv('f-down')) > 0) o.down_mbps = Number(fv('f-down'));
+      if (fv('f-obfs')) o.obfs = { type: 'salamander', password: fv('f-obfs') };
+      break;
+    case 'shadowsocks':
+      Object.assign(o, { method: fv('f-method'), password: fv('f-password') });
+      break;
+    case 'socks':
+      o.version = fv('f-version');
+      if (fv('f-username')) { o.username = fv('f-username'); o.password = fv('f-password'); }
+      break;
+  }
+  return o;
+}
+
+function renderUpstreamFields(type, o) {
+  document.getElementById('f-fields').innerHTML = upstreamFieldsHTML(type, o || {});
+  const known = new Set(UP_FORM_KEYS[type] || []);
+  const extra = {};
+  Object.entries(o || {}).forEach(([k, val]) => { if (!known.has(k)) extra[k] = val; });
+  document.getElementById('f-extra').value = Object.keys(extra).length ? JSON.stringify(extra, null, 2) : '';
+}
+
+function onUpstreamTypeChange() {
+  // 换类型时保留服务器/端口,其余按新类型重建
+  renderUpstreamFields(fv('f-type'), { server: fv('f-server'), server_port: Number(fv('f-port')) || undefined });
+}
+
+async function importUpstreamLink() {
+  const link = fv('f-link').trim();
+  if (!link) return;
+  try {
+    const p = await api('upstreams/parse', { method: 'POST', body: JSON.stringify({ link }) });
+    document.getElementById('f-type').value = p.type;
+    if (!fv('f-name').trim()) document.getElementById('f-name').value = p.name || '';
+    renderUpstreamFields(p.type, p.options);
+    document.getElementById('modal-err').textContent = '';
+    toast('已解析为 ' + (UP_TYPE_LABELS[p.type] || p.type) + ',请核对后保存');
+  } catch (e) { document.getElementById('modal-err').textContent = '解析失败:' + e.message; }
+}
+
 function editUpstream(id) {
-  const u = id ? UPSTREAMS.find(x => x.id === id) : { type: 'socks', options: {} };
-  const optText = typeof u.options === 'string' ? u.options : JSON.stringify(u.options ?? {}, null, 2);
+  const u = id ? UPSTREAMS.find(x => x.id === id) : { type: 'tuic', options: {} };
+  const o = parseOpts(u.options);
   openModal(id ? '编辑上游' : '新增上游', `
     <div class="form-grid">
+      ${id ? '' : `<label class="full">从分享链接导入(tuic:// hysteria2:// ss:// socks5://)
+        <div class="row"><input id="f-link" placeholder="粘贴机场/服务商给的链接"><button type="button" onclick="importUpstreamLink()">解析填表</button></div></label>`}
       <label>名称<input id="f-name" value="${esc(u.name || '')}"></label>
-      <label>类型<select id="f-type">
-        ${['socks', 'shadowsocks', 'tuic', 'hysteria2'].map(t =>
-          `<option value="${t}" ${u.type === t ? 'selected' : ''}>${t}</option>`).join('')}
+      <label>类型<select id="f-type" onchange="onUpstreamTypeChange()">
+        ${Object.entries(UP_TYPE_LABELS).map(([t, l]) => `<option value="${t}" ${u.type === t ? 'selected' : ''}>${l}</option>`).join('')}
       </select></label>
-      <label class="full">参数(JSON)<textarea id="f-options">${esc(optText)}</textarea></label>
+      <div id="f-fields" class="form-grid full"></div>
+      <details class="full"><summary>高级参数(JSON,合并进配置,一般留空)</summary><textarea id="f-extra"></textarea></details>
     </div>
-    <p class="hint">WARP 本地代理示例:类型 socks,参数 {"server":"127.0.0.1","server_port":40000,"version":"5"}</p>`,
+    <p class="hint">WARP 本地代理:类型 SOCKS5,服务器 127.0.0.1,端口 40000,无用户名密码。</p>`,
   async () => {
+    const type = fv('f-type');
+    const fields = readUpstreamFields(type);
+    if (!fields.server || !fields.server_port) throw new Error('服务器地址和端口必填');
+    if (type === 'tuic' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fields.uuid)) {
+      throw new Error('UUID 格式不正确(应为 8-4-4-4-12 位十六进制)');
+    }
+    const extra = JSON.parse(fv('f-extra').trim() || '{}');
     await api(id ? 'upstreams/' + id : 'upstreams', {
       method: id ? 'PUT' : 'POST',
-      body: JSON.stringify({
-        name: document.getElementById('f-name').value,
-        type: document.getElementById('f-type').value,
-        options: JSON.parse(document.getElementById('f-options').value || '{}'),
-      }),
+      body: JSON.stringify({ name: fv('f-name').trim(), type, options: Object.assign({}, extra, fields) }),
     });
     await loadUpstreams(); await loadLines(); await loadStatus();
     toast(id ? '上游已更新' : '上游已创建');
   });
+  renderUpstreamFields(u.type, o);
 }
 
 async function delUpstream(id) {

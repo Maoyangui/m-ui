@@ -203,21 +203,39 @@ func renderOutbounds(upstreams []model.Upstream) ([]json.RawMessage, error) {
 		json.RawMessage(`{"type":"block","tag":"block"}`),
 	}
 	for _, u := range upstreams {
-		var opts map[string]interface{}
-		if len(u.Options) > 0 {
-			if err := json.Unmarshal(u.Options, &opts); err != nil {
-				return nil, fmt.Errorf("上游 %q 参数解析失败: %w", u.Name, err)
-			}
-		} else {
-			opts = map[string]interface{}{}
-		}
-		opts["type"] = u.Type
-		opts["tag"] = u.Name
-		encoded, err := json.Marshal(opts)
+		encoded, err := OutboundJSON(u)
 		if err != nil {
 			return nil, err
 		}
 		outbounds = append(outbounds, encoded)
 	}
 	return outbounds, nil
+}
+
+// OutboundJSON 渲染单个上游为 sing-box 出站(整体渲染与保存前隔离校验共用)。
+func OutboundJSON(u model.Upstream) (json.RawMessage, error) {
+	opts := map[string]interface{}{}
+	if len(u.Options) > 0 {
+		if err := json.Unmarshal(u.Options, &opts); err != nil {
+			return nil, fmt.Errorf("上游 %q 参数解析失败: %w", u.Name, err)
+		}
+	}
+	opts["type"] = u.Type
+	opts["tag"] = u.Name
+	return json.Marshal(opts)
+}
+
+// InboundJSON 渲染单个线路的入站骨架(不含 TLS 与用户),供保存前结构校验。
+func InboundJSON(line model.Line) (json.RawMessage, error) {
+	inbound := map[string]interface{}{}
+	if len(line.Options) > 0 {
+		if err := json.Unmarshal(line.Options, &inbound); err != nil {
+			return nil, fmt.Errorf("线路 %q 参数解析失败: %w", line.Name, err)
+		}
+	}
+	inbound["type"] = line.Protocol
+	inbound["tag"] = line.Name
+	inbound["listen"] = "::"
+	inbound["listen_port"] = line.Port
+	return json.Marshal(inbound)
 }

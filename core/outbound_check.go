@@ -7,7 +7,7 @@ import (
 	urltest "github.com/sagernet/sing-box/common/urltest"
 )
 
-const checkTimeout = 15 * time.Second
+const checkTimeout = 10 * time.Second
 
 type CheckOutboundResult struct {
 	OK    bool

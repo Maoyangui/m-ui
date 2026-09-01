@@ -106,3 +106,8 @@ button:hover { filter: brightness(1.08); }
 }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: .82rem; }
 .sub-url { color: var(--muted); font-size: .78rem; word-break: break-all; }
+.row { display: flex; gap: .5rem; align-items: center; }
+.row input { flex: 1; }
+.form-grid > .full { grid-column: 1 / -1; }
+details.full summary { cursor: pointer; color: var(--muted); font-size: .85rem; margin-bottom: .4rem; }
+button:disabled { opacity: .55; cursor: default; }
