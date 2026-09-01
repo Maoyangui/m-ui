@@ -31,6 +31,9 @@ var assets embed.FS
 
 const sessionCookie = "m-ui-session"
 
+// Version 由 main 注入,状态接口与"关于"展示用。
+var Version = "dev"
+
 // session 记录登录人与过期时间;登录人用于操作审计。
 type session struct {
 	user string

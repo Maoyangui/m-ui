@@ -88,6 +88,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"trafficDown":   totalDown,
 		"domain":        s.setting("webDomain"),
 		"goroutines":    runtime.NumGoroutine(),
+		"version":       Version,
+		"onlineUsers":   len(s.run.Onlines().Users),
 	}
 	if pct, err := cpu.Percent(0, false); err == nil && len(pct) > 0 {
 		status["cpu"] = pct[0]

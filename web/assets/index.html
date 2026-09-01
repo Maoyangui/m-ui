@@ -3,154 +3,63 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>m-ui</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Ctext x='16' y='22' font-size='18' font-family='system-ui' font-weight='700' text-anchor='middle' fill='%23fff'%3Em%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div id="login" class="login-wrap">
-  <form class="card login-card" onsubmit="doLogin(event)">
-    <h1>m-ui</h1>
-    <input id="lg-user" placeholder="用户名" autocomplete="username" required>
-    <input id="lg-pass" type="password" placeholder="密码" autocomplete="current-password" required>
-    <button class="primary" type="submit">登录</button>
+<!-- 登录 -->
+<div id="login" class="login-wrap" hidden>
+  <form class="login-card" id="login-form" autocomplete="on">
+    <div class="login-brand"><span class="logo">m</span><span>m-ui</span></div>
+    <h1 id="login-title"></h1>
+    <label class="field"><span class="label" id="login-user-label"></span><input id="lg-user" autocomplete="username" required></label>
+    <label class="field"><span class="label" id="login-pass-label"></span><input id="lg-pass" type="password" autocomplete="current-password" required></label>
+    <button class="btn primary block" type="submit" id="login-submit"></button>
     <div id="lg-err" class="err"></div>
   </form>
 </div>
 
-<div id="app" hidden>
-  <header>
-    <div class="brand">m-ui <span id="role-badge" class="badge"></span></div>
-    <nav>
-      <a data-tab="dash" class="active">概览</a>
-      <a data-tab="lines">线路</a>
-      <a data-tab="upstreams">上游</a>
-      <a data-tab="users">用户</a>
-      <a data-tab="logs">订阅日志</a>
-      <a data-tab="settings">设置</a>
-    </nav>
-    <button class="ghost" onclick="doLogout()">退出</button>
-  </header>
+<!-- 应用壳 -->
+<div id="app" class="shell" hidden>
+  <div class="backdrop" id="backdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="logo">m</span><span class="brand-name">m-ui</span><span id="role-badge" class="badge"></span></div>
+    <nav id="nav"></nav>
+    <div class="sidebar-foot">
+      <button class="btn ghost sm" id="btn-theme" title="主题">◐</button>
+      <select id="lang-select" class="sm" title="Language"></select>
+      <button class="btn ghost sm" id="btn-logout"></button>
+    </div>
+    <div class="sidebar-version" id="sidebar-version"></div>
+  </aside>
 
-  <main>
-    <!-- 概览 -->
-    <section id="tab-dash">
-      <div class="stats" id="stat-cards"></div>
-      <div class="card">
-        <h2>数据面</h2>
-        <div id="core-info"></div>
-        <button class="ghost" onclick="reloadCore()">重载数据面</button>
-      </div>
-    </section>
-
-    <!-- 线路 -->
-    <section id="tab-lines" hidden>
-      <div class="bar">
-        <h2>线路 <small>拖动行可调整订阅中的顺序</small></h2>
-        <button class="primary" onclick="editLine(null)">新增线路</button>
-      </div>
-      <table class="grid">
-        <thead><tr><th style="width:2rem"></th><th>名称</th><th>协议</th><th>端口</th><th>上游</th><th>用户</th><th>状态</th><th></th></tr></thead>
-        <tbody id="lines-body"></tbody>
-      </table>
-    </section>
-
-    <!-- 上游 -->
-    <section id="tab-upstreams" hidden>
-      <div class="bar">
-        <h2>上游落地 <small>线路的出口;支持粘贴链接导入与一键测试</small></h2>
-        <div class="row">
-          <button id="btn-test-all" onclick="testAllUpstreams()">测试全部</button>
-          <button class="primary" onclick="editUpstream(null)">新增上游</button>
-        </div>
-      </div>
-      <table class="grid">
-        <thead><tr><th>名称</th><th>类型</th><th>服务器</th><th>状态 / 延迟</th><th></th></tr></thead>
-        <tbody id="upstreams-body"></tbody>
-      </table>
-    </section>
-
-    <!-- 用户 -->
-    <section id="tab-users" hidden>
-      <div class="bar">
-        <h2>用户</h2>
-        <button class="primary" onclick="editUser(null)">新增用户</button>
-      </div>
-      <table class="grid">
-        <thead><tr><th>名称</th><th>状态</th><th>已用/配额</th><th>到期</th><th>设备</th><th>限速</th><th>在线</th><th></th></tr></thead>
-        <tbody id="users-body"></tbody>
-      </table>
-    </section>
-
-    <!-- 订阅日志 -->
-    <section id="tab-logs" hidden>
-      <div class="bar">
-        <h2>订阅访问日志</h2>
-        <input id="log-filter" placeholder="按用户名筛选" oninput="loadLogs()">
-      </div>
-      <table class="grid">
-        <thead><tr><th>时间</th><th>用户</th><th>IP</th><th>格式</th><th>状态</th><th>User-Agent</th></tr></thead>
-        <tbody id="logs-body"></tbody>
-      </table>
-    </section>
-
-    <!-- 设置 -->
-    <section id="tab-settings" hidden>
-      <div class="card">
-        <h2>角色</h2>
-        <label class="switch-row">
-          <input type="checkbox" id="set-nodeMode">
-          <span>作为副服务器运行(开 = 副/台湾,关 = 主/香港)</span>
-        </label>
-        <p class="hint" id="role-hint"></p>
-      </div>
-      <div class="card">
-        <h2>面板</h2>
-        <div class="form-grid">
-          <label>域名<input id="set-webDomain"></label>
-          <label>监听地址<input id="set-webListen"></label>
-          <label>端口<input id="set-webPort"></label>
-          <label>路径<input id="set-webPath"></label>
-          <label>证书<input id="set-webCertFile"></label>
-          <label>私钥<input id="set-webKeyFile"></label>
-        </div>
-      </div>
-      <div class="card">
-        <h2>订阅</h2>
-        <div class="form-grid">
-          <label>监听地址<input id="set-subListen"></label>
-          <label>端口<input id="set-subPort"></label>
-          <label>路径<input id="set-subPath"></label>
-          <label>证书<input id="set-subCertFile"></label>
-          <label>私钥<input id="set-subKeyFile"></label>
-          <label>标题(Profile-Title)<input id="set-subProfileTitle"></label>
-          <label>更新周期(小时)<input id="set-subUpdates"></label>
-          <label class="check"><input type="checkbox" id="set-subEncode"> 链接订阅 base64 编码</label>
-          <label class="check"><input type="checkbox" id="set-subShowNotice"> 顶部显示流量提示节点</label>
-        </div>
-      </div>
-      <div class="card">
-        <h2>修改管理员</h2>
-        <div class="form-grid">
-          <label>新用户名(留空不改)<input id="pw-user"></label>
-          <label>原密码<input id="pw-old" type="password"></label>
-          <label>新密码<input id="pw-new" type="password"></label>
-        </div>
-        <button class="ghost" onclick="changePassword()">更新账号</button>
-      </div>
-      <button class="primary" onclick="saveSettings()">保存设置</button>
-      <p class="hint">端口、证书与监听地址的改动需重启 m-ui 生效。</p>
-    </section>
-  </main>
+  <div class="main">
+    <header class="topbar">
+      <button id="btn-menu" class="btn ghost icon" aria-label="menu">☰</button>
+      <div class="topbar-title"><h1 id="page-title"></h1><p id="page-subtitle" class="subtitle"></p></div>
+      <div id="topbar-right"></div>
+    </header>
+    <main id="page"></main>
+  </div>
 </div>
 
-<div id="modal" class="modal" hidden onclick="if(event.target===this)closeModal()">
-  <div class="modal-box card">
+<!-- 抽屉 -->
+<div id="drawer" class="drawer" hidden>
+  <div class="drawer-head"><h2 id="drawer-title"></h2><button class="btn ghost icon" id="drawer-close" aria-label="close">✕</button></div>
+  <div id="drawer-body" class="drawer-body"></div>
+</div>
+
+<!-- 弹窗 -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-box">
     <h2 id="modal-title"></h2>
     <div id="modal-body"></div>
     <div class="modal-actions">
-      <button class="ghost" onclick="closeModal()">取消</button>
-      <button class="primary" id="modal-save">保存</button>
+      <button class="btn ghost" id="modal-cancel"></button>
+      <button class="btn primary" id="modal-save"></button>
     </div>
     <div id="modal-err" class="err"></div>
   </div>
@@ -158,6 +67,6 @@
 
 <div id="toast" class="toast" hidden></div>
 
-<script src="app.js"></script>
+<script type="module" src="js/app.js"></script>
 </body>
 </html>

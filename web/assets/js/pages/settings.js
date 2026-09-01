@@ -1,0 +1,86 @@
+import { state, load } from '../app.js';
+import { post } from '../api.js';
+import { t } from '../i18n.js';
+import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk } from '../ui.js';
+
+export const title = () => t('set.title');
+
+const groups = () => [
+  { id: 'panel', title: t('set.panel'), fields: [
+    ['webDomain', t('set.webDomain'), 'text', t('set.webDomainHelp')],
+    ['webListen', t('set.listen'), 'text'], ['webPort', t('set.port'), 'number'], ['webPath', t('set.path'), 'text'],
+    ['webCertFile', t('set.cert'), 'text'], ['webKeyFile', t('set.key'), 'text'],
+  ]},
+  { id: 'sub', title: t('set.sub'), fields: [
+    ['subListen', t('set.listen'), 'text'], ['subPort', t('set.port'), 'number'], ['subPath', t('set.path'), 'text'],
+    ['subCertFile', t('set.cert'), 'text'], ['subKeyFile', t('set.key'), 'text'],
+    ['subProfileTitle', t('set.subTitle'), 'text'], ['subUpdates', t('set.subUpdates'), 'number'],
+    ['subEncode', t('set.subEncode'), 'bool'], ['subShowNotice', t('set.subNotice'), 'bool'],
+  ]},
+  { id: 'core', title: t('set.core'), fields: [
+    ['certFile', t('set.certFile'), 'text', t('set.certHelp')], ['keyFile', t('set.key'), 'text'],
+    ['upstreamTestUrl', t('set.testUrl'), 'text', t('set.testUrlHelp')],
+    ['statsBucketSeconds', t('set.bucket'), 'number'], ['trafficAge', t('set.trafficAge'), 'number', t('set.trafficAgeHelp')],
+  ]},
+];
+
+export async function render(el) {
+  const s = state.settings;
+  const isNode = String(s.nodeMode).toLowerCase() === 'true';
+  el.innerHTML = `
+    <section class="card">
+      <div class="card-head"><h2>${t('set.role')}</h2>${badge(isNode ? t('role.node') : t('role.master'), isNode ? 'node' : 'primary')}</div>
+      <label class="field check"><input type="checkbox" id="set-nodeMode" ${isNode ? 'checked' : ''}><span>${t('set.roleSwitch')}</span></label>
+      <p class="hint" id="role-hint">${isNode ? t('set.roleNode') : t('set.roleMaster')}</p>
+      <div class="row" style="margin-top:.7rem"><button class="btn primary" data-act="set.saveRole">${t('common.save')}</button></div>
+    </section>
+    ${groups().map(g => `
+      <section class="card">
+        <div class="card-head"><h2>${esc(g.title)}</h2><button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div>
+        <div class="form-grid">${g.fields.map(([k, label, type, help]) =>
+          type === 'bool'
+            ? check('set-' + k, label, String(s[k]).toLowerCase() === 'true', help)
+            : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}">`, help)).join('')}</div>
+      </section>`).join('')}
+    <section class="card">
+      <div class="card-head"><h2>${t('set.admin')}</h2></div>
+      <div class="form-grid">
+        ${field(t('set.newUser'), `<input id="pw-user" autocomplete="username">`)}
+        ${field(t('set.oldPass'), `<input id="pw-old" type="password" autocomplete="current-password">`)}
+        ${field(t('set.newPass'), `<input id="pw-new" type="password" autocomplete="new-password">`)}
+      </div>
+      <div class="row" style="margin-top:.7rem"><button class="btn" data-act="set.password">${t('set.updateAdmin')}</button></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>${t('set.about')}</h2></div>
+      <dl class="kv"><dt>${t('set.version')}</dt><dd class="mono">${esc(state.status.version || '')}</dd><dt>sing-box</dt><dd class="mono">1.14</dd><dt>License</dt><dd>GPL-3.0</dd></dl>
+      <p class="hint">${t('set.restartNote')}</p>
+    </section>`;
+  document.getElementById('set-nodeMode').addEventListener('change', e => {
+    document.getElementById('role-hint').textContent = e.target.checked ? t('set.roleNode') : t('set.roleMaster');
+  });
+}
+
+registerActions({
+  'set.save': async id => {
+    const g = groups().find(x => x.id === id);
+    const body = {};
+    g.fields.forEach(([k, , type]) => { body[k] = type === 'bool' ? String(fchk('set-' + k)) : fv('set-' + k).trim(); });
+    try { const r = await post('settings', body); await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  'set.saveRole': async () => {
+    const toNode = fchk('set-nodeMode');
+    const cur = String(state.settings.nodeMode).toLowerCase() === 'true';
+    if (toNode !== cur && !await confirm(toNode ? t('set.roleToNode') : t('set.roleToMaster'), { danger: true })) return;
+    try { await post('settings', { nodeMode: String(toNode) }); await load('settings', 'status'); toast(t('set.saved'), 'ok'); location.reload(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  'set.password': async () => {
+    try {
+      await post('password', { username: fv('pw-user'), oldPassword: fv('pw-old'), newPassword: fv('pw-new') });
+      toast(t('set.adminUpdated'), 'ok');
+      setTimeout(() => post('logout').then(() => location.reload()), 1200);
+    } catch (e) { toast(e.message, 'err'); }
+  },
+});

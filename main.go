@@ -16,6 +16,7 @@ import (
 )
 
 func init() {
+	web.Version = version
 	runner.SetPanelStarter(func(r *runner.Runner) error {
 		return web.NewServer(r).Start()
 	})
