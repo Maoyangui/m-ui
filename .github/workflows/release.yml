@@ -1,0 +1,36 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build linux-amd64 (纯 Go,无 CGO,静态单二进制)
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags "-w -s" -o dist/m-ui .
+          tar -C dist -czf m-ui-linux-amd64.tar.gz m-ui
+
+      - name: Smoke test (本机构建可运行)
+        run: |
+          go build -o /tmp/m-ui-host .
+          /tmp/m-ui-host version
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: m-ui-linux-amd64.tar.gz
