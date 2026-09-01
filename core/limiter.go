@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sagernet/sing/common/buf"
@@ -14,7 +15,11 @@ import (
 
 // Limiter 提供两项 per-user 策略,均在数据面本机执行:
 //   - 限速:每用户一对令牌桶(上行/下行),该用户所有连接共享总带宽
-//   - 设备数:按源 IP 计,超过上限的新 IP 连接直接拒绝并进入短暂拒绝窗口
+//   - 设备数:限制**同时在线**的源 IP 数量
+//
+// 设备数是并发语义,不是"锁定前 N 个 IP":某个 IP 只要在 idleWindow 内没有任何
+// 流量就被视为下线并释放名额,新设备立刻可以顶上;有流量经过时持续刷新其活跃时间,
+// 所以长连接(下载/看视频)的设备不会被误判下线。
 //
 // 跨双机的设备数并集判定在 Hub 侧完成(P4);本类型负责单机拦截与"当前在线 IP"上报。
 type Limiter struct {
@@ -23,10 +28,8 @@ type Limiter struct {
 	up     map[string]*rate.Limiter // 上行桶(客户端→服务器,即 Read)
 	down   map[string]*rate.Limiter // 下行桶(服务器→客户端,即 Write)
 	ips    map[string]map[string]int64
-	deny   map[string]map[string]int64
 
-	idleWindow time.Duration // 无流量多久判定该 IP 下线
-	denyWindow time.Duration // 触发设备上限后,该 IP 的拒绝冷却
+	idleWindow time.Duration // 无流量多久判定该 IP 下线并释放名额
 }
 
 type userLimit struct {
@@ -41,9 +44,7 @@ func NewLimiter() *Limiter {
 		up:         map[string]*rate.Limiter{},
 		down:       map[string]*rate.Limiter{},
 		ips:        map[string]map[string]int64{},
-		deny:       map[string]map[string]int64{},
 		idleWindow: 60 * time.Second,
-		denyWindow: 2 * time.Minute,
 	}
 }
 
@@ -73,6 +74,10 @@ type UserLimitSpec struct {
 
 // AllowConn 判定某用户从某源 IP 的新连接是否放行,并登记该 IP 的活跃时间。
 // 空用户名(无鉴权连接)不受限。
+//
+// 判定顺序体现"同时在线"语义:先清掉已空闲的 IP 释放名额,已在线的 IP 直接放行,
+// 只要当前在线数没到上限就接纳新 IP;超限只拒绝这一次,不对该 IP 留任何黑名单,
+// 所以别的设备一下线,它下次重连即可进入。
 func (l *Limiter) AllowConn(user, ip string) bool {
 	if user == "" || ip == "" {
 		return true
@@ -84,30 +89,17 @@ func (l *Limiter) AllowConn(user, ip string) bool {
 	limit := l.limits[user].deviceLimit
 	l.pruneLocked(user, now)
 
-	// 处于拒绝窗口内的 IP 直接挡回
-	if until, ok := l.deny[user][ip]; ok {
-		if now < until {
-			return false
-		}
-		delete(l.deny[user], ip)
-	}
-
 	active := l.ips[user]
 	if active == nil {
 		active = map[string]int64{}
 		l.ips[user] = active
 	}
 
-	if _, known := active[ip]; known {
+	if _, online := active[ip]; online {
 		active[ip] = now
 		return true
 	}
 	if limit > 0 && len(active) >= limit {
-		// 新 IP 超限:拒绝并冷却,避免被踢后立刻重连
-		if l.deny[user] == nil {
-			l.deny[user] = map[string]int64{}
-		}
-		l.deny[user][ip] = now + int64(l.denyWindow.Seconds())
 		return false
 	}
 	active[ip] = now
@@ -164,7 +156,8 @@ func (l *Limiter) bucketFor(m map[string]*rate.Limiter, user string, bps int64) 
 	return b
 }
 
-// wrapConn 按用户限速包装一条连接;无限速时原样返回。
+// wrapConn 按用户限速包装一条连接,并在有流量时刷新该设备的在线状态。
+// 即使不限速,只要该用户有设备数限制也要包装,否则长连接设备会被误判为空闲下线。
 func (l *Limiter) wrapConn(conn net.Conn, user, ip string) net.Conn {
 	if user == "" {
 		return conn
@@ -174,10 +167,10 @@ func (l *Limiter) wrapConn(conn net.Conn, user, ip string) net.Conn {
 	upB := l.bucketFor(l.up, user, lim.upBps)
 	downB := l.bucketFor(l.down, user, lim.downBps)
 	l.mu.Unlock()
-	if upB == nil && downB == nil {
+	if upB == nil && downB == nil && lim.deviceLimit == 0 {
 		return conn
 	}
-	return &limitedConn{Conn: conn, up: upB, down: downB}
+	return &limitedConn{Conn: conn, up: upB, down: downB, keepalive: l.keepaliveFor(user, ip)}
 }
 
 func (l *Limiter) wrapPacketConn(conn N.PacketConn, user, ip string) N.PacketConn {
@@ -189,10 +182,23 @@ func (l *Limiter) wrapPacketConn(conn N.PacketConn, user, ip string) N.PacketCon
 	upB := l.bucketFor(l.up, user, lim.upBps)
 	downB := l.bucketFor(l.down, user, lim.downBps)
 	l.mu.Unlock()
-	if upB == nil && downB == nil {
+	if upB == nil && downB == nil && lim.deviceLimit == 0 {
 		return conn
 	}
-	return &limitedPacketConn{PacketConn: conn, up: upB, down: downB}
+	return &limitedPacketConn{PacketConn: conn, up: upB, down: downB, keepalive: l.keepaliveFor(user, ip)}
+}
+
+// keepaliveFor 返回一个"该设备刚有流量"的回调,按秒节流以免每次读写都抢锁。
+func (l *Limiter) keepaliveFor(user, ip string) func() {
+	var last int64
+	return func() {
+		now := time.Now().Unix()
+		if now == atomic.LoadInt64(&last) {
+			return
+		}
+		atomic.StoreInt64(&last, now)
+		l.touch(user, ip, now)
+	}
 }
 
 // throttle 按令牌桶为 n 字节配速,burst 上限内分块等待,不因单次读写过大而报错。
@@ -216,17 +222,24 @@ func throttle(b *rate.Limiter, n int) {
 
 type limitedConn struct {
 	net.Conn
-	up   *rate.Limiter
-	down *rate.Limiter
+	up        *rate.Limiter
+	down      *rate.Limiter
+	keepalive func()
 }
 
 func (c *limitedConn) Read(p []byte) (int, error) {
 	n, err := c.Conn.Read(p)
+	if n > 0 {
+		c.keepalive()
+	}
 	throttle(c.up, n)
 	return n, err
 }
 
 func (c *limitedConn) Write(p []byte) (int, error) {
+	if len(p) > 0 {
+		c.keepalive()
+	}
 	throttle(c.down, len(p))
 	return c.Conn.Write(p)
 }
@@ -235,17 +248,24 @@ func (c *limitedConn) Upstream() any { return c.Conn }
 
 type limitedPacketConn struct {
 	N.PacketConn
-	up   *rate.Limiter
-	down *rate.Limiter
+	up        *rate.Limiter
+	down      *rate.Limiter
+	keepalive func()
 }
 
 func (c *limitedPacketConn) ReadPacket(b *buf.Buffer) (M.Socksaddr, error) {
 	dest, err := c.PacketConn.ReadPacket(b)
+	if b.Len() > 0 {
+		c.keepalive()
+	}
 	throttle(c.up, b.Len())
 	return dest, err
 }
 
 func (c *limitedPacketConn) WritePacket(b *buf.Buffer, dest M.Socksaddr) error {
+	if b.Len() > 0 {
+		c.keepalive()
+	}
 	throttle(c.down, b.Len())
 	return c.PacketConn.WritePacket(b, dest)
 }

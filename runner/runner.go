@@ -13,6 +13,7 @@ import (
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/logger"
 	"github.com/fangjunsheng555/m-ui/render"
+	"github.com/fangjunsheng555/m-ui/sub"
 
 	"github.com/op/go-logging"
 	"gorm.io/gorm"
@@ -20,8 +21,9 @@ import (
 
 // Runner 持有数据面运行所需的一切。
 type Runner struct {
-	db   *gorm.DB
-	core *core.Core
+	db     *gorm.DB
+	core   *core.Core
+	subSrv *sub.Server
 }
 
 func New(dbPath string) (*Runner, error) {
@@ -29,7 +31,7 @@ func New(dbPath string) (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Runner{db: db, core: core.NewCore()}, nil
+	return &Runner{db: db, core: core.NewCore(), subSrv: sub.NewServer(db)}, nil
 }
 
 func (r *Runner) setting(key string) string {
@@ -119,6 +121,9 @@ func Run(dbPath string) error {
 	}
 	if err := r.Start(); err != nil {
 		return err
+	}
+	if err := r.subSrv.Start(); err != nil {
+		return fmt.Errorf("启动订阅服务: %w", err)
 	}
 	logger.Info("m-ui 数据面已启动")
 

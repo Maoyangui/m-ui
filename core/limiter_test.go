@@ -23,12 +23,55 @@ func TestDeviceLimit(t *testing.T) {
 	if l.AllowConn("alice", "3.3.3.3") {
 		t.Fatal("超过设备上限的新 IP 应被拒绝")
 	}
-	// 拒绝窗口内该 IP 持续被拒
-	if l.AllowConn("alice", "3.3.3.3") {
-		t.Fatal("拒绝窗口内应持续拒绝")
-	}
 	if got := len(l.ActiveIPs("alice")); got != 2 {
 		t.Fatalf("活跃 IP 应为 2,实际 %d", got)
+	}
+}
+
+// 设备数是"同时在线"而非锁定 IP:占位设备下线后,先前被拒的设备应立即可进入。
+func TestDeviceLimitIsConcurrentNotSticky(t *testing.T) {
+	l := NewLimiter()
+	l.SetLimits(map[string]UserLimitSpec{"alice": {DeviceLimit: 2}})
+
+	l.AllowConn("alice", "1.1.1.1")
+	l.AllowConn("alice", "2.2.2.2")
+	if l.AllowConn("alice", "3.3.3.3") {
+		t.Fatal("满员时第 3 个设备应被拒")
+	}
+
+	// 模拟设备 1、2 下线(活跃时间推到空闲窗口之外)
+	l.mu.Lock()
+	stale := time.Now().Unix() - int64(l.idleWindow.Seconds()) - 1
+	l.ips["alice"]["1.1.1.1"] = stale
+	l.ips["alice"]["2.2.2.2"] = stale
+	l.mu.Unlock()
+
+	// 名额已释放,原先被拒的设备应立刻放行(不存在冷却/黑名单)
+	if !l.AllowConn("alice", "3.3.3.3") {
+		t.Fatal("占位设备下线后,先前被拒的设备应立即可连接")
+	}
+	if got := len(l.ActiveIPs("alice")); got != 1 {
+		t.Fatalf("此时在线设备应为 1,实际 %d", got)
+	}
+}
+
+// 有流量经过即刷新在线状态,长连接设备不会因"没建新连接"被误判下线。
+func TestTrafficKeepsDeviceOnline(t *testing.T) {
+	l := NewLimiter()
+	l.SetLimits(map[string]UserLimitSpec{"alice": {DeviceLimit: 1}})
+	l.AllowConn("alice", "1.1.1.1")
+
+	// 把活跃时间推到即将过期
+	l.mu.Lock()
+	l.ips["alice"]["1.1.1.1"] = time.Now().Unix() - int64(l.idleWindow.Seconds()) - 1
+	l.mu.Unlock()
+
+	// 流量回调刷新活跃时间
+	l.keepaliveFor("alice", "1.1.1.1")()
+
+	// 名额仍被占用,新设备应被拒
+	if l.AllowConn("alice", "2.2.2.2") {
+		t.Fatal("有流量的设备应保持在线,新设备不应挤占其名额")
 	}
 }
 
