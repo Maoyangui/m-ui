@@ -1,0 +1,253 @@
+package core
+
+import (
+	"context"
+	"net"
+	"sync"
+	"time"
+
+	"github.com/sagernet/sing/common/buf"
+	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
+	"golang.org/x/time/rate"
+)
+
+// Limiter 提供两项 per-user 策略,均在数据面本机执行:
+//   - 限速:每用户一对令牌桶(上行/下行),该用户所有连接共享总带宽
+//   - 设备数:按源 IP 计,超过上限的新 IP 连接直接拒绝并进入短暂拒绝窗口
+//
+// 跨双机的设备数并集判定在 Hub 侧完成(P4);本类型负责单机拦截与"当前在线 IP"上报。
+type Limiter struct {
+	mu     sync.Mutex
+	limits map[string]userLimit
+	up     map[string]*rate.Limiter // 上行桶(客户端→服务器,即 Read)
+	down   map[string]*rate.Limiter // 下行桶(服务器→客户端,即 Write)
+	ips    map[string]map[string]int64
+	deny   map[string]map[string]int64
+
+	idleWindow time.Duration // 无流量多久判定该 IP 下线
+	denyWindow time.Duration // 触发设备上限后,该 IP 的拒绝冷却
+}
+
+type userLimit struct {
+	upBps       int64 // 字节/秒,0=不限
+	downBps     int64
+	deviceLimit int // 0=不限
+}
+
+func NewLimiter() *Limiter {
+	return &Limiter{
+		limits:     map[string]userLimit{},
+		up:         map[string]*rate.Limiter{},
+		down:       map[string]*rate.Limiter{},
+		ips:        map[string]map[string]int64{},
+		deny:       map[string]map[string]int64{},
+		idleWindow: 60 * time.Second,
+		denyWindow: 2 * time.Minute,
+	}
+}
+
+// SetLimits 全量替换用户策略(来自渲染时的用户表)。mbps 为 0 表示不限。
+func (l *Limiter) SetLimits(limits map[string]UserLimitSpec) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.limits = map[string]userLimit{}
+	for name, s := range limits {
+		l.limits[name] = userLimit{
+			upBps:       int64(s.UpMbps) * 125000,   // Mbps → 字节/秒
+			downBps:     int64(s.DownMbps) * 125000,
+			deviceLimit: s.DeviceLimit,
+		}
+	}
+	// 丢弃已不存在或参数变化的桶,下次取用时按新值重建
+	l.up = map[string]*rate.Limiter{}
+	l.down = map[string]*rate.Limiter{}
+}
+
+// UserLimitSpec 是 SetLimits 的入参(与 model.User 解耦,便于数据面独立测试)。
+type UserLimitSpec struct {
+	UpMbps      int
+	DownMbps    int
+	DeviceLimit int
+}
+
+// AllowConn 判定某用户从某源 IP 的新连接是否放行,并登记该 IP 的活跃时间。
+// 空用户名(无鉴权连接)不受限。
+func (l *Limiter) AllowConn(user, ip string) bool {
+	if user == "" || ip == "" {
+		return true
+	}
+	now := time.Now().Unix()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	limit := l.limits[user].deviceLimit
+	l.pruneLocked(user, now)
+
+	// 处于拒绝窗口内的 IP 直接挡回
+	if until, ok := l.deny[user][ip]; ok {
+		if now < until {
+			return false
+		}
+		delete(l.deny[user], ip)
+	}
+
+	active := l.ips[user]
+	if active == nil {
+		active = map[string]int64{}
+		l.ips[user] = active
+	}
+
+	if _, known := active[ip]; known {
+		active[ip] = now
+		return true
+	}
+	if limit > 0 && len(active) >= limit {
+		// 新 IP 超限:拒绝并冷却,避免被踢后立刻重连
+		if l.deny[user] == nil {
+			l.deny[user] = map[string]int64{}
+		}
+		l.deny[user][ip] = now + int64(l.denyWindow.Seconds())
+		return false
+	}
+	active[ip] = now
+	return true
+}
+
+// pruneLocked 清掉空闲超时的活跃 IP(调用方须持锁)。
+func (l *Limiter) pruneLocked(user string, now int64) {
+	active := l.ips[user]
+	cutoff := now - int64(l.idleWindow.Seconds())
+	for ip, seen := range active {
+		if seen < cutoff {
+			delete(active, ip)
+		}
+	}
+}
+
+// ActiveIPs 返回某用户当前活跃的源 IP(供面板展示与 Hub 聚合)。
+func (l *Limiter) ActiveIPs(user string) []string {
+	now := time.Now().Unix()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pruneLocked(user, now)
+	ips := make([]string, 0, len(l.ips[user]))
+	for ip := range l.ips[user] {
+		ips = append(ips, ip)
+	}
+	return ips
+}
+
+// touch 刷新某用户某 IP 的活跃时间(有流量经过时调用)。
+func (l *Limiter) touch(user, ip string, now int64) {
+	if user == "" || ip == "" {
+		return
+	}
+	l.mu.Lock()
+	if l.ips[user] == nil {
+		l.ips[user] = map[string]int64{}
+	}
+	l.ips[user][ip] = now
+	l.mu.Unlock()
+}
+
+func (l *Limiter) bucketFor(m map[string]*rate.Limiter, user string, bps int64) *rate.Limiter {
+	if bps <= 0 {
+		return nil
+	}
+	if b, ok := m[user]; ok {
+		return b
+	}
+	// 突发上限设为 1 秒带宽,兼顾峰值与平滑
+	b := rate.NewLimiter(rate.Limit(bps), int(bps))
+	m[user] = b
+	return b
+}
+
+// wrapConn 按用户限速包装一条连接;无限速时原样返回。
+func (l *Limiter) wrapConn(conn net.Conn, user, ip string) net.Conn {
+	if user == "" {
+		return conn
+	}
+	l.mu.Lock()
+	lim := l.limits[user]
+	upB := l.bucketFor(l.up, user, lim.upBps)
+	downB := l.bucketFor(l.down, user, lim.downBps)
+	l.mu.Unlock()
+	if upB == nil && downB == nil {
+		return conn
+	}
+	return &limitedConn{Conn: conn, up: upB, down: downB}
+}
+
+func (l *Limiter) wrapPacketConn(conn N.PacketConn, user, ip string) N.PacketConn {
+	if user == "" {
+		return conn
+	}
+	l.mu.Lock()
+	lim := l.limits[user]
+	upB := l.bucketFor(l.up, user, lim.upBps)
+	downB := l.bucketFor(l.down, user, lim.downBps)
+	l.mu.Unlock()
+	if upB == nil && downB == nil {
+		return conn
+	}
+	return &limitedPacketConn{PacketConn: conn, up: upB, down: downB}
+}
+
+// throttle 按令牌桶为 n 字节配速,burst 上限内分块等待,不因单次读写过大而报错。
+func throttle(b *rate.Limiter, n int) {
+	if b == nil || n <= 0 {
+		return
+	}
+	burst := b.Burst()
+	if burst <= 0 {
+		return
+	}
+	for n > 0 {
+		chunk := n
+		if chunk > burst {
+			chunk = burst
+		}
+		_ = b.WaitN(context.Background(), chunk)
+		n -= chunk
+	}
+}
+
+type limitedConn struct {
+	net.Conn
+	up   *rate.Limiter
+	down *rate.Limiter
+}
+
+func (c *limitedConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	throttle(c.up, n)
+	return n, err
+}
+
+func (c *limitedConn) Write(p []byte) (int, error) {
+	throttle(c.down, len(p))
+	return c.Conn.Write(p)
+}
+
+func (c *limitedConn) Upstream() any { return c.Conn }
+
+type limitedPacketConn struct {
+	N.PacketConn
+	up   *rate.Limiter
+	down *rate.Limiter
+}
+
+func (c *limitedPacketConn) ReadPacket(b *buf.Buffer) (M.Socksaddr, error) {
+	dest, err := c.PacketConn.ReadPacket(b)
+	throttle(c.up, b.Len())
+	return dest, err
+}
+
+func (c *limitedPacketConn) WritePacket(b *buf.Buffer, dest M.Socksaddr) error {
+	throttle(c.down, b.Len())
+	return c.PacketConn.WritePacket(b, dest)
+}
+
+func (c *limitedPacketConn) Upstream() any { return c.PacketConn }

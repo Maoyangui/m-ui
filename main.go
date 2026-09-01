@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/fangjunsheng555/m-ui/core"
+	"github.com/fangjunsheng555/m-ui/database"
 	"github.com/fangjunsheng555/m-ui/importer"
+	"github.com/fangjunsheng555/m-ui/render"
 )
 
 var version = "0.1.0-p0"
@@ -44,10 +47,55 @@ func main() {
 			fmt.Fprintln(os.Stderr, "导入失败:", err)
 			os.Exit(1)
 		}
+	case "render":
+		fs := flag.NewFlagSet("render", flag.ExitOnError)
+		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
+		out := fs.String("out", "", "配置输出文件(默认打印到标准输出)")
+		validate := fs.Bool("validate", true, "用 sing-box 解析校验渲染结果")
+		fs.Parse(os.Args[2:])
+		if err := runRender(*dbPath, *out, *validate); err != nil {
+			fmt.Fprintln(os.Stderr, "渲染失败:", err)
+			os.Exit(1)
+		}
 	case "run":
-		fmt.Println("m-ui run:数据面与面板在 P1/P2 实现,当前为 P0(骨架+导入器)。")
+		fmt.Println("m-ui run:面板与数据面启动在 P2 接入,当前为 P1(数据面 core + 渲染器)。")
 	default:
 		usage()
 		os.Exit(2)
 	}
+}
+
+func runRender(dbPath, out string, validate bool) error {
+	db, err := database.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	get := func(key string) string {
+		var v string
+		db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+		return v
+	}
+	cert := render.NodeCert{
+		ServerName: get("webDomain"),
+		CertPath:   get("webCertFile"),
+		KeyPath:    get("webKeyFile"),
+	}
+	raw, err := render.BuildConfig(db, cert)
+	if err != nil {
+		return err
+	}
+	if validate {
+		if err := core.ParseConfig(raw); err != nil {
+			return fmt.Errorf("sing-box 校验失败: %w", err)
+		}
+		fmt.Fprintln(os.Stderr, "✅ sing-box 解析校验通过")
+	}
+	if out == "" {
+		fmt.Println(string(raw))
+	} else if err := os.WriteFile(out, raw, 0o600); err != nil {
+		return err
+	} else {
+		fmt.Fprintln(os.Stderr, "配置已写入:", out)
+	}
+	return nil
 }
