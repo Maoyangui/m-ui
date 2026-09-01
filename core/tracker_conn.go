@@ -128,6 +128,40 @@ func (c *ConnTracker) CloseConnByInbound(inbound string) int {
 	return closedCount
 }
 
+// CloseConnByUser 断开某用户在所有入站上的全部连接(踢下线)。
+func (c *ConnTracker) CloseConnByUser(user string) int {
+	c.access.Lock()
+	defer c.access.Unlock()
+	closed := 0
+	for id, info := range c.connections {
+		if info.User != user {
+			continue
+		}
+		if info.Conn != nil {
+			info.Conn.Close()
+		}
+		if info.PacketConn != nil {
+			info.PacketConn.Close()
+		}
+		delete(c.connections, id)
+		closed++
+	}
+	return closed
+}
+
+// ConnCountByUser 返回每个用户当前的连接数(面板展示用)。
+func (c *ConnTracker) ConnCountByUser() map[string]int {
+	c.access.Lock()
+	defer c.access.Unlock()
+	out := map[string]int{}
+	for _, info := range c.connections {
+		if info.User != "" {
+			out[info.User]++
+		}
+	}
+	return out
+}
+
 func (c *ConnTracker) CloseConnByInboundUsers(inbound string, keepUsers map[string]struct{}) int {
 	c.access.Lock()
 	defer c.access.Unlock()

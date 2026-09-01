@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/fangjunsheng555/m-ui/core"
 	"github.com/fangjunsheng555/m-ui/database"
 	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/fangjunsheng555/m-ui/jobs"
 	"github.com/fangjunsheng555/m-ui/logger"
 	"github.com/fangjunsheng555/m-ui/render"
 	"github.com/fangjunsheng555/m-ui/sub"
@@ -32,6 +34,7 @@ type Runner struct {
 	db     *gorm.DB
 	core   *core.Core
 	subSrv *sub.Server
+	jobs   *jobs.Scheduler
 	mu     sync.Mutex // 串行化重载,避免并发改动互相打断
 }
 
@@ -43,7 +46,37 @@ func New(dbPath string) (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Runner{db: db, core: core.NewCore(), subSrv: sub.NewServer(db)}, nil
+	r := &Runner{db: db, core: core.NewCore(), subSrv: sub.NewServer(db)}
+	r.jobs = jobs.New(jobs.Deps{
+		DB:          db,
+		Box:         func() *core.Box { return r.core.GetInstance() },
+		ReloadUsers: r.ReloadUsers,
+		IsNode:      r.IsNode,
+		Setting:     r.setting,
+	})
+	return r, nil
+}
+
+// IsNode 报告本机是否以副机角色运行(设置 nodeMode)。
+func (r *Runner) IsNode() bool { return strings.EqualFold(r.setting("nodeMode"), "true") }
+
+// Onlines 返回最近统计周期内在线的用户/线路/上游。
+func (r *Runner) Onlines() jobs.Onlines { return r.jobs.Onlines() }
+
+// KickUser 断开某用户的全部连接,返回断开数。
+func (r *Runner) KickUser(name string) int {
+	if box := r.core.GetInstance(); box != nil {
+		return box.ConnTracker().CloseConnByUser(name)
+	}
+	return 0
+}
+
+// ConnCounts 返回每用户当前连接数。
+func (r *Runner) ConnCounts() map[string]int {
+	if box := r.core.GetInstance(); box != nil {
+		return box.ConnTracker().ConnCountByUser()
+	}
+	return map[string]int{}
 }
 
 func (r *Runner) setting(key string) string {
@@ -258,6 +291,9 @@ func Run(dbPath string) error {
 		}
 	}
 	logger.Info("m-ui 数据面已启动")
+
+	r.jobs.Start()
+	defer r.jobs.Stop()
 
 	stopCheckpoint := make(chan struct{})
 	go r.checkpointLoop(stopCheckpoint)

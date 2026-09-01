@@ -160,6 +160,7 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		s.audit(r, "line", "create", line.Name)
 		s.reloadAll("新增线路 " + line.Name)
 		writeJSON(w, http.StatusOK, line)
 	default:
@@ -171,6 +172,9 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 	// /lines/sort 由专门的处理函数负责
 	if strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/sort") {
 		s.handleLineSort(w, r)
+		return
+	}
+	if s.dispatchLineSubroute(w, r) {
 		return
 	}
 	id, err := pathID(r, "/lines/")
@@ -200,6 +204,7 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		s.audit(r, "line", "update", line.Name)
 		s.reloadAll("修改线路 " + line.Name)
 		writeJSON(w, http.StatusOK, line)
 	case http.MethodDelete:
@@ -210,6 +215,7 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.db.Where("line_id = ?", id).Delete(&model.UserLine{})
+		s.audit(r, "line", "delete", line.Name)
 		s.reloadAll("删除线路 " + line.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	default:
@@ -286,6 +292,7 @@ func (s *Server) handleLineSort(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
+	s.audit(r, "line", "sort", ids)
 	// 顺序只影响订阅展示,不需要重启数据面
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }
@@ -317,6 +324,7 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		s.audit(r, "upstream", "create", up.Name)
 		s.reloadAll("新增上游 " + up.Name)
 		writeJSON(w, http.StatusOK, up)
 	default:
@@ -354,6 +362,7 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		s.audit(r, "upstream", "update", up.Name)
 		s.reloadAll("修改上游 " + up.Name)
 		writeJSON(w, http.StatusOK, up)
 	case http.MethodDelete:
@@ -367,6 +376,7 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		s.audit(r, "upstream", "delete", id)
 		s.reloadAll("删除上游")
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	default:
@@ -454,6 +464,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.setUserLines(p.User.Id, p.LineIds)
+		s.audit(r, "user", "create", p.User.Name)
 		s.reloadUsers("新增用户 " + p.User.Name)
 		writeJSON(w, http.StatusOK, p.User)
 	default:
@@ -462,6 +473,9 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
+	if s.dispatchUserSubroute(w, r) {
+		return
+	}
 	id, err := pathID(r, "/users/")
 	if err != nil {
 		badRequest(w, err)
@@ -488,6 +502,7 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.setUserLines(id, p.LineIds)
+		s.audit(r, "user", "update", p.User.Name)
 		s.reloadUsers("修改用户 " + p.User.Name)
 		writeJSON(w, http.StatusOK, p.User)
 	case http.MethodDelete:
@@ -498,6 +513,7 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.db.Where("user_id = ?", id).Delete(&model.UserLine{})
+		s.audit(r, "user", "delete", u.Name)
 		s.reloadUsers("删除用户 " + u.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	default:
@@ -584,6 +600,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if roleChanged {
 			logger.Info("面板角色已切换为: ", s.role())
 		}
+		keys := make([]string, 0, len(in))
+		for k := range in {
+			keys = append(keys, k)
+		}
+		s.audit(r, "settings", "update", keys)
 		// 端口/证书类改动需重启进程才生效,这里提示前端
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"ok": "1", "role": s.role(),

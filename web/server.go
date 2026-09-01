@@ -31,6 +31,12 @@ var assets embed.FS
 
 const sessionCookie = "m-ui-session"
 
+// session 记录登录人与过期时间;登录人用于操作审计。
+type session struct {
+	user string
+	exp  time.Time
+}
+
 // Server 是面板 HTTP 服务。
 type Server struct {
 	run      *runner.Runner
@@ -39,11 +45,22 @@ type Server struct {
 	listener net.Listener
 
 	mu       sync.Mutex
-	sessions map[string]time.Time // token → 过期时间
+	sessions map[string]session
 }
 
 func NewServer(run *runner.Runner) *Server {
-	return &Server{run: run, db: run.DB(), sessions: map[string]time.Time{}}
+	return &Server{run: run, db: run.DB(), sessions: map[string]session{}}
+}
+
+// actor 返回当前请求的登录用户名(审计用);未登录为空。
+func (s *Server) actor(r *http.Request) string {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sessions[c.Value].user
 }
 
 func (s *Server) setting(key string) string {
@@ -102,6 +119,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"sublogs", s.auth(s.handleSubLogs))
 	mux.HandleFunc(api+"password", s.auth(s.handlePassword))
 	mux.HandleFunc(api+"reload", s.auth(s.handleReload))
+	mux.HandleFunc(api+"stats", s.auth(s.handleStats))
+	mux.HandleFunc(api+"onlines", s.auth(s.handleOnlines))
+	mux.HandleFunc(api+"logs", s.auth(s.handleLogs))
+	mux.HandleFunc(api+"audit", s.auth(s.handleAudit))
 
 	// 根路径重定向到面板
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +179,7 @@ func (s *Server) Stop() error {
 
 // ---- 会话 ----
 
-func (s *Server) newSession() string {
+func (s *Server) newSession(user string) string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	token := hex.EncodeToString(b)
@@ -167,7 +188,7 @@ func (s *Server) newSession() string {
 		maxAge = 7 * 24 * time.Hour
 	}
 	s.mu.Lock()
-	s.sessions[token] = time.Now().Add(maxAge)
+	s.sessions[token] = session{user: user, exp: time.Now().Add(maxAge)}
 	s.mu.Unlock()
 	return token
 }
@@ -175,11 +196,11 @@ func (s *Server) newSession() string {
 func (s *Server) validSession(token string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	exp, ok := s.sessions[token]
+	sess, ok := s.sessions[token]
 	if !ok {
 		return false
 	}
-	if time.Now().After(exp) {
+	if time.Now().After(sess.exp) {
 		delete(s.sessions, token)
 		return false
 	}
@@ -192,8 +213,8 @@ func (s *Server) reapSessions() {
 	for range t.C {
 		now := time.Now()
 		s.mu.Lock()
-		for token, exp := range s.sessions {
-			if now.After(exp) {
+		for token, sess := range s.sessions {
+			if now.After(sess.exp) {
 				delete(s.sessions, token)
 			}
 		}
@@ -238,7 +259,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := s.newSession()
+	token := s.newSession(admin.Username)
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: token, Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
