@@ -9,6 +9,7 @@ import (
 	"github.com/fangjunsheng555/m-ui/database"
 	"github.com/fangjunsheng555/m-ui/importer"
 	"github.com/fangjunsheng555/m-ui/render"
+	"github.com/fangjunsheng555/m-ui/runner"
 )
 
 var version = "0.1.0-p0"
@@ -58,7 +59,13 @@ func main() {
 			os.Exit(1)
 		}
 	case "run":
-		fmt.Println("m-ui run:面板与数据面启动在 P2 接入,当前为 P1(数据面 core + 渲染器)。")
+		fs := flag.NewFlagSet("run", flag.ExitOnError)
+		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
+		fs.Parse(os.Args[2:])
+		if err := runner.Run(*dbPath); err != nil {
+			fmt.Fprintln(os.Stderr, "启动失败:", err)
+			os.Exit(1)
+		}
 	default:
 		usage()
 		os.Exit(2)

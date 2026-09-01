@@ -111,6 +111,11 @@ func Run(from, to, orderFile, profileTitle string, force bool) error {
 	if err := verify(src, dst, report); err != nil {
 		return err
 	}
+	// 检查点并关闭:确保数据全部落进 .db 文件本身,
+	// 使"复制单个文件 = 完整备份"这一前提成立。
+	if err := database.Close(dst); err != nil {
+		return fmt.Errorf("收尾写入数据库: %w", err)
+	}
 	return writeReport(to, report)
 }
 

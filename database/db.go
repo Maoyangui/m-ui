@@ -39,3 +39,24 @@ func OpenReadOnly(dbPath string) (*gorm.DB, error) {
 	dsn := "file:" + dbPath + "?mode=ro"
 	return gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Discard})
 }
+
+// Checkpoint 把 WAL 中的改动全部并回主库文件并截断 WAL。
+// 备份、导入、迁移之后必须调用:否则单独复制 .db 文件会丢失尚在 WAL 中的数据。
+func Checkpoint(db *gorm.DB) error {
+	return db.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error
+}
+
+// Close 检查点后关闭底层连接,使数据库文件自洽、可安全复制。
+func Close(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	if err := Checkpoint(db); err != nil {
+		return err
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
+}

@@ -1,0 +1,149 @@
+// Package runner 启动 m-ui 数据面:渲染配置 → 拉起内嵌 sing-box → 应用用户限速/设备数策略。
+package runner
+
+import (
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/fangjunsheng555/m-ui/core"
+	"github.com/fangjunsheng555/m-ui/database"
+	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/fangjunsheng555/m-ui/render"
+
+	"github.com/op/go-logging"
+	"gorm.io/gorm"
+)
+
+// Runner 持有数据面运行所需的一切。
+type Runner struct {
+	db   *gorm.DB
+	core *core.Core
+}
+
+func New(dbPath string) (*Runner, error) {
+	db, err := database.Open(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return &Runner{db: db, core: core.NewCore()}, nil
+}
+
+func (r *Runner) setting(key string) string {
+	var v string
+	r.db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+	return v
+}
+
+// nodeCert 读取本机证书材料(各机各签,路径固定)。
+func (r *Runner) nodeCert() render.NodeCert {
+	return render.NodeCert{
+		ServerName: r.setting("webDomain"),
+		CertPath:   r.setting("webCertFile"),
+		KeyPath:    r.setting("webKeyFile"),
+	}
+}
+
+// Start 渲染配置并启动 sing-box,随后应用限速/设备数策略。
+func (r *Runner) Start() error {
+	raw, err := render.BuildConfig(r.db, r.nodeCert())
+	if err != nil {
+		return fmt.Errorf("渲染配置: %w", err)
+	}
+	if err := r.core.Start(raw); err != nil {
+		return fmt.Errorf("启动 sing-box: %w", err)
+	}
+	r.applyLimits()
+	return nil
+}
+
+// applyLimits 把用户表里的限速与设备数策略下发给数据面。
+func (r *Runner) applyLimits() {
+	var users []model.User
+	if err := r.db.Find(&users).Error; err != nil {
+		logger.Warning("读取用户限速策略失败: ", err)
+		return
+	}
+	box := r.core.GetInstance()
+	if box == nil {
+		return
+	}
+	specs := make(map[string]core.UserLimitSpec, len(users))
+	for _, u := range users {
+		if u.SpeedUp == 0 && u.SpeedDown == 0 && u.DeviceLimit == 0 {
+			continue
+		}
+		specs[u.Name] = core.UserLimitSpec{
+			UpMbps:      u.SpeedUp,
+			DownMbps:    u.SpeedDown,
+			DeviceLimit: u.DeviceLimit,
+		}
+	}
+	box.Limiter().SetLimits(specs)
+	if len(specs) > 0 {
+		logger.Info("已应用 ", len(specs), " 个用户的限速/设备数策略")
+	}
+}
+
+func (r *Runner) Stop() {
+	if err := r.core.Stop(); err != nil {
+		logger.Warning("停止 sing-box: ", err)
+	}
+}
+
+// checkpointLoop 定期把 WAL 并回主库,使运行中的 .db 文件随时可安全复制备份。
+func (r *Runner) checkpointLoop(stop <-chan struct{}) {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := database.Checkpoint(r.db); err != nil {
+				logger.Warning("WAL 检查点失败: ", err)
+			}
+		case <-stop:
+			return
+		}
+	}
+}
+
+// Run 启动数据面并阻塞直到收到终止信号(SIGHUP 触发重载)。
+func Run(dbPath string) error {
+	logger.InitLogger(logging.INFO)
+	r, err := New(dbPath)
+	if err != nil {
+		return err
+	}
+	if err := r.Start(); err != nil {
+		return err
+	}
+	logger.Info("m-ui 数据面已启动")
+
+	stopCheckpoint := make(chan struct{})
+	go r.checkpointLoop(stopCheckpoint)
+	defer close(stopCheckpoint)
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGINT)
+	for sig := range sigCh {
+		if sig == syscall.SIGHUP {
+			logger.Info("收到 SIGHUP,重载配置")
+			r.Stop()
+			time.Sleep(200 * time.Millisecond)
+			if err := r.Start(); err != nil {
+				logger.Error("重载失败: ", err)
+			}
+			continue
+		}
+		logger.Info("收到终止信号,正在停止")
+		r.Stop()
+		if err := database.Checkpoint(r.db); err != nil {
+			logger.Warning("WAL 检查点失败: ", err)
+		}
+		return nil
+	}
+	return nil
+}

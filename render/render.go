@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/fangjunsheng555/m-ui/database/model"
 
@@ -22,8 +23,10 @@ type NodeCert struct {
 	KeyPath    string
 }
 
-// perUserProtocols 的入站按用户下发凭据并挂载共享 TLS;其余入站(ss)为固定单密码。
-var perUserProtocols = map[string]bool{"hysteria2": true, "anytls": true}
+// tlsProtocols 的入站挂载节点共享 TLS。
+// 三种协议的入站都按用户下发凭据(ss 为多用户模式:各用户用自己的 ss 密码,
+// 与 s-ui 行为和既有分享链接一致;线路自身 password 保留,2022 算法时作为服务端 PSK)。
+var tlsProtocols = map[string]bool{"hysteria2": true, "anytls": true}
 
 // BuildConfig 从数据库读取全部线路/上游/用户,渲染成 sing-box 配置字节。
 func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
@@ -135,12 +138,14 @@ func renderInbound(line model.Line, cert NodeCert, users []model.User) (json.Raw
 	inbound["listen"] = "::"
 	inbound["listen_port"] = line.Port
 
-	if perUserProtocols[line.Protocol] {
+	if tlsProtocols[line.Protocol] {
 		inbound["tls"] = tlsServerBlock(cert)
-		userList, err := renderUsers(line.Protocol, users)
-		if err != nil {
-			return nil, err
-		}
+	}
+	userList, err := renderUsers(line.Protocol, inbound, users)
+	if err != nil {
+		return nil, err
+	}
+	if userList != nil {
 		inbound["users"] = userList
 	}
 	return json.Marshal(inbound)
@@ -156,7 +161,15 @@ func tlsServerBlock(cert NodeCert) map[string]interface{} {
 }
 
 // renderUsers 从用户凭据中取出对应协议的字段,渲染成入站 users 项。
-func renderUsers(protocol string, users []model.User) ([]map[string]interface{}, error) {
+// shadowsocks 的凭据键随加密方式而定(2022-blake3-aes-128-* 用 shadowsocks16),
+// 与 s-ui 及既有分享链接保持一致。
+func renderUsers(protocol string, inbound map[string]interface{}, users []model.User) ([]map[string]interface{}, error) {
+	credKey := protocol
+	if protocol == "shadowsocks" {
+		method, _ := inbound["method"].(string)
+		credKey = shadowsocksCredKey(method)
+	}
+
 	out := make([]map[string]interface{}, 0, len(users))
 	for _, u := range users {
 		var creds map[string]map[string]interface{}
@@ -165,9 +178,9 @@ func renderUsers(protocol string, users []model.User) ([]map[string]interface{},
 				return nil, fmt.Errorf("用户 %q 凭据解析失败: %w", u.Name, err)
 			}
 		}
-		cred := creds[protocol]
+		cred := creds[credKey]
 		switch protocol {
-		case "hysteria2", "anytls":
+		case "hysteria2", "anytls", "shadowsocks":
 			password, _ := cred["password"].(string)
 			out = append(out, map[string]interface{}{"name": u.Name, "password": password})
 		default:
@@ -175,6 +188,13 @@ func renderUsers(protocol string, users []model.User) ([]map[string]interface{},
 		}
 	}
 	return out, nil
+}
+
+func shadowsocksCredKey(method string) string {
+	if strings.HasPrefix(method, "2022-blake3-aes-128") {
+		return "shadowsocks16"
+	}
+	return "shadowsocks"
 }
 
 func renderOutbounds(upstreams []model.Upstream) ([]json.RawMessage, error) {
