@@ -2,9 +2,11 @@
 package runner
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,12 +21,22 @@ import (
 	"gorm.io/gorm"
 )
 
+// startPanel 由 main 注入(web 包依赖 runner,反向直接引用会成环)。
+var startPanel func(*Runner) error
+
+// SetPanelStarter 注册面板启动函数,在 Run 时随数据面一起拉起。
+func SetPanelStarter(f func(*Runner) error) { startPanel = f }
+
 // Runner 持有数据面运行所需的一切。
 type Runner struct {
 	db     *gorm.DB
 	core   *core.Core
 	subSrv *sub.Server
+	mu     sync.Mutex // 串行化重载,避免并发改动互相打断
 }
+
+// DB 暴露数据库句柄给面板层。
+func (r *Runner) DB() *gorm.DB { return r.db }
 
 func New(dbPath string) (*Runner, error) {
 	db, err := database.Open(dbPath)
@@ -59,6 +71,90 @@ func (r *Runner) Start() error {
 		return fmt.Errorf("启动 sing-box: %w", err)
 	}
 	r.applyLimits()
+	return nil
+}
+
+// ReloadUsers 只刷新用户相关状态:入站用户表就地热更新(不断开现有连接),
+// 并重新下发限速/设备数策略。用于新增/禁用用户、改配额与限速等高频操作。
+func (r *Runner) ReloadUsers() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.core.IsRunning() {
+		return nil
+	}
+	raw, err := render.BuildConfig(r.db, r.nodeCert())
+	if err != nil {
+		return fmt.Errorf("渲染配置: %w", err)
+	}
+	var cfg struct {
+		Inbounds []json.RawMessage `json:"inbounds"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return err
+	}
+	box := r.core.GetInstance()
+	for _, inbound := range cfg.Inbounds {
+		handled, err := r.core.UpdateInboundUsers(inbound)
+		if err != nil {
+			logger.Warning("热更新入站用户失败: ", err)
+			continue
+		}
+		if !handled || box == nil {
+			continue
+		}
+		// 断开已不再属于该入站的用户连接(禁用用户即时下线)
+		var meta struct {
+			Tag   string `json:"tag"`
+			Users []struct {
+				Name string `json:"name"`
+			} `json:"users"`
+		}
+		if json.Unmarshal(inbound, &meta) != nil || meta.Tag == "" {
+			continue
+		}
+		keep := make(map[string]struct{}, len(meta.Users))
+		for _, u := range meta.Users {
+			keep[u.Name] = struct{}{}
+		}
+		box.ConnTracker().CloseConnByInboundUsers(meta.Tag, keep)
+	}
+	r.applyLimits()
+	return nil
+}
+
+// ReloadAll 重建整个数据面(线路增删、端口/协议变更、上游或路由变化时使用)。
+func (r *Runner) ReloadAll() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.core.Stop()
+	raw, err := render.BuildConfig(r.db, r.nodeCert())
+	if err != nil {
+		return fmt.Errorf("渲染配置: %w", err)
+	}
+	if err := r.core.Start(raw); err != nil {
+		return fmt.Errorf("重启 sing-box: %w", err)
+	}
+	r.applyLimits()
+	logger.Info("数据面已重载")
+	return nil
+}
+
+// CoreRunning 报告内嵌 sing-box 是否在运行。
+func (r *Runner) CoreRunning() bool { return r.core.IsRunning() }
+
+// Uptime 返回数据面已运行秒数。
+func (r *Runner) Uptime() uint32 {
+	if box := r.core.GetInstance(); box != nil {
+		return box.Uptime()
+	}
+	return 0
+}
+
+// OnlineIPs 返回某用户当前在线的源 IP(同时在线设备)。
+func (r *Runner) OnlineIPs(user string) []string {
+	if box := r.core.GetInstance(); box != nil {
+		return box.Limiter().ActiveIPs(user)
+	}
 	return nil
 }
 
@@ -119,11 +215,18 @@ func Run(dbPath string) error {
 	if err != nil {
 		return err
 	}
+	// core 启动失败(如证书未就绪)不阻塞面板与订阅:
+	// 面板必须先可用,操作者才能在面板里解决问题。
 	if err := r.Start(); err != nil {
-		return err
+		logger.Error("数据面启动失败(面板与订阅继续运行): ", err)
 	}
 	if err := r.subSrv.Start(); err != nil {
 		return fmt.Errorf("启动订阅服务: %w", err)
+	}
+	if startPanel != nil {
+		if err := startPanel(r); err != nil {
+			return fmt.Errorf("启动面板: %w", err)
+		}
 	}
 	logger.Info("m-ui 数据面已启动")
 

@@ -10,7 +10,14 @@ import (
 	"github.com/fangjunsheng555/m-ui/importer"
 	"github.com/fangjunsheng555/m-ui/render"
 	"github.com/fangjunsheng555/m-ui/runner"
+	"github.com/fangjunsheng555/m-ui/web"
 )
+
+func init() {
+	runner.SetPanelStarter(func(r *runner.Runner) error {
+		return web.NewServer(r).Start()
+	})
+}
 
 var version = "0.1.0-p0"
 
