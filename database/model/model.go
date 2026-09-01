@@ -36,9 +36,13 @@ type Line struct {
 	Protocol   string          `json:"protocol"` // hysteria2 | anytls | shadowsocks
 	Port       int             `json:"port" gorm:"uniqueIndex"`
 	UpstreamId uint            `json:"upstreamId"` // 0 = direct
-	Options    json.RawMessage `json:"options"`    // 协议入站附加参数(obfs、method、up/down_mbps 等)
-	Enabled    bool            `json:"enabled" gorm:"default:true"`
-	Sort       int             `json:"sort"`
+	Options    json.RawMessage `json:"options"`    // 协议入站附加参数(obfs、method、padding_scheme 等)
+	// Addrs 订阅里对外公布的连接地址列表 [{server, server_port?, remark?, sni?}]。
+	// 空 = 用入口节点主机 + 本线路端口(常态);非空 = 逐地址各出一条链接/代理。
+	// 也是 HK/TW 双入口的承载:每个入口一条 addr。
+	Addrs   json.RawMessage `json:"addrs,omitempty"`
+	Enabled bool            `json:"enabled" gorm:"default:true"`
+	Sort    int             `json:"sort"`
 }
 
 // Node 入口服务器。IsLocal 标记 Hub 所在机;副机通过 ApiUrl+Token 管理。

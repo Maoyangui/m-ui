@@ -159,11 +159,12 @@ type oldInbound struct {
 	Type    string
 	Tag     string
 	Options []byte
+	Addrs   []byte
 }
 
 func importLines(src, dst *gorm.DB, report *Report, upstreamIdByTag map[string]uint, orderRank map[string]int) (map[uint]bool, error) {
 	var inbounds []oldInbound
-	if err := src.Raw("SELECT id,type,tag,options FROM inbounds ORDER BY id").Scan(&inbounds).Error; err != nil {
+	if err := src.Raw("SELECT id,type,tag,options,addrs FROM inbounds ORDER BY id").Scan(&inbounds).Error; err != nil {
 		return nil, fmt.Errorf("读取入站: %w", err)
 	}
 	routeMap, err := readRouteMap(src, report)
@@ -216,6 +217,7 @@ func importLines(src, dst *gorm.DB, report *Report, upstreamIdByTag map[string]u
 		if !listed {
 			rank = len(orderRank) + int(inb.Id) // 未在排序文件中的排在已列出的后面,按旧 id 保持相对顺序
 		}
+		addrs := normalizeAddrs(inb.Addrs)
 		pendings = append(pendings, pending{
 			line: model.Line{
 				Id:         inb.Id,
@@ -224,6 +226,7 @@ func importLines(src, dst *gorm.DB, report *Report, upstreamIdByTag map[string]u
 				Port:       port,
 				UpstreamId: upstreamId,
 				Options:    json.RawMessage(remaining),
+				Addrs:      addrs,
 				Enabled:    true,
 			},
 			rank: rank,
@@ -290,6 +293,19 @@ func readRouteMap(src *gorm.DB, report *Report) (map[string]string, error) {
 		}
 	}
 	return routeMap, nil
+}
+
+// normalizeAddrs 把旧 inbound 的 addrs 列规整:空/空数组/null → nil(常态,用入口主机)。
+func normalizeAddrs(raw []byte) json.RawMessage {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" || s == "[]" {
+		return nil
+	}
+	var list []map[string]interface{}
+	if err := json.Unmarshal(raw, &list); err != nil || len(list) == 0 {
+		return nil
+	}
+	return json.RawMessage(raw)
 }
 
 func decodeStringList(raw json.RawMessage) []string {
