@@ -141,18 +141,19 @@ func (r *Runner) issueCert() error {
 	r.setSetting("certFile", certFile)
 	r.setSetting("keyFile", keyFile)
 	r.setSetting("acmeDomain", domain)
-	r.afterCertChange(certFile, keyFile, domain)
+	r.afterCertChange(certFile, keyFile, domain, true)
 	r.notifier.Event("tgOnCert", fmt.Sprintf("🟢 <b>证书已签发</b>:%s\n到期 %s", notify.Esc(domain), res.NotAfter.Format("2006-01-02")))
 	return nil
 }
 
-// afterCertChange 把新证书套用到面板/订阅(按设置)并重载数据面。
-func (r *Runner) afterCertChange(certFile, keyFile, domain string) {
+// afterCertChange 把新证书套用到面板/订阅(按设置;applyServers=false 时只给数据面用)并重载数据面。
+// 自签证书不套到面板/订阅:客户端拉 HTTPS 订阅会因证书不受信任而失败,无域名场景订阅走 http://IP:端口。
+func (r *Runner) afterCertChange(certFile, keyFile, domain string, applyServers bool) {
 	if domain != "" && r.setting("webDomain") == "" {
 		r.setSetting("webDomain", domain)
 	}
 	subChanged := false
-	if !strings.EqualFold(r.setting("acmeApplySub"), "false") {
+	if applyServers && !strings.EqualFold(r.setting("acmeApplySub"), "false") {
 		if r.setting("subCertFile") != certFile || r.setting("subKeyFile") != keyFile {
 			subChanged = r.setting("subCertFile") == "" // 从 http 变 https 需重启监听
 			r.setSetting("subCertFile", certFile)
@@ -160,7 +161,7 @@ func (r *Runner) afterCertChange(certFile, keyFile, domain string) {
 			subChanged = true
 		}
 	}
-	if !strings.EqualFold(r.setting("acmeApplyPanel"), "false") {
+	if applyServers && !strings.EqualFold(r.setting("acmeApplyPanel"), "false") {
 		if r.setting("webCertFile") == "" {
 			r.cert.logf("面板当前为 http,已写入证书路径,重启 m-ui 后面板改为 https")
 		}
@@ -192,8 +193,8 @@ func (r *Runner) SelfSign(hosts []string) error {
 	}
 	r.setSetting("certFile", certFile)
 	r.setSetting("keyFile", keyFile)
-	r.cert.logf("自签证书已生成: %s", certFile)
-	r.afterCertChange(certFile, keyFile, "")
+	r.cert.logf("自签证书已生成: %s(只用于数据面;订阅与面板保持 HTTP,客户端需允许不安全)", certFile)
+	r.afterCertChange(certFile, keyFile, "", false)
 	return nil
 }
 
