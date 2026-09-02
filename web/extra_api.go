@@ -154,6 +154,32 @@ func mergeIPs(a, b []string) []string {
 	return out
 }
 
+// handleStatsTop GET /stats/top?hours=24&limit=10:按用户聚合的流量排行。
+func (s *Server) handleStatsTop(w http.ResponseWriter, r *http.Request) {
+	hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
+	if hours <= 0 || hours > 24*90 {
+		hours = 24
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 100 {
+		limit = 10
+	}
+	since := time.Now().Unix() - int64(hours)*3600
+	type row struct {
+		Tag  string `json:"name"`
+		Up   int64  `json:"up"`
+		Down int64  `json:"down"`
+	}
+	var rows []row
+	s.db.Raw(`SELECT tag, COALESCE(SUM(CASE WHEN direction = 1 THEN traffic ELSE 0 END),0) AS up,
+		COALESCE(SUM(CASE WHEN direction = 0 THEN traffic ELSE 0 END),0) AS down
+		FROM stats WHERE resource = 'user' AND date_time > ? GROUP BY tag ORDER BY (up + down) DESC LIMIT ?`, since, limit).Scan(&rows)
+	if rows == nil {
+		rows = []row{}
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
 // ---- 最近入站连接(从 sing-box 日志提取,客户端"连不上"时用来判断包有没有到服务器)----
 
 var reInboundConn = regexp.MustCompile(`inbound/(\w+)\[([^\]]+)\]\s*inbound connection from ([0-9a-fA-F.:\[\]]+?)(?::\d+)?\s*$`)

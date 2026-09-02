@@ -130,6 +130,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"password", s.auth(s.handlePassword))
 	mux.HandleFunc(api+"reload", s.auth(s.handleReload))
 	mux.HandleFunc(api+"stats", s.auth(s.handleStats))
+	mux.HandleFunc(api+"stats/top", s.auth(s.handleStatsTop))
 	mux.HandleFunc(api+"onlines", s.auth(s.handleOnlines))
 	mux.HandleFunc(api+"logs", s.auth(s.handleLogs))
 	mux.HandleFunc(api+"audit", s.auth(s.handleAudit))

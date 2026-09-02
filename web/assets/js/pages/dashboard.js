@@ -5,7 +5,21 @@ import { esc, fmtBytes, fmtDuration, fmtRelative, toast, registerActions, badge,
 import { areaChart } from '../chart.js';
 
 export const title = () => t('nav.dashboard');
-let range = 24, logLevel = 'info';
+let range = 24, logLevel = 'info', topHours = 24;
+
+async function renderTop() {
+  const el = document.getElementById('dash-top');
+  if (!el) return;
+  const rows = await get(`stats/top?hours=${topHours}&limit=10`);
+  if (!rows.length) { el.innerHTML = empty(t('dash.noTop')); return; }
+  const max = Math.max(...rows.map(r => r.up + r.down)) || 1;
+  el.innerHTML = `<div class="top-list">${rows.map((r, i) => `<div class="top-row">
+      <span class="top-rank">${i + 1}</span>
+      <a href="#/users" class="top-name">${esc(r.name)}</a>
+      <div class="top-bar"><div style="width:${Math.max(2, Math.round((r.up + r.down) / max * 100))}%"></div></div>
+      <span class="num top-val">${fmtBytes(r.up + r.down, 1)} <span class="muted small">↑${fmtBytes(r.up, 0)} ↓${fmtBytes(r.down, 0)}</span></span>
+    </div>`).join('')}</div>`;
+}
 
 // 快速开始清单:关键步骤未完成时显示,可关闭(记在浏览器里)
 function quickStart() {
@@ -56,6 +70,12 @@ export async function render(el) {
       </section>
     </div>
     <section class="card">
+      <div class="card-head"><h2>${t('dash.topUsers')}</h2>
+        <div class="seg" id="dash-toprange">${[24, 168, 720].map(h => `<button data-act="dash.toprange" data-id="${h}" class="${h === topHours ? 'active' : ''}">${t('dash.range.' + (h === 24 ? '24h' : h === 168 ? '7d' : '30d'))}</button>`).join('')}</div>
+      </div>
+      <div id="dash-top"></div>
+    </section>
+    <section class="card">
       <div class="card-head"><h2>${t('dash.recentConns')}</h2><button class="btn sm" data-act="dash.connsRefresh">${t('common.refresh')}</button></div>
       <p class="hint">${t('dash.recentConnsHelp')}</p>
       <div id="dash-conns" style="margin-top:.5rem"></div>
@@ -71,7 +91,7 @@ export async function render(el) {
     </section>`;
   renderStats();
   renderCore();
-  await Promise.all([renderChart(), renderOnline(), renderAudit(), renderLog(), renderHealth(), renderConns(), refreshNodeSummary().then(renderStats)]);
+  await Promise.all([renderChart(), renderOnline(), renderAudit(), renderLog(), renderHealth(), renderConns(), renderTop(), refreshNodeSummary().then(renderStats)]);
 }
 
 export async function tick() { await refreshNodeSummary(); renderStats(); renderCore(); renderOnline(); }
@@ -190,6 +210,11 @@ registerActions({
   },
   'dash.loglevel': async (_, sel) => { logLevel = sel.value; await renderLog(); },
   'dash.connsRefresh': () => renderConns(),
+  'dash.toprange': async id => {
+    topHours = Number(id);
+    document.querySelectorAll('#dash-toprange button').forEach(b => b.classList.toggle('active', b.dataset.id === id));
+    await renderTop();
+  },
   'dash.hideQs': () => { try { localStorage.setItem('m-ui.hideQuickStart', '1'); } catch {} document.querySelector('.quickstart')?.remove(); },
   'dash.healthRun': async (_, btn) => {
     btn.disabled = true;

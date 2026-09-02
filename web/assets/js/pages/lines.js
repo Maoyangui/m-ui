@@ -35,6 +35,9 @@ export async function render(el) {
       <input type="search" id="line-q" placeholder="${t('common.search')}…" value="${esc(query)}">
       <span class="muted small" id="line-count"></span>
       <span class="grow"></span>
+      <details class="menu"><summary class="btn">${t('line.quick')} ▾</summary><div class="menu-list">
+        ${PRESETS.map(p => `<button data-act="line.preset" data-id="${p.id}"><b>${esc(p.label)}</b><span class="muted small" style="display:block">${esc(p.hint)}</span></button>`).join('')}
+      </div></details>
       <button class="btn primary" data-act="line.add">${t('line.add')}</button>
     </div>
     <div class="table-wrap"><table class="grid">
@@ -258,9 +261,38 @@ function readForm(id) {
   return body;
 }
 
-function editLine(id, cloneFrom) {
+// 一键预设:常用协议组合,随机挑一个未占用端口,Reality 自动生成密钥
+const PRESETS = [
+  { id: 'hy2', label: 'Hysteria2', hint: 'UDP · 抗丢包 · 需证书', protocol: 'hysteria2', tls: { mode: 'cert' } },
+  { id: 'anytls', label: 'AnyTLS', hint: 'TCP · 流量特征弱 · 需证书', protocol: 'anytls', tls: { mode: 'cert' } },
+  { id: 'reality', label: 'VLESS + Reality', hint: 'TCP · 无需证书/域名 · Vision', protocol: 'vless', tls: { mode: 'reality' }, options: { vision: true } },
+  { id: 'trojan', label: 'Trojan', hint: 'TCP · 需证书', protocol: 'trojan', tls: { mode: 'cert' } },
+  { id: 'ss2022', label: 'Shadowsocks 2022', hint: 'TCP/UDP · 无 TLS · 兼容性最好', protocol: 'shadowsocks', tls: { mode: 'none' }, options: { method: '2022-blake3-aes-128-gcm' } },
+  { id: 'vmess-ws', label: 'VMess + WS', hint: 'TCP · 可套 CDN', protocol: 'vmess', tls: { mode: 'none' }, transport: { type: 'ws', path: '/ws' } },
+];
+function randomFreePort() {
+  const used = new Set(state.lines.map(l => l.port));
+  for (let i = 0; i < 50; i++) { const p = 20000 + Math.floor(Math.random() * 40000); if (!used.has(p)) return p; }
+  return 20000 + Math.floor(Math.random() * 40000);
+}
+async function presetLine(pid) {
+  const p = PRESETS.find(x => x.id === pid);
+  if (!p) return;
+  const port = randomFreePort();
+  const l = { protocol: p.protocol, enabled: true, options: p.options || {}, upstreamId: 0, port, name: `${p.label}-${port}`, tls: p.tls, transport: p.transport };
+  if (p.tls && p.tls.mode === 'reality') {
+    try {
+      const kp = await get('keygen?type=reality');
+      const sid = await get('keygen?type=shortid');
+      l.tls = { mode: 'reality', reality: { private_key: kp.privateKey || kp.private_key, public_key: kp.publicKey || kp.public_key, short_ids: [sid.shortId || sid.short_id || sid.value], handshake_server: 'www.apple.com', handshake_port: 443 } };
+    } catch (e) { toast(e.message, 'err'); }
+  }
+  editLine(null, null, l);
+}
+
+function editLine(id, cloneFrom, preset) {
   const src = cloneFrom || (id ? state.lines.find(x => x.id === id) : null);
-  const l = src ? { ...src } : { protocol: 'vless', enabled: true, options: {}, upstreamId: 0 };
+  const l = src ? { ...src } : (preset || { protocol: 'vless', enabled: true, options: {}, upstreamId: 0 });
   if (cloneFrom) { l.name = t('line.cloneOf', { name: src.name }); l.port = ''; }
   openModal(id ? t('line.edit') : t('line.add'), `
     <h3>${t('line.basic')}</h3>
@@ -293,6 +325,7 @@ function editLine(id, cloneFrom) {
 }
 
 registerActions({
+  'line.preset': id => presetLine(id),
   'line.add': () => editLine(null),
   'line.edit': id => editLine(Number(id)),
   'line.clone': id => editLine(null, state.lines.find(x => x.id === Number(id))),

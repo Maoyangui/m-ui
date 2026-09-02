@@ -269,3 +269,13 @@ a.stat { color: inherit; text-decoration: none; display: block; }
 a.stat:hover { border-color: var(--primary); }
 .stat.bad { border-color: var(--danger); }
 .stat.bad .s { color: var(--danger); }
+
+/* 流量排行 */
+.top-list { display: flex; flex-direction: column; gap: .35rem; margin-top: .5rem; }
+.top-row { display: grid; grid-template-columns: 1.6rem minmax(6rem, 14rem) 1fr auto; gap: .6rem; align-items: center; font-size: .85rem; }
+.top-rank { color: var(--muted); font-family: var(--mono); text-align: right; }
+.top-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-bar { height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.top-bar div { height: 100%; background: var(--primary); border-radius: 4px; }
+.top-val { white-space: nowrap; }
+@media (max-width: 700px) { .top-row { grid-template-columns: 1.6rem 1fr auto; } .top-bar { display: none; } }
