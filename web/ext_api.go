@@ -66,7 +66,7 @@ func (s *Server) handleExts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) validateExt(e *model.ExtNode) error {
 	e.Name = strings.TrimSpace(e.Name)
 	e.Value = strings.TrimSpace(e.Value)
-	e.Prefix = strings.TrimSpace(e.Prefix)
+	e.Prefix = strings.Trim(e.Prefix, "\r\n\t") // 保留用户有意留的空格,如 "[外] "
 	if e.Name == "" {
 		return errors.New("名称不能为空")
 	}
