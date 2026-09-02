@@ -484,6 +484,7 @@ func (r *Runner) ReloadAllForce() error {
 func (r *Runner) reloadAllLocked(raw []byte) error {
 	if r.core.IsRunning() && r.appliedRaw != nil && bytes.Equal(r.appliedRaw, raw) {
 		r.applyLimits()
+		r.applyPortHopping() // 端口跳跃等面板侧参数不进 sing-box 配置,即使无需重启也要同步
 		logger.Info("配置无变化,数据面无需重启")
 		return nil
 	}
