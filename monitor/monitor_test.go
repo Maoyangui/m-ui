@@ -115,7 +115,8 @@ func TestCoreWatchdogTransitions(t *testing.T) {
 	running = true
 	m.tickCore()
 	msgs := sink.wait()
-	if len(msgs) != 2 || !strings.Contains(msgs[0], "停止") || !strings.Contains(msgs[1], "恢复") {
+	joined := strings.Join(msgs, "|") // 两条异步发送,顺序不保证
+	if len(msgs) != 2 || !strings.Contains(joined, "停止") || !strings.Contains(joined, "恢复") {
 		t.Fatalf("看门狗应各告警一次: %v", msgs)
 	}
 }

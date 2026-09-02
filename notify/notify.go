@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strings"
@@ -119,6 +120,36 @@ func (n *Notifier) telegram(token, chatID, text string) error {
 		"chat_id": chatID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true,
 	})
 	resp, err := n.client().Post("https://api.telegram.org/bot"+token+"/sendMessage", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("telegram %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return nil
+}
+
+// SendDocument 以文件形式发送(备份推送)。
+func (n *Notifier) SendDocument(filename string, data []byte, caption string) error {
+	token, chat := n.setting("tgToken"), n.setting("tgChatId")
+	if token == "" || chat == "" {
+		return errors.New("未配置 Telegram Bot Token 或 Chat ID")
+	}
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	mw.WriteField("chat_id", chat)
+	if caption != "" {
+		mw.WriteField("caption", caption)
+	}
+	fw, err := mw.CreateFormFile("document", filename)
+	if err != nil {
+		return err
+	}
+	fw.Write(data)
+	mw.Close()
+	resp, err := n.client().Post("https://api.telegram.org/bot"+token+"/sendDocument", mw.FormDataContentType(), &body)
 	if err != nil {
 		return err
 	}

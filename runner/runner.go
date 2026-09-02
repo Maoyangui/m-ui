@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fangjunsheng555/m-ui/backup"
 	"github.com/fangjunsheng555/m-ui/core"
 	"github.com/fangjunsheng555/m-ui/creds"
 	"github.com/fangjunsheng555/m-ui/database"
@@ -42,6 +43,8 @@ type Runner struct {
 	jobs     *jobs.Scheduler
 	notifier *notify.Notifier
 	monitor  *monitor.Monitor
+	dbPath   string
+	cert     certState
 	mu       sync.Mutex // 串行化重载,避免并发改动互相打断
 }
 
@@ -96,7 +99,7 @@ func New(dbPath string) (*Runner, error) {
 	} else if n > 0 {
 		logger.Info("已为 ", n, " 个用户补全新协议凭据")
 	}
-	r := &Runner{db: db, core: core.NewCore(), subSrv: sub.NewServer(db)}
+	r := &Runner{db: db, core: core.NewCore(), subSrv: sub.NewServer(db), dbPath: dbPath}
 	r.notifier = notify.New(r.setting)
 	r.jobs = jobs.New(jobs.Deps{
 		DB:          db,
@@ -346,6 +349,12 @@ func (r *Runner) checkpointLoop(stop <-chan struct{}) {
 // Run 启动数据面并阻塞直到收到终止信号(SIGHUP 触发重载)。
 func Run(dbPath string) error {
 	logger.InitLogger(logging.INFO)
+	// 有待还原的备份(面板上传后重启到这里)先原子替换数据库与证书
+	if applied, err := backup.ApplyPending(dbPath); err != nil {
+		logger.Error("应用待还原备份失败(已改名为 .failed,继续用当前库): ", err)
+	} else if applied {
+		logger.Info("已从备份还原数据库与证书")
+	}
 	r, err := New(dbPath)
 	if err != nil {
 		return err
@@ -372,6 +381,8 @@ func Run(dbPath string) error {
 
 	stopCheckpoint := make(chan struct{})
 	go r.checkpointLoop(stopCheckpoint)
+	go r.certLoop(stopCheckpoint)
+	go r.backupLoop(stopCheckpoint)
 	defer close(stopCheckpoint)
 
 	sigCh := make(chan os.Signal, 1)

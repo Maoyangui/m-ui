@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/fangjunsheng555/m-ui/backup"
 	"github.com/fangjunsheng555/m-ui/certutil"
 	"github.com/fangjunsheng555/m-ui/core"
 	"github.com/fangjunsheng555/m-ui/database"
@@ -17,6 +19,7 @@ import (
 
 func init() {
 	web.Version = version
+	runner.Version = version
 	runner.SetPanelStarter(func(r *runner.Runner) error {
 		return web.NewServer(r).Start()
 	})
@@ -30,6 +33,9 @@ func usage() {
 	fmt.Println("用法:")
 	fmt.Println("  m-ui run                          启动面板(主/副角色由数据库设置 nodeMode 决定)")
 	fmt.Println("  m-ui import -from <s-ui.db> [...] 从旧 s-ui 数据库迁移")
+	fmt.Println("  m-ui backup -db <m-ui.db> -out <zip> 生成备份(含证书)")
+	fmt.Println("  m-ui restore -db <m-ui.db> -from <zip|db> 还原备份(服务停止时执行)")
+	fmt.Println("  m-ui selfsign -hosts <域名,IP>    生成自签证书")
 	fmt.Println("  m-ui version                      显示版本")
 }
 
@@ -58,6 +64,38 @@ func main() {
 			fmt.Fprintln(os.Stderr, "导入失败:", err)
 			os.Exit(1)
 		}
+	case "backup":
+		fs := flag.NewFlagSet("backup", flag.ExitOnError)
+		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
+		out := fs.String("out", "", "输出 zip 路径(默认 m-ui-<时间>.zip)")
+		fs.Parse(os.Args[2:])
+		if *out == "" {
+			*out = "m-ui-" + time.Now().Format("20060102-150405") + ".zip"
+		}
+		if err := runBackup(*dbPath, *out); err != nil {
+			fmt.Fprintln(os.Stderr, "备份失败:", err)
+			os.Exit(1)
+		}
+		fmt.Println("备份已写入:", *out)
+	case "restore":
+		fs := flag.NewFlagSet("restore", flag.ExitOnError)
+		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
+		from := fs.String("from", "", "备份文件(zip 或 .db)")
+		fs.Parse(os.Args[2:])
+		if *from == "" {
+			fmt.Fprintln(os.Stderr, "缺少 -from 参数")
+			os.Exit(2)
+		}
+		sum, err := backup.Inspect(*from)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "备份文件无效:", err)
+			os.Exit(1)
+		}
+		if err := backup.Restore(*dbPath, *from); err != nil {
+			fmt.Fprintln(os.Stderr, "还原失败:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("已还原:%d 用户 / %d 线路 / %d 上游,证书 %d 个(旧库保留为 .bak-*)\n", sum.Users, sum.Lines, sum.Upstreams, len(sum.Meta.Certs))
 	case "selfsign":
 		fs := flag.NewFlagSet("selfsign", flag.ExitOnError)
 		hosts := fs.String("hosts", "", "域名或 IP,逗号分隔(必填)")
@@ -97,6 +135,29 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+}
+
+func runBackup(dbPath, out string) error {
+	db, err := database.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	defer database.Close(db)
+	get := func(key string) string {
+		var v string
+		db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+		return v
+	}
+	var certs []string
+	for _, k := range []string{"certFile", "keyFile", "webCertFile", "webKeyFile", "subCertFile", "subKeyFile"} {
+		certs = append(certs, get(k))
+	}
+	f, err := os.Create(out)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return backup.Create(db, certs, version, f)
 }
 
 func runRender(dbPath, out string, validate bool) error {

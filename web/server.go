@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fangjunsheng555/m-ui/certutil"
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/logger"
 	"github.com/fangjunsheng555/m-ui/notify"
@@ -133,6 +134,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"plans", s.auth(s.handlePlans))
 	mux.HandleFunc(api+"plans/", s.auth(s.handlePlanItem))
 	mux.HandleFunc(api+"notify/test", s.auth(s.handleNotifyTest))
+	mux.HandleFunc(api+"cert", s.auth(s.handleCert))
+	mux.HandleFunc(api+"cert/", s.auth(s.handleCertSub))
+	mux.HandleFunc(api+"backup", s.auth(s.handleBackup))
+	mux.HandleFunc(api+"backup/", s.auth(s.handleBackupSub))
 
 	// 根路径重定向到面板
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -157,12 +162,12 @@ func (s *Server) Start() error {
 	scheme := "http"
 	certFile, keyFile := s.setting("webCertFile"), s.setting("webKeyFile")
 	if certFile != "" && keyFile != "" {
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		rl, err := certutil.NewReloader(certFile, keyFile)
 		if err != nil {
 			ln.Close()
 			return fmt.Errorf("加载面板证书: %w", err)
 		}
-		ln = tls.NewListener(ln, &tls.Config{Certificates: []tls.Certificate{cert}})
+		ln = tls.NewListener(ln, rl.TLSConfig()) // 证书文件更新后自动换用,续期无需重启
 		scheme = "https"
 	}
 

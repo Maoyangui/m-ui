@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fangjunsheng555/m-ui/certutil"
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/logger"
 
@@ -88,12 +89,12 @@ func (s *Server) Start() error {
 	certFile, keyFile := s.setting("subCertFile"), s.setting("subKeyFile")
 	scheme := "http"
 	if certFile != "" && keyFile != "" {
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		rl, err := certutil.NewReloader(certFile, keyFile)
 		if err != nil {
 			ln.Close()
 			return fmt.Errorf("加载订阅证书: %w", err)
 		}
-		ln = tls.NewListener(ln, &tls.Config{Certificates: []tls.Certificate{cert}})
+		ln = tls.NewListener(ln, rl.TLSConfig()) // 证书文件更新后自动换用,续期无需重启
 		scheme = "https"
 	}
 

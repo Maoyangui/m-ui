@@ -24,5 +24,17 @@ export const post = (path, body) => api(path, { method: 'POST', body: body === u
 export const put = (path, body) => api(path, { method: 'PUT', body: JSON.stringify(body) });
 export const del = path => api(path, { method: 'DELETE' });
 
+// 上传文件(multipart),extra 为附加字段
+export async function upload(path, file, extra = {}) {
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  Object.entries(extra).forEach(([k, v]) => fd.append(k, v));
+  const res = await fetch(BASE + path, { method: 'POST', body: fd });
+  if (res.status === 401) { onUnauthorized(); throw new ApiError(401, '未登录'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, data.error || ('请求失败 ' + res.status));
+  return data;
+}
+
 // 二进制资源(二维码)直接返回 URL,由 <img> 加载
 export const qrUrl = (userId, format) => `${BASE}users/${userId}/qr?format=${format}&_=${Date.now()}`;
