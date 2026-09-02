@@ -1,4 +1,5 @@
 // 管理员:登录账号、两步验证(TOTP)、外部 API 开关与令牌。
+import { state } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, registerActions, field, fv, copy, badge, openModal } from '../ui.js';
@@ -109,7 +110,7 @@ function apiCard() {
     </tbody></table></div>
     <h3 class="sub-title">${t('adm.apiExample')}</h3>
     <pre class="log code">${esc(example(base, info.apiToken || ''))}</pre>
-    <p class="hint">${t('adm.apiDocs')} <a href="https://github.com/fangjunsheng555/m-ui/blob/main/docs/API.md" target="_blank" rel="noopener">docs/API.md</a></p>` : ''}`;
+    <p class="hint">${t('adm.apiDocs')} <a href="${esc((state.status.repo || '') + '/blob/main/docs/API.md')}" target="_blank" rel="noopener">docs/API.md</a></p>` : ''}`;
 }
 
 registerActions({

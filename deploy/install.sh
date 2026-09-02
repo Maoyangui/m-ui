@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # m-ui 安装/升级脚本(Linux amd64/arm64,systemd)
 #
-#   bash install.sh <m-ui 二进制路径或下载 URL> [--db /etc/m-ui/m-ui.db] [--restore backup.zip] [--import 旧面板.db]
+#   bash install.sh [latest | vX.Y.Z | 二进制/压缩包路径 | 下载 URL] [--db /etc/m-ui/m-ui.db] [--restore backup.zip] [--import 旧面板.db]
+#
+#   不带来源参数 = 从 GitHub Releases 安装最新版(自动识别 amd64 / arm64)。
 #
 # 幂等:重复执行即升级二进制并重启;数据库与证书不动。
 set -euo pipefail
 
-SRC="${1:-}"
+REPO="${M_UI_REPO:-fangjunsheng555/m-ui}" # GitHub 仓库 owner/name;换仓库改这里或设环境变量 M_UI_REPO
+SRC=""
+if [ $# -gt 0 ] && [[ "$1" != --* ]]; then SRC="$1"; shift; fi
 DB="/etc/m-ui/m-ui.db"
 RESTORE=""
 IMPORT=""
-shift || true
 while [ $# -gt 0 ]; do
   case "$1" in
     --db) DB="$2"; shift 2;;
@@ -21,8 +24,26 @@ while [ $# -gt 0 ]; do
 done
 
 [ "$(id -u)" -eq 0 ] || { echo "请以 root 运行"; exit 1; }
-[ -n "$SRC" ] || { echo "用法: bash install.sh <m-ui 二进制路径或 URL> [--db 路径] [--restore 备份.zip] [--import 旧面板.db]"; exit 2; }
 command -v systemctl >/dev/null || { echo "需要 systemd"; exit 1; }
+command -v curl >/dev/null || { echo "需要 curl"; exit 1; }
+
+# 不带来源 / latest / vX.Y.Z:从 GitHub Releases 取对应架构的压缩包
+if [ -z "$SRC" ] || [ "$SRC" = "latest" ] || [[ "$SRC" == v[0-9]* ]]; then
+  ARCH="$(uname -m)"
+  case "$ARCH" in
+    x86_64|amd64) ARCH=amd64;;
+    aarch64|arm64) ARCH=arm64;;
+    *) echo "不支持的架构: $ARCH(仅 amd64 / arm64)"; exit 1;;
+  esac
+  if [ -z "$SRC" ] || [ "$SRC" = "latest" ]; then
+    TAG="$(curl -fsSL -H "User-Agent: m-ui-install" ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "https://api.github.com/repos/$REPO/releases/latest" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)"
+    [ -n "$TAG" ] || { echo "无法从 GitHub 获取最新版本(网络不通或仓库为私有;私有仓库请设置 GITHUB_TOKEN,或直接传压缩包路径 / 下载地址)"; exit 1; }
+  else
+    TAG="$SRC"
+  fi
+  SRC="https://github.com/$REPO/releases/download/$TAG/m-ui-linux-$ARCH.tar.gz"
+  echo "安装 m-ui $TAG ($ARCH)"
+fi
 
 TMP="$(mktemp)"
 case "$SRC" in
@@ -81,7 +102,7 @@ if systemctl is-active --quiet m-ui; then
   echo "=================== m-ui 安装完成 ==================="
   /usr/local/bin/m-ui info -db "$DB"
   if [ "$FRESH" = 1 ] && [ -z "$RESTORE" ] && [ -z "$IMPORT" ]; then
-    echo "  首次安装默认账号: admin / admin  ——  请登录后立即在 设置 → 管理员 修改密码"
+    echo "  首次安装默认账号: admin / admin  ——  请登录后立即在"管理员"页修改密码"
   elif [ -n "$IMPORT" ]; then
     echo "  账号沿用旧面板库;忘记密码可执行: m-ui passwd -db $DB"
   elif [ -n "$RESTORE" ]; then

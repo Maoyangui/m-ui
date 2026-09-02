@@ -20,6 +20,7 @@ import (
 
 	"github.com/fangjunsheng555/m-ui/acme"
 	"github.com/fangjunsheng555/m-ui/backup"
+	"github.com/fangjunsheng555/m-ui/brand"
 	"github.com/fangjunsheng555/m-ui/certutil"
 	"github.com/fangjunsheng555/m-ui/database"
 	"github.com/fangjunsheng555/m-ui/runner"
@@ -28,7 +29,7 @@ import (
 const (
 	unitPath   = "/etc/systemd/system/m-ui.service"
 	binPath    = "/usr/local/bin/m-ui"
-	repoAPI    = "https://api.github.com/repos/fangjunsheng555/m-ui/releases/latest"
+	repoAPI    = "https://api.github.com/repos/" + brand.RepoPath + "/releases/latest"
 	defaultDB  = "/etc/m-ui/m-ui.db"
 	colorReset = "\033[0m"
 	colorBold  = "\033[1m"

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fangjunsheng555/m-ui/brand"
 	"github.com/fangjunsheng555/m-ui/core"
 	"github.com/fangjunsheng555/m-ui/creds"
 	"github.com/fangjunsheng555/m-ui/database"
@@ -93,6 +94,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"domain":       s.setting("webDomain"),
 		"goroutines":   runtime.NumGoroutine(),
 		"version":      Version,
+		"repo":         brand.Repo,
 		"onlineUsers":  len(s.run.Onlines().Users),
 	}
 	// 快速开始清单用

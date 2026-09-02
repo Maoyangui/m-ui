@@ -85,7 +85,7 @@ export async function render(el) {
         <dt>sing-box</dt><dd class="mono">1.14</dd>
         <dt>${t('set.panelUrl')}</dt><dd class="mono">${esc((state.status.panelTLS ? 'https' : 'http') + '://' + (s.webDomain || '<IP>') + ':' + (state.status.webPort || '') + (state.status.webPath || '/'))}</dd>
         <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + (s.webDomain || '<IP>') + ':' + (state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('set.userPh') + '>?format=clash')}</dd>
-        <dt>License</dt><dd>GPL-3.0 · <a href="https://github.com/fangjunsheng555/m-ui" target="_blank" rel="noopener">GitHub</a></dd>
+        <dt>License</dt><dd>GPL-3.0 · <a href="${esc(state.status.repo || '#')}" target="_blank" rel="noopener">GitHub</a></dd>
       </dl>
       <p class="hint">${t('set.restartNote')}</p>
     </section>`;

@@ -36,7 +36,7 @@ import (
 //   入站:hysteria2 / anytls / tuic / trojan / vless / vmess(带热换用户的 fork)、
 //         shadowsocks(原生多用户)、socks / http / mixed(原生,换用户需重建入站)
 //   出站:direct / block / socks / http / shadowsocks / tuic / hysteria2 / trojan / vless / vmess / anytls
-//         + selector / urltest(双入口自适应用)
+//         + selector / urltest(多入口自适应用)
 // 其余 sing-box 协议、endpoints、services 不注册,保持依赖树最小、无 CGO。
 
 func InboundRegistry() *inbound.Registry {
