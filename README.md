@@ -36,7 +36,8 @@
 - 审计日志、订阅访问日志、流量时序图(按时段柱状,24h / 7d / 30d)、在线用户与 IP;日志可一键关闭 / 清空
 
 **管理员与集成**
-- 两步验证(TOTP):扫码或手输密钥,兼容 Google / Microsoft Authenticator、Authy、1Password;手机丢失可在 SSH 菜单关闭
+- 两步验证(TOTP):扫码或手输密钥,兼容 Google / Microsoft Authenticator、Authy、1Password;手机丢失可在 SSH 菜单关闭,重置密码时自动清除
+- 右上角"建议 / 支持":作者 Telegram 与打赏地址一键复制
 - 外部 API:令牌鉴权,商城 / 计费 / 机器人可建号、套餐续费、启停、踢线、取订阅地址,全部记入审计,见 [docs/API.md](docs/API.md)
 
 ## 安装

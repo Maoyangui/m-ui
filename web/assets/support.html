@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="{{if eq .Lang "zh"}}zh-CN{{else}}en{{end}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{{if eq .Lang "zh"}}建议与支持 · m-ui{{else}}Feedback & Support · m-ui{{end}}</title>
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<style>
+:root { --bg: #f5f7fb; --surface: #fff; --text: #1a1f2e; --muted: #6b7280; --border: #e5e7eb; --primary: #2563eb; --primary-soft: #eaf0ff; --ok: #16a34a; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; --shadow: 0 10px 30px rgba(15, 23, 42, .08); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0f1218; --surface: #171b24; --text: #e6e8ee; --muted: #9aa3b2; --border: #262c38; --primary: #5b8cff; --primary-soft: #1a2540; --shadow: 0 10px 30px rgba(0, 0, 0, .35); } }
+:root[data-theme="dark"] { --bg: #0f1218; --surface: #171b24; --text: #e6e8ee; --muted: #9aa3b2; --border: #262c38; --primary: #5b8cff; --primary-soft: #1a2540; --shadow: 0 10px 30px rgba(0, 0, 0, .35); }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
+.wrap { max-width: 660px; margin: 0 auto; padding: 2.5rem 1.2rem 3rem; }
+.hero { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.6rem; }
+.hero img { width: 64px; height: 52px; }
+.hero h1 { margin: 0; font-size: 1.5rem; letter-spacing: .01em; }
+.hero p { margin: .15rem 0 0; color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 1.4rem 1.5rem; box-shadow: var(--shadow); margin-bottom: 1.1rem; }
+.card h2 { margin: 0 0 .35rem; font-size: 1.08rem; display: flex; align-items: center; gap: .5rem; }
+.card h2 .ic { width: 30px; height: 30px; border-radius: 9px; display: inline-grid; place-items: center; background: linear-gradient(135deg, #6a44f2, #18e3e8); color: #fff; font-size: .95rem; flex: none; }
+.card > p { margin: 0 0 1rem; color: var(--muted); }
+.row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: .7rem .9rem; }
+.row .k { font-size: .78rem; color: var(--muted); width: 100%; }
+.row code { flex: 1; min-width: 12rem; font-family: var(--mono); font-size: .95rem; word-break: break-all; }
+.row code.addr { font-size: .86rem; }
+.btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 9px; padding: .42rem .8rem; font: inherit; font-size: .85rem; cursor: pointer; text-decoration: none; white-space: nowrap; transition: .12s; }
+.btn:hover { border-color: var(--primary); color: var(--primary); }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.btn.primary:hover { filter: brightness(1.08); color: #fff; }
+.btn.done { border-color: var(--ok); color: var(--ok); }
+.tip { margin: .7rem 0 0; font-size: .82rem; color: var(--muted); }
+.tip b { color: var(--text); font-weight: 600; }
+.pay { display: flex; gap: 1rem; align-items: stretch; flex-wrap: wrap; }
+.pay .row { flex: 1; min-width: 16rem; align-content: flex-start; }
+.qr { width: 150px; height: 150px; border: 1px solid var(--border); border-radius: 12px; background: #fff; padding: 6px; flex: none; }
+.foot { text-align: center; color: var(--muted); font-size: .85rem; margin-top: 1.8rem; }
+.foot a { color: var(--primary); text-decoration: none; }
+@media (max-width: 520px) { .wrap { padding: 1.6rem 1rem 2.2rem; } .card { padding: 1.1rem 1.1rem; } .qr { width: 130px; height: 130px; } }
+</style>
+</head>
+<body>
+<script>try{var m=localStorage.getItem('m-ui-theme');if(m==='light'||m==='dark')document.documentElement.dataset.theme=m;}catch(e){}</script>
+<div class="wrap">
+  <div class="hero">
+    <img src="logo.svg" alt="">
+    <div>
+      <h1>{{if eq .Lang "zh"}}建议与支持{{else}}Feedback &amp; Support{{end}}</h1>
+      <p>{{if eq .Lang "zh"}}m-ui 是一个人维护的开源项目,你的反馈会直接决定它下一步做什么。{{else}}m-ui is an open-source project maintained by one person; your feedback decides what gets built next.{{end}}</p>
+    </div>
+  </div>
+
+  <section class="card">
+    <h2><span class="ic">💬</span>{{if eq .Lang "zh"}}提建议 · 报问题{{else}}Suggestions &amp; bug reports{{end}}</h2>
+    <p>{{if eq .Lang "zh"}}用得不顺手、想要的功能、遇到的问题,直接在 Telegram 上告诉我,附上面板版本和一句复现步骤最好。{{else}}Rough edges, feature ideas, anything broken: message me on Telegram. Panel version plus one line on how to reproduce helps a lot.{{end}}</p>
+    <div class="row">
+      <span class="k">Telegram</span>
+      <code id="tg">@{{.Telegram}}</code>
+      <button class="btn" data-copy="@{{.Telegram}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
+      <a class="btn primary" href="{{.TelegramURL}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}打开 Telegram ↗{{else}}Open Telegram ↗{{end}}</a>
+    </div>
+    <p class="tip">{{if eq .Lang "zh"}}也欢迎到 <a href="{{.Repo}}" target="_blank" rel="noopener">GitHub</a> 提 Issue 或 PR。{{else}}Issues and pull requests on <a href="{{.Repo}}" target="_blank" rel="noopener">GitHub</a> are welcome too.{{end}}</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="ic">☕</span>{{if eq .Lang "zh"}}支持这个项目{{else}}Support the project{{end}}</h2>
+    <p>{{if eq .Lang "zh"}}m-ui 免费、开源、没有任何付费功能。如果它帮你省下了时间,可以请我喝杯咖啡,让它走得更远。{{else}}m-ui is free and open source with no paid tier. If it saved you time, buy me a coffee and keep it going.{{end}}</p>
+    <div class="pay">
+      <div class="row">
+        <span class="k">TRON · TRX / USDT (TRC20)</span>
+        <code class="addr" id="tron">{{.Tron}}</code>
+        <button class="btn" data-copy="{{.Tron}}">{{if eq .Lang "zh"}}复制地址{{else}}Copy address{{end}}</button>
+      </div>
+      <img class="qr" src="support/qr" alt="QR">
+    </div>
+    <p class="tip">{{if eq .Lang "zh"}}转账前请核对地址首尾:<b>{{.TronHead}} … {{.TronTail}}</b>。任何金额都是一份鼓励,谢谢。{{else}}Double-check the address before sending: <b>{{.TronHead}} … {{.TronTail}}</b>. Any amount is appreciated, thank you.{{end}}</p>
+  </section>
+
+  <p class="foot">{{if eq .Lang "zh"}}谢谢你使用 m-ui。{{else}}Thanks for using m-ui.{{end}} · <a href="./">{{if eq .Lang "zh"}}返回面板{{else}}Back to panel{{end}}</a></p>
+</div>
+<script>
+document.querySelectorAll('[data-copy]').forEach(function (b) {
+  var label = b.textContent;
+  b.addEventListener('click', function () {
+    var t = b.getAttribute('data-copy');
+    var done = function () { b.textContent = '{{if eq .Lang "zh"}}已复制 ✓{{else}}Copied ✓{{end}}'; b.classList.add('done'); setTimeout(function () { b.textContent = label; b.classList.remove('done'); }, 1600); };
+    if (navigator.clipboard) navigator.clipboard.writeText(t).then(done, done);
+    else { var a = document.createElement('textarea'); a.value = t; document.body.appendChild(a); a.select(); document.execCommand('copy'); a.remove(); done(); }
+  });
+});
+</script>
+</body>
+</html>

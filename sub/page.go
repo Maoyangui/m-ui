@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fangjunsheng555/m-ui/brand"
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/render"
 
@@ -72,6 +73,7 @@ type pageLine struct {
 
 type pageData struct {
 	Lang                   string
+	Icon                   template.URL // 标签图标(内联 SVG data URI)
 	Title, Notice, Support string
 	Name                   string
 	StatusText, StatusKind string
@@ -104,7 +106,7 @@ func buildPageData(r *http.Request, subPath string, user model.User, lines []mod
 	used := user.Up + user.Down
 
 	d := pageData{
-		Lang: pageLang(r), Title: title, Notice: notice, Support: support, Name: user.Name,
+		Lang: pageLang(r), Icon: template.URL(brand.DataURI), Title: title, Notice: notice, Support: support, Name: user.Name,
 		UsedText: fmtBytesHuman(used), Unlimited: user.Volume == 0, UpdateHours: opt.UpdateHours,
 		SubLink: base, SubClash: clashURL,
 		QRClash: template.URL(base + "/qr?format=clash"), QRLink: template.URL(base + "/qr?format=link"),

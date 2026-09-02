@@ -5,15 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>m-ui</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Ctext x='16' y='22' font-size='18' font-family='system-ui' font-weight='700' text-anchor='middle' fill='%23fff'%3Em%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <!-- 登录 -->
 <div id="login" class="login-wrap" hidden>
+  <a id="login-support" class="support-float" href="support" target="_blank" rel="noopener"></a>
   <form class="login-card" id="login-form" autocomplete="on">
-    <div class="login-brand"><span class="logo">m</span><span>m-ui</span></div>
+    <div class="login-brand"><img class="logo" src="logo.svg" alt=""><span>m-ui</span></div>
     <h1 id="login-title"></h1>
     <label class="field"><span class="label" id="login-user-label"></span><input id="lg-user" autocomplete="username" required></label>
     <label class="field"><span class="label" id="login-pass-label"></span><input id="lg-pass" type="password" autocomplete="current-password" required></label>
@@ -27,7 +28,7 @@
 <div id="app" class="shell" hidden>
   <div class="backdrop" id="backdrop"></div>
   <aside class="sidebar" id="sidebar">
-    <div class="brand"><span class="logo">m</span><span class="brand-name">m-ui</span><span id="role-badge" class="badge"></span></div>
+    <div class="brand"><img class="logo" src="logo.svg" alt=""><span class="brand-name">m-ui</span><span id="role-badge" class="badge"></span></div>
     <nav id="nav"></nav>
     <div class="sidebar-foot">
       <button class="btn ghost sm" id="btn-theme" title="主题">◐</button>
@@ -42,6 +43,7 @@
       <button id="btn-menu" class="btn ghost icon" aria-label="menu">☰</button>
       <div class="topbar-title"><h1 id="page-title"></h1><p id="page-subtitle" class="subtitle"></p></div>
       <div id="topbar-right"></div>
+      <a id="btn-support" class="btn ghost sm support-btn" href="support" target="_blank" rel="noopener"></a>
     </header>
     <main id="page"></main>
   </div>

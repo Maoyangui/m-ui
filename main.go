@@ -150,7 +150,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, "重置失败:", err)
 			os.Exit(1)
 		}
-		fmt.Printf("管理员 %s 密码已更新: %s\n", *user, newPw)
+		_ = runner.SetSettings(*dbPath, map[string]string{"adminDefault": "false", "totpEnabled": "false", "totpSecret": ""})
+		fmt.Printf("管理员 %s 密码已更新: %s(两步验证已一并关闭)\n", *user, newPw)
 	case "selfsign":
 		fs := flag.NewFlagSet("selfsign", flag.ExitOnError)
 		hosts := fs.String("hosts", "", "域名或 IP,逗号分隔(必填)")

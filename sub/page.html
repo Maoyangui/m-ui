@@ -6,12 +6,13 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <title>{{.Title}} · {{.Name}}</title>
+<link rel="icon" href="{{.Icon}}" type="image/svg+xml">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--text:#1a202c;--muted:#64748b;--border:#e2e8f0;--primary:#2563eb;--ok:#16a34a;--warn:#d97706;--danger:#dc2626;--soft:#eff6ff}
 @media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--text:#e6e9ef;--muted:#8b95a5;--border:#2a313b;--primary:#3b82f6;--soft:#1e293b}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{max-width:560px;margin:0 auto;padding:1.25rem 1rem 3rem}
-.brand{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem}.logo{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:9px;background:var(--primary);color:#fff;font-weight:700;font-size:1.1rem}
+.brand{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem}.logo{display:block;width:40px;height:33px}
 .brand h1{margin:0;font-size:1.15rem}.brand .u{color:var(--muted);font-size:.85rem}
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.1rem 1.15rem;margin-bottom:.9rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}
 h2{margin:0 0 .7rem;font-size:.95rem}
@@ -37,7 +38,7 @@ button{border:1px solid var(--border);background:var(--card);color:var(--text);b
 </head>
 <body>
 <div class="wrap">
-  <div class="brand"><span class="logo">{{slice .Title 0 1}}</span><div><h1>{{.Title}}</h1><div class="u">{{.Name}}</div></div></div>
+  <div class="brand"><img class="logo" src="{{.Icon}}" alt=""><div><h1>{{.Title}}</h1><div class="u">{{.Name}}</div></div></div>
 
   <div class="card">
     <h2>{{if eq .Lang "zh"}}我的订阅{{else}}My subscription{{end}}

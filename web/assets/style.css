@@ -44,7 +44,12 @@ p { margin: 0; }
 .muted { color: var(--muted); }
 .small { font-size: .8rem; }
 .subtitle { color: var(--muted); font-size: .82rem; margin-top: .1rem; }
-.logo { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: var(--primary); color: #fff; font-weight: 700; font-size: .95rem; }
+.logo { display: block; width: 30px; height: 25px; object-fit: contain; }
+.login-brand .logo { width: 42px; height: 34px; }
+.support-btn { white-space: nowrap; color: var(--muted); }
+.support-btn:hover { color: var(--primary-text); }
+.support-float { position: fixed; top: .9rem; right: 1rem; z-index: 3; font-size: .85rem; color: var(--muted); text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: .35rem .85rem; background: var(--surface); }
+.support-float:hover { color: var(--primary-text); border-color: var(--primary); }
 
 /* ===== 登录 ===== */
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }

@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fangjunsheng555/m-ui/brand"
 	"github.com/fangjunsheng555/m-ui/certutil"
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/logger"
@@ -155,6 +156,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"nodes", s.auth(s.handleNodes))
 	mux.HandleFunc(api+"nodes/", s.auth(s.handleNodeItem))
 	mux.HandleFunc(api+"agent/", s.handleAgent) // 内部按动作分别做令牌/会话鉴权
+	mux.HandleFunc(base+"logo.svg", brand.ServeLogo)
+	mux.HandleFunc(base+"support", s.handleSupport)
+	mux.HandleFunc(base+"support/qr", s.handleSupportQR)
 	mux.HandleFunc(api+"admin/", s.auth(s.handleAdmin))
 	mux.HandleFunc(api+"v1/", s.handlePublicAPI) // 外部 API:Bearer 令牌鉴权,与会话无关
 

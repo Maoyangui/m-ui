@@ -55,6 +55,7 @@ function showLogin() {
   document.getElementById('login-pass-label').textContent = t('login.pass');
   document.getElementById('login-submit').textContent = t('login.submit');
   document.getElementById('login-code-label').textContent = t('login.code');
+  supportLink(document.getElementById('login-support'));
   document.getElementById('login-code-wrap').hidden = !needTotp;
   setTimeout(() => document.getElementById('lg-user').focus(), 50);
 }
@@ -94,12 +95,19 @@ async function enterApp() {
   route();
 }
 
+// "建议 / 支持"按钮:新标签页打开,带上当前语言
+function supportLink(a) {
+  a.textContent = '✦ ' + t('support.btn');
+  a.href = 'support?lang=' + getLang();
+}
+
 // ---- 壳:导航、角色、主题、语言 ----
 function renderChrome() {
   document.getElementById('nav').innerHTML = navItems.map(([p, ic]) =>
     `<a href="#/${p}" data-page="${p}"><span class="ic">${ic}</span>${t('nav.' + p)}</a>`).join('');
   document.getElementById('modal-cancel').textContent = t('common.cancel');
   document.getElementById('btn-logout').textContent = t('common.logout');
+  supportLink(document.getElementById('btn-support'));
   const sel = document.getElementById('lang-select');
   sel.innerHTML = Object.entries(langs).map(([k, v]) => `<option value="${k}" ${k === getLang() ? 'selected' : ''}>${v}</option>`).join('');
   renderRole();

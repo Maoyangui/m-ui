@@ -218,8 +218,8 @@ func runMenu() {
 				fmt.Println(colorRed+"  失败:", err, colorReset)
 				break
 			}
-			_ = runner.SetSettings(dbPath, map[string]string{"adminDefault": "false"})
-			fmt.Println(colorGreen+"  管理员 admin 新密码: "+colorBold+newPw+colorReset, colorGray+"(运行中的面板立即生效)"+colorReset)
+			_ = runner.SetSettings(dbPath, map[string]string{"adminDefault": "false", "totpEnabled": "false", "totpSecret": ""})
+			fmt.Println(colorGreen+"  管理员 admin 新密码: "+colorBold+newPw+colorReset, colorGray+"(运行中的面板立即生效;两步验证已一并关闭)"+colorReset)
 		case "6":
 			s, _ := settingsOf(dbPath)
 			kv := map[string]string{}
