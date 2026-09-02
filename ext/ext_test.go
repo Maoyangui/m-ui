@@ -37,7 +37,7 @@ func TestParseLinksPlainAndBase64AndYAML(t *testing.T) {
 
 	yamlDoc := "port: 7890\nproxies:\n  - name: 外部A\n    type: ss\n    server: 1.1.1.1\n    port: 8388\n    cipher: aes-128-gcm\n    password: x\n  - name: 外部B\n    type: trojan\n    server: 2.2.2.2\n    port: 443\n    password: y\n    sni: t.example.com\nproxy-groups: []\n"
 	it3 := Parse(yamlDoc)
-	if len(it3.Clash) != 2 || it3.Clash[1]["sni"] != "t.example.com" || len(it3.Links) != 0 {
+	if len(it3.Clash) != 2 || it3.Clash[1]["sni"] != "t.example.com" || len(it3.Links) != 2 {
 		t.Fatalf("YAML 应解析 2 个 clash 代理: %+v", it3)
 	}
 

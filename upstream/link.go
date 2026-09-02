@@ -37,6 +37,8 @@ func ParseLink(raw string) (*Parsed, error) {
 		return parseTuic(u)
 	case "hysteria2", "hy2":
 		return parseHysteria2(u)
+	case "anytls":
+		return parseAnytls(u)
 	case "ss":
 		return parseShadowsocks(u)
 	case "socks5", "socks", "socks5h":
@@ -48,7 +50,7 @@ func ParseLink(raw string) (*Parsed, error) {
 	case "vmess":
 		return parseVmess(raw)
 	}
-	return nil, fmt.Errorf("不支持的链接类型: %s://(支持 vless/vmess/trojan/tuic/hysteria2/ss/socks5)", u.Scheme)
+	return nil, fmt.Errorf("不支持的链接类型: %s://(支持 vless/vmess/trojan/tuic/hysteria2/anytls/ss/socks5)", u.Scheme)
 }
 
 // OptionsJSON 把 Options 编码为落库的 JSON。
@@ -181,6 +183,29 @@ func parseHysteria2(u *url.URL) (*Parsed, error) {
 		opts["server_ports"] = strings.Split(strings.ReplaceAll(mport, "-", ":"), ",")
 	}
 	return &Parsed{Type: "hysteria2", Name: tagOf(u, host), Options: opts}, nil
+}
+
+// anytls://password@host:port?sni=..&insecure=1#name
+func parseAnytls(u *url.URL) (*Parsed, error) {
+	host, port, err := hostPort(u, 443)
+	if err != nil {
+		return nil, err
+	}
+	password := ""
+	if u.User != nil {
+		password = u.User.Username()
+	}
+	if password == "" {
+		return nil, errors.New("anytls 链接缺少密码")
+	}
+	q := u.Query()
+	opts := map[string]interface{}{
+		"server":      host,
+		"server_port": port,
+		"password":    password,
+		"tls":         tlsBlock(q, host, ""),
+	}
+	return &Parsed{Type: "anytls", Name: tagOf(u, host), Options: opts}, nil
 }
 
 // ss://base64(method:password)@host:port#name  或  ss://method:password@host:port#name

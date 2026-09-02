@@ -67,7 +67,12 @@ func Parse(content string) Items {
 		if yaml.Unmarshal([]byte(text), &doc) == nil {
 			for _, p := range doc.Proxies {
 				if name, _ := p["name"].(string); name != "" {
-					it.Clash = append(it.Clash, normalizeYAML(p))
+					np := normalizeYAML(p)
+					it.Clash = append(it.Clash, np)
+					// clash YAML 里的节点也转成分享链接,链接订阅(小火箭 / nextin 等)才看得到
+					if link, ok := ClashToLink(np); ok {
+						it.Links = append(it.Links, link)
+					}
 				}
 			}
 		}
