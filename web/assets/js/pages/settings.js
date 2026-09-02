@@ -13,12 +13,12 @@ const defaults = {
 };
 
 const groups = () => [
-  { id: 'panel', title: t('set.panel'), fields: [
+  { id: 'panel', title: t('set.panel'), restart: true, fields: [
     ['webDomain', t('set.webDomain'), 'text', t('set.webDomainHelp')],
     ['webListen', t('set.listen'), 'text'], ['webPort', t('set.port'), 'number'], ['webPath', t('set.path'), 'text'],
     ['webCertFile', t('set.cert'), 'text'], ['webKeyFile', t('set.key'), 'text'],
   ]},
-  { id: 'sub', title: t('set.sub'), fields: [
+  { id: 'sub', title: t('set.sub'), restart: true, fields: [
     ['subListen', t('set.listen'), 'text'], ['subPort', t('set.port'), 'number'], ['subPath', t('set.path'), 'text'],
     ['subCertFile', t('set.cert'), 'text'], ['subKeyFile', t('set.key'), 'text'],
     ['subProfileTitle', t('set.subTitle'), 'text'], ['subUpdates', t('set.subUpdates'), 'number'],
@@ -64,7 +64,7 @@ export async function render(el) {
     </section>
     ${groups().map(g => `
       <section class="card">
-        <div class="card-head"><h2>${esc(g.title)}</h2><div class="row">${g.test ? `<button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button>` : ''}<button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div></div>
+        <div class="card-head"><h2>${esc(g.title)}${g.restart ? ` <span class="badge warn" title="${t('set.restartHint')}">${t('set.needRestart')}</span>` : ''}</h2><div class="row">${g.test ? `<button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button>` : ''}<button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div></div>
         <div class="form-grid">${g.fields.map(([k, label, type, help, options]) =>
           type === 'bool' || type === 'boolOn'
             ? check('set-' + k, label, s[k] === undefined || s[k] === '' ? (k === 'subPageEnabled' || type === 'boolOn') : String(s[k]).toLowerCase() === 'true', help)
@@ -84,8 +84,14 @@ export async function render(el) {
       <div class="row" style="margin-top:.7rem"><button class="btn" data-act="set.password">${t('set.updateAdmin')}</button></div>
     </section>
     <section class="card">
-      <div class="card-head"><h2>${t('set.about')}</h2></div>
-      <dl class="kv"><dt>${t('set.version')}</dt><dd class="mono">${esc(state.status.version || '')}</dd><dt>sing-box</dt><dd class="mono">1.14</dd><dt>License</dt><dd>GPL-3.0</dd></dl>
+      <div class="card-head"><h2>${t('set.about')}</h2><button class="btn sm danger" data-act="set.restart">${t('set.restart')}</button></div>
+      <dl class="kv">
+        <dt>${t('set.version')}</dt><dd class="mono">${esc(state.status.version || '')}</dd>
+        <dt>sing-box</dt><dd class="mono">1.14</dd>
+        <dt>${t('set.panelUrl')}</dt><dd class="mono">${esc((state.status.panelTLS ? 'https' : 'http') + '://' + (s.webDomain || '<IP>') + ':' + (state.status.webPort || '') + (state.status.webPath || '/'))}</dd>
+        <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + (s.webDomain || '<IP>') + ':' + (state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('user.f.name') + '>?format=clash')}</dd>
+        <dt>License</dt><dd>GPL-3.0 · <a href="https://github.com/fangjunsheng555/m-ui" target="_blank" rel="noopener">GitHub</a></dd>
+      </dl>
       <p class="hint">${t('set.restartNote')}</p>
     </section>`;
   document.getElementById('set-nodeMode').addEventListener('change', e => {
@@ -126,6 +132,17 @@ registerActions({
     if (toNode !== cur && !await confirm(toNode ? t('set.roleToNode') : t('set.roleToMaster'), { danger: true })) return;
     try { await post('settings', { nodeMode: String(toNode) }); await load('settings', 'status'); toast(t('set.saved'), 'ok'); location.reload(); }
     catch (e) { toast(e.message, 'err'); }
+  },
+  'set.restart': async () => {
+    if (!await confirm(t('bk.restartConfirm'), { danger: true })) return;
+    await post('backup/restart').catch(() => {});
+    toast(t('bk.restarting'), 'ok');
+    const start = Date.now();
+    const poll = async () => {
+      if (Date.now() - start > 60000) { toast(t('bk.restartTimeout'), 'err'); return; }
+      try { await fetch('./api/status', { cache: 'no-store' }); location.reload(); } catch { setTimeout(poll, 2000); }
+    };
+    setTimeout(poll, 3000);
   },
   'set.copyToken': () => copy(document.getElementById('pair-token').textContent),
   'set.rotateToken': async () => {

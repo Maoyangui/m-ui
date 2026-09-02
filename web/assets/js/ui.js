@@ -23,15 +23,15 @@ export function fmtDay(ts) {
 export function fmtRelative(ts) {
   if (!ts) return '—';
   const d = Math.floor(Date.now() / 1000 - ts);
-  if (d < 60) return '刚刚';
-  if (d < 3600) return Math.floor(d / 60) + ' 分钟前';
-  if (d < 86400) return Math.floor(d / 3600) + ' 小时前';
-  return Math.floor(d / 86400) + ' 天前';
+  if (d < 60) return t('time.justNow');
+  if (d < 3600) return t('time.minAgo', { n: Math.floor(d / 60) });
+  if (d < 86400) return t('time.hourAgo', { n: Math.floor(d / 3600) });
+  return t('time.dayAgo', { n: Math.floor(d / 86400) });
 }
 export function fmtDuration(sec) {
   sec = Number(sec) || 0;
   const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
-  return (d ? d + '天 ' : '') + (h ? h + '小时 ' : '') + m + '分';
+  return (d ? d + t('time.d') + ' ' : '') + (h ? h + t('time.h') + ' ' : '') + m + t('time.m');
 }
 export function daysLeft(expiry) { return Math.ceil((expiry - Date.now() / 1000) / 86400); }
 

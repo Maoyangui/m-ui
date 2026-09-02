@@ -128,9 +128,21 @@ document.getElementById('modal-cancel').addEventListener('click', cancelModal);
 modal.addEventListener('click', e => { if (e.target === modal) cancelModal(); });
 document.getElementById('drawer-close').addEventListener('click', closeDrawer);
 document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return;
-  if (!modal.hidden) cancelModal();
-  else if (drawerOpen()) closeDrawer();
+  // Esc 关闭弹窗/抽屉;Ctrl/⌘+Enter 提交弹窗;"/" 聚焦当前页搜索框
+  if (e.key === 'Escape') {
+    if (!modal.hidden) cancelModal();
+    else if (drawerOpen()) closeDrawer();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !modal.hidden) {
+    const save = document.getElementById('modal-save');
+    if (!save.hidden && !save.disabled) save.click();
+    return;
+  }
+  if (e.key === '/' && modal.hidden && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) {
+    const search = document.querySelector('#page input[type=search]');
+    if (search) { e.preventDefault(); search.focus(); search.select(); }
+  }
 });
 // 点击菜单外关闭 <details class="menu">
 document.addEventListener('click', e => {

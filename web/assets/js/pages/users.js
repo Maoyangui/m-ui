@@ -6,8 +6,13 @@ import { areaChart } from '../chart.js';
 
 export const title = () => t('user.title');
 export const subtitle = () => t('user.subtitle');
-let query = '', filter = 'all', drawerUser = null;
+let query = '', filter = 'all', drawerUser = null, sortKey = 'id', sortDir = 1;
 const selected = new Set();
+const SORTS = {
+  id: u => u.id, name: u => u.name.toLowerCase(), usage: u => (u.up || 0) + (u.down || 0),
+  expiry: u => u.expiry || Number.MAX_SAFE_INTEGER, devices: u => (u.onlineIps || []).length, status: u => (u.enabled ? 0 : 1),
+};
+const th = (key, label) => `<th class="sortable ${sortKey === key ? 'sorted' : ''}" data-act="user.sort" data-id="${key}">${label}${sortKey === key ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
 
 const now = () => Math.floor(Date.now() / 1000);
 const isExpired = u => u.expiry > 0 && u.expiry < now();
@@ -38,7 +43,7 @@ export async function render(el) {
       <button class="btn sm ghost" data-act="user.clearSel">${t('common.cancel')}</button>
     </div>
     <div class="table-wrap"><table class="grid">
-      <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sel-all"></th><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('user.usage')}</th><th>${t('user.expiry')}</th><th>${t('user.devices')}</th><th>${t('user.speed')}</th><th></th></tr></thead>
+      <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sel-all"></th>${th('name', t('common.name'))}${th('status', t('common.status'))}${th('usage', t('user.usage'))}${th('expiry', t('user.expiry'))}${th('devices', t('user.devices'))}<th>${t('user.speed')}</th><th></th></tr></thead>
       <tbody id="users-body"></tbody>
     </table></div>`;
   document.getElementById('user-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
@@ -64,7 +69,9 @@ function expiryCell(u) {
 }
 function visibleRows() {
   let rows = state.users.filter(u => matches(query, u.name, u.remark, u.desc));
-  return rows.filter(u => ({ all: true, enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, expired: isExpired(u), over: isOver(u) })[filter]);
+  rows = rows.filter(u => ({ all: true, enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, expired: isExpired(u), over: isOver(u) })[filter]);
+  const key = SORTS[sortKey] || SORTS.id;
+  return rows.slice().sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * sortDir; });
 }
 
 function renderRows() {
@@ -268,6 +275,14 @@ async function fullUpdate(u, patch) {
 
 registerActions({
   'user.filter': id => { filter = id; document.querySelectorAll('#user-filter button').forEach(b => b.classList.toggle('active', b.dataset.id === id)); renderRows(); },
+  'user.sort': id => {
+    if (sortKey === id) sortDir = -sortDir; else { sortKey = id; sortDir = 1; }
+    document.querySelectorAll('th.sortable').forEach(h => {
+      h.classList.toggle('sorted', h.dataset.id === sortKey);
+      h.innerHTML = h.innerHTML.replace(/ [▲▼]$/, '') + (h.dataset.id === sortKey ? (sortDir > 0 ? ' ▲' : ' ▼') : '');
+    });
+    renderRows();
+  },
   'user.add': () => editUser(null),
   'user.edit': id => editUser(Number(id)),
   'user.detail': id => showDetail(Number(id)),

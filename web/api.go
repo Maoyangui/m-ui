@@ -93,6 +93,23 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"version":       Version,
 		"onlineUsers":   len(s.run.Onlines().Users),
 	}
+	// 快速开始清单用
+	var nodeCount, planCount int64
+	s.db.Model(&model.Node{}).Count(&nodeCount)
+	s.db.Model(&model.Plan{}).Count(&planCount)
+	ci := s.run.CertInfo()
+	status["nodes"] = nodeCount
+	status["plans"] = planCount
+	status["certExists"] = ci.Exists
+	status["certSelfSigned"] = ci.SelfSigned
+	status["certDaysLeft"] = ci.DaysLeft
+	status["tgEnabled"] = s.run.Notifier().Enabled()
+	status["panelTLS"] = s.setting("webCertFile") != ""
+	status["subTLS"] = s.setting("subCertFile") != ""
+	status["subPort"] = s.settingInt("subPort", 2056)
+	status["subPath"] = s.setting("subPath")
+	status["webPort"] = s.settingInt("webPort", 2053)
+	status["webPath"] = s.basePath()
 	if pct, err := cpu.Percent(0, false); err == nil && len(pct) > 0 {
 		status["cpu"] = pct[0]
 	}

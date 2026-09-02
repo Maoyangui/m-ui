@@ -177,6 +177,12 @@ const zh = {
   'cert.selfSignedNote': '当前是自签证书:订阅已自动带"允许不安全"(insecure / skip-cert-verify),客户端可直接导入;有域名后建议签发正式证书。',
   'ops.tuneHelp': '默认值适合大多数 VPS;可按机器规格修改 swap 大小、句柄上限与内核参数,参数会保存供下次使用。',
   'ops.current': '当前', 'ops.restoreDefault': '恢复默认',
+  'time.justNow': '刚刚', 'time.minAgo': '{n} 分钟前', 'time.hourAgo': '{n} 小时前', 'time.dayAgo': '{n} 天前', 'time.d': '天', 'time.h': '小时', 'time.m': '分',
+  'qs.title': '快速开始', 'qs.help': '按顺序完成下面几步即可上线;可选项按需配置。', 'qs.hide': '不再显示', 'qs.optional': '可选',
+  'qs.domain': '设置面板域名(订阅与节点使用)', 'qs.cert': '签发证书(或无域名时生成自签)', 'qs.certSelf': '当前为自签证书,有域名后签发正式证书',
+  'qs.lines': '创建线路(入口协议 + 端口 → 上游)', 'qs.users': '创建用户并分配线路,把订阅链接发给用户',
+  'qs.upstreams': '添加上游落地(WARP / 中转节点)', 'qs.telegram': '配置 Telegram 通知', 'qs.nodes': '接入副服务器(双入口自动选路)', 'qs.plans': '创建套餐模板(建号/续费更快)',
+  'set.needRestart': '改动需重启', 'set.restartHint': '端口、监听地址与证书路径的改动在重启 m-ui 后生效', 'set.restart': '重启 m-ui', 'set.panelUrl': '面板地址', 'set.subUrl': '订阅地址',
 };
 
 const en = {
@@ -357,6 +363,12 @@ const en = {
   'cert.selfSignedNote': 'This is a self-signed certificate: subscriptions automatically include "allow insecure" (insecure / skip-cert-verify), so clients can import directly. Issue a real certificate once you have a domain.',
   'ops.tuneHelp': 'Defaults suit most VPS. Adjust swap size, file limit and kernel parameters to the machine; values are saved for next time.',
   'ops.current': 'current', 'ops.restoreDefault': 'Restore defaults',
+  'time.justNow': 'just now', 'time.minAgo': '{n} min ago', 'time.hourAgo': '{n} h ago', 'time.dayAgo': '{n} d ago', 'time.d': 'd', 'time.h': 'h', 'time.m': 'm',
+  'qs.title': 'Quick start', 'qs.help': 'Complete these steps in order to go live; optional items as needed.', 'qs.hide': 'Hide', 'qs.optional': 'optional',
+  'qs.domain': 'Set the panel domain (used by subscriptions and nodes)', 'qs.cert': 'Issue a certificate (or self-sign without a domain)', 'qs.certSelf': 'Self-signed certificate in use; issue a real one once you have a domain',
+  'qs.lines': 'Create lines (inbound protocol + port → upstream)', 'qs.users': 'Create users, assign lines, send them the subscription link',
+  'qs.upstreams': 'Add upstreams (WARP / relay nodes)', 'qs.telegram': 'Configure Telegram notifications', 'qs.nodes': 'Attach a secondary server (dual-entry auto routing)', 'qs.plans': 'Create plan templates (faster onboarding/renewal)',
+  'set.needRestart': 'restart to apply', 'set.restartHint': 'Port, listen address and certificate path changes take effect after restarting m-ui', 'set.restart': 'Restart m-ui', 'set.panelUrl': 'Panel URL', 'set.subUrl': 'Subscription URL',
 };
 
 const dicts = { zh, en };

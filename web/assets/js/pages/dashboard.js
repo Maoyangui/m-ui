@@ -7,8 +7,34 @@ import { areaChart } from '../chart.js';
 export const title = () => t('nav.dashboard');
 let range = 24, logLevel = 'info';
 
+// 快速开始清单:关键步骤未完成时显示,可关闭(记在浏览器里)
+function quickStart() {
+  const s = state.status;
+  if (s.role === 'node') return '';
+  let hidden = false;
+  try { hidden = localStorage.getItem('m-ui.hideQuickStart') === '1'; } catch {}
+  const items = [
+    { ok: !!s.domain, page: 'settings', text: t('qs.domain'), opt: false },
+    { ok: s.certExists && !s.certSelfSigned, page: 'cert', text: s.certExists && s.certSelfSigned ? t('qs.certSelf') : t('qs.cert'), opt: false },
+    { ok: (s.lines || 0) > 0, page: 'lines', text: t('qs.lines'), opt: false },
+    { ok: (s.users || 0) > 0, page: 'users', text: t('qs.users'), opt: false },
+    { ok: (s.upstreams || 0) > 0, page: 'upstreams', text: t('qs.upstreams'), opt: true },
+    { ok: !!s.tgEnabled, page: 'settings', text: t('qs.telegram'), opt: true },
+    { ok: (s.nodes || 0) > 1, page: 'nodes', text: t('qs.nodes'), opt: true },
+    { ok: (s.plans || 0) > 0, page: 'plans', text: t('qs.plans'), opt: true },
+  ];
+  const requiredDone = items.filter(i => !i.opt).every(i => i.ok);
+  if (hidden || (requiredDone && items.every(i => i.ok))) return '';
+  return `<section class="card quickstart">
+    <div class="card-head"><h2>${t('qs.title')}</h2><button class="btn ghost sm" data-act="dash.hideQs" title="${t('qs.hide')}">✕</button></div>
+    <p class="hint">${t('qs.help')}</p>
+    <ol class="qs-list">${items.map(i => `<li class="${i.ok ? 'done' : ''}"><span class="qs-mark">${i.ok ? '✓' : '○'}</span><a href="#/${i.page}">${esc(i.text)}</a>${i.opt ? `<span class="badge">${t('qs.optional')}</span>` : ''}</li>`).join('')}</ol>
+  </section>`;
+}
+
 export async function render(el) {
   el.innerHTML = `
+    ${quickStart()}
     <div class="stats" id="dash-stats"></div>
     <div class="grid-2">
       <section class="card">
@@ -136,6 +162,7 @@ registerActions({
     finally { btn.disabled = false; }
   },
   'dash.loglevel': async (_, sel) => { logLevel = sel.value; await renderLog(); },
+  'dash.hideQs': () => { try { localStorage.setItem('m-ui.hideQuickStart', '1'); } catch {} document.querySelector('.quickstart')?.remove(); },
   'dash.healthRun': async (_, btn) => {
     btn.disabled = true;
     try { await post('upstreams/health'); await renderHealth(); }

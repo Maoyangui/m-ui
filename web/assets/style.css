@@ -246,3 +246,15 @@ pre.log .warn { color: #fbbf24; } pre.log .error { color: #f87171; } pre.log .de
 .task { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .7rem .8rem; background: var(--surface-2); display: flex; flex-direction: column; gap: .4rem; }
 .task-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .task .row { margin-top: auto; align-items: center; gap: .4rem; }
+
+/* 快速开始 */
+.quickstart { border-color: var(--primary); }
+.qs-list { margin: .6rem 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .35rem .9rem; }
+.qs-list li { display: flex; align-items: center; gap: .5rem; padding: .3rem 0; }
+.qs-list li.done a { color: var(--muted); text-decoration: line-through; }
+.qs-mark { width: 1.3rem; height: 1.3rem; border-radius: 50%; display: inline-grid; place-items: center; font-size: .75rem; background: var(--warn-soft); color: var(--warn); font-weight: 700; }
+.qs-list li.done .qs-mark { background: var(--ok-soft); color: var(--ok); }
+/* 可排序表头 */
+.grid th.sortable { cursor: pointer; user-select: none; }
+.grid th.sortable:hover { color: var(--text); }
+.grid th.sorted { color: var(--primary-text); }
