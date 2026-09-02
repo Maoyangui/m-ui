@@ -25,7 +25,7 @@ func init() {
 	})
 }
 
-var version = "0.1.0"
+var version = "0.1.1"
 
 func usage() {
 	fmt.Println("m-ui", version)
@@ -75,11 +75,33 @@ func main() {
 		order := fs.String("order", "", "线路排序文件:每行一个线路名,可选")
 		title := fs.String("title", "", "订阅 Profile-Title,可选")
 		force := fs.Bool("force", false, "目标已存在时覆盖")
+		usersOnly := fs.Bool("users-only", false, "只把旧库的用户并入已有 m-ui 库(名称/启停/配额/到期/用量),线路与设置不动")
+		noAssign := fs.Bool("no-assign", false, "users-only 时不给新用户分配现有线路")
 		fs.Parse(os.Args[2:])
 		if *from == "" {
 			fmt.Fprintln(os.Stderr, "缺少 -from 参数")
 			fs.Usage()
 			os.Exit(2)
+		}
+		if *usersOnly {
+			db, err := database.Open(*to)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "打开 m-ui 数据库失败:", err)
+				os.Exit(1)
+			}
+			sum, err := importer.ImportUsersOnly(*from, db, !*noAssign)
+			database.Close(db)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "导入失败:", err)
+				os.Exit(1)
+			}
+			fmt.Printf("用户导入完成:新增 %d,更新 %d,分配线路 %d", sum.Created, sum.Updated, sum.Assigned)
+			if len(sum.Skipped) > 0 {
+				fmt.Printf(",跳过 %v", sum.Skipped)
+			}
+			fmt.Println()
+			fmt.Println("m-ui 正在运行时请执行 systemctl restart m-ui,让数据面加载新用户")
+			return
 		}
 		if err := importer.Run(*from, *to, *order, *title, *force); err != nil {
 			fmt.Fprintln(os.Stderr, "导入失败:", err)

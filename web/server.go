@@ -124,13 +124,14 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"login", s.handleLogin)
 	mux.HandleFunc(api+"logout", s.handleLogout)
 	mux.HandleFunc(api+"status", s.auth(s.handleStatus))
-	mux.HandleFunc(api+"lines", s.auth(s.handleLines))
-	mux.HandleFunc(api+"lines/", s.auth(s.handleLineItem))
-	mux.HandleFunc(api+"lines/sort", s.auth(s.handleLineSort))
-	mux.HandleFunc(api+"upstreams", s.auth(s.handleUpstreams))
-	mux.HandleFunc(api+"upstreams/", s.auth(s.handleUpstreamItem))
-	mux.HandleFunc(api+"users", s.auth(s.handleUsers))
-	mux.HandleFunc(api+"users/", s.auth(s.handleUserItem))
+	mux.HandleFunc(api+"lines", s.auth(s.masterOnly(s.handleLines)))
+	mux.HandleFunc(api+"lines/", s.auth(s.masterOnly(s.handleLineItem)))
+	mux.HandleFunc(api+"lines/sort", s.auth(s.masterOnly(s.handleLineSort)))
+	mux.HandleFunc(api+"upstreams", s.auth(s.masterOnly(s.handleUpstreams)))
+	mux.HandleFunc(api+"upstreams/", s.auth(s.masterOnly(s.handleUpstreamItem)))
+	mux.HandleFunc(api+"users", s.auth(s.masterOnly(s.handleUsers)))
+	mux.HandleFunc(api+"users/", s.auth(s.masterOnly(s.handleUserItem)))
+	mux.HandleFunc(api+"users/import", s.auth(s.masterOnly(s.handleUsersImport)))
 	mux.HandleFunc(api+"settings", s.auth(s.handleSettings))
 	mux.HandleFunc(api+"sublogs", s.auth(s.handleSubLogs))
 	mux.HandleFunc(api+"password", s.auth(s.handlePassword))
@@ -141,8 +142,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"logs", s.auth(s.handleLogs))
 	mux.HandleFunc(api+"audit", s.auth(s.handleAudit))
 	mux.HandleFunc(api+"keygen", s.auth(s.handleKeygen))
-	mux.HandleFunc(api+"plans", s.auth(s.handlePlans))
-	mux.HandleFunc(api+"plans/", s.auth(s.handlePlanItem))
+	mux.HandleFunc(api+"plans", s.auth(s.masterOnly(s.handlePlans)))
+	mux.HandleFunc(api+"plans/", s.auth(s.masterOnly(s.handlePlanItem)))
 	mux.HandleFunc(api+"notify/test", s.auth(s.handleNotifyTest))
 	mux.HandleFunc(api+"cert", s.auth(s.handleCert))
 	mux.HandleFunc(api+"cert/", s.auth(s.handleCertSub))
@@ -151,8 +152,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"ops", s.auth(s.handleOps))
 	mux.HandleFunc(api+"ops/", s.auth(s.handleOpsSub))
 	mux.HandleFunc(api+"conns/recent", s.auth(s.handleRecentConns))
-	mux.HandleFunc(api+"exts", s.auth(s.handleExts))
-	mux.HandleFunc(api+"exts/", s.auth(s.handleExtItem))
+	mux.HandleFunc(api+"exts", s.auth(s.masterOnly(s.handleExts)))
+	mux.HandleFunc(api+"exts/", s.auth(s.masterOnly(s.handleExtItem)))
 	mux.HandleFunc(api+"nodes", s.auth(s.handleNodes))
 	mux.HandleFunc(api+"nodes/", s.auth(s.handleNodeItem))
 	mux.HandleFunc(api+"agent/", s.handleAgent) // 内部按动作分别做令牌/会话鉴权
@@ -303,6 +304,21 @@ func sameOrigin(r *http.Request) bool {
 		}
 	}
 	return true
+}
+
+// masterOnly 副机上拒绝改动线路 / 上游 / 用户 / 套餐 / 外部节点:它们由主机下发,本机改了几秒后就会被覆盖。
+// 只读请求与副机本地动作(测上游、踢线、二维码)放行。
+func (s *Server) masterOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && s.role() == "node" {
+			p := strings.TrimSuffix(r.URL.Path, "/")
+			if !strings.HasSuffix(p, "/test") && !strings.HasSuffix(p, "/parse") && !strings.HasSuffix(p, "/kick") {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "本机是副服务器:线路、上游、用户由主机统一下发,请到主机面板修改"})
+				return
+			}
+		}
+		next(w, r)
+	}
 }
 
 // auth 包装需要登录的处理函数。

@@ -310,3 +310,11 @@ svg.chart.bars .ylab, svg.chart.bars .xlab { fill: var(--muted); font-size: 11px
 .sub-title { font-size: .9rem; margin: 1rem 0 .4rem; }
 pre.code { white-space: pre-wrap; word-break: break-all; }
 table.api-doc td.mono { font-family: var(--mono); font-size: .78rem; white-space: nowrap; }
+
+/* 副机只读:由主机下发的页面隐藏增删改入口 */
+.alert-bar.info { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-text); margin: 0 0 .9rem; }
+.node-readonly [data-act$=".add"], .node-readonly [data-act$=".edit"], .node-readonly [data-act$=".del"], .node-readonly [data-act$=".delete"],
+.node-readonly [data-act$=".bulk"], .node-readonly [data-act$=".batch"], .node-readonly [data-act$=".preset"], .node-readonly [data-act$=".plan"],
+.node-readonly [data-act$=".reset"], .node-readonly [data-act$=".extend"], .node-readonly [data-act$=".renew"], .node-readonly [data-act$=".import"],
+.node-readonly [data-act$=".toggle"], .node-readonly [data-act$=".clone"], .node-readonly [data-act$=".sort"], .node-readonly [data-act$=".refresh"],
+.node-readonly .batch-bar, .node-readonly details.menu, .node-readonly input[type=checkbox].sel { display: none !important; }

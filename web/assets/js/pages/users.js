@@ -1,5 +1,5 @@
 import { state, load } from '../app.js';
-import { get, post, put, del, qrUrl } from '../api.js';
+import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
@@ -27,6 +27,7 @@ export async function render(el) {
       <div class="seg" id="user-filter">${['all', 'enabled', 'disabled', 'expired', 'over'].map(f => `<button data-act="user.filter" data-id="${f}" class="${f === filter ? 'active' : ''}">${t('user.filter.' + f)}</button>`).join('')}</div>
       <span class="muted small" id="user-count"></span>
       <span class="grow"></span>
+      <button class="btn" data-act="user.import">${t('user.import')}</button>
       <button class="btn" data-act="user.export">${t('user.batch.export')}</button>
       <button class="btn" data-act="user.bulk">${t('user.bulk')}</button>
       <button class="btn primary" data-act="user.add">${t('user.add')}</button>
@@ -314,6 +315,19 @@ registerActions({
   'user.renew': id => renewDialog([Number(id)]),
   'user.bulk': () => bulkDialog(),
   'user.export': () => { window.open('./api/users/export', '_blank'); },
+  'user.import': () => {
+    openModal(t('user.importTitle'), `
+      <p class="hint">${t('user.importHelp')}</p>
+      <input type="file" id="imp-file" accept=".db,.sqlite,.sqlite3" style="margin:.6rem 0">
+      ${check('imp-assign', t('user.importAssign'), true)}`, async () => {
+      const f = document.getElementById('imp-file').files[0];
+      if (!f) throw new Error(t('user.importPick'));
+      const r = await upload('users/import', f, { assign: String(fchk('imp-assign')) });
+      await load('users', 'status');
+      renderRows();
+      toast(t('user.importDone', { c: r.created, u: r.updated, a: r.assigned }), 'ok');
+    }, { saveText: t('user.importGo') });
+  },
   'user.sel': (id, cb) => { cb.checked ? selected.add(Number(id)) : selected.delete(Number(id)); renderRows(); },
   'user.clearSel': () => { selected.clear(); renderRows(); },
   'user.batch': async action => {

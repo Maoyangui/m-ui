@@ -5,7 +5,8 @@ import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActio
 
 export const title = () => t('node.title');
 export const subtitle = () => t('node.subtitle');
-let data = { nodes: [], revision: '' };
+let data = { nodes: [], revision: '', role: 'master', masterId: 0, appliedAt: '' };
+const isNodeView = () => data.role === 'node';
 
 export async function render(el) {
   data = await get('nodes');
@@ -13,9 +14,9 @@ export async function render(el) {
     <div class="toolbar">
       <span class="muted small">${t('node.revision')} <code>${esc(data.revision || '—')}</code></span>
       <span class="grow"></span>
-      <button class="btn primary" data-act="node.add">${t('node.add')}</button>
+      ${isNodeView() ? '' : `<button class="btn primary" data-act="node.add">${t('node.add')}</button>`}
     </div>
-    <p class="hint" style="margin-bottom:.8rem">${t('node.howto')}</p>
+    <p class="hint" style="margin-bottom:.8rem">${isNodeView() ? t('node.nodeView') : t('node.howto')}</p>
     <div class="table-wrap"><table class="grid">
       <thead><tr><th>${t('common.name')}</th><th>${t('node.domain')}</th><th>${t('node.ip')}</th><th>${t('common.status')}</th><th>${t('node.sync')}</th><th>${t('node.core')}</th><th>${t('node.online')}</th><th></th></tr></thead>
       <tbody id="nodes-body"></tbody>
@@ -25,13 +26,43 @@ export async function render(el) {
 
 export async function tick() { if (!document.getElementById('nodes-body')) return; data = await get('nodes'); renderRows(); }
 
+// 副机视角:自己是"本机",主机那行标"主机 · 最近同步",其它副机标"主机管理";副机不探测别的机器
 function statusCell(n) {
   if (n.isLocal) return badge(t('node.local'), 'primary');
+  if (isNodeView()) {
+    if (n.id === data.masterId) return `${badge(t('role.master'), 'primary')}${data.appliedAt ? ` <span class="muted small">${t('node.lastSync')} ${fmtRelative(Number(data.appliedAt))}</span>` : ''}`;
+    return badge(t('node.byMaster'));
+  }
   if (!n.enabled) return badge(t('common.disabled'));
   const s = n.status;
   if (!s) return badge(t('node.pending'), 'warn');
   if (s.ok) return `${badge(t('common.online'), 'ok')} <span class="muted small">${s.version ? 'v' + esc(s.version) : ''} ${s.hostname ? esc(s.hostname) : ''}</span>`;
   return `${badge(t('common.offline'), 'danger')}<div class="sub-cell" title="${esc(s.error || '')}">${esc((s.error || '').slice(0, 70))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
+}
+
+function syncCell(n) {
+  if (n.isLocal) return '—';
+  if (isNodeView()) return n.id === data.masterId && data.appliedAt ? badge(t('node.synced'), 'ok') : '—';
+  const s = n.status || {};
+  if (!s.ok) return '—';
+  return (s.synced ? badge(t('node.synced'), 'ok') : badge(t('node.unsynced'), 'warn')) + (s.lastPush ? ` <span class="muted small">${fmtRelative(s.lastPush)}</span>` : '');
+}
+
+function coreCell(n) {
+  if (n.isLocal) return badge(state.status.coreRunning ? t('dash.running') : t('dash.stopped'), state.status.coreRunning ? 'ok' : 'danger');
+  const s = n.status || {};
+  if (!s.ok) return '—';
+  return badge(s.coreRunning ? t('dash.running') : t('dash.stopped'), s.coreRunning ? 'ok' : 'danger')
+    + (s.uptime ? ` <span class="muted small">${fmtDuration(s.uptime)}</span>` : '')
+    + (s.certDays !== undefined ? ` <span class="muted small" title="${t('cert.daysLeft')}">🔒 ${s.certDays}d</span>` : '');
+}
+
+function actionsCell(n) {
+  if (isNodeView()) return '';
+  return `<button class="btn sm" data-act="node.test" data-id="${n.id}">${t('common.test')}</button>
+        ${n.isLocal ? '' : `<button class="btn sm" data-act="node.push" data-id="${n.id}">${t('node.push')}</button>`}
+        <button class="btn sm" data-act="node.edit" data-id="${n.id}">${t('common.edit')}</button>
+        ${n.isLocal ? '' : `<button class="btn sm danger" data-act="node.del" data-id="${n.id}">${t('common.delete')}</button>`}`;
 }
 
 function renderRows() {
@@ -41,19 +72,14 @@ function renderRows() {
   body.innerHTML = data.nodes.map(n => {
     const s = n.status || {};
     return `<tr>
-      <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl ? `<div class="sub-cell mono">${esc(n.apiUrl)}</div>` : ''}</td>
+      <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl && !isNodeView() ? `<div class="sub-cell mono">${esc(n.apiUrl)}</div>` : ''}</td>
       <td class="mono">${esc(n.domain || (n.isLocal ? state.settings.webDomain || '' : ''))}</td>
       <td class="mono">${esc(n.addr || n.publicIp || '—')}${n.addr ? ` <span class="muted small">${t('node.addrManual')}</span>` : ''}</td>
       <td>${statusCell(n)}</td>
-      <td>${n.isLocal ? '—' : (s.ok ? (s.synced ? badge(t('node.synced'), 'ok') : badge(t('node.unsynced'), 'warn')) + (s.lastPush ? ` <span class="muted small">${fmtRelative(s.lastPush)}</span>` : '') : '—')}</td>
-      <td>${n.isLocal ? badge(state.status.coreRunning ? t('dash.running') : t('dash.stopped'), state.status.coreRunning ? 'ok' : 'danger') : (s.ok ? badge(s.coreRunning ? t('dash.running') : t('dash.stopped'), s.coreRunning ? 'ok' : 'danger') + (s.uptime ? ` <span class="muted small">${fmtDuration(s.uptime)}</span>` : '') : '—')}${!n.isLocal && s.ok && s.certDays !== undefined ? ` <span class="muted small" title="${t('cert.daysLeft')}">🔒 ${s.certDays}d</span>` : ''}</td>
+      <td>${syncCell(n)}</td>
+      <td>${coreCell(n)}</td>
       <td class="num">${n.isLocal ? (state.status.onlineUsers ?? '—') : (s.ok ? s.onlineUsers : '—')}</td>
-      <td class="actions">
-        <button class="btn sm" data-act="node.test" data-id="${n.id}">${t('common.test')}</button>
-        ${n.isLocal ? '' : `<button class="btn sm" data-act="node.push" data-id="${n.id}">${t('node.push')}</button>`}
-        <button class="btn sm" data-act="node.edit" data-id="${n.id}">${t('common.edit')}</button>
-        ${n.isLocal ? '' : `<button class="btn sm danger" data-act="node.del" data-id="${n.id}">${t('common.delete')}</button>`}
-      </td></tr>`;
+      <td class="actions">${actionsCell(n)}</td></tr>`;
   }).join('');
 }
 
@@ -66,7 +92,7 @@ function editNode(id) {
       ${field(t('node.addr'), `<input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(n.publicIp || t('node.addrAuto'))}">`, t('node.addrHelp'))}
       ${field(t('node.ratio'), `<input id="f-ratio" type="number" min="0" max="100" step="0.1" value="${n.ratio || 1}">`, t('node.ratioHelp'))}
       ${n.isLocal ? '' : `
-      <div class="full">${field(t('node.apiUrl'), `<input id="f-api" value="${esc(n.apiUrl || '')}" placeholder="https://tw.example.com:2053/ad/">`, t('node.apiUrlHelp'))}</div>
+      <div class="full">${field(t('node.apiUrl'), `<input id="f-api" value="${esc(n.apiUrl || '')}" placeholder="https://tw.example.com:2053/app/">`, t('node.apiUrlHelp'))}</div>
       <div class="full">${field(t('node.token'), `<input id="f-token" type="password" placeholder="${n.hasToken ? t('node.tokenKeep') : ''}">`, t('node.tokenHelp'))}</div>
       ${check('f-insecure', t('node.insecure'), n.insecure !== false, t('node.insecureHelp'))}
       ${check('f-enabled', t('common.enabled'), n.enabled !== false)}`}
@@ -79,7 +105,7 @@ function editNode(id) {
       insecure: n.isLocal ? false : fchk('f-insecure'), enabled: n.isLocal ? true : fchk('f-enabled'),
     };
     if (id) await put('nodes/' + id, body); else await post('nodes', body);
-    await load('settings');
+    await load('settings', 'nodes'); // 线路编辑器里的"部署到服务器"依赖 state.nodes
     toast(t('set.saved'), 'ok');
     render(document.getElementById('page'));
   }, { wide: true });
@@ -106,7 +132,7 @@ registerActions({
   'node.del': async id => {
     const n = data.nodes.find(x => x.id === Number(id));
     if (!await confirm(t('common.deleteConfirm', { name: n.name }), { danger: true, okText: t('common.delete') })) return;
-    try { await del('nodes/' + id); render(document.getElementById('page')); toast(t('common.deleted'), 'ok'); }
+    try { await del('nodes/' + id); await load('nodes'); render(document.getElementById('page')); toast(t('common.deleted'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
 });

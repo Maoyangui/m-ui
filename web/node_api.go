@@ -36,7 +36,10 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			}
 			out = append(out, rr)
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"nodes": out, "revision": s.run.Hub().Revision()})
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"nodes": out, "revision": s.run.Hub().Revision(), "role": s.role(),
+			"masterId": s.settingInt("hubMasterId", 0), "appliedAt": s.setting("hubAppliedAt"),
+		})
 	case http.MethodPost:
 		var p nodePayload
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {

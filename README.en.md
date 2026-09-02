@@ -210,11 +210,21 @@ Run `m-ui` without arguments for the menu (Chinese):
 
 ## Migrating from an old panel
 
+Full migration (lines, upstreams, users and settings):
+
 ```bash
 bash install.sh --import /path/to/old-panel.db
 ```
 
 Inbound ports, user credentials, panel path and subscription URLs are preserved, so clients need no changes; the import report lists what was checked.
+
+Users only (lines already rebuilt on m-ui, you just want the old users' names, usage, quota and expiry): Users page → **Import from old panel**, or
+
+```bash
+m-ui import -from /path/to/old-panel.db -to /etc/m-ui/m-ui.db -users-only && systemctl restart m-ui
+```
+
+Existing names only get usage / quota / expiry / enabled updated; new users are created with their old credentials and, by default, every existing line.
 
 ## FAQ
 

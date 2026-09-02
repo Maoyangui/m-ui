@@ -208,11 +208,21 @@ m-ui version
 
 ## 从旧面板迁移
 
+整机迁移(线路、上游、用户、设置全部带过来):
+
 ```bash
 bash install.sh --import /path/to/旧面板.db
 ```
 
 导入保留全部入站端口、用户凭据、面板路径与订阅地址,客户端不用改任何东西;导入报告会列出核对结果。
+
+只搬用户(线路已在 m-ui 上重新建好,只想把老用户的名称、用量、配额、到期带过来):用户页 **从旧面板导入** 上传 .db,或
+
+```bash
+m-ui import -from /path/to/旧面板.db -to /etc/m-ui/m-ui.db -users-only && systemctl restart m-ui
+```
+
+同名用户只更新用量 / 配额 / 到期 / 启停,新用户创建并沿用旧凭据,默认分配全部现有线路。
 
 ## 常见问题
 

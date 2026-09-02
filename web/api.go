@@ -163,11 +163,15 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, out)
 	case http.MethodPost:
-		var line model.Line
-		if err := json.NewDecoder(r.Body).Decode(&line); err != nil {
+		var p struct {
+			model.Line
+			AssignAll bool `json:"assignAll"` // 新线路直接分配给全部现有用户
+		}
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			badRequest(w, err)
 			return
 		}
+		line := p.Line
 		if err := s.validateLine(&line); err != nil {
 			badRequest(w, err)
 			return
@@ -186,6 +190,15 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Create(&line).Error; err != nil {
 				return err
+			}
+			if p.AssignAll {
+				var userIds []uint
+				tx.Model(&model.User{}).Pluck("id", &userIds)
+				for _, uid := range userIds {
+					if err := tx.Create(&model.UserLine{UserId: uid, LineId: line.Id}).Error; err != nil {
+						return err
+					}
+				}
 			}
 			return validateFullConfig(tx, s.run.NodeCert())
 		})

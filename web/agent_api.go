@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -92,9 +93,12 @@ func (s *Server) selfApiURL() string {
 	}
 	host := s.setting("webDomain")
 	if host == "" {
+		host = s.run.PublicHost()
+	}
+	if host == "" {
 		host = "<本机IP>"
 	}
-	return scheme + "://" + host + ":" + s.setting("webPort") + s.basePath()
+	return fmt.Sprintf("%s://%s:%d%s", scheme, host, s.settingInt("webPort", 2053), s.basePath())
 }
 
 func (s *Server) handleAgentPing(w http.ResponseWriter, r *http.Request) {

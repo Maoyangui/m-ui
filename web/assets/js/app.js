@@ -206,6 +206,10 @@ async function route(force = false) {
   el.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
   try { await page.render(el); }
   catch (e) { if (e.status !== 401) el.innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+  // 副机上线路/上游/用户/套餐/外部节点由主机下发:只读展示,隐藏增删改按钮
+  const readOnly = state.status.role === 'node' && ['lines', 'upstreams', 'users', 'plans', 'exts'].includes(name);
+  el.classList.toggle('node-readonly', readOnly);
+  if (readOnly) el.insertAdjacentHTML('afterbegin', `<div class="alert-bar info">${t('app.nodeReadOnly')}</div>`);
 }
 window.addEventListener('hashchange', () => route());
 

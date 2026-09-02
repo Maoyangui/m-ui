@@ -130,7 +130,7 @@ func Inspect(path string) (Summary, error) {
 	for _, t := range []string{"users", "lines", "settings"} {
 		var n int64
 		if err := db.Raw("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", t).Scan(&n).Error; err != nil || n == 0 {
-			return s, fmt.Errorf("不是 m-ui 数据库:缺少 %s 表", t)
+			return s, fmt.Errorf("不是 m-ui 数据库:缺少 %s 表(旧面板库请在安装时用 --import 整机迁移,或到「用户」页「从旧面板导入」只导用户)", t)
 		}
 	}
 	db.Raw("SELECT COUNT(*) FROM users").Scan(&s.Users)

@@ -40,6 +40,7 @@ var SyncedSettings = []string{
 type Snapshot struct {
 	Revision   string            `json:"revision"`
 	SelfNodeId uint              `json:"selfNodeId"` // 接收方在 nodes 表里的 id
+	MasterId   uint              `json:"masterId"`   // 主机自己在 nodes 表里的 id
 	Nodes      []model.Node      `json:"nodes"`
 	Upstreams  []model.Upstream  `json:"upstreams"`
 	Lines      []model.Line      `json:"lines"`
@@ -58,6 +59,9 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 	}
 	for i := range s.Nodes {
 		s.Nodes[i].Token = ""
+		if s.Nodes[i].IsLocal {
+			s.MasterId = s.Nodes[i].Id
+		}
 	}
 	if err := db.Order("sort asc, id asc").Find(&s.Upstreams).Error; err != nil {
 		return s, err
@@ -209,6 +213,7 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 			upsertSetting(tx, k, v)
 		}
 		upsertSetting(tx, "hubRevision", snap.Revision)
+		upsertSetting(tx, "hubMasterId", fmt.Sprintf("%d", snap.MasterId))
 		upsertSetting(tx, "hubAppliedAt", fmt.Sprintf("%d", time.Now().Unix()))
 		return nil
 	})

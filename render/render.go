@@ -284,6 +284,12 @@ func inboundBase(line model.Line, cert NodeCert) (map[string]interface{}, error)
 	default:
 		return nil, fmt.Errorf("未知 TLS 模式 %q", tlsConf.Mode)
 	}
+	if line.Protocol == "tuic" {
+		// TUIC v5 客户端(小火箭 / nextin / sing-box)一律按 ALPN h3 握手,服务端显式声明,避免协商失败
+		if tlsMap, ok := inbound["tls"].(map[string]interface{}); ok {
+			tlsMap["alpn"] = []string{"h3"}
+		}
+	}
 
 	if spec.Transport && len(line.Transport) > 0 {
 		var tr map[string]interface{}

@@ -292,7 +292,8 @@ async function presetLine(pid) {
   editLine(null, null, l);
 }
 
-function editLine(id, cloneFrom, preset) {
+async function editLine(id, cloneFrom, preset) {
+  await load('nodes').catch(() => {}); // 服务器列表可能刚在别的页面改过,"部署到服务器"要用最新的
   const src = cloneFrom || (id ? state.lines.find(x => x.id === id) : null);
   const l = src ? { ...src } : (preset || { protocol: 'vless', enabled: true, options: {}, upstreamId: 0 });
   if (cloneFrom) { l.name = t('line.cloneOf', { name: src.name }); l.port = ''; }
@@ -304,6 +305,7 @@ function editLine(id, cloneFrom, preset) {
       ${field(t('common.port'), `<input id="f-port" type="number" min="1" max="65535" value="${l.port || ''}">`, t('line.portHelp'))}
       ${field(t('line.upstream'), `<select id="f-upstream"><option value="0">${t('line.direct')}</option>${state.upstreams.map(u => `<option value="${u.id}" ${l.upstreamId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`, t('line.upstreamHelp'))}
       ${check('f-enabled', t('common.enabled'), l.enabled !== false)}
+      ${id ? '' : check('f-assign', t('line.assignAll'), true, t('line.assignAllHelp'))}
       ${(state.nodes || []).length > 1 ? `<div class="full">${field(t('line.servers'), `<div class="check-list">${(state.nodes || []).map(n => {
         const ids = (() => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } })();
         return `<label><input type="checkbox" class="node-cb" value="${n.id}" ${!ids.length || ids.includes(n.id) ? 'checked' : ''}> ${esc(n.name)}${n.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>`;
@@ -317,8 +319,9 @@ function editLine(id, cloneFrom, preset) {
     const body = readForm(id);
     const addrs = fv('f-addrs').trim();
     if (addrs) body.addrs = JSON.parse(addrs);
+    if (!id) body.assignAll = fchk('f-assign');
     if (id) await put('lines/' + id, body); else await post('lines', body);
-    await load('lines', 'status');
+    await load('lines', 'status', 'users');
     renderRows();
     toast(id ? t('line.updated') : t('line.created'), 'ok');
   }, { wide: true });

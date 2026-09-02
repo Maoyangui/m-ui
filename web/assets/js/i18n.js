@@ -232,6 +232,12 @@ const zh = {
   'login.code': '两步验证码', 'login.codeRequired': '请输入认证器 App 显示的 6 位验证码', 'login.codeWrong': '验证码错误',
   'logs.enabled': '记录日志', 'logs.enabledHelp': '关闭后数据面与面板都不再写日志(省 CPU/内存),"最近入站连接"也没有数据;排障时再打开。切换会重载数据面,连接短暂中断。',
   'logs.clear': '清空', 'logs.clearConfirm': '清空当前列表的全部日志?', 'logs.cleared': '已清空', 'logs.toggled': '日志开关已保存',
+  'node.nodeView': '本机是副服务器:服务器列表由主机下发,这里只读。要增删服务器或改倍率,请到主机的服务器页操作。', 'node.byMaster': '主机管理', 'node.lastSync': '最近同步',
+  'line.assignAll': '分配给全部现有用户', 'line.assignAllHelp': '不勾选则新线路暂不属于任何用户,需要在用户里逐个勾选',
+  'user.import': '从旧面板导入', 'user.importTitle': '从旧面板数据库导入用户', 'user.importGo': '开始导入', 'user.importPick': '请选择数据库文件',
+  'user.importHelp': '上传旧面板的 .db 文件,只导入用户:同名用户更新用量、配额、到期与启停(保留本站的凭据与线路),其余新建并沿用旧凭据。线路、上游、设置一律不动。',
+  'user.importAssign': '给新建的用户分配全部现有线路', 'user.importDone': '导入完成:新增 {c},更新 {u},分配线路 {a}',
+  'app.nodeReadOnly': '本机是副服务器:这里的内容由主机统一下发、只读。请到主机面板修改。',
 };
 
 const en = {
@@ -467,6 +473,12 @@ const en = {
   'login.code': '2FA code', 'login.codeRequired': 'Enter the 6-digit code from your authenticator app', 'login.codeWrong': 'Wrong code',
   'logs.enabled': 'Logging', 'logs.enabledHelp': 'When off, neither the data plane nor the panel writes logs (saves CPU/memory) and "Recent inbound connections" stays empty; turn it on when troubleshooting. Toggling reloads the data plane, connections drop briefly.',
   'logs.clear': 'Clear', 'logs.clearConfirm': 'Clear every entry in this list?', 'logs.cleared': 'Cleared', 'logs.toggled': 'Logging setting saved',
+  'node.nodeView': 'This server is a node: the server list is pushed by the master and read-only here. Add or remove servers, or change ratios, on the master.', 'node.byMaster': 'managed by master', 'node.lastSync': 'last sync',
+  'line.assignAll': 'Assign to all existing users', 'line.assignAllHelp': 'Unchecked: the new line belongs to nobody until you tick it per user',
+  'user.import': 'Import from old panel', 'user.importTitle': 'Import users from an old panel database', 'user.importGo': 'Import', 'user.importPick': 'Pick a database file',
+  'user.importHelp': 'Upload the old panel .db file to import users only: existing names get usage, quota, expiry and enabled state updated (credentials and lines here are kept), the rest are created with their old credentials. Lines, upstreams and settings are untouched.',
+  'user.importAssign': 'Give newly created users every existing line', 'user.importDone': 'Imported: {c} created, {u} updated, {a} line assignments',
+  'app.nodeReadOnly': 'This is a node: everything here is pushed by the master and read-only. Make changes on the master panel.',
 };
 
 const dicts = { zh, en };
