@@ -104,6 +104,10 @@ const zh = {
   'line.cc': '拥塞控制', 'line.method': '加密方式', 'line.password': '线路密码(2022 算法为 PSK)', 'line.gen': '生成',
   'line.padding': 'padding_scheme(每行一条,留空=默认)', 'line.advanced': '高级参数(JSON,合并进入站配置)',
   'line.cloneOf': '{name} 副本', 'line.transportBadge': '传输',
+  'set.subPage': '订阅页', 'set.subPageEnabled': '浏览器打开订阅地址时显示订阅页',
+  'set.subPageEnabledHelp': '用户用浏览器打开自己的订阅地址会看到用量、到期、二维码与一键导入按钮;客户端拉取不受影响',
+  'set.subPageTitle': '页面标题', 'set.subPageTitleHelp': '留空则用订阅标题',
+  'set.subPageSupport': '页脚联系方式', 'set.subPageNotice': '公告(支持换行)',
 };
 
 const en = {
@@ -211,6 +215,10 @@ const en = {
   'line.cc': 'Congestion control', 'line.method': 'Cipher', 'line.password': 'Line password (PSK for 2022 ciphers)', 'line.gen': 'Generate',
   'line.padding': 'padding_scheme (one per line; empty = default)', 'line.advanced': 'Advanced (JSON merged into inbound)',
   'line.cloneOf': 'Copy of {name}', 'line.transportBadge': 'transport',
+  'set.subPage': 'Subscription page', 'set.subPageEnabled': 'Show a page when the subscription URL is opened in a browser',
+  'set.subPageEnabledHelp': 'Users see usage, expiry, QR codes and one-tap import buttons; proxy clients still get the raw subscription',
+  'set.subPageTitle': 'Page title', 'set.subPageTitleHelp': 'Empty = profile title',
+  'set.subPageSupport': 'Footer contact', 'set.subPageNotice': 'Notice (multi-line)',
 };
 
 const dicts = { zh, en };

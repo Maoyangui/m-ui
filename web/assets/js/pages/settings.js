@@ -17,6 +17,12 @@ const groups = () => [
     ['subProfileTitle', t('set.subTitle'), 'text'], ['subUpdates', t('set.subUpdates'), 'number'],
     ['subEncode', t('set.subEncode'), 'bool'], ['subShowNotice', t('set.subNotice'), 'bool'],
   ]},
+  { id: 'subpage', title: t('set.subPage'), fields: [
+    ['subPageEnabled', t('set.subPageEnabled'), 'bool', t('set.subPageEnabledHelp')],
+    ['subPageTitle', t('set.subPageTitle'), 'text', t('set.subPageTitleHelp')],
+    ['subPageSupport', t('set.subPageSupport'), 'text'],
+    ['subPageNotice', t('set.subPageNotice'), 'textarea'],
+  ]},
   { id: 'core', title: t('set.core'), fields: [
     ['certFile', t('set.certFile'), 'text', t('set.certHelp')], ['keyFile', t('set.key'), 'text'],
     ['upstreamTestUrl', t('set.testUrl'), 'text', t('set.testUrlHelp')],
@@ -39,8 +45,10 @@ export async function render(el) {
         <div class="card-head"><h2>${esc(g.title)}</h2><button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div>
         <div class="form-grid">${g.fields.map(([k, label, type, help]) =>
           type === 'bool'
-            ? check('set-' + k, label, String(s[k]).toLowerCase() === 'true', help)
-            : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}">`, help)).join('')}</div>
+            ? check('set-' + k, label, s[k] === undefined || s[k] === '' ? k === 'subPageEnabled' : String(s[k]).toLowerCase() === 'true', help)
+            : type === 'textarea'
+              ? `<div class="full">${field(label, `<textarea id="set-${k}">${esc(s[k] ?? '')}</textarea>`, help)}</div>`
+              : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}">`, help)).join('')}</div>
       </section>`).join('')}
     <section class="card">
       <div class="card-head"><h2>${t('set.admin')}</h2></div>

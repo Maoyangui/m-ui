@@ -120,6 +120,8 @@ func (s *Server) Stop() error {
 func (s *Server) handle(subPath string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, subPath)
+		wantQR := strings.HasSuffix(name, "/qr")
+		name = strings.TrimSuffix(name, "/qr")
 		if name == "" || strings.Contains(name, "/") {
 			http.NotFound(w, r)
 			return
@@ -131,12 +133,22 @@ func (s *Server) handle(subPath string) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
+		if wantQR {
+			s.serveQR(w, r, subPath, name)
+			return
+		}
 
 		var lines []model.Line
 		s.db.Raw(`SELECT l.* FROM lines l JOIN user_lines ul ON ul.line_id = l.id
 			WHERE ul.user_id = ? AND l.enabled = 1 ORDER BY l.sort`, user.Id).Scan(&lines)
 
 		opt := s.options()
+		// 浏览器打开订阅地址 → 订阅页(用量/到期/一键导入/二维码);客户端拉取 → 原始订阅
+		if !strings.EqualFold(s.setting("subPageEnabled"), "false") && WantsPage(r) {
+			s.servePage(w, r, subPath, user, lines, opt)
+			s.log(r, name, 200)
+			return
+		}
 		format := r.URL.Query().Get("format")
 
 		var res Result
@@ -174,6 +186,9 @@ func (s *Server) log(r *http.Request, user string, status int) {
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "link"
+		if WantsPage(r) {
+			format = "page"
+		}
 	}
 	entry := model.SubLog{
 		Ts: time.Now().Unix(), User: user, Ip: ip,

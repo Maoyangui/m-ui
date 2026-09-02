@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="{{if eq .Lang "zh"}}zh-CN{{else}}en{{end}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>{{.Title}} · {{.Name}}</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--text:#1a202c;--muted:#64748b;--border:#e2e8f0;--primary:#2563eb;--ok:#16a34a;--warn:#d97706;--danger:#dc2626;--soft:#eff6ff}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--text:#e6e9ef;--muted:#8b95a5;--border:#2a313b;--primary:#3b82f6;--soft:#1e293b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:560px;margin:0 auto;padding:1.25rem 1rem 3rem}
+.brand{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem}.logo{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:9px;background:var(--primary);color:#fff;font-weight:700;font-size:1.1rem}
+.brand h1{margin:0;font-size:1.15rem}.brand .u{color:var(--muted);font-size:.85rem}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.1rem 1.15rem;margin-bottom:.9rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+h2{margin:0 0 .7rem;font-size:.95rem}
+.badge{display:inline-block;font-size:.72rem;padding:.15rem .55rem;border-radius:999px;background:var(--soft);color:var(--primary);vertical-align:middle}
+.badge.ok{background:#dcfce7;color:#15803d}.badge.danger{background:#fee2e2;color:#b91c1c}
+@media(prefers-color-scheme:dark){.badge.ok{background:#14532d;color:#86efac}.badge.danger{background:#7f1d1d;color:#fca5a5}}
+.usage{display:flex;justify-content:space-between;align-items:baseline;font-size:.9rem}.usage b{font-size:1.35rem;font-weight:650}
+.bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin:.5rem 0 .8rem}.bar i{display:block;height:100%;background:var(--primary)}
+.bar.warn i{background:var(--warn)}.bar.danger i{background:var(--danger)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:.3rem 1rem;font-size:.88rem}.kv dt{color:var(--muted)}.kv dd{margin:0}
+.notice{white-space:pre-wrap;background:var(--soft);border-radius:10px;padding:.75rem .9rem;font-size:.9rem}
+.apps{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.app{display:block;text-decoration:none;color:var(--text);border:1px solid var(--border);border-radius:11px;padding:.75rem .85rem;background:var(--card);transition:border-color .15s}
+.app:hover{border-color:var(--primary)}.app b{display:block;font-size:.92rem}.app span{display:block;color:var(--muted);font-size:.74rem;margin-top:.1rem}
+.link{display:flex;gap:.5rem;align-items:center;margin-top:.55rem}.link code{flex:1;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.76rem;word-break:break-all;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.5rem .6rem}
+button{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:8px;padding:.45rem .8rem;font:inherit;font-size:.82rem;cursor:pointer;white-space:nowrap}button:hover{border-color:var(--primary)}
+.qrs{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:.9rem}.qrs figure{margin:0;text-align:center;font-size:.78rem;color:var(--muted)}.qrs img{width:150px;height:150px;border-radius:10px;border:1px solid var(--border);background:#fff;display:block;margin-bottom:.3rem}
+.lines{display:flex;flex-direction:column;gap:.35rem}.line{display:flex;justify-content:space-between;align-items:center;font-size:.88rem;padding:.45rem .6rem;border-radius:8px;background:var(--bg)}.line .tags{display:flex;gap:.3rem}
+.tag{font-size:.68rem;padding:.08rem .4rem;border-radius:5px;border:1px solid var(--border);color:var(--muted);text-transform:uppercase}
+.foot{text-align:center;color:var(--muted);font-size:.76rem;margin-top:1.4rem}.foot a{color:var(--primary);text-decoration:none}
+.toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:.5rem 1rem;border-radius:8px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none}.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><span class="logo">{{slice .Title 0 1}}</span><div><h1>{{.Title}}</h1><div class="u">{{.Name}}</div></div></div>
+
+  <div class="card">
+    <h2>{{if eq .Lang "zh"}}我的订阅{{else}}My subscription{{end}}
+      <span class="badge {{.StatusKind}}">{{if eq .Lang "zh"}}{{if eq .StatusText "active"}}正常{{else if eq .StatusText "expired"}}已到期{{else if eq .StatusText "exhausted"}}流量用尽{{else}}已停用{{end}}{{else}}{{.StatusText}}{{end}}</span></h2>
+    <div class="usage"><div><b>{{.UsedText}}</b> {{if .Unlimited}}<span style="color:var(--muted)">/ {{if eq .Lang "zh"}}不限{{else}}unlimited{{end}}</span>{{else}}<span style="color:var(--muted)">/ {{.TotalText}}</span>{{end}}</div>{{if not .Unlimited}}<div>{{.Percent}}%</div>{{end}}</div>
+    <div class="bar {{if ge .Percent 100}}danger{{else if ge .Percent 80}}warn{{end}}"><i style="width:{{.Percent}}%"></i></div>
+    <dl class="kv">
+      <dt>{{if eq .Lang "zh"}}到期{{else}}Expires{{end}}</dt><dd>{{if .HasExpiry}}{{.ExpiryText}}{{if .Expired}} <span class="badge danger">{{if eq .Lang "zh"}}已到期{{else}}expired{{end}}</span>{{else}} <span class="badge">{{if eq .Lang "zh"}}剩 {{.DaysLeft}} 天{{else}}{{.DaysLeft}} days left{{end}}</span>{{end}}{{else}}{{if eq .Lang "zh"}}不限{{else}}never{{end}}{{end}}</dd>
+      {{if .ResetText}}<dt>{{if eq .Lang "zh"}}流量重置{{else}}Traffic resets{{end}}</dt><dd>{{.ResetText}}</dd>{{end}}
+      <dt>{{if eq .Lang "zh"}}自动更新{{else}}Auto update{{end}}</dt><dd>{{if eq .Lang "zh"}}每 {{.UpdateHours}} 小时{{else}}every {{.UpdateHours}} h{{end}}</dd>
+    </dl>
+  </div>
+
+  {{if .Notice}}<div class="card"><h2>{{if eq .Lang "zh"}}公告{{else}}Notice{{end}}</h2><div class="notice">{{.Notice}}</div></div>{{end}}
+
+  <div class="card">
+    <h2>{{if eq .Lang "zh"}}一键导入{{else}}Import into an app{{end}}</h2>
+    <div class="apps">{{range .Imports}}<a class="app" href="{{.Href}}"><b>{{.Name}}</b><span>{{.Hint}}</span></a>{{end}}</div>
+  </div>
+
+  <div class="card">
+    <h2>{{if eq .Lang "zh"}}订阅地址{{else}}Subscription links{{end}}</h2>
+    <div class="link"><code id="l1">{{.SubClash}}</code><button onclick="cp('l1')">Clash</button></div>
+    <div class="link"><code id="l2">{{.SubLink}}</code><button onclick="cp('l2')">{{if eq .Lang "zh"}}通用{{else}}Links{{end}}</button></div>
+    <div class="qrs">
+      <figure><img src="{{.QRClash}}" alt="QR"><figcaption>Clash</figcaption></figure>
+      <figure><img src="{{.QRLink}}" alt="QR"><figcaption>{{if eq .Lang "zh"}}通用链接{{else}}Links{{end}}</figcaption></figure>
+    </div>
+  </div>
+
+  {{if .Lines}}<div class="card">
+    <h2>{{if eq .Lang "zh"}}节点{{else}}Nodes{{end}} <span class="badge">{{len .Lines}}</span></h2>
+    <div class="lines">{{range .Lines}}<div class="line"><span>{{.Name}}</span><span class="tags"><span class="tag">{{.Protocol}}</span>{{if .TLS}}<span class="tag">{{.TLS}}</span>{{end}}{{if .Transport}}<span class="tag">{{.Transport}}</span>{{end}}</span></div>{{end}}</div>
+  </div>{{end}}
+
+  <div class="foot">{{if .Support}}{{.Support}} · {{end}}© {{.Year}} {{.Title}}</div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+function cp(id){var t=document.getElementById(id).textContent;var done=function(){var e=document.getElementById('toast');e.textContent='{{if eq .Lang "zh"}}已复制{{else}}Copied{{end}}';e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)};
+if(navigator.clipboard){navigator.clipboard.writeText(t).then(done)}else{var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();done()}}
+</script>
+</body>
+</html>
