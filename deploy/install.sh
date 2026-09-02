@@ -36,8 +36,12 @@ if [ -z "$SRC" ] || [ "$SRC" = "latest" ] || [[ "$SRC" == v[0-9]* ]]; then
     *) echo "不支持的架构: $ARCH(仅 amd64 / arm64)"; exit 1;;
   esac
   if [ -z "$SRC" ] || [ "$SRC" = "latest" ]; then
-    TAG="$(curl -fsSL -H "User-Agent: m-ui-install" ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "https://api.github.com/repos/$REPO/releases/latest" | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)"
-    [ -n "$TAG" ] || { echo "无法从 GitHub 获取最新版本(网络不通或仓库为私有;私有仓库请设置 GITHUB_TOKEN,或直接传压缩包路径 / 下载地址)"; exit 1; }
+    # 先走 releases/latest 的重定向拿标签(不经 API,无限流);拿不到再查 API
+    TAG="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" 2>/dev/null | sed -n 's#.*/tag/##p')"
+    if [ -z "$TAG" ]; then
+      TAG="$(curl -fsSL -H "User-Agent: m-ui-install" ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)"
+    fi
+    [ -n "$TAG" ] || { echo "无法从 GitHub 获取最新版本(网络不通、还没有 Release,或仓库为私有;私有仓库请设置 GITHUB_TOKEN,或直接传压缩包路径 / 下载地址)"; exit 1; }
   else
     TAG="$SRC"
   fi

@@ -387,6 +387,39 @@ func resetSettings(dbPath string) error {
 }
 
 // selfUpdate 从 GitHub Releases 下载最新版替换二进制并重启。
+// latestTag 取最新 Release 的标签:先跟随 releases/latest 的重定向(不经 API,没有匿名限流),
+// 失败再查 GitHub API(私有仓库可设 GITHUB_TOKEN)。
+func latestTag(ctx context.Context) (string, error) {
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://github.com/"+brand.RepoPath+"/releases/latest", nil)
+	req.Header.Set("User-Agent", "m-ui")
+	if resp, err := http.DefaultClient.Do(req); err == nil {
+		resp.Body.Close()
+		if p := resp.Request.URL.Path; resp.StatusCode == 200 && strings.Contains(p, "/tag/") {
+			return p[strings.LastIndex(p, "/tag/")+5:], nil
+		}
+	}
+	req, _ = http.NewRequestWithContext(ctx, "GET", repoAPI, nil)
+	req.Header.Set("User-Agent", "m-ui")
+	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("无法读取 Releases(HTTP %d):还没有发布版本、网络受阻,或仓库为私有(可设置 GITHUB_TOKEN);也可手动下载后执行: bash install.sh <tar.gz>", resp.StatusCode)
+	}
+	var rel struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil || rel.TagName == "" {
+		return "", fmt.Errorf("解析 Releases 失败")
+	}
+	return rel.TagName, nil
+}
+
 func selfUpdate(ask func(string) string) error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("只支持 Linux 在线更新")
@@ -394,44 +427,14 @@ func selfUpdate(ask func(string) string) error {
 	fmt.Println("  查询最新版本…")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", repoAPI, nil)
-	req.Header.Set("User-Agent", "m-ui")
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-	resp, err := http.DefaultClient.Do(req)
+	tag, err := latestTag(ctx)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 404 || resp.StatusCode == 401 {
-		return fmt.Errorf("无法读取 Releases(HTTP %d)。仓库为私有时请设置 GITHUB_TOKEN 环境变量,或手动下载后执行: bash install.sh <tar.gz>", resp.StatusCode)
-	}
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("GitHub API HTTP %d", resp.StatusCode)
-	}
-	var rel struct {
-		TagName string `json:"tag_name"`
-		Assets  []struct {
-			Name string `json:"name"`
-			URL  string `json:"browser_download_url"`
-		} `json:"assets"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		return err
-	}
 	want := "m-ui-linux-" + runtime.GOARCH + ".tar.gz"
-	var url string
-	for _, a := range rel.Assets {
-		if a.Name == want {
-			url = a.URL
-		}
-	}
-	if url == "" {
-		return fmt.Errorf("最新版 %s 没有 %s", rel.TagName, want)
-	}
-	fmt.Printf("  当前 v%s → 最新 %s\n", version, rel.TagName)
-	if strings.TrimPrefix(rel.TagName, "v") == version {
+	url := "https://github.com/" + brand.RepoPath + "/releases/download/" + tag + "/" + want
+	fmt.Printf("  当前 v%s → 最新 %s\n", version, tag)
+	if strings.TrimPrefix(tag, "v") == version {
 		if ask("  已是最新版,仍要重新安装? [y/N]: ") != "y" {
 			return nil
 		}
@@ -489,7 +492,7 @@ func selfUpdate(ask func(string) string) error {
 	if err := os.Rename(tmp, binPath); err != nil {
 		return err
 	}
-	fmt.Println(colorGreen + "  已更新为 " + rel.TagName + ",重启服务…" + colorReset)
+	fmt.Println(colorGreen + "  已更新为 " + tag + ",重启服务…" + colorReset)
 	systemctl("restart", "m-ui")
 	time.Sleep(2 * time.Second)
 	fmt.Println("  状态:", stateColored())
