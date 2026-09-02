@@ -145,7 +145,8 @@ async function showDetail(id) {
     </section>
     <section><h3>${t('user.onlineIps')}</h3><div id="ud-ips"></div></section>
     <section><h3>${t('user.traffic7d')}</h3><div id="ud-chart"></div></section>
-    <section><h3>${t('user.lines')}</h3><div class="chips">${(u.lineIds || []).map(lid => { const l = state.lines.find(x => x.id === lid); return l ? `<span class="chip">${esc(l.name)}</span>` : ''; }).join('') || `<span class="muted small">${t('common.none')}</span>`}</div></section>`);
+    <section><h3>${t('user.lines')}</h3><div class="chips">${(u.lineIds || []).map(lid => { const l = state.lines.find(x => x.id === lid); return l ? `<span class="chip">${esc(l.name)}</span>` : ''; }).join('') || `<span class="muted small">${t('common.none')}</span>`}</div>
+      ${(u.extIds || []).length ? `<h3 style="margin-top:.6rem">${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span></span>` : ''; }).join('')}</div>` : ''}</section>`);
   refreshDrawerLive();
   const d = await get(`stats?resource=user&tag=${encodeURIComponent(u.name)}&hours=168`);
   const ch = document.getElementById('ud-chart');
@@ -200,6 +201,10 @@ function editUser(id) {
           <label><input type="checkbox" id="f-all"> <b>${t('user.f.selectAll')}</b></label>
           ${state.lines.map(l => `<label><input type="checkbox" class="ln-cb" value="${l.id}" ${lineIds.has(l.id) ? 'checked' : ''}> ${esc(l.name)}</label>`).join('')}
         </div>`)}</div>
+      ${(state.exts || []).length ? `<div class="full">${field(t('user.f.exts'), `
+        <div class="check-list">
+          ${(state.exts || []).map(x => `<label><input type="checkbox" class="ext-cb" value="${x.id}" ${(u.extIds || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name)} <span class="muted small">${x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink')} · ${x.nodeCount || 0}</span></label>`).join('')}
+        </div>`, t('user.f.extsHelp'))}</div>` : ''}
     </div>`, async () => {
     const expiry = fv('f-expiry');
     const body = {
@@ -210,6 +215,7 @@ function editUser(id) {
       autoReset: fchk('f-autoreset'), resetDays: Number(fv('f-resetdays')),
       nextReset: u.nextReset || 0, desc: u.desc || '',
       lineIds: [...document.querySelectorAll('.ln-cb:checked')].map(c => Number(c.value)),
+      extIds: [...document.querySelectorAll('.ext-cb:checked')].map(c => Number(c.value)),
     };
     if (id) await put('users/' + id, body); else await post('users', body);
     await load('users', 'lines', 'status');
@@ -268,7 +274,7 @@ function bulkDialog() {
 }
 
 async function fullUpdate(u, patch) {
-  const body = Object.assign({}, u, patch, { lineIds: u.lineIds || [] });
+  const body = Object.assign({}, u, patch, { lineIds: u.lineIds || [], extIds: u.extIds || [] });
   delete body.onlineIps; delete body.subUrl;
   await put('users/' + u.id, body);
 }

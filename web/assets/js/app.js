@@ -7,6 +7,7 @@ import * as lines from './pages/lines.js';
 import * as upstreams from './pages/upstreams.js';
 import * as users from './pages/users.js';
 import * as plans from './pages/plans.js';
+import * as exts from './pages/exts.js';
 import * as nodes from './pages/nodes.js';
 import * as cert from './pages/cert.js';
 import * as backup from './pages/backup.js';
@@ -15,13 +16,13 @@ import * as logs from './pages/logs.js';
 import * as settings from './pages/settings.js';
 
 export const state = {
-  status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [],
+  status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [], exts: [],
   onlines: { users: [], lines: [], upstreams: [], connCounts: {} },
 };
 
-const pages = { dashboard, lines, upstreams, users, plans, nodes, cert, backup, ops, logs, settings };
+const pages = { dashboard, lines, upstreams, exts, users, plans, nodes, cert, backup, ops, logs, settings };
 const navItems = [
-  ['dashboard', '◉'], ['lines', '⇄'], ['upstreams', '⇪'], ['users', '☺'], ['plans', '▤'], ['nodes', '☁'],
+  ['dashboard', '◉'], ['lines', '⇄'], ['upstreams', '⇪'], ['exts', '⇢'], ['users', '☺'], ['plans', '▤'], ['nodes', '☁'],
   ['cert', '⚿'], ['backup', '⛁'], ['ops', '⚒'], ['logs', '≡'], ['settings', '⚙'],
 ];
 let current = null;
@@ -37,6 +38,7 @@ export async function load(...what) {
   if (all || what.includes('users')) jobs.push(get('users').then(u => { state.users = u; }));
   if (all || what.includes('plans')) jobs.push(get('plans').then(p => { state.plans = p || []; }));
   if (all || what.includes('nodes')) jobs.push(get('nodes').then(n => { state.nodes = (n && n.nodes) || []; }).catch(() => { state.nodes = []; }));
+  if (all || what.includes('exts')) jobs.push(get('exts').then(x => { state.exts = x || []; }).catch(() => { state.exts = []; }));
   if (all || what.includes('onlines')) jobs.push(get('onlines').then(o => { state.onlines = o; }));
   await Promise.all(jobs);
 }

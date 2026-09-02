@@ -111,6 +111,28 @@ type Plan struct {
 	Sort        int             `json:"sort"`
 }
 
+// ExtNode 外部节点:一条分享链接,或一个外部订阅地址;分配给用户后聚合进该用户的订阅。
+type ExtNode struct {
+	Id        uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name      string `json:"name" gorm:"uniqueIndex"`
+	Type      string `json:"type"`   // link | sub
+	Value     string `json:"value"`  // 分享链接 或 订阅 URL
+	Prefix    string `json:"prefix"` // 节点名前缀(可空),如 "[中转] "
+	Enabled   bool   `json:"enabled" gorm:"default:true"`
+	Sort      int    `json:"sort"`
+	Remark    string `json:"remark"`
+	LastFetch int64  `json:"lastFetch"`
+	LastError string `json:"lastError"`
+	NodeCount int    `json:"nodeCount"`
+	Cache     string `json:"cache,omitempty"` // 外部订阅抓取到的内容(主机抓取,随快照下发副机)
+}
+
+// UserExt 用户-外部节点 多对多。
+type UserExt struct {
+	UserId uint `json:"userId" gorm:"primaryKey;autoIncrement:false"`
+	ExtId  uint `json:"extId" gorm:"primaryKey;autoIncrement:false"`
+}
+
 // UserLine 用户-线路 多对多。
 type UserLine struct {
 	UserId uint `json:"userId" gorm:"primaryKey;autoIncrement:false"`
@@ -167,7 +189,7 @@ type Change struct {
 // All 供 AutoMigrate 使用。
 func All() []interface{} {
 	return []interface{}{
-		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &Plan{},
+		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{},
 	}
 }

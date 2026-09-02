@@ -510,6 +510,7 @@ func (s *Server) validateUpstream(up *model.Upstream) error {
 type userPayload struct {
 	model.User
 	LineIds []uint `json:"lineIds"`
+	ExtIds  []uint `json:"extIds"`
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
@@ -520,6 +521,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		type row struct {
 			model.User
 			LineIds  []uint   `json:"lineIds"`
+			ExtIds   []uint   `json:"extIds"`
 			OnlineIP []string `json:"onlineIps"`
 			SubURL   string   `json:"subUrl"`
 		}
@@ -527,9 +529,11 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		for _, u := range users {
 			var ids []uint
 			s.db.Model(&model.UserLine{}).Where("user_id = ?", u.Id).Pluck("line_id", &ids)
+			eids := []uint{}
+			s.db.Model(&model.UserExt{}).Where("user_id = ?", u.Id).Pluck("ext_id", &eids)
 			u.Credentials = nil // 列表不返回凭据
 			out = append(out, row{
-				User: u, LineIds: ids,
+				User: u, LineIds: ids, ExtIds: eids,
 				OnlineIP: mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
 				SubURL:   s.subLinks(u)["link"],
 			})
@@ -555,6 +559,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.setUserLines(p.User.Id, p.LineIds)
+		s.setUserExts(p.User.Id, p.ExtIds)
 		s.audit(r, "user", "create", p.User.Name)
 		s.reloadUsers("新增用户 " + p.User.Name)
 		writeJSON(w, http.StatusOK, p.User)
@@ -593,6 +598,7 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.setUserLines(id, p.LineIds)
+		s.setUserExts(id, p.ExtIds)
 		s.audit(r, "user", "update", p.User.Name)
 		s.reloadUsers("修改用户 " + p.User.Name)
 		writeJSON(w, http.StatusOK, p.User)

@@ -22,6 +22,15 @@ type Options struct {
 	// Insecure 为 true 时链接带 insecure=1、clash 带 skip-cert-verify:
 	// 服务端用自签证书(纯 IP 无域名)时客户端必须允许不安全才能连上。
 	Insecure bool
+	// External 分配给该用户的外部节点(分享链接 / 外部订阅解析结果),追加在本站节点之后。
+	External []ExtItem
+}
+
+// ExtItem 是一组外部节点。
+type ExtItem struct {
+	Name  string
+	Links []string
+	Clash []map[string]interface{}
 }
 
 // Result 是一份渲染好的订阅响应。
@@ -37,6 +46,9 @@ func BuildLinkSub(user model.User, lines []model.Line, opt Options) Result {
 		out = append(out, noticeLinkURI(user))
 	}
 	out = append(out, GenerateLinks(user, lines, opt.Entries)...)
+	for _, e := range opt.External {
+		out = append(out, e.Links...)
+	}
 	body := strings.Join(out, "\n")
 	if opt.Encode {
 		body = base64.StdEncoding.EncodeToString([]byte(body))
@@ -50,7 +62,7 @@ func BuildClashSub(user model.User, lines []model.Line, opt Options) (Result, er
 	if opt.ShowNotice {
 		notice = noticeText(user)
 	}
-	body, err := BuildClash(user, lines, opt.Entries, opt.ClashTmpl, notice)
+	body, err := BuildClashFull(user, lines, opt.Entries, opt.ClashTmpl, notice, opt.External)
 	if err != nil {
 		return Result{}, err
 	}

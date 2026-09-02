@@ -13,6 +13,7 @@ import (
 	"github.com/fangjunsheng555/m-ui/acme"
 	"github.com/fangjunsheng555/m-ui/certutil"
 	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/fangjunsheng555/m-ui/ext"
 	"github.com/fangjunsheng555/m-ui/logger"
 
 	"gorm.io/gorm"
@@ -74,6 +75,28 @@ func (s *Server) insecure() bool {
 		return false
 	}
 	return CertIsSelfSigned(s.setting("certFile"), s.setting("webCertFile"))
+}
+
+// externalFor 取用户被分配的外部节点:单条链接直接用,外部订阅用主机抓取的缓存解析。
+func (s *Server) externalFor(userID uint) []ExtItem {
+	var exts []model.ExtNode
+	s.db.Raw(`SELECT e.* FROM ext_nodes e JOIN user_exts ue ON ue.ext_id = e.id
+		WHERE ue.user_id = ? AND e.enabled = 1 ORDER BY e.sort, e.id`, userID).Scan(&exts)
+	out := make([]ExtItem, 0, len(exts))
+	for _, e := range exts {
+		var it ext.Items
+		if e.Type == "link" {
+			it = ext.Parse(e.Value)
+		} else {
+			it = ext.Parse(e.Cache)
+		}
+		it = ext.WithPrefix(it, e.Prefix)
+		if len(it.Links) == 0 && len(it.Clash) == 0 {
+			continue
+		}
+		out = append(out, ExtItem{Name: e.Name, Links: it.Links, Clash: it.Clash})
+	}
+	return out
 }
 
 // sniFor 域名作 SNI;纯 IP 入口不发 SNI(自签 IP 证书场景)。
@@ -232,6 +255,7 @@ func (s *Server) handle(subPath string) http.HandlerFunc {
 			WHERE ul.user_id = ? AND l.enabled = 1 ORDER BY l.sort`, user.Id).Scan(&lines)
 
 		opt := s.options()
+		opt.External = s.externalFor(user.Id)
 		// 浏览器打开订阅地址 → 订阅页(用量/到期/一键导入/二维码);客户端拉取 → 原始订阅
 		if !strings.EqualFold(s.setting("subPageEnabled"), "false") && WantsPage(r) {
 			s.servePage(w, r, subPath, user, lines, opt)

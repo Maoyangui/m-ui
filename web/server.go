@@ -144,6 +144,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"ops", s.auth(s.handleOps))
 	mux.HandleFunc(api+"ops/", s.auth(s.handleOpsSub))
 	mux.HandleFunc(api+"conns/recent", s.auth(s.handleRecentConns))
+	mux.HandleFunc(api+"exts", s.auth(s.handleExts))
+	mux.HandleFunc(api+"exts/", s.auth(s.handleExtItem))
 	mux.HandleFunc(api+"nodes", s.auth(s.handleNodes))
 	mux.HandleFunc(api+"nodes/", s.auth(s.handleNodeItem))
 	mux.HandleFunc(api+"agent/", s.handleAgent) // 内部按动作分别做令牌/会话鉴权

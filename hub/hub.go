@@ -45,6 +45,8 @@ type Snapshot struct {
 	Lines      []model.Line      `json:"lines"`
 	Users      []model.User      `json:"users"`
 	UserLines  []model.UserLine  `json:"userLines"`
+	Exts       []model.ExtNode   `json:"exts"`
+	UserExts   []model.UserExt   `json:"userExts"`
 	Settings   map[string]string `json:"settings"`
 }
 
@@ -71,6 +73,12 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 		s.Users[i].Up, s.Users[i].Down, s.Users[i].TotalUp, s.Users[i].TotalDown, s.Users[i].OnlineAt = 0, 0, 0, 0, 0
 	}
 	if err := db.Order("user_id asc, line_id asc").Find(&s.UserLines).Error; err != nil {
+		return s, err
+	}
+	if err := db.Order("sort asc, id asc").Find(&s.Exts).Error; err != nil {
+		return s, err
+	}
+	if err := db.Order("user_id asc, ext_id asc").Find(&s.UserExts).Error; err != nil {
 		return s, err
 	}
 	s.Settings = map[string]string{}
@@ -112,10 +120,15 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 
 	// gorm 对带 default:true 的 bool 字段:Create 时零值 false 会写成默认 true,并把 true 回填进结构体。
 	// 所以要在插入之前记下被禁用的 id,插入后再显式写回 false,否则主机禁用的用户会在副机上"复活"。
-	var offUsers, offLines, offNodes []uint
+	var offUsers, offLines, offNodes, offExts []uint
 	for _, u := range snap.Users {
 		if !u.Enabled {
 			offUsers = append(offUsers, u.Id)
+		}
+	}
+	for _, e := range snap.Exts {
+		if !e.Enabled {
+			offExts = append(offExts, e.Id)
 		}
 	}
 	for _, l := range snap.Lines {
@@ -129,8 +142,18 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		}
 	}
 	err = db.Transaction(func(tx *gorm.DB) error {
-		for _, t := range []interface{}{&model.UserLine{}, &model.User{}, &model.Line{}, &model.Upstream{}, &model.Node{}} {
+		for _, t := range []interface{}{&model.UserLine{}, &model.UserExt{}, &model.User{}, &model.Line{}, &model.Upstream{}, &model.Node{}, &model.ExtNode{}} {
 			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(t).Error; err != nil {
+				return err
+			}
+		}
+		if len(snap.Exts) > 0 {
+			if err := tx.Create(&snap.Exts).Error; err != nil {
+				return err
+			}
+		}
+		if len(snap.UserExts) > 0 {
+			if err := tx.Create(&snap.UserExts).Error; err != nil {
 				return err
 			}
 		}
@@ -174,6 +197,11 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		}
 		if len(offNodes) > 0 {
 			if err := tx.Model(&model.Node{}).Where("id IN ?", offNodes).Update("enabled", false).Error; err != nil {
+				return err
+			}
+		}
+		if len(offExts) > 0 {
+			if err := tx.Model(&model.ExtNode{}).Where("id IN ?", offExts).Update("enabled", false).Error; err != nil {
 				return err
 			}
 		}

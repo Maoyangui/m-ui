@@ -548,11 +548,16 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 	probe := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if ip := acme.PublicIP(ctx); ip != "" && ip != r.setting("publicIp") {
+		ip := acme.PublicIP(ctx)
+		if ip == "" {
+			return
+		}
+		if ip != r.setting("publicIp") {
 			r.setSetting("publicIp", ip)
-			r.db.Model(&model.Node{}).Where("is_local = ?", true).Update("public_ip", ip)
 			logger.Info("本机公网 IP: ", ip)
 		}
+		// 本机服务器记录也同步(订阅入口用)
+		r.db.Model(&model.Node{}).Where("is_local = ? AND public_ip != ?", true, ip).Update("public_ip", ip)
 	}
 	probe()
 	t := time.NewTicker(time.Hour)
@@ -642,6 +647,7 @@ func Run(dbPath string) error {
 	go r.certLoop(stopCheckpoint)
 	go r.backupLoop(stopCheckpoint)
 	go r.publicIPLoop(stopCheckpoint)
+	go r.extLoop(stopCheckpoint)
 	defer close(stopCheckpoint)
 
 	sigCh := make(chan os.Signal, 1)

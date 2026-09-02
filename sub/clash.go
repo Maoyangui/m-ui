@@ -2,6 +2,7 @@ package sub
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/render"
@@ -29,9 +30,14 @@ rules:
   - MATCH,Proxy
 `
 
-// BuildClash 生成一个用户的 clash 订阅 YAML。
-// notice 为可选的顶部提示节点名(如流量提示);为空则不注入。
+// BuildClash 生成一个用户的 clash 订阅 YAML(不含外部节点)。
 func BuildClash(user model.User, lines []model.Line, entries []Entry, template, notice string) (string, error) {
+	return BuildClashFull(user, lines, entries, template, notice, nil)
+}
+
+// BuildClashFull 生成一个用户的 clash 订阅 YAML,外部节点追加在本站节点之后并加入 Proxy/Auto 组。
+// notice 为可选的顶部提示节点名(如流量提示);为空则不注入。
+func BuildClashFull(user model.User, lines []model.Line, entries []Entry, template, notice string, external []ExtItem) (string, error) {
 	base := template
 	if base == "" {
 		base = basicClashConfig
@@ -72,6 +78,31 @@ func BuildClash(user model.User, lines []model.Line, entries []Entry, template, 
 			topNames = append(topNames, line.Name)
 		} else {
 			topNames = append(topNames, names...)
+		}
+	}
+	// 外部节点:名字去重后追加
+	used := map[string]bool{}
+	for _, n := range proxyNames {
+		used[n] = true
+	}
+	for _, e := range external {
+		for _, p := range e.Clash {
+			name, _ := p["name"].(string)
+			if name == "" {
+				continue
+			}
+			for i := 2; used[name]; i++ {
+				name = fmt.Sprintf("%s %d", p["name"], i)
+			}
+			used[name] = true
+			q := make(map[string]interface{}, len(p))
+			for k, v := range p {
+				q[k] = v
+			}
+			q["name"] = name
+			proxies = append(proxies, q)
+			proxyNames = append(proxyNames, name)
+			topNames = append(topNames, name)
 		}
 	}
 	root["proxies"] = proxies
