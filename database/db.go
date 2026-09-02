@@ -22,7 +22,7 @@ func Open(dbPath string) (*gorm.DB, error) {
 	if strings.Contains(dbPath, "?") {
 		sep = "&"
 	}
-	// WAL + busy_timeout:与 s-ui 相同的取舍,读写并发下不互相饿死。
+	// WAL + busy_timeout:常见取舍,读写并发下不互相饿死。
 	dsn := dbPath + sep + "_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Discard})
 	if err != nil {

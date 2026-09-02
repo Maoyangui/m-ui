@@ -23,7 +23,7 @@ func mkUser() model.User {
 
 var hkEntry = []Entry{{Name: "香港", Host: "hk.joinvip.vip", SNI: "hk.joinvip.vip"}}
 
-// 合成用例:三种协议链接与 s-ui 实测 golden 字节级一致。
+// 合成用例:三种协议链接与 旧面板 实测 golden 字节级一致。
 func TestLinkFormatsMatchSUI(t *testing.T) {
 	user := mkUser()
 	cases := []struct {
@@ -61,7 +61,7 @@ func TestShadowsocksLinkWithAddr(t *testing.T) {
 }
 
 // 真实数据黄金对比:设置 MUI_OLD_DB=旧库 与 MUI_NEW_DB=导入后的 m-ui 库时运行。
-// 逐用户比对 m-ui 生成的 local 链接与 s-ui 存储的 local 链接(忽略顺序)。
+// 逐用户比对 m-ui 生成的 local 链接与 旧面板 存储的 local 链接(忽略顺序)。
 func TestGoldenAgainstRealDB(t *testing.T) {
 	oldPath := os.Getenv("MUI_OLD_DB")
 	newPath := os.Getenv("MUI_NEW_DB")
@@ -78,7 +78,7 @@ func TestGoldenAgainstRealDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// s-ui 原始链接用域名(Flask 后才改 IP),故入口用域名对齐。
+	// 旧面板 原始链接用域名(Flask 后才改 IP),故入口用域名对齐。
 	var domain string
 	newDB.Raw("SELECT value FROM settings WHERE key='webDomain'").Scan(&domain)
 	entries := []Entry{{Host: domain, SNI: domain}}

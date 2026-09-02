@@ -105,6 +105,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status["certSelfSigned"] = ci.SelfSigned
 	status["certDaysLeft"] = ci.DaysLeft
 	status["tgEnabled"] = s.run.Notifier().Enabled()
+	status["defaultPassword"] = s.setting("adminDefault") == "true"
 	status["panelTLS"] = s.setting("webCertFile") != ""
 	status["subTLS"] = s.setting("subCertFile") != ""
 	status["subPort"] = s.settingInt("subPort", 2056)
@@ -741,6 +742,8 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		updates["username"] = u
 	}
 	s.db.Model(&model.Admin{}).Where("id = ?", admin.Id).Updates(updates)
+	s.run.SetSetting("adminDefault", "false") // 默认密码提示解除
+	s.audit(r, "admin", "password", admin.Username)
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }
 

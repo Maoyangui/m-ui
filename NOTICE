@@ -1,0 +1,16 @@
+m-ui
+Copyright (C) 2026 m-ui contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See LICENSE.
+
+Third-party code and attributions (retained as required by their licenses):
+
+- Portions of the embedded data-plane integration (package core: box lifecycle,
+  statistics/connection tracking and inbound user hot-reload adapters) are
+  derived from alireza0/s-ui (GPL-3.0).
+- sing-box (SagerNet) — GPL-3.0 with additional terms; see
+  https://github.com/SagerNet/sing-box/blob/main/LICENSE
+- Go module dependencies are listed in go.mod with their respective licenses.

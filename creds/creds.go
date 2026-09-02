@@ -1,7 +1,7 @@
 // Package creds 生成与补全用户的各协议凭据,并提供 Reality/UUID/短 ID 等密钥生成。
 //
 // 凭据按协议分键存于 users.credentials:同一用户在所有口令型协议上共用一个口令、
-// 在所有 UUID 型协议上共用一个 UUID(与 s-ui 一致,便于用户记忆与迁移)。
+// 在所有 UUID 型协议上共用一个 UUID(便于用户记忆与从旧面板迁移)。
 package creds
 
 import (

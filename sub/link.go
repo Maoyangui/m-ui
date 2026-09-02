@@ -124,7 +124,7 @@ func hostPort(server string, port int) string {
 	return fmt.Sprintf("%s:%d", server, port)
 }
 
-// ---- 与 s-ui 字节级一致的三种既有格式(有真实数据黄金测试,勿改顺序)----
+// ---- 与旧面板字节级一致的三种既有格式(有真实数据黄金测试,勿改顺序)----
 
 // hysteria2://<password>@host:port?security=tls&sni=<sni>&fastopen=<0|1>#remark
 func hysteria2URI(line model.Line, user model.User, a addr, remark string) string {
@@ -153,7 +153,7 @@ func anytlsURI(user model.User, a addr, remark string) string {
 	return withFragment(fmt.Sprintf("anytls://%s@%s?%s", password, hostPort(a.server, a.port), q), remark)
 }
 
-// ss://base64(method:password)@host:port#remark  (SIP002,备注原样,与 s-ui 一致)
+// ss://base64(method:password)@host:port#remark  (SIP002,备注原样)
 func shadowsocksURI(line model.Line, user model.User, a addr, remark string) string {
 	var opts map[string]interface{}
 	_ = json.Unmarshal(line.Options, &opts)
@@ -162,7 +162,7 @@ func shadowsocksURI(line model.Line, user model.User, a addr, remark string) str
 	return fmt.Sprintf("ss://%s@%s#%s", userinfo, hostPort(a.server, a.port), remark)
 }
 
-// ssClientPassword 客户端用的 shadowsocks 密码:2022 系列多用户为 "服务端PSK:用户PSK"(与 s-ui 一致),
+// ssClientPassword 客户端用的 shadowsocks 密码:2022 系列多用户为 "服务端PSK:用户PSK",
 // 其余算法直接用用户密码。
 func ssClientPassword(line model.Line, user model.User) string {
 	var opts map[string]interface{}
@@ -388,7 +388,7 @@ func httpURI(line model.Line, user model.User, a addr, remark string) string {
 // ---- 工具 ----
 
 // withFragment 用 Go 的 URL 片段编码追加备注(CJK 百分号编码、括号等子分隔符保留字面),
-// 与 s-ui 的 addParams(通过 url.URL.String())完全一致。
+// 与旧面板实现完全一致。
 func withFragment(base, remark string) string {
 	u, err := url.Parse(base)
 	if err != nil {

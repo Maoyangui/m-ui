@@ -216,16 +216,16 @@ func (r *Runner) ensureAdmin() {
 	if n > 0 {
 		return
 	}
-	pw := creds.Password(12)
-	hash, err := hashPassword(pw)
+	// 与主流面板一致:首次安装默认 admin / admin,面板内醒目提示修改;安装脚本会打印出来
+	hash, err := hashPassword("admin")
 	if err != nil {
 		logger.Error("生成初始密码失败: ", err)
 		return
 	}
 	r.db.Create(&model.Admin{Username: "admin", Password: hash})
+	r.setSetting("adminDefault", "true")
 	logger.Info("==================================================")
-	logger.Info("首次启动:已创建管理员 admin,初始密码: ", pw)
-	logger.Info("请登录后在 设置 → 管理员 里修改密码")
+	logger.Info("首次启动:已创建管理员 admin / admin(默认密码,请登录后立即修改)")
 	logger.Info("==================================================")
 }
 

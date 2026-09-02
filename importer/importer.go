@@ -1,4 +1,4 @@
-// Package importer 从旧 s-ui 数据库一次性迁移到 m-ui 数据模型。
+// Package importer 从旧面板(兼容格式)数据库一次性迁移到 m-ui 数据模型。
 //
 // 迁移映射:
 //   - 入站(hysteria2/anytls/shadowsocks)+ 路由规则 → 线路(Line),id/端口/名称原样保留

@@ -19,17 +19,17 @@ var (
 
 // init 先装一个 stderr 默认日志器:CLI 子命令、测试与库调用不经过 InitLogger 也不会因 nil 崩溃。
 func init() {
-	l := logging.MustGetLogger("s-ui")
+	l := logging.MustGetLogger("m-ui")
 	backend := logging.NewLogBackend(os.Stderr, "", 0)
 	format := logging.MustStringFormatter(`%{time:2006/01/02 15:04:05} %{level} - %{message}`)
 	leveled := logging.AddModuleLevel(logging.NewBackendFormatter(backend, format))
-	leveled.SetLevel(logging.INFO, "s-ui")
+	leveled.SetLevel(logging.INFO, "m-ui")
 	l.SetBackend(leveled)
 	logger = l
 }
 
 func InitLogger(level logging.Level) {
-	newLogger := logging.MustGetLogger("s-ui")
+	newLogger := logging.MustGetLogger("m-ui")
 	var err error
 	var backend logging.Backend
 	var format logging.Formatter
@@ -58,7 +58,7 @@ func InitLogger(level logging.Level) {
 
 	backendFormatter := logging.NewBackendFormatter(backend, format)
 	backendLeveled := logging.AddModuleLevel(backendFormatter)
-	backendLeveled.SetLevel(level, "s-ui")
+	backendLeveled.SetLevel(level, "m-ui")
 	newLogger.SetBackend(backendLeveled)
 
 	logger = newLogger

@@ -2,7 +2,7 @@
 
 内嵌 [sing-box](https://github.com/SagerNet/sing-box) 的多服务器代理面板。**单二进制、单数据库文件**,主/副角色一键切换,面板内完成证书、WARP、备份、换机等全部运维。
 
-> 数据面部分移植自 [alireza0/s-ui](https://github.com/alireza0/s-ui),并可从 s-ui 数据库一键导入(端口、凭据、订阅 URL 全部保留)。License: GPL-3.0。
+> 可从旧面板数据库一键导入(端口、凭据、订阅 URL 全部保留)。License: GPL-3.0,第三方来源声明见 NOTICE。
 
 ## 特性
 
@@ -53,10 +53,10 @@ journalctl -u m-ui -n 30 --no-pager | grep -E "初始密码|面板"
 
 默认面板地址 `http://<IP>:2053/app/`,订阅入口 `:2056/sub/`。登录后按概览页的**快速开始**清单依次完成:域名 → 证书 → 线路 → 用户。
 
-### 从 s-ui 迁移
+### 从旧面板迁移
 
 ```bash
-bash deploy/install.sh ./m-ui-linux-amd64 --import /usr/local/s-ui/db/s-ui.db
+bash deploy/install.sh ./m-ui-linux-amd64 --import /path/to/旧面板.db
 ```
 
 导入保留全部入站端口、用户凭据、面板路径与订阅 URL,客户端无需改任何东西;导入报告会列出核对结果。
@@ -84,7 +84,7 @@ bash deploy/install.sh ./m-ui-linux-amd64 --restore m-ui-20260901-120000.zip
 
 ```
 m-ui run -db <m-ui.db>                    启动
-m-ui import -from <s-ui.db> -to <m-ui.db> 从 s-ui 导入
+m-ui import -from <旧面板.db> -to <m-ui.db> 从旧面板导入
 m-ui backup -db <m-ui.db> -out <zip>      生成备份
 m-ui restore -db <m-ui.db> -from <zip|db> 还原备份(服务停止时)
 m-ui selfsign -hosts <域名,IP>            生成自签证书
@@ -116,7 +116,7 @@ acme/      Let's Encrypt 签发(HTTP-01 / Cloudflare DNS-01)
 backup/    备份与还原
 ops/       WARP 与系统优化脚本
 web/       面板 HTTP API 与前端
-importer/  s-ui 数据库导入
+importer/  旧面板数据库导入(兼容)
 ```
 
 ## 常见问题

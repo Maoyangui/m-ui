@@ -8,7 +8,7 @@ import (
 	"github.com/fangjunsheng555/m-ui/database/model"
 )
 
-// ss2022 多用户:客户端密码必须是 "服务端PSK:用户PSK"(与 s-ui 一致),否则客户端握手被服务端静默丢弃表现为超时。
+// ss2022 多用户:客户端密码必须是 "服务端PSK:用户PSK"(与 旧面板 一致),否则客户端握手被服务端静默丢弃表现为超时。
 func TestShadowsocks2022ClientPasswordIncludesServerPSK(t *testing.T) {
 	user := model.User{Name: "u", Credentials: []byte(`{"shadowsocks":{"password":"userpw32"},"shadowsocks16":{"password":"userpw16"}}`)}
 	entries := []Entry{{Host: "1.2.3.4"}}

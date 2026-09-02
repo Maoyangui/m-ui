@@ -279,3 +279,8 @@ a.stat:hover { border-color: var(--primary); }
 .top-bar div { height: 100%; background: var(--primary); border-radius: 4px; }
 .top-val { white-space: nowrap; }
 @media (max-width: 700px) { .top-row { grid-template-columns: 1.6rem 1fr auto; } .top-bar { display: none; } }
+
+/* 顶部常驻警示(默认密码等) */
+.alert-bar { display: flex; align-items: center; gap: .8rem; margin: .9rem 1.5rem 0; padding: .6rem .9rem; border: 1px solid var(--danger); background: var(--danger-soft); color: var(--danger); border-radius: var(--radius-sm); font-weight: 500; }
+.alert-bar span { flex: 1; }
+@media (max-width: 900px) { .alert-bar { margin: .8rem 1rem 0; } }

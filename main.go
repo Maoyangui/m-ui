@@ -30,28 +30,47 @@ var version = "0.1.0"
 func usage() {
 	fmt.Println("m-ui", version)
 	fmt.Println()
-	fmt.Println("用法:")
-	fmt.Println("  m-ui run                          启动面板(主/副角色由数据库设置 nodeMode 决定)")
-	fmt.Println("  m-ui import -from <s-ui.db> [...] 从旧 s-ui 数据库迁移")
-	fmt.Println("  m-ui backup -db <m-ui.db> -out <zip> 生成备份(含证书)")
-	fmt.Println("  m-ui restore -db <m-ui.db> -from <zip|db> 还原备份(服务停止时执行)")
-	fmt.Println("  m-ui selfsign -hosts <域名,IP>    生成自签证书")
-	fmt.Println("  m-ui passwd -db <m-ui.db> [-user admin] [-password 新密码]  重置管理员密码(忘记密码 / 导入后)")
-	fmt.Println("  m-ui set -db <m-ui.db> key=value ...  写入设置(如首次启动前改端口:webPort=3053 nodeMode=true)")
-	fmt.Println("  m-ui version                      显示版本")
+	fmt.Println("不带参数运行 m-ui 进入管理菜单(重启 / 更新 / 查看地址账号 / 重置密码 / 备份 / 卸载)。")
+	fmt.Println()
+	fmt.Println("子命令:")
+	rows := [][2]string{
+		{"run [-db 路径]", "启动面板(主/副角色由设置 nodeMode 决定)"},
+		{"menu", "管理菜单(同不带参数)"},
+		{"info [-db 路径]", "打印面板地址与账号"},
+		{"import -from <旧面板.db> [-to m-ui.db]", "从旧面板数据库迁移(兼容导入)"},
+		{"backup -db <m-ui.db> [-out zip]", "生成备份(含证书)"},
+		{"restore -db <m-ui.db> -from <zip|db>", "还原备份(服务停止时执行)"},
+		{"selfsign -hosts <域名,IP>", "生成自签证书"},
+		{"passwd -db <m-ui.db> [-password 新密码]", "重置管理员密码"},
+		{"set -db <m-ui.db> key=value ...", "写入设置(如 webPort=3053 nodeMode=true)"},
+		{"render -db <m-ui.db>", "打印并校验 sing-box 配置"},
+		{"version", "显示版本"},
+	}
+	for _, r := range rows {
+		fmt.Printf("  m-ui %-42s %s\n", r[0], r[1])
+	}
 }
 
 func main() {
 	if len(os.Args) < 2 {
-		usage()
+		runMenu()
 		return
 	}
 	switch os.Args[1] {
+	case "menu":
+		runMenu()
+	case "help", "-h", "--help":
+		usage()
+	case "info":
+		fs := flag.NewFlagSet("info", flag.ExitOnError)
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径")
+		fs.Parse(os.Args[2:])
+		printInstallSummary(*dbPath)
 	case "version", "-v", "--version":
 		fmt.Println("m-ui", version)
 	case "import":
 		fs := flag.NewFlagSet("import", flag.ExitOnError)
-		from := fs.String("from", "", "旧 s-ui 数据库路径(只读打开,绝不修改源文件)")
+		from := fs.String("from", "", "旧面板数据库路径(只读打开,绝不修改源文件)")
 		to := fs.String("to", "m-ui.db", "生成的 m-ui 数据库路径")
 		order := fs.String("order", "", "线路排序文件:每行一个线路名,可选")
 		title := fs.String("title", "", "订阅 Profile-Title,可选")

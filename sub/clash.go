@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// basicClashConfig 是 clash/mihomo 订阅的骨架(dns + 规则),与 s-ui 默认一致。
+// basicClashConfig 是 clash/mihomo 订阅的骨架(dns + 规则),与常见默认一致。
 // 用户如在设置里提供自定义模板则整体替换(设置项 subClashExt)。
 const basicClashConfig = `mixed-port: 7890
 allow-lan: false

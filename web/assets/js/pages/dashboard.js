@@ -28,6 +28,7 @@ function quickStart() {
   let hidden = false;
   try { hidden = localStorage.getItem('m-ui.hideQuickStart') === '1'; } catch {}
   const items = [
+    { ok: !s.defaultPassword, page: 'settings', text: t('qs.password'), opt: false },
     { ok: !!s.domain, page: 'settings', text: t('qs.domain'), opt: false },
     { ok: s.certExists && !s.certSelfSigned, page: 'cert', text: s.certExists && s.certSelfSigned ? t('qs.certSelf') : t('qs.cert'), opt: false },
     { ok: (s.lines || 0) > 0, page: 'lines', text: t('qs.lines'), opt: false },

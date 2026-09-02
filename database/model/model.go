@@ -9,7 +9,7 @@ type Setting struct {
 	Value string `json:"value"`
 }
 
-// Admin 面板登录账号(bcrypt 哈希,从旧 s-ui 原样迁入)。
+// Admin 面板登录账号(bcrypt 哈希,从旧面板原样迁入)。
 type Admin struct {
 	Id         uint   `json:"id" gorm:"primaryKey;autoIncrement"`
 	Username   string `json:"username" gorm:"uniqueIndex"`
@@ -17,7 +17,7 @@ type Admin struct {
 	LastLogins string `json:"lastLogins"`
 }
 
-// Upstream 上游落地(旧 s-ui 的出站)。warp 本地代理也是一个 Upstream(type=socks 指向 127.0.0.1:40000)。
+// Upstream 上游落地(旧面板的出站)。warp 本地代理也是一个 Upstream(type=socks 指向 127.0.0.1:40000)。
 // direct 不入库,渲染时内置。
 type Upstream struct {
 	Id      uint            `json:"id" gorm:"primaryKey;autoIncrement"`
@@ -28,7 +28,7 @@ type Upstream struct {
 }
 
 // Line 线路 = 用户在订阅里看到的一个节点。
-// 合并了旧 s-ui 的"入站 + 路由规则":一条线路即 一个入口协议+端口 → 一个上游。
+// 合并了旧面板的"入站 + 路由规则":一条线路即 一个入口协议+端口 → 一个上游。
 // 端口在所有入口服务器上一致,配置由 Hub 按服务器渲染下发。
 type Line struct {
 	Id         uint            `json:"id" gorm:"primaryKey;autoIncrement"`
@@ -150,7 +150,7 @@ type SubLog struct {
 	Status int    `json:"status"`
 }
 
-// Stats 流量时序(bucket 聚合,沿用 s-ui 的四元唯一键+累加合并模型,天然支持多机合并)。
+// Stats 流量时序(bucket 聚合,四元唯一键+累加合并模型,天然支持多机合并)。
 type Stats struct {
 	Id        uint64 `json:"id" gorm:"primaryKey;autoIncrement"`
 	DateTime  int64  `json:"dateTime" gorm:"uniqueIndex:idx_stats_bucket,priority:3"`

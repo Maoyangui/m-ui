@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # m-ui 安装/升级脚本(Linux amd64/arm64,systemd)
 #
-#   bash install.sh <m-ui 二进制路径或下载 URL> [--db /etc/m-ui/m-ui.db] [--restore backup.zip] [--import s-ui.db]
+#   bash install.sh <m-ui 二进制路径或下载 URL> [--db /etc/m-ui/m-ui.db] [--restore backup.zip] [--import 旧面板.db]
 #
 # 幂等:重复执行即升级二进制并重启;数据库与证书不动。
 set -euo pipefail
@@ -21,7 +21,7 @@ while [ $# -gt 0 ]; do
 done
 
 [ "$(id -u)" -eq 0 ] || { echo "请以 root 运行"; exit 1; }
-[ -n "$SRC" ] || { echo "用法: bash install.sh <m-ui 二进制路径或 URL> [--db 路径] [--restore 备份.zip] [--import s-ui.db]"; exit 2; }
+[ -n "$SRC" ] || { echo "用法: bash install.sh <m-ui 二进制路径或 URL> [--db 路径] [--restore 备份.zip] [--import 旧面板.db]"; exit 2; }
 command -v systemctl >/dev/null || { echo "需要 systemd"; exit 1; }
 
 TMP="$(mktemp)"
@@ -40,6 +40,7 @@ chmod 0755 "$TMP"
 "$TMP" version >/dev/null || { echo "二进制无法执行(架构不符?)"; exit 1; }
 
 mkdir -p "$(dirname "$DB")" /etc/m-ui/cert /etc/m-ui/backups
+FRESH=0; [ -f "$DB" ] || FRESH=1
 if systemctl is-active --quiet m-ui; then systemctl stop m-ui; fi
 install -m 0755 "$TMP" /usr/local/bin/m-ui
 rm -f "$TMP"
@@ -48,7 +49,7 @@ if [ -n "$RESTORE" ]; then
   echo "还原备份 $RESTORE → $DB"
   /usr/local/bin/m-ui restore -db "$DB" -from "$RESTORE"
 elif [ -n "$IMPORT" ]; then
-  echo "从 s-ui 数据库导入 $IMPORT → $DB"
+  echo "从旧面板数据库导入 $IMPORT → $DB"
   /usr/local/bin/m-ui import -from "$IMPORT" -to "$DB"
 fi
 
@@ -74,10 +75,20 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 systemctl enable --now m-ui
-sleep 2
+sleep 3
 if systemctl is-active --quiet m-ui; then
-  echo "m-ui 已启动。面板地址与路径见: journalctl -u m-ui -n 20 --no-pager | grep 面板"
-  journalctl -u m-ui -n 20 --no-pager | grep -E "面板|订阅|数据面" || true
+  echo
+  echo "=================== m-ui 安装完成 ==================="
+  /usr/local/bin/m-ui info -db "$DB"
+  if [ "$FRESH" = 1 ] && [ -z "$RESTORE" ] && [ -z "$IMPORT" ]; then
+    echo "  首次安装默认账号: admin / admin  ——  请登录后立即在 设置 → 管理员 修改密码"
+  elif [ -n "$IMPORT" ]; then
+    echo "  账号沿用旧面板库;忘记密码可执行: m-ui passwd -db $DB"
+  elif [ -n "$RESTORE" ]; then
+    echo "  账号沿用备份;忘记密码可执行: m-ui passwd -db $DB"
+  fi
+  echo "  下一步:登录面板,按概览页“快速开始”依次完成 域名 → 证书 → 线路 → 用户"
+  echo "====================================================="
 else
   echo "启动失败:"; journalctl -u m-ui -n 40 --no-pager; exit 1
 fi

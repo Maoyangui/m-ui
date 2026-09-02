@@ -34,7 +34,7 @@ func (s *Server) dryRunLine(line *model.Line) error {
 	return core.ValidateInbound(ib)
 }
 
-// defaultTestURL 是上游健康检查的目标(与 clash/s-ui 默认一致),可用设置 upstreamTestUrl 覆盖。
+// defaultTestURL 是上游健康检查的目标(与 clash 默认一致),可用设置 upstreamTestUrl 覆盖。
 const defaultTestURL = "http://www.gstatic.com/generate_204"
 
 type upstreamTestResult struct {

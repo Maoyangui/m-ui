@@ -94,6 +94,17 @@ function renderRole() {
   b.textContent = s.role === 'node' ? t('role.node') : t('role.master');
   b.className = 'badge ' + (s.role === 'node' ? 'node' : 'primary');
   document.getElementById('sidebar-version').textContent = s.version ? 'v' + s.version : '';
+  // 默认密码未改:顶部常驻警示
+  let bar = document.getElementById('default-pw-bar');
+  if (s.defaultPassword) {
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'default-pw-bar';
+      bar.className = 'alert-bar';
+      document.querySelector('.main').insertBefore(bar, document.getElementById('page'));
+    }
+    bar.innerHTML = `<span>${t('alert.defaultPw')}</span><a href="#/settings" class="btn sm">${t('alert.changeNow')}</a>`;
+  } else if (bar) bar.remove();
 }
 
 document.getElementById('lang-select').addEventListener('change', e => {
