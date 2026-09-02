@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDuration, fmtRelative, toast, registerActions, badge, dot, empty } from '../ui.js';
-import { areaChart } from '../chart.js';
+import { barChart, bucketFor } from '../chart.js';
 
 export const title = () => t('nav.dashboard');
 let range = 24, logLevel = 'info', topHours = 24;
@@ -158,9 +158,9 @@ function renderCore() {
 async function renderChart() {
   const el = document.getElementById('dash-chart');
   if (!el) return;
-  const d = await get(`stats?resource=user&hours=${range}`);
+  const d = await get(`stats?resource=user&hours=${range}&bucket=${bucketFor(range)}&tz=${-new Date().getTimezoneOffset()}`);
   if (range === 24) { state._dayUp = d.totalUp; state._dayDown = d.totalDown; renderStats(); }
-  areaChart(el, d.points, { upLabel: t('dash.up'), downLabel: t('dash.down') });
+  barChart(el, d.points, { span: d.span, upLabel: t('dash.up'), downLabel: t('dash.down'), totalLabel: t('dash.total'), peakLabel: t('dash.peak'), emptyText: t('dash.noTraffic') });
 }
 
 function renderOnline() {

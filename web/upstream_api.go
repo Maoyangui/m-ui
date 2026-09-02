@@ -16,7 +16,7 @@ import (
 )
 
 // dryRunUpstream 保存前用 sing-box 干跑该出站:拦住会拖垮数据面的坏配置
-//(如 tuic uuid 格式错误),错误原样回给前端。
+// (如 tuic uuid 格式错误),错误原样回给前端。
 func (s *Server) dryRunUpstream(up *model.Upstream) error {
 	ob, err := render.OutboundJSON(*up)
 	if err != nil {

@@ -54,9 +54,9 @@ type Line struct {
 
 // Node 入口服务器。IsLocal 标记 Hub 所在机;副机通过 ApiUrl+Token 管理。
 type Node struct {
-	Id      uint   `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name    string `json:"name" gorm:"uniqueIndex"`
-	Domain  string `json:"domain"`
+	Id       uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name     string `json:"name" gorm:"uniqueIndex"`
+	Domain   string `json:"domain"`
 	ApiUrl   string `json:"apiUrl"`
 	Token    string `json:"-"`
 	Insecure bool   `json:"insecure"` // 副机面板用自签证书时跳过校验

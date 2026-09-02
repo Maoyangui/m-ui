@@ -5,7 +5,7 @@ import "testing"
 func TestInboundConnRegexMatchesRingBufferFormat(t *testing.T) {
 	cases := map[string][3]string{
 		"2026/09/02 12:51:53 INFO - inbound/anytls[对照-anytls-443]inbound connection from 20.78.1.208:27872": {"anytls", "对照-anytls-443", "20.78.1.208"},
-		"2026/09/02 12:51:51 INFO - inbound/hysteria2[测试-hy2] inbound connection from [2001:db8::1]:46502":     {"hysteria2", "测试-hy2", "[2001:db8::1]"},
+		"2026/09/02 12:51:51 INFO - inbound/hysteria2[测试-hy2] inbound connection from [2001:db8::1]:46502":  {"hysteria2", "测试-hy2", "[2001:db8::1]"},
 	}
 	for line, want := range cases {
 		m := reInboundConn.FindStringSubmatch(line)

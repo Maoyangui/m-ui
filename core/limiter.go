@@ -72,7 +72,7 @@ func (l *Limiter) SetLimits(limits map[string]UserLimitSpec) {
 	l.limits = map[string]userLimit{}
 	for name, s := range limits {
 		l.limits[name] = userLimit{
-			upBps:       int64(s.UpMbps) * 125000,   // Mbps → 字节/秒
+			upBps:       int64(s.UpMbps) * 125000, // Mbps → 字节/秒
 			downBps:     int64(s.DownMbps) * 125000,
 			deviceLimit: s.DeviceLimit,
 		}

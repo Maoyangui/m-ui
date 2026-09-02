@@ -23,7 +23,12 @@ func (f *fakeSink) send(_, _, text string) error {
 	f.mu.Unlock()
 	return nil
 }
-func (f *fakeSink) wait() []string { time.Sleep(50 * time.Millisecond); f.mu.Lock(); defer f.mu.Unlock(); return append([]string(nil), f.msgs...) }
+func (f *fakeSink) wait() []string {
+	time.Sleep(50 * time.Millisecond)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.msgs...)
+}
 
 func setup(t *testing.T, settings map[string]string) (*Monitor, *fakeSink, func(string) string) {
 	t.Helper()

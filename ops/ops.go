@@ -24,40 +24,40 @@ import (
 // ---- 系统信息 ----
 
 type WarpInfo struct {
-	Installed  bool   `json:"installed"`
-	Service    string `json:"service"`  // warp-svc 状态
-	Socks      string `json:"socks"`    // warp-socks5 单元状态
-	Port       int    `json:"port"`
-	Listening  bool   `json:"listening"`
-	Status     string `json:"status"`   // warp-cli status 首行
-	Exit       string `json:"exit"`     // on | plus | off | 错误
-	ExitIP     string `json:"exitIp"`
-	ExitLoc    string `json:"exitLoc"`
-	ExitColo   string `json:"exitColo"`
+	Installed bool   `json:"installed"`
+	Service   string `json:"service"` // warp-svc 状态
+	Socks     string `json:"socks"`   // warp-socks5 单元状态
+	Port      int    `json:"port"`
+	Listening bool   `json:"listening"`
+	Status    string `json:"status"` // warp-cli status 首行
+	Exit      string `json:"exit"`   // on | plus | off | 错误
+	ExitIP    string `json:"exitIp"`
+	ExitLoc   string `json:"exitLoc"`
+	ExitColo  string `json:"exitColo"`
 }
 
 type Info struct {
-	Linux    bool     `json:"linux"`
-	OS       string   `json:"os"`
-	Kernel   string   `json:"kernel"`
-	Arch     string   `json:"arch"`
-	Hostname string   `json:"hostname"`
-	Uptime   int64    `json:"uptime"`
-	Load     string   `json:"load"`
-	MemTotal int64    `json:"memTotal"`
-	MemAvail int64    `json:"memAvail"`
-	SwapTotal int64   `json:"swapTotal"`
-	SwapFree int64    `json:"swapFree"`
-	DiskTotal int64   `json:"diskTotal"`
-	DiskFree int64    `json:"diskFree"`
-	CC       string   `json:"cc"`     // tcp_congestion_control
-	Qdisc    string   `json:"qdisc"`
-	NoFile   uint64   `json:"nofile"` // 本进程打开文件数上限
-	NTP      string   `json:"ntp"`    // yes | no | unknown
-	Root     bool     `json:"root"`
-	Warp     WarpInfo `json:"warp"`
-	Tuned    bool     `json:"tuned"`  // 存在 /etc/sysctl.d/99-m-ui-tune.conf
-	Limits   bool     `json:"limits"` // 存在 m-ui.service override
+	Linux     bool     `json:"linux"`
+	OS        string   `json:"os"`
+	Kernel    string   `json:"kernel"`
+	Arch      string   `json:"arch"`
+	Hostname  string   `json:"hostname"`
+	Uptime    int64    `json:"uptime"`
+	Load      string   `json:"load"`
+	MemTotal  int64    `json:"memTotal"`
+	MemAvail  int64    `json:"memAvail"`
+	SwapTotal int64    `json:"swapTotal"`
+	SwapFree  int64    `json:"swapFree"`
+	DiskTotal int64    `json:"diskTotal"`
+	DiskFree  int64    `json:"diskFree"`
+	CC        string   `json:"cc"` // tcp_congestion_control
+	Qdisc     string   `json:"qdisc"`
+	NoFile    uint64   `json:"nofile"` // 本进程打开文件数上限
+	NTP       string   `json:"ntp"`    // yes | no | unknown
+	Root      bool     `json:"root"`
+	Warp      WarpInfo `json:"warp"`
+	Tuned     bool     `json:"tuned"`  // 存在 /etc/sysctl.d/99-m-ui-tune.conf
+	Limits    bool     `json:"limits"` // 存在 m-ui.service override
 }
 
 // Collect 收集系统信息;非 Linux 只填基础字段。

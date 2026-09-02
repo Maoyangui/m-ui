@@ -26,9 +26,9 @@ import (
 	"github.com/fangjunsheng555/m-ui/logger"
 	"github.com/fangjunsheng555/m-ui/monitor"
 	"github.com/fangjunsheng555/m-ui/notify"
-	"github.com/fangjunsheng555/m-ui/upstream"
 	"github.com/fangjunsheng555/m-ui/render"
 	"github.com/fangjunsheng555/m-ui/sub"
+	"github.com/fangjunsheng555/m-ui/upstream"
 
 	"github.com/op/go-logging"
 	"golang.org/x/crypto/bcrypt"
@@ -48,18 +48,18 @@ func SetPanelStarter(f func(*Runner) error) { startPanel = f }
 
 // Runner 持有数据面运行所需的一切。
 type Runner struct {
-	db       *gorm.DB
-	core     *core.Core
-	subSrv   *sub.Server
-	jobs     *jobs.Scheduler
-	notifier *notify.Notifier
-	monitor  *monitor.Monitor
-	hub      *hub.Hub
-	dbPath   string
-	cert     certState
+	db         *gorm.DB
+	core       *core.Core
+	subSrv     *sub.Server
+	jobs       *jobs.Scheduler
+	notifier   *notify.Notifier
+	monitor    *monitor.Monitor
+	hub        *hub.Hub
+	dbPath     string
+	cert       certState
 	applied    map[string]string // 数据面当前生效的出站(tag → JSON),供上游热更新做差异
 	appliedRaw []byte            // 数据面当前生效的完整配置,渲染结果相同则不重启
-	mu       sync.Mutex // 串行化重载,避免并发改动互相打断
+	mu         sync.Mutex        // 串行化重载,避免并发改动互相打断
 }
 
 // Notifier 暴露通知器(面板发测试消息、登录告警)。

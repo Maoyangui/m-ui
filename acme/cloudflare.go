@@ -48,9 +48,9 @@ func (c *Cloudflare) do(ctx context.Context, method, path string, body interface
 	}
 	defer resp.Body.Close()
 	var env struct {
-		Success bool            `json:"success"`
+		Success bool                       `json:"success"`
 		Errors  []struct{ Message string } `json:"errors"`
-		Result  json.RawMessage `json:"result"`
+		Result  json.RawMessage            `json:"result"`
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err := json.Unmarshal(raw, &env); err != nil {

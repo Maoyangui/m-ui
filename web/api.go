@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fangjunsheng555/m-ui/core"
 	"github.com/fangjunsheng555/m-ui/creds"
 	"github.com/fangjunsheng555/m-ui/database"
 	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/logger"
-	"github.com/fangjunsheng555/m-ui/core"
 	"github.com/fangjunsheng555/m-ui/hop"
+	"github.com/fangjunsheng555/m-ui/logger"
 	"github.com/fangjunsheng555/m-ui/render"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -81,19 +81,19 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.db.Model(&model.User{}).Select("COALESCE(SUM(down+total_down),0)").Scan(&totalDown)
 
 	status := map[string]interface{}{
-		"role":          s.role(),
-		"coreRunning":   s.run.CoreRunning(),
-		"uptime":        s.run.Uptime(),
-		"lines":         lineCount,
-		"upstreams":     upstreamCount,
-		"users":         userCount,
-		"enabledUsers":  enabledUsers,
-		"trafficUp":     totalUp,
-		"trafficDown":   totalDown,
-		"domain":        s.setting("webDomain"),
-		"goroutines":    runtime.NumGoroutine(),
-		"version":       Version,
-		"onlineUsers":   len(s.run.Onlines().Users),
+		"role":         s.role(),
+		"coreRunning":  s.run.CoreRunning(),
+		"uptime":       s.run.Uptime(),
+		"lines":        lineCount,
+		"upstreams":    upstreamCount,
+		"users":        userCount,
+		"enabledUsers": enabledUsers,
+		"trafficUp":    totalUp,
+		"trafficDown":  totalDown,
+		"domain":       s.setting("webDomain"),
+		"goroutines":   runtime.NumGoroutine(),
+		"version":      Version,
+		"onlineUsers":  len(s.run.Onlines().Users),
 	}
 	// 快速开始清单用
 	var nodeCount, planCount int64

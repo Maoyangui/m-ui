@@ -366,12 +366,12 @@ func Info(certPath string) CertInfo {
 // ---- 预检 ----
 
 type PrecheckResult struct {
-	Domain    string            `json:"domain"`
-	PublicIP  string            `json:"publicIp"`
-	Resolved  map[string]string `json:"resolved"` // resolver → A 记录
-	DNSOk     bool              `json:"dnsOk"`
-	Port80    string            `json:"port80"` // free | busy | error text
-	Cloudflare bool             `json:"cloudflare"` // A 记录像 Cloudflare 代理 IP 段(不完全判断)
+	Domain     string            `json:"domain"`
+	PublicIP   string            `json:"publicIp"`
+	Resolved   map[string]string `json:"resolved"` // resolver → A 记录
+	DNSOk      bool              `json:"dnsOk"`
+	Port80     string            `json:"port80"`     // free | busy | error text
+	Cloudflare bool              `json:"cloudflare"` // A 记录像 Cloudflare 代理 IP 段(不完全判断)
 }
 
 // Precheck 检查域名解析是否指向本机公网 IP、80 端口是否空闲。

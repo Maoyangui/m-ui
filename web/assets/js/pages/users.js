@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del, qrUrl } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy } from '../ui.js';
-import { areaChart } from '../chart.js';
+import { barChart, bucketFor } from '../chart.js';
 
 export const title = () => t('user.title');
 export const subtitle = () => t('user.subtitle');
@@ -144,13 +144,23 @@ async function showDetail(id) {
       </div>
     </section>
     <section><h3>${t('user.onlineIps')}</h3><div id="ud-ips"></div></section>
-    <section><h3>${t('user.traffic7d')}</h3><div id="ud-chart"></div></section>
+    <section>
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:.4rem"><h3 style="margin:0">${t('user.trafficChart')}</h3>
+        <div class="seg">${[24, 168, 720].map(h => `<button data-act="user.chartRange" data-id="${h}" class="${h === drawerRange ? 'active' : ''}">${t('dash.range.' + (h === 24 ? '24h' : h === 168 ? '7d' : '30d'))}</button>`).join('')}</div></div>
+      <div id="ud-chart"></div>
+    </section>
     <section><h3>${t('user.lines')}</h3><div class="chips">${(u.lineIds || []).map(lid => { const l = state.lines.find(x => x.id === lid); return l ? `<span class="chip">${esc(l.name)}</span>` : ''; }).join('') || `<span class="muted small">${t('common.none')}</span>`}</div>
       ${(u.extIds || []).length ? `<h3 style="margin-top:.6rem">${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span></span>` : ''; }).join('')}</div>` : ''}</section>`);
   refreshDrawerLive();
-  const d = await get(`stats?resource=user&tag=${encodeURIComponent(u.name)}&hours=168`);
+  await renderUserChart(u.name, drawerRange);
+}
+
+let drawerRange = 168;
+async function renderUserChart(name, hours) {
   const ch = document.getElementById('ud-chart');
-  if (ch) areaChart(ch, d.points, { height: 160, upLabel: t('dash.up'), downLabel: t('dash.down') });
+  if (!ch) return;
+  const d = await get(`stats?resource=user&tag=${encodeURIComponent(name)}&hours=${hours}&bucket=${bucketFor(hours)}&tz=${-new Date().getTimezoneOffset()}`);
+  barChart(ch, d.points, { span: d.span, height: 170, upLabel: t('dash.up'), downLabel: t('dash.down'), totalLabel: t('dash.total'), peakLabel: t('dash.peak'), emptyText: t('dash.noTraffic') });
 }
 
 function refreshDrawerLive() {
@@ -281,6 +291,12 @@ async function fullUpdate(u, patch) {
 
 registerActions({
   'user.filter': id => { filter = id; document.querySelectorAll('#user-filter button').forEach(b => b.classList.toggle('active', b.dataset.id === id)); renderRows(); },
+  'user.chartRange': async id => {
+    drawerRange = Number(id);
+    document.querySelectorAll('[data-act="user.chartRange"]').forEach(b => b.classList.toggle('active', b.dataset.id === id));
+    const u = state.users.find(x => x.id === drawerUser);
+    if (u) await renderUserChart(u.name, drawerRange);
+  },
   'user.sort': id => {
     if (sortKey === id) sortDir = -sortDir; else { sortKey = id; sortDir = 1; }
     document.querySelectorAll('th.sortable').forEach(h => {

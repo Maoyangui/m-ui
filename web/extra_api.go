@@ -1,10 +1,10 @@
 package web
 
 import (
-	"regexp"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -64,29 +64,56 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	end := time.Now().Unix()
 	start := end - int64(hours)*3600
 
-	q := s.db.Model(&model.Stats{}).Where("resource = ? AND date_time > ? AND date_time <= ?", dbResource, start, end)
-	if tag != "" {
-		q = q.Where("tag = ?", tag)
-	}
 	var rows []model.Stats
-	q.Order("date_time asc").Find(&rows)
 
-	// 目标最多 240 个点;桶宽不小于落库桶
-	numBuckets := 240
+	// 桶宽:前端可指定 bucket(秒,如 300/3600/21600/86400)得到整齐的时段柱;
+	// 未指定时最多 240 个点,桶宽不小于落库桶
 	bucketSeconds := s.settingInt("statsBucketSeconds", 60)
 	if bucketSeconds < 1 {
 		bucketSeconds = 60
 	}
-	if maxB := int((end - start) / int64(bucketSeconds)); maxB < numBuckets {
-		numBuckets = maxB
+	var span int64
+	var numBuckets int
+	if b, _ := strconv.Atoi(r.URL.Query().Get("bucket")); b >= bucketSeconds && b <= 7*86400 {
+		span = int64(b)
+		// 起点对齐到桶边界:按查看者时区(tz=分钟偏移,浏览器传入;缺省用服务器时区),
+		// 日桶对齐到零点,小时级桶对齐到当天内的整数倍(6h 桶 → 0/6/12/18 点),更细的桶按 UTC 取整
+		loc := time.Now().Location()
+		if tz, err := strconv.Atoi(r.URL.Query().Get("tz")); err == nil && tz >= -14*60 && tz <= 14*60 {
+			loc = time.FixedZone("viewer", tz*60)
+		}
+		st := time.Unix(start, 0).In(loc)
+		var aligned time.Time
+		switch {
+		case span >= 86400:
+			aligned = time.Date(st.Year(), st.Month(), st.Day(), 0, 0, 0, 0, loc)
+		case span >= 3600:
+			secOfDay := int64(st.Hour())*3600 + int64(st.Minute())*60 + int64(st.Second())
+			midnight := time.Date(st.Year(), st.Month(), st.Day(), 0, 0, 0, 0, loc)
+			aligned = midnight.Add(time.Duration(secOfDay-secOfDay%span) * time.Second)
+		default:
+			aligned = time.Unix(start-start%span, 0)
+		}
+		start = aligned.Unix()
+		numBuckets = int((end-start)/span) + 1
+	} else {
+		numBuckets = 240
+		if maxB := int((end - start) / int64(bucketSeconds)); maxB < numBuckets {
+			numBuckets = maxB
+		}
+		if numBuckets < 1 {
+			numBuckets = 1
+		}
+		span = (end - start) / int64(numBuckets)
+		if span == 0 {
+			span = 1
+		}
 	}
-	if numBuckets < 1 {
-		numBuckets = 1
+	q := s.db.Model(&model.Stats{}).Where("resource = ? AND date_time > ? AND date_time <= ?", dbResource, start, end)
+	if tag != "" {
+		q = q.Where("tag = ?", tag)
 	}
-	span := (end - start) / int64(numBuckets)
-	if span == 0 {
-		span = 1
-	}
+	q.Order("date_time asc").Find(&rows)
 	type point struct {
 		T    int64 `json:"t"`
 		Up   int64 `json:"up"`

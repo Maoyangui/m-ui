@@ -80,7 +80,6 @@ func systemctl(args ...string) {
 	}
 }
 
-
 // settingsOf 读取设置(离线打开数据库)。
 func settingsOf(dbPath string) (map[string]string, error) {
 	db, err := database.Open(dbPath)

@@ -31,8 +31,8 @@ type Deps struct {
 	ReloadUsers func() error     // 用户表变更后热更新入站并踢线
 	IsNode      func() bool      // 是否副机
 	Setting     func(string) string
-	Notify      func(text string)  // 用户被禁用时的通知(可为 nil)
-	LocalRatio  func() float64     // 本机流量倍率(可为 nil = 1);只在主机计费路径生效,副机账本保持原始值
+	Notify      func(text string) // 用户被禁用时的通知(可为 nil)
+	LocalRatio  func() float64    // 本机流量倍率(可为 nil = 1);只在主机计费路径生效,副机账本保持原始值
 }
 
 // Onlines 是最近一个统计周期内有流量经过的对象。
@@ -175,7 +175,7 @@ func (s *Scheduler) runStats() {
 			if isNode {
 				// 副机:写单调账本,主机按游标回收
 				if err := tx.Clauses(clause.OnConflict{
-					Columns:   []clause.Column{{Name: "user_name"}},
+					Columns: []clause.Column{{Name: "user_name"}},
 					DoUpdates: clause.Assignments(map[string]interface{}{
 						"up":   gorm.Expr("agent_counters.up + ?", t.up),
 						"down": gorm.Expr("agent_counters.down + ?", t.down),

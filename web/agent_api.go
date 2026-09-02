@@ -69,7 +69,7 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAgentInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"isNode": strings.EqualFold(s.setting("nodeMode"), "true"),
-		"token": s.nodeToken(), "revision": s.setting("hubRevision"), "appliedAt": s.setting("hubAppliedAt"),
+		"token":  s.nodeToken(), "revision": s.setting("hubRevision"), "appliedAt": s.setting("hubAppliedAt"),
 		"apiUrl": s.selfApiURL(),
 	})
 }

@@ -28,7 +28,7 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		"settings": map[string]interface{}{
 			"acmeDomain": s.setting("acmeDomain"), "acmeEmail": s.setting("acmeEmail"), "acmeMethod": s.setting("acmeMethod"),
 			"hasCfToken": s.setting("acmeCfToken") != "", "acmeStaging": s.setting("acmeStaging") == "true",
-			"acmeAutoRenew": s.setting("acmeAutoRenew") != "false",
+			"acmeAutoRenew":  s.setting("acmeAutoRenew") != "false",
 			"acmeApplyPanel": s.setting("acmeApplyPanel") != "false", "acmeApplySub": s.setting("acmeApplySub") != "false",
 			"webDomain": s.setting("webDomain"), "certFile": s.setting("certFile"), "keyFile": s.setting("keyFile"),
 		},
@@ -59,7 +59,7 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		var req struct {
-			Domain, Email, Method, CfToken string
+			Domain, Email, Method, CfToken           string
 			Staging, AutoRenew, ApplyPanel, ApplySub bool
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

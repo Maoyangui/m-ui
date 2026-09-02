@@ -284,3 +284,15 @@ a.stat:hover { border-color: var(--primary); }
 .alert-bar { display: flex; align-items: center; gap: .8rem; margin: .9rem 1.5rem 0; padding: .6rem .9rem; border: 1px solid var(--danger); background: var(--danger-soft); color: var(--danger); border-radius: var(--radius-sm); font-weight: 500; }
 .alert-bar span { flex: 1; }
 @media (max-width: 900px) { .alert-bar { margin: .8rem 1rem 0; } }
+
+/* 柱状流量图 */
+.chart-summary { display: flex; flex-wrap: wrap; gap: .4rem 1rem; align-items: center; font-size: .85rem; margin: 0 0 .4rem; }
+.chart-summary .chart-legend { margin-left: auto; }
+svg.chart.bars { width: 100%; height: auto; display: block; }
+svg.chart.bars .hit { fill: transparent; }
+svg.chart.bars .seg.down { fill: var(--ok); opacity: .85; }
+svg.chart.bars .seg.up { fill: var(--primary); opacity: .85; }
+svg.chart.bars g.bar.hot .seg { opacity: 1; }
+svg.chart.bars g.bar.hot .hit { fill: var(--surface-2); }
+svg.chart.bars .grid { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+svg.chart.bars .ylab, svg.chart.bars .xlab { fill: var(--muted); font-size: 11px; font-family: var(--mono); }

@@ -330,12 +330,12 @@ type NodeStatus struct {
 }
 
 type Deps struct {
-	DB       *gorm.DB
-	Setting  func(string) string
-	IsNode   func() bool
-	Version  string
-	Notify   func(toggle, text string)
-	LocalIPs func(user string) []string // 主机本机在线 IP,用于合并下发
+	DB             *gorm.DB
+	Setting        func(string) string
+	IsNode         func() bool
+	Version        string
+	Notify         func(toggle, text string)
+	LocalIPs       func(user string) []string // 主机本机在线 IP,用于合并下发
 	SetExternalIPs func(map[string][]string)
 }
 
