@@ -208,6 +208,9 @@ func lineToClashProxies(line model.Line, user model.User, a addr) []map[string]i
 			p["obfs"], _ = obfs["type"].(string)
 			p["obfs-password"], _ = obfs["password"].(string)
 		}
+		if ph := portHopping(line); ph != "" {
+			p["ports"] = ph // mihomo 端口跳跃
+		}
 		return []map[string]interface{}{p}
 	case "anytls":
 		p := base()

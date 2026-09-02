@@ -17,6 +17,7 @@ import (
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/logger"
 	"github.com/fangjunsheng555/m-ui/core"
+	"github.com/fangjunsheng555/m-ui/hop"
 	"github.com/fangjunsheng555/m-ui/render"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -312,6 +313,43 @@ func (s *Server) validateLine(line *model.Line) error {
 	var probe map[string]interface{}
 	if err := json.Unmarshal(line.Options, &probe); err != nil {
 		return fmt.Errorf("协议参数不是合法 JSON: %w", err)
+	}
+	if line.Protocol == "hysteria2" {
+		if ph, _ := probe["port_hopping"].(string); strings.TrimSpace(ph) != "" {
+			n, err := hop.Normalize(ph)
+			if err != nil {
+				return err
+			}
+			probe["port_hopping"] = n
+			var others []model.Line
+			s.db.Where("protocol = ? AND id != ?", "hysteria2", line.Id).Find(&others)
+			var rules []hop.Rule
+			a, b, _ := hop.ParseRange(n)
+			rules = append(rules, hop.Rule{From: a, To: b, Port: line.Port})
+			for _, o := range others {
+				var oo struct {
+					PortHopping string `json:"port_hopping"`
+				}
+				if json.Unmarshal(o.Options, &oo) == nil && oo.PortHopping != "" {
+					if x, y, err := hop.ParseRange(oo.PortHopping); err == nil {
+						rules = append(rules, hop.Rule{From: x, To: y, Port: o.Port})
+					}
+				}
+			}
+			var ports []int
+			s.db.Model(&model.Line{}).Where("id != ?", line.Id).Pluck("port", &ports)
+			if err := hop.Overlaps(rules, ports); err != nil {
+				return err
+			}
+			if b, err := json.Marshal(probe); err == nil {
+				line.Options = b
+			}
+		} else if _, has := probe["port_hopping"]; has {
+			delete(probe, "port_hopping")
+			if b, err := json.Marshal(probe); err == nil {
+				line.Options = b
+			}
+		}
 	}
 	if line.Protocol == "shadowsocks" {
 		m, _ := probe["method"].(string)

@@ -20,6 +20,7 @@ import (
 	"github.com/fangjunsheng555/m-ui/creds"
 	"github.com/fangjunsheng555/m-ui/database"
 	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/fangjunsheng555/m-ui/hop"
 	"github.com/fangjunsheng555/m-ui/hub"
 	"github.com/fangjunsheng555/m-ui/jobs"
 	"github.com/fangjunsheng555/m-ui/logger"
@@ -284,7 +285,38 @@ func (r *Runner) Start() error {
 	r.applied, _ = outboundsOf(raw)
 	r.appliedRaw = raw
 	r.applyLimits()
+	r.applyPortHopping()
 	return nil
+}
+
+// applyPortHopping 为本机部署的、开启端口跳跃的 hysteria2 线路应用 UDP 端口范围转发(Linux root 生效)。
+func (r *Runner) applyPortHopping() {
+	var lines []model.Line
+	r.db.Where("enabled = ? AND protocol = ?", true, "hysteria2").Find(&lines)
+	self := render.LocalNodeID(r.db)
+	var rules []hop.Rule
+	for _, l := range lines {
+		if !render.LineOnNode(l, self) {
+			continue
+		}
+		var o struct {
+			PortHopping string `json:"port_hopping"`
+		}
+		if json.Unmarshal(l.Options, &o) != nil || o.PortHopping == "" {
+			continue
+		}
+		a, b, err := hop.ParseRange(o.PortHopping)
+		if err != nil {
+			logger.Warning("线路 ", l.Name, " 端口跳跃范围无效: ", err)
+			continue
+		}
+		rules = append(rules, hop.Rule{From: a, To: b, Port: l.Port})
+	}
+	if err := hop.Apply(rules); err != nil {
+		logger.Warning("端口跳跃规则应用失败: ", err)
+	} else if len(rules) > 0 {
+		logger.Info("端口跳跃已应用 ", len(rules), " 条规则")
+	}
 }
 
 // outboundsOf 从渲染好的配置里取出出站列表(tag → 规范化 JSON 文本)。
@@ -469,6 +501,7 @@ func (r *Runner) reloadAllLocked(raw []byte) error {
 	r.applied, _ = outboundsOf(raw)
 	r.appliedRaw = raw
 	r.applyLimits()
+	r.applyPortHopping()
 	logger.Info("数据面已重载")
 	return nil
 }

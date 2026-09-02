@@ -24,7 +24,7 @@ const SS_METHODS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-ietf-poly1305', '202
 const FPS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random'];
 // 表单接管的 Options 键,其余进"高级参数"
 const OPT_KEYS = {
-  hysteria2: ['up_mbps', 'down_mbps', 'obfs'], tuic: ['congestion_control'], shadowsocks: ['method', 'password'],
+  hysteria2: ['up_mbps', 'down_mbps', 'obfs', 'port_hopping'], tuic: ['congestion_control'], shadowsocks: ['method', 'password'],
   anytls: ['padding_scheme'], vless: ['vision'],
 };
 const parseJ = o => { try { return typeof o === 'string' ? JSON.parse(o) : (o || {}); } catch { return {}; } };
@@ -161,7 +161,8 @@ function protoSection(protocol, o) {
     case 'hysteria2':
       h = field(t('line.upMbps'), `<input id="f-up" type="number" value="${o.up_mbps || 0}">`) +
         field(t('line.downMbps'), `<input id="f-down" type="number" value="${o.down_mbps || 0}">`) +
-        field(t('line.obfs'), `<input id="f-obfs" value="${esc((o.obfs && o.obfs.password) || '')}">`); break;
+        field(t('line.obfs'), `<input id="f-obfs" value="${esc((o.obfs && o.obfs.password) || '')}">`) +
+        `<div class="full">${field(t('line.hop'), `<input id="f-hop" value="${esc(o.port_hopping || '')}" placeholder="20000-30000">`, t('line.hopHelp'))}</div>`; break;
     case 'tuic': h = field(t('line.cc'), sel('f-cc', ['cubic', 'bbr', 'new_reno'], o.congestion_control || 'cubic')); break;
     case 'shadowsocks':
       h = field(t('line.method'), sel('f-method', SS_METHODS, o.method || 'aes-256-gcm')) +
@@ -245,6 +246,7 @@ function readForm(id) {
       if (Number(fv('f-up')) > 0) o.up_mbps = Number(fv('f-up')); else delete o.up_mbps;
       if (Number(fv('f-down')) > 0) o.down_mbps = Number(fv('f-down')); else delete o.down_mbps;
       if (fv('f-obfs')) o.obfs = { type: 'salamander', password: fv('f-obfs') }; else delete o.obfs;
+      if (fv('f-hop').trim()) o.port_hopping = fv('f-hop').trim(); else delete o.port_hopping;
       break;
     case 'tuic': o.congestion_control = fv('f-cc'); break;
     case 'shadowsocks':

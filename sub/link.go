@@ -137,7 +137,21 @@ func hysteria2URI(line model.Line, user model.User, a addr, remark string) strin
 	if a.insecure {
 		q += "&insecure=1"
 	}
+	if ph := portHopping(line); ph != "" {
+		q += "&mport=" + ph // 端口跳跃:Shadowrocket/NekoBox/sing-box 系客户端识别 mport
+	}
 	return withFragment(fmt.Sprintf("hysteria2://%s@%s?%s", password, hostPort(a.server, a.port), q), remark)
+}
+
+// portHopping 返回线路的端口跳跃范围("20000-30000"),未开启为空。
+func portHopping(line model.Line) string {
+	var o struct {
+		PortHopping string `json:"port_hopping"`
+	}
+	if len(line.Options) > 0 {
+		_ = json.Unmarshal(line.Options, &o)
+	}
+	return strings.TrimSpace(o.PortHopping)
 }
 
 // anytls://<password>@host:port?security=tls&sni=<sni>#remark

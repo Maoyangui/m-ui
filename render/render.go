@@ -73,6 +73,9 @@ func ParseTLS(line model.Line) TLSConfig {
 	return c
 }
 
+// panelOnlyOptions 是只给面板/订阅用、不能进 sing-box 入站的线路参数。
+var panelOnlyOptions = map[string]bool{"vision": true, "port_hopping": true}
+
 // LineOnNode 报告线路是否部署在某台服务器上:NodeIds 为空 = 全部;selfID 为 0(尚无本机记录)视为全部。
 func LineOnNode(line model.Line, selfID uint) bool {
 	if len(line.NodeIds) == 0 || selfID == 0 {
@@ -225,8 +228,10 @@ func inboundBase(line model.Line, cert NodeCert) (map[string]interface{}, error)
 			return nil, fmt.Errorf("解析线路参数: %w", err)
 		}
 	}
-	// 面板自有的开关键,不是 sing-box 字段
-	delete(inbound, "vision")
+	// 面板自有的开关键(vision / port_hopping 等),不是 sing-box 字段
+	for k := range panelOnlyOptions {
+		delete(inbound, k)
+	}
 	inbound["type"] = line.Protocol
 	inbound["tag"] = line.Name
 	inbound["listen"] = "::"
