@@ -115,12 +115,14 @@ document.addEventListener('change', e => {
 });
 
 // ---- 下拉菜单:表格容器有 overflow 会裁掉菜单,展开时改为 fixed 定位到 summary 下方 ----
+let menuOpenedAt = 0;
 document.addEventListener('toggle', e => {
   const d = e.target;
   if (!(d instanceof HTMLDetailsElement) || !d.classList.contains('menu')) return;
   const list = d.querySelector('.menu-list');
   if (!list) return;
   if (!d.open) { list.classList.remove('fixed'); list.style.top = list.style.left = list.style.right = ''; return; }
+  menuOpenedAt = Date.now();
   const r = d.querySelector('summary').getBoundingClientRect();
   list.classList.add('fixed');
   list.style.top = (r.bottom + 4) + 'px';
@@ -130,7 +132,11 @@ document.addEventListener('toggle', e => {
   const h = list.offsetHeight;
   if (r.bottom + 4 + h > window.innerHeight) list.style.top = Math.max(8, r.top - 4 - h) + 'px';
 }, true);
-['scroll', 'resize'].forEach(ev => window.addEventListener(ev, () => document.querySelectorAll('details.menu[open]').forEach(d => d.removeAttribute('open')), true));
+// 页面滚动/缩放时收起(fixed 定位会脱离原位置);刚打开 300ms 内的滚动事件(如 scrollIntoView 尾巴)忽略
+['scroll', 'resize'].forEach(ev => window.addEventListener(ev, () => {
+  if (Date.now() - menuOpenedAt < 300) return;
+  document.querySelectorAll('details.menu[open]').forEach(d => d.removeAttribute('open'));
+}, true));
 
 // ---- 剪贴板 ----
 export async function copy(text) {

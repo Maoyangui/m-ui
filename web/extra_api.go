@@ -156,7 +156,7 @@ func mergeIPs(a, b []string) []string {
 
 // ---- 最近入站连接(从 sing-box 日志提取,客户端"连不上"时用来判断包有没有到服务器)----
 
-var reInboundConn = regexp.MustCompile(`inbound/(\w+)\[([^\]]+)\] inbound connection from ([0-9a-fA-F.:\[\]]+?)(?::\d+)?$`)
+var reInboundConn = regexp.MustCompile(`inbound/(\w+)\[([^\]]+)\]\s*inbound connection from ([0-9a-fA-F.:\[\]]+?)(?::\d+)?\s*$`)
 var reLogTime = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`)
 
 type recentConn struct {
