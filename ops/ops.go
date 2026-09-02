@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -222,8 +223,8 @@ var Tasks = []Task{
 	{Name: "warp-disable", Title: "停用 WARP", Desc: "断开并禁用 warp-socks5 单元"},
 	{Name: "warp-uninstall", Title: "卸载 WARP", Desc: "移除 cloudflare-warp、单元与源", Danger: true},
 	{Name: "swap", Title: "创建 swap", Desc: "无 swap 时创建 <N>G /swapfile 并写入 fstab"},
-	{Name: "sysctl", Title: "内核参数 + BBR", Desc: "写入 /etc/sysctl.d/99-m-ui-tune.conf(fq+bbr、连接数、端口范围等)并应用"},
-	{Name: "limits", Title: "文件句柄上限", Desc: "为 m-ui.service 写 LimitNOFILE=1048576 等 override(重启 m-ui 生效)"},
+	{Name: "sysctl", Title: "内核参数 + BBR", Desc: "把下方参数写入 /etc/sysctl.d/99-m-ui-tune.conf 并应用(默认 fq+bbr、连接数、端口范围等,可按需修改)"},
+	{Name: "limits", Title: "文件句柄上限", Desc: "为 m-ui.service 写 LimitNOFILE/LimitNPROC override(重启 m-ui 生效)"},
 	{Name: "ntp", Title: "时间同步", Desc: "开启 systemd-timesyncd NTP 同步"},
 	{Name: "tune-all", Title: "一键优化", Desc: "swap + 内核参数 + 文件句柄 + NTP"},
 }
@@ -231,6 +232,46 @@ var Tasks = []Task{
 type Params struct {
 	Port   int
 	SwapGB int
+	NoFile int    // 文件句柄上限,默认 1048576
+	Sysctl string // 自定义内核参数(key=value 每行一条),空=默认模板
+}
+
+// DefaultNoFile 是 limits 任务的默认句柄上限。
+const DefaultNoFile = 1048576
+
+// DefaultSysctl 是 sysctl 任务的默认参数模板(可在面板按需修改)。
+const DefaultSysctl = `fs.file-max=1048576
+net.core.somaxconn=65535
+net.core.netdev_max_backlog=65535
+net.ipv4.tcp_max_syn_backlog=65535
+net.netfilter.nf_conntrack_max=524288
+net.ipv4.ip_local_port_range=10240 65535
+net.ipv4.tcp_fin_timeout=15
+net.ipv4.tcp_tw_reuse=1
+net.ipv4.tcp_fastopen=3
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+vm.swappiness=10`
+
+var sysctlLine = regexp.MustCompile(`^[a-z0-9_.\-]+\s*=\s*[A-Za-z0-9 _.\-]+$`)
+
+// ValidateSysctl 校验自定义内核参数:只允许 key=value 行、空行与 # 注释。
+func ValidateSysctl(s string) (string, error) {
+	var out []string
+	for i, raw := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if !sysctlLine.MatchString(line) {
+			return "", fmt.Errorf("第 %d 行不是合法的 key=value:%q", i+1, line)
+		}
+		out = append(out, line)
+	}
+	if len(out) == 0 {
+		return "", errors.New("内核参数为空")
+	}
+	return strings.Join(out, "\n"), nil
 }
 
 // Script 返回任务脚本;参数经校验后替换占位符。
@@ -240,6 +281,17 @@ func Script(name string, p Params) (string, error) {
 	}
 	if p.SwapGB <= 0 || p.SwapGB > 64 {
 		p.SwapGB = 2
+	}
+	if p.NoFile < 1024 || p.NoFile > 4194304 {
+		p.NoFile = DefaultNoFile
+	}
+	sysctl := DefaultSysctl
+	if strings.TrimSpace(p.Sysctl) != "" {
+		v, err := ValidateSysctl(p.Sysctl)
+		if err != nil {
+			return "", err
+		}
+		sysctl = v
 	}
 	var s string
 	switch name {
@@ -266,6 +318,8 @@ func Script(name string, p Params) (string, error) {
 	}
 	s = strings.ReplaceAll(s, "{{PORT}}", strconv.Itoa(p.Port))
 	s = strings.ReplaceAll(s, "{{SWAP_GB}}", strconv.Itoa(p.SwapGB))
+	s = strings.ReplaceAll(s, "{{NOFILE}}", strconv.Itoa(p.NoFile))
+	s = strings.ReplaceAll(s, "{{SYSCTL}}", sysctl)
 	return "set -uo pipefail\nexport DEBIAN_FRONTEND=noninteractive\n" + s, nil
 }
 
@@ -509,18 +563,7 @@ fi
 const scriptSysctl = `
 echo "== sysctl / BBR =="
 cat >/etc/sysctl.d/99-m-ui-tune.conf <<'EOF'
-fs.file-max=1048576
-net.core.somaxconn=65535
-net.core.netdev_max_backlog=65535
-net.ipv4.tcp_max_syn_backlog=65535
-net.netfilter.nf_conntrack_max=524288
-net.ipv4.ip_local_port_range=10240 65535
-net.ipv4.tcp_fin_timeout=15
-net.ipv4.tcp_tw_reuse=1
-net.ipv4.tcp_fastopen=3
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
-vm.swappiness=10
+{{SYSCTL}}
 EOF
 sysctl --system >/dev/null 2>&1 || true
 echo "拥塞控制: $(cat /proc/sys/net/ipv4/tcp_congestion_control)  队列: $(cat /proc/sys/net/core/default_qdisc)"
@@ -529,14 +572,14 @@ echo "拥塞控制: $(cat /proc/sys/net/ipv4/tcp_congestion_control)  队列: $(
 const scriptLimits = `
 echo "== limits =="
 mkdir -p /etc/systemd/system/m-ui.service.d
-cat >/etc/systemd/system/m-ui.service.d/override.conf <<'EOF'
+cat >/etc/systemd/system/m-ui.service.d/override.conf <<EOF
 [Service]
-LimitNOFILE=1048576
-LimitNPROC=1048576
+LimitNOFILE={{NOFILE}}
+LimitNPROC={{NOFILE}}
 TasksMax=infinity
 EOF
 systemctl daemon-reload
-echo "已写入 m-ui.service override(重启 m-ui 后生效)"
+echo "已写入 m-ui.service override:LimitNOFILE={{NOFILE}}(重启 m-ui 后生效)"
 `
 
 const scriptNTP = `

@@ -10,7 +10,7 @@ const yes = (ok, onText, offText) => badge(ok ? (onText || t('common.yes')) : (o
 
 export async function render(el) {
   data = await get('ops');
-  const i = data.info, w = i.warp, st = data.status;
+  const i = data.info, w = i.warp, st = data.status, p = data.params || { swapGb: 2, noFile: 1048576, sysctl: '', defaultSysctl: '' };
   const linux = i.linux;
   const dis = linux && i.root ? '' : 'disabled';
   el.innerHTML = `
@@ -52,13 +52,24 @@ export async function render(el) {
     </div>
     <section class="card">
       <div class="card-head"><h2>${t('ops.tune')}</h2><button class="btn primary sm" data-act="ops.run" data-id="tune-all" ${dis}>${t('ops.t.tune-all')}</button></div>
+      <p class="hint" style="margin-bottom:.6rem">${t('ops.tuneHelp')}</p>
       <div class="task-grid">
-        ${['swap', 'sysctl', 'limits', 'ntp'].map(n => {
+        ${['swap', 'limits', 'ntp'].map(n => {
           const task = data.tasks.find(x => x.name === n);
-          const done = { swap: i.swapTotal > 0, sysctl: i.tuned && i.cc === 'bbr', limits: i.limits, ntp: i.ntp === 'yes' }[n];
-          return `<div class="task"><div class="task-head"><b>${esc(task.title)}</b>${linux ? yes(done, t('ops.done'), t('ops.todo')) : ''}</div><p class="hint">${esc(task.desc)}</p>
-            <div class="row">${n === 'swap' ? `<input id="ops-swap" type="number" min="1" max="64" value="2" style="width:5rem"> G` : ''}<button class="btn sm" data-act="ops.run" data-id="${n}" ${dis}>${t('common.run')}</button></div></div>`;
+          const done = { swap: i.swapTotal > 0, limits: i.limits, ntp: i.ntp === 'yes' }[n];
+          const cur = { swap: i.swapTotal ? fmtBytes(i.swapTotal, 0) : '', limits: i.nofile ? `${t('ops.current')} ${i.nofile}` : '', ntp: '' }[n];
+          return `<div class="task"><div class="task-head"><b>${esc(task.title)}</b>${linux ? yes(done, t('ops.done'), t('ops.todo')) : ''}</div><p class="hint">${esc(task.desc)}${cur ? ` · ${esc(cur)}` : ''}</p>
+            <div class="row">
+              ${n === 'swap' ? `<input id="ops-swap" type="number" min="1" max="64" value="${p.swapGb}" style="width:5rem"> G` : ''}
+              ${n === 'limits' ? `<input id="ops-nofile" type="number" min="1024" max="4194304" step="1024" value="${p.noFile}" style="width:8rem">` : ''}
+              <button class="btn sm" data-act="ops.run" data-id="${n}" ${dis}>${t('common.run')}</button></div></div>`;
         }).join('')}
+      </div>
+      <div class="task" style="margin-top:.75rem">
+        <div class="task-head"><b>${esc(data.tasks.find(x => x.name === 'sysctl').title)}</b>${linux ? yes(i.tuned && i.cc === 'bbr', t('ops.done'), t('ops.todo')) : ''}</div>
+        <p class="hint">${esc(data.tasks.find(x => x.name === 'sysctl').desc)}${linux ? ` · ${t('ops.current')} ${esc(i.cc || '?')} / ${esc(i.qdisc || '?')}` : ''}</p>
+        <textarea id="ops-sysctl" class="mono" style="min-height:11rem" spellcheck="false">${esc(p.sysctl)}</textarea>
+        <div class="row"><button class="btn sm ghost" data-act="ops.sysctlDefault">${t('ops.restoreDefault')}</button><span class="grow"></span><button class="btn sm" data-act="ops.run" data-id="sysctl" ${dis}>${t('common.run')}</button></div>
       </div>
     </section>
     <section class="card">
@@ -93,13 +104,17 @@ registerActions({
     if (!await confirm(t('ops.runConfirm', { task: t2 ? t2.title : task }), { danger: !!(t2 && t2.danger) })) return;
     btn.disabled = true;
     try {
-      await post('ops/run', { task, port: Number(fv('ops-port')) || 0, swapGb: Number(fv('ops-swap')) || 0 });
+      await post('ops/run', {
+        task, port: Number(fv('ops-port')) || 0, swapGb: Number(fv('ops-swap')) || 0,
+        noFile: Number(fv('ops-nofile')) || 0, sysctl: (task === 'sysctl' || task === 'tune-all') ? fv('ops-sysctl') : '',
+      });
       toast(t('ops.started'), 'ok');
       await render(document.getElementById('page'));
       startPoll();
     } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
   },
   'ops.cancel': async () => { await post('ops/cancel').catch(() => {}); },
+  'ops.sysctlDefault': () => { document.getElementById('ops-sysctl').value = data.params.defaultSysctl; },
   'ops.warpCheck': async (_, btn) => {
     btn.disabled = true;
     try { const r = await post('ops/warp-check'); toast(`warp=${r.exit} ${r.ip || ''} ${r.loc || ''} ${r.colo || ''}`, r.exit === 'on' || r.exit === 'plus' ? 'ok' : 'err'); }

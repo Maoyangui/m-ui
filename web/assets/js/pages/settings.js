@@ -23,6 +23,7 @@ const groups = () => [
     ['subCertFile', t('set.cert'), 'text'], ['subKeyFile', t('set.key'), 'text'],
     ['subProfileTitle', t('set.subTitle'), 'text'], ['subUpdates', t('set.subUpdates'), 'number'],
     ['subEncode', t('set.subEncode'), 'bool'], ['subShowNotice', t('set.subNotice'), 'bool'],
+    ['subInsecure', t('set.subInsecure'), 'select', t('set.subInsecureHelp'), [['', t('set.subInsecureAuto')], ['true', t('common.yes')], ['false', t('common.no')]]],
   ]},
   { id: 'subpage', title: t('set.subPage'), fields: [
     ['subPageEnabled', t('set.subPageEnabled'), 'bool', t('set.subPageEnabledHelp')],
@@ -64,12 +65,14 @@ export async function render(el) {
     ${groups().map(g => `
       <section class="card">
         <div class="card-head"><h2>${esc(g.title)}</h2><div class="row">${g.test ? `<button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button>` : ''}<button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div></div>
-        <div class="form-grid">${g.fields.map(([k, label, type, help]) =>
+        <div class="form-grid">${g.fields.map(([k, label, type, help, options]) =>
           type === 'bool' || type === 'boolOn'
             ? check('set-' + k, label, s[k] === undefined || s[k] === '' ? (k === 'subPageEnabled' || type === 'boolOn') : String(s[k]).toLowerCase() === 'true', help)
             : type === 'textarea'
               ? `<div class="full">${field(label, `<textarea id="set-${k}">${esc(s[k] ?? '')}</textarea>`, help)}</div>`
-              : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">`, help)).join('')}</div>
+              : type === 'select'
+                ? field(label, `<select id="set-${k}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(s[k] ?? '') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`, help)
+                : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">`, help)).join('')}</div>
       </section>`).join('')}
     <section class="card">
       <div class="card-head"><h2>${t('set.admin')}</h2></div>

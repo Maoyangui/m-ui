@@ -17,18 +17,20 @@ import (
 
 // Entry 是一个对外入口(如 香港/台湾):订阅里线路的连接地址与 SNI。
 type Entry struct {
-	Name   string // 入口名(用于备注后缀,单入口时留空)
-	Host   string // 连接地址(IP 或域名)
-	SNI    string // TLS server_name
-	Suffix string // 备注后缀,如 "-港";单入口留空
+	Name     string // 入口名(用于备注后缀,单入口时留空)
+	Host     string // 连接地址(IP 或域名)
+	SNI      string // TLS server_name
+	Suffix   string // 备注后缀,如 "-港";单入口留空
+	Insecure bool   // 服务端为自签证书:客户端需允许不安全
 }
 
 // addr 是一条线路的一个对外地址(展开 Line.Addrs 或回落到入口)。
 type addr struct {
-	server string
-	port   int
-	sni    string
-	remark string
+	server   string
+	port     int
+	sni      string
+	remark   string
+	insecure bool
 }
 
 // resolveAddrs 把线路的对外地址展开为一组 addr。
@@ -42,6 +44,7 @@ func resolveAddrs(line model.Line, entries []Entry) []addr {
 	if len(line.Addrs) > 0 {
 		_ = json.Unmarshal(line.Addrs, &custom)
 	}
+	insecure := len(entries) > 0 && entries[0].Insecure
 	if len(custom) > 0 {
 		out := make([]addr, 0, len(custom))
 		for _, c := range custom {
@@ -49,13 +52,13 @@ func resolveAddrs(line model.Line, entries []Entry) []addr {
 			if port == 0 {
 				port = line.Port
 			}
-			out = append(out, addr{server: c.Server, port: port, sni: c.SNI, remark: c.Remark})
+			out = append(out, addr{server: c.Server, port: port, sni: c.SNI, remark: c.Remark, insecure: insecure})
 		}
 		return out
 	}
 	out := make([]addr, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, addr{server: e.Host, port: line.Port, sni: e.SNI, remark: e.Suffix})
+		out = append(out, addr{server: e.Host, port: line.Port, sni: e.SNI, remark: e.Suffix, insecure: e.Insecure})
 	}
 	return out
 }
@@ -126,6 +129,9 @@ func hysteria2URI(line model.Line, user model.User, a addr, remark string) strin
 		q += "&sni=" + url.QueryEscape(a.sni)
 	}
 	q += "&fastopen=" + boolParam(lineOption(line, "tcp_fast_open"))
+	if a.insecure {
+		q += "&insecure=1"
+	}
 	return withFragment(fmt.Sprintf("hysteria2://%s@%s?%s", password, hostPort(a.server, a.port), q), remark)
 }
 
@@ -135,6 +141,9 @@ func anytlsURI(user model.User, a addr, remark string) string {
 	q := "security=tls"
 	if a.sni != "" {
 		q += "&sni=" + url.QueryEscape(a.sni)
+	}
+	if a.insecure {
+		q += "&insecure=1"
 	}
 	return withFragment(fmt.Sprintf("anytls://%s@%s?%s", password, hostPort(a.server, a.port), q), remark)
 }
@@ -162,6 +171,9 @@ func tlsQuery(line model.Line, a addr) []string {
 		}
 		if a.sni != "" {
 			q = append(q, "sni="+url.QueryEscape(a.sni))
+		}
+		if a.insecure {
+			q = append(q, "allowInsecure=1")
 		}
 		return q
 	case "reality":
@@ -293,6 +305,9 @@ func tuicURI(line model.Line, user model.User, a addr, remark string) string {
 		cc = "cubic"
 	}
 	q := append(tlsQuery(line, a), "congestion_control="+cc, "udp_relay_mode=native", "alpn=h3")
+	if a.insecure {
+		q = append(q, "allow_insecure=1")
+	}
 	return withFragment(fmt.Sprintf("tuic://%s:%s@%s?%s", id, url.PathEscape(password), hostPort(a.server, a.port), strings.Join(q, "&")), remark)
 }
 

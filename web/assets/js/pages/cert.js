@@ -26,6 +26,7 @@ export async function render(el) {
           <span class="chip">${t('cert.usePanel')} ${badge(data.panelTLS ? 'HTTPS' : 'HTTP', data.panelTLS ? 'ok' : 'warn')}</span>
           <span class="chip">${t('cert.useSub')} ${badge(data.subTLS ? 'HTTPS' : 'HTTP', data.subTLS ? 'ok' : 'warn')}</span>
         </div>
+        ${i.exists && i.selfSigned ? `<p class="hint" style="margin-top:.6rem;color:var(--warn)">${t('cert.selfSignedNote')}</p>` : ''}
         <div class="row" style="margin-top:.8rem"><button class="btn sm" data-act="cert.selfsign">${t('cert.selfsign')}</button></div>
       </section>
       <section class="card">

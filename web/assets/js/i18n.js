@@ -173,6 +173,10 @@ const zh = {
   'node.insecure': '跳过证书校验', 'node.insecureHelp': '副机面板用自签证书或 IP 访问时勾选', 'node.push': '推送', 'node.pushed': '已推送配置', 'node.testOk': '连接成功 {v} · 数据面{core}',
   'set.pairing': '配对信息', 'set.pairingHelp': '把 API 地址与令牌填到主机的「服务器」页即可接入;本机的线路/上游/用户将由主机下发覆盖。',
   'set.rotateToken': '更换令牌', 'set.rotateConfirm': '更换后主机需重新填写新令牌才能连接,确定?', 'set.rotated': '令牌已更换',
+  'set.subInsecure': '订阅允许不安全证书', 'set.subInsecureAuto': '自动(证书为自签时开启)', 'set.subInsecureHelp': '自签证书(无域名、纯 IP)时客户端必须允许不安全才能连接:链接带 insecure=1,Clash 带 skip-cert-verify',
+  'cert.selfSignedNote': '当前是自签证书:订阅已自动带"允许不安全"(insecure / skip-cert-verify),客户端可直接导入;有域名后建议签发正式证书。',
+  'ops.tuneHelp': '默认值适合大多数 VPS;可按机器规格修改 swap 大小、句柄上限与内核参数,参数会保存供下次使用。',
+  'ops.current': '当前', 'ops.restoreDefault': '恢复默认',
 };
 
 const en = {
@@ -349,6 +353,10 @@ const en = {
   'node.insecure': 'Skip certificate verification', 'node.insecureHelp': 'Check when the node panel uses a self-signed certificate or an IP', 'node.push': 'Push', 'node.pushed': 'Config pushed', 'node.testOk': 'Connected {v} · data plane {core}',
   'set.pairing': 'Pairing', 'set.pairingHelp': 'Enter the API URL and token on the hub\'s Servers page. Lines, upstreams and users on this server are then managed by the hub.',
   'set.rotateToken': 'Rotate token', 'set.rotateConfirm': 'The hub must be updated with the new token before it can connect again. Continue?', 'set.rotated': 'Token rotated',
+  'set.subInsecure': 'Allow insecure certificate in subscriptions', 'set.subInsecureAuto': 'Auto (on when the certificate is self-signed)', 'set.subInsecureHelp': 'With a self-signed certificate (IP-only server) clients must allow insecure TLS: links get insecure=1, Clash gets skip-cert-verify',
+  'cert.selfSignedNote': 'This is a self-signed certificate: subscriptions automatically include "allow insecure" (insecure / skip-cert-verify), so clients can import directly. Issue a real certificate once you have a domain.',
+  'ops.tuneHelp': 'Defaults suit most VPS. Adjust swap size, file limit and kernel parameters to the machine; values are saved for next time.',
+  'ops.current': 'current', 'ops.restoreDefault': 'Restore defaults',
 };
 
 const dicts = { zh, en };

@@ -19,6 +19,9 @@ type Options struct {
 	ShowNotice   bool    // 是否注入流量提示节点
 	ClashTmpl    string  // 自定义 clash 模板,空=内置
 	Entries      []Entry // 对外入口(单入口即一条)
+	// Insecure 为 true 时链接带 insecure=1、clash 带 skip-cert-verify:
+	// 服务端用自签证书(纯 IP 无域名)时客户端必须允许不安全才能连上。
+	Insecure bool
 }
 
 // Result 是一份渲染好的订阅响应。

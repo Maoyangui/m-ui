@@ -30,6 +30,29 @@ func TestScriptParamsAndValidation(t *testing.T) {
 	if _, err := Script("rm-rf", Params{}); err == nil {
 		t.Fatal("未知任务应报错")
 	}
+	// nofile / sysctl 参数化
+	s, _ = Script("limits", Params{NoFile: 65536})
+	if !strings.Contains(s, "LimitNOFILE=65536") || !strings.Contains(s, "LimitNPROC=65536") {
+		t.Fatal("nofile 未替换")
+	}
+	s, _ = Script("limits", Params{NoFile: 1})
+	if !strings.Contains(s, "LimitNOFILE=1048576") {
+		t.Fatal("非法 nofile 应回落默认")
+	}
+	s, _ = Script("sysctl", Params{})
+	if !strings.Contains(s, "net.ipv4.tcp_congestion_control=bbr") || strings.Contains(s, "{{SYSCTL}}") {
+		t.Fatal("默认 sysctl 模板未写入")
+	}
+	s, _ = Script("sysctl", Params{Sysctl: "# 注释\nnet.core.somaxconn=4096\n\nvm.swappiness = 1\n"})
+	if !strings.Contains(s, "net.core.somaxconn=4096\nvm.swappiness = 1\n") || strings.Contains(s, "bbr") {
+		t.Fatalf("自定义 sysctl 未生效:\n%s", s)
+	}
+	if _, err := Script("sysctl", Params{Sysctl: "net.core.somaxconn=4096; rm -rf /"}); err == nil {
+		t.Fatal("危险 sysctl 行应被拒")
+	}
+	if _, err := ValidateSysctl("   \n# only comment\n"); err == nil {
+		t.Fatal("空参数应被拒")
+	}
 	for _, task := range Tasks {
 		if _, err := Script(task.Name, Params{}); err != nil {
 			t.Fatalf("任务 %s 无脚本: %v", task.Name, err)

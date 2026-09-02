@@ -55,6 +55,9 @@ func BuildClash(user model.User, lines []model.Line, entries []Entry, template, 
 		var names []string
 		for _, a := range resolveAddrs(line, entries) {
 			for _, p := range lineToClashProxies(line, user, a) {
+				if a.insecure {
+					applyInsecure(p)
+				}
 				proxies = append(proxies, p)
 				proxyNames = append(proxyNames, p["name"].(string))
 				names = append(names, p["name"].(string))
@@ -276,6 +279,21 @@ func lineToClashProxies(line model.Line, user model.User, a addr) []map[string]i
 		return out
 	}
 	return nil
+}
+
+// applyInsecure 给使用 TLS 的代理加 skip-cert-verify(服务端自签证书时必需)。
+func applyInsecure(p map[string]interface{}) {
+	if _, reality := p["reality-opts"]; reality {
+		return // Reality 用公钥校验,与证书无关
+	}
+	switch p["type"] {
+	case "hysteria2", "anytls", "tuic":
+		p["skip-cert-verify"] = true
+	case "trojan", "vless", "vmess", "http":
+		if tls, _ := p["tls"].(bool); tls {
+			p["skip-cert-verify"] = true
+		}
+	}
 }
 
 // noticeClashProxy 生成一个不可用的占位代理作为顶部提示(流量/到期信息写在名字里)。

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fangjunsheng555/m-ui/acme"
 	"github.com/fangjunsheng555/m-ui/certutil"
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/logger"
@@ -48,14 +49,52 @@ func (s *Server) settingInt(key string, def int) int {
 
 // options 每次请求时读取,便于面板改设置后即时生效。
 func (s *Server) options() Options {
+	insecure := s.insecure()
+	entries := EntriesFromNodes(s.db, s.setting("webDomain"))
+	for i := range entries {
+		entries[i].Insecure = insecure
+	}
 	return Options{
 		ProfileTitle: s.setting("subProfileTitle"),
 		UpdateHours:  s.settingInt("subUpdates", 12),
 		Encode:       s.settingBool("subEncode"),
 		ShowNotice:   s.settingBool("subShowNotice"),
 		ClashTmpl:    s.setting("subClashExt"),
-		Entries:      EntriesFromNodes(s.db, s.setting("webDomain")),
+		Entries:      entries,
+		Insecure:     insecure,
 	}
+}
+
+// insecure 决定订阅是否带"允许不安全":设置 subInsecure=true/false 强制;auto(默认)按数据面证书是否自签判断。
+func (s *Server) insecure() bool {
+	switch strings.ToLower(strings.TrimSpace(s.setting("subInsecure"))) {
+	case "true":
+		return true
+	case "false":
+		return false
+	}
+	return CertIsSelfSigned(s.setting("certFile"), s.setting("webCertFile"))
+}
+
+// sniFor 域名作 SNI;纯 IP 入口不发 SNI(自签 IP 证书场景)。
+func sniFor(host string) string {
+	if net.ParseIP(host) != nil {
+		return ""
+	}
+	return host
+}
+
+// CertIsSelfSigned 读取数据面证书(certFile,回落 webCertFile)判断是否自签。
+func CertIsSelfSigned(certFile, fallback string) bool {
+	path := certFile
+	if path == "" {
+		path = fallback
+	}
+	if path == "" {
+		return false
+	}
+	info := acme.Info(path)
+	return info.Exists && info.SelfSigned
 }
 
 // EntriesFromNodes 由入口服务器表生成订阅入口:多入口时每条线路按入口各出一个节点并加名称后缀;
@@ -72,10 +111,10 @@ func EntriesFromNodes(db *gorm.DB, webDomain string) []Entry {
 		if host == "" {
 			continue
 		}
-		out = append(out, Entry{Name: n.Name, Host: host, SNI: host, Suffix: "-" + n.Name})
+		out = append(out, Entry{Name: n.Name, Host: host, SNI: sniFor(host), Suffix: "-" + n.Name})
 	}
 	if len(out) == 0 {
-		return []Entry{{Host: webDomain, SNI: webDomain}}
+		return []Entry{{Host: webDomain, SNI: sniFor(webDomain)}}
 	}
 	if len(out) == 1 {
 		out[0].Suffix = ""
