@@ -1,16 +1,19 @@
 import { state, load } from '../app.js';
 import { get, post, put, del, qrUrl } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy } from '../ui.js';
+import { esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy } from '../ui.js';
 import { areaChart } from '../chart.js';
 
 export const title = () => t('user.title');
 export const subtitle = () => t('user.subtitle');
 let query = '', filter = 'all', drawerUser = null;
+const selected = new Set();
 
 const now = () => Math.floor(Date.now() / 1000);
 const isExpired = u => u.expiry > 0 && u.expiry < now();
 const isOver = u => u.volume > 0 && (u.up + u.down) > u.volume;
+const planSelect = (id, cur, allowNone = true) =>
+  `<select id="${id}">${allowNone ? `<option value="0">${t('plan.none')}</option>` : ''}${state.plans.map(p => `<option value="${p.id}" ${cur === p.id ? 'selected' : ''}>${esc(p.name)} · ${p.volumeGb ? p.volumeGb + 'GB' : '∞'} / ${p.days ? p.days + t('common.day') : '∞'}</option>`).join('')}</select>`;
 
 export async function render(el) {
   el.innerHTML = `
@@ -19,13 +22,30 @@ export async function render(el) {
       <div class="seg" id="user-filter">${['all', 'enabled', 'disabled', 'expired', 'over'].map(f => `<button data-act="user.filter" data-id="${f}" class="${f === filter ? 'active' : ''}">${t('user.filter.' + f)}</button>`).join('')}</div>
       <span class="muted small" id="user-count"></span>
       <span class="grow"></span>
+      <button class="btn" data-act="user.export">${t('user.batch.export')}</button>
+      <button class="btn" data-act="user.bulk">${t('user.bulk')}</button>
       <button class="btn primary" data-act="user.add">${t('user.add')}</button>
     </div>
+    <div class="toolbar batch-bar" id="batch-bar" hidden>
+      <span class="badge primary" id="batch-count"></span>
+      <button class="btn sm" data-act="user.batch" data-id="enable">${t('user.batch.enable')}</button>
+      <button class="btn sm" data-act="user.batch" data-id="disable">${t('user.batch.disable')}</button>
+      <button class="btn sm" data-act="user.batch" data-id="extend">${t('user.batch.extend')}</button>
+      <button class="btn sm" data-act="user.batch" data-id="plan">${t('user.batch.plan')}</button>
+      <button class="btn sm" data-act="user.batch" data-id="reset">${t('user.batch.reset')}</button>
+      <button class="btn sm danger" data-act="user.batch" data-id="delete">${t('user.batch.delete')}</button>
+      <span class="grow"></span>
+      <button class="btn sm ghost" data-act="user.clearSel">${t('common.cancel')}</button>
+    </div>
     <div class="table-wrap"><table class="grid">
-      <thead><tr><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('user.usage')}</th><th>${t('user.expiry')}</th><th>${t('user.devices')}</th><th>${t('user.speed')}</th><th></th></tr></thead>
+      <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sel-all"></th><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('user.usage')}</th><th>${t('user.expiry')}</th><th>${t('user.devices')}</th><th>${t('user.speed')}</th><th></th></tr></thead>
       <tbody id="users-body"></tbody>
     </table></div>`;
   document.getElementById('user-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
+  document.getElementById('sel-all').addEventListener('change', e => {
+    visibleRows().forEach(u => e.target.checked ? selected.add(u.id) : selected.delete(u.id));
+    renderRows();
+  });
   renderRows();
 }
 export async function tick() { await load('users'); renderRows(); if (drawerUser) refreshDrawerLive(); }
@@ -42,19 +62,26 @@ function expiryCell(u) {
   const b = d < 0 ? badge(t('user.expired'), 'danger') : d <= 7 ? badge(t('user.daysLeft', { n: d }), 'warn') : badge(t('user.daysLeft', { n: d }));
   return `${fmtDay(u.expiry)}<div class="sub-cell">${b}</div>`;
 }
+function visibleRows() {
+  let rows = state.users.filter(u => matches(query, u.name, u.remark, u.desc));
+  return rows.filter(u => ({ all: true, enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, expired: isExpired(u), over: isOver(u) })[filter]);
+}
 
 function renderRows() {
   const body = document.getElementById('users-body');
   if (!body) return;
   const online = new Set(state.onlines.users || []);
-  let rows = state.users.filter(u => matches(query, u.name, u.remark, u.desc));
-  rows = rows.filter(u => ({ all: true, enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, expired: isExpired(u), over: isOver(u) })[filter]);
+  const rows = visibleRows();
   document.getElementById('user-count').textContent = `${rows.length} / ${state.users.length}`;
-  if (!rows.length) { body.innerHTML = `<tr><td colspan="7">${empty()}</td></tr>`; return; }
+  const bar = document.getElementById('batch-bar');
+  bar.hidden = selected.size === 0;
+  document.getElementById('batch-count').textContent = t('user.selected', { n: selected.size });
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="8">${empty()}</td></tr>`; return; }
   body.innerHTML = rows.map(u => {
     const used = (u.up || 0) + (u.down || 0);
     const ips = (u.onlineIps || []).length;
-    return `<tr>
+    return `<tr class="${selected.has(u.id) ? 'selected' : ''}">
+      <td><input type="checkbox" class="sel" data-change="user.sel" data-id="${u.id}" ${selected.has(u.id) ? 'checked' : ''}></td>
       <td class="primary-cell">${dot(online.has(u.name))}<a href="#" data-act="user.detail" data-id="${u.id}">${esc(u.name)}</a>${u.remark ? `<div class="sub-cell">${esc(u.remark)}</div>` : ''}</td>
       <td>${statusBadge(u)}</td>
       <td><span class="num">${fmtBytes(used, 1)}</span> <span class="muted small">/ ${u.volume ? fmtBytes(u.volume, 0) : t('common.unlimited')}</span>${progress(used, u.volume)}</td>
@@ -67,6 +94,7 @@ function renderRows() {
         <details class="menu"><summary class="btn sm">${t('common.more')} ▾</summary><div class="menu-list">
           <button data-act="user.copy" data-id="${u.id}" data-fmt="clash">${t('user.subClash')}</button>
           <button data-act="user.copy" data-id="${u.id}" data-fmt="link">${t('user.subLink')}</button>
+          <button data-act="user.renew" data-id="${u.id}">${t('user.renew')}</button>
           <button data-act="user.extend" data-id="${u.id}">${t('user.extend')}</button>
           <button data-act="user.reset" data-id="${u.id}">${t('user.reset')}</button>
           <button data-act="user.kick" data-id="${u.id}">${t('user.kick')}</button>
@@ -101,6 +129,7 @@ async function showDetail(id) {
         <dt>${t('user.f.autoReset')}</dt><dd>${u.autoReset ? `${u.resetDays} ${t('common.day')} · ${fmtDay(u.nextReset)}` : t('common.no')}</dd>
       </dl>
       <div class="row" style="margin-top:.6rem;flex-wrap:wrap">
+        <button class="btn sm primary" data-act="user.renew" data-id="${id}">${t('user.renew')}</button>
         <button class="btn sm" data-act="user.extend" data-id="${id}">${t('user.extend')}</button>
         <button class="btn sm" data-act="user.reset" data-id="${id}">${t('user.reset')}</button>
         <button class="btn sm" data-act="user.kick" data-id="${id}">${t('user.kick')}</button>
@@ -127,15 +156,30 @@ function refreshDrawerLive() {
     : `<p class="muted small">${t('user.noOnline')}</p>`;
 }
 
-// ---- 编辑 ----
+// ---- 编辑 / 新建(可按套餐填写)----
+function fillFromPlan(planId) {
+  const p = state.plans.find(x => x.id === Number(planId));
+  if (!p) return;
+  document.getElementById('f-volume').value = p.volumeGb || 0;
+  document.getElementById('f-expiry').value = p.days ? new Date(Date.now() + p.days * 86400000).toISOString().slice(0, 10) : '';
+  document.getElementById('f-device').value = p.deviceLimit || 0;
+  document.getElementById('f-up').value = p.speedUp || 0;
+  document.getElementById('f-down').value = p.speedDown || 0;
+  document.getElementById('f-autoreset').checked = !!p.autoReset;
+  document.getElementById('f-resetdays').value = p.resetDays || 30;
+  const ids = Array.isArray(p.lineIds) ? p.lineIds : (p.lineIds ? JSON.parse(p.lineIds) : []);
+  if (ids.length) document.querySelectorAll('.ln-cb').forEach(c => { c.checked = ids.includes(Number(c.value)); });
+}
+
 function editUser(id) {
   const u = id ? state.users.find(x => x.id === id) : { enabled: true, lineIds: [], resetDays: 30 };
   const lineIds = new Set(u.lineIds || []);
   const expiryVal = u.expiry ? new Date(u.expiry * 1000).toISOString().slice(0, 10) : '';
   openModal(id ? t('user.edit') : t('user.add'), `
     <div class="form-grid">
-      ${field(t('user.f.name'), `<input id="f-name" value="${esc(u.name || '')}" ${id ? '' : 'autofocus'}>`, t('user.f.nameHelp'))}
+      ${field(t('user.f.name'), `<input id="f-name" value="${esc(u.name || '')}">`, t('user.f.nameHelp'))}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(u.remark || '')}">`)}
+      ${state.plans.length ? `<div class="full">${field(t('user.fromPlan'), `<div class="row">${planSelect('f-plan', 0)}<button type="button" class="btn" data-act="user.fillPlan">${t('user.fromPlan')}</button></div>`)}</div>` : ''}
       ${field(t('user.f.volume'), `<input id="f-volume" type="number" min="0" value="${u.volume ? (u.volume / 1073741824).toFixed(0) : 0}">`)}
       ${field(t('user.f.expiry'), `<input id="f-expiry" type="date" value="${expiryVal}">`)}
       ${field(t('user.f.device'), `<input id="f-device" type="number" min="0" value="${u.deviceLimit || 0}">`, t('user.f.deviceHelp'))}
@@ -169,6 +213,53 @@ function editUser(id) {
   document.getElementById('f-all').addEventListener('change', e => document.querySelectorAll('.ln-cb').forEach(c => { c.checked = e.target.checked; }));
 }
 
+// ---- 续费 / 延期(套餐)----
+function renewDialog(ids) {
+  if (!state.plans.length) { toast(t('plan.empty'), 'err'); return; }
+  const single = ids.length === 1 ? state.users.find(x => x.id === ids[0]) : null;
+  openModal(t('user.renew') + (single ? ' · ' + single.name : ` (${ids.length})`), `
+    <div class="form-grid">
+      <div class="full">${field(t('plan.pick'), planSelect('f-plan', state.plans[0].id, false))}</div>
+      <div class="full">${field('', `<select id="f-mode"><option value="renew">${t('plan.renew')}</option><option value="extend">${t('plan.extend')}</option></select>`)}</div>
+    </div>`, async () => {
+    const planId = Number(fv('f-plan')), mode = fv('f-mode');
+    if (ids.length === 1) await post(`users/${ids[0]}/plan`, { planId, mode });
+    else await post('users/batch', { ids, action: 'plan', planId, mode });
+    await load('users'); renderRows();
+    if (drawerUser && ids.includes(drawerUser)) showDetail(drawerUser);
+    toast(t('plan.applied'), 'ok');
+  });
+}
+
+// ---- 批量生成 ----
+function bulkDialog() {
+  openModal(t('user.bulk'), `
+    <div class="form-grid">
+      ${field(t('user.bulkPrefix'), `<input id="f-prefix" value="user-">`)}
+      ${field(t('user.bulkCount'), `<input id="f-count" type="number" min="1" max="500" value="10">`)}
+      ${field(t('user.bulkMode'), `<select id="f-mode"><option value="random">${t('user.bulkRandom')}</option><option value="seq">${t('user.bulkSeq')}</option></select>`)}
+      ${field(t('user.bulkStart'), `<input id="f-start" type="number" min="1" value="1">`)}
+      ${field(t('user.f.remark'), `<input id="f-remark" value="">`)}
+      ${field(t('plan.pick'), planSelect('f-plan', 0), t('user.bulkHelp'))}
+      <div class="full">${field(t('user.f.lines'), `
+        <div class="check-list">
+          <label><input type="checkbox" id="f-all" checked> <b>${t('user.f.selectAll')}</b></label>
+          ${state.lines.map(l => `<label><input type="checkbox" class="ln-cb" value="${l.id}" checked> ${esc(l.name)}</label>`).join('')}
+        </div>`)}</div>
+    </div>`, async () => {
+    const res = await post('users/bulk', {
+      prefix: fv('f-prefix').trim(), count: Number(fv('f-count')), nameMode: fv('f-mode'), startIndex: Number(fv('f-start')),
+      remark: fv('f-remark'), planId: Number(fv('f-plan')),
+      lineIds: [...document.querySelectorAll('.ln-cb:checked')].map(c => Number(c.value)),
+    });
+    await load('users', 'lines', 'status'); renderRows();
+    toast(t('user.bulkDone', { n: res.length }), 'ok');
+    closeModal();
+    openModal(t('user.bulkResult'), `<textarea style="min-height:16rem" readonly>${esc(res.map(r => r.name + '\t' + r.link).join('\n'))}</textarea>`, null);
+  }, { wide: true });
+  document.getElementById('f-all').addEventListener('change', e => document.querySelectorAll('.ln-cb').forEach(c => { c.checked = e.target.checked; }));
+}
+
 async function fullUpdate(u, patch) {
   const body = Object.assign({}, u, patch, { lineIds: u.lineIds || [] });
   delete body.onlineIps; delete body.subUrl;
@@ -182,6 +273,29 @@ registerActions({
   'user.detail': id => showDetail(Number(id)),
   'user.copyText': id => copy(id),
   'user.copy': async (id, btn) => { const l = await get(`users/${id}/sub`); copy(btn.dataset.fmt === 'link' ? l.link : l.clash); },
+  'user.fillPlan': () => fillFromPlan(fv('f-plan')),
+  'user.renew': id => renewDialog([Number(id)]),
+  'user.bulk': () => bulkDialog(),
+  'user.export': () => { window.open('./api/users/export', '_blank'); },
+  'user.sel': (id, cb) => { cb.checked ? selected.add(Number(id)) : selected.delete(Number(id)); renderRows(); },
+  'user.clearSel': () => { selected.clear(); renderRows(); },
+  'user.batch': async action => {
+    const ids = [...selected];
+    if (!ids.length) return;
+    if (action === 'plan') { renewDialog(ids); return; }
+    let days = 0;
+    if (action === 'extend') {
+      days = Number(prompt(t('user.batchDays'), '30'));
+      if (!days) return;
+    }
+    if (action === 'delete' && !await confirm(t('user.batchDeleteConfirm', { n: ids.length }), { danger: true, okText: t('common.delete') })) return;
+    try {
+      const r = await post('users/batch', { ids, action, days });
+      selected.clear();
+      await load('users', 'lines', 'status'); renderRows();
+      toast(t('user.batchDone', { n: r.affected }), 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  },
   'user.extend': async id => {
     const u = state.users.find(x => x.id === Number(id));
     const base = Math.max(u.expiry || 0, now());
@@ -203,7 +317,7 @@ registerActions({
   'user.del': async id => {
     const u = state.users.find(x => x.id === Number(id));
     if (!await confirm(t('common.deleteConfirm', { name: u.name }), { danger: true, okText: t('common.delete') })) return;
-    try { await del('users/' + id); await load('users', 'lines', 'status'); renderRows(); if (drawerUser === u.id) closeDrawer(); toast(t('user.deleted'), 'ok'); }
+    try { await del('users/' + id); selected.delete(u.id); await load('users', 'lines', 'status'); renderRows(); if (drawerUser === u.id) closeDrawer(); toast(t('user.deleted'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
 });

@@ -86,6 +86,22 @@ type User struct {
 	OnlineAt    int64           `json:"onlineAt" gorm:"default:0;not null"`
 }
 
+// Plan 套餐:配额/时长/设备/限速/线路的模板,用于建号、续费与批量操作。
+type Plan struct {
+	Id          uint            `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name        string          `json:"name" gorm:"uniqueIndex"`
+	VolumeGB    int             `json:"volumeGb"` // 0=不限
+	Days        int             `json:"days"`     // 0=不限
+	DeviceLimit int             `json:"deviceLimit"`
+	SpeedUp     int             `json:"speedUp"`
+	SpeedDown   int             `json:"speedDown"`
+	AutoReset   bool            `json:"autoReset"`
+	ResetDays   int             `json:"resetDays"`
+	LineIds     json.RawMessage `json:"lineIds,omitempty"` // 空=不改动用户线路
+	Desc        string          `json:"desc"`
+	Sort        int             `json:"sort"`
+}
+
 // UserLine 用户-线路 多对多。
 type UserLine struct {
 	UserId uint `json:"userId" gorm:"primaryKey;autoIncrement:false"`
@@ -142,7 +158,7 @@ type Change struct {
 // All 供 AutoMigrate 使用。
 func All() []interface{} {
 	return []interface{}{
-		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{},
+		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &Plan{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{},
 	}
 }

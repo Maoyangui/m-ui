@@ -127,6 +127,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"logs", s.auth(s.handleLogs))
 	mux.HandleFunc(api+"audit", s.auth(s.handleAudit))
 	mux.HandleFunc(api+"keygen", s.auth(s.handleKeygen))
+	mux.HandleFunc(api+"plans", s.auth(s.handlePlans))
+	mux.HandleFunc(api+"plans/", s.auth(s.handlePlanItem))
 
 	// 根路径重定向到面板
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

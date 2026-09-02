@@ -153,6 +153,20 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 		return false
 	}
 	rest := strings.Split(path[idx+len("/users/"):], "/")
+	if len(rest) == 1 {
+		switch rest[0] {
+		case "bulk":
+			s.handleUsersBulk(w, r)
+			return true
+		case "batch":
+			s.handleUsersBatch(w, r)
+			return true
+		case "export":
+			s.handleUsersExport(w, r)
+			return true
+		}
+		return false
+	}
 	if len(rest) != 2 {
 		return false
 	}
@@ -166,6 +180,12 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 		return true
 	}
 	switch rest[1] {
+	case "plan":
+		if r.Method != http.MethodPost {
+			break
+		}
+		s.handleUserPlan(w, r, u)
+		return true
 	case "reset":
 		if r.Method != http.MethodPost {
 			break

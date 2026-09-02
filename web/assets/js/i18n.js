@@ -108,6 +108,20 @@ const zh = {
   'set.subPageEnabledHelp': '用户用浏览器打开自己的订阅地址会看到用量、到期、二维码与一键导入按钮;客户端拉取不受影响',
   'set.subPageTitle': '页面标题', 'set.subPageTitleHelp': '留空则用订阅标题',
   'set.subPageSupport': '页脚联系方式', 'set.subPageNotice': '公告(支持换行)',
+  'nav.plans': '套餐', 'plan.title': '套餐', 'plan.subtitle': '配额/时长/设备/限速的模板。建号、续费、批量操作都可以直接套用。',
+  'plan.add': '新增套餐', 'plan.edit': '编辑套餐', 'plan.quota': '流量', 'plan.days': '时长(天)', 'plan.reset': '周期重置',
+  'plan.lines': '线路', 'plan.keepLines': '不改动', 'plan.desc': '说明', 'plan.namePh': '如 100G/月', 'plan.zeroUnlimited': '0 = 不限',
+  'plan.autoResetHelp': '按周期把已用流量清零并解禁(月付套餐常用)', 'plan.linesHelp': '留空 = 套用时不改动用户已有线路',
+  'plan.empty': '还没有套餐,新增一个后可在用户页一键套用', 'plan.created': '套餐已创建', 'plan.updated': '套餐已更新', 'plan.deleted': '套餐已删除',
+  'plan.apply': '套用套餐', 'plan.renew': '续费(清零流量并顺延)', 'plan.extend': '延期(保留已用流量)', 'plan.applied': '套餐已套用',
+  'plan.pick': '选择套餐', 'plan.none': '不使用套餐',
+  'user.bulk': '批量生成', 'user.bulkPrefix': '用户名前缀', 'user.bulkCount': '数量', 'user.bulkMode': '命名方式',
+  'user.bulkRandom': '前缀 + 随机 8 位', 'user.bulkSeq': '前缀 + 序号(001…)', 'user.bulkStart': '起始序号',
+  'user.bulkDone': '已生成 {n} 个用户', 'user.bulkResult': '生成结果(可复制)', 'user.bulkHelp': '不选套餐时按下面勾选的线路创建,配额不限',
+  'user.selected': '已选 {n}', 'user.batch.enable': '启用', 'user.batch.disable': '停用', 'user.batch.extend': '延期',
+  'user.batch.plan': '套用套餐', 'user.batch.reset': '重置流量', 'user.batch.delete': '删除', 'user.batch.export': '导出 CSV',
+  'user.batchDays': '延期天数', 'user.batchDone': '已处理 {n} 个用户', 'user.batchDeleteConfirm': '确定删除选中的 {n} 个用户?',
+  'user.fromPlan': '按套餐填写', 'user.renew': '续费 / 延期',
 };
 
 const en = {
@@ -219,6 +233,20 @@ const en = {
   'set.subPageEnabledHelp': 'Users see usage, expiry, QR codes and one-tap import buttons; proxy clients still get the raw subscription',
   'set.subPageTitle': 'Page title', 'set.subPageTitleHelp': 'Empty = profile title',
   'set.subPageSupport': 'Footer contact', 'set.subPageNotice': 'Notice (multi-line)',
+  'nav.plans': 'Plans', 'plan.title': 'Plans', 'plan.subtitle': 'Templates of quota, duration, device and speed limits. Apply them when creating, renewing or batch-editing users.',
+  'plan.add': 'Add plan', 'plan.edit': 'Edit plan', 'plan.quota': 'Quota', 'plan.days': 'Duration (days)', 'plan.reset': 'Periodic reset',
+  'plan.lines': 'Lines', 'plan.keepLines': 'keep', 'plan.desc': 'Description', 'plan.namePh': 'e.g. 100G / month', 'plan.zeroUnlimited': '0 = unlimited',
+  'plan.autoResetHelp': 'Reset used traffic and re-enable every period (monthly plans)', 'plan.linesHelp': 'Empty = keep the user\'s current lines',
+  'plan.empty': 'No plans yet. Add one and apply it from the users page', 'plan.created': 'Plan created', 'plan.updated': 'Plan updated', 'plan.deleted': 'Plan deleted',
+  'plan.apply': 'Apply plan', 'plan.renew': 'Renew (reset traffic, extend)', 'plan.extend': 'Extend (keep traffic)', 'plan.applied': 'Plan applied',
+  'plan.pick': 'Choose a plan', 'plan.none': 'No plan',
+  'user.bulk': 'Bulk create', 'user.bulkPrefix': 'Username prefix', 'user.bulkCount': 'Count', 'user.bulkMode': 'Naming',
+  'user.bulkRandom': 'prefix + 8 random chars', 'user.bulkSeq': 'prefix + sequence (001…)', 'user.bulkStart': 'Start index',
+  'user.bulkDone': 'Created {n} users', 'user.bulkResult': 'Result (copyable)', 'user.bulkHelp': 'Without a plan, users get the lines checked below and unlimited quota',
+  'user.selected': '{n} selected', 'user.batch.enable': 'Enable', 'user.batch.disable': 'Disable', 'user.batch.extend': 'Extend',
+  'user.batch.plan': 'Apply plan', 'user.batch.reset': 'Reset traffic', 'user.batch.delete': 'Delete', 'user.batch.export': 'Export CSV',
+  'user.batchDays': 'Days to extend', 'user.batchDone': '{n} users updated', 'user.batchDeleteConfirm': 'Delete the {n} selected users?',
+  'user.fromPlan': 'Fill from plan', 'user.renew': 'Renew / extend',
 };
 
 const dicts = { zh, en };

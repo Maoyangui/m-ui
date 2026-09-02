@@ -237,3 +237,6 @@ pre.log .warn { color: #fbbf24; } pre.log .error { color: #f87171; } pre.log .de
 .tabs button { border: none; background: transparent; padding: .5rem .9rem; font: inherit; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tabs button.active { color: var(--primary-text); border-color: var(--primary); font-weight: 500; }
 .ua { color: var(--muted); font-size: .74rem; max-width: 26rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.grid tbody tr.selected { background: var(--primary-soft); }
+.batch-bar { background: var(--primary-soft); border-radius: var(--radius-sm); padding: .45rem .7rem; }

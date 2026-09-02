@@ -6,17 +6,18 @@ import * as dashboard from './pages/dashboard.js';
 import * as lines from './pages/lines.js';
 import * as upstreams from './pages/upstreams.js';
 import * as users from './pages/users.js';
+import * as plans from './pages/plans.js';
 import * as logs from './pages/logs.js';
 import * as settings from './pages/settings.js';
 
 export const state = {
-  status: {}, settings: {}, lines: [], upstreams: [], users: [],
+  status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [],
   onlines: { users: [], lines: [], upstreams: [], connCounts: {} },
 };
 
-const pages = { dashboard, lines, upstreams, users, logs, settings };
+const pages = { dashboard, lines, upstreams, users, plans, logs, settings };
 const navItems = [
-  ['dashboard', '◉'], ['lines', '⇄'], ['upstreams', '⇪'], ['users', '☺'], ['logs', '≡'], ['settings', '⚙'],
+  ['dashboard', '◉'], ['lines', '⇄'], ['upstreams', '⇪'], ['users', '☺'], ['plans', '▤'], ['logs', '≡'], ['settings', '⚙'],
 ];
 let current = null;
 
@@ -29,6 +30,7 @@ export async function load(...what) {
   if (all || what.includes('lines')) jobs.push(get('lines').then(l => { state.lines = l; }));
   if (all || what.includes('upstreams')) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
   if (all || what.includes('users')) jobs.push(get('users').then(u => { state.users = u; }));
+  if (all || what.includes('plans')) jobs.push(get('plans').then(p => { state.plans = p || []; }));
   if (all || what.includes('onlines')) jobs.push(get('onlines').then(o => { state.onlines = o; }));
   await Promise.all(jobs);
 }
