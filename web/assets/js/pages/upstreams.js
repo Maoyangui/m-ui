@@ -1,5 +1,5 @@
 import { state, load } from '../app.js';
-import { post, put, del } from '../api.js';
+import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce } from '../ui.js';
 
@@ -40,14 +40,21 @@ export async function render(el) {
     </table></div>`;
   document.getElementById('up-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
   renderRows();
+  // 用定时巡检结果填充尚未手动测试过的行
+  try {
+    const h = await get('upstreams/health');
+    (h.results || []).forEach(x => { if (!results[x.id] || results[x.id].scheduled) results[x.id] = { ...x, scheduled: true }; });
+    renderRows();
+  } catch {}
 }
 
 function resultHTML(id) {
   const r = results[id];
   if (!r) return badge(t('up.untested'));
   if (r.testing) return badge(t('up.testing'));
-  if (r.ok) return badge(r.delayMs + ' ms', 'ok') + (r.method === 'tcp' ? ' ' + badge('TCP') : '');
-  return `${badge(t('up.fault'), 'danger')}<div class="sub-cell" title="${esc(r.error)}">${esc(r.error).slice(0, 80)}</div>`;
+  const when = r.scheduled ? ` <span class="muted small" title="${t('up.scheduled')}">🕘 ${new Date(r.checkedAt * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>` : '';
+  if (r.ok) return badge(r.delayMs + ' ms', 'ok') + (r.method === 'tcp' ? ' ' + badge('TCP') : '') + when;
+  return `${badge(t('up.fault'), 'danger')}${when}<div class="sub-cell" title="${esc(r.error)}">${esc(r.error).slice(0, 80)}</div>`;
 }
 
 function typeBadges(u) {

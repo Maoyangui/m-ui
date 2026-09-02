@@ -23,6 +23,20 @@ const groups = () => [
     ['subPageSupport', t('set.subPageSupport'), 'text'],
     ['subPageNotice', t('set.subPageNotice'), 'textarea'],
   ]},
+  { id: 'notify', title: t('set.notify'), test: true, fields: [
+    ['tgEnabled', t('set.tgEnabled'), 'bool', t('set.tgEnabledHelp')],
+    ['tgToken', t('set.tgToken'), 'text', t('set.tgTokenHelp')], ['tgChatId', t('set.tgChatId'), 'text', t('set.tgChatIdHelp')],
+    ['tgProxy', t('set.tgProxy'), 'text', t('set.tgProxyHelp')],
+    ['tgOnLogin', t('set.tgOnLogin'), 'boolOn'], ['tgOnUserDisabled', t('set.tgOnUserDisabled'), 'boolOn'],
+    ['tgOnUserExpiring', t('set.tgOnUserExpiring'), 'boolOn'], ['tgExpiringDays', t('set.tgExpiringDays'), 'number'],
+    ['tgOnQuota', t('set.tgOnQuota'), 'boolOn'], ['tgQuotaPercent', t('set.tgQuotaPercent'), 'number'],
+    ['tgOnUpstream', t('set.tgOnUpstream'), 'boolOn'], ['tgOnCore', t('set.tgOnCore'), 'boolOn'],
+    ['tgDaily', t('set.tgDaily'), 'boolOn'], ['tgDailyHour', t('set.tgDailyHour'), 'number'],
+  ]},
+  { id: 'monitor', title: t('set.monitor'), fields: [
+    ['upstreamCheckMinutes', t('set.checkMinutes'), 'number', t('set.checkMinutesHelp')],
+    ['upstreamCheckFailThreshold', t('set.checkThreshold'), 'number', t('set.checkThresholdHelp')],
+  ]},
   { id: 'core', title: t('set.core'), fields: [
     ['certFile', t('set.certFile'), 'text', t('set.certHelp')], ['keyFile', t('set.key'), 'text'],
     ['upstreamTestUrl', t('set.testUrl'), 'text', t('set.testUrlHelp')],
@@ -42,10 +56,10 @@ export async function render(el) {
     </section>
     ${groups().map(g => `
       <section class="card">
-        <div class="card-head"><h2>${esc(g.title)}</h2><button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div>
+        <div class="card-head"><h2>${esc(g.title)}</h2><div class="row">${g.test ? `<button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button>` : ''}<button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div></div>
         <div class="form-grid">${g.fields.map(([k, label, type, help]) =>
-          type === 'bool'
-            ? check('set-' + k, label, s[k] === undefined || s[k] === '' ? k === 'subPageEnabled' : String(s[k]).toLowerCase() === 'true', help)
+          type === 'bool' || type === 'boolOn'
+            ? check('set-' + k, label, s[k] === undefined || s[k] === '' ? (k === 'subPageEnabled' || type === 'boolOn') : String(s[k]).toLowerCase() === 'true', help)
             : type === 'textarea'
               ? `<div class="full">${field(label, `<textarea id="set-${k}">${esc(s[k] ?? '')}</textarea>`, help)}</div>`
               : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}">`, help)).join('')}</div>
@@ -73,7 +87,7 @@ registerActions({
   'set.save': async id => {
     const g = groups().find(x => x.id === id);
     const body = {};
-    g.fields.forEach(([k, , type]) => { body[k] = type === 'bool' ? String(fchk('set-' + k)) : fv('set-' + k).trim(); });
+    g.fields.forEach(([k, , type]) => { body[k] = (type === 'bool' || type === 'boolOn') ? String(fchk('set-' + k)) : fv('set-' + k).trim(); });
     try { const r = await post('settings', body); await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
@@ -83,6 +97,12 @@ registerActions({
     if (toNode !== cur && !await confirm(toNode ? t('set.roleToNode') : t('set.roleToMaster'), { danger: true })) return;
     try { await post('settings', { nodeMode: String(toNode) }); await load('settings', 'status'); toast(t('set.saved'), 'ok'); location.reload(); }
     catch (e) { toast(e.message, 'err'); }
+  },
+  'set.notifyTest': async (_, btn) => {
+    btn.disabled = true;
+    try { await post('notify/test'); toast(t('set.tgTestOk'), 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+    finally { btn.disabled = false; }
   },
   'set.password': async () => {
     try {

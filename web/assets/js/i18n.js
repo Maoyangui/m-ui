@@ -122,6 +122,17 @@ const zh = {
   'user.batch.plan': '套用套餐', 'user.batch.reset': '重置流量', 'user.batch.delete': '删除', 'user.batch.export': '导出 CSV',
   'user.batchDays': '延期天数', 'user.batchDone': '已处理 {n} 个用户', 'user.batchDeleteConfirm': '确定删除选中的 {n} 个用户?',
   'user.fromPlan': '按套餐填写', 'user.renew': '续费 / 延期',
+  'set.notify': '通知(Telegram)', 'set.tgEnabled': '启用 Telegram 通知', 'set.tgEnabledHelp': '在 @BotFather 创建机器人拿到 Token;Chat ID 可向 @userinfobot 发消息获取',
+  'set.tgToken': 'Bot Token', 'set.tgTokenHelp': '形如 123456:ABC-DEF…', 'set.tgChatId': 'Chat ID', 'set.tgChatIdHelp': '个人、群或频道 ID(群/频道为负数)',
+  'set.tgProxy': '代理(可选)', 'set.tgProxyHelp': '服务器访问不到 Telegram 时填,如 socks5://127.0.0.1:40000',
+  'set.tgOnLogin': '面板登录 / 连续登录失败', 'set.tgOnUserDisabled': '用户被自动禁用(到期/超量)',
+  'set.tgOnUserExpiring': '用户即将到期', 'set.tgExpiringDays': '到期前几天提醒', 'set.tgOnQuota': '用户流量告急',
+  'set.tgQuotaPercent': '用量达到百分比时提醒', 'set.tgOnUpstream': '上游故障 / 恢复', 'set.tgOnCore': '数据面停止 / 恢复',
+  'set.tgDaily': '每日报告', 'set.tgDailyHour': '每日报告时间(小时,0–23)', 'set.tgTest': '发送测试消息', 'set.tgTestOk': '测试消息已发送,请查看 Telegram',
+  'set.monitor': '上游巡检', 'set.checkMinutes': '巡检间隔(分钟)', 'set.checkMinutesHelp': '0 = 关闭;每次经数据面真实请求测试全部上游',
+  'set.checkThreshold': '连续失败几次判定故障', 'set.checkThresholdHelp': '避免单次抖动误报',
+  'dash.health': '上游巡检', 'dash.healthNever': '尚未巡检', 'dash.healthLast': '上次', 'dash.healthOk': '正常', 'dash.healthBad': '故障', 'dash.healthRun': '立即巡检',
+  'up.scheduled': '巡检', 'up.runCheck': '立即巡检',
 };
 
 const en = {
@@ -247,6 +258,17 @@ const en = {
   'user.batch.plan': 'Apply plan', 'user.batch.reset': 'Reset traffic', 'user.batch.delete': 'Delete', 'user.batch.export': 'Export CSV',
   'user.batchDays': 'Days to extend', 'user.batchDone': '{n} users updated', 'user.batchDeleteConfirm': 'Delete the {n} selected users?',
   'user.fromPlan': 'Fill from plan', 'user.renew': 'Renew / extend',
+  'set.notify': 'Notifications (Telegram)', 'set.tgEnabled': 'Enable Telegram notifications', 'set.tgEnabledHelp': 'Create a bot with @BotFather for the token; get your chat ID from @userinfobot',
+  'set.tgToken': 'Bot token', 'set.tgTokenHelp': 'Looks like 123456:ABC-DEF…', 'set.tgChatId': 'Chat ID', 'set.tgChatIdHelp': 'User, group or channel ID (groups/channels are negative)',
+  'set.tgProxy': 'Proxy (optional)', 'set.tgProxyHelp': 'If the server cannot reach Telegram, e.g. socks5://127.0.0.1:40000',
+  'set.tgOnLogin': 'Panel login / repeated failures', 'set.tgOnUserDisabled': 'User auto-disabled (expired / quota)',
+  'set.tgOnUserExpiring': 'User expiring soon', 'set.tgExpiringDays': 'Days before expiry', 'set.tgOnQuota': 'User quota warning',
+  'set.tgQuotaPercent': 'Warn at usage percent', 'set.tgOnUpstream': 'Upstream down / recovered', 'set.tgOnCore': 'Data plane stopped / recovered',
+  'set.tgDaily': 'Daily report', 'set.tgDailyHour': 'Daily report hour (0–23)', 'set.tgTest': 'Send test message', 'set.tgTestOk': 'Test message sent, check Telegram',
+  'set.monitor': 'Upstream health checks', 'set.checkMinutes': 'Interval (minutes)', 'set.checkMinutesHelp': '0 = off; every run sends a real request through each upstream',
+  'set.checkThreshold': 'Consecutive failures before alert', 'set.checkThresholdHelp': 'Avoids alerts on a single hiccup',
+  'dash.health': 'Upstream health', 'dash.healthNever': 'Not checked yet', 'dash.healthLast': 'Last', 'dash.healthOk': 'ok', 'dash.healthBad': 'down', 'dash.healthRun': 'Check now',
+  'up.scheduled': 'scheduled', 'up.runCheck': 'Check now',
 };
 
 const dicts = { zh, en };

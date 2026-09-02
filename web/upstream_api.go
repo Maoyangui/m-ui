@@ -3,13 +3,11 @@ package web
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/fangjunsheng555/m-ui/core"
 	"github.com/fangjunsheng555/m-ui/database/model"
@@ -58,6 +56,9 @@ func (s *Server) dispatchUpstreamSubroute(w http.ResponseWriter, r *http.Request
 		return true
 	case strings.HasSuffix(path, "/upstreams/parse"):
 		s.handleUpstreamParse(w, r)
+		return true
+	case strings.HasSuffix(path, "/upstreams/health"):
+		s.handleUpstreamHealth(w, r)
 		return true
 	case strings.HasSuffix(path, "/test"):
 		trimmed := strings.TrimSuffix(path, "/test")
@@ -115,48 +116,36 @@ func (s *Server) handleUpstreamTestAll(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, results)
 }
 
-// testUpstream 对单个上游做健康检查。
-// 数据面运行时:经该上游真实请求测试 URL,得到端到端延迟(最可信,WARP 是否通也能测出)。
-// 数据面未运行时:TCP 类上游做端口探测兜底;QUIC 类(tuic/hysteria2)无法离线测试。
+// testUpstream 对单个上游做健康检查(与定时巡检共用 runner.CheckUpstream)。
 func (s *Server) testUpstream(up model.Upstream) upstreamTestResult {
-	res := upstreamTestResult{Id: up.Id, Name: up.Name}
-	testURL := s.setting("upstreamTestUrl")
-	if testURL == "" {
-		testURL = defaultTestURL
-	}
+	ok, ms, method, errStr := s.run.CheckUpstream(up)
+	return upstreamTestResult{Id: up.Id, Name: up.Name, OK: ok, DelayMs: ms, Method: method, Error: errStr}
+}
 
-	if s.run.CoreRunning() {
-		r := s.run.TestUpstream(up.Name, testURL)
-		res.Method = "urltest"
-		res.OK, res.DelayMs, res.Error = r.OK, int(r.Delay), r.Error
-		if r.Error == "outbound not found" {
-			res.Error = "数据面中尚无该上游(刚创建/修改请等重载完成后再测)"
-		}
-		return res
+// handleUpstreamHealth GET /upstreams/health:定时巡检的最近结果;POST 立即巡检一次。
+func (s *Server) handleUpstreamHealth(w http.ResponseWriter, r *http.Request) {
+	m := s.run.Monitor()
+	if r.Method == http.MethodPost {
+		changed := m.RunUpstreamCheck()
+		s.audit(r, "upstream", "health-check", changed)
 	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"results": m.Results(), "lastRun": m.LastRun(),
+		"intervalMinutes": s.settingInt("upstreamCheckMinutes", 10),
+	})
+}
 
-	switch up.Type {
-	case "shadowsocks", "socks", "http":
-		addr, err := upstream.ServerAddr(up.Options)
-		if err != nil {
-			res.Method, res.Error = "none", err.Error()
-			return res
-		}
-		res.Method = "tcp"
-		start := time.Now()
-		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
-		if err != nil {
-			res.Error = "TCP 连接失败: " + err.Error()
-			return res
-		}
-		conn.Close()
-		res.OK = true
-		res.DelayMs = int(time.Since(start).Milliseconds())
-	default:
-		res.Method = "none"
-		res.Error = "数据面未运行:tuic/hysteria2 走 QUIC,需数据面运行后才能真实测试"
+// handleNotifyTest POST /notify/test:发送 Telegram 测试消息。
+func (s *Server) handleNotifyTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
 	}
-	return res
+	if err := s.run.Notifier().Test(); err != nil {
+		badRequest(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }
 
 // handleUpstreamParse 把分享链接解析为上游表单数据。

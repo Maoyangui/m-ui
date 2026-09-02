@@ -4,6 +4,7 @@ package runner
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -17,6 +18,9 @@ import (
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/jobs"
 	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/fangjunsheng555/m-ui/monitor"
+	"github.com/fangjunsheng555/m-ui/notify"
+	"github.com/fangjunsheng555/m-ui/upstream"
 	"github.com/fangjunsheng555/m-ui/render"
 	"github.com/fangjunsheng555/m-ui/sub"
 
@@ -32,11 +36,50 @@ func SetPanelStarter(f func(*Runner) error) { startPanel = f }
 
 // Runner 持有数据面运行所需的一切。
 type Runner struct {
-	db     *gorm.DB
-	core   *core.Core
-	subSrv *sub.Server
-	jobs   *jobs.Scheduler
-	mu     sync.Mutex // 串行化重载,避免并发改动互相打断
+	db       *gorm.DB
+	core     *core.Core
+	subSrv   *sub.Server
+	jobs     *jobs.Scheduler
+	notifier *notify.Notifier
+	monitor  *monitor.Monitor
+	mu       sync.Mutex // 串行化重载,避免并发改动互相打断
+}
+
+// Notifier 暴露通知器(面板发测试消息、登录告警)。
+func (r *Runner) Notifier() *notify.Notifier { return r.notifier }
+
+// Monitor 暴露巡检器(面板展示上游健康)。
+func (r *Runner) Monitor() *monitor.Monitor { return r.monitor }
+
+// CheckUpstream 对单个上游做健康检查(面板手动测试与定时巡检共用)。
+// 数据面运行时经该上游真实请求测试 URL;未运行时 TCP 类做端口探测,QUIC 类无法离线测试。
+func (r *Runner) CheckUpstream(up model.Upstream) (ok bool, delayMs int, method, errStr string) {
+	testURL := r.setting("upstreamTestUrl")
+	if testURL == "" {
+		testURL = "http://www.gstatic.com/generate_204"
+	}
+	if r.CoreRunning() {
+		res := r.TestUpstream(up.Name, testURL)
+		if res.Error == "outbound not found" {
+			res.Error = "数据面中尚无该上游(刚创建/修改请等重载完成后再测)"
+		}
+		return res.OK, int(res.Delay), "urltest", res.Error
+	}
+	switch up.Type {
+	case "shadowsocks", "socks", "http":
+		addr, err := upstream.ServerAddr(up.Options)
+		if err != nil {
+			return false, 0, "none", err.Error()
+		}
+		start := time.Now()
+		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err != nil {
+			return false, 0, "tcp", "TCP 连接失败: " + err.Error()
+		}
+		conn.Close()
+		return true, int(time.Since(start).Milliseconds()), "tcp", ""
+	}
+	return false, 0, "none", "数据面未运行:该协议走 QUIC/TLS,需数据面运行后才能真实测试"
 }
 
 // DB 暴露数据库句柄给面板层。
@@ -54,12 +97,17 @@ func New(dbPath string) (*Runner, error) {
 		logger.Info("已为 ", n, " 个用户补全新协议凭据")
 	}
 	r := &Runner{db: db, core: core.NewCore(), subSrv: sub.NewServer(db)}
+	r.notifier = notify.New(r.setting)
 	r.jobs = jobs.New(jobs.Deps{
 		DB:          db,
 		Box:         func() *core.Box { return r.core.GetInstance() },
 		ReloadUsers: r.ReloadUsers,
 		IsNode:      r.IsNode,
 		Setting:     r.setting,
+		Notify:      func(text string) { r.notifier.Event("tgOnUserDisabled", text) },
+	})
+	r.monitor = monitor.New(monitor.Deps{
+		DB: db, Setting: r.setting, CoreRunning: r.CoreRunning, Check: r.CheckUpstream, Notify: r.notifier,
 	})
 	return r, nil
 }
@@ -319,6 +367,8 @@ func Run(dbPath string) error {
 
 	r.jobs.Start()
 	defer r.jobs.Stop()
+	r.monitor.Start()
+	defer r.monitor.Stop()
 
 	stopCheckpoint := make(chan struct{})
 	go r.checkpointLoop(stopCheckpoint)

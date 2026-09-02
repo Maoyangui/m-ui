@@ -24,8 +24,12 @@ export async function render(el) {
     </div>
     <div class="grid-2">
       <section class="card"><h2>${t('dash.onlineList')}</h2><div id="dash-online" style="margin-top:.6rem"></div></section>
-      <section class="card"><h2>${t('dash.recentAudit')}</h2><div id="dash-audit" style="margin-top:.6rem"></div></section>
+      <section class="card">
+        <div class="card-head"><h2>${t('dash.health')}</h2><button class="btn sm" data-act="dash.healthRun">${t('dash.healthRun')}</button></div>
+        <div id="dash-health"></div>
+      </section>
     </div>
+    <section class="card"><h2>${t('dash.recentAudit')}</h2><div id="dash-audit" style="margin-top:.6rem"></div></section>
     <section class="card">
       <div class="card-head"><h2>${t('dash.coreLog')}</h2>
         <select class="sm" id="dash-loglevel" data-change="dash.loglevel" style="width:auto">
@@ -36,10 +40,21 @@ export async function render(el) {
     </section>`;
   renderStats();
   renderCore();
-  await Promise.all([renderChart(), renderOnline(), renderAudit(), renderLog()]);
+  await Promise.all([renderChart(), renderOnline(), renderAudit(), renderLog(), renderHealth()]);
 }
 
 export function tick() { renderStats(); renderCore(); renderOnline(); }
+
+async function renderHealth() {
+  const el = document.getElementById('dash-health');
+  if (!el) return;
+  const h = await get('upstreams/health');
+  if (!h.lastRun) { el.innerHTML = empty(t('dash.healthNever')); return; }
+  const bad = (h.results || []).filter(x => !x.ok);
+  el.innerHTML = `<p class="small muted">${t('dash.healthLast')} ${fmtRelative(h.lastRun)} · ${h.intervalMinutes} min</p>
+    <div class="row" style="margin:.4rem 0 .6rem"><span class="badge ok">${h.results.length - bad.length} ${t('dash.healthOk')}</span><span class="badge ${bad.length ? 'danger' : ''}">${bad.length} ${t('dash.healthBad')}</span></div>
+    ${bad.length ? `<div class="chips">${bad.map(x => `<a class="chip" href="#/upstreams" title="${esc(x.error)}">✗ ${esc(x.name)}</a>`).join('')}</div>` : ''}`;
+}
 
 function renderStats() {
   const s = state.status;
@@ -121,4 +136,10 @@ registerActions({
     finally { btn.disabled = false; }
   },
   'dash.loglevel': async (_, sel) => { logLevel = sel.value; await renderLog(); },
+  'dash.healthRun': async (_, btn) => {
+    btn.disabled = true;
+    try { await post('upstreams/health'); await renderHealth(); }
+    catch (e) { toast(e.message, 'err'); }
+    finally { btn.disabled = false; }
+  },
 });

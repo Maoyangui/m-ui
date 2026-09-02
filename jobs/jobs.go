@@ -10,7 +10,9 @@ package jobs
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +31,7 @@ type Deps struct {
 	ReloadUsers func() error     // 用户表变更后热更新入站并踢线
 	IsNode      func() bool      // 是否副机
 	Setting     func(string) string
+	Notify      func(text string) // 用户被禁用时的通知(可为 nil)
 }
 
 // Onlines 是最近一个统计周期内有流量经过的对象。
@@ -252,12 +255,15 @@ func (s *Scheduler) runDeplete() {
 			return err
 		}
 		for _, u := range depleted {
-			reason := "quota"
+			reason, why := "quota", "流量用尽"
 			if u.Expiry > 0 && u.Expiry < now {
-				reason = "expired"
+				reason, why = "expired", "已到期"
 			}
 			record(tx, "DepleteJob", "user", "disable:"+reason, u.Name)
 			logger.Info("用户 ", u.Name, " 已禁用(", reason, ")")
+			if s.d.Notify != nil {
+				s.d.Notify(fmt.Sprintf("⛔ <b>用户已禁用</b>:%s(%s)", escapeHTML(u.Name), why))
+			}
 		}
 		changed = true
 		return nil
@@ -288,6 +294,10 @@ func (s *Scheduler) runCleanup() {
 	if err := s.d.DB.Where("ts < ?", cutoff).Delete(&model.SubLog{}).Error; err != nil {
 		logger.Warning("清理订阅日志失败: ", err)
 	}
+}
+
+func escapeHTML(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }
 
 // record 写一条审计记录(任务发起的变更)。

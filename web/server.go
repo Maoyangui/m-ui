@@ -20,6 +20,7 @@ import (
 
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/fangjunsheng555/m-ui/notify"
 	"github.com/fangjunsheng555/m-ui/runner"
 
 	"golang.org/x/crypto/bcrypt"
@@ -47,8 +48,9 @@ type Server struct {
 	httpSrv  *http.Server
 	listener net.Listener
 
-	mu       sync.Mutex
-	sessions map[string]session
+	mu         sync.Mutex
+	sessions   map[string]session
+	loginFails map[string][]int64 // ip → 最近失败时间
 }
 
 func NewServer(run *runner.Runner) *Server {
@@ -129,6 +131,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"keygen", s.auth(s.handleKeygen))
 	mux.HandleFunc(api+"plans", s.auth(s.handlePlans))
 	mux.HandleFunc(api+"plans/", s.auth(s.handlePlanItem))
+	mux.HandleFunc(api+"notify/test", s.auth(s.handleNotifyTest))
 
 	// 根路径重定向到面板
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -261,9 +264,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !checkPassword(req.Password, admin.Password) {
 		time.Sleep(300 * time.Millisecond)
 		logger.Warning("面板登录失败,来源 ", clientIP(r))
+		s.noteLoginFailure(clientIP(r))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
 		return
 	}
+	s.run.Notifier().Event("tgOnLogin", "🔐 <b>面板登录</b>:"+notify.Esc(admin.Username)+"\nIP:"+notify.Esc(clientIP(r))+"\n"+time.Now().Format("2006-01-02 15:04:05"))
 
 	token := s.newSession(admin.Username)
 	http.SetCookie(w, &http.Cookie{
@@ -285,6 +290,28 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// noteLoginFailure 记录某 IP 的失败次数,10 分钟内达到 5 次告警一次。
+func (s *Server) noteLoginFailure(ip string) {
+	s.mu.Lock()
+	if s.loginFails == nil {
+		s.loginFails = map[string][]int64{}
+	}
+	now := time.Now().Unix()
+	recent := s.loginFails[ip][:0]
+	for _, ts := range s.loginFails[ip] {
+		if now-ts < 600 {
+			recent = append(recent, ts)
+		}
+	}
+	recent = append(recent, now)
+	s.loginFails[ip] = recent
+	n := len(recent)
+	s.mu.Unlock()
+	if n == 5 {
+		s.run.Notifier().Event("tgOnLogin", "⚠️ <b>面板登录连续失败</b>\nIP:"+notify.Esc(ip)+" 10 分钟内失败 5 次")
+	}
 }
 
 // checkPassword 兼容 bcrypt 哈希与(旧库可能残留的)明文。
