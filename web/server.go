@@ -4,6 +4,7 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
 	"embed"
@@ -106,7 +107,7 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
-	mux.Handle(base, http.StripPrefix(strings.TrimSuffix(base, "/"), http.FileServer(http.FS(sub))))
+	mux.Handle(base, assetCache(sub, http.StripPrefix(strings.TrimSuffix(base, "/"), http.FileServer(http.FS(sub)))))
 
 	// API
 	api := base + "api/"
@@ -175,6 +176,32 @@ func (s *Server) Start() error {
 	logger.Info("面板已启动 ", scheme, "://", addr, base)
 	go s.reapSessions()
 	return nil
+}
+
+// assetCache 给内嵌前端加上按内容哈希生成的 ETag,并要求浏览器每次校验(no-cache)。
+// 内嵌文件没有修改时间,浏览器会按启发式长期缓存 ES 模块,升级后就会看到旧界面;
+// 这里用整套资源的哈希做 ETag:未升级时全部 304,升级后立即拿到新文件。
+func assetCache(fsys fs.FS, next http.Handler) http.Handler {
+	h := sha256.New()
+	fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		b, _ := fs.ReadFile(fsys, p)
+		h.Write([]byte(p))
+		h.Write(b)
+		return nil
+	})
+	etag := `"` + hex.EncodeToString(h.Sum(nil))[:16] + `"`
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("ETag", etag)
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) Stop() error {

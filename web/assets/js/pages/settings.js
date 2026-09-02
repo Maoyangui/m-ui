@@ -5,6 +5,13 @@ import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk } f
 
 export const title = () => t('set.title');
 
+// 留空时后端采用的默认值,作为输入框占位提示
+const defaults = {
+  webListen: '0.0.0.0', webPort: 2053, webPath: '/app/', subListen: '0.0.0.0', subPort: 2056, subPath: '/sub/', subUpdates: 12,
+  tgExpiringDays: 3, tgQuotaPercent: 80, tgDailyHour: 9, upstreamCheckMinutes: 10, upstreamCheckFailThreshold: 2,
+  upstreamTestUrl: 'http://www.gstatic.com/generate_204', statsBucketSeconds: 10, trafficAge: 30,
+};
+
 const groups = () => [
   { id: 'panel', title: t('set.panel'), fields: [
     ['webDomain', t('set.webDomain'), 'text', t('set.webDomainHelp')],
@@ -62,7 +69,7 @@ export async function render(el) {
             ? check('set-' + k, label, s[k] === undefined || s[k] === '' ? (k === 'subPageEnabled' || type === 'boolOn') : String(s[k]).toLowerCase() === 'true', help)
             : type === 'textarea'
               ? `<div class="full">${field(label, `<textarea id="set-${k}">${esc(s[k] ?? '')}</textarea>`, help)}</div>`
-              : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}">`, help)).join('')}</div>
+              : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">`, help)).join('')}</div>
       </section>`).join('')}
     <section class="card">
       <div class="card-head"><h2>${t('set.admin')}</h2></div>
