@@ -48,15 +48,39 @@ func (s *Server) settingInt(key string, def int) int {
 
 // options 每次请求时读取,便于面板改设置后即时生效。
 func (s *Server) options() Options {
-	domain := s.setting("webDomain")
 	return Options{
 		ProfileTitle: s.setting("subProfileTitle"),
 		UpdateHours:  s.settingInt("subUpdates", 12),
 		Encode:       s.settingBool("subEncode"),
 		ShowNotice:   s.settingBool("subShowNotice"),
 		ClashTmpl:    s.setting("subClashExt"),
-		Entries:      []Entry{{Host: domain, SNI: domain}},
+		Entries:      EntriesFromNodes(s.db, s.setting("webDomain")),
 	}
+}
+
+// EntriesFromNodes 由入口服务器表生成订阅入口:多入口时每条线路按入口各出一个节点并加名称后缀;
+// 只有一台(或未配置)时用面板域名、不加后缀。
+func EntriesFromNodes(db *gorm.DB, webDomain string) []Entry {
+	var nodes []model.Node
+	db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&nodes)
+	var out []Entry
+	for _, n := range nodes {
+		host := strings.TrimSpace(n.Domain)
+		if host == "" && n.IsLocal {
+			host = webDomain
+		}
+		if host == "" {
+			continue
+		}
+		out = append(out, Entry{Name: n.Name, Host: host, SNI: host, Suffix: "-" + n.Name})
+	}
+	if len(out) == 0 {
+		return []Entry{{Host: webDomain, SNI: webDomain}}
+	}
+	if len(out) == 1 {
+		out[0].Suffix = ""
+	}
+	return out
 }
 
 func (s *Server) Start() error {

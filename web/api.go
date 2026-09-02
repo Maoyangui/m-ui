@@ -453,7 +453,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			u.Credentials = nil // 列表不返回凭据
 			out = append(out, row{
 				User: u, LineIds: ids,
-				OnlineIP: s.run.OnlineIPs(u.Name),
+				OnlineIP: mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
 				SubURL:   fmt.Sprintf("https://%s:%s%s%s", domain, subPort, subPath, u.Name),
 			})
 		}

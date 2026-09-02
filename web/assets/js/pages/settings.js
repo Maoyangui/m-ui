@@ -1,7 +1,7 @@
 import { state, load } from '../app.js';
-import { post } from '../api.js';
+import { get, post } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk } from '../ui.js';
+import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy } from '../ui.js';
 
 export const title = () => t('set.title');
 
@@ -88,6 +88,25 @@ export async function render(el) {
   document.getElementById('set-nodeMode').addEventListener('change', e => {
     document.getElementById('role-hint').textContent = e.target.checked ? t('set.roleNode') : t('set.roleMaster');
   });
+  if (isNode) renderPairing();
+}
+
+// 副机:展示配对信息(API 地址 + 令牌),复制到主机的"服务器"页即可接入
+async function renderPairing() {
+  const info = await get('agent/info').catch(() => null);
+  if (!info) return;
+  const role = document.querySelector('section.card');
+  const card = document.createElement('section');
+  card.className = 'card';
+  card.innerHTML = `
+    <div class="card-head"><h2>${t('set.pairing')}</h2><button class="btn sm" data-act="set.rotateToken">${t('set.rotateToken')}</button></div>
+    <p class="hint">${t('set.pairingHelp')}</p>
+    <dl class="kv" style="margin-top:.5rem">
+      <dt>${t('node.apiUrl')}</dt><dd class="mono">${esc(info.apiUrl)}</dd>
+      <dt>${t('node.token')}</dt><dd><div class="sub-box"><code id="pair-token">${esc(info.token)}</code><button class="btn sm" data-act="set.copyToken">${t('common.copy')}</button></div></dd>
+      <dt>${t('node.revision')}</dt><dd class="mono">${esc(info.revision || '—')}${info.appliedAt ? ` <span class="muted small">${new Date(Number(info.appliedAt) * 1000).toLocaleString()}</span>` : ''}</dd>
+    </dl>`;
+  role.after(card);
 }
 
 registerActions({
@@ -103,6 +122,12 @@ registerActions({
     const cur = String(state.settings.nodeMode).toLowerCase() === 'true';
     if (toNode !== cur && !await confirm(toNode ? t('set.roleToNode') : t('set.roleToMaster'), { danger: true })) return;
     try { await post('settings', { nodeMode: String(toNode) }); await load('settings', 'status'); toast(t('set.saved'), 'ok'); location.reload(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  'set.copyToken': () => copy(document.getElementById('pair-token').textContent),
+  'set.rotateToken': async () => {
+    if (!await confirm(t('set.rotateConfirm'), { danger: true })) return;
+    try { const r = await post('agent/rotate'); document.getElementById('pair-token').textContent = r.token; toast(t('set.rotated'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
   'set.notifyTest': async (_, btn) => {

@@ -123,9 +123,34 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 	o := s.run.Onlines()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"users": o.Users, "lines": o.Lines, "upstreams": o.Upstreams,
+		"users": mergeIPs(o.Users, s.run.Hub().RemoteOnlineUsers()), "lines": o.Lines, "upstreams": o.Upstreams,
 		"connCounts": s.run.ConnCounts(),
 	})
+}
+
+// mergeIPs 合并两组字符串并去重(顺序:a 在前)。
+func mergeIPs(a, b []string) []string {
+	if len(b) == 0 {
+		if a == nil {
+			return []string{}
+		}
+		return a
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	for _, s := range b {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // ---- 日志 ----

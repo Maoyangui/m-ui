@@ -28,8 +28,25 @@ type Limiter struct {
 	up     map[string]*rate.Limiter // 上行桶(客户端→服务器,即 Read)
 	down   map[string]*rate.Limiter // 下行桶(服务器→客户端,即 Write)
 	ips    map[string]map[string]int64
+	// external 是其他机器上该用户当前在线的源 IP(Hub 下发),计入设备数;本机已在线的 IP 不重复计
+	external map[string]map[string]bool
 
 	idleWindow time.Duration // 无流量多久判定该 IP 下线并释放名额
+}
+
+// SetExternalIPs 全量替换"其他机器上在线的 IP"(跨机设备数并集判定)。
+func (l *Limiter) SetExternalIPs(m map[string][]string) {
+	ext := make(map[string]map[string]bool, len(m))
+	for user, ips := range m {
+		set := make(map[string]bool, len(ips))
+		for _, ip := range ips {
+			set[ip] = true
+		}
+		ext[user] = set
+	}
+	l.mu.Lock()
+	l.external = ext
+	l.mu.Unlock()
 }
 
 type userLimit struct {
@@ -99,8 +116,22 @@ func (l *Limiter) AllowConn(user, ip string) bool {
 		active[ip] = now
 		return true
 	}
-	if limit > 0 && len(active) >= limit {
-		return false
+	if limit > 0 {
+		ext := l.external[user]
+		if ext[ip] {
+			// 该设备已在别的机器上在线,视为同一设备切换入口,不占新名额
+			active[ip] = now
+			return true
+		}
+		total := len(active)
+		for eip := range ext {
+			if _, dup := active[eip]; !dup {
+				total++
+			}
+		}
+		if total >= limit {
+			return false
+		}
 	}
 	active[ip] = now
 	return true

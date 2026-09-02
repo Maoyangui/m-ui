@@ -45,16 +45,30 @@ func BuildClash(user model.User, lines []model.Line, entries []Entry, template, 
 	}
 
 	var proxies []interface{}
-	var proxyNames []string
+	var proxyNames []string // 全部代理(Auto 组)
+	var topNames []string   // Proxy 选择组里的条目:单入口=代理本身;多入口=每条线路一个 url-test 组
+	var lineGroups []interface{}
 	if notice != "" {
 		proxies = append(proxies, noticeClashProxy(notice))
 	}
 	for _, line := range lines {
+		var names []string
 		for _, a := range resolveAddrs(line, entries) {
 			for _, p := range lineToClashProxies(line, user, a) {
 				proxies = append(proxies, p)
 				proxyNames = append(proxyNames, p["name"].(string))
+				names = append(names, p["name"].(string))
 			}
+		}
+		if len(names) > 1 && line.Protocol != "mixed" {
+			// 多入口(如 香港/台湾):同一线路做成 url-test 组,客户端按延迟自动选入口
+			lineGroups = append(lineGroups, map[string]interface{}{
+				"name": line.Name, "type": "url-test", "url": "http://www.gstatic.com/generate_204",
+				"interval": 300, "tolerance": 50, "proxies": names,
+			})
+			topNames = append(topNames, line.Name)
+		} else {
+			topNames = append(topNames, names...)
 		}
 	}
 	root["proxies"] = proxies
@@ -64,11 +78,13 @@ func BuildClash(user model.User, lines []model.Line, entries []Entry, template, 
 		selectList = append(selectList, notice)
 	}
 	selectList = append(selectList, "Auto")
-	selectList = append(selectList, proxyNames...)
-	root["proxy-groups"] = []interface{}{
+	selectList = append(selectList, topNames...)
+	groups := []interface{}{
 		map[string]interface{}{"name": "Proxy", "type": "select", "proxies": selectList},
 		map[string]interface{}{"name": "Auto", "type": "url-test", "url": "http://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50, "proxies": proxyNames},
 	}
+	groups = append(groups, lineGroups...)
+	root["proxy-groups"] = groups
 	out, err := yaml.Marshal(root)
 	if err != nil {
 		return "", err

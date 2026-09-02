@@ -55,11 +55,12 @@ type Node struct {
 	Id      uint   `json:"id" gorm:"primaryKey;autoIncrement"`
 	Name    string `json:"name" gorm:"uniqueIndex"`
 	Domain  string `json:"domain"`
-	ApiUrl  string `json:"apiUrl"`
-	Token   string `json:"-"`
-	IsLocal bool   `json:"isLocal"`
-	Enabled bool   `json:"enabled" gorm:"default:true"`
-	Sort    int    `json:"sort"`
+	ApiUrl   string `json:"apiUrl"`
+	Token    string `json:"-"`
+	Insecure bool   `json:"insecure"` // 副机面板用自签证书时跳过校验
+	IsLocal  bool   `json:"isLocal"`
+	Enabled  bool   `json:"enabled" gorm:"default:true"`
+	Sort     int    `json:"sort"`
 }
 
 // User 订阅用户。配额/流量为两台服务器聚合值,判定只在主端进行。

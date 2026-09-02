@@ -163,7 +163,16 @@ const zh = {
   'ops.t.warp-install': '安装', 'ops.t.warp-enable': '启用', 'ops.t.warp-disable': '停用', 'ops.t.warp-uninstall': '卸载', 'ops.t.tune-all': '一键优化',
   'ops.tune': '系统优化', 'ops.done': '已完成', 'ops.todo': '未做', 'ops.log': '任务输出', 'ops.running': '执行中:{task}',
   'ops.runConfirm': '执行「{task}」?', 'ops.started': '任务已开始', 'ops.taskDone': '任务完成', 'ops.taskFailed': '任务失败,请查看输出', 'ops.upstreamAdded': '已添加上游 warp 并重载数据面',
-  'common.refresh': '刷新', 'common.run': '执行',
+  'common.refresh': '刷新', 'common.run': '执行', 'common.sort': '排序', 'common.test': '测试', 'common.deleted': '已删除',
+  'nav.nodes': '服务器', 'node.title': '服务器', 'node.subtitle': '入口服务器。主机把线路/上游/用户推送给每台副机并回收流量;订阅里每条线路按服务器各出一个节点,Clash 自动选延迟低的入口。',
+  'node.howto': '接入副机:在副机上安装 m-ui → 设置里打开"作为副服务器运行" → 复制其"配对信息"里的 API 地址与令牌 → 在这里新增。副机证书各自签发。',
+  'node.add': '新增服务器', 'node.edit': '编辑服务器', 'node.domain': '域名 / IP', 'node.sync': '同步', 'node.core': '数据面', 'node.online': '在线',
+  'node.local': '本机', 'node.pending': '等待连接', 'node.synced': '已同步', 'node.unsynced': '待推送', 'node.lastSeen': '最后在线', 'node.revision': '配置修订号',
+  'node.nameHelp': '订阅里节点名后缀,如「台湾」→「香港极速1-台湾」', 'node.domainHelp': '用户连接该服务器用的地址(也是 SNI);本机留空则用面板域名',
+  'node.apiUrl': 'API 地址', 'node.apiUrlHelp': '副机面板地址,含路径,如 https://tw.example.com:2053/ad/', 'node.token': '配对令牌', 'node.tokenKeep': '已保存,留空沿用', 'node.tokenHelp': '在副机 设置 → 配对信息 里复制',
+  'node.insecure': '跳过证书校验', 'node.insecureHelp': '副机面板用自签证书或 IP 访问时勾选', 'node.push': '推送', 'node.pushed': '已推送配置', 'node.testOk': '连接成功 {v} · 数据面{core}',
+  'set.pairing': '配对信息', 'set.pairingHelp': '把 API 地址与令牌填到主机的「服务器」页即可接入;本机的线路/上游/用户将由主机下发覆盖。',
+  'set.rotateToken': '更换令牌', 'set.rotateConfirm': '更换后主机需重新填写新令牌才能连接,确定?', 'set.rotated': '令牌已更换',
 };
 
 const en = {
@@ -330,7 +339,16 @@ const en = {
   'ops.t.warp-install': 'Install', 'ops.t.warp-enable': 'Enable', 'ops.t.warp-disable': 'Disable', 'ops.t.warp-uninstall': 'Uninstall', 'ops.t.tune-all': 'Tune everything',
   'ops.tune': 'System tuning', 'ops.done': 'done', 'ops.todo': 'pending', 'ops.log': 'Task output', 'ops.running': 'running: {task}',
   'ops.runConfirm': 'Run "{task}"?', 'ops.started': 'Task started', 'ops.taskDone': 'Task finished', 'ops.taskFailed': 'Task failed, see output', 'ops.upstreamAdded': 'Upstream "warp" added and data plane reloaded',
-  'common.refresh': 'Refresh', 'common.run': 'Run',
+  'common.refresh': 'Refresh', 'common.run': 'Run', 'common.sort': 'Sort', 'common.test': 'Test', 'common.deleted': 'Deleted',
+  'nav.nodes': 'Servers', 'node.title': 'Servers', 'node.subtitle': 'Entry servers. The hub pushes lines/upstreams/users to every node and collects traffic; subscriptions list each line per server and Clash picks the lowest-latency entry.',
+  'node.howto': 'To add a node: install m-ui on it → enable "Run as secondary server" in its settings → copy the API URL and token from its "Pairing" card → add it here. Each node issues its own certificate.',
+  'node.add': 'Add server', 'node.edit': 'Edit server', 'node.domain': 'Domain / IP', 'node.sync': 'Sync', 'node.core': 'Data plane', 'node.online': 'Online',
+  'node.local': 'this server', 'node.pending': 'waiting', 'node.synced': 'synced', 'node.unsynced': 'push pending', 'node.lastSeen': 'last seen', 'node.revision': 'Config revision',
+  'node.nameHelp': 'Suffix on node names in subscriptions, e.g. "TW" → "HK Fast 1-TW"', 'node.domainHelp': 'Address users connect to (also the SNI); empty on this server = panel domain',
+  'node.apiUrl': 'API URL', 'node.apiUrlHelp': 'Node panel URL including path, e.g. https://tw.example.com:2053/ad/', 'node.token': 'Pairing token', 'node.tokenKeep': 'saved, leave empty to keep', 'node.tokenHelp': 'Copy from the node\'s Settings → Pairing',
+  'node.insecure': 'Skip certificate verification', 'node.insecureHelp': 'Check when the node panel uses a self-signed certificate or an IP', 'node.push': 'Push', 'node.pushed': 'Config pushed', 'node.testOk': 'Connected {v} · data plane {core}',
+  'set.pairing': 'Pairing', 'set.pairingHelp': 'Enter the API URL and token on the hub\'s Servers page. Lines, upstreams and users on this server are then managed by the hub.',
+  'set.rotateToken': 'Rotate token', 'set.rotateConfirm': 'The hub must be updated with the new token before it can connect again. Continue?', 'set.rotated': 'Token rotated',
 };
 
 const dicts = { zh, en };

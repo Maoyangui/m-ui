@@ -17,6 +17,7 @@ import (
 	"github.com/fangjunsheng555/m-ui/creds"
 	"github.com/fangjunsheng555/m-ui/database"
 	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/fangjunsheng555/m-ui/hub"
 	"github.com/fangjunsheng555/m-ui/jobs"
 	"github.com/fangjunsheng555/m-ui/logger"
 	"github.com/fangjunsheng555/m-ui/monitor"
@@ -26,8 +27,14 @@ import (
 	"github.com/fangjunsheng555/m-ui/sub"
 
 	"github.com/op/go-logging"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
+
+func hashPassword(plain string) (string, error) {
+	b, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
+	return string(b), err
+}
 
 // startPanel 由 main 注入(web 包依赖 runner,反向直接引用会成环)。
 var startPanel func(*Runner) error
@@ -43,6 +50,7 @@ type Runner struct {
 	jobs     *jobs.Scheduler
 	notifier *notify.Notifier
 	monitor  *monitor.Monitor
+	hub      *hub.Hub
 	dbPath   string
 	cert     certState
 	mu       sync.Mutex // 串行化重载,避免并发改动互相打断
@@ -112,7 +120,44 @@ func New(dbPath string) (*Runner, error) {
 	r.monitor = monitor.New(monitor.Deps{
 		DB: db, Setting: r.setting, CoreRunning: r.CoreRunning, Check: r.CheckUpstream, Notify: r.notifier,
 	})
+	r.hub = hub.New(hub.Deps{
+		DB: db, Setting: r.setting, IsNode: r.IsNode, Version: Version,
+		Notify:         func(toggle, text string) { r.notifier.Event(toggle, text) },
+		LocalIPs:       r.OnlineIPs,
+		SetExternalIPs: r.SetExternalIPs,
+	})
+	r.ensureAdmin()
 	return r, nil
+}
+
+// Hub 暴露主副机同步器。
+func (r *Runner) Hub() *hub.Hub { return r.hub }
+
+// SetExternalIPs 下发其他机器上在线的 IP 给本机限制器(跨机设备数)。
+func (r *Runner) SetExternalIPs(m map[string][]string) {
+	if box := r.core.GetInstance(); box != nil {
+		box.Limiter().SetExternalIPs(m)
+	}
+}
+
+// ensureAdmin 全新数据库没有管理员时创建 admin 并把随机密码打到日志(首次登录后请修改)。
+func (r *Runner) ensureAdmin() {
+	var n int64
+	r.db.Model(&model.Admin{}).Count(&n)
+	if n > 0 {
+		return
+	}
+	pw := creds.Password(12)
+	hash, err := hashPassword(pw)
+	if err != nil {
+		logger.Error("生成初始密码失败: ", err)
+		return
+	}
+	r.db.Create(&model.Admin{Username: "admin", Password: hash})
+	logger.Info("==================================================")
+	logger.Info("首次启动:已创建管理员 admin,初始密码: ", pw)
+	logger.Info("请登录后在 设置 → 管理员 里修改密码")
+	logger.Info("==================================================")
 }
 
 // IsNode 报告本机是否以副机角色运行(设置 nodeMode)。
@@ -378,6 +423,8 @@ func Run(dbPath string) error {
 	defer r.jobs.Stop()
 	r.monitor.Start()
 	defer r.monitor.Stop()
+	r.hub.Start()
+	defer r.hub.Stop()
 
 	stopCheckpoint := make(chan struct{})
 	go r.checkpointLoop(stopCheckpoint)

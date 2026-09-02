@@ -34,6 +34,9 @@ func Open(dbPath string) (*gorm.DB, error) {
 	return db, nil
 }
 
+// DBHandle 是测试里携带 *gorm.DB 的小包装。
+type DBHandle struct{ DB *gorm.DB }
+
 // OpenReadOnly 只读打开一个既有 SQLite 文件(用于导入旧库,绝不写源文件)。
 func OpenReadOnly(dbPath string) (*gorm.DB, error) {
 	dsn := "file:" + dbPath + "?mode=ro"
