@@ -66,10 +66,10 @@ export async function render(el) {
     </section>`;
   renderStats();
   renderCore();
-  await Promise.all([renderChart(), renderOnline(), renderAudit(), renderLog(), renderHealth()]);
+  await Promise.all([renderChart(), renderOnline(), renderAudit(), renderLog(), renderHealth(), refreshNodeSummary().then(renderStats)]);
 }
 
-export function tick() { renderStats(); renderCore(); renderOnline(); }
+export async function tick() { await refreshNodeSummary(); renderStats(); renderCore(); renderOnline(); }
 
 async function renderHealth() {
   const el = document.getElementById('dash-health');
@@ -82,6 +82,8 @@ async function renderHealth() {
     ${bad.length ? `<div class="chips">${bad.map(x => `<a class="chip" href="#/upstreams" title="${esc(x.error)}">✗ ${esc(x.name)}</a>`).join('')}</div>` : ''}`;
 }
 
+let nodeSummary = null; // {online, total, bad:[names]},仅多服务器时填充
+
 function renderStats() {
   const s = state.status;
   const cards = [
@@ -92,8 +94,19 @@ function renderStats() {
     [t('dash.cpu'), s.cpu != null ? s.cpu.toFixed(1) + '%' : '—', ''],
     [t('dash.mem'), s.memTotal ? Math.round(s.memUsed / s.memTotal * 100) + '%' : '—', s.memTotal ? `${fmtBytes(s.memUsed, 1)} / ${fmtBytes(s.memTotal, 1)}` : ''],
   ];
-  document.getElementById('dash-stats').innerHTML = cards.map(([k, v, sub]) =>
-    `<div class="stat"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="s">${esc(sub)}</div></div>`).join('');
+  if (nodeSummary) cards.splice(3, 0, [t('nav.nodes'), `${nodeSummary.online} / ${nodeSummary.total}`, nodeSummary.bad.length ? '✗ ' + nodeSummary.bad.join(', ') : t('common.online'), 'nodes', nodeSummary.bad.length ? 'bad' : '']);
+  document.getElementById('dash-stats').innerHTML = cards.map(([k, v, sub, link, kind]) =>
+    `<${link ? `a href="#/${link}"` : 'div'} class="stat ${kind || ''}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="s">${esc(sub)}</div></${link ? 'a' : 'div'}>`).join('');
+}
+
+async function refreshNodeSummary() {
+  if ((state.status.nodes || 0) <= 1 || state.status.role === 'node') { nodeSummary = null; return; }
+  try {
+    const d = await get('nodes');
+    const remote = d.nodes.filter(n => !n.isLocal && n.enabled);
+    const bad = remote.filter(n => !n.status || !n.status.ok).map(n => n.name);
+    nodeSummary = { online: remote.length - bad.length + 1, total: remote.length + 1, bad };
+  } catch { nodeSummary = null; }
 }
 
 function renderCore() {
