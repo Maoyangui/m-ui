@@ -50,6 +50,12 @@ m-ui 是一个自托管的代理服务面板:一个二进制、一个数据库�
 bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)
 ```
 
+不是 root 用户时用管道形式:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh | sudo bash
+```
+
 脚本会自动识别架构,从 GitHub Releases 下载最新版,装到 `/usr/local/bin/m-ui`,数据放在 `/etc/m-ui/`,并注册 `m-ui.service` 开机自启。安装结束会打印面板地址与默认账号。
 
 指定版本或离线安装:

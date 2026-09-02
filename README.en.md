@@ -50,6 +50,12 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)
 ```
 
+Not root? Use the piped form:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh | sudo bash
+```
+
 The script detects the architecture, downloads the latest release from GitHub, installs `/usr/local/bin/m-ui`, keeps data in `/etc/m-ui/` and registers `m-ui.service`. It prints the panel URL and default credentials when done.
 
 Specific version or offline:
