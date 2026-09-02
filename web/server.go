@@ -23,6 +23,7 @@ import (
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/logger"
 	"github.com/fangjunsheng555/m-ui/notify"
+	"github.com/fangjunsheng555/m-ui/ops"
 	"github.com/fangjunsheng555/m-ui/runner"
 
 	"golang.org/x/crypto/bcrypt"
@@ -53,10 +54,11 @@ type Server struct {
 	mu         sync.Mutex
 	sessions   map[string]session
 	loginFails map[string][]int64 // ip → 最近失败时间
+	ops        *ops.Runner
 }
 
 func NewServer(run *runner.Runner) *Server {
-	return &Server{run: run, db: run.DB(), sessions: map[string]session{}}
+	return &Server{run: run, db: run.DB(), sessions: map[string]session{}, ops: ops.NewRunner()}
 }
 
 // actor 返回当前请求的登录用户名(审计用);未登录为空。
@@ -138,6 +140,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"cert/", s.auth(s.handleCertSub))
 	mux.HandleFunc(api+"backup", s.auth(s.handleBackup))
 	mux.HandleFunc(api+"backup/", s.auth(s.handleBackupSub))
+	mux.HandleFunc(api+"ops", s.auth(s.handleOps))
+	mux.HandleFunc(api+"ops/", s.auth(s.handleOpsSub))
 
 	// 根路径重定向到面板
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

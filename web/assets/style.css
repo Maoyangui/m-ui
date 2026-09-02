@@ -240,3 +240,9 @@ pre.log .warn { color: #fbbf24; } pre.log .error { color: #f87171; } pre.log .de
 
 .grid tbody tr.selected { background: var(--primary-soft); }
 .batch-bar { background: var(--primary-soft); border-radius: var(--radius-sm); padding: .45rem .7rem; }
+
+/* 运维任务卡片 */
+.task-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; }
+.task { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .7rem .8rem; background: var(--surface-2); display: flex; flex-direction: column; gap: .4rem; }
+.task-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.task .row { margin-top: auto; align-items: center; gap: .4rem; }

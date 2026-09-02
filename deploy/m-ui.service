@@ -1,0 +1,19 @@
+[Unit]
+Description=m-ui panel and data plane (sing-box)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/etc/m-ui
+ExecStart=/usr/local/bin/m-ui run -db /etc/m-ui/m-ui.db
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+LimitNPROC=1048576
+TasksMax=infinity
+# 面板"还原备份/重启"会原地 exec 自身,不依赖 Restart 策略
+
+[Install]
+WantedBy=multi-user.target

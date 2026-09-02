@@ -9,6 +9,7 @@ import * as users from './pages/users.js';
 import * as plans from './pages/plans.js';
 import * as cert from './pages/cert.js';
 import * as backup from './pages/backup.js';
+import * as ops from './pages/ops.js';
 import * as logs from './pages/logs.js';
 import * as settings from './pages/settings.js';
 
@@ -17,10 +18,10 @@ export const state = {
   onlines: { users: [], lines: [], upstreams: [], connCounts: {} },
 };
 
-const pages = { dashboard, lines, upstreams, users, plans, cert, backup, logs, settings };
+const pages = { dashboard, lines, upstreams, users, plans, cert, backup, ops, logs, settings };
 const navItems = [
   ['dashboard', '◉'], ['lines', '⇄'], ['upstreams', '⇪'], ['users', '☺'], ['plans', '▤'],
-  ['cert', '⚿'], ['backup', '⛁'], ['logs', '≡'], ['settings', '⚙'],
+  ['cert', '⚿'], ['backup', '⛁'], ['ops', '⚒'], ['logs', '≡'], ['settings', '⚙'],
 ];
 let current = null;
 

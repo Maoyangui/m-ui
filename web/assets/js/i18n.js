@@ -155,6 +155,15 @@ const zh = {
   'bk.from': '来源', 'bk.rawDb': '裸数据库', 'bk.confirmTitle': '确认还原', 'bk.restoreWarn': '当前所有数据将被备份内容替换(旧库会保留为 .bak-* 文件),并重启 m-ui。',
   'bk.restarting': '正在重启 m-ui,请稍候…', 'bk.restartTimeout': '60 秒内未恢复,请手动检查服务', 'bk.saved': '已保存 {name}',
   'bk.pending': '有待应用的还原文件,重启 m-ui 后生效。', 'bk.restartNow': '立即重启', 'bk.restartConfirm': '现在重启 m-ui?所有用户连接会短暂中断。',
+  'nav.ops': '运维', 'ops.title': '运维', 'ops.subtitle': 'Cloudflare WARP 一键安装启停、系统优化与运行状态。任务串行执行,输出实时显示。',
+  'ops.linuxOnly': '运维任务仅支持 Linux 服务器,当前只显示信息。', 'ops.rootOnly': 'm-ui 未以 root 运行,无法执行运维任务。',
+  'ops.system': '系统', 'ops.os': '系统', 'ops.host': '主机名', 'ops.uptime': '运行时间', 'ops.mem': '内存', 'ops.swap': 'Swap', 'ops.disk': '磁盘', 'ops.nofile': '文件句柄上限', 'ops.synced': '已同步', 'ops.unsynced': '未同步',
+  'ops.warpOff': '未启用', 'ops.warpNoExit': '出口未验证', 'ops.installed': '已安装', 'ops.services': '服务', 'ops.exit': '出口', 'ops.upstream': '上游', 'ops.addUpstream': '添加为上游 warp',
+  'ops.warpPort': 'SOCKS5 端口', 'ops.warpPortHelp': '线路的 WARP 出站指向 127.0.0.1:<端口>;修改后需重新启用', 'ops.checkExit': '检测出口',
+  'ops.t.warp-install': '安装', 'ops.t.warp-enable': '启用', 'ops.t.warp-disable': '停用', 'ops.t.warp-uninstall': '卸载', 'ops.t.tune-all': '一键优化',
+  'ops.tune': '系统优化', 'ops.done': '已完成', 'ops.todo': '未做', 'ops.log': '任务输出', 'ops.running': '执行中:{task}',
+  'ops.runConfirm': '执行「{task}」?', 'ops.started': '任务已开始', 'ops.taskDone': '任务完成', 'ops.taskFailed': '任务失败,请查看输出', 'ops.upstreamAdded': '已添加上游 warp 并重载数据面',
+  'common.refresh': '刷新', 'common.run': '执行',
 };
 
 const en = {
@@ -313,6 +322,15 @@ const en = {
   'bk.from': 'Source', 'bk.rawDb': 'raw database', 'bk.confirmTitle': 'Confirm restore', 'bk.restoreWarn': 'All current data will be replaced by the backup (the old database is kept as .bak-*) and m-ui restarts.',
   'bk.restarting': 'Restarting m-ui, please wait…', 'bk.restartTimeout': 'Not back within 60 s, check the service manually', 'bk.saved': 'Saved {name}',
   'bk.pending': 'A restore is staged and will apply on the next restart.', 'bk.restartNow': 'Restart now', 'bk.restartConfirm': 'Restart m-ui now? All user connections drop briefly.',
+  'nav.ops': 'Ops', 'ops.title': 'Operations', 'ops.subtitle': 'One-click Cloudflare WARP, system tuning and live host status. Tasks run one at a time with live output.',
+  'ops.linuxOnly': 'Ops tasks need a Linux server; only information is shown here.', 'ops.rootOnly': 'm-ui is not running as root, tasks are disabled.',
+  'ops.system': 'System', 'ops.os': 'OS', 'ops.host': 'Hostname', 'ops.uptime': 'Uptime', 'ops.mem': 'Memory', 'ops.swap': 'Swap', 'ops.disk': 'Disk', 'ops.nofile': 'Open-file limit', 'ops.synced': 'synced', 'ops.unsynced': 'not synced',
+  'ops.warpOff': 'off', 'ops.warpNoExit': 'exit unverified', 'ops.installed': 'Installed', 'ops.services': 'Services', 'ops.exit': 'Exit', 'ops.upstream': 'Upstream', 'ops.addUpstream': 'Add as upstream "warp"',
+  'ops.warpPort': 'SOCKS5 port', 'ops.warpPortHelp': 'Lines\' WARP outbound points at 127.0.0.1:<port>; re-enable after changing', 'ops.checkExit': 'Check exit',
+  'ops.t.warp-install': 'Install', 'ops.t.warp-enable': 'Enable', 'ops.t.warp-disable': 'Disable', 'ops.t.warp-uninstall': 'Uninstall', 'ops.t.tune-all': 'Tune everything',
+  'ops.tune': 'System tuning', 'ops.done': 'done', 'ops.todo': 'pending', 'ops.log': 'Task output', 'ops.running': 'running: {task}',
+  'ops.runConfirm': 'Run "{task}"?', 'ops.started': 'Task started', 'ops.taskDone': 'Task finished', 'ops.taskFailed': 'Task failed, see output', 'ops.upstreamAdded': 'Upstream "warp" added and data plane reloaded',
+  'common.refresh': 'Refresh', 'common.run': 'Run',
 };
 
 const dicts = { zh, en };
