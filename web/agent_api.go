@@ -142,6 +142,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	rep := hub.Report{
 		Version: Version, Hostname: host, CoreRunning: s.run.CoreRunning(), Uptime: s.run.Uptime(),
 		Revision: s.setting("hubRevision"), Onlines: map[string][]string{}, CertDays: s.run.CertInfo().DaysLeft,
+		PublicIP: s.setting("publicIp"),
 	}
 	s.db.Find(&rep.Counters)
 	o := s.run.Onlines()

@@ -50,11 +50,7 @@ func (s *Server) settingInt(key string, def int) int {
 // options 每次请求时读取,便于面板改设置后即时生效。
 func (s *Server) options() Options {
 	insecure := s.insecure()
-	host := s.setting("webDomain")
-	if host == "" {
-		host = s.setting("publicIp") // 无域名:节点地址用公网 IP
-	}
-	entries := EntriesFromNodes(s.db, host)
+	entries := EntriesFromNodes(s.db, s.setting("webDomain"), s.setting("publicIp"), !strings.EqualFold(s.setting("subServerAddr"), "domain"))
 	for i := range entries {
 		entries[i].Insecure = insecure
 	}
@@ -101,27 +97,52 @@ func CertIsSelfSigned(certFile, fallback string) bool {
 	return info.Exists && info.SelfSigned
 }
 
-// EntriesFromNodes 由入口服务器表生成订阅入口:多入口时每条线路按入口各出一个节点并加名称后缀;
-// 只有一台(或未配置)时用面板域名、不加后缀。
-func EntriesFromNodes(db *gorm.DB, webDomain string) []Entry {
+// EntriesFromNodes 由入口服务器表生成订阅入口。
+//
+// 连接地址:preferIP 时用 节点 Addr → 该服务器公网 IP → 域名(大陆 DNS 污染下客户端按域名解析会失败,
+// 直接给 IP 最稳),SNI 仍用域名保证 TLS 正常;否则用域名。
+// 多入口时每条线路按入口各出一个节点并加 "-名称" 后缀;倍率不为 1 时再加 " x2" 之类标记。
+func EntriesFromNodes(db *gorm.DB, webDomain, localPublicIP string, preferIP bool) []Entry {
 	var nodes []model.Node
 	db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&nodes)
 	var out []Entry
 	for _, n := range nodes {
-		host := strings.TrimSpace(n.Domain)
-		if host == "" && n.IsLocal {
-			host = webDomain
+		domain := strings.TrimSpace(n.Domain)
+		if domain == "" && n.IsLocal {
+			domain = webDomain
+		}
+		ip := strings.TrimSpace(n.Addr)
+		if ip == "" {
+			if n.IsLocal {
+				ip = localPublicIP
+			} else {
+				ip = n.PublicIP
+			}
+		}
+		host := domain
+		if preferIP && ip != "" {
+			host = ip
 		}
 		if host == "" {
 			continue
 		}
-		out = append(out, Entry{Name: n.Name, Host: host, SNI: sniFor(host), Suffix: "-" + n.Name})
+		e := Entry{Name: n.Name, Host: host, SNI: sniFor(domain), NodeId: n.Id, Ratio: n.Ratio, Suffix: "-" + n.Name}
+		out = append(out, e)
 	}
 	if len(out) == 0 {
-		return []Entry{{Host: webDomain, SNI: sniFor(webDomain)}}
+		host := webDomain
+		if preferIP && localPublicIP != "" {
+			host = localPublicIP
+		}
+		return []Entry{{Host: host, SNI: sniFor(webDomain)}}
 	}
-	if len(out) == 1 {
-		out[0].Suffix = ""
+	for i := range out {
+		if len(out) == 1 {
+			out[i].Suffix = ""
+		}
+		if out[i].Ratio > 0 && out[i].Ratio != 1 {
+			out[i].Suffix += " x" + strconv.FormatFloat(out[i].Ratio, 'f', -1, 64)
+		}
 	}
 	return out
 }

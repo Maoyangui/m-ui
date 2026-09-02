@@ -41,6 +41,8 @@ type Line struct {
 	// 空 = 用入口节点主机 + 本线路端口(常态);非空 = 逐地址各出一条链接/代理。
 	// 也是 HK/TW 双入口的承载:每个入口一条 addr。
 	Addrs json.RawMessage `json:"addrs,omitempty"`
+	// NodeIds 该线路部署到哪些服务器 [1,2];空 = 全部服务器。渲染与订阅都按此过滤。
+	NodeIds json.RawMessage `json:"nodeIds,omitempty"`
 	// Tls 线路 TLS 配置 {mode: cert|reality|none, reality:{private_key, public_key, short_ids, handshake_server, handshake_port}}。
 	// 空 = 按协议默认(hy2/anytls/tuic/trojan 用节点证书,vless 用 reality,其余无)。
 	Tls json.RawMessage `json:"tls,omitempty"`
@@ -61,6 +63,12 @@ type Node struct {
 	IsLocal  bool   `json:"isLocal"`
 	Enabled  bool   `json:"enabled" gorm:"default:true"`
 	Sort     int    `json:"sort"`
+	// Addr 订阅里节点的连接地址(可填 IP);空 = 自动用该服务器探测到的公网 IP。域名仍作 SNI,绕开大陆 DNS 污染。
+	Addr string `json:"addr"`
+	// PublicIP 该服务器自动探测到的公网 IP(本机由 runner 写入,副机随报告上报)。
+	PublicIP string `json:"publicIp"`
+	// Ratio 流量倍率:经该服务器的流量按倍率计入用户用量(2 = 双倍扣量);0/1 = 原样。
+	Ratio float64 `json:"ratio" gorm:"default:1"`
 }
 
 // User 订阅用户。配额/流量为两台服务器聚合值,判定只在主端进行。

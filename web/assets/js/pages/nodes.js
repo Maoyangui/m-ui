@@ -17,7 +17,7 @@ export async function render(el) {
     </div>
     <p class="hint" style="margin-bottom:.8rem">${t('node.howto')}</p>
     <div class="table-wrap"><table class="grid">
-      <thead><tr><th>${t('common.name')}</th><th>${t('node.domain')}</th><th>${t('common.status')}</th><th>${t('node.sync')}</th><th>${t('node.core')}</th><th>${t('node.online')}</th><th></th></tr></thead>
+      <thead><tr><th>${t('common.name')}</th><th>${t('node.domain')}</th><th>${t('node.ip')}</th><th>${t('common.status')}</th><th>${t('node.sync')}</th><th>${t('node.core')}</th><th>${t('node.online')}</th><th></th></tr></thead>
       <tbody id="nodes-body"></tbody>
     </table></div>`;
   renderRows();
@@ -37,12 +37,13 @@ function statusCell(n) {
 function renderRows() {
   const body = document.getElementById('nodes-body');
   if (!body) return;
-  if (!data.nodes.length) { body.innerHTML = `<tr><td colspan="7">${empty()}</td></tr>`; return; }
+  if (!data.nodes.length) { body.innerHTML = `<tr><td colspan="8">${empty()}</td></tr>`; return; }
   body.innerHTML = data.nodes.map(n => {
     const s = n.status || {};
     return `<tr>
-      <td class="primary-cell">${esc(n.name)}${n.apiUrl ? `<div class="sub-cell mono">${esc(n.apiUrl)}</div>` : ''}</td>
+      <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl ? `<div class="sub-cell mono">${esc(n.apiUrl)}</div>` : ''}</td>
       <td class="mono">${esc(n.domain || (n.isLocal ? state.settings.webDomain || '' : ''))}</td>
+      <td class="mono">${esc(n.addr || n.publicIp || '—')}${n.addr ? ` <span class="muted small">${t('node.addrManual')}</span>` : ''}</td>
       <td>${statusCell(n)}</td>
       <td>${n.isLocal ? '—' : (s.ok ? (s.synced ? badge(t('node.synced'), 'ok') : badge(t('node.unsynced'), 'warn')) + (s.lastPush ? ` <span class="muted small">${fmtRelative(s.lastPush)}</span>` : '') : '—')}</td>
       <td>${n.isLocal ? badge(state.status.coreRunning ? t('dash.running') : t('dash.stopped'), state.status.coreRunning ? 'ok' : 'danger') : (s.ok ? badge(s.coreRunning ? t('dash.running') : t('dash.stopped'), s.coreRunning ? 'ok' : 'danger') + (s.uptime ? ` <span class="muted small">${fmtDuration(s.uptime)}</span>` : '') : '—')}${!n.isLocal && s.ok && s.certDays !== undefined ? ` <span class="muted small" title="${t('cert.daysLeft')}">🔒 ${s.certDays}d</span>` : ''}</td>
@@ -62,6 +63,8 @@ function editNode(id) {
     <div class="form-grid">
       ${field(t('common.name'), `<input id="f-name" value="${esc(n.name || '')}" placeholder="台湾">`, t('node.nameHelp'))}
       ${field(t('node.domain'), `<input id="f-domain" value="${esc(n.domain || '')}" placeholder="tw.example.com">`, t('node.domainHelp'))}
+      ${field(t('node.addr'), `<input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(n.publicIp || t('node.addrAuto'))}">`, t('node.addrHelp'))}
+      ${field(t('node.ratio'), `<input id="f-ratio" type="number" min="0" max="100" step="0.1" value="${n.ratio || 1}">`, t('node.ratioHelp'))}
       ${n.isLocal ? '' : `
       <div class="full">${field(t('node.apiUrl'), `<input id="f-api" value="${esc(n.apiUrl || '')}" placeholder="https://tw.example.com:2053/ad/">`, t('node.apiUrlHelp'))}</div>
       <div class="full">${field(t('node.token'), `<input id="f-token" type="password" placeholder="${n.hasToken ? t('node.tokenKeep') : ''}">`, t('node.tokenHelp'))}</div>
@@ -71,6 +74,7 @@ function editNode(id) {
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), domain: fv('f-domain').trim(), sort: Number(fv('f-sort')) || 0,
+      addr: fv('f-addr').trim(), ratio: Number(fv('f-ratio')) || 1,
       apiUrl: n.isLocal ? '' : fv('f-api').trim(), token: n.isLocal ? '' : fv('f-token'),
       insecure: n.isLocal ? false : fchk('f-insecure'), enabled: n.isLocal ? true : fchk('f-enabled'),
     };

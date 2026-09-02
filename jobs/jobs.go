@@ -31,7 +31,8 @@ type Deps struct {
 	ReloadUsers func() error     // 用户表变更后热更新入站并踢线
 	IsNode      func() bool      // 是否副机
 	Setting     func(string) string
-	Notify      func(text string) // 用户被禁用时的通知(可为 nil)
+	Notify      func(text string)  // 用户被禁用时的通知(可为 nil)
+	LocalRatio  func() float64     // 本机流量倍率(可为 nil = 1);只在主机计费路径生效,副机账本保持原始值
 }
 
 // Onlines 是最近一个统计周期内有流量经过的对象。
@@ -155,6 +156,19 @@ func (s *Scheduler) runStats() {
 		return
 	}
 
+	ratio := 1.0
+	if s.d.LocalRatio != nil {
+		if r := s.d.LocalRatio(); r > 0 {
+			ratio = r
+		}
+	}
+	scale := func(v int64) int64 {
+		if ratio == 1 {
+			return v
+		}
+		return int64(float64(v) * ratio)
+	}
+
 	err := s.d.DB.Transaction(func(tx *gorm.DB) error {
 		isNode := s.d.IsNode()
 		for name, t := range userTraffic {
@@ -173,10 +187,10 @@ func (s *Scheduler) runStats() {
 			}
 			update := map[string]interface{}{"online_at": now}
 			if t.up > 0 {
-				update["up"] = gorm.Expr("up + ?", t.up)
+				update["up"] = gorm.Expr("up + ?", scale(t.up))
 			}
 			if t.down > 0 {
-				update["down"] = gorm.Expr("down + ?", t.down)
+				update["down"] = gorm.Expr("down + ?", scale(t.down))
 			}
 			if err := tx.Model(&model.User{}).Where("name = ?", name).Updates(update).Error; err != nil {
 				return err
@@ -195,6 +209,9 @@ func (s *Scheduler) runStats() {
 		rows := *stats
 		for i := range rows {
 			rows[i].DateTime = bucket
+			if !isNode && rows[i].Resource == "user" {
+				rows[i].Traffic = scale(rows[i].Traffic) // 用户维度按倍率记(与用量一致);线路/上游维度保持真实流量
+			}
 		}
 		return tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "resource"}, {Name: "tag"}, {Name: "date_time"}, {Name: "direction"}},

@@ -73,11 +73,44 @@ func ParseTLS(line model.Line) TLSConfig {
 	return c
 }
 
-// BuildConfig 从数据库读取全部线路/上游/用户,渲染成 sing-box 配置字节。
+// LineOnNode 报告线路是否部署在某台服务器上:NodeIds 为空 = 全部;selfID 为 0(尚无本机记录)视为全部。
+func LineOnNode(line model.Line, selfID uint) bool {
+	if len(line.NodeIds) == 0 || selfID == 0 {
+		return true
+	}
+	var ids []uint
+	if json.Unmarshal(line.NodeIds, &ids) != nil || len(ids) == 0 {
+		return true
+	}
+	for _, id := range ids {
+		if id == selfID {
+			return true
+		}
+	}
+	return false
+}
+
+// LocalNodeID 返回本机在 nodes 表中的 id(没有则 0)。
+func LocalNodeID(db *gorm.DB) uint {
+	var n model.Node
+	if err := db.Where("is_local = ?", true).First(&n).Error; err != nil {
+		return 0
+	}
+	return n.Id
+}
+
+// BuildConfig 从数据库读取本机应部署的线路/全部上游/用户,渲染成 sing-box 配置字节。
 func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
-	var lines []model.Line
-	if err := db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&lines).Error; err != nil {
+	var all []model.Line
+	if err := db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&all).Error; err != nil {
 		return nil, err
+	}
+	self := LocalNodeID(db)
+	lines := make([]model.Line, 0, len(all))
+	for _, l := range all {
+		if LineOnNode(l, self) {
+			lines = append(lines, l)
+		}
 	}
 	var upstreams []model.Upstream
 	if err := db.Order("id asc").Find(&upstreams).Error; err != nil {

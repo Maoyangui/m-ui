@@ -15,7 +15,7 @@ func TestInsecureSubscriptionForSelfSignedIPServer(t *testing.T) {
 	db, _ := database.Open(filepath.Join(t.TempDir(), "x.db"))
 	defer database.Close(db)
 	db.Create(&model.Node{Name: "HK", Domain: "1.2.3.4", IsLocal: true, Enabled: true})
-	e := EntriesFromNodes(db, "")
+	e := EntriesFromNodes(db, "", "", false)
 	if len(e) != 1 || e[0].Host != "1.2.3.4" || e[0].SNI != "" {
 		t.Fatalf("IP 入口不应带 SNI: %+v", e)
 	}

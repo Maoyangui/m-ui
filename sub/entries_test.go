@@ -19,19 +19,19 @@ func TestEntriesFromNodesAndClashLineGroups(t *testing.T) {
 	defer database.Close(db)
 
 	// 未配置节点 → 面板域名单入口
-	e := EntriesFromNodes(db, "hk.example.com")
+	e := EntriesFromNodes(db, "hk.example.com", "", false)
 	if len(e) != 1 || e[0].Host != "hk.example.com" || e[0].Suffix != "" {
 		t.Fatalf("无节点应回落面板域名: %+v", e)
 	}
 	db.Create(&model.Node{Name: "香港", IsLocal: true, Enabled: true, Sort: 1})
-	e = EntriesFromNodes(db, "hk.example.com")
+	e = EntriesFromNodes(db, "hk.example.com", "", false)
 	if len(e) != 1 || e[0].Host != "hk.example.com" || e[0].Suffix != "" {
 		t.Fatalf("单节点不加后缀: %+v", e)
 	}
 	db.Create(&model.Node{Name: "台湾", Domain: "tw.example.com", Enabled: true, Sort: 2})
 	db.Create(&model.Node{Name: "停用", Domain: "x.example.com", Sort: 3})
 	db.Model(&model.Node{}).Where("name = ?", "停用").Update("enabled", false) // default:true 会吞掉 Create 的 false
-	e = EntriesFromNodes(db, "hk.example.com")
+	e = EntriesFromNodes(db, "hk.example.com", "", false)
 	if len(e) != 2 || e[0].Suffix != "-香港" || e[1].Host != "tw.example.com" || e[1].Suffix != "-台湾" {
 		t.Fatalf("双节点应各带后缀且跳过停用: %+v", e)
 	}

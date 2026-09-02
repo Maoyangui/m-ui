@@ -74,6 +74,13 @@ func (s *Server) validateNode(p *nodePayload) error {
 	if p.ApiUrl != "" && !strings.HasPrefix(p.ApiUrl, "http://") && !strings.HasPrefix(p.ApiUrl, "https://") {
 		return errors.New("API 地址需以 http:// 或 https:// 开头,如 https://tw.example.com:2053/ad/")
 	}
+	p.Addr = strings.TrimSpace(p.Addr)
+	if p.Ratio < 0 || p.Ratio > 100 {
+		return errors.New("倍率需在 0–100 之间(1 = 原样)")
+	}
+	if p.Ratio == 0 {
+		p.Ratio = 1
+	}
 	dup := s.db.Model(&model.Node{}).Where("name = ?", p.Name)
 	if p.Id != 0 {
 		dup = dup.Where("id != ?", p.Id)
@@ -143,6 +150,12 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		}
 		updates := map[string]interface{}{
 			"name": p.Name, "domain": p.Domain, "api_url": p.ApiUrl, "insecure": p.Insecure, "enabled": p.Enabled, "sort": p.Sort,
+			"addr": p.Addr, "ratio": p.Ratio,
+		}
+		if node.IsLocal { // 本机:API 地址/令牌/校验无意义,保持原值
+			delete(updates, "api_url")
+			delete(updates, "insecure")
+			updates["enabled"] = true
 		}
 		if tok := strings.TrimSpace(p.Token); tok != "" {
 			updates["token"] = tok // 留空保留原令牌

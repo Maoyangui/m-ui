@@ -229,7 +229,7 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 		}
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&model.Line{}).Where("id = ?", id).Select(
-				"name", "protocol", "port", "upstream_id", "options", "addrs", "tls", "transport", "enabled",
+				"name", "protocol", "port", "upstream_id", "options", "addrs", "node_ids", "tls", "transport", "enabled",
 			).Updates(line).Error; err != nil {
 				return err
 			}
@@ -291,6 +291,15 @@ func (s *Server) validateLine(line *model.Line) error {
 		var probe map[string]interface{}
 		if err := json.Unmarshal(line.Transport, &probe); err != nil {
 			return fmt.Errorf("传输配置不是合法 JSON: %w", err)
+		}
+	}
+	if len(line.NodeIds) > 0 {
+		var ids []uint
+		if err := json.Unmarshal(line.NodeIds, &ids); err != nil {
+			return fmt.Errorf("服务器列表格式错误: %w", err)
+		}
+		if len(ids) == 0 {
+			line.NodeIds = nil // 空 = 全部服务器
 		}
 	}
 	if line.Port < 1 || line.Port > 65535 {

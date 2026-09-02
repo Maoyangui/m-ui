@@ -17,11 +17,13 @@ import (
 
 // Entry 是一个对外入口(如 香港/台湾):订阅里线路的连接地址与 SNI。
 type Entry struct {
-	Name     string // 入口名(用于备注后缀,单入口时留空)
-	Host     string // 连接地址(IP 或域名)
-	SNI      string // TLS server_name
-	Suffix   string // 备注后缀,如 "-港";单入口留空
-	Insecure bool   // 服务端为自签证书:客户端需允许不安全
+	Name     string  // 入口名(用于备注后缀,单入口时留空)
+	Host     string  // 连接地址(IP 或域名)
+	SNI      string  // TLS server_name
+	Suffix   string  // 备注后缀,如 "-港 x2";单入口且倍率为 1 时留空
+	Insecure bool    // 服务端为自签证书:客户端需允许不安全
+	NodeId   uint    // 对应 nodes.id(0 = 不按服务器过滤线路)
+	Ratio    float64 // 流量倍率(仅展示)
 }
 
 // addr 是一条线路的一个对外地址(展开 Line.Addrs 或回落到入口)。
@@ -58,6 +60,9 @@ func resolveAddrs(line model.Line, entries []Entry) []addr {
 	}
 	out := make([]addr, 0, len(entries))
 	for _, e := range entries {
+		if e.NodeId != 0 && !render.LineOnNode(line, e.NodeId) {
+			continue // 该线路没部署在这台服务器上
+		}
 		out = append(out, addr{server: e.Host, port: line.Port, sni: e.SNI, remark: e.Suffix, insecure: e.Insecure})
 	}
 	return out

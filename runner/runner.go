@@ -121,6 +121,7 @@ func New(dbPath string) (*Runner, error) {
 		IsNode:      r.IsNode,
 		Setting:     r.setting,
 		Notify:      func(text string) { r.notifier.Event("tgOnUserDisabled", text) },
+		LocalRatio:  r.localRatio,
 	})
 	r.monitor = monitor.New(monitor.Deps{
 		DB: db, Setting: r.setting, CoreRunning: r.CoreRunning, Check: r.CheckUpstream, Notify: r.notifier,
@@ -549,6 +550,7 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 		defer cancel()
 		if ip := acme.PublicIP(ctx); ip != "" && ip != r.setting("publicIp") {
 			r.setSetting("publicIp", ip)
+			r.db.Model(&model.Node{}).Where("is_local = ?", true).Update("public_ip", ip)
 			logger.Info("本机公网 IP: ", ip)
 		}
 	}
@@ -563,6 +565,15 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 			return
 		}
 	}
+}
+
+// localRatio 本机服务器记录的流量倍率(无记录或 ≤0 视为 1)。
+func (r *Runner) localRatio() float64 {
+	var n model.Node
+	if err := r.db.Where("is_local = ?", true).First(&n).Error; err != nil || n.Ratio <= 0 {
+		return 1
+	}
+	return n.Ratio
 }
 
 // PublicHost 返回对外地址:订阅域名 → 面板域名 → 本机公网 IP。

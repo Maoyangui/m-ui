@@ -15,7 +15,7 @@ import * as logs from './pages/logs.js';
 import * as settings from './pages/settings.js';
 
 export const state = {
-  status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [],
+  status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [],
   onlines: { users: [], lines: [], upstreams: [], connCounts: {} },
 };
 
@@ -36,6 +36,7 @@ export async function load(...what) {
   if (all || what.includes('upstreams')) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
   if (all || what.includes('users')) jobs.push(get('users').then(u => { state.users = u; }));
   if (all || what.includes('plans')) jobs.push(get('plans').then(p => { state.plans = p || []; }));
+  if (all || what.includes('nodes')) jobs.push(get('nodes').then(n => { state.nodes = (n && n.nodes) || []; }).catch(() => { state.nodes = []; }));
   if (all || what.includes('onlines')) jobs.push(get('onlines').then(o => { state.onlines = o; }));
   await Promise.all(jobs);
 }

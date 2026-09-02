@@ -205,16 +205,20 @@ type Report struct {
 	Onlines     map[string][]string  `json:"onlines"` // 用户 → 在线源 IP
 	OnlineLines []string             `json:"onlineLines"`
 	CertDays    int                  `json:"certDays"`
+	PublicIP    string               `json:"publicIp"` // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
 }
 
 // ApplyCounters 把副机的单调账本按游标并入主机:只计增量;计数器回绕(副机重装)时游标归零重认。
-// 返回并入的用户数。
-func ApplyCounters(db *gorm.DB, nodeId uint, nodeName string, counters []model.AgentCounter, now int64, bucketSeconds int64) (int, error) {
+// ratio 为该服务器的流量倍率(≤0 视为 1),增量按倍率计入用户用量与时序。返回并入的用户数。
+func ApplyCounters(db *gorm.DB, nodeId uint, nodeName string, counters []model.AgentCounter, now int64, bucketSeconds int64, ratio float64) (int, error) {
 	if len(counters) == 0 {
 		return 0, nil
 	}
 	if bucketSeconds < 1 {
 		bucketSeconds = 60
+	}
+	if ratio <= 0 {
+		ratio = 1
 	}
 	bucket := now - now%bucketSeconds
 	n := 0
@@ -228,6 +232,9 @@ func ApplyCounters(db *gorm.DB, nodeId uint, nodeName string, counters []model.A
 			dUp, dDown := c.Up-cur.Up, c.Down-cur.Down
 			if dUp <= 0 && dDown <= 0 {
 				continue
+			}
+			if ratio != 1 {
+				dUp, dDown = int64(float64(dUp)*ratio), int64(float64(dDown)*ratio)
 			}
 			update := map[string]interface{}{"online_at": now}
 			if dUp > 0 {
@@ -393,11 +400,14 @@ func (h *Hub) tick() {
 			continue
 		}
 		h.setStatus(n, true, "", &rep)
+		if rep.PublicIP != "" && rep.PublicIP != n.PublicIP {
+			h.d.DB.Model(&model.Node{}).Where("id = ?", n.Id).Update("public_ip", rep.PublicIP)
+		}
 		bucket := int64(60)
 		if v := h.d.Setting("statsBucketSeconds"); v != "" {
 			fmt.Sscanf(v, "%d", &bucket)
 		}
-		if _, err := ApplyCounters(h.d.DB, n.Id, n.Name, rep.Counters, time.Now().Unix(), bucket); err != nil {
+		if _, err := ApplyCounters(h.d.DB, n.Id, n.Name, rep.Counters, time.Now().Unix(), bucket, n.Ratio); err != nil {
 			logger.Warning("并入副机 ", n.Name, " 流量失败: ", err)
 		}
 		h.mu.Lock()

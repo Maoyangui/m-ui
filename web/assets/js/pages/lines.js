@@ -38,7 +38,7 @@ export async function render(el) {
       <button class="btn primary" data-act="line.add">${t('line.add')}</button>
     </div>
     <div class="table-wrap"><table class="grid">
-      <thead><tr><th></th><th>${t('common.name')}</th><th>${t('line.protocol')}</th><th>${t('common.port')}</th><th>${t('line.upstream')}</th><th>${t('line.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
+      <thead><tr><th></th><th>${t('common.name')}</th><th>${t('line.protocol')}</th><th>${t('common.port')}</th><th>${t('line.upstream')}</th><th>${t('nav.nodes')}</th><th>${t('line.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
       <tbody id="lines-body"></tbody>
     </table></div>`;
   document.getElementById('line-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
@@ -65,7 +65,13 @@ function renderRows() {
   const online = new Set(state.onlines.lines || []);
   const rows = state.lines.filter(l => matches(query, l.name, l.protocol, l.port, l.upstreamName));
   document.getElementById('line-count').textContent = `${rows.length} / ${state.lines.length}`;
-  if (!rows.length) { body.innerHTML = `<tr><td colspan="8">${empty()}</td></tr>`; return; }
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="9">${empty()}</td></tr>`; return; }
+  const nodeIdsOf = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
+  const serversCell = l => {
+    const ids = nodeIdsOf(l);
+    if (!ids.length) return `<span class="muted">${t('line.allServers')}</span>`;
+    return ids.map(id => { const n = (state.nodes || []).find(x => x.id === id); return badge(n ? n.name : '#' + id, 'primary'); }).join(' ');
+  };
   body.innerHTML = rows.map(l => `
     <tr draggable="${query ? 'false' : 'true'}" data-id="${l.id}">
       <td class="handle" title="拖动排序">⠿</td>
@@ -73,6 +79,7 @@ function renderRows() {
       <td>${protoBadges(l)}</td>
       <td class="num">${l.port}</td>
       <td>${esc(l.upstreamName)}</td>
+      <td>${serversCell(l)}</td>
       <td class="num">${l.userCount}</td>
       <td><label class="switch" title="${l.enabled ? t('common.enabled') : t('common.disabled')}"><input type="checkbox" data-change="line.toggle" data-id="${l.id}" ${l.enabled ? 'checked' : ''}><span></span></label></td>
       <td class="actions">
@@ -191,6 +198,10 @@ function readForm(id) {
     name: fv('f-name').trim(), protocol, port: Number(fv('f-port')),
     upstreamId: Number(fv('f-upstream')), enabled: fchk('f-enabled'),
   };
+  // 部署到哪些服务器:全不勾或全勾 = 全部(存空)
+  const nodeCbs = [...document.querySelectorAll('.node-cb')];
+  const picked = nodeCbs.filter(c => c.checked).map(c => Number(c.value));
+  body.nodeIds = (picked.length && picked.length < nodeCbs.length) ? picked : [];
   // TLS
   if (!spec.noTls) {
     const tls = { mode: fv('f-tlsmode') };
@@ -259,6 +270,10 @@ function editLine(id, cloneFrom) {
       ${field(t('common.port'), `<input id="f-port" type="number" min="1" max="65535" value="${l.port || ''}">`, t('line.portHelp'))}
       ${field(t('line.upstream'), `<select id="f-upstream"><option value="0">${t('line.direct')}</option>${state.upstreams.map(u => `<option value="${u.id}" ${l.upstreamId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`, t('line.upstreamHelp'))}
       ${check('f-enabled', t('common.enabled'), l.enabled !== false)}
+      ${(state.nodes || []).length > 1 ? `<div class="full">${field(t('line.servers'), `<div class="check-list">${(state.nodes || []).map(n => {
+        const ids = (() => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } })();
+        return `<label><input type="checkbox" class="node-cb" value="${n.id}" ${!ids.length || ids.includes(n.id) ? 'checked' : ''}> ${esc(n.name)}${n.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>`;
+      }).join('')}</div>`, t('line.serversHelp'))}</div>` : ''}
     </div>
     <div id="f-dyn"></div>
     <details class="adv"><summary>${t('line.advanced')}</summary><textarea id="f-extra"></textarea></details>
