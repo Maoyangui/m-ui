@@ -118,17 +118,19 @@ registerActions({
     const g = groups().find(x => x.id === id);
     const body = {};
     g.fields.forEach(([k, , type]) => { body[k] = (type === 'bool' || type === 'boolOn') ? String(fchk('set-' + k)) : fv('set-' + k).trim(); });
-    const pathBefore = state.status.webPath;
-    try {
-      const r = await post('settings', body);
-      await load('settings', 'status');
-      if (id === 'panel' && state.status.webPath && state.status.webPath !== pathBefore) {
-        toast(t('set.pathChanged', { p: state.status.webPath }), 'ok');
-        setTimeout(() => { location.href = state.status.webPath; }, 900);
-        return;
-      }
-      toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok');
-    } catch (e) { toast(e.message, 'err'); }
+    // 面板路径改动保存即生效:旧地址随即失效,保存成功后直接跳到新地址(不能再用旧前缀请求接口)
+    const norm = p => { p = (p || '/app/').trim(); if (!p.startsWith('/')) p = '/' + p; if (!p.endsWith('/')) p += '/'; return p; };
+    if (id === 'panel' && norm(body.webPath) !== norm(state.status.webPath)) {
+      try {
+        await post('settings', body);
+        const np = norm(body.webPath);
+        toast(t('set.pathChanged', { p: np }), 'ok');
+        setTimeout(() => { location.href = np + '#/settings'; }, 900);
+      } catch (e) { toast(e.message, 'err'); }
+      return;
+    }
+    try { const r = await post('settings', body); await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
   },
   'set.saveRole': async () => {
     const toNode = fchk('set-nodeMode');
