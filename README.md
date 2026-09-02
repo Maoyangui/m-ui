@@ -32,11 +32,13 @@
 
 ## 安装
 
-支持 Linux amd64 / arm64(systemd)。从 Releases 下载对应架构的二进制,然后:
+支持 Linux amd64 / arm64(systemd)。从 Releases 下载对应架构的 `m-ui-linux-<arch>.tar.gz`,然后:
 
 ```bash
-bash deploy/install.sh ./m-ui-linux-amd64
+bash deploy/install.sh ./m-ui-linux-amd64.tar.gz
 ```
+
+也可以直接传 Releases 里的下载地址给 `install.sh`,脚本会自动下载并解包。
 
 `install.sh` 会把二进制装到 `/usr/local/bin/m-ui`,数据库放在 `/etc/m-ui/m-ui.db`,写入并启动 `m-ui.service`。首次启动会创建管理员 `admin` 并把随机密码打到日志:
 

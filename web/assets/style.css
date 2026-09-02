@@ -258,3 +258,8 @@ pre.log .warn { color: #fbbf24; } pre.log .error { color: #f87171; } pre.log .de
 .grid th.sortable { cursor: pointer; user-select: none; }
 .grid th.sortable:hover { color: var(--text); }
 .grid th.sorted { color: var(--primary-text); }
+
+/* 换机向导 */
+.mig-steps { margin: .6rem 0 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: .8rem; }
+.mig-steps li { border-left: 3px solid var(--primary-soft); padding-left: .8rem; }
+.mig-steps .sub-box { margin-top: .4rem; }

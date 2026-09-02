@@ -1,7 +1,7 @@
-import { load } from '../app.js';
+import { state, load } from '../app.js';
 import { get, post, del, upload } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, fmtBytes, fmtDate, fmtRelative, toast, confirm, openModal, closeModal, registerActions, badge, field, check, empty, fv, fchk } from '../ui.js';
+import { esc, fmtBytes, fmtDate, fmtRelative, toast, confirm, openModal, closeModal, registerActions, badge, field, check, empty, fv, fchk, copy } from '../ui.js';
 
 export const title = () => t('bk.title');
 export const subtitle = () => t('bk.subtitle');
@@ -38,6 +38,23 @@ export async function render(el) {
         ${check('bk-tg', t('bk.telegram'), data.backupTelegram, t('bk.telegramHelp'))}
       </div>
       <p class="hint mono">${esc(data.dir)}</p>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>${t('mig.title')}</h2><span class="badge">${t('mig.badge')}</span></div>
+      <p class="hint">${t('mig.help')}</p>
+      <ol class="mig-steps">
+        <li><b>${t('mig.s1')}</b><div class="hint">${t('mig.s1h')}</div>
+          <div class="sub-box"><code>bash install.sh ./m-ui-linux-amd64 --restore m-ui-backup.zip</code><button class="btn sm" data-act="bk.copyCmd">${t('common.copy')}</button></div></li>
+        <li><b>${t('mig.s2')}</b><div class="hint">${t('mig.s2h')}</div></li>
+        <li><b>${t('mig.s3')}</b><div class="hint">${t('mig.s3h')}</div>
+          <div class="row" style="margin-top:.4rem;flex-wrap:wrap">
+            <input id="mig-domain" placeholder="${esc(state.settings.webDomain || 'hk.example.com')}" value="${esc(state.settings.webDomain || '')}" style="max-width:14rem">
+            <input id="mig-ip" placeholder="${t('mig.newIp')}" style="max-width:12rem">
+            <button class="btn sm" data-act="bk.dnsCheck">${t('mig.check')}</button>
+          </div>
+          <div id="mig-result" style="margin-top:.4rem"></div></li>
+        <li><b>${t('mig.s4')}</b><div class="hint">${t('mig.s4h')}</div></li>
+      </ol>
     </section>
     <section class="card">
       <div class="card-head"><h2>${t('bk.local')}</h2></div>
@@ -115,6 +132,22 @@ registerActions({
         waitBack();
       }, { okText: t('bk.restoreBtn'), danger: true });
     } catch (e) { toast(e.message, 'err'); }
+  },
+  'bk.copyCmd': () => copy('bash install.sh ./m-ui-linux-amd64 --restore m-ui-backup.zip'),
+  'bk.dnsCheck': async (_, btn) => {
+    const domain = fv('mig-domain').trim(), ip = fv('mig-ip').trim();
+    const box = document.getElementById('mig-result');
+    if (!domain) { toast(t('cert.needDomain'), 'err'); return; }
+    btn.disabled = true;
+    box.innerHTML = `<span class="muted small">${t('cert.checking')}</span>`;
+    try {
+      const p = await post('cert/precheck', { domain });
+      const target = ip || p.publicIp;
+      const rows = Object.entries(p.resolved).map(([r, v]) => `<dt class="mono">${esc(r)}</dt><dd class="mono">${esc(v)} ${v === target ? badge('✓', 'ok') : badge('✗', 'danger')}</dd>`).join('');
+      const all = Object.values(p.resolved).every(v => v === target);
+      box.innerHTML = `<dl class="kv">${rows}</dl><p class="hint">${all ? t('mig.dnsOk', { ip: target }) : t('mig.dnsWait', { ip: target })}</p>`;
+    } catch (e) { box.innerHTML = `<span class="small" style="color:var(--danger)">${esc(e.message)}</span>`; }
+    finally { btn.disabled = false; }
   },
   'bk.restart': async () => {
     if (!await confirm(t('bk.restartConfirm'), { danger: true })) return;

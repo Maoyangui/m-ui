@@ -29,6 +29,13 @@ case "$SRC" in
   http://*|https://*) echo "下载 $SRC"; curl -fL --progress-bar "$SRC" -o "$TMP";;
   *) cp "$SRC" "$TMP";;
 esac
+# Releases 里是 tar.gz(内含单文件 m-ui),也接受裸二进制
+if file "$TMP" 2>/dev/null | grep -qi gzip || [[ "$SRC" == *.tar.gz ]]; then
+  EXTRACT="$(mktemp -d)"
+  tar -xzf "$TMP" -C "$EXTRACT"
+  mv "$EXTRACT/m-ui" "$TMP"
+  rm -rf "$EXTRACT"
+fi
 chmod 0755 "$TMP"
 "$TMP" version >/dev/null || { echo "二进制无法执行(架构不符?)"; exit 1; }
 

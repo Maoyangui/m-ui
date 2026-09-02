@@ -18,22 +18,42 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Build linux-amd64 (纯 Go,无 CGO,静态单二进制)
+      - name: Version
+        id: ver
         run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -tags with_utls -trimpath -ldflags "-w -s" -o dist/m-ui .
-          tar -C dist -czf m-ui-linux-amd64.tar.gz m-ui
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then echo "v=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"; else echo "v=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"; fi
 
       - name: Tests (含全协议 sing-box 干跑)
         run: go test -tags with_utls ./...
 
+      - name: Build linux amd64 / arm64 (纯 Go,无 CGO,静态单二进制)
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+              go build -tags with_utls -trimpath -ldflags "-w -s -X main.version=${{ steps.ver.outputs.v }}" -o dist/$arch/m-ui .
+            tar -C dist/$arch -czf m-ui-linux-$arch.tar.gz m-ui
+          done
+          sha256sum m-ui-linux-*.tar.gz > SHA256SUMS
+
       - name: Smoke test (本机构建可运行)
         run: |
-          go build -tags with_utls -o /tmp/m-ui-host .
+          go build -tags with_utls -ldflags "-X main.version=${{ steps.ver.outputs.v }}" -o /tmp/m-ui-host .
           /tmp/m-ui-host version
+
+      - uses: actions/upload-artifact@v4
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        with:
+          name: m-ui-linux
+          path: |
+            m-ui-linux-*.tar.gz
+            SHA256SUMS
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: m-ui-linux-amd64.tar.gz
+          generate_release_notes: true
+          files: |
+            m-ui-linux-amd64.tar.gz
+            m-ui-linux-arm64.tar.gz
+            SHA256SUMS

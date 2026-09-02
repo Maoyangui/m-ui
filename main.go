@@ -25,7 +25,7 @@ func init() {
 	})
 }
 
-var version = "0.1.0-p0"
+var version = "0.1.0"
 
 func usage() {
 	fmt.Println("m-ui", version)
