@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 
 	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/fangjunsheng555/m-ui/render"
 
 	"gopkg.in/yaml.v3"
 )
 
-// basicClashConfig 是 clash/mihomo 订阅的骨架(tun + dns + 规则),与 s-ui 默认一致。
-// 用户如在设置里提供自定义模板则整体替换(P2 设置项 subClashExt)。
+// basicClashConfig 是 clash/mihomo 订阅的骨架(dns + 规则),与 s-ui 默认一致。
+// 用户如在设置里提供自定义模板则整体替换(设置项 subClashExt)。
 const basicClashConfig = `mixed-port: 7890
 allow-lan: false
 mode: rule
@@ -45,23 +46,19 @@ func BuildClash(user model.User, lines []model.Line, entries []Entry, template, 
 
 	var proxies []interface{}
 	var proxyNames []string
-
 	if notice != "" {
 		proxies = append(proxies, noticeClashProxy(notice))
 	}
 	for _, line := range lines {
 		for _, a := range resolveAddrs(line, entries) {
-			p := lineToClashProxy(line, user, a)
-			if p == nil {
-				continue
+			for _, p := range lineToClashProxies(line, user, a) {
+				proxies = append(proxies, p)
+				proxyNames = append(proxyNames, p["name"].(string))
 			}
-			proxies = append(proxies, p)
-			proxyNames = append(proxyNames, p["name"].(string))
 		}
 	}
 	root["proxies"] = proxies
 
-	// 默认分组:Proxy(手选,含 Auto 与提示节点在前)+ Auto(自动测速)。
 	selectList := []string{}
 	if notice != "" {
 		selectList = append(selectList, notice)
@@ -72,7 +69,6 @@ func BuildClash(user model.User, lines []model.Line, entries []Entry, template, 
 		map[string]interface{}{"name": "Proxy", "type": "select", "proxies": selectList},
 		map[string]interface{}{"name": "Auto", "type": "url-test", "url": "http://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50, "proxies": proxyNames},
 	}
-
 	out, err := yaml.Marshal(root)
 	if err != nil {
 		return "", err
@@ -80,52 +76,195 @@ func BuildClash(user model.User, lines []model.Line, entries []Entry, template, 
 	return string(out), nil
 }
 
-func lineToClashProxy(line model.Line, user model.User, a addr) map[string]interface{} {
+// lineToClashProxies 把一条线路的一个地址渲染成 mihomo 代理(mixed 出 socks5 + http 两个)。
+func lineToClashProxies(line model.Line, user model.User, a addr) []map[string]interface{} {
 	name := line.Name + a.remark
-	p := map[string]interface{}{
-		"name":   name,
-		"server": a.server,
-		"port":   a.port,
+	base := func() map[string]interface{} {
+		return map[string]interface{}{"name": name, "server": a.server, "port": a.port}
 	}
+	tlsConf := render.ParseTLS(line)
+	fp := tlsConf.Fingerprint
+
+	// applyTLS 按线路 TLS 模式填充 mihomo 字段;sniKey 为 sni 或 servername(vmess/vless 用后者)
+	applyTLS := func(p map[string]interface{}, sniKey string) {
+		switch tlsConf.Mode {
+		case "cert":
+			p["tls"] = true
+			if a.sni != "" {
+				p[sniKey] = a.sni
+			}
+			if fp != "" {
+				p["client-fingerprint"] = fp
+			}
+		case "reality":
+			p["tls"] = true
+			p[sniKey] = tlsConf.Reality.HandshakeServer
+			if fp == "" {
+				fp = "chrome"
+			}
+			p["client-fingerprint"] = fp
+			opts := map[string]interface{}{"public-key": tlsConf.Reality.PublicKey}
+			if len(tlsConf.Reality.ShortIDs) > 0 {
+				opts["short-id"] = tlsConf.Reality.ShortIDs[0]
+			}
+			p["reality-opts"] = opts
+		}
+	}
+	applyTransport := func(p map[string]interface{}) {
+		tr := transportOf(line)
+		switch typ, _ := tr["type"].(string); typ {
+		case "ws", "httpupgrade":
+			p["network"] = "ws"
+			opts := map[string]interface{}{}
+			if path, _ := tr["path"].(string); path != "" {
+				opts["path"] = path
+			}
+			if h := wsHost(tr); h != "" {
+				opts["headers"] = map[string]interface{}{"Host": h}
+			}
+			if typ == "httpupgrade" {
+				opts["v2ray-http-upgrade"] = true
+			}
+			p["ws-opts"] = opts
+		case "grpc":
+			p["network"] = "grpc"
+			s, _ := tr["service_name"].(string)
+			p["grpc-opts"] = map[string]interface{}{"grpc-service-name": s}
+		case "http":
+			path, _ := tr["path"].(string)
+			hosts := stringList(tr["host"])
+			if tlsConf.Mode != "none" {
+				p["network"] = "h2"
+				p["h2-opts"] = map[string]interface{}{"path": path, "host": hosts}
+			} else {
+				p["network"] = "http"
+				p["http-opts"] = map[string]interface{}{"path": []string{path}, "headers": map[string]interface{}{"Host": hosts}}
+			}
+		}
+	}
+
 	switch line.Protocol {
 	case "hysteria2":
-		password, _ := userCred(user, "hysteria2")["password"].(string)
+		p := base()
 		p["type"] = "hysteria2"
-		p["password"] = password
+		p["password"], _ = userCred(user, "hysteria2")["password"].(string)
 		if a.sni != "" {
 			p["sni"] = a.sni
 		}
 		p["alpn"] = []string{"h3"}
+		var opts map[string]interface{}
+		_ = json.Unmarshal(line.Options, &opts)
+		if obfs, ok := opts["obfs"].(map[string]interface{}); ok {
+			p["obfs"], _ = obfs["type"].(string)
+			p["obfs-password"], _ = obfs["password"].(string)
+		}
+		return []map[string]interface{}{p}
 	case "anytls":
-		password, _ := userCred(user, "anytls")["password"].(string)
+		p := base()
 		p["type"] = "anytls"
-		p["password"] = password
+		p["password"], _ = userCred(user, "anytls")["password"].(string)
 		if a.sni != "" {
 			p["sni"] = a.sni
 		}
+		return []map[string]interface{}{p}
 	case "shadowsocks":
 		var opts map[string]interface{}
 		_ = json.Unmarshal(line.Options, &opts)
 		method, _ := opts["method"].(string)
-		password, _ := userCred(user, ssCredKey(method))["password"].(string)
+		p := base()
 		p["type"] = "ss"
 		p["cipher"] = method
-		p["password"] = password
+		p["password"], _ = userCred(user, ssCredKey(method))["password"].(string)
 		p["udp"] = true
-	default:
-		return nil
+		return []map[string]interface{}{p}
+	case "tuic":
+		c := userCred(user, "tuic")
+		var opts map[string]interface{}
+		_ = json.Unmarshal(line.Options, &opts)
+		cc, _ := opts["congestion_control"].(string)
+		if cc == "" {
+			cc = "cubic"
+		}
+		p := base()
+		p["type"] = "tuic"
+		p["uuid"], _ = c["uuid"].(string)
+		p["password"], _ = c["password"].(string)
+		if a.sni != "" {
+			p["sni"] = a.sni
+		}
+		p["alpn"] = []string{"h3"}
+		p["congestion-controller"] = cc
+		p["udp-relay-mode"] = "native"
+		return []map[string]interface{}{p}
+	case "trojan":
+		p := base()
+		p["type"] = "trojan"
+		p["password"], _ = userCred(user, "trojan")["password"].(string)
+		p["udp"] = true
+		applyTLS(p, "sni")
+		applyTransport(p)
+		return []map[string]interface{}{p}
+	case "vless":
+		p := base()
+		p["type"] = "vless"
+		p["uuid"], _ = userCred(user, "vless")["uuid"].(string)
+		p["udp"] = true
+		p["packet-encoding"] = "xudp"
+		if render.VisionEnabled(line) {
+			p["flow"] = "xtls-rprx-vision"
+		}
+		applyTLS(p, "servername")
+		applyTransport(p)
+		return []map[string]interface{}{p}
+	case "vmess":
+		p := base()
+		p["type"] = "vmess"
+		p["uuid"], _ = userCred(user, "vmess")["uuid"].(string)
+		p["alterId"] = 0
+		p["cipher"] = "auto"
+		p["udp"] = true
+		applyTLS(p, "servername")
+		applyTransport(p)
+		return []map[string]interface{}{p}
+	case "socks", "http", "mixed":
+		var out []map[string]interface{}
+		c := userCred(user, "socks")
+		if line.Protocol != "http" {
+			p := base()
+			if line.Protocol == "mixed" {
+				p["name"] = name + "-socks"
+			}
+			p["type"] = "socks5"
+			p["username"], _ = c["username"].(string)
+			p["password"], _ = c["password"].(string)
+			p["udp"] = true
+			out = append(out, p)
+		}
+		if line.Protocol != "socks" {
+			hc := userCred(user, "http")
+			p := base()
+			if line.Protocol == "mixed" {
+				p["name"] = name + "-http"
+			}
+			p["type"] = "http"
+			p["username"], _ = hc["username"].(string)
+			p["password"], _ = hc["password"].(string)
+			if tlsConf.Mode == "cert" {
+				p["tls"] = true
+				if a.sni != "" {
+					p["sni"] = a.sni
+				}
+			}
+			out = append(out, p)
+		}
+		return out
 	}
-	return p
+	return nil
 }
 
 // noticeClashProxy 生成一个不可用的占位代理作为顶部提示(流量/到期信息写在名字里)。
 func noticeClashProxy(name string) map[string]interface{} {
 	return map[string]interface{}{
-		"name":     name,
-		"type":     "ss",
-		"server":   "127.0.0.1",
-		"port":     1,
-		"cipher":   "aes-128-gcm",
-		"password": "dummy",
+		"name": name, "type": "ss", "server": "127.0.0.1", "port": 1, "cipher": "aes-128-gcm", "password": "dummy",
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/fangjunsheng555/m-ui/core"
+	"github.com/fangjunsheng555/m-ui/creds"
 	"github.com/fangjunsheng555/m-ui/database"
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/jobs"
@@ -45,6 +46,12 @@ func New(dbPath string) (*Runner, error) {
 	db, err := database.Open(dbPath)
 	if err != nil {
 		return nil, err
+	}
+	// 升级后新增的协议需要新的凭据键:启动时为所有用户补全(复用既有口令与 UUID)
+	if n, err := creds.EnsureAll(db); err != nil {
+		logger.Warning("补全用户凭据失败: ", err)
+	} else if n > 0 {
+		logger.Info("已为 ", n, " 个用户补全新协议凭据")
 	}
 	r := &Runner{db: db, core: core.NewCore(), subSrv: sub.NewServer(db)}
 	r.jobs = jobs.New(jobs.Deps{
@@ -138,22 +145,40 @@ func (r *Runner) ReloadUsers() error {
 			logger.Warning("热更新入站用户失败: ", err)
 			continue
 		}
-		if !handled || box == nil {
+		if box == nil {
 			continue
 		}
-		// 断开已不再属于该入站的用户连接(禁用用户即时下线)
 		var meta struct {
 			Tag   string `json:"tag"`
 			Users []struct {
-				Name string `json:"name"`
+				Name     string `json:"name"`
+				Username string `json:"username"`
 			} `json:"users"`
 		}
 		if json.Unmarshal(inbound, &meta) != nil || meta.Tag == "" {
 			continue
 		}
+		if !handled {
+			// 该协议不支持原地换用户表(socks/http/mixed):重建该入站,断开其全部连接
+			if err := r.core.RemoveInbound(meta.Tag); err != nil && err != os.ErrInvalid {
+				logger.Warning("重建入站 ", meta.Tag, " 失败(移除): ", err)
+				continue
+			}
+			box.ConnTracker().CloseConnByInbound(meta.Tag)
+			if err := r.core.AddInbound(inbound); err != nil {
+				logger.Warning("重建入站 ", meta.Tag, " 失败(添加): ", err)
+			}
+			continue
+		}
+		// 断开已不再属于该入站的用户连接(禁用用户即时下线)
 		keep := make(map[string]struct{}, len(meta.Users))
 		for _, u := range meta.Users {
-			keep[u.Name] = struct{}{}
+			if u.Name != "" {
+				keep[u.Name] = struct{}{}
+			}
+			if u.Username != "" {
+				keep[u.Username] = struct{}{}
+			}
 		}
 		box.ConnTracker().CloseConnByInboundUsers(meta.Tag, keep)
 	}

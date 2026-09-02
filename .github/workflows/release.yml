@@ -21,12 +21,15 @@ jobs:
       - name: Build linux-amd64 (纯 Go,无 CGO,静态单二进制)
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -trimpath -ldflags "-w -s" -o dist/m-ui .
+            go build -tags with_utls -trimpath -ldflags "-w -s" -o dist/m-ui .
           tar -C dist -czf m-ui-linux-amd64.tar.gz m-ui
+
+      - name: Tests (含全协议 sing-box 干跑)
+        run: go test -tags with_utls ./...
 
       - name: Smoke test (本机构建可运行)
         run: |
-          go build -o /tmp/m-ui-host .
+          go build -tags with_utls -o /tmp/m-ui-host .
           /tmp/m-ui-host version
 
       - name: Release

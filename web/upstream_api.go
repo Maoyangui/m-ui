@@ -27,9 +27,9 @@ func (s *Server) dryRunUpstream(up *model.Upstream) error {
 	return core.ValidateOutbound(ob)
 }
 
-// dryRunLine 保存前做线路参数的结构校验。
+// dryRunLine 保存前做线路参数、TLS 与传输配置的结构校验。
 func (s *Server) dryRunLine(line *model.Line) error {
-	ib, err := render.InboundJSON(*line)
+	ib, err := render.InboundJSON(*line, s.run.NodeCert())
 	if err != nil {
 		return err
 	}

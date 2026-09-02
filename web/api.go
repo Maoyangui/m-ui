@@ -12,9 +12,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fangjunsheng555/m-ui/creds"
 	"github.com/fangjunsheng555/m-ui/database"
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/fangjunsheng555/m-ui/render"
 
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/host"
@@ -201,7 +203,7 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.db.Model(&model.Line{}).Where("id = ?", id).Select(
-			"name", "protocol", "port", "upstream_id", "options", "addrs", "enabled",
+			"name", "protocol", "port", "upstream_id", "options", "addrs", "tls", "transport", "enabled",
 		).Updates(line).Error; err != nil {
 			badRequest(w, err)
 			return
@@ -231,10 +233,20 @@ func (s *Server) validateLine(line *model.Line) error {
 	if line.Name == "" {
 		return errors.New("线路名称不能为空")
 	}
-	switch line.Protocol {
-	case "hysteria2", "anytls", "shadowsocks":
-	default:
+	if _, ok := render.Protocols[line.Protocol]; !ok {
 		return fmt.Errorf("不支持的协议: %s", line.Protocol)
+	}
+	if len(line.Tls) > 0 {
+		var probe map[string]interface{}
+		if err := json.Unmarshal(line.Tls, &probe); err != nil {
+			return fmt.Errorf("TLS 配置不是合法 JSON: %w", err)
+		}
+	}
+	if len(line.Transport) > 0 {
+		var probe map[string]interface{}
+		if err := json.Unmarshal(line.Transport, &probe); err != nil {
+			return fmt.Errorf("传输配置不是合法 JSON: %w", err)
+		}
 	}
 	if line.Port < 1 || line.Port > 65535 {
 		return errors.New("端口需在 1-65535 之间")
@@ -553,18 +565,9 @@ func (s *Server) setUserLines(userID uint, lineIds []uint) {
 	}
 }
 
-// generateCredentials 为新用户生成各协议凭据(同一随机口令,与既有数据形态一致)。
+// generateCredentials 为新用户生成全部协议的凭据。
 func generateCredentials(name string) json.RawMessage {
-	pass := randomString(10)
-	ssPass := randomBase64(32)
-	ss16 := randomBase64(16)
-	creds := map[string]map[string]interface{}{
-		"hysteria2":     {"name": name, "password": pass},
-		"anytls":        {"name": name, "password": pass},
-		"shadowsocks":   {"name": name, "password": ssPass},
-		"shadowsocks16": {"name": name, "password": ss16},
-	}
-	b, _ := json.Marshal(creds)
+	b, _ := json.Marshal(creds.Generate(name))
 	return b
 }
 

@@ -3,6 +3,10 @@ package core
 import (
 	suiAnytls "github.com/fangjunsheng555/m-ui/core/protocol/anytls"
 	suiHysteria2 "github.com/fangjunsheng555/m-ui/core/protocol/hysteria2"
+	suiTrojan "github.com/fangjunsheng555/m-ui/core/protocol/trojan"
+	suiTuic "github.com/fangjunsheng555/m-ui/core/protocol/tuic"
+	suiVless "github.com/fangjunsheng555/m-ui/core/protocol/vless"
+	suiVmess "github.com/fangjunsheng555/m-ui/core/protocol/vmess"
 	"github.com/fangjunsheng555/m-ui/util/common"
 
 	"github.com/sagernet/sing-box/option"
@@ -17,8 +21,7 @@ func (c *Core) UpdateInboundUsers(config []byte) (bool, error) {
 		return false, common.NewError("sing-box is not running")
 	}
 	var inboundConfig option.Inbound
-	err := inboundConfig.UnmarshalJSONContext(c.GetCtx(), config)
-	if err != nil {
+	if err := inboundConfig.UnmarshalJSONContext(c.GetCtx(), config); err != nil {
 		return false, err
 	}
 	inb, found := inbound_manager.Get(inboundConfig.Tag)
@@ -32,6 +35,22 @@ func (c *Core) UpdateInboundUsers(config []byte) (bool, error) {
 		}
 	case *option.AnyTLSInboundOptions:
 		if in, ok := inb.(*suiAnytls.Inbound); ok {
+			return true, in.UpdateUsers(options.Users)
+		}
+	case *option.TUICInboundOptions:
+		if in, ok := inb.(*suiTuic.Inbound); ok {
+			return true, in.UpdateUsers(options.Users)
+		}
+	case *option.TrojanInboundOptions:
+		if in, ok := inb.(*suiTrojan.Inbound); ok {
+			return true, in.UpdateUsers(options.Users)
+		}
+	case *option.VLESSInboundOptions:
+		if in, ok := inb.(*suiVless.Inbound); ok {
+			return true, in.UpdateUsers(options.Users)
+		}
+	case *option.VMessInboundOptions:
+		if in, ok := inb.(*suiVmess.Inbound); ok {
 			return true, in.UpdateUsers(options.Users)
 		}
 	case *option.ShadowsocksInboundOptions:

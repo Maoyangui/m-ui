@@ -41,8 +41,14 @@ func ParseLink(raw string) (*Parsed, error) {
 		return parseShadowsocks(u)
 	case "socks5", "socks", "socks5h":
 		return parseSocks(u)
+	case "vless":
+		return parseVless(u)
+	case "trojan":
+		return parseTrojan(u)
+	case "vmess":
+		return parseVmess(raw)
 	}
-	return nil, fmt.Errorf("不支持的链接类型: %s://(支持 tuic/hysteria2/ss/socks5)", u.Scheme)
+	return nil, fmt.Errorf("不支持的链接类型: %s://(支持 vless/vmess/trojan/tuic/hysteria2/ss/socks5)", u.Scheme)
 }
 
 // OptionsJSON 把 Options 编码为落库的 JSON。
@@ -251,6 +257,174 @@ func parseSocks(u *url.URL) (*Parsed, error) {
 		}
 	}
 	return &Parsed{Type: "socks", Name: tagOf(u, host), Options: opts}, nil
+}
+
+// clientTLS 按 v2ray 风格参数组装出站 TLS(security=tls|reality;sni/alpn/fp/insecure/pbk/sid)。
+// forceTLS 用于 trojan 这类缺省即 TLS 的协议。
+func clientTLS(q url.Values, host string, forceTLS bool) map[string]interface{} {
+	security := strings.ToLower(q.Get("security"))
+	if security == "" && forceTLS {
+		security = "tls"
+	}
+	if security != "tls" && security != "reality" {
+		return nil
+	}
+	tls := map[string]interface{}{"enabled": true, "server_name": firstNonEmpty(q.Get("sni"), q.Get("peer"), host)}
+	if alpn := q.Get("alpn"); alpn != "" {
+		tls["alpn"] = strings.Split(alpn, ",")
+	}
+	if flag(q, "insecure", "allowInsecure", "allow_insecure") {
+		tls["insecure"] = true
+	}
+	fp := q.Get("fp")
+	if security == "reality" {
+		if fp == "" {
+			fp = "chrome"
+		}
+		tls["reality"] = map[string]interface{}{"enabled": true, "public_key": q.Get("pbk"), "short_id": q.Get("sid")}
+	}
+	if fp != "" {
+		tls["utls"] = map[string]interface{}{"enabled": true, "fingerprint": fp}
+	}
+	return tls
+}
+
+// clientTransport 把 type/path/host/serviceName 参数转成 sing-box 出站 transport;TCP 返回 nil。
+func clientTransport(q url.Values) map[string]interface{} {
+	typ := strings.ToLower(q.Get("type"))
+	host, path := q.Get("host"), q.Get("path")
+	switch typ {
+	case "ws":
+		tr := map[string]interface{}{"type": "ws", "path": firstNonEmpty(path, "/")}
+		if host != "" {
+			tr["headers"] = map[string]interface{}{"Host": host}
+		}
+		return tr
+	case "grpc":
+		return map[string]interface{}{"type": "grpc", "service_name": q.Get("serviceName")}
+	case "httpupgrade":
+		tr := map[string]interface{}{"type": "httpupgrade", "path": firstNonEmpty(path, "/")}
+		if host != "" {
+			tr["host"] = host
+		}
+		return tr
+	case "http", "h2":
+		tr := map[string]interface{}{"type": "http", "path": firstNonEmpty(path, "/")}
+		if host != "" {
+			tr["host"] = strings.Split(host, ",")
+		}
+		return tr
+	case "tcp", "":
+		if strings.EqualFold(q.Get("headerType"), "http") {
+			tr := map[string]interface{}{"type": "http", "path": firstNonEmpty(path, "/")}
+			if host != "" {
+				tr["host"] = strings.Split(host, ",")
+			}
+			return tr
+		}
+	}
+	return nil
+}
+
+// vless://uuid@host:port?type=..&security=..&sni=..&pbk=..&sid=..&fp=..&flow=..#name
+func parseVless(u *url.URL) (*Parsed, error) {
+	host, port, err := hostPort(u, 443)
+	if err != nil {
+		return nil, err
+	}
+	if u.User == nil || u.User.Username() == "" {
+		return nil, errors.New("vless 链接缺少 uuid")
+	}
+	q := u.Query()
+	opts := map[string]interface{}{"server": host, "server_port": port, "uuid": u.User.Username()}
+	if flow := q.Get("flow"); flow != "" {
+		opts["flow"] = flow
+	}
+	if tls := clientTLS(q, host, false); tls != nil {
+		opts["tls"] = tls
+	}
+	if tr := clientTransport(q); tr != nil {
+		opts["transport"] = tr
+	}
+	return &Parsed{Type: "vless", Name: tagOf(u, host), Options: opts}, nil
+}
+
+// trojan://password@host:port?type=..&security=tls&sni=..#name
+func parseTrojan(u *url.URL) (*Parsed, error) {
+	host, port, err := hostPort(u, 443)
+	if err != nil {
+		return nil, err
+	}
+	if u.User == nil || u.User.Username() == "" {
+		return nil, errors.New("trojan 链接缺少密码")
+	}
+	q := u.Query()
+	opts := map[string]interface{}{"server": host, "server_port": port, "password": u.User.Username()}
+	if tls := clientTLS(q, host, true); tls != nil {
+		opts["tls"] = tls
+	}
+	if tr := clientTransport(q); tr != nil {
+		opts["transport"] = tr
+	}
+	return &Parsed{Type: "trojan", Name: tagOf(u, host), Options: opts}, nil
+}
+
+// vmess://base64({v,ps,add,port,id,aid,net,type,host,path,tls,sni,alpn,fp})  (v2rayN 格式)
+func parseVmess(raw string) (*Parsed, error) {
+	payload := strings.TrimPrefix(strings.TrimSpace(raw), "vmess://")
+	decoded, err := decodeBase64Loose(payload)
+	if err != nil {
+		return nil, errors.New("vmess 链接不是合法 base64")
+	}
+	var v map[string]interface{}
+	if err := json.Unmarshal([]byte(decoded), &v); err != nil {
+		return nil, errors.New("vmess 链接内容不是 JSON")
+	}
+	str := func(k string) string {
+		switch x := v[k].(type) {
+		case string:
+			return x
+		case float64:
+			return strconv.Itoa(int(x))
+		}
+		return ""
+	}
+	host, id := str("add"), str("id")
+	if host == "" || id == "" {
+		return nil, errors.New("vmess 链接缺少 add/id")
+	}
+	port, err := strconv.Atoi(str("port"))
+	if err != nil || port < 1 || port > 65535 {
+		return nil, fmt.Errorf("vmess 端口无效: %s", str("port"))
+	}
+	aid, _ := strconv.Atoi(firstNonEmpty(str("aid"), "0"))
+	opts := map[string]interface{}{"server": host, "server_port": port, "uuid": id, "security": "auto", "alter_id": aid}
+
+	q := url.Values{}
+	q.Set("type", str("net"))
+	q.Set("host", str("host"))
+	q.Set("path", str("path"))
+	if strings.EqualFold(str("type"), "http") {
+		q.Set("headerType", "http")
+	}
+	if str("net") == "grpc" {
+		q.Set("serviceName", str("path"))
+	}
+	if tr := clientTransport(q); tr != nil {
+		opts["transport"] = tr
+	}
+	if str("tls") == "tls" {
+		tq := url.Values{}
+		tq.Set("security", "tls")
+		tq.Set("sni", firstNonEmpty(str("sni"), str("host")))
+		tq.Set("alpn", str("alpn"))
+		tq.Set("fp", str("fp"))
+		if _, ok := v["allowInsecure"]; ok {
+			tq.Set("insecure", "1")
+		}
+		opts["tls"] = clientTLS(tq, host, false)
+	}
+	return &Parsed{Type: "vmess", Name: firstNonEmpty(str("ps"), host), Options: opts}, nil
 }
 
 // decodeBase64Loose 容忍 URL-safe / 无 padding 的 base64。

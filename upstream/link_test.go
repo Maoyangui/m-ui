@@ -103,8 +103,51 @@ func TestParseSocks(t *testing.T) {
 	}
 }
 
+func TestParseVlessReality(t *testing.T) {
+	p := mustParse(t, "vless://11111111-2222-3333-4444-555555555555@1.2.3.4:443?type=tcp&security=reality&pbk=PUB&sid=ab12&fp=chrome&sni=www.microsoft.com&flow=xtls-rprx-vision#node")
+	if p.Type != "vless" || p.Options["uuid"] != "11111111-2222-3333-4444-555555555555" || p.Options["flow"] != "xtls-rprx-vision" {
+		t.Fatalf("vless 基本字段不符: %+v", p.Options)
+	}
+	tls := p.Options["tls"].(map[string]interface{})
+	re := tls["reality"].(map[string]interface{})
+	if re["public_key"] != "PUB" || re["short_id"] != "ab12" || tls["server_name"] != "www.microsoft.com" {
+		t.Fatalf("reality 不符: %+v", tls)
+	}
+	if tls["utls"].(map[string]interface{})["fingerprint"] != "chrome" {
+		t.Fatal("reality 应带 utls 指纹")
+	}
+	if _, has := p.Options["transport"]; has {
+		t.Fatal("tcp 不应有 transport")
+	}
+}
+
+func TestParseTrojanWs(t *testing.T) {
+	p := mustParse(t, "trojan://pw@h.example:8443?type=ws&path=%2Fchat&host=cdn.example&sni=h.example#tj")
+	if p.Type != "trojan" || p.Options["password"] != "pw" {
+		t.Fatalf("trojan 不符: %+v", p.Options)
+	}
+	tr := p.Options["transport"].(map[string]interface{})
+	if tr["type"] != "ws" || tr["path"] != "/chat" || tr["headers"].(map[string]interface{})["Host"] != "cdn.example" {
+		t.Fatalf("ws 传输不符: %+v", tr)
+	}
+	if p.Options["tls"].(map[string]interface{})["enabled"] != true {
+		t.Fatal("trojan 缺省应启用 TLS")
+	}
+}
+
+func TestParseVmess(t *testing.T) {
+	obj := `{"v":"2","ps":"jp","add":"jp.example","port":"443","id":"11111111-2222-3333-4444-555555555555","aid":"0","net":"ws","host":"cdn.example","path":"/v","tls":"tls","sni":"jp.example"}`
+	p := mustParse(t, "vmess://"+base64.StdEncoding.EncodeToString([]byte(obj)))
+	if p.Type != "vmess" || p.Name != "jp" || p.Options["server_port"] != 443 || p.Options["alter_id"] != 0 {
+		t.Fatalf("vmess 不符: %+v", p)
+	}
+	if p.Options["transport"].(map[string]interface{})["type"] != "ws" || p.Options["tls"].(map[string]interface{})["server_name"] != "jp.example" {
+		t.Fatalf("vmess ws/tls 不符: %+v", p.Options)
+	}
+}
+
 func TestParseErrors(t *testing.T) {
-	for _, bad := range []string{"", "vmess://abc", "tuic://@host:1", "ss://notbase64@h:1", "http://x"} {
+	for _, bad := range []string{"", "vmess://abc", "tuic://@host:1", "ss://notbase64@h:1", "http://x", "vless://@h:1"} {
 		if _, err := ParseLink(bad); err == nil {
 			t.Errorf("%q 应解析失败", bad)
 		}

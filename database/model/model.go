@@ -40,9 +40,14 @@ type Line struct {
 	// Addrs 订阅里对外公布的连接地址列表 [{server, server_port?, remark?, sni?}]。
 	// 空 = 用入口节点主机 + 本线路端口(常态);非空 = 逐地址各出一条链接/代理。
 	// 也是 HK/TW 双入口的承载:每个入口一条 addr。
-	Addrs   json.RawMessage `json:"addrs,omitempty"`
-	Enabled bool            `json:"enabled" gorm:"default:true"`
-	Sort    int             `json:"sort"`
+	Addrs json.RawMessage `json:"addrs,omitempty"`
+	// Tls 线路 TLS 配置 {mode: cert|reality|none, reality:{private_key, public_key, short_ids, handshake_server, handshake_port}}。
+	// 空 = 按协议默认(hy2/anytls/tuic/trojan 用节点证书,vless 用 reality,其余无)。
+	Tls json.RawMessage `json:"tls,omitempty"`
+	// Transport vless/vmess/trojan 的传输层(sing-box transport 对象:ws/grpc/httpupgrade/http);空 = TCP。
+	Transport json.RawMessage `json:"transport,omitempty"`
+	Enabled   bool            `json:"enabled" gorm:"default:true"`
+	Sort      int             `json:"sort"`
 }
 
 // Node 入口服务器。IsLocal 标记 Hub 所在机;副机通过 ApiUrl+Token 管理。

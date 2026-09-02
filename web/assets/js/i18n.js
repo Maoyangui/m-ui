@@ -89,6 +89,21 @@ const zh = {
   'set.updateAdmin': '更新账号', 'set.adminUpdated': '账号已更新,请重新登录',
   'set.saved': '设置已保存', 'set.restartNote': '端口、证书与监听地址的改动需重启 m-ui 生效。',
   'set.version': '版本', 'set.role.current': '当前角色',
+  'line.clone': '克隆', 'line.basic': '基本', 'line.tls': 'TLS', 'line.tlsMode': 'TLS 模式',
+  'line.tls.cert': '节点证书', 'line.tls.reality': 'Reality', 'line.tls.none': '无',
+  'line.tlsHelp.cert': '使用本机证书(设置里的数据面证书),客户端按域名校验', 'line.tlsHelp.reality': '无需证书,伪装成握手目标网站的 TLS;抗探测最强',
+  'line.tlsHelp.none': '明文传输,仅用于 CDN 回源或内网',
+  'line.reality.server': '握手目标(伪装域名)', 'line.reality.port': '握手端口', 'line.reality.private': '私钥',
+  'line.reality.public': '公钥(下发给客户端)', 'line.reality.shortIds': 'Short ID(逗号分隔,可多个)', 'line.reality.gen': '生成密钥对',
+  'line.reality.serverHelp': '选一个支持 TLS 1.3、H2 的大站,如 www.microsoft.com、www.apple.com',
+  'line.fp': '客户端指纹', 'line.transport': '传输', 'line.transport.type': '传输方式', 'line.transport.tcp': 'TCP(直连)',
+  'line.transport.path': '路径', 'line.transport.host': 'Host', 'line.transport.service': 'gRPC 服务名',
+  'line.transportHelp': 'ws/httpupgrade 可套 CDN;grpc 适合 Reality;TCP 最快',
+  'line.proto': '协议参数', 'line.vision': '启用 XTLS Vision(仅 TCP + TLS,推荐)',
+  'line.upMbps': '上行带宽 Mbps(0=不限)', 'line.downMbps': '下行带宽 Mbps(0=不限)', 'line.obfs': '混淆密码(salamander,留空=不用)',
+  'line.cc': '拥塞控制', 'line.method': '加密方式', 'line.password': '线路密码(2022 算法为 PSK)', 'line.gen': '生成',
+  'line.padding': 'padding_scheme(每行一条,留空=默认)', 'line.advanced': '高级参数(JSON,合并进入站配置)',
+  'line.cloneOf': '{name} 副本', 'line.transportBadge': '传输',
 };
 
 const en = {
@@ -181,6 +196,21 @@ const en = {
   'set.updateAdmin': 'Update account', 'set.adminUpdated': 'Account updated, please sign in again',
   'set.saved': 'Settings saved', 'set.restartNote': 'Port, certificate and listen address changes need a restart.',
   'set.version': 'Version', 'set.role.current': 'Current role',
+  'line.clone': 'Clone', 'line.basic': 'Basics', 'line.tls': 'TLS', 'line.tlsMode': 'TLS mode',
+  'line.tls.cert': 'Node certificate', 'line.tls.reality': 'Reality', 'line.tls.none': 'None',
+  'line.tlsHelp.cert': 'Uses this server\'s certificate; clients verify by domain', 'line.tlsHelp.reality': 'No certificate needed; mimics the handshake target\'s TLS, hardest to detect',
+  'line.tlsHelp.none': 'Plaintext; only behind a CDN or on a private network',
+  'line.reality.server': 'Handshake target (masquerade domain)', 'line.reality.port': 'Handshake port', 'line.reality.private': 'Private key',
+  'line.reality.public': 'Public key (given to clients)', 'line.reality.shortIds': 'Short IDs (comma separated)', 'line.reality.gen': 'Generate keypair',
+  'line.reality.serverHelp': 'Pick a large site with TLS 1.3 + H2, e.g. www.microsoft.com, www.apple.com',
+  'line.fp': 'Client fingerprint', 'line.transport': 'Transport', 'line.transport.type': 'Transport', 'line.transport.tcp': 'TCP (direct)',
+  'line.transport.path': 'Path', 'line.transport.host': 'Host', 'line.transport.service': 'gRPC service name',
+  'line.transportHelp': 'ws/httpupgrade work behind CDNs; grpc pairs well with Reality; TCP is fastest',
+  'line.proto': 'Protocol options', 'line.vision': 'Enable XTLS Vision (TCP + TLS only, recommended)',
+  'line.upMbps': 'Up Mbps (0 = unlimited)', 'line.downMbps': 'Down Mbps (0 = unlimited)', 'line.obfs': 'Obfs password (salamander; empty = off)',
+  'line.cc': 'Congestion control', 'line.method': 'Cipher', 'line.password': 'Line password (PSK for 2022 ciphers)', 'line.gen': 'Generate',
+  'line.padding': 'padding_scheme (one per line; empty = default)', 'line.advanced': 'Advanced (JSON merged into inbound)',
+  'line.cloneOf': 'Copy of {name}', 'line.transportBadge': 'transport',
 };
 
 const dicts = { zh, en };
