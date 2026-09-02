@@ -26,6 +26,7 @@ import (
 	"github.com/fangjunsheng555/m-ui/notify"
 	"github.com/fangjunsheng555/m-ui/ops"
 	"github.com/fangjunsheng555/m-ui/runner"
+	"github.com/fangjunsheng555/m-ui/totp"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -56,6 +57,9 @@ type Server struct {
 	sessions   map[string]session
 	loginFails map[string][]int64 // ip → 最近失败时间
 	ops        *ops.Runner
+
+	totpPending  string // 两步验证:已生成、待认证器验证一次后才生效的密钥
+	lastTotpStep int64  // 最近一次登录成功用掉的时间步,同一验证码不能再用(防重放)
 }
 
 func NewServer(run *runner.Runner) *Server {
@@ -104,6 +108,7 @@ func (s *Server) basePath() string {
 
 func (s *Server) Start() error {
 	base := s.basePath()
+	logger.SetEnabled(s.setting("logEnabled") != "false")
 	mux := http.NewServeMux()
 
 	// 静态前端
@@ -150,6 +155,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"nodes", s.auth(s.handleNodes))
 	mux.HandleFunc(api+"nodes/", s.auth(s.handleNodeItem))
 	mux.HandleFunc(api+"agent/", s.handleAgent) // 内部按动作分别做令牌/会话鉴权
+	mux.HandleFunc(api+"admin/", s.auth(s.handleAdmin))
+	mux.HandleFunc(api+"v1/", s.handlePublicAPI) // 外部 API:Bearer 令牌鉴权,与会话无关
 
 	// 根路径重定向到面板
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -319,7 +326,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "跨站请求被拒绝"})
 		return
 	}
-	var req struct{ Username, Password string }
+	var req struct{ Username, Password, Code string }
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
 		return
@@ -338,6 +345,27 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.noteLoginFailure(clientIP(r))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
 		return
+	}
+	// 两步验证:密码正确后才要求验证码,不向猜密码的人暴露是否开启
+	if s.setting("totpEnabled") == "true" {
+		if strings.TrimSpace(req.Code) == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "请输入两步验证码", "totp": true, "needCode": true})
+			return
+		}
+		ok, step := totp.Verify(s.setting("totpSecret"), req.Code, time.Now())
+		s.mu.Lock()
+		replay := ok && step <= s.lastTotpStep
+		if ok && !replay {
+			s.lastTotpStep = step
+		}
+		s.mu.Unlock()
+		if !ok || replay {
+			time.Sleep(300 * time.Millisecond)
+			logger.Warning("面板两步验证失败,来源 ", clientIP(r))
+			s.noteLoginFailure(clientIP(r))
+			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "两步验证码错误", "totp": true})
+			return
+		}
 	}
 	s.run.Notifier().Event("tgOnLogin", "🔐 <b>面板登录</b>:"+notify.Esc(admin.Username)+"\nIP:"+notify.Esc(clientIP(r))+"\n"+time.Now().Format("2006-01-02 15:04:05"))
 

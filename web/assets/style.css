@@ -296,3 +296,12 @@ svg.chart.bars g.bar.hot .seg { opacity: 1; }
 svg.chart.bars g.bar.hot .hit { fill: var(--surface-2); }
 svg.chart.bars .grid { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
 svg.chart.bars .ylab, svg.chart.bars .xlab { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+
+/* 管理员页:2FA 与外部 API */
+.totp-setup { display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: .6rem; }
+.totp-setup img.qr { width: 180px; height: 180px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; padding: 6px; }
+.totp-side { flex: 1; min-width: 260px; }
+.totp-side .label { font-size: .8rem; color: var(--muted); margin-bottom: .3rem; }
+.sub-title { font-size: .9rem; margin: 1rem 0 .4rem; }
+pre.code { white-space: pre-wrap; word-break: break-all; }
+table.api-doc td.mono { font-family: var(--mono); font-size: .78rem; white-space: nowrap; }

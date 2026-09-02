@@ -14,16 +14,17 @@ import * as backup from './pages/backup.js';
 import * as ops from './pages/ops.js';
 import * as logs from './pages/logs.js';
 import * as settings from './pages/settings.js';
+import * as admin from './pages/admin.js';
 
 export const state = {
   status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [], exts: [],
   onlines: { users: [], lines: [], upstreams: [], connCounts: {} },
 };
 
-const pages = { dashboard, lines, upstreams, exts, users, plans, nodes, cert, backup, ops, logs, settings };
+const pages = { dashboard, lines, upstreams, exts, users, plans, nodes, cert, backup, ops, logs, admin, settings };
 const navItems = [
   ['dashboard', '◉'], ['lines', '⇄'], ['upstreams', '⇪'], ['exts', '⇢'], ['users', '☺'], ['plans', '▤'], ['nodes', '☁'],
-  ['cert', '⚿'], ['backup', '⛁'], ['ops', '⚒'], ['logs', '≡'], ['settings', '⚙'],
+  ['cert', '⚿'], ['backup', '⛁'], ['ops', '⚒'], ['logs', '≡'], ['admin', '⚉'], ['settings', '⚙'],
 ];
 let current = null;
 
@@ -44,6 +45,7 @@ export async function load(...what) {
 }
 
 // ---- 登录 ----
+let needTotp = false; // 服务端要求过两步验证码后,登录框一直显示验证码栏
 function showLogin() {
   document.getElementById('app').hidden = true;
   const l = document.getElementById('login');
@@ -52,6 +54,8 @@ function showLogin() {
   document.getElementById('login-user-label').textContent = t('login.user');
   document.getElementById('login-pass-label').textContent = t('login.pass');
   document.getElementById('login-submit').textContent = t('login.submit');
+  document.getElementById('login-code-label').textContent = t('login.code');
+  document.getElementById('login-code-wrap').hidden = !needTotp;
   setTimeout(() => document.getElementById('lg-user').focus(), 50);
 }
 setUnauthorizedHandler(showLogin);
@@ -63,10 +67,22 @@ document.getElementById('login-form').addEventListener('submit', async ev => {
   const btn = document.getElementById('login-submit');
   btn.disabled = true;
   try {
-    await post('login', { username: document.getElementById('lg-user').value, password: document.getElementById('lg-pass').value });
+    const body = { username: document.getElementById('lg-user').value, password: document.getElementById('lg-pass').value };
+    const code = document.getElementById('lg-code').value.trim();
+    if (code) body.code = code;
+    await post('login', body);
     document.getElementById('lg-pass').value = '';
+    document.getElementById('lg-code').value = '';
     await enterApp();
-  } catch (e) { err.textContent = e.status === 401 ? t('login.failed') : e.message; }
+  } catch (e) {
+    const d = e.data || {};
+    if (e.status === 401 && d.totp) {
+      needTotp = true;
+      document.getElementById('login-code-wrap').hidden = false;
+      err.textContent = d.needCode ? t('login.codeRequired') : t('login.codeWrong');
+      setTimeout(() => document.getElementById('lg-code').focus(), 80);
+    } else err.textContent = e.status === 401 ? t('login.failed') : e.message;
+  }
   finally { btn.disabled = false; }
 });
 
@@ -103,7 +119,7 @@ function renderRole() {
       bar.className = 'alert-bar';
       document.querySelector('.main').insertBefore(bar, document.getElementById('page'));
     }
-    bar.innerHTML = `<span>${t('alert.defaultPw')}</span><a href="#/settings" class="btn sm">${t('alert.changeNow')}</a>`;
+    bar.innerHTML = `<span>${t('alert.defaultPw')}</span><a href="#/admin" class="btn sm">${t('alert.changeNow')}</a>`;
   } else if (bar) bar.remove();
 }
 

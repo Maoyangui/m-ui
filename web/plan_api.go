@@ -185,20 +185,28 @@ func (s *Server) handleUserPlan(w http.ResponseWriter, r *http.Request, u model.
 	if req.Mode != "extend" {
 		req.Mode = "renew"
 	}
-	lineIds := applyPlan(&u, p, req.Mode, time.Now().Unix())
-	if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).Select(
-		"volume", "expiry", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "next_reset",
-		"total_up", "total_down", "up", "down", "enabled",
-	).Updates(u).Error; err != nil {
+	if err := s.applyUserPlan(&u, p, req.Mode); err != nil {
 		badRequest(w, err)
 		return
-	}
-	if lineIds != nil {
-		s.setUserLines(u.Id, lineIds)
 	}
 	s.audit(r, "user", "plan:"+req.Mode+":"+p.Name, u.Name)
 	s.reloadUsers("套餐 " + p.Name + " → " + u.Name)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "expiry": u.Expiry})
+}
+
+// applyUserPlan 把套餐套到已有用户上并落库(含套餐指定的线路);调用方负责审计与热更新。
+func (s *Server) applyUserPlan(u *model.User, p model.Plan, mode string) error {
+	lineIds := applyPlan(u, p, mode, time.Now().Unix())
+	if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).Select(
+		"volume", "expiry", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "next_reset",
+		"total_up", "total_down", "up", "down", "enabled",
+	).Updates(*u).Error; err != nil {
+		return err
+	}
+	if lineIds != nil {
+		s.setUserLines(u.Id, lineIds)
+	}
+	return nil
 }
 
 // ---- 批量生成 ----

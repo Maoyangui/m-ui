@@ -643,14 +643,14 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, p.User)
 	case http.MethodDelete:
 		var u model.User
-		s.db.First(&u, id)
-		if err := s.db.Delete(&model.User{}, id).Error; err != nil {
+		if err := s.db.First(&u, id).Error; err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+			return
+		}
+		if err := s.deleteUser(u, s.actor(r)); err != nil {
 			badRequest(w, err)
 			return
 		}
-		s.db.Where("user_id = ?", id).Delete(&model.UserLine{})
-		s.audit(r, "user", "delete", u.Name)
-		s.reloadUsers("删除用户 " + u.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
@@ -677,6 +677,19 @@ func (s *Server) validateUser(u *model.User) error {
 	if n > 0 {
 		return errors.New("用户名已存在")
 	}
+	return nil
+}
+
+// deleteUser 删除用户及其线路/外部节点关联,踢下线并热更新数据面。
+func (s *Server) deleteUser(u model.User, actor string) error {
+	if err := s.db.Delete(&model.User{}, u.Id).Error; err != nil {
+		return err
+	}
+	s.db.Where("user_id = ?", u.Id).Delete(&model.UserLine{})
+	s.db.Where("user_id = ?", u.Id).Delete(&model.UserExt{})
+	s.run.KickUser(u.Name)
+	s.auditAs(actor, "user", "delete", u.Name)
+	s.reloadUsers("删除用户 " + u.Name)
 	return nil
 }
 

@@ -57,6 +57,8 @@ const groups = () => [
 export async function render(el) {
   const s = state.settings;
   const isNode = String(s.nodeMode).toLowerCase() === 'true';
+  // 重启按钮放在页头右侧,任何时候都看得到
+  document.getElementById('topbar-right').innerHTML = `<button class="btn danger sm" data-act="set.restart" title="${esc(t('set.restartHint'))}">↻ ${t('set.restart')}</button>`;
   el.innerHTML = `
     <section class="card">
       <div class="card-head"><h2>${t('set.role')}</h2>${badge(isNode ? t('role.node') : t('role.master'), isNode ? 'node' : 'primary')}</div>
@@ -77,16 +79,7 @@ export async function render(el) {
                 : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">`, help)).join('')}</div>
       </section>`).join('')}
     <section class="card">
-      <div class="card-head"><h2>${t('set.admin')}</h2></div>
-      <div class="form-grid">
-        ${field(t('set.newUser'), `<input id="pw-user" autocomplete="username">`)}
-        ${field(t('set.oldPass'), `<input id="pw-old" type="password" autocomplete="current-password">`)}
-        ${field(t('set.newPass'), `<input id="pw-new" type="password" autocomplete="new-password">`)}
-      </div>
-      <div class="row" style="margin-top:.7rem"><button class="btn" data-act="set.password">${t('set.updateAdmin')}</button></div>
-    </section>
-    <section class="card">
-      <div class="card-head"><h2>${t('set.about')}</h2><button class="btn sm danger" data-act="set.restart">${t('set.restart')}</button></div>
+      <div class="card-head"><h2>${t('set.about')}</h2><a href="#/admin" class="btn sm">${t('nav.admin')} →</a></div>
       <dl class="kv">
         <dt>${t('set.version')}</dt><dd class="mono">${esc(state.status.version || '')}</dd>
         <dt>sing-box</dt><dd class="mono">1.14</dd>
@@ -157,12 +150,5 @@ registerActions({
     try { await post('notify/test'); toast(t('set.tgTestOk'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; }
-  },
-  'set.password': async () => {
-    try {
-      await post('password', { username: fv('pw-user'), oldPassword: fv('pw-old'), newPassword: fv('pw-new') });
-      toast(t('set.adminUpdated'), 'ok');
-      setTimeout(() => post('logout').then(() => location.reload()), 1200);
-    } catch (e) { toast(e.message, 'err'); }
   },
 });

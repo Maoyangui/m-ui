@@ -33,7 +33,11 @@
 - 运维页:Cloudflare WARP 一键安装 / 启用(本地 SOCKS5,MASQUE)/ 停用 / 卸载并验证出口;swap、内核参数 + BBR、文件句柄上限、NTP,参数可按机器调整
 - 备份页:一个 zip 含数据库一致快照与证书;上传即整机还原并自动重启;定时备份、轮转、推送到 Telegram
 - Telegram 通知:登录、用户到期 / 超量 / 被禁用、上游故障、数据面停止、每日报告
-- 审计日志、订阅访问日志、流量时序图、在线用户与 IP
+- 审计日志、订阅访问日志、流量时序图(按时段柱状,24h / 7d / 30d)、在线用户与 IP;日志可一键关闭 / 清空
+
+**管理员与集成**
+- 两步验证(TOTP):扫码或手输密钥,兼容 Google / Microsoft Authenticator、Authy、1Password;手机丢失可在 SSH 菜单关闭
+- 外部 API:令牌鉴权,商城 / 计费 / 机器人可建号、套餐续费、启停、踢线、取订阅地址,全部记入审计,见 [docs/API.md](docs/API.md)
 
 ## 安装
 
@@ -90,6 +94,8 @@ m-ui restore -db <m-ui.db> -from <zip|db> 还原备份(服务停止时)
 m-ui selfsign -hosts <域名,IP>            生成自签证书
 m-ui render -db <m-ui.db>                 打印并校验 sing-box 配置
 ```
+
+直接执行 `m-ui`(不带参数)进入数字菜单:查看面板地址与账号、重启 / 更新、重置密码、改端口、关闭两步验证、备份、卸载等。
 
 ## 开发
 

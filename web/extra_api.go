@@ -20,8 +20,12 @@ import (
 
 // audit 记录一次面板操作(谁、对什么、做了什么)。
 func (s *Server) audit(r *http.Request, key, action string, obj interface{}) {
+	s.auditAs(s.actor(r), key, action, obj)
+}
+
+// auditAs 以指定操作人记录(外部 API 调用记为 api)。
+func (s *Server) auditAs(actor, key, action string, obj interface{}) {
 	b, _ := json.Marshal(obj)
-	actor := s.actor(r)
 	if actor == "" {
 		actor = "?"
 	}
@@ -252,8 +256,42 @@ func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
 
 // ---- 日志 ----
 
-// handleLogs 返回面板与内嵌 sing-box 的最近日志(内存环形缓冲)。
+// handleLogs 面板与内嵌 sing-box 的最近日志(内存环形缓冲):
+// GET 读取;POST {enabled} 打开/关闭记录(数据面 log 随之启停);DELETE ?kind=core|sub|audit 清空对应日志。
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		var in struct {
+			Enabled string `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			badRequest(w, err)
+			return
+		}
+		on := in.Enabled != "false"
+		s.run.SetSetting("logEnabled", strconv.FormatBool(on))
+		logger.SetEnabled(on)
+		s.audit(r, "logs", map[bool]string{true: "enable", false: "disable"}[on], nil)
+		s.reloadAll("日志开关") // 数据面 log.disabled 随之变化
+		writeJSON(w, http.StatusOK, map[string]bool{"enabled": on})
+		return
+	case http.MethodDelete:
+		kind := r.URL.Query().Get("kind")
+		switch kind {
+		case "core":
+			logger.Clear()
+		case "sub":
+			s.db.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SubLog{})
+		case "audit":
+			s.db.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Change{})
+		default:
+			badRequest(w, fmt.Errorf("kind 须为 core / sub / audit"))
+			return
+		}
+		s.audit(r, "logs", "clear:"+kind, nil)
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+		return
+	}
 	count := 200
 	if v, err := strconv.Atoi(r.URL.Query().Get("count")); err == nil && v > 0 && v <= 2000 {
 		count = v
@@ -262,7 +300,11 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if level == "" {
 		level = "info"
 	}
-	writeJSON(w, http.StatusOK, logger.GetLogs(count, level))
+	lines := logger.GetLogs(count, level)
+	if lines == nil {
+		lines = []string{} // 清空后返回 [] 而不是 null
+	}
+	writeJSON(w, http.StatusOK, lines)
 }
 
 // ---- 用户子操作:reset / kick / qr / sub ----

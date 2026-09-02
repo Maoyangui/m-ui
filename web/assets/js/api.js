@@ -13,8 +13,8 @@ export async function api(path, opts = {}) {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   });
-  if (res.status === 401) { onUnauthorized(); throw new ApiError(401, '未登录'); }
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { onUnauthorized(); const e = new ApiError(401, data.error || '未登录'); e.data = data; throw e; }
   if (!res.ok) throw new ApiError(res.status, data.error || ('请求失败 ' + res.status));
   return data;
 }

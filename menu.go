@@ -191,7 +191,8 @@ func runMenu() {
 		fmt.Println("  10. 更新到最新版")
 		fmt.Println("  11. 生成自签证书(无域名时)")
 		fmt.Println("  12. 切换 主机 / 副机 角色")
-		fmt.Println("  13. 卸载 m-ui")
+		fmt.Println("  13. 关闭两步验证(2FA,手机丢失时用)")
+		fmt.Println("  14. 卸载 m-ui")
 		fmt.Println("   0. 退出")
 		choice := ask(colorBold + "  请输入数字: " + colorReset)
 		switch choice {
@@ -330,6 +331,12 @@ func runMenu() {
 			fmt.Println(colorGreen + "  已切换,重启生效" + colorReset)
 			systemctl("restart", "m-ui")
 		case "13":
+			if err := runner.SetSettings(dbPath, map[string]string{"totpEnabled": "false", "totpSecret": ""}); err != nil {
+				fmt.Println(colorRed+"  失败:", err, colorReset)
+				break
+			}
+			fmt.Println(colorGreen + "  已关闭两步验证,现在只需密码即可登录(运行中的面板立即生效)" + colorReset)
+		case "14":
 			if ask(colorRed+"  将停止并删除 m-ui 程序与服务单元。输入 yes 确认: "+colorReset) != "yes" {
 				fmt.Println("  已取消")
 				break

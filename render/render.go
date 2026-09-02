@@ -157,13 +157,23 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 		return nil, err
 	}
 	config := map[string]interface{}{
-		"log":       map[string]interface{}{"level": "info"},
+		"log":       logOptions(db),
 		"dns":       map[string]interface{}{"servers": []map[string]interface{}{{"type": "local", "tag": "local"}}},
 		"inbounds":  inbounds,
 		"outbounds": outbounds,
 		"route":     map[string]interface{}{"rules": rules, "final": "direct"},
 	}
 	return json.MarshalIndent(config, "", "  ")
+}
+
+// logOptions 数据面日志:面板"日志"页关闭记录后,核心也不再产生日志。
+func logOptions(db *gorm.DB) map[string]interface{} {
+	var v string
+	db.Raw("SELECT value FROM settings WHERE key = ?", "logEnabled").Scan(&v)
+	if v == "false" {
+		return map[string]interface{}{"disabled": true}
+	}
+	return map[string]interface{}{"level": "info"}
 }
 
 // loadLineUsers 返回 lineId → 启用用户列表(含凭据)。

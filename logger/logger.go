@@ -3,6 +3,8 @@ package logger
 import (
 	"fmt"
 	"os"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/op/go-logging"
@@ -15,7 +17,27 @@ var (
 		level logging.Level
 		log   string
 	}
+	bufMu    sync.Mutex
+	disabled int32 // 1 = 面板"日志"页关闭了记录:不再写入环形缓冲
 )
+
+// SetEnabled 打开/关闭日志记录(仅影响面板内的环形缓冲;syslog/stderr 输出不受影响)。
+func SetEnabled(on bool) {
+	if on {
+		atomic.StoreInt32(&disabled, 0)
+	} else {
+		atomic.StoreInt32(&disabled, 1)
+	}
+}
+
+func Enabled() bool { return atomic.LoadInt32(&disabled) == 0 }
+
+// Clear 清空环形缓冲。
+func Clear() {
+	bufMu.Lock()
+	logBuffer = nil
+	bufMu.Unlock()
+}
 
 // init 先装一个 stderr 默认日志器:CLI 子命令、测试与库调用不经过 InitLogger 也不会因 nil 崩溃。
 func init() {
@@ -109,7 +131,12 @@ func Errorf(format string, args ...interface{}) {
 }
 
 func addToBuffer(level string, newLog string) {
+	if atomic.LoadInt32(&disabled) == 1 {
+		return
+	}
 	t := time.Now()
+	bufMu.Lock()
+	defer bufMu.Unlock()
 	if len(logBuffer) >= 10240 {
 		logBuffer = logBuffer[1:]
 	}
@@ -130,6 +157,8 @@ func GetLogs(c int, level string) []string {
 	var output []string
 	logLevel, _ := logging.LogLevel(level)
 
+	bufMu.Lock()
+	defer bufMu.Unlock()
 	for i := len(logBuffer) - 1; i >= 0 && len(output) <= c; i-- {
 		if logBuffer[i].level <= logLevel {
 			output = append(output, fmt.Sprintf("%s %s - %s", logBuffer[i].time, logBuffer[i].level, logBuffer[i].log))
