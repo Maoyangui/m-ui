@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 // ss2022 多用户:客户端密码必须是 "服务端PSK:用户PSK"(与 旧面板 一致),否则客户端握手被服务端静默丢弃表现为超时。

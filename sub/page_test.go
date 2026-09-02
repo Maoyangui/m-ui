@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 func TestWantsPage(t *testing.T) {

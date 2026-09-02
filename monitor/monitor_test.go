@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/database"
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/notify"
+	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/notify"
 )
 
 type fakeSink struct {

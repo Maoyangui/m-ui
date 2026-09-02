@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 // Options 控制订阅输出(来自设置)。

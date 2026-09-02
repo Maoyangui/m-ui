@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/brand"
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/render"
+	"github.com/Maoyangui/m-ui/brand"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/render"
 
 	"github.com/skip2/go-qrcode"
 )

@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/ext"
-	"github.com/fangjunsheng555/m-ui/upstream"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ext"
+	"github.com/Maoyangui/m-ui/upstream"
 )
 
 // ---- 外部节点(分享链接 / 外部订阅)----

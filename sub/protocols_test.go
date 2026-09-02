@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fangjunsheng555/m-ui/creds"
-	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/creds"
+	"github.com/Maoyangui/m-ui/database/model"
 
 	"gopkg.in/yaml.v3"
 )

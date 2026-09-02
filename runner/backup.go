@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/backup"
-	"github.com/fangjunsheng555/m-ui/database"
-	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/Maoyangui/m-ui/backup"
+	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/logger"
 )
 
 // Version 由 main 注入,写进备份 meta。

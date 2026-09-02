@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/upstream"
+	"github.com/Maoyangui/m-ui/upstream"
 
 	"gopkg.in/yaml.v3"
 )

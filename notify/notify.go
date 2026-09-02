@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/Maoyangui/m-ui/logger"
 )
 
 type Notifier struct {

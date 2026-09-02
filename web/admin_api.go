@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/logger"
-	"github.com/fangjunsheng555/m-ui/totp"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/totp"
 
 	"github.com/skip2/go-qrcode"
 )

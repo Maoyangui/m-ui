@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/fangjunsheng555/m-ui/brand"
+	"github.com/Maoyangui/m-ui/brand"
 
 	"github.com/skip2/go-qrcode"
 )

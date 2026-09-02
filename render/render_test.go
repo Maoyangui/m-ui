@@ -5,11 +5,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/fangjunsheng555/m-ui/certutil"
-	"github.com/fangjunsheng555/m-ui/core"
-	"github.com/fangjunsheng555/m-ui/creds"
-	"github.com/fangjunsheng555/m-ui/database"
-	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/certutil"
+	"github.com/Maoyangui/m-ui/core"
+	"github.com/Maoyangui/m-ui/creds"
+	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 func raw(v interface{}) json.RawMessage { b, _ := json.Marshal(v); return b }

@@ -47,7 +47,7 @@ m-ui 是一个自托管的代理服务面板:一个二进制、一个数据库�
 ### 一键安装(推荐)
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/fangjunsheng555/m-ui/main/deploy/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)
 ```
 
 脚本会自动识别架构,从 GitHub Releases 下载最新版,装到 `/usr/local/bin/m-ui`,数据放在 `/etc/m-ui/`,并注册 `m-ui.service` 开机自启。安装结束会打印面板地址与默认账号。

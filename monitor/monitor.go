@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/logger"
-	"github.com/fangjunsheng555/m-ui/notify"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/notify"
 
 	"gorm.io/gorm"
 )

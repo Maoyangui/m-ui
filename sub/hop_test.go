@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 func TestHysteria2PortHoppingInSubscriptions(t *testing.T) {

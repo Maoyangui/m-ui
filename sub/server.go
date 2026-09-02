@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/acme"
-	"github.com/fangjunsheng555/m-ui/certutil"
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/ext"
-	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/Maoyangui/m-ui/acme"
+	"github.com/Maoyangui/m-ui/certutil"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ext"
+	"github.com/Maoyangui/m-ui/logger"
 
 	"gorm.io/gorm"
 )

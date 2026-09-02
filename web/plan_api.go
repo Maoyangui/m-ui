@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/creds"
-	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/creds"
+	"github.com/Maoyangui/m-ui/database/model"
 
 	"gorm.io/gorm"
 )

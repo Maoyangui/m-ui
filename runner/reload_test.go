@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/fangjunsheng555/m-ui/database"
-	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 // 上游热更新:增删上游只增删出站,数据面实例不重启(Box 指针不变)。

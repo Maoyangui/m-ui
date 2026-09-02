@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/Maoyangui/m-ui/logger"
 )
 
 // restartProcess 用相同参数原地重新执行自身(不依赖 systemd 的 Restart 策略)。

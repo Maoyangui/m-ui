@@ -47,7 +47,7 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 ### One-line install (recommended)
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/fangjunsheng555/m-ui/main/deploy/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)
 ```
 
 The script detects the architecture, downloads the latest release from GitHub, installs `/usr/local/bin/m-ui`, keeps data in `/etc/m-ui/` and registers `m-ui.service`. It prints the panel URL and default credentials when done.

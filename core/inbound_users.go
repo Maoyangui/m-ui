@@ -1,13 +1,13 @@
 package core
 
 import (
-	suiAnytls "github.com/fangjunsheng555/m-ui/core/protocol/anytls"
-	suiHysteria2 "github.com/fangjunsheng555/m-ui/core/protocol/hysteria2"
-	suiTrojan "github.com/fangjunsheng555/m-ui/core/protocol/trojan"
-	suiTuic "github.com/fangjunsheng555/m-ui/core/protocol/tuic"
-	suiVless "github.com/fangjunsheng555/m-ui/core/protocol/vless"
-	suiVmess "github.com/fangjunsheng555/m-ui/core/protocol/vmess"
-	"github.com/fangjunsheng555/m-ui/util/common"
+	suiAnytls "github.com/Maoyangui/m-ui/core/protocol/anytls"
+	suiHysteria2 "github.com/Maoyangui/m-ui/core/protocol/hysteria2"
+	suiTrojan "github.com/Maoyangui/m-ui/core/protocol/trojan"
+	suiTuic "github.com/Maoyangui/m-ui/core/protocol/tuic"
+	suiVless "github.com/Maoyangui/m-ui/core/protocol/vless"
+	suiVmess "github.com/Maoyangui/m-ui/core/protocol/vmess"
+	"github.com/Maoyangui/m-ui/util/common"
 
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/shadowsocks"

@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/Maoyangui/m-ui/logger"
 )
 
 // restartProcess Windows 无 exec(2):启动一个新进程后退出(开发测试用)。

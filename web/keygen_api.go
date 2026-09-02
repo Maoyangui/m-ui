@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/fangjunsheng555/m-ui/creds"
+	"github.com/Maoyangui/m-ui/creds"
 )
 
 // handleKeygen 为线路表单生成密钥材料:

@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/core"
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/Maoyangui/m-ui/core"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/logger"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

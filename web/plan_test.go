@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 func TestApplyPlanRenewExtendsFromExpiryAndResetsTraffic(t *testing.T) {

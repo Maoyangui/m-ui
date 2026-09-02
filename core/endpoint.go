@@ -1,8 +1,8 @@
 package core
 
 import (
-	"github.com/fangjunsheng555/m-ui/logger"
-	"github.com/fangjunsheng555/m-ui/util/common"
+	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/util/common"
 
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"

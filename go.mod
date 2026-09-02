@@ -1,4 +1,4 @@
-module github.com/fangjunsheng555/m-ui
+module github.com/Maoyangui/m-ui
 
 go 1.27.0
 

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/fangjunsheng555/m-ui/core"
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/render"
-	"github.com/fangjunsheng555/m-ui/upstream"
+	"github.com/Maoyangui/m-ui/core"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/upstream"
 )
 
 // dryRunUpstream 保存前用 sing-box 干跑该出站:拦住会拖垮数据面的坏配置

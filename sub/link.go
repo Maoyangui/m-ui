@@ -11,8 +11,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/render"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/render"
 )
 
 // Entry 是一个对外入口(如 香港/台湾):订阅里线路的连接地址与 SNI。

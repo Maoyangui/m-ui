@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fangjunsheng555/m-ui/certutil"
-	"github.com/fangjunsheng555/m-ui/database"
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/render"
+	"github.com/Maoyangui/m-ui/certutil"
+	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/render"
 )
 
 // 复现真机事故:ss2022 线路没有服务端 PSK 时,parse 能过、初始化报 "missing psk",

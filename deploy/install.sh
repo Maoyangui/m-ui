@@ -8,7 +8,7 @@
 # 幂等:重复执行即升级二进制并重启;数据库与证书不动。
 set -euo pipefail
 
-REPO="${M_UI_REPO:-fangjunsheng555/m-ui}" # GitHub 仓库 owner/name;换仓库改这里或设环境变量 M_UI_REPO
+REPO="${M_UI_REPO:-Maoyangui/m-ui}" # GitHub 仓库 owner/name;换仓库改这里或设环境变量 M_UI_REPO
 SRC=""
 if [ $# -gt 0 ] && [[ "$1" != --* ]]; then SRC="$1"; shift; fi
 DB="/etc/m-ui/m-ui.db"

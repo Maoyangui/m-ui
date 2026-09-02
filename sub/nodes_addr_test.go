@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fangjunsheng555/m-ui/database"
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/render"
+	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/render"
 )
 
 // 节点地址策略:默认给 IP(SNI 仍是域名),倍率进后缀,线路按 NodeIds 只在部署的服务器上出节点。

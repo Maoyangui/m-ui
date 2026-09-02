@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/ext"
-	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ext"
+	"github.com/Maoyangui/m-ui/logger"
 )
 
 // ExtRefreshResult 是一次外部订阅抓取的结果。

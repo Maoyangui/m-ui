@@ -19,8 +19,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fangjunsheng555/m-ui/database"
-	"github.com/fangjunsheng555/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/database/model"
 
 	"gorm.io/gorm"
 )

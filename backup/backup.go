@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/database"
+	"github.com/Maoyangui/m-ui/database"
 
 	"gorm.io/gorm"
 )

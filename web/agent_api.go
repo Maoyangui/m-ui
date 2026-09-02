@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fangjunsheng555/m-ui/database/model"
-	"github.com/fangjunsheng555/m-ui/hub"
-	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/hub"
+	"github.com/Maoyangui/m-ui/logger"
 )
 
 // ---- 副机端:供主机调用的接口(令牌鉴权,不走会话) ----
