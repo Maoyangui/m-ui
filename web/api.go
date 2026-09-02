@@ -514,9 +514,6 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			OnlineIP []string `json:"onlineIps"`
 			SubURL   string   `json:"subUrl"`
 		}
-		domain := s.setting("webDomain")
-		subPort := s.setting("subPort")
-		subPath := s.setting("subPath")
 		out := make([]row, 0, len(users))
 		for _, u := range users {
 			var ids []uint
@@ -525,7 +522,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			out = append(out, row{
 				User: u, LineIds: ids,
 				OnlineIP: mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
-				SubURL:   fmt.Sprintf("https://%s:%s%s%s", domain, subPort, subPath, u.Name),
+				SubURL:   s.subLinks(u)["link"],
 			})
 		}
 		writeJSON(w, http.StatusOK, out)

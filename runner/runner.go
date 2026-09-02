@@ -3,6 +3,7 @@ package runner
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fangjunsheng555/m-ui/acme"
 	"github.com/fangjunsheng555/m-ui/backup"
 	"github.com/fangjunsheng555/m-ui/core"
 	"github.com/fangjunsheng555/m-ui/creds"
@@ -540,6 +542,39 @@ func (r *Runner) Stop() {
 	}
 }
 
+// publicIPLoop 探测并记录本机公网 IP(设置 publicIp):没配域名时订阅地址与节点地址用它兜底。
+func (r *Runner) publicIPLoop(stop <-chan struct{}) {
+	probe := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if ip := acme.PublicIP(ctx); ip != "" && ip != r.setting("publicIp") {
+			r.setSetting("publicIp", ip)
+			logger.Info("本机公网 IP: ", ip)
+		}
+	}
+	probe()
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			probe()
+		case <-stop:
+			return
+		}
+	}
+}
+
+// PublicHost 返回对外地址:订阅域名 → 面板域名 → 本机公网 IP。
+func (r *Runner) PublicHost() string {
+	for _, k := range []string{"subDomain", "webDomain", "publicIp"} {
+		if v := strings.TrimSpace(r.setting(k)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // checkpointLoop 定期把 WAL 并回主库,使运行中的 .db 文件随时可安全复制备份。
 func (r *Runner) checkpointLoop(stop <-chan struct{}) {
 	ticker := time.NewTicker(10 * time.Minute)
@@ -595,6 +630,7 @@ func Run(dbPath string) error {
 	go r.checkpointLoop(stopCheckpoint)
 	go r.certLoop(stopCheckpoint)
 	go r.backupLoop(stopCheckpoint)
+	go r.publicIPLoop(stopCheckpoint)
 	defer close(stopCheckpoint)
 
 	sigCh := make(chan os.Signal, 1)

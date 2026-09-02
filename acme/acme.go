@@ -406,6 +406,9 @@ func Precheck(ctx context.Context, domain string) PrecheckResult {
 	return res
 }
 
+// PublicIP 探测本机公网 IPv4(Cloudflare trace,回落 ipify);失败返回空。
+func PublicIP(ctx context.Context) string { return publicIP(ctx) }
+
 func publicIP(ctx context.Context) string {
 	c := &http.Client{Timeout: 6 * time.Second}
 	for _, u := range []string{"https://www.cloudflare.com/cdn-cgi/trace", "https://api.ipify.org"} {

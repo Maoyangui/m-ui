@@ -50,7 +50,11 @@ func (s *Server) settingInt(key string, def int) int {
 // options 每次请求时读取,便于面板改设置后即时生效。
 func (s *Server) options() Options {
 	insecure := s.insecure()
-	entries := EntriesFromNodes(s.db, s.setting("webDomain"))
+	host := s.setting("webDomain")
+	if host == "" {
+		host = s.setting("publicIp") // 无域名:节点地址用公网 IP
+	}
+	entries := EntriesFromNodes(s.db, host)
 	for i := range entries {
 		entries[i].Insecure = insecure
 	}

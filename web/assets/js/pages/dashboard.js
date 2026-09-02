@@ -55,6 +55,11 @@ export async function render(el) {
         <div id="dash-health"></div>
       </section>
     </div>
+    <section class="card">
+      <div class="card-head"><h2>${t('dash.recentConns')}</h2><button class="btn sm" data-act="dash.connsRefresh">${t('common.refresh')}</button></div>
+      <p class="hint">${t('dash.recentConnsHelp')}</p>
+      <div id="dash-conns" style="margin-top:.5rem"></div>
+    </section>
     <section class="card"><h2>${t('dash.recentAudit')}</h2><div id="dash-audit" style="margin-top:.6rem"></div></section>
     <section class="card">
       <div class="card-head"><h2>${t('dash.coreLog')}</h2>
@@ -66,10 +71,19 @@ export async function render(el) {
     </section>`;
   renderStats();
   renderCore();
-  await Promise.all([renderChart(), renderOnline(), renderAudit(), renderLog(), renderHealth(), refreshNodeSummary().then(renderStats)]);
+  await Promise.all([renderChart(), renderOnline(), renderAudit(), renderLog(), renderHealth(), renderConns(), refreshNodeSummary().then(renderStats)]);
 }
 
 export async function tick() { await refreshNodeSummary(); renderStats(); renderCore(); renderOnline(); }
+
+async function renderConns() {
+  const el = document.getElementById('dash-conns');
+  if (!el) return;
+  const rows = await get('conns/recent');
+  if (!rows.length) { el.innerHTML = empty(t('dash.noConns')); return; }
+  el.innerHTML = `<div class="table-wrap"><table class="grid" style="min-width:0"><thead><tr><th>IP</th><th>${t('nav.lines')}</th><th>${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 15).map(c =>
+    `<tr><td class="mono">${esc(c.ip)}</td><td>${esc(c.line)} <span class="muted small">${esc(c.protocol)}</span></td><td class="num">${c.count}</td><td class="mono small">${esc(c.last || '')}</td></tr>`).join('')}</tbody></table></div>`;
+}
 
 async function renderHealth() {
   const el = document.getElementById('dash-health');
@@ -175,6 +189,7 @@ registerActions({
     finally { btn.disabled = false; }
   },
   'dash.loglevel': async (_, sel) => { logLevel = sel.value; await renderLog(); },
+  'dash.connsRefresh': () => renderConns(),
   'dash.hideQs': () => { try { localStorage.setItem('m-ui.hideQuickStart', '1'); } catch {} document.querySelector('.quickstart')?.remove(); },
   'dash.healthRun': async (_, btn) => {
     btn.disabled = true;

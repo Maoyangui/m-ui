@@ -1,6 +1,7 @@
 package web
 
 import (
+	"regexp"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -153,6 +154,49 @@ func mergeIPs(a, b []string) []string {
 	return out
 }
 
+// ---- 最近入站连接(从 sing-box 日志提取,客户端"连不上"时用来判断包有没有到服务器)----
+
+var reInboundConn = regexp.MustCompile(`inbound/(\w+)\[([^\]]+)\] inbound connection from ([0-9a-fA-F.:\[\]]+?)(?::\d+)?$`)
+var reLogTime = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`)
+
+type recentConn struct {
+	IP       string `json:"ip"`
+	Line     string `json:"line"`
+	Protocol string `json:"protocol"`
+	Count    int    `json:"count"`
+	Last     string `json:"last"`
+}
+
+// handleRecentConns GET /conns/recent:按 (源IP, 线路) 聚合最近的入站连接。
+func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
+	lines := logger.GetLogs(3000, "info")
+	agg := map[string]*recentConn{}
+	var order []string
+	for _, l := range lines {
+		m := reInboundConn.FindStringSubmatch(strings.TrimSpace(l))
+		if m == nil {
+			continue
+		}
+		ip := strings.Trim(m[3], "[]")
+		key := ip + "|" + m[2]
+		c := agg[key]
+		if c == nil {
+			c = &recentConn{IP: ip, Line: m[2], Protocol: m[1]}
+			agg[key] = c
+			order = append(order, key)
+		}
+		c.Count++
+		if t := reLogTime.FindStringSubmatch(l); t != nil {
+			c.Last = t[1]
+		}
+	}
+	out := make([]recentConn, 0, len(agg))
+	for i := len(order) - 1; i >= 0 && len(out) < 100; i-- { // 最近的在前
+		out = append(out, *agg[order[i]])
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // ---- 日志 ----
 
 // handleLogs 返回面板与内嵌 sing-box 的最近日志(内存环形缓冲)。
@@ -264,17 +308,27 @@ func (s *Server) subLinks(u model.User) map[string]string {
 	if s.setting("subCertFile") != "" && s.setting("subKeyFile") != "" {
 		scheme = "https"
 	}
-	host := s.setting("subDomain")
+	host := s.run.PublicHost() // 订阅域名 → 面板域名 → 公网 IP(无域名自签场景就是 IP:端口)
 	if host == "" {
-		host = s.setting("webDomain")
+		host = "<服务器IP或域名>"
 	}
-	port := s.setting("subPort")
-	path := s.setting("subPath")
-	if path == "" {
-		path = "/sub/"
-	}
-	base := fmt.Sprintf("%s://%s:%s%s%s", scheme, host, port, path, u.Name)
+	base := fmt.Sprintf("%s://%s:%d%s%s", scheme, host, s.settingInt("subPort", 2056), s.subPath(), u.Name)
 	return map[string]string{"link": base, "clash": base + "?format=clash"}
+}
+
+// subPath 订阅路径,始终以 / 开头结尾(默认 /sub/)。
+func (s *Server) subPath() string {
+	p := strings.TrimSpace(s.setting("subPath"))
+	if p == "" {
+		p = "/sub/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	return p
 }
 
 // ---- 线路子操作:toggle ----

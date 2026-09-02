@@ -188,6 +188,7 @@ const zh = {
   'mig.s2': '② 确认新机面板正常', 'mig.s2h': '用新机 IP 打开面板(端口与路径同旧机),概览显示线路已运行;若旧机有副服务器,新机会自动重新连接它们。',
   'mig.s3': '③ 把域名解析改到新机 IP,并检查生效', 'mig.s3h': '在 DNS 服务商把 A 记录改为新机 IP;下面可查询主流解析器看是否已生效:', 'mig.newIp': '新机 IP(留空=本机公网 IP)', 'mig.check': '检查解析',
   'mig.dnsOk': '解析已全部指向 {ip},客户端刷新订阅或重连即可走新机', 'mig.dnsWait': '还有解析器未指向 {ip},请等待生效(通常几分钟,取决于 TTL)',
+  'dash.recentConns': '最近入站连接', 'dash.recentConnsHelp': '客户端"连不上"时先看这里:列表里没有你的 IP,说明连接根本没到服务器(端口被封或客户端配置错);有 IP 但用不了,才是协议/证书/密码问题。', 'dash.noConns': '数据面日志里还没有入站连接', 'dash.connCount': '次数', 'dash.connLast': '最近',
   'mig.s4': '④ 旧机下线', 'mig.s4h': '观察新机在线用户正常后,停掉旧机的 m-ui(systemctl stop m-ui)即可。换副服务器更简单:新副机装好后在"服务器"页更新 API 地址与令牌,主机会自动重新推送。',
 };
 
@@ -380,6 +381,7 @@ const en = {
   'mig.s2': '② Verify the new panel', 'mig.s2h': 'Open the panel via the new IP (same port and path); the dashboard should show lines running. Secondary servers reconnect automatically.',
   'mig.s3': '③ Point the domain at the new IP and check propagation', 'mig.s3h': 'Change the A record at your DNS provider; then query the major resolvers here:', 'mig.newIp': 'New IP (empty = this server\'s public IP)', 'mig.check': 'Check DNS',
   'mig.dnsOk': 'All resolvers point at {ip}; clients pick up the new server on next refresh/reconnect', 'mig.dnsWait': 'Some resolvers do not point at {ip} yet; wait for propagation (usually minutes, depends on TTL)',
+  'dash.recentConns': 'Recent inbound connections', 'dash.recentConnsHelp': 'When a client "cannot connect", look here first: if its IP is missing, packets never reached the server (port blocked or client misconfigured); if it is present but unusable, it is a protocol / certificate / password issue.', 'dash.noConns': 'No inbound connections in the data-plane log yet', 'dash.connCount': 'Count', 'dash.connLast': 'Last',
   'mig.s4': '④ Retire the old server', 'mig.s4h': 'Once users are online on the new server, stop m-ui on the old one (systemctl stop m-ui). Replacing a secondary server is simpler: install it, then update its API URL and token on the Servers page; the hub re-pushes automatically.',
 };
 

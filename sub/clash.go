@@ -193,7 +193,7 @@ func lineToClashProxies(line model.Line, user model.User, a addr) []map[string]i
 		p := base()
 		p["type"] = "ss"
 		p["cipher"] = method
-		p["password"], _ = userCred(user, ssCredKey(method))["password"].(string)
+		p["password"] = ssClientPassword(line, user)
 		p["udp"] = true
 		return []map[string]interface{}{p}
 	case "tuic":

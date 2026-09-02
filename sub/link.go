@@ -153,9 +153,23 @@ func shadowsocksURI(line model.Line, user model.User, a addr, remark string) str
 	var opts map[string]interface{}
 	_ = json.Unmarshal(line.Options, &opts)
 	method, _ := opts["method"].(string)
-	password, _ := userCred(user, ssCredKey(method))["password"].(string)
-	userinfo := base64.StdEncoding.EncodeToString([]byte(method + ":" + password))
+	userinfo := base64.StdEncoding.EncodeToString([]byte(method + ":" + ssClientPassword(line, user)))
 	return fmt.Sprintf("ss://%s@%s#%s", userinfo, hostPort(a.server, a.port), remark)
+}
+
+// ssClientPassword 客户端用的 shadowsocks 密码:2022 系列多用户为 "服务端PSK:用户PSK"(与 s-ui 一致),
+// 其余算法直接用用户密码。
+func ssClientPassword(line model.Line, user model.User) string {
+	var opts map[string]interface{}
+	_ = json.Unmarshal(line.Options, &opts)
+	method, _ := opts["method"].(string)
+	password, _ := userCred(user, ssCredKey(method))["password"].(string)
+	if strings.HasPrefix(method, "2022") {
+		if psk, _ := opts["password"].(string); psk != "" {
+			return psk + ":" + password
+		}
+	}
+	return password
 }
 
 // ---- 新增协议 ----
