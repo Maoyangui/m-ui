@@ -61,9 +61,9 @@ func TestSnapshotRevisionAndApply(t *testing.T) {
 	dst.Create(&model.Line{Name: "stale", Protocol: "shadowsocks", Port: 5})
 	dst.Create(&model.AgentCounter{UserName: "alice", Up: 10, Down: 20})
 	s4.SelfNodeId = 2
-	changed, err := ApplySnapshot(dst, s4)
-	if err != nil || !changed {
-		t.Fatalf("应用失败: %v changed=%v", err, changed)
+	changed, upsChanged, err := ApplySnapshot(dst, s4)
+	if err != nil || !changed || !upsChanged {
+		t.Fatalf("应用失败: %v lines=%v ups=%v", err, changed, upsChanged)
 	}
 	var lines []model.Line
 	dst.Find(&lines)
@@ -94,10 +94,18 @@ func TestSnapshotRevisionAndApply(t *testing.T) {
 	if title != "maoyang" {
 		t.Fatal("同步设置未写入")
 	}
-	// 再次应用相同快照:线路未变
-	changed, err = ApplySnapshot(dst, s4)
-	if err != nil || changed {
-		t.Fatalf("相同快照不应判定线路变化: %v %v", err, changed)
+	// 再次应用相同快照:线路与上游都未变
+	changed, upsChanged, err = ApplySnapshot(dst, s4)
+	if err != nil || changed || upsChanged {
+		t.Fatalf("相同快照不应判定变化: %v lines=%v ups=%v", err, changed, upsChanged)
+	}
+	// 只改上游:线路不变、上游变
+	src.Model(&model.Upstream{}).Where("name = ?", "warp").Update("options", []byte(`{"server":"127.0.0.1","server_port":40001}`))
+	s5, _ := BuildSnapshot(src, setting)
+	s5.SelfNodeId = 2
+	changed, upsChanged, err = ApplySnapshot(dst, s5)
+	if err != nil || changed || !upsChanged {
+		t.Fatalf("仅上游变化应只标记上游: %v lines=%v ups=%v", err, changed, upsChanged)
 	}
 }
 

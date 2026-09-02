@@ -2,6 +2,7 @@
 package runner
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -53,6 +54,8 @@ type Runner struct {
 	hub      *hub.Hub
 	dbPath   string
 	cert     certState
+	applied    map[string]string // 数据面当前生效的出站(tag → JSON),供上游热更新做差异
+	appliedRaw []byte            // 数据面当前生效的完整配置,渲染结果相同则不重启
 	mu       sync.Mutex // 串行化重载,避免并发改动互相打断
 }
 
@@ -127,7 +130,22 @@ func New(dbPath string) (*Runner, error) {
 		SetExternalIPs: r.SetExternalIPs,
 	})
 	r.ensureAdmin()
+	r.ensureLocalNode()
 	return r, nil
+}
+
+// ensureLocalNode 保证 nodes 表里有一条"本机"记录(全新安装时创建),订阅入口与副机接入都以它为基准。
+func (r *Runner) ensureLocalNode() {
+	if r.IsNode() {
+		return // 副机的 nodes 表由主机下发
+	}
+	var n int64
+	r.db.Model(&model.Node{}).Where("is_local = ?", true).Count(&n)
+	if n > 0 {
+		return
+	}
+	r.db.Create(&model.Node{Name: "主机", Domain: r.setting("webDomain"), IsLocal: true, Enabled: true, Sort: 1})
+	logger.Info("已创建本机服务器记录(服务器页可改名与域名)")
 }
 
 // Hub 暴露主副机同步器。
@@ -138,6 +156,54 @@ func (r *Runner) SetExternalIPs(m map[string][]string) {
 	if box := r.core.GetInstance(); box != nil {
 		box.Limiter().SetExternalIPs(m)
 	}
+}
+
+// SetSettings 离线写入设置(首次启动前改端口/角色等)。
+func SetSettings(dbPath string, kv map[string]string) error {
+	db, err := database.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	defer database.Close(db)
+	for k, v := range kv {
+		var existing model.Setting
+		if err := db.Where("key = ?", k).First(&existing).Error; err == nil {
+			if err := db.Model(&model.Setting{}).Where("key = ?", k).Update("value", v).Error; err != nil {
+				return err
+			}
+		} else if err := db.Create(&model.Setting{Key: k, Value: v}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ResetPassword 重置(或创建)管理员密码;pw 为空则随机生成。返回生效的明文密码。
+func ResetPassword(dbPath, user, pw string) (string, error) {
+	db, err := database.Open(dbPath)
+	if err != nil {
+		return "", err
+	}
+	defer database.Close(db)
+	if pw == "" {
+		pw = creds.Password(12)
+	}
+	if len(pw) < 6 {
+		return "", fmt.Errorf("密码至少 6 位")
+	}
+	hash, err := hashPassword(pw)
+	if err != nil {
+		return "", err
+	}
+	var admin model.Admin
+	if err := db.Where("username = ?", user).First(&admin).Error; err == nil {
+		if err := db.Model(&model.Admin{}).Where("id = ?", admin.Id).Update("password", hash).Error; err != nil {
+			return "", err
+		}
+	} else if err := db.Create(&model.Admin{Username: user, Password: hash}).Error; err != nil {
+		return "", err
+	}
+	return pw, nil
 }
 
 // ensureAdmin 全新数据库没有管理员时创建 admin 并把随机密码打到日志(首次登录后请修改)。
@@ -212,7 +278,81 @@ func (r *Runner) Start() error {
 	if err := r.core.Start(raw); err != nil {
 		return fmt.Errorf("启动 sing-box: %w", err)
 	}
+	r.applied, _ = outboundsOf(raw)
+	r.appliedRaw = raw
 	r.applyLimits()
+	return nil
+}
+
+// outboundsOf 从渲染好的配置里取出出站列表(tag → 规范化 JSON 文本)。
+func outboundsOf(raw []byte) (map[string]string, error) {
+	var cfg struct {
+		Outbounds []json.RawMessage `json:"outbounds"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(cfg.Outbounds))
+	for _, ob := range cfg.Outbounds {
+		var meta struct {
+			Tag string `json:"tag"`
+		}
+		if json.Unmarshal(ob, &meta) == nil && meta.Tag != "" {
+			out[meta.Tag] = string(ob)
+		}
+	}
+	return out, nil
+}
+
+// ReloadUpstreams 只增删改有变化的出站,不重启数据面,现有用户连接不受影响。
+// 适用于上游增删改(线路与路由未变)。任一步失败则回退到全量重载。
+func (r *Runner) ReloadUpstreams() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.core.IsRunning() {
+		return nil
+	}
+	raw, err := render.BuildConfig(r.db, r.nodeCert())
+	if err != nil {
+		return fmt.Errorf("渲染配置: %w", err)
+	}
+	want, err := outboundsOf(raw)
+	if err != nil {
+		return err
+	}
+	if r.applied == nil {
+		return r.reloadAllLocked(raw)
+	}
+	changed := 0
+	for tag, ob := range want {
+		prev, existed := r.applied[tag]
+		if existed && prev == ob {
+			continue
+		}
+		if existed {
+			if err := r.core.RemoveOutbound(tag); err != nil {
+				logger.Warning("热移除出站 ", tag, " 失败,改为全量重载: ", err)
+				return r.reloadAllLocked(raw)
+			}
+		}
+		if err := r.core.AddOutbound([]byte(ob)); err != nil {
+			logger.Warning("热添加出站 ", tag, " 失败,改为全量重载: ", err)
+			return r.reloadAllLocked(raw)
+		}
+		changed++
+	}
+	for tag := range r.applied {
+		if _, keep := want[tag]; keep {
+			continue
+		}
+		if err := r.core.RemoveOutbound(tag); err != nil {
+			logger.Warning("热移除出站 ", tag, " 失败,改为全量重载: ", err)
+			return r.reloadAllLocked(raw)
+		}
+		changed++
+	}
+	r.applied = want
+	logger.Info("上游已热更新(", changed, " 个出站变化,数据面未重启)")
 	return nil
 }
 
@@ -282,13 +422,35 @@ func (r *Runner) ReloadUsers() error {
 	return nil
 }
 
-// ReloadAll 重建整个数据面(线路增删、端口/协议变更、上游或路由变化时使用)。
+// ReloadAll 重建整个数据面(线路增删、端口/协议变更、路由或证书变化时使用)。
 func (r *Runner) ReloadAll() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	raw, err := render.BuildConfig(r.db, r.nodeCert())
 	if err != nil {
 		return fmt.Errorf("渲染配置: %w", err)
+	}
+	return r.reloadAllLocked(raw)
+}
+
+// ReloadAllForce 无条件重启数据面(证书文件内容变了但配置文本没变时用)。
+func (r *Runner) ReloadAllForce() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	raw, err := render.BuildConfig(r.db, r.nodeCert())
+	if err != nil {
+		return fmt.Errorf("渲染配置: %w", err)
+	}
+	r.appliedRaw = nil
+	return r.reloadAllLocked(raw)
+}
+
+// reloadAllLocked 用给定配置重启数据面(调用方持 mu)。渲染结果与当前生效配置完全相同则不重启。
+func (r *Runner) reloadAllLocked(raw []byte) error {
+	if r.core.IsRunning() && r.appliedRaw != nil && bytes.Equal(r.appliedRaw, raw) {
+		r.applyLimits()
+		logger.Info("配置无变化,数据面无需重启")
+		return nil
 	}
 	// 先干跑校验新配置;不通过就让旧数据面继续服务——绝不为一条坏配置断掉所有用户。
 	if r.core.IsRunning() {
@@ -298,8 +460,11 @@ func (r *Runner) ReloadAll() error {
 	}
 	r.core.Stop()
 	if err := r.core.Start(raw); err != nil {
+		r.applied, r.appliedRaw = nil, nil
 		return fmt.Errorf("重启 sing-box: %w", err)
 	}
+	r.applied, _ = outboundsOf(raw)
+	r.appliedRaw = raw
 	r.applyLimits()
 	logger.Info("数据面已重载")
 	return nil

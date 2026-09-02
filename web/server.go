@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -270,9 +271,32 @@ func (s *Server) reapSessions() {
 	}
 }
 
+// sameOrigin 拦截跨站请求(CSRF):写操作只接受同源发起。
+// JSON 接口不校验 Content-Type,恶意页面可用 text/plain 表单带 Cookie 伪造 POST;
+// 现代浏览器对跨站请求都会带 Sec-Fetch-Site / Origin,据此拒绝即可。
+func sameOrigin(r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+		return false
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		if u, err := url.Parse(origin); err != nil || !strings.EqualFold(u.Host, r.Host) {
+			return false
+		}
+	}
+	return true
+}
+
 // auth 包装需要登录的处理函数。
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !sameOrigin(r) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "跨站请求被拒绝"})
+			return
+		}
 		c, err := r.Cookie(sessionCookie)
 		if err != nil || !s.validSession(c.Value) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
@@ -285,6 +309,10 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	if !sameOrigin(r) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "跨站请求被拒绝"})
 		return
 	}
 	var req struct{ Username, Password string }

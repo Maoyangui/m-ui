@@ -96,21 +96,19 @@ func revisionOf(s Snapshot) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// ApplySnapshot 在副机上整表替换配置。返回线路/上游是否变化(决定全量重载还是只热更新用户)。
-func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged bool, err error) {
+// ApplySnapshot 在副机上整表替换配置。返回线路、上游是否变化,副机据此选择重载级别:
+// 线路变 → 全量重载;仅上游变 → 热换出站;都没变 → 热换用户。
+func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged bool, err error) {
 	var oldLines []model.Line
 	var oldUps []model.Upstream
 	db.Order("id asc").Find(&oldLines)
 	db.Order("id asc").Find(&oldUps)
-	ob, _ := json.Marshal(struct {
-		L []model.Line
-		U []model.Upstream
-	}{oldLines, oldUps})
-	nb, _ := json.Marshal(struct {
-		L []model.Line
-		U []model.Upstream
-	}{snap.Lines, snap.Upstreams})
-	linesChanged = !bytes.Equal(ob, nb)
+	ol, _ := json.Marshal(oldLines)
+	nl, _ := json.Marshal(snap.Lines)
+	ou, _ := json.Marshal(oldUps)
+	nu, _ := json.Marshal(snap.Upstreams)
+	linesChanged = !bytes.Equal(ol, nl)
+	upstreamsChanged = !bytes.Equal(ou, nu)
 
 	// gorm 对带 default:true 的 bool 字段:Create 时零值 false 会写成默认 true,并把 true 回填进结构体。
 	// 所以要在插入之前记下被禁用的 id,插入后再显式写回 false,否则主机禁用的用户会在副机上"复活"。
@@ -186,7 +184,7 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged bool, err error) {
 		upsertSetting(tx, "hubAppliedAt", fmt.Sprintf("%d", time.Now().Unix()))
 		return nil
 	})
-	return linesChanged, err
+	return linesChanged, upstreamsChanged, err
 }
 
 func upsertSetting(tx *gorm.DB, k, v string) {

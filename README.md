@@ -10,7 +10,10 @@
 - 一条**线路** = 入口协议 + 端口 → 上游落地,一页管理(替代入站 / 出站 / 路由三张表)
 - 入站协议:Hysteria2、AnyTLS、TUIC、Trojan、VLESS(Reality / Vision)、VMess、Shadowsocks(含 2022)、SOCKS、HTTP、Mixed;传输层 WS / gRPC / HTTPUpgrade / HTTP
 - 上游:VLESS / VMess / Trojan / TUIC / Hysteria2 / Shadowsocks / SOCKS,可视化编辑或粘贴分享链接导入;一键测试延迟、定时巡检、故障/恢复告警
-- 保存前 sing-box 干跑校验:一条坏配置不会断掉所有用户
+- 保存前整配置 sing-box 干跑校验:一条坏配置不会落库,更不会断掉所有用户
+- 三级重载:改用户热换、改上游热换出站、只有改线路才重启数据面(现有连接不受影响);配置未变化不重启
+
+架构细节见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 **用户与订阅**
 - 配额、到期、周期重置、同时在线设备数(按源 IP)、上下行限速;超量/到期自动禁用并即时踢线

@@ -16,6 +16,7 @@ import (
 	"github.com/fangjunsheng555/m-ui/database"
 	"github.com/fangjunsheng555/m-ui/database/model"
 	"github.com/fangjunsheng555/m-ui/logger"
+	"github.com/fangjunsheng555/m-ui/core"
 	"github.com/fangjunsheng555/m-ui/render"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -177,7 +178,14 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 			s.db.Model(&model.Line{}).Select("COALESCE(MAX(sort),0)").Scan(&maxSort)
 			line.Sort = maxSort + 1
 		}
-		if err := s.db.Create(&line).Error; err != nil {
+		// 在事务里写入并对整套配置做 sing-box 干跑:通不过就回滚,绝不让一条坏线路留在库里拖垮后续所有重载
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&line).Error; err != nil {
+				return err
+			}
+			return validateFullConfig(tx, s.run.NodeCert())
+		})
+		if err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -219,9 +227,15 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		if err := s.db.Model(&model.Line{}).Where("id = ?", id).Select(
-			"name", "protocol", "port", "upstream_id", "options", "addrs", "tls", "transport", "enabled",
-		).Updates(line).Error; err != nil {
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.Line{}).Where("id = ?", id).Select(
+				"name", "protocol", "port", "upstream_id", "options", "addrs", "tls", "transport", "enabled",
+			).Updates(line).Error; err != nil {
+				return err
+			}
+			return validateFullConfig(tx, s.run.NodeCert())
+		})
+		if err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -242,6 +256,20 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// validateFullConfig 用事务内的当前数据渲染整套 sing-box 配置并干跑初始化。
+// 单条入站/出站的 parse 校验抓不住"初始化才报错"的问题(如 ss2022 缺 PSK),
+// 而这类错误会让之后每一次重载都失败,所以保存前必须整体干跑一遍。
+func validateFullConfig(tx *gorm.DB, cert render.NodeCert) error {
+	raw, err := render.BuildConfig(tx, cert)
+	if err != nil {
+		return fmt.Errorf("渲染配置失败(已取消保存): %w", err)
+	}
+	if err := core.ValidateConfig(raw); err != nil {
+		return fmt.Errorf("配置未通过 sing-box 校验(已取消保存): %w", err)
+	}
+	return nil
 }
 
 // validateLine 校验线路必填项与唯一性(端口/名称)。
@@ -276,8 +304,22 @@ func (s *Server) validateLine(line *model.Line) error {
 		return fmt.Errorf("协议参数不是合法 JSON: %w", err)
 	}
 	if line.Protocol == "shadowsocks" {
-		if m, _ := probe["method"].(string); m == "" {
+		m, _ := probe["method"].(string)
+		if m == "" {
 			return errors.New("shadowsocks 线路必须设置 method")
+		}
+		// 2022 系列需要服务端 PSK(aes-128 为 16 字节,其余 32 字节),留空则自动生成
+		if strings.HasPrefix(m, "2022-") {
+			if p, _ := probe["password"].(string); p == "" {
+				n := 32
+				if strings.Contains(m, "aes-128") {
+					n = 16
+				}
+				probe["password"] = randomBase64(n)
+				if b, err := json.Marshal(probe); err == nil {
+					line.Options = b
+				}
+			}
 		}
 	}
 	// 名称与端口全局唯一
@@ -351,12 +393,18 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		up.Id = 0
-		if err := s.db.Create(&up).Error; err != nil {
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&up).Error; err != nil {
+				return err
+			}
+			return validateFullConfig(tx, s.run.NodeCert())
+		})
+		if err != nil {
 			badRequest(w, err)
 			return
 		}
 		s.audit(r, "upstream", "create", up.Name)
-		s.reloadAll("新增上游 " + up.Name)
+		s.reloadUpstreams("新增上游 " + up.Name)
 		writeJSON(w, http.StatusOK, up)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
@@ -388,13 +436,19 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		if err := s.db.Model(&model.Upstream{}).Where("id = ?", id).
-			Select("name", "type", "options").Updates(up).Error; err != nil {
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.Upstream{}).Where("id = ?", id).
+				Select("name", "type", "options").Updates(up).Error; err != nil {
+				return err
+			}
+			return validateFullConfig(tx, s.run.NodeCert())
+		})
+		if err != nil {
 			badRequest(w, err)
 			return
 		}
 		s.audit(r, "upstream", "update", up.Name)
-		s.reloadAll("修改上游 " + up.Name)
+		s.reloadUpstreams("修改上游 " + up.Name)
 		writeJSON(w, http.StatusOK, up)
 	case http.MethodDelete:
 		var inUse int64
@@ -408,7 +462,7 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.audit(r, "upstream", "delete", id)
-		s.reloadAll("删除上游")
+		s.reloadUpstreams("删除上游")
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
@@ -607,10 +661,15 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		roleChanged := false
+		oldDomain := s.setting("webDomain")
 		for k, v := range in {
 			v = strings.TrimSpace(v)
 			if k == "nodeMode" && v != s.setting("nodeMode") {
 				roleChanged = true
+			}
+			if k == "webDomain" && v != oldDomain && v != "" {
+				// 本机服务器记录的域名跟着面板域名走(用户没单独改过时)
+				s.db.Model(&model.Node{}).Where("is_local = ? AND (domain = ? OR domain = '')", true, oldDomain).Update("domain", v)
 			}
 			var existing model.Setting
 			if err := s.db.Where("key = ?", k).First(&existing).Error; err == nil {
@@ -712,6 +771,18 @@ func (s *Server) reloadAll(reason string) {
 }
 
 // reloadUsers 用户变更走热更新,不断开其他用户连接。
+// reloadUpstreams 上游变化:只热换出站,不重启数据面(失败时 runner 自动回退全量重载)。
+func (s *Server) reloadUpstreams(reason string) {
+	go func() {
+		if err := s.run.ReloadUpstreams(); err != nil {
+			logger.Warning(reason, " 后更新上游失败: ", err)
+			return
+		}
+		logger.Info(reason, ",上游已更新")
+		_ = database.Checkpoint(s.db)
+	}()
+}
+
 func (s *Server) reloadUsers(reason string) {
 	go func() {
 		if err := s.run.ReloadUsers(); err != nil {

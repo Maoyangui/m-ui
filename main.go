@@ -36,6 +36,8 @@ func usage() {
 	fmt.Println("  m-ui backup -db <m-ui.db> -out <zip> 生成备份(含证书)")
 	fmt.Println("  m-ui restore -db <m-ui.db> -from <zip|db> 还原备份(服务停止时执行)")
 	fmt.Println("  m-ui selfsign -hosts <域名,IP>    生成自签证书")
+	fmt.Println("  m-ui passwd -db <m-ui.db> [-user admin] [-password 新密码]  重置管理员密码(忘记密码 / 导入后)")
+	fmt.Println("  m-ui set -db <m-ui.db> key=value ...  写入设置(如首次启动前改端口:webPort=3053 nodeMode=true)")
 	fmt.Println("  m-ui version                      显示版本")
 }
 
@@ -96,6 +98,40 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("已还原:%d 用户 / %d 线路 / %d 上游,证书 %d 个(旧库保留为 .bak-*)\n", sum.Users, sum.Lines, sum.Upstreams, len(sum.Meta.Certs))
+	case "set":
+		fs := flag.NewFlagSet("set", flag.ExitOnError)
+		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
+		fs.Parse(os.Args[2:])
+		if fs.NArg() == 0 {
+			fmt.Fprintln(os.Stderr, "用法: m-ui set -db <m-ui.db> key=value [key=value ...]   例: webPort=3053 nodeMode=true")
+			os.Exit(2)
+		}
+		kv := map[string]string{}
+		for _, a := range fs.Args() {
+			k, v, ok := strings.Cut(a, "=")
+			if !ok || k == "" {
+				fmt.Fprintln(os.Stderr, "参数需为 key=value:", a)
+				os.Exit(2)
+			}
+			kv[k] = v
+		}
+		if err := runner.SetSettings(*dbPath, kv); err != nil {
+			fmt.Fprintln(os.Stderr, "写入失败:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("已写入 %d 项设置(运行中的 m-ui 需重启生效)\n", len(kv))
+	case "passwd":
+		fs := flag.NewFlagSet("passwd", flag.ExitOnError)
+		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
+		user := fs.String("user", "admin", "管理员用户名(不存在则创建)")
+		pw := fs.String("password", "", "新密码(留空则随机生成并打印)")
+		fs.Parse(os.Args[2:])
+		newPw, err := runner.ResetPassword(*dbPath, *user, *pw)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "重置失败:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("管理员 %s 密码已更新: %s\n", *user, newPw)
 	case "selfsign":
 		fs := flag.NewFlagSet("selfsign", flag.ExitOnError)
 		hosts := fs.String("hosts", "", "域名或 IP,逗号分隔(必填)")

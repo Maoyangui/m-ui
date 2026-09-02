@@ -120,17 +120,20 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("快照缺少修订号"))
 		return
 	}
-	linesChanged, err := hub.ApplySnapshot(s.db, snap)
+	linesChanged, upsChanged, err := hub.ApplySnapshot(s.db, snap)
 	if err != nil {
 		badRequest(w, err)
 		return
 	}
-	if linesChanged {
+	switch {
+	case linesChanged:
 		s.reloadAll("主机下发配置 " + snap.Revision)
-	} else {
+	case upsChanged:
+		s.reloadUpstreams("主机下发上游 " + snap.Revision)
+	default:
 		s.reloadUsers("主机下发用户 " + snap.Revision)
 	}
-	logger.Info("已应用主机配置 ", snap.Revision, "(线路变化: ", linesChanged, ")")
+	logger.Info("已应用主机配置 ", snap.Revision, "(线路变化: ", linesChanged, ",上游变化: ", upsChanged, ")")
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "revision": snap.Revision})
 }
 

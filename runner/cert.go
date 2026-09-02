@@ -174,7 +174,7 @@ func (r *Runner) afterCertChange(certFile, keyFile, domain string) {
 			r.cert.logf("订阅服务已用新证书重启")
 		}
 	}
-	if err := r.ReloadAll(); err != nil {
+	if err := r.ReloadAllForce(); err != nil { // 证书文件内容变了,配置文本不变也必须重启
 		r.cert.logf("数据面重载失败: %v", err)
 	} else {
 		r.cert.logf("数据面已用新证书重载")
