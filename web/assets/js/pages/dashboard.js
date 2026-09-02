@@ -95,15 +95,25 @@ export async function render(el) {
   await Promise.all([renderChart(), renderOnline(), renderAudit(), renderLog(), renderHealth(), renderConns(), renderTop(), refreshNodeSummary().then(renderStats)]);
 }
 
-export async function tick() { await refreshNodeSummary(); renderStats(); renderCore(); renderOnline(); }
+// 每 10 秒:状态卡、数据面、在线、最近入站连接、日志;每 30 秒:流量图(含 24h 流量卡)、排行、巡检、审计
+let ticks = 0;
+export async function tick() {
+  ticks++;
+  await refreshNodeSummary();
+  renderStats(); renderCore(); renderOnline();
+  const jobs = [renderConns(), renderLog()];
+  if (ticks % 3 === 0) jobs.push(renderChart(), renderTop(), renderHealth(), renderAudit());
+  await Promise.allSettled(jobs);
+}
 
 async function renderConns() {
   const el = document.getElementById('dash-conns');
   if (!el) return;
   const rows = await get('conns/recent');
   if (!rows.length) { el.innerHTML = empty(t('dash.noConns')); return; }
-  el.innerHTML = `<div class="table-wrap"><table class="grid" style="min-width:0"><thead><tr><th>IP</th><th>${t('nav.lines')}</th><th>${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 15).map(c =>
-    `<tr><td class="mono">${esc(c.ip)}</td><td>${esc(c.line)} <span class="muted small">${esc(c.protocol)}</span></td><td class="num">${c.count}</td><td class="mono small">${esc(c.last || '')}</td></tr>`).join('')}</tbody></table></div>`;
+  const multi = rows.some(c => c.server);
+  el.innerHTML = `<div class="table-wrap"><table class="grid" style="min-width:0"><thead><tr><th>IP</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th>${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 15).map(c =>
+    `<tr><td class="mono">${esc(c.ip)}</td><td>${esc(c.line)} <span class="muted small">${esc(c.protocol)}</span></td>${multi ? `<td>${esc(c.server || '')}</td>` : ''}<td class="num">${c.count}</td><td class="mono small">${esc(c.last || '')}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 async function renderHealth() {
@@ -124,7 +134,7 @@ function renderStats() {
   const cards = [
     [t('dash.onlineUsers'), `${s.onlineUsers ?? 0} / ${s.enabledUsers ?? 0}`, `${s.users ?? 0} ${t('common.all')}`],
     [t('dash.trafficToday'), `↑ ${fmtBytes(state._dayUp || 0, 1)}`, `↓ ${fmtBytes(state._dayDown || 0, 1)}`],
-    [t('dash.lines'), `${(state.onlines.lines || []).length} / ${s.lines ?? 0}`, t('common.online')],
+    [t('dash.lines'), `${s.linesEnabled ?? 0} / ${s.lines ?? 0}`, (state.onlines.lines || []).length ? t('dash.localRunning', { n: (state.onlines.lines || []).length }) : t('common.enabled')],
     [t('dash.upstreams'), s.upstreams ?? 0, ''],
     [t('dash.cpu'), s.cpu != null ? s.cpu.toFixed(1) + '%' : '—', ''],
     [t('dash.mem'), s.memTotal ? Math.round(s.memUsed / s.memTotal * 100) + '%' : '—', s.memTotal ? `${fmtBytes(s.memUsed, 1)} / ${fmtBytes(s.memTotal, 1)}` : ''],

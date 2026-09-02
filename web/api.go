@@ -71,8 +71,9 @@ func pathID(r *http.Request, prefix string) (uint, error) {
 // ---- 状态 ----
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	var lineCount, upstreamCount, userCount, enabledUsers int64
+	var lineCount, linesEnabled, upstreamCount, userCount, enabledUsers int64
 	s.db.Model(&model.Line{}).Count(&lineCount)
+	s.db.Model(&model.Line{}).Where("enabled = ?", true).Count(&linesEnabled)
 	s.db.Model(&model.Upstream{}).Count(&upstreamCount)
 	s.db.Model(&model.User{}).Count(&userCount)
 	s.db.Model(&model.User{}).Where("enabled = ?", true).Count(&enabledUsers)
@@ -95,7 +96,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"goroutines":   runtime.NumGoroutine(),
 		"version":      Version,
 		"repo":         brand.Repo,
-		"onlineUsers":  len(s.run.Onlines().Users),
+		"onlineUsers":  len(mergeIPs(s.run.Onlines().Users, s.run.Hub().RemoteOnlineUsers())), // 含副机上的在线用户
+		"linesEnabled": linesEnabled,
 	}
 	// 快速开始清单用
 	var nodeCount, planCount int64

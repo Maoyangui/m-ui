@@ -44,7 +44,7 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOpsSub(w http.ResponseWriter, r *http.Request) {
-	action := strings.TrimPrefix(r.URL.Path, s.basePath()+"api/ops/")
+	action := strings.TrimPrefix(r.URL.Path, innerBase+"api/ops/")
 	switch action {
 	case "status":
 		writeJSON(w, http.StatusOK, s.ops.Status())

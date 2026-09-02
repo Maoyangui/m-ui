@@ -238,6 +238,8 @@ const zh = {
   'user.importHelp': '上传旧面板的 .db 文件,只导入用户:同名用户更新用量、配额、到期与启停(保留本站的凭据与线路),其余新建并沿用旧凭据。线路、上游、设置一律不动。',
   'user.importAssign': '给新建的用户分配全部现有线路', 'user.importDone': '导入完成:新增 {c},更新 {u},分配线路 {a}',
   'app.nodeReadOnly': '本机是副服务器:这里的内容由主机统一下发、只读。请到主机面板修改。',
+  'dash.localRunning': '本机在线 {n}',
+  'set.pathHelp': '保存即生效,浏览器会自动跳到新地址', 'set.subPathHelp': '保存即生效;用户已有的订阅地址会失效,需要重新分发', 'set.pathChanged': '面板路径已改为 {p},正在跳转…',
 };
 
 const en = {
@@ -479,6 +481,8 @@ const en = {
   'user.importHelp': 'Upload the old panel .db file to import users only: existing names get usage, quota, expiry and enabled state updated (credentials and lines here are kept), the rest are created with their old credentials. Lines, upstreams and settings are untouched.',
   'user.importAssign': 'Give newly created users every existing line', 'user.importDone': 'Imported: {c} created, {u} updated, {a} line assignments',
   'app.nodeReadOnly': 'This is a node: everything here is pushed by the master and read-only. Make changes on the master panel.',
+  'dash.localRunning': '{n} running here',
+  'set.pathHelp': 'Takes effect immediately; the browser jumps to the new address', 'set.subPathHelp': 'Immediate; existing subscription URLs stop working and must be re-sent', 'set.pathChanged': 'Panel path changed to {p}, redirecting…',
 };
 
 const dicts = { zh, en };

@@ -13,6 +13,7 @@
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{max-width:560px;margin:0 auto;padding:1.25rem 1rem 3rem}
 .brand{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem}.logo{display:block;width:40px;height:33px}
+details.nodes summary{display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none}details.nodes summary::-webkit-details-marker{display:none}details.nodes summary h2{margin:0}details.nodes .chev{font-size:.8rem;color:var(--muted)}details.nodes[open] .chev{display:none}details.nodes .lines{margin-top:.6rem}
 .brand h1{margin:0;font-size:1.15rem}.brand .u{color:var(--muted);font-size:.85rem}
 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.1rem 1.15rem;margin-bottom:.9rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}
 h2{margin:0 0 .7rem;font-size:.95rem}
@@ -71,8 +72,8 @@ button{border:1px solid var(--border);background:var(--card);color:var(--text);b
   </div>
 
   {{if .Lines}}<div class="card">
-    <h2>{{if eq .Lang "zh"}}节点{{else}}Nodes{{end}} <span class="badge">{{len .Lines}}</span></h2>
-    <div class="lines">{{range .Lines}}<div class="line"><span>{{.Name}}</span><span class="tags"><span class="tag">{{.Protocol}}</span>{{if .TLS}}<span class="tag">{{.TLS}}</span>{{end}}{{if .Transport}}<span class="tag">{{.Transport}}</span>{{end}}</span></div>{{end}}</div>
+    <details class="nodes"><summary><h2>{{if eq .Lang "zh"}}节点{{else}}Nodes{{end}} <span class="badge">{{len .Lines}}</span></h2><span class="chev">{{if eq .Lang "zh"}}展开{{else}}Show{{end}} ▾</span></summary>
+    <div class="lines">{{range .Lines}}<div class="line"><span>{{.Name}}</span><span class="tags"><span class="tag">{{.Protocol}}</span>{{if .TLS}}<span class="tag">{{.TLS}}</span>{{end}}{{if .Transport}}<span class="tag">{{.Transport}}</span>{{end}}</span></div>{{end}}</div></details>
   </div>{{end}}
 
   <div class="foot">{{if .Support}}{{.Support}} · {{end}}© {{.Year}} {{.Title}}</div>

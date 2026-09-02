@@ -15,11 +15,11 @@ const defaults = {
 const groups = () => [
   { id: 'panel', title: t('set.panel'), restart: true, fields: [
     ['webDomain', t('set.webDomain'), 'text', t('set.webDomainHelp')],
-    ['webListen', t('set.listen'), 'text'], ['webPort', t('set.port'), 'number'], ['webPath', t('set.path'), 'text'],
+    ['webListen', t('set.listen'), 'text'], ['webPort', t('set.port'), 'number'], ['webPath', t('set.path'), 'text', t('set.pathHelp')],
     ['webCertFile', t('set.cert'), 'text'], ['webKeyFile', t('set.key'), 'text'],
   ]},
   { id: 'sub', title: t('set.sub'), restart: true, fields: [
-    ['subListen', t('set.listen'), 'text'], ['subPort', t('set.port'), 'number'], ['subPath', t('set.path'), 'text'],
+    ['subListen', t('set.listen'), 'text'], ['subPort', t('set.port'), 'number'], ['subPath', t('set.path'), 'text', t('set.subPathHelp')],
     ['subCertFile', t('set.cert'), 'text'], ['subKeyFile', t('set.key'), 'text'],
     ['subProfileTitle', t('set.subTitle'), 'text'], ['subUpdates', t('set.subUpdates'), 'number'],
     ['subEncode', t('set.subEncode'), 'bool'], ['subShowNotice', t('set.subNotice'), 'bool'],
@@ -118,8 +118,17 @@ registerActions({
     const g = groups().find(x => x.id === id);
     const body = {};
     g.fields.forEach(([k, , type]) => { body[k] = (type === 'bool' || type === 'boolOn') ? String(fchk('set-' + k)) : fv('set-' + k).trim(); });
-    try { const r = await post('settings', body); await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok'); }
-    catch (e) { toast(e.message, 'err'); }
+    const pathBefore = state.status.webPath;
+    try {
+      const r = await post('settings', body);
+      await load('settings', 'status');
+      if (id === 'panel' && state.status.webPath && state.status.webPath !== pathBefore) {
+        toast(t('set.pathChanged', { p: state.status.webPath }), 'ok');
+        setTimeout(() => { location.href = state.status.webPath; }, 900);
+        return;
+      }
+      toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok');
+    } catch (e) { toast(e.message, 'err'); }
   },
   'set.saveRole': async () => {
     const toNode = fchk('set-nodeMode');

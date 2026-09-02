@@ -39,7 +39,7 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
-	action := strings.TrimPrefix(r.URL.Path, s.basePath()+"api/cert/")
+	action := strings.TrimPrefix(r.URL.Path, innerBase+"api/cert/")
 	switch action {
 	case "status":
 		writeJSON(w, http.StatusOK, s.run.CertStatus())
@@ -144,7 +144,7 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBackupSub(w http.ResponseWriter, r *http.Request) {
-	action := strings.TrimPrefix(r.URL.Path, s.basePath()+"api/backup/")
+	action := strings.TrimPrefix(r.URL.Path, innerBase+"api/backup/")
 	switch action {
 	case "list":
 		writeJSON(w, http.StatusOK, map[string]interface{}{

@@ -170,7 +170,8 @@ func EntriesFromNodes(db *gorm.DB, webDomain, localPublicIP string, preferIP boo
 	return out
 }
 
-func (s *Server) Start() error {
+// currentPath 当前订阅路径(设置 subPath,规整为 /xxx/);每个请求读取,改路径保存即生效。
+func (s *Server) currentPath() string {
 	subPath := s.setting("subPath")
 	if subPath == "" {
 		subPath = "/sub/"
@@ -181,9 +182,14 @@ func (s *Server) Start() error {
 	if !strings.HasSuffix(subPath, "/") {
 		subPath += "/"
 	}
+	return subPath
+}
+
+func (s *Server) Start() error {
+	subPath := s.currentPath()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc(subPath, s.handle(subPath))
+	mux.HandleFunc("/", s.handle())
 
 	listen := s.setting("subListen")
 	if listen == "" {
@@ -229,8 +235,13 @@ func (s *Server) Stop() error {
 	return s.httpSrv.Shutdown(ctx)
 }
 
-func (s *Server) handle(subPath string) http.HandlerFunc {
+func (s *Server) handle() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		subPath := s.currentPath()
+		if !strings.HasPrefix(r.URL.Path, subPath) {
+			http.NotFound(w, r)
+			return
+		}
 		name := strings.TrimPrefix(r.URL.Path, subPath)
 		wantQR := strings.HasSuffix(name, "/qr")
 		name = strings.TrimSuffix(name, "/qr")

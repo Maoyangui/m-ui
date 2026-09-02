@@ -178,7 +178,7 @@ Subscription access log, core log (data plane + panel) and audit log. Logging ca
 
 ### Settings
 
-Panel and subscription listen address / port / path / certificate, subscription display options, landing-page text, Telegram notification toggles, upstream check parameters, data-plane stats granularity. Port, listen address and certificate path changes need a restart; the restart button sits in the page header.
+Panel and subscription listen address / port / path / certificate, subscription display options, landing-page text, Telegram notification toggles, upstream check parameters, data-plane stats granularity. Panel and subscription path changes apply immediately; port, listen address and certificate path changes need a restart (button in the page header).
 
 ## Command line
 

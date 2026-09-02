@@ -227,6 +227,16 @@ func upsertSetting(tx *gorm.DB, k, v string) {
 	}).Create(&model.Setting{Key: k, Value: v})
 }
 
+// RecentConn 数据面日志里聚合出的一条"源 IP × 线路"入站记录(诊断用)。
+type RecentConn struct {
+	IP       string `json:"ip"`
+	Line     string `json:"line"`
+	Protocol string `json:"protocol"`
+	Count    int    `json:"count"`
+	Last     string `json:"last"`
+	Server   string `json:"server,omitempty"` // 主机汇总时标注来自哪台服务器
+}
+
 // Report 是副机上报的状态。
 type Report struct {
 	Version     string               `json:"version"`
@@ -238,7 +248,8 @@ type Report struct {
 	Onlines     map[string][]string  `json:"onlines"` // 用户 → 在线源 IP
 	OnlineLines []string             `json:"onlineLines"`
 	CertDays    int                  `json:"certDays"`
-	PublicIP    string               `json:"publicIp"` // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
+	PublicIP    string               `json:"publicIp"`        // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
+	Conns       []RecentConn         `json:"conns,omitempty"` // 最近入站连接,主机概览汇总展示
 }
 
 // ApplyCounters 把副机的单调账本按游标并入主机:只计增量;计数器回绕(副机重装)时游标归零重认。
@@ -332,6 +343,21 @@ type NodeStatus struct {
 	OnlineUsers int    `json:"onlineUsers"`
 	CertDays    int    `json:"certDays"`
 	alerted     bool
+	conns       []RecentConn
+}
+
+// RemoteConns 汇总所有在线副机最近上报的入站连接,标注服务器名。
+func (h *Hub) RemoteConns() []RecentConn {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []RecentConn
+	for _, st := range h.status {
+		for _, c := range st.conns {
+			c.Server = st.Name
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 type Deps struct {
@@ -552,6 +578,7 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 		st.Version, st.Hostname, st.CoreRunning, st.Uptime, st.Revision, st.CertDays = rep.Version, rep.Hostname, rep.CoreRunning, rep.Uptime, rep.Revision, rep.CertDays
 		st.Synced = rep.Revision == h.revision
 		st.OnlineUsers = len(rep.Onlines)
+		st.conns = rep.Conns
 	}
 	if !ok && !alerted && st.LastSeen > 0 && time.Now().Unix()-st.LastSeen > 60 {
 		st.alerted = true

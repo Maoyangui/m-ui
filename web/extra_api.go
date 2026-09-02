@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
 
 	"github.com/skip2/go-qrcode"
@@ -216,16 +218,10 @@ func (s *Server) handleStatsTop(w http.ResponseWriter, r *http.Request) {
 var reInboundConn = regexp.MustCompile(`inbound/(\w+)\[([^\]]+)\]\s*inbound connection from ([0-9a-fA-F.:\[\]]+?)(?::\d+)?\s*$`)
 var reLogTime = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`)
 
-type recentConn struct {
-	IP       string `json:"ip"`
-	Line     string `json:"line"`
-	Protocol string `json:"protocol"`
-	Count    int    `json:"count"`
-	Last     string `json:"last"`
-}
+type recentConn = hub.RecentConn
 
-// handleRecentConns GET /conns/recent:按 (源IP, 线路) 聚合最近的入站连接。
-func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
+// recentConns 从本机数据面日志聚合最近入站连接(最近的在前,最多 limit 条)。
+func (s *Server) recentConns(limit int) []recentConn {
 	lines := logger.GetLogs(3000, "info")
 	agg := map[string]*recentConn{}
 	var order []string
@@ -248,8 +244,27 @@ func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := make([]recentConn, 0, len(agg))
-	for i := len(order) - 1; i >= 0 && len(out) < 100; i-- { // 最近的在前
+	for i := len(order) - 1; i >= 0 && len(out) < limit; i-- { // 最近的在前
 		out = append(out, *agg[order[i]])
+	}
+	return out
+}
+
+// handleRecentConns 本机 + 各副机最近入站连接;多服务器时带服务器名,按最近时间排序。
+func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
+	out := s.recentConns(100)
+	remote := s.run.Hub().RemoteConns()
+	if len(remote) > 0 {
+		var local model.Node
+		s.db.Where("is_local = ?", true).First(&local)
+		for i := range out {
+			out[i].Server = local.Name
+		}
+		out = append(out, remote...)
+		sort.SliceStable(out, func(i, j int) bool { return out[i].Last > out[j].Last })
+		if len(out) > 100 {
+			out = out[:100]
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

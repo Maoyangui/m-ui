@@ -95,7 +95,7 @@ func (s *Server) validateExt(e *model.ExtNode) error {
 }
 
 func (s *Server) handleExtItem(w http.ResponseWriter, r *http.Request) {
-	rest := strings.Split(strings.TrimPrefix(r.URL.Path, s.basePath()+"api/exts/"), "/")
+	rest := strings.Split(strings.TrimPrefix(r.URL.Path, innerBase+"api/exts/"), "/")
 	id64, err := strconv.ParseUint(rest[0], 10, 64)
 	if err != nil {
 		badRequest(w, errors.New("id 无效"))

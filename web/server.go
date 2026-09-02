@@ -38,6 +38,10 @@ var assets embed.FS
 
 const sessionCookie = "m-ui-session"
 
+// innerBase 路由注册用的固定前缀;对外的面板路径(设置 webPath)在请求进入时改写到它,
+// 因此改路径保存即生效,无需重启。各处理函数解析路径一律用 innerBase,拼对外地址才用 basePath()。
+const innerBase = "/app/"
+
 // Version 由 main 注入,状态接口与"关于"展示用。
 var Version = "dev"
 
@@ -108,7 +112,7 @@ func (s *Server) basePath() string {
 }
 
 func (s *Server) Start() error {
-	base := s.basePath()
+	base := innerBase
 	logger.SetEnabled(s.setting("logEnabled") != "false")
 	mux := http.NewServeMux()
 
@@ -166,10 +170,25 @@ func (s *Server) Start() error {
 	// 根路径重定向到面板
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
-			http.Redirect(w, r, base, http.StatusTemporaryRedirect)
+			http.Redirect(w, r, s.basePath(), http.StatusTemporaryRedirect)
 			return
 		}
 		http.NotFound(w, r)
+	})
+	// 对外前缀 → 内部前缀改写;对外前缀不是 innerBase 时,直接访问内部前缀视为不存在
+	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pub := s.basePath()
+		if pub != innerBase && r.URL.Path != "/" {
+			switch {
+			case strings.HasPrefix(r.URL.Path, pub):
+				r.URL.Path = innerBase + strings.TrimPrefix(r.URL.Path, pub)
+				r.URL.RawPath = ""
+			case strings.HasPrefix(r.URL.Path, innerBase):
+				http.NotFound(w, r)
+				return
+			}
+		}
+		mux.ServeHTTP(w, r)
 	})
 
 	listen := s.setting("webListen")
@@ -196,13 +215,13 @@ func (s *Server) Start() error {
 	}
 
 	s.listener = ln
-	s.httpSrv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	s.httpSrv = &http.Server{Handler: outer, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := s.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			logger.Warning("面板服务退出: ", err)
 		}
 	}()
-	logger.Info("面板已启动 ", scheme, "://", addr, base)
+	logger.Info("面板已启动 ", scheme, "://", addr, s.basePath())
 	go s.reapSessions()
 	return nil
 }

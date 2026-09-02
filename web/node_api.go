@@ -97,7 +97,7 @@ func (s *Server) validateNode(p *nodePayload) error {
 }
 
 func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
-	rest := strings.Split(strings.TrimPrefix(r.URL.Path, s.basePath()+"api/nodes/"), "/")
+	rest := strings.Split(strings.TrimPrefix(r.URL.Path, innerBase+"api/nodes/"), "/")
 	id64, err := strconv.ParseUint(rest[0], 10, 64)
 	if err != nil {
 		badRequest(w, errors.New("id 无效"))

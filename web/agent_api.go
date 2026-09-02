@@ -48,7 +48,7 @@ func (s *Server) agentAuth(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
-	action := strings.TrimPrefix(r.URL.Path, s.basePath()+"api/agent/")
+	action := strings.TrimPrefix(r.URL.Path, innerBase+"api/agent/")
 	switch action {
 	case "info": // 会话鉴权:副机面板展示配对信息
 		s.auth(s.handleAgentInfo)(w, r)
@@ -147,6 +147,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		Version: Version, Hostname: host, CoreRunning: s.run.CoreRunning(), Uptime: s.run.Uptime(),
 		Revision: s.setting("hubRevision"), Onlines: map[string][]string{}, CertDays: s.run.CertInfo().DaysLeft,
 		PublicIP: s.setting("publicIp"),
+		Conns:    s.recentConns(50),
 	}
 	s.db.Find(&rep.Counters)
 	o := s.run.Onlines()
