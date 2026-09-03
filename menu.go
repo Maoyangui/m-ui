@@ -311,7 +311,7 @@ func runMenu() {
 				fmt.Println(colorRed+"  失败:", err, colorReset)
 				break
 			}
-			_ = runner.SetSettings(dbPath, map[string]string{"certFile": crt, "keyFile": key})
+			_ = runner.SetSettings(dbPath, map[string]string{"certFile": crt, "keyFile": key, "certSource": "selfsign"})
 			fmt.Println(colorGreen+"  自签证书已生成并设为数据面证书:", crt, colorReset)
 			fmt.Println(colorGray + "  订阅会自动带 allow-insecure;重启后生效" + colorReset)
 			if ask("  现在重启? [Y/n]: ") != "n" {

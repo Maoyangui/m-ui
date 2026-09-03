@@ -133,7 +133,7 @@ const zh = {
   'set.checkThreshold': '连续失败几次判定故障', 'set.checkThresholdHelp': '避免单次抖动误报',
   'dash.health': '上游巡检', 'dash.healthNever': '尚未巡检', 'dash.healthLast': '上次', 'dash.healthOk': '正常', 'dash.healthBad': '故障', 'dash.healthRun': '立即巡检',
   'up.scheduled': '巡检', 'up.runCheck': '立即巡检',
-  'nav.cert': '证书', 'cert.title': '证书', 'cert.subtitle': "用 Let's Encrypt 为本机签发证书,面板、订阅与数据面共用,到期前自动续期。",
+  'nav.cert': '证书', 'cert.title': '证书', 'cert.subtitle': "三种来源任选:有域名用 Let's Encrypt 自动签发、无域名生成自签、或直接用服务器上已有的证书。线路入站始终使用它,面板与订阅是否走 HTTPS 可勾选。",
   'cert.current': '当前证书', 'cert.subject': '域名', 'cert.issuer': '签发者', 'cert.validity': '有效期', 'cert.daysLeft': '剩余', 'cert.path': '路径',
   'cert.none': '尚无证书', 'cert.selfSigned': '自签', 'cert.expired': '已过期', 'cert.expiring': '{n} 天后到期', 'cert.valid': '有效',
   'cert.usePanel': '面板', 'cert.useSub': '订阅', 'cert.selfsign': '生成自签证书', 'cert.hosts': '域名 / IP(逗号分隔)', 'cert.hostsHelp': '自签只用于数据面(订阅会自动带 allow-insecure);订阅与面板保持 HTTP,地址为 http://IP:端口。适合无域名的纯 IP 服务器',
@@ -174,7 +174,7 @@ const zh = {
   'set.pairing': '配对信息', 'set.pairingHelp': '把 API 地址与令牌填到主机的「服务器」页即可接入;本机的线路/上游/用户将由主机下发覆盖。',
   'set.rotateToken': '更换令牌', 'set.rotateConfirm': '更换后主机需重新填写新令牌才能连接,确定?', 'set.rotated': '令牌已更换',
   'set.subInsecure': '订阅允许不安全证书', 'set.subInsecureAuto': '自动(证书为自签时开启)', 'set.subInsecureHelp': '自签证书(无域名、纯 IP)时客户端必须允许不安全才能连接:链接带 insecure=1,Clash 带 skip-cert-verify',
-  'cert.selfSignedNote': '当前是自签证书:订阅已自动带"允许不安全"(insecure / skip-cert-verify),客户端可直接导入;有域名后建议签发正式证书。',
+  'cert.selfSignedNote': '当前是自签证书:线路入站可用,订阅已自动带"允许不安全"(insecure / skip-cert-verify),客户端导入后能直接连;面板与订阅走 HTTPS 会被浏览器和客户端拦下,建议保持 HTTP,有域名后再签发正式证书。',
   'ops.tuneHelp': '默认值适合大多数 VPS;可按机器规格修改 swap 大小、句柄上限与内核参数,参数会保存供下次使用。',
   'ops.current': '当前', 'ops.restoreDefault': '恢复默认',
   'time.justNow': '刚刚', 'time.minAgo': '{n} 分钟前', 'time.hourAgo': '{n} 小时前', 'time.dayAgo': '{n} 天前', 'time.d': '天', 'time.h': '小时', 'time.m': '分',
@@ -241,6 +241,15 @@ const zh = {
   'dash.localRunning': '本机在线 {n}',
   'set.pathHelp': '保存即生效,浏览器会自动跳到新地址', 'set.subPathHelp': '保存即生效;用户已有的订阅地址会失效,需要重新分发', 'set.pathChanged': '面板路径已改为 {p},正在跳转…',
   'user.subJson': 'sing-box 订阅',
+  'cert.usage': '证书用途', 'cert.useLines': '线路入站', 'cert.on': '已启用', 'cert.off': '未配置',
+  'cert.usageHelp': '线路入站(客户端连接节点)始终使用这张证书;面板与订阅是否走 HTTPS 由右侧勾选决定。',
+  'cert.source': '证书来源', 'cert.srcAcme': '有域名(自动签发)', 'cert.srcSelf': '无域名(自签)', 'cert.srcExternal': '已有证书',
+  'cert.applyTo': '应用到', 'cert.applyPanelHelp': '面板改用 HTTPS,重启 m-ui 后生效', 'cert.applySubHelp': '订阅地址改用 HTTPS,保存后立即生效(用户需重新获取地址)',
+  'cert.applySave': '保存用途', 'cert.applied': '证书用途已更新',
+  'cert.selfHelp': '没有域名时用服务器 IP 生成自签证书:线路入站可以正常加密,订阅链接会自动带上"允许不安全",客户端打开该开关即可连接。自签证书不被系统信任,面板与订阅默认保持 HTTP。',
+  'cert.externalHelp': '使用服务器上已有的证书(certbot、宝塔、nginx 或商业证书都可以),只记录路径不复制文件;证书续期后覆盖原文件即可,面板与订阅会自动换用。',
+  'cert.certPath': '证书文件(fullchain)', 'cert.keyPath': '私钥文件', 'cert.pathHelp': '填服务器上的绝对路径,m-ui 需要有读取权限',
+  'cert.useExternal': '使用该证书', 'cert.externalOk': '已使用该证书', 'cert.needHosts': '请填写域名或 IP', 'cert.needPaths': '请填写证书与私钥路径',
 };
 
 const en = {
@@ -377,7 +386,7 @@ const en = {
   'set.checkThreshold': 'Consecutive failures before alert', 'set.checkThresholdHelp': 'Avoids alerts on a single hiccup',
   'dash.health': 'Upstream health', 'dash.healthNever': 'Not checked yet', 'dash.healthLast': 'Last', 'dash.healthOk': 'ok', 'dash.healthBad': 'down', 'dash.healthRun': 'Check now',
   'up.scheduled': 'scheduled', 'up.runCheck': 'Check now',
-  'nav.cert': 'Certificate', 'cert.title': 'Certificate', 'cert.subtitle': "Issue a Let's Encrypt certificate for this server, shared by panel, subscription and data plane, renewed automatically.",
+  'nav.cert': 'Certificate', 'cert.title': 'Certificate', 'cert.subtitle': "Three sources: auto-issue with Let's Encrypt when you have a domain, generate a self-signed one when you do not, or point at a certificate already on the server. Line inbounds always use it; panel and subscription HTTPS are opt-in.",
   'cert.current': 'Current certificate', 'cert.subject': 'Domain', 'cert.issuer': 'Issuer', 'cert.validity': 'Validity', 'cert.daysLeft': 'Remaining', 'cert.path': 'Path',
   'cert.none': 'No certificate', 'cert.selfSigned': 'self-signed', 'cert.expired': 'expired', 'cert.expiring': 'expires in {n} days', 'cert.valid': 'valid',
   'cert.usePanel': 'Panel', 'cert.useSub': 'Subscription', 'cert.selfsign': 'Generate self-signed', 'cert.hosts': 'Domains / IPs (comma separated)', 'cert.hostsHelp': 'Self-signed certificates are used by the data plane only (subscriptions get allow-insecure automatically); panel and subscription stay on HTTP at http://IP:port. For IP-only servers',
@@ -485,6 +494,15 @@ const en = {
   'dash.localRunning': '{n} running here',
   'set.pathHelp': 'Takes effect immediately; the browser jumps to the new address', 'set.subPathHelp': 'Immediate; existing subscription URLs stop working and must be re-sent', 'set.pathChanged': 'Panel path changed to {p}, redirecting…',
   'user.subJson': 'sing-box subscription',
+  'cert.usage': 'Certificate usage', 'cert.useLines': 'Line inbounds', 'cert.on': 'in use', 'cert.off': 'not set',
+  'cert.usageHelp': 'Line inbounds (clients connecting to nodes) always use this certificate; whether the panel and subscription serve HTTPS is up to the checkboxes on the right.',
+  'cert.source': 'Certificate source', 'cert.srcAcme': 'Domain (auto-issue)', 'cert.srcSelf': 'No domain (self-signed)', 'cert.srcExternal': 'Existing certificate',
+  'cert.applyTo': 'Apply to', 'cert.applyPanelHelp': 'Serve the panel over HTTPS; takes effect after restarting m-ui', 'cert.applySubHelp': 'Serve subscriptions over HTTPS; applies immediately (users need the new URL)',
+  'cert.applySave': 'Save usage', 'cert.applied': 'Certificate usage updated',
+  'cert.selfHelp': 'No domain? Generate a self-signed certificate for the server IP: line inbounds stay encrypted and subscriptions automatically carry "allow insecure" so clients connect fine. Self-signed certificates are not trusted, so the panel and subscription stay on HTTP by default.',
+  'cert.externalHelp': 'Use a certificate that already exists on this server (certbot, nginx, a commercial one…). Only the paths are stored, files are not copied; renew by overwriting them and the panel and subscription pick it up automatically.',
+  'cert.certPath': 'Certificate file (fullchain)', 'cert.keyPath': 'Private key file', 'cert.pathHelp': 'Absolute path on this server; m-ui must be able to read it',
+  'cert.useExternal': 'Use this certificate', 'cert.externalOk': 'Certificate applied', 'cert.needHosts': 'Enter a domain or IP', 'cert.needPaths': 'Enter both certificate and key paths',
 };
 
 const dicts = { zh, en };

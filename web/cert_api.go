@@ -22,9 +22,14 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		return
 	}
+	certFile, _ := s.run.DataPlaneCert()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"info":   s.run.CertInfo(),
-		"status": s.run.CertStatus(),
+		"info":       s.run.CertInfo(),
+		"status":     s.run.CertStatus(),
+		"source":     s.run.CertSource(),
+		"applyPanel": certFile != "" && s.setting("webCertFile") == certFile,
+		"applySub":   certFile != "" && s.setting("subCertFile") == certFile,
+		"certPath":   certFile,
 		"settings": map[string]interface{}{
 			"acmeDomain": s.setting("acmeDomain"), "acmeEmail": s.setting("acmeEmail"), "acmeMethod": s.setting("acmeMethod"),
 			"hasCfToken": s.setting("acmeCfToken") != "", "acmeStaging": s.setting("acmeStaging") == "true",
@@ -92,7 +97,10 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			break
 		}
-		var req struct{ Hosts string }
+		var req struct {
+			Hosts                string
+			ApplyPanel, ApplySub bool
+		}
 		json.NewDecoder(r.Body).Decode(&req)
 		var hosts []string
 		for _, h := range strings.Split(req.Hosts, ",") {
@@ -100,11 +108,46 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 				hosts = append(hosts, h)
 			}
 		}
-		if err := s.run.SelfSign(hosts); err != nil {
+		if err := s.run.SelfSign(hosts, req.ApplyPanel, req.ApplySub); err != nil {
 			badRequest(w, err)
 			return
 		}
+		s.saveSettings(map[string]string{"acmeApplyPanel": boolStr(req.ApplyPanel), "acmeApplySub": boolStr(req.ApplySub)})
 		s.audit(r, "cert", "selfsign", hosts)
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+	case "external":
+		if r.Method != http.MethodPost {
+			break
+		}
+		var req struct {
+			CertFile, KeyFile    string
+			ApplyPanel, ApplySub bool
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if err := s.run.UseExternalCert(req.CertFile, req.KeyFile, req.ApplyPanel, req.ApplySub); err != nil {
+			badRequest(w, err)
+			return
+		}
+		s.saveSettings(map[string]string{"acmeApplyPanel": boolStr(req.ApplyPanel), "acmeApplySub": boolStr(req.ApplySub)})
+		s.audit(r, "cert", "external", req.CertFile)
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+	case "apply":
+		if r.Method != http.MethodPost {
+			break
+		}
+		var req struct{ ApplyPanel, ApplySub bool }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if err := s.run.ApplyCertTargets(req.ApplyPanel, req.ApplySub); err != nil {
+			badRequest(w, err)
+			return
+		}
+		s.audit(r, "cert", "apply", map[string]bool{"panel": req.ApplyPanel, "sub": req.ApplySub})
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	default:
 		http.NotFound(w, r)

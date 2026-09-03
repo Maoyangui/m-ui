@@ -151,10 +151,12 @@ Each server, including the master, can have a **traffic ratio**: traffic through
 
 ### Certificates
 
-- Let's Encrypt via HTTP-01 (port 80 must be reachable) or Cloudflare DNS-01 (API token, no port 80 needed). DNS and port are pre-checked before issuing.
-- Auto-renewal; panel / subscription / data plane reload the new cert without restarting.
-- No domain: one-click self-signed cert.
-- Nodes issue their own certificates.
+Three sources:
+- **With a domain**: Let's Encrypt via HTTP-01 (port 80 reachable) or Cloudflare DNS-01 (API token, no port 80). DNS and port are pre-checked; auto-renewal reloads everything without a restart.
+- **Without a domain**: self-signed certificate for the server IP. Used for line inbounds only by default; subscriptions automatically carry "allow insecure" so clients connect, while panel and subscription stay on HTTP (browsers and clients reject self-signed HTTPS).
+- **Existing certificate**: point at a certificate and key already on the server (certbot, nginx, commercial…). Only paths are stored; they are checked for a matching, unexpired pair. Renew by overwriting the files.
+
+Line inbounds always use the current certificate; **panel HTTPS and subscription HTTPS are separate checkboxes** (subscription applies immediately, panel needs an m-ui restart). Nodes keep their own certificates.
 
 ### Backup and migration
 

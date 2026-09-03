@@ -141,49 +141,80 @@ func (r *Runner) issueCert() error {
 	r.setSetting("certFile", certFile)
 	r.setSetting("keyFile", keyFile)
 	r.setSetting("acmeDomain", domain)
-	r.afterCertChange(certFile, keyFile, domain, true)
+	r.setSetting("certSource", "acme")
+	r.afterCertChange(certFile, keyFile, domain,
+		!strings.EqualFold(r.setting("acmeApplyPanel"), "false"),
+		!strings.EqualFold(r.setting("acmeApplySub"), "false"))
 	r.notifier.Event("tgOnCert", fmt.Sprintf("🟢 <b>证书已签发</b>:%s\n到期 %s", notify.Esc(domain), res.NotAfter.Format("2006-01-02")))
 	return nil
 }
 
-// afterCertChange 把新证书套用到面板/订阅(按设置;applyServers=false 时只给数据面用)并重载数据面。
-// 自签证书不套到面板/订阅:客户端拉 HTTPS 订阅会因证书不受信任而失败,无域名场景订阅走 http://IP:端口。
-func (r *Runner) afterCertChange(certFile, keyFile, domain string, applyServers bool) {
+// DataPlaneCert 当前线路入站(数据面)用的证书与私钥路径。
+func (r *Runner) DataPlaneCert() (string, string) { return r.certPaths(r.setting("webDomain")) }
+
+// CertSource 证书来源:acme(Let's Encrypt 签发)/ selfsign(自签)/ external(服务器上已有)。
+func (r *Runner) CertSource() string {
+	src := r.setting("certSource")
+	if src != "" {
+		return src
+	}
+	if info := r.CertInfo(); info.Exists && info.SelfSigned { // 老库没有该设置,按证书本身推断
+		return "selfsign"
+	}
+	if r.setting("acmeDomain") != "" {
+		return "acme"
+	}
+	return ""
+}
+
+// afterCertChange 证书变更后:线路入站(数据面)始终换用新证书;面板与订阅按 applyPanel / applySub 开关,
+// 取消勾选会清掉对应设置(订阅立即重启生效,面板监听器需重启 m-ui)。
+func (r *Runner) afterCertChange(certFile, keyFile, domain string, applyPanel, applySub bool) {
 	if domain != "" && r.setting("webDomain") == "" {
 		r.setSetting("webDomain", domain)
 	}
-	subChanged := false
-	if applyServers && !strings.EqualFold(r.setting("acmeApplySub"), "false") {
-		if r.setting("subCertFile") != certFile || r.setting("subKeyFile") != keyFile {
-			subChanged = r.setting("subCertFile") == "" // 从 http 变 https 需重启监听
-			r.setSetting("subCertFile", certFile)
-			r.setSetting("subKeyFile", keyFile)
-			subChanged = true
-		}
+
+	wantSubCert, wantSubKey := "", ""
+	if applySub {
+		wantSubCert, wantSubKey = certFile, keyFile
 	}
-	if applyServers && !strings.EqualFold(r.setting("acmeApplyPanel"), "false") {
-		if r.setting("webCertFile") == "" {
-			r.cert.logf("面板当前为 http,已写入证书路径,重启 m-ui 后面板改为 https")
-		}
-		r.setSetting("webCertFile", certFile)
-		r.setSetting("webKeyFile", keyFile)
-	}
-	if subChanged {
+	if r.setting("subCertFile") != wantSubCert || r.setting("subKeyFile") != wantSubKey {
+		r.setSetting("subCertFile", wantSubCert)
+		r.setSetting("subKeyFile", wantSubKey)
 		if err := r.RestartSub(); err != nil {
 			r.cert.logf("重启订阅服务失败: %v", err)
+		} else if wantSubCert == "" {
+			r.cert.logf("订阅已改为 HTTP(用户需重新获取订阅地址)")
 		} else {
-			r.cert.logf("订阅服务已用新证书重启")
+			r.cert.logf("订阅服务已用该证书重启(HTTPS)")
 		}
 	}
+
+	wantWebCert, wantWebKey := "", ""
+	if applyPanel {
+		wantWebCert, wantWebKey = certFile, keyFile
+	}
+	if r.setting("webCertFile") != wantWebCert || r.setting("webKeyFile") != wantWebKey {
+		r.setSetting("webCertFile", wantWebCert)
+		r.setSetting("webKeyFile", wantWebKey)
+		if wantWebCert == "" {
+			r.cert.logf("面板已取消 HTTPS,重启 m-ui 后生效(地址改回 http://)")
+		} else {
+			r.cert.logf("面板已启用 HTTPS,重启 m-ui 后生效")
+		}
+	}
+
 	if err := r.ReloadAllForce(); err != nil { // 证书文件内容变了,配置文本不变也必须重启
 		r.cert.logf("数据面重载失败: %v", err)
 	} else {
-		r.cert.logf("数据面已用新证书重载")
+		r.cert.logf("线路入站已用新证书重载")
 	}
 }
 
-// SelfSign 生成自签证书到固定路径并套用(测试或纯 IP 场景)。
-func (r *Runner) SelfSign(hosts []string) error {
+// SelfSign 生成自签证书(无域名 / 纯 IP 场景)。默认只给线路入站用:
+// 自签证书不被系统信任,面板与订阅走 HTTPS 会让浏览器和客户端报错;
+// 订阅链接会自动带"允许不安全",客户端打开该开关即可连上。
+func (r *Runner) SelfSign(hosts []string, applyPanel, applySub bool) error {
 	if len(hosts) == 0 {
 		return errors.New("至少填一个域名或 IP")
 	}
@@ -193,9 +224,55 @@ func (r *Runner) SelfSign(hosts []string) error {
 	}
 	r.setSetting("certFile", certFile)
 	r.setSetting("keyFile", keyFile)
-	r.cert.logf("自签证书已生成: %s(只用于数据面;订阅与面板保持 HTTP,客户端需允许不安全)", certFile)
-	r.afterCertChange(certFile, keyFile, "", false)
+	r.setSetting("certSource", "selfsign")
+	r.cert.logf("自签证书已生成: %s(用于线路入站;订阅链接会自动带允许不安全标记)", certFile)
+	r.afterCertChange(certFile, keyFile, "", applyPanel, applySub)
 	return nil
+}
+
+// UseExternalCert 使用服务器上已有的证书(如 certbot / nginx / 商业证书):只记录路径,不复制文件,
+// 证书续期后覆盖原文件即可,面板与订阅会自动换用(线路入站在下次重载时生效)。
+func (r *Runner) UseExternalCert(certFile, keyFile string, applyPanel, applySub bool) error {
+	certFile, keyFile = strings.TrimSpace(certFile), strings.TrimSpace(keyFile)
+	if certFile == "" || keyFile == "" {
+		return errors.New("请填写证书与私钥的完整路径")
+	}
+	if err := certutil.Verify(certFile, keyFile); err != nil {
+		return err
+	}
+	info := acme.Info(certFile)
+	if info.Exists && info.DaysLeft < 0 {
+		return fmt.Errorf("该证书已于 %s 过期", info.NotAfter.Format("2006-01-02"))
+	}
+	r.setSetting("certFile", certFile)
+	r.setSetting("keyFile", keyFile)
+	r.setSetting("certSource", "external")
+	domain := ""
+	if len(info.DNSNames) > 0 {
+		domain = info.DNSNames[0]
+	}
+	r.cert.logf("已使用外部证书 %s(%s,剩余 %d 天)", certFile, info.Subject, info.DaysLeft)
+	r.afterCertChange(certFile, keyFile, domain, applyPanel, applySub)
+	return nil
+}
+
+// ApplyCertTargets 只改套用目标(面板 / 订阅 HTTPS),不换证书。
+func (r *Runner) ApplyCertTargets(applyPanel, applySub bool) error {
+	certFile, keyFile := r.DataPlaneCert()
+	if (applyPanel || applySub) && !acme.Info(certFile).Exists {
+		return errors.New("当前没有可用证书,请先签发、自签或填写已有证书")
+	}
+	r.setSetting("acmeApplyPanel", boolText(applyPanel))
+	r.setSetting("acmeApplySub", boolText(applySub))
+	r.afterCertChange(certFile, keyFile, "", applyPanel, applySub)
+	return nil
+}
+
+func boolText(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // RestartSub 用当前设置重启订阅服务(端口/证书变更后)。
