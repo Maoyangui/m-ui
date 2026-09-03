@@ -34,7 +34,7 @@ import (
 var SyncedSettings = []string{
 	"timezone",
 	"upstreamTestUrl", "subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subUpdates",
-	"subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice",
+	"subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice", "subShareEnabled",
 }
 
 // Snapshot 是主机下发给副机的完整配置。

@@ -93,6 +93,8 @@ type User struct {
 	Desc        string          `json:"desc"`
 	CreatedAt   int64           `json:"createdAt" gorm:"default:0;not null"`
 	OnlineAt    int64           `json:"onlineAt" gorm:"default:0;not null"`
+	ShareToken  string          `json:"shareToken" gorm:"index"` // 临时共享订阅令牌,空=未开启
+	ShareAt     int64           `json:"shareAt"`                 // 令牌生成时间
 }
 
 // Plan 套餐:配额/时长/设备/限速/线路的模板,用于建号、续费与批量操作。

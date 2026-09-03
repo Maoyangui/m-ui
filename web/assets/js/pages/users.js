@@ -126,6 +126,7 @@ async function showDetail(id) {
       <h3>${t('user.subscription')}</h3>
       <div class="sub-box"><code>${esc(links.clash)}</code><button class="btn sm" data-act="user.copyText" data-id="${esc(links.clash)}">${t('common.copy')}</button></div>
       <div class="sub-box"><code>${esc(links.link)}</code><button class="btn sm" data-act="user.copyText" data-id="${esc(links.link)}">${t('common.copy')}</button></div>
+      ${links.share ? `<div class="sub-box">${badge(t('user.share'), 'warn')}<code>${esc(links.share)}</code><button class="btn sm" data-act="user.copyText" data-id="${esc(links.share)}">${t('common.copy')}</button><button class="btn sm danger" data-act="user.unshare" data-id="${id}">${t('user.unshare')}</button></div>` : ''}
       <img class="qr" src="${qrUrl(id, 'clash')}" alt="QR" title="${t('user.subClash')}">
     </section>
     <section>
@@ -369,6 +370,12 @@ registerActions({
     const u = state.users.find(x => x.id === Number(id));
     if (!await confirm(t('user.kickConfirm', { name: u.name }))) return;
     try { const r = await post(`users/${id}/kick`); toast(t('user.kicked', { n: r.closed }), 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  'user.unshare': async id => {
+    const u = state.users.find(x => x.id === Number(id));
+    if (!await confirm(t('user.unshareConfirm', { name: u.name }), { danger: true, okText: t('user.unshare') })) return;
+    try { await del(`users/${id}/share`); await load('users'); renderRows(); showDetail(Number(id)); toast(t('user.unshared'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
   'user.del': async id => {

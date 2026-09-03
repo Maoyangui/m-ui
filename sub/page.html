@@ -30,6 +30,10 @@ h2{margin:0 0 .7rem;font-size:.95rem}
 .app:hover{border-color:var(--primary)}.app b{display:block;font-size:.92rem}.app span{display:block;color:var(--muted);font-size:.74rem;margin-top:.1rem}
 .link{display:flex;gap:.5rem;align-items:center;margin-top:.55rem}.link code{flex:1;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.76rem;word-break:break-all;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.5rem .6rem}
 button{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:8px;padding:.45rem .8rem;font:inherit;font-size:.82rem;cursor:pointer;white-space:nowrap}button:hover{border-color:var(--primary)}
+button.primary{background:var(--primary);border-color:var(--primary);color:#fff}button.primary:hover{filter:brightness(1.08)}
+button.danger{color:var(--danger)}button.danger:hover{border-color:var(--danger)}
+.hint{color:var(--muted);font-size:.8rem;margin:.5rem 0 0}
+.share form{display:flex;align-items:center;gap:.7rem;margin:.6rem 0 0}.share form .hint{margin:0}
 .qrs{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:.9rem}.qrs figure{margin:0;text-align:center;font-size:.78rem;color:var(--muted)}.qrs img{width:150px;height:150px;border-radius:10px;border:1px solid var(--border);background:#fff;display:block;margin-bottom:.3rem}
 .lines{display:flex;flex-direction:column;gap:.35rem}.line{display:flex;justify-content:space-between;align-items:center;font-size:.88rem;padding:.45rem .6rem;border-radius:8px;background:var(--bg)}.line .tags{display:flex;gap:.3rem}
 .tag{font-size:.68rem;padding:.08rem .4rem;border-radius:5px;border:1px solid var(--border);color:var(--muted);text-transform:uppercase}
@@ -72,6 +76,17 @@ button{border:1px solid var(--border);background:var(--card);color:var(--text);b
     </div>
   </div>
 
+  {{if .ShareOn}}<div class="card share" id="share">
+    <h2>{{if eq .Lang "zh"}}临时共享{{else}}Share temporarily{{end}}{{if .ShareURL}} <span class="badge ok">{{if eq .Lang "zh"}}已开启{{else}}on{{end}}</span>{{end}}</h2>
+    {{if .ShareURL}}
+    <div class="link"><code id="l4">{{.ShareURL}}</code><button onclick="cp('l4')">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button></div>
+    <form method="post" action="?share=off"><button class="danger">{{if eq .Lang "zh"}}取消共享{{else}}Stop sharing{{end}}</button><span class="hint">{{if eq .Lang "zh"}}取消后立即失效{{else}}Stops working right away{{end}}</span></form>
+    {{else}}
+    <p class="hint">{{if eq .Lang "zh"}}生成一条临时地址给别人用,随时可取消。{{else}}Create a temporary link for someone else. Cancel any time.{{end}}</p>
+    <form method="post" action="?share=on"><button class="primary">{{if eq .Lang "zh"}}生成链接{{else}}Create link{{end}}</button></form>
+    {{end}}
+  </div>{{end}}
+
   {{if .Lines}}<div class="card">
     <details class="nodes"><summary><h2>{{if eq .Lang "zh"}}节点{{else}}Nodes{{end}} <span class="badge">{{len .Lines}}</span></h2><span class="chev">{{if eq .Lang "zh"}}展开{{else}}Show{{end}} ▾</span></summary>
     <div class="lines">{{range .Lines}}<div class="line"><span>{{.Name}}</span><span class="tags"><span class="tag">{{.Protocol}}</span>{{if .TLS}}<span class="tag">{{.TLS}}</span>{{end}}{{if .Transport}}<span class="tag">{{.Transport}}</span>{{end}}</span></div>{{end}}</div></details>
@@ -83,6 +98,11 @@ button{border:1px solid var(--border);background:var(--card);color:var(--text);b
 <script>
 function cp(id){var t=document.getElementById(id).textContent;var done=function(){var e=document.getElementById('toast');e.textContent='{{if eq .Lang "zh"}}已复制{{else}}Copied{{end}}';e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)};
 if(navigator.clipboard){navigator.clipboard.writeText(t).then(done)}else{var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();done()}}
+document.addEventListener('submit',function(e){var f=e.target,card=document.getElementById('share');
+if(!card||!card.contains(f))return;e.preventDefault();var b=f.querySelector('button');b.disabled=true;
+fetch(f.action,{method:'POST',credentials:'same-origin'}).then(function(r){return r.text()}).then(function(h){
+var n=new DOMParser().parseFromString(h,'text/html').querySelector('#share');
+if(n){card.innerHTML=n.innerHTML}else{location.reload()}}).catch(function(){location.reload()})});
 </script>
 </body>
 </html>

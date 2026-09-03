@@ -88,6 +88,8 @@ type pageData struct {
 	UpdateHours            int
 	SubLink, SubClash      string
 	SubJSON                string // sing-box 远程配置(SFA / SFI)
+	ShareOn                bool   // 是否显示"临时共享"卡片
+	ShareURL               string // 已生成的共享地址(空=未生成)
 	QRClash, QRLink        template.URL
 	Imports                []importLink
 	Lines                  []pageLine
@@ -123,6 +125,12 @@ func buildPageData(r *http.Request, subPath string, user model.User, lines []mod
 		d.ExpiryText = time.Unix(user.Expiry, 0).In(loc).Format("2006-01-02")
 		d.DaysLeft = int(math.Ceil(float64(user.Expiry-now) / 86400))
 		d.Expired = user.Expiry < now
+	}
+	if opt.Share {
+		d.ShareOn = true
+		if user.ShareToken != "" {
+			d.ShareURL = publicBase(r, subPath, user.ShareToken)
+		}
 	}
 	if user.AutoReset && user.NextReset > 0 {
 		d.ResetText = time.Unix(user.NextReset, 0).In(loc).Format("2006-01-02")

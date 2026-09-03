@@ -26,6 +26,8 @@ type Options struct {
 	External []ExtItem
 	// TZ 面板时区名(设置 timezone),落地页的日期按它显示。
 	TZ string
+	// Share 是否允许用户在订阅页自助生成临时共享地址(设置 subShareEnabled)。
+	Share bool
 }
 
 // ExtItem 是一组外部节点。

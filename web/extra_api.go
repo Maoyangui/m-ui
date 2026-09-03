@@ -413,6 +413,18 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 		s.audit(r, "user", "kick", u.Name)
 		writeJSON(w, http.StatusOK, map[string]int{"closed": n})
 		return true
+	case "share":
+		if r.Method != http.MethodDelete {
+			break
+		}
+		if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).
+			Updates(map[string]interface{}{"share_token": "", "share_at": 0}).Error; err != nil {
+			badRequest(w, err)
+			return true
+		}
+		s.audit(r, "user", "unshare", u.Name)
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+		return true
 	case "sub":
 		writeJSON(w, http.StatusOK, s.subLinks(u))
 		return true
@@ -446,8 +458,13 @@ func (s *Server) subLinks(u model.User) map[string]string {
 	if host == "" {
 		host = "<服务器IP或域名>"
 	}
-	base := fmt.Sprintf("%s://%s:%d%s%s", scheme, host, s.settingInt("subPort", 2056), s.subPath(), u.Name)
-	return map[string]string{"link": base, "clash": base + "?format=clash", "json": base + "?format=json"}
+	root := fmt.Sprintf("%s://%s:%d%s", scheme, host, s.settingInt("subPort", 2056), s.subPath())
+	base := root + u.Name
+	out := map[string]string{"link": base, "clash": base + "?format=clash", "json": base + "?format=json"}
+	if u.ShareToken != "" {
+		out["share"] = root + u.ShareToken // 用户自助生成的临时共享地址
+	}
+	return out
 }
 
 // subPath 订阅路径,始终以 / 开头结尾(默认 /sub/)。

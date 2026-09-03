@@ -64,6 +64,7 @@ func (s *Server) options() Options {
 		Entries:      entries,
 		Insecure:     insecure,
 		TZ:           s.setting("timezone"),
+		Share:        s.shareSelfService(),
 	}
 }
 
@@ -251,10 +252,23 @@ func (s *Server) handle() http.HandlerFunc {
 			return
 		}
 
+		// 先按用户名查;查不到再按临时共享令牌查
 		var user model.User
+		shared := false
 		if err := s.db.Where("name = ? AND enabled = ?", name, true).First(&user).Error; err != nil {
-			s.log(r, name, 404)
+			if !s.shareEnabled() || s.db.Where("share_token = ? AND enabled = ?", name, true).First(&user).Error != nil {
+				s.log(r, name, false, 404)
+				http.NotFound(w, r)
+				return
+			}
+			shared = true // 共享地址:只发原始订阅,不出订阅页/二维码,也不能改共享状态
+		}
+		if shared && (wantQR || r.Method == http.MethodPost) {
 			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodPost {
+			s.handleShare(w, r, subPath, user)
 			return
 		}
 		if wantQR {
@@ -269,9 +283,9 @@ func (s *Server) handle() http.HandlerFunc {
 		opt := s.options()
 		opt.External = s.externalFor(user.Id)
 		// 浏览器打开订阅地址 → 订阅页(用量/到期/一键导入/二维码);客户端拉取 → 原始订阅
-		if !strings.EqualFold(s.setting("subPageEnabled"), "false") && WantsPage(r) {
+		if !shared && !strings.EqualFold(s.setting("subPageEnabled"), "false") && WantsPage(r) {
 			s.servePage(w, r, subPath, user, lines, opt)
-			s.log(r, name, 200)
+			s.log(r, user.Name, false, 200)
 			return
 		}
 		format := r.URL.Query().Get("format")
@@ -281,7 +295,7 @@ func (s *Server) handle() http.HandlerFunc {
 		case "clash":
 			out, err := BuildClashSub(user, lines, opt)
 			if err != nil {
-				s.log(r, name, 500)
+				s.log(r, user.Name, shared, 500)
 				http.Error(w, "生成失败", http.StatusInternalServerError)
 				return
 			}
@@ -289,7 +303,7 @@ func (s *Server) handle() http.HandlerFunc {
 		case "json", "sing-box", "singbox", "sfa":
 			out, err := BuildSingBoxSub(user, lines, opt)
 			if err != nil {
-				s.log(r, name, 500)
+				s.log(r, user.Name, shared, 500)
 				http.Error(w, "生成失败: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -305,12 +319,12 @@ func (s *Server) handle() http.HandlerFunc {
 		if r.Method != http.MethodHead {
 			_, _ = w.Write([]byte(res.Body))
 		}
-		s.log(r, name, 200)
+		s.log(r, user.Name, shared, 200)
 	}
 }
 
 // log 记录订阅访问,供面板按用户汇总(替代 nginx 日志 + 汇总脚本)。
-func (s *Server) log(r *http.Request, user string, status int) {
+func (s *Server) log(r *http.Request, user string, shared bool, status int) {
 	ip := r.Header.Get("X-Forwarded-For")
 	if ip != "" {
 		ip = strings.TrimSpace(strings.Split(ip, ",")[0])
@@ -320,9 +334,12 @@ func (s *Server) log(r *http.Request, user string, status int) {
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "link"
-		if WantsPage(r) {
+		if !shared && WantsPage(r) { // 共享地址从不出页面
 			format = "page"
 		}
+	}
+	if shared {
+		format += "-share" // 后台一眼分辨是共享地址拉的
 	}
 	entry := model.SubLog{
 		Ts: time.Now().Unix(), User: user, Ip: ip,
