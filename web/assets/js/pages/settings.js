@@ -16,11 +16,11 @@ const groups = () => [
   { id: 'panel', title: t('set.panel'), restart: true, fields: [
     ['webDomain', t('set.webDomain'), 'text', t('set.webDomainHelp')],
     ['webListen', t('set.listen'), 'text'], ['webPort', t('set.port'), 'number'], ['webPath', t('set.path'), 'text', t('set.pathHelp')],
-    ['webCertFile', t('set.cert'), 'text'], ['webKeyFile', t('set.key'), 'text'],
+    ['webCertFile', t('set.cert'), 'text', t('set.certManaged')], ['webKeyFile', t('set.key'), 'text'],
   ]},
   { id: 'sub', title: t('set.sub'), restart: true, fields: [
     ['subListen', t('set.listen'), 'text'], ['subPort', t('set.port'), 'number'], ['subPath', t('set.path'), 'text', t('set.subPathHelp')],
-    ['subCertFile', t('set.cert'), 'text'], ['subKeyFile', t('set.key'), 'text'],
+    ['subCertFile', t('set.cert'), 'text', t('set.certManaged')], ['subKeyFile', t('set.key'), 'text'],
     ['subProfileTitle', t('set.subTitle'), 'text'], ['subUpdates', t('set.subUpdates'), 'number'],
     ['subEncode', t('set.subEncode'), 'bool'], ['subShowNotice', t('set.subNotice'), 'bool'],
     ['subInsecure', t('set.subInsecure'), 'select', t('set.subInsecureHelp'), [['', t('set.subInsecureAuto')], ['true', t('common.yes')], ['false', t('common.no')]]],

@@ -136,7 +136,7 @@ const zh = {
   'nav.cert': '证书', 'cert.title': '证书', 'cert.subtitle': "三种来源任选:有域名用 Let's Encrypt 自动签发、无域名生成自签、或直接用服务器上已有的证书。线路入站始终使用它,面板与订阅是否走 HTTPS 可勾选。",
   'cert.current': '当前证书', 'cert.subject': '域名', 'cert.issuer': '签发者', 'cert.validity': '有效期', 'cert.daysLeft': '剩余', 'cert.path': '路径',
   'cert.none': '尚无证书', 'cert.selfSigned': '自签', 'cert.expired': '已过期', 'cert.expiring': '{n} 天后到期', 'cert.valid': '有效',
-  'cert.usePanel': '面板', 'cert.useSub': '订阅', 'cert.selfsign': '生成自签证书', 'cert.hosts': '域名 / IP(逗号分隔)', 'cert.hostsHelp': '自签只用于数据面(订阅会自动带 allow-insecure);订阅与面板保持 HTTP,地址为 http://IP:端口。适合无域名的纯 IP 服务器',
+  'cert.usePanel': '面板', 'cert.useSub': '订阅', 'cert.selfsign': '生成自签证书', 'cert.hosts': '证书包含的地址(留空自动)', 'cert.hostsHelp': '留空即用本机自动探测到的公网 IP;要额外包含别的 IP 或域名再手填,逗号分隔',
   'cert.issue': '签发 / 续期', 'cert.running': '签发中', 'cert.lastOk': '上次成功', 'cert.lastFailed': '上次失败',
   'cert.domainHelp': '必须已解析到本机公网 IP', 'cert.email': '邮箱', 'cert.emailHelp': '到期提醒用,可留空',
   'cert.method': '验证方式', 'cert.methodHttp': 'HTTP(临时监听 80 端口)', 'cert.methodCf': 'DNS(Cloudflare API)',
@@ -246,10 +246,12 @@ const zh = {
   'cert.source': '证书来源', 'cert.srcAcme': '有域名(自动签发)', 'cert.srcSelf': '无域名(自签)', 'cert.srcExternal': '已有证书',
   'cert.applyTo': '应用到', 'cert.applyPanelHelp': '面板改用 HTTPS,重启 m-ui 后生效', 'cert.applySubHelp': '订阅地址改用 HTTPS,保存后立即生效(用户需重新获取地址)',
   'cert.applySave': '保存用途', 'cert.applied': '证书用途已更新',
-  'cert.selfHelp': '没有域名时用服务器 IP 生成自签证书。订阅里每个节点都会自动写好"允许不安全"(链接 insecure=1、Clash skip-cert-verify、sing-box insecure),用户导入订阅即可直接连,不需要在客户端手动开任何开关。自签证书不被系统信任,所以面板与订阅默认保持 HTTP。',
+  'cert.selfHelp': '没有域名时用服务器 IP 生成自签证书。订阅里每个节点都会自动写好"允许不安全"(链接 insecure=1、Clash skip-cert-verify、sing-box insecure)。',
   'cert.externalHelp': '使用服务器上已有的证书(certbot、宝塔、nginx 或商业证书都可以),只记录路径不复制文件;证书续期后覆盖原文件即可,面板与订阅会自动换用。',
   'cert.certPath': '证书文件(fullchain)', 'cert.keyPath': '私钥文件', 'cert.pathHelp': '填服务器上的绝对路径,m-ui 需要有读取权限',
   'cert.useExternal': '使用该证书', 'cert.externalOk': '已使用该证书', 'cert.needHosts': '请填写域名或 IP', 'cert.needPaths': '请填写证书与私钥路径',
+  'cert.otherCert': '另一张证书', 'cert.otherCertNote': '注意:设置页里手填了别的证书路径,面板 / 订阅用的不是这张证书。勾上下面的用途并保存,即可统一改用当前证书。',
+  'set.certManaged': '一般不用手填:在证书页勾选"用于面板 / 订阅 HTTPS"会自动写入这里',
 };
 
 const en = {
@@ -389,7 +391,7 @@ const en = {
   'nav.cert': 'Certificate', 'cert.title': 'Certificate', 'cert.subtitle': "Three sources: auto-issue with Let's Encrypt when you have a domain, generate a self-signed one when you do not, or point at a certificate already on the server. Line inbounds always use it; panel and subscription HTTPS are opt-in.",
   'cert.current': 'Current certificate', 'cert.subject': 'Domain', 'cert.issuer': 'Issuer', 'cert.validity': 'Validity', 'cert.daysLeft': 'Remaining', 'cert.path': 'Path',
   'cert.none': 'No certificate', 'cert.selfSigned': 'self-signed', 'cert.expired': 'expired', 'cert.expiring': 'expires in {n} days', 'cert.valid': 'valid',
-  'cert.usePanel': 'Panel', 'cert.useSub': 'Subscription', 'cert.selfsign': 'Generate self-signed', 'cert.hosts': 'Domains / IPs (comma separated)', 'cert.hostsHelp': 'Self-signed certificates are used by the data plane only (subscriptions get allow-insecure automatically); panel and subscription stay on HTTP at http://IP:port. For IP-only servers',
+  'cert.usePanel': 'Panel', 'cert.useSub': 'Subscription', 'cert.selfsign': 'Generate self-signed', 'cert.hosts': 'Addresses in the certificate (auto if empty)', 'cert.hostsHelp': 'Leave empty to use the auto-detected public IP of this server; add more IPs or domains here (comma separated) if needed',
   'cert.issue': 'Issue / renew', 'cert.running': 'issuing', 'cert.lastOk': 'last success', 'cert.lastFailed': 'last failed',
   'cert.domainHelp': 'Must already resolve to this server\'s public IP', 'cert.email': 'Email', 'cert.emailHelp': 'For expiry notices, optional',
   'cert.method': 'Validation', 'cert.methodHttp': 'HTTP (temporary listener on port 80)', 'cert.methodCf': 'DNS (Cloudflare API)',
@@ -499,10 +501,12 @@ const en = {
   'cert.source': 'Certificate source', 'cert.srcAcme': 'Domain (auto-issue)', 'cert.srcSelf': 'No domain (self-signed)', 'cert.srcExternal': 'Existing certificate',
   'cert.applyTo': 'Apply to', 'cert.applyPanelHelp': 'Serve the panel over HTTPS; takes effect after restarting m-ui', 'cert.applySubHelp': 'Serve subscriptions over HTTPS; applies immediately (users need the new URL)',
   'cert.applySave': 'Save usage', 'cert.applied': 'Certificate usage updated',
-  'cert.selfHelp': 'No domain? Generate a self-signed certificate for the server IP. Every node in the subscription already carries the allow-insecure flag (insecure=1 in links, skip-cert-verify in Clash, insecure in sing-box), so users just import and connect without touching any client switch. Self-signed certificates are not trusted, so the panel and subscription stay on HTTP by default.',
+  'cert.selfHelp': 'No domain? Generate a self-signed certificate for the server IP. Every node in the subscription already carries the allow-insecure flag (insecure=1 in links, skip-cert-verify in Clash, insecure in sing-box).',
   'cert.externalHelp': 'Use a certificate that already exists on this server (certbot, nginx, a commercial one…). Only the paths are stored, files are not copied; renew by overwriting them and the panel and subscription pick it up automatically.',
   'cert.certPath': 'Certificate file (fullchain)', 'cert.keyPath': 'Private key file', 'cert.pathHelp': 'Absolute path on this server; m-ui must be able to read it',
   'cert.useExternal': 'Use this certificate', 'cert.externalOk': 'Certificate applied', 'cert.needHosts': 'Enter a domain or IP', 'cert.needPaths': 'Enter both certificate and key paths',
+  'cert.otherCert': 'other cert', 'cert.otherCertNote': 'Heads-up: a different certificate path is set on the Settings page, so the panel / subscription is not using this certificate. Tick the usage boxes and save to switch them over.',
+  'set.certManaged': 'Usually leave empty: ticking "use for panel / subscription HTTPS" on the Certificate page fills this in',
 };
 
 const dicts = { zh, en };

@@ -215,19 +215,47 @@ func (r *Runner) afterCertChange(certFile, keyFile, domain string, applyPanel, a
 // 自签证书不被系统信任,面板与订阅走 HTTPS 会让浏览器和客户端报错;
 // 订阅链接会自动带"允许不安全",客户端打开该开关即可连上。
 func (r *Runner) SelfSign(hosts []string, applyPanel, applySub bool) error {
-	if len(hosts) == 0 {
-		return errors.New("至少填一个域名或 IP")
+	if len(hosts) == 0 { // 无域名场景不该逼用户填东西:自动用本机探测到的公网 IP / 入口地址
+		hosts = r.autoCertHosts()
 	}
-	certFile, keyFile := r.certPaths(hosts[0])
+	if len(hosts) == 0 {
+		return errors.New("没有探测到本机公网 IP,请手动填写服务器 IP")
+	}
+	certFile, keyFile := r.DataPlaneCert()
 	if err := certutil.GenerateSelfSigned(hosts, certFile, keyFile, 3650); err != nil {
 		return err
 	}
 	r.setSetting("certFile", certFile)
 	r.setSetting("keyFile", keyFile)
 	r.setSetting("certSource", "selfsign")
-	r.cert.logf("自签证书已生成: %s(用于线路入站;订阅链接会自动带允许不安全标记)", certFile)
+	r.cert.logf("自签证书已生成: %s,包含地址 %s(用于线路入站;订阅里每个节点会自动带允许不安全标记)", certFile, strings.Join(hosts, ", "))
 	r.afterCertChange(certFile, keyFile, "", applyPanel, applySub)
 	return nil
+}
+
+// autoCertHosts 自签证书默认包含的地址:本机公网 IP(v4/v6)、本机节点手填的连接地址、已设置的域名。
+// 客户端连哪个地址、证书里就要有哪个地址,否则即使允许不安全也可能被某些客户端拒绝。
+func (r *Runner) autoCertHosts() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(v string) {
+		for _, h := range strings.Split(v, ",") {
+			h = strings.TrimSpace(h)
+			if h != "" && !seen[h] {
+				seen[h] = true
+				out = append(out, h)
+			}
+		}
+	}
+	add(r.setting("publicIp"))
+	var local model.Node
+	if err := r.db.Where("is_local = ?", true).First(&local).Error; err == nil {
+		add(local.PublicIP)
+		add(local.Addr)
+		add(local.Domain)
+	}
+	add(r.setting("webDomain"))
+	return out
 }
 
 // UseExternalCert 使用服务器上已有的证书(如 certbot / nginx / 商业证书):只记录路径,不复制文件,

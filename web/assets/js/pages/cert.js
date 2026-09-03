@@ -26,10 +26,11 @@ export async function render(el) {
         <h3 class="sub-title">${t('cert.usage')}</h3>
         <div class="chips">
           <span class="chip">${t('cert.useLines')} ${badge(i.exists ? t('cert.on') : t('cert.off'), i.exists ? 'ok' : '')}</span>
-          <span class="chip">${t('cert.usePanel')} ${badge(data.applyPanel ? 'HTTPS' : 'HTTP', data.applyPanel ? 'ok' : 'warn')}</span>
-          <span class="chip">${t('cert.useSub')} ${badge(data.applySub ? 'HTTPS' : 'HTTP', data.applySub ? 'ok' : 'warn')}</span>
+          <span class="chip">${t('cert.usePanel')} ${tlsBadge(data.applyPanel, data.panelCert)}</span>
+          <span class="chip">${t('cert.useSub')} ${tlsBadge(data.applySub, data.subCert)}</span>
         </div>
         <p class="hint" style="margin-top:.6rem">${i.exists && i.selfSigned ? t('cert.selfSignedNote') : t('cert.usageHelp')}</p>
+        ${(data.panelCert && !data.applyPanel) || (data.subCert && !data.applySub) ? `<p class="hint" style="color:var(--warn)">${t('cert.otherCertNote')}</p>` : ''}
       </section>
 
       <section class="card">
@@ -55,6 +56,13 @@ export async function render(el) {
 }
 
 export function tick() {}
+
+// HTTPS 状态:用的是当前证书 / 设置页手填的另一张证书 / 没开
+function tlsBadge(applied, path) {
+  if (applied) return badge('HTTPS', 'ok');
+  if (path) return badge('HTTPS · ' + t('cert.otherCert'), 'warn');
+  return badge('HTTP', 'warn');
+}
 
 function sourceBadge() {
   const src = data.source;
@@ -85,11 +93,12 @@ function renderForm() {
       </div>
       <div id="c-precheck" style="margin-top:.6rem"></div>`;
   } else if (source === 'selfsign') {
-    const host = s.webDomain || state.settings.publicIp || '';
+    // 无域名场景不该逼用户填东西:留空即用本机探测到的公网 IP,占位里先给他看是哪些
+    const auto = [state.settings.publicIp, s.webDomain].filter(Boolean).join(', ');
     box.innerHTML = `
       <p class="hint">${t('cert.selfHelp')}</p>
       <div class="form-grid" style="margin-top:.6rem">
-        <div class="full">${field(t('cert.hosts'), `<input id="ss-hosts" value="${esc(host)}" placeholder="1.2.3.4, hk.example.com">`, t('cert.hostsHelp'))}</div>
+        <div class="full">${field(t('cert.hosts'), `<input id="ss-hosts" value="" placeholder="${esc(auto || '1.2.3.4')}">`, t('cert.hostsHelp'))}</div>
       </div>
       <div class="row" style="margin-top:.8rem"><button class="btn primary" data-act="cert.selfsign">${t('cert.selfsign')}</button></div>`;
   } else {
@@ -169,8 +178,7 @@ registerActions({
     catch (e) { toast(e.message, 'err'); btn.disabled = false; }
   },
   'cert.selfsign': async (_, btn) => {
-    const hosts = fv('ss-hosts').trim();
-    if (!hosts) { toast(t('cert.needHosts'), 'err'); return; }
+    const hosts = fv('ss-hosts').trim(); // 留空 = 后端自动用本机公网 IP
     btn.disabled = true;
     try {
       await post('cert/selfsign', { hosts, applyPanel: fchk('c-panel'), applySub: fchk('c-sub') });

@@ -30,6 +30,9 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		"applyPanel": certFile != "" && s.setting("webCertFile") == certFile,
 		"applySub":   certFile != "" && s.setting("subCertFile") == certFile,
 		"certPath":   certFile,
+		// 面板 / 订阅实际引用的证书路径:与数据面不同则说明设置页里手填了另一张证书
+		"panelCert": s.setting("webCertFile"),
+		"subCert":   s.setting("subCertFile"),
 		"settings": map[string]interface{}{
 			"acmeDomain": s.setting("acmeDomain"), "acmeEmail": s.setting("acmeEmail"), "acmeMethod": s.setting("acmeMethod"),
 			"hasCfToken": s.setting("acmeCfToken") != "", "acmeStaging": s.setting("acmeStaging") == "true",
