@@ -66,7 +66,6 @@ button{border:1px solid var(--border);background:var(--card);color:var(--text);b
     <div class="link"><code id="l1">{{.SubClash}}</code><button onclick="cp('l1')">Clash</button></div>
     <div class="link"><code id="l2">{{.SubLink}}</code><button onclick="cp('l2')">{{if eq .Lang "zh"}}通用{{else}}Links{{end}}</button></div>
     <div class="link"><code id="l3">{{.SubJSON}}</code><button onclick="cp('l3')">sing-box</button></div>
-    <div class="link"><code id="l3">{{.SubJSON}}</code><button onclick="cp('l3')">sing-box</button></div>
     <div class="qrs">
       <figure><img src="{{.QRClash}}" alt="QR"><figcaption>Clash</figcaption></figure>
       <figure><img src="{{.QRLink}}" alt="QR"><figcaption>{{if eq .Lang "zh"}}通用链接{{else}}Links{{end}}</figcaption></figure>
