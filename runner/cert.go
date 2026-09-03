@@ -14,7 +14,6 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
-	"github.com/Maoyangui/m-ui/sub"
 )
 
 // certState 记录一次签发的进度,供面板轮询。
@@ -311,7 +310,7 @@ func (r *Runner) RestartSub() error {
 		r.subSrv.Stop()
 	}
 	time.Sleep(200 * time.Millisecond)
-	r.subSrv = sub.NewServer(r.db)
+	r.subSrv = r.newSubServer()
 	return r.subSrv.Start()
 }
 

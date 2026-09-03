@@ -124,6 +124,7 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("快照缺少修订号"))
 		return
 	}
+	revoked := hub.RevokedShares(s.db, snap)
 	linesChanged, upsChanged, err := hub.ApplySnapshot(s.db, snap)
 	if err != nil {
 		badRequest(w, err)
@@ -136,6 +137,19 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		s.reloadUpstreams("主机下发上游 " + snap.Revision)
 	default:
 		s.reloadUsers("主机下发用户 " + snap.Revision)
+	}
+	if len(revoked) > 0 {
+		go func() { // 先把凭据热更新掉再断线,免得借用者在空档里重连
+			if err := s.run.ReloadUsers(); err != nil {
+				logger.Warning("撤下共享凭据失败: ", err)
+				return
+			}
+			for _, name := range revoked {
+				if n := s.run.KickUser(name); n > 0 {
+					logger.Info("临时共享已取消,断开 ", name, " 的 ", n, " 条连接")
+				}
+			}
+		}()
 	}
 	logger.Info("已应用主机配置 ", snap.Revision, "(线路变化: ", linesChanged, ",上游变化: ", upsChanged, ")")
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "revision": snap.Revision})

@@ -3,17 +3,21 @@ package sub
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 )
 
 // 临时共享:用户在自己的订阅页生成一条随机地址给别人临时用。
-// 共享地址发的是同一份订阅(同凭据、同线路),所以流量、设备数、到期都算在本人头上;
-// 每人只有一条,随时可取消;共享地址只出原始订阅,不出订阅页,也不能再生成/取消。
+//
+// 共享地址发的是本人那份订阅(同线路、同外部节点),但**用一套单独的凭据**,
+// 在数据面里挂在本人名下——流量、设备数、限速、到期都算本人,取消后凭据即被撤下,
+// 已经拉走的节点也连不上。每人只有一条;共享地址只出原始订阅,不出订阅页,也不能生成/取消。
 
 // shareEnabled 是否允许用户自助生成共享地址(设置 subShareEnabled,默认开)。
 func (s *Server) shareEnabled() bool {
@@ -40,19 +44,29 @@ func (s *Server) handleShare(w http.ResponseWriter, r *http.Request, subPath str
 		http.NotFound(w, r)
 		return
 	}
-	upd := map[string]interface{}{"share_token": "", "share_at": 0}
-	if r.URL.Query().Get("share") == "on" {
+	upd := map[string]interface{}{"share_token": "", "share_creds": nil, "share_at": 0}
+	on := r.URL.Query().Get("share") == "on"
+	if on {
 		tok := newShareToken()
 		if tok == "" {
 			http.Error(w, "生成失败", http.StatusInternalServerError)
 			return
 		}
-		upd = map[string]interface{}{"share_token": tok, "share_at": time.Now().Unix()}
+		c, _ := json.Marshal(creds.Generate(user.Name))
+		upd = map[string]interface{}{"share_token": tok, "share_creds": json.RawMessage(c), "share_at": time.Now().Unix()}
 	}
 	if err := s.db.Model(&model.User{}).Where("id = ?", user.Id).Updates(upd).Error; err != nil {
 		logger.Warning("更新共享地址失败: ", err)
 		http.Error(w, "保存失败", http.StatusInternalServerError)
 		return
 	}
+	s.applyShare(user.Name, user.ShareToken != "") // 旧凭据被作废才需要断线
 	http.Redirect(w, r, publicBase(r, subPath, user.Name), http.StatusSeeOther)
+}
+
+// applyShare 让共享凭据即时生效/失效。
+func (s *Server) applyShare(name string, kick bool) {
+	if s.OnShareChange != nil {
+		s.OnShareChange(name, kick)
+	}
 }

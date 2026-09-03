@@ -94,6 +94,7 @@ type User struct {
 	CreatedAt   int64           `json:"createdAt" gorm:"default:0;not null"`
 	OnlineAt    int64           `json:"onlineAt" gorm:"default:0;not null"`
 	ShareToken  string          `json:"shareToken" gorm:"index"` // 临时共享订阅令牌,空=未开启
+	ShareCreds  json.RawMessage `json:"shareCreds,omitempty"`    // 共享地址专用凭据(与本人凭据不同,取消即失效)
 	ShareAt     int64           `json:"shareAt"`                 // 令牌生成时间
 }
 

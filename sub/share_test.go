@@ -61,13 +61,21 @@ func TestShareLink(t *testing.T) {
 	if len(tok) < 20 {
 		t.Fatalf("令牌不合理: %q", tok)
 	}
+	var owner model.User
+	db.First(&owner, 1)
+	if len(owner.ShareCreds) == 0 || strings.Contains(string(owner.ShareCreds), "\"password\":\"p\"") {
+		t.Fatalf("共享应有独立凭据: %s", owner.ShareCreds)
+	}
 
-	// 三种格式与本人订阅逐字一致
+	// 三种格式都能拉到同样的节点,但用的是另一套凭据(本人口令不得出现在共享订阅里)
 	for _, f := range []string{"", "?format=clash", "?format=json"} {
 		mine := doReq(s, "GET", "/sub/alice"+f, "curl/8.4.0")
 		shared := doReq(s, "GET", "/sub/"+tok+f, "curl/8.4.0")
-		if shared.Code != 200 || shared.Body.String() != mine.Body.String() {
-			t.Fatalf("格式 %q 内容不一致 (code %d)", f, shared.Code)
+		if shared.Code != 200 || !strings.Contains(shared.Body.String(), "hk.example") {
+			t.Fatalf("格式 %q 共享订阅不可用 (code %d)", f, shared.Code)
+		}
+		if shared.Body.String() == mine.Body.String() || strings.Contains(shared.Body.String(), "//p@") {
+			t.Fatalf("格式 %q 共享订阅不该用本人凭据", f)
 		}
 	}
 	// 共享地址:不出订阅页、不出二维码、不能改共享状态
@@ -109,8 +117,9 @@ func TestShareLink(t *testing.T) {
 	if w := doReq(s, "POST", "/sub/alice?share=off", browserUA); w.Code != http.StatusSeeOther {
 		t.Fatalf("取消应 303,得 %d", w.Code)
 	}
-	if token(t, db) != "" {
-		t.Fatal("取消后令牌应清空")
+	db.First(&owner, 1)
+	if token(t, db) != "" || len(owner.ShareCreds) != 0 {
+		t.Fatalf("取消后令牌与共享凭据都要清空: %q %s", owner.ShareToken, owner.ShareCreds)
 	}
 	if w := doReq(s, "GET", "/sub/"+tok, "curl/8.4.0"); w.Code != 404 {
 		t.Fatalf("取消后应 404,得 %d", w.Code)

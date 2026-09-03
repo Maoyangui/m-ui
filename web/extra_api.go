@@ -418,11 +418,18 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 			break
 		}
 		if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).
-			Updates(map[string]interface{}{"share_token": "", "share_at": 0}).Error; err != nil {
+			Updates(map[string]interface{}{"share_token": "", "share_creds": nil, "share_at": 0}).Error; err != nil {
 			badRequest(w, err)
 			return true
 		}
 		s.audit(r, "user", "unshare", u.Name)
+		go func() { // 先撤下共享凭据再断线,借用者已拉走的节点立刻失效
+			if err := s.run.ReloadUsers(); err != nil {
+				logger.Warning("撤下共享凭据失败: ", err)
+				return
+			}
+			logger.Info("已收回 ", u.Name, " 的临时共享,断开 ", s.run.KickUser(u.Name), " 条连接")
+		}()
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		return true
 	case "sub":

@@ -109,6 +109,27 @@ func revisionOf(s Snapshot) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// RevokedShares 返回本次快照里临时共享被取消或换新的用户名(要在 ApplySnapshot 之前调用)。
+// 副机据此在热更新后断开这些用户的连接,否则借用者已经建立的连接还能接着用。
+func RevokedShares(db *gorm.DB, snap Snapshot) []string {
+	var old []model.User
+	db.Where("share_token <> ''").Find(&old)
+	if len(old) == 0 {
+		return nil
+	}
+	now := make(map[string]string, len(snap.Users))
+	for _, u := range snap.Users {
+		now[u.Name] = u.ShareToken
+	}
+	var out []string
+	for _, u := range old {
+		if now[u.Name] != u.ShareToken {
+			out = append(out, u.Name)
+		}
+	}
+	return out
+}
+
 // ApplySnapshot 在副机上整表替换配置。返回线路、上游是否变化,副机据此选择重载级别:
 // 线路变 → 全量重载;仅上游变 → 热换出站;都没变 → 热换用户。
 func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged bool, err error) {

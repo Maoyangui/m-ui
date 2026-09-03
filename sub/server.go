@@ -24,6 +24,9 @@ type Server struct {
 	db       *gorm.DB
 	httpSrv  *http.Server
 	listener net.Listener
+	// OnShareChange 生成/取消临时共享后调用:热更新数据面用户;
+	// kick 为真表示有旧凭据被作废(取消,或在已有共享上重新生成),需要断开该用户现有连接。
+	OnShareChange func(user string, kick bool)
 }
 
 func NewServer(db *gorm.DB) *Server {
@@ -262,6 +265,11 @@ func (s *Server) handle() http.HandlerFunc {
 				return
 			}
 			shared = true // 共享地址:只发原始订阅,不出订阅页/二维码,也不能改共享状态
+			if len(user.ShareCreds) == 0 {
+				http.NotFound(w, r) // 老版本留下的令牌没有独立凭据,让用户重新生成
+				return
+			}
+			user.Credentials = user.ShareCreds // 共享用单独凭据,取消即失效
 		}
 		if shared && (wantQR || r.Method == http.MethodPost) {
 			http.NotFound(w, r)

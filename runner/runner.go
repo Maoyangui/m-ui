@@ -113,7 +113,8 @@ func New(dbPath string) (*Runner, error) {
 	} else if n > 0 {
 		logger.Info("已为 ", n, " 个用户补全新协议凭据")
 	}
-	r := &Runner{db: db, core: core.NewCore(), subSrv: sub.NewServer(db), dbPath: dbPath}
+	r := &Runner{db: db, core: core.NewCore(), dbPath: dbPath}
+	r.subSrv = r.newSubServer()
 	r.notifier = notify.New(r.setting)
 	r.jobs = jobs.New(jobs.Deps{
 		DB:          db,
@@ -712,4 +713,24 @@ func Run(dbPath string) error {
 		return nil
 	}
 	return nil
+}
+
+// newSubServer 建订阅服务,并接上临时共享回调:用户在订阅页生成/取消后立即生效。
+// 取消时先热更新撤下共享凭据,再断开该用户的连接——否则借用者已经建立的连接还能接着用。
+func (r *Runner) newSubServer() *sub.Server {
+	s := sub.NewServer(r.db)
+	s.OnShareChange = func(name string, kick bool) {
+		go func() {
+			if err := r.ReloadUsers(); err != nil {
+				logger.Warning("临时共享热更新失败: ", err)
+				return
+			}
+			if !kick {
+				logger.Info("用户 ", name, " 的临时共享凭据已生效")
+				return
+			}
+			logger.Info("用户 ", name, " 的旧共享凭据已作废,断开 ", r.KickUser(name), " 条连接")
+		}()
+	}
+	return s
 }
