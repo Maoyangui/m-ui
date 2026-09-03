@@ -12,13 +12,44 @@ export function fmtBytes(n, digits = 2) {
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return (i === 0 ? n.toFixed(0) : n.toFixed(digits)) + ' ' + u[i];
 }
+// ---- 时区 ----
+// 服务器多在 UTC、浏览器又各不相同,面板里所有时间统一按设置中的时区显示(默认 Asia/Shanghai),
+// 这样页面上的时间、数据面日志里的时间、流量图的分桶才是同一套。
+let TZ = 'Asia/Shanghai';
+const dtfCache = new Map();
+export function setTimezone(z) {
+  z = (z || '').trim() || 'Asia/Shanghai';
+  try { new Intl.DateTimeFormat('zh-CN', { timeZone: z }); } catch { z = 'Asia/Shanghai'; } // 名字无效就回落
+  if (z !== TZ) { TZ = z; dtfCache.clear(); }
+}
+export function getTimezone() { return TZ; }
+function dtf(opts) {
+  const key = JSON.stringify(opts);
+  let f = dtfCache.get(key);
+  if (!f) { f = new Intl.DateTimeFormat('zh-CN', { timeZone: TZ, hour12: false, ...opts }); dtfCache.set(key, f); }
+  return f;
+}
+// tzOffsetMinutes 面板时区在该时刻相对 UTC 的偏移(分钟),用于把流量图按当地零点/整点分桶
+export function tzOffsetMinutes(at = new Date()) {
+  const p = dtf({ year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(at);
+  const g = k => Number((p.find(x => x.type === k) || {}).value);
+  return Math.round((Date.UTC(g('year'), g('month') - 1, g('day'), g('hour') % 24, g('minute'), g('second')) - at.getTime()) / 60000);
+}
+// tzDate 把时间戳平移到面板时区:之后用 getUTC* 取到的就是该时区的墙上时间
+export function tzDate(ts) { return new Date((ts + tzOffsetMinutes(new Date(ts * 1000)) * 60) * 1000); }
+
 export function fmtDate(ts) {
   if (!ts) return '—';
-  return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return dtf({ year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(ts * 1000));
+}
+// fmtTime 到秒,列表里更紧凑(不带年份)
+export function fmtTime(ts) {
+  if (!ts) return '—';
+  return dtf({ month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(ts * 1000));
 }
 export function fmtDay(ts) {
   if (!ts) return '—';
-  return new Date(ts * 1000).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return dtf({ year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ts * 1000));
 }
 export function fmtRelative(ts) {
   if (!ts) return '—';

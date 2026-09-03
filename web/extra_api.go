@@ -84,7 +84,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		span = int64(b)
 		// 起点对齐到桶边界:按查看者时区(tz=分钟偏移,浏览器传入;缺省用服务器时区),
 		// 日桶对齐到零点,小时级桶对齐到当天内的整数倍(6h 桶 → 0/6/12/18 点),更细的桶按 UTC 取整
-		loc := time.Now().Location()
+		loc := s.panelLocation()
 		if tz, err := strconv.Atoi(r.URL.Query().Get("tz")); err == nil && tz >= -14*60 && tz <= 14*60 {
 			loc = time.FixedZone("viewer", tz*60)
 		}
@@ -216,7 +216,23 @@ func (s *Server) handleStatsTop(w http.ResponseWriter, r *http.Request) {
 // ---- 最近入站连接(从 sing-box 日志提取,客户端"连不上"时用来判断包有没有到服务器)----
 
 var reInboundConn = regexp.MustCompile(`inbound/(\w+)\[([^\]]+)\]\s*inbound connection from ([0-9a-fA-F.:\[\]]+?)(?::\d+)?\s*$`)
+
+// 认证成功后紧跟的一条日志带用户名:inbound/hysteria2[香港1] [alice] inbound connection to example.com:443
+var reInboundUser = regexp.MustCompile(`inbound/\w+\[([^\]]+)\]\s*\[([^\]]+)\]\s*inbound connection to`)
 var reLogTime = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`)
+
+// logTime 把日志行首的时间按本机时区解析成 unix 秒:各机时区可能不同,统一成绝对时间,面板才能按面板时区显示。
+func logTime(line string) int64 {
+	m := reLogTime.FindStringSubmatch(line)
+	if m == nil {
+		return 0
+	}
+	t, err := time.ParseInLocation("2006/01/02 15:04:05", m[1], time.Local)
+	if err != nil {
+		return 0
+	}
+	return t.Unix()
+}
 
 type recentConn = hub.RecentConn
 
@@ -225,22 +241,30 @@ func (s *Server) recentConns(limit int) []recentConn {
 	lines := logger.GetLogs(3000, "info")
 	agg := map[string]*recentConn{}
 	var order []string
-	for _, l := range lines {
-		m := reInboundConn.FindStringSubmatch(strings.TrimSpace(l))
-		if m == nil {
+	lastKeyOfLine := map[string]string{} // 线路 → 最近一条"来自 IP"的键,用来把随后那条带 [用户] 的日志归到它名下
+	// GetLogs 返回倒序(新的在前),按时间正序遍历才能把 from → [用户] to 这一对接上
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.TrimSpace(lines[i])
+		if m := reInboundConn.FindStringSubmatch(l); m != nil {
+			ip := strings.Trim(m[3], "[]")
+			key := ip + "|" + m[2]
+			c := agg[key]
+			if c == nil {
+				c = &recentConn{IP: ip, Line: m[2], Protocol: m[1]}
+				agg[key] = c
+				order = append(order, key)
+			}
+			c.Count++
+			if ts := logTime(l); ts > 0 {
+				c.Ts = ts
+			}
+			lastKeyOfLine[m[2]] = key
 			continue
 		}
-		ip := strings.Trim(m[3], "[]")
-		key := ip + "|" + m[2]
-		c := agg[key]
-		if c == nil {
-			c = &recentConn{IP: ip, Line: m[2], Protocol: m[1]}
-			agg[key] = c
-			order = append(order, key)
-		}
-		c.Count++
-		if t := reLogTime.FindStringSubmatch(l); t != nil {
-			c.Last = t[1]
+		if m := reInboundUser.FindStringSubmatch(l); m != nil {
+			if c := agg[lastKeyOfLine[m[1]]]; c != nil {
+				c.User = m[2]
+			}
 		}
 	}
 	out := make([]recentConn, 0, len(agg))
@@ -261,7 +285,7 @@ func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
 			out[i].Server = local.Name
 		}
 		out = append(out, remote...)
-		sort.SliceStable(out, func(i, j int) bool { return out[i].Last > out[j].Last })
+		sort.SliceStable(out, func(i, j int) bool { return out[i].Ts > out[j].Ts })
 		if len(out) > 100 {
 			out = out[:100]
 		}

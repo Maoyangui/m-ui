@@ -252,6 +252,8 @@ const zh = {
   'cert.useExternal': '使用该证书', 'cert.externalOk': '已使用该证书', 'cert.needHosts': '请填写域名或 IP', 'cert.needPaths': '请填写证书与私钥路径',
   'cert.otherCert': '另一张证书', 'cert.otherCertNote': '注意:设置页里手填了别的证书路径,面板 / 订阅用的不是这张证书。勾上下面的用途并保存,即可统一改用当前证书。',
   'set.certManaged': '一般不用手填:在证书页勾选"用于面板 / 订阅 HTTPS"会自动写入这里',
+  'set.timezone': '时区', 'set.timezoneHelp': '面板里所有时间(日志、流量图、到期、订阅落地页)按此时区显示,与服务器所在时区无关',
+  'user.lineUnknown': '线路未知(刚连上或只有 UDP 心跳)',
 };
 
 const en = {
@@ -507,6 +509,8 @@ const en = {
   'cert.useExternal': 'Use this certificate', 'cert.externalOk': 'Certificate applied', 'cert.needHosts': 'Enter a domain or IP', 'cert.needPaths': 'Enter both certificate and key paths',
   'cert.otherCert': 'other cert', 'cert.otherCertNote': 'Heads-up: a different certificate path is set on the Settings page, so the panel / subscription is not using this certificate. Tick the usage boxes and save to switch them over.',
   'set.certManaged': 'Usually leave empty: ticking "use for panel / subscription HTTPS" on the Certificate page fills this in',
+  'set.timezone': 'Time zone', 'set.timezoneHelp': 'Every time shown in the panel (logs, charts, expiry, subscription page) uses this zone, regardless of the server time zone',
+  'user.lineUnknown': 'line unknown (just connected, or UDP keepalive only)',
 };
 
 const dicts = { zh, en };

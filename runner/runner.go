@@ -526,6 +526,14 @@ func (r *Runner) OnlineIPs(user string) []string {
 	return nil
 }
 
+// OnlineIPLines 本机上 用户 → 源 IP → 线路名。
+func (r *Runner) OnlineIPLines() map[string]map[string][]string {
+	if box := r.core.GetInstance(); box != nil {
+		return box.ConnTracker().IPLinesByUser()
+	}
+	return nil
+}
+
 // TestUpstream 通过运行中的数据面,经指定上游真实发一次 HTTP 请求,返回延迟或错误。
 // 这是最可信的健康检查:连 WARP 本地代理是否真的通都能测出来。
 func (r *Runner) TestUpstream(name, testURL string) core.CheckOutboundResult {

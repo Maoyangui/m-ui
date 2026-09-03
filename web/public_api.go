@@ -119,33 +119,34 @@ func (s *Server) apiFindUser(key string) (model.User, bool) {
 
 // apiUserView 对外用户视图:去掉凭据,附带用量、线路与订阅地址。
 type apiUserView struct {
-	Id          uint     `json:"id"`
-	Name        string   `json:"name"`
-	Enabled     bool     `json:"enabled"`
-	Volume      int64    `json:"volume"`
-	Used        int64    `json:"used"`
-	Up          int64    `json:"up"`
-	Down        int64    `json:"down"`
-	TotalUp     int64    `json:"totalUp"`
-	TotalDown   int64    `json:"totalDown"`
-	Expiry      int64    `json:"expiry"`
-	Expired     bool     `json:"expired"`
-	AutoReset   bool     `json:"autoReset"`
-	ResetDays   int      `json:"resetDays"`
-	NextReset   int64    `json:"nextReset"`
-	DeviceLimit int      `json:"deviceLimit"`
-	SpeedUp     int      `json:"speedUp"`
-	SpeedDown   int      `json:"speedDown"`
-	Remark      string   `json:"remark"`
-	Desc        string   `json:"desc"`
-	CreatedAt   int64    `json:"createdAt"`
-	OnlineAt    int64    `json:"onlineAt"`
-	OnlineIPs   []string `json:"onlineIps"`
-	LineIds     []uint   `json:"lineIds"`
-	ExtIds      []uint   `json:"extIds"`
-	SubLink     string   `json:"subLink"`
-	SubClash    string   `json:"subClash"`
-	SubJSON     string   `json:"subJson"` // sing-box 远程配置地址
+	Id          uint                `json:"id"`
+	Name        string              `json:"name"`
+	Enabled     bool                `json:"enabled"`
+	Volume      int64               `json:"volume"`
+	Used        int64               `json:"used"`
+	Up          int64               `json:"up"`
+	Down        int64               `json:"down"`
+	TotalUp     int64               `json:"totalUp"`
+	TotalDown   int64               `json:"totalDown"`
+	Expiry      int64               `json:"expiry"`
+	Expired     bool                `json:"expired"`
+	AutoReset   bool                `json:"autoReset"`
+	ResetDays   int                 `json:"resetDays"`
+	NextReset   int64               `json:"nextReset"`
+	DeviceLimit int                 `json:"deviceLimit"`
+	SpeedUp     int                 `json:"speedUp"`
+	SpeedDown   int                 `json:"speedDown"`
+	Remark      string              `json:"remark"`
+	Desc        string              `json:"desc"`
+	CreatedAt   int64               `json:"createdAt"`
+	OnlineAt    int64               `json:"onlineAt"`
+	OnlineIPs   []string            `json:"onlineIps"`
+	OnlineLines map[string][]string `json:"onlineLines,omitempty"` // 源 IP → 线路(带服务器后缀)
+	LineIds     []uint              `json:"lineIds"`
+	ExtIds      []uint              `json:"extIds"`
+	SubLink     string              `json:"subLink"`
+	SubClash    string              `json:"subClash"`
+	SubJSON     string              `json:"subJson"` // sing-box 远程配置地址
 }
 
 func (s *Server) apiUser(u model.User) apiUserView {
@@ -160,8 +161,9 @@ func (s *Server) apiUser(u model.User) apiUserView {
 		AutoReset: u.AutoReset, ResetDays: u.ResetDays, NextReset: u.NextReset,
 		DeviceLimit: u.DeviceLimit, SpeedUp: u.SpeedUp, SpeedDown: u.SpeedDown, Remark: u.Remark, Desc: u.Desc,
 		CreatedAt: u.CreatedAt, OnlineAt: u.OnlineAt,
-		OnlineIPs: mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
-		LineIds:   ids, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}
+		OnlineIPs:   mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
+		OnlineLines: s.onlineLines(u.Name, s.localNodeName(), s.run.OnlineIPLines()),
+		LineIds:     ids, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}
 }
 
 func (s *Server) apiListUsers(w http.ResponseWriter, r *http.Request) {

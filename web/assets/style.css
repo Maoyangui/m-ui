@@ -318,3 +318,13 @@ table.api-doc td.mono { font-family: var(--mono); font-size: .78rem; white-space
 .node-readonly [data-act$=".reset"], .node-readonly [data-act$=".extend"], .node-readonly [data-act$=".renew"], .node-readonly [data-act$=".import"],
 .node-readonly [data-act$=".toggle"], .node-readonly [data-act$=".clone"], .node-readonly [data-act$=".sort"], .node-readonly [data-act$=".refresh"],
 .node-readonly .batch-bar, .node-readonly details.menu, .node-readonly input[type=checkbox].sel { display: none !important; }
+
+/* 最近入站连接:一行一条,长用户名省略而不是撑开换行 */
+table.grid.conns { min-width: 0; }
+table.grid.conns th, table.grid.conns td { white-space: nowrap; padding: .38rem .7rem; font-size: .82rem; }
+table.grid.conns td.ell { max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 700px) { table.grid.conns td.ell { max-width: 8rem; } }
+
+/* 在线设备:IP 右侧列出它正在使用的线路 */
+.ip-list .ip { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
+.ip-lines { display: flex; gap: .25rem; flex-wrap: wrap; justify-content: flex-end; }

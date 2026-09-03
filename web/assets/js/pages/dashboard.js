@@ -1,7 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, fmtBytes, fmtDuration, fmtRelative, toast, registerActions, badge, dot, empty } from '../ui.js';
+import { esc, fmtBytes, fmtDuration, fmtRelative, fmtTime, tzOffsetMinutes, toast, registerActions, badge, dot, empty } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
 
 export const title = () => t('nav.dashboard');
@@ -112,8 +112,15 @@ async function renderConns() {
   const rows = await get('conns/recent');
   if (!rows.length) { el.innerHTML = empty(t('dash.noConns')); return; }
   const multi = rows.some(c => c.server);
-  el.innerHTML = `<div class="table-wrap"><table class="grid" style="min-width:0"><thead><tr><th>IP</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th>${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 15).map(c =>
-    `<tr><td class="mono">${esc(c.ip)}</td><td>${esc(c.line)} <span class="muted small">${esc(c.protocol)}</span></td>${multi ? `<td>${esc(c.server || '')}</td>` : ''}<td class="num">${c.count}</td><td class="mono small">${esc(c.last || '')}</td></tr>`).join('')}</tbody></table></div>`;
+  el.innerHTML = `<div class="table-wrap"><table class="grid conns"><thead><tr><th>IP</th><th>${t('logs.user')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 15).map(c =>
+    `<tr>
+      <td class="mono">${esc(c.ip)}</td>
+      <td class="ell" title="${esc(c.user || '')}">${c.user ? esc(c.user) : '<span class="muted">—</span>'}</td>
+      <td class="ell">${esc(c.line)} <span class="muted small">${esc(c.protocol)}</span></td>
+      ${multi ? `<td class="ell">${esc(c.server || '')}</td>` : ''}
+      <td class="num">${c.count}</td>
+      <td class="mono small">${fmtTime(c.ts)}</td>
+    </tr>`).join('')}</tbody></table></div>`;
 }
 
 async function renderHealth() {
@@ -168,7 +175,7 @@ function renderCore() {
 async function renderChart() {
   const el = document.getElementById('dash-chart');
   if (!el) return;
-  const d = await get(`stats?resource=user&hours=${range}&bucket=${bucketFor(range)}&tz=${-new Date().getTimezoneOffset()}`);
+  const d = await get(`stats?resource=user&hours=${range}&bucket=${bucketFor(range)}&tz=${tzOffsetMinutes()}`);
   if (range === 24) { state._dayUp = d.totalUp; state._dayDown = d.totalDown; renderStats(); }
   barChart(el, d.points, { span: d.span, upLabel: t('dash.up'), downLabel: t('dash.down'), totalLabel: t('dash.total'), peakLabel: t('dash.peak'), emptyText: t('dash.noTraffic') });
 }

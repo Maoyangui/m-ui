@@ -125,7 +125,7 @@ Merge nodes from elsewhere into your subscriptions: a single share link, or a wh
 - Over quota or expired → disabled and kicked automatically; resetting traffic re-enables.
 - Plans are templates: apply on create; *renew* applies again (usage reset, expiry extended); *extend* keeps usage and only extends expiry.
 - Bulk: generate by prefix, select rows for enable / disable / extend / reset / delete, CSV export.
-- User drawer: live online IPs, 24h / 7d / 30d chart, subscription links and QR, kick.
+- User drawer: live devices (each IP shows the line and server it is using), 24h / 7d / 30d chart, subscription links and QR, kick.
 
 ### Subscriptions
 
@@ -181,7 +181,7 @@ Subscription access log, core log (data plane + panel) and audit log. Logging ca
 
 ### Settings
 
-Panel and subscription listen address / port / path / certificate, subscription display options, landing-page text, Telegram notification toggles, upstream check parameters, data-plane stats granularity. Panel and subscription path changes apply immediately; port, listen address and certificate path changes need a restart (button in the page header).
+**Time zone** (default Asia/Shanghai; every time in the panel uses it), panel and subscription listen address / port / path / certificate, subscription display options, landing-page text, Telegram notification toggles, upstream check parameters, data-plane stats granularity. Panel and subscription path changes apply immediately; port, listen address and certificate path changes need a restart (button in the page header).
 
 ## Command line
 

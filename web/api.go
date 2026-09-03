@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/Maoyangui/m-ui/hop"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/tz"
 
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/host"
@@ -93,6 +95,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"trafficUp":    totalUp,
 		"trafficDown":  totalDown,
 		"domain":       s.setting("webDomain"),
+		"timezone":     s.panelLocation().String(),
 		"goroutines":   runtime.NumGoroutine(),
 		"version":      Version,
 		"repo":         brand.Repo,
@@ -130,6 +133,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // role 返回本机角色:master(主/香港) 或 node(副/台湾)。
+// panelLocation 面板时区(设置 timezone,默认 Asia/Shanghai):所有时间按它显示与对齐。
+func (s *Server) panelLocation() *time.Location { return tz.Location(s.setting("timezone")) }
+
 func (s *Server) role() string {
 	if strings.EqualFold(s.setting("nodeMode"), "true") {
 		return "node"
@@ -574,12 +580,15 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		var users []model.User
 		s.db.Order("id asc").Find(&users)
+		localName := s.localNodeName()
+		localLines := s.run.OnlineIPLines()
 		type row struct {
 			model.User
-			LineIds  []uint   `json:"lineIds"`
-			ExtIds   []uint   `json:"extIds"`
-			OnlineIP []string `json:"onlineIps"`
-			SubURL   string   `json:"subUrl"`
+			LineIds  []uint              `json:"lineIds"`
+			ExtIds   []uint              `json:"extIds"`
+			OnlineIP []string            `json:"onlineIps"`
+			OnlineOn map[string][]string `json:"onlineLines"` // 源 IP → 该 IP 正在使用的线路(带服务器后缀)
+			SubURL   string              `json:"subUrl"`
 		}
 		out := make([]row, 0, len(users))
 		for _, u := range users {
@@ -591,6 +600,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			out = append(out, row{
 				User: u, LineIds: ids, ExtIds: eids,
 				OnlineIP: mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
+				OnlineOn: s.onlineLines(u.Name, localName, localLines),
 				SubURL:   s.subLinks(u)["link"],
 			})
 		}
@@ -708,6 +718,39 @@ func (s *Server) deleteUser(u model.User, actor string) error {
 	s.auditAs(actor, "user", "delete", u.Name)
 	s.reloadUsers("删除用户 " + u.Name)
 	return nil
+}
+
+// localNodeName 本机在服务器列表里的名称,用于给线路名加服务器后缀(如 "香港1-高带宽")。
+func (s *Server) localNodeName() string {
+	var n model.Node
+	if err := s.db.Where("is_local = ?", true).First(&n).Error; err != nil {
+		return ""
+	}
+	return n.Name
+}
+
+// onlineLines 汇总某用户每个在线 IP 正在使用的线路:本机来自连接跟踪器,副机来自它们的上报,
+// 线路名一律带上服务器后缀,面板上就能看出这台设备连的是哪台服务器的哪条线路。
+func (s *Server) onlineLines(user, localName string, local map[string]map[string][]string) map[string][]string {
+	out := map[string][]string{}
+	for ip, lines := range local[user] {
+		for _, l := range lines {
+			if localName != "" {
+				l += "-" + localName
+			}
+			out[ip] = append(out[ip], l)
+		}
+	}
+	for ip, lines := range s.run.Hub().RemoteIPLines(user) {
+		out[ip] = append(out[ip], lines...)
+	}
+	for ip := range out {
+		sort.Strings(out[ip])
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (s *Server) setUserLines(userID uint, lineIds []uint) {

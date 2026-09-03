@@ -63,6 +63,7 @@ func (s *Server) options() Options {
 		ClashTmpl:    s.setting("subClashExt"),
 		Entries:      entries,
 		Insecure:     insecure,
+		TZ:           s.setting("timezone"),
 	}
 }
 

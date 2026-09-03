@@ -15,6 +15,7 @@ import (
 	"github.com/Maoyangui/m-ui/brand"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/tz"
 
 	"github.com/skip2/go-qrcode"
 )
@@ -103,6 +104,7 @@ func pageLang(r *http.Request) string {
 func buildPageData(r *http.Request, subPath string, user model.User, lines []model.Line, opt Options, title, notice, support string) pageData {
 	base := publicBase(r, subPath, user.Name)
 	clashURL := base + "?format=clash"
+	loc := tz.Location(opt.TZ) // 到期 / 重置日期按面板时区显示
 	now := time.Now().Unix()
 	used := user.Up + user.Down
 
@@ -118,12 +120,12 @@ func buildPageData(r *http.Request, subPath string, user model.User, lines []mod
 	}
 	if user.Expiry > 0 {
 		d.HasExpiry = true
-		d.ExpiryText = time.Unix(user.Expiry, 0).Format("2006-01-02")
+		d.ExpiryText = time.Unix(user.Expiry, 0).In(loc).Format("2006-01-02")
 		d.DaysLeft = int(math.Ceil(float64(user.Expiry-now) / 86400))
 		d.Expired = user.Expiry < now
 	}
 	if user.AutoReset && user.NextReset > 0 {
-		d.ResetText = time.Unix(user.NextReset, 0).Format("2006-01-02")
+		d.ResetText = time.Unix(user.NextReset, 0).In(loc).Format("2006-01-02")
 	}
 	switch {
 	case !user.Enabled:

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sort"
 	"sync"
 
 	"github.com/gofrs/uuid/v5"
@@ -21,6 +22,7 @@ type ConnectionInfo struct {
 	PacketConn network.PacketConn
 	Inbound    string
 	User       string
+	SourceIP   string // 客户端源 IP(建连时从 metadata 取,面板"在线设备"按它归类线路)
 	Type       string // "tcp" or "udp"
 }
 
@@ -68,11 +70,12 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 	}
 	connID := c.generateConnectionID()
 	connInfo := &ConnectionInfo{
-		ID:      connID,
-		Conn:    conn,
-		Inbound: metadata.Inbound,
-		User:    metadata.User,
-		Type:    "tcp",
+		ID:       connID,
+		Conn:     conn,
+		Inbound:  metadata.Inbound,
+		User:     metadata.User,
+		SourceIP: ip,
+		Type:     "tcp",
 	}
 
 	c.trackConnection(connID, connInfo)
@@ -96,6 +99,7 @@ func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.P
 		PacketConn: conn,
 		Inbound:    metadata.Inbound,
 		User:       metadata.User,
+		SourceIP:   ip,
 		Type:       "udp",
 	}
 
@@ -147,6 +151,43 @@ func (c *ConnTracker) CloseConnByUser(user string) int {
 		closed++
 	}
 	return closed
+}
+
+// IPLinesByUser 返回 用户 → 源 IP → 该 IP 正在使用的线路(入站)名。
+// 面板"在线设备"里据此标出每个 IP 走的是哪条线路,而不只是一串 IP。
+func (c *ConnTracker) IPLinesByUser() map[string]map[string][]string {
+	c.access.Lock()
+	defer c.access.Unlock()
+	seen := map[string]map[string]map[string]bool{} // user → ip → 线路集合
+	for _, info := range c.connections {
+		if info.User == "" || info.Inbound == "" {
+			continue
+		}
+		ip := info.SourceIP
+		if ip == "" {
+			continue
+		}
+		if seen[info.User] == nil {
+			seen[info.User] = map[string]map[string]bool{}
+		}
+		if seen[info.User][ip] == nil {
+			seen[info.User][ip] = map[string]bool{}
+		}
+		seen[info.User][ip][info.Inbound] = true
+	}
+	out := make(map[string]map[string][]string, len(seen))
+	for user, ips := range seen {
+		out[user] = make(map[string][]string, len(ips))
+		for ip, lines := range ips {
+			names := make([]string, 0, len(lines))
+			for l := range lines {
+				names = append(names, l)
+			}
+			sort.Strings(names)
+			out[user][ip] = names
+		}
+	}
+	return out
 }
 
 // ConnCountByUser 返回每个用户当前的连接数(面板展示用)。

@@ -24,6 +24,8 @@ type Options struct {
 	Insecure bool
 	// External 分配给该用户的外部节点(分享链接 / 外部订阅解析结果),追加在本站节点之后。
 	External []ExtItem
+	// TZ 面板时区名(设置 timezone),落地页的日期按它显示。
+	TZ string
 }
 
 // ExtItem 是一组外部节点。

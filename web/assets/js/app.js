@@ -1,7 +1,7 @@
 // 应用入口:登录、壳布局、hash 路由、全局状态与定时刷新。
 import { get, post, setUnauthorizedHandler } from './api.js';
 import { t, setLang, getLang, langs } from './i18n.js';
-import { toast, closeModal, closeDrawer, drawerOpen, esc } from './ui.js';
+import { toast, closeModal, closeDrawer, drawerOpen, esc, setTimezone } from './ui.js';
 import * as dashboard from './pages/dashboard.js';
 import * as lines from './pages/lines.js';
 import * as upstreams from './pages/upstreams.js';
@@ -33,7 +33,7 @@ export async function load(...what) {
   const all = what.length === 0;
   const jobs = [];
   if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); }));
-  if (all || what.includes('settings')) jobs.push(get('settings').then(s => { state.settings = s; }));
+  if (all || what.includes('settings')) jobs.push(get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
   if (all || what.includes('lines')) jobs.push(get('lines').then(l => { state.lines = l; }));
   if (all || what.includes('upstreams')) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
   if (all || what.includes('users')) jobs.push(get('users').then(u => { state.users = u; }));

@@ -7,14 +7,23 @@ export const title = () => t('set.title');
 
 // 留空时后端采用的默认值,作为输入框占位提示
 const defaults = {
-  webListen: '0.0.0.0', webPort: 2053, webPath: '/app/', subListen: '0.0.0.0', subPort: 2056, subPath: '/sub/', subUpdates: 12,
+  timezone: 'Asia/Shanghai', webListen: '0.0.0.0', webPort: 2053, webPath: '/app/', subListen: '0.0.0.0', subPort: 2056, subPath: '/sub/', subUpdates: 12,
   tgExpiringDays: 3, tgQuotaPercent: 80, tgDailyHour: 9, upstreamCheckMinutes: 10, upstreamCheckFailThreshold: 2, extRefreshMinutes: 30,
   upstreamTestUrl: 'http://www.gstatic.com/generate_204', statsBucketSeconds: 10, trafficAge: 30,
 };
 
+// 面板时间显示用的时区(默认 Asia/Shanghai);列表覆盖常见地区,够用且不会写错名字
+const TIMEZONES = [
+  'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore',
+  'Asia/Bangkok', 'Asia/Kolkata', 'Asia/Dubai', 'Europe/Moscow', 'Europe/London', 'Europe/Berlin',
+  'Europe/Paris', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+  'America/Sao_Paulo', 'Australia/Sydney', 'UTC',
+];
+
 const groups = () => [
   { id: 'panel', title: t('set.panel'), restart: true, fields: [
     ['webDomain', t('set.webDomain'), 'text', t('set.webDomainHelp')],
+    ['timezone', t('set.timezone'), 'select', t('set.timezoneHelp'), TIMEZONES.map(z => [z, z])],
     ['webListen', t('set.listen'), 'text'], ['webPort', t('set.port'), 'number'], ['webPath', t('set.path'), 'text', t('set.pathHelp')],
     ['webCertFile', t('set.cert'), 'text', t('set.certManaged')], ['webKeyFile', t('set.key'), 'text'],
   ]},

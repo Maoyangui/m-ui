@@ -149,6 +149,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		PublicIP: s.setting("publicIp"),
 		Conns:    s.recentConns(50),
 	}
+	rep.OnlineLinesByIP = s.run.OnlineIPLines()
 	s.db.Find(&rep.Counters)
 	o := s.run.Onlines()
 	for _, u := range o.Users {

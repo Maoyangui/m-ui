@@ -3,6 +3,7 @@ import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
+import { tzOffsetMinutes } from '../ui.js';
 
 export const title = () => t('user.title');
 export const subtitle = () => t('user.subtitle');
@@ -161,7 +162,7 @@ let drawerRange = 168;
 async function renderUserChart(name, hours) {
   const ch = document.getElementById('ud-chart');
   if (!ch) return;
-  const d = await get(`stats?resource=user&tag=${encodeURIComponent(name)}&hours=${hours}&bucket=${bucketFor(hours)}&tz=${-new Date().getTimezoneOffset()}`);
+  const d = await get(`stats?resource=user&tag=${encodeURIComponent(name)}&hours=${hours}&bucket=${bucketFor(hours)}&tz=${tzOffsetMinutes()}`);
   barChart(ch, d.points, { span: d.span, height: 170, upLabel: t('dash.up'), downLabel: t('dash.down'), totalLabel: t('dash.total'), peakLabel: t('dash.peak'), emptyText: t('dash.noTraffic') });
 }
 
@@ -171,8 +172,12 @@ function refreshDrawerLive() {
   if (!u || !el) return;
   const ips = u.onlineIps || [];
   const conns = state.onlines.connCounts[u.name] || 0;
+  // 每个 IP 右侧标出它正在使用的线路(线路名已带服务器后缀,如 "香港1-高带宽")
+  const lines = u.onlineLines || {};
   el.innerHTML = ips.length
-    ? `<div class="ip-list">${ips.map(ip => `<div class="ip"><span>${esc(ip)}</span></div>`).join('')}</div><p class="hint">${conns} ${t('dash.conns')}</p>`
+    ? `<div class="ip-list">${ips.map(ip => `<div class="ip"><span class="mono">${esc(ip)}</span><span class="ip-lines">${
+        (lines[ip] || []).map(l => badge(l, 'primary')).join(' ') || `<span class="muted small">${t('user.lineUnknown')}</span>`
+      }</span></div>`).join('')}</div><p class="hint">${conns} ${t('dash.conns')}</p>`
     : `<p class="muted small">${t('user.noOnline')}</p>`;
 }
 

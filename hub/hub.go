@@ -32,6 +32,7 @@ import (
 
 // SyncedSettings 是需要在主副机之间保持一致的设置项(订阅展示相关)。
 var SyncedSettings = []string{
+	"timezone",
 	"upstreamTestUrl", "subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subUpdates",
 	"subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice",
 }
@@ -230,26 +231,28 @@ func upsertSetting(tx *gorm.DB, k, v string) {
 // RecentConn 数据面日志里聚合出的一条"源 IP × 线路"入站记录(诊断用)。
 type RecentConn struct {
 	IP       string `json:"ip"`
+	User     string `json:"user,omitempty"` // 认证成功的用户名(日志里带 [用户] 的那条)
 	Line     string `json:"line"`
 	Protocol string `json:"protocol"`
 	Count    int    `json:"count"`
-	Last     string `json:"last"`
+	Ts       int64  `json:"ts"`               // 最近一次的绝对时间(unix 秒),由各机按本机时区解析
 	Server   string `json:"server,omitempty"` // 主机汇总时标注来自哪台服务器
 }
 
 // Report 是副机上报的状态。
 type Report struct {
-	Version     string               `json:"version"`
-	Hostname    string               `json:"hostname"`
-	CoreRunning bool                 `json:"coreRunning"`
-	Uptime      uint32               `json:"uptime"`
-	Revision    string               `json:"revision"` // 副机当前已应用的修订号
-	Counters    []model.AgentCounter `json:"counters"`
-	Onlines     map[string][]string  `json:"onlines"` // 用户 → 在线源 IP
-	OnlineLines []string             `json:"onlineLines"`
-	CertDays    int                  `json:"certDays"`
-	PublicIP    string               `json:"publicIp"`        // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
-	Conns       []RecentConn         `json:"conns,omitempty"` // 最近入站连接,主机概览汇总展示
+	Version         string                         `json:"version"`
+	Hostname        string                         `json:"hostname"`
+	CoreRunning     bool                           `json:"coreRunning"`
+	Uptime          uint32                         `json:"uptime"`
+	Revision        string                         `json:"revision"` // 副机当前已应用的修订号
+	Counters        []model.AgentCounter           `json:"counters"`
+	Onlines         map[string][]string            `json:"onlines"`                   // 用户 → 在线源 IP
+	OnlineLinesByIP map[string]map[string][]string `json:"onlineLinesByIp,omitempty"` // 用户 → 源 IP → 线路名
+	OnlineLines     []string                       `json:"onlineLines"`
+	CertDays        int                            `json:"certDays"`
+	PublicIP        string                         `json:"publicIp"`        // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
+	Conns           []RecentConn                   `json:"conns,omitempty"` // 最近入站连接,主机概览汇总展示
 }
 
 // ApplyCounters 把副机的单调账本按游标并入主机:只计增量;计数器回绕(副机重装)时游标归零重认。
@@ -371,19 +374,23 @@ type Deps struct {
 }
 
 type Hub struct {
-	d        Deps
-	mu       sync.Mutex
-	status   map[uint]*NodeStatus
-	pushed   map[uint]string
-	remote   map[uint]map[string][]string // node → user → ips
-	revision string
-	stop     chan struct{}
-	wg       sync.WaitGroup
-	clients  map[bool]*http.Client
+	d      Deps
+	mu     sync.Mutex
+	status map[uint]*NodeStatus
+	pushed map[uint]string
+	remote map[uint]map[string][]string // node → user → ips
+	// remoteLines 副机上报的 用户 → 源 IP → 线路名;nodeNames 用于在面板里给线路加服务器后缀
+	remoteLines map[uint]map[string]map[string][]string
+	nodeNames   map[uint]string
+	revision    string
+	stop        chan struct{}
+	wg          sync.WaitGroup
+	clients     map[bool]*http.Client
 }
 
 func New(d Deps) *Hub {
-	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{}, stop: make(chan struct{}),
+	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{},
+		remoteLines: map[uint]map[string]map[string][]string{}, nodeNames: map[uint]string{}, stop: make(chan struct{}),
 		clients: map[bool]*http.Client{
 			false: {Timeout: 25 * time.Second},
 			true:  {Timeout: 25 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}},
@@ -471,6 +478,8 @@ func (h *Hub) tick() {
 		}
 		h.mu.Lock()
 		h.remote[n.Id] = rep.Onlines
+		h.remoteLines[n.Id] = rep.OnlineLinesByIP
+		h.nodeNames[n.Id] = n.Name
 		h.mu.Unlock()
 	}
 	h.mu.Lock()
@@ -666,6 +675,28 @@ func (h *Hub) RemoteIPs(user string) []string {
 		return nil
 	}
 	return keys(set)
+}
+
+// RemoteIPLines 返回各副机上 该用户的 源 IP → 线路名(线路名已带服务器后缀,如 "香港1-台湾")。
+func (h *Hub) RemoteIPLines(user string) map[string][]string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := map[string][]string{}
+	for id, m := range h.remoteLines {
+		name := h.nodeNames[id]
+		for ip, lines := range m[user] {
+			for _, l := range lines {
+				if name != "" {
+					l += "-" + name
+				}
+				out[ip] = append(out[ip], l)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // RemoteOnlineUsers 返回在任一副机上在线的用户名。

@@ -1,6 +1,6 @@
 // 零依赖 SVG 流量图:按时段聚合的堆叠柱状图(下行在下、上行在上),悬停显示该时段明细,
 // 顶部汇总 总量/峰值,Y 轴取整刻度,X 轴按桶宽选择 时:分 / 月/日 标签。
-import { fmtBytes } from './ui.js';
+import { fmtBytes, tzDate } from './ui.js';
 
 const pad2 = n => String(n).padStart(2, '0');
 
@@ -16,17 +16,19 @@ function niceMax(v) {
   return Math.ceil(x) * unit;
 }
 
+// 时间一律按面板时区取墙上时间(tzDate 平移后用 getUTC*)
+const day = d => `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+const hm = d => `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
+
 function labelFor(t, span, showDate) {
-  const d = new Date(t * 1000);
-  if (span >= 86400) return `${d.getMonth() + 1}/${d.getDate()}`;
-  if (showDate) return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const d = tzDate(t);
+  if (span >= 86400) return day(d);
+  if (showDate) return `${day(d)} ${hm(d)}`;
+  return hm(d);
 }
 
 function rangeText(t, span) {
-  const a = new Date(t * 1000), b = new Date((t + span) * 1000);
-  const day = d => `${d.getMonth() + 1}/${d.getDate()}`;
-  const hm = d => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const a = tzDate(t), b = tzDate(t + span);
   if (span >= 86400) return day(a);
   return `${day(a)} ${hm(a)} – ${hm(b)}`;
 }
@@ -74,8 +76,8 @@ export function barChart(container, points, opts = {}) {
   if (multiDay) {
     const dayStarts = [];
     for (let i = 0; i < n; i++) {
-      const d = new Date(points[i].t * 1000);
-      if (d.getHours() === 0 && d.getMinutes() === 0) dayStarts.push(i);
+      const d = tzDate(points[i].t);
+      if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) dayStarts.push(i);
     }
     const step = Math.max(1, Math.ceil(dayStarts.length / 8));
     dayStarts.forEach((i, k) => { if (k % step === 0) put(i, labelFor(points[i].t, 86400)); });
