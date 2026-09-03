@@ -102,6 +102,7 @@ function renderRows() {
         <details class="menu"><summary class="btn sm">${t('common.more')} ▾</summary><div class="menu-list">
           <button data-act="user.copy" data-id="${u.id}" data-fmt="clash">${t('user.subClash')}</button>
           <button data-act="user.copy" data-id="${u.id}" data-fmt="link">${t('user.subLink')}</button>
+          <button data-act="user.copy" data-id="${u.id}" data-fmt="json">${t('user.subJson')}</button>
           <button data-act="user.renew" data-id="${u.id}">${t('user.renew')}</button>
           <button data-act="user.extend" data-id="${u.id}">${t('user.extend')}</button>
           <button data-act="user.reset" data-id="${u.id}">${t('user.reset')}</button>

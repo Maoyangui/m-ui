@@ -129,6 +129,7 @@ m-ui            # 菜单选 10 "更新到最新版"
 
 - 通用链接:`https://<域名或IP>:2056/sub/<用户名>`,适用于 nextin、sing-box、Shadowrocket、Surge、Quantumult X、Loon、Karing 等。
 - Clash:在链接后加 `?format=clash`,适用于 mihomo / Clash Verge / Stash 等;每条线路生成一个按延迟自动选择的入口组。
+- sing-box:在链接后加 `?format=json`,输出完整的 sing-box 客户端配置(TUN + 分组 + DNS + 分流),SFA(Android)/ SFI(iOS)/ 桌面版直接作为远程配置导入,落地页有一键导入。
 - 浏览器打开链接显示落地页:用量、到期、各客户端一键导入、二维码、自定义公告与客服信息。
 - 节点地址默认用**服务器 IP**、域名只作 SNI,避免客户端本地 DNS 被污染导致连不上;可在设置里改为域名。
 - 多服务器时每条线路按服务器各出一个节点,名称后缀为服务器名;流量倍率不为 1 的服务器会带 `x2` 之类的标记。

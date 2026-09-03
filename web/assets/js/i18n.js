@@ -240,6 +240,7 @@ const zh = {
   'app.nodeReadOnly': '本机是副服务器:这里的内容由主机统一下发、只读。请到主机面板修改。',
   'dash.localRunning': '本机在线 {n}',
   'set.pathHelp': '保存即生效,浏览器会自动跳到新地址', 'set.subPathHelp': '保存即生效;用户已有的订阅地址会失效,需要重新分发', 'set.pathChanged': '面板路径已改为 {p},正在跳转…',
+  'user.subJson': 'sing-box 订阅',
 };
 
 const en = {
@@ -483,6 +484,7 @@ const en = {
   'app.nodeReadOnly': 'This is a node: everything here is pushed by the master and read-only. Make changes on the master panel.',
   'dash.localRunning': '{n} running here',
   'set.pathHelp': 'Takes effect immediately; the browser jumps to the new address', 'set.subPathHelp': 'Immediate; existing subscription URLs stop working and must be re-sent', 'set.pathChanged': 'Panel path changed to {p}, redirecting…',
+  'user.subJson': 'sing-box subscription',
 };
 
 const dicts = { zh, en };

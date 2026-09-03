@@ -423,7 +423,7 @@ func (s *Server) subLinks(u model.User) map[string]string {
 		host = "<服务器IP或域名>"
 	}
 	base := fmt.Sprintf("%s://%s:%d%s%s", scheme, host, s.settingInt("subPort", 2056), s.subPath(), u.Name)
-	return map[string]string{"link": base, "clash": base + "?format=clash"}
+	return map[string]string{"link": base, "clash": base + "?format=clash", "json": base + "?format=json"}
 }
 
 // subPath 订阅路径,始终以 / 开头结尾(默认 /sub/)。

@@ -131,6 +131,7 @@ Merge nodes from elsewhere into your subscriptions: a single share link, or a wh
 
 - Universal: `https://<domain-or-ip>:2056/sub/<user>` for nextin, sing-box, Shadowrocket, Surge, Quantumult X, Loon, Karing and others.
 - Clash: append `?format=clash` for mihomo / Clash Verge / Stash; each line becomes a latency-selected group of entries.
+- sing-box: append `?format=json` for a complete sing-box client config (TUN, groups, DNS, basic routing) that SFA (Android), SFI (iOS) and the desktop build import as a remote profile; the landing page has a one-tap import button.
 - Opening the link in a browser shows a landing page: usage, expiry, one-tap import for each client, QR codes, custom notice and support contact.
 - Node addresses default to the **server IP** with the domain only as SNI, so a poisoned local DNS on the client cannot break connectivity; switch to domain in Settings if you prefer.
 - With several servers each line appears once per server, suffixed with the server name; servers with a traffic ratio other than 1 get a tag such as `x2`.

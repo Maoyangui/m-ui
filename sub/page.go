@@ -86,6 +86,7 @@ type pageData struct {
 	ResetText              string
 	UpdateHours            int
 	SubLink, SubClash      string
+	SubJSON                string // sing-box 远程配置(SFA / SFI)
 	QRClash, QRLink        template.URL
 	Imports                []importLink
 	Lines                  []pageLine
@@ -108,8 +109,7 @@ func buildPageData(r *http.Request, subPath string, user model.User, lines []mod
 	d := pageData{
 		Lang: pageLang(r), Icon: template.URL(brand.DataURI), Title: title, Notice: notice, Support: support, Name: user.Name,
 		UsedText: fmtBytesHuman(used), Unlimited: user.Volume == 0, UpdateHours: opt.UpdateHours,
-		SubLink: base, SubClash: clashURL,
-		QRClash: template.URL(base + "/qr?format=clash"), QRLink: template.URL(base + "/qr?format=link"),
+		SubLink: base, SubClash: clashURL, SubJSON: base + "?format=json", QRClash: template.URL(base + "/qr?format=clash"), QRLink: template.URL(base + "/qr?format=link"),
 		Year: time.Now().Year(),
 	}
 	if user.Volume > 0 {
@@ -140,6 +140,7 @@ func buildPageData(r *http.Request, subPath string, user model.User, lines []mod
 	d.Imports = []importLink{
 		{Name: "Clash / Mihomo", Hint: "Clash Verge · FlClash · ClashMeta", Href: template.URL("clash://install-config?url=" + enc(clashURL) + "&name=" + enc(title))},
 		{Name: "Shadowrocket", Hint: "iOS", Href: template.URL("shadowrocket://add/sub://" + base64.StdEncoding.EncodeToString([]byte(base)) + "?remark=" + enc(title))},
+		{Name: "sing-box", Hint: "SFA Android · SFI iOS · Desktop", Href: template.URL("sing-box://import-remote-profile?url=" + enc(base+"?format=json") + "#" + enc(title))},
 		{Name: "Hiddify", Hint: "Android · iOS · Desktop", Href: template.URL("hiddify://import/" + clashURL)},
 		{Name: "Stash", Hint: "iOS · macOS", Href: template.URL("stash://install-config?url=" + enc(clashURL) + "&name=" + enc(title))},
 	}

@@ -48,7 +48,8 @@
   "createdAt": 1756000000, "onlineAt": 1756800000, "onlineIps": ["1.2.3.4"],
   "lineIds": [1, 2], "extIds": [],
   "subLink": "https://example.com:2056/sub/alice",
-  "subClash": "https://example.com:2056/sub/alice?format=clash"
+  "subClash": "https://example.com:2056/sub/alice?format=clash",
+  "subJson": "https://example.com:2056/sub/alice?format=json"
 }
 ```
 

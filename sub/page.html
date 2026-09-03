@@ -58,13 +58,15 @@ button{border:1px solid var(--border);background:var(--card);color:var(--text);b
   <div class="card">
     <h2>{{if eq .Lang "zh"}}一键导入{{else}}Import into an app{{end}}</h2>
     <div class="apps">{{range .Imports}}<a class="app" href="{{.Href}}"><b>{{.Name}}</b><span>{{.Hint}}</span></a>{{end}}</div>
-    <p class="hint">{{if eq .Lang "zh"}}其它客户端(nextin、sing-box、Surge、Quantumult X、Loon、Karing 等):复制下方地址,在 App 里"添加订阅"粘贴即可;Clash 类用 Clash 地址,其余用通用地址。{{else}}Other apps (nextin, sing-box, Surge, Quantumult X, Loon, Karing…): copy a link below and paste it into the app's "add subscription"; Clash-family apps take the Clash link, everything else the universal link.{{end}}</p>
+    <p class="hint">{{if eq .Lang "zh"}}其它客户端:复制下方地址,在 App 里"添加订阅"粘贴即可。Clash 类用 Clash 地址;sing-box(SFA / SFI)用 sing-box 地址;nextin、Surge、Quantumult X、Loon、Karing 等用通用地址。{{else}}Other apps: copy a link below and paste it into the app's "add subscription". Clash-family apps take the Clash link; sing-box (SFA / SFI) takes the sing-box link; nextin, Surge, Quantumult X, Loon, Karing and the rest take the universal link.{{end}}</p>
   </div>
 
   <div class="card">
     <h2>{{if eq .Lang "zh"}}订阅地址{{else}}Subscription links{{end}}</h2>
     <div class="link"><code id="l1">{{.SubClash}}</code><button onclick="cp('l1')">Clash</button></div>
     <div class="link"><code id="l2">{{.SubLink}}</code><button onclick="cp('l2')">{{if eq .Lang "zh"}}通用{{else}}Links{{end}}</button></div>
+    <div class="link"><code id="l3">{{.SubJSON}}</code><button onclick="cp('l3')">sing-box</button></div>
+    <div class="link"><code id="l3">{{.SubJSON}}</code><button onclick="cp('l3')">sing-box</button></div>
     <div class="qrs">
       <figure><img src="{{.QRClash}}" alt="QR"><figcaption>Clash</figcaption></figure>
       <figure><img src="{{.QRLink}}" alt="QR"><figcaption>{{if eq .Lang "zh"}}通用链接{{else}}Links{{end}}</figcaption></figure>

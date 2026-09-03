@@ -53,7 +53,7 @@ func TestBuildPage(t *testing.T) {
 	if !d.HasExpiry || d.Expired || d.StatusText != "active" || d.Lang != "zh" {
 		t.Fatalf("状态不符: %+v", d)
 	}
-	if len(d.Imports) != 4 || !strings.HasPrefix(string(d.Imports[0].Href), "clash://install-config?url=https%3A%2F%2Fsub.example") {
+	if len(d.Imports) != 5 || !strings.HasPrefix(string(d.Imports[0].Href), "clash://install-config?url=https%3A%2F%2Fsub.example") || !strings.HasPrefix(string(d.Imports[2].Href), "sing-box://import-remote-profile?url=") || d.SubJSON != "https://sub.example:2056/sub/alice?format=json" {
 		t.Fatalf("导入链接不符: %+v", d.Imports)
 	}
 	if len(d.Lines) != 2 || d.Lines[1].TLS != "reality" {

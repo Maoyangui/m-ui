@@ -276,7 +276,8 @@ func (s *Server) handle() http.HandlerFunc {
 		format := r.URL.Query().Get("format")
 
 		var res Result
-		if format == "clash" {
+		switch format {
+		case "clash":
 			out, err := BuildClashSub(user, lines, opt)
 			if err != nil {
 				s.log(r, name, 500)
@@ -284,7 +285,15 @@ func (s *Server) handle() http.HandlerFunc {
 				return
 			}
 			res = out
-		} else {
+		case "json", "sing-box", "singbox", "sfa":
+			out, err := BuildSingBoxSub(user, lines, opt)
+			if err != nil {
+				s.log(r, name, 500)
+				http.Error(w, "生成失败: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			res = out
+		default:
 			res = BuildLinkSub(user, lines, opt)
 		}
 

@@ -145,6 +145,7 @@ type apiUserView struct {
 	ExtIds      []uint   `json:"extIds"`
 	SubLink     string   `json:"subLink"`
 	SubClash    string   `json:"subClash"`
+	SubJSON     string   `json:"subJson"` // sing-box 远程配置地址
 }
 
 func (s *Server) apiUser(u model.User) apiUserView {
@@ -160,8 +161,7 @@ func (s *Server) apiUser(u model.User) apiUserView {
 		DeviceLimit: u.DeviceLimit, SpeedUp: u.SpeedUp, SpeedDown: u.SpeedDown, Remark: u.Remark, Desc: u.Desc,
 		CreatedAt: u.CreatedAt, OnlineAt: u.OnlineAt,
 		OnlineIPs: mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
-		LineIds:   ids, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"],
-	}
+		LineIds:   ids, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}
 }
 
 func (s *Server) apiListUsers(w http.ResponseWriter, r *http.Request) {
