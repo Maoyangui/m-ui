@@ -576,6 +576,11 @@ func (s *Server) validateUpstream(up *model.Upstream) error {
 	if up.Name == "" {
 		return errors.New("上游名称不能为空")
 	}
+	// direct / block 是内置出站的标签:重名会让整份配置的出站标签冲突,
+	// 单独校验这个上游时看不出来,等到重载数据面才炸。
+	if n := strings.ToLower(up.Name); n == "direct" || n == "block" {
+		return errors.New("上游名称不能用 direct 或 block(内置出站占用)")
+	}
 	if up.Type == "" {
 		return errors.New("上游类型不能为空")
 	}

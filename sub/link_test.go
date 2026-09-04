@@ -2,6 +2,7 @@ package sub
 
 import (
 	"encoding/json"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -47,13 +48,14 @@ func TestLinkFormatsMatchSUI(t *testing.T) {
 	}
 }
 
-// ss 用自定义地址(网址节点指向独立服务器),备注原样、地址取 addrs。
+// ss 用自定义地址(网址节点指向独立服务器),地址取 addrs;备注按 URL 片段编码,
+// 与其它协议一致(线路名里出现空格或 # 时不会把链接弄坏,客户端解码后显示原名)。
 func TestShadowsocksLinkWithAddr(t *testing.T) {
 	user := mkUser()
 	opts, _ := json.Marshal(map[string]interface{}{"method": "aes-256-gcm"})
 	addrs, _ := json.Marshal([]map[string]interface{}{{"server": "20.189.113.56", "server_port": 29937}})
 	line := model.Line{Name: "网址:www.liumeiti.vip/www.joinvip.vip", Protocol: "shadowsocks", Port: 29937, Options: opts, Addrs: addrs}
-	want := "ss://YWVzLTI1Ni1nY206T2hyNU5ZbmRIWURnWVhVYWZFTzlQeG9OVkIyT3dsRkltZTkydVYxaFkzbz0=@20.189.113.56:29937#网址:www.liumeiti.vip/www.joinvip.vip"
+	want := "ss://YWVzLTI1Ni1nY206T2hyNU5ZbmRIWURnWVhVYWZFTzlQeG9OVkIyT3dsRkltZTkydVYxaFkzbz0=@20.189.113.56:29937#%E7%BD%91%E5%9D%80:www.liumeiti.vip/www.joinvip.vip"
 	got := GenerateLinks(user, []model.Line{line}, hkEntry)
 	if len(got) != 1 || got[0] != want {
 		t.Errorf("ss link\n want: %s\n got:  %v", want, got)
@@ -156,4 +158,39 @@ func diffLines(a, b map[string]bool) string {
 		only = only[:8]
 	}
 	return strings.Join(only, "\n")
+}
+
+// 线路名里有空格、# 或中文时,所有协议的链接都必须仍然可解析(备注按片段编码)。
+func TestRemarkEncodingAcrossProtocols(t *testing.T) {
+	user := model.User{Name: "u", Credentials: []byte(`{"hysteria2":{"password":"p"},"anytls":{"password":"p"},
+		"tuic":{"uuid":"11111111-1111-1111-1111-111111111111","password":"p"},"trojan":{"password":"p"},
+		"vless":{"uuid":"22222222-2222-2222-2222-222222222222"},"vmess":{"uuid":"33333333-3333-3333-3333-333333333333"},
+		"shadowsocks16":{"password":"aaaaaaaaaaaaaaaaaaaaaa=="},"socks":{"username":"u","password":"p"},"http":{"username":"u","password":"p"}}`)}
+	lines := []model.Line{
+		{Name: "香港 1 #促销", Protocol: "hysteria2", Port: 1, Enabled: true},
+		{Name: "香港 1 #促销", Protocol: "anytls", Port: 2, Enabled: true},
+		{Name: "香港 1 #促销", Protocol: "shadowsocks", Port: 3, Enabled: true, Options: []byte(`{"method":"2022-blake3-aes-128-gcm","password":"c2VydmVycHNrc2VydmVycHNr"}`)},
+		{Name: "香港 1 #促销", Protocol: "tuic", Port: 4, Enabled: true},
+		{Name: "香港 1 #促销", Protocol: "trojan", Port: 5, Enabled: true, Tls: []byte(`{"mode":"cert"}`)},
+		{Name: "香港 1 #促销", Protocol: "vless", Port: 6, Enabled: true},
+		{Name: "香港 1 #促销", Protocol: "socks", Port: 7, Enabled: true},
+	}
+	for _, l := range lines {
+		links := GenerateLinks(user, []model.Line{l}, []Entry{{Host: "hk.example"}})
+		if len(links) == 0 {
+			t.Fatalf("%s 没生成链接", l.Protocol)
+		}
+		for _, link := range links {
+			u, err := url.Parse(link)
+			if err != nil {
+				t.Fatalf("%s 链接解析失败: %v (%s)", l.Protocol, err, link)
+			}
+			if u.Fragment != l.Name {
+				t.Fatalf("%s 备注应还原成线路名,得 %q(%s)", l.Protocol, u.Fragment, link)
+			}
+			if strings.Contains(link, " ") {
+				t.Fatalf("%s 链接里不该有裸空格: %s", l.Protocol, link)
+			}
+		}
+	}
 }

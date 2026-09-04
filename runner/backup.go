@@ -2,6 +2,7 @@ package runner
 
 import (
 	"errors"
+	"github.com/Maoyangui/m-ui/notify"
 	"io"
 	"os"
 	"path/filepath"
@@ -146,7 +147,7 @@ func (r *Runner) backupLoop(stop <-chan struct{}) {
 			bf, err := r.CreateBackupFile()
 			if err != nil {
 				logger.Warning("定时备份失败: ", err)
-				r.notifier.Event("tgOnCore", "🔴 <b>定时备份失败</b>\n"+err.Error())
+				r.notifier.Event("tgOnCore", "🔴 <b>定时备份失败</b>\n"+notify.Esc(err.Error()))
 				continue
 			}
 			logger.Info("定时备份完成: ", bf.Name)

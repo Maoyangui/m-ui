@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"sync"
 
 	"github.com/Maoyangui/m-ui/logger"
 
@@ -22,8 +23,26 @@ var (
 	service_manager  adapter.ServiceManager
 	endpoint_manager adapter.EndpointManager
 	router           adapter.Router
-	factory          log.Factory
+
+	// factory 是包级日志工厂:NewBox 会改写它,而"保存前干跑校验"也走 NewBox。
+	// 干跑发生在 HTTP 处理协程,和运行中数据面创建入站/出站是并发的,所以要加锁;
+	// validateMu 再把并发干跑串起来,免得两次干跑的保存/恢复交叉,把死实例的工厂留在进程里。
+	factoryMu  sync.RWMutex
+	factory    log.Factory
+	validateMu sync.Mutex
 )
+
+func setFactory(f log.Factory) {
+	factoryMu.Lock()
+	factory = f
+	factoryMu.Unlock()
+}
+
+func currentFactory() log.Factory {
+	factoryMu.RLock()
+	defer factoryMu.RUnlock()
+	return factory
+}
 
 type Core struct {
 	isRunning bool

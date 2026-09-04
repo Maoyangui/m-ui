@@ -173,7 +173,8 @@ func shadowsocksURI(line model.Line, user model.User, a addr, remark string) str
 	_ = json.Unmarshal(line.Options, &opts)
 	method, _ := opts["method"].(string)
 	userinfo := base64.StdEncoding.EncodeToString([]byte(method + ":" + ssClientPassword(line, user)))
-	return fmt.Sprintf("ss://%s@%s#%s", userinfo, hostPort(a.server, a.port), remark)
+	// 备注要按 URL 片段编码:线路名里出现空格或 # 时,拼进去会把链接弄坏
+	return withFragment(fmt.Sprintf("ss://%s@%s", userinfo, hostPort(a.server, a.port)), remark)
 }
 
 // ssClientPassword 客户端用的 shadowsocks 密码:2022 系列多用户为 "服务端PSK:用户PSK",

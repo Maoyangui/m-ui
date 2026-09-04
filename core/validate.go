@@ -31,8 +31,13 @@ func ValidateConfig(raw []byte) error {
 		return err
 	}
 	// NewBox 会覆盖包级日志工厂;干跑后恢复,避免影响运行中实例的热更新日志。
-	savedFactory := factory
-	defer func() { factory = savedFactory }()
+	// 并发的干跑要串行执行,否则两次保存/恢复交叉后,留在进程里的会是已关闭实例的工厂。
+	validateMu.Lock()
+	savedFactory := currentFactory()
+	defer func() {
+		setFactory(savedFactory)
+		validateMu.Unlock()
+	}()
 
 	box, err := NewBox(Options{Context: ctx, Options: opt})
 	if err != nil {

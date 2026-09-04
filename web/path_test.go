@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 // 面板路径是用户自己填的:填成 app、/app、app/、带空格、带引号、多斜杠、甚至 /,
@@ -64,5 +65,25 @@ func TestValidatePorts(t *testing.T) {
 		if err := s.validatePorts(in); err != nil {
 			t.Errorf("应通过 %v: %v", in, err)
 		}
+	}
+}
+
+// direct / block 是内置出站标签:上游重名会让整份配置冲突,重载时才炸,得在保存时拦。
+func TestUpstreamReservedNames(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	for _, name := range []string{"direct", "block", "DIRECT", " Block "} {
+		up := model.Upstream{Name: name, Type: "socks"}
+		if err := s.validateUpstream(&up); err == nil {
+			t.Errorf("上游名 %q 应被拒绝", name)
+		}
+	}
+	up := model.Upstream{Name: "warp", Type: "socks"}
+	if err := s.validateUpstream(&up); err != nil {
+		t.Errorf("正常名称应通过: %v", err)
 	}
 }

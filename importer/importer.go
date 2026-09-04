@@ -141,9 +141,15 @@ func importUpstreams(src, dst *gorm.DB, report *Report) (map[string]uint, error)
 			continue
 		}
 		sortIdx++
+		name := ob.Tag
+		// direct / block 是内置出站的标签:同名会让整份配置的出站标签冲突,数据面起不来
+		if n := strings.ToLower(name); n == "direct" || n == "block" {
+			name = ob.Tag + "-1"
+			report.warnf("上游 %q 与内置出站同名,已改名为 %q", ob.Tag, name)
+		}
 		up := model.Upstream{
 			Id:      ob.Id,
-			Name:    ob.Tag,
+			Name:    name,
 			Type:    ob.Type,
 			Options: json.RawMessage(ob.Options),
 			Sort:    sortIdx,

@@ -37,7 +37,7 @@ func (s *Server) handleUsersImport(w http.ResponseWriter, r *http.Request) {
 			os.Remove(tmpName + suffix)
 		}
 	}()
-	if _, err := io.Copy(tmp, f); err != nil {
+	if _, err := io.Copy(tmp, io.LimitReader(f, 512<<20)); err != nil { // 上传文件落盘也要有上限
 		tmp.Close()
 		badRequest(w, err)
 		return

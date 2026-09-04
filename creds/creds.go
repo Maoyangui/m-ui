@@ -19,14 +19,25 @@ const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789
 
 // Password 生成 n 位字母数字口令。
 func Password(n int) string {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return ""
+	// 拒绝采样:直接对 62 取模会偏向字母表开头的 8 个字符(256 % 62 = 8)
+	const limit = 248 // 62 * 4,超过这个值的字节丢弃重取
+	out := make([]byte, 0, n)
+	buf := make([]byte, n)
+	for len(out) < n {
+		if _, err := rand.Read(buf); err != nil {
+			return ""
+		}
+		for _, v := range buf {
+			if v >= limit {
+				continue
+			}
+			out = append(out, alphabet[int(v)%len(alphabet)])
+			if len(out) == n {
+				break
+			}
+		}
 	}
-	for i := range b {
-		b[i] = alphabet[int(b[i])%len(alphabet)]
-	}
-	return string(b)
+	return string(out)
 }
 
 // Base64Key 生成 n 字节随机数据的 base64(shadowsocks 密码要求)。

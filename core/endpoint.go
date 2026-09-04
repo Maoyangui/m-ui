@@ -22,7 +22,7 @@ func (c *Core) AddInbound(config []byte) error {
 	err = inbound_manager.Create(
 		c.GetCtx(),
 		router,
-		factory.NewLogger("inbound/"+inbound_config.Type+"["+inbound_config.Tag+"]"),
+		currentFactory().NewLogger("inbound/"+inbound_config.Type+"["+inbound_config.Tag+"]"),
 		inbound_config.Tag,
 		inbound_config.Type,
 		inbound_config.Options)
@@ -60,7 +60,7 @@ func (c *Core) AddOutbound(config []byte) error {
 	err = outbound_manager.Create(
 		outboundCtx,
 		router,
-		factory.NewLogger("outbound/"+outbound_config.Type+"["+outbound_config.Tag+"]"),
+		currentFactory().NewLogger("outbound/"+outbound_config.Type+"["+outbound_config.Tag+"]"),
 		outbound_config.Tag,
 		outbound_config.Type,
 		outbound_config.Options)
@@ -94,7 +94,7 @@ func (c *Core) AddEndpoint(config []byte) error {
 	err = endpoint_manager.Create(
 		c.GetCtx(),
 		router,
-		factory.NewLogger("endpoint/"+endpoint_config.Type+"["+endpoint_config.Tag+"]"),
+		currentFactory().NewLogger("endpoint/"+endpoint_config.Type+"["+endpoint_config.Tag+"]"),
 		endpoint_config.Tag,
 		endpoint_config.Type,
 		endpoint_config.Options)
@@ -127,7 +127,7 @@ func (c *Core) AddService(config []byte) error {
 
 	err = service_manager.Create(
 		c.GetCtx(),
-		factory.NewLogger("service/"+srv_config.Type+"["+srv_config.Tag+"]"),
+		currentFactory().NewLogger("service/"+srv_config.Type+"["+srv_config.Tag+"]"),
 		srv_config.Tag,
 		srv_config.Type,
 		srv_config.Options)
