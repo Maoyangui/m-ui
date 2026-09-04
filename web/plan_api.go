@@ -319,6 +319,7 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 			u := model.User{Name: name, Enabled: true, Remark: req.Remark, CreatedAt: now}
 			b, _ := json.Marshal(creds.Generate(name))
 			u.Credentials = b
+			s.applySubTokenPolicy(&u) // 批量生成同样按设置决定订阅地址形式
 			lineIds := req.LineIds
 			if plan != nil {
 				if ids := applyPlan(&u, *plan, "new", now); ids != nil {

@@ -64,7 +64,8 @@ p { margin: 0; }
 .brand-name { flex: 1; }
 #nav { display: flex; flex-direction: column; gap: .15rem; flex: 1; }
 #nav a { display: flex; align-items: center; gap: .6rem; padding: .55rem .7rem; border-radius: var(--radius-sm); color: var(--text); font-weight: 500; }
-#nav a .ic { width: 18px; text-align: center; color: var(--muted); font-size: .95rem; }
+#nav a .ic { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); flex: none; }
+#nav a .ic svg { width: 18px; height: 18px; }
 #nav a:hover { background: var(--surface-2); }
 #nav a.active { background: var(--primary-soft); color: var(--primary-text); }
 #nav a.active .ic { color: var(--primary-text); }
@@ -343,3 +344,10 @@ table.grid.conns td.ell { max-width: 14rem; overflow: hidden; text-overflow: ell
 .rs-u .ip-list .ip { font-size: .74rem; padding: .15rem .4rem; }
 /* 线路标签紧凑些,36 条也就三四行 */
 .rs-lines .chip { font-size: .72rem; padding: .1rem .4rem; }
+
+/* 版本号旁的更新提示:平时不出现,有新版本才亮一个小箭头 */
+.sidebar-version { display: flex; align-items: center; gap: .35rem; }
+.update-dot { display: inline-flex; align-items: center; gap: .2rem; border: 1px solid var(--primary); background: transparent; color: var(--primary); border-radius: 999px; padding: 0 .35rem; height: 18px; cursor: pointer; line-height: 1; }
+.update-dot svg { width: 12px; height: 12px; }
+.update-dot:hover { background: var(--primary); color: #fff; }
+.confirm-text { white-space: pre-line; }

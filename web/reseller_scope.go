@@ -249,3 +249,15 @@ func randomSubToken() string {
 	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
 }
+
+// applySubTokenPolicy 决定新用户的订阅地址形式:
+// 设置 subUseUserName 关掉时发一个随机令牌(订阅地址与用户名无关),开着(默认)则沿用用户名。
+// 只在建号时判断一次,改设置不会动到已有用户的订阅地址。
+func (s *Server) applySubTokenPolicy(u *model.User) {
+	if u.SubToken != "" || u.ResellerId > 0 {
+		return // 代理建的用户本来就是随机令牌
+	}
+	if strings.EqualFold(s.setting("subUseUserName"), "false") {
+		u.SubToken = randomSubToken()
+	}
+}

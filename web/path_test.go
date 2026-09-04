@@ -248,3 +248,38 @@ func TestPortBusyOnSave(t *testing.T) {
 		t.Fatalf("与端口无关的设置不该被拦: %v", err)
 	}
 }
+
+// 订阅地址形式:设置开着(默认)用用户名,关掉后新建用户发随机令牌;
+// 改设置不影响已有用户,代理建的用户一律随机令牌。
+func TestSubTokenPolicy(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+
+	u1 := model.User{Name: "a"}
+	s.applySubTokenPolicy(&u1)
+	if u1.SubToken != "" {
+		t.Fatalf("默认应沿用用户名: %q", u1.SubToken)
+	}
+	db.Create(&model.Setting{Key: "subUseUserName", Value: "false"})
+	u2 := model.User{Name: "b"}
+	s.applySubTokenPolicy(&u2)
+	if len(u2.SubToken) < 20 {
+		t.Fatalf("关掉后应发随机令牌: %q", u2.SubToken)
+	}
+	// 已经有地址的用户不会被重新发一个(改设置也不会动到已有用户:改用户走的是字段白名单,不含 sub_token)
+	kept := model.User{Name: "old", SubToken: "KEEPTHISONE1234567890ab"}
+	s.applySubTokenPolicy(&kept)
+	if kept.SubToken != "KEEPTHISONE1234567890ab" {
+		t.Fatalf("已有地址不该被改写: %q", kept.SubToken)
+	}
+	// 代理的用户由代理逻辑发令牌,这里不插手
+	u3 := model.User{Name: "c", ResellerId: 3}
+	s.applySubTokenPolicy(&u3)
+	if u3.SubToken != "" {
+		t.Fatal("代理用户不走这条策略")
+	}
+}

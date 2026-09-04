@@ -182,6 +182,11 @@ function refreshDrawerLive() {
     : `<p class="muted small">${t('user.noOnline')}</p>`;
 }
 
+// 订阅地址是不是用用户名,取决于 设置 → 订阅 的开关(代理建的用户一律随机地址)
+const nameIsSubPath = () => !isReseller() && String((state.settings || {}).subUseUserName).toLowerCase() !== 'false';
+const nameLabel = () => t(nameIsSubPath() ? 'user.f.name' : 'user.f.nameOnly');
+const nameHelp = () => t(nameIsSubPath() ? 'user.f.nameHelp' : 'user.f.nameOnlyHelp');
+
 // ---- 编辑 / 新建(可按套餐填写)----
 function fillFromPlan(planId) {
   const p = state.plans.find(x => x.id === Number(planId));
@@ -203,8 +208,7 @@ function editUser(id) {
   const expiryVal = u.expiry ? new Date(u.expiry * 1000).toISOString().slice(0, 10) : '';
   openModal(id ? t('user.edit') : t('user.add'), `
     <div class="form-grid">
-      ${field(t(isReseller() ? 'user.f.nameOnly' : 'user.f.name'), `<input id="f-name" value="${esc(u.name || '')}">`,
-        t(isReseller() ? 'user.f.nameOnlyHelp' : 'user.f.nameHelp'))}
+      ${field(nameLabel(), `<input id="f-name" value="${esc(u.name || '')}">`, nameHelp())}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(u.remark || '')}">`)}
       ${state.plans.length ? `<div class="full">${field(t('user.fromPlan'), `<div class="row">${planSelect('f-plan', 0)}<button type="button" class="btn" data-act="user.fillPlan">${t('user.fromPlan')}</button></div>`)}</div>` : ''}
       ${field(t('user.f.volume'), `<input id="f-volume" type="number" min="0" value="${u.volume ? (u.volume / 1073741824).toFixed(0) : 0}">`)}

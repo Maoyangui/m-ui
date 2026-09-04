@@ -346,6 +346,7 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request) {
 		s.db.Model(&model.Line{}).Order("sort asc, id asc").Pluck("id", &lineIds)
 	}
 	u.Credentials = generateCredentials(u.Name)
+	s.applySubTokenPolicy(&u) // 外部 API 建号也按设置来
 	if err := s.db.Create(&u).Error; err != nil {
 		badRequest(w, err)
 		return

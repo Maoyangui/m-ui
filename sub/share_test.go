@@ -262,3 +262,21 @@ func TestResellerProfileTitle(t *testing.T) {
 		t.Fatalf("应使用代理的订阅标题: %q", got)
 	}
 }
+
+// 用户有随机订阅地址时,用户名那条路径就不该再能拉到订阅,否则"随机地址"没有意义。
+func TestUserNamePathDisabledWhenTokenIssued(t *testing.T) {
+	s, db := shareServer(t)
+	db.Model(&model.User{}).Where("id = ?", 1).Update("sub_token", "RANDOMTOKEN1234567890ab")
+
+	if w := doReq(s, "GET", "/sub/alice", "curl/8.4.0"); w.Code != 404 {
+		t.Fatalf("发了随机地址后用户名不该再能用,得 %d", w.Code)
+	}
+	if w := doReq(s, "GET", "/sub/RANDOMTOKEN1234567890ab", "curl/8.4.0"); w.Code != 200 {
+		t.Fatalf("随机地址应可用,得 %d", w.Code)
+	}
+	// 没有随机地址的用户仍按用户名
+	db.Model(&model.User{}).Where("id = ?", 1).Update("sub_token", "")
+	if w := doReq(s, "GET", "/sub/alice", "curl/8.4.0"); w.Code != 200 {
+		t.Fatalf("没发随机地址时用户名应可用,得 %d", w.Code)
+	}
+}

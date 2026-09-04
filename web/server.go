@@ -169,6 +169,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"sublogs", s.auth(s.handleSubLogs))
 	mux.HandleFunc(api+"password", s.auth(s.handlePassword))
 	mux.HandleFunc(api+"reload", s.auth(s.handleReload))
+	mux.HandleFunc(api+"update", s.auth(s.masterOnly(s.handleUpdate)))
 	mux.HandleFunc(api+"stats", s.auth(s.handleStats))
 	mux.HandleFunc(api+"stats/top", s.auth(s.handleStatsTop))
 	mux.HandleFunc(api+"onlines", s.auth(s.handleOnlines))
@@ -265,6 +266,7 @@ func (s *Server) Start() error {
 		}
 	}()
 	logger.Info("面板已启动 ", scheme, "://", addr, s.basePath())
+	s.StartUpdateWatch()
 	if err := s.StartReseller(); err != nil {
 		logger.Warning("代理面板启动失败: ", err)
 	}

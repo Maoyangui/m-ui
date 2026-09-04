@@ -261,7 +261,8 @@ func (s *Server) handle() http.HandlerFunc {
 		// 用户名(主面板用户)→ 订阅令牌(代理建的用户)→ 临时共享令牌
 		var user model.User
 		shared := false
-		if err := s.db.Where("name = ? AND COALESCE(reseller_id, 0) = 0 AND enabled = ?", name, true).First(&user).Error; err != nil {
+		byName := s.db.Where("name = ? AND COALESCE(reseller_id, 0) = 0 AND enabled = ? AND COALESCE(sub_token, '') = ''", name, true)
+		if err := byName.First(&user).Error; err != nil {
 			if s.db.Where("sub_token = ? AND enabled = ?", name, true).First(&user).Error != nil {
 				if !s.shareEnabled() || s.db.Where("share_token = ? AND enabled = ?", name, true).First(&user).Error != nil {
 					s.log(r, name, false, 404)

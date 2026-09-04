@@ -1,7 +1,8 @@
 // 应用入口:登录、壳布局、hash 路由、全局状态与定时刷新。
 import { get, post, setUnauthorizedHandler } from './api.js';
 import { t, setLang, getLang, langs } from './i18n.js';
-import { toast, closeModal, closeDrawer, drawerOpen, esc, setTimezone } from './ui.js';
+import { ICONS } from './icons.js';
+import { toast, confirm, closeModal, closeDrawer, drawerOpen, esc, setTimezone } from './ui.js';
 import * as dashboard from './pages/dashboard.js';
 import * as lines from './pages/lines.js';
 import * as upstreams from './pages/upstreams.js';
@@ -24,12 +25,10 @@ export const state = {
 };
 
 const pages = { dashboard, lines, upstreams, exts, users, plans, resellers, account, nodes, cert, backup, ops, logs, admin, settings };
-const masterNav = [
-  ['dashboard', '◉'], ['lines', '⇄'], ['upstreams', '⇪'], ['exts', '⇢'], ['users', '☺'], ['resellers', '⚑'], ['plans', '▤'], ['nodes', '☁'],
-  ['cert', '⚿'], ['backup', '⛁'], ['ops', '⚒'], ['logs', '≡'], ['admin', '⚉'], ['settings', '⚙'],
-];
+const masterNav = ['dashboard', 'lines', 'upstreams', 'exts', 'users', 'resellers', 'plans', 'nodes',
+  'cert', 'backup', 'ops', 'logs', 'admin', 'settings'];
 // 代理面板:同一套前端,只留下代理用得上的几页
-const resellerNav = [['dashboard', '◉'], ['users', '☺'], ['plans', '▤'], ['account', '⚉']];
+const resellerNav = ['dashboard', 'users', 'plans', 'account'];
 export const isReseller = () => (state.status || {}).scope === 'reseller';
 const navFor = () => (isReseller() ? resellerNav : masterNav);
 let current = null;
@@ -114,8 +113,8 @@ function supportLink(a) {
 
 // ---- 壳:导航、角色、主题、语言 ----
 function renderChrome() {
-  document.getElementById('nav').innerHTML = navFor().map(([p, ic]) =>
-    `<a href="#/${p}" data-page="${p}"><span class="ic">${ic}</span>${t('nav.' + p)}</a>`).join('');
+  document.getElementById('nav').innerHTML = navFor().map(p =>
+    `<a href="#/${p}" data-page="${p}"><span class="ic">${ICONS[p] || ''}</span>${t('nav.' + p)}</a>`).join('');
   document.getElementById('modal-cancel').textContent = t('common.cancel');
   document.getElementById('btn-logout').textContent = t('common.logout');
   supportLink(document.getElementById('btn-support'));
@@ -134,6 +133,7 @@ function renderRole() {
     b.className = 'badge ' + (s.role === 'node' ? 'node' : 'primary');
   }
   document.getElementById('sidebar-version').textContent = s.version ? 'v' + s.version : '';
+  refreshUpdateBadge();
   // 默认密码未改:顶部常驻警示
   let bar = document.getElementById('default-pw-bar');
   if (s.defaultPassword) {
@@ -145,6 +145,54 @@ function renderRole() {
     }
     bar.innerHTML = `<span>${t('alert.defaultPw')}</span><a href="#/admin" class="btn sm">${t('alert.changeNow')}</a>`;
   } else if (bar) bar.remove();
+}
+
+// ---- 版本更新 ----
+// 面板自己去查有没有新版本(每 6 小时一次,结果缓存在服务端),有就在版本号旁边亮个小箭头。
+// 更新只替换二进制再重启服务:数据库、证书、备份、设置都不动,用户与订阅地址不变。
+let updateState = null;
+async function refreshUpdateBadge() {
+  const dot = document.getElementById('update-dot');
+  if (!dot || isReseller()) return;
+  try {
+    updateState = await get('update');
+  } catch { return; }
+  dot.hidden = !updateState.hasUpdate;
+  if (updateState.hasUpdate) {
+    dot.innerHTML = ICONS.update;
+    dot.title = t('update.available', { v: updateState.latest });
+  }
+}
+
+document.getElementById('update-dot').addEventListener('click', async () => {
+  if (!updateState) return;
+  const ok = await confirm(
+    [t('update.confirm', { from: 'v' + updateState.current, to: updateState.latest }), t('update.note')].join(String.fromCharCode(10)),
+    { okText: t('update.now') });
+  if (!ok) return;
+  const dot = document.getElementById('update-dot');
+  dot.disabled = true;
+  try {
+    await post('update');
+  } catch (e) {
+    dot.disabled = false;
+    toast(e.message, 'err');
+    return;
+  }
+  toast(t('update.restarting'), 'ok');
+  waitForPanel();
+});
+
+// 面板重启期间接口会短暂不可用:轮询到恢复就自动刷新页面
+async function waitForPanel() {
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const s = await get('status');
+      if (s && s.version) { location.reload(); return; }
+    } catch { /* 还没起来,继续等 */ }
+  }
+  toast(t('update.timeout'), 'err');
 }
 
 document.getElementById('lang-select').addEventListener('change', e => {
@@ -207,7 +255,7 @@ document.addEventListener('click', e => {
 function pageName() {
   const h = location.hash.replace(/^#\/?/, '').split('/')[0];
   // 代理会话下,主面板专属页面一律回概览(那些接口本来也是 403,别让界面误导人)
-  if (!pages[h] || !navFor().some(([n]) => n === h)) return 'dashboard';
+  if (!pages[h] || !navFor().includes(h)) return 'dashboard';
   return h;
 }
 async function route(force = false) {

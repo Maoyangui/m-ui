@@ -691,6 +691,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		p.User.Id = 0
 		p.User.CreatedAt = time.Now().Unix()
+		s.applySubTokenPolicy(&p.User) // 设置里关掉"用用户名作订阅地址"时,发一个随机地址
 		if rid := scope(r); rid > 0 {
 			if err := s.prepareResellerUser(rid, &p.User, p.LineIds); err != nil {
 				badRequest(w, err)
