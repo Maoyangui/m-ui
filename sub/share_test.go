@@ -217,6 +217,11 @@ func TestProfileTitleEncoding(t *testing.T) {
 	if !strings.Contains(h["Content-Disposition"], "filename*=UTF-8''") {
 		t.Fatalf("应带 RFC 5987 文件名: %q", h["Content-Disposition"])
 	}
+	// 中文标题时不能再给 ASCII 回退名:有的客户端只认第一个 filename=,
+	// 会拿它当订阅名(Clash Verge 就会显示成用户名)
+	if strings.Contains(h["Content-Disposition"], "filename=") {
+		t.Fatalf("中文标题不应带 ASCII filename=: %q", h["Content-Disposition"])
+	}
 	for _, v := range h { // 头里不能出现非 ASCII
 		for i := 0; i < len(v); i++ {
 			if v[i] > 127 {

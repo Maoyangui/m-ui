@@ -329,7 +329,11 @@ table.grid.conns td.ell { max-width: 14rem; overflow: hidden; text-overflow: ell
 .ip-list .ip { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
 .ip-lines { display: flex; gap: .25rem; flex-wrap: wrap; justify-content: flex-end; }
 
-/* 代理详情:名下用户卡片 */
-.rs-user { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .6rem .7rem; margin-bottom: .5rem; }
-.rs-user .sub-box { margin: .4rem 0 .35rem; }
-.rs-user .ip-list { margin-top: .3rem; }
+
+/* 代理详情里的用户表:紧凑、名字过长省略、在线 IP 作为附属行 */
+.rs-users { max-height: 46vh; overflow: auto; }
+.rs-users table { font-size: .82rem; }
+.rs-users td, .rs-users th { padding: .3rem .5rem; white-space: nowrap; }
+.rs-users .ell { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; }
+.rs-users .rs-ips td { padding-top: 0; }
+.rs-users .ip-list .ip { font-size: .76rem; padding: .2rem .45rem; }

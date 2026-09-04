@@ -24,17 +24,17 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 |---|---|
 | Lines | Hysteria2, AnyTLS, TUIC, Trojan, VLESS (Reality / Vision), VMess, Shadowsocks (incl. 2022), SOCKS, HTTP, Mixed; WS / gRPC / HTTPUpgrade / HTTP transports; Hysteria2 port hopping; per-server deployment |
 | Upstreams | VLESS / VMess / Trojan / TUIC / Hysteria2 / Shadowsocks / SOCKS exits, import by pasting a share link; latency test, periodic health checks, failure / recovery alerts; one-click WARP |
-| Users | Quota, expiry, periodic reset, concurrent device limit (by source IP, merged across servers), up / down speed limits; auto-disable and kick on overuse or expiry; bulk create, bulk actions, CSV export |
+| Users | Quota, expiry, periodic reset, concurrent device limit (by source IP, merged across servers), up / down speed limits; auto-disable and kick on overuse or expiry; bulk create, bulk actions, CSV export. Reseller-owned users stay in the reseller's panel and out of the main user list |
 | Plans | Templates for quota / duration / devices / speed / lines; apply on create, renew or extend |
 | Resellers | Give a reseller lines plus traffic / device / bandwidth budgets and an expiry; they create users and plans in their own panel (port 2054, path /dl). Usage rolls up to the reseller, and going over quota, expiring or being disabled cuts off all of their users at once |
-| Subscriptions | Universal link and Clash formats; landing page in the browser (usage, expiry, one-tap import, QR); external nodes / external subscriptions merged in; `insecure` added automatically for self-signed certs |
+| Subscriptions | Universal link, Clash and sing-box formats; landing page in the browser (usage, expiry, one-tap import, QR); users can hand out a temporary share link themselves; external nodes / external subscriptions merged in; `insecure` added automatically for self-signed certs |
 | Multi-server | Master pushes config, collects traffic, enforces quotas; per-server traffic ratio; node offline / recovery alerts |
 | Certificates | Let's Encrypt via HTTP-01 or Cloudflare DNS-01, auto-renewal, hot reload without restart; one-click self-signed cert when you have no domain |
 | Backup | One zip with a consistent database snapshot and certificates; upload to restore a whole server; scheduled backups, rotation, push to Telegram; migration wizard |
 | Ops | WARP install / enable / disable / uninstall with exit-IP verification; swap, sysctl + BBR, file limits, NTP |
 | Alerts | Telegram: logins, user expiring / over quota / disabled, upstream failures, data plane down, daily report |
 | Observability | Traffic charts (stacked bars, 1h / 6h / 24h / 7d / 30d), top users, online users and IPs, recent inbound connections for troubleshooting, audit log, subscription access log |
-| Security | bcrypt passwords, CSRF protection, failed-login alerts, two-factor authentication (TOTP), external API tokens |
+| Security | bcrypt passwords, CSRF protection, login cooldown after repeated failures from the same peer, two-factor authentication (TOTP), external API tokens; reseller and admin sessions are strictly separated |
 | Integration | External API for creating users, applying plans, enabling / disabling, renewing and fetching subscription URLs, see [docs/API.md](docs/API.md) |
 
 ## Installation
@@ -43,7 +43,7 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 
 - Linux amd64 or arm64 with systemd (Debian 11+ / Ubuntu 20.04+ recommended)
 - root
-- Open ports: panel `2053/tcp`, subscription `2056/tcp`, plus the ports of the lines you create (TCP or UDP depending on protocol). HTTP-01 certificate issuance also needs `80/tcp` reachable
+- Open ports: panel `2053/tcp`, subscription `2056/tcp`, `2054/tcp` as well when the reseller panel is on, plus the ports of the lines you create (TCP or UDP depending on protocol). HTTP-01 certificate issuance also needs `80/tcp` reachable
 
 ### One-line install (recommended)
 
@@ -98,7 +98,7 @@ The dashboard shows a **Quick start** checklist. In order:
 4. **User**: Users → Add, tick the lines the user may use, or apply a plan.
 5. **Hand out the subscription**: copy the subscription link from the user list, or let the user open the landing page in a browser to scan / import.
 
-No domain is fine: self-signed cert + IP, and subscriptions carry "allow insecure" automatically. Issue a real certificate later and users only need to refresh once.
+No domain is fine: self-signed cert + IP, and every node in the subscription already carries "allow insecure" (`insecure=1` in links, `skip-cert-verify` in Clash, `insecure` in sing-box), so clients need no extra setting. Issue a real certificate later and users only need to refresh once.
 
 ## Feature guide
 
@@ -136,7 +136,9 @@ Hand part of the selling to someone else: create a reseller on the Resellers pag
 - The login name is the reseller's name and **a new reseller has no password**: they log in with the name once and must set a password first, then can change it and enable two-factor auth. "Reset password" on the main panel clears it again.
 - Inside their panel a reseller only sees their own users. Creating one takes just a name — the subscription URL is a long random token, and link / Clash / sing-box formats plus the QR code all work as usual. They can assign lines (only the ones granted to them), quota, expiry, devices and speed limits, and renew, reset, kick, batch-edit or inspect traffic and online devices. **Plans are per-reseller too**: they only see and use the ones they created.
 - Quota: traffic counts **all-time**, so a reseller cannot wash it away by resetting, renewing or deleting users — only the main panel's "Reset traffic" clears it. Devices and up/down bandwidth are allocation budgets: what they hand out cannot add up to more than the total. Expiry, being disabled or going over quota each pull their users from the data plane at once and make their subscriptions return 404.
-- A reseller can set their own landing-page title, notice and support contact (empty inherits the main panel's) and can switch off their own landing page or temporary sharing.
+- A reseller can set their own **profile title** (the name clients show) plus landing-page title, notice and support contact — empty inherits the main panel's — and can switch off their own landing page or temporary sharing.
+- A new reseller has a 24-hour claim window: sign in once with the name and an empty password and set a password. After that the main panel has to reset the password again to reopen the window, so an unclaimed account cannot sit open forever.
+- Reseller users never appear in the main user list or CSV export. The reseller drawer lists them one per row — usage, expiry, online devices — expandable to show which line on which server each IP is using, with their subscription URL one click away.
 - The reseller detail drawer on the main panel lists each of their users with the subscription URL, usage, expiry, online IPs and the lines those IPs are on.
 
 ### Subscriptions
@@ -144,6 +146,7 @@ Hand part of the selling to someone else: create a reseller on the Resellers pag
 - Universal: `https://<domain-or-ip>:2056/sub/<user>` for nextin, sing-box, Shadowrocket, Surge, Quantumult X, Loon, Karing and others.
 - Clash: append `?format=clash` for mihomo / Clash Verge / Stash; each line becomes a latency-selected group of entries.
 - sing-box: append `?format=json` for a complete sing-box client config (TUN, groups, DNS, basic routing) that SFA (Android), SFI (iOS) and the desktop build import as a remote profile; the landing page has a one-tap import button.
+- The name clients show comes from Settings → Subscription → "Profile title" (falling back to the landing-page title, then the remark or username). Non-ASCII titles are sent base64-encoded, so Clash Verge, Shadowrocket and nextin all display them correctly.
 - Opening the link in a browser shows a landing page: usage, expiry, one-tap import for each client, QR codes, custom notice and support contact.
 - Temporary sharing: from the landing page a user can create one random link to lend their subscription, one per user. The link carries the same nodes but a **separate set of credentials** registered under the owner's name, so traffic, devices, speed limits and expiry all count against the owner. Cancelling (or regenerating) pulls those credentials immediately and drops the connections, so nodes already imported by the borrower stop working too. Shared links serve the subscription only, never the landing page. Settings → Subscription page turns the whole thing off.
 - Node addresses default to the **server IP** with the domain only as SNI, so a poisoned local DNS on the client cannot break connectivity; switch to domain in Settings if you prefer.
@@ -194,7 +197,7 @@ Subscription access log, core log (data plane + panel) and audit log. Logging ca
 
 ### Settings
 
-**Time zone** (default Asia/Shanghai; every time in the panel uses it), panel and subscription listen address / port / path / certificate, subscription display options, landing-page text, Telegram notification toggles, upstream check parameters, data-plane stats granularity. Panel and subscription path changes apply immediately; port, listen address and certificate path changes need a restart (button in the page header).
+**Time zone** (default Asia/Shanghai; every time in the panel uses it), listen address · port · path · certificate for the panel, the subscription server and the reseller panel, subscription display options, landing-page text, Telegram notification toggles, upstream check parameters, data-plane stats granularity. Panel and subscription path changes apply immediately; port, listen address and certificate path changes need a restart (button in the page header). The reseller panel can be switched off entirely (`resellerEnabled`) and never starts on nodes.
 
 ## Command line
 
@@ -256,11 +259,15 @@ Existing names only get usage / quota / expiry / enabled updated; new users are 
 
 **Forgot the password or lost the 2FA phone.** Run `m-ui` over SSH: item 5 resets the password (and clears 2FA), item 13 only disables 2FA.
 
-**Where is the data?** `/etc/m-ui/m-ui.db` (database), `/etc/m-ui/cert/` (certificates), `/etc/m-ui/backups/` (scheduled backups). Backup zips contain user credentials and private keys, keep them safe.
+**Wrong subscription name in the client?** Set "Profile title" under Settings → Subscription (a reseller sets theirs on their own subscription-page card). Shadowrocket and Clash Verge name a profile when it is added and never rename it on refresh — re-add it, or use the one-tap import buttons on the landing page, which pass the title along.
+
+**A reseller cannot sign in?** New resellers have a 24-hour claim window: sign in with the reseller name and an empty password, then set a password. Once it expires — or if they forget the password — Resellers → More → Reset password clears it and reopens the window (two-factor is cleared too).
+
+**Where is the data?** `/etc/m-ui/m-ui.db` (database), `/etc/m-ui/cert/` (certificates), `/etc/m-ui/backups/` (scheduled backups). Backup zips contain user credentials and private keys, keep them safe; on restore, certificates are only written back to paths inside the data directory.
 
 ## Development
 
-Go 1.22+. Reality needs the `with_utls` build tag, so every build and test must carry it:
+Go 1.27+ (see go.mod). Reality needs the `with_utls` build tag, so every build and test must carry it:
 
 ```bash
 make build          # host binary
@@ -282,8 +289,13 @@ backup/    backup and restore
 ops/       WARP and system tuning scripts
 hop/       Hysteria2 port hopping (nftables / iptables)
 ext/       external nodes / subscriptions fetching and parsing
+upstream/  share-link parsing (shared by upstream import and the sing-box subscription)
+creds/     per-protocol credential generation
 totp/      two-factor authentication (RFC 6238)
-web/       panel HTTP API and frontend
+notify/    Telegram notifications
+logger/    log buffer behind the panel's log page
+tz/        panel time zone
+web/       panel and reseller-panel HTTP APIs, external API, frontend
 importer/  old panel database import
 brand/     logo and contact details
 ```

@@ -72,12 +72,14 @@ func pathID(r *http.Request, prefix string) (uint, error) {
 // ---- 状态 ----
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	var lineCount, linesEnabled, upstreamCount, userCount, enabledUsers int64
+	var lineCount, linesEnabled, upstreamCount, userCount, enabledUsers, resellerUsers int64
 	s.db.Model(&model.Line{}).Count(&lineCount)
 	s.db.Model(&model.Line{}).Where("enabled = ?", true).Count(&linesEnabled)
 	s.db.Model(&model.Upstream{}).Count(&upstreamCount)
-	s.db.Model(&model.User{}).Count(&userCount)
-	s.db.Model(&model.User{}).Where("enabled = ?", true).Count(&enabledUsers)
+	// 用户数与用户页同口径:只算直属用户,代理的单独给一个数
+	s.db.Model(&model.User{}).Where("COALESCE(reseller_id,0) = 0").Count(&userCount)
+	s.db.Model(&model.User{}).Where("COALESCE(reseller_id,0) = 0 AND enabled = ?", true).Count(&enabledUsers)
+	s.db.Model(&model.User{}).Where("reseller_id > 0").Count(&resellerUsers)
 
 	var totalUp, totalDown int64
 	s.db.Model(&model.User{}).Select("COALESCE(SUM(up+total_up),0)").Scan(&totalUp)
@@ -88,22 +90,23 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := map[string]interface{}{
-		"role":         s.role(),
-		"coreRunning":  s.run.CoreRunning(),
-		"uptime":       s.run.Uptime(),
-		"lines":        lineCount,
-		"upstreams":    upstreamCount,
-		"users":        userCount,
-		"enabledUsers": enabledUsers,
-		"trafficUp":    totalUp,
-		"trafficDown":  totalDown,
-		"domain":       s.setting("webDomain"),
-		"timezone":     s.panelLocation().String(),
-		"goroutines":   runtime.NumGoroutine(),
-		"version":      Version,
-		"repo":         brand.Repo,
-		"onlineUsers":  len(mergeIPs(s.run.Onlines().Users, s.run.Hub().RemoteOnlineUsers())), // 含副机上的在线用户
-		"linesEnabled": linesEnabled,
+		"role":          s.role(),
+		"coreRunning":   s.run.CoreRunning(),
+		"uptime":        s.run.Uptime(),
+		"lines":         lineCount,
+		"upstreams":     upstreamCount,
+		"users":         userCount,
+		"enabledUsers":  enabledUsers,
+		"trafficUp":     totalUp,
+		"trafficDown":   totalDown,
+		"domain":        s.setting("webDomain"),
+		"timezone":      s.panelLocation().String(),
+		"goroutines":    runtime.NumGoroutine(),
+		"version":       Version,
+		"repo":          brand.Repo,
+		"onlineUsers":   len(mergeIPs(s.run.Onlines().Users, s.run.Hub().RemoteOnlineUsers())), // 含副机上的在线用户
+		"linesEnabled":  linesEnabled,
+		"resellerUsers": resellerUsers,
 	}
 	// 快速开始清单用
 	var nodeCount, planCount int64
@@ -607,7 +610,11 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		var users []model.User
-		s.scoped(r, s.db.Order("id asc")).Find(&users)
+		q := s.db.Order("id asc")
+		if scope(r) == 0 {
+			q = q.Where("COALESCE(reseller_id,0) = 0") // 代理的用户不混进主面板用户页
+		}
+		s.scoped(r, q).Find(&users)
 		localName := s.localNodeName()
 		localLines, remoteLines := s.run.OnlineIPLines(), s.run.Hub().RemoteIPLinesAll()
 		localIPs, remoteIPs := s.run.OnlineIPsAll(), s.run.Hub().RemoteIPsAll() // 一次锁拿全量,别按用户逐个抢数据面的锁

@@ -1,7 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, progress, field, check, empty, fv, fchk, copy } from '../ui.js';
+import { esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy } from '../ui.js';
 
 export const title = () => t('rs.title');
 export const subtitle = () => t('rs.subtitle');
@@ -97,23 +97,29 @@ async function showDetail(id) {
       </dl>
     </section>
     <section><h3>${t('rs.users')} <span class="badge">${users.length}</span></h3>
-      ${users.length ? users.map(u => userCard(u)).join('') : `<p class="muted small">${t('rs.noUsers')}</p>`}
+      ${users.length ? `<div class="table-wrap rs-users"><table class="grid">
+        <thead><tr><th>${t('common.name')}</th><th>${t('user.usage')}</th><th>${t('user.expiry')}</th><th>${t('rs.online')}</th><th></th></tr></thead>
+        <tbody>${users.map(u => userRow(u)).join('')}</tbody></table></div>`
+        : `<p class="muted small">${t('rs.noUsers')}</p>`}
     </section>`);
 }
 
-function userCard(u) {
+// 一行一个用户:名称、用量、到期、在线设备数;点"在线"看是哪些 IP 走哪条线路
+function userRow(u) {
   const used = (u.up || 0) + (u.down || 0);
+  const ips = u.onlineIps || [];
   const lines = u.onlineLines || {};
-  return `<div class="rs-user">
-    <div class="row" style="justify-content:space-between;align-items:baseline">
-      <b>${esc(u.name)}</b>
-      <span class="muted small">${fmtBytes(used)}${u.volume ? ' / ' + fmtBytes(u.volume) : ''} · ${u.expiry ? fmtDay(u.expiry) : t('user.never')}</span>
-    </div>
-    <div class="sub-box"><code>${esc(u.sub.link)}</code><button class="btn sm" data-act="rs.copy" data-id="${esc(u.sub.link)}">${t('common.copy')}</button></div>
-    ${(u.onlineIps || []).length ? `<div class="ip-list">${u.onlineIps.map(ip => `<div class="ip"><span class="mono">${esc(ip)}</span><span class="ip-lines">${
-      (lines[ip] || []).map(l => badge(l, 'primary')).join(' ') || `<span class="muted small">${t('user.lineUnknown')}</span>`}</span></div>`).join('')}</div>`
-      : `<p class="muted small">${t('user.noOnline')}</p>`}
-  </div>`;
+  const detail = ips.length
+    ? `<tr class="rs-ips"><td colspan="5"><div class="ip-list">${ips.map(ip => `<div class="ip"><span class="mono">${esc(ip)}</span><span class="ip-lines">${
+        (lines[ip] || []).map(l => badge(l, 'primary')).join(' ') || `<span class="muted small">${t('user.lineUnknown')}</span>`}</span></div>`).join('')}</div></td></tr>`
+    : '';
+  return `<tr>
+    <td class="primary-cell ell" title="${esc(u.name)}">${dot(ips.length > 0)}${esc(u.name)}</td>
+    <td class="num">${fmtBytes(used, 1)}${u.volume ? ` <span class="muted small">/ ${fmtBytes(u.volume, 0)}</span>` : ''}</td>
+    <td class="mono small">${u.expiry ? fmtDay(u.expiry) : t('user.never')}</td>
+    <td class="num">${ips.length}</td>
+    <td class="actions"><button class="btn sm ghost" title="${t('user.subLink')}" data-act="rs.copy" data-id="${esc(u.sub.link)}">⧉</button></td>
+  </tr>${detail}`;
 }
 
 // ---- 新建 / 编辑 ----

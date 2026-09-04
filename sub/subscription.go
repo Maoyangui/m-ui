@@ -92,7 +92,7 @@ func headers(user model.User, opt Options, contentType string) map[string]string
 		"Subscription-Userinfo":   fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", user.Up, user.Down, user.Volume, user.Expiry),
 		"Profile-Update-Interval": fmt.Sprintf("%d", opt.UpdateHours),
 		"Profile-Title":           encodeTitle(title),
-		"Content-Disposition":     contentDisposition(title),
+		"Content-Disposition":     contentDisposition(title, user.Name),
 	}
 }
 
@@ -104,18 +104,28 @@ func encodeTitle(title string) string {
 	return "base64:" + base64.StdEncoding.EncodeToString([]byte(title))
 }
 
-// contentDisposition 同时给出 ASCII 回退名与 RFC 5987 的 UTF-8 名。
-func contentDisposition(title string) string {
-	ascii := "subscription"
-	if isASCII(title) && strings.TrimSpace(title) != "" {
-		ascii = strings.Map(func(r rune) rune {
+// contentDisposition 客户端(Shadowrocket、Clash Verge 等)拿这个头给订阅命名。
+//
+// 关键:标题含中文时**只发 filename*,不要再给 ASCII 的 filename=**。
+// 有些客户端只认它遇到的第一个 filename=,会把那个回退名当订阅名
+// (于是显示成用户名或 "subscription"),UTF-8 那份直接被忽略。
+func contentDisposition(title, fallback string) string {
+	name := strings.TrimSpace(title)
+	if name == "" {
+		name = strings.TrimSpace(fallback)
+	}
+	if name == "" {
+		name = "subscription"
+	}
+	if isASCII(name) {
+		return fmt.Sprintf("attachment; filename=%q", strings.Map(func(r rune) rune {
 			if r == 34 || r == 92 || r < 32 {
 				return -1
 			}
 			return r
-		}, title)
+		}, name))
 	}
-	return fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s", ascii, url.PathEscape(title))
+	return "attachment; filename*=UTF-8''" + url.PathEscape(name)
 }
 
 func isASCII(s string) bool {

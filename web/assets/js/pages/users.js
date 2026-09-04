@@ -91,7 +91,7 @@ function renderRows() {
     const ips = (u.onlineIps || []).length;
     return `<tr class="${selected.has(u.id) ? 'selected' : ''}">
       <td><input type="checkbox" class="sel" data-change="user.sel" data-id="${u.id}" ${selected.has(u.id) ? 'checked' : ''}></td>
-      <td class="primary-cell">${dot(online.has(u.name))}<a href="#" data-act="user.detail" data-id="${u.id}">${esc(u.name)}</a>${u.resellerName && !isReseller() ? ' ' + badge(u.resellerName, 'warn') : ''}${u.remark ? `<div class="sub-cell">${esc(u.remark)}</div>` : ''}</td>
+      <td class="primary-cell">${dot(online.has(u.name))}<a href="#" data-act="user.detail" data-id="${u.id}">${esc(u.name)}</a>${u.remark ? `<div class="sub-cell">${esc(u.remark)}</div>` : ''}</td>
       <td>${statusBadge(u)}</td>
       <td><span class="num">${fmtBytes(used, 1)}</span> <span class="muted small">/ ${u.volume ? fmtBytes(u.volume, 0) : t('common.unlimited')}</span>${progress(used, u.volume)}</td>
       <td>${expiryCell(u)}</td>

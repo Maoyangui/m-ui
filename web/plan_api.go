@@ -458,7 +458,7 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUsersExport(w http.ResponseWriter, r *http.Request) {
 	var users []model.User
-	s.db.Order("id asc").Find(&users)
+	s.db.Where("COALESCE(reseller_id,0) = 0").Order("id asc").Find(&users)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=users-"+time.Now().Format("20060102")+".csv")
 	w.Write([]byte("\xEF\xBB\xBF")) // BOM,Excel 正确识别 UTF-8
