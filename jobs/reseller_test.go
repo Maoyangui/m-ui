@@ -50,3 +50,13 @@ func TestResellerQuotaDisablesItsUsers(t *testing.T) {
 		t.Fatal("停用后应热更新数据面")
 	}
 }
+
+// 定时任务里出 panic 不能把进程带走。
+func TestRunSafelyRecovers(t *testing.T) {
+	done := false
+	runSafely("测试", func() { panic("boom") })
+	runSafely("测试", func() { done = true })
+	if !done {
+		t.Fatal("panic 之后后续任务仍应正常执行")
+	}
+}

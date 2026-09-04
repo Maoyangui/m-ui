@@ -11,6 +11,7 @@ package jobs
 import (
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,9 +56,9 @@ func New(d Deps) *Scheduler {
 }
 
 func (s *Scheduler) Start() {
-	s.loop(10*time.Second, s.runStats)
-	s.loop(time.Minute, s.runDeplete)
-	s.loop(24*time.Hour, s.runCleanup)
+	s.loop("统计", 10*time.Second, s.runStats)
+	s.loop("配额判定", time.Minute, s.runDeplete)
+	s.loop("时序清理", 24*time.Hour, s.runCleanup)
 	logger.Info("定时任务已启动:统计 10s / 配额判定 1m / 时序清理 24h")
 }
 
@@ -66,7 +67,17 @@ func (s *Scheduler) Stop() {
 	s.wg.Wait()
 }
 
-func (s *Scheduler) loop(every time.Duration, fn func()) {
+// runSafely 兜住定时任务里的 panic:一个周期任务崩了不该把面板和数据面一起带走。
+func runSafely(name string, fn func()) {
+	defer func() {
+		if v := recover(); v != nil {
+			logger.Warning("定时任务 ", name, " 异常: ", v, " | ", string(debug.Stack()))
+		}
+	}()
+	fn()
+}
+
+func (s *Scheduler) loop(name string, every time.Duration, fn func()) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -75,7 +86,7 @@ func (s *Scheduler) loop(every time.Duration, fn func()) {
 		for {
 			select {
 			case <-t.C:
-				fn()
+				runSafely(name, fn)
 			case <-s.stop:
 				return
 			}

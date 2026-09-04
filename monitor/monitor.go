@@ -4,6 +4,7 @@ package monitor
 
 import (
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -82,7 +83,14 @@ func (m *Monitor) loop(every time.Duration, fn func()) {
 		for {
 			select {
 			case <-t.C:
-				fn()
+				func() { // 巡检里出一次 panic 不该带走整个进程
+					defer func() {
+						if v := recover(); v != nil {
+							logger.Warning("巡检任务异常: ", v, " | ", string(debug.Stack()))
+						}
+					}()
+					fn()
+				}()
 			case <-m.stop:
 				return
 			}

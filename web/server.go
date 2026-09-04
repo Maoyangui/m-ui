@@ -352,6 +352,11 @@ func (s *Server) reapSessions() {
 				delete(s.sessions, token)
 			}
 		}
+		for ip, fails := range s.loginFails { // 扫描器会留下大量 IP,过期的清掉
+			if len(fails) == 0 || now.Unix()-fails[len(fails)-1] > 600 {
+				delete(s.loginFails, ip)
+			}
+		}
 		s.mu.Unlock()
 	}
 }

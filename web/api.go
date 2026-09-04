@@ -879,6 +879,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		if err := s.validatePorts(in); err != nil { // 端口写错会导致重启后打不开,先拦下
+			badRequest(w, err)
+			return
+		}
 		roleChanged := false
 		oldDomain := s.setting("webDomain")
 		for k, v := range in {
@@ -913,6 +917,55 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// validatePorts 校验这次提交后的面板 / 订阅 / 代理面板端口:必须是 1-65535 且互不相同。
+// 端口填错要等重启才发现,那时面板已经起不来,只能进 SSH 用 m-ui set 救,所以在这里拦。
+func (s *Server) validatePorts(in map[string]string) error {
+	ports := map[string]struct {
+		label string
+		def   int
+	}{
+		"webPort":      {"面板", 2053},
+		"subPort":      {"订阅", 2056},
+		"resellerPort": {"代理面板", 2054},
+	}
+	got := map[string]int{}
+	for key, meta := range ports {
+		raw, ok := in[key]
+		if !ok {
+			raw = s.setting(key)
+		}
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			got[key] = meta.def
+			continue
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("%s端口 %q 不合法,应为 1-65535", meta.label, raw)
+		}
+		got[key] = n
+	}
+	seen := map[int]string{}
+	for key, n := range got {
+		if key == "resellerPort" && strings.EqualFold(s.settingOr(in, "resellerEnabled"), "false") {
+			continue // 代理面板关着就不占端口
+		}
+		if other, dup := seen[n]; dup {
+			return fmt.Errorf("%s与%s的端口都是 %d,不能重复", ports[key].label, ports[other].label, n)
+		}
+		seen[n] = key
+	}
+	return nil
+}
+
+// settingOr 取这次提交里的值,没提交就取库里的。
+func (s *Server) settingOr(in map[string]string, key string) string {
+	if v, ok := in[key]; ok {
+		return v
+	}
+	return s.setting(key)
 }
 
 func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {

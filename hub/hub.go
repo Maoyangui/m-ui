@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -452,7 +453,14 @@ func (h *Hub) Start() {
 		for {
 			select {
 			case <-t.C:
-				h.tick()
+				func() { // 同步里出一次 panic 不该带走整个进程
+					defer func() {
+						if v := recover(); v != nil {
+							logger.Warning("主副机同步异常: ", v, " | ", string(debug.Stack()))
+						}
+					}()
+					h.tick()
+				}()
 			case <-h.stop:
 				return
 			}
