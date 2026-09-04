@@ -32,7 +32,7 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 | Certificates | Let's Encrypt via HTTP-01 or Cloudflare DNS-01, auto-renewal, hot reload without restart; one-click self-signed cert when you have no domain |
 | Backup | One zip with a consistent database snapshot and certificates; upload to restore a whole server; scheduled backups, rotation, push to Telegram; migration wizard |
 | Ops | WARP install / enable / disable / uninstall with exit-IP verification; swap, sysctl + BBR, file limits, NTP |
-| Alerts | Telegram: logins, user expiring / over quota / disabled, upstream failures, data plane down, daily report |
+| Alerts | Telegram: logins, user expiring / over quota / disabled, upstream failures, data plane down, daily report (its hour and dates follow the panel time zone) |
 | Observability | Traffic charts (stacked bars, 1h / 6h / 24h / 7d / 30d), top users, online users and IPs, recent inbound connections for troubleshooting, audit log, subscription access log |
 | Security | bcrypt passwords, CSRF protection, login cooldown after repeated failures from the same peer, two-factor authentication (TOTP), external API tokens; reseller and admin sessions are strictly separated |
 | Integration | External API for creating users, applying plans, enabling / disabling, renewing and fetching subscription URLs, see [docs/API.md](docs/API.md) |
