@@ -298,6 +298,7 @@ func (s *Server) handle() http.HandlerFunc {
 
 		opt := s.options()
 		opt.External = s.externalFor(user.Id)
+		opt.Shadowrocket = strings.Contains(strings.ToLower(r.UserAgent()), "shadowrocket")
 		opt.Share = s.shareSelfService() && (rs == nil || rs.ShareOn)
 		if rs != nil { // 代理填了标题就用代理的,客户端里显示的就是他的品牌
 			opt.ProfileTitle = pick(rs.ProfileTitle, pick(rs.PageTitle, opt.ProfileTitle))
