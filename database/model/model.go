@@ -125,11 +125,13 @@ type Reseller struct {
 	CreatedAt   int64  `json:"createdAt" gorm:"default:0;not null"`
 	LastLogins  string `json:"lastLogins"`
 	// 代理自己的订阅落地页设置(文案留空则用主面板的;两个开关与主面板取与)
-	PageEnabled bool   `json:"pageEnabled" gorm:"default:true"`
-	ShareOn     bool   `json:"shareOn" gorm:"default:true"`
-	PageTitle   string `json:"pageTitle"`
-	PageNotice  string `json:"pageNotice"`
-	PageSupport string `json:"pageSupport"`
+	PageEnabled bool `json:"pageEnabled" gorm:"default:true"`
+	ShareOn     bool `json:"shareOn" gorm:"default:true"`
+	// ProfileTitle 客户端里显示的订阅名(Profile-Title 头);留空跟随主面板
+	ProfileTitle string `json:"profileTitle"`
+	PageTitle    string `json:"pageTitle"`
+	PageNotice   string `json:"pageNotice"`
+	PageSupport  string `json:"pageSupport"`
 }
 
 // ResellerLine 代理可用线路(主面板分配),代理只能把这些线路分给自己的用户。

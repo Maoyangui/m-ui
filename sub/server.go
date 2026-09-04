@@ -300,7 +300,7 @@ func (s *Server) handle() http.HandlerFunc {
 		opt.External = s.externalFor(user.Id)
 		opt.Share = s.shareSelfService() && (rs == nil || rs.ShareOn)
 		if rs != nil { // 代理填了标题就用代理的,客户端里显示的就是他的品牌
-			opt.ProfileTitle = pick(rs.PageTitle, opt.ProfileTitle)
+			opt.ProfileTitle = pick(rs.ProfileTitle, pick(rs.PageTitle, opt.ProfileTitle))
 		}
 		// 浏览器打开订阅地址 → 订阅页(用量/到期/一键导入/二维码);客户端拉取 → 原始订阅
 		if !shared && s.pageEnabled(rs) && WantsPage(r) {

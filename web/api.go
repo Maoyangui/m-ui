@@ -302,6 +302,7 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.db.Where("line_id = ?", id).Delete(&model.UserLine{})
+		s.db.Where("line_id = ?", id).Delete(&model.ResellerLine{}) // 代理的线路授权一并清掉
 		s.audit(r, "line", "delete", line.Name)
 		s.reloadAll("删除线路 " + line.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})

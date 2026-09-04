@@ -66,7 +66,7 @@ func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "version": Version, "role": s.role(), "time": time.Now().Unix()})
 	case len(parts) == 1 && parts[0] == "plans":
 		var plans []model.Plan
-		s.db.Order("sort asc, id asc").Find(&plans)
+		s.db.Where("COALESCE(reseller_id,0) = 0").Order("sort asc, id asc").Find(&plans)
 		writeJSON(w, http.StatusOK, plans)
 	case len(parts) == 1 && parts[0] == "users":
 		switch r.Method {
@@ -149,11 +149,38 @@ type apiUserView struct {
 	SubJSON     string              `json:"subJson"` // sing-box 远程配置地址
 }
 
+// apiSnapshot 是列表渲染时"只算一次"的公共数据:在线 IP、线路映射、订阅前缀。
+// 逐个用户去问数据面会把限速器与 Hub 的锁抢上几百次(用户一多就拖慢数据面)。
+type apiSnapshot struct {
+	localIPs, remoteIPs     map[string][]string
+	localLines, remoteLines map[string]map[string][]string
+	localName, subBase      string
+	lineIdsBy, extIdsBy     map[uint][]uint
+}
+
+func (s *Server) apiSnapshot() *apiSnapshot {
+	return &apiSnapshot{
+		localIPs: s.run.OnlineIPsAll(), remoteIPs: s.run.Hub().RemoteIPsAll(),
+		localLines: s.run.OnlineIPLines(), remoteLines: s.run.Hub().RemoteIPLinesAll(),
+		localName: s.localNodeName(), subBase: s.subBase(),
+		lineIdsBy: s.userLineMap(), extIdsBy: s.userExtMap(),
+	}
+}
+
 func (s *Server) apiUser(u model.User) apiUserView {
-	ids, eids := []uint{}, []uint{}
-	s.db.Model(&model.UserLine{}).Where("user_id = ?", u.Id).Pluck("line_id", &ids)
-	s.db.Model(&model.UserExt{}).Where("user_id = ?", u.Id).Pluck("ext_id", &eids)
-	links := s.subLinks(u)
+	return s.apiUserWith(u, s.apiSnapshot())
+}
+
+func (s *Server) apiUserWith(u model.User, snap *apiSnapshot) apiUserView {
+	ids, eids := snap.lineIdsBy[u.Id], snap.extIdsBy[u.Id]
+	if ids == nil {
+		ids = []uint{}
+	}
+	if eids == nil {
+		eids = []uint{}
+	}
+	base := snap.subBase + subKey(u)
+	links := map[string]string{"link": base, "clash": base + "?format=clash", "json": base + "?format=json"}
 	now := time.Now().Unix()
 	return apiUserView{
 		Id: u.Id, Name: u.Name, Enabled: u.Enabled, Volume: u.Volume, Used: u.Up + u.Down, Up: u.Up, Down: u.Down,
@@ -161,8 +188,8 @@ func (s *Server) apiUser(u model.User) apiUserView {
 		AutoReset: u.AutoReset, ResetDays: u.ResetDays, NextReset: u.NextReset,
 		DeviceLimit: u.DeviceLimit, SpeedUp: u.SpeedUp, SpeedDown: u.SpeedDown, Remark: u.Remark, Desc: u.Desc,
 		CreatedAt: u.CreatedAt, OnlineAt: u.OnlineAt,
-		OnlineIPs:   mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
-		OnlineLines: s.onlineLines(u.Name, s.localNodeName(), s.run.OnlineIPLines(), s.run.Hub().RemoteIPLinesAll()),
+		OnlineIPs:   mergeIPs(snap.localIPs[u.Name], snap.remoteIPs[u.Name]),
+		OnlineLines: s.onlineLines(u.Name, snap.localName, snap.localLines, snap.remoteLines),
 		LineIds:     ids, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}
 }
 
@@ -176,9 +203,10 @@ func (s *Server) apiListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	var users []model.User
 	q.Find(&users)
+	snap := s.apiSnapshot() // 整表算一次
 	out := make([]apiUserView, 0, len(users))
 	for _, u := range users {
-		out = append(out, s.apiUser(u))
+		out = append(out, s.apiUserWith(u, snap))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -209,11 +237,11 @@ func (s *Server) apiFindPlan(req apiUserReq) (*model.Plan, error) {
 	var p model.Plan
 	switch {
 	case req.PlanId != nil && *req.PlanId > 0:
-		if err := s.db.First(&p, *req.PlanId).Error; err != nil {
+		if err := s.db.Where("COALESCE(reseller_id,0) = 0").First(&p, *req.PlanId).Error; err != nil {
 			return nil, errors.New("套餐不存在: id " + strconv.Itoa(int(*req.PlanId)))
 		}
 	case req.Plan != nil && strings.TrimSpace(*req.Plan) != "":
-		if err := s.db.Where("name = ?", strings.TrimSpace(*req.Plan)).First(&p).Error; err != nil {
+		if err := s.db.Where("name = ? AND COALESCE(reseller_id,0) = 0", strings.TrimSpace(*req.Plan)).First(&p).Error; err != nil {
 			return nil, errors.New("套餐不存在: " + *req.Plan)
 		}
 	default:

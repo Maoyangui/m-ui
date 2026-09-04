@@ -244,6 +244,13 @@ func TestResellerProfileTitle(t *testing.T) {
 	w := doReq(s, "GET", "/sub/TOKENabcdefghijklmnop", "curl/8.4.0")
 	want := "base64:" + base64.StdEncoding.EncodeToString([]byte("代理站"))
 	if got := w.Header().Get("Profile-Title"); got != want {
-		t.Fatalf("应使用代理的标题: %q", got)
+		t.Fatalf("没填订阅标题时应回落到页面标题: %q", got)
+	}
+	// 代理单独设了订阅标题:优先于页面标题
+	db.Model(&model.Reseller{}).Where("id = ?", 1).Update("profile_title", "代理机场")
+	w = doReq(s, "GET", "/sub/TOKENabcdefghijklmnop", "curl/8.4.0")
+	want = "base64:" + base64.StdEncoding.EncodeToString([]byte("代理机场"))
+	if got := w.Header().Get("Profile-Title"); got != want {
+		t.Fatalf("应使用代理的订阅标题: %q", got)
 	}
 }

@@ -41,6 +41,7 @@ export async function render(el) {
       <div class="form-grid">
         ${check('sp-enabled', t('set.subPageEnabled'), me.pageEnabled !== false, t('acct.pageHelp'))}
         ${check('sp-share', t('set.subShare'), me.shareOn !== false, t('acct.shareHelp'))}
+        ${field(t('set.subTitle'), `<input id="sp-profile" value="${esc(me.profileTitle || '')}" placeholder="${esc(t('acct.inherit'))}">`, t('acct.profileHelp'))}
         ${field(t('set.subPageTitle'), `<input id="sp-title" value="${esc(me.pageTitle || '')}" placeholder="${esc(t('acct.inherit'))}">`)}
         ${field(t('set.subPageSupport'), `<input id="sp-support" value="${esc(me.pageSupport || '')}" placeholder="${esc(t('acct.inherit'))}">`)}
         <div class="full">${field(t('set.subPageNotice'), `<textarea id="sp-notice" placeholder="${esc(t('acct.inherit'))}">${esc(me.pageNotice || '')}</textarea>`)}</div>
@@ -130,6 +131,7 @@ registerActions({
     try {
       await put('self', {
         pageEnabled: fchk('sp-enabled'), shareOn: fchk('sp-share'),
+        profileTitle: fv('sp-profile').trim(),
         pageTitle: fv('sp-title').trim(), pageSupport: fv('sp-support').trim(), pageNotice: fv('sp-notice'),
       });
       await load('status');

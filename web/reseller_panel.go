@@ -321,18 +321,19 @@ func (s *Server) handleResellerSelf(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.resellerRow(rs))
 	case http.MethodPut:
 		var p struct {
-			PageEnabled bool   `json:"pageEnabled"`
-			ShareOn     bool   `json:"shareOn"`
-			PageTitle   string `json:"pageTitle"`
-			PageNotice  string `json:"pageNotice"`
-			PageSupport string `json:"pageSupport"`
+			PageEnabled  bool   `json:"pageEnabled"`
+			ShareOn      bool   `json:"shareOn"`
+			ProfileTitle string `json:"profileTitle"`
+			PageTitle    string `json:"pageTitle"`
+			PageNotice   string `json:"pageNotice"`
+			PageSupport  string `json:"pageSupport"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			badRequest(w, err)
 			return
 		}
 		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{
-			"page_enabled": p.PageEnabled, "share_on": p.ShareOn,
+			"page_enabled": p.PageEnabled, "share_on": p.ShareOn, "profile_title": strings.TrimSpace(p.ProfileTitle),
 			"page_title": p.PageTitle, "page_notice": p.PageNotice, "page_support": p.PageSupport,
 		})
 		s.auditAs(rs.Name, "reseller", "subpage", rs.Name)

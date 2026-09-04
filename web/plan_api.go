@@ -192,6 +192,15 @@ func (s *Server) loadPlan(id uint) (model.Plan, error) {
 	return p, nil
 }
 
+// loadPlanFor 按归属取套餐:主面板只认自己的,代理只认自己的。
+func (s *Server) loadPlanFor(rid, id uint) (model.Plan, error) {
+	var p model.Plan
+	if err := s.db.Where("COALESCE(reseller_id,0) = ?", rid).First(&p, id).Error; err != nil {
+		return p, errors.New("套餐不存在")
+	}
+	return p, nil
+}
+
 // handleUserPlan POST /users/{id}/plan {planId, mode}
 func (s *Server) handleUserPlan(w http.ResponseWriter, r *http.Request, u model.User) {
 	var req struct {
