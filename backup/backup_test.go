@@ -21,7 +21,7 @@ func TestCreateInspectRestore(t *testing.T) {
 	db.Create(&model.User{Name: "bob", Enabled: true})
 	db.Create(&model.Line{Name: "l1", Protocol: "hysteria2", Port: 1234})
 	db.Create(&model.Setting{Key: "webDomain", Value: "hk.example.com"})
-	certPath := filepath.Join(dir, "cert", "hk.crt")
+	certPath := filepath.Join(dir, "new", "cert", "hk.crt") // 与还原目标同一数据目录
 	os.MkdirAll(filepath.Dir(certPath), 0o755)
 	os.WriteFile(certPath, []byte("CERT"), 0o644)
 
@@ -41,7 +41,7 @@ func TestCreateInspectRestore(t *testing.T) {
 		t.Fatalf("摘要不符: %+v", s)
 	}
 
-	// 还原到新路径;证书应写回原绝对路径
+	// 还原到新路径;数据目录内的证书应写回原绝对路径
 	os.Remove(certPath)
 	dst := filepath.Join(dir, "new", "m-ui.db")
 	os.MkdirAll(filepath.Dir(dst), 0o755)
@@ -62,8 +62,27 @@ func TestCreateInspectRestore(t *testing.T) {
 	if b, _ := os.ReadFile(certPath); string(b) != "CERT" {
 		t.Fatal("证书未写回原路径")
 	}
+	// 数据目录之外的路径不写(不可信的备份不能借此往任意位置落文件)
+	outside := filepath.Join(dir, "outside.crt")
+	os.WriteFile(outside, []byte("OLD"), 0o644)
+	var buf2 bytes.Buffer
+	db3, _ := database.Open(src)
+	if err := Create(db3, []string{outside}, "1.2.3", &buf2); err != nil {
+		t.Fatal(err)
+	}
+	database.Close(db3)
+	zip2 := filepath.Join(dir, "b2.zip")
+	os.WriteFile(zip2, buf2.Bytes(), 0o600)
+	os.WriteFile(outside, []byte("KEEP"), 0o644)
+	if err := Restore(dst, zip2); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(outside); string(b) != "KEEP" {
+		t.Fatal("数据目录外的证书路径不应被备份覆盖")
+	}
+
 	baks, _ := filepath.Glob(dst + ".bak-*")
-	if len(baks) != 1 {
+	if len(baks) == 0 {
 		t.Fatal("旧库应保留为 .bak-*")
 	}
 

@@ -3,7 +3,9 @@ package web
 import (
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
@@ -207,5 +209,53 @@ func TestResellerPlanRespectsLines(t *testing.T) {
 	}
 	if err := s.checkResellerPlan(rs.Id, u, ok); err != nil {
 		t.Fatalf("合规套餐应通过: %v", err)
+	}
+}
+
+// 代理会话不能当管理员会话用:两者存在同一张表里,而 Cookie 不区分端口,
+// 代理只要把自己的令牌换个 Cookie 名塞给主面板就会被当成管理员。
+func TestResellerSessionIsNotAdminSession(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db, sessions: map[string]session{}}
+
+	rs := model.Reseller{Name: "dl", Enabled: true}
+	db.Create(&rs)
+	tok := s.newResellerSession(rs, false)
+	if s.validSession(tok) {
+		t.Fatal("代理会话不得通过主面板鉴权")
+	}
+	admin := s.newSession("admin")
+	if !s.validSession(admin) {
+		t.Fatal("管理员会话应通过")
+	}
+}
+
+// 空密码首登只在认领窗口内有效,过期后必须由主面板重置。
+func TestResellerClaimWindow(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db, sessions: map[string]session{}, loginFails: map[string][]int64{}}
+
+	db.Create(&model.Reseller{Name: "dl", Enabled: true, ClaimBefore: time.Now().Unix() + 3600})
+	login := func() int {
+		body := strings.NewReader(`{"username":"dl","password":""}`)
+		r := httptest.NewRequest("POST", "http://x/app/api/login", body)
+		w := httptest.NewRecorder()
+		s.handleResellerLogin(w, r)
+		return w.Code
+	}
+	if code := login(); code != 200 {
+		t.Fatalf("窗口内空密码应能首登,得 %d", code)
+	}
+	db.Model(&model.Reseller{}).Where("name = ?", "dl").Update("claim_before", time.Now().Unix()-1)
+	if code := login(); code != 401 {
+		t.Fatalf("窗口过期后应拒绝,得 %d", code)
 	}
 }

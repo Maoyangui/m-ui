@@ -37,6 +37,10 @@ func Open(dbPath string) (*gorm.DB, error) {
 	db.Exec("UPDATE users SET share_token = '' WHERE share_token IS NULL")
 	db.Exec("UPDATE resellers SET used_carried = 0 WHERE used_carried IS NULL")
 	db.Exec("UPDATE resellers SET used_base = 0 WHERE used_base IS NULL")
+	db.Exec("UPDATE resellers SET claim_before = 0 WHERE claim_before IS NULL")
+	db.Exec("UPDATE resellers SET expiry = 0 WHERE expiry IS NULL")
+	db.Exec("UPDATE resellers SET speed_up = 0 WHERE speed_up IS NULL")
+	db.Exec("UPDATE resellers SET speed_down = 0 WHERE speed_down IS NULL")
 	// 套餐从"全局唯一名"改成"按归属唯一",老库里那个唯一索引要去掉
 	db.Exec("UPDATE plans SET reseller_id = 0 WHERE reseller_id IS NULL")
 	db.Exec("DROP INDEX IF EXISTS idx_plans_name")

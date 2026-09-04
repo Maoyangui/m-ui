@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/logger"
 
 	"gorm.io/gorm"
 )
@@ -208,8 +209,23 @@ func ApplyPending(dbPath string) (bool, error) {
 	return true, nil
 }
 
+// underDir 判断 p 是否落在 root 目录内(拒绝绝对路径越界与 ..)。
+func underDir(root, p string) bool {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return false
+	}
+	return abs == root || strings.HasPrefix(abs, root+string(os.PathSeparator))
+}
+
 // Restore 直接把备份应用到 dbPath(要求该库当前未被打开)。
 func Restore(dbPath, srcPath string) error {
+	var skipped []string
+	defer func() {
+		if len(skipped) > 0 {
+			logger.Warning("备份里的证书路径不在数据目录内,已跳过: ", strings.Join(skipped, ", "))
+		}
+	}()
 	dbBytes, meta, isZip, err := extract(srcPath)
 	if err != nil {
 		return err
@@ -241,9 +257,16 @@ func Restore(dbPath, srcPath string) error {
 	for _, f := range zr.File {
 		files[f.Name] = f
 	}
+	// 证书路径来自 zip 里的 meta.json,是不可信输入:限制在数据目录内,
+	// 否则一个伪造的备份就能以 root 身份往任意位置写文件(systemd 单元、authorized_keys…)。
+	root, _ := filepath.Abs(filepath.Dir(dbPath))
 	for _, c := range meta.Certs {
 		f := files[c.Zip]
 		if f == nil || c.Path == "" {
+			continue
+		}
+		if !underDir(root, c.Path) {
+			skipped = append(skipped, c.Path)
 			continue
 		}
 		rc, err := f.Open()

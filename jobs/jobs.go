@@ -349,6 +349,19 @@ func (s *Scheduler) runCleanup() {
 	if err := s.d.DB.Where("ts < ?", cutoff).Delete(&model.SubLog{}).Error; err != nil {
 		logger.Warning("清理订阅日志失败: ", err)
 	}
+	// 订阅端口对公网开放,每个请求(含 404)记一行:再压一道总量上限,免得被刷爆磁盘
+	const keepSubLogs = 200000
+	var n int64
+	s.d.DB.Model(&model.SubLog{}).Count(&n)
+	if n > keepSubLogs {
+		var cut uint64
+		s.d.DB.Model(&model.SubLog{}).Order("id desc").Offset(keepSubLogs).Limit(1).Pluck("id", &cut)
+		if cut > 0 {
+			if err := s.d.DB.Where("id <= ?", cut).Delete(&model.SubLog{}).Error; err != nil {
+				logger.Warning("裁剪订阅日志失败: ", err)
+			}
+		}
+	}
 }
 
 func escapeHTML(s string) string {

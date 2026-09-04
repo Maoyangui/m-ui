@@ -70,14 +70,15 @@ type Server struct {
 	loginFails map[string][]int64 // ip → 最近失败时间
 	ops        *ops.Runner
 
-	totpPending   string          // 两步验证:已生成、待认证器验证一次后才生效的密钥
-	totpPendingRS map[uint]string // 同上,按代理
-	lastTotpStep  int64           // 最近一次登录成功用掉的时间步,同一验证码不能再用(防重放)
+	totpPending    string          // 两步验证:已生成、待认证器验证一次后才生效的密钥
+	totpPendingRS  map[uint]string // 同上,按代理
+	lastTotpStep   int64           // 最近一次登录成功用掉的时间步,同一验证码不能再用(防重放)
+	lastTotpStepRS map[uint]int64  // 同上,按代理
 }
 
 func NewServer(run *runner.Runner) *Server {
 	return &Server{run: run, db: run.DB(), sessions: map[string]session{},
-		totpPendingRS: map[uint]string{}, ops: ops.NewRunner()}
+		totpPendingRS: map[uint]string{}, lastTotpStepRS: map[uint]int64{}, ops: ops.NewRunner()}
 }
 
 // actor 返回当前请求的登录用户名(审计用);未登录为空。
@@ -292,6 +293,9 @@ func (s *Server) newSession(user string) string {
 	return token
 }
 
+// validSession 判断这是不是一个有效的**管理员**会话。
+// 代理会话与管理员会话共用一张表,而 Cookie 不区分端口:代理只要把自己的令牌
+// 换个 Cookie 名塞给主面板,就会被当成管理员——所以这里必须把代理会话挡在外面。
 func (s *Server) validSession(token string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -303,7 +307,7 @@ func (s *Server) validSession(token string) bool {
 		delete(s.sessions, token)
 		return false
 	}
-	return true
+	return sess.reseller == 0
 }
 
 func (s *Server) reapSessions() {
@@ -380,6 +384,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "跨站请求被拒绝"})
 		return
 	}
+	if s.loginBlocked(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
+		return
+	}
 	var req struct{ Username, Password, Code string }
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
@@ -396,7 +404,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !checkPassword(req.Password, admin.Password) {
 		time.Sleep(300 * time.Millisecond)
 		logger.Warning("面板登录失败,来源 ", clientIP(r))
-		s.noteLoginFailure(clientIP(r))
+		s.noteLoginFailure(peerIP(r))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
 		return
 	}
@@ -416,7 +424,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		if !ok || replay {
 			time.Sleep(300 * time.Millisecond)
 			logger.Warning("面板两步验证失败,来源 ", clientIP(r))
-			s.noteLoginFailure(clientIP(r))
+			s.noteLoginFailure(peerIP(r))
 			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "两步验证码错误", "totp": true})
 			return
 		}
@@ -443,6 +451,28 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// loginBlocked 该 IP 是否处于冷却期:10 分钟内失败 10 次就先挡 5 分钟,
+// 否则空密码首登、弱口令都能被慢速爆破(每次失败只 sleep 300ms)。
+func (s *Server) loginBlocked(ip string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.loginFails == nil {
+		s.loginFails = map[string][]int64{}
+	}
+	now := time.Now().Unix()
+	var recent []int64
+	for _, ts := range s.loginFails[ip] {
+		if now-ts < 600 {
+			recent = append(recent, ts)
+		}
+	}
+	s.loginFails[ip] = recent
+	if len(recent) < 10 {
+		return false
+	}
+	return now-recent[len(recent)-1] < 300
 }
 
 // noteLoginFailure 记录某 IP 的失败次数,10 分钟内达到 5 次告警一次。
@@ -478,6 +508,13 @@ func checkPassword(plain, stored string) bool {
 func hashPassword(plain string) (string, error) {
 	b, err := bcrypt.GenerateFromPassword([]byte(plain), bcrypt.DefaultCost)
 	return string(b), err
+}
+
+// peerIP 取 TCP 对端地址。登录限流必须用它:X-Forwarded-For 是客户端能随便写的,
+// 按它计数等于没有限流(每次换一个就绕过),还能伪造成别人的 IP 把人锁在门外。
+func peerIP(r *http.Request) string {
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return ip
 }
 
 func clientIP(r *http.Request) string {

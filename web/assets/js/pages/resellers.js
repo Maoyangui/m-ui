@@ -29,6 +29,13 @@ function statusBadge(r) {
   return badge(t('common.enabled'), 'ok');
 }
 
+// 还没设过密码:窗口内可用名字直接登录,过期后要管理员再点一次"重置密码"
+function claimBadge(r) {
+  if (!r.needsClaim) return '';
+  const open = r.claimBefore > 0 && r.claimBefore * 1000 > Date.now();
+  return ' ' + badge(t(open ? 'rs.claimOpen' : 'rs.claimExpired'), open ? 'warn' : 'danger');
+}
+
 function panelURL() {
   const s = state.settings || {};
   const host = s.webDomain || (state.status && state.status.domain) || location.hostname;
@@ -51,7 +58,7 @@ function renderRows() {
   body.innerHTML = list.map(r => `<tr>
     <td class="primary-cell"><a href="#" data-act="rs.detail" data-id="${r.id}">${esc(r.name)}</a>
       ${r.remark ? `<div class="sub-cell">${esc(r.remark)}</div>` : ''}</td>
-    <td>${statusBadge(r)}${r.totpEnabled ? ' ' + badge('2FA', 'primary') : ''}</td>
+    <td>${statusBadge(r)}${r.totpEnabled ? ' ' + badge('2FA', 'primary') : ''}${claimBadge(r)}</td>
     <td class="num">${r.users}</td>
     <td class="num">${fmtBytes(r.used)}${r.volume ? ' / ' + fmtBytes(r.volume) : ''}${progress(r.used, r.volume)}</td>
     <td class="num">${r.devices}${r.deviceLimit ? ' / ' + r.deviceLimit : ''}</td>

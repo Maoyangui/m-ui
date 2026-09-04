@@ -20,11 +20,12 @@ import (
 
 type resellerRow struct {
 	model.Reseller
-	LineIds []uint `json:"lineIds"`
-	Users   int    `json:"users"`
-	Used    int64  `json:"used"`    // 名下用户已用流量之和
-	Devices int    `json:"devices"` // 名下用户设备上限之和
-	Online  int    `json:"online"`  // 当前在线设备数(去重 IP)
+	LineIds    []uint `json:"lineIds"`
+	NeedsClaim bool   `json:"needsClaim"` // 还没设过密码
+	Users      int    `json:"users"`
+	Used       int64  `json:"used"`    // 名下用户已用流量之和
+	Devices    int    `json:"devices"` // 名下用户设备上限之和
+	Online     int    `json:"online"`  // 当前在线设备数(去重 IP)
 }
 
 func (s *Server) handleResellers(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +51,7 @@ func (s *Server) handleResellers(w http.ResponseWriter, r *http.Request) {
 		}
 		p.Id, p.CreatedAt = 0, time.Now().Unix()
 		p.Password, p.TotpSecret, p.TotpEnabled = "", "", false // 新代理无密码,首次登录时自行设置
+		p.ClaimBefore = p.CreatedAt + 24*3600                   // 24 小时内首登设密码,过期要重新重置
 		p.PageEnabled, p.ShareOn = true, true
 		if err := s.db.Create(&p.Reseller).Error; err != nil {
 			badRequest(w, err)
@@ -167,8 +169,10 @@ func (s *Server) dispatchResellerSubroute(w http.ResponseWriter, r *http.Request
 		if r.Method != http.MethodPost {
 			break
 		}
-		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).
-			Updates(map[string]interface{}{"password": "", "totp_secret": "", "totp_enabled": false})
+		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{
+			"password": "", "totp_secret": "", "totp_enabled": false,
+			"claim_before": time.Now().Unix() + 24*3600, // 重开 24 小时认领窗口
+		})
 		s.audit(r, "reseller", "passwd", rs.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		return true
@@ -196,7 +200,7 @@ func (s *Server) onlineIPsAll() map[string][]string {
 }
 
 func (s *Server) resellerRowWith(rs model.Reseller, online map[string][]string) resellerRow {
-	row := resellerRow{Reseller: rs, LineIds: s.resellerLineIds(rs.Id)}
+	row := resellerRow{Reseller: rs, LineIds: s.resellerLineIds(rs.Id), NeedsClaim: rs.Password == ""}
 	var agg struct {
 		N       int64
 		Devices int64

@@ -111,8 +111,11 @@ type Reseller struct {
 	// 代理已用 = 名下用户的全时用量之和 + UsedCarried - UsedBase。
 	// 全时用量(up+down+total_up+total_down)只增不减,所以代理自己重置/续费/周期清零都改不动额度;
 	// 删用户时把它的全时用量结转到 UsedCarried,免得删号就能洗掉;只有主面板"重置流量"会抬高 UsedBase。
-	UsedCarried int64  `json:"usedCarried" gorm:"default:0;not null"`
-	UsedBase    int64  `json:"usedBase" gorm:"default:0;not null"`
+	UsedCarried int64 `json:"usedCarried" gorm:"default:0;not null"`
+	UsedBase    int64 `json:"usedBase" gorm:"default:0;not null"`
+	// ClaimBefore 空密码"首次登录设密码"的截止时间(建号/重置密码时给 24 小时);
+	// 过了这个点仍未设密码就必须让主面板重新重置,否则账号会一直敞着等人认领。
+	ClaimBefore int64  `json:"claimBefore"`
 	Expiry      int64  `json:"expiry"`      // unix 秒,0=不限;到期后其用户一并停用
 	SpeedUp     int    `json:"speedUp"`     // 名下用户上行限速之和的上限,Mbps,0=不限
 	SpeedDown   int    `json:"speedDown"`   // 名下用户下行限速之和的上限,Mbps,0=不限

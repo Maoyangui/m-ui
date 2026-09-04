@@ -179,6 +179,9 @@ func (s *Server) rauth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "代理已停用"})
 			return
 		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 代理面板没有上传接口
+		}
 		if sess.pending && !strings.HasSuffix(r.URL.Path, "/status") && !strings.HasSuffix(r.URL.Path, "/self/password") {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "请先设置密码"})
 			return
@@ -197,19 +200,31 @@ func (s *Server) handleResellerLogin(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	ip := clientIP(r)
+	ip, peer := clientIP(r), peerIP(r)
+	if s.loginBlocked(peer) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
+		return
+	}
 	var rs model.Reseller
 	if s.db.Where("name = ?", strings.TrimSpace(body.Username)).First(&rs).Error != nil || !rs.Enabled {
 		time.Sleep(300 * time.Millisecond)
-		s.noteLoginFailure(ip)
+		s.noteLoginFailure(peer)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
 		return
 	}
 	first := rs.Password == "" // 新建的代理没有密码:凭用户名登录,进去必须先设密码
+	if first && (rs.ClaimBefore == 0 || time.Now().Unix() > rs.ClaimBefore) {
+		// 认领窗口已过:不能再空密码进,免得账号一直敞着
+		time.Sleep(300 * time.Millisecond)
+		s.noteLoginFailure(peer)
+		logger.Warning("代理 ", rs.Name, " 的首登窗口已过期,需主面板重置密码")
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"}) // 措辞保持一致,不暴露账号是否存在
+		return
+	}
 	if !first {
 		if bcrypt.CompareHashAndPassword([]byte(rs.Password), []byte(body.Password)) != nil {
 			time.Sleep(300 * time.Millisecond)
-			s.noteLoginFailure(ip)
+			s.noteLoginFailure(peer)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
 			return
 		}
@@ -218,9 +233,16 @@ func (s *Server) handleResellerLogin(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "需要两步验证码", "totp": true})
 				return
 			}
-			if ok, _ := totp.Verify(rs.TotpSecret, body.Code, time.Now()); !ok {
+			ok, step := totp.Verify(rs.TotpSecret, body.Code, time.Now())
+			s.mu.Lock()
+			replay := ok && step <= s.lastTotpStepRS[rs.Id] // 同一验证码不能再用
+			if ok && !replay {
+				s.lastTotpStepRS[rs.Id] = step
+			}
+			s.mu.Unlock()
+			if !ok || replay {
 				time.Sleep(300 * time.Millisecond)
-				s.noteLoginFailure(ip)
+				s.noteLoginFailure(peer)
 				writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "两步验证码错误", "totp": true})
 				return
 			}
@@ -375,7 +397,8 @@ func (s *Server) handleResellerPassword(w http.ResponseWriter, r *http.Request, 
 		badRequest(w, err)
 		return
 	}
-	s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Update("password", string(hash))
+	s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).
+		Updates(map[string]interface{}{"password": string(hash), "claim_before": 0})
 	s.setSessionPending(r, false)
 	s.auditAs(rs.Name, "reseller", "password", rs.Name)
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
