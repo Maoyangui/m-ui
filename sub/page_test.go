@@ -42,7 +42,7 @@ func TestBuildPage(t *testing.T) {
 	r.Header.Set("X-Forwarded-Proto", "https")
 	u := model.User{Name: "alice", Enabled: true, Volume: 100 << 30, Up: 10 << 30, Down: 20 << 30, Expiry: 4102444800}
 	lines := []model.Line{{Name: "香港1", Protocol: "hysteria2"}, {Name: "美国-reality", Protocol: "vless", Tls: raw(map[string]interface{}{"mode": "reality"})}}
-	d := buildPageData(r, "/sub/", u, lines, Options{UpdateHours: 12}, "maoyang", "欢迎使用", "tg: @support")
+	d := buildPageData(r, "/sub/", u.Name, u, lines, Options{UpdateHours: 12}, "maoyang", "欢迎使用", "tg: @support")
 
 	if d.SubClash != "https://sub.example:2056/sub/alice?format=clash" || d.SubLink != "https://sub.example:2056/sub/alice" {
 		t.Fatalf("订阅地址不符: %s %s", d.SubClash, d.SubLink)
@@ -78,7 +78,7 @@ func TestBuildPage(t *testing.T) {
 func TestPageStatusExhausted(t *testing.T) {
 	r := httptest.NewRequest("GET", "http://x/sub/b", nil)
 	u := model.User{Name: "b", Enabled: true, Volume: 1 << 30, Up: 1 << 30}
-	d := buildPageData(r, "/sub/", u, nil, Options{}, "t", "", "")
+	d := buildPageData(r, "/sub/", u.Name, u, nil, Options{}, "t", "", "")
 	if d.StatusText != "exhausted" || d.Percent != 100 || d.Lang != "en" {
 		t.Fatalf("超量状态不符: %+v", d)
 	}

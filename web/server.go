@@ -46,9 +46,13 @@ const innerBase = "/app/"
 var Version = "dev"
 
 // session 记录登录人与过期时间;登录人用于操作审计。
+// reseller 非 0 表示这是代理面板的会话,所有查询都被限制在该代理名下;
+// pending 表示代理还没设过密码,进面板后必须先设置。
 type session struct {
-	user string
-	exp  time.Time
+	user     string
+	reseller uint
+	pending  bool
+	exp      time.Time
 }
 
 // Server 是面板 HTTP 服务。
@@ -58,17 +62,22 @@ type Server struct {
 	httpSrv  *http.Server
 	listener net.Listener
 
+	rSrv      *http.Server // 代理面板(独立端口/路径)
+	rListener net.Listener
+
 	mu         sync.Mutex
 	sessions   map[string]session
 	loginFails map[string][]int64 // ip → 最近失败时间
 	ops        *ops.Runner
 
-	totpPending  string // 两步验证:已生成、待认证器验证一次后才生效的密钥
-	lastTotpStep int64  // 最近一次登录成功用掉的时间步,同一验证码不能再用(防重放)
+	totpPending   string          // 两步验证:已生成、待认证器验证一次后才生效的密钥
+	totpPendingRS map[uint]string // 同上,按代理
+	lastTotpStep  int64           // 最近一次登录成功用掉的时间步,同一验证码不能再用(防重放)
 }
 
 func NewServer(run *runner.Runner) *Server {
-	return &Server{run: run, db: run.DB(), sessions: map[string]session{}, ops: ops.NewRunner()}
+	return &Server{run: run, db: run.DB(), sessions: map[string]session{},
+		totpPendingRS: map[uint]string{}, ops: ops.NewRunner()}
 }
 
 // actor 返回当前请求的登录用户名(审计用);未登录为空。
@@ -146,6 +155,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"logs", s.auth(s.handleLogs))
 	mux.HandleFunc(api+"audit", s.auth(s.handleAudit))
 	mux.HandleFunc(api+"keygen", s.auth(s.handleKeygen))
+	mux.HandleFunc(api+"resellers", s.auth(s.masterOnly(s.handleResellers)))
+	mux.HandleFunc(api+"resellers/", s.auth(s.masterOnly(s.handleResellerItem)))
 	mux.HandleFunc(api+"plans", s.auth(s.masterOnly(s.handlePlans)))
 	mux.HandleFunc(api+"plans/", s.auth(s.masterOnly(s.handlePlanItem)))
 	mux.HandleFunc(api+"notify/test", s.auth(s.handleNotifyTest))
@@ -222,6 +233,9 @@ func (s *Server) Start() error {
 		}
 	}()
 	logger.Info("面板已启动 ", scheme, "://", addr, s.basePath())
+	if err := s.StartReseller(); err != nil {
+		logger.Warning("代理面板启动失败: ", err)
+	}
 	go s.reapSessions()
 	return nil
 }
@@ -253,6 +267,7 @@ func assetCache(fsys fs.FS, next http.Handler) http.Handler {
 }
 
 func (s *Server) Stop() error {
+	_ = s.StopReseller()
 	if s.httpSrv == nil {
 		return nil
 	}

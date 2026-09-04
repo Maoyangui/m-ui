@@ -8,6 +8,7 @@ export const title = () => t('set.title');
 // 留空时后端采用的默认值,作为输入框占位提示
 const defaults = {
   timezone: 'Asia/Shanghai', webListen: '0.0.0.0', webPort: 2053, webPath: '/app/', subListen: '0.0.0.0', subPort: 2056, subPath: '/sub/', subUpdates: 12,
+  resellerListen: '0.0.0.0', resellerPort: 2054, resellerPath: '/dl/',
   tgExpiringDays: 3, tgQuotaPercent: 80, tgDailyHour: 9, upstreamCheckMinutes: 10, upstreamCheckFailThreshold: 2, extRefreshMinutes: 30,
   upstreamTestUrl: 'http://www.gstatic.com/generate_204', statsBucketSeconds: 10, trafficAge: 30,
 };
@@ -35,6 +36,12 @@ const groups = () => [
     ['subInsecure', t('set.subInsecure'), 'select', t('set.subInsecureHelp'), [['', t('set.subInsecureAuto')], ['true', t('common.yes')], ['false', t('common.no')]]],
     ['subServerAddr', t('set.subServerAddr'), 'select', t('set.subServerAddrHelp'), [['', t('set.addrIp')], ['domain', t('set.addrDomain')]]],
     ['extRefreshMinutes', t('set.extRefresh'), 'number'],
+  ]},
+  { id: 'reseller', title: t('set.reseller'), restart: true, fields: [
+    ['resellerEnabled', t('set.resellerEnabled'), 'boolOn', t('set.resellerEnabledHelp')],
+    ['resellerListen', t('set.listen'), 'text'], ['resellerPort', t('set.port'), 'number'],
+    ['resellerPath', t('set.path'), 'text', t('set.resellerPathHelp')],
+    ['resellerCertFile', t('set.cert'), 'text', t('set.resellerCertHelp')], ['resellerKeyFile', t('set.key'), 'text'],
   ]},
   { id: 'subpage', title: t('set.subPage'), fields: [
     ['subPageEnabled', t('set.subPageEnabled'), 'bool', t('set.subPageEnabledHelp')],

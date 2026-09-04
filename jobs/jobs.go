@@ -259,6 +259,34 @@ func (s *Scheduler) runDeplete() {
 			return err
 		}
 
+		// 1.5) 代理额度:名下用户用量之和超了,整个代理的用户一起停
+		var resellers []model.Reseller
+		if err := tx.Where("volume > 0 AND enabled = ?", true).Find(&resellers).Error; err != nil {
+			return err
+		}
+		for _, rs := range resellers {
+			var used int64
+			tx.Model(&model.User{}).Where("reseller_id = ?", rs.Id).
+				Select("COALESCE(SUM(up+down),0)").Scan(&used)
+			if used < rs.Volume {
+				continue
+			}
+			var n int64
+			tx.Model(&model.User{}).Where("reseller_id = ? AND enabled = ?", rs.Id, true).Count(&n)
+			if n == 0 {
+				continue
+			}
+			if err := tx.Model(&model.User{}).Where("reseller_id = ?", rs.Id).Update("enabled", false).Error; err != nil {
+				return err
+			}
+			record(tx, "DepleteJob", "reseller", "disable:quota", rs.Name)
+			logger.Info("代理 ", rs.Name, " 流量用尽,已停用其 ", n, " 个用户")
+			if s.d.Notify != nil {
+				s.d.Notify(fmt.Sprintf("⛔ <b>代理流量用尽</b>:%s(已停用 %d 个用户)", escapeHTML(rs.Name), n))
+			}
+			changed = true
+		}
+
 		// 2) 超量 / 过期 → 禁用
 		var depleted []model.User
 		cond := "enabled = ? AND ((volume > 0 AND up + down > volume) OR (expiry > 0 AND expiry < ?))"

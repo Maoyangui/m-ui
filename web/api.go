@@ -84,6 +84,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.db.Model(&model.User{}).Select("COALESCE(SUM(up+total_up),0)").Scan(&totalUp)
 	s.db.Model(&model.User{}).Select("COALESCE(SUM(down+total_down),0)").Scan(&totalDown)
 
+	if rid := scope(r); rid > 0 {
+		writeJSON(w, http.StatusOK, s.resellerStatus(r, rid))
+		return
+	}
 	status := map[string]interface{}{
 		"role":         s.role(),
 		"coreRunning":  s.run.CoreRunning(),
@@ -146,10 +150,34 @@ func (s *Server) role() string {
 // ---- 线路 ----
 
 func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
+	rid := scope(r)
+	if rid > 0 && r.Method != http.MethodGet {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权限"})
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		var lines []model.Line
-		s.db.Order("sort asc, id asc").Find(&lines)
+		q := s.db.Order("sort asc, id asc")
+		if rid > 0 {
+			q = q.Where("id IN (SELECT line_id FROM reseller_lines WHERE reseller_id = ?)", rid)
+		}
+		q.Find(&lines)
+		if rid > 0 { // 代理只需要名字与协议,服务端凭据一律不给
+			type slim struct {
+				Id       uint   `json:"id"`
+				Name     string `json:"name"`
+				Protocol string `json:"protocol"`
+				Port     int    `json:"port"`
+				Enabled  bool   `json:"enabled"`
+			}
+			out := make([]slim, 0, len(lines))
+			for _, l := range lines {
+				out = append(out, slim{l.Id, l.Name, l.Protocol, l.Port, l.Enabled})
+			}
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
 		// 附带上游名与用户数,便于前端直接展示
 		type row struct {
 			model.Line
@@ -579,16 +607,25 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		var users []model.User
-		s.db.Order("id asc").Find(&users)
+		s.scoped(r, s.db.Order("id asc")).Find(&users)
 		localName := s.localNodeName()
 		localLines := s.run.OnlineIPLines()
 		type row struct {
 			model.User
-			LineIds  []uint              `json:"lineIds"`
-			ExtIds   []uint              `json:"extIds"`
-			OnlineIP []string            `json:"onlineIps"`
-			OnlineOn map[string][]string `json:"onlineLines"` // 源 IP → 该 IP 正在使用的线路(带服务器后缀)
-			SubURL   string              `json:"subUrl"`
+			LineIds      []uint              `json:"lineIds"`
+			ExtIds       []uint              `json:"extIds"`
+			OnlineIP     []string            `json:"onlineIps"`
+			OnlineOn     map[string][]string `json:"onlineLines"` // 源 IP → 该 IP 正在使用的线路(带服务器后缀)
+			SubURL       string              `json:"subUrl"`
+			ResellerName string              `json:"resellerName,omitempty"` // 归属代理
+		}
+		rsNames := map[uint]string{}
+		if scope(r) == 0 {
+			var rss []model.Reseller
+			s.db.Find(&rss)
+			for _, x := range rss {
+				rsNames[x.Id] = x.Name
+			}
 		}
 		out := make([]row, 0, len(users))
 		for _, u := range users {
@@ -599,9 +636,10 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			u.Credentials, u.ShareCreds = nil, nil // 列表不返回凭据
 			out = append(out, row{
 				User: u, LineIds: ids, ExtIds: eids,
-				OnlineIP: mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
-				OnlineOn: s.onlineLines(u.Name, localName, localLines),
-				SubURL:   s.subLinks(u)["link"],
+				OnlineIP:     mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
+				OnlineOn:     s.onlineLines(u.Name, localName, localLines),
+				SubURL:       s.subLinks(u)["link"],
+				ResellerName: rsNames[u.ResellerId],
 			})
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -617,6 +655,13 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		p.User.Id = 0
 		p.User.CreatedAt = time.Now().Unix()
+		if rid := scope(r); rid > 0 {
+			if err := s.prepareResellerUser(rid, &p.User, p.LineIds); err != nil {
+				badRequest(w, err)
+				return
+			}
+			p.ExtIds = nil // 外部节点只由主面板分配
+		}
 		if len(p.User.Credentials) == 0 {
 			p.User.Credentials = generateCredentials(p.User.Name)
 		}
@@ -635,6 +680,9 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
+	if !s.guardScope(w, r) {
+		return
+	}
 	if s.dispatchUserSubroute(w, r) {
 		return
 	}
@@ -654,6 +702,13 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 		if err := s.validateUser(&p.User); err != nil {
 			badRequest(w, err)
 			return
+		}
+		if rid := scope(r); rid > 0 {
+			if err := s.checkResellerUser(rid, id, &p.User, p.LineIds); err != nil {
+				badRequest(w, err)
+				return
+			}
+			p.ExtIds = nil
 		}
 		// 凭据与累计流量不经由表单覆盖
 		if err := s.db.Model(&model.User{}).Where("id = ?", id).Select(
@@ -769,6 +824,11 @@ func generateCredentials(name string) json.RawMessage {
 // ---- 设置 ----
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	rid := scope(r)
+	if rid > 0 && r.Method != http.MethodGet {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权限"})
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		var rows []model.Setting
@@ -776,6 +836,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		out := map[string]string{}
 		for _, row := range rows {
 			out[row.Key] = row.Value
+		}
+		if rid > 0 { // 代理只需要这几项来渲染界面
+			out = map[string]string{"timezone": out["timezone"], "subUpdates": out["subUpdates"]}
 		}
 		writeJSON(w, http.StatusOK, out)
 	case http.MethodPost:

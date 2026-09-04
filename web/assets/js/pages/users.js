@@ -1,4 +1,4 @@
-import { state, load } from '../app.js';
+import { state, load, isReseller } from '../app.js';
 import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy } from '../ui.js';
@@ -28,9 +28,9 @@ export async function render(el) {
       <div class="seg" id="user-filter">${['all', 'enabled', 'disabled', 'expired', 'over'].map(f => `<button data-act="user.filter" data-id="${f}" class="${f === filter ? 'active' : ''}">${t('user.filter.' + f)}</button>`).join('')}</div>
       <span class="muted small" id="user-count"></span>
       <span class="grow"></span>
-      <button class="btn" data-act="user.import">${t('user.import')}</button>
+      ${isReseller() ? '' : `<button class="btn" data-act="user.import">${t('user.import')}</button>
       <button class="btn" data-act="user.export">${t('user.batch.export')}</button>
-      <button class="btn" data-act="user.bulk">${t('user.bulk')}</button>
+      <button class="btn" data-act="user.bulk">${t('user.bulk')}</button>`}
       <button class="btn primary" data-act="user.add">${t('user.add')}</button>
     </div>
     <div class="toolbar batch-bar" id="batch-bar" hidden>
@@ -91,7 +91,7 @@ function renderRows() {
     const ips = (u.onlineIps || []).length;
     return `<tr class="${selected.has(u.id) ? 'selected' : ''}">
       <td><input type="checkbox" class="sel" data-change="user.sel" data-id="${u.id}" ${selected.has(u.id) ? 'checked' : ''}></td>
-      <td class="primary-cell">${dot(online.has(u.name))}<a href="#" data-act="user.detail" data-id="${u.id}">${esc(u.name)}</a>${u.remark ? `<div class="sub-cell">${esc(u.remark)}</div>` : ''}</td>
+      <td class="primary-cell">${dot(online.has(u.name))}<a href="#" data-act="user.detail" data-id="${u.id}">${esc(u.name)}</a>${u.resellerName && !isReseller() ? ' ' + badge(u.resellerName, 'warn') : ''}${u.remark ? `<div class="sub-cell">${esc(u.remark)}</div>` : ''}</td>
       <td>${statusBadge(u)}</td>
       <td><span class="num">${fmtBytes(used, 1)}</span> <span class="muted small">/ ${u.volume ? fmtBytes(u.volume, 0) : t('common.unlimited')}</span>${progress(used, u.volume)}</td>
       <td>${expiryCell(u)}</td>

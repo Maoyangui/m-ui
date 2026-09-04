@@ -103,8 +103,9 @@ func pageLang(r *http.Request) string {
 	return "en"
 }
 
-func buildPageData(r *http.Request, subPath string, user model.User, lines []model.Line, opt Options, title, notice, support string) pageData {
-	base := publicBase(r, subPath, user.Name)
+// key 是订阅地址里的那一段:主面板用户是用户名,代理建的用户是随机令牌。
+func buildPageData(r *http.Request, subPath, key string, user model.User, lines []model.Line, opt Options, title, notice, support string) pageData {
+	base := publicBase(r, subPath, key)
 	clashURL := base + "?format=clash"
 	loc := tz.Location(opt.TZ) // 到期 / 重置日期按面板时区显示
 	now := time.Now().Unix()
@@ -172,15 +173,18 @@ func buildPageData(r *http.Request, subPath string, user model.User, lines []mod
 }
 
 // servePage 输出订阅落地页。
-func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath string, user model.User, lines []model.Line, opt Options) {
-	title := s.setting("subPageTitle")
+func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key string, user model.User, lines []model.Line, opt Options, rs *model.Reseller) {
+	title, notice, support := s.setting("subPageTitle"), s.setting("subPageNotice"), s.setting("subPageSupport")
+	if rs != nil { // 代理可以给自己的用户配一套落地页文案
+		title, notice, support = pick(rs.PageTitle, title), pick(rs.PageNotice, notice), pick(rs.PageSupport, support)
+	}
 	if title == "" {
 		title = opt.ProfileTitle
 	}
 	if title == "" {
 		title = "m-ui"
 	}
-	data := buildPageData(r, subPath, user, lines, opt, title, s.setting("subPageNotice"), s.setting("subPageSupport"))
+	data := buildPageData(r, subPath, key, user, lines, opt, title, notice, support)
 	var buf bytes.Buffer
 	if err := pageTmpl.Execute(&buf, data); err != nil {
 		http.Error(w, "page error: "+err.Error(), http.StatusInternalServerError)
@@ -207,6 +211,14 @@ func (s *Server) serveQR(w http.ResponseWriter, r *http.Request, subPath, name s
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(png)
+}
+
+// pick 返回第一个非空串。
+func pick(v, def string) string {
+	if strings.TrimSpace(v) != "" {
+		return v
+	}
+	return def
 }
 
 func fmtBytesHuman(n int64) string {

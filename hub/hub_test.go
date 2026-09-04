@@ -167,3 +167,37 @@ func TestApplyCountersCursor(t *testing.T) {
 		t.Fatalf("游标应记录原始计数而非倍率后的值: %+v", cur4)
 	}
 }
+
+// 代理随快照下发副机(供订阅页文案用),但不带密码与 2FA;开关不能被 gorm 默认值翻回 true。
+func TestSnapshotCarriesResellers(t *testing.T) {
+	src, err := database.Open(filepath.Join(t.TempDir(), "src.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(src)
+	dst, err := database.Open(filepath.Join(t.TempDir(), "dst.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(dst)
+
+	src.Create(&model.Reseller{Name: "dl1", Enabled: true, Password: "$2a$hash", TotpSecret: "SECRET", PageTitle: "DL1"})
+	// 代理在自己面板里关掉了订阅页与临时共享(gorm 的 default:true 只对 Create 生效,这里用 map 更新)
+	src.Model(&model.Reseller{}).Where("id = ?", 1).
+		Updates(map[string]interface{}{"page_enabled": false, "share_on": false})
+	snap, err := BuildSnapshot(src, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Resellers) != 1 || snap.Resellers[0].Password != "" || snap.Resellers[0].TotpSecret != "" {
+		t.Fatalf("密码与 2FA 不应下发: %+v", snap.Resellers)
+	}
+	if _, _, err := ApplySnapshot(dst, snap); err != nil {
+		t.Fatal(err)
+	}
+	var got model.Reseller
+	dst.First(&got)
+	if got.Name != "dl1" || got.PageTitle != "DL1" || got.PageEnabled || got.ShareOn {
+		t.Fatalf("副机上的代理不对: %+v", got)
+	}
+}

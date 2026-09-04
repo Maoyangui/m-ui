@@ -63,6 +63,12 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tag := r.URL.Query().Get("tag")
+	if rid := scope(r); rid > 0 { // 代理只能查自己用户的曲线
+		if resource != "user" || !s.resellerUserNames(rid)[tag] {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权限"})
+			return
+		}
+	}
 	hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
 	if hours <= 0 || hours > 24*90 {
 		hours = 24
@@ -156,10 +162,31 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 	o := s.run.Onlines()
+	users := mergeIPs(o.Users, s.run.Hub().RemoteOnlineUsers())
+	counts := s.run.ConnCounts()
+	if rid := scope(r); rid > 0 { // 代理只看自己的用户
+		mine := s.resellerUserNames(rid)
+		users = filterNames(users, mine)
+		for name := range counts {
+			if !mine[name] {
+				delete(counts, name)
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"users": mergeIPs(o.Users, s.run.Hub().RemoteOnlineUsers()), "lines": o.Lines, "upstreams": o.Upstreams,
-		"connCounts": s.run.ConnCounts(),
+		"users": users, "lines": o.Lines, "upstreams": o.Upstreams, "connCounts": counts,
 	})
+}
+
+// filterNames 只保留属于该代理的名字。
+func filterNames(all []string, mine map[string]bool) []string {
+	out := make([]string, 0, len(all))
+	for _, n := range all {
+		if mine[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // mergeIPs 合并两组字符串并去重(顺序:a 在前)。
@@ -466,7 +493,11 @@ func (s *Server) subLinks(u model.User) map[string]string {
 		host = "<服务器IP或域名>"
 	}
 	root := fmt.Sprintf("%s://%s:%d%s", scheme, host, s.settingInt("subPort", 2056), s.subPath())
-	base := root + u.Name
+	key := u.Name
+	if u.SubToken != "" { // 代理建的用户按随机令牌订阅
+		key = u.SubToken
+	}
+	base := root + key
 	out := map[string]string{"link": base, "clash": base + "?format=clash", "json": base + "?format=json"}
 	if u.ShareToken != "" {
 		out["share"] = root + u.ShareToken // 用户自助生成的临时共享地址

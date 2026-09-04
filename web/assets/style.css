@@ -328,3 +328,8 @@ table.grid.conns td.ell { max-width: 14rem; overflow: hidden; text-overflow: ell
 /* 在线设备:IP 右侧列出它正在使用的线路 */
 .ip-list .ip { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
 .ip-lines { display: flex; gap: .25rem; flex-wrap: wrap; justify-content: flex-end; }
+
+/* 代理详情:名下用户卡片 */
+.rs-user { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .6rem .7rem; margin-bottom: .5rem; }
+.rs-user .sub-box { margin: .4rem 0 .35rem; }
+.rs-user .ip-list { margin-top: .3rem; }

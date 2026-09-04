@@ -93,9 +93,38 @@ type User struct {
 	Desc        string          `json:"desc"`
 	CreatedAt   int64           `json:"createdAt" gorm:"default:0;not null"`
 	OnlineAt    int64           `json:"onlineAt" gorm:"default:0;not null"`
+	ResellerId  uint            `json:"resellerId" gorm:"index"` // 归属代理,0=主面板直属
+	SubToken    string          `json:"subToken" gorm:"index"`   // 代理建的用户用随机令牌做订阅地址(主面板用户为空,按用户名)
 	ShareToken  string          `json:"shareToken" gorm:"index"` // 临时共享订阅令牌,空=未开启
 	ShareCreds  json.RawMessage `json:"shareCreds,omitempty"`    // 共享地址专用凭据(与本人凭据不同,取消即失效)
 	ShareAt     int64           `json:"shareAt"`                 // 令牌生成时间
+}
+
+// Reseller 代理:自带面板,能在自己额度内建用户。其用户的流量与设备数全部归到代理名下。
+type Reseller struct {
+	Id          uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name        string `json:"name" gorm:"uniqueIndex"`
+	Password    string `json:"-"` // bcrypt;空=首次登录时自行设置
+	TotpSecret  string `json:"-"`
+	TotpEnabled bool   `json:"totpEnabled"`
+	Volume      int64  `json:"volume"`      // 名下用户用量之和的上限,字节,0=不限
+	DeviceLimit int    `json:"deviceLimit"` // 名下用户设备上限之和的上限,0=不限
+	Enabled     bool   `json:"enabled" gorm:"default:true"`
+	Remark      string `json:"remark"`
+	CreatedAt   int64  `json:"createdAt" gorm:"default:0;not null"`
+	LastLogins  string `json:"lastLogins"`
+	// 代理自己的订阅落地页设置(文案留空则用主面板的;两个开关与主面板取与)
+	PageEnabled bool   `json:"pageEnabled" gorm:"default:true"`
+	ShareOn     bool   `json:"shareOn" gorm:"default:true"`
+	PageTitle   string `json:"pageTitle"`
+	PageNotice  string `json:"pageNotice"`
+	PageSupport string `json:"pageSupport"`
+}
+
+// ResellerLine 代理可用线路(主面板分配),代理只能把这些线路分给自己的用户。
+type ResellerLine struct {
+	ResellerId uint `json:"resellerId" gorm:"primaryKey;autoIncrement:false"`
+	LineId     uint `json:"lineId" gorm:"primaryKey;autoIncrement:false"`
 }
 
 // Plan 套餐:配额/时长/设备/限速/线路的模板,用于建号、续费与批量操作。
@@ -193,6 +222,7 @@ type Change struct {
 func All() []interface{} {
 	return []interface{}{
 		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &Plan{}, &ExtNode{}, &UserExt{},
+		&Reseller{}, &ResellerLine{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{},
 	}
 }

@@ -7,6 +7,8 @@ import * as lines from './pages/lines.js';
 import * as upstreams from './pages/upstreams.js';
 import * as users from './pages/users.js';
 import * as plans from './pages/plans.js';
+import * as resellers from './pages/resellers.js';
+import * as account from './pages/account.js';
 import * as exts from './pages/exts.js';
 import * as nodes from './pages/nodes.js';
 import * as cert from './pages/cert.js';
@@ -21,11 +23,15 @@ export const state = {
   onlines: { users: [], lines: [], upstreams: [], connCounts: {} },
 };
 
-const pages = { dashboard, lines, upstreams, exts, users, plans, nodes, cert, backup, ops, logs, admin, settings };
-const navItems = [
-  ['dashboard', '◉'], ['lines', '⇄'], ['upstreams', '⇪'], ['exts', '⇢'], ['users', '☺'], ['plans', '▤'], ['nodes', '☁'],
+const pages = { dashboard, lines, upstreams, exts, users, plans, resellers, account, nodes, cert, backup, ops, logs, admin, settings };
+const masterNav = [
+  ['dashboard', '◉'], ['lines', '⇄'], ['upstreams', '⇪'], ['exts', '⇢'], ['users', '☺'], ['resellers', '⚑'], ['plans', '▤'], ['nodes', '☁'],
   ['cert', '⚿'], ['backup', '⛁'], ['ops', '⚒'], ['logs', '≡'], ['admin', '⚉'], ['settings', '⚙'],
 ];
+// 代理面板:同一套前端,只留下代理用得上的几页
+const resellerNav = [['dashboard', '◉'], ['users', '☺'], ['plans', '▤'], ['account', '⚉']];
+export const isReseller = () => (state.status || {}).scope === 'reseller';
+const navFor = () => (isReseller() ? resellerNav : masterNav);
 let current = null;
 
 // ---- 数据加载 ----
@@ -35,11 +41,11 @@ export async function load(...what) {
   if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); }));
   if (all || what.includes('settings')) jobs.push(get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
   if (all || what.includes('lines')) jobs.push(get('lines').then(l => { state.lines = l; }));
-  if (all || what.includes('upstreams')) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
+  if (!isReseller() && (all || what.includes('upstreams'))) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
   if (all || what.includes('users')) jobs.push(get('users').then(u => { state.users = u; }));
   if (all || what.includes('plans')) jobs.push(get('plans').then(p => { state.plans = p || []; }));
-  if (all || what.includes('nodes')) jobs.push(get('nodes').then(n => { state.nodes = (n && n.nodes) || []; }).catch(() => { state.nodes = []; }));
-  if (all || what.includes('exts')) jobs.push(get('exts').then(x => { state.exts = x || []; }).catch(() => { state.exts = []; }));
+  if (!isReseller() && (all || what.includes('nodes'))) jobs.push(get('nodes').then(n => { state.nodes = (n && n.nodes) || []; }).catch(() => { state.nodes = []; }));
+  if (!isReseller() && (all || what.includes('exts'))) jobs.push(get('exts').then(x => { state.exts = x || []; }).catch(() => { state.exts = []; }));
   if (all || what.includes('onlines')) jobs.push(get('onlines').then(o => { state.onlines = o; }));
   await Promise.all(jobs);
 }
@@ -90,6 +96,11 @@ document.getElementById('login-form').addEventListener('submit', async ev => {
 async function enterApp() {
   document.getElementById('login').hidden = true;
   document.getElementById('app').hidden = false;
+  await load('status');
+  if (state.status.mustSetPassword) { // 新代理首次登录:先设密码
+    account.forceSetPassword();
+    return;
+  }
   renderChrome();
   await load();
   route();
@@ -103,7 +114,7 @@ function supportLink(a) {
 
 // ---- 壳:导航、角色、主题、语言 ----
 function renderChrome() {
-  document.getElementById('nav').innerHTML = navItems.map(([p, ic]) =>
+  document.getElementById('nav').innerHTML = navFor().map(([p, ic]) =>
     `<a href="#/${p}" data-page="${p}"><span class="ic">${ic}</span>${t('nav.' + p)}</a>`).join('');
   document.getElementById('modal-cancel').textContent = t('common.cancel');
   document.getElementById('btn-logout').textContent = t('common.logout');
@@ -115,8 +126,13 @@ function renderChrome() {
 function renderRole() {
   const s = state.status || {};
   const b = document.getElementById('role-badge');
-  b.textContent = s.role === 'node' ? t('role.node') : t('role.master');
-  b.className = 'badge ' + (s.role === 'node' ? 'node' : 'primary');
+  if (s.scope === 'reseller') {
+    b.textContent = s.reseller || t('rs.role');
+    b.className = 'badge warn';
+  } else {
+    b.textContent = s.role === 'node' ? t('role.node') : t('role.master');
+    b.className = 'badge ' + (s.role === 'node' ? 'node' : 'primary');
+  }
   document.getElementById('sidebar-version').textContent = s.version ? 'v' + s.version : '';
   // 默认密码未改:顶部常驻警示
   let bar = document.getElementById('default-pw-bar');

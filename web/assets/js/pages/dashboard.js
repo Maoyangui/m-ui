@@ -1,4 +1,4 @@
-import { state, load } from '../app.js';
+import { state, load, isReseller } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDuration, fmtRelative, fmtTime, tzOffsetMinutes, toast, registerActions, badge, dot, empty } from '../ui.js';
@@ -48,6 +48,7 @@ function quickStart() {
 }
 
 export async function render(el) {
+  if (isReseller()) return renderReseller(el);
   el.innerHTML = `
     ${quickStart()}
     <div class="stats" id="dash-stats"></div>
@@ -98,12 +99,37 @@ export async function render(el) {
 // 每 10 秒:状态卡、数据面、在线、最近入站连接、日志;每 30 秒:流量图(含 24h 流量卡)、排行、巡检、审计
 let ticks = 0;
 export async function tick() {
+  if (isReseller()) { renderResellerStats(); renderOnline(); return; }
   ticks++;
   await refreshNodeSummary();
   renderStats(); renderCore(); renderOnline();
   const jobs = [renderConns(), renderLog()];
   if (ticks % 3 === 0) jobs.push(renderChart(), renderTop(), renderHealth(), renderAudit());
   await Promise.allSettled(jobs);
+}
+
+// ---- 代理面板的概览:只有自己的额度、用户与在线 ----
+function renderReseller(el) {
+  el.innerHTML = `
+    <div class="stats" id="dash-stats"></div>
+    <section class="card"><h2>${t('dash.onlineList')}</h2><div id="dash-online" style="margin-top:.6rem"></div></section>`;
+  renderResellerStats();
+  renderOnline();
+}
+
+function renderResellerStats() {
+  const el = document.getElementById('dash-stats');
+  if (!el) return;
+  const s = state.status || {};
+  const pct = s.volume ? Math.min(100, Math.round((s.used || 0) / s.volume * 100)) : 0;
+  const card = (label, value, sub, kind) => `<div class="stat ${kind || ''}"><div class="stat-label">${label}</div>
+    <div class="stat-value">${value}</div>${sub ? `<div class="stat-sub">${sub}</div>` : ''}</div>`;
+  el.innerHTML = [
+    card(t('rs.used'), fmtBytes(s.used || 0), s.volume ? `/ ${fmtBytes(s.volume)} · ${pct}%` : t('common.unlimited'), pct >= 100 ? 'bad' : ''),
+    card(t('rs.users'), `${s.enabledUsers || 0} / ${s.users || 0}`, t('common.enabled')),
+    card(t('dash.onlineUsers'), s.onlineUsers || 0, ''),
+    card(t('rs.online'), `${s.onlineDevices || 0}${s.deviceLimit ? ' / ' + s.deviceLimit : ''}`, t('rs.devicesSub')),
+  ].join('');
 }
 
 async function renderConns() {

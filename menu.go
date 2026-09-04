@@ -104,21 +104,7 @@ func panelInfo(dbPath string) (url string, user string, defaultPw bool, err erro
 	if err != nil {
 		return "", "", false, err
 	}
-	host := s["subDomain"]
-	if host == "" {
-		host = s["webDomain"]
-	}
-	if host == "" {
-		host = s["publicIp"]
-	}
-	if host == "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-		host = acme.PublicIP(ctx)
-		cancel()
-	}
-	if host == "" {
-		host = "<服务器IP>"
-	}
+	host := infoHost(s)
 	scheme := "http"
 	if s["webCertFile"] != "" && s["webKeyFile"] != "" {
 		scheme = "https"
@@ -138,6 +124,21 @@ func panelInfo(dbPath string) (url string, user string, defaultPw bool, err erro
 		path += "/"
 	}
 	return fmt.Sprintf("%s://%s:%s%s", scheme, host, port, path), "admin", s["adminDefault"] == "true", nil
+}
+
+// infoHost 面板地址里的主机名:订阅域名 → 面板域名 → 公网 IP。
+func infoHost(s map[string]string) string {
+	for _, k := range []string{"subDomain", "webDomain", "publicIp"} {
+		if v := strings.TrimSpace(s[k]); v != "" {
+			return v
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	if ip := acme.PublicIP(ctx); ip != "" {
+		return ip
+	}
+	return "<服务器IP>"
 }
 
 func printPanelInfo(dbPath string) {
@@ -164,6 +165,21 @@ func printPanelInfo(dbPath string) {
 		subPort = "2056"
 	}
 	fmt.Println(colorBold+"  角色:     "+colorReset+role, "   订阅端口:", subPort, "   数据库:", dbPath)
+	if !strings.EqualFold(s["resellerEnabled"], "false") && !strings.EqualFold(s["nodeMode"], "true") {
+		rp, rpath := s["resellerPort"], s["resellerPath"]
+		if rp == "" {
+			rp = "2054"
+		}
+		if rpath == "" {
+			rpath = "/dl/"
+		}
+		scheme := "http"
+		if s["webCertFile"] != "" && s["webKeyFile"] != "" {
+			scheme = "https"
+		}
+		fmt.Println(colorBold + "  代理面板: " + colorReset + colorGray +
+			fmt.Sprintf("%s://%s:%s%s", scheme, infoHost(s), rp, rpath) + colorReset)
+	}
 	fmt.Println()
 }
 

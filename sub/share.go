@@ -39,8 +39,8 @@ func newShareToken() string {
 }
 
 // handleShare 处理订阅页上的生成/取消(POST ?share=on|off),完成后跳回订阅页。
-func (s *Server) handleShare(w http.ResponseWriter, r *http.Request, subPath string, user model.User) {
-	if !s.shareSelfService() {
+func (s *Server) handleShare(w http.ResponseWriter, r *http.Request, subPath, key string, user model.User, rs *model.Reseller) {
+	if !s.shareSelfService() || (rs != nil && !rs.ShareOn) {
 		http.NotFound(w, r)
 		return
 	}
@@ -61,7 +61,7 @@ func (s *Server) handleShare(w http.ResponseWriter, r *http.Request, subPath str
 		return
 	}
 	s.applyShare(user.Name, user.ShareToken != "") // 旧凭据被作废才需要断线
-	http.Redirect(w, r, publicBase(r, subPath, user.Name), http.StatusSeeOther)
+	http.Redirect(w, r, publicBase(r, subPath, key), http.StatusSeeOther)
 }
 
 // applyShare 让共享凭据即时生效/失效。

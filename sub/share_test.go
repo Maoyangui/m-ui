@@ -162,3 +162,35 @@ func TestShareOnNode(t *testing.T) {
 		t.Fatalf("副机应照常按令牌发订阅,得 %d", w.Code)
 	}
 }
+
+// 代理建的用户:订阅地址是随机令牌,link / clash / json 三种格式都要正常;
+// 用户名路径不给(避免枚举),临时共享照常可用。
+func TestResellerUserSubscription(t *testing.T) {
+	s, db := shareServer(t)
+	db.Create(&model.Reseller{Name: "dl", Enabled: true, PageEnabled: true, ShareOn: true})
+	db.Model(&model.User{}).Where("id = ?", 1).
+		Updates(map[string]interface{}{"reseller_id": 1, "sub_token": "TOKEN1234567890abcdefg"})
+
+	if w := doReq(s, "GET", "/sub/alice", "curl/8.4.0"); w.Code != 404 {
+		t.Fatalf("代理用户不应能按用户名订阅,得 %d", w.Code)
+	}
+	for _, f := range []string{"", "?format=clash", "?format=json"} {
+		w := doReq(s, "GET", "/sub/TOKEN1234567890abcdefg"+f, "curl/8.4.0")
+		if w.Code != 200 || !strings.Contains(w.Body.String(), "hk.example") {
+			t.Fatalf("格式 %q 令牌订阅不可用 (code %d): %s", f, w.Code, w.Body.String())
+		}
+	}
+	// 落地页与二维码也走令牌地址
+	page := doReq(s, "GET", "/sub/TOKEN1234567890abcdefg", browserUA).Body.String()
+	if !strings.Contains(page, "/sub/TOKEN1234567890abcdefg?format=clash") {
+		t.Fatal("落地页里的地址应是令牌地址")
+	}
+	if w := doReq(s, "GET", "/sub/TOKEN1234567890abcdefg/qr", browserUA); w.Code != 200 {
+		t.Fatalf("二维码应可用,得 %d", w.Code)
+	}
+	// 代理关掉自己的订阅页:客户端照常拿订阅,浏览器不再出页面
+	db.Model(&model.Reseller{}).Where("id = ?", 1).Update("page_enabled", false)
+	if w := doReq(s, "GET", "/sub/TOKEN1234567890abcdefg", browserUA); w.Code != 200 || strings.Contains(w.Body.String(), "<html") {
+		t.Fatalf("关掉订阅页后应直接给订阅,得 %d", w.Code)
+	}
+}

@@ -49,6 +49,7 @@ type Snapshot struct {
 	UserLines  []model.UserLine  `json:"userLines"`
 	Exts       []model.ExtNode   `json:"exts"`
 	UserExts   []model.UserExt   `json:"userExts"`
+	Resellers  []model.Reseller  `json:"resellers"` // 副机据此给代理用户出对应的订阅页文案(不含密码/2FA)
 	Settings   map[string]string `json:"settings"`
 }
 
@@ -76,6 +77,12 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 	for i := range s.Users {
 		// 副机不需要也不该拥有主机的计量;凭据/配额/限速/启用状态才是它要的
 		s.Users[i].Up, s.Users[i].Down, s.Users[i].TotalUp, s.Users[i].TotalDown, s.Users[i].OnlineAt = 0, 0, 0, 0, 0
+	}
+	if err := db.Order("id asc").Find(&s.Resellers).Error; err != nil {
+		return s, err
+	}
+	for i := range s.Resellers {
+		s.Resellers[i].Password, s.Resellers[i].TotpSecret = "", "" // 副机不跑代理面板,不需要这些
 	}
 	if err := db.Order("user_id asc, line_id asc").Find(&s.UserLines).Error; err != nil {
 		return s, err
@@ -146,6 +153,11 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 
 	// gorm 对带 default:true 的 bool 字段:Create 时零值 false 会写成默认 true,并把 true 回填进结构体。
 	// 所以要在插入之前记下被禁用的 id,插入后再显式写回 false,否则主机禁用的用户会在副机上"复活"。
+	type rsFlags struct{ enabled, page, share bool }
+	rsSwitches := map[uint]rsFlags{}
+	for _, rs := range snap.Resellers {
+		rsSwitches[rs.Id] = rsFlags{rs.Enabled, rs.PageEnabled, rs.ShareOn}
+	}
 	var offUsers, offLines, offNodes, offExts []uint
 	for _, u := range snap.Users {
 		if !u.Enabled {
@@ -168,7 +180,7 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		}
 	}
 	err = db.Transaction(func(tx *gorm.DB) error {
-		for _, t := range []interface{}{&model.UserLine{}, &model.UserExt{}, &model.User{}, &model.Line{}, &model.Upstream{}, &model.Node{}, &model.ExtNode{}} {
+		for _, t := range []interface{}{&model.UserLine{}, &model.UserExt{}, &model.User{}, &model.Line{}, &model.Upstream{}, &model.Node{}, &model.ExtNode{}, &model.Reseller{}} {
 			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(t).Error; err != nil {
 				return err
 			}
@@ -209,6 +221,19 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		if len(snap.UserLines) > 0 {
 			if err := tx.Create(&snap.UserLines).Error; err != nil {
 				return err
+			}
+		}
+		if len(snap.Resellers) > 0 {
+			if err := tx.Create(&snap.Resellers).Error; err != nil {
+				return err
+			}
+			// gorm 的 default:true 会把 false 写成 true,插入后按插入前记下的值写回
+			for id, f := range rsSwitches {
+				if err := tx.Model(&model.Reseller{}).Where("id = ?", id).Updates(map[string]interface{}{
+					"enabled": f.enabled, "page_enabled": f.page, "share_on": f.share,
+				}).Error; err != nil {
+					return err
+				}
 			}
 		}
 		if len(offUsers) > 0 {

@@ -255,28 +255,31 @@ func (s *Server) handle() http.HandlerFunc {
 			return
 		}
 
-		// 先按用户名查;查不到再按临时共享令牌查
+		// 用户名(主面板用户)→ 订阅令牌(代理建的用户)→ 临时共享令牌
 		var user model.User
 		shared := false
-		if err := s.db.Where("name = ? AND enabled = ?", name, true).First(&user).Error; err != nil {
-			if !s.shareEnabled() || s.db.Where("share_token = ? AND enabled = ?", name, true).First(&user).Error != nil {
-				s.log(r, name, false, 404)
-				http.NotFound(w, r)
-				return
+		if err := s.db.Where("name = ? AND reseller_id = 0 AND enabled = ?", name, true).First(&user).Error; err != nil {
+			if s.db.Where("sub_token = ? AND enabled = ?", name, true).First(&user).Error != nil {
+				if !s.shareEnabled() || s.db.Where("share_token = ? AND enabled = ?", name, true).First(&user).Error != nil {
+					s.log(r, name, false, 404)
+					http.NotFound(w, r)
+					return
+				}
+				shared = true // 共享地址:只发原始订阅,不出订阅页/二维码,也不能改共享状态
+				if len(user.ShareCreds) == 0 {
+					http.NotFound(w, r) // 老版本留下的令牌没有独立凭据,让用户重新生成
+					return
+				}
+				user.Credentials = user.ShareCreds // 共享用单独凭据,取消即失效
 			}
-			shared = true // 共享地址:只发原始订阅,不出订阅页/二维码,也不能改共享状态
-			if len(user.ShareCreds) == 0 {
-				http.NotFound(w, r) // 老版本留下的令牌没有独立凭据,让用户重新生成
-				return
-			}
-			user.Credentials = user.ShareCreds // 共享用单独凭据,取消即失效
 		}
+		rs := s.resellerOf(user) // 代理用户:落地页文案与开关按代理的来
 		if shared && (wantQR || r.Method == http.MethodPost) {
 			http.NotFound(w, r)
 			return
 		}
 		if r.Method == http.MethodPost {
-			s.handleShare(w, r, subPath, user)
+			s.handleShare(w, r, subPath, name, user, rs)
 			return
 		}
 		if wantQR {
@@ -290,9 +293,10 @@ func (s *Server) handle() http.HandlerFunc {
 
 		opt := s.options()
 		opt.External = s.externalFor(user.Id)
+		opt.Share = s.shareSelfService() && (rs == nil || rs.ShareOn)
 		// 浏览器打开订阅地址 → 订阅页(用量/到期/一键导入/二维码);客户端拉取 → 原始订阅
-		if !shared && !strings.EqualFold(s.setting("subPageEnabled"), "false") && WantsPage(r) {
-			s.servePage(w, r, subPath, user, lines, opt)
+		if !shared && s.pageEnabled(rs) && WantsPage(r) {
+			s.servePage(w, r, subPath, name, user, lines, opt, rs)
 			s.log(r, user.Name, false, 200)
 			return
 		}
@@ -329,6 +333,26 @@ func (s *Server) handle() http.HandlerFunc {
 		}
 		s.log(r, user.Name, shared, 200)
 	}
+}
+
+// resellerOf 取用户所属代理;主面板直属用户返回 nil。
+func (s *Server) resellerOf(u model.User) *model.Reseller {
+	if u.ResellerId == 0 {
+		return nil
+	}
+	var rs model.Reseller
+	if s.db.First(&rs, u.ResellerId).Error != nil {
+		return nil
+	}
+	return &rs
+}
+
+// pageEnabled 订阅页开关:主面板关掉就都不出;代理可以只关自己的。
+func (s *Server) pageEnabled(rs *model.Reseller) bool {
+	if strings.EqualFold(s.setting("subPageEnabled"), "false") {
+		return false
+	}
+	return rs == nil || rs.PageEnabled
 }
 
 // log 记录订阅访问,供面板按用户汇总(替代 nginx 日志 + 汇总脚本)。
