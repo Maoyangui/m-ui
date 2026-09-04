@@ -162,7 +162,7 @@ func (s *Server) apiUser(u model.User) apiUserView {
 		DeviceLimit: u.DeviceLimit, SpeedUp: u.SpeedUp, SpeedDown: u.SpeedDown, Remark: u.Remark, Desc: u.Desc,
 		CreatedAt: u.CreatedAt, OnlineAt: u.OnlineAt,
 		OnlineIPs:   mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
-		OnlineLines: s.onlineLines(u.Name, s.localNodeName(), s.run.OnlineIPLines()),
+		OnlineLines: s.onlineLines(u.Name, s.localNodeName(), s.run.OnlineIPLines(), s.run.Hub().RemoteIPLinesAll()),
 		LineIds:     ids, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}
 }
 

@@ -161,6 +161,28 @@ func (l *Limiter) ActiveIPs(user string) []string {
 	return ips
 }
 
+// ActiveIPsAll 一次拿全量:用户 → 活跃源 IP。
+// 面板过去是每个用户调一次 ActiveIPs,几百个用户就要抢几百次锁,
+// 而数据面每有流量都要 touch 同一把锁——用户一多两边都卡。
+func (l *Limiter) ActiveIPsAll() map[string][]string {
+	now := time.Now().Unix()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make(map[string][]string, len(l.ips))
+	for user := range l.ips {
+		l.pruneLocked(user, now)
+		if len(l.ips[user]) == 0 {
+			continue
+		}
+		ips := make([]string, 0, len(l.ips[user]))
+		for ip := range l.ips[user] {
+			ips = append(ips, ip)
+		}
+		out[user] = ips
+	}
+	return out
+}
+
 // touch 刷新某用户某 IP 的活跃时间(有流量经过时调用)。
 func (l *Limiter) touch(user, ip string, now int64) {
 	if user == "" || ip == "" {

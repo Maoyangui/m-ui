@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
 
@@ -183,7 +184,11 @@ func loadLineUsers(db *gorm.DB) (map[uint][]model.User, error) {
 		return nil, err
 	}
 	var users []model.User
-	if err := db.Where("enabled = ?", true).Find(&users).Error; err != nil {
+	// 代理被停用或到期 → 他名下的用户一并不下发(等同停用,节点立刻连不上)
+	live := db.Model(&model.Reseller{}).Select("id").
+		Where("enabled = ? AND (expiry = 0 OR expiry > ?)", true, time.Now().Unix())
+	if err := db.Where("enabled = ? AND (COALESCE(reseller_id,0) = 0 OR reseller_id IN (?))", true, live).
+		Find(&users).Error; err != nil {
 		return nil, err
 	}
 	userById := make(map[uint]model.User, len(users))

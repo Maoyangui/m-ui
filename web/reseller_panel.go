@@ -77,11 +77,14 @@ func (s *Server) StartReseller() error {
 	mux.HandleFunc(api+"users", s.rauth(s.handleUsers))
 	mux.HandleFunc(api+"users/", s.rauth(s.handleUserItem))
 	mux.HandleFunc(api+"plans", s.rauth(s.handlePlans))
+	mux.HandleFunc(api+"plans/", s.rauth(s.handlePlanItem))
 	mux.HandleFunc(api+"stats", s.rauth(s.handleStats))
 	mux.HandleFunc(api+"onlines", s.rauth(s.handleOnlines))
 	mux.HandleFunc(api+"self", s.rauth(s.handleResellerSelf))
 	mux.HandleFunc(api+"self/", s.rauth(s.handleResellerSelfSub))
 	mux.HandleFunc(base+"logo.svg", brand.ServeLogo)
+	mux.HandleFunc(base+"support", s.handleSupport)
+	mux.HandleFunc(base+"support/qr", s.handleSupportQR)
 
 	path := s.resellerPath()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +105,11 @@ func (s *Server) StartReseller() error {
 	if listen == "" {
 		listen = "0.0.0.0"
 	}
-	addr := net.JoinHostPort(listen, fmt.Sprint(s.settingInt("resellerPort", 2054)))
+	port := s.settingInt("resellerPort", 2054)
+	if port == s.settingInt("webPort", 2053) || port == s.settingInt("subPort", 2056) {
+		return fmt.Errorf("代理面板端口 %d 与面板/订阅端口冲突,请在设置里改", port)
+	}
+	addr := net.JoinHostPort(listen, fmt.Sprint(port))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err

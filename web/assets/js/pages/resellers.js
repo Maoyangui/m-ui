@@ -13,11 +13,20 @@ export async function render(el) {
     <div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="rs.add">${t('rs.add')}</button></div>
     <div class="table-wrap"><table class="grid">
       <thead><tr><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('rs.users')}</th><th>${t('rs.used')}</th>
-        <th>${t('rs.devices')}</th><th>${t('rs.online')}</th><th>${t('rs.createdAt')}</th><th></th></tr></thead>
+        <th>${t('rs.devices')}</th><th>${t('rs.speed')}</th><th>${t('user.expiry')}</th><th>${t('rs.online')}</th><th></th></tr></thead>
       <tbody id="rs-body"></tbody>
     </table></div>
     <p class="hint">${t('rs.panelHint', { url: panelURL() })}</p>`;
   await reload();
+}
+
+// 到期也是一种"停":名下用户会被一起停掉,列表要看得出来
+function expired(r) { return r.expiry > 0 && r.expiry * 1000 < Date.now(); }
+function statusBadge(r) {
+  if (!r.enabled) return badge(t('common.disabled'), 'danger');
+  if (expired(r)) return badge(t('user.expired'), 'warn');
+  if (r.volume > 0 && r.used >= r.volume) return badge(t('user.over'), 'warn');
+  return badge(t('common.enabled'), 'ok');
 }
 
 function panelURL() {
@@ -38,17 +47,17 @@ async function reload() {
 function renderRows() {
   const body = document.getElementById('rs-body');
   if (!body) return;
-  if (!list.length) { body.innerHTML = `<tr><td colspan="8">${empty(t('rs.empty'))}</td></tr>`; return; }
+  if (!list.length) { body.innerHTML = `<tr><td colspan="9">${empty(t('rs.empty'))}</td></tr>`; return; }
   body.innerHTML = list.map(r => `<tr>
     <td class="primary-cell"><a href="#" data-act="rs.detail" data-id="${r.id}">${esc(r.name)}</a>
       ${r.remark ? `<div class="sub-cell">${esc(r.remark)}</div>` : ''}</td>
-    <td>${r.enabled ? badge(t('common.enabled'), 'ok') : badge(t('common.disabled'), 'danger')}
-      ${r.totpEnabled ? badge('2FA', 'primary') : ''}</td>
+    <td>${statusBadge(r)}${r.totpEnabled ? ' ' + badge('2FA', 'primary') : ''}</td>
     <td class="num">${r.users}</td>
     <td class="num">${fmtBytes(r.used)}${r.volume ? ' / ' + fmtBytes(r.volume) : ''}${progress(r.used, r.volume)}</td>
     <td class="num">${r.devices}${r.deviceLimit ? ' / ' + r.deviceLimit : ''}</td>
+    <td class="num">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'}/${r.speedDown || '∞'} M` : '∞'}</td>
+    <td class="${expired(r) ? 'danger' : ''}">${r.expiry ? fmtDay(r.expiry) : `<span class="muted small">${t('user.never')}</span>`}</td>
     <td class="num">${r.online}</td>
-    <td class="mono small">${r.createdAt ? fmtDay(r.createdAt) : '—'}</td>
     <td class="actions">
       <button class="btn sm" data-act="rs.detail" data-id="${r.id}">${t('common.details')}</button>
       <button class="btn sm" data-act="rs.edit" data-id="${r.id}">${t('common.edit')}</button>
@@ -65,12 +74,14 @@ async function showDetail(id) {
   const r = list.find(x => x.id === id);
   if (!r) return;
   const users = await get(`resellers/${id}/users`).catch(() => []);
-  openDrawer(`${esc(r.name)} ${r.enabled ? badge(t('common.enabled'), 'ok') : badge(t('common.disabled'), 'danger')}`, `
+  openDrawer(`${esc(r.name)} ${statusBadge(r)}`, `
     <section>
       <h3>${t('rs.quota')}</h3>
       <dl class="kv">
         <dt>${t('rs.used')}</dt><dd>${fmtBytes(r.used)} / ${r.volume ? fmtBytes(r.volume) : t('common.unlimited')}${progress(r.used, r.volume)}</dd>
         <dt>${t('rs.devices')}</dt><dd class="num">${r.devices} / ${r.deviceLimit || '∞'}</dd>
+        <dt>${t('rs.speed')}</dt><dd class="num">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'} / ${r.speedDown || '∞'} Mbps` : t('common.unlimited')}</dd>
+        <dt>${t('user.expiry')}</dt><dd>${r.expiry ? fmtDay(r.expiry) : t('user.never')}</dd>
         <dt>${t('rs.online')}</dt><dd class="num">${r.online}</dd>
         <dt>${t('rs.lines')}</dt><dd><div class="chips">${(r.lineIds || []).map(lid => {
           const l = state.lines.find(x => x.id === lid); return l ? `<span class="chip">${esc(l.name)}</span>` : '';
@@ -107,6 +118,9 @@ function editReseller(id) {
       ${field(t('common.name'), `<input id="f-name" value="${esc(r.name || '')}" placeholder="${t('rs.namePh')}">`, t('rs.nameHelp'))}
       ${field(t('rs.volumeGb'), `<input id="f-vol" type="number" min="0" value="${Math.round((r.volume || 0) / 1073741824)}">`, t('plan.zeroUnlimited'))}
       ${field(t('rs.deviceLimit'), `<input id="f-device" type="number" min="0" value="${r.deviceLimit || 0}">`, t('rs.deviceHelp'))}
+      ${field(t('rs.expiry'), `<input id="f-expiry" type="date" value="${r.expiry ? new Date(r.expiry * 1000).toISOString().slice(0, 10) : ''}">`, t('rs.expiryHelp'))}
+      ${field(t('rs.speedUp'), `<input id="f-up" type="number" min="0" value="${r.speedUp || 0}">`, t('rs.speedHelp'))}
+      ${field(t('rs.speedDown'), `<input id="f-down" type="number" min="0" value="${r.speedDown || 0}">`, t('rs.speedHelp'))}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(r.remark || '')}">`)}
       ${check('f-enabled', t('common.enabled'), r.enabled !== false)}
       <div class="full">${field(t('rs.lines'), `
@@ -118,6 +132,8 @@ function editReseller(id) {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), enabled: fchk('f-enabled'),
       volume: Number(fv('f-vol')) * 1073741824, deviceLimit: Number(fv('f-device')),
+      speedUp: Number(fv('f-up')), speedDown: Number(fv('f-down')),
+      expiry: fv('f-expiry') ? Math.floor(new Date(fv('f-expiry') + 'T23:59:59').getTime() / 1000) : 0,
       lineIds: [...document.querySelectorAll('.ln-cb:checked')].map(c => Number(c.value)),
     };
     if (id) await put('resellers/' + id, body); else await post('resellers', body);

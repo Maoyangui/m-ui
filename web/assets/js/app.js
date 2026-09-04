@@ -206,7 +206,9 @@ document.addEventListener('click', e => {
 // ---- 路由 ----
 function pageName() {
   const h = location.hash.replace(/^#\/?/, '').split('/')[0];
-  return pages[h] ? h : 'dashboard';
+  // 代理会话下,主面板专属页面一律回概览(那些接口本来也是 403,别让界面误导人)
+  if (!pages[h] || !navFor().some(([n]) => n === h)) return 'dashboard';
+  return h;
 }
 async function route(force = false) {
   const name = pageName();

@@ -482,8 +482,8 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 	return true
 }
 
-// subLinks 组装用户的订阅地址(链接格式与 clash 格式)。
-func (s *Server) subLinks(u model.User) map[string]string {
+// subBase 订阅地址前缀(scheme://host:port/path/);整表渲染时算一次即可。
+func (s *Server) subBase() string {
 	scheme := "http"
 	if s.setting("subCertFile") != "" && s.setting("subKeyFile") != "" {
 		scheme = "https"
@@ -492,12 +492,21 @@ func (s *Server) subLinks(u model.User) map[string]string {
 	if host == "" {
 		host = "<服务器IP或域名>"
 	}
-	root := fmt.Sprintf("%s://%s:%d%s", scheme, host, s.settingInt("subPort", 2056), s.subPath())
-	key := u.Name
-	if u.SubToken != "" { // 代理建的用户按随机令牌订阅
-		key = u.SubToken
+	return fmt.Sprintf("%s://%s:%d%s", scheme, host, s.settingInt("subPort", 2056), s.subPath())
+}
+
+// subKey 订阅地址里代表这个用户的那一段:主面板用户是用户名,代理建的用户是随机令牌。
+func subKey(u model.User) string {
+	if u.SubToken != "" {
+		return u.SubToken
 	}
-	base := root + key
+	return u.Name
+}
+
+// subLinks 组装用户的订阅地址(链接格式与 clash 格式)。
+func (s *Server) subLinks(u model.User) map[string]string {
+	root := s.subBase()
+	base := root + subKey(u)
 	out := map[string]string{"link": base, "clash": base + "?format=clash", "json": base + "?format=json"}
 	if u.ShareToken != "" {
 		out["share"] = root + u.ShareToken // 用户自助生成的临时共享地址

@@ -166,15 +166,16 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	rep.OnlineLinesByIP = s.run.OnlineIPLines()
 	s.db.Find(&rep.Counters)
 	o := s.run.Onlines()
+	allIPs := s.run.OnlineIPsAll() // 一次锁拿全量,不按用户逐个抢数据面的锁
 	for _, u := range o.Users {
-		rep.Onlines[u] = s.run.OnlineIPs(u)
+		rep.Onlines[u] = allIPs[u]
 	}
 	// 设备数限制的用户即使本周期无流量,其仍在线的 IP 也要上报
 	var limited []model.User
 	s.db.Where("device_limit > 0").Find(&limited)
 	for _, u := range limited {
 		if _, ok := rep.Onlines[u.Name]; !ok {
-			if ips := s.run.OnlineIPs(u.Name); len(ips) > 0 {
+			if ips := allIPs[u.Name]; len(ips) > 0 {
 				rep.Onlines[u.Name] = ips
 			}
 		}

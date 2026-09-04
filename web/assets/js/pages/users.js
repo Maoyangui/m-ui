@@ -203,7 +203,8 @@ function editUser(id) {
   const expiryVal = u.expiry ? new Date(u.expiry * 1000).toISOString().slice(0, 10) : '';
   openModal(id ? t('user.edit') : t('user.add'), `
     <div class="form-grid">
-      ${field(t('user.f.name'), `<input id="f-name" value="${esc(u.name || '')}">`, t('user.f.nameHelp'))}
+      ${field(t(isReseller() ? 'user.f.nameOnly' : 'user.f.name'), `<input id="f-name" value="${esc(u.name || '')}">`,
+        t(isReseller() ? 'user.f.nameOnlyHelp' : 'user.f.nameHelp'))}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(u.remark || '')}">`)}
       ${state.plans.length ? `<div class="full">${field(t('user.fromPlan'), `<div class="row">${planSelect('f-plan', 0)}<button type="button" class="btn" data-act="user.fillPlan">${t('user.fromPlan')}</button></div>`)}</div>` : ''}
       ${field(t('user.f.volume'), `<input id="f-volume" type="number" min="0" value="${u.volume ? (u.volume / 1073741824).toFixed(0) : 0}">`)}

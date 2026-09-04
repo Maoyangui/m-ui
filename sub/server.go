@@ -274,6 +274,11 @@ func (s *Server) handle() http.HandlerFunc {
 			}
 		}
 		rs := s.resellerOf(user) // 代理用户:落地页文案与开关按代理的来
+		if rs != nil && (!rs.Enabled || (rs.Expiry > 0 && rs.Expiry < time.Now().Unix())) {
+			s.log(r, user.Name, shared, 404)
+			http.NotFound(w, r) // 代理被停用或到期,名下用户的订阅一并停
+			return
+		}
 		if shared && (wantQR || r.Method == http.MethodPost) {
 			http.NotFound(w, r)
 			return

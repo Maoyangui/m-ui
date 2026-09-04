@@ -2,7 +2,7 @@
 import { state, load } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, registerActions, badge, field, check, fv, fchk, fmtBytes, progress } from '../ui.js';
+import { esc, toast, confirm, registerActions, badge, field, check, fv, fchk, fmtBytes, fmtDay, progress } from '../ui.js';
 
 export const title = () => t('acct.title');
 export const subtitle = () => t('acct.subtitle');
@@ -18,6 +18,8 @@ export async function render(el) {
       <dl class="kv">
         <dt>${t('rs.used')}</dt><dd>${fmtBytes(me.used)} / ${me.volume ? fmtBytes(me.volume) : t('common.unlimited')}${progress(me.used, me.volume)}</dd>
         <dt>${t('rs.devices')}</dt><dd class="num">${me.devices} / ${me.deviceLimit || '∞'}</dd>
+        <dt>${t('rs.speed')}</dt><dd class="num">${(me.speedUp || me.speedDown) ? `${me.speedUp || '∞'} / ${me.speedDown || '∞'} Mbps` : t('common.unlimited')}</dd>
+        <dt>${t('user.expiry')}</dt><dd>${me.expiry ? fmtDay(me.expiry) : t('user.never')}</dd>
         <dt>${t('rs.online')}</dt><dd class="num">${me.online}</dd>
         <dt>${t('rs.users')}</dt><dd class="num">${me.users}</dd>
       </dl>

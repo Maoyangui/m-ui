@@ -107,7 +107,15 @@ type Reseller struct {
 	Password    string `json:"-"` // bcrypt;空=首次登录时自行设置
 	TotpSecret  string `json:"-"`
 	TotpEnabled bool   `json:"totpEnabled"`
-	Volume      int64  `json:"volume"`      // 名下用户用量之和的上限,字节,0=不限
+	Volume      int64  `json:"volume"` // 名下用户用量之和的上限,字节,0=不限
+	// 代理已用 = 名下用户的全时用量之和 + UsedCarried - UsedBase。
+	// 全时用量(up+down+total_up+total_down)只增不减,所以代理自己重置/续费/周期清零都改不动额度;
+	// 删用户时把它的全时用量结转到 UsedCarried,免得删号就能洗掉;只有主面板"重置流量"会抬高 UsedBase。
+	UsedCarried int64  `json:"usedCarried" gorm:"default:0;not null"`
+	UsedBase    int64  `json:"usedBase" gorm:"default:0;not null"`
+	Expiry      int64  `json:"expiry"`      // unix 秒,0=不限;到期后其用户一并停用
+	SpeedUp     int    `json:"speedUp"`     // 名下用户上行限速之和的上限,Mbps,0=不限
+	SpeedDown   int    `json:"speedDown"`   // 名下用户下行限速之和的上限,Mbps,0=不限
 	DeviceLimit int    `json:"deviceLimit"` // 名下用户设备上限之和的上限,0=不限
 	Enabled     bool   `json:"enabled" gorm:"default:true"`
 	Remark      string `json:"remark"`
@@ -129,8 +137,10 @@ type ResellerLine struct {
 
 // Plan 套餐:配额/时长/设备/限速/线路的模板,用于建号、续费与批量操作。
 type Plan struct {
-	Id          uint            `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name        string          `json:"name" gorm:"uniqueIndex"`
+	Id uint `json:"id" gorm:"primaryKey;autoIncrement"`
+	// ResellerId 归属:0=主面板;代理只看得到也只能用自己建的套餐(名称在各自范围内唯一)
+	ResellerId  uint            `json:"resellerId" gorm:"uniqueIndex:idx_plans_owner_name,priority:1;index"`
+	Name        string          `json:"name" gorm:"uniqueIndex:idx_plans_owner_name,priority:2"`
 	VolumeGB    int             `json:"volumeGb"` // 0=不限
 	Days        int             `json:"days"`     // 0=不限
 	DeviceLimit int             `json:"deviceLimit"`

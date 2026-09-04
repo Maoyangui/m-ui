@@ -609,7 +609,9 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		var users []model.User
 		s.scoped(r, s.db.Order("id asc")).Find(&users)
 		localName := s.localNodeName()
-		localLines := s.run.OnlineIPLines()
+		localLines, remoteLines := s.run.OnlineIPLines(), s.run.Hub().RemoteIPLinesAll()
+		localIPs, remoteIPs := s.run.OnlineIPsAll(), s.run.Hub().RemoteIPsAll() // 一次锁拿全量,别按用户逐个抢数据面的锁
+		subBase := s.subBase()
 		type row struct {
 			model.User
 			LineIds      []uint              `json:"lineIds"`
@@ -619,6 +621,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			SubURL       string              `json:"subUrl"`
 			ResellerName string              `json:"resellerName,omitempty"` // 归属代理
 		}
+		lineIdsBy, extIdsBy := s.userLineMap(), s.userExtMap() // 两条查询代替每个用户两条
 		rsNames := map[uint]string{}
 		if scope(r) == 0 {
 			var rss []model.Reseller
@@ -629,16 +632,16 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		out := make([]row, 0, len(users))
 		for _, u := range users {
-			var ids []uint
-			s.db.Model(&model.UserLine{}).Where("user_id = ?", u.Id).Pluck("line_id", &ids)
-			eids := []uint{}
-			s.db.Model(&model.UserExt{}).Where("user_id = ?", u.Id).Pluck("ext_id", &eids)
+			ids, eids := lineIdsBy[u.Id], extIdsBy[u.Id]
+			if eids == nil {
+				eids = []uint{}
+			}
 			u.Credentials, u.ShareCreds = nil, nil // 列表不返回凭据
 			out = append(out, row{
 				User: u, LineIds: ids, ExtIds: eids,
-				OnlineIP:     mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
-				OnlineOn:     s.onlineLines(u.Name, localName, localLines),
-				SubURL:       s.subLinks(u)["link"],
+				OnlineIP:     mergeIPs(localIPs[u.Name], remoteIPs[u.Name]),
+				OnlineOn:     s.onlineLines(u.Name, localName, localLines, remoteLines),
+				SubURL:       subBase + subKey(u),
 				ResellerName: rsNames[u.ResellerId],
 			})
 		}
@@ -764,6 +767,7 @@ func (s *Server) validateUser(u *model.User) error {
 
 // deleteUser 删除用户及其线路/外部节点关联,踢下线并热更新数据面。
 func (s *Server) deleteUser(u model.User, actor string) error {
+	carryUsage(s.db, u) // 代理的用户:删之前把用量结转到代理头上,免得删号洗额度
 	if err := s.db.Delete(&model.User{}, u.Id).Error; err != nil {
 		return err
 	}
@@ -786,7 +790,7 @@ func (s *Server) localNodeName() string {
 
 // onlineLines 汇总某用户每个在线 IP 正在使用的线路:本机来自连接跟踪器,副机来自它们的上报,
 // 线路名一律带上服务器后缀,面板上就能看出这台设备连的是哪台服务器的哪条线路。
-func (s *Server) onlineLines(user, localName string, local map[string]map[string][]string) map[string][]string {
+func (s *Server) onlineLines(user, localName string, local, remote map[string]map[string][]string) map[string][]string {
 	out := map[string][]string{}
 	for ip, lines := range local[user] {
 		for _, l := range lines {
@@ -796,7 +800,7 @@ func (s *Server) onlineLines(user, localName string, local map[string]map[string
 			out[ip] = append(out[ip], l)
 		}
 	}
-	for ip, lines := range s.run.Hub().RemoteIPLines(user) {
+	for ip, lines := range remote[user] {
 		out[ip] = append(out[ip], lines...)
 	}
 	for ip := range out {
@@ -804,6 +808,27 @@ func (s *Server) onlineLines(user, localName string, local map[string]map[string
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// userLineMap / userExtMap 整表关联一次查出来,列表渲染时按用户取,避免 N+1。
+func (s *Server) userLineMap() map[uint][]uint {
+	var rows []model.UserLine
+	s.db.Order("user_id asc, line_id asc").Find(&rows)
+	out := map[uint][]uint{}
+	for _, r := range rows {
+		out[r.UserId] = append(out[r.UserId], r.LineId)
+	}
+	return out
+}
+
+func (s *Server) userExtMap() map[uint][]uint {
+	var rows []model.UserExt
+	s.db.Order("user_id asc, ext_id asc").Find(&rows)
+	out := map[uint][]uint{}
+	for _, r := range rows {
+		out[r.UserId] = append(out[r.UserId], r.ExtId)
 	}
 	return out
 }

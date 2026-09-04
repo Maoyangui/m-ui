@@ -35,6 +35,11 @@ func Open(dbPath string) (*gorm.DB, error) {
 	db.Exec("UPDATE users SET reseller_id = 0 WHERE reseller_id IS NULL")
 	db.Exec("UPDATE users SET sub_token = '' WHERE sub_token IS NULL")
 	db.Exec("UPDATE users SET share_token = '' WHERE share_token IS NULL")
+	db.Exec("UPDATE resellers SET used_carried = 0 WHERE used_carried IS NULL")
+	db.Exec("UPDATE resellers SET used_base = 0 WHERE used_base IS NULL")
+	// 套餐从"全局唯一名"改成"按归属唯一",老库里那个唯一索引要去掉
+	db.Exec("UPDATE plans SET reseller_id = 0 WHERE reseller_id IS NULL")
+	db.Exec("DROP INDEX IF EXISTS idx_plans_name")
 	return db, nil
 }
 

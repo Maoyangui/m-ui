@@ -7,6 +7,8 @@ import (
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
+
+	"gorm.io/gorm"
 )
 
 // 代理面板的隔离与额度:线路不能越权、设备数不能超总额、别家的用户碰不到。
@@ -36,6 +38,15 @@ func TestResellerScope(t *testing.T) {
 	}
 	if u.ResellerId != a.Id || len(u.SubToken) < 20 {
 		t.Fatalf("应归到代理名下并发订阅令牌: %+v", u)
+	}
+	// 请求体里塞的计量与共享令牌必须被清掉(负数用量能把额度刷回来)
+	dirty := model.User{Name: "dirty", Enabled: true, DeviceLimit: 1,
+		Up: -1 << 40, TotalDown: -1 << 40, ShareToken: "chosen", ShareCreds: []byte("{}")}
+	if err := s.prepareResellerUser(a.Id, &dirty, []uint{1}); err != nil {
+		t.Fatal(err)
+	}
+	if dirty.Up != 0 || dirty.TotalDown != 0 || dirty.ShareToken != "" || dirty.ShareCreds != nil {
+		t.Fatalf("代理提交的计量/共享字段应被清掉: %+v", dirty)
 	}
 	db.Create(&u)
 
@@ -102,7 +113,10 @@ func TestResellerGuard(t *testing.T) {
 		t.Fatal("主面板直属用户应拒绝")
 	}
 	if req("/users/bulk", 1) || req("/users/export", 1) {
-		t.Fatal("批量接口不应开放给代理")
+		t.Fatal("批量生成/导出不应开放给代理")
+	}
+	if !req("/users/batch", 1) {
+		t.Fatal("批量操作要放行(由处理函数按代理过滤 id)")
 	}
 	if !req("/users/2", 0) {
 		t.Fatal("主面板不受限")
@@ -115,5 +129,83 @@ func TestResellerGuard(t *testing.T) {
 	s.scoped(r, db.Order("id asc")).Find(&mine)
 	if len(mine) != 1 || mine[0].Name != "theirs" {
 		t.Fatalf("列表应只剩自己的用户: %+v", mine)
+	}
+}
+
+// 额度不能被代理自己洗掉:重置/续费只是把 up/down 挪进 total_*,删号会结转,
+// 只有主面板的"重置流量"抬基线才让额度回血。
+func TestResellerQuotaCannotBeReset(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	rs := model.Reseller{Name: "a", Enabled: true, Volume: 10 << 30}
+	db.Create(&rs)
+	u := model.User{Name: "u1", Enabled: true, ResellerId: rs.Id, Up: 8 << 30}
+	db.Create(&u)
+
+	get := func() int64 {
+		var cur model.Reseller
+		db.First(&cur, rs.Id)
+		return resellerUsed(db, cur)
+	}
+	if got := get(); got != 8<<30 {
+		t.Fatalf("已用应为 8G: %d", got)
+	}
+	// 代理重置用户流量(up→total_up):额度照算
+	db.Model(&model.User{}).Where("id = ?", u.Id).Updates(map[string]interface{}{
+		"total_up": gorm.Expr("total_up + up"), "up": 0})
+	if got := get(); got != 8<<30 {
+		t.Fatalf("重置后额度不该回血: %d", got)
+	}
+	// 删号:用量结转到代理
+	var cur model.User
+	db.First(&cur, u.Id)
+	carryUsage(db, cur)
+	db.Delete(&model.User{}, u.Id)
+	if got := get(); got != 8<<30 {
+		t.Fatalf("删号后额度不该回血: %d", got)
+	}
+	// 主面板重置:抬基线 → 归零
+	var r2 model.Reseller
+	db.First(&r2, rs.Id)
+	db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Update("used_base", r2.UsedCarried)
+	if got := get(); got != 0 {
+		t.Fatalf("主面板重置后应归零: %d", got)
+	}
+}
+
+// 套餐不能越权:代理套一个带未授权线路的套餐要被拒。
+func TestResellerPlanRespectsLines(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	db.Create(&model.Line{Name: "l1", Protocol: "hysteria2", Port: 1, Enabled: true})
+	db.Create(&model.Line{Name: "l2", Protocol: "anytls", Port: 2, Enabled: true})
+	rs := model.Reseller{Name: "a", Enabled: true, DeviceLimit: 4}
+	db.Create(&rs)
+	s.setResellerLines(rs.Id, []uint{1})
+	u := model.User{Name: "u1", Enabled: true, ResellerId: rs.Id, DeviceLimit: 2}
+	db.Create(&u)
+	db.Create(&model.UserLine{UserId: u.Id, LineId: 1})
+
+	bad := model.Plan{Name: "bad", ResellerId: rs.Id, DeviceLimit: 2, LineIds: []byte(`[1,2]`)}
+	if err := s.checkResellerPlan(rs.Id, u, bad); err == nil {
+		t.Fatal("套餐里的未授权线路应被拒")
+	}
+	over := model.Plan{Name: "over", ResellerId: rs.Id, DeviceLimit: 9, LineIds: []byte(`[1]`)}
+	if err := s.checkResellerPlan(rs.Id, u, over); err == nil {
+		t.Fatal("套餐撑破设备总额应被拒")
+	}
+	ok := model.Plan{Name: "ok", ResellerId: rs.Id, DeviceLimit: 3, LineIds: []byte(`[1]`)}
+	if err := s.checkResellerPlan(rs.Id, u, model.Plan{Name: "master", LineIds: []byte(`[1]`)}); err == nil {
+		t.Fatal("主面板的套餐代理不该能用")
+	}
+	if err := s.checkResellerPlan(rs.Id, u, ok); err != nil {
+		t.Fatalf("合规套餐应通过: %v", err)
 	}
 }

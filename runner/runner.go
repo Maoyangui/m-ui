@@ -527,6 +527,14 @@ func (r *Runner) OnlineIPs(user string) []string {
 	return nil
 }
 
+// OnlineIPsAll 本机上 用户 → 活跃源 IP(一次锁拿全量,面板列表用)。
+func (r *Runner) OnlineIPsAll() map[string][]string {
+	if box := r.core.GetInstance(); box != nil {
+		return box.Limiter().ActiveIPsAll()
+	}
+	return map[string][]string{}
+}
+
 // OnlineIPLines 本机上 用户 → 源 IP → 线路名。
 func (r *Runner) OnlineIPLines() map[string]map[string][]string {
 	if box := r.core.GetInstance(); box != nil {

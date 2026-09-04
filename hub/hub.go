@@ -708,6 +708,28 @@ func (h *Hub) Statuses() map[uint]NodeStatus {
 }
 
 // RemoteIPs 返回某用户在所有副机上的在线 IP。
+// RemoteIPsAll 一次锁拿全量:用户 → 副机上报的在线 IP(面板列表用)。
+func (h *Hub) RemoteIPsAll() map[string][]string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := map[string]map[string]bool{}
+	for _, m := range h.remote {
+		for user, ips := range m {
+			if out[user] == nil {
+				out[user] = map[string]bool{}
+			}
+			for _, ip := range ips {
+				out[user][ip] = true
+			}
+		}
+	}
+	res := make(map[string][]string, len(out))
+	for user, set := range out {
+		res[user] = keys(set)
+	}
+	return res
+}
+
 func (h *Hub) RemoteIPs(user string) []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -724,6 +746,30 @@ func (h *Hub) RemoteIPs(user string) []string {
 }
 
 // RemoteIPLines 返回各副机上 该用户的 源 IP → 线路名(线路名已带服务器后缀,如 "香港1-台湾")。
+// RemoteIPLinesAll 一次锁拿全量:用户 → 源 IP → 线路名(带服务器后缀)。
+func (h *Hub) RemoteIPLinesAll() map[string]map[string][]string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := map[string]map[string][]string{}
+	for id, m := range h.remoteLines {
+		name := h.nodeNames[id]
+		for user, ips := range m {
+			if out[user] == nil {
+				out[user] = map[string][]string{}
+			}
+			for ip, lines := range ips {
+				for _, l := range lines {
+					if name != "" {
+						l += "-" + name
+					}
+					out[user][ip] = append(out[user][ip], l)
+				}
+			}
+		}
+	}
+	return out
+}
+
 func (h *Hub) RemoteIPLines(user string) map[string][]string {
 	h.mu.Lock()
 	defer h.mu.Unlock()

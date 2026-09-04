@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
 
@@ -28,6 +30,32 @@ func (s *Server) scoped(r *http.Request, q *gorm.DB) *gorm.DB {
 		return q.Where("reseller_id = ?", rid)
 	}
 	return q
+}
+
+// resellerUsed 代理已用流量:名下用户的全时用量之和 + 结转 - 主面板重置基线。
+// 用全时用量是关键——代理自己重置/续费/周期清零都只是把 up/down 挪进 total_*,额度不会因此回血。
+func resellerUsed(db *gorm.DB, rs model.Reseller) int64 {
+	var live int64
+	db.Model(&model.User{}).Where("reseller_id = ?", rs.Id).
+		Select("COALESCE(SUM(up + down + total_up + total_down),0)").Scan(&live)
+	used := live + rs.UsedCarried - rs.UsedBase
+	if used < 0 {
+		return 0
+	}
+	return used
+}
+
+// carryUsage 删用户前把它的全时用量结转到所属代理,防止"删号洗流量"。
+func carryUsage(db *gorm.DB, u model.User) {
+	if u.ResellerId == 0 {
+		return
+	}
+	all := u.Up + u.Down + u.TotalUp + u.TotalDown
+	if all <= 0 {
+		return
+	}
+	db.Model(&model.Reseller{}).Where("id = ?", u.ResellerId).
+		Update("used_carried", gorm.Expr("used_carried + ?", all))
 }
 
 // resellerUserNames 该代理名下的用户名集合。
@@ -51,9 +79,11 @@ func (s *Server) guardScope(w http.ResponseWriter, r *http.Request) bool {
 	rest := path[strings.LastIndex(path, "/users/")+len("/users/"):]
 	head := strings.Split(rest, "/")[0]
 	switch head {
-	case "bulk", "batch", "export", "import":
+	case "bulk", "export", "import":
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权限"})
 		return false
+	case "batch":
+		return true // 批量接口自己会把 id 过滤成这个代理的
 	}
 	id, err := strconv.ParseUint(head, 10, 64) // 子路由是 /users/{id}/xxx,只取 id 那一段
 	if err != nil {
@@ -76,6 +106,10 @@ func (s *Server) prepareResellerUser(rid uint, u *model.User, lineIds []uint) er
 	}
 	u.ResellerId = rid
 	u.SubToken = randomSubToken()
+	// 请求体里能塞的字段一律清掉:计量必须从 0 起(否则塞个负数就能把代理额度刷回来),
+	// 共享令牌只能由用户自己在订阅页生成
+	u.Up, u.Down, u.TotalUp, u.TotalDown, u.OnlineAt = 0, 0, 0, 0, 0
+	u.ShareToken, u.ShareCreds, u.ShareAt = "", nil, 0
 	return nil
 }
 
@@ -98,45 +132,74 @@ func (s *Server) checkResellerUser(rid, id uint, u *model.User, lineIds []uint) 
 			return errors.New("含未授权的线路")
 		}
 	}
-	if rs.DeviceLimit > 0 {
-		if u.DeviceLimit <= 0 {
-			return fmt.Errorf("必须设置设备上限(代理总额 %d 台)", rs.DeviceLimit)
+	if rs.Expiry > 0 && rs.Expiry < time.Now().Unix() {
+		return errors.New("代理已到期")
+	}
+	// 设备与带宽都是"分配预算":名下用户分到的额度之和不得超过代理总额
+	budgets := []struct {
+		col, label string
+		cap, want  int
+	}{
+		{"device_limit", "设备数", rs.DeviceLimit, u.DeviceLimit},
+		{"speed_up", "上行带宽", rs.SpeedUp, u.SpeedUp},
+		{"speed_down", "下行带宽", rs.SpeedDown, u.SpeedDown},
+	}
+	for _, b := range budgets {
+		if b.cap <= 0 {
+			continue
+		}
+		if b.want <= 0 {
+			return fmt.Errorf("必须设置%s(代理总额 %d)", b.label, b.cap)
 		}
 		var used int64
 		q := s.db.Model(&model.User{}).Where("reseller_id = ?", rid)
 		if id != 0 {
 			q = q.Where("id != ?", id)
 		}
-		q.Select("COALESCE(SUM(device_limit),0)").Scan(&used)
-		if int(used)+u.DeviceLimit > rs.DeviceLimit {
-			return fmt.Errorf("设备数超出代理额度:已分配 %d,总额 %d", used, rs.DeviceLimit)
+		q.Select("COALESCE(SUM(" + b.col + "),0)").Scan(&used)
+		if int(used)+b.want > b.cap {
+			return fmt.Errorf("%s超出代理额度:已分配 %d,总额 %d", b.label, used, b.cap)
 		}
 	}
-	if rs.Volume > 0 {
-		var usedBytes int64
-		s.db.Model(&model.User{}).Where("reseller_id = ?", rid).
-			Select("COALESCE(SUM(up+down),0)").Scan(&usedBytes)
-		if usedBytes >= rs.Volume {
-			return errors.New("代理流量已用尽")
-		}
+	if rs.Volume > 0 && resellerUsed(s.db, rs) >= rs.Volume {
+		return errors.New("代理流量已用尽")
 	}
 	return nil
+}
+
+// checkResellerPlan 代理套用套餐时:套餐带的线路必须在授权范围内,设备数不能撑破总额。
+func (s *Server) checkResellerPlan(rid uint, u model.User, p model.Plan) error {
+	if p.ResellerId != rid {
+		return errors.New("套餐不存在")
+	}
+	lineIds := []uint{}
+	if len(p.LineIds) > 0 {
+		if err := json.Unmarshal(p.LineIds, &lineIds); err != nil {
+			return errors.New("套餐线路解析失败")
+		}
+	}
+	if len(lineIds) == 0 { // 套餐不改线路时,沿用用户当前线路
+		s.db.Model(&model.UserLine{}).Where("user_id = ?", u.Id).Pluck("line_id", &lineIds)
+	}
+	next := u
+	next.DeviceLimit, next.SpeedUp, next.SpeedDown = p.DeviceLimit, p.SpeedUp, p.SpeedDown
+	return s.checkResellerUser(rid, u.Id, &next, lineIds)
 }
 
 // resellerStatus 代理面板的概览数据:只统计自己名下。
 func (s *Server) resellerStatus(r *http.Request, rid uint) map[string]interface{} {
 	var rs model.Reseller
 	s.db.First(&rs, rid)
-	var userCount, enabledUsers, used, total int64
+	var userCount, enabledUsers, total int64
 	s.db.Model(&model.User{}).Where("reseller_id = ?", rid).Count(&userCount)
 	s.db.Model(&model.User{}).Where("reseller_id = ? AND enabled = ?", rid, true).Count(&enabledUsers)
-	s.db.Model(&model.User{}).Where("reseller_id = ?", rid).Select("COALESCE(SUM(up+down),0)").Scan(&used)
+	used := resellerUsed(s.db, rs)
 	s.db.Model(&model.User{}).Where("reseller_id = ?", rid).
 		Select("COALESCE(SUM(up+down+total_up+total_down),0)").Scan(&total)
 	var lines int64
 	s.db.Model(&model.ResellerLine{}).Where("reseller_id = ?", rid).Count(&lines)
 
-	online := s.resellerOnlineIPs(rid)
+	online := s.resellerOnlineIPs(rid, s.onlineIPsAll())
 	sess := s.sessionOf(r)
 	return map[string]interface{}{
 		"scope":           "reseller",
@@ -146,6 +209,9 @@ func (s *Server) resellerStatus(r *http.Request, rid uint) map[string]interface{
 		"volume":          rs.Volume,
 		"used":            used,
 		"deviceLimit":     rs.DeviceLimit,
+		"expiry":          rs.Expiry,
+		"speedUp":         rs.SpeedUp,
+		"speedDown":       rs.SpeedDown,
 		"onlineDevices":   len(online),
 		"users":           userCount,
 		"enabledUsers":    enabledUsers,

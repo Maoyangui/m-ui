@@ -26,7 +26,7 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 | Upstreams | VLESS / VMess / Trojan / TUIC / Hysteria2 / Shadowsocks / SOCKS exits, import by pasting a share link; latency test, periodic health checks, failure / recovery alerts; one-click WARP |
 | Users | Quota, expiry, periodic reset, concurrent device limit (by source IP, merged across servers), up / down speed limits; auto-disable and kick on overuse or expiry; bulk create, bulk actions, CSV export |
 | Plans | Templates for quota / duration / devices / speed / lines; apply on create, renew or extend |
-| Resellers | Give a reseller lines plus traffic and device budgets; they create users in their own panel (port 2054, path /dl). Usage rolls up to the reseller, and going over the quota disables all of their users |
+| Resellers | Give a reseller lines plus traffic / device / bandwidth budgets and an expiry; they create users and plans in their own panel (port 2054, path /dl). Usage rolls up to the reseller, and going over quota, expiring or being disabled cuts off all of their users at once |
 | Subscriptions | Universal link and Clash formats; landing page in the browser (usage, expiry, one-tap import, QR); external nodes / external subscriptions merged in; `insecure` added automatically for self-signed certs |
 | Multi-server | Master pushes config, collects traffic, enforces quotas; per-server traffic ratio; node offline / recovery alerts |
 | Certificates | Let's Encrypt via HTTP-01 or Cloudflare DNS-01, auto-renewal, hot reload without restart; one-click self-signed cert when you have no domain |
@@ -134,8 +134,8 @@ Hand part of the selling to someone else: create a reseller on the Resellers pag
 
 - Reseller panel: `https://<domain or IP>:2054/dl/` by default. Port, path and certificate live under Settings → Reseller panel (an empty certificate means it shares the main panel's).
 - The login name is the reseller's name and **a new reseller has no password**: they log in with the name once and must set a password first, then can change it and enable two-factor auth. "Reset password" on the main panel clears it again.
-- Inside their panel a reseller only sees their own users. Creating one takes just a name — the subscription URL is a long random token, and link / Clash / sing-box formats plus the QR code all work as usual. They can assign lines (only the ones granted to them), quota, expiry, devices, speed limits and plans, and renew, reset, kick, or inspect traffic and online devices.
-- Quota: when the sum of their users' usage reaches the reseller quota, every one of their users is disabled (the main panel can reset it). The device limits they hand out cannot add up to more than their device budget.
+- Inside their panel a reseller only sees their own users. Creating one takes just a name — the subscription URL is a long random token, and link / Clash / sing-box formats plus the QR code all work as usual. They can assign lines (only the ones granted to them), quota, expiry, devices and speed limits, and renew, reset, kick, batch-edit or inspect traffic and online devices. **Plans are per-reseller too**: they only see and use the ones they created.
+- Quota: traffic counts **all-time**, so a reseller cannot wash it away by resetting, renewing or deleting users — only the main panel's "Reset traffic" clears it. Devices and up/down bandwidth are allocation budgets: what they hand out cannot add up to more than the total. Expiry, being disabled or going over quota each pull their users from the data plane at once and make their subscriptions return 404.
 - A reseller can set their own landing-page title, notice and support contact (empty inherits the main panel's) and can switch off their own landing page or temporary sharing.
 - The reseller detail drawer on the main panel lists each of their users with the subscription URL, usage, expiry, online IPs and the lines those IPs are on.
 

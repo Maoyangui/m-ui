@@ -18,10 +18,11 @@ import (
 // ---- 套餐 CRUD ----
 
 func (s *Server) handlePlans(w http.ResponseWriter, r *http.Request) {
+	rid := scope(r)
 	switch r.Method {
 	case http.MethodGet:
 		var plans []model.Plan
-		s.db.Order("sort asc, id asc").Find(&plans)
+		s.db.Where("COALESCE(reseller_id,0) = ?", rid).Order("sort asc, id asc").Find(&plans)
 		writeJSON(w, http.StatusOK, plans)
 	case http.MethodPost:
 		var p model.Plan
@@ -29,6 +30,7 @@ func (s *Server) handlePlans(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		p.ResellerId = rid
 		if err := s.validatePlan(&p); err != nil {
 			badRequest(w, err)
 			return
@@ -51,6 +53,16 @@ func (s *Server) handlePlanItem(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
+	rid := scope(r)
+	var owner model.Plan
+	if s.db.First(&owner, id).Error != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "套餐不存在"})
+		return
+	}
+	if owner.ResellerId != rid { // 代理碰不到主面板的套餐,反之亦然
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权限"})
+		return
+	}
 	switch r.Method {
 	case http.MethodPut:
 		var p model.Plan
@@ -58,7 +70,7 @@ func (s *Server) handlePlanItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		p.Id = id
+		p.Id, p.ResellerId = id, rid
 		if err := s.validatePlan(&p); err != nil {
 			badRequest(w, err)
 			return
@@ -103,7 +115,20 @@ func (s *Server) validatePlan(p *model.Plan) error {
 			p.LineIds = nil
 		}
 	}
-	dup := s.db.Model(&model.Plan{}).Where("name = ?", p.Name)
+	if p.ResellerId > 0 { // 代理的套餐只能用授权线路
+		var ids []uint
+		_ = json.Unmarshal(p.LineIds, &ids)
+		allowed := map[uint]bool{}
+		for _, lid := range s.resellerLineIds(p.ResellerId) {
+			allowed[lid] = true
+		}
+		for _, lid := range ids {
+			if !allowed[lid] {
+				return errors.New("含未授权的线路")
+			}
+		}
+	}
+	dup := s.db.Model(&model.Plan{}).Where("name = ? AND COALESCE(reseller_id,0) = ?", p.Name, p.ResellerId)
 	if p.Id != 0 {
 		dup = dup.Where("id != ?", p.Id)
 	}
@@ -184,6 +209,12 @@ func (s *Server) handleUserPlan(w http.ResponseWriter, r *http.Request, u model.
 	}
 	if req.Mode != "extend" {
 		req.Mode = "renew"
+	}
+	if rid := scope(r); rid > 0 { // 代理套餐同样受线路授权与设备额度约束
+		if err := s.checkResellerPlan(rid, u, p); err != nil {
+			badRequest(w, err)
+			return
+		}
 	}
 	if err := s.applyUserPlan(&u, p, req.Mode); err != nil {
 		badRequest(w, err)
@@ -330,6 +361,15 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("未选择用户"))
 		return
 	}
+	if rid := scope(r); rid > 0 { // 代理:只留自己的用户
+		var mine []uint
+		s.db.Model(&model.User{}).Where("id IN ? AND reseller_id = ?", req.Ids, rid).Pluck("id", &mine)
+		if len(mine) == 0 {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权限"})
+			return
+		}
+		req.Ids = mine
+	}
 	now := time.Now().Unix()
 	var affected int64
 	switch req.Action {
@@ -337,9 +377,15 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		res := s.db.Model(&model.User{}).Where("id IN ?", req.Ids).Update("enabled", req.Action == "enable")
 		affected = res.RowsAffected
 	case "delete":
-		res := s.db.Where("id IN ?", req.Ids).Delete(&model.User{})
-		s.db.Where("user_id IN ?", req.Ids).Delete(&model.UserLine{})
-		affected = res.RowsAffected
+		var users []model.User
+		s.db.Where("id IN ?", req.Ids).Find(&users)
+		for _, u := range users {
+			if err := s.deleteUser(u, s.actor(r)); err != nil {
+				badRequest(w, err)
+				return
+			}
+			affected++
+		}
 	case "reset":
 		res := s.db.Model(&model.User{}).Where("id IN ?", req.Ids).Updates(map[string]interface{}{
 			"total_up": gorm.Expr("total_up + up"), "total_down": gorm.Expr("total_down + down"), "up": 0, "down": 0, "enabled": true,
@@ -371,6 +417,14 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		var users []model.User
 		s.db.Where("id IN ?", req.Ids).Find(&users)
+		if rid := scope(r); rid > 0 {
+			for _, u := range users {
+				if err := s.checkResellerPlan(rid, u, p); err != nil {
+					badRequest(w, err)
+					return
+				}
+			}
+		}
 		for _, u := range users {
 			lineIds := applyPlan(&u, p, req.Mode, now)
 			s.db.Model(&model.User{}).Where("id = ?", u.Id).Select(

@@ -32,9 +32,10 @@ func (s *Server) handleResellers(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		var list []model.Reseller
 		s.db.Order("id asc").Find(&list)
+		online := s.onlineIPsAll() // 一次锁拿全量,别按用户逐个抢数据面的锁
 		out := make([]resellerRow, 0, len(list))
 		for _, rs := range list {
-			out = append(out, s.resellerRow(rs))
+			out = append(out, s.resellerRowWith(rs, online))
 		}
 		writeJSON(w, http.StatusOK, out)
 	case http.MethodPost:
@@ -85,7 +86,8 @@ func (s *Server) handleResellerItem(w http.ResponseWriter, r *http.Request) {
 		}
 		// 密码、2FA、落地页文案由代理自己在代理面板里改,主面板表单不覆盖
 		if err := s.db.Model(&model.Reseller{}).Where("id = ?", id).Select(
-			"name", "enabled", "volume", "device_limit", "remark").Updates(p.Reseller).Error; err != nil {
+			"name", "enabled", "volume", "device_limit", "speed_up", "speed_down", "expiry", "remark").
+			Updates(p.Reseller).Error; err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -152,6 +154,11 @@ func (s *Server) dispatchResellerSubroute(w http.ResponseWriter, r *http.Request
 			badRequest(w, err)
 			return true
 		}
+		var allTime int64
+		s.db.Model(&model.User{}).Where("reseller_id = ?", rs.Id).
+			Select("COALESCE(SUM(up + down + total_up + total_down),0)").Scan(&allTime)
+		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).
+			Update("used_base", allTime+rs.UsedCarried) // 额度归零
 		s.audit(r, "reseller", "reset", rs.Name)
 		s.reloadUsers("重置代理流量 " + rs.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
@@ -172,26 +179,41 @@ func (s *Server) dispatchResellerSubroute(w http.ResponseWriter, r *http.Request
 
 // resellerRow 汇总代理的用户数、已用流量、设备预算与在线设备。
 func (s *Server) resellerRow(rs model.Reseller) resellerRow {
+	return s.resellerRowWith(rs, s.onlineIPsAll())
+}
+
+// onlineIPsAll 用户 → 在线源 IP(本机 + 副机),整表算一次。
+func (s *Server) onlineIPsAll() map[string][]string {
+	local, remote := s.run.OnlineIPsAll(), s.run.Hub().RemoteIPsAll()
+	out := make(map[string][]string, len(local)+len(remote))
+	for u, ips := range local {
+		out[u] = ips
+	}
+	for u, ips := range remote {
+		out[u] = mergeIPs(out[u], ips)
+	}
+	return out
+}
+
+func (s *Server) resellerRowWith(rs model.Reseller, online map[string][]string) resellerRow {
 	row := resellerRow{Reseller: rs, LineIds: s.resellerLineIds(rs.Id)}
 	var agg struct {
 		N       int64
-		Used    int64
 		Devices int64
 	}
-	s.db.Raw(`SELECT COUNT(*) n, COALESCE(SUM(up + down), 0) used, COALESCE(SUM(device_limit), 0) devices
-		FROM users WHERE reseller_id = ?`, rs.Id).Scan(&agg)
-	row.Users, row.Used, row.Devices = int(agg.N), agg.Used, int(agg.Devices)
-	row.Online = len(s.resellerOnlineIPs(rs.Id))
+	s.db.Raw(`SELECT COUNT(*) n, COALESCE(SUM(device_limit), 0) devices FROM users WHERE reseller_id = ?`, rs.Id).Scan(&agg)
+	row.Users, row.Used, row.Devices = int(agg.N), resellerUsed(s.db, rs), int(agg.Devices)
+	row.Online = len(s.resellerOnlineIPs(rs.Id, online))
 	return row
 }
 
-// resellerOnlineIPs 代理名下所有用户当前在线的源 IP(去重),本机与副机合并。
-func (s *Server) resellerOnlineIPs(id uint) []string {
+// resellerOnlineIPs 代理名下所有用户当前在线的源 IP(去重)。
+func (s *Server) resellerOnlineIPs(id uint, online map[string][]string) []string {
 	var names []string
 	s.db.Model(&model.User{}).Where("reseller_id = ?", id).Pluck("name", &names)
 	seen := map[string]bool{}
 	for _, n := range names {
-		for _, ip := range mergeIPs(s.run.OnlineIPs(n), s.run.Hub().RemoteIPs(n)) {
+		for _, ip := range online[n] {
 			seen[ip] = true
 		}
 	}
@@ -214,16 +236,18 @@ func (s *Server) resellerUsers(rs model.Reseller) []resellerUserRow {
 	var users []model.User
 	s.db.Where("reseller_id = ?", rs.Id).Order("id asc").Find(&users)
 	localName, localLines := s.localNodeName(), s.run.OnlineIPLines()
+	remoteLines, online, base := s.run.Hub().RemoteIPLinesAll(), s.onlineIPsAll(), s.subBase()
+	lineIdsBy := s.userLineMap()
 	out := make([]resellerUserRow, 0, len(users))
 	for _, u := range users {
-		var ids []uint
-		s.db.Model(&model.UserLine{}).Where("user_id = ?", u.Id).Pluck("line_id", &ids)
-		links := s.subLinks(u)
+		ids := lineIdsBy[u.Id]
+		key := base + subKey(u)
+		links := map[string]string{"link": key, "clash": key + "?format=clash", "json": key + "?format=json"}
 		u.Credentials, u.ShareCreds = nil, nil
 		out = append(out, resellerUserRow{
 			User: u, LineIds: ids, Sub: links,
-			OnlineIP: mergeIPs(s.run.OnlineIPs(u.Name), s.run.Hub().RemoteIPs(u.Name)),
-			OnlineOn: s.onlineLines(u.Name, localName, localLines),
+			OnlineIP: online[u.Name],
+			OnlineOn: s.onlineLines(u.Name, localName, localLines, remoteLines),
 		})
 	}
 	return out
@@ -250,8 +274,8 @@ func (s *Server) validateReseller(rs *model.Reseller) error {
 	if strings.ContainsAny(rs.Name, "/?#& ") {
 		return errors.New("代理名称不能包含空格或 / ? # &(它是登录名)")
 	}
-	if rs.Volume < 0 || rs.DeviceLimit < 0 {
-		return errors.New("流量与设备数不能为负")
+	if rs.Volume < 0 || rs.DeviceLimit < 0 || rs.SpeedUp < 0 || rs.SpeedDown < 0 || rs.Expiry < 0 {
+		return errors.New("额度不能为负")
 	}
 	dup := s.db.Model(&model.Reseller{}).Where("name = ?", rs.Name)
 	if rs.Id != 0 {
