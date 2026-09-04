@@ -12,15 +12,22 @@
 :root[data-theme="dark"] { --bg: #0f1218; --surface: #171b24; --text: #e6e8ee; --muted: #9aa3b2; --border: #262c38; --primary: #5b8cff; --primary-soft: #1a2540; --shadow: 0 10px 30px rgba(0, 0, 0, .35); }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
-.wrap { max-width: 660px; margin: 0 auto; padding: 2.5rem 1.2rem 3rem; }
-.hero { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.6rem; }
+.wrap { max-width: 640px; margin: 0 auto; padding: 1.4rem 1.2rem 2.4rem; }
+.top { display: flex; align-items: center; gap: .6rem; margin-bottom: 1.2rem; font-size: .85rem; }
+.top a { color: var(--muted); text-decoration: none; }
+.top a:hover { color: var(--primary); }
+.top .grow { flex: 1; }
+.ver { margin: .45rem 0 0 !important; font-size: .8rem; display: flex; align-items: center; gap: .45rem; }
+.ver code { font-family: var(--mono); background: var(--primary-soft); color: var(--primary); border-radius: 6px; padding: .05rem .35rem; }
+.btn.tiny { padding: .15rem .45rem; font-size: .75rem; border-radius: 6px; }
+.hero { display: flex; align-items: center; gap: .9rem; margin-bottom: 1.2rem; }
 .hero img { width: 64px; height: 52px; }
 .hero h1 { margin: 0; font-size: 1.5rem; letter-spacing: .01em; }
 .hero p { margin: .15rem 0 0; color: var(--muted); }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 1.4rem 1.5rem; box-shadow: var(--shadow); margin-bottom: 1.1rem; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem 1.2rem; box-shadow: var(--shadow); margin-bottom: .9rem; }
 .card h2 { margin: 0 0 .35rem; font-size: 1.08rem; display: flex; align-items: center; gap: .5rem; }
 .card h2 .ic { width: 30px; height: 30px; border-radius: 9px; display: inline-grid; place-items: center; background: linear-gradient(135deg, #6a44f2, #18e3e8); color: #fff; font-size: .95rem; flex: none; }
-.card > p { margin: 0 0 1rem; color: var(--muted); }
+.card > p { margin: 0 0 .8rem; color: var(--muted); font-size: .9rem; }
 .row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: .7rem .9rem; }
 .row .k { font-size: .78rem; color: var(--muted); width: 100%; }
 .row code { flex: 1; min-width: 12rem; font-family: var(--mono); font-size: .95rem; word-break: break-all; }
@@ -34,8 +41,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 syst
 .tip b { color: var(--text); font-weight: 600; }
 .pay { display: flex; gap: 1rem; align-items: stretch; flex-wrap: wrap; }
 .pay .row { flex: 1; min-width: 16rem; align-content: flex-start; }
-.qr { width: 150px; height: 150px; border: 1px solid var(--border); border-radius: 12px; background: #fff; padding: 6px; flex: none; }
-.foot { text-align: center; color: var(--muted); font-size: .85rem; margin-top: 1.8rem; }
+.qr { width: 128px; height: 128px; border: 1px solid var(--border); border-radius: 12px; background: #fff; padding: 6px; flex: none; }
+.foot { text-align: center; color: var(--muted); font-size: .82rem; margin-top: 1.4rem; }
 .foot a { color: var(--primary); text-decoration: none; }
 @media (max-width: 520px) { .wrap { padding: 1.6rem 1rem 2.2rem; } .card { padding: 1.1rem 1.1rem; } .qr { width: 130px; height: 130px; } }
 </style>
@@ -43,11 +50,17 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 syst
 <body>
 <script>try{var m=localStorage.getItem('m-ui-theme');if(m==='light'||m==='dark')document.documentElement.dataset.theme=m;}catch(e){}</script>
 <div class="wrap">
+  <nav class="top">
+    <a href="./">← {{if eq .Lang "zh"}}返回面板{{else}}Back to panel{{end}}</a>
+    <span class="grow"></span>
+    <a href="?lang={{if eq .Lang "zh"}}en{{else}}zh{{end}}">{{if eq .Lang "zh"}}English{{else}}中文{{end}}</a>
+  </nav>
   <div class="hero">
     <img src="logo.svg" alt="">
     <div>
       <h1>{{if eq .Lang "zh"}}建议与支持{{else}}Feedback &amp; Support{{end}}</h1>
       <p>{{if eq .Lang "zh"}}m-ui 是一个人维护的开源项目,你的反馈会直接决定它下一步做什么。{{else}}m-ui is an open-source project maintained by one person; your feedback decides what gets built next.{{end}}</p>
+      <p class="ver">{{if eq .Lang "zh"}}当前版本{{else}}Version{{end}} <code>v{{.Version}}</code> <button class="btn tiny" data-copy="m-ui v{{.Version}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button></p>
     </div>
   </div>
 

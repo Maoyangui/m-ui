@@ -262,19 +262,3 @@ func TestResellerProfileTitle(t *testing.T) {
 		t.Fatalf("应使用代理的订阅标题: %q", got)
 	}
 }
-
-// Shadowrocket 不读响应头,流量与到期看正文首行的 STATUS=;别的客户端不能收到这一行。
-func TestShadowrocketStatusLine(t *testing.T) {
-	s, _ := shareServer(t)
-	rocket := doReq(s, "GET", "/sub/alice", "Shadowrocket/2288 CFNetwork/1494 Darwin/23.4.0").Body.String()
-	if !strings.HasPrefix(rocket, "STATUS=") {
-		t.Fatalf("小火箭应拿到 STATUS 行: %.60q", rocket)
-	}
-	if !strings.Contains(rocket, "hysteria2://") {
-		t.Fatalf("STATUS 行之后仍要有节点: %.80q", rocket)
-	}
-	other := doReq(s, "GET", "/sub/alice", "clash-verge/1.5").Body.String()
-	if strings.Contains(other, "STATUS=") {
-		t.Fatalf("其它客户端不应收到 STATUS 行: %.60q", other)
-	}
-}

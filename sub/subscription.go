@@ -28,8 +28,6 @@ type Options struct {
 	TZ string
 	// Share 是否允许用户在订阅页自助生成临时共享地址(设置 subShareEnabled)。
 	Share bool
-	// Shadowrocket 为真时在正文首行加 STATUS=(小火箭据此显示流量与到期,它不读响应头)。
-	Shadowrocket bool
 }
 
 // ExtItem 是一组外部节点。
@@ -48,9 +46,6 @@ type Result struct {
 // BuildLinkSub 生成分享链接订阅(可选 base64)。
 func BuildLinkSub(user model.User, lines []model.Line, opt Options) Result {
 	var out []string
-	if opt.Shadowrocket {
-		out = append(out, shadowrocketStatus(user))
-	}
 	if opt.ShowNotice {
 		out = append(out, noticeLinkURI(user))
 	}
@@ -142,20 +137,6 @@ func isASCII(s string) bool {
 		}
 	}
 	return true
-}
-
-// shadowrocketStatus 是 Shadowrocket 认的正文首行:STATUS=<文本>,显示在订阅条目下方。
-// 其它客户端会把这行当成解析不了的节点跳过,所以只在 UA 是 Shadowrocket 时才加。
-func shadowrocketStatus(user model.User) string {
-	total := "不限"
-	if user.Volume > 0 {
-		total = formatGB(user.Volume) + "GB"
-	}
-	s := fmt.Sprintf("STATUS=↑:%sGB,↓:%sGB,TOT:%s", formatGB(user.Up), formatGB(user.Down), total)
-	if user.Expiry > 0 {
-		s += "💡Expires:" + time.Unix(user.Expiry, 0).Format("2006-01-02")
-	}
-	return s
 }
 
 // noticeText 生成流量提示节点名:00-勿选-流量:<已用>/<总量> 重置:<天>天
