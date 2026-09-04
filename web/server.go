@@ -108,9 +108,20 @@ func (s *Server) settingInt(key string, def int) int {
 
 // basePath 面板路径,始终以 / 开头结尾。
 func (s *Server) basePath() string {
-	p := s.setting("webPath")
+	return normalizePath(s.setting("webPath"), "/app/")
+}
+
+// normalizePath 把用户填的路径规整成 /xxx/ 形式:去掉首尾空白与引号、
+// 补上首尾斜杠、压掉重复斜杠。填 app、/app、app/、"//app//" 都得到 /app/;填 / 就是 /。
+func normalizePath(p, def string) string {
+	p = strings.TrimSpace(p)
+	p = strings.Trim(p, "\"'")
+	p = strings.TrimSpace(p)
 	if p == "" {
-		p = "/app/"
+		p = def
+	}
+	for strings.Contains(p, "//") {
+		p = strings.ReplaceAll(p, "//", "/")
 	}
 	if !strings.HasPrefix(p, "/") {
 		p = "/" + p
@@ -119,6 +130,14 @@ func (s *Server) basePath() string {
 		p += "/"
 	}
 	return p
+}
+
+// redirectTo 跳到 target,带上原查询串(少个斜杠的地址跳转时别把 ?lang= 之类丢了)。
+func redirectTo(w http.ResponseWriter, r *http.Request, target string) {
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	http.Redirect(w, r, target, http.StatusMovedPermanently)
 }
 
 func (s *Server) Start() error {
@@ -181,7 +200,7 @@ func (s *Server) Start() error {
 
 	// 根路径重定向到面板
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
+		if r.URL.Path == "/" && s.basePath() != "/" {
 			http.Redirect(w, r, s.basePath(), http.StatusTemporaryRedirect)
 			return
 		}
@@ -191,8 +210,15 @@ func (s *Server) Start() error {
 	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secureHeaders(w)
 		pub := s.basePath()
-		if r.URL.Path == strings.TrimSuffix(pub, "/") { // /app 少个斜杠也能打开
-			http.Redirect(w, r, pub, http.StatusMovedPermanently)
+		// 少一个结尾斜杠也要能打开(/app → /app/);路径就是 / 时没有这一步
+		if pub != "/" && r.URL.Path == strings.TrimSuffix(pub, "/") {
+			redirectTo(w, r, pub)
+			return
+		}
+		if pub == "/" { // 面板挂在根上:整段前缀就是 /,直接改写到内部前缀
+			r.URL.Path = innerBase + strings.TrimPrefix(r.URL.Path, "/")
+			r.URL.RawPath = ""
+			mux.ServeHTTP(w, r)
 			return
 		}
 		if pub != innerBase && r.URL.Path != "/" {

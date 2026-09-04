@@ -42,17 +42,7 @@ func scope(r *http.Request) uint {
 
 // resellerPath 代理面板对外路径,默认 /dl/。
 func (s *Server) resellerPath() string {
-	p := strings.TrimSpace(s.setting("resellerPath"))
-	if p == "" {
-		p = "/dl/"
-	}
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
-	}
-	if !strings.HasSuffix(p, "/") {
-		p += "/"
-	}
-	return p
+	return normalizePath(s.setting("resellerPath"), "/dl/")
 }
 
 // StartReseller 启动代理面板;设置 resellerEnabled=false 或副机模式下不启动。
@@ -89,12 +79,12 @@ func (s *Server) StartReseller() error {
 	path := s.resellerPath()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secureHeaders(w)
-		if r.URL.Path == "/" {
+		if r.URL.Path == "/" && path != "/" {
 			http.Redirect(w, r, path, http.StatusTemporaryRedirect)
 			return
 		}
-		if r.URL.Path == strings.TrimSuffix(path, "/") { // /dl 少个斜杠也能打开
-			http.Redirect(w, r, path, http.StatusMovedPermanently)
+		if path != "/" && r.URL.Path == strings.TrimSuffix(path, "/") { // /dl 少个斜杠也能打开
+			redirectTo(w, r, path)
 			return
 		}
 		// 对外路径改写到固定前缀,改路径保存即生效

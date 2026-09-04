@@ -177,17 +177,20 @@ func EntriesFromNodes(db *gorm.DB, webDomain, localPublicIP string, preferIP boo
 
 // currentPath 当前订阅路径(设置 subPath,规整为 /xxx/);每个请求读取,改路径保存即生效。
 func (s *Server) currentPath() string {
-	subPath := s.setting("subPath")
-	if subPath == "" {
-		subPath = "/sub/"
+	p := strings.Trim(strings.TrimSpace(s.setting("subPath")), "\"'")
+	if strings.TrimSpace(p) == "" {
+		p = "/sub/"
 	}
-	if !strings.HasPrefix(subPath, "/") {
-		subPath = "/" + subPath
+	for strings.Contains(p, "//") {
+		p = strings.ReplaceAll(p, "//", "/")
 	}
-	if !strings.HasSuffix(subPath, "/") {
-		subPath += "/"
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
 	}
-	return subPath
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	return p
 }
 
 func (s *Server) Start() error {
