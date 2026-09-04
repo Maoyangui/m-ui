@@ -3,6 +3,7 @@ package sub
 import (
 	"bytes"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -81,5 +82,31 @@ func TestPageStatusExhausted(t *testing.T) {
 	d := buildPageData(r, "/sub/", u.Name, u, nil, Options{}, "t", "", "")
 	if d.StatusText != "exhausted" || d.Percent != 100 || d.Lang != "en" {
 		t.Fatalf("超量状态不符: %+v", d)
+	}
+}
+
+// 一键导入的名字必须用"订阅标题",而不是订阅页标题:
+// 两者常常不一样(页面叫 Maoyang Node,订阅标题叫 冒央会社),客户端里应显示后者。
+func TestImportLinksUseProfileTitle(t *testing.T) {
+	r := httptest.NewRequest("GET", "http://sub.example:2056/sub/alice", nil)
+	u := model.User{Name: "alice", Enabled: true}
+	opt := Options{UpdateHours: 12, ProfileTitle: "冒央会社"}
+	d := buildPageData(r, "/sub/", u.Name, u, nil, opt, "Maoyang Node", "", "")
+
+	if d.Title != "Maoyang Node" {
+		t.Fatalf("页面标题应保持不变: %q", d.Title)
+	}
+	want := url.QueryEscape("冒央会社")
+	for _, im := range d.Imports {
+		href := string(im.Href)
+		if im.Name == "Hiddify" { // 它的协议不带名字
+			continue
+		}
+		if !strings.Contains(href, want) {
+			t.Fatalf("%s 的导入链接应带订阅标题: %s", im.Name, href)
+		}
+		if strings.Contains(href, url.QueryEscape("Maoyang Node")) {
+			t.Fatalf("%s 的导入链接不该用订阅页标题: %s", im.Name, href)
+		}
 	}
 }

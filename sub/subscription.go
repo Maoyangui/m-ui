@@ -79,7 +79,9 @@ func BuildClashSub(user model.User, lines []model.Line, opt Options) (Result, er
 // (Shadowrocket 会回退成域名、Clash Verge 回退成用户名、nextin 用首个节点名)。
 // 通行做法是 Profile-Title: base64:<UTF-8 的 base64>;再补一个 RFC 5987 的
 // Content-Disposition 文件名,Clash 系客户端优先用它当配置名。
-func headers(user model.User, opt Options, contentType string) map[string]string {
+// SubTitle 是客户端里该显示的订阅名:订阅标题 → 备注 → 用户名。
+// 响应头与落地页的一键导入都用它,免得两处叫法不一样。
+func SubTitle(user model.User, opt Options) string {
 	title := opt.ProfileTitle
 	if title == "" {
 		title = user.Remark
@@ -87,6 +89,11 @@ func headers(user model.User, opt Options, contentType string) map[string]string
 	if title == "" {
 		title = user.Name
 	}
+	return title
+}
+
+func headers(user model.User, opt Options, contentType string) map[string]string {
+	title := SubTitle(user, opt)
 	return map[string]string{
 		"Content-Type":            contentType,
 		"Subscription-Userinfo":   fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", user.Up, user.Down, user.Volume, user.Expiry),

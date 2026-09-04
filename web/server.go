@@ -191,6 +191,10 @@ func (s *Server) Start() error {
 	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secureHeaders(w)
 		pub := s.basePath()
+		if r.URL.Path == strings.TrimSuffix(pub, "/") { // /app 少个斜杠也能打开
+			http.Redirect(w, r, pub, http.StatusMovedPermanently)
+			return
+		}
 		if pub != innerBase && r.URL.Path != "/" {
 			switch {
 			case strings.HasPrefix(r.URL.Path, pub):

@@ -93,6 +93,10 @@ func (s *Server) StartReseller() error {
 			http.Redirect(w, r, path, http.StatusTemporaryRedirect)
 			return
 		}
+		if r.URL.Path == strings.TrimSuffix(path, "/") { // /dl 少个斜杠也能打开
+			http.Redirect(w, r, path, http.StatusMovedPermanently)
+			return
+		}
 		// 对外路径改写到固定前缀,改路径保存即生效
 		if strings.HasPrefix(r.URL.Path, path) {
 			r.URL.Path = innerBase + strings.TrimPrefix(r.URL.Path, path)
