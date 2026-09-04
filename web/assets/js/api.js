@@ -1,4 +1,6 @@
 // 面板 API 客户端。所有请求同源相对路径,兼容任意面板路径前缀。
+import { t } from './i18n.js';
+
 const BASE = './api/';
 
 export class ApiError extends Error {
@@ -8,21 +10,41 @@ export class ApiError extends Error {
 let onUnauthorized = () => {};
 export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
 
+// 普通接口 30 秒没回来就当失败(副机"测试"要等主机那边最多 25 秒,所以不能更短);
+// 更新、签证书、装 WARP 这类长活由调用方自己传更长的 timeout,传 0 表示不限。
+const DEFAULT_TIMEOUT = 30000;
+
 export async function api(path, opts = {}) {
-  const res = await fetch(BASE + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
+  const { timeout = DEFAULT_TIMEOUT, ...init } = opts;
+  const ctl = timeout > 0 ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), timeout) : null;
+  let res;
+  try {
+    res = await fetch(BASE + path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...init,
+      signal: ctl ? ctl.signal : undefined,
+    });
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw new ApiError(0, t('api.timeout'));
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) { onUnauthorized(); const e = new ApiError(401, data.error || '未登录'); e.data = data; throw e; }
   if (!res.ok) throw new ApiError(res.status, data.error || ('请求失败 ' + res.status));
   return data;
 }
 
-export const get = path => api(path);
-export const post = (path, body) => api(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
-export const put = (path, body) => api(path, { method: 'PUT', body: JSON.stringify(body) });
-export const del = path => api(path, { method: 'DELETE' });
+export const get = (path, opts) => api(path, opts);
+export const post = (path, body, opts) => api(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body), ...opts });
+export const put = (path, body, opts) => api(path, { method: 'PUT', body: JSON.stringify(body), ...opts });
+export const del = (path, opts) => api(path, { method: 'DELETE', ...opts });
+// 长活的预算:在线更新要下载几十 MB 再重启,一次测完所有上游要挨个等超时
+export const LONG = { timeout: 600000 };
+// 中等长度:签证书前的预检、单个上游测试、刷新外部订阅、副机测试/推送(主机侧最多等 25 秒)
+export const SLOW = { timeout: 90000 };
 
 // 上传文件(multipart),extra 为附加字段
 export async function upload(path, file, extra = {}) {

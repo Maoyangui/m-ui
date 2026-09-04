@@ -1,5 +1,5 @@
 import { state, load } from '../app.js';
-import { get, post, put, del } from '../api.js';
+import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtRelative, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk } from '../ui.js';
 
@@ -62,7 +62,7 @@ registerActions({
   'ext.edit': id => editExt(Number(id)),
   'ext.refresh': async (id, btn) => {
     btn.disabled = true;
-    try { const r = await post(`exts/${id}/refresh`); toast(t('ext.refreshed', { n: r.clash }), 'ok'); }
+    try { const r = await post(`exts/${id}/refresh`, undefined, SLOW); toast(t('ext.refreshed', { n: r.clash }), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; await load('exts'); renderRows(); }
   },

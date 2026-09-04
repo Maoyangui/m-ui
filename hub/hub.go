@@ -486,6 +486,13 @@ func (h *Hub) remoteNodes() []model.Node {
 	return nodes
 }
 
+// nodeResult 一台副机这一轮同步的结果:网络部分并发跑,落库部分回到主协程串行做。
+type nodeResult struct {
+	n   model.Node
+	rep Report
+	err string // 非空 = 这一轮失败(推送或拉报告)
+}
+
 func (h *Hub) tick() {
 	if h.d.IsNode() {
 		return
@@ -499,45 +506,71 @@ func (h *Hub) tick() {
 	h.revision = snap.Revision
 	h.mu.Unlock()
 
+	// 各副机的网络往返并发进行:一台慢或失联的机器不该让后面的机器等它超时。
+	// 同一台机器内部仍是 推送 → 拉报告 的顺序;数据库写入留到下面串行做,不给 SQLite 添堵。
 	nodes := h.remoteNodes()
 	live := map[uint]bool{}
-	for _, n := range nodes {
+	results := make([]*nodeResult, len(nodes))
+	var wg sync.WaitGroup
+	for i, n := range nodes {
 		live[n.Id] = true
 		if n.ApiUrl == "" || n.Token == "" {
-			h.setStatus(n, false, "未配置 API 地址或令牌", nil)
+			results[i] = &nodeResult{n: n, err: "未配置 API 地址或令牌"}
 			continue
 		}
-		st := h.getStatus(n)
-		if h.pushed[n.Id] != snap.Revision || time.Now().Unix()-st.LastPush > 600 {
-			if err := h.push(n, snap); err != nil {
-				h.setStatus(n, false, "推送失败: "+err.Error(), nil)
-				continue
-			}
-		}
-		rep, err := h.fetchReport(n)
-		if err != nil {
-			h.setStatus(n, false, "拉取报告失败: "+err.Error(), nil)
+		wg.Add(1)
+		go func(i int, n model.Node) {
+			defer wg.Done()
+			results[i] = h.syncNode(n, snap)
+		}(i, n)
+	}
+	wg.Wait()
+
+	bucket := int64(60)
+	if v := h.d.Setting("statsBucketSeconds"); v != "" {
+		fmt.Sscanf(v, "%d", &bucket)
+	}
+	for _, r := range results {
+		if r == nil {
 			continue
 		}
-		h.setStatus(n, true, "", &rep)
-		if rep.PublicIP != "" && rep.PublicIP != n.PublicIP {
-			h.d.DB.Model(&model.Node{}).Where("id = ?", n.Id).Update("public_ip", rep.PublicIP)
+		if r.err != "" {
+			h.setStatus(r.n, false, r.err, nil)
+			continue
 		}
-		bucket := int64(60)
-		if v := h.d.Setting("statsBucketSeconds"); v != "" {
-			fmt.Sscanf(v, "%d", &bucket)
+		h.setStatus(r.n, true, "", &r.rep)
+		if r.rep.PublicIP != "" && r.rep.PublicIP != r.n.PublicIP {
+			h.d.DB.Model(&model.Node{}).Where("id = ?", r.n.Id).Update("public_ip", r.rep.PublicIP)
 		}
-		if _, err := ApplyCounters(h.d.DB, n.Id, n.Name, rep.Counters, time.Now().Unix(), bucket, n.Ratio); err != nil {
-			logger.Warning("并入副机 ", n.Name, " 流量失败: ", err)
+		if _, err := ApplyCounters(h.d.DB, r.n.Id, r.n.Name, r.rep.Counters, time.Now().Unix(), bucket, r.n.Ratio); err != nil {
+			logger.Warning("并入副机 ", r.n.Name, " 流量失败: ", err)
 		}
 		h.mu.Lock()
-		h.remote[n.Id] = rep.Onlines
-		h.remoteLines[n.Id] = rep.OnlineLinesByIP
-		h.nodeNames[n.Id] = n.Name
+		h.remote[r.n.Id] = r.rep.Onlines
+		h.remoteLines[r.n.Id] = r.rep.OnlineLinesByIP
+		h.nodeNames[r.n.Id] = r.n.Name
 		h.mu.Unlock()
 	}
 	h.forgetNodes(live)
 	h.distributeIPs(nodes)
+}
+
+// syncNode 一台副机的网络部分:该推就推,再拉报告。不碰数据库,可以和别的机器并发。
+func (h *Hub) syncNode(n model.Node, snap Snapshot) *nodeResult {
+	st := h.getStatus(n) // 先把状态项建出来,首次推送才能记下 LastPush,不会下一轮又推一遍
+	h.mu.Lock()
+	pushedRev, lastPush := h.pushed[n.Id], st.LastPush
+	h.mu.Unlock()
+	if pushedRev != snap.Revision || time.Now().Unix()-lastPush > 600 {
+		if err := h.push(n, snap); err != nil {
+			return &nodeResult{n: n, err: "推送失败: " + err.Error()}
+		}
+	}
+	rep, err := h.fetchReport(n)
+	if err != nil {
+		return &nodeResult{n: n, err: "拉取报告失败: " + err.Error()}
+	}
+	return &nodeResult{n: n, rep: rep}
 }
 
 // forgetNodes 清掉已经不存在的副机留下的所有按节点缓存。
@@ -589,7 +622,9 @@ func (h *Hub) distributeIPs(nodes []model.Node) {
 	if h.d.SetExternalIPs != nil {
 		h.d.SetExternalIPs(local)
 	}
-	// 每台副机:外部 IP = 主机本机 + 其他副机
+	// 每台副机:外部 IP = 主机本机 + 其他副机。载荷在这里串行算好,发送各机并发
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for _, n := range nodes {
 		if n.ApiUrl == "" || n.Token == "" {
 			continue
@@ -614,7 +649,11 @@ func (h *Hub) distributeIPs(nodes []model.Node) {
 				ext[u.Name] = keys(set)
 			}
 		}
-		_ = h.request(n, "POST", "external-ips", ext, nil)
+		wg.Add(1)
+		go func(n model.Node, ext map[string][]string) {
+			defer wg.Done()
+			_ = h.request(n, "POST", "external-ips", ext, nil)
+		}(n, ext)
 	}
 }
 

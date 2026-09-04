@@ -1,4 +1,4 @@
-import { get, post } from '../api.js';
+import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDuration, toast, confirm, registerActions, badge, field, fv } from '../ui.js';
 
@@ -117,7 +117,7 @@ registerActions({
   'ops.sysctlDefault': () => { document.getElementById('ops-sysctl').value = data.params.defaultSysctl; },
   'ops.warpCheck': async (_, btn) => {
     btn.disabled = true;
-    try { const r = await post('ops/warp-check'); toast(`warp=${r.exit} ${r.ip || ''} ${r.loc || ''} ${r.colo || ''}`, r.exit === 'on' || r.exit === 'plus' ? 'ok' : 'err'); }
+    try { const r = await post('ops/warp-check', undefined, SLOW); toast(`warp=${r.exit} ${r.ip || ''} ${r.loc || ''} ${r.colo || ''}`, r.exit === 'on' || r.exit === 'plus' ? 'ok' : 'err'); }
     catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; }
   },

@@ -124,6 +124,9 @@ table.grid.tight { min-width: 0; table-layout: fixed; }
 .grid.tight td { word-break: break-word; }
 .grid .ellip { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grid.tight .btn.sm { padding: .22rem .5rem; }
+/* 表格下方的分页条:上一页 · 页码 · 下一页,右侧选每页条数 */
+.pager { display: flex; align-items: center; gap: .6rem; padding: .6rem .2rem 0; }
+.pager select { padding: .2rem .35rem; font: inherit; font-size: .8rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
 /* 服务器表:窄列给定宽度,余下宽度留给名称/地址/状态三列 */
 .grid.nodes th:nth-child(4), .grid.nodes td:nth-child(4),
 .grid.nodes th:nth-child(5), .grid.nodes td:nth-child(5) { width: 7.5rem; }

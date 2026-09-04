@@ -1,5 +1,5 @@
 import { state, load, isReseller } from '../app.js';
-import { get, post } from '../api.js';
+import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDuration, fmtRelative, fmtTime, tzOffsetMinutes, toast, registerActions, badge, dot, empty } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
@@ -212,9 +212,8 @@ function renderOnline() {
   const o = state.onlines;
   if (!o.users.length) { el.innerHTML = empty(t('dash.noOnline')); return; }
   el.innerHTML = `<div class="chips">${o.users.map(u => {
-    const usr = state.users.find(x => x.name === u);
-    const ips = usr ? (usr.onlineIps || []).length : 0;
-    return `<a class="chip" href="#/users" title="${ips} IP">${dot(true)}${esc(u)} <span class="muted">${o.connCounts[u] || 0} ${t('dash.conns')}</span></a>`;
+    const usr = state.users.find(x => x.name === u); // 用户列表是进用户页才拉的,这里可能还没有
+    return `<a class="chip" href="#/users" title="${usr ? (usr.onlineIps || []).length + ' IP' : ''}">${dot(true)}${esc(u)} <span class="muted">${o.connCounts[u] || 0} ${t('dash.conns')}</span></a>`;
   }).join('')}</div>`;
 }
 
@@ -248,7 +247,7 @@ registerActions({
   },
   'dash.reload': async (_, btn) => {
     btn.disabled = true;
-    try { await post('reload'); toast(t('dash.reloaded'), 'ok'); await load('status'); renderCore(); }
+    try { await post('reload', undefined, SLOW); toast(t('dash.reloaded'), 'ok'); await load('status'); renderCore(); }
     catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; }
   },

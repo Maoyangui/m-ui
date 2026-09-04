@@ -1,5 +1,5 @@
 import { state, load } from '../app.js';
-import { get, post, put, del } from '../api.js';
+import { get, post, put, del, SLOW, LONG } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce } from '../ui.js';
 
@@ -286,14 +286,14 @@ registerActions({
   },
   'up.test': async id => {
     setResult(id, { testing: true });
-    try { setResult(id, await post(`upstreams/${id}/test`)); }
+    try { setResult(id, await post(`upstreams/${id}/test`, undefined, SLOW)); }
     catch (e) { setResult(id, { ok: false, error: e.message }); }
   },
   'up.testAll': async (_, btn) => {
     btn.disabled = true;
     state.upstreams.forEach(u => setResult(u.id, { testing: true }));
     try {
-      const rs = await post('upstreams/test');
+      const rs = await post('upstreams/test', undefined, LONG);
       rs.forEach(r => setResult(r.id, r));
       const bad = rs.filter(r => !r.ok).length;
       toast(bad ? t('up.testDoneBad', { n: bad }) : t('up.testDone'), bad ? 'err' : 'ok');

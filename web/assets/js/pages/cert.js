@@ -1,5 +1,5 @@
 import { state, load } from '../app.js';
-import { get, post } from '../api.js';
+import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtDay, fmtRelative, toast, confirm, registerActions, badge, field, check, fv, fchk } from '../ui.js';
 
@@ -157,7 +157,7 @@ registerActions({
     btn.disabled = true;
     box.innerHTML = `<span class="muted small">${t('cert.checking')}</span>`;
     try {
-      const p = await post('cert/precheck', { domain: fv('c-domain') });
+      const p = await post('cert/precheck', { domain: fv('c-domain') }, SLOW);
       box.innerHTML = `<dl class="kv">
         <dt>${t('cert.publicIp')}</dt><dd class="mono">${esc(p.publicIp || '—')}</dd>
         ${Object.entries(p.resolved).map(([r, v]) => `<dt class="mono">${esc(r)}</dt><dd class="mono">${esc(v)} ${v === p.publicIp ? badge('✓', 'ok') : badge('✗', 'danger')}</dd>`).join('')}

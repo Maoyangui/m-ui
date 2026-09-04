@@ -9,6 +9,11 @@ export const title = () => t('user.title');
 export const subtitle = () => t('user.subtitle');
 let query = '', filter = 'all', drawerUser = null, sortKey = 'id', sortDir = 1;
 const selected = new Set();
+// 分页:全部用户 → 搜索 → 筛选 → 排序 → 只渲染当前页。上千用户时不再一次画出整张表。
+const PAGE_SIZES = [25, 50, 100];
+let page = 1, pageSize = 25;
+try { const v = Number(localStorage.getItem('m-ui-users-ps')); if (PAGE_SIZES.includes(v)) pageSize = v; } catch {}
+let lastPager = '';
 const SORTS = {
   id: u => u.id, name: u => u.name.toLowerCase(), usage: u => (u.up || 0) + (u.down || 0),
   expiry: u => u.expiry || Number.MAX_SAFE_INTEGER, devices: u => (u.onlineIps || []).length, status: u => (u.enabled ? 0 : 1),
@@ -47,12 +52,15 @@ export async function render(el) {
     <div class="table-wrap"><table class="grid">
       <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sel-all"></th>${th('name', t('common.name'))}${th('status', t('common.status'))}${th('usage', t('user.usage'))}${th('expiry', t('user.expiry'))}${th('devices', t('user.devices'))}<th>${t('user.speed')}</th><th></th></tr></thead>
       <tbody id="users-body"></tbody>
-    </table></div>`;
-  document.getElementById('user-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
+    </table></div>
+    <div class="pager" id="user-pager" hidden></div>`;
+  document.getElementById('user-q').addEventListener('input', debounce(e => { query = e.target.value; page = 1; renderRows(); }));
+  // 表头的全选只勾当前页显示的用户:免得以为选了 25 个,实际操作了几千个
   document.getElementById('sel-all').addEventListener('change', e => {
-    visibleRows().forEach(u => e.target.checked ? selected.add(u.id) : selected.delete(u.id));
+    pageRows().forEach(u => e.target.checked ? selected.add(u.id) : selected.delete(u.id));
     renderRows();
   });
+  lastPager = '';
   renderRows();
 }
 export async function tick() { await load('users'); renderRows(); if (drawerUser) refreshDrawerLive(); }
@@ -76,15 +84,49 @@ function visibleRows() {
   return rows.slice().sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * sortDir; });
 }
 
+// pageRows 当前页实际显示的那些用户(页码越界时先收敛,删掉本页最后一个也不会停在空页上)
+function pageRows() {
+  const rows = visibleRows();
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+  if (page > pages) page = pages;
+  if (page < 1) page = 1;
+  return rows.slice((page - 1) * pageSize, page * pageSize);
+}
+
+function renderPager(total) {
+  const el = document.getElementById('user-pager');
+  if (!el) return;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  el.hidden = total <= PAGE_SIZES[0];
+  if (el.hidden) { lastPager = ''; return; }
+  const html = `<button class="btn sm" data-act="user.page" data-id="prev" ${page <= 1 ? 'disabled' : ''}>‹ ${t('common.prev')}</button>
+    <span class="muted small">${page} / ${pages}</span>
+    <button class="btn sm" data-act="user.page" data-id="next" ${page >= pages ? 'disabled' : ''}>${t('common.next')} ›</button>
+    <span class="grow"></span>
+    <label class="muted small">${t('common.perPage')} <select id="user-ps">${PAGE_SIZES.map(n => `<option value="${n}" ${n === pageSize ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`;
+  if (html === lastPager) return; // 定时刷新时内容没变就不动 DOM,免得把打开的下拉框关掉
+  lastPager = html;
+  el.innerHTML = html;
+  document.getElementById('user-ps').addEventListener('change', e => {
+    pageSize = Number(e.target.value); page = 1;
+    try { localStorage.setItem('m-ui-users-ps', String(pageSize)); } catch {}
+    renderRows();
+  });
+}
+
 function renderRows() {
   const body = document.getElementById('users-body');
   if (!body) return;
   const online = new Set(state.onlines.users || []);
-  const rows = visibleRows();
-  document.getElementById('user-count').textContent = `${rows.length} / ${state.users.length}`;
+  const total = visibleRows().length;
+  const rows = pageRows();
+  document.getElementById('user-count').textContent = `${total} / ${state.users.length}`;
   const bar = document.getElementById('batch-bar');
   bar.hidden = selected.size === 0;
   document.getElementById('batch-count').textContent = t('user.selected', { n: selected.size });
+  const selAll = document.getElementById('sel-all');
+  if (selAll) selAll.checked = rows.length > 0 && rows.every(u => selected.has(u.id));
+  renderPager(total);
   if (!rows.length) { body.innerHTML = `<tr><td colspan="8">${empty()}</td></tr>`; return; }
   body.innerHTML = rows.map(u => {
     const used = (u.up || 0) + (u.down || 0);
@@ -303,7 +345,8 @@ async function fullUpdate(u, patch) {
 }
 
 registerActions({
-  'user.filter': id => { filter = id; document.querySelectorAll('#user-filter button').forEach(b => b.classList.toggle('active', b.dataset.id === id)); renderRows(); },
+  'user.filter': id => { filter = id; page = 1; document.querySelectorAll('#user-filter button').forEach(b => b.classList.toggle('active', b.dataset.id === id)); renderRows(); },
+  'user.page': id => { page += id === 'next' ? 1 : -1; renderRows(); },
   'user.chartRange': async id => {
     drawerRange = Number(id);
     document.querySelectorAll('[data-act="user.chartRange"]').forEach(b => b.classList.toggle('active', b.dataset.id === id));
@@ -312,6 +355,7 @@ registerActions({
   },
   'user.sort': id => {
     if (sortKey === id) sortDir = -sortDir; else { sortKey = id; sortDir = 1; }
+    page = 1;
     document.querySelectorAll('th.sortable').forEach(h => {
       h.classList.toggle('sorted', h.dataset.id === sortKey);
       h.innerHTML = h.innerHTML.replace(/ [▲▼]$/, '') + (h.dataset.id === sortKey ? (sortDir > 0 ? ' ▲' : ' ▼') : '');

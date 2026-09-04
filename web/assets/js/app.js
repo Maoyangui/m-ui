@@ -1,5 +1,5 @@
 // 应用入口:登录、壳布局、hash 路由、全局状态与定时刷新。
-import { get, post, setUnauthorizedHandler } from './api.js';
+import { get, post, setUnauthorizedHandler, LONG } from './api.js';
 import { t, setLang, getLang, langs } from './i18n.js';
 import { ICONS } from './icons.js';
 import { toast, confirm, closeModal, closeDrawer, drawerOpen, esc, setTimezone } from './ui.js';
@@ -34,6 +34,19 @@ const navFor = () => (isReseller() ? resellerNav : masterNav);
 let current = null;
 
 // ---- 数据加载 ----
+// 进哪个页面才拉哪个页面的数据(见下面 PAGE_DATA);拉过的留在 state 里,切换页面不重复请求。
+// 页面上的增删改本来就会显式 load('users') 之类刷新自己关心的那份,这一点没有变。
+const ALL_DATA = ['status', 'settings', 'lines', 'upstreams', 'users', 'plans', 'nodes', 'exts', 'onlines'];
+const loaded = new Set();
+export async function ensure(...what) {
+  const need = what.filter(k => !loaded.has(k));
+  if (need.length) await load(...need);
+}
+function resetState() {
+  loaded.clear();
+  Object.assign(state, { status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [], exts: [],
+    onlines: { users: [], lines: [], upstreams: [], connCounts: {} } });
+}
 export async function load(...what) {
   const all = what.length === 0;
   const jobs = [];
@@ -47,7 +60,20 @@ export async function load(...what) {
   if (!isReseller() && (all || what.includes('exts'))) jobs.push(get('exts').then(x => { state.exts = x || []; }).catch(() => { state.exts = []; }));
   if (all || what.includes('onlines')) jobs.push(get('onlines').then(o => { state.onlines = o; }));
   await Promise.all(jobs);
+  (all ? ALL_DATA : what).forEach(k => loaded.add(k));
 }
+
+// 每个页面真正用到的全局数据;没列的页面只靠 status / settings(登录时就有)
+const PAGE_DATA = {
+  dashboard: ['onlines'],
+  lines: ['lines', 'nodes', 'upstreams', 'onlines'],
+  upstreams: ['upstreams', 'lines', 'onlines'],
+  exts: ['exts'],
+  users: ['users', 'plans', 'lines', 'exts', 'onlines'],
+  plans: ['plans', 'lines'],
+  resellers: ['lines'],
+  nodes: ['nodes'],
+};
 
 // ---- 登录 ----
 let needTotp = false; // 服务端要求过两步验证码后,登录框一直显示验证码栏
@@ -95,13 +121,13 @@ document.getElementById('login-form').addEventListener('submit', async ev => {
 async function enterApp() {
   document.getElementById('login').hidden = true;
   document.getElementById('app').hidden = false;
-  await load('status');
+  resetState(); // 换账号登录(管理员 ↔ 代理)不能沿用上一个会话拉到的数据
+  await load('status', 'settings');
   if (state.status.mustSetPassword) { // 新代理首次登录:先设密码
     account.forceSetPassword();
     return;
   }
   renderChrome();
-  await load();
   route();
 }
 
@@ -152,14 +178,17 @@ function renderRole() {
 // 更新只替换二进制再重启服务:数据库、证书、备份、设置都不动,用户与订阅地址不变。
 let updateState = null;
 let updateCheckedAt = 0;
+let updateChecking = false;
 async function refreshUpdateBadge() {
   const dot = document.getElementById('update-dot');
-  if (!dot || isReseller()) return;
+  if (!dot || isReseller() || updateChecking) return;
   // 服务端本就缓存 6 小时:成功后半小时再问,失败(副机、网络不通)5 分钟内不重试
   if (Date.now() - updateCheckedAt < (updateState ? 1800000 : 300000)) return;
+  updateChecking = true;
   try {
     updateState = await get('update');
   } catch { updateCheckedAt = Date.now(); return; }
+  finally { updateChecking = false; }
   updateCheckedAt = Date.now();
   dot.hidden = !updateState.hasUpdate;
   if (updateState.hasUpdate) {
@@ -177,7 +206,7 @@ document.getElementById('update-dot').addEventListener('click', async () => {
   const dot = document.getElementById('update-dot');
   dot.disabled = true;
   try {
-    await post('update');
+    await post('update', undefined, LONG);
   } catch (e) {
     dot.disabled = false;
     toast(e.message, 'err');
@@ -274,7 +303,7 @@ async function route(force = false) {
   closeDrawer();
   const el = document.getElementById('page');
   el.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
-  try { await page.render(el); }
+  try { await ensure(...(PAGE_DATA[name] || [])); await page.render(el); }
   catch (e) { if (e.status !== 401) el.innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
   // 副机上线路/上游/用户/套餐/外部节点由主机下发:只读展示,隐藏增删改按钮
   const readOnly = state.status.role === 'node' && ['lines', 'upstreams', 'users', 'plans', 'exts'].includes(name);
@@ -284,13 +313,22 @@ async function route(force = false) {
 window.addEventListener('hashchange', () => route());
 
 // ---- 定时刷新(仅可见时)----
-setInterval(async () => {
-  if (document.getElementById('app').hidden || document.hidden) return;
+// 上一轮还没回来就跳过这一轮:服务器慢或网络差时,不会把同样的请求一轮轮堆起来
+let refreshing = false;
+export async function refreshNow() {
+  if (refreshing) return false;
+  refreshing = true;
   try {
     await load('status', 'onlines');
     const page = pages[current];
-    if (page && page.tick) page.tick();
+    if (page && page.tick) await page.tick();
   } catch {}
+  finally { refreshing = false; }
+  return true;
+}
+setInterval(() => {
+  if (document.getElementById('app').hidden || document.hidden) return;
+  refreshNow();
 }, 10000);
 
 // ---- 启动 ----

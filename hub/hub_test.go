@@ -1,8 +1,16 @@
 package hub
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
@@ -222,5 +230,108 @@ func TestHubForgetsRemovedNodes(t *testing.T) {
 	}
 	if got := h.RemoteIPLines("u"); len(got) != 0 {
 		t.Fatalf("已删服务器的线路不该再出现: %v", got)
+	}
+}
+
+// fakeNode 模拟一台副机的 agent 接口:可指定报告延迟、是否失败,并数一数被推送了几次。
+type fakeNode struct {
+	srv      *httptest.Server
+	applies  int32
+	delay    time.Duration
+	failRep  bool
+	counters []model.AgentCounter
+}
+
+func newFakeNode(t *testing.T, delay time.Duration, failRep bool, counters []model.AgentCounter) *fakeNode {
+	t.Helper()
+	f := &fakeNode{delay: delay, failRep: failRep, counters: counters}
+	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/agent/apply"):
+			atomic.AddInt32(&f.applies, 1)
+			w.Write([]byte(`{"ok":"1","revision":"x"}`))
+		case strings.HasSuffix(r.URL.Path, "/agent/report"):
+			time.Sleep(f.delay)
+			if f.failRep {
+				http.Error(w, `{"error":"boom"}`, 500)
+				return
+			}
+			json.NewEncoder(w).Encode(Report{Version: "t", CoreRunning: true, Counters: f.counters,
+				Onlines: map[string][]string{"alice": {"9.9.9.9"}}})
+		case strings.HasSuffix(r.URL.Path, "/agent/external-ips"):
+			w.Write([]byte(`{"ok":"1"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+// 各副机并发同步:两台各慢 1 秒的机器不该让整轮变成 2 秒以上;失败的机器不影响正常机器;
+// 同一修订号只推一次;流量按游标并入,连跑两轮不会重复计费;不留 goroutine。
+func TestTickSyncsNodesConcurrently(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	db.Create(&model.Node{Name: "本机", IsLocal: true, Enabled: true})
+	db.Create(&model.User{Name: "alice", Enabled: true, DeviceLimit: 3, Credentials: []byte(`{}`)})
+
+	ctr := []model.AgentCounter{{UserName: "alice", Up: 100, Down: 200}}
+	fakes := []*fakeNode{
+		newFakeNode(t, 0, false, ctr),           // 正常
+		newFakeNode(t, time.Second, false, ctr), // 慢
+		newFakeNode(t, time.Second, false, ctr), // 慢
+		newFakeNode(t, 0, true, nil),            // 拉报告失败
+		newFakeNode(t, 0, false, nil),           // 正常
+	}
+	for i, f := range fakes {
+		db.Create(&model.Node{Name: fmt.Sprintf("n%d", i+1), ApiUrl: f.srv.URL + "/app/", Token: "t", Enabled: true})
+	}
+	h := New(Deps{DB: db, Setting: func(string) string { return "" }, IsNode: func() bool { return false }})
+
+	before := runtime.NumGoroutine()
+	start := time.Now()
+	h.tick()
+	elapsed := time.Since(start)
+	if elapsed > 1800*time.Millisecond {
+		t.Fatalf("两台各慢 1 秒的机器应并发等待,整轮用了 %v", elapsed)
+	}
+	st := h.Statuses()
+	for i, f := range fakes {
+		id := uint(i + 2)
+		if f.failRep {
+			if st[id].OK || !strings.Contains(st[id].Error, "拉取报告失败") {
+				t.Fatalf("失败机器状态不对: %+v", st[id])
+			}
+			continue
+		}
+		if !st[id].OK || !st[id].CoreRunning {
+			t.Fatalf("正常机器 %d 不该被失败机器拖累: %+v", id, st[id])
+		}
+	}
+	h.tick() // 第二轮:修订号没变,不该再推;报告里同样的计数器不该再记一次
+	for i, f := range fakes {
+		if got := atomic.LoadInt32(&f.applies); got != 1 {
+			t.Fatalf("机器 %d 应只被推送一次,实际 %d", i+1, got)
+		}
+	}
+	var u model.User
+	db.Where("name = ?", "alice").First(&u)
+	if u.Up != 300 || u.Down != 600 {
+		t.Fatalf("三台带计数器的机器各 100/200,应并入 300/600 且第二轮不重复,实际 %d/%d", u.Up, u.Down)
+	}
+	if ips := h.RemoteIPs("alice"); len(ips) != 1 {
+		t.Fatalf("在线 IP 应汇总去重为 1 个,实际 %v", ips)
+	}
+	// 多出来的只该是 keep-alive 连接两头的读写协程:关掉空闲连接后应回落到同步前的水平
+	for _, c := range h.clients {
+		c.CloseIdleConnections()
+	}
+	time.Sleep(200 * time.Millisecond)
+	if after := runtime.NumGoroutine(); after > before+3 {
+		t.Fatalf("同步后多出 goroutine: %d → %d", before, after)
 	}
 }

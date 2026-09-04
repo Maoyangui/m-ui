@@ -1,5 +1,5 @@
 import { state, load } from '../app.js';
-import { get, post, put, del } from '../api.js';
+import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk } from '../ui.js';
 
@@ -136,7 +136,7 @@ registerActions({
   'node.test': async (id, btn) => {
     btn.disabled = true;
     try {
-      const r = await post(`nodes/${id}/test`);
+      const r = await post(`nodes/${id}/test`, undefined, SLOW);
       if (r.ok) toast(t('node.testOk', { v: r.version || '', core: r.coreRunning ? t('dash.running') : t('dash.stopped') }), 'ok');
       else toast(r.error, 'err');
     } catch (e) { toast(e.message, 'err'); }
@@ -144,7 +144,7 @@ registerActions({
   },
   'node.push': async (id, btn) => {
     btn.disabled = true;
-    try { await post(`nodes/${id}/push`); toast(t('node.pushed'), 'ok'); data = await get('nodes'); renderRows(); }
+    try { await post(`nodes/${id}/push`, undefined, SLOW); toast(t('node.pushed'), 'ok'); data = await get('nodes'); renderRows(); }
     catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; }
   },

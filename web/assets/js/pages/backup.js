@@ -1,5 +1,5 @@
 import { state, load } from '../app.js';
-import { get, post, del, upload } from '../api.js';
+import { get, post, del, upload, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDate, fmtRelative, toast, confirm, openModal, closeModal, registerActions, badge, field, check, empty, fv, fchk, copy } from '../ui.js';
 
@@ -125,9 +125,9 @@ registerActions({
   },
   'bk.restoreLocal': async name => {
     try {
-      const s = await post('backup/inspect', { name });
+      const s = await post('backup/inspect', { name }, SLOW);
       openModal(t('bk.confirmTitle') + ' · ' + name, summaryHTML(s), async () => {
-        await post('backup/restore', { name });
+        await post('backup/restore', { name }, SLOW);
         closeModal();
         waitBack();
       }, { okText: t('bk.restoreBtn'), danger: true });
@@ -141,7 +141,7 @@ registerActions({
     btn.disabled = true;
     box.innerHTML = `<span class="muted small">${t('cert.checking')}</span>`;
     try {
-      const p = await post('cert/precheck', { domain });
+      const p = await post('cert/precheck', { domain }, SLOW);
       const target = ip || p.publicIp;
       const rows = Object.entries(p.resolved).map(([r, v]) => `<dt class="mono">${esc(r)}</dt><dd class="mono">${esc(v)} ${v === target ? badge('✓', 'ok') : badge('✗', 'danger')}</dd>`).join('');
       const all = Object.values(p.resolved).every(v => v === target);
