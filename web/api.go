@@ -978,6 +978,21 @@ func (s *Server) validatePorts(in map[string]string) error {
 		}
 		seen[n] = key
 	}
+	// 反方向也要拦:把面板/订阅端口改成某条线路正在用的端口,同样会起不来
+	lineByPort := map[int]string{}
+	var lines []model.Line
+	s.db.Select("name, port").Find(&lines)
+	for _, l := range lines {
+		lineByPort[l.Port] = l.Name
+	}
+	for key, n := range got {
+		if _, active := seen[n]; !active {
+			continue
+		}
+		if name, dup := lineByPort[n]; dup {
+			return fmt.Errorf("%s端口 %d 已被线路 %q 占用,换一个", ports[key].label, n, name)
+		}
+	}
 	return nil
 }
 

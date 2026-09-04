@@ -181,11 +181,50 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, errors.New("不能删除本机"))
 			return
 		}
+		disabled := s.detachLinesFromNode(id) // 只部署在这台机器上的线路会被停用,不留悬空引用
 		s.db.Delete(&model.Node{}, id)
 		s.db.Where("node_id = ?", id).Delete(&model.TrafficCursor{})
 		s.audit(r, "node", "delete", node.Name)
-		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+		if len(disabled) > 0 {
+			s.reloadAll("删除服务器 " + node.Name)
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "disabledLines": disabled})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// detachLinesFromNode 把线路的"部署到服务器"里那台被删的机器摘掉。
+// 摘完没有服务器可去的线路会被停用(空列表在渲染时等于"所有服务器",
+// 直接留空会让线路悄悄跑到全部机器上,不是管理员的本意),返回被停用的线路名。
+func (s *Server) detachLinesFromNode(nodeID uint) []string {
+	var lines []model.Line
+	s.db.Where("node_ids IS NOT NULL AND node_ids <> ''").Find(&lines)
+	var disabled []string
+	for _, l := range lines {
+		var ids []uint
+		if json.Unmarshal(l.NodeIds, &ids) != nil {
+			continue
+		}
+		kept := make([]uint, 0, len(ids))
+		for _, id := range ids {
+			if id != nodeID {
+				kept = append(kept, id)
+			}
+		}
+		if len(kept) == len(ids) {
+			continue // 与这台机器无关
+		}
+		upd := map[string]interface{}{}
+		if len(kept) == 0 {
+			upd["node_ids"] = nil
+			upd["enabled"] = false
+			disabled = append(disabled, l.Name)
+		} else {
+			b, _ := json.Marshal(kept)
+			upd["node_ids"] = json.RawMessage(b)
+		}
+		s.db.Model(&model.Line{}).Where("id = ?", l.Id).Updates(upd)
+	}
+	return disabled
 }

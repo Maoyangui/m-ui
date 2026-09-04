@@ -272,15 +272,24 @@ const PRESETS = [
   { id: 'ss2022', label: 'Shadowsocks 2022', hint: 'TCP/UDP · 无 TLS · 兼容性最好', protocol: 'shadowsocks', tls: { mode: 'none' }, options: { method: '2022-blake3-aes-128-gcm' } },
   { id: 'vmess-ws', label: 'VMess + WS', hint: 'TCP · 可套 CDN', protocol: 'vmess', tls: { mode: 'none' }, transport: { type: 'ws', path: '/ws' } },
 ];
-function randomFreePort() {
+// 新线路的默认端口:优先问服务端(它避开面板/订阅/代理面板端口,并真的试着监听一次);
+// 拿不到就在本地挑一个没被其它线路用的五位端口。填好后仍然可以改。
+async function suggestPort() {
+  try {
+    const r = await get('keygen?type=port');
+    if (r && r.port) return r.port;
+  } catch { /* 接口不可用时退回本地挑 */ }
   const used = new Set(state.lines.map(l => l.port));
-  for (let i = 0; i < 50; i++) { const p = 20000 + Math.floor(Math.random() * 40000); if (!used.has(p)) return p; }
-  return 20000 + Math.floor(Math.random() * 40000);
+  for (let i = 0; i < 50; i++) {
+    const p = 10000 + Math.floor(Math.random() * 55536);
+    if (!used.has(p)) return p;
+  }
+  return 10000 + Math.floor(Math.random() * 55536);
 }
 async function presetLine(pid) {
   const p = PRESETS.find(x => x.id === pid);
   if (!p) return;
-  const port = randomFreePort();
+  const port = await suggestPort();
   const l = { protocol: p.protocol, enabled: true, options: p.options || {}, upstreamId: 0, port, name: `${p.label}-${port}`, tls: p.tls, transport: p.transport };
   if (p.tls && p.tls.mode === 'reality') {
     try {
@@ -297,6 +306,7 @@ async function editLine(id, cloneFrom, preset) {
   const src = cloneFrom || (id ? state.lines.find(x => x.id === id) : null);
   const l = src ? { ...src } : (preset || { protocol: 'vless', enabled: true, options: {}, upstreamId: 0 });
   if (cloneFrom) { l.name = t('line.cloneOf', { name: src.name }); l.port = ''; }
+  if (!l.port) l.port = await suggestPort(); // 新建/克隆:给个可用端口做默认值,可改
   openModal(id ? t('line.edit') : t('line.add'), `
     <h3>${t('line.basic')}</h3>
     <div class="form-grid">
