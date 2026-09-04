@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   discussions: write
+  actions: write # 发布后显式触发 pages 工作流刷新 feed.xml
 
 jobs:
   build:
@@ -113,3 +114,11 @@ jobs:
           body="$(printf 'Release: https://github.com/%s/releases/tag/%s\n\n' "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"; cat RELEASE_NOTES.md)"
           gh api graphql -f query='mutation($r:ID!,$c:ID!,$t:String!,$b:String!){createDiscussion(input:{repositoryId:$r,categoryId:$c,title:$t,body:$b}){discussion{url}}}' \
             -f r="$repo_id" -f c="$cat_id" -f t="$title" -f b="$body" --jq '.data.createDiscussion.discussion.url'
+
+      # GITHUB_TOKEN 创建的 Release 不会触发别的工作流(GitHub 防递归),
+      # 所以在这里显式触发一次 pages,让站点的 feed.xml 带上这个版本。
+      - name: Refresh site feed
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main || echo "触发 pages 失败(不影响发布)"
