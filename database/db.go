@@ -28,6 +28,15 @@ func Open(dbPath string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// SQLite 同一时刻只允许一个写事务。多条连接时,一个事务里"先读后写"会与另一个写事务
+	// 撞成升级死锁 —— busy_timeout 对这种情况无效,直接抛 SQLITE_BUSY(生产日志里
+	// "配额判定失败: database is locked" 就是它)。把连接数压到 1 让所有事务排队,
+	// 面板这种量级完全够用,换来的是不再有随机失败。
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
+		sqlDB.SetMaxIdleConns(1)
+		sqlDB.SetConnMaxLifetime(0)
+	}
 	if err := db.AutoMigrate(model.All()...); err != nil {
 		return nil, err
 	}

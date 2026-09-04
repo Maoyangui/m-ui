@@ -35,7 +35,73 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 | Alerts | Telegram: logins, user expiring / over quota / disabled, upstream failures, data plane down, daily report (its hour and dates follow the panel time zone) |
 | Observability | Traffic charts (stacked bars, 1h / 6h / 24h / 7d / 30d), top users, online users and IPs, recent inbound connections for troubleshooting, audit log, subscription access log |
 | Security | bcrypt passwords, CSRF protection, login cooldown after repeated failures from the same peer, two-factor authentication (TOTP), external API tokens; reseller and admin sessions are strictly separated |
+| Updates | The panel finds new releases by itself and flags them next to the version in the sidebar; one click verifies the SHA256, swaps the binary and restarts — database, certificates and settings are untouched |
 | Integration | External API for creating users, applying plans, enabling / disabling, renewing and fetching subscription URLs, see [docs/API.md](docs/API.md) |
+
+## Architecture
+
+One process runs three things: the **panel** (for you), the **subscription server** (for clients), and the **data plane** (embedded sing-box, where traffic actually flows). They share one SQLite file, so a change takes effect immediately.
+
+```mermaid
+flowchart LR
+  A[Admin browser] -->|:2053 /app| P[Panel HTTP]
+  R[Reseller browser] -->|:2054 /dl| D[Reseller panel<br/>same frontend · scoped session]
+  C[Clients<br/>Clash / sing-box / Shadowrocket] -->|:2056 /sub| S[Subscription server]
+  C -->|proxy traffic| X[Data plane<br/>embedded sing-box]
+  P --> DB[(SQLite<br/>m-ui.db)]
+  D --> DB
+  S --> DB
+  X --- DB
+  X -->|egress| U[Upstreams / WARP / direct]
+```
+
+**What happens when you save** — the panel never edits a running sing-box in place:
+
+```mermaid
+flowchart LR
+  E[Save a line / user] --> V{Dry-run the whole<br/>config through sing-box}
+  V -- fails --> K[Reject the save<br/>old config keeps serving]
+  V -- passes --> W[(Write to DB)]
+  W --> H{What changed}
+  H -- users --> HU[Hot-swap inbound users<br/>nobody else is dropped]
+  H -- upstreams --> HO[Hot-swap outbounds<br/>no restart]
+  H -- lines --> HR[Restart data plane<br/>roll back if it fails to start]
+```
+
+**Multi-server** is one master, any number of nodes. The master does the accounting and pushes config; nodes just forward.
+
+```mermaid
+flowchart LR
+  M[Master<br/>panel · subscriptions · quota] -->|snapshot every 5s<br/>lines/upstreams/users/creds| N1[Node A]
+  M -->|same| N2[Node B]
+  N1 -->|traffic deltas · online IPs| M
+  N2 -->|report| M
+  M -->|other machines' online IPs| N1
+  M -->|device counts deduped across servers| N2
+```
+
+**The data model** is four main tables:
+
+```mermaid
+flowchart TB
+  L[Line<br/>protocol+port → upstream] --- UL{{user ↔ line}}
+  UL --- U[User<br/>quota · expiry · devices · speed]
+  U --> SUB[Subscription<br/>link / clash / sing-box]
+  L --> UP[Upstream<br/>egress]
+  RS[Reseller<br/>quota holder + own panel] -->|owns| U
+  RS -->|granted| L
+  PL[Plan<br/>template] -.applied to.-> U
+```
+
+| Component | Responsibility | Code |
+|---|---|---|
+| Panel | Admin UI and API, reseller panel, external API | `web/` |
+| Render | Lines → sing-box config, dry-run before save | `render/` `core/validate.go` |
+| Data plane | Embedded sing-box, traffic stats, connection tracking, limits | `core/` |
+| Subscriptions | Three formats, landing page, temporary sharing | `sub/` |
+| Sync | Snapshot push, traffic collection, online aggregation | `hub/` |
+| Orchestration | Process lifecycle, certificates, backups, external nodes | `runner/` |
+| Scheduled | Stats, quota enforcement, cleanup | `jobs/` `monitor/` |
 
 ## Installation
 
@@ -146,6 +212,7 @@ Hand part of the selling to someone else: create a reseller on the Resellers pag
 ### Subscriptions
 
 - Universal: `https://<domain-or-ip>:2056/sub/<user>` for nextin, sing-box, Shadowrocket, Surge, Quantumult X, Loon, Karing and others.
+- Settings → Subscription → "Use the username as the subscription URL" is on by default. Turn it off and **new** users get an unguessable random token instead (the username stays a plain label); existing users keep their URL, and reseller-created users always get a token.
 - Clash: append `?format=clash` for mihomo / Clash Verge / Stash; each line becomes a latency-selected group of entries.
 - sing-box: append `?format=json` for a complete sing-box client config (TUN, groups, DNS, basic routing) that SFA (Android), SFI (iOS) and the desktop build import as a remote profile; the landing page has a one-tap import button.
 - The name clients show comes from Settings → Subscription → "Profile title" (falling back to the landing-page title, then the remark, then the username). It goes out on both `Content-Disposition` and `Profile-Title`, encoded the standard way for non-ASCII. Clients that re-read the title on every update (nextin, sing-box) pick it up on refresh; Shadowrocket and Clash Verge name a profile **when it is added** and never rename it — add it through the landing page's one-tap import (which carries the title) or re-add it.
