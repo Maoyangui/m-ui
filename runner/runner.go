@@ -411,6 +411,7 @@ func (r *Runner) ReloadUsers() error {
 		return err
 	}
 	box := r.core.GetInstance()
+	keepAll := map[string]map[string]struct{}{} // 入站 → 仍然有效的用户名
 	for _, inbound := range cfg.Inbounds {
 		handled, err := r.core.UpdateInboundUsers(inbound)
 		if err != nil {
@@ -442,7 +443,7 @@ func (r *Runner) ReloadUsers() error {
 			}
 			continue
 		}
-		// 断开已不再属于该入站的用户连接(禁用用户即时下线)
+		// 记下这个入站还有哪些用户,最后一次性断开不在其中的连接(禁用用户即时下线)
 		keep := make(map[string]struct{}, len(meta.Users))
 		for _, u := range meta.Users {
 			if u.Name != "" {
@@ -452,7 +453,10 @@ func (r *Runner) ReloadUsers() error {
 				keep[u.Username] = struct{}{}
 			}
 		}
-		box.ConnTracker().CloseConnByInboundUsers(meta.Tag, keep)
+		keepAll[meta.Tag] = keep
+	}
+	if box != nil && len(keepAll) > 0 {
+		box.ConnTracker().CloseConnsNotIn(keepAll) // 一次扫描,锁只拿一次
 	}
 	r.applyLimits()
 	return nil

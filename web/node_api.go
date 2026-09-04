@@ -124,6 +124,10 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			out["ok"] = true
 			writeJSON(w, http.StatusOK, out)
 		case "push":
+			if r.Method != http.MethodPost {
+				writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+				return
+			}
 			if node.IsLocal {
 				badRequest(w, errors.New("本机无需推送"))
 				return

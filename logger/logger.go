@@ -154,15 +154,25 @@ func addToBuffer(level string, newLog string) {
 }
 
 func GetLogs(c int, level string) []string {
-	var output []string
 	logLevel, _ := logging.LogLevel(level)
 
+	type entry struct {
+		time  string
+		level logging.Level
+		log   string
+	}
+	picked := make([]entry, 0, c+1)
 	bufMu.Lock()
-	defer bufMu.Unlock()
-	for i := len(logBuffer) - 1; i >= 0 && len(output) <= c; i-- {
+	for i := len(logBuffer) - 1; i >= 0 && len(picked) <= c; i-- {
 		if logBuffer[i].level <= logLevel {
-			output = append(output, fmt.Sprintf("%s %s - %s", logBuffer[i].time, logBuffer[i].level, logBuffer[i].log))
+			picked = append(picked, entry{logBuffer[i].time, logBuffer[i].level, logBuffer[i].log})
 		}
+	}
+	bufMu.Unlock()
+
+	output := make([]string, 0, len(picked))
+	for _, e := range picked { // 格式化在锁外做
+		output = append(output, fmt.Sprintf("%s %s - %s", e.time, e.level, e.log))
 	}
 	return output
 }

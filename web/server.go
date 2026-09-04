@@ -189,6 +189,7 @@ func (s *Server) Start() error {
 	})
 	// 对外前缀 → 内部前缀改写;对外前缀不是 innerBase 时,直接访问内部前缀视为不存在
 	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secureHeaders(w)
 		pub := s.basePath()
 		if pub != innerBase && r.URL.Path != "/" {
 			switch {
@@ -328,6 +329,15 @@ func (s *Server) reapSessions() {
 // sameOrigin 拦截跨站请求(CSRF):写操作只接受同源发起。
 // JSON 接口不校验 Content-Type,恶意页面可用 text/plain 表单带 Cookie 伪造 POST;
 // 现代浏览器对跨站请求都会带 Sec-Fetch-Site / Origin,据此拒绝即可。
+// secureHeaders 面板与代理面板的基本响应头:禁止被 iframe 套壳(点击劫持)、
+// 禁止 MIME 嗅探、不把面板地址带到外站。
+func secureHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "no-referrer")
+}
+
 func sameOrigin(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:

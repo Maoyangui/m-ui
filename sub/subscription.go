@@ -74,6 +74,11 @@ func BuildClashSub(user model.User, lines []model.Line, opt Options) (Result, er
 }
 
 // headers 组装订阅响应头(流量信息 + 更新周期 + 标题)。
+//
+// 标题里有中文时不能原样塞进 HTTP 头:头只能放 ASCII,客户端要么丢掉要么显示乱码
+// (Shadowrocket 会回退成域名、Clash Verge 回退成用户名、nextin 用首个节点名)。
+// 通行做法是 Profile-Title: base64:<UTF-8 的 base64>;再补一个 RFC 5987 的
+// Content-Disposition 文件名,Clash 系客户端优先用它当配置名。
 func headers(user model.User, opt Options, contentType string) map[string]string {
 	title := opt.ProfileTitle
 	if title == "" {
@@ -86,8 +91,40 @@ func headers(user model.User, opt Options, contentType string) map[string]string
 		"Content-Type":            contentType,
 		"Subscription-Userinfo":   fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", user.Up, user.Down, user.Volume, user.Expiry),
 		"Profile-Update-Interval": fmt.Sprintf("%d", opt.UpdateHours),
-		"Profile-Title":           title,
+		"Profile-Title":           encodeTitle(title),
+		"Content-Disposition":     contentDisposition(title),
 	}
+}
+
+// encodeTitle 纯 ASCII 原样发,含非 ASCII 用 base64: 前缀。
+func encodeTitle(title string) string {
+	if isASCII(title) {
+		return title
+	}
+	return "base64:" + base64.StdEncoding.EncodeToString([]byte(title))
+}
+
+// contentDisposition 同时给出 ASCII 回退名与 RFC 5987 的 UTF-8 名。
+func contentDisposition(title string) string {
+	ascii := "subscription"
+	if isASCII(title) && strings.TrimSpace(title) != "" {
+		ascii = strings.Map(func(r rune) rune {
+			if r == 34 || r == 92 || r < 32 {
+				return -1
+			}
+			return r
+		}, title)
+	}
+	return fmt.Sprintf("attachment; filename=%q; filename*=UTF-8''%s", ascii, url.PathEscape(title))
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > 127 || s[i] < 32 {
+			return false
+		}
+	}
+	return true
 }
 
 // noticeText 生成流量提示节点名:00-勿选-流量:<已用>/<总量> 重置:<天>天

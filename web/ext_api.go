@@ -110,6 +110,10 @@ func (s *Server) handleExtItem(w http.ResponseWriter, r *http.Request) {
 	if len(rest) == 2 {
 		switch rest[1] {
 		case "refresh":
+			if r.Method != http.MethodPost {
+				writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+				return
+			}
 			res, err := s.run.RefreshExt(id)
 			if err != nil {
 				badRequest(w, err)

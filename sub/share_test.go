@@ -1,6 +1,7 @@
 package sub
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -201,5 +202,48 @@ func TestLegacyNullResellerIdStillResolves(t *testing.T) {
 	db.Exec("UPDATE users SET reseller_id = NULL, sub_token = NULL WHERE id = 1")
 	if w := doReq(s, "GET", "/sub/alice", "curl/8.4.0"); w.Code != 200 {
 		t.Fatalf("历史用户的订阅不能 404,得 %d", w.Code)
+	}
+}
+
+// 订阅标题带中文时必须编码:HTTP 头只能放 ASCII,原样发客户端会丢掉,
+// 于是 Shadowrocket 显示域名、Clash Verge 显示用户名、nextin 显示首个节点名。
+func TestProfileTitleEncoding(t *testing.T) {
+	u := model.User{Name: "alice", Volume: 100, Up: 1, Down: 2}
+
+	h := headers(u, Options{ProfileTitle: "冒央会社", UpdateHours: 12}, "text/plain")
+	if h["Profile-Title"] != "base64:5YaS5aSu5Lya56S+" {
+		t.Fatalf("中文标题应 base64 编码: %q", h["Profile-Title"])
+	}
+	if !strings.Contains(h["Content-Disposition"], "filename*=UTF-8''") {
+		t.Fatalf("应带 RFC 5987 文件名: %q", h["Content-Disposition"])
+	}
+	for _, v := range h { // 头里不能出现非 ASCII
+		for i := 0; i < len(v); i++ {
+			if v[i] > 127 {
+				t.Fatalf("响应头出现非 ASCII: %q", v)
+			}
+		}
+	}
+	if got := headers(u, Options{ProfileTitle: "Maoyang Node"}, "text/plain")["Profile-Title"]; got != "Maoyang Node" {
+		t.Fatalf("纯 ASCII 标题应原样发: %q", got)
+	}
+	// 没配标题时回落到备注 → 用户名
+	if got := headers(model.User{Name: "bob"}, Options{}, "text/plain")["Profile-Title"]; got != "bob" {
+		t.Fatalf("应回落到用户名: %q", got)
+	}
+}
+
+// 代理填了标题,他名下用户的订阅头就用代理的。
+func TestResellerProfileTitle(t *testing.T) {
+	s, db := shareServer(t)
+	db.Create(&model.Setting{Key: "subProfileTitle", Value: "主站"})
+	db.Create(&model.Reseller{Name: "dl", Enabled: true, PageEnabled: true, ShareOn: true, PageTitle: "代理站"})
+	db.Model(&model.User{}).Where("id = ?", 1).
+		Updates(map[string]interface{}{"reseller_id": 1, "sub_token": "TOKENabcdefghijklmnop"})
+
+	w := doReq(s, "GET", "/sub/TOKENabcdefghijklmnop", "curl/8.4.0")
+	want := "base64:" + base64.StdEncoding.EncodeToString([]byte("代理站"))
+	if got := w.Header().Get("Profile-Title"); got != want {
+		t.Fatalf("应使用代理的标题: %q", got)
 	}
 }

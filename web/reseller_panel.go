@@ -88,6 +88,7 @@ func (s *Server) StartReseller() error {
 
 	path := s.resellerPath()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secureHeaders(w)
 		if r.URL.Path == "/" {
 			http.Redirect(w, r, path, http.StatusTemporaryRedirect)
 			return

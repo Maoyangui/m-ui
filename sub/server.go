@@ -59,7 +59,7 @@ func (s *Server) options() Options {
 		entries[i].Insecure = insecure
 	}
 	return Options{
-		ProfileTitle: s.setting("subProfileTitle"),
+		ProfileTitle: pick(s.setting("subProfileTitle"), s.setting("subPageTitle")),
 		UpdateHours:  s.settingInt("subUpdates", 12),
 		Encode:       s.settingBool("subEncode"),
 		ShowNotice:   s.settingBool("subShowNotice"),
@@ -299,6 +299,9 @@ func (s *Server) handle() http.HandlerFunc {
 		opt := s.options()
 		opt.External = s.externalFor(user.Id)
 		opt.Share = s.shareSelfService() && (rs == nil || rs.ShareOn)
+		if rs != nil { // 代理填了标题就用代理的,客户端里显示的就是他的品牌
+			opt.ProfileTitle = pick(rs.PageTitle, opt.ProfileTitle)
+		}
 		// 浏览器打开订阅地址 → 订阅页(用量/到期/一键导入/二维码);客户端拉取 → 原始订阅
 		if !shared && s.pageEnabled(rs) && WantsPage(r) {
 			s.servePage(w, r, subPath, name, user, lines, opt, rs)
@@ -360,6 +363,14 @@ func (s *Server) pageEnabled(rs *model.Reseller) bool {
 	return rs == nil || rs.PageEnabled
 }
 
+// truncate 按字节截断(只用于落库的诊断字段,不追求字符边界)。
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
 // log 记录订阅访问,供面板按用户汇总(替代 nginx 日志 + 汇总脚本)。
 func (s *Server) log(r *http.Request, user string, shared bool, status int) {
 	ip := r.Header.Get("X-Forwarded-For")
@@ -380,7 +391,7 @@ func (s *Server) log(r *http.Request, user string, shared bool, status int) {
 	}
 	entry := model.SubLog{
 		Ts: time.Now().Unix(), User: user, Ip: ip,
-		Ua: r.UserAgent(), Format: format, Status: status,
+		Ua: truncate(r.UserAgent(), 200), Format: format, Status: status, // UA 是请求头,能塞很大
 	}
 	if err := s.db.Create(&entry).Error; err != nil {
 		logger.Warning("写订阅日志失败: ", err)

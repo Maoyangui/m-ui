@@ -47,16 +47,18 @@ func (rejectedConn) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
 func (c *ConnTracker) Reset() {
 	c.access.Lock()
-	defer c.access.Unlock()
-	for _, connInfo := range c.connections {
-		if connInfo.Conn != nil {
-			_ = connInfo.Conn.Close()
+	old := c.connections
+	c.connections = make(map[string]*ConnectionInfo)
+	c.access.Unlock()
+
+	for _, info := range old { // Close 是系统调用,别压在锁里
+		if info.Conn != nil {
+			_ = info.Conn.Close()
 		}
-		if connInfo.PacketConn != nil {
-			_ = connInfo.PacketConn.Close()
+		if info.PacketConn != nil {
+			_ = info.PacketConn.Close()
 		}
 	}
-	c.connections = make(map[string]*ConnectionInfo)
 }
 
 func (c *ConnTracker) generateConnectionID() string {
@@ -113,44 +115,12 @@ func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.P
 }
 
 func (c *ConnTracker) CloseConnByInbound(inbound string) int {
-	c.access.Lock()
-	defer c.access.Unlock()
-
-	closedCount := 0
-	for connID, connInfo := range c.connections {
-		if connInfo.Inbound == inbound {
-			if connInfo.Conn != nil {
-				connInfo.Conn.Close()
-			}
-			if connInfo.PacketConn != nil {
-				connInfo.PacketConn.Close()
-			}
-			delete(c.connections, connID)
-			closedCount++
-		}
-	}
-	return closedCount
+	return c.closeMatching(func(info *ConnectionInfo) bool { return info.Inbound == inbound })
 }
 
 // CloseConnByUser 断开某用户在所有入站上的全部连接(踢下线)。
 func (c *ConnTracker) CloseConnByUser(user string) int {
-	c.access.Lock()
-	defer c.access.Unlock()
-	closed := 0
-	for id, info := range c.connections {
-		if info.User != user {
-			continue
-		}
-		if info.Conn != nil {
-			info.Conn.Close()
-		}
-		if info.PacketConn != nil {
-			info.PacketConn.Close()
-		}
-		delete(c.connections, id)
-		closed++
-	}
-	return closed
+	return c.closeMatching(func(info *ConnectionInfo) bool { return info.User == user })
 }
 
 // IPLinesByUser 返回 用户 → 源 IP → 该 IP 正在使用的线路(入站)名。
@@ -204,27 +174,49 @@ func (c *ConnTracker) ConnCountByUser() map[string]int {
 }
 
 func (c *ConnTracker) CloseConnByInboundUsers(inbound string, keepUsers map[string]struct{}) int {
-	c.access.Lock()
-	defer c.access.Unlock()
+	return c.closeMatching(func(info *ConnectionInfo) bool {
+		if info.Inbound != inbound {
+			return false
+		}
+		_, keep := keepUsers[info.User]
+		return !keep
+	})
+}
 
-	closedCount := 0
-	for connID, connInfo := range c.connections {
-		if connInfo.Inbound != inbound {
-			continue
+// CloseConnsNotIn 一次扫描处理所有入站:keep[入站][用户名] 里没有的连接全部关掉。
+// 热更新用户时不要按入站各扫一遍——线路一多就是几十遍全表扫描,每遍都占着锁。
+func (c *ConnTracker) CloseConnsNotIn(keep map[string]map[string]struct{}) int {
+	return c.closeMatching(func(info *ConnectionInfo) bool {
+		users, ok := keep[info.Inbound]
+		if !ok {
+			return false // 这个入站不在本次下发范围内,不动它
 		}
-		if _, keep := keepUsers[connInfo.User]; keep {
-			continue
+		_, ok = users[info.User]
+		return !ok
+	})
+}
+
+// closeMatching 在锁内挑出要关的连接并从表里摘掉,出锁之后再真正 Close。
+func (c *ConnTracker) closeMatching(match func(*ConnectionInfo) bool) int {
+	c.access.Lock()
+	victims := make([]*ConnectionInfo, 0, 16)
+	for connID, info := range c.connections {
+		if match(info) {
+			victims = append(victims, info)
+			delete(c.connections, connID)
 		}
-		if connInfo.Conn != nil {
-			connInfo.Conn.Close()
-		}
-		if connInfo.PacketConn != nil {
-			connInfo.PacketConn.Close()
-		}
-		delete(c.connections, connID)
-		closedCount++
 	}
-	return closedCount
+	c.access.Unlock()
+
+	for _, info := range victims {
+		if info.Conn != nil {
+			info.Conn.Close()
+		}
+		if info.PacketConn != nil {
+			info.PacketConn.Close()
+		}
+	}
+	return len(victims)
 }
 
 func (c *ConnTracker) trackConnection(connID string, connInfo *ConnectionInfo) {

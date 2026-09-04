@@ -16,7 +16,6 @@ import (
 	"github.com/Maoyangui/m-ui/brand"
 	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/creds"
-	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hop"
 	"github.com/Maoyangui/m-ui/logger"
@@ -965,6 +964,10 @@ func (s *Server) handleSubLogs(w http.ResponseWriter, r *http.Request) {
 // ---- 重载 ----
 
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
 	if err := s.run.ReloadAll(); err != nil {
 		badRequest(w, err)
 		return
@@ -980,7 +983,6 @@ func (s *Server) reloadAll(reason string) {
 			return
 		}
 		logger.Info(reason, ",数据面已重载")
-		_ = database.Checkpoint(s.db)
 	}()
 }
 
@@ -993,7 +995,6 @@ func (s *Server) reloadUpstreams(reason string) {
 			return
 		}
 		logger.Info(reason, ",上游已更新")
-		_ = database.Checkpoint(s.db)
 	}()
 }
 
@@ -1004,6 +1005,5 @@ func (s *Server) reloadUsers(reason string) {
 			return
 		}
 		logger.Info(reason, ",用户已热更新")
-		_ = database.Checkpoint(s.db)
 	}()
 }
