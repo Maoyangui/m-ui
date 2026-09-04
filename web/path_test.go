@@ -4,6 +4,7 @@ import (
 	"net"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/Maoyangui/m-ui/database"
@@ -281,5 +282,50 @@ func TestSubTokenPolicy(t *testing.T) {
 	s.applySubTokenPolicy(&u3)
 	if u3.SubToken != "" {
 		t.Fatal("代理用户不走这条策略")
+	}
+}
+
+// 两条线路同端口一律拦下(端口全局唯一,不分服务器),而且要说清是被哪条线路占了。
+func TestLinePortConflictsWithLine(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	db.Create(&model.Line{Name: "香港1", Protocol: "hysteria2", Port: 30443, Enabled: true, NodeIds: []byte("[1]")})
+
+	for _, l := range []model.Line{
+		{Name: "新线路", Protocol: "anytls", Port: 30443, NodeIds: []byte("[1,2]")},
+		{Name: "只在 2 号机", Protocol: "anytls", Port: 30443, NodeIds: []byte("[2]")},
+		{Name: "全部机器", Protocol: "anytls", Port: 30443},
+	} {
+		err := s.validateLine(&l)
+		if err == nil || !strings.Contains(err.Error(), "香港1") {
+			t.Fatalf("%s:同端口应拦下并点名线路,实际: %v", l.Name, err)
+		}
+	}
+	// 编辑自己不算和自己冲突
+	self := model.Line{Id: 1, Name: "香港1", Protocol: "hysteria2", Port: 30443, NodeIds: []byte("[1]")}
+	if err := s.validateLine(&self); err != nil && strings.Contains(err.Error(), "线路") {
+		t.Fatalf("编辑自己不该被自己占用的端口拦下: %v", err)
+	}
+}
+
+// 设置里把默认端口 2053 明文填进去(库里原本是空 = 默认),不能被"自己占着的端口"拦下。
+func TestPanelPortUnchangedSkipsBindCheck(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	ln, err := net.Listen("tcp", ":2053") // 模拟面板自己正监听默认端口
+	if err != nil {
+		t.Skip("2053 在本机不可用,跳过")
+	}
+	defer ln.Close()
+	if err := s.validatePorts(map[string]string{"webPort": "2053"}); err != nil {
+		t.Fatalf("端口没变(默认值明文提交)不该被拦: %v", err)
 	}
 }

@@ -683,6 +683,29 @@ func (r *Runner) checkpointLoop(stop <-chan struct{}) {
 	}
 }
 
+// keepRunning 跑一个常驻循环:它 panic 了就记日志,歇一分钟再拉起来,
+// 直到 stop 关闭。只兜一次的话,证书续期这种循环崩一回就到重启前都不再工作。
+// loopRestartDelay 循环崩溃后的重启间隔,测试里会调短。
+var loopRestartDelay = time.Minute
+
+func keepRunning(name string, fn func(<-chan struct{}), stop <-chan struct{}) {
+	for {
+		func() {
+			defer func() {
+				if v := recover(); v != nil {
+					logger.Warning("后台任务 ", name, " 异常,一分钟后重启: ", v, " | ", string(debug.Stack()))
+				}
+			}()
+			fn(stop)
+		}()
+		select {
+		case <-stop:
+			return
+		case <-time.After(loopRestartDelay):
+		}
+	}
+}
+
 // Run 启动数据面并阻塞直到收到终止信号(SIGHUP 触发重载)。
 func Run(dbPath string) error {
 	logger.InitLogger(logging.INFO)
@@ -727,14 +750,7 @@ func Run(dbPath string) error {
 		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"定时备份", r.backupLoop},
 		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop},
 	} {
-		go func(name string, fn func(<-chan struct{})) {
-			defer func() {
-				if v := recover(); v != nil {
-					logger.Warning("后台任务 ", name, " 异常退出: ", v, " | ", string(debug.Stack()))
-				}
-			}()
-			fn(stopCheckpoint)
-		}(l.name, l.fn)
+		go keepRunning(l.name, l.fn, stopCheckpoint)
 	}
 	defer close(stopCheckpoint)
 

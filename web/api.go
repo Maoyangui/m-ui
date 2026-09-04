@@ -379,6 +379,11 @@ func (s *Server) validateLine(line *model.Line) error {
 			return fmt.Errorf("端口 %d 已被%s占用,换一个", line.Port, p.label)
 		}
 	}
+	// 线路之间撞端口(端口全局唯一,不分服务器):后面的 bind 探测只会说"被别的程序占用",
+	// 这里先把占着端口的那条线路点名
+	if name := s.lineOnPort(line); name != "" {
+		return fmt.Errorf("端口 %d 已被线路 %q 占用,换一个", line.Port, name)
+	}
 	// 机器上可能还跑着别的项目:端口有变化时试着监听一次,占着就别让它进库
 	// (端口没改的编辑不测——那时占着它的正是本机运行中的数据面)
 	if s.portChanged(line) && !portBindable(line.Port) {
@@ -447,15 +452,15 @@ func (s *Server) validateLine(line *model.Line) error {
 			}
 		}
 	}
-	// 名称与端口全局唯一
-	dup := s.db.Model(&model.Line{}).Where("(name = ? OR port = ?)", line.Name, line.Port)
+	// 名称全局唯一(端口在上面已按线路点名拦过)
+	dup := s.db.Model(&model.Line{}).Where("name = ?", line.Name)
 	if line.Id != 0 {
 		dup = dup.Where("id != ?", line.Id)
 	}
 	var n int64
 	dup.Count(&n)
 	if n > 0 {
-		return errors.New("线路名称或端口已被占用")
+		return errors.New("线路名称已被占用")
 	}
 	if line.UpstreamId != 0 {
 		var exists int64
@@ -993,8 +998,8 @@ func (s *Server) validatePorts(in map[string]string) error {
 		if _, active := seen[n]; !active {
 			continue
 		}
-		if raw, ok := in[key]; !ok || strings.TrimSpace(raw) == strings.TrimSpace(s.setting(key)) {
-			continue
+		if _, ok := in[key]; !ok || n == s.settingInt(key, ports[key].def) {
+			continue // 没提交或没变(包括把默认值手动填进去):占着它的正是面板自己
 		}
 		if !portBindable(n) {
 			return fmt.Errorf("%s端口 %d 已被本机其它程序占用,换一个", ports[key].label, n)
@@ -1024,6 +1029,15 @@ func (s *Server) settingOr(in map[string]string, key string) string {
 		return v
 	}
 	return s.setting(key)
+}
+
+// lineOnPort 返回占着同一端口的另一条线路名;没有返回空。
+func (s *Server) lineOnPort(line *model.Line) string {
+	var o model.Line
+	if s.db.Select("name").Where("port = ? AND id <> ?", line.Port, line.Id).First(&o).Error != nil {
+		return ""
+	}
+	return o.Name
 }
 
 // portChanged 这次保存是否动了线路端口(新建视为动过)。

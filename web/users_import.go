@@ -37,12 +37,18 @@ func (s *Server) handleUsersImport(w http.ResponseWriter, r *http.Request) {
 			os.Remove(tmpName + suffix)
 		}
 	}()
-	if _, err := io.Copy(tmp, io.LimitReader(f, 512<<20)); err != nil { // 上传文件落盘也要有上限
-		tmp.Close()
+	// 上传文件落盘也要有上限;超限要明说,而不是悄悄截断后报一个"不是 SQLite 文件"
+	const maxUpload = 512 << 20
+	n, err := io.Copy(tmp, io.LimitReader(f, maxUpload+1))
+	tmp.Close()
+	if err != nil {
 		badRequest(w, err)
 		return
 	}
-	tmp.Close()
+	if n > maxUpload {
+		badRequest(w, errors.New("文件超过 512 MB 上限"))
+		return
+	}
 
 	assign := r.FormValue("assign") != "false"
 	sum, err := importer.ImportUsersOnly(tmpName, s.db, assign)
