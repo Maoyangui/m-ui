@@ -110,7 +110,7 @@ No domain is fine: self-signed cert + IP, and every node in the subscription alr
 - Hysteria2 accepts a **port-hopping range** (e.g. `20000-30000`): the server forwards that UDP range to the line port with nftables / iptables and clients hop between ports, which sidesteps per-port UDP throttling by ISPs.
 - Every save dry-runs the full sing-box config; a failing change is rejected instead of stored.
 
-> New lines get a free five-digit port filled in automatically (still editable): it avoids ports already used by other lines and by the panel / subscription / reseller panel, and the server actually binds it once to confirm nothing else holds it. Port conflicts are blocked in both directions — a line cannot take a panel port, and the panel / subscription / reseller ports cannot be changed to one a line is using. You get the error on save instead of a service that fails to start after the next restart.
+> New lines get a free five-digit port filled in automatically (still editable): it avoids ports already used by other lines and by the panel / subscription / reseller panel, and the server binds it once to confirm it is free. Ports you type are checked the same way — **including ports held by other software on the same box**: the save is rejected if nginx, another panel or anything else already holds it (an edit that does not change the port skips the check, since the running data plane is what holds it). Conflicts are blocked in both directions: a line cannot take a panel port, and the panel / subscription / reseller ports cannot move onto a port a line or another process is using. You get the error on save instead of a service that fails to start after the next restart.
 
 ### Upstreams
 

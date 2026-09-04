@@ -377,6 +377,11 @@ func (s *Server) validateLine(line *model.Line) error {
 			return fmt.Errorf("端口 %d 已被%s占用,换一个", line.Port, p.label)
 		}
 	}
+	// 机器上可能还跑着别的项目:端口有变化时试着监听一次,占着就别让它进库
+	// (端口没改的编辑不测——那时占着它的正是本机运行中的数据面)
+	if s.portChanged(line) && !portBindable(line.Port) {
+		return fmt.Errorf("端口 %d 已被本机其它程序占用,换一个", line.Port)
+	}
 	if len(line.Options) == 0 {
 		line.Options = json.RawMessage("{}")
 	}
@@ -978,6 +983,18 @@ func (s *Server) validatePorts(in map[string]string) error {
 		}
 		seen[n] = key
 	}
+	// 端口有改动时,确认本机没有别的程序占着(没改的不测:占着它的就是自己)
+	for key, n := range got {
+		if _, active := seen[n]; !active {
+			continue
+		}
+		if raw, ok := in[key]; !ok || strings.TrimSpace(raw) == strings.TrimSpace(s.setting(key)) {
+			continue
+		}
+		if !portBindable(n) {
+			return fmt.Errorf("%s端口 %d 已被本机其它程序占用,换一个", ports[key].label, n)
+		}
+	}
 	// 反方向也要拦:把面板/订阅端口改成某条线路正在用的端口,同样会起不来
 	lineByPort := map[int]string{}
 	var lines []model.Line
@@ -1002,6 +1019,19 @@ func (s *Server) settingOr(in map[string]string, key string) string {
 		return v
 	}
 	return s.setting(key)
+}
+
+// portChanged 这次保存是否动了线路端口(新建视为动过)。
+// 端口没变的编辑不做占用检测,否则运行中的数据面自己占着自己,会误报冲突。
+func (s *Server) portChanged(line *model.Line) bool {
+	if line.Id == 0 {
+		return true
+	}
+	var cur model.Line
+	if s.db.Select("port").First(&cur, line.Id).Error != nil {
+		return true
+	}
+	return cur.Port != line.Port
 }
 
 func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {

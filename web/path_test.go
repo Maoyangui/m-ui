@@ -3,6 +3,7 @@ package web
 import (
 	"net"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/Maoyangui/m-ui/database"
@@ -204,5 +205,46 @@ func TestDetachLinesFromNode(t *testing.T) {
 	}
 	if len(lines[2].NodeIds) != 0 || !lines[2].Enabled {
 		t.Fatalf("原本就是全部机器的线路不该被动: %+v", lines[2])
+	}
+}
+
+// 机器上可能还跑着别的项目:手填的端口被别的程序占着就不该进库;
+// 但端口没改的编辑不能误报(那时占着它的正是本机运行中的数据面)。
+func TestPortBusyOnSave(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+
+	// 监听所有网卡:只绑 127.0.0.1 时 Windows 仍允许再绑 0.0.0.0,测不出冲突
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	busy := ln.Addr().(*net.TCPAddr).Port
+
+	// 新建:占用的端口要被拒
+	l := model.Line{Name: "x", Protocol: "hysteria2", Port: busy}
+	if err := s.validateLine(&l); err == nil {
+		t.Fatal("被别的程序占用的端口应被拒绝")
+	}
+	// 已有线路(端口不变)重新保存:不测占用,不能误报
+	saved := model.Line{Name: "y", Protocol: "hysteria2", Port: busy}
+	db.Create(&saved)
+	edit := saved
+	edit.Name = "y2"
+	if err := s.validateLine(&edit); err != nil {
+		t.Fatalf("端口没改的编辑不该报占用: %v", err)
+	}
+	// 设置里改端口撞上别的程序也要拒
+	if err := s.validatePorts(map[string]string{"webPort": strconv.Itoa(busy)}); err == nil {
+		t.Fatal("面板端口撞别的程序应被拒绝")
+	}
+	// 没改动的提交不测(库里没值时按默认值走,不会误报)
+	if err := s.validatePorts(map[string]string{"webDomain": "x.com"}); err != nil {
+		t.Fatalf("与端口无关的设置不该被拦: %v", err)
 	}
 }
