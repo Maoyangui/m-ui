@@ -361,6 +361,22 @@ func (s *Server) validateLine(line *model.Line) error {
 	if line.Port < 1 || line.Port > 65535 {
 		return errors.New("端口需在 1-65535 之间")
 	}
+	// 干跑校验不绑定端口,和面板/订阅/代理面板撞号要等数据面启动才炸,在这里先拦
+	for _, p := range []struct {
+		label string
+		port  int
+	}{
+		{"面板", s.settingInt("webPort", 2053)},
+		{"订阅", s.settingInt("subPort", 2056)},
+		{"代理面板", s.settingInt("resellerPort", 2054)},
+	} {
+		if p.label == "代理面板" && strings.EqualFold(s.setting("resellerEnabled"), "false") {
+			continue
+		}
+		if line.Port == p.port {
+			return fmt.Errorf("端口 %d 已被%s占用,换一个", line.Port, p.label)
+		}
+	}
 	if len(line.Options) == 0 {
 		line.Options = json.RawMessage("{}")
 	}

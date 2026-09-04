@@ -56,7 +56,8 @@ func (r *Runner) CreateBackupFile() (BackupFile, error) {
 		return BackupFile{}, err
 	}
 	name := "m-ui-" + time.Now().Format("20060102-150405") + ".zip"
-	f, err := os.Create(filepath.Join(dir, name))
+	// 备份里有全部用户凭据与证书私钥,按 0600 建文件(目录已是 0700,再加一层)
+	f, err := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return BackupFile{}, err
 	}

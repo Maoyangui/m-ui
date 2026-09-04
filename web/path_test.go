@@ -87,3 +87,29 @@ func TestUpstreamReservedNames(t *testing.T) {
 		t.Errorf("正常名称应通过: %v", err)
 	}
 }
+
+// 线路端口和面板/订阅/代理面板撞号:干跑不绑定端口,要等数据面启动才炸,保存时就得拦。
+func TestLinePortConflictsWithPanel(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	for _, port := range []int{2053, 2054, 2056} {
+		l := model.Line{Name: "x", Protocol: "hysteria2", Port: port}
+		if err := s.validateLine(&l); err == nil {
+			t.Errorf("端口 %d 应被拒绝", port)
+		}
+	}
+	// 关掉代理面板后 2054 可以给线路用
+	db.Create(&model.Setting{Key: "resellerEnabled", Value: "false"})
+	l := model.Line{Name: "x", Protocol: "hysteria2", Port: 2054}
+	if err := s.validateLine(&l); err != nil {
+		t.Errorf("代理面板关闭后 2054 应可用: %v", err)
+	}
+	ok := model.Line{Name: "y", Protocol: "hysteria2", Port: 30443}
+	if err := s.validateLine(&ok); err != nil {
+		t.Errorf("普通端口应通过: %v", err)
+	}
+}
