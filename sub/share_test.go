@@ -214,6 +214,9 @@ func TestProfileTitleEncoding(t *testing.T) {
 	if h["Profile-Title"] != "base64:5YaS5aSu5Lya56S+" {
 		t.Fatalf("中文标题应 base64 编码: %q", h["Profile-Title"])
 	}
+	if !strings.HasPrefix(h["Content-Disposition"], "attachment;filename*=UTF-8''") { // 分号后不能有空格
+		t.Fatalf("Content-Disposition 格式不对: %q", h["Content-Disposition"])
+	}
 	if !strings.Contains(h["Content-Disposition"], "filename*=UTF-8''") {
 		t.Fatalf("应带 RFC 5987 文件名: %q", h["Content-Disposition"])
 	}

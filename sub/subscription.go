@@ -118,14 +118,16 @@ func contentDisposition(title, fallback string) string {
 		name = "subscription"
 	}
 	if isASCII(name) {
-		return fmt.Sprintf("attachment; filename=%q", strings.Map(func(r rune) rune {
+		return fmt.Sprintf("attachment;filename=%q", strings.Map(func(r rune) rune {
 			if r == 34 || r == 92 || r < 32 {
 				return -1
 			}
 			return r
 		}, name))
 	}
-	return "attachment; filename*=UTF-8''" + url.PathEscape(name)
+	// 分号后不留空格:有客户端按 ";" 切分后不去空格,匹配不到 " filename*=",
+	// 于是回退成域名或用户名(Shadowrocket、Clash Verge 都踩这个)
+	return "attachment;filename*=UTF-8''" + url.PathEscape(name)
 }
 
 func isASCII(s string) bool {

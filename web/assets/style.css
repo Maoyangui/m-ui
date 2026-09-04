@@ -337,3 +337,5 @@ table.grid.conns td.ell { max-width: 14rem; overflow: hidden; text-overflow: ell
 .rs-users .ell { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; }
 .rs-users .rs-ips td { padding-top: 0; }
 .rs-users .ip-list .ip { font-size: .76rem; padding: .2rem .45rem; }
+/* 代理详情:线路多时不把抽屉撑长,超出就在小框里滚 */
+.rs-lines { max-height: 4.6rem; overflow: auto; }

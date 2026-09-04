@@ -90,7 +90,8 @@ async function showDetail(id) {
         <dt>${t('rs.speed')}</dt><dd class="num">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'} / ${r.speedDown || '∞'} Mbps` : t('common.unlimited')}</dd>
         <dt>${t('user.expiry')}</dt><dd>${r.expiry ? fmtDay(r.expiry) : t('user.never')}</dd>
         <dt>${t('rs.online')}</dt><dd class="num">${r.online}</dd>
-        <dt>${t('rs.lines')}</dt><dd><div class="chips">${(r.lineIds || []).map(lid => {
+        <dt>${t('rs.lines')} <span class="muted small">${(r.lineIds || []).length}</span></dt>
+        <dd><div class="chips rs-lines">${(r.lineIds || []).map(lid => {
           const l = state.lines.find(x => x.id === lid); return l ? `<span class="chip">${esc(l.name)}</span>` : '';
         }).join('') || `<span class="muted small">${t('common.none')}</span>`}</div></dd>
         <dt>${t('rs.lastLogin')}</dt><dd class="mono small">${esc(r.lastLogins || '—')}</dd>
