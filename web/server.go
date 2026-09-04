@@ -169,7 +169,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"sublogs", s.auth(s.handleSubLogs))
 	mux.HandleFunc(api+"password", s.auth(s.handlePassword))
 	mux.HandleFunc(api+"reload", s.auth(s.handleReload))
-	mux.HandleFunc(api+"update", s.auth(s.masterOnly(s.handleUpdate)))
+	mux.HandleFunc(api+"update", s.auth(s.handleUpdate)) // 副机也是一份完整安装,自己更新自己
 	mux.HandleFunc(api+"stats", s.auth(s.handleStats))
 	mux.HandleFunc(api+"stats/top", s.auth(s.handleStatsTop))
 	mux.HandleFunc(api+"onlines", s.auth(s.handleOnlines))

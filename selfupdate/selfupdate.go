@@ -145,15 +145,15 @@ func Apply(ctx context.Context, tag, binPath string, logf func(string, ...interf
 		return err
 	}
 
-	if want, err := sha256Of(ctx, base+"SHA256SUMS", asset); err != nil {
-		logf("提示:未取到 SHA256SUMS,跳过校验(%v)", err)
-	} else {
-		got := sha256.Sum256(body)
-		if hex.EncodeToString(got[:]) != want {
-			return fmt.Errorf("校验失败:下载的文件与 Release 的 SHA256 不一致,已中止")
-		}
-		logf("SHA256 校验通过")
+	want, err := sha256Of(ctx, base+"SHA256SUMS", asset)
+	if err != nil {
+		return fmt.Errorf("取不到这个版本的 SHA256SUMS,无法校验下载内容,已中止: %w", err)
 	}
+	got := sha256.Sum256(body)
+	if hex.EncodeToString(got[:]) != want {
+		return fmt.Errorf("校验失败:下载的文件与 Release 的 SHA256 不一致,已中止")
+	}
+	logf("SHA256 校验通过")
 
 	bin, err := extractBinary(body)
 	if err != nil {

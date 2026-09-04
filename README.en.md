@@ -7,14 +7,14 @@
 
 ## What it is
 
-m-ui is a self-hosted proxy panel: one binary, one database file, sing-box embedded. Lines, users, subscriptions, certificates, backups, multiple servers and routine maintenance are all managed from the web UI.
+m-ui is a self-hosted proxy panel: **one binary, one database file**, with sing-box embedded. Lines, users, subscriptions, certificates, backups and every server you own are managed from the web UI.
 
-What makes it different from the usual panels:
+Four things it does differently:
 
-- **Line model**: a *line* is "inbound protocol + port → upstream". No separate inbound / outbound / routing tables to keep in sync.
-- **Config changes don't drop users**: every save is dry-run through sing-box first, so a broken config never reaches the database. User and upstream changes are hot-swapped; only line changes restart the data plane If a config passes validation but still fails to start — say another process grabbed the port in the meantime — m-ui rolls back to the last working one instead of leaving everyone offline.
-- **One master, many nodes**: the master pushes lines / upstreams / users to any number of node servers, collects their traffic and enforces quotas centrally. Subscriptions list every line once per server and clients pick the lowest-latency entry automatically.
-- **Ops built in**: Let's Encrypt, Cloudflare WARP, kernel tuning, backup / restore, a migration wizard, Telegram alerts, two-factor login and an external API.
+- **A line is one thing** — inbound protocol + port → where it exits. No separate inbound / outbound / routing tables to keep in sync.
+- **Saving can't break you** — every save is dry-run through sing-box first, so a broken config never reaches the database. Users and upstreams are hot-swapped; only line changes restart the data plane, and if the new config passes validation yet still fails to start (say another process grabbed the port), m-ui rolls back to the last working one.
+- **One master, many nodes** — the master pushes lines and users to any number of nodes, collects their traffic and enforces quota centrally. Subscriptions list every line once per server, so clients pick the lowest-latency entry themselves.
+- **Ops without leaving the panel** — Let's Encrypt issuance and renewal, Cloudflare WARP, kernel tuning, backup / restore, a migration wizard, Telegram alerts, two-factor login and an external API.
 
 Good for personal use, small teams, or anyone who needs one place to manage users across several servers.
 
@@ -40,68 +40,179 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 
 ## Architecture
 
-One process runs three things: the **panel** (for you), the **subscription server** (for clients), and the **data plane** (embedded sing-box, where traffic actually flows). They share one SQLite file, so a change takes effect immediately.
+One binary runs four things: the **panel** (admin UI and API), the **subscription server** (where clients fetch their config), the **data plane** (embedded sing-box, where traffic actually flows) and **background work** (stats, quota enforcement, health checks, sync). They share one SQLite file, so a click in the panel is visible to the subscription server and the data plane immediately.
+
+### What runs on one server
 
 ```mermaid
 flowchart LR
-  A[Admin browser] -->|:2053 /app| P[Panel HTTP]
-  R[Reseller browser] -->|:2054 /dl| D[Reseller panel<br/>same frontend · scoped session]
-  C[Clients<br/>Clash / sing-box / Shadowrocket] -->|:2056 /sub| S[Subscription server]
-  C -->|proxy traffic| X[Data plane<br/>embedded sing-box]
-  P --> DB[(SQLite<br/>m-ui.db)]
-  D --> DB
-  S --> DB
-  X --- DB
-  X -->|egress| U[Upstreams / WARP / direct]
+  subgraph WHO["Who connects"]
+    direction TB
+    ADM["Admin browser"]
+    DLR["Reseller browser"]
+    APP["User's client<br/>Clash · sing-box · Shadowrocket"]
+  end
+
+  subgraph PROC["One m-ui process"]
+    direction TB
+    WEB["Panel<br/>sessions · API · reseller scope"]
+    SUB["Subscription server<br/>landing page · 3 formats · sharing"]
+    CORE["Data plane<br/>embedded sing-box"]
+    BG["Background<br/>stats · quota · probes · sync"]
+  end
+
+  ADM -->|":2053 /app/"| WEB
+  DLR -->|":2054 /dl/"| WEB
+  APP -->|":2056 /sub/"| SUB
+  APP ==>|"line ports<br/>the actual traffic"| CORE
+  WEB -.->|"hot user update / hot outbound swap / restart"| CORE
+  CORE -.->|"traffic deltas · online IPs"| BG
+  WEB --> DB[("m-ui.db<br/>SQLite · WAL")]
+  SUB --> DB
+  BG --> DB
+  CORE ==> OUT["Exit<br/>direct · WARP · upstream"]
+
+  classDef box fill:#eff6ff,stroke:#2563eb,color:#1e3a8a
+  classDef store fill:#f8fafc,stroke:#64748b,color:#334155
+  class WEB,SUB,CORE,BG box
+  class DB,OUT store
 ```
 
-**What happens when you save** — the panel never edits a running sing-box in place:
+> Ports and paths are all configurable; the values above are the defaults. The panel and the reseller panel are the same frontend — the session scope decides what you can see.
+
+### What happens when you save
+
+The panel never edits a running sing-box. It hands the whole new config to sing-box first; only if that parses does anything reach the database or the data plane.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant W as Panel
+  participant D as SQLite
+  participant V as sing-box parser
+  participant C as Data plane
+
+  B->>W: Save a line / user / upstream
+  W->>W: Validate fields + check the port<br/>(including ports held by other software)
+  W->>D: BEGIN IMMEDIATE and write
+  W->>V: Render the full config from the DB and dry-run it
+  alt Does not parse
+    V--)W: error
+    W->>D: rollback
+    W--)B: Rejected with a reason — nothing in production moved
+  else Parses
+    V--)W: ok
+    W->>D: commit
+    W->>C: Reload, graded by what changed
+    Note over W,C: user → swap the inbound user table, nobody else drops<br/>upstream → hot-swap the outbound, no restart<br/>line → restart the data plane, roll back if it fails to come up
+    W--)B: Saved
+  end
+```
+
+### How a subscription request is answered
 
 ```mermaid
 flowchart LR
-  E[Save a line / user] --> V{Dry-run the whole<br/>config through sing-box}
-  V -- fails --> K[Reject the save<br/>old config keeps serving]
-  V -- passes --> W[(Write to DB)]
-  W --> H{What changed}
-  H -- users --> HU[Hot-swap inbound users<br/>nobody else is dropped]
-  H -- upstreams --> HO[Hot-swap outbounds<br/>no restart]
-  H -- lines --> HR[Restart data plane<br/>roll back if it fails to start]
+  Q["GET /sub/&lt;key&gt;"] --> WHO{"Whose key is this"}
+  WHO -->|"username"| U["User found"]
+  WHO -->|"random token<br/>reseller users / username-as-URL turned off"| U
+  WHO -->|"temporary share token"| S["Same user<br/>but a second credential set"]
+  WHO -->|"no match · disabled · reseller expired"| E["404"]
+  U --> UA{"Check the User-Agent"}
+  UA -->|"browser"| P["Landing page<br/>usage · one-tap import · QR<br/>client downloads · sharing"]
+  UA -->|"proxy client"| F{"Which format"}
+  S --> F
+  F -->|"default"| F1["Universal links (base64)"]
+  F -->|"?format=clash"| F2["Clash / Mihomo YAML"]
+  F -->|"?format=json"| F3["Full sing-box config"]
+
+  classDef hit fill:#ecfdf5,stroke:#16a34a,color:#14532d
+  classDef bad fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
+  class U,S hit
+  class E bad
 ```
 
-**Multi-server** is one master, any number of nodes. The master does the accounting and pushes config; nodes just forward.
+> All three formats build nodes the same way: **the lines assigned to the user × the servers each line is deployed on**, plus external nodes and external subscriptions. Add a server and every subscription grows the matching nodes on its own.
+
+### Master and nodes
+
+The master does the accounting and pushes config; a node only forwards. Nodes never judge quota themselves, so losing the link never cuts users off by mistake.
 
 ```mermaid
-flowchart LR
-  M[Master<br/>panel · subscriptions · quota] -->|snapshot every 5s<br/>lines/upstreams/users/creds| N1[Node A]
-  M -->|same| N2[Node B]
-  N1 -->|traffic deltas · online IPs| M
-  N2 -->|report| M
-  M -->|other machines' online IPs| N1
-  M -->|device counts deduped across servers| N2
+sequenceDiagram
+  autonumber
+  participant M as Master
+  participant N as Node
+
+  rect rgb(239, 246, 255)
+    Note over M,N: every 5 seconds
+    M->>N: Push a snapshot: lines / upstreams / users / credentials / resellers + a config revision
+    N->>N: Same revision → do nothing, changed → reload the data plane
+    M->>N: Pull report
+    N--)M: Traffic since the last cursor + online IPs
+  end
+  M->>M: Roll up usage · union device counts across servers · judge quota and expiry
+  M->>N: Users over quota, expired or disabled simply aren't in the next snapshot
+  Note over M,N: A disconnected node keeps forwarding,<br/>when it returns, the cursor fills the gap without double counting
 ```
 
-**The data model** is four main tables:
+### Data model
 
 ```mermaid
-flowchart TB
-  L[Line<br/>protocol+port → upstream] --- UL{{user ↔ line}}
-  UL --- U[User<br/>quota · expiry · devices · speed]
-  U --> SUB[Subscription<br/>link / clash / sing-box]
-  L --> UP[Upstream<br/>egress]
-  RS[Reseller<br/>quota holder + own panel] -->|owns| U
-  RS -->|granted| L
-  PL[Plan<br/>template] -.applied to.-> U
+erDiagram
+  RESELLER ||--o{ USER : "owns"
+  RESELLER ||--o{ PLAN : "own plans"
+  RESELLER }o--o{ LINE : "granted lines"
+  USER }o--o{ LINE : "user_lines"
+  PLAN ||..o{ USER : "applied on create"
+  LINE }o--|| UPSTREAM : "exits through"
+  LINE }o--o{ NODE : "deployed on"
+  USER ||--o{ SUBLOG : "subscription fetches"
+
+  USER {
+    string name "subscription key · inbound credential name"
+    json credentials "password / UUID per protocol"
+    int64 volume_used "quota and usage"
+    int64 expiry "expiry date"
+    int device_limit "simultaneous devices"
+  }
+  LINE {
+    string protocol "hysteria2 / vless / ..."
+    int port "listen port"
+    json tls_transport "TLS and transport"
+    json node_ids "servers it is deployed on"
+  }
+  RESELLER {
+    int64 quota "traffic / bandwidth / device budget"
+    int64 expiry "expiry date"
+    json page "own profile title and landing copy"
+  }
 ```
 
-| Component | Responsibility | Code |
+### Background cadence
+
+| Every | What happens | Code |
 |---|---|---|
-| Panel | Admin UI and API, reseller panel, external API | `web/` |
-| Render | Lines → sing-box config, dry-run before save | `render/` `core/validate.go` |
-| Data plane | Embedded sing-box, traffic stats, connection tracking, limits | `core/` |
-| Subscriptions | Three formats, landing page, temporary sharing | `sub/` |
-| Sync | Snapshot push, traffic collection, online aggregation | `hub/` |
-| Orchestration | Process lifecycle, certificates, backups, external nodes | `runner/` |
-| Scheduled | Stats, quota enforcement, cleanup | `jobs/` `monitor/` |
+| 10s | Read traffic and live connections from the data plane, write per user / line / upstream stats | `jobs/` |
+| 1m | Judge quota, expiry and periodic resets — disable and kick where needed; data-plane watchdog | `jobs/` `monitor/` |
+| 5s | Master pushes snapshots to nodes and pulls back traffic and online IPs | `hub/` |
+| 10m | WAL checkpoint, so the live .db is always safe to copy | `runner/` |
+| 6h | Check whether a newer release exists (check only, never auto-install) | `selfupdate/` |
+| daily | Prune old time series, renew certificates, send the daily report | `jobs/` `runner/` |
+
+### Code layout
+
+| Directory | Responsibility |
+|---|---|
+| `web/` | Panel and API, reseller panel and scoping, external API, embedded frontend (zero-build ES modules) |
+| `sub/` | The three subscription formats, landing page, client-download page, temporary sharing |
+| `render/` `core/` | Lines → sing-box config and its dry-run check; embedded data plane, traffic and connection tracking |
+| `hub/` | Snapshot push, traffic reclaim, online aggregation between master and nodes |
+| `runner/` | Process orchestration, the three reload tiers and rollback, certificates, backups, external nodes |
+| `jobs/` `monitor/` | Stats, quota enforcement, cleanup, upstream probing and alerts |
+| `database/` | Models, SQLite open and migration |
+| `selfupdate/` `deploy/` | Version check and in-place update, install script |
 
 ## Installation
 
@@ -218,6 +329,7 @@ Hand part of the selling to someone else: create a reseller on the Resellers pag
 - The name clients show comes from Settings → Subscription → "Profile title" (falling back to the landing-page title, then the remark, then the username). It goes out on both `Content-Disposition` and `Profile-Title`, encoded the standard way for non-ASCII. Clients that re-read the title on every update (nextin, sing-box) pick it up on refresh; Shadowrocket and Clash Verge name a profile **when it is added** and never rename it — add it through the landing page's one-tap import (which carries the title) or re-add it.
 - Opening the link in a browser shows a landing page: usage, expiry, one-tap import for each client, QR codes, custom notice and support contact.
 - Client downloads: a small download arrow next to "Import into an app" opens a separate page with per-OS install links — iOS / iPadOS / Apple TV (Nextin, with a note on switching App Store region), Android / Android TV (Clash Meta for Android), Windows / macOS / Linux (Clash Verge Rev, plus a FlClash AppImage for Linux). Every tile carries the official direct link, a China-friendly mirror and an "all releases" link. The page holds no user data, so it can be forwarded as-is; reseller users get the same page.
+- A dead subscription link no longer means a blank 404: browsers get a short page — "Subscription unavailable, it may be out of traffic or past its expiry date" — followed by the contact details and notice that apply (reseller users see the reseller’s own, everyone else the master’s). Out of quota, expired, disabled, reseller expired or simply a wrong link all land there; proxy clients still get a plain 404.
 - Temporary sharing: from the landing page a user can create one random link to lend their subscription, one per user. The link carries the same nodes but a **separate set of credentials** registered under the owner's name, so traffic, devices, speed limits and expiry all count against the owner. Cancelling (or regenerating) pulls those credentials immediately and drops the connections, so nodes already imported by the borrower stop working too. Shared links serve the subscription only, never the landing page. Settings → Subscription page turns the whole thing off.
 - Node addresses default to the **server IP** with the domain only as SNI, so a poisoned local DNS on the client cannot break connectivity; switch to domain in Settings if you prefer.
 - With several servers each line appears once per server, suffixed with the server name; servers with a traffic ratio other than 1 get a tag such as `x2`.

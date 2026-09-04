@@ -45,13 +45,15 @@ function statusCell(n) {
 function shortErr(raw) {
   const e = String(raw || '');
   if (!e) return t('node.errUnknown');
+  // 用整词匹配状态码:端口 4031、IP 段里都可能出现 "403" 这三个字
   const map = [
-    ['context deadline exceeded', 'node.errTimeout'], ['timeout', 'node.errTimeout'],
-    ['connection refused', 'node.errRefused'], ['no such host', 'node.errDns'],
-    ['certificate', 'node.errCert'], ['x509', 'node.errCert'],
-    ['401', 'node.errToken'], ['403', 'node.errToken'],
+    [/context deadline exceeded|timeout/, 'node.errTimeout'],
+    [/connection refused/, 'node.errRefused'],
+    [/no such host|dns/, 'node.errDns'],
+    [/certificate|x509/, 'node.errCert'],
+    [/\b40[13]\b/, 'node.errToken'],
   ];
-  for (const [needle, key] of map) if (e.toLowerCase().includes(needle)) return t(key);
+  for (const [re, key] of map) if (re.test(e.toLowerCase())) return t(key);
   const tail = e.split(': ').pop().trim();
   return tail.length > 48 ? tail.slice(0, 48) + '…' : tail;
 }

@@ -155,11 +155,12 @@ let updateCheckedAt = 0;
 async function refreshUpdateBadge() {
   const dot = document.getElementById('update-dot');
   if (!dot || isReseller()) return;
-  if (updateState && Date.now() - updateCheckedAt < 1800000) return; // 服务端本就缓存 6 小时,前端半小时问一次足够
+  // 服务端本就缓存 6 小时:成功后半小时再问,失败(副机、网络不通)5 分钟内不重试
+  if (Date.now() - updateCheckedAt < (updateState ? 1800000 : 300000)) return;
   try {
     updateState = await get('update');
-    updateCheckedAt = Date.now();
-  } catch { return; }
+  } catch { updateCheckedAt = Date.now(); return; }
+  updateCheckedAt = Date.now();
   dot.hidden = !updateState.hasUpdate;
   if (updateState.hasUpdate) {
     dot.innerHTML = ICONS.update;

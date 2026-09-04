@@ -55,16 +55,18 @@ case "$SRC" in
   http://*|https://*) echo "下载 $SRC"; curl -fL --progress-bar "$SRC" -o "$TMP";;
   *) cp "$SRC" "$TMP";;
 esac
-# 官方 Release:用同一个 Release 里的 SHA256SUMS 校验,校验通过再解包执行
-if [ -n "${SUMS:-}" ] && command -v sha256sum >/dev/null; then
+# 官方 Release:用同一个 Release 里的 SHA256SUMS 校验,通不过就不装
+# (能拦住 SHA256SUMS 这个请求的人也能换掉二进制,所以取不到摘要同样中止;
+#  确实需要绕过时显式 MUI_SKIP_VERIFY=1)
+if [ -n "${SUMS:-}" ] && [ "${MUI_SKIP_VERIFY:-}" != "1" ]; then
+  if command -v sha256sum >/dev/null; then SUM="sha256sum"
+  elif command -v shasum >/dev/null; then SUM="shasum -a 256"
+  else echo "没有 sha256sum,无法校验下载内容,已中止(装 coreutils 后重试)"; rm -f "$TMP"; exit 1; fi
   WANT="$(curl -fsSL "$SUMS" 2>/dev/null | grep " m-ui-linux-$ARCH.tar.gz$" | awk '{print $1}')"
-  if [ -n "$WANT" ]; then
-    GOT="$(sha256sum "$TMP" | awk '{print $1}')"
-    [ "$WANT" = "$GOT" ] || { echo "校验失败:下载的文件与 Release 的 SHA256 不一致,已中止"; rm -f "$TMP"; exit 1; }
-    echo "SHA256 校验通过"
-  else
-    echo "提示:未取到 SHA256SUMS,跳过校验"
-  fi
+  [ -n "$WANT" ] || { echo "取不到这个版本的 SHA256SUMS,无法校验,已中止"; rm -f "$TMP"; exit 1; }
+  GOT="$($SUM "$TMP" | awk '{print $1}')"
+  [ "$WANT" = "$GOT" ] || { echo "校验失败:下载的文件与 Release 的 SHA256 不一致,已中止"; rm -f "$TMP"; exit 1; }
+  echo "SHA256 校验通过"
 fi
 # Releases 里是 tar.gz(内含单文件 m-ui),也接受裸二进制
 if file "$TMP" 2>/dev/null | grep -qi gzip || [[ "$SRC" == *.tar.gz ]]; then

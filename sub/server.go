@@ -266,7 +266,7 @@ func (s *Server) handle() http.HandlerFunc {
 			if s.db.Where("sub_token = ? AND enabled = ?", name, true).First(&user).Error != nil {
 				if !s.shareEnabled() || s.db.Where("share_token = ? AND enabled = ?", name, true).First(&user).Error != nil {
 					s.log(r, name, false, 404)
-					http.NotFound(w, r)
+					s.serveNotFound(w, r, name) // 浏览器打开时给一页说明(多半是用完/到期被停用)
 					return
 				}
 				shared = true // 共享地址:只发原始订阅,不出订阅页/二维码,也不能改共享状态
@@ -280,7 +280,7 @@ func (s *Server) handle() http.HandlerFunc {
 		rs := s.resellerOf(user) // 代理用户:落地页文案与开关按代理的来
 		if rs != nil && (!rs.Enabled || (rs.Expiry > 0 && rs.Expiry < time.Now().Unix())) {
 			s.log(r, user.Name, shared, 404)
-			http.NotFound(w, r) // 代理被停用或到期,名下用户的订阅一并停
+			s.serveNotFound(w, r, name) // 代理被停用或到期,名下用户的订阅一并停
 			return
 		}
 		if shared && (wantQR || r.Method == http.MethodPost) {

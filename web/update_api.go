@@ -56,11 +56,8 @@ func (s *Server) checkUpdate(force bool) selfupdate.Info {
 	return info
 }
 
-// StartUpdateWatch 启动时查一次,之后每 6 小时查一次(副机不查,它跟着主机走)。
+// StartUpdateWatch 启动时查一次,之后每 6 小时查一次。
 func (s *Server) StartUpdateWatch() {
-	if s.run.IsNode() {
-		return
-	}
 	go func() {
 		time.Sleep(20 * time.Second) // 让面板先起来,别和启动抢网络
 		for {
