@@ -194,3 +194,12 @@ func TestResellerUserSubscription(t *testing.T) {
 		t.Fatalf("关掉订阅页后应直接给订阅,得 %d", w.Code)
 	}
 }
+
+// 老库升级上来的行,新列是 NULL:SQL 里 NULL = 0 不成立,订阅必须照样按用户名找得到人。
+func TestLegacyNullResellerIdStillResolves(t *testing.T) {
+	s, db := shareServer(t)
+	db.Exec("UPDATE users SET reseller_id = NULL, sub_token = NULL WHERE id = 1")
+	if w := doReq(s, "GET", "/sub/alice", "curl/8.4.0"); w.Code != 200 {
+		t.Fatalf("历史用户的订阅不能 404,得 %d", w.Code)
+	}
+}
