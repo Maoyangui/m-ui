@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="{{if eq .Lang "zh"}}zh-CN{{else}}en{{end}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<title>{{if eq .Lang "zh"}}客户端下载{{else}}Get a client{{end}} · {{.Title}}</title>
+<link rel="icon" href="{{.Icon}}" type="image/svg+xml">
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--text:#1a202c;--muted:#64748b;--border:#e2e8f0;--primary:#2563eb;--soft:#eff6ff}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--text:#e6e9ef;--muted:#8b95a5;--border:#2a313b;--primary:#3b82f6;--soft:#1e293b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:560px;margin:0 auto;padding:1.25rem 1rem 3rem}
+.head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:1rem}
+.head h1{margin:0;font-size:1.15rem}
+.head a{color:var(--muted);text-decoration:none;font-size:.82rem}.head a:hover{color:var(--primary)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.1rem 1.15rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem}
+@media(max-width:520px){.tiles{grid-template-columns:repeat(3,1fr)}}
+.tile{display:flex;flex-direction:column;align-items:center;gap:.4rem;padding:.85rem .3rem;border:1px solid var(--border);border-radius:12px;background:var(--card);color:var(--text);font:inherit;cursor:pointer;transition:border-color .15s,background .15s}
+.tile:hover{border-color:var(--primary)}
+.tile svg{width:26px;height:26px;display:block}
+.tile span{font-size:.7rem;line-height:1.25;text-align:center;color:var(--muted);word-break:keep-all}
+.tile[aria-expanded="true"]{border-color:var(--primary);background:var(--soft)}
+.tile[aria-expanded="true"] span{color:var(--primary)}
+.panel{margin-top:.9rem;padding-top:.9rem;border-top:1px dashed var(--border)}
+.panel h2{margin:0 0 .35rem;font-size:.95rem}
+.panel p{margin:0 0 .75rem;color:var(--muted);font-size:.86rem}
+.dls{display:flex;flex-wrap:wrap;gap:.5rem}
+.dl{display:inline-flex;align-items:center;gap:.35rem;text-decoration:none;border:1px solid var(--border);border-radius:9px;padding:.42rem .7rem;font-size:.82rem;color:var(--text);background:var(--card);white-space:nowrap}
+.dl:hover{border-color:var(--primary)}
+.dl.primary{background:var(--primary);border-color:var(--primary);color:#fff}.dl.primary:hover{filter:brightness(1.08)}
+.dl.muted{color:var(--muted);font-size:.78rem;padding:.42rem .6rem}
+.dl svg{width:13px;height:13px}
+.foot{text-align:center;color:var(--muted);font-size:.76rem;margin-top:1.2rem}
+.js .panel[hidden]{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <h1>{{if eq .Lang "zh"}}客户端下载{{else}}Get a client{{end}}</h1>
+    <a href="{{.Back}}">{{if eq .Lang "zh"}}← 返回订阅页{{else}}← Back to subscription{{end}}</a>
+  </div>
+  <div class="card">
+    <div class="tiles">
+      {{range .Tiles}}<button class="tile" type="button" data-key="{{.Key}}" aria-expanded="false" aria-controls="p-{{.Key}}">{{.Icon}}<span>{{.OS}}</span></button>{{end}}
+    </div>
+    {{range .Tiles}}
+    <div class="panel" id="p-{{.Key}}" data-key="{{.Key}}" hidden>
+      <h2>{{.App}}</h2>
+      <p>{{.Desc}}</p>
+      <div class="dls">
+        {{range .Links}}<a class="dl{{if .Primary}} primary{{end}}{{if .Muted}} muted{{end}}" href="{{.Href}}" target="_blank" rel="noopener noreferrer">{{.Text}}</a>{{end}}
+      </div>
+    </div>
+    {{end}}
+  </div>
+  <p class="foot">{{if eq .Lang "zh"}}下载均来自各客户端官方发布页{{else}}All downloads come from each client&#39;s official release page{{end}} · {{.Year}}</p>
+</div>
+<script>
+// 没有 JS 时五块说明全部展开(照样能用);有 JS 就按系统自动展开一块,点图标切换。
+document.body.classList.add('js');
+var tiles = [].slice.call(document.querySelectorAll('.tile'));
+var panels = [].slice.call(document.querySelectorAll('.panel'));
+function show(key) {
+  panels.forEach(function (p) { p.hidden = p.dataset.key !== key; });
+  tiles.forEach(function (t) { t.setAttribute('aria-expanded', String(t.dataset.key === key)); });
+}
+tiles.forEach(function (t) {
+  t.addEventListener('click', function () {
+    show(t.getAttribute('aria-expanded') === 'true' ? '' : t.dataset.key);
+  });
+});
+var ua = navigator.userAgent;
+var guess = /iPhone|iPad|iPod/.test(ua) ? 'ios'
+  : /Android/.test(ua) ? 'android'
+  : /Macintosh|Mac OS X/.test(ua) ? 'macos'
+  : /Windows/.test(ua) ? 'windows'
+  : /Linux|X11/.test(ua) ? 'linux' : 'ios';
+show(guess);
+</script>
+</body>
+</html>

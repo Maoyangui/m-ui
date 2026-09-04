@@ -33,6 +33,8 @@ button{border:1px solid var(--border);background:var(--card);color:var(--text);b
 button.primary{background:var(--primary);border-color:var(--primary);color:#fff}button.primary:hover{filter:brightness(1.08)}
 button.danger{color:var(--danger)}button.danger:hover{border-color:var(--danger)}
 .hint{color:var(--muted);font-size:.8rem;margin:.5rem 0 0}
+.cardhead{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-bottom:.7rem}.cardhead h2{margin:0}
+.getapp{display:inline-flex;align-items:center;gap:.25rem;color:var(--muted);text-decoration:none;font-size:.78rem;white-space:nowrap}.getapp:hover{color:var(--primary)}.getapp svg{width:14px;height:14px}
 .share form{display:flex;align-items:center;gap:.7rem;margin:.6rem 0 0}.share form .hint{margin:0}
 .qrs{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:.9rem}.qrs figure{margin:0;text-align:center;font-size:.78rem;color:var(--muted)}.qrs img{width:150px;height:150px;border-radius:10px;border:1px solid var(--border);background:#fff;display:block;margin-bottom:.3rem}
 .lines{display:flex;flex-direction:column;gap:.35rem}.line{display:flex;justify-content:space-between;align-items:center;font-size:.88rem;padding:.45rem .6rem;border-radius:8px;background:var(--bg)}.line .tags{display:flex;gap:.3rem}
@@ -60,7 +62,7 @@ button.danger{color:var(--danger)}button.danger:hover{border-color:var(--danger)
   {{if .Notice}}<div class="card"><h2>{{if eq .Lang "zh"}}公告{{else}}Notice{{end}}</h2><div class="notice">{{.Notice}}</div></div>{{end}}
 
   <div class="card">
-    <h2>{{if eq .Lang "zh"}}一键导入{{else}}Import into an app{{end}}</h2>
+    <div class="cardhead"><h2>{{if eq .Lang "zh"}}一键导入{{else}}Import into an app{{end}}</h2><a class="getapp" href="{{.ClientsURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10"/><path d="M8.5 10.5 12 14l3.5-3.5"/><path d="M5 19h14"/></svg>{{if eq .Lang "zh"}}客户端下载{{else}}Get a client{{end}}</a></div>
     <div class="apps">{{range .Imports}}<a class="app" href="{{.Href}}"><b>{{.Name}}</b><span>{{.Hint}}</span></a>{{end}}</div>
     <p class="hint">{{if eq .Lang "zh"}}其它客户端:复制下方地址,在 App 里"添加订阅"粘贴即可。Clash 类用 Clash 地址;sing-box(SFA / SFI)用 sing-box 地址;nextin、Surge、Quantumult X、Loon、Karing 等用通用地址。{{else}}Other apps: copy a link below and paste it into the app's "add subscription". Clash-family apps take the Clash link; sing-box (SFA / SFI) takes the sing-box link; nextin, Surge, Quantumult X, Loon, Karing and the rest take the universal link.{{end}}</p>
   </div>

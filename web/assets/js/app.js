@@ -151,11 +151,14 @@ function renderRole() {
 // 面板自己去查有没有新版本(每 6 小时一次,结果缓存在服务端),有就在版本号旁边亮个小箭头。
 // 更新只替换二进制再重启服务:数据库、证书、备份、设置都不动,用户与订阅地址不变。
 let updateState = null;
+let updateCheckedAt = 0;
 async function refreshUpdateBadge() {
   const dot = document.getElementById('update-dot');
   if (!dot || isReseller()) return;
+  if (updateState && Date.now() - updateCheckedAt < 1800000) return; // 服务端本就缓存 6 小时,前端半小时问一次足够
   try {
     updateState = await get('update');
+    updateCheckedAt = Date.now();
   } catch { return; }
   dot.hidden = !updateState.hasUpdate;
   if (updateState.hasUpdate) {

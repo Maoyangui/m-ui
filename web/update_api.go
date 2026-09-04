@@ -20,9 +20,11 @@ import (
 // 更新只替换 /usr/local/bin/m-ui 再重启服务,数据库、证书、备份、设置一概不动。
 
 var (
-	updateMu   sync.Mutex
-	updateInfo selfupdate.Info
-	updating   bool
+	canUpdateOnce sync.Once
+	canUpdateVal  bool
+	updateMu      sync.Mutex
+	updateInfo    selfupdate.Info
+	updating      bool
 )
 
 // checkUpdate 查一次新版本(带缓存);force 为真时忽略缓存。
@@ -131,6 +133,11 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 // 注意不能去写正在运行的二进制本身(Linux 会返回 ETXTBSY);替换靠 rename,
 // 需要的是目录写权限,所以在同目录建个临时文件来判断。
 func canSelfUpdate() bool {
+	canUpdateOnce.Do(func() { canUpdateVal = probeSelfUpdate() })
+	return canUpdateVal
+}
+
+func probeSelfUpdate() bool {
 	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
 		return false
 	}

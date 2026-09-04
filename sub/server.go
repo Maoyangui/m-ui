@@ -308,6 +308,11 @@ func (s *Server) handle() http.HandlerFunc {
 		}
 		// 浏览器打开订阅地址 → 订阅页(用量/到期/一键导入/二维码);客户端拉取 → 原始订阅
 		if !shared && s.pageEnabled(rs) && WantsPage(r) {
+			if r.URL.Query().Has("clients") { // 订阅页里那个下载箭头
+				s.serveClients(w, r, subPath, name, s.pageTitle(rs, opt))
+				s.log(r, user.Name, false, 200)
+				return
+			}
 			s.servePage(w, r, subPath, name, user, lines, opt, rs)
 			s.log(r, user.Name, false, 200)
 			return

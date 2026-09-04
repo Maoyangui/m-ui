@@ -92,6 +92,7 @@ type pageData struct {
 	ShareURL               string // 已生成的共享地址(空=未生成)
 	QRClash, QRLink        template.URL
 	Imports                []importLink
+	ClientsURL             template.URL // 客户端下载页(同一地址加 ?clients=1)
 	Lines                  []pageLine
 	Year                   int
 }
@@ -115,7 +116,8 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 		Lang: pageLang(r), Icon: template.URL(brand.DataURI), Title: title, Notice: notice, Support: support, Name: user.Name,
 		UsedText: fmtBytesHuman(used), Unlimited: user.Volume == 0, UpdateHours: opt.UpdateHours,
 		SubLink: base, SubClash: clashURL, SubJSON: base + "?format=json", QRClash: template.URL(base + "/qr?format=clash"), QRLink: template.URL(base + "/qr?format=link"),
-		Year: time.Now().Year(),
+		ClientsURL: template.URL(base + "?clients=1"),
+		Year:       time.Now().Year(),
 	}
 	if user.Volume > 0 {
 		d.TotalText = fmtBytesHuman(user.Volume)
@@ -173,18 +175,28 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 	return d
 }
 
-// servePage 输出订阅落地页。
-func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key string, user model.User, lines []model.Line, opt Options, rs *model.Reseller) {
-	title, notice, support := s.setting("subPageTitle"), s.setting("subPageNotice"), s.setting("subPageSupport")
-	if rs != nil { // 代理可以给自己的用户配一套落地页文案
-		title, notice, support = pick(rs.PageTitle, title), pick(rs.PageNotice, notice), pick(rs.PageSupport, support)
+// pageTitle 是落地页(以及客户端下载页)顶上的名字:代理有自己的就用代理的。
+func (s *Server) pageTitle(rs *model.Reseller, opt Options) string {
+	title := s.setting("subPageTitle")
+	if rs != nil {
+		title = pick(rs.PageTitle, title)
 	}
 	if title == "" {
 		title = opt.ProfileTitle
 	}
 	if title == "" {
-		title = "m-ui"
+		title = brand.Name
 	}
+	return title
+}
+
+// servePage 输出订阅落地页。
+func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key string, user model.User, lines []model.Line, opt Options, rs *model.Reseller) {
+	notice, support := s.setting("subPageNotice"), s.setting("subPageSupport")
+	if rs != nil { // 代理可以给自己的用户配一套落地页文案
+		notice, support = pick(rs.PageNotice, notice), pick(rs.PageSupport, support)
+	}
+	title := s.pageTitle(rs, opt)
 	data := buildPageData(r, subPath, key, user, lines, opt, title, notice, support)
 	var buf bytes.Buffer
 	if err := pageTmpl.Execute(&buf, data); err != nil {
