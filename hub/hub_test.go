@@ -201,3 +201,26 @@ func TestSnapshotCarriesResellers(t *testing.T) {
 		t.Fatalf("副机上的代理不对: %+v", got)
 	}
 }
+
+// 副机被删后,它的在线线路与名字要一起清掉,否则用户的"在线设备"里会一直挂着
+// 一台已经不存在的服务器的线路。
+func TestHubForgetsRemovedNodes(t *testing.T) {
+	h := &Hub{
+		status:      map[uint]*NodeStatus{1: {Name: "旧机"}},
+		remote:      map[uint]map[string][]string{1: {"u": {"1.2.3.4"}}},
+		pushed:      map[uint]string{1: "rev"},
+		remoteLines: map[uint]map[string]map[string][]string{1: {"u": {"1.2.3.4": {"香港1"}}}},
+		nodeNames:   map[uint]string{1: "旧机"},
+	}
+	if got := h.RemoteIPLines("u"); len(got) == 0 {
+		t.Fatal("清理前应能取到线路")
+	}
+	h.forgetNodes(map[uint]bool{}) // 一台都不再存活
+	if len(h.status) != 0 || len(h.remote) != 0 || len(h.pushed) != 0 ||
+		len(h.remoteLines) != 0 || len(h.nodeNames) != 0 {
+		t.Fatalf("所有按节点的缓存都要清空: %+v", h)
+	}
+	if got := h.RemoteIPLines("u"); len(got) != 0 {
+		t.Fatalf("已删服务器的线路不该再出现: %v", got)
+	}
+}

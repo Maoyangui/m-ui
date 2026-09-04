@@ -500,9 +500,20 @@ func (r *Runner) reloadAllLocked(raw []byte) error {
 			return fmt.Errorf("新配置未通过校验,数据面保持原状: %w", err)
 		}
 	}
+	prev := r.appliedRaw // 新配置起不来时用它把服务拉回来(端口被别的进程抢走之类)
 	r.core.Stop()
 	if err := r.core.Start(raw); err != nil {
 		r.applied, r.appliedRaw = nil, nil
+		if prev != nil {
+			if err2 := r.core.Start(prev); err2 == nil {
+				r.applied, r.appliedRaw = outboundsOfSafe(prev), prev
+				r.applyLimits()
+				r.applyPortHopping()
+				logger.Warning("新配置启动失败,已回滚到上一份可用配置: ", err)
+				return fmt.Errorf("新配置启动失败,已回滚到上一份配置: %w", err)
+			}
+			logger.Error("新配置启动失败且回滚也失败: ", err)
+		}
 		return fmt.Errorf("重启 sing-box: %w", err)
 	}
 	r.applied, _ = outboundsOf(raw)
@@ -511,6 +522,15 @@ func (r *Runner) reloadAllLocked(raw []byte) error {
 	r.applyPortHopping()
 	logger.Info("数据面已重载")
 	return nil
+}
+
+// outboundsOfSafe 与 outboundsOf 相同,解析失败时返回 nil(回滚路径上不该再报错)。
+func outboundsOfSafe(raw []byte) map[string]string {
+	m, err := outboundsOf(raw)
+	if err != nil {
+		return nil
+	}
+	return m
 }
 
 // CoreRunning 报告内嵌 sing-box 是否在运行。

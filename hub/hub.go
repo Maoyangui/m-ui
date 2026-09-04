@@ -536,16 +536,25 @@ func (h *Hub) tick() {
 		h.nodeNames[n.Id] = n.Name
 		h.mu.Unlock()
 	}
-	h.mu.Lock()
-	for id := range h.status {
-		if !live[id] {
-			delete(h.status, id)
-			delete(h.remote, id)
-			delete(h.pushed, id)
-		}
-	}
-	h.mu.Unlock()
+	h.forgetNodes(live)
 	h.distributeIPs(nodes)
+}
+
+// forgetNodes 清掉已经不存在的副机留下的所有按节点缓存。
+// 漏清 remoteLines / nodeNames 的话,用户的"在线设备"里会一直挂着已删服务器的线路。
+func (h *Hub) forgetNodes(live map[uint]bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for id := range h.status {
+		if live[id] {
+			continue
+		}
+		delete(h.status, id)
+		delete(h.remote, id)
+		delete(h.pushed, id)
+		delete(h.remoteLines, id)
+		delete(h.nodeNames, id)
+	}
 }
 
 // distributeIPs 把"其他机器上的在线 IP"下发给每台机器(含主机自身)。

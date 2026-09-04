@@ -12,7 +12,7 @@ m-ui is a self-hosted proxy panel: one binary, one database file, sing-box embed
 What makes it different from the usual panels:
 
 - **Line model**: a *line* is "inbound protocol + port → upstream". No separate inbound / outbound / routing tables to keep in sync.
-- **Config changes don't drop users**: every save is dry-run through sing-box first, so a broken config never reaches the database. User and upstream changes are hot-swapped; only line changes restart the data plane.
+- **Config changes don't drop users**: every save is dry-run through sing-box first, so a broken config never reaches the database. User and upstream changes are hot-swapped; only line changes restart the data plane If a config passes validation but still fails to start — say another process grabbed the port in the meantime — m-ui rolls back to the last working one instead of leaving everyone offline.
 - **One master, many nodes**: the master pushes lines / upstreams / users to any number of node servers, collects their traffic and enforces quotas centrally. Subscriptions list every line once per server and clients pick the lowest-latency entry automatically.
 - **Ops built in**: Let's Encrypt, Cloudflare WARP, kernel tuning, backup / restore, a migration wizard, Telegram alerts, two-factor login and an external API.
 

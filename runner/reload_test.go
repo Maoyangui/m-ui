@@ -1,7 +1,11 @@
 package runner
 
 import (
+	"fmt"
+	"github.com/Maoyangui/m-ui/core"
+	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Maoyangui/m-ui/database"
@@ -85,4 +89,45 @@ func TestReloadUpstreamsKeepsBoxRunning(t *testing.T) {
 	if r.core.GetInstance() == box0 {
 		t.Fatal("ReloadAllForce 应重启数据面")
 	}
+}
+
+// 新配置起不来(端口被别的进程抢走之类)时,要用上一份可用配置把数据面拉回来,
+// 而不是把所有用户晾在那儿。
+func TestReloadRollsBackWhenStartFails(t *testing.T) {
+	dir := t.TempDir()
+	db, err := database.Open(filepath.Join(dir, "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	r := &Runner{db: db, core: core.NewCore(), dbPath: filepath.Join(dir, "x.db")}
+
+	// 先起一份能用的配置(只有出站,不占端口)
+	good := []byte(`{"log":{"disabled":true},"outbounds":[{"type":"direct","tag":"direct"}]}`)
+	if err := r.reloadAllLocked(good); err != nil {
+		t.Fatalf("初始配置应能启动: %v", err)
+	}
+	if !r.core.IsRunning() {
+		t.Fatal("数据面应在运行")
+	}
+
+	// 再喂一份能过校验、但启动时必然失败的配置(监听一个已被本测试占住的端口)
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	busy := ln.Addr().(*net.TCPAddr).Port
+	bad := []byte(fmt.Sprintf(`{"log":{"disabled":true},"inbounds":[{"type":"mixed","tag":"in","listen":"::","listen_port":%d}],"outbounds":[{"type":"direct","tag":"direct"}]}`, busy))
+	err = r.reloadAllLocked(bad)
+	if err == nil {
+		t.Fatal("坏配置应当报错")
+	}
+	if !strings.Contains(err.Error(), "回滚") {
+		t.Fatalf("错误里应说明已回滚: %v", err)
+	}
+	if !r.core.IsRunning() {
+		t.Fatal("回滚后数据面应仍在运行")
+	}
+	r.core.Stop()
 }
