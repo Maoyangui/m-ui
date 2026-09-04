@@ -110,6 +110,8 @@ No domain is fine: self-signed cert + IP, and every node in the subscription alr
 - Hysteria2 accepts a **port-hopping range** (e.g. `20000-30000`): the server forwards that UDP range to the line port with nftables / iptables and clients hop between ports, which sidesteps per-port UDP throttling by ISPs.
 - Every save dry-runs the full sing-box config; a failing change is rejected instead of stored.
 
+> New lines get a free five-digit port filled in automatically (still editable): it avoids ports already used by other lines and by the panel / subscription / reseller panel, and the server actually binds it once to confirm nothing else holds it. Port conflicts are blocked in both directions — a line cannot take a panel port, and the panel / subscription / reseller ports cannot be changed to one a line is using. You get the error on save instead of a service that fails to start after the next restart.
+
 ### Upstreams
 
 - Edit visually or paste `vless://`, `hy2://`, `ss://` … share links.
@@ -164,6 +166,8 @@ Any number of nodes. To attach one:
 How it works: the master compares a snapshot every few seconds and pushes on change; in the same round it pulls the node's traffic ledger, online IPs, status and certificate expiry. Quotas are enforced only on the master; a disabled user reaches every node within about 5 seconds. A node unreachable for over a minute triggers one alert and one more on recovery; while offline it keeps serving users with its last config.
 
 Each server, including the master, can have a **traffic ratio**: traffic through it counts toward users' usage multiplied by the ratio, e.g. 2× for an expensive route.
+
+> Deleting a server strips it from every line's "deploy to servers" list. A line that was deployed only on that server has nowhere left to run, so it is disabled as well (rather than silently spreading to every server); the response lists which lines were disabled.
 
 ### Certificates
 

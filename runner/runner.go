@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"syscall"
@@ -698,11 +699,23 @@ func Run(dbPath string) error {
 	defer r.hub.Stop()
 
 	stopCheckpoint := make(chan struct{})
-	go r.checkpointLoop(stopCheckpoint)
-	go r.certLoop(stopCheckpoint)
-	go r.backupLoop(stopCheckpoint)
-	go r.publicIPLoop(stopCheckpoint)
-	go r.extLoop(stopCheckpoint)
+	// 常驻循环各自兜住 panic:一个后台任务崩了不该把面板和数据面一起带走
+	for _, l := range []struct {
+		name string
+		fn   func(<-chan struct{})
+	}{
+		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"定时备份", r.backupLoop},
+		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop},
+	} {
+		go func(name string, fn func(<-chan struct{})) {
+			defer func() {
+				if v := recover(); v != nil {
+					logger.Warning("后台任务 ", name, " 异常退出: ", v, " | ", string(debug.Stack()))
+				}
+			}()
+			fn(stopCheckpoint)
+		}(l.name, l.fn)
+	}
 	defer close(stopCheckpoint)
 
 	sigCh := make(chan os.Signal, 1)
