@@ -225,6 +225,7 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 			line.Sort = maxSort + 1
 		}
 		// 在事务里写入并对整套配置做 sing-box 干跑:通不过就回滚,绝不让一条坏线路留在库里拖垮后续所有重载
+		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Create(&line).Error; err != nil {
 				return err
@@ -238,7 +239,7 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			return validateFullConfig(tx, s.run.NodeCert())
+			return validateFullConfig(tx, nodeCert)
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -282,13 +283,14 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&model.Line{}).Where("id = ?", id).Select(
 				"name", "protocol", "port", "upstream_id", "options", "addrs", "node_ids", "tls", "transport", "enabled",
 			).Updates(line).Error; err != nil {
 				return err
 			}
-			return validateFullConfig(tx, s.run.NodeCert())
+			return validateFullConfig(tx, nodeCert)
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -516,11 +518,12 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		up.Id = 0
+		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Create(&up).Error; err != nil {
 				return err
 			}
-			return validateFullConfig(tx, s.run.NodeCert())
+			return validateFullConfig(tx, nodeCert)
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -559,12 +562,13 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&model.Upstream{}).Where("id = ?", id).
 				Select("name", "type", "options").Updates(up).Error; err != nil {
 				return err
 			}
-			return validateFullConfig(tx, s.run.NodeCert())
+			return validateFullConfig(tx, nodeCert)
 		})
 		if err != nil {
 			badRequest(w, err)

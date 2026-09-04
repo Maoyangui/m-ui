@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
 
@@ -52,5 +53,34 @@ func TestConcurrentWritesDoNotLock(t *testing.T) {
 	db.First(&u, 1)
 	if u.Up != 200 {
 		t.Fatalf("应累加 200 次,实际 %d", u.Up)
+	}
+}
+
+// 事务里再用连接池查一次(代码里到处都是"事务中顺手读个设置")必须不会卡死。
+// v0.4.1 把连接池压到 1 条,这里就会自己等自己,面板整体挂起 —— 加个哨兵防复发。
+func TestPoolNotStarvedInsideTransaction(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "m-ui.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer Close(db)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("CREATE TABLE IF NOT EXISTS probe(id INTEGER PRIMARY KEY)").Error; err != nil {
+				return err
+			}
+			var n int64 // 故意走 db 而不是 tx:模拟事务体里读设置
+			return db.Raw("SELECT 1").Scan(&n).Error
+		})
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("事务内使用连接池失败: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("事务内向连接池借连接卡死:连接池被事务自己占满了")
 	}
 }

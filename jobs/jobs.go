@@ -180,8 +180,15 @@ func (s *Scheduler) runStats() {
 		return int64(float64(v) * ratio)
 	}
 
+	// 事务里只用 tx:一旦在事务体内再走 s.d.DB / 设置查询,就是向连接池要第二条连接,
+	// 池子被自己占满时会死等。所有要读的东西都在开事务之前取好。
+	isNode := s.d.IsNode()
+	trafficAge := s.settingInt("trafficAge", 30)
+	bucketSeconds := s.settingInt("statsBucketSeconds", 60)
+	if bucketSeconds < 1 {
+		bucketSeconds = 60
+	}
 	err := s.d.DB.Transaction(func(tx *gorm.DB) error {
-		isNode := s.d.IsNode()
 		for name, t := range userTraffic {
 			if isNode {
 				// 副机:写单调账本,主机按游标回收
@@ -209,12 +216,8 @@ func (s *Scheduler) runStats() {
 		}
 
 		// 流量时序:按桶累加,同一桶内多个周期合并为一行
-		if s.settingInt("trafficAge", 30) <= 0 {
+		if trafficAge <= 0 {
 			return nil
-		}
-		bucketSeconds := s.settingInt("statsBucketSeconds", 60)
-		if bucketSeconds < 1 {
-			bucketSeconds = 60
 		}
 		bucket := now - now%bucketSeconds
 		rows := *stats

@@ -118,6 +118,17 @@ table.grid { width: 100%; border-collapse: collapse; min-width: 640px; }
 .grid .primary-cell { font-weight: 500; }
 .grid .sub-cell { color: var(--muted); font-size: .76rem; margin-top: .1rem; }
 .grid td.num { font-family: var(--mono); font-size: .82rem; }
+/* 服务器等信息密集的表:不设最小宽度,长文本用省略号,不让整表出横向滚动条 */
+table.grid.tight { min-width: 0; table-layout: fixed; }
+.grid.tight th, .grid.tight td { padding: .45rem .6rem; }
+.grid.tight td { word-break: break-word; }
+.grid .ellip { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid.tight .btn.sm { padding: .22rem .5rem; }
+/* 服务器表:窄列给定宽度,余下宽度留给名称/地址/状态三列 */
+.grid.nodes th:nth-child(4), .grid.nodes td:nth-child(4),
+.grid.nodes th:nth-child(5), .grid.nodes td:nth-child(5) { width: 7.5rem; }
+.grid.nodes th:nth-child(6), .grid.nodes td:nth-child(6) { width: 3.5rem; }
+.grid.nodes th:nth-child(7), .grid.nodes td:nth-child(7) { width: 13.5rem; }
 
 /* ===== 控件 ===== */
 input, select, textarea { width: 100%; padding: .48rem .65rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; transition: border-color .15s, box-shadow .15s; }

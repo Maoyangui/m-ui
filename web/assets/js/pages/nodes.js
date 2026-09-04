@@ -17,8 +17,8 @@ export async function render(el) {
       ${isNodeView() ? '' : `<button class="btn primary" data-act="node.add">${t('node.add')}</button>`}
     </div>
     <p class="hint" style="margin-bottom:.8rem">${isNodeView() ? t('node.nodeView') : t('node.howto')}</p>
-    <div class="table-wrap"><table class="grid">
-      <thead><tr><th>${t('common.name')}</th><th>${t('node.domain')}</th><th>${t('node.ip')}</th><th>${t('common.status')}</th><th>${t('node.sync')}</th><th>${t('node.core')}</th><th>${t('node.online')}</th><th></th></tr></thead>
+    <div class="table-wrap"><table class="grid tight nodes">
+      <thead><tr><th>${t('common.name')}</th><th>${t('node.domain')}</th><th>${t('common.status')}</th><th>${t('node.sync')}</th><th>${t('node.core')}</th><th>${t('node.online')}</th><th></th></tr></thead>
       <tbody id="nodes-body"></tbody>
     </table></div>`;
   renderRows();
@@ -36,8 +36,24 @@ function statusCell(n) {
   if (!n.enabled) return badge(t('common.disabled'));
   const s = n.status;
   if (!s) return badge(t('node.pending'), 'warn');
-  if (s.ok) return `${badge(t('common.online'), 'ok')} <span class="muted small">${s.version ? 'v' + esc(s.version) : ''} ${s.hostname ? esc(s.hostname) : ''}</span>`;
-  return `${badge(t('common.offline'), 'danger')}<div class="sub-cell" title="${esc(s.error || '')}">${esc((s.error || '').slice(0, 70))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
+  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : ''}`;
+  return `${badge(t('common.offline'), 'danger')}<div class="sub-cell ellip" title="${esc(s.error || '')}">${esc(shortErr(s.error))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
+}
+
+// 副机报错原文是 Go 的网络错误,又长又带完整 URL(列表里会把表格撑出横向滚动条)。
+// 这里只显示原因,完整内容留在 title 里。
+function shortErr(raw) {
+  const e = String(raw || '');
+  if (!e) return t('node.errUnknown');
+  const map = [
+    ['context deadline exceeded', 'node.errTimeout'], ['timeout', 'node.errTimeout'],
+    ['connection refused', 'node.errRefused'], ['no such host', 'node.errDns'],
+    ['certificate', 'node.errCert'], ['x509', 'node.errCert'],
+    ['401', 'node.errToken'], ['403', 'node.errToken'],
+  ];
+  for (const [needle, key] of map) if (e.toLowerCase().includes(needle)) return t(key);
+  const tail = e.split(': ').pop().trim();
+  return tail.length > 48 ? tail.slice(0, 48) + '…' : tail;
 }
 
 function syncCell(n) {
@@ -68,13 +84,14 @@ function actionsCell(n) {
 function renderRows() {
   const body = document.getElementById('nodes-body');
   if (!body) return;
-  if (!data.nodes.length) { body.innerHTML = `<tr><td colspan="8">${empty()}</td></tr>`; return; }
+  if (!data.nodes.length) { body.innerHTML = `<tr><td colspan="7">${empty()}</td></tr>`; return; }
   body.innerHTML = data.nodes.map(n => {
     const s = n.status || {};
+    const domain = n.domain || (n.isLocal ? state.settings.webDomain || '' : '');
+    const addr = n.addr || n.publicIp || '';
     return `<tr>
-      <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl && !isNodeView() ? `<div class="sub-cell mono">${esc(n.apiUrl)}</div>` : ''}</td>
-      <td class="mono">${esc(n.domain || (n.isLocal ? state.settings.webDomain || '' : ''))}</td>
-      <td class="mono">${esc(n.addr || n.publicIp || '—')}${n.addr ? ` <span class="muted small">${t('node.addrManual')}</span>` : ''}</td>
+      <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl && !isNodeView() ? `<div class="sub-cell mono ellip" title="${esc(n.apiUrl)}">${esc(n.apiUrl)}</div>` : ''}</td>
+      <td class="mono"><span class="ellip" title="${esc(domain)}">${esc(domain || '—')}</span>${addr ? `<div class="sub-cell mono">${esc(addr)}${n.addr ? ' · ' + t('node.addrManual') : ''}</div>` : ''}</td>
       <td>${statusCell(n)}</td>
       <td>${syncCell(n)}</td>
       <td>${coreCell(n)}</td>

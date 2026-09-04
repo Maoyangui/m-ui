@@ -23,18 +23,19 @@ func Open(dbPath string) (*gorm.DB, error) {
 		sep = "&"
 	}
 	// WAL + busy_timeout:常见取舍,读写并发下不互相饿死。
-	dsn := dbPath + sep + "_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)"
+	// _txlock=immediate:事务一开始就取写锁。SQLite 的"先读后写"事务在升级写锁时
+	// 会直接抛 SQLITE_BUSY(busy_timeout 对升级无效),开头就取锁则会排队等待。
+	dsn := dbPath + sep + "_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)&_txlock=immediate"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		return nil, err
 	}
-	// SQLite 同一时刻只允许一个写事务。多条连接时,一个事务里"先读后写"会与另一个写事务
-	// 撞成升级死锁 —— busy_timeout 对这种情况无效,直接抛 SQLITE_BUSY(生产日志里
-	// "配额判定失败: database is locked" 就是它)。把连接数压到 1 让所有事务排队,
-	// 面板这种量级完全够用,换来的是不再有随机失败。
+	// 连接池绝不能压到 1:事务从池里借走连接后,事务体里再用 db(而不是 tx)查一次
+	// 设置,就会向池要第二条连接 —— 池空了,自己等自己,面板会永久挂起。写冲突交给
+	// 上面的 _txlock=immediate + busy_timeout 处理,连接数保持宽裕。
 	if sqlDB, err := db.DB(); err == nil {
-		sqlDB.SetMaxOpenConns(1)
-		sqlDB.SetMaxIdleConns(1)
+		sqlDB.SetMaxOpenConns(8)
+		sqlDB.SetMaxIdleConns(8)
 		sqlDB.SetConnMaxLifetime(0)
 	}
 	if err := db.AutoMigrate(model.All()...); err != nil {
