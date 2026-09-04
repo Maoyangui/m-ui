@@ -1,0 +1,67 @@
+name: pages
+
+# 文档 / 介绍站:site/ 下的纯 HTML 由 site/build.mjs(无依赖的 Node 脚本)生成,发到 GitHub Pages。
+# main 上改了站点、截图或 README 会自动部署;每次 Release 也部署一次,让 feed.xml 带上新版本。
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "docs/screenshots/**", "brand/**", "README.md", "README.en.md", ".github/workflows/pages.yml"]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build site
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # 只用来读 Releases 生成 feed.xml
+        run: node site/build.mjs
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  # 部署成功后按 IndexNow 协议把站点 URL 提交给支持它的搜索引擎(Bing 等),让新页面更快被发现。
+  # 密钥文件由 build.mjs 放在站点根目录,这里只是 POST 一份 sitemap 里的 URL 列表。
+  indexnow:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Submit URLs
+        run: |
+          key="$(cat site/indexnow.key | tr -d '[:space:]')"
+          site="https://maoyangui.github.io/m-ui/"
+          urls="$(curl -fsSL "${site}sitemap.xml" | grep -o '<loc>[^<]*</loc>' | sed 's/<loc>//;s/<\/loc>//' | head -500)"
+          [ -n "$urls" ] || { echo "sitemap 里没有 URL,跳过"; exit 0; }
+          list="$(printf '%s\n' "$urls" | sed 's/.*/"&"/' | paste -sd, -)"
+          code="$(curl -s -o /tmp/indexnow.out -w '%{http_code}' -X POST https://api.indexnow.org/indexnow \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            -d "{\"host\":\"maoyangui.github.io\",\"key\":\"$key\",\"keyLocation\":\"${site}${key}.txt\",\"urlList\":[$list]}")"
+          echo "IndexNow HTTP $code"; cat /tmp/indexnow.out || true
+          case "$code" in 200|202) ;; *) echo "IndexNow 未接受(不影响部署)";; esac

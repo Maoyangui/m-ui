@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 提问 / 讨论 · Questions & discussion
+    url: https://github.com/Maoyangui/m-ui/discussions/categories/q-a
+    about: 怎么用、拿不准是不是 Bug、想聊想法,去 Discussions。How-to questions and anything you are not sure is a bug.
+  - name: 文档 · Documentation
+    url: https://maoyangui.github.io/m-ui/
+    about: 安装、快速上手、多服务器、常见问题。Install, getting started, multi-server, FAQ.
+  - name: Telegram
+    url: https://t.me/yangweii
+    about: 直接找作者。Talk to the author directly.

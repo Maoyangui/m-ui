@@ -68,7 +68,11 @@ function renderRows() {
   const online = new Set(state.onlines.lines || []);
   const rows = state.lines.filter(l => matches(query, l.name, l.protocol, l.port, l.upstreamName));
   document.getElementById('line-count').textContent = `${rows.length} / ${state.lines.length}`;
-  if (!rows.length) { body.innerHTML = `<tr><td colspan="9">${empty()}</td></tr>`; return; }
+  // 库里一条线路都没有(不是搜索没结果):说清线路是什么,并给出第一步
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="9">${state.lines.length ? empty() : `<div class="empty-guide"><p>${t('line.emptyFirst')}</p><button class="btn primary" data-act="line.add">${t('line.emptyFirstBtn')}</button></div>`}</td></tr>`;
+    return;
+  }
   const nodeIdsOf = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
   const serversCell = l => {
     const ids = nodeIdsOf(l);

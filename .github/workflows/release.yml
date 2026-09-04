@@ -7,12 +7,15 @@ on:
 
 permissions:
   contents: write
+  discussions: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 发布说明要列出自上一个标签以来的改动
 
       - uses: actions/setup-go@v5
         with:
@@ -48,12 +51,65 @@ jobs:
             m-ui-linux-*.tar.gz
             SHA256SUMS
 
+      # 发布说明:自上一个标签以来的提交标题(中文)+ 安装 / 升级命令 + 文档与完整变更链接。
+      # 两种语言的固定部分都在,改动列表取自提交标题,不需要人手写公告。
+      - name: Release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        id: notes
+        run: |
+          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          if [ -n "$prev" ]; then range="$prev..${GITHUB_REF_NAME}"; else range="${GITHUB_REF_NAME}"; fi
+          changes="$(git log --no-merges --pretty='- %s' "$range" | grep -v '^- Merge' | head -40)"
+          [ -n "$changes" ] || changes="- (no changes listed)"
+          {
+            echo "## 这个版本 · What's new"
+            echo
+            echo "$changes"
+            echo
+            echo "## 安装 / 升级 · Install / upgrade"
+            echo
+            echo '```bash'
+            echo 'bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)'
+            echo '```'
+            echo
+            echo "已在跑的面板:左下角版本号旁的更新箭头,或命令行 \`m-ui\` 菜单里选「更新到最新版」。数据库、证书与设置都不动。"
+            echo "Already running m-ui? Click the update arrow next to the version in the sidebar, or pick \"Update\" in the \`m-ui\` menu. Database, certificates and settings are untouched."
+            echo
+            echo "## 校验 · Verify"
+            echo
+            echo "\`SHA256SUMS\` 与压缩包在同一个 Release 里;安装脚本和面板内更新都会先校验再替换。"
+            echo "\`SHA256SUMS\` ships with the archives; the installer and in-panel updater verify before replacing the binary."
+            echo
+            echo "## 链接 · Links"
+            echo
+            echo "- 文档 · Docs: https://maoyangui.github.io/m-ui/"
+            if [ -n "$prev" ]; then echo "- 完整变更 · Full changelog: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_REF_NAME}"; fi
+            echo "- 提问 · Questions: https://github.com/${GITHUB_REPOSITORY}/discussions"
+          } > RELEASE_NOTES.md
+          echo "prev=$prev" >> "$GITHUB_OUTPUT"
+
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
           files: |
             m-ui-linux-amd64.tar.gz
             m-ui-linux-arm64.tar.gz
             SHA256SUMS
+
+      # Release 之后自动在 Discussions → Announcements 发一条公告(版本、改动、升级方式、链接)。
+      # 分类按名字现查,仓库里没有该分类就跳过,不让发布失败。
+      - name: Announce in Discussions
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          repo_id="$(gh api graphql -f query='query($o:String!,$n:String!){repository(owner:$o,name:$n){id}}' -f o="${GITHUB_REPOSITORY_OWNER}" -f n="${GITHUB_REPOSITORY#*/}" --jq '.data.repository.id')"
+          cat_id="$(gh api graphql -f query='query($o:String!,$n:String!){repository(owner:$o,name:$n){discussionCategories(first:20){nodes{id name}}}}' -f o="${GITHUB_REPOSITORY_OWNER}" -f n="${GITHUB_REPOSITORY#*/}" --jq '.data.repository.discussionCategories.nodes[] | select(.name=="Announcements") | .id' | head -1)"
+          if [ -z "$cat_id" ]; then echo "没有 Announcements 分类,跳过公告"; exit 0; fi
+          title="m-ui ${GITHUB_REF_NAME} 发布 · released"
+          body="$(printf 'Release: https://github.com/%s/releases/tag/%s\n\n' "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"; cat RELEASE_NOTES.md)"
+          gh api graphql -f query='mutation($r:ID!,$c:ID!,$t:String!,$b:String!){createDiscussion(input:{repositoryId:$r,categoryId:$c,title:$t,body:$b}){discussion{url}}}' \
+            -f r="$repo_id" -f c="$cat_id" -f t="$title" -f b="$body" --jq '.data.createDiscussion.discussion.url'

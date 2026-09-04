@@ -1,9 +1,19 @@
 <p align="center"><img src="brand/logo.svg" width="130" alt="m-ui"></p>
 <h1 align="center">m-ui</h1>
 <p align="center">内嵌 <a href="https://github.com/SagerNet/sing-box">sing-box</a> 的多服务器代理面板 · 单二进制 · 一主多副 · 面板内完成全部运维</p>
-<p align="center"><b>中文</b> · <a href="README.en.md">English</a></p>
+<p align="center"><b>中文</b> · <a href="README.en.md">English</a> · <a href="https://maoyangui.github.io/m-ui/zh/">文档站</a> · <a href="#架构">架构</a> · <a href="https://github.com/Maoyangui/m-ui/releases">下载</a></p>
 
 ---
+
+**一行安装**(Debian / Ubuntu,root 运行):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)
+```
+
+装完打开 `http://<服务器IP>:2053/app/`,默认账号 `admin / admin`(登录后到「管理员」页改掉)。**没有域名也能用**:一键自签证书 → 建线路 → 建用户 → 把订阅发出去,五分钟内完成。详见 [安装](#安装) 与 [快速上手](#快速上手)。
+
+<p align="center"><img src="docs/screenshots/dashboard.png" alt="m-ui 概览:流量走势、数据面状态、在线用户与流量排行" width="960"></p>
 
 ## 这是什么
 
@@ -37,6 +47,19 @@ m-ui 是一个自托管的代理面板:**一个二进制 + 一个数据库文件
 | 安全 | bcrypt 密码、CSRF 防护、登录冷却(同一来源连续失败即暂停尝试)、两步验证(TOTP)、外部 API 令牌;代理面板与主面板会话严格隔离 |
 | 更新 | 面板自己发现新版本,侧栏版本号旁提示;一键更新 = 校验 SHA256 → 替换程序 → 重启,数据库、证书与所有设置不动 |
 | 集成 | 外部 API(建号、套餐、启停、续费、订阅地址),见 [docs/API.md](docs/API.md) |
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/user-detail.png" alt="用户详情:订阅地址、二维码、用量与流量走势"></td>
+<td width="50%"><img src="docs/screenshots/nodes.png" alt="服务器:一主两副,配置推送、同步状态与在线数"></td>
+</tr>
+<tr>
+<td align="center"><sub>用户详情:订阅地址、二维码、用量、在线设备</sub></td>
+<td align="center"><sub>服务器:一主多副,推送同步、在线状态一眼看完</sub></td>
+</tr>
+</table>
+
+更多截图(线路、落地页、英文界面)在 [docs/screenshots](docs/screenshots)。演示数据全部是 example.com 与文档保留 IP。
 
 ## 架构
 

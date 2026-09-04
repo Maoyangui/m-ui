@@ -1,0 +1,54 @@
+<!--meta {"title":"m-ui 与 3x-ui、s-ui、Marzban、Hiddify 的对比 · sing-box 面板选型","description":"m-ui 与 3x-ui、s-ui、Marzban、Hiddify-Manager 的如实对比:内核(Xray 还是 sing-box)、内嵌还是外部进程、多服务器、订阅、用户限制与许可证 —— 附来源与核对日期。","nav":"对比","order":7,"date":"2026-09-05"} -->
+<article class="doc">
+  <h1>m-ui 和其它面板的对比</h1>
+  <p class="lead">在 sing-box 与 Xray 面板之间选型时,这页列出各项目自己怎么说。以下事实于 <b>2026-09-05</b> 对照各项目 README 核对;README 没写的一律标 <span class="unk">未知</span>,不猜。</p>
+
+  <h2>一句话版本</h2>
+  <p>多数面板是<b>配置驱动</b>的:你编辑的入站、出站、路由规则一一对应内核的 JSON,面板重启或重载一个外部内核进程。m-ui 是<b>线路驱动</b>的:一条记录 —— 协议 + 端口 → 出口 —— 渲染成部署到的每台服务器的 sing-box 配置,内核跑在面板进程里,改动用能覆盖它的最小重载来应用。理念上的差别就这一句;表格里是它落到功能上的样子。</p>
+
+  <h2>功能对照</h2>
+  <table>
+    <tr><th></th><th>m-ui</th><th>3x-ui</th><th>s-ui</th><th>Marzban</th><th>Hiddify-Manager</th></tr>
+    <tr><td>内核</td><td>sing-box</td><td>Xray-core</td><td>sing-box</td><td>Xray-core</td><td>Xray 与 sing-box</td></tr>
+    <tr><td>内核怎么跑</td><td class="yes">内嵌在面板二进制里</td><td>面板管理的外部进程</td><td class="unk">未知</td><td>外部进程(Xray 单独安装)</td><td class="unk">未知</td></tr>
+    <tr><td>配置模型</td><td>线路(协议 + 端口 → 出口)</td><td>入站 / 出站 / 路由</td><td>入站 / 出站 / 路由</td><td>入站(Xray 配置),按用户选协议</td><td class="unk">未知</td></tr>
+    <tr><td>改动不影响其他用户连接</td><td class="yes">是:改用户、改上游热换,只有改线路才重启</td><td class="unk">未知</td><td class="unk">未知</td><td class="unk">未知</td><td class="unk">未知</td></tr>
+    <tr><td>保存前校验、起不来回滚</td><td class="yes">是(sing-box 干跑 + 回滚)</td><td class="unk">未知</td><td class="unk">未知</td><td class="unk">未知</td><td class="unk">未知</td></tr>
+    <tr><td>一个面板管多台服务器</td><td class="yes">主 / 副机:每 5 秒推送,配额与设备数集中判定</td><td>是:管理多台服务器,把入站克隆到其它节点</td><td class="unk">未知</td><td>是:Marzban-node</td><td class="unk">未知</td></tr>
+    <tr><td>订阅格式</td><td>通用链接、Clash / Mihomo、sing-box JSON;落地页</td><td>Raw、JSON、Clash;自定义页面模板</td><td>链接、JSON、Clash;外部链接</td><td>V2ray 系、Clash、ClashMeta</td><td>专用客户端 + 订阅</td></tr>
+    <tr><td>流量配额 / 到期</td><td>有 / 有,周期重置</td><td>有 / 有,续费周期</td><td>有 / 有</td><td>有 / 有,周期限额</td><td>有 / 有</td></tr>
+    <tr><td>设备数限制</td><td>按源 IP,跨所有服务器合计</td><td>IP 限制与 HWID 限制</td><td class="unk">未知</td><td class="unk">未知</td><td class="unk">未知</td></tr>
+    <tr><td>按用户限速</td><td>有(上 / 下行)</td><td class="unk">未知</td><td class="unk">未知</td><td class="unk">未知</td><td class="unk">未知</td></tr>
+    <tr><td>带独立面板的代理</td><td>有</td><td class="unk">未知</td><td class="unk">未知</td><td class="unk">未知</td><td class="unk">未知</td></tr>
+    <tr><td>部署</td><td>一个静态二进制 + SQLite</td><td>二进制 + Xray,或 Docker</td><td>二进制,或 Docker</td><td>Python 应用 + Xray,Docker</td><td>安装脚本,Docker</td></tr>
+    <tr><td>许可证</td><td>GPL-3.0</td><td>GPL-3.0</td><td>GPL-3.0</td><td>AGPL-3.0</td><td>GPL-3.0</td></tr>
+  </table>
+
+  <h2>什么时候不该选 m-ui</h2>
+  <ul>
+    <li>你需要 <b>Xray 独有</b>的东西 —— Vision 之外的 XTLS 流控、XHTTP、WireGuard 或 TUN 入站。m-ui 只做 sing-box,没有这些。</li>
+    <li>你想要最大的社区和最多的第三方教程。3x-ui 领先了好几年;m-ui 很新,而且是一个人维护。</li>
+    <li>你习惯直接改内核 JSON。m-ui 刻意把它藏在线路后面;每条线路有一个"高级"JSON 字段,但路由表不归你编辑。</li>
+  </ul>
+
+  <h2>什么时候该选</h2>
+  <ul>
+    <li>你有<b>不止一台服务器</b>,希望用户、配额、设备数是一份,而不是每台一份。</li>
+    <li>你经常改用户,不想每次都让所有人重连。</li>
+    <li>你想要一个能直接复制、备份、更新的二进制,不想维护容器运行时或一个要对版本的独立内核。</li>
+    <li>你做分销:独立的代理面板,各自的额度、套餐和落地页文案。</li>
+  </ul>
+
+  <h2>迁移</h2>
+  <p>m-ui 能导入兼容格式的旧面板数据库,保留端口、凭据与订阅路径,割接后既有客户端继续可用。它不声称兼容上表里的每一个面板 —— 先拿数据库副本跑一遍导入报告核对。见<a href="{{base}}zh/getting-started/">快速上手</a>。</p>
+
+  <h2>来源</h2>
+  <ul class="small">
+    <li><a href="https://github.com/MHSanaei/3x-ui" rel="noopener">3x-ui README</a></li>
+    <li><a href="https://github.com/alireza0/s-ui" rel="noopener">s-ui README</a></li>
+    <li><a href="https://github.com/Gozargah/Marzban" rel="noopener">Marzban README</a></li>
+    <li><a href="https://github.com/hiddify/Hiddify-Manager" rel="noopener">Hiddify-Manager README</a></li>
+    <li><a href="{{github}}" rel="noopener">m-ui README</a></li>
+  </ul>
+  <p class="small muted">核对于 2026-09-05。有误欢迎到 <a href="{{github}}/discussions" rel="noopener">Discussions</a> 指出 —— 目标是准确,不是赢下这张表。</p>
+</article>

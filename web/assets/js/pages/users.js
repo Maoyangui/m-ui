@@ -127,7 +127,7 @@ function renderRows() {
   const selAll = document.getElementById('sel-all');
   if (selAll) selAll.checked = rows.length > 0 && rows.every(u => selected.has(u.id));
   renderPager(total);
-  if (!rows.length) { body.innerHTML = `<tr><td colspan="8">${empty()}</td></tr>`; return; }
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="8">${state.users.length ? empty() : firstUserGuide()}</td></tr>`; return; }
   body.innerHTML = rows.map(u => {
     const used = (u.up || 0) + (u.down || 0);
     const ips = (u.onlineIps || []).length;
@@ -154,6 +154,15 @@ function renderRows() {
         </div></details>
       </td></tr>`;
   }).join('');
+}
+
+// 一个用户都还没有:告诉新手下一步是什么。没有线路先去建线路(代理没有线路是主面板还没分配)。
+function firstUserGuide() {
+  if (!state.lines.length) {
+    if (isReseller()) return empty();
+    return `<div class="empty-guide"><p>${t('user.emptyNoLines')}</p><a class="btn primary" href="#/lines">${t('user.emptyNoLinesBtn')}</a></div>`;
+  }
+  return `<div class="empty-guide"><p>${t('user.emptyFirst')}</p><button class="btn primary" data-act="user.add">${t('user.emptyFirstBtn')}</button></div>`;
 }
 
 // ---- 详情抽屉 ----
@@ -282,11 +291,14 @@ function editUser(id) {
       lineIds: [...document.querySelectorAll('.ln-cb:checked')].map(c => Number(c.value)),
       extIds: [...document.querySelectorAll('.ext-cb:checked')].map(c => Number(c.value)),
     };
-    if (id) await put('users/' + id, body); else await post('users', body);
+    const created = id ? null : await post('users', body);
+    if (id) await put('users/' + id, body);
     await load('users', 'lines', 'status');
     renderRows();
     if (drawerUser === id) showDetail(id);
     toast(id ? t('user.updated') : t('user.created'), 'ok');
+    // 系统里的第一个用户:直接打开详情抽屉,订阅地址 / 二维码 / 复制就在眼前,不用再找
+    if (created && created.id && state.users.length === 1) showDetail(created.id);
   }, { wide: true });
   document.getElementById('f-all').addEventListener('change', e => document.querySelectorAll('.ln-cb').forEach(c => { c.checked = e.target.checked; }));
 }

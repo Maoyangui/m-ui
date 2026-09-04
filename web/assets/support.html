@@ -77,6 +77,17 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 syst
   </section>
 
   <section class="card">
+    <h2><span class="ic">📚</span>{{if eq .Lang "zh"}}文档与 GitHub{{else}}Docs &amp; GitHub{{end}}</h2>
+    <p>{{if eq .Lang "zh"}}怎么用看文档;确定是 Bug 提 Issue;拿不准的、想讨论的去 Discussions —— 这样问题不会淹没在一起。{{else}}How-to questions: the docs. A confirmed bug: open an Issue. Not sure, or want to discuss: Discussions — so bugs don't drown in questions.{{end}}</p>
+    <div class="row">
+      <a class="btn" href="{{.Site}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}文档 ↗{{else}}Documentation ↗{{end}}</a>
+      <a class="btn" href="{{.Repo}}/issues/new/choose" target="_blank" rel="noopener">{{if eq .Lang "zh"}}报告 Bug ↗{{else}}Report a bug ↗{{end}}</a>
+      <a class="btn" href="{{.Repo}}/discussions" target="_blank" rel="noopener">{{if eq .Lang "zh"}}提问 / 讨论 ↗{{else}}Ask a question ↗{{end}}</a>
+      <a class="btn" href="{{.Repo}}" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </section>
+
+  <section class="card">
     <h2><span class="ic">☕</span>{{if eq .Lang "zh"}}支持这个项目{{else}}Support the project{{end}}</h2>
     <p>{{if eq .Lang "zh"}}m-ui 免费、开源、没有任何付费功能。如果它帮你省下了时间,可以请我喝杯咖啡,让它走得更远。{{else}}m-ui is free and open source with no paid tier. If it saved you time, buy me a coffee and keep it going.{{end}}</p>
     <div class="pay">

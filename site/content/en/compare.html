@@ -1,0 +1,54 @@
+<!--meta {"title":"m-ui vs 3x-ui, s-ui, Marzban and Hiddify · sing-box panel alternatives","description":"An honest comparison of m-ui with 3x-ui, s-ui, Marzban and Hiddify-Manager: core (Xray or sing-box), embedded vs external process, multi-server support, subscriptions, user limits and license — with sources and a checked date.","nav":"Compare","order":7,"date":"2026-09-05"} -->
+<article class="doc">
+  <h1>m-ui compared with other panels</h1>
+  <p class="lead">If you are choosing between sing-box and Xray panels, this page lists what each project states about itself. Facts below were checked against each project's README on <b>2026-09-05</b>; anything a README does not state is marked <span class="unk">Unknown</span> rather than guessed.</p>
+
+  <h2>The short version</h2>
+  <p>Most panels are <b>config-driven</b>: you edit inbounds, outbounds and routing rules that map one-to-one onto the core's JSON, and the panel restarts or reloads an external core process. m-ui is <b>line-driven</b>: one record — protocol + port → exit — is rendered into the sing-box config for every server it is deployed on, the core runs inside the panel process, and changes are applied by the smallest reload that covers them. That is the whole difference in philosophy; the table shows how it plays out in features.</p>
+
+  <h2>Feature table</h2>
+  <table>
+    <tr><th></th><th>m-ui</th><th>3x-ui</th><th>s-ui</th><th>Marzban</th><th>Hiddify-Manager</th></tr>
+    <tr><td>Core</td><td>sing-box</td><td>Xray-core</td><td>sing-box</td><td>Xray-core</td><td>Xray and sing-box</td></tr>
+    <tr><td>Core runs</td><td class="yes">Embedded in the panel binary</td><td>External process managed by the panel</td><td class="unk">Unknown</td><td>External process (Xray installed separately)</td><td class="unk">Unknown</td></tr>
+    <tr><td>Config model</td><td>Lines (protocol + port → exit)</td><td>Inbounds / outbounds / routing</td><td>Inbounds / outbounds / routing</td><td>Inbounds (Xray config), per-user protocol selection</td><td class="unk">Unknown</td></tr>
+    <tr><td>Change applied without dropping other users</td><td class="yes">Yes: user and upstream changes hot-swap; only line changes restart</td><td class="unk">Unknown</td><td class="unk">Unknown</td><td class="unk">Unknown</td><td class="unk">Unknown</td></tr>
+    <tr><td>Config validated before save, rollback on failed start</td><td class="yes">Yes (sing-box dry run + rollback)</td><td class="unk">Unknown</td><td class="unk">Unknown</td><td class="unk">Unknown</td><td class="unk">Unknown</td></tr>
+    <tr><td>Multi-server from one panel</td><td class="yes">Master / node: push every 5 s, central quota and device limits</td><td>Yes: manage multiple servers, clone inbounds onto other nodes</td><td class="unk">Unknown</td><td>Yes: Marzban-node</td><td class="unk">Unknown</td></tr>
+    <tr><td>Subscription formats</td><td>Universal links, Clash / Mihomo, sing-box JSON; landing page</td><td>Raw, JSON, Clash; custom page templates</td><td>Link, JSON, Clash; external links</td><td>V2ray-style, Clash, ClashMeta</td><td>Dedicated clients + subscriptions</td></tr>
+    <tr><td>Traffic quota / expiry</td><td>Yes / yes, periodic reset</td><td>Yes / yes, renewal cycles</td><td>Yes / yes</td><td>Yes / yes, periodic limits</td><td>Yes / yes</td></tr>
+    <tr><td>Device limit</td><td>By source IP, counted across all servers</td><td>IP limit and HWID limit</td><td class="unk">Unknown</td><td class="unk">Unknown</td><td class="unk">Unknown</td></tr>
+    <tr><td>Per-user speed limit</td><td>Yes (up / down)</td><td class="unk">Unknown</td><td class="unk">Unknown</td><td class="unk">Unknown</td><td class="unk">Unknown</td></tr>
+    <tr><td>Resellers with own panel</td><td>Yes</td><td class="unk">Unknown</td><td class="unk">Unknown</td><td class="unk">Unknown</td><td class="unk">Unknown</td></tr>
+    <tr><td>Deployment</td><td>One static binary + SQLite</td><td>Binary + Xray, or Docker</td><td>Binary, or Docker</td><td>Python app + Xray, Docker</td><td>Installer script, Docker</td></tr>
+    <tr><td>License</td><td>GPL-3.0</td><td>GPL-3.0</td><td>GPL-3.0</td><td>AGPL-3.0</td><td>GPL-3.0</td></tr>
+  </table>
+
+  <h2>When m-ui is not the right pick</h2>
+  <ul>
+    <li>You need <b>Xray-only</b> features — XTLS flows beyond Vision, XHTTP, WireGuard or TUN inbounds. m-ui is sing-box only and does not expose those.</li>
+    <li>You want the largest community and the most third-party tutorials. 3x-ui has years of head start; m-ui is new and maintained by one person.</li>
+    <li>You prefer editing the core's JSON directly. m-ui deliberately hides it behind lines; an "advanced" JSON field exists per line, but the routing table is not yours to edit.</li>
+  </ul>
+
+  <h2>When it is</h2>
+  <ul>
+    <li>You run <b>more than one server</b> and want users, quotas and device limits to be one thing, not one per server.</li>
+    <li>You change users often and do not want everyone else reconnecting every time.</li>
+    <li>You want one binary you can copy, back up and update without a container runtime or a separate core to keep in step.</li>
+    <li>You resell: separate reseller panels with budgets, own plans and own landing copy.</li>
+  </ul>
+
+  <h2>Migrating</h2>
+  <p>m-ui imports a compatible legacy panel database and keeps ports, credentials and subscription paths, so existing clients keep working after a switch. It does not claim compatibility with every panel above — check the importer report on a copy of your database first. See <a href="{{base}}getting-started/">Getting started</a>.</p>
+
+  <h2>Sources</h2>
+  <ul class="small">
+    <li><a href="https://github.com/MHSanaei/3x-ui" rel="noopener">3x-ui README</a></li>
+    <li><a href="https://github.com/alireza0/s-ui" rel="noopener">s-ui README</a></li>
+    <li><a href="https://github.com/Gozargah/Marzban" rel="noopener">Marzban README</a></li>
+    <li><a href="https://github.com/hiddify/Hiddify-Manager" rel="noopener">Hiddify-Manager README</a></li>
+    <li><a href="{{github}}" rel="noopener">m-ui README</a></li>
+  </ul>
+  <p class="small muted">Checked 2026-09-05. Corrections welcome in <a href="{{github}}/discussions" rel="noopener">Discussions</a> — the goal is accuracy, not winning a table.</p>
+</article>

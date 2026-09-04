@@ -1,0 +1,53 @@
+<!--meta {"title":"Getting started · m-ui","description":"Install m-ui on Debian or Ubuntu with one command, get a certificate (real or self-signed), create a line and a user, and hand out the first subscription link — in about five minutes.","nav":"Getting started","order":2} -->
+<article class="doc">
+  <h1>Getting started</h1>
+  <p class="lead">One command installs the panel and the embedded sing-box core as a systemd service. Five minutes later a user can import a subscription.</p>
+  <nav class="toc"><a href="#install">Install</a><a href="#login">First login</a><a href="#cert">Certificate</a><a href="#line">Line</a><a href="#user">User</a><a href="#sub">Subscription</a><a href="#upgrade">Upgrade</a><a href="#uninstall">Uninstall</a></nav>
+
+  <h2 id="install">1. Install</h2>
+  <p>Any systemd Linux on amd64 or arm64 (Debian 11+ / Ubuntu 20.04+ recommended), as root:</p>
+  <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
+  <p>The script downloads the latest release, verifies it against the <code>SHA256SUMS</code> published with the same release, installs <code>/usr/local/bin/m-ui</code>, creates the systemd service and starts it. The database lives in <code>/etc/m-ui/m-ui.db</code>. Nothing else is installed — no Docker, no Node, no external database.</p>
+  <div class="note">Coming from a legacy panel? Run the installer with <code>--import /path/to/old.db</code> to bring lines, upstreams, users and settings across in one go — ports, credentials and the subscription path are kept, so existing clients keep connecting without a refresh. To move only users onto lines you already rebuilt, use <b>Users → Import from legacy panel</b>.</div>
+
+  <h2 id="login">2. First login</h2>
+  <ul>
+    <li>Panel: <code>http://&lt;server-ip&gt;:2053/app/</code></li>
+    <li>Default account: <code>admin</code> / <code>admin</code></li>
+  </ul>
+  <p>A banner stays at the top until the default password is changed — do that on the <b>Admin</b> page first. Port, path and credentials can also be changed later from the SSH menu (<code>m-ui</code>). The UI is available in English and Chinese; switch at the bottom of the sidebar.</p>
+
+  <h2 id="cert">3. Certificate</h2>
+  <p>Most protocols need TLS. You have two equally supported options:</p>
+  <table>
+    <tr><th>You have</th><th>Do this</th><th>Result</th></tr>
+    <tr><td>A domain pointing at the server</td><td><b>Certificate → Issue</b>: Let's Encrypt via HTTP-01 (port 80 reachable) or Cloudflare DNS-01 (API token, no port 80). Renews itself.</td><td>Real certificate, no client warnings.</td></tr>
+    <tr><td>Only an IP</td><td><b>Certificate → Self-sign</b>, one click.</td><td>Works everywhere; subscriptions automatically tell clients to allow the insecure certificate. Add a domain later and switch.</td></tr>
+  </table>
+  <p>The Quick Start card on the dashboard treats both as "certificate ready". A domain is a recommendation, not a prerequisite.</p>
+
+  <h2 id="line">4. Create a line</h2>
+  <p>A <b>line</b> is inbound protocol + port → where traffic exits (direct, or an upstream you add later). On the Lines page use <b>Quick add</b> — Hysteria2, AnyTLS, VLESS + Reality, Trojan, Shadowsocks 2022 or VMess + WS come with sane defaults and a free five-digit port already filled in. Ports are checked against other lines, the panel and anything else listening on the server before the save is accepted.</p>
+  <p>Every save is dry-run through sing-box. If the config does not parse you get the reason and nothing changes on the running data plane.</p>
+
+  <h2 id="user">5. Create a user</h2>
+  <p>On the Users page, <b>Add user</b>: name, optional quota, expiry, device limit and speed limits, and which lines they can use. Credentials for every protocol are generated for you. The first user's detail drawer opens automatically with the subscription links and QR code.</p>
+
+  <h2 id="sub">6. Hand out the subscription</h2>
+  <p>Each user has one subscription address in three formats:</p>
+  <ul>
+    <li><b>Universal links</b> (default) — Shadowrocket, nextin, Surge, Quantumult X, Loon, Karing…</li>
+    <li><code>?format=clash</code> — Clash / Mihomo / Clash Verge / FlClash / Stash</li>
+    <li><code>?format=json</code> — a complete sing-box configuration for SFA / SFI / desktop sing-box</li>
+  </ul>
+  <p>Opened in a browser, the same address is a landing page: usage, expiry, one-tap import buttons, QR code and client downloads. Users can also generate a temporary share link there if you allow it. When a subscription is exhausted, expired or disabled, the browser shows a short explanation and your contact details instead of a blank 404.</p>
+
+  <h2 id="upgrade">Upgrade</h2>
+  <p>Click the update arrow next to the version number in the sidebar (the panel checks GitHub Releases every 6 hours), or run the install command again, or pick "Update" in the <code>m-ui</code> SSH menu. Only the binary is replaced; database, certificates and settings stay where they are.</p>
+
+  <h2 id="uninstall">Uninstall</h2>
+  <pre><code>m-ui   # menu → 14, uninstall</code></pre>
+  <p>The service and binary are removed; the menu asks whether to delete the data directory <code>/etc/m-ui</code> as well.</p>
+
+  <p style="margin-top:2rem">Next: <a href="{{base}}multi-server/">add more servers</a> · <a href="{{base}}features/">see everything else the panel does</a> · <a href="{{base}}faq/">FAQ</a></p>
+</article>

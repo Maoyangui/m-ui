@@ -1,0 +1,51 @@
+<!--meta {"title":"Multi-server sing-box panel · m-ui master and nodes","description":"How m-ui manages many servers from one panel: master/node roles, 5-second config sync with revisions, traffic cursors, online-IP sharing for device limits, per-server subscription nodes, and what happens when a node goes offline.","nav":"Multi-server","order":4} -->
+<article class="doc">
+  <h1>One master, any number of nodes</h1>
+  <p class="lead">m-ui is a multi-server sing-box panel by design, not by add-on. Every server runs the same binary; one is the master and does the accounting, the others only forward traffic.</p>
+  <nav class="toc"><a href="#roles">Roles</a><a href="#pair">Pairing</a><a href="#sync">What gets synced</a><a href="#traffic">Traffic and limits</a><a href="#subs">Subscriptions</a><a href="#failure">When a node is down</a><a href="#ratio">Traffic ratio</a></nav>
+
+  <figure class="shot"><img src="{{base}}img/nodes-en.png" alt="Servers page showing a master and two nodes, online and synced" loading="lazy"></figure>
+
+  <h2 id="roles">Roles</h2>
+  <table>
+    <tr><th></th><th>Master</th><th>Node</th></tr>
+    <tr><td>Panel</td><td>Full: lines, users, upstreams, resellers, settings</td><td>Read-only view of what the master pushed; local settings, certificate, logs</td></tr>
+    <tr><td>Data plane</td><td>Embedded sing-box, serves its own lines</td><td>Embedded sing-box, serves the lines deployed to it</td></tr>
+    <tr><td>Accounting</td><td>Rolls up traffic from every server, judges quota, expiry and device limits</td><td>Keeps a monotonic counter per user, reports deltas</td></tr>
+    <tr><td>Subscriptions</td><td>Serves them (nodes also can, with the same data)</td><td>Same data, same formats</td></tr>
+  </table>
+
+  <h2 id="pair">Pairing a node</h2>
+  <ol>
+    <li>Install m-ui on the new server with the same one-line installer.</li>
+    <li>In its panel, <b>Settings → Run as node</b>. The pairing card shows its API address and token.</li>
+    <li>On the master, <b>Servers → Add server</b>, paste the address and token, give it a name and a domain or IP. Each node issues its own certificate (self-signed is fine).</li>
+  </ol>
+  <p>That is the whole procedure. Within five seconds the node shows <i>online · synced</i> and starts serving the lines deployed to it.</p>
+
+  <h2 id="sync">What gets synced, and how</h2>
+  <p>Every 5 seconds the master builds a snapshot — lines, upstreams, users with credentials, user↔line assignments, external nodes, resellers and the subscription settings — hashes it into a <b>revision</b>, and pushes it to every node <b>concurrently</b>. A node that already has that revision does nothing; one that does not applies it and reloads its data plane using the same three-tier reload as the master: user changes hot-swap the inbound user table, upstream changes hot-swap outbounds, only line changes restart sing-box (with rollback if the new config fails to start).</p>
+  <p>In the same round the master pulls each node's <b>report</b>: traffic since the last cursor, online source IPs per user, version, core status, certificate days left. A slow or unreachable node only delays itself; the others sync on time.</p>
+
+  <h2 id="traffic">Traffic, quota and device limits across servers</h2>
+  <ul>
+    <li><b>Traffic</b> is accounted once. Nodes keep a monotonic per-user counter; the master stores a cursor per node and adds only the delta. A node that reinstalls (counter resets) is detected and re-based, so nothing is double-counted.</li>
+    <li><b>Quota and expiry</b> are judged on the master only. A user who runs out is simply absent from the next snapshot, so every server stops serving them within seconds.</li>
+    <li><b>Device limit</b> is the number of distinct source IPs across all servers. The master merges online IPs from every node and pushes each node the IPs seen elsewhere, so a limit of 3 means 3 devices in total, not 3 per server.</li>
+  </ul>
+
+  <h2 id="subs">Subscriptions with many servers</h2>
+  <p>A line deployed to N servers appears N times in the user's subscription, named <i>line – server</i>, with each server's own domain or IP. Clash, sing-box and universal-link clients then pick by latency or let the user choose. Adding a server to a line updates every subscription on the next refresh — no per-user edits.</p>
+
+  <h2 id="failure">When a node goes offline</h2>
+  <ul>
+    <li>The node keeps forwarding with the configuration it has. Users on it do not notice.</li>
+    <li>The master marks it offline, sends a Telegram alert after a minute if configured, and keeps trying every 5 seconds.</li>
+    <li>When it returns, the cursor picks up traffic from where it left off and the current snapshot is pushed. Users disabled meanwhile are removed on that push.</li>
+  </ul>
+
+  <h2 id="ratio">Traffic ratio</h2>
+  <p>Each server has a ratio (default 1). Traffic through a server with ratio 2 counts double against the user's quota — useful for premium routes or expensive bandwidth. Time-series charts keep the real bytes; only user quota accounting is scaled.</p>
+
+  <p style="margin-top:2rem">Deeper: <a href="{{base}}articles/multi-server-sync/">how the sync protocol is built</a> · <a href="{{base}}architecture/">architecture overview</a></p>
+</article>

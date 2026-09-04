@@ -1,0 +1,38 @@
+<!--meta {"title":"How m-ui hot-reloads users without restarting every connection","description":"The three reload tiers in m-ui: swapping the inbound user table for user changes, swapping outbounds for upstream changes, and a restart with rollback only when a line itself changes. How sing-box keys users, why disabling a user kicks them, and how temporary share links are revoked instantly.","type":"article","date":"2026-09-05"} -->
+<article class="doc">
+  <p class="meta">Deep dive · 2026-09-05</p>
+  <h1>How m-ui hot-reloads users without restarting every connection</h1>
+  <p class="lead">Adding a user should not disconnect the other two hundred. m-ui gets there with three reload tiers, chosen by what actually changed, and a couple of details about how sing-box identifies users.</p>
+
+  <h2>Three tiers, smallest first</h2>
+  <table>
+    <tr><th>What changed</th><th>What happens</th><th>Who notices</th></tr>
+    <tr><td>User: added, removed, enabled, disabled, credentials, line assignment</td><td><b>ReloadUsers</b> — rebuild each inbound's user list from the database and swap it into the running inbound; re-apply per-user speed and device limits</td><td>Only the user whose credentials went away (they are disconnected on purpose)</td></tr>
+    <tr><td>Upstream: added, edited, removed</td><td><b>ReloadUpstreams</b> — render the outbound set, add new outbounds, replace changed ones, remove stale ones, then update routing</td><td>Connections through a replaced outbound reconnect; everything else stays</td></tr>
+    <tr><td>Line: protocol, port, TLS, transport, options, deployment</td><td><b>ReloadAll</b> — render the whole config, stop the box, start the new one; if it fails to start, start the previous config again</td><td>All connections on that server reconnect (a few seconds)</td></tr>
+  </table>
+  <p>The panel picks the tier from the change itself, so an operator never has to decide "is this safe to apply now?". Nodes apply pushed snapshots with the same logic: a snapshot that only differs in users triggers only tier one on every node.</p>
+
+  <h2>How sing-box identifies a user</h2>
+  <p>Inside a sing-box inbound, users are a list of credentials. The name attached to each entry is a label used for logging and traffic attribution; the credential is what actually matches a connection. Two consequences shape m-ui's design:</p>
+  <ul>
+    <li>Two entries with the same name and different credentials are, to sing-box, two ways into the same account. m-ui uses this for <b>temporary share links</b>: the share gets a second credential set under the user's name, so the borrower's traffic and devices count against the owner, and revoking the share removes just that credential.</li>
+    <li>Replacing the user table with one that lacks a credential makes that credential's future connections fail — but existing connections are already established. So after a swap m-ui explicitly <b>closes the tracked connections</b> of users who were disabled or whose credentials were revoked, on the master and on every node (nodes receive the list of revoked shares with the snapshot).</li>
+  </ul>
+
+  <h2>What "swap the user table" costs</h2>
+  <p>Rebuilding a user list is a database read plus a call into the inbound's user manager. It runs in milliseconds for hundreds of users, and it runs inside the panel process, so there is no config file, no signal and no race with a supervisor restarting the core.</p>
+
+  <h2>Why upstream changes do not restart either</h2>
+  <p>sing-box's outbound manager can add and remove outbounds at run time. m-ui diffs the rendered outbound set against what is running (by tag and rendered options), applies only the difference, and updates the routing rules that map lines to exits. Switching a line from direct to an upstream, or rotating an upstream's credentials, therefore never touches the inbounds.</p>
+
+  <h2>When a restart is unavoidable</h2>
+  <p>Listeners cannot change protocol or port in place, so a line edit restarts the data plane. Two guards keep that from being risky:</p>
+  <ol>
+    <li>The new configuration was already parsed by sing-box inside the save transaction; if it did not parse, the save failed and nothing restarted.</li>
+    <li>If it parses but does not start — typically a port that another process took in the meantime — the previous configuration is started again and the panel shows the error. The server is never left without a data plane.</li>
+  </ol>
+  <p>Port conflicts with the panel, other lines and other processes are also rejected at save time, which is why the restart path rarely has to fall back at all.</p>
+
+  <p style="margin-top:2rem">Related: <a href="{{base}}articles/embedded-sing-box/">why the core is embedded</a> · <a href="{{base}}articles/multi-server-sync/">how nodes receive the same changes</a> · <a href="{{github}}/tree/main/runner" rel="noopener">runner/ on GitHub</a></p>
+</article>

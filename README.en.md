@@ -1,9 +1,19 @@
 <p align="center"><img src="brand/logo.svg" width="130" alt="m-ui"></p>
 <h1 align="center">m-ui</h1>
 <p align="center">Multi-server proxy panel with embedded <a href="https://github.com/SagerNet/sing-box">sing-box</a> · single binary · one master, any number of nodes · all day-to-day ops inside the panel</p>
-<p align="center"><a href="README.md">中文</a> · <b>English</b></p>
+<p align="center"><a href="README.md">中文</a> · <b>English</b> · <a href="https://maoyangui.github.io/m-ui/">Docs</a> · <a href="#architecture">Architecture</a> · <a href="https://github.com/Maoyangui/m-ui/releases">Download</a></p>
 
 ---
+
+**One-line install** (Debian / Ubuntu, as root):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)
+```
+
+Then open `http://<server-ip>:2053/app/`, default login `admin / admin` (change it on the Admin page right after). **No domain needed**: self-sign a certificate with one click → create a line → create a user → send the subscription link — five minutes end to end. See [Installation](#installation) and [Quick start](#quick-start).
+
+<p align="center"><img src="docs/screenshots/dashboard-en.png" alt="m-ui dashboard: traffic chart, data-plane status, online users and top talkers" width="960"></p>
 
 ## What it is
 
@@ -37,6 +47,19 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 | Security | bcrypt passwords, CSRF protection, login cooldown after repeated failures from the same peer, two-factor authentication (TOTP), external API tokens; reseller and admin sessions are strictly separated |
 | Updates | The panel finds new releases by itself and flags them next to the version in the sidebar; one click verifies the SHA256, swaps the binary and restarts — database, certificates and settings are untouched |
 | Integration | External API for creating users, applying plans, enabling / disabling, renewing and fetching subscription URLs, see [docs/API.md](docs/API.md) |
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/user-detail-en.png" alt="User details: subscription URLs, QR code, usage and traffic chart"></td>
+<td width="50%"><img src="docs/screenshots/nodes-en.png" alt="Servers: one master and two nodes, push status and sync"></td>
+</tr>
+<tr>
+<td align="center"><sub>User details: subscription links, QR code, usage, online devices</sub></td>
+<td align="center"><sub>Servers: one master, any number of nodes — push, sync and status at a glance</sub></td>
+</tr>
+</table>
+
+More screenshots (lines, landing page, Chinese UI) live in [docs/screenshots](docs/screenshots). All demo data uses example.com and documentation IP ranges.
 
 ## Architecture
 

@@ -1,0 +1,73 @@
+<!--meta {"title":"m-ui · Embedded sing-box multi-server panel","description":"Self-hosted sing-box panel in one Go binary: embedded core, hot user and upstream reload, dry-run validation with rollback, master/node multi-server sync, subscriptions with landing pages, resellers, WARP and certificates.","nav":"Home","order":1} -->
+<section class="hero">
+  <h1>The sing-box panel that runs as one binary</h1>
+  <p class="lead">m-ui embeds sing-box instead of babysitting an external process. Users and upstreams hot-reload without dropping anyone, every config is dry-run before it goes live, and one master keeps any number of servers in sync.</p>
+  <div class="actions">
+    <a class="btn" href="{{base}}getting-started/">Install in 5 minutes</a>
+    <a class="btn ghost" href="{{github}}" rel="noopener">GitHub</a>
+  </div>
+  <div class="install">
+    <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
+    <button type="button" data-copy="bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)" title="Copy">Copy</button>
+  </div>
+  <figure class="shot"><img src="{{base}}img/dashboard-en.png" alt="m-ui dashboard with traffic chart, data-plane status, online users and top talkers" width="1440" height="900" loading="eager"></figure>
+</section>
+
+<section class="block" id="why">
+  <h2>Why m-ui</h2>
+  <p class="sub">Not another Xray wrapper. These are the parts that are actually different.</p>
+  <div class="grid">
+    <div class="card"><h3>Embedded sing-box</h3><p>The core runs inside the panel binary. No separate service to install, version-match or restart by hand — the panel talks to it in-process.</p></div>
+    <div class="card"><h3>A line is one thing</h3><p>Inbound protocol + port → where it exits. No inbound / outbound / routing tables to keep in sync. Hysteria2, AnyTLS, TUIC, VLESS Reality, Trojan, VMess, Shadowsocks 2022.</p></div>
+    <div class="card"><h3>Hot user and upstream updates</h3><p>Adding, disabling or re-keying a user swaps the inbound user table in place. Changing an exit swaps the outbound. Nobody else gets disconnected.</p></div>
+    <div class="card"><h3>Validated before it ships</h3><p>Every save is parsed by sing-box first. A bad config never reaches the database, and if a new config still fails to start, m-ui rolls back to the last working one.</p></div>
+    <div class="card"><h3>One master, many nodes</h3><p>Lines, users and credentials are pushed to every node every 5 seconds. Traffic and online IPs flow back, quota and device limits are enforced centrally.</p></div>
+    <div class="card"><h3>Ops without a terminal</h3><p>Let's Encrypt, Cloudflare WARP, kernel tuning, backup and restore, a migration wizard, Telegram alerts, two-factor login and a one-click updater — all in the panel.</p></div>
+  </div>
+</section>
+
+<section class="block" id="path">
+  <h2>From empty server to first subscription</h2>
+  <p class="sub">A domain is recommended, not required — an IP with a self-signed certificate is a fully supported path.</p>
+  <ol class="steps">
+    <li><b>Install</b><span>One command on Debian / Ubuntu. Log in at <code>:2053/app/</code>.</span></li>
+    <li><b>Certificate</b><span>Issue one for your domain, or self-sign with one click.</span></li>
+    <li><b>Line</b><span>Pick a protocol from the quick-add menu; a free port is filled in for you.</span></li>
+    <li><b>User</b><span>Create the first user — the detail drawer opens with the subscription link and QR code.</span></li>
+    <li><b>Subscription</b><span>Clash, sing-box or universal links, plus a landing page with usage and one-tap import.</span></li>
+  </ol>
+  <p style="margin-top:1rem"><a href="{{base}}getting-started/">Read the full getting-started guide →</a></p>
+</section>
+
+<section class="block" id="multi">
+  <h2>Multi-server without the spreadsheet</h2>
+  <p class="sub">Install m-ui on each server, flip one to node mode, paste its pairing info into the master. Every line is listed once per server in the subscription, so clients pick the lowest-latency entry themselves.</p>
+  <figure class="shot"><img src="{{base}}img/nodes-en.png" alt="Servers page: one master and two nodes, both online and synced" width="1440" height="900" loading="lazy"></figure>
+  <p style="margin-top:1rem"><a href="{{base}}multi-server/">How master/node sync works →</a></p>
+</section>
+
+<section class="block" id="user">
+  <h2>What your users get</h2>
+  <p class="sub">A subscription link that works in Clash, sing-box, Shadowrocket, Stash and Hiddify, and a landing page that explains itself: usage, expiry, one-tap import, QR code, client downloads. When a subscription runs out, the browser shows why and who to contact — not a blank 404.</p>
+  <div class="grid">
+    <figure class="shot" style="margin:0"><img src="{{base}}img/user-detail-en.png" alt="User detail drawer with subscription URLs, QR code, usage and traffic chart" loading="lazy"></figure>
+    <figure class="shot phone" style="margin:0 auto"><img src="{{base}}img/landing-en.png" alt="Subscription landing page on a phone: usage, expiry, one-tap import" loading="lazy"></figure>
+  </div>
+</section>
+
+<div class="ctaband">
+  <h2>Free, GPL-3.0, one binary</h2>
+  <p>Linux amd64 / arm64. SQLite for state, vanilla JS for the UI, no build chain, no external database.</p>
+  <a class="btn" href="{{github}}" rel="noopener">Star or fork on GitHub</a>
+</div>
+
+<section class="block" id="faq">
+  <h2>Quick answers</h2>
+  <article class="doc" style="padding:0;max-width:none">
+    <details><summary>Do I need a domain?</summary><p>No. Self-sign a certificate with one click and use the server IP; clients are told to allow the insecure certificate automatically. A domain lets you issue a real certificate and drop that warning.</p></details>
+    <details><summary>Is this a fork of an existing panel?</summary><p>m-ui has its own data model (lines instead of inbound/outbound/routing tables), its own embedded data plane and its own sync protocol. It can import a legacy panel database so existing clients keep working after a switch.</p></details>
+    <details><summary>Does it phone home?</summary><p>No telemetry. The only outbound calls are the ones you configure: certificate issuance, WARP, Telegram, and a version check against GitHub Releases every 6 hours.</p></details>
+    <details><summary>What does it run on?</summary><p>Linux, amd64 or arm64, with systemd. A 1 vCPU / 1 GB VPS is plenty for the panel itself.</p></details>
+  </article>
+  <p style="margin-top:1rem"><a href="{{base}}faq/">More questions →</a></p>
+</section>

@@ -1,0 +1,58 @@
+name: Bug 报告 · Bug report
+description: 确定是 m-ui 的问题时用这个;不确定请先去 Discussions。Use this for confirmed bugs; ask in Discussions if unsure.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **不要贴这些 · Never paste these:** 面板密码、API 令牌、订阅地址、UUID / 密码、证书私钥、Cloudflare Token、Telegram Bot Token。日志里有的话请先打码。
+        Panel passwords, API tokens, subscription URLs, UUIDs / passwords, private keys, Cloudflare tokens, Telegram bot tokens. Redact them from logs first.
+  - type: input
+    id: version
+    attributes:
+      label: m-ui 版本 · Version
+      description: 面板左下角,或 `m-ui version`。Bottom-left of the panel, or `m-ui version`.
+      placeholder: v0.4.6
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 系统与架构 · OS / architecture
+      placeholder: Ubuntu 22.04 · amd64
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: 角色 · Role
+      options:
+        - 主服务器 · Master
+        - 副服务器 · Node
+        - 单机 · Single server
+        - 代理面板 · Reseller panel
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么 · What happened
+      description: 期望是什么,实际是什么。What you expected vs what happened.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤 · Steps to reproduce
+      placeholder: |
+        1. 设置 → …
+        2. 点击 …
+        3. 看到 …
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志 · Relevant logs
+      description: 面板「日志」页,或 `journalctl -u m-ui -n 200`。打码后再贴。Panel → Logs, or `journalctl -u m-ui -n 200`. Redact first.
+      render: shell

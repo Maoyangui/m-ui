@@ -1,0 +1,57 @@
+<!--meta {"title":"Features · m-ui","description":"Everything the m-ui panel does: lines for Hysteria2, AnyTLS, TUIC, VLESS Reality, Trojan, VMess and Shadowsocks 2022; upstreams and WARP; user quotas, device and speed limits; plans; resellers; subscriptions with landing pages; certificates; backups; multi-server; Telegram; external API; one-click update.","nav":"Features","order":3} -->
+<article class="doc">
+  <h1>Features</h1>
+  <p class="lead">What the panel manages, grouped the way the sidebar is. All of it lives in one binary and one SQLite file.</p>
+  <nav class="toc"><a href="#lines">Lines</a><a href="#upstreams">Upstreams</a><a href="#users">Users</a><a href="#plans">Plans</a><a href="#resellers">Resellers</a><a href="#subs">Subscriptions</a><a href="#servers">Servers</a><a href="#cert">Certificates</a><a href="#ops">Operations</a><a href="#security">Security</a><a href="#api">API</a></nav>
+
+  <h2 id="lines">Lines</h2>
+  <p>A line is inbound protocol + port → exit. Protocols: <b>Hysteria2</b> (with port hopping), <b>AnyTLS</b>, <b>TUIC</b>, <b>Trojan</b>, <b>VLESS</b> (Reality / Vision), <b>VMess</b>, <b>Shadowsocks</b> including the 2022 ciphers, plus SOCKS, HTTP and Mixed. Transports: WebSocket, gRPC, HTTPUpgrade, HTTP. Each line can be deployed to all servers or a chosen subset. Quick-add presets fill in a free port and sensible options; every save is dry-run through sing-box and port-checked against the panel, other lines and other processes on the box.</p>
+
+  <h2 id="upstreams">Upstreams</h2>
+  <p>Where traffic exits when it should not go direct: VLESS, VMess, Trojan, TUIC, Hysteria2, Shadowsocks and SOCKS outbounds, importable from share links. One-click latency test, scheduled health checks with failure/recovery alerts, and Cloudflare WARP set up from inside the panel. Changing an upstream hot-swaps the outbound without restarting the data plane.</p>
+
+  <h2 id="users">Users</h2>
+  <ul>
+    <li>Quota, expiry, periodic reset, simultaneous device limit (by source IP, unioned across servers), upload / download speed limits.</li>
+    <li>Over-quota and expired users are disabled and kicked automatically; the subscription landing page tells them why.</li>
+    <li>Bulk create, bulk enable / disable / extend / reset / delete, CSV export, legacy database import.</li>
+    <li>Subscription addresses can be the user name or a random token (setting), and users can generate a temporary share link that you can revoke — revoking cuts the borrower off immediately.</li>
+    <li>Adding, disabling or re-keying a user swaps the inbound user table in place: nobody else is disconnected.</li>
+  </ul>
+
+  <h2 id="plans">Plans</h2>
+  <p>Templates for quota, duration, devices, speed and line assignment. Apply on create, on renewal or when extending. Resellers get their own plans, separate from yours.</p>
+
+  <h2 id="resellers">Resellers</h2>
+  <p>Give a reseller a set of lines plus traffic, device, bandwidth and expiry budgets. They get their own panel (default port 2054, path <code>/dl</code>) where they create users and plans, set their own landing-page title, notice and contact, and optionally enable two-factor login. All usage rolls up to the reseller; when the reseller is over budget, expired or disabled, every user of theirs is cut off at once. Reseller users are never mixed into your own user list.</p>
+
+  <h2 id="subs">Subscriptions</h2>
+  <ul>
+    <li>Three formats from one address: universal links, Clash / Mihomo YAML, full sing-box JSON — chosen by <code>?format=</code> or the client's User-Agent.</li>
+    <li>Every line is listed once per server it is deployed on; external nodes and external subscriptions can be merged in.</li>
+    <li>Browser landing page: usage, expiry, notice, one-tap import for Clash, Shadowrocket, sing-box, Hiddify and Stash, QR code, client download page, temporary sharing.</li>
+    <li>Optional traffic-notice node at the top of the list; self-signed certificates automatically add <code>insecure</code> for clients.</li>
+    <li>Dead subscriptions get a short explanation page with your contact details instead of a blank 404.</li>
+  </ul>
+
+  <h2 id="servers">Servers</h2>
+  <p>One master, any number of nodes. The master pushes lines, upstreams, users and credentials every 5 seconds and pulls back traffic deltas and online IPs; nodes only forward. Per-server traffic ratio, per-server deployment of lines, connection tracking across servers. See <a href="{{base}}multi-server/">Multi-server</a>.</p>
+
+  <h2 id="cert">Certificates</h2>
+  <p>Let's Encrypt via HTTP-01 or Cloudflare DNS-01 with DNS and port pre-checks, automatic renewal and hot reload without a restart. No domain? Self-sign with one click. Bring your own certificate files too.</p>
+
+  <h2 id="ops">Operations</h2>
+  <ul>
+    <li><b>Backup / restore</b>: one zip with the database and certificates, scheduled daily backups, restore from the panel, a migration wizard for moving to a new machine.</li>
+    <li><b>Kernel tuning</b> and <b>WARP</b> installation from the Ops page, with logs streamed to the browser.</li>
+    <li><b>Telegram</b>: alerts for data plane, upstream and node failures, users about to expire or run out, daily report in your time zone.</li>
+    <li><b>Update</b>: the panel checks GitHub Releases every 6 hours; one click verifies the checksum, replaces the binary and restarts. Data, certificates and settings are untouched. Nodes update themselves the same way.</li>
+    <li><b>Logs</b> and <b>audit trail</b> in the panel; the SSH menu (<code>m-ui</code>) for port, path, password and emergency recovery.</li>
+  </ul>
+
+  <h2 id="security">Security</h2>
+  <p>Two-factor login (TOTP), login rate limiting per IP, sessions scoped per role, reseller isolation enforced server-side, checksum-verified downloads for the installer and the updater, no telemetry. Config changes never bypass validation.</p>
+
+  <h2 id="api">External API</h2>
+  <p>A token-authenticated HTTP API for creating and updating users, reading usage and fetching subscription links — for shops, bots and automation. Documented in <a href="{{github}}/blob/main/docs/API.md" rel="noopener">docs/API.md</a>.</p>
+</article>

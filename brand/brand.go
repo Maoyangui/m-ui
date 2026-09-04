@@ -20,6 +20,7 @@ const (
 	Tron     = "TDoUMF4nF244o5GZvBBwX5t9axvnSoP1Cm" // 打赏地址:TRON(TRX / USDT-TRC20)
 	RepoPath = "Maoyangui/m-ui"                     // GitHub 仓库 owner/name;换仓库改这里(deploy/install.sh 的 REPO 与 go.mod 模块路径另改)
 	Repo     = "https://github.com/" + RepoPath
+	Site     = "https://maoyangui.github.io/m-ui/" // 文档 / 介绍站(GitHub Pages)
 )
 
 // TelegramURL 点击即可打开对话。

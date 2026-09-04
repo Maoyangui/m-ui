@@ -1,0 +1,45 @@
+<!--meta {"title":"FAQ · m-ui","description":"Answers about m-ui: domains and self-signed certificates, ports and paths, subscription names in Clash and Shadowrocket, nodes, resellers, updates, backups, migration from a legacy panel, telemetry and system requirements.","nav":"FAQ","order":6} -->
+<article class="doc">
+  <h1>Frequently asked questions</h1>
+  <p class="lead">Short answers; the README's Feature guide has the long ones.</p>
+
+  <h2>Setup</h2>
+  <details><summary>Do I need a domain?</summary><p>No. <b>Certificate → Self-sign</b> gives you TLS on the server IP in one click, and subscriptions automatically tell clients to allow the insecure certificate. A domain lets you issue a Let's Encrypt certificate and removes that warning — recommended, not required.</p></details>
+  <details><summary>Which ports must be open?</summary><p>Panel <code>2053/tcp</code>, subscription <code>2056/tcp</code>, reseller panel <code>2054/tcp</code> if enabled, plus every line's port (TCP or UDP depending on the protocol). HTTP-01 certificate issuance also needs <code>80/tcp</code>; Cloudflare DNS-01 does not.</p></details>
+  <details><summary>Can I change the panel port or path?</summary><p>Yes, in Settings, or from the SSH menu (<code>m-ui</code>) if you locked yourself out. Paths work with or without the trailing slash. Ports are validated before saving so the panel cannot restart onto a port already used by a line or another program.</p></details>
+  <details><summary>What are the system requirements?</summary><p>Linux amd64 or arm64 with systemd; Debian 11+ / Ubuntu 20.04+ recommended, CentOS and Alpine work too. Root for installation. The panel itself is happy on 1 vCPU / 1 GB.</p></details>
+  <details><summary>Why does the new-line form already have a port?</summary><p>It picks a free five-digit port that no other line, the panel or any other process on the server is using, and binds it once to be sure. You can change it; conflicts are rejected on save.</p></details>
+
+  <h2>Users and subscriptions</h2>
+  <details><summary>The subscription shows my host name instead of the title I set.</summary><p>Set <b>Settings → Subscription → Profile title</b> (resellers set theirs in their own panel). Clients like nextin and sing-box re-read it on every refresh. Shadowrocket and Clash Verge name a subscription when it is <i>added</i> and never rename it — use the landing page's one-tap import button (it carries the title) or have the user delete and re-add.</p></details>
+  <details><summary>How is a device counted?</summary><p>By distinct source IP, across all servers. A phone on Wi-Fi and the same phone on mobile data are two IPs. The limit is enforced centrally by the master, so 3 means 3 in total.</p></details>
+  <details><summary>Can users share a subscription temporarily?</summary><p>If you enable sharing, the landing page offers a temporary share link that uses a second credential set. Revoking it disconnects the borrower immediately; usage, devices and expiry still count against the owner.</p></details>
+  <details><summary>What do users see when their subscription runs out?</summary><p>In a browser: a short "subscription unavailable" page with your notice and contact details (reseller users see the reseller's). Clients get a plain 404.</p></details>
+  <details><summary>Can subscription addresses avoid exposing user names?</summary><p>Yes. Untick <b>Settings → Subscription → Use user name as subscription URL</b>; new users then get a random 32-character token. Existing users keep their current address either way.</p></details>
+
+  <h2>Multi-server</h2>
+  <details><summary>Do nodes need their own certificate?</summary><p>Yes, each node issues its own (self-signed is fine). Lines are pushed with the master's TLS settings and each node serves them with its own certificate files.</p></details>
+  <details><summary>What if the master goes down?</summary><p>Nodes keep forwarding with the configuration they have. Subscriptions served by the master are unavailable until it returns; nodes can also serve subscriptions if you point users at them.</p></details>
+  <details><summary>Is traffic double-counted when a node reconnects?</summary><p>No. Nodes keep monotonic counters and the master stores a cursor per node, so only the delta is added. See <a href="{{base}}multi-server/">Multi-server</a>.</p></details>
+
+  <h2>Resellers</h2>
+  <details><summary>The new reseller cannot log in.</summary><p>A new reseller has no password. On the reseller panel they enter the name, leave the password empty and click Log in; the panel then asks them to set one. The first-login window can be reset from the master.</p></details>
+  <details><summary>Can a reseller see my users or lines?</summary><p>No. Resellers see only their own users and plans and only the lines you granted. Scoping is enforced on the server, not in the UI.</p></details>
+
+  <h2>Operations</h2>
+  <details><summary>How do updates work? Will I lose data?</summary><p>The sidebar shows an arrow when GitHub has a newer release. One click downloads the archive, verifies it against the release's SHA256SUMS, replaces the binary and restarts. The database, certificates, backups and settings are untouched. The installer does the same when run again.</p></details>
+  <details><summary>What is in a backup?</summary><p>The database (checkpointed so it is consistent) and the certificate files, as one zip. Restore from the panel; the migration wizard moves a whole installation to a new server.</p></details>
+  <details><summary>Can I migrate from a legacy panel?</summary><p>Yes — the importer reads the compatible legacy database format and keeps ports, credentials, panel path and subscription addresses, so existing clients continue without a refresh. Run the installer with <code>--import /path/to/old.db</code>, or use Users → Import to move only users.</p></details>
+  <details><summary>Does m-ui send any telemetry?</summary><p>No. Outbound connections are only the ones you configure (ACME, Cloudflare, WARP, Telegram) and a version check against GitHub Releases every 6 hours.</p></details>
+  <details><summary>Where do I ask questions or report bugs?</summary><p>Questions and ideas: <a href="{{github}}/discussions" rel="noopener">GitHub Discussions</a>. Confirmed bugs: <a href="{{github}}/issues/new/choose" rel="noopener">an issue</a> using the form. Please redact tokens, UUIDs and subscription URLs from logs.</p></details>
+
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
+   {"@type":"Question","name":"Do I need a domain to run m-ui?","acceptedAnswer":{"@type":"Answer","text":"No. Self-sign a certificate with one click and use the server IP; subscriptions tell clients to allow the insecure certificate. A domain lets you issue a Let's Encrypt certificate and removes that warning."}},
+   {"@type":"Question","name":"Which ports does m-ui need?","acceptedAnswer":{"@type":"Answer","text":"Panel 2053/tcp, subscription 2056/tcp, reseller panel 2054/tcp if enabled, plus each line's port. HTTP-01 certificate issuance also needs 80/tcp."}},
+   {"@type":"Question","name":"Does updating m-ui lose data?","acceptedAnswer":{"@type":"Answer","text":"No. The updater verifies the release checksum, replaces only the binary and restarts; the database, certificates, backups and settings are untouched."}},
+   {"@type":"Question","name":"Can m-ui manage multiple servers?","acceptedAnswer":{"@type":"Answer","text":"Yes. One master pushes lines, users and credentials to any number of nodes every 5 seconds and pulls back traffic and online IPs; quota and device limits are enforced centrally."}},
+   {"@type":"Question","name":"Does m-ui send telemetry?","acceptedAnswer":{"@type":"Answer","text":"No. The only outbound connections are the ones you configure and a version check against GitHub Releases every 6 hours."}}
+  ]}
+  </script>
+</article>

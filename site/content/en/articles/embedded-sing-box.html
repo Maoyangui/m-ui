@@ -1,0 +1,32 @@
+<!--meta {"title":"Why m-ui embeds sing-box instead of managing an external process","description":"The panel and the sing-box core run in one Go process. What that buys — in-process user tables, exact traffic counters, the same parser for validation — and what it costs, and how m-ui handles the cost.","type":"article","date":"2026-09-05"} -->
+<article class="doc">
+  <p class="meta">Deep dive · 2026-09-05</p>
+  <h1>Why m-ui embeds sing-box instead of managing an external process</h1>
+  <p class="lead">Most panels write a JSON file and restart a core they do not control. m-ui links sing-box as a Go library and runs it inside the panel process. This is the single decision most of the rest of the design follows from.</p>
+
+  <h2>What "embedded" means here</h2>
+  <p>sing-box is written in Go and exposes its box, inbound and outbound managers as packages. m-ui's <code>core/</code> package constructs a box from a rendered configuration (<code>NewBox</code>), starts it, and keeps handles to the inbound and outbound managers. When the panel needs to change something it calls those managers directly — <code>AddInbound</code>, <code>AddOutbound</code>, swap a user table — instead of writing a file and sending a signal. The data plane is a set of goroutines in the same process as the HTTP handlers and the SQLite connection.</p>
+
+  <h2>Four things this makes possible</h2>
+  <h3>1. Users change without a restart</h3>
+  <p>sing-box inbounds keep a user table keyed by credential. Because the panel holds the inbound object, it can replace that table in place when a user is added, disabled or re-keyed. Existing connections of other users are not touched. A panel driving an external process can only restart it or use whatever partial reload API the core offers over a socket.</p>
+  <h3>2. Exact traffic and connection data</h3>
+  <p>Per-user, per-line and per-upstream counters are read from the core's own trackers every 10 seconds — no parsing of stats APIs, no log scraping. Online source IPs come from the connection tracker, which is what makes a cross-server device limit possible at all.</p>
+  <h3>3. The same parser validates every save</h3>
+  <p>Before a line, user or upstream is committed, m-ui renders the complete configuration and asks sing-box's own option parser to load it (<code>core/validate.go</code>). Whatever sing-box would reject at startup is rejected at save time, inside the database transaction, with the core's own error message. There is no second, panel-side validator that can drift from the real one.</p>
+  <h3>4. One binary to install, back up and update</h3>
+  <p>There is no core version to keep in step with the panel version. The installer downloads one file; the updater replaces one file; a backup is the database plus certificates. The Docker-less install path is a direct consequence.</p>
+
+  <h2>What it costs</h2>
+  <p>Embedding also means the panel and the data plane share a process: if the data plane must restart, so does its host. Two things in m-ui exist specifically to pay this cost down.</p>
+  <ul>
+    <li><b>Three reload tiers.</b> Only changes to a line's protocol, port, TLS or transport restart the data plane. User changes swap tables; upstream changes swap outbounds. In practice the restart path is the rare one.</li>
+    <li><b>Rollback.</b> A configuration can pass the parser and still fail to start — another process grabbed the port, a certificate file vanished. <code>runner/</code> keeps the previous working config and, if the new one fails to come up, starts the old one again and reports the failure to the panel. Users are never left with nothing running because of a bad save.</li>
+  </ul>
+  <p>A third consequence is memory: the panel's footprint includes sing-box's. On a 1 GB VPS this is not a problem, and the panel does not need a second machine or container for the core.</p>
+
+  <h2>What it deliberately does not do</h2>
+  <p>m-ui does not expose sing-box's raw JSON as the primary interface. Lines, upstreams and users are the model; the JSON is rendered from them for every server. That keeps a multi-server deployment consistent by construction — the same record produces the same inbound on every node — at the price of not supporting every sing-box option. A per-line "advanced" field accepts extra inbound options for the cases the form does not cover.</p>
+
+  <p style="margin-top:2rem">Related: <a href="{{base}}articles/hot-reload/">how hot reload works</a> · <a href="{{base}}architecture/">architecture overview</a> · <a href="{{github}}/tree/main/core" rel="noopener">core/ on GitHub</a></p>
+</article>

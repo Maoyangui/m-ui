@@ -126,6 +126,12 @@ table.grid.tight { min-width: 0; table-layout: fixed; }
 .grid.tight .btn.sm { padding: .22rem .5rem; }
 /* 表格下方的分页条:上一页 · 页码 · 下一页,右侧选每页条数 */
 .pager { display: flex; align-items: center; gap: .6rem; padding: .6rem .2rem 0; }
+/* 真正为空时的引导(与"搜索无结果"分开):一句话说明 + 一个动作 */
+.empty-guide { text-align: center; padding: 2.4rem 1rem; }
+.empty-guide p { color: var(--muted); margin: 0 auto 1rem; max-width: 34rem; line-height: 1.6; }
+/* 配置完成后的 Star 卡片:一行,轻量 */
+.star-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.star-card .hint { margin: .15rem 0 0; }
 .pager select { padding: .2rem .35rem; font: inherit; font-size: .8rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
 /* 服务器表:窄列给定宽度,余下宽度留给名称/地址/状态三列 */
 .grid.nodes th:nth-child(4), .grid.nodes td:nth-child(4),

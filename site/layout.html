@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}}</title>
+<meta name="description" content="{{description}}">
+<link rel="canonical" href="{{canonical}}">
+  {{alternates}}
+<meta property="og:type" content="{{og_type}}">
+<meta property="og:site_name" content="m-ui">
+<meta property="og:title" content="{{title}}">
+<meta property="og:description" content="{{description}}">
+<meta property="og:url" content="{{canonical}}">
+<meta property="og:image" content="{{og_image}}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{title}}">
+<meta name="twitter:description" content="{{description}}">
+<meta name="twitter:image" content="{{og_image}}">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#2563eb">
+<link rel="icon" href="{{base}}logo.svg" type="image/svg+xml">
+<link rel="alternate" type="application/atom+xml" title="m-ui releases" href="{{base}}feed.xml">
+<link rel="stylesheet" href="{{base}}assets/site.css">
+{{jsonld}}
+</head>
+<body>
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="{{home}}"><img src="{{base}}logo.svg" alt="" width="28" height="28"><span>m-ui</span></a>
+    <nav class="nav" aria-label="main">{{nav}}</nav>
+    <div class="right">
+      <a class="lang" href="{{switch_href}}">{{switch_label}}</a>
+      <a class="gh" href="{{github}}" rel="noopener">{{t_github}}</a>
+      <a class="cta" href="{{getting_started}}">{{t_install}}</a>
+    </div>
+  </div>
+</header>
+<main class="wrap">
+{{content}}
+</main>
+<footer class="foot">
+  <div class="wrap">
+    <div class="cols">
+      <div><a class="brand" href="{{home}}"><img src="{{base}}logo.svg" alt="" width="22" height="22"><span>m-ui</span></a><p class="muted">{{t_license}}</p></div>
+      <div>
+        <a href="{{github}}" rel="noopener">{{t_github}}</a>
+        <a href="{{github}}/releases" rel="noopener">{{t_releases}}</a>
+        <a href="{{github}}/discussions" rel="noopener">{{t_discussions}}</a>
+        <a href="{{base}}feed.xml">{{t_feed}}</a>
+      </div>
+    </div>
+    <p class="muted small">© {{year}} Maoyangui</p>
+  </div>
+</footer>
+<script>
+// 复制安装命令:纯装饰,没有 JS 也能选中复制
+document.querySelectorAll('[data-copy]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var text = b.getAttribute('data-copy');
+    var done = function () { var l = b.textContent; b.textContent = '✓'; setTimeout(function () { b.textContent = l; }, 1500); };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done); else { var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); done(); }
+  });
+});
+</script>
+</body>
+</html>

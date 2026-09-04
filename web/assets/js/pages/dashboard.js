@@ -27,12 +27,14 @@ function quickStart() {
   if (s.role === 'node') return '';
   let hidden = false;
   try { hidden = localStorage.getItem('m-ui.hideQuickStart') === '1'; } catch {}
+  // 两条正规路径都算配置完成:有域名 → 正式证书;没域名 → IP + 自签证书。
+  // 域名放在可选项里(推荐,但不是使用 m-ui 的前置条件),自签证书视为"证书已就绪"。
   const items = [
     { ok: !s.defaultPassword, page: 'admin', text: t('qs.password'), opt: false },
-    { ok: !!s.domain, page: 'settings', text: t('qs.domain'), opt: false },
-    { ok: s.certExists && !s.certSelfSigned, page: 'cert', text: s.certExists && s.certSelfSigned ? t('qs.certSelf') : t('qs.cert'), opt: false },
+    { ok: !!s.certExists, page: 'cert', text: s.certExists && s.certSelfSigned ? t('qs.certSelf') : t('qs.cert'), opt: false },
     { ok: (s.lines || 0) > 0, page: 'lines', text: t('qs.lines'), opt: false },
     { ok: (s.users || 0) > 0, page: 'users', text: t('qs.users'), opt: false },
+    { ok: !!s.domain, page: 'settings', text: t('qs.domain'), opt: true },
     { ok: (s.upstreams || 0) > 0, page: 'upstreams', text: t('qs.upstreams'), opt: true },
     { ok: !!s.tgEnabled, page: 'settings', text: t('qs.telegram'), opt: true },
     { ok: (s.nodes || 0) > 1, page: 'nodes', text: t('qs.nodes'), opt: true },
@@ -47,10 +49,26 @@ function quickStart() {
   </section>`;
 }
 
+// 真正用起来之后(密码已改、证书就绪、有线路有用户)才出现一次,轻量、可永久关闭。
+function starCard() {
+  const s = state.status;
+  if (s.role === 'node' || !s.repo) return '';
+  try { if (localStorage.getItem('m-ui.starDismissed') === '1') return ''; } catch {}
+  if (s.defaultPassword || !s.certExists || !(s.lines > 0) || !(s.users > 0)) return '';
+  return `<section class="card star-card" id="star-card">
+    <div><b>${t('star.title')}</b><p class="hint">${t('star.text')}</p></div>
+    <div class="row">
+      <a class="btn primary sm" href="${esc(s.repo)}" target="_blank" rel="noopener" data-act="dash.starGo">★ ${t('star.btn')}</a>
+      <button class="btn ghost sm" data-act="dash.starDismiss">${t('star.dismiss')}</button>
+    </div>
+  </section>`;
+}
+
 export async function render(el) {
   if (isReseller()) return renderReseller(el);
   el.innerHTML = `
     ${quickStart()}
+    ${starCard()}
     <div class="stats" id="dash-stats"></div>
     <div class="grid-2">
       <section class="card">
@@ -258,6 +276,8 @@ registerActions({
     document.querySelectorAll('#dash-toprange button').forEach(b => b.classList.toggle('active', b.dataset.id === id));
     await renderTop();
   },
+  'dash.starDismiss': () => { try { localStorage.setItem('m-ui.starDismissed', '1'); } catch {} const c = document.getElementById('star-card'); if (c) c.remove(); },
+  'dash.starGo': () => { try { localStorage.setItem('m-ui.starDismissed', '1'); } catch {} const c = document.getElementById('star-card'); if (c) c.remove(); },
   'dash.hideQs': () => { try { localStorage.setItem('m-ui.hideQuickStart', '1'); } catch {} document.querySelector('.quickstart')?.remove(); },
   'dash.healthRun': async (_, btn) => {
     btn.disabled = true;

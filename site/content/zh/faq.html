@@ -1,0 +1,45 @@
+<!--meta {"title":"常见问题 · m-ui","description":"关于 m-ui 的问答:域名与自签证书、端口与路径、Clash 和小火箭里的订阅名、副机、代理、更新、备份、从旧面板迁移、遥测与系统要求。","nav":"常见问题","order":6} -->
+<article class="doc">
+  <h1>常见问题</h1>
+  <p class="lead">短答案;长的在 README 的功能说明里。</p>
+
+  <h2>安装与配置</h2>
+  <details><summary>一定要有域名吗?</summary><p>不用。<b>证书 → 自签</b>一键就有 TLS,订阅会自动告诉客户端允许不安全证书。有域名可以签 Let's Encrypt 证书、去掉那个提示 —— 推荐,但不是必须。</p></details>
+  <details><summary>要放行哪些端口?</summary><p>面板 <code>2053/tcp</code>、订阅 <code>2056/tcp</code>、开了代理面板再加 <code>2054/tcp</code>,以及每条线路的端口(TCP 或 UDP 看协议)。用 HTTP-01 签证书还需要 <code>80/tcp</code>;Cloudflare DNS-01 不需要。</p></details>
+  <details><summary>能改面板端口和路径吗?</summary><p>能,在设置里改;把自己锁在外面了就用 SSH 菜单(<code>m-ui</code>)。路径带不带结尾斜杠都能打开。端口保存前会校验,面板不会重启到一个被线路或别的程序占着的端口上。</p></details>
+  <details><summary>系统要求?</summary><p>Linux amd64 或 arm64,带 systemd;推荐 Debian 11+ / Ubuntu 20.04+,CentOS、Alpine 也行。安装需要 root。面板本身 1 核 1 GB 足够。</p></details>
+  <details><summary>为什么新建线路的表单里已经填了端口?</summary><p>它挑了一个没被其它线路、面板和本机任何程序占用的五位端口,还真的绑定了一次确认。可以改;保存时冲突会被拦下。</p></details>
+
+  <h2>用户与订阅</h2>
+  <details><summary>客户端里订阅名显示的是域名,不是我设的标题。</summary><p>去 <b>设置 → 订阅 → 订阅标题</b> 填(代理在自己面板的订阅页填)。nextin、sing-box 这类每次刷新都读标题的客户端刷新即可。小火箭和 Clash Verge 是在<i>添加</i>订阅那一刻定名的,之后不改 —— 用落地页的一键导入按钮(会带上标题),或者让用户删掉重加。</p></details>
+  <details><summary>设备数怎么算?</summary><p>按不同的源 IP 算,跨所有服务器。手机连 Wi-Fi 和连流量是两个 IP。由主机统一判定,上限 3 就是总共 3 个。</p></details>
+  <details><summary>用户能临时把订阅共享给别人吗?</summary><p>你开启共享后,落地页上能生成一条临时共享地址,用的是另一套凭据。取消即刻断掉借用者;用量、设备、到期都算在本人头上。</p></details>
+  <details><summary>用户订阅用完了看到什么?</summary><p>浏览器里是一页简短的"订阅不可用",带你的公告和联系方式(代理的用户看到代理的)。客户端拿到的是纯 404。</p></details>
+  <details><summary>订阅地址能不暴露用户名吗?</summary><p>能。取消勾选 <b>设置 → 订阅 → 用户名用作订阅链接</b>,之后新建的用户拿到 32 位随机令牌。已有用户的地址不受影响。</p></details>
+
+  <h2>多服务器</h2>
+  <details><summary>副机要自己的证书吗?</summary><p>要,各自签发(自签就行)。线路带着主机的 TLS 设置下发,每台副机用自己的证书文件跑。</p></details>
+  <details><summary>主机挂了怎么办?</summary><p>副机拿着手里的配置照常转发。主机提供的订阅在它回来前打不开;把用户指向副机的话,副机也能提供订阅。</p></details>
+  <details><summary>副机重连后流量会重复计吗?</summary><p>不会。副机保存单调计数器,主机为每台副机存游标,只加增量。见<a href="{{base}}zh/multi-server/">多服务器</a>。</p></details>
+
+  <h2>代理</h2>
+  <details><summary>新建的代理登不进去。</summary><p>新代理没有密码。在代理面板输入名字,密码留空直接点登录,面板会要求设一个。首登窗口过期了可以在主面板重置。</p></details>
+  <details><summary>代理能看到我的用户或线路吗?</summary><p>不能。代理只看到自己的用户与套餐,只能用你授权的线路。隔离在服务端强制,不是靠界面藏起来。</p></details>
+
+  <h2>运维</h2>
+  <details><summary>更新怎么做?会丢数据吗?</summary><p>GitHub 有新版本时侧栏会出现箭头。点一下:下载压缩包、用 Release 里的 SHA256SUMS 校验、替换程序、重启。数据库、证书、备份、设置都不动。再跑一遍安装命令效果一样。</p></details>
+  <details><summary>备份里有什么?</summary><p>数据库(做过检查点,自洽)和证书文件,打成一个 zip。面板里就能还原;换机向导能把整套搬到新服务器。</p></details>
+  <details><summary>能从旧面板迁移吗?</summary><p>能 —— 导入器读兼容格式的旧面板数据库,保留端口、凭据、面板路径与订阅地址,既有客户端不用刷新就能继续连。安装时加 <code>--import /path/to/旧面板.db</code>,或者用 用户 → 从旧面板导入 只搬用户。</p></details>
+  <details><summary>m-ui 会上报什么吗?</summary><p>不会。对外连接只有你自己配置的(ACME、Cloudflare、WARP、Telegram),以及每 6 小时向 GitHub Releases 查一次新版本。</p></details>
+  <details><summary>去哪提问、报 Bug?</summary><p>提问和想法:<a href="{{github}}/discussions" rel="noopener">GitHub Discussions</a>。确定的 Bug:<a href="{{github}}/issues/new/choose" rel="noopener">用表单提 Issue</a>。日志里的令牌、UUID、订阅地址请先打码。</p></details>
+
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"FAQPage","inLanguage":"zh-CN","mainEntity":[
+   {"@type":"Question","name":"用 m-ui 一定要有域名吗?","acceptedAnswer":{"@type":"Answer","text":"不用。一键自签证书,直接用服务器 IP;订阅会告诉客户端允许不安全证书。有域名可以签 Let's Encrypt 证书,去掉提示。"}},
+   {"@type":"Question","name":"m-ui 需要放行哪些端口?","acceptedAnswer":{"@type":"Answer","text":"面板 2053/tcp、订阅 2056/tcp、代理面板 2054/tcp(开启时),以及每条线路的端口。HTTP-01 签证书还需要 80/tcp。"}},
+   {"@type":"Question","name":"更新 m-ui 会丢数据吗?","acceptedAnswer":{"@type":"Answer","text":"不会。更新器校验 Release 摘要后只替换程序本体并重启;数据库、证书、备份和设置都不动。"}},
+   {"@type":"Question","name":"m-ui 能管理多台服务器吗?","acceptedAnswer":{"@type":"Answer","text":"能。一台主机每 5 秒把线路、用户、凭据推给任意多台副机,收回流量和在线 IP;配额与设备数统一判定。"}},
+   {"@type":"Question","name":"m-ui 会上报数据吗?","acceptedAnswer":{"@type":"Answer","text":"不会。对外连接只有你自己配置的,以及每 6 小时向 GitHub Releases 查一次新版本。"}}
+  ]}
+  </script>
+</article>

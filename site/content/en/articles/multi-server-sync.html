@@ -1,0 +1,37 @@
+<!--meta {"title":"How m-ui keeps many servers in sync from one master","description":"The m-ui master/node protocol: a hashed snapshot pushed every 5 seconds, revision-based idempotent apply on nodes, concurrent per-node sync, monotonic traffic counters with per-node cursors, online-IP exchange for cross-server device limits, and behaviour during outages.","type":"article","date":"2026-09-05"} -->
+<article class="doc">
+  <p class="meta">Deep dive · 2026-09-05</p>
+  <h1>How m-ui keeps many servers in sync from one master</h1>
+  <p class="lead">There is no message broker and no shared database between servers. The master owns the truth in its SQLite file, pushes a complete snapshot every five seconds, and pulls back only what nodes know better: traffic and who is online.</p>
+
+  <h2>The snapshot</h2>
+  <p>Every tick the master's <code>hub/</code> reads lines, upstreams, users (with credentials, minus the master's own usage counters), user↔line assignments, external nodes, resellers and the handful of settings that affect rendering, and serialises them. A SHA-256 of that serialisation is the <b>revision</b>. The snapshot is complete rather than incremental on purpose: a node can always be brought to the right state from one message, whatever it missed.</p>
+
+  <h2>Push, and why nodes are idempotent</h2>
+  <p>The master pushes the snapshot to a node when the node's last acknowledged revision differs, or every ten minutes regardless. A node compares the revision with what it has applied; if equal it answers immediately and does nothing. If different it writes the snapshot into its own database in one transaction and reloads by the same three tiers the master uses — user-only differences swap the inbound user table, upstream differences swap outbounds, line differences restart the data plane with rollback. Because the whole state arrives every time, a node that was offline for an hour needs one push, not a replay.</p>
+
+  <h2>Concurrency: one slow node cannot block the others</h2>
+  <p>Since v0.4.6 each node's push-then-report round trip runs in its own goroutine. Only the database writes that follow — merging counters, storing public IPs — happen sequentially on the master, because SQLite prefers one writer. A node that takes the full 25-second timeout delays itself by 25 seconds; the others finish in the usual few hundred milliseconds.</p>
+
+  <h2>Traffic: counters and cursors</h2>
+  <p>Nodes never decrement anything. Each keeps a per-user <b>monotonic counter</b> of bytes forwarded, updated from the embedded core every 10 seconds. The master keeps, per node and user, a <b>cursor</b>: the last counter value it has already accounted for. Each report is <code>counter − cursor</code>, added to the user's usage (scaled by the node's traffic ratio) and to the time series; then the cursor moves forward.</p>
+  <p>If a counter comes back <i>smaller</i> than the cursor, the node was reinstalled or its database reset. The master re-bases the cursor to the new value instead of subtracting, so a reset never produces negative or doubled usage. Duplicate reports (a retried request) are harmless for the same reason: the delta is zero.</p>
+
+  <h2>Device limits across servers</h2>
+  <p>A device limit counts distinct source IPs, and IPs are seen by whichever server the client connected to. Every report carries the node's online IPs per user. The master merges them with its own, and in the same tick sends each node the IPs seen <i>elsewhere</i>. Each server then enforces the limit against the union: three devices means three across the fleet. Enforcement stays local and fast; only the IP lists travel.</p>
+
+  <h2>What travels back</h2>
+  <p>Besides counters and IPs, a report carries the node's version, whether its core is running, uptime, certificate days remaining, its detected public IP (used as the node's address in subscriptions unless you set one), and a short list of recent connections for the dashboard. Nothing about the master goes to nodes except the snapshot.</p>
+
+  <h2>Outages</h2>
+  <ul>
+    <li><b>Node unreachable:</b> it keeps forwarding with its last snapshot. The master marks it offline, alerts via Telegram after a minute if configured, and retries every tick. On return: one push, cursors resume, nothing is lost or double-counted.</li>
+    <li><b>Master unreachable:</b> nodes continue unchanged. Quota enforcement pauses until the master is back, because only the master judges quota — a deliberate choice so a partition never disables users by mistake.</li>
+    <li><b>Node removed:</b> lines deployed only to it are disabled rather than silently spread to all servers, and its cursors and caches are dropped.</li>
+  </ul>
+
+  <h2>Security of the channel</h2>
+  <p>Each node has its own token; the master stores it and sends it as a header over HTTPS to the node's panel address. Nodes accept agent calls only in node mode and only with the right token, with constant-time comparison. Snapshots contain user credentials by necessity — they are what the node's inbounds need — which is why node panels are meant to sit behind TLS, self-signed or otherwise.</p>
+
+  <p style="margin-top:2rem">Related: <a href="{{base}}multi-server/">multi-server overview</a> · <a href="{{base}}articles/hot-reload/">how reload tiers work</a> · <a href="{{github}}/tree/main/hub" rel="noopener">hub/ on GitHub</a></p>
+</article>

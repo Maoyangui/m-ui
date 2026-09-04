@@ -1,0 +1,21 @@
+name: 功能建议 · Feature request
+description: 想要 m-ui 做什么。What you would like m-ui to do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决什么问题 · The problem
+      description: 先说场景,再说想法。Describe the situation before the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 希望怎么做 · Proposed behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 现在怎么绕过 · Current workaround

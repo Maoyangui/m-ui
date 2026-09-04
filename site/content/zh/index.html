@@ -1,0 +1,73 @@
+<!--meta {"title":"m-ui · 内嵌 sing-box 的多服务器面板","description":"自托管的 sing-box 面板,一个 Go 二进制:内嵌内核、用户与上游热更新、保存前干跑校验并可回滚、一主多副同步、带落地页的订阅、代理、WARP 与证书。","nav":"首页","order":1} -->
+<section class="hero">
+  <h1>一个二进制就能跑的 sing-box 面板</h1>
+  <p class="lead">m-ui 把 sing-box 内嵌进面板,而不是在旁边看着一个外部进程。改用户、换上游都是热更新,别人不断线;每次保存先交给 sing-box 干跑;一台主机把任意多台副机同步好。</p>
+  <div class="actions">
+    <a class="btn" href="{{base}}zh/getting-started/">五分钟装好</a>
+    <a class="btn ghost" href="{{github}}" rel="noopener">GitHub</a>
+  </div>
+  <div class="install">
+    <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
+    <button type="button" data-copy="bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)" title="复制">复制</button>
+  </div>
+  <figure class="shot"><img src="{{base}}img/dashboard.png" alt="m-ui 概览:流量走势、数据面状态、在线用户与流量排行" width="1440" height="900" loading="eager"></figure>
+</section>
+
+<section class="block" id="why">
+  <h2>为什么是 m-ui</h2>
+  <p class="sub">不是又一个套壳面板。下面这些才是真正不一样的地方。</p>
+  <div class="grid">
+    <div class="card"><h3>内嵌 sing-box</h3><p>内核跑在面板进程里。不用单独装、不用对版本、不用手动重启,面板在进程内直接操作它。</p></div>
+    <div class="card"><h3>一条线路就是一件事</h3><p>入口协议 + 端口 → 从哪出去。不用分别维护入站、出站、路由三张表。Hysteria2、AnyTLS、TUIC、VLESS Reality、Trojan、VMess、Shadowsocks 2022。</p></div>
+    <div class="card"><h3>改用户、换上游不断线</h3><p>加人、停用、换凭据只是换入站的用户表;换出口只是换出站。其他人的连接一个都不掉。</p></div>
+    <div class="card"><h3>先校验再上线</h3><p>每次保存先让 sing-box 解析一遍,坏配置进不了库;新配置万一起不来,自动回滚到上一份能用的。</p></div>
+    <div class="card"><h3>一主多副</h3><p>线路、用户、凭据每 5 秒推给所有副机;流量和在线 IP 回收到主机,配额与设备数统一判定。</p></div>
+    <div class="card"><h3>运维不用回终端</h3><p>Let's Encrypt、Cloudflare WARP、内核调优、备份还原、换机向导、Telegram 通知、两步验证、一键更新,都在面板里。</p></div>
+  </div>
+</section>
+
+<section class="block" id="path">
+  <h2>从空服务器到第一条订阅</h2>
+  <p class="sub">域名是推荐项,不是前置条件 —— IP + 自签证书是完整支持的路径。</p>
+  <ol class="steps">
+    <li><b>安装</b><span>Debian / Ubuntu 一条命令,打开 <code>:2053/app/</code> 登录。</span></li>
+    <li><b>证书</b><span>有域名就签发,没有就一键自签。</span></li>
+    <li><b>线路</b><span>快速添加里选个协议,空闲端口自动填好。</span></li>
+    <li><b>用户</b><span>建第一个用户,详情抽屉直接打开:订阅地址和二维码就在眼前。</span></li>
+    <li><b>订阅</b><span>Clash、sing-box、通用链接三种格式,外加一页带用量和一键导入的落地页。</span></li>
+  </ol>
+  <p style="margin-top:1rem"><a href="{{base}}zh/getting-started/">看完整的上手指南 →</a></p>
+</section>
+
+<section class="block" id="multi">
+  <h2>多服务器,不用再开表格记</h2>
+  <p class="sub">每台都装 m-ui,其中几台切成副机,把配对信息贴进主机。订阅里每条线路按服务器各出一个节点,客户端自己挑延迟低的。</p>
+  <figure class="shot"><img src="{{base}}img/nodes.png" alt="服务器页:一主两副,均在线并已同步" width="1440" height="900" loading="lazy"></figure>
+  <p style="margin-top:1rem"><a href="{{base}}zh/multi-server/">主副机是怎么同步的 →</a></p>
+</section>
+
+<section class="block" id="user">
+  <h2>用户拿到的是什么</h2>
+  <p class="sub">一条在 Clash、sing-box、小火箭、Stash、Hiddify 里都能用的订阅,和一页自己会说话的落地页:用量、到期、一键导入、二维码、客户端下载。订阅用完了,浏览器里看到的是原因和联系方式,不是一片空白的 404。</p>
+  <div class="grid">
+    <figure class="shot" style="margin:0"><img src="{{base}}img/user-detail.png" alt="用户详情抽屉:订阅地址、二维码、用量与流量走势" loading="lazy"></figure>
+    <figure class="shot phone" style="margin:0 auto"><img src="{{base}}img/landing.png" alt="手机上的订阅落地页:用量、到期、一键导入" loading="lazy"></figure>
+  </div>
+</section>
+
+<div class="ctaband">
+  <h2>免费、GPL-3.0、一个二进制</h2>
+  <p>Linux amd64 / arm64。状态在 SQLite,界面是原生 JS,没有构建链,没有外部数据库。</p>
+  <a class="btn" href="{{github}}" rel="noopener">到 GitHub 点个 Star</a>
+</div>
+
+<section class="block" id="faq">
+  <h2>先答几个问题</h2>
+  <article class="doc" style="padding:0;max-width:none">
+    <details><summary>一定要有域名吗?</summary><p>不用。一键自签证书,直接用服务器 IP;订阅里会自动告诉客户端允许不安全证书。有域名可以签正式证书,客户端就不再提示。</p></details>
+    <details><summary>是某个面板的分支吗?</summary><p>m-ui 有自己的数据模型(线路,而不是入站 / 出站 / 路由三张表)、自己内嵌的数据面和自己的同步协议。它能导入旧面板的数据库,割接后既有客户端不用刷新订阅就能继续连。</p></details>
+    <details><summary>会不会偷偷上报?</summary><p>没有遥测。对外的请求只有你自己配置的:签证书、WARP、Telegram,以及每 6 小时向 GitHub Releases 查一次新版本。</p></details>
+    <details><summary>跑在什么上面?</summary><p>Linux,amd64 或 arm64,systemd。面板本身 1 核 1 GB 的小鸡绰绰有余。</p></details>
+  </article>
+  <p style="margin-top:1rem"><a href="{{base}}zh/faq/">更多问题 →</a></p>
+</section>

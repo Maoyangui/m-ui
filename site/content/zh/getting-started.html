@@ -1,0 +1,53 @@
+<!--meta {"title":"快速上手 · m-ui","description":"一条命令在 Debian / Ubuntu 上装好 m-ui,准备证书(正式或自签),建一条线路、一个用户,把第一条订阅发出去 —— 大约五分钟。","nav":"快速上手","order":2} -->
+<article class="doc">
+  <h1>快速上手</h1>
+  <p class="lead">一条命令把面板和内嵌的 sing-box 装成 systemd 服务。五分钟后,第一个用户就能导入订阅。</p>
+  <nav class="toc"><a href="#install">安装</a><a href="#login">首次登录</a><a href="#cert">证书</a><a href="#line">线路</a><a href="#user">用户</a><a href="#sub">订阅</a><a href="#upgrade">升级</a><a href="#uninstall">卸载</a></nav>
+
+  <h2 id="install">1. 安装</h2>
+  <p>任何带 systemd 的 Linux,amd64 或 arm64(推荐 Debian 11+ / Ubuntu 20.04+),root 运行:</p>
+  <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
+  <p>脚本下载最新 Release,用同一个 Release 里的 <code>SHA256SUMS</code> 校验,装到 <code>/usr/local/bin/m-ui</code>,创建 systemd 服务并启动。数据库在 <code>/etc/m-ui/m-ui.db</code>。除此之外什么都不装 —— 没有 Docker、没有 Node、没有外部数据库。</p>
+  <div class="note">从旧面板过来?安装时加 <code>--import /path/to/旧面板.db</code>,线路、上游、用户、设置一次带过来 —— 端口、凭据、订阅路径都保留,既有客户端不用刷新订阅就能继续连。线路已经在 m-ui 上重建好、只想搬用户,用 <b>用户 → 从旧面板导入</b>。</div>
+
+  <h2 id="login">2. 首次登录</h2>
+  <ul>
+    <li>面板地址:<code>http://&lt;服务器IP&gt;:2053/app/</code></li>
+    <li>默认账号:<code>admin</code> / <code>admin</code></li>
+  </ul>
+  <p>顶部会一直提示,直到你把默认密码改掉 —— 先去 <b>管理员</b> 页改。端口、路径、账号以后也可以在 SSH 里执行 <code>m-ui</code> 用菜单改。界面有中英文,侧栏底部切换。</p>
+
+  <h2 id="cert">3. 证书</h2>
+  <p>大多数协议需要 TLS。两条路都是完整支持的:</p>
+  <table>
+    <tr><th>你有</th><th>怎么做</th><th>结果</th></tr>
+    <tr><td>解析到这台服务器的域名</td><td><b>证书 → 签发</b>:Let's Encrypt,HTTP-01(80 端口可达)或 Cloudflare DNS-01(填 API Token,不用开 80)。到期自动续。</td><td>正式证书,客户端不提示。</td></tr>
+    <tr><td>只有 IP</td><td><b>证书 → 自签</b>,一键。</td><td>到处都能用;订阅会自动告诉客户端允许不安全证书。以后有了域名再换。</td></tr>
+  </table>
+  <p>概览页的「快速开始」把这两种都算作"证书已就绪"。域名是推荐项,不是前置条件。</p>
+
+  <h2 id="line">4. 建线路</h2>
+  <p><b>线路</b> = 入口协议 + 端口 → 从哪出去(直连,或以后添加的上游)。线路页用 <b>快速添加</b>:Hysteria2、AnyTLS、VLESS + Reality、Trojan、Shadowsocks 2022、VMess + WS 都带合理默认值,空闲的五位端口已经填好。保存前会检查端口有没有和其它线路、面板、以及这台机器上任何别的程序撞上。</p>
+  <p>每次保存都先交给 sing-box 干跑。解析不通过就告诉你原因,运行中的数据面一动不动。</p>
+
+  <h2 id="user">5. 建用户</h2>
+  <p>用户页 <b>新增用户</b>:名字,可选的配额、到期、设备数、限速,以及能用哪些线路。各协议的凭据自动生成。第一个用户建好后,详情抽屉直接打开:订阅地址和二维码就在那里。</p>
+
+  <h2 id="sub">6. 把订阅发出去</h2>
+  <p>每个用户一个订阅地址,三种格式:</p>
+  <ul>
+    <li><b>通用链接</b>(默认)—— 小火箭、nextin、Surge、Quantumult X、Loon、Karing……</li>
+    <li><code>?format=clash</code> —— Clash / Mihomo / Clash Verge / FlClash / Stash</li>
+    <li><code>?format=json</code> —— 完整的 sing-box 配置,给 SFA / SFI / 桌面版 sing-box</li>
+  </ul>
+  <p>用浏览器打开同一个地址就是落地页:用量、到期、一键导入、二维码、客户端下载。你允许的话,用户还能在那里生成临时共享地址。订阅用完、到期或被停用时,浏览器里看到的是一句说明和你的联系方式,不是一片空白的 404。</p>
+
+  <h2 id="upgrade">升级</h2>
+  <p>点侧栏版本号旁边的更新箭头(面板每 6 小时查一次 GitHub Releases),或者再跑一遍安装命令,或者在 <code>m-ui</code> 菜单里选「更新到最新版」。只换程序本体;数据库、证书、设置都不动。</p>
+
+  <h2 id="uninstall">卸载</h2>
+  <pre><code>m-ui   # 菜单选 14</code></pre>
+  <p>服务与程序会被删掉;菜单会问要不要连 <code>/etc/m-ui</code> 数据目录一起删。</p>
+
+  <p style="margin-top:2rem">下一步:<a href="{{base}}zh/multi-server/">加更多服务器</a> · <a href="{{base}}zh/features/">面板还能做什么</a> · <a href="{{base}}zh/faq/">常见问题</a></p>
+</article>

@@ -1,0 +1,67 @@
+<!--meta {"title":"架构 · m-ui","description":"m-ui 是怎么搭的:一个 Go 进程跑面板、订阅服务、内嵌 sing-box 数据面和后台任务,共用一个 SQLite 文件;保存 → 干跑 → 三级重载;主副机同步;数据模型。","nav":"架构","order":5} -->
+<article class="doc">
+  <h1>架构</h1>
+  <p class="lead">一个二进制跑四件事,共用一个 SQLite 文件。这里是短版;README 里有同样内容的时序图与 ER 图。</p>
+  <nav class="toc"><a href="#process">一个进程</a><a href="#save">保存一次改动</a><a href="#request">一次订阅请求</a><a href="#sync">主副机</a><a href="#model">数据模型</a><a href="#cadence">后台节奏</a><a href="#code">代码结构</a></nav>
+
+  <h2 id="process">一台服务器里有什么</h2>
+  <table>
+    <tr><th>部分</th><th>监听</th><th>负责</th></tr>
+    <tr><td>面板</td><td><code>:2053 /app/</code>(代理面板 <code>:2054 /dl/</code>)</td><td>会话、API、代理作用域。两个面板是同一套前端,会话决定能看到什么。</td></tr>
+    <tr><td>订阅服务</td><td><code>:2056 /sub/</code></td><td>三种格式、落地页、客户端下载页、临时共享、"订阅不可用"说明页。</td></tr>
+    <tr><td>数据面</td><td>各线路端口</td><td>内嵌 sing-box:每条线路一个入站、每个上游一个出站,流量与连接跟踪,按用户限制。</td></tr>
+    <tr><td>后台</td><td>—</td><td>每 10 秒统计,每分钟判配额,上游巡检,证书续期,备份,每 5 秒主副同步。</td></tr>
+  </table>
+  <p>四者共用 <code>m-ui.db</code>(SQLite,WAL 模式)。面板写,数据面和订阅服务读,所以面板里点一下保存,各处立刻看到同一份数据。没有消息队列、没有缓存服务、没有第二个数据库要跑。</p>
+
+  <h2 id="save">保存一次改动,发生了什么</h2>
+  <ol>
+    <li>字段校验与端口检查 —— 对照其它线路、面板端口,以及本机上任何已经在监听的程序。</li>
+    <li>开写事务(<code>BEGIN IMMEDIATE</code>)写入改动。</li>
+    <li>从库里渲染出整份配置,交给 sing-box 自己的解析器。解析不通过就回滚事务,请求带着原因失败。线上一动没动。</li>
+    <li>通过后按改动分级应用:<b>改用户</b> → 换入站用户表(别人不断线);<b>改上游</b> → 热换出站;<b>改线路</b> → 重启数据面,新配置起不来(比如端口被别的进程抢走)就恢复上一份能用的。</li>
+  </ol>
+
+  <h2 id="request">一次订阅请求</h2>
+  <p><code>GET /sub/&lt;地址&gt;</code>:地址按用户名、随机订阅令牌、临时共享令牌(同一个用户,另一套凭据)依次匹配。停用的用户、到期的代理、对不上的地址都是 404 —— 浏览器看到一页说明,客户端拿到纯 404。有效用户:浏览器得到落地页;客户端按 <code>?format=</code> 得到通用链接、Clash YAML 或 sing-box 配置。节点 = 用户已分配的线路 × 线路部署的服务器,再拼上外部节点与外部订阅。</p>
+
+  <h2 id="sync">主副机</h2>
+  <p>主机每 5 秒把线路、上游、用户、凭据、代理和同步设置做成快照,哈希成修订号,并发推给所有副机,再拉回每台的报告(游标之后的流量、在线 IP、状态)。副机不判配额;主机停用的用户在下一份快照里自然消失。细节见<a href="{{base}}zh/multi-server/">多服务器</a>。</p>
+
+  <h2 id="model">数据模型</h2>
+  <table>
+    <tr><th>表</th><th>存什么</th><th>关系</th></tr>
+    <tr><td>lines</td><td>协议、端口、TLS、传输、参数、部署到哪些服务器</td><td>→ upstream(出口);↔ users(user_lines);↔ nodes</td></tr>
+    <tr><td>users</td><td>各协议凭据、配额与用量、到期、设备与限速、订阅地址、共享令牌</td><td>↔ lines;→ reseller(可选);← plans(建号时)</td></tr>
+    <tr><td>upstreams</td><td>出站类型与参数</td><td>← lines</td></tr>
+    <tr><td>nodes</td><td>名称、域名 / 地址、API 地址与令牌、倍率</td><td>↔ lines</td></tr>
+    <tr><td>resellers</td><td>额度(流量、带宽、设备)、到期、自己的落地页文案、被授权的线路</td><td>→ users、plans</td></tr>
+    <tr><td>stats、agent_counters、traffic_cursors</td><td>时序与跨机计量</td><td></td></tr>
+    <tr><td>settings、admins、sub_logs、audit</td><td>其余一切</td><td></td></tr>
+  </table>
+
+  <h2 id="cadence">后台节奏</h2>
+  <table>
+    <tr><th>周期</th><th>做什么</th></tr>
+    <tr><td>5 秒</td><td>主机 → 副机推快照、拉报告</td></tr>
+    <tr><td>10 秒</td><td>从数据面取流量与连接,按用户 / 线路 / 上游写统计</td></tr>
+    <tr><td>1 分钟</td><td>配额、到期、周期重置;数据面看门狗</td></tr>
+    <tr><td>10 分钟</td><td>WAL 检查点,运行中的库随时可安全复制</td></tr>
+    <tr><td>6 小时</td><td>向 GitHub Releases 查一次新版本(只查)</td></tr>
+    <tr><td>每天</td><td>清理旧时序、证书续期、日报</td></tr>
+  </table>
+
+  <h2 id="code">代码结构</h2>
+  <table>
+    <tr><th>目录</th><th>职责</th></tr>
+    <tr><td><code>web/</code></td><td>面板与 API、代理面板、外部 API、内嵌前端(零构建 ES 模块)</td></tr>
+    <tr><td><code>sub/</code></td><td>订阅格式、落地页、客户端下载、共享</td></tr>
+    <tr><td><code>render/</code> <code>core/</code></td><td>线路 → sing-box 配置与干跑;内嵌数据面与跟踪</td></tr>
+    <tr><td><code>hub/</code></td><td>快照推送、流量回收、在线聚合</td></tr>
+    <tr><td><code>runner/</code></td><td>进程编排、三级重载与回滚、证书、备份</td></tr>
+    <tr><td><code>jobs/</code> <code>monitor/</code></td><td>统计、配额判定、巡检、告警</td></tr>
+    <tr><td><code>database/</code></td><td>模型、SQLite 打开与迁移</td></tr>
+    <tr><td><code>selfupdate/</code> <code>deploy/</code></td><td>版本检查与就地更新、安装脚本</td></tr>
+  </table>
+  <p style="margin-top:2rem">图:<a href="{{github}}#架构" rel="noopener">README → 架构</a>。深入:<a href="{{base}}zh/articles/embedded-sing-box/">为什么内嵌内核</a> · <a href="{{base}}zh/articles/hot-reload/">热更新是怎么做的</a> · <a href="{{base}}zh/articles/multi-server-sync/">同步是怎么做的</a>。</p>
+</article>

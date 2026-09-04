@@ -1,0 +1,57 @@
+<!--meta {"title":"功能 · m-ui","description":"m-ui 面板能做的全部:Hysteria2、AnyTLS、TUIC、VLESS Reality、Trojan、VMess、Shadowsocks 2022 线路;上游与 WARP;用户配额、设备与限速;套餐;代理;带落地页的订阅;证书;备份;多服务器;Telegram;外部 API;一键更新。","nav":"功能","order":3} -->
+<article class="doc">
+  <h1>功能</h1>
+  <p class="lead">按侧栏的顺序,面板管的每一件事。全部在一个二进制、一个 SQLite 文件里。</p>
+  <nav class="toc"><a href="#lines">线路</a><a href="#upstreams">上游</a><a href="#users">用户</a><a href="#plans">套餐</a><a href="#resellers">代理</a><a href="#subs">订阅</a><a href="#servers">服务器</a><a href="#cert">证书</a><a href="#ops">运维</a><a href="#security">安全</a><a href="#api">API</a></nav>
+
+  <h2 id="lines">线路</h2>
+  <p>线路 = 入口协议 + 端口 → 出口。协议:<b>Hysteria2</b>(支持端口跳跃)、<b>AnyTLS</b>、<b>TUIC</b>、<b>Trojan</b>、<b>VLESS</b>(Reality / Vision)、<b>VMess</b>、<b>Shadowsocks</b>(含 2022 系列),以及 SOCKS、HTTP、Mixed。传输层:WebSocket、gRPC、HTTPUpgrade、HTTP。每条线路可以部署到全部服务器或指定几台。快速添加自动填好空闲端口和合理参数;每次保存都经 sing-box 干跑,并检查端口是否与面板、其它线路、本机其它程序冲突。</p>
+
+  <h2 id="upstreams">上游</h2>
+  <p>不直连时从哪出去:VLESS、VMess、Trojan、TUIC、Hysteria2、Shadowsocks、SOCKS 出站,粘贴分享链接即可导入。一键测延迟、定时巡检、故障 / 恢复告警,Cloudflare WARP 在面板里一键接入。改上游是热换出站,数据面不重启。</p>
+
+  <h2 id="users">用户</h2>
+  <ul>
+    <li>配额、到期、周期重置、同时在线设备数(按源 IP,跨服务器取并集)、上下行限速。</li>
+    <li>超量、到期自动禁用并踢线;订阅落地页会告诉用户原因。</li>
+    <li>批量生成、批量启用 / 禁用 / 延期 / 重置 / 删除、CSV 导出、旧面板数据库导入。</li>
+    <li>订阅地址可以是用户名也可以是随机令牌(设置里选);用户可自助生成临时共享地址,你随时能取消 —— 取消即刻断掉借用者。</li>
+    <li>加人、停用、换凭据只是换入站的用户表,其他人不断线。</li>
+  </ul>
+
+  <h2 id="plans">套餐</h2>
+  <p>配额、时长、设备、限速、线路分配的模板。建号、续费、延期时一键套用。代理有自己的套餐,和你的分开。</p>
+
+  <h2 id="resellers">代理</h2>
+  <p>给代理分配一组线路,以及流量、设备、带宽额度和到期日。代理有自己的面板(默认端口 2054,路径 <code>/dl</code>),在里面建用户、建套餐、设置自己的落地页标题、公告与联系方式,还可以开两步验证。所有用量汇总到代理;代理超额、到期或被停用时,名下用户一并断掉。代理的用户不会混进你的用户列表。</p>
+
+  <h2 id="subs">订阅</h2>
+  <ul>
+    <li>一个地址三种格式:通用链接、Clash / Mihomo YAML、完整 sing-box JSON —— 用 <code>?format=</code> 或按客户端 User-Agent 自动选。</li>
+    <li>每条线路按部署的服务器各出一个节点;外部节点和外部订阅可以并进来。</li>
+    <li>浏览器落地页:用量、到期、公告、Clash / 小火箭 / sing-box / Hiddify / Stash 一键导入、二维码、客户端下载页、临时共享。</li>
+    <li>可选的顶部流量提示节点;自签证书自动给客户端加 <code>insecure</code>。</li>
+    <li>失效的订阅给一页说明和你的联系方式,而不是空白的 404。</li>
+  </ul>
+
+  <h2 id="servers">服务器</h2>
+  <p>一主多副。主机每 5 秒推送线路、上游、用户、凭据,拉回流量增量与在线 IP;副机只管转发。每台服务器可设流量倍率,线路按服务器部署,连接跟踪跨服务器汇总。详见 <a href="{{base}}zh/multi-server/">多服务器</a>。</p>
+
+  <h2 id="cert">证书</h2>
+  <p>Let's Encrypt,HTTP-01 或 Cloudflare DNS-01,签发前预检 DNS 与端口,到期自动续期,续期后热更新不重启。没有域名一键自签。也可以用自己的证书文件。</p>
+
+  <h2 id="ops">运维</h2>
+  <ul>
+    <li><b>备份 / 还原</b>:数据库与证书打成一个 zip,每日定时备份,面板里还原,换机向导迁到新机器。</li>
+    <li><b>内核调优</b>与 <b>WARP</b> 安装在运维页完成,日志实时输出到浏览器。</li>
+    <li><b>Telegram</b>:数据面、上游、副机故障告警,用户即将到期 / 用完提醒,按面板时区发日报。</li>
+    <li><b>更新</b>:面板每 6 小时查一次 GitHub Releases;一键校验摘要、替换程序、重启。数据、证书、设置不动。副机也用同样的方式自己更新。</li>
+    <li>面板内看<b>日志</b>与<b>审计记录</b>;SSH 菜单(<code>m-ui</code>)负责端口、路径、密码与应急恢复。</li>
+  </ul>
+
+  <h2 id="security">安全</h2>
+  <p>两步验证(TOTP)、按 IP 的登录限速、按角色隔离的会话、服务端强制的代理隔离、安装脚本与更新器都校验摘要、没有遥测。任何配置改动都绕不过校验。</p>
+
+  <h2 id="api">外部 API</h2>
+  <p>令牌鉴权的 HTTP API:建用户、改用户、读用量、取订阅链接 —— 给发卡站、机器人和自动化用。见 <a href="{{github}}/blob/main/docs/API.md" rel="noopener">docs/API.md</a>。</p>
+</article>
