@@ -3,6 +3,7 @@ package runner
 import (
 	"errors"
 	"github.com/Maoyangui/m-ui/notify"
+	"github.com/Maoyangui/m-ui/tz"
 	"io"
 	"os"
 	"path/filepath"
@@ -139,10 +140,11 @@ func (r *Runner) backupLoop(stop <-chan struct{}) {
 		select {
 		case <-t.C:
 			hour, err := strconv.Atoi(strings.TrimSpace(r.setting("backupHour")))
-			if err != nil || hour < 0 || time.Now().Hour() != hour {
+			now := time.Now().In(tz.Location(r.setting("timezone"))) // 按面板时区的钟点,不看服务器本地时间
+			if err != nil || hour < 0 || now.Hour() != hour {
 				continue
 			}
-			if !r.notifier.Once("backup:"+time.Now().Format("2006-01-02"), 36*time.Hour) {
+			if !r.notifier.Once("backup:"+now.Format("2006-01-02"), 36*time.Hour) {
 				continue
 			}
 			bf, err := r.CreateBackupFile()

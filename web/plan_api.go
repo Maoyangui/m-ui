@@ -460,7 +460,8 @@ func (s *Server) handleUsersExport(w http.ResponseWriter, r *http.Request) {
 	var users []model.User
 	s.db.Where("COALESCE(reseller_id,0) = 0").Order("id asc").Find(&users)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename=users-"+time.Now().Format("20060102")+".csv")
+	loc := s.panelLocation() // 导出的日期跟面板时区一致
+	w.Header().Set("Content-Disposition", "attachment; filename=users-"+time.Now().In(loc).Format("20060102")+".csv")
 	w.Write([]byte("\xEF\xBB\xBF")) // BOM,Excel 正确识别 UTF-8
 	cw := csv.NewWriter(w)
 	cw.Write([]string{"用户名", "备注", "状态", "已用GB", "配额GB", "到期", "设备上限", "上行Mbps", "下行Mbps", "最近在线", "Clash订阅"})
@@ -477,10 +478,10 @@ func (s *Server) handleUsersExport(w http.ResponseWriter, r *http.Request) {
 		}
 		expiry, online := "", ""
 		if u.Expiry > 0 {
-			expiry = time.Unix(u.Expiry, 0).Format("2006-01-02")
+			expiry = time.Unix(u.Expiry, 0).In(loc).Format("2006-01-02")
 		}
 		if u.OnlineAt > 0 {
-			online = time.Unix(u.OnlineAt, 0).Format("2006-01-02 15:04")
+			online = time.Unix(u.OnlineAt, 0).In(loc).Format("2006-01-02 15:04")
 		}
 		cw.Write([]string{
 			u.Name, u.Remark, status,

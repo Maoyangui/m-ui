@@ -46,6 +46,7 @@ if [ -z "$SRC" ] || [ "$SRC" = "latest" ] || [[ "$SRC" == v[0-9]* ]]; then
     TAG="$SRC"
   fi
   SRC="https://github.com/$REPO/releases/download/$TAG/m-ui-linux-$ARCH.tar.gz"
+  SUMS="https://github.com/$REPO/releases/download/$TAG/SHA256SUMS"
   echo "安装 m-ui $TAG ($ARCH)"
 fi
 
@@ -54,14 +55,26 @@ case "$SRC" in
   http://*|https://*) echo "下载 $SRC"; curl -fL --progress-bar "$SRC" -o "$TMP";;
   *) cp "$SRC" "$TMP";;
 esac
+# 官方 Release:用同一个 Release 里的 SHA256SUMS 校验,校验通过再解包执行
+if [ -n "${SUMS:-}" ] && command -v sha256sum >/dev/null; then
+  WANT="$(curl -fsSL "$SUMS" 2>/dev/null | grep " m-ui-linux-$ARCH.tar.gz$" | awk '{print $1}')"
+  if [ -n "$WANT" ]; then
+    GOT="$(sha256sum "$TMP" | awk '{print $1}')"
+    [ "$WANT" = "$GOT" ] || { echo "校验失败:下载的文件与 Release 的 SHA256 不一致,已中止"; rm -f "$TMP"; exit 1; }
+    echo "SHA256 校验通过"
+  else
+    echo "提示:未取到 SHA256SUMS,跳过校验"
+  fi
+fi
 # Releases 里是 tar.gz(内含单文件 m-ui),也接受裸二进制
 if file "$TMP" 2>/dev/null | grep -qi gzip || [[ "$SRC" == *.tar.gz ]]; then
   EXTRACT="$(mktemp -d)"
-  tar -xzf "$TMP" -C "$EXTRACT"
+  # 只解出 m-ui 这一个成员:压缩包里就算有 ../ 之类的路径也不会落到别处
+  tar -xzf "$TMP" -C "$EXTRACT" m-ui || { echo "压缩包里没有 m-ui"; rm -rf "$EXTRACT"; rm -f "$TMP"; exit 1; }
   mv "$EXTRACT/m-ui" "$TMP"
   rm -rf "$EXTRACT"
 fi
-chmod 0755 "$TMP"
+chmod 0700 "$TMP" # 临时文件只给 root 执行
 "$TMP" version >/dev/null || { echo "二进制无法执行(架构不符?)"; exit 1; }
 
 mkdir -p "$(dirname "$DB")" /etc/m-ui/cert /etc/m-ui/backups

@@ -4,6 +4,7 @@ package monitor
 
 import (
 	"fmt"
+	"github.com/Maoyangui/m-ui/tz"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -52,6 +53,15 @@ type Monitor struct {
 func New(d Deps) *Monitor {
 	return &Monitor{d: d, results: map[uint]*UpstreamHealth{}, stop: make(chan struct{})}
 }
+
+// loc 面板设置的时区:日报发送时点与消息里的日期都按它算,
+// 否则服务器在美国、面板设成 Asia/Shanghai 时,日报会在错误的钟点发出。
+func (m *Monitor) loc() *time.Location {
+	return tz.Location(m.d.Setting("timezone"))
+}
+
+// now 面板时区下的当前时间。
+func (m *Monitor) now() time.Time { return time.Now().In(m.loc()) }
 
 func (m *Monitor) settingInt(key string, def int) int {
 	v, err := strconv.Atoi(strings.TrimSpace(m.d.Setting(key)))
@@ -213,7 +223,7 @@ func (m *Monitor) tickCore() {
 // CheckUsers 检查即将到期与用量接近上限的用户,每用户每天最多提醒一次。
 func (m *Monitor) CheckUsers() {
 	now := time.Now().Unix()
-	day := time.Now().Format("2006-01-02")
+	day := m.now().Format("2006-01-02")
 	days := m.settingInt("tgExpiringDays", 3)
 	pct := m.settingInt("tgQuotaPercent", 80)
 
@@ -223,7 +233,7 @@ func (m *Monitor) CheckUsers() {
 		if days > 0 && u.Expiry > now && u.Expiry-now <= int64(days)*86400 {
 			left := (u.Expiry - now + 86399) / 86400
 			if m.d.Notify.Once("expiring:"+u.Name+":"+day, 24*time.Hour) {
-				m.d.Notify.Event("tgOnUserExpiring", fmt.Sprintf("⏳ <b>用户即将到期</b>:%s\n到期 %s(剩 %d 天)", notify.Esc(u.Name), time.Unix(u.Expiry, 0).Format("2006-01-02"), left))
+				m.d.Notify.Event("tgOnUserExpiring", fmt.Sprintf("⏳ <b>用户即将到期</b>:%s\n到期 %s(剩 %d 天)", notify.Esc(u.Name), time.Unix(u.Expiry, 0).In(m.loc()).Format("2006-01-02"), left))
 			}
 		}
 		if pct > 0 && u.Volume > 0 {
@@ -242,10 +252,10 @@ func (m *Monitor) tickDaily() {
 		return
 	}
 	hour := m.settingInt("tgDailyHour", 9)
-	if time.Now().Hour() != hour {
+	if m.now().Hour() != hour {
 		return
 	}
-	if m.d.Notify.Once("daily:"+time.Now().Format("2006-01-02"), 36*time.Hour) {
+	if m.d.Notify.Once("daily:"+m.now().Format("2006-01-02"), 36*time.Hour) {
 		m.d.Notify.Event("tgDaily", m.DailyReport())
 	}
 }
@@ -295,7 +305,7 @@ func (m *Monitor) DailyReport() string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "📈 <b>m-ui 日报</b> %s\n", time.Now().Format("2006-01-02"))
+	fmt.Fprintf(&b, "📈 <b>m-ui 日报</b> %s\n", m.now().Format("2006-01-02"))
 	fmt.Fprintf(&b, "用户:%d 启用 / %d 总计,7 天内到期 %d,昨日禁用 %d\n", enabled, total, expiringSoon, disabled)
 	fmt.Fprintf(&b, "流量(24h):↑ %s  ↓ %s\n", human(up), human(down))
 	if okN+badN > 0 {
