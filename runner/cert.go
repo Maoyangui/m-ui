@@ -57,7 +57,7 @@ func (r *Runner) setSetting(key, val string) {
 func (r *Runner) certPaths(domain string) (string, string) {
 	c, k := r.setting("certFile"), r.setting("keyFile")
 	if c == "" || k == "" {
-		name := domain
+		name := strings.NewReplacer("/", "", "\\", "", ":", "", "..", "").Replace(strings.TrimSpace(domain))
 		if name == "" {
 			name = "main"
 		}

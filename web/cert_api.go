@@ -79,6 +79,10 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, errors.New("请填写域名"))
 			return
 		}
+		if !validDomain(req.Domain) {
+			badRequest(w, errors.New("域名格式不对:只能是字母、数字、点与连字符,如 hk.example.com"))
+			return
+		}
 		if req.Method != "cloudflare" {
 			req.Method = "http"
 		}
@@ -292,4 +296,28 @@ func (s *Server) receiveBackup(r *http.Request) (string, func(), error) {
 	json.NewDecoder(r.Body).Decode(&req)
 	p, err := s.run.BackupFilePath(req.Name)
 	return p, noop, err
+}
+
+// validDomain 只接受形如 example.com / *.example.com 的域名。
+// 域名会成为证书文件名的一部分,也会进 ACME 请求,先把奇怪的输入卡住。
+func validDomain(d string) bool {
+	d = strings.TrimPrefix(d, "*.")
+	if len(d) < 3 || len(d) > 253 || strings.HasPrefix(d, ".") || strings.HasSuffix(d, ".") {
+		return false
+	}
+	labels := strings.Split(d, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, l := range labels {
+		if l == "" || len(l) > 63 || strings.HasPrefix(l, "-") || strings.HasSuffix(l, "-") {
+			return false
+		}
+		for _, c := range l {
+			if !(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9') && c != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
