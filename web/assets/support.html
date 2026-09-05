@@ -83,7 +83,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 syst
       <a class="btn" href="{{.Site}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}文档 ↗{{else}}Documentation ↗{{end}}</a>
       <a class="btn" href="{{.Repo}}/issues/new/choose" target="_blank" rel="noopener">{{if eq .Lang "zh"}}报告 Bug ↗{{else}}Report a bug ↗{{end}}</a>
       <a class="btn" href="{{.Repo}}/discussions" target="_blank" rel="noopener">{{if eq .Lang "zh"}}提问 / 讨论 ↗{{else}}Ask a question ↗{{end}}</a>
-      <a class="btn" href="{{.Repo}}" target="_blank" rel="noopener">GitHub ↗</a>
+      <a class="btn" href="{{.Repo}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}GitHub · 点个 Star ↗{{else}}Star on GitHub ↗{{end}}</a>
+      <button class="btn" data-share="{{.Site}}" data-share-title="m-ui · sing-box panel by Maoyangui">{{if eq .Lang "zh"}}分享 m-ui{{else}}Share m-ui{{end}}</button>
     </div>
   </section>
 
@@ -104,6 +105,14 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 syst
   <p class="foot">{{if eq .Lang "zh"}}谢谢你使用 m-ui。{{else}}Thanks for using m-ui.{{end}} · <a href="./">{{if eq .Lang "zh"}}返回面板{{else}}Back to panel{{end}}</a></p>
 </div>
 <script>
+document.querySelectorAll('[data-share]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var url = b.getAttribute('data-share'), title = b.getAttribute('data-share-title');
+    var done = function () { var l = b.textContent; b.textContent = '{{if eq .Lang "zh"}}已复制地址 ✓{{else}}Link copied ✓{{end}}'; setTimeout(function () { b.textContent = l; }, 1600); };
+    if (navigator.share) { navigator.share({ title: title, url: url }).catch(function () {}); return; }
+    if (navigator.clipboard) navigator.clipboard.writeText(url).then(done); else { var ta = document.createElement('textarea'); ta.value = url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); done(); }
+  });
+});
 document.querySelectorAll('[data-copy]').forEach(function (b) {
   var label = b.textContent;
   b.addEventListener('click', function () {

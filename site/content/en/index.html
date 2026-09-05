@@ -1,5 +1,6 @@
-<!--meta {"title":"m-ui · Embedded sing-box multi-server panel","description":"Self-hosted sing-box panel in one Go binary: embedded core, hot user and upstream reload, dry-run validation with rollback, master/node multi-server sync, subscriptions with landing pages, resellers, WARP and certificates.","nav":"Home","order":1} -->
+<!--meta {"title":"m-ui — sing-box panel by Maoyangui: embedded core, multi-server, one binary","description":"Self-hosted sing-box panel in one Go binary: embedded core, hot user and upstream reload, dry-run validation with rollback, master/node multi-server sync, subscriptions with landing pages, resellers, WARP and certificates.","nav":"Home","order":1} -->
 <section class="hero">
+  <span class="eyebrow">sing-box panel by Maoyangui</span>
   <h1>The sing-box panel that runs as one binary</h1>
   <p class="lead">m-ui embeds sing-box instead of babysitting an external process. Users and upstreams hot-reload without dropping anyone, every config is dry-run before it goes live, and one master keeps any number of servers in sync.</p>
   <div class="actions">
@@ -10,6 +11,7 @@
     <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
     <button type="button" data-copy="bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)" title="Copy">Copy</button>
   </div>
+  <p class="proof"><span>One static binary</span><span>No Docker, no external database</span><span>Hot user &amp; upstream reload</span><span>One master, any number of nodes</span><span>GPL-3.0</span></p>
   <figure class="shot"><img src="{{base}}img/dashboard-en.png" alt="m-ui dashboard with traffic chart, data-plane status, online users and top talkers" width="1440" height="900" loading="eager"></figure>
 </section>
 
@@ -17,12 +19,12 @@
   <h2>Why m-ui</h2>
   <p class="sub">Not another Xray wrapper. These are the parts that are actually different.</p>
   <div class="grid">
-    <div class="card"><h3>Embedded sing-box</h3><p>The core runs inside the panel binary. No separate service to install, version-match or restart by hand — the panel talks to it in-process.</p></div>
-    <div class="card"><h3>A line is one thing</h3><p>Inbound protocol + port → where it exits. No inbound / outbound / routing tables to keep in sync. Hysteria2, AnyTLS, TUIC, VLESS Reality, Trojan, VMess, Shadowsocks 2022.</p></div>
-    <div class="card"><h3>Hot user and upstream updates</h3><p>Adding, disabling or re-keying a user swaps the inbound user table in place. Changing an exit swaps the outbound. Nobody else gets disconnected.</p></div>
-    <div class="card"><h3>Validated before it ships</h3><p>Every save is parsed by sing-box first. A bad config never reaches the database, and if a new config still fails to start, m-ui rolls back to the last working one.</p></div>
-    <div class="card"><h3>One master, many nodes</h3><p>Lines, users and credentials are pushed to every node every 5 seconds. Traffic and online IPs flow back, quota and device limits are enforced centrally.</p></div>
-    <div class="card"><h3>Ops without a terminal</h3><p>Let's Encrypt, Cloudflare WARP, kernel tuning, backup and restore, a migration wizard, Telegram alerts, two-factor login and a one-click updater — all in the panel.</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/></svg></div><h3>Embedded sing-box</h3><p>The core runs inside the panel binary. No separate service to install, version-match or restart by hand — the panel talks to it in-process.</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h11l-2.5-2.5M3 8l2.5 2.5"/><path d="M21 16H10l2.5 2.5M21 16l-2.5-2.5"/></svg></div><h3>A line is one thing</h3><p>Inbound protocol + port → where it exits. No inbound / outbound / routing tables to keep in sync. Hysteria2, AnyTLS, TUIC, VLESS Reality, Trojan, VMess, Shadowsocks 2022.</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3 4 14h7l-1 7 9-11h-7l1-7Z"/></svg></div><h3>Hot user and upstream updates</h3><p>Adding, disabling or re-keying a user swaps the inbound user table in place. Changing an exit swaps the outbound. Nobody else gets disconnected.</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2 19 6v5.5c0 4.2-2.8 7.4-7 9.3-4.2-1.9-7-5.1-7-9.3V6l7-2.8Z"/><path d="M9.2 12.2l2 2 3.6-3.8"/></svg></div><h3>Validated before it ships</h3><p>Every save is parsed by sing-box first. A bad config never reaches the database, and if a new config still fails to start, m-ui rolls back to the last working one.</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></div><h3>One master, many nodes</h3><p>Lines, users and credentials are pushed to every node every 5 seconds. Traffic and online IPs flow back, quota and device limits are enforced centrally.</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 3.8a5 5 0 0 0-6 6.6L4 15.9a2.1 2.1 0 1 0 3 3l5.5-5.5a5 5 0 0 0 6.6-6l-2.9 2.9-2.6-.7-.7-2.6 2.6-3Z"/></svg></div><h3>Ops without a terminal</h3><p>Let's Encrypt, Cloudflare WARP, kernel tuning, backup and restore, a migration wizard, Telegram alerts, two-factor login and a one-click updater — all in the panel.</p></div>
   </div>
 </section>
 
@@ -49,9 +51,9 @@
 <section class="block" id="user">
   <h2>What your users get</h2>
   <p class="sub">A subscription link that works in Clash, sing-box, Shadowrocket, Stash and Hiddify, and a landing page that explains itself: usage, expiry, one-tap import, QR code, client downloads. When a subscription runs out, the browser shows why and who to contact — not a blank 404.</p>
-  <div class="grid">
-    <figure class="shot" style="margin:0"><img src="{{base}}img/user-detail-en.png" alt="User detail drawer with subscription URLs, QR code, usage and traffic chart" loading="lazy"></figure>
-    <figure class="shot phone" style="margin:0 auto"><img src="{{base}}img/landing-en.png" alt="Subscription landing page on a phone: usage, expiry, one-tap import" loading="lazy"></figure>
+  <div class="duo">
+    <figure class="shot"><img src="{{base}}img/user-detail-en.png" alt="User detail drawer with subscription URLs, QR code, usage and traffic chart" loading="lazy"></figure>
+    <figure class="shot phone"><img src="{{base}}img/landing-en.png" alt="Subscription landing page on a phone: usage, expiry, one-tap import" loading="lazy"></figure>
   </div>
 </section>
 

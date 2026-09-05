@@ -1,0 +1,52 @@
+<!--meta {"title":"m-ui 与 3x-ui:基于 sing-box 的 x-ui 替代方案对比","description":"3x-ui 管理 Xray-core,m-ui 内嵌 sing-box。这一点差别对协议、多服务器管理、热更新、设备数与部署意味着什么 —— 2026-09-05 对照 3x-ui v3.7.0 核对,附来源与未知项,以及清楚的\"谁该选哪个\"。","date":"2026-09-05"} -->
+<article class="doc">
+  <h1>m-ui 与 3x-ui</h1>
+  <p class="lead">3x-ui 是最流行的 x-ui 系面板,管理的是 <b>Xray-core</b>。m-ui 管理并内嵌的是 <b>sing-box</b>。后面大部分差别都由这一点推出来。事实于 <b>2026-09-05</b> 对照 3x-ui 的 README 与 Releases(v3.7.0,2026-08-24)核对;README 没写明的一律标 <span class="unk">未知</span>。</p>
+
+  <h2>一段话版本</h2>
+  <p>你要的是 Xray —— XTLS Vision 与其它流控、XHTTP、WireGuard 和 TUN 入站、最广的客户端兼容、以及遥遥领先的社区规模 —— 那 3x-ui 是显然的选择,m-ui 不是替代品。你要的是 sing-box(Hysteria2、AnyTLS、TUIC、sing-box 实现的 Reality),并且希望面板内嵌内核、改用户不重启、配置先校验后回滚、一台主机同步多台服务器,那 m-ui 就是你在找的替代方案。</p>
+
+  <h2>对照</h2>
+  <table>
+    <tr><th></th><th>m-ui</th><th>3x-ui</th></tr>
+    <tr><td>内核</td><td>sing-box,内嵌在面板进程里</td><td>Xray-core,面板管理的独立进程</td></tr>
+    <tr><td>成熟度</td><td>2026 年 9 月首发,一个维护者</td><td>约 4.6 万 star,发布历史很长,最新 v3.7.0(2026-08-24)</td></tr>
+    <tr><td>配置模型</td><td>线路:协议 + 端口 → 出口,按服务器渲染</td><td>带客户端的入站、出站、路由;贴近 Xray 的 JSON</td></tr>
+    <tr><td>协议</td><td>Hysteria2、AnyTLS、TUIC、VLESS Reality / Vision、Trojan、VMess、Shadowsocks 2022、SOCKS、HTTP、Mixed</td><td>VLESS、VMess、Trojan、Shadowsocks、WireGuard、AmneziaWG、Hysteria2、MTProto、HTTP、SOCKS(Mixed)、Dokodemo-door / Tunnel、TUN(按 README)</td></tr>
+    <tr><td>改用户怎么生效</td><td>原地换入站用户表;不重连</td><td><span class="unk">未知</span></td></tr>
+    <tr><td>保存前校验 / 回滚</td><td>事务内 sing-box 干跑;新配置起不来就回滚</td><td><span class="unk">未知</span></td></tr>
+    <tr><td>多服务器</td><td>主 / 副机每 5 秒同步;集中判定配额与设备数;部署到 N 台的线路是一条记录</td><td>一个面板管理多台服务器;把入站克隆到其它节点(按 README)</td></tr>
+    <tr><td>订阅</td><td>通用链接、Clash / Mihomo、sing-box JSON;带用量、一键导入、二维码、客户端下载的落地页</td><td>Raw、JSON、Clash,按 User-Agent 自动选;自定义页面模板(按 README)</td></tr>
+    <tr><td>用户限制</td><td>带周期重置的配额、到期、跨所有服务器按源 IP 的设备数、限速</td><td>流量配额、到期、带可信地址豁免的 IP 限制、HWID 设备限制、续费周期(按 README)</td></tr>
+    <tr><td>代理</td><td>独立面板、额度、自己的套餐与落地页文案</td><td><span class="unk">未知</span></td></tr>
+    <tr><td>部署</td><td>一个静态 Go 二进制 + SQLite;安装脚本与更新器都校验 SHA256</td><td>安装脚本或 Docker;旁边跑 Xray-core</td></tr>
+    <tr><td>许可证</td><td>GPL-3.0</td><td>GPL-3.0</td></tr>
+  </table>
+
+  <h2>选 3x-ui,如果</h2>
+  <ul>
+    <li>你需要 Xray 独有的传输或入站(XHTTP、WireGuard、TUN、MTProto),或者想留在用户已经熟悉的 Xray 生态里。</li>
+    <li>你看重最大的社区、最多的第三方教程和多年的生产使用。</li>
+    <li>你要硬件 ID 设备限制或 MTProto —— m-ui 没有这些。</li>
+  </ul>
+
+  <h2>选 m-ui,如果</h2>
+  <ul>
+    <li>你已经决定用 sing-box —— 为了 Hysteria2、AnyTLS、TUIC,或只是因为你的客户端都是 sing-box 系。</li>
+    <li>你有好几台服务器,希望用户表、配额、设备数在所有服务器上是一份,而不是手工克隆入站。</li>
+    <li>你频繁改用户,不想每次都重启内核。</li>
+    <li>你希望配置在保存前就由内核自己校验,起不来还能回滚。</li>
+    <li>你想要一个二进制,不用 Docker,不用单独对内核版本。</li>
+  </ul>
+
+  <h2>迁移</h2>
+  <p>m-ui 不声称能导入 3x-ui 的数据库:导入器只针对一种兼容的旧面板格式,并如实报告映射了什么。从 3x-ui 搬过来意味着重建线路(快速添加几分钟的事),用户要么重建、要么按套餐批量生成;用户凭据会变,客户端需要重新导入一次订阅。先看<a href="{{base}}zh/getting-started/">快速上手</a>。</p>
+
+  <h2>来源</h2>
+  <ul class="small">
+    <li><a href="https://github.com/MHSanaei/3x-ui" rel="noopener">3x-ui README</a> 与 <a href="https://github.com/MHSanaei/3x-ui/releases" rel="noopener">Releases</a></li>
+    <li><a href="{{github}}" rel="noopener">m-ui README</a></li>
+    <li>四个面板的总表:<a href="{{base}}zh/compare/">m-ui 和其它面板的对比</a></li>
+  </ul>
+  <p class="small muted">核对于 2026-09-05。关于 3x-ui 的描述有误欢迎到 <a href="{{github}}/discussions" rel="noopener">Discussions</a> 指出。</p>
+</article>

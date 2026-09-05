@@ -1,0 +1,47 @@
+<!--meta {"title":"Backup and server migration with m-ui: one zip, zero client changes","description":"What an m-ui backup contains, how scheduled backups and Telegram delivery work, how to restore on a new server from the panel or the installer, and the migration order that keeps ports, credentials and subscription addresses unchanged so users never notice.","type":"article","date":"2026-10-23","discussion":true,"summary":"A consistent SQLite snapshot plus certificates in one zip; restore from the panel or with the installer; the migration checklist that moves a whole panel without touching a single client."} -->
+<article class="doc">
+  <p class="meta">Guide · 2026-10-23</p>
+  <h1>Backup and server migration with m-ui</h1>
+  <p class="lead">Because m-ui keeps everything in one SQLite file and one certificate directory, a backup is one zip and a migration is "restore that zip somewhere else". This is how to do both so that no user has to re-import anything.</p>
+
+  <h2>What a backup contains</h2>
+  <ul>
+    <li><b>The database</b>, checkpointed first so the WAL is folded in and the copy is consistent: lines, upstreams, users with credentials, plans, resellers, nodes, settings, statistics.</li>
+    <li><b>Certificate files</b>: your issued or self-signed certificate and key, so TLS keeps working after a restore.</li>
+  </ul>
+  <p>It does not contain the m-ui binary (the installer provides that) or anything outside <code>/etc/m-ui</code>. A backup is therefore small — usually a few megabytes — and portable between architectures.</p>
+
+  <h2>Taking one</h2>
+  <p><b>Backup → Download</b> gives you the zip now. <b>Scheduled backups</b> run daily at the hour you choose in the panel's time zone, keep a rotation, and can be pushed to Telegram so a copy lives off the server. The file is created with owner-only permissions; it contains every user's credentials, so treat it accordingly.</p>
+
+  <h2>Restoring</h2>
+  <p>Two ways, same result:</p>
+  <ol>
+    <li><b>From the panel:</b> Backup → Restore, upload the zip. m-ui inspects it, shows what is inside, then swaps the database and certificates in and restarts itself.</li>
+    <li><b>From the installer:</b> <code>bash install.sh --restore backup.zip</code> on a fresh server installs m-ui and restores in one go — useful when the old panel is already gone.</li>
+  </ol>
+  <p>Either way the restore is atomic: the old database is replaced only after the new one has been validated and copied into place.</p>
+
+  <h2>Migrating to a new server</h2>
+  <p>The order matters, because subscriptions point at a name or address and clients cache it:</p>
+  <ol>
+    <li>Install m-ui on the new server and restore the latest backup. Ports, panel path, credentials and subscription addresses are now identical to the old server.</li>
+    <li>Open the new panel and check the dashboard: data plane running, lines listening, users present. The migration wizard on the Backup page walks through exactly this.</li>
+    <li>If you use a domain, point it at the new server. The wizard can query the major public resolvers so you can watch the change propagate. If you use an IP, edit the server's address on the Servers page — subscriptions update on the client's next refresh.</li>
+    <li>Nodes need nothing: the master contacts them, not the other way round, and their tokens travelled with the database.</li>
+    <li>Turn the old server off once traffic has moved. Nothing on clients changed: same credentials, same ports, same subscription link.</li>
+  </ol>
+
+  <h2>Things that are easy to forget</h2>
+  <ul>
+    <li>Open the same ports on the new server's firewall: the panel, the subscription server, every line, and UDP for Hysteria2 / TUIC.</li>
+    <li>If the certificate was issued for a domain, it works on the new server unchanged; if it was self-signed for the old IP, self-sign again on the new one.</li>
+    <li>WARP is a per-server installation, not part of the backup. Re-run it from the Ops page if you used it.</li>
+    <li>Keep the last backup from the old server until you have watched the new one for a day.</li>
+  </ul>
+
+  <h2>Coming from a legacy panel instead</h2>
+  <p>That is a different tool: the importer reads a compatible legacy panel database and maps inbounds to lines, outbounds to upstreams and clients to users, keeping ports and credentials. Run the installer with <code>--import old.db</code> or use Users → Import for users only; the report tells you what was mapped and what was skipped.</p>
+
+  <p class="related">Related: <a href="{{base}}getting-started/">getting started</a> · <a href="{{base}}features/#ops">operations features</a> · <a href="{{base}}faq/">FAQ</a></p>
+</article>

@@ -1,0 +1,45 @@
+name: radar
+
+# 每周一次:找外链机会(仍在维护、与 sing-box / 代理面板相关的 awesome 列表,以及它们的收录规则信号)
+# 和第三方提及(GitHub 上提到本仓库或站点的地方)。结果只存为 artifact 和运行摘要,不写进仓库。
+# 向别人仓库开 PR 需要能 fork 的令牌,Actions 的 GITHUB_TOKEN 做不到,所以这里只产出判断,不自动投递。
+on:
+  schedule:
+    - cron: "23 3 * * 1" # 每周一 03:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Scan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node site/tools/radar.mjs > radar.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: radar-${{ github.run_id }}
+          path: radar.json
+          retention-days: 90
+      - name: Summary
+        run: |
+          node -e '
+            const r = require("./radar.json");
+            const lines = [];
+            lines.push("## m-ui radar · " + r.generated, "");
+            lines.push("### awesome-selfhosted", "", `- eligible from **${r.awesomeSelfhosted.eligibleFrom}** (${r.awesomeSelfhosted.rule}) → ${r.awesomeSelfhosted.eligible ? "**eligible now — submit a PR**" : "not yet"}`, "");
+            lines.push("### Backlink candidates (maintained, ≥20★)", "", "| repo | ★ | pushed | mentions m-ui | accepts PR | forbids self-promo | about sing-box |", "|---|---|---|---|---|---|---|");
+            for (const l of r.backlinkCandidates) lines.push(`| [${l.repo}](${l.url}) | ${l.stars} | ${l.pushed} | ${l.mentionsMui ? "yes" : "no"} | ${l.acceptsPR ? "yes" : "?"} | ${l.forbidsSelfPromo ? "**yes**" : "no"} | ${l.aboutSingBox ? "yes" : "no"} |`);
+            lines.push("", "### Mentions", "", `- repositories: ${r.mentions.repositories.length}`, `- issues / discussions: ${r.mentions.issuesAndDiscussions.length}`, `- code: ${r.mentions.code.length}`, "");
+            for (const m of r.mentions.repositories) lines.push(`- repo: [${m.repo}](${m.url}) (${m.stars}★)`);
+            for (const m of r.mentions.issuesAndDiscussions) lines.push(`- thread: [${m.title}](${m.url}) · ${m.updated}`);
+            for (const m of r.mentions.code) lines.push(`- code: [${m.repo} · ${m.path}](${m.url})`);
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
+          '

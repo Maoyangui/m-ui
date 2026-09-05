@@ -1,0 +1,38 @@
+<!--meta {"title":"sing-box 面板:用 m-ui 管用户、线路和订阅","description":"sing-box 面板是干什么的,m-ui 怎么做:内嵌 sing-box 内核、用线路代替裸 JSON、带配额和设备数的用户、给 Clash / sing-box / 小火箭的订阅、热更新、一台主机管多台服务器。一条命令安装。","date":"2026-09-05"} -->
+<article class="doc">
+  <h1>一个管内核、而不只是管 JSON 的 sing-box 面板</h1>
+  <p class="lead">sing-box 是极好的代理内核,却不是一个多用户产品:一个 JSON、一个进程,不知道谁超量了。<b>sing-box 面板</b>把它变成一项服务。m-ui 就是这样一个面板 —— <a href="{{author_url}}" rel="noopener">Maoyangui</a> 开源,GPL-3.0,一个内嵌内核的 Go 二进制。</p>
+  <nav class="toc"><a href="#why">为什么要面板</a><a href="#lines">线路</a><a href="#users">用户</a><a href="#subs">订阅</a><a href="#reload">热更新</a><a href="#multi">多服务器</a><a href="#install">安装</a></nav>
+
+  <h2 id="why">到底为什么需要面板</h2>
+  <p>自己用 sing-box,一个配置文件加一个 systemd 单元就够了。给别人用,就多出内核不管的一切:给每个人发凭据、算各自的流量、到配额或到期日断掉、限制设备数、给出客户端能导入的订阅、让证书不过期,以及在不止一台服务器上做这些而不用改五份文件。这就是 sing-box 面板的活。大多数面板的做法是把 JSON 套上表单、重启一个外部进程。m-ui 的做法不同。</p>
+
+  <figure class="shot"><img src="{{base}}img/lines.png" alt="m-ui 线路页:Hysteria2、AnyTLS、VLESS Reality、Shadowsocks 2022 线路,带端口、出口和用户数" loading="lazy"></figure>
+
+  <h2 id="lines">线路,而不是入站 / 出站 / 路由三张表</h2>
+  <p>在 m-ui 里你管理的单位是<b>线路</b>:入口协议 + 端口 → 从哪出去。Hysteria2、AnyTLS、TUIC、VLESS Reality、Trojan、VMess、Shadowsocks 2022 都是线路;出口是直连或你的某个上游(另一个代理,或 Cloudflare WARP)。面板把线路渲染成完整的 sing-box 配置 —— 入站、出站,以及把它们连起来的路由规则 —— 部署到哪台服务器就为哪台渲染。你不用手工保持三张表一致;部署到三台服务器的线路是一条记录,不是三条。</p>
+  <p>快速添加会挑好默认参数和一个空闲端口;端口与其它线路、面板、本机任何程序撞上时保存会被拒绝;每次保存都先经 sing-box 自己解析再落库。</p>
+
+  <h2 id="users">用户:凭据、配额、到期、设备、限速</h2>
+  <p>用户建一次,各协议的凭据自动生成。分配能用的线路,设配额、到期日、可选的周期重置、设备数、上下行限速。判定每分钟跑一次:超量或到期就是停用并踢线,在每台服务器上。套餐把这些变成一键模板;代理有自己的面板和额度。详见<a href="{{base}}zh/user-management/">用户管理</a>。</p>
+
+  <h2 id="subs">用户真的能导入的订阅</h2>
+  <p>每个用户一个订阅地址,三种格式:给小火箭、nextin、Surge 等的通用链接;Clash / Mihomo YAML;给 SFA / SFI 的完整 sing-box JSON。浏览器打开同一个地址是落地页:用量、到期、一键导入、二维码、客户端下载。每条线路按服务器各出一个节点,客户端按延迟选。订阅用完时,浏览器里看到原因和联系方式。</p>
+
+  <h2 id="reload">热更新,因为内核是内嵌的</h2>
+  <p>sing-box 跑在面板进程里,所以改用户时 m-ui 换的是入站用户表,改上游时换的是出站。别人不重连。只有改线路的协议、端口、TLS 才重启数据面 —— 新配置起不来,上一份自动回来。看<a href="{{base}}zh/articles/hot-reload/">热更新是怎么做的</a>和<a href="{{base}}zh/articles/embedded-sing-box/">为什么内嵌内核</a>。</p>
+
+  <h2 id="multi">一个面板,多台服务器</h2>
+  <p>每台都装 m-ui,多出来的标成副机,把配对信息贴进主机。主机每 5 秒推送线路、用户、凭据,拉回流量与在线 IP,集中判定配额和设备数。主机不可达时副机照常转发。见<a href="{{base}}zh/multi-server/">多服务器</a>。</p>
+
+  <h2 id="install">安装</h2>
+  <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
+  <p>Debian / Ubuntu(任何 systemd Linux 都行),root,amd64 或 arm64。然后<a href="{{base}}zh/getting-started/">五分钟到第一条订阅</a> —— 不需要域名。</p>
+
+  <h2>m-ui 是不是适合你的 sing-box 面板?</h2>
+  <ul>
+    <li><b>是</b>,如果你有好几台服务器、经常改用户,或者想要一个不用 Docker、不用单独对内核版本的二进制。</li>
+    <li><b>未必</b>,如果你需要 Xray 独有的功能,或者习惯手改内核 JSON。看<a href="{{base}}zh/compare/">和其它面板的对比</a>。</li>
+  </ul>
+  <p class="related">m-ui · Maoyangui 的 sing-box 面板 · <a href="{{github}}" rel="noopener">GitHub</a> · <a href="{{base}}zh/features/">全部功能</a> · <a href="{{base}}zh/faq/">常见问题</a></p>
+</article>

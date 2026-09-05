@@ -1,4 +1,4 @@
-<!--meta {"title":"为什么 m-ui 把 sing-box 内嵌进来,而不是管一个外部进程","description":"面板和 sing-box 内核跑在同一个 Go 进程里。这换来了什么 —— 进程内的用户表、精确的流量计数、用同一个解析器做校验 —— 代价是什么,以及 m-ui 怎么把代价补回来。","type":"article","date":"2026-09-05"} -->
+<!--meta {"title":"为什么 m-ui 把 sing-box 内嵌进来,而不是管一个外部进程","description":"面板和 sing-box 内核跑在同一个 Go 进程里。这换来了什么 —— 进程内的用户表、精确的流量计数、用同一个解析器做校验 —— 代价是什么,以及 m-ui 怎么把代价补回来。","type":"article","date":"2026-09-05","discussion":true,"discussionDate":"2026-09-05","summary":"把 sing-box 跑在面板进程里换来了什么 —— 进程内用户表、精确计数、同一个解析器做校验 —— 以及 m-ui 用三级重载和回滚怎么把代价补回来。"} -->
 <article class="doc">
   <p class="meta">深入 · 2026-09-05</p>
   <h1>为什么 m-ui 把 sing-box 内嵌进来,而不是管一个外部进程</h1>

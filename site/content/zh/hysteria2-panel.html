@@ -1,0 +1,49 @@
+<!--meta {"title":"Hysteria2 面板:在 m-ui 里建 Hysteria2 线路、端口跳跃、用户与订阅","description":"通过 m-ui 这个 sing-box 面板跑 Hysteria2:证书(正式或自签)、Hysteria2 线路表单(带宽提示、混淆、端口跳跃)、用户分配、给 Clash Meta / sing-box / 小火箭的订阅输出,以及把同一条线路部署到多台服务器。","date":"2026-09-05"} -->
+<article class="doc">
+  <h1>m-ui 里的 Hysteria2:从证书到多服务器线路</h1>
+  <p class="lead">丢包或被限速的链路上,Hysteria2 往往是大家第一个选的协议:基于 QUIC、重传激进、客户端配置简单。下面是在 m-ui 里把它跑起来到底要做什么。</p>
+  <nav class="toc"><a href="#cert">1. 证书</a><a href="#line">2. 线路</a><a href="#hop">3. 端口跳跃</a><a href="#users">4. 用户</a><a href="#subs">5. 订阅</a><a href="#multi">6. 多台服务器</a><a href="#ops">运维提示</a></nav>
+
+  <h2 id="cert">1. 证书,正式的或自签的</h2>
+  <p>Hysteria2 必须有 TLS。有域名,<b>证书 → 签发</b>拿 Let's Encrypt 证书(HTTP-01 或 Cloudflare DNS-01),自动续期。没有域名,<b>证书 → 自签</b>一键完成;m-ui 会在订阅里标记让客户端允许不安全证书(Clash Meta 的 <code>skip-cert-verify</code>、sing-box 的 <code>insecure</code>)。两条路都是正规路径;概览页的快速开始两种都认。</p>
+
+  <h2 id="line">2. Hysteria2 线路</h2>
+  <p>线路 → 快速添加 → <b>Hysteria2</b>。预设会选好协议、TLS 模式"证书",以及一个没被其它线路、面板和本机任何程序占用的空闲五位 UDP 端口。表单里还有:</p>
+  <table>
+    <tr><th>字段</th><th>作用</th></tr>
+    <tr><td>端口</td><td>UDP 监听端口。防火墙放行 UDP(不是 TCP)。</td></tr>
+    <tr><td>上行 / 下行 Mbps</td><td>交给 sing-box 的带宽提示;0 表示让拥塞控制自己决定。客户端反映速度不稳时,设成接近服务器真实线速。</td></tr>
+    <tr><td>混淆密码</td><td>启用 Salamander 混淆并使用该密码;客户端通过订阅拿到。留空就是普通 QUIC。</td></tr>
+    <tr><td>端口跳跃</td><td>一个范围,如 <code>20000-30000</code>;见下文。</td></tr>
+    <tr><td>出口</td><td>直连,或你的某个上游(WARP、中转)。</td></tr>
+    <tr><td>服务器</td><td>这条线路部署到哪些服务器 —— 全部或几台。</td></tr>
+  </table>
+  <p>保存时先渲染整份配置交给 sing-box 的解析器,通过了才落库;不合法的组合会被拒绝,错误信息是 sing-box 自己的。随后数据面为这个新监听器重启 —— 新配置起不来就回滚到上一份。</p>
+
+  <h2 id="hop">3. 端口跳跃</h2>
+  <p>Hysteria2 的端口跳跃让客户端在一个范围内轮换目标 UDP 端口,单条 UDP 流跑一会就被限速的地方很有用。在 m-ui 里范围只在线路上填一次。线路部署到的每台服务器上,m-ui 会安装防火墙转发规则,把范围内所有端口都落到线路真正的监听端口,并在订阅里把范围告诉客户端(Clash Meta 的 <code>ports</code>、sing-box 与小火箭的对应字段)。删掉范围就删掉规则。不用手写脚本;保存时范围会被校验并规范化。</p>
+
+  <h2 id="users">4. 用户</h2>
+  <p>在线路上勾"分配给所有用户",或者按用户分配。每个用户本来就有 Hysteria2 密码;配额、到期、设备数、限速对这条线路和别的线路一样生效。停用用户换的是入站用户表,不重启监听器,其他 Hysteria2 会话不受影响。</p>
+
+  <h2 id="subs">5. 客户端拿到什么</h2>
+  <ul>
+    <li><b>Clash Meta / Mihomo</b>(<code>?format=clash</code>):一个 <code>hysteria2</code> 代理,带密码、混淆、端口范围,自签证书时带 <code>skip-cert-verify</code>。</li>
+    <li><b>sing-box</b>(<code>?format=json</code>):给 SFA、SFI 和桌面 sing-box 的完整出站加规则配置。</li>
+    <li><b>通用链接</b>(默认):给小火箭、nextin、Karing 等的 <code>hysteria2://</code> 链接。</li>
+  </ul>
+  <p>三种都来自同一个地址;落地页提供一键导入按钮和二维码。</p>
+
+  <h2 id="multi">6. 同一条线路上多台服务器</h2>
+  <p>把线路部署到全部服务器或挑几台。主机 5 秒内把线路、证书设置和用户表推给每台副机;每台副机用同一个端口、自己的证书和自己的端口跳跃规则监听。用户订阅里于是出现 <i>Hysteria2 – Tokyo</i>、<i>Hysteria2 – Frankfurt</i> 等,客户端按延迟选。每台服务器的流量只计一次进用户配额。</p>
+
+  <h2 id="ops">运维提示</h2>
+  <ul>
+    <li>Hysteria2 走 UDP:云防火墙和安全组要放行该端口(以及跳跃范围)的 UDP。</li>
+    <li>带宽提示比 TCP 协议更重要:客户端速度忽高忽低时,把上下行设成接近服务器真实线速。</li>
+    <li>按用户限速在数据面执行,对 Hysteria2 和别的协议一样有效。</li>
+    <li>停用用户、改密码、把线路换到别的出口,都不会重启监听器。</li>
+  </ul>
+
+  <p class="related">m-ui · Maoyangui 的 sing-box 面板 · <a href="{{base}}zh/getting-started/">安装</a> · <a href="{{base}}zh/multi-server/">多服务器</a> · <a href="{{base}}zh/user-management/">用户管理</a> · <a href="{{github}}" rel="noopener">GitHub</a></p>
+</article>

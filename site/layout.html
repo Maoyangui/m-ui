@@ -5,14 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{title}}</title>
 <meta name="description" content="{{description}}">
+<meta name="author" content="Maoyangui">
+<meta name="application-name" content="m-ui">
 <link rel="canonical" href="{{canonical}}">
   {{alternates}}
 <meta property="og:type" content="{{og_type}}">
-<meta property="og:site_name" content="m-ui">
+<meta property="og:site_name" content="m-ui · sing-box panel by Maoyangui">
+<meta property="og:locale" content="{{og_locale}}">
 <meta property="og:title" content="{{title}}">
 <meta property="og:description" content="{{description}}">
 <meta property="og:url" content="{{canonical}}">
 <meta property="og:image" content="{{og_image}}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="{{title}}">
 <meta name="twitter:description" content="{{description}}">
@@ -20,14 +25,14 @@
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#2563eb">
 <link rel="icon" href="{{base}}logo.svg" type="image/svg+xml">
-<link rel="alternate" type="application/atom+xml" title="m-ui releases" href="{{base}}feed.xml">
+<link rel="alternate" type="application/atom+xml" title="m-ui releases and articles" href="{{base}}feed.xml">
 <link rel="stylesheet" href="{{base}}assets/site.css">
 {{jsonld}}
 </head>
 <body>
 <header class="top">
   <div class="wrap bar">
-    <a class="brand" href="{{home}}"><img src="{{base}}logo.svg" alt="" width="28" height="28"><span>m-ui</span></a>
+    <a class="brand" href="{{home}}" title="{{brand_line}}"><img src="{{base}}logo.svg" alt="" width="28" height="28"><span>m-ui</span><small>sing-box panel</small></a>
     <nav class="nav" aria-label="main">{{nav}}</nav>
     <div class="right">
       <a class="lang" href="{{switch_href}}">{{switch_label}}</a>
@@ -42,15 +47,17 @@
 <footer class="foot">
   <div class="wrap">
     <div class="cols">
-      <div><a class="brand" href="{{home}}"><img src="{{base}}logo.svg" alt="" width="22" height="22"><span>m-ui</span></a><p class="muted">{{t_license}}</p></div>
+      <div><a class="brand" href="{{home}}"><img src="{{base}}logo.svg" alt="" width="22" height="22"><span>m-ui</span></a><p class="muted">{{brand_line}}<br>{{t_license}}</p></div>
       <div>
+        <a href="{{about}}">{{t_about}}</a>
+        <a href="{{articles}}">{{t_articles}}</a>
         <a href="{{github}}" rel="noopener">{{t_github}}</a>
         <a href="{{github}}/releases" rel="noopener">{{t_releases}}</a>
         <a href="{{github}}/discussions" rel="noopener">{{t_discussions}}</a>
         <a href="{{base}}feed.xml">{{t_feed}}</a>
       </div>
     </div>
-    <p class="muted small">© {{year}} Maoyangui</p>
+    <p class="muted small">© {{year}} <a href="{{author_url}}" rel="noopener">Maoyangui</a></p>
   </div>
 </footer>
 <script>

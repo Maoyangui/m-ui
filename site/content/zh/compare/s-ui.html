@@ -1,0 +1,54 @@
+<!--meta {"title":"m-ui 与 s-ui:两个 sing-box 面板的对比 · s-ui 替代","description":"s-ui 和 m-ui 都管理 sing-box。差别在:内嵌内核还是管进程、线路还是入站/出站/路由三张表、主副机多服务器同步、跨服务器设备数、代理、部署方式。2026-09-05 对照 s-ui v1.6.0 核对,附来源与未知项。","date":"2026-09-05"} -->
+<article class="doc">
+  <h1>m-ui 与 s-ui</h1>
+  <p class="lead">两个都是 sing-box 面板,都是 GPL-3.0,都是单人维护、带网页界面。如果你已经了解 s-ui,这页只回答一个问题:<b>什么情况下 m-ui 更合适,什么情况下不是?</b>事实于 <b>2026-09-05</b> 对照 s-ui 的 README 与 Releases(v1.6.0,2026-09-01)核对;s-ui 没写明的一律标 <span class="unk">未知</span>。</p>
+
+  <h2>一段话版本</h2>
+  <p>s-ui 是成熟的 sing-box 面板:近 1 万 star、多年发布记录、协议列表很长,以及熟悉的入站 / 出站 / 路由模型,每一样一张表单。m-ui 更新、也刻意更窄:把 sing-box 内嵌进面板二进制,用<i>线路</i>取代三张配置表,改用户、换上游热换不重启,每次保存用 sing-box 自己的解析器校验,并且从一开始就是一台主机同步任意多台副机。只跑一台服务器、喜欢把配置改得很细,s-ui 是稳妥的选择;跑好几台服务器、整天在改用户,m-ui 就是为此而做的。</p>
+
+  <h2>对照</h2>
+  <table>
+    <tr><th></th><th>m-ui</th><th>s-ui</th></tr>
+    <tr><td>内核</td><td>sing-box,内嵌在面板进程里</td><td>sing-box;内嵌还是外部进程:<span class="unk">未知</span></td></tr>
+    <tr><td>成熟度</td><td>2026 年 9 月首发,一个维护者</td><td>发布多年,约 9.8k star,最新 v1.6.0(2026-09-01)</td></tr>
+    <tr><td>配置模型</td><td>线路:协议 + 端口 → 出口,按服务器渲染</td><td>入站、出站、路由规则各自表单;其余用 JSON 编辑器</td></tr>
+    <tr><td>入站协议</td><td>Hysteria2、AnyTLS、TUIC、VLESS Reality / Vision、Trojan、VMess、Shadowsocks 2022、SOCKS、HTTP、Mixed</td><td>Mixed、SOCKS、HTTP、HTTPS、Direct、Redirect、TProxy、VLESS、VMess、Trojan、Shadowsocks、ShadowTLS、Hysteria、Hysteria2、Naive、TUIC(按 README)</td></tr>
+    <tr><td>改用户怎么生效</td><td>原地换入站用户表;不重连</td><td><span class="unk">未知</span></td></tr>
+    <tr><td>保存前校验 / 回滚</td><td>事务内 sing-box 干跑;新配置起不来就回滚</td><td><span class="unk">未知</span></td></tr>
+    <tr><td>多服务器</td><td>主 / 副机每 5 秒同步,集中判定配额与设备数,线路按服务器部署</td><td>README 未提及(<span class="unk">未知</span>)</td></tr>
+    <tr><td>订阅</td><td>通用链接、Clash / Mihomo、sing-box JSON;带用量、一键导入、二维码、客户端下载的落地页;临时共享</td><td>链接、JSON、Clash 三种格式,带信息展示;可加外部链接与订阅</td></tr>
+    <tr><td>用户限制</td><td>带周期重置的配额、到期、设备数(跨所有服务器的源 IP)、限速</td><td>流量上限与到期日;IP / 设备数:<span class="unk">未知</span></td></tr>
+    <tr><td>代理</td><td>独立面板、额度、自己的套餐与落地页文案</td><td><span class="unk">未知</span></td></tr>
+    <tr><td>证书</td><td>面板内 Let's Encrypt HTTP-01 / Cloudflare DNS-01,一键自签</td><td><span class="unk">未知</span>(README 未提)</td></tr>
+    <tr><td>部署</td><td>一个静态 Go 二进制 + SQLite,systemd;安装脚本校验 SHA256</td><td>安装脚本或 Docker(按 README)</td></tr>
+    <tr><td>导入旧面板数据库</td><td>支持兼容格式;端口、凭据保留</td><td>—</td></tr>
+    <tr><td>许可证</td><td>GPL-3.0</td><td>GPL-3.0</td></tr>
+  </table>
+
+  <h2>选 s-ui,如果</h2>
+  <ul>
+    <li>你想要社区更大、教程更多、历史更长的面板。</li>
+    <li>你喜欢显式地配入站、出站、路由,或者需要 m-ui 没有的协议(ShadowTLS、Naive、TProxy、Redirect)。</li>
+    <li>你只跑一台服务器,不需要跨机集中配额。</li>
+  </ul>
+
+  <h2>选 m-ui,如果</h2>
+  <ul>
+    <li>你有<b>两台以上服务器</b>,希望用户、配额、设备数是一份。</li>
+    <li>你频繁加减用户,不想每次都重启。</li>
+    <li>你希望配置错误在进入运行中的内核之前就被拦下,并且自动回滚。</li>
+    <li>你做分销,需要带额度的独立代理面板。</li>
+    <li>你想要一个不用 Docker 就能备份、搬迁、更新的二进制。</li>
+  </ul>
+
+  <h2>迁移</h2>
+  <p>m-ui 能导入兼容格式的旧面板数据库,保留端口、凭据与订阅路径,既有客户端不用刷新就能继续用。先拿数据库副本试,看导入报告:它列出映射了什么、跳过了什么。见<a href="{{base}}zh/getting-started/">快速上手</a>。</p>
+
+  <h2>来源</h2>
+  <ul class="small">
+    <li><a href="https://github.com/alireza0/s-ui" rel="noopener">s-ui README</a> 与 <a href="https://github.com/alireza0/s-ui/releases" rel="noopener">Releases</a></li>
+    <li><a href="{{github}}" rel="noopener">m-ui README</a></li>
+    <li>四个面板的总表:<a href="{{base}}zh/compare/">m-ui 和其它面板的对比</a></li>
+  </ul>
+  <p class="small muted">核对于 2026-09-05。关于 s-ui 的描述有误或过时,请到 <a href="{{github}}/discussions" rel="noopener">Discussions</a> 指出,会改。</p>
+</article>

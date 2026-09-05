@@ -1,6 +1,7 @@
 <p align="center"><img src="brand/logo.svg" width="130" alt="m-ui"></p>
 <h1 align="center">m-ui</h1>
 <p align="center">内嵌 <a href="https://github.com/SagerNet/sing-box">sing-box</a> 的多服务器代理面板 · 单二进制 · 一主多副 · 面板内完成全部运维</p>
+<p align="center"><sub>m-ui · <a href="https://github.com/Maoyangui">Maoyangui</a> 的 sing-box 面板 · Go · Linux · GPL-3.0 —— 与其它同名 “m-ui” 项目无关</sub></p>
 <p align="center"><b>中文</b> · <a href="README.en.md">English</a> · <a href="https://maoyangui.github.io/m-ui/zh/">文档站</a> · <a href="#架构">架构</a> · <a href="https://github.com/Maoyangui/m-ui/releases">下载</a></p>
 
 ---

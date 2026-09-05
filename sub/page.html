@@ -39,7 +39,7 @@ button.danger{color:var(--danger)}button.danger:hover{border-color:var(--danger)
 .qrs{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:.9rem}.qrs figure{margin:0;text-align:center;font-size:.78rem;color:var(--muted)}.qrs img{width:150px;height:150px;border-radius:10px;border:1px solid var(--border);background:#fff;display:block;margin-bottom:.3rem}
 .lines{display:flex;flex-direction:column;gap:.35rem}.line{display:flex;justify-content:space-between;align-items:center;font-size:.88rem;padding:.45rem .6rem;border-radius:8px;background:var(--bg)}.line .tags{display:flex;gap:.3rem}
 .tag{font-size:.68rem;padding:.08rem .4rem;border-radius:5px;border:1px solid var(--border);color:var(--muted);text-transform:uppercase}
-.foot{text-align:center;color:var(--muted);font-size:.76rem;margin-top:1.4rem}.foot a{color:var(--primary);text-decoration:none}
+.foot{text-align:center;color:var(--muted);font-size:.76rem;margin-top:1.4rem}.foot a.powered{color:inherit;text-decoration:none;opacity:.85}.foot a.powered:hover{text-decoration:underline}.foot a{color:var(--primary);text-decoration:none}
 .toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:.5rem 1rem;border-radius:8px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none}.toast.show{opacity:1}
 </style>
 </head>
@@ -94,7 +94,7 @@ button.danger{color:var(--danger)}button.danger:hover{border-color:var(--danger)
     <div class="lines">{{range .Lines}}<div class="line"><span>{{.Name}}</span><span class="tags"><span class="tag">{{.Protocol}}</span>{{if .TLS}}<span class="tag">{{.TLS}}</span>{{end}}{{if .Transport}}<span class="tag">{{.Transport}}</span>{{end}}</span></div>{{end}}</div></details>
   </div>{{end}}
 
-  <div class="foot">{{if .Support}}{{.Support}} · {{end}}© {{.Year}} {{.Title}}</div>
+  <div class="foot">{{if .Support}}{{.Support}} · {{end}}© {{.Year}} {{.Title}}{{if .Brand}} · <a class="powered" href="https://maoyangui.github.io/m-ui/" rel="noopener" target="_blank">Powered by m-ui</a>{{end}}</div>
 </div>
 <div class="toast" id="toast"></div>
 <script>

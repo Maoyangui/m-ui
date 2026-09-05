@@ -1,0 +1,34 @@
+<!--meta {"title":"Running m-ui without a domain: IP, self-signed certificate, working subscriptions","description":"You do not need a domain to run a sing-box panel. How m-ui works on a bare IP: one-click self-signed certificate, what the subscription tells clients, which protocols care, Reality as the no-certificate option, and how to add a domain later without breaking anyone.","type":"article","date":"2026-10-11","discussion":true,"summary":"A bare IP is a fully supported path: self-sign in one click, subscriptions carry the insecure flag, Reality needs no certificate at all, and a domain can be added later."} -->
+<article class="doc">
+  <p class="meta">Guide · 2026-10-11</p>
+  <h1>Running m-ui without a domain</h1>
+  <p class="lead">Plenty of people run a proxy on a VPS they will replace next month and never buy a domain for it. m-ui treats that as a normal setup, not a degraded one.</p>
+
+  <h2>What actually needs a domain</h2>
+  <p>Only two things: a certificate issued by a public CA (Let's Encrypt validates a name, not an address), and a stable address in subscriptions that survives changing the server. Everything else — TLS itself, Hysteria2, AnyTLS, Trojan, the panel, the landing page — works on an IP.</p>
+
+  <h2>Step 1: self-sign</h2>
+  <p><b>Certificate → Self-sign</b> creates a long-lived certificate for the server's IP (and any names you type) and installs it for the data plane. It is one click. The Quick Start card on the dashboard counts it as "certificate ready"; a domain is listed under optional steps.</p>
+
+  <h2>Step 2: what the subscription tells clients</h2>
+  <p>When the certificate is self-signed, m-ui marks every TLS-bearing node in the subscription so clients do not reject it: <code>skip-cert-verify: true</code> in Clash / Mihomo YAML, <code>"insecure": true</code> in sing-box JSON, and the insecure flag each universal-link scheme uses. Users import the link and connect; nothing to toggle by hand.</p>
+  <p>The trade-off is real and worth stating: with certificate verification off, a client cannot detect a man-in-the-middle presenting another self-signed certificate. For most personal setups this is acceptable; for a service you sell, a domain and a real certificate are the better default.</p>
+
+  <h2>Step 3 (optional): Reality needs no certificate</h2>
+  <p>VLESS + Reality borrows a real website's TLS handshake and never presents your certificate at all, so it is the cleanest no-domain protocol: no self-signed warning, no insecure flag. Quick add → <b>VLESS + Reality</b>, generate the key pair, pick a handshake target, done. Many operators run Reality on IP-only servers and keep Hysteria2 with a self-signed certificate alongside it.</p>
+
+  <h2>Step 4: the address in subscriptions</h2>
+  <p>Without a domain, nodes are advertised by the server's public IP (auto-detected, or the address you set per server). If you later move to a new IP, edit the server's address once and every subscription updates on the client's next refresh — that is the one place a domain would have saved a step.</p>
+
+  <h2>Adding a domain later</h2>
+  <ol>
+    <li>Point the domain at the server.</li>
+    <li><b>Certificate → Issue</b> with HTTP-01 (port 80 reachable) or Cloudflare DNS-01 (API token, no port 80). m-ui pre-checks DNS and the port before it starts.</li>
+    <li>Set the server's domain on the Servers page. Subscriptions switch from IP to name and drop the insecure flag on the next refresh; existing clients are not disconnected, because a certificate change is a hot reload.</li>
+  </ol>
+
+  <h2>Nodes without domains</h2>
+  <p>Each node issues its own certificate. A self-signed one is fine: the master pushes lines with your TLS settings, and each node's subscription entries carry the insecure flag or not according to that node's certificate. Mixed fleets — a domain on the master, IPs on nodes — are normal.</p>
+
+  <p class="related">Related: <a href="{{base}}getting-started/">getting started</a> · <a href="{{base}}hysteria2-panel/">Hysteria2 in m-ui</a> · <a href="{{base}}faq/">FAQ</a></p>
+</article>

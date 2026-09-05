@@ -1,0 +1,38 @@
+<!--meta {"title":"About m-ui · sing-box panel by Maoyangui","description":"What this m-ui is: an open-source sing-box management panel by Maoyangui — embedded core, multi-server, one Go binary, GPL-3.0, Linux. Not related to other projects that share the name m-ui."} -->
+<article class="doc">
+  <h1>About m-ui</h1>
+  <p class="lead">There are several unrelated projects called "m-ui". This one is the <b>sing-box panel by Maoyangui</b>: a self-hosted web panel that embeds the sing-box core and manages any number of servers from one place.</p>
+
+  <h2>The facts</h2>
+  <table>
+    <tr><th>Name</th><td>m-ui (full form: <i>m-ui — sing-box panel by Maoyangui</i>)</td></tr>
+    <tr><th>Author / maintainer</th><td><a href="{{author_url}}" rel="noopener">Maoyangui</a> on GitHub</td></tr>
+    <tr><th>Repository</th><td><a href="{{github}}" rel="noopener">github.com/Maoyangui/m-ui</a></td></tr>
+    <tr><th>Website</th><td><a href="{{base}}">maoyangui.github.io/m-ui</a> (this site; Chinese at <a href="{{base}}zh/">/zh/</a>)</td></tr>
+    <tr><th>What it is</th><td>A web panel for <a href="https://github.com/SagerNet/sing-box" rel="noopener">sing-box</a>: lines (protocol + port → exit), users with quotas, subscriptions with landing pages, resellers, certificates, backups, multi-server sync</td></tr>
+    <tr><th>How it runs</th><td>One statically linked Go binary with sing-box embedded; SQLite for state; Linux amd64 / arm64 with systemd</td></tr>
+    <tr><th>License</th><td><a href="{{github}}/blob/main/LICENSE" rel="noopener">GPL-3.0</a></td></tr>
+    <tr><th>First release</th><td>September 2026 (<a href="{{github}}/releases" rel="noopener">releases</a>)</td></tr>
+    <tr><th>Languages</th><td>Panel UI, docs and landing pages in English and Chinese</td></tr>
+  </table>
+
+  <h2>Not to be confused with</h2>
+  <p>"m-ui" is also used by other, unrelated software — most visibly UI component libraries and various small repositories. This project has no connection to any of them, shares no code with them, and is not a fork of another panel. If you are looking for a React component library, this is not it.</p>
+  <p>When you write about or link to this project, the unambiguous references are the repository path <code>Maoyangui/m-ui</code>, the phrase <i>m-ui sing-box panel</i>, or this site's address.</p>
+
+  <h2>What makes it different</h2>
+  <ul>
+    <li><b>Embedded core</b>: sing-box runs inside the panel process, so users and upstreams are hot-swapped without restarting connections — <a href="{{base}}articles/embedded-sing-box/">why</a>.</li>
+    <li><b>Lines instead of config tables</b>: one record renders into the sing-box config on every server it is deployed to.</li>
+    <li><b>Validated saves with rollback</b>: sing-box's own parser checks every change before it is committed; a config that fails to start is rolled back.</li>
+    <li><b>Multi-server by design</b>: one master, any number of nodes, central quota and device limits — <a href="{{base}}multi-server/">how</a>.</li>
+  </ul>
+
+  <h2>Where things happen</h2>
+  <ul>
+    <li>Code, releases and issues: <a href="{{github}}" rel="noopener">GitHub</a></li>
+    <li>Questions and announcements: <a href="{{github}}/discussions" rel="noopener">GitHub Discussions</a></li>
+    <li>Release and article feed: <a href="{{base}}feed.xml">feed.xml</a></li>
+    <li>Getting started: <a href="{{base}}getting-started/">install in five minutes</a></li>
+  </ul>
+</article>

@@ -1,0 +1,49 @@
+<!--meta {"title":"Hysteria2 panel: create a Hysteria2 line with port hopping, users and subscriptions · m-ui","description":"Running Hysteria2 through the m-ui sing-box panel: certificate (real or self-signed), the Hysteria2 line form (bandwidth hints, obfuscation, port hopping), user assignment, subscription output for Clash Meta, sing-box and Shadowrocket, and deploying the same line to several servers.","date":"2026-09-05"} -->
+<article class="doc">
+  <h1>Hysteria2 in m-ui: from certificate to a multi-server line</h1>
+  <p class="lead">Hysteria2 is the protocol most people pick first for lossy or throttled links: QUIC-based, aggressive on retransmission, and simple for clients. Here is exactly what setting it up in m-ui involves.</p>
+  <nav class="toc"><a href="#cert">1. Certificate</a><a href="#line">2. The line</a><a href="#hop">3. Port hopping</a><a href="#users">4. Users</a><a href="#subs">5. Subscription</a><a href="#multi">6. Several servers</a><a href="#ops">Operations</a></nav>
+
+  <h2 id="cert">1. A certificate, real or self-signed</h2>
+  <p>Hysteria2 requires TLS. With a domain, <b>Certificate → Issue</b> gets a Let's Encrypt certificate (HTTP-01 or Cloudflare DNS-01) that renews itself. Without one, <b>Certificate → Self-sign</b> is one click; m-ui then marks the subscription so clients allow the insecure certificate (Clash Meta's <code>skip-cert-verify</code>, sing-box's <code>insecure</code>). Both paths are first-class; the dashboard's Quick Start accepts either.</p>
+
+  <h2 id="line">2. The Hysteria2 line</h2>
+  <p>Lines → Quick add → <b>Hysteria2</b>. The preset selects the protocol, TLS mode "certificate", and a free five-digit UDP port that no other line, the panel or another process on the server is using. The form then offers:</p>
+  <table>
+    <tr><th>Field</th><th>What it does</th></tr>
+    <tr><td>Port</td><td>The UDP listen port. Open it on the firewall (UDP, not TCP).</td></tr>
+    <tr><td>Upload / download Mbps</td><td>Bandwidth hints handed to sing-box; 0 lets the congestion controller decide. Set them close to the server's real line rate if clients report unstable speed.</td></tr>
+    <tr><td>Obfuscation password</td><td>Enables Salamander obfuscation with that password; clients receive it in the subscription. Leave empty for plain QUIC.</td></tr>
+    <tr><td>Port hopping</td><td>A range such as <code>20000-30000</code>; see below.</td></tr>
+    <tr><td>Exit</td><td>Direct, or one of your upstreams (WARP, a relay).</td></tr>
+    <tr><td>Servers</td><td>Which servers this line is deployed to — all, or a subset.</td></tr>
+  </table>
+  <p>Saving renders the full configuration and hands it to sing-box's parser before anything is committed; a bad combination is rejected with sing-box's own message. The data plane then restarts for this new listener — with rollback to the previous configuration if the new one fails to start.</p>
+
+  <h2 id="hop">3. Port hopping</h2>
+  <p>Hysteria2 port hopping lets clients rotate the destination UDP port inside a range, which helps where a single UDP flow gets throttled after a while. In m-ui you type the range once on the line. On each server the line is deployed to, m-ui installs a firewall redirect rule so every port in the range lands on the line's real listen port, and the subscription tells clients about the range (Clash Meta <code>ports</code>, sing-box and Shadowrocket equivalents). Removing the range removes the rule. Nothing to script by hand; the range is validated and normalised when you save.</p>
+
+  <h2 id="users">4. Users</h2>
+  <p>Tick "assign to all users" on the line, or assign per user. Each user already has a Hysteria2 password; quota, expiry, device limit and speed limits apply to this line like any other. Disabling a user swaps the inbound user table without restarting the listener, so other Hysteria2 sessions stay up.</p>
+
+  <h2 id="subs">5. What clients receive</h2>
+  <ul>
+    <li><b>Clash Meta / Mihomo</b> (<code>?format=clash</code>): a <code>hysteria2</code> proxy with password, obfs, port range and <code>skip-cert-verify</code> when the certificate is self-signed.</li>
+    <li><b>sing-box</b> (<code>?format=json</code>): a complete outbound-plus-rules configuration for SFA, SFI and desktop sing-box.</li>
+    <li><b>Universal links</b> (default): <code>hysteria2://</code> URIs for Shadowrocket, nextin, Karing and others.</li>
+  </ul>
+  <p>All three come from the same address; the landing page offers one-tap import buttons and a QR code.</p>
+
+  <h2 id="multi">6. The same line on several servers</h2>
+  <p>Deploy the line to all servers or pick some. The master pushes the line, the certificate settings and the user table to every node within 5 seconds; each node listens on the same port with its own certificate and its own port-hopping rule. The user's subscription then lists <i>Hysteria2 – Tokyo</i>, <i>Hysteria2 – Frankfurt</i> and so on, and their client picks by latency. Traffic from every server counts once against the user's quota.</p>
+
+  <h2 id="ops">Operations notes</h2>
+  <ul>
+    <li>Hysteria2 is UDP: cloud firewalls and security groups must allow UDP on the port (and the hop range).</li>
+    <li>Bandwidth hints matter more than on TCP protocols: if clients see erratic speed, set upload / download close to the server's real line rate.</li>
+    <li>Per-user speed limits are enforced in the data plane and work with Hysteria2 like any other protocol.</li>
+    <li>Switching a user off, changing their password or moving the line to another exit never restarts the listener.</li>
+  </ul>
+
+  <p class="related">m-ui · sing-box panel by Maoyangui · <a href="{{base}}getting-started/">install</a> · <a href="{{base}}multi-server/">multi-server</a> · <a href="{{base}}user-management/">user management</a> · <a href="{{github}}" rel="noopener">GitHub</a></p>
+</article>

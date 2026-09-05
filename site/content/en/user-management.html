@@ -1,0 +1,40 @@
+<!--meta {"title":"sing-box user management: quotas, expiry, device and speed limits · m-ui","description":"How m-ui manages sing-box users: traffic quotas with periodic reset, expiry dates, device limits counted by source IP across all servers, per-user speed limits, plans as templates, subscriptions, bulk operations and reseller panels — enforced centrally every minute.","date":"2026-09-05"} -->
+<article class="doc">
+  <h1>User management for sing-box, done centrally</h1>
+  <p class="lead">sing-box knows credentials; it does not know quotas, expiry dates or how many phones one person is using. m-ui keeps that state in one place and enforces it on every server it manages.</p>
+  <nav class="toc"><a href="#user">A user</a><a href="#quota">Quota</a><a href="#expiry">Expiry</a><a href="#devices">Devices</a><a href="#speed">Speed</a><a href="#plans">Plans</a><a href="#subs">Subscription</a><a href="#bulk">Bulk</a><a href="#resellers">Resellers</a><a href="#enforce">Enforcement</a></nav>
+
+  <figure class="shot"><img src="{{base}}img/user-detail-en.png" alt="User detail drawer in m-ui: subscription links, QR code, usage, expiry, online devices and traffic chart" loading="lazy"></figure>
+
+  <h2 id="user">What a user is</h2>
+  <p>A name, a set of credentials generated for every protocol (password for Hysteria2 and Shadowsocks, UUID for VLESS / VMess / TUIC, and so on), the lines they may use, and the limits below. The name doubles as the subscription key unless you switch to random tokens in Settings. Creating a user hot-swaps the inbound user tables on the master and every node; nobody else reconnects.</p>
+
+  <h2 id="quota">Traffic quota</h2>
+  <p>Set a quota in GB or leave it unlimited. Usage is the sum of upload and download across all servers, scaled by each server's traffic ratio (a premium server can count double). <b>Periodic reset</b> zeroes the counter every <i>N</i> days from the first reset date and re-enables a user who was disabled for being over quota — the usual monthly plan. Lifetime totals are kept separately so a reset does not lose history.</p>
+
+  <h2 id="expiry">Expiry</h2>
+  <p>A date, or none. Expired users are disabled and kicked; the landing page tells them so. "Extend 30 days" and "Renew" (apply a plan again) are one click on the user, and bulk-extend exists for the whole list. Telegram can warn you <i>N</i> days before expiry.</p>
+
+  <h2 id="devices">Device limit</h2>
+  <p>A device is a distinct source IP seen on any inbound. The master merges online IPs from every node and pushes each node the IPs seen elsewhere, so a limit of 3 means three devices across your whole fleet, not three per server. Connections beyond the limit are refused; the user's detail drawer lists the current IPs and the lines they are on.</p>
+
+  <h2 id="speed">Speed limits</h2>
+  <p>Upload and download limits in Mbps, per user, applied by the data plane on every server. Useful for trial accounts and for keeping one user from saturating a small VPS.</p>
+
+  <h2 id="plans">Plans</h2>
+  <p>A plan is a template: quota, duration, device limit, speed limits, reset period and which lines to assign. Use it when creating a user, when renewing, or in bulk-create. Resellers get their own plans, separate from yours.</p>
+
+  <h2 id="subs">Subscription</h2>
+  <p>Every user has one address in three formats (universal links, Clash / Mihomo, sing-box JSON) plus a landing page with usage, expiry, one-tap import and QR code. You can allow users to generate a temporary share link that you can revoke instantly. Details on the <a href="{{base}}sing-box-panel/">sing-box panel</a> page.</p>
+
+  <h2 id="bulk">Bulk operations</h2>
+  <p>Bulk-create <i>N</i> users from a prefix and a plan; select across pages to enable, disable, extend, reset, apply a plan or delete; export CSV; import users from a legacy panel database. The user list is paginated and searchable so a few thousand users stay manageable.</p>
+
+  <h2 id="resellers">Resellers</h2>
+  <p>Give a reseller a traffic, device and bandwidth budget, an expiry date and a set of lines. They get a separate panel where they create their own users and plans; all usage rolls up to their budget, and when it is exhausted or expired every user of theirs is cut off at once. Their users never appear in your list.</p>
+
+  <h2 id="enforce">How enforcement works</h2>
+  <p>Every 10 seconds the panel reads traffic and online connections from the embedded core. Every minute it judges quota, expiry and periodic resets on the master. Users who fail are disabled in the database and removed from the next snapshot to every node, so enforcement is consistent fleet-wide within seconds and never depends on a node making its own decision. Read <a href="{{base}}articles/multi-server-sync/">how the sync protocol works</a>.</p>
+
+  <p class="related">m-ui · sing-box panel by Maoyangui · <a href="{{base}}features/">features</a> · <a href="{{base}}getting-started/">install</a> · <a href="{{github}}" rel="noopener">GitHub</a></p>
+</article>

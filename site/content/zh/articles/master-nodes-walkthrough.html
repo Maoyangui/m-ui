@@ -1,0 +1,47 @@
+<!--meta {"title":"一台主机、三台 VPS:用 m-ui 搭多服务器 sing-box 的完整走一遍","description":"一次具体的演练:在三台服务器上装 m-ui,把两台变成副机,在主机里配对,把一条线路部署到三台,建一个用户,看订阅 —— 外加副机显示离线时该查什么。","type":"article","date":"2026-10-17","discussion":true,"summary":"Frankfurt 做主机,Tokyo 和 Singapore 做副机:从三台空服务器到一条每个城市各一个节点的订阅,一步不漏。"} -->
+<article class="doc">
+  <p class="meta">演练 · 2026-10-17</p>
+  <h1>一台主机、三台 VPS:多服务器完整走一遍</h1>
+  <p class="lead">三台服务器 —— 就叫它们 Frankfurt、Tokyo、Singapore —— 和一个想在三台里随便挑的用户。下面是每一步,什么都不跳过。</p>
+
+  <figure class="shot"><img src="{{base}}img/nodes.png" alt="配对后的服务器页:Frankfurt 为主机,Tokyo 与 Singapore 在线并已同步" loading="lazy"></figure>
+
+  <h2>0. 决定哪台是主机</h2>
+  <p>主机负责算账、提供面板和订阅,所以挑那台你最不想经常换的 —— 有域名的话就是它。这里是 Frankfurt。副机只管转发;可以便宜、可以随时换。</p>
+
+  <h2>1. 三台都装</h2>
+  <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
+  <p>每台同一条命令。各自登录一次面板改掉默认密码。三台都放行 <code>2053/tcp</code>(主机的面板要用;副机要让主机能访问它的 agent API)。</p>
+
+  <h2>2. 证书</h2>
+  <p>Frankfurt:给它的域名签 Let's Encrypt 证书,或者自签。Tokyo 和 Singapore:<b>证书 → 自签</b>就够了 —— 每台副机用自己的证书跑线路,主机访问自签副机时放宽验证(新增服务器时那个"忽略证书"开关)。</p>
+
+  <h2>3. 把 Tokyo 和 Singapore 变成副机</h2>
+  <p>在它们各自的面板:<b>设置 → 作为副服务器运行</b>。面板会显示一张配对卡片,两个值:API 地址(<code>https://&lt;ip&gt;:2053/app/</code>)和令牌。页面留着,或者两个都复制下来。</p>
+
+  <h2>4. 在主机里配对</h2>
+  <p>在 Frankfurt:<b>服务器 → 新增服务器</b>。名字 "Tokyo",客户端要连的域名或 IP,第 3 步的 API 地址和令牌,副机是自签证书就勾"忽略证书"。保存。Singapore 同样来一遍。五秒内两行都显示<i>在线 · 已同步</i>。有一台显示离线,看文末的检查清单。</p>
+
+  <h2>5. 一条线路,三台服务器</h2>
+  <p><b>线路 → 快速添加 → Hysteria2</b>(或 AnyTLS、Reality)。"服务器"留在全部,端口用推荐的,勾"分配给所有用户",保存。主机校验配置、为新监听器重启自己的数据面,下一份快照把线路推给两台副机;每台副机用自己的证书重启数据面。三台防火墙都放行 <code>24443/udp</code>(或推荐的那个端口)。</p>
+
+  <h2>6. 一个用户和他的订阅</h2>
+  <p><b>用户 → 新增用户</b>:名字、配额、到期、设备数 3。详情抽屉直接打开,里面有订阅地址和二维码。导进 Clash Meta 或 sing-box:代理列表里是 <i>Hysteria2 – Frankfurt</i>、<i>Hysteria2 – Tokyo</i>、<i>Hysteria2 – Singapore</i>,各指向那台服务器的地址。客户端的自动测速组挑最快的。</p>
+
+  <h2>7. 现在成立的事</h2>
+  <ul>
+    <li>走三台中任何一台的流量都只计一次进同一个配额。</li>
+    <li>三台设备是所有服务器合计三台,不是九台。</li>
+    <li>在 Frankfurt 停用这个用户,几秒内 Tokyo 和 Singapore 上都没他了。</li>
+    <li>以后加第四台,再来一遍第 1–4 步;所有部署到"全部服务器"的线路自动出现在它上面,每个人的订阅下次刷新多出第四个节点。</li>
+  </ul>
+
+  <h2>副机显示离线时</h2>
+  <ol>
+    <li>鼠标悬停状态:<i>连接超时</i>是副机防火墙或安全组没放行 2053;<i>令牌不匹配</i>是令牌抄错了;<i>证书不受信任</i>是自签副机该勾"忽略证书"。</li>
+    <li>点该行的<b>测试</b>立刻重试,不用等下一轮。</li>
+    <li>主机眼里离线的副机仍在照常转发;什么都不会丢,重连后按副机的游标补齐流量。</li>
+  </ol>
+
+  <p class="related">相关:<a href="{{base}}zh/multi-server/">多服务器总览</a> · <a href="{{base}}zh/articles/multi-server-sync/">同步在底下是怎么做的</a> · <a href="{{base}}zh/hysteria2-panel/">m-ui 里的 Hysteria2</a></p>
+</article>

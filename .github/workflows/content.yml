@@ -1,0 +1,40 @@
+name: content
+
+# 内容发布队列:site/content 里带 date 的文章到了日期自动上站(pages 工作流生成时按日期过滤),
+# 带 discussion 的文章到了 discussionDate 自动发一份到 Discussions。每天跑一次,不需要任何人操作。
+on:
+  schedule:
+    - cron: "17 2 * * *" # 每天 02:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  discussions: write
+  actions: write # 有新内容时触发 pages 重新部署
+
+concurrency:
+  group: content
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build manifest
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node site/build.mjs
+      - name: Publish due articles to Discussions
+        id: pub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node site/publish.mjs
+      - name: Redeploy site when something became due today
+        if: steps.pub.outputs.due != '0' || steps.pub.outputs.created != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main

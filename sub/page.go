@@ -95,6 +95,7 @@ type pageData struct {
 	ClientsURL             template.URL // 客户端下载页(同一地址加 ?clients=1)
 	Lines                  []pageLine
 	Year                   int
+	Brand                  bool // 页脚 "Powered by m-ui":设置可关;代理的落地页不显示
 }
 
 func pageLang(r *http.Request) string {
@@ -198,6 +199,7 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key 
 	}
 	title := s.pageTitle(rs, opt)
 	data := buildPageData(r, subPath, key, user, lines, opt, title, notice, support)
+	data.Brand = rs == nil && !strings.EqualFold(s.setting("subPageBrand"), "false") // 代理的落地页尊重代理品牌
 	var buf bytes.Buffer
 	if err := pageTmpl.Execute(&buf, data); err != nil {
 		http.Error(w, "page error: "+err.Error(), http.StatusInternalServerError)

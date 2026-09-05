@@ -1,0 +1,47 @@
+<!--meta {"title":"One master, three VPS: a multi-server sing-box walkthrough with m-ui","description":"A concrete walkthrough: install m-ui on three servers, make two of them nodes, pair them in the master, deploy a line to all three, create a user and read the subscription — plus what to check when a node shows offline.","type":"article","date":"2026-10-17","discussion":true,"summary":"Frankfurt as master, Tokyo and Singapore as nodes: the exact clicks from three empty servers to one subscription with a node per city."} -->
+<article class="doc">
+  <p class="meta">Walkthrough · 2026-10-17</p>
+  <h1>One master, three VPS: a multi-server walkthrough</h1>
+  <p class="lead">Three servers — call them Frankfurt, Tokyo and Singapore — and one user who should be able to pick any of them. Here is every step, with nothing skipped.</p>
+
+  <figure class="shot"><img src="{{base}}img/nodes-en.png" alt="Servers page after pairing: Frankfurt as master, Tokyo and Singapore online and synced" loading="lazy"></figure>
+
+  <h2>0. Decide which one is the master</h2>
+  <p>The master does the accounting and serves the panel and subscriptions, so pick the server you would rather not replace often — the one with the domain, if you have one. Frankfurt here. Nodes only forward; they can be cheap and disposable.</p>
+
+  <h2>1. Install on all three</h2>
+  <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
+  <p>Same command on each. Log in to each panel once and change the default password. Open <code>2053/tcp</code> on all three (the master needs it for the panel; nodes need it for the master to reach their agent API).</p>
+
+  <h2>2. Certificates</h2>
+  <p>On Frankfurt: issue a Let's Encrypt certificate for its domain, or self-sign. On Tokyo and Singapore: <b>Certificate → Self-sign</b> is enough — each node serves lines with its own certificate, and the master will talk to them with verification relaxed for self-signed nodes (the "insecure" toggle when you add a server).</p>
+
+  <h2>3. Turn Tokyo and Singapore into nodes</h2>
+  <p>On each of them: <b>Settings → Run as node</b>. The panel shows a pairing card with two values: its API address (<code>https://&lt;ip&gt;:2053/app/</code>) and a token. Leave that page open or copy both.</p>
+
+  <h2>4. Pair them on the master</h2>
+  <p>On Frankfurt: <b>Servers → Add server</b>. Name "Tokyo", the domain or IP clients should connect to, the API address and token from step 3, tick "insecure" if the node's certificate is self-signed. Save. Repeat for Singapore. Within five seconds both rows show <i>online · synced</i>. If one shows offline, see the checklist at the end.</p>
+
+  <h2>5. One line, three servers</h2>
+  <p><b>Lines → Quick add → Hysteria2</b> (or AnyTLS, or Reality). Leave "servers" at all, keep the suggested port, tick "assign to all users", save. The master validates the configuration, restarts its own data plane for the new listener, and pushes the line to both nodes on the next snapshot; each node restarts its data plane with its own certificate. Open <code>24443/udp</code> (or whatever port was suggested) on all three firewalls.</p>
+
+  <h2>6. A user and their subscription</h2>
+  <p><b>Users → Add user</b>: a name, a quota, an expiry, a device limit of 3. The detail drawer opens with the subscription link and QR code. Import it into Clash Meta or sing-box: the proxy list shows <i>Hysteria2 – Frankfurt</i>, <i>Hysteria2 – Tokyo</i>, <i>Hysteria2 – Singapore</i>, each pointing at that server's address. The client's URL-test group picks the fastest.</p>
+
+  <h2>7. What is now true</h2>
+  <ul>
+    <li>Traffic through any of the three servers counts once against the same quota.</li>
+    <li>Three devices means three across all servers, not nine.</li>
+    <li>Disabling the user on Frankfurt removes them from Tokyo and Singapore within seconds.</li>
+    <li>Adding a fourth server later is steps 1–4 again; every existing line deployed to "all servers" appears on it, and every subscription grows a fourth node on the next refresh.</li>
+  </ul>
+
+  <h2>When a node shows offline</h2>
+  <ol>
+    <li>Hover the status: <i>connection timed out</i> means port 2053 is closed on the node's firewall or security group; <i>token mismatch</i> means the token was copied wrong; <i>certificate not trusted</i> means "insecure" should be ticked for a self-signed node.</li>
+    <li>Click <b>Test</b> on the row to retry immediately instead of waiting for the next tick.</li>
+    <li>Nodes keep forwarding while offline from the master's point of view; nothing is lost, and traffic is reconciled from the node's cursor when it reconnects.</li>
+  </ol>
+
+  <p class="related">Related: <a href="{{base}}multi-server/">multi-server overview</a> · <a href="{{base}}articles/multi-server-sync/">how sync works under the hood</a> · <a href="{{base}}hysteria2-panel/">Hysteria2 in m-ui</a></p>
+</article>

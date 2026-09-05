@@ -1,0 +1,52 @@
+<!--meta {"title":"m-ui vs 3x-ui: an x-ui alternative built on sing-box · compared","description":"3x-ui manages Xray-core; m-ui embeds sing-box. What that changes for protocols, multi-server management, hot reload, device limits and deployment — checked against 3x-ui v3.7.0 on 2026-09-05, with sources and Unknowns, and a clear 'who should pick which'.","date":"2026-09-05"} -->
+<article class="doc">
+  <h1>m-ui vs 3x-ui</h1>
+  <p class="lead">3x-ui is the most popular x-ui panel and manages <b>Xray-core</b>. m-ui manages <b>sing-box</b> and embeds it. That single difference drives most of what follows. Facts checked on <b>2026-09-05</b> against 3x-ui's README and releases (v3.7.0, 2026-08-24); anything the README does not state is marked <span class="unk">Unknown</span>.</p>
+
+  <h2>The one-paragraph version</h2>
+  <p>If you want Xray — XTLS Vision and other flows, XHTTP, WireGuard and TUN inbounds, the widest client compatibility and by far the largest community — 3x-ui is the obvious choice and m-ui is not a substitute. If you want sing-box (Hysteria2, AnyTLS, TUIC, Reality via sing-box) with a panel that embeds the core, applies user changes without restarts, validates and rolls back configuration, and keeps several servers in sync from one master, m-ui is the alternative you are looking for.</p>
+
+  <h2>Side by side</h2>
+  <table>
+    <tr><th></th><th>m-ui</th><th>3x-ui</th></tr>
+    <tr><td>Core</td><td>sing-box, embedded in the panel process</td><td>Xray-core, run as a process the panel manages</td></tr>
+    <tr><td>Maturity</td><td>First release September 2026, one maintainer</td><td>~46k stars, long release history, latest v3.7.0 (2026-08-24)</td></tr>
+    <tr><td>Config model</td><td>Lines: protocol + port → exit, rendered per server</td><td>Inbounds with clients, outbounds, routing; close to Xray's JSON</td></tr>
+    <tr><td>Protocols</td><td>Hysteria2, AnyTLS, TUIC, VLESS Reality / Vision, Trojan, VMess, Shadowsocks 2022, SOCKS, HTTP, Mixed</td><td>VLESS, VMess, Trojan, Shadowsocks, WireGuard, AmneziaWG, Hysteria2, MTProto, HTTP, SOCKS (Mixed), Dokodemo-door / Tunnel, TUN (per README)</td></tr>
+    <tr><td>Apply a user change</td><td>Swap the inbound user table in place; no reconnects</td><td><span class="unk">Unknown</span></td></tr>
+    <tr><td>Validate before save / rollback</td><td>sing-box dry run inside the transaction; rollback if the new config fails to start</td><td><span class="unk">Unknown</span></td></tr>
+    <tr><td>Multi-server</td><td>Master / node sync every 5 s; central quota and device limits; a line deployed to N servers is one record</td><td>Manage multiple servers from one panel; clone inbounds onto other nodes (per README)</td></tr>
+    <tr><td>Subscription</td><td>Universal links, Clash / Mihomo, sing-box JSON; landing page with usage, one-tap import, QR, client downloads</td><td>Raw, JSON and Clash, auto-selected by User-Agent; custom page templates (per README)</td></tr>
+    <tr><td>User limits</td><td>Quota with periodic reset, expiry, device limit by source IP across all servers, speed limits</td><td>Traffic quota, expiry, IP limit with trusted-address exemptions, HWID device limit, renewal cycles (per README)</td></tr>
+    <tr><td>Resellers</td><td>Separate panel with budgets, own plans and landing copy</td><td><span class="unk">Unknown</span></td></tr>
+    <tr><td>Deployment</td><td>One static Go binary + SQLite; installer and updater verify SHA256</td><td>Install script or Docker; Xray-core alongside</td></tr>
+    <tr><td>License</td><td>GPL-3.0</td><td>GPL-3.0</td></tr>
+  </table>
+
+  <h2>Choose 3x-ui if</h2>
+  <ul>
+    <li>You need Xray-specific transports or inbounds (XHTTP, WireGuard, TUN, MTProto) or want to stay on the Xray ecosystem your users already know.</li>
+    <li>You value the largest community, the most third-party guides and years of production use.</li>
+    <li>You want hardware-ID device limits or MTProto — features m-ui does not have.</li>
+  </ul>
+
+  <h2>Choose m-ui if</h2>
+  <ul>
+    <li>You have decided on sing-box — for Hysteria2, AnyTLS or TUIC, or simply because your clients are sing-box based.</li>
+    <li>You run several servers and want one user table, one quota and one device limit across all of them, without cloning inbounds by hand.</li>
+    <li>You change users often and do not want the core restarted each time.</li>
+    <li>You want configuration validated by the core itself before it is saved, with rollback if it still fails to start.</li>
+    <li>You want one binary, no Docker, no separate core to version-match.</li>
+  </ul>
+
+  <h2>Migrating</h2>
+  <p>m-ui does not claim to import 3x-ui's database: the importer targets one compatible legacy format and reports exactly what it mapped. Moving from 3x-ui means re-creating lines (a few minutes with quick-add) and either re-creating users or bulk-creating them from a plan; user credentials will change, so clients re-import the subscription once. Read <a href="{{base}}getting-started/">Getting started</a> first.</p>
+
+  <h2>Sources</h2>
+  <ul class="small">
+    <li><a href="https://github.com/MHSanaei/3x-ui" rel="noopener">3x-ui README</a> and <a href="https://github.com/MHSanaei/3x-ui/releases" rel="noopener">releases</a></li>
+    <li><a href="{{github}}" rel="noopener">m-ui README</a></li>
+    <li>General table across four panels: <a href="{{base}}compare/">m-ui compared with other panels</a></li>
+  </ul>
+  <p class="small muted">Checked 2026-09-05. Corrections about 3x-ui are welcome in <a href="{{github}}/discussions" rel="noopener">Discussions</a>.</p>
+</article>

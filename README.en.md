@@ -1,6 +1,7 @@
 <p align="center"><img src="brand/logo.svg" width="130" alt="m-ui"></p>
 <h1 align="center">m-ui</h1>
 <p align="center">Multi-server proxy panel with embedded <a href="https://github.com/SagerNet/sing-box">sing-box</a> · single binary · one master, any number of nodes · all day-to-day ops inside the panel</p>
+<p align="center"><sub>m-ui · sing-box panel by <a href="https://github.com/Maoyangui">Maoyangui</a> · Go · Linux · GPL-3.0 — not related to other projects named “m-ui”</sub></p>
 <p align="center"><a href="README.md">中文</a> · <b>English</b> · <a href="https://maoyangui.github.io/m-ui/">Docs</a> · <a href="#architecture">Architecture</a> · <a href="https://github.com/Maoyangui/m-ui/releases">Download</a></p>
 
 ---

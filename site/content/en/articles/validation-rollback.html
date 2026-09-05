@@ -1,0 +1,34 @@
+<!--meta {"title":"How config validation and rollback work in m-ui","description":"Every save in m-ui is parsed by sing-box inside the database transaction, and a configuration that passes but fails to start is rolled back to the last working one. What is checked, in what order, what still cannot be caught, and how nodes behave.","type":"article","date":"2026-09-29","discussion":true,"summary":"Four layers between a click in the panel and a running sing-box: field checks, port probes, the core's own parser inside the transaction, and rollback on a failed start."} -->
+<article class="doc">
+  <p class="meta">Deep dive · 2026-09-29</p>
+  <h1>How config validation and rollback work in m-ui</h1>
+  <p class="lead">The worst thing a panel can do is accept a change that takes the proxy down. m-ui puts four layers between a click and a running sing-box, and the last one puts the previous configuration back if everything else was wrong.</p>
+
+  <h2>Layer 1: field checks</h2>
+  <p>The API validates what the form sends: known protocol, port in range, JSON fields that parse, a name that is not taken, TLS mode that fits the protocol, Reality keys present when Reality is selected, a normalised port-hopping range. These are cheap and give the clearest messages, so they run first.</p>
+
+  <h2>Layer 2: port probes</h2>
+  <p>A port conflict is the one mistake sing-box cannot see at parse time — it only fails when the listener binds. m-ui checks the port against other lines, the panel, subscription and reseller-panel ports, and then actually binds it once (TCP and UDP) to catch anything else running on the machine. An edit that does not change the port skips the bind, because the process holding it is the running data plane itself. The same rules apply in reverse when you move the panel to a new port.</p>
+
+  <h2>Layer 3: sing-box's own parser, inside the transaction</h2>
+  <p>This is the layer that makes the others optional. The change is written inside a SQLite transaction; before committing, m-ui renders the <i>complete</i> configuration for this server from the database — every line, every upstream, every user — and hands it to sing-box's option parser (<code>core/validate.go</code>). If the parser rejects it, the transaction rolls back and the request fails with sing-box's own message. Nothing reached the running core, and the database still holds the last good state.</p>
+  <p>Because the whole configuration is rendered, this also catches interactions: two upstreams that would produce the same outbound tag, a user whose credentials do not fit a newly added protocol, an option that is only invalid in combination with another.</p>
+
+  <h2>Layer 4: rollback on a failed start</h2>
+  <p>A configuration can parse and still not start: a port grabbed by another process between the probe and the restart, a certificate file that disappeared, a kernel that refuses a socket option. Line changes restart the data plane, so this is where it would hurt. m-ui keeps the previously applied configuration in memory; if the new one fails to come up, it starts the old one again, re-applies per-user limits and port-hopping rules, and reports the error to the panel. Users keep their service on the old configuration while you fix the cause.</p>
+
+  <h2>What still cannot be caught</h2>
+  <ul>
+    <li>Things that are valid but wrong: a typo in an upstream's server address, a certificate that does not match the domain. The health checks and the upstream test button exist for those.</li>
+    <li>Firewalls outside the machine. A line can be running perfectly and unreachable because the cloud security group blocks UDP.</li>
+    <li>Client-side compatibility: a configuration sing-box accepts may still use an option an old client does not understand.</li>
+  </ul>
+
+  <h2>Nodes</h2>
+  <p>Nodes receive a full snapshot from the master and apply it with the same logic: parse, apply by tier, roll back if a restart fails. A node that cannot apply a snapshot reports the error back, keeps its last configuration, and retries on the next push — the master never leaves a node half-applied.</p>
+
+  <h2>Why the order matters</h2>
+  <p>Cheap checks first give better error messages; the expensive full render runs only when the cheap ones pass; rollback exists for the cases no static check can see. Each layer is allowed to be imperfect because the next one is there.</p>
+
+  <p class="related">Related: <a href="{{base}}articles/hot-reload/">reload tiers</a> · <a href="{{base}}articles/line-model/">what a line is</a> · <a href="{{base}}articles/embedded-sing-box/">why the core is embedded</a> · <a href="{{github}}/blob/main/core/validate.go" rel="noopener">core/validate.go</a></p>
+</article>

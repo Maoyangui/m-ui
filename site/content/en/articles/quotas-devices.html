@@ -1,0 +1,36 @@
+<!--meta {"title":"Managing traffic quotas and device limits across servers with m-ui","description":"How m-ui counts a user's traffic once across many servers, applies per-server ratios, resets quotas on a schedule, counts devices by source IP fleet-wide, enforces speed limits, and what users see when they run out.","type":"article","date":"2026-10-05","discussion":true,"summary":"Quotas, periodic resets, traffic ratios, fleet-wide device limits and speed limits — what is counted, where it is judged, and what happens at the limit."} -->
+<article class="doc">
+  <p class="meta">Deep dive · 2026-10-05</p>
+  <h1>Managing traffic quotas and device limits across servers</h1>
+  <p class="lead">A quota is easy on one server and surprisingly hard on five. This is how m-ui makes "20 GB and 3 devices" mean the same thing no matter which server a client connects to.</p>
+
+  <h2>Where bytes are counted</h2>
+  <p>Each server's embedded sing-box tracks bytes per user. Every 10 seconds the panel reads those counters. On the master they go straight into the user's usage and the time series. On a node they go into a monotonic per-user counter that the master pulls every 5 seconds and reconciles with a cursor, so each byte is added exactly once even if a report is retried or a node reinstalls. The user's quota is judged against the sum.</p>
+
+  <h2>Traffic ratio</h2>
+  <p>A server can carry a ratio. Traffic through a ratio-2 server counts double against the quota — a simple way to price a premium route without a second product. Charts keep the real bytes; only quota accounting is scaled, so you can still see what actually flowed.</p>
+
+  <h2>Periodic reset</h2>
+  <p>Enable auto-reset with a period in days and m-ui zeros the usage on schedule, re-enables users who were disabled for exceeding it, and records lifetime totals separately. The next reset date is shown on the user and on their landing page. Resetting manually is one click, in bulk too.</p>
+
+  <h2>Device limits, fleet-wide</h2>
+  <p>A "device" is a distinct source IP seen on any inbound. On one server that is trivial; across servers each machine only sees its own clients. The master merges online IPs from every node with its own and, in the same 5-second round, sends each node the set of IPs seen <i>elsewhere</i>. Every server then enforces the limit against the union. A limit of 3 is three devices in total. Enforcement is local and immediate; only IP lists travel.</p>
+  <p>Two things to know: a phone on Wi-Fi and the same phone on mobile data are two IPs; and the user's detail drawer lists current IPs with the lines they are using, which usually explains a "why am I blocked" ticket in one look.</p>
+
+  <h2>Speed limits</h2>
+  <p>Upload and download caps in Mbps are per user and applied by the data plane on every server. They are part of plans, so trial and premium tiers differ by one dropdown.</p>
+
+  <h2>What happens at the limit</h2>
+  <ol>
+    <li>Every minute the master judges quota and expiry. A user over either is disabled in the database.</li>
+    <li>On the master the inbound user table is swapped and the user's connections are closed.</li>
+    <li>The next snapshot to every node no longer contains the user, so nodes drop them within seconds — nodes never judge quota themselves, which is why a network partition cannot disable users by mistake.</li>
+    <li>The subscription address now answers with a short "unavailable" page in browsers, with your contact details (resellers' users see the reseller's), and a plain 404 to clients.</li>
+    <li>Telegram, if configured, told you <i>N</i> days before expiry and at a usage percentage you chose.</li>
+  </ol>
+
+  <h2>Resellers as a second layer</h2>
+  <p>A reseller has a budget of its own — traffic, devices, bandwidth, expiry. All of their users' usage rolls up to it. When the budget is exhausted, every user of that reseller is cut off at once, regardless of individual quotas. The accounting is monotonic: revoking and re-granting budget cannot be gamed by resets.</p>
+
+  <p class="related">Related: <a href="{{base}}user-management/">user management</a> · <a href="{{base}}articles/multi-server-sync/">how the sync protocol works</a> · <a href="{{github}}/tree/main/jobs" rel="noopener">jobs/ on GitHub</a></p>
+</article>

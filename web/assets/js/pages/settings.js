@@ -47,6 +47,7 @@ const groups = () => [
   { id: 'subpage', title: t('set.subPage'), fields: [
     ['subPageEnabled', t('set.subPageEnabled'), 'bool', t('set.subPageEnabledHelp')],
     ['subShareEnabled', t('set.subShare'), 'boolOn', t('set.subShareHelp')],
+    ['subPageBrand', t('set.subPageBrand'), 'boolOn', t('set.subPageBrandHelp')],
     ['subPageTitle', t('set.subPageTitle'), 'text', t('set.subPageTitleHelp')],
     ['subPageSupport', t('set.subPageSupport'), 'text'],
     ['subPageNotice', t('set.subPageNotice'), 'textarea'],

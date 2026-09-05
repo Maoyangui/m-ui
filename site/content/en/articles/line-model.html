@@ -1,0 +1,47 @@
+<!--meta {"title":"What a Line means in m-ui, and why it replaces inbound / outbound / routing tables","description":"m-ui's central concept is the Line: inbound protocol + port → exit, deployed to a set of servers. How a line renders into sing-box inbounds, outbounds and routing rules, what stays out of it, and what that buys on multi-server setups.","type":"article","date":"2026-09-23","discussion":true,"summary":"The single record m-ui manages instead of three config tables, and how it turns into a sing-box configuration on every server."} -->
+<article class="doc">
+  <p class="meta">Deep dive · 2026-09-23</p>
+  <h1>What a Line means in m-ui</h1>
+  <p class="lead">Every proxy panel has to answer "what do I edit?". Most answer with the core's own vocabulary: inbounds, outbounds, routing rules. m-ui answers with one record — a <b>line</b> — and renders the rest.</p>
+
+  <h2>Definition</h2>
+  <p>A line is: <i>inbound protocol + port → where traffic exits</i>, plus the options that protocol needs (TLS mode, transport, protocol-specific fields) and the list of servers it is deployed to. That is the whole record. Users are attached to lines through an assignment table; upstreams are referenced by id as the exit.</p>
+  <table>
+    <tr><th>Field</th><th>Meaning</th></tr>
+    <tr><td>protocol, port</td><td>The listener sing-box will open — Hysteria2 on UDP 24443, VLESS on TCP 443, and so on.</td></tr>
+    <tr><td>tls</td><td>none, certificate (the server's own), or Reality with its keys and handshake target.</td></tr>
+    <tr><td>transport</td><td>tcp, WebSocket, gRPC, HTTPUpgrade, HTTP, with their paths and hosts.</td></tr>
+    <tr><td>options</td><td>Protocol extras: Hysteria2 bandwidth hints, obfuscation and port hopping; Shadowsocks method; VLESS Vision flow.</td></tr>
+    <tr><td>upstream</td><td>Direct, or an upstream record (another proxy, WARP). This becomes the outbound and the routing rule.</td></tr>
+    <tr><td>servers</td><td>Empty = every server; otherwise the subset of nodes that should run this listener.</td></tr>
+  </table>
+
+  <h2>What rendering does</h2>
+  <p>When m-ui needs a configuration for a server — on save, on restart, or when pushing a snapshot to a node — it walks the lines deployed to that server and produces, for each: one sing-box inbound with the users assigned to it (credentials from the user records), the server's own certificate paths if TLS is "certificate", and a routing rule that sends traffic entering that inbound to the line's exit. Exits are rendered once each as outbounds; direct and block are built in. The result is a complete sing-box JSON that the embedded core loads, or that its parser checks before a save is committed.</p>
+  <p>Because rendering is a pure function of the database, two servers with the same lines produce the same inbounds, and a line changed once changes everywhere on the next 5-second snapshot.</p>
+
+  <h2>What is deliberately not in a line</h2>
+  <ul>
+    <li><b>Per-user routing.</b> Users get lines; they do not get their own rules. Splitting traffic by destination is done at the exit (an upstream) or on the client, not per user.</li>
+    <li><b>Arbitrary routing tables.</b> The panel owns the routing section; there is no editor for it. This is what keeps multi-server rendering deterministic.</li>
+    <li><b>Every sing-box option.</b> The forms cover what the supported protocols need. A per-line "advanced" JSON field merges extra inbound options for the rest.</li>
+  </ul>
+
+  <h2>Why not just expose the JSON?</h2>
+  <p>Three reasons, in order of how often they bite people running panels:</p>
+  <ol>
+    <li><b>Consistency across servers.</b> Hand-maintained inbounds drift; a rendered line cannot. Adding a node means "deploy this line there", not "copy this block and fix the certificate paths".</li>
+    <li><b>Validation.</b> A form with a fixed shape can be checked before it reaches the core; m-ui additionally hands the full render to sing-box's parser inside the save transaction, so what the core would reject at startup is rejected at save time.</li>
+    <li><b>Reload tiers.</b> Knowing that a change touched only users, only an upstream, or the line itself is what lets m-ui pick a hot swap over a restart. A free-form JSON edit gives no such information.</li>
+  </ol>
+
+  <h2>Practical consequences</h2>
+  <ul>
+    <li>Ports are unique per line, checked against the panel and other processes on the box; a new line gets a free five-digit port suggested.</li>
+    <li>The same line on N servers appears N times in each assigned user's subscription, named <i>line – server</i>.</li>
+    <li>Deleting a server disables lines that were deployed only to it rather than silently spreading them to all servers.</li>
+    <li>Switching a line's exit from direct to an upstream is a hot outbound swap; changing its port is a restart with rollback.</li>
+  </ul>
+
+  <p class="related">Related: <a href="{{base}}sing-box-panel/">how m-ui manages sing-box</a> · <a href="{{base}}articles/hot-reload/">reload tiers</a> · <a href="{{base}}architecture/">architecture</a> · <a href="{{github}}/tree/main/render" rel="noopener">render/ on GitHub</a></p>
+</article>

@@ -1,5 +1,6 @@
-<!--meta {"title":"m-ui · 内嵌 sing-box 的多服务器面板","description":"自托管的 sing-box 面板,一个 Go 二进制:内嵌内核、用户与上游热更新、保存前干跑校验并可回滚、一主多副同步、带落地页的订阅、代理、WARP 与证书。","nav":"首页","order":1} -->
+<!--meta {"title":"m-ui — Maoyangui 的 sing-box 面板:内嵌内核、多服务器、一个二进制","description":"自托管的 sing-box 面板,一个 Go 二进制:内嵌内核、用户与上游热更新、保存前干跑校验并可回滚、一主多副同步、带落地页的订阅、代理、WARP 与证书。","nav":"首页","order":1} -->
 <section class="hero">
+  <span class="eyebrow">Maoyangui 的 sing-box 面板</span>
   <h1>一个二进制就能跑的 sing-box 面板</h1>
   <p class="lead">m-ui 把 sing-box 内嵌进面板,而不是在旁边看着一个外部进程。改用户、换上游都是热更新,别人不断线;每次保存先交给 sing-box 干跑;一台主机把任意多台副机同步好。</p>
   <div class="actions">
@@ -10,6 +11,7 @@
     <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
     <button type="button" data-copy="bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)" title="复制">复制</button>
   </div>
+  <p class="proof"><span>一个静态二进制</span><span>不用 Docker、不用外部数据库</span><span>改用户、换上游不断线</span><span>一主多副</span><span>GPL-3.0</span></p>
   <figure class="shot"><img src="{{base}}img/dashboard.png" alt="m-ui 概览:流量走势、数据面状态、在线用户与流量排行" width="1440" height="900" loading="eager"></figure>
 </section>
 
@@ -17,12 +19,12 @@
   <h2>为什么是 m-ui</h2>
   <p class="sub">不是又一个套壳面板。下面这些才是真正不一样的地方。</p>
   <div class="grid">
-    <div class="card"><h3>内嵌 sing-box</h3><p>内核跑在面板进程里。不用单独装、不用对版本、不用手动重启,面板在进程内直接操作它。</p></div>
-    <div class="card"><h3>一条线路就是一件事</h3><p>入口协议 + 端口 → 从哪出去。不用分别维护入站、出站、路由三张表。Hysteria2、AnyTLS、TUIC、VLESS Reality、Trojan、VMess、Shadowsocks 2022。</p></div>
-    <div class="card"><h3>改用户、换上游不断线</h3><p>加人、停用、换凭据只是换入站的用户表;换出口只是换出站。其他人的连接一个都不掉。</p></div>
-    <div class="card"><h3>先校验再上线</h3><p>每次保存先让 sing-box 解析一遍,坏配置进不了库;新配置万一起不来,自动回滚到上一份能用的。</p></div>
-    <div class="card"><h3>一主多副</h3><p>线路、用户、凭据每 5 秒推给所有副机;流量和在线 IP 回收到主机,配额与设备数统一判定。</p></div>
-    <div class="card"><h3>运维不用回终端</h3><p>Let's Encrypt、Cloudflare WARP、内核调优、备份还原、换机向导、Telegram 通知、两步验证、一键更新,都在面板里。</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/></svg></div><h3>内嵌 sing-box</h3><p>内核跑在面板进程里。不用单独装、不用对版本、不用手动重启,面板在进程内直接操作它。</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h11l-2.5-2.5M3 8l2.5 2.5"/><path d="M21 16H10l2.5 2.5M21 16l-2.5-2.5"/></svg></div><h3>一条线路就是一件事</h3><p>入口协议 + 端口 → 从哪出去。不用分别维护入站、出站、路由三张表。Hysteria2、AnyTLS、TUIC、VLESS Reality、Trojan、VMess、Shadowsocks 2022。</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3 4 14h7l-1 7 9-11h-7l1-7Z"/></svg></div><h3>改用户、换上游不断线</h3><p>加人、停用、换凭据只是换入站的用户表;换出口只是换出站。其他人的连接一个都不掉。</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2 19 6v5.5c0 4.2-2.8 7.4-7 9.3-4.2-1.9-7-5.1-7-9.3V6l7-2.8Z"/><path d="M9.2 12.2l2 2 3.6-3.8"/></svg></div><h3>先校验再上线</h3><p>每次保存先让 sing-box 解析一遍,坏配置进不了库;新配置万一起不来,自动回滚到上一份能用的。</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></div><h3>一主多副</h3><p>线路、用户、凭据每 5 秒推给所有副机;流量和在线 IP 回收到主机,配额与设备数统一判定。</p></div>
+    <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 3.8a5 5 0 0 0-6 6.6L4 15.9a2.1 2.1 0 1 0 3 3l5.5-5.5a5 5 0 0 0 6.6-6l-2.9 2.9-2.6-.7-.7-2.6 2.6-3Z"/></svg></div><h3>运维不用回终端</h3><p>Let's Encrypt、Cloudflare WARP、内核调优、备份还原、换机向导、Telegram 通知、两步验证、一键更新,都在面板里。</p></div>
   </div>
 </section>
 
@@ -49,9 +51,9 @@
 <section class="block" id="user">
   <h2>用户拿到的是什么</h2>
   <p class="sub">一条在 Clash、sing-box、小火箭、Stash、Hiddify 里都能用的订阅,和一页自己会说话的落地页:用量、到期、一键导入、二维码、客户端下载。订阅用完了,浏览器里看到的是原因和联系方式,不是一片空白的 404。</p>
-  <div class="grid">
-    <figure class="shot" style="margin:0"><img src="{{base}}img/user-detail.png" alt="用户详情抽屉:订阅地址、二维码、用量与流量走势" loading="lazy"></figure>
-    <figure class="shot phone" style="margin:0 auto"><img src="{{base}}img/landing.png" alt="手机上的订阅落地页:用量、到期、一键导入" loading="lazy"></figure>
+  <div class="duo">
+    <figure class="shot"><img src="{{base}}img/user-detail.png" alt="用户详情抽屉:订阅地址、二维码、用量与流量走势" loading="lazy"></figure>
+    <figure class="shot phone"><img src="{{base}}img/landing.png" alt="手机上的订阅落地页:用量、到期、一键导入" loading="lazy"></figure>
   </div>
 </section>
 

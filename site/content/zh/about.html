@@ -1,0 +1,38 @@
+<!--meta {"title":"关于 m-ui · Maoyangui 的 sing-box 面板","description":"这个 m-ui 是什么:Maoyangui 开源的 sing-box 管理面板 —— 内嵌内核、多服务器、一个 Go 二进制、GPL-3.0、Linux。与其它同名 m-ui 项目无关。"} -->
+<article class="doc">
+  <h1>关于 m-ui</h1>
+  <p class="lead">叫 "m-ui" 的项目不止一个,彼此没有关系。这一个是 <b>Maoyangui 的 sing-box 面板</b>:自托管的网页面板,把 sing-box 内核内嵌进来,在一个地方管任意多台服务器。</p>
+
+  <h2>基本事实</h2>
+  <table>
+    <tr><th>名称</th><td>m-ui(完整说法:<i>m-ui — Maoyangui 的 sing-box 面板</i>)</td></tr>
+    <tr><th>作者 / 维护者</th><td>GitHub 上的 <a href="{{author_url}}" rel="noopener">Maoyangui</a></td></tr>
+    <tr><th>仓库</th><td><a href="{{github}}" rel="noopener">github.com/Maoyangui/m-ui</a></td></tr>
+    <tr><th>网站</th><td><a href="{{base}}zh/">maoyangui.github.io/m-ui</a>(本站;英文在 <a href="{{base}}">/</a>)</td></tr>
+    <tr><th>是什么</th><td><a href="https://github.com/SagerNet/sing-box" rel="noopener">sing-box</a> 的网页面板:线路(协议 + 端口 → 出口)、带配额的用户、带落地页的订阅、代理、证书、备份、多服务器同步</td></tr>
+    <tr><th>怎么跑</th><td>一个静态链接的 Go 二进制,内嵌 sing-box;状态在 SQLite;Linux amd64 / arm64,systemd</td></tr>
+    <tr><th>许可证</th><td><a href="{{github}}/blob/main/LICENSE" rel="noopener">GPL-3.0</a></td></tr>
+    <tr><th>首次发布</th><td>2026 年 9 月(<a href="{{github}}/releases" rel="noopener">Releases</a>)</td></tr>
+    <tr><th>语言</th><td>面板界面、文档、落地页均有中英文</td></tr>
+  </table>
+
+  <h2>别认错了</h2>
+  <p>"m-ui" 这个名字也被其它不相干的软件用着 —— 最常见的是前端组件库,还有各种小仓库。本项目与它们没有任何关系,不共享代码,也不是别的面板的分支。如果你找的是 React 组件库,那不是这里。</p>
+  <p>写到或链接这个项目时,不会认错的说法是仓库路径 <code>Maoyangui/m-ui</code>、"m-ui sing-box 面板",或者本站地址。</p>
+
+  <h2>不一样的地方</h2>
+  <ul>
+    <li><b>内嵌内核</b>:sing-box 跑在面板进程里,改用户、换上游是热换,不重启连接 —— <a href="{{base}}zh/articles/embedded-sing-box/">为什么这样做</a>。</li>
+    <li><b>线路而不是配置表</b>:一条记录渲染成部署到的每台服务器的 sing-box 配置。</li>
+    <li><b>保存先校验、起不来回滚</b>:每次改动先过 sing-box 自己的解析器;新配置起不来就回滚。</li>
+    <li><b>天生多服务器</b>:一台主机、任意多台副机,配额与设备数集中判定 —— <a href="{{base}}zh/multi-server/">怎么做的</a>。</li>
+  </ul>
+
+  <h2>在哪找</h2>
+  <ul>
+    <li>代码、发布、Issue:<a href="{{github}}" rel="noopener">GitHub</a></li>
+    <li>提问与公告:<a href="{{github}}/discussions" rel="noopener">GitHub Discussions</a></li>
+    <li>发布与文章订阅:<a href="{{base}}feed.xml">feed.xml</a></li>
+    <li>上手:<a href="{{base}}zh/getting-started/">五分钟装好</a></li>
+  </ul>
+</article>

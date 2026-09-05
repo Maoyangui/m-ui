@@ -1,0 +1,54 @@
+<!--meta {"title":"m-ui vs s-ui: two sing-box panels compared · s-ui alternative","description":"s-ui and m-ui both manage sing-box. Where they differ: embedded core vs managed process, lines vs inbound/outbound/routing tables, multi-server master/node sync, device limits across servers, resellers, deployment. Checked against s-ui v1.6.0 on 2026-09-05, with sources and Unknowns.","date":"2026-09-05"} -->
+<article class="doc">
+  <h1>m-ui vs s-ui</h1>
+  <p class="lead">Both are sing-box panels, both GPL-3.0, both single-author projects with a web UI. If you already know s-ui, this page answers one question: <b>when is m-ui the better fit, and when is it not?</b> Facts checked on <b>2026-09-05</b> against s-ui's README and release page (v1.6.0, 2026-09-01); anything s-ui does not state is marked <span class="unk">Unknown</span>.</p>
+
+  <h2>The one-paragraph version</h2>
+  <p>s-ui is the established sing-box panel: nearly 10k stars, years of releases, a large protocol list and a familiar inbound / outbound / routing model with a form for each. m-ui is newer and narrower on purpose: it embeds sing-box in the panel binary, replaces the three config tables with <i>lines</i>, hot-swaps users and upstreams without restarting, validates every save with sing-box's own parser, and is built around one master syncing any number of nodes. If you run one server and like editing configuration in detail, s-ui is a safe choice. If you run several servers or change users all day, m-ui was built for that.</p>
+
+  <h2>Side by side</h2>
+  <table>
+    <tr><th></th><th>m-ui</th><th>s-ui</th></tr>
+    <tr><td>Core</td><td>sing-box, embedded in the panel process</td><td>sing-box; embedded or external process: <span class="unk">Unknown</span></td></tr>
+    <tr><td>Maturity</td><td>First release September 2026, one maintainer</td><td>Many releases, ~9.8k stars, latest v1.6.0 (2026-09-01)</td></tr>
+    <tr><td>Config model</td><td>Lines: protocol + port → exit, rendered per server</td><td>Inbounds, outbounds, routing rules edited as forms; JSON editor for the rest</td></tr>
+    <tr><td>Protocols (inbound)</td><td>Hysteria2, AnyTLS, TUIC, VLESS Reality / Vision, Trojan, VMess, Shadowsocks 2022, SOCKS, HTTP, Mixed</td><td>Mixed, SOCKS, HTTP, HTTPS, Direct, Redirect, TProxy, VLESS, VMess, Trojan, Shadowsocks, ShadowTLS, Hysteria, Hysteria2, Naive, TUIC (per README)</td></tr>
+    <tr><td>Apply a user change</td><td>Swap inbound user table in place; no reconnects</td><td><span class="unk">Unknown</span></td></tr>
+    <tr><td>Validate before save / rollback</td><td>sing-box dry run inside the transaction; rollback if the new config fails to start</td><td><span class="unk">Unknown</span></td></tr>
+    <tr><td>Multi-server</td><td>Master / node sync every 5 s, central quota and device limits, per-server line deployment</td><td>Not described in the README (<span class="unk">Unknown</span>)</td></tr>
+    <tr><td>Subscription</td><td>Universal links, Clash / Mihomo, sing-box JSON; landing page with usage, one-tap import, QR, client downloads; temporary sharing</td><td>Link, JSON and Clash formats with info display; external links and subscriptions can be added</td></tr>
+    <tr><td>User limits</td><td>Quota with periodic reset, expiry, device limit (source IPs across all servers), speed limits</td><td>Traffic cap and expiration date; IP / device limit: <span class="unk">Unknown</span></td></tr>
+    <tr><td>Resellers</td><td>Separate panel, budgets, own plans and landing copy</td><td><span class="unk">Unknown</span></td></tr>
+    <tr><td>Certificates</td><td>Let's Encrypt HTTP-01 / Cloudflare DNS-01 in the panel, self-signed one-click</td><td><span class="unk">Unknown</span> (not in README)</td></tr>
+    <tr><td>Deployment</td><td>One static Go binary + SQLite, systemd; installer verifies SHA256</td><td>Install script or Docker (per README)</td></tr>
+    <tr><td>Import from legacy panel DB</td><td>Yes, compatible legacy format; ports and credentials preserved</td><td>—</td></tr>
+    <tr><td>License</td><td>GPL-3.0</td><td>GPL-3.0</td></tr>
+  </table>
+
+  <h2>Choose s-ui if</h2>
+  <ul>
+    <li>You want the panel with the larger community, more tutorials and a longer track record.</li>
+    <li>You like configuring inbounds, outbounds and routing explicitly, or need a protocol m-ui does not expose (ShadowTLS, Naive, TProxy, Redirect).</li>
+    <li>You run one server and do not need central quota across machines.</li>
+  </ul>
+
+  <h2>Choose m-ui if</h2>
+  <ul>
+    <li>You run <b>two or more servers</b> and want users, quotas and device limits to be one thing.</li>
+    <li>You add and remove users often and do not want a restart each time.</li>
+    <li>You want configuration mistakes caught before they reach the running core, with automatic rollback.</li>
+    <li>You resell and need isolated reseller panels with budgets.</li>
+    <li>You want a single binary you can back up, move and update without Docker.</li>
+  </ul>
+
+  <h2>Moving between them</h2>
+  <p>m-ui can import a compatible legacy panel database and keep ports, credentials and subscription paths so existing clients continue without a refresh. Try it on a copy of your database first and read the importer's report; it lists what was mapped and what was skipped. See <a href="{{base}}getting-started/">Getting started</a>.</p>
+
+  <h2>Sources</h2>
+  <ul class="small">
+    <li><a href="https://github.com/alireza0/s-ui" rel="noopener">s-ui README</a> and <a href="https://github.com/alireza0/s-ui/releases" rel="noopener">releases</a></li>
+    <li><a href="{{github}}" rel="noopener">m-ui README</a></li>
+    <li>General table across four panels: <a href="{{base}}compare/">m-ui compared with other panels</a></li>
+  </ul>
+  <p class="small muted">Checked 2026-09-05. If something about s-ui is wrong or outdated, say so in <a href="{{github}}/discussions" rel="noopener">Discussions</a> and it will be fixed.</p>
+</article>
