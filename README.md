@@ -2,7 +2,13 @@
 <h1 align="center">m-ui</h1>
 <p align="center">内嵌 <a href="https://github.com/SagerNet/sing-box">sing-box</a> 的多服务器代理面板 · 单二进制 · 一主多副 · 面板内完成全部运维</p>
 <p align="center"><sub>m-ui · <a href="https://github.com/Maoyangui">Maoyangui</a> 的 sing-box 面板 · Go · Linux · GPL-3.0 —— 与其它同名 “m-ui” 项目无关</sub></p>
-<p align="center"><b>中文</b> · <a href="README.en.md">English</a> · <a href="https://maoyangui.github.io/m-ui/zh/">文档站</a> · <a href="#架构">架构</a> · <a href="https://github.com/Maoyangui/m-ui/releases">下载</a></p>
+<p align="center"><b>中文</b> · <a href="README.en.md">English</a> · <a href="https://maoyangui.github.io/m-ui/zh/">文档站</a> · <a href="https://maoyangui.github.io/m-ui/demo/">在线演示</a> · <a href="#架构">架构</a> · <a href="https://github.com/Maoyangui/m-ui/releases">下载</a></p>
+<p align="center">
+  <a href="https://github.com/Maoyangui/m-ui/actions/workflows/ci.yml"><img src="https://github.com/Maoyangui/m-ui/actions/workflows/ci.yml/badge.svg" alt="tests"></a>
+  <a href="https://github.com/Maoyangui/m-ui/actions/workflows/install-test.yml"><img src="https://github.com/Maoyangui/m-ui/actions/workflows/install-test.yml/badge.svg" alt="install smoke test"></a>
+  <a href="https://github.com/Maoyangui/m-ui/releases/latest"><img src="https://img.shields.io/github/v/release/Maoyangui/m-ui?label=release" alt="latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Maoyangui/m-ui" alt="GPL-3.0"></a>
+</p>
 
 ---
 
@@ -13,6 +19,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/i
 ```
 
 装完打开 `http://<服务器IP>:2053/app/`,默认账号 `admin / admin`(登录后到「管理员」页改掉)。**没有域名也能用**:一键自签证书 → 建线路 → 建用户 → 把订阅发出去,五分钟内完成。详见 [安装](#安装) 与 [快速上手](#快速上手)。
+
+**先看看再装?** [在线演示](https://maoyangui.github.io/m-ui/demo/) 就是真实的面板界面跑在示例数据上:不用登录、没有后端,随便点,刷新即恢复。安装命令后面加 `--dry-run` 可以先看它会写哪些文件。
 
 <p align="center"><img src="docs/screenshots/dashboard.png" alt="m-ui 概览:流量走势、数据面状态、在线用户与流量排行" width="960"></p>
 

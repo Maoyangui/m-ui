@@ -120,11 +120,14 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash # 容器默认是 sh,而这里的步骤和安装脚本一样要 bash
     steps:
       - name: Prepare (curl, tar, ca-certificates)
         run: |
           if command -v apt-get >/dev/null; then apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates tar file >/dev/null;
-          elif command -v dnf >/dev/null; then dnf install -y -q curl tar file >/dev/null; fi
+          elif command -v dnf >/dev/null; then dnf install -y -q --allowerasing curl tar file >/dev/null; fi # Rocky 自带 curl-minimal,换成完整 curl 要 --allowerasing
           cat /etc/os-release | head -2
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

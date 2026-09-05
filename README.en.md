@@ -2,7 +2,13 @@
 <h1 align="center">m-ui</h1>
 <p align="center">Multi-server proxy panel with embedded <a href="https://github.com/SagerNet/sing-box">sing-box</a> · single binary · one master, any number of nodes · all day-to-day ops inside the panel</p>
 <p align="center"><sub>m-ui · sing-box panel by <a href="https://github.com/Maoyangui">Maoyangui</a> · Go · Linux · GPL-3.0 — not related to other projects named “m-ui”</sub></p>
-<p align="center"><a href="README.md">中文</a> · <b>English</b> · <a href="https://maoyangui.github.io/m-ui/">Docs</a> · <a href="#architecture">Architecture</a> · <a href="https://github.com/Maoyangui/m-ui/releases">Download</a></p>
+<p align="center"><a href="README.md">中文</a> · <b>English</b> · <a href="https://maoyangui.github.io/m-ui/">Docs</a> · <a href="https://maoyangui.github.io/m-ui/demo/">Live demo</a> · <a href="#architecture">Architecture</a> · <a href="https://github.com/Maoyangui/m-ui/releases">Download</a></p>
+<p align="center">
+  <a href="https://github.com/Maoyangui/m-ui/actions/workflows/ci.yml"><img src="https://github.com/Maoyangui/m-ui/actions/workflows/ci.yml/badge.svg" alt="tests"></a>
+  <a href="https://github.com/Maoyangui/m-ui/actions/workflows/install-test.yml"><img src="https://github.com/Maoyangui/m-ui/actions/workflows/install-test.yml/badge.svg" alt="install smoke test"></a>
+  <a href="https://github.com/Maoyangui/m-ui/releases/latest"><img src="https://img.shields.io/github/v/release/Maoyangui/m-ui?label=release" alt="latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Maoyangui/m-ui" alt="GPL-3.0"></a>
+</p>
 
 ---
 
@@ -13,6 +19,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/i
 ```
 
 Then open `http://<server-ip>:2053/app/`, default login `admin / admin` (change it on the Admin page right after). **No domain needed**: self-sign a certificate with one click → create a line → create a user → send the subscription link — five minutes end to end. See [Installation](#installation) and [Quick start](#quick-start).
+
+**Want to look before you install?** The [live demo](https://maoyangui.github.io/m-ui/demo/) is the real panel interface running on sample data: no login, no backend, click anything, refresh to reset. Append `--dry-run` to the install command to see which files it would write first.
 
 <p align="center"><img src="docs/screenshots/dashboard-en.png" alt="m-ui dashboard: traffic chart, data-plane status, online users and top talkers" width="960"></p>
 

@@ -9,6 +9,7 @@
   <details><summary>安装脚本到底写了哪些文件?</summary><p><code>/usr/local/bin/m-ui</code>、目录 <code>/etc/m-ui/</code>(数据库、<code>cert/</code>、<code>backups/</code>)和 <code>/etc/systemd/system/m-ui.service</code>。没有别的。安装命令后面加 <code>--dry-run</code>,它会先按你的机器把这份计划打印出来,什么都不改。</p></details>
   <details><summary>会和 nginx、Caddy 这类 Web 服务冲突吗?</summary><p>默认不会:面板在 2053,订阅在 2056,代理面板在 2054。只有用 HTTP-01 签证书时才短暂需要 80 端口;80 被占着就用 Cloudflare DNS-01 或自签。</p></details>
   <details><summary>卸载会删数据吗?</summary><p>不主动删。<code>install.sh --uninstall</code>(或 SSH 菜单)只删服务和程序,保留 <code>/etc/m-ui</code>,重新安装就能接着用原来的用户、线路和证书。要连数据一起删,加 <code>--purge</code>。</p></details>
+  <details><summary>不装能先试试吗?</summary><p>能。<a href="{{demo}}">在线演示</a>就是真实的面板界面在浏览器里跑示例数据:不用登录、没有后端,改动刷新即恢复。它和发布版用的是同一套前端文件,看到什么装出来就是什么。</p></details>
 
   <h2>安装与配置</h2>
   <details><summary>一定要有域名吗?</summary><p>不用。<b>证书 → 自签</b>一键就有 TLS,订阅会自动告诉客户端允许不安全证书。有域名可以签 Let's Encrypt 证书、去掉那个提示 —— 推荐,但不是必须。</p></details>
