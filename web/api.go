@@ -168,17 +168,18 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 			q = q.Where("id IN (SELECT line_id FROM reseller_lines WHERE reseller_id = ?)", rid)
 		}
 		q.Find(&lines)
-		if rid > 0 { // 代理只需要名字与协议,服务端凭据一律不给
+		if rid > 0 { // 代理只需要名字、协议与部署到的服务器(选择器按入口展开),服务端凭据一律不给
 			type slim struct {
-				Id       uint   `json:"id"`
-				Name     string `json:"name"`
-				Protocol string `json:"protocol"`
-				Port     int    `json:"port"`
-				Enabled  bool   `json:"enabled"`
+				Id       uint            `json:"id"`
+				Name     string          `json:"name"`
+				Protocol string          `json:"protocol"`
+				Port     int             `json:"port"`
+				Enabled  bool            `json:"enabled"`
+				NodeIds  json.RawMessage `json:"nodeIds"`
 			}
 			out := make([]slim, 0, len(lines))
 			for _, l := range lines {
-				out = append(out, slim{l.Id, l.Name, l.Protocol, l.Port, l.Enabled})
+				out = append(out, slim{l.Id, l.Name, l.Protocol, l.Port, l.Enabled, l.NodeIds})
 			}
 			writeJSON(w, http.StatusOK, out)
 			return

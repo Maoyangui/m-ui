@@ -13,8 +13,9 @@ function nodeIdsOf(line, nodes) {
   return nodes.filter(n => ids.includes(n.id)).map(n => n.id);
 }
 
-// lineItems 把线路展开成入口:[{key, lineId, nodeId, lineName, nodeName, local}]
-// grants(可选)= 授权范围 [{lineId, nodeIds}]:只列授权过的入口(nodeIds 空 = 该线路全部)
+// lineItems 把线路展开成入口:[{key, lineId, nodeId, lineName, nodeName, local, narrowed}]
+// grants(可选)= 授权范围 [{lineId, nodeIds}]:只列授权过的入口(nodeIds 空 = 该线路全部)。
+// 授权收窄过的线路标 narrowed:这里看到的不是它的全部入口,勾满也只能按具体服务器写回。
 export function lineItems(lines, nodes, grants) {
   nodes = nodes || [];
   const byNode = new Map(nodes.map(n => [n.id, n]));
@@ -23,10 +24,11 @@ export function lineItems(lines, nodes, grants) {
   for (const l of lines) {
     if (allowed && !allowed.has(l.id)) continue;
     let ids = nodes.length ? nodeIdsOf(l, nodes) : [0];
-    if (allowed && allowed.get(l.id).length) ids = ids.filter(id => allowed.get(l.id).includes(id));
+    const narrowed = !!(allowed && allowed.get(l.id).length);
+    if (narrowed) ids = ids.filter(id => allowed.get(l.id).includes(id));
     for (const nid of ids) {
       const n = byNode.get(nid);
-      out.push({ key: `${l.id}:${nid}`, lineId: l.id, nodeId: nid, lineName: l.name, nodeName: n ? n.name : '', local: !!(n && n.isLocal) });
+      out.push({ key: `${l.id}:${nid}`, lineId: l.id, nodeId: nid, lineName: l.name, nodeName: n ? n.name : '', local: !!(n && n.isLocal), narrowed });
     }
   }
   return out;
@@ -44,19 +46,21 @@ export function keysFromRefs(refs, items) {
   return keys;
 }
 
-// refsFromKeys 把勾选集合收回成分配:一条线路的入口全勾 = 全部(以后新加的服务器自动包含)
+// refsFromKeys 把勾选集合收回成分配:一条线路的入口全勾 = 全部(以后新加的服务器自动包含);
+// 授权收窄过的线路例外,勾满也只写具体服务器(代理看到的本来就只是一部分)。
 export function refsFromKeys(keys, items) {
   const byLine = new Map();
   for (const it of items) {
-    if (!byLine.has(it.lineId)) byLine.set(it.lineId, { total: 0, picked: [] });
+    if (!byLine.has(it.lineId)) byLine.set(it.lineId, { total: 0, picked: [], narrowed: false });
     const b = byLine.get(it.lineId);
     b.total++;
+    if (it.narrowed) b.narrowed = true;
     if (keys.has(it.key)) b.picked.push(it.nodeId);
   }
   const refs = [];
   for (const [lineId, b] of byLine) {
     if (!b.picked.length) continue;
-    refs.push(b.picked.length === b.total ? { lineId } : { lineId, nodeIds: b.picked });
+    refs.push(!b.narrowed && b.picked.length === b.total ? { lineId } : { lineId, nodeIds: b.picked });
   }
   return refs;
 }

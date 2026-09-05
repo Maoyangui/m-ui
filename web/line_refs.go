@@ -52,7 +52,14 @@ func lineNodeIDs(line model.Line, nodes []model.Node) []uint {
 
 // normalizeRefs 整理一份分配:同一线路合并、服务器去重并只留该线路真的部署到的、
 // 覆盖了全部服务器就收成"全部"(以后新加服务器自动包含);不存在的线路原样保留交给校验点名。
+// 勾的服务器一台都没部署这条线路时按全部处理,不让用户拿到空入口。
 func (s *Server) normalizeRefs(refs []model.LineRef) []model.LineRef {
+	return s.normalizeRefsWith(refs, false)
+}
+
+// normalizeRefsWith 同上;strict 时"一台都对不上"不放宽成全部,而是原样保留(用于代理授权:
+// 授权的服务器已经没有这条线路,代理就什么都分不了,不能反过来变成全部)。
+func (s *Server) normalizeRefsWith(refs []model.LineRef, strict bool) []model.LineRef {
 	if len(refs) == 0 {
 		return nil
 	}
@@ -108,6 +115,11 @@ func (s *Server) normalizeRefs(refs []model.LineRef) []model.LineRef {
 				// 勾满了 = 全部;一台都对不上(勾的服务器没部署这条线路)也按全部,不让用户拿到空入口
 				if len(keep) > 0 && len(keep) < len(deployed) {
 					ref.NodeIds = keep
+				} else if len(keep) == 0 && strict {
+					for n := range a.set {
+						ref.NodeIds = append(ref.NodeIds, n)
+					}
+					sort.Slice(ref.NodeIds, func(i, j int) bool { return ref.NodeIds[i] < ref.NodeIds[j] })
 				}
 			}
 		}
@@ -196,9 +208,10 @@ func (s *Server) resellerLineRefs(id uint) []model.LineRef {
 
 // checkRefsGranted 用户的分配必须落在代理的授权范围内:线路要授权过;授权收窄到了具体服务器时,
 // 用户只能拿其中的服务器,不能拿"全部"。
+// 授权也先整理一遍:线路后来撤出了某台服务器,原本收窄的授权可能已经等于全部,不能再拿它挡人。
 func (s *Server) checkRefsGranted(rid uint, refs []model.LineRef) error {
 	granted := map[uint]map[uint]bool{} // nil 值 = 该线路全部服务器
-	for _, g := range s.resellerLineRefs(rid) {
+	for _, g := range s.normalizeRefsWith(s.resellerLineRefs(rid), true) {
 		if len(g.NodeIds) == 0 {
 			granted[g.LineId] = nil
 			continue

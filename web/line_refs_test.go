@@ -71,6 +71,25 @@ func TestLineRefs(t *testing.T) {
 	if err := s.checkRefsGranted(rs.Id, []model.LineRef{{LineId: 1, NodeIds: []uint{3}}}); err != nil {
 		t.Fatalf("线路授权了全部时可以只拿一台: %v", err)
 	}
+	// 授权行按具体服务器存着,但已经覆盖了线路现在部署的全部服务器 → 等于全部,拿全部也放行
+	db.Where("reseller_id = ?", rs.Id).Delete(&model.ResellerLineNode{})
+	db.Create(&model.ResellerLineNode{ResellerId: rs.Id, LineId: 2, NodeId: 2})
+	db.Create(&model.ResellerLineNode{ResellerId: rs.Id, LineId: 2, NodeId: 3})
+	if err := s.checkRefsGranted(rs.Id, []model.LineRef{{LineId: 2}}); err != nil {
+		t.Fatalf("授权覆盖了全部部署时应等于全部: %v", err)
+	}
+	// 线路撤出了授权的那台服务器:授权不能反过来变成全部,这条线路代理什么都分不了
+	db.Model(&model.Line{}).Where("id = ?", 2).Update("node_ids", []byte(`[3]`))
+	db.Where("reseller_id = ? AND line_id = 2", rs.Id).Delete(&model.ResellerLineNode{})
+	db.Create(&model.ResellerLineNode{ResellerId: rs.Id, LineId: 2, NodeId: 2})
+	if err := s.checkRefsGranted(rs.Id, []model.LineRef{{LineId: 2}}); err == nil {
+		t.Fatal("授权的服务器已没有这条线路时不能放宽成全部")
+	}
+	if err := s.checkRefsGranted(rs.Id, []model.LineRef{{LineId: 2, NodeIds: []uint{3}}}); err == nil {
+		t.Fatal("授权外的服务器仍应被拒")
+	}
+	db.Model(&model.Line{}).Where("id = ?", 2).Update("node_ids", []byte(`[2,3]`))
+	s.setResellerLineRefs(rs.Id, []model.LineRef{{LineId: 1}, {LineId: 2, NodeIds: []uint{2}}})
 
 	// 套餐:LineIds + LineNodes
 	p := model.Plan{Name: "p", LineIds: []byte(`[1,2]`), LineNodes: []byte(`{"2":[3]}`)}
