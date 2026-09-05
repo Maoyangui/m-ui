@@ -13,7 +13,7 @@ import (
 // 节点与链接订阅同源(本站线路 + 外部节点的分享链接),外加 proxy 选择组 / auto 测速组、
 // TUN + 本地混合入站、DNS 与基础分流;字段按 sing-box 1.12+ 写法,不使用已废弃的 legacy 字段。
 func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, error) {
-	links := GenerateLinks(user, lines, opt.Entries)
+	links := GenerateLinksFor(user, lines, opt.Entries, opt.LineNodes)
 	for _, e := range opt.External {
 		links = append(links, e.Links...)
 	}

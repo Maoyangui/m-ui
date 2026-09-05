@@ -311,6 +311,7 @@ func (s *Server) handle() http.HandlerFunc {
 
 		opt := s.options()
 		opt.External = s.externalFor(user.Id)
+		opt.LineNodes = s.lineNodesFor(user.Id)
 		opt.Share = s.shareSelfService() && (rs == nil || rs.ShareOn)
 		if rs != nil { // 代理填了标题就用代理的,客户端里显示的就是他的品牌
 			opt.ProfileTitle = pick(rs.ProfileTitle, pick(rs.PageTitle, opt.ProfileTitle))
@@ -365,6 +366,23 @@ func (s *Server) handle() http.HandlerFunc {
 		}
 		s.log(r, user.Name, shared, 200)
 	}
+}
+
+// lineNodesFor 用户在各线路上被收窄到的服务器集合(user_line_nodes);没有行的线路不出现在结果里 = 全部。
+func (s *Server) lineNodesFor(userID uint) map[uint]map[uint]bool {
+	var rows []model.UserLineNode
+	s.db.Where("user_id = ?", userID).Find(&rows)
+	if len(rows) == 0 {
+		return nil
+	}
+	out := map[uint]map[uint]bool{}
+	for _, r := range rows {
+		if out[r.LineId] == nil {
+			out[r.LineId] = map[uint]bool{}
+		}
+		out[r.LineId][r.NodeId] = true
+	}
+	return out
 }
 
 // resellerOf 取用户所属代理;主面板直属用户返回 nil。

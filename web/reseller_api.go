@@ -20,13 +20,14 @@ import (
 
 type resellerRow struct {
 	model.Reseller
-	LineIds     []uint `json:"lineIds"`
-	NeedsClaim  bool   `json:"needsClaim"` // 还没设过密码
-	Users       int    `json:"users"`
-	Used        int64  `json:"used"`        // 名下用户已用流量之和
-	Devices     int    `json:"devices"`     // 名下用户设备上限之和
-	Online      int    `json:"online"`      // 当前在线设备数(去重 IP)= 设备池当前占用
-	PoolRejects int64  `json:"poolRejects"` // 最近 10 分钟因设备池满被拒的新设备连接数(所有机器合计)
+	LineIds     []uint          `json:"lineIds"`
+	LineRefs    []model.LineRef `json:"lineRefs"`   // 线路 × 服务器授权;给了它就以它为准
+	NeedsClaim  bool            `json:"needsClaim"` // 还没设过密码
+	Users       int             `json:"users"`
+	Used        int64           `json:"used"`        // 名下用户已用流量之和
+	Devices     int             `json:"devices"`     // 名下用户设备上限之和
+	Online      int             `json:"online"`      // 当前在线设备数(去重 IP)= 设备池当前占用
+	PoolRejects int64           `json:"poolRejects"` // 最近 10 分钟因设备池满被拒的新设备连接数(所有机器合计)
 }
 
 func (s *Server) handleResellers(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +59,7 @@ func (s *Server) handleResellers(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		s.setResellerLines(p.Id, p.LineIds)
+		s.setResellerLineRefs(p.Id, lineRefsOf(p.LineIds, p.LineRefs))
 		s.audit(r, "reseller", "create", p.Name)
 		writeJSON(w, http.StatusOK, s.resellerRow(p.Reseller))
 	default:
@@ -94,7 +95,7 @@ func (s *Server) handleResellerItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		s.setResellerLines(id, p.LineIds)
+		s.setResellerLineRefs(id, lineRefsOf(p.LineIds, p.LineRefs))
 		s.audit(r, "reseller", "update", p.Name)
 		s.reloadUsers("修改代理 " + p.Name)
 		writeJSON(w, http.StatusOK, s.resellerRow(p.Reseller))
@@ -201,7 +202,8 @@ func (s *Server) onlineIPsAll() map[string][]string {
 }
 
 func (s *Server) resellerRowWith(rs model.Reseller, online map[string][]string) resellerRow {
-	row := resellerRow{Reseller: rs, LineIds: s.resellerLineIds(rs.Id), NeedsClaim: rs.Password == ""}
+	grants := s.resellerLineRefs(rs.Id)
+	row := resellerRow{Reseller: rs, LineIds: refIDs(grants), LineRefs: grants, NeedsClaim: rs.Password == ""}
 	var agg struct {
 		N       int64
 		Devices int64
@@ -235,6 +237,7 @@ func (s *Server) resellerOnlineIPs(id uint, online map[string][]string) []string
 type resellerUserRow struct {
 	model.User
 	LineIds  []uint              `json:"lineIds"`
+	LineRefs []model.LineRef     `json:"lineRefs"`
 	OnlineIP []string            `json:"onlineIps"`
 	OnlineOn map[string][]string `json:"onlineLines"`
 	Sub      map[string]string   `json:"sub"`
@@ -245,15 +248,19 @@ func (s *Server) resellerUsers(rs model.Reseller) []resellerUserRow {
 	s.db.Where("reseller_id = ?", rs.Id).Order("id asc").Find(&users)
 	localName, localLines := s.localNodeName(), s.run.OnlineIPLines()
 	remoteLines, online, base := s.run.Hub().RemoteIPLinesAll(), s.onlineIPsAll(), s.subBase()
-	lineIdsBy := s.userLineMap()
+	refsBy := s.userLineRefMap()
 	out := make([]resellerUserRow, 0, len(users))
 	for _, u := range users {
-		ids := lineIdsBy[u.Id]
+		refs := refsBy[u.Id]
+		if refs == nil {
+			refs = []model.LineRef{}
+		}
+		ids := refIDs(refs)
 		key := base + subKey(u)
 		links := map[string]string{"link": key, "clash": key + "?format=clash", "json": key + "?format=json"}
 		u.Credentials, u.ShareCreds = nil, nil
 		out = append(out, resellerUserRow{
-			User: u, LineIds: ids, Sub: links,
+			User: u, LineIds: ids, LineRefs: refs, Sub: links,
 			OnlineIP: online[u.Name],
 			OnlineOn: s.onlineLines(u.Name, localName, localLines, remoteLines),
 		})
@@ -267,11 +274,9 @@ func (s *Server) resellerLineIds(id uint) []uint {
 	return ids
 }
 
+// setResellerLines 老写法:整条线路(全部服务器)。
 func (s *Server) setResellerLines(id uint, lineIds []uint) {
-	s.db.Where("reseller_id = ?", id).Delete(&model.ResellerLine{})
-	for _, lid := range lineIds {
-		s.db.Create(&model.ResellerLine{ResellerId: id, LineId: lid})
-	}
+	s.setResellerLineRefs(id, lineRefsOf(lineIds, nil))
 }
 
 func (s *Server) validateReseller(rs *model.Reseller) error {

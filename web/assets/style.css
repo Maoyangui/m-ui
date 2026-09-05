@@ -374,3 +374,9 @@ table.grid.conns td.ell { max-width: 14rem; overflow: hidden; text-overflow: ell
 .update-dot svg { width: 12px; height: 12px; }
 .update-dot:hover { background: var(--primary); color: #fff; }
 .confirm-text { white-space: pre-line; }
+
+/* 线路 × 服务器选择器 */
+.lp-head{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-bottom:.45rem}
+.lp-tabs button{white-space:nowrap}
+.lp-list{max-height:17rem;overflow:auto}
+.lp-count{margin-left:.2rem}

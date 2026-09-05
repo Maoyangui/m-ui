@@ -69,9 +69,9 @@ const PAGE_DATA = {
   lines: ['lines', 'nodes', 'upstreams', 'onlines'],
   upstreams: ['upstreams', 'lines', 'onlines'],
   exts: ['exts'],
-  users: ['users', 'plans', 'lines', 'exts', 'onlines'],
-  plans: ['plans', 'lines'],
-  resellers: ['lines'],
+  users: ['users', 'plans', 'lines', 'exts', 'onlines', 'nodes'],
+  plans: ['plans', 'lines', 'nodes'],
+  resellers: ['lines', 'nodes'],
   nodes: ['nodes'],
 };
 

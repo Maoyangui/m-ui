@@ -176,7 +176,8 @@ type Plan struct {
 	SpeedDown   int             `json:"speedDown"`
 	AutoReset   bool            `json:"autoReset"`
 	ResetDays   int             `json:"resetDays"`
-	LineIds     json.RawMessage `json:"lineIds,omitempty"` // 空=不改动用户线路
+	LineIds     json.RawMessage `json:"lineIds,omitempty"`   // 空=不改动用户线路
+	LineNodes   json.RawMessage `json:"lineNodes,omitempty"` // 线路 → 服务器范围 {"3":[1,2]};没写的线路 = 全部服务器
 	Desc        string          `json:"desc"`
 	Sort        int             `json:"sort"`
 }
@@ -207,6 +208,28 @@ type UserExt struct {
 type UserLine struct {
 	UserId uint `json:"userId" gorm:"primaryKey;autoIncrement:false"`
 	LineId uint `json:"lineId" gorm:"primaryKey;autoIncrement:false"`
+}
+
+// UserLineNode 把用户在某条线路上的范围收窄到具体服务器:
+// 一条线路部署在 A、B 两台时,用户可以只拿 A 上的那一个入口。
+// 没有任何行 = 该线路的全部服务器(老数据、以及"全选"时都是这种,以后新加的服务器自动包含)。
+type UserLineNode struct {
+	UserId uint `json:"userId" gorm:"primaryKey;autoIncrement:false"`
+	LineId uint `json:"lineId" gorm:"primaryKey;autoIncrement:false"`
+	NodeId uint `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
+}
+
+// ResellerLineNode 代理的线路授权同样可以按服务器收窄。
+type ResellerLineNode struct {
+	ResellerId uint `json:"resellerId" gorm:"primaryKey;autoIncrement:false"`
+	LineId     uint `json:"lineId" gorm:"primaryKey;autoIncrement:false"`
+	NodeId     uint `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
+}
+
+// LineRef 是接口里表达"线路 × 服务器"分配的方式:NodeIds 为空 = 该线路的全部服务器。
+type LineRef struct {
+	LineId  uint   `json:"lineId"`
+	NodeIds []uint `json:"nodeIds,omitempty"`
 }
 
 // SubLog 订阅访问日志。
@@ -259,8 +282,8 @@ type Change struct {
 // All 供 AutoMigrate 使用。
 func All() []interface{} {
 	return []interface{}{
-		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &Plan{}, &ExtNode{}, &UserExt{},
-		&Reseller{}, &ResellerLine{},
+		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &Plan{}, &ExtNode{}, &UserExt{},
+		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{},
 	}
 }

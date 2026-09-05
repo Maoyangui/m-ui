@@ -32,10 +32,10 @@ func TestResellerScope(t *testing.T) {
 
 	// 建用户:线路必须在授权范围内
 	u := model.User{Name: "u1", Enabled: true, DeviceLimit: 3}
-	if err := s.prepareResellerUser(a.Id, &u, []uint{2}); err == nil {
+	if err := s.prepareResellerUser(a.Id, &u, lineRefsOf([]uint{2}, nil)); err == nil {
 		t.Fatal("未授权线路应被拒")
 	}
-	if err := s.prepareResellerUser(a.Id, &u, []uint{1}); err != nil {
+	if err := s.prepareResellerUser(a.Id, &u, lineRefsOf([]uint{1}, nil)); err != nil {
 		t.Fatalf("授权线路应通过: %v", err)
 	}
 	if u.ResellerId != a.Id || len(u.SubToken) < 20 {
@@ -44,7 +44,7 @@ func TestResellerScope(t *testing.T) {
 	// 请求体里塞的计量与共享令牌必须被清掉(负数用量能把额度刷回来)
 	dirty := model.User{Name: "dirty", Enabled: true, DeviceLimit: 1,
 		Up: -1 << 40, TotalDown: -1 << 40, ShareToken: "chosen", ShareCreds: []byte("{}")}
-	if err := s.prepareResellerUser(a.Id, &dirty, []uint{1}); err != nil {
+	if err := s.prepareResellerUser(a.Id, &dirty, lineRefsOf([]uint{1}, nil)); err != nil {
 		t.Fatal(err)
 	}
 	if dirty.Up != 0 || dirty.TotalDown != 0 || dirty.ShareToken != "" || dirty.ShareCreds != nil {
@@ -54,44 +54,44 @@ func TestResellerScope(t *testing.T) {
 
 	// 设备池 5:分配时不再限制"之和",代理给用户填多少都行,0 也行(运行时由数据面按池限制)
 	u2 := model.User{Name: "u2", Enabled: true, DeviceLimit: 3}
-	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err != nil {
+	if err := s.checkResellerUser(a.Id, 0, &u2, lineRefsOf([]uint{1}, nil)); err != nil {
 		t.Fatalf("分配超过池上限也应通过(运行时按池限): %v", err)
 	}
 	u2.DeviceLimit = 99
-	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err != nil {
+	if err := s.checkResellerUser(a.Id, 0, &u2, lineRefsOf([]uint{1}, nil)); err != nil {
 		t.Fatalf("单个用户的上限可以比池大: %v", err)
 	}
 	u2.DeviceLimit = 0
-	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err != nil {
+	if err := s.checkResellerUser(a.Id, 0, &u2, lineRefsOf([]uint{1}, nil)); err != nil {
 		t.Fatalf("用户可以不限设备,只受池限: %v", err)
 	}
 	u2.DeviceLimit = -1
-	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err == nil {
+	if err := s.checkResellerUser(a.Id, 0, &u2, lineRefsOf([]uint{1}, nil)); err == nil {
 		t.Fatal("负数仍应被拒")
 	}
 	u2.DeviceLimit = 0
 	// 用户数上限:a 已有 1 个用户,上限 1 → 新建被拒,编辑已有的不受影响;改成 2 就能建
 	db.Model(&model.Reseller{}).Where("id = ?", a.Id).Update("user_limit", 1)
-	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err == nil || !strings.Contains(err.Error(), "用户数上限") {
+	if err := s.checkResellerUser(a.Id, 0, &u2, lineRefsOf([]uint{1}, nil)); err == nil || !strings.Contains(err.Error(), "用户数上限") {
 		t.Fatalf("达到用户数上限应拒绝新建: %v", err)
 	}
-	if err := s.checkResellerUser(a.Id, u.Id, &u, []uint{1}); err != nil {
+	if err := s.checkResellerUser(a.Id, u.Id, &u, lineRefsOf([]uint{1}, nil)); err != nil {
 		t.Fatalf("上限只管新建,编辑已有用户应通过: %v", err)
 	}
 	db.Model(&model.Reseller{}).Where("id = ?", a.Id).Update("user_limit", 2)
-	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err != nil {
+	if err := s.checkResellerUser(a.Id, 0, &u2, lineRefsOf([]uint{1}, nil)); err != nil {
 		t.Fatalf("上限放宽后应能新建: %v", err)
 	}
 	db.Model(&model.Reseller{}).Where("id = ?", a.Id).Update("user_limit", 0)
 	// 改自己这个用户时,先扣掉它原来的占用
 	u.DeviceLimit = 5
-	if err := s.checkResellerUser(a.Id, u.Id, &u, []uint{1}); err != nil {
+	if err := s.checkResellerUser(a.Id, u.Id, &u, lineRefsOf([]uint{1}, nil)); err != nil {
 		t.Fatalf("改自己应按扣除后的余额算: %v", err)
 	}
 
 	// 流量用尽 → 不给再建号
 	db.Model(&model.User{}).Where("id = ?", u.Id).Update("up", int64(100)<<30)
-	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err == nil {
+	if err := s.checkResellerUser(a.Id, 0, &u2, lineRefsOf([]uint{1}, nil)); err == nil {
 		t.Fatal("代理流量用尽应被拒")
 	}
 	db.Model(&model.User{}).Where("id = ?", u.Id).Update("up", 0)

@@ -1,6 +1,7 @@
 import { state, load } from '../app.js';
 import { post, put, del } from '../api.js';
 import { t } from '../i18n.js';
+import { lineItems, keysFromRefs, linePicker } from '../linepicker.js';
 import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk } from '../ui.js';
 
 export const title = () => t('plan.title');
@@ -39,7 +40,11 @@ function renderRows() {
 
 export function editPlan(id) {
   const p = id ? state.plans.find(x => x.id === id) : { volumeGb: 100, days: 30, resetDays: 30 };
-  const lineIds = new Set(Array.isArray(p.lineIds) ? p.lineIds : (p.lineIds ? JSON.parse(p.lineIds) : []));
+  const ids = Array.isArray(p.lineIds) ? p.lineIds : (p.lineIds ? JSON.parse(p.lineIds) : []);
+  let nodesBy = {};
+  try { nodesBy = typeof p.lineNodes === 'string' ? JSON.parse(p.lineNodes || '{}') : (p.lineNodes || {}); } catch { nodesBy = {}; }
+  const refs = ids.map(id => ({ lineId: id, nodeIds: nodesBy[String(id)] || [] }));
+  let picker = null;
   openModal(id ? t('plan.edit') : t('plan.add'), `
     <div class="form-grid">
       ${field(t('common.name'), `<input id="f-name" value="${esc(p.name || '')}" placeholder="${t('plan.namePh')}">`)}
@@ -51,24 +56,26 @@ export function editPlan(id) {
       ${field(t('user.f.down'), `<input id="f-down" type="number" min="0" value="${p.speedDown || 0}">`)}
       ${field(t('user.f.resetDays'), `<input id="f-resetdays" type="number" min="1" value="${p.resetDays || 30}">`)}
       ${check('f-autoreset', t('user.f.autoReset'), !!p.autoReset, t('plan.autoResetHelp'))}
-      <div class="full">${field(t('plan.lines'), `
-        <div class="check-list">
-          <label><input type="checkbox" id="f-all"> <b>${t('user.f.selectAll')}</b></label>
-          ${state.lines.map(l => `<label><input type="checkbox" class="ln-cb" value="${l.id}" ${lineIds.has(l.id) ? 'checked' : ''}> ${esc(l.name)}</label>`).join('')}
-        </div>`, t('plan.linesHelp'))}</div>
+      <div class="full">${field(t('plan.lines'), `<div id="f-lines"></div>`, t('plan.linesHelp'))}</div>
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), desc: fv('f-desc'), volumeGb: Number(fv('f-vol')), days: Number(fv('f-days')),
       deviceLimit: Number(fv('f-device')), speedUp: Number(fv('f-up')), speedDown: Number(fv('f-down')),
       autoReset: fchk('f-autoreset'), resetDays: Number(fv('f-resetdays')),
-      lineIds: [...document.querySelectorAll('.ln-cb:checked')].map(c => Number(c.value)),
     };
+    const picked = picker.read();
+    body.lineIds = picked.map(r => r.lineId);
+    const nodes = {};
+    picked.forEach(r => { if (r.nodeIds && r.nodeIds.length) nodes[String(r.lineId)] = r.nodeIds; });
+    body.lineNodes = Object.keys(nodes).length ? nodes : null;
     if (id) await put('plans/' + id, body); else await post('plans', body);
     await load('plans');
     renderRows();
     toast(id ? t('plan.updated') : t('plan.created'), 'ok');
   }, { wide: true });
-  document.getElementById('f-all').addEventListener('change', e => document.querySelectorAll('.ln-cb').forEach(c => { c.checked = e.target.checked; }));
+  const nodes = (Array.isArray(state.nodes) && state.nodes.length) ? state.nodes : (Array.isArray(state.status.nodes) ? state.status.nodes : []);
+  const items = lineItems(state.lines, nodes, state.status.scope === 'reseller' ? (state.status.grants || []) : null);
+  picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refs, items) });
 }
 
 registerActions({

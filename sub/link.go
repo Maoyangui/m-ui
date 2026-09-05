@@ -36,7 +36,8 @@ type addr struct {
 }
 
 // resolveAddrs 把线路的对外地址展开为一组 addr。
-func resolveAddrs(line model.Line, entries []Entry) []addr {
+// allowed 是用户在这条线路上被收窄到的服务器集合(空 = 全部)。
+func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []addr {
 	var custom []struct {
 		Server     string `json:"server"`
 		ServerPort int    `json:"server_port"`
@@ -63,6 +64,9 @@ func resolveAddrs(line model.Line, entries []Entry) []addr {
 		if e.NodeId != 0 && !render.LineOnNode(line, e.NodeId) {
 			continue // 该线路没部署在这台服务器上
 		}
+		if e.NodeId != 0 && len(allowed) > 0 && !allowed[e.NodeId] {
+			continue // 用户在这条线路上只拿了别的服务器
+		}
 		out = append(out, addr{server: e.Host, port: line.Port, sni: e.SNI, remark: e.Suffix, insecure: e.Insecure})
 	}
 	return out
@@ -82,9 +86,14 @@ func userCred(user model.User, protocol string) map[string]interface{} {
 
 // GenerateLinks 为一个用户在给定线路集合下生成分享链接(每条线路每个地址一到两行)。
 func GenerateLinks(user model.User, lines []model.Line, entries []Entry) []string {
+	return GenerateLinksFor(user, lines, entries, nil)
+}
+
+// GenerateLinksFor 同 GenerateLinks,但按 lineNodes(线路 → 允许的服务器,缺省 = 全部)过滤入口。
+func GenerateLinksFor(user model.User, lines []model.Line, entries []Entry, lineNodes map[uint]map[uint]bool) []string {
 	var links []string
 	for _, line := range lines {
-		for _, a := range resolveAddrs(line, entries) {
+		for _, a := range resolveAddrs(line, entries, lineNodes[line.Id]) {
 			links = append(links, lineToURIs(line, user, a, line.Name+a.remark)...)
 		}
 	}

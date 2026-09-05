@@ -3,6 +3,13 @@ import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
+import { lineItems, keysFromRefs, linePicker, refLabels } from '../linepicker.js';
+
+// 代理面板没有服务器页:服务器名与授权范围来自 status;主面板用 state.nodes
+const pickerNodes = () => (Array.isArray(state.nodes) && state.nodes.length) ? state.nodes : (Array.isArray(state.status.nodes) ? state.status.nodes : []);
+const pickerItems = () => lineItems(state.lines, pickerNodes(), isReseller() ? (state.status.grants || []) : null);
+const refsOf = u => u.lineRefs || (u.lineIds || []).map(id => ({ lineId: id }));
+let picker = null;
 import { tzOffsetMinutes } from '../ui.js';
 
 export const title = () => t('user.title');
@@ -204,7 +211,7 @@ async function showDetail(id) {
         <div class="seg">${[24, 168, 720].map(h => `<button data-act="user.chartRange" data-id="${h}" class="${h === drawerRange ? 'active' : ''}">${t('dash.range.' + (h === 24 ? '24h' : h === 168 ? '7d' : '30d'))}</button>`).join('')}</div></div>
       <div id="ud-chart"></div>
     </section>
-    <section><h3>${t('user.lines')}</h3><div class="chips">${(u.lineIds || []).map(lid => { const l = state.lines.find(x => x.id === lid); return l ? `<span class="chip">${esc(l.name)}</span>` : ''; }).join('') || `<span class="muted small">${t('common.none')}</span>`}</div>
+    <section><h3>${t('user.lines')}</h3><div class="chips">${refLabels(refsOf(u), state.lines, pickerNodes()).map(n => `<span class="chip">${esc(n)}</span>`).join('') || `<span class="muted small">${t('common.none')}</span>`}</div>
       ${(u.extIds || []).length ? `<h3 style="margin-top:.6rem">${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span></span>` : ''; }).join('')}</div>` : ''}</section>`);
   refreshDrawerLive();
   await renderUserChart(u.name, drawerRange);
@@ -250,12 +257,15 @@ function fillFromPlan(planId) {
   document.getElementById('f-autoreset').checked = !!p.autoReset;
   document.getElementById('f-resetdays').value = p.resetDays || 30;
   const ids = Array.isArray(p.lineIds) ? p.lineIds : (p.lineIds ? JSON.parse(p.lineIds) : []);
-  if (ids.length) document.querySelectorAll('.ln-cb').forEach(c => { c.checked = ids.includes(Number(c.value)); });
+  if (ids.length && picker) {
+    let nodesBy = {};
+    try { nodesBy = typeof p.lineNodes === 'string' ? JSON.parse(p.lineNodes || '{}') : (p.lineNodes || {}); } catch { nodesBy = {}; }
+    picker.set(ids.map(id => ({ lineId: id, nodeIds: nodesBy[String(id)] || [] })));
+  }
 }
 
 function editUser(id) {
   const u = id ? state.users.find(x => x.id === id) : { enabled: true, lineIds: [], resetDays: 30 };
-  const lineIds = new Set(u.lineIds || []);
   const expiryVal = u.expiry ? new Date(u.expiry * 1000).toISOString().slice(0, 10) : '';
   openModal(id ? t('user.edit') : t('user.add'), `
     <div class="form-grid">
@@ -270,11 +280,7 @@ function editUser(id) {
       ${field(t('user.f.resetDays'), `<input id="f-resetdays" type="number" min="1" value="${u.resetDays || 30}">`)}
       ${check('f-enabled', t('user.f.enabled'), u.enabled !== false)}
       ${check('f-autoreset', t('user.f.autoReset'), !!u.autoReset)}
-      <div class="full">${field(t('user.f.lines'), `
-        <div class="check-list">
-          <label><input type="checkbox" id="f-all"> <b>${t('user.f.selectAll')}</b></label>
-          ${state.lines.map(l => `<label><input type="checkbox" class="ln-cb" value="${l.id}" ${lineIds.has(l.id) ? 'checked' : ''}> ${esc(l.name)}</label>`).join('')}
-        </div>`)}</div>
+      <div class="full">${field(t('user.f.lines'), `<div id="f-lines"></div>`, t('lp.help'))}</div>
       ${(state.exts || []).length ? `<div class="full">${field(t('user.f.exts'), `
         <div class="check-list">
           ${(state.exts || []).map(x => `<label><input type="checkbox" class="ext-cb" value="${x.id}" ${(u.extIds || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name)} <span class="muted small">${x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink')} · ${x.nodeCount || 0}</span></label>`).join('')}
@@ -288,7 +294,7 @@ function editUser(id) {
       deviceLimit: Number(fv('f-device')), speedUp: Number(fv('f-up')), speedDown: Number(fv('f-down')),
       autoReset: fchk('f-autoreset'), resetDays: Number(fv('f-resetdays')),
       nextReset: u.nextReset || 0, desc: u.desc || '',
-      lineIds: [...document.querySelectorAll('.ln-cb:checked')].map(c => Number(c.value)),
+      lineRefs: picker.read(), lineIds: picker.read().map(r => r.lineId),
       extIds: [...document.querySelectorAll('.ext-cb:checked')].map(c => Number(c.value)),
     };
     const created = id ? null : await post('users', body);
@@ -300,7 +306,8 @@ function editUser(id) {
     // 系统里的第一个用户:直接打开详情抽屉,订阅地址 / 二维码 / 复制就在眼前,不用再找
     if (created && created.id && state.users.length === 1) showDetail(created.id);
   }, { wide: true });
-  document.getElementById('f-all').addEventListener('change', e => document.querySelectorAll('.ln-cb').forEach(c => { c.checked = e.target.checked; }));
+  const items = pickerItems();
+  picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refsOf(u), items) });
 }
 
 // ---- 续费 / 延期(套餐)----
@@ -331,23 +338,20 @@ function bulkDialog() {
       ${field(t('user.bulkStart'), `<input id="f-start" type="number" min="1" value="1">`)}
       ${field(t('user.f.remark'), `<input id="f-remark" value="">`)}
       ${field(t('plan.pick'), planSelect('f-plan', 0), t('user.bulkHelp'))}
-      <div class="full">${field(t('user.f.lines'), `
-        <div class="check-list">
-          <label><input type="checkbox" id="f-all" checked> <b>${t('user.f.selectAll')}</b></label>
-          ${state.lines.map(l => `<label><input type="checkbox" class="ln-cb" value="${l.id}" checked> ${esc(l.name)}</label>`).join('')}
-        </div>`)}</div>
+      <div class="full">${field(t('user.f.lines'), `<div id="f-lines"></div>`, t('lp.help'))}</div>
     </div>`, async () => {
     const res = await post('users/bulk', {
       prefix: fv('f-prefix').trim(), count: Number(fv('f-count')), nameMode: fv('f-mode'), startIndex: Number(fv('f-start')),
       remark: fv('f-remark'), planId: Number(fv('f-plan')),
-      lineIds: [...document.querySelectorAll('.ln-cb:checked')].map(c => Number(c.value)),
+      lineIds: picker.read().map(r => r.lineId), lineRefs: picker.read(),
     });
     await load('users', 'lines', 'status'); renderRows();
     toast(t('user.bulkDone', { n: res.length }), 'ok');
     closeModal();
     openModal(t('user.bulkResult'), `<textarea style="min-height:16rem" readonly>${esc(res.map(r => r.name + '\t' + r.link).join('\n'))}</textarea>`, null);
   }, { wide: true });
-  document.getElementById('f-all').addEventListener('change', e => document.querySelectorAll('.ln-cb').forEach(c => { c.checked = e.target.checked; }));
+  const items = pickerItems();
+  picker = linePicker(document.getElementById('f-lines'), { items, selected: new Set(items.map(it => it.key)) });
 }
 
 async function fullUpdate(u, patch) {

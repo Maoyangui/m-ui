@@ -124,7 +124,7 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 	for _, u := range upstreams {
 		upstreamById[u.Id] = u
 	}
-	usersByLine, err := loadLineUsers(db)
+	usersByLine, err := loadLineUsers(db, self)
 	if err != nil {
 		return nil, err
 	}
@@ -178,10 +178,25 @@ func logOptions(db *gorm.DB) map[string]interface{} {
 }
 
 // loadLineUsers 返回 lineId → 启用用户列表(含凭据)。
-func loadLineUsers(db *gorm.DB) (map[uint][]model.User, error) {
+// self 是本机在 nodes 表里的 id:用户在某条线路上被收窄到具体服务器时(user_line_nodes 有行),
+// 只有包含本机的才挂到本机的入站上;没有行 = 该线路的全部服务器。
+func loadLineUsers(db *gorm.DB, self uint) (map[uint][]model.User, error) {
 	var links []model.UserLine
 	if err := db.Find(&links).Error; err != nil {
 		return nil, err
+	}
+	var scopes []model.UserLineNode
+	if err := db.Find(&scopes).Error; err != nil {
+		return nil, err
+	}
+	type key struct{ u, l uint }
+	allowed := map[key]map[uint]bool{}
+	for _, sc := range scopes {
+		k := key{sc.UserId, sc.LineId}
+		if allowed[k] == nil {
+			allowed[k] = map[uint]bool{}
+		}
+		allowed[k][sc.NodeId] = true
 	}
 	var users []model.User
 	// 代理被停用或到期 → 他名下的用户一并不下发(等同停用,节点立刻连不上)
@@ -200,6 +215,9 @@ func loadLineUsers(db *gorm.DB) (map[uint][]model.User, error) {
 		u, ok := userById[l.UserId]
 		if !ok {
 			continue
+		}
+		if set := allowed[key{l.UserId, l.LineId}]; self > 0 && len(set) > 0 && !set[self] {
+			continue // 该用户在这条线路上只拿了别的服务器
 		}
 		byLine[l.LineId] = append(byLine[l.LineId], u)
 		// 临时共享:再挂一份共享凭据,数据面里叫 "名字#share"(core 的追踪器记账时去掉后缀归到本人),

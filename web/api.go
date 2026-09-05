@@ -645,8 +645,9 @@ func (s *Server) validateUpstream(up *model.Upstream) error {
 
 type userPayload struct {
 	model.User
-	LineIds []uint `json:"lineIds"`
-	ExtIds  []uint `json:"extIds"`
+	LineIds  []uint          `json:"lineIds"`  // 老字段:整条线路(全部服务器)
+	LineRefs []model.LineRef `json:"lineRefs"` // 新字段:线路 × 服务器;给了它就以它为准
+	ExtIds   []uint          `json:"extIds"`
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
@@ -665,13 +666,14 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		type row struct {
 			model.User
 			LineIds      []uint              `json:"lineIds"`
+			LineRefs     []model.LineRef     `json:"lineRefs"`
 			ExtIds       []uint              `json:"extIds"`
 			OnlineIP     []string            `json:"onlineIps"`
 			OnlineOn     map[string][]string `json:"onlineLines"` // 源 IP → 该 IP 正在使用的线路(带服务器后缀)
 			SubURL       string              `json:"subUrl"`
 			ResellerName string              `json:"resellerName,omitempty"` // 归属代理
 		}
-		lineIdsBy, extIdsBy := s.userLineMap(), s.userExtMap() // 两条查询代替每个用户两条
+		refsBy, extIdsBy := s.userLineRefMap(), s.userExtMap() // 两条查询代替每个用户两条
 		rsNames := map[uint]string{}
 		if scope(r) == 0 {
 			var rss []model.Reseller
@@ -682,13 +684,16 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		out := make([]row, 0, len(users))
 		for _, u := range users {
-			ids, eids := lineIdsBy[u.Id], extIdsBy[u.Id]
+			refs, eids := refsBy[u.Id], extIdsBy[u.Id]
 			if eids == nil {
 				eids = []uint{}
 			}
+			if refs == nil {
+				refs = []model.LineRef{}
+			}
 			u.Credentials, u.ShareCreds = nil, nil // 列表不返回凭据
 			out = append(out, row{
-				User: u, LineIds: ids, ExtIds: eids,
+				User: u, LineIds: refIDs(refs), LineRefs: refs, ExtIds: eids,
 				OnlineIP:     mergeIPs(localIPs[u.Name], remoteIPs[u.Name]),
 				OnlineOn:     s.onlineLines(u.Name, localName, localLines, remoteLines),
 				SubURL:       subBase + subKey(u),
@@ -709,8 +714,9 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		p.User.Id = 0
 		p.User.CreatedAt = time.Now().Unix()
 		s.applySubTokenPolicy(&p.User) // 设置里关掉"用用户名作订阅地址"时,发一个随机地址
+		refs := lineRefsOf(p.LineIds, p.LineRefs)
 		if rid := scope(r); rid > 0 {
-			if err := s.prepareResellerUser(rid, &p.User, p.LineIds); err != nil {
+			if err := s.prepareResellerUser(rid, &p.User, refs); err != nil {
 				badRequest(w, err)
 				return
 			}
@@ -723,7 +729,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		s.setUserLines(p.User.Id, p.LineIds)
+		s.setUserLineRefs(p.User.Id, refs)
 		s.setUserExts(p.User.Id, p.ExtIds)
 		s.audit(r, "user", "create", p.User.Name)
 		s.reloadUsers("新增用户 " + p.User.Name)
@@ -757,8 +763,9 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		refs := lineRefsOf(p.LineIds, p.LineRefs)
 		if rid := scope(r); rid > 0 {
-			if err := s.checkResellerUser(rid, id, &p.User, p.LineIds); err != nil {
+			if err := s.checkResellerUser(rid, id, &p.User, refs); err != nil {
 				badRequest(w, err)
 				return
 			}
@@ -772,7 +779,7 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		s.setUserLines(id, p.LineIds)
+		s.setUserLineRefs(id, refs)
 		s.setUserExts(id, p.ExtIds)
 		s.audit(r, "user", "update", p.User.Name)
 		s.reloadUsers("修改用户 " + p.User.Name)
@@ -884,11 +891,9 @@ func (s *Server) userExtMap() map[uint][]uint {
 	return out
 }
 
+// setUserLines 老写法:整条线路(全部服务器)。
 func (s *Server) setUserLines(userID uint, lineIds []uint) {
-	s.db.Where("user_id = ?", userID).Delete(&model.UserLine{})
-	for _, lid := range lineIds {
-		s.db.Create(&model.UserLine{UserId: userID, LineId: lid})
-	}
+	s.setUserLineRefs(userID, lineRefsOf(lineIds, nil))
 }
 
 // generateCredentials 为新用户生成全部协议的凭据。

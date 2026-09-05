@@ -1,6 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
+import { lineItems, keysFromRefs, linePicker, refLabels } from '../linepicker.js';
 import { esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy } from '../ui.js';
 
 export const title = () => t('rs.title');
@@ -92,9 +93,7 @@ async function showDetail(id) {
         <dt>${t('rs.online')}</dt><dd class="num">${r.online}</dd>
         <dt>${t('rs.users')}</dt><dd class="num">${r.users} / ${r.userLimit || '∞'}</dd>
         <dt>${t('rs.lines')} <span class="muted small">${(r.lineIds || []).length}</span></dt>
-        <dd><div class="chips rs-lines">${(r.lineIds || []).map(lid => {
-          const l = state.lines.find(x => x.id === lid); return l ? `<span class="chip">${esc(l.name)}</span>` : '';
-        }).join('') || `<span class="muted small">${t('common.none')}</span>`}</div></dd>
+        <dd><div class="chips rs-lines">${refLabels(r.lineRefs || (r.lineIds || []).map(id => ({ lineId: id })), state.lines, state.nodes || []).map(n => `<span class="chip">${esc(n)}</span>`).join('') || `<span class="muted small">${t('common.none')}</span>`}</div></dd>
         <dt>${t('rs.lastLogin')}</dt><dd class="mono small">${esc(r.lastLogins || '—')}</dd>
       </dl>
     </section>
@@ -125,7 +124,7 @@ function userRow(u) {
 // ---- 新建 / 编辑 ----
 function editReseller(id) {
   const r = id ? list.find(x => x.id === id) : { enabled: true, volume: 0, deviceLimit: 0, userLimit: 0, lineIds: [] };
-  const picked = new Set(r.lineIds || []);
+  let picker = null;
   openModal(id ? t('rs.edit') : t('rs.add'), `
     <div class="form-grid">
       ${field(t('common.name'), `<input id="f-name" value="${esc(r.name || '')}" placeholder="${t('rs.namePh')}">`, t('rs.nameHelp'))}
@@ -137,24 +136,21 @@ function editReseller(id) {
       ${field(t('rs.speedDown'), `<input id="f-down" type="number" min="0" value="${r.speedDown || 0}">`, t('rs.speedHelp'))}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(r.remark || '')}">`)}
       ${check('f-enabled', t('common.enabled'), r.enabled !== false)}
-      <div class="full">${field(t('rs.lines'), `
-        <div class="check-list">
-          <label><input type="checkbox" id="f-all"> <b>${t('user.f.selectAll')}</b></label>
-          ${state.lines.map(l => `<label><input type="checkbox" class="ln-cb" value="${l.id}" ${picked.has(l.id) ? 'checked' : ''}> ${esc(l.name)}</label>`).join('')}
-        </div>`, t('rs.linesHelp'))}</div>
+      <div class="full">${field(t('rs.lines'), `<div id="f-lines"></div>`, t('rs.linesHelp'))}</div>
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), enabled: fchk('f-enabled'),
       volume: Number(fv('f-vol')) * 1073741824, deviceLimit: Number(fv('f-device')), userLimit: Number(fv('f-users')),
       speedUp: Number(fv('f-up')), speedDown: Number(fv('f-down')),
       expiry: fv('f-expiry') ? Math.floor(new Date(fv('f-expiry') + 'T23:59:59').getTime() / 1000) : 0,
-      lineIds: [...document.querySelectorAll('.ln-cb:checked')].map(c => Number(c.value)),
+      lineRefs: picker.read(), lineIds: picker.read().map(x => x.lineId),
     };
     if (id) await put('resellers/' + id, body); else await post('resellers', body);
     await reload();
     toast(id ? t('rs.updated') : t('rs.created', { url: panelURL() }), 'ok');
   }, { wide: true });
-  document.getElementById('f-all').addEventListener('change', e => document.querySelectorAll('.ln-cb').forEach(c => { c.checked = e.target.checked; }));
+  const items = lineItems(state.lines, state.nodes || [], null);
+  picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(r.lineRefs || (r.lineIds || []).map(x => ({ lineId: x })), items) });
 }
 
 registerActions({

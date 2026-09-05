@@ -29,7 +29,7 @@ func TestShareCredsRenderedUnderOwnerName(t *testing.T) {
 	db.Create(&model.UserLine{UserId: u.Id, LineId: line.Id})
 
 	users := func() []map[string]interface{} {
-		byLine, err := loadLineUsers(db)
+		byLine, err := loadLineUsers(db, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

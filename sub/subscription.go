@@ -28,6 +28,8 @@ type Options struct {
 	TZ string
 	// Share 是否允许用户在订阅页自助生成临时共享地址(设置 subShareEnabled)。
 	Share bool
+	// LineNodes 用户在各线路上被收窄到的服务器(线路 id → 服务器 id 集合);没写的线路 = 全部服务器。
+	LineNodes map[uint]map[uint]bool
 }
 
 // ExtItem 是一组外部节点。
@@ -49,7 +51,7 @@ func BuildLinkSub(user model.User, lines []model.Line, opt Options) Result {
 	if opt.ShowNotice {
 		out = append(out, noticeLinkURI(user))
 	}
-	out = append(out, GenerateLinks(user, lines, opt.Entries)...)
+	out = append(out, GenerateLinksFor(user, lines, opt.Entries, opt.LineNodes)...)
 	for _, e := range opt.External {
 		out = append(out, e.Links...)
 	}
@@ -66,7 +68,7 @@ func BuildClashSub(user model.User, lines []model.Line, opt Options) (Result, er
 	if opt.ShowNotice {
 		notice = noticeText(user)
 	}
-	body, err := BuildClashFull(user, lines, opt.Entries, opt.ClashTmpl, notice, opt.External)
+	body, err := BuildClashFor(user, lines, opt.Entries, opt.ClashTmpl, notice, opt.External, opt.LineNodes)
 	if err != nil {
 		return Result{}, err
 	}

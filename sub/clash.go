@@ -38,6 +38,11 @@ func BuildClash(user model.User, lines []model.Line, entries []Entry, template, 
 // BuildClashFull 生成一个用户的 clash 订阅 YAML,外部节点追加在本站节点之后并加入 Proxy/Auto 组。
 // notice 为可选的顶部提示节点名(如流量提示);为空则不注入。
 func BuildClashFull(user model.User, lines []model.Line, entries []Entry, template, notice string, external []ExtItem) (string, error) {
+	return BuildClashFor(user, lines, entries, template, notice, external, nil)
+}
+
+// BuildClashFor 同 BuildClashFull,但按 lineNodes(线路 → 允许的服务器,缺省 = 全部)过滤入口。
+func BuildClashFor(user model.User, lines []model.Line, entries []Entry, template, notice string, external []ExtItem, lineNodes map[uint]map[uint]bool) (string, error) {
 	base := template
 	if base == "" {
 		base = basicClashConfig
@@ -59,7 +64,7 @@ func BuildClashFull(user model.User, lines []model.Line, entries []Entry, templa
 	}
 	for _, line := range lines {
 		var names []string
-		for _, a := range resolveAddrs(line, entries) {
+		for _, a := range resolveAddrs(line, entries, lineNodes[line.Id]) {
 			for _, p := range lineToClashProxies(line, user, a) {
 				if a.insecure {
 					applyInsecure(p)

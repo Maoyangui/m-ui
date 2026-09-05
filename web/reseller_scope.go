@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -100,8 +99,8 @@ func (s *Server) guardScope(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // prepareResellerUser 代理建用户:归到自己名下,发随机订阅令牌,并校验线路与设备额度。
-func (s *Server) prepareResellerUser(rid uint, u *model.User, lineIds []uint) error {
-	if err := s.checkResellerUser(rid, 0, u, lineIds); err != nil {
+func (s *Server) prepareResellerUser(rid uint, u *model.User, refs []model.LineRef) error {
+	if err := s.checkResellerUser(rid, 0, u, refs); err != nil {
 		return err
 	}
 	u.ResellerId = rid
@@ -115,7 +114,7 @@ func (s *Server) prepareResellerUser(rid uint, u *model.User, lineIds []uint) er
 
 // checkResellerUser 校验:代理可用、线路在授权范围内、设备数不超代理预算。
 // id 为 0 表示新建;否则是改这个用户(算预算时先扣掉它原来的占用)。
-func (s *Server) checkResellerUser(rid, id uint, u *model.User, lineIds []uint) error {
+func (s *Server) checkResellerUser(rid, id uint, u *model.User, refs []model.LineRef) error {
 	var rs model.Reseller
 	if err := s.db.First(&rs, rid).Error; err != nil {
 		return errors.New("代理不存在")
@@ -123,14 +122,8 @@ func (s *Server) checkResellerUser(rid, id uint, u *model.User, lineIds []uint) 
 	if !rs.Enabled {
 		return errors.New("代理已停用")
 	}
-	allowed := map[uint]bool{}
-	for _, lid := range s.resellerLineIds(rid) {
-		allowed[lid] = true
-	}
-	for _, lid := range lineIds {
-		if !allowed[lid] {
-			return errors.New("含未授权的线路")
-		}
+	if err := s.checkRefsGranted(rid, refs); err != nil { // 线路与服务器范围都要在授权之内
+		return err
 	}
 	if rs.Expiry > 0 && rs.Expiry < time.Now().Unix() {
 		return errors.New("代理已到期")
@@ -158,18 +151,13 @@ func (s *Server) checkResellerPlan(rid uint, u model.User, p model.Plan) error {
 	if p.ResellerId != rid {
 		return errors.New("套餐不存在")
 	}
-	lineIds := []uint{}
-	if len(p.LineIds) > 0 {
-		if err := json.Unmarshal(p.LineIds, &lineIds); err != nil {
-			return errors.New("套餐线路解析失败")
-		}
-	}
-	if len(lineIds) == 0 { // 套餐不改线路时,沿用用户当前线路
-		s.db.Model(&model.UserLine{}).Where("user_id = ?", u.Id).Pluck("line_id", &lineIds)
+	refs := planRefs(p)
+	if refs == nil { // 套餐不改线路时,沿用用户当前分配
+		refs = s.userLineRefs(u.Id)
 	}
 	next := u
 	next.DeviceLimit, next.SpeedUp, next.SpeedDown = p.DeviceLimit, p.SpeedUp, p.SpeedDown
-	return s.checkResellerUser(rid, u.Id, &next, lineIds)
+	return s.checkResellerUser(rid, u.Id, &next, refs)
 }
 
 // resellerStatus 代理面板的概览数据:只统计自己名下。
@@ -206,6 +194,8 @@ func (s *Server) resellerStatus(r *http.Request, rid uint) map[string]interface{
 		"trafficUp":       total, // 概览卡片用:代理名下累计
 		"trafficDown":     int64(0),
 		"onlineUsers":     len(s.onlineResellerUsers(rid)),
+		"grants":          s.resellerLineRefs(rid), // 授权的线路 × 服务器,代理面板据此画选择器
+		"nodes":           s.nodeBriefs(),
 		"timezone":        s.panelLocation().String(),
 		"version":         Version,
 		"coreRunning":     s.run.CoreRunning(),
@@ -216,6 +206,17 @@ func (s *Server) resellerStatus(r *http.Request, rid uint) map[string]interface{
 func (s *Server) onlineResellerUsers(rid uint) []string {
 	mine := s.resellerUserNames(rid)
 	return filterNames(mergeIPs(s.run.Onlines().Users, s.run.Hub().RemoteOnlineUsers()), mine)
+}
+
+// nodeBriefs 服务器的 id / 名字 / 是否本机,给代理面板的线路选择器用(代理看不到服务器页)。
+func (s *Server) nodeBriefs() []map[string]interface{} {
+	var nodes []model.Node
+	s.db.Select("id, name, is_local, enabled").Order("sort asc, id asc").Find(&nodes)
+	out := make([]map[string]interface{}, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, map[string]interface{}{"id": n.Id, "name": n.Name, "isLocal": n.IsLocal, "enabled": n.Enabled})
+	}
+	return out
 }
 
 // sessionOf 取当前代理会话(用于读 pending 标记)。

@@ -115,16 +115,13 @@ func (s *Server) validatePlan(p *model.Plan) error {
 			p.LineIds = nil
 		}
 	}
-	if p.ResellerId > 0 { // 代理的套餐只能用授权线路
-		var ids []uint
-		_ = json.Unmarshal(p.LineIds, &ids)
-		allowed := map[uint]bool{}
-		for _, lid := range s.resellerLineIds(p.ResellerId) {
-			allowed[lid] = true
-		}
-		for _, lid := range ids {
-			if !allowed[lid] {
-				return errors.New("含未授权的线路")
+	if err := validatePlanRefs(p); err != nil {
+		return err
+	}
+	if p.ResellerId > 0 { // 代理的套餐只能用授权线路(含服务器范围)
+		if refs := planRefs(*p); refs != nil {
+			if err := s.checkRefsGranted(p.ResellerId, refs); err != nil {
+				return err
 			}
 		}
 	}
@@ -184,6 +181,14 @@ func applyPlan(u *model.User, p model.Plan, mode string, now int64) []uint {
 	return nil
 }
 
+// applyPlanRefs 同 applyPlan,但返回线路 × 服务器的分配(nil = 不改)。
+func applyPlanRefs(u *model.User, p model.Plan, mode string, now int64) []model.LineRef {
+	if applyPlan(u, p, mode, now) == nil {
+		return nil
+	}
+	return planRefs(p)
+}
+
 func (s *Server) loadPlan(id uint) (model.Plan, error) {
 	var p model.Plan
 	if err := s.db.First(&p, id).Error; err != nil {
@@ -236,15 +241,15 @@ func (s *Server) handleUserPlan(w http.ResponseWriter, r *http.Request, u model.
 
 // applyUserPlan 把套餐套到已有用户上并落库(含套餐指定的线路);调用方负责审计与热更新。
 func (s *Server) applyUserPlan(u *model.User, p model.Plan, mode string) error {
-	lineIds := applyPlan(u, p, mode, time.Now().Unix())
+	refs := applyPlanRefs(u, p, mode, time.Now().Unix())
 	if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).Select(
 		"volume", "expiry", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "next_reset",
 		"total_up", "total_down", "up", "down", "enabled",
 	).Updates(*u).Error; err != nil {
 		return err
 	}
-	if lineIds != nil {
-		s.setUserLines(u.Id, lineIds)
+	if refs != nil {
+		s.setUserLineRefs(u.Id, refs)
 	}
 	return nil
 }
@@ -258,13 +263,14 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Prefix     string `json:"prefix"`
-		Count      int    `json:"count"`
-		PlanId     uint   `json:"planId"`
-		NameMode   string `json:"nameMode"`
-		StartIndex int    `json:"startIndex"`
-		LineIds    []uint `json:"lineIds"`
-		Remark     string `json:"remark"`
+		Prefix     string          `json:"prefix"`
+		Count      int             `json:"count"`
+		PlanId     uint            `json:"planId"`
+		NameMode   string          `json:"nameMode"`
+		StartIndex int             `json:"startIndex"`
+		LineIds    []uint          `json:"lineIds"`
+		LineRefs   []model.LineRef `json:"lineRefs"` // 线路 × 服务器;给了它就以它为准
+		Remark     string          `json:"remark"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		badRequest(w, err)
@@ -320,17 +326,20 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 			b, _ := json.Marshal(creds.Generate(name))
 			u.Credentials = b
 			s.applySubTokenPolicy(&u) // 批量生成同样按设置决定订阅地址形式
-			lineIds := req.LineIds
+			refs := lineRefsOf(req.LineIds, req.LineRefs)
 			if plan != nil {
-				if ids := applyPlan(&u, *plan, "new", now); ids != nil {
-					lineIds = ids
+				if pr := applyPlanRefs(&u, *plan, "new", now); pr != nil {
+					refs = pr
 				}
 			}
 			if err := tx.Create(&u).Error; err != nil {
 				return err
 			}
-			for _, lid := range lineIds {
-				tx.Create(&model.UserLine{UserId: u.Id, LineId: lid})
+			for _, ref := range s.normalizeRefs(refs) {
+				tx.Create(&model.UserLine{UserId: u.Id, LineId: ref.LineId})
+				for _, n := range ref.NodeIds {
+					tx.Create(&model.UserLineNode{UserId: u.Id, LineId: ref.LineId, NodeId: n})
+				}
 			}
 			out = append(out, created{Name: name, Link: s.subLinks(u)["clash"]})
 			if idx-req.StartIndex > req.Count*3+10 { // 序号模式下冲突过多时终止
@@ -436,13 +445,13 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for _, u := range users {
-			lineIds := applyPlan(&u, p, req.Mode, now)
+			refs := applyPlanRefs(&u, p, req.Mode, now)
 			s.db.Model(&model.User{}).Where("id = ?", u.Id).Select(
 				"volume", "expiry", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "next_reset",
 				"total_up", "total_down", "up", "down", "enabled",
 			).Updates(u)
-			if lineIds != nil {
-				s.setUserLines(u.Id, lineIds)
+			if refs != nil {
+				s.setUserLineRefs(u.Id, refs)
 			}
 			affected++
 		}

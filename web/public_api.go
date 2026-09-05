@@ -196,6 +196,7 @@ type apiUserView struct {
 	OnlineIPs   []string            `json:"onlineIps"`
 	OnlineLines map[string][]string `json:"onlineLines,omitempty"` // 源 IP → 线路(带服务器后缀)
 	LineIds     []uint              `json:"lineIds"`
+	LineRefs    []model.LineRef     `json:"lineRefs"`
 	ExtIds      []uint              `json:"extIds"`
 	SubLink     string              `json:"subLink"`
 	SubClash    string              `json:"subClash"`
@@ -209,6 +210,7 @@ type apiSnapshot struct {
 	localLines, remoteLines map[string]map[string][]string
 	localName, subBase      string
 	lineIdsBy, extIdsBy     map[uint][]uint
+	refsBy                  map[uint][]model.LineRef
 }
 
 func (s *Server) apiSnapshot() *apiSnapshot {
@@ -216,7 +218,7 @@ func (s *Server) apiSnapshot() *apiSnapshot {
 		localIPs: map[string][]string{}, remoteIPs: map[string][]string{},
 		localLines: map[string]map[string][]string{}, remoteLines: map[string]map[string][]string{},
 		localName: s.localNodeName(), subBase: s.subBase(),
-		lineIdsBy: s.userLineMap(), extIdsBy: s.userExtMap(),
+		lineIdsBy: s.userLineMap(), extIdsBy: s.userExtMap(), refsBy: s.userLineRefMap(),
 	}
 	if s.run != nil { // 测试里没有数据面
 		snap.localIPs, snap.remoteIPs = s.run.OnlineIPsAll(), s.run.Hub().RemoteIPsAll()
@@ -230,12 +232,15 @@ func (s *Server) apiUser(u model.User) apiUserView {
 }
 
 func (s *Server) apiUserWith(u model.User, snap *apiSnapshot) apiUserView {
-	ids, eids := snap.lineIdsBy[u.Id], snap.extIdsBy[u.Id]
+	ids, eids, refs := snap.lineIdsBy[u.Id], snap.extIdsBy[u.Id], snap.refsBy[u.Id]
 	if ids == nil {
 		ids = []uint{}
 	}
 	if eids == nil {
 		eids = []uint{}
+	}
+	if refs == nil {
+		refs = []model.LineRef{}
 	}
 	base := snap.subBase + subKey(u)
 	links := map[string]string{"link": base, "clash": base + "?format=clash", "json": base + "?format=json"}
@@ -248,7 +253,7 @@ func (s *Server) apiUserWith(u model.User, snap *apiSnapshot) apiUserView {
 		CreatedAt: u.CreatedAt, OnlineAt: u.OnlineAt,
 		OnlineIPs:   mergeIPs(snap.localIPs[u.Name], snap.remoteIPs[u.Name]),
 		OnlineLines: s.onlineLines(u.Name, snap.localName, snap.localLines, snap.remoteLines),
-		LineIds:     ids, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}
+		LineIds:     ids, LineRefs: refs, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}
 }
 
 func (s *Server) apiListUsers(w http.ResponseWriter, r *http.Request, sc apiScope) {
@@ -274,24 +279,25 @@ func (s *Server) apiListUsers(w http.ResponseWriter, r *http.Request, sc apiScop
 
 // apiUserReq 创建/修改用户的请求体;指针字段缺省表示"不改动"。
 type apiUserReq struct {
-	Name        *string  `json:"name"`
-	Enabled     *bool    `json:"enabled"`
-	PlanId      *uint    `json:"planId"`
-	Plan        *string  `json:"plan"` // 套餐名,与 planId 二选一
-	Mode        string   `json:"mode"` // 套用套餐的方式:renew(默认,清零用量)| extend(保留用量)
-	VolumeGB    *float64 `json:"volumeGb"`
-	Volume      *int64   `json:"volume"` // 字节,0=不限;与 volumeGb 二选一
-	Days        *int     `json:"days"`   // 创建:自现在起 N 天;修改:在原到期(未过期时)基础上再加 N 天
-	Expiry      *int64   `json:"expiry"` // 到期时间戳(秒),0=不限;优先级高于 days
-	DeviceLimit *int     `json:"deviceLimit"`
-	SpeedUp     *int     `json:"speedUp"`
-	SpeedDown   *int     `json:"speedDown"`
-	AutoReset   *bool    `json:"autoReset"`
-	ResetDays   *int     `json:"resetDays"`
-	Remark      *string  `json:"remark"`
-	Desc        *string  `json:"desc"`
-	LineIds     *[]uint  `json:"lineIds"`
-	ExtIds      *[]uint  `json:"extIds"`
+	Name        *string          `json:"name"`
+	Enabled     *bool            `json:"enabled"`
+	PlanId      *uint            `json:"planId"`
+	Plan        *string          `json:"plan"` // 套餐名,与 planId 二选一
+	Mode        string           `json:"mode"` // 套用套餐的方式:renew(默认,清零用量)| extend(保留用量)
+	VolumeGB    *float64         `json:"volumeGb"`
+	Volume      *int64           `json:"volume"` // 字节,0=不限;与 volumeGb 二选一
+	Days        *int             `json:"days"`   // 创建:自现在起 N 天;修改:在原到期(未过期时)基础上再加 N 天
+	Expiry      *int64           `json:"expiry"` // 到期时间戳(秒),0=不限;优先级高于 days
+	DeviceLimit *int             `json:"deviceLimit"`
+	SpeedUp     *int             `json:"speedUp"`
+	SpeedDown   *int             `json:"speedDown"`
+	AutoReset   *bool            `json:"autoReset"`
+	ResetDays   *int             `json:"resetDays"`
+	Remark      *string          `json:"remark"`
+	Desc        *string          `json:"desc"`
+	LineIds     *[]uint          `json:"lineIds"`
+	LineRefs    *[]model.LineRef `json:"lineRefs"` // 线路 × 服务器;给了它就以它为准
+	ExtIds      *[]uint          `json:"extIds"`
 }
 
 // apiFindPlan 找套餐:主面板令牌只看主面板的套餐,代理令牌只看该代理自己的。
@@ -392,28 +398,33 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiSco
 		badRequest(w, err)
 		return
 	}
-	var lineIds []uint
+	var refs []model.LineRef
 	if plan != nil {
-		lineIds = applyPlan(&u, *plan, "new", now)
+		refs = applyPlanRefs(&u, *plan, "new", now)
 	}
 	if err := applyReq(&u, req, now, true); err != nil {
 		badRequest(w, err)
 		return
 	}
-	if req.LineIds != nil {
-		lineIds = *req.LineIds
+	switch {
+	case req.LineRefs != nil:
+		refs = *req.LineRefs
+	case req.LineIds != nil:
+		refs = lineRefsOf(*req.LineIds, nil)
 	}
-	if lineIds == nil {
-		// 没指定线路:主面板分配全部线路,代理分配它被授权的全部线路,订阅拿到就能用
+	if refs == nil {
+		// 没指定线路:主面板分配全部线路,代理分配它被授权的全部(含服务器范围),订阅拿到就能用
 		if sc.rid > 0 {
-			lineIds = s.resellerLineIds(sc.rid)
+			refs = s.resellerLineRefs(sc.rid)
 		} else {
-			s.db.Model(&model.Line{}).Order("sort asc, id asc").Pluck("id", &lineIds)
+			var ids []uint
+			s.db.Model(&model.Line{}).Order("sort asc, id asc").Pluck("id", &ids)
+			refs = lineRefsOf(ids, nil)
 		}
 	}
 	if sc.rid > 0 {
 		// 和代理在面板里建号完全一样的校验与归属:线路授权、用户数上限、流量额度、随机订阅令牌
-		if err := s.prepareResellerUser(sc.rid, &u, lineIds); err != nil {
+		if err := s.prepareResellerUser(sc.rid, &u, refs); err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -424,7 +435,7 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiSco
 		badRequest(w, err)
 		return
 	}
-	s.setUserLines(u.Id, lineIds)
+	s.setUserLineRefs(u.Id, refs)
 	if req.ExtIds != nil && sc.rid == 0 { // 外部节点只有主面板能分配
 		s.setUserExts(u.Id, *req.ExtIds)
 	}
@@ -449,13 +460,13 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 		badRequest(w, err)
 		return
 	}
-	var planLines []uint
+	var planRefsV []model.LineRef
 	if plan != nil {
 		mode := req.Mode
 		if mode != "extend" {
 			mode = "renew"
 		}
-		planLines = applyPlan(&u, *plan, mode, now)
+		planRefsV = applyPlanRefs(&u, *plan, mode, now)
 	}
 	if req.Name != nil && *req.Name != u.Name {
 		u.Name = *req.Name
@@ -468,17 +479,19 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 		badRequest(w, err)
 		return
 	}
-	var lineIds []uint
+	var refs []model.LineRef
 	switch {
+	case req.LineRefs != nil:
+		refs = *req.LineRefs
 	case req.LineIds != nil:
-		lineIds = *req.LineIds
-	case planLines != nil:
-		lineIds = planLines
+		refs = lineRefsOf(*req.LineIds, nil)
+	case planRefsV != nil:
+		refs = planRefsV
 	}
 	if sc.rid > 0 {
-		check := lineIds
+		check := refs
 		if check == nil { // 没改线路就按现有的校验(授权可能已被主面板收回)
-			s.db.Model(&model.UserLine{}).Where("user_id = ?", u.Id).Pluck("line_id", &check)
+			check = s.userLineRefs(u.Id)
 		}
 		if err := s.checkResellerUser(sc.rid, u.Id, &u, check); err != nil {
 			badRequest(w, err)
@@ -492,8 +505,8 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 		badRequest(w, err)
 		return
 	}
-	if lineIds != nil {
-		s.setUserLines(u.Id, lineIds)
+	if refs != nil {
+		s.setUserLineRefs(u.Id, refs)
 	}
 	if req.ExtIds != nil && sc.rid == 0 {
 		s.setUserExts(u.Id, *req.ExtIds)

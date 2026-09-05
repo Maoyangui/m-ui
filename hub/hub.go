@@ -40,18 +40,19 @@ var SyncedSettings = []string{
 
 // Snapshot 是主机下发给副机的完整配置。
 type Snapshot struct {
-	Revision   string            `json:"revision"`
-	SelfNodeId uint              `json:"selfNodeId"` // 接收方在 nodes 表里的 id
-	MasterId   uint              `json:"masterId"`   // 主机自己在 nodes 表里的 id
-	Nodes      []model.Node      `json:"nodes"`
-	Upstreams  []model.Upstream  `json:"upstreams"`
-	Lines      []model.Line      `json:"lines"`
-	Users      []model.User      `json:"users"`
-	UserLines  []model.UserLine  `json:"userLines"`
-	Exts       []model.ExtNode   `json:"exts"`
-	UserExts   []model.UserExt   `json:"userExts"`
-	Resellers  []model.Reseller  `json:"resellers"` // 副机据此给代理用户出对应的订阅页文案(不含密码/2FA)
-	Settings   map[string]string `json:"settings"`
+	Revision      string               `json:"revision"`
+	SelfNodeId    uint                 `json:"selfNodeId"` // 接收方在 nodes 表里的 id
+	MasterId      uint                 `json:"masterId"`   // 主机自己在 nodes 表里的 id
+	Nodes         []model.Node         `json:"nodes"`
+	Upstreams     []model.Upstream     `json:"upstreams"`
+	Lines         []model.Line         `json:"lines"`
+	Users         []model.User         `json:"users"`
+	UserLines     []model.UserLine     `json:"userLines"`
+	UserLineNodes []model.UserLineNode `json:"userLineNodes,omitempty"` // 用户在某线路上收窄到的服务器;没有 = 全部
+	Exts          []model.ExtNode      `json:"exts"`
+	UserExts      []model.UserExt      `json:"userExts"`
+	Resellers     []model.Reseller     `json:"resellers"` // 副机据此给代理用户出对应的订阅页文案(不含密码/2FA)
+	Settings      map[string]string    `json:"settings"`
 }
 
 // BuildSnapshot 从主机数据库构造快照并计算修订号(只含会影响副机行为的字段)。
@@ -86,6 +87,9 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 		s.Resellers[i].Password, s.Resellers[i].TotpSecret, s.Resellers[i].ApiToken = "", "", "" // 副机不跑代理面板,不需要这些
 	}
 	if err := db.Order("user_id asc, line_id asc").Find(&s.UserLines).Error; err != nil {
+		return s, err
+	}
+	if err := db.Order("user_id asc, line_id asc, node_id asc").Find(&s.UserLineNodes).Error; err != nil {
 		return s, err
 	}
 	if err := db.Order("sort asc, id asc").Find(&s.Exts).Error; err != nil {
@@ -240,7 +244,7 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		}
 	}
 	err = db.Transaction(func(tx *gorm.DB) error {
-		for _, t := range []interface{}{&model.UserLine{}, &model.UserExt{}, &model.User{}, &model.Line{}, &model.Upstream{}, &model.Node{}, &model.ExtNode{}, &model.Reseller{}} {
+		for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserExt{}, &model.User{}, &model.Line{}, &model.Upstream{}, &model.Node{}, &model.ExtNode{}, &model.Reseller{}} {
 			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(t).Error; err != nil {
 				return err
 			}
@@ -280,6 +284,11 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		}
 		if len(snap.UserLines) > 0 {
 			if err := tx.Create(&snap.UserLines).Error; err != nil {
+				return err
+			}
+		}
+		if len(snap.UserLineNodes) > 0 {
+			if err := tx.Create(&snap.UserLineNodes).Error; err != nil {
 				return err
 			}
 		}
