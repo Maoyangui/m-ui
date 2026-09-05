@@ -165,7 +165,7 @@ flowchart LR
   class E bad
 ```
 
-> All three formats build nodes the same way: **the lines assigned to the user × the servers each line is deployed on**, plus external nodes and external subscriptions. Add a server and every subscription grows the matching nodes on its own.
+> All three formats build nodes the same way: **the lines assigned to the user × the servers each line is deployed on**, plus external nodes and external subscriptions. Add a server and every subscription grows the matching nodes on its own. Assignment can go down to the entry: a line deployed on several servers is several entries, and users, plans and reseller grants can pick just one server's entry, so the subscription lists only what was given.
 
 ### Master and nodes
 
@@ -345,7 +345,7 @@ Hand part of the selling to someone else: create a reseller on the Resellers pag
 
 - Reseller panel: `https://<domain or IP>:2054/dl/` by default. Port, path and certificate live under Settings → Reseller panel (an empty certificate means it shares the main panel's).
 - The login name is the reseller's name and **a new reseller has no password**: they log in with the name and an **empty password**, then must set one before anything else, then can change it and enable two-factor auth. "Reset password" on the main panel clears it again.
-- Inside their panel a reseller only sees their own users. Creating one takes just a name — the subscription URL is a long random token, and link / Clash / sing-box formats plus the QR code all work as usual. They can assign lines (only the ones granted to them), quota, expiry, devices and speed limits, and renew, reset, kick, batch-edit or inspect traffic and online devices. **Plans are per-reseller too**: they only see and use the ones they created.
+- Inside their panel a reseller only sees their own users. Creating one takes just a name — the subscription URL is a long random token, and link / Clash / sing-box formats plus the QR code all work as usual. They can assign lines (only the ones granted to them, and a grant can be narrowed to one server), quota, expiry, devices and speed limits, and renew, reset, kick, batch-edit or inspect traffic and online devices. **Plans are per-reseller too**: they only see and use the ones they created.
 - Quota: traffic counts **all-time**, so a reseller cannot wash it away by resetting, renewing or deleting users — only the main panel's "Reset traffic" clears it. Devices and up/down bandwidth are **runtime pools**: a reseller may give any single user any limit, but all of their users together cannot have more devices online at once than the device pool (counted as a union across servers; when full only new devices are refused) or exceed the bandwidth pool in combined rate (one pool per server). Expiry, being disabled or going over quota each pull their users from the data plane at once and make their subscriptions return 404.
 - A reseller can set their own **profile title** (the name clients show) plus landing-page title, notice and support contact — empty inherits the main panel's — and can switch off their own landing page or temporary sharing.
 - A new reseller has a 24-hour claim window: sign in once with the name and an empty password and set a password. After that the main panel has to reset the password again to reopen the window, so an unclaimed account cannot sit open forever.

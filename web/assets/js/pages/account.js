@@ -65,14 +65,10 @@ export async function render(el) {
         <div class="full">${field(t('set.subPageNotice'), `<textarea id="sp-notice" placeholder="${esc(t('acct.inherit'))}">${esc(me.pageNotice || '')}</textarea>`)}</div>
       </div>
     </section>`;
-  const sw = document.getElementById('acct-api-on');
-  if (sw) sw.addEventListener('change', async e => {
-    try { api = await put('self/api', { enabled: e.target.checked }); toast(t('acct.apiSaved'), 'ok'); document.getElementById('acct-api').innerHTML = apiCard(); bindApiSwitch(); }
-    catch (err) { toast(err.message, 'err'); e.target.checked = !e.target.checked; }
-  });
+  bindApiSwitch();
 }
 
-// 卡片重绘后开关要重新挂事件
+// 开关的事件:卡片每次重绘后都要重新挂
 function bindApiSwitch() {
   const sw = document.getElementById('acct-api-on');
   if (sw) sw.addEventListener('change', async e => {

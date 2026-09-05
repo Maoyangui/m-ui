@@ -20,7 +20,7 @@
 
 - 地址前缀:`https://<面板域名或IP>:<代理面板端口><代理面板路径>api/v1`(默认 `:2054/dl/api/v1`),账号页会直接显示。
 - 鉴权方式与主面板相同(`Authorization: Bearer <令牌>` 或 `X-API-Key`),令牌只对应这个代理,主面板入口不认代理令牌,反之亦然。
-- 作用域和代理在面板里能做的完全一致:只看得到、改得动自己名下的用户;`/plans` 只列自己建的套餐;线路只能用主面板授权给他的(`lineIds` 含未授权线路返回 400);不指定线路时分配授权的全部线路;`extIds` 不可用;用户数上限、流量额度同样生效。
+- 作用域和代理在面板里能做的完全一致:只看得到、改得动自己名下的用户;`/plans` 只列自己建的套餐;线路只能用主面板授权给他的(`lineIds` 含未授权线路返回 400;授权收窄到了具体服务器的线路,只能用 `lineRefs` 指定其中的服务器);不指定线路时分配授权的全部线路(含服务器范围);`extIds` 不可用;用户数上限、流量额度同样生效。
 - 代理被停用、到期,或在账号页关掉开关后,令牌立即返回 401。
 
 ## 接口一览
@@ -55,7 +55,7 @@
   "deviceLimit": 3, "speedUp": 0, "speedDown": 0,
   "remark": "订单 #1001", "desc": "",
   "createdAt": 1756000000, "onlineAt": 1756800000, "onlineIps": ["1.2.3.4"],
-  "lineIds": [1, 2], "extIds": [],
+  "lineIds": [1, 2], "lineRefs": [{"lineId": 1}, {"lineId": 2, "nodeIds": [3]}], "extIds": [],
   "subLink": "https://example.com:2056/sub/alice",
   "subClash": "https://example.com:2056/sub/alice?format=clash",
   "subJson": "https://example.com:2056/sub/alice?format=json"
@@ -64,7 +64,7 @@
 
 ## 创建 / 修改 的请求字段
 
-> 线路分配有两种写法:(整条线路,即该线路部署到的全部服务器,包括以后新加的)和 (线路 × 服务器,如 , 省略 = 该线路全部服务器)。两者同时给时以  为准;用户对象里两个字段都会返回。代理令牌下  只能落在主面板授权给该代理的服务器内。
+> 线路分配有两种写法:`lineIds`(整条线路,即该线路部署到的全部服务器,包括以后新加的)和 `lineRefs`(线路 × 服务器,如 `[{"lineId": 1}, {"lineId": 2, "nodeIds": [3]}]`,`nodeIds` 省略 = 该线路全部服务器)。两者同时给时以 `lineRefs` 为准;用户对象里两个字段都会返回。代理令牌下 `lineRefs` 只能落在主面板授权给该代理的服务器内。
 
 
 全部可选(创建时 `name` 必填),没给的字段不改动:
@@ -83,6 +83,7 @@
 | `autoReset` / `resetDays` | bool / number | 周期重置用量 |
 | `remark` / `desc` | string | 备注 / 说明 |
 | `lineIds` | number[] | 可用线路;创建时不给且套餐未指定 → 分配全部线路 |
+| `lineRefs` | [{lineId, nodeIds}] | 线路 × 服务器;`nodeIds` 空 = 该线路全部服务器。给了它就以它为准,`lineIds` 忽略 |
 | `extIds` | number[] | 可用外部节点 |
 
 显式字段优先级高于套餐:例如 `{"plan": "月付", "days": 60}` 会先套用月付套餐,再把到期改为 60 天后。

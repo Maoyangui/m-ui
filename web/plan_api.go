@@ -299,6 +299,12 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().Unix()
+	// 线路范围整批一样,事务外整理一次;套餐带线路时以套餐的为准
+	baseRefs := s.normalizeRefs(lineRefsOf(req.LineIds, req.LineRefs))
+	var planRefsN []model.LineRef
+	if plan != nil {
+		planRefsN = s.normalizeRefs(planRefs(*plan))
+	}
 	type created struct {
 		Name string `json:"name"`
 		Link string `json:"link"`
@@ -326,16 +332,16 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 			b, _ := json.Marshal(creds.Generate(name))
 			u.Credentials = b
 			s.applySubTokenPolicy(&u) // 批量生成同样按设置决定订阅地址形式
-			refs := lineRefsOf(req.LineIds, req.LineRefs)
+			refs := baseRefs
 			if plan != nil {
-				if pr := applyPlanRefs(&u, *plan, "new", now); pr != nil {
-					refs = pr
+				if applyPlanRefs(&u, *plan, "new", now) != nil {
+					refs = planRefsN
 				}
 			}
 			if err := tx.Create(&u).Error; err != nil {
 				return err
 			}
-			for _, ref := range s.normalizeRefs(refs) {
+			for _, ref := range refs {
 				tx.Create(&model.UserLine{UserId: u.Id, LineId: ref.LineId})
 				for _, n := range ref.NodeIds {
 					tx.Create(&model.UserLineNode{UserId: u.Id, LineId: ref.LineId, NodeId: n})
