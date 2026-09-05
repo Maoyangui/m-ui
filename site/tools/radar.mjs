@@ -27,7 +27,7 @@ const FIRST_RELEASE = state.firstRelease || '2026-09-02';
 const api = (path, params = {}) => {
   const args = ['api', '-X', 'GET', path];
   for (const [k, v] of Object.entries(params)) args.push('-f', `${k}=${v}`);
-  try { return JSON.parse(execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 1 << 26 })); } catch { return null; }
+  try { return JSON.parse(execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'ignore'] })); } catch { return null; }
 };
 const b64 = c => c && c.content ? Buffer.from(c.content.replace(/\n/g, ''), 'base64').toString('utf8') : '';
 const daysAgo = iso => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
@@ -68,13 +68,16 @@ for (const it of seen.values()) {
     humanOnly, eligibleFrom, aboutSingBox: /sing-box|singbox/.test(readme),
     yamlData: contrib.includes('software/') && contrib.includes('.yml'),
   };
+  // 免费节点 / 订阅聚合不是软件列表,m-ui 放进去没有意义
+  cand.nodeAggregator = /free (proxy|vpn) (node|config|server|account)s?|aggregat|免费.*(节点|订阅|机场)|daily updated/.test(meta + ' ' + readme.slice(0, 2000));
   cand.category = cand.mentionsMui ? 'done'
     : humanOnly ? 'prohibited'
-    : !cand.acceptsPR || cand.forbidsSelfPromo ? 'blocked'
+    : cand.nodeAggregator || !cand.acceptsPR || cand.forbidsSelfPromo ? 'blocked'
     : eligibleFrom && TODAY < eligibleFrom ? 'blocked'
     : 'auto';
   cand.reason = cand.mentionsMui ? '已收录'
     : humanOnly ? '该列表明确禁止机器 / LLM 生成的提交,只能由人手工提交'
+    : cand.nodeAggregator ? '是免费节点 / 订阅聚合,不是软件列表'
     : !cand.acceptsPR ? '不接受 PR' : cand.forbidsSelfPromo ? '禁止自荐'
     : eligibleFrom && TODAY < eligibleFrom ? `要求首个 Release 满 ${ageMonths} 个月,${eligibleFrom} 起可提交`
     : '可以提交 PR';
