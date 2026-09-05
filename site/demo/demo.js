@@ -75,7 +75,12 @@ function route(method, path, query, body) {
       case 'resellers': if (seg[2] === 'users') return S.users.filter(u => u.resellerId === id); return clone(S.resellers);
       case 'update': return { current: 'demo', latest: '', hasUpdate: false, canUpdate: false };
       case 'ops': { if (seg[1] === 'status') return fx('GET ops/status') || { running: false, log: [] }; const o = fx('GET ops') || { info: {}, status: {}, params: {} };
-        o.info = { ...(o.info || {}), linux: true, root: true, warp: { ...((o.info || {}).warp || {}), installed: true, listening: true, exit: 'on' } }; o.status = o.status || { running: false, log: [] }; return o; }
+        // 导出实例跑在 Windows 上,系统信息是空的;演示里给一台像样的 Linux 主机
+        o.info = { ...(o.info || {}), linux: true, root: true, os: 'linux', kernel: '6.8.0-45-generic', arch: 'amd64', hostname: 'tokyo', uptime: 37 * 86400 + 4 * 3600, load: '0.12 0.09 0.05',
+          memTotal: 2 * 1073741824, memAvail: 1.3 * 1073741824, swapTotal: 2 * 1073741824, swapFree: 2 * 1073741824, diskTotal: 40 * 1073741824, diskFree: 29 * 1073741824,
+          cc: 'bbr', qdisc: 'fq', nofile: 1048576, ntp: 'yes', tuned: true, limits: true,
+          warp: { ...((o.info || {}).warp || {}), installed: true, service: 'active', socks: 'active', port: 40000, listening: true, status: 'Connected', exit: 'on', exitIp: '104.28.0.1', exitLoc: 'JP', exitColo: 'NRT' } };
+        o.status = o.status || { running: false, log: [] }; return o; }
       case 'cert': if (seg[1] === 'status') return fx('GET cert/status') || { running: false, log: [] }; return fx('GET cert') || { info: {}, settings: S.settings, status: {} };
       case 'stats': { const q = new URLSearchParams(query); const tag = q.get('tag'); const hours = q.get('hours') || '24'; const bucket = q.get('bucket') || '3600';
         if (seg[1] === 'top') return listByPrefix('stats/top') || [];

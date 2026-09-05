@@ -108,7 +108,8 @@ jobs:
         run: |
           # 模拟面板一键更新已把坏程序换上、旧程序在 .prev、服务已重启:守护要判定失败并换回旧程序
           sudo cp -p /usr/local/bin/m-ui /usr/local/bin/m-ui.prev
-          sudo cp /tmp/broken-m-ui /usr/local/bin/m-ui
+          # 正在运行的程序不能原地覆盖(ETXTBSY);install 先 unlink 再建新文件。面板真实路径用的是 rename,效果相同
+          sudo install -m 0755 /tmp/broken-m-ui /usr/local/bin/m-ui
           oldpid="$(systemctl show -p MainPID --value m-ui)"
           sudo systemctl restart m-ui || true
           set +e
