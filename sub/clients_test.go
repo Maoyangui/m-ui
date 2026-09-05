@@ -9,7 +9,8 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
-// 五块系统各自要有图标、系统名、说明和至少一个下载入口,而且链接必须是 https。
+// 五块系统各自要有图标、系统名,每块至少两款客户端(第一款是推荐项,且只有一款推荐),
+// 每款都要有说明、该粘贴哪种地址、至少一个 https 下载入口且首选包恰好一个。
 func TestClientTiles(t *testing.T) {
 	for _, lang := range []string{"zh", "en"} {
 		tiles := clientTiles(lang)
@@ -22,23 +23,41 @@ func TestClientTiles(t *testing.T) {
 				t.Fatalf("多出的系统: %s", tile.Key)
 			}
 			delete(want, tile.Key)
-			if tile.OS == "" || tile.App == "" || tile.Desc == "" || !strings.Contains(string(tile.Icon), "<svg") {
+			if tile.OS == "" || !strings.Contains(string(tile.Icon), "<svg") {
 				t.Fatalf("%s/%s 内容不全: %+v", lang, tile.Key, tile)
 			}
-			if len(tile.Links) == 0 {
-				t.Fatalf("%s/%s 没有下载入口", lang, tile.Key)
+			if len(tile.Apps) < 2 {
+				t.Fatalf("%s/%s 应列出不止一款客户端,实际 %d", lang, tile.Key, len(tile.Apps))
 			}
-			primary := 0
-			for _, l := range tile.Links {
-				if l.Text == "" || !strings.HasPrefix(string(l.Href), "https://") {
-					t.Fatalf("%s/%s 链接不对: %+v", lang, tile.Key, l)
+			rec := 0
+			for i, app := range tile.Apps {
+				if app.Recommended {
+					rec++
+					if i != 0 {
+						t.Fatalf("%s/%s 推荐项应排第一,实际是第 %d 款 %s", lang, tile.Key, i+1, app.Name)
+					}
 				}
-				if l.Primary {
-					primary++
+				if app.Name == "" || app.Desc == "" || app.Format == "" {
+					t.Fatalf("%s/%s/%s 内容不全: %+v", lang, tile.Key, app.Name, app)
+				}
+				if len(app.Links) == 0 {
+					t.Fatalf("%s/%s/%s 没有下载入口", lang, tile.Key, app.Name)
+				}
+				primary := 0
+				for _, l := range app.Links {
+					if l.Text == "" || !strings.HasPrefix(string(l.Href), "https://") {
+						t.Fatalf("%s/%s/%s 链接不对: %+v", lang, tile.Key, app.Name, l)
+					}
+					if l.Primary {
+						primary++
+					}
+				}
+				if primary != 1 {
+					t.Fatalf("%s/%s/%s 首选包应恰好一个,实际 %d", lang, tile.Key, app.Name, primary)
 				}
 			}
-			if primary != 1 {
-				t.Fatalf("%s/%s 推荐项应恰好一个,实际 %d", lang, tile.Key, primary)
+			if rec != 1 {
+				t.Fatalf("%s/%s 推荐项应恰好一款,实际 %d", lang, tile.Key, rec)
 			}
 		}
 	}

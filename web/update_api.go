@@ -17,7 +17,9 @@ import (
 // 面板里的"有新版本"提示与一键更新。
 //
 // 检查结果缓存在内存并落一份到设置里,刷新页面不会每次都去打 GitHub;
-// 更新只替换 /usr/local/bin/m-ui 再重启服务,数据库、证书、备份、设置一概不动。
+// 更新是一次事务:升级前备份 → 下载校验 → 旧程序留作 .prev、新程序换上 → 重启 →
+// 服务之外的守护(m-ui upgrade-watch)等新版本健康,起不来就自动换回旧程序、必要时还原备份。
+// 数据库、证书、设置在成功路径上一概不动;回滚过会写 upgrade-status.json,状态接口带给页面明说。
 
 var (
 	canUpdateOnce sync.Once
@@ -67,6 +69,18 @@ func (s *Server) StartUpdateWatch() {
 	}()
 }
 
+// upgradeStatusPath 是上一次升级的结果文件(回滚过才有意义)。
+func (s *Server) upgradeStatusPath() string { return selfupdate.StatusPath(s.run.DataDir()) }
+
+// lastUpgrade 返回需要管理员知道的升级结果:回滚过、或回滚也没成的那种;成功的不打扰。
+func (s *Server) lastUpgrade() *selfupdate.Status {
+	st := selfupdate.ReadStatus(s.upgradeStatusPath())
+	if st == nil || st.OK {
+		return nil
+	}
+	return st
+}
+
 // handleUpdate GET 返回版本信息(?force=1 立即重查);POST 执行更新并重启。
 func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -78,7 +92,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"current": info.Current, "latest": info.Latest, "hasUpdate": info.HasUpdate,
 			"checkedAt": info.CheckedAt, "error": info.Err, "updating": busy,
-			"canUpdate": canSelfUpdate(),
+			"canUpdate": canSelfUpdate(), "lastUpgrade": s.lastUpgrade(),
 		})
 	case http.MethodPost:
 		updateMu.Lock()
@@ -110,20 +124,79 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 		defer cancel()
 		bin, _ := os.Executable()
-		if err := selfupdate.Apply(ctx, info.Latest, bin, func(f string, a ...interface{}) {
-			logger.Info("更新: ", f)
-		}); err != nil {
+		logf := func(f string, a ...interface{}) { logger.Info("更新: ", f) }
+
+		// 1. 升级前备份(面板自己的备份格式,带 WAL 检查点):回滚时旧程序对新库不放心就还原它
+		backupPath := s.preUpgradeBackup()
+
+		// 2. 下载、校验、试运行,然后旧程序留作 .prev、新程序换上
+		newPath, err := selfupdate.Stage(ctx, info.Latest, bin, logf)
+		if err != nil {
 			badRequest(w, err)
 			return
 		}
+		if err := selfupdate.Swap(bin, newPath, selfupdate.PrevPath(bin)); err != nil {
+			badRequest(w, err)
+			return
+		}
+
+		// 3. 服务之外的守护:等新版本健康;起不来就换回 .prev(必要时还原备份)
+		plan := selfupdate.Plan{
+			Bin: bin, Prev: selfupdate.PrevPath(bin), Failed: selfupdate.FailedPath(bin),
+			From: "v" + Version, To: info.Latest,
+			URL:     selfupdate.LocalURL(s.setting("webCertFile") != "", s.settingInt("webPort", 2053), s.basePath()),
+			Service: selfupdate.ServiceName(), OldPID: os.Getpid(),
+			DBPath: s.run.DBPath(), Backup: backupPath, StatusPath: s.upgradeStatusPath(), Timeout: selfupdate.DefaultTimeout,
+		}
+		selfupdate.ClearStatus(plan.StatusPath)
+		watched := true
+		if err := selfupdate.LaunchWatcher(plan); err != nil {
+			watched = false
+			logger.Warning("无法启动升级守护,这次更新没有自动回滚(旧程序保留在 ", plan.Prev, "): ", err)
+		}
 		s.audit(r, "panel", "update", info.Latest)
-		logger.Info("已更新到 ", info.Latest, ",正在重启面板")
-		writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "version": info.Latest})
+		logger.Info("已换上 ", info.Latest, ",正在重启面板;守护=", watched, " 备份=", backupPath)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "version": info.Latest, "watch": watched, "backup": filepath.Base(backupPath)})
 		// 先把响应写回去再重启,前端才能进入"等待面板回来"的轮询
 		s.run.ScheduleRestart(800 * time.Millisecond)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// preUpgradeBackup 在备份目录写一份 pre-upgrade-<版本>-<时间>.zip,只保留最近两份;失败返回空(升级继续,回滚时只换程序)。
+func (s *Server) preUpgradeBackup() string {
+	dir := s.run.BackupDir()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		logger.Warning("升级前备份失败(继续): ", err)
+		return ""
+	}
+	p := filepath.Join(dir, selfupdate.BackupName("v"+Version))
+	f, err := os.Create(p)
+	if err != nil {
+		logger.Warning("升级前备份失败(继续): ", err)
+		return ""
+	}
+	werr := s.run.WriteBackup(f)
+	f.Close()
+	if werr != nil {
+		os.Remove(p)
+		logger.Warning("升级前备份失败(继续,回滚时只换回旧程序): ", werr)
+		return ""
+	}
+	selfupdate.Prune(dir, selfupdate.BackupPrefix, selfupdate.KeepBackups)
+	logger.Info("升级前备份: ", p)
+	return p
+}
+
+// handleUpdateAck 管理员看过"已回滚"提示后清掉状态文件。
+func (s *Server) handleUpdateAck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	selfupdate.ClearStatus(s.upgradeStatusPath())
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }
 
 // canSelfUpdate 只有 Linux 上以 root 跑、且二进制所在目录可写时才允许一键更新。

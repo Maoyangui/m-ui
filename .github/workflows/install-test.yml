@@ -89,6 +89,38 @@ jobs:
           sleep 3
           systemctl is-active m-ui
           sudo test -f /etc/m-ui/m-ui.db
+      - name: A broken release is rolled back by the installer
+        run: |
+          # 一个"version 能跑、run 必挂"的假程序:模拟新版本本身能执行但服务起不来的升级事故
+          printf '%s\n' '#!/bin/bash' 'if [ "$1" = version ]; then echo "m-ui 99.0.0-broken"; exit 0; fi' 'echo "simulated broken release"; exit 1' > /tmp/broken-m-ui
+          chmod +x /tmp/broken-m-ui
+          if sudo bash deploy/install.sh /tmp/broken-m-ui; then echo "安装脚本应当失败并回滚"; exit 1; fi
+          systemctl is-active m-ui
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:2053/app/)" = 200 ]
+          /usr/local/bin/m-ui version | grep -q "ci-${GITHUB_SHA::7}"
+          sudo test -f /usr/local/bin/m-ui.failed
+          sudo test ! -f /usr/local/bin/m-ui.prev
+          sudo ls /etc/m-ui/backups/ | grep -q '^pre-upgrade-'
+          sudo grep -q '"rolledBack":true' /etc/m-ui/upgrade-status.json
+          sudo cat /etc/m-ui/upgrade.log
+          sudo rm -f /usr/local/bin/m-ui.failed /etc/m-ui/upgrade-status.json
+      - name: The panel updater's watcher (upgrade-watch) rolls a broken binary back
+        run: |
+          # 模拟面板一键更新已把坏程序换上、旧程序在 .prev、服务已重启:守护要判定失败并换回旧程序
+          sudo cp -p /usr/local/bin/m-ui /usr/local/bin/m-ui.prev
+          sudo cp /tmp/broken-m-ui /usr/local/bin/m-ui
+          oldpid="$(systemctl show -p MainPID --value m-ui)"
+          sudo systemctl restart m-ui || true
+          set +e
+          sudo /usr/local/bin/m-ui.prev upgrade-watch -bin /usr/local/bin/m-ui -prev /usr/local/bin/m-ui.prev -url http://127.0.0.1:2053/app/ -service m-ui -old-pid "$oldpid" -db /etc/m-ui/m-ui.db -status /etc/m-ui/upgrade-status.json -from ci -to broken -timeout 20
+          rc=$?; set -e
+          [ "$rc" = 1 ] || { echo "upgrade-watch 应返回 1(已回滚且面板健康),实际 $rc"; exit 1; }
+          systemctl is-active m-ui
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:2053/app/)" = 200 ]
+          /usr/local/bin/m-ui version | grep -q "ci-${GITHUB_SHA::7}"
+          sudo grep -q '"rolledBack": true' /etc/m-ui/upgrade-status.json
+          sudo test -f /usr/local/bin/m-ui.failed
+          sudo rm -f /usr/local/bin/m-ui.failed /etc/m-ui/upgrade-status.json
       - name: Uninstall keeps the data directory
         run: |
           sudo bash deploy/install.sh --uninstall

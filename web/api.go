@@ -126,6 +126,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status["subPath"] = s.setting("subPath")
 	status["webPort"] = s.settingInt("webPort", 2053)
 	status["webPath"] = s.basePath()
+	if st := s.lastUpgrade(); st != nil { // 上次一键更新回滚过:页面顶部要明说,管理员点"知道了"才消
+		status["upgrade"] = st
+	}
 	if pct, err := cpu.Percent(0, false); err == nil && len(pct) > 0 {
 		status["cpu"] = pct[0]
 	}

@@ -74,6 +74,9 @@ function route(method, path, query, body) {
       case 'onlines': return clone(S.onlines);
       case 'resellers': if (seg[2] === 'users') return S.users.filter(u => u.resellerId === id); return clone(S.resellers);
       case 'update': return { current: 'demo', latest: '', hasUpdate: false, canUpdate: false };
+      case 'ops': { if (seg[1] === 'status') return fx('GET ops/status') || { running: false, log: [] }; const o = fx('GET ops') || { info: {}, status: {}, params: {} };
+        o.info = { ...(o.info || {}), linux: true, root: true, warp: { ...((o.info || {}).warp || {}), installed: true, listening: true, exit: 'on' } }; o.status = o.status || { running: false, log: [] }; return o; }
+      case 'cert': if (seg[1] === 'status') return fx('GET cert/status') || { running: false, log: [] }; return fx('GET cert') || { info: {}, settings: S.settings, status: {} };
       case 'stats': { const q = new URLSearchParams(query); const tag = q.get('tag'); const hours = q.get('hours') || '24'; const bucket = q.get('bucket') || '3600';
         if (seg[1] === 'top') return listByPrefix('stats/top') || [];
         const k = tag ? `GET stats?resource=user&tag=${tag}&hours=${hours}&bucket=${bucket}` : `GET stats?resource=user&hours=${hours}&bucket=${bucket}`;

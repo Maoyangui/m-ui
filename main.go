@@ -14,6 +14,7 @@ import (
 	"github.com/Maoyangui/m-ui/importer"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/runner"
+	"github.com/Maoyangui/m-ui/selfupdate"
 	"github.com/Maoyangui/m-ui/web"
 )
 
@@ -68,6 +69,17 @@ func main() {
 		printInstallSummary(*dbPath)
 	case "version", "-v", "--version":
 		fmt.Println("m-ui", version)
+	case "upgrade-watch":
+		// 升级守护:面板一键更新后由 systemd-run 在服务之外拉起;等新版本健康,起不来就自动回滚。
+		// 只做健康检查与文件替换,不碰数据库,不初始化内核。
+		st, err := selfupdate.Watch(selfupdate.ParseArgs(os.Args[2:]), os.Stdout)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "upgrade-watch:", err)
+			if st.Healthy {
+				os.Exit(1) // 回滚成功:面板是好的,但这次更新没成
+			}
+			os.Exit(2) // 回滚也没救回来,需要人工介入
+		}
 	case "import":
 		fs := flag.NewFlagSet("import", flag.ExitOnError)
 		from := fs.String("from", "", "旧面板数据库路径(只读打开,绝不修改源文件)")

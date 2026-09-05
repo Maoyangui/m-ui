@@ -1,0 +1,14 @@
+{
+  "_": "外部发布的状态记录:同一个 launch 不会每周再发一次。radar.mjs 读它决定哪些渠道还没做;发布成功后由脚本(或人)追加一条。",
+  "firstRelease": "2026-09-02",
+  "launches": [],
+  "platforms": {
+    "v2ex": { "type": "browser", "url": "https://v2ex.com/go/create", "angle": "sing-box 配置复杂:线路抽象 + 安全应用 + 热更新", "rule": "分享创造节点欢迎发布自己的作品;需要已登录的浏览器会话" },
+    "hackernews": { "type": "browser", "url": "https://news.ycombinator.com/submit", "angle": "架构:embedded sing-box、DB→render→runtime、SQLite WAL、master/node", "rule": "Show HN 要求能直接试用(Live Demo 满足);需要已登录的浏览器会话" },
+    "reddit-selfhosted": { "type": "browser", "url": "https://www.reddit.com/r/selfhosted/", "angle": "自托管:一个静态二进制、SQLite、不需要 Docker、多服务器、无遥测", "rule": "项目不满 3 个月只能发在 New Project Megathread;满 3 个月后重读当时的版规再决定" },
+    "lowendtalk": { "type": "browser", "url": "https://lowendtalk.com/", "angle": "多 VPS 管理:一台主机管配置、流量、在线 IP、配额", "rule": "只在已登录、实时核对版规、找到允许介绍开源工具的分类、并明确自称作者时才发" },
+    "linuxdo": { "type": "prohibited", "url": "https://linux.do/", "rule": "站规禁止自动发帖与 AI 生成/润色内容,永久跳过" },
+    "telegram": { "type": "browser", "url": "https://web.telegram.org/", "rule": "只在群规明确允许开源项目分享的公开群发一次;不私聊、不群发" },
+    "github-lists": { "type": "auto", "rule": "接受 PR、不禁止自荐、主题相关的 awesome / curated 列表;awesome-selfhosted 要求首个 Release 满 4 个月" }
+  }
+}

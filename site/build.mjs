@@ -90,7 +90,7 @@ function graph(p) {
       ...(latestVersion ? { softwareVersion: latestVersion } : {}),
       license: 'https://www.gnu.org/licenses/gpl-3.0.html', isAccessibleForFree: true, offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
       author: { '@id': AUTHOR.url + '#person' }, sameAs: [GITHUB, GITHUB + '/releases', GITHUB + '/discussions'], image: ogImage,
-      description: 'Self-hosted multi-server sing-box panel with an embedded core, one Go binary, hot user/upstream reload with validation and rollback, subscriptions, resellers, WARP and certificates.' },
+      description: 'Embedded sing-box control plane for self-hosted and multi-server deployments: one Go binary, lines instead of inbound/outbound/route, dry-run and rollback on every apply, hot user/upstream reload, one master for many servers, subscriptions, resellers, WARP and certificates.' },
     { '@type': 'SoftwareSourceCode', '@id': GITHUB + '#source', name: 'Maoyangui/m-ui', alternateName: 'm-ui', codeRepository: GITHUB, programmingLanguage: 'Go', runtimePlatform: 'Linux',
       license: 'https://www.gnu.org/licenses/gpl-3.0.html', author: { '@id': AUTHOR.url + '#person' }, targetProduct: { '@id': SITE + '#software' }, url: GITHUB },
   ];
@@ -267,7 +267,9 @@ const entries = [
   ...releases.map(r => ({ title: `m-ui ${r.tag_name} · sing-box panel release`, url: r.html_url, date: r.published_at || r.created_at, text: (r.body || '').slice(0, 4000) })),
   ...pages.filter(p => p.meta.type === 'article').map(p => ({ title: p.meta.title, url: urlOf(p.lang, p.slug), date: (p.meta.date || TODAY) + 'T00:00:00Z', text: p.meta.summary || p.meta.description || '' })),
 ].sort((a, b) => b.date.localeCompare(a.date));
+copyFileSync(join(ROOT, 'feed.xsl'), join(DIST, 'feed.xsl')); // 浏览器直接打开 feed.xml 时套的样式
 out('feed.xml', `<?xml version="1.0" encoding="utf-8"?>
+<?xml-stylesheet type="text/xsl" href="feed.xsl"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <title>m-ui · sing-box panel by Maoyangui — releases and articles</title>
   <subtitle>New versions and technical write-ups for m-ui, the embedded sing-box multi-server panel</subtitle>

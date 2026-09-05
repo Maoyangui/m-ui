@@ -308,6 +308,9 @@ a.stat:hover { border-color: var(--primary); }
 
 /* 顶部常驻警示(默认密码等) */
 .alert-bar { display: flex; align-items: center; gap: .8rem; margin: .9rem 1.5rem 0; padding: .6rem .9rem; border: 1px solid var(--danger); background: var(--danger-soft); color: var(--danger); border-radius: var(--radius-sm); font-weight: 500; }
+.alert-bar.warn{background:var(--warn-bg,#fff7ed);color:var(--warn-fg,#9a3412);border-color:var(--warn-bd,#fdba74)}
+[data-theme="dark"] .alert-bar.warn{background:#3a2410;color:#fdba74;border-color:#7c3f10}
+.alert-bar{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap}
 .alert-bar span { flex: 1; }
 @media (max-width: 900px) { .alert-bar { margin: .8rem 1rem 0; } }
 

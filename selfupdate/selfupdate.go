@@ -10,14 +10,11 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -127,8 +124,9 @@ func parse(v string) ([3]int, bool) {
 	return out, true
 }
 
-// Apply 下载指定标签的二进制并就地替换 binPath;不负责重启服务。
+// Apply 下载指定标签的二进制并换到 binPath(旧程序留作 <bin>.prev);不负责重启服务。
 // 下载后先用同一个 Release 里的 SHA256SUMS 校验,再确认新二进制能执行,最后才替换。
+// 要带自动回滚的完整升级请用 Stage + Swap + Watch/LaunchWatcher(见 upgrade.go)。
 func Apply(ctx context.Context, tag, binPath string, logf func(string, ...interface{})) error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("只支持 Linux 在线更新")
@@ -136,40 +134,12 @@ func Apply(ctx context.Context, tag, binPath string, logf func(string, ...interf
 	if logf == nil {
 		logf = func(string, ...interface{}) {}
 	}
-	asset := "m-ui-linux-" + runtime.GOARCH + ".tar.gz"
-	base := "https://github.com/" + brand.RepoPath + "/releases/download/" + tag + "/"
-
-	logf("下载 %s", base+asset)
-	body, err := download(ctx, base+asset)
+	tmp, err := Stage(ctx, tag, binPath, logf)
 	if err != nil {
 		return err
 	}
-
-	want, err := sha256Of(ctx, base+"SHA256SUMS", asset)
-	if err != nil {
-		return fmt.Errorf("取不到这个版本的 SHA256SUMS,无法校验下载内容,已中止: %w", err)
-	}
-	got := sha256.Sum256(body)
-	if hex.EncodeToString(got[:]) != want {
-		return fmt.Errorf("校验失败:下载的文件与 Release 的 SHA256 不一致,已中止")
-	}
-	logf("SHA256 校验通过")
-
-	bin, err := extractBinary(body)
-	if err != nil {
+	if err := Swap(binPath, tmp, PrevPath(binPath)); err != nil {
 		return err
-	}
-	tmp := binPath + ".new"
-	if err := os.WriteFile(tmp, bin, 0o755); err != nil {
-		return err
-	}
-	if out, err := exec.Command(tmp, "version").CombinedOutput(); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("新二进制无法运行: %v %s", err, out)
-	}
-	if err := os.Rename(tmp, binPath); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("替换 %s 失败: %w", binPath, err)
 	}
 	logf("已替换 %s,准备重启", binPath)
 	return nil

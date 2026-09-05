@@ -25,8 +25,13 @@
 .tile[aria-expanded="true"]{border-color:var(--primary);background:var(--soft)}
 .tile[aria-expanded="true"] span{color:var(--primary)}
 .panel{margin-top:.9rem;padding-top:.9rem;border-top:1px dashed var(--border)}
-.panel h2{margin:0 0 .35rem;font-size:.95rem}
+.panel h2{margin:0 0 .35rem;font-size:.95rem;display:flex;align-items:center;gap:.45rem;flex-wrap:wrap}
 .panel p{margin:0 0 .75rem;color:var(--muted);font-size:.86rem}
+.app+.app{margin-top:.9rem;padding-top:.8rem;border-top:1px solid var(--border)}
+.app:not(.rec) h2{font-size:.9rem}
+.app:not(.rec) p{font-size:.82rem;margin-bottom:.55rem}
+.badge{font-size:.66rem;font-weight:600;line-height:1;padding:.22rem .45rem;border-radius:999px;background:var(--soft);color:var(--primary);border:1px solid color-mix(in srgb,var(--primary) 35%,transparent)}
+.fmt{font-size:.68rem;font-weight:400;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:.14rem .4rem;margin-left:auto;white-space:nowrap}
 .dls{display:flex;flex-wrap:wrap;gap:.5rem}
 .dl{display:inline-flex;align-items:center;gap:.35rem;text-decoration:none;border:1px solid var(--border);border-radius:9px;padding:.42rem .7rem;font-size:.82rem;color:var(--text);background:var(--card);white-space:nowrap}
 .dl:hover{border-color:var(--primary)}
@@ -50,11 +55,15 @@
     </div>
     {{range .Tiles}}
     <div class="panel" id="p-{{.Key}}" data-key="{{.Key}}" hidden>
-      <h2>{{.App}}</h2>
-      <p>{{.Desc}}</p>
-      <div class="dls">
-        {{range .Links}}<a class="dl{{if .Primary}} primary{{end}}{{if .Muted}} muted{{end}}" href="{{.Href}}" target="_blank" rel="noopener noreferrer">{{.Text}}</a>{{end}}
-      </div>
+      {{range .Apps}}
+      <section class="app{{if .Recommended}} rec{{end}}">
+        <h2>{{.Name}}{{if .Recommended}} <span class="badge">{{if eq $.Lang "zh"}}推荐{{else}}Recommended{{end}}</span>{{end}}<span class="fmt">{{.Format}}</span></h2>
+        <p>{{.Desc}}</p>
+        <div class="dls">
+          {{range .Links}}<a class="dl{{if .Primary}} primary{{end}}{{if .Muted}} muted{{end}}" href="{{.Href}}" target="_blank" rel="noopener noreferrer">{{.Text}}</a>{{end}}
+        </div>
+      </section>
+      {{end}}
     </div>
     {{end}}
   </div>

@@ -4,12 +4,13 @@
 // 里面只有 example.com 与文档保留 IP 的演示数据;主机名、探测到的公网 IP、令牌会再抹一遍。
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
+const BS = String.fromCharCode(92);
 
 const M = process.env.MUI_URL, C = process.env.MUI_COOKIE, TOKEN = process.env.MUI_TOKEN || '', SCRUB = (process.env.SCRUB || '').split(',').filter(Boolean), FIX = process.env.FIX || 'site/demo/fixtures.json';
 const curl = (p, bin) => { try { return execFileSync('curl', ['-s', '-b', C, '-m', '20', `${M}/api/${p}`], { encoding: bin ? 'buffer' : 'utf8', maxBuffer: 1 << 26 }); } catch { return bin ? null : ''; } };
 const json = p => { try { return JSON.parse(curl(p)); } catch { return null; } };
 
-const keys = ['status', 'settings', 'lines', 'upstreams', 'users', 'plans', 'nodes', 'exts', 'onlines', 'resellers', 'update',
+const keys = ['status', 'settings', 'lines', 'upstreams', 'users', 'plans', 'nodes', 'exts', 'onlines', 'resellers', 'update', 'cert', 'ops', 'self',
   'audit?limit=8', 'logs?count=40&level=info', 'upstreams/health', 'conns/recent', 'sublogs', 'cert/status', 'ops/status', 'backup/list', 'admin/info', 'agent/info',
   'stats/top?hours=24&limit=10', 'stats/top?hours=168&limit=10', 'stats/top?hours=720&limit=10',
   'stats?resource=user&hours=1&bucket=60', 'stats?resource=user&hours=6&bucket=300', 'stats?resource=user&hours=24&bucket=3600', 'stats?resource=user&hours=168&bucket=3600'];
@@ -40,6 +41,12 @@ if (fixtures['GET status']) fixtures['GET status'].version = VER;
 let out = JSON.stringify({ generated: new Date().toISOString().slice(0, 10), generatedAt: Math.floor(Date.now() / 1000), fixtures: scrub(fixtures), qr });
 out = out.replace(/\b1905([346])\b/g, '205$1'); // 19053/19056/19054 → 2053/2056/2054(数字与字符串两种形式都在)
 for (const w of [TOKEN, ...SCRUB]) if (w && w.length > 3) out = out.split(w).join('demo');
+// 导出实例跑在临时目录里,证书等路径会带本机目录:统一换成安装后的 /etc/m-ui(JSON 里反斜杠是转义过的)
+if (process.env.MUI_TMP) {
+  const forms = new Set([process.env.MUI_TMP, process.env.MUI_TMP.replace(/\//g, BS)].map(x => JSON.stringify(x).slice(1, -1)));
+  for (const f of forms) if (f.length > 5) out = out.split(f).join('/etc/m-ui');
+  out = out.replace(/\/etc\/m-ui((?:\\\\[A-Za-z0-9._~-]+)+)/g, (m, tail) => '/etc/m-ui' + tail.split(BS + BS).join('/'));
+}
 out = out.replace(/\b(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{0,4}\b/gi, m => (m.includes('::') || m.split(':').length > 3) ? '2001:db8::10' : m);
 writeFileSync(FIX, out);
 console.log(`fixture:${Object.keys(fixtures).length} 个接口,${Object.keys(qr).length} 张二维码,${Math.round(out.length / 1024)} KB → ${FIX}`);

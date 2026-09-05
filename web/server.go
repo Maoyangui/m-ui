@@ -170,6 +170,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"password", s.auth(s.handlePassword))
 	mux.HandleFunc(api+"reload", s.auth(s.handleReload))
 	mux.HandleFunc(api+"update", s.auth(s.handleUpdate)) // 副机也是一份完整安装,自己更新自己
+	mux.HandleFunc(api+"update/ack", s.auth(s.handleUpdateAck))
 	mux.HandleFunc(api+"stats", s.auth(s.handleStats))
 	mux.HandleFunc(api+"stats/top", s.auth(s.handleStatsTop))
 	mux.HandleFunc(api+"onlines", s.auth(s.handleOnlines))

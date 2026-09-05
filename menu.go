@@ -1,14 +1,10 @@
 package main
 
 import (
-	"archive/tar"
 	"bufio"
-	"compress/gzip"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +20,7 @@ import (
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/runner"
+	"github.com/Maoyangui/m-ui/selfupdate"
 )
 
 const (
@@ -402,117 +399,86 @@ func resetSettings(dbPath string) error {
 	return db.Exec("DELETE FROM settings").Error
 }
 
-// selfUpdate 从 GitHub Releases 下载最新版替换二进制并重启。
-// latestTag 取最新 Release 的标签:先跟随 releases/latest 的重定向(不经 API,没有匿名限流),
-// 失败再查 GitHub API(私有仓库可设 GITHUB_TOKEN)。
-func latestTag(ctx context.Context) (string, error) {
-	req, _ := http.NewRequestWithContext(ctx, "GET", "https://github.com/"+brand.RepoPath+"/releases/latest", nil)
-	req.Header.Set("User-Agent", "m-ui")
-	if resp, err := http.DefaultClient.Do(req); err == nil {
-		resp.Body.Close()
-		if p := resp.Request.URL.Path; resp.StatusCode == 200 && strings.Contains(p, "/tag/") {
-			return p[strings.LastIndex(p, "/tag/")+5:], nil
-		}
-	}
-	req, _ = http.NewRequestWithContext(ctx, "GET", repoAPI, nil)
-	req.Header.Set("User-Agent", "m-ui")
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("无法读取 Releases(HTTP %d):还没有发布版本、网络受阻,或仓库为私有(可设置 GITHUB_TOKEN);也可手动下载后执行: bash install.sh <tar.gz>", resp.StatusCode)
-	}
-	var rel struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil || rel.TagName == "" {
-		return "", fmt.Errorf("解析 Releases 失败")
-	}
-	return rel.TagName, nil
-}
-
+// selfUpdate:菜单里的"更新到最新版"。与面板按钮共用 selfupdate 的升级事务:
+// 升级前备份 → 下载校验 → 旧程序留作 .prev、新程序换上 → 重启 → 在这里同步等新版本健康,起不来就自动回滚。
 func selfUpdate(ask func(string) string) error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("只支持 Linux 在线更新")
 	}
 	fmt.Println("  查询最新版本…")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	tag, err := latestTag(ctx)
+	info, err := selfupdate.Check(ctx, version)
+	cancel()
 	if err != nil {
 		return err
 	}
-	want := "m-ui-linux-" + runtime.GOARCH + ".tar.gz"
-	url := "https://github.com/" + brand.RepoPath + "/releases/download/" + tag + "/" + want
+	tag := info.Latest
 	fmt.Printf("  当前 v%s → 最新 %s\n", version, tag)
-	if strings.TrimPrefix(tag, "v") == version {
+	if !info.HasUpdate {
 		if ask("  已是最新版,仍要重新安装? [y/N]: ") != "y" {
 			return nil
 		}
 	}
-	fmt.Println("  下载", url)
-	dctx, dcancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	dbPath := menuDBPath()
+	dataDir := filepath.Dir(dbPath)
+	// 升级前备份:回滚时旧程序对新库不放心就还原它;失败不挡升级,只是回滚时少一道保险
+	bk := ""
+	if _, err := os.Stat(dbPath); err == nil {
+		dir := filepath.Join(dataDir, "backups")
+		os.MkdirAll(dir, 0o750)
+		bk = filepath.Join(dir, selfupdate.BackupName("v"+version))
+		if err := runBackup(dbPath, bk); err != nil {
+			fmt.Println(colorRed+"  升级前备份失败(继续,回滚时只换回旧程序):", err, colorReset)
+			bk = ""
+		} else {
+			fmt.Println("  升级前备份:", bk)
+			selfupdate.Prune(dir, selfupdate.BackupPrefix, selfupdate.KeepBackups)
+		}
+	}
+	dctx, dcancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer dcancel()
-	dreq, _ := http.NewRequestWithContext(dctx, "GET", url, nil)
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
-		dreq.Header.Set("Authorization", "Bearer "+tok)
-	}
-	dresp, err := http.DefaultClient.Do(dreq)
+	logf := func(f string, a ...interface{}) { fmt.Printf("  "+f+"\n", a...) }
+	newPath, err := selfupdate.Stage(dctx, tag, binPath, logf)
 	if err != nil {
 		return err
 	}
-	defer dresp.Body.Close()
-	if dresp.StatusCode != 200 {
-		return fmt.Errorf("下载 HTTP %d", dresp.StatusCode)
-	}
-	gz, err := gzip.NewReader(dresp.Body)
-	if err != nil {
+	if err := selfupdate.Swap(binPath, newPath, selfupdate.PrevPath(binPath)); err != nil {
 		return err
 	}
-	tr := tar.NewReader(gz)
-	tmp := binPath + ".new"
-	found := false
-	for {
-		h, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if filepath.Base(h.Name) == "m-ui" && h.Typeflag == tar.TypeReg {
-			f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				f.Close()
-				return err
-			}
-			f.Close()
-			found = true
-		}
+	plan := selfupdate.Plan{
+		Bin: binPath, Prev: selfupdate.PrevPath(binPath), Failed: selfupdate.FailedPath(binPath),
+		From: "v" + version, To: tag, URL: localPanelURL(dbPath), Service: "m-ui", OldPID: selfupdate.MainPID("m-ui"),
+		DBPath: dbPath, Backup: bk, StatusPath: selfupdate.StatusPath(dataDir), Timeout: selfupdate.DefaultTimeout,
 	}
-	if !found {
-		return fmt.Errorf("压缩包里没有 m-ui")
-	}
-	if out, err := exec.Command(tmp, "version").CombinedOutput(); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("新二进制无法运行: %v %s", err, out)
-	}
-	if err := os.Rename(tmp, binPath); err != nil {
-		return err
-	}
-	fmt.Println(colorGreen + "  已更新为 " + tag + ",重启服务…" + colorReset)
+	selfupdate.ClearStatus(plan.StatusPath)
+	fmt.Println(colorGreen + "  已换上 " + tag + ",重启服务并等它起来(最多 90 秒)…" + colorReset)
 	systemctl("restart", "m-ui")
-	time.Sleep(2 * time.Second)
+	st, err := selfupdate.Watch(plan, os.Stdout)
+	switch {
+	case err == nil:
+		fmt.Println(colorGreen+"  更新完成:", st.Message, colorReset)
+	case errors.Is(err, selfupdate.ErrRolledBack):
+		fmt.Println(colorRed+"  "+st.Message, colorReset)
+		fmt.Println("  日志:journalctl -u m-ui -n 50")
+	default:
+		return err
+	}
 	fmt.Println("  状态:", stateColored())
 	return nil
+}
+
+// localPanelURL 按数据库里的设置拼出面板在本机的地址,健康检查用。
+func localPanelURL(dbPath string) string {
+	s, _ := settingsOf(dbPath)
+	port := 2053
+	if n, err := strconv.Atoi(strings.TrimSpace(s["webPort"])); err == nil && n > 0 {
+		port = n
+	}
+	path := s["webPath"]
+	if path == "" {
+		path = "/app/"
+	}
+	return selfupdate.LocalURL(s["webCertFile"] != "", port, path)
 }
 
 // printInstallSummary 供安装脚本调用:m-ui info -db <db>

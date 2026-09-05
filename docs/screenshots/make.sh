@@ -96,5 +96,5 @@ PUBIP="$(api "$M/api/nodes" | node -e 'let d="";process.stdin.on("data",c=>d+=c)
 MUI_URL="$M/" MUI_SUB="$SUBBASE" MUI_PASS="$PASS" OUT="docs/screenshots" SCRUB="$SCRUB" node docs/screenshots/shoot.mjs
 echo "导出 Live Demo fixture"
 FIX="site/demo/fixtures.json"; mkdir -p site/demo
-MUI_URL="$M" MUI_COOKIE="$C" MUI_TOKEN="$TOKEN" SCRUB="$SCRUB" FIX="$FIX" node docs/screenshots/fixtures.mjs
+MUI_URL="$M" MUI_COOKIE="$C" MUI_TOKEN="$TOKEN" MUI_TMP="$TMP" SCRUB="$SCRUB" FIX="$FIX" node docs/screenshots/fixtures.mjs
 echo "完成:docs/screenshots/*.png + $FIX"

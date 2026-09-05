@@ -1,8 +1,8 @@
 <!--meta {"title":"m-ui — Maoyangui 的 sing-box 面板:内嵌内核、多服务器、一个二进制","description":"自托管的 sing-box 面板,一个 Go 二进制:内嵌内核、用户与上游热更新、保存前干跑校验并可回滚、一主多副同步、带落地页的订阅、代理、WARP 与证书。","nav":"首页","order":1} -->
 <section class="hero">
   <span class="eyebrow">Maoyangui 的 sing-box 面板</span>
-  <h1>一个二进制就能跑的 sing-box 面板</h1>
-  <p class="lead">m-ui 把 sing-box 内嵌进面板,而不是在旁边看着一个外部进程。改用户、换上游都是热更新,别人不断线;每次保存先交给 sing-box 干跑;一台主机把任意多台副机同步好。</p>
+  <h1>内嵌 sing-box 的控制面,一个二进制</h1>
+  <p class="lead">m-ui 把 sing-box 跑在面板进程里,而不是在旁边看着一个外部进程。你管的是<b>线路</b>(协议 + 入口端口 → 出口),不是 inbound、outbound、route 三套对象;改用户、换上游都是热更新,别人不断线;每次应用先干跑、失败即回到上一份可用配置;一台主机把任意多台副机同步好。</p>
   <div class="actions">
     <a class="btn" href="{{base}}zh/getting-started/">五分钟装好</a>
     <a class="btn ghost" href="{{demo}}">在线演示</a>

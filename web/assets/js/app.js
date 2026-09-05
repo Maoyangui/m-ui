@@ -50,7 +50,7 @@ function resetState() {
 export async function load(...what) {
   const all = what.length === 0;
   const jobs = [];
-  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); }));
+  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); }));
   if (all || what.includes('settings')) jobs.push(get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
   if (all || what.includes('lines')) jobs.push(get('lines').then(l => { state.lines = l; }));
   if (!isReseller() && (all || what.includes('upstreams'))) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
@@ -205,16 +205,38 @@ document.getElementById('update-dot').addEventListener('click', async () => {
   if (!ok) return;
   const dot = document.getElementById('update-dot');
   dot.disabled = true;
+  let res;
   try {
-    await post('update', undefined, LONG);
+    res = await post('update', undefined, LONG);
   } catch (e) {
     dot.disabled = false;
     toast(e.message, 'err');
     return;
   }
   toast(t('update.restarting'), 'ok');
+  if (res && res.watch === false) toast(t('update.noWatch'), 'err');
   waitForPanel();
 });
+
+// 上次一键更新回滚过:在页面顶部明说,管理员点"知道了"才清掉(状态文件在数据目录里,重启也不会忘)
+function upgradeNotice() {
+  const st = state.status && state.status.upgrade;
+  let bar = document.getElementById('upgrade-bar');
+  if (!st) { if (bar) bar.remove(); return; }
+  if (bar) return;
+  const main = document.querySelector('.main'), page = document.getElementById('page');
+  if (!main || !page) return;
+  bar = document.createElement('div');
+  bar.id = 'upgrade-bar';
+  bar.className = 'alert-bar warn';
+  bar.innerHTML = `<span><b>${esc(t(st.dbRestored ? 'update.rolledBackDb' : 'update.rolledBack', { from: st.from, to: st.to }))}</b> ${esc(t('update.rollbackHint'))}</span><button class="btn sm" id="upgrade-ack">${esc(t('update.ack'))}</button>`;
+  main.insertBefore(bar, page);
+  bar.querySelector('#upgrade-ack').addEventListener('click', async () => {
+    await post('update/ack').catch(() => {});
+    if (state.status) delete state.status.upgrade;
+    bar.remove();
+  });
+}
 
 // 面板重启期间接口会短暂不可用:轮询到恢复就自动刷新页面
 async function waitForPanel() {
@@ -332,4 +354,4 @@ setInterval(() => {
 }, 10000);
 
 // ---- 启动 ----
-get('status').then(async s => { state.status = s; await enterApp(); }).catch(showLogin);
+get('status').then(async s => { state.status = s; await enterApp(); upgradeNotice(); }).catch(showLogin);

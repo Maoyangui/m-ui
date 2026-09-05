@@ -12,9 +12,11 @@ import (
 
 // 客户端下载页:订阅页"一键导入"旁边那个下载箭头点开的就是这里。
 //
-// 页面本身不含任何用户数据,只是把各系统该装哪个客户端讲清楚 + 给可用的下载地址。
-// 版本号写死是有意的:直链必须指向确实存在的文件,版本升级时改这一处即可,
-// 每块同时留了"全部版本"入口,即便这里的版本旧了也点得到最新的。
+// 页面本身不含任何用户数据,只是把各系统能用的客户端讲清楚 + 给可用的下载地址。
+// 每个系统列几款都能吃这套订阅的客户端:第一款是推荐项(页面上有个小"推荐"标),其余按常用程度排;
+// 每款都注明该粘贴哪种地址(Clash / sing-box / 通用),和订阅页上三个地址一一对应。
+// 版本号写死是有意的:直链必须指向确实存在的文件,版本升级时改这一处即可;文件名不带版本的项目
+// (Hiddify、v2rayN)走 releases/latest/download,永远是最新。每块都留了"全部版本"入口。
 //
 //go:embed clients.html
 var clientsFS embed.FS
@@ -24,11 +26,12 @@ var clientsTmpl = template.Must(template.ParseFS(clientsFS, "clients.html"))
 const (
 	verVerge   = "2.5.2"   // Clash Verge Rev(Windows / macOS / Linux)
 	verCMFA    = "2.11.33" // Clash Meta for Android
-	verFlClash = "0.8.96"  // FlClash(Linux AppImage,免安装)
+	verFlClash = "0.8.96"  // FlClash(Android / Windows / macOS / Linux)
+	verSingBox = "1.14.0"  // sing-box 官方客户端 SFA(Android)/ SFW(Windows)与命令行版
 	ghMirror   = "https://ghfast.top/"
 )
 
-// dl 是一个下载按钮。Primary 的那个是推荐项。
+// dl 是一个下载按钮。Primary 的那个是这款客户端里首选的包。
 type dl struct {
 	Text    string
 	Href    template.URL
@@ -36,13 +39,20 @@ type dl struct {
 	Muted   bool // 次要入口(镜像 / 全部版本),弱化显示
 }
 
+// clientApp 是某个系统上的一款客户端。
+type clientApp struct {
+	Name        string
+	Recommended bool   // 该系统首选,页面上打一个小"推荐"标
+	Format      string // 该粘贴订阅页上的哪个地址:Clash / sing-box / 通用
+	Desc        string // 一两句话:怎么装、怎么导入
+	Links       []dl
+}
+
 type clientTile struct {
-	Key   string // ios / android / windows / macos / linux
-	Icon  template.HTML
-	OS    string // 图标下方那行系统名
-	App   string // 用哪个客户端
-	Desc  string // 展开后的说明,一两句话
-	Links []dl
+	Key  string // ios / android / windows / macos / linux
+	Icon template.HTML
+	OS   string // 图标下方那行系统名
+	Apps []clientApp
 }
 
 type clientsData struct {
@@ -60,6 +70,11 @@ func gh(repo, tag, file string) template.URL {
 
 func ghm(repo, tag, file string) template.URL {
 	return template.URL(ghMirror + "https://github.com/" + repo + "/releases/download/" + tag + "/" + file)
+}
+
+// ghLatestDL:文件名不带版本号的项目,直接取最新 Release 里的那个文件。
+func ghLatestDL(repo, file string) template.URL {
+	return template.URL("https://github.com/" + repo + "/releases/latest/download/" + file)
 }
 
 func ghLatest(repo string) template.URL {
@@ -83,58 +98,190 @@ func clientTiles(lang string) []clientTile {
 		}
 		return b
 	}
+	fClash, fSing, fAny := pick("Clash 地址", "Clash link"), pick("sing-box 地址", "sing-box link"), pick("通用地址", "universal link")
+	mirror, all := pick("国内镜像下载", "China mirror"), pick("全部版本", "All releases")
+	const verge, cmfa, flclash, singbox, hiddify, v2rayn = "clash-verge-rev/clash-verge-rev", "MetaCubeX/ClashMetaForAndroid", "chen08209/FlClash", "SagerNet/sing-box", "hiddify/hiddify-app", "2dust/v2rayN"
 	return []clientTile{
 		{
-			Key: "ios", Icon: template.HTML(iconApple), OS: pick("iOS / iPadOS / Apple TV", "iOS / iPadOS / Apple TV"), App: "Nextin",
-			Desc: pick("Nextin 在中国大陆区 App Store 搜不到:把 App Store 切到非大陆区(如美区),或用非大陆 Apple ID 登录,再搜索安装。装好后回订阅页点「Nextin」或粘贴订阅地址。",
-				"Nextin is not listed in the mainland China App Store. Switch the App Store to another region (e.g. the US) or sign in with a non-mainland Apple ID, then install it and import your subscription link."),
-			Links: []dl{
-				{Text: pick("App Store(美区)", "App Store (US)"), Href: "https://apps.apple.com/us/app/nextin/id6754002454", Primary: true},
+			Key: "ios", Icon: template.HTML(iconApple), OS: "iOS / iPadOS / Apple TV",
+			Apps: []clientApp{
+				{Name: "Nextin", Recommended: true, Format: fAny,
+					Desc: pick("Nextin 在中国大陆区 App Store 搜不到:把 App Store 切到非大陆区(如美区),或用非大陆 Apple ID 登录,再搜索安装。装好后回订阅页点「Nextin」或粘贴通用地址。",
+						"Nextin is not listed in the mainland China App Store. Switch the App Store to another region (e.g. the US) or sign in with a non-mainland Apple ID, then install it and tap Nextin on the subscription page or paste the universal link."),
+					Links: []dl{{Text: pick("App Store(美区)", "App Store (US)"), Href: "https://apps.apple.com/us/app/nextin/id6754002454", Primary: true}}},
+				{Name: "Shadowrocket", Format: fAny,
+					Desc: pick("付费,同样需要非大陆区 Apple ID。添加订阅时粘贴通用地址;订阅名以添加那一刻为准,之后改标题不会跟着变。",
+						"Paid, and also needs a non-mainland Apple ID. Paste the universal link when adding the subscription; the name is fixed at the moment you add it."),
+					Links: []dl{{Text: pick("App Store(美区)", "App Store (US)"), Href: "https://apps.apple.com/us/app/shadowrocket/id932747118", Primary: true}}},
+				{Name: "Hiddify", Format: fAny,
+					Desc: pick("免费开源,非大陆区 App Store 可装。新建配置 → 从链接添加,粘贴通用地址或 sing-box 地址都行。",
+						"Free and open source, available in non-mainland App Stores. New profile → Add from link, then paste the universal link (the sing-box link works too)."),
+					Links: []dl{{Text: pick("App Store(美区)", "App Store (US)"), Href: "https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532", Primary: true}}},
 			},
 		},
 		{
-			Key: "android", Icon: template.HTML(iconAndro), OS: pick("Android / Android TV", "Android / Android TV"), App: "Clash Meta for Android",
-			Desc: pick("下载 APK 安装(系统会提示「允许安装未知来源」,同意即可)。通用版任何机型都能装,机型确定是 64 位手机/电视盒子可以选更小的 arm64 版。",
-				"Install the APK (Android will ask you to allow installs from this source). The universal build works on any device; pick arm64 if you know your phone or TV box is 64-bit."),
-			Links: []dl{
-				{Text: pick("APK 通用版 v"+verCMFA, "APK universal v"+verCMFA), Href: gh("MetaCubeX/ClashMetaForAndroid", "v"+verCMFA, "cmfa-"+verCMFA+"-meta-universal-release.apk"), Primary: true},
-				{Text: pick("APK arm64 版", "APK arm64"), Href: gh("MetaCubeX/ClashMetaForAndroid", "v"+verCMFA, "cmfa-"+verCMFA+"-meta-arm64-v8a-release.apk")},
-				{Text: pick("国内镜像下载", "China mirror"), Href: ghm("MetaCubeX/ClashMetaForAndroid", "v"+verCMFA, "cmfa-"+verCMFA+"-meta-universal-release.apk"), Muted: true},
-				{Text: pick("全部版本", "All releases"), Href: ghLatest("MetaCubeX/ClashMetaForAndroid"), Muted: true},
+			Key: "android", Icon: template.HTML(iconAndro), OS: "Android / Android TV",
+			Apps: []clientApp{
+				{Name: "Clash Meta for Android", Recommended: true, Format: fClash,
+					Desc: pick("下载 APK 安装(系统会提示「允许安装未知来源」,同意即可)。通用版任何机型都能装,机型确定是 64 位手机/电视盒子可以选更小的 arm64 版。",
+						"Install the APK (Android will ask you to allow installs from this source). The universal build works on any device; pick arm64 if you know your phone or TV box is 64-bit."),
+					Links: []dl{
+						{Text: pick("APK 通用版 v"+verCMFA, "APK universal v"+verCMFA), Href: gh(cmfa, "v"+verCMFA, "cmfa-"+verCMFA+"-meta-universal-release.apk"), Primary: true},
+						{Text: pick("APK arm64 版", "APK arm64"), Href: gh(cmfa, "v"+verCMFA, "cmfa-"+verCMFA+"-meta-arm64-v8a-release.apk")},
+						{Text: mirror, Href: ghm(cmfa, "v"+verCMFA, "cmfa-"+verCMFA+"-meta-universal-release.apk"), Muted: true},
+						{Text: all, Href: ghLatest(cmfa), Muted: true},
+					}},
+				{Name: "sing-box (SFA)", Format: fSing,
+					Desc: pick("sing-box 官方客户端。新建配置 → 远程,粘贴 sing-box 地址。",
+						"The official sing-box client. New profile → Remote, paste the sing-box link."),
+					Links: []dl{
+						{Text: pick("APK 通用版 v"+verSingBox, "APK universal v"+verSingBox), Href: gh(singbox, "v"+verSingBox, "SFA-"+verSingBox+"-universal.apk"), Primary: true},
+						{Text: pick("APK arm64 版", "APK arm64"), Href: gh(singbox, "v"+verSingBox, "SFA-"+verSingBox+"-arm64-v8a.apk")},
+						{Text: all, Href: ghLatest(singbox), Muted: true},
+					}},
+				{Name: "FlClash", Format: fClash,
+					Desc: pick("界面简洁的 Clash 客户端,支持 Android TV。配置 → 添加 → URL,粘贴 Clash 地址。",
+						"A clean Clash client that also runs on Android TV. Profiles → Add → URL, paste the Clash link."),
+					Links: []dl{
+						{Text: "APK arm64 v" + verFlClash, Href: gh(flclash, "v"+verFlClash, "FlClash-"+verFlClash+"-android-arm64-v8a.apk"), Primary: true},
+						{Text: all, Href: ghLatest(flclash), Muted: true},
+					}},
+				{Name: "Hiddify", Format: fAny,
+					Desc: pick("免费开源,一键式。新建配置 → 从链接添加,粘贴通用地址。",
+						"Free and open source, one-tap style. New profile → Add from link, paste the universal link."),
+					Links: []dl{
+						{Text: pick("APK 通用版(最新)", "APK universal (latest)"), Href: ghLatestDL(hiddify, "Hiddify-Android-universal.apk"), Primary: true},
+						{Text: pick("APK arm64 版", "APK arm64"), Href: ghLatestDL(hiddify, "Hiddify-Android-arm64.apk")},
+						{Text: all, Href: ghLatest(hiddify), Muted: true},
+					}},
 			},
 		},
 		{
-			Key: "windows", Icon: template.HTML(iconWin), OS: "Windows", App: "Clash Verge Rev",
-			Desc: pick("下载安装包一路下一步即可。若提示「Windows 已保护你的电脑」,点「更多信息」→「仍要运行」。装好后在软件里粘贴订阅地址。",
-				"Run the installer and follow the wizard. If Windows SmartScreen warns you, choose More info → Run anyway, then paste your subscription link into the app."),
-			Links: []dl{
-				{Text: pick("Windows x64 安装包 v"+verVerge, "Windows x64 installer v"+verVerge), Href: gh("clash-verge-rev/clash-verge-rev", "v"+verVerge, "Clash.Verge_"+verVerge+"_x64-setup.exe"), Primary: true},
-				{Text: pick("ARM64 安装包", "ARM64 installer"), Href: gh("clash-verge-rev/clash-verge-rev", "v"+verVerge, "Clash.Verge_"+verVerge+"_arm64-setup.exe")},
-				{Text: pick("国内镜像下载", "China mirror"), Href: ghm("clash-verge-rev/clash-verge-rev", "v"+verVerge, "Clash.Verge_"+verVerge+"_x64-setup.exe"), Muted: true},
-				{Text: pick("全部版本", "All releases"), Href: ghLatest("clash-verge-rev/clash-verge-rev"), Muted: true},
+			Key: "windows", Icon: template.HTML(iconWin), OS: "Windows",
+			Apps: []clientApp{
+				{Name: "Clash Verge Rev", Recommended: true, Format: fClash,
+					Desc: pick("下载安装包一路下一步即可。若提示「Windows 已保护你的电脑」,点「更多信息」→「仍要运行」。装好后在「订阅」里粘贴 Clash 地址。",
+						"Run the installer and follow the wizard. If Windows SmartScreen warns you, choose More info → Run anyway, then paste the Clash link under Profiles."),
+					Links: []dl{
+						{Text: pick("Windows x64 安装包 v"+verVerge, "Windows x64 installer v"+verVerge), Href: gh(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_x64-setup.exe"), Primary: true},
+						{Text: pick("ARM64 安装包", "ARM64 installer"), Href: gh(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_arm64-setup.exe")},
+						{Text: mirror, Href: ghm(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_x64-setup.exe"), Muted: true},
+						{Text: all, Href: ghLatest(verge), Muted: true},
+					}},
+				{Name: "FlClash", Format: fClash,
+					Desc: pick("界面简洁的 Clash 客户端。配置 → 添加 → URL,粘贴 Clash 地址。",
+						"A clean Clash client. Profiles → Add → URL, paste the Clash link."),
+					Links: []dl{
+						{Text: pick("x64 安装包 v"+verFlClash, "x64 installer v"+verFlClash), Href: gh(flclash, "v"+verFlClash, "FlClash-"+verFlClash+"-windows-amd64-setup.exe"), Primary: true},
+						{Text: pick("ARM64 安装包", "ARM64 installer"), Href: gh(flclash, "v"+verFlClash, "FlClash-"+verFlClash+"-windows-arm64-setup.exe")},
+						{Text: all, Href: ghLatest(flclash), Muted: true},
+					}},
+				{Name: "v2rayN", Format: fAny,
+					Desc: pick("老牌客户端,解压即用,内置 sing-box 与 Xray 内核。订阅分组 → 添加订阅,粘贴通用地址。",
+						"A long-standing client, unzip and run, ships both sing-box and Xray cores. Subscription group → Add, paste the universal link."),
+					Links: []dl{
+						{Text: pick("x64(最新,zip)", "x64 (latest, zip)"), Href: ghLatestDL(v2rayn, "v2rayN-windows-64-desktop.zip"), Primary: true},
+						{Text: pick("ARM64(zip)", "ARM64 (zip)"), Href: ghLatestDL(v2rayn, "v2rayN-windows-arm64-desktop.zip")},
+						{Text: all, Href: ghLatest(v2rayn), Muted: true},
+					}},
+				{Name: "Hiddify", Format: fAny,
+					Desc: pick("免费开源,一键式。新建配置 → 从链接添加,粘贴通用地址。",
+						"Free and open source, one-tap style. New profile → Add from link, paste the universal link."),
+					Links: []dl{
+						{Text: pick("x64 安装包(最新)", "x64 installer (latest)"), Href: ghLatestDL(hiddify, "Hiddify-Windows-Setup-x64.exe"), Primary: true},
+						{Text: pick("便携版(zip)", "Portable (zip)"), Href: ghLatestDL(hiddify, "Hiddify-Windows-Portable-x64.zip")},
+						{Text: all, Href: ghLatest(hiddify), Muted: true},
+					}},
+				{Name: "sing-box (SFW)", Format: fSing,
+					Desc: pick("sing-box 官方客户端。新建配置 → 远程,粘贴 sing-box 地址。",
+						"The official sing-box client. New profile → Remote, paste the sing-box link."),
+					Links: []dl{
+						{Text: pick("x64 安装包 v"+verSingBox, "x64 installer v"+verSingBox), Href: gh(singbox, "v"+verSingBox, "SFW-"+verSingBox+"-x64.exe"), Primary: true},
+						{Text: all, Href: ghLatest(singbox), Muted: true},
+					}},
 			},
 		},
 		{
-			Key: "macos", Icon: template.HTML(iconMac), OS: "macOS", App: "Clash Verge Rev",
-			Desc: pick("按芯片选:2020 年后的机型基本都是 Apple 芯片。打开 dmg 把图标拖进「应用程序」即可;首次打开若提示来源不明,到「系统设置 → 隐私与安全性」点「仍要打开」。",
-				"Pick the build for your chip (Macs from 2020 on are Apple silicon). Open the dmg and drag the app into Applications; on first launch allow it under System Settings → Privacy & Security."),
-			Links: []dl{
-				{Text: pick("Apple 芯片 (dmg) v"+verVerge, "Apple silicon (dmg) v"+verVerge), Href: gh("clash-verge-rev/clash-verge-rev", "v"+verVerge, "Clash.Verge_"+verVerge+"_aarch64.dmg"), Primary: true},
-				{Text: pick("Intel 芯片 (dmg)", "Intel (dmg)"), Href: gh("clash-verge-rev/clash-verge-rev", "v"+verVerge, "Clash.Verge_"+verVerge+"_x64.dmg")},
-				{Text: pick("国内镜像下载", "China mirror"), Href: ghm("clash-verge-rev/clash-verge-rev", "v"+verVerge, "Clash.Verge_"+verVerge+"_aarch64.dmg"), Muted: true},
-				{Text: pick("全部版本", "All releases"), Href: ghLatest("clash-verge-rev/clash-verge-rev"), Muted: true},
+			Key: "macos", Icon: template.HTML(iconMac), OS: "macOS",
+			Apps: []clientApp{
+				{Name: "Clash Verge Rev", Recommended: true, Format: fClash,
+					Desc: pick("按芯片选:2020 年后的机型基本都是 Apple 芯片。打开 dmg 把图标拖进「应用程序」即可;首次打开若提示来源不明,到「系统设置 → 隐私与安全性」点「仍要打开」。",
+						"Pick the build for your chip (Macs from 2020 on are Apple silicon). Open the dmg and drag the app into Applications; on first launch allow it under System Settings → Privacy & Security."),
+					Links: []dl{
+						{Text: pick("Apple 芯片 (dmg) v"+verVerge, "Apple silicon (dmg) v"+verVerge), Href: gh(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_aarch64.dmg"), Primary: true},
+						{Text: pick("Intel 芯片 (dmg)", "Intel (dmg)"), Href: gh(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_x64.dmg")},
+						{Text: mirror, Href: ghm(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_aarch64.dmg"), Muted: true},
+						{Text: all, Href: ghLatest(verge), Muted: true},
+					}},
+				{Name: "FlClash", Format: fClash,
+					Desc: pick("界面简洁的 Clash 客户端。配置 → 添加 → URL,粘贴 Clash 地址。",
+						"A clean Clash client. Profiles → Add → URL, paste the Clash link."),
+					Links: []dl{
+						{Text: pick("Apple 芯片 (dmg) v"+verFlClash, "Apple silicon (dmg) v"+verFlClash), Href: gh(flclash, "v"+verFlClash, "FlClash-"+verFlClash+"-macos-arm64.dmg"), Primary: true},
+						{Text: pick("Intel 芯片 (dmg)", "Intel (dmg)"), Href: gh(flclash, "v"+verFlClash, "FlClash-"+verFlClash+"-macos-amd64.dmg")},
+						{Text: all, Href: ghLatest(flclash), Muted: true},
+					}},
+				{Name: "v2rayN", Format: fAny,
+					Desc: pick("内置 sing-box 与 Xray 内核。订阅分组 → 添加订阅,粘贴通用地址。",
+						"Ships both sing-box and Xray cores. Subscription group → Add, paste the universal link."),
+					Links: []dl{
+						{Text: pick("Apple 芯片 (dmg,最新)", "Apple silicon (dmg, latest)"), Href: ghLatestDL(v2rayn, "v2rayN-macos-arm64.dmg"), Primary: true},
+						{Text: pick("Intel 芯片 (dmg)", "Intel (dmg)"), Href: ghLatestDL(v2rayn, "v2rayN-macos-64.dmg")},
+						{Text: all, Href: ghLatest(v2rayn), Muted: true},
+					}},
+				{Name: "Hiddify", Format: fAny,
+					Desc: pick("免费开源,一键式。新建配置 → 从链接添加,粘贴通用地址。",
+						"Free and open source, one-tap style. New profile → Add from link, paste the universal link."),
+					Links: []dl{
+						{Text: pick("dmg(最新,通用)", "dmg (latest, universal)"), Href: ghLatestDL(hiddify, "Hiddify-MacOS.dmg"), Primary: true},
+						{Text: all, Href: ghLatest(hiddify), Muted: true},
+					}},
 			},
 		},
 		{
-			Key: "linux", Icon: template.HTML(iconLinux), OS: "Linux", App: "Clash Verge Rev · FlClash",
-			Desc: pick("Debian / Ubuntu 装 deb,Fedora / RHEL 装 rpm。不想装包就用 FlClash 的 AppImage:下载后加执行权限直接双击运行。",
-				"Use the deb on Debian/Ubuntu or the rpm on Fedora/RHEL. Prefer no install? Grab the FlClash AppImage, make it executable and run it."),
-			Links: []dl{
-				{Text: "deb (amd64) v" + verVerge, Href: gh("clash-verge-rev/clash-verge-rev", "v"+verVerge, "Clash.Verge_"+verVerge+"_amd64.deb"), Primary: true},
-				{Text: "rpm (x86_64) v" + verVerge, Href: gh("clash-verge-rev/clash-verge-rev", "v"+verVerge, "Clash.Verge-"+verVerge+"-1.x86_64.rpm")},
-				{Text: "AppImage v" + verFlClash, Href: gh("chen08209/FlClash", "v"+verFlClash, "FlClash-"+verFlClash+"-linux-amd64.AppImage")},
-				{Text: pick("国内镜像下载", "China mirror"), Href: ghm("clash-verge-rev/clash-verge-rev", "v"+verVerge, "Clash.Verge_"+verVerge+"_amd64.deb"), Muted: true},
-				{Text: pick("全部版本", "All releases"), Href: ghLatest("clash-verge-rev/clash-verge-rev"), Muted: true},
+			Key: "linux", Icon: template.HTML(iconLinux), OS: "Linux",
+			Apps: []clientApp{
+				{Name: "Clash Verge Rev", Recommended: true, Format: fClash,
+					Desc: pick("Debian / Ubuntu 装 deb,Fedora / RHEL 装 rpm。装好后在「订阅」里粘贴 Clash 地址。",
+						"Use the deb on Debian/Ubuntu or the rpm on Fedora/RHEL, then paste the Clash link under Profiles."),
+					Links: []dl{
+						{Text: "deb (amd64) v" + verVerge, Href: gh(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_amd64.deb"), Primary: true},
+						{Text: "rpm (x86_64) v" + verVerge, Href: gh(verge, "v"+verVerge, "Clash.Verge-"+verVerge+"-1.x86_64.rpm")},
+						{Text: mirror, Href: ghm(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_amd64.deb"), Muted: true},
+						{Text: all, Href: ghLatest(verge), Muted: true},
+					}},
+				{Name: "FlClash", Format: fClash,
+					Desc: pick("不想装包就用 AppImage:下载后加执行权限直接双击运行。配置 → 添加 → URL,粘贴 Clash 地址。",
+						"Prefer no install? Grab the AppImage, make it executable and run it. Profiles → Add → URL, paste the Clash link."),
+					Links: []dl{
+						{Text: "AppImage (amd64) v" + verFlClash, Href: gh(flclash, "v"+verFlClash, "FlClash-"+verFlClash+"-linux-amd64.AppImage"), Primary: true},
+						{Text: "deb (amd64)", Href: gh(flclash, "v"+verFlClash, "FlClash-"+verFlClash+"-linux-amd64.deb")},
+						{Text: all, Href: ghLatest(flclash), Muted: true},
+					}},
+				{Name: "Hiddify", Format: fAny,
+					Desc: pick("免费开源,一键式。新建配置 → 从链接添加,粘贴通用地址。",
+						"Free and open source, one-tap style. New profile → Add from link, paste the universal link."),
+					Links: []dl{
+						{Text: pick("AppImage (x64,最新)", "AppImage (x64, latest)"), Href: ghLatestDL(hiddify, "Hiddify-Linux-x64-AppImage.AppImage"), Primary: true},
+						{Text: "deb (x64)", Href: ghLatestDL(hiddify, "Hiddify-Debian-x64.deb")},
+						{Text: all, Href: ghLatest(hiddify), Muted: true},
+					}},
+				{Name: "v2rayN", Format: fAny,
+					Desc: pick("内置 sing-box 与 Xray 内核。订阅分组 → 添加订阅,粘贴通用地址。",
+						"Ships both sing-box and Xray cores. Subscription group → Add, paste the universal link."),
+					Links: []dl{
+						{Text: pick("deb (amd64,最新)", "deb (amd64, latest)"), Href: ghLatestDL(v2rayn, "v2rayN-linux-64.deb"), Primary: true},
+						{Text: "rpm (amd64)", Href: ghLatestDL(v2rayn, "v2rayN-linux-rhel-64.rpm")},
+						{Text: all, Href: ghLatest(v2rayn), Muted: true},
+					}},
+				{Name: pick("sing-box(命令行)", "sing-box (command line)"), Format: fSing,
+					Desc: pick("服务器或路由器上直接跑内核:把 sing-box 地址返回的 JSON 存成配置文件,sing-box run -c 即可。",
+						"Run the core itself on a server or router: save the JSON from the sing-box link as the config and start it with sing-box run -c."),
+					Links: []dl{
+						{Text: "deb (amd64) v" + verSingBox, Href: gh(singbox, "v"+verSingBox, "sing-box_"+verSingBox+"_linux_amd64.deb"), Primary: true},
+						{Text: "deb (arm64)", Href: gh(singbox, "v"+verSingBox, "sing-box_"+verSingBox+"_linux_arm64.deb")},
+						{Text: all, Href: ghLatest(singbox), Muted: true},
+					}},
 			},
 		},
 	}

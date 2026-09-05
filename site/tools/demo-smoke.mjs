@@ -73,12 +73,12 @@ await page.waitForTimeout(800);
 if (await page.locator('#demo-bar').count()) pass('演示提示条已显示'); else fail('没有演示提示条 #demo-bar');
 if (await page.locator('#login:not([hidden])').count()) fail('演示页显示了登录框'); else pass('不需要登录');
 
-const expect = { dashboard: /online|在线|users|用户/i, users: /demo-alice/, lines: /Tokyo-HY2/, nodes: /Frankfurt/, upstreams: /./, plans: /./, resellers: /./, exts: /./, settings: /./ };
+const expect = { dashboard: /online|在线|users|用户/i, users: /demo-alice/, lines: /Tokyo-HY2/, nodes: /Frankfurt/, upstreams: /./, plans: /./, resellers: /./, exts: /./, settings: /./, cert: /./, ops: /./, backup: /./, logs: /./, admin: /./, account: /./ };
 for (const [route, re] of Object.entries(expect)) {
   await page.goto(`${DEMO}#/${route}`);
   await page.waitForTimeout(700);
   const text = (await page.locator('#page').innerText().catch(() => '')).trim();
-  if (text.length < 20) fail(`#/${route} 页面几乎为空`); else if (!re.test(text)) fail(`#/${route} 没渲染出预期内容`); else pass(`#/${route} 渲染正常(${text.length} 字符)`);
+  if (text.length < 20) fail(`#/${route} 页面几乎为空`); else if (/Cannot read properties|is not defined|TypeError|undefined \(reading/.test(text)) fail(`#/${route} 页面渲染出错:${text.slice(0, 120)}`); else if (!re.test(text)) fail(`#/${route} 没渲染出预期内容`); else pass(`#/${route} 渲染正常(${text.length} 字符)`);
 }
 
 // 深链接:直接打开用户页也应到用户页
