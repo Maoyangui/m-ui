@@ -72,6 +72,7 @@ func (s *Server) StartReseller() error {
 	mux.HandleFunc(api+"onlines", s.rauth(s.handleOnlines))
 	mux.HandleFunc(api+"self", s.rauth(s.handleResellerSelf))
 	mux.HandleFunc(api+"self/", s.rauth(s.handleResellerSelfSub))
+	mux.HandleFunc(api+"v1/", s.handleResellerPublicAPI) // 代理自己的外部 API:令牌鉴权,作用域限定为该代理
 	mux.HandleFunc(base+"logo.svg", brand.ServeLogo)
 	mux.HandleFunc(base+"support", s.handleSupport)
 	mux.HandleFunc(base+"support/qr", s.handleSupportQR)
@@ -353,6 +354,39 @@ func (s *Server) handleResellerSelfSub(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/password"):
 		s.handleResellerPassword(w, r, rs)
+	case strings.HasSuffix(r.URL.Path, "/api/rotate"):
+		// 重新生成令牌:旧令牌立即失效
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+			return
+		}
+		tok := randomAPIToken()
+		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Update("api_token", tok)
+		s.auditAs(rs.Name, "reseller", "api-rotate", rs.Name)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": rs.ApiEnabled, "token": tok})
+	case strings.HasSuffix(r.URL.Path, "/api"):
+		// 代理自己的外部 API:开关 + 令牌(首次开启自动生成)
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": rs.ApiEnabled, "token": rs.ApiToken})
+		case http.MethodPut:
+			var p struct {
+				Enabled bool `json:"enabled"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+				badRequest(w, err)
+				return
+			}
+			tok := rs.ApiToken
+			if p.Enabled && tok == "" {
+				tok = randomAPIToken()
+			}
+			s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{"api_enabled": p.Enabled, "api_token": tok})
+			s.auditAs(rs.Name, "reseller", "api-"+map[bool]string{true: "on", false: "off"}[p.Enabled], rs.Name)
+			writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": p.Enabled, "token": tok})
+		default:
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		}
 	case strings.HasSuffix(r.URL.Path, "/totp/qr"):
 		s.mu.Lock()
 		secret := s.totpPendingRS[rs.Id]

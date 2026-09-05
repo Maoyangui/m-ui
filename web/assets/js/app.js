@@ -122,11 +122,14 @@ async function enterApp() {
   document.getElementById('login').hidden = true;
   document.getElementById('app').hidden = false;
   resetState(); // 换账号登录(管理员 ↔ 代理)不能沿用上一个会话拉到的数据
-  await load('status', 'settings');
+  // 先只拿 status:新代理首次登录时会话是"待设密码"状态,后端只放行 status 与 self/password,
+  // 这时去拉 settings 会被 403 拒掉,整个 enterApp 抛错就成了黑屏。
+  await load('status');
   if (state.status.mustSetPassword) { // 新代理首次登录:先设密码
     account.forceSetPassword();
     return;
   }
+  await load('settings');
   renderChrome();
   route();
 }

@@ -3,6 +3,7 @@ import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce } from '../ui.js';
 
+const selected = new Set(); // 批量设置勾选的线路 id
 export const title = () => t('line.title');
 export const subtitle = () => t('line.subtitle');
 let query = '';
@@ -40,13 +41,26 @@ export async function render(el) {
       </div></details>
       <button class="btn primary" data-act="line.add">${t('line.add')}</button>
     </div>
+    <div class="toolbar batch-bar" id="line-batch-bar" hidden>
+      <span class="badge primary" id="line-batch-count"></span>
+      <button class="btn sm" data-act="line.batch" data-id="enable">${t('line.batch.enable')}</button>
+      <button class="btn sm" data-act="line.batch" data-id="disable">${t('line.batch.disable')}</button>
+      <button class="btn sm" data-act="line.batch" data-id="upstream">${t('line.batch.upstream')}</button>
+      ${(state.nodes || []).length > 1 ? `<button class="btn sm" data-act="line.batch" data-id="nodes">${t('line.batch.nodes')}</button>` : ''}
+      <button class="btn sm ghost" data-act="line.clearSel">${t('line.batch.clear')}</button>
+    </div>
     <div class="table-wrap"><table class="grid">
-      <thead><tr><th></th><th>${t('common.name')}</th><th>${t('line.protocol')}</th><th>${t('common.port')}</th><th>${t('line.upstream')}</th><th>${t('nav.nodes')}</th><th>${t('line.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
+      <thead><tr><th></th><th style="width:1.5rem"><input type="checkbox" id="line-sel-all"></th><th>${t('common.name')}</th><th>${t('line.protocol')}</th><th>${t('common.port')}</th><th>${t('line.upstream')}</th><th>${t('nav.nodes')}</th><th>${t('line.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
       <tbody id="lines-body"></tbody>
     </table></div>`;
   document.getElementById('line-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
+  document.getElementById('line-sel-all').addEventListener('change', e => {
+    visibleRows().forEach(l => e.target.checked ? selected.add(l.id) : selected.delete(l.id));
+    renderRows();
+  });
   renderRows();
 }
+function visibleRows() { return state.lines.filter(l => matches(query, l.name, l.protocol, l.port, l.upstreamName)); }
 export function tick() { renderRows(); }
 
 function tlsModeOf(l) {
@@ -66,11 +80,16 @@ function renderRows() {
   const body = document.getElementById('lines-body');
   if (!body) return;
   const online = new Set(state.onlines.lines || []);
-  const rows = state.lines.filter(l => matches(query, l.name, l.protocol, l.port, l.upstreamName));
+  const rows = visibleRows();
   document.getElementById('line-count').textContent = `${rows.length} / ${state.lines.length}`;
+  for (const id of [...selected]) if (!state.lines.some(l => l.id === id)) selected.delete(id); // 被删掉的线路不再算选中
+  const bar = document.getElementById('line-batch-bar');
+  if (bar) { bar.hidden = selected.size === 0; document.getElementById('line-batch-count').textContent = t('line.selected', { n: selected.size }); }
+  const selAll = document.getElementById('line-sel-all');
+  if (selAll) selAll.checked = rows.length > 0 && rows.every(l => selected.has(l.id));
   // 库里一条线路都没有(不是搜索没结果):说清线路是什么,并给出第一步
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="9">${state.lines.length ? empty() : `<div class="empty-guide"><p>${t('line.emptyFirst')}</p><button class="btn primary" data-act="line.add">${t('line.emptyFirstBtn')}</button></div>`}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="10">${state.lines.length ? empty() : `<div class="empty-guide"><p>${t('line.emptyFirst')}</p><button class="btn primary" data-act="line.add">${t('line.emptyFirstBtn')}</button></div>`}</td></tr>`;
     return;
   }
   const nodeIdsOf = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
@@ -80,8 +99,9 @@ function renderRows() {
     return ids.map(id => { const n = (state.nodes || []).find(x => x.id === id); return badge(n ? n.name : '#' + id, 'primary'); }).join(' ');
   };
   body.innerHTML = rows.map(l => `
-    <tr draggable="${query ? 'false' : 'true'}" data-id="${l.id}">
+    <tr draggable="${query ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
       <td class="handle" title="拖动排序">⠿</td>
+      <td><input type="checkbox" class="sel" data-change="line.sel" data-id="${l.id}" ${selected.has(l.id) ? 'checked' : ''}></td>
       <td class="primary-cell">${dot(online.has(l.name))}${esc(l.name)}</td>
       <td>${protoBadges(l)}</td>
       <td class="num">${l.port}</td>
@@ -343,7 +363,35 @@ async function editLine(id, cloneFrom, preset) {
   document.getElementById('f-protocol').addEventListener('change', () => renderDynamic({ options: {}, tls: {}, transport: {} }));
 }
 
+// ---- 批量设置 ----
+async function runBatch(action, extra = {}) {
+  const ids = [...selected];
+  try {
+    const r = await post('lines/batch', { ids, action, ...extra });
+    selected.clear();
+    await load('lines', 'status'); renderRows();
+    toast(t('line.batchDone', { n: r.affected }), 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+function batchDialog(action) {
+  const n = selected.size;
+  if (action === 'upstream') {
+    openModal(t('line.batchUpstream', { n }), `<div class="form-grid">${field(t('line.upstream'), `<select id="b-upstream"><option value="0">${t('line.direct')}</option>${state.upstreams.map(u => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select>`, t('line.upstreamHelp'))}</div>`,
+      () => runBatch('upstream', { upstreamId: Number(fv('b-upstream')) }));
+    return;
+  }
+  openModal(t('line.batchNodes', { n }), `<div class="form-grid"><div class="full">${field(t('line.servers'), `<div class="check-list">${(state.nodes || []).map(nd => `<label><input type="checkbox" class="b-node-cb" value="${nd.id}"> ${esc(nd.name)}${nd.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>`).join('')}</div>`, t('line.batchNodesHelp'))}</div></div>`,
+    () => runBatch('nodes', { nodeIds: [...document.querySelectorAll('.b-node-cb:checked')].map(c => Number(c.value)) }));
+}
+
 registerActions({
+  'line.sel': (id, cb) => { cb.checked ? selected.add(Number(id)) : selected.delete(Number(id)); renderRows(); },
+  'line.clearSel': () => { selected.clear(); renderRows(); },
+  'line.batch': async action => {
+    if (!selected.size) return;
+    if (action === 'enable' || action === 'disable') { await runBatch(action); return; }
+    batchDialog(action);
+  },
   'line.preset': id => presetLine(id),
   'line.add': () => editLine(null),
   'line.edit': id => editLine(Number(id)),

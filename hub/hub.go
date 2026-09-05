@@ -83,7 +83,7 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 		return s, err
 	}
 	for i := range s.Resellers {
-		s.Resellers[i].Password, s.Resellers[i].TotpSecret = "", "" // 副机不跑代理面板,不需要这些
+		s.Resellers[i].Password, s.Resellers[i].TotpSecret, s.Resellers[i].ApiToken = "", "", "" // 副机不跑代理面板,不需要这些
 	}
 	if err := db.Order("user_id asc, line_id asc").Find(&s.UserLines).Error; err != nil {
 		return s, err

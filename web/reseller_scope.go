@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -226,6 +227,13 @@ func (s *Server) sessionOf(r *http.Request) session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.sessions[c.Value]
+}
+
+// randomAPIToken 外部 API 令牌:40 位十六进制随机串。
+func randomAPIToken() string {
+	b := make([]byte, 20)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // randomSubToken 代理用户的订阅地址:32 位随机,不可猜。

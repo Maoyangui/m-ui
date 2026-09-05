@@ -406,12 +406,20 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 }
 
 // subBase 订阅地址前缀(scheme://host:port/path/);整表渲染时算一次即可。
+// publicHost 本机公网地址;测试里没有数据面时退回设置里的域名。
+func (s *Server) publicHost() string {
+	if s.run == nil {
+		return s.setting("webDomain")
+	}
+	return s.run.PublicHost()
+}
+
 func (s *Server) subBase() string {
 	scheme := "http"
 	if s.setting("subCertFile") != "" && s.setting("subKeyFile") != "" {
 		scheme = "https"
 	}
-	host := s.run.PublicHost() // 订阅域名 → 面板域名 → 公网 IP(无域名自签场景就是 IP:端口)
+	host := s.publicHost() // 订阅域名 → 面板域名 → 公网 IP(无域名自签场景就是 IP:端口)
 	if host == "" {
 		host = "<服务器IP或域名>"
 	}

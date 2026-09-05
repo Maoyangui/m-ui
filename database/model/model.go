@@ -137,6 +137,9 @@ type Reseller struct {
 	PageNotice   string `json:"pageNotice"`
 	PageSupport  string `json:"pageSupport"`
 	PageBuyURL   string `json:"pageBuyURL"` // 落地页 / 404 页上「选购订阅」按钮的地址;留空用主面板的
+	// 代理自己的外部 API:在代理面板"我的账号"里开启并取令牌,接口与主面板的 v1 相同,作用域限定为该代理名下
+	ApiEnabled bool   `json:"apiEnabled"`
+	ApiToken   string `json:"-" gorm:"index"`
 }
 
 // ShareSuffix 临时共享凭据在数据面里的名字后缀:sing-box 里叫 "alice#share",记账时去掉后缀归到 alice。

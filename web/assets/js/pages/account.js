@@ -9,9 +9,24 @@ export const subtitle = () => t('acct.subtitle');
 
 let me = {};
 let pendingSecret = '';
+let api = { enabled: false, token: '' };
+
+// 代理自己的外部 API:开关 + 令牌;接口前缀就是当前面板地址下的 api/v1/
+function apiBase() { return location.origin + location.pathname.replace(/[^/]*$/, '') + 'api/v1/'; }
+function apiCard() {
+  const on = !!api.enabled;
+  return `<div class="card-head"><h2>${t('acct.api')}</h2><div class="row" style="align-items:center;gap:.5rem">${badge(on ? t('common.enabled') : t('common.disabled'), on ? 'ok' : '')}<label class="switch" title="${esc(t('acct.apiEnable'))}"><input type="checkbox" id="acct-api-on" ${on ? 'checked' : ''}><span></span></label></div></div>
+    <p class="hint">${t('acct.apiHelp')}</p>
+    ${on ? `<dl class="kv">
+      <dt>${t('acct.apiBase')}</dt><dd><div class="sub-box"><code>${esc(apiBase())}</code><button class="btn sm" data-act="acct.copy" data-id="${esc(apiBase())}">${t('common.copy')}</button></div></dd>
+      <dt>${t('acct.apiToken')}</dt><dd><div class="sub-box"><code>${esc(api.token || '')}</code><button class="btn sm" data-act="acct.copy" data-id="${esc(api.token || '')}">${t('common.copy')}</button><button class="btn sm danger" data-act="acct.apiRotate">${t('acct.apiRotate')}</button></div></dd>
+    </dl>
+    <p class="hint">${t('acct.apiDocs')} <a href="${esc((state.status.repo || 'https://github.com/Maoyangui/m-ui') + '/blob/main/docs/API.md')}" target="_blank" rel="noopener">docs/API.md</a></p>` : ''}`;
+}
 
 export async function render(el) {
   me = await get('self');
+  api = await get('self/api').catch(() => ({ enabled: false, token: '' }));
   el.innerHTML = `
     <section class="card">
       <div class="card-head"><h2>${t('acct.quota')}</h2><span class="muted small">${t('rs.lastLogin')}: ${esc(me.lastLogins || '—')}</span></div>
@@ -36,6 +51,8 @@ export async function render(el) {
 
     <section class="card" id="acct-totp">${totpCard()}</section>
 
+    <section class="card" id="acct-api">${apiCard()}</section>
+
     <section class="card">
       <div class="card-head"><h2>${t('set.subPage')}</h2><button class="btn primary sm" data-act="acct.savePage">${t('common.save')}</button></div>
       <div class="form-grid">
@@ -48,6 +65,20 @@ export async function render(el) {
         <div class="full">${field(t('set.subPageNotice'), `<textarea id="sp-notice" placeholder="${esc(t('acct.inherit'))}">${esc(me.pageNotice || '')}</textarea>`)}</div>
       </div>
     </section>`;
+  const sw = document.getElementById('acct-api-on');
+  if (sw) sw.addEventListener('change', async e => {
+    try { api = await put('self/api', { enabled: e.target.checked }); toast(t('acct.apiSaved'), 'ok'); document.getElementById('acct-api').innerHTML = apiCard(); bindApiSwitch(); }
+    catch (err) { toast(err.message, 'err'); e.target.checked = !e.target.checked; }
+  });
+}
+
+// 卡片重绘后开关要重新挂事件
+function bindApiSwitch() {
+  const sw = document.getElementById('acct-api-on');
+  if (sw) sw.addEventListener('change', async e => {
+    try { api = await put('self/api', { enabled: e.target.checked }); toast(t('acct.apiSaved'), 'ok'); document.getElementById('acct-api').innerHTML = apiCard(); bindApiSwitch(); }
+    catch (err) { toast(err.message, 'err'); e.target.checked = !e.target.checked; }
+  });
 }
 
 function totpCard() {
@@ -99,6 +130,16 @@ export function forceSetPassword() {
 }
 
 registerActions({
+  'acct.copy': (_, btn) => {
+    const v = btn.dataset.id || '';
+    if (navigator.clipboard) navigator.clipboard.writeText(v).then(() => toast(t('common.copied'), 'ok'));
+    else { const a = document.createElement('textarea'); a.value = v; document.body.appendChild(a); a.select(); document.execCommand('copy'); a.remove(); toast(t('common.copied'), 'ok'); }
+  },
+  'acct.apiRotate': async () => {
+    if (!await confirm(t('acct.apiRotateConfirm'), { danger: true })) return;
+    try { api = await post('self/api/rotate'); toast(t('acct.apiRotated'), 'ok'); document.getElementById('acct-api').innerHTML = apiCard(); bindApiSwitch(); }
+    catch (e) { toast(e.message, 'err'); }
+  },
   'acct.first': async () => {
     const err = document.getElementById('first-err');
     try {

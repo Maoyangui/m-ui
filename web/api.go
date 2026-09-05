@@ -262,6 +262,10 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 		s.handleLineSort(w, r)
 		return
 	}
+	if strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/batch") {
+		s.handleLineBatch(w, r)
+		return
+	}
 	if s.dispatchLineSubroute(w, r) {
 		return
 	}
@@ -1173,6 +1177,9 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 
 // reloadAll 在线路/上游变更后重建数据面;失败只记日志,数据已落库。
 func (s *Server) reloadAll(reason string) {
+	if s.run == nil { // 测试里没有数据面
+		return
+	}
 	go func() {
 		if err := s.run.ReloadAll(); err != nil {
 			logger.Warning(reason, " 后重载数据面失败: ", err)
@@ -1195,6 +1202,9 @@ func (s *Server) reloadUpstreams(reason string) {
 }
 
 func (s *Server) reloadUsers(reason string) {
+	if s.run == nil { // 测试里没有数据面
+		return
+	}
 	go func() {
 		if err := s.run.ReloadUsers(); err != nil {
 			logger.Warning(reason, " 后热更新用户失败: ", err)
