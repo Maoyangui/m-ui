@@ -202,10 +202,11 @@ func loadLineUsers(db *gorm.DB) (map[uint][]model.User, error) {
 			continue
 		}
 		byLine[l.LineId] = append(byLine[l.LineId], u)
-		// 临时共享:同名再挂一份共享凭据(sing-box 按凭据认人、按名字记账),
-		// 于是共享连接的流量/设备数/限速都算本人,取消共享撤下凭据即刻断供。
+		// 临时共享:再挂一份共享凭据,数据面里叫 "名字#share"(core 的追踪器记账时去掉后缀归到本人),
+		// 于是共享连接的流量/设备数/限速都算本人;取消共享撤下这份凭据时只断借用者的连接,本人不受影响。
 		if u.ShareToken != "" && len(u.ShareCreds) > 0 {
 			shared := u
+			shared.Name = u.Name + model.ShareSuffix
 			shared.Credentials = u.ShareCreds
 			byLine[l.LineId] = append(byLine[l.LineId], shared)
 		}

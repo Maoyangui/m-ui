@@ -246,6 +246,14 @@ func (r *Runner) KickUser(name string) int {
 	return 0
 }
 
+// KickShare 只断某用户临时共享凭据("名字#share")上的连接,本人的连接不动。
+func (r *Runner) KickShare(name string) int {
+	if box := r.core.GetInstance(); box != nil {
+		return box.ConnTracker().CloseConnByDataPlaneName(name + model.ShareSuffix)
+	}
+	return 0
+}
+
 // ConnCounts 返回每用户当前连接数。
 func (r *Runner) ConnCounts() map[string]int {
 	if box := r.core.GetInstance(); box != nil {
@@ -790,7 +798,9 @@ func (r *Runner) newSubServer() *sub.Server {
 				logger.Info("用户 ", name, " 的临时共享凭据已生效")
 				return
 			}
-			logger.Info("用户 ", name, " 的旧共享凭据已作废,断开 ", r.KickUser(name), " 条连接")
+			// 只断借用者(名字#share)的连接:取消共享时 ReloadUsers 已把这份凭据撤下并按用户表断掉不在表里的连接,
+			// 重新生成时旧凭据的连接还挂着,这里补一刀;本人自己的连接从头到尾不动
+			logger.Info("用户 ", name, " 的旧共享凭据已作废,断开 ", r.KickShare(name), " 条共享连接")
 		}()
 	}
 	return s

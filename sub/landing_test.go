@@ -149,6 +149,61 @@ func TestUsageStatsEndpoint(t *testing.T) {
 	}
 }
 
+// 共享地址的落地页:精简版 —— 临时共享标识、选购、公告、一键导入、订阅地址(共享令牌)、节点;
+// 本人的用量 / 到期 / 用量图 / 共享管理都不出;取消后地址对不上就是 404 页。
+func TestSharedLandingPage(t *testing.T) {
+	s, db := shareServer(t)
+	db.Create(&model.Setting{Key: "subPageNotice", Value: "每月 1 号重置流量"})
+	db.Create(&model.Setting{Key: "subPageBuyURL", Value: "https://shop.example/buy"})
+	db.Model(&model.User{}).Where("name = ?", "alice").Updates(map[string]interface{}{"volume": 1000, "up": 100, "down": 100, "expiry": time.Now().Unix() + 86400})
+	doReq(s, "POST", "/sub/alice?share=on", browserUA)
+	tok := token(t, db)
+
+	w := doReqZh(s, "/sub/"+tok)
+	if w.Code != 200 {
+		t.Fatalf("共享落地页应 200,实际 %d", w.Code)
+	}
+	body := w.Body.String()
+	for _, want := range []string{"临时共享", "选购自己的订阅", "https://shop.example/buy", "每月 1 号重置流量", "一键导入", "订阅地址", "/sub/" + tok + "?format=clash", "/sub/" + tok + "/qr?format=clash"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("共享落地页缺少 %q", want)
+		}
+	}
+	for _, unwanted := range []string{"我的订阅", `id="usage"`, `id="share"`, "?share=off", "/sub/alice", "100.0 B", "剩 1 天"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("共享落地页不该出现 %q(本人用量 / 到期 / 共享管理 / 本人地址)", unwanted)
+		}
+	}
+	// 借用者不能看本人用量、不能改共享
+	if x := doReq(s, "GET", "/sub/"+tok+"?stats=24", browserUA); x.Code != 404 {
+		t.Fatalf("共享地址查用量应 404,实际 %d", x.Code)
+	}
+	// 客户端拉共享订阅照常
+	if c := doReq(s, "GET", "/sub/"+tok+"?format=clash", "clash-verge/2.0"); c.Code != 200 {
+		t.Fatalf("客户端拉共享订阅应 200,实际 %d", c.Code)
+	}
+	// 本人到期:借用者看到状态卡但没有日期和数字;客户端仍按启停拿订阅
+	db.Model(&model.User{}).Where("name = ?", "alice").Update("expiry", time.Now().Unix()-3600)
+	body = doReqZh(s, "/sub/"+tok).Body.String()
+	if !strings.Contains(body, "分享给你的这条订阅已经到期") || strings.Contains(body, `class="buylink"`) || strings.Count(body, "选购自己的订阅</a>") != 1 { // 状态卡里那一个,共享卡里的不再重复
+		t.Fatal("共享落地页到期时应有不带数字的状态卡,且不再出现「选购自己的订阅」按钮")
+	}
+	// 本人被停用:借用者浏览器看到落地页(已停用),客户端 404
+	db.Model(&model.User{}).Where("name = ?", "alice").Updates(map[string]interface{}{"expiry": 0, "enabled": false})
+	if w := doReqZh(s, "/sub/"+tok); w.Code != 200 || !strings.Contains(w.Body.String(), "分享给你的这条订阅目前无法使用") {
+		t.Fatalf("本人停用时共享落地页应 200 并标明不可用,实际 %d", w.Code)
+	}
+	if c := doReq(s, "GET", "/sub/"+tok+"?format=clash", "clash-verge/2.0"); c.Code != 404 {
+		t.Fatalf("本人停用时客户端拉共享订阅应 404,实际 %d", c.Code)
+	}
+	// 取消共享后地址对不上任何人:404 页
+	db.Model(&model.User{}).Where("name = ?", "alice").Update("enabled", true)
+	doReq(s, "POST", "/sub/alice?share=off", browserUA)
+	if w := doReqZh(s, "/sub/"+tok); w.Code != 404 || !strings.Contains(w.Body.String(), "订阅地址无效") {
+		t.Fatalf("取消后的共享地址应是 404 页,实际 %d", w.Code)
+	}
+}
+
 func TestSharePostReturnsPageDirectly(t *testing.T) {
 	s, _ := shareServer(t)
 	r := httptest.NewRequest("POST", "http://hk.example:2056/sub/alice?share=on", nil)

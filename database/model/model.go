@@ -135,6 +135,18 @@ type Reseller struct {
 	PageBuyURL   string `json:"pageBuyURL"` // 落地页 / 404 页上「选购订阅」按钮的地址;留空用主面板的
 }
 
+// ShareSuffix 临时共享凭据在数据面里的名字后缀:sing-box 里叫 "alice#share",记账时去掉后缀归到 alice。
+// 这样取消共享只断借用者的连接,本人不受影响。"#" 是用户名里禁止的字符,不会撞名。
+const ShareSuffix = "#share"
+
+// Owner 把数据面里的名字换回面板用户名(去掉共享后缀)。
+func Owner(dataPlaneName string) string {
+	if len(dataPlaneName) > len(ShareSuffix) && dataPlaneName[len(dataPlaneName)-len(ShareSuffix):] == ShareSuffix {
+		return dataPlaneName[:len(dataPlaneName)-len(ShareSuffix)]
+	}
+	return dataPlaneName
+}
+
 // ResellerLine 代理可用线路(主面板分配),代理只能把这些线路分给自己的用户。
 type ResellerLine struct {
 	ResellerId uint `json:"resellerId" gorm:"primaryKey;autoIncrement:false"`

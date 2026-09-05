@@ -79,12 +79,12 @@ func TestShareLink(t *testing.T) {
 			t.Fatalf("格式 %q 共享订阅不该用本人凭据", f)
 		}
 	}
-	// 共享地址:不出订阅页、不出二维码、不能改共享状态
-	if w := doReq(s, "GET", "/sub/"+tok, browserUA); strings.Contains(w.Body.String(), "<html") {
-		t.Fatal("共享地址不应出订阅页")
+	// 共享地址:浏览器打开是精简版落地页(见 landing_test),二维码照常,但不能改共享状态
+	if w := doReq(s, "GET", "/sub/"+tok, browserUA); w.Code != 200 || !strings.Contains(w.Body.String(), "<html") {
+		t.Fatalf("共享地址在浏览器里应出落地页,得 %d", w.Code)
 	}
-	if w := doReq(s, "GET", "/sub/"+tok+"/qr", browserUA); w.Code != 404 {
-		t.Fatalf("共享地址不应出二维码,得 %d", w.Code)
+	if w := doReq(s, "GET", "/sub/"+tok+"/qr", browserUA); w.Code != 200 || w.Header().Get("Content-Type") != "image/png" {
+		t.Fatalf("共享地址应出自己的二维码,得 %d %s", w.Code, w.Header().Get("Content-Type"))
 	}
 	if w := doReq(s, "POST", "/sub/"+tok+"?share=off", browserUA); w.Code != 404 {
 		t.Fatalf("共享地址不应能取消,得 %d", w.Code)
@@ -99,9 +99,9 @@ func TestShareLink(t *testing.T) {
 		t.Fatalf("共享访问日志不对: %+v", logs)
 	}
 	var pages int64
-	db.Model(&model.SubLog{}).Where("format = ?", "page-share").Count(&pages)
-	if pages != 0 {
-		t.Fatal("共享访问发的是订阅,不应记成 page")
+	db.Model(&model.SubLog{}).Where("format = ? AND status = 200", "page-share").Count(&pages)
+	if pages != 1 {
+		t.Fatalf("上面用浏览器打开过一次共享落地页,应记 1 条 page-share,实际 %d", pages)
 	}
 
 	// 再生成一次 = 换新,旧地址失效(始终只有一条)

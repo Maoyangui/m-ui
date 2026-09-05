@@ -102,6 +102,9 @@ type pageData struct {
 	Year                   int
 	Brand                  bool // 页脚 "Powered by m-ui":设置可关;代理的落地页不显示
 	TZOffset               int  // 面板时区相对 UTC 的分钟数,用量图的时间标签按它显示
+	// Shared:这是共享地址的落地页。只给借用者看得着的:临时共享标识、选购、公告、一键导入、订阅地址、节点;
+	// 本人的用量 / 到期 / 用量图 / 共享管理一概不出,状态卡也只说原因不带数字。
+	Shared bool
 }
 
 func pageLang(r *http.Request) string {
@@ -229,13 +232,18 @@ func (s *Server) pageTitle(rs *model.Reseller, opt Options) string {
 }
 
 // servePage 输出订阅落地页。不可用(到期 / 用尽 / 停用)的用户也出这一页,顶部标明原因。
-func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key string, user model.User, lines []model.Line, opt Options, rs *model.Reseller) {
+// shared 为真是共享地址(key 是共享令牌)的精简版:见 pageData.Shared。
+func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key string, user model.User, lines []model.Line, opt Options, rs *model.Reseller, shared bool) {
 	notice, support := s.setting("subPageNotice"), s.setting("subPageSupport")
 	if rs != nil { // 代理可以给自己的用户配一套落地页文案
 		notice, support = pick(rs.PageNotice, notice), pick(rs.PageSupport, support)
 	}
 	title := s.pageTitle(rs, opt)
+	if shared {
+		opt.Share = false // 借用者不能管理共享
+	}
 	data := buildPageData(r, subPath, key, user, lines, opt, title, notice, support)
+	data.Shared = shared
 	data.Brand = rs == nil && !strings.EqualFold(s.setting("subPageBrand"), "false") // 代理的落地页尊重代理品牌
 	data.BuyURL = s.buyURL(rs)
 	if st := stateOf(user, rs, time.Now().Unix()); st != data.StatusText { // 代理被停用 / 到期也算停用

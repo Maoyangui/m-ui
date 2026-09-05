@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
-<title>{{.Title}} · {{.Name}}</title>
+<title>{{.Title}} · {{if .Shared}}{{if eq .Lang "zh"}}临时共享{{else}}Shared link{{end}}{{else}}{{.Name}}{{end}}</title>
 <link rel="icon" href="{{.Icon}}" type="image/svg+xml">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--text:#1a202c;--muted:#64748b;--border:#e2e8f0;--primary:#2563eb;--ok:#16a34a;--warn:#d97706;--danger:#dc2626;--soft:#eff6ff;--danger-soft:#fef2f2;--danger-bd:#fecaca;--shadow:0 1px 3px rgba(0,0,0,.05)}
@@ -27,6 +27,11 @@ h2{margin:0 0 .7rem;font-size:.95rem}
 .state .mark svg{width:22px;height:22px}
 .state-text b{display:block;font-size:1rem}.state-text span{display:block;color:var(--muted);font-size:.86rem;margin-top:.15rem}
 .state .contact{margin-top:.8rem;font-size:.84rem;color:var(--muted);white-space:pre-wrap}
+/* 共享地址的落地页:说明这是借来的地址 + 选购自己的 */
+.sharedcard{border-color:var(--info-bd,#bfdbfe);background:var(--soft)}
+.sharedcard .mark{flex:none;width:40px;height:40px;border-radius:50%;background:var(--card);color:var(--primary);display:flex;align-items:center;justify-content:center;border:1px solid var(--info-bd,#bfdbfe)}
+.sharedcard .mark svg{width:22px;height:22px}
+@media(prefers-color-scheme:dark){.sharedcard{--info-bd:#1e3a5f}}
 /* 选购 / 续费 */
 .buy{display:flex;align-items:center;justify-content:center;gap:.45rem;margin-top:.9rem;padding:.72rem 1rem;border-radius:11px;background:var(--primary);color:#fff;text-decoration:none;font-weight:600;font-size:.95rem;box-shadow:0 6px 18px rgba(37,99,235,.28);transition:transform .12s,filter .15s}
 .buy:hover{filter:brightness(1.07)}.buy:active{transform:translateY(1px)}.buy svg{width:18px;height:18px}
@@ -69,21 +74,30 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
 </head>
 <body>
 <div class="wrap">
-  <div class="brand"><img class="logo" src="{{.Icon}}" alt=""><div><h1>{{.Title}}</h1><div class="u">{{.Name}}</div></div></div>
+  <div class="brand"><img class="logo" src="{{.Icon}}" alt=""><div><h1>{{.Title}}</h1><div class="u">{{if .Shared}}<span class="badge">{{if eq .Lang "zh"}}临时共享{{else}}Shared link{{end}}</span>{{else}}{{.Name}}{{end}}</div></div></div>
 
   {{if .Unavailable}}<div class="card state">
     <div class="state-row">
       <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{if eq .StatusText "expired"}}<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>{{else if eq .StatusText "exhausted"}}<path d="M4 6.5h16v11H4z"/><path d="M4 12h9"/><path d="M8 6.5v11"/>{{else}}<path d="M9.6 14.4 7.9 16.1a3.8 3.8 0 0 1-5.4-5.4l1.7-1.7"/><path d="M14.4 9.6l1.7-1.7a3.8 3.8 0 0 1 5.4 5.4l-1.7 1.7"/><path d="M4 4l16 16"/>{{end}}</svg></div>
       <div class="state-text">
         <b>{{if eq .Lang "zh"}}{{if eq .StatusText "expired"}}订阅已到期{{else if eq .StatusText "exhausted"}}流量已用完{{else}}订阅已停用{{end}}{{else}}{{if eq .StatusText "expired"}}Subscription expired{{else if eq .StatusText "exhausted"}}Traffic used up{{else}}Subscription disabled{{end}}{{end}}</b>
-        <span>{{if eq .Lang "zh"}}{{if eq .StatusText "expired"}}{{.ExpiryText}} 到期,节点已停止服务。续费后这条订阅地址继续有效,客户端刷新即可。{{else if eq .StatusText "exhausted"}}已用 {{.UsedText}} / {{.TotalText}}{{if .ResetText}},{{.ResetText}} 重置{{end}}。续费或加量后这条订阅地址继续有效,客户端刷新即可。{{else}}这条订阅目前无法使用。如有疑问请联系我们。{{end}}{{else}}{{if eq .StatusText "expired"}}Expired on {{.ExpiryText}}; the nodes have stopped serving. The link stays valid after renewal — just refresh in your app.{{else if eq .StatusText "exhausted"}}{{.UsedText}} of {{.TotalText}} used{{if .ResetText}}, resets on {{.ResetText}}{{end}}. The link stays valid after a top-up — just refresh in your app.{{else}}This subscription is currently unavailable. Get in touch if you have questions.{{end}}{{end}}</span>
+        <span>{{if .Shared}}{{if eq .Lang "zh"}}{{if eq .StatusText "expired"}}分享给你的这条订阅已经到期,节点已停止服务。{{else if eq .StatusText "exhausted"}}分享给你的这条订阅流量已经用完,节点已停止服务。{{else}}分享给你的这条订阅目前无法使用。{{end}}想继续用可以选购自己的订阅。{{else}}{{if eq .StatusText "expired"}}The subscription shared with you has expired; the nodes have stopped serving.{{else if eq .StatusText "exhausted"}}The subscription shared with you has used up its traffic; the nodes have stopped serving.{{else}}The subscription shared with you is currently unavailable.{{end}} Get your own to keep going.{{end}}{{else if eq .Lang "zh"}}{{if eq .StatusText "expired"}}{{.ExpiryText}} 到期,节点已停止服务。续费后这条订阅地址继续有效,客户端刷新即可。{{else if eq .StatusText "exhausted"}}已用 {{.UsedText}} / {{.TotalText}}{{if .ResetText}},{{.ResetText}} 重置{{end}}。续费或加量后这条订阅地址继续有效,客户端刷新即可。{{else}}这条订阅目前无法使用。如有疑问请联系我们。{{end}}{{else}}{{if eq .StatusText "expired"}}Expired on {{.ExpiryText}}; the nodes have stopped serving. The link stays valid after renewal — just refresh in your app.{{else if eq .StatusText "exhausted"}}{{.UsedText}} of {{.TotalText}} used{{if .ResetText}}, resets on {{.ResetText}}{{end}}. The link stays valid after a top-up — just refresh in your app.{{else}}This subscription is currently unavailable. Get in touch if you have questions.{{end}}{{end}}</span>
       </div>
     </div>
-    {{if .BuyURL}}<a class="buy" href="{{.BuyURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>{{if eq .Lang "zh"}}选购 / 续费订阅{{else}}Purchase / renew{{end}}</a>{{end}}
+    {{if .BuyURL}}<a class="buy" href="{{.BuyURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>{{if .Shared}}{{if eq .Lang "zh"}}选购自己的订阅{{else}}Get your own subscription{{end}}{{else}}{{if eq .Lang "zh"}}选购 / 续费订阅{{else}}Purchase / renew{{end}}{{end}}</a>{{end}}
     {{if .Support}}<div class="contact">{{if eq .Lang "zh"}}有疑问请联系:{{else}}Questions? {{end}}{{.Support}}</div>{{end}}
   </div>{{end}}
 
-  <div class="card">
+  {{if .Shared}}<div class="card sharedcard">
+    <div class="state-row">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1L11 5"/><path d="M14 11a5 5 0 0 0-7.1 0l-2 2a5 5 0 0 0 7.1 7.1L13 19"/></svg></div>
+      <div class="state-text">
+        <b>{{if eq .Lang "zh"}}临时共享的订阅{{else}}A subscription shared with you{{end}}</b>
+        <span>{{if eq .Lang "zh"}}这是别人临时分享给你的地址,对方随时可以取消;用下面的方式导入即可使用。{{else}}Someone shared this link with you temporarily; they can cancel it at any time. Import it below to start using it.{{end}}</span>
+      </div>
+    </div>
+    {{if and .BuyURL (not .Unavailable)}}<a class="buy" href="{{.BuyURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>{{if eq .Lang "zh"}}选购自己的订阅{{else}}Get your own subscription{{end}}</a>{{end}}
+  </div>{{else}}<div class="card">
     <div class="cardhead"><h2>{{if eq .Lang "zh"}}我的订阅{{else}}My subscription{{end}}
       <span class="badge {{.StatusKind}}">{{if eq .Lang "zh"}}{{if eq .StatusText "active"}}正常{{else if eq .StatusText "expired"}}已到期{{else if eq .StatusText "exhausted"}}流量用尽{{else}}已停用{{end}}{{else}}{{.StatusText}}{{end}}</span></h2>
       {{if and .BuyURL (not .Unavailable)}}<a class="buylink" href="{{.BuyURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>{{if eq .Lang "zh"}}选购 / 续费{{else}}Purchase / renew{{end}}</a>{{end}}</div>
@@ -94,7 +108,7 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
       {{if .ResetText}}<dt>{{if eq .Lang "zh"}}流量重置{{else}}Traffic resets{{end}}</dt><dd>{{.ResetText}}</dd>{{end}}
       <dt>{{if eq .Lang "zh"}}自动更新{{else}}Auto update{{end}}</dt><dd>{{if eq .Lang "zh"}}每 {{.UpdateHours}} 小时{{else}}every {{.UpdateHours}} h{{end}}</dd>
     </dl>
-  </div>
+  </div>{{end}}
 
   {{if .Notice}}<div class="card"><h2>{{if eq .Lang "zh"}}公告{{else}}Notice{{end}}</h2><div class="notice">{{.Notice}}</div></div>{{end}}
 
@@ -115,13 +129,13 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
     </div>
   </div>
 
-  <div class="card"><details id="usage">
+  {{if not .Shared}}<div class="card"><details id="usage">
     <summary><h2>{{if eq .Lang "zh"}}用量情况{{else}}Usage{{end}}</h2><span class="chev"><span class="o">{{if eq .Lang "zh"}}展开查看流量图{{else}}Show traffic chart{{end}} ▾</span><span class="c">{{if eq .Lang "zh"}}收起{{else}}Hide{{end}} ▴</span></span></summary>
     <div class="ubody">
       <div class="seg" id="u-seg"><button type="button" class="active" data-h="24">{{if eq .Lang "zh"}}24 小时{{else}}24 h{{end}}</button><button type="button" data-h="168">{{if eq .Lang "zh"}}7 天{{else}}7 days{{end}}</button><button type="button" data-h="720">{{if eq .Lang "zh"}}30 天{{else}}30 days{{end}}</button></div>
       <div id="u-chart"><div class="empty">{{if eq .Lang "zh"}}加载中…{{else}}Loading…{{end}}</div></div>
     </div>
-  </details></div>
+  </details></div>{{end}}
 
   {{if .ShareOn}}<div class="card share" id="share">
     <div class="cardhead"><h2>{{if eq .Lang "zh"}}临时共享{{else}}Share temporarily{{end}}{{if .ShareURL}} <span class="badge ok">{{if eq .Lang "zh"}}已开启{{else}}on{{end}}</span>{{end}}</h2>
@@ -189,8 +203,9 @@ function loadUsage(h){uh=h;var box=document.getElementById('u-chart');var btns=d
 if(uloaded[h]){chart(box,uloaded[h].points,uloaded[h].span);return}
 box.innerHTML='<div class="empty">'+L.loading+'</div>';
 fetch(location.pathname+'?stats='+h+'&tz='+TZOFF,{credentials:'same-origin'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()}).then(function(d){uloaded[h]=d;if(uh===h)chart(box,d.points,d.span)}).catch(function(){box.innerHTML='<div class="empty">'+L.fail+'</div>'})}
-document.getElementById('usage').addEventListener('toggle',function(e){if(e.target.open&&!uloaded[uh])loadUsage(uh)});
-document.getElementById('u-seg').addEventListener('click',function(e){var b=e.target.closest('button');if(b)loadUsage(Number(b.getAttribute('data-h')))});
+var usageEl=document.getElementById('usage');
+if(usageEl){usageEl.addEventListener('toggle',function(e){if(e.target.open&&!uloaded[uh])loadUsage(uh)});
+document.getElementById('u-seg').addEventListener('click',function(e){var b=e.target.closest('button');if(b)loadUsage(Number(b.getAttribute('data-h')))})}
 </script>
 </body>
 </html>

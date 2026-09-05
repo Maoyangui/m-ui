@@ -14,6 +14,8 @@ import (
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/common/network"
+
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 type ConnectionInfo struct {
@@ -65,9 +67,12 @@ func (c *ConnTracker) generateConnectionID() string {
 	return uuid.Must(uuid.NewV4()).String()
 }
 
+// 连接记录里的 User 是数据面里的原名(临时共享的凭据叫 "名字#share"),用于按配置里的用户表断连;
+// 对外的记账(设备数、限速、在线 IP、连接数、踢下线)一律按 model.Owner 归到本人。
 func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) net.Conn {
 	ip := metadata.Source.Addr.String()
-	if c.limiter != nil && !c.limiter.AllowConn(metadata.User, ip) {
+	owner := model.Owner(metadata.User)
+	if c.limiter != nil && !c.limiter.AllowConn(owner, ip) {
 		return rejectedConn{conn}
 	}
 	connID := c.generateConnectionID()
@@ -84,14 +89,15 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 
 	wrapped := c.createWrappedConn(conn, connID)
 	if c.limiter != nil {
-		return c.limiter.wrapConn(wrapped, metadata.User, ip)
+		return c.limiter.wrapConn(wrapped, owner, ip)
 	}
 	return wrapped
 }
 
 func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.PacketConn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) network.PacketConn {
 	ip := metadata.Source.Addr.String()
-	if c.limiter != nil && !c.limiter.AllowConn(metadata.User, ip) {
+	owner := model.Owner(metadata.User)
+	if c.limiter != nil && !c.limiter.AllowConn(owner, ip) {
 		conn.Close()
 		return conn
 	}
@@ -109,7 +115,7 @@ func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.P
 
 	wrapped := c.createWrappedPacketConn(conn, connID)
 	if c.limiter != nil {
-		return c.limiter.wrapPacketConn(wrapped, metadata.User, ip)
+		return c.limiter.wrapPacketConn(wrapped, owner, ip)
 	}
 	return wrapped
 }
@@ -118,9 +124,14 @@ func (c *ConnTracker) CloseConnByInbound(inbound string) int {
 	return c.closeMatching(func(info *ConnectionInfo) bool { return info.Inbound == inbound })
 }
 
-// CloseConnByUser 断开某用户在所有入站上的全部连接(踢下线)。
+// CloseConnByUser 断开某用户在所有入站上的全部连接(踢下线):本人的和借用者的一起断。
 func (c *ConnTracker) CloseConnByUser(user string) int {
-	return c.closeMatching(func(info *ConnectionInfo) bool { return info.User == user })
+	return c.closeMatching(func(info *ConnectionInfo) bool { return model.Owner(info.User) == user })
+}
+
+// CloseConnByDataPlaneName 只断某个数据面名字的连接:取消共享时传 "名字#share",本人的连接不动。
+func (c *ConnTracker) CloseConnByDataPlaneName(name string) int {
+	return c.closeMatching(func(info *ConnectionInfo) bool { return info.User == name })
 }
 
 // IPLinesByUser 返回 用户 → 源 IP → 该 IP 正在使用的线路(入站)名。
@@ -137,13 +148,14 @@ func (c *ConnTracker) IPLinesByUser() map[string]map[string][]string {
 		if ip == "" {
 			continue
 		}
-		if seen[info.User] == nil {
-			seen[info.User] = map[string]map[string]bool{}
+		user := model.Owner(info.User) // 借用者的设备也算本人的
+		if seen[user] == nil {
+			seen[user] = map[string]map[string]bool{}
 		}
-		if seen[info.User][ip] == nil {
-			seen[info.User][ip] = map[string]bool{}
+		if seen[user][ip] == nil {
+			seen[user][ip] = map[string]bool{}
 		}
-		seen[info.User][ip][info.Inbound] = true
+		seen[user][ip][info.Inbound] = true
 	}
 	out := make(map[string]map[string][]string, len(seen))
 	for user, ips := range seen {
@@ -167,7 +179,7 @@ func (c *ConnTracker) ConnCountByUser() map[string]int {
 	out := map[string]int{}
 	for _, info := range c.connections {
 		if info.User != "" {
-			out[info.User]++
+			out[model.Owner(info.User)]++
 		}
 	}
 	return out

@@ -270,7 +270,7 @@ func (s *Server) handle() http.HandlerFunc {
 					s.serveNotFound(w, r, name) // 地址对不上任何人:浏览器给"订阅地址无效"页,客户端纯 404
 					return
 				}
-				shared = true // 共享地址:只发原始订阅,不出订阅页/二维码/用量,也不能改共享状态
+				shared = true // 共享地址:订阅内容与二维码照常,落地页是精简版;不给本人用量,也不能改共享状态
 				if len(user.ShareCreds) == 0 {
 					http.NotFound(w, r) // 老版本留下的令牌没有独立凭据,让用户重新生成
 					return
@@ -283,7 +283,7 @@ func (s *Server) handle() http.HandlerFunc {
 		// blocked = 客户端拿不到订阅:本人被停用,或所属代理被停用 / 到期。到期、流量用尽只在页面上标出来,
 		// 要不要真的停用由面板决定(和以前一致)
 		blocked := !user.Enabled || (rs != nil && (!rs.Enabled || (rs.Expiry > 0 && rs.Expiry < now)))
-		if shared && (blocked || wantQR || r.Method == http.MethodPost || r.URL.Query().Has("stats")) {
+		if shared && (r.Method == http.MethodPost || r.URL.Query().Has("stats")) { // 借用者不能管理共享,也看不到本人用量
 			s.log(r, user.Name, true, 404)
 			http.NotFound(w, r)
 			return
@@ -315,15 +315,16 @@ func (s *Server) handle() http.HandlerFunc {
 		if rs != nil { // 代理填了标题就用代理的,客户端里显示的就是他的品牌
 			opt.ProfileTitle = pick(rs.ProfileTitle, pick(rs.PageTitle, opt.ProfileTitle))
 		}
-		// 浏览器打开订阅地址 → 订阅页(不论状态;到期 / 用尽 / 停用在页面顶部标出);客户端拉取 → 原始订阅,停用则 404
-		if !shared && s.pageEnabled(rs) && WantsPage(r) {
+		// 浏览器打开订阅地址 → 订阅页(不论状态;到期 / 用尽 / 停用在页面顶部标出;共享地址是精简版);
+		// 客户端拉取 → 原始订阅,停用则 404
+		if s.pageEnabled(rs) && WantsPage(r) {
 			if r.URL.Query().Has("clients") { // 订阅页里那个下载箭头
 				s.serveClients(w, r, subPath, name, s.pageTitle(rs, opt))
-				s.log(r, user.Name, false, 200)
+				s.log(r, user.Name, shared, 200)
 				return
 			}
-			s.servePage(w, r, subPath, name, user, lines, opt, rs)
-			s.log(r, user.Name, false, 200)
+			s.servePage(w, r, subPath, name, user, lines, opt, rs, shared)
+			s.log(r, user.Name, shared, 200)
 			return
 		}
 		if blocked {
@@ -405,7 +406,7 @@ func (s *Server) log(r *http.Request, user string, shared bool, status int) {
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "link"
-		if !shared && WantsPage(r) { // 共享地址从不出页面
+		if WantsPage(r) { // 共享地址也有(精简版)落地页,记成 page-share
 			format = "page"
 		}
 	}

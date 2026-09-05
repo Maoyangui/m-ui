@@ -75,12 +75,12 @@ func (c *StatsTracker) loadOrCreateCounter(obj *map[string]Counter, name string)
 }
 
 func (c *StatsTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) net.Conn {
-	readCounter, writeCounter := c.getReadCounters(metadata.Inbound, matchOutbound.Tag(), metadata.User)
+	readCounter, writeCounter := c.getReadCounters(metadata.Inbound, matchOutbound.Tag(), model.Owner(metadata.User)) // 借用者的流量记到本人
 	return bufio.NewInt64CounterConn(conn, readCounter, writeCounter)
 }
 
 func (c *StatsTracker) RoutedPacketConnection(ctx context.Context, conn network.PacketConn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) network.PacketConn {
-	readCounter, writeCounter := c.getReadCounters(metadata.Inbound, matchOutbound.Tag(), metadata.User)
+	readCounter, writeCounter := c.getReadCounters(metadata.Inbound, matchOutbound.Tag(), model.Owner(metadata.User)) // 借用者的流量记到本人
 	return bufio.NewInt64CounterPacketConn(conn, readCounter, nil, writeCounter, nil)
 }
 

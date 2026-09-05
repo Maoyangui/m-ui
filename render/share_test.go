@@ -9,8 +9,8 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
-// 临时共享的凭据要以"同名多凭据"的形式进入入站:
-// sing-box 按凭据认人、按名字记账,所以借用者的流量与设备数都算在本人名下;
+// 临时共享的凭据以 "本人名#share" 进入入站:core 的追踪器记账时去掉后缀归到本人,
+// 所以借用者的流量与设备数都算在本人名下;名字不同又让取消共享时只断借用者的连接。
 // 取消共享后这份凭据必须立刻从配置里消失。
 func TestShareCredsRenderedUnderOwnerName(t *testing.T) {
 	dir := t.TempDir()
@@ -44,10 +44,11 @@ func TestShareCredsRenderedUnderOwnerName(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("共享开启时应有两份凭据: %v", got)
 	}
-	for _, e := range got {
-		if e["name"] != "alice" {
-			t.Fatalf("共享凭据必须挂在本人名下: %v", e)
-		}
+	if got[0]["name"] != "alice" || got[1]["name"] != "alice"+model.ShareSuffix {
+		t.Fatalf("本人凭据叫 alice、共享凭据叫 alice#share: %v", got)
+	}
+	if model.Owner(got[1]["name"].(string)) != "alice" {
+		t.Fatal("记账名应去掉后缀归到本人")
 	}
 	if got[0]["password"] != "own" || got[1]["password"] != "lent" {
 		t.Fatalf("两份凭据应不同: %v", got)
