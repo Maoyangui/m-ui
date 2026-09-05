@@ -44,11 +44,11 @@
   <p>Opened in a browser, the same address is a landing page: usage, expiry, one-tap import buttons, QR code and client downloads. Users can also generate a temporary share link there if you allow it. When a subscription is exhausted, expired or disabled, the browser shows a short explanation and your contact details instead of a blank 404.</p>
 
   <h2 id="tested">Tested automatically</h2>
-  <p>Every change to the installer or the Go code runs the <a href="{{github}}/actions/workflows/install-test.yml" rel="noopener">install-test</a> workflow on fresh GitHub-hosted machines: the official one-line installer, the service coming up, the panel answering on port 2053, a second install as the upgrade path, then uninstall. The list below is generated from the latest completed run, not written by hand.</p>
+  <p>Every change to the installer or the Go code runs the <a href="{{github}}/actions/workflows/install-test.yml" rel="noopener">install-test</a> workflow on fresh GitHub-hosted machines: the official one-line installer, the service coming up, the panel answering on port 2053, a second install as the upgrade path, a deliberately broken release that must be rolled back automatically, then uninstall. The list below is generated from the latest completed run, not written by hand.</p>
   {{tested}}
 
   <h2 id="upgrade">Upgrade</h2>
-  <p>Click the update arrow next to the version number in the sidebar (the panel checks GitHub Releases every 6 hours), or run the install command again, or pick "Update" in the <code>m-ui</code> SSH menu. Only the binary is replaced; database, certificates and settings stay where they are.</p>
+  <p>Click the update arrow next to the version number in the sidebar (the panel checks GitHub Releases every 6 hours), or run the install command again, or pick "Update" in the <code>m-ui</code> SSH menu. Only the binary is replaced; database, certificates and settings stay where they are. If the new version fails to start, the previous binary is restored automatically (a pre-upgrade backup is kept under <code>/etc/m-ui/backups/</code>).</p>
 
   <h2 id="uninstall">Uninstall</h2>
   <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --uninstall</code></pre>

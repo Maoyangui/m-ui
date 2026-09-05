@@ -44,11 +44,11 @@
   <p>用浏览器打开同一个地址就是落地页:用量、到期、一键导入、二维码、客户端下载。你允许的话,用户还能在那里生成临时共享地址。订阅用完、到期或被停用时,浏览器里看到的是一句说明和你的联系方式,不是一片空白的 404。</p>
 
   <h2 id="tested">自动测试过的平台</h2>
-  <p>安装脚本或 Go 代码每次改动,<a href="{{github}}/actions/workflows/install-test.yml" rel="noopener">install-test</a> 工作流都会在全新的 GitHub 托管机器上跑一遍:官方一行安装命令、服务起来、面板在 2053 端口返回 200、再装一次(升级路径)、卸载。下面这份列表由最近一次完成的运行结果生成,不是手写的。</p>
+  <p>安装脚本或 Go 代码每次改动,<a href="{{github}}/actions/workflows/install-test.yml" rel="noopener">install-test</a> 工作流都会在全新的 GitHub 托管机器上跑一遍:官方一行安装命令、服务起来、面板在 2053 端口返回 200、再装一次(升级路径)、故意装一个坏版本看它自动回滚、卸载。下面这份列表由最近一次完成的运行结果生成,不是手写的。</p>
   {{tested}}
 
   <h2 id="upgrade">升级</h2>
-  <p>点侧栏版本号旁边的更新箭头(面板每 6 小时查一次 GitHub Releases),或者再跑一遍安装命令,或者在 <code>m-ui</code> 菜单里选「更新到最新版」。只换程序本体;数据库、证书、设置都不动。</p>
+  <p>点侧栏版本号旁边的更新箭头(面板每 6 小时查一次 GitHub Releases),或者再跑一遍安装命令,或者在 <code>m-ui</code> 菜单里选「更新到最新版」。只换程序本体;数据库、证书、设置都不动。新版本起不来会自动换回旧程序(升级前备份留在 <code>/etc/m-ui/backups/</code>)。</p>
 
   <h2 id="uninstall">卸载</h2>
   <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --uninstall</code></pre>

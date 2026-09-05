@@ -36,7 +36,7 @@
   <details><summary>代理能看到我的用户或线路吗?</summary><p>不能。代理只看到自己的用户与套餐,只能用你授权的线路。隔离在服务端强制,不是靠界面藏起来。</p></details>
 
   <h2>运维</h2>
-  <details><summary>更新怎么做?会丢数据吗?</summary><p>GitHub 有新版本时侧栏会出现箭头。点一下:下载压缩包、用 Release 里的 SHA256SUMS 校验、替换程序、重启。数据库、证书、备份、设置都不动。再跑一遍安装命令效果一样。</p></details>
+  <details><summary>更新怎么做?会丢数据吗?</summary><p>GitHub 有新版本时侧栏会出现箭头。点一下:下载压缩包、用 Release 里的 SHA256SUMS 校验、替换程序、重启。数据库、证书、备份、设置都不动。再跑一遍安装命令效果一样。v0.4.9 起更新是一次事务:旧程序留着、先做升级前备份,新版本 90 秒内起不来就自动换回旧程序(必要时连备份一起还原),面板会明确提示。</p></details>
   <details><summary>备份里有什么?</summary><p>数据库(做过检查点,自洽)和证书文件,打成一个 zip。面板里就能还原;换机向导能把整套搬到新服务器。</p></details>
   <details><summary>能从旧面板迁移吗?</summary><p>能 —— 导入器读兼容格式的旧面板数据库,保留端口、凭据、面板路径与订阅地址,既有客户端不用刷新就能继续连。安装时加 <code>--import /path/to/旧面板.db</code>,或者用 用户 → 从旧面板导入 只搬用户。</p></details>
   <details><summary>m-ui 会上报什么吗?</summary><p>不会。对外连接只有你自己配置的(ACME、Cloudflare、WARP、Telegram),以及每 6 小时向 GitHub Releases 查一次新版本。</p></details>
