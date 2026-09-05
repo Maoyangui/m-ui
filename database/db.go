@@ -38,6 +38,13 @@ func Open(dbPath string) (*gorm.DB, error) {
 		sqlDB.SetMaxIdleConns(8)
 		sqlDB.SetConnMaxLifetime(0)
 	}
+	// 线路端口从"全局唯一"改成"同一台服务器上唯一"(主机的 443 和只部署在副机 B 的 443 互不相干):
+	// 老库里的唯一索引要在 AutoMigrate 之前去掉,AutoMigrate 才会按现在的模型建回普通索引(只认名字,不看唯一性)
+	var portIdx string
+	db.Raw("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'idx_lines_port'").Scan(&portIdx)
+	if strings.Contains(strings.ToUpper(portIdx), "UNIQUE") {
+		db.Exec("DROP INDEX IF EXISTS idx_lines_port")
+	}
 	if err := db.AutoMigrate(model.All()...); err != nil {
 		return nil, err
 	}
@@ -55,8 +62,6 @@ func Open(dbPath string) (*gorm.DB, error) {
 	// 套餐从"全局唯一名"改成"按归属唯一",老库里那个唯一索引要去掉
 	db.Exec("UPDATE plans SET reseller_id = 0 WHERE reseller_id IS NULL")
 	db.Exec("DROP INDEX IF EXISTS idx_plans_name")
-	// 线路端口从"全局唯一"改成"同一台服务器上唯一"(主机的 443 和只部署在副机 B 的 443 互不相干),老库里那个唯一索引要去掉
-	db.Exec("DROP INDEX IF EXISTS idx_lines_port")
 	return db, nil
 }
 
