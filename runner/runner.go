@@ -414,11 +414,40 @@ func (r *Runner) ReloadUsers() error {
 	if err != nil {
 		return fmt.Errorf("渲染配置: %w", err)
 	}
+	if err := r.reloadUsersLocked(raw); err != nil {
+		return err
+	}
+	// 用户表已经是新的了:如果配置里除了用户没别的变化,记下这份配置,之后的全量重载比对不会再为它重启一次
+	if r.appliedRaw != nil && onlyUsersDiffer(r.appliedRaw, raw) {
+		r.appliedRaw = raw
+	}
+	return nil
+}
+
+// reloadUsersLocked 按给定配置热替换各入站的用户表(调用方持 mu,数据面在运行)。
+func (r *Runner) reloadUsersLocked(raw []byte) error {
 	var cfg struct {
 		Inbounds []json.RawMessage `json:"inbounds"`
 	}
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return err
+	}
+	// 当前生效配置里的各入站(按 tag),用来判断不支持热换用户的入站到底变没变
+	prevInbounds := map[string]json.RawMessage{}
+	if r.appliedRaw != nil {
+		var prev struct {
+			Inbounds []json.RawMessage `json:"inbounds"`
+		}
+		if json.Unmarshal(r.appliedRaw, &prev) == nil {
+			for _, ib := range prev.Inbounds {
+				var m struct {
+					Tag string `json:"tag"`
+				}
+				if json.Unmarshal(ib, &m) == nil && m.Tag != "" {
+					prevInbounds[m.Tag] = ib
+				}
+			}
+		}
 	}
 	box := r.core.GetInstance()
 	keepAll := map[string]map[string]struct{}{} // 入站 → 仍然有效的用户名
@@ -442,7 +471,11 @@ func (r *Runner) ReloadUsers() error {
 			continue
 		}
 		if !handled {
-			// 该协议不支持原地换用户表(socks/http/mixed):重建该入站,断开其全部连接
+			// 该协议不支持原地换用户表(socks/http/mixed、单用户 shadowsocks):只有这个入站本身变了才重建
+			// (重建会断开它上面的全部连接);别人改了用户表和它无关,不能每次都把它重启一遍
+			if prev, ok := prevInbounds[meta.Tag]; ok && bytes.Equal(prev, inbound) {
+				continue
+			}
 			if err := r.core.RemoveInbound(meta.Tag); err != nil && err != os.ErrInvalid {
 				logger.Warning("重建入站 ", meta.Tag, " 失败(移除): ", err)
 				continue
@@ -503,6 +536,18 @@ func (r *Runner) reloadAllLocked(raw []byte) error {
 		logger.Info("配置无变化,数据面无需重启")
 		return nil
 	}
+	// 只有用户表变了(线路、上游、证书、路由都没动):热替换用户即可,绝不为此重启数据面断掉所有人。
+	// 副机整表替换后判断"线路是否变化"曾经误报过,这里再兜一层,不依赖调用方判断得对不对。
+	if r.core.IsRunning() && r.appliedRaw != nil && onlyUsersDiffer(r.appliedRaw, raw) {
+		if err := r.reloadUsersLocked(raw); err == nil {
+			r.appliedRaw = raw
+			r.applyPortHopping()
+			logger.Info("只有用户变化,已热更新,数据面未重启")
+			return nil
+		} else {
+			logger.Warning("用户热更新失败,改为重启数据面: ", err)
+		}
+	}
 	// 先干跑校验新配置;不通过就让旧数据面继续服务——绝不为一条坏配置断掉所有用户。
 	if r.core.IsRunning() {
 		if err := core.ValidateConfig(raw); err != nil {
@@ -531,6 +576,38 @@ func (r *Runner) reloadAllLocked(raw []byte) error {
 	r.applyPortHopping()
 	logger.Info("数据面已重载")
 	return nil
+}
+
+// onlyUsersDiffer 两份 sing-box 配置是否只有入站用户表不同(入站的 users 字段抹掉后逐字节相同)。
+// 解析不了就按"不止用户变了"处理,让调用方走稳妥的重启路径。
+func onlyUsersDiffer(prev, next []byte) bool {
+	strip := func(raw []byte) []byte {
+		var cfg map[string]json.RawMessage
+		if json.Unmarshal(raw, &cfg) != nil {
+			return nil
+		}
+		var inbounds []map[string]json.RawMessage
+		if in, ok := cfg["inbounds"]; ok {
+			if json.Unmarshal(in, &inbounds) != nil {
+				return nil
+			}
+			for _, ib := range inbounds {
+				delete(ib, "users")
+			}
+			b, err := json.Marshal(inbounds)
+			if err != nil {
+				return nil
+			}
+			cfg["inbounds"] = b
+		}
+		out, err := json.Marshal(cfg) // map 序列化按键排序,两边一致
+		if err != nil {
+			return nil
+		}
+		return out
+	}
+	a, b := strip(prev), strip(next)
+	return a != nil && b != nil && bytes.Equal(a, b) && !bytes.Equal(prev, next)
 }
 
 // outboundsOfSafe 与 outboundsOf 相同,解析失败时返回 nil(回滚路径上不该再报错)。

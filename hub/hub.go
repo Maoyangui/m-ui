@@ -117,6 +117,67 @@ func revisionOf(s Snapshot) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// sameLines / sameUpstreams 按 id 排好序、把空的 JSON 字段归一(nil 与 "" 与 "null" 一律视为空)后逐条比较,
+// 顺序与存储形态的差异不算变化。
+func sameLines(a, b []model.Line) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	norm := func(in []model.Line) []model.Line {
+		out := make([]model.Line, len(in))
+		copy(out, in)
+		sort.Slice(out, func(i, j int) bool { return out[i].Id < out[j].Id })
+		for i := range out {
+			out[i].Sort = 0 // 排序只影响面板与订阅里的展示顺序,不影响数据面
+			out[i].Options = normJSON(out[i].Options)
+			out[i].Addrs = normJSON(out[i].Addrs)
+			out[i].NodeIds = normJSON(out[i].NodeIds)
+			out[i].Tls = normJSON(out[i].Tls)
+			out[i].Transport = normJSON(out[i].Transport)
+		}
+		return out
+	}
+	x, _ := json.Marshal(norm(a))
+	y, _ := json.Marshal(norm(b))
+	return bytes.Equal(x, y)
+}
+
+func sameUpstreams(a, b []model.Upstream) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	norm := func(in []model.Upstream) []model.Upstream {
+		out := make([]model.Upstream, len(in))
+		copy(out, in)
+		sort.Slice(out, func(i, j int) bool { return out[i].Id < out[j].Id })
+		for i := range out {
+			out[i].Sort = 0
+			out[i].Options = normJSON(out[i].Options)
+		}
+		return out
+	}
+	x, _ := json.Marshal(norm(a))
+	y, _ := json.Marshal(norm(b))
+	return bytes.Equal(x, y)
+}
+
+// normJSON 把"没有值"的各种写法统一成 nil,有值的重新紧凑序列化(去掉空白差异)。
+func normJSON(raw json.RawMessage) json.RawMessage {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return nil
+	}
+	var v interface{}
+	if json.Unmarshal([]byte(s), &v) != nil {
+		return raw
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return raw
+	}
+	return b
+}
+
 // RevokedShares 返回本次快照里临时共享被取消或换新的用户名(要在 ApplySnapshot 之前调用)。
 // 副机据此在热更新后断开这些用户的连接,否则借用者已经建立的连接还能接着用。
 func RevokedShares(db *gorm.DB, snap Snapshot) []string {
@@ -141,16 +202,14 @@ func RevokedShares(db *gorm.DB, snap Snapshot) []string {
 // ApplySnapshot 在副机上整表替换配置。返回线路、上游是否变化,副机据此选择重载级别:
 // 线路变 → 全量重载;仅上游变 → 热换出站;都没变 → 热换用户。
 func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged bool, err error) {
+	// 比"变没变"必须两边同序、同形:快照按 sort 排、库里按 id 排,直接比会把每次推送都当成线路变了,
+	// 副机于是次次全量重启数据面,所有人掉线几秒——只是有人生成了一条临时共享。
 	var oldLines []model.Line
 	var oldUps []model.Upstream
-	db.Order("id asc").Find(&oldLines)
-	db.Order("id asc").Find(&oldUps)
-	ol, _ := json.Marshal(oldLines)
-	nl, _ := json.Marshal(snap.Lines)
-	ou, _ := json.Marshal(oldUps)
-	nu, _ := json.Marshal(snap.Upstreams)
-	linesChanged = !bytes.Equal(ol, nl)
-	upstreamsChanged = !bytes.Equal(ou, nu)
+	db.Find(&oldLines)
+	db.Find(&oldUps)
+	linesChanged = !sameLines(oldLines, snap.Lines)
+	upstreamsChanged = !sameUpstreams(oldUps, snap.Upstreams)
 
 	// gorm 对带 default:true 的 bool 字段:Create 时零值 false 会写成默认 true,并把 true 回填进结构体。
 	// 所以要在插入之前记下被禁用的 id,插入后再显式写回 false,否则主机禁用的用户会在副机上"复活"。
