@@ -282,7 +282,7 @@ func (s *Server) validateReseller(rs *model.Reseller) error {
 	if strings.ContainsAny(rs.Name, "/?#& ") {
 		return errors.New("代理名称不能包含空格或 / ? # &(它是登录名)")
 	}
-	if rs.Volume < 0 || rs.DeviceLimit < 0 || rs.SpeedUp < 0 || rs.SpeedDown < 0 || rs.Expiry < 0 {
+	if rs.Volume < 0 || rs.DeviceLimit < 0 || rs.SpeedUp < 0 || rs.SpeedDown < 0 || rs.Expiry < 0 || rs.UserLimit < 0 {
 		return errors.New("额度不能为负")
 	}
 	dup := s.db.Model(&model.Reseller{}).Where("name = ?", rs.Name)

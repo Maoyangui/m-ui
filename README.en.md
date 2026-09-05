@@ -341,7 +341,7 @@ Merge nodes from elsewhere into your subscriptions: a single share link, or a wh
 
 ### Resellers
 
-Hand part of the selling to someone else: create a reseller on the Resellers page, tick the lines they may use, give them a traffic quota plus a device pool and a bandwidth pool.
+Hand part of the selling to someone else: create a reseller on the Resellers page, tick the lines they may use, give them a traffic quota plus a device pool and a bandwidth pool, and optionally cap how many users they may create.
 
 - Reseller panel: `https://<domain or IP>:2054/dl/` by default. Port, path and certificate live under Settings → Reseller panel (an empty certificate means it shares the main panel's).
 - The login name is the reseller's name and **a new reseller has no password**: they log in with the name and an **empty password**, then must set one before anything else, then can change it and enable two-factor auth. "Reset password" on the main panel clears it again.

@@ -36,10 +36,10 @@ type Upstream struct {
 type Line struct {
 	Id         uint            `json:"id" gorm:"primaryKey;autoIncrement"`
 	Name       string          `json:"name" gorm:"uniqueIndex"`
-	Protocol   string          `json:"protocol"` // hysteria2 | anytls | shadowsocks
-	Port       int             `json:"port" gorm:"uniqueIndex"`
-	UpstreamId uint            `json:"upstreamId"` // 0 = direct
-	Options    json.RawMessage `json:"options"`    // 协议入站附加参数(obfs、method、padding_scheme 等)
+	Protocol   string          `json:"protocol"`          // hysteria2 | anytls | shadowsocks
+	Port       int             `json:"port" gorm:"index"` // 端口只在同一台服务器上才会撞:部署范围没有交集的线路可以同端口
+	UpstreamId uint            `json:"upstreamId"`        // 0 = direct
+	Options    json.RawMessage `json:"options"`           // 协议入站附加参数(obfs、method、padding_scheme 等)
 	// Addrs 订阅里对外公布的连接地址列表 [{server, server_port?, remark?, sni?}]。
 	// 空 = 用入口节点主机 + 本线路端口(常态);非空 = 逐地址各出一条链接/代理。
 	// 也是多入口的承载:每个入口一条 addr。
@@ -123,6 +123,7 @@ type Reseller struct {
 	SpeedUp     int    `json:"speedUp"`     // 带宽池(上行):名下用户合计上行速率上限,每台服务器各一份,Mbps,0=不限
 	SpeedDown   int    `json:"speedDown"`   // 带宽池(下行),同上
 	DeviceLimit int    `json:"deviceLimit"` // 设备池:名下用户同时在线的不同设备(源 IP)总数上限,跨服务器并集,0=不限
+	UserLimit   int    `json:"userLimit"`   // 最多能建多少个用户,0=不限
 	Enabled     bool   `json:"enabled" gorm:"default:true"`
 	Remark      string `json:"remark"`
 	CreatedAt   int64  `json:"createdAt" gorm:"default:0;not null"`

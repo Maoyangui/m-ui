@@ -69,6 +69,20 @@ func TestResellerScope(t *testing.T) {
 	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err == nil {
 		t.Fatal("负数仍应被拒")
 	}
+	u2.DeviceLimit = 0
+	// 用户数上限:a 已有 1 个用户,上限 1 → 新建被拒,编辑已有的不受影响;改成 2 就能建
+	db.Model(&model.Reseller{}).Where("id = ?", a.Id).Update("user_limit", 1)
+	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err == nil || !strings.Contains(err.Error(), "用户数上限") {
+		t.Fatalf("达到用户数上限应拒绝新建: %v", err)
+	}
+	if err := s.checkResellerUser(a.Id, u.Id, &u, []uint{1}); err != nil {
+		t.Fatalf("上限只管新建,编辑已有用户应通过: %v", err)
+	}
+	db.Model(&model.Reseller{}).Where("id = ?", a.Id).Update("user_limit", 2)
+	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err != nil {
+		t.Fatalf("上限放宽后应能新建: %v", err)
+	}
+	db.Model(&model.Reseller{}).Where("id = ?", a.Id).Update("user_limit", 0)
 	// 改自己这个用户时,先扣掉它原来的占用
 	u.DeviceLimit = 5
 	if err := s.checkResellerUser(a.Id, u.Id, &u, []uint{1}); err != nil {

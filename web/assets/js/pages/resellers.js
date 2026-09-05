@@ -59,7 +59,7 @@ function renderRows() {
     <td class="primary-cell"><a href="#" data-act="rs.detail" data-id="${r.id}">${esc(r.name)}</a>
       ${r.remark ? `<div class="sub-cell">${esc(r.remark)}</div>` : ''}</td>
     <td>${statusBadge(r)}${r.totpEnabled ? ' ' + badge('2FA', 'primary') : ''}${claimBadge(r)}</td>
-    <td class="num">${r.users}</td>
+    <td class="num">${r.users} / ${r.userLimit || '∞'}</td>
     <td class="num">${fmtBytes(r.used)}${r.volume ? ' / ' + fmtBytes(r.volume) : ''}${progress(r.used, r.volume)}</td>
     <td class="num">${r.online} / ${r.deviceLimit || '∞'}${r.poolRejects ? ' <span class="badge warn" title="' + esc(t('rs.poolFull', { n: r.poolRejects })) + '">!</span>' : ''}</td>
     <td class="num">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'}/${r.speedDown || '∞'} M` : '∞'}</td>
@@ -90,6 +90,7 @@ async function showDetail(id) {
         <dt>${t('rs.speed')}</dt><dd class="num">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'} / ${r.speedDown || '∞'} Mbps` : t('common.unlimited')}</dd>
         <dt>${t('user.expiry')}</dt><dd>${r.expiry ? fmtDay(r.expiry) : t('user.never')}</dd>
         <dt>${t('rs.online')}</dt><dd class="num">${r.online}</dd>
+        <dt>${t('rs.users')}</dt><dd class="num">${r.users} / ${r.userLimit || '∞'}</dd>
         <dt>${t('rs.lines')} <span class="muted small">${(r.lineIds || []).length}</span></dt>
         <dd><div class="chips rs-lines">${(r.lineIds || []).map(lid => {
           const l = state.lines.find(x => x.id === lid); return l ? `<span class="chip">${esc(l.name)}</span>` : '';
@@ -123,12 +124,13 @@ function userRow(u) {
 
 // ---- 新建 / 编辑 ----
 function editReseller(id) {
-  const r = id ? list.find(x => x.id === id) : { enabled: true, volume: 0, deviceLimit: 0, lineIds: [] };
+  const r = id ? list.find(x => x.id === id) : { enabled: true, volume: 0, deviceLimit: 0, userLimit: 0, lineIds: [] };
   const picked = new Set(r.lineIds || []);
   openModal(id ? t('rs.edit') : t('rs.add'), `
     <div class="form-grid">
       ${field(t('common.name'), `<input id="f-name" value="${esc(r.name || '')}" placeholder="${t('rs.namePh')}">`, t('rs.nameHelp'))}
       ${field(t('rs.volumeGb'), `<input id="f-vol" type="number" min="0" value="${Math.round((r.volume || 0) / 1073741824)}">`, t('plan.zeroUnlimited'))}
+      ${field(t('rs.userLimit'), `<input id="f-users" type="number" min="0" value="${r.userLimit || 0}">`, t('rs.userLimitHelp'))}
       ${field(t('rs.deviceLimit'), `<input id="f-device" type="number" min="0" value="${r.deviceLimit || 0}">`, t('rs.deviceHelp'))}
       ${field(t('rs.expiry'), `<input id="f-expiry" type="date" value="${r.expiry ? new Date(r.expiry * 1000).toISOString().slice(0, 10) : ''}">`, t('rs.expiryHelp'))}
       ${field(t('rs.speedUp'), `<input id="f-up" type="number" min="0" value="${r.speedUp || 0}">`, t('rs.speedHelp'))}
@@ -143,7 +145,7 @@ function editReseller(id) {
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), enabled: fchk('f-enabled'),
-      volume: Number(fv('f-vol')) * 1073741824, deviceLimit: Number(fv('f-device')),
+      volume: Number(fv('f-vol')) * 1073741824, deviceLimit: Number(fv('f-device')), userLimit: Number(fv('f-users')),
       speedUp: Number(fv('f-up')), speedDown: Number(fv('f-down')),
       expiry: fv('f-expiry') ? Math.floor(new Date(fv('f-expiry') + 'T23:59:59').getTime() / 1000) : 0,
       lineIds: [...document.querySelectorAll('.ln-cb:checked')].map(c => Number(c.value)),

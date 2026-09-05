@@ -139,6 +139,13 @@ func (s *Server) checkResellerUser(rid, id uint, u *model.User, lineIds []uint) 
 	if u.DeviceLimit < 0 || u.SpeedUp < 0 || u.SpeedDown < 0 {
 		return errors.New("设备数与限速不能为负")
 	}
+	if id == 0 && rs.UserLimit > 0 { // 用户数上限只管新建;已有用户照常编辑
+		var n int64
+		s.db.Model(&model.User{}).Where("reseller_id = ?", rid).Count(&n)
+		if int(n) >= rs.UserLimit {
+			return errors.New("已达到用户数上限 " + strconv.Itoa(rs.UserLimit) + ",不能再建")
+		}
+	}
 	if rs.Volume > 0 && resellerUsed(s.db, rs) >= rs.Volume {
 		return errors.New("代理流量已用尽")
 	}

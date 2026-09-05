@@ -55,6 +55,8 @@ func Open(dbPath string) (*gorm.DB, error) {
 	// 套餐从"全局唯一名"改成"按归属唯一",老库里那个唯一索引要去掉
 	db.Exec("UPDATE plans SET reseller_id = 0 WHERE reseller_id IS NULL")
 	db.Exec("DROP INDEX IF EXISTS idx_plans_name")
+	// 线路端口从"全局唯一"改成"同一台服务器上唯一"(主机的 443 和只部署在副机 B 的 443 互不相干),老库里那个唯一索引要去掉
+	db.Exec("DROP INDEX IF EXISTS idx_lines_port")
 	return db, nil
 }
 

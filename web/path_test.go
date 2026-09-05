@@ -285,7 +285,8 @@ func TestSubTokenPolicy(t *testing.T) {
 	}
 }
 
-// 两条线路同端口一律拦下(端口全局唯一,不分服务器),而且要说清是被哪条线路占了。
+// 两条线路同端口:部署范围有交集才拦(端口只在同一台服务器上会撞),而且要说清是被哪条线路占了;
+// 范围不相交(只在 2 号机 vs 只在 1 号机)放行。
 func TestLinePortConflictsWithLine(t *testing.T) {
 	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
 	if err != nil {
@@ -297,13 +298,16 @@ func TestLinePortConflictsWithLine(t *testing.T) {
 
 	for _, l := range []model.Line{
 		{Name: "新线路", Protocol: "anytls", Port: 30443, NodeIds: []byte("[1,2]")},
-		{Name: "只在 2 号机", Protocol: "anytls", Port: 30443, NodeIds: []byte("[2]")},
 		{Name: "全部机器", Protocol: "anytls", Port: 30443},
 	} {
 		err := s.validateLine(&l)
 		if err == nil || !strings.Contains(err.Error(), "香港1") {
 			t.Fatalf("%s:同端口应拦下并点名线路,实际: %v", l.Name, err)
 		}
+	}
+	only2 := model.Line{Name: "只在 2 号机", Protocol: "anytls", Port: 30443, NodeIds: []byte("[2]")}
+	if err := s.validateLine(&only2); err != nil {
+		t.Fatalf("只在 2 号机的同端口线路不该被 1 号机的线路拦下: %v", err)
 	}
 	// 编辑自己不算和自己冲突
 	self := model.Line{Id: 1, Name: "香港1", Protocol: "hysteria2", Port: 30443, NodeIds: []byte("[1]")}

@@ -382,14 +382,15 @@ func (s *Server) validateLine(line *model.Line) error {
 			return fmt.Errorf("端口 %d 已被%s占用,换一个", line.Port, p.label)
 		}
 	}
-	// 线路之间撞端口(端口全局唯一,不分服务器):后面的 bind 探测只会说"被别的程序占用",
+	// 线路之间撞端口(只看部署范围有交集的服务器):后面的 bind 探测只会说"被别的程序占用",
 	// 这里先把占着端口的那条线路点名
 	if name := s.lineOnPort(line); name != "" {
-		return fmt.Errorf("端口 %d 已被线路 %q 占用,换一个", line.Port, name)
+		return fmt.Errorf("端口 %d 已被线路%s占用,换一个", line.Port, name)
 	}
 	// 机器上可能还跑着别的项目:端口有变化时试着监听一次,占着就别让它进库
-	// (端口没改的编辑不测——那时占着它的正是本机运行中的数据面)
-	if s.portChanged(line) && !portBindable(line.Port) {
+	// (端口没改的编辑不测——那时占着它的正是本机运行中的数据面;
+	//  不部署在本机的线路也不测——本机数据面可能正用着这个端口跑另一条线路)
+	if s.portChanged(line) && render.LineOnNode(*line, s.localNodeID()) && !portBindable(line.Port) {
 		return fmt.Errorf("端口 %d 已被本机其它程序占用,换一个", line.Port)
 	}
 	if len(line.Options) == 0 {
@@ -1036,11 +1037,57 @@ func (s *Server) settingOr(in map[string]string, key string) string {
 
 // lineOnPort 返回占着同一端口的另一条线路名;没有返回空。
 func (s *Server) lineOnPort(line *model.Line) string {
-	var o model.Line
-	if s.db.Select("name").Where("port = ? AND id <> ?", line.Port, line.Id).First(&o).Error != nil {
+	// 端口只在同一台服务器上才会撞:主机的 443 和只部署在副机 B 的 443 互不相干。
+	// 空 NodeIds = 全部服务器,和任何线路都算有交集。
+	var others []model.Line
+	s.db.Select("id, name, port, node_ids").Where("port = ? AND id <> ?", line.Port, line.Id).Find(&others)
+	if len(others) == 0 {
 		return ""
 	}
-	return o.Name
+	var nodes []model.Node
+	s.db.Select("id, name").Order("sort asc, id asc").Find(&nodes)
+	for _, o := range others {
+		if where := linesSharedNode(*line, o, nodes); where != "" {
+			return "「" + o.Name + "」(两条线路都部署在 " + where + ")"
+		}
+	}
+	return ""
+}
+
+// linesSharedNode 两条线路都部署到的第一台服务器名;没有交集返回空串。
+// 还没有服务器记录时按范围直接比:任一方是"全部"或 id 有交集即冲突。
+func linesSharedNode(a, b model.Line, nodes []model.Node) string {
+	if len(nodes) == 0 {
+		if len(a.NodeIds) == 0 || len(b.NodeIds) == 0 {
+			return "全部服务器"
+		}
+		var ia, ib []uint
+		_ = json.Unmarshal(a.NodeIds, &ia)
+		_ = json.Unmarshal(b.NodeIds, &ib)
+		for _, x := range ia {
+			for _, y := range ib {
+				if x == y {
+					return "服务器 #" + strconv.Itoa(int(x))
+				}
+			}
+		}
+		return ""
+	}
+	for _, n := range nodes {
+		if render.LineOnNode(a, n.Id) && render.LineOnNode(b, n.Id) {
+			return n.Name
+		}
+	}
+	return ""
+}
+
+// localNodeID 本机在 nodes 表里的 id(0 = 还没有本机记录)。
+func (s *Server) localNodeID() uint {
+	var n model.Node
+	if s.db.Select("id").Where("is_local = ?", true).First(&n).Error != nil {
+		return 0
+	}
+	return n.Id
 }
 
 // portChanged 这次保存是否动了线路端口(新建视为动过)。

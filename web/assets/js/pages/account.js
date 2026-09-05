@@ -21,7 +21,7 @@ export async function render(el) {
         <dt>${t('rs.speed')}</dt><dd class="num">${(me.speedUp || me.speedDown) ? `${me.speedUp || '∞'} / ${me.speedDown || '∞'} Mbps` : t('common.unlimited')}</dd>
         <dt>${t('user.expiry')}</dt><dd>${me.expiry ? fmtDay(me.expiry) : t('user.never')}</dd>
         <dt>${t('rs.online')}</dt><dd class="num">${me.online}</dd>
-        <dt>${t('rs.users')}</dt><dd class="num">${me.users}</dd>
+        <dt>${t('rs.users')}</dt><dd class="num">${me.users} / ${me.userLimit || '∞'}</dd>
       </dl>
     </section>
 
