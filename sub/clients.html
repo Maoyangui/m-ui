@@ -32,6 +32,8 @@
 .app:not(.rec) p{font-size:.82rem;margin-bottom:.55rem}
 .badge{font-size:.66rem;font-weight:600;line-height:1;padding:.22rem .45rem;border-radius:999px;background:var(--soft);color:var(--primary);border:1px solid color-mix(in srgb,var(--primary) 35%,transparent)}
 .fmt{font-size:.68rem;font-weight:400;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:.14rem .4rem;margin-left:auto;white-space:nowrap}
+.dl.mirror small{font-size:.66rem;color:var(--primary);background:var(--soft);border-radius:5px;padding:.08rem .3rem;margin-left:.1rem}
+.mirror-note{margin:.8rem 0 0;font-size:.74rem;color:var(--muted);line-height:1.45}
 .dls{display:flex;flex-wrap:wrap;gap:.5rem}
 .dl{display:inline-flex;align-items:center;gap:.35rem;text-decoration:none;border:1px solid var(--border);border-radius:9px;padding:.42rem .7rem;font-size:.82rem;color:var(--text);background:var(--card);white-space:nowrap}
 .dl:hover{border-color:var(--primary)}
@@ -60,10 +62,11 @@
         <h2>{{.Name}}{{if .Recommended}} <span class="badge">{{if eq $.Lang "zh"}}推荐{{else}}Recommended{{end}}</span>{{end}}<span class="fmt">{{.Format}}</span></h2>
         <p>{{.Desc}}</p>
         <div class="dls">
-          {{range .Links}}<a class="dl{{if .Primary}} primary{{end}}{{if .Muted}} muted{{end}}" href="{{.Href}}" target="_blank" rel="noopener noreferrer">{{.Text}}</a>{{end}}
+          {{range .Links}}<a class="dl{{if .Primary}} primary{{end}}{{if .Muted}} muted{{end}}{{if .Mirror}} mirror{{end}}" href="{{.Href}}" target="_blank" rel="noopener noreferrer"{{if .Mirror}} title="{{$.MirrorHint}}"{{end}}>{{.Text}}{{if .Mirror}}<small>{{if eq $.Lang "zh"}}大陆可用{{else}}CN OK{{end}}</small>{{end}}</a>{{end}}
         </div>
       </section>
       {{end}}
+      {{if .MirrorNote}}<p class="mirror-note">{{.MirrorNote}}</p>{{end}}
     </div>
     {{end}}
   </div>

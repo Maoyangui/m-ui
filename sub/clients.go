@@ -5,6 +5,7 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
@@ -37,6 +38,7 @@ type dl struct {
 	Href    template.URL
 	Primary bool
 	Muted   bool // 次要入口(镜像 / 全部版本),弱化显示
+	Mirror  bool // 国内镜像:同一个文件经 ghfast.top 中转,大陆网络环境可直接下载
 }
 
 // clientApp 是某个系统上的一款客户端。
@@ -49,19 +51,82 @@ type clientApp struct {
 }
 
 type clientTile struct {
-	Key  string // ios / android / windows / macos / linux
-	Icon template.HTML
-	OS   string // 图标下方那行系统名
-	Apps []clientApp
+	Key        string // ios / android / windows / macos / linux
+	Icon       template.HTML
+	OS         string // 图标下方那行系统名
+	Apps       []clientApp
+	MirrorNote string // 这块里有镜像链接时,面板底部的一行说明
 }
 
 type clientsData struct {
-	Lang  string
-	Icon  template.URL
-	Title string
-	Back  string // 返回订阅页
-	Tiles []clientTile
-	Year  int
+	Lang       string
+	Icon       template.URL
+	Title      string
+	Back       string // 返回订阅页
+	Tiles      []clientTile
+	Year       int
+	MirrorHint string // 镜像按钮的悬停提示
+}
+
+// mirrorOf 把 GitHub 直链换成镜像站直链;不是 GitHub 的(App Store)没有镜像。
+func mirrorOf(href template.URL) template.URL {
+	if !strings.HasPrefix(string(href), "https://github.com/") {
+		return ""
+	}
+	return template.URL(ghMirror + string(href))
+}
+
+// addMirrors 给每款客户端补一个首选包的国内镜像(已经写了的不重复),并给有镜像的系统块配一行说明。
+// 放在数据之后统一处理,新增客户端时不会漏掉。
+func addMirrors(tiles []clientTile, zh bool) []clientTile {
+	text := "国内镜像下载"
+	note := "「国内镜像下载」经 ghfast.top 中转,大陆网络环境可直接下载,文件与官方发布页相同;App Store 应用没有镜像。"
+	if !zh {
+		text = "China mirror"
+		note = "“China mirror” links are the same files proxied by ghfast.top, so they download from mainland China; App Store apps have no mirror."
+	}
+	for ti := range tiles {
+		has := false
+		for ai := range tiles[ti].Apps {
+			app := &tiles[ti].Apps[ai]
+			var primary template.URL
+			hasMirror := false
+			for _, l := range app.Links {
+				if l.Primary {
+					primary = l.Href
+				}
+				if l.Mirror {
+					hasMirror = true
+				}
+			}
+			if !hasMirror {
+				if m := mirrorOf(primary); m != "" {
+					// 插在"全部版本"之前:主包、次包、镜像、全部版本
+					links := make([]dl, 0, len(app.Links)+1)
+					inserted := false
+					for _, l := range app.Links {
+						if l.Muted && !inserted {
+							links = append(links, dl{Text: text, Href: m, Muted: true, Mirror: true})
+							inserted = true
+						}
+						links = append(links, l)
+					}
+					if !inserted {
+						links = append(links, dl{Text: text, Href: m, Muted: true, Mirror: true})
+					}
+					app.Links = links
+					hasMirror = true
+				}
+			}
+			if hasMirror {
+				has = true
+			}
+		}
+		if has {
+			tiles[ti].MirrorNote = note
+		}
+	}
+	return tiles
 }
 
 func gh(repo, tag, file string) template.URL {
@@ -101,7 +166,7 @@ func clientTiles(lang string) []clientTile {
 	fClash, fSing, fAny := pick("Clash 地址", "Clash link"), pick("sing-box 地址", "sing-box link"), pick("通用地址", "universal link")
 	mirror, all := pick("国内镜像下载", "China mirror"), pick("全部版本", "All releases")
 	const verge, cmfa, flclash, singbox, hiddify, v2rayn = "clash-verge-rev/clash-verge-rev", "MetaCubeX/ClashMetaForAndroid", "chen08209/FlClash", "SagerNet/sing-box", "hiddify/hiddify-app", "2dust/v2rayN"
-	return []clientTile{
+	tiles := []clientTile{
 		{
 			Key: "ios", Icon: template.HTML(iconApple), OS: "iOS / iPadOS / Apple TV",
 			Apps: []clientApp{
@@ -128,7 +193,7 @@ func clientTiles(lang string) []clientTile {
 					Links: []dl{
 						{Text: pick("APK 通用版 v"+verCMFA, "APK universal v"+verCMFA), Href: gh(cmfa, "v"+verCMFA, "cmfa-"+verCMFA+"-meta-universal-release.apk"), Primary: true},
 						{Text: pick("APK arm64 版", "APK arm64"), Href: gh(cmfa, "v"+verCMFA, "cmfa-"+verCMFA+"-meta-arm64-v8a-release.apk")},
-						{Text: mirror, Href: ghm(cmfa, "v"+verCMFA, "cmfa-"+verCMFA+"-meta-universal-release.apk"), Muted: true},
+						{Text: mirror, Mirror: true, Href: ghm(cmfa, "v"+verCMFA, "cmfa-"+verCMFA+"-meta-universal-release.apk"), Muted: true},
 						{Text: all, Href: ghLatest(cmfa), Muted: true},
 					}},
 				{Name: "sing-box (SFA)", Format: fSing,
@@ -165,7 +230,7 @@ func clientTiles(lang string) []clientTile {
 					Links: []dl{
 						{Text: pick("Windows x64 安装包 v"+verVerge, "Windows x64 installer v"+verVerge), Href: gh(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_x64-setup.exe"), Primary: true},
 						{Text: pick("ARM64 安装包", "ARM64 installer"), Href: gh(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_arm64-setup.exe")},
-						{Text: mirror, Href: ghm(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_x64-setup.exe"), Muted: true},
+						{Text: mirror, Mirror: true, Href: ghm(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_x64-setup.exe"), Muted: true},
 						{Text: all, Href: ghLatest(verge), Muted: true},
 					}},
 				{Name: "FlClash", Format: fClash,
@@ -210,7 +275,7 @@ func clientTiles(lang string) []clientTile {
 					Links: []dl{
 						{Text: pick("Apple 芯片 (dmg) v"+verVerge, "Apple silicon (dmg) v"+verVerge), Href: gh(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_aarch64.dmg"), Primary: true},
 						{Text: pick("Intel 芯片 (dmg)", "Intel (dmg)"), Href: gh(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_x64.dmg")},
-						{Text: mirror, Href: ghm(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_aarch64.dmg"), Muted: true},
+						{Text: mirror, Mirror: true, Href: ghm(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_aarch64.dmg"), Muted: true},
 						{Text: all, Href: ghLatest(verge), Muted: true},
 					}},
 				{Name: "FlClash", Format: fClash,
@@ -247,7 +312,7 @@ func clientTiles(lang string) []clientTile {
 					Links: []dl{
 						{Text: "deb (amd64) v" + verVerge, Href: gh(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_amd64.deb"), Primary: true},
 						{Text: "rpm (x86_64) v" + verVerge, Href: gh(verge, "v"+verVerge, "Clash.Verge-"+verVerge+"-1.x86_64.rpm")},
-						{Text: mirror, Href: ghm(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_amd64.deb"), Muted: true},
+						{Text: mirror, Mirror: true, Href: ghm(verge, "v"+verVerge, "Clash.Verge_"+verVerge+"_amd64.deb"), Muted: true},
 						{Text: all, Href: ghLatest(verge), Muted: true},
 					}},
 				{Name: "FlClash", Format: fClash,
@@ -285,14 +350,19 @@ func clientTiles(lang string) []clientTile {
 			},
 		},
 	}
+	return addMirrors(tiles, zh)
 }
 
 // serveClients 输出客户端下载页。页面不带任何用户信息,Back 指回订阅页。
 func (s *Server) serveClients(w http.ResponseWriter, r *http.Request, subPath, key, title string) {
 	lang := pageLang(r)
+	hint := "经 ghfast.top 镜像中转,大陆网络环境可直接下载;文件与官方发布页相同"
+	if lang != "zh" {
+		hint = "Same file proxied by ghfast.top; downloads from mainland China"
+	}
 	d := clientsData{
 		Lang: lang, Icon: template.URL(brand.DataURI), Title: title,
-		Back: publicBase(r, subPath, key), Tiles: clientTiles(lang), Year: time.Now().Year(),
+		Back: publicBase(r, subPath, key), Tiles: clientTiles(lang), Year: time.Now().Year(), MirrorHint: hint,
 	}
 	var buf bytes.Buffer
 	if err := clientsTmpl.Execute(&buf, d); err != nil {

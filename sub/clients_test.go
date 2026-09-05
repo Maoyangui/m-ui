@@ -55,9 +55,39 @@ func TestClientTiles(t *testing.T) {
 				if primary != 1 {
 					t.Fatalf("%s/%s/%s 首选包应恰好一个,实际 %d", lang, tile.Key, app.Name, primary)
 				}
+				// GitHub 上的客户端都要有且只有一个国内镜像(同一文件经镜像站),App Store 的没有
+				mirrors, ghPrimary := 0, false
+				for _, l := range app.Links {
+					if l.Primary && strings.HasPrefix(string(l.Href), "https://github.com/") {
+						ghPrimary = true
+					}
+					if l.Mirror {
+						mirrors++
+						if !strings.HasPrefix(string(l.Href), ghMirror+"https://github.com/") || !l.Muted {
+							t.Fatalf("%s/%s/%s 镜像链接不对: %+v", lang, tile.Key, app.Name, l)
+						}
+					}
+				}
+				if ghPrimary && mirrors != 1 {
+					t.Fatalf("%s/%s/%s 应恰好一个国内镜像,实际 %d", lang, tile.Key, app.Name, mirrors)
+				}
+				if !ghPrimary && mirrors != 0 {
+					t.Fatalf("%s/%s/%s 不是 GitHub 发布的,不该有镜像", lang, tile.Key, app.Name)
+				}
 			}
 			if rec != 1 {
 				t.Fatalf("%s/%s 推荐项应恰好一款,实际 %d", lang, tile.Key, rec)
+			}
+			anyMirror := false
+			for _, app := range tile.Apps {
+				for _, l := range app.Links {
+					if l.Mirror {
+						anyMirror = true
+					}
+				}
+			}
+			if anyMirror != (tile.MirrorNote != "") {
+				t.Fatalf("%s/%s 镜像说明与镜像链接不一致(有链接=%v,有说明=%v)", lang, tile.Key, anyMirror, tile.MirrorNote != "")
 			}
 		}
 	}
