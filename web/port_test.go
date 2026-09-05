@@ -23,26 +23,26 @@ func TestLinePortConflictIsPerServer(t *testing.T) {
 	db.Create(&model.Node{Name: "副机B", ApiUrl: "http://b", Enabled: true, Sort: 3})
 
 	// 主机 + 副机A 上的 443
-	a := model.Line{Name: "HK-443", Protocol: "hysteria2", Port: 443, Enabled: true, NodeIds: []byte(`[1,2]`)}
+	a := model.Line{Name: "HK-443", Protocol: "hysteria2", Port: 30443, Enabled: true, NodeIds: []byte(`[1,2]`)}
 	if err := s.validateLine(&a); err != nil {
 		t.Fatalf("第一条 443 应通过: %v", err)
 	}
 	db.Create(&a)
 
 	// 只在副机B 上的 443:没有交集,放行(而且不测本机端口占用)
-	b := model.Line{Name: "B-443", Protocol: "hysteria2", Port: 443, Enabled: true, NodeIds: []byte(`[3]`)}
+	b := model.Line{Name: "B-443", Protocol: "hysteria2", Port: 30443, Enabled: true, NodeIds: []byte(`[3]`)}
 	if err := s.validateLine(&b); err != nil {
 		t.Fatalf("不同服务器上的同端口应放行: %v", err)
 	}
 	db.Create(&b)
 
 	// 全部服务器的 443:和上面两条都有交集
-	all := model.Line{Name: "ALL-443", Protocol: "hysteria2", Port: 443, Enabled: true}
+	all := model.Line{Name: "ALL-443", Protocol: "hysteria2", Port: 30443, Enabled: true}
 	if err := s.validateLine(&all); err == nil || !strings.Contains(err.Error(), "443") {
 		t.Fatalf("部署到全部服务器的同端口应被拒并点名: %v", err)
 	}
 	// 副机A + 副机B 的 443:和 HK-443 在副机A 上撞
-	ab := model.Line{Name: "AB-443", Protocol: "hysteria2", Port: 443, Enabled: true, NodeIds: []byte(`[2,3]`)}
+	ab := model.Line{Name: "AB-443", Protocol: "hysteria2", Port: 30443, Enabled: true, NodeIds: []byte(`[2,3]`)}
 	if err := s.validateLine(&ab); err == nil || !strings.Contains(err.Error(), "HK-443") || !strings.Contains(err.Error(), "副机A") {
 		t.Fatalf("应指出在副机A 上和 HK-443 冲突: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestLinePortConflictIsPerServer(t *testing.T) {
 	}
 	// 老库升级:曾经的全局唯一索引已去掉,同端口两条线路能同时存在
 	var n int64
-	db.Model(&model.Line{}).Where("port = ?", 443).Count(&n)
+	db.Model(&model.Line{}).Where("port = ?", 30443).Count(&n)
 	if n != 2 {
 		t.Fatalf("库里应有两条 443 线路,实际 %d", n)
 	}
