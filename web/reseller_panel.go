@@ -251,7 +251,7 @@ func (s *Server) handleResellerLogin(w http.ResponseWriter, r *http.Request) {
 		Secure: s.setting("resellerCertFile") != "" || s.setting("webCertFile") != "",
 	})
 	s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).
-		Update("last_logins", time.Now().Format("2006-01-02 15:04:05")+" "+ip)
+		Update("last_logins", time.Now().In(s.panelLocation()).Format("2006-01-02 15:04:05")+" "+ip) // 按面板时区显示,不用服务器本地时间
 	logger.Info("代理登录成功: ", rs.Name, " 来自 ", ip)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"username": rs.Name, "mustSetPassword": first})
 }

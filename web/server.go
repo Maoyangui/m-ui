@@ -477,7 +477,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.run.Notifier().Event("tgOnLogin", "🔐 <b>面板登录</b>:"+notify.Esc(admin.Username)+"\nIP:"+notify.Esc(clientIP(r))+"\n"+time.Now().Format("2006-01-02 15:04:05"))
+	s.run.Notifier().Event("tgOnLogin", "🔐 <b>面板登录</b>:"+notify.Esc(admin.Username)+"\nIP:"+notify.Esc(clientIP(r))+"\n"+time.Now().In(s.panelLocation()).Format("2006-01-02 15:04:05"))
 
 	token := s.newSession(admin.Username)
 	http.SetCookie(w, &http.Cookie{
@@ -485,7 +485,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		Secure: s.setting("webCertFile") != "",
 	})
-	stamp := time.Now().Format("2006-01-02 15:04:05") + " " + clientIP(r)
+	stamp := time.Now().In(s.panelLocation()).Format("2006-01-02 15:04:05") + " " + clientIP(r)
 	s.db.Model(&model.Admin{}).Where("id = ?", admin.Id).Update("last_logins", stamp)
 	logger.Info("面板登录成功: ", admin.Username, " 来自 ", clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]string{"username": admin.Username})
