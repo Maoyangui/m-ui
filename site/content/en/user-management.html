@@ -31,7 +31,7 @@
   <p>Bulk-create <i>N</i> users from a prefix and a plan; select across pages to enable, disable, extend, reset, apply a plan or delete; export CSV; import users from a legacy panel database. The user list is paginated and searchable so a few thousand users stay manageable.</p>
 
   <h2 id="resellers">Resellers</h2>
-  <p>Give a reseller a traffic, device and bandwidth budget, an expiry date and a set of lines. They get a separate panel where they create their own users and plans; all usage rolls up to their budget, and when it is exhausted or expired every user of theirs is cut off at once. Their users never appear in your list.</p>
+  <p>Give a reseller a traffic quota, a device pool, a bandwidth pool, an expiry date and a set of lines. They get a separate panel where they create their own users and plans; all usage rolls up to their budget, and when it is exhausted or expired every user of theirs is cut off at once. Their users never appear in your list.</p>
 
   <h2 id="enforce">How enforcement works</h2>
   <p>Every 10 seconds the panel reads traffic and online connections from the embedded core. Every minute it judges quota, expiry and periodic resets on the master. Users who fail are disabled in the database and removed from the next snapshot to every node, so enforcement is consistent fleet-wide within seconds and never depends on a node making its own decision. Read <a href="{{base}}articles/multi-server-sync/">how the sync protocol works</a>.</p>

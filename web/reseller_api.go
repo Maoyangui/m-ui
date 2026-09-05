@@ -20,12 +20,13 @@ import (
 
 type resellerRow struct {
 	model.Reseller
-	LineIds    []uint `json:"lineIds"`
-	NeedsClaim bool   `json:"needsClaim"` // 还没设过密码
-	Users      int    `json:"users"`
-	Used       int64  `json:"used"`    // 名下用户已用流量之和
-	Devices    int    `json:"devices"` // 名下用户设备上限之和
-	Online     int    `json:"online"`  // 当前在线设备数(去重 IP)
+	LineIds     []uint `json:"lineIds"`
+	NeedsClaim  bool   `json:"needsClaim"` // 还没设过密码
+	Users       int    `json:"users"`
+	Used        int64  `json:"used"`        // 名下用户已用流量之和
+	Devices     int    `json:"devices"`     // 名下用户设备上限之和
+	Online      int    `json:"online"`      // 当前在线设备数(去重 IP)= 设备池当前占用
+	PoolRejects int64  `json:"poolRejects"` // 最近 10 分钟因设备池满被拒的新设备连接数(所有机器合计)
 }
 
 func (s *Server) handleResellers(w http.ResponseWriter, r *http.Request) {
@@ -208,6 +209,9 @@ func (s *Server) resellerRowWith(rs model.Reseller, online map[string][]string) 
 	s.db.Raw(`SELECT COUNT(*) n, COALESCE(SUM(device_limit), 0) devices FROM users WHERE reseller_id = ?`, rs.Id).Scan(&agg)
 	row.Users, row.Used, row.Devices = int(agg.N), resellerUsed(s.db, rs), int(agg.Devices)
 	row.Online = len(s.resellerOnlineIPs(rs.Id, online))
+	if h := s.run.Hub(); h != nil {
+		row.PoolRejects = h.Rejects(model.ResellerGroup(rs.Id))
+	}
 	return row
 }
 

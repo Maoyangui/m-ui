@@ -1,6 +1,9 @@
 package model
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strconv"
+)
 
 // Setting 面板设置,key/value。角色开关也存这里:nodeMode=false 为主(HK),true 为副(TW)。
 type Setting struct {
@@ -117,9 +120,9 @@ type Reseller struct {
 	// 过了这个点仍未设密码就必须让主面板重新重置,否则账号会一直敞着等人认领。
 	ClaimBefore int64  `json:"claimBefore"`
 	Expiry      int64  `json:"expiry"`      // unix 秒,0=不限;到期后其用户一并停用
-	SpeedUp     int    `json:"speedUp"`     // 名下用户上行限速之和的上限,Mbps,0=不限
-	SpeedDown   int    `json:"speedDown"`   // 名下用户下行限速之和的上限,Mbps,0=不限
-	DeviceLimit int    `json:"deviceLimit"` // 名下用户设备上限之和的上限,0=不限
+	SpeedUp     int    `json:"speedUp"`     // 带宽池(上行):名下用户合计上行速率上限,每台服务器各一份,Mbps,0=不限
+	SpeedDown   int    `json:"speedDown"`   // 带宽池(下行),同上
+	DeviceLimit int    `json:"deviceLimit"` // 设备池:名下用户同时在线的不同设备(源 IP)总数上限,跨服务器并集,0=不限
 	Enabled     bool   `json:"enabled" gorm:"default:true"`
 	Remark      string `json:"remark"`
 	CreatedAt   int64  `json:"createdAt" gorm:"default:0;not null"`
@@ -138,6 +141,9 @@ type Reseller struct {
 // ShareSuffix 临时共享凭据在数据面里的名字后缀:sing-box 里叫 "alice#share",记账时去掉后缀归到 alice。
 // 这样取消共享只断借用者的连接,本人不受影响。"#" 是用户名里禁止的字符,不会撞名。
 const ShareSuffix = "#share"
+
+// ResellerGroup 代理在数据面里的池名(设备池 / 带宽池按它归组)。
+func ResellerGroup(id uint) string { return "r" + strconv.FormatUint(uint64(id), 10) }
 
 // Owner 把数据面里的名字换回面板用户名(去掉共享后缀)。
 func Owner(dataPlaneName string) string {

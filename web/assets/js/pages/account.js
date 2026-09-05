@@ -17,7 +17,7 @@ export async function render(el) {
       <div class="card-head"><h2>${t('acct.quota')}</h2><span class="muted small">${t('rs.lastLogin')}: ${esc(me.lastLogins || '—')}</span></div>
       <dl class="kv">
         <dt>${t('rs.used')}</dt><dd>${fmtBytes(me.used)} / ${me.volume ? fmtBytes(me.volume) : t('common.unlimited')}${progress(me.used, me.volume)}</dd>
-        <dt>${t('rs.devices')}</dt><dd class="num">${me.devices} / ${me.deviceLimit || '∞'}</dd>
+        <dt>${t('rs.pool')}</dt><dd class="num">${me.online} / ${me.deviceLimit || '∞'} <span class="muted small">${t('rs.allocated')} ${me.devices}</span>${me.poolRejects ? `<div class="muted small" style="color:var(--warn)">${esc(t('rs.poolFull', { n: me.poolRejects }))}</div>` : ''}</dd>
         <dt>${t('rs.speed')}</dt><dd class="num">${(me.speedUp || me.speedDown) ? `${me.speedUp || '∞'} / ${me.speedDown || '∞'} Mbps` : t('common.unlimited')}</dd>
         <dt>${t('user.expiry')}</dt><dd>${me.expiry ? fmtDay(me.expiry) : t('user.never')}</dd>
         <dt>${t('rs.online')}</dt><dd class="num">${me.online}</dd>

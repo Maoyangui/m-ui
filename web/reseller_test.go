@@ -52,18 +52,22 @@ func TestResellerScope(t *testing.T) {
 	}
 	db.Create(&u)
 
-	// 设备总额 5:再建一个 3 台就超了
+	// 设备池 5:分配时不再限制"之和",代理给用户填多少都行,0 也行(运行时由数据面按池限制)
 	u2 := model.User{Name: "u2", Enabled: true, DeviceLimit: 3}
-	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err == nil {
-		t.Fatal("设备数超额应被拒")
-	}
-	u2.DeviceLimit = 2
 	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err != nil {
-		t.Fatalf("刚好用满应通过: %v", err)
+		t.Fatalf("分配超过池上限也应通过(运行时按池限): %v", err)
+	}
+	u2.DeviceLimit = 99
+	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err != nil {
+		t.Fatalf("单个用户的上限可以比池大: %v", err)
 	}
 	u2.DeviceLimit = 0
+	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err != nil {
+		t.Fatalf("用户可以不限设备,只受池限: %v", err)
+	}
+	u2.DeviceLimit = -1
 	if err := s.checkResellerUser(a.Id, 0, &u2, []uint{1}); err == nil {
-		t.Fatal("代理有设备总额时,用户不能不限设备")
+		t.Fatal("负数仍应被拒")
 	}
 	// 改自己这个用户时,先扣掉它原来的占用
 	u.DeviceLimit = 5
@@ -200,8 +204,8 @@ func TestResellerPlanRespectsLines(t *testing.T) {
 		t.Fatal("套餐里的未授权线路应被拒")
 	}
 	over := model.Plan{Name: "over", ResellerId: rs.Id, DeviceLimit: 9, LineIds: []byte(`[1]`)}
-	if err := s.checkResellerPlan(rs.Id, u, over); err == nil {
-		t.Fatal("套餐撑破设备总额应被拒")
+	if err := s.checkResellerPlan(rs.Id, u, over); err != nil {
+		t.Fatalf("套餐设备数超过池上限也应通过(运行时按池限): %v", err)
 	}
 	ok := model.Plan{Name: "ok", ResellerId: rs.Id, DeviceLimit: 3, LineIds: []byte(`[1]`)}
 	if err := s.checkResellerPlan(rs.Id, u, model.Plan{Name: "master", LineIds: []byte(`[1]`)}); err == nil {

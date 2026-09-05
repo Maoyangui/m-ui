@@ -298,8 +298,15 @@ type Report struct {
 	OnlineLinesByIP map[string]map[string][]string `json:"onlineLinesByIp,omitempty"` // 用户 → 源 IP → 线路名
 	OnlineLines     []string                       `json:"onlineLines"`
 	CertDays        int                            `json:"certDays"`
-	PublicIP        string                         `json:"publicIp"`        // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
-	Conns           []RecentConn                   `json:"conns,omitempty"` // 最近入站连接,主机概览汇总展示
+	PublicIP        string                         `json:"publicIp"`         // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
+	Conns           []RecentConn                   `json:"conns,omitempty"`  // 最近入站连接,主机概览汇总展示
+	Groups          map[string]GroupState          `json:"groups,omitempty"` // 代理池在这台机器上的状态(在线设备、设备池满被拒次数)
+}
+
+// GroupState 一个代理池在某台机器上的状态。
+type GroupState struct {
+	Devices int   `json:"devices"`
+	Rejects int64 `json:"rejects"` // 自上次上报以来设备池满被拒的新设备连接数
 }
 
 // ApplyCounters 把副机的单调账本按游标并入主机:只计增量;计数器回绕(副机重装)时游标归零重认。
@@ -418,6 +425,7 @@ type Deps struct {
 	Notify         func(toggle, text string)
 	LocalIPs       func(user string) []string // 主机本机在线 IP,用于合并下发
 	SetExternalIPs func(map[string][]string)
+	LocalGroups    func() map[string]GroupState // 主机本机的代理池状态(与副机上报的合并给面板看)
 }
 
 type Hub struct {
@@ -433,11 +441,20 @@ type Hub struct {
 	stop        chan struct{}
 	wg          sync.WaitGroup
 	clients     map[bool]*http.Client
+	// rejects 各代理池最近被拒的新设备连接(主机 + 各副机上报),只留 rejectWindow 内的,面板给代理看"设备池已满"
+	rejects map[string][]rejectAt
 }
+
+type rejectAt struct {
+	at int64
+	n  int64
+}
+
+const rejectWindow = 10 * 60 // 秒
 
 func New(d Deps) *Hub {
 	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{},
-		remoteLines: map[uint]map[string]map[string][]string{}, nodeNames: map[uint]string{}, stop: make(chan struct{}),
+		remoteLines: map[uint]map[string]map[string][]string{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
 		clients: map[bool]*http.Client{
 			false: {Timeout: 25 * time.Second},
 			true:  {Timeout: 25 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}},
@@ -553,6 +570,54 @@ func (h *Hub) tick() {
 	}
 	h.forgetNodes(live)
 	h.distributeIPs(nodes)
+	// 代理池被拒次数:主机本机 + 各副机这一轮上报的,合起来记 10 分钟
+	if h.d.LocalGroups != nil {
+		h.recordRejects(h.d.LocalGroups())
+	}
+	for _, r := range results {
+		if r != nil && r.err == "" {
+			h.recordRejects(r.rep.Groups)
+		}
+	}
+}
+
+// recordRejects 把一台机器这一轮上报的设备池被拒次数记进滚动窗口。
+func (h *Hub) recordRejects(groups map[string]GroupState) {
+	now := time.Now().Unix()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for g, st := range groups {
+		if st.Rejects > 0 {
+			h.rejects[g] = append(h.rejects[g], rejectAt{at: now, n: st.Rejects})
+		}
+	}
+	for g, list := range h.rejects {
+		keep := list[:0]
+		for _, x := range list {
+			if now-x.at <= rejectWindow {
+				keep = append(keep, x)
+			}
+		}
+		if len(keep) == 0 {
+			delete(h.rejects, g)
+		} else {
+			h.rejects[g] = keep
+		}
+	}
+}
+
+// Rejects 某代理池最近 10 分钟内因设备池满被拒的新设备连接数(所有机器合计)。
+func (h *Hub) Rejects(group string) int64 {
+	now := time.Now().Unix()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var n int64
+	for _, x := range h.rejects[group] {
+		if now-x.at <= rejectWindow {
+			n += x.n
+		}
+	}
+	return n
 }
 
 // syncNode 一台副机的网络部分:该推就推,再拉报告。不碰数据库,可以和别的机器并发。
@@ -598,8 +663,9 @@ func (h *Hub) distributeIPs(nodes []model.Node) {
 		remote[id] = m
 	}
 	h.mu.Unlock()
+	// 需要跨机并集的用户:自己有设备数限制的,以及所属代理有设备池的(池按名下所有用户的 IP 并集判定)
 	var users []model.User
-	h.d.DB.Where("device_limit > 0").Find(&users)
+	h.d.DB.Where("device_limit > 0 OR reseller_id IN (SELECT id FROM resellers WHERE device_limit > 0)").Find(&users)
 	if len(users) == 0 {
 		if h.d.SetExternalIPs != nil {
 			h.d.SetExternalIPs(map[string][]string{})

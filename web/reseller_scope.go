@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -135,31 +134,10 @@ func (s *Server) checkResellerUser(rid, id uint, u *model.User, lineIds []uint) 
 	if rs.Expiry > 0 && rs.Expiry < time.Now().Unix() {
 		return errors.New("代理已到期")
 	}
-	// 设备与带宽都是"分配预算":名下用户分到的额度之和不得超过代理总额
-	budgets := []struct {
-		col, label string
-		cap, want  int
-	}{
-		{"device_limit", "设备数", rs.DeviceLimit, u.DeviceLimit},
-		{"speed_up", "上行带宽", rs.SpeedUp, u.SpeedUp},
-		{"speed_down", "下行带宽", rs.SpeedDown, u.SpeedDown},
-	}
-	for _, b := range budgets {
-		if b.cap <= 0 {
-			continue
-		}
-		if b.want <= 0 {
-			return fmt.Errorf("必须设置%s(代理总额 %d)", b.label, b.cap)
-		}
-		var used int64
-		q := s.db.Model(&model.User{}).Where("reseller_id = ?", rid)
-		if id != 0 {
-			q = q.Where("id != ?", id)
-		}
-		q.Select("COALESCE(SUM(" + b.col + "),0)").Scan(&used)
-		if int(used)+b.want > b.cap {
-			return fmt.Errorf("%s超出代理额度:已分配 %d,总额 %d", b.label, used, b.cap)
-		}
+	// 设备数与带宽不再是"分配预算":代理给单个用户填多少都行(0=不限),运行时由数据面按代理池限制 ——
+	// 名下所有用户同时在线的设备总数不超过代理的设备池,合计带宽不超过代理的带宽池(每台服务器各一份)。
+	if u.DeviceLimit < 0 || u.SpeedUp < 0 || u.SpeedDown < 0 {
+		return errors.New("设备数与限速不能为负")
 	}
 	if rs.Volume > 0 && resellerUsed(s.db, rs) >= rs.Volume {
 		return errors.New("代理流量已用尽")

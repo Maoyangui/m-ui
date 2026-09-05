@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
 )
@@ -145,7 +144,7 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			for _, name := range revoked {
-				if n := s.run.KickUser(name); n > 0 {
+				if n := s.run.KickShare(name); n > 0 {
 					logger.Info("临时共享已取消,断开 ", name, " 的 ", n, " 条连接")
 				}
 			}
@@ -164,20 +163,17 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		Conns:    s.recentConns(50),
 	}
 	rep.OnlineLinesByIP = s.run.OnlineIPLines()
+	rep.Groups = s.run.GroupState()
 	s.db.Find(&rep.Counters)
 	o := s.run.Onlines()
 	allIPs := s.run.OnlineIPsAll() // 一次锁拿全量,不按用户逐个抢数据面的锁
 	for _, u := range o.Users {
 		rep.Onlines[u] = allIPs[u]
 	}
-	// 设备数限制的用户即使本周期无流量,其仍在线的 IP 也要上报
-	var limited []model.User
-	s.db.Where("device_limit > 0").Find(&limited)
-	for _, u := range limited {
-		if _, ok := rep.Onlines[u.Name]; !ok {
-			if ips := allIPs[u.Name]; len(ips) > 0 {
-				rep.Onlines[u.Name] = ips
-			}
+	// 本周期没流量但仍在线(空闲窗口内)的 IP 也要上报:用户自己的设备数限制、代理设备池都要靠它跨机并集判定
+	for u, ips := range allIPs {
+		if _, ok := rep.Onlines[u]; !ok && len(ips) > 0 {
+			rep.Onlines[u] = ips
 		}
 	}
 	rep.OnlineLines = o.Lines

@@ -61,7 +61,7 @@ function renderRows() {
     <td>${statusBadge(r)}${r.totpEnabled ? ' ' + badge('2FA', 'primary') : ''}${claimBadge(r)}</td>
     <td class="num">${r.users}</td>
     <td class="num">${fmtBytes(r.used)}${r.volume ? ' / ' + fmtBytes(r.volume) : ''}${progress(r.used, r.volume)}</td>
-    <td class="num">${r.devices}${r.deviceLimit ? ' / ' + r.deviceLimit : ''}</td>
+    <td class="num">${r.online} / ${r.deviceLimit || '∞'}${r.poolRejects ? ' <span class="badge warn" title="' + esc(t('rs.poolFull', { n: r.poolRejects })) + '">!</span>' : ''}</td>
     <td class="num">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'}/${r.speedDown || '∞'} M` : '∞'}</td>
     <td class="${expired(r) ? 'danger' : ''}">${r.expiry ? fmtDay(r.expiry) : `<span class="muted small">${t('user.never')}</span>`}</td>
     <td class="num">${r.online}</td>
@@ -86,7 +86,7 @@ async function showDetail(id) {
       <h3>${t('rs.quota')}</h3>
       <dl class="kv">
         <dt>${t('rs.used')}</dt><dd>${fmtBytes(r.used)} / ${r.volume ? fmtBytes(r.volume) : t('common.unlimited')}${progress(r.used, r.volume)}</dd>
-        <dt>${t('rs.devices')}</dt><dd class="num">${r.devices} / ${r.deviceLimit || '∞'}</dd>
+        <dt>${t('rs.pool')}</dt><dd class="num">${r.online} / ${r.deviceLimit || '∞'} <span class="muted small">${t('rs.allocated')} ${r.devices}</span>${r.poolRejects ? `<div class="muted small" style="color:var(--warn)">${esc(t('rs.poolFull', { n: r.poolRejects }))}</div>` : ''}</dd>
         <dt>${t('rs.speed')}</dt><dd class="num">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'} / ${r.speedDown || '∞'} Mbps` : t('common.unlimited')}</dd>
         <dt>${t('user.expiry')}</dt><dd>${r.expiry ? fmtDay(r.expiry) : t('user.never')}</dd>
         <dt>${t('rs.online')}</dt><dd class="num">${r.online}</dd>

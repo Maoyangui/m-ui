@@ -134,6 +134,7 @@ func New(dbPath string) (*Runner, error) {
 		Notify:         func(toggle, text string) { r.notifier.Event(toggle, text) },
 		LocalIPs:       r.OnlineIPs,
 		SetExternalIPs: r.SetExternalIPs,
+		LocalGroups:    r.GroupState,
 	})
 	r.ensureAdmin()
 	r.ensureLocalNode()
@@ -604,21 +605,44 @@ func (r *Runner) applyLimits() {
 	if box == nil {
 		return
 	}
+	// 代理池:设备池跨机并集判定,带宽池每台服务器各一份(带宽是单机物理量,和用户限速同一逻辑)
+	var resellers []model.Reseller
+	r.db.Find(&resellers)
+	groups := map[string]core.GroupLimitSpec{}
+	for _, rs := range resellers {
+		if rs.DeviceLimit > 0 || rs.SpeedUp > 0 || rs.SpeedDown > 0 {
+			groups[model.ResellerGroup(rs.Id)] = core.GroupLimitSpec{UpMbps: rs.SpeedUp, DownMbps: rs.SpeedDown, DeviceLimit: rs.DeviceLimit}
+		}
+	}
 	specs := make(map[string]core.UserLimitSpec, len(users))
 	for _, u := range users {
-		if u.SpeedUp == 0 && u.SpeedDown == 0 && u.DeviceLimit == 0 {
+		spec := core.UserLimitSpec{UpMbps: u.SpeedUp, DownMbps: u.SpeedDown, DeviceLimit: u.DeviceLimit}
+		if u.ResellerId > 0 {
+			if g := model.ResellerGroup(u.ResellerId); groups[g].DeviceLimit > 0 || groups[g].UpMbps > 0 || groups[g].DownMbps > 0 {
+				spec.Group = g
+			}
+		}
+		if spec.UpMbps == 0 && spec.DownMbps == 0 && spec.DeviceLimit == 0 && spec.Group == "" {
 			continue
 		}
-		specs[u.Name] = core.UserLimitSpec{
-			UpMbps:      u.SpeedUp,
-			DownMbps:    u.SpeedDown,
-			DeviceLimit: u.DeviceLimit,
+		specs[u.Name] = spec
+	}
+	box.Limiter().SetGroups(groups)
+	box.Limiter().SetLimits(specs)
+	if len(specs) > 0 || len(groups) > 0 {
+		logger.Info("已应用 ", len(specs), " 个用户的限速/设备数策略,", len(groups), " 个代理池")
+	}
+}
+
+// GroupState 各代理池在本机的状态(在线设备数、设备池满被拒次数),供 Hub 汇总给面板。
+func (r *Runner) GroupState() map[string]hub.GroupState {
+	out := map[string]hub.GroupState{}
+	if box := r.core.GetInstance(); box != nil {
+		for g, s := range box.Limiter().GroupState() {
+			out[g] = hub.GroupState{Devices: s.Devices, Rejects: s.Rejects}
 		}
 	}
-	box.Limiter().SetLimits(specs)
-	if len(specs) > 0 {
-		logger.Info("已应用 ", len(specs), " 个用户的限速/设备数策略")
-	}
+	return out
 }
 
 func (r *Runner) Stop() {
