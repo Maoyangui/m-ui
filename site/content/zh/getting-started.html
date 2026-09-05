@@ -2,12 +2,13 @@
 <article class="doc">
   <h1>快速上手</h1>
   <p class="lead">一条命令把面板和内嵌的 sing-box 装成 systemd 服务。五分钟后,第一个用户就能导入订阅。</p>
-  <nav class="toc"><a href="#install">安装</a><a href="#login">首次登录</a><a href="#cert">证书</a><a href="#line">线路</a><a href="#user">用户</a><a href="#sub">订阅</a><a href="#upgrade">升级</a><a href="#uninstall">卸载</a></nav>
+  <nav class="toc"><a href="#install">安装</a><a href="#login">首次登录</a><a href="#cert">证书</a><a href="#line">线路</a><a href="#user">用户</a><a href="#sub">订阅</a><a href="#tested">自动测试</a><a href="#upgrade">升级</a><a href="#uninstall">卸载</a></nav>
 
   <h2 id="install">1. 安装</h2>
   <p>任何带 systemd 的 Linux,amd64 或 arm64(推荐 Debian 11+ / Ubuntu 20.04+),root 运行:</p>
   <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
   <p>脚本下载最新 Release,用同一个 Release 里的 <code>SHA256SUMS</code> 校验,装到 <code>/usr/local/bin/m-ui</code>,创建 systemd 服务并启动。数据库在 <code>/etc/m-ui/m-ui.db</code>。除此之外什么都不装 —— 没有 Docker、没有 Node、没有外部数据库。</p>
+  <p>还没想好?同一条命令后面加 <code>--dry-run</code>:打印会装到哪、写哪些文件、默认端口,什么都不改。</p>
   <div class="note">从旧面板过来?安装时加 <code>--import /path/to/旧面板.db</code>,线路、上游、用户、设置一次带过来 —— 端口、凭据、订阅路径都保留,既有客户端不用刷新订阅就能继续连。线路已经在 m-ui 上重建好、只想搬用户,用 <b>用户 → 从旧面板导入</b>。</div>
 
   <h2 id="login">2. 首次登录</h2>
@@ -42,12 +43,17 @@
   </ul>
   <p>用浏览器打开同一个地址就是落地页:用量、到期、一键导入、二维码、客户端下载。你允许的话,用户还能在那里生成临时共享地址。订阅用完、到期或被停用时,浏览器里看到的是一句说明和你的联系方式,不是一片空白的 404。</p>
 
+  <h2 id="tested">自动测试过的平台</h2>
+  <p>安装脚本或 Go 代码每次改动,<a href="{{github}}/actions/workflows/install-test.yml" rel="noopener">install-test</a> 工作流都会在全新的 GitHub 托管机器上跑一遍:官方一行安装命令、服务起来、面板在 2053 端口返回 200、再装一次(升级路径)、卸载。下面这份列表由最近一次完成的运行结果生成,不是手写的。</p>
+  {{tested}}
+
   <h2 id="upgrade">升级</h2>
   <p>点侧栏版本号旁边的更新箭头(面板每 6 小时查一次 GitHub Releases),或者再跑一遍安装命令,或者在 <code>m-ui</code> 菜单里选「更新到最新版」。只换程序本体;数据库、证书、设置都不动。</p>
 
   <h2 id="uninstall">卸载</h2>
-  <pre><code>m-ui   # 菜单选 14</code></pre>
-  <p>服务与程序会被删掉;菜单会问要不要连 <code>/etc/m-ui</code> 数据目录一起删。</p>
+  <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --uninstall</code></pre>
+  <p>停掉并删除服务和程序;<code>/etc/m-ui</code>(数据库、证书、备份)保留,之后重新安装会原样接上。要一起删掉数据目录,加 <code>--purge</code>。SSH 菜单 <code>m-ui</code> 里的"卸载"效果相同,会问你要不要删数据目录。别的东西一概不碰:m-ui 从不改动机器上已有的 sing-box、Xray、Docker 或 nginx。</p>
+
 
   <p style="margin-top:2rem">下一步:<a href="{{base}}zh/multi-server/">加更多服务器</a> · <a href="{{base}}zh/features/">面板还能做什么</a> · <a href="{{base}}zh/faq/">常见问题</a></p>
 </article>

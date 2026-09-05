@@ -2,6 +2,8 @@
 # m-ui 安装/升级脚本(Linux amd64/arm64,systemd)
 #
 #   bash install.sh [latest | vX.Y.Z | 二进制/压缩包路径 | 下载 URL] [--db /etc/m-ui/m-ui.db] [--restore backup.zip] [--import 旧面板.db]
+#   bash install.sh --dry-run              只打印会做什么(装到哪、写哪些文件、默认端口),不改任何东西
+#   bash install.sh --uninstall [--purge]  停止并删除服务与程序;不带 --purge 时保留 /etc/m-ui(数据库、证书、备份)
 #
 #   不带来源参数 = 从 GitHub Releases 安装最新版(自动识别 amd64 / arm64)。
 #
@@ -14,18 +16,48 @@ if [ $# -gt 0 ] && [[ "$1" != --* ]]; then SRC="$1"; shift; fi
 DB="/etc/m-ui/m-ui.db"
 RESTORE=""
 IMPORT=""
+DRY=0
+UNINSTALL=0
+PURGE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --db) DB="$2"; shift 2;;
     --restore) RESTORE="$2"; shift 2;;
     --import) IMPORT="$2"; shift 2;;
+    --dry-run) DRY=1; shift;;
+    --uninstall) UNINSTALL=1; shift;;
+    --purge) PURGE=1; shift;;
     *) echo "未知参数 $1"; exit 2;;
   esac
 done
 
-[ "$(id -u)" -eq 0 ] || { echo "请以 root 运行"; exit 1; }
-command -v systemctl >/dev/null || { echo "需要 systemd"; exit 1; }
-command -v curl >/dev/null || { echo "需要 curl"; exit 1; }
+# 卸载:与面板菜单里的"卸载"一致 —— 停服务、删单元与程序;数据目录默认保留,--purge 才删
+if [ "$UNINSTALL" = 1 ]; then
+  [ "$DRY" = 1 ] || [ "$(id -u)" -eq 0 ] || { echo "请以 root 运行"; exit 1; }
+  DATA_DIR="$(dirname "$DB")"
+  if [ "$DRY" = 1 ]; then
+    echo "[dry-run] 将执行:systemctl disable --now m-ui;删除 /etc/systemd/system/m-ui.service 与 /usr/local/bin/m-ui"
+    [ "$PURGE" = 1 ] && echo "[dry-run] --purge:同时删除 $DATA_DIR(数据库、证书、备份)" || echo "[dry-run] 保留 $DATA_DIR(数据库、证书、备份)"
+    exit 0
+  fi
+  systemctl disable --now m-ui 2>/dev/null || true
+  rm -f /etc/systemd/system/m-ui.service
+  systemctl daemon-reload 2>/dev/null || true
+  rm -f /usr/local/bin/m-ui
+  if [ "$PURGE" = 1 ]; then rm -rf "$DATA_DIR"; echo "m-ui 已卸载,数据目录 $DATA_DIR 已删除"; else echo "m-ui 已卸载;数据目录 $DATA_DIR 已保留(数据库、证书、备份),重新安装即可恢复"; fi
+  exit 0
+fi
+
+if [ "$DRY" = 1 ]; then
+  echo "[dry-run] 不会修改任何文件。检查环境:"
+  [ "$(id -u)" -eq 0 ] && echo "  root:是" || echo "  root:否(真正安装需要 root)"
+  command -v systemctl >/dev/null && echo "  systemd:有" || echo "  systemd:无(真正安装需要 systemd)"
+  command -v curl >/dev/null && echo "  curl:有" || echo "  curl:无(真正安装需要 curl)"
+else
+  [ "$(id -u)" -eq 0 ] || { echo "请以 root 运行"; exit 1; }
+  command -v systemctl >/dev/null || { echo "需要 systemd"; exit 1; }
+  command -v curl >/dev/null || { echo "需要 curl"; exit 1; }
+fi
 
 # 不带来源 / latest / vX.Y.Z:从 GitHub Releases 取对应架构的压缩包
 if [ -z "$SRC" ] || [ "$SRC" = "latest" ] || [[ "$SRC" == v[0-9]* ]]; then
@@ -48,6 +80,21 @@ if [ -z "$SRC" ] || [ "$SRC" = "latest" ] || [[ "$SRC" == v[0-9]* ]]; then
   SRC="https://github.com/$REPO/releases/download/$TAG/m-ui-linux-$ARCH.tar.gz"
   SUMS="https://github.com/$REPO/releases/download/$TAG/SHA256SUMS"
   echo "安装 m-ui $TAG ($ARCH)"
+fi
+
+if [ "$DRY" = 1 ]; then
+  echo "[dry-run] 计划:"
+  echo "  来源:$SRC"
+  [ -n "${SUMS:-}" ] && echo "  校验:$SUMS(SHA256 不一致则中止)"
+  echo "  程序:/usr/local/bin/m-ui(已存在则覆盖,先停服务)"
+  echo "  数据:$DB;目录 $(dirname "$DB")、$(dirname "$DB")/cert、$(dirname "$DB")/backups(已存在的数据库、证书不动)"
+  echo "  服务:/etc/systemd/system/m-ui.service(root 运行 m-ui run -db $DB,Restart=always),然后 systemctl enable --now m-ui"
+  echo "  端口:面板 2053/tcp 路径 /app/,订阅 2056/tcp,代理面板 2054/tcp(首次安装的默认值,面板里可改)"
+  echo "  首次安装账号:admin / admin(登录后请改)"
+  echo "  不会碰:系统里已有的 sing-box / xray 等程序与它们的配置、防火墙规则、其它服务"
+  [ -n "$RESTORE" ] && echo "  还原备份:$RESTORE → $DB"
+  [ -n "$IMPORT" ] && echo "  导入旧面板库:$IMPORT → $DB"
+  exit 0
 fi
 
 TMP="$(mktemp)"
@@ -127,7 +174,7 @@ if systemctl is-active --quiet m-ui; then
   elif [ -n "$RESTORE" ]; then
     echo "  账号沿用备份;忘记密码可执行: m-ui passwd -db $DB"
   fi
-  echo "  下一步:登录面板,按概览页“快速开始”依次完成 域名 → 证书 → 线路 → 用户"
+  echo "  下一步:登录面板,按概览页“快速开始”完成 证书(有域名就签发,没有就一键自签)→ 线路 → 用户"
   echo "====================================================="
 else
   echo "启动失败:"; journalctl -u m-ui -n 40 --no-pager; exit 1

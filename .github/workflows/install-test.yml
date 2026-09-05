@@ -1,0 +1,164 @@
+name: install-test
+
+# 安装冒烟测试:在全新的 GitHub 托管机器上跑官方 deploy/install.sh,确认服务起来、面板能打开、能卸载。
+# 两档:
+#   full-*   真机(带 systemd):安装 → systemctl 起来 → /app/ 返回 200 → 版本 → 再装一次(升级路径)→ 卸载保留数据 → 重装 → --purge
+#   logic-*  容器(没有 systemd):只测安装脚本逻辑(--dry-run、参数解析)和静态二进制能不能在该发行版上启动
+# 站点 Getting started 里的"自动测试过的平台"列表直接读这个工作流最近一次完成的运行结果,任务名就是数据源,不要随意改名。
+on:
+  push:
+    branches: [main]
+    paths: ["deploy/**", "**.go", "go.mod", "go.sum", "web/**", ".github/workflows/install-test.yml"]
+  pull_request:
+    paths: ["deploy/**", "**.go", "go.mod", "go.sum", "web/**", ".github/workflows/install-test.yml"]
+  schedule:
+    - cron: "41 4 * * 1" # 每周一,防止运行器镜像更新后悄悄坏掉
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write # 跑完后触发 pages,刷新站点上的"自动测试过"列表
+
+concurrency:
+  group: install-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build archives (与 Release 相同的产物)
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+              go build -tags with_utls -trimpath -ldflags "-w -s -X main.version=ci-${GITHUB_SHA::7}" -o dist/$arch/m-ui .
+            tar -C dist/$arch -czf m-ui-linux-$arch.tar.gz m-ui
+          done
+          sha256sum m-ui-linux-*.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m-ui-linux
+          path: |
+            m-ui-linux-*.tar.gz
+            SHA256SUMS
+
+  full:
+    needs: build
+    name: full-${{ matrix.os }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, arch: amd64 }
+          - { os: ubuntu-24.04, arch: amd64 }
+          - { os: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: m-ui-linux
+      - name: Dry run (只打印计划,不改任何文件)
+        run: |
+          sudo bash deploy/install.sh --dry-run
+          test ! -f /usr/local/bin/m-ui
+          test ! -d /etc/m-ui
+      - name: Install from the freshly built archive
+        run: sudo bash deploy/install.sh "$PWD/m-ui-linux-${{ matrix.arch }}.tar.gz"
+      - name: Service is up and the panel answers
+        run: |
+          code=""
+          for i in $(seq 1 40); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:2053/app/ || true)"
+            [ "$code" = "200" ] && break
+            sleep 1
+          done
+          systemctl is-active m-ui
+          echo "GET /app/ -> $code"
+          [ "$code" = "200" ] || { sudo journalctl -u m-ui --no-pager | tail -60; exit 1; }
+          /usr/local/bin/m-ui version | grep -q "ci-${GITHUB_SHA::7}"
+          sudo test -f /etc/m-ui/m-ui.db
+          sudo test -f /etc/systemd/system/m-ui.service
+      - name: Run the installer again (upgrade path keeps data)
+        run: |
+          sudo bash deploy/install.sh "$PWD/m-ui-linux-${{ matrix.arch }}.tar.gz"
+          sleep 3
+          systemctl is-active m-ui
+          sudo test -f /etc/m-ui/m-ui.db
+      - name: Uninstall keeps the data directory
+        run: |
+          sudo bash deploy/install.sh --uninstall
+          ! systemctl is-active --quiet m-ui
+          test ! -f /usr/local/bin/m-ui
+          test ! -f /etc/systemd/system/m-ui.service
+          sudo test -f /etc/m-ui/m-ui.db
+      - name: Reinstall picks the data up, then --purge removes it
+        run: |
+          sudo bash deploy/install.sh "$PWD/m-ui-linux-${{ matrix.arch }}.tar.gz"
+          sleep 3
+          systemctl is-active m-ui
+          sudo bash deploy/install.sh --uninstall --purge
+          ! systemctl is-active --quiet m-ui
+          test ! -d /etc/m-ui
+      - name: Nothing else was touched
+        run: |
+          # 安装脚本不该往系统里放别的服务;这里列出 m-ui 相关残留(应为空)
+          ls /etc/systemd/system | grep -i m-ui && exit 1 || true
+          which sing-box xray 2>/dev/null && { echo "安装脚本不应安装系统级 sing-box / xray"; exit 1; } || true
+
+  logic:
+    needs: build
+    name: logic-${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["debian:12", "debian:13", "ubuntu:20.04", "rockylinux:9"]
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Prepare (curl, tar, ca-certificates)
+        run: |
+          if command -v apt-get >/dev/null; then apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates tar file >/dev/null;
+          elif command -v dnf >/dev/null; then dnf install -y -q curl tar file >/dev/null; fi
+          cat /etc/os-release | head -2
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: m-ui-linux
+      - name: Installer dry run (latest release lookup + plan)
+        run: bash deploy/install.sh --dry-run
+      - name: Installer dry run against a local archive
+        run: bash deploy/install.sh "$PWD/m-ui-linux-amd64.tar.gz" --dry-run
+      - name: Uninstall dry run
+        run: bash deploy/install.sh --uninstall --purge --dry-run
+      - name: Static binary starts on this distro
+        run: |
+          tar -xzf m-ui-linux-amd64.tar.gz
+          ./m-ui version | grep -q "ci-${GITHUB_SHA::7}"
+
+  report:
+    needs: [full, logic]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "## Installation smoke test"
+            echo
+            echo "| Job | Result |"
+            echo "|---|---|"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=50" --jq '.jobs[] | select(.name | startswith("full-") or startswith("logic-")) | "| \(.name) | \(.conclusion // .status) |"'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Refresh site (Tested automatically list)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main || echo "触发 pages 失败(不影响测试结果)"

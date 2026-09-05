@@ -117,3 +117,9 @@ article.doc figure.shot { margin: 1.4rem 0; }
 .cols > div:last-child { display: flex; gap: 1.2rem; flex-wrap: wrap; align-items: center; }
 .cols a { color: var(--muted); }
 .foot p { margin: .3rem 0 0; }
+
+/* 站点页脚的社交证明、Getting started 里的自动测试列表 */
+.foot .social a { color: var(--muted); }
+.tested li { margin: .3rem 0; }
+.tested .ok { color: var(--ok); font-weight: 700; }
+.tested .bad { color: #dc2626; font-weight: 600; }

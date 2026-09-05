@@ -1,0 +1,38 @@
+name: tests
+
+# 产品代码的持续测试:push / PR 触及 Go 代码或前端就跑 go vet + 全部测试(含全协议 sing-box 干跑)并确认能构建。
+# 只测不发:发布只在 release.yml 里由标签触发。
+on:
+  push:
+    branches: [main]
+    paths: ["**.go", "go.mod", "go.sum", "web/**", "deploy/**", ".github/workflows/ci.yml"]
+  pull_request:
+    paths: ["**.go", "go.mod", "go.sum", "web/**", "deploy/**", ".github/workflows/ci.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet -tags with_utls ./...
+      - name: Tests
+        run: go test -tags with_utls ./...
+      - name: Build (linux amd64 / arm64)
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags with_utls -trimpath -ldflags "-w -s" -o /tmp/m-ui-$arch .
+          done
+      - name: Installer syntax
+        run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run

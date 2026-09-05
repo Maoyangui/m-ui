@@ -11,7 +11,34 @@ permissions:
   actions: write # 发布后显式触发 pages 工作流刷新 feed.xml
 
 jobs:
+  # 发布与营销严格分开:自上一个标签以来只有站点 / 截图 / README / 内容类工作流有改动,就不构建、不发布、不公告。
+  # 产品路径(Go 代码、web/assets、deploy/、go.mod 等)有改动才往下走。
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then echo "release=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          if [ -z "$prev" ]; then echo "release=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          changed="$(git diff --name-only "$prev" "$GITHUB_REF_NAME")"
+          product="$(printf '%s\n' "$changed" | grep -Ev '^(site/|docs/|README(\.en)?\.md$|\.github/workflows/(pages|content|radar|install-test)\.yml$|\.github/ISSUE_TEMPLATE/|\.github/DISCUSSION_TEMPLATE/)' || true)"
+          if [ -z "$product" ]; then
+            echo "自 $prev 以来只有站点 / 文档 / 内容改动,不发布 Release:"; printf '%s\n' "$changed"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "产品路径有改动,发布:"; printf '%s\n' "$product" | head -20
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: scope
+    if: needs.scope.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

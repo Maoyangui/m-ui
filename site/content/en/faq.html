@@ -3,11 +3,18 @@
   <h1>Frequently asked questions</h1>
   <p class="lead">Short answers; the README's Feature guide has the long ones.</p>
 
+  <h2>Before you install</h2>
+  <details><summary>Will it break the sing-box, Xray or other panel already on the server?</summary><p>No. m-ui runs its own sing-box core inside the m-ui process; it never installs, stops or edits a system-wide sing-box or Xray, their configuration files, or another panel. The only thing shared with them is ports — pick free ones for your lines (the new-line form already does) and they coexist.</p></details>
+  <details><summary>Does it need Docker, Node or a database server?</summary><p>No. The installer puts one static Go binary at <code>/usr/local/bin/m-ui</code>, an SQLite file at <code>/etc/m-ui/m-ui.db</code> and one systemd unit. No Docker, no Node, no nginx, no MySQL or PostgreSQL.</p></details>
+  <details><summary>Exactly which files does the installer write?</summary><p><code>/usr/local/bin/m-ui</code>, the directory <code>/etc/m-ui/</code> (database, <code>cert/</code>, <code>backups/</code>) and <code>/etc/systemd/system/m-ui.service</code>. Nothing else. Append <code>--dry-run</code> to the install command to print this plan for your machine without changing anything.</p></details>
+  <details><summary>Will it conflict with nginx, Caddy or another web server?</summary><p>Not by default: the panel listens on 2053, subscriptions on 2056, the reseller panel on 2054. Port 80 is only needed briefly if you issue a certificate with HTTP-01; use Cloudflare DNS-01 or a self-signed certificate if 80 is taken.</p></details>
+  <details><summary>Does uninstalling delete my data?</summary><p>Not unless you ask. <code>install.sh --uninstall</code> (or the SSH menu) removes the service and the binary and keeps <code>/etc/m-ui</code>, so installing again picks up your users, lines and certificates. Add <code>--purge</code> to delete the data directory too.</p></details>
+
   <h2>Setup</h2>
   <details><summary>Do I need a domain?</summary><p>No. <b>Certificate → Self-sign</b> gives you TLS on the server IP in one click, and subscriptions automatically tell clients to allow the insecure certificate. A domain lets you issue a Let's Encrypt certificate and removes that warning — recommended, not required.</p></details>
   <details><summary>Which ports must be open?</summary><p>Panel <code>2053/tcp</code>, subscription <code>2056/tcp</code>, reseller panel <code>2054/tcp</code> if enabled, plus every line's port (TCP or UDP depending on the protocol). HTTP-01 certificate issuance also needs <code>80/tcp</code>; Cloudflare DNS-01 does not.</p></details>
   <details><summary>Can I change the panel port or path?</summary><p>Yes, in Settings, or from the SSH menu (<code>m-ui</code>) if you locked yourself out. Paths work with or without the trailing slash. Ports are validated before saving so the panel cannot restart onto a port already used by a line or another program.</p></details>
-  <details><summary>What are the system requirements?</summary><p>Linux amd64 or arm64 with systemd; Debian 11+ / Ubuntu 20.04+ recommended, CentOS and Alpine work too. Root for installation. The panel itself is happy on 1 vCPU / 1 GB.</p></details>
+  <details><summary>What are the system requirements?</summary><p>Linux amd64 or arm64 with systemd; Debian 11+ / Ubuntu 20.04+ recommended, Rocky / CentOS and other systemd distributions work too. The installer needs systemd, so Alpine (OpenRC) is not supported by it. Root for installation. The panel itself is happy on 1 vCPU / 1 GB. The platforms CI actually exercises are listed under <a href="{{base}}getting-started/#tested">Tested automatically</a>.</p></details>
   <details><summary>Why does the new-line form already have a port?</summary><p>It picks a free five-digit port that no other line, the panel or any other process on the server is using, and binds it once to be sure. You can change it; conflicts are rejected on save.</p></details>
 
   <h2>Users and subscriptions</h2>
@@ -20,6 +27,7 @@
   <h2>Multi-server</h2>
   <details><summary>Do nodes need their own certificate?</summary><p>Yes, each node issues its own (self-signed is fine). Lines are pushed with the master's TLS settings and each node serves them with its own certificate files.</p></details>
   <details><summary>What if the master goes down?</summary><p>Nodes keep forwarding with the configuration they have. Subscriptions served by the master are unavailable until it returns; nodes can also serve subscriptions if you point users at them.</p></details>
+  <details><summary>What happens when a node goes offline?</summary><p>The master marks it offline on the Servers page (and sends a Telegram alert if you configured the bot); the other servers keep working. Lines that live only on that node are unreachable until it returns. On reconnect the master pushes the full snapshot again and continues the traffic counters from the stored cursor, so nothing is double-counted.</p></details>
   <details><summary>Is traffic double-counted when a node reconnects?</summary><p>No. Nodes keep monotonic counters and the master stores a cursor per node, so only the delta is added. See <a href="{{base}}multi-server/">Multi-server</a>.</p></details>
 
   <h2>Resellers</h2>
@@ -35,6 +43,8 @@
 
   <script type="application/ld+json">
   {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
+   {"@type":"Question","name":"Does installing m-ui affect an existing sing-box or Xray on the server?","acceptedAnswer":{"@type":"Answer","text":"No. m-ui runs its own sing-box core inside its own process and never installs, stops or edits a system-wide sing-box, Xray or another panel; only the ports need to be different."}},
+   {"@type":"Question","name":"Does uninstalling m-ui delete its data?","acceptedAnswer":{"@type":"Answer","text":"Not by default. --uninstall removes the service and binary and keeps the database, certificates and backups in /etc/m-ui; add --purge to delete them as well."}},
    {"@type":"Question","name":"Do I need a domain to run m-ui?","acceptedAnswer":{"@type":"Answer","text":"No. Self-sign a certificate with one click and use the server IP; subscriptions tell clients to allow the insecure certificate. A domain lets you issue a Let's Encrypt certificate and removes that warning."}},
    {"@type":"Question","name":"Which ports does m-ui need?","acceptedAnswer":{"@type":"Answer","text":"Panel 2053/tcp, subscription 2056/tcp, reseller panel 2054/tcp if enabled, plus each line's port. HTTP-01 certificate issuance also needs 80/tcp."}},
    {"@type":"Question","name":"Does updating m-ui lose data?","acceptedAnswer":{"@type":"Answer","text":"No. The updater verifies the release checksum, replaces only the binary and restarts; the database, certificates, backups and settings are untouched."}},

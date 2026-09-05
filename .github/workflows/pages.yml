@@ -5,7 +5,7 @@ name: pages
 on:
   push:
     branches: [main]
-    paths: ["site/**", "docs/screenshots/**", "brand/**", "README.md", "README.en.md", ".github/workflows/pages.yml"]
+    paths: ["site/**", "docs/screenshots/**", "brand/**", "web/assets/**", "README.md", "README.en.md", ".github/workflows/pages.yml"]
   release:
     types: [published]
   workflow_dispatch:
@@ -31,6 +31,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }} # 只用来读 Releases 生成 feed.xml
         run: node site/build.mjs
+      # Live Demo 冒烟:真实浏览器打开 dist 里的 /m-ui/demo/,没有 JS 报错、没有 /api/ 或外部请求、
+      # 演示数据渲染出来、写操作在内存里生效、手机宽度不横向溢出、fixture 里没有非保留 IP 与密钥。不过就不部署。
+      - name: Live Demo smoke test
+        run: |
+          npm i --no-save --no-audit --no-fund playwright-core@1.49.1
+          node site/tools/demo-smoke.mjs
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

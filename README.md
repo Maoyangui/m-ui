@@ -242,7 +242,7 @@ erDiagram
 
 ### 系统要求
 
-- Linux amd64 或 arm64,systemd(Debian / Ubuntu / CentOS / Alpine 等均可,推荐 Debian 11+ / Ubuntu 20.04+)
+- Linux amd64 或 arm64,systemd(Debian / Ubuntu / Rocky / CentOS 等均可,推荐 Debian 11+ / Ubuntu 20.04+;安装脚本依赖 systemd,Alpine 这类没有 systemd 的系统不支持)
 - root 权限
 - 放行端口:面板 `2053/tcp`、订阅 `2056/tcp`、启用代理面板时再加 `2054/tcp`,以及你创建的线路端口(TCP 或 UDP 视协议而定)。签发证书用 HTTP-01 时还需要 `80/tcp` 可达
 

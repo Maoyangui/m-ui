@@ -14,7 +14,15 @@ export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
 // 更新、签证书、装 WARP 这类长活由调用方自己传更长的 timeout,传 0 表示不限。
 const DEFAULT_TIMEOUT = 30000;
 
+// 传输层可替换:官网的静态 Live Demo 用同一套前端,只把这里换成内存里的演示数据,
+// 不发任何网络请求。生产环境从不调用 setTransport,这段对它没有影响。
+let transport = null;
+export function setTransport(fn) { transport = fn; }
+let qrUrlFn = null;
+export function setQrUrl(fn) { qrUrlFn = fn; }
+
 export async function api(path, opts = {}) {
+  if (transport) return transport(path, opts);
   const { timeout = DEFAULT_TIMEOUT, ...init } = opts;
   const ctl = timeout > 0 ? new AbortController() : null;
   const timer = ctl ? setTimeout(() => ctl.abort(), timeout) : null;
@@ -59,4 +67,4 @@ export async function upload(path, file, extra = {}) {
 }
 
 // 二进制资源(二维码)直接返回 URL,由 <img> 加载
-export const qrUrl = (userId, format) => `${BASE}users/${userId}/qr?format=${format}&_=${Date.now()}`;
+export const qrUrl = (userId, format) => qrUrlFn ? qrUrlFn(userId, format) : `${BASE}users/${userId}/qr?format=${format}&_=${Date.now()}`;

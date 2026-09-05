@@ -10,7 +10,7 @@
 // 文章额外字段:type "article"、date(站点发布日,未到不生成)、discussionDate(发到 Discussions 的日期)、
 // discussion(true = 到日期后由 content 工作流发一份到 Discussions)、summary。
 // 正文里的 {{base}} 会替换成站点根路径(GitHub Pages 的 /m-ui/),所有内部链接都用它。
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, copyFileSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, copyFileSync, statSync, cpSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -133,6 +133,9 @@ function render(p) {
     .replaceAll('{{about}}', BASE + pathOf(p.lang, 'about'))
     .replaceAll('{{articles}}', BASE + pathOf(p.lang, 'articles'))
     .replaceAll('{{content}}', p.body)
+    .replaceAll('{{social}}', social[p.lang] || '')
+    .replaceAll('{{tested}}', testedHtml(p.lang))
+    .replaceAll('{{demo}}', SITE + 'demo/')
     .replaceAll('{{github}}', GITHUB)
     .replaceAll('{{author_url}}', AUTHOR.url)
     .replaceAll('{{year}}', String(new Date().getFullYear()))
@@ -152,6 +155,63 @@ async function fetchReleases() {
 const releases = await fetchReleases();
 latestVersion = releases[0] ? String(releases[0].tag_name || '').replace(/^v/, '') : '';
 
+// 社交证明(star / fork / 最新版本)与安装测试矩阵都在构建时从 GitHub API 取,写死进页面;
+// 取不到就不显示,页面里不放任何运行时脚本或第三方组件。
+async function gh(path) {
+  try {
+    const headers = { 'User-Agent': 'm-ui-site', Accept: 'application/vnd.github+json' };
+    if (process.env.GITHUB_TOKEN) headers.Authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
+    const res = await fetch('https://api.github.com/repos/Maoyangui/m-ui' + path, { headers, signal: AbortSignal.timeout(15000) });
+    if (res.ok) return await res.json();
+    console.warn('GitHub API ' + path + ' → ' + res.status);
+  } catch (e) { console.warn('GitHub API 取不到 ' + path + ':', e.message); }
+  return null;
+}
+const repoInfo = await gh('');
+const social = {};
+for (const lang of Object.keys(LANGS)) {
+  const parts = [];
+  if (repoInfo && repoInfo.stargazers_count > 0) parts.push(`<a href="${GITHUB}/stargazers" rel="noopener">★ ${repoInfo.stargazers_count}</a>`);
+  if (repoInfo && repoInfo.forks_count > 0) parts.push(`<a href="${GITHUB}/forks" rel="noopener">${repoInfo.forks_count} ${lang === 'zh' ? '个 fork' : 'forks'}</a>`);
+  if (latestVersion) parts.push(`<a href="${GITHUB}/releases/latest" rel="noopener">${lang === 'zh' ? '最新版' : 'latest'} v${latestVersion}</a>`);
+  social[lang] = parts.length ? ' · ' + parts.join(' · ') : '';
+}
+
+// "自动测试过的平台":只读 install-test 工作流在 main 上最近一次完成的运行,任务名 full-<os>-<arch> / logic-<image> 就是数据源。
+// 没跑过、没跑成的平台不会出现 ✓;取不到数据就明说没有记录。
+async function fetchTested() {
+  const runs = await gh('/actions/workflows/install-test.yml/runs?branch=main&status=completed&per_page=1');
+  const run = runs && runs.workflow_runs && runs.workflow_runs[0];
+  if (!run) return null;
+  const jobs = await gh(`/actions/runs/${run.id}/jobs?per_page=50`);
+  const rows = [];
+  for (const j of (jobs && jobs.jobs) || []) {
+    let m;
+    if ((m = /^full-(.+)-(amd64|arm64)$/.exec(j.name))) rows.push({ kind: 'full', platform: m[1], arch: m[2], ok: j.conclusion === 'success' });
+    else if ((m = /^logic-(.+)$/.exec(j.name))) rows.push({ kind: 'logic', platform: m[1], arch: 'amd64', ok: j.conclusion === 'success' });
+  }
+  rows.sort((a, b) => a.kind.localeCompare(b.kind) || a.platform.localeCompare(b.platform) || a.arch.localeCompare(b.arch));
+  return { date: String(run.updated_at || run.created_at).slice(0, 10), sha: String(run.head_sha).slice(0, 7), url: run.html_url, rows };
+}
+const tested = await fetchTested();
+const PLATFORM = s => { const m = /^([a-z]+)[-:]?([\d.]*)(?:-arm)?$/.exec(s); const names = { ubuntu: 'Ubuntu', debian: 'Debian', rockylinux: 'Rocky Linux', almalinux: 'AlmaLinux', centos: 'CentOS', fedora: 'Fedora', alpine: 'Alpine' }; return m ? `${names[m[1]] || m[1]} ${m[2]}`.trim() : s; };
+function testedHtml(lang) {
+  const zh = lang === 'zh';
+  const wf = `${GITHUB}/actions/workflows/install-test.yml`;
+  if (!tested || !tested.rows.length) return `<p class="muted">${zh ? '还没有记录到自动安装测试的结果;<a href="' + wf + '" rel="noopener">install-test</a> 工作流第一次跑完后这里会自动列出。' : 'No automated installation run has been recorded yet; this list fills in by itself after the first <a href="' + wf + '" rel="noopener">install-test</a> run completes.'}</p>`;
+  const li = tested.rows.map(r => {
+    const what = r.kind === 'full'
+      ? (zh ? '真机全程:安装脚本 → systemd 服务 → 面板返回 200 → 再装一次 → 卸载' : 'full run: installer → systemd service → panel answers → upgrade → uninstall')
+      : (zh ? '容器:安装脚本逻辑(dry-run)与静态二进制能启动,没有 systemd' : 'container: installer logic (dry-run) and the binary starts, no systemd');
+    const mark = r.ok ? '✓' : (zh ? '✗ 最近一次失败' : '✗ failed in the latest run');
+    return `<li><b>${esc(PLATFORM(r.platform))} · ${r.arch}</b> — ${what} <span class="${r.ok ? 'ok' : 'bad'}">${mark}</span></li>`;
+  }).join('\n');
+  const foot = zh
+    ? `最近一次运行:${tested.date},提交 <a href="${GITHUB}/commit/${tested.sha}" rel="noopener"><code>${tested.sha}</code></a>(<a href="${tested.url}" rel="noopener">日志</a>)。不在列表里的平台就是没有测过。`
+    : `Latest run: ${tested.date}, commit <a href="${GITHUB}/commit/${tested.sha}" rel="noopener"><code>${tested.sha}</code></a> (<a href="${tested.url}" rel="noopener">log</a>). Anything not listed has not been tested.`;
+  return `<ul class="tested">\n${li}\n</ul>\n<p class="muted small">${foot}</p>`;
+}
+
 for (const p of pages) out(pathOf(p.lang, p.slug) + 'index.html', render(p));
 
 // 静态资源:样式、品牌 logo、截图、OG 图
@@ -163,6 +223,23 @@ if (existsSync(shots)) {
   mkdirSync(join(DIST, 'img'), { recursive: true });
   for (const f of readdirSync(shots).filter(f => f.endsWith('.png'))) copyFileSync(join(shots, f), join(DIST, 'img', f));
 }
+
+// Live Demo:面板前端(web/assets)原样复制到 /demo/,只把入口换成 demo.js(内存传输层 + 演示数据)。
+// 前端一改,站点一构建,演示就跟着变;没有第二份 UI 代码。
+const demoSrc = join(REPO, 'web', 'assets');
+const demoFix = join(ROOT, 'demo', 'fixtures.json');
+if (existsSync(demoSrc) && existsSync(demoFix)) {
+  cpSync(demoSrc, join(DIST, 'demo'), { recursive: true });
+  let html = readFileSync(join(demoSrc, 'index.html'), 'utf8');
+  if (!html.includes('src="js/app.js"')) throw new Error('web/assets/index.html 里没有 js/app.js 入口,Live Demo 组装失败');
+  html = html.replace('src="js/app.js"', 'src="js/demo.js"')
+    .replace(/<title>[^<]*<\/title>/, '<title>m-ui live demo · sing-box panel</title>')
+    .replace('<head>', `<head>\n  <meta name="description" content="Try the real m-ui interface on sample data: no login, no backend, changes reset on refresh.">\n  <link rel="canonical" href="${SITE}demo/">`);
+  out('demo/index.html', html);
+  copyFileSync(join(REPO, 'brand', 'logo.svg'), join(DIST, 'demo', 'logo.svg')); // 面板里 logo.svg 由 Go 端从 brand/ 提供
+  copyFileSync(join(ROOT, 'demo', 'demo.js'), join(DIST, 'demo', 'js', 'demo.js'));
+  copyFileSync(demoFix, join(DIST, 'demo', 'js', 'fixtures.json'));
+} else console.warn('没有 site/demo/fixtures.json,跳过 Live Demo');
 
 // sitemap:每个 URL 带上语言替代;没有日期的页面用站点构建日
 const urls = pages.map(p => {

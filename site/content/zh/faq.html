@@ -3,11 +3,18 @@
   <h1>常见问题</h1>
   <p class="lead">短答案;长的在 README 的功能说明里。</p>
 
+  <h2>装之前想知道的</h2>
+  <details><summary>会不会弄坏服务器上已有的 sing-box、Xray 或别的面板?</summary><p>不会。m-ui 的 sing-box 内核跑在 m-ui 自己的进程里,不会安装、停止或改动系统里的 sing-box / Xray、它们的配置文件,或者别的面板。唯一共用的是端口 —— 给线路挑空闲端口(新建线路的表单已经帮你挑好)就能共存。</p></details>
+  <details><summary>需要 Docker、Node 或数据库服务吗?</summary><p>不需要。安装脚本只放一个静态 Go 二进制到 <code>/usr/local/bin/m-ui</code>,一个 SQLite 文件在 <code>/etc/m-ui/m-ui.db</code>,加一个 systemd 单元。没有 Docker、Node、nginx,也没有 MySQL / PostgreSQL。</p></details>
+  <details><summary>安装脚本到底写了哪些文件?</summary><p><code>/usr/local/bin/m-ui</code>、目录 <code>/etc/m-ui/</code>(数据库、<code>cert/</code>、<code>backups/</code>)和 <code>/etc/systemd/system/m-ui.service</code>。没有别的。安装命令后面加 <code>--dry-run</code>,它会先按你的机器把这份计划打印出来,什么都不改。</p></details>
+  <details><summary>会和 nginx、Caddy 这类 Web 服务冲突吗?</summary><p>默认不会:面板在 2053,订阅在 2056,代理面板在 2054。只有用 HTTP-01 签证书时才短暂需要 80 端口;80 被占着就用 Cloudflare DNS-01 或自签。</p></details>
+  <details><summary>卸载会删数据吗?</summary><p>不主动删。<code>install.sh --uninstall</code>(或 SSH 菜单)只删服务和程序,保留 <code>/etc/m-ui</code>,重新安装就能接着用原来的用户、线路和证书。要连数据一起删,加 <code>--purge</code>。</p></details>
+
   <h2>安装与配置</h2>
   <details><summary>一定要有域名吗?</summary><p>不用。<b>证书 → 自签</b>一键就有 TLS,订阅会自动告诉客户端允许不安全证书。有域名可以签 Let's Encrypt 证书、去掉那个提示 —— 推荐,但不是必须。</p></details>
   <details><summary>要放行哪些端口?</summary><p>面板 <code>2053/tcp</code>、订阅 <code>2056/tcp</code>、开了代理面板再加 <code>2054/tcp</code>,以及每条线路的端口(TCP 或 UDP 看协议)。用 HTTP-01 签证书还需要 <code>80/tcp</code>;Cloudflare DNS-01 不需要。</p></details>
   <details><summary>能改面板端口和路径吗?</summary><p>能,在设置里改;把自己锁在外面了就用 SSH 菜单(<code>m-ui</code>)。路径带不带结尾斜杠都能打开。端口保存前会校验,面板不会重启到一个被线路或别的程序占着的端口上。</p></details>
-  <details><summary>系统要求?</summary><p>Linux amd64 或 arm64,带 systemd;推荐 Debian 11+ / Ubuntu 20.04+,CentOS、Alpine 也行。安装需要 root。面板本身 1 核 1 GB 足够。</p></details>
+  <details><summary>系统要求?</summary><p>Linux amd64 或 arm64,带 systemd;推荐 Debian 11+ / Ubuntu 20.04+,Rocky / CentOS 等其它 systemd 发行版也行。安装脚本依赖 systemd,所以 Alpine(OpenRC)不支持。安装需要 root。面板本身 1 核 1 GB 足够。CI 真正跑过的平台见<a href="{{base}}zh/getting-started/#tested">自动测试过的平台</a>。</p></details>
   <details><summary>为什么新建线路的表单里已经填了端口?</summary><p>它挑了一个没被其它线路、面板和本机任何程序占用的五位端口,还真的绑定了一次确认。可以改;保存时冲突会被拦下。</p></details>
 
   <h2>用户与订阅</h2>
@@ -20,6 +27,7 @@
   <h2>多服务器</h2>
   <details><summary>副机要自己的证书吗?</summary><p>要,各自签发(自签就行)。线路带着主机的 TLS 设置下发,每台副机用自己的证书文件跑。</p></details>
   <details><summary>主机挂了怎么办?</summary><p>副机拿着手里的配置照常转发。主机提供的订阅在它回来前打不开;把用户指向副机的话,副机也能提供订阅。</p></details>
+  <details><summary>副机掉线了会怎样?</summary><p>主机在服务器页把它标成离线(配了 Telegram 机器人会收到提醒),其它服务器照常。只部署在这台副机上的线路,在它回来前连不上。重连后主机重新推一次完整快照,流量从存好的游标接着算,不会重复计。</p></details>
   <details><summary>副机重连后流量会重复计吗?</summary><p>不会。副机保存单调计数器,主机为每台副机存游标,只加增量。见<a href="{{base}}zh/multi-server/">多服务器</a>。</p></details>
 
   <h2>代理</h2>
@@ -35,6 +43,8 @@
 
   <script type="application/ld+json">
   {"@context":"https://schema.org","@type":"FAQPage","inLanguage":"zh-CN","mainEntity":[
+   {"@type":"Question","name":"安装 m-ui 会影响服务器上已有的 sing-box 或 Xray 吗?","acceptedAnswer":{"@type":"Answer","text":"不会。m-ui 的内核跑在自己的进程里,不安装、不停止、不改动系统里的 sing-box / Xray 或别的面板;只有端口需要错开。"}},
+   {"@type":"Question","name":"卸载 m-ui 会删数据吗?","acceptedAnswer":{"@type":"Answer","text":"默认不删。--uninstall 只删服务和程序,保留 /etc/m-ui 里的数据库、证书和备份;加 --purge 才一起删除。"}},
    {"@type":"Question","name":"用 m-ui 一定要有域名吗?","acceptedAnswer":{"@type":"Answer","text":"不用。一键自签证书,直接用服务器 IP;订阅会告诉客户端允许不安全证书。有域名可以签 Let's Encrypt 证书,去掉提示。"}},
    {"@type":"Question","name":"m-ui 需要放行哪些端口?","acceptedAnswer":{"@type":"Answer","text":"面板 2053/tcp、订阅 2056/tcp、代理面板 2054/tcp(开启时),以及每条线路的端口。HTTP-01 签证书还需要 80/tcp。"}},
    {"@type":"Question","name":"更新 m-ui 会丢数据吗?","acceptedAnswer":{"@type":"Answer","text":"不会。更新器校验 Release 摘要后只替换程序本体并重启;数据库、证书、备份和设置都不动。"}},
