@@ -4,17 +4,20 @@ import (
 	"bytes"
 	"embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/stats"
 	"github.com/Maoyangui/m-ui/tz"
 
 	"github.com/skip2/go-qrcode"
@@ -77,7 +80,9 @@ type pageData struct {
 	Icon                   template.URL // 标签图标(内联 SVG data URI)
 	Title, Notice, Support string
 	Name                   string
-	StatusText, StatusKind string
+	StatusText, StatusKind string // active / expired / exhausted / disabled;ok / danger
+	Unavailable            bool   // 不是 active:页面顶部出状态卡
+	BuyURL                 string // 「选购 / 续费」按钮地址(空=不显示)
 	UsedText, TotalText    string
 	Percent                int
 	Unlimited              bool
@@ -96,6 +101,7 @@ type pageData struct {
 	Lines                  []pageLine
 	Year                   int
 	Brand                  bool // 页脚 "Powered by m-ui":设置可关;代理的落地页不显示
+	TZOffset               int  // 面板时区相对 UTC 的分钟数,用量图的时间标签按它显示
 }
 
 func pageLang(r *http.Request) string {
@@ -105,6 +111,41 @@ func pageLang(r *http.Request) string {
 	return "en"
 }
 
+// stateOf 落地页上的状态:到期 > 流量用尽 > 停用(含所属代理停用 / 到期)> 正常。
+// 只决定页面怎么显示;客户端能不能拉到订阅只看"启用"(server.go 里的 blocked),和以前一致。
+func stateOf(u model.User, rs *model.Reseller, now int64) string {
+	switch {
+	case u.Expiry > 0 && u.Expiry < now:
+		return "expired"
+	case u.Volume > 0 && u.Up+u.Down >= u.Volume:
+		return "exhausted"
+	case !u.Enabled:
+		return "disabled"
+	case rs != nil && (!rs.Enabled || (rs.Expiry > 0 && rs.Expiry < now)):
+		return "disabled"
+	}
+	return "active"
+}
+
+// safeURL 只放行 http(s) 地址,别的(javascript: 之类)当作没填。
+func safeURL(u string) string {
+	u = strings.TrimSpace(u)
+	l := strings.ToLower(u)
+	if strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://") {
+		return u
+	}
+	return ""
+}
+
+// buyURL 「选购 / 续费」地址:代理填了用代理的,否则用主面板的。
+func (s *Server) buyURL(rs *model.Reseller) string {
+	u := s.setting("subPageBuyURL")
+	if rs != nil {
+		u = pick(rs.PageBuyURL, u)
+	}
+	return safeURL(u)
+}
+
 // key 是订阅地址里的那一段:主面板用户是用户名,代理建的用户是随机令牌。
 func buildPageData(r *http.Request, subPath, key string, user model.User, lines []model.Line, opt Options, title, notice, support string) pageData {
 	base := publicBase(r, subPath, key)
@@ -112,13 +153,14 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 	loc := tz.Location(opt.TZ) // 到期 / 重置日期按面板时区显示
 	now := time.Now().Unix()
 	used := user.Up + user.Down
+	_, off := time.Now().In(loc).Zone()
 
 	d := pageData{
 		Lang: pageLang(r), Icon: template.URL(brand.DataURI), Title: title, Notice: notice, Support: support, Name: user.Name,
 		UsedText: fmtBytesHuman(used), Unlimited: user.Volume == 0, UpdateHours: opt.UpdateHours,
 		SubLink: base, SubClash: clashURL, SubJSON: base + "?format=json", QRClash: template.URL(base + "/qr?format=clash"), QRLink: template.URL(base + "/qr?format=link"),
 		ClientsURL: template.URL(base + "?clients=1"),
-		Year:       time.Now().Year(),
+		Year:       time.Now().Year(), TZOffset: off / 60,
 	}
 	if user.Volume > 0 {
 		d.TotalText = fmtBytesHuman(user.Volume)
@@ -139,15 +181,10 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 	if user.AutoReset && user.NextReset > 0 {
 		d.ResetText = time.Unix(user.NextReset, 0).In(loc).Format("2006-01-02")
 	}
-	switch {
-	case !user.Enabled:
-		d.StatusText, d.StatusKind = "disabled", "danger"
-	case d.Expired:
-		d.StatusText, d.StatusKind = "expired", "danger"
-	case user.Volume > 0 && used >= user.Volume:
-		d.StatusText, d.StatusKind = "exhausted", "danger"
-	default:
-		d.StatusText, d.StatusKind = "active", "ok"
+	d.StatusText = stateOf(user, nil, now)
+	d.StatusKind = "ok"
+	if d.StatusText != "active" {
+		d.StatusKind, d.Unavailable = "danger", true
 	}
 
 	enc := url.QueryEscape
@@ -191,7 +228,7 @@ func (s *Server) pageTitle(rs *model.Reseller, opt Options) string {
 	return title
 }
 
-// servePage 输出订阅落地页。
+// servePage 输出订阅落地页。不可用(到期 / 用尽 / 停用)的用户也出这一页,顶部标明原因。
 func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key string, user model.User, lines []model.Line, opt Options, rs *model.Reseller) {
 	notice, support := s.setting("subPageNotice"), s.setting("subPageSupport")
 	if rs != nil { // 代理可以给自己的用户配一套落地页文案
@@ -200,6 +237,10 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key 
 	title := s.pageTitle(rs, opt)
 	data := buildPageData(r, subPath, key, user, lines, opt, title, notice, support)
 	data.Brand = rs == nil && !strings.EqualFold(s.setting("subPageBrand"), "false") // 代理的落地页尊重代理品牌
+	data.BuyURL = s.buyURL(rs)
+	if st := stateOf(user, rs, time.Now().Unix()); st != data.StatusText { // 代理被停用 / 到期也算停用
+		data.StatusText, data.StatusKind, data.Unavailable = st, "danger", true
+	}
 	var buf bytes.Buffer
 	if err := pageTmpl.Execute(&buf, data); err != nil {
 		http.Error(w, "page error: "+err.Error(), http.StatusInternalServerError)
@@ -212,6 +253,26 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key 
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(buf.Bytes())
+}
+
+// serveStats 落地页"用量情况"的数据:GET <地址>?stats=24|168|720[&tz=分钟偏移],返回该用户的时段柱。
+// 只对本人地址开放(共享地址在 server.go 里已拦下);知道地址就能看,和落地页本身同一信任级别。
+func (s *Server) serveStats(w http.ResponseWriter, r *http.Request, user model.User) {
+	hours, _ := strconv.Atoi(r.URL.Query().Get("stats"))
+	switch hours {
+	case 24, 168, 720:
+	default:
+		hours = 24
+	}
+	loc := tz.Location(s.setting("timezone"))
+	if v, err := strconv.Atoi(r.URL.Query().Get("tz")); err == nil && v >= -14*60 && v <= 14*60 {
+		loc = time.FixedZone("viewer", v*60)
+	}
+	res := stats.Series(s.db, "user", user.Name, hours, stats.BucketFor(hours), s.settingInt("statsBucketSeconds", 60), loc)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 // serveQR 输出订阅地址二维码(PNG)。

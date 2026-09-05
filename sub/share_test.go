@@ -55,8 +55,8 @@ func TestShareLink(t *testing.T) {
 		t.Fatal("订阅页应有生成按钮")
 	}
 	// 生成
-	if w := doReq(s, "POST", "/sub/alice?share=on", browserUA); w.Code != http.StatusSeeOther {
-		t.Fatalf("生成应 303,得 %d", w.Code)
+	if w := doReq(s, "POST", "/sub/alice?share=on", browserUA); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `id="share"`) {
+		t.Fatalf("生成应直接返回落地页(200),得 %d", w.Code)
 	}
 	tok := token(t, db)
 	if len(tok) < 20 {
@@ -115,8 +115,8 @@ func TestShareLink(t *testing.T) {
 	}
 
 	// 取消
-	if w := doReq(s, "POST", "/sub/alice?share=off", browserUA); w.Code != http.StatusSeeOther {
-		t.Fatalf("取消应 303,得 %d", w.Code)
+	if w := doReq(s, "POST", "/sub/alice?share=off", browserUA); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `id="share"`) {
+		t.Fatalf("取消应直接返回落地页(200),得 %d", w.Code)
 	}
 	db.First(&owner, 1)
 	if token(t, db) != "" || len(owner.ShareCreds) != 0 {

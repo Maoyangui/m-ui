@@ -132,6 +132,7 @@ type Reseller struct {
 	PageTitle    string `json:"pageTitle"`
 	PageNotice   string `json:"pageNotice"`
 	PageSupport  string `json:"pageSupport"`
+	PageBuyURL   string `json:"pageBuyURL"` // 落地页 / 404 页上「选购订阅」按钮的地址;留空用主面板的
 }
 
 // ResellerLine 代理可用线路(主面板分配),代理只能把这些线路分给自己的用户。

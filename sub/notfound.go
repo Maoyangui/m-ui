@@ -11,11 +11,11 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
-// 订阅地址打不开时,浏览器里给一页人话而不是空白的 404。
+// 订阅地址对不上任何人时,浏览器里给一页人话而不是空白的 404。
 //
-// 用户看到的"订阅失效"绝大多数是流量用完或到期被自动停用,他们需要知道找谁。
-// 所以这里按地址反查归属(不管有没有被停用),把该看的公告与联系方式显示出来:
-// 代理的用户看代理自己配的那套,其它人看主面板的。客户端(非浏览器)仍是干净的 404。
+// 到期 / 用尽 / 停用的用户不走这里:地址能对上就出正常落地页,顶部标明原因(见 page.go)。
+// 这里只剩"地址无效":按地址反查归属拿不到人,就用主面板的公告、联系方式与选购链接;
+// 反查得到代理(理论上不会,留作兜底)就用代理的。客户端(非浏览器)仍是干净的 404。
 //
 //go:embed gone.html
 var goneFS embed.FS
@@ -28,6 +28,7 @@ type goneData struct {
 	Title   string
 	Notice  string
 	Support string
+	BuyURL  string // 「选购订阅」按钮(空=不显示)
 	Year    int
 }
 
@@ -59,7 +60,7 @@ func (s *Server) serveNotFound(w http.ResponseWriter, r *http.Request, key strin
 	}
 	d := goneData{
 		Lang: pageLang(r), Icon: template.URL(brand.DataURI),
-		Title: s.pageTitle(rs, s.options()), Notice: notice, Support: support, Year: time.Now().Year(),
+		Title: s.pageTitle(rs, s.options()), Notice: notice, Support: support, BuyURL: s.buyURL(rs), Year: time.Now().Year(),
 	}
 	var buf bytes.Buffer
 	if err := goneTmpl.Execute(&buf, d); err != nil {

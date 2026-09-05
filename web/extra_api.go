@@ -13,6 +13,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/stats"
 
 	"github.com/skip2/go-qrcode"
 	"gorm.io/gorm"
@@ -70,92 +71,14 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
-	if hours <= 0 || hours > 24*90 {
-		hours = 24
+	// 桶宽:前端可指定 bucket(秒,如 300/3600/21600/86400)得到整齐的时段柱,起点按查看者时区
+	// (tz=分钟偏移,浏览器传入;缺省用面板时区)对齐;未指定时最多 240 个点。聚合在 stats 包,落地页共用。
+	bucket, _ := strconv.Atoi(r.URL.Query().Get("bucket"))
+	loc := s.panelLocation()
+	if tz, err := strconv.Atoi(r.URL.Query().Get("tz")); err == nil && tz >= -14*60 && tz <= 14*60 {
+		loc = time.FixedZone("viewer", tz*60)
 	}
-	end := time.Now().Unix()
-	start := end - int64(hours)*3600
-
-	var rows []model.Stats
-
-	// 桶宽:前端可指定 bucket(秒,如 300/3600/21600/86400)得到整齐的时段柱;
-	// 未指定时最多 240 个点,桶宽不小于落库桶
-	bucketSeconds := s.settingInt("statsBucketSeconds", 60)
-	if bucketSeconds < 1 {
-		bucketSeconds = 60
-	}
-	var span int64
-	var numBuckets int
-	if b, _ := strconv.Atoi(r.URL.Query().Get("bucket")); b >= bucketSeconds && b <= 7*86400 {
-		span = int64(b)
-		// 起点对齐到桶边界:按查看者时区(tz=分钟偏移,浏览器传入;缺省用服务器时区),
-		// 日桶对齐到零点,小时级桶对齐到当天内的整数倍(6h 桶 → 0/6/12/18 点),更细的桶按 UTC 取整
-		loc := s.panelLocation()
-		if tz, err := strconv.Atoi(r.URL.Query().Get("tz")); err == nil && tz >= -14*60 && tz <= 14*60 {
-			loc = time.FixedZone("viewer", tz*60)
-		}
-		st := time.Unix(start, 0).In(loc)
-		var aligned time.Time
-		switch {
-		case span >= 86400:
-			aligned = time.Date(st.Year(), st.Month(), st.Day(), 0, 0, 0, 0, loc)
-		case span >= 3600:
-			secOfDay := int64(st.Hour())*3600 + int64(st.Minute())*60 + int64(st.Second())
-			midnight := time.Date(st.Year(), st.Month(), st.Day(), 0, 0, 0, 0, loc)
-			aligned = midnight.Add(time.Duration(secOfDay-secOfDay%span) * time.Second)
-		default:
-			aligned = time.Unix(start-start%span, 0)
-		}
-		start = aligned.Unix()
-		numBuckets = int((end-start)/span) + 1
-	} else {
-		numBuckets = 240
-		if maxB := int((end - start) / int64(bucketSeconds)); maxB < numBuckets {
-			numBuckets = maxB
-		}
-		if numBuckets < 1 {
-			numBuckets = 1
-		}
-		span = (end - start) / int64(numBuckets)
-		if span == 0 {
-			span = 1
-		}
-	}
-	q := s.db.Model(&model.Stats{}).Where("resource = ? AND date_time > ? AND date_time <= ?", dbResource, start, end)
-	if tag != "" {
-		q = q.Where("tag = ?", tag)
-	}
-	q.Order("date_time asc").Find(&rows)
-	type point struct {
-		T    int64 `json:"t"`
-		Up   int64 `json:"up"`
-		Down int64 `json:"down"`
-	}
-	points := make([]point, numBuckets)
-	for i := range points {
-		points[i].T = start + int64(i)*span
-	}
-	var totalUp, totalDown int64
-	for _, row := range rows {
-		i := int((row.DateTime - start) / span)
-		if i < 0 {
-			i = 0
-		}
-		if i >= numBuckets {
-			i = numBuckets - 1
-		}
-		if row.Direction {
-			points[i].Up += row.Traffic
-			totalUp += row.Traffic
-		} else {
-			points[i].Down += row.Traffic
-			totalDown += row.Traffic
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"points": points, "span": span, "start": start, "end": end,
-		"totalUp": totalUp, "totalDown": totalDown,
-	})
+	writeJSON(w, http.StatusOK, stats.Series(s.db, dbResource, tag, hours, int64(bucket), s.settingInt("statsBucketSeconds", 60), loc))
 }
 
 // ---- 在线 ----

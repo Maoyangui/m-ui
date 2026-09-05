@@ -8,18 +8,29 @@
 <title>{{.Title}} · {{.Name}}</title>
 <link rel="icon" href="{{.Icon}}" type="image/svg+xml">
 <style>
-:root{--bg:#f4f6f9;--card:#fff;--text:#1a202c;--muted:#64748b;--border:#e2e8f0;--primary:#2563eb;--ok:#16a34a;--warn:#d97706;--danger:#dc2626;--soft:#eff6ff}
-@media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--text:#e6e9ef;--muted:#8b95a5;--border:#2a313b;--primary:#3b82f6;--soft:#1e293b}}
+:root{--bg:#f4f6f9;--card:#fff;--text:#1a202c;--muted:#64748b;--border:#e2e8f0;--primary:#2563eb;--ok:#16a34a;--warn:#d97706;--danger:#dc2626;--soft:#eff6ff;--danger-soft:#fef2f2;--danger-bd:#fecaca;--shadow:0 1px 3px rgba(0,0,0,.05)}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--text:#e6e9ef;--muted:#8b95a5;--border:#2a313b;--primary:#3b82f6;--soft:#1e293b;--danger-soft:#2a1416;--danger-bd:#5b1f24;--shadow:0 1px 3px rgba(0,0,0,.3)}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{max-width:560px;margin:0 auto;padding:1.25rem 1rem 3rem}
 .brand{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem}.logo{display:block;width:40px;height:33px}
-details.nodes summary{display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none}details.nodes summary::-webkit-details-marker{display:none}details.nodes summary h2{margin:0}details.nodes .chev{font-size:.8rem;color:var(--muted)}details.nodes[open] .chev{display:none}details.nodes .lines{margin-top:.6rem}
 .brand h1{margin:0;font-size:1.15rem}.brand .u{color:var(--muted);font-size:.85rem}
-.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.1rem 1.15rem;margin-bottom:.9rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.1rem 1.15rem;margin-bottom:.9rem;box-shadow:var(--shadow)}
 h2{margin:0 0 .7rem;font-size:.95rem}
 .badge{display:inline-block;font-size:.72rem;padding:.15rem .55rem;border-radius:999px;background:var(--soft);color:var(--primary);vertical-align:middle}
 .badge.ok{background:#dcfce7;color:#15803d}.badge.danger{background:#fee2e2;color:#b91c1c}
 @media(prefers-color-scheme:dark){.badge.ok{background:#14532d;color:#86efac}.badge.danger{background:#7f1d1d;color:#fca5a5}}
+.cardhead{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-bottom:.7rem}.cardhead h2{margin:0}
+/* 状态卡:到期 / 用尽 / 停用时放在最上面 */
+.state{border-color:var(--danger-bd);background:var(--danger-soft)}
+.state-row{display:flex;align-items:flex-start;gap:.8rem}
+.state .mark{flex:none;width:40px;height:40px;border-radius:50%;background:var(--card);color:var(--danger);display:flex;align-items:center;justify-content:center;border:1px solid var(--danger-bd)}
+.state .mark svg{width:22px;height:22px}
+.state-text b{display:block;font-size:1rem}.state-text span{display:block;color:var(--muted);font-size:.86rem;margin-top:.15rem}
+.state .contact{margin-top:.8rem;font-size:.84rem;color:var(--muted);white-space:pre-wrap}
+/* 选购 / 续费 */
+.buy{display:flex;align-items:center;justify-content:center;gap:.45rem;margin-top:.9rem;padding:.72rem 1rem;border-radius:11px;background:var(--primary);color:#fff;text-decoration:none;font-weight:600;font-size:.95rem;box-shadow:0 6px 18px rgba(37,99,235,.28);transition:transform .12s,filter .15s}
+.buy:hover{filter:brightness(1.07)}.buy:active{transform:translateY(1px)}.buy svg{width:18px;height:18px}
+.buylink{display:inline-flex;align-items:center;gap:.3rem;color:var(--primary);background:var(--soft);text-decoration:none;font-size:.8rem;font-weight:600;padding:.32rem .7rem;border-radius:999px;white-space:nowrap}.buylink:hover{filter:brightness(.96)}.buylink svg{width:14px;height:14px}
 .usage{display:flex;justify-content:space-between;align-items:baseline;font-size:.9rem}.usage b{font-size:1.35rem;font-weight:650}
 .bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin:.5rem 0 .8rem}.bar i{display:block;height:100%;background:var(--primary)}
 .bar.warn i{background:var(--warn)}.bar.danger i{background:var(--danger)}
@@ -32,13 +43,26 @@ h2{margin:0 0 .7rem;font-size:.95rem}
 button{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:8px;padding:.45rem .8rem;font:inherit;font-size:.82rem;cursor:pointer;white-space:nowrap}button:hover{border-color:var(--primary)}
 button.primary{background:var(--primary);border-color:var(--primary);color:#fff}button.primary:hover{filter:brightness(1.08)}
 button.danger{color:var(--danger)}button.danger:hover{border-color:var(--danger)}
+button.sm{padding:.34rem .7rem;font-size:.78rem}button[disabled]{opacity:.6;cursor:default}
 .hint{color:var(--muted);font-size:.8rem;margin:.5rem 0 0}
-.cardhead{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-bottom:.7rem}.cardhead h2{margin:0}
 .getapp{display:inline-flex;align-items:center;gap:.25rem;color:var(--muted);text-decoration:none;font-size:.78rem;white-space:nowrap}.getapp:hover{color:var(--primary)}.getapp svg{width:14px;height:14px}
-.share form{display:flex;align-items:center;gap:.7rem;margin:.6rem 0 0}.share form .hint{margin:0}
+.share .cardhead{margin-bottom:0}.share .link{margin-top:.7rem}.share form{margin:0}
 .qrs{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:.9rem}.qrs figure{margin:0;text-align:center;font-size:.78rem;color:var(--muted)}.qrs img{width:150px;height:150px;border-radius:10px;border:1px solid var(--border);background:#fff;display:block;margin-bottom:.3rem}
 .lines{display:flex;flex-direction:column;gap:.35rem}.line{display:flex;justify-content:space-between;align-items:center;font-size:.88rem;padding:.45rem .6rem;border-radius:8px;background:var(--bg)}.line .tags{display:flex;gap:.3rem}
 .tag{font-size:.68rem;padding:.08rem .4rem;border-radius:5px;border:1px solid var(--border);color:var(--muted);text-transform:uppercase}
+/* 折叠卡(节点 / 用量) */
+details summary{display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none}details summary::-webkit-details-marker{display:none}details summary h2{margin:0}details .chev{font-size:.8rem;color:var(--muted);white-space:nowrap}details[open] .chev .o{display:none}details:not([open]) .chev .c{display:none}
+details .lines{margin-top:.6rem}
+/* 用量图 */
+.ubody{margin-top:.8rem}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:.7rem}.seg button{border:none;border-radius:0;background:transparent;color:var(--muted);padding:.3rem .7rem;font-size:.78rem}.seg button+button{border-left:1px solid var(--border)}.seg button.active{background:var(--primary);color:#fff}
+.chart-wrap{position:relative}
+.chart-summary{display:flex;flex-wrap:wrap;gap:.3rem .9rem;align-items:center;font-size:.84rem;margin:0 0 .45rem}.chart-summary .num{font-weight:650}.chart-summary .muted{color:var(--muted);font-size:.78rem}
+.chart-legend{margin-left:auto;display:flex;gap:.7rem;font-size:.76rem;color:var(--muted)}.lg::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:.3rem;vertical-align:-1px}.lg.up::before{background:var(--primary)}.lg.down::before{background:var(--ok)}
+svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border);stroke-width:1}.chart .ylab,.chart .xlab{fill:var(--muted);font-size:11px;font-family:ui-monospace,Menlo,Consolas,monospace}
+.chart .hit{fill:transparent}.chart .seg.up{fill:var(--primary)}.chart .seg.down{fill:var(--ok)}.chart g.hot .seg{opacity:.75}
+.chart-tip{position:absolute;pointer-events:none;background:var(--text);color:var(--bg);padding:.4rem .6rem;border-radius:6px;font-size:.76rem;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:nowrap;z-index:2}.chart-tip .tt{opacity:.7;margin-bottom:.15rem}
+.empty{color:var(--muted);font-size:.86rem;text-align:center;padding:1.4rem 0}
 .foot{text-align:center;color:var(--muted);font-size:.76rem;margin-top:1.4rem}.foot a.powered{color:inherit;text-decoration:none;opacity:.85}.foot a.powered:hover{text-decoration:underline}.foot a{color:var(--primary);text-decoration:none}
 .toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:.5rem 1rem;border-radius:8px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none}.toast.show{opacity:1}
 </style>
@@ -47,9 +71,22 @@ button.danger{color:var(--danger)}button.danger:hover{border-color:var(--danger)
 <div class="wrap">
   <div class="brand"><img class="logo" src="{{.Icon}}" alt=""><div><h1>{{.Title}}</h1><div class="u">{{.Name}}</div></div></div>
 
+  {{if .Unavailable}}<div class="card state">
+    <div class="state-row">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{if eq .StatusText "expired"}}<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>{{else if eq .StatusText "exhausted"}}<path d="M4 6.5h16v11H4z"/><path d="M4 12h9"/><path d="M8 6.5v11"/>{{else}}<path d="M9.6 14.4 7.9 16.1a3.8 3.8 0 0 1-5.4-5.4l1.7-1.7"/><path d="M14.4 9.6l1.7-1.7a3.8 3.8 0 0 1 5.4 5.4l-1.7 1.7"/><path d="M4 4l16 16"/>{{end}}</svg></div>
+      <div class="state-text">
+        <b>{{if eq .Lang "zh"}}{{if eq .StatusText "expired"}}订阅已到期{{else if eq .StatusText "exhausted"}}流量已用完{{else}}订阅已停用{{end}}{{else}}{{if eq .StatusText "expired"}}Subscription expired{{else if eq .StatusText "exhausted"}}Traffic used up{{else}}Subscription disabled{{end}}{{end}}</b>
+        <span>{{if eq .Lang "zh"}}{{if eq .StatusText "expired"}}{{.ExpiryText}} 到期,节点已停止服务。续费后这条订阅地址继续有效,客户端刷新即可。{{else if eq .StatusText "exhausted"}}已用 {{.UsedText}} / {{.TotalText}}{{if .ResetText}},{{.ResetText}} 重置{{end}}。续费或加量后这条订阅地址继续有效,客户端刷新即可。{{else}}这条订阅目前无法使用。如有疑问请联系我们。{{end}}{{else}}{{if eq .StatusText "expired"}}Expired on {{.ExpiryText}}; the nodes have stopped serving. The link stays valid after renewal — just refresh in your app.{{else if eq .StatusText "exhausted"}}{{.UsedText}} of {{.TotalText}} used{{if .ResetText}}, resets on {{.ResetText}}{{end}}. The link stays valid after a top-up — just refresh in your app.{{else}}This subscription is currently unavailable. Get in touch if you have questions.{{end}}{{end}}</span>
+      </div>
+    </div>
+    {{if .BuyURL}}<a class="buy" href="{{.BuyURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>{{if eq .Lang "zh"}}选购 / 续费订阅{{else}}Purchase / renew{{end}}</a>{{end}}
+    {{if .Support}}<div class="contact">{{if eq .Lang "zh"}}有疑问请联系:{{else}}Questions? {{end}}{{.Support}}</div>{{end}}
+  </div>{{end}}
+
   <div class="card">
-    <h2>{{if eq .Lang "zh"}}我的订阅{{else}}My subscription{{end}}
+    <div class="cardhead"><h2>{{if eq .Lang "zh"}}我的订阅{{else}}My subscription{{end}}
       <span class="badge {{.StatusKind}}">{{if eq .Lang "zh"}}{{if eq .StatusText "active"}}正常{{else if eq .StatusText "expired"}}已到期{{else if eq .StatusText "exhausted"}}流量用尽{{else}}已停用{{end}}{{else}}{{.StatusText}}{{end}}</span></h2>
+      {{if and .BuyURL (not .Unavailable)}}<a class="buylink" href="{{.BuyURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>{{if eq .Lang "zh"}}选购 / 续费{{else}}Purchase / renew{{end}}</a>{{end}}</div>
     <div class="usage"><div><b>{{.UsedText}}</b> {{if .Unlimited}}<span style="color:var(--muted)">/ {{if eq .Lang "zh"}}不限{{else}}unlimited{{end}}</span>{{else}}<span style="color:var(--muted)">/ {{.TotalText}}</span>{{end}}</div>{{if not .Unlimited}}<div>{{.Percent}}%</div>{{end}}</div>
     <div class="bar {{if ge .Percent 100}}danger{{else if ge .Percent 80}}warn{{end}}"><i style="width:{{.Percent}}%"></i></div>
     <dl class="kv">
@@ -78,19 +115,29 @@ button.danger{color:var(--danger)}button.danger:hover{border-color:var(--danger)
     </div>
   </div>
 
+  <div class="card"><details id="usage">
+    <summary><h2>{{if eq .Lang "zh"}}用量情况{{else}}Usage{{end}}</h2><span class="chev"><span class="o">{{if eq .Lang "zh"}}展开查看流量图{{else}}Show traffic chart{{end}} ▾</span><span class="c">{{if eq .Lang "zh"}}收起{{else}}Hide{{end}} ▴</span></span></summary>
+    <div class="ubody">
+      <div class="seg" id="u-seg"><button type="button" class="active" data-h="24">{{if eq .Lang "zh"}}24 小时{{else}}24 h{{end}}</button><button type="button" data-h="168">{{if eq .Lang "zh"}}7 天{{else}}7 days{{end}}</button><button type="button" data-h="720">{{if eq .Lang "zh"}}30 天{{else}}30 days{{end}}</button></div>
+      <div id="u-chart"><div class="empty">{{if eq .Lang "zh"}}加载中…{{else}}Loading…{{end}}</div></div>
+    </div>
+  </details></div>
+
   {{if .ShareOn}}<div class="card share" id="share">
-    <h2>{{if eq .Lang "zh"}}临时共享{{else}}Share temporarily{{end}}{{if .ShareURL}} <span class="badge ok">{{if eq .Lang "zh"}}已开启{{else}}on{{end}}</span>{{end}}</h2>
+    <div class="cardhead"><h2>{{if eq .Lang "zh"}}临时共享{{else}}Share temporarily{{end}}{{if .ShareURL}} <span class="badge ok">{{if eq .Lang "zh"}}已开启{{else}}on{{end}}</span>{{end}}</h2>
+      {{if .ShareURL}}<form method="post" action="?share=off"><button class="danger sm" data-busy="{{if eq .Lang "zh"}}取消中…{{else}}Stopping…{{end}}">{{if eq .Lang "zh"}}取消共享{{else}}Stop sharing{{end}}</button></form>
+      {{else}}<form method="post" action="?share=on"><button class="primary sm" data-busy="{{if eq .Lang "zh"}}生成中…{{else}}Creating…{{end}}">{{if eq .Lang "zh"}}生成链接{{else}}Create link{{end}}</button></form>{{end}}
+    </div>
     {{if .ShareURL}}
     <div class="link"><code id="l4">{{.ShareURL}}</code><button onclick="cp('l4')">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button></div>
-    <form method="post" action="?share=off"><button class="danger">{{if eq .Lang "zh"}}取消共享{{else}}Stop sharing{{end}}</button><span class="hint">{{if eq .Lang "zh"}}取消后立即失效{{else}}Stops working right away{{end}}</span></form>
+    <p class="hint">{{if eq .Lang "zh"}}给别人临时用的地址,取消后立即失效;用量、设备数与到期仍算在你名下。{{else}}A temporary link for someone else; it stops working the moment you cancel. Traffic, devices and expiry still count against you.{{end}}</p>
     {{else}}
     <p class="hint">{{if eq .Lang "zh"}}生成一条临时地址给别人用,随时可取消。{{else}}Create a temporary link for someone else. Cancel any time.{{end}}</p>
-    <form method="post" action="?share=on"><button class="primary">{{if eq .Lang "zh"}}生成链接{{else}}Create link{{end}}</button></form>
     {{end}}
   </div>{{end}}
 
   {{if .Lines}}<div class="card">
-    <details class="nodes"><summary><h2>{{if eq .Lang "zh"}}节点{{else}}Nodes{{end}} <span class="badge">{{len .Lines}}</span></h2><span class="chev">{{if eq .Lang "zh"}}展开{{else}}Show{{end}} ▾</span></summary>
+    <details class="nodes"><summary><h2>{{if eq .Lang "zh"}}节点{{else}}Nodes{{end}} <span class="badge">{{len .Lines}}</span></h2><span class="chev"><span class="o">{{if eq .Lang "zh"}}展开{{else}}Show{{end}} ▾</span><span class="c">{{if eq .Lang "zh"}}收起{{else}}Hide{{end}} ▴</span></span></summary>
     <div class="lines">{{range .Lines}}<div class="line"><span>{{.Name}}</span><span class="tags"><span class="tag">{{.Protocol}}</span>{{if .TLS}}<span class="tag">{{.TLS}}</span>{{end}}{{if .Transport}}<span class="tag">{{.Transport}}</span>{{end}}</span></div>{{end}}</div></details>
   </div>{{end}}
 
@@ -98,13 +145,52 @@ button.danger{color:var(--danger)}button.danger:hover{border-color:var(--danger)
 </div>
 <div class="toast" id="toast"></div>
 <script>
-function cp(id){var t=document.getElementById(id).textContent;var done=function(){var e=document.getElementById('toast');e.textContent='{{if eq .Lang "zh"}}已复制{{else}}Copied{{end}}';e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)};
+var TZOFF={{.TZOffset}};
+var L={up:{{if eq .Lang "zh"}}'上行'{{else}}'Up'{{end}},down:{{if eq .Lang "zh"}}'下行'{{else}}'Down'{{end}},total:{{if eq .Lang "zh"}}'合计'{{else}}'Total'{{end}},peak:{{if eq .Lang "zh"}}'峰值'{{else}}'Peak'{{end}},empty:{{if eq .Lang "zh"}}'该时段没有流量'{{else}}'No traffic in this period'{{end}},loading:{{if eq .Lang "zh"}}'加载中…'{{else}}'Loading…'{{end}},fail:{{if eq .Lang "zh"}}'加载失败,请稍后再试'{{else}}'Could not load, try again later'{{end}},copied:{{if eq .Lang "zh"}}'已复制'{{else}}'Copied'{{end}}};
+function cp(id){var t=document.getElementById(id).textContent;var done=function(){var e=document.getElementById('toast');e.textContent=L.copied;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)};
 if(navigator.clipboard){navigator.clipboard.writeText(t).then(done)}else{var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();done()}}
+/* 临时共享:POST 直接返回更新后的页面,只替换这张卡;按钮点下去立刻有反馈 */
 document.addEventListener('submit',function(e){var f=e.target,card=document.getElementById('share');
-if(!card||!card.contains(f))return;e.preventDefault();var b=f.querySelector('button');b.disabled=true;
-fetch(f.action,{method:'POST',credentials:'same-origin'}).then(function(r){return r.text()}).then(function(h){
+if(!card||!card.contains(f))return;e.preventDefault();var b=f.querySelector('button');b.disabled=true;b.textContent=b.getAttribute('data-busy')||'…';
+fetch(f.action,{method:'POST',credentials:'same-origin',headers:{'Accept':'text/html'}}).then(function(r){if(!r.ok)throw new Error(r.status);return r.text()}).then(function(h){
 var n=new DOMParser().parseFromString(h,'text/html').querySelector('#share');
 if(n){card.innerHTML=n.innerHTML}else{location.reload()}}).catch(function(){location.reload()})});
+/* 用量图:展开才请求;和面板同一套画法(堆叠柱,下行在下、上行在上) */
+function fmtB(n,d){n=Number(n)||0;var u=['B','KB','MB','GB','TB'],i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return (i===0?n.toFixed(0):n.toFixed(d===undefined?1:d))+' '+u[i]}
+function tzd(t){return new Date((t+TZOFF*60)*1000)}
+function p2(n){return (n<10?'0':'')+n}
+function dayS(d){return (d.getUTCMonth()+1)+'/'+d.getUTCDate()}
+function hmS(d){return p2(d.getUTCHours())+':'+p2(d.getUTCMinutes())}
+function lab(t,span,withDate){var d=tzd(t);if(span>=86400)return dayS(d);return (withDate?dayS(d)+' ':'')+hmS(d)}
+function rng(t,span){var a=tzd(t),b=tzd(t+span);if(span>=86400)return dayS(a);return dayS(a)+' '+hmS(a)+' – '+hmS(b)}
+function niceMax(v){if(v<=0)return 1024;var units=[1,1024,1048576,1073741824,1099511627776],unit=1,i;for(i=0;i<units.length;i++)if(v>=units[i])unit=units[i];var x=v/unit,steps=[1,1.5,2,2.5,3,4,5,6,8,10,15,20,25,30,40,50,60,80,100,150,200,250,300,400,500,600,800,1000];for(i=0;i<steps.length;i++)if(steps[i]>=x)return steps[i]*unit;return Math.ceil(x)*unit}
+function chart(el,points,span){
+var W=800,H=200,PL=58,PR=12,PT=10,PB=26,iw=W-PL-PR,ih=H-PT-PB,n=points.length,i;
+var tu=0,td=0;for(i=0;i<n;i++){tu+=points[i].up;td+=points[i].down}
+if(!n||tu+td===0){el.innerHTML='<div class="empty">'+L.empty+'</div>';return}
+var sums=points.map(function(p){return p.up+p.down}),peak=0;for(i=1;i<n;i++)if(sums[i]>sums[peak])peak=i;
+var max=niceMax(sums[peak]),y=function(v){return PT+ih-v/max*ih},slot=iw/n,gap=Math.min(6,slot*.25),bw=Math.max(2,slot-gap),x=function(i){return PL+i*slot+gap/2};
+var grid='',k;for(k=0;k<=4;k++){var v=max*k/4,yy=y(v).toFixed(1);grid+='<line x1="'+PL+'" x2="'+(W-PR)+'" y1="'+yy+'" y2="'+yy+'" class="grid"/><text x="'+(PL-8)+'" y="'+yy+'" class="ylab" text-anchor="end" dominant-baseline="middle">'+fmtB(v,v>=1073741824?1:0)+'</text>'}
+var bars='';for(i=0;i<n;i++){var p=points[i],yD=y(p.down),yU=y(p.down+p.up);bars+='<g class="bar" data-i="'+i+'"><rect class="hit" x="'+(PL+i*slot).toFixed(1)+'" y="'+PT+'" width="'+slot.toFixed(1)+'" height="'+ih+'"/><rect class="seg down" x="'+x(i).toFixed(1)+'" y="'+yD.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(0,PT+ih-yD).toFixed(1)+'" rx="1"/><rect class="seg up" x="'+x(i).toFixed(1)+'" y="'+yU.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(0,yD-yU).toFixed(1)+'" rx="1"/></g>'}
+var total=points[n-1].t-points[0].t+span,multi=total>36*3600&&span<86400,xl='';
+var put=function(i,text){xl+='<text x="'+(x(i)+bw/2).toFixed(1)+'" y="'+(H-8)+'" class="xlab" text-anchor="middle">'+text+'</text>'};
+if(multi){var ds=[];for(i=0;i<n;i++){var d=tzd(points[i].t);if(d.getUTCHours()===0&&d.getUTCMinutes()===0)ds.push(i)}var step=Math.max(1,Math.ceil(ds.length/8));for(i=0;i<ds.length;i++)if(i%step===0)put(ds[i],lab(points[ds[i]].t,86400));if(!ds.length)put(0,lab(points[0].t,span,true))}
+else{var every=Math.max(1,Math.ceil(n/8));for(i=0;i<n;i+=every)put(i,lab(points[i].t,span,false))}
+el.innerHTML='<div class="chart-wrap"><div class="chart-summary"><span><b>'+L.total+'</b> <span class="num">'+fmtB(tu+td)+'</span> <span class="muted">↑ '+fmtB(tu)+' · ↓ '+fmtB(td)+'</span></span><span class="muted">'+L.peak+' '+fmtB(sums[peak])+' · '+rng(points[peak].t,span)+'</span><span class="chart-legend"><span class="lg up">'+L.up+'</span><span class="lg down">'+L.down+'</span></span></div><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" class="chart">'+grid+bars+xl+'</svg><div class="chart-tip" hidden></div></div>';
+var tip=el.querySelector('.chart-tip'),svg=el.querySelector('svg');
+var show=function(g,cx,cy){svg.querySelectorAll('g.bar.hot').forEach(function(b){b.classList.remove('hot')});g.classList.add('hot');var p=points[Number(g.getAttribute('data-i'))],r=svg.getBoundingClientRect();tip.innerHTML='<div class="tt">'+rng(p.t,span)+'</div><div>↑ '+fmtB(p.up)+'</div><div>↓ '+fmtB(p.down)+'</div><div class="tt">= '+fmtB(p.up+p.down)+'</div>';tip.hidden=false;tip.style.left=Math.max(0,Math.min(cx-r.left+12,r.width-150))+'px';tip.style.top=Math.max(0,cy-r.top-72)+'px'};
+var hide=function(){tip.hidden=true;svg.querySelectorAll('g.bar.hot').forEach(function(b){b.classList.remove('hot')})};
+svg.addEventListener('mousemove',function(e){var g=e.target.closest('g.bar');if(!g){hide();return}show(g,e.clientX,e.clientY)});
+svg.addEventListener('mouseleave',hide);
+svg.addEventListener('touchstart',function(e){var t=e.touches[0],g=document.elementFromPoint(t.clientX,t.clientY);g=g&&g.closest('g.bar');if(g)show(g,t.clientX,t.clientY);else hide()},{passive:true});
+}
+var uh=24,uloaded={};
+function loadUsage(h){uh=h;var box=document.getElementById('u-chart');var btns=document.querySelectorAll('#u-seg button');btns.forEach(function(b){b.classList.toggle('active',Number(b.getAttribute('data-h'))===h)});
+if(uloaded[h]){chart(box,uloaded[h].points,uloaded[h].span);return}
+box.innerHTML='<div class="empty">'+L.loading+'</div>';
+fetch(location.pathname+'?stats='+h+'&tz='+TZOFF,{credentials:'same-origin'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()}).then(function(d){uloaded[h]=d;if(uh===h)chart(box,d.points,d.span)}).catch(function(){box.innerHTML='<div class="empty">'+L.fail+'</div>'})}
+document.getElementById('usage').addEventListener('toggle',function(e){if(e.target.open&&!uloaded[uh])loadUsage(uh)});
+document.getElementById('u-seg').addEventListener('click',function(e){var b=e.target.closest('button');if(b)loadUsage(Number(b.getAttribute('data-h')))});
 </script>
 </body>
 </html>

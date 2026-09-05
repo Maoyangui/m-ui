@@ -50,6 +50,7 @@ const groups = () => [
     ['subPageBrand', t('set.subPageBrand'), 'boolOn', t('set.subPageBrandHelp')],
     ['subPageTitle', t('set.subPageTitle'), 'text', t('set.subPageTitleHelp')],
     ['subPageSupport', t('set.subPageSupport'), 'text'],
+    ['subPageBuyURL', t('set.subPageBuyURL'), 'text', t('set.subPageBuyURLHelp')],
     ['subPageNotice', t('set.subPageNotice'), 'textarea'],
   ]},
   { id: 'notify', title: t('set.notify'), test: true, fields: [

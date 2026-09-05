@@ -44,6 +44,7 @@ export async function render(el) {
         ${field(t('set.subTitle'), `<input id="sp-profile" value="${esc(me.profileTitle || '')}" placeholder="${esc(t('acct.inherit'))}">`, t('acct.profileHelp'))}
         ${field(t('set.subPageTitle'), `<input id="sp-title" value="${esc(me.pageTitle || '')}" placeholder="${esc(t('acct.inherit'))}">`)}
         ${field(t('set.subPageSupport'), `<input id="sp-support" value="${esc(me.pageSupport || '')}" placeholder="${esc(t('acct.inherit'))}">`)}
+        ${field(t('set.subPageBuyURL'), `<input id="sp-buy" type="url" value="${esc(me.pageBuyURL || '')}" placeholder="${esc(t('acct.inherit'))}">`, t('set.subPageBuyURLHelp'))}
         <div class="full">${field(t('set.subPageNotice'), `<textarea id="sp-notice" placeholder="${esc(t('acct.inherit'))}">${esc(me.pageNotice || '')}</textarea>`)}</div>
       </div>
     </section>`;
@@ -132,7 +133,7 @@ registerActions({
       await put('self', {
         pageEnabled: fchk('sp-enabled'), shareOn: fchk('sp-share'),
         profileTitle: fv('sp-profile').trim(),
-        pageTitle: fv('sp-title').trim(), pageSupport: fv('sp-support').trim(), pageNotice: fv('sp-notice'),
+        pageTitle: fv('sp-title').trim(), pageSupport: fv('sp-support').trim(), pageNotice: fv('sp-notice'), pageBuyURL: fv('sp-buy').trim(),
       });
       await load('status');
       toast(t('set.saved'), 'ok');

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
-<title>{{if eq .Lang "zh"}}订阅不可用{{else}}Subscription unavailable{{end}} · {{.Title}}</title>
+<title>{{if eq .Lang "zh"}}订阅地址无效{{else}}Invalid subscription link{{end}} · {{.Title}}</title>
 <link rel="icon" href="{{.Icon}}" type="image/svg+xml">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--text:#1a202c;--muted:#64748b;--border:#e2e8f0;--primary:#2563eb;--soft:#eff6ff}
@@ -17,6 +17,8 @@
 .mark svg{width:26px;height:26px}
 h1{margin:0 0 .45rem;font-size:1.05rem}
 .lead{margin:0;color:var(--muted);font-size:.9rem}
+.buy{display:flex;align-items:center;justify-content:center;gap:.45rem;margin:1.2rem 0 0;padding:.72rem 1rem;border-radius:11px;background:var(--primary);color:#fff;text-decoration:none;font-weight:600;font-size:.95rem;box-shadow:0 6px 18px rgba(37,99,235,.28);transition:transform .12s,filter .15s}
+.buy:hover{filter:brightness(1.07)}.buy:active{transform:translateY(1px)}.buy svg{width:18px;height:18px}
 .contact{margin-top:1.1rem;padding-top:1.1rem;border-top:1px solid var(--border);font-size:.88rem}
 .contact .k{color:var(--muted);font-size:.78rem;display:block;margin-bottom:.2rem}
 .contact .v{white-space:pre-wrap;word-break:break-word}
@@ -34,8 +36,9 @@ h1{margin:0 0 .45rem;font-size:1.05rem}
         <path d="M4 4l16 16"/>
       </svg>
     </div>
-    <h1>{{if eq .Lang "zh"}}订阅不可用{{else}}Subscription unavailable{{end}}</h1>
-    <p class="lead">{{if eq .Lang "zh"}}这条订阅可能已用完流量或已到期。{{else}}This subscription may be out of traffic or past its expiry date.{{end}}</p>
+    <h1>{{if eq .Lang "zh"}}订阅地址无效{{else}}Invalid subscription link{{end}}</h1>
+    <p class="lead">{{if eq .Lang "zh"}}没有找到这条订阅。请核对地址是否完整,或向提供者重新获取。{{else}}No subscription matches this link. Check that the address is complete, or ask your provider for a new one.{{end}}</p>
+    {{if .BuyURL}}<a class="buy" href="{{.BuyURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>{{if eq .Lang "zh"}}选购订阅{{else}}Get a subscription{{end}}</a>{{end}}
     {{if .Support}}<div class="contact"><span class="k">{{if eq .Lang "zh"}}有疑问请联系{{else}}Questions? Get in touch{{end}}</span><div class="v">{{.Support}}</div></div>{{end}}
     {{if .Notice}}<div class="notice">{{.Notice}}</div>{{end}}
   </div>

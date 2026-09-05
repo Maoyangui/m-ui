@@ -258,18 +258,19 @@ func (s *Server) handle() http.HandlerFunc {
 			return
 		}
 
-		// 用户名(主面板用户)→ 订阅令牌(代理建的用户)→ 临时共享令牌
+		// 用户名(主面板用户)→ 订阅令牌(代理建的用户)→ 临时共享令牌。
+		// 不按启停过滤:到期 / 用尽 / 被停用的人也要能打开自己的落地页看到原因;客户端拉取才按 blocked 拦。
 		var user model.User
 		shared := false
-		byName := s.db.Where("name = ? AND COALESCE(reseller_id, 0) = 0 AND enabled = ? AND COALESCE(sub_token, '') = ''", name, true)
+		byName := s.db.Where("name = ? AND COALESCE(reseller_id, 0) = 0 AND COALESCE(sub_token, '') = ''", name)
 		if err := byName.First(&user).Error; err != nil {
-			if s.db.Where("sub_token = ? AND enabled = ?", name, true).First(&user).Error != nil {
-				if !s.shareEnabled() || s.db.Where("share_token = ? AND enabled = ?", name, true).First(&user).Error != nil {
+			if s.db.Where("sub_token = ?", name).First(&user).Error != nil {
+				if !s.shareEnabled() || s.db.Where("share_token = ?", name).First(&user).Error != nil {
 					s.log(r, name, false, 404)
-					s.serveNotFound(w, r, name) // 浏览器打开时给一页说明(多半是用完/到期被停用)
+					s.serveNotFound(w, r, name) // 地址对不上任何人:浏览器给"订阅地址无效"页,客户端纯 404
 					return
 				}
-				shared = true // 共享地址:只发原始订阅,不出订阅页/二维码,也不能改共享状态
+				shared = true // 共享地址:只发原始订阅,不出订阅页/二维码/用量,也不能改共享状态
 				if len(user.ShareCreds) == 0 {
 					http.NotFound(w, r) // 老版本留下的令牌没有独立凭据,让用户重新生成
 					return
@@ -278,16 +279,24 @@ func (s *Server) handle() http.HandlerFunc {
 			}
 		}
 		rs := s.resellerOf(user) // 代理用户:落地页文案与开关按代理的来
-		if rs != nil && (!rs.Enabled || (rs.Expiry > 0 && rs.Expiry < time.Now().Unix())) {
-			s.log(r, user.Name, shared, 404)
-			s.serveNotFound(w, r, name) // 代理被停用或到期,名下用户的订阅一并停
-			return
-		}
-		if shared && (wantQR || r.Method == http.MethodPost) {
+		now := time.Now().Unix()
+		// blocked = 客户端拿不到订阅:本人被停用,或所属代理被停用 / 到期。到期、流量用尽只在页面上标出来,
+		// 要不要真的停用由面板决定(和以前一致)
+		blocked := !user.Enabled || (rs != nil && (!rs.Enabled || (rs.Expiry > 0 && rs.Expiry < now)))
+		if shared && (blocked || wantQR || r.Method == http.MethodPost || r.URL.Query().Has("stats")) {
+			s.log(r, user.Name, true, 404)
 			http.NotFound(w, r)
 			return
 		}
+		if r.URL.Query().Has("stats") { // 落地页"用量情况"的数据,只对本人地址
+			s.serveStats(w, r, user)
+			return
+		}
 		if r.Method == http.MethodPost {
+			if blocked { // 停用状态下不能生成 / 取消共享
+				http.NotFound(w, r)
+				return
+			}
 			s.handleShare(w, r, subPath, name, user, rs)
 			return
 		}
@@ -306,7 +315,7 @@ func (s *Server) handle() http.HandlerFunc {
 		if rs != nil { // 代理填了标题就用代理的,客户端里显示的就是他的品牌
 			opt.ProfileTitle = pick(rs.ProfileTitle, pick(rs.PageTitle, opt.ProfileTitle))
 		}
-		// 浏览器打开订阅地址 → 订阅页(用量/到期/一键导入/二维码);客户端拉取 → 原始订阅
+		// 浏览器打开订阅地址 → 订阅页(不论状态;到期 / 用尽 / 停用在页面顶部标出);客户端拉取 → 原始订阅,停用则 404
 		if !shared && s.pageEnabled(rs) && WantsPage(r) {
 			if r.URL.Query().Has("clients") { // 订阅页里那个下载箭头
 				s.serveClients(w, r, subPath, name, s.pageTitle(rs, opt))
@@ -315,6 +324,11 @@ func (s *Server) handle() http.HandlerFunc {
 			}
 			s.servePage(w, r, subPath, name, user, lines, opt, rs)
 			s.log(r, user.Name, false, 200)
+			return
+		}
+		if blocked {
+			s.log(r, user.Name, shared, 404)
+			http.NotFound(w, r)
 			return
 		}
 		format := r.URL.Query().Get("format")

@@ -321,14 +321,20 @@ func (s *Server) handleResellerSelf(w http.ResponseWriter, r *http.Request) {
 			PageTitle    string `json:"pageTitle"`
 			PageNotice   string `json:"pageNotice"`
 			PageSupport  string `json:"pageSupport"`
+			PageBuyURL   string `json:"pageBuyURL"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			badRequest(w, err)
 			return
 		}
+		buy := strings.TrimSpace(p.PageBuyURL)
+		if buy != "" && !strings.HasPrefix(strings.ToLower(buy), "http://") && !strings.HasPrefix(strings.ToLower(buy), "https://") {
+			badRequest(w, errors.New("选购链接必须以 http:// 或 https:// 开头"))
+			return
+		}
 		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{
 			"page_enabled": p.PageEnabled, "share_on": p.ShareOn, "profile_title": strings.TrimSpace(p.ProfileTitle),
-			"page_title": p.PageTitle, "page_notice": p.PageNotice, "page_support": p.PageSupport,
+			"page_title": p.PageTitle, "page_notice": p.PageNotice, "page_support": p.PageSupport, "page_buy_url": buy,
 		})
 		s.auditAs(rs.Name, "reseller", "subpage", rs.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})

@@ -61,7 +61,12 @@ func (s *Server) handleShare(w http.ResponseWriter, r *http.Request, subPath, ke
 		return
 	}
 	s.applyShare(user.Name, user.ShareToken != "") // 旧凭据被作废才需要断线
-	http.Redirect(w, r, publicBase(r, subPath, key), http.StatusSeeOther)
+	// 直接把更新后的落地页返回(200),省掉一次跳转往返 —— 用户离服务器远时每趟要两三秒;页面脚本只替换共享那张卡。
+	// 非浏览器(客户端 / curl)POST 完拿到的就是它平时拉的订阅内容。
+	get := r.Clone(r.Context())
+	get.Method = http.MethodGet
+	get.URL.RawQuery = ""
+	s.handle()(w, get)
 }
 
 // applyShare 让共享凭据即时生效/失效。
