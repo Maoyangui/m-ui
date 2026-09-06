@@ -127,7 +127,12 @@ func New(dbPath string) (*Runner, error) {
 		LocalRatio:  r.localRatio,
 	})
 	r.monitor = monitor.New(monitor.Deps{
-		DB: db, Setting: r.setting, CoreRunning: r.CoreRunning, Check: r.CheckUpstream, Notify: r.notifier,
+		UsedUpstreams: r.usedUpstreams,
+		RemoteHealth:  r.remoteUpstreamHealth,
+		SelfName:      r.LocalNodeName,
+		SelfNodeId:    r.LocalNodeId,
+		Alerting:      func() bool { return !r.IsNode() },
+		DB:            db, Setting: r.setting, CoreRunning: r.CoreRunning, Check: r.CheckUpstream, Notify: r.notifier,
 	})
 	r.hub = hub.New(hub.Deps{
 		DB: db, Setting: r.setting, IsNode: r.IsNode, Version: Version,
@@ -710,6 +715,61 @@ func (r *Runner) applyLimits() {
 		logger.Info("已应用 ", len(specs), " 个用户的限速/设备数策略,", len(groups), " 个代理池")
 	}
 }
+
+// usedUpstreams 本机线路真正用到的上游 id:启用的线路 ∩ 部署在本机 ∩ 指定了上游。
+// 巡检据此只测本机用得上的那些,不部署线路的主机一条都不测。
+func (r *Runner) usedUpstreams() map[uint]bool {
+	self := render.LocalNodeID(r.db)
+	var lines []model.Line
+	r.db.Select("id, upstream_id, node_ids").Where("enabled = ? AND upstream_id > 0", true).Find(&lines)
+	out := map[uint]bool{}
+	for _, l := range lines {
+		if render.LineOnNode(l, self) {
+			out[l.UpstreamId] = true
+		}
+	}
+	return out
+}
+
+// remoteUpstreamHealth 各副机上报的上游巡检结果,转成巡检器的形式(带服务器名)。
+func (r *Runner) remoteUpstreamHealth() []monitor.NodeHealth {
+	if r.hub == nil { // 巡检器比 Hub 先建,理论上跑不到这里,留个兜底
+		return nil
+	}
+	all := r.hub.UpstreamHealthAll()
+	if len(all) == 0 {
+		return nil
+	}
+	names := map[uint]string{}
+	var nodes []model.Node
+	r.db.Select("id, name").Find(&nodes)
+	for _, n := range nodes {
+		names[n.Id] = n.Name
+	}
+	var out []monitor.NodeHealth
+	for id, list := range all {
+		for _, h := range list {
+			out = append(out, monitor.NodeHealth{NodeId: id, NodeName: names[id], Id: h.Id, Name: h.Name,
+				OK: h.OK, DelayMs: h.DelayMs, Method: h.Method, Error: h.Error, CheckedAt: h.CheckedAt, Fails: h.Fails})
+		}
+	}
+	return out
+}
+
+// LocalNodeName 本机在服务器列表里的名字(巡检告警里点名用)。
+func (r *Runner) LocalNodeName() string {
+	var n model.Node
+	if r.db.Where("is_local = ?", true).First(&n).Error != nil {
+		return ""
+	}
+	return n.Name
+}
+
+// LocalNodeId 本机在 nodes 表里的 id。
+func (r *Runner) LocalNodeId() uint { return render.LocalNodeID(r.db) }
+
+// UpstreamHealthLocal 本机巡检结果(副机随报告上报给主机)。
+func (r *Runner) UpstreamHealthLocal() []monitor.UpstreamHealth { return r.monitor.Results() }
 
 // GroupState 各代理池在本机的状态(在线设备数、设备池满被拒次数),供 Hub 汇总给面板。
 func (r *Runner) GroupState() map[string]hub.GroupState {

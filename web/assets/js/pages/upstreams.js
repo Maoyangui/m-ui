@@ -1,7 +1,9 @@
 import { state, load } from '../app.js';
 import { get, post, put, del, SLOW, LONG } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce } from '../ui.js';
+import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtTime } from '../ui.js';
+// 展开查看细节的上游 id:一行只显示各服务器的延迟,点开才看检查时间、方式与完整报错
+const expanded = new Set();
 
 export const title = () => t('up.title');
 export const subtitle = () => t('up.subtitle');
@@ -46,15 +48,40 @@ export async function render(el) {
     (h.results || []).forEach(x => { if (!results[x.id] || results[x.id].scheduled) results[x.id] = { ...x, scheduled: true }; });
     renderRows();
   } catch {}
+  // 巡检结果会随定时刷新更新,不必自己再开一个定时器
 }
 
+// resultHTML 延迟列:一条上游一行,里面按服务器并排 —— "专线倍率 128ms · 高带宽 96ms"。
+// 上游通不通只在真正跑这条线路的机器上量才算数,所以这里显示的是各机各自的结果。
 function resultHTML(id) {
   const r = results[id];
   if (!r) return badge(t('up.untested'));
   if (r.testing) return badge(t('up.testing'));
-  const when = r.scheduled ? ` <span class="muted small" title="${t('up.scheduled')}">🕘 ${new Date(r.checkedAt * 1000).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>` : '';
-  if (r.ok) return badge(r.delayMs + ' ms', 'ok') + (r.method === 'tcp' ? ' ' + badge('TCP') : '') + when;
-  return `${badge(t('up.fault'), 'danger')}${when}<div class="sub-cell" title="${esc(r.error)}">${esc(r.error).slice(0, 80)}</div>`;
+  if (r.unused) return `${badge(t('up.unused'))}<div class="sub-cell muted">${t('up.unusedHint')}</div>`;
+  const servers = r.servers || [];
+  if (!servers.length) return badge(t('up.untested'));
+  const one = servers.length === 1;
+  const chips = servers.map(sv => {
+    const who = one ? '' : `<span class="muted small">${esc(sv.name)}</span> `;
+    if (sv.state === 'ok') return who + badge(sv.delayMs + ' ms', 'ok') + (sv.method === 'tcp' ? ' ' + badge('TCP') : '');
+    if (sv.state === 'fail') return who + badge(t('up.fault'), 'danger');
+    if (sv.state === 'stale') return who + badge(t('up.stale'), 'warn');
+    return who + badge(t('up.pending'));
+  }).join(' <span class="muted">·</span> ');
+  const bad = servers.filter(sv => sv.error); // 折叠时预览第一条真正带报错的,“数据过期”没有报错文字
+  const more = `<button class="btn xs ghost" data-act="up.expand" data-id="${id}" title="${t('up.detail')}">${expanded.has(id) ? '▴' : '▾'}</button>`;
+  let detail = '';
+  if (expanded.has(id)) {
+    detail = '<div class="sub-cell">' + servers.map(sv => {
+      const when = sv.checkedAt ? fmtTime(sv.checkedAt) : '—';
+      const how = sv.method ? ` · ${esc(sv.method)}` : '';
+      const err = sv.error ? ` · <span class="danger">${esc(sv.error).slice(0, 120)}</span>` : '';
+      return `<div>${esc(sv.name)}${sv.isLocal ? ' <span class="muted">(' + t('node.local') + ')</span>' : ''} · ${when}${how}${err}</div>`;
+    }).join('') + '</div>';
+  } else if (bad.length) {
+    detail = `<div class="sub-cell" title="${esc(bad[0].error)}">${esc(bad[0].error).slice(0, 60)}</div>`;
+  }
+  return `<div class="row" style="gap:.35rem;align-items:center;flex-wrap:wrap">${chips}${more}</div>${detail}`;
 }
 
 function typeBadges(u) {
@@ -74,8 +101,8 @@ function renderRows() {
   const online = new Set(state.onlines.upstreams || []);
   const rows = state.upstreams.filter(u => { const o = parseOpts(u.options); return matches(query, u.name, u.type, o.server); });
   document.getElementById('up-count').textContent = `${rows.length} / ${state.upstreams.length}`;
-  if (!rows.length) { body.innerHTML = `<tr><td colspan="6">${empty()}</td></tr>`; return; }
-  body.innerHTML = rows.map(u => {
+  if (!rows.length) { setHTML(body, `<tr><td colspan="6">${empty()}</td></tr>`); return; }
+  setHTML(body, rows.map(u => {
     const o = parseOpts(u.options);
     const srv = o.server ? o.server + (o.server_port ? ':' + o.server_port : '') : '';
     return `<tr>
@@ -89,13 +116,12 @@ function renderRows() {
         <button class="btn sm" data-act="up.edit" data-id="${u.id}">${t('common.edit')}</button>
         <button class="btn sm danger" data-act="up.del" data-id="${u.id}">${t('common.delete')}</button>
       </td></tr>`;
-  }).join('');
+  }).join(''));
 }
 
 function setResult(id, r) {
   results[id] = r;
-  const cell = document.getElementById('up-res-' + id);
-  if (cell) cell.innerHTML = resultHTML(id);
+  setHTML('up-res-' + id, resultHTML(id));
 }
 
 // ---- 表单片段 ----
@@ -284,10 +310,11 @@ registerActions({
     try { await del('upstreams/' + id); await load('upstreams', 'status'); renderRows(); toast(t('up.deleted'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
+  'up.expand': id => { const n = Number(id); expanded.has(n) ? expanded.delete(n) : expanded.add(n); setResult(n, results[n]); },
   'up.test': async id => {
     setResult(id, { testing: true });
     try { setResult(id, await post(`upstreams/${id}/test`, undefined, SLOW)); }
-    catch (e) { setResult(id, { ok: false, error: e.message }); }
+    catch (e) { setResult(id, { servers: [{ name: '—', state: 'fail', error: e.message }] }); }
   },
   'up.testAll': async (_, btn) => {
     btn.disabled = true;
@@ -295,7 +322,7 @@ registerActions({
     try {
       const rs = await post('upstreams/test', undefined, LONG);
       rs.forEach(r => setResult(r.id, r));
-      const bad = rs.filter(r => !r.ok).length;
+      const bad = rs.filter(r => (r.servers || []).some(sv => sv.state === 'fail')).length;
       toast(bad ? t('up.testDoneBad', { n: bad }) : t('up.testDone'), bad ? 'err' : 'ok');
     } catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; }

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
 )
@@ -61,6 +62,8 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentReport)(w, r)
 	case "external-ips":
 		s.agentAuth(s.handleAgentExternalIPs)(w, r)
+	case "upstream-test": // 主机让本机立刻测一条上游(面板的"测试"按钮派发过来)
+		s.agentAuth(s.handleAgentUpstreamTest)(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -170,6 +173,10 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	}
 	rep.OnlineLinesByIP = s.run.OnlineIPLines()
 	rep.Groups = s.run.GroupState()
+	for _, h := range s.run.UpstreamHealthLocal() { // 本机线路用到的那些上游,量出来的结果交给主机汇总
+		rep.Upstreams = append(rep.Upstreams, hub.UpstreamHealth{Id: h.Id, Name: h.Name, OK: h.OK,
+			DelayMs: h.DelayMs, Method: h.Method, Error: h.Error, CheckedAt: h.CheckedAt, Fails: h.Fails})
+	}
 	s.db.Find(&rep.Counters)
 	o := s.run.Onlines()
 	allIPs := s.run.OnlineIPsAll() // 一次锁拿全量,不按用户逐个抢数据面的锁
@@ -194,4 +201,28 @@ func (s *Server) handleAgentExternalIPs(w http.ResponseWriter, r *http.Request) 
 	}
 	s.run.SetExternalIPs(m)
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// handleAgentUpstreamTest 主机派发过来的单条上游测试:在本机实测并返回结果。
+// 上游通不通要在真正跑这条线路的机器上量,面板的"测试"按钮因此要派发到各机而不是只测主机。
+func (s *Server) handleAgentUpstreamTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	var body struct {
+		Id uint `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		badRequest(w, err)
+		return
+	}
+	var up model.Upstream
+	if err := s.db.First(&up, body.Id).Error; err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "上游不存在"})
+		return
+	}
+	ok, ms, meth, errStr := s.run.CheckUpstream(up)
+	writeJSON(w, http.StatusOK, hub.UpstreamHealth{Id: up.Id, Name: up.Name, OK: ok, DelayMs: ms,
+		Method: meth, Error: errStr, CheckedAt: time.Now().Unix()})
 }

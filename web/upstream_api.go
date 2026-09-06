@@ -37,15 +37,6 @@ func (s *Server) dryRunLine(line *model.Line) error {
 // defaultTestURL 是上游健康检查的目标(与 clash 默认一致),可用设置 upstreamTestUrl 覆盖。
 const defaultTestURL = "http://www.gstatic.com/generate_204"
 
-type upstreamTestResult struct {
-	Id      uint   `json:"id"`
-	Name    string `json:"name"`
-	OK      bool   `json:"ok"`
-	DelayMs int    `json:"delayMs"`
-	Method  string `json:"method"` // urltest(经数据面真实请求)| tcp(端口探测)| none
-	Error   string `json:"error,omitempty"`
-}
-
 // dispatchUpstreamSubroute 处理 /upstreams/test、/upstreams/parse、/upstreams/{id}/test。
 // 返回 true 表示请求已被处理。
 func (s *Server) dispatchUpstreamSubroute(w http.ResponseWriter, r *http.Request) bool {
@@ -87,7 +78,7 @@ func (s *Server) handleUpstreamTestOne(w http.ResponseWriter, r *http.Request, i
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "上游不存在"})
 		return
 	}
-	writeJSON(w, http.StatusOK, s.testUpstream(up))
+	writeJSON(w, http.StatusOK, upRow{Id: up.Id, Name: up.Name, Servers: s.testUpstreamEverywhere(up)})
 }
 
 // handleUpstreamTestAll 并发测试全部上游(最多 12 个同时),按 id 排序返回。
@@ -99,8 +90,8 @@ func (s *Server) handleUpstreamTestAll(w http.ResponseWriter, r *http.Request) {
 	var ups []model.Upstream
 	s.db.Order("id asc").Find(&ups)
 
-	results := make([]upstreamTestResult, len(ups))
-	sem := make(chan struct{}, 12)
+	results := make([]upRow, len(ups))
+	sem := make(chan struct{}, 6) // 每条上游还要往各机派发,并发别开太大
 	var wg sync.WaitGroup
 	for i, up := range ups {
 		wg.Add(1)
@@ -108,31 +99,12 @@ func (s *Server) handleUpstreamTestAll(w http.ResponseWriter, r *http.Request) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[i] = s.testUpstream(up)
+			results[i] = upRow{Id: up.Id, Name: up.Name, Servers: s.testUpstreamEverywhere(up)}
 		}(i, up)
 	}
 	wg.Wait()
 	sort.Slice(results, func(a, b int) bool { return results[a].Id < results[b].Id })
 	writeJSON(w, http.StatusOK, results)
-}
-
-// testUpstream 对单个上游做健康检查(与定时巡检共用 runner.CheckUpstream)。
-func (s *Server) testUpstream(up model.Upstream) upstreamTestResult {
-	ok, ms, method, errStr := s.run.CheckUpstream(up)
-	return upstreamTestResult{Id: up.Id, Name: up.Name, OK: ok, DelayMs: ms, Method: method, Error: errStr}
-}
-
-// handleUpstreamHealth GET /upstreams/health:定时巡检的最近结果;POST 立即巡检一次。
-func (s *Server) handleUpstreamHealth(w http.ResponseWriter, r *http.Request) {
-	m := s.run.Monitor()
-	if r.Method == http.MethodPost {
-		changed := m.RunUpstreamCheck()
-		s.audit(r, "upstream", "health-check", changed)
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"results": m.Results(), "lastRun": m.LastRun(),
-		"intervalMinutes": s.settingInt("upstreamCheckMinutes", 10),
-	})
 }
 
 // handleNotifyTest POST /notify/test:发送 Telegram 测试消息。

@@ -29,7 +29,6 @@ type UpstreamHealth struct {
 	Error     string `json:"error,omitempty"`
 	CheckedAt int64  `json:"checkedAt"`
 	Fails     int    `json:"fails"` // 连续失败次数
-	alerted   bool
 }
 
 type Deps struct {
@@ -38,12 +37,35 @@ type Deps struct {
 	CoreRunning func() bool
 	Check       func(model.Upstream) (ok bool, delayMs int, method, errStr string)
 	Notify      *notify.Notifier
+	// UsedUpstreams 本机线路真正用到的上游 id。上游通不通只在跑这条线路的机器上量才有意义:
+	// 主机在香港、落地从别的机器出去,主机测得通不代表那台通;主机不部署线路时更是一条都不该测。
+	UsedUpstreams func() map[uint]bool
+	// RemoteHealth 各副机上报的结果(只有主机有),和本机结果合在一起判断告警
+	RemoteHealth func() []NodeHealth
+	SelfName     func() string // 本机在服务器列表里的名字,告警文案里点名是哪台
+	SelfNodeId   func() uint
+	Alerting     func() bool // 只有主机发告警:副机没有通知配置,也不该重复发
+}
+
+// NodeHealth 某台服务器上某条上游的巡检结果(主机汇总各机结果时用)。
+type NodeHealth struct {
+	NodeId    uint   `json:"nodeId"`
+	NodeName  string `json:"nodeName"`
+	Id        uint   `json:"id"`
+	Name      string `json:"name"`
+	OK        bool   `json:"ok"`
+	DelayMs   int    `json:"delayMs"`
+	Method    string `json:"method"`
+	Error     string `json:"error,omitempty"`
+	CheckedAt int64  `json:"checkedAt"`
+	Fails     int    `json:"fails"`
 }
 
 type Monitor struct {
 	d        Deps
 	mu       sync.Mutex
-	results  map[uint]*UpstreamHealth
+	results  map[uint]*UpstreamHealth // 本机测出来的结果(副机上报的就是它)
+	alerted  map[string]bool          // "服务器 id:上游 id" → 已经告过警,避免同一条故障反复发
 	lastRun  int64
 	coreDown bool
 	stop     chan struct{}
@@ -51,7 +73,7 @@ type Monitor struct {
 }
 
 func New(d Deps) *Monitor {
-	return &Monitor{d: d, results: map[uint]*UpstreamHealth{}, stop: make(chan struct{})}
+	return &Monitor{d: d, results: map[uint]*UpstreamHealth{}, alerted: map[string]bool{}, stop: make(chan struct{})}
 }
 
 // loc 面板设置的时区:日报发送时点与消息里的日期都按它算,
@@ -121,15 +143,30 @@ func (m *Monitor) tickUpstreams() {
 	m.RunUpstreamCheck()
 }
 
-// RunUpstreamCheck 立即巡检全部上游,返回状态发生变化(故障/恢复)的上游名。
+// RunUpstreamCheck 巡检本机线路用到的上游,返回状态发生变化(故障/恢复)的上游名。
+// 本机没有线路用到的上游一条都不测:测了也只是"从这台机器看通不通",既没人关心,还会误报。
 func (m *Monitor) RunUpstreamCheck() []string {
 	m.lastRun = time.Now().Unix()
 	threshold := m.settingInt("upstreamCheckFailThreshold", 2)
 	if threshold < 1 {
 		threshold = 1
 	}
-	var ups []model.Upstream
-	m.d.DB.Order("id asc").Find(&ups)
+	var all []model.Upstream
+	m.d.DB.Order("id asc").Find(&all)
+	used := map[uint]bool{}
+	if m.d.UsedUpstreams != nil {
+		used = m.d.UsedUpstreams()
+	} else {
+		for _, u := range all { // 没接这个依赖(测试里)就维持老行为
+			used[u.Id] = true
+		}
+	}
+	ups := make([]model.Upstream, 0, len(all))
+	for _, u := range all {
+		if used[u.Id] {
+			ups = append(ups, u)
+		}
+	}
 
 	type res struct {
 		up   model.Upstream
@@ -153,7 +190,6 @@ func (m *Monitor) RunUpstreamCheck() []string {
 	}
 	wg.Wait()
 
-	var changed []string
 	now := time.Now().Unix()
 	m.mu.Lock()
 	seen := map[uint]bool{}
@@ -166,27 +202,80 @@ func (m *Monitor) RunUpstreamCheck() []string {
 		}
 		h.Name, h.OK, h.DelayMs, h.Method, h.Error, h.CheckedAt = r.up.Name, r.ok, r.ms, r.meth, r.err, now
 		if r.ok {
-			if h.alerted {
-				h.alerted = false
-				changed = append(changed, r.up.Name)
-				m.d.Notify.Event("tgOnUpstream", fmt.Sprintf("🟢 <b>上游恢复</b>:%s(%d ms)", notify.Esc(r.up.Name), r.ms))
-			}
 			h.Fails = 0
-			continue
-		}
-		h.Fails++
-		if h.Fails >= threshold && !h.alerted {
-			h.alerted = true
-			changed = append(changed, r.up.Name)
-			m.d.Notify.Event("tgOnUpstream", fmt.Sprintf("🔴 <b>上游故障</b>:%s\n连续 %d 次失败:%s", notify.Esc(r.up.Name), h.Fails, notify.Esc(r.err)))
+		} else {
+			h.Fails++
 		}
 	}
 	for id := range m.results {
-		if !seen[id] {
+		if !seen[id] { // 线路改了部署或换了上游,本机不再用它,结果作废
 			delete(m.results, id)
 		}
 	}
+	local := m.snapshotLocked()
 	m.mu.Unlock()
+	return m.evaluateAlerts(local, threshold)
+}
+
+// snapshotLocked 本机结果转成带服务器身份的形式(调用方须持锁)。
+func (m *Monitor) snapshotLocked() []NodeHealth {
+	var name string
+	var id uint
+	if m.d.SelfName != nil {
+		name = m.d.SelfName()
+	}
+	if m.d.SelfNodeId != nil {
+		id = m.d.SelfNodeId()
+	}
+	out := make([]NodeHealth, 0, len(m.results))
+	for _, h := range m.results {
+		out = append(out, NodeHealth{NodeId: id, NodeName: name, Id: h.Id, Name: h.Name, OK: h.OK,
+			DelayMs: h.DelayMs, Method: h.Method, Error: h.Error, CheckedAt: h.CheckedAt, Fails: h.Fails})
+	}
+	return out
+}
+
+// evaluateAlerts 把本机与各副机的结果合在一起判断告警:某条上游在**真正用它的那台服务器**上
+// 连续失败到阈值才发,消息里点名是哪台;恢复同理。只有主机做这件事。
+// 返回状态发生变化的上游名(面板"立即巡检"用)。
+func (m *Monitor) evaluateAlerts(local []NodeHealth, threshold int) []string {
+	if m.d.Alerting != nil && !m.d.Alerting() {
+		return nil
+	}
+	merged := local
+	if m.d.RemoteHealth != nil {
+		merged = append(append([]NodeHealth{}, local...), m.d.RemoteHealth()...)
+	}
+	var changed []string
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	live := map[string]bool{}
+	for _, h := range merged {
+		key := fmt.Sprintf("%d:%d", h.NodeId, h.Id)
+		live[key] = true
+		where := h.Name
+		if h.NodeName != "" {
+			where = h.Name + " @ " + h.NodeName
+		}
+		if h.OK {
+			if m.alerted[key] {
+				delete(m.alerted, key)
+				changed = append(changed, h.Name)
+				m.d.Notify.Event("tgOnUpstream", fmt.Sprintf("🟢 <b>上游恢复</b>:%s(%d ms)", notify.Esc(where), h.DelayMs))
+			}
+			continue
+		}
+		if h.Fails >= threshold && !m.alerted[key] {
+			m.alerted[key] = true
+			changed = append(changed, h.Name)
+			m.d.Notify.Event("tgOnUpstream", fmt.Sprintf("🔴 <b>上游故障</b>:%s\n连续 %d 次失败:%s", notify.Esc(where), h.Fails, notify.Esc(h.Error)))
+		}
+	}
+	for key := range m.alerted { // 上游删了、线路不再用它、副机下线:挂着的告警状态清掉,别留着假红点
+		if !live[key] {
+			delete(m.alerted, key)
+		}
+	}
 	return changed
 }
 

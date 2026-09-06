@@ -34,7 +34,8 @@ import (
 // SyncedSettings 是需要在主副机之间保持一致的设置项(订阅展示相关)。
 var SyncedSettings = []string{
 	"timezone",
-	"upstreamTestUrl", "subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subUpdates",
+	"upstreamTestUrl", "upstreamCheckMinutes", "upstreamCheckFailThreshold",
+	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subUpdates",
 	"subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice", "subShareEnabled",
 }
 
@@ -392,9 +393,23 @@ type Report struct {
 	OnlineLinesByIP map[string]map[string][]string `json:"onlineLinesByIp,omitempty"` // 用户 → 源 IP → 线路名
 	OnlineLines     []string                       `json:"onlineLines"`
 	CertDays        int                            `json:"certDays"`
-	PublicIP        string                         `json:"publicIp"`         // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
-	Conns           []RecentConn                   `json:"conns,omitempty"`  // 最近入站连接,主机概览汇总展示
-	Groups          map[string]GroupState          `json:"groups,omitempty"` // 代理池在这台机器上的状态(在线设备、设备池满被拒次数)
+	PublicIP        string                         `json:"publicIp"`            // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
+	Conns           []RecentConn                   `json:"conns,omitempty"`     // 最近入站连接,主机概览汇总展示
+	Groups          map[string]GroupState          `json:"groups,omitempty"`    // 代理池在这台机器上的状态(在线设备、设备池满被拒次数)
+	Upstreams       []UpstreamHealth               `json:"upstreams,omitempty"` // 本机线路真正用到的那些上游的巡检结果
+}
+
+// UpstreamHealth 一台服务器上某条上游的最近巡检结果。
+// 上游通不通要在真正跑这条线路的机器上量:主机在香港、落地从高带宽走,主机测得通不代表高带宽通。
+type UpstreamHealth struct {
+	Id        uint   `json:"id"`
+	Name      string `json:"name"`
+	OK        bool   `json:"ok"`
+	DelayMs   int    `json:"delayMs"`
+	Method    string `json:"method"`
+	Error     string `json:"error,omitempty"`
+	CheckedAt int64  `json:"checkedAt"`
+	Fails     int    `json:"fails"` // 该机连续失败次数,主机据此决定告不告警
 }
 
 // GroupState 一个代理池在某台机器上的状态。
@@ -537,6 +552,8 @@ type Hub struct {
 	clients     map[bool]*http.Client
 	// rejects 各代理池最近被拒的新设备连接(主机 + 各副机上报),只留 rejectWindow 内的,面板给代理看"设备池已满"
 	rejects map[string][]rejectAt
+	// upHealth 各副机上报的上游巡检结果(副机 id → 结果),面板按服务器展示、主机据此告警
+	upHealth map[uint][]UpstreamHealth
 }
 
 type rejectAt struct {
@@ -549,6 +566,7 @@ const rejectWindow = 10 * 60 // 秒
 func New(d Deps) *Hub {
 	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{},
 		remoteLines: map[uint]map[string]map[string][]string{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
+		upHealth: map[uint][]UpstreamHealth{},
 		clients: map[bool]*http.Client{
 			false: {Timeout: 25 * time.Second},
 			true:  {Timeout: 25 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}},
@@ -660,6 +678,9 @@ func (h *Hub) tick() {
 		h.remote[r.n.Id] = r.rep.Onlines
 		h.remoteLines[r.n.Id] = r.rep.OnlineLinesByIP
 		h.nodeNames[r.n.Id] = r.n.Name
+		if r.rep.Upstreams != nil {
+			h.upHealth[r.n.Id] = r.rep.Upstreams
+		}
 		h.mu.Unlock()
 	}
 	h.forgetNodes(live)
@@ -746,6 +767,7 @@ func (h *Hub) forgetNodes(live map[uint]bool) {
 		delete(h.pushed, id)
 		delete(h.remoteLines, id)
 		delete(h.nodeNames, id)
+		delete(h.upHealth, id)
 	}
 }
 
@@ -910,6 +932,26 @@ func (h *Hub) PushNow(n model.Node) error {
 		return err
 	}
 	return h.push(n, snap)
+}
+
+// UpstreamHealthAll 各副机上报的上游巡检结果(副机 id → 结果)。
+func (h *Hub) UpstreamHealthAll() map[uint][]UpstreamHealth {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make(map[uint][]UpstreamHealth, len(h.upHealth))
+	for id, list := range h.upHealth {
+		cp := make([]UpstreamHealth, len(list))
+		copy(cp, list)
+		out[id] = cp
+	}
+	return out
+}
+
+// TestUpstreamOn 让某台副机立刻测一条上游(面板的"测试"按钮:在真正用它的机器上测才有意义)。
+func (h *Hub) TestUpstreamOn(n model.Node, id uint) (UpstreamHealth, error) {
+	var out UpstreamHealth
+	err := h.request(n, "POST", "upstream-test", map[string]uint{"id": id}, &out)
+	return out, err
 }
 
 // Statuses 返回所有副机的运行状态。
