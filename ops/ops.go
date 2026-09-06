@@ -58,6 +58,14 @@ type Info struct {
 	Warp      WarpInfo `json:"warp"`
 	Tuned     bool     `json:"tuned"`  // 存在 /etc/sysctl.d/99-m-ui-tune.conf
 	Limits    bool     `json:"limits"` // 存在 m-ui.service override
+	Journal   Journal  `json:"journal"`
+}
+
+// Journal 系统日志(journald)的占用与是否设过上限。
+// 它装的是全机所有服务的日志,m-ui 只占其中很小一部分;面板自己的运行日志在进程内存里,与它无关。
+type Journal struct {
+	UsedMB  int  `json:"usedMb"`
+	Limited bool `json:"limited"` // 存在 /etc/systemd/journald.conf.d/99-m-ui.conf
 }
 
 // Collect 收集系统信息;非 Linux 只填基础字段。
@@ -112,6 +120,13 @@ func Collect(ctx context.Context, warpPort int, dataDir string) Info {
 		} else if out != "" {
 			in.Warp.Status = strings.TrimSpace(strings.Split(out, "\n")[0])
 		}
+	}
+	// 系统日志占用:journalctl --disk-usage 输出形如 "... take up 138.0M in the file system."
+	if out, err := run(ctx, 5*time.Second, "journalctl", "--disk-usage"); err == nil {
+		in.Journal.UsedMB = parseDiskUsage(out)
+	}
+	if _, err := os.Stat(journalConf); err == nil {
+		in.Journal.Limited = true
 	}
 	in.Warp.Listening = portOpen(warpPort)
 	if in.Warp.Listening {
@@ -227,13 +242,58 @@ var Tasks = []Task{
 	{Name: "limits", Title: "文件句柄上限", Desc: "为 m-ui.service 写 LimitNOFILE/LimitNPROC override(重启 m-ui 生效)"},
 	{Name: "ntp", Title: "时间同步", Desc: "开启 systemd-timesyncd NTP 同步"},
 	{Name: "tune-all", Title: "一键优化", Desc: "swap + 内核参数 + 文件句柄 + NTP"},
+	{Name: "journal", Title: "限制系统日志占用", Desc: "给 journald 设占用上限与保留时长,并立刻回收超出的部分。装的是全机所有服务的日志,不影响 m-ui 运行"},
+}
+
+// journalConf 是本面板写的 journald 配置片段路径。
+const journalConf = "/etc/systemd/journald.conf.d/99-m-ui.conf"
+
+// DefaultJournalMB / DefaultJournalDays 是"限制系统日志占用"的默认值。
+const (
+	DefaultJournalMB   = 200
+	DefaultJournalDays = 14
+)
+
+// parseDiskUsage 从 journalctl --disk-usage 的输出里取出兆字节数(支持 K/M/G/T)。
+func parseDiskUsage(s string) int {
+	i := strings.LastIndex(s, "take up ")
+	if i < 0 {
+		return 0
+	}
+	f := strings.Fields(s[i+len("take up "):])
+	if len(f) == 0 {
+		return 0
+	}
+	v := f[0]
+	unit := byte('B')
+	if n := len(v); n > 0 && (v[n-1] < '0' || v[n-1] > '9') {
+		unit = v[n-1]
+		v = v[:n-1]
+	}
+	num, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return 0
+	}
+	switch unit {
+	case 'K':
+		return int(num / 1024)
+	case 'M':
+		return int(num)
+	case 'G':
+		return int(num * 1024)
+	case 'T':
+		return int(num * 1024 * 1024)
+	}
+	return int(num / 1024 / 1024)
 }
 
 type Params struct {
-	Port   int
-	SwapGB int
-	NoFile int    // 文件句柄上限,默认 1048576
-	Sysctl string // 自定义内核参数(key=value 每行一条),空=默认模板
+	Port        int
+	SwapGB      int
+	NoFile      int    // 文件句柄上限,默认 1048576
+	Sysctl      string // 自定义内核参数(key=value 每行一条),空=默认模板
+	JournalMB   int    // 系统日志占用上限(MB)
+	JournalDays int    // 系统日志保留天数
 }
 
 // DefaultNoFile 是 limits 任务的默认句柄上限。
@@ -301,6 +361,8 @@ func Script(name string, p Params) (string, error) {
 		s = scriptWarpEnable
 	case "warp-disable":
 		s = scriptWarpDisable
+	case "journal":
+		s = scriptJournal
 	case "warp-uninstall":
 		s = scriptWarpUninstall
 	case "swap":
@@ -319,6 +381,8 @@ func Script(name string, p Params) (string, error) {
 	s = strings.ReplaceAll(s, "{{PORT}}", strconv.Itoa(p.Port))
 	s = strings.ReplaceAll(s, "{{SWAP_GB}}", strconv.Itoa(p.SwapGB))
 	s = strings.ReplaceAll(s, "{{NOFILE}}", strconv.Itoa(p.NoFile))
+	s = strings.ReplaceAll(s, "{{JOURNAL_MB}}", strconv.Itoa(p.JournalMB))
+	s = strings.ReplaceAll(s, "{{JOURNAL_DAYS}}", strconv.Itoa(p.JournalDays))
 	s = strings.ReplaceAll(s, "{{SYSCTL}}", sysctl)
 	return "set -uo pipefail\nexport DEBIAN_FRONTEND=noninteractive\n" + s, nil
 }
@@ -580,6 +644,25 @@ TasksMax=infinity
 EOF
 systemctl daemon-reload
 echo "已写入 m-ui.service override:LimitNOFILE={{NOFILE}}(重启 m-ui 后生效)"
+`
+
+const scriptJournal = `
+echo "== 限制系统日志占用 =="
+echo "当前: $(journalctl --disk-usage 2>/dev/null)"
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/99-m-ui.conf <<'EOF'
+# 由 m-ui 运维页写入:限制 journald 的占用与保留时长。
+# 这里装的是全机所有服务的日志;m-ui 自己的运行日志在进程内存里,不受影响。
+[Journal]
+SystemMaxUse={{JOURNAL_MB}}M
+MaxRetentionSec={{JOURNAL_DAYS}}day
+EOF
+echo "已写入 /etc/systemd/journald.conf.d/99-m-ui.conf(上限 {{JOURNAL_MB}}M,保留 {{JOURNAL_DAYS}} 天)"
+systemctl restart systemd-journald 2>&1 | tail -2 || true
+journalctl --vacuum-size={{JOURNAL_MB}}M 2>&1 | tail -2 || true
+journalctl --vacuum-time={{JOURNAL_DAYS}}d 2>&1 | tail -2 || true
+echo "现在: $(journalctl --disk-usage 2>/dev/null)"
+echo "提示:m-ui 的运行日志在面板「日志」页,与这里无关"
 `
 
 const scriptNTP = `

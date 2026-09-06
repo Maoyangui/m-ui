@@ -58,8 +58,8 @@ func New(d Deps) *Scheduler {
 func (s *Scheduler) Start() {
 	s.loop("统计", 10*time.Second, s.runStats)
 	s.loop("配额判定", time.Minute, s.runDeplete)
-	s.loop("时序清理", 24*time.Hour, s.runCleanup)
-	logger.Info("定时任务已启动:统计 10s / 配额判定 1m / 时序清理 24h")
+	s.loop("日志清理", time.Hour, s.runCleanup) // 每小时一轮:选了"保留 1 天"时不用等到明天才生效
+	logger.Info("定时任务已启动:统计 10s / 配额判定 1m / 日志清理 1h")
 }
 
 func (s *Scheduler) Stop() {
@@ -350,30 +350,52 @@ func (s *Scheduler) runDeplete() {
 
 // ---- cleanup ----
 
+// runCleanup 按各自的保留天数清理:流量时序、订阅访问日志、审计日志。
+// 三者分开设置 —— 订阅日志以前跟着"流量记录保留"走,想把日志收到 1 天就会把流量图的历史一起删掉。
 func (s *Scheduler) runCleanup() {
-	days := s.settingInt("trafficAge", 30)
-	if days <= 0 {
-		return
+	now := time.Now()
+	// 流量时序
+	if days := s.settingInt("trafficAge", 30); days > 0 {
+		cutoff := now.AddDate(0, 0, -int(days)).Unix()
+		if err := s.d.DB.Where("date_time < ?", cutoff).Delete(&model.Stats{}).Error; err != nil {
+			logger.Warning("清理流量时序失败: ", err)
+		}
 	}
-	cutoff := time.Now().AddDate(0, 0, -int(days)).Unix()
-	if err := s.d.DB.Where("date_time < ?", cutoff).Delete(&model.Stats{}).Error; err != nil {
-		logger.Warning("清理流量时序失败: ", err)
-		return
+	// 订阅访问日志:没设过就沿用"流量记录保留"的天数(与老版本行为一致),0 = 不自动清理
+	subDays := s.settingInt("trafficAge", 30)
+	if v := s.d.Setting("subLogAge"); v != "" {
+		subDays = s.settingInt("subLogAge", subDays)
 	}
-	if err := s.d.DB.Where("ts < ?", cutoff).Delete(&model.SubLog{}).Error; err != nil {
-		logger.Warning("清理订阅日志失败: ", err)
+	if subDays > 0 {
+		cutoff := now.AddDate(0, 0, -int(subDays)).Unix()
+		if err := s.d.DB.Where("ts < ?", cutoff).Delete(&model.SubLog{}).Error; err != nil {
+			logger.Warning("清理订阅日志失败: ", err)
+		}
 	}
 	// 订阅端口对公网开放,每个请求(含 404)记一行:再压一道总量上限,免得被刷爆磁盘
-	const keepSubLogs = 200000
+	trim(s.d.DB, &model.SubLog{}, 200000, "订阅日志")
+	// 审计日志:默认 0 = 不自动清理(保持老版本行为),设了天数才按天清
+	if days := s.settingInt("auditAge", 0); days > 0 {
+		cutoff := now.AddDate(0, 0, -int(days)).Unix()
+		if err := s.d.DB.Where("date_time < ?", cutoff).Delete(&model.Change{}).Error; err != nil {
+			logger.Warning("清理审计日志失败: ", err)
+		}
+	}
+	trim(s.d.DB, &model.Change{}, 200000, "审计日志")
+}
+
+// trim 按总量上限裁掉最旧的行(时间设置之外的兜底,免得某一类日志被刷爆磁盘)。
+func trim(db *gorm.DB, tbl interface{}, keep int64, what string) {
 	var n int64
-	s.d.DB.Model(&model.SubLog{}).Count(&n)
-	if n > keepSubLogs {
-		var cut uint64
-		s.d.DB.Model(&model.SubLog{}).Order("id desc").Offset(keepSubLogs).Limit(1).Pluck("id", &cut)
-		if cut > 0 {
-			if err := s.d.DB.Where("id <= ?", cut).Delete(&model.SubLog{}).Error; err != nil {
-				logger.Warning("裁剪订阅日志失败: ", err)
-			}
+	db.Model(tbl).Count(&n)
+	if n <= keep {
+		return
+	}
+	var cut uint64
+	db.Model(tbl).Order("id desc").Offset(int(keep)).Limit(1).Pluck("id", &cut)
+	if cut > 0 {
+		if err := db.Where("id <= ?", cut).Delete(tbl).Error; err != nil {
+			logger.Warning("裁剪", what, "失败: ", err)
 		}
 	}
 }

@@ -63,7 +63,10 @@ function syncCell(n) {
   if (isNodeView()) return n.id === data.masterId && data.appliedAt ? badge(t('node.synced'), 'ok') : '—';
   const s = n.status || {};
   if (!s.ok) return '—';
-  return (s.synced ? badge(t('node.synced'), 'ok') : badge(t('node.unsynced'), 'warn')) + (s.lastPush ? ` <span class="muted small">${fmtRelative(s.lastPush)}</span>` : '');
+  // 时间显示"最后一次联系"(每 5 秒一轮)。推送只在配置真的变了才发,拿它当时间会让人以为同步停了。
+  const push = s.lastPush ? `${t('node.pushedAt')} ${fmtRelative(s.lastPush)}` : t('node.neverPushed');
+  return (s.synced ? badge(t('node.synced'), 'ok') : badge(t('node.unsynced'), 'warn')) +
+    (s.lastSeen ? ` <span class="muted small" title="${esc(push)}">${fmtRelative(s.lastSeen)}</span>` : '');
 }
 
 function coreCell(n) {

@@ -8,6 +8,31 @@ let tab = 'sub', userFilter = '', level = 'info';
 
 const logOn = () => String(state.settings.logEnabled ?? 'true') !== 'false';
 const clearBtn = () => `<button class="btn sm danger" data-act="logs.clear">${t('logs.clear')}</button>`;
+
+// 自动清理:订阅访问日志与审计日志存在数据库里,会一直累积,给它们各自一个保留天数。
+// 空 = 保持原来的行为(订阅跟随「流量记录保留」,审计不清理),不会因为上线这个功能就删掉已有记录。
+const RETENTION = { sub: 'subLogAge', audit: 'auditAge' };
+function retentionSelect(kind) {
+  const key = RETENTION[kind];
+  if (!key) return '';
+  const cur = String(state.settings[key] ?? '');
+  const opts = [
+    ['', kind === 'sub' ? t('logs.keepFollow') : t('logs.keepNever')],
+    ['1', t('logs.keep1d')], ['7', t('logs.keep7d')], ['30', t('logs.keep30d')],
+  ];
+  if (kind === 'sub') opts.push(['0', t('logs.keepNever')]);
+  return `<label class="muted small" style="display:flex;align-items:center;gap:.35rem">${t('logs.keep')}
+    <select class="sm" id="logs-keep" style="width:auto">${opts.map(([v, label]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select></label>`;
+}
+function bindRetention(kind) {
+  const sel = document.getElementById('logs-keep');
+  if (!sel) return;
+  sel.addEventListener('change', async e => {
+    const v = e.target.value;
+    try { await post('settings', { [RETENTION[kind]]: v }); await load('settings'); toast(t('logs.keepSaved'), 'ok'); }
+    catch (err) { toast(err.message, 'err'); }
+  });
+}
 const logSwitch = () => `<label class="row" style="gap:.45rem;align-items:center;cursor:pointer" title="${esc(t('logs.enabledHelp'))}"><span class="switch"><input type="checkbox" id="logs-on" ${logOn() ? 'checked' : ''}><span></span></span><span class="small ${logOn() ? '' : 'muted'}">${t('logs.enabled')}</span></label>`;
 
 export async function render(el) {
@@ -23,14 +48,16 @@ async function renderTab() {
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.id === tab));
   if (tab === 'sub') {
     el.innerHTML = `
-      <div class="toolbar"><input type="search" id="logs-user" placeholder="${t('logs.filterUser')}" value="${esc(userFilter)}"><span class="grow"></span><button class="btn sm" data-act="logs.refresh">${t('common.refresh')}</button>${clearBtn()}</div>
+      <div class="toolbar"><input type="search" id="logs-user" placeholder="${t('logs.filterUser')}" value="${esc(userFilter)}"><span class="grow"></span>${retentionSelect('sub')}<button class="btn sm" data-act="logs.refresh">${t('common.refresh')}</button>${clearBtn()}</div>
       <div class="table-wrap"><table class="grid"><thead><tr><th>${t('logs.time')}</th><th>${t('logs.user')}</th><th>${t('logs.ip')}</th><th>${t('logs.format')}</th><th>${t('common.status')}</th><th>${t('logs.ua')}</th></tr></thead><tbody id="logs-rows"></tbody></table></div>`;
     document.getElementById('logs-user').addEventListener('input', debounce(e => { userFilter = e.target.value.trim(); loadSub(); }));
+    bindRetention('sub');
     await loadSub();
   } else if (tab === 'core') {
     el.innerHTML = `
       <div class="toolbar">${logSwitch()}<span class="grow"></span><select class="sm" id="logs-level" style="width:auto">${['debug', 'info', 'warning', 'error'].map(l => `<option ${l === level ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm" data-act="logs.refresh">${t('common.refresh')}</button>${clearBtn()}</div>
       ${logOn() ? '' : `<p class="hint" style="margin:-.3rem 0 .7rem">${t('logs.enabledHelp')}</p>`}
+      <p class="hint" style="margin:-.3rem 0 .7rem">${t('logs.coreMemHelp')}</p>
       <pre class="log" id="logs-core" style="max-height:70vh"></pre>`;
     document.getElementById('logs-level').addEventListener('change', e => { level = e.target.value; loadCore(); });
     document.getElementById('logs-on').addEventListener('change', async e => {
@@ -41,8 +68,9 @@ async function renderTab() {
     await loadCore();
   } else {
     el.innerHTML = `
-      <div class="toolbar"><span class="grow"></span><button class="btn sm" data-act="logs.refresh">${t('common.refresh')}</button>${clearBtn()}</div>
+      <div class="toolbar"><span class="grow"></span>${retentionSelect('audit')}<button class="btn sm" data-act="logs.refresh">${t('common.refresh')}</button>${clearBtn()}</div>
       <div class="table-wrap"><table class="grid"><thead><tr><th>${t('logs.time')}</th><th>${t('logs.actor')}</th><th>${t('logs.object')}</th><th>${t('logs.action')}</th><th>${t('common.details')}</th></tr></thead><tbody id="logs-rows"></tbody></table></div>`;
+    bindRetention('audit');
     await loadAudit();
   }
 }

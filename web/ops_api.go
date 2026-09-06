@@ -39,6 +39,7 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		"params": map[string]interface{}{
 			"swapGb": s.settingInt("opsSwapGb", 2), "noFile": s.settingInt("opsNoFile", ops.DefaultNoFile),
 			"sysctl": sysctl, "defaultSysctl": ops.DefaultSysctl, "defaultNoFile": ops.DefaultNoFile,
+			"journalMb": s.settingInt("opsJournalMb", ops.DefaultJournalMB), "journalDays": s.settingInt("opsJournalDays", ops.DefaultJournalDays),
 		},
 	})
 }
@@ -53,11 +54,13 @@ func (s *Server) handleOpsSub(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		var req struct {
-			Task   string `json:"task"`
-			Port   int    `json:"port"`
-			SwapGB int    `json:"swapGb"`
-			NoFile int    `json:"noFile"`
-			Sysctl string `json:"sysctl"`
+			Task        string `json:"task"`
+			Port        int    `json:"port"`
+			SwapGB      int    `json:"swapGb"`
+			NoFile      int    `json:"noFile"`
+			Sysctl      string `json:"sysctl"`
+			JournalMB   int    `json:"journalMb"`
+			JournalDays int    `json:"journalDays"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			badRequest(w, err)
@@ -73,6 +76,12 @@ func (s *Server) handleOpsSub(w http.ResponseWriter, r *http.Request) {
 		if req.NoFile > 0 {
 			s.run.SetSetting("opsNoFile", itoa(req.NoFile))
 		}
+		if req.JournalMB > 0 {
+			s.run.SetSetting("opsJournalMb", itoa(req.JournalMB))
+		}
+		if req.JournalDays > 0 {
+			s.run.SetSetting("opsJournalDays", itoa(req.JournalDays))
+		}
 		if strings.TrimSpace(req.Sysctl) != "" {
 			if _, err := ops.ValidateSysctl(req.Sysctl); err != nil {
 				badRequest(w, err)
@@ -81,7 +90,15 @@ func (s *Server) handleOpsSub(w http.ResponseWriter, r *http.Request) {
 			s.run.SetSetting("opsSysctl", req.Sysctl)
 		}
 		task := req.Task
-		err := s.ops.Start(task, ops.Params{Port: s.warpPort(), SwapGB: req.SwapGB, NoFile: req.NoFile, Sysctl: req.Sysctl}, func(ok bool, err error) {
+		jm, jd := req.JournalMB, req.JournalDays
+		if jm <= 0 {
+			jm = ops.DefaultJournalMB
+		}
+		if jd <= 0 {
+			jd = ops.DefaultJournalDays
+		}
+		err := s.ops.Start(task, ops.Params{Port: s.warpPort(), SwapGB: req.SwapGB, NoFile: req.NoFile, Sysctl: req.Sysctl,
+			JournalMB: jm, JournalDays: jd}, func(ok bool, err error) {
 			if ok {
 				logger.Info("运维任务完成: ", task)
 				if task == "warp-enable" {

@@ -10,7 +10,8 @@ const yes = (ok, onText, offText) => badge(ok ? (onText || t('common.yes')) : (o
 
 export async function render(el) {
   data = await get('ops');
-  const i = data.info, w = i.warp, st = data.status, p = data.params || { swapGb: 2, noFile: 1048576, sysctl: '', defaultSysctl: '' };
+  const i = data.info, w = i.warp, st = data.status, p = data.params || { swapGb: 2, noFile: 1048576, sysctl: '', defaultSysctl: '', journalMb: 200, journalDays: 14 };
+  const jr = i.journal || { usedMb: 0, limited: false };
   const linux = i.linux;
   const dis = linux && i.root ? '' : 'disabled';
   el.innerHTML = `
@@ -71,6 +72,14 @@ export async function render(el) {
         <textarea id="ops-sysctl" class="mono" style="min-height:11rem" spellcheck="false">${esc(p.sysctl)}</textarea>
         <div class="row"><button class="btn sm ghost" data-act="ops.sysctlDefault">${t('ops.restoreDefault')}</button><span class="grow"></span><button class="btn sm" data-act="ops.run" data-id="sysctl" ${dis}>${t('common.run')}</button></div>
       </div>
+      <div class="task" style="margin-top:.75rem">
+        <div class="task-head"><b>${esc(data.tasks.find(x => x.name === 'journal').title)}</b>${linux ? yes(jr.limited, t('ops.done'), t('ops.todo')) : ''}</div>
+        <p class="hint">${esc(data.tasks.find(x => x.name === 'journal').desc)}${jr.usedMb ? ` · ${t('ops.current')} ${jr.usedMb} MB` : ''}</p>
+        <div class="row">
+          <label class="muted small">${t('ops.journalMb')} <input id="ops-jmb" type="number" min="20" max="20480" step="10" value="${p.journalMb}" style="width:6rem"></label>
+          <label class="muted small">${t('ops.journalDays')} <input id="ops-jdays" type="number" min="1" max="3650" value="${p.journalDays}" style="width:5rem"></label>
+          <span class="grow"></span><button class="btn sm" data-act="ops.run" data-id="journal" ${dis}>${t('common.run')}</button></div>
+      </div>
     </section>
     <section class="card">
       <div class="card-head"><h2>${t('ops.log')}</h2><div class="row">${st.running ? badge(t('ops.running', { task: st.current }), 'primary') + `<button class="btn sm danger" data-act="ops.cancel">${t('common.cancel')}</button>` : (st.last && st.last.name ? badge((st.last.ok ? '✓ ' : '✗ ') + st.last.name, st.last.ok ? 'ok' : 'danger') : '')}</div></div>
@@ -107,6 +116,7 @@ registerActions({
       await post('ops/run', {
         task, port: Number(fv('ops-port')) || 0, swapGb: Number(fv('ops-swap')) || 0,
         noFile: Number(fv('ops-nofile')) || 0, sysctl: (task === 'sysctl' || task === 'tune-all') ? fv('ops-sysctl') : '',
+        journalMb: Number(fv('ops-jmb')) || 0, journalDays: Number(fv('ops-jdays')) || 0,
       });
       toast(t('ops.started'), 'ok');
       await render(document.getElementById('page'));

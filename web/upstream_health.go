@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
@@ -141,9 +142,10 @@ func (s *Server) testUpstreamEverywhere(up model.Upstream) []upServer {
 			targets = append(targets, n)
 		}
 	}
+	now := time.Now().Unix()
 	if len(targets) == 0 {
 		ok, ms, meth, errStr := s.run.CheckUpstream(up)
-		sv := upServer{Name: s.localNodeName(), IsLocal: true, State: "fail", Method: meth, Error: errStr}
+		sv := upServer{Name: s.localNodeName(), IsLocal: true, State: "fail", Method: meth, Error: errStr, CheckedAt: now}
 		if ok {
 			sv.State, sv.DelayMs = "ok", ms
 		}
@@ -158,7 +160,7 @@ func (s *Server) testUpstreamEverywhere(up model.Upstream) []upServer {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			sv := upServer{NodeId: n.Id, Name: n.Name, IsLocal: n.IsLocal}
+			sv := upServer{NodeId: n.Id, Name: n.Name, IsLocal: n.IsLocal, CheckedAt: now}
 			if n.IsLocal {
 				ok, ms, meth, errStr := s.run.CheckUpstream(up)
 				sv.State, sv.DelayMs, sv.Method, sv.Error = "fail", 0, meth, errStr

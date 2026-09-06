@@ -171,11 +171,21 @@ async function renderHealth() {
   const el = document.getElementById('dash-health');
   if (!el) return;
   const h = await get('upstreams/health');
-  if (!h.lastRun) { el.innerHTML = empty(t('dash.healthNever')); return; }
-  const bad = (h.results || []).filter(x => !x.ok);
-  el.innerHTML = `<p class="small muted">${t('dash.healthLast')} ${fmtRelative(h.lastRun)} · ${h.intervalMinutes} min</p>
-    <div class="row" style="margin:.4rem 0 .6rem"><span class="badge ok">${h.results.length - bad.length} ${t('dash.healthOk')}</span><span class="badge ${bad.length ? 'danger' : ''}">${bad.length} ${t('dash.healthBad')}</span></div>
-    ${bad.length ? `<div class="chips">${bad.map(x => `<a class="chip" href="#/upstreams" title="${esc(x.error)}">✗ ${esc(x.name)}</a>`).join('')}</div>` : ''}`;
+  if (!h.lastRun) { setHTML(el, empty(t('dash.healthNever'))); return; }
+  // 一条上游在"真正用它的服务器"上失败才算故障;没有线路使用的不计入,待测与数据过期也不算故障
+  const rows = (h.results || []).filter(x => !x.unused);
+  const bad = [];
+  let ok = 0;
+  for (const r of rows) {
+    const servers = r.servers || [];
+    const fails = servers.filter(sv => sv.state === 'fail');
+    if (fails.length) fails.forEach(sv => bad.push({ name: r.name, server: sv.name, error: sv.error || '' }));
+    else if (servers.some(sv => sv.state === 'ok')) ok++;
+  }
+  const one = new Set(rows.flatMap(r => (r.servers || []).map(sv => sv.name))).size <= 1;
+  setHTML(el, `<p class="small muted">${t('dash.healthLast')} ${fmtRelative(h.lastRun)} · ${h.intervalMinutes} min</p>
+    <div class="row" style="margin:.4rem 0 .6rem"><span class="badge ok">${ok} ${t('dash.healthOk')}</span><span class="badge ${bad.length ? 'danger' : ''}">${bad.length} ${t('dash.healthBad')}</span></div>
+    ${bad.length ? `<div class="chips">${bad.map(x => `<a class="chip" href="#/upstreams" title="${esc(x.error)}">✗ ${esc(x.name)}${one || !x.server ? '' : ' · ' + esc(x.server)}</a>`).join('')}</div>` : ''}`);
 }
 
 let nodeSummary = null; // {online, total, bad:[names]},仅多服务器时填充

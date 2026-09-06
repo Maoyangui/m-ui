@@ -22,7 +22,6 @@ import (
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/tz"
 
-	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/mem"
 	"gorm.io/gorm"
@@ -129,8 +128,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if st := s.lastUpgrade(); st != nil { // 上次一键更新回滚过:页面顶部要明说,管理员点"知道了"才消
 		status["upgrade"] = st
 	}
-	if pct, err := cpu.Percent(0, false); err == nil && len(pct) > 0 {
-		status["cpu"] = pct[0]
+	if pct, ok := cpuPercent(); ok { // 固定 5 秒窗口取值,不随面板刷新频率变化,见 cpu_sample.go
+		status["cpu"] = pct
 	}
 	if vm, err := mem.VirtualMemory(); err == nil {
 		status["memUsed"], status["memTotal"] = vm.Used, vm.Total

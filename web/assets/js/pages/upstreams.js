@@ -69,14 +69,17 @@ function resultHTML(id) {
     return who + badge(t('up.pending'));
   }).join(' <span class="muted">·</span> ');
   const bad = servers.filter(sv => sv.error); // 折叠时预览第一条真正带报错的,“数据过期”没有报错文字
-  const more = `<button class="btn xs ghost" data-act="up.expand" data-id="${id}" title="${t('up.detail')}">${expanded.has(id) ? '▴' : '▾'}</button>`;
+  // 展开只在有话可说时才给:全部正常的话,折叠这一行已经把每台的延迟写全了,再点开只是重复一遍。
+  const worth = servers.some(sv => sv.state !== 'ok' || sv.error);
+  const more = worth ? `<button class="btn xs ghost" data-act="up.expand" data-id="${id}" title="${t('up.detail')}">${expanded.has(id) ? '▴' : '▾'}</button>` : '';
   let detail = '';
-  if (expanded.has(id)) {
+  if (worth && expanded.has(id)) {
+    const label = { ok: sv => sv.delayMs + ' ms', fail: () => t('up.fault'), stale: () => t('up.stale') };
     detail = '<div class="sub-cell">' + servers.map(sv => {
-      const when = sv.checkedAt ? fmtTime(sv.checkedAt) : '—';
-      const how = sv.method ? ` · ${esc(sv.method)}` : '';
-      const err = sv.error ? ` · <span class="danger">${esc(sv.error).slice(0, 120)}</span>` : '';
-      return `<div>${esc(sv.name)}${sv.isLocal ? ' <span class="muted">(' + t('node.local') + ')</span>' : ''} · ${when}${how}${err}</div>`;
+      const st = (label[sv.state] || (() => t('up.pending')))(sv);
+      const when = sv.checkedAt ? ` · ${t('up.checkedAt')} ${fmtTime(sv.checkedAt)}` : '';
+      const err = sv.error ? ` · <span class="danger">${esc(sv.error).slice(0, 160)}</span>` : '';
+      return `<div>${esc(sv.name)}${sv.isLocal ? ' <span class="muted">(' + t('node.local') + ')</span>' : ''} · ${esc(st)}${when}${err}</div>`;
     }).join('') + '</div>';
   } else if (bad.length) {
     detail = `<div class="sub-cell" title="${esc(bad[0].error)}">${esc(bad[0].error).slice(0, 60)}</div>`;
