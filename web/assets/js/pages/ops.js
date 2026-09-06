@@ -12,6 +12,8 @@ export async function render(el) {
   data = await get('ops');
   const i = data.info, w = i.warp, st = data.status, p = data.params || { swapGb: 2, noFile: 1048576, sysctl: '', defaultSysctl: '', journalMb: 200, journalDays: 14 };
   const jr = i.journal || { usedMb: 0, limited: false };
+  // 后端版本里没有某条任务时给个空壳,免得取 .title 直接把整页打挂
+  const task = n => data.tasks.find(x => x.name === n) || { name: n, title: n, desc: '' };
   const linux = i.linux;
   const dis = linux && i.root ? '' : 'disabled';
   el.innerHTML = `
@@ -56,10 +58,10 @@ export async function render(el) {
       <p class="hint" style="margin-bottom:.6rem">${t('ops.tuneHelp')}</p>
       <div class="task-grid">
         ${['swap', 'limits', 'ntp'].map(n => {
-          const task = data.tasks.find(x => x.name === n);
+          const tk = task(n);
           const done = { swap: i.swapTotal > 0, limits: i.limits, ntp: i.ntp === 'yes' }[n];
           const cur = { swap: i.swapTotal ? fmtBytes(i.swapTotal, 0) : '', limits: i.nofile ? `${t('ops.current')} ${i.nofile}` : '', ntp: '' }[n];
-          return `<div class="task"><div class="task-head"><b>${esc(task.title)}</b>${linux ? yes(done, t('ops.done'), t('ops.todo')) : ''}</div><p class="hint">${esc(task.desc)}${cur ? ` · ${esc(cur)}` : ''}</p>
+          return `<div class="task"><div class="task-head"><b>${esc(tk.title)}</b>${linux ? yes(done, t('ops.done'), t('ops.todo')) : ''}</div><p class="hint">${esc(tk.desc)}${cur ? ` · ${esc(cur)}` : ''}</p>
             <div class="row">
               ${n === 'swap' ? `<input id="ops-swap" type="number" min="1" max="64" value="${p.swapGb}" style="width:5rem"> G` : ''}
               ${n === 'limits' ? `<input id="ops-nofile" type="number" min="1024" max="4194304" step="1024" value="${p.noFile}" style="width:8rem">` : ''}
@@ -67,14 +69,14 @@ export async function render(el) {
         }).join('')}
       </div>
       <div class="task" style="margin-top:.75rem">
-        <div class="task-head"><b>${esc(data.tasks.find(x => x.name === 'sysctl').title)}</b>${linux ? yes(i.tuned && i.cc === 'bbr', t('ops.done'), t('ops.todo')) : ''}</div>
-        <p class="hint">${esc(data.tasks.find(x => x.name === 'sysctl').desc)}${linux ? ` · ${t('ops.current')} ${esc(i.cc || '?')} / ${esc(i.qdisc || '?')}` : ''}</p>
+        <div class="task-head"><b>${esc(task('sysctl').title)}</b>${linux ? yes(i.tuned && i.cc === 'bbr', t('ops.done'), t('ops.todo')) : ''}</div>
+        <p class="hint">${esc(task('sysctl').desc)}${linux ? ` · ${t('ops.current')} ${esc(i.cc || '?')} / ${esc(i.qdisc || '?')}` : ''}</p>
         <textarea id="ops-sysctl" class="mono" style="min-height:11rem" spellcheck="false">${esc(p.sysctl)}</textarea>
         <div class="row"><button class="btn sm ghost" data-act="ops.sysctlDefault">${t('ops.restoreDefault')}</button><span class="grow"></span><button class="btn sm" data-act="ops.run" data-id="sysctl" ${dis}>${t('common.run')}</button></div>
       </div>
       <div class="task" style="margin-top:.75rem">
-        <div class="task-head"><b>${esc(data.tasks.find(x => x.name === 'journal').title)}</b>${linux ? yes(jr.limited, t('ops.done'), t('ops.todo')) : ''}</div>
-        <p class="hint">${esc(data.tasks.find(x => x.name === 'journal').desc)}${jr.usedMb ? ` · ${t('ops.current')} ${jr.usedMb} MB` : ''}</p>
+        <div class="task-head"><b>${esc(task('journal').title)}</b>${linux ? yes(jr.limited, t('ops.done'), t('ops.todo')) : ''}</div>
+        <p class="hint">${esc(task('journal').desc)}${jr.usedMb ? ` · ${t('ops.current')} ${jr.usedMb} MB` : ''}</p>
         <div class="row">
           <label class="muted small">${t('ops.journalMb')} <input id="ops-jmb" type="number" min="20" max="20480" step="10" value="${p.journalMb}" style="width:6rem"></label>
           <label class="muted small">${t('ops.journalDays')} <input id="ops-jdays" type="number" min="1" max="3650" value="${p.journalDays}" style="width:5rem"></label>
