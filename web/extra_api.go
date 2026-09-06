@@ -363,6 +363,18 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 		s.audit(r, "user", "kick", u.Name)
 		writeJSON(w, http.StatusOK, map[string]int{"closed": n})
 		return true
+	case "rotate": // 重置订阅链接:新随机地址 + 新凭据,收回临时共享,旧的立即失效
+		if r.Method != http.MethodPost {
+			break
+		}
+		nu, err := s.rotateUser(u)
+		if err != nil {
+			badRequest(w, err)
+			return true
+		}
+		s.audit(r, "user", "rotate", u.Name)
+		writeJSON(w, http.StatusOK, s.subLinks(nu))
+		return true
 	case "share":
 		if r.Method != http.MethodDelete {
 			break

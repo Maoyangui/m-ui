@@ -334,6 +334,7 @@ Merge nodes from elsewhere into your subscriptions: a single share link, or a wh
 ### Users and plans
 
 - Per user: quota, expiry, periodic reset (e.g. every 30 days), device limit, speed limit, remark, allowed lines and external nodes.
+- Leaked address? **Reset subscription link** (in the row's More menu and the detail drawer, reseller panel included): the address becomes a new random token, every protocol credential is regenerated and any shared link is revoked. The old address and credentials stop working on every server at once and connected devices are dropped.
 - Over quota or expired → disabled and kicked automatically; resetting traffic re-enables.
 - Plans are templates: apply on create; *renew* applies again (usage reset, expiry extended); *extend* keeps usage and only extends expiry.
 - Bulk: generate by prefix, select rows for enable / disable / extend / reset / delete, CSV export.

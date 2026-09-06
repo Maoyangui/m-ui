@@ -124,6 +124,7 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	revoked := hub.RevokedShares(s.db, snap)
+	rotated := hub.RotatedUsers(s.db, snap)
 	linesChanged, upsChanged, err := hub.ApplySnapshot(s.db, snap)
 	if err != nil {
 		badRequest(w, err)
@@ -137,15 +138,20 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.reloadUsers("主机下发用户 " + snap.Revision)
 	}
-	if len(revoked) > 0 {
-		go func() { // 先把凭据热更新掉再断线,免得借用者在空档里重连
+	if len(revoked) > 0 || len(rotated) > 0 {
+		go func() { // 先把凭据热更新掉再断线,免得借用者 / 旧凭据在空档里重连
 			if err := s.run.ReloadUsers(); err != nil {
-				logger.Warning("撤下共享凭据失败: ", err)
+				logger.Warning("撤下旧凭据失败: ", err)
 				return
 			}
 			for _, name := range revoked {
 				if n := s.run.KickShare(name); n > 0 {
 					logger.Info("临时共享已取消,断开 ", name, " 的 ", n, " 条连接")
+				}
+			}
+			for _, name := range rotated {
+				if n := s.run.KickUser(name); n > 0 {
+					logger.Info("订阅链接已重置,断开 ", name, " 旧凭据上的 ", n, " 条连接")
 				}
 			}
 		}()

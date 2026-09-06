@@ -38,6 +38,7 @@
 | POST | `/users/{name\|id}/disable` | 停用(并踢下线) |
 | POST | `/users/{name\|id}/reset` | 本周期用量清零并启用 |
 | POST | `/users/{name\|id}/kick` | 踢下线,返回关闭的连接数 |
+| POST | `/users/{name\|id}/rotate` | 重置订阅链接:订阅地址换成新的随机令牌(不管面板是否用用户名作地址),全部协议凭据重新生成,临时共享收回;旧地址、旧凭据立即失效并断开已连接的设备。返回用户对象(含新订阅地址) |
 | POST | `/users/{name\|id}/plan` | 套用套餐(续费/延期) |
 | GET | `/users/{name\|id}/sub` | 订阅地址 `{link, clash}` |
 

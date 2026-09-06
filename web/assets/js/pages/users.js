@@ -157,6 +157,7 @@ function renderRows() {
           <button data-act="user.extend" data-id="${u.id}">${t('user.extend')}</button>
           <button data-act="user.reset" data-id="${u.id}">${t('user.reset')}</button>
           <button data-act="user.kick" data-id="${u.id}">${t('user.kick')}</button>
+          <button data-act="user.rotate" data-id="${u.id}">${t('user.rotate')}</button>
           <hr><button class="danger" data-act="user.del" data-id="${u.id}">${t('common.delete')}</button>
         </div></details>
       </td></tr>`;
@@ -202,6 +203,7 @@ async function showDetail(id) {
         <button class="btn sm" data-act="user.extend" data-id="${id}">${t('user.extend')}</button>
         <button class="btn sm" data-act="user.reset" data-id="${id}">${t('user.reset')}</button>
         <button class="btn sm" data-act="user.kick" data-id="${id}">${t('user.kick')}</button>
+        <button class="btn sm" data-act="user.rotate" data-id="${id}">${t('user.rotate')}</button>
         <button class="btn sm" data-act="user.edit" data-id="${id}">${t('common.edit')}</button>
       </div>
     </section>
@@ -435,6 +437,12 @@ registerActions({
     const u = state.users.find(x => x.id === Number(id));
     if (!await confirm(t('user.kickConfirm', { name: u.name }))) return;
     try { const r = await post(`users/${id}/kick`); toast(t('user.kicked', { n: r.closed }), 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  'user.rotate': async id => {
+    const u = state.users.find(x => x.id === Number(id));
+    if (!await confirm(t('user.rotateConfirm', { name: u.name }), { danger: true, okText: t('user.rotate') })) return;
+    try { await post(`users/${id}/rotate`); await load('users'); renderRows(); if (drawerUser === u.id) showDetail(u.id); toast(t('user.rotated'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
   'user.unshare': async id => {

@@ -32,6 +32,7 @@ import (
 //	PATCH  /api/v1/users/{name|id}          修改字段(启停、配额、到期、线路…)
 //	DELETE /api/v1/users/{name|id}          删除
 //	POST   /api/v1/users/{name|id}/enable | disable | reset | kick
+//	POST   /api/v1/users/{name|id}/rotate   重置订阅链接:新随机地址 + 新凭据,收回临时共享,旧的立即失效
 //	POST   /api/v1/users/{name|id}/plan     套用套餐 {planId|plan, mode: renew|extend}
 //	GET    /api/v1/users/{name|id}/sub      订阅地址
 
@@ -556,6 +557,14 @@ func (s *Server) apiUserAction(w http.ResponseWriter, r *http.Request, u model.U
 		n := s.kickUser(u.Name)
 		s.auditAs(sc.actor, "user", "kick", u.Name)
 		writeJSON(w, http.StatusOK, map[string]int{"closed": n})
+	case "rotate": // 重置订阅链接:返回带新订阅地址的用户对象
+		nu, err := s.rotateUser(u)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		s.auditAs(sc.actor, "user", "rotate", u.Name)
+		writeJSON(w, http.StatusOK, s.apiUser(nu))
 	case "plan", "renew":
 		var req apiUserReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

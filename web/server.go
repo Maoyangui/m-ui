@@ -83,6 +83,11 @@ func NewServer(run *runner.Runner) *Server {
 
 // actor 返回当前请求的登录用户名(审计用);未登录为空。
 func (s *Server) actor(r *http.Request) string {
+	if rid := scope(r); rid > 0 { // 代理面板里的操作记代理名,而不是 "?"
+		var name string
+		s.db.Model(&model.Reseller{}).Select("name").Where("id = ?", rid).Scan(&name)
+		return name
+	}
 	c, err := r.Cookie(sessionCookie)
 	if err != nil {
 		return ""

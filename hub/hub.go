@@ -203,6 +203,32 @@ func RevokedShares(db *gorm.DB, snap Snapshot) []string {
 	return out
 }
 
+// RotatedUsers 返回本次快照里重置过订阅链接的用户名(要在 ApplySnapshot 之前调用):
+// 订阅令牌换了、凭据也换了才算(只比凭据会把本机补全协议键之类的差异误当成换新)。
+// 副机热更新后还要把这些用户旧凭据上的连接断掉,否则旧设备能一直连到自己断开为止。
+func RotatedUsers(db *gorm.DB, snap Snapshot) []string {
+	var old []model.User
+	db.Select("name, sub_token, credentials").Find(&old)
+	if len(old) == 0 {
+		return nil
+	}
+	now := make(map[string]model.User, len(snap.Users))
+	for _, u := range snap.Users {
+		now[u.Name] = u
+	}
+	var out []string
+	for _, u := range old {
+		cur, ok := now[u.Name]
+		if !ok || cur.SubToken == u.SubToken || len(cur.Credentials) == 0 {
+			continue // 被删的用户热更新会自然断开;令牌没换就不是重置
+		}
+		if !bytes.Equal(normJSON(u.Credentials), normJSON(cur.Credentials)) {
+			out = append(out, u.Name)
+		}
+	}
+	return out
+}
+
 // ApplySnapshot 在副机上整表替换配置。返回线路、上游是否变化,副机据此选择重载级别:
 // 线路变 → 全量重载;仅上游变 → 热换出站;都没变 → 热换用户。
 func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged bool, err error) {
