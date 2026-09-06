@@ -73,7 +73,7 @@ export async function render(el) {
 export async function tick() { await load('users'); renderRows(); if (drawerUser) refreshDrawerLive(); }
 
 function statusBadge(u) {
-  if (!u.enabled) return badge(t('common.disabled'), 'danger');
+  if (!u.enabled) return badge(t('common.disabled') + (u.disabledReason ? ' · ' + t('user.reason.' + u.disabledReason) : ''), 'danger');
   if (isExpired(u)) return badge(t('user.expired'), 'warn');
   if (isOver(u)) return badge(t('user.over'), 'warn');
   return badge(t('common.enabled'), 'ok');

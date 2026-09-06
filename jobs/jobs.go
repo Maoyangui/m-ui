@@ -34,6 +34,7 @@ type Deps struct {
 	Setting     func(string) string
 	Notify      func(text string) // 用户被禁用时的通知(可为 nil)
 	LocalRatio  func() float64    // 本机流量倍率(可为 nil = 1);只在主机计费路径生效,副机账本保持原始值
+	Forget      func(key string)  // 清掉通知去重键(用量清零后要允许再次告警;可为 nil)
 }
 
 // Onlines 是最近一个统计周期内有流量经过的对象。
@@ -49,6 +50,42 @@ type Scheduler struct {
 	onlines Onlines
 	stop    chan struct{}
 	wg      sync.WaitGroup
+	// deadResellers 上一轮判定为"不可用"(停用 / 到期 / 额度用尽)的代理集合。到期是时间自然到的,没人保存过任何东西,
+	// 数据面不会自己重载,所以每轮比对这个集合,变了就重载一次;deadInit 为假表示还没有上一轮
+	deadResellers map[uint]bool
+	deadInit      bool
+}
+
+// ResellerUsed 代理已用流量:名下用户的全时用量之和 + 结转 - 主面板重置基线。
+// 用全时用量是关键——代理自己重置 / 续费 / 周期清零都只是把 up/down 挪进 total_*,额度不会因此回血。
+func ResellerUsed(db *gorm.DB, rs model.Reseller) int64 {
+	var live int64
+	db.Model(&model.User{}).Where("reseller_id = ?", rs.Id).
+		Select("COALESCE(SUM(up + down + total_up + total_down),0)").Scan(&live)
+	used := live + rs.UsedCarried - rs.UsedBase
+	if used < 0 {
+		return 0
+	}
+	return used
+}
+
+// ResellerDepleted 代理的流量额度是否已用尽(0 = 不限)。
+func ResellerDepleted(db *gorm.DB, rs model.Reseller) bool {
+	return rs.Volume > 0 && ResellerUsed(db, rs) >= rs.Volume
+}
+
+// RefreshReseller 立刻重算一个代理的额度用尽标志(改额度 / 重置流量后调用,不用等下一分钟);返回是否变化。
+func RefreshReseller(db *gorm.DB, id uint) bool {
+	var rs model.Reseller
+	if err := db.First(&rs, id).Error; err != nil {
+		return false
+	}
+	depleted := ResellerDepleted(db, rs)
+	if depleted == rs.Depleted {
+		return false
+	}
+	db.Model(&model.Reseller{}).Where("id = ?", id).Update("depleted", depleted)
+	return true
 }
 
 func New(d Deps) *Scheduler {
@@ -258,11 +295,18 @@ func (s *Scheduler) runDeplete() {
 				"total_down": gorm.Expr("total_down + down"),
 				"up":         0,
 				"down":       0,
-				"enabled":    true,
 				"next_reset": now + int64(u.ResetDays)*86400,
 			}
 			if err := tx.Model(&model.User{}).Where("id = ?", u.Id).Updates(updates).Error; err != nil {
 				return err
+			}
+			// 只解禁因超量被停的;手动停用的和到期的不动(以前是一律 enabled=true,手动停的人到点就复活)
+			if err := tx.Model(&model.User{}).Where("id = ? AND enabled = ? AND disabled_reason = ?", u.Id, false, model.DisabledQuota).
+				Updates(map[string]interface{}{"enabled": true, "disabled_reason": ""}).Error; err != nil {
+				return err
+			}
+			if s.d.Forget != nil {
+				s.d.Forget("quota:" + u.Name) // 新周期从零开始,再到阈值要能再提醒
 			}
 			record(tx, "ResetJob", "user", "reset", u.Name)
 			changed = true
@@ -273,60 +317,76 @@ func (s *Scheduler) runDeplete() {
 			return err
 		}
 
-		// 1.5) 代理额度 / 到期:任一条踩线,整个代理的用户一起停
+		// 1.5) 代理:额度用尽只在代理行上打 depleted 标记(渲染与订阅据此把他名下用户整体撤下),用户行不动;
+		// 到期 / 停用同样在渲染层拦。这里只负责察觉"不可用集合"的变化并触发一次重载,以及发通知。
 		var resellers []model.Reseller
-		if err := tx.Where("enabled = ? AND (volume > 0 OR expiry > 0)", true).Find(&resellers).Error; err != nil {
+		if err := tx.Find(&resellers).Error; err != nil {
 			return err
 		}
+		dead := map[uint]bool{}
 		for _, rs := range resellers {
-			why := ""
-			if rs.Expiry > 0 && rs.Expiry < now {
-				why = "已到期"
+			depleted := ResellerDepleted(tx, rs)
+			if depleted != rs.Depleted {
+				if err := tx.Model(&model.Reseller{}).Where("id = ?", rs.Id).Update("depleted", depleted).Error; err != nil {
+					return err
+				}
+				var n int64
+				tx.Model(&model.User{}).Where("reseller_id = ?", rs.Id).Count(&n)
+				if depleted {
+					record(tx, "DepleteJob", "reseller", "depleted", rs.Name)
+					logger.Info("代理 ", rs.Name, " 流量用尽,名下 ", n, " 个用户已从数据面撤下")
+					if s.d.Notify != nil {
+						s.d.Notify(fmt.Sprintf("⛔ <b>代理流量用尽</b>:%s(名下 %d 个用户已停止服务,补量后自动恢复)", escapeHTML(rs.Name), n))
+					}
+				} else {
+					record(tx, "DepleteJob", "reseller", "restored", rs.Name)
+					logger.Info("代理 ", rs.Name, " 额度恢复,名下 ", n, " 个用户已恢复服务")
+				}
+				changed = true
 			}
-			if why == "" && rs.Volume > 0 {
-				// 全时用量 + 结转 - 主面板重置基线:代理自己重置/续费/删号都改不动它
-				var live int64
-				tx.Model(&model.User{}).Where("reseller_id = ?", rs.Id).
-					Select("COALESCE(SUM(up + down + total_up + total_down),0)").Scan(&live)
-				if live+rs.UsedCarried-rs.UsedBase >= rs.Volume {
-					why = "流量用尽"
+			if !rs.Enabled || depleted || (rs.Expiry > 0 && rs.Expiry < now) {
+				dead[rs.Id] = true
+			}
+		}
+		if s.deadInit {
+			for id := range dead {
+				if !s.deadResellers[id] {
+					changed = true // 新变得不可用(典型是到期):数据面要撤下他的用户
+					for _, rs := range resellers {
+						if rs.Id == id && rs.Enabled && !rs.Depleted && rs.Expiry > 0 && rs.Expiry < now {
+							record(tx, "DepleteJob", "reseller", "expired", rs.Name)
+							if s.d.Notify != nil {
+								s.d.Notify(fmt.Sprintf("⛔ <b>代理已到期</b>:%s(名下用户已停止服务)", escapeHTML(rs.Name)))
+							}
+						}
+					}
 				}
 			}
-			if why == "" {
-				continue
+			for id := range s.deadResellers {
+				if !dead[id] {
+					changed = true // 续期 / 重新启用:用户要回到数据面
+				}
 			}
-			var n int64
-			tx.Model(&model.User{}).Where("reseller_id = ? AND enabled = ?", rs.Id, true).Count(&n)
-			if n == 0 {
-				continue
-			}
-			if err := tx.Model(&model.User{}).Where("reseller_id = ?", rs.Id).Update("enabled", false).Error; err != nil {
-				return err
-			}
-			record(tx, "DepleteJob", "reseller", "disable:"+why, rs.Name)
-			logger.Info("代理 ", rs.Name, " ", why, ",已停用其 ", n, " 个用户")
-			if s.d.Notify != nil {
-				s.d.Notify(fmt.Sprintf("⛔ <b>代理%s</b>:%s(已停用 %d 个用户)", why, escapeHTML(rs.Name), n))
-			}
-			changed = true
 		}
+		s.deadResellers, s.deadInit = dead, true
 
-		// 2) 超量 / 过期 → 禁用
+		// 2) 超量 / 过期 → 禁用,并记下原因(补量 / 延期时只有这些原因会自动恢复)
 		var depleted []model.User
-		cond := "enabled = ? AND ((volume > 0 AND up + down > volume) OR (expiry > 0 AND expiry < ?))"
+		cond := "enabled = ? AND ((volume > 0 AND up + down >= volume) OR (expiry > 0 AND expiry < ?))"
 		if err := tx.Where(cond, true, now).Find(&depleted).Error; err != nil {
 			return err
 		}
 		if len(depleted) == 0 {
 			return nil
 		}
-		if err := tx.Model(&model.User{}).Where(cond, true, now).Update("enabled", false).Error; err != nil {
-			return err
-		}
 		for _, u := range depleted {
-			reason, why := "quota", "流量用尽"
+			reason, why := model.DisabledQuota, "流量用尽"
 			if u.Expiry > 0 && u.Expiry < now {
-				reason, why = "expired", "已到期"
+				reason, why = model.DisabledExpired, "已到期"
+			}
+			if err := tx.Model(&model.User{}).Where("id = ?", u.Id).
+				Updates(map[string]interface{}{"enabled": false, "disabled_reason": reason}).Error; err != nil {
+				return err
 			}
 			record(tx, "DepleteJob", "user", "disable:"+reason, u.Name)
 			logger.Info("用户 ", u.Name, " 已禁用(", reason, ")")
@@ -361,6 +421,11 @@ func (s *Scheduler) runCleanup() {
 			logger.Warning("清理流量时序失败: ", err)
 		}
 	}
+	// 48 小时之前的分钟级样本并成小时桶:图表最细的 5 分钟桶只看最近 1 小时,再往前按小时够用。
+	// 不并的话几百个活跃用户一个月就是上千万行,库文件和每次拉图都跟着胖
+	if err := RollupStats(s.d.DB, now.Add(-48*time.Hour).Unix()); err != nil {
+		logger.Warning("合并流量时序失败: ", err)
+	}
 	// 订阅访问日志:没设过就沿用"流量记录保留"的天数(与老版本行为一致),0 = 不自动清理
 	subDays := s.settingInt("trafficAge", 30)
 	if v := s.d.Setting("subLogAge"); v != "" {
@@ -382,6 +447,20 @@ func (s *Scheduler) runCleanup() {
 		}
 	}
 	trim(s.d.DB, &model.Change{}, 200000, "审计日志")
+}
+
+// RollupStats 把 before 之前、不在整点上的时序行并入所在小时的桶(同键累加),再删掉原始行。
+// 唯一键是 (resource, tag, date_time, direction),小时桶就是 date_time 落在整点的那一行。
+func RollupStats(db *gorm.DB, before int64) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`INSERT INTO stats (date_time, resource, tag, direction, traffic)
+			SELECT date_time - date_time % 3600, resource, tag, direction, SUM(traffic) FROM stats
+			WHERE date_time < ? AND date_time % 3600 <> 0 GROUP BY 1, 2, 3, 4
+			ON CONFLICT(resource, tag, date_time, direction) DO UPDATE SET traffic = stats.traffic + excluded.traffic`, before).Error; err != nil {
+			return err
+		}
+		return tx.Exec("DELETE FROM stats WHERE date_time < ? AND date_time % 3600 <> 0", before).Error
+	})
 }
 
 // trim 按总量上限裁掉最旧的行(时间设置之外的兜底,免得某一类日志被刷爆磁盘)。

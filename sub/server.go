@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/Maoyangui/m-ui/acme"
 	"github.com/Maoyangui/m-ui/certutil"
@@ -27,10 +30,115 @@ type Server struct {
 	// OnShareChange 生成/取消临时共享后调用:热更新数据面用户;
 	// kick 为真表示有旧凭据被作废(取消,或在已有共享上重新生成),需要断开该用户现有连接。
 	OnShareChange func(user string, kick bool)
+
+	// 订阅端口对公网开放,又不需要登录:按来源 IP 做令牌桶限速(setting subRateLimit,每分钟次数,默认 120,0 = 不限),
+	// 超出直接 429;地址对不上任何人的请求(扫描、猜用户名)按 IP 聚合,每 10 分钟落一行,而不是每个 404 写一行日志。
+	guardMu  sync.Mutex
+	buckets  map[string]*ipBucket
+	misses   map[string]*missAgg
+	stopOnce sync.Once
+	stop     chan struct{}
 }
+
+type ipBucket struct {
+	lim  *rate.Limiter
+	seen int64
+}
+
+type missAgg struct {
+	n           int
+	first, last int64
+	sample      string // 最近一次请求的地址段,方便看出是在猜什么
+}
+
+// DefaultRateLimit 每 IP 每分钟允许的订阅请求数(落地页一次打开约 6 个请求)。
+const DefaultRateLimit = 120
 
 func NewServer(db *gorm.DB) *Server {
 	return &Server{db: db}
+}
+
+// allow 该来源 IP 这一次请求是否放行。限速看的是 TCP 对端地址而不是 X-Forwarded-For:后者谁都能写。
+func (s *Server) allow(ip string) bool {
+	perMin := s.settingInt("subRateLimit", DefaultRateLimit)
+	if perMin <= 0 || ip == "" {
+		return true
+	}
+	s.guardMu.Lock()
+	defer s.guardMu.Unlock()
+	if s.buckets == nil {
+		s.buckets = map[string]*ipBucket{}
+	}
+	b := s.buckets[ip]
+	if b == nil || int(b.lim.Burst()) != perMin {
+		b = &ipBucket{lim: rate.NewLimiter(rate.Limit(float64(perMin)/60), perMin)}
+		s.buckets[ip] = b
+	}
+	b.seen = time.Now().Unix()
+	return b.lim.Allow()
+}
+
+// noteMiss 记一次"地址对不上":先聚合,housekeeping 定期落库。
+func (s *Server) noteMiss(ip, key string) {
+	now := time.Now().Unix()
+	s.guardMu.Lock()
+	defer s.guardMu.Unlock()
+	if s.misses == nil {
+		s.misses = map[string]*missAgg{}
+	}
+	m := s.misses[ip]
+	if m == nil {
+		m = &missAgg{first: now}
+		s.misses[ip] = m
+	}
+	m.n++
+	m.last = now
+	m.sample = truncate(key, 60)
+}
+
+// flushMisses 把聚合好的 404 一 IP 一行写进订阅日志(format=miss,user=-),并清掉闲置的限速桶。
+func (s *Server) flushMisses() {
+	now := time.Now().Unix()
+	s.guardMu.Lock()
+	rows := make([]model.SubLog, 0, len(s.misses))
+	for ip, m := range s.misses {
+		rows = append(rows, model.SubLog{Ts: m.last, User: "-", Ip: ip, Format: "miss", Status: 404,
+			Ua: fmt.Sprintf("404 ×%d(%s 内,最近 %s)", m.n, spanText(m.last-m.first), m.sample)})
+	}
+	s.misses = map[string]*missAgg{}
+	for ip, b := range s.buckets {
+		if now-b.seen > 600 {
+			delete(s.buckets, ip)
+		}
+	}
+	s.guardMu.Unlock()
+	if len(rows) > 0 {
+		if err := s.db.Create(&rows).Error; err != nil {
+			logger.Warning("写订阅日志失败: ", err)
+		}
+	}
+}
+
+func spanText(sec int64) string {
+	if sec < 60 {
+		return fmt.Sprintf("%d 秒", sec)
+	}
+	return fmt.Sprintf("%d 分钟", sec/60)
+}
+
+// housekeeping 每 10 分钟落一次聚合的 404 并清闲置桶;Stop 时再落最后一次。
+func (s *Server) housekeeping() {
+	t := time.NewTicker(10 * time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			s.flushMisses()
+		case <-s.stop:
+			s.flushMisses()
+			return
+		}
+	}
 }
 
 func (s *Server) setting(key string) string {
@@ -225,6 +333,8 @@ func (s *Server) Start() error {
 
 	s.listener = ln
 	s.httpSrv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	s.stop = make(chan struct{})
+	go s.housekeeping()
 	go func() {
 		if err := s.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			logger.Warning("订阅服务退出: ", err)
@@ -238,6 +348,9 @@ func (s *Server) Stop() error {
 	if s.httpSrv == nil {
 		return nil
 	}
+	if s.stop != nil {
+		s.stopOnce.Do(func() { close(s.stop) })
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return s.httpSrv.Shutdown(ctx)
@@ -248,6 +361,11 @@ func (s *Server) handle() http.HandlerFunc {
 		subPath := s.currentPath()
 		if !strings.HasPrefix(r.URL.Path, subPath) {
 			http.NotFound(w, r)
+			return
+		}
+		if peer, _, _ := net.SplitHostPort(r.RemoteAddr); !s.allow(peer) {
+			w.Header().Set("Retry-After", "10")
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
 		}
 		name := strings.TrimPrefix(r.URL.Path, subPath)
@@ -266,7 +384,9 @@ func (s *Server) handle() http.HandlerFunc {
 		if err := byName.First(&user).Error; err != nil {
 			if s.db.Where("sub_token = ?", name).First(&user).Error != nil {
 				if !s.shareEnabled() || s.db.Where("share_token = ?", name).First(&user).Error != nil {
-					s.log(r, name, false, 404)
+					if peer, _, _ := net.SplitHostPort(r.RemoteAddr); peer != "" {
+						s.noteMiss(peer, name) // 按 IP 聚合,扫描器刷不爆日志表
+					}
 					s.serveNotFound(w, r, name) // 地址对不上任何人:浏览器给"订阅地址无效"页,客户端纯 404
 					return
 				}
@@ -280,9 +400,10 @@ func (s *Server) handle() http.HandlerFunc {
 		}
 		rs := s.resellerOf(user) // 代理用户:落地页文案与开关按代理的来
 		now := time.Now().Unix()
-		// blocked = 客户端拿不到订阅:本人被停用,或所属代理被停用 / 到期。到期、流量用尽只在页面上标出来,
-		// 要不要真的停用由面板决定(和以前一致)
-		blocked := !user.Enabled || (rs != nil && (!rs.Enabled || (rs.Expiry > 0 && rs.Expiry < now)))
+		// blocked = 客户端拿不到订阅:本人被停用、流量用尽或到期,或所属代理被停用 / 到期。
+		// 落地页不受影响(顶部标出原因),只是客户端从这一刻起拉不到节点,不用等一分钟一次的执法。
+		blocked := !user.Enabled || (user.Volume > 0 && user.Up+user.Down >= user.Volume) || (user.Expiry > 0 && user.Expiry < now) ||
+			(rs != nil && (!rs.Enabled || rs.Depleted || (rs.Expiry > 0 && rs.Expiry < now)))
 		if shared && (r.Method == http.MethodPost || r.URL.Query().Has("stats")) { // 借用者不能管理共享,也看不到本人用量
 			s.log(r, user.Name, true, 404)
 			http.NotFound(w, r)

@@ -159,13 +159,7 @@ func (s *Server) rauth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 			return
 		}
-		s.mu.Lock()
-		sess, ok := s.sessions[c.Value]
-		if ok && time.Now().After(sess.exp) {
-			delete(s.sessions, c.Value)
-			ok = false
-		}
-		s.mu.Unlock()
+		sess, ok := s.getSession(c.Value)
 		if !ok || sess.reseller == 0 {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 			return
@@ -258,9 +252,7 @@ func (s *Server) handleResellerLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleResellerLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(resellerCookie); err == nil {
-		s.mu.Lock()
-		delete(s.sessions, c.Value)
-		s.mu.Unlock()
+		s.delSession(c.Value)
 	}
 	http.SetCookie(w, &http.Cookie{Name: resellerCookie, Value: "", Path: "/", MaxAge: -1})
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
@@ -274,9 +266,7 @@ func (s *Server) newResellerSession(rs model.Reseller, pending bool) string {
 	if maxAge <= 0 {
 		maxAge = 7 * 24 * time.Hour
 	}
-	s.mu.Lock()
-	s.sessions[token] = session{user: rs.Name, reseller: rs.Id, pending: pending, exp: time.Now().Add(maxAge)}
-	s.mu.Unlock()
+	s.putSession(token, session{user: rs.Name, reseller: rs.Id, pending: pending, exp: time.Now().Add(maxAge)})
 	return token
 }
 
@@ -286,12 +276,7 @@ func (s *Server) setSessionPending(r *http.Request, pending bool) {
 	if err != nil {
 		return
 	}
-	s.mu.Lock()
-	if sess, ok := s.sessions[c.Value]; ok {
-		sess.pending = pending
-		s.sessions[c.Value] = sess
-	}
-	s.mu.Unlock()
+	s.updateSession(c.Value, func(sess *session) { sess.pending = pending })
 }
 
 // current 当前登录的代理。

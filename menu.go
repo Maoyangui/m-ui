@@ -227,13 +227,13 @@ func runMenu() {
 			fmt.Println("  状态:", stateColored())
 		case "5":
 			pw := ask("  新密码(回车 = 随机生成): ")
-			newPw, err := runner.ResetPassword(dbPath, "admin", pw)
+			who, newPw, err := runner.ResetPassword(dbPath, "", pw) // 现有管理员,不管叫什么名字
 			if err != nil {
 				fmt.Println(colorRed+"  失败:", err, colorReset)
 				break
 			}
 			_ = runner.SetSettings(dbPath, map[string]string{"adminDefault": "false", "totpEnabled": "false", "totpSecret": ""})
-			fmt.Println(colorGreen+"  管理员 admin 新密码: "+colorBold+newPw+colorReset, colorGray+"(运行中的面板立即生效;两步验证已一并关闭)"+colorReset)
+			fmt.Println(colorGreen+"  管理员 "+who+" 新密码: "+colorBold+newPw+colorReset, colorGray+"(运行中的面板立即生效;两步验证已一并关闭)"+colorReset)
 		case "6":
 			s, _ := settingsOf(dbPath)
 			kv := map[string]string{}
@@ -341,6 +341,16 @@ func runMenu() {
 				fmt.Println("  已取消")
 				break
 			}
+			if !cur { // 切成副机后本机的线路 / 用户 / 上游会被主机快照整表替换,先留一份备份
+				dir := filepath.Join(filepath.Dir(dbPath), "backups")
+				os.MkdirAll(dir, 0o750)
+				out := filepath.Join(dir, "before-node-"+time.Now().Format("20060102-150405")+".zip")
+				if err := runBackup(dbPath, out); err != nil {
+					fmt.Println(colorRed+"  切换前备份失败:", err, colorReset)
+				} else {
+					fmt.Println("  已备份到:", out)
+				}
+			}
 			_ = runner.SetSettings(dbPath, map[string]string{"nodeMode": strconv.FormatBool(!cur)})
 			fmt.Println(colorGreen + "  已切换,重启生效" + colorReset)
 			systemctl("restart", "m-ui")
@@ -357,6 +367,11 @@ func runMenu() {
 			}
 			systemctl("disable", "--now", "m-ui")
 			_ = os.Remove(unitPath)
+			// 运维页写过的系统文件一并清掉:journald 上限、内核参数、服务的句柄上限 override
+			for _, p := range []string{"/etc/systemd/journald.conf.d/99-m-ui.conf", "/etc/sysctl.d/99-m-ui-tune.conf", "/etc/systemd/system/m-ui.service.d/override.conf"} {
+				_ = os.Remove(p)
+			}
+			_ = os.Remove("/etc/systemd/system/m-ui.service.d")
 			_ = exec.Command("systemctl", "daemon-reload").Run()
 			if ask("  同时删除数据目录 "+filepath.Dir(dbPath)+"(数据库/证书/备份)? [y/N]: ") == "y" {
 				_ = os.RemoveAll(filepath.Dir(dbPath))

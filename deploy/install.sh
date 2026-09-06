@@ -40,7 +40,7 @@ DATA_DIR="$(dirname "$DB")"
 if [ "$UNINSTALL" = 1 ]; then
   [ "$DRY" = 1 ] || [ "$(id -u)" -eq 0 ] || { echo "请以 root 运行"; exit 1; }
   if [ "$DRY" = 1 ]; then
-    echo "[dry-run] 将执行:systemctl disable --now m-ui;删除 /etc/systemd/system/m-ui.service 与 $BIN(以及 .prev / .failed)"
+    echo "[dry-run] 将执行:systemctl disable --now m-ui;删除 /etc/systemd/system/m-ui.service 与 $BIN(以及 .prev / .failed),以及运维页写过的 journald / sysctl / service override 文件"
     [ "$PURGE" = 1 ] && echo "[dry-run] --purge:同时删除 $DATA_DIR(数据库、证书、备份)" || echo "[dry-run] 保留 $DATA_DIR(数据库、证书、备份)"
     exit 0
   fi
@@ -48,6 +48,10 @@ if [ "$UNINSTALL" = 1 ]; then
   rm -f /etc/systemd/system/m-ui.service
   systemctl daemon-reload 2>/dev/null || true
   rm -f "$BIN" "$BIN.prev" "$BIN.failed"
+  # 运维页写过的系统文件:journald 上限、内核参数、服务的句柄上限 override
+  rm -f /etc/systemd/journald.conf.d/99-m-ui.conf /etc/sysctl.d/99-m-ui-tune.conf
+  rm -rf /etc/systemd/system/m-ui.service.d
+  systemctl daemon-reload 2>/dev/null || true
   if [ "$PURGE" = 1 ]; then rm -rf "$DATA_DIR"; echo "m-ui 已卸载,数据目录 $DATA_DIR 已删除"; else echo "m-ui 已卸载;数据目录 $DATA_DIR 已保留(数据库、证书、备份),重新安装即可恢复"; fi
   exit 0
 fi
@@ -78,7 +82,11 @@ healthy() {
     if systemctl is-active --quiet m-ui; then
       if [ -n "${HEALTH_URL:-}" ]; then
         code="$(curl -ks -o /dev/null -w '%{http_code}' --max-time 3 "$HEALTH_URL" 2>/dev/null || echo 000)"
-        if [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ]; then return 0; fi
+        if [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ]; then
+          # 首页会应答只说明进程活着;api/health(只对本机开放)还看数据面把线路都起来了没有,503 = 没起来
+          hc="$(curl -ks -o /dev/null -w '%{http_code}' --max-time 3 "${HEALTH_URL%/}/api/health" 2>/dev/null || echo 000)"
+          [ "$hc" = 503 ] || return 0
+        fi
       elif [ "$i" -ge 8 ] && [ "$(systemctl show -p NRestarts --value m-ui 2>/dev/null || echo 0)" = "$nr0" ]; then
         return 0
       fi

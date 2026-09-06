@@ -7,6 +7,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/gofrs/uuid/v5"
 	"github.com/sagernet/sing-box/adapter"
@@ -32,13 +33,79 @@ type ConnTracker struct {
 	access      sync.Mutex
 	connections map[string]*ConnectionInfo
 	limiter     *Limiter
+	// recent 最近入站连接,按 源 IP × 入站 聚合(面板概览的诊断卡)。以前是每 5 秒拿两个正则扫 3000 行日志,
+	// 副机每次上报也扫一遍;在这里记一笔既准又便宜
+	recent    map[string]*RecentConn
+	recentSeq uint64 // 单调递增,同一秒内多条也能分出先后
 }
+
+// RecentConn 一条"源 IP × 线路"的最近连接记录。
+type RecentConn struct {
+	IP       string
+	User     string
+	Inbound  string
+	Protocol string
+	Count    int
+	Last     int64
+	seq      uint64
+}
+
+const recentCap = 300
 
 func NewConnTracker(limiter *Limiter) *ConnTracker {
 	return &ConnTracker{
 		connections: make(map[string]*ConnectionInfo),
 		limiter:     limiter,
+		recent:      make(map[string]*RecentConn),
 	}
+}
+
+// noteRecent 记一次入站连接;超过上限时丢掉最久没动的那条。
+func (c *ConnTracker) noteRecent(ip, user, inbound, proto string) {
+	if ip == "" || inbound == "" {
+		return
+	}
+	now := time.Now().Unix()
+	key := ip + "|" + inbound
+	c.access.Lock()
+	defer c.access.Unlock()
+	r := c.recent[key]
+	if r == nil {
+		if len(c.recent) >= recentCap {
+			var oldest string
+			var oldestSeq uint64
+			for k, v := range c.recent {
+				if oldest == "" || v.seq < oldestSeq {
+					oldest, oldestSeq = k, v.seq
+				}
+			}
+			delete(c.recent, oldest)
+		}
+		r = &RecentConn{IP: ip, Inbound: inbound, Protocol: proto}
+		c.recent[key] = r
+	}
+	c.recentSeq++
+	r.seq = c.recentSeq
+	r.Count++
+	r.Last = now
+	if user != "" {
+		r.User = user
+	}
+}
+
+// Recent 最近的入站连接,最近的在前,最多 limit 条。
+func (c *ConnTracker) Recent(limit int) []RecentConn {
+	c.access.Lock()
+	out := make([]RecentConn, 0, len(c.recent))
+	for _, r := range c.recent {
+		out = append(out, *r)
+	}
+	c.access.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].seq > out[j].seq })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 // rejectedConn 是设备数超限时返回的连接:任何读写立即失败,使该次拨号被拒绝。
@@ -86,6 +153,7 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 	}
 
 	c.trackConnection(connID, connInfo)
+	c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType)
 
 	wrapped := c.createWrappedConn(conn, connID)
 	if c.limiter != nil {
@@ -112,6 +180,7 @@ func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.P
 	}
 
 	c.trackConnection(connID, connInfo)
+	c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType)
 
 	wrapped := c.createWrappedPacketConn(conn, connID)
 	if c.limiter != nil {

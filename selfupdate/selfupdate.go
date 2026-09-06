@@ -85,6 +85,11 @@ func latestTag(ctx context.Context) (string, error) {
 	return rel.TagName, nil
 }
 
+// Newer 报告 latest 是否比 current 新(x.y.z,可带 v 前缀);解析不出来一律 false。
+func Newer(latest, current string) bool {
+	return newer(strings.TrimPrefix(latest, "v"), strings.TrimPrefix(current, "v"))
+}
+
 // newer 比较两个 x.y.z:latest 比 current 新才返回 true。
 // 版本号解析不出来时保守返回 false(宁可不提示,也不要误报有更新)。
 func newer(latest, current string) bool {

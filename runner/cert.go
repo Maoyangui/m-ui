@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -203,11 +204,48 @@ func (r *Runner) afterCertChange(certFile, keyFile, domain string, applyPanel, a
 		}
 	}
 
-	if err := r.ReloadAllForce(); err != nil { // 证书文件内容变了,配置文本不变也必须重启
+	// 证书文件内容变了但路径没变:sing-box 监视着 certificate_path / key_path,写入后自动热加载,
+	// 不用重启数据面(以前每次续期都强制重启,所有人掉线一次);路径变了(换来源)才整体重载。
+	if r.appliedUsesCert(certFile, keyFile) {
+		if err := r.ReloadAll(); err != nil { // 域名(server_name)之类变了时它自己会重启,否则无操作
+			r.cert.logf("数据面重载失败: %v", err)
+		} else {
+			r.cert.logf("线路入站证书已由数据面自动热加载(路径不变,不重启)")
+		}
+		return
+	}
+	if err := r.ReloadAllForce(); err != nil {
 		r.cert.logf("数据面重载失败: %v", err)
 	} else {
 		r.cert.logf("线路入站已用新证书重载")
 	}
+}
+
+// appliedUsesCert 当前生效的配置里,入站是否已经引用这两个证书文件路径。
+func (r *Runner) appliedUsesCert(certFile, keyFile string) bool {
+	r.mu.Lock()
+	raw := r.appliedRaw
+	r.mu.Unlock()
+	if raw == nil {
+		return false
+	}
+	var cfg struct {
+		Inbounds []struct {
+			TLS struct {
+				Cert string `json:"certificate_path"`
+				Key  string `json:"key_path"`
+			} `json:"tls"`
+		} `json:"inbounds"`
+	}
+	if json.Unmarshal(raw, &cfg) != nil {
+		return false
+	}
+	for _, ib := range cfg.Inbounds {
+		if ib.TLS.Cert != "" && (ib.TLS.Cert != certFile || ib.TLS.Key != keyFile) {
+			return false
+		}
+	}
+	return true
 }
 
 // SelfSign 生成自签证书(无域名 / 纯 IP 场景)。默认只给线路入站用:

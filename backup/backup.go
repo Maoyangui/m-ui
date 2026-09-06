@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,9 +35,14 @@ type Meta struct {
 	Certs   []CertEntry `json:"certs"`
 }
 
-// Create 把数据库一致快照 + 证书文件打成 zip 写入 w。
+// Create 把数据库一致快照 + 证书文件打成 zip 写入 w(快照临时文件放系统临时目录)。
 func Create(db *gorm.DB, certPaths []string, version string, w io.Writer) error {
-	tmp, err := os.CreateTemp("", "m-ui-snap-*.db")
+	return CreateIn(db, certPaths, version, "", w)
+}
+
+// CreateIn 同 Create,快照临时文件放在 tmpDir(数据目录):/tmp 可能是很小的内存盘,库大一点就写不下。
+func CreateIn(db *gorm.DB, certPaths []string, version, tmpDir string, w io.Writer) error {
+	tmp, err := os.CreateTemp(tmpDir, "m-ui-snap-*.db")
 	if err != nil {
 		return err
 	}
@@ -209,6 +215,15 @@ func ApplyPending(dbPath string) (bool, error) {
 	return true, nil
 }
 
+// pruneBaks 只保留最近 keep 份 <db>.bak-* 旧库。
+func pruneBaks(dbPath string, keep int) {
+	matches, _ := filepath.Glob(dbPath + ".bak-*")
+	sort.Sort(sort.Reverse(sort.StringSlice(matches))) // 文件名带时间,倒序就是新的在前
+	for i := keep; i < len(matches); i++ {
+		os.Remove(matches[i])
+	}
+}
+
 // underDir 判断 p 是否落在 root 目录内(拒绝绝对路径越界与 ..)。
 func underDir(root, p string) bool {
 	abs, err := filepath.Abs(p)
@@ -235,6 +250,7 @@ func Restore(dbPath, srcPath string) error {
 		if err := os.Rename(dbPath, bak); err != nil {
 			return fmt.Errorf("备份当前库: %w", err)
 		}
+		pruneBaks(dbPath, 2) // 每次还原都留一份旧库,只保留最近两份,别越积越多
 	}
 	for _, suffix := range []string{"-wal", "-shm"} {
 		os.Remove(dbPath + suffix)

@@ -88,19 +88,27 @@ func Series(db *gorm.DB, resource, tag string, hours int, bucket int64, floor in
 			span = 1
 		}
 	}
-	q := db.Model(&model.Stats{}).Where("resource = ? AND date_time > ? AND date_time <= ?", resource, start, end)
+	// 聚合交给 SQLite:以前是把区间内的原始行全部读进内存再累加,几百个活跃用户看 30 天就是几百万行,
+	// 概览每十几秒拉一次图,面板就是被这个拖慢的
+	type agg struct {
+		I         int64
+		Direction bool
+		Traffic   int64
+	}
+	var rows []agg
+	q := db.Model(&model.Stats{}).Select("((date_time - ?) / ?) AS i, direction, SUM(traffic) AS traffic", start, span).
+		Where("resource = ? AND date_time > ? AND date_time <= ?", resource, start, end)
 	if tag != "" {
 		q = q.Where("tag = ?", tag)
 	}
-	var rows []model.Stats
-	q.Order("date_time asc").Find(&rows)
+	q.Group("i, direction").Scan(&rows)
 
 	res := Result{Points: make([]Point, n), Span: span, Start: start, End: end}
 	for i := range res.Points {
 		res.Points[i].T = start + int64(i)*span
 	}
 	for _, row := range rows {
-		i := int((row.DateTime - start) / span)
+		i := int(row.I)
 		if i < 0 {
 			i = 0
 		}

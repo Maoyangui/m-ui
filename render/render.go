@@ -94,6 +94,13 @@ func LineOnNode(line model.Line, selfID uint) bool {
 	return false
 }
 
+// AllowPrivate 设置 allowPrivate=true 时不加私网屏蔽规则(有人确实要经代理访问内网时打开)。
+func AllowPrivate(db *gorm.DB) bool {
+	var v string
+	db.Raw("SELECT value FROM settings WHERE key = ?", "allowPrivate").Scan(&v)
+	return strings.EqualFold(v, "true")
+}
+
 // LocalNodeID 返回本机在 nodes 表中的 id(没有则 0)。
 func LocalNodeID(db *gorm.DB) uint {
 	var n model.Node
@@ -116,13 +123,25 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 			lines = append(lines, l)
 		}
 	}
-	var upstreams []model.Upstream
-	if err := db.Order("id asc").Find(&upstreams).Error; err != nil {
+	var allUps []model.Upstream
+	if err := db.Order("id asc").Find(&allUps).Error; err != nil {
 		return nil, err
 	}
-	upstreamById := make(map[uint]model.Upstream, len(upstreams))
-	for _, u := range upstreams {
+	// 只渲染本机线路真正用到的上游:不部署线路的主机一个出站都不该有;一条坏掉的上游也不该让
+	// 与它无关的机器整份配置渲染失败。没线路用的上游在面板上按"未使用"处理,测试走临时实例
+	usedUp := map[uint]bool{}
+	for _, l := range lines {
+		if l.UpstreamId != 0 {
+			usedUp[l.UpstreamId] = true
+		}
+	}
+	upstreams := make([]model.Upstream, 0, len(allUps))
+	upstreamById := make(map[uint]model.Upstream, len(allUps))
+	for _, u := range allUps {
 		upstreamById[u.Id] = u
+		if usedUp[u.Id] {
+			upstreams = append(upstreams, u)
+		}
 	}
 	usersByLine, err := loadLineUsers(db, self)
 	if err != nil {
@@ -133,6 +152,24 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 	rules := []json.RawMessage{
 		json.RawMessage(`{"action":"sniff"}`),
 		json.RawMessage(`{"protocol":["dns"],"action":"hijack-dns"}`),
+	}
+	if !AllowPrivate(db) {
+		// 用户经代理不该摸到这台机器自己(面板、WARP 的 socks 口、副机接口)、内网,以及云厂商的元数据地址
+		// 169.254.169.254(AWS 上拿到实例凭证只要一个 GET)。域名要先解析成 IP,"localhost"或指向 127.0.0.1 的
+		// 自定义域名才拦得住;但 resolve 解析失败会直接拒绝连接,所以只对走直连出口的线路做——它们本来就要
+		// 在本机解析域名,没有新增失败点;经上游(WARP / 远端代理)出去的线路,私网指的是上游那头的网络,
+		// 由上游自己管,这里只拦写成 IP 字面量的。
+		var directIn []string
+		for _, l := range lines {
+			if l.UpstreamId == 0 {
+				directIn = append(directIn, l.Name)
+			}
+		}
+		if len(directIn) > 0 {
+			resolve, _ := json.Marshal(map[string]interface{}{"inbound": directIn, "action": "resolve"})
+			rules = append(rules, resolve)
+		}
+		rules = append(rules, json.RawMessage(`{"ip_is_private":true,"action":"reject"}`))
 	}
 	for _, line := range lines {
 		inbound, err := renderInbound(line, cert, usersByLine[line.Id])
@@ -158,23 +195,13 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 		return nil, err
 	}
 	config := map[string]interface{}{
-		"log":       logOptions(db),
+		"log":       map[string]interface{}{"level": "info"}, // 级别由运行时按 logEnabled 调,配置文本不随开关变
 		"dns":       map[string]interface{}{"servers": []map[string]interface{}{{"type": "local", "tag": "local"}}},
 		"inbounds":  inbounds,
 		"outbounds": outbounds,
 		"route":     map[string]interface{}{"rules": rules, "final": "direct"},
 	}
 	return json.MarshalIndent(config, "", "  ")
-}
-
-// logOptions 数据面日志:面板"日志"页关闭记录后,核心也不再产生日志。
-func logOptions(db *gorm.DB) map[string]interface{} {
-	var v string
-	db.Raw("SELECT value FROM settings WHERE key = ?", "logEnabled").Scan(&v)
-	if v == "false" {
-		return map[string]interface{}{"disabled": true}
-	}
-	return map[string]interface{}{"level": "info"}
 }
 
 // loadLineUsers 返回 lineId → 启用用户列表(含凭据)。
@@ -199,9 +226,9 @@ func loadLineUsers(db *gorm.DB, self uint) (map[uint][]model.User, error) {
 		allowed[k][sc.NodeId] = true
 	}
 	var users []model.User
-	// 代理被停用或到期 → 他名下的用户一并不下发(等同停用,节点立刻连不上)
+	// 代理被停用、到期或额度用尽 → 他名下的用户一并不下发(等同停用,节点立刻连不上);用户行本身不改
 	live := db.Model(&model.Reseller{}).Select("id").
-		Where("enabled = ? AND (expiry = 0 OR expiry > ?)", true, time.Now().Unix())
+		Where("enabled = ? AND depleted = ? AND (expiry = 0 OR expiry > ?)", true, false, time.Now().Unix())
 	if err := db.Where("enabled = ? AND (COALESCE(reseller_id,0) = 0 OR reseller_id IN (?))", true, live).
 		Find(&users).Error; err != nil {
 		return nil, err

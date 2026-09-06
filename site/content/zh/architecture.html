@@ -48,7 +48,9 @@
     <tr><td>1 分钟</td><td>配额、到期、周期重置;数据面看门狗</td></tr>
     <tr><td>10 分钟</td><td>WAL 检查点,运行中的库随时可安全复制</td></tr>
     <tr><td>6 小时</td><td>向 GitHub Releases 查一次新版本(只查)</td></tr>
-    <tr><td>每天</td><td>清理旧时序、证书续期、日报</td></tr>
+    <tr><td>1 小时</td><td>按保留天数清理时序与日志;48 小时前的分钟样本并成小时桶</td></tr>
+    <tr><td>12 小时</td><td>证书续期检查(续期后 sing-box 自动换证书,不重启)</td></tr>
+    <tr><td>每天</td><td>日报</td></tr>
   </table>
 
   <h2 id="code">代码结构</h2>

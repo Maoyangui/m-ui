@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -125,6 +127,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status["subPath"] = s.setting("subPath")
 	status["webPort"] = s.settingInt("webPort", 2053)
 	status["webPath"] = s.basePath()
+	status["reload"] = s.run.ReloadStatus() // 最近一次重载:失败会在页面顶部常驻提示
+	status["singBox"] = singBoxVersion
+	status["dbSize"] = dbFileSize(s.run.DBPath())
 	if st := s.lastUpgrade(); st != nil { // 上次一键更新回滚过:页面顶部要明说,管理员点"知道了"才消
 		status["upgrade"] = st
 	}
@@ -138,6 +143,29 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		status["bootTime"] = bt
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+// singBoxVersion 内嵌的 sing-box 版本,从构建信息里读(设置页"关于"展示,不再手写)。
+var singBoxVersion = func() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, d := range bi.Deps {
+			if d.Path == "github.com/sagernet/sing-box" {
+				return strings.TrimPrefix(d.Version, "v")
+			}
+		}
+	}
+	return ""
+}()
+
+// dbFileSize 数据库文件占用(含尚未并回的 WAL),概览"数据面"卡里给一眼。
+func dbFileSize(path string) int64 {
+	var n int64
+	for _, p := range []string{path, path + "-wal"} {
+		if st, err := os.Stat(p); err == nil {
+			n += st.Size()
+		}
+	}
+	return n
 }
 
 // role 返回本机角色:master(主/香港) 或 node(副/台湾)。
@@ -309,14 +337,21 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		var line model.Line
 		s.db.First(&line, id)
-		if err := s.db.Delete(&model.Line{}, id).Error; err != nil {
+		err := s.db.Transaction(func(tx *gorm.DB) error { // 线路和它的分配、授权一起删,不留半截
+			if err := tx.Delete(&model.Line{}, id).Error; err != nil {
+				return err
+			}
+			for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.ResellerLine{}, &model.ResellerLineNode{}} {
+				if err := tx.Where("line_id = ?", id).Delete(t).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
 			badRequest(w, err)
 			return
 		}
-		s.db.Where("line_id = ?", id).Delete(&model.UserLine{})
-		s.db.Where("line_id = ?", id).Delete(&model.UserLineNode{})
-		s.db.Where("line_id = ?", id).Delete(&model.ResellerLine{}) // 代理的线路授权一并清掉
-		s.db.Where("line_id = ?", id).Delete(&model.ResellerLineNode{})
 		s.audit(r, "line", "delete", line.Name)
 		s.reloadAll("删除线路 " + line.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
@@ -577,6 +612,8 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		var oldName string
+		s.db.Model(&model.Upstream{}).Select("name").Where("id = ?", id).Scan(&oldName)
 		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&model.Upstream{}).Where("id = ?", id).
@@ -590,7 +627,12 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.audit(r, "upstream", "update", up.Name)
-		s.reloadUpstreams("修改上游 " + up.Name)
+		if oldName != "" && oldName != up.Name {
+			// 出站标签就是上游名:路由规则指着旧名字,只换出站会让用它的线路找不到出口,必须整体重载
+			s.reloadAll("上游改名 " + oldName + " → " + up.Name)
+		} else {
+			s.reloadUpstreams("修改上游 " + up.Name)
+		}
 		writeJSON(w, http.StatusOK, up)
 	case http.MethodDelete:
 		var inUse int64
@@ -760,6 +802,11 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		var cur model.User
+		if err := s.db.First(&cur, id).Error; err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+			return
+		}
 		p.User.Id = id
 		if err := s.validateUser(&p.User); err != nil {
 			badRequest(w, err)
@@ -773,9 +820,20 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			}
 			p.ExtIds = nil
 		}
+		// 启停:表单里的开关和库里不一样才算手动决定;一样时按自动规则——超量 / 到期被停的人,配额或到期改回范围内就自动启用
+		if p.User.Enabled != cur.Enabled {
+			p.User.DisabledReason = ""
+			if !p.User.Enabled {
+				p.User.DisabledReason = model.DisabledManual
+			}
+		} else {
+			p.User.DisabledReason = cur.DisabledReason
+			p.User.Up, p.User.Down = cur.Up, cur.Down
+			autoEnable(&p.User, time.Now().Unix())
+		}
 		// 凭据与累计流量不经由表单覆盖
 		if err := s.db.Model(&model.User{}).Where("id = ?", id).Select(
-			"name", "enabled", "volume", "expiry", "auto_reset", "reset_days",
+			"name", "enabled", "disabled_reason", "volume", "expiry", "auto_reset", "reset_days",
 			"next_reset", "device_limit", "speed_up", "speed_down", "remark", "desc",
 		).Updates(p.User).Error; err != nil {
 			badRequest(w, err)
@@ -827,13 +885,21 @@ func (s *Server) validateUser(u *model.User) error {
 
 // deleteUser 删除用户及其线路/外部节点关联,踢下线并热更新数据面。
 func (s *Server) deleteUser(u model.User, actor string) error {
-	carryUsage(s.db, u) // 代理的用户:删之前把用量结转到代理头上,免得删号洗额度
-	if err := s.db.Delete(&model.User{}, u.Id).Error; err != nil {
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		carryUsage(tx, u) // 代理的用户:删之前把用量结转到代理头上,免得删号洗额度
+		if err := tx.Delete(&model.User{}, u.Id).Error; err != nil {
+			return err
+		}
+		for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserExt{}} {
+			if err := tx.Where("user_id = ?", u.Id).Delete(t).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
-	s.db.Where("user_id = ?", u.Id).Delete(&model.UserLine{})
-	s.db.Where("user_id = ?", u.Id).Delete(&model.UserLineNode{})
-	s.db.Where("user_id = ?", u.Id).Delete(&model.UserExt{})
 	s.run.KickUser(u.Name)
 	s.auditAs(actor, "user", "delete", u.Name)
 	s.reloadUsers("删除用户 " + u.Name)
@@ -937,6 +1003,17 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		roleChanged := false
 		oldDomain := s.setting("webDomain")
+		oldAllowPrivate := s.setting("allowPrivate")
+		note := "端口、证书与监听地址的改动需重启 m-ui 生效"
+		if v, ok := in["nodeMode"]; ok && strings.EqualFold(strings.TrimSpace(v), "true") && !strings.EqualFold(s.setting("nodeMode"), "true") {
+			// 切成副机后本机的线路 / 用户 / 上游会被主机的快照整表替换:先留一份备份,别静默丢数据
+			if bf, err := s.run.CreateBackupFile(); err != nil {
+				logger.Warning("切换副机前备份失败: ", err)
+				note = "切换前备份失败:" + err.Error() + ";" + note
+			} else {
+				note = "已先备份到 " + bf.Name + "(本机现有线路 / 用户 / 上游会被主机下发的配置替换);" + note
+			}
+		}
 		for k, v := range in {
 			v = strings.TrimSpace(v)
 			if k == "nodeMode" && v != s.setting("nodeMode") {
@@ -956,6 +1033,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if roleChanged {
 			logger.Info("面板角色已切换为: ", s.role())
 		}
+		if v, ok := in["allowPrivate"]; ok && strings.TrimSpace(v) != oldAllowPrivate {
+			s.reloadAll("私网访问开关") // 路由规则变了,只能整体重载
+		}
 		keys := make([]string, 0, len(in))
 		for k := range in {
 			keys = append(keys, k)
@@ -964,7 +1044,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		// 端口/证书类改动需重启进程才生效,这里提示前端
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"ok": "1", "role": s.role(),
-			"note": "端口、证书与监听地址的改动需重启 m-ui 生效",
+			"note": note,
 		})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})

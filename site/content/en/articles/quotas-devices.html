@@ -22,10 +22,10 @@
 
   <h2>What happens at the limit</h2>
   <ol>
-    <li>Every minute the master judges quota and expiry. A user over either is disabled in the database.</li>
+    <li>Every minute the master judges quota and expiry. A user over either is disabled in the database with the reason recorded (quota / expired); a manually disabled user is a separate case that neither a reset nor a renewal brings back on its own.</li>
     <li>On the master the inbound user table is swapped and the user's connections are closed.</li>
     <li>The next snapshot to every node no longer contains the user, so nodes drop them within seconds — nodes never judge quota themselves, which is why a network partition cannot disable users by mistake.</li>
-    <li>The subscription address now answers with a short "unavailable" page in browsers, with your contact details (resellers' users see the reseller's), and a plain 404 to clients.</li>
+    <li>The user can still open their landing page in a browser: it shows that they are out of traffic or expired, the next reset date, and your contact details (resellers' users see the reseller's). Only clients are cut off — a plain 404 from that moment on, and the line inbounds stop accepting them.</li>
     <li>Telegram, if configured, told you <i>N</i> days before expiry and at a usage percentage you chose.</li>
   </ol>
 

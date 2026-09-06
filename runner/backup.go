@@ -41,7 +41,7 @@ func (r *Runner) CertPaths() []string {
 
 // WriteBackup 把备份 zip 写到 w。
 func (r *Runner) WriteBackup(w io.Writer) error {
-	return backup.Create(r.db, r.CertPaths(), Version, w)
+	return backup.CreateIn(r.db, r.CertPaths(), Version, r.DataDir(), w)
 }
 
 type BackupFile struct {

@@ -10,7 +10,7 @@ const defaults = {
   timezone: 'Asia/Shanghai', webListen: '0.0.0.0', webPort: 2053, webPath: '/app/', subListen: '0.0.0.0', subPort: 2056, subPath: '/sub/', subUpdates: 12,
   resellerListen: '0.0.0.0', resellerPort: 2054, resellerPath: '/dl/',
   tgExpiringDays: 3, tgQuotaPercent: 80, tgDailyHour: 9, upstreamCheckMinutes: 10, upstreamCheckFailThreshold: 2, extRefreshMinutes: 30,
-  upstreamTestUrl: 'http://www.gstatic.com/generate_204', statsBucketSeconds: 10, trafficAge: 30,
+  upstreamTestUrl: 'http://www.gstatic.com/generate_204', statsBucketSeconds: 60, trafficAge: 30,
 };
 
 // 面板时间显示用的时区(默认 Asia/Shanghai);列表覆盖常见地区,够用且不会写错名字
@@ -71,6 +71,7 @@ const groups = () => [
     ['certFile', t('set.certFile'), 'text', t('set.certHelp')], ['keyFile', t('set.key'), 'text'],
     ['upstreamTestUrl', t('set.testUrl'), 'text', t('set.testUrlHelp')],
     ['statsBucketSeconds', t('set.bucket'), 'number'], ['trafficAge', t('set.trafficAge'), 'number', t('set.trafficAgeHelp')],
+    ['allowPrivate', t('set.allowPrivate'), 'bool', t('set.allowPrivateHelp')],
   ]},
 ];
 
@@ -102,7 +103,7 @@ export async function render(el) {
       <div class="card-head"><h2>${t('set.about')}</h2><a href="#/admin" class="btn sm">${t('nav.admin')} →</a></div>
       <dl class="kv">
         <dt>${t('set.version')}</dt><dd class="mono">${esc(state.status.version || '')}</dd>
-        <dt>sing-box</dt><dd class="mono">1.14</dd>
+        <dt>sing-box</dt><dd class="mono">${esc(state.status.singBox || '—')}</dd>
         <dt>${t('set.panelUrl')}</dt><dd class="mono">${esc((state.status.panelTLS ? 'https' : 'http') + '://' + (s.webDomain || '<IP>') + ':' + (state.status.webPort || '') + (state.status.webPath || '/'))}</dd>
         <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + (s.webDomain || '<IP>') + ':' + (state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('set.userPh') + '>?format=clash')}</dd>
         <dt>License</dt><dd>GPL-3.0 · <a href="${esc(state.status.repo || '#')}" target="_blank" rel="noopener">GitHub</a></dd>
@@ -156,7 +157,7 @@ registerActions({
     const toNode = fchk('set-nodeMode');
     const cur = String(state.settings.nodeMode).toLowerCase() === 'true';
     if (toNode !== cur && !await confirm(toNode ? t('set.roleToNode') : t('set.roleToMaster'), { danger: true })) return;
-    try { await post('settings', { nodeMode: String(toNode) }); await load('settings', 'status'); toast(t('set.saved'), 'ok'); location.reload(); }
+    try { const r = await post('settings', { nodeMode: String(toNode) }); await load('settings', 'status'); toast(r && r.note && toNode ? r.note : t('set.saved'), 'ok'); setTimeout(() => location.reload(), toNode ? 2500 : 0); }
     catch (e) { toast(e.message, 'err'); }
   },
   'set.restart': async () => {

@@ -8,7 +8,8 @@
   <table>
     <tr><th>What changed</th><th>What happens</th><th>Who notices</th></tr>
     <tr><td>User: added, removed, enabled, disabled, credentials, line assignment</td><td><b>ReloadUsers</b> — rebuild each inbound's user list from the database and swap it into the running inbound; re-apply per-user speed and device limits</td><td>Only the user whose credentials went away (they are disconnected on purpose)</td></tr>
-    <tr><td>Upstream: added, edited, removed</td><td><b>ReloadUpstreams</b> — render the outbound set, add new outbounds, replace changed ones, remove stale ones, then update routing</td><td>Connections through a replaced outbound reconnect; everything else stays</td></tr>
+    <tr><td>Upstream: added, edited, removed</td><td><b>ReloadUpstreams</b> — render the outbound set, add new outbounds, replace changed ones, remove stale ones; routing rules reference outbounds by name, so they stay as they are. <b>Renaming</b> an upstream changes what the rules reference, and that case is promoted to ReloadAll automatically</td><td>Connections through a replaced outbound reconnect; everything else stays</td></tr>
+    <tr><td>Certificate: renewed or overwritten in place</td><td>No reload at all — sing-box watches the certificate files and swaps them itself; only a changed certificate <b>path</b> triggers ReloadAll</td><td>Nobody</td></tr>
     <tr><td>Line: protocol, port, TLS, transport, options, deployment</td><td><b>ReloadAll</b> — render the whole config, stop the box, start the new one; if it fails to start, start the previous config again</td><td>All connections on that server reconnect (a few seconds)</td></tr>
   </table>
   <p>The panel picks the tier from the change itself, so an operator never has to decide "is this safe to apply now?". Nodes apply pushed snapshots with the same logic: a snapshot that only differs in users triggers only tier one on every node.</p>

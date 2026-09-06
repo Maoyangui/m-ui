@@ -90,12 +90,13 @@ func (s *Server) handleResellerItem(w http.ResponseWriter, r *http.Request) {
 		}
 		// 密码、2FA、落地页文案由代理自己在代理面板里改,主面板表单不覆盖
 		if err := s.db.Model(&model.Reseller{}).Where("id = ?", id).Select(
-			"name", "enabled", "volume", "device_limit", "speed_up", "speed_down", "expiry", "remark").
+			"name", "enabled", "volume", "device_limit", "speed_up", "speed_down", "expiry", "remark", "user_limit").
 			Updates(p.Reseller).Error; err != nil {
 			badRequest(w, err)
 			return
 		}
 		s.setResellerLineRefs(id, lineRefsOf(p.LineIds, p.LineRefs))
+		s.refreshReseller(id) // 额度改了就立刻重算"用尽"标记,不等下一分钟
 		s.audit(r, "reseller", "update", p.Name)
 		s.reloadUsers("修改代理 " + p.Name)
 		writeJSON(w, http.StatusOK, s.resellerRow(p.Reseller))
@@ -151,19 +152,26 @@ func (s *Server) dispatchResellerSubroute(w http.ResponseWriter, r *http.Request
 		if r.Method != http.MethodPost {
 			break
 		}
+		// 名下用户本周期清零;只有因超量被停的自动恢复,手动停用和到期的不动(以前是一律复活)
 		err := s.db.Model(&model.User{}).Where("reseller_id = ?", rs.Id).Updates(map[string]interface{}{
-			"total_up": gorm.Expr("total_up + up"), "total_down": gorm.Expr("total_down + down"),
-			"up": 0, "down": 0, "enabled": true,
+			"total_up": gorm.Expr("total_up + up"), "total_down": gorm.Expr("total_down + down"), "up": 0, "down": 0,
 		}).Error
 		if err != nil {
 			badRequest(w, err)
 			return true
 		}
+		s.db.Model(&model.User{}).Where("reseller_id = ? AND enabled = ? AND disabled_reason = ?", rs.Id, false, model.DisabledQuota).
+			Updates(map[string]interface{}{"enabled": true, "disabled_reason": ""})
+		var names []string
+		s.db.Model(&model.User{}).Where("reseller_id = ?", rs.Id).Pluck("name", &names)
+		for _, n := range names {
+			s.forgetQuotaAlert(n)
+		}
 		var allTime int64
 		s.db.Model(&model.User{}).Where("reseller_id = ?", rs.Id).
 			Select("COALESCE(SUM(up + down + total_up + total_down),0)").Scan(&allTime)
 		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).
-			Update("used_base", allTime+rs.UsedCarried) // 额度归零
+			Updates(map[string]interface{}{"used_base": allTime + rs.UsedCarried, "depleted": false}) // 额度归零,立即恢复
 		s.audit(r, "reseller", "reset", rs.Name)
 		s.reloadUsers("重置代理流量 " + rs.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})

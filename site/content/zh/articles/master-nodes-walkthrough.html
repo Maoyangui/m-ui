@@ -11,7 +11,7 @@
 
   <h2>1. 三台都装</h2>
   <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
-  <p>每台同一条命令。各自登录一次面板改掉默认密码。三台都放行 <code>2053/tcp</code>(主机的面板要用;副机要让主机能访问它的 agent API)。</p>
+  <p>每台同一条命令。各自登录一次面板改掉默认密码。主机放行 <code>2053/tcp</code> 给你自己用面板;两台副机的 <code>2053/tcp</code> 只需要对<b>主机的 IP</b> 放行(主机要访问它们的 agent API),不必对公网开放。</p>
 
   <h2>2. 证书</h2>
   <p>Frankfurt:给它的域名签 Let's Encrypt 证书,或者自签。Tokyo 和 Singapore:<b>证书 → 自签</b>就够了 —— 每台副机用自己的证书跑线路,主机访问自签副机时放宽验证(新增服务器时那个"忽略证书"开关)。</p>

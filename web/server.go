@@ -92,9 +92,8 @@ func (s *Server) actor(r *http.Request) string {
 	if err != nil {
 		return ""
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.sessions[c.Value].user
+	sess, _ := s.getSession(c.Value)
+	return sess.user
 }
 
 func (s *Server) setting(key string) string {
@@ -161,6 +160,7 @@ func (s *Server) Start() error {
 	api := base + "api/"
 	mux.HandleFunc(api+"login", s.handleLogin)
 	mux.HandleFunc(api+"logout", s.handleLogout)
+	mux.HandleFunc(api+"health", s.handleHealth) // 只对本机开放:升级守护 / 安装脚本判健康用
 	mux.HandleFunc(api+"status", s.auth(s.handleStatus))
 	mux.HandleFunc(api+"lines", s.auth(s.masterOnly(s.handleLines)))
 	mux.HandleFunc(api+"lines/", s.auth(s.masterOnly(s.handleLineItem)))
@@ -326,9 +326,7 @@ func (s *Server) newSession(user string) string {
 	if maxAge <= 0 {
 		maxAge = 7 * 24 * time.Hour
 	}
-	s.mu.Lock()
-	s.sessions[token] = session{user: user, exp: time.Now().Add(maxAge)}
-	s.mu.Unlock()
+	s.putSession(token, session{user: user, exp: time.Now().Add(maxAge)})
 	return token
 }
 
@@ -336,17 +334,8 @@ func (s *Server) newSession(user string) string {
 // 代理会话与管理员会话共用一张表,而 Cookie 不区分端口:代理只要把自己的令牌
 // 换个 Cookie 名塞给主面板,就会被当成管理员——所以这里必须把代理会话挡在外面。
 func (s *Server) validSession(token string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sess, ok := s.sessions[token]
-	if !ok {
-		return false
-	}
-	if time.Now().After(sess.exp) {
-		delete(s.sessions, token)
-		return false
-	}
-	return sess.reseller == 0
+	sess, ok := s.getSession(token)
+	return ok && sess.reseller == 0
 }
 
 func (s *Server) reapSessions() {
@@ -366,6 +355,7 @@ func (s *Server) reapSessions() {
 			}
 		}
 		s.mu.Unlock()
+		s.db.Where("exp < ?", now.Unix()).Delete(&model.Session{})
 	}
 }
 
@@ -498,9 +488,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
-		s.mu.Lock()
-		delete(s.sessions, c.Value)
-		s.mu.Unlock()
+		s.delSession(c.Value)
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})

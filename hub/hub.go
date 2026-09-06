@@ -33,17 +33,23 @@ import (
 
 // SyncedSettings 是需要在主副机之间保持一致的设置项(订阅展示相关)。
 var SyncedSettings = []string{
-	"timezone",
+	"timezone", "allowPrivate",
 	"upstreamTestUrl", "upstreamCheckMinutes", "upstreamCheckFailThreshold",
 	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subUpdates",
 	"subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice", "subShareEnabled",
 }
 
+// MinNodeVersion 副机至少要这个版本才能正确应用当前快照(快照里新增了它必须理解的字段时抬高它)。
+// 0.5.0:用户的停用原因、代理的额度用尽标志、私网屏蔽开关。
+const MinNodeVersion = "0.5.0"
+
 // Snapshot 是主机下发给副机的完整配置。
 type Snapshot struct {
 	Revision      string               `json:"revision"`
-	SelfNodeId    uint                 `json:"selfNodeId"` // 接收方在 nodes 表里的 id
-	MasterId      uint                 `json:"masterId"`   // 主机自己在 nodes 表里的 id
+	Version       string               `json:"version,omitempty"` // 主机版本(只做展示与比对,不进修订号)
+	MinNode       string               `json:"minNode,omitempty"` // 副机最低版本,低于它拒绝应用并报错
+	SelfNodeId    uint                 `json:"selfNodeId"`        // 接收方在 nodes 表里的 id
+	MasterId      uint                 `json:"masterId"`          // 主机自己在 nodes 表里的 id
 	Nodes         []model.Node         `json:"nodes"`
 	Upstreams     []model.Upstream     `json:"upstreams"`
 	Lines         []model.Line         `json:"lines"`
@@ -109,7 +115,7 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 
 // revisionOf 对快照内容做哈希;字段顺序固定,故稳定。
 func revisionOf(s Snapshot) string {
-	s.Revision, s.SelfNodeId = "", 0
+	s.Revision, s.SelfNodeId, s.Version, s.MinNode = "", 0, "", ""
 	// nodes 表中的 IsLocal 因接收方不同而不同,不参与修订号
 	nodes := make([]model.Node, len(s.Nodes))
 	copy(nodes, s.Nodes)
@@ -117,6 +123,14 @@ func revisionOf(s Snapshot) string {
 		nodes[i].IsLocal = false
 	}
 	s.Nodes = nodes
+	// 外部订阅的抓取时间 / 报错 / 节点数只是主机自己的记录:每半小时抓一次就推一次全量快照,
+	// 副机热更新一轮、限速桶清一遍,毫无意义。只有抓到的内容(Cache)变了才算配置变了
+	exts := make([]model.ExtNode, len(s.Exts))
+	copy(exts, s.Exts)
+	for i := range exts {
+		exts[i].LastFetch, exts[i].LastError, exts[i].NodeCount = 0, "", 0
+	}
+	s.Exts = exts
 	b, _ := json.Marshal(s)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
@@ -397,6 +411,15 @@ type Report struct {
 	Conns           []RecentConn                   `json:"conns,omitempty"`     // 最近入站连接,主机概览汇总展示
 	Groups          map[string]GroupState          `json:"groups,omitempty"`    // 代理池在这台机器上的状态(在线设备、设备池满被拒次数)
 	Upstreams       []UpstreamHealth               `json:"upstreams,omitempty"` // 本机线路真正用到的那些上游的巡检结果
+	Reload          *ReloadState                   `json:"reload,omitempty"`    // 副机最近一次重载的结果,失败要让主机面板看见
+}
+
+// ReloadState 一台机器最近一次数据面重载的结果。
+type ReloadState struct {
+	At    int64  `json:"at"`
+	Op    string `json:"op"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
 }
 
 // UpstreamHealth 一台服务器上某条上游的最近巡检结果。
@@ -508,8 +531,12 @@ type NodeStatus struct {
 	Synced      bool   `json:"synced"`
 	OnlineUsers int    `json:"onlineUsers"`
 	CertDays    int    `json:"certDays"`
-	alerted     bool
-	conns       []RecentConn
+	// ReloadError 副机最近一次重载失败的原因(空 = 正常);VersionMismatch 副机版本与主机不同
+	ReloadError     string `json:"reloadError,omitempty"`
+	ReloadAt        int64  `json:"reloadAt,omitempty"`
+	VersionMismatch bool   `json:"versionMismatch,omitempty"`
+	alerted         bool
+	conns           []RecentConn
 }
 
 // RemoteConns 汇总所有在线副机最近上报的入站连接,标注服务器名。
@@ -631,6 +658,7 @@ func (h *Hub) tick() {
 		logger.Warning("构造同步快照失败: ", err)
 		return
 	}
+	snap.Version, snap.MinNode = h.d.Version, MinNodeVersion
 	h.mu.Lock()
 	h.revision = snap.Revision
 	h.mu.Unlock()
@@ -870,6 +898,11 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 		st.Synced = rep.Revision == h.revision
 		st.OnlineUsers = len(rep.Onlines)
 		st.conns = rep.Conns
+		st.ReloadError, st.ReloadAt = "", 0
+		if rep.Reload != nil && !rep.Reload.OK {
+			st.ReloadError, st.ReloadAt = rep.Reload.Op+":"+rep.Reload.Error, rep.Reload.At
+		}
+		st.VersionMismatch = rep.Version != "" && h.d.Version != "" && rep.Version != h.d.Version
 	}
 	if !ok && !alerted && st.LastSeen > 0 && time.Now().Unix()-st.LastSeen > 60 {
 		st.alerted = true
@@ -929,6 +962,7 @@ func (h *Hub) PushNow(n model.Node) error {
 	if err != nil {
 		return err
 	}
+	snap.Version, snap.MinNode = h.d.Version, MinNodeVersion
 	return h.push(n, snap)
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/selfupdate"
 )
 
 // ---- 副机端:供主机调用的接口(令牌鉴权,不走会话) ----
@@ -126,6 +127,11 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("快照缺少修订号"))
 		return
 	}
+	if snap.MinNode != "" && selfupdate.Newer(snap.MinNode, Version) {
+		// 主机的快照里有本机不认识的字段(比如停用原因、代理额度标志):应用了也是错的,直接拒绝并说清楚
+		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("副机版本 v%s 低于主机要求的 v%s,请先升级这台副机", Version, snap.MinNode)})
+		return
+	}
 	revoked := hub.RevokedShares(s.db, snap)
 	rotated := hub.RotatedUsers(s.db, snap)
 	linesChanged, upsChanged, err := hub.ApplySnapshot(s.db, snap)
@@ -133,6 +139,9 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
+	// ================= D. 本机账本只增不删:主机已经不认识的用户,它的计数器没人再回收,清掉 =================
+	// 主机那边的游标还留着;同名用户以后再建,计数从 0 起小于游标,会被当成回绕重认,不会多算
+	s.db.Exec("DELETE FROM agent_counters WHERE user_name NOT IN (SELECT name FROM users)")
 	switch {
 	case linesChanged:
 		s.reloadAll("主机下发配置 " + snap.Revision)
@@ -173,6 +182,9 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	}
 	rep.OnlineLinesByIP = s.run.OnlineIPLines()
 	rep.Groups = s.run.GroupState()
+	if rl := s.run.ReloadStatus(); rl.At > 0 {
+		rep.Reload = &hub.ReloadState{At: rl.At, Op: rl.Op, OK: rl.OK, Error: rl.Error}
+	}
 	for _, h := range s.run.UpstreamHealthLocal() { // 本机线路用到的那些上游,量出来的结果交给主机汇总
 		rep.Upstreams = append(rep.Upstreams, hub.UpstreamHealth{Id: h.Id, Name: h.Name, OK: h.OK,
 			DelayMs: h.DelayMs, Method: h.Method, Error: h.Error, CheckedAt: h.CheckedAt, Fails: h.Fails})

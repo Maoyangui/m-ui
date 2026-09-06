@@ -13,7 +13,7 @@
 
   <h2>安装与配置</h2>
   <details><summary>一定要有域名吗?</summary><p>不用。<b>证书 → 自签</b>一键就有 TLS,订阅会自动告诉客户端允许不安全证书。有域名可以签 Let's Encrypt 证书、去掉那个提示 —— 推荐,但不是必须。</p></details>
-  <details><summary>要放行哪些端口?</summary><p>面板 <code>2053/tcp</code>、订阅 <code>2056/tcp</code>、开了代理面板再加 <code>2054/tcp</code>,以及每条线路的端口(TCP 或 UDP 看协议)。用 HTTP-01 签证书还需要 <code>80/tcp</code>;Cloudflare DNS-01 不需要。</p></details>
+  <details><summary>要放行哪些端口?</summary><p>面板 <code>2053/tcp</code>、订阅 <code>2056/tcp</code>、开了代理面板再加 <code>2054/tcp</code>,以及每条线路的端口(TCP 或 UDP 看协议)。用 HTTP-01 签证书还需要 <code>80/tcp</code>;Cloudflare DNS-01 不需要。副机的面板端口只需对主机的 IP 放行。</p></details>
   <details><summary>能改面板端口和路径吗?</summary><p>能,在设置里改;把自己锁在外面了就用 SSH 菜单(<code>m-ui</code>)。路径带不带结尾斜杠都能打开。端口保存前会校验,面板不会重启到一个被线路或别的程序占着的端口上。</p></details>
   <details><summary>系统要求?</summary><p>Linux amd64 或 arm64,带 systemd;推荐 Debian 11+ / Ubuntu 20.04+,Rocky / CentOS 等其它 systemd 发行版也行。安装脚本依赖 systemd,所以 Alpine(OpenRC)不支持。安装需要 root。面板本身 1 核 1 GB 足够。CI 真正跑过的平台见<a href="{{base}}zh/getting-started/#tested">自动测试过的平台</a>。</p></details>
   <details><summary>为什么新建线路的表单里已经填了端口?</summary><p>它挑了一个没被其它线路、面板和本机任何程序占用的五位端口,还真的绑定了一次确认。可以改;保存时冲突会被拦下。</p></details>
@@ -47,7 +47,7 @@
    {"@type":"Question","name":"安装 m-ui 会影响服务器上已有的 sing-box 或 Xray 吗?","acceptedAnswer":{"@type":"Answer","text":"不会。m-ui 的内核跑在自己的进程里,不安装、不停止、不改动系统里的 sing-box / Xray 或别的面板;只有端口需要错开。"}},
    {"@type":"Question","name":"卸载 m-ui 会删数据吗?","acceptedAnswer":{"@type":"Answer","text":"默认不删。--uninstall 只删服务和程序,保留 /etc/m-ui 里的数据库、证书和备份;加 --purge 才一起删除。"}},
    {"@type":"Question","name":"用 m-ui 一定要有域名吗?","acceptedAnswer":{"@type":"Answer","text":"不用。一键自签证书,直接用服务器 IP;订阅会告诉客户端允许不安全证书。有域名可以签 Let's Encrypt 证书,去掉提示。"}},
-   {"@type":"Question","name":"m-ui 需要放行哪些端口?","acceptedAnswer":{"@type":"Answer","text":"面板 2053/tcp、订阅 2056/tcp、代理面板 2054/tcp(开启时),以及每条线路的端口。HTTP-01 签证书还需要 80/tcp。"}},
+   {"@type":"Question","name":"m-ui 需要放行哪些端口?","acceptedAnswer":{"@type":"Answer","text":"面板 2053/tcp、订阅 2056/tcp、代理面板 2054/tcp(开启时),以及每条线路的端口。HTTP-01 签证书还需要 80/tcp。副机的面板端口只需对主机 IP 放行。"}},
    {"@type":"Question","name":"更新 m-ui 会丢数据吗?","acceptedAnswer":{"@type":"Answer","text":"不会。更新器校验 Release 摘要后只替换程序本体并重启;数据库、证书、备份和设置都不动。"}},
    {"@type":"Question","name":"m-ui 能管理多台服务器吗?","acceptedAnswer":{"@type":"Answer","text":"能。一台主机每 5 秒把线路、用户、凭据推给任意多台副机,收回流量和在线 IP;配额与设备数统一判定。"}},
    {"@type":"Question","name":"m-ui 会上报数据吗?","acceptedAnswer":{"@type":"Answer","text":"不会。对外连接只有你自己配置的,以及每 6 小时向 GitHub Releases 查一次新版本。"}}

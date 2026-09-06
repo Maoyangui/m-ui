@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -83,7 +84,7 @@ func main() {
 	case "import":
 		fs := flag.NewFlagSet("import", flag.ExitOnError)
 		from := fs.String("from", "", "旧面板数据库路径(只读打开,绝不修改源文件)")
-		to := fs.String("to", "m-ui.db", "生成的 m-ui 数据库路径")
+		to := fs.String("to", menuDBPath(), "生成的 m-ui 数据库路径")
 		order := fs.String("order", "", "线路排序文件:每行一个线路名,可选")
 		title := fs.String("title", "", "订阅 Profile-Title,可选")
 		force := fs.Bool("force", false, "目标已存在时覆盖")
@@ -96,6 +97,10 @@ func main() {
 			os.Exit(2)
 		}
 		if *usersOnly {
+			if err := requireDB(*to); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
 			db, err := database.Open(*to)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "打开 m-ui 数据库失败:", err)
@@ -121,9 +126,13 @@ func main() {
 		}
 	case "backup":
 		fs := flag.NewFlagSet("backup", flag.ExitOnError)
-		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径(默认取 systemd 单元里的,没有则 /etc/m-ui/m-ui.db)")
 		out := fs.String("out", "", "输出 zip 路径(默认 m-ui-<时间>.zip)")
 		fs.Parse(os.Args[2:])
+		if err := requireDB(*dbPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		if *out == "" {
 			*out = "m-ui-" + time.Now().Format("20060102-150405") + ".zip"
 		}
@@ -134,7 +143,7 @@ func main() {
 		fmt.Println("备份已写入:", *out)
 	case "restore":
 		fs := flag.NewFlagSet("restore", flag.ExitOnError)
-		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径(默认取 systemd 单元里的,没有则 /etc/m-ui/m-ui.db)")
 		from := fs.String("from", "", "备份文件(zip 或 .db)")
 		fs.Parse(os.Args[2:])
 		if *from == "" {
@@ -153,8 +162,12 @@ func main() {
 		fmt.Printf("已还原:%d 用户 / %d 线路 / %d 上游,证书 %d 个(旧库保留为 .bak-*)\n", sum.Users, sum.Lines, sum.Upstreams, len(sum.Meta.Certs))
 	case "set":
 		fs := flag.NewFlagSet("set", flag.ExitOnError)
-		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径(默认取 systemd 单元里的,没有则 /etc/m-ui/m-ui.db)")
 		fs.Parse(os.Args[2:])
+		if err := requireDB(*dbPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		if fs.NArg() == 0 {
 			fmt.Fprintln(os.Stderr, "用法: m-ui set -db <m-ui.db> key=value [key=value ...]   例: webPort=3053 nodeMode=true")
 			os.Exit(2)
@@ -175,17 +188,21 @@ func main() {
 		fmt.Printf("已写入 %d 项设置(运行中的 m-ui 需重启生效)\n", len(kv))
 	case "passwd":
 		fs := flag.NewFlagSet("passwd", flag.ExitOnError)
-		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
-		user := fs.String("user", "admin", "管理员用户名(不存在则创建)")
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径(默认取 systemd 单元里的,没有则 /etc/m-ui/m-ui.db)")
+		user := fs.String("user", "", "管理员用户名(留空 = 库里现有的管理员;库里没有管理员时创建 admin)")
 		pw := fs.String("password", "", "新密码(留空则随机生成并打印)")
 		fs.Parse(os.Args[2:])
-		newPw, err := runner.ResetPassword(*dbPath, *user, *pw)
+		if err := requireDB(*dbPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		who, newPw, err := runner.ResetPassword(*dbPath, *user, *pw)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "重置失败:", err)
 			os.Exit(1)
 		}
 		_ = runner.SetSettings(*dbPath, map[string]string{"adminDefault": "false", "totpEnabled": "false", "totpSecret": ""})
-		fmt.Printf("管理员 %s 密码已更新: %s(两步验证已一并关闭)\n", *user, newPw)
+		fmt.Printf("管理员 %s 密码已更新: %s(两步验证已一并关闭)\n", who, newPw)
 	case "selfsign":
 		fs := flag.NewFlagSet("selfsign", flag.ExitOnError)
 		hosts := fs.String("hosts", "", "域名或 IP,逗号分隔(必填)")
@@ -205,17 +222,21 @@ func main() {
 		fmt.Println("自签证书已生成:", *cert, *key)
 	case "render":
 		fs := flag.NewFlagSet("render", flag.ExitOnError)
-		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径(默认取 systemd 单元里的,没有则 /etc/m-ui/m-ui.db)")
 		out := fs.String("out", "", "配置输出文件(默认打印到标准输出)")
 		validate := fs.Bool("validate", true, "用 sing-box 解析校验渲染结果")
 		fs.Parse(os.Args[2:])
+		if err := requireDB(*dbPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		if err := runRender(*dbPath, *out, *validate); err != nil {
 			fmt.Fprintln(os.Stderr, "渲染失败:", err)
 			os.Exit(1)
 		}
 	case "run":
 		fs := flag.NewFlagSet("run", flag.ExitOnError)
-		dbPath := fs.String("db", "m-ui.db", "m-ui 数据库路径")
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径(默认取 systemd 单元里的,没有则 /etc/m-ui/m-ui.db)")
 		fs.Parse(os.Args[2:])
 		if err := runner.Run(*dbPath); err != nil {
 			fmt.Fprintln(os.Stderr, "启动失败:", err)
@@ -227,7 +248,19 @@ func main() {
 	}
 }
 
+// requireDB 备份 / 改设置 / 重置密码 / 渲染都必须对着已存在的库:database.Open 会顺手建一个空库,
+// 在错误目录里跑 m-ui backup 就会备份一个空库、m-ui passwd 会在空库里建管理员,而且不报错。
+func requireDB(path string) error {
+	if st, err := os.Stat(path); err != nil || st.IsDir() {
+		return fmt.Errorf("数据库不存在: %s(用 -db 指定;服务安装的默认位置是 /etc/m-ui/m-ui.db)", path)
+	}
+	return nil
+}
+
 func runBackup(dbPath, out string) error {
+	if err := requireDB(dbPath); err != nil {
+		return err
+	}
 	db, err := database.Open(dbPath)
 	if err != nil {
 		return err
@@ -247,7 +280,7 @@ func runBackup(dbPath, out string) error {
 		return err
 	}
 	defer f.Close()
-	return backup.Create(db, certs, version, f)
+	return backup.CreateIn(db, certs, version, filepath.Dir(dbPath), f)
 }
 
 func runRender(dbPath, out string, validate bool) error {
@@ -255,6 +288,7 @@ func runRender(dbPath, out string, validate bool) error {
 	if err != nil {
 		return err
 	}
+	defer database.Close(db)
 	get := func(key string) string {
 		var v string
 		db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)

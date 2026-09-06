@@ -11,7 +11,7 @@
 
   <h2>1. Install on all three</h2>
   <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
-  <p>Same command on each. Log in to each panel once and change the default password. Open <code>2053/tcp</code> on all three (the master needs it for the panel; nodes need it for the master to reach their agent API).</p>
+  <p>Same command on each. Log in to each panel once and change the default password. Open <code>2053/tcp</code> on the master for yourself; on the two nodes open <code>2053/tcp</code> to the <b>master's IP only</b> (the master needs it to reach their agent API) — it does not have to face the internet.</p>
 
   <h2>2. Certificates</h2>
   <p>On Frankfurt: issue a Let's Encrypt certificate for its domain, or self-sign. On Tokyo and Singapore: <b>Certificate → Self-sign</b> is enough — each node serves lines with its own certificate, and the master will talk to them with verification relaxed for self-signed nodes (the "insecure" toggle when you add a server).</p>

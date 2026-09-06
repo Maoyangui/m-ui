@@ -56,8 +56,10 @@ X-API-Key: <令牌>
 | 405 | 方法不对(如对 `/enable` 发 GET) |
 
 - 所有写操作记入面板"操作审计":主面板令牌的操作人显示为 `api`,代理令牌的显示为 `api:<代理名>`。
-- 接口只在**主服务器**上调用:副服务器的用户由主机每 5 秒下发,在副机上改动会被下一次同步覆盖。
-- 令牌等同该入口的全部权限,只放在服务端程序里,不要写进网页前端或客户端。
+- 接口只在**主服务器**上调用:副服务器的用户由主机每 5 秒下发,在副机上改动会被下一次同步覆盖。`/ping` 返回的 `role` 是 `node` 就说明调错了机器:那台机器上建的用户几秒内就会被主机的快照抹掉,套餐、线路授权也不存在。
+- 令牌等同该入口的全部权限,只放在服务端程序里,不要写进网页前端或客户端。令牌泄露就到面板里重新生成一个(旧的立即失效)。
+- 频率与安全:接口本身不限流,由调用方控制节奏(建号、续费这类操作按需调用即可,不要轮询 `/users` 拉全表做同步);面板端口建议只对调用方的 IP 放行或挂在反向代理后面。列表接口没有分页,用户很多时用 `q` / `enabled` 缩小范围。
+- 用户的启停有三种原因:手动、超量、到期(用户对象里的 `disabledReason`)。自动停用的用户在 `/reset`、`/plan` 或周期重置后自动恢复;手动停用的只有 `/enable`(或显式 `enabled: true`)才恢复。
 
 ### 代理令牌下的边界
 
@@ -102,7 +104,7 @@ X-API-Key: <令牌>
 {"ok": true, "version": "0.4.21", "role": "master", "time": 1788700000}
 ```
 
-- `role`:主面板令牌下为 `master`(主服务器)或 `node`(这台是副服务器,不该在这里调接口);代理令牌下固定为 `reseller`。
+- `role`:主面板令牌下为 `master`(主服务器)或 `node`(这台是副服务器,不该在这里调接口:副机上的改动会被主机下一次同步覆盖,先用它确认调对了机器);代理令牌下固定为 `reseller`。
 
 ### GET /plans
 
@@ -152,14 +154,14 @@ X-API-Key: <令牌>
 
 ### POST /users/{name|id}/enable · /disable
 
-- `enable`:`enabled = true`,数据面热更新后客户端立即可用。
-- `disable`:`enabled = false`,同时断开该用户在主服务器上的连接;副服务器在下一次同步(≤ 5 秒)时把他撤下并断开。
+- `enable`:`enabled = true`、`disabledReason = ""`,数据面热更新后客户端立即可用。对超量或到期的用户调它也会启用,但下一分钟的判定会再次停用;先 `/reset` 或 `/plan`。
+- `disable`:`enabled = false`、`disabledReason = "manual"`,同时断开该用户在主服务器上的连接;副服务器在下一次同步(≤ 5 秒)时把他撤下并断开。手动停用的用户不会被重置或续期自动恢复。
 
 都返回更新后的用户对象。
 
 ### POST /users/{name|id}/reset
 
-本周期用量清零:`up` / `down` 并入 `totalUp` / `totalDown` 后归零,并把用户置为启用(常用于"超量停用后补量")。不改到期、不改周期重置日。返回用户对象。
+本周期用量清零:`up` / `down` 并入 `totalUp` / `totalDown` 后归零;因超量被停用的用户(`disabledReason = "quota"`)重新启用(常用于"超量停用后补量"),手动停用或已到期的保持原状。不改到期、不改周期重置日。返回用户对象。
 
 ### POST /users/{name|id}/kick
 
@@ -178,7 +180,7 @@ X-API-Key: <令牌>
 
 ### POST /users/{name|id}/plan
 
-给已有用户套用套餐(续费 / 延期)。`/renew` 是它的别名。
+给已有用户套用套餐(续费 / 延期)。`/renew` 是它的别名。套用套餐是明确的"续费"动作:不管之前因什么原因停用,套用后都置为启用(`disabledReason` 清空)。
 
 请求体:
 
@@ -227,7 +229,7 @@ X-API-Key: <令牌>
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `name` | string | 用户名;不能为空,不能含空格与 `/ ? # &`(它可能是订阅地址的一部分),全站唯一 |
-| `enabled` | bool | 启停 |
+| `enabled` | bool | 启停;显式给 `false` 记为手动停用,之后重置 / 续期不会自动恢复 |
 | `planId` / `plan` | number / string | 套餐 id 或名称,二选一。创建时按 `new` 套用;修改时按 `mode` 套用 |
 | `mode` | string | 和套餐一起用:`renew`(默认)或 `extend`,规则见上表 |
 | `volumeGb` / `volume` | number | 配额,GB 或字节;两者都给以 `volume` 为准;0 = 不限 |
@@ -256,7 +258,7 @@ X-API-Key: <令牌>
 
 ```json
 {
-  "id": 12, "name": "alice", "enabled": true,
+  "id": 12, "name": "alice", "enabled": true, "disabledReason": "",
   "volume": 107374182400, "used": 1234567, "up": 100, "down": 1234467,
   "totalUp": 0, "totalDown": 0,
   "expiry": 1760000000, "expired": false,
@@ -276,6 +278,7 @@ X-API-Key: <令牌>
 | 字段 | 说明 |
 |---|---|
 | `id`、`name`、`enabled` | 用户 id、用户名、是否启用 |
+| `disabledReason` | 停用原因:`manual`(手动 / 显式 `enabled: false`)、`quota`(超量)、`expired`(到期);启用时为空 |
 | `volume` | 配额(字节),0 = 不限 |
 | `used` | 本周期已用 = `up + down` |
 | `up` / `down` | 本周期上行 / 下行(字节),所有服务器合计,按各服务器的流量倍率计入 |

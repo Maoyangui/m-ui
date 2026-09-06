@@ -413,7 +413,8 @@ func oldRunning(pid int, prev string) bool {
 	return os.SameFile(exe, old)
 }
 
-// httpHealthy:本机首页 2xx/3xx 即健康(证书自签也算,只看进程有没有把面板端口服务起来)。
+// httpHealthy:本机首页 2xx/3xx,且 api/health 没有明说不健康(503)。
+// api/health 只对本机开放,汇报数据面是否把库里的线路都监听起来了;老版本没有这个接口(404),只看首页。
 func httpHealthy(url string) bool {
 	if url == "" {
 		return false
@@ -424,7 +425,18 @@ func httpHealthy(url string) bool {
 		return false
 	}
 	resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 400
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return false
+	}
+	if !strings.HasSuffix(url, "/") {
+		url += "/"
+	}
+	hr, err := c.Get(url + "api/health")
+	if err != nil {
+		return true // 接口打不通不当成不健康,首页已经回答了"进程活着"
+	}
+	hr.Body.Close()
+	return hr.StatusCode != http.StatusServiceUnavailable
 }
 
 func writeStatus(path string, st Status) {

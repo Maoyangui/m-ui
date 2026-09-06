@@ -73,6 +73,11 @@ func Run(from, to, orderFile, profileTitle string, force bool) error {
 	if err != nil {
 		return fmt.Errorf("打开源库: %w", err)
 	}
+	defer func() { // 源库只读打开,用完关掉,别一直占着文件
+		if sqlDB, err := src.DB(); err == nil {
+			sqlDB.Close()
+		}
+	}()
 	dst, err := database.Open(to)
 	if err != nil {
 		return fmt.Errorf("创建目标库: %w", err)
@@ -380,6 +385,11 @@ func importUsers(src, dst *gorm.DB, report *Report, lineIds map[uint]bool) error
 		}
 		if err := dst.Create(&user).Error; err != nil {
 			return fmt.Errorf("写入用户 %q: %w", c.Name, err)
+		}
+		if !c.Enable { // gorm 的 default:true 会把 false 当零值写成 true,显式改回,否则停用的人导入后全部复活
+			if err := dst.Model(&model.User{}).Where("id = ?", user.Id).Update("enabled", false).Error; err != nil {
+				return fmt.Errorf("写入用户 %q 的启停: %w", c.Name, err)
+			}
 		}
 		report.Users++
 

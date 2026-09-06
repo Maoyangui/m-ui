@@ -36,7 +36,7 @@ function statusCell(n) {
   if (!n.enabled) return badge(t('common.disabled'));
   const s = n.status;
   if (!s) return badge(t('node.pending'), 'warn');
-  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : ''}`;
+  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : ''}`;
   return `${badge(t('common.offline'), 'danger')}<div class="sub-cell ellip" title="${esc(s.error || '')}">${esc(shortErr(s.error))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
 }
 
@@ -69,13 +69,21 @@ function syncCell(n) {
     (s.lastSeen ? ` <span class="muted small" title="${esc(push)}">${fmtRelative(s.lastSeen)}</span>` : '');
 }
 
+// 重载失败:线上还是旧配置,要在这一行里看得见
+const reloadBadge = err => err ? ` <span class="badge danger" title="${esc(err)}">${t('node.reloadFailed')}</span>` : '';
+
 function coreCell(n) {
-  if (n.isLocal) return badge(state.status.coreRunning ? t('dash.running') : t('dash.stopped'), state.status.coreRunning ? 'ok' : 'danger');
+  if (n.isLocal) {
+    const rl = state.status.reload || {};
+    return badge(state.status.coreRunning ? t('dash.running') : t('dash.stopped'), state.status.coreRunning ? 'ok' : 'danger')
+      + reloadBadge(rl.at && !rl.ok ? `${rl.op}: ${rl.error}` : '');
+  }
   const s = n.status || {};
   if (!s.ok) return '—';
   return badge(s.coreRunning ? t('dash.running') : t('dash.stopped'), s.coreRunning ? 'ok' : 'danger')
     + (s.uptime ? ` <span class="muted small">${fmtDuration(s.uptime)}</span>` : '')
-    + (s.certDays !== undefined ? ` <span class="muted small" title="${t('cert.daysLeft')}">🔒 ${s.certDays}d</span>` : '');
+    + (s.certDays !== undefined ? ` <span class="muted small" title="${t('cert.daysLeft')}">🔒 ${s.certDays}d</span>` : '')
+    + reloadBadge(s.reloadError);
 }
 
 function actionsCell(n) {

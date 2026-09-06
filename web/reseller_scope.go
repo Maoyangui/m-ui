@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/jobs"
 
 	"gorm.io/gorm"
 )
@@ -31,18 +32,8 @@ func (s *Server) scoped(r *http.Request, q *gorm.DB) *gorm.DB {
 	return q
 }
 
-// resellerUsed 代理已用流量:名下用户的全时用量之和 + 结转 - 主面板重置基线。
-// 用全时用量是关键——代理自己重置/续费/周期清零都只是把 up/down 挪进 total_*,额度不会因此回血。
-func resellerUsed(db *gorm.DB, rs model.Reseller) int64 {
-	var live int64
-	db.Model(&model.User{}).Where("reseller_id = ?", rs.Id).
-		Select("COALESCE(SUM(up + down + total_up + total_down),0)").Scan(&live)
-	used := live + rs.UsedCarried - rs.UsedBase
-	if used < 0 {
-		return 0
-	}
-	return used
-}
+// resellerUsed 代理已用流量(实现在 jobs 包,执法与面板用同一个口径)。
+func resellerUsed(db *gorm.DB, rs model.Reseller) int64 { return jobs.ResellerUsed(db, rs) }
 
 // carryUsage 删用户前把它的全时用量结转到所属代理,防止"删号洗流量"。
 func carryUsage(db *gorm.DB, u model.User) {
@@ -168,8 +159,10 @@ func (s *Server) resellerStatus(r *http.Request, rid uint) map[string]interface{
 	s.db.Model(&model.User{}).Where("reseller_id = ?", rid).Count(&userCount)
 	s.db.Model(&model.User{}).Where("reseller_id = ? AND enabled = ?", rid, true).Count(&enabledUsers)
 	used := resellerUsed(s.db, rs)
-	s.db.Model(&model.User{}).Where("reseller_id = ?", rid).
-		Select("COALESCE(SUM(up+down+total_up+total_down),0)").Scan(&total)
+	var totalUp, totalDown int64
+	s.db.Model(&model.User{}).Where("reseller_id = ?", rid).Select("COALESCE(SUM(up+total_up),0)").Scan(&totalUp)
+	s.db.Model(&model.User{}).Where("reseller_id = ?", rid).Select("COALESCE(SUM(down+total_down),0)").Scan(&totalDown)
+	total = totalUp + totalDown
 	var lines int64
 	s.db.Model(&model.ResellerLine{}).Where("reseller_id = ?", rid).Count(&lines)
 
@@ -191,8 +184,9 @@ func (s *Server) resellerStatus(r *http.Request, rid uint) map[string]interface{
 		"enabledUsers":    enabledUsers,
 		"lines":           lines,
 		"linesEnabled":    lines,
-		"trafficUp":       total, // 概览卡片用:代理名下累计
-		"trafficDown":     int64(0),
+		"trafficUp":       totalUp, // 概览卡片用:代理名下累计上行 / 下行
+		"trafficDown":     totalDown,
+		"trafficTotal":    total,
 		"onlineUsers":     len(s.onlineResellerUsers(rid)),
 		"grants":          s.resellerLineRefs(rid), // 授权的线路 × 服务器,代理面板据此画选择器
 		"nodes":           s.nodeBriefs(),
@@ -225,9 +219,8 @@ func (s *Server) sessionOf(r *http.Request) session {
 	if err != nil {
 		return session{}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.sessions[c.Value]
+	sess, _ := s.getSession(c.Value)
+	return sess
 }
 
 // randomAPIToken 外部 API 令牌:40 位十六进制随机串。

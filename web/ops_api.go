@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
@@ -15,6 +16,37 @@ import (
 )
 
 func (s *Server) warpPort() int { return s.settingInt("warpPort", 40000) }
+
+// 系统信息要跑 warp-cli / journalctl / timedatectl 并经 SOCKS5 外连一次 Cloudflare 验证出口,
+// 页面每次刷新都来一遍太重:缓存 30 秒,点"刷新"或任务跑完才重新采集。
+var (
+	opsMu     sync.Mutex
+	opsAt     time.Time
+	opsPort   int
+	opsCached ops.Info
+)
+
+func (s *Server) opsInfo(ctx context.Context, fresh bool) ops.Info {
+	port := s.warpPort()
+	opsMu.Lock()
+	if !fresh && port == opsPort && time.Since(opsAt) < 30*time.Second {
+		info := opsCached
+		opsMu.Unlock()
+		return info
+	}
+	opsMu.Unlock()
+	info := ops.Collect(ctx, port, s.run.DataDir())
+	opsMu.Lock()
+	opsAt, opsPort, opsCached = time.Now(), port, info
+	opsMu.Unlock()
+	return info
+}
+
+func invalidateOpsInfo() {
+	opsMu.Lock()
+	opsAt = time.Time{}
+	opsMu.Unlock()
+}
 
 // handleOps GET /ops:系统信息 + 任务列表 + 任务状态
 func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +63,7 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		sysctl = ops.DefaultSysctl
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"info":         ops.Collect(ctx, s.warpPort(), s.run.DataDir()),
+		"info":         s.opsInfo(ctx, r.URL.Query().Get("fresh") == "1"),
 		"tasks":        ops.Tasks,
 		"status":       s.ops.Status(),
 		"warpPort":     s.warpPort(),
@@ -99,6 +131,7 @@ func (s *Server) handleOpsSub(w http.ResponseWriter, r *http.Request) {
 		}
 		err := s.ops.Start(task, ops.Params{Port: s.warpPort(), SwapGB: req.SwapGB, NoFile: req.NoFile, Sysctl: req.Sysctl,
 			JournalMB: jm, JournalDays: jd}, func(ok bool, err error) {
+			invalidateOpsInfo() // 任务改了系统状态,下次打开页面要重新采集
 			if ok {
 				logger.Info("运维任务完成: ", task)
 				if task == "warp-enable" {

@@ -237,9 +237,10 @@ erDiagram
 | 5s | Master pushes snapshots to nodes and pulls back traffic and online IPs | `hub/` |
 | 10m | WAL checkpoint, so the live .db is always safe to copy | `runner/` |
 | 6h | Check whether a newer release exists (check only, never auto-install) | `selfupdate/` |
-| 1h | Prune time series, subscription access log and audit log, each by its own retention | `jobs/` |
+| 1h | Prune time series, subscription access log and audit log, each by its own retention; fold minute samples older than 48 h into hourly buckets | `jobs/` |
 | per setting (10m default) | Probe upstreams — every server checks only what its own lines use, results roll up to the master | `monitor/` |
-| daily | Renew certificates, send the daily report | `runner/` `monitor/` |
+| 12h | Certificate renewal check (after renewal sing-box swaps the certificate itself, no restart) | `runner/` |
+| daily | Daily report | `monitor/` |
 
 ### Code layout
 
@@ -343,7 +344,7 @@ Merge nodes from elsewhere into your subscriptions: a single share link, or a wh
 
 - Per user: quota, expiry, periodic reset (e.g. every 30 days), device limit, speed limit, remark, allowed lines and external nodes.
 - Leaked address? **Reset subscription link** (in the row's More menu and the detail drawer, reseller panel included): the address becomes a new random token, every protocol credential is regenerated and any shared link is revoked. The old address and credentials stop working on every server at once and connected devices are dropped.
-- Over quota or expired → disabled and kicked automatically; resetting traffic re-enables.
+- Over quota or expired → disabled and kicked automatically, with the reason shown in the list (quota / expired / manual); resetting traffic or renewing re-enables them, a manually disabled user only comes back when enabled by hand.
 - Plans are templates: apply on create; *renew* applies again (usage reset, expiry extended); *extend* keeps usage and only extends expiry.
 - Bulk: generate by prefix, select rows for enable / disable / extend / reset / delete, CSV export.
 - User drawer: live devices (each IP shows the line and server it is using), 24h / 7d / 30d chart, subscription links and QR, kick.
@@ -370,7 +371,8 @@ Hand part of the selling to someone else: create a reseller on the Resellers pag
 - The name clients show comes from Settings → Subscription → "Profile title" (falling back to the landing-page title, then the remark, then the username). It goes out on both `Content-Disposition` and `Profile-Title`, encoded the standard way for non-ASCII. Clients that re-read the title on every update (nextin, sing-box) pick it up on refresh; Shadowrocket and Clash Verge name a profile **when it is added** and never rename it — add it through the landing page's one-tap import (which carries the title) or re-add it.
 - Opening the link in a browser shows a landing page: usage, expiry, one-tap import for each client, QR codes, custom notice and support contact.
 - Client downloads: a small download arrow next to "Import into an app" opens a separate page with per-OS install links — iOS / iPadOS / Apple TV (Nextin, with a note on switching App Store region), Android / Android TV (Clash Meta for Android), Windows / macOS / Linux (Clash Verge Rev, plus a FlClash AppImage for Linux). Every tile carries the official direct link, a China-friendly mirror and an "all releases" link. The page holds no user data, so it can be forwarded as-is; reseller users get the same page.
-- A dead subscription link no longer means a blank 404: browsers get a short page — "Subscription unavailable, it may be out of traffic or past its expiry date" — followed by the contact details and notice that apply (reseller users see the reseller’s own, everyone else the master’s). Out of quota, expired, disabled, reseller expired or simply a wrong link all land there; proxy clients still get a plain 404.
+- A user who is out of traffic, expired or disabled (or whose reseller is depleted / expired) can still open their landing page in a browser: the reason, the next reset date and the contact details that apply are shown at the top (reseller users see the reseller’s own). Only clients are cut off — they get a 404 from that moment on and the line inbounds stop accepting them. An address that matches nobody gets a short "invalid subscription address" page in browsers and a plain 404 for clients.
+- The subscription port is rate-limited per source IP (120 requests a minute by default, setting `subRateLimit`, 429 above that), and misses are logged as one aggregated row per IP so scanners cannot flood the access log.
 - Temporary sharing: from the landing page a user can create one random link to lend their subscription, one per user. The link carries the same nodes but a **separate set of credentials** registered under the owner's name, so traffic, devices, speed limits and expiry all count against the owner. Cancelling (or regenerating) pulls those credentials immediately and drops the connections, so nodes already imported by the borrower stop working too. Shared links serve the subscription only, never the landing page. Settings → Subscription page turns the whole thing off.
 - Node addresses default to the **server IP** with the domain only as SNI, so a poisoned local DNS on the client cannot break connectivity; switch to domain in Settings if you prefer.
 - With several servers each line appears once per server, suffixed with the server name; servers with a traffic ratio other than 1 get a tag such as `x2`.
@@ -422,7 +424,7 @@ Subscription access log, core log (data plane + panel) and audit log. Logging ca
 
 ### Settings
 
-**Time zone** (default Asia/Shanghai; every time in the panel uses it), listen address · port · path · certificate for the panel, the subscription server and the reseller panel, subscription display options, landing-page text, Telegram notification toggles, upstream check parameters, data-plane stats granularity. Panel and subscription path changes apply immediately; port, listen address and certificate path changes need a restart (button in the page header). The reseller panel can be switched off entirely (`resellerEnabled`) and never starts on nodes.
+**Time zone** (default Asia/Shanghai; every time in the panel uses it), listen address · port · path · certificate for the panel, the subscription server and the reseller panel, subscription display options, landing-page text, Telegram notification toggles, upstream check parameters, data-plane stats granularity, **private-network access** (off by default: the data plane rejects user traffic to 127.0.0.0/8, 10/8, 172.16/12, 192.168/16 and the like; turn it on only if users are meant to reach your internal services). Panel and subscription path changes apply immediately; port, listen address and certificate path changes need a restart (button in the page header). The reseller panel can be switched off entirely (`resellerEnabled`) and never starts on nodes.
 
 ## Command line
 
@@ -431,7 +433,7 @@ m-ui                                         numeric menu (below)
 m-ui run -db /etc/m-ui/m-ui.db               start (used by systemd)
 m-ui info -db <db>                           print panel URL, path and account status
 m-ui set -db <db> key=value ...              change settings, e.g. webPort=3053 nodeMode=true
-m-ui passwd -db <db> [-password NEW]         reset the admin password (also disables 2FA)
+m-ui passwd -db <db> [-password NEW]         reset the existing admin's password, whatever the username is (also disables 2FA)
 m-ui backup -db <db> -out backup.zip         create a backup
 m-ui restore -db <db> -from backup.zip       restore (service stopped)
 m-ui import -from old-panel.db -to <db>      import an old panel database
@@ -439,6 +441,8 @@ m-ui selfsign -hosts domain,ip               generate a self-signed certificate
 m-ui render -db <db>                         print and validate the sing-box config
 m-ui version
 ```
+
+Without `-db` the path comes from the systemd unit (default `/etc/m-ui/m-ui.db`); if the database does not exist the command fails instead of silently creating an empty one and backing up or resetting that.
 
 Run `m-ui` without arguments for the menu (Chinese):
 
@@ -476,7 +480,7 @@ Existing names only get usage / quota / expiry / enabled updated; new users are 
 
 **Can I run without a domain?** Yes. Generate a self-signed cert with the IP; subscriptions carry "allow insecure". Issue a real cert later and users just refresh.
 
-**Changed the port / listen address and nothing happened?** Those need a restart (button in the Settings header, or menu item 2). Certificate renewal does not. Ports are validated on save (1-65535, and the three services cannot share one), so a typo fails immediately instead of leaving the panel unable to start after the next restart.
+**Changed the port / listen address and nothing happened?** Those need a restart (button in the Settings header, or menu item 2). Certificate renewal does not — not even for the data plane: sing-box watches the certificate files and swaps them without dropping connections. Ports are validated on save (1-65535, and the three services cannot share one), so a typo fails immediately instead of leaving the panel unable to start after the next restart.
 
 **How should paths be written?** `app`, `/app`, `app/`, `//app//` and values with stray spaces all normalize to `/app/`; use `/` to serve the panel at the root. A URL missing the trailing slash (`:2053/app`) redirects to the canonical one, and the subscription path behaves the same way.
 

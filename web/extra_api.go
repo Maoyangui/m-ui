@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -163,65 +162,18 @@ func (s *Server) handleStatsTop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rows)
 }
 
-// ---- 最近入站连接(从 sing-box 日志提取,客户端"连不上"时用来判断包有没有到服务器)----
-
-var reInboundConn = regexp.MustCompile(`inbound/(\w+)\[([^\]]+)\]\s*inbound connection from ([0-9a-fA-F.:\[\]]+?)(?::\d+)?\s*$`)
-
-// 认证成功后紧跟的一条日志带用户名:inbound/hysteria2[香港1] [alice] inbound connection to example.com:443
-var reInboundUser = regexp.MustCompile(`inbound/\w+\[([^\]]+)\]\s*\[([^\]]+)\]\s*inbound connection to`)
-var reLogTime = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})`)
-
-// logTime 把日志行首的时间按本机时区解析成 unix 秒:各机时区可能不同,统一成绝对时间,面板才能按面板时区显示。
-func logTime(line string) int64 {
-	m := reLogTime.FindStringSubmatch(line)
-	if m == nil {
-		return 0
-	}
-	t, err := time.ParseInLocation("2006/01/02 15:04:05", m[1], time.Local)
-	if err != nil {
-		return 0
-	}
-	return t.Unix()
-}
+// ---- 最近入站连接(客户端"连不上"时用来判断包有没有到服务器)----
+// 数据面的连接跟踪器在每次入站连接时记一笔(源 IP × 线路,带认证到的用户),这里直接取;
+// 以前是每 5 秒拿正则扫 3000 行日志,副机每次上报也扫一遍。
 
 type recentConn = hub.RecentConn
 
-// recentConns 从本机数据面日志聚合最近入站连接(最近的在前,最多 limit 条)。
+// recentConns 本机最近入站连接(最近的在前,最多 limit 条)。
 func (s *Server) recentConns(limit int) []recentConn {
-	lines := logger.GetLogs(3000, "info")
-	agg := map[string]*recentConn{}
-	var order []string
-	lastKeyOfLine := map[string]string{} // 线路 → 最近一条"来自 IP"的键,用来把随后那条带 [用户] 的日志归到它名下
-	// GetLogs 返回倒序(新的在前),按时间正序遍历才能把 from → [用户] to 这一对接上
-	for i := len(lines) - 1; i >= 0; i-- {
-		l := strings.TrimSpace(lines[i])
-		if m := reInboundConn.FindStringSubmatch(l); m != nil {
-			ip := strings.Trim(m[3], "[]")
-			key := ip + "|" + m[2]
-			c := agg[key]
-			if c == nil {
-				c = &recentConn{IP: ip, Line: m[2], Protocol: m[1]}
-				agg[key] = c
-				order = append(order, key)
-			}
-			c.Count++
-			if ts := logTime(l); ts > 0 {
-				c.Ts = ts
-			}
-			lastKeyOfLine[m[2]] = key
-			continue
-		}
-		if m := reInboundUser.FindStringSubmatch(l); m != nil {
-			if c := agg[lastKeyOfLine[m[1]]]; c != nil {
-				c.User = m[2]
-			}
-		}
+	if s.run == nil {
+		return nil
 	}
-	out := make([]recentConn, 0, len(agg))
-	for i := len(order) - 1; i >= 0 && len(out) < limit; i-- { // 最近的在前
-		out = append(out, *agg[order[i]])
-	}
-	return out
+	return s.run.RecentConns(limit)
 }
 
 // handleRecentConns 本机 + 各副机最近入站连接;多服务器时带服务器名,按最近时间排序。
@@ -260,8 +212,8 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		on := in.Enabled != "false"
 		s.run.SetSetting("logEnabled", strconv.FormatBool(on))
 		logger.SetEnabled(on)
+		s.run.SetLogEnabled(on) // 数据面日志级别运行时调整,不重启、不断线
 		s.audit(r, "logs", map[bool]string{true: "enable", false: "disable"}[on], nil)
-		s.reloadAll("日志开关") // 数据面 log.disabled 随之变化
 		writeJSON(w, http.StatusOK, map[string]bool{"enabled": on})
 		return
 	case http.MethodDelete:
@@ -343,11 +295,7 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 		if r.Method != http.MethodPost {
 			break
 		}
-		err := s.db.Model(&model.User{}).Where("id = ?", u.Id).Updates(map[string]interface{}{
-			"total_up": gorm.Expr("total_up + up"), "total_down": gorm.Expr("total_down + down"),
-			"up": 0, "down": 0, "enabled": true,
-		}).Error
-		if err != nil {
+		if err := s.resetUsage(s.db, u.Id); err != nil { // 超量被停的自动恢复;手动停的不动
 			badRequest(w, err)
 			return true
 		}

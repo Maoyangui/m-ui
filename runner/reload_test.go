@@ -20,8 +20,13 @@ func TestReloadUpstreamsKeepsBoxRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close(r.db)
+	// 上游只有被本机线路用到才会渲染进数据面:先建上游和一条用它的线路,再启动
+	up := model.Upstream{Name: "hot", Type: "socks", Options: []byte(`{"server":"127.0.0.1","server_port":1}`)}
+	r.db.Create(&up)
+	r.db.Create(&model.Line{Name: "via-hot", Protocol: "shadowsocks", Port: freePort(t), UpstreamId: up.Id, Enabled: true,
+		Options: []byte(`{"method":"aes-256-gcm","password":"test-password"}`)})
 	if err := r.Start(); err != nil {
-		t.Fatalf("空配置启动失败: %v", err)
+		t.Fatalf("启动失败: %v", err)
 	}
 	defer r.Stop()
 	box0 := r.core.GetInstance()
@@ -31,18 +36,18 @@ func TestReloadUpstreamsKeepsBoxRunning(t *testing.T) {
 	if _, ok := r.applied["direct"]; !ok {
 		t.Fatalf("启动后应记录内置出站: %v", r.applied)
 	}
+	if _, ok := r.applied["hot"]; !ok {
+		t.Fatalf("线路用到的上游应已渲染: %v", r.applied)
+	}
 
-	// 新增上游 → 热添加
-	up := model.Upstream{Name: "hot", Type: "socks", Options: []byte(`{"server":"127.0.0.1","server_port":1}`)}
-	r.db.Create(&up)
+	// 没有线路用的上游不进数据面
+	spare := model.Upstream{Name: "spare", Type: "socks", Options: []byte(`{"server":"127.0.0.1","server_port":3}`)}
+	r.db.Create(&spare)
 	if err := r.ReloadUpstreams(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := r.applied["hot"]; !ok {
-		t.Fatal("热添加后应记录出站 hot")
-	}
-	if _, ok := box0.Outbound().Outbound("hot"); !ok {
-		t.Fatal("运行中的数据面应有出站 hot")
+	if _, ok := r.applied["spare"]; ok {
+		t.Fatal("没有线路用的上游不该渲染进数据面")
 	}
 	if r.core.GetInstance() != box0 {
 		t.Fatal("热更新不应重启数据面")
@@ -61,19 +66,17 @@ func TestReloadUpstreamsKeepsBoxRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 删除上游 → 热移除
-	r.db.Delete(&model.Upstream{}, up.Id)
+	// 上游改名:路由规则还指着旧标签,必须整体重载(不能只热换出站,否则线路找不到出口)
+	r.db.Model(&model.Upstream{}).Where("id = ?", up.Id).Update("name", "hot2")
 	if err := r.ReloadUpstreams(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := r.applied["hot"]; ok {
-		t.Fatal("删除后不应再有出站 hot")
+	if r.core.GetInstance() == box0 {
+		t.Fatal("上游改名后应整体重载数据面")
 	}
-	if _, ok := box0.Outbound().Outbound("hot"); ok {
-		t.Fatal("运行中的数据面不应再有出站 hot")
-	}
-	if r.core.GetInstance() != box0 {
-		t.Fatal("全程不应重启数据面")
+	box0 = r.core.GetInstance()
+	if _, ok := r.applied["hot2"]; !ok {
+		t.Fatalf("改名后应记录新出站: %v", r.applied)
 	}
 
 	// 配置未变化的全量重载不应重启;强制重载才重启

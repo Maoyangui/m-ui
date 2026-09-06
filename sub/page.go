@@ -124,7 +124,7 @@ func stateOf(u model.User, rs *model.Reseller, now int64) string {
 		return "exhausted"
 	case !u.Enabled:
 		return "disabled"
-	case rs != nil && (!rs.Enabled || (rs.Expiry > 0 && rs.Expiry < now)):
+	case rs != nil && (!rs.Enabled || rs.Depleted || (rs.Expiry > 0 && rs.Expiry < now)):
 		return "disabled"
 	}
 	return "active"

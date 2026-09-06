@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
 
@@ -62,6 +63,17 @@ func Open(dbPath string) (*gorm.DB, error) {
 	// 套餐从"全局唯一名"改成"按归属唯一",老库里那个唯一索引要去掉
 	db.Exec("UPDATE plans SET reseller_id = 0 WHERE reseller_id IS NULL")
 	db.Exec("DROP INDEX IF EXISTS idx_plans_name")
+	// 停用原因是后加的列:老库里已停用的用户按当时的状态推断一次(幂等:有原因的行不再动)。
+	// 超量记 quota、到期记 expired、所属代理额度已用尽的记 quota(旧版是把他名下用户整体停掉的),其余当手动。
+	db.Exec("UPDATE users SET disabled_reason = '' WHERE disabled_reason IS NULL")
+	db.Exec("UPDATE resellers SET depleted = 0 WHERE depleted IS NULL")
+	now := time.Now().Unix()
+	db.Exec("UPDATE users SET disabled_reason = 'quota' WHERE enabled = 0 AND disabled_reason = '' AND volume > 0 AND up + down >= volume")
+	db.Exec("UPDATE users SET disabled_reason = 'expired' WHERE enabled = 0 AND disabled_reason = '' AND expiry > 0 AND expiry < ?", now)
+	db.Exec(`UPDATE users SET disabled_reason = 'quota' WHERE enabled = 0 AND disabled_reason = '' AND reseller_id IN (
+		SELECT r.id FROM resellers r WHERE r.volume > 0 AND
+		(SELECT COALESCE(SUM(u.up + u.down + u.total_up + u.total_down), 0) FROM users u WHERE u.reseller_id = r.id) + r.used_carried - r.used_base >= r.volume)`)
+	db.Exec("UPDATE users SET disabled_reason = 'manual' WHERE enabled = 0 AND disabled_reason = ''")
 	return db, nil
 }
 

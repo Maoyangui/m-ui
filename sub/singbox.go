@@ -3,10 +3,41 @@ package sub
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/upstream"
 )
+
+// httpLink 把本站 http / https 线路的链接(http://user:pass@host:port#name)转成 sing-box http 出站。
+func httpLink(raw string) *upstream.Parsed {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return nil
+	}
+	port := 80
+	if u.Scheme == "https" {
+		port = 443
+	}
+	if p := u.Port(); p != "" {
+		if n, err := strconv.Atoi(p); err == nil {
+			port = n
+		}
+	}
+	opts := map[string]interface{}{"server": u.Hostname(), "server_port": port}
+	if u.User != nil {
+		opts["username"] = u.User.Username()
+		if pw, ok := u.User.Password(); ok {
+			opts["password"] = pw
+		}
+	}
+	if u.Scheme == "https" {
+		opts["tls"] = map[string]interface{}{"enabled": true, "server_name": u.Hostname()}
+	}
+	return &upstream.Parsed{Type: "http", Name: u.Fragment, Options: opts}
+}
 
 // BuildSingBoxSub 生成 sing-box 客户端配置(JSON,?format=json):
 // SFA(Android)、SFI(iOS)、sing-box 桌面版都只认这种"远程配置",链接列表和 clash YAML 它们导不进去。
@@ -23,7 +54,9 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 	for _, l := range links {
 		p, err := upstream.ParseLink(l)
 		if err != nil {
-			continue // http 等 sing-box 客户端不常用的类型跳过
+			if p = httpLink(l); p == nil {
+				continue // 认不出的链接跳过
+			}
 		}
 		tag := p.Name
 		if tag == "" {
@@ -42,7 +75,14 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 		tags = append(tags, tag)
 	}
 	if len(nodes) == 0 {
-		return Result{}, fmt.Errorf("没有可用节点")
+		// 一个节点都没有(线路还没分配):给一份能加载的配置,客户端不会因为 500 把整个订阅标成坏的
+		cfg := map[string]interface{}{
+			"log":       map[string]interface{}{"level": "info"},
+			"outbounds": []map[string]interface{}{{"type": "direct", "tag": "direct"}},
+			"route":     map[string]interface{}{"final": "direct"},
+		}
+		b, _ := json.MarshalIndent(cfg, "", "  ")
+		return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
 	}
 
 	outbounds := []map[string]interface{}{

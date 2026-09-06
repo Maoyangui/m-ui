@@ -76,7 +76,7 @@ func (s *Server) handlePlanItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.db.Model(&model.Plan{}).Where("id = ?", id).Select(
-			"name", "volume_gb", "days", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "line_ids", "desc", "sort",
+			"name", "volume_gb", "days", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "line_ids", "line_nodes", "desc", "sort",
 		).Updates(p).Error; err != nil {
 			badRequest(w, err)
 			return
@@ -170,7 +170,7 @@ func applyPlan(u *model.User, p model.Plan, mode string, now int64) []uint {
 	} else {
 		u.NextReset = 0
 	}
-	u.Enabled = true
+	u.Enabled, u.DisabledReason = true, "" // 套餐是明确的商业动作(开号 / 续费 / 延期):一律启用,手动停用也解除
 
 	if len(p.LineIds) > 0 {
 		var ids []uint
@@ -244,9 +244,12 @@ func (s *Server) applyUserPlan(u *model.User, p model.Plan, mode string) error {
 	refs := applyPlanRefs(u, p, mode, time.Now().Unix())
 	if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).Select(
 		"volume", "expiry", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "next_reset",
-		"total_up", "total_down", "up", "down", "enabled",
+		"total_up", "total_down", "up", "down", "enabled", "disabled_reason",
 	).Updates(*u).Error; err != nil {
 		return err
+	}
+	if mode != "extend" {
+		s.forgetQuotaAlert(u.Name) // 用量清零了,再到阈值要能再提醒
 	}
 	if refs != nil {
 		s.setUserLineRefs(u.Id, refs)
@@ -312,7 +315,8 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 	var out []created
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		idx := req.StartIndex
-		for len(out) < req.Count {
+		// 名字撞了就跳过再试;试的次数封顶,免得序号段全被占时在事务里空转
+		for attempts := 0; len(out) < req.Count && attempts < req.Count*3+10; attempts++ {
 			var name string
 			if req.NameMode == "seq" {
 				name = fmt.Sprintf("%s%03d", req.Prefix, idx)
@@ -323,9 +327,6 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 			var exists int64
 			tx.Model(&model.User{}).Where("name = ?", name).Count(&exists)
 			if exists > 0 {
-				if req.NameMode != "seq" {
-					continue
-				}
 				continue
 			}
 			u := model.User{Name: name, Enabled: true, Remark: req.Remark, CreatedAt: now}
@@ -348,9 +349,6 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			out = append(out, created{Name: name, Link: s.subLinks(u)["clash"]})
-			if idx-req.StartIndex > req.Count*3+10 { // 序号模式下冲突过多时终止
-				break
-			}
 		}
 		return nil
 	})
@@ -399,8 +397,12 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 	var affected int64
 	switch req.Action {
 	case "enable", "disable":
-		res := s.db.Model(&model.User{}).Where("id IN ?", req.Ids).Update("enabled", req.Action == "enable")
-		affected = res.RowsAffected
+		n, err := s.setEnabled(s.db, req.Ids, req.Action == "enable")
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		affected = n
 	case "delete":
 		var users []model.User
 		s.db.Where("id IN ?", req.Ids).Find(&users)
@@ -412,10 +414,13 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 			affected++
 		}
 	case "reset":
-		res := s.db.Model(&model.User{}).Where("id IN ?", req.Ids).Updates(map[string]interface{}{
-			"total_up": gorm.Expr("total_up + up"), "total_down": gorm.Expr("total_down + down"), "up": 0, "down": 0, "enabled": true,
-		})
-		affected = res.RowsAffected
+		for _, id := range req.Ids {
+			if err := s.resetUsage(s.db, id); err != nil {
+				badRequest(w, err)
+				return
+			}
+			affected++
+		}
 	case "extend":
 		if req.Days <= 0 {
 			badRequest(w, errors.New("延期天数需大于 0"))
@@ -424,11 +429,10 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		var users []model.User
 		s.db.Where("id IN ?", req.Ids).Find(&users)
 		for _, u := range users {
-			base := now
-			if u.Expiry > now {
-				base = u.Expiry
+			if err := s.extendExpiry(s.db, u, req.Days, now); err != nil {
+				badRequest(w, err)
+				return
 			}
-			s.db.Model(&model.User{}).Where("id = ?", u.Id).Updates(map[string]interface{}{"expiry": base + int64(req.Days)*86400, "enabled": true})
 			affected++
 		}
 	case "plan":
@@ -451,13 +455,9 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for _, u := range users {
-			refs := applyPlanRefs(&u, p, req.Mode, now)
-			s.db.Model(&model.User{}).Where("id = ?", u.Id).Select(
-				"volume", "expiry", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "next_reset",
-				"total_up", "total_down", "up", "down", "enabled",
-			).Updates(u)
-			if refs != nil {
-				s.setUserLineRefs(u.Id, refs)
+			if err := s.applyUserPlan(&u, p, req.Mode); err != nil {
+				badRequest(w, err)
+				return
 			}
 			affected++
 		}

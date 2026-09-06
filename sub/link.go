@@ -43,6 +43,7 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 		ServerPort int    `json:"server_port"`
 		Remark     string `json:"remark"`
 		SNI        string `json:"sni"`
+		NodeId     uint   `json:"node_id"` // 可选:这条地址属于哪台服务器,按服务器分配 / 收窄时据此过滤;0 = 不属于任何一台,总是给
 	}
 	if len(line.Addrs) > 0 {
 		_ = json.Unmarshal(line.Addrs, &custom)
@@ -51,6 +52,14 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 	if len(custom) > 0 {
 		out := make([]addr, 0, len(custom))
 		for _, c := range custom {
+			if c.NodeId != 0 {
+				if !render.LineOnNode(line, c.NodeId) {
+					continue // 线路没部署在那台服务器上
+				}
+				if len(allowed) > 0 && !allowed[c.NodeId] {
+					continue // 用户在这条线路上只拿了别的服务器
+				}
+			}
 			port := c.ServerPort
 			if port == 0 {
 				port = line.Port
@@ -149,7 +158,13 @@ func hysteria2URI(line model.Line, user model.User, a addr, remark string) strin
 	if ph := portHopping(line); ph != "" {
 		q += "&mport=" + ph // 端口跳跃:Shadowrocket/NekoBox/sing-box 系客户端识别 mport
 	}
-	return withFragment(fmt.Sprintf("hysteria2://%s@%s?%s", password, hostPort(a.server, a.port), q), remark)
+	return withFragment(fmt.Sprintf("hysteria2://%s@%s?%s", escapeUserinfo(password), hostPort(a.server, a.port), q), remark)
+}
+
+// escapeUserinfo 按 URL userinfo 规则转义口令:旧面板导入的密码可能带 @ / ? #,不转义会把链接切坏。
+// 字母数字原样不动,所以既有的黄金测试(与旧面板字节级一致)不受影响。
+func escapeUserinfo(s string) string {
+	return url.User(s).String()
 }
 
 // portHopping 返回线路的端口跳跃范围("20000-30000"),未开启为空。
@@ -173,7 +188,7 @@ func anytlsURI(user model.User, a addr, remark string) string {
 	if a.insecure {
 		q += "&insecure=1"
 	}
-	return withFragment(fmt.Sprintf("anytls://%s@%s?%s", password, hostPort(a.server, a.port), q), remark)
+	return withFragment(fmt.Sprintf("anytls://%s@%s?%s", escapeUserinfo(password), hostPort(a.server, a.port), q), remark)
 }
 
 // ss://base64(method:password)@host:port#remark  (SIP002,备注原样)

@@ -2,9 +2,8 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"sync"
-
-	"github.com/Maoyangui/m-ui/logger"
 
 	sb "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
@@ -45,6 +44,7 @@ func currentFactory() log.Factory {
 }
 
 type Core struct {
+	mu        sync.RWMutex // isRunning / instance 会被 HTTP 处理、定时任务、重载协程同时读写
 	isRunning bool
 	instance  *Box
 }
@@ -63,6 +63,8 @@ func (c *Core) GetCtx() context.Context {
 }
 
 func (c *Core) GetInstance() *Box {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.instance
 }
 
@@ -70,10 +72,12 @@ func (c *Core) Start(sbConfig []byte) error {
 	var opt option.Options
 	err := opt.UnmarshalJSONContext(globalCtx, sbConfig)
 	if err != nil {
-		logger.Error("Unmarshal config err:", err.Error())
+		// 以前只打日志就继续用一份空配置起数据面:零入站却显示"运行中",线路全停而面板毫无察觉。
+		// 解析不过就是起不来,交给调用方回滚或报错。
+		return fmt.Errorf("解析 sing-box 配置: %w", err)
 	}
 
-	c.instance, err = NewBox(Options{
+	box, err := NewBox(Options{
 		Context: globalCtx,
 		Options: opt,
 	})
@@ -81,10 +85,8 @@ func (c *Core) Start(sbConfig []byte) error {
 		return err
 	}
 
-	err = c.instance.Start()
-	if err != nil {
-		_ = c.instance.Close()
-		c.instance = nil
+	if err = box.Start(); err != nil {
+		_ = box.Close()
 		return err
 	}
 
@@ -95,20 +97,41 @@ func (c *Core) Start(sbConfig []byte) error {
 	endpoint_manager = service.FromContext[adapter.EndpointManager](globalCtx)
 	router = service.FromContext[adapter.Router](globalCtx)
 
+	c.mu.Lock()
+	c.instance = box
 	c.isRunning = true
+	c.mu.Unlock()
 	return nil
 }
 
 func (c *Core) Stop() error {
+	c.mu.Lock()
 	c.isRunning = false
-	if c.instance == nil {
+	box := c.instance
+	c.instance = nil
+	c.mu.Unlock()
+	if box == nil {
 		return nil
 	}
-	err := c.instance.Close()
-	c.instance = nil
-	return err
+	return box.Close()
 }
 
 func (c *Core) IsRunning() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.isRunning
+}
+
+// SetLogEnabled 运行时调整数据面日志级别:关 = 只留 panic 级(什么都不会打),开 = info。
+// 配置文本里的日志段保持不变,这样开关日志不会因"配置变了"而触发全量重启。
+func (c *Core) SetLogEnabled(on bool) {
+	box := c.GetInstance()
+	if box == nil || box.logFactory == nil {
+		return
+	}
+	if on {
+		box.logFactory.SetLevel(log.LevelInfo)
+	} else {
+		box.logFactory.SetLevel(log.LevelPanic)
+	}
 }

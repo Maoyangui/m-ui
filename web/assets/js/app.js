@@ -59,7 +59,7 @@ function resetState() {
 export async function load(...what) {
   const all = what.length === 0;
   const jobs = [];
-  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); }));
+  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); reloadNotice(); }));
   if (all || what.includes('settings')) jobs.push(get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
   if (all || what.includes('lines')) jobs.push(get('lines').then(l => { state.lines = l; }));
   if (!isReseller() && (all || what.includes('upstreams'))) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
@@ -247,6 +247,31 @@ function upgradeNotice() {
     await post('update/ack').catch(() => {});
     if (state.status) delete state.status.upgrade;
     bar.remove();
+  });
+}
+
+// 最近一次数据面重载失败:保存早已返回"成功",线上其实还是旧配置。常驻在页面顶部,直到下一次重载成功。
+function reloadNotice() {
+  const rl = state.status && state.status.reload;
+  let bar = document.getElementById('reload-bar');
+  if (!rl || rl.ok || isReseller()) { if (bar) bar.remove(); return; }
+  const text = t('alert.reloadFailed', { op: rl.op || '', err: rl.error || '' });
+  if (bar && bar.dataset.err === text) return;
+  const main = document.querySelector('.main'), page = document.getElementById('page');
+  if (!main || !page) return;
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'reload-bar';
+    bar.className = 'alert-bar warn';
+    main.insertBefore(bar, page);
+  }
+  bar.dataset.err = text;
+  bar.innerHTML = `<span><b>${esc(text)}</b> ${esc(t('alert.reloadHint'))}</span><button class="btn sm" id="reload-retry">${esc(t('alert.retryReload'))}</button>`;
+  bar.querySelector('#reload-retry').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try { await post('reload', undefined, LONG); toast(t('dash.reloaded'), 'ok'); }
+    catch (err) { toast(err.message, 'err'); }
+    finally { await load('status').catch(() => {}); }
   });
 }
 

@@ -53,9 +53,9 @@ func TestExpiredAndExhaustedStates(t *testing.T) {
 	if strings.Contains(body, `class="buylink"`) {
 		t.Fatal("不可用时不该再出现右上角的小选购按钮(状态卡里已是主按钮)")
 	}
-	// 到期但没被停用:客户端行为和以前一样,面板说了算
-	if c := doReq(s, "GET", "/sub/alice?format=clash", "clash-verge/2.0"); c.Code != 200 {
-		t.Fatalf("到期未停用的用户,客户端应仍拿到订阅,实际 %d", c.Code)
+	// 到期就立即不给客户端订阅(不等一分钟一次的执法),落地页照常
+	if c := doReq(s, "GET", "/sub/alice?format=clash", "clash-verge/2.0"); c.Code != 404 {
+		t.Fatalf("到期用户的客户端应拿到 404,实际 %d", c.Code)
 	}
 
 	db.Model(&model.User{}).Where("name = ?", "alice").Updates(map[string]interface{}{"expiry": 0, "volume": 1000, "up": 600, "down": 500, "auto_reset": true, "next_reset": time.Now().Unix() + 86400})

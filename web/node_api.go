@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/Maoyangui/m-ui/database/model"
+
+	"gorm.io/gorm"
 )
 
 // ---- 主机端:入口服务器管理 ----
@@ -181,13 +183,25 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, errors.New("不能删除本机"))
 			return
 		}
-		disabled := s.detachLinesFromNode(id) // 只部署在这台机器上的线路会被停用,不留悬空引用
-		s.db.Delete(&model.Node{}, id)
-		s.db.Where("node_id = ?", id).Delete(&model.TrafficCursor{})
-		// 用户 / 代理"只要这台机器上的入口"的收窄行也要清掉:留着的话,这些人这条线路上
-		// 一台机器都匹配不到,订阅里会悄无声息地少节点。清掉之后按"没有收窄 = 全部服务器"处理。
-		s.db.Where("node_id = ?", id).Delete(&model.UserLineNode{})
-		s.db.Where("node_id = ?", id).Delete(&model.ResellerLineNode{})
+		var disabled []string
+		err := s.db.Transaction(func(tx *gorm.DB) error { // 服务器和引用它的一切一起删
+			disabled = s.detachLinesFromNodeTx(tx, id) // 只部署在这台机器上的线路会被停用,不留悬空引用
+			if err := tx.Delete(&model.Node{}, id).Error; err != nil {
+				return err
+			}
+			// 用户 / 代理"只要这台机器上的入口"的收窄行也要清掉:留着的话,这些人这条线路上
+			// 一台机器都匹配不到,订阅里会悄无声息地少节点。清掉之后按"没有收窄 = 全部服务器"处理。
+			for _, t := range []interface{}{&model.TrafficCursor{}, &model.UserLineNode{}, &model.ResellerLineNode{}} {
+				if err := tx.Where("node_id = ?", id).Delete(t).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
 		s.audit(r, "node", "delete", node.Name)
 		if len(disabled) > 0 {
 			s.reloadAll("删除服务器 " + node.Name)
@@ -202,8 +216,12 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 // 摘完没有服务器可去的线路会被停用(空列表在渲染时等于"所有服务器",
 // 直接留空会让线路悄悄跑到全部机器上,不是管理员的本意),返回被停用的线路名。
 func (s *Server) detachLinesFromNode(nodeID uint) []string {
+	return s.detachLinesFromNodeTx(s.db, nodeID)
+}
+
+func (s *Server) detachLinesFromNodeTx(db *gorm.DB, nodeID uint) []string {
 	var lines []model.Line
-	s.db.Where("node_ids IS NOT NULL AND node_ids <> ''").Find(&lines)
+	db.Where("node_ids IS NOT NULL AND node_ids <> ''").Find(&lines)
 	var disabled []string
 	for _, l := range lines {
 		var ids []uint
@@ -228,7 +246,7 @@ func (s *Server) detachLinesFromNode(nodeID uint) []string {
 			b, _ := json.Marshal(kept)
 			upd["node_ids"] = json.RawMessage(b)
 		}
-		s.db.Model(&model.Line{}).Where("id = ?", l.Id).Updates(upd)
+		db.Model(&model.Line{}).Where("id = ?", l.Id).Updates(upd)
 	}
 	return disabled
 }

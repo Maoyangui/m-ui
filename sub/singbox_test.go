@@ -22,7 +22,7 @@ func TestSingBoxSubValidates(t *testing.T) {
 	}
 	opt := Options{Entries: hkEntry, External: []ExtItem{{Name: "ext", Links: []string{
 		"hysteria2://secret@34.81.174.123:443?sni=aron.joinvip.vip#%E5%8F%B0%E6%B9%BEwarp1",
-		"http://user:pw@1.2.3.4:8080#skipped", // sing-box 订阅不收 http 代理,应被跳过而不是报错
+		"http://user:pw@1.2.3.4:8080#plainhttp", // http 链接也转成 http 出站(本站 http/https 线路同样走这条路)
 	}}}}
 	res, err := BuildSingBoxSub(fullUser(), lines, opt)
 	if err != nil {
@@ -50,8 +50,8 @@ func TestSingBoxSubValidates(t *testing.T) {
 			t.Fatalf("缺少 %s 出站: %v", want, types)
 		}
 	}
-	if types["hysteria2"] != 2 || types["http"] != 0 {
-		t.Fatalf("外部节点应并入(hysteria2×2)、http 应跳过: %v", types)
+	if types["hysteria2"] != 2 || types["http"] != 1 {
+		t.Fatalf("外部节点应并入(hysteria2×2、http×1): %v", types)
 	}
 	if !tags["proxy"] || !tags["auto"] || !tags["台湾warp1"] {
 		t.Fatalf("分组或外部节点 tag 缺失: %v", tags)
@@ -76,8 +76,16 @@ func TestSingBoxSubValidates(t *testing.T) {
 	}
 }
 
+// 一个节点都没有:给一份只有直连的合法配置,而不是 500(客户端会把 500 当成订阅坏了)
 func TestSingBoxSubNoNodes(t *testing.T) {
-	if _, err := BuildSingBoxSub(fullUser(), nil, Options{Entries: hkEntry}); err == nil {
-		t.Fatal("没有节点应报错")
+	res, err := BuildSingBoxSub(fullUser(), nil, Options{Entries: hkEntry})
+	if err != nil {
+		t.Fatalf("没有节点不该报错: %v", err)
+	}
+	if err := core.ValidateConfig([]byte(res.Body)); err != nil {
+		t.Fatalf("空配置也要能被 sing-box 解析: %v\n%s", err, res.Body)
+	}
+	if strings.Contains(res.Body, "\"proxy\"") {
+		t.Fatalf("没有节点时不该有选择组: %s", res.Body)
 	}
 }

@@ -93,6 +93,7 @@ func NewLimiter() *Limiter {
 func (l *Limiter) SetLimits(limits map[string]UserLimitSpec) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	old := l.limits
 	l.limits = map[string]userLimit{}
 	l.userGroup = map[string]string{}
 	l.groupUsers = map[string][]string{}
@@ -107,9 +108,18 @@ func (l *Limiter) SetLimits(limits map[string]UserLimitSpec) {
 			l.groupUsers[s.Group] = append(l.groupUsers[s.Group], name)
 		}
 	}
-	// 丢弃已不存在或参数变化的桶,下次取用时按新值重建
-	l.up = map[string]*rate.Limiter{}
-	l.down = map[string]*rate.Limiter{}
+	// 桶只在参数变了或用户没了才丢:每次热更新用户(主机推快照、代理改了个备注)都清桶的话,
+	// 所有人的限速一次次回到满桶,等于没限
+	for name := range l.up {
+		if n, ok := l.limits[name]; !ok || n.upBps != old[name].upBps {
+			delete(l.up, name)
+		}
+	}
+	for name := range l.down {
+		if n, ok := l.limits[name]; !ok || n.downBps != old[name].downBps {
+			delete(l.down, name)
+		}
+	}
 }
 
 // UserLimitSpec 是 SetLimits 的入参(与 model.User 解耦,便于数据面独立测试)。
@@ -131,12 +141,21 @@ type GroupLimitSpec struct {
 func (l *Limiter) SetGroups(groups map[string]GroupLimitSpec) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	old := l.groups
 	l.groups = map[string]groupLimit{}
 	for g, s := range groups {
 		l.groups[g] = groupLimit{upBps: int64(s.UpMbps) * 125000, downBps: int64(s.DownMbps) * 125000, deviceLimit: s.DeviceLimit}
 	}
-	l.gup = map[string]*rate.Limiter{}
-	l.gdown = map[string]*rate.Limiter{}
+	for g := range l.gup {
+		if n, ok := l.groups[g]; !ok || n.upBps != old[g].upBps {
+			delete(l.gup, g)
+		}
+	}
+	for g := range l.gdown {
+		if n, ok := l.groups[g]; !ok || n.downBps != old[g].downBps {
+			delete(l.gdown, g)
+		}
+	}
 }
 
 // GroupState 是一个代理池当前的状态:本机在线设备数,以及自上次取走以来设备池满被拒的次数。

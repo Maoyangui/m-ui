@@ -101,7 +101,17 @@ type User struct {
 	ShareToken  string          `json:"shareToken" gorm:"index"` // 临时共享订阅令牌,空=未开启
 	ShareCreds  json.RawMessage `json:"shareCreds,omitempty"`    // 共享地址专用凭据(与本人凭据不同,取消即失效)
 	ShareAt     int64           `json:"shareAt"`                 // 令牌生成时间
+	// DisabledReason 为什么被停用:manual(管理员 / 代理 / 外部 API 手动)、quota(超量)、expired(到期);启用时为空。
+	// 自动恢复(补量、周期重置、延期)只对自动原因生效,手动停的人不会因为清了流量就复活。
+	DisabledReason string `json:"disabledReason"`
 }
+
+// 停用原因。
+const (
+	DisabledManual  = "manual"
+	DisabledQuota   = "quota"
+	DisabledExpired = "expired"
+)
 
 // Reseller 代理:自带面板,能在自己额度内建用户。其用户的流量与设备数全部归到代理名下。
 type Reseller struct {
@@ -140,6 +150,9 @@ type Reseller struct {
 	// 代理自己的外部 API:在代理面板"我的账号"里开启并取令牌,接口与主面板的 v1 相同,作用域限定为该代理名下
 	ApiEnabled bool   `json:"apiEnabled"`
 	ApiToken   string `json:"-" gorm:"index"`
+	// Depleted 流量额度已用尽:主机每分钟判定并写入,随快照下发副机。为真时名下用户不下发数据面、订阅返回 404,
+	// 用户行本身不改(以前是把他名下的用户全部 enabled=false,补量后又整体复活,连手动停用的一起)。
+	Depleted bool `json:"depleted"`
 }
 
 // ShareSuffix 临时共享凭据在数据面里的名字后缀:sing-box 里叫 "alice#share",记账时去掉后缀归到 alice。
@@ -232,6 +245,16 @@ type LineRef struct {
 	NodeIds []uint `json:"nodeIds,omitempty"`
 }
 
+// Session 面板与代理面板的登录会话:以前只在内存里,每次更新 / 重启所有人都要重新登录。
+// Token 是随机 64 位十六进制;Reseller 非 0 为代理会话;Pending 为代理首登待设密码。
+type Session struct {
+	Token    string `json:"-" gorm:"primaryKey"`
+	User     string `json:"user"`
+	Reseller uint   `json:"reseller" gorm:"index"`
+	Pending  bool   `json:"pending"`
+	Exp      int64  `json:"exp" gorm:"index"`
+}
+
 // SubLog 订阅访问日志。
 type SubLog struct {
 	Id     uint64 `json:"id" gorm:"primaryKey;autoIncrement"`
@@ -284,6 +307,6 @@ func All() []interface{} {
 	return []interface{}{
 		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
-		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{},
+		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{},
 	}
 }

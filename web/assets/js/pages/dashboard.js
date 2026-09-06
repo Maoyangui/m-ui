@@ -114,7 +114,8 @@ export async function render(el) {
   await Promise.all([renderChart(), renderOnline(), renderAudit(), renderLog(), renderHealth(), renderConns(), renderTop(), refreshNodeSummary().then(renderStats)]);
 }
 
-// 每 10 秒:状态卡、数据面、在线、最近入站连接、日志;每 30 秒:流量图(含 24h 流量卡)、排行、巡检、审计
+// 每轮(5 秒):状态卡、数据面、在线、最近入站连接、日志;每 3 轮:巡检、审计;每 12 轮(约一分钟):流量图与排行。
+// 图和排行要扫时序表,一分钟一次足够,拉太勤只会拖慢面板
 let ticks = 0;
 export async function tick() {
   if (isReseller()) { renderResellerStats(); renderOnline(); return; }
@@ -122,7 +123,8 @@ export async function tick() {
   await refreshNodeSummary();
   renderStats(); renderCore(); renderOnline();
   const jobs = [renderConns(), renderLog()];
-  if (ticks % 3 === 0) jobs.push(renderChart(), renderTop(), renderHealth(), renderAudit());
+  if (ticks % 3 === 0) jobs.push(renderHealth(), renderAudit());
+  if (ticks % 12 === 0) jobs.push(renderChart(), renderTop());
   await Promise.allSettled(jobs);
 }
 
@@ -223,6 +225,7 @@ function renderCore() {
     <dt>${t('set.webDomain')}</dt><dd>${esc(s.domain || '—')}</dd>
     <dt>${t('set.role.current')}</dt><dd>${s.role === 'node' ? t('role.node') : t('role.master')}</dd>
     <dt>${t('set.version')}</dt><dd class="mono">${esc(s.version || '')}</dd>
+    <dt>${t('dash.dbSize')}</dt><dd class="mono">${s.dbSize ? fmtBytes(s.dbSize, 1) : '—'}</dd>
     <dt>goroutines</dt><dd class="mono">${s.goroutines ?? ''}</dd>`);
 }
 

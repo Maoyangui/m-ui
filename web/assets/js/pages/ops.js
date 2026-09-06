@@ -8,8 +8,8 @@ let data = null, pollTimer = null;
 
 const yes = (ok, onText, offText) => badge(ok ? (onText || t('common.yes')) : (offText || t('common.no')), ok ? 'ok' : 'warn');
 
-export async function render(el) {
-  data = await get('ops');
+export async function render(el, fresh = false) {
+  data = await get(fresh ? 'ops?fresh=1' : 'ops'); // 系统信息服务端缓存 30 秒;点刷新或任务跑完才重新采集
   const i = data.info, w = i.warp, st = data.status, p = data.params || { swapGb: 2, noFile: 1048576, sysctl: '', defaultSysctl: '', journalMb: 200, journalDays: 14 };
   const jr = i.journal || { usedMb: 0, limited: false };
   // 后端版本里没有某条任务时给个空壳,免得取 .title 直接把整页打挂
@@ -102,14 +102,14 @@ function startPoll() {
     if (!st.running) {
       stopPoll();
       toast(st.last && st.last.ok ? t('ops.taskDone') : t('ops.taskFailed'), st.last && st.last.ok ? 'ok' : 'err');
-      if (location.hash.startsWith('#/ops')) render(document.getElementById('page'));
+      if (location.hash.startsWith('#/ops')) render(document.getElementById('page'), true);
     }
   }, 1500);
 }
 function stopPoll() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
 
 registerActions({
-  'ops.refresh': () => render(document.getElementById('page')),
+  'ops.refresh': () => render(document.getElementById('page'), true),
   'ops.run': async (task, btn) => {
     const t2 = data.tasks.find(x => x.name === task);
     if (!await confirm(t('ops.runConfirm', { task: t2 ? t2.title : task }), { danger: !!(t2 && t2.danger) })) return;
@@ -135,7 +135,7 @@ registerActions({
   },
   'ops.warpUpstream': async (_, btn) => {
     btn.disabled = true;
-    try { await post('ops/warp-upstream'); toast(t('ops.upstreamAdded'), 'ok'); render(document.getElementById('page')); }
+    try { await post('ops/warp-upstream'); toast(t('ops.upstreamAdded'), 'ok'); render(document.getElementById('page'), true); }
     catch (e) { toast(e.message, 'err'); btn.disabled = false; }
   },
 });

@@ -48,7 +48,9 @@
     <tr><td>1 min</td><td>Quota, expiry and periodic resets; data-plane watchdog</td></tr>
     <tr><td>10 min</td><td>WAL checkpoint so the live database is always safe to copy</td></tr>
     <tr><td>6 h</td><td>Version check against GitHub Releases (check only)</td></tr>
-    <tr><td>daily</td><td>Prune old series, renew certificates, daily report</td></tr>
+    <tr><td>1 h</td><td>Prune series and logs by retention; fold minute samples older than 48 h into hourly buckets</td></tr>
+    <tr><td>12 h</td><td>Certificate renewal check (sing-box swaps the renewed certificate itself, no restart)</td></tr>
+    <tr><td>daily</td><td>Daily report</td></tr>
   </table>
 
   <h2 id="code">Code layout</h2>

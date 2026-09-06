@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -29,7 +28,6 @@ import (
 	"github.com/Maoyangui/m-ui/notify"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/sub"
-	"github.com/Maoyangui/m-ui/upstream"
 
 	"github.com/op/go-logging"
 	"golang.org/x/crypto/bcrypt"
@@ -61,6 +59,36 @@ type Runner struct {
 	applied    map[string]string // 数据面当前生效的出站(tag → JSON),供上游热更新做差异
 	appliedRaw []byte            // 数据面当前生效的完整配置,渲染结果相同则不重启
 	mu         sync.Mutex        // 串行化重载,避免并发改动互相打断
+
+	reloadMu sync.Mutex
+	reload   ReloadStatus // 最近一次重载的结果:面板据此在页面上明说"已保存但没生效"
+}
+
+// ReloadStatus 最近一次数据面重载(启动、全量、热换出站、热更新用户)的结果。
+// 重载都是保存之后异步做的,接口早已返回"已保存";失败只写日志的话操作者永远不知道线上还是旧配置。
+type ReloadStatus struct {
+	At    int64  `json:"at"`
+	Op    string `json:"op"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+// ReloadStatus 返回最近一次重载的结果(尚未重载过时 At 为 0)。
+func (r *Runner) ReloadStatus() ReloadStatus {
+	r.reloadMu.Lock()
+	defer r.reloadMu.Unlock()
+	return r.reload
+}
+
+// noteReload 记下一次重载的结果。
+func (r *Runner) noteReload(op string, err error) {
+	st := ReloadStatus{At: time.Now().Unix(), Op: op, OK: err == nil}
+	if err != nil {
+		st.Error = err.Error()
+	}
+	r.reloadMu.Lock()
+	r.reload = st
+	r.reloadMu.Unlock()
 }
 
 // Notifier 暴露通知器(面板发测试消息、登录告警)。
@@ -78,26 +106,18 @@ func (r *Runner) CheckUpstream(up model.Upstream) (ok bool, delayMs int, method,
 	}
 	if r.CoreRunning() {
 		res := r.TestUpstream(up.Name, testURL)
-		if res.Error == "outbound not found" {
-			res.Error = "数据面中尚无该上游(刚创建/修改请等重载完成后再测)"
+		if res.Error != "outbound not found" {
+			return res.OK, int(res.Delay), "urltest", res.Error
 		}
-		return res.OK, int(res.Delay), "urltest", res.Error
 	}
-	switch up.Type {
-	case "shadowsocks", "socks", "http":
-		addr, err := upstream.ServerAddr(up.Options)
-		if err != nil {
-			return false, 0, "none", err.Error()
-		}
-		start := time.Now()
-		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
-		if err != nil {
-			return false, 0, "tcp", "TCP 连接失败: " + err.Error()
-		}
-		conn.Close()
-		return true, int(time.Since(start).Milliseconds()), "tcp", ""
+	// 本机没有线路用这条上游(它就不在数据面里),或数据面没起来:起一个只含它的临时实例真实测一次,
+	// 结果和经数据面测的同样可信,不再退化成"只探 TCP 端口"
+	ob, err := render.OutboundJSON(up)
+	if err != nil {
+		return false, 0, "none", err.Error()
 	}
-	return false, 0, "none", "数据面未运行:该协议走 QUIC/TLS,需数据面运行后才能真实测试"
+	res := core.CheckOutboundIsolated(ob, testURL)
+	return res.OK, int(res.Delay), "urltest", res.Error
 }
 
 // DB 暴露数据库句柄给面板层。
@@ -125,6 +145,7 @@ func New(dbPath string) (*Runner, error) {
 		Setting:     r.setting,
 		Notify:      func(text string) { r.notifier.Event("tgOnUserDisabled", text) },
 		LocalRatio:  r.localRatio,
+		Forget:      r.notifier.Forget,
 	})
 	r.monitor = monitor.New(monitor.Deps{
 		UsedUpstreams: r.usedUpstreams,
@@ -190,32 +211,43 @@ func SetSettings(dbPath string, kv map[string]string) error {
 	return nil
 }
 
-// ResetPassword 重置(或创建)管理员密码;pw 为空则随机生成。返回生效的明文密码。
-func ResetPassword(dbPath, user, pw string) (string, error) {
+// ResetPassword 重置管理员密码;user 为空 = 库里现有的管理员(改过用户名也认得),库里一个管理员都没有时才创建 admin;
+// pw 为空则随机生成。返回实际重置的用户名与明文密码。
+// 以前硬编码 "admin":管理员把用户名改掉之后,菜单里重置密码会凭空多出一个 admin 账号。
+func ResetPassword(dbPath, user, pw string) (string, string, error) {
 	db, err := database.Open(dbPath)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer database.Close(db)
 	if pw == "" {
 		pw = creds.Password(12)
 	}
 	if len(pw) < 6 {
-		return "", fmt.Errorf("密码至少 6 位")
+		return "", "", fmt.Errorf("密码至少 6 位")
 	}
 	hash, err := hashPassword(pw)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	var admin model.Admin
-	if err := db.Where("username = ?", user).First(&admin).Error; err == nil {
-		if err := db.Model(&model.Admin{}).Where("id = ?", admin.Id).Update("password", hash).Error; err != nil {
-			return "", err
-		}
-	} else if err := db.Create(&model.Admin{Username: user, Password: hash}).Error; err != nil {
-		return "", err
+	q := db.Order("id asc")
+	if user != "" {
+		q = q.Where("username = ?", user)
 	}
-	return pw, nil
+	if err := q.First(&admin).Error; err == nil {
+		if err := db.Model(&model.Admin{}).Where("id = ?", admin.Id).Update("password", hash).Error; err != nil {
+			return "", "", err
+		}
+		return admin.Username, pw, nil
+	}
+	if user == "" {
+		user = "admin"
+	}
+	if err := db.Create(&model.Admin{Username: user, Password: hash}).Error; err != nil {
+		return "", "", err
+	}
+	return user, pw, nil
 }
 
 // ensureAdmin 全新数据库没有管理员时创建 admin 并把随机密码打到日志(首次登录后请修改)。
@@ -296,13 +328,33 @@ func (r *Runner) Start() error {
 		return fmt.Errorf("渲染配置: %w", err)
 	}
 	if err := r.core.Start(raw); err != nil {
+		r.noteReload("启动", err)
 		return fmt.Errorf("启动 sing-box: %w", err)
 	}
 	r.applied, _ = outboundsOf(raw)
 	r.appliedRaw = raw
 	r.applyLimits()
 	r.applyPortHopping()
+	r.applyLogLevel()
+	r.noteReload("启动", nil)
 	return nil
+}
+
+// applyLogLevel 按设置 logEnabled 调数据面日志级别:关掉记录就只留 panic 级(等于不记)。
+// 以前是把 log.disabled 渲染进配置,一切换就要重启整个数据面、断掉所有人;级别是运行时可改的。
+func (r *Runner) applyLogLevel() {
+	r.core.SetLogEnabled(r.setting("logEnabled") != "false")
+}
+
+// SetLogEnabled 面板"日志"页开关:立即生效,不重启数据面。
+func (r *Runner) SetLogEnabled(on bool) { r.core.SetLogEnabled(on) }
+
+// InboundCount 数据面当前的入站数(健康检查用:线路都在库里,监听器却没起来就是不健康)。
+func (r *Runner) InboundCount() int {
+	if box := r.core.GetInstance(); box != nil {
+		return len(box.Inbound().Inbounds())
+	}
+	return 0
 }
 
 // applyPortHopping 为本机部署的、开启端口跳跃的 hysteria2 线路应用 UDP 端口范围转发(Linux root 生效)。
@@ -357,12 +409,13 @@ func outboundsOf(raw []byte) (map[string]string, error) {
 
 // ReloadUpstreams 只增删改有变化的出站,不重启数据面,现有用户连接不受影响。
 // 适用于上游增删改(线路与路由未变)。任一步失败则回退到全量重载。
-func (r *Runner) ReloadUpstreams() error {
+func (r *Runner) ReloadUpstreams() (err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.core.IsRunning() {
 		return nil
 	}
+	defer func() { r.noteReload("热换出站", err) }()
 	raw, err := render.BuildConfig(r.db, r.nodeCert())
 	if err != nil {
 		return fmt.Errorf("渲染配置: %w", err)
@@ -372,6 +425,12 @@ func (r *Runner) ReloadUpstreams() error {
 		return err
 	}
 	if r.applied == nil {
+		return r.reloadAllLocked(raw)
+	}
+	// 路由规则引用的出站集合变了(典型是上游改名):运行中的规则还指着旧标签,只换出站会让这些线路
+	// 找不到出口而断流。这种情况必须整体重启,让规则和出站一起换。
+	if r.appliedRaw != nil && !sameRuleOutbounds(r.appliedRaw, raw) {
+		logger.Info("路由引用的出站变化(如上游改名),改为全量重载")
 		return r.reloadAllLocked(raw)
 	}
 	changed := 0
@@ -409,12 +468,13 @@ func (r *Runner) ReloadUpstreams() error {
 
 // ReloadUsers 只刷新用户相关状态:入站用户表就地热更新(不断开现有连接),
 // 并重新下发限速/设备数策略。用于新增/禁用用户、改配额与限速等高频操作。
-func (r *Runner) ReloadUsers() error {
+func (r *Runner) ReloadUsers() (err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.core.IsRunning() {
 		return nil
 	}
+	defer func() { r.noteReload("热更新用户", err) }()
 	raw, err := render.BuildConfig(r.db, r.nodeCert())
 	if err != nil {
 		return fmt.Errorf("渲染配置: %w", err)
@@ -511,9 +571,10 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 }
 
 // ReloadAll 重建整个数据面(线路增删、端口/协议变更、路由或证书变化时使用)。
-func (r *Runner) ReloadAll() error {
+func (r *Runner) ReloadAll() (err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	defer func() { r.noteReload("全量重载", err) }()
 	raw, err := render.BuildConfig(r.db, r.nodeCert())
 	if err != nil {
 		return fmt.Errorf("渲染配置: %w", err)
@@ -522,9 +583,10 @@ func (r *Runner) ReloadAll() error {
 }
 
 // ReloadAllForce 无条件重启数据面(证书文件内容变了但配置文本没变时用)。
-func (r *Runner) ReloadAllForce() error {
+func (r *Runner) ReloadAllForce() (err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	defer func() { r.noteReload("全量重载", err) }()
 	raw, err := render.BuildConfig(r.db, r.nodeCert())
 	if err != nil {
 		return fmt.Errorf("渲染配置: %w", err)
@@ -568,6 +630,7 @@ func (r *Runner) reloadAllLocked(raw []byte) error {
 				r.applied, r.appliedRaw = outboundsOfSafe(prev), prev
 				r.applyLimits()
 				r.applyPortHopping()
+				r.applyLogLevel()
 				logger.Warning("新配置启动失败,已回滚到上一份可用配置: ", err)
 				return fmt.Errorf("新配置启动失败,已回滚到上一份配置: %w", err)
 			}
@@ -579,8 +642,48 @@ func (r *Runner) reloadAllLocked(raw []byte) error {
 	r.appliedRaw = raw
 	r.applyLimits()
 	r.applyPortHopping()
+	r.applyLogLevel()
 	logger.Info("数据面已重载")
 	return nil
+}
+
+// ruleOutboundsOf 取出配置里路由规则(含 final)引用的出站标签集合。
+func ruleOutboundsOf(raw []byte) map[string]bool {
+	var cfg struct {
+		Route struct {
+			Rules []struct {
+				Outbound string `json:"outbound"`
+			} `json:"rules"`
+			Final string `json:"final"`
+		} `json:"route"`
+	}
+	out := map[string]bool{}
+	if json.Unmarshal(raw, &cfg) != nil {
+		return out
+	}
+	for _, rule := range cfg.Route.Rules {
+		if rule.Outbound != "" {
+			out[rule.Outbound] = true
+		}
+	}
+	if cfg.Route.Final != "" {
+		out[cfg.Route.Final] = true
+	}
+	return out
+}
+
+// sameRuleOutbounds 两份配置的路由是否引用同一组出站标签;不同就不能只热换出站。
+func sameRuleOutbounds(prev, next []byte) bool {
+	a, b := ruleOutboundsOf(prev), ruleOutboundsOf(next)
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
 }
 
 // onlyUsersDiffer 两份 sing-box 配置是否只有入站用户表不同(入站的 users 字段抹掉后逐字节相同)。
@@ -649,6 +752,20 @@ func (r *Runner) OnlineIPsAll() map[string][]string {
 		return box.Limiter().ActiveIPsAll()
 	}
 	return map[string][]string{}
+}
+
+// RecentConns 本机最近的入站连接(源 IP × 线路聚合),概览诊断卡与副机报告用。
+func (r *Runner) RecentConns(limit int) []hub.RecentConn {
+	box := r.core.GetInstance()
+	if box == nil {
+		return nil
+	}
+	list := box.ConnTracker().Recent(limit)
+	out := make([]hub.RecentConn, 0, len(list))
+	for _, c := range list {
+		out = append(out, hub.RecentConn{IP: c.IP, User: c.User, Line: c.Inbound, Protocol: c.Protocol, Count: c.Count, Ts: c.Last})
+	}
+	return out
 }
 
 // OnlineIPLines 本机上 用户 → 源 IP → 线路名。
@@ -928,9 +1045,7 @@ func Run(dbPath string) error {
 	for sig := range sigCh {
 		if sig == syscall.SIGHUP {
 			logger.Info("收到 SIGHUP,重载配置")
-			r.Stop()
-			time.Sleep(200 * time.Millisecond)
-			if err := r.Start(); err != nil {
+			if err := r.ReloadAllForce(); err != nil { // 和面板走同一把锁,不和进行中的热更新互相打断
 				logger.Error("重载失败: ", err)
 			}
 			continue

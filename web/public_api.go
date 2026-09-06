@@ -173,35 +173,36 @@ func (s *Server) apiFindUser(key string, rid uint) (model.User, bool) {
 
 // apiUserView 对外用户视图:去掉凭据,附带用量、线路与订阅地址。
 type apiUserView struct {
-	Id          uint                `json:"id"`
-	Name        string              `json:"name"`
-	Enabled     bool                `json:"enabled"`
-	Volume      int64               `json:"volume"`
-	Used        int64               `json:"used"`
-	Up          int64               `json:"up"`
-	Down        int64               `json:"down"`
-	TotalUp     int64               `json:"totalUp"`
-	TotalDown   int64               `json:"totalDown"`
-	Expiry      int64               `json:"expiry"`
-	Expired     bool                `json:"expired"`
-	AutoReset   bool                `json:"autoReset"`
-	ResetDays   int                 `json:"resetDays"`
-	NextReset   int64               `json:"nextReset"`
-	DeviceLimit int                 `json:"deviceLimit"`
-	SpeedUp     int                 `json:"speedUp"`
-	SpeedDown   int                 `json:"speedDown"`
-	Remark      string              `json:"remark"`
-	Desc        string              `json:"desc"`
-	CreatedAt   int64               `json:"createdAt"`
-	OnlineAt    int64               `json:"onlineAt"`
-	OnlineIPs   []string            `json:"onlineIps"`
-	OnlineLines map[string][]string `json:"onlineLines,omitempty"` // 源 IP → 线路(带服务器后缀)
-	LineIds     []uint              `json:"lineIds"`
-	LineRefs    []model.LineRef     `json:"lineRefs"`
-	ExtIds      []uint              `json:"extIds"`
-	SubLink     string              `json:"subLink"`
-	SubClash    string              `json:"subClash"`
-	SubJSON     string              `json:"subJson"` // sing-box 远程配置地址
+	Id             uint                `json:"id"`
+	Name           string              `json:"name"`
+	Enabled        bool                `json:"enabled"`
+	Volume         int64               `json:"volume"`
+	Used           int64               `json:"used"`
+	Up             int64               `json:"up"`
+	Down           int64               `json:"down"`
+	TotalUp        int64               `json:"totalUp"`
+	TotalDown      int64               `json:"totalDown"`
+	Expiry         int64               `json:"expiry"`
+	Expired        bool                `json:"expired"`
+	AutoReset      bool                `json:"autoReset"`
+	ResetDays      int                 `json:"resetDays"`
+	NextReset      int64               `json:"nextReset"`
+	DeviceLimit    int                 `json:"deviceLimit"`
+	SpeedUp        int                 `json:"speedUp"`
+	SpeedDown      int                 `json:"speedDown"`
+	Remark         string              `json:"remark"`
+	Desc           string              `json:"desc"`
+	CreatedAt      int64               `json:"createdAt"`
+	OnlineAt       int64               `json:"onlineAt"`
+	DisabledReason string              `json:"disabledReason,omitempty"` // 停用原因:manual / quota / expired
+	OnlineIPs      []string            `json:"onlineIps"`
+	OnlineLines    map[string][]string `json:"onlineLines,omitempty"` // 源 IP → 线路(带服务器后缀)
+	LineIds        []uint              `json:"lineIds"`
+	LineRefs       []model.LineRef     `json:"lineRefs"`
+	ExtIds         []uint              `json:"extIds"`
+	SubLink        string              `json:"subLink"`
+	SubClash       string              `json:"subClash"`
+	SubJSON        string              `json:"subJson"` // sing-box 远程配置地址
 }
 
 // apiSnapshot 是列表渲染时"只算一次"的公共数据:在线 IP、线路映射、订阅前缀。
@@ -251,7 +252,7 @@ func (s *Server) apiUserWith(u model.User, snap *apiSnapshot) apiUserView {
 		TotalUp: u.TotalUp, TotalDown: u.TotalDown, Expiry: u.Expiry, Expired: u.Expiry > 0 && u.Expiry < now,
 		AutoReset: u.AutoReset, ResetDays: u.ResetDays, NextReset: u.NextReset,
 		DeviceLimit: u.DeviceLimit, SpeedUp: u.SpeedUp, SpeedDown: u.SpeedDown, Remark: u.Remark, Desc: u.Desc,
-		CreatedAt: u.CreatedAt, OnlineAt: u.OnlineAt,
+		CreatedAt: u.CreatedAt, OnlineAt: u.OnlineAt, DisabledReason: u.DisabledReason,
 		OnlineIPs:   mergeIPs(snap.localIPs[u.Name], snap.remoteIPs[u.Name]),
 		OnlineLines: s.onlineLines(u.Name, snap.localName, snap.localLines, snap.remoteLines),
 		LineIds:     ids, LineRefs: refs, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}
@@ -321,8 +322,11 @@ func (s *Server) apiFindPlan(req apiUserReq, rid uint) (*model.Plan, error) {
 
 // applyReq 把请求里显式给出的字段写到用户上。
 func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
-	if req.Enabled != nil {
-		u.Enabled = *req.Enabled
+	if req.Enabled != nil { // 显式给了启停就是手动决定
+		u.Enabled, u.DisabledReason = *req.Enabled, ""
+		if !u.Enabled {
+			u.DisabledReason = model.DisabledManual
+		}
 	}
 	if req.Volume != nil {
 		u.Volume = *req.Volume
@@ -374,6 +378,9 @@ func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
 	}
 	if u.Volume < 0 || u.Expiry < 0 || u.DeviceLimit < 0 || u.SpeedUp < 0 || u.SpeedDown < 0 {
 		return errors.New("数值字段不能为负")
+	}
+	if req.Enabled == nil { // 没碰启停:超量 / 到期被停的人,改回范围内就自动恢复
+		autoEnable(u, now)
 	}
 	return nil
 }
@@ -500,7 +507,7 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 		}
 	}
 	if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).Select(
-		"name", "enabled", "volume", "expiry", "auto_reset", "reset_days", "next_reset",
+		"name", "enabled", "disabled_reason", "volume", "expiry", "auto_reset", "reset_days", "next_reset",
 		"device_limit", "speed_up", "speed_down", "remark", "desc", "total_up", "total_down", "up", "down",
 	).Updates(u).Error; err != nil {
 		badRequest(w, err)
@@ -533,19 +540,20 @@ func (s *Server) apiUserAction(w http.ResponseWriter, r *http.Request, u model.U
 	switch action {
 	case "enable", "disable":
 		on := action == "enable"
-		s.db.Model(&model.User{}).Where("id = ?", u.Id).Update("enabled", on)
-		u.Enabled = on
+		if _, err := s.setEnabled(s.db, []uint{u.Id}, on); err != nil {
+			badRequest(w, err)
+			return
+		}
+		u.Enabled, u.DisabledReason = on, ""
 		if !on {
+			u.DisabledReason = model.DisabledManual
 			s.kickUser(u.Name)
 		}
 		s.auditAs(sc.actor, "user", action, u.Name)
 		s.reloadUsers("外部 API " + action + " " + u.Name)
 		writeJSON(w, http.StatusOK, s.apiUser(u))
 	case "reset":
-		if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).Updates(map[string]interface{}{
-			"total_up": gorm.Expr("total_up + up"), "total_down": gorm.Expr("total_down + down"),
-			"up": 0, "down": 0, "enabled": true,
-		}).Error; err != nil {
+		if err := s.resetUsage(s.db, u.Id); err != nil {
 			badRequest(w, err)
 			return
 		}
