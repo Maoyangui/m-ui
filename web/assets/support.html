@@ -4,113 +4,193 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>{{if eq .Lang "zh"}}建议与支持 · m-ui{{else}}Feedback & Support · m-ui{{end}}</title>
+<title>{{if eq .Lang "zh"}}建议与支持 · m-ui{{else}}Feedback &amp; Support · m-ui{{end}}</title>
 <link rel="icon" href="logo.svg" type="image/svg+xml">
 <style>
-:root { --bg: #f5f7fb; --surface: #fff; --text: #1a1f2e; --muted: #6b7280; --border: #e5e7eb; --primary: #2563eb; --primary-soft: #eaf0ff; --ok: #16a34a; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; --shadow: 0 10px 30px rgba(15, 23, 42, .08); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0f1218; --surface: #171b24; --text: #e6e8ee; --muted: #9aa3b2; --border: #262c38; --primary: #5b8cff; --primary-soft: #1a2540; --shadow: 0 10px 30px rgba(0, 0, 0, .35); } }
-:root[data-theme="dark"] { --bg: #0f1218; --surface: #171b24; --text: #e6e8ee; --muted: #9aa3b2; --border: #262c38; --primary: #5b8cff; --primary-soft: #1a2540; --shadow: 0 10px 30px rgba(0, 0, 0, .35); }
+:root {
+  --bg: #f5f7fb; --surface: #fff; --surface-2: #f8fafc; --text: #1a1f2e; --muted: #6b7280;
+  --border: #e5e7eb; --border-soft: #eef1f6; --primary: #2563eb; --primary-soft: #eaf0ff;
+  --ok: #16a34a; --accent: #6a44f2;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 8px 24px rgba(15, 23, 42, .06);
+  --r: 14px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1218; --surface: #171b24; --surface-2: #1d222c; --text: #e6e8ee; --muted: #9aa3b2;
+  --border: #262c38; --border-soft: #222835; --primary: #5b8cff; --primary-soft: #18233c; --accent: #8f7bff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .28);
+} }
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b24; --surface-2: #1d222c; --text: #e6e8ee; --muted: #9aa3b2;
+  --border: #262c38; --border-soft: #222835; --primary: #5b8cff; --primary-soft: #18233c; --accent: #8f7bff;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .28);
+}
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; }
-.wrap { max-width: 640px; margin: 0 auto; padding: 1.4rem 1.2rem 2.4rem; }
-.top { display: flex; align-items: center; gap: .6rem; margin-bottom: 1.2rem; font-size: .85rem; }
-.top a { color: var(--muted); text-decoration: none; }
-.top a:hover { color: var(--primary); }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; -webkit-font-smoothing: antialiased; }
+svg { flex: none; }
+a { color: var(--primary); }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+.wrap { max-width: 640px; margin: 0 auto; padding: .9rem 1.1rem 1.3rem; }
+
+/* 顶栏 */
+.top { display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; font-size: .85rem; }
+.top a { color: var(--muted); text-decoration: none; display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .5rem; margin: -.3rem -.5rem; border-radius: 8px; transition: .12s; }
+.top a:hover { color: var(--text); background: var(--surface); }
 .top .grow { flex: 1; }
-.ver { margin: .45rem 0 0 !important; font-size: .8rem; display: flex; align-items: center; gap: .45rem; }
-.ver code { font-family: var(--mono); background: var(--primary-soft); color: var(--primary); border-radius: 6px; padding: .05rem .35rem; }
-.btn.tiny { padding: .15rem .45rem; font-size: .75rem; border-radius: 6px; }
-.hero { display: flex; align-items: center; gap: .9rem; margin-bottom: 1.2rem; }
-.hero img { width: 64px; height: 52px; }
-.hero h1 { margin: 0; font-size: 1.5rem; letter-spacing: .01em; }
-.hero p { margin: .15rem 0 0; color: var(--muted); }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1.1rem 1.2rem; box-shadow: var(--shadow); margin-bottom: .9rem; }
-.card h2 { margin: 0 0 .35rem; font-size: 1.08rem; display: flex; align-items: center; gap: .5rem; }
-.card h2 .ic { width: 30px; height: 30px; border-radius: 9px; display: inline-grid; place-items: center; background: linear-gradient(135deg, #6a44f2, #18e3e8); color: #fff; font-size: .95rem; flex: none; }
-.card > p { margin: 0 0 .8rem; color: var(--muted); font-size: .9rem; }
-.row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: .7rem .9rem; }
-.row .k { font-size: .78rem; color: var(--muted); width: 100%; }
-.row code { flex: 1; min-width: 12rem; font-family: var(--mono); font-size: .95rem; word-break: break-all; }
-.row code.addr { font-size: .86rem; }
-.btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 9px; padding: .42rem .8rem; font: inherit; font-size: .85rem; cursor: pointer; text-decoration: none; white-space: nowrap; transition: .12s; }
+
+/* 头部 */
+.hero { display: flex; align-items: flex-start; gap: .85rem; margin-bottom: 1rem; }
+.hero > img { width: 40px; height: 40px; margin-top: .1rem; }
+.hero h1 { margin: 0; font-size: 1.3rem; line-height: 1.3; letter-spacing: -.01em; display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
+.hero p { margin: .2rem 0 0; color: var(--muted); font-size: .88rem; }
+.chip { display: inline-flex; align-items: center; gap: .35rem; padding: .12rem .25rem .12rem .5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; font-size: .78rem; color: var(--muted); }
+.chip code { font-family: var(--mono); color: var(--primary); font-size: .78rem; }
+.chip button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: .75rem; cursor: pointer; padding: .1rem .45rem; border-radius: 999px; transition: .12s; }
+.chip button:hover { background: var(--primary-soft); color: var(--primary); }
+
+/* 卡片 */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: .85rem 1rem; box-shadow: var(--shadow); margin-bottom: .6rem; }
+.card > header { display: flex; align-items: center; gap: .6rem; margin-bottom: .35rem; }
+.card h2 { margin: 0; font-size: 1.02rem; font-weight: 600; letter-spacing: -.005em; }
+.ic { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
+.ic.warm { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.lede { margin: 0 0 .6rem; color: var(--muted); font-size: .85rem; line-height: 1.5; }
+.lede b { color: var(--text); font-weight: 600; }
+
+/* 主要联系方式 */
+.contact { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 11px; padding: .55rem .75rem; }
+.contact .who { display: flex; align-items: center; gap: .55rem; min-width: 0; flex: 1; }
+.contact .who span { font-size: .72rem; color: var(--muted); display: block; letter-spacing: .04em; text-transform: uppercase; }
+.contact code { font-family: var(--mono); font-size: .95rem; word-break: break-all; }
+.actions { display: flex; gap: .45rem; flex-wrap: wrap; }
+
+/* 按钮 */
+.btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 9px; padding: .44rem .8rem; font: inherit; font-size: .85rem; cursor: pointer; text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; gap: .35rem; transition: .12s; }
 .btn:hover { border-color: var(--primary); color: var(--primary); }
 .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
 .btn.primary:hover { filter: brightness(1.08); color: #fff; }
 .btn.done { border-color: var(--ok); color: var(--ok); }
-.tip { margin: .7rem 0 0; font-size: .82rem; color: var(--muted); }
-.tip b { color: var(--text); font-weight: 600; }
-.pay { display: flex; gap: 1rem; align-items: stretch; flex-wrap: wrap; }
-.pay .row { flex: 1; min-width: 16rem; align-content: flex-start; }
-.qr { width: 128px; height: 128px; border: 1px solid var(--border); border-radius: 12px; background: #fff; padding: 6px; flex: none; }
-.foot { text-align: center; color: var(--muted); font-size: .82rem; margin-top: 1.4rem; }
-.foot a { color: var(--primary); text-decoration: none; }
-@media (max-width: 520px) { .wrap { padding: 1.6rem 1rem 2.2rem; } .card { padding: 1.1rem 1.1rem; } .qr { width: 130px; height: 130px; } }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); padding-inline: .5rem; }
+.btn.ghost:hover { color: var(--primary); background: var(--primary-soft); }
+
+/* 链接磁贴 */
+.tiles { display: flex; flex-wrap: wrap; gap: .45rem; }
+.tile { display: inline-flex; align-items: center; gap: .4rem; padding: .42rem .7rem; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); color: inherit; text-decoration: none; font-size: .85rem; transition: .12s; cursor: pointer; font-family: inherit; }
+.tile:hover { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
+.tile svg { color: var(--muted); }
+.tile:hover svg { color: var(--primary); }
+
+/* 打赏 */
+.pay { display: flex; gap: .9rem; align-items: center; }
+.pay .col { flex: 1; min-width: 0; }
+.pay .label { font-size: .71rem; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-bottom: .3rem; }
+.addr { display: flex; align-items: center; gap: .55rem; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 11px; padding: .5rem .7rem; }
+.addr code { font-family: var(--mono); font-size: .82rem; line-height: 1.5; word-break: break-all; flex: 1; min-width: 0; }
+.verify { margin: .45rem 0 0; font-size: .78rem; color: var(--muted); }
+.verify b { color: var(--text); font-family: var(--mono); font-weight: 600; }
+.qr { width: 96px; height: 96px; border: 1px solid var(--border); border-radius: 12px; background: #fff; padding: 7px; flex: none; }
+
+.foot { text-align: center; color: var(--muted); font-size: .8rem; margin-top: 1.1rem; }
+.foot a { text-decoration: none; }
+.foot a:hover { text-decoration: underline; }
+
+@media (max-width: 560px) {
+  .wrap { padding: 1rem .95rem 2.2rem; }
+  .card { padding: 1.05rem 1rem; }
+  .tiles { grid-template-columns: 1fr; }
+  .pay { flex-direction: column; align-items: center; }
+  .pay .col { width: 100%; }
+  .contact .actions { width: 100%; }
+  .contact .actions .btn { flex: 1; justify-content: center; }
+}
 </style>
 </head>
 <body>
 <script>try{var m=localStorage.getItem('m-ui-theme');if(m==='light'||m==='dark')document.documentElement.dataset.theme=m;}catch(e){}</script>
 <div class="wrap">
   <nav class="top">
-    <a href="./">← {{if eq .Lang "zh"}}返回面板{{else}}Back to panel{{end}}</a>
+    <a href="./"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>{{if eq .Lang "zh"}}返回面板{{else}}Back to panel{{end}}</a>
     <span class="grow"></span>
     <a href="?lang={{if eq .Lang "zh"}}en{{else}}zh{{end}}">{{if eq .Lang "zh"}}English{{else}}中文{{end}}</a>
   </nav>
-  <div class="hero">
+
+  <header class="hero">
     <img src="logo.svg" alt="">
     <div>
-      <h1>{{if eq .Lang "zh"}}建议与支持{{else}}Feedback &amp; Support{{end}}</h1>
-      <p>{{if eq .Lang "zh"}}m-ui 是一个人维护的开源项目,你的反馈会直接决定它下一步做什么。{{else}}m-ui is an open-source project maintained by one person; your feedback decides what gets built next.{{end}}</p>
-      <p class="ver">{{if eq .Lang "zh"}}当前版本{{else}}Version{{end}} <code>v{{.Version}}</code> <button class="btn tiny" data-copy="m-ui v{{.Version}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button></p>
+      <h1>{{if eq .Lang "zh"}}建议与支持{{else}}Feedback &amp; Support{{end}}
+        <span class="chip"><code>v{{.Version}}</code><button data-copy="m-ui v{{.Version}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button></span></h1>
+      <p>{{if eq .Lang "zh"}}一个人维护的开源项目,你的反馈决定它下一步做什么。{{else}}An open-source project maintained by one person — your feedback decides what comes next.{{end}}</p>
     </div>
-  </div>
+  </header>
 
   <section class="card">
-    <h2><span class="ic">💬</span>{{if eq .Lang "zh"}}提建议 · 报问题{{else}}Suggestions &amp; bug reports{{end}}</h2>
-    <p>{{if eq .Lang "zh"}}用得不顺手、想要的功能、遇到的问题,直接在 Telegram 上告诉我,附上面板版本和一句复现步骤最好。{{else}}Rough edges, feature ideas, anything broken: message me on Telegram. Panel version plus one line on how to reproduce helps a lot.{{end}}</p>
-    <div class="row">
-      <span class="k">Telegram</span>
-      <code id="tg">@{{.Telegram}}</code>
-      <button class="btn" data-copy="@{{.Telegram}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
-      <a class="btn primary" href="{{.TelegramURL}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}打开 Telegram ↗{{else}}Open Telegram ↗{{end}}</a>
-    </div>
-    <p class="tip">{{if eq .Lang "zh"}}也欢迎到 <a href="{{.Repo}}" target="_blank" rel="noopener">GitHub</a> 提 Issue 或 PR。{{else}}Issues and pull requests on <a href="{{.Repo}}" target="_blank" rel="noopener">GitHub</a> are welcome too.{{end}}</p>
-  </section>
-
-  <section class="card">
-    <h2><span class="ic">📚</span>{{if eq .Lang "zh"}}文档与 GitHub{{else}}Docs &amp; GitHub{{end}}</h2>
-    <p>{{if eq .Lang "zh"}}怎么用看文档;确定是 Bug 提 Issue;拿不准的、想讨论的去 Discussions —— 这样问题不会淹没在一起。{{else}}How-to questions: the docs. A confirmed bug: open an Issue. Not sure, or want to discuss: Discussions — so bugs don't drown in questions.{{end}}</p>
-    <div class="row">
-      <a class="btn" href="{{.Site}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}文档 ↗{{else}}Documentation ↗{{end}}</a>
-      <a class="btn" href="{{.Repo}}/issues/new/choose" target="_blank" rel="noopener">{{if eq .Lang "zh"}}报告 Bug ↗{{else}}Report a bug ↗{{end}}</a>
-      <a class="btn" href="{{.Repo}}/discussions" target="_blank" rel="noopener">{{if eq .Lang "zh"}}提问 / 讨论 ↗{{else}}Ask a question ↗{{end}}</a>
-      <a class="btn" href="{{.Repo}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}GitHub · 点个 Star ↗{{else}}Star on GitHub ↗{{end}}</a>
-      <button class="btn" data-share="{{.Site}}" data-share-title="m-ui · sing-box panel by Maoyangui">{{if eq .Lang "zh"}}分享 m-ui{{else}}Share m-ui{{end}}</button>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2><span class="ic">☕</span>{{if eq .Lang "zh"}}支持这个项目{{else}}Support the project{{end}}</h2>
-    <p>{{if eq .Lang "zh"}}m-ui 免费、开源、没有任何付费功能。如果它帮你省下了时间,可以请我喝杯咖啡,让它走得更远。{{else}}m-ui is free and open source with no paid tier. If it saved you time, buy me a coffee and keep it going.{{end}}</p>
-    <div class="pay">
-      <div class="row">
-        <span class="k">TRON · TRX / USDT (TRC20)</span>
-        <code class="addr" id="tron">{{.Tron}}</code>
-        <button class="btn" data-copy="{{.Tron}}">{{if eq .Lang "zh"}}复制地址{{else}}Copy address{{end}}</button>
+    <header>
+      <span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H9l-5 4Z"/></svg></span>
+      <h2>{{if eq .Lang "zh"}}提建议 · 报问题{{else}}Suggestions &amp; bug reports{{end}}</h2>
+    </header>
+    <p class="lede">{{if eq .Lang "zh"}}想要的功能、遇到的问题(附上版本号最好),直接告诉我。也可以找我<b>采购 GCP / Azure / AWS 服务器</b>。{{else}}Feature ideas or anything broken (please include the version) — just tell me. I can also <b>source GCP / Azure / AWS servers</b> for you.{{end}}</p>
+    <div class="contact">
+      <div class="who">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted)"><path d="M21.5 4.3 2.9 11.2c-.9.3-.9 1.6 0 1.9l4.6 1.5 1.8 5.3c.3.8 1.3 1 1.9.4l2.6-2.5 4.7 3.5c.7.5 1.7.1 1.9-.7l3-14.9c.2-.9-.7-1.6-1.5-1.3Z"/><path d="m8 14.4 10.5-7.7L10 16"/></svg>
+        <div style="min-width:0">
+          <span>Telegram</span>
+          <code>@{{.Telegram}}</code>
+        </div>
       </div>
-      <img class="qr" src="support/qr" alt="QR">
+      <div class="actions">
+        <button class="btn" data-copy="@{{.Telegram}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
+        <a class="btn primary" href="{{.TelegramURL}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}打开 Telegram{{else}}Open Telegram{{end}}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg></a>
+      </div>
     </div>
-    <p class="tip">{{if eq .Lang "zh"}}转账前请核对地址首尾:<b>{{.TronHead}} … {{.TronTail}}</b>。任何金额都是一份鼓励,谢谢。{{else}}Double-check the address before sending: <b>{{.TronHead}} … {{.TronTail}}</b>. Any amount is appreciated, thank you.{{end}}</p>
   </section>
 
-  <p class="foot">{{if eq .Lang "zh"}}谢谢你使用 m-ui。{{else}}Thanks for using m-ui.{{end}} · <a href="./">{{if eq .Lang "zh"}}返回面板{{else}}Back to panel{{end}}</a></p>
+  <section class="card">
+    <header>
+      <span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h6v16H6a2 2 0 0 0-2 2Z"/><path d="M20 6a2 2 0 0 0-2-2h-6v16h6a2 2 0 0 1 2 2Z"/></svg></span>
+      <h2>{{if eq .Lang "zh"}}文档与 GitHub{{else}}Docs &amp; GitHub{{end}}</h2>
+    </header>
+    <p class="lede">{{if eq .Lang "zh"}}怎么用看文档,确定是 Bug 提 Issue,拿不准的去 Discussions。{{else}}How-to in the docs, confirmed bugs in Issues, anything unsure in Discussions.{{end}}</p>
+    <div class="tiles">
+      <a class="tile" href="{{.Site}}" target="_blank" rel="noopener"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h11v18H6a2 2 0 0 0-2 2Z"/><path d="M8 8h6"/><path d="M8 12h4"/></svg>{{if eq .Lang "zh"}}文档{{else}}Docs{{end}}</a>
+      <a class="tile" href="{{.Repo}}/issues/new/choose" target="_blank" rel="noopener"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>{{if eq .Lang "zh"}}报告 Bug{{else}}Report a bug{{end}}</a>
+      <a class="tile" href="{{.Repo}}/discussions" target="_blank" rel="noopener"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10h8"/><path d="M8 14h5"/><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4Z"/></svg>{{if eq .Lang "zh"}}提问 / 讨论{{else}}Discussions{{end}}</a>
+      <a class="tile" href="{{.Repo}}" target="_blank" rel="noopener"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3.5 2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8-4.2-4.1 5.9-.9Z"/></svg>{{if eq .Lang "zh"}}点个 Star{{else}}Star{{end}}</a>
+      <button class="tile" data-share="{{.Site}}" data-share-title="m-ui · sing-box panel by Maoyangui"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></svg>{{if eq .Lang "zh"}}分享{{else}}Share{{end}}</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <header>
+      <span class="ic warm"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-9.2A3.8 3.8 0 0 1 12 8a3.8 3.8 0 0 1 7 2.8c0 4.8-7 9.2-7 9.2Z"/></svg></span>
+      <h2>{{if eq .Lang "zh"}}支持这个项目{{else}}Support the project{{end}}</h2>
+    </header>
+    <p class="lede">{{if eq .Lang "zh"}}免费开源,没有付费功能。帮你省了时间的话,请我喝杯咖啡。{{else}}Free and open source, no paid tier. If it saved you time, buy me a coffee.{{end}}</p>
+    <div class="pay">
+      <div class="col">
+        <div class="label">TRON · TRX / USDT (TRC20)</div>
+        <div class="addr">
+          <code>{{.Tron}}</code>
+          <button class="btn" data-copy="{{.Tron}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
+        </div>
+        <p class="verify">{{if eq .Lang "zh"}}转账前核对首尾:<b>{{.TronHead}} … {{.TronTail}}</b>。任何金额都是一份鼓励,谢谢。{{else}}Check the ends before sending: <b>{{.TronHead}} … {{.TronTail}}</b>. Any amount is appreciated, thank you.{{end}}</p>
+      </div>
+      <img class="qr" src="support/qr" alt="{{if eq .Lang "zh"}}打赏地址二维码{{else}}Donation address QR code{{end}}">
+    </div>
+  </section>
+
 </div>
 <script>
 document.querySelectorAll('[data-share]').forEach(function (b) {
+  var label = b.innerHTML;
   b.addEventListener('click', function () {
     var url = b.getAttribute('data-share'), title = b.getAttribute('data-share-title');
-    var done = function () { var l = b.textContent; b.textContent = '{{if eq .Lang "zh"}}已复制地址 ✓{{else}}Link copied ✓{{end}}'; setTimeout(function () { b.textContent = l; }, 1600); };
+    var done = function () { b.textContent = '{{if eq .Lang "zh"}}已复制链接 ✓{{else}}Link copied ✓{{end}}'; b.classList.add('done'); setTimeout(function () { b.innerHTML = label; b.classList.remove('done'); }, 1600); };
     if (navigator.share) { navigator.share({ title: title, url: url }).catch(function () {}); return; }
-    if (navigator.clipboard) navigator.clipboard.writeText(url).then(done); else { var ta = document.createElement('textarea'); ta.value = url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); done(); }
+    if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, done);
+    else { var ta = document.createElement('textarea'); ta.value = url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); done(); }
   });
 });
 document.querySelectorAll('[data-copy]').forEach(function (b) {
