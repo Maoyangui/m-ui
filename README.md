@@ -72,42 +72,47 @@ m-ui 是一个自托管的代理面板:**一个二进制 + 一个数据库文件
 
 ## 架构
 
-一个二进制里跑着四件事:**面板**(管理界面与 API)、**订阅服务**(客户端来拉配置)、**数据面**(内嵌 sing-box,真正过流量)、**后台**(统计、配额、巡检、同步)。它们共用同一个 SQLite 文件,所以面板里点一下保存,订阅和数据面立刻看到同一份数据。
+一个二进制里跑着四件事:**面板**(管理界面与 API)、**订阅服务**(客户端来拉配置)、**数据面**(内嵌 sing-box,真正过流量)、**后台**(统计、配额判定、上游巡检、日志清理、主副同步)。它们共用同一个 SQLite 文件,所以面板里点一下保存,订阅和数据面立刻看到同一份数据。
 
 ### 一台服务器里有什么
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph WHO["谁在连"]
-    direction TB
-    ADM["管理员浏览器"]
-    DLR["代理浏览器"]
-    APP["用户客户端<br/>Clash · sing-box · 小火箭"]
+    direction LR
+    ADM["管理员"]
+    DLR["代理"]
+    APP["用户客户端"]
   end
 
   subgraph PROC["一个 m-ui 进程"]
-    direction TB
-    WEB["面板<br/>会话 · API · 代理作用域"]
-    SUB["订阅服务<br/>落地页 · 三种格式 · 临时共享"]
-    CORE["数据面<br/>内嵌 sing-box"]
-    BG["后台<br/>统计 · 配额 · 巡检 · 主副同步"]
+    direction LR
+    WEB["面板"]
+    SUB["订阅服务"]
+    CORE["数据面 · sing-box"]
+    BG["后台任务"]
   end
 
   ADM -->|":2053 /app/"| WEB
   DLR -->|":2054 /dl/"| WEB
   APP -->|":2056 /sub/"| SUB
-  APP ==>|"线路端口<br/>真正的流量"| CORE
-  WEB -.->|"热更新用户 / 热换上游 / 必要时重启"| CORE
-  CORE -.->|"流量增量 · 在线 IP"| BG
-  WEB --> DB[("m-ui.db<br/>SQLite · WAL")]
+  APP ==>|"线路端口 · 真流量"| CORE
+  WEB -.->|"热更新 / 重启"| CORE
+  CORE -.->|"流量 · 在线 IP"| BG
+  WEB --> DB[("m-ui.db")]
   SUB --> DB
   BG --> DB
-  CORE ==> OUT["落地出口<br/>直连 · WARP · 中转上游"]
+  CORE ==> OUT["落地出口"]
 
-  classDef box fill:#eff6ff,stroke:#2563eb,color:#1e3a8a
-  classDef store fill:#f8fafc,stroke:#64748b,color:#334155
-  class WEB,SUB,CORE,BG box
-  class DB,OUT store
+  classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
+  classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
+  classDef data fill:#334155,stroke:#0f172a,color:#ffffff,stroke-width:1px
+  classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
+  classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
+  class ADM,DLR,APP who
+  class WEB,SUB,CORE,BG svc
+  class DB data
+  class OUT exit
 ```
 
 > 端口和路径都能改;上面写的是默认值。面板与代理面板是同一套前端,靠会话里的作用域区分能看到什么。
@@ -121,23 +126,22 @@ sequenceDiagram
   autonumber
   participant B as 浏览器
   participant W as 面板
-  participant D as SQLite
-  participant V as sing-box 解析器
-  participant C as 数据面
+  participant D as 库
+  participant S as sing-box
 
-  B->>W: 保存线路 / 用户 / 上游
-  W->>W: 字段校验 + 端口占用检查<br/>(同机其它程序占的端口也算)
-  W->>D: 开事务(BEGIN IMMEDIATE)并写入
-  W->>V: 用库里的全量配置渲染一份,交给它干跑
-  alt 解析不通过
-    V--)W: 报错
+  B->>W: 保存线路 / 用户
+  W->>W: 校验字段与端口
+  W->>D: 开事务写入
+  W->>S: 全量配置干跑
+  alt 干跑不过
+    S--)W: 报错
     W->>D: 回滚
-    W--)B: 拒绝保存并说明原因,线上配置一动没动
-  else 解析通过
-    V--)W: OK
+    W--)B: 拒绝,线上没动
+  else 干跑通过
+    S--)W: OK
     W->>D: 提交
-    W->>C: 按改动分级重载
-    Note over W,C: 改用户 → 换入站用户表,别人不断线<br/>改上游 → 热换出站,数据面不重启<br/>改线路 → 重启数据面,起不来就回滚到上一份
+    W->>S: 分级重载
+    Note over W,S: 改用户 → 换用户表<br/>改上游 → 热换出站<br/>改线路 → 重启并可回滚
     W--)B: 已保存
   end
 ```
@@ -145,24 +149,28 @@ sequenceDiagram
 ### 一次订阅请求怎么走
 
 ```mermaid
-flowchart LR
+flowchart TD
   Q["GET /sub/&lt;地址&gt;"] --> WHO{"这个地址是谁"}
-  WHO -->|"用户名"| U["命中用户"]
-  WHO -->|"随机令牌<br/>代理的用户 / 关掉用户名的用户"| U
-  WHO -->|"临时共享令牌"| S["同一个用户<br/>但发另一套凭据"]
-  WHO -->|"对不上 · 已停用 · 代理到期"| E["404"]
+  WHO -->|"用户名 / 随机令牌"| U["命中用户"]
+  WHO -->|"临时共享令牌"| S["同一个用户<br/>另一套凭据"]
+  WHO -->|"对不上 · 已停用"| E["404"]
   U --> UA{"看 User-Agent"}
-  UA -->|"浏览器"| P["落地页<br/>用量 · 一键导入 · 二维码<br/>客户端下载 · 临时共享"]
-  UA -->|"代理客户端"| F{"要哪种格式"}
   S --> F
-  F -->|"默认"| F1["通用链接(base64)"]
-  F -->|"?format=clash"| F2["Clash / Mihomo YAML"]
-  F -->|"?format=json"| F3["sing-box 完整配置"]
+  UA -->|"浏览器"| P["落地页"]
+  UA -->|"代理客户端"| F{"要哪种格式"}
+  F -->|"默认"| F1["通用链接"]
+  F -->|"?format=clash"| F2["Clash YAML"]
+  F -->|"?format=json"| F3["sing-box 配置"]
 
-  classDef hit fill:#ecfdf5,stroke:#16a34a,color:#14532d
-  classDef bad fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
-  class U,S hit
-  class E bad
+  classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
+  classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
+  classDef data fill:#334155,stroke:#0f172a,color:#ffffff,stroke-width:1px
+  classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
+  classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
+  class U,S exit
+  class E warn
+  class P,F1,F2,F3 svc
+  class Q who
 ```
 
 > 三种格式里的节点都是同一套来源:**用户已分配的线路 × 该线路已部署的服务器**,再拼上外部节点与外部订阅。所以加一台服务器,所有人的订阅里自动多出对应节点。分配也可以细到入口:一条线路部署在几台服务器上就是几个入口,给用户 / 套餐 / 代理授权时可以只勾其中某台的,订阅里就只出拿到的那些。
@@ -177,16 +185,14 @@ sequenceDiagram
   participant M as 主服务器
   participant N as 副服务器
 
-  rect rgb(239, 246, 255)
-    Note over M,N: 每 5 秒一轮
-    M->>N: 推快照:线路 / 上游 / 用户 / 凭据 / 代理 + 配置修订号
-    N->>N: 修订号没变就什么都不做,变了才重载数据面
-    M->>N: 拉报告
-    N--)M: 自上次游标以来的流量增量 + 在线 IP
-  end
-  M->>M: 汇总用量 · 设备数跨机取并集 · 判定配额与到期
-  M->>N: 超量 / 到期 / 被停用的用户,下一轮快照里就没了
-  Note over M,N: 副机掉线期间照常转发,<br/>恢复后按游标补齐流量,不会重复计费
+  Note over M,N: 每 5 秒一轮
+  M->>N: 推快照:线路 / 上游 / 用户 / 凭据 + 修订号
+  N->>N: 修订号没变就什么都不做
+  M->>N: 拉报告
+  N--)M: 流量增量 · 在线 IP · 上游巡检结果
+  M->>M: 汇总用量 · 设备数跨机取并集 · 判定配额
+  M->>N: 超量 / 到期的用户,下一轮快照里就没了
+  Note over M,N: 副机掉线期间照常转发,<br/>恢复后按游标补齐,不会重复计费
 ```
 
 ### 数据模型
@@ -195,8 +201,8 @@ sequenceDiagram
 erDiagram
   RESELLER ||--o{ USER : "名下用户"
   RESELLER ||--o{ PLAN : "自己的套餐"
-  RESELLER }o--o{ LINE : "被授权的线路"
-  USER }o--o{ LINE : "user_lines 分配"
+  RESELLER }o--o{ LINE : "被授权的线路(可收窄到某几台)"
+  USER }o--o{ LINE : "分配(可细到某台服务器上的入口)"
   PLAN ||..o{ USER : "建号时套用"
   LINE }o--|| UPSTREAM : "从哪出去"
   LINE }o--o{ NODE : "部署在哪几台"
@@ -217,7 +223,7 @@ erDiagram
   }
   RESELLER {
     int64 quota "流量 / 带宽 / 设备额度"
-    int64 expiry "到期时间"
+    int user_limit "最多能建多少用户"
     json page "自己的订阅标题与落地页文案"
   }
 ```
@@ -231,7 +237,9 @@ erDiagram
 | 5 秒 | 主机推快照给副机、拉回流量与在线 IP | `hub/` |
 | 10 分钟 | WAL 检查点,让运行中的 .db 随时可安全复制 | `runner/` |
 | 6 小时 | 查一次有没有新版本(只查,不自己更新) | `selfupdate/` |
-| 每天 | 清理过期时序数据、证书续期检查、日报 | `jobs/` `runner/` |
+| 1 小时 | 按各自的保留天数清理流量时序、订阅访问日志、审计日志 | `jobs/` |
+| 按设置(默认 10 分钟)| 巡检上游:每台只测自己线路用到的那些,结果汇总回主机 | `monitor/` |
+| 每天 | 证书续期检查、日报 | `runner/` `monitor/` |
 
 ### 代码结构
 

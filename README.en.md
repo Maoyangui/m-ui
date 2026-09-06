@@ -72,42 +72,47 @@ More screenshots (lines, landing page, Chinese UI) live in [docs/screenshots](do
 
 ## Architecture
 
-One binary runs four things: the **panel** (admin UI and API), the **subscription server** (where clients fetch their config), the **data plane** (embedded sing-box, where traffic actually flows) and **background work** (stats, quota enforcement, health checks, sync). They share one SQLite file, so a click in the panel is visible to the subscription server and the data plane immediately.
+One binary runs four things: the **panel** (admin UI and API), the **subscription server** (where clients fetch their config), the **data plane** (embedded sing-box, where traffic actually flows) and **background work** (stats, quota enforcement, upstream probes, log cleanup, master/node sync). They share one SQLite file, so a click in the panel is visible to the subscription server and the data plane immediately.
 
 ### What runs on one server
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph WHO["Who connects"]
-    direction TB
-    ADM["Admin browser"]
-    DLR["Reseller browser"]
-    APP["User's client<br/>Clash · sing-box · Shadowrocket"]
+    direction LR
+    ADM["Admin"]
+    DLR["Reseller"]
+    APP["User's client"]
   end
 
   subgraph PROC["One m-ui process"]
-    direction TB
-    WEB["Panel<br/>sessions · API · reseller scope"]
-    SUB["Subscription server<br/>landing page · 3 formats · sharing"]
-    CORE["Data plane<br/>embedded sing-box"]
-    BG["Background<br/>stats · quota · probes · sync"]
+    direction LR
+    WEB["Panel"]
+    SUB["Subscriptions"]
+    CORE["Data plane · sing-box"]
+    BG["Background"]
   end
 
   ADM -->|":2053 /app/"| WEB
   DLR -->|":2054 /dl/"| WEB
   APP -->|":2056 /sub/"| SUB
-  APP ==>|"line ports<br/>the actual traffic"| CORE
-  WEB -.->|"hot user update / hot outbound swap / restart"| CORE
-  CORE -.->|"traffic deltas · online IPs"| BG
-  WEB --> DB[("m-ui.db<br/>SQLite · WAL")]
+  APP ==>|"line ports · traffic"| CORE
+  WEB -.->|"hot reload"| CORE
+  CORE -.->|"traffic · IPs"| BG
+  WEB --> DB[("m-ui.db")]
   SUB --> DB
   BG --> DB
-  CORE ==> OUT["Exit<br/>direct · WARP · upstream"]
+  CORE ==> OUT["Exit"]
 
-  classDef box fill:#eff6ff,stroke:#2563eb,color:#1e3a8a
-  classDef store fill:#f8fafc,stroke:#64748b,color:#334155
-  class WEB,SUB,CORE,BG box
-  class DB,OUT store
+  classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
+  classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
+  classDef data fill:#334155,stroke:#0f172a,color:#ffffff,stroke-width:1px
+  classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
+  classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
+  class ADM,DLR,APP who
+  class WEB,SUB,CORE,BG svc
+  class DB data
+  class OUT exit
 ```
 
 > Ports and paths are all configurable; the values above are the defaults. The panel and the reseller panel are the same frontend — the session scope decides what you can see.
@@ -121,23 +126,22 @@ sequenceDiagram
   autonumber
   participant B as Browser
   participant W as Panel
-  participant D as SQLite
-  participant V as sing-box parser
-  participant C as Data plane
+  participant D as DB
+  participant S as sing-box
 
-  B->>W: Save a line / user / upstream
-  W->>W: Validate fields + check the port<br/>(including ports held by other software)
-  W->>D: BEGIN IMMEDIATE and write
-  W->>V: Render the full config from the DB and dry-run it
-  alt Does not parse
-    V--)W: error
-    W->>D: rollback
-    W--)B: Rejected with a reason — nothing in production moved
-  else Parses
-    V--)W: ok
-    W->>D: commit
-    W->>C: Reload, graded by what changed
-    Note over W,C: user → swap the inbound user table, nobody else drops<br/>upstream → hot-swap the outbound, no restart<br/>line → restart the data plane, roll back if it fails to come up
+  B->>W: Save line / user
+  W->>W: Validate + port check
+  W->>D: Write in a tx
+  W->>S: Dry-run config
+  alt Fails
+    S--)W: Error
+    W->>D: Roll back
+    W--)B: Refused, live untouched
+  else Passes
+    S--)W: OK
+    W->>D: Commit
+    W->>S: Reload by level
+    Note over W,S: users → swap user table<br/>upstream → hot-swap outbound<br/>line → restart, can roll back
     W--)B: Saved
   end
 ```
@@ -145,24 +149,28 @@ sequenceDiagram
 ### How a subscription request is answered
 
 ```mermaid
-flowchart LR
-  Q["GET /sub/&lt;key&gt;"] --> WHO{"Whose key is this"}
-  WHO -->|"username"| U["User found"]
-  WHO -->|"random token<br/>reseller users / username-as-URL turned off"| U
-  WHO -->|"temporary share token"| S["Same user<br/>but a second credential set"]
-  WHO -->|"no match · disabled · reseller expired"| E["404"]
-  U --> UA{"Check the User-Agent"}
-  UA -->|"browser"| P["Landing page<br/>usage · one-tap import · QR<br/>client downloads · sharing"]
-  UA -->|"proxy client"| F{"Which format"}
+flowchart TD
+  Q["GET /sub/&lt;key&gt;"] --> WHO{"Whose key is it"}
+  WHO -->|"username / random token"| U["Matched user"]
+  WHO -->|"share token"| S["Same user<br/>separate credentials"]
+  WHO -->|"no match · disabled"| E["404"]
+  U --> UA{"User-Agent"}
   S --> F
-  F -->|"default"| F1["Universal links (base64)"]
-  F -->|"?format=clash"| F2["Clash / Mihomo YAML"]
-  F -->|"?format=json"| F3["Full sing-box config"]
+  UA -->|"browser"| P["Landing page"]
+  UA -->|"proxy client"| F{"Which format"}
+  F -->|"default"| F1["Universal links"]
+  F -->|"?format=clash"| F2["Clash YAML"]
+  F -->|"?format=json"| F3["sing-box config"]
 
-  classDef hit fill:#ecfdf5,stroke:#16a34a,color:#14532d
-  classDef bad fill:#fef2f2,stroke:#dc2626,color:#7f1d1d
-  class U,S hit
-  class E bad
+  classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
+  classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
+  classDef data fill:#334155,stroke:#0f172a,color:#ffffff,stroke-width:1px
+  classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
+  classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
+  class U,S exit
+  class E warn
+  class P,F1,F2,F3 svc
+  class Q who
 ```
 
 > All three formats build nodes the same way: **the lines assigned to the user × the servers each line is deployed on**, plus external nodes and external subscriptions. Add a server and every subscription grows the matching nodes on its own. Assignment can go down to the entry: a line deployed on several servers is several entries, and users, plans and reseller grants can pick just one server's entry, so the subscription lists only what was given.
@@ -177,48 +185,46 @@ sequenceDiagram
   participant M as Master
   participant N as Node
 
-  rect rgb(239, 246, 255)
-    Note over M,N: every 5 seconds
-    M->>N: Push a snapshot: lines / upstreams / users / credentials / resellers + a config revision
-    N->>N: Same revision → do nothing, changed → reload the data plane
-    M->>N: Pull report
-    N--)M: Traffic since the last cursor + online IPs
-  end
-  M->>M: Roll up usage · union device counts across servers · judge quota and expiry
-  M->>N: Users over quota, expired or disabled simply aren't in the next snapshot
-  Note over M,N: A disconnected node keeps forwarding,<br/>when it returns, the cursor fills the gap without double counting
+  Note over M,N: Every 5 seconds
+  M->>N: Push snapshot: lines / upstreams / users + revision
+  N->>N: Same revision, nothing to do
+  M->>N: Pull report
+  N--)M: Traffic delta · online IPs · upstream health
+  M->>M: Roll up usage · merge device IPs · judge quota
+  M->>N: Over-quota and expired users leave the next snapshot
+  Note over M,N: A node keeps forwarding while offline,<br/>catches up by cursor, never double-counts
 ```
 
 ### Data model
 
 ```mermaid
 erDiagram
-  RESELLER ||--o{ USER : "owns"
-  RESELLER ||--o{ PLAN : "own plans"
-  RESELLER }o--o{ LINE : "granted lines"
-  USER }o--o{ LINE : "user_lines"
+  RESELLER ||--o{ USER : "their users"
+  RESELLER ||--o{ PLAN : "their own plans"
+  RESELLER }o--o{ LINE : "granted lines (can be one server only)"
+  USER }o--o{ LINE : "assigned (down to one server's entry)"
   PLAN ||..o{ USER : "applied on create"
-  LINE }o--|| UPSTREAM : "exits through"
+  LINE }o--|| UPSTREAM : "where it exits"
   LINE }o--o{ NODE : "deployed on"
   USER ||--o{ SUBLOG : "subscription fetches"
 
   USER {
-    string name "subscription key · inbound credential name"
-    json credentials "password / UUID per protocol"
+    string name "subscription key · inbound credential"
+    json credentials "per-protocol password / UUID"
     int64 volume_used "quota and usage"
-    int64 expiry "expiry date"
-    int device_limit "simultaneous devices"
+    int64 expiry "expiry"
+    int device_limit "concurrent devices"
   }
   LINE {
     string protocol "hysteria2 / vless / ..."
     int port "listen port"
     json tls_transport "TLS and transport"
-    json node_ids "servers it is deployed on"
+    json node_ids "which servers"
   }
   RESELLER {
     int64 quota "traffic / bandwidth / device budget"
-    int64 expiry "expiry date"
-    json page "own profile title and landing copy"
+    int user_limit "how many users they may create"
+    json page "their own subscription title and landing copy"
   }
 ```
 
@@ -231,7 +237,9 @@ erDiagram
 | 5s | Master pushes snapshots to nodes and pulls back traffic and online IPs | `hub/` |
 | 10m | WAL checkpoint, so the live .db is always safe to copy | `runner/` |
 | 6h | Check whether a newer release exists (check only, never auto-install) | `selfupdate/` |
-| daily | Prune old time series, renew certificates, send the daily report | `jobs/` `runner/` |
+| 1h | Prune time series, subscription access log and audit log, each by its own retention | `jobs/` |
+| per setting (10m default) | Probe upstreams — every server checks only what its own lines use, results roll up to the master | `monitor/` |
+| daily | Renew certificates, send the daily report | `runner/` `monitor/` |
 
 ### Code layout
 
