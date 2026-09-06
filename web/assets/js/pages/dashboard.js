@@ -1,7 +1,7 @@
 import { state, load, isReseller } from '../app.js';
 import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, fmtBytes, fmtDuration, fmtRelative, fmtTime, tzOffsetMinutes, toast, registerActions, badge, dot, empty } from '../ui.js';
+import { esc, fmtBytes, fmtDuration, fmtRelative, fmtTime, tzOffsetMinutes, toast, registerActions, badge, dot, empty, setHTML } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
 
 export const title = () => t('nav.dashboard');
@@ -154,7 +154,7 @@ async function renderConns() {
   const el = document.getElementById('dash-conns');
   if (!el) return;
   const rows = await get('conns/recent');
-  if (!rows.length) { el.innerHTML = empty(t('dash.noConns')); return; }
+  if (!rows.length) { setHTML(el, empty(t('dash.noConns'))); return; }
   const multi = rows.some(c => c.server);
   el.innerHTML = `<div class="table-wrap"><table class="grid conns"><thead><tr><th>IP</th><th>${t('logs.user')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 15).map(c =>
     `<tr>
@@ -191,8 +191,8 @@ function renderStats() {
     [t('dash.mem'), s.memTotal ? Math.round(s.memUsed / s.memTotal * 100) + '%' : '—', s.memTotal ? `${fmtBytes(s.memUsed, 1)} / ${fmtBytes(s.memTotal, 1)}` : ''],
   ];
   if (nodeSummary) cards.splice(3, 0, [t('nav.nodes'), `${nodeSummary.online} / ${nodeSummary.total}`, nodeSummary.bad.length ? '✗ ' + nodeSummary.bad.join(', ') : t('common.online'), 'nodes', nodeSummary.bad.length ? 'bad' : '']);
-  document.getElementById('dash-stats').innerHTML = cards.map(([k, v, sub, link, kind]) =>
-    `<${link ? `a href="#/${link}"` : 'div'} class="stat ${kind || ''}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="s">${esc(sub)}</div></${link ? 'a' : 'div'}>`).join('');
+  setHTML('dash-stats', cards.map(([k, v, sub, link, kind]) =>
+    `<${link ? `a href="#/${link}"` : 'div'} class="stat ${kind || ''}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="s">${esc(sub)}</div></${link ? 'a' : 'div'}>`).join(''));
 }
 
 async function refreshNodeSummary() {
@@ -207,13 +207,13 @@ async function refreshNodeSummary() {
 
 function renderCore() {
   const s = state.status;
-  document.getElementById('dash-core').innerHTML = `
+  setHTML('dash-core', `
     <dt>${t('common.status')}</dt><dd>${badge(s.coreRunning ? t('dash.running') : t('dash.stopped'), s.coreRunning ? 'ok' : 'danger')}</dd>
     <dt>${t('dash.uptime')}</dt><dd>${fmtDuration(s.uptime)}</dd>
     <dt>${t('set.webDomain')}</dt><dd>${esc(s.domain || '—')}</dd>
     <dt>${t('set.role.current')}</dt><dd>${s.role === 'node' ? t('role.node') : t('role.master')}</dd>
     <dt>${t('set.version')}</dt><dd class="mono">${esc(s.version || '')}</dd>
-    <dt>goroutines</dt><dd class="mono">${s.goroutines ?? ''}</dd>`;
+    <dt>goroutines</dt><dd class="mono">${s.goroutines ?? ''}</dd>`);
 }
 
 async function renderChart() {
@@ -228,11 +228,11 @@ function renderOnline() {
   const el = document.getElementById('dash-online');
   if (!el) return;
   const o = state.onlines;
-  if (!o.users.length) { el.innerHTML = empty(t('dash.noOnline')); return; }
-  el.innerHTML = `<div class="chips">${o.users.map(u => {
+  if (!o.users.length) { setHTML(el, empty(t('dash.noOnline'))); return; }
+  setHTML(el, `<div class="chips">${o.users.map(u => {
     const usr = state.users.find(x => x.name === u); // 用户列表是进用户页才拉的,这里可能还没有
     return `<a class="chip" href="#/users" title="${usr ? (usr.onlineIps || []).length + ' IP' : ''}">${dot(true)}${esc(u)} <span class="muted">${o.connCounts[u] || 0} ${t('dash.conns')}</span></a>`;
-  }).join('')}</div>`;
+  }).join('')}</div>`);
 }
 
 async function renderAudit() {

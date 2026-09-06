@@ -32,6 +32,10 @@ const resellerNav = ['dashboard', 'users', 'plans', 'account'];
 export const isReseller = () => (state.status || {}).scope === 'reseller';
 const navFor = () => (isReseller() ? resellerNav : masterNav);
 let current = null;
+// routeGen 每换一次页面加一。渲染是异步的,中途换页时旧的那次渲染必须整个作废:
+// 它既不该再往页面里写内容,它抛的错也不该显示出来(那正是"点了 A 却看到报错/看到 B"的来源)。
+let routeGen = 0;
+let routing = false;
 
 // ---- 数据加载 ----
 // 进哪个页面才拉哪个页面的数据(见下面 PAGE_DATA);拉过的留在 state 里,切换页面不重复请求。
@@ -319,7 +323,9 @@ function pageName() {
 async function route(force = false) {
   const name = pageName();
   if (!force && current === name && pages[name].keepAlive) return;
+  const gen = ++routeGen;
   current = name;
+  routing = true;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.page === name));
   const page = pages[name];
   document.getElementById('page-title').textContent = page.title();
@@ -328,33 +334,58 @@ async function route(force = false) {
   closeDrawer();
   const el = document.getElementById('page');
   el.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
-  try { await ensure(...(PAGE_DATA[name] || [])); await page.render(el); }
-  catch (e) { if (e.status !== 401) el.innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+  try {
+    await ensure(...(PAGE_DATA[name] || []));
+    if (gen !== routeGen) return; // 已经切到别的页面了,这次渲染作废
+    await page.render(el);
+  } catch (e) {
+    if (gen !== routeGen) return; // 过时渲染抛的错,不能盖掉新页面
+    if (e.status !== 401) el.innerHTML = `<div class="card err">${esc(e.message)}</div>`;
+  } finally {
+    if (gen === routeGen) routing = false;
+  }
+  if (gen !== routeGen) return;
   // 副机上线路/上游/用户/套餐/外部节点由主机下发:只读展示,隐藏增删改按钮
   const readOnly = state.status.role === 'node' && ['lines', 'upstreams', 'users', 'plans', 'exts'].includes(name);
   el.classList.toggle('node-readonly', readOnly);
   if (readOnly) el.insertAdjacentHTML('afterbegin', `<div class="alert-bar info">${t('app.nodeReadOnly')}</div>`);
+  bumpRefresh(); // 换页后立刻取一次新数据:进来看到的不该是上次缓存的旧值
 }
 window.addEventListener('hashchange', () => route());
 
 // ---- 定时刷新(仅可见时)----
-// 上一轮还没回来就跳过这一轮:服务器慢或网络差时,不会把同样的请求一轮轮堆起来
+// 节奏:平时 5 秒一轮,和主副机同步的 5 秒对齐(副机那部分数据本来就是 5 秒一更,再快也没有更新的东西);
+// 刚操作过或刚换页的十几秒内 2 秒一轮,让连接数、在线状态这类本机数据立刻跟上。
+// 上一轮还没回来就跳过这一轮:服务器慢或网络差时,不会把同样的请求一轮轮堆起来。
+const REFRESH_SLOW = 5000, REFRESH_FAST = 2000, FAST_WINDOW = 12000;
 let refreshing = false;
+let fastUntil = 0;
 export async function refreshNow() {
-  if (refreshing) return false;
+  if (refreshing || routing) return false; // 页面正在渲染时不插队,免得往还没画好的 DOM 上写
   refreshing = true;
+  const gen = routeGen;
   try {
     await load('status', 'onlines');
+    if (gen !== routeGen) return false; // 拉数据期间换了页,这一轮的结果不该画到新页面上
     const page = pages[current];
     if (page && page.tick) await page.tick();
   } catch {}
   finally { refreshing = false; }
   return true;
 }
-setInterval(() => {
-  if (document.getElementById('app').hidden || document.hidden) return;
+// bumpRefresh 进入"快刷"窗口并立刻刷一次(换页后、用户操作后)
+export function bumpRefresh() {
+  fastUntil = Date.now() + FAST_WINDOW;
   refreshNow();
-}, 10000);
+}
+document.addEventListener('mui:acted', () => { fastUntil = Date.now() + FAST_WINDOW; });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) bumpRefresh(); });
+(function refreshLoop() {
+  setTimeout(() => {
+    if (!document.getElementById('app').hidden && !document.hidden) refreshNow();
+    refreshLoop();
+  }, Date.now() < fastUntil ? REFRESH_FAST : REFRESH_SLOW);
+})();
 
 // ---- 启动 ----
 get('status').then(async s => { state.status = s; await enterApp(); upgradeNotice(); }).catch(showLogin);

@@ -2,7 +2,7 @@
 import { state, load } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, registerActions, badge, field, check, fv, fchk, fmtBytes, fmtDay, progress } from '../ui.js';
+import { esc, toast, confirm, registerActions, badge, field, check, fv, fchk, fmtBytes, fmtDay, progress, setHTML } from '../ui.js';
 
 export const title = () => t('acct.title');
 export const subtitle = () => t('acct.subtitle');
@@ -72,7 +72,7 @@ export async function render(el) {
 function bindApiSwitch() {
   const sw = document.getElementById('acct-api-on');
   if (sw) sw.addEventListener('change', async e => {
-    try { api = await put('self/api', { enabled: e.target.checked }); toast(t('acct.apiSaved'), 'ok'); document.getElementById('acct-api').innerHTML = apiCard(); bindApiSwitch(); }
+    try { api = await put('self/api', { enabled: e.target.checked }); toast(t('acct.apiSaved'), 'ok'); setHTML('acct-api', apiCard()); bindApiSwitch(); }
     catch (err) { toast(err.message, 'err'); e.target.checked = !e.target.checked; }
   });
 }
@@ -133,7 +133,7 @@ registerActions({
   },
   'acct.apiRotate': async () => {
     if (!await confirm(t('acct.apiRotateConfirm'), { danger: true })) return;
-    try { api = await post('self/api/rotate'); toast(t('acct.apiRotated'), 'ok'); document.getElementById('acct-api').innerHTML = apiCard(); bindApiSwitch(); }
+    try { api = await post('self/api/rotate'); toast(t('acct.apiRotated'), 'ok'); setHTML('acct-api', apiCard()); bindApiSwitch(); }
     catch (e) { toast(e.message, 'err'); }
   },
   'acct.first': async () => {
@@ -152,10 +152,10 @@ registerActions({
     } catch (e) { toast(e.message, 'err'); }
   },
   'acct.totpGen': async () => {
-    try { const r = await get('self/totp'); pendingSecret = r.secret; document.getElementById('acct-totp').innerHTML = totpCard(); }
+    try { const r = await get('self/totp'); pendingSecret = r.secret; setHTML('acct-totp', totpCard()); }
     catch (e) { toast(e.message, 'err'); }
   },
-  'acct.totpCancel': () => { pendingSecret = ''; document.getElementById('acct-totp').innerHTML = totpCard(); },
+  'acct.totpCancel': () => { pendingSecret = ''; setHTML('acct-totp', totpCard()); },
   'acct.totpOn': async () => {
     try { await post('self/totp', { code: fv('totp-code') }); pendingSecret = ''; await refresh(); toast(t('adm.totpEnabled'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }

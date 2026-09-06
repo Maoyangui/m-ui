@@ -130,6 +130,27 @@ export function drawerOpen() { return !document.getElementById('drawer').hidden;
 // ---- 事件委托:data-act="name" data-id="..." ----
 const actions = {};
 export function registerActions(map) { Object.assign(actions, map); }
+
+// setHTML / setText 安全写入:
+//   1) 元素不在就跳过。异步渲染回来时页面可能已经切走,直接写 null 会抛异常,
+//      而这个异常会被上一次路由的错误处理接住,把报错糊到刚画好的新页面上。
+//   2) 内容和上次一字不差也跳过。刷新变快之后,整张表每几秒重画一次会闪、会丢滚动位置,
+//      内容没变就不动 DOM。
+export function setHTML(target, html) {
+  const el = typeof target === 'string' ? document.getElementById(target) : target;
+  if (!el) return false;
+  if (el.__muiHTML === html) return false;
+  el.__muiHTML = html;
+  el.innerHTML = html;
+  return true;
+}
+
+export function setText(target, text) {
+  const el = typeof target === 'string' ? document.getElementById(target) : target;
+  if (!el || el.textContent === text) return false;
+  el.textContent = text;
+  return true;
+}
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
   if (!el) return;
@@ -137,6 +158,8 @@ document.addEventListener('click', e => {
   if (!fn) return;
   e.preventDefault();
   fn(el.dataset.id, el, e);
+  // 用户刚动过手,接下来十几秒刷快一点,好让连接数、在线状态这类立刻跟上(app.js 监听)
+  document.dispatchEvent(new CustomEvent('mui:acted'));
 });
 document.addEventListener('change', e => {
   const el = e.target.closest('[data-change]');

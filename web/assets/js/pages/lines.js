@@ -1,7 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce } from '../ui.js';
+import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML } from '../ui.js';
 
 const selected = new Set(); // 批量设置勾选的线路 id
 export const title = () => t('line.title');
@@ -89,7 +89,7 @@ function renderRows() {
   if (selAll) selAll.checked = rows.length > 0 && rows.every(l => selected.has(l.id));
   // 库里一条线路都没有(不是搜索没结果):说清线路是什么,并给出第一步
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="10">${state.lines.length ? empty() : `<div class="empty-guide"><p>${t('line.emptyFirst')}</p><button class="btn primary" data-act="line.add">${t('line.emptyFirstBtn')}</button></div>`}</td></tr>`;
+    setHTML(body, `<tr><td colspan="10">${state.lines.length ? empty() : `<div class="empty-guide"><p>${t('line.emptyFirst')}</p><button class="btn primary" data-act="line.add">${t('line.emptyFirstBtn')}</button></div>`}</td></tr>`);
     return;
   }
   const nodeIdsOf = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
@@ -98,7 +98,7 @@ function renderRows() {
     if (!ids.length) return `<span class="muted">${t('line.allServers')}</span>`;
     return ids.map(id => { const n = (state.nodes || []).find(x => x.id === id); return badge(n ? n.name : '#' + id, 'primary'); }).join(' ');
   };
-  body.innerHTML = rows.map(l => `
+  setHTML(body, rows.map(l => `
     <tr draggable="${query ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
       <td class="handle" title="拖动排序">⠿</td>
       <td><input type="checkbox" class="sel" data-change="line.sel" data-id="${l.id}" ${selected.has(l.id) ? 'checked' : ''}></td>
@@ -114,7 +114,7 @@ function renderRows() {
         <button class="btn sm" data-act="line.clone" data-id="${l.id}" title="${t('line.clone')}">⧉</button>
         <button class="btn sm danger" data-act="line.del" data-id="${l.id}">${t('common.delete')}</button>
       </td>
-    </tr>`).join('');
+    </tr>`).join(''));
   if (!query) enableDragSort(body);
 }
 

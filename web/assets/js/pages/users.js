@@ -1,7 +1,7 @@
 import { state, load, isReseller } from '../app.js';
 import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy } from '../ui.js';
+import { esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
 import { lineItems, keysFromRefs, linePicker, refLabels } from '../linepicker.js';
 
@@ -134,8 +134,8 @@ function renderRows() {
   const selAll = document.getElementById('sel-all');
   if (selAll) selAll.checked = rows.length > 0 && rows.every(u => selected.has(u.id));
   renderPager(total);
-  if (!rows.length) { body.innerHTML = `<tr><td colspan="8">${state.users.length ? empty() : firstUserGuide()}</td></tr>`; return; }
-  body.innerHTML = rows.map(u => {
+  if (!rows.length) { setHTML(body, `<tr><td colspan="8">${state.users.length ? empty() : firstUserGuide()}</td></tr>`); return; }
+  setHTML(body, rows.map(u => {
     const used = (u.up || 0) + (u.down || 0);
     const ips = (u.onlineIps || []).length;
     return `<tr class="${selected.has(u.id) ? 'selected' : ''}">
@@ -161,7 +161,7 @@ function renderRows() {
           <hr><button class="danger" data-act="user.del" data-id="${u.id}">${t('common.delete')}</button>
         </div></details>
       </td></tr>`;
-  }).join('');
+  }).join(''));
 }
 
 // 一个用户都还没有:告诉新手下一步是什么。没有线路先去建线路(代理没有线路是主面板还没分配)。
