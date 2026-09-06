@@ -8,7 +8,7 @@
   <p>线路 = 入口协议 + 端口 → 出口。协议:<b>Hysteria2</b>(支持端口跳跃)、<b>AnyTLS</b>、<b>TUIC</b>、<b>Trojan</b>、<b>VLESS</b>(Reality / Vision)、<b>VMess</b>、<b>Shadowsocks</b>(含 2022 系列),以及 SOCKS、HTTP、Mixed。传输层:WebSocket、gRPC、HTTPUpgrade、HTTP。每条线路可以部署到全部服务器或指定几台。快速添加自动填好空闲端口和合理参数;每次保存都经 sing-box 干跑,并检查端口是否与面板、其它线路、本机其它程序冲突。</p>
 
   <h2 id="upstreams">上游</h2>
-  <p>不直连时从哪出去:VLESS、VMess、Trojan、TUIC、Hysteria2、Shadowsocks、SOCKS 出站,粘贴分享链接即可导入。一键测延迟、定时巡检、故障 / 恢复告警,Cloudflare WARP 在面板里一键接入。改上游是热换出站,数据面不重启。</p>
+  <p>不直连时从哪出去:VLESS、VMess、Trojan、TUIC、Hysteria2、Shadowsocks、SOCKS 出站,粘贴分享链接即可导入。一键测延迟、定时巡检、故障 / 恢复告警,Cloudflare WARP 在面板里一键接入。<b>巡检在真正用这条上游的机器上做</b>:每台只测自己线路用到的那些,上游页一行里并排显示各服务器的延迟,告警会点名是哪台不通。改上游是热换出站,数据面不重启。</p>
 
   <h2 id="users">用户</h2>
   <ul>
@@ -43,10 +43,10 @@
   <h2 id="ops">运维</h2>
   <ul>
     <li><b>备份 / 还原</b>:数据库与证书打成一个 zip,每日定时备份,面板里还原,换机向导迁到新机器。</li>
-    <li><b>内核调优</b>与 <b>WARP</b> 安装在运维页完成,日志实时输出到浏览器。</li>
+    <li><b>内核调优</b>、<b>WARP</b> 安装、<b>限制系统日志占用</b>都在运维页完成,日志实时输出到浏览器。</li>
     <li><b>Telegram</b>:数据面、上游、副机故障告警,用户即将到期 / 用完提醒,按面板时区发日报。</li>
     <li><b>更新</b>:面板每 6 小时查一次 GitHub Releases;一键校验摘要、替换程序、重启。数据、证书、设置不动。副机也用同样的方式自己更新。</li>
-    <li>面板内看<b>日志</b>与<b>审计记录</b>;SSH 菜单(<code>m-ui</code>)负责端口、路径、密码与应急恢复。</li>
+    <li>面板内看<b>日志</b>与<b>审计记录</b>,订阅访问日志与审计各自可设自动清理天数;SSH 菜单(<code>m-ui</code>)负责端口、路径、密码与应急恢复。</li>
   </ul>
 
   <h2 id="security">安全</h2>

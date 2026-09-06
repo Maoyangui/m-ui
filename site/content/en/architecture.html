@@ -10,7 +10,7 @@
     <tr><td>Panel</td><td><code>:2053 /app/</code> (and <code>:2054 /dl/</code> for resellers)</td><td>Sessions, API, reseller scoping. Same frontend for both, the session decides what is visible.</td></tr>
     <tr><td>Subscription server</td><td><code>:2056 /sub/</code></td><td>Three formats, landing page, client-download page, temporary sharing, the "subscription unavailable" page.</td></tr>
     <tr><td>Data plane</td><td>line ports</td><td>Embedded sing-box: inbounds per line, outbounds per upstream, traffic and connection tracking, per-user limits.</td></tr>
-    <tr><td>Background</td><td>—</td><td>Stats every 10 s, quota judgment every minute, upstream probes, certificate renewal, backups, master/node sync every 5 s.</td></tr>
+    <tr><td>Background</td><td>—</td><td>Stats every 10 s, quota judgment every minute, upstream probes (each server checks only what it uses), log cleanup hourly, certificate renewal, backups, master/node sync every 5 s.</td></tr>
   </table>
   <p>All four share <code>m-ui.db</code> (SQLite in WAL mode). The panel writes, the data plane and subscription server read, so a click in the panel is visible everywhere immediately. There is no message queue, cache server or second database to run.</p>
 

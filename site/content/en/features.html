@@ -8,7 +8,7 @@
   <p>A line is inbound protocol + port → exit. Protocols: <b>Hysteria2</b> (with port hopping), <b>AnyTLS</b>, <b>TUIC</b>, <b>Trojan</b>, <b>VLESS</b> (Reality / Vision), <b>VMess</b>, <b>Shadowsocks</b> including the 2022 ciphers, plus SOCKS, HTTP and Mixed. Transports: WebSocket, gRPC, HTTPUpgrade, HTTP. Each line can be deployed to all servers or a chosen subset. Quick-add presets fill in a free port and sensible options; every save is dry-run through sing-box and port-checked against the panel, other lines and other processes on the box.</p>
 
   <h2 id="upstreams">Upstreams</h2>
-  <p>Where traffic exits when it should not go direct: VLESS, VMess, Trojan, TUIC, Hysteria2, Shadowsocks and SOCKS outbounds, importable from share links. One-click latency test, scheduled health checks with failure/recovery alerts, and Cloudflare WARP set up from inside the panel. Changing an upstream hot-swaps the outbound without restarting the data plane.</p>
+  <p>Where traffic exits when it should not go direct: VLESS, VMess, Trojan, TUIC, Hysteria2, Shadowsocks and SOCKS outbounds, importable from share links. One-click latency test, scheduled health checks with failure/recovery alerts, and Cloudflare WARP set up from inside the panel. <b>Health is measured on the servers that actually use the upstream</b>: each one checks only what its own lines need, the upstream row shows every server's latency side by side, and alerts name the server that cannot reach it. Changing an upstream hot-swaps the outbound without restarting the data plane.</p>
 
   <h2 id="users">Users</h2>
   <ul>
@@ -43,10 +43,10 @@
   <h2 id="ops">Operations</h2>
   <ul>
     <li><b>Backup / restore</b>: one zip with the database and certificates, scheduled daily backups, restore from the panel, a migration wizard for moving to a new machine.</li>
-    <li><b>Kernel tuning</b> and <b>WARP</b> installation from the Ops page, with logs streamed to the browser.</li>
+    <li><b>Kernel tuning</b>, <b>WARP</b> installation and <b>capping the system journal</b> from the Ops page, with logs streamed to the browser.</li>
     <li><b>Telegram</b>: alerts for data plane, upstream and node failures, users about to expire or run out, daily report in your time zone.</li>
     <li><b>Update</b>: the panel checks GitHub Releases every 6 hours; one click verifies the checksum, replaces the binary and restarts. Data, certificates and settings are untouched. Nodes update themselves the same way.</li>
-    <li><b>Logs</b> and <b>audit trail</b> in the panel; the SSH menu (<code>m-ui</code>) for port, path, password and emergency recovery.</li>
+    <li><b>Logs</b> and <b>audit trail</b> in the panel, each with its own auto-clean retention; the SSH menu (<code>m-ui</code>) for port, path, password and emergency recovery.</li>
   </ul>
 
   <h2 id="security">Security</h2>
