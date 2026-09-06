@@ -184,6 +184,10 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		disabled := s.detachLinesFromNode(id) // 只部署在这台机器上的线路会被停用,不留悬空引用
 		s.db.Delete(&model.Node{}, id)
 		s.db.Where("node_id = ?", id).Delete(&model.TrafficCursor{})
+		// 用户 / 代理"只要这台机器上的入口"的收窄行也要清掉:留着的话,这些人这条线路上
+		// 一台机器都匹配不到,订阅里会悄无声息地少节点。清掉之后按"没有收窄 = 全部服务器"处理。
+		s.db.Where("node_id = ?", id).Delete(&model.UserLineNode{})
+		s.db.Where("node_id = ?", id).Delete(&model.ResellerLineNode{})
 		s.audit(r, "node", "delete", node.Name)
 		if len(disabled) > 0 {
 			s.reloadAll("删除服务器 " + node.Name)

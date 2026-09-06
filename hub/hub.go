@@ -678,9 +678,7 @@ func (h *Hub) tick() {
 		h.remote[r.n.Id] = r.rep.Onlines
 		h.remoteLines[r.n.Id] = r.rep.OnlineLinesByIP
 		h.nodeNames[r.n.Id] = r.n.Name
-		if r.rep.Upstreams != nil {
-			h.upHealth[r.n.Id] = r.rep.Upstreams
-		}
+		h.upHealth[r.n.Id] = r.rep.Upstreams // 这一轮没有结果就清空:副机改了线路、不再用任何上游时不该留着旧数据
 		h.mu.Unlock()
 	}
 	h.forgetNodes(live)

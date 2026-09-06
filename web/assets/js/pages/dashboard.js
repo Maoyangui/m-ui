@@ -142,12 +142,12 @@ function renderResellerStats() {
   const pct = s.volume ? Math.min(100, Math.round((s.used || 0) / s.volume * 100)) : 0;
   const card = (label, value, sub, kind) => `<div class="stat ${kind || ''}"><div class="stat-label">${label}</div>
     <div class="stat-value">${value}</div>${sub ? `<div class="stat-sub">${sub}</div>` : ''}</div>`;
-  el.innerHTML = [
+  setHTML(el, [
     card(t('rs.used'), fmtBytes(s.used || 0), s.volume ? `/ ${fmtBytes(s.volume)} · ${pct}%` : t('common.unlimited'), pct >= 100 ? 'bad' : ''),
     card(t('rs.users'), `${s.enabledUsers || 0} / ${s.users || 0}`, t('common.enabled')),
     card(t('dash.onlineUsers'), s.onlineUsers || 0, ''),
     card(t('rs.online'), `${s.onlineDevices || 0}${s.deviceLimit ? ' / ' + s.deviceLimit : ''}`, t('rs.devicesSub')),
-  ].join('');
+  ].join(''));
 }
 
 async function renderConns() {

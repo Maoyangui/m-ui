@@ -114,6 +114,7 @@ func (s *Server) handleResellerItem(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		s.db.Where("reseller_id = ?", id).Delete(&model.ResellerLine{})
+		s.db.Where("reseller_id = ?", id).Delete(&model.ResellerLineNode{})
 		s.db.Delete(&model.Reseller{}, id)
 		s.audit(r, "reseller", "delete", rs.Name)
 		writeJSON(w, http.StatusOK, map[string]int{"users": len(users)})

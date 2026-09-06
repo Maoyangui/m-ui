@@ -64,6 +64,7 @@ type NodeHealth struct {
 type Monitor struct {
 	d        Deps
 	mu       sync.Mutex
+	runMu    sync.Mutex               // 串行化整轮巡检:面板点"立即巡检"时定时那轮可能正在跑,两轮同时跑会把失败次数多加一次
 	results  map[uint]*UpstreamHealth // 本机测出来的结果(副机上报的就是它)
 	alerted  map[string]bool          // "服务器 id:上游 id" → 已经告过警,避免同一条故障反复发
 	lastRun  int64
@@ -137,7 +138,7 @@ func (m *Monitor) tickUpstreams() {
 	if interval <= 0 {
 		return
 	}
-	if time.Now().Unix()-m.lastRun < int64(interval*60) {
+	if time.Now().Unix()-m.LastRun() < int64(interval*60) {
 		return
 	}
 	m.RunUpstreamCheck()
@@ -146,7 +147,11 @@ func (m *Monitor) tickUpstreams() {
 // RunUpstreamCheck 巡检本机线路用到的上游,返回状态发生变化(故障/恢复)的上游名。
 // 本机没有线路用到的上游一条都不测:测了也只是"从这台机器看通不通",既没人关心,还会误报。
 func (m *Monitor) RunUpstreamCheck() []string {
+	m.runMu.Lock()
+	defer m.runMu.Unlock()
+	m.mu.Lock()
 	m.lastRun = time.Now().Unix()
+	m.mu.Unlock()
 	threshold := m.settingInt("upstreamCheckFailThreshold", 2)
 	if threshold < 1 {
 		threshold = 1
@@ -292,7 +297,11 @@ func (m *Monitor) Results() []UpstreamHealth {
 }
 
 // LastRun 返回上次巡检时间(0=尚未运行)。
-func (m *Monitor) LastRun() int64 { return m.lastRun }
+func (m *Monitor) LastRun() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastRun
+}
 
 // ---- 数据面看门狗 ----
 
