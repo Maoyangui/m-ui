@@ -831,6 +831,7 @@ func (s *Server) deleteUser(u model.User, actor string) error {
 		return err
 	}
 	s.db.Where("user_id = ?", u.Id).Delete(&model.UserLine{})
+	s.db.Where("user_id = ?", u.Id).Delete(&model.UserLineNode{})
 	s.db.Where("user_id = ?", u.Id).Delete(&model.UserExt{})
 	s.run.KickUser(u.Name)
 	s.auditAs(actor, "user", "delete", u.Name)
