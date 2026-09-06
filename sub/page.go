@@ -76,32 +76,32 @@ type pageLine struct {
 }
 
 type pageData struct {
-	Lang                   string
-	Icon                   template.URL // 标签图标(内联 SVG data URI)
-	Title, Notice, Support string
-	Name                   string
-	StatusText, StatusKind string // active / expired / exhausted / disabled;ok / danger
-	Unavailable            bool   // 不是 active:页面顶部出状态卡
-	BuyURL                 string // 「选购 / 续费」按钮地址(空=不显示)
-	UsedText, TotalText    string
-	Percent                int
-	Unlimited              bool
-	ExpiryText             string
-	DaysLeft               int
-	HasExpiry, Expired     bool
-	ResetText              string
-	UpdateHours            int
-	SubLink, SubClash      string
-	SubJSON                string // sing-box 远程配置(SFA / SFI)
-	ShareOn                bool   // 是否显示"临时共享"卡片
-	ShareURL               string // 已生成的共享地址(空=未生成)
-	QRClash, QRLink        template.URL
-	Imports                []importLink
-	ClientsURL             template.URL // 客户端下载页(同一地址加 ?clients=1)
-	Lines                  []pageLine
-	Year                   int
-	Brand                  bool // 页脚 "Powered by m-ui":设置可关;代理的落地页不显示
-	TZOffset               int  // 面板时区相对 UTC 的分钟数,用量图的时间标签按它显示
+	Lang                    string
+	Icon                    template.URL // 标签图标(内联 SVG data URI)
+	Title, Notice, Support  string
+	Name                    string
+	StatusText, StatusKind  string // active / expired / exhausted / disabled;ok / danger
+	Unavailable             bool   // 不是 active:页面顶部出状态卡
+	BuyURL                  string // 「选购 / 续费」按钮地址(空=不显示)
+	UsedText, TotalText     string
+	Percent                 int
+	Unlimited               bool
+	ExpiryText              string
+	DaysLeft                int
+	HasExpiry, Expired      bool
+	ResetText               string
+	UpdateHours             int
+	SubLink, SubClash       string
+	SubJSON                 string // sing-box 远程配置(SFA / SFI)
+	ShareOn                 bool   // 是否显示"临时共享"卡片
+	ShareURL                string // 已生成的共享地址(空=未生成)
+	QRClash, QRLink, QRJSON template.URL
+	Imports                 []importLink
+	ClientsURL              template.URL // 客户端下载页(同一地址加 ?clients=1)
+	Lines                   []pageLine
+	Year                    int
+	Brand                   bool // 页脚 "Powered by m-ui":设置可关;代理的落地页不显示
+	TZOffset                int  // 面板时区相对 UTC 的分钟数,用量图的时间标签按它显示
 	// Shared:这是共享地址的落地页。只给借用者看得着的:临时共享标识、选购、公告、一键导入、订阅地址、节点;
 	// 本人的用量 / 到期 / 用量图 / 共享管理一概不出,状态卡也只说原因不带数字。
 	Shared bool
@@ -161,7 +161,7 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 	d := pageData{
 		Lang: pageLang(r), Icon: template.URL(brand.DataURI), Title: title, Notice: notice, Support: support, Name: user.Name,
 		UsedText: fmtBytesHuman(used), Unlimited: user.Volume == 0, UpdateHours: opt.UpdateHours,
-		SubLink: base, SubClash: clashURL, SubJSON: base + "?format=json", QRClash: template.URL(base + "/qr?format=clash"), QRLink: template.URL(base + "/qr?format=link"),
+		SubLink: base, SubClash: clashURL, SubJSON: base + "?format=json", QRClash: template.URL(base + "/qr?format=clash"), QRLink: template.URL(base + "/qr?format=link"), QRJSON: template.URL(base + "/qr?format=json"),
 		ClientsURL: template.URL(base + "?clients=1"),
 		Year:       time.Now().Year(), TZOffset: off / 60,
 	}
@@ -195,6 +195,8 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 	d.Imports = []importLink{
 		{Name: "Clash / Mihomo", Hint: "Clash Verge · FlClash · ClashMeta", Href: template.URL("clash://install-config?url=" + enc(clashURL) + "&name=" + enc(imp))},
 		{Name: "Shadowrocket", Hint: "iOS", Href: template.URL("shadowrocket://add/sub://" + base64.StdEncoding.EncodeToString([]byte(base)) + "?remark=" + enc(imp))},
+		// Nextin 的深链只有 url 一个参数(官方文档 wiki.nextinnet.com/guide/deeplink),用 Clash 地址;标题它每次刷新都从响应头读
+		{Name: "Nextin", Hint: "iOS · macOS · Apple TV", Href: template.URL("nextin://install-config?url=" + enc(clashURL))},
 		{Name: "sing-box", Hint: "SFA Android · SFI iOS · Desktop", Href: template.URL("sing-box://import-remote-profile?url=" + enc(base+"?format=json") + "#" + enc(imp))},
 		{Name: "Hiddify", Hint: "Android · iOS · Desktop", Href: template.URL("hiddify://import/" + clashURL)},
 		{Name: "Stash", Hint: "iOS · macOS", Href: template.URL("stash://install-config?url=" + enc(clashURL) + "&name=" + enc(imp))},
@@ -286,8 +288,11 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request, user model.U
 // serveQR 输出订阅地址二维码(PNG)。
 func (s *Server) serveQR(w http.ResponseWriter, r *http.Request, subPath, name string) {
 	target := publicBase(r, subPath, name)
-	if r.URL.Query().Get("format") == "clash" {
+	switch r.URL.Query().Get("format") {
+	case "clash":
 		target += "?format=clash"
+	case "json": // sing-box 远程配置
+		target += "?format=json"
 	}
 	png, err := qrcode.Encode(target, qrcode.Medium, 320)
 	if err != nil {

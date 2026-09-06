@@ -54,8 +54,15 @@ func TestBuildPage(t *testing.T) {
 	if !d.HasExpiry || d.Expired || d.StatusText != "active" || d.Lang != "zh" {
 		t.Fatalf("状态不符: %+v", d)
 	}
-	if len(d.Imports) != 5 || !strings.HasPrefix(string(d.Imports[0].Href), "clash://install-config?url=https%3A%2F%2Fsub.example") || !strings.HasPrefix(string(d.Imports[2].Href), "sing-box://import-remote-profile?url=") || d.SubJSON != "https://sub.example:2056/sub/alice?format=json" {
+	if len(d.Imports) != 6 || !strings.HasPrefix(string(d.Imports[0].Href), "clash://install-config?url=https%3A%2F%2Fsub.example") || !strings.HasPrefix(string(d.Imports[3].Href), "sing-box://import-remote-profile?url=") || d.SubJSON != "https://sub.example:2056/sub/alice?format=json" {
 		t.Fatalf("导入链接不符: %+v", d.Imports)
+	}
+	// Nextin:官方深链只有 url 一个参数,指向 Clash 地址(百分号编码);sing-box 二维码指向 json 地址
+	if d.Imports[2].Name != "Nextin" || string(d.Imports[2].Href) != "nextin://install-config?url="+url.QueryEscape("https://sub.example:2056/sub/alice?format=clash") {
+		t.Fatalf("Nextin 导入链接不符: %+v", d.Imports[2])
+	}
+	if string(d.QRJSON) != "https://sub.example:2056/sub/alice/qr?format=json" {
+		t.Fatalf("sing-box 二维码地址不符: %s", d.QRJSON)
 	}
 	if len(d.Lines) != 2 || d.Lines[1].TLS != "reality" {
 		t.Fatalf("节点列表不符: %+v", d.Lines)
@@ -99,7 +106,7 @@ func TestImportLinksUseProfileTitle(t *testing.T) {
 	want := url.QueryEscape("冒央会社")
 	for _, im := range d.Imports {
 		href := string(im.Href)
-		if im.Name == "Hiddify" { // 它的协议不带名字
+		if im.Name == "Hiddify" || im.Name == "Nextin" { // 这两家的协议不带名字(Nextin 每次刷新从响应头读标题)
 			continue
 		}
 		if !strings.Contains(href, want) {

@@ -52,7 +52,7 @@ button.sm{padding:.34rem .7rem;font-size:.78rem}button[disabled]{opacity:.6;curs
 .hint{color:var(--muted);font-size:.8rem;margin:.5rem 0 0}
 .getapp{display:inline-flex;align-items:center;gap:.25rem;color:var(--muted);text-decoration:none;font-size:.78rem;white-space:nowrap}.getapp:hover{color:var(--primary)}.getapp svg{width:14px;height:14px}
 .share .cardhead{margin-bottom:0}.share .link{margin-top:.7rem}.share form{margin:0}
-.qrs{display:flex;gap:1rem;justify-content:center;flex-wrap:wrap;margin-top:.9rem}.qrs figure{margin:0;text-align:center;font-size:.78rem;color:var(--muted)}.qrs img{width:150px;height:150px;border-radius:10px;border:1px solid var(--border);background:#fff;display:block;margin-bottom:.3rem}
+.qrs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.8rem;justify-items:center;margin-top:.9rem}.qrs figure{margin:0;text-align:center;font-size:.78rem;color:var(--muted);width:100%;max-width:150px}.qrs img{width:100%;aspect-ratio:1/1;height:auto;border-radius:10px;border:1px solid var(--border);background:#fff;display:block;margin:0 auto .3rem}
 .lines{display:flex;flex-direction:column;gap:.35rem}.line{display:flex;justify-content:space-between;align-items:center;font-size:.88rem;padding:.45rem .6rem;border-radius:8px;background:var(--bg)}.line .tags{display:flex;gap:.3rem}
 .tag{font-size:.68rem;padding:.08rem .4rem;border-radius:5px;border:1px solid var(--border);color:var(--muted);text-transform:uppercase}
 /* 折叠卡(节点 / 用量) */
@@ -115,7 +115,7 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
   <div class="card">
     <div class="cardhead"><h2>{{if eq .Lang "zh"}}一键导入{{else}}Import into an app{{end}}</h2><a class="getapp" href="{{.ClientsURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10"/><path d="M8.5 10.5 12 14l3.5-3.5"/><path d="M5 19h14"/></svg>{{if eq .Lang "zh"}}客户端下载{{else}}Get a client{{end}}</a></div>
     <div class="apps">{{range .Imports}}<a class="app" href="{{.Href}}"><b>{{.Name}}</b><span>{{.Hint}}</span></a>{{end}}</div>
-    <p class="hint">{{if eq .Lang "zh"}}其它客户端:复制下方地址,在 App 里"添加订阅"粘贴即可。Clash 类用 Clash 地址;sing-box(SFA / SFI)用 sing-box 地址;nextin、Surge、Quantumult X、Loon、Karing 等用通用地址。{{else}}Other apps: copy a link below and paste it into the app's "add subscription". Clash-family apps take the Clash link; sing-box (SFA / SFI) takes the sing-box link; nextin, Surge, Quantumult X, Loon, Karing and the rest take the universal link.{{end}}</p>
+    <p class="hint">{{if eq .Lang "zh"}}其它客户端:复制下方地址,在 App 里"添加订阅"粘贴即可。Clash 类用 Clash 地址;sing-box(SFA / SFI)用 sing-box 地址;Surge、Quantumult X、Loon、Karing 等用通用地址。{{else}}Other apps: copy a link below and paste it into the app's "add subscription". Clash-family apps take the Clash link; sing-box (SFA / SFI) takes the sing-box link; Surge, Quantumult X, Loon, Karing and the rest take the universal link.{{end}}</p>
   </div>
 
   <div class="card">
@@ -126,6 +126,7 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
     <div class="qrs">
       <figure><img src="{{.QRClash}}" alt="QR"><figcaption>Clash</figcaption></figure>
       <figure><img src="{{.QRLink}}" alt="QR"><figcaption>{{if eq .Lang "zh"}}通用链接{{else}}Links{{end}}</figcaption></figure>
+      <figure><img src="{{.QRJSON}}" alt="QR"><figcaption>sing-box</figcaption></figure>
     </div>
   </div>
 
