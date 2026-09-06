@@ -36,6 +36,11 @@ let current = null;
 // 它既不该再往页面里写内容,它抛的错也不该显示出来(那正是"点了 A 却看到报错/看到 B"的来源)。
 let routeGen = 0;
 let routing = false;
+// 渲染串行化:页面的 render 内部还会自己 await(账号页就是先取数据再画整页)。
+// 两次渲染重叠时,慢的那次会晚一步把内容写进 #page,把新页面顶掉,表现就是"点了 A 却显示 B"。
+// 让每次渲染排队等上一次结束,再判断自己是不是还当值,这样最后一次导航一定是赢家。
+// 请求本身有超时(见 api.js),渲染不会永远挂住,队列不会卡死。
+let renderQueue = Promise.resolve();
 
 // ---- 数据加载 ----
 // 进哪个页面才拉哪个页面的数据(见下面 PAGE_DATA);拉过的留在 state 里,切换页面不重复请求。
@@ -334,16 +339,21 @@ async function route(force = false) {
   closeDrawer();
   const el = document.getElementById('page');
   el.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
-  try {
-    await ensure(...(PAGE_DATA[name] || []));
-    if (gen !== routeGen) return; // 已经切到别的页面了,这次渲染作废
-    await page.render(el);
-  } catch (e) {
-    if (gen !== routeGen) return; // 过时渲染抛的错,不能盖掉新页面
-    if (e.status !== 401) el.innerHTML = `<div class="card err">${esc(e.message)}</div>`;
-  } finally {
-    if (gen === routeGen) routing = false;
-  }
+  const prev = renderQueue;
+  renderQueue = (async () => {
+    await prev.catch(() => {});
+    if (gen !== routeGen) return; // 排队期间又换页了,这一次直接不画
+    try {
+      await ensure(...(PAGE_DATA[name] || []));
+      if (gen !== routeGen) return;
+      await page.render(el);
+    } catch (e) {
+      if (gen !== routeGen) return; // 过时渲染抛的错,不能盖掉新页面
+      if (e.status !== 401) el.innerHTML = `<div class="card err">${esc(e.message)}</div>`;
+    }
+  })();
+  await renderQueue;
+  if (gen === routeGen) routing = false;
   if (gen !== routeGen) return;
   // 副机上线路/上游/用户/套餐/外部节点由主机下发:只读展示,隐藏增删改按钮
   const readOnly = state.status.role === 'node' && ['lines', 'upstreams', 'users', 'plans', 'exts'].includes(name);
