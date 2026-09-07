@@ -12,7 +12,7 @@ export function userPicker(host, { users, resellers, selected }) {
   let q = '';
   const tabs = [{ id: 0, name: t('up.master') }, ...(resellers || []).map(r => ({ id: r.id, name: r.name }))];
   const inTab = u => (tab === 0 ? !u.resellerId : u.resellerId === tab);
-  const hit = u => !q || (u.name || '').toLowerCase().includes(q) || (u.remark || '').toLowerCase().includes(q);
+  const hit = u => !q || (u.name || '').toLowerCase().includes(q); // 只按用户名找,列表也只显示用户名(备注可能是多行订单信息)
   const visible = () => users.filter(u => inTab(u) && hit(u));
   const countText = () => t('up.count', { users: userIds.size, resellers: resellerIds.size });
 
@@ -20,7 +20,7 @@ export function userPicker(host, { users, resellers, selected }) {
     const rows = visible();
     const whole = tab !== 0 && resellerIds.has(tab);
     if (!rows.length) return `<p class="hint">${t('up.none')}</p>`;
-    return `<div class="check-list lp-list">${rows.map(u => `<label class="${!u.enabled ? 'muted' : ''}"><input type="checkbox" class="up-cb" data-id="${u.id}" ${userIds.has(u.id) || whole ? 'checked' : ''} ${whole ? 'disabled' : ''}> ${esc(u.name)}${u.remark ? ` <span class="muted small">· ${esc(u.remark)}</span>` : ''}${!u.enabled ? ` <span class="muted small">(${t('common.disabled')})</span>` : ''}</label>`).join('')}</div>`;
+    return `<div class="check-list lp-list">${rows.map(u => `<label class="${!u.enabled ? 'muted' : ''}"><input type="checkbox" class="up-cb" data-id="${u.id}" ${userIds.has(u.id) || whole ? 'checked' : ''} ${whole ? 'disabled' : ''}> ${esc(u.name)}${!u.enabled ? ` <span class="muted small">(${t('common.disabled')})</span>` : ''}</label>`).join('')}</div>`;
   };
   const render = () => {
     host.innerHTML = `<div class="lp up">
