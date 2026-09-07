@@ -8,6 +8,7 @@ import * as lines from './pages/lines.js';
 import * as upstreams from './pages/upstreams.js';
 import * as users from './pages/users.js';
 import * as plans from './pages/plans.js';
+import * as rulesPage from './pages/rules.js';
 import * as resellers from './pages/resellers.js';
 import * as account from './pages/account.js';
 import * as exts from './pages/exts.js';
@@ -20,12 +21,12 @@ import * as settings from './pages/settings.js';
 import * as admin from './pages/admin.js';
 
 export const state = {
-  status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [], exts: [],
+  status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [], exts: [], rules: [], limitStates: [],
   onlines: { users: [], lines: [], upstreams: [], connCounts: {} },
 };
 
-const pages = { dashboard, lines, upstreams, exts, users, plans, resellers, account, nodes, cert, backup, ops, logs, admin, settings };
-const masterNav = ['dashboard', 'lines', 'upstreams', 'exts', 'users', 'resellers', 'plans', 'nodes',
+const pages = { dashboard, lines, upstreams, exts, users, plans, rules: rulesPage, resellers, account, nodes, cert, backup, ops, logs, admin, settings };
+const masterNav = ['dashboard', 'lines', 'upstreams', 'exts', 'users', 'resellers', 'plans', 'rules', 'nodes',
   'cert', 'backup', 'ops', 'logs', 'admin', 'settings'];
 // 代理面板:同一套前端,只留下代理用得上的几页
 const resellerNav = ['dashboard', 'users', 'plans', 'account'];
@@ -53,7 +54,7 @@ export async function ensure(...what) {
 }
 function resetState() {
   loaded.clear();
-  Object.assign(state, { status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [], exts: [],
+  Object.assign(state, { status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [], exts: [], rules: [], limitStates: [],
     onlines: { users: [], lines: [], upstreams: [], connCounts: {} } });
 }
 export async function load(...what) {
@@ -64,6 +65,8 @@ export async function load(...what) {
   if (all || what.includes('lines')) jobs.push(get('lines').then(l => { state.lines = l; }));
   if (!isReseller() && (all || what.includes('upstreams'))) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
   if (all || what.includes('users')) jobs.push(get('users').then(u => { state.users = u; }));
+  // 生效中的规则限速:用户列表据此打"限速中"标记(主面板才有;副机 / 代理拿不到就保持空)
+  if (!isReseller() && (all || what.includes('users'))) jobs.push(get('limitstates').then(l => { state.limitStates = l || []; }).catch(() => {}));
   if (all || what.includes('plans')) jobs.push(get('plans').then(p => { state.plans = p || []; }));
   if (!isReseller() && (all || what.includes('nodes'))) jobs.push(get('nodes').then(n => { state.nodes = (n && n.nodes) || []; }).catch(() => { state.nodes = []; }));
   if (!isReseller() && (all || what.includes('exts'))) jobs.push(get('exts').then(x => { state.exts = x || []; }).catch(() => { state.exts = []; }));
@@ -80,6 +83,7 @@ const PAGE_DATA = {
   exts: ['exts'],
   users: ['users', 'plans', 'lines', 'exts', 'onlines', 'nodes'],
   plans: ['plans', 'lines', 'nodes'],
+  rules: ['users'],
   resellers: ['lines', 'nodes'],
   nodes: ['nodes'],
 };

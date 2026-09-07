@@ -45,6 +45,7 @@
     <tr><th>Every</th><th>What</th></tr>
     <tr><td>5 s</td><td>Master → nodes snapshot push and report pull</td></tr>
     <tr><td>10 s</td><td>Read traffic and connections from the data plane, write per user / line / upstream stats</td></tr>
+    <tr><td>10 s</td><td>Evaluate limit rules (schedule / burst); active states ride the next snapshot to nodes</td></tr>
     <tr><td>1 min</td><td>Quota, expiry and periodic resets; data-plane watchdog</td></tr>
     <tr><td>10 min</td><td>WAL checkpoint so the live database is always safe to copy</td></tr>
     <tr><td>6 h</td><td>Version check against GitHub Releases (check only)</td></tr>

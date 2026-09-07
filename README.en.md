@@ -233,6 +233,7 @@ erDiagram
 | Every | What happens | Code |
 |---|---|---|
 | 10s | Read traffic and live connections from the data plane, write per user / line / upstream stats | `jobs/` |
+| 10s | Evaluate limit rules (schedule / burst); active states ride the next snapshot to nodes | `rules/` `jobs/` |
 | 1m | Judge quota, expiry and periodic resets — disable and kick where needed; data-plane watchdog | `jobs/` `monitor/` |
 | 5s | Master pushes snapshots to nodes and pulls back traffic and online IPs | `hub/` |
 | 10m | WAL checkpoint, so the live .db is always safe to copy | `runner/` |
@@ -252,6 +253,7 @@ erDiagram
 | `hub/` | Snapshot push, traffic reclaim, online aggregation between master and nodes |
 | `runner/` | Process orchestration, the three reload tiers and rollback, certificates, backups, external nodes |
 | `jobs/` `monitor/` | Stats, quota enforcement, cleanup, upstream probing and alerts |
+| `rules/` | Limit rules: schedule / burst evaluation, active states, overlay onto user limits |
 | `database/` | Models, SQLite open and migration |
 | `selfupdate/` `deploy/` | Version check and in-place update, install script |
 
@@ -348,6 +350,14 @@ Merge nodes from elsewhere into your subscriptions: a single share link, or a wh
 - Plans are templates: apply on create; *renew* applies again (usage reset, expiry extended); *extend* keeps usage and only extends expiry.
 - Bulk: generate by prefix, select rows for enable / disable / extend / reset / delete, CSV export.
 - User drawer: live devices (each IP shows the line and server it is using), 24h / 7d / 30d chart, subscription links and QR, kick.
+
+### Rules
+
+- Temporary speed limits on top of a user's own: **schedule** rules (chosen weekdays and a time window in the panel time zone, crossing midnight allowed) and **burst** rules (when combined up + down usage in the last N minutes reaches X GB, limit for M minutes, lift automatically, limit again on the next burst).
+- Targets combine freely: all users (including ones created later), every user of a reseller (including ones created later), individual users; the picker groups by master panel / each reseller and keeps your ticks when switching groups.
+- The master evaluates rules every 10 seconds, writes an active state per hit and ships it to nodes in the snapshot; master and nodes overlay the states on the user's own limits. Several rules on one user resolve to the strictest; a rule with "tighten only" (default) never exceeds the user's own limit, switch it off and the rule value overrides, which lets you relax limits at certain hours. A user can be under several burst rules, each triggering and timing independently.
+- Limit changes hit live connections immediately (token buckets are re-rated in place) — this also fixes the old behaviour where a changed user limit only applied after reconnecting.
+- The user list shows "Limited" with the rule name, the drawer lists every active limit with time left; triggers and lifts go to the audit log, with an optional Telegram notice. Rule limits are visible only in the panel and the external API, **never on the user's landing page**.
 
 ### Resellers
 

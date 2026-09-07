@@ -17,6 +17,7 @@ export const ICONS = {
   resellers: svg('<rect x="3" y="7.5" width="18" height="12" rx="2"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5"/><path d="M3 12h18"/>'),
   // 套餐:模板层叠
   plans: svg('<path d="M12 3.5 21 8l-9 4.5L3 8l9-4.5Z"/><path d="M3 12.5 12 17l9-4.5"/><path d="M3 16.5 12 21l9-4.5"/>'),
+  rules: svg('<path d="M4 7h9"/><circle cx="17" cy="7" r="2.5"/><path d="M20 17h-9"/><circle cx="7" cy="17" r="2.5"/>'),
   // 服务器:机架
   nodes: svg('<rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><path d="M7 7.5h.01M7 16.5h.01"/>'),
   // 证书:盾牌与勾

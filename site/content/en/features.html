@@ -2,7 +2,7 @@
 <article class="doc">
   <h1>Features</h1>
   <p class="lead">What the panel manages, grouped the way the sidebar is. All of it lives in one binary and one SQLite file.</p>
-  <nav class="toc"><a href="#lines">Lines</a><a href="#upstreams">Upstreams</a><a href="#users">Users</a><a href="#plans">Plans</a><a href="#resellers">Resellers</a><a href="#subs">Subscriptions</a><a href="#servers">Servers</a><a href="#cert">Certificates</a><a href="#ops">Operations</a><a href="#security">Security</a><a href="#api">API</a></nav>
+  <nav class="toc"><a href="#lines">Lines</a><a href="#upstreams">Upstreams</a><a href="#users">Users</a><a href="#plans">Plans</a><a href="#rules">Rules</a><a href="#resellers">Resellers</a><a href="#subs">Subscriptions</a><a href="#servers">Servers</a><a href="#cert">Certificates</a><a href="#ops">Operations</a><a href="#security">Security</a><a href="#api">API</a></nav>
 
   <h2 id="lines">Lines</h2>
   <p>A line is inbound protocol + port → exit. Protocols: <b>Hysteria2</b> (with port hopping), <b>AnyTLS</b>, <b>TUIC</b>, <b>Trojan</b>, <b>VLESS</b> (Reality / Vision), <b>VMess</b>, <b>Shadowsocks</b> including the 2022 ciphers, plus SOCKS, HTTP and Mixed. Transports: WebSocket, gRPC, HTTPUpgrade, HTTP. Each line can be deployed to all servers or a chosen subset. Quick-add presets fill in a free port and sensible options; every save is dry-run through sing-box and port-checked against the panel, other lines and other processes on the box.</p>
@@ -21,6 +21,9 @@
 
   <h2 id="plans">Plans</h2>
   <p>Templates for quota, duration, devices, speed and line assignment. Apply on create, on renewal or when extending. Resellers get their own plans, separate from yours.</p>
+
+  <h2 id="rules">Rules</h2>
+  <p>Temporary speed limits layered on top of a user's own. <b>Schedule</b>: chosen weekdays and a time window in the panel time zone, crossing midnight allowed. <b>Burst</b>: X GB within the last N minutes limits the user for M minutes, lifts automatically and applies again on the next burst; a user can be under several rules at once, each independent. Targets are all users, every user of a reseller, or individual users. The master evaluates rules and syncs them to every node; several hits resolve to the strictest, and the default "tighten only" never exceeds the user's own limit. Changes reach live connections immediately, no reconnect needed. The user list shows "Limited"; the landing page never does.</p>
 
   <h2 id="resellers">Resellers</h2>
   <p>Give a reseller a set of lines plus a traffic quota, a device pool, a bandwidth pool and an expiry. Per-user limits are up to the reseller; the pools cap what all of their users can do at the same time. They get their own panel (default port 2054, path <code>/dl</code>) where they create users and plans, set their own landing-page title, notice and contact, and optionally enable two-factor login. All usage rolls up to the reseller; when the reseller is over budget, expired or disabled, every user of theirs is cut off at once. Reseller users are never mixed into your own user list.</p>

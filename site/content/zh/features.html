@@ -2,7 +2,7 @@
 <article class="doc">
   <h1>功能</h1>
   <p class="lead">按侧栏的顺序,面板管的每一件事。全部在一个二进制、一个 SQLite 文件里。</p>
-  <nav class="toc"><a href="#lines">线路</a><a href="#upstreams">上游</a><a href="#users">用户</a><a href="#plans">套餐</a><a href="#resellers">代理</a><a href="#subs">订阅</a><a href="#servers">服务器</a><a href="#cert">证书</a><a href="#ops">运维</a><a href="#security">安全</a><a href="#api">API</a></nav>
+  <nav class="toc"><a href="#lines">线路</a><a href="#upstreams">上游</a><a href="#users">用户</a><a href="#plans">套餐</a><a href="#rules">规则</a><a href="#resellers">代理</a><a href="#subs">订阅</a><a href="#servers">服务器</a><a href="#cert">证书</a><a href="#ops">运维</a><a href="#security">安全</a><a href="#api">API</a></nav>
 
   <h2 id="lines">线路</h2>
   <p>线路 = 入口协议 + 端口 → 出口。协议:<b>Hysteria2</b>(支持端口跳跃)、<b>AnyTLS</b>、<b>TUIC</b>、<b>Trojan</b>、<b>VLESS</b>(Reality / Vision)、<b>VMess</b>、<b>Shadowsocks</b>(含 2022 系列),以及 SOCKS、HTTP、Mixed。传输层:WebSocket、gRPC、HTTPUpgrade、HTTP。每条线路可以部署到全部服务器或指定几台。快速添加自动填好空闲端口和合理参数;每次保存都经 sing-box 干跑,并检查端口是否与面板、其它线路、本机其它程序冲突。</p>
@@ -21,6 +21,9 @@
 
   <h2 id="plans">套餐</h2>
   <p>配额、时长、设备、限速、线路分配的模板。建号、续费、延期时一键套用。代理有自己的套餐,和你的分开。</p>
+
+  <h2 id="rules">规则</h2>
+  <p>临时限速,叠在用户自己的限速之上。<b>时段限速</b>:每周指定几天的某个时间段(面板时区,可跨午夜)。<b>突发限速</b>:最近 N 分钟内跑了 X GB 就限 M 分钟,到期自动解除,再次达到再次限速;同一用户可挂多条,各自独立。目标可以是全部用户、某个代理名下全部用户、或逐个勾选。规则由主机判定并同步到各副机,多条命中取最严;默认「只升不降」,不会高于用户自己的限速。改限速对在线连接立刻生效,不用等重连。用户列表标出「限速中」;落地页不显示。</p>
 
   <h2 id="resellers">代理</h2>
   <p>给代理分配一组线路,以及流量额度、设备池、带宽池和到期日。单个用户的设备数与限速由代理自己定;池限制的是名下所有用户同时的总量:设备池跨服务器算并集、池满只拒新设备,带宽池每台服务器各一份。代理有自己的面板(默认端口 2054,路径 <code>/dl</code>),在里面建用户、建套餐、设置自己的落地页标题、公告与联系方式,还可以开两步验证。所有用量汇总到代理;代理超额、到期或被停用时,名下用户一并断掉。代理的用户不会混进你的用户列表。</p>

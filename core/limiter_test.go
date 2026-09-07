@@ -120,11 +120,14 @@ func TestSetLimitsConvertsMbps(t *testing.T) {
 	if got := l.limits["d"].downBps; got != 100*125000 {
 		t.Fatalf("下行应为 %d 字节/秒,实际 %d", 100*125000, got)
 	}
-	// 取用桶:限速>0 应得到非 nil 桶,=0 应为 nil
-	if l.bucketFor(l.up, "d", l.limits["d"].upBps) == nil {
+	// 限速>0 应建出桶;没下发策略的用户桶为空
+	if l.entries["d"].up.Load() == nil {
 		t.Fatal("上行桶不应为 nil")
 	}
-	if l.bucketFor(l.down, "none", 0) != nil {
-		t.Fatal("零限速应返回 nil 桶")
+	l.mu.Lock()
+	none := l.entryLocked("none")
+	l.mu.Unlock()
+	if none.up.Load() != nil {
+		t.Fatal("零限速的桶应为空")
 	}
 }

@@ -30,11 +30,10 @@ import (
 //
 // 跨多机的设备数并集判定在 Hub 侧完成(P4);本类型负责单机拦截与"当前在线 IP"上报。
 type Limiter struct {
-	mu     sync.Mutex
-	limits map[string]userLimit
-	up     map[string]*rate.Limiter // 上行桶(客户端→服务器,即 Read)
-	down   map[string]*rate.Limiter // 下行桶(服务器→客户端,即 Write)
-	ips    map[string]map[string]int64
+	mu      sync.Mutex
+	limits  map[string]userLimit
+	entries map[string]*userEntry // 用户桶位:连接持有的是条目而不是桶,改速率原地生效,在线连接立刻变速
+	ips     map[string]map[string]int64
 	// external 是其他机器上该用户当前在线的源 IP(Hub 下发),计入设备数;本机已在线的 IP 不重复计
 	external   map[string]map[string]bool
 	idleWindow time.Duration // 无流量多久判定该 IP 下线并释放名额
@@ -43,7 +42,7 @@ type Limiter struct {
 	userGroup  map[string]string   // 用户 → 组(如 r12)
 	groupUsers map[string][]string // 组 → 用户
 	groups     map[string]groupLimit
-	gup, gdown map[string]*rate.Limiter
+	gentries   map[string]*groupEntry
 	grejects   map[string]int64 // 设备池满被拒的次数(GroupState 取走即清零)
 }
 
@@ -76,15 +75,13 @@ type groupLimit struct {
 func NewLimiter() *Limiter {
 	return &Limiter{
 		limits:     map[string]userLimit{},
-		up:         map[string]*rate.Limiter{},
-		down:       map[string]*rate.Limiter{},
+		entries:    map[string]*userEntry{},
 		ips:        map[string]map[string]int64{},
 		idleWindow: 60 * time.Second,
 		userGroup:  map[string]string{},
 		groupUsers: map[string][]string{},
 		groups:     map[string]groupLimit{},
-		gup:        map[string]*rate.Limiter{},
-		gdown:      map[string]*rate.Limiter{},
+		gentries:   map[string]*groupEntry{},
 		grejects:   map[string]int64{},
 	}
 }
@@ -93,31 +90,30 @@ func NewLimiter() *Limiter {
 func (l *Limiter) SetLimits(limits map[string]UserLimitSpec) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	old := l.limits
 	l.limits = map[string]userLimit{}
 	l.userGroup = map[string]string{}
 	l.groupUsers = map[string][]string{}
 	for name, s := range limits {
-		l.limits[name] = userLimit{
+		lim := userLimit{
 			upBps:       int64(s.UpMbps) * 125000, // Mbps → 字节/秒
 			downBps:     int64(s.DownMbps) * 125000,
 			deviceLimit: s.DeviceLimit,
 		}
+		l.limits[name] = lim
 		if s.Group != "" {
 			l.userGroup[name] = s.Group
 			l.groupUsers[s.Group] = append(l.groupUsers[s.Group], name)
 		}
+		// 桶原地改速率:参数没变的桶不动(热更新一次不会回到满桶),变了的连同在线连接一起立刻变速
+		e := l.entryLocked(name)
+		setRate(&e.up, lim.upBps)
+		setRate(&e.down, lim.downBps)
 	}
-	// 桶只在参数变了或用户没了才丢:每次热更新用户(主机推快照、代理改了个备注)都清桶的话,
-	// 所有人的限速一次次回到满桶,等于没限
-	for name := range l.up {
-		if n, ok := l.limits[name]; !ok || n.upBps != old[name].upBps {
-			delete(l.up, name)
-		}
-	}
-	for name := range l.down {
-		if n, ok := l.limits[name]; !ok || n.downBps != old[name].downBps {
-			delete(l.down, name)
+	// 不在策略里的用户 = 不限速:桶置空,持有条目的在线连接随之放开
+	for name, e := range l.entries {
+		if _, ok := limits[name]; !ok {
+			e.up.Store(nil)
+			e.down.Store(nil)
 		}
 	}
 }
@@ -141,19 +137,18 @@ type GroupLimitSpec struct {
 func (l *Limiter) SetGroups(groups map[string]GroupLimitSpec) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	old := l.groups
 	l.groups = map[string]groupLimit{}
 	for g, s := range groups {
-		l.groups[g] = groupLimit{upBps: int64(s.UpMbps) * 125000, downBps: int64(s.DownMbps) * 125000, deviceLimit: s.DeviceLimit}
+		gl := groupLimit{upBps: int64(s.UpMbps) * 125000, downBps: int64(s.DownMbps) * 125000, deviceLimit: s.DeviceLimit}
+		l.groups[g] = gl
+		e := l.groupEntryLocked(g)
+		setRate(&e.up, gl.upBps)
+		setRate(&e.down, gl.downBps)
 	}
-	for g := range l.gup {
-		if n, ok := l.groups[g]; !ok || n.upBps != old[g].upBps {
-			delete(l.gup, g)
-		}
-	}
-	for g := range l.gdown {
-		if n, ok := l.groups[g]; !ok || n.downBps != old[g].downBps {
-			delete(l.gdown, g)
+	for g, e := range l.gentries {
+		if _, ok := groups[g]; !ok {
+			e.up.Store(nil)
+			e.down.Store(nil)
 		}
 	}
 }
@@ -307,47 +302,62 @@ func (l *Limiter) touch(user, ip string, now int64) {
 	l.mu.Unlock()
 }
 
-func (l *Limiter) bucketFor(m map[string]*rate.Limiter, key string, bps int64) *rate.Limiter {
+// userEntry 一个用户的桶位:连接建立时拿走这个条目,之后改限速只改条目里的桶(原地改速率或置空),
+// 在线连接不用重连就变速。桶为 nil = 该方向不限。
+type userEntry struct{ up, down atomic.Pointer[rate.Limiter] }
+
+// groupEntry 代理池的桶位,同上。
+type groupEntry struct{ up, down atomic.Pointer[rate.Limiter] }
+
+// setRate 把桶位调到 bps:0 置空;没桶就建;有桶就原地改速率(桶不换,不会回到满桶)。
+// 突发上限设为 1 秒带宽,兼顾峰值与平滑。
+func setRate(p *atomic.Pointer[rate.Limiter], bps int64) {
 	if bps <= 0 {
-		return nil
+		p.Store(nil)
+		return
 	}
-	if b, ok := m[key]; ok {
-		return b
+	if b := p.Load(); b != nil {
+		if b.Limit() != rate.Limit(bps) || b.Burst() != int(bps) {
+			b.SetLimit(rate.Limit(bps))
+			b.SetBurst(int(bps))
+		}
+		return
 	}
-	// 突发上限设为 1 秒带宽,兼顾峰值与平滑
-	b := rate.NewLimiter(rate.Limit(bps), int(bps))
-	m[key] = b
-	return b
+	p.Store(rate.NewLimiter(rate.Limit(bps), int(bps)))
 }
 
-// bucketsLocked 取一条连接要过的四个桶:用户上/下行、所属池上/下行(不限的为 nil),以及该连接是否需要包装。
-func (l *Limiter) bucketsLocked(user string) (upB, downB, gupB, gdownB *rate.Limiter, need bool) {
-	lim := l.limits[user]
-	upB = l.bucketFor(l.up, user, lim.upBps)
-	downB = l.bucketFor(l.down, user, lim.downBps)
-	need = upB != nil || downB != nil || lim.deviceLimit > 0
-	if g := l.userGroup[user]; g != "" {
-		gl := l.groups[g]
-		gupB = l.bucketFor(l.gup, g, gl.upBps)
-		gdownB = l.bucketFor(l.gdown, g, gl.downBps)
-		need = need || gupB != nil || gdownB != nil || gl.deviceLimit > 0
+func (l *Limiter) entryLocked(user string) *userEntry {
+	e := l.entries[user]
+	if e == nil {
+		e = &userEntry{}
+		l.entries[user] = e
 	}
-	return
+	return e
 }
 
-// wrapConn 按用户与所属代理池限速包装一条连接,并在有流量时刷新该设备的在线状态。
-// 即使不限速,只要该用户(或其代理池)有设备数限制也要包装,否则长连接设备会被误判为空闲下线。
+func (l *Limiter) groupEntryLocked(g string) *groupEntry {
+	e := l.gentries[g]
+	if e == nil {
+		e = &groupEntry{}
+		l.gentries[g] = e
+	}
+	return e
+}
+
+// wrapConn 给一条连接挂上用户与所属代理池的桶位,并在有流量时刷新该设备的在线状态。
+// 每条认证过的连接都包装:现在不限速的用户,之后被规则限速时这条连接也要立刻变慢。
 func (l *Limiter) wrapConn(conn net.Conn, user, ip string) net.Conn {
 	if user == "" {
 		return conn
 	}
 	l.mu.Lock()
-	upB, downB, gupB, gdownB, need := l.bucketsLocked(user)
-	l.mu.Unlock()
-	if !need {
-		return conn
+	e := l.entryLocked(user)
+	var g *groupEntry
+	if name := l.userGroup[user]; name != "" {
+		g = l.groupEntryLocked(name)
 	}
-	return &limitedConn{Conn: conn, up: upB, down: downB, gup: gupB, gdown: gdownB, keepalive: l.keepaliveFor(user, ip)}
+	l.mu.Unlock()
+	return &limitedConn{Conn: conn, user: e, group: g, keepalive: l.keepaliveFor(user, ip)}
 }
 
 func (l *Limiter) wrapPacketConn(conn N.PacketConn, user, ip string) N.PacketConn {
@@ -355,12 +365,13 @@ func (l *Limiter) wrapPacketConn(conn N.PacketConn, user, ip string) N.PacketCon
 		return conn
 	}
 	l.mu.Lock()
-	upB, downB, gupB, gdownB, need := l.bucketsLocked(user)
-	l.mu.Unlock()
-	if !need {
-		return conn
+	e := l.entryLocked(user)
+	var g *groupEntry
+	if name := l.userGroup[user]; name != "" {
+		g = l.groupEntryLocked(name)
 	}
-	return &limitedPacketConn{PacketConn: conn, up: upB, down: downB, gup: gupB, gdown: gdownB, keepalive: l.keepaliveFor(user, ip)}
+	l.mu.Unlock()
+	return &limitedPacketConn{PacketConn: conn, user: e, group: g, keepalive: l.keepaliveFor(user, ip)}
 }
 
 // keepaliveFor 返回一个"该设备刚有流量"的回调,按秒节流以免每次读写都抢锁。
@@ -397,9 +408,9 @@ func throttle(b *rate.Limiter, n int) {
 
 type limitedConn struct {
 	net.Conn
-	up, down   *rate.Limiter // 用户桶
-	gup, gdown *rate.Limiter // 代理池桶
-	keepalive  func()
+	user      *userEntry  // 用户桶位
+	group     *groupEntry // 代理池桶位(不在池里为 nil)
+	keepalive func()
 }
 
 func (c *limitedConn) Read(p []byte) (int, error) {
@@ -407,8 +418,10 @@ func (c *limitedConn) Read(p []byte) (int, error) {
 	if n > 0 {
 		c.keepalive()
 	}
-	throttle(c.up, n)
-	throttle(c.gup, n)
+	throttle(c.user.up.Load(), n)
+	if c.group != nil {
+		throttle(c.group.up.Load(), n)
+	}
 	return n, err
 }
 
@@ -416,8 +429,10 @@ func (c *limitedConn) Write(p []byte) (int, error) {
 	if len(p) > 0 {
 		c.keepalive()
 	}
-	throttle(c.down, len(p))
-	throttle(c.gdown, len(p))
+	throttle(c.user.down.Load(), len(p))
+	if c.group != nil {
+		throttle(c.group.down.Load(), len(p))
+	}
 	return c.Conn.Write(p)
 }
 
@@ -425,9 +440,9 @@ func (c *limitedConn) Upstream() any { return c.Conn }
 
 type limitedPacketConn struct {
 	N.PacketConn
-	up, down   *rate.Limiter
-	gup, gdown *rate.Limiter
-	keepalive  func()
+	user      *userEntry
+	group     *groupEntry
+	keepalive func()
 }
 
 func (c *limitedPacketConn) ReadPacket(b *buf.Buffer) (M.Socksaddr, error) {
@@ -435,8 +450,10 @@ func (c *limitedPacketConn) ReadPacket(b *buf.Buffer) (M.Socksaddr, error) {
 	if b.Len() > 0 {
 		c.keepalive()
 	}
-	throttle(c.up, b.Len())
-	throttle(c.gup, b.Len())
+	throttle(c.user.up.Load(), b.Len())
+	if c.group != nil {
+		throttle(c.group.up.Load(), b.Len())
+	}
 	return dest, err
 }
 
@@ -444,8 +461,10 @@ func (c *limitedPacketConn) WritePacket(b *buf.Buffer, dest M.Socksaddr) error {
 	if b.Len() > 0 {
 		c.keepalive()
 	}
-	throttle(c.down, b.Len())
-	throttle(c.gdown, b.Len())
+	throttle(c.user.down.Load(), b.Len())
+	if c.group != nil {
+		throttle(c.group.down.Load(), b.Len())
+	}
 	return c.PacketConn.WritePacket(b, dest)
 }
 

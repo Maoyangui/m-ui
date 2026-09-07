@@ -2,6 +2,15 @@ import { state, load, isReseller } from '../app.js';
 import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML } from '../ui.js';
+
+// 生效中的规则限速(主面板才有):列表徽章与详情抽屉都从这里取
+const limitsOf = id => (state.limitStates || []).filter(s => s.userId === id);
+function ruleLimitsHTML(u) {
+  const lim = limitsOf(u.id);
+  if (!lim.length) return '';
+  const now = Math.floor(Date.now() / 1000);
+  return `<h3 style="margin-top:.6rem">${t('user.ruleLimits')}</h3><div class="chips">${lim.map(s => `<span class="chip" title="${esc(s.reason || '')}">${esc(s.ruleName)} · ${s.upMbps || '—'}/${s.downMbps || '—'} M · ${s.until ? t('rule.remaining', { n: Math.max(0, Math.ceil((s.until - now) / 60)) }) : t('rule.untilWindowEnd')}</span>`).join('')}</div>`;
+}
 import { barChart, bucketFor } from '../chart.js';
 import { lineItems, keysFromRefs, linePicker, refLabels } from '../linepicker.js';
 
@@ -76,6 +85,8 @@ function statusBadge(u) {
   if (!u.enabled) return badge(t('common.disabled') + (u.disabledReason ? ' · ' + t('user.reason.' + u.disabledReason) : ''), 'danger');
   if (isExpired(u)) return badge(t('user.expired'), 'warn');
   if (isOver(u)) return badge(t('user.over'), 'warn');
+  const lim = limitsOf(u.id);
+  if (lim.length) return badge(t('user.limited') + ' · ' + lim.map(s => s.ruleName).join(' / '), 'warn');
   return badge(t('common.enabled'), 'ok');
 }
 function expiryCell(u) {
@@ -198,6 +209,7 @@ async function showDetail(id) {
         <dt>${t('user.lastOnline')}</dt><dd>${u.onlineAt ? fmtRelative(u.onlineAt) : '—'}</dd>
         <dt>${t('user.f.autoReset')}</dt><dd>${u.autoReset ? `${u.resetDays} ${t('common.day')} · ${fmtDay(u.nextReset)}` : t('common.no')}</dd>
       </dl>
+      ${ruleLimitsHTML(u)}
       <div class="row" style="margin-top:.6rem;flex-wrap:wrap">
         <button class="btn sm primary" data-act="user.renew" data-id="${id}">${t('user.renew')}</button>
         <button class="btn sm" data-act="user.extend" data-id="${id}">${t('user.extend')}</button>

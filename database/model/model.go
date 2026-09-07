@@ -255,6 +255,51 @@ type Session struct {
 	Exp      int64  `json:"exp" gorm:"index"`
 }
 
+// Rule 限速规则:时段(schedule)或突发(burst)。主机每 10 秒判定,命中时给目标用户写一条 LimitState。
+// 目标三选一可叠加:全部用户 / 指定用户 / 指定代理名下的全部用户(动态,以后新建的也算)。
+type Rule struct {
+	Id          uint            `json:"id" gorm:"primaryKey;autoIncrement"`
+	ResellerId  uint            `json:"resellerId" gorm:"index"` // 归属:0 = 主面板(预留给代理面板自建规则)
+	Name        string          `json:"name"`
+	Enabled     bool            `json:"enabled"`
+	Kind        string          `json:"kind"` // schedule | burst
+	AllUsers    bool            `json:"allUsers"`
+	UserIds     json.RawMessage `json:"userIds,omitempty"`
+	ResellerIds json.RawMessage `json:"resellerIds,omitempty"`
+	// 时段(面板时区):Days "1,2,5"(1 = 周一,空 = 每天);Start / End "HH:MM",结束早于开始 = 跨午夜,相等 = 全天
+	Days  string `json:"days"`
+	Start string `json:"start"`
+	End   string `json:"end"`
+	// 突发:最近 WindowMin 分钟内上下行合计达到 ThresholdBytes → 限速 PenaltyMin 分钟,到期自动解除,再达到再限
+	WindowMin      int   `json:"windowMin"`
+	ThresholdBytes int64 `json:"thresholdBytes"`
+	PenaltyMin     int   `json:"penaltyMin"`
+	// 限到多少 Mbps:0 = 该方向不改
+	UpMbps   int `json:"upMbps"`
+	DownMbps int `json:"downMbps"`
+	// TightenOnly 只升不降:结果不会高于用户自己的限速;关掉后规则值直接覆盖(可用于放宽)
+	TightenOnly bool   `json:"tightenOnly"`
+	Remark      string `json:"remark"`
+	Sort        int    `json:"sort"`
+	CreatedAt   int64  `json:"createdAt"`
+}
+
+// LimitState 一条生效中的规则限速:主机写、随快照下发副机,主副机计算限速时叠加到用户自己的限速上。
+// Until 为 0 = 时段规则(随窗口结束删除);突发规则到期即失效,副机据此在主机失联时也能自行放开。
+type LimitState struct {
+	Id          uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	RuleId      uint   `json:"ruleId" gorm:"uniqueIndex:idx_limit_rule_user,priority:1"`
+	UserId      uint   `json:"userId" gorm:"uniqueIndex:idx_limit_rule_user,priority:2;index"`
+	UserName    string `json:"userName"`
+	RuleName    string `json:"ruleName"`
+	UpMbps      int    `json:"upMbps"`
+	DownMbps    int    `json:"downMbps"`
+	TightenOnly bool   `json:"tightenOnly"`
+	Since       int64  `json:"since"`
+	Until       int64  `json:"until"`
+	Reason      string `json:"reason"` // 触发原因,如 "10 分钟内 1.2 GB" / "时段 19:00 到 23:00"
+}
+
 // SubLog 订阅访问日志。
 type SubLog struct {
 	Id     uint64 `json:"id" gorm:"primaryKey;autoIncrement"`
@@ -307,6 +352,6 @@ func All() []interface{} {
 	return []interface{}{
 		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
-		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{},
+		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
 	}
 }

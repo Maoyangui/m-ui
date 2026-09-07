@@ -269,6 +269,7 @@ X-API-Key: <令牌>
   "onlineIps": ["203.0.113.9"],
   "onlineLines": {"203.0.113.9": ["香港1-主机", "香港1-高带宽"]},
   "lineIds": [1, 2], "lineRefs": [{"lineId": 1}, {"lineId": 2, "nodeIds": [3]}], "extIds": [],
+  "activeLimits": [{"rule": "晚高峰", "upMbps": 0, "downMbps": 30, "since": 1758000000, "until": 0, "reason": "时段 19:00 到 23:00"}],
   "subLink": "https://example.com:2056/sub/alice",
   "subClash": "https://example.com:2056/sub/alice?format=clash",
   "subJson": "https://example.com:2056/sub/alice?format=json"
@@ -293,6 +294,7 @@ X-API-Key: <令牌>
 | `onlineLines` | 每个在线 IP 正在使用的线路,名字带服务器后缀 `线路名-服务器名`;没人在线时省略 |
 | `lineIds` / `lineRefs` | 可用线路 / 线路 × 服务器,见上节 |
 | `extIds` | 可用外部节点 id |
+| `activeLimits` | 生效中的规则限速(只读,面板"规则"页配置):`rule` 规则名、`upMbps` / `downMbps`(0 = 该方向不改)、`since`、`until`(0 = 时段规则,随时段结束)、`reason`;没有时省略。只给站长的系统看,用户落地页不显示 |
 | `subLink` / `subClash` / `subJson` | 订阅地址(通用 / Clash / sing-box) |
 
 用户对象不含任何凭据;临时共享地址只在 `/sub` 里返回。

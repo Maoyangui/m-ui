@@ -195,6 +195,7 @@ type apiUserView struct {
 	CreatedAt      int64               `json:"createdAt"`
 	OnlineAt       int64               `json:"onlineAt"`
 	DisabledReason string              `json:"disabledReason,omitempty"` // 停用原因:manual / quota / expired
+	ActiveLimits   []apiLimit          `json:"activeLimits,omitempty"`   // 生效中的规则限速(只读)
 	OnlineIPs      []string            `json:"onlineIps"`
 	OnlineLines    map[string][]string `json:"onlineLines,omitempty"` // 源 IP → 线路(带服务器后缀)
 	LineIds        []uint              `json:"lineIds"`
@@ -207,7 +208,29 @@ type apiUserView struct {
 
 // apiSnapshot 是列表渲染时"只算一次"的公共数据:在线 IP、线路映射、订阅前缀。
 // 逐个用户去问数据面会把限速器与 Hub 的锁抢上几百次(用户一多就拖慢数据面)。
+// apiLimit 一条生效中的规则限速。
+type apiLimit struct {
+	Rule     string `json:"rule"`
+	UpMbps   int    `json:"upMbps"`
+	DownMbps int    `json:"downMbps"`
+	Since    int64  `json:"since"`
+	Until    int64  `json:"until"` // 0 = 时段规则,随窗口结束
+	Reason   string `json:"reason"`
+}
+
+// userLimitMap 用户 id → 生效中的规则限速。
+func (s *Server) userLimitMap() map[uint][]apiLimit {
+	var states []model.LimitState
+	s.db.Where("until = 0 OR until > ?", time.Now().Unix()).Order("since desc").Find(&states)
+	out := map[uint][]apiLimit{}
+	for _, st := range states {
+		out[st.UserId] = append(out[st.UserId], apiLimit{Rule: st.RuleName, UpMbps: st.UpMbps, DownMbps: st.DownMbps, Since: st.Since, Until: st.Until, Reason: st.Reason})
+	}
+	return out
+}
+
 type apiSnapshot struct {
+	limitsBy                map[uint][]apiLimit
 	localIPs, remoteIPs     map[string][]string
 	localLines, remoteLines map[string]map[string][]string
 	localName, subBase      string
@@ -220,7 +243,7 @@ func (s *Server) apiSnapshot() *apiSnapshot {
 		localIPs: map[string][]string{}, remoteIPs: map[string][]string{},
 		localLines: map[string]map[string][]string{}, remoteLines: map[string]map[string][]string{},
 		localName: s.localNodeName(), subBase: s.subBase(),
-		lineIdsBy: s.userLineMap(), extIdsBy: s.userExtMap(), refsBy: s.userLineRefMap(),
+		lineIdsBy: s.userLineMap(), extIdsBy: s.userExtMap(), refsBy: s.userLineRefMap(), limitsBy: s.userLimitMap(),
 	}
 	if s.run != nil { // 测试里没有数据面
 		snap.localIPs, snap.remoteIPs = s.run.OnlineIPsAll(), s.run.Hub().RemoteIPsAll()
@@ -252,7 +275,7 @@ func (s *Server) apiUserWith(u model.User, snap *apiSnapshot) apiUserView {
 		TotalUp: u.TotalUp, TotalDown: u.TotalDown, Expiry: u.Expiry, Expired: u.Expiry > 0 && u.Expiry < now,
 		AutoReset: u.AutoReset, ResetDays: u.ResetDays, NextReset: u.NextReset,
 		DeviceLimit: u.DeviceLimit, SpeedUp: u.SpeedUp, SpeedDown: u.SpeedDown, Remark: u.Remark, Desc: u.Desc,
-		CreatedAt: u.CreatedAt, OnlineAt: u.OnlineAt, DisabledReason: u.DisabledReason,
+		CreatedAt: u.CreatedAt, OnlineAt: u.OnlineAt, DisabledReason: u.DisabledReason, ActiveLimits: snap.limitsBy[u.Id],
 		OnlineIPs:   mergeIPs(snap.localIPs[u.Name], snap.remoteIPs[u.Name]),
 		OnlineLines: s.onlineLines(u.Name, snap.localName, snap.localLines, snap.remoteLines),
 		LineIds:     ids, LineRefs: refs, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}

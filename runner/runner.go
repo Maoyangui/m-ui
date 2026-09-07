@@ -27,7 +27,9 @@ import (
 	"github.com/Maoyangui/m-ui/monitor"
 	"github.com/Maoyangui/m-ui/notify"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/rules"
 	"github.com/Maoyangui/m-ui/sub"
+	"github.com/Maoyangui/m-ui/tz"
 
 	"github.com/op/go-logging"
 	"golang.org/x/crypto/bcrypt"
@@ -59,6 +61,8 @@ type Runner struct {
 	applied    map[string]string // 数据面当前生效的出站(tag → JSON),供上游热更新做差异
 	appliedRaw []byte            // 数据面当前生效的完整配置,渲染结果相同则不重启
 	mu         sync.Mutex        // 串行化重载,避免并发改动互相打断
+
+	rules *rules.Engine // 限速规则判定器(只在主机跑)
 
 	reloadMu sync.Mutex
 	reload   ReloadStatus // 最近一次重载的结果:面板据此在页面上明说"已保存但没生效"
@@ -137,6 +141,7 @@ func New(dbPath string) (*Runner, error) {
 	r := &Runner{db: db, core: core.NewCore(), dbPath: dbPath}
 	r.subSrv = r.newSubServer()
 	r.notifier = notify.New(r.setting)
+	r.rules = &rules.Engine{DB: db, Location: func() *time.Location { return tz.Location(r.setting("timezone")) }, Notify: r.notifyRule}
 	r.jobs = jobs.New(jobs.Deps{
 		DB:          db,
 		Box:         func() *core.Box { return r.core.GetInstance() },
@@ -146,6 +151,8 @@ func New(dbPath string) (*Runner, error) {
 		Notify:      func(text string) { r.notifier.Event("tgOnUserDisabled", text) },
 		LocalRatio:  r.localRatio,
 		Forget:      r.notifier.Forget,
+		Rules:       r.RulesNow,
+		ApplyLimits: r.applyLimits,
 	})
 	r.monitor = monitor.New(monitor.Deps{
 		UsedUpstreams: r.usedUpstreams,
@@ -804,18 +811,37 @@ func (r *Runner) applyLimits() {
 	if box == nil {
 		return
 	}
-	// 代理池:设备池跨机并集判定,带宽池每台服务器各一份(带宽是单机物理量,和用户限速同一逻辑)
 	var resellers []model.Reseller
 	r.db.Find(&resellers)
+	// 规则限速:生效中的状态叠加到用户自己的限速上(只升不降 / 覆盖,多条取最严);
+	// 到期的不算,主机失联时副机也能按到期时间自行放开
+	var states []model.LimitState
+	r.db.Find(&states)
+	specs, groups := limitSpecs(users, resellers, rules.Active(states, time.Now().Unix()))
+	box.Limiter().SetGroups(groups)
+	box.Limiter().SetLimits(specs)
+	if len(specs) > 0 || len(groups) > 0 {
+		logger.Info("已应用 ", len(specs), " 个用户的限速/设备数策略,", len(groups), " 个代理池")
+	}
+}
+
+// limitSpecs 把用户表、代理池与生效中的规则限速算成数据面要的策略。
+// 代理池:设备池跨机并集判定,带宽池每台服务器各一份(带宽是单机物理量,和用户限速同一逻辑)。
+func limitSpecs(users []model.User, resellers []model.Reseller, states []model.LimitState) (map[string]core.UserLimitSpec, map[string]core.GroupLimitSpec) {
 	groups := map[string]core.GroupLimitSpec{}
 	for _, rs := range resellers {
 		if rs.DeviceLimit > 0 || rs.SpeedUp > 0 || rs.SpeedDown > 0 {
 			groups[model.ResellerGroup(rs.Id)] = core.GroupLimitSpec{UpMbps: rs.SpeedUp, DownMbps: rs.SpeedDown, DeviceLimit: rs.DeviceLimit}
 		}
 	}
+	statesBy := map[string][]model.LimitState{}
+	for _, st := range states {
+		statesBy[st.UserName] = append(statesBy[st.UserName], st)
+	}
 	specs := make(map[string]core.UserLimitSpec, len(users))
 	for _, u := range users {
-		spec := core.UserLimitSpec{UpMbps: u.SpeedUp, DownMbps: u.SpeedDown, DeviceLimit: u.DeviceLimit}
+		up, down := rules.Effective(u.SpeedUp, u.SpeedDown, statesBy[u.Name])
+		spec := core.UserLimitSpec{UpMbps: up, DownMbps: down, DeviceLimit: u.DeviceLimit}
 		if u.ResellerId > 0 {
 			if g := model.ResellerGroup(u.ResellerId); groups[g].DeviceLimit > 0 || groups[g].UpMbps > 0 || groups[g].DownMbps > 0 {
 				spec.Group = g
@@ -826,10 +852,32 @@ func (r *Runner) applyLimits() {
 		}
 		specs[u.Name] = spec
 	}
-	box.Limiter().SetGroups(groups)
-	box.Limiter().SetLimits(specs)
-	if len(specs) > 0 || len(groups) > 0 {
-		logger.Info("已应用 ", len(specs), " 个用户的限速/设备数策略,", len(groups), " 个代理池")
+	return specs, groups
+}
+
+// RulesNow 立刻判一轮限速规则(规则增删改后不用等下一轮统计),状态变了就重新下发限速;
+// 快照里带着状态表,下一轮同步自然推给副机。
+func (r *Runner) RulesNow() {
+	if r.rules == nil || r.IsNode() {
+		return
+	}
+	changed, err := r.rules.Tick(time.Now())
+	if err != nil {
+		logger.Warning("限速规则判定失败: ", err)
+		return
+	}
+	if changed {
+		r.applyLimits()
+	}
+}
+
+// ApplyLimits 重新下发限速(副机按到期时间解除规则限速时用)。
+func (r *Runner) ApplyLimits() { r.applyLimits() }
+
+// notifyRule 突发限速触发的通知:设置里明确打开才发(默认关,免得高峰期刷屏)。
+func (r *Runner) notifyRule(text string) {
+	if strings.EqualFold(r.setting("tgOnRuleLimit"), "true") {
+		r.notifier.Event("", text)
 	}
 }
 

@@ -898,7 +898,7 @@ func (s *Server) deleteUser(u model.User, actor string) error {
 		if err := tx.Delete(&model.User{}, u.Id).Error; err != nil {
 			return err
 		}
-		for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserExt{}} {
+		for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserExt{}, &model.LimitState{}} {
 			if err := tx.Where("user_id = ?", u.Id).Delete(t).Error; err != nil {
 				return err
 			}

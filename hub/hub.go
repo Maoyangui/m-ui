@@ -40,8 +40,8 @@ var SyncedSettings = []string{
 }
 
 // MinNodeVersion 副机至少要这个版本才能正确应用当前快照(快照里新增了它必须理解的字段时抬高它)。
-// 0.5.0:用户的停用原因、代理的额度用尽标志、私网屏蔽开关。
-const MinNodeVersion = "0.5.0"
+// 0.5.0:用户的停用原因、代理的额度用尽标志、私网屏蔽开关。0.6.0:规则限速状态表(副机要叠加到限速上)。
+const MinNodeVersion = "0.6.0"
 
 // Snapshot 是主机下发给副机的完整配置。
 type Snapshot struct {
@@ -58,7 +58,8 @@ type Snapshot struct {
 	UserLineNodes []model.UserLineNode `json:"userLineNodes,omitempty"` // 用户在某线路上收窄到的服务器;没有 = 全部
 	Exts          []model.ExtNode      `json:"exts"`
 	UserExts      []model.UserExt      `json:"userExts"`
-	Resellers     []model.Reseller     `json:"resellers"` // 副机据此给代理用户出对应的订阅页文案(不含密码/2FA)
+	Resellers     []model.Reseller     `json:"resellers"`   // 副机据此给代理用户出对应的订阅页文案(不含密码/2FA)
+	LimitStates   []model.LimitState   `json:"limitStates"` // 主机判定的规则限速,副机照单叠加到用户限速上
 	Settings      map[string]string    `json:"settings"`
 }
 
@@ -103,6 +104,9 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 		return s, err
 	}
 	if err := db.Order("user_id asc, ext_id asc").Find(&s.UserExts).Error; err != nil {
+		return s, err
+	}
+	if err := db.Order("id asc").Find(&s.LimitStates).Error; err != nil {
 		return s, err
 	}
 	s.Settings = map[string]string{}
@@ -285,7 +289,7 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		}
 	}
 	err = db.Transaction(func(tx *gorm.DB) error {
-		for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserExt{}, &model.User{}, &model.Line{}, &model.Upstream{}, &model.Node{}, &model.ExtNode{}, &model.Reseller{}} {
+		for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserExt{}, &model.User{}, &model.Line{}, &model.Upstream{}, &model.Node{}, &model.ExtNode{}, &model.Reseller{}, &model.LimitState{}} {
 			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(t).Error; err != nil {
 				return err
 			}
@@ -344,6 +348,11 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 				}).Error; err != nil {
 					return err
 				}
+			}
+		}
+		if len(snap.LimitStates) > 0 { // 主机判定的规则限速,副机照单执行
+			if err := tx.Create(&snap.LimitStates).Error; err != nil {
+				return err
 			}
 		}
 		if len(offUsers) > 0 {

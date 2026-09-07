@@ -74,20 +74,23 @@ func TestGroupBandwidthBuckets(t *testing.T) {
 	pipe := func() net.Conn { a, _ := net.Pipe(); return a }
 
 	ca, ok := l.wrapConn(pipe(), "a", "1.1.1.1").(*limitedConn)
-	if !ok || ca.up == nil || ca.gup == nil || ca.gdown == nil || ca.down != nil {
+	if !ok || ca.user.up.Load() == nil || ca.group == nil || ca.group.up.Load() == nil || ca.group.down.Load() == nil || ca.user.down.Load() != nil {
 		t.Fatalf("a 应有自己的上行桶 + 池的上下行桶:%+v", ca)
 	}
 	cb, ok := l.wrapConn(pipe(), "b", "1.1.1.2").(*limitedConn)
-	if !ok || cb.up != nil || cb.gup == nil || cb.gup != ca.gup || cb.gdown != ca.gdown {
-		t.Fatal("b 自己不限速,但要和 a 共用同一对池桶")
+	if !ok || cb.user.up.Load() != nil || cb.group == nil || cb.group != ca.group {
+		t.Fatal("b 自己不限速,但要和 a 共用同一个池桶位")
 	}
-	if _, wrapped := l.wrapConn(pipe(), "c", "1.1.1.3").(*limitedConn); wrapped {
-		t.Fatal("池不限速也不限设备时不该多包一层")
+	// 每条连接都包装(之后被规则限速时要立刻变速),没限制的只是桶位为空
+	cc, ok := l.wrapConn(pipe(), "c", "1.1.1.3").(*limitedConn)
+	if !ok || cc.user.up.Load() != nil || (cc.group != nil && cc.group.up.Load() != nil) {
+		t.Fatal("池不限速时 c 的桶位应为空")
 	}
-	if _, wrapped := l.wrapConn(pipe(), "x", "1.1.1.4").(*limitedConn); wrapped {
-		t.Fatal("主面板无限制用户不该被包装")
+	cx, ok := l.wrapConn(pipe(), "x", "1.1.1.4").(*limitedConn)
+	if !ok || cx.user.up.Load() != nil || cx.user.down.Load() != nil || cx.group != nil {
+		t.Fatal("主面板无限制用户桶位为空、不在任何池")
 	}
-	if got := ca.gup.Limit(); float64(got) != 100*125000 {
+	if got := ca.group.up.Load().Limit(); float64(got) != 100*125000 {
 		t.Fatalf("池上行桶速率应为 100 Mbps = %d B/s,实际 %v", 100*125000, got)
 	}
 }

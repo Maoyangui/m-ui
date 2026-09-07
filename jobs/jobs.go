@@ -35,6 +35,8 @@ type Deps struct {
 	Notify      func(text string) // 用户被禁用时的通知(可为 nil)
 	LocalRatio  func() float64    // 本机流量倍率(可为 nil = 1);只在主机计费路径生效,副机账本保持原始值
 	Forget      func(key string)  // 清掉通知去重键(用量清零后要允许再次告警;可为 nil)
+	Rules       func()            // 主机:限速规则判定(时段 / 突发),每轮统计之后跑;可为 nil
+	ApplyLimits func()            // 重新下发限速(副机按到期时间解除规则限速后调用);可为 nil
 }
 
 // Onlines 是最近一个统计周期内有流量经过的对象。
@@ -96,7 +98,8 @@ func (s *Scheduler) Start() {
 	s.loop("统计", 10*time.Second, s.runStats)
 	s.loop("配额判定", time.Minute, s.runDeplete)
 	s.loop("日志清理", time.Hour, s.runCleanup) // 每小时一轮:选了"保留 1 天"时不用等到明天才生效
-	logger.Info("定时任务已启动:统计 10s / 配额判定 1m / 日志清理 1h")
+	s.loop("限速规则", 10*time.Second, s.runRules)
+	logger.Info("定时任务已启动:统计 10s / 限速规则 10s / 配额判定 1m / 日志清理 1h")
 }
 
 func (s *Scheduler) Stop() {
@@ -274,11 +277,31 @@ func (s *Scheduler) runStats() {
 	}
 }
 
+// runRules 主机每 10 秒判一轮限速规则(时段 / 突发)。单独一个循环而不是挂在统计后面:
+// 没有流量时统计任务会提前返回,时段规则却照样要按时生效。副机不判,只执行主机下发的状态。
+func (s *Scheduler) runRules() {
+	if s.d.IsNode() || s.d.Rules == nil {
+		return
+	}
+	s.d.Rules()
+}
+
+// expireLimitStates 副机:到期的突发限速状态自己删掉并重新下发限速。正常情况主机会先删并推快照,
+// 这是主机失联时的兜底,免得一条 20 分钟的限速挂到主机回来为止。
+func (s *Scheduler) expireLimitStates() {
+	res := s.d.DB.Where("until > 0 AND until <= ?", time.Now().Unix()).Delete(&model.LimitState{})
+	if res.RowsAffected > 0 && s.d.ApplyLimits != nil {
+		logger.Info("规则限速到期,已解除 ", res.RowsAffected, " 条")
+		s.d.ApplyLimits()
+	}
+}
+
 // ---- deplete / reset ----
 
 func (s *Scheduler) runDeplete() {
 	if s.d.IsNode() {
-		return // 副机不执法
+		s.expireLimitStates() // 副机不执法,只按到期时间解除规则限速
+		return
 	}
 	now := time.Now().Unix()
 	changed := false
