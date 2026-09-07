@@ -46,6 +46,13 @@ const subUrl = u => `https://${subBase}:2056/sub/${u.subToken || u.name}`;
 const notFound = () => { throw new ApiError(404, 'not found'); };
 const ok = (extra = {}) => ({ ok: '1', ...extra });
 const rnd = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
+// 规则页的演示数据(导出实例还没有这一页):一条晚高峰时段规则、一条突发规则,alice 正被突发规则限着
+S.rules = [
+  { id: 1, name: '晚高峰 Evening peak', enabled: true, kind: 'schedule', allUsers: true, userIds: [], resellerIds: [], days: '1,2,3,4,5', start: '19:00', end: '23:00', windowMin: 0, thresholdGb: 0, penaltyMin: 0, upMbps: 0, downMbps: 30, tightenOnly: true, remark: '', sort: 0, createdAt: now() - 86400 * 20 },
+  { id: 2, name: '突发惩罚 Burst penalty', enabled: true, kind: 'burst', allUsers: false, userIds: [1, 2], resellerIds: [], days: '', start: '', end: '', windowMin: 10, thresholdGb: 1, penaltyMin: 20, upMbps: 0, downMbps: 20, tightenOnly: true, remark: '', sort: 0, createdAt: now() - 86400 * 3 },
+];
+S.limitStates = [{ id: 1, ruleId: 2, ruleName: '突发惩罚 Burst penalty', userId: 1, userName: 'demo-alice', upMbps: 0, downMbps: 20, tightenOnly: true, since: now() - 300, until: now() + 900, reason: '10 分钟内 1.2 GB' }];
+const ruleView = r => ({ ...r, targetCount: r.allUsers ? S.users.filter(u => u.enabled).length : (r.userIds || []).length + S.users.filter(u => (r.resellerIds || []).includes(u.resellerId)).length, activeCount: S.limitStates.filter(s => s.ruleId === r.id).length });
 
 function status() {
   const s = fx('GET status') || {};
@@ -72,6 +79,8 @@ function route(method, path, query, body) {
       case 'nodes': return clone(S.nodes);
       case 'exts': return clone(S.exts);
       case 'onlines': return clone(S.onlines);
+      case 'rules': if (seg[2] === 'states') return clone(S.limitStates.filter(s => s.ruleId === id)); if (seg[1]) return ruleView(find(S.rules, id)); return S.rules.map(ruleView);
+      case 'limitstates': return clone(S.limitStates);
       case 'resellers': if (seg[2] === 'users') return S.users.filter(u => u.resellerId === id); return clone(S.resellers);
       case 'update': return { current: 'demo', latest: '', hasUpdate: false, canUpdate: false };
       case 'ops': { if (seg[1] === 'status') return fx('GET ops/status') || { running: false, log: [] }; const o = fx('GET ops') || { info: {}, status: {}, params: {} };
@@ -171,6 +180,13 @@ function route(method, path, query, body) {
       if (seg[2] === 'preview') return { nodes: [] };
       if (method === 'DELETE') { S.exts = S.exts.filter(x => x.id !== id); return ok(); }
       if (method === 'PUT') { Object.assign(e, body, { id }); return clone(e); }
+      return ok();
+    }
+    case 'rules': {
+      if (method === 'POST' && !seg[1]) { const r = { id: nextId(S.rules), enabled: true, tightenOnly: true, userIds: [], resellerIds: [], createdAt: now(), ...body }; S.rules.push(r); return ruleView(r); }
+      const r = find(S.rules, id);
+      if (method === 'DELETE') { S.rules = S.rules.filter(x => x.id !== id); S.limitStates = S.limitStates.filter(s => s.ruleId !== id); return ok(); }
+      if (method === 'PUT') { Object.assign(r, body, { id }); if (!r.enabled) S.limitStates = S.limitStates.filter(s => s.ruleId !== id); return ruleView(r); }
       return ok();
     }
     case 'update': throw new ApiError(400, 'Demo mode: nothing to update here');
