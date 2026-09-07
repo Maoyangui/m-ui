@@ -28,6 +28,18 @@ func autoEnable(u *model.User, now int64) bool {
 	return true
 }
 
+// ensureDisabled 建号时勾了停用:gorm 的 default:true 把 Create 里的 false 写成了 true(结构体里也被回填成 true),
+// 插入后按记下的本意写回,并把结构体改回来给响应用。
+func ensureDisabled(db *gorm.DB, u *model.User, disabled bool) error {
+	if !disabled {
+		return nil
+	}
+	u.Enabled, u.DisabledReason = false, model.DisabledManual
+	return db.Model(&model.User{}).Where("id = ?", u.Id).Updates(map[string]interface{}{
+		"enabled": false, "disabled_reason": model.DisabledManual,
+	}).Error
+}
+
 // setEnabled 手动启停:停用记 manual,启用清原因。
 func (s *Server) setEnabled(db *gorm.DB, ids []uint, on bool) (int64, error) {
 	upd := map[string]interface{}{"enabled": on, "disabled_reason": ""}

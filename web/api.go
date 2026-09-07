@@ -769,7 +769,15 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		if len(p.User.Credentials) == 0 {
 			p.User.Credentials = generateCredentials(p.User.Name)
 		}
+		disabled := !p.User.Enabled // Create 之后 gorm 会把默认值 true 回填进结构体,先记下本意
+		if disabled {
+			p.User.DisabledReason = model.DisabledManual // 建号时就停用 = 手动停用,重置 / 续期不会自动启用
+		}
 		if err := s.db.Create(&p.User).Error; err != nil {
+			badRequest(w, err)
+			return
+		}
+		if err := ensureDisabled(s.db, &p.User, disabled); err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -1209,8 +1217,13 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("新密码至少 6 位"))
 		return
 	}
+	// 改的是当前登录的这个管理员:库里若还留着旧版重置密码时多出来的 admin 行,First() 会改错人
 	var admin model.Admin
-	if err := s.db.First(&admin).Error; err != nil {
+	q := s.db
+	if who := s.actor(r); who != "" {
+		q = q.Where("username = ?", who)
+	}
+	if err := q.First(&admin).Error; err != nil {
 		badRequest(w, err)
 		return
 	}

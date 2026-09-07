@@ -439,7 +439,12 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiSco
 	}
 	u.Credentials = generateCredentials(u.Name)
 	s.applySubTokenPolicy(&u) // 外部 API 建号也按设置来
+	disabled := !u.Enabled    // Create 之后 gorm 会把默认值 true 回填进结构体,先记下本意
 	if err := s.db.Create(&u).Error; err != nil {
+		badRequest(w, err)
+		return
+	}
+	if err := ensureDisabled(s.db, &u, disabled); err != nil {
 		badRequest(w, err)
 		return
 	}
