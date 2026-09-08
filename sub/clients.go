@@ -189,8 +189,8 @@ func clientTiles(lang string) []clientTile {
 			Key: "android", Icon: template.HTML(iconAndro), OS: "Android / Android TV",
 			Apps: []clientApp{
 				{Name: god, Recommended: true, Format: fAny,
-					Desc: pick("本站自家的客户端,内置 sing-box,手机与电视盒子都能用。装好后回订阅页点「"+god+"」一键导入,或粘贴通用地址。不确定机型就装通用版。",
-						"Our own client, with sing-box built in; works on phones and TV boxes. After installing, tap "+god+" on the subscription page or paste the universal link. Pick the universal build if unsure."),
+					Desc: pick("自研客户端,内置 sing-box,手机与电视盒子通用。装好后回订阅页点「"+god+"」一键导入。不确定机型就装通用版。",
+						"Our own client with sing-box built in, for phones and TV boxes. After installing, tap "+god+" on the subscription page. Pick the universal build if unsure."),
 					Links: []dl{
 						{Text: pick("APK arm64 版 v"+gv, "APK arm64 v"+gv), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-android-arm64.apk"), Primary: true},
 						{Text: pick("APK 通用版", "APK universal"), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-android-universal.apk")},
@@ -234,8 +234,8 @@ func clientTiles(lang string) []clientTile {
 			Key: "windows", Icon: template.HTML(iconWin), OS: "Windows",
 			Apps: []clientApp{
 				{Name: god, Recommended: true, Format: fAny,
-					Desc: pick("本站自家的客户端,内置 sing-box。安装包一路下一步;若提示「Windows 已保护你的电脑」,点「更多信息」→「仍要运行」。装好后回订阅页点「"+god+"」一键导入,或粘贴通用地址。系统精简 / 内网机器用离线完整版。",
-						"Our own client, with sing-box built in. Run the installer; if SmartScreen warns you, choose More info → Run anyway. Then tap "+god+" on the subscription page or paste the universal link. Use the offline build on trimmed-down or offline machines."),
+					Desc: pick("自研客户端,内置 sing-box。安装包一路下一步(若提示「Windows 已保护你的电脑」,点「更多信息」→「仍要运行」),装好后回订阅页点「"+god+"」一键导入。精简系统用离线完整版。",
+						"Our own client with sing-box built in. Run the installer (if SmartScreen warns you: More info → Run anyway), then tap "+god+" on the subscription page. Use the offline build on trimmed-down systems."),
 					Links: []dl{
 						{Text: pick("Windows x64 安装包 v"+gv, "Windows x64 installer v"+gv), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-windows-x64-setup.exe"), Primary: true},
 						{Text: pick("ARM64 安装包", "ARM64 installer"), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-windows-arm64-setup.exe")},
@@ -325,8 +325,8 @@ func clientTiles(lang string) []clientTile {
 			Key: "linux", Icon: template.HTML(iconLinux), OS: "Linux",
 			Apps: []clientApp{
 				{Name: god, Recommended: true, Format: fAny,
-					Desc: pick("本站自家的客户端:单一二进制,自带浏览器面板。解压后 sudo ./install.sh 装成服务,终端会打印面板地址,在面板里粘贴通用地址即可。软路由(OpenWrt / iStoreOS)用 ipk 包,opkg install 装完自动起服务。",
-						"Our own client: a single binary with its own browser panel. Unpack and run sudo ./install.sh; the terminal prints the panel address, then paste the universal link there. On OpenWrt / iStoreOS use the ipk, which starts the service on install."),
+					Desc: pick("自研客户端,单一二进制,自带浏览器面板。解压后 sudo ./install.sh,终端会打印面板地址,在面板里粘贴通用地址。软路由(OpenWrt / iStoreOS)用 ipk 包。",
+						"Our own client: a single binary with its own browser panel. Unpack, run sudo ./install.sh, then paste the universal link into the panel address it prints. On OpenWrt / iStoreOS use the ipk."),
 					Links: []dl{
 						{Text: "tar.gz (amd64) v" + gv, Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-linux-amd64.tar.gz"), Primary: true},
 						{Text: "tar.gz (arm64)", Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-linux-arm64.tar.gz")},
