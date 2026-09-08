@@ -192,9 +192,10 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 
 	enc := url.QueryEscape
 	imp := SubTitle(user, opt) // 一键导入按订阅标题命名,与响应头一致
-	god, godHint := "佛跳墙", "Windows · Android · Android TV · Linux"
+	// 一键导入靠 godusevpn:// 深链,只有注册了协议的 Windows 与安卓(含电视)能接;Linux 版在自己的面板里粘地址
+	god, godHint := "佛跳墙", "Windows · Android · 电视"
 	if d.Lang != "zh" {
-		god = "Fotiaoqiang"
+		god, godHint = "Fotiaoqiang", "Windows · Android · TV"
 	}
 	d.Imports = []importLink{
 		// 自家客户端排第一:它自己会给地址补 ?format=json,所以传不带 format 的通用地址
