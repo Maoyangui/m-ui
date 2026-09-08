@@ -335,6 +335,7 @@ func (s *Server) Start() error {
 	s.httpSrv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	s.stop = make(chan struct{})
 	go s.housekeeping()
+	s.startGodusevpnRefresh() // 落地页里佛跳墙的下载链接始终指向最新发布
 	go func() {
 		if err := s.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			logger.Warning("订阅服务退出: ", err)

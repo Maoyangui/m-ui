@@ -192,14 +192,19 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 
 	enc := url.QueryEscape
 	imp := SubTitle(user, opt) // 一键导入按订阅标题命名,与响应头一致
+	god, godHint := "佛跳墙", "Windows · Android · Android TV · Linux"
+	if d.Lang != "zh" {
+		god = "Fotiaoqiang"
+	}
 	d.Imports = []importLink{
+		// 自家客户端排第一:它自己会给地址补 ?format=json,所以传不带 format 的通用地址
+		{Name: god, Hint: godHint, Href: template.URL("godusevpn://import?url=" + enc(base) + "&name=" + enc(imp))},
 		{Name: "Clash / Mihomo", Hint: "Clash Verge · FlClash · ClashMeta", Href: template.URL("clash://install-config?url=" + enc(clashURL) + "&name=" + enc(imp))},
 		{Name: "Shadowrocket", Hint: "iOS", Href: template.URL("shadowrocket://add/sub://" + base64.StdEncoding.EncodeToString([]byte(base)) + "?remark=" + enc(imp))},
 		// Nextin 的深链只有 url 一个参数(官方文档 wiki.nextinnet.com/guide/deeplink),用 Clash 地址;标题它每次刷新都从响应头读
 		{Name: "Nextin", Hint: "iOS · macOS · Apple TV", Href: template.URL("nextin://install-config?url=" + enc(clashURL))},
 		{Name: "sing-box", Hint: "SFA Android · SFI iOS · Desktop", Href: template.URL("sing-box://import-remote-profile?url=" + enc(base+"?format=json") + "#" + enc(imp))},
 		{Name: "Hiddify", Hint: "Android · iOS · Desktop", Href: template.URL("hiddify://import/" + clashURL)},
-		{Name: "Stash", Hint: "iOS · macOS", Href: template.URL("stash://install-config?url=" + enc(clashURL) + "&name=" + enc(imp))},
 	}
 	for _, l := range lines {
 		pl := pageLine{Name: l.Name, Protocol: l.Protocol}

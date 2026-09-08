@@ -54,12 +54,16 @@ func TestBuildPage(t *testing.T) {
 	if !d.HasExpiry || d.Expired || d.StatusText != "active" || d.Lang != "zh" {
 		t.Fatalf("状态不符: %+v", d)
 	}
-	if len(d.Imports) != 6 || !strings.HasPrefix(string(d.Imports[0].Href), "clash://install-config?url=https%3A%2F%2Fsub.example") || !strings.HasPrefix(string(d.Imports[3].Href), "sing-box://import-remote-profile?url=") || d.SubJSON != "https://sub.example:2056/sub/alice?format=json" {
+	// 第一个是自家的佛跳墙(深链带通用地址,客户端自己补 ?format=json)
+	if len(d.Imports) != 6 || !strings.HasPrefix(string(d.Imports[0].Href), "godusevpn://import?url=https%3A%2F%2Fsub.example") || d.Imports[0].Name != "佛跳墙" {
+		t.Fatalf("佛跳墙应排在第一个: %+v", d.Imports)
+	}
+	if !strings.HasPrefix(string(d.Imports[1].Href), "clash://install-config?url=https%3A%2F%2Fsub.example") || !strings.HasPrefix(string(d.Imports[4].Href), "sing-box://import-remote-profile?url=") || d.SubJSON != "https://sub.example:2056/sub/alice?format=json" {
 		t.Fatalf("导入链接不符: %+v", d.Imports)
 	}
 	// Nextin:官方深链只有 url 一个参数,指向 Clash 地址(百分号编码);sing-box 二维码指向 json 地址
-	if d.Imports[2].Name != "Nextin" || string(d.Imports[2].Href) != "nextin://install-config?url="+url.QueryEscape("https://sub.example:2056/sub/alice?format=clash") {
-		t.Fatalf("Nextin 导入链接不符: %+v", d.Imports[2])
+	if d.Imports[3].Name != "Nextin" || string(d.Imports[3].Href) != "nextin://install-config?url="+url.QueryEscape("https://sub.example:2056/sub/alice?format=clash") {
+		t.Fatalf("Nextin 导入链接不符: %+v", d.Imports[3])
 	}
 	if string(d.QRJSON) != "https://sub.example:2056/sub/alice/qr?format=json" {
 		t.Fatalf("sing-box 二维码地址不符: %s", d.QRJSON)

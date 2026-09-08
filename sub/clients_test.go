@@ -2,9 +2,12 @@ package sub
 
 import (
 	"bytes"
+	"context"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
 )
@@ -130,4 +133,80 @@ func TestLandingLinksToClients(t *testing.T) {
 	if !strings.Contains(buf.String(), `class="getapp"`) || !strings.Contains(buf.String(), "?clients=1") {
 		t.Fatal("订阅页里没有客户端下载入口")
 	}
+}
+
+// 自家客户端:安卓 / Windows / Linux 三块里佛跳墙必须排第一并带推荐标,链接指向最新版本的发布资产,
+// 并且能自动拿到国内镜像(和别家一样经 addMirrors 补上)。
+func TestGodusevpnFirstAndMirrored(t *testing.T) {
+	for _, lang := range []string{"zh", "en"} {
+		name := "佛跳墙"
+		if lang != "zh" {
+			name = "Fotiaoqiang"
+		}
+		ver := godusevpnVersion()
+		for _, key := range []string{"android", "windows", "linux"} {
+			var tile clientTile
+			for _, x := range clientTiles(lang) {
+				if x.Key == key {
+					tile = x
+				}
+			}
+			if len(tile.Apps) == 0 {
+				t.Fatalf("%s: 找不到 %s 块", lang, key)
+			}
+			app := tile.Apps[0]
+			if app.Name != name || !app.Recommended {
+				t.Fatalf("%s/%s: 第一款应是带推荐标的 %s,实际 %q recommended=%v", lang, key, name, app.Name, app.Recommended)
+			}
+			var primary, mirror string
+			for _, l := range app.Links {
+				if l.Primary {
+					primary = string(l.Href)
+				}
+				if l.Mirror {
+					mirror = string(l.Href)
+				}
+			}
+			if !strings.Contains(primary, "Maoyangui/godusevpn/releases/download/v"+ver+"/godusevpn-"+ver+"-") {
+				t.Fatalf("%s/%s: 首选包应指向本仓库最新版本的资产: %s", lang, key, primary)
+			}
+			if !strings.HasPrefix(mirror, ghMirror) {
+				t.Fatalf("%s/%s: 应有国内镜像入口: %q", lang, key, mirror)
+			}
+		}
+	}
+}
+
+// 版本号取自后台刷新的最新发布;拿不到网络时用兜底常量,格式必须是 x.y.z[-后缀]。
+func TestGodusevpnVersionFallbackAndParse(t *testing.T) {
+	if got := godusevpnVersion(); !godTagRe.MatchString(got) {
+		t.Fatalf("兜底版本格式不对: %q", got)
+	}
+	before := godusevpnVersion()
+	setGodusevpnVersion("不是版本号")
+	if godusevpnVersion() != before {
+		t.Fatal("非法版本号不该被采用")
+	}
+	setGodusevpnVersion("v9.9.9-z1")
+	if godusevpnVersion() != "9.9.9-z1" {
+		t.Fatalf("应去掉 v 前缀并采用: %q", godusevpnVersion())
+	}
+	setGodusevpnVersion(before)
+}
+
+// 真的去 GitHub 读一次发布订阅源(默认跳过,平时不联网跑测试):M_UI_NET_TEST=1 go test -run Atom ./sub/
+func TestGodusevpnAtomLive(t *testing.T) {
+	if os.Getenv("M_UI_NET_TEST") != "1" {
+		t.Skip("联网用例,设 M_UI_NET_TEST=1 再跑")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	v, err := fetchGodusevpnVersion(ctx, "https://github.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !godTagRe.MatchString(v) {
+		t.Fatalf("拿到的版本号不对: %q", v)
+	}
+	t.Logf("最新发布: %s", v)
 }

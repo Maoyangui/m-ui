@@ -165,6 +165,7 @@ func clientTiles(lang string) []clientTile {
 	}
 	fClash, fSing, fAny := pick("Clash 地址", "Clash link"), pick("sing-box 地址", "sing-box link"), pick("通用地址", "universal link")
 	mirror, all := pick("国内镜像下载", "China mirror"), pick("全部版本", "All releases")
+	god, gv := pick("佛跳墙", "Fotiaoqiang"), godusevpnVersion() // 自家客户端排在每个系统的第一位,版本号跟着最新发布走
 	const verge, cmfa, flclash, singbox, hiddify, v2rayn = "clash-verge-rev/clash-verge-rev", "MetaCubeX/ClashMetaForAndroid", "chen08209/FlClash", "SagerNet/sing-box", "hiddify/hiddify-app", "2dust/v2rayN"
 	tiles := []clientTile{
 		{
@@ -187,7 +188,15 @@ func clientTiles(lang string) []clientTile {
 		{
 			Key: "android", Icon: template.HTML(iconAndro), OS: "Android / Android TV",
 			Apps: []clientApp{
-				{Name: "Clash Meta for Android", Recommended: true, Format: fClash,
+				{Name: god, Recommended: true, Format: fAny,
+					Desc: pick("本站自家的客户端,内置 sing-box,手机与电视盒子都能用。装好后回订阅页点「"+god+"」一键导入,或粘贴通用地址。不确定机型就装通用版。",
+						"Our own client, with sing-box built in; works on phones and TV boxes. After installing, tap "+god+" on the subscription page or paste the universal link. Pick the universal build if unsure."),
+					Links: []dl{
+						{Text: pick("APK arm64 版 v"+gv, "APK arm64 v"+gv), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-android-arm64.apk"), Primary: true},
+						{Text: pick("APK 通用版", "APK universal"), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-android-universal.apk")},
+						{Text: all, Href: ghLatest(godRepo), Muted: true},
+					}},
+				{Name: "Clash Meta for Android", Format: fClash,
 					Desc: pick("下载 APK 安装(系统会提示「允许安装未知来源」,同意即可)。通用版任何机型都能装,机型确定是 64 位手机/电视盒子可以选更小的 arm64 版。",
 						"Install the APK (Android will ask you to allow installs from this source). The universal build works on any device; pick arm64 if you know your phone or TV box is 64-bit."),
 					Links: []dl{
@@ -224,7 +233,16 @@ func clientTiles(lang string) []clientTile {
 		{
 			Key: "windows", Icon: template.HTML(iconWin), OS: "Windows",
 			Apps: []clientApp{
-				{Name: "Clash Verge Rev", Recommended: true, Format: fClash,
+				{Name: god, Recommended: true, Format: fAny,
+					Desc: pick("本站自家的客户端,内置 sing-box。安装包一路下一步;若提示「Windows 已保护你的电脑」,点「更多信息」→「仍要运行」。装好后回订阅页点「"+god+"」一键导入,或粘贴通用地址。系统精简 / 内网机器用离线完整版。",
+						"Our own client, with sing-box built in. Run the installer; if SmartScreen warns you, choose More info → Run anyway. Then tap "+god+" on the subscription page or paste the universal link. Use the offline build on trimmed-down or offline machines."),
+					Links: []dl{
+						{Text: pick("Windows x64 安装包 v"+gv, "Windows x64 installer v"+gv), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-windows-x64-setup.exe"), Primary: true},
+						{Text: pick("ARM64 安装包", "ARM64 installer"), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-windows-arm64-setup.exe")},
+						{Text: pick("x64 离线完整版", "x64 offline installer"), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-windows-x64-setup-offline.exe")},
+						{Text: all, Href: ghLatest(godRepo), Muted: true},
+					}},
+				{Name: "Clash Verge Rev", Format: fClash,
 					Desc: pick("下载安装包一路下一步即可。若提示「Windows 已保护你的电脑」,点「更多信息」→「仍要运行」。装好后在「订阅」里粘贴 Clash 地址。",
 						"Run the installer and follow the wizard. If Windows SmartScreen warns you, choose More info → Run anyway, then paste the Clash link under Profiles."),
 					Links: []dl{
@@ -306,7 +324,16 @@ func clientTiles(lang string) []clientTile {
 		{
 			Key: "linux", Icon: template.HTML(iconLinux), OS: "Linux",
 			Apps: []clientApp{
-				{Name: "Clash Verge Rev", Recommended: true, Format: fClash,
+				{Name: god, Recommended: true, Format: fAny,
+					Desc: pick("本站自家的客户端:单一二进制,自带浏览器面板。解压后 sudo ./install.sh 装成服务,终端会打印面板地址,在面板里粘贴通用地址即可。软路由(OpenWrt / iStoreOS)用 ipk 包,opkg install 装完自动起服务。",
+						"Our own client: a single binary with its own browser panel. Unpack and run sudo ./install.sh; the terminal prints the panel address, then paste the universal link there. On OpenWrt / iStoreOS use the ipk, which starts the service on install."),
+					Links: []dl{
+						{Text: "tar.gz (amd64) v" + gv, Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-linux-amd64.tar.gz"), Primary: true},
+						{Text: "tar.gz (arm64)", Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-linux-arm64.tar.gz")},
+						{Text: pick("OpenWrt ipk (arm64)", "OpenWrt ipk (arm64)"), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-openwrt-arm64.ipk")},
+						{Text: all, Href: ghLatest(godRepo), Muted: true},
+					}},
+				{Name: "Clash Verge Rev", Format: fClash,
 					Desc: pick("Debian / Ubuntu 装 deb,Fedora / RHEL 装 rpm。装好后在「订阅」里粘贴 Clash 地址。",
 						"Use the deb on Debian/Ubuntu or the rpm on Fedora/RHEL, then paste the Clash link under Profiles."),
 					Links: []dl{
