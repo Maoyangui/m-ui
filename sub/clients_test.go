@@ -144,7 +144,7 @@ func TestGodusevpnFirstAndMirrored(t *testing.T) {
 			name = "Fotiaoqiang"
 		}
 		ver := godusevpnVersion()
-		for _, key := range []string{"android", "windows", "linux"} {
+		for _, key := range []string{"android", "windows", "macos", "linux"} {
 			var tile clientTile
 			for _, x := range clientTiles(lang) {
 				if x.Key == key {

@@ -287,7 +287,15 @@ func clientTiles(lang string) []clientTile {
 		{
 			Key: "macos", Icon: template.HTML(iconMac), OS: "macOS",
 			Apps: []clientApp{
-				{Name: "Clash Verge Rev", Recommended: true, Format: fClash,
+				{Name: god, Recommended: true, Format: fAny,
+					Desc: pick("自研客户端,内置 sing-box,macOS 13 及以上。下载对应芯片的包,解开后在终端里 sudo sh install.sh(会问一次开机密码);装好在启动台打开「"+god+"」,再回订阅页点「"+god+"」一键导入。2020 年后的机型基本都是 Apple 芯片。",
+						"Our own client with sing-box built in, macOS 13 and up. Download the build for your chip, unpack it and run sudo sh install.sh in Terminal, then open "+god+" from Launchpad and tap "+god+" on the subscription page. Macs from 2020 on are Apple silicon."),
+					Links: []dl{
+						{Text: pick("Apple 芯片 (tar.gz) v"+gv, "Apple silicon (tar.gz) v"+gv), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-macos-arm64.tar.gz"), Primary: true},
+						{Text: pick("Intel 芯片 (tar.gz)", "Intel (tar.gz)"), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-macos-amd64.tar.gz")},
+						{Text: all, Href: ghLatest(godRepo), Muted: true},
+					}},
+				{Name: "Clash Verge Rev", Format: fClash,
 					Desc: pick("按芯片选:2020 年后的机型基本都是 Apple 芯片。打开 dmg 把图标拖进「应用程序」即可;首次打开若提示来源不明,到「系统设置 → 隐私与安全性」点「仍要打开」。",
 						"Pick the build for your chip (Macs from 2020 on are Apple silicon). Open the dmg and drag the app into Applications; on first launch allow it under System Settings → Privacy & Security."),
 					Links: []dl{

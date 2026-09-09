@@ -18,7 +18,7 @@ import (
 const (
 	godRepo = "Maoyangui/godusevpn"
 	// godFallbackVer 兜底版本:发布新版时顺手更新一下,拉不到网络也有一份能用的链接
-	godFallbackVer  = "0.6.1-a5"
+	godFallbackVer  = "0.6.2-mac2"
 	godRefreshEvery = 6 * time.Hour
 )
 
