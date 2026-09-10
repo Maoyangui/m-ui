@@ -432,6 +432,7 @@ func (s *Server) handle() http.HandlerFunc {
 			WHERE ul.user_id = ? AND l.enabled = 1 ORDER BY l.sort`, user.Id).Scan(&lines)
 
 		opt := s.options()
+		opt.BuyURL = s.buyURL(rs) // 代理填了用代理的,否则用主面板的;随订阅发出去给客户端做续费入口
 		opt.External = s.externalFor(user.Id)
 		opt.LineNodes = s.lineNodesFor(user.Id)
 		opt.Share = s.shareSelfService() && (rs == nil || rs.ShareOn)

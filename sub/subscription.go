@@ -30,6 +30,9 @@ type Options struct {
 	Share bool
 	// LineNodes 用户在各线路上被收窄到的服务器(线路 id → 服务器 id 集合);没写的线路 = 全部服务器。
 	LineNodes map[uint]map[uint]bool
+	// BuyURL 「选购 / 续费」地址,已按 buyURL(rs) 解析过(代理填了用代理的,否则用主面板的)。
+	// 非空时随订阅发一个 Profile-Web-Page-Url 头,客户端就能在订阅卡片上摆一个续费入口。
+	BuyURL string
 }
 
 // ExtItem 是一组外部节点。
@@ -96,13 +99,31 @@ func SubTitle(user model.User, opt Options) string {
 
 func headers(user model.User, opt Options, contentType string) map[string]string {
 	title := SubTitle(user, opt)
-	return map[string]string{
+	h := map[string]string{
 		"Content-Type":            contentType,
 		"Subscription-Userinfo":   fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", user.Up, user.Down, user.Volume, user.Expiry),
 		"Profile-Update-Interval": fmt.Sprintf("%d", opt.UpdateHours),
 		"Profile-Title":           encodeTitle(title),
 		"Content-Disposition":     contentDisposition(title, user.Name),
 	}
+	// 「选购 / 续费」地址。Profile-Web-Page-Url 是 Clash 系客户端已有的约定头,
+	// 佛跳墙拿它在订阅卡片上摆续费按钮,别的客户端会显示成「订阅主页」。
+	// 值在 buyURL() 里已经限死 http(s);这里再挡一次控制字符,免得设置里粘进换行把响应头劈开。
+	if u := headerSafe(opt.BuyURL); u != "" {
+		h["Profile-Web-Page-Url"] = u
+	}
+	return h
+}
+
+// headerSafe 头里不能出现 CR / LF 之类的控制字符,有就整条不发。
+func headerSafe(v string) string {
+	v = strings.TrimSpace(v)
+	for _, r := range v {
+		if r < 0x20 || r == 0x7f {
+			return ""
+		}
+	}
+	return v
 }
 
 // encodeTitle 纯 ASCII 原样发,含非 ASCII 用 base64: 前缀。
