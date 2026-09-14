@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"strconv"
 	"strings"
 )
 
@@ -238,21 +237,6 @@ func firstNonEmpty(vals ...string) string {
 		if v != "" {
 			return v
 		}
-	}
-	return ""
-}
-
-// portString 把 clash 里可能是数字或字符串的端口统一成字符串。
-func portString(v interface{}) string {
-	switch x := v.(type) {
-	case string:
-		return x
-	case int:
-		return strconv.Itoa(x)
-	case int64:
-		return strconv.FormatInt(x, 10)
-	case float64:
-		return strconv.Itoa(int(x))
 	}
 	return ""
 }

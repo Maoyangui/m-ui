@@ -62,7 +62,7 @@ func Issue(ctx context.Context, cfg Config) (Result, error) {
 		return res, errors.New("域名无效")
 	}
 	if net.ParseIP(cfg.Domain) != nil {
-		return res, errors.New("Let's Encrypt 不给 IP 签发证书,请用域名或自签")
+		return res, errors.New("签发失败:Let's Encrypt 不给 IP 签发证书,请用域名或自签")
 	}
 	if cfg.Method == "cloudflare" && strings.TrimSpace(cfg.CFToken) == "" {
 		return res, errors.New("dns-01 需要 Cloudflare API Token")

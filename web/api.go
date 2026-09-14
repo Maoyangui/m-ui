@@ -29,20 +29,6 @@ import (
 	"gorm.io/gorm"
 )
 
-const credAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-
-// randomString 生成指定长度的随机口令(密码学安全)。
-func randomString(n int) string {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return ""
-	}
-	for i := range b {
-		b[i] = credAlphabet[int(b[i])%len(credAlphabet)]
-	}
-	return string(b)
-}
-
 // randomBase64 生成 n 字节随机数据的 base64(shadowsocks 密码要求)。
 func randomBase64(n int) string {
 	b := make([]byte, n)
@@ -387,6 +373,20 @@ func (s *Server) validateLine(line *model.Line) error {
 		var probe map[string]interface{}
 		if err := json.Unmarshal(line.Tls, &probe); err != nil {
 			return fmt.Errorf("TLS 配置不是合法 JSON: %w", err)
+		}
+		// REALITY 没填 short_id 就补一个:入站默认接受空 short_id,等于只靠公钥认人,弱了一截
+		if mode, _ := probe["mode"].(string); mode == "reality" {
+			r, _ := probe["reality"].(map[string]interface{})
+			if r == nil {
+				r = map[string]interface{}{}
+			}
+			if ids, _ := r["short_ids"].([]interface{}); len(ids) == 0 {
+				r["short_ids"] = []string{creds.ShortID()}
+				probe["reality"] = r
+				if b, err := json.Marshal(probe); err == nil {
+					line.Tls = b
+				}
+			}
 		}
 	}
 	if len(line.Transport) > 0 {

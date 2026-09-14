@@ -7,6 +7,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gofrs/uuid/v5"
@@ -320,9 +321,15 @@ func shouldUntrackIOErr(err error) bool {
 	if errors.Is(err, io.EOF) {
 		return true
 	}
+	// 超时,以及 EINTR / EMFILE / ENFILE 这类"过会儿再试"的错,连接本身还在;其它网络错误都当作断了。
+	// (这就是 net.Error 的 Temporary() 原来的判断,它从 Go 1.18 起被标为语义不清,这里写明白。)
 	var ne net.Error
-	if errors.As(err, &ne) {
-		return !ne.Temporary()
+	if errors.As(err, &ne) && ne.Timeout() {
+		return false
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) && (errno == syscall.EINTR || errno == syscall.EMFILE || errno == syscall.ENFILE) {
+		return false
 	}
 	return true
 }

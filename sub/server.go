@@ -452,6 +452,10 @@ func (s *Server) handle() http.HandlerFunc {
 			return
 		}
 		if blocked {
+			// 拉不到节点,但「选购 / 续费」地址照样随这个 404 发出去 —— 到期 / 用尽的人正是这时候最需要它
+			if u := headerSafe(opt.BuyURL); u != "" {
+				w.Header().Set("Profile-Web-Page-Url", u)
+			}
 			s.log(r, user.Name, shared, 404)
 			http.NotFound(w, r)
 			return

@@ -72,6 +72,8 @@ type Node struct {
 	PublicIP string `json:"publicIp"`
 	// Ratio 流量倍率:经该服务器的流量按倍率计入用户用量(2 = 双倍扣量);0/1 = 原样。
 	Ratio float64 `json:"ratio" gorm:"default:1"`
+	// CertFP 勾了"跳过证书校验"时记住的副机证书 SHA-256 指纹(首次连接写入),之后指纹变了就拒绝连接;空 = 还没记。
+	CertFP string `json:"certFp,omitempty"`
 }
 
 // User 订阅用户。配额/流量为两台服务器聚合值,判定只在主端进行。

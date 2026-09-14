@@ -12,6 +12,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -545,6 +546,7 @@ type NodeStatus struct {
 	ReloadAt        int64  `json:"reloadAt,omitempty"`
 	VersionMismatch bool   `json:"versionMismatch,omitempty"`
 	alerted         bool
+	failSince       int64 // 这一轮连续失败从什么时候开始;0 = 正常
 	conns           []RecentConn
 }
 
@@ -585,7 +587,9 @@ type Hub struct {
 	revision    string
 	stop        chan struct{}
 	wg          sync.WaitGroup
-	clients     map[bool]*http.Client
+	// verified 正常校验证书的副机共用一个;pinned 勾了"跳过证书校验"的副机按 id+指纹各一个,指纹一变就换新的
+	verified *http.Client
+	pinned   map[string]*http.Client
 	// rejects 各代理池最近被拒的新设备连接(主机 + 各副机上报),只留 rejectWindow 内的,面板给代理看"设备池已满"
 	rejects map[string][]rejectAt
 	// upHealth 各副机上报的上游巡检结果(副机 id → 结果),面板按服务器展示、主机据此告警
@@ -603,10 +607,7 @@ func New(d Deps) *Hub {
 	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{},
 		remoteLines: map[uint]map[string]map[string][]string{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
 		upHealth: map[uint][]UpstreamHealth{},
-		clients: map[bool]*http.Client{
-			false: {Timeout: 25 * time.Second},
-			true:  {Timeout: 25 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}},
-		}}
+		verified: &http.Client{Timeout: 25 * time.Second}, pinned: map[string]*http.Client{}}
 }
 
 func (h *Hub) Start() {
@@ -899,8 +900,11 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 	h.mu.Lock()
 	wasOK, alerted := st.OK, st.alerted
 	st.Name, st.OK, st.Error = n.Name, ok, errStr
+	now := time.Now().Unix()
 	if ok {
-		st.LastSeen = time.Now().Unix()
+		st.LastSeen, st.failSince = now, 0
+	} else if st.failSince == 0 {
+		st.failSince = now
 	}
 	if rep != nil {
 		st.Version, st.Hostname, st.CoreRunning, st.Uptime, st.Revision, st.CertDays = rep.Version, rep.Hostname, rep.CoreRunning, rep.Uptime, rep.Revision, rep.CertDays
@@ -913,7 +917,8 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 		}
 		st.VersionMismatch = rep.Version != "" && h.d.Version != "" && rep.Version != h.d.Version
 	}
-	if !ok && !alerted && st.LastSeen > 0 && time.Now().Unix()-st.LastSeen > 60 {
+	// 按"连续失败了多久"告警,不看上次在线时间:从来没连上过的副机(配错了)也得有人知道
+	if !ok && !alerted && now-st.failSince > 60 {
 		st.alerted = true
 		h.mu.Unlock()
 		if h.d.Notify != nil {
@@ -1126,7 +1131,7 @@ func (h *Hub) request(n model.Node, method, path string, body interface{}, out i
 	}
 	req.Header.Set("X-Agent-Token", n.Token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := h.clients[n.Insecure].Do(req)
+	resp, err := h.clientFor(n).Do(req)
 	if err != nil {
 		return err
 	}
@@ -1146,4 +1151,58 @@ func (h *Hub) request(n model.Node, method, path string, body interface{}, out i
 		}
 	}
 	return nil
+}
+
+// clientFor 副机用哪个 HTTP 客户端。勾了"跳过证书校验"的不是完全不看证书:第一次连上把它的证书
+// 指纹记进库(信任首次连接),之后指纹变了就拒绝 —— 主副之间传的是令牌和整份用户快照,完全不校验
+// 等于把这些交给线路上任何一个中间人。副机重签过证书的,在服务器页点「重置指纹」重新信任。
+func (h *Hub) clientFor(n model.Node) *http.Client {
+	if !n.Insecure {
+		return h.verified
+	}
+	key := fmt.Sprintf("%d:%s", n.Id, n.CertFP)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if c := h.pinned[key]; c != nil {
+		return c
+	}
+	id, want, name := n.Id, n.CertFP, n.Name
+	c := &http.Client{Timeout: 25 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		InsecureSkipVerify: true, // 不查签发链(自签 / IP 证书都过不了),只认下面记住的指纹
+		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
+			if len(raw) == 0 {
+				return errors.New("副机没有出示证书")
+			}
+			sum := sha256.Sum256(raw[0])
+			got := hex.EncodeToString(sum[:])
+			if want == "" {
+				h.d.DB.Model(&model.Node{}).Where("id = ? AND COALESCE(cert_fp, '') = ''", id).Update("cert_fp", got)
+				logger.Info("已记住副机 ", name, " 的证书指纹 ", got[:16])
+				return nil
+			}
+			if got != want {
+				return fmt.Errorf("副机证书指纹变了(记住的 %s…,现在 %s…):要是你重签了证书,到服务器页点「重置指纹」重新信任", want[:16], got[:16])
+			}
+			return nil
+		},
+	}}}
+	// 这台机器旧指纹的客户端不再用了
+	for k, old := range h.pinned {
+		if strings.HasPrefix(k, fmt.Sprintf("%d:", id)) {
+			old.CloseIdleConnections()
+			delete(h.pinned, k)
+		}
+	}
+	h.pinned[key] = c
+	return c
+}
+
+// CloseIdleConnections 关掉所有副机客户端的空闲连接(测试里数协程用)。
+func (h *Hub) CloseIdleConnections() {
+	h.verified.CloseIdleConnections()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, c := range h.pinned {
+		c.CloseIdleConnections()
+	}
 }

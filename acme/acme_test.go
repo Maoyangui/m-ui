@@ -16,7 +16,7 @@ func TestCloudflareZoneAndTXT(t *testing.T) {
 	var created, deleted string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer tok" {
-			http.Error(w, `{"success":false,"errors":[{"message":"bad token"}]}`, 403)
+			http.Error(w, `{"success":false,"errors":[{"message":"bad token"}]}`, http.StatusForbidden)
 			return
 		}
 		switch {

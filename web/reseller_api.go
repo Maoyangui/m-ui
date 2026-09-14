@@ -277,12 +277,6 @@ func (s *Server) resellerUsers(rs model.Reseller) []resellerUserRow {
 	return out
 }
 
-func (s *Server) resellerLineIds(id uint) []uint {
-	ids := []uint{}
-	s.db.Model(&model.ResellerLine{}).Where("reseller_id = ?", id).Pluck("line_id", &ids)
-	return ids
-}
-
 // setResellerLines 老写法:整条线路(全部服务器)。
 func (s *Server) setResellerLines(id uint, lineIds []uint) {
 	s.setResellerLineRefs(id, lineRefsOf(lineIds, nil))

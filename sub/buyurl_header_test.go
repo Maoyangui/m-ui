@@ -60,3 +60,21 @@ func TestBuyURLHeader(t *testing.T) {
 		}
 	}
 }
+
+// 到期 / 用尽 / 停用的人拉订阅只有 404 —— 但续费地址照样随 404 发,这时候最需要它。
+// 地址对不上任何人的 404 不带(没有"这个人"可言,也不给扫描器任何线索)。
+func TestBuyURLHeaderOnBlocked(t *testing.T) {
+	s, db := shareServer(t)
+	db.Create(&model.Setting{Key: "subPageBuyURL", Value: "https://main.example/buy"})
+	db.Model(&model.User{}).Where("name = ?", "alice").Update("enabled", false)
+	w := doReq(s, "GET", "/sub/alice?format=json", "curl/8.4.0")
+	if w.Code != 404 {
+		t.Fatalf("停用的人应得 404,得 %d", w.Code)
+	}
+	if got := w.Header().Get("Profile-Web-Page-Url"); got != "https://main.example/buy" {
+		t.Fatalf("404 也该带续费地址,得 %q", got)
+	}
+	if got := doReq(s, "GET", "/sub/nobody?format=json", "curl/8.4.0").Header().Get("Profile-Web-Page-Url"); got != "" {
+		t.Fatalf("无主地址不该带续费头,得 %q", got)
+	}
+}

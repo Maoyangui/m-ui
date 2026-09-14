@@ -393,7 +393,7 @@ Any number of nodes. To attach one:
 
 1. Install m-ui on the node, sign in, Settings → Role → "run as node".
 2. Copy the API URL and token from Settings → Pairing on the node.
-3. On the master, Servers → Add: name (e.g. "HK", used as the node-name suffix), domain, API URL, token; optionally skip certificate verification if the node uses a self-signed cert.
+3. On the master, Servers → Add: name (e.g. "HK", used as the node-name suffix), domain, API URL, token; optionally skip certificate verification if the node uses a self-signed cert (its certificate fingerprint is remembered on first contact and a changed fingerprint is rejected; click "Reset fingerprint" after re-issuing the certificate).
 4. Within seconds the master pushes and shows "synced".
 
 How it works: the master compares a snapshot every few seconds and pushes on change; in the same round it pulls the node's traffic ledger, online IPs, status and certificate expiry. Quotas are enforced only on the master; a disabled user reaches every node within about 5 seconds. A node unreachable for over a minute triggers one alert and one more on recovery; while offline it keeps serving users with its last config.
@@ -496,7 +496,9 @@ Existing names only get usage / quota / expiry / enabled updated; new users are 
 
 **WARP fails to enable?** The task output on the Ops page shows why; usually port 40000 is taken. WARP is only a local SOCKS5 upstream; pick upstream `warp` on a line to use it.
 
-**A node shows offline.** The Servers page shows the reason (bad token / timeout / certificate error). Tick "skip certificate verification" on the master when the node uses a self-signed cert.
+**A node shows offline.** The Servers page shows the reason (bad token / timeout / certificate error / fingerprint changed). Tick "skip certificate verification" on the master when the node uses a self-signed cert — it still pins the certificate: the fingerprint is remembered on first contact and a changed one is rejected; after re-issuing the node certificate click "Reset fingerprint" on the Servers page.
+
+**Why is `:2053/` a 404?** The root path deliberately does not redirect to the panel: a redirect would hand the panel path to anyone scanning the port. Open the full panel URL directly.
 
 **Forgot the password or lost the 2FA phone.** Run `m-ui` over SSH: item 5 resets the password (and clears 2FA), item 13 only disables 2FA.
 

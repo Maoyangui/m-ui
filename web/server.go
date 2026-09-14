@@ -208,12 +208,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"admin/", s.auth(s.handleAdmin))
 	mux.HandleFunc(api+"v1/", s.handlePublicAPI) // 外部 API:Bearer 令牌鉴权,与会话无关
 
-	// 根路径重定向到面板
+	// 根路径不跳到面板:跳转等于把面板路径告诉每一个扫到这个端口的人,面板路径这层保护就没了。
+	// 不认识的路径一律普通 404,对外看不出这个端口上跑的是什么。
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" && s.basePath() != "/" {
-			http.Redirect(w, r, s.basePath(), http.StatusTemporaryRedirect)
-			return
-		}
 		http.NotFound(w, r)
 	})
 	// 对外前缀 → 内部前缀改写;对外前缀不是 innerBase 时,直接访问内部前缀视为不存在

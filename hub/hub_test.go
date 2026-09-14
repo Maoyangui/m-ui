@@ -327,9 +327,7 @@ func TestTickSyncsNodesConcurrently(t *testing.T) {
 		t.Fatalf("在线 IP 应汇总去重为 1 个,实际 %v", ips)
 	}
 	// 多出来的只该是 keep-alive 连接两头的读写协程:关掉空闲连接后应回落到同步前的水平
-	for _, c := range h.clients {
-		c.CloseIdleConnections()
-	}
+	h.CloseIdleConnections()
 	time.Sleep(200 * time.Millisecond)
 	if after := runtime.NumGoroutine(); after > before+3 {
 		t.Fatalf("同步后多出 goroutine: %d → %d", before, after)

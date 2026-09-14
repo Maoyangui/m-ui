@@ -34,9 +34,6 @@ func (s *Server) dryRunLine(line *model.Line) error {
 	return core.ValidateInbound(ib)
 }
 
-// defaultTestURL 是上游健康检查的目标(与 clash 默认一致),可用设置 upstreamTestUrl 覆盖。
-const defaultTestURL = "http://www.gstatic.com/generate_204"
-
 // dispatchUpstreamSubroute 处理 /upstreams/test、/upstreams/parse、/upstreams/{id}/test。
 // 返回 true 表示请求已被处理。
 func (s *Server) dispatchUpstreamSubroute(w http.ResponseWriter, r *http.Request) bool {

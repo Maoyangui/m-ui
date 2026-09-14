@@ -50,6 +50,7 @@ function shortErr(raw) {
     [/context deadline exceeded|timeout/, 'node.errTimeout'],
     [/connection refused/, 'node.errRefused'],
     [/no such host|dns/, 'node.errDns'],
+    [/指纹|fingerprint/, 'node.errFp'],
     [/certificate|x509/, 'node.errCert'],
     [/\b40[13]\b/, 'node.errToken'],
   ];
@@ -90,6 +91,7 @@ function actionsCell(n) {
   if (isNodeView()) return '';
   return `<button class="btn sm" data-act="node.test" data-id="${n.id}">${t('common.test')}</button>
         ${n.isLocal ? '' : `<button class="btn sm" data-act="node.push" data-id="${n.id}">${t('node.push')}</button>`}
+        ${n.isLocal || !n.certFp ? '' : `<button class="btn sm" data-act="node.resetCert" data-id="${n.id}" title="${esc(n.certFp)}">${t('node.resetCert')}</button>`}
         <button class="btn sm" data-act="node.edit" data-id="${n.id}">${t('common.edit')}</button>
         ${n.isLocal ? '' : `<button class="btn sm danger" data-act="node.del" data-id="${n.id}">${t('common.delete')}</button>`}`;
 }
@@ -156,6 +158,13 @@ registerActions({
   'node.push': async (id, btn) => {
     btn.disabled = true;
     try { await post(`nodes/${id}/push`, undefined, SLOW); toast(t('node.pushed'), 'ok'); data = await get('nodes'); renderRows(); }
+    catch (e) { toast(e.message, 'err'); }
+    finally { btn.disabled = false; }
+  },
+  'node.resetCert': async (id, btn) => {
+    if (!await confirm(t('node.resetCertConfirm'), { okText: t('node.resetCert') })) return;
+    btn.disabled = true;
+    try { await post(`nodes/${id}/resetcert`); toast(t('node.resetCertDone'), 'ok'); data = await get('nodes'); renderRows(); }
     catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; }
   },

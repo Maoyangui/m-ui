@@ -140,6 +140,18 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			}
 			s.audit(r, "node", "push", node.Name)
 			writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+		case "resetcert":
+			if r.Method != http.MethodPost {
+				writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+				return
+			}
+			// 忘掉记住的证书指纹:副机重签了证书之后用,下次连接重新记住新的
+			if err := s.db.Model(&model.Node{}).Where("id = ?", id).Update("cert_fp", "").Error; err != nil {
+				badRequest(w, err)
+				return
+			}
+			s.audit(r, "node", "resetcert", node.Name)
+			writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -160,6 +172,9 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		updates := map[string]interface{}{
 			"name": p.Name, "domain": p.Domain, "api_url": p.ApiUrl, "insecure": p.Insecure, "enabled": p.Enabled, "sort": p.Sort,
 			"addr": p.Addr, "ratio": p.Ratio,
+		}
+		if p.ApiUrl != node.ApiUrl || p.Insecure != node.Insecure {
+			updates["cert_fp"] = "" // 地址或校验方式变了,记住的证书指纹作废,下次连接重新记
 		}
 		if node.IsLocal { // 本机:API 地址/令牌/校验无意义,保持原值
 			delete(updates, "api_url")
