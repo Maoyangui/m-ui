@@ -15,6 +15,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/monitor"
 	"github.com/Maoyangui/m-ui/selfupdate"
 )
 
@@ -65,6 +66,10 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentExternalIPs)(w, r)
 	case "upstream-test": // 主机让本机立刻测一条上游(面板的"测试"按钮派发过来)
 		s.agentAuth(s.handleAgentUpstreamTest)(w, r)
+	case "upstream-check": // 主机让本机立刻跑一轮巡检(概览的「立即巡检」派发过来),返回本机全部结果
+		s.agentAuth(s.handleAgentUpstreamCheck)(w, r)
+	case "outbound-test": // 主机让本机实测一个临时出站(外部订阅展开后的逐台测速),不落库
+		s.agentAuth(s.handleAgentOutboundTest)(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -235,6 +240,47 @@ func (s *Server) handleAgentUpstreamTest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	ok, ms, meth, errStr := s.run.CheckUpstream(up)
+	now := time.Now().Unix()
+	// 本机的巡检结果也更新:下一轮随报告上报给主机的就是这份,不会又退回旧状态
+	s.run.Monitor().SetResult(monitor.UpstreamHealth{Id: up.Id, Name: up.Name, OK: ok, DelayMs: ms, Method: meth, Error: errStr, CheckedAt: now})
 	writeJSON(w, http.StatusOK, hub.UpstreamHealth{Id: up.Id, Name: up.Name, OK: ok, DelayMs: ms,
-		Method: meth, Error: errStr, CheckedAt: time.Now().Unix()})
+		Method: meth, Error: errStr, CheckedAt: now})
+}
+
+// handleAgentOutboundTest 用主机发来的出站参数在本机真连一次(临时实例),结果原样返回。
+func (s *Server) handleAgentOutboundTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	var up model.Upstream
+	if err := json.NewDecoder(r.Body).Decode(&up); err != nil {
+		badRequest(w, err)
+		return
+	}
+	if up.Type == "" || len(up.Options) == 0 {
+		badRequest(w, errors.New("出站参数不完整"))
+		return
+	}
+	if up.Name == "" {
+		up.Name = "ext-test"
+	}
+	ok, ms, meth, errStr := s.run.CheckUpstream(up)
+	writeJSON(w, http.StatusOK, hub.UpstreamHealth{Name: up.Name, OK: ok, DelayMs: ms, Method: meth, Error: errStr, CheckedAt: time.Now().Unix()})
+}
+
+// handleAgentUpstreamCheck 本机立刻跑一轮巡检,把全部结果交给主机(主机据此刷新汇总)。
+func (s *Server) handleAgentUpstreamCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	s.run.Monitor().RunUpstreamCheck()
+	local := s.run.UpstreamHealthLocal()
+	out := make([]hub.UpstreamHealth, 0, len(local))
+	for _, h := range local {
+		out = append(out, hub.UpstreamHealth{Id: h.Id, Name: h.Name, OK: h.OK, DelayMs: h.DelayMs,
+			Method: h.Method, Error: h.Error, CheckedAt: h.CheckedAt, Fails: h.Fails})
+	}
+	writeJSON(w, http.StatusOK, out)
 }

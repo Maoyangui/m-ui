@@ -382,3 +382,15 @@ table.grid.conns td.ell { max-width: 14rem; overflow: hidden; text-overflow: ell
 .lp-tabs button{white-space:nowrap}
 .lp-list{max-height:17rem;overflow:auto}
 .lp-count{margin-left:.2rem}
+
+/* 外部节点:展开面板 */
+tr.ext-sub > td { padding: 0 .5rem .9rem; background: rgba(127, 127, 127, .05); }
+.ext-panel { padding-top: .5rem; }
+.ext-tools input[type=search] { max-width: 16rem; }
+.ext-grid th, .ext-grid td { padding: .3rem .5rem; font-size: .85rem; }
+.ext-toggle { min-width: 1.6rem; padding: 0 .3rem; margin-right: .35rem; }
+.grid.kv td:first-child { width: 11rem; white-space: nowrap; }
+.ext-val { word-break: break-all; }
+.ext-link { margin-top: .8rem; display: grid; gap: .3rem; }
+.ext-results { padding-left: 1.2rem; }
+.ext-results li { margin: .25rem 0; }

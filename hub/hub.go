@@ -993,6 +993,52 @@ func (h *Hub) UpstreamHealthAll() map[uint][]UpstreamHealth {
 	return out
 }
 
+// SetUpstreamHealth 面板「测试」按钮在副机上测出来的结果直接写进汇总:比那台上一轮上报的新才写,
+// 概览不用等它下一轮上报才变。连续失败次数接着原来的算。
+func (h *Hub) SetUpstreamHealth(nodeID uint, uh UpstreamHealth) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	list := h.upHealth[nodeID]
+	for i := range list {
+		if list[i].Id != uh.Id {
+			continue
+		}
+		if uh.CheckedAt >= list[i].CheckedAt {
+			uh.Fails = list[i].Fails + 1
+			if uh.OK {
+				uh.Fails = 0
+			}
+			list[i] = uh
+		}
+		return
+	}
+	uh.Fails = 0
+	if !uh.OK {
+		uh.Fails = 1
+	}
+	h.upHealth[nodeID] = append(list, uh)
+}
+
+// CheckUpstreamsOn 让一台副机立刻跑一轮巡检,并把它的全部结果写进汇总(概览的「立即巡检」用:
+// 只刷主机那份、副机还是上一轮的,概览就会一直挂着旧故障)。
+func (h *Hub) CheckUpstreamsOn(n model.Node) error {
+	var out []UpstreamHealth
+	if err := h.request(n, "POST", "upstream-check", nil, &out); err != nil {
+		return err
+	}
+	h.mu.Lock()
+	h.upHealth[n.Id] = out
+	h.mu.Unlock()
+	return nil
+}
+
+// TestOutboundOn 让某台副机实测一个还不是上游的出站(外部订阅展开后的逐台测速),副机不落库。
+func (h *Hub) TestOutboundOn(n model.Node, up model.Upstream) (UpstreamHealth, error) {
+	var out UpstreamHealth
+	err := h.request(n, "POST", "outbound-test", up, &out)
+	return out, err
+}
+
 // TestUpstreamOn 让某台副机立刻测一条上游(面板的"测试"按钮:在真正用它的机器上测才有意义)。
 func (h *Hub) TestUpstreamOn(n model.Node, id uint) (UpstreamHealth, error) {
 	var out UpstreamHealth

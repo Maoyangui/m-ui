@@ -40,6 +40,34 @@ S.onlines.lines = S.lines.slice(0, 2).map(l => l.name);
 for (const n of S.nodes.nodes || []) if (n.status) n.status.uptime = (n.status.uptime || 0) + DELTA; // 副机运行时长随导出日期累加
 
 const nextId = list => list.reduce((m, x) => Math.max(m, x.id || 0), 0) + 1;
+// 外部订阅展开:节点明细 / 逐台测速 / 添加为上游(GET 与 POST 都走这里)
+function extNodes(id, seg, method, body) {
+  let servers = ((S.nodes && S.nodes.nodes) || (Array.isArray(S.nodes) ? S.nodes : [])).filter(n => n.enabled !== false).map(n => ({ id: n.id, name: n.name, isLocal: !!n.isLocal }));
+  if (!servers.length) servers = [{ id: 1, name: '主机', isLocal: true }, { id: 2, name: '副机', isLocal: false }];
+  const nodes = demoExtNodes(id);
+  if (!seg[3]) return { nodes, servers, fetchedAt: now() - 600 };
+  if (seg[3] === 'test' && !seg[4]) return { job: 'demo-' + id };
+  if (seg[3] === 'test') {
+    const results = {};
+    for (const n of nodes) { results[n.index] = {}; for (const s of servers) results[n.index][s.id] = Math.random() < 0.8 ? { state: 'ok', delayMs: 60 + Math.floor(Math.random() * 300), method: 'urltest' } : { state: 'fail', error: 'timeout' }; }
+    return { done: true, total: nodes.length * servers.length, finished: nodes.length * servers.length, results };
+  }
+  if (seg[3] === 'add-upstream') return { results: (body || []).map(x => ({ index: x.index, name: x.name, ok: true, id: 900 + x.index })) };
+  return ok();
+}
+// 演示用的外部订阅节点:三种协议各两个,带完整参数
+const demoExtNodes = id => [
+  ['hysteria2', 'HK-1', 'hk1.example.net', 443, [['password', 'p' + id + 'a'], ['sni', 'hk1.example.net'], ['skip-cert-verify', 'false'], ['alpn', '["h3"]']]],
+  ['hysteria2', 'HK-2', 'hk2.example.net', 443, [['password', 'p' + id + 'b'], ['sni', 'hk2.example.net'], ['up', '100'], ['down', '500']]],
+  ['tuic', 'JP-1', 'jp1.example.net', 8443, [['uuid', '3f2a1c9e-0000-4000-8000-00000000' + String(id).padStart(4, '0')], ['password', 'tp' + id], ['sni', 'jp1.example.net'], ['congestion-controller', 'bbr'], ['udp-relay-mode', 'native']]],
+  ['tuic', 'JP-2', 'jp2.example.net', 8443, [['uuid', '3f2a1c9e-0000-4000-8000-00000000' + String(id + 1).padStart(4, '0')], ['password', 'tq' + id], ['sni', 'jp2.example.net']]],
+  ['anytls', 'SG-1', 'sg1.example.net', 8444, [['password', 'ap' + id], ['sni', 'sg1.example.net'], ['client-fingerprint', 'chrome']]],
+  ['anytls', 'US-1', 'us1.example.net', 8444, [['password', 'aq' + id], ['sni', 'us1.example.net'], ['skip-cert-verify', 'true']]],
+].map(([type, name, server, port, extra], i) => ({
+  index: i, name, type, server, port, upstream: true,
+  fields: [['name', name], ['type', type], ['server', server], ['port', String(port)], ...extra].map(([k, v]) => ({ k, v })),
+  link: type + '://' + encodeURIComponent(extra[0][1]) + '@' + server + ':' + port + '?sni=' + server + '#' + encodeURIComponent(name),
+}));
 const now = () => Math.floor(Date.now() / 1000);
 const subBase = (S.settings.webDomain || 'panel.example.com');
 const subUrl = u => `https://${subBase}:2056/sub/${u.subToken || u.name}`;
@@ -77,7 +105,7 @@ function route(method, path, query, body) {
       case 'users': if (seg[2] === 'sub') { const u = find(S.users, id); return { link: subUrl(u), clash: subUrl(u) + '?format=clash', json: subUrl(u) + '?format=json' }; } return clone(S.users);
       case 'plans': return clone(S.plans);
       case 'nodes': return clone(S.nodes);
-      case 'exts': return clone(S.exts);
+      case 'exts': if (seg[2] === 'nodes') return extNodes(id, seg, 'GET', null); return clone(S.exts);
       case 'onlines': return clone(S.onlines);
       case 'rules': if (seg[2] === 'states') return clone(S.limitStates.filter(s => s.ruleId === id)); if (seg[1]) return ruleView(find(S.rules, id)); return S.rules.map(ruleView);
       case 'limitstates': return clone(S.limitStates);
@@ -178,6 +206,7 @@ function route(method, path, query, body) {
       const e = find(S.exts, id);
       if (seg[2] === 'refresh') return { clash: 3, link: 3 };
       if (seg[2] === 'preview') return { nodes: [] };
+      if (seg[2] === 'nodes') return extNodes(id, seg, method, body);
       if (method === 'DELETE') { S.exts = S.exts.filter(x => x.id !== id); return ok(); }
       if (method === 'PUT') { Object.assign(e, body, { id }); return clone(e); }
       return ok();

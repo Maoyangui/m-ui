@@ -8,6 +8,8 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
+	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/monitor"
 	"github.com/Maoyangui/m-ui/render"
 )
 
@@ -167,6 +169,8 @@ func (s *Server) testUpstreamEverywhere(up model.Upstream) []upServer {
 				if ok {
 					sv.State, sv.DelayMs = "ok", ms
 				}
+				// 测出来的结果写回巡检缓存,概览立刻按它显示,不用等下一轮定时巡检
+				s.run.Monitor().SetResult(monitor.UpstreamHealth{Id: up.Id, Name: up.Name, OK: ok, DelayMs: ms, Method: meth, Error: errStr, CheckedAt: now})
 			} else {
 				h, err := s.run.Hub().TestUpstreamOn(n, up.Id)
 				switch {
@@ -176,6 +180,9 @@ func (s *Server) testUpstreamEverywhere(up model.Upstream) []upServer {
 					sv.State, sv.DelayMs, sv.Method = "ok", h.DelayMs, h.Method
 				default:
 					sv.State, sv.Method, sv.Error = "fail", h.Method, h.Error
+				}
+				if err == nil {
+					s.run.Hub().SetUpstreamHealth(n.Id, h) // 同上:副机测出来的也写回汇总
 				}
 			}
 			out[i] = sv
@@ -190,6 +197,23 @@ func (s *Server) testUpstreamEverywhere(up model.Upstream) []upServer {
 func (s *Server) handleUpstreamHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost && s.run != nil {
 		changed := s.run.Monitor().RunUpstreamCheck()
+		// 副机那份也得刷:概览拼的是"主机自己 + 各副机上报"的结果,只刷主机、副机还是上一轮的,
+		// 上游页全绿了概览却一直挂着旧故障。让每台启用的副机立刻跑一轮并把结果写回汇总。
+		if h := s.run.Hub(); h != nil {
+			var nodes []model.Node
+			s.db.Where("enabled = ? AND is_local = ?", true, false).Find(&nodes)
+			var wg sync.WaitGroup
+			for _, n := range nodes {
+				wg.Add(1)
+				go func(n model.Node) {
+					defer wg.Done()
+					if err := h.CheckUpstreamsOn(n); err != nil {
+						logger.Warning("副机 ", n.Name, " 立即巡检失败: ", err)
+					}
+				}(n)
+			}
+			wg.Wait()
+		}
 		s.audit(r, "upstream", "health-check", changed)
 	}
 	var lastRun int64

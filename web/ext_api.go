@@ -107,6 +107,10 @@ func (s *Server) handleExtItem(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "外部节点不存在"})
 		return
 	}
+	if len(rest) >= 2 && rest[1] == "nodes" { // 展开:节点明细 / 逐台测速 / 添加为上游
+		s.handleExtNodes(w, r, e, rest[2:])
+		return
+	}
 	if len(rest) == 2 {
 		switch rest[1] {
 		case "refresh":

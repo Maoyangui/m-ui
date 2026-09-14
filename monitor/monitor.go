@@ -296,6 +296,28 @@ func (m *Monitor) Results() []UpstreamHealth {
 	return out
 }
 
+// SetResult 把一次手动测试(面板「测试」按钮)的结果写进巡检结果:比缓存里的新才写。
+// 这样概览与上游页看到的是同一份,不用等下一轮定时巡检;失败也计一次连续失败,恢复清零。
+func (m *Monitor) SetResult(h UpstreamHealth) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur := m.results[h.Id]
+	if cur == nil {
+		cur = &UpstreamHealth{Id: h.Id}
+		m.results[h.Id] = cur
+	} else if h.CheckedAt < cur.CheckedAt {
+		return
+	}
+	fails := cur.Fails
+	if h.OK {
+		fails = 0
+	} else {
+		fails++
+	}
+	*cur = h
+	cur.Fails = fails
+}
+
 // LastRun 返回上次巡检时间(0=尚未运行)。
 func (m *Monitor) LastRun() int64 {
 	m.mu.Lock()

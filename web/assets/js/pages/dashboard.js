@@ -294,7 +294,7 @@ registerActions({
   'dash.hideQs': () => { try { localStorage.setItem('m-ui.hideQuickStart', '1'); } catch {} document.querySelector('.quickstart')?.remove(); },
   'dash.healthRun': async (_, btn) => {
     btn.disabled = true;
-    try { await post('upstreams/health'); await renderHealth(); }
+    try { await post('upstreams/health', undefined, SLOW); await renderHealth(); }
     catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; }
   },

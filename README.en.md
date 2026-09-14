@@ -340,7 +340,9 @@ No domain is fine: self-signed cert + IP, and every node in the subscription alr
 
 ### External nodes
 
-Merge nodes from elsewhere into your subscriptions: a single share link, or a whole external subscription (provider / relay). The master fetches it on a schedule; once assigned to a user, those nodes appear after this site's nodes, optionally with a prefix.
+Merge nodes from elsewhere into your subscriptions: a single share link, or a whole external subscription (provider / relay). The master fetches it on a schedule; once assigned to a user, those nodes appear after this site's nodes, optionally with a prefix. Base64 / plain link lists, Clash YAML and sing-box JSON are understood; fetching first identifies as Clash Meta to get the full list (some panels serve a different subset per client, and a generic identity may only get one or two protocols), then falls back to a generic client.
+
+Expand an external subscription in the list to see every node it parsed: the full parameters of each node (server, port, SNI, UUID, password, transport and so on) and its share link. Test them for real on every enabled server, one column per server, or tick a few, give each a name and add them as upstreams — with the same validation as a manually created upstream; a duplicate name fails instead of being renamed.
 
 ### Users and plans
 

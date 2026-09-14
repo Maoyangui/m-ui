@@ -4,6 +4,7 @@ package ext
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,8 +24,35 @@ type Items struct {
 	Clash []map[string]interface{} // clash 代理(用于 clash 订阅)
 }
 
-// Fetch 抓取外部订阅。UA 用通用客户端标识,让服务商返回链接列表而不是 clash YAML(两种都能解析)。
+// fetchAgents 抓取时依次冒充的客户端身份。有的面板按客户端发不同内容:Clash 系给全量 YAML,
+// 通用身份只给它认为该客户端支持的一两种协议(真机遇到过:同一条订阅 5 个 vs 117 个)。
+var fetchAgents = []string{"ClashMeta/1.18.0 (m-ui)", "v2rayN/7.0 m-ui"}
+
+// Fetch 抓取外部订阅:先以 Clash Meta 身份拉,解析不出节点再退回通用身份;
+// 都解析不出就把第一份原样交出去,让调用方报"没有可识别的节点"。
 func Fetch(ctx context.Context, rawURL string) ([]byte, error) {
+	var first []byte
+	var lastErr error
+	for _, ua := range fetchAgents {
+		b, err := fetchAs(ctx, rawURL, ua)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if first == nil {
+			first = b
+		}
+		if it := Parse(string(b)); len(it.Clash) > 0 {
+			return b, nil
+		}
+	}
+	if first != nil {
+		return first, nil
+	}
+	return nil, lastErr
+}
+
+func fetchAs(ctx context.Context, rawURL, agent string) ([]byte, error) {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, errors.New("订阅地址必须是 http(s) URL")
@@ -33,7 +61,7 @@ func Fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "v2rayN/7.0 m-ui")
+	req.Header.Set("User-Agent", agent)
 	c := &http.Client{Timeout: 25 * time.Second}
 	resp, err := c.Do(req)
 	if err != nil {
@@ -53,12 +81,33 @@ func Fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	return b, nil
 }
 
-// Parse 解析外部内容:base64 链接列表 / 明文链接列表 / clash YAML(取 proxies)。
+// Parse 解析外部内容:base64 链接列表 / 明文链接列表 / clash YAML(取 proxies)/ sing-box JSON(取 outbounds)。
 func Parse(content string) Items {
 	var it Items
 	text := strings.TrimSpace(content)
 	if text == "" {
 		return it
+	}
+	if strings.HasPrefix(text, "{") {
+		var doc struct {
+			Outbounds []map[string]interface{} `json:"outbounds"`
+		}
+		if json.Unmarshal([]byte(text), &doc) == nil && len(doc.Outbounds) > 0 {
+			for _, o := range doc.Outbounds {
+				typ, _ := o["type"].(string)
+				tag, _ := o["tag"].(string)
+				if tag == "" || o["server"] == nil {
+					continue // selector / urltest / direct 这些不是节点
+				}
+				if p, ok := OutboundToClash(typ, tag, o); ok {
+					it.Clash = append(it.Clash, p)
+					if link, ok := ClashToLink(p); ok {
+						it.Links = append(it.Links, link)
+					}
+				}
+			}
+			return it
+		}
 	}
 	if looksLikeClash(text) {
 		var doc struct {
