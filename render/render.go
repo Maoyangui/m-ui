@@ -195,7 +195,7 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 		return nil, err
 	}
 	config := map[string]interface{}{
-		"log":       map[string]interface{}{"level": "info"}, // 级别由运行时按 logEnabled 调,配置文本不随开关变
+		"log":       map[string]interface{}{"level": "warn"}, // 级别由运行时按 logEnabled / coreLogLevel 调,配置文本不随开关变
 		"dns":       map[string]interface{}{"servers": []map[string]interface{}{{"type": "local", "tag": "local"}}},
 		"inbounds":  inbounds,
 		"outbounds": outbounds,

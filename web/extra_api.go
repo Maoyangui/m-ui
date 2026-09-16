@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -204,6 +205,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var in struct {
 			Enabled string `json:"enabled"`
+			Level   string `json:"level"` // 数据面级别:warn(默认)| info | debug | error;空 = 不改
 		}
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			badRequest(w, err)
@@ -211,10 +213,19 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		on := in.Enabled != "false"
 		s.run.SetSetting("logEnabled", strconv.FormatBool(on))
+		if lv := strings.ToLower(strings.TrimSpace(in.Level)); lv != "" {
+			switch lv {
+			case "warn", "info", "debug", "error":
+				s.run.SetSetting("coreLogLevel", lv)
+			default:
+				badRequest(w, errors.New("数据面日志级别只能是 warn / info / debug / error"))
+				return
+			}
+		}
 		logger.SetEnabled(on)
 		s.run.SetLogEnabled(on) // 数据面日志级别运行时调整,不重启、不断线
-		s.audit(r, "logs", map[bool]string{true: "enable", false: "disable"}[on], nil)
-		writeJSON(w, http.StatusOK, map[string]bool{"enabled": on})
+		s.audit(r, "logs", map[bool]string{true: "enable", false: "disable"}[on], in.Level)
+		writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": on, "level": s.setting("coreLogLevel")})
 		return
 	case http.MethodDelete:
 		kind := r.URL.Query().Get("kind")

@@ -150,3 +150,11 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 - 限速改动对在线连接立刻生效:限速器里连接持有的是用户条目,桶原地改速率或置空,不用重连;每条认证过的连接都包装(以后被规则限速也要立刻变慢)。
 - 规则限速:主机每 10 秒判一轮;突发窗口只在内存(进程重启后从空开始,跨过重启那一刻的突发可能漏判一次);副机按到期时间自行解除,主机失联也不会一直限着;副机最低版本 0.6.0。
 - 尚未做:Telegram 之外的通知渠道、更多入站协议(Naive/ShadowTLS)、外部 API 的分页、代理面板自建规则(规则表已预留归属字段)。
+
+## 数据面日志与磁盘(v0.6.8)
+
+真机排查过一次"隧道偶尔卡几秒、面板偶尔卡几秒":副机的数据面按 info 逐条记连接,一小时几万行经 stderr 进 journald(Ubuntu 上 rsyslog 再抄一份到 /var/log/syslog),journald 堆到几 GB;sing-box 的日志是在处理连接的 goroutine 里同步写的,磁盘一顿(`/proc/pressure/io` 的 full 停顿占到每分钟 5% 以上),所有连接跟着顿。主机那边则是 SQLite 每次提交都 fsync、加上每 10 分钟一次 `wal_checkpoint(TRUNCATE)` 独占,盘慢时面板请求要等。
+
+- `core/log.go`:数据面日志进有界队列(8192 条),单独一个 goroutine 往外写;内核那头只入队,满了丢、丢了多少每分钟报一次。
+- 数据面默认级别 warn;日志页可调 warn / info / debug / error(设置 `coreLogLevel`),运行时生效不重启;关掉记录仍是 panic。
+- SQLite:WAL + `synchronous=NORMAL`(提交不再等 WAL fsync,断电最多丢最近几笔,库不会坏);定时检查点改 PASSIVE(不阻塞),TRUNCATE 只留给备份和停机。

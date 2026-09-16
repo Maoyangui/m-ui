@@ -347,14 +347,28 @@ func (r *Runner) Start() error {
 	return nil
 }
 
-// applyLogLevel 按设置 logEnabled 调数据面日志级别:关掉记录就只留 panic 级(等于不记)。
-// 以前是把 log.disabled 渲染进配置,一切换就要重启整个数据面、断掉所有人;级别是运行时可改的。
+// applyLogLevel 按设置调数据面日志级别:logEnabled=false 只留 panic(等于不记);开着时按 coreLogLevel,
+// 默认 warn —— 逐条记连接的 info 一小时几万行,副机磁盘扛不住会拖慢所有连接,排障时再临时调到 info / debug。
+// 级别是运行时可改的,不重启数据面、不断线。
 func (r *Runner) applyLogLevel() {
-	r.core.SetLogEnabled(r.setting("logEnabled") != "false")
+	r.core.SetLogLevelName(r.coreLogLevel())
+}
+
+// coreLogLevel 数据面该记到哪一级。
+func (r *Runner) coreLogLevel() string {
+	if r.setting("logEnabled") == "false" {
+		return "panic"
+	}
+	switch lv := strings.ToLower(strings.TrimSpace(r.setting("coreLogLevel"))); lv {
+	case "debug", "info", "error":
+		return lv
+	default:
+		return "warn"
+	}
 }
 
 // SetLogEnabled 面板"日志"页开关:立即生效,不重启数据面。
-func (r *Runner) SetLogEnabled(on bool) { r.core.SetLogEnabled(on) }
+func (r *Runner) SetLogEnabled(bool) { r.applyLogLevel() }
 
 // InboundCount 数据面当前的入站数(健康检查用:线路都在库里,监听器却没起来就是不健康)。
 func (r *Runner) InboundCount() int {
@@ -1008,7 +1022,7 @@ func (r *Runner) checkpointLoop(stop <-chan struct{}) {
 	for {
 		select {
 		case <-ticker.C:
-			if err := database.Checkpoint(r.db); err != nil {
+			if err := database.CheckpointPassive(r.db); err != nil { // 定时的不许阻塞;备份和停机才用 TRUNCATE
 				logger.Warning("WAL 检查点失败: ", err)
 			}
 		case <-stop:

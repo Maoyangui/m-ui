@@ -7,6 +7,7 @@ export const title = () => t('logs.title');
 let tab = 'sub', userFilter = '', level = 'info';
 
 const logOn = () => String(state.settings.logEnabled ?? 'true') !== 'false';
+const coreLevel = () => ['warn', 'info', 'debug', 'error'].includes(state.settings.coreLogLevel) ? state.settings.coreLogLevel : 'warn';
 const clearBtn = () => `<button class="btn sm danger" data-act="logs.clear">${t('logs.clear')}</button>`;
 
 // 自动清理:订阅访问日志与审计日志存在数据库里,会一直累积,给它们各自一个保留天数。
@@ -55,11 +56,15 @@ async function renderTab() {
     await loadSub();
   } else if (tab === 'core') {
     el.innerHTML = `
-      <div class="toolbar">${logSwitch()}<span class="grow"></span><select class="sm" id="logs-level" style="width:auto">${['debug', 'info', 'warning', 'error'].map(l => `<option ${l === level ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm" data-act="logs.refresh">${t('common.refresh')}</button>${clearBtn()}</div>
+      <div class="toolbar">${logSwitch()}<label class="small muted" style="display:flex;align-items:center;gap:.35rem" title="${esc(t('logs.coreLevelHelp'))}">${t('logs.coreLevel')}<select class="sm" id="logs-core-level" style="width:auto">${['warn', 'info', 'debug', 'error'].map(l => `<option ${l === coreLevel() ? 'selected' : ''}>${l}</option>`).join('')}</select></label><span class="grow"></span><select class="sm" id="logs-level" style="width:auto">${['debug', 'info', 'warning', 'error'].map(l => `<option ${l === level ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm" data-act="logs.refresh">${t('common.refresh')}</button>${clearBtn()}</div>
       ${logOn() ? '' : `<p class="hint" style="margin:-.3rem 0 .7rem">${t('logs.enabledHelp')}</p>`}
       <p class="hint" style="margin:-.3rem 0 .7rem">${t('logs.coreMemHelp')}</p>
       <pre class="log" id="logs-core" style="max-height:70vh"></pre>`;
     document.getElementById('logs-level').addEventListener('change', e => { level = e.target.value; loadCore(); });
+    document.getElementById('logs-core-level').addEventListener('change', async e => {
+      try { await post('logs', { enabled: String(logOn()), level: e.target.value }); await load('settings'); toast(t('logs.coreLevelSaved'), 'ok'); }
+      catch (err) { toast(err.message, 'err'); e.target.value = coreLevel(); }
+    });
     document.getElementById('logs-on').addEventListener('change', async e => {
       const on = e.target.checked;
       try { await post('logs', { enabled: String(on) }); await load('settings'); toast(t('logs.toggled'), 'ok'); await renderTab(); }

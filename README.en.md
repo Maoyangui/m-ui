@@ -428,6 +428,8 @@ Line inbounds always use the current certificate; **panel HTTPS and subscription
 
 Subscription access log, core log (data plane + panel) and audit log. Logging can be switched off on the core log tab to save resources, and every log can be cleared with one click.
 
+**Data-plane log level** defaults to warn: warnings and errors only. Logging every connection at info means tens of thousands of lines an hour into journald (and a second copy via rsyslog); one disk hiccup on a node then stalls every connection for seconds (that was the cause of the "tunnel freezes for a moment" reports), so raise it to info / debug only while troubleshooting; changes apply immediately without a restart. Data-plane logging also goes through a bounded asynchronous queue now, so a slow disk can never hold connections back; lines that cannot be written in time are dropped and counted.
+
 ### Admin
 
 - Change username / password.

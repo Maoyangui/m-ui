@@ -26,7 +26,10 @@ func Open(dbPath string) (*gorm.DB, error) {
 	// WAL + busy_timeout:常见取舍,读写并发下不互相饿死。
 	// _txlock=immediate:事务一开始就取写锁。SQLite 的"先读后写"事务在升级写锁时
 	// 会直接抛 SQLITE_BUSY(busy_timeout 对升级无效),开头就取锁则会排队等待。
-	dsn := dbPath + sep + "_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)&_txlock=immediate"
+	// synchronous=NORMAL:WAL 模式下每次提交不再 fsync WAL(只在检查点时同步),断电最多丢最近几笔提交,
+	// 库不会坏。主机每 5 秒并入各副机计数、副机每 5 秒写本机账本,默认的 FULL 让每次提交都等磁盘,
+	// 小盘一顿面板就跟着顿几秒。
+	dsn := dbPath + sep + "_pragma=journal_mode(WAL)&_pragma=busy_timeout(10000)&_pragma=synchronous(NORMAL)&_txlock=immediate"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Discard})
 	if err != nil {
 		return nil, err
@@ -90,6 +93,12 @@ func OpenReadOnly(dbPath string) (*gorm.DB, error) {
 // 备份、导入、迁移之后必须调用:否则单独复制 .db 文件会丢失尚在 WAL 中的数据。
 func Checkpoint(db *gorm.DB) error {
 	return db.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error
+}
+
+// CheckpointPassive 不阻塞任何读写的检查点:定时循环用它,把 WAL 能并回去的并回去就行。
+// TRUNCATE 要等所有读写让路、还要把主库 fsync 一遍,盘慢时面板会跟着卡几秒;那只留给备份和停机。
+func CheckpointPassive(db *gorm.DB) error {
+	return db.Exec("PRAGMA wal_checkpoint(PASSIVE)").Error
 }
 
 // Close 检查点后关闭底层连接,使数据库文件自洽、可安全复制。

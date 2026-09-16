@@ -125,13 +125,22 @@ func (c *Core) IsRunning() bool {
 // SetLogEnabled 运行时调整数据面日志级别:关 = 只留 panic 级(什么都不会打),开 = info。
 // 配置文本里的日志段保持不变,这样开关日志不会因"配置变了"而触发全量重启。
 func (c *Core) SetLogEnabled(on bool) {
+	if on {
+		c.SetLogLevelName("warn")
+	} else {
+		c.SetLogLevelName("panic")
+	}
+}
+
+// SetLogLevelName 运行时改数据面日志级别(panic 等于不记);不重启、不断线。认不出的名字按 warn。
+func (c *Core) SetLogLevelName(name string) {
 	box := c.GetInstance()
 	if box == nil || box.logFactory == nil {
 		return
 	}
-	if on {
-		box.logFactory.SetLevel(log.LevelInfo)
-	} else {
-		box.logFactory.SetLevel(log.LevelPanic)
+	lv, err := log.ParseLevel(name)
+	if err != nil {
+		lv = log.LevelWarn
 	}
+	box.logFactory.SetLevel(lv)
 }

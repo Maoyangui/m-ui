@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"sync/atomic"
 	"time"
 
 	suiLog "github.com/Maoyangui/m-ui/logger"
@@ -21,17 +22,63 @@ func (p PlatformWriter) DisableColors() bool {
 	return true
 }
 func (p PlatformWriter) WriteMessage(level log.Level, message string) {
+	enqueueLog(level, "", message)
+}
+
+// 数据面日志不能同步写。sing-box 是在处理连接的 goroutine 里直接调日志的,底下是 stderr → journald → 磁盘
+// (Ubuntu 上 rsyslog 还会再抄一份到 /var/log/syslog)。副机上按 info 逐条记连接,一小时几万行,journald
+// 堆到几 GB;磁盘一顿,所有正在处理的连接跟着顿几秒 —— 用户看到的就是"隧道卡一下、面板卡一下"
+// (真机 /proc/pressure/io 的 full 停顿能占到每分钟 5% 以上)。
+// 这里把日志放进有界队列,单独一个 goroutine 往外写:内核那头只是入队,队列满了就丢、丢了多少每分钟报一次。
+type logEntry struct {
+	level log.Level
+	tag   string
+	msg   string
+}
+
+var (
+	logQueue   = make(chan logEntry, 8192)
+	logDropped atomic.Int64
+)
+
+func init() { go drainLogQueue() }
+
+func enqueueLog(level log.Level, tag, msg string) {
+	select {
+	case logQueue <- logEntry{level: level, tag: tag, msg: msg}:
+	default:
+		logDropped.Add(1)
+	}
+}
+
+func drainLogQueue() {
+	var lastReport time.Time
+	for e := range logQueue {
+		emitLog(e.level, e.tag, e.msg)
+		if n := logDropped.Load(); n > 0 && time.Since(lastReport) > time.Minute {
+			logDropped.Add(-n)
+			lastReport = time.Now()
+			suiLog.Warning("数据面日志来不及写,丢弃了 ", n, " 条(磁盘慢或日志量大;日志页可把数据面级别调到 warn)")
+		}
+	}
+}
+
+func emitLog(level log.Level, tag, msg string) {
+	args := []interface{}{msg}
+	if tag != "" {
+		args = []interface{}{tag, msg}
+	}
 	switch level {
 	case log.LevelInfo:
-		suiLog.Info(message)
+		suiLog.Info(args...)
 	case log.LevelWarn:
-		suiLog.Warning(message)
+		suiLog.Warning(args...)
 	case log.LevelPanic:
 	case log.LevelFatal:
 	case log.LevelError:
-		suiLog.Error(message)
+		suiLog.Error(args...)
 	default:
-		suiLog.Debug(message)
+		suiLog.Debug(args...)
 	}
 }
 
@@ -167,18 +214,7 @@ func (l *observableLogger) Log(ctx context.Context, level log.Level, args []any)
 		return
 	}
 	msg := F.ToString(args...)
-	switch level {
-	case log.LevelInfo:
-		suiLog.Info(l.tag, msg)
-	case log.LevelWarn:
-		suiLog.Warning(l.tag, msg)
-	case log.LevelPanic:
-	case log.LevelFatal:
-	case log.LevelError:
-		suiLog.Error(l.tag, msg)
-	default:
-		suiLog.Debug(l.tag, msg)
-	}
+	enqueueLog(level, l.tag, msg) // 入队即返,写盘由 drainLogQueue 那个 goroutine 慢慢做
 	if (l.filePath != "" || l.writer != os.Stderr) && l.writer != nil {
 		message := l.formatter.Format(ctx, level, l.tag, msg, time.Now())
 		l.writer.Write([]byte(message))
