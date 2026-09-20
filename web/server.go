@@ -322,6 +322,15 @@ func (s *Server) newSession(user string) string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	token := hex.EncodeToString(b)
+	// Bind the token to the password hash that was checked at login.  A
+	// password reset performed outside the running HTTP process (the menu or
+	// `m-ui passwd`) therefore invalidates this token on its next request too.
+	identity, password := user, ""
+	var admin model.Admin
+	if s.db != nil && s.db.Where("username = ?", user).First(&admin).Error == nil {
+		identity, password = strconv.FormatUint(uint64(admin.Id), 10), admin.Password
+	}
+	token = sessionTokenWithCredential(token, "admin", identity, password)
 	maxAge := time.Duration(s.settingInt("sessionMaxAge", 0)) * time.Minute
 	if maxAge <= 0 {
 		maxAge = 7 * 24 * time.Hour
@@ -335,7 +344,7 @@ func (s *Server) newSession(user string) string {
 // 换个 Cookie 名塞给主面板,就会被当成管理员——所以这里必须把代理会话挡在外面。
 func (s *Server) validSession(token string) bool {
 	sess, ok := s.getSession(token)
-	return ok && sess.reseller == 0
+	return ok && sess.reseller == 0 && s.sessionCredentialValid(token, sess)
 }
 
 func (s *Server) reapSessions() {

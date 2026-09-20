@@ -64,6 +64,8 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentReport)(w, r)
 	case "external-ips":
 		s.agentAuth(s.handleAgentExternalIPs)(w, r)
+	case "kick":
+		s.agentAuth(s.handleAgentKick)(w, r)
 	case "upstream-test": // 主机让本机立刻测一条上游(面板的"测试"按钮派发过来)
 		s.agentAuth(s.handleAgentUpstreamTest)(w, r)
 	case "upstream-check": // 主机让本机立刻跑一轮巡检(概览的「立即巡检」派发过来),返回本机全部结果
@@ -218,6 +220,30 @@ func (s *Server) handleAgentExternalIPs(w http.ResponseWriter, r *http.Request) 
 	}
 	s.run.SetExternalIPs(m)
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// handleAgentKick 主机要求副机断开某用户的现有连接。
+// agentAuth 已确认请求来自已配对的主机;副机上的 Runner.KickUser 只会操作本机。
+func (s *Server) handleAgentKick(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+		badRequest(w, err)
+		return
+	}
+	body.Name = strings.TrimSpace(body.Name)
+	if body.Name == "" {
+		badRequest(w, errors.New("用户名不能为空"))
+		return
+	}
+	closed, sessions := s.run.KickUserLocal(body.Name)
+	// count 是 0.6.9 之前主机读的字段名,留着让新副机配旧主机也能用
+	writeJSON(w, http.StatusOK, map[string]interface{}{"count": closed, "closed": closed, "sessions": sessions})
 }
 
 // handleAgentUpstreamTest 主机派发过来的单条上游测试:在本机实测并返回结果。

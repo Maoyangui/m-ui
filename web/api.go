@@ -1231,6 +1231,7 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "原密码错误"})
 		return
 	}
+	actor := s.actor(r)
 	hashed, err := hashPassword(req.NewPassword)
 	if err != nil {
 		badRequest(w, err)
@@ -1240,9 +1241,22 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 	if u := strings.TrimSpace(req.Username); u != "" {
 		updates["username"] = u
 	}
-	s.db.Model(&model.Admin{}).Where("id = ?", admin.Id).Updates(updates)
+	// Compare-and-set prevents an older concurrent request from overwriting a
+	// password that was reset from the menu or another browser.
+	result := s.db.Model(&model.Admin{}).Where("id = ? AND password = ?", admin.Id, admin.Password).Updates(updates)
+	if result.Error != nil {
+		badRequest(w, result.Error)
+		return
+	}
+	if result.RowsAffected != 1 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "账号状态已变化,请重新登录"})
+		return
+	}
+	// Changing an administrator password revokes every old browser session;
+	// the UI already logs out after a successful change.
+	s.invalidateAdminSessions(admin.Username)
 	s.run.SetSetting("adminDefault", "false") // 默认密码提示解除
-	s.audit(r, "admin", "password", admin.Username)
+	s.auditAs(actor, "admin", "password", admin.Username)
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }
 

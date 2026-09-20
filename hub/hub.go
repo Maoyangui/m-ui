@@ -581,6 +581,10 @@ type Hub struct {
 	status map[uint]*NodeStatus
 	pushed map[uint]string
 	remote map[uint]map[string][]string // node → user → ips
+	// remoteAt 各副机最近一次成功上报的时间。失联的副机报告本身留着(页面还要显示它最后的样子),
+	// 但超过 remoteReportGrace 没上报,它的在线 IP 就不再计入设备数并集:那些设备是不是还在线已经无从得知,
+	// 拿几分钟前的名单去拒新设备、断别的机器上回来的老连接,比短暂超限更伤人。
+	remoteAt map[uint]int64
 	// remoteLines 副机上报的 用户 → 源 IP → 线路名;nodeNames 用于在面板里给线路加服务器后缀
 	remoteLines map[uint]map[string]map[string][]string
 	nodeNames   map[uint]string
@@ -594,6 +598,9 @@ type Hub struct {
 	rejects map[string][]rejectAt
 	// upHealth 各副机上报的上游巡检结果(副机 id → 结果),面板按服务器展示、主机据此告警
 	upHealth map[uint][]UpstreamHealth
+	// kicking 按用户名单飞的踢线派发:面板连点两下只向副机发一轮请求,后到的等同一份结果
+	kickMu  sync.Mutex
+	kicking map[string]*kickCall
 }
 
 type rejectAt struct {
@@ -604,9 +611,9 @@ type rejectAt struct {
 const rejectWindow = 10 * 60 // 秒
 
 func New(d Deps) *Hub {
-	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{},
+	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{}, remoteAt: map[uint]int64{},
 		remoteLines: map[uint]map[string]map[string][]string{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
-		upHealth: map[uint][]UpstreamHealth{},
+		upHealth: map[uint][]UpstreamHealth{}, kicking: map[string]*kickCall{},
 		verified: &http.Client{Timeout: 25 * time.Second}, pinned: map[string]*http.Client{}}
 }
 
@@ -703,6 +710,10 @@ func (h *Hub) tick() {
 		}
 		if r.err != "" {
 			h.setStatus(r.n, false, r.err, nil)
+			// Keep the last report and all line/node configuration intact during
+			// an outage. The last known devices remain reserved until the node
+			// reports again; releasing them would allow a second set of devices
+			// in during a short outage and exceed the limit after recovery.
 			continue
 		}
 		h.setStatus(r.n, true, "", &r.rep)
@@ -714,6 +725,7 @@ func (h *Hub) tick() {
 		}
 		h.mu.Lock()
 		h.remote[r.n.Id] = r.rep.Onlines
+		h.remoteAt[r.n.Id] = time.Now().Unix()
 		h.remoteLines[r.n.Id] = r.rep.OnlineLinesByIP
 		h.nodeNames[r.n.Id] = r.n.Name
 		h.upHealth[r.n.Id] = r.rep.Upstreams // 这一轮没有结果就清空:副机改了线路、不再用任何上游时不该留着旧数据
@@ -800,6 +812,7 @@ func (h *Hub) forgetNodes(live map[uint]bool) {
 		}
 		delete(h.status, id)
 		delete(h.remote, id)
+		delete(h.remoteAt, id)
 		delete(h.pushed, id)
 		delete(h.remoteLines, id)
 		delete(h.nodeNames, id)
@@ -807,14 +820,28 @@ func (h *Hub) forgetNodes(live map[uint]bool) {
 	}
 }
 
+// remoteReportGrace 副机多久没上报,它的在线 IP 就不再计入设备数并集(秒)。同步是 5 秒一轮,几分钟足够跨过抖动。
+const remoteReportGrace = 300
+
+// remoteForDeviceLimits 参与跨机设备数并集的副机报告:只要最近 remoteReportGrace 内上报过的。
+// 失联的副机不计入 —— 它上面的设备是不是还在线无从得知;短暂超限比拿陈旧名单误伤别的机器上的用户轻。
+// 报告本身不删(forgetNodes 才删),页面照常显示它最后的样子。
+func (h *Hub) remoteForDeviceLimits() map[uint]map[string][]string {
+	now := time.Now().Unix()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make(map[uint]map[string][]string, len(h.remote))
+	for id, report := range h.remote {
+		if at, ok := h.remoteAt[id]; ok && now-at <= remoteReportGrace {
+			out[id] = report
+		}
+	}
+	return out
+}
+
 // distributeIPs 把"其他机器上的在线 IP"下发给每台机器(含主机自身)。
 func (h *Hub) distributeIPs(nodes []model.Node) {
-	h.mu.Lock()
-	remote := map[uint]map[string][]string{}
-	for id, m := range h.remote {
-		remote[id] = m
-	}
-	h.mu.Unlock()
+	remote := h.remoteForDeviceLimits()
 	// 需要跨机并集的用户:自己有设备数限制的,以及所属代理有设备池的(池按名下所有用户的 IP 并集判定)
 	var users []model.User
 	h.d.DB.Where("device_limit > 0 OR reseller_id IN (SELECT id FROM resellers WHERE device_limit > 0)").Find(&users)
@@ -916,6 +943,13 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 			st.ReloadError, st.ReloadAt = rep.Reload.Op+":"+rep.Reload.Error, rep.Reload.At
 		}
 		st.VersionMismatch = rep.Version != "" && h.d.Version != "" && rep.Version != h.d.Version
+	} else if !ok {
+		// A failed request makes the node offline, but does not invalidate its
+		// last report. In particular, keep the last known device set reserved
+		// until a later successful report replaces it; releasing it during an
+		// outage could admit a second set of devices before recovery.
+		st.Synced = false
+		st.CoreRunning = false
 	}
 	// 按"连续失败了多久"告警,不看上次在线时间:从来没连上过的副机(配错了)也得有人知道
 	if !ok && !alerted && now-st.failSince > 60 {
@@ -978,6 +1012,126 @@ func (h *Hub) PushNow(n model.Node) error {
 	}
 	snap.Version, snap.MinNode = h.d.Version, MinNodeVersion
 	return h.push(n, snap)
+}
+
+// KickUser 让所有已启用的副机断开用户的现有连接。
+//
+// 踢线不是配置快照的一部分:快照只会在凭据变化时触发副机自行断线,
+// 面板上的一次性踢线必须显式派发到每台副机。各副机并发执行,一台失联
+// 不应阻塞其它副机;返回值只包含成功收到响应的副机断开数。
+// KickResult 一次踢线的结果:合计 + 各机明细。本机那一行由 runner 填(Local=true),这里只管副机。
+type KickResult struct {
+	Closed   int          `json:"closed"`   // 断开的连接数,所有机器合计
+	Sessions int          `json:"sessions"` // 关掉的整条会话数(hysteria2 / tuic / anytls),合计
+	Failed   int          `json:"failed"`   // 没派发成功的副机数(失联、版本过旧)
+	Servers  []KickServer `json:"servers"`
+}
+
+// KickServer 一台机器上的踢线结果。
+type KickServer struct {
+	Id       uint   `json:"id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Local    bool   `json:"local,omitempty"` // 本机:名字由前端按语言渲染
+	Closed   int    `json:"closed"`
+	Sessions int    `json:"sessions"`
+	Error    string `json:"error,omitempty"`    // 派发失败的原因
+	Outdated bool   `json:"outdated,omitempty"` // 副机版本过旧,还没有踢线接口
+}
+
+// Scrubbed 给代理作用域看的版本:去掉错误原文(拨号错误里带副机地址),只留"失败 / 版本过旧"的事实。
+func (r KickResult) Scrubbed() KickResult {
+	out := r
+	out.Servers = make([]KickServer, len(r.Servers))
+	for i, s := range r.Servers {
+		if s.Error != "" {
+			s.Error = "failed"
+		}
+		out.Servers[i] = s
+	}
+	return out
+}
+
+// kickCall 一次进行中的派发;同名的后来者等它的结果。
+type kickCall struct {
+	done chan struct{}
+	res  KickResult
+}
+
+// kickPerNode 每台副机的踢线预算。踢线是面板上的交互请求,失联的副机不能把整个请求拖到同步 API 的 25 秒;
+// 各副机并发跑,总耗时也就这么久。
+const kickPerNode = 3 * time.Second
+
+// KickUser 把踢线派发到所有副机(主机才做;副机上调用直接返回空结果,不会递归派发)。
+// 同一用户名并发的调用单飞:只发一轮请求,后到的拿同一份结果。
+// 回 404 的副机是版本过旧(还没有 kick 接口):算失败并标出来,但**不提高 MinNodeVersion** —— 提高会让它连快照都收不到。
+func (h *Hub) KickUser(name string) KickResult {
+	name = strings.TrimSpace(name)
+	if h == nil || name == "" || h.d.IsNode == nil || h.d.IsNode() {
+		return KickResult{}
+	}
+	h.kickMu.Lock()
+	if c := h.kicking[name]; c != nil {
+		h.kickMu.Unlock()
+		<-c.done
+		return c.res
+	}
+	c := &kickCall{done: make(chan struct{})}
+	h.kicking[name] = c
+	h.kickMu.Unlock()
+	c.res = h.kickRemote(name)
+	h.kickMu.Lock()
+	delete(h.kicking, name)
+	h.kickMu.Unlock()
+	close(c.done)
+	return c.res
+}
+
+func (h *Hub) kickRemote(name string) KickResult {
+	nodes := h.remoteNodes()
+	results := make([]KickServer, len(nodes))
+	var wg sync.WaitGroup
+	for i, n := range nodes {
+		results[i] = KickServer{Id: n.Id, Name: n.Name}
+		if n.ApiUrl == "" || n.Token == "" {
+			results[i].Error = "副机没有配置 API 地址或令牌"
+			continue
+		}
+		wg.Add(1)
+		go func(i int, n model.Node) {
+			defer wg.Done()
+			var out struct {
+				Count    int `json:"count"` // 0.6.9 之前的字段名,仍然认
+				Closed   int `json:"closed"`
+				Sessions int `json:"sessions"`
+			}
+			err := h.requestTimeout(n, http.MethodPost, "kick", map[string]string{"name": name}, &out, kickPerNode)
+			if err != nil {
+				var he *httpStatusError
+				if errors.As(err, &he) && he.Status == http.StatusNotFound {
+					results[i].Outdated, results[i].Error = true, "副机版本过旧,没有踢线接口"
+				} else {
+					results[i].Error = err.Error()
+				}
+				logger.Warning("向副机 ", n.Name, " 派发用户踢线失败: ", err)
+				return
+			}
+			if out.Closed == 0 {
+				out.Closed = out.Count
+			}
+			results[i].Closed, results[i].Sessions = out.Closed, out.Sessions
+		}(i, n)
+	}
+	wg.Wait()
+	res := KickResult{Servers: results}
+	for _, s := range results {
+		if s.Error != "" {
+			res.Failed++
+			continue
+		}
+		res.Closed += s.Closed
+		res.Sessions += s.Sessions
+	}
+	return res
 }
 
 // UpstreamHealthAll 各副机上报的上游巡检结果(副机 id → 结果)。
@@ -1156,7 +1310,19 @@ func (h *Hub) RemoteOnlineUsers() []string {
 	return keys(set)
 }
 
+// httpStatusError 副机回了非 200:调用方按状态码归类(404 = 这台副机还没有这个接口)。
+type httpStatusError struct {
+	Status int
+	Msg    string
+}
+
+func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Status, e.Msg) }
+
 func (h *Hub) request(n model.Node, method, path string, body interface{}, out interface{}) error {
+	return h.requestTimeout(n, method, path, body, out, 25*time.Second)
+}
+
+func (h *Hub) requestTimeout(n model.Node, method, path string, body interface{}, out interface{}, timeout time.Duration) error {
 	base := strings.TrimRight(n.ApiUrl, "/")
 	if !strings.HasSuffix(base, "/api") {
 		base += "/api"
@@ -1169,7 +1335,10 @@ func (h *Hub) request(n model.Node, method, path string, body interface{}, out i
 		}
 		rd = bytes.NewReader(b)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	if timeout <= 0 {
+		timeout = 25 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, base+"/agent/"+path, rd)
 	if err != nil {
@@ -1189,7 +1358,7 @@ func (h *Hub) request(n model.Node, method, path string, body interface{}, out i
 		if e.Error == "" {
 			e.Error = strings.TrimSpace(string(b))
 		}
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, e.Error)
+		return &httpStatusError{Status: resp.StatusCode, Msg: e.Error}
 	}
 	if out != nil {
 		if err := json.Unmarshal(b, out); err != nil {

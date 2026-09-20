@@ -180,10 +180,20 @@ func (s *Server) dispatchResellerSubroute(w http.ResponseWriter, r *http.Request
 		if r.Method != http.MethodPost {
 			break
 		}
-		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{
+		if err := s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{
 			"password": "", "totp_secret": "", "totp_enabled": false,
 			"claim_before": time.Now().Unix() + 24*3600, // 重开 24 小时认领窗口
-		})
+		}).Error; err != nil {
+			badRequest(w, err)
+			return true
+		}
+		// Clearing the credential also revokes every browser session.  Without
+		// this, an old session could call /self/password while the hash is empty
+		// and claim the account before the legitimate owner does.
+		s.invalidateResellerSessions(rs.Id)
+		s.mu.Lock()
+		delete(s.totpPendingRS, rs.Id)
+		s.mu.Unlock()
 		s.audit(r, "reseller", "passwd", rs.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		return true

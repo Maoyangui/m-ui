@@ -351,7 +351,7 @@ Expand an external subscription in the list to see every node it parsed: the ful
 - Over quota or expired → disabled and kicked automatically, with the reason shown in the list (quota / expired / manual); resetting traffic or renewing re-enables them, a manually disabled user only comes back when enabled by hand.
 - Plans are templates: apply on create; *renew* applies again (usage reset, expiry extended); *extend* keeps usage and only extends expiry.
 - Bulk: generate by prefix, select rows for enable / disable / extend / reset / delete, CSV export.
-- User drawer: live devices (each IP shows the line and server it is using), 24h / 7d / 30d chart, subscription links and QR, kick.
+- User drawer: live devices (each IP shows the line and server it is using), 24h / 7d / 30d chart, subscription links and QR, kick (every server at once; for hysteria2 / TUIC / AnyTLS the whole session is closed, so an already-authenticated session cannot keep opening new streams).
 
 ### Rules
 

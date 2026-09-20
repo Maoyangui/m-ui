@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,7 +161,7 @@ func (s *Server) rauth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		sess, ok := s.getSession(c.Value)
-		if !ok || sess.reseller == 0 {
+		if !ok || sess.reseller == 0 || !s.sessionCredentialValid(c.Value, sess) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 			return
 		}
@@ -261,7 +262,7 @@ func (s *Server) handleResellerLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) newResellerSession(rs model.Reseller, pending bool) string {
 	b := make([]byte, 32)
 	rand.Read(b)
-	token := hex.EncodeToString(b)
+	token := sessionTokenWithCredential(hex.EncodeToString(b), "reseller", strconv.FormatUint(uint64(rs.Id), 10), rs.Password)
 	maxAge := time.Duration(s.settingInt("sessionMaxAge", 0)) * time.Minute
 	if maxAge <= 0 {
 		maxAge = 7 * 24 * time.Hour
@@ -409,6 +410,17 @@ func (s *Server) handleResellerPassword(w http.ResponseWriter, r *http.Request, 
 		badRequest(w, errors.New("新密码至少 8 位"))
 		return
 	}
+	// Only a session explicitly created for the first-login claim may set an
+	// empty password.  In particular, an old authenticated session must not be
+	// able to take over after an administrator clears the password.
+	var current session
+	if c, err := r.Cookie(resellerCookie); err == nil {
+		current, _ = s.getSession(c.Value)
+	}
+	if rs.Password == "" && !current.pending {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "请重新登录后设置密码"})
+		return
+	}
 	if rs.Password != "" && bcrypt.CompareHashAndPassword([]byte(rs.Password), []byte(body.Old)) != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "原密码错误"})
 		return
@@ -418,9 +430,28 @@ func (s *Server) handleResellerPassword(w http.ResponseWriter, r *http.Request, 
 		badRequest(w, err)
 		return
 	}
-	s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).
+	// Compare-and-set the old hash.  This closes the race where an old request
+	// was already in flight while the administrator reset the password.
+	result := s.db.Model(&model.Reseller{}).Where("id = ? AND password = ?", rs.Id, rs.Password).
 		Updates(map[string]interface{}{"password": string(hash), "claim_before": 0})
-	s.setSessionPending(r, false)
+	if result.Error != nil {
+		badRequest(w, result.Error)
+		return
+	}
+	if result.RowsAffected != 1 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "账号状态已变化,请重新登录"})
+		return
+	}
+	// Revoke every old session, then issue a fresh token bound to the new hash
+	// for the browser that just completed the change.
+	s.invalidateResellerSessions(rs.Id)
+	rs.Password = string(hash)
+	token := s.newResellerSession(rs, false)
+	http.SetCookie(w, &http.Cookie{
+		Name: resellerCookie, Value: token, Path: "/",
+		HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: s.setting("resellerCertFile") != "" || s.setting("webCertFile") != "",
+	})
 	s.auditAs(rs.Name, "reseller", "password", rs.Name)
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }

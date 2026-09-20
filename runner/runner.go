@@ -49,18 +49,19 @@ func SetPanelStarter(f func(*Runner) error) { startPanel = f }
 
 // Runner 持有数据面运行所需的一切。
 type Runner struct {
-	db         *gorm.DB
-	core       *core.Core
-	subSrv     *sub.Server
-	jobs       *jobs.Scheduler
-	notifier   *notify.Notifier
-	monitor    *monitor.Monitor
-	hub        *hub.Hub
-	dbPath     string
-	cert       certState
-	applied    map[string]string // 数据面当前生效的出站(tag → JSON),供上游热更新做差异
-	appliedRaw []byte            // 数据面当前生效的完整配置,渲染结果相同则不重启
-	mu         sync.Mutex        // 串行化重载,避免并发改动互相打断
+	db           *gorm.DB
+	core         *core.Core
+	subSrv       *sub.Server
+	jobs         *jobs.Scheduler
+	notifier     *notify.Notifier
+	monitor      *monitor.Monitor
+	hub          *hub.Hub
+	dbPath       string
+	cert         certState
+	applied      map[string]string // 数据面当前生效的出站(tag → JSON),供上游热更新做差异
+	appliedRaw   []byte            // 数据面当前生效的完整配置,渲染结果相同则不重启
+	pendingStats []model.Stats     // 旧数据面关闭后暂时无法落库的流量,下次启动继续记账
+	mu           sync.Mutex        // 串行化重载,避免并发改动互相打断
 
 	rules *rules.Engine // 限速规则判定器(只在主机跑)
 
@@ -284,17 +285,51 @@ func (r *Runner) IsNode() bool { return strings.EqualFold(r.setting("nodeMode"),
 func (r *Runner) Onlines() jobs.Onlines { return r.jobs.Onlines() }
 
 // KickUser 断开某用户的全部连接,返回断开数。
+// KickUser 只断本机:连接 + 整条会话,再清掉 limiter 里他的在线 IP。返回断开的连接数。
+// 停用 / 删除 / 重置链接这些路径用它就够了:快照 5 秒内推到副机,副机热换用户表时自己关掉被移除 / 换了凭据的会话。
 func (r *Runner) KickUser(name string) int {
-	if box := r.core.GetInstance(); box != nil {
-		return box.ConnTracker().CloseConnByUser(name)
+	closed, _ := r.KickUserLocal(name)
+	return closed
+}
+
+// KickUserLocal 本机踢线,返回 (断开的连接数, 关掉的会话数)。
+func (r *Runner) KickUserLocal(name string) (closed, sessions int) {
+	box := r.core.GetInstance()
+	if box == nil {
+		return 0, 0
 	}
-	return 0
+	closed = box.ConnTracker().CloseConnByUser(name)
+	// 再把整条会话关掉(hysteria2 / tuic / anytls 只鉴权一次,只断流的话客户端马上再开一条):本人的和借用者的一起
+	sessions = box.CloseUserSessions([]string{name, name + model.ShareSuffix})
+	if sessions > 0 {
+		logger.Info("踢线:关闭 ", name, " 的 ", sessions, " 条会话")
+	}
+	// 连接都断了,在线 IP 不用再等 60 秒空闲窗口才从"在线设备"里消失;设备重连会重新登记
+	box.Limiter().Forget(name)
+	return closed, sessions
+}
+
+// KickUserAll 面板 / 代理面板 / 外部 API 的「踢下线」:本机 + 所有副机。
+// 只有主机派发;副机上调用等于本机踢线(hub.KickUser 在副机上直接返回空)。
+func (r *Runner) KickUserAll(name string) hub.KickResult {
+	closed, sessions := r.KickUserLocal(name)
+	res := hub.KickResult{Closed: closed, Sessions: sessions, Servers: []hub.KickServer{{Local: true, Closed: closed, Sessions: sessions}}}
+	if r.hub != nil && !r.IsNode() {
+		remote := r.hub.KickUser(name)
+		res.Closed += remote.Closed
+		res.Sessions += remote.Sessions
+		res.Failed = remote.Failed
+		res.Servers = append(res.Servers, remote.Servers...)
+	}
+	return res
 }
 
 // KickShare 只断某用户临时共享凭据("名字#share")上的连接,本人的连接不动。
 func (r *Runner) KickShare(name string) int {
 	if box := r.core.GetInstance(); box != nil {
-		return box.ConnTracker().CloseConnByDataPlaneName(name + model.ShareSuffix)
+		n := box.ConnTracker().CloseConnByDataPlaneName(name + model.ShareSuffix)
+		box.CloseUserSessions([]string{name + model.ShareSuffix}) // 精确匹配共享凭据的名字,本人的会话不动
+		return n
 	}
 	return 0
 }
@@ -338,6 +373,7 @@ func (r *Runner) Start() error {
 		r.noteReload("启动", err)
 		return fmt.Errorf("启动 sing-box: %w", err)
 	}
+	r.restorePendingStats()
 	r.applied, _ = outboundsOf(raw)
 	r.appliedRaw = raw
 	r.applyLimits()
@@ -537,12 +573,14 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 	}
 	box := r.core.GetInstance()
 	keepAll := map[string]map[string]struct{}{} // 入站 → 仍然有效的用户名
+	sessionsClosed := 0                         // 随换表关掉的整条会话数(被停用 / 换了凭据的用户)
 	for _, inbound := range cfg.Inbounds {
-		handled, err := r.core.UpdateInboundUsers(inbound)
+		handled, closed, err := r.core.UpdateInboundUsers(inbound)
 		if err != nil {
 			logger.Warning("热更新入站用户失败: ", err)
 			continue
 		}
+		sessionsClosed += closed
 		if box == nil {
 			continue
 		}
@@ -586,6 +624,10 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 	}
 	if box != nil && len(keepAll) > 0 {
 		box.ConnTracker().CloseConnsNotIn(keepAll) // 一次扫描,锁只拿一次
+	}
+	if sessionsClosed > 0 {
+		// 数据面日志默认只到 warn,这一句必须从面板日志出去:线上出事(比如每次推送都把所有人踢掉)只能靠它看出来
+		logger.Info("热更新用户:断开 ", sessionsClosed, " 条会话(被停用 / 撤销凭据的用户)")
 	}
 	r.applyLimits()
 	return nil
@@ -643,11 +685,29 @@ func (r *Runner) reloadAllLocked(raw []byte) error {
 		}
 	}
 	prev := r.appliedRaw // 新配置起不来时用它把服务拉回来(端口被别的进程抢走之类)
+	// StatsTracker belongs to the Box. Flush before Stop so bytes collected
+	// since the last scheduler tick survive a full data-plane replacement.
+	if r.jobs != nil && !r.jobs.FlushStats() {
+		// 一次 SQLite 抖动不能让改线路、续证书全都失败:计数器没被消费,下面停掉旧数据面后还会再试,再不行就带到新数据面补记
+		logger.Warning("重载前统计落库失败,这段流量会在新数据面起来后补记")
+	}
+	oldBox := r.core.GetInstance()
 	r.core.Stop()
+	// Closing the old box stops new accepts. Drain it once more afterwards so
+	// bytes that arrived during the preflight transaction are retained. A
+	// second pass covers any final read/write callbacks fired by Close.
+	if oldBox != nil && r.jobs != nil {
+		ok1 := r.jobs.FlushStatsBox(oldBox)
+		ok2 := r.jobs.FlushStatsBox(oldBox)
+		if !ok1 || !ok2 {
+			r.pendingStats = append(r.pendingStats, *oldBox.StatsTracker().SnapshotStats()...)
+		}
+	}
 	if err := r.core.Start(raw); err != nil {
 		r.applied, r.appliedRaw = nil, nil
 		if prev != nil {
 			if err2 := r.core.Start(prev); err2 == nil {
+				r.restorePendingStats()
 				r.applied, r.appliedRaw = outboundsOfSafe(prev), prev
 				r.applyLimits()
 				r.applyPortHopping()
@@ -659,6 +719,7 @@ func (r *Runner) reloadAllLocked(raw []byte) error {
 		}
 		return fmt.Errorf("重启 sing-box: %w", err)
 	}
+	r.restorePendingStats()
 	r.applied, _ = outboundsOf(raw)
 	r.appliedRaw = raw
 	r.applyLimits()
@@ -837,6 +898,22 @@ func (r *Runner) applyLimits() {
 	if len(specs) > 0 || len(groups) > 0 {
 		logger.Info("已应用 ", len(specs), " 个用户的限速/设备数策略,", len(groups), " 个代理池")
 	}
+}
+
+// restorePendingStats moves traffic that could not be committed while an old
+// data plane was closing into the newly started tracker. It is deliberately
+// retried on the next successful start if a reload failed before a box was
+// available.
+func (r *Runner) restorePendingStats() {
+	if len(r.pendingStats) == 0 {
+		return
+	}
+	box := r.core.GetInstance()
+	if box == nil {
+		return
+	}
+	box.StatsTracker().RestoreStats(r.pendingStats)
+	r.pendingStats = nil
 }
 
 // limitSpecs 把用户表、代理池与生效中的规则限速算成数据面要的策略。

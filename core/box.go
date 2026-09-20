@@ -37,6 +37,8 @@ import (
 	F "github.com/sagernet/sing/common/format"
 	"github.com/sagernet/sing/common/ntp"
 	"github.com/sagernet/sing/service"
+
+	"github.com/Maoyangui/m-ui/core/protocol/usersess"
 	"github.com/sagernet/sing/service/pause"
 )
 
@@ -64,6 +66,7 @@ type Box struct {
 	statsTracker        *StatsTracker
 	connTracker         *ConnTracker
 	limiter             *Limiter
+	sessions            *usersess.Set // 各入站的用户 → 会话登记表(停用 / 换凭据 / 踢线时关整条会话)
 	done                chan struct{}
 }
 
@@ -236,6 +239,10 @@ func NewBox(options Options) (*Box, error) {
 	service.MustRegister[adapter.NetworkManager](ctx, networkManager)
 	connectionManager := route.NewConnectionManager(logFactory.NewLogger("connection"))
 	service.MustRegister[adapter.ConnectionManager](ctx, connectionManager)
+	// 用户 → 会话登记表的集合。要在入站构造之前注册,入站构造时从 ctx 取。
+	// 注意服务注册表是进程级共享的:每次 NewBox 都覆盖同一个槽位,热加的入站也从同一处取 —— 先停旧数据面再起新的,拿到的永远是当前这份。
+	sessions := usersess.NewSet()
+	service.MustRegister[*usersess.Set](ctx, sessions)
 	// Must register after ConnectionManager: the Apple HTTP engine's proxy bridge reads it from the context when Manager.Start resolves the default client.
 	httpClientManager := httpclient.NewManager(ctx, logFactory.NewLogger("httpclient"), options.HTTPClients, routeOptions.DefaultHTTPClient)
 	service.MustRegister[adapter.HTTPClientManager](ctx, httpClientManager)
@@ -473,6 +480,7 @@ func NewBox(options Options) (*Box, error) {
 
 	return &Box{
 		ctx:                 ctx,
+		sessions:            sessions,
 		network:             networkManager,
 		endpoint:            endpointManager,
 		inbound:             inboundManager,
@@ -707,4 +715,19 @@ func (s *Box) StatsTracker() *StatsTracker {
 
 func (s *Box) ConnTracker() *ConnTracker {
 	return s.connTracker
+}
+
+// CloseUserSessions 在全部入站上关掉这些名字的整条会话(hysteria2 / tuic / anytls),返回关掉的数量。
+// 名字是数据面里的名字:本人是 "X",临时共享是 "X#share",各自精确匹配。空名字忽略。
+func (b *Box) CloseUserSessions(names []string) int {
+	var keep []string
+	for _, n := range names {
+		if n != "" {
+			keep = append(keep, n)
+		}
+	}
+	if len(keep) == 0 || b.sessions == nil {
+		return 0
+	}
+	return b.sessions.CloseUsers(keep)
 }

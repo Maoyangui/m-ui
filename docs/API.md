@@ -89,7 +89,7 @@ X-API-Key: <令牌>
 | POST | `/users/{name\|id}/enable` | 启用 | 用户对象 |
 | POST | `/users/{name\|id}/disable` | 停用并踢下线 | 用户对象 |
 | POST | `/users/{name\|id}/reset` | 本周期用量清零并启用 | 用户对象 |
-| POST | `/users/{name\|id}/kick` | 踢下线 | `{closed}` |
+| POST | `/users/{name\|id}/kick` | 踢下线(所有服务器) | `{closed, sessions, failed, servers}` |
 | POST | `/users/{name\|id}/rotate` | 重置订阅链接与凭据 | 用户对象 |
 | POST | `/users/{name\|id}/plan` | 套用套餐(续费 / 延期) | 用户对象 |
 | GET | `/users/{name\|id}/sub` | 订阅地址 | `{link, clash, json[, share]}` |
@@ -165,7 +165,26 @@ X-API-Key: <令牌>
 
 ### POST /users/{name|id}/kick
 
-断开该用户在**主服务器**上的全部连接,返回 `{"closed": <连接数>}`。客户端凭据没变,可以立刻重连;要让他连不上请用 `/disable`,要让旧凭据彻底失效请用 `/rotate`。副服务器上的连接不受这个接口影响。
+断开该用户在**所有服务器**上的全部连接:主服务器本机立刻断,同时并发派发到每台副服务器(每台最多等 3 秒)。hysteria2 / TUIC / AnyTLS 这些"一条会话里开很多子连接"的协议会把整条会话一起关掉,客户端不能靠已鉴权的会话继续开新流。返回:
+
+```json
+{
+  "closed": 5,
+  "sessions": 2,
+  "failed": 1,
+  "servers": [
+    {"local": true, "closed": 3, "sessions": 1},
+    {"id": 2, "name": "hk", "closed": 2, "sessions": 1},
+    {"id": 3, "name": "tw", "closed": 0, "sessions": 0, "error": "副机版本过旧,没有踢线接口", "outdated": true}
+  ]
+}
+```
+
+- `closed`:断开的连接数,所有服务器合计;`sessions`:关掉的整条会话数(hysteria2 / TUIC / AnyTLS),合计;`failed`:没派发成功的副服务器数。
+- `servers`:每台的明细。`local: true` 是主服务器本机;副服务器带 `id` / `name`。部分副服务器失联仍返回 200,看 `failed` 与各项的 `error`;`outdated: true` 表示那台副服务器版本过旧(还没有踢线接口),升级后即可。
+- 代理令牌调用时 `error` 只给 `failed`,不含副服务器地址与错误原文。
+
+客户端凭据没变,可以立刻重连;要让他连不上请用 `/disable`,要让旧凭据彻底失效请用 `/rotate`。停用 / 删除 / 重置链接不走这个派发:它们改的是用户表,快照 5 秒内推到副服务器,副服务器热换用户表时自己关掉被移除或换了凭据的会话。
 
 ### POST /users/{name|id}/rotate
 

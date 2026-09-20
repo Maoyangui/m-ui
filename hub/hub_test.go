@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -230,6 +231,192 @@ func TestHubForgetsRemovedNodes(t *testing.T) {
 	}
 	if got := h.RemoteIPLines("u"); len(got) != 0 {
 		t.Fatalf("已删服务器的线路不该再出现: %v", got)
+	}
+}
+
+// 副机短暂失联:它的在线 IP 仍计入设备数;失联超过宽限期就不再计入,但报告本身留着给页面显示。
+func TestHubPreservesRemoteReportDuringOutage(t *testing.T) {
+	now := time.Now().Unix()
+	h := &Hub{
+		status:      map[uint]*NodeStatus{1: {failSince: now}},
+		remote:      map[uint]map[string][]string{1: {"u": {"1.2.3.4"}}},
+		remoteAt:    map[uint]int64{1: now - 30},
+		remoteLines: map[uint]map[string]map[string][]string{1: {"u": {"1.2.3.4": {"香港1"}}}},
+		upHealth:    map[uint][]UpstreamHealth{1: {{Name: "warp"}}},
+	}
+	if got := h.remoteForDeviceLimits(); len(got) != 1 {
+		t.Fatal("短暂失联时应继续计入远端设备")
+	}
+	h.remoteAt[1] = now - remoteReportGrace - 1
+	if got := h.remoteForDeviceLimits(); len(got) != 0 {
+		t.Fatal("失联超过宽限期后,陈旧的在线 IP 不该再占名额")
+	}
+	if len(h.remote) != 1 || len(h.remoteLines) != 1 || len(h.upHealth) != 1 {
+		t.Fatalf("老化只影响设备数并集,不得删除副机报告或线路缓存: remote=%v lines=%v health=%v", h.remote, h.remoteLines, h.upHealth)
+	}
+}
+
+func TestKickUserDispatchesToRemoteNodes(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "kick.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	db.Create(&model.Node{Name: "主机", IsLocal: true, Enabled: true})
+	var gotName string
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/agent/kick") {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPost || r.Header.Get("X-Agent-Token") != "token" {
+			http.Error(w, "bad request", http.StatusUnauthorized)
+			return
+		}
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad body", http.StatusBadRequest)
+			return
+		}
+		gotName = body.Name
+		atomic.AddInt32(&calls, 1)
+		json.NewEncoder(w).Encode(map[string]int{"count": 3})
+	}))
+	defer srv.Close()
+	db.Create(&model.Node{Name: "副机", ApiUrl: srv.URL + "/panel/", Token: "token", Enabled: true})
+
+	h := New(Deps{DB: db, IsNode: func() bool { return false }})
+	got := h.KickUser("alice")
+	if got.Closed != 3 || got.Failed != 0 || len(got.Servers) != 1 || got.Servers[0].Name != "副机" || got.Servers[0].Closed != 3 || got.Servers[0].Local {
+		t.Fatalf("副机返回的断开数应计入结果并列在明细里,实际 %+v", got)
+	}
+	if atomic.LoadInt32(&calls) != 1 || gotName != "alice" {
+		t.Fatalf("踢线请求未正确派发: calls=%d name=%q", calls, gotName)
+	}
+	// 空用户名不派发:Owner("")=="" 会把所有无认证连接一起断掉
+	if got := h.KickUser("  "); atomic.LoadInt32(&calls) != 1 || got.Closed != 0 || len(got.Servers) != 0 {
+		t.Fatalf("空用户名不该派发: calls=%d got=%+v", calls, got)
+	}
+}
+
+// 旧版副机没有 kick 接口(404):算失败并标"版本过旧",其它副机的结果照常合计;拨号失败的副机记错误原文,代理看的版本去掉原文。
+func TestKickUserMarksOutdatedAndFailedNodes(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "kick-old.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	db.Create(&model.Node{Name: "主机", IsLocal: true, Enabled: true})
+	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }))
+	defer old.Close()
+	fresh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]int{"count": 2, "closed": 2, "sessions": 1})
+	}))
+	defer fresh.Close()
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close() // 端口已经关了:拨号失败
+	db.Create(&model.Node{Name: "旧副机", ApiUrl: old.URL, Token: "t", Enabled: true})
+	db.Create(&model.Node{Name: "新副机", ApiUrl: fresh.URL, Token: "t", Enabled: true})
+	db.Create(&model.Node{Name: "失联副机", ApiUrl: deadURL, Token: "t", Enabled: true})
+	db.Create(&model.Node{Name: "没配地址", Enabled: true})
+
+	h := New(Deps{DB: db, IsNode: func() bool { return false }})
+	got := h.KickUser("alice")
+	if got.Closed != 2 || got.Sessions != 1 || got.Failed != 3 || len(got.Servers) != 4 {
+		t.Fatalf("应合计新副机的 2 条连接 / 1 条会话、3 台失败,实际 %+v", got)
+	}
+	byName := map[string]KickServer{}
+	for _, s := range got.Servers {
+		byName[s.Name] = s
+	}
+	if s := byName["旧副机"]; !s.Outdated || s.Error == "" {
+		t.Fatalf("404 应标版本过旧: %+v", s)
+	}
+	if s := byName["新副机"]; s.Outdated || s.Error != "" || s.Closed != 2 || s.Sessions != 1 {
+		t.Fatalf("新副机应正常计数: %+v", s)
+	}
+	if s := byName["失联副机"]; s.Outdated || s.Error == "" || !strings.Contains(s.Error, "127.0.0.1") {
+		t.Fatalf("拨号失败应记错误原文(含地址): %+v", s)
+	}
+	if s := byName["没配地址"]; s.Error == "" {
+		t.Fatalf("没配 API 地址的副机应记为失败: %+v", s)
+	}
+	sc := got.Scrubbed()
+	for _, s := range sc.Servers {
+		if strings.Contains(s.Error, "127.0.0.1") || strings.Contains(s.Error, "http") {
+			t.Fatalf("代理看的版本不该带副机地址: %+v", s)
+		}
+	}
+	if sc.Closed != got.Closed || sc.Failed != got.Failed || len(sc.Servers) != len(got.Servers) {
+		t.Fatalf("去掉原文不该改动计数: %+v", sc)
+	}
+	if got.Servers[2].Error == "failed" {
+		t.Fatal("Scrubbed 不该改到原结果")
+	}
+}
+
+// 同一用户并发踢线只向副机发一轮;上一轮结束后再踢才重新派发。
+func TestKickUserSingleFlight(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "kick-sf.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	db.Create(&model.Node{Name: "主机", IsLocal: true, Enabled: true})
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		time.Sleep(200 * time.Millisecond)
+		json.NewEncoder(w).Encode(map[string]int{"closed": 1})
+	}))
+	defer srv.Close()
+	db.Create(&model.Node{Name: "副机", ApiUrl: srv.URL, Token: "t", Enabled: true})
+	h := New(Deps{DB: db, IsNode: func() bool { return false }})
+	var wg sync.WaitGroup
+	results := make([]KickResult, 5)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i] = h.KickUser("alice")
+		}(i)
+	}
+	wg.Wait()
+	if atomic.LoadInt32(&calls) != 1 {
+		t.Fatalf("同名并发踢线应只派发一轮,实际 %d 轮", calls)
+	}
+	for i, r := range results {
+		if r.Closed != 1 || len(r.Servers) != 1 {
+			t.Fatalf("第 %d 个调用应拿到同一份结果: %+v", i, r)
+		}
+	}
+	h.KickUser("alice")
+	if atomic.LoadInt32(&calls) != 2 {
+		t.Fatalf("上一轮结束后应重新派发,实际 %d 轮", calls)
+	}
+}
+
+func TestKickUserDoesNotDispatchFromNode(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "kick-node.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	db.Create(&model.Node{Name: "本机", IsLocal: true, Enabled: true})
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	db.Create(&model.Node{Name: "主机", ApiUrl: srv.URL, Token: "token", Enabled: true})
+	h := New(Deps{DB: db, IsNode: func() bool { return true }})
+	if got := h.KickUser("alice"); got.Closed != 0 || len(got.Servers) != 0 || atomic.LoadInt32(&calls) != 0 {
+		t.Fatalf("副机不能递归派发踢线: got=%+v calls=%d", got, calls)
 	}
 }
 

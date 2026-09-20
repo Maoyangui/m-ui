@@ -447,9 +447,18 @@ registerActions({
   },
   'user.kick': async id => {
     const u = state.users.find(x => x.id === Number(id));
-    if (!await confirm(t('user.kickConfirm', { name: u.name }))) return;
-    try { const r = await post(`users/${id}/kick`); toast(t('user.kicked', { n: r.closed }), 'ok'); }
-    catch (e) { toast(e.message, 'err'); }
+    // 主面板(含代理面板)的踢线会下发到所有服务器;副机面板只管本机
+    const local = state.status.role === 'node';
+    if (!await confirm(t(local ? 'user.kickConfirmLocal' : 'user.kickConfirm', { name: u.name }))) return;
+    try {
+      const r = await post(`users/${id}/kick`);
+      const servers = Array.isArray(r.servers) ? r.servers : [];
+      // 多台机器时列出每台的结果:本机 2 · hk 1 · tw 未响应
+      const detail = servers.length > 1 ? ' (' + servers.map(s => (s.local ? t('user.kickLocal') : esc(s.name || '')) + ' ' +
+        (s.error ? t(s.outdated ? 'user.kickOutdated' : 'user.kickNoReply') : String(s.closed))).join(' · ') + ')' : '';
+      if (r.failed > 0) toast(t('user.kickedPartial', { n: r.closed, f: r.failed }) + detail, 'warn');
+      else toast(t('user.kicked', { n: r.closed }) + detail, 'ok');
+    } catch (e) { toast(e.message, 'err'); }
   },
   'user.rotate': async id => {
     const u = state.users.find(x => x.id === Number(id));

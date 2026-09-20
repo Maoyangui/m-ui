@@ -76,7 +76,8 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 
 | 变更 | 动作 | 用户连接 |
 |---|---|---|
-| 用户增删/启停/配额/限速/线路分配 | `ReloadUsers`:入站用户表原地热换(hy2/anytls/tuic/trojan/vless/vmess/ss),不支持热换的入站(socks/http/mixed)单独重建;被移除的用户即时踢线;限速/设备数策略重下发 | 不受影响(被禁用者除外) |
+| 用户增删/启停/配额/限速/线路分配 | `ReloadUsers`:入站用户表原地热换(hy2/anytls/tuic/trojan/vless/vmess/ss),不支持热换的入站(socks/http/mixed)单独重建;被移除 / 换了凭据的用户即时断线 —— 连接和**整条会话**一起关(hy2/tuic/anytls 只在会话建立时鉴权一次,只断子连接的话客户端在同一会话里马上再开一条);表没变的入站一条会话都不动;限速/设备数策略重下发 | 不受影响(被禁用者除外) |
+| 踢下线 | `KickUserAll`:本机断连接 + 关会话 + 清在线 IP,再并发派发到每台副机(每台 ≤3s,同名单飞);回 404 的副机标"版本过旧" | 只有被踢的用户 |
 | 上游增删改、测试 | `ReloadUpstreams`:对比上次应用的出站集合,只对变化的 tag 做 Remove/Add | 不受影响 |
 | 线路增删改、线路换上游、证书更换 | `ReloadAll`:先 `ValidateConfig` 干跑新配置,通过才 Stop/Start | 断开一次 |
 
@@ -88,7 +89,9 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 
 - **推**:主机每 5s 构造快照(线路/上游/用户(去掉计量)/用户线路/入口/少量订阅设置)并算修订号;与上次推送不同(或超 10 分钟)就 `POST /api/agent/apply`。副机整表替换(保留自己的账本),按变化类型走三级重载。
 - **拉**:同一轮 `GET /api/agent/report` 拿到副机的单调账本、在线 IP、运行状态、证书剩余天数。主机按 `TrafficCursor` 只计增量;计数器变小(副机重装)视为回绕,游标归零重认。增量写入用户与 `Stats`(resource=user 与 resource=node)。
-- **判定只在主机**:副机 `jobs` 不执法。主机禁用用户 → 快照变化 → 5s 内推到副机 → 副机热换用户表踢线。
+- **判定只在主机**:副机 `jobs` 不执法。主机禁用用户 → 快照变化 → 5s 内推到副机 → 副机热换用户表踢线(连接与整条会话一起关)。面板的「踢下线」另走 `POST /api/agent/kick` 即时派发到各副机,不等快照。
+- **升级内核必须核对**:`core/protocol/usersess` 的会话登记靠 sing-quic 的 `qtls.ServerConfig` 扩展点(`ListenWithOptions` / `ListenEarlyWithOptions` / `ConfigureHTTP3` 对 TLS 配置做类型断言)接管 QUIC 监听,`usersess/quic.go` 里复制了 sing-quic 默认路径的 Transport 参数(hy2 无混淆时的 StatelessResetKey、有混淆时关版本协商包、`SetSingleUse`)。升 sing-box / sing-quic / quic-go 时逐项对照上游 `qtls` 与 `hysteria2/service.go`、`tuic/service.go`,参数变了这里要跟着改;`usersess/registry_test.go` 与 `M_UI_E2E=1` 的真实入站测试(`core/usersess_e2e_test.go`)都要过。
+- **老连接的设备数**:limiter 对空闲后恢复的 IP 重新执行设备上限;副机上报超过 300 秒没刷新的在线 IP 不再计入并集(失联副机的名单不能拿来拒新设备、断老连接)。
 - **设备数跨机**:主机把"其他机器上在线的 IP"下发给每台机器的 Limiter;本机计数 = 本机活跃 IP ∪ 外部 IP,同一 IP 切换入口不占新名额。
 - **失联**:>60s 拉不到报告告警一次,恢复再告警一次;副机离线期间主机照常工作,副机继续用最后一份配置服务用户(只是账本回收延后)。
 

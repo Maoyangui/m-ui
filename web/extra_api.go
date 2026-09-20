@@ -318,9 +318,13 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 		if r.Method != http.MethodPost {
 			break
 		}
-		n := s.run.KickUser(u.Name)
+		// 本机 + 所有副机;部分副机失联也回 200,失败数在 failed 里。代理看不到副机地址与错误原文
+		res := s.run.KickUserAll(u.Name)
+		if scope(r) > 0 {
+			res = res.Scrubbed()
+		}
 		s.audit(r, "user", "kick", u.Name)
-		writeJSON(w, http.StatusOK, map[string]int{"closed": n})
+		writeJSON(w, http.StatusOK, res)
 		return true
 	case "rotate": // 重置订阅链接:新随机地址 + 新凭据,收回临时共享,旧的立即失效
 		if r.Method != http.MethodPost {
@@ -349,7 +353,8 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 				logger.Warning("撤下共享凭据失败: ", err)
 				return
 			}
-			logger.Info("已收回 ", u.Name, " 的临时共享,断开 ", s.run.KickUser(u.Name), " 条连接")
+			// 只断借用者:本人的连接与会话不动(以前调的是 KickUser,会把本人一起踢掉)
+			logger.Info("已收回 ", u.Name, " 的临时共享,断开 ", s.run.KickShare(u.Name), " 条连接")
 		}()
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		return true

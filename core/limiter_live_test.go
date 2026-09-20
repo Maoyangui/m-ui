@@ -3,6 +3,7 @@ package core
 import (
 	"net"
 	"testing"
+	"time"
 
 	"golang.org/x/time/rate"
 )
@@ -49,5 +50,73 @@ func TestLimitsApplyToLiveConnections(t *testing.T) {
 	l.SetGroups(map[string]GroupLimitSpec{"r1": {DownMbps: 5}})
 	if wb.group.down.Load().Limit() != rate.Limit(5*125000) {
 		t.Fatal("代理池改速率应原地生效")
+	}
+}
+
+func TestLiveConnectionFollowsResellerPoolChanges(t *testing.T) {
+	l := NewLimiter()
+	l.SetGroups(map[string]GroupLimitSpec{
+		"r1": {DownMbps: 10},
+		"r2": {DownMbps: 20},
+	})
+	l.SetLimits(map[string]UserLimitSpec{"alice": {Group: "r1"}})
+	a, _ := net.Pipe()
+	defer a.Close()
+	c := l.wrapConn(a, "alice", "1.2.3.4").(*limitedConn)
+	if c.currentGroup() != c.group {
+		t.Fatal("连接初始代理池不正确")
+	}
+	l.SetLimits(map[string]UserLimitSpec{"alice": {Group: "r2"}})
+	if g := c.currentGroup(); g == nil || g == c.group || g.down.Load() == nil || g.down.Load().Limit() != rate.Limit(20*125000) {
+		t.Fatal("用户换代理后,已有连接应使用新代理池")
+	}
+	l.SetLimits(map[string]UserLimitSpec{"alice": {}})
+	if c.currentGroup() != nil {
+		t.Fatal("用户移出代理后,已有连接不应继续使用旧代理池")
+	}
+}
+
+// 踢线后本机在线 IP 立刻清掉,不用等空闲窗口;策略与外部 IP 不动,设备重连照常登记。
+func TestForgetClearsActiveIPsImmediately(t *testing.T) {
+	l := NewLimiter()
+	l.SetLimits(map[string]UserLimitSpec{"alice": {DeviceLimit: 1}})
+	l.SetExternalIPs(map[string][]string{"alice": {"9.9.9.9"}})
+	if l.AllowConn("alice", "1.1.1.1") {
+		t.Fatal("外部已占满名额,本机新设备应被拒")
+	}
+	l.SetExternalIPs(map[string][]string{})
+	if !l.AllowConn("alice", "1.1.1.1") {
+		t.Fatal("名额空出后应放行")
+	}
+	if ips := l.ActiveIPs("alice"); len(ips) != 1 {
+		t.Fatalf("应记着一个在线 IP,实际 %v", ips)
+	}
+	l.Forget("alice")
+	l.Forget("") // 空名字无害
+	if ips := l.ActiveIPs("alice"); len(ips) != 0 {
+		t.Fatalf("踢线后在线 IP 应立刻清空,实际 %v", ips)
+	}
+	if !l.AllowConn("alice", "2.2.2.2") {
+		t.Fatal("清掉之后新设备应占到名额")
+	}
+	if l.AllowConn("alice", "3.3.3.3") {
+		t.Fatal("设备上限策略不该因 Forget 丢失")
+	}
+}
+
+func TestIdleDeviceResumeRechecksDeviceLimit(t *testing.T) {
+	l := NewLimiter()
+	l.SetLimits(map[string]UserLimitSpec{"alice": {DeviceLimit: 1}})
+	if !l.AllowConn("alice", "old") {
+		t.Fatal("首台设备应放行")
+	}
+	l.mu.Lock()
+	l.ips["alice"]["old"] = time.Now().Unix() - int64(l.idleWindow.Seconds()) - 1
+	l.mu.Unlock()
+	if !l.AllowConn("alice", "new") {
+		t.Fatal("旧设备息屏后,新设备应放行")
+	}
+	if l.keepaliveFor("alice", "old")() {
+		t.Fatal("息屏设备恢复流量时应重新执行设备上限")
 	}
 }

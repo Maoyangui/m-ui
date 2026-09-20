@@ -1,8 +1,10 @@
 package web
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +12,7 @@ import (
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -275,5 +278,68 @@ func TestResellerClaimWindow(t *testing.T) {
 	db.Model(&model.Reseller{}).Where("name = ?", "dl").Update("claim_before", time.Now().Unix()-1)
 	if code := login(); code != 401 {
 		t.Fatalf("窗口过期后应拒绝,得 %d", code)
+	}
+}
+
+func TestResellerPasswordResetRevokesOldSessions(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	hash, _ := bcrypt.GenerateFromPassword([]byte("old-password"), bcrypt.MinCost)
+	s := &Server{db: db, sessions: map[string]session{}, totpPendingRS: map[uint]string{}}
+	rs := model.Reseller{Name: "dl", Password: string(hash), Enabled: true}
+	if err := db.Create(&rs).Error; err != nil {
+		t.Fatal(err)
+	}
+	old := s.newResellerSession(rs, false)
+	s.totpPendingRS[rs.Id] = "pending"
+	r := httptest.NewRequest("POST", "/app/api/resellers/"+strconv.FormatUint(uint64(rs.Id), 10)+"/passwd", nil)
+	w := httptest.NewRecorder()
+	if !s.dispatchResellerSubroute(w, r) || w.Code != 200 {
+		t.Fatalf("管理员重置代理密码失败: handled=%v status=%d body=%s", true, w.Code, w.Body.String())
+	}
+	if _, ok := s.getSession(old); ok {
+		t.Fatal("代理密码重置后旧会话必须从缓存与数据库同时撤销")
+	}
+	var got model.Reseller
+	db.First(&got, rs.Id)
+	if got.Password != "" || got.TotpEnabled {
+		t.Fatal("代理重置应清空密码与 2FA")
+	}
+	if _, ok := s.totpPendingRS[rs.Id]; ok {
+		t.Fatal("代理重置应清空未完成的 2FA 设置")
+	}
+}
+
+func TestResellerFirstPasswordClaimRotatesSession(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db, sessions: map[string]session{}, totpPendingRS: map[uint]string{}}
+	rs := model.Reseller{Name: "dl", Enabled: true, ClaimBefore: time.Now().Unix() + 3600}
+	if err := db.Create(&rs).Error; err != nil {
+		t.Fatal(err)
+	}
+	old := s.newResellerSession(rs, true)
+	r := httptest.NewRequest("POST", "/app/api/self/password", strings.NewReader(`{"new":"new-password"}`))
+	r.AddCookie(&http.Cookie{Name: resellerCookie, Value: old})
+	w := httptest.NewRecorder()
+	s.handleResellerPassword(w, r, rs)
+	if w.Code != 200 {
+		t.Fatalf("代理首次设置密码失败: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if _, ok := s.getSession(old); ok {
+		t.Fatal("首次设置密码后旧 pending 会话必须失效")
+	}
+	cookies := w.Result().Cookies()
+	if len(cookies) == 0 || cookies[0].Value == old {
+		t.Fatal("首次设置密码应下发绑定新密码的新会话")
+	}
+	if !s.sessionCredentialValid(cookies[0].Value, session{reseller: rs.Id}) {
+		t.Fatal("新会话的凭据绑定校验失败")
 	}
 }

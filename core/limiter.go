@@ -35,8 +35,13 @@ type Limiter struct {
 	entries map[string]*userEntry // 用户桶位:连接持有的是条目而不是桶,改速率原地生效,在线连接立刻变速
 	ips     map[string]map[string]int64
 	// external 是其他机器上该用户当前在线的源 IP(Hub 下发),计入设备数;本机已在线的 IP 不重复计
-	external   map[string]map[string]bool
+	external map[string]map[string]bool
+	// externalAt 上一次收到外部 IP 的时间。主机失联(副机)/ 副机失联(主机)时这份表会一直冻结,
+	// 陈旧的 IP 不能再占名额,更不能拿它去断掉回来的老连接:超过 externalGrace 没刷新就当没有。
+	externalAt int64
 	idleWindow time.Duration // 无流量多久判定该 IP 下线并释放名额
+	// gen 策略代数:SetLimits 每次加一。在线连接靠它判断"用户所属的代理池有没有变",没变就不抢锁。
+	gen atomic.Uint64
 
 	// 组层
 	userGroup  map[string]string   // 用户 → 组(如 r12)
@@ -58,7 +63,20 @@ func (l *Limiter) SetExternalIPs(m map[string][]string) {
 	}
 	l.mu.Lock()
 	l.external = ext
+	l.externalAt = time.Now().Unix()
 	l.mu.Unlock()
+}
+
+// externalGrace 外部 IP 多久没刷新就作废(秒)。主机每 5 秒下发一次;这里给足几分钟,短暂抖动不误伤,
+// 真失联了也不会拿几分钟前的 IP 去拒新设备、断老连接。
+const externalGrace = 300
+
+// externalLocked 某用户此刻有效的外部 IP(过期了就当没有)。调用方须持锁。
+func (l *Limiter) externalLocked(user string, now int64) map[string]bool {
+	if now-l.externalAt > externalGrace {
+		return nil
+	}
+	return l.external[user]
 }
 
 type userLimit struct {
@@ -116,6 +134,7 @@ func (l *Limiter) SetLimits(limits map[string]UserLimitSpec) {
 			e.down.Store(nil)
 		}
 	}
+	l.gen.Add(1)
 }
 
 // UserLimitSpec 是 SetLimits 的入参(与 model.User 解耦,便于数据面独立测试)。
@@ -192,6 +211,12 @@ func (l *Limiter) AllowConn(user, ip string) bool {
 	now := time.Now().Unix()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.allowConnLocked(user, ip, now)
+}
+
+// allowConnLocked applies the device limits for a connection or for a device
+// that became active again after the idle window. The caller must hold l.mu.
+func (l *Limiter) allowConnLocked(user, ip string, now int64) bool {
 	limit := l.limits[user].deviceLimit
 	l.pruneLocked(user, now)
 	active := l.ips[user]
@@ -203,7 +228,7 @@ func (l *Limiter) AllowConn(user, ip string) bool {
 		active[ip] = now
 		return true
 	}
-	ext := l.external[user]
+	ext := l.externalLocked(user, now)
 	if limit > 0 && !ext[ip] { // 该设备已在别的机器上在线时,视为同一设备切换入口,不占新名额
 		total := len(active)
 		for eip := range ext {
@@ -233,7 +258,7 @@ func (l *Limiter) groupHasRoomLocked(g, ip string, now int64, limit int) bool {
 		for a := range l.ips[u] {
 			set[a] = true
 		}
-		for e := range l.external[u] {
+		for e := range l.externalLocked(u, now) {
 			set[e] = true
 		}
 	}
@@ -252,6 +277,17 @@ func (l *Limiter) pruneLocked(user string, now int64) {
 			delete(active, ip)
 		}
 	}
+}
+
+// Forget 踢线后立刻清掉该用户的在线 IP 记录:连接都断了,不用再等空闲窗口才从"在线设备"里消失。
+// 设备重连会重新登记;别的机器上的 IP 由下一轮同步刷新。只清本机的记账,策略与外部 IP 不动。
+func (l *Limiter) Forget(user string) {
+	if user == "" {
+		return
+	}
+	l.mu.Lock()
+	delete(l.ips, user)
+	l.mu.Unlock()
 }
 
 // ActiveIPs 返回某用户当前活跃的源 IP(供面板展示与 Hub 聚合)。
@@ -290,16 +326,24 @@ func (l *Limiter) ActiveIPsAll() map[string][]string {
 }
 
 // touch 刷新某用户某 IP 的活跃时间(有流量经过时调用)。
-func (l *Limiter) touch(user, ip string, now int64) {
+func (l *Limiter) touch(user, ip string, now int64) bool {
 	if user == "" || ip == "" {
-		return
+		return true
 	}
 	l.mu.Lock()
-	if l.ips[user] == nil {
-		l.ips[user] = map[string]int64{}
+	defer l.mu.Unlock()
+	active := l.ips[user]
+	if active != nil {
+		l.pruneLocked(user, now)
+		// Keep the fast path for an already-active device. A connection that
+		// resumes after the idle window must go through allowConnLocked below,
+		// otherwise it could bypass a newly occupied device pool.
+		if _, ok := active[ip]; ok {
+			active[ip] = now
+			return true
+		}
 	}
-	l.ips[user][ip] = now
-	l.mu.Unlock()
+	return l.allowConnLocked(user, ip, now)
 }
 
 // userEntry 一个用户的桶位:连接建立时拿走这个条目,之后改限速只改条目里的桶(原地改速率或置空),
@@ -357,7 +401,7 @@ func (l *Limiter) wrapConn(conn net.Conn, user, ip string) net.Conn {
 		g = l.groupEntryLocked(name)
 	}
 	l.mu.Unlock()
-	return &limitedConn{Conn: conn, user: e, group: g, keepalive: l.keepaliveFor(user, ip)}
+	return &limitedConn{Conn: conn, limiter: l, name: user, user: e, group: g, keepalive: l.keepaliveFor(user, ip)}
 }
 
 func (l *Limiter) wrapPacketConn(conn N.PacketConn, user, ip string) N.PacketConn {
@@ -371,19 +415,19 @@ func (l *Limiter) wrapPacketConn(conn N.PacketConn, user, ip string) N.PacketCon
 		g = l.groupEntryLocked(name)
 	}
 	l.mu.Unlock()
-	return &limitedPacketConn{PacketConn: conn, user: e, group: g, keepalive: l.keepaliveFor(user, ip)}
+	return &limitedPacketConn{PacketConn: conn, limiter: l, name: user, user: e, group: g, keepalive: l.keepaliveFor(user, ip)}
 }
 
 // keepaliveFor 返回一个"该设备刚有流量"的回调,按秒节流以免每次读写都抢锁。
-func (l *Limiter) keepaliveFor(user, ip string) func() {
+func (l *Limiter) keepaliveFor(user, ip string) func() bool {
 	var last int64
-	return func() {
+	return func() bool {
 		now := time.Now().Unix()
 		if now == atomic.LoadInt64(&last) {
-			return
+			return true
 		}
 		atomic.StoreInt64(&last, now)
-		l.touch(user, ip, now)
+		return l.touch(user, ip, now)
 	}
 }
 
@@ -406,32 +450,83 @@ func throttle(b *rate.Limiter, n int) {
 	}
 }
 
+// errDeviceRecheck 空闲后回来的设备被设备上限拒掉:这条连接关掉。识别为"连接已关"(net.ErrClosed),
+// 拷贝循环只当普通断开处理,不往有界日志队列里刷 ERROR。
+type deviceRecheckError struct{}
+
+func (deviceRecheckError) Error() string        { return "device limit: connection closed" }
+func (deviceRecheckError) Is(target error) bool { return target == net.ErrClosed }
+
+var errDeviceRecheck error = deviceRecheckError{}
+
 type limitedConn struct {
 	net.Conn
+	limiter   *Limiter
+	name      string
 	user      *userEntry  // 用户桶位
-	group     *groupEntry // 代理池桶位(不在池里为 nil)
-	keepalive func()
+	group     *groupEntry // 建连时的代理池桶位(不在池里为 nil);运行期以 currentGroup 为准
+	keepalive func() bool
+	gen       atomic.Uint64              // 上次解析代理池时的策略代数
+	groupNow  atomic.Pointer[groupEntry] // 按代数缓存的当前代理池
+	denied    atomic.Bool                // 已被设备上限拒掉:之后所有读写立即失败,不会下一秒又放行
+}
+
+// currentGroup 这条连接此刻所属的代理池。用户被挪到别的代理、或移出代理之后,已有连接要跟着走,
+// 所以不能只用建连时抓的指针。但也不能每次读写都抢 l.mu —— 那把锁是数据面的热点,
+// keepalive 按秒节流就是为了躲它。按策略代数缓存:代数没变(绝大多数读写)一把锁都不碰。
+func (c *limitedConn) currentGroup() *groupEntry {
+	if c.limiter == nil {
+		return c.group
+	}
+	return resolveGroup(c.limiter, c.name, &c.gen, &c.groupNow)
+}
+
+func resolveGroup(l *Limiter, name string, gen *atomic.Uint64, cache *atomic.Pointer[groupEntry]) *groupEntry {
+	g := l.gen.Load()
+	if gen.Load() == g {
+		return cache.Load()
+	}
+	l.mu.Lock()
+	var ng *groupEntry
+	if gname := l.userGroup[name]; gname != "" {
+		ng = l.groupEntryLocked(gname)
+	}
+	l.mu.Unlock()
+	cache.Store(ng)
+	gen.Store(g)
+	return ng
 }
 
 func (c *limitedConn) Read(p []byte) (int, error) {
+	if c.denied.Load() {
+		return 0, errDeviceRecheck
+	}
 	n, err := c.Conn.Read(p)
-	if n > 0 {
-		c.keepalive()
+	if n > 0 && !c.keepalive() {
+		// 空闲后回来、名额已被占:这条连接到此为止,读到的字节丢掉(对端是被拒的设备,不该再收到任何东西)
+		c.denied.Store(true)
+		_ = c.Conn.Close()
+		return 0, errDeviceRecheck
 	}
 	throttle(c.user.up.Load(), n)
-	if c.group != nil {
-		throttle(c.group.up.Load(), n)
+	if g := c.currentGroup(); g != nil {
+		throttle(g.up.Load(), n)
 	}
 	return n, err
 }
 
 func (c *limitedConn) Write(p []byte) (int, error) {
-	if len(p) > 0 {
-		c.keepalive()
+	if c.denied.Load() || (len(p) > 0 && !c.keepalive()) {
+		c.denied.Store(true)
+		_ = c.Conn.Close()
+		return 0, errDeviceRecheck
 	}
 	throttle(c.user.down.Load(), len(p))
-	if c.group != nil {
-		throttle(c.group.down.Load(), len(p))
+	if g := c.currentGroup(); g != nil {
+		throttle(g.down.Load(), len(p))
+	}
+	if c.denied.Load() {
+		return 0, errDeviceRecheck
 	}
 	return c.Conn.Write(p)
 }
@@ -440,30 +535,57 @@ func (c *limitedConn) Upstream() any { return c.Conn }
 
 type limitedPacketConn struct {
 	N.PacketConn
+	limiter   *Limiter
+	name      string
 	user      *userEntry
 	group     *groupEntry
-	keepalive func()
+	keepalive func() bool
+	gen       atomic.Uint64
+	groupNow  atomic.Pointer[groupEntry]
+	denied    atomic.Bool
 }
 
+func (c *limitedPacketConn) currentGroup() *groupEntry {
+	if c.limiter == nil {
+		return c.group
+	}
+	return resolveGroup(c.limiter, c.name, &c.gen, &c.groupNow)
+}
+
+// ReadPacket 被设备上限拒掉的 UDP 流走黑洞:包吞掉、连接不关。关掉的话 hysteria2 / tuic 的服务端会为下一个数据报
+// 重建一条 UDP 会话、再起一个 goroutine、再被拒一次 —— 游戏 / 语音每秒几百个包就是几百次。留着它,客户端停发后由 UDP 超时回收。
 func (c *limitedPacketConn) ReadPacket(b *buf.Buffer) (M.Socksaddr, error) {
-	dest, err := c.PacketConn.ReadPacket(b)
-	if b.Len() > 0 {
-		c.keepalive()
+	for {
+		dest, err := c.PacketConn.ReadPacket(b)
+		if err != nil {
+			return dest, err
+		}
+		if c.denied.Load() {
+			b.Reset()
+			continue
+		}
+		if b.Len() > 0 && !c.keepalive() {
+			c.denied.Store(true)
+			b.Reset()
+			continue
+		}
+		throttle(c.user.up.Load(), b.Len())
+		if g := c.currentGroup(); g != nil {
+			throttle(g.up.Load(), b.Len())
+		}
+		return dest, nil
 	}
-	throttle(c.user.up.Load(), b.Len())
-	if c.group != nil {
-		throttle(c.group.up.Load(), b.Len())
-	}
-	return dest, err
 }
 
 func (c *limitedPacketConn) WritePacket(b *buf.Buffer, dest M.Socksaddr) error {
-	if b.Len() > 0 {
-		c.keepalive()
+	if c.denied.Load() || (b.Len() > 0 && !c.keepalive()) {
+		c.denied.Store(true)
+		b.Release() // 这里要接管缓冲区
+		return nil  // 黑洞:吞掉,不报错、不关连接
 	}
 	throttle(c.user.down.Load(), b.Len())
-	if c.group != nil {
-		throttle(c.group.down.Load(), b.Len())
+	if g := c.currentGroup(); g != nil {
+		throttle(g.down.Load(), b.Len())
 	}
 	return c.PacketConn.WritePacket(b, dest)
 }

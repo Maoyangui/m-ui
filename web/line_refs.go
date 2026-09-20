@@ -7,7 +7,10 @@ import (
 	"strconv"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
+
+	"gorm.io/gorm"
 )
 
 // 线路分配的"线路 × 服务器"表示。
@@ -131,13 +134,28 @@ func (s *Server) normalizeRefsWith(refs []model.LineRef, strict bool) []model.Li
 // setUserLineRefs 落库用户的分配(两张表整体替换)。
 func (s *Server) setUserLineRefs(userID uint, refs []model.LineRef) {
 	refs = s.normalizeRefs(refs)
-	s.db.Where("user_id = ?", userID).Delete(&model.UserLine{})
-	s.db.Where("user_id = ?", userID).Delete(&model.UserLineNode{})
-	for _, r := range refs {
-		s.db.Create(&model.UserLine{UserId: userID, LineId: r.LineId})
-		for _, n := range r.NodeIds {
-			s.db.Create(&model.UserLineNode{UserId: userID, LineId: r.LineId, NodeId: n})
+	// 两张表整体替换放进一个事务:中途失败不留下"删了没建"的半截分配
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ?", userID).Delete(&model.UserLine{}).Error; err != nil {
+			return err
 		}
+		if err := tx.Where("user_id = ?", userID).Delete(&model.UserLineNode{}).Error; err != nil {
+			return err
+		}
+		for _, r := range refs {
+			if err := tx.Create(&model.UserLine{UserId: userID, LineId: r.LineId}).Error; err != nil {
+				return err
+			}
+			for _, n := range r.NodeIds {
+				if err := tx.Create(&model.UserLineNode{UserId: userID, LineId: r.LineId, NodeId: n}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		logger.Warning("写入用户 ", userID, " 的线路分配失败: ", err)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
 
 	"gorm.io/gorm"
@@ -590,9 +591,12 @@ func (s *Server) apiUserAction(w http.ResponseWriter, r *http.Request, u model.U
 		s.db.First(&u, u.Id)
 		writeJSON(w, http.StatusOK, s.apiUser(u))
 	case "kick":
-		n := s.kickUser(u.Name)
+		res := s.kickUserAll(u.Name)
+		if sc.rid > 0 {
+			res = res.Scrubbed()
+		}
 		s.auditAs(sc.actor, "user", "kick", u.Name)
-		writeJSON(w, http.StatusOK, map[string]int{"closed": n})
+		writeJSON(w, http.StatusOK, res)
 	case "rotate": // 重置订阅链接:返回带新订阅地址的用户对象
 		nu, err := s.rotateUser(u)
 		if err != nil {
@@ -638,10 +642,18 @@ func (s *Server) apiUserAction(w http.ResponseWriter, r *http.Request, u model.U
 	}
 }
 
-// kickUser 断开某用户的全部连接;测试里没有数据面时返回 0。
+// kickUser 断开某用户在本机的全部连接;测试里没有数据面时返回 0。
 func (s *Server) kickUser(name string) int {
 	if s.run == nil {
 		return 0
 	}
 	return s.run.KickUser(name)
+}
+
+// kickUserAll 本机 + 所有副机;测试里没有数据面时返回空结果。
+func (s *Server) kickUserAll(name string) hub.KickResult {
+	if s.run == nil {
+		return hub.KickResult{}
+	}
+	return s.run.KickUserAll(name)
 }

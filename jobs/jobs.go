@@ -49,6 +49,7 @@ type Onlines struct {
 type Scheduler struct {
 	d       Deps
 	mu      sync.Mutex
+	statsMu sync.Mutex // 串行化统计取数,也保护重载前的显式冲刷
 	onlines Onlines
 	stop    chan struct{}
 	wg      sync.WaitGroup
@@ -56,6 +57,37 @@ type Scheduler struct {
 	// 数据面不会自己重载,所以每轮比对这个集合,变了就重载一次;deadInit 为假表示还没有上一轮
 	deadResellers map[uint]bool
 	deadInit      bool
+}
+
+// FlushStats synchronously persists the current data-plane counters. Runner
+// calls this immediately before replacing a Box so traffic collected since the
+// last 10-second tick is not discarded with the old instance.
+func (s *Scheduler) FlushStats() (ok bool) {
+	ok = true
+	defer func() {
+		if v := recover(); v != nil {
+			ok = false
+			logger.Warning("定时任务 统计 异常: ", v, " | ", string(debug.Stack()))
+		}
+	}()
+	return s.runStatsResult()
+}
+
+// FlushStatsBox persists counters from a specific (usually just stopped) Box.
+// This lets Runner drain the old data plane after closing it, when no new
+// traffic can race the final snapshot.
+func (s *Scheduler) FlushStatsBox(box *core.Box) (ok bool) {
+	if box == nil {
+		return true
+	}
+	ok = true
+	defer func() {
+		if v := recover(); v != nil {
+			ok = false
+			logger.Warning("定时任务 统计 异常: ", v, " | ", string(debug.Stack()))
+		}
+	}()
+	return s.runStatsForBox(box)
 }
 
 // ResellerUsed 代理已用流量:名下用户的全时用量之和 + 结转 - 主面板重置基线。
@@ -162,11 +194,20 @@ func (s *Scheduler) settingInt(key string, def int64) int64 {
 // ---- stats ----
 
 func (s *Scheduler) runStats() {
-	box := s.d.Box()
+	_ = s.runStatsResult()
+}
+
+func (s *Scheduler) runStatsResult() (ok bool) {
+	return s.runStatsForBox(s.d.Box())
+}
+
+func (s *Scheduler) runStatsForBox(box *core.Box) (ok bool) {
+	s.statsMu.Lock()
+	defer s.statsMu.Unlock()
 	if box == nil {
-		return
+		return true
 	}
-	stats := box.StatsTracker().GetStats()
+	stats := box.StatsTracker().SnapshotStats()
 	now := time.Now().Unix()
 
 	type traffic struct{ up, down int64 }
@@ -204,7 +245,7 @@ func (s *Scheduler) runStats() {
 	s.mu.Unlock()
 
 	if len(*stats) == 0 {
-		return
+		return true
 	}
 
 	ratio := 1.0
@@ -274,7 +315,10 @@ func (s *Scheduler) runStats() {
 	})
 	if err != nil {
 		logger.Warning("统计落库失败: ", err)
+		return false
 	}
+	box.StatsTracker().ConsumeStats(*stats)
+	return true
 }
 
 // runRules 主机每 10 秒判一轮限速规则(时段 / 突发)。单独一个循环而不是挂在统计后面:
