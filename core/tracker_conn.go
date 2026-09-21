@@ -199,6 +199,23 @@ func (c *ConnTracker) CloseConnByUser(user string) int {
 	return c.closeMatching(func(info *ConnectionInfo) bool { return model.Owner(info.User) == user })
 }
 
+// CloseConnByDevices 仅断开跨机恢复后实际超额的设备，不影响同用户其它设备。
+func (c *ConnTracker) CloseConnByDevices(devices map[string][]string) int {
+	if len(devices) == 0 {
+		return 0
+	}
+	sets := make(map[string]map[string]bool, len(devices))
+	for user, ips := range devices {
+		sets[user] = map[string]bool{}
+		for _, ip := range ips {
+			sets[user][ip] = true
+		}
+	}
+	return c.closeMatching(func(info *ConnectionInfo) bool {
+		return sets[model.Owner(info.User)][info.SourceIP]
+	})
+}
+
 // CloseConnByDataPlaneName 只断某个数据面名字的连接:取消共享时传 "名字#share",本人的连接不动。
 func (c *ConnTracker) CloseConnByDataPlaneName(name string) int {
 	return c.closeMatching(func(info *ConnectionInfo) bool { return info.User == name })

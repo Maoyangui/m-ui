@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,15 +22,19 @@ import (
 
 // ---- 副机端:供主机调用的接口(令牌鉴权,不走会话) ----
 
-func (s *Server) nodeToken() string {
+func (s *Server) nodeToken() (string, error) {
 	tok := s.setting("nodeToken")
 	if tok == "" {
 		b := make([]byte, 24)
-		rand.Read(b)
+		if _, err := rand.Read(b); err != nil {
+			return "", err
+		}
 		tok = hex.EncodeToString(b)
-		s.run.SetSetting("nodeToken", tok)
+		if err := s.run.SetSetting("nodeToken", tok); err != nil {
+			return "", fmt.Errorf("保存副机令牌: %w", err)
+		}
 	}
-	return tok
+	return tok, nil
 }
 
 func (s *Server) agentAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -39,7 +44,11 @@ func (s *Server) agentAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		tok := r.Header.Get("X-Agent-Token")
-		want := s.nodeToken()
+		want, err := s.nodeToken()
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+			return
+		}
 		if tok == "" || subtle.ConstantTimeCompare([]byte(tok), []byte(want)) != 1 {
 			time.Sleep(200 * time.Millisecond)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "令牌错误"})
@@ -78,9 +87,14 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAgentInfo(w http.ResponseWriter, r *http.Request) {
+	tok, err := s.nodeToken()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"isNode": strings.EqualFold(s.setting("nodeMode"), "true"),
-		"token":  s.nodeToken(), "revision": s.setting("hubRevision"), "appliedAt": s.setting("hubAppliedAt"),
+		"token":  tok, "revision": s.setting("hubRevision"), "appliedAt": s.setting("hubAppliedAt"),
 		"apiUrl": s.selfApiURL(),
 	})
 }
@@ -90,9 +104,17 @@ func (s *Server) handleAgentRotate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		return
 	}
-	s.run.SetSetting("nodeToken", "")
+	if err := s.run.SetSetting("nodeToken", ""); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "保存令牌重置状态失败: " + err.Error()})
+		return
+	}
 	s.audit(r, "agent", "rotate-token", nil)
-	writeJSON(w, http.StatusOK, map[string]string{"token": s.nodeToken()})
+	tok, err := s.nodeToken()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"token": tok})
 }
 
 // selfApiURL 猜测本机面板对外地址,便于复制到主机。
@@ -139,8 +161,46 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("副机版本 v%s 低于主机要求的 v%s,请先升级这台副机", Version, snap.MinNode)})
 		return
 	}
-	revoked := hub.RevokedShares(s.db, snap)
-	rotated := hub.RotatedUsers(s.db, snap)
+	if s.run == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机数据面未初始化,暂不能确认配置已应用"})
+		return
+	}
+	s.agentApplyMu.Lock()
+	defer s.agentApplyMu.Unlock()
+	var previousPending string
+	if err := s.db.Model(&model.Setting{}).Select("value").Where("key = ?", "hubReloadPending").Scan(&previousPending).Error; err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "读取副机待重载状态失败: " + err.Error()})
+		return
+	}
+	revoked, err := hub.RevokedSharesChecked(s.db, snap)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "读取旧共享凭据失败: " + err.Error()})
+		return
+	}
+	rotated, err := hub.RotatedUsersChecked(s.db, snap)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "读取旧订阅凭据失败: " + err.Error()})
+		return
+	}
+	pendingKick, err := s.pendingAgentKicks()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "读取副机待踢线状态失败: " + err.Error()})
+		return
+	}
+	kickSet := make(map[string]bool, len(pendingKick)+len(rotated))
+	for _, name := range pendingKick {
+		kickSet[name] = true
+	}
+	for _, name := range rotated {
+		kickSet[name] = true
+	}
+	kickNames := sortedNames(kickSet)
+	// 先把目标持久化,再进行可能失败的网络/内核操作。这样即使本次
+	// 请求在踢线中途断开,下一次同一修订仍会继续处理旧凭据连接。
+	if err := s.saveAgentKicks(kickNames); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "记录副机待踢线状态失败: " + err.Error()})
+		return
+	}
 	linesChanged, upsChanged, err := hub.ApplySnapshot(s.db, snap)
 	if err != nil {
 		badRequest(w, err)
@@ -149,34 +209,118 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 	// ================= D. 本机账本只增不删:主机已经不认识的用户,它的计数器没人再回收,清掉 =================
 	// 主机那边的游标还留着;同名用户以后再建,计数从 0 起小于游标,会被当成回绕重认,不会多算
 	s.db.Exec("DELETE FROM agent_counters WHERE user_name NOT IN (SELECT name FROM users)")
+	// 配置接口只有在本机数据面真正应用完成后才确认 revision。这样主机
+	// 看到 HTTP 错误会保留重试机会，而不是把“请求已收到”误当成“已生效”。
+	// 数据库快照先落地、数据面后重载。若重载失败，保留一个只在本机使用的
+	// 待重载标记；同一 revision 重试时必须再次走全量重载，不能因表已经
+	// 写入而误降级成 ReloadUsers。
+	// 事务会把本次修订记为待重载，保证落库后崩溃也能恢复。重载级别只看
+	// ApplySnapshot 前的标记；只有同一修订的待重载才强制重建，旧修订仍
+	// 按当前快照的线路/上游差异选择热更新。
+	pendingReload := previousPending != "" && previousPending == snap.Revision
+	var reloadErr error
 	switch {
-	case linesChanged:
-		s.reloadAll("主机下发配置 " + snap.Revision)
+	case linesChanged || pendingReload || !s.run.CoreRunning():
+		reloadErr = s.run.ReloadAll()
 	case upsChanged:
-		s.reloadUpstreams("主机下发上游 " + snap.Revision)
+		reloadErr = s.run.ReloadUpstreams()
 	default:
-		s.reloadUsers("主机下发用户 " + snap.Revision)
+		reloadErr = s.run.ReloadUsers()
 	}
-	if len(revoked) > 0 || len(rotated) > 0 {
-		go func() { // 先把凭据热更新掉再断线,免得借用者 / 旧凭据在空档里重连
-			if err := s.run.ReloadUsers(); err != nil {
-				logger.Warning("撤下旧凭据失败: ", err)
+	if reloadErr == nil && !s.run.CoreRunning() {
+		reloadErr = errors.New("本机数据面未运行，不能确认快照已应用")
+	}
+	if reloadErr != nil {
+		if err := s.run.SetSetting("hubReloadPending", snap.Revision); err != nil {
+			logger.Error("记录副机待重载状态失败: ", err)
+		}
+		logger.Warning("应用主机配置 ", snap.Revision, " 失败: ", reloadErr)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机数据面应用失败: " + reloadErr.Error()})
+		return
+	}
+	if err := s.run.SetSetting("hubReloadPending", ""); err != nil {
+		// 快照已经应用,但不清标记比错误地报告已清理更安全;主机重试会
+		// 再次确认同一 revision 的数据面状态。
+		logger.Error("清除副机待重载状态失败: ", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "数据面已应用,但待重载状态未能持久化: " + err.Error()})
+		return
+	}
+	if len(revoked) > 0 || len(kickNames) > 0 {
+		for _, name := range revoked {
+			if n := s.run.KickShare(name); n > 0 {
+				logger.Info("临时共享已取消,断开 ", name, " 的 ", n, " 条连接")
+			}
+		}
+		for i, name := range kickNames {
+			res := s.run.KickUserAll(name)
+			if res.Failed > 0 {
+				// 保留未完成的目标;已完成的从队列中去掉,避免每次
+				// 重试都重复踢大量已经处理完的用户。
+				remaining := make(map[string]bool)
+				for _, n := range kickNames[i:] {
+					remaining[n] = true
+				}
+				_ = s.saveAgentKicks(sortedNames(remaining))
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": fmt.Sprintf("用户 %s 踢线未完成，%d 台副机失败", name, res.Failed)})
 				return
 			}
-			for _, name := range revoked {
-				if n := s.run.KickShare(name); n > 0 {
-					logger.Info("临时共享已取消,断开 ", name, " 的 ", n, " 条连接")
-				}
+			if res.Closed > 0 {
+				logger.Info("订阅链接已重置,断开 ", name, " 旧凭据上的 ", res.Closed, " 条连接")
 			}
-			for _, name := range rotated {
-				if n := s.run.KickUser(name); n > 0 {
-					logger.Info("订阅链接已重置,断开 ", name, " 旧凭据上的 ", n, " 条连接")
-				}
-			}
-		}()
+		}
+	}
+	if err := s.saveAgentKicks(nil); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "清除副机待踢线状态失败: " + err.Error()})
+		return
 	}
 	logger.Info("已应用主机配置 ", snap.Revision, "(线路变化: ", linesChanged, ",上游变化: ", upsChanged, ")")
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "revision": snap.Revision})
+}
+
+const agentKickPendingKey = "hubKickPending"
+
+func (s *Server) pendingAgentKicks() ([]string, error) {
+	var raw string
+	if err := s.db.Raw("SELECT value FROM settings WHERE key = ?", agentKickPendingKey).Scan(&raw).Error; err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var names []string
+	if err := json.Unmarshal([]byte(raw), &names); err != nil {
+		return nil, fmt.Errorf("解析待踢线状态: %w", err)
+	}
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		if name = strings.TrimSpace(name); name != "" {
+			set[name] = true
+		}
+	}
+	return sortedNames(set), nil
+}
+
+func sortedNames(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for name, keep := range set {
+		if keep && strings.TrimSpace(name) != "" {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (s *Server) saveAgentKicks(names []string) error {
+	value := ""
+	if len(names) > 0 {
+		b, err := json.Marshal(names)
+		if err != nil {
+			return err
+		}
+		value = string(b)
+	}
+	return s.run.SetSetting(agentKickPendingKey, value)
 }
 
 func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {

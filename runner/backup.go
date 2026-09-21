@@ -15,6 +15,7 @@ import (
 	"github.com/Maoyangui/m-ui/backup"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/logger"
+	"gorm.io/gorm"
 )
 
 // Version 由 main 注入,写进备份 meta。
@@ -115,7 +116,12 @@ func (r *Runner) BackupFilePath(name string) (string, error) {
 }
 
 // SetSetting 写入一个设置项(面板保存证书设置用)。
-func (r *Runner) SetSetting(key, val string) { r.setSetting(key, val) }
+func (r *Runner) SetSetting(key, val string) error { return r.setSetting(key, val) }
+
+// SetSettings writes a related set of settings atomically.
+func (r *Runner) SetSettings(values map[string]string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error { return saveSettings(tx, values) })
+}
 
 // InspectBackup 检查一个备份文件。
 func (r *Runner) InspectBackup(src string) (backup.Summary, error) { return backup.Inspect(src) }

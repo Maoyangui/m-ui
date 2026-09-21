@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,8 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // certState 记录一次签发的进度,供面板轮询。
@@ -45,13 +48,25 @@ func (r *Runner) DataDir() string {
 	return filepath.Dir(abs)
 }
 
-func (r *Runner) setSetting(key, val string) {
-	var existing model.Setting
-	if err := r.db.Where("key = ?", key).First(&existing).Error; err == nil {
-		r.db.Model(&model.Setting{}).Where("key = ?", key).Update("value", val)
-	} else {
-		r.db.Create(&model.Setting{Key: key, Value: val})
+func (r *Runner) setSetting(key, val string) error {
+	return saveSettings(r.db, map[string]string{key: val})
+}
+
+func saveSettings(db *gorm.DB, values map[string]string) error {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
 	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if err := db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "key"}},
+			DoUpdates: clause.AssignmentColumns([]string{"value"}),
+		}).Create(&model.Setting{Key: key, Value: values[key]}).Error; err != nil {
+			return fmt.Errorf("保存设置 %s: %w", key, err)
+		}
+	}
+	return nil
 }
 
 // certPaths 返回数据面证书路径(未设置时给出默认固定路径)。
@@ -109,6 +124,8 @@ func (r *Runner) IssueCert() error {
 }
 
 func (r *Runner) issueCert() error {
+	r.certOpMu.Lock()
+	defer r.certOpMu.Unlock()
 	domain := strings.TrimSpace(r.setting("acmeDomain"))
 	if domain == "" {
 		domain = strings.TrimSpace(r.setting("webDomain"))
@@ -131,20 +148,24 @@ func (r *Runner) issueCert() error {
 	defer cancel()
 	res, err := acme.Issue(ctx, cfg)
 	if res.AccountKey != "" && res.AccountKey != cfg.AccountKey {
-		r.setSetting("acmeAccountKey", res.AccountKey)
+		if saveErr := r.setSetting("acmeAccountKey", res.AccountKey); saveErr != nil {
+			return errors.Join(err, saveErr)
+		}
 	}
 	if err != nil {
 		r.cert.logf("失败: %v", err)
 		r.notifier.Event("tgOnCert", "🔴 <b>证书签发失败</b>:"+notify.Esc(domain)+"\n"+notify.Esc(err.Error()))
 		return err
 	}
-	r.setSetting("certFile", certFile)
-	r.setSetting("keyFile", keyFile)
-	r.setSetting("acmeDomain", domain)
-	r.setSetting("certSource", "acme")
-	r.afterCertChange(certFile, keyFile, domain,
+	if err := r.afterCertChange(certFile, keyFile, domain,
 		!strings.EqualFold(r.setting("acmeApplyPanel"), "false"),
-		!strings.EqualFold(r.setting("acmeApplySub"), "false"))
+		!strings.EqualFold(r.setting("acmeApplySub"), "false"),
+		map[string]string{
+			"certFile": certFile, "keyFile": keyFile, "acmeDomain": domain, "certSource": "acme",
+			"acmeApplyPanel": r.setting("acmeApplyPanel"), "acmeApplySub": r.setting("acmeApplySub"),
+		}); err != nil {
+		return err
+	}
 	r.notifier.Event("tgOnCert", fmt.Sprintf("🟢 <b>证书已签发</b>:%s\n到期 %s", notify.Esc(domain), res.NotAfter.Format("2006-01-02")))
 	return nil
 }
@@ -169,34 +190,56 @@ func (r *Runner) CertSource() string {
 
 // afterCertChange 证书变更后:线路入站(数据面)始终换用新证书;面板与订阅按 applyPanel / applySub 开关,
 // 取消勾选会清掉对应设置(订阅立即重启生效,面板监听器需重启 m-ui)。
-func (r *Runner) afterCertChange(certFile, keyFile, domain string, applyPanel, applySub bool) {
-	if domain != "" && r.setting("webDomain") == "" {
-		r.setSetting("webDomain", domain)
-	}
-
+func (r *Runner) afterCertChange(certFile, keyFile, domain string, applyPanel, applySub bool, values map[string]string) error {
 	wantSubCert, wantSubKey := "", ""
 	if applySub {
 		wantSubCert, wantSubKey = certFile, keyFile
 	}
-	if r.setting("subCertFile") != wantSubCert || r.setting("subKeyFile") != wantSubKey {
-		r.setSetting("subCertFile", wantSubCert)
-		r.setSetting("subKeyFile", wantSubKey)
+	wantWebCert, wantWebKey := "", ""
+	if applyPanel {
+		wantWebCert, wantWebKey = certFile, keyFile
+	}
+	if values == nil {
+		values = map[string]string{}
+	}
+	var restartSub, webChanged bool
+	if err := r.db.Transaction(func(tx *gorm.DB) error {
+		var rows []model.Setting
+		if err := tx.Where("key IN ?", []string{"webDomain", "subCertFile", "subKeyFile", "webCertFile", "webKeyFile", "subRestartPending"}).Find(&rows).Error; err != nil {
+			return err
+		}
+		current := map[string]string{}
+		for _, row := range rows {
+			current[row.Key] = row.Value
+		}
+		if domain != "" && current["webDomain"] == "" {
+			values["webDomain"] = domain
+		}
+		restartSub = current["subCertFile"] != wantSubCert || current["subKeyFile"] != wantSubKey || current["subRestartPending"] == "true"
+		webChanged = current["webCertFile"] != wantWebCert || current["webKeyFile"] != wantWebKey
+		values["subCertFile"], values["subKeyFile"] = wantSubCert, wantSubKey
+		values["webCertFile"], values["webKeyFile"] = wantWebCert, wantWebKey
+		if restartSub {
+			values["subRestartPending"] = "true"
+		}
+		return saveSettings(tx, values)
+	}); err != nil {
+		return fmt.Errorf("保存证书设置失败: %w", err)
+	}
+	var applyErr error
+	if restartSub {
 		if err := r.RestartSub(); err != nil {
 			r.cert.logf("重启订阅服务失败: %v", err)
+			applyErr = fmt.Errorf("证书设置已保存，重启订阅服务失败: %w", err)
+		} else if err := r.setSetting("subRestartPending", ""); err != nil {
+			applyErr = err
 		} else if wantSubCert == "" {
 			r.cert.logf("订阅已改为 HTTP(用户需重新获取订阅地址)")
 		} else {
 			r.cert.logf("订阅服务已用该证书重启(HTTPS)")
 		}
 	}
-
-	wantWebCert, wantWebKey := "", ""
-	if applyPanel {
-		wantWebCert, wantWebKey = certFile, keyFile
-	}
-	if r.setting("webCertFile") != wantWebCert || r.setting("webKeyFile") != wantWebKey {
-		r.setSetting("webCertFile", wantWebCert)
-		r.setSetting("webKeyFile", wantWebKey)
+	if webChanged {
 		if wantWebCert == "" {
 			r.cert.logf("面板已取消 HTTPS,重启 m-ui 后生效(地址改回 http://)")
 		} else {
@@ -209,16 +252,19 @@ func (r *Runner) afterCertChange(certFile, keyFile, domain string, applyPanel, a
 	if r.appliedUsesCert(certFile, keyFile) {
 		if err := r.ReloadAll(); err != nil { // 域名(server_name)之类变了时它自己会重启,否则无操作
 			r.cert.logf("数据面重载失败: %v", err)
+			applyErr = errors.Join(applyErr, fmt.Errorf("证书设置已保存，数据面重载失败: %w", err))
 		} else {
 			r.cert.logf("线路入站证书已由数据面自动热加载(路径不变,不重启)")
 		}
-		return
+		return applyErr
 	}
 	if err := r.ReloadAllForce(); err != nil {
 		r.cert.logf("数据面重载失败: %v", err)
+		applyErr = errors.Join(applyErr, fmt.Errorf("证书设置已保存，数据面重载失败: %w", err))
 	} else {
 		r.cert.logf("线路入站已用新证书重载")
 	}
+	return applyErr
 }
 
 // appliedUsesCert 当前生效的配置里,入站是否已经引用这两个证书文件路径。
@@ -252,6 +298,8 @@ func (r *Runner) appliedUsesCert(certFile, keyFile string) bool {
 // 自签证书不被系统信任,面板与订阅走 HTTPS 会让浏览器和客户端报错;
 // 订阅链接会自动带"允许不安全",客户端打开该开关即可连上。
 func (r *Runner) SelfSign(hosts []string, applyPanel, applySub bool) error {
+	r.certOpMu.Lock()
+	defer r.certOpMu.Unlock()
 	if len(hosts) == 0 { // 无域名场景不该逼用户填东西:自动用本机探测到的公网 IP / 入口地址
 		hosts = r.autoCertHosts()
 	}
@@ -262,12 +310,10 @@ func (r *Runner) SelfSign(hosts []string, applyPanel, applySub bool) error {
 	if err := certutil.GenerateSelfSigned(hosts, certFile, keyFile, 3650); err != nil {
 		return err
 	}
-	r.setSetting("certFile", certFile)
-	r.setSetting("keyFile", keyFile)
-	r.setSetting("certSource", "selfsign")
 	r.cert.logf("自签证书已生成: %s,包含地址 %s(用于线路入站;订阅里每个节点会自动带允许不安全标记)", certFile, strings.Join(hosts, ", "))
-	r.afterCertChange(certFile, keyFile, "", applyPanel, applySub)
-	return nil
+	return r.afterCertChange(certFile, keyFile, "", applyPanel, applySub,
+		map[string]string{"certFile": certFile, "keyFile": keyFile, "certSource": "selfsign",
+			"acmeApplyPanel": boolText(applyPanel), "acmeApplySub": boolText(applySub)})
 }
 
 // autoCertHosts 自签证书默认包含的地址:本机公网 IP(v4/v6)、本机节点手填的连接地址、已设置的域名。
@@ -298,6 +344,8 @@ func (r *Runner) autoCertHosts() []string {
 // UseExternalCert 使用服务器上已有的证书(如 certbot / nginx / 商业证书):只记录路径,不复制文件,
 // 证书续期后覆盖原文件即可,面板与订阅会自动换用(线路入站在下次重载时生效)。
 func (r *Runner) UseExternalCert(certFile, keyFile string, applyPanel, applySub bool) error {
+	r.certOpMu.Lock()
+	defer r.certOpMu.Unlock()
 	certFile, keyFile = strings.TrimSpace(certFile), strings.TrimSpace(keyFile)
 	if certFile == "" || keyFile == "" {
 		return errors.New("请填写证书与私钥的完整路径")
@@ -309,28 +357,26 @@ func (r *Runner) UseExternalCert(certFile, keyFile string, applyPanel, applySub 
 	if info.Exists && info.DaysLeft < 0 {
 		return fmt.Errorf("该证书已于 %s 过期", info.NotAfter.Format("2006-01-02"))
 	}
-	r.setSetting("certFile", certFile)
-	r.setSetting("keyFile", keyFile)
-	r.setSetting("certSource", "external")
 	domain := ""
 	if len(info.DNSNames) > 0 {
 		domain = info.DNSNames[0]
 	}
 	r.cert.logf("已使用外部证书 %s(%s,剩余 %d 天)", certFile, info.Subject, info.DaysLeft)
-	r.afterCertChange(certFile, keyFile, domain, applyPanel, applySub)
-	return nil
+	return r.afterCertChange(certFile, keyFile, domain, applyPanel, applySub,
+		map[string]string{"certFile": certFile, "keyFile": keyFile, "certSource": "external",
+			"acmeApplyPanel": boolText(applyPanel), "acmeApplySub": boolText(applySub)})
 }
 
 // ApplyCertTargets 只改套用目标(面板 / 订阅 HTTPS),不换证书。
 func (r *Runner) ApplyCertTargets(applyPanel, applySub bool) error {
+	r.certOpMu.Lock()
+	defer r.certOpMu.Unlock()
 	certFile, keyFile := r.DataPlaneCert()
 	if (applyPanel || applySub) && !acme.Info(certFile).Exists {
 		return errors.New("当前没有可用证书,请先签发、自签或填写已有证书")
 	}
-	r.setSetting("acmeApplyPanel", boolText(applyPanel))
-	r.setSetting("acmeApplySub", boolText(applySub))
-	r.afterCertChange(certFile, keyFile, "", applyPanel, applySub)
-	return nil
+	return r.afterCertChange(certFile, keyFile, "", applyPanel, applySub,
+		map[string]string{"acmeApplyPanel": boolText(applyPanel), "acmeApplySub": boolText(applySub)})
 }
 
 func boolText(b bool) string {

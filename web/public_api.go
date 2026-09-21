@@ -409,6 +409,35 @@ func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
 	return nil
 }
 
+// updateUserFields 返回用户资料更新所允许写入的字段。
+// 用量字段刻意不从请求前读出的 User 结构体写回：数据面可能在请求期间
+// 增加 up/down，直接 Updates(struct) 会把那一小段流量覆盖掉。renew 的
+// 结算项由调用方以 SQL 表达式原子完成。
+func updateUserFields(u model.User, renew bool) map[string]interface{} {
+	updates := map[string]interface{}{
+		"name":            u.Name,
+		"enabled":         u.Enabled,
+		"disabled_reason": u.DisabledReason,
+		"volume":          u.Volume,
+		"expiry":          u.Expiry,
+		"device_limit":    u.DeviceLimit,
+		"speed_up":        u.SpeedUp,
+		"speed_down":      u.SpeedDown,
+		"auto_reset":      u.AutoReset,
+		"reset_days":      u.ResetDays,
+		"next_reset":      u.NextReset,
+		"remark":          u.Remark,
+		"desc":            u.Desc,
+	}
+	if renew {
+		// total_* + up/down 必须在数据库内完成，和统计写入并发时不会丢本轮流量。
+		updates["total_up"] = gorm.Expr("total_up + up")
+		updates["total_down"] = gorm.Expr("total_down + down")
+		updates["up"], updates["down"] = int64(0), int64(0)
+	}
+	return updates
+}
+
 func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiScope) {
 	var req apiUserReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -456,6 +485,8 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiSco
 	}
 	if sc.rid > 0 {
 		// 和代理在面板里建号完全一样的校验与归属:线路授权、用户数上限、流量额度、随机订阅令牌
+		s.resellerUserMu.Lock()
+		defer s.resellerUserMu.Unlock()
 		if err := s.prepareResellerUser(sc.rid, &u, refs); err != nil {
 			badRequest(w, err)
 			return
@@ -498,10 +529,12 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 		return
 	}
 	var planRefsV []model.LineRef
+	planRenews := false
 	if plan != nil {
 		mode := req.Mode
 		if mode != "extend" {
 			mode = "renew"
+			planRenews = true
 		}
 		planRefsV = applyPlanRefs(&u, *plan, mode, now)
 	}
@@ -535,10 +568,8 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 			return
 		}
 	}
-	if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).Select(
-		"name", "enabled", "disabled_reason", "volume", "expiry", "auto_reset", "reset_days", "next_reset",
-		"device_limit", "speed_up", "speed_down", "remark", "desc", "total_up", "total_down", "up", "down",
-	).Updates(u).Error; err != nil {
+	if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).
+		Updates(updateUserFields(u, planRenews)).Error; err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -554,6 +585,11 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 	}
 	s.auditAs(sc.actor, "user", action, u.Name)
 	s.reloadUsers("外部 API 修改用户 " + u.Name)
+	// 返回数据库中的最新用量，避免把请求开始时的旧快照回传给调用方。
+	if err := s.db.First(&u, u.Id).Error; err != nil {
+		badRequest(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, s.apiUser(u))
 }
 

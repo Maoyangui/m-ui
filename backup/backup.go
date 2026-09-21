@@ -264,10 +264,13 @@ func Restore(dbPath, srcPath string) error {
 	if !isZip {
 		return nil
 	}
-	raw, _ := os.ReadFile(srcPath)
+	raw, err := os.ReadFile(srcPath)
+	if err != nil {
+		return fmt.Errorf("重新读取备份 zip: %w", err)
+	}
 	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil {
-		return nil
+		return fmt.Errorf("读取备份 zip: %w", err)
 	}
 	files := map[string]*zip.File{}
 	for _, f := range zr.File {
@@ -279,7 +282,7 @@ func Restore(dbPath, srcPath string) error {
 	for _, c := range meta.Certs {
 		f := files[c.Zip]
 		if f == nil || c.Path == "" {
-			continue
+			return fmt.Errorf("备份证书条目缺失: %s", c.Zip)
 		}
 		if !underDir(root, c.Path) {
 			skipped = append(skipped, c.Path)
@@ -287,16 +290,26 @@ func Restore(dbPath, srcPath string) error {
 		}
 		rc, err := f.Open()
 		if err != nil {
-			continue
+			return fmt.Errorf("读取证书 %s: %w", c.Path, err)
 		}
-		b, _ := io.ReadAll(rc)
-		rc.Close()
-		os.MkdirAll(filepath.Dir(c.Path), 0o755)
+		b, readErr := io.ReadAll(rc)
+		closeErr := rc.Close()
+		if readErr != nil {
+			return fmt.Errorf("读取证书 %s: %w", c.Path, readErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("关闭证书 %s: %w", c.Path, closeErr)
+		}
+		if err := os.MkdirAll(filepath.Dir(c.Path), 0o755); err != nil {
+			return fmt.Errorf("创建证书目录 %s: %w", filepath.Dir(c.Path), err)
+		}
 		mode := os.FileMode(0o644)
 		if strings.HasSuffix(c.Path, ".key") {
 			mode = 0o600
 		}
-		os.WriteFile(c.Path, b, mode)
+		if err := os.WriteFile(c.Path, b, mode); err != nil {
+			return fmt.Errorf("写入证书 %s: %w", c.Path, err)
+		}
 	}
 	return nil
 }

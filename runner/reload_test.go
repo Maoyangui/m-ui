@@ -134,3 +134,22 @@ func TestReloadRollsBackWhenStartFails(t *testing.T) {
 	}
 	r.core.Stop()
 }
+
+func TestReloadUpstreamsWhenStoppedPreservesPendingUserReload(t *testing.T) {
+	dir := t.TempDir()
+	db, err := database.Open(filepath.Join(dir, "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	r := &Runner{db: db, core: core.NewCore(), dbPath: filepath.Join(dir, "x.db")}
+	if err := r.setSetting("userReloadPending", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ReloadUpstreams(); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.setting("userReloadPending"); got != "true" {
+		t.Fatalf("停止数据面时热换出站不应清理用户待重载标记: %q", got)
+	}
+}

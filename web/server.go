@@ -65,10 +65,15 @@ type Server struct {
 	rSrv      *http.Server // 代理面板(独立端口/路径)
 	rListener net.Listener
 
-	mu         sync.Mutex
-	sessions   map[string]session
-	loginFails map[string][]int64 // ip → 最近失败时间
-	ops        *ops.Runner
+	mu sync.Mutex
+	// resellerUserMu 串行化“检查代理用户数上限 + 创建用户”这个复合操作。
+	// 单独 Count 后再 Create 在并发请求下会同时看到同一个余量，导致 UserLimit 被突破。
+	resellerUserMu sync.Mutex
+	rotateMu       sync.Mutex
+	agentApplyMu   sync.Mutex // 快照落库、重载和确认必须作为同一轮串行完成
+	sessions       map[string]session
+	loginFails     map[string][]int64 // ip → 最近失败时间
+	ops            *ops.Runner
 
 	totpPending    string          // 两步验证:已生成、待认证器验证一次后才生效的密钥
 	totpPendingRS  map[uint]string // 同上,按代理

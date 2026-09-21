@@ -436,7 +436,12 @@ func httpHealthy(url string) bool {
 		return true // 接口打不通不当成不健康,首页已经回答了"进程活着"
 	}
 	hr.Body.Close()
-	return hr.StatusCode != http.StatusServiceUnavailable
+	// 新版健康接口必须明确返回成功；404 代表旧程序没有该接口，仍按首页
+	// 存活兼容。5xx/4xx 说明数据面或面板未就绪，不能把升级判为成功。
+	if hr.StatusCode == http.StatusNotFound {
+		return true
+	}
+	return hr.StatusCode >= 200 && hr.StatusCode < 400
 }
 
 func writeStatus(path string, st Status) {

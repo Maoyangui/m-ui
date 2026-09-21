@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -47,10 +48,11 @@ const MinNodeVersion = "0.6.0"
 // Snapshot 是主机下发给副机的完整配置。
 type Snapshot struct {
 	Revision      string               `json:"revision"`
-	Version       string               `json:"version,omitempty"` // 主机版本(只做展示与比对,不进修订号)
-	MinNode       string               `json:"minNode,omitempty"` // 副机最低版本,低于它拒绝应用并报错
-	SelfNodeId    uint                 `json:"selfNodeId"`        // 接收方在 nodes 表里的 id
-	MasterId      uint                 `json:"masterId"`          // 主机自己在 nodes 表里的 id
+	Sequence      uint64               `json:"sequence,omitempty"` // 推送序号，拒绝延迟到达的旧快照；不参与内容修订号
+	Version       string               `json:"version,omitempty"`  // 主机版本(只做展示与比对,不进修订号)
+	MinNode       string               `json:"minNode,omitempty"`  // 副机最低版本,低于它拒绝应用并报错
+	SelfNodeId    uint                 `json:"selfNodeId"`         // 接收方在 nodes 表里的 id
+	MasterId      uint                 `json:"masterId"`           // 主机自己在 nodes 表里的 id
 	Nodes         []model.Node         `json:"nodes"`
 	Upstreams     []model.Upstream     `json:"upstreams"`
 	Lines         []model.Line         `json:"lines"`
@@ -121,6 +123,7 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 // revisionOf 对快照内容做哈希;字段顺序固定,故稳定。
 func revisionOf(s Snapshot) string {
 	s.Revision, s.SelfNodeId, s.Version, s.MinNode = "", 0, "", ""
+	s.Sequence = 0
 	// nodes 表中的 IsLocal 因接收方不同而不同,不参与修订号
 	nodes := make([]model.Node, len(s.Nodes))
 	copy(nodes, s.Nodes)
@@ -205,10 +208,20 @@ func normJSON(raw json.RawMessage) json.RawMessage {
 // RevokedShares 返回本次快照里临时共享被取消或换新的用户名(要在 ApplySnapshot 之前调用)。
 // 副机据此在热更新后断开这些用户的连接,否则借用者已经建立的连接还能接着用。
 func RevokedShares(db *gorm.DB, snap Snapshot) []string {
+	out, _ := RevokedSharesChecked(db, snap)
+	return out
+}
+
+// RevokedSharesChecked is the error-reporting form used by the apply path.
+// A database read failure must not be treated as "nothing to revoke" because
+// that would leave an old shared credential connected on the node.
+func RevokedSharesChecked(db *gorm.DB, snap Snapshot) ([]string, error) {
 	var old []model.User
-	db.Where("share_token <> ''").Find(&old)
+	if err := db.Where("share_token <> ''").Find(&old).Error; err != nil {
+		return nil, err
+	}
 	if len(old) == 0 {
-		return nil
+		return nil, nil
 	}
 	now := make(map[string]string, len(snap.Users))
 	for _, u := range snap.Users {
@@ -220,17 +233,25 @@ func RevokedShares(db *gorm.DB, snap Snapshot) []string {
 			out = append(out, u.Name)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // RotatedUsers 返回本次快照里重置过订阅链接的用户名(要在 ApplySnapshot 之前调用):
 // 订阅令牌换了、凭据也换了才算(只比凭据会把本机补全协议键之类的差异误当成换新)。
 // 副机热更新后还要把这些用户旧凭据上的连接断掉,否则旧设备能一直连到自己断开为止。
 func RotatedUsers(db *gorm.DB, snap Snapshot) []string {
+	out, _ := RotatedUsersChecked(db, snap)
+	return out
+}
+
+// RotatedUsersChecked is the error-reporting form used by the apply path.
+func RotatedUsersChecked(db *gorm.DB, snap Snapshot) ([]string, error) {
 	var old []model.User
-	db.Select("name, sub_token, credentials").Find(&old)
+	if err := db.Select("name, sub_token, credentials").Find(&old).Error; err != nil {
+		return nil, err
+	}
 	if len(old) == 0 {
-		return nil
+		return nil, nil
 	}
 	now := make(map[string]model.User, len(snap.Users))
 	for _, u := range snap.Users {
@@ -246,7 +267,7 @@ func RotatedUsers(db *gorm.DB, snap Snapshot) []string {
 			out = append(out, u.Name)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // ApplySnapshot 在副机上整表替换配置。返回线路、上游是否变化,副机据此选择重载级别:
@@ -256,8 +277,12 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 	// 副机于是次次全量重启数据面,所有人掉线几秒——只是有人生成了一条临时共享。
 	var oldLines []model.Line
 	var oldUps []model.Upstream
-	db.Find(&oldLines)
-	db.Find(&oldUps)
+	if err := db.Find(&oldLines).Error; err != nil {
+		return false, false, err
+	}
+	if err := db.Find(&oldUps).Error; err != nil {
+		return false, false, err
+	}
 	linesChanged = !sameLines(oldLines, snap.Lines)
 	upstreamsChanged = !sameUpstreams(oldUps, snap.Upstreams)
 
@@ -290,6 +315,22 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		}
 	}
 	err = db.Transaction(func(tx *gorm.DB) error {
+		var previous string
+		if err := tx.Model(&model.Setting{}).Select("value").Where("key = ?", "hubSnapshotSequence").Scan(&previous).Error; err != nil {
+			return err
+		}
+		seq, err := strconv.ParseUint(previous, 10, 64)
+		if previous != "" && err != nil {
+			return fmt.Errorf("读取快照序号: %w", err)
+		}
+		// Older masters do not send a sequence field.  Keep that wire format
+		// usable during a rolling upgrade; only snapshots carrying a sequence
+		// participate in stale-snapshot rejection.  Do not overwrite a newer
+		// node's persisted sequence with the legacy zero value.
+		legacySequence := snap.Sequence == 0
+		if !legacySequence && snap.Sequence < seq {
+			return fmt.Errorf("拒绝过期快照:序号 %d 低于已接收的 %d", snap.Sequence, seq)
+		}
 		for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserExt{}, &model.User{}, &model.Line{}, &model.Upstream{}, &model.Node{}, &model.ExtNode{}, &model.Reseller{}, &model.LimitState{}} {
 			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(t).Error; err != nil {
 				return err
@@ -377,21 +418,34 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 			}
 		}
 		for k, v := range snap.Settings {
-			upsertSetting(tx, k, v)
+			if err := upsertSetting(tx, k, v); err != nil {
+				return err
+			}
 		}
-		upsertSetting(tx, "hubRevision", snap.Revision)
-		upsertSetting(tx, "hubMasterId", fmt.Sprintf("%d", snap.MasterId))
-		upsertSetting(tx, "hubAppliedAt", fmt.Sprintf("%d", time.Now().Unix()))
+		settingsToWrite := map[string]string{
+			"hubRevision":      snap.Revision,
+			"hubMasterId":      fmt.Sprintf("%d", snap.MasterId),
+			"hubAppliedAt":     fmt.Sprintf("%d", time.Now().Unix()),
+			"hubReloadPending": snap.Revision,
+		}
+		if !legacySequence {
+			settingsToWrite["hubSnapshotSequence"] = strconv.FormatUint(snap.Sequence, 10)
+		}
+		for k, v := range settingsToWrite {
+			if err := upsertSetting(tx, k, v); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return linesChanged, upstreamsChanged, err
 }
 
-func upsertSetting(tx *gorm.DB, k, v string) {
-	tx.Clauses(clause.OnConflict{
+func upsertSetting(tx *gorm.DB, k, v string) error {
+	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value"}),
-	}).Create(&model.Setting{Key: k, Value: v})
+	}).Create(&model.Setting{Key: k, Value: v}).Error
 }
 
 // RecentConn 数据面日志里聚合出的一条"源 IP × 线路"入站记录(诊断用)。
@@ -576,6 +630,7 @@ type Deps struct {
 }
 
 type Hub struct {
+	syncMu sync.Mutex // 锁覆盖构造快照到 ACK，避免 tick/SyncNow/PushNow 乱序回写
 	d      Deps
 	mu     sync.Mutex
 	status map[uint]*NodeStatus
@@ -653,10 +708,10 @@ func (h *Hub) Revision() string {
 	return h.revision
 }
 
-func (h *Hub) remoteNodes() []model.Node {
+func (h *Hub) remoteNodes() ([]model.Node, error) {
 	var nodes []model.Node
-	h.d.DB.Where("enabled = ? AND is_local = ?", true, false).Order("sort asc, id asc").Find(&nodes)
-	return nodes
+	err := h.d.DB.Where("enabled = ? AND is_local = ?", true, false).Order("sort asc, id asc").Find(&nodes).Error
+	return nodes, err
 }
 
 // nodeResult 一台副机这一轮同步的结果:网络部分并发跑,落库部分回到主协程串行做。
@@ -667,10 +722,12 @@ type nodeResult struct {
 }
 
 func (h *Hub) tick() {
+	h.syncMu.Lock()
+	defer h.syncMu.Unlock()
 	if h.d.IsNode() {
 		return
 	}
-	snap, err := BuildSnapshot(h.d.DB, h.d.Setting)
+	snap, err := h.buildPushSnapshot()
 	if err != nil {
 		logger.Warning("构造同步快照失败: ", err)
 		return
@@ -682,7 +739,11 @@ func (h *Hub) tick() {
 
 	// 各副机的网络往返并发进行:一台慢或失联的机器不该让后面的机器等它超时。
 	// 同一台机器内部仍是 推送 → 拉报告 的顺序;数据库写入留到下面串行做,不给 SQLite 添堵。
-	nodes := h.remoteNodes()
+	nodes, err := h.remoteNodes()
+	if err != nil {
+		logger.Warning("读取副机列表失败，保留已有缓存: ", err)
+		return
+	}
 	live := map[uint]bool{}
 	results := make([]*nodeResult, len(nodes))
 	var wg sync.WaitGroup
@@ -846,7 +907,12 @@ func (h *Hub) distributeIPs(nodes []model.Node) {
 	remote := h.remoteForDeviceLimits()
 	// 需要跨机并集的用户:自己有设备数限制的,以及所属代理有设备池的(池按名下所有用户的 IP 并集判定)
 	var users []model.User
-	h.d.DB.Where("device_limit > 0 OR reseller_id IN (SELECT id FROM resellers WHERE device_limit > 0)").Find(&users)
+	if err := h.d.DB.Where("device_limit > 0 OR reseller_id IN (SELECT id FROM resellers WHERE device_limit > 0)").Find(&users).Error; err != nil {
+		// 数据库瞬时失败时不能把外部设备表当成空表下发，否则会暂时放宽
+		// 设备限制并与副机恢复后的连接状态失去一致。
+		logger.Warning("读取跨机设备限制用户失败,保留现有设备租约: ", err)
+		return
+	}
 	if len(users) == 0 {
 		if h.d.SetExternalIPs != nil {
 			h.d.SetExternalIPs(map[string][]string{})
@@ -899,7 +965,16 @@ func (h *Hub) distributeIPs(nodes []model.Node) {
 		wg.Add(1)
 		go func(n model.Node, ext map[string][]string) {
 			defer wg.Done()
-			_ = h.request(n, "POST", "external-ips", ext, nil)
+			var ack struct {
+				OK string `json:"ok"`
+			}
+			if err := h.request(n, "POST", "external-ips", ext, &ack); err != nil {
+				logger.Warning("向副机 ", n.Name, " 下发外部设备租约失败: ", err)
+				return
+			}
+			if !strings.EqualFold(ack.OK, "1") && !strings.EqualFold(ack.OK, "true") {
+				logger.Warning("副机 ", n.Name, " 未确认外部设备租约")
+			}
 		}(n, ext)
 	}
 }
@@ -979,11 +1054,18 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 func (h *Hub) push(n model.Node, snap Snapshot) error {
 	snap.SelfNodeId = n.Id
 	var out struct {
-		OK       string `json:"ok"`
-		Revision string `json:"revision"`
+		OK       json.RawMessage `json:"ok"`
+		Revision string          `json:"revision"`
 	}
 	if err := h.request(n, "POST", "apply", snap, &out); err != nil {
 		return err
+	}
+	ok := strings.Trim(strings.TrimSpace(string(out.OK)), `"`)
+	if ok != "1" && !strings.EqualFold(ok, "true") {
+		return fmt.Errorf("副机未确认应用修订 %s (ok=%q)", snap.Revision, ok)
+	}
+	if out.Revision != snap.Revision {
+		return fmt.Errorf("副机确认的修订号不匹配:期望 %s,收到 %s", snap.Revision, out.Revision)
 	}
 	h.mu.Lock()
 	h.pushed[n.Id] = snap.Revision
@@ -1010,12 +1092,93 @@ func (h *Hub) Ping(n model.Node) (map[string]interface{}, error) {
 
 // PushNow 立即向某副机推送当前配置。
 func (h *Hub) PushNow(n model.Node) error {
-	snap, err := BuildSnapshot(h.d.DB, h.d.Setting)
+	h.syncMu.Lock()
+	defer h.syncMu.Unlock()
+	snap, err := h.buildPushSnapshot()
 	if err != nil {
 		return err
 	}
 	snap.Version, snap.MinNode = h.d.Version, MinNodeVersion
 	return h.push(n, snap)
+}
+
+// buildPushSnapshot 在 syncMu 内调用。序号持久化，进程重启后也不会重用旧序号。
+func (h *Hub) buildPushSnapshot() (Snapshot, error) {
+	snap, err := BuildSnapshot(h.d.DB, h.d.Setting)
+	if err != nil {
+		return snap, err
+	}
+	err = h.d.DB.Transaction(func(tx *gorm.DB) error {
+		var raw string
+		if err := tx.Model(&model.Setting{}).Select("value").Where("key = ?", "hubPushSequence").Scan(&raw).Error; err != nil {
+			return err
+		}
+		seq, err := strconv.ParseUint(raw, 10, 64)
+		if raw != "" && err != nil {
+			return fmt.Errorf("读取主机推送序号: %w", err)
+		}
+		var previousRevision string
+		if err := tx.Model(&model.Setting{}).Select("value").Where("key = ?", "hubPushRevision").Scan(&previousRevision).Error; err != nil {
+			return err
+		}
+		// The content revision, rather than the five-second polling tick, is
+		// what orders snapshots. Reuse the same durable sequence while the
+		// configuration is unchanged; this avoids a SQLite write every tick and
+		// still gives every newly changed revision a strictly newer sequence.
+		if raw != "" && previousRevision == snap.Revision {
+			snap.Sequence = seq
+			return nil
+		}
+		if seq == ^uint64(0) {
+			return errors.New("主机推送序号已耗尽")
+		}
+		snap.Sequence = seq + 1
+		if err := upsertSetting(tx, "hubPushSequence", strconv.FormatUint(snap.Sequence, 10)); err != nil {
+			return err
+		}
+		return upsertSetting(tx, "hubPushRevision", snap.Revision)
+	})
+	return snap, err
+}
+
+// SyncNow 等待当前快照在所有启用副机上得到实际应用 ACK。
+func (h *Hub) SyncNow() error {
+	h.syncMu.Lock()
+	defer h.syncMu.Unlock()
+	if h.d.IsNode() {
+		return nil
+	}
+	snap, err := h.buildPushSnapshot()
+	if err != nil {
+		return err
+	}
+	snap.Version, snap.MinNode = h.d.Version, MinNodeVersion
+	var nodes []model.Node
+	if err := h.d.DB.Where("enabled = ? AND is_local = ?", true, false).Find(&nodes).Error; err != nil {
+		return err
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(nodes))
+	for _, n := range nodes {
+		wg.Add(1)
+		go func(n model.Node) {
+			defer wg.Done()
+			if n.ApiUrl == "" || n.Token == "" {
+				errs <- fmt.Errorf("副机 %s 未配置 API 地址或令牌", n.Name)
+				return
+			}
+			if err := h.push(n, snap); err != nil {
+				errs <- fmt.Errorf("副机 %s: %w", n.Name, err)
+			}
+		}(n)
+	}
+	wg.Wait()
+	close(errs)
+	var all []error
+	for e := range errs {
+		all = append(all, e)
+	}
+	return errors.Join(all...)
 }
 
 // KickResult 一次踢线的结果:合计 + 各机明细。本机那一行由 runner 填(Local=true),这里只管副机。
@@ -1088,7 +1251,10 @@ func (h *Hub) KickUser(name string) KickResult {
 }
 
 func (h *Hub) kickRemote(name string) KickResult {
-	nodes := h.remoteNodes()
+	nodes, err := h.remoteNodes()
+	if err != nil {
+		return KickResult{Failed: 1, Servers: []KickServer{{Error: "读取副机列表失败: " + err.Error()}}}
+	}
 	results := make([]KickServer, len(nodes))
 	var wg sync.WaitGroup
 	for i, n := range nodes {

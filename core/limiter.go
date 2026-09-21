@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -39,7 +40,10 @@ type Limiter struct {
 	// externalAt 上一次收到外部 IP 的时间。主机失联(副机)/ 副机失联(主机)时这份表会一直冻结,
 	// 陈旧的 IP 不能再占名额,更不能拿它去断掉回来的老连接:超过 externalGrace 没刷新就当没有。
 	externalAt int64
-	idleWindow time.Duration // 无流量多久判定该 IP 下线并释放名额
+	// reconciledRejects 是本轮跨机并集实际超额的设备；外部租约过期时一并失效。
+	reconciledRejects map[string]map[string]bool
+	deviceGen         atomic.Uint64
+	idleWindow        time.Duration // 无流量多久判定该 IP 下线并释放名额
 	// gen 策略代数:SetLimits 每次加一。在线连接靠它判断"用户所属的代理池有没有变",没变就不抢锁。
 	gen atomic.Uint64
 
@@ -52,7 +56,7 @@ type Limiter struct {
 }
 
 // SetExternalIPs 全量替换"其他机器上在线的 IP"(跨机设备数并集判定)。
-func (l *Limiter) SetExternalIPs(m map[string][]string) {
+func (l *Limiter) SetExternalIPs(m map[string][]string) map[string][]string {
 	ext := make(map[string]map[string]bool, len(m))
 	for user, ips := range m {
 		set := make(map[string]bool, len(ips))
@@ -64,7 +68,97 @@ func (l *Limiter) SetExternalIPs(m map[string][]string) {
 	l.mu.Lock()
 	l.external = ext
 	l.externalAt = time.Now().Unix()
+	victims := l.reconcileDevicesLocked(l.externalAt)
+	l.deviceGen.Add(1)
 	l.mu.Unlock()
+	return victims
+}
+
+// ReconcileDevices 在用户/代理设备策略热更新后重新收敛当前在线设备。
+// 返回值只包含本机需要断开的实际超额设备；调用方负责关闭对应连接。
+func (l *Limiter) ReconcileDevices() map[string][]string {
+	l.mu.Lock()
+	victims := l.reconcileDevicesLocked(time.Now().Unix())
+	l.deviceGen.Add(1)
+	l.mu.Unlock()
+	return victims
+}
+
+// reconcileDevicesLocked 收敛失联后重新合并的设备集合。各机按同一 IP 顺序选出
+// 超额设备，避免两台机器各自保留自己的设备、永久超限；未超额的设备不会被踢。
+// 只处理活跃设备记录，副机配置和线路完全不在这里修改。
+func (l *Limiter) reconcileDevicesLocked(now int64) map[string][]string {
+	all := make(map[string]map[string]bool, len(l.limits))
+	l.reconciledRejects = map[string]map[string]bool{}
+	for user := range l.limits {
+		l.pruneLocked(user, now)
+		set := map[string]bool{}
+		for ip := range l.ips[user] {
+			set[ip] = true
+		}
+		for ip := range l.externalLocked(user, now) {
+			set[ip] = true
+		}
+		all[user] = set
+		if limit := l.limits[user].deviceLimit; limit > 0 {
+			for _, ip := range excessDevices(set, limit) {
+				l.rejectDeviceLocked(user, ip)
+				delete(set, ip)
+			}
+		}
+	}
+	for group, lim := range l.groups {
+		if lim.deviceLimit <= 0 {
+			continue
+		}
+		set := map[string]bool{}
+		for _, user := range l.groupUsers[group] {
+			for ip := range all[user] {
+				set[ip] = true
+			}
+		}
+		for _, ip := range excessDevices(set, lim.deviceLimit) {
+			for _, user := range l.groupUsers[group] {
+				if all[user][ip] {
+					l.rejectDeviceLocked(user, ip)
+				}
+			}
+		}
+	}
+	victims := map[string][]string{}
+	for user, ips := range l.reconciledRejects {
+		for ip := range ips {
+			if _, local := l.ips[user][ip]; local {
+				victims[user] = append(victims[user], ip)
+				delete(l.ips[user], ip)
+			}
+		}
+		sort.Strings(victims[user])
+	}
+	return victims
+}
+
+func excessDevices(set map[string]bool, limit int) []string {
+	if len(set) <= limit {
+		return nil
+	}
+	ips := make([]string, 0, len(set))
+	for ip := range set {
+		ips = append(ips, ip)
+	}
+	sort.Strings(ips)
+	return ips[limit:]
+}
+
+func (l *Limiter) rejectDeviceLocked(user, ip string) {
+	if l.reconciledRejects[user] == nil {
+		l.reconciledRejects[user] = map[string]bool{}
+	}
+	l.reconciledRejects[user][ip] = true
+}
+
+func (l *Limiter) deviceRejectedLocked(user, ip string, now int64) bool {
+	return now-l.externalAt <= externalGrace && l.reconciledRejects[user][ip]
 }
 
 // externalGrace 外部 IP 多久没刷新就作废(秒)。主机每 5 秒下发一次;这里给足几分钟,短暂抖动不误伤,
@@ -217,6 +311,9 @@ func (l *Limiter) AllowConn(user, ip string) bool {
 // allowConnLocked applies the device limits for a connection or for a device
 // that became active again after the idle window. The caller must hold l.mu.
 func (l *Limiter) allowConnLocked(user, ip string, now int64) bool {
+	if l.deviceRejectedLocked(user, ip, now) {
+		return false
+	}
 	limit := l.limits[user].deviceLimit
 	l.pruneLocked(user, now)
 	active := l.ips[user]
@@ -332,6 +429,9 @@ func (l *Limiter) touch(user, ip string, now int64) bool {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.deviceRejectedLocked(user, ip, now) {
+		return false
+	}
 	active := l.ips[user]
 	if active != nil {
 		l.pruneLocked(user, now)
@@ -420,14 +520,19 @@ func (l *Limiter) wrapPacketConn(conn N.PacketConn, user, ip string) N.PacketCon
 
 // keepaliveFor 返回一个"该设备刚有流量"的回调,按秒节流以免每次读写都抢锁。
 func (l *Limiter) keepaliveFor(user, ip string) func() bool {
-	var last int64
+	var last, generation atomic.Int64
 	return func() bool {
 		now := time.Now().Unix()
-		if now == atomic.LoadInt64(&last) {
+		gen := int64(l.deviceGen.Load())
+		if now == last.Load() && gen == generation.Load() {
 			return true
 		}
-		atomic.StoreInt64(&last, now)
-		return l.touch(user, ip, now)
+		if !l.touch(user, ip, now) {
+			return false
+		}
+		generation.Store(gen)
+		last.Store(now)
+		return true
 	}
 }
 

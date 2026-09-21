@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -86,13 +87,19 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 		if req.Method != "cloudflare" {
 			req.Method = "http"
 		}
-		s.saveSettings(map[string]string{
+		if err := s.saveSettings(map[string]string{
 			"acmeDomain": req.Domain, "acmeEmail": strings.TrimSpace(req.Email), "acmeMethod": req.Method,
 			"acmeStaging": boolStr(req.Staging), "acmeAutoRenew": boolStr(req.AutoRenew),
 			"acmeApplyPanel": boolStr(req.ApplyPanel), "acmeApplySub": boolStr(req.ApplySub),
-		})
+		}); err != nil {
+			badRequest(w, fmt.Errorf("保存证书设置失败: %w", err))
+			return
+		}
 		if strings.TrimSpace(req.CfToken) != "" { // 留空保留原 Token
-			s.saveSettings(map[string]string{"acmeCfToken": strings.TrimSpace(req.CfToken)})
+			if err := s.saveSettings(map[string]string{"acmeCfToken": strings.TrimSpace(req.CfToken)}); err != nil {
+				badRequest(w, fmt.Errorf("保存 Cloudflare Token 失败: %w", err))
+				return
+			}
 		}
 		if err := s.run.IssueCert(); err != nil {
 			badRequest(w, err)
@@ -119,7 +126,6 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		s.saveSettings(map[string]string{"acmeApplyPanel": boolStr(req.ApplyPanel), "acmeApplySub": boolStr(req.ApplySub)})
 		s.audit(r, "cert", "selfsign", hosts)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	case "external":
@@ -138,7 +144,6 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		s.saveSettings(map[string]string{"acmeApplyPanel": boolStr(req.ApplyPanel), "acmeApplySub": boolStr(req.ApplySub)})
 		s.audit(r, "cert", "external", req.CertFile)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	case "apply":
@@ -169,10 +174,8 @@ func boolStr(b bool) string {
 	return "false"
 }
 
-func (s *Server) saveSettings(kv map[string]string) {
-	for k, v := range kv {
-		s.run.SetSetting(k, v)
-	}
+func (s *Server) saveSettings(kv map[string]string) error {
+	return s.run.SetSettings(kv)
 }
 
 // ---- 备份 ----

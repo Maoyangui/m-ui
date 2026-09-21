@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -58,6 +59,7 @@ type Runner struct {
 	hub          *hub.Hub
 	dbPath       string
 	cert         certState
+	certOpMu     sync.Mutex        // 串行化签发、切换来源与套用目标
 	applied      map[string]string // 数据面当前生效的出站(tag → JSON),供上游热更新做差异
 	appliedRaw   []byte            // 数据面当前生效的完整配置,渲染结果相同则不重启
 	pendingStats []model.Stats     // 旧数据面关闭后暂时无法落库的流量,下次启动继续记账
@@ -153,7 +155,7 @@ func New(dbPath string) (*Runner, error) {
 		LocalRatio:  r.localRatio,
 		Forget:      r.notifier.Forget,
 		Rules:       r.RulesNow,
-		ApplyLimits: r.applyLimits,
+		ApplyLimits: func() { _ = r.applyLimits() },
 	})
 	r.monitor = monitor.New(monitor.Deps{
 		UsedUpstreams: r.usedUpstreams,
@@ -195,7 +197,10 @@ func (r *Runner) Hub() *hub.Hub { return r.hub }
 // SetExternalIPs 下发其他机器上在线的 IP 给本机限制器(跨机设备数)。
 func (r *Runner) SetExternalIPs(m map[string][]string) {
 	if box := r.core.GetInstance(); box != nil {
-		box.Limiter().SetExternalIPs(m)
+		victims := box.Limiter().SetExternalIPs(m)
+		if n := box.ConnTracker().CloseConnByDevices(victims); n > 0 {
+			logger.Info("跨机设备记录恢复后,断开实际超额设备的 ", n, " 条连接")
+		}
 	}
 }
 
@@ -364,22 +369,35 @@ func (r *Runner) nodeCert() render.NodeCert {
 }
 
 // Start 渲染配置并启动 sing-box,随后应用限速/设备数策略。
-func (r *Runner) Start() error {
+func (r *Runner) Start() (err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	defer func() { r.noteReload("启动", err) }()
 	raw, err := render.BuildConfig(r.db, r.nodeCert())
 	if err != nil {
 		return fmt.Errorf("渲染配置: %w", err)
 	}
 	if err := r.core.Start(raw); err != nil {
-		r.noteReload("启动", err)
 		return fmt.Errorf("启动 sing-box: %w", err)
 	}
 	r.restorePendingStats()
 	r.applied, _ = outboundsOf(raw)
 	r.appliedRaw = raw
-	r.applyLimits()
+	if err := r.applyLimits(); err != nil {
+		box := r.core.GetInstance()
+		_ = r.core.Stop()
+		if box != nil {
+			if r.jobs != nil {
+				_ = r.jobs.FlushStatsBox(box)
+				_ = r.jobs.FlushStatsBox(box)
+			}
+			r.pendingStats = append(r.pendingStats, *box.StatsTracker().SnapshotStats()...)
+		}
+		r.applied, r.appliedRaw = nil, nil
+		return err
+	}
 	r.applyPortHopping()
 	r.applyLogLevel()
-	r.noteReload("启动", nil)
 	return nil
 }
 
@@ -531,7 +549,22 @@ func (r *Runner) ReloadUsers() (err error) {
 	if !r.core.IsRunning() {
 		return nil
 	}
-	defer func() { r.noteReload("热更新用户", err) }()
+	defer func() {
+		if err != nil {
+			// 部分入站可能已经更新，不能把失败吞掉；持久待重试标记让
+			// 后台按数据库最新用户表继续收敛，直到所有入站成功。
+			if markerErr := r.setSetting("userReloadPending", "true"); markerErr != nil {
+				logger.Error("记录用户热更新待重试状态失败: ", markerErr)
+			}
+		} else {
+			if markerErr := r.setSetting("userReloadPending", ""); markerErr != nil {
+				// 数据面已经处理,但清理标记失败;返回错误让调用方保留
+				// 重试语义,不会把持久状态误报成已收敛。
+				err = fmt.Errorf("清理用户热更新状态失败: %w", markerErr)
+			}
+		}
+		r.noteReload("热更新用户", err)
+	}()
 	raw, err := render.BuildConfig(r.db, r.nodeCert())
 	if err != nil {
 		return fmt.Errorf("渲染配置: %w", err)
@@ -544,6 +577,74 @@ func (r *Runner) ReloadUsers() (err error) {
 		r.appliedRaw = raw
 	}
 	return nil
+}
+
+func (r *Runner) userReloadLoop(stop <-chan struct{}) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			if r.setting("userReloadPending") == "true" {
+				if err := r.ReloadUsers(); err != nil {
+					logger.Warning("重试用户热更新: ", err)
+				}
+			}
+		}
+	}
+}
+
+// ReloadUsersSecure 用于撤销凭据等不能继续接受旧用户表的变更。
+// 重载失败时停止数据面并保留重试标记，绝不回滚成已撤销的凭据。
+func (r *Runner) ReloadUsersSecure() (err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	defer func() { r.noteReload("撤销凭据", err) }()
+	if markerErr := r.setSetting("secureReloadPending", "true"); markerErr != nil {
+		return fmt.Errorf("记录凭据撤销待重试状态: %w", markerErr)
+	}
+	raw, err := render.BuildConfig(r.db, r.nodeCert())
+	if err == nil {
+		if r.core.IsRunning() {
+			err = r.reloadUsersLocked(raw)
+		} else {
+			err = r.reloadAllLocked(raw)
+		}
+	}
+	if err != nil {
+		old := r.core.GetInstance()
+		_ = r.core.Stop()
+		if old != nil && r.jobs != nil && !r.jobs.FlushStatsBox(old) {
+			r.pendingStats = append(r.pendingStats, *old.StatsTracker().SnapshotStats()...)
+		}
+		return fmt.Errorf("凭据撤销未完成，已停止本机数据面并保留自动重试: %w", err)
+	}
+	if r.appliedRaw != nil && onlyUsersDiffer(r.appliedRaw, raw) {
+		r.appliedRaw = raw
+	}
+	if markerErr := r.setSetting("secureReloadPending", ""); markerErr != nil {
+		return fmt.Errorf("清理凭据撤销状态失败: %w", markerErr)
+	}
+	return nil
+}
+
+func (r *Runner) secureReloadLoop(stop <-chan struct{}) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			if r.setting("secureReloadPending") == "true" {
+				if err := r.ReloadUsersSecure(); err != nil {
+					logger.Warning("重试凭据撤销: ", err)
+				}
+			}
+		}
+	}
 }
 
 // reloadUsersLocked 按给定配置热替换各入站的用户表(调用方持 mu,数据面在运行)。
@@ -574,10 +675,14 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 	box := r.core.GetInstance()
 	keepAll := map[string]map[string]struct{}{} // 入站 → 仍然有效的用户名
 	sessionsClosed := 0                         // 随换表关掉的整条会话数(被停用 / 换了凭据的用户)
+	var firstErr error
 	for _, inbound := range cfg.Inbounds {
 		handled, closed, err := r.core.UpdateInboundUsers(inbound)
 		if err != nil {
 			logger.Warning("热更新入站用户失败: ", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("热更新入站用户: %w", err)
+			}
 			continue
 		}
 		sessionsClosed += closed
@@ -591,7 +696,16 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 				Username string `json:"username"`
 			} `json:"users"`
 		}
-		if json.Unmarshal(inbound, &meta) != nil || meta.Tag == "" {
+		if err := json.Unmarshal(inbound, &meta); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("解析入站用户配置: %w", err)
+			}
+			continue
+		}
+		if meta.Tag == "" {
+			if firstErr == nil {
+				firstErr = errors.New("入站用户配置缺少 tag")
+			}
 			continue
 		}
 		if !handled {
@@ -602,11 +716,17 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 			}
 			if err := r.core.RemoveInbound(meta.Tag); err != nil && err != os.ErrInvalid {
 				logger.Warning("重建入站 ", meta.Tag, " 失败(移除): ", err)
+				if firstErr == nil {
+					firstErr = fmt.Errorf("重建入站 %s(移除): %w", meta.Tag, err)
+				}
 				continue
 			}
 			box.ConnTracker().CloseConnByInbound(meta.Tag)
 			if err := r.core.AddInbound(inbound); err != nil {
 				logger.Warning("重建入站 ", meta.Tag, " 失败(添加): ", err)
+				if firstErr == nil {
+					firstErr = fmt.Errorf("重建入站 %s(添加): %w", meta.Tag, err)
+				}
 			}
 			continue
 		}
@@ -629,8 +749,7 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 		// 数据面日志默认只到 warn,这一句必须从面板日志出去:线上出事(比如每次推送都把所有人踢掉)只能靠它看出来
 		logger.Info("热更新用户:断开 ", sessionsClosed, " 条会话(被停用 / 撤销凭据的用户)")
 	}
-	r.applyLimits()
-	return nil
+	return errors.Join(firstErr, r.applyLimits())
 }
 
 // ReloadAll 重建整个数据面(线路增删、端口/协议变更、路由或证书变化时使用)。
@@ -654,21 +773,30 @@ func (r *Runner) ReloadAllForce() (err error) {
 	if err != nil {
 		return fmt.Errorf("渲染配置: %w", err)
 	}
-	r.appliedRaw = nil
-	return r.reloadAllLocked(raw)
+	return r.reloadAllLockedForce(raw)
 }
 
 // reloadAllLocked 用给定配置重启数据面(调用方持 mu)。渲染结果与当前生效配置完全相同则不重启。
 func (r *Runner) reloadAllLocked(raw []byte) error {
-	if r.core.IsRunning() && r.appliedRaw != nil && bytes.Equal(r.appliedRaw, raw) {
-		r.applyLimits()
+	return r.reloadAllLockedWithForce(raw, false)
+}
+
+func (r *Runner) reloadAllLockedForce(raw []byte) error {
+	return r.reloadAllLockedWithForce(raw, true)
+}
+
+func (r *Runner) reloadAllLockedWithForce(raw []byte, force bool) error {
+	if !force && r.core.IsRunning() && r.appliedRaw != nil && bytes.Equal(r.appliedRaw, raw) {
+		if err := r.applyLimits(); err != nil {
+			return err
+		}
 		r.applyPortHopping() // 端口跳跃等面板侧参数不进 sing-box 配置,即使无需重启也要同步
 		logger.Info("配置无变化,数据面无需重启")
 		return nil
 	}
 	// 只有用户表变了(线路、上游、证书、路由都没动):热替换用户即可,绝不为此重启数据面断掉所有人。
 	// 副机整表替换后判断"线路是否变化"曾经误报过,这里再兜一层,不依赖调用方判断得对不对。
-	if r.core.IsRunning() && r.appliedRaw != nil && onlyUsersDiffer(r.appliedRaw, raw) {
+	if !force && r.core.IsRunning() && r.appliedRaw != nil && onlyUsersDiffer(r.appliedRaw, raw) {
 		if err := r.reloadUsersLocked(raw); err == nil {
 			r.appliedRaw = raw
 			r.applyPortHopping()
@@ -709,7 +837,11 @@ func (r *Runner) reloadAllLocked(raw []byte) error {
 			if err2 := r.core.Start(prev); err2 == nil {
 				r.restorePendingStats()
 				r.applied, r.appliedRaw = outboundsOfSafe(prev), prev
-				r.applyLimits()
+				if limErr := r.applyLimits(); limErr != nil {
+					_ = r.core.Stop()
+					r.applied, r.appliedRaw = nil, nil
+					return fmt.Errorf("新配置启动失败，回滚后的限速策略恢复失败: %w (原错误: %v)", limErr, err)
+				}
 				r.applyPortHopping()
 				r.applyLogLevel()
 				logger.Warning("新配置启动失败,已回滚到上一份可用配置: ", err)
@@ -722,7 +854,38 @@ func (r *Runner) reloadAllLocked(raw []byte) error {
 	r.restorePendingStats()
 	r.applied, _ = outboundsOf(raw)
 	r.appliedRaw = raw
-	r.applyLimits()
+	if err := r.applyLimits(); err != nil {
+		// 配置虽然已经启动,但没有成功应用设备数/限速策略时不能继续提供
+		// 一个策略为空或不确定的数据面。先把新实例的最后一批统计冲刷掉,
+		// 再恢复旧配置;旧配置也无法恢复完整策略时保持停止状态。
+		newBox := r.core.GetInstance()
+		_ = r.core.Stop()
+		if newBox != nil && r.jobs != nil {
+			ok1 := r.jobs.FlushStatsBox(newBox)
+			ok2 := r.jobs.FlushStatsBox(newBox)
+			if !ok1 || !ok2 {
+				r.pendingStats = append(r.pendingStats, *newBox.StatsTracker().SnapshotStats()...)
+			}
+		}
+		r.applied, r.appliedRaw = nil, nil
+		if prev != nil {
+			if err2 := r.core.Start(prev); err2 == nil {
+				r.restorePendingStats()
+				r.applied, r.appliedRaw = outboundsOfSafe(prev), prev
+				if limErr := r.applyLimits(); limErr == nil {
+					r.applyPortHopping()
+					r.applyLogLevel()
+					logger.Warning("新配置策略应用失败,已回滚到上一份可用配置: ", err)
+					return fmt.Errorf("新配置策略应用失败,已回滚到上一份配置: %w", err)
+				} else {
+					_ = r.core.Stop()
+					r.applied, r.appliedRaw = nil, nil
+					return fmt.Errorf("新配置策略应用失败，回滚后的限速策略恢复失败: %w (原错误: %v)", limErr, err)
+				}
+			}
+		}
+		return fmt.Errorf("新配置策略应用失败且旧配置回滚失败: %w", err)
+	}
 	r.applyPortHopping()
 	r.applyLogLevel()
 	logger.Info("数据面已重载")
@@ -876,28 +1039,42 @@ func (r *Runner) TestUpstream(name, testURL string) core.CheckOutboundResult {
 func (r *Runner) NodeCert() render.NodeCert { return r.nodeCert() }
 
 // applyLimits 把用户表里的限速与设备数策略下发给数据面。
-func (r *Runner) applyLimits() {
+func (r *Runner) applyLimits() error {
 	var users []model.User
 	if err := r.db.Find(&users).Error; err != nil {
 		logger.Warning("读取用户限速策略失败: ", err)
-		return
+		return fmt.Errorf("读取用户限速策略: %w", err)
 	}
 	box := r.core.GetInstance()
 	if box == nil {
-		return
+		return nil
 	}
 	var resellers []model.Reseller
-	r.db.Find(&resellers)
+	if err := r.db.Find(&resellers).Error; err != nil {
+		// 查询失败时保留数据面当前策略；空切片会被 SetGroups 清空代理池，
+		// 反而把一次短暂的数据库抖动变成限速绕过。
+		logger.Warning("读取代理限速策略失败,保留现有限制: ", err)
+		return fmt.Errorf("读取代理限速策略: %w", err)
+	}
 	// 规则限速:生效中的状态叠加到用户自己的限速上(只升不降 / 覆盖,多条取最严);
 	// 到期的不算,主机失联时副机也能按到期时间自行放开
 	var states []model.LimitState
-	r.db.Find(&states)
+	if err := r.db.Find(&states).Error; err != nil {
+		logger.Warning("读取限速规则状态失败,保留现有限制: ", err)
+		return fmt.Errorf("读取限速规则状态: %w", err)
+	}
 	specs, groups := limitSpecs(users, resellers, rules.Active(states, time.Now().Unix()))
 	box.Limiter().SetGroups(groups)
 	box.Limiter().SetLimits(specs)
+	if victims := box.Limiter().ReconcileDevices(); len(victims) > 0 {
+		if n := box.ConnTracker().CloseConnByDevices(victims); n > 0 {
+			logger.Info("设备策略更新后,断开实际超额设备的 ", n, " 条连接")
+		}
+	}
 	if len(specs) > 0 || len(groups) > 0 {
 		logger.Info("已应用 ", len(specs), " 个用户的限速/设备数策略,", len(groups), " 个代理池")
 	}
+	return nil
 }
 
 // restorePendingStats moves traffic that could not be committed while an old
@@ -1039,6 +1216,8 @@ func (r *Runner) GroupState() map[string]hub.GroupState {
 }
 
 func (r *Runner) Stop() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.core.Stop(); err != nil {
 		logger.Warning("停止 sing-box: ", err)
 	}
@@ -1173,7 +1352,7 @@ func Run(dbPath string) error {
 		fn   func(<-chan struct{})
 	}{
 		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"定时备份", r.backupLoop},
-		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop},
+		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop}, {"凭据撤销重试", r.secureReloadLoop}, {"用户热更新重试", r.userReloadLoop},
 	} {
 		go keepRunning(l.name, l.fn, stopCheckpoint)
 	}

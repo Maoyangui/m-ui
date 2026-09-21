@@ -233,10 +233,8 @@ func (s *Server) handleUserPlan(w http.ResponseWriter, r *http.Request, u model.
 // applyUserPlan 把套餐套到已有用户上并落库(含套餐指定的线路);调用方负责审计与热更新。
 func (s *Server) applyUserPlan(u *model.User, p model.Plan, mode string) error {
 	refs := applyPlanRefs(u, p, mode, time.Now().Unix())
-	if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).Select(
-		"volume", "expiry", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "next_reset",
-		"total_up", "total_down", "up", "down", "enabled", "disabled_reason",
-	).Updates(*u).Error; err != nil {
+	if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).
+		Updates(updateUserFields(*u, mode != "extend")).Error; err != nil {
 		return err
 	}
 	if mode != "extend" {
@@ -291,13 +289,34 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 	if req.StartIndex < 1 {
 		req.StartIndex = 1
 	}
-
 	now := time.Now().Unix()
 	// 线路范围整批一样,事务外整理一次;套餐带线路时以套餐的为准
 	baseRefs := s.normalizeRefs(lineRefsOf(req.LineIds, req.LineRefs))
 	var planRefsN []model.LineRef
 	if plan != nil {
 		planRefsN = s.normalizeRefs(planRefs(*plan))
+	}
+	rid := scope(r)
+	if rid > 0 {
+		s.resellerUserMu.Lock()
+		defer s.resellerUserMu.Unlock()
+		if plan != nil && plan.ResellerId != rid {
+			badRequest(w, errors.New("套餐不存在"))
+			return
+		}
+		if len(baseRefs) == 0 {
+			baseRefs = s.resellerLineRefs(rid)
+		}
+		if err := s.checkRefsGranted(rid, baseRefs); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if plan != nil {
+			if err := s.checkRefsGranted(rid, planRefsN); err != nil {
+				badRequest(w, err)
+				return
+			}
+		}
 	}
 	type created struct {
 		Name string `json:"name"`
@@ -328,6 +347,11 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 			if plan != nil {
 				if applyPlanRefs(&u, *plan, "new", now) != nil {
 					refs = planRefsN
+				}
+			}
+			if rid > 0 {
+				if err := s.prepareResellerUser(rid, &u, refs); err != nil {
+					return err
 				}
 			}
 			if err := tx.Create(&u).Error; err != nil {

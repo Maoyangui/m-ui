@@ -760,6 +760,8 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		s.applySubTokenPolicy(&p.User) // 设置里关掉"用用户名作订阅地址"时,发一个随机地址
 		refs := lineRefsOf(p.LineIds, p.LineRefs)
 		if rid := scope(r); rid > 0 {
+			s.resellerUserMu.Lock()
+			defer s.resellerUserMu.Unlock()
 			if err := s.prepareResellerUser(rid, &p.User, refs); err != nil {
 				badRequest(w, err)
 				return

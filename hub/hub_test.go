@@ -103,6 +103,11 @@ func TestSnapshotRevisionAndApply(t *testing.T) {
 	if title != "maoyang" {
 		t.Fatal("同步设置未写入")
 	}
+	var pending string
+	dst.Raw("SELECT value FROM settings WHERE key='hubReloadPending'").Scan(&pending)
+	if pending != s4.Revision {
+		t.Fatalf("快照和待重载修订应在同一事务保存: %q", pending)
+	}
 	// 再次应用相同快照:线路与上游都未变
 	changed, upsChanged, err = ApplySnapshot(dst, s4)
 	if err != nil || changed || upsChanged {
@@ -115,6 +120,25 @@ func TestSnapshotRevisionAndApply(t *testing.T) {
 	changed, upsChanged, err = ApplySnapshot(dst, s5)
 	if err != nil || changed || !upsChanged {
 		t.Fatalf("仅上游变化应只标记上游: %v lines=%v ups=%v", err, changed, upsChanged)
+	}
+}
+
+func TestApplySnapshotKeepsLegacySequenceCompatibility(t *testing.T) {
+	db := openDB(t, "legacy-sequence.db").DB
+	db.Create(&model.Setting{Key: "hubSnapshotSequence", Value: "7"})
+	// A pre-sequence master omits the field, which decodes as zero. It must
+	// remain applicable during a rolling upgrade and must not erase the newer
+	// node's durable sequence watermark.
+	_, _, err := ApplySnapshot(db, Snapshot{Revision: "legacy-revision"})
+	if err != nil {
+		t.Fatalf("旧格式快照在滚动升级期间应可应用: %v", err)
+	}
+	var seq string
+	if err := db.Raw("SELECT value FROM settings WHERE key = ?", "hubSnapshotSequence").Scan(&seq).Error; err != nil {
+		t.Fatal(err)
+	}
+	if seq != "7" {
+		t.Fatalf("旧格式快照不应覆盖序号水位: got %q", seq)
 	}
 }
 
@@ -436,7 +460,9 @@ func newFakeNode(t *testing.T, delay time.Duration, failRep bool, counters []mod
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/agent/apply"):
 			atomic.AddInt32(&f.applies, 1)
-			w.Write([]byte(`{"ok":"1","revision":"x"}`))
+			var snap Snapshot
+			_ = json.NewDecoder(r.Body).Decode(&snap)
+			json.NewEncoder(w).Encode(map[string]string{"ok": "1", "revision": snap.Revision})
 		case strings.HasSuffix(r.URL.Path, "/agent/report"):
 			time.Sleep(f.delay)
 			if f.failRep {
