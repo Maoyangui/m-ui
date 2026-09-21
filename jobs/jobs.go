@@ -202,12 +202,17 @@ func (s *Scheduler) runStatsResult() (ok bool) {
 }
 
 func (s *Scheduler) runStatsForBox(box *core.Box) (ok bool) {
-	s.statsMu.Lock()
-	defer s.statsMu.Unlock()
 	if box == nil {
 		return true
 	}
-	stats := box.StatsTracker().SnapshotStats()
+	return s.runStatsTracker(box.StatsTracker())
+}
+
+// runStatsTracker 收一轮账:快照 → 落库 → 按快照原值从计数器里扣掉。拆出来是为了不起数据面也能测。
+func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
+	s.statsMu.Lock()
+	defer s.statsMu.Unlock()
+	stats := tracker.SnapshotStats()
 	now := time.Now().Unix()
 
 	type traffic struct{ up, down int64 }
@@ -301,7 +306,9 @@ func (s *Scheduler) runStatsForBox(box *core.Box) (ok bool) {
 			return nil
 		}
 		bucket := now - now%bucketSeconds
-		rows := *stats
+		// 复制一份再按倍率改写:*stats 之后要原样交给 ConsumeStats 扣计数器,就地改会把缩放后的值扣进去 ——
+		// 本机倍率不是 1 时计数器就漂了(倍率 2:多扣一倍、计数器变负、用户隔一轮从在线名单消失;倍率 0.5:余量下一轮重记)
+		rows := append([]model.Stats(nil), *stats...)
 		for i := range rows {
 			rows[i].DateTime = bucket
 			if !isNode && rows[i].Resource == "user" {
@@ -317,7 +324,7 @@ func (s *Scheduler) runStatsForBox(box *core.Box) (ok bool) {
 		logger.Warning("统计落库失败: ", err)
 		return false
 	}
-	box.StatsTracker().ConsumeStats(*stats)
+	tracker.ConsumeStats(*stats)
 	return true
 }
 

@@ -283,7 +283,7 @@ func TestKickUserDispatchesToRemoteNodes(t *testing.T) {
 		}
 		gotName = body.Name
 		atomic.AddInt32(&calls, 1)
-		json.NewEncoder(w).Encode(map[string]int{"count": 3})
+		json.NewEncoder(w).Encode(map[string]int{"closed": 3, "sessions": 1})
 	}))
 	defer srv.Close()
 	db.Create(&model.Node{Name: "副机", ApiUrl: srv.URL + "/panel/", Token: "token", Enabled: true})
@@ -313,7 +313,7 @@ func TestKickUserMarksOutdatedAndFailedNodes(t *testing.T) {
 	old := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }))
 	defer old.Close()
 	fresh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]int{"count": 2, "closed": 2, "sessions": 1})
+		json.NewEncoder(w).Encode(map[string]int{"closed": 2, "sessions": 1})
 	}))
 	defer fresh.Close()
 	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))

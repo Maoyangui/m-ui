@@ -711,9 +711,11 @@ func (h *Hub) tick() {
 		if r.err != "" {
 			h.setStatus(r.n, false, r.err, nil)
 			// Keep the last report and all line/node configuration intact during
-			// an outage. The last known devices remain reserved until the node
-			// reports again; releasing them would allow a second set of devices
-			// in during a short outage and exceed the limit after recovery.
+			// an outage so the panel still shows the node's last known state. Its
+			// device set stays in the cross-node union only for remoteReportGrace
+			// (see remoteForDeviceLimits): a short blip keeps the limit intact, a
+			// real outage stops a stale list from rejecting new devices or evicting
+			// old connections on the other servers.
 			continue
 		}
 		h.setStatus(r.n, true, "", &r.rep)
@@ -1100,7 +1102,6 @@ func (h *Hub) kickRemote(name string) KickResult {
 		go func(i int, n model.Node) {
 			defer wg.Done()
 			var out struct {
-				Count    int `json:"count"` // 0.6.9 之前的字段名,仍然认
 				Closed   int `json:"closed"`
 				Sessions int `json:"sessions"`
 			}
@@ -1114,9 +1115,6 @@ func (h *Hub) kickRemote(name string) KickResult {
 				}
 				logger.Warning("向副机 ", n.Name, " 派发用户踢线失败: ", err)
 				return
-			}
-			if out.Closed == 0 {
-				out.Closed = out.Count
 			}
 			results[i].Closed, results[i].Sessions = out.Closed, out.Sessions
 		}(i, n)

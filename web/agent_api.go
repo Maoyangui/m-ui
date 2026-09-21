@@ -242,8 +242,7 @@ func (s *Server) handleAgentKick(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	closed, sessions := s.run.KickUserLocal(body.Name)
-	// count 是 0.6.9 之前主机读的字段名,留着让新副机配旧主机也能用
-	writeJSON(w, http.StatusOK, map[string]interface{}{"count": closed, "closed": closed, "sessions": sessions})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"closed": closed, "sessions": sessions})
 }
 
 // handleAgentUpstreamTest 主机派发过来的单条上游测试:在本机实测并返回结果。

@@ -242,6 +242,7 @@ details.menu .menu-list hr { border: none; border-top: 1px solid var(--border); 
 .toast { position: fixed; bottom: 1.4rem; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: .6rem 1.1rem; border-radius: 8px; z-index: 100; font-size: .9rem; box-shadow: var(--shadow-lg); }
 .toast.ok { background: var(--ok); color: #fff; }
 .toast.err { background: var(--danger); color: #fff; }
+.toast.warn { background: var(--warn); color: #fff; }
 
 /* ===== 图表 ===== */
 .chart-wrap { position: relative; }

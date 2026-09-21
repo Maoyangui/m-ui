@@ -19,6 +19,9 @@ import (
 // changing the sessions table schema.
 const sessionTokenTagLen = 32
 
+// 0.6.9 起令牌尾部带凭据指纹;更早签发的令牌(64 位十六进制)一律拒绝,升级后已登录的管理员 / 代理要重新登录一次 —— 只此一次,
+// 之后升级照旧保持登录(会话落库,进程重启不丢)。
+
 // sessionCredentialTag binds a session to the current credential.  Passwords
 // are already one-way hashes here; hashing the stored value again avoids
 // putting any credential material in the token while still changing the tag
