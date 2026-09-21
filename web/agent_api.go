@@ -142,6 +142,14 @@ func (s *Server) handleAgentPing(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// agentApplyNeedsFullReload keeps the data plane converging after a failed
+// snapshot application. The pending marker is deliberately independent of
+// the incoming revision: a newer user-only snapshot can arrive while the
+// previous line/upstream change is still unapplied in the running core.
+func agentApplyNeedsFullReload(previousPending string, linesChanged, coreRunning bool) bool {
+	return !coreRunning || linesChanged || strings.TrimSpace(previousPending) != ""
+}
+
 func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
@@ -217,10 +225,16 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 	// 事务会把本次修订记为待重载，保证落库后崩溃也能恢复。重载级别只看
 	// ApplySnapshot 前的标记；只有同一修订的待重载才强制重建，旧修订仍
 	// 按当前快照的线路/上游差异选择热更新。
-	pendingReload := previousPending != "" && previousPending == snap.Revision
+	// Any pending marker means the previous attempt did not prove that the
+	// data-plane accepted its snapshot.  A newer snapshot may have a different
+	// revision (for example, only a user changed), but the database already
+	// contains the newer lines/upstreams while the running core still has the
+	// older failed configuration.  Always force the full reconciliation until
+	// the marker is cleared by a successful reload.
+	pendingReload := agentApplyNeedsFullReload(previousPending, linesChanged, s.run.CoreRunning())
 	var reloadErr error
 	switch {
-	case linesChanged || pendingReload || !s.run.CoreRunning():
+	case pendingReload:
 		reloadErr = s.run.ReloadAll()
 	case upsChanged:
 		reloadErr = s.run.ReloadUpstreams()

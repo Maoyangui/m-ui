@@ -142,6 +142,31 @@ func TestApplySnapshotKeepsLegacySequenceCompatibility(t *testing.T) {
 	}
 }
 
+func TestBuildPushSnapshotRaisesRestoredSequenceToClockFloor(t *testing.T) {
+	db := openDB(t, "push-sequence.db").DB
+	base, err := BuildSnapshot(db, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Create(&model.Setting{Key: "hubPushSequence", Value: "7"})
+	db.Create(&model.Setting{Key: "hubPushRevision", Value: base.Revision})
+	h := New(Deps{DB: db, Setting: func(string) string { return "" }})
+	first, err := h.buildPushSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Sequence < uint64(time.Now().UnixNano()-int64(2*time.Second)) {
+		t.Fatalf("restored sequence was not raised to the current clock floor: %d", first.Sequence)
+	}
+	second, err := h.buildPushSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Sequence < first.Sequence {
+		t.Fatalf("push sequence must not regress after restore: %d then %d", first.Sequence, second.Sequence)
+	}
+}
+
 func TestApplyCountersCursor(t *testing.T) {
 	db := openDB(t, "hub.db").DB
 	db.Create(&model.User{Name: "bob", Enabled: true})

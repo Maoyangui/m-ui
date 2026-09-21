@@ -631,11 +631,16 @@ type Deps struct {
 
 type Hub struct {
 	syncMu sync.Mutex // 锁覆盖构造快照到 ACK，避免 tick/SyncNow/PushNow 乱序回写
-	d      Deps
-	mu     sync.Mutex
-	status map[uint]*NodeStatus
-	pushed map[uint]string
-	remote map[uint]map[string][]string // node → user → ips
+	// sequencePrimed is process-local: after startup (including a restored
+	// database) the first snapshot raises the durable sequence to the clock
+	// floor once, while unchanged five-second polls reuse it without a SQLite
+	// write. A content revision change still advances it monotonically.
+	sequencePrimed bool
+	d              Deps
+	mu             sync.Mutex
+	status         map[uint]*NodeStatus
+	pushed         map[uint]string
+	remote         map[uint]map[string][]string // node → user → ips
 	// remoteAt 各副机最近一次成功上报的时间。失联的副机报告本身留着(页面还要显示它最后的样子),
 	// 但超过 remoteReportGrace 没上报,它的在线 IP 就不再计入设备数并集:那些设备是不是还在线已经无从得知,
 	// 拿几分钟前的名单去拒新设备、断别的机器上回来的老连接,比短暂超限更伤人。
@@ -1122,22 +1127,52 @@ func (h *Hub) buildPushSnapshot() (Snapshot, error) {
 			return err
 		}
 		// The content revision, rather than the five-second polling tick, is
-		// what orders snapshots. Reuse the same durable sequence while the
-		// configuration is unchanged; this avoids a SQLite write every tick and
-		// still gives every newly changed revision a strictly newer sequence.
-		if raw != "" && previousRevision == snap.Revision {
+		// what normally orders snapshots.  A restored database can contain an
+		// old sequence, however, while a node has already accepted a newer one.
+		// Raise the sequence to the current wall-clock floor even when the
+		// revision is unchanged; this lets a normal post-restore clock advance
+		// past the sequence remembered by the node without inventing an epoch
+		// that an old snapshot could replay.  The +1 floor also handles clock
+		// rollback and the legacy small counter values.
+		clockNow := time.Now().UnixNano()
+		clockSeq := uint64(0)
+		if clockNow > 0 {
+			clockSeq = uint64(clockNow)
+		}
+		if raw != "" && previousRevision == snap.Revision && h.sequencePrimed {
 			snap.Sequence = seq
+			return nil
+		}
+		if raw != "" && previousRevision == snap.Revision {
+			if seq == ^uint64(0) {
+				return errors.New("主机推送序号已耗尽")
+			}
+			next := seq + 1
+			if clockSeq > next {
+				next = clockSeq
+			}
+			snap.Sequence = next
+			if err := upsertSetting(tx, "hubPushSequence", strconv.FormatUint(next, 10)); err != nil {
+				return err
+			}
 			return nil
 		}
 		if seq == ^uint64(0) {
 			return errors.New("主机推送序号已耗尽")
 		}
-		snap.Sequence = seq + 1
+		next := seq + 1
+		if clockSeq > next {
+			next = clockSeq
+		}
+		snap.Sequence = next
 		if err := upsertSetting(tx, "hubPushSequence", strconv.FormatUint(snap.Sequence, 10)); err != nil {
 			return err
 		}
 		return upsertSetting(tx, "hubPushRevision", snap.Revision)
 	})
+	if err == nil {
+		h.sequencePrimed = true
+	}
 	return snap, err
 }
 
