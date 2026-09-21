@@ -455,7 +455,7 @@ registerActions({
       const servers = Array.isArray(r.servers) ? r.servers : [];
       // 多台机器时列出每台的结果:本机 2 · hk 1 · tw 未响应
       const detail = servers.length > 1 ? ' (' + servers.map(s => (s.local ? t('user.kickLocal') : (s.name || '')) + ' ' + // toast 走 textContent,不转义
-        (s.error ? t(s.outdated ? 'user.kickOutdated' : 'user.kickNoReply') : String(s.closed))).join(' · ') + ')' : '';
+        (s.error ? t(s.outdated ? 'user.kickOutdated' : s.unconfigured ? 'user.kickUnconfigured' : 'user.kickNoReply') : String(s.closed))).join(' · ') + ')' : '';
       if (r.failed > 0) toast(t('user.kickedPartial', { n: r.closed, f: r.failed }) + detail, 'warn');
       else toast(t('user.kicked', { n: r.closed }) + detail, 'ok');
     } catch (e) { toast(e.message, 'err'); }

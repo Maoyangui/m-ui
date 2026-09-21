@@ -342,8 +342,8 @@ func TestKickUserMarksOutdatedAndFailedNodes(t *testing.T) {
 	if s := byName["失联副机"]; s.Outdated || s.Error == "" || !strings.Contains(s.Error, "127.0.0.1") {
 		t.Fatalf("拨号失败应记错误原文(含地址): %+v", s)
 	}
-	if s := byName["没配地址"]; s.Error == "" {
-		t.Fatalf("没配 API 地址的副机应记为失败: %+v", s)
+	if s := byName["没配地址"]; s.Error == "" || !s.Unconfigured {
+		t.Fatalf("没配 API 地址的副机应记为失败并标 unconfigured: %+v", s)
 	}
 	sc := got.Scrubbed()
 	for _, s := range sc.Servers {

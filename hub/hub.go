@@ -947,9 +947,11 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 		st.VersionMismatch = rep.Version != "" && h.d.Version != "" && rep.Version != h.d.Version
 	} else if !ok {
 		// A failed request makes the node offline, but does not invalidate its
-		// last report. In particular, keep the last known device set reserved
-		// until a later successful report replaces it; releasing it during an
-		// outage could admit a second set of devices before recovery.
+		// last report: the panel keeps showing the node's last known state, and
+		// its device set stays in the cross-node union for remoteReportGrace
+		// (see remoteForDeviceLimits) so a short blip cannot admit a second set
+		// of devices, while a real outage stops a stale list from rejecting or
+		// evicting anyone.
 		st.Synced = false
 		st.CoreRunning = false
 	}
@@ -1016,11 +1018,6 @@ func (h *Hub) PushNow(n model.Node) error {
 	return h.push(n, snap)
 }
 
-// KickUser 让所有已启用的副机断开用户的现有连接。
-//
-// 踢线不是配置快照的一部分:快照只会在凭据变化时触发副机自行断线,
-// 面板上的一次性踢线必须显式派发到每台副机。各副机并发执行,一台失联
-// 不应阻塞其它副机;返回值只包含成功收到响应的副机断开数。
 // KickResult 一次踢线的结果:合计 + 各机明细。本机那一行由 runner 填(Local=true),这里只管副机。
 type KickResult struct {
 	Closed   int          `json:"closed"`   // 断开的连接数,所有机器合计
@@ -1038,6 +1035,8 @@ type KickServer struct {
 	Sessions int    `json:"sessions"`
 	Error    string `json:"error,omitempty"`    // 派发失败的原因
 	Outdated bool   `json:"outdated,omitempty"` // 副机版本过旧,还没有踢线接口
+	// Unconfigured 这台副机没填 API 地址或令牌,根本没法派发(和"失联"不是一回事)
+	Unconfigured bool `json:"unconfigured,omitempty"`
 }
 
 // Scrubbed 给代理作用域看的版本:去掉错误原文(拨号错误里带副机地址),只留"失败 / 版本过旧"的事实。
@@ -1095,7 +1094,7 @@ func (h *Hub) kickRemote(name string) KickResult {
 	for i, n := range nodes {
 		results[i] = KickServer{Id: n.Id, Name: n.Name}
 		if n.ApiUrl == "" || n.Token == "" {
-			results[i].Error = "副机没有配置 API 地址或令牌"
+			results[i].Error, results[i].Unconfigured = "副机没有配置 API 地址或令牌", true
 			continue
 		}
 		wg.Add(1)
