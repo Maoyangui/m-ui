@@ -224,6 +224,19 @@ func pruneBaks(dbPath string, keep int) {
 	}
 }
 
+// readZipFile 读出 zip 里的一个条目。
+func readZipFile(f *zip.File) ([]byte, error) {
+	rc, err := f.Open()
+	if err != nil {
+		return nil, err
+	}
+	b, readErr := io.ReadAll(rc)
+	if closeErr := rc.Close(); readErr == nil {
+		readErr = closeErr
+	}
+	return b, readErr
+}
+
 // underDir 判断 p 是否落在 root 目录内(拒绝绝对路径越界与 ..)。
 func underDir(root, p string) bool {
 	abs, err := filepath.Abs(p)
@@ -245,8 +258,9 @@ func Restore(dbPath, srcPath string) error {
 	if err != nil {
 		return err
 	}
+	bak := ""
 	if _, err := os.Stat(dbPath); err == nil {
-		bak := dbPath + ".bak-" + time.Now().Format("20060102-150405")
+		bak = dbPath + ".bak-" + time.Now().Format("20060102-150405")
 		if err := os.Rename(dbPath, bak); err != nil {
 			return fmt.Errorf("备份当前库: %w", err)
 		}
@@ -279,37 +293,44 @@ func Restore(dbPath, srcPath string) error {
 	// 证书路径来自 zip 里的 meta.json,是不可信输入:限制在数据目录内,
 	// 否则一个伪造的备份就能以 root 身份往任意位置写文件(systemd 单元、authorized_keys…)。
 	root, _ := filepath.Abs(filepath.Dir(dbPath))
+	// 走到这里数据库**已经**换成备份里的了。之后任何一个证书写失败,都不能再说"还原失败、继续用当前库":
+	// 0.6.10 在第一个出错的证书上直接 return,ApplyPending 把包改名 .failed,日志却说"继续用当前库" ——
+	// 管理员信了、再传一次再还原,每次还原都生成一份 .bak 而 pruneBaks 只留两份,试到第三次原库就没了。
+	// 这里把能写的证书都写完,最后把实情报出来:库已还原、原库在哪、哪些证书没写成。
+	var certErrs []string
 	for _, c := range meta.Certs {
 		f := files[c.Zip]
 		if f == nil || c.Path == "" {
-			return fmt.Errorf("备份证书条目缺失: %s", c.Zip)
+			certErrs = append(certErrs, c.Zip+": 备份里缺这一条")
+			continue
 		}
 		if !underDir(root, c.Path) {
 			skipped = append(skipped, c.Path)
 			continue
 		}
-		rc, err := f.Open()
+		b, err := readZipFile(f)
 		if err != nil {
-			return fmt.Errorf("读取证书 %s: %w", c.Path, err)
-		}
-		b, readErr := io.ReadAll(rc)
-		closeErr := rc.Close()
-		if readErr != nil {
-			return fmt.Errorf("读取证书 %s: %w", c.Path, readErr)
-		}
-		if closeErr != nil {
-			return fmt.Errorf("关闭证书 %s: %w", c.Path, closeErr)
+			certErrs = append(certErrs, c.Path+": "+err.Error())
+			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(c.Path), 0o755); err != nil {
-			return fmt.Errorf("创建证书目录 %s: %w", filepath.Dir(c.Path), err)
+			certErrs = append(certErrs, c.Path+": 创建目录: "+err.Error())
+			continue
 		}
 		mode := os.FileMode(0o644)
 		if strings.HasSuffix(c.Path, ".key") {
 			mode = 0o600
 		}
 		if err := os.WriteFile(c.Path, b, mode); err != nil {
-			return fmt.Errorf("写入证书 %s: %w", c.Path, err)
+			certErrs = append(certErrs, c.Path+": "+err.Error())
 		}
+	}
+	if len(certErrs) > 0 {
+		where := "(之前没有数据库)"
+		if bak != "" {
+			where = "原库在 " + bak
+		}
+		return fmt.Errorf("数据库已从备份还原%s,但 %d 个证书没写成: %s", where, len(certErrs), strings.Join(certErrs, "; "))
 	}
 	return nil
 }

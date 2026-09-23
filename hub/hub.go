@@ -465,7 +465,8 @@ type Report struct {
 	Hostname        string                         `json:"hostname"`
 	CoreRunning     bool                           `json:"coreRunning"`
 	Uptime          uint32                         `json:"uptime"`
-	Revision        string                         `json:"revision"` // 副机当前已应用的修订号
+	Revision        string                         `json:"revision"`                // 副机库里的修订号(ApplySnapshot 落库就写,不等数据面)
+	ReloadPending   bool                           `json:"reloadPending,omitempty"` // 库里是新修订、数据面还没应用成功(起不来、回滚了)
 	Counters        []model.AgentCounter           `json:"counters"`
 	Onlines         map[string][]string            `json:"onlines"`                   // 用户 → 在线源 IP
 	OnlineLinesByIP map[string]map[string][]string `json:"onlineLinesByIp,omitempty"` // 用户 → 源 IP → 线路名
@@ -640,6 +641,7 @@ type Hub struct {
 	mu             sync.Mutex
 	status         map[uint]*NodeStatus
 	pushed         map[uint]string
+	pushFail       map[uint]*pushFailure        // 同一修订连续推送失败:次数与时间,用来退避
 	remote         map[uint]map[string][]string // node → user → ips
 	// remoteAt 各副机最近一次成功上报的时间。失联的副机报告本身留着(页面还要显示它最后的样子),
 	// 但超过 remoteReportGrace 没上报,它的在线 IP 就不再计入设备数并集:那些设备是不是还在线已经无从得知,
@@ -674,7 +676,7 @@ func New(d Deps) *Hub {
 	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{}, remoteAt: map[uint]int64{},
 		remoteLines: map[uint]map[string]map[string][]string{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
 		upHealth: map[uint][]UpstreamHealth{}, kicking: map[string]*kickCall{},
-		verified: &http.Client{Timeout: 25 * time.Second}, pinned: map[string]*http.Client{}}
+		verified: &http.Client{Timeout: 25 * time.Second}, pinned: map[string]*http.Client{}, pushFail: map[uint]*pushFailure{}}
 }
 
 func (h *Hub) Start() {
@@ -721,9 +723,10 @@ func (h *Hub) remoteNodes() ([]model.Node, error) {
 
 // nodeResult 一台副机这一轮同步的结果:网络部分并发跑,落库部分回到主协程串行做。
 type nodeResult struct {
-	n   model.Node
-	rep Report
-	err string // 非空 = 这一轮失败(推送或拉报告)
+	pushErr string // 这一轮推送没成功(退避中也算),但报告照样拉到了
+	n       model.Node
+	rep     Report
+	err     string // 非空 = 这一轮失败(推送或拉报告)
 }
 
 func (h *Hub) tick() {
@@ -784,7 +787,7 @@ func (h *Hub) tick() {
 			// old connections on the other servers.
 			continue
 		}
-		h.setStatus(r.n, true, "", &r.rep)
+		h.setStatus(r.n, true, r.pushErr, &r.rep) // 在线但配置未同步:Error 里写推送原因,Synced 由报告的修订号判
 		if r.rep.PublicIP != "" && r.rep.PublicIP != r.n.PublicIP {
 			h.d.DB.Model(&model.Node{}).Where("id = ?", r.n.Id).Update("public_ip", r.rep.PublicIP)
 		}
@@ -852,21 +855,85 @@ func (h *Hub) Rejects(group string) int64 {
 }
 
 // syncNode 一台副机的网络部分:该推就推,再拉报告。不碰数据库,可以和别的机器并发。
+// errApplyUnconfirmed 副机收到了、但没确认应用(ok 不是 1、或修订号对不上)。
+var errApplyUnconfirmed = errors.New("副机未确认应用")
+
+// pushRejected 这次推送失败是"副机明确拒绝 / 没应用成功"(该退避),还是"根本没连上"(不该退避)?
+// 失联的副机恢复后必须在下一轮 tick 就拿到最新配置 —— 失联期间做的停用、换凭据都等着它。
+// 把连接失败也算进退避,副机一回来还要再等最长 5 分钟,旧凭据在那台机上就多活 5 分钟。
+func pushRejected(err error) bool {
+	var hse *httpStatusError
+	return errors.As(err, &hse) || errors.Is(err, errApplyUnconfirmed)
+}
+
+// pushFailure 某台副机对某个修订的连续推送失败记录(只记"拒绝应用",不记失联)。
+type pushFailure struct {
+	rev   string
+	n     int       // 连续失败次数
+	at    time.Time // 最近一次失败
+	cause string
+}
+
+// pushBackoff 同一修订连续失败 n 次之后,下一次重推至少要隔多久:5s、10s、20s … 封顶 5 分钟。
+// 副机上一份配置起不来时,每 5 秒硬推一次没有任何意义 —— 只会让副机每 5 秒重来一遍
+// "停数据面 → 起失败 → 回滚"。管理员改了配置(修订号变了)立刻重推,不受退避影响。
+func pushBackoff(n int) time.Duration {
+	if n <= 0 {
+		return 0
+	}
+	if n > 7 {
+		n = 7
+	}
+	d := 5 * time.Second << uint(n-1) // 5s, 10s, 20s, 40s, 80s, 160s, 320s
+	if d > 5*time.Minute {
+		d = 5 * time.Minute
+	}
+	return d
+}
+
 func (h *Hub) syncNode(n model.Node, snap Snapshot) *nodeResult {
 	st := h.getStatus(n) // 先把状态项建出来,首次推送才能记下 LastPush,不会下一轮又推一遍
 	h.mu.Lock()
 	pushedRev, lastPush := h.pushed[n.Id], st.LastPush
+	pf := h.pushFail[n.Id]
 	h.mu.Unlock()
+	res := &nodeResult{n: n}
 	if pushedRev != snap.Revision || time.Now().Unix()-lastPush > 600 {
-		if err := h.push(n, snap); err != nil {
-			return &nodeResult{n: n, err: "推送失败: " + err.Error()}
+		switch {
+		case pf != nil && pf.rev == snap.Revision && time.Since(pf.at) < pushBackoff(pf.n):
+			res.pushErr = fmt.Sprintf("推送失败 %d 次,%s 后再试: %s", pf.n, (pushBackoff(pf.n) - time.Since(pf.at)).Round(time.Second), pf.cause)
+		default:
+			if err := h.push(n, snap); err != nil {
+				if pushRejected(err) {
+					h.mu.Lock()
+					if pf == nil || pf.rev != snap.Revision {
+						pf = &pushFailure{rev: snap.Revision}
+						h.pushFail[n.Id] = pf
+					}
+					pf.n++
+					pf.at, pf.cause = time.Now(), err.Error()
+					h.mu.Unlock()
+				}
+				res.pushErr = "推送失败: " + err.Error()
+			} else {
+				h.mu.Lock()
+				delete(h.pushFail, n.Id)
+				h.mu.Unlock()
+			}
 		}
 	}
+	// 推送成没成,报告都要拉:流量回收、超额停用、跨机设备并集全靠它。0.6.10 在推送失败时直接返回,
+	// 于是一台配置没应用成功的副机,它的流量不再并入主机、它上面的设备 300 秒后就不再计入设备数。
 	rep, err := h.fetchReport(n)
 	if err != nil {
-		return &nodeResult{n: n, err: "拉取报告失败: " + err.Error()}
+		res.err = "拉取报告失败: " + err.Error()
+		if res.pushErr != "" {
+			res.err = res.pushErr + ";" + res.err
+		}
+		return res
 	}
-	return &nodeResult{n: n, rep: rep}
+	res.rep = rep
+	return res
 }
 
 // forgetNodes 清掉已经不存在的副机留下的所有按节点缓存。
@@ -882,6 +949,7 @@ func (h *Hub) forgetNodes(live map[uint]bool) {
 		delete(h.remote, id)
 		delete(h.remoteAt, id)
 		delete(h.pushed, id)
+		delete(h.pushFail, id)
 		delete(h.remoteLines, id)
 		delete(h.nodeNames, id)
 		delete(h.upHealth, id)
@@ -1017,7 +1085,12 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 	}
 	if rep != nil {
 		st.Version, st.Hostname, st.CoreRunning, st.Uptime, st.Revision, st.CertDays = rep.Version, rep.Hostname, rep.CoreRunning, rep.Uptime, rep.Revision, rep.CertDays
-		st.Synced = rep.Revision == h.revision
+		// hubRevision 在副机 ApplySnapshot 的事务里就写了,数据面有没有真的应用成功要看 ReloadPending。
+		// 不看它,一台新配置起不来、正在跑回滚旧配置的副机会显示"在线 · 已同步",管理员看不出任何异常。
+		st.Synced = rep.Revision == h.revision && !rep.ReloadPending
+		if rep.ReloadPending && st.Error == "" {
+			st.Error = "配置已收到,但这台副机的数据面没应用成功(仍在跑上一份可用配置),看副机日志"
+		}
 		st.OnlineUsers = len(rep.Onlines)
 		st.conns = rep.Conns
 		st.ReloadError, st.ReloadAt = "", 0
@@ -1067,10 +1140,10 @@ func (h *Hub) push(n model.Node, snap Snapshot) error {
 	}
 	ok := strings.Trim(strings.TrimSpace(string(out.OK)), `"`)
 	if ok != "1" && !strings.EqualFold(ok, "true") {
-		return fmt.Errorf("副机未确认应用修订 %s (ok=%q)", snap.Revision, ok)
+		return fmt.Errorf("%w:修订 %s (ok=%q)", errApplyUnconfirmed, snap.Revision, ok)
 	}
 	if out.Revision != snap.Revision {
-		return fmt.Errorf("副机确认的修订号不匹配:期望 %s,收到 %s", snap.Revision, out.Revision)
+		return fmt.Errorf("%w:确认的修订号不匹配,期望 %s,收到 %s", errApplyUnconfirmed, snap.Revision, out.Revision)
 	}
 	h.mu.Lock()
 	h.pushed[n.Id] = snap.Revision

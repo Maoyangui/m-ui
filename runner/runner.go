@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -63,7 +64,17 @@ type Runner struct {
 	applied      map[string]string // 数据面当前生效的出站(tag → JSON),供上游热更新做差异
 	appliedRaw   []byte            // 数据面当前生效的完整配置,渲染结果相同则不重启
 	pendingStats []model.Stats     // 旧数据面关闭后暂时无法落库的流量,下次启动继续记账
-	mu           sync.Mutex        // 串行化重载,避免并发改动互相打断
+	// 上一份"校验能过、真正启动却失败"的配置。同一份(或只有用户表不同的一份)在冷却期内不再拆掉
+	// 正在服务的数据面去重试 —— 见 reloadAllLockedWithForce 里的说明。
+	lastFailedRaw []byte
+	lastFailedAt  time.Time
+	lastFailedErr error
+	// 上一次成功读到并应用的限速 / 设备数策略。数据库抖动时沿用它,后台重试,绝不为此停机。
+	lastSpecs     map[string]core.UserLimitSpec
+	lastGroups    map[string]core.GroupLimitSpec
+	limitsPending atomic.Bool // applyLimits 读库失败,等 secureReloadLoop 重试
+	applyLimitsMu sync.Mutex  // applyLimits 串行:ApplyLimits() / RulesNow() 不持 r.mu 就会调它,lastSpecs 不能裸着被并发读写
+	mu            sync.Mutex  // 串行化重载,避免并发改动互相打断
 
 	rules *rules.Engine // 限速规则判定器(只在主机跑)
 
@@ -377,24 +388,27 @@ func (r *Runner) Start() (err error) {
 	if err != nil {
 		return fmt.Errorf("渲染配置: %w", err)
 	}
+	if r.lastSpecs == nil && r.lastGroups == nil {
+		// 进程刚起、手上还没有任何一份策略:这时读库失败又先起数据面,Limiter 就是空表,
+		// 设备数 / 限速 / 代理池全部放开,直到几秒后重试成功。数据面还没起、什么都不会断,
+		// 先把策略读到手再起;读不到就让服务管理器按常规重启我们。
+		specs, groups, err := r.readLimits()
+		if err != nil {
+			return fmt.Errorf("启动前读取限速/设备数策略: %w", err)
+		}
+		r.lastSpecs, r.lastGroups = specs, groups
+	}
 	if err := r.core.Start(raw); err != nil {
 		return fmt.Errorf("启动 sing-box: %w", err)
 	}
 	r.restorePendingStats()
 	r.applied, _ = outboundsOf(raw)
 	r.appliedRaw = raw
+	r.clearFailedConfig()
 	if err := r.applyLimits(); err != nil {
-		box := r.core.GetInstance()
-		_ = r.core.Stop()
-		if box != nil {
-			if r.jobs != nil {
-				_ = r.jobs.FlushStatsBox(box)
-				_ = r.jobs.FlushStatsBox(box)
-			}
-			r.pendingStats = append(r.pendingStats, *box.StatsTracker().SnapshotStats()...)
-		}
-		r.applied, r.appliedRaw = nil, nil
-		return err
+		// 数据面已经起来了。策略读不到就先沿用上一份(applyLimits 里已经装回去了),后台重试;
+		// 拿停机去换"策略确定",只会让所有用户为一次数据库抖动断网(0.6.10 就是这么改的)。
+		r.markLimitsRetry(err)
 	}
 	r.applyPortHopping()
 	r.applyLogLevel()
@@ -614,12 +628,11 @@ func (r *Runner) ReloadUsersSecure() (err error) {
 		}
 	}
 	if err != nil {
-		old := r.core.GetInstance()
-		_ = r.core.Stop()
-		if old != nil && r.jobs != nil && !r.jobs.FlushStatsBox(old) {
-			r.pendingStats = append(r.pendingStats, *old.StatsTracker().SnapshotStats()...)
-		}
-		return fmt.Errorf("凭据撤销未完成，已停止本机数据面并保留自动重试: %w", err)
+		// 撤销凭据只需要保证"这个用户的旧凭据不再可用"。热更新有一处入站失败(往往是另一条根本
+		// 起不来的线路),不是把整台机器停掉的理由 —— 0.6.10 在这里 Stop(),之后每 5 秒
+		// "起旧配置 → 判失败 → 再停",主机在管理员修好之前一直不可用。
+		// 标记留着,secureReloadLoop 会退避重试;运行中的入站上用户表已经更新到哪算哪。
+		return fmt.Errorf("凭据撤销的热更新没有全部完成,数据面保持服务并在后台重试: %w", err)
 	}
 	if r.appliedRaw != nil && onlyUsersDiffer(r.appliedRaw, raw) {
 		r.appliedRaw = raw
@@ -633,15 +646,39 @@ func (r *Runner) ReloadUsersSecure() (err error) {
 func (r *Runner) secureReloadLoop(stop <-chan struct{}) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	var failures int
+	var next time.Time // 连续失败时退避:5s、10s、20s … 最长 5 分钟,别每 5 秒刷一条一样的告警
 	for {
 		select {
 		case <-stop:
 			return
 		case <-ticker.C:
-			if r.setting("secureReloadPending") == "true" {
-				if err := r.ReloadUsersSecure(); err != nil {
-					logger.Warning("重试凭据撤销: ", err)
+			if r.limitsPending.Load() {
+				r.mu.Lock()
+				err := r.applyLimits()
+				r.mu.Unlock()
+				if err == nil {
+					r.limitsPending.Store(false)
+					logger.Info("限速/设备数策略已在重试后应用")
 				}
+			}
+			if r.setting("secureReloadPending") != "true" {
+				failures = 0
+				continue
+			}
+			if time.Now().Before(next) {
+				continue
+			}
+			if err := r.ReloadUsersSecure(); err != nil {
+				failures++
+				delay := 5 * time.Second << uint(min(failures, 6)) // 10s … 5m20s
+				if delay > 5*time.Minute {
+					delay = 5 * time.Minute
+				}
+				next = time.Now().Add(delay)
+				logger.Warning("重试凭据撤销(", delay, " 后再试): ", err)
+			} else {
+				failures = 0
 			}
 		}
 	}
@@ -714,18 +751,33 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 			if prev, ok := prevInbounds[meta.Tag]; ok && bytes.Equal(prev, inbound) {
 				continue
 			}
+			prevDef, wasRunning := prevInbounds[meta.Tag]
 			if err := r.core.RemoveInbound(meta.Tag); err != nil && err != os.ErrInvalid {
 				logger.Warning("重建入站 ", meta.Tag, " 失败(移除): ", err)
-				if firstErr == nil {
+				if firstErr == nil && wasRunning {
 					firstErr = fmt.Errorf("重建入站 %s(移除): %w", meta.Tag, err)
 				}
 				continue
 			}
 			box.ConnTracker().CloseConnByInbound(meta.Tag)
 			if err := r.core.AddInbound(inbound); err != nil {
+				// 这个入站本来就不在运行中的配置里(上一次整机重载时它没起来、已回滚),这里补建
+				// 又失败,是意料之中:它上面没有任何用户在服务,不能让它把别的入站的用户热更新
+				// 一起判成失败 —— 那正是 0.6.10 里"撤销凭据失败 → 停掉整台机器"的起点。
+				if !wasRunning {
+					logger.Warning("入站 ", meta.Tag, " 不在运行中的配置里且补建失败(它本来就没在服务),跳过: ", err)
+					continue
+				}
 				logger.Warning("重建入站 ", meta.Tag, " 失败(添加): ", err)
 				if firstErr == nil {
 					firstErr = fmt.Errorf("重建入站 %s(添加): %w", meta.Tag, err)
+				}
+				// 正在服务的旧入站已经被拆掉了,新的又加不上:把旧定义补回去,至少让这条线路照旧服务,
+				// 不要让它在整个冷却期里停摆。补不回去才是真的没了。
+				if err2 := r.core.AddInbound(prevDef); err2 != nil {
+					logger.Warning("重建入站 ", meta.Tag, " 失败后恢复旧定义也失败,这条线路暂停服务: ", err2)
+				} else {
+					logger.Warning("重建入站 ", meta.Tag, " 失败,已恢复旧定义继续服务")
 				}
 			}
 			continue
@@ -785,9 +837,41 @@ func (r *Runner) reloadAllLockedForce(raw []byte) error {
 	return r.reloadAllLockedWithForce(raw, true)
 }
 
+// failedConfigRetryEvery 同一份起不来的配置,多久才允许再拆一次正在服务的数据面去重试。
+//
+// 副机上一份新配置"校验能过、真正启动失败"(典型:新线路的端口在这台机上被别的进程占着)时,
+// 主机每 5 秒会重推同一份修订。没有这道闸,每一轮都是"停掉正在服务的旧数据面 → 新配置起不来 →
+// 再起旧配置":这台机器上的所有用户每 5 秒断一次线,直到管理员发现并修好 —— 0.4.16 修过的
+// "每次推送都重启数据面"换了个形式回来。冷却期内同一份配置只热更新用户表,不动数据面。
+const failedConfigRetryEvery = 10 * time.Minute
+
+// sameFailedConfig 这份配置是不是上次刚起不来的那份(或者只有用户表不一样的那份)且还在冷却期内。
+// "只有用户表不一样"也算:管理员没改线路、只是停用了个用户,推下来的新修订照样起不来。
+func (r *Runner) sameFailedConfig(raw []byte) bool {
+	if r.lastFailedRaw == nil || time.Since(r.lastFailedAt) >= failedConfigRetryEvery {
+		return false
+	}
+	return bytes.Equal(r.lastFailedRaw, raw) || onlyUsersDiffer(r.lastFailedRaw, raw)
+}
+
+func (r *Runner) noteFailedConfig(raw []byte, err error) {
+	r.lastFailedRaw, r.lastFailedAt, r.lastFailedErr = raw, time.Now(), err
+}
+
+func (r *Runner) clearFailedConfig() {
+	r.lastFailedRaw, r.lastFailedAt, r.lastFailedErr = nil, time.Time{}, nil
+}
+
+// markLimitsRetry 限速 / 设备数策略这次没读到:记下来让 secureReloadLoop 隔几秒再读,数据面照常服务。
+func (r *Runner) markLimitsRetry(err error) {
+	r.limitsPending.Store(true)
+	logger.Warning("限速/设备数策略暂时没读到,沿用上一份并在后台重试: ", err)
+}
+
 func (r *Runner) reloadAllLockedWithForce(raw []byte, force bool) error {
 	if !force && r.core.IsRunning() && r.appliedRaw != nil && bytes.Equal(r.appliedRaw, raw) {
 		if err := r.applyLimits(); err != nil {
+			r.markLimitsRetry(err)
 			return err
 		}
 		r.applyPortHopping() // 端口跳跃等面板侧参数不进 sing-box 配置,即使无需重启也要同步
@@ -805,6 +889,16 @@ func (r *Runner) reloadAllLockedWithForce(raw []byte, force bool) error {
 		} else {
 			logger.Warning("用户热更新失败,改为重启数据面: ", err)
 		}
+	}
+	// 同一份刚刚起不来、已经回滚过的配置,冷却期内不再拆正在服务的数据面。
+	// 用户表照样热更新到运行中的旧配置上 —— 停用、到期、换凭据在这台机上不能被冻结;
+	// 线路等管理员改过(渲染结果就不一样了)、或者冷却期过了,再试一次真正的重启。
+	if !force && r.core.IsRunning() && r.sameFailedConfig(raw) {
+		if err := r.reloadUsersLocked(raw); err != nil {
+			logger.Warning("同一份起不来的配置冷却期内只热更新用户,部分入站没更新到: ", err)
+		}
+		return fmt.Errorf("这份配置 %s 前启动失败并已回滚,冷却期内不再重启数据面(用户表已热更新到运行中的旧配置);改好线路或 %s 后会再试。原因: %w",
+			time.Since(r.lastFailedAt).Round(time.Second), failedConfigRetryEvery, r.lastFailedErr)
 	}
 	// 先干跑校验新配置;不通过就让旧数据面继续服务——绝不为一条坏配置断掉所有用户。
 	if r.core.IsRunning() {
@@ -833,14 +927,19 @@ func (r *Runner) reloadAllLockedWithForce(raw []byte, force bool) error {
 	}
 	if err := r.core.Start(raw); err != nil {
 		r.applied, r.appliedRaw = nil, nil
+		r.noteFailedConfig(raw, err)
 		if prev != nil {
 			if err2 := r.core.Start(prev); err2 == nil {
 				r.restorePendingStats()
 				r.applied, r.appliedRaw = outboundsOfSafe(prev), prev
 				if limErr := r.applyLimits(); limErr != nil {
-					_ = r.core.Stop()
-					r.applied, r.appliedRaw = nil, nil
-					return fmt.Errorf("新配置启动失败，回滚后的限速策略恢复失败: %w (原错误: %v)", limErr, err)
+					// 旧配置起来了就让它服务:策略没读到只是"沿用上一份",不是再停一次机的理由
+					r.markLimitsRetry(limErr)
+				}
+				// 旧配置带的是它当初生效时的用户表。此后被停用的用户、被换掉的旧凭据不能跟着回来 ——
+				// 把当前用户表热更新到回滚后的入站上(起不来的那条入站会被跳过)。
+				if uerr := r.reloadUsersLocked(raw); uerr != nil {
+					logger.Warning("回滚后热更新用户表有入站没更新到: ", uerr)
 				}
 				r.applyPortHopping()
 				r.applyLogLevel()
@@ -851,40 +950,14 @@ func (r *Runner) reloadAllLockedWithForce(raw []byte, force bool) error {
 		}
 		return fmt.Errorf("重启 sing-box: %w", err)
 	}
+	r.clearFailedConfig()
 	r.restorePendingStats()
 	r.applied, _ = outboundsOf(raw)
 	r.appliedRaw = raw
 	if err := r.applyLimits(); err != nil {
-		// 配置虽然已经启动,但没有成功应用设备数/限速策略时不能继续提供
-		// 一个策略为空或不确定的数据面。先把新实例的最后一批统计冲刷掉,
-		// 再恢复旧配置;旧配置也无法恢复完整策略时保持停止状态。
-		newBox := r.core.GetInstance()
-		_ = r.core.Stop()
-		if newBox != nil && r.jobs != nil {
-			ok1 := r.jobs.FlushStatsBox(newBox)
-			ok2 := r.jobs.FlushStatsBox(newBox)
-			if !ok1 || !ok2 {
-				r.pendingStats = append(r.pendingStats, *newBox.StatsTracker().SnapshotStats()...)
-			}
-		}
-		r.applied, r.appliedRaw = nil, nil
-		if prev != nil {
-			if err2 := r.core.Start(prev); err2 == nil {
-				r.restorePendingStats()
-				r.applied, r.appliedRaw = outboundsOfSafe(prev), prev
-				if limErr := r.applyLimits(); limErr == nil {
-					r.applyPortHopping()
-					r.applyLogLevel()
-					logger.Warning("新配置策略应用失败,已回滚到上一份可用配置: ", err)
-					return fmt.Errorf("新配置策略应用失败,已回滚到上一份配置: %w", err)
-				} else {
-					_ = r.core.Stop()
-					r.applied, r.appliedRaw = nil, nil
-					return fmt.Errorf("新配置策略应用失败，回滚后的限速策略恢复失败: %w (原错误: %v)", limErr, err)
-				}
-			}
-		}
-		return fmt.Errorf("新配置策略应用失败且旧配置回滚失败: %w", err)
+		// 新配置已经在服务了,策略没读到就沿用上一份、后台重试。0.6.10 在这里停掉新实例再回滚,
+		// 回滚后再失败就保持停机 —— 一次数据库抖动就能让整台机器断网。
+		r.markLimitsRetry(err)
 	}
 	r.applyPortHopping()
 	r.applyLogLevel()
@@ -1040,41 +1113,56 @@ func (r *Runner) NodeCert() render.NodeCert { return r.nodeCert() }
 
 // applyLimits 把用户表里的限速与设备数策略下发给数据面。
 func (r *Runner) applyLimits() error {
-	var users []model.User
-	if err := r.db.Find(&users).Error; err != nil {
-		logger.Warning("读取用户限速策略失败: ", err)
-		return fmt.Errorf("读取用户限速策略: %w", err)
-	}
+	r.applyLimitsMu.Lock()
+	defer r.applyLimitsMu.Unlock()
 	box := r.core.GetInstance()
 	if box == nil {
 		return nil
 	}
+	specs, groups, err := r.readLimits()
+	if err != nil {
+		// 数据库抖动。不能把 Limiter 留成空的(那等于所有限额都放开),也不能为此停机:
+		// 把上一次成功读到的那份装回去,让调用方记下待重试。数据面刚重启时 Limiter 是全新的,
+		// 没有这一步,重试成功之前设备数 / 限速就是空的。
+		if r.lastSpecs != nil || r.lastGroups != nil {
+			box.Limiter().SetGroups(r.lastGroups)
+			box.Limiter().SetLimits(r.lastSpecs)
+			box.Limiter().ReconcileDevices()
+		}
+		return err
+	}
+	r.lastSpecs, r.lastGroups = specs, groups
+	box.Limiter().SetGroups(groups)
+	box.Limiter().SetLimits(specs)
+	// 重新算一遍"并集超限时哪些设备不再接受新登记"。它**不会**断开任何已连接的设备:
+	// 你定过的语义是"池满只拒新设备,已连接的不动",0.6.10 曾按 IP 字典序踢掉在线设备,一个连了
+	// 几小时、完全合规的付费用户会因为 IP 排得靠后被断网。
+	box.Limiter().ReconcileDevices()
+	if len(specs) > 0 || len(groups) > 0 {
+		logger.Info("已应用 ", len(specs), " 个用户的限速/设备数策略,", len(groups), " 个代理池")
+	}
+	return nil
+}
+
+// readLimits 从库里读出限速 / 设备数策略。三张表任一读失败都整体报错,不拿半份策略去覆盖。
+func (r *Runner) readLimits() (map[string]core.UserLimitSpec, map[string]core.GroupLimitSpec, error) {
+	var users []model.User
+	if err := r.db.Find(&users).Error; err != nil {
+		return nil, nil, fmt.Errorf("读取用户限速策略: %w", err)
+	}
 	var resellers []model.Reseller
 	if err := r.db.Find(&resellers).Error; err != nil {
-		// 查询失败时保留数据面当前策略；空切片会被 SetGroups 清空代理池，
-		// 反而把一次短暂的数据库抖动变成限速绕过。
-		logger.Warning("读取代理限速策略失败,保留现有限制: ", err)
-		return fmt.Errorf("读取代理限速策略: %w", err)
+		// 空切片会被 SetGroups 清空代理池,反而把一次短暂的数据库抖动变成限速绕过 —— 所以整体报错
+		return nil, nil, fmt.Errorf("读取代理限速策略: %w", err)
 	}
 	// 规则限速:生效中的状态叠加到用户自己的限速上(只升不降 / 覆盖,多条取最严);
 	// 到期的不算,主机失联时副机也能按到期时间自行放开
 	var states []model.LimitState
 	if err := r.db.Find(&states).Error; err != nil {
-		logger.Warning("读取限速规则状态失败,保留现有限制: ", err)
-		return fmt.Errorf("读取限速规则状态: %w", err)
+		return nil, nil, fmt.Errorf("读取限速规则状态: %w", err)
 	}
 	specs, groups := limitSpecs(users, resellers, rules.Active(states, time.Now().Unix()))
-	box.Limiter().SetGroups(groups)
-	box.Limiter().SetLimits(specs)
-	if victims := box.Limiter().ReconcileDevices(); len(victims) > 0 {
-		if n := box.ConnTracker().CloseConnByDevices(victims); n > 0 {
-			logger.Info("设备策略更新后,断开实际超额设备的 ", n, " 条连接")
-		}
-	}
-	if len(specs) > 0 || len(groups) > 0 {
-		logger.Info("已应用 ", len(specs), " 个用户的限速/设备数策略,", len(groups), " 个代理池")
-	}
-	return nil
+	return specs, groups, nil
 }
 
 // restorePendingStats moves traffic that could not be committed while an old
@@ -1315,7 +1403,8 @@ func Run(dbPath string) error {
 	logger.InitLogger(logging.INFO)
 	// 有待还原的备份(面板上传后重启到这里)先原子替换数据库与证书
 	if applied, err := backup.ApplyPending(dbPath); err != nil {
-		logger.Error("应用待还原备份失败(已改名为 .failed,继续用当前库): ", err)
+		// 备份包已改名 .failed。注意错误文本里会说明数据库有没有换:证书阶段出错时库**已经**是备份里的了。
+		logger.Error("应用待还原备份时出错(备份包已改名为 .failed): ", err)
 	} else if applied {
 		logger.Info("已从备份还原数据库与证书")
 	}

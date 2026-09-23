@@ -84,24 +84,36 @@ func (l *Limiter) ReconcileDevices() map[string][]string {
 	return victims
 }
 
-// reconcileDevicesLocked 收敛失联后重新合并的设备集合。各机按同一 IP 顺序选出
-// 超额设备，避免两台机器各自保留自己的设备、永久超限；未超额的设备不会被踢。
-// 只处理活跃设备记录，副机配置和线路完全不在这里修改。
+// reconcileDevicesLocked 并集(本机在线 + 副机上报)超过上限时,算出**哪些 IP 不再接受新登记**。
+//
+// 它**不会**断开任何已经连着的设备,返回值永远是空的。你定过的语义是"设备池跨机并集只拒新设备,
+// 已连接的不动"(0.6.9 就是这么做的)。0.6.10 把这里改成按 IP 字典序踢掉在线设备:一个连了几小时、
+// 完全合规的付费用户会因为 IP 排得靠后被断网,而且之后池已被别人占满还连不回来;副机失联恢复
+// 那一轮同样可能踢掉健康主机上的老设备、留下失联期间在副机上新加的(踢谁只看 IP 排序)。
+//
+// 这里的做法:本机正在连着的设备一律保留(它们登记时是合规的,超限后靠空闲窗口自然释放);
+// 剩余名额留给副机上报的 IP,按固定顺序取,取不到名额的那些在本机拒绝新登记。
+// 各机以自己的在线集合为基准,算出的拒绝名单**不一定相同**(A 机保留自己的两台,B 机保留自己的一台),
+// 但谁都不踢、谁都不放新 IP,并集不会再涨 —— 副机失联恢复后可能短暂超过上限(最坏各机上限之和),
+// 靠 60 秒空闲窗口收敛。别为了"各机一致"去踢在线设备:0.6.10 就是这么走偏的。
 func (l *Limiter) reconcileDevicesLocked(now int64) map[string][]string {
 	all := make(map[string]map[string]bool, len(l.limits))
+	local := make(map[string]map[string]bool, len(l.limits))
 	l.reconciledRejects = map[string]map[string]bool{}
 	for user := range l.limits {
 		l.pruneLocked(user, now)
 		set := map[string]bool{}
+		mine := map[string]bool{}
 		for ip := range l.ips[user] {
 			set[ip] = true
+			mine[ip] = true
 		}
 		for ip := range l.externalLocked(user, now) {
 			set[ip] = true
 		}
-		all[user] = set
+		all[user], local[user] = set, mine
 		if limit := l.limits[user].deviceLimit; limit > 0 {
-			for _, ip := range excessDevices(set, limit) {
+			for _, ip := range excessExternal(set, mine, limit) {
 				l.rejectDeviceLocked(user, ip)
 				delete(set, ip)
 			}
@@ -112,30 +124,46 @@ func (l *Limiter) reconcileDevicesLocked(now int64) map[string][]string {
 			continue
 		}
 		set := map[string]bool{}
+		mine := map[string]bool{}
 		for _, user := range l.groupUsers[group] {
 			for ip := range all[user] {
 				set[ip] = true
 			}
+			for ip := range local[user] {
+				mine[ip] = true
+			}
 		}
-		for _, ip := range excessDevices(set, lim.deviceLimit) {
+		for _, ip := range excessExternal(set, mine, lim.deviceLimit) {
 			for _, user := range l.groupUsers[group] {
-				if all[user][ip] {
+				if all[user][ip] && !local[user][ip] {
 					l.rejectDeviceLocked(user, ip)
 				}
 			}
 		}
 	}
-	victims := map[string][]string{}
-	for user, ips := range l.reconciledRejects {
-		for ip := range ips {
-			if _, local := l.ips[user][ip]; local {
-				victims[user] = append(victims[user], ip)
-				delete(l.ips[user], ip)
-			}
-		}
-		sort.Strings(victims[user])
+	return map[string][]string{} // 永远不踢已连接的设备
+}
+
+// excessExternal 在"本机在线的一律保留"之后,并集里还放不下的那些外部 IP(按固定顺序取,各机算出来一样)。
+func excessExternal(set, local map[string]bool, limit int) []string {
+	if len(set) <= limit {
+		return nil
 	}
-	return victims
+	room := limit - len(local)
+	ext := make([]string, 0, len(set))
+	for ip := range set {
+		if !local[ip] {
+			ext = append(ext, ip)
+		}
+	}
+	sort.Strings(ext)
+	if room <= 0 {
+		return ext
+	}
+	if room >= len(ext) {
+		return nil
+	}
+	return ext[room:]
 }
 
 func excessDevices(set map[string]bool, limit int) []string {

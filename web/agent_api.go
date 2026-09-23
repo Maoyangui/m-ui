@@ -249,6 +249,10 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 			logger.Error("记录副机待重载状态失败: ", err)
 		}
 		logger.Warning("应用主机配置 ", snap.Revision, " 失败: ", reloadErr)
+		// 配置没应用成功,不等于执法可以停:运行中的数据面(回滚后的旧配置)上,用户表已经尽量热更新过了
+		// (见 runner 的冷却期逻辑),这里把该踢的人先在本机踢掉。待踢名单留着,下次成功应用时会再踢一遍(幂等)。
+		// 0.6.10 在这里直接 return,于是待重载期间停用、换凭据的用户在这台副机上一直连得上。
+		s.kickBestEffort(revoked, kickNames)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机数据面应用失败: " + reloadErr.Error()})
 		return
 	}
@@ -289,6 +293,20 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 	}
 	logger.Info("已应用主机配置 ", snap.Revision, "(线路变化: ", linesChanged, ",上游变化: ", upsChanged, ")")
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "revision": snap.Revision})
+}
+
+// kickBestEffort 本机能踢多少踢多少,不因为副机没确认就一个都不踢。只在"配置应用失败"那条路上用。
+func (s *Server) kickBestEffort(revoked, kickNames []string) {
+	for _, name := range revoked {
+		if n := s.run.KickShare(name); n > 0 {
+			logger.Info("临时共享已取消,断开 ", name, " 的 ", n, " 条连接")
+		}
+	}
+	for _, name := range kickNames {
+		if closed, sessions := s.run.KickUserLocal(name); closed > 0 || sessions > 0 {
+			logger.Info("配置应用失败期间先在本机断开 ", name, " 旧凭据上的 ", closed, " 条连接、", sessions, " 条会话")
+		}
+	}
 }
 
 const agentKickPendingKey = "hubKickPending"
@@ -341,7 +359,8 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	host, _ := os.Hostname()
 	rep := hub.Report{
 		Version: Version, Hostname: host, CoreRunning: s.run.CoreRunning(), Uptime: s.run.Uptime(),
-		Revision: s.setting("hubRevision"), Onlines: map[string][]string{}, CertDays: s.run.CertInfo().DaysLeft,
+		Revision: s.setting("hubRevision"), ReloadPending: strings.TrimSpace(s.setting("hubReloadPending")) != "",
+		Onlines: map[string][]string{}, CertDays: s.run.CertInfo().DaysLeft,
 		PublicIP: s.setting("publicIp"),
 		Conns:    s.recentConns(50),
 	}

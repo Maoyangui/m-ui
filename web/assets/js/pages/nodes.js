@@ -36,7 +36,8 @@ function statusCell(n) {
   if (!n.enabled) return badge(t('common.disabled'));
   const s = n.status;
   if (!s) return badge(t('node.pending'), 'warn');
-  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : ''}`;
+  // 在线但有话要说(配置推不下去、数据面没应用成功):这台机器并没有离线,但管理员必须看见
+  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.error ? `<div class="sub-cell ellip warn-text" title="${esc(s.error)}">${esc(shortErr(s.error))}</div>` : (s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : '')}`;
   return `${badge(t('common.offline'), 'danger')}<div class="sub-cell ellip" title="${esc(s.error || '')}">${esc(shortErr(s.error))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
 }
 
