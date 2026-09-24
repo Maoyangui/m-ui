@@ -1,3 +1,10 @@
+//go:build !race
+
+// 这两条测试起的是真实的内嵌数据面。竞争检测(-race)下会稳定撞上上游库自己的竞争,与 m-ui 无关:
+//   - sing-box route.(*NetworkManager).Start 写接口表,同时它自己的接口监听 goroutine 在 updateInterface 里读;
+//   - sing common/bufio.(*CachedConn).Close 读 c.buffer,同时拷贝 goroutine 的 Read 在写它(踢线关连接时)。
+// 普通 go test 照跑(CI 的 test 步骤),只在 -race 那一步跳过。m-ui 自己在这里暴露出来的日志级别竞争已修(core/log.go)。
+
 package web
 
 import (

@@ -133,12 +133,14 @@ func NewFactory(options log.Options) (log.Factory, error) {
 var _ log.Factory = (*defaultFactory)(nil)
 
 type defaultFactory struct {
-	ctx        context.Context
-	formatter  log.Formatter
-	writer     io.Writer
-	file       *os.File
-	filePath   string
-	level      log.Level
+	ctx       context.Context
+	formatter log.Formatter
+	writer    io.Writer
+	file      *os.File
+	filePath  string
+	// level 用原子量:数据面运行中会从面板改日志级别(SetLevel),而各个 goroutine 每写一条日志都要读它。
+	// 以前是普通字段,竞争检测一跑就报(读写同一个 uint8 没有同步,按 Go 内存模型是未定义行为)。
+	level      atomic.Uint32
 	subscriber *observable.Subscriber[log.Entry]
 	observer   *observable.Observer[log.Entry]
 }
@@ -154,9 +156,9 @@ func NewDefaultFactory(
 		formatter:  formatter,
 		writer:     writer,
 		filePath:   filePath,
-		level:      log.LevelTrace,
 		subscriber: observable.NewSubscriber[log.Entry](128),
 	}
+	factory.level.Store(uint32(log.LevelTrace))
 	return factory
 }
 
@@ -180,11 +182,11 @@ func (f *defaultFactory) Close() error {
 }
 
 func (f *defaultFactory) Level() log.Level {
-	return f.level
+	return log.Level(f.level.Load())
 }
 
 func (f *defaultFactory) SetLevel(level log.Level) {
-	f.level = level
+	f.level.Store(uint32(level))
 }
 
 func (f *defaultFactory) Logger() log.ContextLogger {
@@ -210,7 +212,7 @@ type observableLogger struct {
 
 func (l *observableLogger) Log(ctx context.Context, level log.Level, args []any) {
 	level = log.OverrideLevelFromContext(level, ctx)
-	if level > l.level {
+	if level > l.Level() {
 		return
 	}
 	msg := F.ToString(args...)
