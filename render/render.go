@@ -298,6 +298,11 @@ func inboundBase(line model.Line, cert NodeCert) (map[string]interface{}, error)
 			return nil, fmt.Errorf("解析线路参数: %w", err)
 		}
 	}
+	// Options 是 JSON 字面量 null(老库、手工改库、主机那边列为 NULL 推过来)时,Unmarshal 会把 map 置成 nil,
+	// 下面一写就 panic:副机的 HTTP 处理协程崩掉、主机只看到 EOF、永远重试不成功。当空参数处理。
+	if inbound == nil {
+		inbound = map[string]interface{}{}
+	}
 	// 面板自有的开关键(vision / port_hopping 等),不是 sing-box 字段
 	for k := range panelOnlyOptions {
 		delete(inbound, k)
