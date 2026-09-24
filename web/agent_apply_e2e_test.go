@@ -267,8 +267,7 @@ func TestAgentApplyEndToEnd(t *testing.T) {
 	}
 }
 
-// 不经 hub、直接打接口的几条拒绝路径:不是副机 403、令牌错 / 缺令牌 401、缺修订号 400、数据面未初始化 503。
-// ---- 测试助手 ----
+// ---- 测试助手 ----(不经 hub、直接打接口的拒绝路径在 agent_apply_auth_test.go)
 
 // freeTCPPort 找一个当前没人监听的端口给测试线路用。
 func freeTCPPort(t *testing.T) int {

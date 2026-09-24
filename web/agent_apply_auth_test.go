@@ -13,7 +13,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// 副机 agent 接口的鉴权与参数校验。不起数据面,所以不带 !race 标签 —— 竞争检测那一步照样跑它
+// 副机 agent 接口的鉴权与参数校验(不经 hub、直接打接口的几条拒绝路径:不是副机 403、令牌错 / 缺令牌 401、
+// 缺修订号 400、数据面未初始化 503)。不起数据面,所以不带 !race 标签 —— 竞争检测那一步照样跑它
 // (agent_apply_e2e_test.go 起真实数据面,会撞上上游库自己的竞争,才在 -race 下跳过)。
 
 func TestAgentApplyAuthAndValidation(t *testing.T) {
