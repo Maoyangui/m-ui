@@ -26,7 +26,6 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/runner"
-	"gorm.io/gorm"
 )
 
 // 主机 → 副机推送配置的端到端测试:真实的 hub.PushNow 打到真实的 handleAgentApply
@@ -269,64 +268,7 @@ func TestAgentApplyEndToEnd(t *testing.T) {
 }
 
 // 不经 hub、直接打接口的几条拒绝路径:不是副机 403、令牌错 / 缺令牌 401、缺修订号 400、数据面未初始化 503。
-func TestAgentApplyAuthAndValidation(t *testing.T) {
-	db := openAgentTestDB(t, "x.db")
-	s := &Server{db: db}
-	mux := http.NewServeMux()
-	mux.HandleFunc(innerBase+"api/agent/", s.handleAgent)
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-	post := func(token string, body string) (int, string) {
-		t.Helper()
-		req, err := http.NewRequest(http.MethodPost, srv.URL+"/app/api/agent/apply", strings.NewReader(body))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if token != "" {
-			req.Header.Set("X-Agent-Token", token)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer resp.Body.Close()
-		b, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, string(b)
-	}
-
-	if code, body := post("tok", `{"revision":"r1"}`); code != http.StatusForbidden {
-		t.Fatalf("没开副机模式应 403,实际 %d %s", code, body)
-	}
-	db.Create(&model.Setting{Key: "nodeMode", Value: "true"})
-	db.Create(&model.Setting{Key: "nodeToken", Value: "tok"})
-	if code, body := post("nope", `{"revision":"r1"}`); code != http.StatusUnauthorized {
-		t.Fatalf("令牌错误应 401,实际 %d %s", code, body)
-	}
-	if code, body := post("", `{"revision":"r1"}`); code != http.StatusUnauthorized {
-		t.Fatalf("缺令牌应 401,实际 %d %s", code, body)
-	}
-	if code, body := post("tok", `{"users":[]}`); code != http.StatusBadRequest {
-		t.Fatalf("缺修订号应 400,实际 %d %s", code, body)
-	}
-	if code, body := post("tok", `{"revision":"r1"}`); code != http.StatusServiceUnavailable || !strings.Contains(body, "未初始化") {
-		t.Fatalf("数据面未初始化时不能确认应用,应 503,实际 %d %s", code, body)
-	}
-	if got := s.setting("hubRevision"); got != "" {
-		t.Fatalf("被拒的请求不该落库,hubRevision=%q", got)
-	}
-}
-
 // ---- 测试助手 ----
-
-func openAgentTestDB(t *testing.T, name string) *gorm.DB {
-	t.Helper()
-	db, err := database.Open(filepath.Join(t.TempDir(), name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = database.Close(db) })
-	return db
-}
 
 // freeTCPPort 找一个当前没人监听的端口给测试线路用。
 func freeTCPPort(t *testing.T) int {

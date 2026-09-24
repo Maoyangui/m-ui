@@ -434,7 +434,7 @@ func (s *Server) validateLine(line *model.Line) error {
 	if s.portChanged(line) && render.LineOnNode(*line, s.localNodeID()) && !portBindable(line.Port) {
 		return fmt.Errorf("端口 %d 已被本机其它程序占用,换一个", line.Port)
 	}
-	if len(line.Options) == 0 {
+	if len(line.Options) == 0 || strings.TrimSpace(string(line.Options)) == "null" { // null 同上,见 validateUpstream
 		line.Options = json.RawMessage("{}")
 	}
 	var probe map[string]interface{}
@@ -666,7 +666,9 @@ func (s *Server) validateUpstream(up *model.Upstream) error {
 	if up.Type == "" {
 		return errors.New("上游类型不能为空")
 	}
-	if len(up.Options) == 0 {
+	// null 和空一样归一成 {}:把 null 解码进 map 不报错(map 变成 nil),校验照样放行,
+	// 存进库以后渲染时一写就崩。
+	if len(up.Options) == 0 || strings.TrimSpace(string(up.Options)) == "null" {
 		up.Options = json.RawMessage("{}")
 	}
 	var probe map[string]interface{}

@@ -473,6 +473,11 @@ func OutboundJSON(u model.Upstream) (json.RawMessage, error) {
 			return nil, fmt.Errorf("上游 %q 参数解析失败: %w", u.Name, err)
 		}
 	}
+	// 和 inboundBase 同一个坑:参数是 JSON 字面量 null 时 Unmarshal 把 map 置成 nil,下一行写入就 panic ——
+	// 主机、副机每次重载都崩,启动时撞上就反复崩溃重启。当空参数处理。
+	if opts == nil {
+		opts = map[string]interface{}{}
+	}
 	opts["type"] = u.Type
 	opts["tag"] = u.Name
 	return json.Marshal(opts)

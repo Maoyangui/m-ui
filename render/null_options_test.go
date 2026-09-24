@@ -22,3 +22,18 @@ func TestInboundBaseToleratesNullOptions(t *testing.T) {
 		}
 	}
 }
+
+// 上游(出站)同一个坑:参数是 null 时 OutboundJSON 以前在 nil map 上 panic,
+// 主机和副机的每次重载都会崩,启动时撞上就反复崩溃重启。
+func TestOutboundJSONToleratesNullOptions(t *testing.T) {
+	for _, opts := range []json.RawMessage{json.RawMessage("null"), nil, json.RawMessage("{}")} {
+		raw, err := OutboundJSON(model.Upstream{Name: "up", Type: "socks", Options: opts})
+		if err != nil {
+			t.Fatalf("Options=%s: %v", string(opts), err)
+		}
+		var out map[string]interface{}
+		if err := json.Unmarshal(raw, &out); err != nil || out["type"] != "socks" || out["tag"] != "up" {
+			t.Fatalf("Options=%s: 渲染结果不对: %s %v", string(opts), raw, err)
+		}
+	}
+}
