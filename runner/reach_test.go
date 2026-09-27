@@ -19,14 +19,17 @@ func TestReachTargets(t *testing.T) {
 	}
 	defer database.Close(r.db)
 	db := r.db
-	db.Model(&model.Node{}).Where("is_local = ?", true).Updates(map[string]interface{}{"name": "香港1", "public_ip": "203.0.113.1"})
+	// 本机的连接地址填 127.0.0.1(不做入站的主机就是这么配的):要跳过它,用探测到的公网 IP
+	db.Model(&model.Node{}).Where("is_local = ?", true).Updates(map[string]interface{}{"name": "香港1", "addr": "127.0.0.1", "public_ip": "203.0.113.1"})
 	r.setSetting("subPort", "2096")
 	a := model.Node{Name: "台湾", ApiUrl: "https://tw.example.com:2053/app/", Addr: "198.51.100.2", PublicIP: "198.51.100.99", Enabled: true, Sort: 2}
 	b := model.Node{Name: "日本", ApiUrl: "https://jp.example.com/app/", PublicIP: "198.51.100.3", Enabled: true, Sort: 3}
 	c := model.Node{Name: "停用", PublicIP: "198.51.100.4", Enabled: true, Sort: 4}
+	d := model.Node{Name: "没地址", Addr: "10.0.0.5", PublicIP: "192.168.1.9", Enabled: true, Sort: 5}
 	db.Create(&a)
 	db.Create(&b)
 	db.Create(&c)
+	db.Create(&d)
 	db.Model(&model.Node{}).Where("id = ?", c.Id).Update("enabled", false)
 	ids := func(v ...uint) json.RawMessage { raw, _ := json.Marshal(v); return raw }
 	// 台湾:先是一条 UDP 线路,再是一条 TCP 线路(应当选 TCP 那条);日本只有 UDP;本机什么都没部署
@@ -46,8 +49,11 @@ func TestReachTargets(t *testing.T) {
 			port             int
 		}{tg.Host, tg.PortFrom, tg.PortLine, tg.Port}
 	}
-	if _, ok := got["停用"]; ok || len(got) != 3 {
+	if _, ok := got["停用"]; ok || len(got) != 4 {
 		t.Fatalf("目标 = %+v", got)
+	}
+	if g := got["没地址"]; g.host != "" {
+		t.Fatalf("内网地址不该拿去测: %+v", g)
 	}
 	if g := got["香港1"]; g.host != "203.0.113.1" || g.port != 2096 || g.from != "sub" {
 		t.Fatalf("本机 = %+v", g)

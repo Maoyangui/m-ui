@@ -51,36 +51,60 @@ func (r *Runner) reachTargets(ctx context.Context) []reach.Target {
 	return out
 }
 
+// 连接地址可能故意填成 127.0.0.1(不做入站的主机让订阅里它那组节点指向本机),
+// 这种地址测不了、也不代表这台服务器,跳过它去用探测到的公网 IP。
 func (r *Runner) reachHost(ctx context.Context, n model.Node) string {
-	if ip := net.ParseIP(strings.TrimSpace(n.Addr)); ip != nil && ip.To4() != nil {
-		return ip.String()
+	if ip := publicIPv4(n.Addr); ip != "" {
+		return ip
 	}
 	pub := n.PublicIP
-	if n.IsLocal && pub == "" {
+	if n.IsLocal && publicIPv4(pub) == "" {
 		pub = r.setting("publicIp")
 	}
-	if ip := net.ParseIP(strings.TrimSpace(pub)); ip != nil && ip.To4() != nil {
-		return ip.String()
-	}
-	host := strings.TrimSpace(n.Addr)
-	if host == "" {
-		host = strings.TrimSpace(n.Domain)
-	}
-	if host == "" && n.IsLocal {
-		host = strings.TrimSpace(r.setting("webDomain"))
-	}
-	if host == "" {
-		return ""
+	if ip := publicIPv4(pub); ip != "" {
+		return ip
 	}
 	// 域名在主机上解析成 IPv4 再测:让大陆测点自己解析会撞上 DNS 污染,测出来的就不是这台服务器了
-	c, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	ips, err := net.DefaultResolver.LookupIP(c, "ip4", host)
-	if err != nil || len(ips) == 0 {
+	for _, host := range []string{n.Addr, n.Domain, localDomain(r, n)} {
+		host = strings.TrimSpace(host)
+		if host == "" || net.ParseIP(host) != nil {
+			continue
+		}
+		c, cancel := context.WithTimeout(ctx, 5*time.Second)
+		ips, err := net.DefaultResolver.LookupIP(c, "ip4", host)
+		cancel()
+		if err != nil {
+			continue
+		}
+		for _, ip := range ips {
+			if s := publicIPv4(ip.String()); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func localDomain(r *Runner, n model.Node) string {
+	if n.IsLocal {
+		return r.setting("webDomain")
+	}
+	return ""
+}
+
+// publicIPv4 是公网 IPv4 才原样返回;回环、内网、链路本地、运营商级 NAT、组播、未指定地址一律当没有。
+func publicIPv4(s string) string {
+	ip := net.ParseIP(strings.TrimSpace(s))
+	if ip == nil || ip.To4() == nil {
 		return ""
 	}
-	return ips[0].String()
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsMulticast() || cgnat.Contains(ip) {
+		return ""
+	}
+	return ip.To4().String()
 }
+
+var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
 
 func (r *Runner) settingIntOr(key string, def int) int {
 	if n, err := strconv.Atoi(strings.TrimSpace(r.setting(key))); err == nil && n > 0 && n < 65536 {
