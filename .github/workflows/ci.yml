@@ -34,7 +34,7 @@ jobs:
       # 不含 runner:它的用例会真的把 sing-box 起起来,而 sing-box 自己的网络管理器与
       # 本地 DNS 解析器之间存在竞态(上游问题,不是本项目的代码),会淹掉真正要看的报告。
       - name: Tests (race)
-        run: go test -race -tags with_utls ./core/... ./hub/... ./monitor/... ./web/...
+        run: go test -race -tags with_utls ./core/... ./hub/... ./monitor/... ./reach/... ./web/...
       - name: Build (linux amd64 / arm64)
         run: |
           for arch in amd64 arm64; do

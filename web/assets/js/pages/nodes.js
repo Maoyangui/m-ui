@@ -1,30 +1,44 @@
 import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk } from '../ui.js';
+import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, setHTML } from '../ui.js';
+import { loadReach, reachCell, reachToolbar, refreshDetail, setNodes, setReachListener } from '../reach.js';
 
 export const title = () => t('node.title');
 export const subtitle = () => t('node.subtitle');
 let data = { nodes: [], revision: '', role: 'master', masterId: 0, appliedAt: '' };
 const isNodeView = () => data.role === 'node';
 
+setNodes(() => data.nodes);
+setReachListener(() => { renderReachBar(); renderRows(); refreshDetail(); });
+
 export async function render(el) {
-  data = await get('nodes');
+  [data] = await Promise.all([get('nodes'), loadReach()]);
   el.innerHTML = `
     <div class="toolbar">
       <span class="muted small">${t('node.revision')} <code>${esc(data.revision || '—')}</code></span>
       <span class="grow"></span>
+      <span class="row" id="reach-bar"></span>
       ${isNodeView() ? '' : `<button class="btn primary" data-act="node.add">${t('node.add')}</button>`}
     </div>
     <p class="hint" style="margin-bottom:.8rem">${isNodeView() ? t('node.nodeView') : t('node.howto')}</p>
     <div class="table-wrap"><table class="grid tight nodes">
-      <thead><tr><th>${t('common.name')}</th><th>${t('node.domain')}</th><th>${t('common.status')}</th><th>${t('node.sync')}</th><th>${t('node.core')}</th><th>${t('node.online')}</th><th></th></tr></thead>
+      <thead><tr><th>${t('common.name')}</th><th>${t('node.domain')}</th><th>${t('common.status')}</th><th title="${esc(t('reach.colHint'))}">${t('reach.col')}</th><th>${t('node.sync')}</th><th>${t('node.core')}</th><th>${t('node.online')}</th><th></th></tr></thead>
       <tbody id="nodes-body"></tbody>
     </table></div>`;
+  renderReachBar();
   renderRows();
 }
 
-export async function tick() { if (!document.getElementById('nodes-body')) return; data = await get('nodes'); renderRows(); }
+export async function tick() {
+  if (!document.getElementById('nodes-body')) return;
+  [data] = await Promise.all([get('nodes'), loadReach()]);
+  renderReachBar();
+  renderRows();
+  refreshDetail();
+}
+
+function renderReachBar() { setHTML('reach-bar', reachToolbar(isNodeView())); }
 
 // 副机视角:自己是"本机",主机那行标"主机 · 最近同步",其它副机标"主机管理";副机不探测别的机器
 function statusCell(n) {
@@ -100,8 +114,9 @@ function actionsCell(n) {
 function renderRows() {
   const body = document.getElementById('nodes-body');
   if (!body) return;
-  if (!data.nodes.length) { body.innerHTML = `<tr><td colspan="7">${empty()}</td></tr>`; return; }
-  body.innerHTML = data.nodes.map(n => {
+  if (!data.nodes.length) { setHTML(body, `<tr><td colspan="8">${empty()}</td></tr>`); return; }
+  // 每 5 秒刷新一次:内容没变就不动 DOM(整表重画会让鼠标下的按钮、提示闪一下)
+  setHTML(body, data.nodes.map(n => {
     const s = n.status || {};
     const domain = n.domain || (n.isLocal ? state.settings.webDomain || '' : '');
     const addr = n.addr || n.publicIp || '';
@@ -109,11 +124,12 @@ function renderRows() {
       <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl && !isNodeView() ? `<div class="sub-cell mono ellip" title="${esc(n.apiUrl)}">${esc(n.apiUrl)}</div>` : ''}</td>
       <td class="mono"><span class="ellip" title="${esc(domain)}">${esc(domain || '—')}</span>${addr ? `<div class="sub-cell mono">${esc(addr)}${n.addr ? ' · ' + t('node.addrManual') : ''}</div>` : ''}</td>
       <td>${statusCell(n)}</td>
+      <td class="reach-td">${reachCell(n, isNodeView())}</td>
       <td>${syncCell(n)}</td>
       <td>${coreCell(n)}</td>
       <td class="num">${n.isLocal ? (state.status.onlineUsers ?? '—') : (s.ok ? s.onlineUsers : '—')}</td>
       <td class="actions">${actionsCell(n)}</td></tr>`;
-  }).join('');
+  }).join(''));
 }
 
 function editNode(id) {

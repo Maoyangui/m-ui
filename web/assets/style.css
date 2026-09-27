@@ -136,10 +136,13 @@ table.grid.tight { min-width: 0; table-layout: fixed; }
 .star-card .hint { margin: .15rem 0 0; }
 .pager select { padding: .2rem .35rem; font: inherit; font-size: .8rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
 /* 服务器表:窄列给定宽度,余下宽度留给名称/地址/状态三列 */
-.grid.nodes th:nth-child(4), .grid.nodes td:nth-child(4),
-.grid.nodes th:nth-child(5), .grid.nodes td:nth-child(5) { width: 7.5rem; }
-.grid.nodes th:nth-child(6), .grid.nodes td:nth-child(6) { width: 3.5rem; }
-.grid.nodes th:nth-child(7), .grid.nodes td:nth-child(7) { width: 13.5rem; }
+.grid.nodes th:nth-child(4), .grid.nodes td:nth-child(4) { width: 10.5rem; }
+.grid.nodes th:nth-child(5), .grid.nodes td:nth-child(5),
+.grid.nodes th:nth-child(6), .grid.nodes td:nth-child(6) { width: 7.5rem; }
+.grid.nodes th:nth-child(7), .grid.nodes td:nth-child(7) { width: 3.5rem; }
+.grid.nodes th:nth-child(8), .grid.nodes td:nth-child(8) { width: 13.5rem; }
+/* 窄屏:几列定宽加起来比屏幕还宽,名称 / 地址 / 状态会被挤成一个字一行;改成整表横向滚动 */
+@media (max-width: 900px) { table.grid.nodes { min-width: 62rem; } }
 
 /* ===== 控件 ===== */
 input, select, textarea { width: 100%; padding: .48rem .65rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; transition: border-color .15s, box-shadow .15s; }
@@ -313,6 +316,7 @@ a.stat:hover { border-color: var(--primary); }
 .alert-bar { display: flex; align-items: center; gap: .8rem; margin: .9rem 1.5rem 0; padding: .6rem .9rem; border: 1px solid var(--danger); background: var(--danger-soft); color: var(--danger); border-radius: var(--radius-sm); font-weight: 500; }
 .alert-bar.warn{background:var(--warn-bg,#fff7ed);color:var(--warn-fg,#9a3412);border-color:var(--warn-bd,#fdba74)}
 [data-theme="dark"] .alert-bar.warn{background:#3a2410;color:#fdba74;border-color:#7c3f10}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .alert-bar.warn { background: #3a2410; color: #fdba74; border-color: #7c3f10; } }
 .alert-bar{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap}
 .alert-bar span { flex: 1; }
 @media (max-width: 900px) { .alert-bar { margin: .8rem 1rem 0; } }
@@ -395,3 +399,42 @@ tr.ext-sub > td { padding: 0 .5rem .9rem; background: rgba(127, 127, 127, .05); 
 .ext-link { margin-top: .8rem; display: grid; gap: .3rem; }
 .ext-results { padding-left: 1.2rem; }
 .ext-results li { margin: .25rem 0; }
+
+/* ===== 大陆连通检测 ===== */
+/* 表格里的一格:整格可点,打开明细抽屉 */
+button.reach-cell { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; border-radius: var(--radius-sm); }
+button.reach-cell:hover .badge { filter: brightness(.97); }
+button.reach-cell:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.sub-cell.link { color: var(--primary-text); }
+.rc-row { display: flex; gap: .25rem; margin-top: .3rem; flex-wrap: wrap; }
+.rc { display: inline-flex; align-items: baseline; gap: .2rem; font-size: .7rem; line-height: 1.5; padding: 0 .32rem; border-radius: 4px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+.rc b { font-family: var(--mono); font-weight: 600; }
+.rc.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.rc.weak { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.rc.down { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+.spin { display: inline-block; width: .72rem; height: .72rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -1px; animation: mui-spin .8s linear infinite; }
+@keyframes mui-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
+.reach-sum { white-space: nowrap; }
+.ok-text { color: var(--ok); } .danger-text { color: var(--danger); } .warn-text { color: var(--warn); }
+/* 抽屉:结论条 + 分运营商 + 历史 */
+.reach-hero { border-left: 3px solid var(--border-strong); background: var(--surface-2); border-radius: var(--radius-sm); padding: .6rem .85rem; margin-bottom: .8rem; }
+.reach-hero .v { font-weight: 650; font-size: 1.02rem; margin-bottom: .2rem; }
+.reach-hero p { color: var(--muted); font-size: .85rem; line-height: 1.5; }
+.reach-hero.ok { border-left-color: var(--ok); } .reach-hero.warn { border-left-color: var(--warn); } .reach-hero.danger { border-left-color: var(--danger); }
+.reach-meta { margin-bottom: .2rem; }
+.reach-g { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .45rem .65rem; margin-bottom: .4rem; }
+.reach-g-head { display: flex; align-items: center; gap: .55rem; }
+.reach-g-name { flex: 1; font-weight: 500; }
+.reach-g details { margin-top: .3rem; }
+.reach-g summary { cursor: pointer; color: var(--muted); font-size: .78rem; }
+.reach-probes { list-style: none; margin: .35rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .2rem; }
+.reach-probes li { display: flex; justify-content: space-between; gap: .6rem; font-size: .78rem; }
+.reach-probes li .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.reach-hist { display: flex; gap: 3px; flex-wrap: wrap; }
+.reach-hist i { width: 13px; height: 13px; border-radius: 3px; background: var(--border-strong); }
+.reach-hist i.ok { background: var(--ok); } .reach-hist i.warn { background: var(--warn); } .reach-hist i.danger { background: var(--danger); }
+/* 导航"服务器"上的红点 */
+#nav a.has-alert { position: relative; }
+#nav a.has-alert::after { content: ""; position: absolute; right: .7rem; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+@media (max-width: 700px) { .reach-sum { display: none; } }

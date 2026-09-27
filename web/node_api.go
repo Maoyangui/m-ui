@@ -206,7 +206,7 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			}
 			// 用户 / 代理"只要这台机器上的入口"的收窄行也要清掉:留着的话,这些人这条线路上
 			// 一台机器都匹配不到,订阅里会悄无声息地少节点。清掉之后按"没有收窄 = 全部服务器"处理。
-			for _, t := range []interface{}{&model.TrafficCursor{}, &model.UserLineNode{}, &model.ResellerLineNode{}} {
+			for _, t := range []interface{}{&model.TrafficCursor{}, &model.UserLineNode{}, &model.ResellerLineNode{}, &model.ReachCheck{}} {
 				if err := tx.Where("node_id = ?", id).Delete(t).Error; err != nil {
 					return err
 				}
@@ -216,6 +216,9 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			badRequest(w, err)
 			return
+		}
+		if s.run != nil { // 测试里没有数据面
+			s.run.Reach().Forget(id)
 		}
 		s.audit(r, "node", "delete", node.Name)
 		if len(disabled) > 0 {

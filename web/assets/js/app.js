@@ -60,7 +60,7 @@ function resetState() {
 export async function load(...what) {
   const all = what.length === 0;
   const jobs = [];
-  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); reloadNotice(); }));
+  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); reloadNotice(); reachNotice(); }));
   if (all || what.includes('settings')) jobs.push(get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
   if (all || what.includes('lines')) jobs.push(get('lines').then(l => { state.lines = l; }));
   if (!isReseller() && (all || what.includes('upstreams'))) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
@@ -157,6 +157,7 @@ function supportLink(a) {
 function renderChrome() {
   document.getElementById('nav').innerHTML = navFor().map(p =>
     `<a href="#/${p}" data-page="${p}"><span class="ic">${ICONS[p] || ''}</span>${t('nav.' + p)}</a>`).join('');
+  reachNotice(); // 导航重画后补上"服务器"的红点
   document.getElementById('modal-cancel').textContent = t('common.cancel');
   document.getElementById('btn-logout').textContent = t('common.logout');
   supportLink(document.getElementById('btn-support'));
@@ -276,6 +277,38 @@ function reloadNotice() {
     try { await post('reload', undefined, LONG); toast(t('dash.reloaded'), 'ok'); }
     catch (err) { toast(err.message, 'err'); }
     finally { await load('status').catch(() => {}); }
+  });
+}
+
+// 大陆连通异常(被墙 / 部分运营商不通):导航"服务器"上亮红点,顶部常驻一条提示。
+// 提示可以点"知道了"按当前这组情况关掉;又有别的服务器出事、或同一台换了结论,再出现。
+function reachNotice() {
+  const bad = (!isReseller() && state.status && state.status.reachBad) || [];
+  const nav = document.querySelector('#nav a[data-page="nodes"]');
+  if (nav) nav.classList.toggle('has-alert', bad.length > 0);
+  let bar = document.getElementById('reach-bar-top');
+  const sig = bad.map(r => r.nodeId + ':' + r.verdict).join(',');
+  let dismissed = '';
+  try { dismissed = localStorage.getItem('m-ui.reachDismissed') || ''; } catch {}
+  if (!bad.length || dismissed === sig) { if (bar) bar.remove(); return; }
+  const list = bad.map(r => `${r.name} ${t('reach.v.' + r.verdict)}`).join(t('reach.sep'));
+  const text = t('reach.alert', { list });
+  if (bar && bar.dataset.sig === sig && bar.dataset.text === text) return;
+  const main = document.querySelector('.main'), page = document.getElementById('page');
+  if (!main || !page) return;
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'reach-bar-top';
+    main.insertBefore(bar, page);
+  }
+  const blocked = bad.some(r => r.verdict !== 'partial');
+  bar.className = 'alert-bar' + (blocked ? '' : ' warn');
+  bar.dataset.sig = sig;
+  bar.dataset.text = text;
+  bar.innerHTML = `<span><b>${esc(text)}</b></span><div class="row"><a href="#/nodes" class="btn sm">${esc(t('reach.view'))}</a><button class="btn sm ghost" id="reach-dismiss">${esc(t('reach.dismiss'))}</button></div>`;
+  bar.querySelector('#reach-dismiss').addEventListener('click', () => {
+    try { localStorage.setItem('m-ui.reachDismissed', sig); } catch {}
+    bar.remove();
   });
 }
 

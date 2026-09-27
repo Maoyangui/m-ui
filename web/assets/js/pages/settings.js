@@ -10,7 +10,7 @@ const defaults = {
   timezone: 'Asia/Shanghai', webListen: '0.0.0.0', webPort: 2053, webPath: '/app/', subListen: '0.0.0.0', subPort: 2056, subPath: '/sub/', subUpdates: 12,
   resellerListen: '0.0.0.0', resellerPort: 2054, resellerPath: '/dl/',
   tgExpiringDays: 3, tgQuotaPercent: 80, tgDailyHour: 9, upstreamCheckMinutes: 10, upstreamCheckFailThreshold: 2, extRefreshMinutes: 30,
-  upstreamTestUrl: 'http://www.gstatic.com/generate_204', statsBucketSeconds: 60, trafficAge: 30,
+  upstreamTestUrl: 'http://www.gstatic.com/generate_204', statsBucketSeconds: 60, trafficAge: 30, reachMinutes: 90,
 };
 
 // 面板时间显示用的时区(默认 Asia/Shanghai);列表覆盖常见地区,够用且不会写错名字
@@ -61,12 +61,18 @@ const groups = () => [
     ['tgOnUserExpiring', t('set.tgOnUserExpiring'), 'boolOn'], ['tgExpiringDays', t('set.tgExpiringDays'), 'number'],
     ['tgOnQuota', t('set.tgOnQuota'), 'boolOn'], ['tgQuotaPercent', t('set.tgQuotaPercent'), 'number'],
     ['tgOnRuleLimit', t('set.tgOnRuleLimit'), 'bool'],
-    ['tgOnUpstream', t('set.tgOnUpstream'), 'boolOn'], ['tgOnCore', t('set.tgOnCore'), 'boolOn'],
+    ['tgOnUpstream', t('set.tgOnUpstream'), 'boolOn'], ['tgOnCore', t('set.tgOnCore'), 'boolOn'], ['tgOnReach', t('set.tgOnReach'), 'boolOn'],
     ['tgDaily', t('set.tgDaily'), 'boolOn'], ['tgDailyHour', t('set.tgDailyHour'), 'number'],
   ]},
   { id: 'monitor', title: t('set.monitor'), fields: [
     ['upstreamCheckMinutes', t('set.checkMinutes'), 'number', t('set.checkMinutesHelp')],
     ['upstreamCheckFailThreshold', t('set.checkThreshold'), 'number', t('set.checkThresholdHelp')],
+  ]},
+  // 大陆连通检测只在主机上跑,副机不显示这一组
+  { id: 'reach', title: t('set.reach'), masterOnly: true, fields: [
+    ['reachAuto', t('set.reachAuto'), 'boolOn', t('set.reachAutoHelp')],
+    ['reachMinutes', t('set.reachMinutes'), 'number', t('set.reachMinutesHelp')],
+    ['reachToken', t('set.reachToken'), 'text', t('set.reachTokenHelp')],
   ]},
   { id: 'core', title: t('set.core'), fields: [
     ['certFile', t('set.certFile'), 'text', t('set.certHelp')], ['keyFile', t('set.key'), 'text'],
@@ -88,7 +94,7 @@ export async function render(el) {
       <p class="hint" id="role-hint">${isNode ? t('set.roleNode') : t('set.roleMaster')}</p>
       <div class="row" style="margin-top:.7rem"><button class="btn primary" data-act="set.saveRole">${t('common.save')}</button></div>
     </section>
-    ${groups().map(g => `
+    ${groups().filter(g => !(g.masterOnly && isNode)).map(g => `
       <section class="card">
         <div class="card-head"><h2>${esc(g.title)}${g.restart ? ` <span class="badge warn" title="${t('set.restartHint')}">${t('set.needRestart')}</span>` : ''}</h2><div class="row">${g.test ? `<button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button>` : ''}<button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div></div>
         <div class="form-grid">${g.fields.map(([k, label, type, help, options]) =>

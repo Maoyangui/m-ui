@@ -350,10 +350,21 @@ type Change struct {
 }
 
 // All 供 AutoMigrate 使用。
+// ReachCheck 一次大陆连通检测(每台服务器只留最近几十条)。Detail 是完整结果的 JSON,界面展开明细时用。
+type ReachCheck struct {
+	Id      uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	NodeId  uint   `json:"nodeId" gorm:"index"`
+	At      int64  `json:"at"`
+	Verdict string `json:"verdict"`
+	Auto    bool   `json:"auto"`
+	Detail  string `json:"detail"`
+}
+
 func All() []interface{} {
 	return []interface{}{
 		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
+		&ReachCheck{},
 	}
 }

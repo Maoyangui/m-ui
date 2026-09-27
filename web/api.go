@@ -21,6 +21,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hop"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/reach"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/tz"
 
@@ -114,6 +115,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status["webPort"] = s.settingInt("webPort", 2053)
 	status["webPath"] = s.basePath()
 	status["reload"] = s.run.ReloadStatus() // 最近一次重载:失败会在页面顶部常驻提示
+	if !s.run.IsNode() {
+		status["reachBad"] = s.run.Reach().Bad() // 大陆连通异常的服务器:概览页顶部提示
+	}
 	status["singBox"] = singBoxVersion
 	status["dbSize"] = dbFileSize(s.run.DBPath())
 	if st := s.lastUpgrade(); st != nil { // 上次一键更新回滚过:页面顶部要明说,管理员点"知道了"才消
@@ -1012,6 +1016,12 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if err := s.validatePorts(in); err != nil { // 端口写错会导致重启后打不开,先拦下
 			badRequest(w, err)
 			return
+		}
+		if v, ok := in["reachMinutes"]; ok && strings.TrimSpace(v) != "" {
+			if n, err := strconv.Atoi(strings.TrimSpace(v)); err != nil || n < reach.MinMinutes || n > reach.MaxMinutes {
+				badRequest(w, fmt.Errorf("大陆连通巡检间隔要在 %d 到 %d 分钟之间", reach.MinMinutes, reach.MaxMinutes))
+				return
+			}
 		}
 		roleChanged := false
 		oldDomain := s.setting("webDomain")

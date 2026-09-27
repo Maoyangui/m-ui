@@ -18,6 +18,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/acme"
 	"github.com/Maoyangui/m-ui/backup"
+	"github.com/Maoyangui/m-ui/brand"
 	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database"
@@ -28,6 +29,7 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/monitor"
 	"github.com/Maoyangui/m-ui/notify"
+	"github.com/Maoyangui/m-ui/reach"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/rules"
 	"github.com/Maoyangui/m-ui/sub"
@@ -57,6 +59,7 @@ type Runner struct {
 	jobs         *jobs.Scheduler
 	notifier     *notify.Notifier
 	monitor      *monitor.Monitor
+	reach        *reach.Service
 	hub          *hub.Hub
 	dbPath       string
 	cert         certState
@@ -175,6 +178,11 @@ func New(dbPath string) (*Runner, error) {
 		SelfNodeId:    r.LocalNodeId,
 		Alerting:      func() bool { return !r.IsNode() },
 		DB:            db, Setting: r.setting, CoreRunning: r.CoreRunning, Check: r.CheckUpstream, Notify: r.notifier,
+	})
+	r.reach = reach.New(reach.Deps{
+		DB: db, Setting: r.setting, IsNode: r.IsNode, Targets: r.reachTargets,
+		Notify: func(toggle, text string) { r.notifier.Event(toggle, text) },
+		UA:     "m-ui/" + Version + " (+" + brand.Repo + ")",
 	})
 	r.hub = hub.New(hub.Deps{
 		DB: db, Setting: r.setting, IsNode: r.IsNode, Version: Version,
@@ -1431,6 +1439,8 @@ func Run(dbPath string) error {
 	defer r.jobs.Stop()
 	r.monitor.Start()
 	defer r.monitor.Stop()
+	r.reach.Start()
+	defer r.reach.Stop()
 	r.hub.Start()
 	defer r.hub.Stop()
 
