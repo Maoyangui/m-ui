@@ -252,12 +252,8 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			if p.AssignAll {
-				var userIds []uint
-				tx.Model(&model.User{}).Pluck("id", &userIds)
-				for _, uid := range userIds {
-					if err := tx.Create(&model.UserLine{UserId: uid, LineId: line.Id}).Error; err != nil {
-						return err
-					}
+				if err := assignLineToMainUsers(tx, line.Id); err != nil {
+					return err
 				}
 			}
 			return validateFullConfig(tx, nodeCert)
@@ -348,6 +344,21 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// assignLineToMainUsers 新线路直接分配给主面板的全部现有用户。
+// 代理名下的用户不在内:他们只能用主面板授权给代理的线路,新线路此时还没授权给任何代理。
+func assignLineToMainUsers(tx *gorm.DB, lineID uint) error {
+	var userIds []uint
+	if err := tx.Model(&model.User{}).Where("COALESCE(reseller_id,0) = 0").Pluck("id", &userIds).Error; err != nil {
+		return err
+	}
+	for _, uid := range userIds {
+		if err := tx.Create(&model.UserLine{UserId: uid, LineId: lineID}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // validateFullConfig 用事务内的当前数据渲染整套 sing-box 配置并干跑初始化。
