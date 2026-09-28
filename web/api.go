@@ -774,10 +774,12 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			}
 			p.ExtIds = nil // 外部节点只由主面板分配
 		}
-		if len(p.User.Credentials) == 0 {
-			p.User.Credentials = generateCredentials(p.User.Name)
-		}
+		// 凭据只由服务端生成(前端从不提交,编辑也不经表单覆盖):请求体里自带的一份坏凭据
+		// 会让部署这条线路的每台机器渲染配置失败,热更新从此发不下去。临时共享同理,只能由用户自己生成。
+		p.User.Credentials = generateCredentials(p.User.Name)
+		p.User.ShareToken, p.User.ShareCreds, p.User.ShareAt = "", nil, 0
 		disabled := !p.User.Enabled // Create 之后 gorm 会把默认值 true 回填进结构体,先记下本意
+		p.User.DisabledReason = ""
 		if disabled {
 			p.User.DisabledReason = model.DisabledManual // 建号时就停用 = 手动停用,重置 / 续期不会自动启用
 		}
