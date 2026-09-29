@@ -127,7 +127,7 @@ func (s *Server) StartReseller() error {
 		scheme = "https"
 	}
 	s.rListener = ln
-	s.rSrv = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	s.rSrv = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		if err := s.rSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			logger.Warning("代理面板退出: ", err)
@@ -190,6 +190,7 @@ func (s *Server) handleResellerLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "跨站请求被拒绝"})
 		return
 	}
+	limitLoginBody(w, r)
 	var body struct{ Username, Password, Code string }
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		badRequest(w, err)

@@ -272,7 +272,7 @@ func (s *Server) Start() error {
 	}
 
 	s.listener = ln
-	s.httpSrv = &http.Server{Handler: outer, ReadHeaderTimeout: 10 * time.Second}
+	s.httpSrv = &http.Server{Handler: outer, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		if err := s.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			logger.Warning("面板服务退出: ", err)
@@ -447,6 +447,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return
 	}
+	limitLoginBody(w, r)
 	var req struct{ Username, Password, Code string }
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
@@ -500,6 +501,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.db.Model(&model.Admin{}).Where("id = ?", admin.Id).Update("last_logins", stamp)
 	logger.Info("面板登录成功: ", admin.Username, " 来自 ", clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]string{"username": admin.Username})
+}
+
+// limitLoginBody 登录接口不用登录就能调:请求体封顶、限时读完,
+// 一个几 GB 的 JSON 撑不爆内存(数据面在同一进程里,OOM 就是全员断线),慢慢发的请求也占不住连接。
+func limitLoginBody(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(30 * time.Second))
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
