@@ -52,6 +52,9 @@ func Open(dbPath string) (*gorm.DB, error) {
 	if err := db.AutoMigrate(model.All()...); err != nil {
 		return nil, err
 	}
+	// 会话表改存令牌哈希(64 位十六进制)后,老版本存的明文令牌(96 位)已对不上任何人,删掉,
+	// 免得还留在之后的备份里。升级后管理员 / 代理重新登录一次。
+	db.Exec("DELETE FROM sessions WHERE length(token) <> 64")
 	// 升级新增的列在老行里是 NULL,而 SQL 里 NULL = 0 不成立(订阅按 reseller_id 找人会落空)
 	db.Exec("UPDATE users SET reseller_id = 0 WHERE reseller_id IS NULL")
 	db.Exec("UPDATE users SET sub_token = '' WHERE sub_token IS NULL")

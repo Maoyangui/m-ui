@@ -248,7 +248,7 @@ type LineRef struct {
 }
 
 // Session 面板与代理面板的登录会话:以前只在内存里,每次更新 / 重启所有人都要重新登录。
-// Token 是随机部分加凭据指纹的十六进制令牌;Reseller 非 0 为代理会话;Pending 为代理首登待设密码。
+// Token 存的是令牌(随机部分加凭据指纹)的 SHA-256 十六进制,不是令牌本身;Reseller 非 0 为代理会话;Pending 为代理首登待设密码。
 type Session struct {
 	Token    string `json:"-" gorm:"primaryKey"`
 	User     string `json:"user"`

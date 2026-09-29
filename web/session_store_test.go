@@ -36,6 +36,41 @@ func TestSessionSurvivesRestart(t *testing.T) {
 	}
 }
 
+// 库里(以及整库备份里)只有令牌的哈希:拿着库里的值当 Cookie 登不进去;老版本留下的明文令牌升级时清掉。
+func TestSessionTableHoldsNoUsableToken(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.db")
+	db, err := database.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{db: db}
+	tok := s.newSession("admin")
+	var rows []model.Session
+	db.Find(&rows)
+	if len(rows) != 1 || rows[0].Token == tok {
+		t.Fatalf("库里不该存令牌本身: %+v", rows)
+	}
+	if (&Server{db: db}).validSession(rows[0].Token) {
+		t.Fatal("库里的值不能直接当令牌用")
+	}
+	legacy := tok[:len(tok)-1] + "0" // 老版本存的是 96 位明文令牌
+	db.Create(&model.Session{Token: legacy, User: "admin", Exp: time.Now().Add(time.Hour).Unix()})
+	database.Close(db)
+	db, err = database.Open(path) // 升级后第一次打开
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	var n int64
+	db.Model(&model.Session{}).Where("token = ?", legacy).Count(&n)
+	if n != 0 {
+		t.Fatal("老版本的明文令牌应在升级时清掉")
+	}
+	if !(&Server{db: db}).validSession(tok) {
+		t.Fatal("新会话重启后应仍然有效")
+	}
+}
+
 // A password reset from the CLI opens the same database as the running panel,
 // so the web process must reject the old token even though its in-memory cache
 // still contains it.

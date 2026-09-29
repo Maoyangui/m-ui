@@ -19,8 +19,8 @@ import (
 // changing the sessions table schema.
 const sessionTokenTagLen = 32
 
-// 0.6.9 起令牌尾部带凭据指纹;更早签发的令牌(64 位十六进制)一律拒绝,升级后已登录的管理员 / 代理要重新登录一次 —— 只此一次,
-// 之后升级照旧保持登录(会话落库,进程重启不丢)。
+// 0.6.9 起令牌尾部带凭据指纹;更早签发的令牌(64 位十六进制)一律拒绝。会话表改存哈希的那次升级同样要重新登录一次,
+// 平时升级照旧保持登录(会话落库,进程重启不丢)。
 
 // sessionCredentialTag binds a session to the current credential.  Passwords
 // are already one-way hashes here; hashing the stored value again avoids
@@ -136,6 +136,13 @@ func (s *Server) sessionCredentialValid(token string, sess session) bool {
 
 // 会话:内存 map 是缓存,库里的 sessions 表是事实。登录写库,校验先看缓存、没有再查库,
 // 登出与过期从两边删。这样一键更新、重启、菜单里重启之后,管理员和代理都还在登录状态。
+// 库里只存令牌的 SHA-256:整库备份(含定时推送到 Telegram 的)里拿不到能直接登录的令牌。
+
+// sessionKey 会话令牌在库里的存法。
+func sessionKey(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
 
 func (s *Server) putSession(token string, sess session) {
 	s.mu.Lock()
@@ -145,7 +152,7 @@ func (s *Server) putSession(token string, sess session) {
 	s.sessions[token] = sess
 	s.mu.Unlock()
 	if s.db != nil {
-		s.db.Save(&model.Session{Token: token, User: sess.user, Reseller: sess.reseller, Pending: sess.pending, Exp: sess.exp.Unix()})
+		s.db.Save(&model.Session{Token: sessionKey(token), User: sess.user, Reseller: sess.reseller, Pending: sess.pending, Exp: sess.exp.Unix()})
 	}
 }
 
@@ -159,7 +166,7 @@ func (s *Server) getSession(token string) (session, bool) {
 	s.mu.Unlock()
 	if !ok && s.db != nil {
 		var row model.Session
-		if err := s.db.Where("token = ?", token).First(&row).Error; err == nil {
+		if err := s.db.Where("token = ?", sessionKey(token)).First(&row).Error; err == nil {
 			sess = session{user: row.User, reseller: row.Reseller, pending: row.Pending, exp: time.Unix(row.Exp, 0)}
 			ok = true
 			s.mu.Lock()
@@ -185,7 +192,7 @@ func (s *Server) delSession(token string) {
 	delete(s.sessions, token)
 	s.mu.Unlock()
 	if s.db != nil {
-		s.db.Where("token = ?", token).Delete(&model.Session{})
+		s.db.Where("token = ?", sessionKey(token)).Delete(&model.Session{})
 	}
 }
 
