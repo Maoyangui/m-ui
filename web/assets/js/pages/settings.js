@@ -133,6 +133,7 @@ async function renderPairing() {
   card.innerHTML = `
     <div class="card-head"><h2>${t('set.pairing')}</h2><button class="btn sm" data-act="set.rotateToken">${t('set.rotateToken')}</button></div>
     <p class="hint">${t('set.pairingHelp')}</p>
+    ${/^http:\/\//i.test(info.apiUrl || '') ? `<p class="hint warn-text">${t('set.pairingPlain')}</p>` : ''}
     <dl class="kv" style="margin-top:.5rem">
       <dt>${t('node.apiUrl')}</dt><dd class="mono">${esc(info.apiUrl)}</dd>
       <dt>${t('node.token')}</dt><dd><div class="sub-box"><code id="pair-token">${esc(info.token)}</code><button class="btn sm" data-act="set.copyToken">${t('common.copy')}</button></div></dd>

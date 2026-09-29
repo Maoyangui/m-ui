@@ -396,6 +396,7 @@ Any number of nodes. To attach one:
 1. Install m-ui on the node, sign in, Settings → Role → "run as node".
 2. Copy the API URL and token from Settings → Pairing on the node.
 3. On the master, Servers → Add: name (e.g. "HK", used as the node-name suffix), domain, API URL, token; optionally skip certificate verification if the node uses a self-signed cert (its certificate fingerprint is remembered on first contact and a changed fingerprint is rejected; click "Reset fingerprint" after re-issuing the certificate).
+   With an `http://` API URL the token and every user credential cross the internet in plaintext (marked "Plaintext" on the Servers page): enable HTTPS on the node panel (self-signed is fine), or open the node port to the master only.
 4. Within seconds the master pushes and shows "synced".
 
 How it works: the master compares a snapshot every few seconds and pushes on change; in the same round it pulls the node's traffic ledger, online IPs, status and certificate expiry. Quotas are enforced only on the master; a disabled user reaches every node within about 5 seconds. A node unreachable for over a minute triggers one alert and one more on recovery; while offline it keeps serving users with its last config.

@@ -121,7 +121,7 @@ function renderRows() {
     const domain = n.domain || (n.isLocal ? state.settings.webDomain || '' : '');
     const addr = n.addr || n.publicIp || '';
     return `<tr>
-      <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl && !isNodeView() ? `<div class="sub-cell mono ellip" title="${esc(n.apiUrl)}">${esc(n.apiUrl)}</div>` : ''}</td>
+      <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl && !isNodeView() ? `${isPlain(n.apiUrl) ? ` <span title="${esc(t('node.plainHelp'))}">${badge(t('node.plain'), 'warn')}</span>` : ''}<div class="sub-cell mono ellip" title="${esc(n.apiUrl)}">${esc(n.apiUrl)}</div>` : ''}</td>
       <td class="mono"><span class="ellip" title="${esc(domain)}">${esc(domain || '—')}</span>${addr ? `<div class="sub-cell mono">${esc(addr)}${n.addr ? ' · ' + t('node.addrManual') : ''}</div>` : ''}</td>
       <td>${statusCell(n)}</td>
       <td class="reach-td">${reachCell(n, isNodeView())}</td>
@@ -141,7 +141,7 @@ function editNode(id) {
       ${field(t('node.addr'), `<input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(n.publicIp || t('node.addrAuto'))}">`, t('node.addrHelp'))}
       ${field(t('node.ratio'), `<input id="f-ratio" type="number" min="0" max="100" step="0.1" value="${n.ratio || 1}">`, t('node.ratioHelp'))}
       ${n.isLocal ? '' : `
-      <div class="full">${field(t('node.apiUrl'), `<input id="f-api" value="${esc(n.apiUrl || '')}" placeholder="https://tw.example.com:2053/app/">`, t('node.apiUrlHelp'))}</div>
+      <div class="full">${field(t('node.apiUrl'), `<input id="f-api" value="${esc(n.apiUrl || '')}" placeholder="https://tw.example.com:2053/app/">`, t('node.apiUrlHelp'))}<p class="hint warn-text" id="f-api-plain" ${isPlain(n.apiUrl) ? '' : 'hidden'}>${esc(t('node.plainHelp'))}</p></div>
       <div class="full">${field(t('node.token'), `<input id="f-token" type="password" placeholder="${n.hasToken ? t('node.tokenKeep') : ''}">`, t('node.tokenHelp'))}</div>
       ${check('f-insecure', t('node.insecure'), n.insecure !== false, t('node.insecureHelp'))}
       ${check('f-enabled', t('common.enabled'), n.enabled !== false)}`}
@@ -158,7 +158,12 @@ function editNode(id) {
     toast(t('set.saved'), 'ok');
     render(document.getElementById('page'));
   }, { wide: true });
+  const api = document.getElementById('f-api');
+  if (api) api.addEventListener('input', () => { document.getElementById('f-api-plain').hidden = !isPlain(api.value); });
 }
+
+// 副机 API 地址是 http:// 时,令牌与用户凭据走明文:不拦,但要看得见
+const isPlain = url => /^http:\/\//i.test(String(url || '').trim());
 
 registerActions({
   'node.add': () => editNode(null),
