@@ -186,6 +186,10 @@ func (s *Server) handleResellerLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		return
 	}
+	if !sameOrigin(r) { // 同主面板登录:挡住跨站把受害者登进别人的代理账号
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "跨站请求被拒绝"})
+		return
+	}
 	var body struct{ Username, Password, Code string }
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		badRequest(w, err)
@@ -466,6 +470,10 @@ func (s *Server) handleResellerTotp(w http.ResponseWriter, r *http.Request, rs m
 		s.mu.Unlock()
 		writeJSON(w, http.StatusOK, map[string]string{"secret": secret, "url": s.totpURL(rs.Name, secret)})
 	case http.MethodPost:
+		if rs.TotpEnabled { // 已开启时换密钥等于先关再开,关要验证密码与验证码
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "两步验证已开启,请先关闭再重新设置"})
+			return
+		}
 		var body struct{ Code, Secret string }
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			badRequest(w, err)
@@ -491,6 +499,29 @@ func (s *Server) handleResellerTotp(w http.ResponseWriter, r *http.Request, rs m
 		s.auditAs(rs.Name, "reseller", "totp-on", rs.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	case http.MethodDelete:
+		// 与管理员一致:关闭要当前密码和一次有效验证码,光有会话关不掉
+		var body struct{ Password, Code string }
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			badRequest(w, errors.New("请输入当前密码与验证码"))
+			return
+		}
+		if rs.Password == "" || bcrypt.CompareHashAndPassword([]byte(rs.Password), []byte(body.Password)) != nil {
+			badRequest(w, errors.New("密码错误"))
+			return
+		}
+		if rs.TotpEnabled {
+			ok, step := totp.Verify(rs.TotpSecret, body.Code, time.Now())
+			s.mu.Lock()
+			replay := ok && step <= s.lastTotpStepRS[rs.Id]
+			if ok && !replay {
+				s.lastTotpStepRS[rs.Id] = step
+			}
+			s.mu.Unlock()
+			if !ok || replay {
+				badRequest(w, errors.New("验证码错误"))
+				return
+			}
+		}
 		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).
 			Updates(map[string]interface{}{"totp_secret": "", "totp_enabled": false})
 		s.auditAs(rs.Name, "reseller", "totp-off", rs.Name)

@@ -2,7 +2,7 @@
 import { state, load } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, registerActions, badge, field, check, fv, fchk, fmtBytes, fmtDay, progress, setHTML } from '../ui.js';
+import { esc, toast, confirm, openModal, registerActions, badge, field, check, fv, fchk, fmtBytes, fmtDay, progress, setHTML } from '../ui.js';
 
 export const title = () => t('acct.title');
 export const subtitle = () => t('acct.subtitle');
@@ -160,10 +160,17 @@ registerActions({
     try { await post('self/totp', { code: fv('totp-code') }); pendingSecret = ''; await refresh(); toast(t('adm.totpEnabled'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
-  'acct.totpOff': async () => {
-    if (!await confirm(t('adm.totpDisableConfirm'), { danger: true })) return;
-    try { await del('self/totp'); await refresh(); toast(t('adm.totpDisabled'), 'ok'); }
-    catch (e) { toast(e.message, 'err'); }
+  'acct.totpOff': () => {
+    openModal(t('adm.totpDisableTitle'), `
+      <p class="hint">${t('adm.totpDisableHelp')}</p>
+      <div class="form-grid">
+        ${field(t('adm.password'), `<input id="totp-pw" type="password" autocomplete="current-password">`)}
+        ${field(t('adm.totpCode'), `<input id="totp-dcode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">`)}
+      </div>`, async () => {
+      await del('self/totp', { body: JSON.stringify({ password: fv('totp-pw'), code: fv('totp-dcode') }) });
+      await refresh();
+      toast(t('adm.totpDisabled'), 'ok');
+    }, { saveText: t('adm.totpDisable'), danger: true });
   },
   'acct.savePage': async () => {
     try {

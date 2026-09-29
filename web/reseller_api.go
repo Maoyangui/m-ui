@@ -196,12 +196,12 @@ func (s *Server) dispatchResellerSubroute(w http.ResponseWriter, r *http.Request
 		s.reloadUsers("重置代理流量 " + rs.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		return true
-	case "passwd": // 清空密码与 2FA:代理下次登录时重新设置
+	case "passwd": // 清空密码、2FA 与外部 API 令牌:代理下次登录时重新设置(API 重新打开时发新令牌)
 		if r.Method != http.MethodPost {
 			break
 		}
 		if err := s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{
-			"password": "", "totp_secret": "", "totp_enabled": false,
+			"password": "", "totp_secret": "", "totp_enabled": false, "api_enabled": false, "api_token": "",
 			"claim_before": time.Now().Unix() + 24*3600, // 重开 24 小时认领窗口
 		}).Error; err != nil {
 			badRequest(w, err)
