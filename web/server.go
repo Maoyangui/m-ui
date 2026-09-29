@@ -456,8 +456,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	var admin model.Admin
 	if err := s.db.Where("username = ?", req.Username).First(&admin).Error; err != nil {
-		// 统一延迟与措辞,避免用户名枚举
+		// 与密码错误一模一样:同样跑一次 bcrypt、同样的延迟与措辞、同样计入失败,看不出用户名存不存在
+		dummyPasswordCheck(req.Password)
 		time.Sleep(300 * time.Millisecond)
+		logger.Warning("面板登录失败,来源 ", clientIP(r))
+		s.noteLoginFailure(peerIP(r))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
 		return
 	}
@@ -518,17 +521,40 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }
 
-// loginBlocked 该 IP 是否处于冷却期:10 分钟内失败 10 次就先挡 5 分钟,
+// loginKey 登录限流按什么计数:IPv4 按单个地址;IPv6 按 /64 —— 一台机器通常分到整段 /64,
+// 按完整地址计数的话每次换一个源地址就永远不会被挡。
+func loginKey(ip string) string {
+	p := net.ParseIP(ip)
+	if p == nil || p.To4() != nil {
+		return ip
+	}
+	return p.Mask(net.CIDRMask(64, 128)).String() + "/64"
+}
+
+var (
+	dummyHashOnce sync.Once
+	dummyHash     []byte
+)
+
+// dummyPasswordCheck 用户名不存在时也跑一次 bcrypt,响应耗时与密码错误相同。
+func dummyPasswordCheck(plain string) {
+	dummyHashOnce.Do(func() { dummyHash, _ = bcrypt.GenerateFromPassword([]byte("m-ui"), bcrypt.DefaultCost) })
+	_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(plain))
+}
+
+// loginBlocked 该 IP(IPv6 为所在 /64)是否处于冷却期:10 分钟内失败 10 次就先挡 5 分钟,
 // 否则空密码首登、弱口令都能被慢速爆破(每次失败只 sleep 300ms)。
 func (s *Server) loginBlocked(ip string) bool {
+	ip = loginKey(ip)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.loginFails == nil {
-		s.loginFails = map[string][]int64{}
+	fails, ok := s.loginFails[ip]
+	if !ok {
+		return false // 没失败过的来源不建条目,扫描器换着地址来也不会把这张表撑大
 	}
 	now := time.Now().Unix()
 	var recent []int64
-	for _, ts := range s.loginFails[ip] {
+	for _, ts := range fails {
 		if now-ts < 600 {
 			recent = append(recent, ts)
 		}
@@ -542,6 +568,7 @@ func (s *Server) loginBlocked(ip string) bool {
 
 // noteLoginFailure 记录某 IP 的失败次数,10 分钟内达到 5 次告警一次。
 func (s *Server) noteLoginFailure(ip string) {
+	ip = loginKey(ip)
 	s.mu.Lock()
 	if s.loginFails == nil {
 		s.loginFails = map[string][]int64{}
@@ -582,12 +609,22 @@ func peerIP(r *http.Request) string {
 	return ip
 }
 
+// clientIP 日志、登录告警、"最近登录"里记的来源地址。X-Forwarded-For 谁都能写,只在请求来自本机
+// (同机反向代理转过来)时才采信,并取最后一段 —— 那是反代自己看到的对端,前面的段仍可能是客户端伪造的。
 func clientIP(r *http.Request) string {
-	if v := r.Header.Get("X-Forwarded-For"); v != "" {
-		return strings.TrimSpace(strings.Split(v, ",")[0])
+	peer := peerIP(r)
+	if ip := net.ParseIP(peer); ip == nil || !ip.IsLoopback() {
+		return peer
 	}
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	return ip
+	v := r.Header.Get("X-Forwarded-For")
+	if v == "" {
+		return peer
+	}
+	parts := strings.Split(v, ",")
+	if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {
+		return last
+	}
+	return peer
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {

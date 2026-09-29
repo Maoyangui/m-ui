@@ -203,6 +203,7 @@ func (s *Server) handleResellerLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	var rs model.Reseller
 	if s.db.Where("name = ?", strings.TrimSpace(body.Username)).First(&rs).Error != nil || !rs.Enabled {
+		dummyPasswordCheck(body.Password) // 耗时与密码错误相同,看不出代理名存不存在
 		time.Sleep(300 * time.Millisecond)
 		s.noteLoginFailure(peer)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
