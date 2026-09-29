@@ -159,12 +159,24 @@ func (s *Server) setUserLineRefs(userID uint, refs []model.LineRef) {
 	}
 }
 
-// userLineRefMap 整表一次查出:用户 → 分配(含服务器范围)。
+// userLineRefMap 整表一次查出:用户 → 生效的分配(含服务器范围;代理名下的用户已与代理当前授权取交集,
+// 与数据面、订阅同一口径 —— 授权收回的线路不再显示,代理保存时也不会因它被判越权)。
 func (s *Server) userLineRefMap() map[uint][]model.LineRef {
-	var links []model.UserLine
-	s.db.Order("user_id asc, line_id asc").Find(&links)
-	var scopes []model.UserLineNode
-	s.db.Order("user_id asc, line_id asc, node_id asc").Find(&scopes)
+	links, scopes, _ := render.EffectiveLines(s.db, 0)
+	return lineRefsBy(links, scopes)
+}
+
+// userLineRefs 单个用户生效的分配。
+func (s *Server) userLineRefs(userID uint) []model.LineRef {
+	links, scopes, _ := render.EffectiveLines(s.db, userID)
+	if out := lineRefsBy(links, scopes)[userID]; out != nil {
+		return out
+	}
+	return []model.LineRef{}
+}
+
+// lineRefsBy 两张表的行 → 用户 → 分配。
+func lineRefsBy(links []model.UserLine, scopes []model.UserLineNode) map[uint][]model.LineRef {
 	type key struct{ u, l uint }
 	nodesBy := map[key][]uint{}
 	for _, sc := range scopes {
@@ -178,34 +190,32 @@ func (s *Server) userLineRefMap() map[uint][]model.LineRef {
 	return out
 }
 
-// userLineRefs 单个用户的分配。
-func (s *Server) userLineRefs(userID uint) []model.LineRef {
-	var links []model.UserLine
-	s.db.Where("user_id = ?", userID).Order("line_id asc").Find(&links)
-	var scopes []model.UserLineNode
-	s.db.Where("user_id = ?", userID).Order("line_id asc, node_id asc").Find(&scopes)
-	nodesBy := map[uint][]uint{}
-	for _, sc := range scopes {
-		nodesBy[sc.LineId] = append(nodesBy[sc.LineId], sc.NodeId)
-	}
-	out := make([]model.LineRef, 0, len(links))
-	for _, l := range links {
-		out = append(out, model.LineRef{LineId: l.LineId, NodeIds: nodesBy[l.LineId]})
-	}
-	return out
+// setResellerLineRefs / resellerLineRefs 代理授权的两张表。
+// 名下用户的分配不动:数据面、订阅按授权取交集,收回立即生效,重新授权即恢复。
+func (s *Server) setResellerLineRefs(id uint, refs []model.LineRef) error {
+	refs = s.normalizeRefs(refs)
+	return s.db.Transaction(func(tx *gorm.DB) error { return writeResellerLineRefs(tx, id, refs) })
 }
 
-// setResellerLineRefs / resellerLineRefs 代理授权的两张表。
-func (s *Server) setResellerLineRefs(id uint, refs []model.LineRef) {
-	refs = s.normalizeRefs(refs)
-	s.db.Where("reseller_id = ?", id).Delete(&model.ResellerLine{})
-	s.db.Where("reseller_id = ?", id).Delete(&model.ResellerLineNode{})
+// writeResellerLineRefs 在事务里整体替换代理的授权(refs 已整理好):中途失败不留下"删了没建"的半截授权。
+func writeResellerLineRefs(tx *gorm.DB, id uint, refs []model.LineRef) error {
+	if err := tx.Where("reseller_id = ?", id).Delete(&model.ResellerLine{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Where("reseller_id = ?", id).Delete(&model.ResellerLineNode{}).Error; err != nil {
+		return err
+	}
 	for _, r := range refs {
-		s.db.Create(&model.ResellerLine{ResellerId: id, LineId: r.LineId})
+		if err := tx.Create(&model.ResellerLine{ResellerId: id, LineId: r.LineId}).Error; err != nil {
+			return err
+		}
 		for _, n := range r.NodeIds {
-			s.db.Create(&model.ResellerLineNode{ResellerId: id, LineId: r.LineId, NodeId: n})
+			if err := tx.Create(&model.ResellerLineNode{ResellerId: id, LineId: r.LineId, NodeId: n}).Error; err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 func (s *Server) resellerLineRefs(id uint) []model.LineRef {

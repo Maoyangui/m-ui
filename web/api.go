@@ -968,17 +968,7 @@ func (s *Server) onlineLines(user, localName string, local, remote map[string]ma
 	return out
 }
 
-// userLineMap / userExtMap 整表关联一次查出来,列表渲染时按用户取,避免 N+1。
-func (s *Server) userLineMap() map[uint][]uint {
-	var rows []model.UserLine
-	s.db.Order("user_id asc, line_id asc").Find(&rows)
-	out := map[uint][]uint{}
-	for _, r := range rows {
-		out[r.UserId] = append(out[r.UserId], r.LineId)
-	}
-	return out
-}
-
+// userExtMap 整表关联一次查出来,列表渲染时按用户取,避免 N+1。
 func (s *Server) userExtMap() map[uint][]uint {
 	var rows []model.UserExt
 	s.db.Order("user_id asc, ext_id asc").Find(&rows)

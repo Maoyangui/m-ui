@@ -28,6 +28,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/render"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -64,6 +65,10 @@ type Snapshot struct {
 	Resellers     []model.Reseller     `json:"resellers"`   // 副机据此给代理用户出对应的订阅页文案(不含密码/2FA)
 	LimitStates   []model.LimitState   `json:"limitStates"` // 主机判定的规则限速,副机照单叠加到用户限速上
 	Settings      map[string]string    `json:"settings"`
+	// 代理的线路授权:副机渲染不用它(UserLines 已取过交集),只为副机提升为主机后授权还在。
+	// 旧版主机不发这两项(解码为 nil),副机就不动本机的授权表。
+	ResellerLines     []model.ResellerLine     `json:"resellerLines"`
+	ResellerLineNodes []model.ResellerLineNode `json:"resellerLineNodes"`
 }
 
 // BuildSnapshot 从主机数据库构造快照并计算修订号(只含会影响副机行为的字段)。
@@ -97,10 +102,17 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 	for i := range s.Resellers {
 		s.Resellers[i].Password, s.Resellers[i].TotpSecret, s.Resellers[i].ApiToken = "", "", "" // 副机不跑代理面板,不需要这些
 	}
-	if err := db.Order("user_id asc, line_id asc").Find(&s.UserLines).Error; err != nil {
+	// 下发的是与代理授权取过交集的分配:副机直接照此渲染,不用(也不能)自己再算 —— 旧版主机不下发授权表
+	links, scopes, err := render.EffectiveLines(db, 0)
+	if err != nil {
 		return s, err
 	}
-	if err := db.Order("user_id asc, line_id asc, node_id asc").Find(&s.UserLineNodes).Error; err != nil {
+	s.UserLines, s.UserLineNodes = links, scopes
+	s.ResellerLines, s.ResellerLineNodes = []model.ResellerLine{}, []model.ResellerLineNode{}
+	if err := db.Order("reseller_id asc, line_id asc").Find(&s.ResellerLines).Error; err != nil {
+		return s, err
+	}
+	if err := db.Order("reseller_id asc, line_id asc, node_id asc").Find(&s.ResellerLineNodes).Error; err != nil {
 		return s, err
 	}
 	if err := db.Order("sort asc, id asc").Find(&s.Exts).Error; err != nil {
@@ -388,6 +400,23 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 				if err := tx.Model(&model.Reseller{}).Where("id = ?", id).Updates(map[string]interface{}{
 					"enabled": f.enabled, "page_enabled": f.page, "share_on": f.share,
 				}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		if snap.ResellerLines != nil { // 旧版主机不发授权表:保留本机的,不当成"全部收回"
+			for _, t := range []interface{}{&model.ResellerLine{}, &model.ResellerLineNode{}} {
+				if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(t).Error; err != nil {
+					return err
+				}
+			}
+			if len(snap.ResellerLines) > 0 {
+				if err := tx.Create(&snap.ResellerLines).Error; err != nil {
+					return err
+				}
+			}
+			if len(snap.ResellerLineNodes) > 0 {
+				if err := tx.Create(&snap.ResellerLineNodes).Error; err != nil {
 					return err
 				}
 			}

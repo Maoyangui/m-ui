@@ -18,6 +18,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/ext"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/render"
 
 	"gorm.io/gorm"
 )
@@ -430,11 +431,14 @@ func (s *Server) handle() http.HandlerFunc {
 		var lines []model.Line
 		s.db.Raw(`SELECT l.* FROM lines l JOIN user_lines ul ON ul.line_id = l.id
 			WHERE ul.user_id = ? AND l.enabled = 1 ORDER BY l.sort`, user.Id).Scan(&lines)
+		// 代理名下的用户按代理当前授权取交集:授权收回的线路不出现,收窄的只给授权的服务器(与数据面同一口径)
+		links, scopes, _ := render.EffectiveLines(s.db, user.Id)
+		lines = keepLines(lines, links)
 
 		opt := s.options()
 		opt.BuyURL = s.buyURL(rs) // 代理填了用代理的,否则用主面板的;随订阅发出去给客户端做续费入口
 		opt.External = s.externalFor(user.Id)
-		opt.LineNodes = s.lineNodesFor(user.Id)
+		opt.LineNodes = lineNodesOf(scopes)
 		opt.Share = s.shareSelfService() && (rs == nil || rs.ShareOn)
 		if rs != nil { // 代理填了标题就用代理的,客户端里显示的就是他的品牌
 			opt.ProfileTitle = pick(rs.ProfileTitle, pick(rs.PageTitle, opt.ProfileTitle))
@@ -495,10 +499,23 @@ func (s *Server) handle() http.HandlerFunc {
 	}
 }
 
-// lineNodesFor 用户在各线路上被收窄到的服务器集合(user_line_nodes);没有行的线路不出现在结果里 = 全部。
-func (s *Server) lineNodesFor(userID uint) map[uint]map[uint]bool {
-	var rows []model.UserLineNode
-	s.db.Where("user_id = ?", userID).Find(&rows)
+// keepLines 只留分配里有的线路(顺序不变)。
+func keepLines(lines []model.Line, links []model.UserLine) []model.Line {
+	has := make(map[uint]bool, len(links))
+	for _, l := range links {
+		has[l.LineId] = true
+	}
+	out := lines[:0]
+	for _, l := range lines {
+		if has[l.Id] {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// lineNodesOf 用户在各线路上被收窄到的服务器集合;没有行的线路不出现在结果里 = 全部。
+func lineNodesOf(rows []model.UserLineNode) map[uint]map[uint]bool {
 	if len(rows) == 0 {
 		return nil
 	}

@@ -244,7 +244,10 @@ func (s *Server) apiSnapshot() *apiSnapshot {
 		localIPs: map[string][]string{}, remoteIPs: map[string][]string{},
 		localLines: map[string]map[string][]string{}, remoteLines: map[string]map[string][]string{},
 		localName: s.localNodeName(), subBase: s.subBase(),
-		lineIdsBy: s.userLineMap(), extIdsBy: s.userExtMap(), refsBy: s.userLineRefMap(), limitsBy: s.userLimitMap(),
+		lineIdsBy: map[uint][]uint{}, extIdsBy: s.userExtMap(), refsBy: s.userLineRefMap(), limitsBy: s.userLimitMap(),
+	}
+	for uid, refs := range snap.refsBy {
+		snap.lineIdsBy[uid] = refIDs(refs)
 	}
 	if s.run != nil { // 测试里没有数据面
 		snap.localIPs, snap.remoteIPs = s.run.OnlineIPsAll(), s.run.Hub().RemoteIPsAll()
@@ -560,7 +563,7 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 	}
 	if sc.rid > 0 {
 		check := refs
-		if check == nil { // 没改线路就按现有的校验(授权可能已被主面板收回)
+		if check == nil { // 没改线路就按现有的校验(已与当前授权取交集,收回的线路不算越权)
 			check = s.userLineRefs(u.Id)
 		}
 		if err := s.checkResellerUser(sc.rid, u.Id, &u, check); err != nil {

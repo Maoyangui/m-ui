@@ -171,6 +171,7 @@ func TestResellerUserSubscription(t *testing.T) {
 	db.Create(&model.Reseller{Name: "dl", Enabled: true, PageEnabled: true, ShareOn: true})
 	db.Model(&model.User{}).Where("id = ?", 1).
 		Updates(map[string]interface{}{"reseller_id": 1, "sub_token": "TOKEN1234567890abcdefg"})
+	db.Create(&model.ResellerLine{ResellerId: 1, LineId: 1}) // 代理用户只能用授权给代理的线路
 
 	if w := doReq(s, "GET", "/sub/alice", "curl/8.4.0"); w.Code != 404 {
 		t.Fatalf("代理用户不应能按用户名订阅,得 %d", w.Code)

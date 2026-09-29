@@ -20,6 +20,7 @@ func TestDepletedResellerUsersNotRendered(t *testing.T) {
 	_ = users
 	db.Create(&model.Line{Name: "ss", Protocol: "shadowsocks", Port: 30012, Enabled: true, Options: []byte(`{"method":"aes-256-gcm","password":"x"}`)})
 	db.Exec("INSERT INTO user_lines (user_id, line_id) VALUES (1, 1)")
+	db.Create(&model.ResellerLine{ResellerId: 1, LineId: 1}) // 代理用户只能用授权给代理的线路
 	byLine, err := loadLineUsers(db, 0)
 	if err != nil {
 		t.Fatal(err)

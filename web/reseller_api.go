@@ -55,11 +55,17 @@ func (s *Server) handleResellers(w http.ResponseWriter, r *http.Request) {
 		p.Password, p.TotpSecret, p.TotpEnabled = "", "", false // 新代理无密码,首次登录时自行设置
 		p.ClaimBefore = p.CreatedAt + 24*3600                   // 24 小时内首登设密码,过期要重新重置
 		p.PageEnabled, p.ShareOn = true, true
-		if err := s.db.Create(&p.Reseller).Error; err != nil {
+		refs := s.normalizeRefs(lineRefsOf(p.LineIds, p.LineRefs))
+		err := s.db.Transaction(func(tx *gorm.DB) error { // 代理与授权一起建,不留下没有授权的半截代理
+			if err := tx.Create(&p.Reseller).Error; err != nil {
+				return err
+			}
+			return writeResellerLineRefs(tx, p.Id, refs)
+		})
+		if err != nil {
 			badRequest(w, err)
 			return
 		}
-		s.setResellerLineRefs(p.Id, lineRefsOf(p.LineIds, p.LineRefs))
 		s.audit(r, "reseller", "create", p.Name)
 		writeJSON(w, http.StatusOK, s.resellerRow(p.Reseller))
 	default:
@@ -88,14 +94,21 @@ func (s *Server) handleResellerItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		// 密码、2FA、落地页文案由代理自己在代理面板里改,主面板表单不覆盖
-		if err := s.db.Model(&model.Reseller{}).Where("id = ?", id).Select(
-			"name", "enabled", "volume", "device_limit", "speed_up", "speed_down", "expiry", "remark", "user_limit").
-			Updates(p.Reseller).Error; err != nil {
+		// 密码、2FA、落地页文案由代理自己在代理面板里改,主面板表单不覆盖。
+		// 额度与授权同一个事务;收回的线路对名下用户立即停用(下面热更新一次),用户自己的分配不动,重新授权即恢复
+		refs := s.normalizeRefs(lineRefsOf(p.LineIds, p.LineRefs))
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.Reseller{}).Where("id = ?", id).Select(
+				"name", "enabled", "volume", "device_limit", "speed_up", "speed_down", "expiry", "remark", "user_limit").
+				Updates(p.Reseller).Error; err != nil {
+				return err
+			}
+			return writeResellerLineRefs(tx, id, refs)
+		})
+		if err != nil {
 			badRequest(w, err)
 			return
 		}
-		s.setResellerLineRefs(id, lineRefsOf(p.LineIds, p.LineRefs))
 		s.refreshReseller(id) // 额度改了就立刻重算"用尽"标记,不等下一分钟
 		s.audit(r, "reseller", "update", p.Name)
 		s.reloadUsers("修改代理 " + p.Name)
@@ -114,9 +127,16 @@ func (s *Server) handleResellerItem(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		s.db.Where("reseller_id = ?", id).Delete(&model.ResellerLine{})
-		s.db.Where("reseller_id = ?", id).Delete(&model.ResellerLineNode{})
-		s.db.Delete(&model.Reseller{}, id)
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := writeResellerLineRefs(tx, id, nil); err != nil {
+				return err
+			}
+			return tx.Delete(&model.Reseller{}, id).Error
+		})
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
 		s.audit(r, "reseller", "delete", rs.Name)
 		writeJSON(w, http.StatusOK, map[string]int{"users": len(users)})
 	default:
@@ -288,8 +308,8 @@ func (s *Server) resellerUsers(rs model.Reseller) []resellerUserRow {
 }
 
 // setResellerLines 老写法:整条线路(全部服务器)。
-func (s *Server) setResellerLines(id uint, lineIds []uint) {
-	s.setResellerLineRefs(id, lineRefsOf(lineIds, nil))
+func (s *Server) setResellerLines(id uint, lineIds []uint) error {
+	return s.setResellerLineRefs(id, lineRefsOf(lineIds, nil))
 }
 
 func (s *Server) validateReseller(rs *model.Reseller) error {

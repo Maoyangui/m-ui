@@ -206,14 +206,10 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 
 // loadLineUsers 返回 lineId → 启用用户列表(含凭据)。
 // self 是本机在 nodes 表里的 id:用户在某条线路上被收窄到具体服务器时(user_line_nodes 有行),
-// 只有包含本机的才挂到本机的入站上;没有行 = 该线路的全部服务器。
+// 只有包含本机的才挂到本机的入站上;没有行 = 该线路的全部服务器。代理名下的用户按代理当前授权取交集。
 func loadLineUsers(db *gorm.DB, self uint) (map[uint][]model.User, error) {
-	var links []model.UserLine
-	if err := db.Find(&links).Error; err != nil {
-		return nil, err
-	}
-	var scopes []model.UserLineNode
-	if err := db.Find(&scopes).Error; err != nil {
+	links, scopes, err := EffectiveLines(db, 0)
+	if err != nil {
 		return nil, err
 	}
 	type key struct{ u, l uint }
