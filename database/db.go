@@ -19,6 +19,7 @@ func Open(dbPath string) (*gorm.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o750); err != nil {
 		return nil, err
 	}
+	restrictFiles(dbPath)
 	sep := "?"
 	if strings.Contains(dbPath, "?") {
 		sep = "&"
@@ -81,6 +82,24 @@ func Open(dbPath string) (*gorm.DB, error) {
 		(SELECT COALESCE(SUM(u.up + u.down + u.total_up + u.total_down), 0) FROM users u WHERE u.reseller_id = r.id) + r.used_carried - r.used_base >= r.volume)`)
 	db.Exec("UPDATE users SET disabled_reason = 'manual' WHERE enabled = 0 AND disabled_reason = ''")
 	return db, nil
+}
+
+// restrictFiles 库里是全部用户凭据、订阅令牌、管理员与代理的密码哈希和各种令牌:只给本账号读写(0600)。
+// SQLite 默认按 0644 建库,-wal / -shm 照主库的权限建,所以先把主库建好、收紧,老库与已有的 -wal / -shm 一并收紧。
+// 只动这三个文件,不动所在目录(路径可以是用户自己指定的任何地方)。
+func restrictFiles(dbPath string) {
+	p := dbPath
+	if i := strings.IndexByte(p, '?'); i >= 0 {
+		p = p[:i]
+	}
+	if f, err := os.OpenFile(p, os.O_RDWR|os.O_CREATE, 0o600); err == nil {
+		f.Close()
+	}
+	for _, f := range []string{p, p + "-wal", p + "-shm"} {
+		if _, err := os.Stat(f); err == nil {
+			_ = os.Chmod(f, 0o600)
+		}
+	}
 }
 
 // DBHandle 是测试里携带 *gorm.DB 的小包装。
