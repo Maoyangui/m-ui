@@ -8,6 +8,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/runner"
 )
 
 // 建号时勾了"停用":gorm 的 default:true 会把 false 写成 true,以前建出来的是启用的用户。
@@ -38,5 +39,26 @@ func TestCreateUserDisabledStaysDisabled(t *testing.T) {
 	db.First(&u, u.Id)
 	if u.Enabled {
 		t.Fatal("手动停用的用户重置用量后不该自动启用")
+	}
+}
+
+// 新建代理时去掉"启用":gorm 的 default:true 会把 false 写成 true,建出来的代理以前是启用的。
+func TestCreateResellerDisabledStaysDisabled(t *testing.T) {
+	run, err := runner.New(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(run.DB())
+	s := NewServer(run)
+	r := httptest.NewRequest("POST", "http://x/app/api/resellers", strings.NewReader(`{"name":"dl","enabled":false}`))
+	w := httptest.NewRecorder()
+	s.handleResellers(w, r)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"enabled":false`) {
+		t.Fatalf("建代理失败或回显不对: %d %s", w.Code, w.Body.String())
+	}
+	var got model.Reseller
+	run.DB().Where("name = ?", "dl").First(&got)
+	if got.Enabled {
+		t.Fatal("建代理时停用,库里应保持停用")
 	}
 }

@@ -56,9 +56,16 @@ func (s *Server) handleResellers(w http.ResponseWriter, r *http.Request) {
 		p.ClaimBefore = p.CreatedAt + 24*3600                   // 24 小时内首登设密码,过期要重新重置
 		p.PageEnabled, p.ShareOn = true, true
 		refs := s.normalizeRefs(lineRefsOf(p.LineIds, p.LineRefs))
+		enabled := p.Enabled // Create 会把 default:true 字段的 false 写成 true 并回填,先记下本意
 		err := s.db.Transaction(func(tx *gorm.DB) error { // 代理与授权一起建,不留下没有授权的半截代理
 			if err := tx.Create(&p.Reseller).Error; err != nil {
 				return err
+			}
+			if !enabled {
+				if err := tx.Model(&model.Reseller{}).Where("id = ?", p.Id).Update("enabled", false).Error; err != nil {
+					return err
+				}
+				p.Enabled = false
 			}
 			return writeResellerLineRefs(tx, p.Id, refs)
 		})
