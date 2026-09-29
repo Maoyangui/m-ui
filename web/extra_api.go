@@ -87,7 +87,8 @@ func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 	o := s.run.Onlines()
 	users := mergeIPs(o.Users, s.run.Hub().RemoteOnlineUsers())
 	counts := s.run.ConnCounts()
-	if rid := scope(r); rid > 0 { // 代理只看自己的用户
+	lines, ups := o.Lines, o.Upstreams
+	if rid := scope(r); rid > 0 { // 代理只看自己的用户、授权给自己的线路;上游是主面板的布局,一概不给
 		mine := s.resellerUserNames(rid)
 		users = filterNames(users, mine)
 		for name := range counts {
@@ -95,10 +96,18 @@ func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 				delete(counts, name)
 			}
 		}
+		lines, ups = s.grantedLineNames(rid, lines), []string{}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"users": users, "lines": o.Lines, "upstreams": o.Upstreams, "connCounts": counts,
+		"users": users, "lines": lines, "upstreams": ups, "connCounts": counts,
 	})
+}
+
+// grantedLineNames 只留授权给该代理的线路名。
+func (s *Server) grantedLineNames(rid uint, names []string) []string {
+	var granted []string
+	s.db.Model(&model.Line{}).Where("id IN (SELECT line_id FROM reseller_lines WHERE reseller_id = ?)", rid).Pluck("name", &granted)
+	return filterNames(names, setOf(granted...))
 }
 
 // filterNames 只保留属于该代理的名字。
