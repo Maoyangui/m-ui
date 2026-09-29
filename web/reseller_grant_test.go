@@ -49,3 +49,31 @@ func TestRevokedGrantNoLongerBlocksReseller(t *testing.T) {
 		t.Fatalf("收回授权不删用户的分配,应仍有 2 条,实际 %d", n)
 	}
 }
+
+// 改授权是一个事务:中途写失败返回错误,原来的授权原样保留(以前会留下"删了没建"的半截授权)。
+func TestResellerGrantWriteIsAtomic(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	db.Create(&model.Node{Name: "主机", IsLocal: true, Enabled: true})
+	db.Create(&model.Node{Name: "B", ApiUrl: "http://b", Enabled: true})
+	db.Create(&model.Line{Name: "A", Protocol: "hysteria2", Port: 30443, Enabled: true})
+	db.Create(&model.Line{Name: "C", Protocol: "anytls", Port: 30444, Enabled: true})
+	rs := model.Reseller{Name: "r", Enabled: true}
+	db.Create(&rs)
+	if err := s.setResellerLines(rs.Id, []uint{1, 2}); err != nil {
+		t.Fatal(err)
+	}
+	db.Exec("DROP TABLE reseller_line_nodes") // 模拟写到一半失败
+	if err := s.setResellerLineRefs(rs.Id, []model.LineRef{{LineId: 1, NodeIds: []uint{2}}}); err == nil {
+		t.Fatal("写失败应返回错误")
+	}
+	var n int64
+	db.Model(&model.ResellerLine{}).Where("reseller_id = ?", rs.Id).Count(&n)
+	if n != 2 {
+		t.Fatalf("失败时原授权应原样保留,剩 %d 条", n)
+	}
+}
