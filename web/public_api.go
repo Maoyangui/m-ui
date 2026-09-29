@@ -71,6 +71,11 @@ func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
+	// 副机上的写操作会被主机下一次快照整表覆盖(新号消失、删掉的号复活),调用方却以为成功了;与面板一样只放行只读与踢线
+	if s.role() == "node" && r.Method != http.MethodGet && r.Method != http.MethodHead && !strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/kick") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": nodeReadOnly})
+		return
+	}
 	s.publicAPI(w, r, apiScope{actor: "api"})
 }
 

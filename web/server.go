@@ -410,13 +410,15 @@ func (s *Server) masterOnly(next http.HandlerFunc) http.HandlerFunc {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && s.role() == "node" {
 			p := strings.TrimSuffix(r.URL.Path, "/")
 			if !strings.HasSuffix(p, "/test") && !strings.HasSuffix(p, "/parse") && !strings.HasSuffix(p, "/kick") {
-				writeJSON(w, http.StatusForbidden, map[string]string{"error": "本机是副服务器:线路、上游、用户由主机统一下发,请到主机面板修改"})
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": nodeReadOnly})
 				return
 			}
 		}
 		next(w, r)
 	}
 }
+
+const nodeReadOnly = "本机是副服务器:线路、上游、用户由主机统一下发,请到主机面板修改"
 
 // auth 包装需要登录的处理函数。
 func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
