@@ -992,6 +992,38 @@ func generateCredentials(name string) json.RawMessage {
 
 // ---- 设置 ----
 
+// panelSettings 设置接口能写的键:设置页各分组、角色开关、备份页与日志页的保留期。
+// 两步验证、外部 API 令牌、配对令牌、ACME 账户这类键各有专门的接口(带各自的校验),这里一律不收 ——
+// 否则拿到会话就能绕过"关闭两步验证要密码 + 验证码"。设置页加字段时要同步加到这里(测试会核对)。
+var panelSettings = setOf(
+	"webDomain", "timezone", "webListen", "webPort", "webPath", "webCertFile", "webKeyFile",
+	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subProfileTitle", "subUpdates",
+	"subUseUserName", "subEncode", "subShowNotice", "subInsecure", "subServerAddr", "extRefreshMinutes",
+	"resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile",
+	"subPageEnabled", "subShareEnabled", "subPageBrand", "subPageTitle", "subPageSupport", "subPageBuyURL", "subPageNotice",
+	"tgEnabled", "tgToken", "tgChatId", "tgProxy", "tgOnLogin", "tgOnUserDisabled", "tgOnUserExpiring", "tgExpiringDays",
+	"tgOnQuota", "tgQuotaPercent", "tgOnRuleLimit", "tgOnUpstream", "tgOnCore", "tgOnReach", "tgDaily", "tgDailyHour",
+	"upstreamCheckMinutes", "upstreamCheckFailThreshold", "reachAuto", "reachMinutes", "reachToken",
+	"certFile", "keyFile", "upstreamTestUrl", "statsBucketSeconds", "trafficAge", "allowPrivate",
+	"nodeMode", "backupHour", "backupKeep", "backupTelegram", "subLogAge", "auditAge",
+)
+
+// hiddenSettings 不发给浏览器的密钥:前端用不到,各自的页面走专门接口(管理员页、配对信息、证书页)。
+var hiddenSettings = setOf("totpSecret", "apiToken", "nodeToken", "acmeAccountKey", "acmeCfToken")
+
+// maskedSettings 设置页上要显示"已填"的密钥:只发掩码,原样提交回来的掩码表示不改,清空表示删除。
+var maskedSettings = setOf("tgToken", "reachToken")
+
+const secretMask = "********"
+
+func setOf(keys ...string) map[string]bool {
+	out := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		out[k] = true
+	}
+	return out
+}
+
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	rid := scope(r)
 	if rid > 0 && r.Method != http.MethodGet {
@@ -1004,17 +1036,33 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.db.Find(&rows)
 		out := map[string]string{}
 		for _, row := range rows {
+			if hiddenSettings[row.Key] {
+				continue
+			}
+			if maskedSettings[row.Key] && row.Value != "" {
+				row.Value = secretMask
+			}
 			out[row.Key] = row.Value
 		}
 		if rid > 0 { // 代理只需要这几项来渲染界面
 			out = map[string]string{"timezone": out["timezone"], "subUpdates": out["subUpdates"]}
 		}
+		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, out)
 	case http.MethodPost:
 		var in map[string]string
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 			badRequest(w, err)
 			return
+		}
+		for k, v := range in {
+			if !panelSettings[k] {
+				badRequest(w, fmt.Errorf("设置项 %q 不能在这里修改", k))
+				return
+			}
+			if maskedSettings[k] && v == secretMask {
+				delete(in, k) // 原样提交回来的掩码 = 不改
+			}
 		}
 		if err := s.validatePorts(in); err != nil { // 端口写错会导致重启后打不开,先拦下
 			badRequest(w, err)

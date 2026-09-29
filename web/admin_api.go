@@ -43,8 +43,17 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "info":
 		s.adminInfo(w, r)
-	case "totp/setup":
-		post(func() { s.totpSetup(w, r) })
+	case "totp/setup", "totp/enable":
+		// 已开启时不能直接换密钥:换密钥等于先关再开,关要走 totp/disable(密码 + 验证码)
+		if s.setting("totpEnabled") == "true" {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "两步验证已开启,请先关闭再重新设置"})
+			return
+		}
+		if action == "totp/setup" {
+			post(func() { s.totpSetup(w, r) })
+		} else {
+			post(func() { s.totpEnable(w, r) })
+		}
 	case "totp/qr":
 		s.totpQR(w, r)
 	case "totp/cancel":
@@ -54,8 +63,6 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 			writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		})
-	case "totp/enable":
-		post(func() { s.totpEnable(w, r) })
 	case "totp/disable":
 		post(func() { s.totpDisable(w, r) })
 	case "api":
