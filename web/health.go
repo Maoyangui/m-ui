@@ -45,10 +45,12 @@ func (s *Server) healthStatus() healthStatus {
 }
 
 // handleHealth 不走会话:只允许 127.0.0.1 / ::1 访问,别的来源一律 403,不向外泄露任何计数。
-// 不健康返回 503,守护和脚本只看状态码。
+// 面板挂在同机反代后面时,外面的请求对端也是 127.0.0.1:带着反代加的转发头就不算本机
+// (守护与安装脚本直连,不带这些头)。不健康返回 503,守护和脚本只看状态码。
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	ip := net.ParseIP(peerIP(r))
-	if ip == nil || !ip.IsLoopback() {
+	proxied := r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" || r.Header.Get("Forwarded") != ""
+	if ip == nil || !ip.IsLoopback() || proxied {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "只允许本机访问"})
 		return
 	}

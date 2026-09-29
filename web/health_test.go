@@ -55,3 +55,23 @@ func TestHealthLoopbackOnlyAndLinesGate(t *testing.T) {
 		t.Fatalf("状态不对: %+v", st)
 	}
 }
+
+// 面板挂在同机反代后面时,外面的请求对端也是回环:带转发头的一律当外部请求拒掉。
+func TestHealthRejectsProxiedLoopback(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	for _, h := range []string{"X-Forwarded-For", "X-Real-IP", "Forwarded"} {
+		req := httptest.NewRequest("GET", "/app/api/health", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set(h, "203.0.113.5")
+		rec := httptest.NewRecorder()
+		s.handleHealth(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("带 %s 的回环请求应 403,得到 %d", h, rec.Code)
+		}
+	}
+}
