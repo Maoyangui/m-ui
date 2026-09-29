@@ -10,6 +10,8 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/ext"
 	"github.com/Maoyangui/m-ui/upstream"
+
+	"gorm.io/gorm"
 )
 
 // ---- 外部节点(分享链接 / 外部订阅)----
@@ -180,10 +182,20 @@ func (s *Server) handleExtItem(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// setUserExts 全量替换用户的外部节点分配。
-func (s *Server) setUserExts(userID uint, extIds []uint) {
-	s.db.Where("user_id = ?", userID).Delete(&model.UserExt{})
-	for _, eid := range extIds {
-		s.db.Create(&model.UserExt{UserId: userID, ExtId: eid})
+// writeUserExts 在调用方的事务里全量替换用户的外部节点分配(重复的 id 只记一次)。
+func writeUserExts(tx *gorm.DB, userID uint, extIds []uint) error {
+	if err := tx.Where("user_id = ?", userID).Delete(&model.UserExt{}).Error; err != nil {
+		return err
 	}
+	seen := map[uint]bool{}
+	for _, eid := range extIds {
+		if seen[eid] {
+			continue
+		}
+		seen[eid] = true
+		if err := tx.Create(&model.UserExt{UserId: userID, ExtId: eid}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }

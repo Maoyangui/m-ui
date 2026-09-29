@@ -233,15 +233,24 @@ func (s *Server) handleUserPlan(w http.ResponseWriter, r *http.Request, u model.
 // applyUserPlan 把套餐套到已有用户上并落库(含套餐指定的线路);调用方负责审计与热更新。
 func (s *Server) applyUserPlan(u *model.User, p model.Plan, mode string) error {
 	refs := applyPlanRefs(u, p, mode, time.Now().Unix())
-	if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).
-		Updates(updateUserFields(*u, mode != "extend")).Error; err != nil {
+	if refs != nil {
+		refs = s.normalizeRefs(refs)
+	}
+	err := s.db.Transaction(func(tx *gorm.DB) error { // 套餐字段与线路一个事务
+		if err := tx.Model(&model.User{}).Where("id = ?", u.Id).
+			Updates(updateUserFields(*u, mode != "extend")).Error; err != nil {
+			return err
+		}
+		if refs != nil {
+			return writeUserLineRefs(tx, u.Id, refs)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 	if mode != "extend" {
 		s.forgetQuotaAlert(u.Name) // 用量清零了,再到阈值要能再提醒
-	}
-	if refs != nil {
-		s.setUserLineRefs(u.Id, refs)
 	}
 	return nil
 }
@@ -357,11 +366,8 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 			if err := tx.Create(&u).Error; err != nil {
 				return err
 			}
-			for _, ref := range refs {
-				tx.Create(&model.UserLine{UserId: u.Id, LineId: ref.LineId})
-				for _, n := range ref.NodeIds {
-					tx.Create(&model.UserLineNode{UserId: u.Id, LineId: ref.LineId, NodeId: n})
-				}
+			if err := writeUserLineRefs(tx, u.Id, refs); err != nil {
+				return err
 			}
 			out = append(out, created{Name: name, Link: s.subLinks(u)["clash"]})
 		}

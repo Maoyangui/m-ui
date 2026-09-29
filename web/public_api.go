@@ -144,7 +144,10 @@ func (s *Server) publicAPI(w http.ResponseWriter, r *http.Request, sc apiScope) 
 			case http.MethodPatch, http.MethodPut:
 				s.apiUpdateUser(w, r, u, sc)
 			case http.MethodDelete:
-				s.deleteUser(u, sc.actor)
+				if err := s.deleteUser(u, sc.actor); err != nil { // 没删掉(用户还在、还能连)不能报成功
+					badRequest(w, err)
+					return
+				}
 				writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 			default:
 				writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
@@ -503,17 +506,25 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiSco
 	u.Credentials = generateCredentials(u.Name)
 	s.applySubTokenPolicy(&u) // 外部 API 建号也按设置来
 	disabled := !u.Enabled    // Create 之后 gorm 会把默认值 true 回填进结构体,先记下本意
-	if err := s.db.Create(&u).Error; err != nil {
+	refs = s.normalizeRefs(refs)
+	err = s.db.Transaction(func(tx *gorm.DB) error { // 用户与分配一起落库:任一步失败整体回滚并报错
+		if err := tx.Create(&u).Error; err != nil {
+			return err
+		}
+		if err := ensureDisabled(tx, &u, disabled); err != nil {
+			return err
+		}
+		if err := writeUserLineRefs(tx, u.Id, refs); err != nil {
+			return err
+		}
+		if req.ExtIds != nil && sc.rid == 0 { // 外部节点只有主面板能分配
+			return writeUserExts(tx, u.Id, *req.ExtIds)
+		}
+		return nil
+	})
+	if err != nil {
 		badRequest(w, err)
 		return
-	}
-	if err := ensureDisabled(s.db, &u, disabled); err != nil {
-		badRequest(w, err)
-		return
-	}
-	s.setUserLineRefs(u.Id, refs)
-	if req.ExtIds != nil && sc.rid == 0 { // 外部节点只有主面板能分配
-		s.setUserExts(u.Id, *req.ExtIds)
 	}
 	action := "create"
 	if plan != nil {
@@ -576,16 +587,27 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 			return
 		}
 	}
-	if err := s.db.Model(&model.User{}).Where("id = ?", u.Id).
-		Updates(updateUserFields(u, planRenews)).Error; err != nil {
+	if refs != nil {
+		refs = s.normalizeRefs(refs)
+	}
+	err = s.db.Transaction(func(tx *gorm.DB) error { // 用户字段与分配一个事务
+		if err := tx.Model(&model.User{}).Where("id = ?", u.Id).
+			Updates(updateUserFields(u, planRenews)).Error; err != nil {
+			return err
+		}
+		if refs != nil {
+			if err := writeUserLineRefs(tx, u.Id, refs); err != nil {
+				return err
+			}
+		}
+		if req.ExtIds != nil && sc.rid == 0 {
+			return writeUserExts(tx, u.Id, *req.ExtIds)
+		}
+		return nil
+	})
+	if err != nil {
 		badRequest(w, err)
 		return
-	}
-	if refs != nil {
-		s.setUserLineRefs(u.Id, refs)
-	}
-	if req.ExtIds != nil && sc.rid == 0 {
-		s.setUserExts(u.Id, *req.ExtIds)
 	}
 	action := "update"
 	if plan != nil {

@@ -7,7 +7,6 @@ import (
 	"strconv"
 
 	"github.com/Maoyangui/m-ui/database/model"
-	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
 
 	"gorm.io/gorm"
@@ -131,32 +130,32 @@ func (s *Server) normalizeRefsWith(refs []model.LineRef, strict bool) []model.Li
 	return out
 }
 
-// setUserLineRefs 落库用户的分配(两张表整体替换)。
-func (s *Server) setUserLineRefs(userID uint, refs []model.LineRef) {
+// setUserLineRefs 落库用户的分配(两张表整体替换,一个事务)。
+func (s *Server) setUserLineRefs(userID uint, refs []model.LineRef) error {
 	refs = s.normalizeRefs(refs)
-	// 两张表整体替换放进一个事务:中途失败不留下"删了没建"的半截分配
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ?", userID).Delete(&model.UserLine{}).Error; err != nil {
+	return s.db.Transaction(func(tx *gorm.DB) error { return writeUserLineRefs(tx, userID, refs) })
+}
+
+// writeUserLineRefs 在调用方的事务里整体替换用户的分配(refs 已整理好):
+// 与用户行的写入同一个事务,中途失败整体回滚,不会"用户建好了、线路一条没有"却报成功。
+func writeUserLineRefs(tx *gorm.DB, userID uint, refs []model.LineRef) error {
+	if err := tx.Where("user_id = ?", userID).Delete(&model.UserLine{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Where("user_id = ?", userID).Delete(&model.UserLineNode{}).Error; err != nil {
+		return err
+	}
+	for _, r := range refs {
+		if err := tx.Create(&model.UserLine{UserId: userID, LineId: r.LineId}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("user_id = ?", userID).Delete(&model.UserLineNode{}).Error; err != nil {
-			return err
-		}
-		for _, r := range refs {
-			if err := tx.Create(&model.UserLine{UserId: userID, LineId: r.LineId}).Error; err != nil {
+		for _, n := range r.NodeIds {
+			if err := tx.Create(&model.UserLineNode{UserId: userID, LineId: r.LineId, NodeId: n}).Error; err != nil {
 				return err
 			}
-			for _, n := range r.NodeIds {
-				if err := tx.Create(&model.UserLineNode{UserId: userID, LineId: r.LineId, NodeId: n}).Error; err != nil {
-					return err
-				}
-			}
 		}
-		return nil
-	})
-	if err != nil {
-		logger.Warning("写入用户 ", userID, " 的线路分配失败: ", err)
 	}
+	return nil
 }
 
 // userLineRefMap 整表一次查出:用户 → 生效的分配(含服务器范围;代理名下的用户已与代理当前授权取交集,

@@ -794,16 +794,23 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		if disabled {
 			p.User.DisabledReason = model.DisabledManual // 建号时就停用 = 手动停用,重置 / 续期不会自动启用
 		}
-		if err := s.db.Create(&p.User).Error; err != nil {
+		refs = s.normalizeRefs(refs)
+		err := s.db.Transaction(func(tx *gorm.DB) error { // 用户与分配一起落库:任一步失败整体回滚并报错
+			if err := tx.Create(&p.User).Error; err != nil {
+				return err
+			}
+			if err := ensureDisabled(tx, &p.User, disabled); err != nil {
+				return err
+			}
+			if err := writeUserLineRefs(tx, p.User.Id, refs); err != nil {
+				return err
+			}
+			return writeUserExts(tx, p.User.Id, p.ExtIds)
+		})
+		if err != nil {
 			badRequest(w, err)
 			return
 		}
-		if err := ensureDisabled(s.db, &p.User, disabled); err != nil {
-			badRequest(w, err)
-			return
-		}
-		s.setUserLineRefs(p.User.Id, refs)
-		s.setUserExts(p.User.Id, p.ExtIds)
 		s.audit(r, "user", "create", p.User.Name)
 		s.reloadUsers("新增用户 " + p.User.Name)
 		writeJSON(w, http.StatusOK, p.User)
@@ -860,16 +867,24 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			p.User.Up, p.User.Down = cur.Up, cur.Down
 			autoEnable(&p.User, time.Now().Unix())
 		}
-		// 凭据与累计流量不经由表单覆盖
-		if err := s.db.Model(&model.User{}).Where("id = ?", id).Select(
-			"name", "enabled", "disabled_reason", "volume", "expiry", "auto_reset", "reset_days",
-			"next_reset", "device_limit", "speed_up", "speed_down", "remark", "desc",
-		).Updates(p.User).Error; err != nil {
+		// 凭据与累计流量不经由表单覆盖;用户字段与分配一个事务
+		refs = s.normalizeRefs(refs)
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.User{}).Where("id = ?", id).Select(
+				"name", "enabled", "disabled_reason", "volume", "expiry", "auto_reset", "reset_days",
+				"next_reset", "device_limit", "speed_up", "speed_down", "remark", "desc",
+			).Updates(p.User).Error; err != nil {
+				return err
+			}
+			if err := writeUserLineRefs(tx, id, refs); err != nil {
+				return err
+			}
+			return writeUserExts(tx, id, p.ExtIds)
+		})
+		if err != nil {
 			badRequest(w, err)
 			return
 		}
-		s.setUserLineRefs(id, refs)
-		s.setUserExts(id, p.ExtIds)
 		s.audit(r, "user", "update", p.User.Name)
 		s.reloadUsers("修改用户 " + p.User.Name)
 		writeJSON(w, http.StatusOK, p.User)
@@ -980,8 +995,8 @@ func (s *Server) userExtMap() map[uint][]uint {
 }
 
 // setUserLines 老写法:整条线路(全部服务器)。
-func (s *Server) setUserLines(userID uint, lineIds []uint) {
-	s.setUserLineRefs(userID, lineRefsOf(lineIds, nil))
+func (s *Server) setUserLines(userID uint, lineIds []uint) error {
+	return s.setUserLineRefs(userID, lineRefsOf(lineIds, nil))
 }
 
 // generateCredentials 为新用户生成全部协议的凭据。
