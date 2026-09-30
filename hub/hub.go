@@ -349,12 +349,12 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 			}
 		}
 		if len(snap.Exts) > 0 {
-			if err := tx.Create(&snap.Exts).Error; err != nil {
+			if err := tx.CreateInBatches(&snap.Exts, snapshotBatch).Error; err != nil {
 				return err
 			}
 		}
 		if len(snap.UserExts) > 0 {
-			if err := tx.Create(&snap.UserExts).Error; err != nil {
+			if err := tx.CreateInBatches(&snap.UserExts, snapshotBatch).Error; err != nil {
 				return err
 			}
 		}
@@ -362,37 +362,37 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 			snap.Nodes[i].IsLocal = snap.Nodes[i].Id == snap.SelfNodeId
 		}
 		if len(snap.Nodes) > 0 {
-			if err := tx.Create(&snap.Nodes).Error; err != nil {
+			if err := tx.CreateInBatches(&snap.Nodes, snapshotBatch).Error; err != nil {
 				return err
 			}
 		}
 		if len(snap.Upstreams) > 0 {
-			if err := tx.Create(&snap.Upstreams).Error; err != nil {
+			if err := tx.CreateInBatches(&snap.Upstreams, snapshotBatch).Error; err != nil {
 				return err
 			}
 		}
 		if len(snap.Lines) > 0 {
-			if err := tx.Create(&snap.Lines).Error; err != nil {
+			if err := tx.CreateInBatches(&snap.Lines, snapshotBatch).Error; err != nil {
 				return err
 			}
 		}
 		if len(snap.Users) > 0 {
-			if err := tx.Create(&snap.Users).Error; err != nil {
+			if err := tx.CreateInBatches(&snap.Users, snapshotBatch).Error; err != nil {
 				return err
 			}
 		}
 		if len(snap.UserLines) > 0 {
-			if err := tx.Create(&snap.UserLines).Error; err != nil {
+			if err := tx.CreateInBatches(&snap.UserLines, snapshotBatch).Error; err != nil {
 				return err
 			}
 		}
 		if len(snap.UserLineNodes) > 0 {
-			if err := tx.Create(&snap.UserLineNodes).Error; err != nil {
+			if err := tx.CreateInBatches(&snap.UserLineNodes, snapshotBatch).Error; err != nil {
 				return err
 			}
 		}
 		if len(snap.Resellers) > 0 {
-			if err := tx.Create(&snap.Resellers).Error; err != nil {
+			if err := tx.CreateInBatches(&snap.Resellers, snapshotBatch).Error; err != nil {
 				return err
 			}
 			// gorm 的 default:true 会把 false 写成 true,插入后按插入前记下的值写回
@@ -411,40 +411,32 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 				}
 			}
 			if len(snap.ResellerLines) > 0 {
-				if err := tx.Create(&snap.ResellerLines).Error; err != nil {
+				if err := tx.CreateInBatches(&snap.ResellerLines, snapshotBatch).Error; err != nil {
 					return err
 				}
 			}
 			if len(snap.ResellerLineNodes) > 0 {
-				if err := tx.Create(&snap.ResellerLineNodes).Error; err != nil {
+				if err := tx.CreateInBatches(&snap.ResellerLineNodes, snapshotBatch).Error; err != nil {
 					return err
 				}
 			}
 		}
 		if len(snap.LimitStates) > 0 { // 主机判定的规则限速,副机照单执行
-			if err := tx.Create(&snap.LimitStates).Error; err != nil {
+			if err := tx.CreateInBatches(&snap.LimitStates, snapshotBatch).Error; err != nil {
 				return err
 			}
 		}
-		if len(offUsers) > 0 {
-			if err := tx.Model(&model.User{}).Where("id IN ?", offUsers).Update("enabled", false).Error; err != nil {
-				return err
-			}
+		if err := disableIDs(tx, &model.User{}, offUsers); err != nil {
+			return err
 		}
-		if len(offLines) > 0 {
-			if err := tx.Model(&model.Line{}).Where("id IN ?", offLines).Update("enabled", false).Error; err != nil {
-				return err
-			}
+		if err := disableIDs(tx, &model.Line{}, offLines); err != nil {
+			return err
 		}
-		if len(offNodes) > 0 {
-			if err := tx.Model(&model.Node{}).Where("id IN ?", offNodes).Update("enabled", false).Error; err != nil {
-				return err
-			}
+		if err := disableIDs(tx, &model.Node{}, offNodes); err != nil {
+			return err
 		}
-		if len(offExts) > 0 {
-			if err := tx.Model(&model.ExtNode{}).Where("id IN ?", offExts).Update("enabled", false).Error; err != nil {
-				return err
-			}
+		if err := disableIDs(tx, &model.ExtNode{}, offExts); err != nil {
+			return err
 		}
 		for k, v := range snap.Settings {
 			if err := upsertSetting(tx, k, v); err != nil {
@@ -468,6 +460,23 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		return nil
 	})
 	return linesChanged, upstreamsChanged, err
+}
+
+// snapshotBatch 快照整表插入每批的行数。SQLite 一条语句最多 32766 个变量:用户表一行约 25 列,
+// 一条 INSERT 插一千三百来个用户(或一万六千多条"用户 × 线路")就超限,整份快照应用失败,
+// 所有副机从此一份配置都收不到。500 行 × 最宽的用户表也只有一万出头个变量。
+const snapshotBatch = 500
+
+// disableIDs 把 ids 这些行的 enabled 写回 false,按批进行(理由同 snapshotBatch)。
+func disableIDs(tx *gorm.DB, table interface{}, ids []uint) error {
+	for len(ids) > 0 {
+		n := min(len(ids), snapshotBatch)
+		if err := tx.Model(table).Where("id IN ?", ids[:n]).Update("enabled", false).Error; err != nil {
+			return err
+		}
+		ids = ids[n:]
+	}
+	return nil
 }
 
 func upsertSetting(tx *gorm.DB, k, v string) error {
