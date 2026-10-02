@@ -1336,6 +1336,41 @@ func (h *Hub) PushNow(n model.Node) error {
 	return h.pushLatest(n)
 }
 
+// Decommission 停用 / 删除副机时调用:给它推一份空用户表(线路照旧、一个用户都没有),那台立刻停止为任何人服务。
+// 以前停用 / 删除只是不再同步,那台的数据面一直按最后一份用户表放行所有人,之后的停用、到期、超额、重置在它上面
+// 都不生效,流量也不记账(审计 M042 / M061)。
+//
+// before 是改库之前的快照(BuildSnapshot):删掉的副机在改库之后的快照里已经没有自己那一行、独占的线路也停了,
+// 拿那份去推,它认不出本机、会把所有线路都当成自己的去渲染。调用时库里已经把它停用 / 删掉:在途的定时推送拿到闸后
+// 看它不再启用,不会把空表盖回去;重新启用后修订号不同,定时同步推回完整快照。
+func (h *Hub) Decommission(n model.Node, before Snapshot) error {
+	if n.IsLocal || h.d.IsNode() {
+		return nil
+	}
+	if n.ApiUrl == "" || n.Token == "" {
+		return errors.New("这台副机没有配置 API 地址或令牌,发不出下线通知")
+	}
+	if err := h.waitNode(n.Id, nodeWait); err != nil {
+		return err
+	}
+	defer h.releaseNode(n.Id)
+	cur, err := h.refreshSnapshot() // 序号取此刻最新的:不低于这台已经收过的任何一份,否则被它当成过期快照拒掉
+	if err != nil {
+		return err
+	}
+	snap := withoutUsers(before)
+	snap.Sequence, snap.Version, snap.MinNode = cur.Sequence, cur.Version, cur.MinNode
+	return h.push(n, snap)
+}
+
+// withoutUsers 同一份快照去掉所有用户及挂在用户上的分配,重算修订号。线路留着:有线路没用户,谁连都认证不过
+// (TestEveryProtocolConstructsWithoutUsers 钉着这样的配置内核照样起得来)。
+func withoutUsers(s Snapshot) Snapshot {
+	s.Users, s.UserLines, s.UserLineNodes, s.UserExts, s.LimitStates = []model.User{}, []model.UserLine{}, []model.UserLineNode{}, []model.UserExt{}, []model.LimitState{}
+	s.Revision = revisionOf(s)
+	return s
+}
+
 // pushLatest 在这台副机的闸里推最新快照(等不到闸就报错,见 nodeWait)。
 func (h *Hub) pushLatest(n model.Node) error {
 	if err := h.waitNode(n.Id, nodeWait); err != nil {

@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/hub"
+	"github.com/Maoyangui/m-ui/logger"
 
 	"gorm.io/gorm"
 )
@@ -184,6 +186,15 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		if tok := strings.TrimSpace(p.Token); tok != "" {
 			updates["token"] = tok // 留空保留原令牌
 		}
+		// 停用副机:改库之前记下它此刻的配置,改完给它推一份空用户表(见 hub.Decommission)
+		disabling := !node.IsLocal && node.Enabled && !p.Enabled
+		var before hub.Snapshot
+		if disabling {
+			if before, err = hub.BuildSnapshot(s.db, s.setting); err != nil {
+				badRequest(w, err)
+				return
+			}
+		}
 		if err := s.db.Model(&model.Node{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			badRequest(w, err)
 			return
@@ -192,14 +203,26 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			s.run.SetSetting("webDomain", p.Domain)
 		}
 		s.audit(r, "node", "update", p.Name)
-		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+		resp := map[string]interface{}{"ok": "1"}
+		if disabling {
+			if e := s.decommission(node, before); e != "" {
+				resp["decommissionError"] = e
+			}
+		}
+		writeJSON(w, http.StatusOK, resp)
 	case http.MethodDelete:
 		if node.IsLocal {
 			badRequest(w, errors.New("不能删除本机"))
 			return
 		}
+		// 改库之前记下它此刻的配置,删完给它推一份空用户表(见 hub.Decommission)
+		before, err := hub.BuildSnapshot(s.db, s.setting)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
 		var disabled []string
-		err := s.db.Transaction(func(tx *gorm.DB) error { // 服务器和引用它的一切一起删
+		err = s.db.Transaction(func(tx *gorm.DB) error { // 服务器和引用它的一切一起删
 			disabled = s.detachLinesFromNodeTx(tx, id) // 只部署在这台机器上的线路会被停用,不留悬空引用
 			if err := tx.Delete(&model.Node{}, id).Error; err != nil {
 				return err
@@ -224,10 +247,27 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		if len(disabled) > 0 {
 			s.reloadAll("删除服务器 " + node.Name)
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "disabledLines": disabled})
+		resp := map[string]interface{}{"ok": "1", "disabledLines": disabled}
+		if e := s.decommission(node, before); e != "" {
+			resp["decommissionError"] = e
+		}
+		writeJSON(w, http.StatusOK, resp)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// decommission 停用 / 删除副机后给它推空用户表,那台立刻停止为任何人服务。没推到(失联、没配地址)返回原因:
+// 那台仍按旧配置为所有人服务,得让管理员知道、去那台机器上处理。
+func (s *Server) decommission(node model.Node, before hub.Snapshot) string {
+	if s.run == nil || node.IsLocal { // 测试里没有数据面
+		return ""
+	}
+	if err := s.run.Hub().Decommission(node, before); err != nil {
+		logger.Warning("副机 ", node.Name, " 没收到下线通知: ", err)
+		return err.Error()
+	}
+	return ""
 }
 
 // detachLinesFromNode 把线路的"部署到服务器"里那台被删的机器摘掉。

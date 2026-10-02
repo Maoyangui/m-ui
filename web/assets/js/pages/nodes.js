@@ -144,7 +144,7 @@ function editNode(id) {
       <div class="full">${field(t('node.apiUrl'), `<input id="f-api" value="${esc(n.apiUrl || '')}" placeholder="https://tw.example.com:2053/app/">`, t('node.apiUrlHelp'))}<p class="hint warn-text" id="f-api-plain" ${isPlain(n.apiUrl) ? '' : 'hidden'}>${esc(t('node.plainHelp'))}</p></div>
       <div class="full">${field(t('node.token'), `<input id="f-token" type="password" placeholder="${n.hasToken ? t('node.tokenKeep') : ''}">`, t('node.tokenHelp'))}</div>
       ${check('f-insecure', t('node.insecure'), n.insecure !== false, t('node.insecureHelp'))}
-      ${check('f-enabled', t('common.enabled'), n.enabled !== false)}`}
+      ${check('f-enabled', t('common.enabled'), n.enabled !== false, t('node.enabledHelp'))}`}
       ${field(t('common.sort'), `<input id="f-sort" type="number" value="${n.sort || 0}">`)}
     </div>`, async () => {
     const body = {
@@ -153,14 +153,18 @@ function editNode(id) {
       apiUrl: n.isLocal ? '' : fv('f-api').trim(), token: n.isLocal ? '' : fv('f-token'),
       insecure: n.isLocal ? false : fchk('f-insecure'), enabled: n.isLocal ? true : fchk('f-enabled'),
     };
-    if (id) await put('nodes/' + id, body); else await post('nodes', body);
+    const r = id ? await put('nodes/' + id, body, SLOW) : await post('nodes', body); // 停用时主机要先给它推空用户表
     await load('settings', 'nodes'); // 线路编辑器里的"部署到服务器"依赖 state.nodes
     toast(t('set.saved'), 'ok');
     render(document.getElementById('page'));
+    if (r && r.decommissionError) notice(t('node.decomFailTitle'), t('node.decomFail', { name: body.name, err: r.decommissionError }));
   }, { wide: true });
   const api = document.getElementById('f-api');
   if (api) api.addEventListener('input', () => { document.getElementById('f-api-plain').hidden = !isPlain(api.value); });
 }
+
+// 必须让人看见的结果(下线通知没发到、线路被一并停用):弹窗,不用两秒多就消失的 toast。等当前弹窗关掉再开
+const notice = (title, msg) => setTimeout(() => confirm(msg, { title, okText: t('node.ack') }), 0);
 
 // 副机 API 地址是 http:// 时,令牌与用户凭据走明文:不拦,但要看得见
 const isPlain = url => /^http:\/\//i.test(String(url || '').trim());
@@ -192,8 +196,14 @@ registerActions({
   },
   'node.del': async id => {
     const n = data.nodes.find(x => x.id === Number(id));
-    if (!await confirm(t('common.deleteConfirm', { name: n.name }), { danger: true, okText: t('common.delete') })) return;
-    try { await del('nodes/' + id); await load('nodes'); render(document.getElementById('page')); toast(t('common.deleted'), 'ok'); }
-    catch (e) { toast(e.message, 'err'); }
+    if (!await confirm(t('node.delConfirm', { name: n.name }), { danger: true, okText: t('common.delete') })) return;
+    try {
+      const r = await del('nodes/' + id, SLOW); // 主机要先给它推空用户表
+      await load('nodes'); render(document.getElementById('page')); toast(t('common.deleted'), 'ok');
+      const msgs = [];
+      if ((r.disabledLines || []).length) msgs.push(t('node.linesDisabled', { names: r.disabledLines.join(t('node.sep')) }));
+      if (r.decommissionError) msgs.push(t('node.decomFail', { name: n.name, err: r.decommissionError }));
+      if (msgs.length) notice(t(r.decommissionError ? 'node.decomFailTitle' : 'common.deleted'), msgs.join('\n'));
+    } catch (e) { toast(e.message, 'err'); }
   },
 });
