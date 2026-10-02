@@ -57,6 +57,9 @@ type Scheduler struct {
 	// 数据面不会自己重载,所以每轮比对这个集合,变了就重载一次;deadInit 为假表示还没有上一轮
 	deadResellers map[uint]bool
 	deadInit      bool
+	// expired 副机上一轮看到的已到期用户 / 代理(见 expireLocal);expiredInit 为假表示还没有上一轮
+	expired     map[string]bool
+	expiredInit bool
 }
 
 // FlushStats synchronously persists the current data-plane counters. Runner
@@ -347,11 +350,47 @@ func (s *Scheduler) expireLimitStates() {
 	}
 }
 
+// expireLocal 副机:用户 / 代理到期是时间自然到的,没人保存过任何东西 —— 代理到期不改快照修订号,主机要等 600 秒的
+// 重推心跳才推(审计 M022);主机失联时什么都不推(M035)。数据面不会自己重载,到期的人就一直连得上。
+// 每分钟看一次已到期的集合,出现新到期的就热更新用户表,渲染层按到期时间把他们撤下。不改库、不影响主机执法
+// (用户 2026-09-29 拍板:副机失联过久时按本地到期时间自己停掉过期用户)。
+func (s *Scheduler) expireLocal() {
+	now := time.Now().Unix()
+	var users, resellers []uint
+	if err := s.d.DB.Model(&model.User{}).Where("enabled = ? AND expiry > 0 AND expiry <= ?", true, now).Pluck("id", &users).Error; err != nil {
+		return
+	}
+	if err := s.d.DB.Model(&model.Reseller{}).Where("enabled = ? AND expiry > 0 AND expiry <= ?", true, now).Pluck("id", &resellers).Error; err != nil {
+		return
+	}
+	cur := make(map[string]bool, len(users)+len(resellers))
+	fresh := false
+	for _, id := range users {
+		k := fmt.Sprintf("u%d", id)
+		cur[k], fresh = true, fresh || !s.expired[k]
+	}
+	for _, id := range resellers {
+		k := fmt.Sprintf("r%d", id)
+		cur[k], fresh = true, fresh || !s.expired[k]
+	}
+	first := !s.expiredInit
+	s.expired, s.expiredInit = cur, true
+	// 第一轮只记下:启动时的渲染已经按到期时间撤下了他们。集合缩小(续费、主机停用后推了快照)不用重载,快照应用时已重载
+	if first || !fresh || s.d.ReloadUsers == nil {
+		return
+	}
+	logger.Info("有用户或代理到期,按本机时间撤下(", len(users), " 个用户、", len(resellers), " 个代理已到期)")
+	if err := s.d.ReloadUsers(); err != nil {
+		logger.Warning("到期撤下时热更新用户表失败: ", err)
+	}
+}
+
 // ---- deplete / reset ----
 
 func (s *Scheduler) runDeplete() {
 	if s.d.IsNode() {
 		s.expireLimitStates() // 副机不执法,只按到期时间解除规则限速
+		s.expireLocal()
 		return
 	}
 	now := time.Now().Unix()

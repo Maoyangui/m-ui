@@ -222,10 +222,12 @@ func loadLineUsers(db *gorm.DB, self uint) (map[uint][]model.User, error) {
 		allowed[k][sc.NodeId] = true
 	}
 	var users []model.User
-	// 代理被停用、到期或额度用尽 → 他名下的用户一并不下发(等同停用,节点立刻连不上);用户行本身不改
+	now := time.Now().Unix()
+	// 代理被停用、到期或额度用尽 → 他名下的用户一并不下发(等同停用,节点立刻连不上);用户行本身不改。
+	// 用户自己到期同样在这里拦:主机每分钟会把到期用户停用再推快照,但主机失联时副机只有这一道(审计 M035)
 	live := db.Model(&model.Reseller{}).Select("id").
-		Where("enabled = ? AND depleted = ? AND (expiry = 0 OR expiry > ?)", true, false, time.Now().Unix())
-	if err := db.Where("enabled = ? AND (COALESCE(reseller_id,0) = 0 OR reseller_id IN (?))", true, live).
+		Where("enabled = ? AND depleted = ? AND (expiry = 0 OR expiry > ?)", true, false, now)
+	if err := db.Where("enabled = ? AND (expiry = 0 OR expiry > ?) AND (COALESCE(reseller_id,0) = 0 OR reseller_id IN (?))", true, now, live).
 		Find(&users).Error; err != nil {
 		return nil, err
 	}

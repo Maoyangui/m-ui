@@ -399,7 +399,7 @@ Any number of nodes. To attach one:
    With an `http://` API URL the token and every user credential cross the internet in plaintext (marked "Plaintext" on the Servers page): enable HTTPS on the node panel (self-signed is fine), or open the node port to the master only.
 4. Within seconds the master pushes and shows "synced".
 
-How it works: the master compares a snapshot every few seconds and pushes on change; in the same round it pulls the node's traffic ledger, online IPs, status and certificate expiry. Quotas are enforced only on the master; a disabled user reaches every node within about 5 seconds. A node unreachable for over a minute triggers one alert and one more on recovery; while offline it keeps serving users with its last config.
+How it works: the master compares a snapshot every few seconds and pushes on change; in the same round it pulls the node's traffic ledger, online IPs, status and certificate expiry. Quotas are enforced only on the master; a disabled user reaches every node within about 5 seconds. A node unreachable for over a minute triggers one alert and one more on recovery; while offline it keeps serving users with its last config and stops expired users and resellers by its own clock.
 
 Each server, including the master, can have a **traffic ratio**: traffic through it counts toward users' usage multiplied by the ratio, e.g. 2× for an expensive route.
 
