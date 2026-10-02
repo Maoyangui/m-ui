@@ -234,7 +234,8 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 			}
-			return nil
+			// 记下的账本纪元随游标一起删:那台机器以后再加回来,只建基线、不重算历史(见 hub.ledgerBaseline)
+			return tx.Where("key = ?", hub.LedgerEpochSetting(id)).Delete(&model.Setting{}).Error
 		})
 		if err != nil {
 			badRequest(w, err)

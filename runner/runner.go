@@ -193,7 +193,19 @@ func New(dbPath string) (*Runner, error) {
 	})
 	r.ensureAdmin()
 	r.ensureLocalNode()
+	r.ensureLedgerEpoch(false)
 	return r, nil
+}
+
+// ensureLedgerEpoch 本机流量账本的纪元(副机随报告上报,见 hub.LedgerEpochKey):没有就生成;renew 时换新 ——
+// 从备份还原后账本换了一本,主机据此只建基线,不把整段历史当增量再计一遍。
+func (r *Runner) ensureLedgerEpoch(renew bool) {
+	if !renew && r.setting(hub.LedgerEpochKey) != "" {
+		return
+	}
+	if err := r.SetSetting(hub.LedgerEpochKey, hub.NewLedgerEpoch()); err != nil {
+		logger.Warning("记录流量账本纪元失败: ", err)
+	}
 }
 
 // ensureLocalNode 保证 nodes 表里有一条"本机"记录(全新安装时创建),订阅入口与副机接入都以它为基准。
@@ -1410,15 +1422,20 @@ func keepRunning(name string, fn func(<-chan struct{}), stop <-chan struct{}) {
 func Run(dbPath string) error {
 	logger.InitLogger(logging.INFO)
 	// 有待还原的备份(面板上传后重启到这里)先原子替换数据库与证书
-	if applied, err := backup.ApplyPending(dbPath); err != nil {
+	applied, err := backup.ApplyPending(dbPath)
+	if err != nil {
 		// 备份包已改名 .failed。注意错误文本里会说明数据库有没有换:证书阶段出错时库**已经**是备份里的了。
 		logger.Error("应用待还原备份时出错(备份包已改名为 .failed): ", err)
 	} else if applied {
 		logger.Info("已从备份还原数据库与证书")
 	}
+	restored := applied || err != nil // 出错时库也可能已经换成备份里的了
 	r, err := New(dbPath)
 	if err != nil {
 		return err
+	}
+	if restored {
+		r.ensureLedgerEpoch(true) // 还原回来的库里是旧账本的纪元
 	}
 	// core 启动失败(如证书未就绪)不阻塞面板与订阅:
 	// 面板必须先可用,操作者才能在面板里解决问题。

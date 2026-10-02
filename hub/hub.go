@@ -10,6 +10,7 @@ package hub
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -510,11 +511,12 @@ type Report struct {
 	OnlineLinesByIP map[string]map[string][]string `json:"onlineLinesByIp,omitempty"` // 用户 → 源 IP → 线路名
 	OnlineLines     []string                       `json:"onlineLines"`
 	CertDays        int                            `json:"certDays"`
-	PublicIP        string                         `json:"publicIp"`            // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
-	Conns           []RecentConn                   `json:"conns,omitempty"`     // 最近入站连接,主机概览汇总展示
-	Groups          map[string]GroupState          `json:"groups,omitempty"`    // 代理池在这台机器上的状态(在线设备、设备池满被拒次数)
-	Upstreams       []UpstreamHealth               `json:"upstreams,omitempty"` // 本机线路真正用到的那些上游的巡检结果
-	Reload          *ReloadState                   `json:"reload,omitempty"`    // 副机最近一次重载的结果,失败要让主机面板看见
+	PublicIP        string                         `json:"publicIp"`              // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
+	Conns           []RecentConn                   `json:"conns,omitempty"`       // 最近入站连接,主机概览汇总展示
+	Groups          map[string]GroupState          `json:"groups,omitempty"`      // 代理池在这台机器上的状态(在线设备、设备池满被拒次数)
+	Upstreams       []UpstreamHealth               `json:"upstreams,omitempty"`   // 本机线路真正用到的那些上游的巡检结果
+	Reload          *ReloadState                   `json:"reload,omitempty"`      // 副机最近一次重载的结果,失败要让主机面板看见
+	LedgerEpoch     string                         `json:"ledgerEpoch,omitempty"` // 副机流量账本的纪元(见 LedgerEpochKey);老副机不报
 }
 
 // ReloadState 一台机器最近一次数据面重载的结果。
@@ -546,10 +548,7 @@ type GroupState struct {
 
 // ApplyCounters 把副机的单调账本按游标并入主机:只计增量;计数器回绕(副机重装)时游标归零重认。
 // ratio 为该服务器的流量倍率(≤0 视为 1),增量按倍率计入用户用量与时序。返回并入的用户数。
-func ApplyCounters(db *gorm.DB, nodeId uint, nodeName string, counters []model.AgentCounter, now int64, bucketSeconds int64, ratio float64) (int, error) {
-	if len(counters) == 0 {
-		return 0, nil
-	}
+func ApplyCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []model.AgentCounter, now int64, bucketSeconds int64, ratio float64) (int, error) {
 	if bucketSeconds < 1 {
 		bucketSeconds = 60
 	}
@@ -559,13 +558,28 @@ func ApplyCounters(db *gorm.DB, nodeId uint, nodeName string, counters []model.A
 	bucket := now - now%bucketSeconds
 	n := 0
 	err := db.Transaction(func(tx *gorm.DB) error {
+		baseline, err := ledgerBaseline(tx, nodeId, epoch)
+		if err != nil {
+			return err
+		}
 		for _, c := range counters {
 			var cur model.TrafficCursor
 			tx.Where("node_id = ? AND user_name = ?", nodeId, c.UserName).First(&cur)
-			if c.Up < cur.Up || c.Down < cur.Down {
-				cur.Up, cur.Down = 0, 0 // 副机计数器回绕
+			if baseline {
+				cur.Up, cur.Down = c.Up, c.Down // 只建基线:游标对齐当前计数,这一份不计增量
+			} else if c.Up < cur.Up || c.Down < cur.Down {
+				cur.Up, cur.Down = 0, 0 // 副机计数器回绕(同名用户删了再建,计数从 0 起)
 			}
 			dUp, dDown := c.Up-cur.Up, c.Down-cur.Down
+			if baseline {
+				if err := tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "node_id"}, {Name: "user_name"}},
+					DoUpdates: clause.AssignmentColumns([]string{"up", "down"}),
+				}).Create(&model.TrafficCursor{NodeId: nodeId, UserName: c.UserName, Up: c.Up, Down: c.Down}).Error; err != nil {
+					return err
+				}
+				continue
+			}
 			if dUp <= 0 && dDown <= 0 {
 				continue
 			}
@@ -608,6 +622,67 @@ func ApplyCounters(db *gorm.DB, nodeId uint, nodeName string, counters []model.A
 		return nil
 	})
 	return n, err
+}
+
+// LedgerEpochKey 副机账本纪元在 settings 里的键(副机本机的,不随快照同步)。数据面启动时没有就生成,
+// 从备份还原后换新:账本换了一本,主机据此只建基线、不把整段历史当增量再计一遍(审计 M057)。
+const LedgerEpochKey = "agentLedgerEpoch"
+
+// NewLedgerEpoch 一个新的随机账本纪元。
+func NewLedgerEpoch() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// LedgerEpochSetting 主机记下的某台副机的账本纪元(删除副机时一并删掉)。
+func LedgerEpochSetting(nodeId uint) string { return fmt.Sprintf("ledgerEpoch:%d", nodeId) }
+
+// DuplicateLedgerError 这份报告的账本纪元已经记在另一台副机上:同一台机器加了两次(或克隆出来的),流量只按先记下的那台算。
+type DuplicateLedgerError struct{ Other uint }
+
+func (e *DuplicateLedgerError) Error() string {
+	return fmt.Sprintf("和副机 #%d 是同一本流量账本(同一台机器加了两次,或者是克隆出来的),这台的流量不重复计入", e.Other)
+}
+
+// ledgerBaseline 按账本纪元判断这一份报告是不是只建基线。以前副机账本没有身份:删了再加(主机游标随副机删掉)、
+// 副机从备份还原(计数倒退,被当成回绕从 0 计)、同一台机器加两次,都会把整段历史流量重算一遍。
+//   - 纪元变了:换了一本账,只建基线;
+//   - 这台第一次报纪元:有游标说明是升级上来的老副机,照常计(不丢流量);没有游标(新加的、删了再加的)只建基线;
+//   - 同一纪元记在另一台副机上:不计入(DuplicateLedgerError);
+//   - 老副机不报纪元(epoch 为空):照旧。
+func ledgerBaseline(tx *gorm.DB, nodeId uint, epoch string) (bool, error) {
+	if epoch == "" {
+		return false, nil
+	}
+	key := LedgerEpochSetting(nodeId)
+	var prev string
+	if err := tx.Model(&model.Setting{}).Select("value").Where("key = ?", key).Scan(&prev).Error; err != nil {
+		return false, err
+	}
+	if prev == epoch {
+		return false, nil
+	}
+	var other model.Setting
+	if err := tx.Where("key LIKE ? AND key <> ? AND value = ?", "ledgerEpoch:%", key, epoch).Limit(1).Find(&other).Error; err != nil {
+		return false, err
+	}
+	if other.Key != "" {
+		id, _ := strconv.ParseUint(strings.TrimPrefix(other.Key, "ledgerEpoch:"), 10, 64)
+		return false, &DuplicateLedgerError{Other: uint(id)}
+	}
+	baseline := prev != ""
+	if !baseline {
+		var cursors int64
+		if err := tx.Model(&model.TrafficCursor{}).Where("node_id = ?", nodeId).Count(&cursors).Error; err != nil {
+			return false, err
+		}
+		baseline = cursors == 0
+	}
+	if baseline {
+		logger.Info("副机 #", nodeId, " 的流量账本是新的一本(纪元 ", epoch, "),这一份只建基线、不计增量")
+	}
+	return baseline, upsertSetting(tx, key, epoch)
 }
 
 func maxInt64(a, b int64) int64 {
@@ -938,16 +1013,21 @@ func (h *Hub) applyResult(r *nodeResult) {
 		// old connections on the other servers.
 		return
 	}
-	h.setStatus(r.n, true, r.pushErr, &r.rep) // 在线但配置未同步:Error 里写推送原因,Synced 由报告的修订号判
-	if r.rep.PublicIP != "" && r.rep.PublicIP != r.n.PublicIP {
-		h.d.DB.Model(&model.Node{}).Where("id = ?", r.n.Id).Update("public_ip", r.rep.PublicIP)
-	}
 	bucket := int64(60)
 	if v := h.d.Setting("statsBucketSeconds"); v != "" {
 		fmt.Sscanf(v, "%d", &bucket)
 	}
-	if _, err := ApplyCounters(h.d.DB, r.n.Id, r.n.Name, r.rep.Counters, time.Now().Unix(), bucket, r.n.Ratio); err != nil {
+	errStr := r.pushErr // 在线但配置未同步:Error 里写推送原因,Synced 由报告的修订号判
+	if _, err := ApplyCounters(h.d.DB, r.n.Id, r.n.Name, r.rep.LedgerEpoch, r.rep.Counters, time.Now().Unix(), bucket, r.n.Ratio); err != nil {
 		logger.Warning("并入副机 ", r.n.Name, " 流量失败: ", err)
+		var dup *DuplicateLedgerError
+		if errors.As(err, &dup) { // 要让管理员看见:这台的流量没在计
+			errStr = strings.TrimPrefix(errStr+";"+err.Error(), ";")
+		}
+	}
+	h.setStatus(r.n, true, errStr, &r.rep)
+	if r.rep.PublicIP != "" && r.rep.PublicIP != r.n.PublicIP {
+		h.d.DB.Model(&model.Node{}).Where("id = ?", r.n.Id).Update("public_ip", r.rep.PublicIP)
 	}
 	h.mu.Lock()
 	h.remote[r.n.Id] = r.rep.Onlines

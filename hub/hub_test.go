@@ -171,7 +171,7 @@ func TestApplyCountersCursor(t *testing.T) {
 	db := openDB(t, "hub.db").DB
 	db.Create(&model.User{Name: "bob", Enabled: true})
 	c := []model.AgentCounter{{UserName: "bob", Up: 100, Down: 200}}
-	if n, err := ApplyCounters(db, 2, "台湾", c, 1000, 60, 1); err != nil || n != 1 {
+	if n, err := ApplyCounters(db, 2, "台湾", "", c, 1000, 60, 1); err != nil || n != 1 {
 		t.Fatalf("首次并入: %v %d", err, n)
 	}
 	var u model.User
@@ -181,18 +181,18 @@ func TestApplyCountersCursor(t *testing.T) {
 	}
 	// 增量
 	c[0].Up, c[0].Down = 150, 260
-	ApplyCounters(db, 2, "台湾", c, 1060, 60, 1)
+	ApplyCounters(db, 2, "台湾", "", c, 1060, 60, 1)
 	db.First(&u)
 	if u.Up != 150 || u.Down != 260 {
 		t.Fatalf("应只计增量: %+v", u)
 	}
 	// 无变化 → 不计
-	if n, _ := ApplyCounters(db, 2, "台湾", c, 1120, 60, 1); n != 0 {
+	if n, _ := ApplyCounters(db, 2, "台湾", "", c, 1120, 60, 1); n != 0 {
 		t.Fatal("无增量不应计入")
 	}
 	// 回绕(副机重装):计数器变小 → 游标归零,全额计入
 	c[0].Up, c[0].Down = 5, 7
-	ApplyCounters(db, 2, "台湾", c, 1180, 60, 1)
+	ApplyCounters(db, 2, "台湾", "", c, 1180, 60, 1)
 	db.First(&u)
 	if u.Up != 155 || u.Down != 267 {
 		t.Fatalf("回绕后应重认: %+v", u)
@@ -208,13 +208,13 @@ func TestApplyCountersCursor(t *testing.T) {
 		t.Fatal("应记录副机流量时序")
 	}
 	// 不同副机独立游标
-	ApplyCounters(db, 3, "日本", []model.AgentCounter{{UserName: "bob", Up: 1, Down: 1}}, 1240, 60, 1)
+	ApplyCounters(db, 3, "日本", "", []model.AgentCounter{{UserName: "bob", Up: 1, Down: 1}}, 1240, 60, 1)
 	db.First(&u)
 	if u.Up != 156 || u.Down != 268 {
 		t.Fatalf("多副机应各自计入: %+v", u)
 	}
 	// 倍率:2 倍服务器的 100/200 增量计为 200/400
-	ApplyCounters(db, 4, "贵", []model.AgentCounter{{UserName: "bob", Up: 100, Down: 200}}, 1300, 60, 2)
+	ApplyCounters(db, 4, "贵", "", []model.AgentCounter{{UserName: "bob", Up: 100, Down: 200}}, 1300, 60, 2)
 	db.First(&u)
 	if u.Up != 356 || u.Down != 668 {
 		t.Fatalf("倍率应按 2 倍计入: %+v", u)

@@ -361,8 +361,9 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		Version: Version, Hostname: host, CoreRunning: s.run.CoreRunning(), Uptime: s.run.Uptime(),
 		Revision: s.setting("hubRevision"), ReloadPending: strings.TrimSpace(s.setting("hubReloadPending")) != "",
 		Onlines: map[string][]string{}, CertDays: s.run.CertInfo().DaysLeft,
-		PublicIP: s.setting("publicIp"),
-		Conns:    s.recentConns(50),
+		PublicIP:    s.setting("publicIp"),
+		Conns:       s.recentConns(50),
+		LedgerEpoch: s.setting(hub.LedgerEpochKey),
 	}
 	rep.OnlineLinesByIP = s.run.OnlineIPLines()
 	rep.Groups = s.run.GroupState()
