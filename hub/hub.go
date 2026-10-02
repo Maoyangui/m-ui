@@ -734,10 +734,14 @@ type NodeStatus struct {
 
 // RemoteConns 汇总所有在线副机最近上报的入站连接,标注服务器名。
 func (h *Hub) RemoteConns() []RecentConn {
+	now := time.Now().Unix()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var out []RecentConn
-	for _, st := range h.status {
+	for id, st := range h.status {
+		if !h.freshLocked(id, now) {
+			continue
+		}
 		for _, c := range st.conns {
 			c.Server = st.Name
 			out = append(out, c)
@@ -1206,11 +1210,19 @@ func (h *Hub) remoteForDeviceLimits() map[uint]map[string][]string {
 	defer h.mu.Unlock()
 	out := make(map[uint]map[string][]string, len(h.remote))
 	for id, report := range h.remote {
-		if at, ok := h.remoteAt[id]; ok && now-at <= remoteReportGrace {
+		if h.freshLocked(id, now) {
 			out[id] = report
 		}
 	}
 	return out
+}
+
+// freshLocked 这台副机的报告还算数吗(最近 remoteReportGrace 内上报过),调用方持有 h.mu。
+// 在线用户、在线 IP、最近连接这些汇总都只取还算数的:失联副机最后一份报告里的人不能一直挂着"在线"(审计 M067);
+// 服务器页那一行照旧显示它最后的样子(Statuses 不过滤)。
+func (h *Hub) freshLocked(id uint, now int64) bool {
+	at, ok := h.remoteAt[id]
+	return ok && now-at <= remoteReportGrace
 }
 
 // distributeIPs 把"其他机器上的在线 IP"下发给每台机器(含主机自身)。
@@ -1810,10 +1822,14 @@ func (h *Hub) Statuses() map[uint]NodeStatus {
 // RemoteIPs 返回某用户在所有副机上的在线 IP。
 // RemoteIPsAll 一次锁拿全量:用户 → 副机上报的在线 IP(面板列表用)。
 func (h *Hub) RemoteIPsAll() map[string][]string {
+	now := time.Now().Unix()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := map[string]map[string]bool{}
-	for _, m := range h.remote {
+	for id, m := range h.remote {
+		if !h.freshLocked(id, now) {
+			continue
+		}
 		for user, ips := range m {
 			if out[user] == nil {
 				out[user] = map[string]bool{}
@@ -1831,10 +1847,14 @@ func (h *Hub) RemoteIPsAll() map[string][]string {
 }
 
 func (h *Hub) RemoteIPs(user string) []string {
+	now := time.Now().Unix()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	set := map[string]bool{}
-	for _, m := range h.remote {
+	for id, m := range h.remote {
+		if !h.freshLocked(id, now) {
+			continue
+		}
 		for _, ip := range m[user] {
 			set[ip] = true
 		}
@@ -1848,10 +1868,14 @@ func (h *Hub) RemoteIPs(user string) []string {
 // RemoteIPLines 返回各副机上 该用户的 源 IP → 线路名(线路名已带服务器后缀,如 "香港1-台湾")。
 // RemoteIPLinesAll 一次锁拿全量:用户 → 源 IP → 线路名(带服务器后缀)。
 func (h *Hub) RemoteIPLinesAll() map[string]map[string][]string {
+	now := time.Now().Unix()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := map[string]map[string][]string{}
 	for id, m := range h.remoteLines {
+		if !h.freshLocked(id, now) {
+			continue
+		}
 		name := h.nodeNames[id]
 		for user, ips := range m {
 			if out[user] == nil {
@@ -1871,10 +1895,14 @@ func (h *Hub) RemoteIPLinesAll() map[string]map[string][]string {
 }
 
 func (h *Hub) RemoteIPLines(user string) map[string][]string {
+	now := time.Now().Unix()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	out := map[string][]string{}
 	for id, m := range h.remoteLines {
+		if !h.freshLocked(id, now) {
+			continue
+		}
 		name := h.nodeNames[id]
 		for ip, lines := range m[user] {
 			for _, l := range lines {
@@ -1893,10 +1921,14 @@ func (h *Hub) RemoteIPLines(user string) map[string][]string {
 
 // RemoteOnlineUsers 返回在任一副机上在线的用户名。
 func (h *Hub) RemoteOnlineUsers() []string {
+	now := time.Now().Unix()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	set := map[string]bool{}
-	for _, m := range h.remote {
+	for id, m := range h.remote {
+		if !h.freshLocked(id, now) {
+			continue
+		}
 		for u, ips := range m {
 			if len(ips) > 0 {
 				set[u] = true

@@ -266,6 +266,7 @@ func TestHubForgetsRemovedNodes(t *testing.T) {
 	h := &Hub{
 		status:      map[uint]*NodeStatus{1: {Name: "旧机"}},
 		remote:      map[uint]map[string][]string{1: {"u": {"1.2.3.4"}}},
+		remoteAt:    map[uint]int64{1: time.Now().Unix()},
 		pushed:      map[uint]string{1: "rev"},
 		remoteLines: map[uint]map[string]map[string][]string{1: {"u": {"1.2.3.4": {"香港1"}}}},
 		nodeNames:   map[uint]string{1: "旧机"},
@@ -571,5 +572,39 @@ func TestTickSyncsNodesConcurrently(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if after := runtime.NumGoroutine(); after > before+3 {
 		t.Fatalf("同步后多出 goroutine: %d → %d", before, after)
+	}
+}
+
+// 失联超过宽限期的副机:它最后一份报告里的人不再算"在线"(概览、用户列表、外部 API、最近连接都受影响),
+// 服务器页那一行照旧显示它最后的样子(审计 M067)。宽限期内的照常计。
+func TestStaleRemoteReportNotOnline(t *testing.T) {
+	now := time.Now().Unix()
+	h := &Hub{
+		status: map[uint]*NodeStatus{
+			1: {Name: "失联", conns: []RecentConn{{IP: "1.1.1.1"}}},
+			2: {Name: "在线", conns: []RecentConn{{IP: "2.2.2.2"}}},
+		},
+		remote:      map[uint]map[string][]string{1: {"old": {"1.1.1.1"}}, 2: {"new": {"2.2.2.2"}}},
+		remoteAt:    map[uint]int64{1: now - remoteReportGrace - 1, 2: now},
+		remoteLines: map[uint]map[string]map[string][]string{1: {"old": {"1.1.1.1": {"香港1"}}}, 2: {"new": {"2.2.2.2": {"台湾1"}}}},
+		nodeNames:   map[uint]string{1: "失联", 2: "在线"},
+	}
+	if got := h.RemoteOnlineUsers(); len(got) != 1 || got[0] != "new" {
+		t.Fatalf("在线用户只该算宽限期内上报过的副机,实际 %v", got)
+	}
+	if all := h.RemoteIPsAll(); len(all) != 1 || len(all["new"]) != 1 {
+		t.Fatalf("在线 IP 汇总不对: %v", all)
+	}
+	if ips := h.RemoteIPs("old"); len(ips) != 0 {
+		t.Fatalf("失联副机上的 IP 不该算在线: %v", ips)
+	}
+	if lines := h.RemoteIPLinesAll(); len(lines) != 1 || h.RemoteIPLines("old") != nil {
+		t.Fatalf("在线线路汇总不对: %v", lines)
+	}
+	if conns := h.RemoteConns(); len(conns) != 1 || conns[0].IP != "2.2.2.2" {
+		t.Fatalf("最近连接只该算宽限期内的: %v", conns)
+	}
+	if st := h.Statuses(); len(st) != 2 {
+		t.Fatalf("服务器页照旧显示两台的最后状态: %v", st)
 	}
 }
