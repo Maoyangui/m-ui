@@ -202,6 +202,8 @@ registerActions({
       await load('nodes'); render(document.getElementById('page')); toast(t('common.deleted'), 'ok');
       const msgs = [];
       if ((r.disabledLines || []).length) msgs.push(t('node.linesDisabled', { names: r.disabledLines.join(t('node.sep')) }));
+      const revoked = [...(r.revokedUsers || []), ...(r.revokedResellers || [])];
+      if (revoked.length) msgs.push(t('node.scopeRevoked', { names: revoked.join(t('node.sep')) }));
       if (r.decommissionError) msgs.push(t('node.decomFail', { name: n.name, err: r.decommissionError }));
       if (msgs.length) notice(t(r.decommissionError ? 'node.decomFailTitle' : 'common.deleted'), msgs.join('\n'));
     } catch (e) { toast(e.message, 'err'); }

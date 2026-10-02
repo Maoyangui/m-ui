@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
@@ -65,10 +66,15 @@ func TestDeleteCleansLineNodeRows(t *testing.T) {
 		t.Fatalf("代理删了,它的收窄行应清掉,剩 %d", n)
 	}
 
-	// 删服务器 A:指向它的收窄行要清掉,用户回到"这条线路的全部服务器"
+	// 删服务器 A:只收窄到 A 的那条分配撤掉(以前清掉收窄行就退回"该线路的全部服务器",范围静默扩大,审计 M062);
+	// 收窄里还有别的机器的只去掉 A。受影响的人列在返回里
 	if n := count(&model.UserLineNode{}, "node_id = ?", 2); n != 1 {
 		t.Fatalf("前提:还剩一条指向 A 的收窄行,实际 %d", n)
 	}
+	db.Create(&model.Node{Name: "C", ApiUrl: "http://c", Enabled: true, Sort: 3}) // 线路部署在三台上,收窄到主机与 A 才算真收窄
+	u2 := model.User{Name: "u2", Enabled: true}
+	db.Create(&u2)
+	s.setUserLineRefs(u2.Id, []model.LineRef{{LineId: 2, NodeIds: []uint{1, 2}}})
 	req = httptest.NewRequest("DELETE", "http://x/app/api/nodes/2", nil)
 	w = httptest.NewRecorder()
 	s.handleNodeItem(w, req)
@@ -78,7 +84,16 @@ func TestDeleteCleansLineNodeRows(t *testing.T) {
 	if n := count(&model.UserLineNode{}, "node_id = ?", 2); n != 0 {
 		t.Fatalf("服务器删了,指向它的收窄行应清掉,剩 %d", n)
 	}
-	if refs := s.userLineRefs(u.Id); len(refs) != 1 || refs[0].LineId != 2 || len(refs[0].NodeIds) != 0 {
-		t.Fatalf("清掉之后应回到「该线路的全部服务器」: %+v", refs)
+	if refs := s.userLineRefs(u.Id); len(refs) != 0 {
+		t.Fatalf("只收窄到 A 的分配应撤掉,不能退回全部服务器: %+v", refs)
+	}
+	if refs := s.userLineRefs(u2.Id); len(refs) != 1 || len(refs[0].NodeIds) != 1 || refs[0].NodeIds[0] != 1 {
+		t.Fatalf("收窄到主机与 A 的应只剩主机: %+v", refs)
+	}
+	var resp struct {
+		RevokedUsers []string `json:"revokedUsers"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || len(resp.RevokedUsers) != 1 || resp.RevokedUsers[0] != "u" {
+		t.Fatalf("返回里应列出被撤分配的用户 u: %s", w.Body.String())
 	}
 }

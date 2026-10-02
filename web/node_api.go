@@ -221,14 +221,19 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		var disabled []string
+		var disabled, revokedUsers, revokedResellers []string
 		err = s.db.Transaction(func(tx *gorm.DB) error { // 服务器和引用它的一切一起删
 			disabled = s.detachLinesFromNodeTx(tx, id) // 只部署在这台机器上的线路会被停用,不留悬空引用
 			if err := tx.Delete(&model.Node{}, id).Error; err != nil {
 				return err
 			}
-			// 用户 / 代理"只要这台机器上的入口"的收窄行也要清掉:留着的话,这些人这条线路上
-			// 一台机器都匹配不到,订阅里会悄无声息地少节点。清掉之后按"没有收窄 = 全部服务器"处理。
+			// 用户 / 代理在某条线路上只收窄到这台机器的:收窄行一清就退回"该线路的全部服务器",范围静默扩大到
+			// 别的机器。这条分配 / 授权改为撤掉,并列给管理员看(审计 M062)
+			var err error
+			if revokedUsers, revokedResellers, err = revokeSoleNodeScopes(tx, id); err != nil {
+				return err
+			}
+			// 剩下的收窄行(还收窄到别的机器)只去掉这一台;它和游标、连通检测记录一起清
 			for _, t := range []interface{}{&model.TrafficCursor{}, &model.UserLineNode{}, &model.ResellerLineNode{}, &model.ReachCheck{}} {
 				if err := tx.Where("node_id = ?", id).Delete(t).Error; err != nil {
 					return err
@@ -248,7 +253,7 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		if len(disabled) > 0 {
 			s.reloadAll("删除服务器 " + node.Name)
 		}
-		resp := map[string]interface{}{"ok": "1", "disabledLines": disabled}
+		resp := map[string]interface{}{"ok": "1", "disabledLines": disabled, "revokedUsers": revokedUsers, "revokedResellers": revokedResellers}
 		if e := s.decommission(node, before); e != "" {
 			resp["decommissionError"] = e
 		}
@@ -256,6 +261,44 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// revokeSoleNodeScopes 删除服务器时:用户 / 代理在某条线路上只收窄到这台的,撤掉那条分配 / 授权,返回受影响的名字。
+// 收窄里还有别的机器的不动(调用方随后只删指向这台的收窄行)。
+func revokeSoleNodeScopes(tx *gorm.DB, nodeID uint) (users, resellers []string, err error) {
+	var ul []model.UserLineNode
+	if err = tx.Raw(`SELECT a.user_id, a.line_id, a.node_id FROM user_line_nodes a WHERE a.node_id = ? AND NOT EXISTS
+		(SELECT 1 FROM user_line_nodes b WHERE b.user_id = a.user_id AND b.line_id = a.line_id AND b.node_id <> a.node_id)`, nodeID).Scan(&ul).Error; err != nil {
+		return
+	}
+	var uids []uint
+	for _, x := range ul {
+		if err = tx.Where("user_id = ? AND line_id = ?", x.UserId, x.LineId).Delete(&model.UserLine{}).Error; err != nil {
+			return
+		}
+		uids = append(uids, x.UserId)
+	}
+	var rl []model.ResellerLineNode
+	if err = tx.Raw(`SELECT a.reseller_id, a.line_id, a.node_id FROM reseller_line_nodes a WHERE a.node_id = ? AND NOT EXISTS
+		(SELECT 1 FROM reseller_line_nodes b WHERE b.reseller_id = a.reseller_id AND b.line_id = a.line_id AND b.node_id <> a.node_id)`, nodeID).Scan(&rl).Error; err != nil {
+		return
+	}
+	var rids []uint
+	for _, x := range rl {
+		if err = tx.Where("reseller_id = ? AND line_id = ?", x.ResellerId, x.LineId).Delete(&model.ResellerLine{}).Error; err != nil {
+			return
+		}
+		rids = append(rids, x.ResellerId)
+	}
+	if len(uids) > 0 {
+		if err = tx.Model(&model.User{}).Where("id IN ?", uids).Order("name").Pluck("name", &users).Error; err != nil {
+			return
+		}
+	}
+	if len(rids) > 0 {
+		err = tx.Model(&model.Reseller{}).Where("id IN ?", rids).Order("name").Pluck("name", &resellers).Error
+	}
+	return
 }
 
 // decommission 停用 / 删除副机后给它推空用户表,那台立刻停止为任何人服务。没推到(失联、没配地址)返回原因:
