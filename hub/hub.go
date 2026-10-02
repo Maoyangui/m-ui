@@ -669,7 +669,8 @@ type Deps struct {
 }
 
 type Hub struct {
-	syncMu sync.Mutex // 锁覆盖构造快照到 ACK，避免 tick/SyncNow/PushNow 乱序回写
+	// syncMu 只串行"构造快照 + 分配推送序号",不跨网络往返:一台挂起的副机拖不住别的机器,也拖不住面板上的推送。
+	syncMu sync.Mutex
 	// sequencePrimed is process-local: after startup (including a restored
 	// database) the first snapshot raises the durable sequence to the clock
 	// floor once, while unchanged five-second polls reuse it without a SQLite
@@ -677,10 +678,23 @@ type Hub struct {
 	sequencePrimed bool
 	d              Deps
 	mu             sync.Mutex
-	status         map[uint]*NodeStatus
-	pushed         map[uint]string
-	pushFail       map[uint]*pushFailure        // 同一修订连续推送失败:次数与时间,用来退避
-	remote         map[uint]map[string][]string // node → user → ips
+	// latest 最近一次构造的快照。推送一律在那台机器的闸里取它来发,同一台副机上不会先到新快照、后到旧快照
+	latest *Snapshot
+	// gates 每台副机一个容量为 1 的信号量:推送 → ACK、拉报告都在里面。定时同步拿不到就跳过这台(上一轮对它的
+	// 请求还没回来),手动推送、立即同步、下线推送最多等 nodeWait
+	gates map[uint]chan struct{}
+	// dbMu 各副机的结果串行落库(并入流量、改状态);网络部分各走各的
+	dbMu sync.Mutex
+	// ipsBusy 正在向这台副机下发外部设备租约:同一台机器同一时间最多一个在途请求
+	ipsBusy map[uint]bool
+	// rounds 定时同步发出去、还没回来的请求(各副机的同步、设备租约);Stop 等它们收尾
+	rounds   sync.WaitGroup
+	ctx      context.Context // Stop 时取消,在途请求立刻返回
+	cancel   context.CancelFunc
+	status   map[uint]*NodeStatus
+	pushed   map[uint]string
+	pushFail map[uint]*pushFailure        // 同一修订连续推送失败:次数与时间,用来退避
+	remote   map[uint]map[string][]string // node → user → ips
 	// remoteAt 各副机最近一次成功上报的时间。失联的副机报告本身留着(页面还要显示它最后的样子),
 	// 但超过 remoteReportGrace 没上报,它的在线 IP 就不再计入设备数并集:那些设备是不是还在线已经无从得知,
 	// 拿几分钟前的名单去拒新设备、断别的机器上回来的老连接,比短暂超限更伤人。
@@ -711,9 +725,11 @@ type rejectAt struct {
 const rejectWindow = 10 * 60 // 秒
 
 func New(d Deps) *Hub {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{}, remoteAt: map[uint]int64{},
 		remoteLines: map[uint]map[string]map[string][]string{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
-		upHealth: map[uint][]UpstreamHealth{}, kicking: map[string]*kickCall{},
+		upHealth: map[uint][]UpstreamHealth{}, kicking: map[string]*kickCall{}, gates: map[uint]chan struct{}{}, ipsBusy: map[uint]bool{},
+		ctx: ctx, cancel: cancel,
 		verified: &http.Client{Timeout: 25 * time.Second}, pinned: map[string]*http.Client{}, pushFail: map[uint]*pushFailure{}}
 }
 
@@ -743,7 +759,96 @@ func (h *Hub) Start() {
 
 func (h *Hub) Stop() {
 	close(h.stop)
-	h.wg.Wait()
+	if h.cancel != nil {
+		h.cancel()
+	}
+	h.wg.Wait()     // 定时循环先退出,之后不会再有新的 rounds
+	h.rounds.Wait() // 在途请求随 ctx 取消立刻返回
+}
+
+// baseCtx 所有发往副机的请求都挂在它下面;测试里直接拼出来的 Hub 没有它。
+func (h *Hub) baseCtx() context.Context {
+	if h.ctx == nil {
+		return context.Background()
+	}
+	return h.ctx
+}
+
+// nodeWait 手动推送、立即同步、下线推送等这台副机上一轮同步收尾的上限:和一次请求的超时一样长,
+// 再久多半是它挂起了,如实报错比让面板转一分钟强。
+const nodeWait = 25 * time.Second
+
+// gate 这台副机的信号量(见 Hub.gates)。
+func (h *Hub) gate(id uint) chan struct{} {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.gates == nil {
+		h.gates = map[uint]chan struct{}{}
+	}
+	g := h.gates[id]
+	if g == nil {
+		g = make(chan struct{}, 1)
+		h.gates[id] = g
+	}
+	return g
+}
+
+// tryNode 拿到这台副机的闸就返回 true;上一轮还在途就立刻返回 false。
+func (h *Hub) tryNode(id uint) bool {
+	select {
+	case h.gate(id) <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// waitNode 最多等 d 拿这台副机的闸。
+func (h *Hub) waitNode(id uint, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case h.gate(id) <- struct{}{}:
+		return nil
+	case <-t.C:
+		return errors.New("上一轮对这台副机的同步还没结束(它可能失联了),稍后再试")
+	case <-h.baseCtx().Done():
+		return h.baseCtx().Err()
+	}
+}
+
+func (h *Hub) releaseNode(id uint) { <-h.gate(id) }
+
+// stillEnabled 这台副机此刻是否仍是启用的:拿到它的闸之后再看一眼,中途被停用 / 删掉的就不再推送
+// (停用时推的空用户表不能被一轮在途的定时推送盖回去)。
+func (h *Hub) stillEnabled(id uint) bool {
+	var n int64
+	if err := h.d.DB.Model(&model.Node{}).Where("id = ? AND enabled = ?", id, true).Count(&n).Error; err != nil {
+		return false
+	}
+	return n > 0
+}
+
+// refreshSnapshot 按当前库构造一份快照记为 latest(推送一律发它)。
+func (h *Hub) refreshSnapshot() (Snapshot, error) {
+	h.syncMu.Lock()
+	defer h.syncMu.Unlock()
+	snap, err := h.buildPushSnapshot()
+	if err != nil {
+		return snap, err
+	}
+	snap.Version, snap.MinNode = h.d.Version, MinNodeVersion
+	h.mu.Lock()
+	h.latest, h.revision = &snap, snap.Revision
+	h.mu.Unlock()
+	return snap, nil
+}
+
+// latestSnapshot 调用前必须至少 refreshSnapshot 过一次。
+func (h *Hub) latestSnapshot() Snapshot {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return *h.latest
 }
 
 // Revision 返回主机当前配置修订号。
@@ -759,7 +864,7 @@ func (h *Hub) remoteNodes() ([]model.Node, error) {
 	return nodes, err
 }
 
-// nodeResult 一台副机这一轮同步的结果:网络部分并发跑,落库部分回到主协程串行做。
+// nodeResult 一台副机这一轮同步的结果:网络部分各台各跑,落库部分经 dbMu 串行做。
 type nodeResult struct {
 	pushErr string // 这一轮推送没成功(退避中也算),但报告照样拉到了
 	n       model.Node
@@ -767,90 +872,91 @@ type nodeResult struct {
 	err     string // 非空 = 这一轮失败(推送或拉报告)
 }
 
+// tick 一轮定时同步:按当前库构造快照,给每台副机各发一轮请求就返回,不等任何一台回来。
+// 以前整轮等所有副机:一台黑洞 / 挂起的副机(推送、拉报告、下发设备租约各 25 秒超时)把所有健康副机的
+// 同步周期从 5 秒拖到 75 秒左右 —— 停用、换凭据、超额停用在每台机器上都晚一分多钟生效。
+// 现在上一轮对某台的请求还在途,这一轮就跳过它;结果谁先回来谁先落库。
 func (h *Hub) tick() {
-	h.syncMu.Lock()
-	defer h.syncMu.Unlock()
 	if h.d.IsNode() {
 		return
 	}
-	snap, err := h.buildPushSnapshot()
-	if err != nil {
+	if _, err := h.refreshSnapshot(); err != nil {
 		logger.Warning("构造同步快照失败: ", err)
 		return
 	}
-	snap.Version, snap.MinNode = h.d.Version, MinNodeVersion
-	h.mu.Lock()
-	h.revision = snap.Revision
-	h.mu.Unlock()
-
-	// 各副机的网络往返并发进行:一台慢或失联的机器不该让后面的机器等它超时。
-	// 同一台机器内部仍是 推送 → 拉报告 的顺序;数据库写入留到下面串行做,不给 SQLite 添堵。
 	nodes, err := h.remoteNodes()
 	if err != nil {
 		logger.Warning("读取副机列表失败，保留已有缓存: ", err)
 		return
 	}
 	live := map[uint]bool{}
-	results := make([]*nodeResult, len(nodes))
-	var wg sync.WaitGroup
-	for i, n := range nodes {
+	for _, n := range nodes {
 		live[n.Id] = true
 		if n.ApiUrl == "" || n.Token == "" {
-			results[i] = &nodeResult{n: n, err: "未配置 API 地址或令牌"}
+			h.setStatus(n, false, "未配置 API 地址或令牌", nil)
 			continue
 		}
-		wg.Add(1)
-		go func(i int, n model.Node) {
-			defer wg.Done()
-			results[i] = h.syncNode(n, snap)
-		}(i, n)
+		if !h.tryNode(n.Id) {
+			continue // 上一轮对它的请求还没回来
+		}
+		h.rounds.Add(1)
+		go func(n model.Node) {
+			defer h.rounds.Done()
+			defer h.releaseNode(n.Id)
+			defer func() {
+				if v := recover(); v != nil {
+					logger.Warning("同步副机 ", n.Name, " 异常: ", v, " | ", string(debug.Stack()))
+				}
+			}()
+			// 同一台机器内部仍是 推送 → 拉报告 的顺序。拿到闸之后再确认它还启用着:停用 / 删除时推的空用户表
+			// 不能被这一轮在途的定时推送盖回去
+			if !h.stillEnabled(n.Id) {
+				return
+			}
+			h.applyResult(h.syncNode(n, h.latestSnapshot()))
+		}(n)
 	}
-	wg.Wait()
+	h.forgetNodes(live)
+	h.distributeIPs(nodes)
+	// 代理池被拒次数:主机本机这一轮的;各副机的在 applyResult 里随报告记
+	if h.d.LocalGroups != nil {
+		h.recordRejects(h.d.LocalGroups())
+	}
+}
 
+// applyResult 一台副机这一轮的结果落库、更新状态。各副机的结果经 dbMu 串行,不给 SQLite 添堵。
+func (h *Hub) applyResult(r *nodeResult) {
+	h.dbMu.Lock()
+	defer h.dbMu.Unlock()
+	if r.err != "" {
+		h.setStatus(r.n, false, r.err, nil)
+		// Keep the last report and all line/node configuration intact during
+		// an outage so the panel still shows the node's last known state. Its
+		// device set stays in the cross-node union only for remoteReportGrace
+		// (see remoteForDeviceLimits): a short blip keeps the limit intact, a
+		// real outage stops a stale list from rejecting new devices or evicting
+		// old connections on the other servers.
+		return
+	}
+	h.setStatus(r.n, true, r.pushErr, &r.rep) // 在线但配置未同步:Error 里写推送原因,Synced 由报告的修订号判
+	if r.rep.PublicIP != "" && r.rep.PublicIP != r.n.PublicIP {
+		h.d.DB.Model(&model.Node{}).Where("id = ?", r.n.Id).Update("public_ip", r.rep.PublicIP)
+	}
 	bucket := int64(60)
 	if v := h.d.Setting("statsBucketSeconds"); v != "" {
 		fmt.Sscanf(v, "%d", &bucket)
 	}
-	for _, r := range results {
-		if r == nil {
-			continue
-		}
-		if r.err != "" {
-			h.setStatus(r.n, false, r.err, nil)
-			// Keep the last report and all line/node configuration intact during
-			// an outage so the panel still shows the node's last known state. Its
-			// device set stays in the cross-node union only for remoteReportGrace
-			// (see remoteForDeviceLimits): a short blip keeps the limit intact, a
-			// real outage stops a stale list from rejecting new devices or evicting
-			// old connections on the other servers.
-			continue
-		}
-		h.setStatus(r.n, true, r.pushErr, &r.rep) // 在线但配置未同步:Error 里写推送原因,Synced 由报告的修订号判
-		if r.rep.PublicIP != "" && r.rep.PublicIP != r.n.PublicIP {
-			h.d.DB.Model(&model.Node{}).Where("id = ?", r.n.Id).Update("public_ip", r.rep.PublicIP)
-		}
-		if _, err := ApplyCounters(h.d.DB, r.n.Id, r.n.Name, r.rep.Counters, time.Now().Unix(), bucket, r.n.Ratio); err != nil {
-			logger.Warning("并入副机 ", r.n.Name, " 流量失败: ", err)
-		}
-		h.mu.Lock()
-		h.remote[r.n.Id] = r.rep.Onlines
-		h.remoteAt[r.n.Id] = time.Now().Unix()
-		h.remoteLines[r.n.Id] = r.rep.OnlineLinesByIP
-		h.nodeNames[r.n.Id] = r.n.Name
-		h.upHealth[r.n.Id] = r.rep.Upstreams // 这一轮没有结果就清空:副机改了线路、不再用任何上游时不该留着旧数据
-		h.mu.Unlock()
+	if _, err := ApplyCounters(h.d.DB, r.n.Id, r.n.Name, r.rep.Counters, time.Now().Unix(), bucket, r.n.Ratio); err != nil {
+		logger.Warning("并入副机 ", r.n.Name, " 流量失败: ", err)
 	}
-	h.forgetNodes(live)
-	h.distributeIPs(nodes)
-	// 代理池被拒次数:主机本机 + 各副机这一轮上报的,合起来记 10 分钟
-	if h.d.LocalGroups != nil {
-		h.recordRejects(h.d.LocalGroups())
-	}
-	for _, r := range results {
-		if r != nil && r.err == "" {
-			h.recordRejects(r.rep.Groups)
-		}
-	}
+	h.mu.Lock()
+	h.remote[r.n.Id] = r.rep.Onlines
+	h.remoteAt[r.n.Id] = time.Now().Unix()
+	h.remoteLines[r.n.Id] = r.rep.OnlineLinesByIP
+	h.nodeNames[r.n.Id] = r.n.Name
+	h.upHealth[r.n.Id] = r.rep.Upstreams // 这一轮没有结果就清空:副机改了线路、不再用任何上游时不该留着旧数据
+	h.mu.Unlock()
+	h.recordRejects(r.rep.Groups)
 }
 
 // recordRejects 把一台机器这一轮上报的设备池被拒次数记进滚动窗口。
@@ -1046,11 +1152,22 @@ func (h *Hub) distributeIPs(nodes []model.Node) {
 	if h.d.SetExternalIPs != nil {
 		h.d.SetExternalIPs(local)
 	}
-	// 每台副机:外部 IP = 主机本机 + 其他副机。载荷在这里串行算好,发送各机并发
-	var wg sync.WaitGroup
-	defer wg.Wait()
+	// 每台副机:外部 IP = 主机本机 + 其他副机。载荷在这里串行算好,发送各台各发、不等:失联的那台不能拖住这一轮。
+	// 同一台上一份还在途就跳过这一轮(下一轮的载荷更新)
 	for _, n := range nodes {
 		if n.ApiUrl == "" || n.Token == "" {
+			continue
+		}
+		h.mu.Lock()
+		busy := h.ipsBusy[n.Id]
+		if !busy {
+			if h.ipsBusy == nil {
+				h.ipsBusy = map[uint]bool{}
+			}
+			h.ipsBusy[n.Id] = true
+		}
+		h.mu.Unlock()
+		if busy {
 			continue
 		}
 		ext := map[string][]string{}
@@ -1073,9 +1190,14 @@ func (h *Hub) distributeIPs(nodes []model.Node) {
 				ext[u.Name] = keys(set)
 			}
 		}
-		wg.Add(1)
+		h.rounds.Add(1)
 		go func(n model.Node, ext map[string][]string) {
-			defer wg.Done()
+			defer h.rounds.Done()
+			defer func() {
+				h.mu.Lock()
+				delete(h.ipsBusy, n.Id)
+				h.mu.Unlock()
+			}()
 			var ack struct {
 				OK string `json:"ok"`
 			}
@@ -1208,14 +1330,19 @@ func (h *Hub) Ping(n model.Node) (map[string]interface{}, error) {
 
 // PushNow 立即向某副机推送当前配置。
 func (h *Hub) PushNow(n model.Node) error {
-	h.syncMu.Lock()
-	defer h.syncMu.Unlock()
-	snap, err := h.buildPushSnapshot()
-	if err != nil {
+	if _, err := h.refreshSnapshot(); err != nil {
 		return err
 	}
-	snap.Version, snap.MinNode = h.d.Version, MinNodeVersion
-	return h.push(n, snap)
+	return h.pushLatest(n)
+}
+
+// pushLatest 在这台副机的闸里推最新快照(等不到闸就报错,见 nodeWait)。
+func (h *Hub) pushLatest(n model.Node) error {
+	if err := h.waitNode(n.Id, nodeWait); err != nil {
+		return err
+	}
+	defer h.releaseNode(n.Id)
+	return h.push(n, h.latestSnapshot())
 }
 
 // buildPushSnapshot 在 syncMu 内调用。序号持久化，进程重启后也不会重用旧序号。
@@ -1289,16 +1416,12 @@ func (h *Hub) buildPushSnapshot() (Snapshot, error) {
 
 // SyncNow 等待当前快照在所有启用副机上得到实际应用 ACK。
 func (h *Hub) SyncNow() error {
-	h.syncMu.Lock()
-	defer h.syncMu.Unlock()
 	if h.d.IsNode() {
 		return nil
 	}
-	snap, err := h.buildPushSnapshot()
-	if err != nil {
+	if _, err := h.refreshSnapshot(); err != nil {
 		return err
 	}
-	snap.Version, snap.MinNode = h.d.Version, MinNodeVersion
 	var nodes []model.Node
 	if err := h.d.DB.Where("enabled = ? AND is_local = ?", true, false).Find(&nodes).Error; err != nil {
 		return err
@@ -1313,7 +1436,7 @@ func (h *Hub) SyncNow() error {
 				errs <- fmt.Errorf("副机 %s 未配置 API 地址或令牌", n.Name)
 				return
 			}
-			if err := h.push(n, snap); err != nil {
+			if err := h.pushLatest(n); err != nil {
 				errs <- fmt.Errorf("副机 %s: %w", n.Name, err)
 			}
 		}(n)
@@ -1647,7 +1770,7 @@ func (h *Hub) requestTimeout(n model.Node, method, path string, body interface{}
 	if timeout <= 0 {
 		timeout = 25 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(h.baseCtx(), timeout) // Stop 时在途请求立刻返回
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, base+"/agent/"+path, rd)
 	if err != nil {

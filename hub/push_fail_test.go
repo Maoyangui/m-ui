@@ -67,8 +67,11 @@ func TestPushFailureBacksOffButStillFetchesReport(t *testing.T) {
 
 	// 三轮 tick 连着来(中间不睡):第一次被拒后进 5 秒退避,后两轮不该再推
 	h.tick()
+	h.settle()
 	h.tick()
+	h.settle()
 	h.tick()
+	h.settle()
 	if got := atomic.LoadInt32(&applies); got != 1 {
 		t.Fatalf("同一修订被拒后应退避,三轮只该推 1 次,实际 %d 次", got)
 	}
@@ -94,6 +97,7 @@ func TestPushFailureBacksOffButStillFetchesReport(t *testing.T) {
 	// 管理员改了配置:修订号变了,立刻重推,不受退避影响
 	db.Model(&model.User{}).Where("name = ?", "alice").Update("device_limit", 5)
 	h.tick()
+	h.settle()
 	if got := atomic.LoadInt32(&applies); got != 2 {
 		t.Fatalf("修订号变了应立刻重推,实际累计 %d 次", got)
 	}
@@ -102,6 +106,7 @@ func TestPushFailureBacksOffButStillFetchesReport(t *testing.T) {
 	atomic.StoreInt32(&failApply, 0)
 	db.Model(&model.User{}).Where("name = ?", "alice").Update("device_limit", 6)
 	h.tick()
+	h.settle()
 	h.mu.Lock()
 	left := h.pushFail[2]
 	h.mu.Unlock()
@@ -148,6 +153,7 @@ func TestTransportFailureDoesNotBackOff(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		h.tick()
+		h.settle()
 	}
 	h.mu.Lock()
 	pf := h.pushFail[2]
@@ -158,6 +164,7 @@ func TestTransportFailureDoesNotBackOff(t *testing.T) {
 	atomic.StoreInt32(&down, 0)
 	db.Model(&model.Node{}).Where("id = ?", 2).Update("api_url", srv.URL+"/app/")
 	h.tick()
+	h.settle()
 	if got := atomic.LoadInt32(&applies); got != 1 {
 		t.Fatalf("副机一回来就该在这一轮拿到配置,实际推了 %d 次", got)
 	}

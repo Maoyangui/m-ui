@@ -533,6 +533,7 @@ func TestTickSyncsNodesConcurrently(t *testing.T) {
 	before := runtime.NumGoroutine()
 	start := time.Now()
 	h.tick()
+	h.settle()
 	elapsed := time.Since(start)
 	if elapsed > 1800*time.Millisecond {
 		t.Fatalf("两台各慢 1 秒的机器应并发等待,整轮用了 %v", elapsed)
@@ -551,6 +552,7 @@ func TestTickSyncsNodesConcurrently(t *testing.T) {
 		}
 	}
 	h.tick() // 第二轮:修订号没变,不该再推;报告里同样的计数器不该再记一次
+	h.settle()
 	for i, f := range fakes {
 		if got := atomic.LoadInt32(&f.applies); got != 1 {
 			t.Fatalf("机器 %d 应只被推送一次,实际 %d", i+1, got)
