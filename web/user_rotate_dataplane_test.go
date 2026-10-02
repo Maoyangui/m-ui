@@ -58,7 +58,7 @@ func TestRotateUserRevokesOldCredentialsInRunningDataPlane(t *testing.T) {
 	if err := run.SetSetting("allowPrivate", "true"); err != nil {
 		t.Fatal(err)
 	}
-	port := rdFreePort(t)
+	port := freeTCPPort(t)
 	line := model.Line{Name: "ss", Protocol: "shadowsocks", Port: port, Enabled: true, Options: []byte(`{"method":"aes-256-gcm"}`)}
 	if err := db.Create(&line).Error; err != nil {
 		t.Fatal(err)
@@ -291,14 +291,4 @@ func rdEchoServer(t *testing.T) string {
 		}
 	}()
 	return ln.Addr().String()
-}
-
-func rdFreePort(t *testing.T) int {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
 }
