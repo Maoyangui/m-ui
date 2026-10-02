@@ -22,7 +22,8 @@ func TestApplySnapshotDetectsOnlyRealLineChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close(node)
-	setting := func(string) string { return "" }
+	vals := map[string]string{}
+	setting := func(k string) string { return vals[k] }
 
 	master.Create(&model.Node{Name: "主机", IsLocal: true, Enabled: true, Sort: 1})
 	master.Create(&model.Node{Name: "副机", ApiUrl: "http://n", Token: "t", Enabled: true, Sort: 2})
@@ -70,5 +71,17 @@ func TestApplySnapshotDetectsOnlyRealLineChanges(t *testing.T) {
 	master.Model(&model.Upstream{}).Where("name = ?", "warp").Update("options", []byte(`{"server":"127.0.0.1","server_port":40001}`))
 	if lc, uc := apply(); lc || !uc {
 		t.Fatalf("只改了上游:应只报上游变化,实际 lines=%v ups=%v", lc, uc)
+	}
+	// 改了「私网访问」:私网屏蔽是路由规则,要全量重载(审计 M058);原样再推不报
+	vals["allowPrivate"] = "true"
+	if lc, _ := apply(); !lc {
+		t.Fatal("改了私网访问开关应要求全量重载")
+	}
+	if lc, uc := apply(); lc || uc {
+		t.Fatalf("私网访问没再变:不该报变化,实际 lines=%v ups=%v", lc, uc)
+	}
+	vals["allowPrivate"] = "false"
+	if lc, _ := apply(); !lc {
+		t.Fatal("关掉私网访问同样要求全量重载")
 	}
 }

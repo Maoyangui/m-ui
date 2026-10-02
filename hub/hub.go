@@ -40,7 +40,7 @@ var SyncedSettings = []string{
 	"timezone", "allowPrivate",
 	"upstreamTestUrl", "upstreamCheckMinutes", "upstreamCheckFailThreshold",
 	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subUpdates",
-	"subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice", "subShareEnabled",
+	"subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice", "subShareEnabled", "subPageBuyURL", "subPageBrand",
 }
 
 // MinNodeVersion 副机至少要这个版本才能正确应用当前快照(快照里新增了它必须理解的字段时抬高它)。
@@ -298,6 +298,17 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 	}
 	linesChanged = !sameLines(oldLines, snap.Lines)
 	upstreamsChanged = !sameUpstreams(oldUps, snap.Upstreams)
+	// 渲染要读的同步设置变了也得全量重载:私网屏蔽是路由规则,热换用户不会重建它。以前主机改了「私网访问」,
+	// 副机只热更新用户表,屏蔽规则在副机上一直按旧开关(审计 M058)
+	if v, ok := snap.Settings["allowPrivate"]; ok {
+		var old string
+		if err := db.Model(&model.Setting{}).Select("value").Where("key = ?", "allowPrivate").Scan(&old).Error; err != nil {
+			return false, false, err
+		}
+		if strings.EqualFold(v, "true") != strings.EqualFold(old, "true") { // 与 render.AllowPrivate 同一判法
+			linesChanged = true
+		}
+	}
 
 	// gorm 对带 default:true 的 bool 字段:Create 时零值 false 会写成默认 true,并把 true 回填进结构体。
 	// 所以要在插入之前记下被禁用的 id,插入后再显式写回 false,否则主机禁用的用户会在副机上"复活"。
