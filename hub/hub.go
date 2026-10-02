@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -801,6 +802,7 @@ type Hub struct {
 	// verified 正常校验证书的副机共用一个;pinned 勾了"跳过证书校验"的副机按 id+指纹各一个,指纹一变就换新的
 	verified *http.Client
 	pinned   map[string]*http.Client
+	roots    *x509.CertPool // 判断"正规 CA 续期"用的根证书;nil = 系统的(测试里注入)
 	// rejects 各代理池最近被拒的新设备连接(主机 + 各副机上报),只留 rejectWindow 内的,面板给代理看"设备池已满"
 	rejects map[string][]rejectAt
 	// upHealth 各副机上报的上游巡检结果(副机 id → 结果),面板按服务器展示、主机据此告警
@@ -2023,6 +2025,10 @@ func (h *Hub) clientFor(n model.Node) *http.Client {
 		return c
 	}
 	id, want, name := n.Id, n.CertFP, n.Name
+	host := ""
+	if u, err := url.Parse(n.ApiUrl); err == nil {
+		host = u.Hostname()
+	}
 	c := &http.Client{Timeout: 25 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{
 		InsecureSkipVerify: true, // 不查签发链(自签 / IP 证书都过不了),只认下面记住的指纹
 		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
@@ -2034,6 +2040,13 @@ func (h *Hub) clientFor(n model.Node) *http.Client {
 			if want == "" {
 				h.d.DB.Model(&model.Node{}).Where("id = ? AND COALESCE(cert_fp, '') = ''", id).Update("cert_fp", got)
 				logger.Info("已记住副机 ", name, " 的证书指纹 ", got[:16])
+				return nil
+			}
+			if got != want && host != "" && h.chainValid(raw, host) {
+				// 正规 CA 自动续期换了证书:新证书能按 API 地址的主机名过根证书校验,就换记新指纹。以前每次续期都失联,
+				// 得手点「重置指纹」(审计 M063)。自签证书换了照旧拒绝 —— 那正是钉指纹要防的
+				h.d.DB.Model(&model.Node{}).Where("id = ? AND cert_fp = ?", id, want).Update("cert_fp", got)
+				logger.Info("副机 ", name, " 的证书已由正规 CA 续期,指纹换记为 ", got[:16])
 				return nil
 			}
 			if got != want {
@@ -2051,6 +2064,24 @@ func (h *Hub) clientFor(n model.Node) *http.Client {
 	}
 	h.pinned[key] = c
 	return c
+}
+
+// chainValid 副机出示的证书链能不能按 host 过根证书校验(正规 CA 签的)。
+func (h *Hub) chainValid(raw [][]byte, host string) bool {
+	certs := make([]*x509.Certificate, 0, len(raw))
+	for _, r := range raw {
+		c, err := x509.ParseCertificate(r)
+		if err != nil {
+			return false
+		}
+		certs = append(certs, c)
+	}
+	inter := x509.NewCertPool()
+	for _, c := range certs[1:] {
+		inter.AddCert(c)
+	}
+	_, err := certs[0].Verify(x509.VerifyOptions{DNSName: host, Intermediates: inter, Roots: h.roots})
+	return err == nil
 }
 
 // CloseIdleConnections 关掉所有副机客户端的空闲连接(测试里数协程用)。

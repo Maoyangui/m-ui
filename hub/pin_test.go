@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -150,4 +151,86 @@ func TestAlertForNeverSeenNode(t *testing.T) {
 	if since != 0 {
 		t.Fatal("恢复后连续失败起点应清零")
 	}
+}
+
+// caSigned 用 ca 签一张 127.0.0.1 的服务器证书。
+func caSigned(t *testing.T, ca *x509.Certificate, caKey *ecdsa.PrivateKey, cn string) tls.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: cn},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1)},
+		KeyUsage:    x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, ca, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
+}
+
+// 勾了"跳过证书校验"、但副机用的是正规 CA 的证书:自动续期换了证书,新证书能按 API 地址过根证书校验,
+// 就换记新指纹、照常同步(以前每次续期都失联,得手点「重置指纹」,审计 M063);换成自签证书仍然拒绝。
+func TestPinnedNodeFollowsCARenewal(t *testing.T) {
+	db := openDB(t, "renew.db").DB
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test CA"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTpl, caTpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, _ := x509.ParseCertificate(caDER)
+	pool := x509.NewCertPool()
+	pool.AddCert(ca)
+
+	c1, c2, forged := caSigned(t, ca, caKey, "v1"), caSigned(t, ca, caKey, "v2"), selfSigned(t, "forged")
+	var cur atomic.Pointer[tls.Certificate]
+	cur.Store(&c1)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":"1"}`))
+	}))
+	// 连 IP 不发 SNI,httptest 又会塞一张自带证书,GetCertificate 不会被调用;每次握手按当前证书给一份配置
+	srv.TLS = &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		return &tls.Config{Certificates: []tls.Certificate{*cur.Load()}}, nil
+	}}
+	srv.StartTLS()
+	defer srv.Close()
+
+	db.Create(&model.Node{Name: "hk", ApiUrl: srv.URL, Token: "tok", Insecure: true})
+	h := New(Deps{DB: db})
+	h.roots = pool
+	load := func() model.Node {
+		var n model.Node
+		db.First(&n, 1)
+		return n
+	}
+	if _, err := h.Ping(load()); err != nil || load().CertFP != fingerprint(c1) {
+		t.Fatalf("首次连接应记住指纹: %v %q", err, load().CertFP)
+	}
+	cur.Store(&c2) // CA 续期
+	h.CloseIdleConnections()
+	if _, err := h.Ping(load()); err != nil {
+		t.Fatalf("正规 CA 续期后应照常连上: %v", err)
+	}
+	if fp := load().CertFP; fp != fingerprint(c2) {
+		t.Fatalf("应换记续期后的指纹,得 %q", fp)
+	}
+	cur.Store(&forged) // 换成自签:中间人或手工重签,都要拒绝
+	h.CloseIdleConnections()
+	if _, err := h.Ping(load()); err == nil || !strings.Contains(err.Error(), "指纹变了") {
+		t.Fatalf("换成自签证书应拒绝,得 %v", err)
+	}
+	if fp := load().CertFP; fp != fingerprint(c2) {
+		t.Fatalf("被拒绝时不该改动指纹,得 %q", fp)
+	}
+	h.CloseIdleConnections()
 }
