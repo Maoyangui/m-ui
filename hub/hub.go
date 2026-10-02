@@ -29,6 +29,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/notify"
 	"github.com/Maoyangui/m-ui/render"
 
 	"gorm.io/gorm"
@@ -726,6 +727,8 @@ type NodeStatus struct {
 	VersionMismatch bool   `json:"versionMismatch,omitempty"`
 	alerted         bool
 	failSince       int64 // 这一轮连续失败从什么时候开始;0 = 正常
+	unsyncedSince   int64 // 在线但配置没同步上从什么时候开始;0 = 已同步或不在线
+	unsyncedAlerted bool
 	conns           []RecentConn
 }
 
@@ -1359,25 +1362,60 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 		st.Synced = false
 		st.CoreRunning = false
 	}
+	var msgs []string
 	// 按"连续失败了多久"告警,不看上次在线时间:从来没连上过的副机(配错了)也得有人知道
 	if !ok && !alerted && now-st.failSince > 60 {
 		st.alerted = true
-		h.mu.Unlock()
-		if h.d.Notify != nil {
-			h.d.Notify("tgOnCore", "🔴 <b>副机失联</b>:"+n.Name+"\n"+errStr)
-		}
-		return
+		msgs = append(msgs, "🔴 <b>副机失联</b>:"+alertText(n.Name, 64)+"\n"+alertText(errStr, 300))
 	}
 	if ok && alerted {
 		st.alerted = false
-		h.mu.Unlock()
-		if h.d.Notify != nil {
-			h.d.Notify("tgOnCore", "🟢 <b>副机恢复</b>:"+n.Name)
+		msgs = append(msgs, "🟢 <b>副机恢复</b>:"+alertText(n.Name, 64))
+	}
+	// 在线但配置一直没同步上(推送被拒、版本过低、数据面应用失败):失联告警管不到,以前一声不吭(审计 M064)。
+	// 刚改完配置到下一份报告之间本来就有几秒不同步,推送退避最长 5 分钟,所以持续 unsyncedAlertAfter 才告警
+	switch {
+	case !ok:
+		st.unsyncedSince = 0 // 失联由上面那条管;恢复在线后重新计时
+	case rep == nil:
+	case st.Synced:
+		st.unsyncedSince = 0
+		if st.unsyncedAlerted {
+			st.unsyncedAlerted = false
+			msgs = append(msgs, "🟢 <b>副机配置已同步</b>:"+alertText(n.Name, 64))
 		}
-		return
+	case st.unsyncedSince == 0:
+		st.unsyncedSince = now
+	case !st.unsyncedAlerted && now-st.unsyncedSince > unsyncedAlertAfter:
+		st.unsyncedAlerted = true
+		why := st.Error
+		if why == "" && st.VersionMismatch {
+			why = "副机版本 " + st.Version + " 与主机不同"
+		}
+		if why == "" {
+			why = "副机上报的配置修订号一直对不上"
+		}
+		msgs = append(msgs, "🟠 <b>副机配置没同步上</b>:"+alertText(n.Name, 64)+"(在线,已持续 "+strconv.FormatInt((now-st.unsyncedSince)/60, 10)+" 分钟)\n"+alertText(why, 300))
 	}
 	_ = wasOK
 	h.mu.Unlock()
+	if h.d.Notify != nil {
+		for _, m := range msgs {
+			h.d.Notify("tgOnCore", m)
+		}
+	}
+}
+
+// unsyncedAlertAfter 副机在线但配置持续多久没同步上才告警(秒)。
+const unsyncedAlertAfter = 10 * 60
+
+// alertText 告警里的外部文本(服务器名、副机返回的错误)先截断再转义:Telegram 按 HTML 解析,
+// 一个裸的 < 或超长正文就整条被拒,告警被吞掉(审计 M060)。
+func alertText(s string, max int) string {
+	if r := []rune(s); len(r) > max {
+		s = string(r[:max]) + "…"
+	}
+	return notify.Esc(s)
 }
 
 func (h *Hub) push(n model.Node, snap Snapshot) error {
@@ -1914,7 +1952,7 @@ func (h *Hub) requestTimeout(n model.Node, method, path string, body interface{}
 		var e struct{ Error string }
 		json.Unmarshal(b, &e)
 		if e.Error == "" {
-			e.Error = strings.TrimSpace(string(b))
+			e.Error = errBody(b, resp.StatusCode)
 		}
 		return &httpStatusError{Status: resp.StatusCode, Msg: e.Error}
 	}
@@ -1924,6 +1962,19 @@ func (h *Hub) requestTimeout(n model.Node, method, path string, body interface{}
 		}
 	}
 	return nil
+}
+
+// errBody 副机回了非 JSON 的错误体(反代的报错页、被劫持的页面):HTML 只留状态码,其余只留前 200 字节。
+// 原文整段进状态、告警和日志,动辄几 KB 的网页(审计 M060)。
+func errBody(b []byte, status int) string {
+	s := strings.TrimSpace(string(b))
+	if strings.HasPrefix(s, "<") {
+		return http.StatusText(status)
+	}
+	if r := []rune(s); len(r) > 200 {
+		s = string(r[:200]) + "…"
+	}
+	return s
 }
 
 // clientFor 副机用哪个 HTTP 客户端。勾了"跳过证书校验"的不是完全不看证书:第一次连上把它的证书
