@@ -555,7 +555,13 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 			mode = "renew"
 			planRenews = true
 		}
+		before := u.Expiry
 		planRefsV = applyPlanRefs(&u, *plan, mode, now)
+		// 显式字段优先于套餐:同时给了 days 就由它替代套餐自带的天数(同样从原到期起算)。以前在套餐延好的到期上
+		// 再加一遍,多给一个周期(审计 MB09)
+		if req.Days != nil && req.Expiry == nil {
+			u.Expiry = before
+		}
 	}
 	if req.Name != nil && *req.Name != u.Name {
 		u.Name = *req.Name
