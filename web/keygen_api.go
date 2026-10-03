@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"errors"
 	mrand "math/rand"
 	"net"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/hop"
 )
 
 // handleKeygen 为线路表单生成密钥材料:
@@ -67,10 +69,32 @@ func (s *Server) freePort() (int, error) {
 	used[s.settingInt("webPort", 2053)] = true
 	used[s.settingInt("subPort", 2056)] = true
 	used[s.settingInt("resellerPort", 2054)] = true
+	// 端口跳跃范围里的 UDP 端口被 nft 整段转走了,随机端口也要避开(审计 MB04)
+	var hops []string
+	s.db.Model(&model.Line{}).Where("protocol = ?", "hysteria2").Pluck("options", &hops)
+	var ranges [][2]int
+	for _, o := range hops {
+		var oo struct {
+			PortHopping string `json:"port_hopping"`
+		}
+		if json.Unmarshal([]byte(o), &oo) == nil && oo.PortHopping != "" {
+			if a, b, err := hop.ParseRange(oo.PortHopping); err == nil {
+				ranges = append(ranges, [2]int{a, b})
+			}
+		}
+	}
+	inHop := func(p int) bool {
+		for _, r := range ranges {
+			if p >= r[0] && p <= r[1] {
+				return true
+			}
+		}
+		return false
+	}
 
 	for i := 0; i < 300; i++ {
 		p := 10000 + mrand.Intn(55536) // 10000-65535,五位
-		if used[p] || !portBindable(p) {
+		if used[p] || inHop(p) || !portBindable(p) {
 			continue
 		}
 		return p, nil

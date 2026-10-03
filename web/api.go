@@ -443,6 +443,13 @@ func (s *Server) validateLine(line *model.Line) error {
 	if name := s.lineOnPort(line); name != "" {
 		return fmt.Errorf("端口 %d 已被线路%s占用,换一个", line.Port, name)
 	}
+	// 走 UDP 的线路端口不能落进别的 hysteria2 线路的端口跳跃范围:那段 UDP 端口被 nft 整段转给那条线路,
+	// 这条线路建好了也收不到包,干跑照样通过、面板毫无提示(审计 MB04)
+	if usesUDP(line.Protocol) {
+		if name, rng := s.hopCovering(line); name != "" {
+			return fmt.Errorf("端口 %d 落在线路「%s」的端口跳跃范围 %s 里,UDP 包会被转给那条线路,换一个", line.Port, name, rng)
+		}
+	}
 	// 机器上可能还跑着别的项目:端口有变化时试着监听一次,占着就别让它进库
 	// (端口没改的编辑不测——那时占着它的正是本机运行中的数据面;
 	//  不部署在本机的线路也不测——本机数据面可能正用着这个端口跑另一条线路)
@@ -1235,6 +1242,31 @@ func (s *Server) lineOnPort(line *model.Line) string {
 		}
 	}
 	return ""
+}
+
+// usesUDP 主要靠 UDP 的协议(端口跳跃转的是 UDP)。
+func usesUDP(protocol string) bool {
+	return protocol == "hysteria2" || protocol == "tuic" || protocol == "shadowsocks"
+}
+
+// hopCovering 部署范围有交集的别的 hysteria2 线路里,端口跳跃范围盖住了 line.Port 的那条:返回它的名字与范围。
+func (s *Server) hopCovering(line *model.Line) (string, string) {
+	var others []model.Line
+	s.db.Where("protocol = ? AND id <> ?", "hysteria2", line.Id).Find(&others)
+	var nodes []model.Node
+	s.db.Select("id, name").Order("sort asc, id asc").Find(&nodes)
+	for _, o := range others {
+		var oo struct {
+			PortHopping string `json:"port_hopping"`
+		}
+		if json.Unmarshal(o.Options, &oo) != nil || oo.PortHopping == "" {
+			continue
+		}
+		if a, b, err := hop.ParseRange(oo.PortHopping); err == nil && line.Port >= a && line.Port <= b && linesSharedNode(*line, o, nodes) != "" {
+			return o.Name, oo.PortHopping
+		}
+	}
+	return "", ""
 }
 
 // linesSharedNode 两条线路都部署到的第一台服务器名;没有交集返回空串。
