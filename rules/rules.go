@@ -45,6 +45,10 @@ func Targets(rule model.Rule, users []model.User) []model.User {
 		if !u.Enabled {
 			continue
 		}
+		// 代理的规则只管他自己名下的用户:「全部用户」也不能越出他的作用域(审计 MB20)
+		if rule.ResellerId != 0 && u.ResellerId != rule.ResellerId {
+			continue
+		}
 		if rule.AllUsers || uid[u.Id] || (u.ResellerId != 0 && rid[u.ResellerId]) {
 			out = append(out, u)
 		}

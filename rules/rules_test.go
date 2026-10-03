@@ -81,6 +81,13 @@ func TestTargets(t *testing.T) {
 	if got := names(Targets(model.Rule{UserIds: []byte(`[1]`), ResellerIds: []byte(`[8]`)}, users)); got != "ad" {
 		t.Fatalf("用户 + 代理并集: %s", got)
 	}
+	// 代理自己的规则(ResellerId≠0):「全部用户」、指定的别人家用户都不能越出他名下(审计 MB20)
+	if got := names(Targets(model.Rule{ResellerId: 9, AllUsers: true}, users)); got != "c" {
+		t.Fatalf("代理规则的全部用户只能是他名下的: %s", got)
+	}
+	if got := names(Targets(model.Rule{ResellerId: 9, UserIds: []byte(`[1,3,4]`)}, users)); got != "c" {
+		t.Fatalf("代理规则指定的用户也只能是他名下的: %s", got)
+	}
 }
 
 func TestEffective(t *testing.T) {
