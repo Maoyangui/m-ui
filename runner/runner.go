@@ -174,7 +174,7 @@ func New(dbPath string) (*Runner, error) {
 		LocalRatio:  r.localRatio,
 		Forget:      r.notifier.Forget,
 		Rules:       r.RulesNow,
-		ApplyLimits: func() { _ = r.applyLimits() },
+		ApplyLimits: r.ApplyLimits,
 	})
 	r.monitor = monitor.New(monitor.Deps{
 		UsedUpstreams: r.usedUpstreams,
@@ -1249,12 +1249,17 @@ func (r *Runner) RulesNow() {
 		return
 	}
 	if changed {
-		r.applyLimits()
+		r.ApplyLimits()
 	}
 }
 
-// ApplyLimits 重新下发限速(副机按到期时间解除规则限速时用)。
-func (r *Runner) ApplyLimits() { r.applyLimits() }
+// ApplyLimits 重新下发限速(规则状态变了、副机按到期时间解除规则限速时用)。读库失败交给后台重试:以前错误被吞掉,
+// 状态已经落库、下一轮判定认为一致不再下发,这条限速在整个惩罚期都不生效,解除时则一直限着(审计 MB19)。
+func (r *Runner) ApplyLimits() {
+	if err := r.applyLimits(); err != nil {
+		r.markLimitsRetry(err)
+	}
+}
 
 // notifyRule 突发限速触发的通知:设置里明确打开才发(默认关,免得高峰期刷屏)。
 func (r *Runner) notifyRule(text string) {
