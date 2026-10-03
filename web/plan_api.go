@@ -361,6 +361,10 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 			u := model.User{Name: name, Enabled: true, Remark: req.Remark, CreatedAt: now}
 			b, _ := json.Marshal(creds.Generate(name))
 			u.Credentials = b
+			if req.NameMode == "seq" {
+				// 序号名能顺着猜(vip001、vip002…),用户名作订阅地址时拿到一个就能拉到别人的凭据:序号模式一律用随机令牌(审计 MB29)
+				u.SubToken = randomSubToken()
+			}
 			s.applySubTokenPolicy(&u) // 批量生成同样按设置决定订阅地址形式
 			refs := baseRefs
 			if plan != nil {
