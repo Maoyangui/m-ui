@@ -17,7 +17,7 @@ export async function render(el) {
         <th>${t('rs.devices')}</th><th>${t('rs.speed')}</th><th>${t('user.expiry')}</th><th>${t('rs.online')}</th><th></th></tr></thead>
       <tbody id="rs-body"></tbody>
     </table></div>
-    <p class="hint">${t('rs.panelHint', { url: panelURL() })}</p>`;
+    <p class="hint">${esc(t('rs.panelHint', { url: panelURL() }))}</p>`;
   await reload();
 }
 
