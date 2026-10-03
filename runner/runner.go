@@ -78,6 +78,7 @@ type Runner struct {
 	limitsPending atomic.Bool // applyLimits 读库失败,等 secureReloadLoop 重试
 	applyLimitsMu sync.Mutex  // applyLimits 串行:ApplyLimits() / RulesNow() 不持 r.mu 就会调它,lastSpecs 不能裸着被并发读写
 	mu            sync.Mutex  // 串行化重载,避免并发改动互相打断
+	stopping      atomic.Bool // 进程在停 / 在重启:看护循环不再拉起数据面
 
 	rules *rules.Engine // 限速规则判定器(只在主机跑)
 
@@ -679,12 +680,14 @@ func (r *Runner) secureReloadLoop(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-ticker.C:
-			if r.limitsPending.Load() {
+			// 先清标记再重试:重试期间别处又失败、重新打上的标记不能被这里的成功抹掉
+			if r.limitsPending.Swap(false) {
 				r.mu.Lock()
 				err := r.applyLimits()
 				r.mu.Unlock()
-				if err == nil {
-					r.limitsPending.Store(false)
+				if err != nil {
+					r.limitsPending.Store(true)
+				} else {
 					logger.Info("限速/设备数策略已在重试后应用")
 				}
 			}
@@ -1335,10 +1338,60 @@ func (r *Runner) GroupState() map[string]hub.GroupState {
 }
 
 func (r *Runner) Stop() {
+	r.stopping.Store(true)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := r.core.Stop(); err != nil {
 		logger.Warning("停止 sing-box: ", err)
+	}
+}
+
+// 数据面看护:没在跑就隔一会儿再拉一次。退避从 coreWatchMin 起翻倍,最长 coreWatchMax。
+var (
+	coreWatchTick = 10 * time.Second
+	coreWatchMin  = 30 * time.Second
+	coreWatchMax  = 5 * time.Minute
+)
+
+// reviveCore 数据面没在跑(开机那一下证书没就绪、端口还被上一个进程占着,或者新配置起不来回滚也失败)就重新拉起。
+// 以前只有改配置才会再试:主机开机时起不来,数据面就一直停着、所有线路不可用,直到有人登录面板。
+// 进程在停 / 在重启时不拉。返回是否尝试了。
+func (r *Runner) reviveCore() (bool, error) {
+	if r.stopping.Load() || r.core.IsRunning() {
+		return false, nil
+	}
+	return true, r.ReloadAll()
+}
+
+func (r *Runner) coreWatchLoop(stop <-chan struct{}) {
+	t := time.NewTicker(coreWatchTick)
+	defer t.Stop()
+	delay := coreWatchMin
+	next := time.Now().Add(delay) // 启动时 Run 刚试过一次,先等一个退避
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			if r.core.IsRunning() {
+				delay, next = coreWatchMin, time.Now().Add(coreWatchMin)
+				continue
+			}
+			if time.Now().Before(next) {
+				continue
+			}
+			tried, err := r.reviveCore()
+			switch {
+			case !tried:
+			case err != nil:
+				delay = min(delay*2, coreWatchMax)
+				logger.Warning("数据面没在运行,重新拉起失败(", delay, " 后再试): ", err)
+			default:
+				delay = coreWatchMin
+				logger.Info("数据面没在运行,已重新拉起")
+			}
+			next = time.Now().Add(delay)
+		}
 	}
 }
 
@@ -1480,6 +1533,7 @@ func Run(dbPath string) error {
 	}{
 		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"定时备份", r.backupLoop},
 		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop}, {"凭据撤销重试", r.secureReloadLoop}, {"用户热更新重试", r.userReloadLoop},
+		{"数据面看护", r.coreWatchLoop},
 	} {
 		go keepRunning(l.name, l.fn, stopCheckpoint)
 	}
