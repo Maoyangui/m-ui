@@ -158,7 +158,7 @@ function editNode(id) {
     await load('settings', 'nodes'); // 线路编辑器里的"部署到服务器"依赖 state.nodes
     toast(t('set.saved'), 'ok');
     render(document.getElementById('page'));
-    if (r && r.decommissionError) notice(t('node.decomFailTitle'), t('node.decomFail', { name: body.name, err: r.decommissionError }));
+    if (r && r.decommissionError) notice(t('node.decomFailTitle'), t('node.decomFail', { name: body.name, err: trErr(r.decommissionError) }));
   }, { wide: true });
   const api = document.getElementById('f-api');
   if (api) api.addEventListener('input', () => { document.getElementById('f-api-plain').hidden = !isPlain(api.value); });
@@ -205,7 +205,7 @@ registerActions({
       if ((r.disabledLines || []).length) msgs.push(t('node.linesDisabled', { names: r.disabledLines.join(t('node.sep')) }));
       const revoked = [...(r.revokedUsers || []), ...(r.revokedResellers || [])];
       if (revoked.length) msgs.push(t('node.scopeRevoked', { names: revoked.join(t('node.sep')) }));
-      if (r.decommissionError) msgs.push(t('node.decomFail', { name: n.name, err: r.decommissionError }));
+      if (r.decommissionError) msgs.push(t('node.decomFail', { name: n.name, err: trErr(r.decommissionError) }));
       if (msgs.length) notice(t(r.decommissionError ? 'node.decomFailTitle' : 'common.deleted'), msgs.join('\n'));
     } catch (e) { toast(e.message, 'err'); }
   },
