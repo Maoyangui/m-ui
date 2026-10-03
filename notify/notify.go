@@ -25,6 +25,10 @@ type Notifier struct {
 	mu      sync.Mutex
 	last    map[string]int64
 	clients map[string]*http.Client // 按代理地址缓存
+	// durable 是 OnceDurable 的去重记录(key → 到期时间戳),save 把它写回库;没调 Persist 时只在内存里
+	durable map[string]int64
+	save    func(string)
+	saveMu  sync.Mutex
 
 	// Send 可替换,便于测试;默认走 Telegram API
 	sendFn func(token, chatID, text string) error
@@ -76,11 +80,69 @@ func (n *Notifier) Once(key string, ttl time.Duration) bool {
 	return true
 }
 
-// Forget 清除某个去重 key(例如用户重置流量后允许再次告警)。
+// Persist 让 OnceDurable 的去重记录落库:以前只在内存里,面板重启(含自升级)后当天的日报、本周期的流量告急
+// 会立刻再发一遍(审计 MB13)。
+func (n *Notifier) Persist(load func() string, save func(string)) {
+	m := map[string]int64{}
+	if raw := load(); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &m)
+	}
+	n.mu.Lock()
+	n.durable, n.save = m, save
+	n.mu.Unlock()
+}
+
+// OnceDurable 同 Once,但去重记录随 Persist 落库,重启后照样算数;过期的记录写回时顺手清掉。
+func (n *Notifier) OnceDurable(key string, ttl time.Duration) bool {
+	now := time.Now().Unix()
+	n.mu.Lock()
+	if n.durable == nil {
+		n.durable = map[string]int64{}
+	}
+	if until, ok := n.durable[key]; ok && until > now {
+		n.mu.Unlock()
+		return false
+	}
+	n.durable[key] = now + int64(ttl.Seconds())
+	n.mu.Unlock()
+	n.flush()
+	return true
+}
+
+// flush 清掉过期记录后把当前去重记录写回库;saveMu 保证并发写回时最后落库的是最新状态。
+func (n *Notifier) flush() {
+	n.saveMu.Lock()
+	defer n.saveMu.Unlock()
+	now := time.Now().Unix()
+	n.mu.Lock()
+	for k, until := range n.durable {
+		if until <= now {
+			delete(n.durable, k)
+		}
+	}
+	b, _ := json.Marshal(n.durable)
+	save := n.save
+	n.mu.Unlock()
+	if save != nil {
+		save(string(b))
+	}
+}
+
+// Forget 清除某个去重 key(例如用户重置流量后允许再次告警);持久记录里的 key 与以 "key:" 开头的一并清掉。
 func (n *Notifier) Forget(key string) {
 	n.mu.Lock()
 	delete(n.last, key)
+	hit := false
+	for k := range n.durable {
+		if k == key || strings.HasPrefix(k, key+":") {
+			delete(n.durable, k)
+			hit = true
+		}
+	}
 	n.mu.Unlock()
+	if hit {
+		n.flush()
+	}
 }
 
 // Send 同步发送一条消息(HTML 格式)。

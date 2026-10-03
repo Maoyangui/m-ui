@@ -150,7 +150,7 @@ func (r *Runner) backupLoop(stop <-chan struct{}) {
 			if err != nil || hour < 0 || now.Hour() != hour {
 				continue
 			}
-			if !r.notifier.Once("backup:"+now.Format("2006-01-02"), 36*time.Hour) {
+			if !r.notifier.OnceDurable("backup:"+now.Format("2006-01-02"), 36*time.Hour) { // 重启后同一天不再备份第二次
 				continue
 			}
 			bf, err := r.CreateBackupFile()

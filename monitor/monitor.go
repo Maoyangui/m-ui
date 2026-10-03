@@ -352,13 +352,16 @@ func (m *Monitor) CheckUsers() {
 	for _, u := range users {
 		if days > 0 && u.Expiry > now && u.Expiry-now <= int64(days)*86400 {
 			left := (u.Expiry - now + 86399) / 86400
-			if m.d.Notify.Once("expiring:"+u.Name+":"+day, 24*time.Hour) {
+			if m.d.Notify.OnceDurable("expiring:"+u.Name+":"+day, 24*time.Hour) {
 				m.d.Notify.Event("tgOnUserExpiring", fmt.Sprintf("⏳ <b>用户即将到期</b>:%s\n到期 %s(剩 %d 天)", notify.Esc(u.Name), time.Unix(u.Expiry, 0).In(m.loc()).Format("2006-01-02"), left))
 			}
 		}
 		if pct > 0 && u.Volume > 0 {
 			used := u.Up + u.Down
-			if used*100 >= u.Volume*int64(pct) && m.d.Notify.Once("quota:"+u.Name, 24*time.Hour) {
+			// 每个用量周期只告急一次:键带上配额与历史累计(周期重置、续费套餐会把本周期用量并进累计,改额度会变配额),
+			// 以前 24 小时一过就每天重发一条,重启后还会立刻重发(审计 MB13)
+			period := fmt.Sprintf("%d:%d", u.Volume, u.TotalUp+u.TotalDown)
+			if used*100 >= u.Volume*int64(pct) && m.d.Notify.OnceDurable("quota:"+u.Name+":"+period, 365*24*time.Hour) {
 				m.d.Notify.Event("tgOnQuota", fmt.Sprintf("📊 <b>用户流量告急</b>:%s\n已用 %s / %s(%d%%)", notify.Esc(u.Name), human(used), human(u.Volume), used*100/u.Volume))
 			}
 		}
@@ -375,7 +378,7 @@ func (m *Monitor) tickDaily() {
 	if m.now().Hour() != hour {
 		return
 	}
-	if m.d.Notify.Once("daily:"+m.now().Format("2006-01-02"), 36*time.Hour) {
+	if m.d.Notify.OnceDurable("daily:"+m.now().Format("2006-01-02"), 36*time.Hour) {
 		m.d.Notify.Event("tgDaily", m.DailyReport())
 	}
 }

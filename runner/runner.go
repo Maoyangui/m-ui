@@ -158,6 +158,11 @@ func New(dbPath string) (*Runner, error) {
 	r := &Runner{db: db, core: core.NewCore(), dbPath: dbPath}
 	r.subSrv = r.newSubServer()
 	r.notifier = notify.New(r.setting)
+	r.notifier.Persist(func() string { return r.setting("notifyOnce") }, func(v string) {
+		if err := r.SetSetting("notifyOnce", v); err != nil {
+			logger.Warning("记录通知去重失败: ", err)
+		}
+	})
 	r.rules = &rules.Engine{DB: db, Location: func() *time.Location { return tz.Location(r.setting("timezone")) }, Notify: r.notifyRule}
 	r.jobs = jobs.New(jobs.Deps{
 		DB:          db,

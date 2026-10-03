@@ -147,3 +147,42 @@ func TestNotifierDisabledSendsNothing(t *testing.T) {
 		t.Fatal("未开启时不应发送")
 	}
 }
+
+// 流量告急每个用量周期只发一次:重启(新的通知器读回落库的去重记录)后不重发;
+// 周期重置(用量并进累计)或改了配额后再到阈值才再发(审计 MB13)。
+func TestQuotaAlertOncePerPeriodAcrossRestart(t *testing.T) {
+	m, sink, setting := setup(t, map[string]string{"tgQuotaPercent": "80"})
+	store := ""
+	persist := func(n *notify.Notifier) {
+		n.Persist(func() string { return store }, func(v string) { store = v })
+	}
+	persist(m.d.Notify)
+	m.d.DB.Create(&model.User{Name: "heavy", Enabled: true, Volume: 100, Up: 50, Down: 35})
+	m.CheckUsers()
+
+	restarted := notify.New(setting) // 模拟面板重启:内存里的去重表没了
+	restarted.SetSender(sink.send)
+	persist(restarted)
+	m.d.Notify = restarted
+	m.CheckUsers()
+	if msgs := sink.wait(); len(msgs) != 1 {
+		t.Fatalf("重启后不该重发: %v", msgs)
+	}
+
+	m.d.DB.Model(&model.User{}).Where("name = ?", "heavy").Update("volume", 200) // 调高额度,用量还没到新阈值
+	m.CheckUsers()
+	m.d.DB.Model(&model.User{}).Where("name = ?", "heavy").Update("up", 130) // 再涨上来
+	m.CheckUsers()
+	if msgs := sink.wait(); len(msgs) != 2 {
+		t.Fatalf("改额度后再到阈值应再提醒一次: %v", msgs)
+	}
+	// 周期重置:用量并进累计后清零,再用到阈值又能提醒
+	m.d.DB.Model(&model.User{}).Where("name = ?", "heavy").Updates(map[string]interface{}{"total_up": 130, "total_down": 35, "up": 0, "down": 0})
+	m.CheckUsers()
+	m.d.DB.Model(&model.User{}).Where("name = ?", "heavy").Update("up", 170)
+	m.CheckUsers()
+	m.CheckUsers()
+	if msgs := sink.wait(); len(msgs) != 3 {
+		t.Fatalf("新周期到阈值应再提醒一次且只一次: %v", msgs)
+	}
+}
