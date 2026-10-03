@@ -44,6 +44,7 @@ func TestEveryProtocolConstructsWithoutUsers(t *testing.T) {
 		{Name: "socks", Protocol: "socks", Port: 21009},
 		{Name: "http", Protocol: "http", Port: 21010},
 		{Name: "mixed", Protocol: "mixed", Port: 21011},
+		{Name: "ss-nopw", Protocol: "shadowsocks", Port: 21012, Options: raw(map[string]interface{}{"method": "aes-256-gcm"})}, // 没有线路级密码:零用户时靠占位用户才建得起来
 	}
 	for i := range lines {
 		lines[i].Enabled, lines[i].Sort = true, i+1

@@ -438,6 +438,11 @@ func renderUsers(line model.Line, inbound map[string]interface{}, users []model.
 		}
 	}
 	_ = spec
+	if len(out) == 0 {
+		if p := placeholderUser(line, key); p != nil {
+			out = append(out, p) // 不能留空用户表:见 placeholderUser
+		}
+	}
 	return out, nil
 }
 
