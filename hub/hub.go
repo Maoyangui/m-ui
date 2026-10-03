@@ -606,14 +606,17 @@ func ApplyCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 			if dDown > 0 {
 				update["down"] = gorm.Expr("down + ?", dDown)
 			}
-			if err := tx.Model(&model.User{}).Where("name = ?", c.UserName).Updates(update).Error; err != nil {
-				return err
+			res := tx.Model(&model.User{}).Where("name = ?", c.UserName).Updates(update)
+			if res.Error != nil {
+				return res.Error
 			}
 			rows := []model.Stats{}
-			if dUp > 0 {
+			// 用户已经删了(副机还在报在途流量)就不记用户时序:孤儿行会让以后同名的新用户看到前人的历史(审计 MB28)
+			known := res.RowsAffected > 0
+			if known && dUp > 0 {
 				rows = append(rows, model.Stats{DateTime: bucket, Resource: "user", Tag: c.UserName, Direction: true, Traffic: dUp})
 			}
-			if dDown > 0 {
+			if known && dDown > 0 {
 				rows = append(rows, model.Stats{DateTime: bucket, Resource: "user", Tag: c.UserName, Direction: false, Traffic: dDown})
 			}
 			rows = append(rows, model.Stats{DateTime: bucket, Resource: "node", Tag: nodeName, Direction: true, Traffic: maxInt64(dUp, 0)})

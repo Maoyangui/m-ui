@@ -563,6 +563,7 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 			u.Expiry = before
 		}
 	}
+	oldName := u.Name
 	if req.Name != nil && *req.Name != u.Name {
 		u.Name = *req.Name
 		if err := s.validateUser(&u); err != nil {
@@ -599,6 +600,9 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 	err = s.db.Transaction(func(tx *gorm.DB) error { // 用户字段与分配一个事务
 		if err := tx.Model(&model.User{}).Where("id = ?", u.Id).
 			Updates(updateUserFields(u, planRenews)).Error; err != nil {
+			return err
+		}
+		if err := moveUserStats(tx, oldName, u.Name); err != nil {
 			return err
 		}
 		if refs != nil {

@@ -85,6 +85,22 @@ func (s *Server) extendExpiry(db *gorm.DB, u model.User, days int, now int64) (b
 	return true, db.Model(&model.User{}).Where("id = ?", u.Id).Select("expiry", "enabled", "disabled_reason").Updates(u).Error
 }
 
+// 流量时序按用户名记(resource=user, tag=用户名):删号要一并删掉,改名要跟着搬。以前都不管,以后同名的新用户
+// 在落地页「用量情况」里看得到前一个人的流量历史,改了名的人反而看不到自己的(审计 MB28)。
+func dropUserStats(tx *gorm.DB, name string) error {
+	return tx.Where("resource = ? AND tag = ?", "user", name).Delete(&model.Stats{}).Error
+}
+
+func moveUserStats(tx *gorm.DB, from, to string) error {
+	if from == to {
+		return nil
+	}
+	if err := dropUserStats(tx, to); err != nil { // 新名字下若有前人留下的孤儿行,先清掉,免得并到一起
+		return err
+	}
+	return tx.Model(&model.Stats{}).Where("resource = ? AND tag = ?", "user", from).Update("tag", to).Error
+}
+
 // forgetQuotaAlert 用量清零后允许"流量告急"再次提醒(去重键 24 小时才过期)。
 func (s *Server) forgetQuotaAlert(name string) {
 	if s.run != nil {

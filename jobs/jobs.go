@@ -334,12 +334,34 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 		bucket := now - now%bucketSeconds
 		// 复制一份再按倍率改写:*stats 之后要原样交给 ConsumeStats 扣计数器,就地改会把缩放后的值扣进去 ——
 		// 本机倍率不是 1 时计数器就漂了(倍率 2:多扣一倍、计数器变负、用户隔一轮从在线名单消失;倍率 0.5:余量下一轮重记)
-		rows := append([]model.Stats(nil), *stats...)
-		for i := range rows {
-			rows[i].DateTime = bucket
-			if !isNode && rows[i].Resource == "user" {
-				rows[i].Traffic = scale(rows[i].Traffic) // 用户维度按倍率记(与用量一致);线路/上游维度保持真实流量
+		// 只给库里还在的用户记时序:删掉的用户在途流量落成孤儿行,以后同名的新用户会看到前人的历史(审计 MB28)
+		names := make([]string, 0, len(userTraffic))
+		for name := range userTraffic {
+			names = append(names, name)
+		}
+		alive := map[string]bool{}
+		if len(names) > 0 {
+			var have []string
+			if err := tx.Model(&model.User{}).Where("name IN ?", names).Pluck("name", &have).Error; err != nil {
+				return err
 			}
+			for _, n := range have {
+				alive[n] = true
+			}
+		}
+		rows := make([]model.Stats, 0, len(*stats))
+		for _, row := range *stats {
+			if row.Resource == "user" && !alive[row.Tag] {
+				continue
+			}
+			row.DateTime = bucket
+			if !isNode && row.Resource == "user" {
+				row.Traffic = scale(row.Traffic) // 用户维度按倍率记(与用量一致);线路/上游维度保持真实流量
+			}
+			rows = append(rows, row)
+		}
+		if len(rows) == 0 {
+			return nil
 		}
 		return tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "resource"}, {Name: "tag"}, {Name: "date_time"}, {Name: "direction"}},

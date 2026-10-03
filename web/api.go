@@ -883,6 +883,9 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			).Updates(p.User).Error; err != nil {
 				return err
 			}
+			if err := moveUserStats(tx, cur.Name, p.User.Name); err != nil {
+				return err
+			}
 			if err := writeUserLineRefs(tx, id, refs); err != nil {
 				return err
 			}
@@ -946,7 +949,7 @@ func (s *Server) deleteUser(u model.User, actor string) error {
 				return err
 			}
 		}
-		return nil
+		return dropUserStats(tx, u.Name)
 	})
 	if err != nil {
 		return err
