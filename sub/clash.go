@@ -293,7 +293,7 @@ func lineToClashProxies(line model.Line, user model.User, a addr) []map[string]i
 				p["name"] = name + "-socks"
 			}
 			p["type"] = "socks5"
-			p["username"], _ = c["username"].(string)
+			p["username"] = user.Name // 和数据面一样用当前用户名(见 link.go 的 socksURI)
 			p["password"], _ = c["password"].(string)
 			p["udp"] = true
 			out = append(out, p)
@@ -305,7 +305,7 @@ func lineToClashProxies(line model.Line, user model.User, a addr) []map[string]i
 				p["name"] = name + "-http"
 			}
 			p["type"] = "http"
-			p["username"], _ = hc["username"].(string)
+			p["username"] = user.Name
 			p["password"], _ = hc["password"].(string)
 			if tlsConf.Mode == "cert" {
 				p["tls"] = true

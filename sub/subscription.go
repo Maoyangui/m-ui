@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Maoyangui/m-ui/brand"
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
@@ -33,6 +34,9 @@ type Options struct {
 	// BuyURL 「选购 / 续费」地址,已按 buyURL(rs) 解析过(代理填了用代理的,否则用主面板的)。
 	// 非空时随订阅发一个 Profile-Web-Page-Url 头,客户端就能在订阅卡片上摆一个续费入口。
 	BuyURL string
+	// Shared 这是临时共享地址(借用者拉的)。借用者那一份里不能有任何看得出本人是谁的东西:m-ui 默认拿用户名当订阅地址,
+	// 知道用户名就能拿到本人的永久订阅和凭据。标题不回落到本人的备注 / 用户名,用量头只给到期时间(审计 MB23)。
+	Shared bool
 }
 
 // ExtItem 是一组外部节点。
@@ -88,6 +92,9 @@ func BuildClashSub(user model.User, lines []model.Line, opt Options) (Result, er
 // 响应头与落地页的一键导入都用它,免得两处叫法不一样。
 func SubTitle(user model.User, opt Options) string {
 	title := opt.ProfileTitle
+	if opt.Shared {
+		return pick(title, brand.Name) // 共享地址:不回落到本人的备注 / 用户名
+	}
 	if title == "" {
 		title = user.Remark
 	}
@@ -99,12 +106,16 @@ func SubTitle(user model.User, opt Options) string {
 
 func headers(user model.User, opt Options, contentType string) map[string]string {
 	title := SubTitle(user, opt)
+	userinfo, fallback := fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", user.Up, user.Down, user.Volume, user.Expiry), user.Name
+	if opt.Shared { // 借用者看不到本人用量;到期时间留着,好知道节点什么时候停
+		userinfo, fallback = fmt.Sprintf("expire=%d", user.Expiry), "shared"
+	}
 	h := map[string]string{
 		"Content-Type":            contentType,
-		"Subscription-Userinfo":   fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", user.Up, user.Down, user.Volume, user.Expiry),
+		"Subscription-Userinfo":   userinfo,
 		"Profile-Update-Interval": fmt.Sprintf("%d", opt.UpdateHours),
 		"Profile-Title":           encodeTitle(title),
-		"Content-Disposition":     contentDisposition(title, user.Name),
+		"Content-Disposition":     contentDisposition(title, fallback),
 	}
 	// 「选购 / 续费」地址。Profile-Web-Page-Url 是 Clash 系客户端已有的约定头,
 	// 佛跳墙拿它在订阅卡片上摆续费按钮,别的客户端会显示成「订阅主页」。

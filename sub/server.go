@@ -443,6 +443,14 @@ func (s *Server) handle() http.HandlerFunc {
 		if rs != nil { // 代理填了标题就用代理的,客户端里显示的就是他的品牌
 			opt.ProfileTitle = pick(rs.ProfileTitle, pick(rs.PageTitle, opt.ProfileTitle))
 		}
+		if shared {
+			// 借用者那一份里不能有看得出本人是谁的东西(默认用户名就是订阅地址,知道了就能拿到本人的永久订阅):
+			// 标题回落到站点标题,不注入带本人用量的提示节点;socks / http / mixed 的链接里写着用户名,这几条线路不给
+			// (共享凭据在数据面里叫「名字#share」,这种链接本来也认证不过)。审计 MB23 / MB26
+			opt.Shared, opt.ShowNotice = true, false
+			opt.ProfileTitle = pick(opt.ProfileTitle, s.pageTitle(rs, opt))
+			lines = withoutNamedLogin(lines)
+		}
 		// 浏览器打开订阅地址 → 订阅页(不论状态;到期 / 用尽 / 停用在页面顶部标出;共享地址是精简版);
 		// 客户端拉取 → 原始订阅,停用则 404
 		if s.pageEnabled(rs) && WantsPage(r) {
@@ -500,6 +508,19 @@ func (s *Server) handle() http.HandlerFunc {
 }
 
 // keepLines 只留分配里有的线路(顺序不变)。
+// withoutNamedLogin 去掉用户名密码登录的线路(socks / http / mixed):它们的链接里写着用户名,共享地址不能给。
+func withoutNamedLogin(lines []model.Line) []model.Line {
+	out := make([]model.Line, 0, len(lines))
+	for _, l := range lines {
+		switch l.Protocol {
+		case "socks", "http", "mixed":
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
 func keepLines(lines []model.Line, links []model.UserLine) []model.Line {
 	has := make(map[uint]bool, len(links))
 	for _, l := range links {

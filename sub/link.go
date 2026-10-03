@@ -407,7 +407,7 @@ func vmessURI(line model.Line, user model.User, a addr, remark string) string {
 // socks5://user:pass@host:port#remark
 func socksURI(user model.User, a addr, remark string) string {
 	c := userCred(user, "socks")
-	u, _ := c["username"].(string)
+	u := user.Name // 和数据面一样用当前用户名:凭据里存的是建号时的名字,改名后就对不上了(审计 MB26)
 	p, _ := c["password"].(string)
 	return withFragment(fmt.Sprintf("socks5://%s:%s@%s", url.PathEscape(u), url.PathEscape(p), hostPort(a.server, a.port)), remark)
 }
@@ -415,7 +415,7 @@ func socksURI(user model.User, a addr, remark string) string {
 // http(s)://user:pass@host:port#remark
 func httpURI(line model.Line, user model.User, a addr, remark string) string {
 	c := userCred(user, "http")
-	u, _ := c["username"].(string)
+	u := user.Name // 同 socksURI
 	p, _ := c["password"].(string)
 	scheme := "http"
 	if render.ParseTLS(line).Mode == "cert" {
