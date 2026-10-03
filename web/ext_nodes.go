@@ -44,6 +44,7 @@ type extCell struct {
 // extTestJob 一次测速任务:前端每秒来取一次进度,结果一格一格冒出来。
 type extTestJob struct {
 	mu       sync.Mutex
+	extId    uint // 哪条外部节点:同一条同时只跑一个测速任务
 	started  time.Time
 	done     bool
 	total    int
@@ -73,6 +74,9 @@ func extSig(infos []ext.NodeInfo) string {
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
+
+// errExtNodeOffline 失联的副机这次不测。
+var errExtNodeOffline = errors.New("服务器离线,这次没测")
 
 // errExtStale 节点列表已经变了(HTTP 409,前端据此重新展开)。
 var errExtStale = errors.New("节点列表已更新,请重新展开后再操作")
@@ -169,6 +173,17 @@ func (s *Server) handleExtNodes(w http.ResponseWriter, r *http.Request, e model.
 // startExtTest 起一个测速任务:每台服务器各一个工人,逐个真连(临时实例本来就是串行的,并发再大也快不了)。
 // indexes 为空 = 全部节点。
 func (s *Server) startExtTest(e model.ExtNode, indexes []int) (string, error) {
+	// 失联的副机不测:每个节点都要等满 25 秒超时,60 个节点就是二十多分钟,前端早停了轮询后台还在跑(审计 MB31)
+	offline := map[uint]bool{}
+	if s.run != nil && s.run.Hub() != nil {
+		for id, st := range s.run.Hub().Statuses() {
+			offline[id] = !st.OK
+		}
+	}
+	return s.startExtTestWith(e, indexes, offline)
+}
+
+func (s *Server) startExtTestWith(e model.ExtNode, indexes []int, offline map[uint]bool) (string, error) {
 	infos := ext.Details(extItems(e))
 	if len(infos) == 0 {
 		return "", errors.New("这条外部节点还没有解析到节点(先刷新)")
@@ -212,13 +227,17 @@ func (s *Server) startExtTest(e model.ExtNode, indexes []int) (string, error) {
 	if len(targets) == 0 {
 		return "", errors.New("没有可测的节点")
 	}
-	job := &extTestJob{started: time.Now(), results: map[int]map[uint]*extCell{}}
+	job := &extTestJob{extId: e.Id, started: time.Now(), results: map[int]map[uint]*extCell{}}
 	for _, tg := range targets {
 		row := map[uint]*extCell{}
 		for _, n := range nodes {
 			c := &extCell{State: "pending"}
-			if tg.err != "" {
+			switch {
+			case tg.err != "":
 				c.State, c.Error = "fail", tg.err
+				job.finished++
+			case !n.IsLocal && offline[n.Id]:
+				c.State, c.Error = "fail", errExtNodeOffline.Error()
 				job.finished++
 			}
 			row[n.Id] = c
@@ -234,12 +253,24 @@ func (s *Server) startExtTest(e model.ExtNode, indexes []int) (string, error) {
 			delete(extJobs.m, k)
 		}
 	}
+	for _, j := range extJobs.m { // 同一条外部节点同时只跑一个:重复点击以前会起多组任务一起占着各台服务器
+		j.mu.Lock()
+		busy := j.extId == e.Id && !j.done
+		j.mu.Unlock()
+		if busy {
+			extJobs.Unlock()
+			return "", errors.New("这条外部节点正在测速,请等这一轮结束")
+		}
+	}
 	extJobs.m[id] = job
 	extJobs.Unlock()
 	if job.done {
 		return id, nil
 	}
 	for _, n := range nodes {
+		if !n.IsLocal && offline[n.Id] {
+			continue
+		}
 		go func(n model.Node) {
 			for _, tg := range targets {
 				if tg.err != "" {

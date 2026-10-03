@@ -167,22 +167,26 @@ async function startTest(id, indexes) {
   renderSubBody(id);
   toast(t('ext.testStarted', { n: want ? want.size : (c.nodes || []).length, s: (c.servers || []).length }), 'ok');
   const started = Date.now();
-  const timer = setInterval(async () => {
+  // 上一次进度回来了再约下一次:以前 setInterval 每秒一发不等返回,弱网下请求越积越多(审计 MB31)
+  const poll = async () => {
     let st;
     try { st = await get(`exts/${id}/nodes/test/${r.job}`); }
-    catch (e) { stopJob(id); toast(e.message, 'err'); return; }
+    catch (e) { if (jobs[id] && jobs[id].job === r.job) { stopJob(id); toast(e.message, 'err'); } return; }
+    if (!jobs[id] || jobs[id].job !== r.job) return; // 这期间被停了(列表作废、重新展开)
     applyResults(id, st.results);
     if (st.done || Date.now() - started > 20 * 60 * 1000) {
       stopJob(id);
       const { ok, bad } = tally(st.results);
       toast(t('ext.testDone', { ok, bad }), bad ? '' : 'ok');
+      return;
     }
-  }, 1000);
-  jobs[id] = { job: r.job, timer };
+    jobs[id].timer = setTimeout(poll, 1000);
+  };
+  jobs[id] = { job: r.job, timer: setTimeout(poll, 1000) };
 }
 // reloadPanel 节点列表已经变了:丢掉旧的,重新拉一遍。
 function reloadPanel(id) { stopJob(id); delete cache[id]; picked[id] = new Set(); fillPanel(id); }
-function stopJob(id) { if (jobs[id]) { clearInterval(jobs[id].timer); delete jobs[id]; } }
+function stopJob(id) { if (jobs[id]) { clearTimeout(jobs[id].timer); delete jobs[id]; } }
 function applyResults(id, results) {
   const c = cache[id];
   if (!c) return;
