@@ -512,7 +512,6 @@ func (s *Server) handle() http.HandlerFunc {
 	}
 }
 
-// keepLines 只留分配里有的线路(顺序不变)。
 // withoutNamedLogin 去掉用户名密码登录的线路(socks / http / mixed):它们的链接里写着用户名,共享地址不能给。
 func withoutNamedLogin(lines []model.Line) []model.Line {
 	out := make([]model.Line, 0, len(lines))
@@ -526,6 +525,7 @@ func withoutNamedLogin(lines []model.Line) []model.Line {
 	return out
 }
 
+// keepLines 只留分配里有的线路(顺序不变)。
 func keepLines(lines []model.Line, links []model.UserLine) []model.Line {
 	has := make(map[uint]bool, len(links))
 	for _, l := range links {
