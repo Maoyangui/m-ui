@@ -1,6 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
+import { trErr } from '../errmsg.js';
 import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, setHTML } from '../ui.js';
 import { loadReach, reachCell, reachToolbar, refreshDetail, setNodes, setReachListener } from '../reach.js';
 
@@ -51,14 +52,14 @@ function statusCell(n) {
   const s = n.status;
   if (!s) return badge(t('node.pending'), 'warn');
   // 在线但有话要说(配置推不下去、数据面没应用成功):这台机器并没有离线,但管理员必须看见
-  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.error ? `<div class="sub-cell ellip warn-text" title="${esc(s.error)}">${esc(shortErr(s.error))}</div>` : (s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : '')}`;
-  return `${badge(t('common.offline'), 'danger')}<div class="sub-cell ellip" title="${esc(s.error || '')}">${esc(shortErr(s.error))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
+  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.error ? `<div class="sub-cell ellip warn-text" title="${esc(trErr(s.error))}">${esc(shortErr(s.error))}</div>` : (s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : '')}`;
+  return `${badge(t('common.offline'), 'danger')}<div class="sub-cell ellip" title="${esc(trErr(s.error || ''))}">${esc(shortErr(s.error))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
 }
 
 // 副机报错原文是 Go 的网络错误,又长又带完整 URL(列表里会把表格撑出横向滚动条)。
 // 这里只显示原因,完整内容留在 title 里。
 function shortErr(raw) {
-  const e = String(raw || '');
+  const e = trErr(String(raw || ''));
   if (!e) return t('node.errUnknown');
   // 用整词匹配状态码:端口 4031、IP 段里都可能出现 "403" 这三个字
   const map = [
@@ -92,7 +93,7 @@ function coreCell(n) {
   if (n.isLocal) {
     const rl = state.status.reload || {};
     return badge(state.status.coreRunning ? t('dash.running') : t('dash.stopped'), state.status.coreRunning ? 'ok' : 'danger')
-      + reloadBadge(rl.at && !rl.ok ? `${rl.op}: ${rl.error}` : '');
+      + reloadBadge(rl.at && !rl.ok ? `${trErr(rl.op)}: ${trErr(rl.error)}` : '');
   }
   const s = n.status || {};
   if (!s.ok) return '—';
@@ -177,7 +178,7 @@ registerActions({
     try {
       const r = await post(`nodes/${id}/test`, undefined, SLOW);
       if (r.ok) toast(t('node.testOk', { v: r.version || '', core: r.coreRunning ? t('dash.running') : t('dash.stopped') }), 'ok');
-      else toast(r.error, 'err');
+      else toast(trErr(r.error), 'err');
     } catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; }
   },

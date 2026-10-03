@@ -1,6 +1,7 @@
 // 大陆连通检测:服务器页的一列、详情抽屉、顶部工具条文案。数据来自 GET reach(主机内存里的最近结果)。
 import { get, post } from './api.js';
 import { t } from './i18n.js';
+import { trErr } from './errmsg.js';
 import { esc, fmtRelative, fmtTime, toast, openDrawer, drawerOpen, setHTML, registerActions } from './ui.js';
 
 export let reach = null;            // 最近一次 GET reach 的结果;副机上是 { node: true }
@@ -40,9 +41,9 @@ export function reachCell(n, nodeView) {
   }
   if (!r) return `<button class="reach-cell" data-act="reach.one" data-id="${n.id}"><span class="badge">${t('reach.never')}</span><div class="sub-cell link">${t('reach.clickToCheck')}</div></button>`;
   const chips = r.verdict === 'error' || r.verdict === 'noProbes'
-    ? `<span class="muted small ellip" title="${esc(r.error || '')}">${esc(shortReason(r))}</span>`
+    ? `<span class="muted small ellip" title="${esc(trErr(r.error || ''))}">${esc(shortReason(r))}</span>`
     : (r.groups || []).filter(g => GROUPS.includes(g.key)).map(groupChip).join('');
-  const warn = r.attempt ? ` <span class="warn-text small" title="${esc(t('reach.attemptFailed', { t: fmtTime(r.attempt.at), err: r.attempt.error || '' }))}">⚠</span>` : '';
+  const warn = r.attempt ? ` <span class="warn-text small" title="${esc(t('reach.attemptFailed', { t: fmtTime(r.attempt.at), err: trErr(r.attempt.error || '') }))}">⚠</span>` : '';
   return `<button class="reach-cell" data-act="reach.detail" data-id="${n.id}" title="${esc(t('reach.openDetail'))}">
     <span class="badge ${TONE[r.verdict] || ''}">${esc(verdictLabel(r.verdict))}</span> <span class="muted small">${fmtRelative(r.at)}</span>${warn}
     <div class="rc-row">${chips}</div></button>`;
@@ -50,7 +51,7 @@ export function reachCell(n, nodeView) {
 
 function shortReason(r) {
   if (r.verdict === 'noProbes') return t('reach.v.noProbes');
-  const e = String(r.error || '');
+  const e = trErr(String(r.error || ''));
   return e.length > 26 ? e.slice(0, 26) + '…' : (e || t('reach.v.error'));
 }
 
@@ -71,7 +72,7 @@ function explain(r) {
     const down = (r.groups || []).filter(g => GROUPS.includes(g.key) && g.state === 'down').map(g => t('reach.g.' + g.key));
     return t('reach.x.partial', { down: down.join(t('reach.sep')) });
   }
-  if (r.verdict === 'error') return t('reach.x.error', { err: r.error || '' });
+  if (r.verdict === 'error') return t('reach.x.error', { err: trErr(r.error || '') });
   return t('reach.x.' + r.verdict);
 }
 
@@ -106,7 +107,7 @@ function detailHTML(n) {
   const r = resultOf(n.id);
   const running = runningFor(n.id);
   const q = reach && reach.quota;
-  const head = r ? `${r.attempt ? `<p class="hint warn-text" style="margin:0 0 .6rem">${esc(t('reach.attemptFailed', { t: fmtTime(r.attempt.at), err: r.attempt.error || '' }))}</p>` : ''}<div class="reach-hero ${TONE[r.verdict] || ''}">
+  const head = r ? `${r.attempt ? `<p class="hint warn-text" style="margin:0 0 .6rem">${esc(t('reach.attemptFailed', { t: fmtTime(r.attempt.at), err: trErr(r.attempt.error || '') }))}</p>` : ''}<div class="reach-hero ${TONE[r.verdict] || ''}">
       <div class="v">${esc(verdictLabel(r.verdict))}${r.rechecked ? ` <span class="badge">${t('reach.rechecked')}</span>` : ''}</div>
       <p>${esc(explain(r))}</p>
     </div>
@@ -122,7 +123,7 @@ function detailHTML(n) {
   return `${head}
     <div class="row" style="margin:.8rem 0 1rem"><button class="btn primary" data-act="reach.one" data-id="${n.id}" ${running || (reach && reach.running) ? 'disabled' : ''}>${running ? `<span class="spin"></span> ${t('reach.running')}` : t('reach.checkNow')}</button></div>
     ${groups}${icmp}${historyStrip(n.id)}
-    <section><p class="hint">${t('reach.note')}</p>${quota}${reach && reach.error ? `<p class="hint danger-text">${esc(reach.error)}</p>` : ''}</section>`;
+    <section><p class="hint">${t('reach.note')}</p>${quota}${reach && reach.error ? `<p class="hint danger-text">${esc(trErr(reach.error))}</p>` : ''}</section>`;
 }
 
 let nodesRef = () => [];

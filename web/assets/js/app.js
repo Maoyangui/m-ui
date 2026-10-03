@@ -1,6 +1,7 @@
 // 应用入口:登录、壳布局、hash 路由、全局状态与定时刷新。
 import { get, post, setUnauthorizedHandler, LONG } from './api.js';
 import { t, setLang, getLang, langs } from './i18n.js';
+import { trErr } from './errmsg.js';
 import { ICONS } from './icons.js';
 import { toast, confirm, closeModal, closeDrawer, drawerOpen, esc, setTimezone } from './ui.js';
 import * as dashboard from './pages/dashboard.js';
@@ -260,7 +261,7 @@ function reloadNotice() {
   const rl = state.status && state.status.reload;
   let bar = document.getElementById('reload-bar');
   if (!rl || rl.ok || isReseller()) { if (bar) bar.remove(); return; }
-  const text = t('alert.reloadFailed', { op: rl.op || '', err: rl.error || '' });
+  const text = t('alert.reloadFailed', { op: trErr(rl.op || ''), err: trErr(rl.error || '') });
   if (bar && bar.dataset.err === text) return;
   const main = document.querySelector('.main'), page = document.getElementById('page');
   if (!main || !page) return;

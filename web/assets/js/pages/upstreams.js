@@ -1,6 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post, put, del, SLOW, LONG } from '../api.js';
 import { t } from '../i18n.js';
+import { trErr } from '../errmsg.js';
 import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtTime } from '../ui.js';
 // 展开查看细节的上游 id:一行只显示各服务器的延迟,点开才看检查时间、方式与完整报错
 const expanded = new Set();
@@ -78,11 +79,11 @@ function resultHTML(id) {
     detail = '<div class="sub-cell">' + servers.map(sv => {
       const st = (label[sv.state] || (() => t('up.pending')))(sv);
       const when = sv.checkedAt ? ` · ${t('up.checkedAt')} ${fmtTime(sv.checkedAt)}` : '';
-      const err = sv.error ? ` · <span class="danger">${esc(sv.error).slice(0, 160)}</span>` : '';
+      const err = sv.error ? ` · <span class="danger">${esc(trErr(sv.error)).slice(0, 160)}</span>` : '';
       return `<div>${esc(sv.name)}${sv.isLocal ? ' <span class="muted">(' + t('node.local') + ')</span>' : ''} · ${esc(st)}${when}${err}</div>`;
     }).join('') + '</div>';
   } else if (bad.length) {
-    detail = `<div class="sub-cell" title="${esc(bad[0].error)}">${esc(bad[0].error).slice(0, 60)}</div>`;
+    detail = `<div class="sub-cell" title="${esc(trErr(bad[0].error))}">${esc(trErr(bad[0].error)).slice(0, 60)}</div>`;
   }
   return `<div class="row" style="gap:.35rem;align-items:center;flex-wrap:wrap">${chips}${more}</div>${detail}`;
 }

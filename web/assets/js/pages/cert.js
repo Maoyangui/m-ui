@@ -1,6 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
+import { trErr } from '../errmsg.js';
 import { esc, fmtDay, fmtRelative, toast, confirm, registerActions, badge, field, check, fv, fchk } from '../ui.js';
 
 export const title = () => t('cert.title');
@@ -22,7 +23,7 @@ export async function render(el) {
           <dt>${t('cert.validity')}</dt><dd>${fmtDay(new Date(i.notBefore).getTime() / 1000)} → ${fmtDay(new Date(i.notAfter).getTime() / 1000)}</dd>
           <dt>${t('cert.daysLeft')}</dt><dd>${i.daysLeft} ${t('common.day')}</dd>
           <dt>${t('cert.path')}</dt><dd class="mono">${esc(i.path)}</dd>
-        </dl>` : `<p class="muted">${t('cert.none')}${i.error ? `<br><span class="small">${esc(i.error)}</span>` : ''}</p>`}
+        </dl>` : `<p class="muted">${t('cert.none')}${i.error ? `<br><span class="small">${esc(trErr(i.error))}</span>` : ''}</p>`}
         <h3 class="sub-title">${t('cert.usage')}</h3>
         <div class="chips">
           <span class="chip">${t('cert.useLines')} ${badge(i.exists ? t('cert.on') : t('cert.off'), i.exists ? 'ok' : '')}</span>
@@ -49,7 +50,7 @@ export async function render(el) {
     <section class="card">
       <div class="card-head"><h2>${t('cert.log')}</h2>${st.lastError ? badge(t('cert.lastFailed'), 'danger') : ''}</div>
       <pre class="log" id="c-log">${esc((st.log || []).join('\n') || t('common.empty'))}</pre>
-      ${st.lastError ? `<p class="hint" style="color:var(--danger)">${esc(st.lastError)}</p>` : ''}
+      ${st.lastError ? `<p class="hint" style="color:var(--danger)">${esc(trErr(st.lastError))}</p>` : ''}
     </section>`;
   renderForm();
   if (st.running) startPoll();

@@ -1,6 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
+import { trErr } from '../errmsg.js';
 import { esc, fmtRelative, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, copy, matches } from '../ui.js';
 
 export const title = () => t('ext.title');
@@ -54,7 +55,7 @@ function rowHTML(x) {
     <td>${badge(x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink'), x.type === 'sub' ? 'primary' : '')}</td>
     <td class="mono small" title="${esc(x.value)}">${esc(x.value.length > 60 ? x.value.slice(0, 60) + '…' : x.value)}</td>
     <td class="num">${x.nodeCount || 0}</td>
-    <td>${x.lastError ? badge(t('ext.failed'), 'danger') + `<div class="sub-cell" title="${esc(x.lastError)}">${esc(x.lastError.slice(0, 60))}</div>` : (x.lastFetch ? fmtRelative(x.lastFetch) : '—')}</td>
+    <td>${x.lastError ? badge(t('ext.failed'), 'danger') + `<div class="sub-cell" title="${esc(trErr(x.lastError))}">${esc(trErr(x.lastError).slice(0, 60))}</div>` : (x.lastFetch ? fmtRelative(x.lastFetch) : '—')}</td>
     <td class="num">${x.userCount || 0}</td>
     <td>${badge(x.enabled ? t('common.enabled') : t('common.disabled'), x.enabled ? 'ok' : 'danger')}</td>
     <td class="actions">
@@ -103,7 +104,7 @@ const visible = (id, c) => {
 const cellHTML = r => !r ? '<span class="muted">—</span>'
   : r.state === 'pending' ? '<span class="muted">…</span>'
     : r.state === 'ok' ? badge(r.delayMs + ' ms', 'ok')
-      : `<span class="badge danger" title="${esc(r.error || '')}">✗</span>`;
+      : `<span class="badge danger" title="${esc(trErr(r.error || ''))}">✗</span>`;
 
 function renderSubBody(id) {
   const tb = document.getElementById('ext-nodes-' + id), c = cache[id];
@@ -214,7 +215,7 @@ async function addUpstreams(id) {
     if (okN) { try { await load('upstreams'); } catch (_) { /* 上游页没打开过也没关系 */ } picked[id] = new Set(); renderSubBody(id); }
     // 逐条结果另开一个框:成功的已经建好了,失败的连同原因列出来,别让人再提交一遍撞重名
     setTimeout(() => openModal(t('ext.addUpResult'), `<p>${t('ext.addUpDone', { n: okN })}${bad.length ? ' · ' + t('ext.addUpFailedN', { n: bad.length }) : ''}</p>
-      <ul class="ext-results">${(r.results || []).map(x => `<li>${x.ok ? badge('OK', 'ok') : badge('✗', 'danger')} ${esc(x.name)}${x.error ? ` <span class="muted small">${esc(x.error)}</span>` : ''}</li>`).join('')}</ul>
+      <ul class="ext-results">${(r.results || []).map(x => `<li>${x.ok ? badge('OK', 'ok') : badge('✗', 'danger')} ${esc(x.name)}${x.error ? ` <span class="muted small">${esc(trErr(x.error))}</span>` : ''}</li>`).join('')}</ul>
       ${okN ? `<p><a href="#/upstreams">${t('ext.toUpstreams')}</a></p>` : ''}`, null), 0);
   }, { wide: true, saveText: t('ext.addUp') });
 }

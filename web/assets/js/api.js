@@ -1,5 +1,6 @@
 // 面板 API 客户端。所有请求同源相对路径,兼容任意面板路径前缀。
 import { t } from './i18n.js';
+import { trErr } from './errmsg.js';
 
 const BASE = './api/';
 
@@ -40,8 +41,8 @@ export async function api(path, opts = {}) {
     if (timer) clearTimeout(timer);
   }
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401) { onUnauthorized(); const e = new ApiError(401, data.error || '未登录'); e.data = data; throw e; }
-  if (!res.ok) throw new ApiError(res.status, data.error || ('请求失败 ' + res.status));
+  if (res.status === 401) { onUnauthorized(); const e = new ApiError(401, trErr(data.error || '未登录')); e.data = data; throw e; }
+  if (!res.ok) throw new ApiError(res.status, trErr(data.error) || t('api.failed', { s: res.status }));
   return data;
 }
 
@@ -60,9 +61,9 @@ export async function upload(path, file, extra = {}) {
   fd.append('file', file, file.name);
   Object.entries(extra).forEach(([k, v]) => fd.append(k, v));
   const res = await fetch(BASE + path, { method: 'POST', body: fd });
-  if (res.status === 401) { onUnauthorized(); throw new ApiError(401, '未登录'); }
+  if (res.status === 401) { onUnauthorized(); throw new ApiError(401, trErr('未登录')); }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, data.error || ('请求失败 ' + res.status));
+  if (!res.ok) throw new ApiError(res.status, trErr(data.error) || t('api.failed', { s: res.status }));
   return data;
 }
 
