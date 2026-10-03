@@ -270,18 +270,19 @@ func TestAgentApplyEndToEnd(t *testing.T) {
 // ---- 测试助手 ----(不经 hub、直接打接口的拒绝路径在 agent_apply_auth_test.go)
 
 // freeTCPPort 找一个 TCP、UDP 都能绑的空闲端口给测试线路用:shadowsocks 这类入站两样都要监听。
-// Windows 上 Hyper-V / WSL 会动态保留成段的 UDP 端口,只试 TCP 常挑到绑不上 UDP 的,测试就偶发失败。
+// 先向 UDP 要端口再试 TCP:Windows 上 Hyper-V / WSL 会动态保留成段的 UDP 端口,而 TCP 的临时端口是挨着分的,
+// 反过来从 TCP 要的话几十次都落在同一段保留里。
 func freeTCPPort(t *testing.T) int {
 	t.Helper()
 	for i := 0; i < 50; i++ {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		pc, err := net.ListenPacket("udp", "0.0.0.0:0")
 		if err != nil {
 			t.Fatal(err)
 		}
-		port := ln.Addr().(*net.TCPAddr).Port
-		ln.Close()
-		if pc, err := net.ListenPacket("udp", fmt.Sprintf("0.0.0.0:%d", port)); err == nil {
-			pc.Close()
+		port := pc.LocalAddr().(*net.UDPAddr).Port
+		pc.Close()
+		if ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port)); err == nil {
+			ln.Close()
 			return port
 		}
 	}
