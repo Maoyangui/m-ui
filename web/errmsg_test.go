@@ -15,7 +15,7 @@ import (
 )
 
 // 英文界面靠 assets/js/errmsg.js 把后端中文错误翻成英文(审计 MB08)。这里扫一遍会把错误送到面板的包:
-// 每条带中文的错误文案(errors.New / fmt.Errorf / "error": … / 拼接的前缀)都要在表里有译文、占位个数一致,
+// 每条带中文的错误文案(errors.New / fmt.Errorf / "error": … / Error 字段 / fail(…) / 拼接的前缀)都要在表里有译文、占位个数一致,
 // 表里也不能留源码里已经没有的条目;数据面重载的操作名(noteReload)要在 LABELS 里。
 func TestErrorMessagesHaveEnglish(t *testing.T) {
 	src, ops := backendMessages(t, ".", "../hop", "../upstream", "../ext", "../rules", "../creds", "../ops", "../selfupdate",
@@ -107,6 +107,7 @@ func backendMessages(t *testing.T, dirs ...string) (map[string]string, map[strin
 		}
 		return "", false
 	}
+	errField := map[string]bool{"Error": true, "Err": true, "err": true, "error": true}
 	msgs, ops := map[string]string{}, map[string]bool{}
 	for _, dir := range dirs {
 		fset := token.NewFileSet()
@@ -142,6 +143,8 @@ func backendMessages(t *testing.T, dirs ...string) (map[string]string, map[strin
 							if len(v.Args) > 0 {
 								add(v.Args[0])
 							}
+						case name == "fail" && len(v.Args) > 0: // 逐条结果里的局部 fail("…")
+							add(v.Args[0])
 						case name == "http.Error" && len(v.Args) > 1:
 							add(v.Args[1])
 						case strings.HasSuffix(name, ".noteReload") && len(v.Args) > 0:
@@ -149,9 +152,17 @@ func backendMessages(t *testing.T, dirs ...string) (map[string]string, map[strin
 								ops[k] = true
 							}
 						}
-					case *ast.KeyValueExpr:
+					case *ast.KeyValueExpr: // map 里的 "error": …,结构体里的 Error: …
 						if k, ok := keyOf(v.Key); ok && k == "error" {
 							add(v.Value)
+						} else if id, ok := v.Key.(*ast.Ident); ok && errField[id.Name] {
+							add(v.Value)
+						}
+					case *ast.AssignStmt: // x.Error = "…"、x.err = "…"
+						for i, l := range v.Lhs {
+							if sel, ok := l.(*ast.SelectorExpr); ok && errField[sel.Sel.Name] && i < len(v.Rhs) {
+								add(v.Rhs[i])
+							}
 						}
 					case *ast.CompositeLit:
 						if id, ok := v.Type.(*ast.Ident); ok && id.Name == "keyErr" && len(v.Elts) > 0 {
