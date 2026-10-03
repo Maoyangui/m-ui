@@ -165,7 +165,7 @@ function renderRows() {
           <button data-act="user.copy" data-id="${u.id}" data-fmt="link">${t('user.subLink')}</button>
           <button data-act="user.copy" data-id="${u.id}" data-fmt="json">${t('user.subJson')}</button>
           <button data-act="user.renew" data-id="${u.id}">${t('user.renew')}</button>
-          <button data-act="user.extend" data-id="${u.id}">${t('user.extend')}</button>
+          ${u.expiry ? `<button data-act="user.extend" data-id="${u.id}">${t('user.extend')}</button>` : ''}
           <button data-act="user.reset" data-id="${u.id}">${t('user.reset')}</button>
           <button data-act="user.kick" data-id="${u.id}">${t('user.kick')}</button>
           <button data-act="user.rotate" data-id="${u.id}">${t('user.rotate')}</button>
@@ -212,7 +212,7 @@ async function showDetail(id) {
       ${ruleLimitsHTML(u)}
       <div class="row" style="margin-top:.6rem;flex-wrap:wrap">
         <button class="btn sm primary" data-act="user.renew" data-id="${id}">${t('user.renew')}</button>
-        <button class="btn sm" data-act="user.extend" data-id="${id}">${t('user.extend')}</button>
+        ${u.expiry ? `<button class="btn sm" data-act="user.extend" data-id="${id}">${t('user.extend')}</button>` : ''}
         <button class="btn sm" data-act="user.reset" data-id="${id}">${t('user.reset')}</button>
         <button class="btn sm" data-act="user.kick" data-id="${id}">${t('user.kick')}</button>
         <button class="btn sm" data-act="user.rotate" data-id="${id}">${t('user.rotate')}</button>
@@ -435,8 +435,8 @@ registerActions({
   },
   'user.extend': async id => {
     const u = state.users.find(x => x.id === Number(id));
-    const base = Math.max(u.expiry || 0, now());
-    try { await fullUpdate(u, { expiry: base + 30 * 86400, enabled: true }); await load('users'); renderRows(); if (drawerUser === u.id) showDetail(u.id); toast(t('user.extended'), 'ok'); }
+    // 走后端的延期:不限期的不动,到期被停的自动恢复,手动停用的仍停着(以前带 enabled:true 把手动停用的也启用了)
+    try { await post('users/batch', { ids: [u.id], action: 'extend', days: 30 }); await load('users'); renderRows(); if (drawerUser === u.id) showDetail(u.id); toast(t('user.extended'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
   'user.reset': async id => {

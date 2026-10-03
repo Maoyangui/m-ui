@@ -70,15 +70,19 @@ func (s *Server) resetUsage(db *gorm.DB, id uint) error {
 	return nil
 }
 
-// extendExpiry 到期顺延 N 天(原到期未过就从原到期算),到期被停的自动恢复。
-func (s *Server) extendExpiry(db *gorm.DB, u model.User, days int, now int64) error {
+// extendExpiry 到期顺延 N 天(原到期未过就从原到期算),到期被停的自动恢复;手动停用的仍停着。
+// 不限期的不动、返回 false:以前也从现在起算,批量延期 30 天等于给它们设了 30 天后到期(审计 MB11)。
+func (s *Server) extendExpiry(db *gorm.DB, u model.User, days int, now int64) (bool, error) {
+	if u.Expiry == 0 {
+		return false, nil
+	}
 	base := now
 	if u.Expiry > now {
 		base = u.Expiry
 	}
 	u.Expiry = base + int64(days)*86400
 	autoEnable(&u, now)
-	return db.Model(&model.User{}).Where("id = ?", u.Id).Select("expiry", "enabled", "disabled_reason").Updates(u).Error
+	return true, db.Model(&model.User{}).Where("id = ?", u.Id).Select("expiry", "enabled", "disabled_reason").Updates(u).Error
 }
 
 // forgetQuotaAlert 用量清零后允许"流量告急"再次提醒(去重键 24 小时才过期)。

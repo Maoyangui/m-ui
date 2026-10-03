@@ -450,11 +450,12 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		var users []model.User
 		s.db.Where("id IN ?", req.Ids).Find(&users)
 		for _, u := range users {
-			if err := s.extendExpiry(s.db, u, req.Days, now); err != nil {
+			if ok, err := s.extendExpiry(s.db, u, req.Days, now); err != nil {
 				badRequest(w, err)
 				return
+			} else if ok {
+				affected++
 			}
-			affected++
 		}
 	case "plan":
 		p, err := s.loadPlan(req.PlanId)
