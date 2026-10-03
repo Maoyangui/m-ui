@@ -107,8 +107,10 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 				k := wkey{rule.Id, u.Id}
 				st, ok := existing[k]
 				if !ok {
-					st = model.LimitState{RuleId: rule.Id, UserId: u.Id, Since: nowU, Reason: "时段 " + rule.Start + " 到 " + rule.End}
+					st = model.LimitState{RuleId: rule.Id, UserId: u.Id, Since: nowU}
 				}
+				// 原因与 Until 也要跟着规则走:突发规则改成时段规则时,旧行带着惩罚截止时间,过点后被当成已解除(审计 MB12)
+				st.Reason = "时段 " + rule.Start + " 到 " + rule.End
 				st.UserName, st.RuleName, st.UpMbps, st.DownMbps, st.TightenOnly, st.Until = u.Name, rule.Name, rule.UpMbps, rule.DownMbps, rule.TightenOnly, 0
 				desired[k] = st
 			}
@@ -156,7 +158,8 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 			add = append(add, st)
 			continue
 		}
-		if old.UpMbps != st.UpMbps || old.DownMbps != st.DownMbps || old.TightenOnly != st.TightenOnly || old.RuleName != st.RuleName || old.UserName != st.UserName {
+		if old.UpMbps != st.UpMbps || old.DownMbps != st.DownMbps || old.TightenOnly != st.TightenOnly || old.RuleName != st.RuleName || old.UserName != st.UserName ||
+			old.Until != st.Until || old.Reason != st.Reason {
 			st.Id = old.Id
 			upd = append(upd, st)
 		}
@@ -180,6 +183,7 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 		for _, st := range upd {
 			if err := tx.Model(&model.LimitState{}).Where("id = ?", st.Id).Updates(map[string]interface{}{
 				"user_name": st.UserName, "rule_name": st.RuleName, "up_mbps": st.UpMbps, "down_mbps": st.DownMbps, "tighten_only": st.TightenOnly,
+				"until": st.Until, "reason": st.Reason,
 			}).Error; err != nil {
 				return err
 			}

@@ -184,3 +184,25 @@ func TestTwoBurstRulesIndependent(t *testing.T) {
 		t.Fatalf("r1 到期解除,r2 仍在: %+v", st)
 	}
 }
+
+// 正在惩罚中的突发规则改成时段规则:旧行的惩罚截止时间要清掉,否则过点后被当成已解除,时段限速对这些人不生效(审计 MB12)。
+func TestBurstChangedToScheduleClearsUntil(t *testing.T) {
+	e, db := newEngine(t)
+	db.Create(&model.User{Name: "alice", Enabled: true})
+	db.Create(&model.Rule{Name: "r", Enabled: true, Kind: KindBurst, UserIds: []byte(`[1]`),
+		WindowMin: 10, ThresholdBytes: gb, PenaltyMin: 20, UpMbps: 20, DownMbps: 20})
+	t0 := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
+	e.Tick(t0)
+	setUsage(db, 1, 2*gb)
+	if ch, _ := e.Tick(t0.Add(time.Minute)); !ch || len(statesOf(t, db)) != 1 || statesOf(t, db)[0].Until == 0 {
+		t.Fatalf("应先触发突发限速: %+v", statesOf(t, db))
+	}
+	db.Model(&model.Rule{}).Where("id = 1").Updates(map[string]interface{}{"kind": KindSchedule, "start": "00:00", "end": "23:59"})
+	e.Tick(t0.Add(2 * time.Minute))
+	later := t0.Add(2 * time.Hour) // 早过了原来的惩罚截止时间
+	e.Tick(later)
+	st := statesOf(t, db)
+	if len(st) != 1 || st[0].Until != 0 || len(Active(st, later.Unix())) != 1 || st[0].Reason != "时段 00:00 到 23:59" {
+		t.Fatalf("改成时段规则后应是一条不带截止时间的时段限速: %+v", st)
+	}
+}
