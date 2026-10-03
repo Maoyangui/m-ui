@@ -129,6 +129,7 @@ func (n *Notifier) flush() {
 }
 
 // Forget 清除某个去重 key(例如用户重置流量后允许再次告警);持久记录里的 key 与以 "key:" 开头的一并清掉。
+// 清到持久记录时会写库,不要在数据库事务里调用(写锁在事务手里,会等到超时)。
 func (n *Notifier) Forget(key string) {
 	n.mu.Lock()
 	delete(n.last, key)

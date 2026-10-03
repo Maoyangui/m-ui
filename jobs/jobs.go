@@ -420,8 +420,13 @@ func (s *Scheduler) runDeplete() {
 	defer s.depleteMu.Unlock()
 	now := time.Now().Unix()
 	changed := false
+	// 事务里只算、只写库;不可用集合写回内存、发通知、清告警去重都等提交成功之后。以前事务里就改了内存集合、发了通知,
+	// 后面一步失败回滚后,这次代理到期的变化被永久漏掉(下一轮集合相同不再重载),通知发了审计却没了(审计 MB15)
+	var notes, forgets []string
+	var dead map[uint]bool
 
 	err := s.d.DB.Transaction(func(tx *gorm.DB) error {
+		notes, forgets, changed = nil, nil, false
 		// 1) 周期重置:到期的清零并解禁;首次开启自动重置的用户初始化下次重置时间
 		var resets []model.User
 		if err := tx.Where("auto_reset = ? AND reset_days > 0 AND next_reset > 0 AND next_reset < ?", true, now).Find(&resets).Error; err != nil {
@@ -443,9 +448,7 @@ func (s *Scheduler) runDeplete() {
 				Updates(map[string]interface{}{"enabled": true, "disabled_reason": ""}).Error; err != nil {
 				return err
 			}
-			if s.d.Forget != nil {
-				s.d.Forget("quota:" + u.Name) // 新周期从零开始,再到阈值要能再提醒
-			}
+			forgets = append(forgets, "quota:"+u.Name) // 新周期从零开始,再到阈值要能再提醒
 			record(tx, "ResetJob", "user", "reset", u.Name)
 			changed = true
 		}
@@ -461,7 +464,7 @@ func (s *Scheduler) runDeplete() {
 		if err := tx.Find(&resellers).Error; err != nil {
 			return err
 		}
-		dead := map[uint]bool{}
+		dead = map[uint]bool{}
 		for _, rs := range resellers {
 			depleted := ResellerDepleted(tx, rs)
 			if depleted != rs.Depleted {
@@ -473,9 +476,7 @@ func (s *Scheduler) runDeplete() {
 				if depleted {
 					record(tx, "DepleteJob", "reseller", "depleted", rs.Name)
 					logger.Info("代理 ", rs.Name, " 流量用尽,名下 ", n, " 个用户已从数据面撤下")
-					if s.d.Notify != nil {
-						s.d.Notify(fmt.Sprintf("⛔ <b>代理流量用尽</b>:%s(名下 %d 个用户已停止服务,补量后自动恢复)", escapeHTML(rs.Name), n))
-					}
+					notes = append(notes, fmt.Sprintf("⛔ <b>代理流量用尽</b>:%s(名下 %d 个用户已停止服务,补量后自动恢复)", escapeHTML(rs.Name), n))
 				} else {
 					record(tx, "DepleteJob", "reseller", "restored", rs.Name)
 					logger.Info("代理 ", rs.Name, " 额度恢复,名下 ", n, " 个用户已恢复服务")
@@ -493,9 +494,7 @@ func (s *Scheduler) runDeplete() {
 					for _, rs := range resellers {
 						if rs.Id == id && rs.Enabled && !rs.Depleted && rs.Expiry > 0 && rs.Expiry < now {
 							record(tx, "DepleteJob", "reseller", "expired", rs.Name)
-							if s.d.Notify != nil {
-								s.d.Notify(fmt.Sprintf("⛔ <b>代理已到期</b>:%s(名下用户已停止服务)", escapeHTML(rs.Name)))
-							}
+							notes = append(notes, fmt.Sprintf("⛔ <b>代理已到期</b>:%s(名下用户已停止服务)", escapeHTML(rs.Name)))
 						}
 					}
 				}
@@ -506,12 +505,14 @@ func (s *Scheduler) runDeplete() {
 				}
 			}
 		}
-		s.deadResellers, s.deadInit = dead, true
 
 		// 2) 超量 / 过期 → 禁用
-		if n, err := s.disableDepleted(tx, now); err != nil {
+		disabled, err := s.disableDepleted(tx, now)
+		if err != nil {
 			return err
-		} else if n > 0 {
+		}
+		if len(disabled) > 0 {
+			notes = append(notes, disabled...)
 			changed = true
 		}
 		return nil
@@ -520,9 +521,25 @@ func (s *Scheduler) runDeplete() {
 		logger.Warning("配额判定失败: ", err)
 		return
 	}
+	s.deadResellers, s.deadInit = dead, true
+	s.afterCommit(notes, forgets)
 	if changed && s.d.ReloadUsers != nil {
 		if err := s.d.ReloadUsers(); err != nil {
 			logger.Warning("配额判定后热更新失败: ", err)
+		}
+	}
+}
+
+// afterCommit 事务提交后才发通知、清告警去重(Forget 会写库,不能在事务里调)。
+func (s *Scheduler) afterCommit(notes, forgets []string) {
+	if s.d.Notify != nil {
+		for _, n := range notes {
+			s.d.Notify(n)
+		}
+	}
+	if s.d.Forget != nil {
+		for _, k := range forgets {
+			s.d.Forget(k)
 		}
 	}
 }
@@ -544,29 +561,32 @@ func (s *Scheduler) depleteNow() {
 	if err := s.d.DB.Model(&model.User{}).Where(depletedCond, true, now).Count(&due).Error; err != nil || due == 0 {
 		return
 	}
-	n := 0
+	var disabled []string
 	err := s.d.DB.Transaction(func(tx *gorm.DB) error {
 		var err error
-		n, err = s.disableDepleted(tx, now)
+		disabled, err = s.disableDepleted(tx, now)
 		return err
 	})
 	if err != nil {
 		logger.Warning("超量判定失败: ", err)
 		return
 	}
-	if n > 0 && s.d.ReloadUsers != nil {
+	s.afterCommit(disabled, nil)
+	if len(disabled) > 0 && s.d.ReloadUsers != nil {
 		if err := s.d.ReloadUsers(); err != nil {
 			logger.Warning("超量判定后热更新失败: ", err)
 		}
 	}
 }
 
-// disableDepleted 把超量 / 到期的用户停用并记下原因(补量 / 延期时只有这些原因会自动恢复),返回停用人数。
-func (s *Scheduler) disableDepleted(tx *gorm.DB, now int64) (int, error) {
+// disableDepleted 把超量 / 到期的用户停用并记下原因(补量 / 延期时只有这些原因会自动恢复),
+// 返回每人一条的通知文案(提交后再发)。
+func (s *Scheduler) disableDepleted(tx *gorm.DB, now int64) ([]string, error) {
 	var depleted []model.User
 	if err := tx.Where(depletedCond, true, now).Find(&depleted).Error; err != nil {
-		return 0, err
+		return nil, err
 	}
+	notes := make([]string, 0, len(depleted))
 	for _, u := range depleted {
 		reason, why := model.DisabledQuota, "流量用尽"
 		if u.Expiry > 0 && u.Expiry < now {
@@ -574,15 +594,13 @@ func (s *Scheduler) disableDepleted(tx *gorm.DB, now int64) (int, error) {
 		}
 		if err := tx.Model(&model.User{}).Where("id = ?", u.Id).
 			Updates(map[string]interface{}{"enabled": false, "disabled_reason": reason}).Error; err != nil {
-			return 0, err
+			return nil, err
 		}
 		record(tx, "DepleteJob", "user", "disable:"+reason, u.Name)
 		logger.Info("用户 ", u.Name, " 已禁用(", reason, ")")
-		if s.d.Notify != nil {
-			s.d.Notify(fmt.Sprintf("⛔ <b>用户已禁用</b>:%s(%s)", escapeHTML(u.Name), why))
-		}
+		notes = append(notes, fmt.Sprintf("⛔ <b>用户已禁用</b>:%s(%s)", escapeHTML(u.Name), why))
 	}
-	return len(depleted), nil
+	return notes, nil
 }
 
 // ---- cleanup ----
