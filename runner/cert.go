@@ -73,14 +73,28 @@ func saveSettings(db *gorm.DB, values map[string]string) error {
 func (r *Runner) certPaths(domain string) (string, string) {
 	c, k := r.setting("certFile"), r.setting("keyFile")
 	if c == "" || k == "" {
-		name := strings.NewReplacer("/", "", "\\", "", ":", "", "..", "").Replace(strings.TrimSpace(domain))
-		if name == "" {
-			name = "main"
-		}
-		c = filepath.Join(r.DataDir(), "cert", name+".crt")
-		k = filepath.Join(r.DataDir(), "cert", name+".key")
+		return r.defaultCertPaths(domain)
 	}
 	return c, k
+}
+
+// defaultCertPaths 面板自己存证书的固定路径(数据目录下 cert/<域名>.crt / .key)。
+func (r *Runner) defaultCertPaths(domain string) (string, string) {
+	name := strings.NewReplacer("/", "", "\\", "", ":", "", "..", "").Replace(strings.TrimSpace(domain))
+	if name == "" {
+		name = "main"
+	}
+	return filepath.Join(r.DataDir(), "cert", name+".crt"), filepath.Join(r.DataDir(), "cert", name+".key")
+}
+
+// ownCertPaths 面板自己写证书(签发、自签)时写到哪:当前来源是「服务器上已有的证书」时,设置里的路径是
+// certbot / nginx / 商业证书的原件,不能往里写 —— 以前签发与自签都照着 certFile 写回去,把原件(连同 certbot
+// live 目录里的软链接)替换掉。这时改写面板自己的固定路径,写完来源随之换成签发 / 自签。
+func (r *Runner) ownCertPaths(domain string) (string, string) {
+	if r.CertSource() == "external" {
+		return r.defaultCertPaths(domain)
+	}
+	return r.certPaths(domain)
 }
 
 // CertInfo 返回当前数据面证书信息。
@@ -135,7 +149,7 @@ func (r *Runner) issueCert() error {
 		r.cert.logf("%v", err)
 		return err
 	}
-	certFile, keyFile := r.certPaths(domain)
+	certFile, keyFile := r.ownCertPaths(domain)
 	cfg := acme.Config{
 		Email: r.setting("acmeEmail"), Domain: domain, Method: r.setting("acmeMethod"),
 		CFToken: r.setting("acmeCfToken"), Staging: strings.EqualFold(r.setting("acmeStaging"), "true"),
@@ -306,7 +320,7 @@ func (r *Runner) SelfSign(hosts []string, applyPanel, applySub bool) error {
 	if len(hosts) == 0 {
 		return errors.New("没有探测到本机公网 IP,请手动填写服务器 IP")
 	}
-	certFile, keyFile := r.DataPlaneCert()
+	certFile, keyFile := r.ownCertPaths(r.setting("webDomain"))
 	if err := certutil.GenerateSelfSigned(hosts, certFile, keyFile, 3650); err != nil {
 		return err
 	}
@@ -413,7 +427,8 @@ func (r *Runner) certLoop(stop <-chan struct{}) {
 }
 
 func (r *Runner) maybeRenew() {
-	if strings.EqualFold(r.setting("acmeAutoRenew"), "false") || r.setting("acmeDomain") == "" {
+	// 只续自己签发的:换成服务器上已有的证书或自签后 acmeDomain 还留着,以前到了 30 天照样去签发(并写回外部证书的原件)
+	if strings.EqualFold(r.setting("acmeAutoRenew"), "false") || r.setting("acmeDomain") == "" || r.CertSource() != "acme" {
 		return
 	}
 	info := r.CertInfo()
