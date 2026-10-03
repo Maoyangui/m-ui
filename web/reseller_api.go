@@ -188,7 +188,8 @@ func (s *Server) dispatchResellerSubroute(w http.ResponseWriter, r *http.Request
 			badRequest(w, err)
 			return true
 		}
-		s.db.Model(&model.User{}).Where("reseller_id = ? AND enabled = ? AND disabled_reason = ?", rs.Id, false, model.DisabledQuota).
+		// 已经到期的不恢复:以前先超量后到期的人原因一直是 quota,重置后被启用,到下一轮判定前还能连(审计 MB14)
+		s.db.Model(&model.User{}).Where("reseller_id = ? AND enabled = ? AND disabled_reason = ? AND (expiry = 0 OR expiry > ?)", rs.Id, false, model.DisabledQuota, time.Now().Unix()).
 			Updates(map[string]interface{}{"enabled": true, "disabled_reason": ""})
 		var names []string
 		s.db.Model(&model.User{}).Where("reseller_id = ?", rs.Id).Pluck("name", &names)
