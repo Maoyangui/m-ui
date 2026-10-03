@@ -61,7 +61,8 @@ function resultHTML(id) {
   if (r.unused) return `${badge(t('up.unused'))}<div class="sub-cell muted">${t('up.unusedHint')}</div>`;
   const servers = r.servers || [];
   if (!servers.length) return badge(t('up.untested'));
-  const one = servers.length === 1;
+  // 只有一台服务器的面板才省掉名字;多台时哪怕只有一台在测(线路只部署在它上面),也要写明是哪台测的
+  const one = servers.length === 1 && ((state.status && state.status.nodes) || 0) <= 1;
   const chips = servers.map(sv => {
     const who = one ? '' : `<span class="muted small">${esc(sv.name)}</span> `;
     if (sv.state === 'ok') return who + badge(sv.delayMs + ' ms', 'ok') + (sv.method === 'tcp' ? ' ' + badge('TCP') : '');
