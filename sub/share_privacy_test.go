@@ -66,3 +66,20 @@ func TestSocksLinkUsesCurrentName(t *testing.T) {
 		}
 	}
 }
+
+// 代理关了「允许临时共享」:他名下用户已有的共享地址一并失效(审计 MB25)。
+func TestSharedLinkDiesWhenResellerSharingOff(t *testing.T) {
+	s, db := shareServer(t)
+	rs := model.Reseller{Name: "r", Enabled: true}
+	db.Create(&rs)
+	db.Create(&model.ResellerLine{ResellerId: rs.Id, LineId: 1})
+	db.Model(&model.User{}).Where("id = 1").Updates(map[string]interface{}{"reseller_id": rs.Id, "share_token": "tok-abcdefghijklmnopqrstu",
+		"share_creds": []byte(`{"hysteria2":{"password":"s"}}`)})
+	if w := doReq(s, "GET", "/sub/tok-abcdefghijklmnopqrstu", "curl/8.4.0"); w.Code != 200 {
+		t.Fatalf("代理允许共享时共享地址应可用: %d", w.Code)
+	}
+	db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Update("share_on", false)
+	if w := doReq(s, "GET", "/sub/tok-abcdefghijklmnopqrstu", "curl/8.4.0"); w.Code != 404 {
+		t.Fatalf("代理关了允许共享,已有的共享地址应失效: %d", w.Code)
+	}
+}

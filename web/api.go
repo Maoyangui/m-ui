@@ -1092,6 +1092,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		roleChanged := false
 		oldDomain := s.setting("webDomain")
 		oldAllowPrivate := s.setting("allowPrivate")
+		oldShare := s.setting("subShareEnabled")
 		note := "端口、证书与监听地址的改动需重启 m-ui 生效"
 		if v, ok := in["nodeMode"]; ok && strings.EqualFold(strings.TrimSpace(v), "true") && !strings.EqualFold(s.setting("nodeMode"), "true") {
 			// 切成副机后本机的线路 / 用户 / 上游会被主机的快照整表替换:先留一份备份,别静默丢数据
@@ -1123,6 +1124,8 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if v, ok := in["allowPrivate"]; ok && strings.TrimSpace(v) != oldAllowPrivate {
 			s.reloadAll("私网访问开关") // 路由规则变了,只能整体重载
+		} else if v, ok := in["subShareEnabled"]; ok && strings.TrimSpace(v) != oldShare {
+			s.reloadUsers("临时共享开关") // 关掉时已有的共享凭据要立刻从数据面撤下
 		}
 		keys := make([]string, 0, len(in))
 		for k := range in {

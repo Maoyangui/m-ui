@@ -401,6 +401,11 @@ func (s *Server) handle() http.HandlerFunc {
 			}
 		}
 		rs := s.resellerOf(user) // 代理用户:落地页文案与开关按代理的来
+		// 代理关了「允许临时共享」:已有的共享地址一并失效(数据面也不再下发共享凭据,审计 MB25)
+		if shared && rs != nil && !rs.ShareOn {
+			s.serveNotFound(w, r, name)
+			return
+		}
 		now := time.Now().Unix()
 		// blocked = 客户端拿不到订阅:本人被停用、流量用尽或到期,或所属代理被停用 / 到期。
 		// 落地页不受影响(顶部标出原因),只是客户端从这一刻起拉不到节点,不用等一分钟一次的执法。

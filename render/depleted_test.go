@@ -64,3 +64,45 @@ func TestExpiredUsersNotRendered(t *testing.T) {
 		t.Fatalf("应只下发不限期与未到期的用户,实际 %v", names)
 	}
 }
+
+// 临时共享关了(全局开关,或代理关了「允许临时共享」)就不再下发共享凭据:以前只是不让新生成,已有的共享照样能连(审计 MB25)。
+func TestShareCredsFollowSwitches(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	db.Create(&model.Line{Name: "ss", Protocol: "shadowsocks", Port: 30014, Enabled: true, Options: []byte(`{"method":"aes-256-gcm","password":"x"}`)})
+	rs := model.Reseller{Name: "r", Enabled: true}
+	db.Create(&rs)
+	db.Create(&model.ResellerLine{ResellerId: rs.Id, LineId: 1})
+	for _, u := range []model.User{
+		{Name: "own", Enabled: true, ShareToken: "t1", ShareCreds: []byte(`{"shadowsocks":{"password":"s1"}}`), Credentials: []byte(`{"shadowsocks":{"password":"p1"}}`)},
+		{Name: "sub", Enabled: true, ResellerId: rs.Id, ShareToken: "t2", ShareCreds: []byte(`{"shadowsocks":{"password":"s2"}}`), Credentials: []byte(`{"shadowsocks":{"password":"p2"}}`)},
+	} {
+		db.Create(&u)
+		db.Create(&model.UserLine{UserId: u.Id, LineId: 1})
+	}
+	names := func() map[string]bool {
+		by, err := loadLineUsers(db, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, u := range by[1] {
+			out[u.Name] = true
+		}
+		return out
+	}
+	if n := names(); !n["own#share"] || !n["sub#share"] {
+		t.Fatalf("开关都开着时共享凭据应下发: %v", n)
+	}
+	db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Update("share_on", false)
+	if n := names(); !n["own#share"] || n["sub#share"] || !n["sub"] {
+		t.Fatalf("代理关了允许共享:只撤他名下用户的共享凭据,本人凭据照旧: %v", n)
+	}
+	db.Create(&model.Setting{Key: "subShareEnabled", Value: "false"})
+	if n := names(); n["own#share"] || n["sub#share"] || !n["own"] {
+		t.Fatalf("全局关了临时共享:所有共享凭据都不该下发: %v", n)
+	}
+}

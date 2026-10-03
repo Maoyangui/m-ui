@@ -101,6 +101,13 @@ func AllowPrivate(db *gorm.DB) bool {
 	return strings.EqualFold(v, "true")
 }
 
+// shareEnabled 设置 subShareEnabled 为 false 时临时共享整体关掉(默认开),与 sub 包的同名判断一致。
+func shareEnabled(db *gorm.DB) bool {
+	var v string
+	db.Raw("SELECT value FROM settings WHERE key = ?", "subShareEnabled").Scan(&v)
+	return !strings.EqualFold(v, "false")
+}
+
 // LocalNodeID 返回本机在 nodes 表中的 id(没有则 0)。
 func LocalNodeID(db *gorm.DB) uint {
 	var n model.Node
@@ -235,6 +242,17 @@ func loadLineUsers(db *gorm.DB, self uint) (map[uint][]model.User, error) {
 	for _, u := range users {
 		userById[u.Id] = u
 	}
+	// 临时共享关了(全局开关,或代理关了「允许临时共享」)就不再下发共享凭据:以前只是不让新生成,已有的共享照样能连,
+	// 本人还取消不了(审计 MB25)。两个开关都随快照同步,副机同样生效
+	shareOn := shareEnabled(db)
+	var noShare []uint
+	if err := db.Model(&model.Reseller{}).Where("share_on = ?", false).Pluck("id", &noShare).Error; err != nil {
+		return nil, err
+	}
+	resellerNoShare := make(map[uint]bool, len(noShare))
+	for _, id := range noShare {
+		resellerNoShare[id] = true
+	}
 	byLine := map[uint][]model.User{}
 	for _, l := range links {
 		u, ok := userById[l.UserId]
@@ -247,7 +265,7 @@ func loadLineUsers(db *gorm.DB, self uint) (map[uint][]model.User, error) {
 		byLine[l.LineId] = append(byLine[l.LineId], u)
 		// 临时共享:再挂一份共享凭据,数据面里叫 "名字#share"(core 的追踪器记账时去掉后缀归到本人),
 		// 于是共享连接的流量/设备数/限速都算本人;取消共享撤下这份凭据时只断借用者的连接,本人不受影响。
-		if u.ShareToken != "" && len(u.ShareCreds) > 0 {
+		if shareOn && !resellerNoShare[u.ResellerId] && u.ShareToken != "" && len(u.ShareCreds) > 0 {
 			shared := u
 			shared.Name = u.Name + model.ShareSuffix
 			shared.Credentials = u.ShareCreds
