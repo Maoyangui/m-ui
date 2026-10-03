@@ -583,14 +583,24 @@ func truncate(s string, n int) string {
 	return s[:n]
 }
 
+// clientIP 订阅日志里记的来源,和面板同一规则:X-Forwarded-For 谁都能写,只在请求来自本机(同机反代转过来)时
+// 才采信,并取最后一段(反代自己看到的对端)。以前无条件取第一段,谁都能把自己的访问记成任意 IP,
+// 管理员据此查订阅是不是被转手就查不准了。
+func clientIP(r *http.Request) string {
+	peer, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if ip := net.ParseIP(peer); ip == nil || !ip.IsLoopback() {
+		return peer
+	}
+	parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	if last := strings.TrimSpace(parts[len(parts)-1]); last != "" {
+		return last
+	}
+	return peer
+}
+
 // log 记录订阅访问,供面板按用户汇总(替代 nginx 日志 + 汇总脚本)。
 func (s *Server) log(r *http.Request, user string, shared bool, status int) {
-	ip := r.Header.Get("X-Forwarded-For")
-	if ip != "" {
-		ip = strings.TrimSpace(strings.Split(ip, ",")[0])
-	} else {
-		ip, _, _ = net.SplitHostPort(r.RemoteAddr)
-	}
+	ip := clientIP(r)
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "link"
