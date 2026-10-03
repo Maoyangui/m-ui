@@ -98,6 +98,17 @@ func (s *Server) handleOpsSub(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		// 先校验再落库:以前 70000 这种端口照样写进设置,脚本悄悄改用 40000 安装,首次建的 warp 上游却指向 70000(审计 MB05)
+		if req.Port < 0 || req.Port > 65535 {
+			badRequest(w, errors.New("WARP 端口要在 1-65535 之间"))
+			return
+		}
+		if strings.TrimSpace(req.Sysctl) != "" {
+			if _, err := ops.ValidateSysctl(req.Sysctl); err != nil {
+				badRequest(w, err)
+				return
+			}
+		}
 		if req.Port > 0 {
 			s.run.SetSetting("warpPort", itoa(req.Port))
 		}
@@ -115,10 +126,6 @@ func (s *Server) handleOpsSub(w http.ResponseWriter, r *http.Request) {
 			s.run.SetSetting("opsJournalDays", itoa(req.JournalDays))
 		}
 		if strings.TrimSpace(req.Sysctl) != "" {
-			if _, err := ops.ValidateSysctl(req.Sysctl); err != nil {
-				badRequest(w, err)
-				return
-			}
 			s.run.SetSetting("opsSysctl", req.Sysctl)
 		}
 		task := req.Task
@@ -178,11 +185,29 @@ func (s *Server) handleOpsSub(w http.ResponseWriter, r *http.Request) {
 
 // ensureWarpUpstream 确保存在名为 warp 的 socks 上游指向 127.0.0.1:<warpPort>。
 func (s *Server) ensureWarpUpstream() (bool, error) {
+	port := s.warpPort()
 	var up model.Upstream
 	if err := s.db.Where("name = ?", "warp").First(&up).Error; err == nil {
+		// 改了 WARP 端口再重新启用:上游还指着旧端口,走 WARP 的线路全断,「检测出口」用新端口却显示正常(审计 MB05)。
+		// 只跟着改指向本机 127.0.0.1 的;管理员自己改成别的地址的不动
+		var o map[string]interface{}
+		if up.Type != "socks" || json.Unmarshal(up.Options, &o) != nil || o["server"] != "127.0.0.1" {
+			return false, nil
+		}
+		if p, _ := o["server_port"].(float64); int(p) == port {
+			return false, nil
+		}
+		o["server_port"] = port
+		b, _ := json.Marshal(o)
+		if err := s.db.Model(&up).Update("options", b).Error; err != nil {
+			return false, err
+		}
+		if err := s.run.ReloadUpstreams(); err != nil {
+			return false, errors.New("上游端口已改,但数据面重载失败: " + err.Error())
+		}
 		return false, nil
 	}
-	opts, _ := json.Marshal(map[string]interface{}{"server": "127.0.0.1", "server_port": s.warpPort()})
+	opts, _ := json.Marshal(map[string]interface{}{"server": "127.0.0.1", "server_port": port})
 	up = model.Upstream{Name: "warp", Type: "socks", Options: opts}
 	if err := s.db.Create(&up).Error; err != nil {
 		return false, err
