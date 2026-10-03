@@ -118,7 +118,7 @@ function detailHTML(n) {
     </dl>${r.portFrom === 'sub' || r.portFrom === 'api' || !r.port ? `<p class="hint">${t(r.port ? 'reach.noTcpLine' : 'reach.pingOnly')}</p>` : ''}` : `<p class="hint">${t('reach.neverHint')}</p>`;
   const groups = r && r.verdict !== 'error' ? `<section><h3>${t('reach.byCarrier')}</h3>${(r.groups || []).map(groupBlock).join('')}</section>` : '';
   const icmp = r && r.icmp ? `<p class="hint">${esc(t('reach.icmp', { cn: `${r.icmp.cnOk}/${r.icmp.cnTotal}`, hk: `${r.icmp.hkOk}/${r.icmp.hkTotal}` }))}</p>`
-    : r && r.icmpError ? `<p class="hint">${esc(t('reach.icmpFail', { err: r.icmpError }))}</p>` : '';
+    : r && r.icmpError ? `<p class="hint">${esc(t('reach.icmpFail', { err: trErr(r.icmpError) }))}</p>` : '';
   const quota = q ? `<p class="hint">${esc(t('reach.quota', { r: q.remaining, l: q.limit, n: reach.perCheck || 15 }))}${q.resetAt ? ' · ' + esc(t('reach.quotaReset', { t: fmtTime(q.resetAt) })) : ''}</p>` : '';
   return `${head}
     <div class="row" style="margin:.8rem 0 1rem"><button class="btn primary" data-act="reach.one" data-id="${n.id}" ${running || (reach && reach.running) ? 'disabled' : ''}>${running ? `<span class="spin"></span> ${t('reach.running')}` : t('reach.checkNow')}</button></div>
