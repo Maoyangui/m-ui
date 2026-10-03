@@ -30,6 +30,17 @@ func extNodesServer(t *testing.T) *Server {
 	return &Server{db: db}
 }
 
+// extSigOf 展开时拿到的节点列表指纹,测速与添加为上游要带上。
+func extSigOf(t *testing.T, s *Server) string {
+	t.Helper()
+	_, out := extCall(t, s, http.MethodGet, "1/nodes", "")
+	sig, _ := out["sig"].(string)
+	if sig == "" {
+		t.Fatalf("展开结果应带节点列表指纹: %v", out)
+	}
+	return sig
+}
+
 func extCall(t *testing.T, s *Server, method, path string, body string) (int, map[string]interface{}) {
 	t.Helper()
 	var rd *strings.Reader
@@ -76,7 +87,8 @@ func TestExtNodesList(t *testing.T) {
 // 测速:起任务后每格先是 pending;没有数据面时都以"数据面未就绪"结束,任务能查到、会 done。
 func TestExtNodesTestJob(t *testing.T) {
 	s := extNodesServer(t)
-	code, out := extCall(t, s, http.MethodPost, "1/nodes/test", `{"indexes":[1]}`)
+	sig := extSigOf(t, s)
+	code, out := extCall(t, s, http.MethodPost, "1/nodes/test", `{"indexes":[1],"sig":"`+sig+`"}`)
 	if code != http.StatusOK || out["job"] == "" {
 		t.Fatalf("起任务失败: %d %v", code, out)
 	}
@@ -107,7 +119,7 @@ func TestExtNodesTestJob(t *testing.T) {
 		t.Fatalf("不存在的任务应 404,得到 %d", code)
 	}
 	// 下标越界的节点不算数
-	if code, out := extCall(t, s, http.MethodPost, "1/nodes/test", `{"indexes":[9]}`); code != http.StatusBadRequest {
+	if code, out := extCall(t, s, http.MethodPost, "1/nodes/test", `{"indexes":[9],"sig":"`+sig+`"}`); code != http.StatusBadRequest {
 		t.Fatalf("全是无效下标应 400: %d %v", code, out)
 	}
 }
@@ -115,7 +127,11 @@ func TestExtNodesTestJob(t *testing.T) {
 // 添加为上游:走上游校验,成功入库;重名报错不改名;不支持的协议报错。
 func TestExtNodesAddUpstream(t *testing.T) {
 	s := extNodesServer(t)
-	code, out := extCall(t, s, http.MethodPost, "1/nodes/add-upstream", `[{"index":0,"name":"机场A-a"},{"index":1,"name":"机场A-b"}]`)
+	sig := extSigOf(t, s)
+	add := func(items string) (int, map[string]interface{}) {
+		return extCall(t, s, http.MethodPost, "1/nodes/add-upstream", `{"sig":"`+sig+`","items":`+items+`}`)
+	}
+	code, out := add(`[{"index":0,"name":"机场A-a"},{"index":1,"name":"机场A-b"}]`)
 	if code != http.StatusOK {
 		t.Fatalf("应 200: %d %v", code, out)
 	}
@@ -140,18 +156,43 @@ func TestExtNodesAddUpstream(t *testing.T) {
 		t.Fatalf("上游参数不对: %v", opts)
 	}
 	// 重名
-	code, out = extCall(t, s, http.MethodPost, "1/nodes/add-upstream", `[{"index":0,"name":"机场A-a"}]`)
+	code, out = add(`[{"index":0,"name":"机场A-a"}]`)
 	m := out["results"].([]interface{})[0].(map[string]interface{})
 	if code != http.StatusOK || m["ok"] == true || !strings.Contains(m["error"].(string), "已存在") {
 		t.Fatalf("重名应逐条报错: %d %v", code, m)
 	}
 	// 空名 / 越界
-	code, out = extCall(t, s, http.MethodPost, "1/nodes/add-upstream", `[{"index":0,"name":" "},{"index":7,"name":"x"}]`)
+	code, out = add(`[{"index":0,"name":" "},{"index":7,"name":"x"}]`)
 	rs := out["results"].([]interface{})
 	if code != http.StatusOK || rs[0].(map[string]interface{})["ok"] == true || rs[1].(map[string]interface{})["ok"] == true {
 		t.Fatalf("空名与越界都应失败: %v", rs)
 	}
-	if code, _ := extCall(t, s, http.MethodPost, "1/nodes/add-upstream", `[]`); code != http.StatusBadRequest {
+	if code, _ := add(`[]`); code != http.StatusBadRequest {
 		t.Fatalf("空列表应 400,得到 %d", code)
+	}
+}
+
+// 订阅刷新后节点增删、换了顺序:按旧列表的下标测速或添加为上游要被拒(409),不能把别的节点加成上游(审计 MB30)。
+func TestExtNodesStaleListRejected(t *testing.T) {
+	s := extNodesServer(t)
+	sig := extSigOf(t, s)
+	// 对方调换了顺序
+	s.db.Model(&model.ExtNode{}).Where("id = 1").Update("cache", `proxies:
+  - {name: b, type: tuic, server: 1.2.3.4, port: 444, uuid: 00000000-0000-0000-0000-000000000000, password: p, sni: x.example.com}
+  - {name: a, type: hysteria2, server: 1.2.3.4, port: 443, password: p, sni: x.example.com, skip-cert-verify: true}
+`)
+	if code, out := extCall(t, s, http.MethodPost, "1/nodes/add-upstream", `{"sig":"`+sig+`","items":[{"index":0,"name":"机场A-a"}]}`); code != http.StatusConflict {
+		t.Fatalf("列表变了应 409: %d %v", code, out)
+	}
+	if code, out := extCall(t, s, http.MethodPost, "1/nodes/test", `{"indexes":[0],"sig":"`+sig+`"}`); code != http.StatusConflict {
+		t.Fatalf("列表变了测速也应 409: %d %v", code, out)
+	}
+	var n int64
+	s.db.Model(&model.Upstream{}).Count(&n)
+	if n != 0 {
+		t.Fatal("不该建出上游")
+	}
+	if extSigOf(t, s) == sig {
+		t.Fatal("列表变了指纹应跟着变")
 	}
 }

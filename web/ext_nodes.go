@@ -2,6 +2,7 @@ package web
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -62,6 +63,20 @@ func extItems(e model.ExtNode) ext.Items {
 	return ext.Parse(e.Value)
 }
 
+// extSig 节点列表的内容指纹。测速与添加为上游按下标指节点,前端拿的是展开时那一份;订阅自动刷新后对方增删、
+// 调换了节点,下标就错位,以前会把别的节点加成上游还显示成功、测速结果贴到错的节点旁(审计 MB30)。
+// 提交时带上指纹,对不上就让前端重新展开。
+func extSig(infos []ext.NodeInfo) string {
+	h := sha256.New()
+	for _, n := range infos {
+		fmt.Fprintf(h, "%s\x00%s\x00%s\x00%d\x00%s\n", n.Name, n.Type, n.Server, n.Port, n.Link)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// errExtStale 节点列表已经变了(HTTP 409,前端据此重新展开)。
+var errExtStale = errors.New("节点列表已更新,请重新展开后再操作")
+
 // extTestServers 测速的目标是所有启用的服务器(含主机),不看有没有线路用它:
 // 它还不是上游,管理员要看的正是"加成上游之前,每台机器连它通不通"。
 func (s *Server) extTestServers() ([]model.Node, []extServer) {
@@ -86,20 +101,26 @@ func (s *Server) handleExtNodes(w http.ResponseWriter, r *http.Request, e model.
 			return
 		}
 		_, servers := s.extTestServers()
-		writeJSON(w, http.StatusOK, map[string]interface{}{"nodes": ext.Details(extItems(e)), "servers": servers, "fetchedAt": e.LastFetch})
+		infos := ext.Details(extItems(e))
+		writeJSON(w, http.StatusOK, map[string]interface{}{"nodes": infos, "servers": servers, "fetchedAt": e.LastFetch, "sig": extSig(infos)})
 	case sub[0] == "test" && len(sub) == 1:
 		if r.Method != http.MethodPost {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 			return
 		}
 		var body struct {
-			Indexes []int `json:"indexes"`
+			Indexes []int  `json:"indexes"`
+			Sig     string `json:"sig"`
 		}
 		if r.Body != nil && r.ContentLength != 0 {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				badRequest(w, err)
 				return
 			}
+		}
+		if body.Sig != extSig(ext.Details(extItems(e))) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": errExtStale.Error()})
+			return
 		}
 		id, err := s.startExtTest(e, body.Indexes)
 		if err != nil {
@@ -122,9 +143,17 @@ func (s *Server) handleExtNodes(w http.ResponseWriter, r *http.Request, e model.
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 			return
 		}
-		var items []extAddItem
-		if err := json.NewDecoder(r.Body).Decode(&items); err != nil {
+		var body struct {
+			Sig   string       `json:"sig"`
+			Items []extAddItem `json:"items"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			badRequest(w, err)
+			return
+		}
+		items := body.Items
+		if body.Sig != extSig(ext.Details(extItems(e))) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": errExtStale.Error()})
 			return
 		}
 		if len(items) == 0 {

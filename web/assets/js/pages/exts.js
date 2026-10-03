@@ -45,7 +45,12 @@ function renderRows() {
   if (!rows.length) { body.innerHTML = `<tr><td colspan="8">${empty(t('ext.empty'))}</td></tr>`; return; }
   body.innerHTML = rows.map(x => rowHTML(x) + (open.has(x.id)
     ? `<tr class="ext-sub"><td colspan="8"><div class="ext-panel" id="ext-panel-${x.id}"><span class="muted small">${t('common.loading')}</span></div></td></tr>` : '')).join('');
-  for (const id of open) fillPanel(id);
+  for (const id of open) {
+    // 订阅刷新过:展开时拿的节点列表作废(测速与添加为上游按下标指节点,旧列表会指错)
+    const x = rows.find(r => r.id === id);
+    if (cache[id] && x && cache[id].fetchedAt !== x.lastFetch) { stopJob(id); delete cache[id]; }
+    fillPanel(id);
+  }
 }
 
 function rowHTML(x) {
@@ -151,8 +156,8 @@ async function startTest(id, indexes) {
   const c = cache[id];
   if (!c) return;
   let r;
-  try { r = await post(`exts/${id}/nodes/test`, { indexes }, SLOW); }
-  catch (e) { toast(e.message, 'err'); return; }
+  try { r = await post(`exts/${id}/nodes/test`, { indexes, sig: c.sig }, SLOW); }
+  catch (e) { toast(e.message, 'err'); if (e.status === 409) reloadPanel(id); return; }
   const want = indexes.length ? new Set(indexes) : null;
   for (const n of c.nodes || []) {
     if (want && !want.has(n.index)) continue;
@@ -175,6 +180,8 @@ async function startTest(id, indexes) {
   }, 1000);
   jobs[id] = { job: r.job, timer };
 }
+// reloadPanel 节点列表已经变了:丢掉旧的,重新拉一遍。
+function reloadPanel(id) { stopJob(id); delete cache[id]; picked[id] = new Set(); fillPanel(id); }
 function stopJob(id) { if (jobs[id]) { clearInterval(jobs[id].timer); delete jobs[id]; } }
 function applyResults(id, results) {
   const c = cache[id];
@@ -210,7 +217,9 @@ async function addUpstreams(id) {
     const items = list.filter(n => n.upstream).map(n => ({ index: n.index, name: fv(`ext-up-${n.index}`).trim() }));
     if (!items.length) throw new Error(t('ext.noneAddable'));
     if (items.some(x => !x.name)) throw new Error(t('ext.nameRequired'));
-    const r = await post(`exts/${id}/nodes/add-upstream`, items, SLOW);
+    let r;
+    try { r = await post(`exts/${id}/nodes/add-upstream`, { sig: c.sig, items }, SLOW); }
+    catch (e) { if (e.status === 409) reloadPanel(id); throw e; }
     const okN = (r.results || []).filter(x => x.ok).length, bad = (r.results || []).filter(x => !x.ok);
     if (okN) { try { await load('upstreams'); } catch (_) { /* 上游页没打开过也没关系 */ } picked[id] = new Set(); renderSubBody(id); }
     // 逐条结果另开一个框:成功的已经建好了,失败的连同原因列出来,别让人再提交一遍撞重名

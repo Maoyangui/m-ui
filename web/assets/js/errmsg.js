@@ -257,6 +257,7 @@ const EN = /*BEGIN*/{
 "线路 %q: %w": "Line %q: %w",
 "线路「%s」和「%s」端口都是 %d,不能同时部署到 %s": "Lines \"%s\" and \"%s\" both use port %d; they can't both be deployed to %s",
 "线路「%s」改到该范围后端口 %d 会和「%s」在 %s 上冲突": "After moving line \"%s\" to this scope, port %d would conflict with \"%s\" on %s",
+"节点列表已更新,请重新展开后再操作": "The node list has changed; expand it again and retry",
 "线路不存在": "Line not found",
 "线路列表格式错误": "Invalid line list",
 "线路名称不能为空": "Line name is required",
