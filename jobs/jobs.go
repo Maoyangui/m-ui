@@ -60,6 +60,9 @@ type Scheduler struct {
 	// expired 副机上一轮看到的已到期用户 / 代理(见 expireLocal);expiredInit 为假表示还没有上一轮
 	expired     map[string]bool
 	expiredInit bool
+	// depleteMu 串行化每分钟的配额判定与并账后的即时判定;kick 是即时判定的触发(容量 1,多次触发合成一次)
+	depleteMu sync.Mutex
+	kick      chan struct{}
 }
 
 // FlushStats synchronously persists the current data-plane counters. Runner
@@ -126,15 +129,35 @@ func RefreshReseller(db *gorm.DB, id uint) bool {
 }
 
 func New(d Deps) *Scheduler {
-	return &Scheduler{d: d, stop: make(chan struct{})}
+	return &Scheduler{d: d, stop: make(chan struct{}), kick: make(chan struct{}, 1)}
 }
 
 func (s *Scheduler) Start() {
-	s.loop("统计", 10*time.Second, s.runStats)
+	s.loop("统计", 10*time.Second, func() { s.runStats(); s.KickDeplete() })
 	s.loop("配额判定", time.Minute, s.runDeplete)
 	s.loop("日志清理", time.Hour, s.runCleanup) // 每小时一轮:选了"保留 1 天"时不用等到明天才生效
 	s.loop("限速规则", 10*time.Second, s.runRules)
-	logger.Info("定时任务已启动:统计 10s / 限速规则 10s / 配额判定 1m / 日志清理 1h")
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for {
+			select {
+			case <-s.kick:
+				runSafely("超量判定", s.depleteNow)
+			case <-s.stop:
+				return
+			}
+		}
+	}()
+	logger.Info("定时任务已启动:统计 10s / 限速规则 10s / 配额判定 1m(并账后即时判定超量与到期) / 日志清理 1h")
+}
+
+// KickDeplete 用量刚并进来(本机统计、副机账本):尽快判一次超量 / 到期。不阻塞,多次触发合成一次。
+func (s *Scheduler) KickDeplete() {
+	select {
+	case s.kick <- struct{}{}:
+	default:
+	}
 }
 
 func (s *Scheduler) Stop() {
@@ -393,6 +416,8 @@ func (s *Scheduler) runDeplete() {
 		s.expireLocal()
 		return
 	}
+	s.depleteMu.Lock()
+	defer s.depleteMu.Unlock()
 	now := time.Now().Unix()
 	changed := false
 
@@ -483,31 +508,12 @@ func (s *Scheduler) runDeplete() {
 		}
 		s.deadResellers, s.deadInit = dead, true
 
-		// 2) 超量 / 过期 → 禁用,并记下原因(补量 / 延期时只有这些原因会自动恢复)
-		var depleted []model.User
-		cond := "enabled = ? AND ((volume > 0 AND up + down >= volume) OR (expiry > 0 AND expiry < ?))"
-		if err := tx.Where(cond, true, now).Find(&depleted).Error; err != nil {
+		// 2) 超量 / 过期 → 禁用
+		if n, err := s.disableDepleted(tx, now); err != nil {
 			return err
+		} else if n > 0 {
+			changed = true
 		}
-		if len(depleted) == 0 {
-			return nil
-		}
-		for _, u := range depleted {
-			reason, why := model.DisabledQuota, "流量用尽"
-			if u.Expiry > 0 && u.Expiry < now {
-				reason, why = model.DisabledExpired, "已到期"
-			}
-			if err := tx.Model(&model.User{}).Where("id = ?", u.Id).
-				Updates(map[string]interface{}{"enabled": false, "disabled_reason": reason}).Error; err != nil {
-				return err
-			}
-			record(tx, "DepleteJob", "user", "disable:"+reason, u.Name)
-			logger.Info("用户 ", u.Name, " 已禁用(", reason, ")")
-			if s.d.Notify != nil {
-				s.d.Notify(fmt.Sprintf("⛔ <b>用户已禁用</b>:%s(%s)", escapeHTML(u.Name), why))
-			}
-		}
-		changed = true
 		return nil
 	})
 	if err != nil {
@@ -519,6 +525,64 @@ func (s *Scheduler) runDeplete() {
 			logger.Warning("配额判定后热更新失败: ", err)
 		}
 	}
+}
+
+// depletedCond 超量或已到期、还启用着的用户。
+const depletedCond = "enabled = ? AND ((volume > 0 AND up + down >= volume) OR (expiry > 0 AND expiry < ?))"
+
+// depleteNow 并账后的即时判定:只做「超量 / 到期 → 停用」。以前只靠每分钟一轮,统计 10 秒 + 拉账 5 秒 + 等判定
+// 最长 60 秒 + 下发,超量后最长约 80 秒才断,高速下载能多用几百 MB(审计 MB10)。没有该停的人时只是一条只读查询,
+// 不占写锁;周期重置、代理额度仍归每分钟那一轮。
+func (s *Scheduler) depleteNow() {
+	if s.d.IsNode() {
+		return
+	}
+	s.depleteMu.Lock()
+	defer s.depleteMu.Unlock()
+	now := time.Now().Unix()
+	var due int64
+	if err := s.d.DB.Model(&model.User{}).Where(depletedCond, true, now).Count(&due).Error; err != nil || due == 0 {
+		return
+	}
+	n := 0
+	err := s.d.DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		n, err = s.disableDepleted(tx, now)
+		return err
+	})
+	if err != nil {
+		logger.Warning("超量判定失败: ", err)
+		return
+	}
+	if n > 0 && s.d.ReloadUsers != nil {
+		if err := s.d.ReloadUsers(); err != nil {
+			logger.Warning("超量判定后热更新失败: ", err)
+		}
+	}
+}
+
+// disableDepleted 把超量 / 到期的用户停用并记下原因(补量 / 延期时只有这些原因会自动恢复),返回停用人数。
+func (s *Scheduler) disableDepleted(tx *gorm.DB, now int64) (int, error) {
+	var depleted []model.User
+	if err := tx.Where(depletedCond, true, now).Find(&depleted).Error; err != nil {
+		return 0, err
+	}
+	for _, u := range depleted {
+		reason, why := model.DisabledQuota, "流量用尽"
+		if u.Expiry > 0 && u.Expiry < now {
+			reason, why = model.DisabledExpired, "已到期"
+		}
+		if err := tx.Model(&model.User{}).Where("id = ?", u.Id).
+			Updates(map[string]interface{}{"enabled": false, "disabled_reason": reason}).Error; err != nil {
+			return 0, err
+		}
+		record(tx, "DepleteJob", "user", "disable:"+reason, u.Name)
+		logger.Info("用户 ", u.Name, " 已禁用(", reason, ")")
+		if s.d.Notify != nil {
+			s.d.Notify(fmt.Sprintf("⛔ <b>用户已禁用</b>:%s(%s)", escapeHTML(u.Name), why))
+		}
+	}
+	return len(depleted), nil
 }
 
 // ---- cleanup ----

@@ -190,6 +190,7 @@ func New(dbPath string) (*Runner, error) {
 		LocalIPs:       r.OnlineIPs,
 		SetExternalIPs: r.SetExternalIPs,
 		LocalGroups:    r.GroupState,
+		CountersMerged: r.jobs.KickDeplete,
 	})
 	r.ensureAdmin()
 	r.ensureLocalNode()

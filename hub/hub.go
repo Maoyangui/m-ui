@@ -760,6 +760,7 @@ type Deps struct {
 	LocalIPs       func(user string) []string // 主机本机在线 IP,用于合并下发
 	SetExternalIPs func(map[string][]string)
 	LocalGroups    func() map[string]GroupState // 主机本机的代理池状态(与副机上报的合并给面板看)
+	CountersMerged func()                       // 并入了副机用量:触发一次超量 / 到期判定(可为 nil,不能阻塞)
 }
 
 type Hub struct {
@@ -1038,12 +1039,14 @@ func (h *Hub) applyResult(r *nodeResult) {
 		fmt.Sscanf(v, "%d", &bucket)
 	}
 	errStr := r.pushErr // 在线但配置未同步:Error 里写推送原因,Synced 由报告的修订号判
-	if _, err := ApplyCounters(h.d.DB, r.n.Id, r.n.Name, r.rep.LedgerEpoch, r.rep.Counters, time.Now().Unix(), bucket, r.n.Ratio); err != nil {
+	if merged, err := ApplyCounters(h.d.DB, r.n.Id, r.n.Name, r.rep.LedgerEpoch, r.rep.Counters, time.Now().Unix(), bucket, r.n.Ratio); err != nil {
 		logger.Warning("并入副机 ", r.n.Name, " 流量失败: ", err)
 		var dup *DuplicateLedgerError
 		if errors.As(err, &dup) { // 要让管理员看见:这台的流量没在计
 			errStr = strings.TrimPrefix(errStr+";"+err.Error(), ";")
 		}
+	} else if merged > 0 && h.d.CountersMerged != nil {
+		h.d.CountersMerged()
 	}
 	h.setStatus(r.n, true, errStr, &r.rep)
 	if r.rep.PublicIP != "" && r.rep.PublicIP != r.n.PublicIP {
