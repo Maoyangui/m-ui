@@ -418,8 +418,15 @@ func (m *Monitor) DailyReport() string {
 	var disabled int64
 	m.d.DB.Model(&model.Change{}).Where("actor = ? AND date_time > ?", "DepleteJob", since).Count(&disabled)
 
+	// 按 服务器 × 上游 计,和概览、告警同一口径:以前只数主机本机,主机不部署线路时这一行永远不出现,副机上的故障看不到(审计 MB18)
+	m.mu.Lock()
+	health := m.snapshotLocked()
+	m.mu.Unlock()
+	if m.d.RemoteHealth != nil {
+		health = append(health, m.d.RemoteHealth()...)
+	}
 	okN, badN := 0, 0
-	for _, h := range m.Results() {
+	for _, h := range health {
 		if h.OK {
 			okN++
 		} else {

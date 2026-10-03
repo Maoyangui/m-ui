@@ -186,3 +186,14 @@ func TestQuotaAlertOncePerPeriodAcrossRestart(t *testing.T) {
 		t.Fatalf("新周期到阈值应再提醒一次且只一次: %v", msgs)
 	}
 }
+
+// 日报的上游巡检按 服务器 × 上游 合计本机与副机:主机自己不用上游时也要报出副机上的故障(审计 MB18)。
+func TestDailyReportCountsRemoteUpstreams(t *testing.T) {
+	m, _, _ := setup(t, nil)
+	m.d.RemoteHealth = func() []NodeHealth {
+		return []NodeHealth{{NodeId: 2, NodeName: "台湾", Id: 1, Name: "warp", OK: false}, {NodeId: 3, NodeName: "日本", Id: 1, Name: "warp", OK: true}}
+	}
+	if txt := m.DailyReport(); !strings.Contains(txt, "上游巡检:1 正常 / 1 故障") {
+		t.Fatalf("日报应合计副机的巡检结果:\n%s", txt)
+	}
+}
