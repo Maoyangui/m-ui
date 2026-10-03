@@ -436,6 +436,22 @@ func renderUsers(line model.Line, inbound map[string]interface{}, users []model.
 		c := creds[key]
 		password, _ := c["password"].(string)
 		id, _ := c["uuid"].(string)
+		// 凭据里缺这个协议的口令(比如以后加了新协议,老的共享凭据不会被补全)就不下发:空口令的用户谁都能冒用,
+		// 缺 SS2022 密钥还会让整份配置起不来
+		switch line.Protocol {
+		case "vless", "vmess":
+			if id == "" {
+				continue
+			}
+		case "tuic":
+			if id == "" || password == "" {
+				continue
+			}
+		default:
+			if password == "" {
+				continue
+			}
+		}
 		switch line.Protocol {
 		case "hysteria2", "anytls", "trojan", "shadowsocks":
 			out = append(out, map[string]interface{}{"name": u.Name, "password": password})
