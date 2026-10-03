@@ -18,7 +18,21 @@ type UsersSummary struct {
 	Created  int      `json:"created"`
 	Updated  int      `json:"updated"`
 	Assigned int      `json:"assigned"` // 给新用户分配的线路关系数
-	Skipped  []string `json:"skipped"`  // 跳过的用户(名称非法)
+	Skipped  []string `json:"skipped"`  // 跳过的用户(名称非法,或本库同名用户属于代理)
+}
+
+// disabledReason 旧库只有启停没有原因:按与数据库迁移相同的规则推断(超量 / 到期,其余算手动停用),启用的为空。
+// 以前导入后原因是空的,之后延期或清零时被当成自动停用而复活(审计 MB16)。
+func disabledReason(enabled bool, volume, used, expiry, now int64) string {
+	switch {
+	case enabled:
+		return ""
+	case volume > 0 && used >= volume:
+		return model.DisabledQuota
+	case expiry > 0 && expiry < now:
+		return model.DisabledExpired
+	}
+	return model.DisabledManual
 }
 
 // ImportUsersOnly 只把旧面板库里的用户并入现有 m-ui 库,线路 / 上游 / 设置一律不动:
@@ -58,10 +72,15 @@ func ImportUsersInto(src, dst *gorm.DB, assignAll bool) (UsersSummary, error) {
 				sum.Skipped = append(sum.Skipped, c.Name)
 				continue
 			}
+			reason := disabledReason(c.Enable, c.Volume, c.Up+c.Down, c.Expiry, now)
 			var existing model.User
 			if err := tx.Where("name = ?", name).First(&existing).Error; err == nil {
+				if existing.ResellerId != 0 { // 代理名下的同名用户不碰:覆盖用量等于给代理洗额度
+					sum.Skipped = append(sum.Skipped, c.Name)
+					continue
+				}
 				upd := map[string]interface{}{
-					"enabled": c.Enable, "volume": c.Volume, "expiry": c.Expiry,
+					"enabled": c.Enable, "disabled_reason": reason, "volume": c.Volume, "expiry": c.Expiry,
 					"up": c.Up, "down": c.Down, "total_up": c.TotalUp, "total_down": c.TotalDown,
 					"auto_reset": c.AutoReset, "reset_days": c.ResetDays, "next_reset": c.NextReset,
 				}
@@ -90,7 +109,7 @@ func ImportUsersInto(src, dst *gorm.DB, assignAll bool) (UsersSummary, error) {
 				return fmt.Errorf("写入用户 %q: %w", name, err)
 			}
 			if !c.Enable { // gorm 的 default:true 会把 false 当零值写成 true,显式改回
-				if err := tx.Model(&model.User{}).Where("id = ?", u.Id).Update("enabled", false).Error; err != nil {
+				if err := tx.Model(&model.User{}).Where("id = ?", u.Id).Updates(map[string]interface{}{"enabled": false, "disabled_reason": reason}).Error; err != nil {
 					return err
 				}
 			}

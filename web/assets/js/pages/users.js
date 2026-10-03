@@ -411,7 +411,9 @@ registerActions({
       const r = await upload('users/import', f, { assign: String(fchk('imp-assign')) });
       await load('users', 'status');
       renderRows();
-      toast(t('user.importDone', { c: r.created, u: r.updated, a: r.assigned }), 'ok');
+      const done = t('user.importDone', { c: r.created, u: r.updated, a: r.assigned });
+      const skipped = r.skipped && r.skipped.length ? t('user.importSkipped', { n: r.skipped.length, names: r.skipped.slice(0, 10).join(', ') }) : '';
+      toast(skipped ? done + ' · ' + skipped : done, skipped ? 'warn' : 'ok');
     }, { saveText: t('user.importGo') });
   },
   'user.sel': (id, cb) => { cb.checked ? selected.add(Number(id)) : selected.delete(Number(id)); renderRows(); },

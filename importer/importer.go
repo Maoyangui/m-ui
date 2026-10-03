@@ -18,6 +18,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
@@ -387,7 +388,8 @@ func importUsers(src, dst *gorm.DB, report *Report, lineIds map[uint]bool) error
 			return fmt.Errorf("写入用户 %q: %w", c.Name, err)
 		}
 		if !c.Enable { // gorm 的 default:true 会把 false 当零值写成 true,显式改回,否则停用的人导入后全部复活
-			if err := dst.Model(&model.User{}).Where("id = ?", user.Id).Update("enabled", false).Error; err != nil {
+			reason := disabledReason(false, c.Volume, c.Up+c.Down, c.Expiry, time.Now().Unix())
+			if err := dst.Model(&model.User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{"enabled": false, "disabled_reason": reason}).Error; err != nil {
 				return fmt.Errorf("写入用户 %q 的启停: %w", c.Name, err)
 			}
 		}
