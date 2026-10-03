@@ -271,6 +271,7 @@ const EN = /*BEGIN*/{
 "节点不存在(列表可能已刷新,请重新展开)": "Node not found (the list may have been refreshed; expand it again)",
 "读取副机列表失败: %w": "Reading the node list failed: %w",
 "配置已收到,但这台副机的数据面没应用成功(仍在跑上一份可用配置),看副机日志": "Config received, but this node's data plane failed to apply it (it keeps running the last good config); check the node log",
+"内容里没有可识别的节点": "No recognizable nodes in the content",
 "线路不存在": "Line not found",
 "线路列表格式错误": "Invalid line list",
 "线路名称不能为空": "Line name is required",

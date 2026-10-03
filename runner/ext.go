@@ -40,9 +40,9 @@ func (r *Runner) RefreshExt(id uint) (ExtRefreshResult, error) {
 	}
 	it := ext.Parse(string(body))
 	if len(it.Links) == 0 && len(it.Clash) == 0 {
-		msg := "内容里没有可识别的节点"
-		r.db.Model(&model.ExtNode{}).Where("id = ?", id).Updates(map[string]interface{}{"last_fetch": now, "last_error": msg})
-		return ExtRefreshResult{Error: msg}, errors.New(msg)
+		err := errors.New("内容里没有可识别的节点") // 写成 errors.New:英文界面的错误翻译表靠扫这种写法收录
+		r.db.Model(&model.ExtNode{}).Where("id = ?", id).Updates(map[string]interface{}{"last_fetch": now, "last_error": err.Error()})
+		return ExtRefreshResult{Error: err.Error()}, err
 	}
 	r.db.Model(&model.ExtNode{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"cache": string(body), "node_count": len(it.Clash), "last_fetch": now, "last_error": "",
