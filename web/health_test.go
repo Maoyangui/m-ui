@@ -75,3 +75,23 @@ func TestHealthRejectsProxiedLoopback(t *testing.T) {
 		}
 	}
 }
+
+// 面板只监听某个地址时,本机健康检查从这个地址连进来:对端是它自己,也算本机;别的地址照样拒(审计 MB06)。
+func TestHealthAllowsOwnListenAddress(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	db.Create(&model.Setting{Key: "webListen", Value: "10.8.0.1"})
+	for addr, want := range map[string]int{"10.8.0.1:1234": http.StatusOK, "10.8.0.2:1234": http.StatusForbidden, "127.0.0.1:1234": http.StatusOK} {
+		req := httptest.NewRequest("GET", "/app/api/health", nil)
+		req.RemoteAddr = addr
+		rec := httptest.NewRecorder()
+		s.handleHealth(rec, req)
+		if rec.Code != want {
+			t.Fatalf("来源 %s 应得 %d,得到 %d", addr, want, rec.Code)
+		}
+	}
+}

@@ -25,7 +25,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,8 +88,28 @@ func BackupName(from string) string {
 	return BackupPrefix + strings.TrimPrefix(from, "v") + "-" + time.Now().Format("20060102-150405") + ".zip"
 }
 
+// LocalHost 健康检查连的主机:面板监听全部地址(空、0.0.0.0、::)时走回环;只监听某个地址时回环连不上,
+// 好好的新版本会被判失败回滚(审计 MB06),那就连这个地址。
+func LocalHost(listen string) string {
+	h := strings.Trim(strings.TrimSpace(listen), "[]")
+	if ip := net.ParseIP(h); h == "" || (ip != nil && ip.IsUnspecified()) {
+		return "127.0.0.1"
+	}
+	return h
+}
+
+// WithListen 把健康检查地址的主机换成 LocalHost(listen):老版本发起的升级只会写 127.0.0.1。
+func WithListen(raw, listen string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Port() == "" {
+		return raw
+	}
+	u.Host = net.JoinHostPort(LocalHost(listen), u.Port())
+	return u.String()
+}
+
 // LocalURL 是面板在本机的地址,健康检查打它。
-func LocalURL(tlsOn bool, port int, path string) string {
+func LocalURL(tlsOn bool, listen string, port int, path string) string {
 	scheme := "http"
 	if tlsOn {
 		scheme = "https"
@@ -98,7 +120,7 @@ func LocalURL(tlsOn bool, port int, path string) string {
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
-	return fmt.Sprintf("%s://127.0.0.1:%d%s", scheme, port, path)
+	return scheme + "://" + net.JoinHostPort(LocalHost(listen), strconv.Itoa(port)) + path
 }
 
 // Stage 下载指定标签、校验 SHA256、解出二进制写到 <bin>.new 并确认它能执行;不动正式程序。

@@ -70,10 +70,23 @@ func main() {
 		printInstallSummary(*dbPath)
 	case "version", "-v", "--version":
 		fmt.Println("m-ui", version)
+	case "health-url":
+		// 安装脚本用:按库里的设置(含监听地址)打印健康检查地址,只读;库不在就什么也不打印
+		fs := flag.NewFlagSet("health-url", flag.ExitOnError)
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径")
+		fs.Parse(os.Args[2:])
+		if u := localPanelURL(*dbPath); u != "" {
+			fmt.Println(u)
+		}
 	case "upgrade-watch":
 		// 升级守护:面板一键更新后由 systemd-run 在服务之外拉起;等新版本健康,起不来就自动回滚。
-		// 只做健康检查与文件替换,不碰数据库,不初始化内核。
-		st, err := selfupdate.Watch(selfupdate.ParseArgs(os.Args[2:]), os.Stdout)
+		// 只做健康检查与文件替换,不改数据库,不初始化内核。
+		p := selfupdate.ParseArgs(os.Args[2:])
+		// 老版本发起的升级只会让守护连 127.0.0.1,面板只监听某个地址时连不上、误判回滚:按库里的监听地址纠正(只读)
+		if s, err := settingsRO(p.DBPath); err == nil {
+			p.URL = selfupdate.WithListen(p.URL, s["webListen"])
+		}
+		st, err := selfupdate.Watch(p, os.Stdout)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "upgrade-watch:", err)
 			if st.Healthy {

@@ -65,10 +65,26 @@ func TestPrune(t *testing.T) {
 }
 
 func TestLocalURL(t *testing.T) {
-	if u := LocalURL(false, 2053, "/app/"); u != "http://127.0.0.1:2053/app/" {
+	if u := LocalURL(false, "", 2053, "/app/"); u != "http://127.0.0.1:2053/app/" {
 		t.Fatal(u)
 	}
-	if u := LocalURL(true, 3053, "ad"); u != "https://127.0.0.1:3053/ad/" {
+	if u := LocalURL(true, "0.0.0.0", 3053, "ad"); u != "https://127.0.0.1:3053/ad/" {
+		t.Fatal(u)
+	}
+	// 面板只监听某个地址时连那个地址(审计 MB06)
+	if u := LocalURL(false, "10.8.0.1", 2053, "/app/"); u != "http://10.8.0.1:2053/app/" {
+		t.Fatal(u)
+	}
+	if u := LocalURL(false, "::", 2053, "/app/"); u != "http://127.0.0.1:2053/app/" {
+		t.Fatal(u)
+	}
+	if u := LocalURL(false, "fd00::1", 2053, "/app/"); u != "http://[fd00::1]:2053/app/" {
+		t.Fatal(u)
+	}
+	if u := WithListen("https://127.0.0.1:3053/ad/", "10.8.0.1"); u != "https://10.8.0.1:3053/ad/" {
+		t.Fatal(u)
+	}
+	if u := WithListen("https://127.0.0.1:3053/ad/", ""); u != "https://127.0.0.1:3053/ad/" {
 		t.Fatal(u)
 	}
 }

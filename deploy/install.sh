@@ -204,6 +204,9 @@ elif [ -n "$IMPORT" ]; then
   echo "从旧面板数据库导入 $IMPORT → $DB"
   "$BIN" import -from "$IMPORT" -to "$DB"
 fi
+# 新程序按库里的设置(含监听地址)给健康检查地址:老程序只会写 127.0.0.1,面板只监听某个地址时好好的新版本会被误判回滚
+U="$("$BIN" health-url -db "$DB" 2>/dev/null | grep -E '^https?://' | head -1 || true)"
+[ -z "$U" ] || HEALTH_URL="$U"
 
 cat >/etc/systemd/system/m-ui.service <<EOF
 [Unit]

@@ -95,6 +95,30 @@ func settingsOf(dbPath string) (map[string]string, error) {
 	return m, nil
 }
 
+// settingsRO 只读取设置:升级守护和健康检查地址用,不建库、不迁移。
+func settingsRO(dbPath string) (map[string]string, error) {
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil, err
+	}
+	db, err := database.OpenReadOnly(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if sq, err := db.DB(); err == nil {
+		defer sq.Close()
+	}
+	type kv struct{ Key, Value string }
+	var rows []kv
+	if err := db.Raw("SELECT key, value FROM settings").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	m := map[string]string{}
+	for _, r := range rows {
+		m[r.Key] = r.Value
+	}
+	return m, nil
+}
+
 // PanelInfo 组装面板地址信息(安装脚本与菜单共用)。
 func panelInfo(dbPath string) (url string, user string, defaultPw bool, err error) {
 	s, err := settingsOf(dbPath)
@@ -482,9 +506,12 @@ func selfUpdate(ask func(string) string) error {
 	return nil
 }
 
-// localPanelURL 按数据库里的设置拼出面板在本机的地址,健康检查用。
+// localPanelURL 按数据库里的设置拼出面板在本机的地址,健康检查用;只读打开,服务在跑、升级途中都能用。
 func localPanelURL(dbPath string) string {
-	s, _ := settingsOf(dbPath)
+	s, err := settingsRO(dbPath)
+	if err != nil {
+		return ""
+	}
 	port := 2053
 	if n, err := strconv.Atoi(strings.TrimSpace(s["webPort"])); err == nil && n > 0 {
 		port = n
@@ -493,7 +520,7 @@ func localPanelURL(dbPath string) string {
 	if path == "" {
 		path = "/app/"
 	}
-	return selfupdate.LocalURL(s["webCertFile"] != "", port, path)
+	return selfupdate.LocalURL(s["webCertFile"] != "", s["webListen"], port, path)
 }
 
 // printInstallSummary 供安装脚本调用:m-ui info -db <db>

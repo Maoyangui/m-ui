@@ -122,6 +122,23 @@ jobs:
           sudo grep -q '"rolledBack": true' /etc/m-ui/upgrade-status.json
           sudo test -f /usr/local/bin/m-ui.failed
           sudo rm -f /usr/local/bin/m-ui.failed /etc/m-ui/upgrade-status.json
+      - name: Panel bound to one address still passes the upgrade health check
+        run: |
+          # 面板只监听某个地址时回环连不上:安装脚本和升级守护都要按监听地址做健康检查,否则好好的新版本被判失败回滚
+          ip="$(hostname -I | awk '{print $1}')"
+          sudo /usr/local/bin/m-ui set -db /etc/m-ui/m-ui.db webListen="$ip"
+          sudo bash deploy/install.sh "$PWD/m-ui-linux-${{ matrix.arch }}.tar.gz"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' "http://$ip:2053/app/")" = 200 ]
+          sudo cp -p /usr/local/bin/m-ui /usr/local/bin/m-ui.prev
+          oldpid="$(systemctl show -p MainPID --value m-ui)"
+          sudo systemctl restart m-ui
+          # 老版本发起的升级只会给守护 127.0.0.1:守护要按库里的监听地址纠正,判定健康、不回滚
+          sudo /usr/local/bin/m-ui upgrade-watch -bin /usr/local/bin/m-ui -prev /usr/local/bin/m-ui.prev -url http://127.0.0.1:2053/app/ -service m-ui -old-pid "$oldpid" -db /etc/m-ui/m-ui.db -status /etc/m-ui/upgrade-status.json -from ci -to ci -timeout 30
+          sudo test ! -f /usr/local/bin/m-ui.prev
+          sudo test ! -f /usr/local/bin/m-ui.failed
+          sudo /usr/local/bin/m-ui set -db /etc/m-ui/m-ui.db webListen=
+          sudo systemctl restart m-ui
+          sudo rm -f /etc/m-ui/upgrade-status.json
       - name: Uninstall keeps the data directory
         run: |
           sudo bash deploy/install.sh --uninstall

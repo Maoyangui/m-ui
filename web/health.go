@@ -7,6 +7,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/runner"
+	"github.com/Maoyangui/m-ui/selfupdate"
 )
 
 // healthStatus 是 GET api/health 的返回:面板能应答只说明进程活着,线路是否真的在监听要看数据面。
@@ -50,7 +51,9 @@ func (s *Server) healthStatus() healthStatus {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	ip := net.ParseIP(peerIP(r))
 	proxied := r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" || r.Header.Get("Forwarded") != ""
-	if ip == nil || !ip.IsLoopback() || proxied {
+	// 面板只监听某个地址时,本机健康检查从这个地址连进来(对端就是它自己),也算本机(审计 MB06)
+	self := ip != nil && (ip.IsLoopback() || ip.Equal(net.ParseIP(selfupdate.LocalHost(s.setting("webListen")))))
+	if !self || proxied {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "只允许本机访问"})
 		return
 	}

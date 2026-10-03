@@ -144,7 +144,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		plan := selfupdate.Plan{
 			Bin: bin, Prev: selfupdate.PrevPath(bin), Failed: selfupdate.FailedPath(bin),
 			From: "v" + Version, To: info.Latest,
-			URL:     selfupdate.LocalURL(s.setting("webCertFile") != "", s.settingInt("webPort", 2053), s.basePath()),
+			URL:     selfupdate.LocalURL(s.setting("webCertFile") != "", s.setting("webListen"), s.settingInt("webPort", 2053), s.basePath()),
 			Service: selfupdate.ServiceName(), OldPID: os.Getpid(),
 			DBPath: s.run.DBPath(), Backup: backupPath, StatusPath: s.upgradeStatusPath(), Timeout: selfupdate.DefaultTimeout,
 		}
