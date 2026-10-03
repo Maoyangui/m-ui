@@ -326,6 +326,16 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// 用户数上限按整批先算:事务里逐个校验用的是另一条连接,看不到本事务刚插入的用户,上限 10 的代理一次能建 500 个(审计 MB21)
+		var rs model.Reseller
+		if s.db.First(&rs, rid).Error == nil && rs.UserLimit > 0 {
+			var n int64
+			s.db.Model(&model.User{}).Where("reseller_id = ?", rid).Count(&n)
+			if int(n)+req.Count > rs.UserLimit {
+				badRequest(w, fmt.Errorf("代理用户数上限 %d,已有 %d,这次最多还能建 %d 个", rs.UserLimit, n, max(rs.UserLimit-int(n), 0)))
+				return
+			}
+		}
 	}
 	type created struct {
 		Name string `json:"name"`

@@ -80,6 +80,7 @@ const EN = /*BEGIN*/{
 "代理已停用": "Reseller is disabled",
 "代理已到期": "Reseller has expired",
 "代理流量已用尽": "Reseller traffic is used up",
+"代理用户数上限 %d,已有 %d,这次最多还能建 %d 个": "Reseller user limit is %d with %d existing; at most %d more can be created",
 "代理面板端口 %d 与面板/订阅端口冲突,请在设置里改": "Reseller panel port %d conflicts with the panel/subscription port; change it in Settings",
 "令牌错误": "Wrong token",
 "传输配置不是合法 JSON: %w": "Transport settings are not valid JSON: %w",
