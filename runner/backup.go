@@ -79,9 +79,16 @@ func (r *Runner) rotateBackups() {
 	if keep <= 0 {
 		keep = 7
 	}
-	list := r.ListBackups()
-	for i := keep; i < len(list); i++ {
-		os.Remove(filepath.Join(r.BackupDir(), list[i].Name))
+	// 只轮转面板自己生成的(m-ui-*.zip):升级前备份(pre-upgrade-*)由升级流程自己留两份,以前混在一起数,
+	// 每份升级前备份都挤掉一份日常备份,时间久了还会被当成多余的删掉
+	var own []BackupFile
+	for _, b := range r.ListBackups() {
+		if strings.HasPrefix(b.Name, "m-ui-") {
+			own = append(own, b)
+		}
+	}
+	for i := keep; i < len(own); i++ {
+		os.Remove(filepath.Join(r.BackupDir(), own[i].Name))
 	}
 }
 
