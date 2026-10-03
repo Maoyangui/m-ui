@@ -114,11 +114,9 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, errCannotUpdate)
 			return
 		}
-		if info.Latest == "" {
-			info = s.checkUpdate(true)
-		}
-		if info.Latest == "" {
-			badRequest(w, errNoRelease)
+		info, err := updateTarget(info, func() selfupdate.Info { return s.checkUpdate(true) })
+		if err != nil {
+			badRequest(w, err)
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
@@ -162,6 +160,22 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// updateTarget 一键更新前确认真有新版本:缓存说没有就强制重查一次。已是最新(或本机比最新发布还新)就拒绝:
+// 以前照样重装或降级一次、重启数据面,所有用户掉线一次(审计 MB07)。
+func updateTarget(cached selfupdate.Info, recheck func() selfupdate.Info) (selfupdate.Info, error) {
+	info := cached
+	if info.Latest == "" || !info.HasUpdate {
+		info = recheck()
+	}
+	if info.Latest == "" {
+		return info, errNoRelease
+	}
+	if !info.HasUpdate {
+		return info, errUpToDate
+	}
+	return info, nil
 }
 
 // preUpgradeBackup 在备份目录写一份 pre-upgrade-<版本>-<时间>.zip,只保留最近两份;失败返回空(升级继续,回滚时只换程序)。
@@ -233,4 +247,5 @@ const (
 	errUpdating     = updateErr("更新正在进行中")
 	errCannotUpdate = updateErr("当前环境不支持一键更新(需要在 Linux 上以 root 运行),请用安装脚本更新")
 	errNoRelease    = updateErr("没有查到可用的发布版本")
+	errUpToDate     = updateErr("已是最新版本")
 )
