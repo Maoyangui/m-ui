@@ -123,7 +123,7 @@ function renderRows() {
     const addr = n.addr || n.publicIp || '';
     return `<tr>
       <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl && !isNodeView() ? `${isPlain(n.apiUrl) ? ` <span title="${esc(t('node.plainHelp'))}">${badge(t('node.plain'), 'warn')}</span>` : ''}<div class="sub-cell mono ellip" title="${esc(n.apiUrl)}">${esc(n.apiUrl)}</div>` : ''}</td>
-      <td class="mono"><span class="ellip" title="${esc(domain)}">${esc(domain || '—')}</span>${addr ? `<div class="sub-cell mono">${esc(addr)}${n.addr ? ' · ' + t('node.addrManual') : ''}</div>` : ''}</td>
+      <td class="mono"><span class="ellip" title="${esc(domain)}">${esc(domain || '—')}</span>${addr ? `<div class="sub-cell mono nowrap">${esc(addr)}${n.addr ? ' · ' + t('node.addrManual') : ''}</div>` : ''}</td>
       <td>${statusCell(n)}</td>
       <td class="reach-td">${reachCell(n, isNodeView())}</td>
       <td>${syncCell(n)}</td>
@@ -165,7 +165,7 @@ function editNode(id) {
 }
 
 // 必须让人看见的结果(下线通知没发到、线路被一并停用):弹窗,不用两秒多就消失的 toast。等当前弹窗关掉再开
-const notice = (title, msg) => setTimeout(() => confirm(msg, { title, okText: t('node.ack') }), 0);
+const notice = (title, msg) => setTimeout(() => confirm(msg, { title, okText: t('node.ack'), notice: true }), 0);
 
 // 副机 API 地址是 http:// 时,令牌与用户凭据走明文:不拦,但要看得见
 const isPlain = url => /^http:\/\//i.test(String(url || '').trim());

@@ -87,6 +87,7 @@ export function openModal(title, html, onSave, opts = {}) {
   save.hidden = !onSave;
   save.textContent = opts.saveText || t('common.save');
   save.className = 'btn ' + (opts.danger ? 'danger' : 'primary');
+  document.getElementById('modal-cancel').hidden = !!opts.noCancel; // 纯提示只留一个「知道了」
   m.hidden = false;
   m.querySelector('.modal-box').classList.toggle('wide', !!opts.wide);
   save.onclick = async () => {
@@ -104,7 +105,7 @@ export function closeModal() { document.getElementById('modal').hidden = true; }
 export function confirm(message, opts = {}) {
   return new Promise(resolve => {
     openModal(opts.title || t('common.confirm'), `<p class="confirm-text">${esc(message)}</p>`, async () => resolve(true),
-      { saveText: opts.okText || t('common.confirm'), danger: opts.danger });
+      { saveText: opts.okText || t('common.confirm'), danger: opts.danger, noCancel: opts.notice });
     const m = document.getElementById('modal');
     const cancel = () => { resolve(false); m.removeEventListener('modal-cancel', cancel); };
     m.addEventListener('modal-cancel', cancel, { once: true });
