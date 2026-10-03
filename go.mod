@@ -9,12 +9,12 @@ require (
 	github.com/gofrs/uuid/v5 v5.5.1
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/sagernet/quic-go v0.61.0-sing-box-mod.7
-	github.com/sagernet/sing v0.9.0-beta.4
-	github.com/sagernet/sing-box v1.14.0
-	github.com/sagernet/sing-quic v0.7.0-beta.4
+	github.com/sagernet/sing v0.9.6-0.20260922013354-87c33f17688f
+	github.com/sagernet/sing-box v1.14.2
+	github.com/sagernet/sing-quic v0.7.1-0.20260924092235-6a3a24d65b99
 	github.com/sagernet/sing-shadowsocks v0.2.8
-	github.com/sagernet/sing-tun v0.9.0-beta.4
-	github.com/sagernet/sing-vmess v0.2.8-0.20250909125414-3aed155119a1
+	github.com/sagernet/sing-tun v0.9.6-0.20260924001923-ddaa4ca25e3b
+	github.com/sagernet/sing-vmess v0.2.8
 	github.com/shirou/gopsutil/v4 v4.26.8
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	golang.org/x/crypto v0.54.0
@@ -70,13 +70,13 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/sagernet/bbolt v0.0.0-20260823094646-e24805439c9c // indirect
+	github.com/sagernet/bbolt v0.0.0-20260915102804-500ee1e84832 // indirect
 	github.com/sagernet/cors v1.2.1 // indirect
 	github.com/sagernet/fswatch v0.1.2 // indirect
 	github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1 // indirect
 	github.com/sagernet/netlink v0.0.0-20260814022025-64455d367bbf // indirect
 	github.com/sagernet/nftables v0.3.0-mod.4 // indirect
-	github.com/sagernet/sing-mux v0.3.5 // indirect
+	github.com/sagernet/sing-mux v0.3.8 // indirect
 	github.com/sagernet/sing-shadowsocks2 v0.2.1 // indirect
 	github.com/sagernet/sing-usbip v0.0.0-20260817040617-28bd42667eca // indirect
 	github.com/sagernet/smux v1.5.50-sing-box-mod.1 // indirect

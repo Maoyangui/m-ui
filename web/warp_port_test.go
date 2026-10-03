@@ -1,8 +1,3 @@
-//go:build !race
-
-// 这条测试会重载真实的内嵌数据面,-race 下会撞上 sing-box 自己的竞争(route.(*NetworkManager).Start 写、
-// 接口监听 goroutine 在 updateInterface 里读),与 m-ui 无关;同 user_rotate_dataplane_test.go,只在 -race 那一步跳过。
-
 package web
 
 import (
