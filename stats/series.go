@@ -59,7 +59,10 @@ func Series(db *gorm.DB, resource, tag string, hours int, bucket int64, floor in
 	start := end - int64(hours)*3600
 	var span int64
 	var n int
+	// 对齐后落在起点上的样本正属于第 0 根柱,要算进来;以前一律 date_time > start,7 天 / 30 天视图首柱少一整小时(审计 MB17)
+	lower := "date_time > ?"
 	if bucket >= int64(floor) && bucket <= 7*86400 {
+		lower = "date_time >= ?"
 		span = bucket
 		st := time.Unix(start, 0).In(loc)
 		var aligned time.Time
@@ -97,7 +100,7 @@ func Series(db *gorm.DB, resource, tag string, hours int, bucket int64, floor in
 	}
 	var rows []agg
 	q := db.Model(&model.Stats{}).Select("((date_time - ?) / ?) AS i, direction, SUM(traffic) AS traffic", start, span).
-		Where("resource = ? AND date_time > ? AND date_time <= ?", resource, start, end)
+		Where("resource = ? AND "+lower+" AND date_time <= ?", resource, start, end)
 	if tag != "" {
 		q = q.Where("tag = ?", tag)
 	}
