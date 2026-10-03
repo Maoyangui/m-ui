@@ -120,21 +120,29 @@ function certBadge(i) {
   return badge(t('cert.valid'), 'ok');
 }
 
+// 上一次进度回来了再约下一次:setInterval 不等返回,弱网下请求叠起来,结束时还会弹两次提示、重绘两遍
+let pollGen = 0;
 function startPoll() {
   stopPoll();
-  pollTimer = setInterval(async () => {
+  const gen = ++pollGen;
+  const step = async () => {
     const st = await get('cert/status').catch(() => null);
-    if (!st) return;
-    const log = document.getElementById('c-log');
-    if (log) { log.textContent = (st.log || []).join('\n'); log.scrollTop = log.scrollHeight; }
-    if (!st.running) {
-      stopPoll();
-      toast(st.lastError ? t('cert.failed') : t('cert.done'), st.lastError ? 'err' : 'ok');
-      await reload();
+    if (gen !== pollGen) return; // 这期间被停了
+    if (st) {
+      const log = document.getElementById('c-log');
+      if (log) { log.textContent = (st.log || []).join('\n'); log.scrollTop = log.scrollHeight; }
+      if (!st.running) {
+        stopPoll();
+        toast(st.lastError ? t('cert.failed') : t('cert.done'), st.lastError ? 'err' : 'ok');
+        await reload();
+        return;
+      }
     }
-  }, 1500);
+    pollTimer = setTimeout(step, 1500);
+  };
+  pollTimer = setTimeout(step, 1500);
 }
-function stopPoll() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
+function stopPoll() { pollGen++; if (pollTimer) clearTimeout(pollTimer); pollTimer = null; }
 
 async function reload() {
   await load('settings', 'status');

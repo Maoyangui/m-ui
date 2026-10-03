@@ -92,21 +92,29 @@ export async function render(el, fresh = false) {
 
 export function tick() {}
 
+// 上一次进度回来了再约下一次:setInterval 不等返回,弱网下请求叠起来,结束时还会弹两次提示、重绘两遍
+let pollGen = 0;
 function startPoll() {
   stopPoll();
-  pollTimer = setInterval(async () => {
+  const gen = ++pollGen;
+  const step = async () => {
     const st = await get('ops/status').catch(() => null);
-    if (!st) return;
-    const log = document.getElementById('ops-log');
-    if (log) { log.textContent = (st.log || []).join('\n'); log.scrollTop = log.scrollHeight; }
-    if (!st.running) {
-      stopPoll();
-      toast(st.last && st.last.ok ? t('ops.taskDone') : t('ops.taskFailed'), st.last && st.last.ok ? 'ok' : 'err');
-      if (location.hash.startsWith('#/ops')) render(document.getElementById('page'), true);
+    if (gen !== pollGen) return; // 这期间被停了
+    if (st) {
+      const log = document.getElementById('ops-log');
+      if (log) { log.textContent = (st.log || []).join('\n'); log.scrollTop = log.scrollHeight; }
+      if (!st.running) {
+        stopPoll();
+        toast(st.last && st.last.ok ? t('ops.taskDone') : t('ops.taskFailed'), st.last && st.last.ok ? 'ok' : 'err');
+        if (location.hash.startsWith('#/ops')) render(document.getElementById('page'), true);
+        return;
+      }
     }
-  }, 1500);
+    pollTimer = setTimeout(step, 1500);
+  };
+  pollTimer = setTimeout(step, 1500);
 }
-function stopPoll() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
+function stopPoll() { pollGen++; if (pollTimer) clearTimeout(pollTimer); pollTimer = null; }
 
 registerActions({
   'ops.refresh': () => render(document.getElementById('page'), true),
