@@ -21,14 +21,21 @@ func traceServer(t *testing.T, ln net.Listener) {
 	t.Cleanup(func() { srv.Close() })
 }
 
+// 两个地址族都用同一组探测地址
 func withURLs(t *testing.T, urls ...string) {
 	old := publicIPURLs
-	publicIPURLs = urls
+	publicIPURLs = map[string][]string{"tcp4": urls, "tcp6": urls}
 	t.Cleanup(func() { publicIPURLs = old })
 }
 
-// 双栈:同一个主机名既有 v4 又有 v6 时,探测结果必须是 IPv4(默认连接会优先走 v6)。
-func TestPublicIPPrefersIPv4OnDualStack(t *testing.T) {
+func testCtx(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// 双栈:同一个主机名既有 v4 又有 v6 时,两个地址各自测出来;PublicIP 给 IPv4(默认连接会优先走 v6)。
+func TestPublicIPsDualStack(t *testing.T) {
 	ips, err := net.DefaultResolver.LookupIP(context.Background(), "ip", "localhost")
 	has4, has6 := false, false
 	for _, ip := range ips {
@@ -55,31 +62,34 @@ func TestPublicIPPrefersIPv4OnDualStack(t *testing.T) {
 	traceServer(t, ln6)
 	withURLs(t, "http://localhost:"+strconv.Itoa(port)+"/")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	t.Logf("不限地址族时探测到: %q", probePublicIP(ctx, "tcp"))
+	ctx := testCtx(t)
+	if v4, v6 := PublicIPs(ctx); v4 != "127.0.0.1" || v6 != "::1" {
+		t.Fatalf("双栈下应分别测到 127.0.0.1 与 ::1,得到 %q %q", v4, v6)
+	}
 	if got := publicIP(ctx); got != "127.0.0.1" {
-		t.Fatalf("双栈下应探测到 IPv4,得到 %q", got)
+		t.Fatalf("双栈下 PublicIP 应给 IPv4,得到 %q", got)
 	}
 }
 
-// 纯 IPv6:强制 IPv4 测不到时退回默认路由,照样给出 v6 地址(不让纯 v6 机器变成没地址)。
-func TestPublicIPFallsBackToIPv6(t *testing.T) {
+// 纯 IPv6:IPv4 测不到,PublicIP 给 v6 地址(不让纯 v6 机器变成没地址)。
+func TestPublicIPIPv6Only(t *testing.T) {
 	ln6, err := net.Listen("tcp6", "[::1]:0")
 	if err != nil {
 		t.Skip("本机没有 IPv6 回环: ", err)
 	}
 	traceServer(t, ln6)
 	withURLs(t, "http://"+ln6.Addr().String()+"/")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ctx := testCtx(t)
+	if v4, v6 := PublicIPs(ctx); v4 != "" || v6 != "::1" {
+		t.Fatalf("纯 IPv6 应只测到 ::1,得到 %q %q", v4, v6)
+	}
 	if got := publicIP(ctx); got != "::1" {
-		t.Fatalf("纯 IPv6 时应退回 v6 地址,得到 %q", got)
+		t.Fatalf("纯 IPv6 时 PublicIP 应给 v6 地址,得到 %q", got)
 	}
 }
 
-// 回落的 ipify 只回一个裸 IP;不是 IP 的内容一律不认。
-func TestPublicIPParsesPlainAndRejectsGarbage(t *testing.T) {
+// 回落的 ipify 只回一个裸 IP;不是 IP 的内容一律不认;地址族对不上的结果也不认。
+func TestPublicIPParsesPlainAndRejectsMismatch(t *testing.T) {
 	body := "203.0.113.5"
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -89,10 +99,13 @@ func TestPublicIPParsesPlainAndRejectsGarbage(t *testing.T) {
 	go srv.Serve(ln)
 	t.Cleanup(func() { srv.Close() })
 	withURLs(t, "http://"+ln.Addr().String()+"/")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ctx := testCtx(t)
 	if got := publicIP(ctx); got != "203.0.113.5" {
 		t.Fatalf("裸 IP 应原样返回,得到 %q", got)
+	}
+	body = "2001:db8::5"
+	if got := probePublicIP(ctx, "tcp4"); got != "" {
+		t.Fatalf("走 IPv4 探测却回了 v6 地址,应不认,得到 %q", got)
 	}
 	body = "<html>blocked</html>"
 	if got := publicIP(ctx); got != "" {

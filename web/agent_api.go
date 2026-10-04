@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -130,7 +132,7 @@ func (s *Server) selfApiURL() string {
 	if host == "" {
 		host = "<本机IP>"
 	}
-	return fmt.Sprintf("%s://%s:%d%s", scheme, host, s.settingInt("webPort", 2053), s.basePath())
+	return fmt.Sprintf("%s://%s%s", scheme, net.JoinHostPort(host, strconv.Itoa(s.settingInt("webPort", 2053))), s.basePath())
 }
 
 func (s *Server) handleAgentPing(w http.ResponseWriter, r *http.Request) {
@@ -362,6 +364,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		Revision: s.setting("hubRevision"), ReloadPending: strings.TrimSpace(s.setting("hubReloadPending")) != "",
 		Onlines: map[string][]string{}, CertDays: s.run.CertInfo().DaysLeft,
 		PublicIP:    s.setting("publicIp"),
+		PublicIP6:   s.setting("publicIp6"),
 		Conns:       s.recentConns(50),
 		LedgerEpoch: s.setting(hub.LedgerEpochKey),
 	}

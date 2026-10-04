@@ -56,6 +56,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		}
 		n := p.Node
 		n.Id, n.IsLocal, n.Token = 0, false, strings.TrimSpace(p.Token)
+		n.PublicIP, n.PublicIP6 = "", "" // 探测值由服务器自己上报,不收客户端填的
 		if err := s.db.Create(&n).Error; err != nil {
 			badRequest(w, err)
 			return
@@ -81,7 +82,8 @@ func (s *Server) validateNode(p *nodePayload) error {
 	if p.ApiUrl != "" && !strings.HasPrefix(p.ApiUrl, "http://") && !strings.HasPrefix(p.ApiUrl, "https://") {
 		return errors.New("API 地址需以 http:// 或 https:// 开头,如 https://tw.example.com:2053/ad/")
 	}
-	p.Addr = strings.TrimSpace(p.Addr)
+	p.Addr = model.BareHost(p.Addr) // 填成 [v6] 的去掉方括号,分享链接里会自己加
+	p.AddrFamily = model.NormAddrFamily(p.AddrFamily)
 	if p.Ratio < 0 || p.Ratio > 100 {
 		return errors.New("倍率需在 0–100 之间(1 = 原样)")
 	}
@@ -173,7 +175,7 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		}
 		updates := map[string]interface{}{
 			"name": p.Name, "domain": p.Domain, "api_url": p.ApiUrl, "insecure": p.Insecure, "enabled": p.Enabled, "sort": p.Sort,
-			"addr": p.Addr, "ratio": p.Ratio,
+			"addr": p.Addr, "addr_family": p.AddrFamily, "ratio": p.Ratio,
 		}
 		if p.ApiUrl != node.ApiUrl || p.Insecure != node.Insecure {
 			updates["cert_fp"] = "" // 地址或校验方式变了,记住的证书指纹作废,下次连接重新记

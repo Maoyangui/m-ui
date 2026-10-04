@@ -18,7 +18,7 @@ func TestEntriesPreferIPRatioAndPerLineServers(t *testing.T) {
 	db.Create(&model.Node{Name: "香港", Domain: "hk.example.com", PublicIP: "5.6.7.8", Enabled: true, Sort: 2, Ratio: 2})
 	db.Create(&model.Node{Name: "手填", Domain: "tw.example.com", Addr: "9.9.9.9", PublicIP: "1.1.1.1", Enabled: true, Sort: 3, Ratio: 1})
 
-	e := EntriesFromNodes(db, "jp.example.com", "1.2.3.4", true)
+	e := EntriesFromNodes(db, "jp.example.com", "1.2.3.4", "", true)
 	if len(e) != 3 {
 		t.Fatalf("应有 3 个入口: %+v", e)
 	}
@@ -32,7 +32,7 @@ func TestEntriesPreferIPRatioAndPerLineServers(t *testing.T) {
 		t.Fatalf("手填地址优先: %+v", e[2])
 	}
 	// 域名策略
-	d := EntriesFromNodes(db, "jp.example.com", "1.2.3.4", false)
+	d := EntriesFromNodes(db, "jp.example.com", "1.2.3.4", "", false)
 	if d[0].Host != "jp.example.com" || d[1].Host != "hk.example.com" {
 		t.Fatalf("域名策略应用域名: %+v", d)
 	}

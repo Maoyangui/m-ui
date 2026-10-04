@@ -70,8 +70,12 @@ type Node struct {
 	Sort     int    `json:"sort"`
 	// Addr 订阅里节点的连接地址(可填 IP);空 = 自动用该服务器探测到的公网 IP。域名仍作 SNI,绕开大陆 DNS 污染。
 	Addr string `json:"addr"`
-	// PublicIP 该服务器自动探测到的公网 IP(本机由 runner 写入,副机随报告上报)。
+	// PublicIP 该服务器自动探测到的公网 IP(本机由 runner 写入,副机随报告上报):有 IPv4 时是 IPv4,纯 IPv6 机器是 IPv6。
 	PublicIP string `json:"publicIp"`
+	// PublicIP6 该服务器探测到的公网 IPv6;没有 IPv6(或副机版本旧、不上报)时为空。
+	PublicIP6 string `json:"publicIp6"`
+	// AddrFamily Addr 留空时订阅里用哪个探测地址:"" = IPv4(默认),"v6" = IPv6;选的那个没探测到就用另一个。
+	AddrFamily string `json:"addrFamily"`
 	// Ratio 流量倍率:经该服务器的流量按倍率计入用户用量(2 = 双倍扣量);0/1 = 原样。
 	Ratio float64 `json:"ratio" gorm:"default:1"`
 	// CertFP 勾了"跳过证书校验"时记住的副机证书 SHA-256 指纹(首次连接写入),之后指纹变了就拒绝连接;空 = 还没记。

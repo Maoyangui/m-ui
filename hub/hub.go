@@ -541,6 +541,7 @@ type Report struct {
 	OnlineLines     []string                       `json:"onlineLines"`
 	CertDays        int                            `json:"certDays"`
 	PublicIP        string                         `json:"publicIp"`              // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
+	PublicIP6       string                         `json:"publicIp6"`             // 副机探测到的公网 IPv6(没有为空;老版本副机不带,也是空),主机存入 nodes.public_ip6
 	Conns           []RecentConn                   `json:"conns,omitempty"`       // 最近入站连接,主机概览汇总展示
 	Groups          map[string]GroupState          `json:"groups,omitempty"`      // 代理池在这台机器上的状态(在线设备、设备池满被拒次数)
 	Upstreams       []UpstreamHealth               `json:"upstreams,omitempty"`   // 本机线路真正用到的那些上游的巡检结果
@@ -1070,6 +1071,9 @@ func (h *Hub) applyResult(r *nodeResult) {
 	h.setStatus(r.n, true, errStr, &r.rep)
 	if r.rep.PublicIP != "" && r.rep.PublicIP != r.n.PublicIP {
 		h.d.DB.Model(&model.Node{}).Where("id = ?", r.n.Id).Update("public_ip", r.rep.PublicIP)
+	}
+	if r.rep.PublicIP6 != r.n.PublicIP6 {
+		h.d.DB.Model(&model.Node{}).Where("id = ?", r.n.Id).Update("public_ip6", r.rep.PublicIP6)
 	}
 	h.mu.Lock()
 	h.remote[r.n.Id] = r.rep.Onlines

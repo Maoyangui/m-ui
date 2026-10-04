@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -144,7 +145,7 @@ func panelInfo(dbPath string) (url string, user string, defaultPw bool, err erro
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
-	return fmt.Sprintf("%s://%s:%s%s", scheme, host, port, path), "admin", s["adminDefault"] == "true", nil
+	return fmt.Sprintf("%s://%s%s", scheme, net.JoinHostPort(host, port), path), "admin", s["adminDefault"] == "true", nil
 }
 
 // infoHost 面板地址里的主机名:订阅域名 → 面板域名 → 公网 IP。
@@ -199,7 +200,7 @@ func printPanelInfo(dbPath string) {
 			scheme = "https"
 		}
 		fmt.Println(colorBold + "  代理面板: " + colorReset + colorGray +
-			fmt.Sprintf("%s://%s:%s%s", scheme, infoHost(s), rp, rpath) + colorReset)
+			fmt.Sprintf("%s://%s%s", scheme, net.JoinHostPort(infoHost(s), rp), rpath) + colorReset)
 	}
 	fmt.Println()
 }
@@ -444,6 +445,15 @@ func selfUpdate(ask func(string) string) error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("只支持 Linux 在线更新")
 	}
+	// 直连 GitHub 不通(纯 IPv6 机器)时经本机 WARP 再试
+	selfupdate.SetFallbackPort(func() int {
+		if m, err := settingsOf(menuDBPath()); err == nil {
+			if p, err := strconv.Atoi(strings.TrimSpace(m["warpPort"])); err == nil && p > 0 {
+				return p
+			}
+		}
+		return 40000
+	})
 	fmt.Println("  查询最新版本…")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	info, err := selfupdate.Check(ctx, version)

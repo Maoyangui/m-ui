@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -1397,21 +1398,67 @@ func (r *Runner) coreWatchLoop(stop <-chan struct{}) {
 	}
 }
 
-// publicIPLoop 探测并记录本机公网 IP(设置 publicIp):没配域名时订阅地址与节点地址用它兜底。
+// publicIPMissLimit 某个地址族连续几轮没测到才把它从记录里去掉:偶尔一轮测不通不该让订阅地址跟着变
+// (双栈机器被换成 v6、选了 IPv6 的节点被打回 IPv4)。
+const publicIPMissLimit = 3
+
+// nextPublicIPs 由这一轮两个地址族的探测结果、旧记录与各自连续没测到的轮数,算出要记的
+// publicIp(有 IPv4 时是 IPv4,纯 IPv6 机器是 IPv6)与 publicIp6。
+func nextPublicIPs(v4, v6, old, old6 string, miss4, miss6 *int) (pub, pub6 string) {
+	oldV4 := ""
+	if ip := net.ParseIP(old); ip != nil && ip.To4() != nil {
+		oldV4 = old
+	}
+	if v4 == "" {
+		*miss4++
+		if oldV4 != "" && *miss4 < publicIPMissLimit {
+			v4 = oldV4
+		}
+	} else {
+		*miss4 = 0
+	}
+	if v6 == "" {
+		*miss6++
+		if old6 != "" && *miss6 < publicIPMissLimit {
+			v6 = old6
+		}
+	} else {
+		*miss6 = 0
+	}
+	pub = v4
+	if pub == "" {
+		pub = v6
+	}
+	return pub, v6
+}
+
+// publicIPLoop 探测并记录本机公网 IP(设置 publicIp / publicIp6):没配域名时订阅地址与节点地址用它兜底。
 func (r *Runner) publicIPLoop(stop <-chan struct{}) {
+	var miss4, miss6 int
 	probe := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		ip := acme.PublicIP(ctx)
-		if ip == "" {
+		v4, v6 := acme.PublicIPs(ctx)
+		if v4 == "" && v6 == "" { // 整个出不去网:什么都不改,也不算没测到
 			return
 		}
-		if ip != r.setting("publicIp") {
-			r.setSetting("publicIp", ip)
-			logger.Info("本机公网 IP: ", ip)
+		old, old6 := r.setting("publicIp"), r.setting("publicIp6")
+		pub, pub6 := nextPublicIPs(v4, v6, old, old6, &miss4, &miss6)
+		if pub != old {
+			r.setSetting("publicIp", pub)
+			logger.Info("本机公网 IP: ", pub)
+		}
+		if pub6 != old6 {
+			r.setSetting("publicIp6", pub6)
+			if pub6 == "" {
+				logger.Info("本机没有公网 IPv6(连续 ", publicIPMissLimit, " 轮没测到)")
+			} else {
+				logger.Info("本机公网 IPv6: ", pub6)
+			}
 		}
 		// 本机服务器记录也同步(订阅入口用)
-		r.db.Model(&model.Node{}).Where("is_local = ? AND public_ip != ?", true, ip).Update("public_ip", ip)
+		r.db.Model(&model.Node{}).Where("is_local = ? AND (public_ip != ? OR public_ip6 != ?)", true, pub, pub6).
+			Updates(map[string]interface{}{"public_ip": pub, "public_ip6": pub6})
 	}
 	probe()
 	t := time.NewTicker(time.Hour)

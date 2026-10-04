@@ -2,11 +2,14 @@ package web
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +45,7 @@ func (s *Server) checkUpdate(force bool) selfupdate.Info {
 	defer cancel()
 	info, err := selfupdate.Check(ctx, Version)
 	if err != nil {
+		info.Err = s.githubHint(err).Error()
 		logger.Warning("检查新版本失败: ", err)
 		if cached.Latest != "" { // 查不到就沿用上次的结果,不要把已有提示抹掉
 			cached.Err = info.Err
@@ -58,8 +62,17 @@ func (s *Server) checkUpdate(force bool) selfupdate.Info {
 	return info
 }
 
+// githubHint 纯 IPv6 机器连不上 GitHub 时,在报错后面说明原因和办法。
+func (s *Server) githubHint(err error) error {
+	if ip := net.ParseIP(strings.TrimSpace(s.setting("publicIp"))); err == nil || ip == nil || ip.To4() != nil {
+		return err
+	}
+	return fmt.Errorf("%w。这台服务器只有 IPv6,GitHub 不支持 IPv6:在运维页装上 WARP 后会自动经 WARP 检查与下载更新;也可以手动下载安装包升级", err)
+}
+
 // StartUpdateWatch 启动时查一次,之后每 6 小时查一次。
 func (s *Server) StartUpdateWatch() {
+	selfupdate.SetFallbackPort(s.warpPort) // 直连 GitHub 不通(纯 IPv6 机器)时经本机 WARP 再试
 	go func() {
 		time.Sleep(20 * time.Second) // 让面板先起来,别和启动抢网络
 		for {
@@ -130,7 +143,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		// 2. 下载、校验、试运行,然后旧程序留作 .prev、新程序换上
 		newPath, err := selfupdate.Stage(ctx, info.Latest, bin, logf)
 		if err != nil {
-			badRequest(w, err)
+			badRequest(w, s.githubHint(err))
 			return
 		}
 		if err := selfupdate.Swap(bin, newPath, selfupdate.PrevPath(bin)); err != nil {

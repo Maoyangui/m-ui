@@ -163,7 +163,7 @@ func (s *Server) settingInt(key string, def int) int {
 // options 每次请求时读取,便于面板改设置后即时生效。
 func (s *Server) options() Options {
 	insecure := s.insecure()
-	entries := EntriesFromNodes(s.db, s.setting("webDomain"), s.setting("publicIp"), !strings.EqualFold(s.setting("subServerAddr"), "domain"))
+	entries := EntriesFromNodes(s.db, s.setting("webDomain"), s.setting("publicIp"), s.setting("publicIp6"), !strings.EqualFold(s.setting("subServerAddr"), "domain"))
 	for i := range entries {
 		entries[i].Insecure = insecure
 	}
@@ -236,10 +236,10 @@ func CertIsSelfSigned(certFile, fallback string) bool {
 
 // EntriesFromNodes 由入口服务器表生成订阅入口。
 //
-// 连接地址:preferIP 时用 节点 Addr → 该服务器公网 IP → 域名(大陆 DNS 污染下客户端按域名解析会失败,
-// 直接给 IP 最稳),SNI 仍用域名保证 TLS 正常;否则用域名。
+// 连接地址:preferIP 时用 节点 Addr → 该服务器探测到的公网 IP(按节点的地址族选项,默认 IPv4)→ 域名
+// (大陆 DNS 污染下客户端按域名解析会失败,直接给 IP 最稳),SNI 仍用域名保证 TLS 正常;否则用域名。
 // 多入口时每条线路按入口各出一个节点并加 "-名称" 后缀;倍率不为 1 时再加 " x2" 之类标记。
-func EntriesFromNodes(db *gorm.DB, webDomain, localPublicIP string, preferIP bool) []Entry {
+func EntriesFromNodes(db *gorm.DB, webDomain, localPublicIP, localPublicIP6 string, preferIP bool) []Entry {
 	var nodes []model.Node
 	db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&nodes)
 	var out []Entry
@@ -248,12 +248,12 @@ func EntriesFromNodes(db *gorm.DB, webDomain, localPublicIP string, preferIP boo
 		if domain == "" && n.IsLocal {
 			domain = webDomain
 		}
-		ip := strings.TrimSpace(n.Addr)
+		ip := model.BareHost(n.Addr)
 		if ip == "" {
 			if n.IsLocal {
-				ip = localPublicIP
+				ip, _ = model.AutoIP(localPublicIP, localPublicIP6, n.AddrFamily)
 			} else {
-				ip = n.PublicIP
+				ip, _ = model.AutoIP(n.PublicIP, n.PublicIP6, n.AddrFamily)
 			}
 		}
 		host := domain

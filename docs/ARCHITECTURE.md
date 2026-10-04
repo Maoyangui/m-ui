@@ -43,7 +43,7 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 - **Line 线路** = 入口协议 + 端口 + TLS/传输 + 上游(+ 可选的分流规则)。渲染成 sing-box 的一个 inbound 和一条 `inbound→outbound` 路由规则;有分流规则时在它前面按顺序加几条(域名 / IP 段 / 端口 → 某个上游、直连或拦截),规则指向的上游也渲染出站。端口在所有服务器上一致,所以"线路"天然就是跨机概念。
 - **Upstream 上游** = 一个 sing-box outbound(WARP 就是 socks 127.0.0.1:40000)。`direct`/`block` 内置不入库。
 - **User 用户** = 凭据(按协议分键,一次生成全协议可用)+ 配额/到期/周期重置/设备数/限速 + 计量;`UserLine` 决定订阅里有哪些线路。
-- **Node 入口服务器** = 域名(订阅里的连接地址与 SNI)+ API 地址 + 令牌;`is_local` 标本机。
+- **Node 入口服务器** = 域名(SNI)+ 连接地址 + API 地址 + 令牌;`is_local` 标本机。连接地址留空时用这台探测到的公网 IP:IPv4、IPv6 各测一次(本机写设置 `publicIp` / `publicIp6`,副机随报告上报),按 `addr_family` 选,默认 IPv4,选的那个没有就用另一个。
 - **Plan 套餐** = 上述用户字段的模板。
 - **Stats** 时序桶(resource/tag/time/direction 唯一,累加合并)——天然支持多机合并。
 - **AgentCounter / TrafficCursor**:副机只增不减的账本 + 主机侧游标,见 §6。

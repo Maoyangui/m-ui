@@ -29,8 +29,9 @@ func (r *Runner) reachTargets(ctx context.Context) []reach.Target {
 	out := make([]reach.Target, 0, len(nodes))
 	for _, n := range nodes {
 		t := reach.Target{NodeId: n.Id, Name: n.Name}
-		t.Host = r.reachHost(ctx, n)
-		if t.Host == "" {
+		if r.reachUsesIPv6(n) {
+			t.Err = "订阅里这台用的是 IPv6 地址,大陆连通检测暂只支持 IPv4"
+		} else if t.Host = r.reachHost(ctx, n); t.Host == "" {
 			t.Err = "没有可测的地址:服务器还没上报公网 IP,也没填连接地址或域名"
 		}
 		for _, l := range lines {
@@ -49,6 +50,24 @@ func (r *Runner) reachTargets(ctx context.Context) []reach.Target {
 		out = append(out, t)
 	}
 	return out
+}
+
+// reachUsesIPv6 订阅里这台给的是 IPv6:手填了 v6 地址,或留空而自动地址落在 IPv6(选了 IPv6 / 纯 IPv6 机器)。
+// 测点不一定有 IPv6,测不通会被误判成被墙,所以这种先不测、如实标出来。
+func (r *Runner) reachUsesIPv6(n model.Node) bool {
+	if strings.EqualFold(r.setting("subServerAddr"), "domain") { // 订阅给域名:客户端自己解析,不看这里的地址
+		return false
+	}
+	if addr := model.BareHost(n.Addr); addr != "" {
+		ip := net.ParseIP(addr)
+		return ip != nil && ip.To4() == nil
+	}
+	pub, pub6 := n.PublicIP, n.PublicIP6
+	if n.IsLocal {
+		pub, pub6 = r.setting("publicIp"), r.setting("publicIp6")
+	}
+	_, fam := model.AutoIP(pub, pub6, n.AddrFamily)
+	return fam == "v6"
 }
 
 // 连接地址可能故意填成 127.0.0.1(不做入站的主机让订阅里它那组节点指向本机),

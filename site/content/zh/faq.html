@@ -16,11 +16,12 @@
   <details><summary>要放行哪些端口?</summary><p>面板 <code>2053/tcp</code>、订阅 <code>2056/tcp</code>、开了代理面板再加 <code>2054/tcp</code>,以及每条线路的端口(TCP 或 UDP 看协议)。用 HTTP-01 签证书还需要 <code>80/tcp</code>;Cloudflare DNS-01 不需要。副机的面板端口只需对主机的 IP 放行。</p></details>
   <details><summary>能改面板端口和路径吗?</summary><p>能,在设置里改;把自己锁在外面了就用 SSH 菜单(<code>m-ui</code>)。路径带不带结尾斜杠都能打开。端口保存前会校验,面板不会重启到一个被线路或别的程序占着的端口上。</p></details>
   <details><summary>系统要求?</summary><p>Linux amd64 或 arm64,带 systemd;推荐 Debian 11+ / Ubuntu 20.04+,Rocky / CentOS 等其它 systemd 发行版也行。安装脚本依赖 systemd,所以 Alpine(OpenRC)不支持。安装需要 root。面板本身 1 核 1 GB 足够。CI 真正跑过的平台见<a href="{{base}}zh/getting-started/#tested">自动测试过的平台</a>。</p></details>
+  <details><summary>纯 IPv6 的机器能用吗?</summary><p>能:面板、订阅、线路都监听 IPv6,订阅自动给 IPv6 地址(云厂商的安全组要单独放行 IPv6 来源 <code>::/0</code>)。有三处受限:GitHub 不支持 IPv6,检查更新与一键更新要先在运维页装 WARP(装好后自动经它下载),一键安装脚本也下载不了,要手动上传安装包;直连出口打不开只有 IPv4 的网站,线路上游选 WARP 才能访问全网;大陆连通检测暂只测 IPv4。双栈机器默认在订阅里给 IPv4,服务器编辑里「自动地址用」可改成 IPv6。</p></details>
   <details><summary>为什么新建线路的表单里已经填了端口?</summary><p>它挑了一个没被其它线路、面板和本机任何程序占用的五位端口,还真的绑定了一次确认。可以改;保存时冲突会被拦下。</p></details>
 
   <h2>用户与订阅</h2>
   <details><summary>客户端里订阅名显示的是域名,不是我设的标题。</summary><p>去 <b>设置 → 订阅 → 订阅标题</b> 填(代理在自己面板的订阅页填)。nextin、sing-box 这类每次刷新都读标题的客户端刷新即可。小火箭和 Clash Verge 是在<i>添加</i>订阅那一刻定名的,之后不改 —— 用落地页的一键导入按钮(会带上标题),或者让用户删掉重加。</p></details>
-  <details><summary>设备数怎么算?</summary><p>按不同的源 IP 算,跨所有服务器。手机连 Wi-Fi 和连流量是两个 IP。由主机统一判定,上限 3 就是总共 3 个。</p></details>
+  <details><summary>设备数怎么算?</summary><p>按不同的源 IP 算,跨所有服务器。手机连 Wi-Fi 和连流量是两个 IP。由主机统一判定,上限 3 就是总共 3 个。经 IPv6 连进来时,同一宽带里的每台设备地址不同,会各算一台(IPv4 下同一路由器后面算一台)。</p></details>
   <details><summary>用户能临时把订阅共享给别人吗?</summary><p>你开启共享后,落地页上能生成一条临时共享地址,用的是另一套凭据。取消即刻只断借用者,本人不掉线;用量、设备、到期都算在本人头上。共享地址打开的是精简版落地页(一键导入、订阅地址、二维码、节点、你的公告和选购按钮),不显示本人的用量与到期。</p></details>
   <details><summary>用户订阅用完了看到什么?</summary><p>浏览器里仍是他的落地页,顶部多一张状态卡(已到期 / 流量已用完 / 已停用,读的是面板数据),链接和二维码不变,带你的公告与联系方式;设置了选购链接就有「选购 / 续费」按钮(代理可填自己的)。只有对不上任何用户的地址才是"订阅地址无效"页。用户被停用期间客户端拿到的是纯 404。</p></details>
   <details><summary>订阅地址能不暴露用户名吗?</summary><p>能。取消勾选 <b>设置 → 订阅 → 用户名用作订阅链接</b>,之后新建的用户拿到 32 位随机令牌。已有用户的地址不受影响。</p></details>

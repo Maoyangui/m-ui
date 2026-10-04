@@ -451,7 +451,9 @@
           "publicIp": "192.0.2.10",
           "ratio": 1,
           "hasToken": false,
-          "status": null
+          "status": null,
+          "publicIp6": "",
+          "addrFamily": ""
         },
         {
           "id": 2,
@@ -462,7 +464,7 @@
           "isLocal": false,
           "enabled": true,
           "sort": 1,
-          "addr": "198.51.100.10",
+          "addr": "",
           "publicIp": "198.51.100.10",
           "ratio": 1,
           "hasToken": true,
@@ -480,7 +482,9 @@
             "synced": true,
             "onlineUsers": 0,
             "certDays": 3649
-          }
+          },
+          "publicIp6": "2001:db8:5::10",
+          "addrFamily": ""
         },
         {
           "id": 3,
@@ -491,7 +495,7 @@
           "isLocal": false,
           "enabled": true,
           "sort": 2,
-          "addr": "203.0.113.30",
+          "addr": "",
           "publicIp": "203.0.113.30",
           "ratio": 2,
           "hasToken": true,
@@ -509,7 +513,9 @@
             "synced": true,
             "onlineUsers": 0,
             "certDays": 3649
-          }
+          },
+          "publicIp6": "2001:db8:7::30",
+          "addrFamily": "v6"
         }
       ],
       "revision": "7790aa6896c6cf2b",

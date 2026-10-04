@@ -403,6 +403,8 @@ How it works: the master compares a snapshot every few seconds and pushes on cha
 
 Each server, including the master, can have a **traffic ratio**: traffic through it counts toward users' usage multiplied by the ratio, e.g. 2× for an expensive route.
 
+**Connect address and IPv4 / IPv6**: subscriptions give each server's public IP (the domain is only the SNI). Every server detects both its IPv4 and IPv6 and IPv4 is used by default; set "Auto address uses" to IPv6 when editing a server, and if the chosen one is not detected the other is used. A connect address you enter always wins.
+
 **Mainland reachability**: the "Mainland reach" column on the Servers page. The master uses the public [Globalping](https://globalping.io) network to connect to every server from China Mobile, China Telecom and China Unicom home-broadband probes (no data-center probes), with Hong Kong probes as a control. If none of the three carriers can connect while Hong Kong can, the server is flagged as blocked, and a follow-up ping tells a blocked IP (needs a new IP) from a blocked port (switch ports). The port tested is the first TCP line on that server; a server with only UDP lines (hysteria2 / tuic) is tested on its subscription or panel port, which shows whether the IP is blocked and nothing more. Check on demand or let it run on a schedule (every 90 minutes by default; change or turn off under **Settings → Mainland reachability**). A new problem is rechecked two minutes later before a Telegram alert goes out, and recovery is announced too. Server addresses are sent to Globalping; the anonymous limit is about 250 probe runs per hour (one server uses about 15), more with a free token.
 
 > Deleting a server strips it from every line's "deploy to servers" list. A line that was deployed only on that server has nowhere left to run, so it is disabled as well (rather than silently spreading to every server). Users and resellers narrowed to only that server on a line lose that line, again rather than falling back to every server of the line. The response and the panel list the disabled lines and the affected people.
@@ -494,6 +496,8 @@ m-ui import -from /path/to/old-panel.db -to /etc/m-ui/m-ui.db -users-only && sys
 Existing names only get usage / quota / expiry / enabled updated; new users are created with their old credentials and, by default, every existing line.
 
 ## FAQ
+
+**Does it work on an IPv6-only server?** Yes: the panel, subscriptions and lines all listen on IPv6 and subscriptions give the IPv6 address (open IPv6 source `::/0` in your cloud firewall separately). Three things are limited: GitHub has no IPv6, so update checks and one-click updates need WARP installed on the Ops page first (updates then go through it automatically) or a manually uploaded package, and the install script likewise; the direct egress cannot reach IPv4-only sites, so use WARP as the line's upstream for full access; the mainland reachability check is IPv4-only for now and marks IPv6 servers as unsupported. Also, device limits count source IPs: over IPv6 every device on the same home connection has its own address and counts separately (over IPv4 they share the router's one).
 
 **Clients can't connect but the subscription refreshes fine.** Usually the client's local DNS resolves the domain wrongly. m-ui writes the server IP into subscriptions by default (domain only as SNI); ask users to refresh once. "Recent inbound connections" on the dashboard shows whether the user's IP reaches the server at all.
 

@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/acme"
@@ -368,22 +369,28 @@ func Info(certPath string) CertInfo {
 type PrecheckResult struct {
 	Domain     string            `json:"domain"`
 	PublicIP   string            `json:"publicIp"`
-	Resolved   map[string]string `json:"resolved"` // resolver → A 记录
+	Family     string            `json:"family"`   // v4 = 比的是 A 记录;v6 = 本机只有 IPv6,比的是 AAAA 记录
+	Resolved   map[string]string `json:"resolved"` // resolver → A(或 AAAA)记录
 	DNSOk      bool              `json:"dnsOk"`
 	Port80     string            `json:"port80"`     // free | busy | error text
 	Cloudflare bool              `json:"cloudflare"` // A 记录像 Cloudflare 代理 IP 段(不完全判断)
 }
 
 // Precheck 检查域名解析是否指向本机公网 IP、80 端口是否空闲。
+// 本机有 IPv4 时比 A 记录;只有 IPv6(纯 v6 机器)时比 AAAA 记录。
 func Precheck(ctx context.Context, domain string) PrecheckResult {
-	res := PrecheckResult{Domain: domain, Resolved: map[string]string{}}
-	res.PublicIP = publicIP(ctx)
+	res := PrecheckResult{Domain: domain, Resolved: map[string]string{}, Family: "v4"}
+	v4, v6 := PublicIPs(ctx)
+	res.PublicIP = v4
+	if v4 == "" && v6 != "" {
+		res.PublicIP, res.Family = v6, "v6"
+	}
 	all := true
 	for _, r := range []string{"1.1.1.1:53", "8.8.8.8:53", "223.5.5.5:53"} {
 		ips, err := resolverAt(r).LookupIPAddr(ctx, domain)
 		v := ""
 		for _, ip := range ips {
-			if ip.IP.To4() != nil {
+			if (ip.IP.To4() != nil) == (res.Family == "v4") {
 				v = ip.IP.String()
 				break
 			}
@@ -406,22 +413,37 @@ func Precheck(ctx context.Context, domain string) PrecheckResult {
 	return res
 }
 
-// PublicIP 探测本机公网 IP(Cloudflare trace,回落 ipify),优先 IPv4;失败返回空。
+// PublicIP 探测本机公网 IP,优先 IPv4,纯 IPv6 机器给 IPv6;失败返回空。
 //
 // 双栈机器上默认连接走 IPv6,测出来的是 v6 地址:订阅里留空的节点地址会变成大陆多数网络连不上的 v6,
-// 大陆连通检测(只测 IPv4)也测不了。所以先强制走 IPv4 测,测不到(纯 IPv6 机器)才按默认路由再测一次。
+// 大陆连通检测(只测 IPv4)也测不了。所以两个地址族分开强制测,见 PublicIPs。
 func PublicIP(ctx context.Context) string { return publicIP(ctx) }
 
-var publicIPURLs = []string{"https://www.cloudflare.com/cdn-cgi/trace", "https://api.ipify.org"}
-
-func publicIP(ctx context.Context) string {
-	if ip := probePublicIP(ctx, "tcp4"); ip != "" {
-		return ip
-	}
-	return probePublicIP(ctx, "tcp")
+// 探测地址按地址族分:api.ipify.org 只有 IPv4,IPv6 用 api64。
+var publicIPURLs = map[string][]string{
+	"tcp4": {"https://www.cloudflare.com/cdn-cgi/trace", "https://api.ipify.org"},
+	"tcp6": {"https://www.cloudflare.com/cdn-cgi/trace", "https://api64.ipify.org"},
 }
 
-// probePublicIP 按指定网络(tcp4 / tcp)连探测地址;tcp4 时只认 IPv4 结果。
+func publicIP(ctx context.Context) string {
+	v4, v6 := PublicIPs(ctx)
+	if v4 != "" {
+		return v4
+	}
+	return v6
+}
+
+// PublicIPs 分别强制走 IPv4、IPv6 探测本机公网地址(两路同时测);哪一路不通哪个就是空。
+func PublicIPs(ctx context.Context) (v4, v6 string) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); v4 = probePublicIP(ctx, "tcp4") }()
+	go func() { defer wg.Done(); v6 = probePublicIP(ctx, "tcp6") }()
+	wg.Wait()
+	return v4, v6
+}
+
+// probePublicIP 按指定地址族(tcp4 / tcp6)连探测地址,只认同一地址族的结果。
 func probePublicIP(ctx context.Context, network string) string {
 	d := &net.Dialer{Timeout: 5 * time.Second}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
@@ -430,7 +452,7 @@ func probePublicIP(ctx context.Context, network string) string {
 	}
 	defer tr.CloseIdleConnections()
 	c := &http.Client{Timeout: 6 * time.Second, Transport: tr}
-	for _, u := range publicIPURLs {
+	for _, u := range publicIPURLs[network] {
 		req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
 		resp, err := c.Do(req)
 		if err != nil {
@@ -449,10 +471,10 @@ func probePublicIP(ctx context.Context, network string) string {
 			}
 		}
 		ip := net.ParseIP(s)
-		if ip == nil || (network == "tcp4" && ip.To4() == nil) {
+		if ip == nil || (ip.To4() != nil) != (network == "tcp4") {
 			continue
 		}
-		return s
+		return ip.String()
 	}
 	return ""
 }

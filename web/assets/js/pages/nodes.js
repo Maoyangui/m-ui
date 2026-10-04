@@ -112,6 +112,33 @@ function actionsCell(n) {
         ${n.isLocal ? '' : `<button class="btn sm danger" data-act="node.del" data-id="${n.id}">${t('common.delete')}</button>`}`;
 }
 
+// 探测到的 IPv4 / IPv6(publicIp 有 IPv4 时是 IPv4,老版本副机在纯 IPv6 机器上报的是 v6)
+const isV4 = s => /^\d{1,3}(\.\d{1,3}){3}$/.test(s);
+function detected(n) {
+  const pub = (n.publicIp || '').trim(), pub6 = (n.publicIp6 || '').trim();
+  return { v4: isV4(pub) ? pub : '', v6: pub6.includes(':') ? pub6 : (pub.includes(':') ? pub : '') };
+}
+// 连接地址留空时订阅里用哪个(与后端 model.AutoIP 一致):选 IPv6 优先 v6,否则优先 v4;选的那个没有就用另一个
+function autoAddr(n, fam = n.addrFamily) {
+  const { v4, v6 } = detected(n);
+  if (v6 && (fam === 'v6' || !v4)) return { ip: v6, fam: 'v6' };
+  return v4 ? { ip: v4, fam: 'v4' } : { ip: '', fam: '' };
+}
+const detectedText = n => { const d = detected(n); return t('node.detected', { v4: d.v4 || t('node.none'), v6: d.v6 || t('node.none') }); };
+
+// 服务器列表里域名下面那行地址:手填的标"手动";自动的标出 IPv6、或选了 IPv6 却没有 IPv6
+function addrCell(n) {
+  const auto = autoAddr(n);
+  const addr = n.addr || auto.ip;
+  if (!addr) return '';
+  const tag = n.addr ? t('node.addrManual')
+    : n.addrFamily === 'v6' && auto.fam === 'v4' ? t('node.v6Fallback')
+    : auto.fam === 'v6' ? 'IPv6' : '';
+  // IPv4 不从中间折;IPv6 太长时只在冒号后折行
+  const ip = addr.includes(':') ? esc(addr).replace(/:/g, ':<wbr>') : `<span class="nowrap">${esc(addr)}</span>`;
+  return `<div class="sub-cell mono" title="${esc(detectedText(n))}">${ip}${tag ? ` <span class="nowrap">· ${esc(tag)}</span>` : ''}</div>`;
+}
+
 function renderRows() {
   const body = document.getElementById('nodes-body');
   if (!body) return;
@@ -120,10 +147,9 @@ function renderRows() {
   setHTML(body, data.nodes.map(n => {
     const s = n.status || {};
     const domain = n.domain || (n.isLocal ? state.settings.webDomain || '' : '');
-    const addr = n.addr || n.publicIp || '';
     return `<tr>
       <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl && !isNodeView() ? `${isPlain(n.apiUrl) ? ` <span title="${esc(t('node.plainHelp'))}">${badge(t('node.plain'), 'warn')}</span>` : ''}<div class="sub-cell mono ellip" title="${esc(n.apiUrl)}">${esc(n.apiUrl)}</div>` : ''}</td>
-      <td class="mono"><span class="ellip" title="${esc(domain)}">${esc(domain || '—')}</span>${addr ? `<div class="sub-cell mono nowrap">${esc(addr)}${n.addr ? ' · ' + t('node.addrManual') : ''}</div>` : ''}</td>
+      <td class="mono"><span class="ellip" title="${esc(domain)}">${esc(domain || '—')}</span>${addrCell(n)}</td>
       <td>${statusCell(n)}</td>
       <td class="reach-td">${reachCell(n, isNodeView())}</td>
       <td>${syncCell(n)}</td>
@@ -139,18 +165,19 @@ function editNode(id) {
     <div class="form-grid">
       ${field(t('common.name'), `<input id="f-name" value="${esc(n.name || '')}" placeholder="台湾">`, t('node.nameHelp'))}
       ${field(t('node.domain'), `<input id="f-domain" value="${esc(n.domain || '')}" placeholder="tw.example.com">`, t('node.domainHelp'))}
-      ${field(t('node.addr'), `<input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(n.publicIp || t('node.addrAuto'))}">`, t('node.addrHelp'))}
+      ${field(t('node.addr'), `<input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(autoAddr(n).ip || t('node.addrAuto'))}">`, t('node.addrHelp'))}
+      ${field(t('node.family'), `<select id="f-family"><option value="">${t('node.familyV4')}</option><option value="v6" ${n.addrFamily === 'v6' ? 'selected' : ''}>IPv6</option></select>`, t('node.familyHelp') + (id ? ' ' + detectedText(n) : ''))}
       ${field(t('node.ratio'), `<input id="f-ratio" type="number" min="0" max="100" step="0.1" value="${n.ratio || 1}">`, t('node.ratioHelp'))}
+      ${field(t('common.sort'), `<input id="f-sort" type="number" value="${n.sort || 0}">`)}
       ${n.isLocal ? '' : `
       <div class="full">${field(t('node.apiUrl'), `<input id="f-api" value="${esc(n.apiUrl || '')}" placeholder="https://tw.example.com:2053/app/">`, t('node.apiUrlHelp'))}<p class="hint warn-text" id="f-api-plain" ${isPlain(n.apiUrl) ? '' : 'hidden'}>${esc(t('node.plainHelp'))}</p></div>
       <div class="full">${field(t('node.token'), `<input id="f-token" type="password" placeholder="${n.hasToken ? t('node.tokenKeep') : ''}">`, t('node.tokenHelp'))}</div>
       ${check('f-insecure', t('node.insecure'), n.insecure !== false, t('node.insecureHelp'))}
       ${check('f-enabled', t('common.enabled'), n.enabled !== false, t('node.enabledHelp'))}`}
-      ${field(t('common.sort'), `<input id="f-sort" type="number" value="${n.sort || 0}">`)}
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), domain: fv('f-domain').trim(), sort: Number(fv('f-sort')) || 0,
-      addr: fv('f-addr').trim(), ratio: Number(fv('f-ratio')) || 1,
+      addr: fv('f-addr').trim(), addrFamily: fv('f-family'), ratio: Number(fv('f-ratio')) || 1,
       apiUrl: n.isLocal ? '' : fv('f-api').trim(), token: n.isLocal ? '' : fv('f-token'),
       insecure: n.isLocal ? false : fchk('f-insecure'), enabled: n.isLocal ? true : fchk('f-enabled'),
     };
@@ -162,6 +189,10 @@ function editNode(id) {
   }, { wide: true });
   const api = document.getElementById('f-api');
   if (api) api.addEventListener('input', () => { document.getElementById('f-api-plain').hidden = !isPlain(api.value); });
+  // 换了地址族,连接地址框的灰字跟着换成会用的那个地址
+  document.getElementById('f-family').addEventListener('change', e => {
+    document.getElementById('f-addr').placeholder = autoAddr(n, e.target.value).ip || t('node.addrAuto');
+  });
 }
 
 // 必须让人看见的结果(下线通知没发到、线路被一并停用):弹窗,不用两秒多就消失的 toast。等当前弹窗关掉再开

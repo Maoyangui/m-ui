@@ -141,9 +141,13 @@ table.grid.tight { min-width: 0; table-layout: fixed; }
 .grid.nodes th:nth-child(5), .grid.nodes td:nth-child(5),
 .grid.nodes th:nth-child(6), .grid.nodes td:nth-child(6) { width: 7.5rem; }
 .grid.nodes th:nth-child(7), .grid.nodes td:nth-child(7) { width: 3.5rem; }
-.grid.nodes th:nth-child(8), .grid.nodes td:nth-child(8) { width: 13.5rem; }
-/* 窄屏:几列定宽加起来比屏幕还宽,名称 / 地址 / 状态会被挤成一个字一行;改成整表横向滚动 */
-@media (max-width: 900px) { table.grid.nodes { min-width: 62rem; } }
+.grid.nodes th:nth-child(8), .grid.nodes td:nth-child(8) { width: 14.5rem; }
+/* 英文按钮更宽、副机多一颗"重置证书"时一行放不下:折到第二行,不顶出表格 */
+.grid.nodes td.actions { white-space: normal; }
+.grid.nodes td.actions .btn { margin-block: .1rem; }
+/* 内容区放不下时(窄屏,或侧栏占去宽度的 1000px 上下的窗口),几列定宽加起来就占满了,名称 / 地址 / 状态
+   会被挤成一个字一行;改成整表横向滚动。手机卡片模式下这条被下面的 min-width: 0 盖掉 */
+table.grid.nodes { min-width: 62rem; }
 /* ===== 窄屏表格:列表的每一行排成一张卡片 =====
    名称当标题(勾选框在它左边),其余每格一行:左边列名(app.js 按表头补到 data-label)、右边内容;没有列名的(操作按钮)靠右。
    拖动排序的把手在手机上用不了,藏掉;键值表、接口文档、连接列表不在此列 */

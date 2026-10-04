@@ -65,3 +65,49 @@ func TestReachTargets(t *testing.T) {
 		t.Fatalf("日本 = %+v(只有 UDP 线路时用 API 端口,https 没写端口按 443)", g)
 	}
 }
+
+// 订阅里给的是 IPv6 的服务器不测(测点不一定有 IPv6,测不通会被误判成被墙),如实标出;双栈默认 IPv4 照测。
+// 订阅给域名时不看地址族。
+func TestReachTargetsIPv6(t *testing.T) {
+	r, err := New(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(r.db)
+	db := r.db
+	db.Model(&model.Node{}).Where("is_local = ?", true).Updates(map[string]interface{}{"name": "本机", "addr_family": "v6"})
+	r.setSetting("publicIp", "203.0.113.1")
+	r.setSetting("publicIp6", "2001:db8::1")
+	for _, n := range []model.Node{
+		{Name: "双栈", PublicIP: "203.0.113.2", PublicIP6: "2001:db8::2", Enabled: true, Sort: 2},
+		{Name: "选v6", PublicIP: "203.0.113.3", PublicIP6: "2001:db8::3", AddrFamily: "v6", Enabled: true, Sort: 3},
+		{Name: "选v6没有", PublicIP: "203.0.113.4", AddrFamily: "v6", Enabled: true, Sort: 4},
+		{Name: "纯v6", PublicIP: "2001:db8::5", PublicIP6: "2001:db8::5", Enabled: true, Sort: 5},
+		{Name: "手填v6", Addr: "[2001:db8::6]", PublicIP: "203.0.113.6", Enabled: true, Sort: 6},
+	} {
+		n := n
+		db.Create(&n)
+	}
+	check := func(want map[string]string) {
+		t.Helper()
+		got := map[string]string{}
+		for _, tg := range r.reachTargets(context.Background()) {
+			if tg.Err != "" {
+				got[tg.Name] = "v6"
+				if tg.Host != "" {
+					t.Fatalf("%s 标了不测却还带着地址 %q", tg.Name, tg.Host)
+				}
+			} else {
+				got[tg.Name] = tg.Host
+			}
+		}
+		for k, v := range want {
+			if got[k] != v {
+				t.Fatalf("%s 应为 %q,得到 %q(全部 %v)", k, v, got[k], got)
+			}
+		}
+	}
+	check(map[string]string{"本机": "v6", "双栈": "203.0.113.2", "选v6": "v6", "选v6没有": "203.0.113.4", "纯v6": "v6", "手填v6": "v6"})
+	r.setSetting("subServerAddr", "domain")
+	check(map[string]string{"本机": "203.0.113.1", "选v6": "203.0.113.3"})
+}

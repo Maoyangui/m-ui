@@ -52,8 +52,10 @@ func latestTag(ctx context.Context) (string, error) {
 		Timeout:       20 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	req, _ := http.NewRequestWithContext(ctx, "GET", "https://github.com/"+brand.RepoPath+"/releases/latest", nil)
-	if resp, err := client.Do(req); err == nil {
+	latestURL := "https://github.com/" + brand.RepoPath + "/releases/latest"
+	if resp, err := doGitHub(ctx, client, func() (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, "GET", latestURL, nil)
+	}); err == nil {
 		loc := resp.Header.Get("Location")
 		resp.Body.Close()
 		if i := strings.LastIndex(loc, "/tag/"); i >= 0 {
@@ -63,12 +65,16 @@ func latestTag(ctx context.Context) (string, error) {
 		}
 	}
 	// 2) API 兜底
-	req2, _ := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/"+brand.RepoPath+"/releases/latest", nil)
-	req2.Header.Set("User-Agent", "m-ui")
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
-		req2.Header.Set("Authorization", "Bearer "+tok)
-	}
-	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req2)
+	resp, err := doGitHub(ctx, &http.Client{Timeout: 20 * time.Second}, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/"+brand.RepoPath+"/releases/latest", nil)
+		if err == nil {
+			req.Header.Set("User-Agent", "m-ui")
+			if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+				req.Header.Set("Authorization", "Bearer "+tok)
+			}
+		}
+		return req, err
+	})
 	if err != nil {
 		return "", fmt.Errorf("连接 GitHub 失败: %w", err)
 	}
@@ -153,11 +159,15 @@ func Apply(ctx context.Context, tag, binPath string, logf func(string, ...interf
 func download(ctx context.Context, url string) ([]byte, error) {
 	dctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(dctx, "GET", url, nil)
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doGitHub(dctx, http.DefaultClient, func() (*http.Request, error) {
+		req, err := http.NewRequestWithContext(dctx, "GET", url, nil)
+		if err == nil {
+			if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+				req.Header.Set("Authorization", "Bearer "+tok)
+			}
+		}
+		return req, err
+	})
 	if err != nil {
 		return nil, err
 	}
