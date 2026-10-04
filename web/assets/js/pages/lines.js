@@ -105,7 +105,7 @@ function renderRows() {
       <td class="primary-cell">${dot(online.has(l.name))}${esc(l.name)}</td>
       <td>${protoBadges(l)}</td>
       <td class="num">${l.port}</td>
-      <td>${esc(l.upstreamName)}</td>
+      <td>${esc(l.upstreamName)}${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
       <td>${serversCell(l)}</td>
       <td class="num">${l.userCount}</td>
       <td><label class="switch" title="${l.enabled ? t('common.enabled') : t('common.disabled')}"><input type="checkbox" data-change="line.toggle" data-id="${l.id}" ${l.enabled ? 'checked' : ''}><span></span></label></td>
@@ -225,6 +225,7 @@ function readForm(id) {
   const body = {
     name: fv('f-name').trim(), protocol, port: Number(fv('f-port')),
     upstreamId: Number(fv('f-upstream')), enabled: fchk('f-enabled'),
+    routeRules: rrRead(),
   };
   // 部署到哪些服务器:全不勾或全勾 = 全部(存空)
   const nodeCbs = [...document.querySelectorAll('.node-cb')];
@@ -331,6 +332,7 @@ async function editLine(id, cloneFrom, preset) {
   const l = src ? { ...src } : (preset || { protocol: 'vless', enabled: true, options: {}, upstreamId: 0 });
   if (cloneFrom) { l.name = t('line.cloneOf', { name: src.name }); l.port = ''; }
   if (!l.port) l.port = await suggestPort(); // 新建/克隆:给个可用端口做默认值,可改
+  const rrInit = rrOf(l);
   openModal(id ? t('line.edit') : t('line.add'), `
     <h3>${t('line.basic')}</h3>
     <div class="form-grid">
@@ -338,6 +340,16 @@ async function editLine(id, cloneFrom, preset) {
       ${field(t('line.protocol'), sel('f-protocol', Object.keys(PROTOCOLS), l.protocol))}
       ${field(t('common.port'), `<input id="f-port" type="number" min="1" max="65535" value="${l.port || ''}">`, t('line.portHelp'))}
       ${field(t('line.upstream'), `<select id="f-upstream"><option value="0">${t('line.direct')}</option>${state.upstreams.map(u => `<option value="${u.id}" ${l.upstreamId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`, t('line.upstreamHelp'))}
+      <div class="full rr-box">
+        ${check('f-rr-on', t('line.rr.on'), rrInit.length > 0, t('line.rr.help'))}
+        <div id="f-rr" ${rrInit.length ? '' : 'hidden'}>
+          <div class="rr-row rr-head" aria-hidden="true"><span>#</span><span>${esc(t('line.rr.type'))}</span><span>${esc(t('line.rr.values'))}</span><span>${esc(t('line.rr.to'))}</span><span></span></div>
+          <div id="f-rr-list"></div>
+          <div class="rr-row rr-rest"><span class="rr-no">—</span><span class="rr-rest-label">${esc(t('line.rr.rest'))}</span><span class="muted small">${esc(t('line.rr.restHint'))}</span><span class="rr-rest-to" id="f-rr-rest"></span><span></span></div>
+          <button type="button" class="rr-add" id="f-rr-add">${esc(t('line.rr.add'))}</button>
+          <p class="hint">${esc(t('line.rr.hint'))}</p>
+        </div>
+      </div>
       ${check('f-enabled', t('common.enabled'), l.enabled !== false)}
       ${id ? '' : check('f-assign', t('line.assignAll'), true, t('line.assignAllHelp'))}
       ${(state.nodes || []).length > 1 ? `<div class="full">${field(t('line.servers'), `<div class="check-list">${(state.nodes || []).map(n => {
@@ -360,7 +372,150 @@ async function editLine(id, cloneFrom, preset) {
     toast(id ? t('line.updated') : t('line.created'), 'ok');
   }, { wide: true });
   renderDynamic(l);
+  rrBind(rrInit);
   document.getElementById('f-protocol').addEventListener('change', () => renderDynamic({ options: {}, tls: {}, transport: {} }));
+}
+
+// ---- 分流规则:同一条线路按域名 / IP 段 / 端口分给不同出口,没命中的走线路的上游(后端见 render/route_rules.go) ----
+const RR_TYPES = ['domain_suffix', 'domain', 'domain_keyword', 'ip_cidr', 'port'];
+const RR_NEW = () => ({ type: 'domain_suffix', values: [], to: 0 });
+function rrOf(l) { const v = parseJ(l.routeRules); return Array.isArray(v) ? v : []; }
+
+// 出口:直连 / 上游(分组)/ 拦截
+function rrOutOptions(to) {
+  const opt = (v, label) => `<option value="${v}" ${to === v ? 'selected' : ''}>${esc(label)}</option>`;
+  const ups = state.upstreams.length ? `<optgroup label="${esc(t('nav.upstreams'))}">${state.upstreams.map(u => opt(u.id, u.name)).join('')}</optgroup>` : '';
+  return opt(0, t('line.direct')) + ups + opt(-1, t('line.rr.reject'));
+}
+
+function rrRowHTML(r, i, n) {
+  const type = RR_TYPES.includes(r.type) ? r.type : 'domain_suffix';
+  return `<div class="rr-row">
+    <span class="rr-no">${i + 1}</span>
+    <select class="rr-type" aria-label="${esc(t('line.rr.type'))}">${RR_TYPES.map(k => `<option value="${k}" ${type === k ? 'selected' : ''}>${esc(t('line.rr.t.' + k))}</option>`).join('')}</select>
+    <textarea class="rr-values" rows="1" spellcheck="false" autocomplete="off" aria-label="${esc(t('line.rr.values'))}" placeholder="${esc(t('line.rr.ph.' + type))}">${esc(r.raw ?? (r.values || []).join(', '))}</textarea>
+    <select class="rr-to" aria-label="${esc(t('line.rr.to'))}">${rrOutOptions(Number(r.to) || 0)}</select>
+    <span class="rr-ops">
+      <button type="button" class="btn sm ghost" data-rr="up" title="${esc(t('line.rr.up'))}" aria-label="${esc(t('line.rr.up'))}" ${i === 0 ? 'disabled' : ''}>↑</button>
+      <button type="button" class="btn sm ghost" data-rr="down" title="${esc(t('line.rr.down'))}" aria-label="${esc(t('line.rr.down'))}" ${i === n - 1 ? 'disabled' : ''}>↓</button>
+      <button type="button" class="btn sm ghost danger" data-rr="del" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}">✕</button>
+    </span>
+    <div class="rr-err" hidden></div>
+  </div>`;
+}
+
+const rrSplit = s => s.split(/[\s,，;；]+/).filter(Boolean);
+
+// 填的时候就地检查,和后端 render.normRouteValue 同一套规矩(后端仍是最终把关)
+const rrIPv4 = s => { const p = s.split('.'); return p.length === 4 && p.every(x => /^\d{1,3}$/.test(x) && +x <= 255); };
+const rrIPv6 = s => s.includes(':') && /^[0-9a-f:.]+$/i.test(s);
+function rrBadValue(type, v) {
+  if (type === 'domain_keyword') return '';
+  if (type === 'ip_cidr') {
+    const [a, p, extra] = v.split('/');
+    const bits = rrIPv4(a) ? 32 : rrIPv6(a) ? 128 : 0;
+    return bits && extra === undefined && (p === undefined || (/^\d{1,3}$/.test(p) && +p <= bits)) ? '' : t('line.rr.err.ip', { v });
+  }
+  if (type === 'port') {
+    const m = v.match(/^(\d+)(?:[-:](\d+))?$/);
+    const lo = m ? +m[1] : 0, hi = m && m[2] ? +m[2] : lo;
+    return m && lo >= 1 && hi <= 65535 && lo <= hi ? '' : t('line.rr.err.port', { v });
+  }
+  if (/[/:@*?#]/.test(v)) return t('line.rr.err.domain', { v });
+  if (rrIPv4(v)) return t('line.rr.err.isIP', { v });
+  return '';
+}
+
+// 检查一条,把第一个问题写在这条下面;返回问题(没有 = '')
+function rrRowCheck(row) {
+  const type = row.querySelector('.rr-type').value;
+  let msg = '';
+  for (const v of rrSplit(row.querySelector('.rr-values').value)) if ((msg = rrBadValue(type, v))) break;
+  const err = row.querySelector('.rr-err');
+  err.textContent = msg;
+  err.hidden = !msg;
+  row.querySelector('.rr-values').classList.toggle('bad', !!msg);
+  return msg;
+}
+
+// 从界面读回当前的规则:值用换行、逗号(中英文)、空格、分号隔开都行;raw 是原样的输入,
+// 排序 / 添加 / 删除重画时照原样放回去,不把用户的写法改掉(只发 values 给后端)
+function rrCollect(withRaw) {
+  return [...document.querySelectorAll('#f-rr-list .rr-row')].map(row => {
+    const ta = row.querySelector('.rr-values');
+    const r = { type: row.querySelector('.rr-type').value, values: rrSplit(ta.value), to: Number(row.querySelector('.rr-to').value) };
+    if (withRaw) r.raw = ta.value;
+    return r;
+  });
+}
+
+// 输入框按内容长高(换行和逗号写法自动折行都算),最多约 8 行,再多出滚动条
+function rrFit(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight + 2, 180) + 'px';
+}
+
+function rrRender(rules, focusLast) {
+  const list = document.getElementById('f-rr-list');
+  list.innerHTML = rules.length
+    ? rules.map((r, i) => rrRowHTML(r, i, rules.length)).join('')
+    : `<p class="rr-empty">${esc(t('line.rr.none'))}</p>`;
+  list.querySelectorAll('.rr-row').forEach(rrRowCheck);
+  list.querySelectorAll('.rr-values').forEach(rrFit);
+  if (focusLast) list.querySelector('.rr-row:last-child .rr-values')?.focus();
+}
+
+// 最后一行"其余流量 → 线路的上游",跟着上面的上游下拉变
+function rrRest() {
+  const up = document.getElementById('f-upstream');
+  document.getElementById('f-rr-rest').textContent = up && up.selectedOptions[0] ? up.selectedOptions[0].textContent : '';
+}
+
+function rrBind(initial) {
+  const on = document.getElementById('f-rr-on'), box = document.getElementById('f-rr'), list = document.getElementById('f-rr-list');
+  rrRender(initial);
+  rrRest();
+  document.getElementById('f-upstream').addEventListener('change', rrRest);
+  on.addEventListener('change', () => {
+    box.hidden = !on.checked;
+    if (on.checked && !rrCollect().length) rrRender([RR_NEW()], true); // 勾上就给一条空规则,直接填
+    else if (on.checked) list.querySelectorAll('.rr-values').forEach(rrFit); // 藏着时量不出高度,显示出来再量
+  });
+  document.getElementById('f-rr-add').addEventListener('click', () => rrRender([...rrCollect(true), RR_NEW()], true));
+  list.addEventListener('click', e => {
+    const b = e.target.closest('[data-rr]');
+    if (!b) return;
+    const i = [...list.querySelectorAll('.rr-row')].indexOf(b.closest('.rr-row'));
+    const rules = rrCollect(true);
+    if (b.dataset.rr === 'del') rules.splice(i, 1);
+    else {
+      const j = b.dataset.rr === 'up' ? i - 1 : i + 1;
+      if (j < 0 || j >= rules.length) return;
+      [rules[i], rules[j]] = [rules[j], rules[i]];
+    }
+    rrRender(rules);
+  });
+  list.addEventListener('change', e => {
+    if (!e.target.classList.contains('rr-type')) return;
+    const row = e.target.closest('.rr-row');
+    row.querySelector('.rr-values').placeholder = t('line.rr.ph.' + e.target.value);
+    rrRowCheck(row);
+  });
+  list.addEventListener('input', e => { if (e.target.classList.contains('rr-values')) rrFit(e.target); }); // 长高立刻做,检查稍等一下再做
+  list.addEventListener('input', debounce(e => { const row = e.target.closest('.rr-row'); if (row) rrRowCheck(row); }, 300));
+}
+
+// 保存时用:没勾 = 不分流(存空);勾了就每条都要有内容、内容要合规
+function rrRead() {
+  if (!fchk('f-rr-on')) return [];
+  const rows = [...document.querySelectorAll('#f-rr-list .rr-row')];
+  const rules = rrCollect();
+  rules.forEach((r, i) => {
+    if (!r.values.length) throw new Error(t('line.rr.emptyRule', { n: i + 1 }));
+    const bad = rrRowCheck(rows[i]);
+    if (bad) throw new Error(t('line.rr.errAt', { n: i + 1, msg: bad }));
+  });
+  return rules;
 }
 
 // ---- 批量设置 ----

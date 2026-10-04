@@ -1,6 +1,6 @@
 // Package render 把 m-ui 数据模型(线路/上游/用户)渲染成一份 sing-box 配置。
 //
-// 一条线路 = 一个入站 + 一条 "inbound→outbound" 路由规则。支持的入站协议:
+// 一条线路 = 一个入站 + 一条 "inbound→outbound" 路由规则(带分流规则时前面再加几条,见 route_rules.go)。支持的入站协议:
 // hysteria2 / anytls / tuic / trojan / vless / vmess / shadowsocks / socks / http / mixed。
 // TLS 三种模式:cert(节点证书)、reality、none;vless/vmess/trojan 可选 ws/grpc/httpupgrade/http 传输。
 // 该渲染由 Hub 按节点执行,产物整份下发给对应 Agent。
@@ -137,9 +137,15 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 	// 只渲染本机线路真正用到的上游:不部署线路的主机一个出站都不该有;一条坏掉的上游也不该让
 	// 与它无关的机器整份配置渲染失败。没线路用的上游在面板上按"未使用"处理,测试走临时实例
 	usedUp := map[uint]bool{}
+	lineRules := make(map[uint][]RouteRule, len(lines))
 	for _, l := range lines {
-		if l.UpstreamId != 0 {
-			usedUp[l.UpstreamId] = true
+		rr, err := ParseRouteRules(l.RouteRules)
+		if err != nil {
+			return nil, fmt.Errorf("线路 %q: %w", l.Name, err)
+		}
+		lineRules[l.Id] = rr
+		for _, id := range LineUpstreams(l) { // 分流规则指向的上游也要渲染出站,否则规则找不到出口、整份配置起不来
+			usedUp[id] = true
 		}
 	}
 	upstreams := make([]model.Upstream, 0, len(allUps))
@@ -166,9 +172,13 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 		// 自定义域名才拦得住;但 resolve 解析失败会直接拒绝连接,所以只对走直连出口的线路做——它们本来就要
 		// 在本机解析域名,没有新增失败点;经上游(WARP / 远端代理)出去的线路,私网指的是上游那头的网络,
 		// 由上游自己管,这里只拦写成 IP 字面量的。
+		// 带分流规则的线路只解析最后走直连的那部分(见 routeResolveRules)。
 		var directIn []string
+		var splitResolve []json.RawMessage
 		for _, l := range lines {
-			if l.UpstreamId == 0 {
+			if rr := lineRules[l.Id]; len(rr) > 0 {
+				splitResolve = append(splitResolve, routeResolveRules(l, rr)...)
+			} else if l.UpstreamId == 0 {
 				directIn = append(directIn, l.Name)
 			}
 		}
@@ -176,6 +186,7 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 			resolve, _ := json.Marshal(map[string]interface{}{"inbound": directIn, "action": "resolve"})
 			rules = append(rules, resolve)
 		}
+		rules = append(rules, splitResolve...)
 		rules = append(rules, json.RawMessage(`{"ip_is_private":true,"action":"reject"}`))
 	}
 	for _, line := range lines {
@@ -192,6 +203,13 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 				return nil, fmt.Errorf("线路 %q 指向不存在的上游 #%d", line.Name, line.UpstreamId)
 			}
 			outboundTag = up.Name
+		}
+		for _, rr := range lineRules[line.Id] { // 分流规则排在这条线路的默认出口前面,从上往下第一条命中的算
+			rule, err := routeRuleJSON(line.Name, rr, upstreamById)
+			if err != nil {
+				return nil, fmt.Errorf("线路 %q 的分流规则%w", line.Name, err)
+			}
+			rules = append(rules, rule)
 		}
 		rule, _ := json.Marshal(map[string]interface{}{"inbound": []string{line.Name}, "action": "route", "outbound": outboundTag})
 		rules = append(rules, rule)

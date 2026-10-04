@@ -1271,16 +1271,18 @@ func (r *Runner) notifyRule(text string) {
 	}
 }
 
-// usedUpstreams 本机线路真正用到的上游 id:启用的线路 ∩ 部署在本机 ∩ 指定了上游。
+// usedUpstreams 本机线路真正用到的上游 id:启用的线路 ∩ 部署在本机 ∩ 指定了上游(含分流规则指向的)。
 // 巡检据此只测本机用得上的那些,不部署线路的主机一条都不测。
 func (r *Runner) usedUpstreams() map[uint]bool {
 	self := render.LocalNodeID(r.db)
 	var lines []model.Line
-	r.db.Select("id, upstream_id, node_ids").Where("enabled = ? AND upstream_id > 0", true).Find(&lines)
+	r.db.Select("id, upstream_id, node_ids, route_rules").Where("enabled = ?", true).Find(&lines)
 	out := map[uint]bool{}
 	for _, l := range lines {
 		if render.LineOnNode(l, self) {
-			out[l.UpstreamId] = true
+			for _, id := range render.LineUpstreams(l) {
+				out[id] = true
+			}
 		}
 	}
 	return out

@@ -11,6 +11,8 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/monitor"
 	"github.com/Maoyangui/m-ui/render"
+
+	"gorm.io/gorm"
 )
 
 // 上游健康:按"上游 × 使用它的服务器"汇总。
@@ -39,22 +41,41 @@ type upRow struct {
 	Servers []upServer `json:"servers"`
 }
 
-// upstreamUsers 每条上游被哪些服务器用到:启用的线路 ∩ 部署到该服务器 ∩ 指定了这条上游。
+// linesUsingUpstream 用到这条上游的线路数(含停用的):自己选的上游是它,或者分流规则指向它。删上游前据此拦下。
+func linesUsingUpstream(db *gorm.DB, id uint) int {
+	var lines []model.Line
+	db.Select("id, upstream_id, route_rules").Find(&lines)
+	n := 0
+	for _, l := range lines {
+		for _, u := range render.LineUpstreams(l) {
+			if u == id {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
+// upstreamUsers 每条上游被哪些服务器用到:启用的线路 ∩ 部署到该服务器 ∩ 指定了这条上游(含分流规则指向的)。
 func (s *Server) upstreamUsers() (map[uint]map[uint]bool, []model.Node) {
 	var nodes []model.Node
 	s.db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&nodes)
 	var lines []model.Line
-	s.db.Select("id, upstream_id, node_ids").Where("enabled = ? AND upstream_id > 0", true).Find(&lines)
+	s.db.Select("id, upstream_id, node_ids, route_rules").Where("enabled = ?", true).Find(&lines)
 	out := map[uint]map[uint]bool{}
 	for _, l := range lines {
+		ups := render.LineUpstreams(l)
 		for _, n := range nodes {
 			if !render.LineOnNode(l, n.Id) {
 				continue
 			}
-			if out[l.UpstreamId] == nil {
-				out[l.UpstreamId] = map[uint]bool{}
+			for _, id := range ups {
+				if out[id] == nil {
+					out[id] = map[uint]bool{}
+				}
+				out[id][n.Id] = true
 			}
-			out[l.UpstreamId][n.Id] = true
 		}
 	}
 	return out, nodes

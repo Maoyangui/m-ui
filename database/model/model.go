@@ -51,8 +51,10 @@ type Line struct {
 	Tls json.RawMessage `json:"tls,omitempty"`
 	// Transport vless/vmess/trojan 的传输层(sing-box transport 对象:ws/grpc/httpupgrade/http);空 = TCP。
 	Transport json.RawMessage `json:"transport,omitempty"`
-	Enabled   bool            `json:"enabled" gorm:"default:true"`
-	Sort      int             `json:"sort"`
+	// RouteRules 分流规则 [{type, values, to}]:按目标分给不同出口,没命中的走 UpstreamId;空 = 不分流(见 render.RouteRule)。
+	RouteRules json.RawMessage `json:"routeRules,omitempty"`
+	Enabled    bool            `json:"enabled" gorm:"default:true"`
+	Sort       int             `json:"sort"`
 }
 
 // Node 入口服务器。IsLocal 标记 Hub 所在机;副机通过 ApiUrl+Token 管理。

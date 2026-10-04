@@ -191,6 +191,39 @@ details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; m
 .confirm-text { font-size: .95rem; padding: .25rem 0 .5rem; }
 .check-list { max-height: 13rem; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .5rem .7rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .25rem .75rem; background: var(--surface-2); }
 .check-list label { display: flex; gap: .4rem; align-items: center; font-size: .82rem; }
+/* 线路的分流规则:一行 = 序号 / 匹配方式 / 匹配内容 / 出口 / 排序删除;最后一行是"其余流量 → 线路的上游"。
+   按编辑框自己的宽度排(容器查询),不看整个窗口 */
+.rr-box { container-type: inline-size; }
+#f-rr { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .55rem .75rem .65rem; margin-top: .55rem; background: var(--surface-2); }
+#f-rr .hint { margin: .5rem 0 0; }
+.rr-row { display: grid; grid-template-columns: 1.4rem 7.5rem minmax(0, 1fr) 9.5rem 5.4rem; gap: .5rem; align-items: start; padding: .5rem 0; border-top: 1px solid var(--border); }
+.rr-head { padding: 0 0 .35rem; border-top: none; font-size: .74rem; font-weight: 500; color: var(--muted); }
+.rr-no { display: flex; align-items: center; justify-content: center; min-height: 2.15rem; font-size: .78rem; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.rr-row textarea { min-height: 2.15rem; resize: vertical; line-height: 1.35; }
+.rr-row textarea.bad { border-color: var(--danger); }
+.rr-err { grid-column: 3 / -1; margin-top: -.15rem; font-size: .76rem; color: var(--danger); }
+.rr-ops { display: flex; justify-content: flex-end; gap: .1rem; }
+.rr-ops .btn { padding: .32rem .48rem; }
+.rr-ops .btn:disabled { opacity: .3; }
+.rr-rest { align-items: center; }
+.rr-rest-label { font-size: .84rem; font-weight: 500; }
+.rr-rest-to { padding: .42rem .65rem; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); font-size: .84rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-empty { padding: .7rem 0; border-top: 1px solid var(--border); font-size: .82rem; color: var(--muted); text-align: center; }
+.rr-add { width: 100%; margin-top: .35rem; padding: .45rem; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); background: transparent; color: var(--primary); font: inherit; font-size: .84rem; cursor: pointer; transition: background .15s, border-color .15s; }
+.rr-add:hover { border-color: var(--primary); background: var(--primary-soft); }
+@container (max-width: 560px) { /* 窄:第一行 序号 / 匹配方式 / 排序删除,下面匹配内容、问题、出口各占一行 */
+  .rr-head { display: none; }
+  .rr-row { grid-template-columns: 1.2rem minmax(0, 1fr) auto; grid-template-areas: "no type ops" ". val val" ". err err" ". to to"; }
+  .rr-row > .rr-no { grid-area: no; }
+  .rr-row > .rr-type { grid-area: type; }
+  .rr-row > .rr-ops { grid-area: ops; }
+  .rr-row > .rr-values { grid-area: val; }
+  .rr-row > .rr-to { grid-area: to; }
+  .rr-row > .rr-err { grid-area: err; margin-top: 0; }
+  .rr-rest { grid-template-columns: 1.2rem auto minmax(0, 1fr); grid-template-areas: none; }
+  .rr-rest > .rr-no { grid-area: auto; }
+  .rr-rest .muted { display: none; }
+}
 
 /* ===== 徽章与状态 ===== */
 .badge { display: inline-block; font-size: .72rem; padding: .12rem .5rem; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; vertical-align: middle; }

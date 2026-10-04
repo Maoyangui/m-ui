@@ -290,10 +290,23 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodPut:
-		var line model.Line
-		if err := json.NewDecoder(r.Body).Decode(&line); err != nil {
+		var raw json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 			badRequest(w, err)
 			return
+		}
+		var line model.Line
+		if err := json.Unmarshal(raw, &line); err != nil {
+			badRequest(w, err)
+			return
+		}
+		cols := []string{"name", "protocol", "port", "upstream_id", "options", "addrs", "node_ids", "tls", "transport", "enabled"}
+		// 分流规则只在请求里带了这个字段时才改:外部程序按老格式改线路(不知道有这个字段)不能把规则清掉
+		var keys map[string]json.RawMessage
+		if json.Unmarshal(raw, &keys) == nil {
+			if _, ok := keys["routeRules"]; ok {
+				cols = append(cols, "route_rules")
+			}
 		}
 		line.Id = id
 		if err := s.validateLine(&line); err != nil {
@@ -306,9 +319,7 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 		}
 		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
 		err := s.db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Model(&model.Line{}).Where("id = ?", id).Select(
-				"name", "protocol", "port", "upstream_id", "options", "addrs", "node_ids", "tls", "transport", "enabled",
-			).Updates(line).Error; err != nil {
+			if err := tx.Model(&model.Line{}).Where("id = ?", id).Select(cols).Updates(line).Error; err != nil {
 				return err
 			}
 			return validateFullConfig(tx, nodeCert)
@@ -536,6 +547,23 @@ func (s *Server) validateLine(line *model.Line) error {
 			return errors.New("指定的上游不存在")
 		}
 	}
+	rules, err := render.ParseRouteRules(line.RouteRules)
+	if err != nil {
+		return err
+	}
+	for i, r := range rules {
+		if r.To > 0 {
+			var exists int64
+			s.db.Model(&model.Upstream{}).Where("id = ?", r.To).Count(&exists)
+			if exists == 0 {
+				return fmt.Errorf("第 %d 条分流规则指向的上游不存在", i+1)
+			}
+		}
+	}
+	line.RouteRules = nil // 存整理过的(去空白、去重);没有规则就存空
+	if len(rules) > 0 {
+		line.RouteRules, _ = json.Marshal(rules)
+	}
 	return nil
 }
 
@@ -657,10 +685,8 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, up)
 	case http.MethodDelete:
-		var inUse int64
-		s.db.Model(&model.Line{}).Where("upstream_id = ?", id).Count(&inUse)
-		if inUse > 0 {
-			badRequest(w, fmt.Errorf("该上游仍被 %d 条线路使用,无法删除", inUse))
+		if inUse := linesUsingUpstream(s.db, id); inUse > 0 {
+			badRequest(w, fmt.Errorf("该上游仍被 %d 条线路使用(含分流规则),无法删除", inUse))
 			return
 		}
 		if err := s.db.Delete(&model.Upstream{}, id).Error; err != nil {

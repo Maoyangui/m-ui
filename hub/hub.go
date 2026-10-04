@@ -49,6 +49,21 @@ var SyncedSettings = []string{
 // 0.5.0:用户的停用原因、代理的额度用尽标志、私网屏蔽开关。0.6.0:规则限速状态表(副机要叠加到限速上)。
 const MinNodeVersion = "0.6.0"
 
+// RouteRulesMinNode 有线路用了分流规则时副机至少要这个版本:旧版副机不认识这个字段,会照常应用快照却把规则丢掉,
+// 该走别的出口、该拦的流量全走线路默认的上游 —— 宁可让它拒收并提示升级。没有线路用分流规则时不抬门槛,
+// 只升级主机不影响旧副机同步。
+const RouteRulesMinNode = "0.6.14"
+
+// minNodeFor 这份快照要求的副机最低版本。
+func minNodeFor(lines []model.Line) string {
+	for _, l := range lines {
+		if render.HasRouteRules(l) {
+			return RouteRulesMinNode
+		}
+	}
+	return MinNodeVersion
+}
+
 // Snapshot 是主机下发给副机的完整配置。
 type Snapshot struct {
 	Revision      string               `json:"revision"`
@@ -176,6 +191,7 @@ func sameLines(a, b []model.Line) bool {
 			out[i].NodeIds = normJSON(out[i].NodeIds)
 			out[i].Tls = normJSON(out[i].Tls)
 			out[i].Transport = normJSON(out[i].Transport)
+			out[i].RouteRules = normJSON(out[i].RouteRules)
 		}
 		return out
 	}
@@ -936,7 +952,7 @@ func (h *Hub) refreshSnapshot() (Snapshot, error) {
 	if err != nil {
 		return snap, err
 	}
-	snap.Version, snap.MinNode = h.d.Version, MinNodeVersion
+	snap.Version, snap.MinNode = h.d.Version, minNodeFor(snap.Lines)
 	h.mu.Lock()
 	h.latest, h.revision = &snap, snap.Revision
 	h.mu.Unlock()
