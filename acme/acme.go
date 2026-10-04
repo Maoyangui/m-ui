@@ -406,12 +406,31 @@ func Precheck(ctx context.Context, domain string) PrecheckResult {
 	return res
 }
 
-// PublicIP 探测本机公网 IPv4(Cloudflare trace,回落 ipify);失败返回空。
+// PublicIP 探测本机公网 IP(Cloudflare trace,回落 ipify),优先 IPv4;失败返回空。
+//
+// 双栈机器上默认连接走 IPv6,测出来的是 v6 地址:订阅里留空的节点地址会变成大陆多数网络连不上的 v6,
+// 大陆连通检测(只测 IPv4)也测不了。所以先强制走 IPv4 测,测不到(纯 IPv6 机器)才按默认路由再测一次。
 func PublicIP(ctx context.Context) string { return publicIP(ctx) }
 
+var publicIPURLs = []string{"https://www.cloudflare.com/cdn-cgi/trace", "https://api.ipify.org"}
+
 func publicIP(ctx context.Context) string {
-	c := &http.Client{Timeout: 6 * time.Second}
-	for _, u := range []string{"https://www.cloudflare.com/cdn-cgi/trace", "https://api.ipify.org"} {
+	if ip := probePublicIP(ctx, "tcp4"); ip != "" {
+		return ip
+	}
+	return probePublicIP(ctx, "tcp")
+}
+
+// probePublicIP 按指定网络(tcp4 / tcp)连探测地址;tcp4 时只认 IPv4 结果。
+func probePublicIP(ctx context.Context, network string) string {
+	d := &net.Dialer{Timeout: 5 * time.Second}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) {
+		return d.DialContext(ctx, network, addr)
+	}
+	defer tr.CloseIdleConnections()
+	c := &http.Client{Timeout: 6 * time.Second, Transport: tr}
+	for _, u := range publicIPURLs {
 		req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
 		resp, err := c.Do(req)
 		if err != nil {
@@ -421,14 +440,19 @@ func publicIP(ctx context.Context) string {
 		resp.Body.Close()
 		s := strings.TrimSpace(string(b))
 		if strings.Contains(s, "ip=") {
-			for _, line := range strings.Split(s, "\n") {
+			s = ""
+			for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 				if strings.HasPrefix(line, "ip=") {
-					return strings.TrimPrefix(line, "ip=")
+					s = strings.TrimSpace(strings.TrimPrefix(line, "ip="))
+					break
 				}
 			}
-		} else if net.ParseIP(s) != nil {
-			return s
 		}
+		ip := net.ParseIP(s)
+		if ip == nil || (network == "tcp4" && ip.To4() == nil) {
+			continue
+		}
+		return s
 	}
 	return ""
 }
