@@ -41,7 +41,7 @@ m-ui 是一个自托管的代理面板:**一个二进制 + 一个数据库文件
 
 | 模块 | 内容 |
 |---|---|
-| 线路 | Hysteria2、AnyTLS、TUIC、Trojan、VLESS(Reality / Vision)、VMess、Shadowsocks(含 2022)、SOCKS、HTTP、Mixed;传输层 WS / gRPC / HTTPUpgrade / HTTP;Hysteria2 端口跳跃;按服务器选择部署位置 |
+| 线路 | Hysteria2、AnyTLS、TUIC、Trojan、VLESS(Reality / Vision)、VMess、Shadowsocks(含 2022)、SOCKS、HTTP、Mixed;传输层 WS / gRPC / HTTPUpgrade / HTTP;Hysteria2 端口跳跃;按服务器选择部署位置;按规则分流(域名 / IP 段 / 端口分给不同出口) |
 | 上游 | VLESS / VMess / Trojan / TUIC / Hysteria2 / Shadowsocks / SOCKS 落地,粘贴分享链接导入;一键测延迟、定时巡检、故障 / 恢复告警;WARP 一键接入 |
 | 用户 | 配额、到期、周期重置、同时在线设备数(按源 IP,跨服务器并集)、上下行限速;超量 / 到期自动禁用并踢线;批量生成、批量操作、CSV 导出。代理的用户归代理管,不混进主面板用户页 |
 | 套餐 | 配额 / 时长 / 设备 / 限速 / 线路的模板,建号、续费、延期一键套用 |
@@ -323,7 +323,7 @@ m-ui            # 菜单选 10 "更新到最新版"
 ### 线路
 
 - 一条线路对应一个入口端口。端口在所有服务器上一致,主机负责渲染并下发到每台副机。
-- **上游**决定流量从哪出去:直连、WARP、或任意一个已添加的落地节点(中转)。
+- **上游**决定流量从哪出去:直连、WARP、或任意一个已添加的落地节点(中转)。勾上**按规则分流**可以让指定的域名、IP 段、端口走别的出口(或拦掉),其余走这里选的上游。
 - **部署到**:默认所有服务器;也可以只部署到某几台,例如给某台副机建一条它专属的线路。
 - Hysteria2 可填**端口跳跃范围**(如 `20000-30000`),服务器用 nftables / iptables 把这段 UDP 转到线路端口,客户端在范围内随机换端口,规避运营商对单端口 UDP 的限速。
 - 保存时整份 sing-box 配置先干跑校验,失败的改动不会落库。
