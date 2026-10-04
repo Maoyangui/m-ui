@@ -781,6 +781,13 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 				continue
 			}
 			prevDef, wasRunning := prevInbounds[meta.Tag]
+			if !wasRunning {
+				// 运行中的配置里没有这条线路(上一次整机重载没起来、已回滚,或还在冷却期):不往旧配置里补建。
+				// 旧配置的路由里没有它 —— 它选的上游、分流规则(含拦截)都不生效,流量会落到默认的直连。
+				// 以前这里照样补建,端口空着就真开出来了;等整份配置能启动时它会随之上线。
+				logger.Warning("入站 ", meta.Tag, " 不在运行中的配置里,等整份配置能启动再开放(补进旧配置会绕开它的上游和分流规则)")
+				continue
+			}
 			if err := r.core.RemoveInbound(meta.Tag); err != nil && err != os.ErrInvalid {
 				logger.Warning("重建入站 ", meta.Tag, " 失败(移除): ", err)
 				if firstErr == nil && wasRunning {
@@ -790,13 +797,6 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 			}
 			box.ConnTracker().CloseConnByInbound(meta.Tag)
 			if err := r.core.AddInbound(inbound); err != nil {
-				// 这个入站本来就不在运行中的配置里(上一次整机重载时它没起来、已回滚),这里补建
-				// 又失败,是意料之中:它上面没有任何用户在服务,不能让它把别的入站的用户热更新
-				// 一起判成失败 —— 那正是 0.6.10 里"撤销凭据失败 → 停掉整台机器"的起点。
-				if !wasRunning {
-					logger.Warning("入站 ", meta.Tag, " 不在运行中的配置里且补建失败(它本来就没在服务),跳过: ", err)
-					continue
-				}
 				logger.Warning("重建入站 ", meta.Tag, " 失败(添加): ", err)
 				if firstErr == nil {
 					firstErr = fmt.Errorf("重建入站 %s(添加): %w", meta.Tag, err)
