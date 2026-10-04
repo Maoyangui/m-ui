@@ -15,9 +15,11 @@ permissions:
   pages: write
   id-token: write
 
+# 不取消正在跑的:推送、发版、安装测试、内容队列都会触发部署,常常前后脚到;
+# 取消会让前一个提交挂上红叉(看着像部署失败)。排队即可,同组最多一个在跑、一个在等。
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
