@@ -157,7 +157,7 @@ table.grid.tight { min-width: 0; table-layout: fixed; }
   table.grid:not(.kv):not(.api-doc):not(.conns) tr.selected { border-color: var(--primary); }
   table.grid:not(.kv):not(.api-doc):not(.conns) td { display: block; flex: 1 1 100%; min-width: 0; padding: .42rem 0; border: none; border-top: 1px dashed var(--border); text-align: right; word-break: break-word; }
   table.grid:not(.kv):not(.api-doc):not(.conns) td::after { content: ''; display: table; clear: both; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td[data-label]::before { content: attr(data-label); float: left; margin-right: .8rem; font-size: .76rem; line-height: 1.7; color: var(--muted); text-align: left; }
+  table.grid:not(.kv):not(.api-doc):not(.conns) td[data-label]::before { content: attr(data-label); float: left; font-family: var(--font); margin-right: .8rem; font-size: .76rem; line-height: 1.7; color: var(--muted); text-align: left; }
   table.grid:not(.kv):not(.api-doc):not(.conns) td.handle { display: none; }
   table.grid:not(.kv):not(.api-doc):not(.conns) td:has(> input[type=checkbox]:only-child) { order: -2; flex: 0 0 auto; padding-right: .6rem; border-top: none; }
   table.grid:not(.kv):not(.api-doc):not(.conns) td:has(> input[type=checkbox]:only-child)::before { display: none; }
@@ -223,7 +223,7 @@ details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; m
 .rr-box { container-type: inline-size; }
 #f-rr { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .55rem .75rem .65rem; margin-top: .55rem; background: var(--surface-2); }
 #f-rr .hint { margin: .5rem 0 0; }
-.rr-row { display: grid; grid-template-columns: 1.4rem 7.5rem minmax(0, 1fr) 9.5rem 5.4rem; gap: .5rem; align-items: start; padding: .5rem 0; border-top: 1px solid var(--border); }
+.rr-row { display: grid; grid-template-columns: 1.4rem 10rem minmax(0, 1fr) 9.5rem 5.4rem; gap: .5rem; align-items: start; padding: .5rem 0; border-top: 1px solid var(--border); }
 .rr-head { padding: 0 0 .35rem; border-top: none; font-size: .74rem; font-weight: 500; color: var(--muted); }
 .rr-no { display: flex; align-items: center; justify-content: center; min-height: 2.15rem; font-size: .78rem; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .rr-row textarea { min-height: 2.15rem; resize: vertical; line-height: 1.35; }
@@ -238,7 +238,7 @@ details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; m
 .rr-empty { padding: .7rem 0; border-top: 1px solid var(--border); font-size: .82rem; color: var(--muted); text-align: center; }
 .rr-add { width: 100%; margin-top: .35rem; padding: .45rem; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); background: transparent; color: var(--primary); font: inherit; font-size: .84rem; cursor: pointer; transition: background .15s, border-color .15s; }
 .rr-add:hover { border-color: var(--primary); background: var(--primary-soft); }
-@container (max-width: 560px) { /* 窄:第一行 序号 / 匹配方式 / 排序删除,下面匹配内容、问题、出口各占一行 */
+@container (max-width: 640px) { /* 窄:第一行 序号 / 匹配方式 / 排序删除,下面匹配内容、问题、出口各占一行 */
   .rr-head { display: none; }
   .rr-row { grid-template-columns: 1.2rem minmax(0, 1fr) auto; grid-template-areas: "no type ops" ". val val" ". err err" ". to to"; }
   .rr-row > .rr-no { grid-area: no; }

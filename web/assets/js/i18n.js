@@ -451,7 +451,7 @@ const en = {
   'line.upstreamHelp': 'Egress for this line. "direct" exits from this server',
   'line.rr.on': 'Rule-based routing', 'line.rr.help': 'Send traffic to different egresses by domain, IP range or port. Unchecking and saving clears the rules',
   'line.rr.add': '+ Add rule', 'line.rr.none': 'No rules yet. Add one below', 'line.rr.hint': 'Checked top to bottom; the first match wins. Traffic requested by domain may not match IP ranges, so prefer domain rules.',
-  'line.rr.type': 'Match', 'line.rr.values': 'Values (separate with commas or new lines)', 'line.rr.to': 'Egress', 'line.rr.up': 'Move up', 'line.rr.down': 'Move down', 'line.rr.reject': 'Block',
+  'line.rr.type': 'Match', 'line.rr.values': 'Values (comma or new line)', 'line.rr.to': 'Egress', 'line.rr.up': 'Move up', 'line.rr.down': 'Move down', 'line.rr.reject': 'Block',
   'line.rr.rest': 'Everything else', 'line.rr.restHint': 'not matched above', 'line.rr.errAt': 'Rule {n}: {msg}',
   'line.rr.err.domain': '"{v}" is not a domain: enter just the domain, e.g. netflix.com', 'line.rr.err.isIP': '"{v}" is an IP; use "IP range"',
   'line.rr.err.ip': '"{v}" is not an IP or IP range (e.g. 1.2.3.4, 91.108.4.0/22)', 'line.rr.err.port': '"{v}" is not a port or port range (e.g. 443, 8000-9000)',
