@@ -388,6 +388,31 @@ function pageName() {
   if (!pages[h] || !navFor().includes(h)) return 'dashboard';
   return h;
 }
+// 窄屏下列表表格按卡片排(见 style.css「窄屏表格」):每格补上它那一列的表头,卡片里当字段名显示。
+// 各页面照常渲染表格,这里统一补,不用每页自己写。只改属性、不动节点,不会反过来触发自己。
+const CARD_SKIP = '.kv, .api-doc, .conns'; // 键值表、接口文档、连接列表保持原样
+function labelTables() {
+  document.querySelectorAll('table.grid').forEach(tb => {
+    if (tb.matches(CARD_SKIP)) return;
+    const heads = [...tb.querySelectorAll('thead th')].map(th => th.textContent.trim());
+    tb.querySelectorAll('tbody tr').forEach(tr => {
+      let col = 0;
+      for (const td of tr.children) {
+        const span = td.colSpan || 1;
+        if (span > 1) td.dataset.span = '';
+        else if (heads[col] && td.dataset.label !== heads[col]) td.dataset.label = heads[col];
+        col += span;
+      }
+    });
+  });
+}
+let labelQueued = false;
+new MutationObserver(() => {
+  if (labelQueued) return;
+  labelQueued = true;
+  requestAnimationFrame(() => { labelQueued = false; labelTables(); });
+}).observe(document.body, { childList: true, subtree: true });
+
 async function route(force = false) {
   const name = pageName();
   if (!force && current === name && pages[name].keepAlive) return;
@@ -397,7 +422,8 @@ async function route(force = false) {
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.page === name));
   const page = pages[name];
   document.getElementById('page-title').textContent = page.title();
-  document.getElementById('page-subtitle').textContent = page.subtitle ? page.subtitle() : '';
+  const sub = document.getElementById('page-subtitle');
+  sub.textContent = sub.title = page.subtitle ? page.subtitle() : ''; // 窄屏只显示两行,全文在悬停提示里
   document.getElementById('topbar-right').innerHTML = '';
   closeDrawer();
   const el = document.getElementById('page');
