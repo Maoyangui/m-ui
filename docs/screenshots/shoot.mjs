@@ -66,6 +66,44 @@ async function panel(lang) {
     await page.click('#users-body tr:first-child [data-act="user.detail"]');
     await page.waitForTimeout(1500);
   });
+  // 线路编辑框里"上游 + 按规则分流"那一块(make.sh 给 Tokyo-HY2 配了三条分流规则);只截这一块,文章里图不会太大。
+  // 上边只留 6px:再多就截进上一行说明文字的半行
+  await page.goto(BASE + '#/lines');
+  await page.waitForTimeout(1800);
+  await page.click('#lines-body tr:first-child [data-act="line.edit"]');
+  await page.waitForTimeout(1200);
+  await page.evaluate(() => document.getElementById('f-rr').scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(400);
+  await scrub(page);
+  const box = await page.evaluate(() => {
+    const up = document.getElementById('f-upstream').closest('.field').getBoundingClientRect();
+    const rr = document.querySelector('.rr-box').getBoundingClientRect();
+    const grid = document.querySelector('#modal .form-grid').getBoundingClientRect();
+    return { x: grid.left, y: up.top, w: grid.width, h: rr.bottom - up.top };
+  });
+  await page.screenshot({ path: `${OUT}/route-rules${suffix}.png`, clip: { x: box.x - 16, y: box.y - 6, width: box.w + 32, height: box.h + 22 } });
+  console.log('拍好', 'route-rules' + suffix);
+  await ctx.close();
+}
+
+// 手机宽度下的线路页(列表排成卡片)
+async function mobile(lang) {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: lang === 'zh' ? 'zh-CN' : 'en-US' });
+  const page = await ctx.newPage();
+  await page.goto(BASE);
+  await page.evaluate(async ({ pass, lang }) => {
+    localStorage.setItem('m-ui-lang', lang);
+    localStorage.setItem('m-ui-theme', 'light');
+    localStorage.setItem('m-ui.hideQuickStart', '1');
+    localStorage.setItem('m-ui.starDismissed', '1');
+    await fetch('api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: pass }) });
+  }, { pass: PASS, lang });
+  await page.goto(BASE + '#/lines');
+  await page.reload();
+  await page.waitForTimeout(2500);
+  await scrub(page);
+  await page.screenshot({ path: `${OUT}/mobile-lines${lang === 'zh' ? '' : '-en'}.png` });
+  console.log('拍好 mobile-lines' + (lang === 'zh' ? '' : '-en'));
   await ctx.close();
 }
 
@@ -82,6 +120,8 @@ async function landing(lang) {
 
 await panel('zh');
 await panel('en');
+await mobile('zh');
+await mobile('en');
 await landing('zh');
 await landing('en');
 await browser.close();

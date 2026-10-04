@@ -82,7 +82,32 @@
         "enabled": true,
         "sort": 1,
         "upstreamName": "direct",
-        "userCount": 5
+        "userCount": 5,
+        "routeRules": [
+          {
+            "type": "domain_suffix",
+            "values": [
+              "netflix.com",
+              "nflxvideo.net"
+            ],
+            "to": 2
+          },
+          {
+            "type": "domain_keyword",
+            "values": [
+              "ads"
+            ],
+            "to": -1
+          },
+          {
+            "type": "ip_cidr",
+            "values": [
+              "91.108.4.0/22",
+              "149.154.160.0/20"
+            ],
+            "to": 1
+          }
+        ]
       },
       {
         "id": 2,
@@ -176,6 +201,18 @@
           "password": "demo-password"
         },
         "sort": 0
+      },
+      {
+        "id": 2,
+        "name": "LA-streaming",
+        "type": "shadowsocks",
+        "options": {
+          "server": "203.0.113.40",
+          "server_port": 8388,
+          "method": "aes-256-gcm",
+          "password": "demo-password"
+        },
+        "sort": 1
       }
     ],
     "GET users": [
@@ -824,6 +861,16 @@
           "error": "Head \"http://www.gstatic.com/generate_204\": EOF",
           "checkedAt": 1788588827,
           "fails": 1
+        },
+        {
+          "id": 2,
+          "name": "LA-streaming",
+          "ok": true,
+          "delayMs": 142,
+          "method": "urltest",
+          "error": "",
+          "checkedAt": 1788588827,
+          "fails": 0
         }
       ]
     },

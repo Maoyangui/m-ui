@@ -1,11 +1,11 @@
 <!--meta {"title":"功能 · m-ui","description":"m-ui 面板能做的全部:Hysteria2、AnyTLS、TUIC、VLESS Reality、Trojan、VMess、Shadowsocks 2022 线路;上游与 WARP;用户配额、设备与限速;套餐;代理;带落地页的订阅;证书;备份;多服务器;Telegram;外部 API;一键更新。","nav":"功能","order":3} -->
 <article class="doc">
   <h1>功能</h1>
-  <p class="lead">按侧栏的顺序,面板管的每一件事。全部在一个二进制、一个 SQLite 文件里。</p>
+  <p class="lead">按侧栏的顺序,面板管的每一件事。全部在一个二进制、一个 SQLite 文件里。手机上打开面板,列表自动排成卡片。</p>
   <nav class="toc"><a href="#lines">线路</a><a href="#upstreams">上游</a><a href="#users">用户</a><a href="#plans">套餐</a><a href="#rules">规则</a><a href="#resellers">代理</a><a href="#subs">订阅</a><a href="#servers">服务器</a><a href="#cert">证书</a><a href="#ops">运维</a><a href="#security">安全</a><a href="#api">API</a></nav>
 
   <h2 id="lines">线路</h2>
-  <p>线路 = 入口协议 + 端口 → 出口。协议:<b>Hysteria2</b>(支持端口跳跃)、<b>AnyTLS</b>、<b>TUIC</b>、<b>Trojan</b>、<b>VLESS</b>(Reality / Vision)、<b>VMess</b>、<b>Shadowsocks</b>(含 2022 系列),以及 SOCKS、HTTP、Mixed。传输层:WebSocket、gRPC、HTTPUpgrade、HTTP。每条线路可以部署到全部服务器或指定几台。快速添加自动填好空闲端口和合理参数;每次保存都经 sing-box 干跑,并检查端口是否与面板、其它线路、本机其它程序冲突。</p>
+  <p>线路 = 入口协议 + 端口 → 出口。协议:<b>Hysteria2</b>(支持端口跳跃)、<b>AnyTLS</b>、<b>TUIC</b>、<b>Trojan</b>、<b>VLESS</b>(Reality / Vision)、<b>VMess</b>、<b>Shadowsocks</b>(含 2022 系列),以及 SOCKS、HTTP、Mixed。传输层:WebSocket、gRPC、HTTPUpgrade、HTTP。每条线路可以部署到全部服务器或指定几台。勾上<b>按规则分流</b>,可以让指定的域名后缀、完整域名、域名关键字、IP 段或端口走另一个上游、直连或直接拦掉,其余流量走线路选的上游。快速添加自动填好空闲端口和合理参数;每次保存都经 sing-box 干跑,并检查端口是否与面板、其它线路、本机其它程序冲突。</p>
 
   <h2 id="upstreams">上游</h2>
   <p>不直连时从哪出去:VLESS、VMess、Trojan、TUIC、Hysteria2、Shadowsocks、SOCKS 出站,粘贴分享链接即可导入。一键测延迟、定时巡检、故障 / 恢复告警,Cloudflare WARP 在面板里一键接入。<b>巡检在真正用这条上游的机器上做</b>:每台只测自己线路用到的那些,上游页一行里并排显示各服务器的延迟,告警会点名是哪台不通。改上游是热换出站,数据面不重启。</p>

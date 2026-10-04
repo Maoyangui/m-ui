@@ -1,4 +1,4 @@
-<!--meta {"title":"What a Line means in m-ui, and why it replaces inbound / outbound / routing tables","description":"m-ui's central concept is the Line: inbound protocol + port → exit, deployed to a set of servers. How a line renders into sing-box inbounds, outbounds and routing rules, what stays out of it, and what that buys on multi-server setups.","type":"article","date":"2026-09-23","discussion":true,"summary":"The single record m-ui manages instead of three config tables, and how it turns into a sing-box configuration on every server."} -->
+<!--meta {"title":"What a Line means in m-ui, and why it replaces inbound / outbound / routing tables","description":"m-ui's central concept is the Line: inbound protocol + port → exit, deployed to a set of servers. How a line renders into sing-box inbounds, outbounds and routing rules, what stays out of it, and what that buys on multi-server setups.","type":"article","date":"2026-09-23","updated":"2026-10-04","discussion":true,"summary":"The single record m-ui manages instead of three config tables, and how it turns into a sing-box configuration on every server."} -->
 <article class="doc">
   <p class="meta">Deep dive · 2026-09-23</p>
   <h1>What a Line means in m-ui</h1>
@@ -13,17 +13,18 @@
     <tr><td>transport</td><td>tcp, WebSocket, gRPC, HTTPUpgrade, HTTP, with their paths and hosts.</td></tr>
     <tr><td>options</td><td>Protocol extras: Hysteria2 bandwidth hints, obfuscation and port hopping; Shadowsocks method; VLESS Vision flow.</td></tr>
     <tr><td>upstream</td><td>Direct, or an upstream record (another proxy, WARP). This becomes the outbound and the routing rule.</td></tr>
+    <tr><td>routeRules</td><td>Optional routing rules: send part of the traffic, by domain suffix, full domain, domain keyword, IP range or port, to another exit (any upstream, direct, or block). The first match from the top wins; everything else uses the upstream above.</td></tr>
     <tr><td>servers</td><td>Empty = every server; otherwise the subset of nodes that should run this listener.</td></tr>
   </table>
 
   <h2>What rendering does</h2>
-  <p>When m-ui needs a configuration for a server — on save, on restart, or when pushing a snapshot to a node — it walks the lines deployed to that server and produces, for each: one sing-box inbound with the users assigned to it (credentials from the user records), the server's own certificate paths if TLS is "certificate", and a routing rule that sends traffic entering that inbound to the line's exit. Exits are rendered once each as outbounds; direct and block are built in. The result is a complete sing-box JSON that the embedded core loads, or that its parser checks before a save is committed.</p>
+  <p>When m-ui needs a configuration for a server — on save, on restart, or when pushing a snapshot to a node — it walks the lines deployed to that server and produces, for each: one sing-box inbound with the users assigned to it (credentials from the user records), the server's own certificate paths if TLS is "certificate", and a routing rule that sends traffic entering that inbound to the line's exit (lines with routing rules get those first, in order). Exits are rendered once each as outbounds; direct and block are built in. The result is a complete sing-box JSON that the embedded core loads, or that its parser checks before a save is committed.</p>
   <p>Because rendering is a pure function of the database, two servers with the same lines produce the same inbounds, and a line changed once changes everywhere on the next 5-second snapshot.</p>
 
   <h2>What is deliberately not in a line</h2>
   <ul>
-    <li><b>Per-user routing.</b> Users get lines; they do not get their own rules. Splitting traffic by destination is done at the exit (an upstream) or on the client, not per user.</li>
-    <li><b>Arbitrary routing tables.</b> The panel owns the routing section; there is no editor for it. This is what keeps multi-server rendering deterministic.</li>
+    <li><b>Per-user routing.</b> Users get lines; they do not get their own rules. Splitting traffic by destination is set on the line (routing rules) and is the same for everyone on it.</li>
+    <li><b>Arbitrary routing tables.</b> The panel owns the routing section; there is no free-form editor. Routing rules come in five match types and three kinds of exit, rendered into a fixed shape. This is what keeps multi-server rendering deterministic.</li>
     <li><b>Every sing-box option.</b> The forms cover what the supported protocols need. A per-line "advanced" JSON field merges extra inbound options for the rest.</li>
   </ul>
 

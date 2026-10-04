@@ -49,6 +49,7 @@ api -X POST "$M/api/login" -d "{\"username\":\"admin\",\"password\":\"$PASS\"}" 
 echo "证书、上游、服务器"
 api -X POST "$M/api/cert/selfsign" -d '{"hosts":["panel.example.com","192.0.2.10"],"applyPanel":false,"applySub":false}' >/dev/null
 api -X POST "$M/api/upstreams" -d '{"name":"Frankfurt-exit","type":"shadowsocks","options":{"server":"203.0.113.20","server_port":8388,"method":"aes-256-gcm","password":"demo-exit-password"}}' >/dev/null
+api -X POST "$M/api/upstreams" -d '{"name":"LA-streaming","type":"shadowsocks","options":{"server":"203.0.113.40","server_port":8388,"method":"aes-256-gcm","password":"demo-exit-password"}}' >/dev/null
 LOCAL_ID="$(api "$M/api/nodes" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const n=JSON.parse(d).nodes.find(x=>x.isLocal);console.log(n?n.id:"")})')"
 [ -n "$LOCAL_ID" ] && api -X PUT "$M/api/nodes/$LOCAL_ID" -d '{"name":"Tokyo","domain":"panel.example.com","addr":"192.0.2.10","ratio":1,"sort":0}' >/dev/null
 api -X POST "$M/api/nodes" -d "{\"name\":\"Singapore\",\"domain\":\"sg.example.com\",\"addr\":\"198.51.100.10\",\"apiUrl\":\"http://127.0.0.1:19153/app/\",\"token\":\"$TOKEN\",\"insecure\":true,\"enabled\":true,\"ratio\":1,\"sort\":1}" >/dev/null
@@ -64,7 +65,7 @@ PUB="$(echo "$RK" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",
 SID="$(api "$M/api/keygen?type=shortid" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d).shortId))')"
 SSPW="$(node -e 'console.log(require("crypto").randomBytes(16).toString("base64"))')" # 2022 系列要 16 字节 base64 密钥
 line() { api -X POST "$M/api/lines" -d "$1" >/dev/null; }
-line "{\"name\":\"Tokyo-HY2\",\"protocol\":\"hysteria2\",\"port\":24443,\"upstreamId\":0,\"enabled\":true,\"nodeIds\":[$LOCAL_ID],\"tls\":{\"mode\":\"cert\"},\"options\":{\"up_mbps\":0,\"down_mbps\":0,\"port_hopping\":\"20000-30000\"},\"assignAll\":true}"
+line "{\"name\":\"Tokyo-HY2\",\"protocol\":\"hysteria2\",\"port\":24443,\"upstreamId\":0,\"enabled\":true,\"nodeIds\":[$LOCAL_ID],\"tls\":{\"mode\":\"cert\"},\"options\":{\"up_mbps\":0,\"down_mbps\":0,\"port_hopping\":\"20000-30000\"},\"routeRules\":[{\"type\":\"domain_suffix\",\"values\":[\"netflix.com\",\"nflxvideo.net\"],\"to\":2},{\"type\":\"domain_keyword\",\"values\":[\"ads\"],\"to\":-1},{\"type\":\"ip_cidr\",\"values\":[\"91.108.4.0/22\",\"149.154.160.0/20\"],\"to\":1}],\"assignAll\":true}"
 line "{\"name\":\"Singapore-AnyTLS\",\"protocol\":\"anytls\",\"port\":28443,\"upstreamId\":0,\"enabled\":true,\"nodeIds\":[$SG_ID],\"tls\":{\"mode\":\"cert\"},\"options\":{},\"assignAll\":true}"
 line "{\"name\":\"Frankfurt-Reality\",\"protocol\":\"vless\",\"port\":24433,\"upstreamId\":0,\"enabled\":true,\"nodeIds\":[$DE_ID],\"tls\":{\"mode\":\"reality\",\"reality\":{\"handshake_server\":\"www.microsoft.com\",\"handshake_port\":443,\"private_key\":\"$PRIV\",\"public_key\":\"$PUB\",\"short_ids\":[\"$SID\"]}},\"options\":{\"vision\":true},\"assignAll\":true}"
 line "{\"name\":\"Global-SS2022\",\"protocol\":\"shadowsocks\",\"port\":28388,\"upstreamId\":1,\"enabled\":true,\"nodeIds\":[],\"options\":{\"method\":\"2022-blake3-aes-128-gcm\",\"password\":\"$SSPW\"},\"assignAll\":true}"

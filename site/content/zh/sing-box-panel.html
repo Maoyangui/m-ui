@@ -10,7 +10,7 @@
   <figure class="shot"><img src="{{base}}img/lines.png" alt="m-ui 线路页:Hysteria2、AnyTLS、VLESS Reality、Shadowsocks 2022 线路,带端口、出口和用户数" loading="lazy"></figure>
 
   <h2 id="lines">线路,而不是入站 / 出站 / 路由三张表</h2>
-  <p>在 m-ui 里你管理的单位是<b>线路</b>:入口协议 + 端口 → 从哪出去。Hysteria2、AnyTLS、TUIC、VLESS Reality、Trojan、VMess、Shadowsocks 2022 都是线路;出口是直连或你的某个上游(另一个代理,或 Cloudflare WARP)。面板把线路渲染成完整的 sing-box 配置 —— 入站、出站,以及把它们连起来的路由规则 —— 部署到哪台服务器就为哪台渲染。你不用手工保持三张表一致;部署到三台服务器的线路是一条记录,不是三条。</p>
+  <p>在 m-ui 里你管理的单位是<b>线路</b>:入口协议 + 端口 → 从哪出去。Hysteria2、AnyTLS、TUIC、VLESS Reality、Trojan、VMess、Shadowsocks 2022 都是线路;出口是直连或你的某个上游(另一个代理,或 Cloudflare WARP),开了按规则分流还能让指定的目的地走别的出口。面板把线路渲染成完整的 sing-box 配置 —— 入站、出站,以及把它们连起来的路由规则 —— 部署到哪台服务器就为哪台渲染。你不用手工保持三张表一致;部署到三台服务器的线路是一条记录,不是三条。</p>
   <p>快速添加会挑好默认参数和一个空闲端口;端口与其它线路、面板、本机任何程序撞上时保存会被拒绝;每次保存都先经 sing-box 自己解析再落库。</p>
 
   <h2 id="users">用户:凭据、配额、到期、设备、限速</h2>

@@ -10,6 +10,7 @@
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+body { overflow-x: hidden; overflow-x: clip; } /* 首页标题区的光晕左右各伸出 40vw:手机上别因此出现横向滚动(clip 不影响顶栏吸顶) */
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -47,7 +48,7 @@ pre { background: var(--surface-2); border: 1px solid var(--border); border-radi
 .hero .lead { font-size: 1.15rem; color: var(--muted); max-width: 44rem; margin: 0 auto 1.5rem; }
 .hero .actions { display: flex; gap: .7rem; justify-content: center; flex-wrap: wrap; }
 .install { display: flex; align-items: center; gap: .6rem; justify-content: center; margin: 1.5rem auto 0; max-width: 46rem; }
-.install pre { margin: 0; flex: 1; text-align: left; white-space: pre; background: var(--surface); box-shadow: var(--shadow); }
+.install pre { margin: 0; flex: 1; min-width: 0; text-align: left; white-space: pre; background: var(--surface); box-shadow: var(--shadow); }
 .install button { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: var(--radius-sm); padding: .6rem .85rem; cursor: pointer; font: inherit; }
 .install button:hover { border-color: var(--primary); color: var(--primary); }
 .proof { display: flex; flex-wrap: wrap; justify-content: center; gap: .4rem 1.2rem; margin: 1.1rem 0 0; color: var(--muted); font-size: .86rem; }
@@ -55,6 +56,7 @@ pre { background: var(--surface-2); border: 1px solid var(--border); border-radi
 .shot { margin: 2.2rem auto 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: 0 30px 60px -32px rgba(15, 23, 42, .45); }
 .shot img { display: block; }
 .shot.phone { max-width: 360px; }
+.shot.fit { width: fit-content; } /* 比正文栏窄的截图:图框贴着图片、居中,右边不留白 */
 figure { margin: 1.5rem 0; }
 figcaption { color: var(--muted); font-size: .85rem; text-align: center; margin-top: .5rem; }
 
@@ -93,13 +95,21 @@ article.doc h3 { font-size: 1.1rem; margin: 1.5rem 0 .4rem; }
 article.doc p, article.doc li { color: var(--text); }
 article.doc table { width: 100%; border-collapse: collapse; font-size: .93rem; margin: 1rem 0; display: block; overflow-x: auto; }
 article.doc th, article.doc td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-article.doc th { color: var(--muted); font-weight: 600; font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; }
+article.doc td.nw { white-space: nowrap; } /* 短的名称列别被挤成两行 */
+@media (max-width: 560px) { /* 手机上三列挤不下的表(class="stack"):每行改成上下排,表头藏起来 */
+  article.doc table.stack, article.doc table.stack tbody, article.doc table.stack tr, article.doc table.stack td { display: block; }
+  article.doc table.stack tr:first-child { display: none; }
+  article.doc table.stack tr { padding: .55rem 0; border-bottom: 1px solid var(--border); }
+  article.doc table.stack td { border: 0; padding: .1rem 0; }
+  article.doc table.stack td:first-child { font-weight: 600; }
+}article.doc th { color: var(--muted); font-weight: 600; font-size: .82rem; text-transform: uppercase; letter-spacing: .03em; }
 article.doc details { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .6rem .9rem; margin: .5rem 0; background: var(--surface); }
 article.doc summary { cursor: pointer; font-weight: 600; }
 article.doc details p { margin: .6rem 0 .2rem; color: var(--muted); }
 article.doc .meta { color: var(--muted); font-size: .85rem; margin-bottom: 1.2rem; }
 article.doc .note { background: var(--primary-soft); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .7rem .9rem; margin: 1rem 0; font-size: .95rem; }
 article.doc figure.shot { margin: 1.4rem 0; }
+article.doc figure.shot.fit, article.doc figure.shot.phone { margin-left: auto; margin-right: auto; }
 .toc { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 1.2rem; }
 .toc a { font-size: .85rem; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: .2rem .7rem; color: var(--muted); }
 .toc a:hover { color: var(--primary); border-color: var(--primary); text-decoration: none; }
