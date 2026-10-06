@@ -265,7 +265,7 @@ func setDNS01(ctx context.Context, client *acme.Client, chal *acme.Challenge, cf
 }
 
 func txtVisible(ctx context.Context, name, want string) bool {
-	r := resolverAt("1.1.1.1:53")
+	r := resolverAt(publicDNS[0].v4+":53", "["+publicDNS[0].v6+"]:53")
 	vals, err := r.LookupTXT(ctx, name)
 	if err != nil {
 		return false
@@ -278,10 +278,25 @@ func txtVisible(ctx context.Context, name, want string) bool {
 	return false
 }
 
-func resolverAt(addr string) *net.Resolver {
+// publicDNS 查解析用的公共 DNS:IPv4 地址与同一家的 IPv6 地址(纯 IPv6 机器连不上 IPv4 的 DNS)。
+var publicDNS = []struct{ v4, v6 string }{
+	{"1.1.1.1", "2606:4700:4700::1111"},
+	{"8.8.8.8", "2001:4860:4860::8888"},
+	{"223.5.5.5", "2400:3200::1"},
+}
+
+// resolverAt 用这几个 DNS 服务器(host:port)查,前一个连不上(纯 IPv6 机器连 IPv4 地址)就换下一个。
+func resolverAt(addrs ...string) *net.Resolver {
 	return &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		d := net.Dialer{Timeout: 4 * time.Second}
-		return d.DialContext(ctx, "udp", addr)
+		var err error
+		for _, a := range addrs {
+			var c net.Conn
+			if c, err = d.DialContext(ctx, "udp", a); err == nil {
+				return c, nil
+			}
+		}
+		return nil, err
 	}}
 }
 
@@ -386,8 +401,12 @@ func Precheck(ctx context.Context, domain string) PrecheckResult {
 		res.PublicIP, res.Family = v6, "v6"
 	}
 	all := true
-	for _, r := range []string{"1.1.1.1:53", "8.8.8.8:53", "223.5.5.5:53"} {
-		ips, err := resolverAt(r).LookupIPAddr(ctx, domain)
+	for _, dns := range publicDNS {
+		r := dns.v4 // 纯 IPv6 机器连不上 IPv4 的 DNS,用同一家的 IPv6 地址查
+		if res.Family == "v6" {
+			r = dns.v6
+		}
+		ips, err := resolverAt(net.JoinHostPort(r, "53")).LookupIPAddr(ctx, domain)
 		v := ""
 		for _, ip := range ips {
 			if (ip.IP.To4() != nil) == (res.Family == "v4") {

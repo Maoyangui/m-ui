@@ -345,9 +345,11 @@ func (r *Runner) autoCertHosts() []string {
 		}
 	}
 	add(r.setting("publicIp"))
+	add(r.setting("publicIp6")) // 双栈机器的 IPv6(服务器选了"自动地址用 IPv6"时客户端连的就是它)
 	var local model.Node
 	if err := r.db.Where("is_local = ?", true).First(&local).Error; err == nil {
 		add(local.PublicIP)
+		add(local.PublicIP6)
 		add(local.Addr)
 		add(local.Domain)
 	}

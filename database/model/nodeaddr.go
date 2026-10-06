@@ -2,6 +2,7 @@ package model
 
 import (
 	"net"
+	"regexp"
 	"strings"
 )
 
@@ -45,4 +46,14 @@ func NormAddrFamily(s string) string {
 		return "v6"
 	}
 	return ""
+}
+
+var hostnameRE = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?(\.[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?)*\.?$`)
+
+// ValidAddr 连接地址只能是 IP 或域名:不带端口、协议头、路径和空格(这些会拼进分享链接把地址弄坏)。
+func ValidAddr(s string) bool {
+	if net.ParseIP(s) != nil {
+		return true
+	}
+	return len(s) <= 253 && hostnameRE.MatchString(s)
 }

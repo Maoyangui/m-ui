@@ -97,3 +97,27 @@ func TestDeleteCleansLineNodeRows(t *testing.T) {
 		t.Fatalf("返回里应列出被撤分配的用户 u: %s", w.Body.String())
 	}
 }
+
+// 服务器的连接地址只收 IP 或域名:[v6] 去掉方括号收下,带端口 / 协议头的拒绝(会拼坏分享链接)。
+func TestValidateNodeAddr(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	for addr, want := range map[string]string{
+		"[2001:db8::1]": "2001:db8::1", " 203.0.113.1 ": "203.0.113.1", "hk.example.com": "hk.example.com", "": "",
+		"[2001:db8::1]:443": "err", "203.0.113.1:443": "err", "https://hk.example.com": "err",
+	} {
+		p := nodePayload{Node: model.Node{Name: "n", Addr: addr}}
+		err := s.validateNode(&p)
+		if want == "err" {
+			if err == nil {
+				t.Errorf("连接地址 %q 应被拒", addr)
+			}
+		} else if err != nil || p.Addr != want {
+			t.Errorf("连接地址 %q 应收下为 %q,得到 %q / %v", addr, want, p.Addr, err)
+		}
+	}
+}

@@ -83,6 +83,9 @@ func (s *Server) validateNode(p *nodePayload) error {
 		return errors.New("API 地址需以 http:// 或 https:// 开头,如 https://tw.example.com:2053/ad/")
 	}
 	p.Addr = model.BareHost(p.Addr) // 填成 [v6] 的去掉方括号,分享链接里会自己加
+	if p.Addr != "" && !model.ValidAddr(p.Addr) {
+		return errors.New("连接地址只填 IP 或域名,不带端口、http:// 和空格")
+	}
 	p.AddrFamily = model.NormAddrFamily(p.AddrFamily)
 	if p.Ratio < 0 || p.Ratio > 100 {
 		return errors.New("倍率需在 0–100 之间(1 = 原样)")

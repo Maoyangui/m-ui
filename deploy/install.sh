@@ -71,7 +71,8 @@ fi
 
 # 面板在本机的地址:端口、路径、是否 HTTPS 都按数据库里的设置来;取不到就为空,健康检查退化为"服务持续 active"
 panel_url() {
-  "$1" info -db "$DB" 2>/dev/null | grep -oE 'https?://[A-Za-z0-9.:/_-]+' | head -1 | sed -E 's#^(https?://)[^/:]+(:[0-9]+)?#\1127.0.0.1\2#' || true
+  # 纯 IPv6 机器的地址带方括号(http://[2001:db8::1]:2053/app/),主机部分整段换成 127.0.0.1
+  "$1" info -db "$DB" 2>/dev/null | grep -oE 'https?://[][A-Za-z0-9.:/_-]+' | head -1 | sed -E 's#^(https?://)(\[[^]/]*\]|[^]/:[]+)(:[0-9]+)?#\1127.0.0.1\3#' || true
 }
 
 # healthy <秒数>:服务 active 且面板首页回 2xx/3xx;没有地址时要求连续 8 秒 active 且期间没被 systemd 自动拉起过

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -56,5 +57,16 @@ func TestHandleRouteApps(t *testing.T) {
 	s.handleRouteApps(w, httptest.NewRequest(http.MethodGet, "/", nil))
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET 应 405,得到 %d", w.Code)
+	}
+}
+
+// 前端靠"没找到"这句原文区分没这个应用与查询出错(后者不该提示换名字),两边要一致。
+func TestRouteAppsNotFoundTextMatchesUI(t *testing.T) {
+	js, err := os.ReadFile("assets/js/pages/lines.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "const RR_NOT_FOUND = '" + appdomains.ErrNotFound.Error() + "'"; !strings.Contains(string(js), want) {
+		t.Fatalf("lines.js 里应有 %s", want)
 	}
 }

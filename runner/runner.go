@@ -1432,6 +1432,13 @@ func nextPublicIPs(v4, v6, old, old6 string, miss4, miss6 *int) (pub, pub6 strin
 	return pub, v6
 }
 
+// syncLocalNodeIPs 本机服务器记录也同步探测值(服务器列表显示用)。
+// 0.6.15 之前建的库里 public_ip6 这一列是 NULL,NULL != 'x' 在 SQL 里不成立,得先当成空串比。
+func syncLocalNodeIPs(db *gorm.DB, pub, pub6 string) {
+	db.Model(&model.Node{}).Where("is_local = ? AND (COALESCE(public_ip, '') != ? OR COALESCE(public_ip6, '') != ?)", true, pub, pub6).
+		Updates(map[string]interface{}{"public_ip": pub, "public_ip6": pub6})
+}
+
 // publicIPLoop 探测并记录本机公网 IP(设置 publicIp / publicIp6):没配域名时订阅地址与节点地址用它兜底。
 func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 	var miss4, miss6 int
@@ -1456,9 +1463,7 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 				logger.Info("本机公网 IPv6: ", pub6)
 			}
 		}
-		// 本机服务器记录也同步(订阅入口用)
-		r.db.Model(&model.Node{}).Where("is_local = ? AND (public_ip != ? OR public_ip6 != ?)", true, pub, pub6).
-			Updates(map[string]interface{}{"public_ip": pub, "public_ip6": pub6})
+		syncLocalNodeIPs(r.db, pub, pub6)
 	}
 	probe()
 	t := time.NewTicker(time.Hour)

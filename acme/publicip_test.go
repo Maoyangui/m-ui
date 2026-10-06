@@ -112,3 +112,23 @@ func TestPublicIPParsesPlainAndRejectsMismatch(t *testing.T) {
 		t.Fatalf("不是 IP 的内容应返回空,得到 %q", got)
 	}
 }
+
+// 前一个 DNS 连不上(纯 IPv6 机器连 IPv4 地址会立刻报错)就换下一个;都连不上报最后的错。
+func TestResolverAtFallsBack(t *testing.T) {
+	c, err := resolverAt("203.0.113.1:99999", "127.0.0.1:5353").Dial(context.Background(), "udp", "")
+	if err != nil {
+		t.Fatalf("第一个连不上应换第二个: %v", err)
+	}
+	defer c.Close()
+	if got := c.RemoteAddr().String(); got != "127.0.0.1:5353" {
+		t.Fatalf("应连到第二个 DNS,实际 %s", got)
+	}
+	if _, err := resolverAt("203.0.113.1:99999").Dial(context.Background(), "udp", ""); err == nil {
+		t.Fatal("唯一的地址连不上应报错")
+	}
+	for _, d := range publicDNS {
+		if ip := net.ParseIP(d.v6); ip == nil || ip.To4() != nil {
+			t.Fatalf("%s 的 IPv6 地址写错了: %q", d.v4, d.v6)
+		}
+	}
+}

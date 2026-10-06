@@ -16,7 +16,7 @@
   <details><summary>要放行哪些端口?</summary><p>面板 <code>2053/tcp</code>、订阅 <code>2056/tcp</code>、开了代理面板再加 <code>2054/tcp</code>,以及每条线路的端口(TCP 或 UDP 看协议)。用 HTTP-01 签证书还需要 <code>80/tcp</code>;Cloudflare DNS-01 不需要。副机的面板端口只需对主机的 IP 放行。</p></details>
   <details><summary>能改面板端口和路径吗?</summary><p>能,在设置里改;把自己锁在外面了就用 SSH 菜单(<code>m-ui</code>)。路径带不带结尾斜杠都能打开。端口保存前会校验,面板不会重启到一个被线路或别的程序占着的端口上。</p></details>
   <details><summary>系统要求?</summary><p>Linux amd64 或 arm64,带 systemd;推荐 Debian 11+ / Ubuntu 20.04+,Rocky / CentOS 等其它 systemd 发行版也行。安装脚本依赖 systemd,所以 Alpine(OpenRC)不支持。安装需要 root。面板本身 1 核 1 GB 足够。CI 真正跑过的平台见<a href="{{base}}zh/getting-started/#tested">自动测试过的平台</a>。</p></details>
-  <details><summary>纯 IPv6 的机器能用吗?</summary><p>能:面板、订阅、线路都监听 IPv6,订阅自动给 IPv6 地址(云厂商的安全组要单独放行 IPv6 来源 <code>::/0</code>)。有三处受限:GitHub 不支持 IPv6,检查更新与一键更新要先在运维页装 WARP(装好后自动经它下载),一键安装脚本也下载不了,要手动上传安装包;直连出口打不开只有 IPv4 的网站,线路上游选 WARP 才能访问全网;大陆连通检测暂只测 IPv4。双栈机器默认在订阅里给 IPv4,服务器编辑里「自动地址用」可改成 IPv6。</p></details>
+  <details><summary>纯 IPv6 的机器能用吗?</summary><p>能:面板、订阅、线路都监听 IPv6,订阅自动给 IPv6 地址(云厂商的安全组要单独放行 IPv6 来源 <code>::/0</code>)。有三处受限:GitHub 不支持 IPv6,检查更新与一键更新要先在运维页装 WARP(装好后自动经它下载),一键安装脚本也下载不了,要手动上传安装包;直连出口连不上只有 IPv4 的地址,客户端的远程 DNS 若是 1.1.1.1、8.8.8.8 这类 IPv4 地址(面板生成的 sing-box 订阅就是)也连不上、域名都解析不了,所以线路上游要选 WARP;大陆连通检测暂只测 IPv4。双栈机器默认在订阅里给 IPv4,服务器编辑里「自动地址用」可改成 IPv6。</p></details>
   <details><summary>为什么新建线路的表单里已经填了端口?</summary><p>它挑了一个没被其它线路、面板和本机任何程序占用的五位端口,还真的绑定了一次确认。可以改;保存时冲突会被拦下。</p></details>
 
   <h2>用户与订阅</h2>

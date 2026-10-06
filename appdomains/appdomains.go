@@ -49,10 +49,17 @@ type Client struct {
 	HTTP    *http.Client
 	TTL     time.Duration
 
-	mu      sync.Mutex
-	files   map[string]cachedFile
-	index   []string
-	indexAt time.Time
+	mu       sync.Mutex
+	files    map[string]cachedFile
+	fetching map[string]*fetchCall // 正在取的列表:同一份同时只取一次,后来的等它
+	index    []string
+	indexAt  time.Time
+}
+
+type fetchCall struct {
+	done  chan struct{}
+	lines []string
+	err   error
 }
 
 type cachedFile struct {
@@ -311,13 +318,37 @@ func (c *Client) resolve(ctx context.Context, name string, seen map[string]bool,
 }
 
 // file 取一份列表(带缓存)。第一个地址回 404 就是没有;连不上才换下一个。
+// 几个应用名同时去大厂列表里找时会要同一份列表:正在取的就等它,不重复请求。
 func (c *Client) file(ctx context.Context, name string) ([]string, error) {
 	c.mu.Lock()
 	if f, ok := c.files[name]; ok && time.Since(f.at) < c.TTL {
 		c.mu.Unlock()
 		return f.lines, nil
 	}
+	if call, ok := c.fetching[name]; ok {
+		c.mu.Unlock()
+		select {
+		case <-call.done:
+			return call.lines, call.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	call := &fetchCall{done: make(chan struct{})}
+	if c.fetching == nil {
+		c.fetching = map[string]*fetchCall{}
+	}
+	c.fetching[name] = call
 	c.mu.Unlock()
+	call.lines, call.err = c.fetchFile(ctx, name)
+	c.mu.Lock()
+	delete(c.fetching, name)
+	c.mu.Unlock()
+	close(call.done)
+	return call.lines, call.err
+}
+
+func (c *Client) fetchFile(ctx context.Context, name string) ([]string, error) {
 	var lastErr error
 	for _, base := range c.Bases {
 		lines, err := c.fetchLines(ctx, base+name)

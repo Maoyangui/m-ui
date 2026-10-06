@@ -173,3 +173,28 @@ func TestSuggestReadsGitHubTreeIndex(t *testing.T) {
 		t.Fatalf("第一份索引取不到应换下一份,并认得 GitHub 目录树的格式:%v", got)
 	}
 }
+
+// 几个名字同时去大厂列表里找:同一份列表只请求一次,后来的等前一个取回来。
+func TestConcurrentLookupsFetchEachListOnce(t *testing.T) {
+	var tencent atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/data/tencent" {
+			http.NotFound(w, r)
+			return
+		}
+		tencent.Add(1)
+		time.Sleep(150 * time.Millisecond) // 让几个查询都赶上同一次下载
+		w.Write([]byte("aaaa.com\nbbbb.com\ncccc.com\ndddd.com\n"))
+	}))
+	t.Cleanup(srv.Close)
+	c := &Client{Bases: []string{srv.URL + "/data/"}, HTTP: &http.Client{Timeout: 5 * time.Second}, TTL: time.Hour}
+	res := c.Lookup(context.Background(), []string{"aaaa", "bbbb", "cccc", "dddd"})
+	for _, r := range res {
+		if r.Error != "" || r.List != "tencent" || len(r.Suffix) != 1 {
+			t.Fatalf("每个名字都应在 tencent 里找到自己的域名: %+v", r)
+		}
+	}
+	if n := tencent.Load(); n != 1 {
+		t.Fatalf("tencent 列表被请求了 %d 次,应只请求 1 次", n)
+	}
+}

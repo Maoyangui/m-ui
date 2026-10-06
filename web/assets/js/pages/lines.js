@@ -1,6 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
+import { trErr } from '../errmsg.js';
 import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML } from '../ui.js';
 
 const selected = new Set(); // 批量设置勾选的线路 id
@@ -415,6 +416,7 @@ function rrRowHTML(r, i, n) {
 }
 
 // 查应用的域名:逗号、顿号、空格隔开都行
+const RR_NOT_FOUND = '没找到这个应用'; // 与后端 appdomains.ErrNotFound 一致
 const rrAppNames = s => s.split(/[\s,，;；、/|]+/).filter(Boolean);
 
 // 查域名:面板所在的服务器去公开的域名库(v2fly)里查,每个应用作为一条带应用名的规则加到列表末尾:
@@ -440,7 +442,8 @@ async function rrAppsLookup() {
     btn.disabled = false;
     btn.textContent = t('line.rr.lookup');
   }
-  const found = res.filter(r => !r.error), missed = res.filter(r => r.error);
+  // 没这个应用(给相近的名字)与查询出错(连不上域名库之类,换个名字没用)分开说
+  const found = res.filter(r => !r.error), missed = res.filter(r => r.error === RR_NOT_FOUND), failed = res.filter(r => r.error && r.error !== RR_NOT_FOUND);
   const add = [];
   found.forEach(r => {
     const dom = [...new Set([...(r.suffix || []), ...(r.full || [])])];
@@ -465,8 +468,9 @@ async function rrAppsLookup() {
     const sug = missed.flatMap(r => (r.suggest || []).map(s => `<button type="button" class="link" data-rr-sug="${esc(s)}" data-q="${esc(r.query)}">${esc(s)}</button>`));
     parts.push(esc(t('line.rr.appMissed', { names: missed.map(r => r.query).join('、') })) + (sug.length ? ' ' + esc(t('line.rr.appSuggest')) + ' ' + sug.join(' ') : ''));
   }
-  input.value = missed.map(r => r.query).join(', '); // 查到的从框里拿掉,没查到的留着改
-  say(parts.join('<br>'), missed.length > 0 && !found.length);
+  if (failed.length) parts.push(esc(t('line.rr.appFailed', { detail: failed.map(r => `${r.query}: ${trErr(r.error)}`).join('; ') })));
+  input.value = [...missed, ...failed].map(r => r.query).join(', '); // 查到的从框里拿掉,没查到的留着改
+  say(parts.join('<br>'), !found.length);
   const to = add.length && document.querySelectorAll('#f-rr-list .rr-row')[first]?.querySelector('.rr-to');
   if (to) { to.scrollIntoView({ block: 'nearest' }); to.focus(); }
 }

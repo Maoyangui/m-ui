@@ -1,6 +1,13 @@
 package runner
 
-import "testing"
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/database/model"
+)
 
 // 两个地址族各自连续没测到 3 轮才从记录里去掉;测到了就立刻更新。
 func TestNextPublicIPs(t *testing.T) {
@@ -32,4 +39,49 @@ func TestNextPublicIPs(t *testing.T) {
 	step("", "2001:db8::9", "2001:db8::9", "2001:db8::9", "2001:db8::9", "2001:db8::9")
 	// v6 地址换了,立刻用新的
 	step("", "2001:db8::a", "2001:db8::9", "2001:db8::9", "2001:db8::a", "2001:db8::a")
+}
+
+// 0.6.15 之前建的库升级后本机记录的 public_ip6 是 NULL:探测到 IPv6 也得写进去(服务器列表靠它显示)。
+func TestSyncLocalNodeIPsFromNullColumn(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	db.Create(&model.Node{Name: "本机", IsLocal: true, Enabled: true, PublicIP: "203.0.113.1"})
+	db.Create(&model.Node{Name: "副机", Enabled: true, PublicIP: "203.0.113.2"})
+	db.Exec("UPDATE nodes SET public_ip6 = NULL")
+
+	syncLocalNodeIPs(db, "203.0.113.1", "2001:db8::1")
+	var local, remote model.Node
+	db.Where("is_local = ?", true).First(&local)
+	db.Where("is_local = ?", false).First(&remote)
+	if local.PublicIP6 != "2001:db8::1" || local.PublicIP != "203.0.113.1" {
+		t.Fatalf("本机记录应写入探测到的 IPv6(原来是 NULL):%q %q", local.PublicIP, local.PublicIP6)
+	}
+	if remote.PublicIP6 != "" || remote.PublicIP != "203.0.113.2" {
+		t.Fatalf("副机记录不该被本机探测值改动:%q %q", remote.PublicIP, remote.PublicIP6)
+	}
+	// IPv6 没了也要清掉
+	syncLocalNodeIPs(db, "203.0.113.1", "")
+	db.Where("is_local = ?", true).First(&local)
+	if local.PublicIP6 != "" {
+		t.Fatalf("IPv6 没了应清空,得到 %q", local.PublicIP6)
+	}
+}
+
+// 自签证书默认带上本机探测到的 IPv4 与 IPv6(双栈机器选了 IPv6 时客户端连的是 v6 地址)。
+func TestAutoCertHostsIncludesIPv6(t *testing.T) {
+	r, err := New(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(r.db)
+	r.setSetting("publicIp", "203.0.113.1")
+	r.setSetting("publicIp6", "2001:db8::1")
+	r.db.Model(&model.Node{}).Where("is_local = ?", true).Updates(map[string]interface{}{"public_ip": "203.0.113.1", "public_ip6": "2001:db8::1", "domain": "hk.example.com"})
+	got := strings.Join(r.autoCertHosts(), ",")
+	if got != "203.0.113.1,2001:db8::1,hk.example.com" {
+		t.Fatalf("自签证书地址 = %s,应含 IPv4、IPv6 与域名各一次", got)
+	}
 }

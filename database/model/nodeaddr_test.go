@@ -38,3 +38,15 @@ func TestBareHost(t *testing.T) {
 		}
 	}
 }
+
+func TestValidAddr(t *testing.T) {
+	for s, want := range map[string]bool{
+		"203.0.113.1": true, "2001:db8::1": true, "hk.example.com": true, "hk.example.com.": true, "127.0.0.1": true, "my_host": true,
+		"[2001:db8::1]:443": false, "203.0.113.1:443": false, "https://hk.example.com": false, "hk example.com": false,
+		"hk.example.com/path": false, "-bad.example.com": false, "a..b": false,
+	} {
+		if got := ValidAddr(s); got != want {
+			t.Errorf("ValidAddr(%q) = %v,应为 %v", s, got, want)
+		}
+	}
+}

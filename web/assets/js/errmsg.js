@@ -91,6 +91,7 @@ const EN = /*BEGIN*/{
 "保存副机令牌: %w": "Saving the node token: %w",
 "保存设置 %s: %w": "Saving setting %s: %w",
 "保存证书设置失败: %w": "Failed to save certificate settings: %w",
+"连接地址只填 IP 或域名,不带端口、http:// 和空格": "Connect address must be an IP or domain, without port, http:// or spaces",
 "倍率需在 0–100 之间(1 = 原样)": "Multiplier must be 0-100 (1 = unchanged)",
 "入站用户配置缺少 tag": "Inbound user config is missing tag",
 "内核参数为空": "Kernel parameters are empty",
