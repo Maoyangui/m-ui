@@ -85,3 +85,18 @@ func TestAutoCertHostsIncludesIPv6(t *testing.T) {
 		t.Fatalf("自签证书地址 = %s,应含 IPv4、IPv6 与域名各一次", got)
 	}
 }
+
+// 有没有 IPv4 变了才重新渲染(纯 IPv6 时直连线路要换公共 DNS 的地址);同一地址族里换 IP 不用。
+func TestIPv6OnlyChanged(t *testing.T) {
+	for _, c := range []struct {
+		old, pub string
+		want     bool
+	}{
+		{"", "2001:db8::1", true}, {"203.0.113.1", "2001:db8::1", true}, {"2001:db8::1", "203.0.113.1", true},
+		{"", "203.0.113.1", false}, {"203.0.113.1", "203.0.113.2", false}, {"2001:db8::1", "2001:db8::2", false},
+	} {
+		if got := ipv6OnlyChanged(c.old, c.pub); got != c.want {
+			t.Errorf("ipv6OnlyChanged(%q,%q) = %v,应为 %v", c.old, c.pub, got, c.want)
+		}
+	}
+}

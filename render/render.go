@@ -166,6 +166,9 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 		json.RawMessage(`{"action":"sniff"}`),
 		json.RawMessage(`{"protocol":["dns"],"action":"hijack-dns"}`),
 	}
+	if PureIPv6(db) { // 客户端的远程 DNS 多是 1.1.1.1 这类 IPv4 地址,纯 IPv6 机器直连连不上:换成同一家的 IPv6
+		rules = append(rules, v6DNSRules(lines)...)
+	}
 	if !AllowPrivate(db) {
 		// 用户经代理不该摸到这台机器自己(面板、WARP 的 socks 口、副机接口)、内网,以及云厂商的元数据地址
 		// 169.254.169.254(AWS 上拿到实例凭证只要一个 GET)。域名要先解析成 IP,"localhost"或指向 127.0.0.1 的

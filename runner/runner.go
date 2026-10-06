@@ -1432,6 +1432,12 @@ func nextPublicIPs(v4, v6, old, old6 string, miss4, miss6 *int) (pub, pub6 strin
 	return pub, v6
 }
 
+// ipv6OnlyChanged 记录的公网地址从"有 IPv4"变成"只有 IPv6"或反过来(空 = 还没测到,算有 IPv4 一侧)。
+func ipv6OnlyChanged(old, pub string) bool {
+	v6only := func(s string) bool { ip := net.ParseIP(s); return ip != nil && ip.To4() == nil }
+	return v6only(old) != v6only(pub)
+}
+
 // syncLocalNodeIPs 本机服务器记录也同步探测值(服务器列表显示用)。
 // 0.6.15 之前建的库里 public_ip6 这一列是 NULL,NULL != 'x' 在 SQL 里不成立,得先当成空串比。
 func syncLocalNodeIPs(db *gorm.DB, pub, pub6 string) {
@@ -1454,6 +1460,12 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 		if pub != old {
 			r.setSetting("publicIp", pub)
 			logger.Info("本机公网 IP: ", pub)
+			// 有没有 IPv4 变了:纯 IPv6 机器的直连线路要把公共 DNS 换成 IPv6 地址(render.v6DNSRules),重新渲染
+			if ipv6OnlyChanged(old, pub) && r.core.IsRunning() {
+				if err := r.ReloadAll(); err != nil {
+					logger.Warning("本机有无 IPv4 变了,重新渲染配置失败: ", err)
+				}
+			}
 		}
 		if pub6 != old6 {
 			r.setSetting("publicIp6", pub6)
