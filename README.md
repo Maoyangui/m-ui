@@ -80,8 +80,10 @@ m-ui 是一个自托管的代理面板:**一个二进制 + 一个数据库文件
 ---
 config:
   htmlLabels: false
+  markdownAutoWrap: false
   flowchart:
     htmlLabels: false
+    wrappingWidth: 600
 ---
 flowchart TB
   subgraph WHO["谁在连"]
@@ -160,8 +162,10 @@ sequenceDiagram
 ---
 config:
   htmlLabels: false
+  markdownAutoWrap: false
   flowchart:
     htmlLabels: false
+    wrappingWidth: 600
 ---
 flowchart TD
   Q["GET /sub/&lt;地址&gt;"] --> WHO{"这个地址是谁"}

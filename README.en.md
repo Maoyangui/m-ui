@@ -80,8 +80,10 @@ One binary runs four things: the **panel** (admin UI and API), the **subscriptio
 ---
 config:
   htmlLabels: false
+  markdownAutoWrap: false
   flowchart:
     htmlLabels: false
+    wrappingWidth: 600
 ---
 flowchart TB
   subgraph WHO["Who connects"]
@@ -160,8 +162,10 @@ sequenceDiagram
 ---
 config:
   htmlLabels: false
+  markdownAutoWrap: false
   flowchart:
     htmlLabels: false
+    wrappingWidth: 600
 ---
 flowchart TD
   Q["GET /sub/&lt;key&gt;"] --> WHO{"Whose key is it"}
