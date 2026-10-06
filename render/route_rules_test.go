@@ -254,3 +254,24 @@ func TestRouteRulesMissingUpstream(t *testing.T) {
 		t.Fatalf("应报规则指向不存在的上游,实际 %v", err)
 	}
 }
+
+// 规则名只用于显示:整理后保留(去控制字符、首尾空白,最长 32 字),不进数据面配置。
+func TestRouteRuleName(t *testing.T) {
+	long := strings.Repeat("长", 40)
+	raw := json.RawMessage(`[{"name":"  抖音\u0007 ","type":"domain_suffix","values":["amemv.com"],"to":0},{"name":"` + long + `","type":"domain","values":["x.com"],"to":0},{"type":"port","values":["25"],"to":-1}]`)
+	rules, err := ParseRouteRules(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rules[0].Name != "抖音" || len([]rune(rules[1].Name)) != 32 || rules[2].Name != "" {
+		t.Fatalf("规则名整理不对: %q %q %q", rules[0].Name, rules[1].Name, rules[2].Name)
+	}
+	b, _ := json.Marshal(rules[2])
+	if strings.Contains(string(b), "name") {
+		t.Fatalf("没有名字的规则不该带 name 字段: %s", b)
+	}
+	m, err := routeRuleJSON("in", rules[0], nil)
+	if err != nil || strings.Contains(string(m), "抖音") || strings.Contains(string(m), "name") {
+		t.Fatalf("规则名不该进数据面配置: %s %v", m, err)
+	}
+}

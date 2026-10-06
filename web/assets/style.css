@@ -235,11 +235,20 @@ details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; m
 .rr-row textarea { min-height: 2.15rem; resize: vertical; line-height: 1.35; }
 .rr-row textarea.bad { border-color: var(--danger); }
 .rr-err { grid-column: 3 / -1; margin-top: -.15rem; font-size: .76rem; color: var(--danger); }
-/* "应用(查域名)"那一条:输入框下面一个按钮 + 说明 / 结果 */
-.rr-app { grid-column: 3 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: .3rem .6rem; margin-top: -.15rem; }
-.rr-app .btn { flex: none; }
-.rr-app-msg { font-size: .76rem; color: var(--muted); line-height: 1.5; }
-.rr-app-msg button.link { border: 0; background: none; padding: 0 .15rem; font: inherit; color: var(--primary-text); text-decoration: underline; cursor: pointer; }
+/* 查应用域名得来的规则:匹配方式那格显示应用名,下面小字是匹配方式 */
+.rr-type-cell { min-width: 0; }
+.rr-name { display: flex; flex-direction: column; justify-content: center; min-height: 2.15rem; padding: .15rem .65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); line-height: 1.25; }
+.rr-name b { font-weight: 600; font-size: .86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-name small { font-size: .7rem; color: var(--muted); }
+/* "按规则分流"那一行右边的查应用域名:编辑框够宽时和勾选框同一行,窄了折到下面占满一行 */
+.rr-top { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .5rem 1rem; }
+.rr-top > .field.check { flex: 1 1 15rem; min-width: 0; }
+.rr-lookup { flex: 1 1 18rem; display: flex; gap: .4rem; align-items: center; min-width: 0; }
+.rr-lookup[hidden] { display: none; }
+.rr-lookup input { flex: 1 1 auto; min-width: 0; }
+.rr-lookup .btn { flex: none; }
+.rr-lookup-msg { margin: .45rem 0 0; font-size: .78rem; color: var(--muted); line-height: 1.55; }
+.rr-lookup-msg button.link { border: 0; background: none; padding: 0 .15rem; font: inherit; color: var(--primary-text); text-decoration: underline; cursor: pointer; }
 .rr-ops { display: flex; justify-content: flex-end; gap: .1rem; }
 .rr-ops .btn { padding: .32rem .48rem; }
 .rr-ops .btn:disabled { opacity: .3; }
@@ -251,10 +260,9 @@ details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; m
 .rr-add:hover { border-color: var(--primary); background: var(--primary-soft); }
 @container (max-width: 640px) { /* 窄:第一行 序号 / 匹配方式 / 排序删除,下面匹配内容、问题、出口各占一行 */
   .rr-head { display: none; }
-  .rr-row { grid-template-columns: 1.2rem minmax(0, 1fr) auto; grid-template-areas: "no type ops" ". val val" ". app app" ". err err" ". to to"; }
-  .rr-row > .rr-app { grid-area: app; margin-top: 0; }
+  .rr-row { grid-template-columns: 1.2rem minmax(0, 1fr) auto; grid-template-areas: "no type ops" ". val val" ". err err" ". to to"; }
   .rr-row > .rr-no { grid-area: no; }
-  .rr-row > .rr-type { grid-area: type; }
+  .rr-row > .rr-type, .rr-row > .rr-type-cell { grid-area: type; }
   .rr-row > .rr-ops { grid-area: ops; }
   .rr-row > .rr-values { grid-area: val; }
   .rr-row > .rr-to { grid-area: to; }

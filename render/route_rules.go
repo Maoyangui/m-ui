@@ -16,9 +16,10 @@ import (
 
 // RouteRule 一条分流规则。
 type RouteRule struct {
-	Type   string   `json:"type"`   // 见 RouteRuleTypes
-	Values []string `json:"values"` // 任一命中即算命中
-	To     int      `json:"to"`     // >0 上游 id;RouteDirect 直连;RouteReject 拦截
+	Name   string   `json:"name,omitempty"` // 可选的名字(查应用域名填的应用名),只用于显示,不影响分流
+	Type   string   `json:"type"`           // 见 RouteRuleTypes
+	Values []string `json:"values"`         // 任一命中即算命中
+	To     int      `json:"to"`             // >0 上游 id;RouteDirect 直连;RouteReject 拦截
 }
 
 const (
@@ -72,9 +73,23 @@ func ParseRouteRules(raw json.RawMessage) ([]RouteRule, error) {
 		if total += len(vals); total > maxRouteValues {
 			return nil, fmt.Errorf("分流规则的匹配内容加起来最多 %d 项", maxRouteValues)
 		}
-		out = append(out, RouteRule{Type: r.Type, Values: vals, To: r.To})
+		out = append(out, RouteRule{Name: routeRuleName(r.Name), Type: r.Type, Values: vals, To: r.To})
 	}
 	return out, nil
+}
+
+// routeRuleName 规则名只用于显示:去掉控制字符与首尾空白,最长 32 个字。
+func routeRuleName(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r < ' ' || r == 0x7f {
+			return -1
+		}
+		return r
+	}, strings.TrimSpace(s))
+	if rs := []rune(s); len(rs) > 32 {
+		s = strings.TrimSpace(string(rs[:32]))
+	}
+	return s
 }
 
 // normRouteValue 整理一个匹配值;空串表示跳过。

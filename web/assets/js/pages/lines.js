@@ -341,7 +341,14 @@ async function editLine(id, cloneFrom, preset) {
       ${field(t('common.port'), `<input id="f-port" type="number" min="1" max="65535" value="${l.port || ''}">`, t('line.portHelp'))}
       ${field(t('line.upstream'), `<select id="f-upstream"><option value="0">${t('line.direct')}</option>${state.upstreams.map(u => `<option value="${u.id}" ${l.upstreamId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`, t('line.upstreamHelp'))}
       <div class="full rr-box">
-        ${check('f-rr-on', t('line.rr.on'), rrInit.length > 0, t('line.rr.help'))}
+        <div class="rr-top">
+          ${check('f-rr-on', t('line.rr.on'), rrInit.length > 0, t('line.rr.help'))}
+          <div class="rr-lookup" id="f-rr-lookup" ${rrInit.length ? '' : 'hidden'}>
+            <input id="f-rr-apps" placeholder="${esc(t('line.rr.appPh'))}" aria-label="${esc(t('line.rr.appPh'))}" autocomplete="off" spellcheck="false">
+            <button type="button" class="btn sm" id="f-rr-apps-go">${esc(t('line.rr.lookup'))}</button>
+          </div>
+        </div>
+        <p class="rr-lookup-msg" id="f-rr-apps-msg" hidden></p>
         <div id="f-rr" ${rrInit.length ? '' : 'hidden'}>
           <div class="rr-row rr-head" aria-hidden="true"><span>#</span><span>${esc(t('line.rr.type'))}</span><span>${esc(t('line.rr.values'))}</span><span>${esc(t('line.rr.to'))}</span><span></span></div>
           <div id="f-rr-list"></div>
@@ -377,8 +384,7 @@ async function editLine(id, cloneFrom, preset) {
 }
 
 // ---- 分流规则:同一条线路按域名 / IP 段 / 端口分给不同出口,没命中的走线路的上游(后端见 render/route_rules.go) ----
-// app 只在编辑框里用:填应用名,点"查域名"换成域名规则(后端只认前五种)
-const RR_TYPES = ['domain_suffix', 'domain', 'domain_keyword', 'ip_cidr', 'port', 'app'];
+const RR_TYPES = ['domain_suffix', 'domain', 'domain_keyword', 'ip_cidr', 'port'];
 const RR_NEW = () => ({ type: 'domain_suffix', values: [], to: 0 });
 function rrOf(l) { const v = parseJ(l.routeRules); return Array.isArray(v) ? v : []; }
 
@@ -391,9 +397,12 @@ function rrOutOptions(to) {
 
 function rrRowHTML(r, i, n) {
   const type = RR_TYPES.includes(r.type) ? r.type : 'domain_suffix';
-  return `<div class="rr-row">
+  const typeSel = `<select class="rr-type" aria-label="${esc(t('line.rr.type'))}" ${r.name ? 'hidden' : ''}>${RR_TYPES.map(k => `<option value="${k}" ${type === k ? 'selected' : ''}>${esc(t('line.rr.t.' + k))}</option>`).join('')}</select>`;
+  // 查应用域名得来的规则带着应用名:左边显示应用名,下面小字是匹配方式(匹配方式就不给改了)
+  const named = r.name ? `<span class="rr-name" title="${esc(r.name)}"><b>${esc(r.name)}</b><small>${esc(t('line.rr.t.' + type))}</small></span>` : '';
+  return `<div class="rr-row" data-name="${esc(r.name || '')}">
     <span class="rr-no">${i + 1}</span>
-    <select class="rr-type" aria-label="${esc(t('line.rr.type'))}">${RR_TYPES.map(k => `<option value="${k}" ${type === k ? 'selected' : ''}>${esc(t('line.rr.t.' + k))}</option>`).join('')}</select>
+    ${named ? `<span class="rr-type-cell">${named}${typeSel}</span>` : typeSel}
     <textarea class="rr-values" rows="1" spellcheck="false" autocomplete="off" aria-label="${esc(t('line.rr.values'))}" placeholder="${esc(t('line.rr.ph.' + type))}">${esc(r.raw ?? (r.values || []).join(', '))}</textarea>
     <select class="rr-to" aria-label="${esc(t('line.rr.to'))}">${rrOutOptions(Number(r.to) || 0)}</select>
     <span class="rr-ops">
@@ -401,54 +410,61 @@ function rrRowHTML(r, i, n) {
       <button type="button" class="btn sm ghost" data-rr="down" title="${esc(t('line.rr.down'))}" aria-label="${esc(t('line.rr.down'))}" ${i === n - 1 ? 'disabled' : ''}>↓</button>
       <button type="button" class="btn sm ghost danger" data-rr="del" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}">✕</button>
     </span>
-    <div class="rr-app" ${type === 'app' ? '' : 'hidden'}>
-      <button type="button" class="btn sm" data-rr="lookup">${esc(t('line.rr.lookup'))}</button>
-      <span class="rr-app-msg">${r.note || esc(t('line.rr.appHint'))}</span>
-    </div>
     <div class="rr-err" hidden></div>
   </div>`;
 }
 
-// "应用"那一条里的名字:逗号、顿号、空格、换行隔开都行
+// 查应用的域名:逗号、顿号、空格隔开都行
 const rrAppNames = s => s.split(/[\s,，;；、/|]+/).filter(Boolean);
 
-// 查域名:面板所在的服务器去公开的域名库(v2fly)里查。查到的换成可以再改的域名规则(后缀 / 完整域名 / 关键字各一条,
-// 出口沿用这一条的),原地放回;没查到的名字留在"应用"这一条里,写上相近的名字(点一下替换)。
-async function rrLookup(row) {
-  const ta = row.querySelector('.rr-values'), msg = row.querySelector('.rr-app-msg'), btn = row.querySelector('[data-rr="lookup"]');
-  const names = rrAppNames(ta.value);
-  if (!names.length) { msg.textContent = t('line.rr.appEmpty'); ta.focus(); return; }
+// 查域名:面板所在的服务器去公开的域名库(v2fly)里查,每个应用作为一条带应用名的规则加到列表末尾:
+// 完整域名并进域名后缀(只会多匹配它自己的子域名),关键字(少见)另起一条同名的。
+// 内容可以再改,出口在规则里自己选(先是直连,光标落到第一条新规则的出口上)。列表里只有一条还没填的空规则时直接用它的位置。
+// 没查到的名字留在查询框里,下面写上相近的名字(点一下替换再查)。
+async function rrAppsLookup() {
+  const input = document.getElementById('f-rr-apps'), btn = document.getElementById('f-rr-apps-go'), msg = document.getElementById('f-rr-apps-msg');
+  const say = (html, err) => { msg.innerHTML = html; msg.hidden = !html; msg.classList.toggle('danger-text', !!err); };
+  const names = rrAppNames(input.value);
+  if (!names.length) { say(esc(t('line.rr.appEmpty')), true); input.focus(); return; }
   btn.disabled = true;
   btn.textContent = t('line.rr.looking');
+  say('');
   let res;
   try {
     res = (await post('route-apps', { names }, SLOW)).results || [];
   } catch (e) {
-    msg.textContent = e.message;
+    say(esc(e.message), true);
+    return;
+  } finally {
     btn.disabled = false;
     btn.textContent = t('line.rr.lookup');
-    return;
   }
-  const to = Number(row.querySelector('.rr-to').value);
   const found = res.filter(r => !r.error), missed = res.filter(r => r.error);
-  const uniq = key => [...new Set(found.flatMap(r => r[key] || []))];
-  const add = [['domain_suffix', uniq('suffix')], ['domain', uniq('full')], ['domain_keyword', uniq('keyword')]]
-    .filter(([, v]) => v.length).map(([type, values]) => ({ type, values, to }));
-  if (missed.length) {
-    const sug = missed.flatMap(r => (r.suggest || []).map(s => `<button type="button" class="link" data-rr-sug="${esc(s)}" data-q="${esc(r.query)}">${esc(s)}</button>`));
-    add.push({ type: 'app', values: missed.map(r => r.query), to,
-      note: esc(t('line.rr.appMissed', { names: missed.map(r => r.query).join('、') })) + (sug.length ? ' ' + esc(t('line.rr.appSuggest')) + ' ' + sug.join(' ') : '') });
-  }
-  const i = [...document.querySelectorAll('#f-rr-list .rr-row')].indexOf(row);
-  const rules = rrCollect(true);
-  rules.splice(i, 1, ...add);
-  rrRender(rules);
+  const add = [];
+  found.forEach(r => {
+    const dom = [...new Set([...(r.suffix || []), ...(r.full || [])])];
+    if (dom.length) add.push({ name: r.query, type: 'domain_suffix', values: dom, to: 0 });
+    if ((r.keyword || []).length) add.push({ name: r.query, type: 'domain_keyword', values: r.keyword, to: 0 });
+  });
+  let rules = rrCollect(true);
+  if (rules.length === 1 && !rules[0].values.length) rules = [];
+  const first = rules.length; // 第一条新规则的位置
+  if (add.length) rrRender([...rules, ...add]);
+  const parts = [];
   if (found.length) {
-    const n = add.filter(r => r.type !== 'app').reduce((s, r) => s + r.values.length, 0);
+    const n = add.reduce((s, r) => s + r.values.length, 0);
     const detail = found.map(r => `${r.query} ${(r.suffix || []).length + (r.full || []).length + (r.keyword || []).length}`).join('、');
     const total = rrCollect().reduce((s, r) => s + r.values.length, 0);
-    toast(total > 5000 ? t('line.rr.appTooMany', { n: total }) : t('line.rr.appDone', { n, detail }), total > 5000 ? 'err' : 'ok');
+    parts.push(esc(total > 5000 ? t('line.rr.appTooMany', { n: total }) : t('line.rr.appDone', { k: add.length, n, detail })));
   }
+  if (missed.length) {
+    const sug = missed.flatMap(r => (r.suggest || []).map(s => `<button type="button" class="link" data-rr-sug="${esc(s)}" data-q="${esc(r.query)}">${esc(s)}</button>`));
+    parts.push(esc(t('line.rr.appMissed', { names: missed.map(r => r.query).join('、') })) + (sug.length ? ' ' + esc(t('line.rr.appSuggest')) + ' ' + sug.join(' ') : ''));
+  }
+  input.value = missed.map(r => r.query).join(', '); // 查到的从框里拿掉,没查到的留着改
+  say(parts.join('<br>'), missed.length > 0 && !found.length);
+  const to = add.length && document.querySelectorAll('#f-rr-list .rr-row')[first]?.querySelector('.rr-to');
+  if (to) { to.scrollIntoView({ block: 'nearest' }); to.focus(); }
 }
 
 const rrSplit = s => s.split(/[\s,，;；]+/).filter(Boolean);
@@ -457,7 +473,7 @@ const rrSplit = s => s.split(/[\s,，;；]+/).filter(Boolean);
 const rrIPv4 = s => { const p = s.split('.'); return p.length === 4 && p.every(x => /^\d{1,3}$/.test(x) && +x <= 255); };
 const rrIPv6 = s => s.includes(':') && /^[0-9a-f:.]+$/i.test(s);
 function rrBadValue(type, v) {
-  if (type === 'domain_keyword' || type === 'app') return '';
+  if (type === 'domain_keyword') return '';
   if (type === 'ip_cidr') {
     const [a, p, extra] = v.split('/');
     const bits = rrIPv4(a) ? 32 : rrIPv6(a) ? 128 : 0;
@@ -491,6 +507,7 @@ function rrCollect(withRaw) {
   return [...document.querySelectorAll('#f-rr-list .rr-row')].map(row => {
     const ta = row.querySelector('.rr-values');
     const r = { type: row.querySelector('.rr-type').value, values: rrSplit(ta.value), to: Number(row.querySelector('.rr-to').value) };
+    if (row.dataset.name) r.name = row.dataset.name;
     if (withRaw) r.raw = ta.value;
     return r;
   });
@@ -525,21 +542,25 @@ function rrBind(initial) {
   document.getElementById('f-upstream').addEventListener('change', rrRest);
   on.addEventListener('change', () => {
     box.hidden = !on.checked;
+    document.getElementById('f-rr-lookup').hidden = !on.checked;
+    if (!on.checked) document.getElementById('f-rr-apps-msg').hidden = true;
     if (on.checked && !rrCollect().length) rrRender([RR_NEW()], true); // 勾上就给一条空规则,直接填
     else if (on.checked) list.querySelectorAll('.rr-values').forEach(rrFit); // 藏着时量不出高度,显示出来再量
   });
   document.getElementById('f-rr-add').addEventListener('click', () => rrRender([...rrCollect(true), RR_NEW()], true));
-  list.addEventListener('click', e => {
+  // 查应用的域名:按钮或回车;点相近的名字把没找到的那个换成它再查
+  const apps = document.getElementById('f-rr-apps');
+  document.getElementById('f-rr-apps-go').addEventListener('click', rrAppsLookup);
+  apps.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); rrAppsLookup(); } });
+  document.getElementById('f-rr-apps-msg').addEventListener('click', e => {
     const sug = e.target.closest('[data-rr-sug]');
-    if (sug) { // 点相近的名字:把没找到的那个换成它,再查一次
-      const row = sug.closest('.rr-row'), ta = row.querySelector('.rr-values');
-      ta.value = rrAppNames(ta.value).map(x => x === sug.dataset.q ? sug.dataset.rrSug : x).join(', ');
-      rrLookup(row);
-      return;
-    }
+    if (!sug) return;
+    apps.value = rrAppNames(apps.value).map(x => x === sug.dataset.q ? sug.dataset.rrSug : x).join(', ');
+    rrAppsLookup();
+  });
+  list.addEventListener('click', e => {
     const b = e.target.closest('[data-rr]');
     if (!b) return;
-    if (b.dataset.rr === 'lookup') { rrLookup(b.closest('.rr-row')); return; }
     const i = [...list.querySelectorAll('.rr-row')].indexOf(b.closest('.rr-row'));
     const rules = rrCollect(true);
     if (b.dataset.rr === 'del') rules.splice(i, 1);
@@ -554,7 +575,6 @@ function rrBind(initial) {
     if (!e.target.classList.contains('rr-type')) return;
     const row = e.target.closest('.rr-row');
     row.querySelector('.rr-values').placeholder = t('line.rr.ph.' + e.target.value);
-    row.querySelector('.rr-app').hidden = e.target.value !== 'app';
     rrRowCheck(row);
   });
   list.addEventListener('input', e => { if (e.target.classList.contains('rr-values')) rrFit(e.target); }); // 长高立刻做,检查稍等一下再做
@@ -567,7 +587,6 @@ function rrRead() {
   const rows = [...document.querySelectorAll('#f-rr-list .rr-row')];
   const rules = rrCollect();
   rules.forEach((r, i) => {
-    if (r.type === 'app') throw new Error(t('line.rr.appPending', { n: i + 1 }));
     if (!r.values.length) throw new Error(t('line.rr.emptyRule', { n: i + 1 }));
     const bad = rrRowCheck(rows[i]);
     if (bad) throw new Error(t('line.rr.errAt', { n: i + 1, msg: bad }));
