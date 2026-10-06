@@ -140,7 +140,7 @@ sequenceDiagram
   participant S as sing-box
 
   B->>W: 保存线路 / 用户
-  W->>W: 校验字段与端口
+  Note over W: 校验字段与端口
   W->>D: 开事务写入
   W->>S: 全量配置干跑
   alt 干跑不过
@@ -205,10 +205,10 @@ sequenceDiagram
 
   Note over M,N: 每 5 秒一轮
   M->>N: 推快照:线路(含分流规则)/ 上游 / 用户 / 凭据 / 限速状态 + 修订号
-  N->>N: 修订号没变就什么都不做
+  Note over N: 修订号没变就什么都不做
   M->>N: 拉报告
   N--)M: 流量增量 · 在线 IP · 公网 IPv4 / IPv6 · 上游巡检结果
-  M->>M: 汇总用量 · 设备数跨机取并集 · 判定配额
+  Note over M: 汇总用量 · 设备数跨机取并集 · 判定配额
   M->>N: 超量 / 到期的用户,下一轮快照里就没了
   Note over M,N: 副机掉线期间照常转发,<br/>恢复后按游标补齐,不会重复计费
 ```

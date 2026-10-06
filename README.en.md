@@ -140,7 +140,7 @@ sequenceDiagram
   participant S as sing-box
 
   B->>W: Save line / user
-  W->>W: Validate + port check
+  Note over W: Validate + port check
   W->>D: Write in a tx
   W->>S: Dry-run config
   alt Fails
@@ -205,10 +205,10 @@ sequenceDiagram
 
   Note over M,N: Every 5 seconds
   M->>N: Push snapshot: lines (with routing rules) / upstreams / users / limit states + revision
-  N->>N: Same revision, nothing to do
+  Note over N: Same revision, nothing to do
   M->>N: Pull report
   N--)M: Traffic delta · online IPs · public IPv4 / IPv6 · upstream health
-  M->>M: Roll up usage · merge device IPs · judge quota
+  Note over M: Roll up usage · merge device IPs · judge quota
   M->>N: Over-quota and expired users leave the next snapshot
   Note over M,N: A node keeps forwarding while offline,<br/>catches up by cursor, never double-counts
 ```
