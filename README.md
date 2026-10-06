@@ -77,6 +77,12 @@ m-ui 是一个自托管的代理面板:**一个二进制 + 一个数据库文件
 ### 一台服务器里有什么
 
 ```mermaid
+---
+config:
+  htmlLabels: false
+  flowchart:
+    htmlLabels: false
+---
 flowchart TB
   subgraph WHO["谁在连"]
     direction LR
@@ -151,6 +157,12 @@ sequenceDiagram
 ### 一次订阅请求怎么走
 
 ```mermaid
+---
+config:
+  htmlLabels: false
+  flowchart:
+    htmlLabels: false
+---
 flowchart TD
   Q["GET /sub/&lt;地址&gt;"] --> WHO{"这个地址是谁"}
   WHO -->|"用户名 / 随机令牌"| U["命中用户"]
@@ -200,6 +212,10 @@ sequenceDiagram
 ### 数据模型
 
 ```mermaid
+---
+config:
+  htmlLabels: false
+---
 erDiagram
   RESELLER ||--o{ USER : "名下用户"
   RESELLER ||--o{ PLAN : "自己的套餐"

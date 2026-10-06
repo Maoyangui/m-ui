@@ -77,6 +77,12 @@ One binary runs four things: the **panel** (admin UI and API), the **subscriptio
 ### What runs on one server
 
 ```mermaid
+---
+config:
+  htmlLabels: false
+  flowchart:
+    htmlLabels: false
+---
 flowchart TB
   subgraph WHO["Who connects"]
     direction LR
@@ -151,6 +157,12 @@ sequenceDiagram
 ### How a subscription request is answered
 
 ```mermaid
+---
+config:
+  htmlLabels: false
+  flowchart:
+    htmlLabels: false
+---
 flowchart TD
   Q["GET /sub/&lt;key&gt;"] --> WHO{"Whose key is it"}
   WHO -->|"username / random token"| U["Matched user"]
@@ -200,6 +212,10 @@ sequenceDiagram
 ### Data model
 
 ```mermaid
+---
+config:
+  htmlLabels: false
+---
 erDiagram
   RESELLER ||--o{ USER : "their users"
   RESELLER ||--o{ PLAN : "their own plans"
