@@ -64,3 +64,53 @@ func TestV6DNSOverrideOnlyOnPureIPv6DirectLines(t *testing.T) {
 		}
 	}
 }
+
+// 改址只作用于最后走默认直连出口的流量:用户写了"1.1.1.1 走 warp"的分流规则排在改址前面、照旧生效;
+// 有 IPv4 的机器规则顺序与以前一致(每条线路的分流规则紧跟它自己的默认出口)。
+func TestV6DNSOverrideRespectsRouteRules(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	db.Create(&model.Upstream{Name: "warp", Type: "socks", Options: []byte(`{"server":"127.0.0.1","server_port":40000}`)})
+	db.Create(&model.Line{Name: "a", Protocol: "shadowsocks", Port: 30011, Enabled: true, Options: []byte(`{"method":"aes-256-gcm","password":"x"}`),
+		RouteRules: []byte(`[{"type":"ip_cidr","values":["1.1.1.1"],"to":1}]`)})
+	db.Create(&model.Line{Name: "b", Protocol: "shadowsocks", Port: 30012, Enabled: true, Options: []byte(`{"method":"aes-256-gcm","password":"y"}`)})
+
+	order := func() (split, firstOverride, defA, defB, lastIdx int) {
+		raw, err := BuildConfig(db, NodeCert{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := core.ValidateConfig(raw); err != nil {
+			t.Fatalf("配置应通过 sing-box 干跑: %v", err)
+		}
+		split, firstOverride, defA, defB = -1, -1, -1, -1
+		rules := rulesOf(t, raw)
+		for i, r := range rules {
+			in, _ := r["inbound"].([]interface{})
+			switch {
+			case r["action"] == "route-options" && firstOverride < 0:
+				firstOverride = i
+			case r["action"] == "route" && r["outbound"] == "warp" && len(in) == 1 && in[0] == "a":
+				split = i
+			case r["action"] == "route" && r["outbound"] == "direct" && len(in) == 1 && in[0] == "a" && r["ip_cidr"] == nil:
+				defA = i
+			case r["action"] == "route" && r["outbound"] == "direct" && len(in) == 1 && in[0] == "b":
+				defB = i
+			}
+		}
+		return split, firstOverride, defA, defB, len(rules)
+	}
+	db.Create(&model.Setting{Key: "publicIp", Value: "203.0.113.1"})
+	split, ov, defA, defB, _ := order()
+	if ov != -1 || !(split < defA && defA < defB) {
+		t.Fatalf("有 IPv4:不改址、顺序照旧(a 的分流 %d < a 默认 %d < b 默认 %d),改址 %d", split, defA, defB, ov)
+	}
+	db.Model(&model.Setting{}).Where("key = ?", "publicIp").Update("value", "2001:db8::1")
+	split, ov, defA, defB, _ = order()
+	if !(split >= 0 && split < ov && ov < defA && ov < defB) {
+		t.Fatalf("纯 IPv6:分流规则 %d 应在改址 %d 前,改址应在各线路默认出口 %d / %d 前", split, ov, defA, defB)
+	}
+}

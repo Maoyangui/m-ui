@@ -198,3 +198,36 @@ func TestConcurrentLookupsFetchEachListOnce(t *testing.T) {
 		t.Fatalf("tencent 列表被请求了 %d 次,应只请求 1 次", n)
 	}
 }
+
+// 先来的那个请求被取消了,在等它的另一个请求不能跟着报错,要自己再取。
+func TestWaiterRefetchesWhenFirstCallerCancelled(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		select {
+		case <-time.After(300 * time.Millisecond):
+			w.Write([]byte("netflix.com\n"))
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(srv.Close)
+	c := &Client{Bases: []string{srv.URL + "/data/"}, HTTP: &http.Client{Timeout: 5 * time.Second}, TTL: time.Hour}
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() { _, err := c.file(ctx1, "netflix"); first <- err }()
+	time.Sleep(50 * time.Millisecond) // 让第一个先开始取
+	second := make(chan error, 1)
+	var lines []string
+	go func() { var err error; lines, err = c.file(context.Background(), "netflix"); second <- err }()
+	time.Sleep(50 * time.Millisecond)
+	cancel1()
+	if err := <-first; err == nil {
+		t.Fatal("被取消的那个应该报错")
+	}
+	if err := <-second; err != nil || len(lines) != 1 {
+		t.Fatalf("等着的那个应自己再取成功: %v %v", lines, err)
+	}
+	if n := hits.Load(); n != 2 {
+		t.Fatalf("应请求 2 次(第一次被取消、第二次重取),实际 %d", n)
+	}
+}

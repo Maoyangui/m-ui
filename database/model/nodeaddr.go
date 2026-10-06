@@ -48,7 +48,8 @@ func NormAddrFamily(s string) string {
 	return ""
 }
 
-var hostnameRE = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?(\.[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?)*\.?$`)
+// 域名每段字母数字(含中文等各国文字,也收 punycode 与下划线)和连字符,连字符不打头不结尾
+var hostnameRE = regexp.MustCompile(`^[\p{L}\p{N}_]([\p{L}\p{N}_-]*[\p{L}\p{N}_])?(\.[\p{L}\p{N}_]([\p{L}\p{N}_-]*[\p{L}\p{N}_])?)*\.?$`)
 
 // ValidAddr 连接地址只能是 IP 或域名:不带端口、协议头、路径和空格(这些会拼进分享链接把地址弄坏)。
 func ValidAddr(s string) bool {

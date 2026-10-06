@@ -166,9 +166,7 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 		json.RawMessage(`{"action":"sniff"}`),
 		json.RawMessage(`{"protocol":["dns"],"action":"hijack-dns"}`),
 	}
-	if PureIPv6(db) { // 客户端的远程 DNS 多是 1.1.1.1 这类 IPv4 地址,纯 IPv6 机器直连连不上:换成同一家的 IPv6
-		rules = append(rules, v6DNSRules(lines)...)
-	}
+	pureV6 := PureIPv6(db)
 	if !AllowPrivate(db) {
 		// 用户经代理不该摸到这台机器自己(面板、WARP 的 socks 口、副机接口)、内网,以及云厂商的元数据地址
 		// 169.254.169.254(AWS 上拿到实例凭证只要一个 GET)。域名要先解析成 IP,"localhost"或指向 127.0.0.1 的
@@ -192,6 +190,7 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 		rules = append(rules, splitResolve...)
 		rules = append(rules, json.RawMessage(`{"ip_is_private":true,"action":"reject"}`))
 	}
+	var defaults []json.RawMessage // 纯 IPv6 时各线路的默认出口规则挪到最后(见下)
 	for _, line := range lines {
 		inbound, err := renderInbound(line, cert, usersByLine[line.Id])
 		if err != nil {
@@ -215,7 +214,19 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 			rules = append(rules, rule)
 		}
 		rule, _ := json.Marshal(map[string]interface{}{"inbound": []string{line.Name}, "action": "route", "outbound": outboundTag})
-		rules = append(rules, rule)
+		if pureV6 {
+			defaults = append(defaults, rule)
+		} else {
+			rules = append(rules, rule)
+		}
+	}
+	// 纯 IPv6 机器:客户端的远程 DNS 多是 1.1.1.1 这类 IPv4 地址,直连连不上,换成同一家的 IPv6(见 v6dns.go)。
+	// 改址只该作用于最后走默认直连出口的流量:各线路的分流规则(都带 inbound,互不影响)先排,
+	// 再排改址,最后排各线路的默认出口 —— 用户写了"1.1.1.1 走某上游"的照旧走上游、不被改址。
+	// 有 IPv4 的机器不走这段,配置与以前逐字节一致。
+	if pureV6 {
+		rules = append(rules, v6DNSRules(lines)...)
+		rules = append(rules, defaults...)
 	}
 
 	outbounds, err := renderOutbounds(upstreams)

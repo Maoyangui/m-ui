@@ -329,6 +329,10 @@ func (c *Client) file(ctx context.Context, name string) ([]string, error) {
 		c.mu.Unlock()
 		select {
 		case <-call.done:
+			// 前一个取的人自己的请求被取消 / 超时了,这边还要:自己再取,别跟着报错
+			if call.err != nil && ctx.Err() == nil && (errors.Is(call.err, context.Canceled) || errors.Is(call.err, context.DeadlineExceeded)) {
+				return c.file(ctx, name)
+			}
 			return call.lines, call.err
 		case <-ctx.Done():
 			return nil, ctx.Err()
