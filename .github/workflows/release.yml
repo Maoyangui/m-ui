@@ -57,11 +57,26 @@ jobs:
       - name: Tests (含全协议 sing-box 干跑)
         run: go test -tags with_utls ./...
 
-      - name: Build linux amd64 / arm64 (纯 Go,无 CGO,静态单二进制)
+      - name: 落地页里佛跳墙的兜底版本(取佛跳墙当前最新发布写进程序;两边同步发版时佛跳墙先发)
+        id: god
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          v=$(gh release view --repo Maoyangui/godusevpn --json tagName -q .tagName 2>/dev/null | sed 's/^v//' || true)
+          if echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "v=$v" >> "$GITHUB_OUTPUT"; echo "佛跳墙最新发布 v$v"
+          else
+            echo "::warning::取不到佛跳墙最新版本,落地页兜底版本用代码里的默认值"
+          fi
+
+      - name: Build linux amd64 / arm64 (纯 Go,无 CGO,静态单二进制)
+        env:
+          GODV: ${{ steps.god.outputs.v }}
+        run: |
+          EXTRA=""; [ -n "$GODV" ] && EXTRA="-X github.com/Maoyangui/m-ui/sub.godFallbackVer=$GODV"
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
-              go build -tags with_utls -trimpath -ldflags "-w -s -X main.version=${{ steps.ver.outputs.v }}" -o dist/$arch/m-ui .
+              go build -tags with_utls -trimpath -ldflags "-w -s -X main.version=${{ steps.ver.outputs.v }} $EXTRA" -o dist/$arch/m-ui .
             tar -C dist/$arch -czf m-ui-linux-$arch.tar.gz m-ui
           done
           sha256sum m-ui-linux-*.tar.gz > SHA256SUMS

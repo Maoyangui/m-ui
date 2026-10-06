@@ -39,6 +39,11 @@ func warpProxy() *url.URL {
 	return &url.URL{Scheme: "socks5", Host: addr}
 }
 
+// DoGitHub 给别的包用(落地页取佛跳墙最新版本号):同 doGitHub,直连 GitHub 不通且本机 WARP 在听时经它再发一次。
+func DoGitHub(ctx context.Context, base *http.Client, newReq func() (*http.Request, error)) (*http.Response, error) {
+	return doGitHub(ctx, base, newReq)
+}
+
 // doGitHub 发一个请求:直连连不上(网络错误,不是 HTTP 状态码)且本机 WARP 在听时,经 WARP 再发一次。
 // newReq 每次新建请求;base 是直连用的 client,经 WARP 时沿用它的超时与重定向策略。
 func doGitHub(ctx context.Context, base *http.Client, newReq func() (*http.Request, error)) (*http.Response, error) {
