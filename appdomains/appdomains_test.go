@@ -55,7 +55,7 @@ func fakeRepo(t *testing.T, primaryStatus int) (*Client, *atomic.Int32, *atomic.
 	s2 := serve(&hits2, 0)
 	t.Cleanup(s1.Close)
 	t.Cleanup(s2.Close)
-	return &Client{Bases: []string{s1.URL + "/data/", s2.URL + "/data/"}, Index: s2.URL + "/flat", HTTP: &http.Client{Timeout: 5 * time.Second}, TTL: time.Hour}, &hits1, &hits2
+	return &Client{Bases: []string{s1.URL + "/data/", s2.URL + "/data/"}, Indexes: []string{s2.URL + "/flat"}, HTTP: &http.Client{Timeout: 5 * time.Second}, TTL: time.Hour}, &hits1, &hits2
 }
 
 func TestLookupExpandsIncludesAndKeepsSupportedForms(t *testing.T) {
@@ -129,5 +129,47 @@ func TestListName(t *testing.T) {
 		if got := ListName(in); got != want {
 			t.Errorf("ListName(%q) = %q,应为 %q", in, got, want)
 		}
+	}
+}
+
+func TestLookupPicksPartOfBigList(t *testing.T) {
+	files["tencent"] = "include:qcloud\nqq.com\nwechat.com\nservicewechat.com\nwxcloudrun.com\nad.weixin.qq.com @ads\nqpic.cn\n"
+	files["qcloud"] = "wechat-in-include.com\n"
+	defer func() { delete(files, "tencent"); delete(files, "qcloud") }()
+	c, _, _ := fakeRepo(t, 0)
+	r := c.Lookup(context.Background(), []string{"微信"})[0]
+	want := []string{"wechat.com", "servicewechat.com", "wxcloudrun.com", "qpic.cn", "weixin.qq.com", "wx.qq.com"}
+	if r.Error != "" || r.List != "tencent" || !r.Part || !reflect.DeepEqual(r.Suffix, want) {
+		t.Fatalf("微信应从 tencent 里挑出相关的(不展开 include、不带 qq.com,ad.weixin.qq.com 被 weixin.qq.com 盖住):%+v", r)
+	}
+}
+
+func TestLookupSearchesUmbrellasWhenNoList(t *testing.T) {
+	files["microsoft"] = "live.com\noutlook.com\nmyoutlook.net\nfull:outlook.office365.com\n"
+	defer delete(files, "microsoft")
+	c, _, _ := fakeRepo(t, 0)
+	r := c.Lookup(context.Background(), []string{"Outlook"})[0]
+	if r.Error != "" || r.List != "microsoft" || !r.Part ||
+		!reflect.DeepEqual(r.Suffix, []string{"outlook.com"}) || !reflect.DeepEqual(r.Full, []string{"outlook.office365.com"}) {
+		t.Fatalf("没有 outlook 列表时应去大厂列表里找以 outlook 开头的段(myoutlook.net 不算):%+v", r)
+	}
+	if r := c.Lookup(context.Background(), []string{"wechatt"})[0]; r.Error == "" || !reflect.DeepEqual(r.Suggest, []string{"wechat"}) {
+		t.Fatalf("拼错的名字也应能推荐到 picks 里的名字:%+v", r)
+	}
+	if r := c.Lookup(context.Background(), []string{"liv"})[0]; r.Error == "" {
+		t.Fatalf("太短的名字不该去大厂列表里找:%+v", r)
+	}
+}
+
+func TestSuggestReadsGitHubTreeIndex(t *testing.T) {
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) }))
+	tree := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"tree":[{"path":"data/netflix"},{"path":"data"},{"path":"README.md"},{"path":"data/nettv"}]}`))
+	}))
+	t.Cleanup(bad.Close)
+	t.Cleanup(tree.Close)
+	c := &Client{Indexes: []string{bad.URL, tree.URL}, HTTP: &http.Client{Timeout: 5 * time.Second}, TTL: time.Hour}
+	if got := c.suggest(context.Background(), "net"); !reflect.DeepEqual(got, []string{"netflix", "nettv"}) {
+		t.Fatalf("第一份索引取不到应换下一份,并认得 GitHub 目录树的格式:%v", got)
 	}
 }

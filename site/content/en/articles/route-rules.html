@@ -15,6 +15,10 @@
   </ul>
   <p>Rules are checked top to bottom and the first match wins; anything unmatched uses the line's own upstream — the "Everything else" row at the bottom shows which one and follows the upstream dropdown. Invalid values are flagged in red with the reason as you type, and every save is still dry-run through sing-box. Leave it unticked and nothing changes.</p>
 
+  <h2>Looking up an app's domains</h2>
+  <p>Apps rarely use a single domain, and hunting them down by hand is tedious. With <b>Rule-based routing</b> ticked there is a lookup box on the same row: type app names (douyin, netflix, chatgpt, google…, comma-separated) and click <b>Look up</b>. The panel's server looks them up in the public <a href="https://github.com/v2fly/domain-list-community" rel="noopener">v2fly/domain-list-community</a> list (where the clients' geosite rules come from) and adds one rule per app, labelled with the app name; edit the domains and pick the egress before saving. Names that are not found stay in the box with similar names offered; click one to swap it in and look up again.</p>
+  <p>WeChat, Alipay, Gmail and the like have no list of their own; their domains are picked out of the big Tencent, Alibaba and Google lists, which the result notes, and may be incomplete, so add more if needed. Some apps such as WeChat also open connections straight to IP addresses without a domain, which domain rules cannot catch; covering those takes IP range rules.</p>
+
   <h2>Five match types</h2>
   <table class="stack">
     <tr><th>Match</th><th>Example</th><th>Notes</th></tr>

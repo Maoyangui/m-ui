@@ -4,6 +4,10 @@
 // 数据来自 v2fly/domain-list-community —— 各家客户端 geosite 规则的源头,按应用一份列表,
 // 列表之间用 include 互相引用。这里只取三种分流规则认得的写法(域名后缀、完整域名、关键字),
 // 正则写法跳过并计数。查过的列表缓存一天。
+//
+// 有些应用没有自己的列表,而是大厂列表里的一部分(微信在 tencent 里、支付宝在 alibaba 里、Gmail 在 google 里):
+// 常见的几个写在 picks 里,从那份列表挑出相关的条目;别的名字找不到列表时,
+// 再去几份大厂列表里找含这个名字的域名(umbrellas)。
 package appdomains
 
 import (
@@ -29,6 +33,7 @@ type Result struct {
 	Suffix  []string `json:"suffix,omitempty"`  // 域名后缀(含子域名)
 	Full    []string `json:"full,omitempty"`    // 完整域名(已被后缀盖住的去掉了)
 	Keyword []string `json:"keyword,omitempty"` // 域名关键字
+	Part    bool     `json:"part,omitempty"`    // 只是 List 里与这个应用相关的一部分(List 可能是逗号隔开的几份)
 	Skipped int      `json:"skipped,omitempty"` // 正则写法的条目:分流规则不支持,跳过
 	Error   string   `json:"error,omitempty"`
 	Suggest []string `json:"suggest,omitempty"` // 没找到时,名字相近的列表
@@ -39,10 +44,10 @@ var ErrNotFound = errors.New("没找到这个应用")
 
 // Client 查列表的客户端;Bases 依次尝试(第一个说没有就是没有,连不上才换下一个)。
 type Client struct {
-	Bases []string // 数据文件所在目录,以 / 结尾
-	Index string   // 全部列表名的索引(只用来推荐相近的名字)
-	HTTP  *http.Client
-	TTL   time.Duration
+	Bases   []string // 数据文件所在目录,以 / 结尾
+	Indexes []string // 全部列表名的索引(只用来推荐相近的名字),依次尝试
+	HTTP    *http.Client
+	TTL     time.Duration
 
 	mu      sync.Mutex
 	files   map[string]cachedFile
@@ -61,9 +66,12 @@ var Default = &Client{
 		"https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/",
 		"https://cdn.jsdelivr.net/gh/v2fly/domain-list-community@master/data/",
 	},
-	Index: "https://data.jsdelivr.com/v1/package/gh/v2fly/domain-list-community@master/flat",
-	HTTP:  &http.Client{Timeout: 12 * time.Second},
-	TTL:   24 * time.Hour,
+	Indexes: []string{
+		"https://api.github.com/repos/v2fly/domain-list-community/git/trees/master?recursive=1",
+		"https://data.jsdelivr.com/v1/package/gh/v2fly/domain-list-community@master/flat", // 镜像的索引会旧一些
+	},
+	HTTP: &http.Client{Timeout: 12 * time.Second},
+	TTL:  24 * time.Hour,
 }
 
 const (
@@ -72,8 +80,21 @@ const (
 	maxFileSz = 2 << 20 // 单份列表的大小上限
 )
 
-// 中文名与常见叫法 → 列表名。没列在这里的,英文名直接当列表名试。
+// 中文名与常见叫法 → 列表名(或 picks 里的名字、或拿去大厂列表里找的字样)。没列在这里的,英文名直接当列表名试。
 var aliases = map[string]string{
+	"微信": "wechat", "weixin": "wechat", "wx": "wechat", "企业微信": "wechat", "wecom": "wechat",
+	"支付宝": "alipay", "蚂蚁": "alipay", "蚂蚁集团": "alipay",
+	"淘宝": "taobao", "天猫": "taobao", "tmall": "taobao", "1688": "taobao",
+	"飞猪": "fliggy", "夸克": "quark", "盒马": "hema", "速卖通": "aliexpress", "qq邮箱": "qqmail",
+	"谷歌邮箱": "gmail", "googlemail": "gmail", "谷歌云盘": "googledrive", "googledrive": "googledrive", "谷歌地图": "googlemaps", "googlemaps": "googlemaps",
+	"谷歌商店": "google-play", "谷歌应用商店": "google-play", "googleplay": "google-play", "bard": "google-gemini", "剪映": "capcut",
+	"高德": "amap", "高德地图": "amap", "饿了么": "eleme", "菜鸟": "cainiao", "钉钉": "dingtalk", "优酷": "youku",
+	"uc浏览器": "uc", "阿里云": "aliyun", "阿里云盘": "aliyun-drive", "爱奇艺": "iqiyi", "美团": "meituan", "大众点评": "meituan",
+	"京东": "jd", "拼多多": "pinduoduo", "百度": "baidu", "快手": "kuaishou", "微博": "sina", "weibo": "sina", "新浪": "sina",
+	"网易": "netease", "网易云音乐": "netease", "滴滴": "didi", "小米": "xiaomi", "华为": "huawei", "斗鱼": "douyu", "虎牙": "huya",
+	"豆瓣": "douban", "携程": "ctrip", "酷狗": "kugou", "酷我": "kuwo", "qq音乐": "tencent-tme", "qqmusic": "tencent-tme",
+	"腾讯云": "qcloud", "喜马拉雅": "ximalaya", "金山": "kingsoft", "苏宁": "suning", "银联": "unionpay", "云闪付": "unionpay",
+	"搜狗": "sogou", "腾讯游戏": "tencent-games",
 	"抖音": "douyin", "douyin": "douyin", "tiktok": "tiktok", "抖音海外版": "tiktok",
 	"字节": "bytedance", "字节跳动": "bytedance", "今日头条": "bytedance", "头条": "bytedance",
 	"飞书": "lark", "豆包": "doubao", "小红书": "xiaohongshu", "红书": "xiaohongshu",
@@ -84,10 +105,37 @@ var aliases = map[string]string{
 	"脸书": "facebook", "fb": "facebook", "ins": "instagram", "ig": "instagram",
 	"迪士尼": "disney", "disney+": "disney", "disneyplus": "disney", "prime": "primevideo", "primevideo": "primevideo",
 	"亚马逊": "amazon", "b站": "bilibili", "哔哩哔哩": "bilibili", "知乎": "zhihu",
-	"腾讯": "tencent", "微信": "tencent", "qq": "tencent", "阿里": "alibaba", "阿里巴巴": "alibaba", "淘宝": "alibaba",
+	"腾讯": "tencent", "qq": "tencent", "阿里": "alibaba", "阿里巴巴": "alibaba",
 	"微软": "microsoft", "苹果": "apple", "必应": "bing",
 	"ai": "category-ai-chat-!cn", "人工智能": "category-ai-chat-!cn",
 }
+
+// pick 一个应用只是某份大列表的一部分:只读那一份(不展开 include),挑出含 keys 里任一字样的条目,
+// 再加上 extra(列表里只有上一级的大域名、挑不出来的,当域名后缀加)。
+type pick struct {
+	list  string
+	keys  []string
+	extra []string
+}
+
+var picks = map[string]pick{
+	"wechat":      {"tencent", []string{"wechat", "weixin", "wx", "mmbiz", "qpic", "qlogo", "tenpay"}, []string{"weixin.qq.com", "wx.qq.com"}},
+	"qqmail":      {"tencent", []string{"qqmail", "foxmail"}, []string{"mail.qq.com", "exmail.qq.com"}},
+	"alipay":      {"alibaba", []string{"alipay", "antgroup", "antfin", "antfortune", "fund123"}, nil},
+	"taobao":      {"alibaba", []string{"taobao", "tmall", "tbcdn", "tbcache", "tb.cn", "tburl", "1688", "etao"}, []string{"alicdn.com"}},
+	"fliggy":      {"alibaba", []string{"fliggy", "feizhu", "alitrip"}, nil},
+	"quark":       {"alibaba", []string{"quark", "cueme"}, nil},
+	"hema":        {"alibaba", []string{"hema", "freshippo"}, nil},
+	"aliexpress":  {"alibaba", []string{"aliexpress", "ae-rus", "aedns", "aeplatform", "aestatic"}, nil},
+	"gmail":       {"google", []string{"gmail", "googlemail"}, []string{"mail.google.com", "gmail.googleapis.com"}},
+	"googledrive": {"google", []string{"googledrive"}, []string{"drive.google.com", "docs.google.com"}},
+	"googlemaps":  {"google", []string{"googlemaps"}, []string{"maps.google.com", "maps.googleapis.com", "maps.gstatic.com"}},
+}
+
+// 找不到列表时去这几份大厂列表里找含这个名字的域名(只看列表本身,不展开 include)
+var umbrellas = []string{"tencent", "alibaba", "bytedance", "baidu", "google", "microsoft", "apple", "amazon", "facebook"}
+
+const minUmbrellaQuery = 4 // 名字太短(qq、ai 这种)不去大厂列表里找,免得挑出一堆不相干的
 
 var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9.!-]{0,63}$`)
 
@@ -139,16 +187,27 @@ func (c *Client) lookupOne(ctx context.Context, q string) Result {
 		return r
 	}
 	acc := newAcc()
-	if err := c.resolve(ctx, name, map[string]bool{}, 0, acc); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			r.Error = ErrNotFound.Error()
-			r.Suggest = c.suggest(ctx, strings.ToLower(strings.Join(strings.Fields(q), "")))
-		} else {
+	if p, ok := picks[name]; ok {
+		if err := c.resolve(ctx, p.list, map[string]bool{}, 0, acc, keysFilter(p.keys)); err != nil {
 			r.Error = err.Error()
+			return r
 		}
+		for _, d := range p.extra {
+			acc.add("s", d)
+		}
+		r.List, r.Part = p.list, true
+	} else if err := c.resolve(ctx, name, map[string]bool{}, 0, acc, nil); err == nil {
+		r.List = name
+	} else if !errors.Is(err, ErrNotFound) {
+		r.Error = err.Error()
+		return r
+	} else if from := c.searchUmbrellas(ctx, name, acc); len(from) > 0 {
+		r.List, r.Part = strings.Join(from, ","), true
+	} else {
+		r.Error = ErrNotFound.Error()
+		r.Suggest = c.suggest(ctx, strings.ToLower(strings.Join(strings.Fields(q), "")))
 		return r
 	}
-	r.List = name
 	r.Suffix, r.Full, r.Keyword, r.Skipped = acc.result()
 	if len(r.Suffix)+len(r.Full)+len(r.Keyword) == 0 {
 		r.Error = ErrNotFound.Error()
@@ -156,8 +215,55 @@ func (c *Client) lookupOne(ctx context.Context, q string) Result {
 	return r
 }
 
+// keysFilter 条目里含任一字样就要
+func keysFilter(keys []string) func(string) bool {
+	return func(v string) bool {
+		for _, k := range keys {
+			if strings.Contains(v, k) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// wordFilter 条目里有一段以 w 开头就要(outlook 认 outlook.com、不认 myoutlook.net;条目前面的 full: 之类也算分隔)
+func wordFilter(w string) func(string) bool {
+	return func(v string) bool {
+		return strings.HasPrefix(v, w) || strings.Contains(v, "."+w) || strings.Contains(v, "-"+w) || strings.Contains(v, ":"+w)
+	}
+}
+
+// searchUmbrellas 在几份大厂列表里找有一段以 name 开头的条目(同时读),返回有收获的列表名(按 umbrellas 的顺序)。
+func (c *Client) searchUmbrellas(ctx context.Context, name string, out *acc) []string {
+	if len(name) < minUmbrellaQuery {
+		return nil
+	}
+	parts := make([]*acc, len(umbrellas))
+	var wg sync.WaitGroup
+	for i, u := range umbrellas {
+		parts[i] = newAcc()
+		wg.Add(1)
+		go func(a *acc, u string) {
+			defer wg.Done()
+			c.resolve(ctx, u, map[string]bool{}, 0, a, wordFilter(name))
+		}(parts[i], u)
+	}
+	wg.Wait()
+	var from []string
+	for i, a := range parts {
+		if a.empty() {
+			continue
+		}
+		from = append(from, umbrellas[i])
+		out.merge(a)
+	}
+	return from
+}
+
 // resolve 读一份列表并展开 include;只有最外层那份找不到才算错,里面引用的缺一份就跳过。
-func (c *Client) resolve(ctx context.Context, name string, seen map[string]bool, depth int, acc *acc) error {
+// keep 不为空时只要它认可的条目,而且不展开 include(从一份大列表里挑一部分)。
+func (c *Client) resolve(ctx context.Context, name string, seen map[string]bool, depth int, acc *acc, keep func(string) bool) error {
 	if seen[name] || depth > maxDepth || len(seen) >= maxFiles {
 		return nil
 	}
@@ -181,10 +287,13 @@ func (c *Client) resolve(ctx context.Context, name string, seen map[string]bool,
 			continue
 		}
 		v := strings.ToLower(f[0])
+		if keep != nil && (strings.HasPrefix(v, "include:") || !keep(v)) {
+			continue
+		}
 		switch {
 		case strings.HasPrefix(v, "include:"):
 			if sub := strings.TrimPrefix(v, "include:"); validName.MatchString(sub) {
-				c.resolve(ctx, sub, seen, depth+1, acc)
+				c.resolve(ctx, sub, seen, depth+1, acc, nil)
 			}
 		case strings.HasPrefix(v, "regexp:"):
 			acc.skipped++
@@ -256,13 +365,22 @@ func (c *Client) fetchLines(ctx context.Context, url string) ([]string, error) {
 	return lines, sc.Err()
 }
 
-// suggest 名字相近的列表(拿不到索引就不推荐)。
+// suggest 名字相近的列表(拿不到索引时只在 picks 的名字里找)。
 func (c *Client) suggest(ctx context.Context, q string) []string {
-	if len(q) < 2 || c.Index == "" {
+	if len(q) < 2 {
 		return nil
 	}
 	names := c.indexNames(ctx)
+	seen := make(map[string]bool, len(names)+len(picks))
 	var pre, sub []string
+	for _, n := range names {
+		seen[n] = true
+	}
+	for n := range picks {
+		if !seen[n] {
+			names = append(names, n)
+		}
+	}
 	for _, n := range names {
 		switch {
 		case strings.HasPrefix(n, q):
@@ -281,13 +399,29 @@ func (c *Client) suggest(ctx context.Context, q string) []string {
 }
 
 func (c *Client) indexNames(ctx context.Context) []string {
+	if len(c.Indexes) == 0 {
+		return nil
+	}
 	c.mu.Lock()
 	if c.index != nil && time.Since(c.indexAt) < c.TTL {
 		defer c.mu.Unlock()
 		return c.index
 	}
 	c.mu.Unlock()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Index, nil)
+	for _, u := range c.Indexes {
+		if names := c.fetchIndex(ctx, u); len(names) > 0 {
+			c.mu.Lock()
+			c.index, c.indexAt = names, time.Now()
+			c.mu.Unlock()
+			return names
+		}
+	}
+	return nil
+}
+
+// fetchIndex 读一份索引:GitHub 的目录树({"tree":[{"path":"data/x"}]})或 jsDelivr 的文件表({"files":[{"name":"/data/x"}]})。
+func (c *Client) fetchIndex(ctx context.Context, url string) []string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil
 	}
@@ -297,6 +431,9 @@ func (c *Client) indexNames(ctx context.Context) []string {
 	}
 	defer resp.Body.Close()
 	var idx struct {
+		Tree []struct {
+			Path string `json:"path"`
+		} `json:"tree"`
 		Files []struct {
 			Name string `json:"name"`
 		} `json:"files"`
@@ -305,14 +442,17 @@ func (c *Client) indexNames(ctx context.Context) []string {
 		return nil
 	}
 	var names []string
-	for _, f := range idx.Files {
-		if n := strings.TrimPrefix(f.Name, "/data/"); n != f.Name && validName.MatchString(n) {
+	add := func(p string) {
+		if n := strings.TrimPrefix(p, "data/"); n != p && validName.MatchString(n) {
 			names = append(names, n)
 		}
 	}
-	c.mu.Lock()
-	c.index, c.indexAt = names, time.Now()
-	c.mu.Unlock()
+	for _, t := range idx.Tree {
+		add(t.Path)
+	}
+	for _, f := range idx.Files {
+		add(strings.TrimPrefix(f.Name, "/"))
+	}
 	return names
 }
 
@@ -348,13 +488,29 @@ func (a *acc) add(kind, v string) {
 	}
 }
 
+func (a *acc) empty() bool { return len(a.suffix)+len(a.full)+len(a.keyword) == 0 }
+
+func (a *acc) merge(b *acc) {
+	for _, v := range b.suffix {
+		a.add("s", v)
+	}
+	for _, v := range b.full {
+		a.add("f", v)
+	}
+	for _, v := range b.keyword {
+		a.add("k", v)
+	}
+	a.skipped += b.skipped
+}
+
+// result 去掉已被别的后缀盖住的:完整域名本身或它的上级是后缀;后缀的上级也是后缀。
 func (a *acc) result() (suffix, full, keyword []string, skipped int) {
 	set := make(map[string]bool, len(a.suffix))
 	for _, s := range a.suffix {
 		set[s] = true
 	}
-	covered := func(host string) bool {
-		for h := host; ; {
+	covered := func(h string) bool { // h 或它的某一级上级在 set 里
+		for {
 			if set[h] {
 				return true
 			}
@@ -365,12 +521,17 @@ func (a *acc) result() (suffix, full, keyword []string, skipped int) {
 			h = h[i+1:]
 		}
 	}
+	for _, s := range a.suffix {
+		if i := strings.IndexByte(s, '.'); i < 0 || !covered(s[i+1:]) {
+			suffix = append(suffix, s)
+		}
+	}
 	for _, f := range a.full {
 		if !covered(f) {
 			full = append(full, f)
 		}
 	}
-	return a.suffix, full, a.keyword, a.skipped
+	return suffix, full, a.keyword, a.skipped
 }
 
 func attrsOnly(f []string) bool {

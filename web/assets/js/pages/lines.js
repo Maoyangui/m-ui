@@ -424,6 +424,7 @@ const rrAppNames = s => s.split(/[\s,，;；、/|]+/).filter(Boolean);
 async function rrAppsLookup() {
   const input = document.getElementById('f-rr-apps'), btn = document.getElementById('f-rr-apps-go'), msg = document.getElementById('f-rr-apps-msg');
   const say = (html, err) => { msg.innerHTML = html; msg.hidden = !html; msg.classList.toggle('danger-text', !!err); };
+  if (btn.disabled) return; // 上一次还没查完(回车不受按钮变灰拦)
   const names = rrAppNames(input.value);
   if (!names.length) { say(esc(t('line.rr.appEmpty')), true); input.focus(); return; }
   btn.disabled = true;
@@ -456,6 +457,9 @@ async function rrAppsLookup() {
     const detail = found.map(r => `${r.query} ${(r.suffix || []).length + (r.full || []).length + (r.keyword || []).length}`).join('、');
     const total = rrCollect().reduce((s, r) => s + r.values.length, 0);
     parts.push(esc(total > 5000 ? t('line.rr.appTooMany', { n: total }) : t('line.rr.appDone', { k: add.length, n, detail })));
+    // 微信、Gmail 这类是从大厂列表里挑出来的,说一声可能不全
+    const part = found.filter(r => r.part);
+    if (part.length) parts.push(esc(t('line.rr.appPart', { names: part.map(r => r.query).join('、'), lists: [...new Set(part.flatMap(r => (r.list || '').split(',')))].join('、') })));
   }
   if (missed.length) {
     const sug = missed.flatMap(r => (r.suggest || []).map(s => `<button type="button" class="link" data-rr-sug="${esc(s)}" data-q="${esc(r.query)}">${esc(s)}</button>`));

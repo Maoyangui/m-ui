@@ -325,7 +325,7 @@ No domain is fine: self-signed cert + IP, and every node in the subscription alr
 ### Lines
 
 - One line = one entry port. Ports are identical on every server; the master renders and pushes the config to each node.
-- The **upstream** decides where traffic exits: direct, WARP, or any relay you added. Turn on **rule-based routing** to send chosen domains, IP ranges or ports to another exit (or block them); everything else uses this upstream.
+- The **upstream** decides where traffic exits: direct, WARP, or any relay you added. Turn on **rule-based routing** to send chosen domains, IP ranges or ports to another exit (or block them); everything else uses this upstream. Type app names next to it (douyin, netflix, chatgpt…) and click "Look up": the server looks them up in a public domain list (v2fly) and adds one rule per app, labelled with the app name, whose domains you can edit and whose egress you pick.
 - **Deploy to**: all servers by default, or only selected ones, e.g. a line that exists only on one node.
 - Hysteria2 accepts a **port-hopping range** (e.g. `20000-30000`): the server forwards that UDP range to the line port with nftables / iptables and clients hop between ports, which sidesteps per-port UDP throttling by ISPs.
 - Every save dry-runs the full sing-box config; a failing change is rejected instead of stored.
