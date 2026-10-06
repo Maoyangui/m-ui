@@ -1164,11 +1164,16 @@ func pushBackoff(n int) time.Duration {
 func (h *Hub) syncNode(n model.Node, snap Snapshot) *nodeResult {
 	st := h.getStatus(n) // 先把状态项建出来,首次推送才能记下 LastPush,不会下一轮又推一遍
 	h.mu.Lock()
-	pushedRev, lastPush := h.pushed[n.Id], st.LastPush
+	pushedRev, lastPush, nodeRev := h.pushed[n.Id], st.LastPush, st.Revision
 	pf := h.pushFail[n.Id]
 	h.mu.Unlock()
 	res := &nodeResult{n: n}
-	if pushedRev != snap.Revision || time.Now().Unix()-lastPush > 600 {
+	// 副机报告的修订号和要推的不一样也要推:推一份新配置失败后(副机库里已经是那份失败的修订、数据面回滚了),
+	// 管理员把改动撤回,内容回到上一次推成功的那份,修订号(内容哈希)也就一样 —— 只比 pushed 会以为副机早已是它,
+	// 一直不推,副机库里留着撤掉的线路、待重载不清、一直未同步,要等下面 10 分钟一次的定期重推。
+	// 同一修订连续失败的退避照旧(下面按 pushFail 判),不会因此每 5 秒去拆一次副机的数据面。
+	behind := nodeRev != "" && nodeRev != snap.Revision
+	if pushedRev != snap.Revision || behind || time.Now().Unix()-lastPush > 600 {
 		switch {
 		case pf != nil && pf.rev == snap.Revision && time.Since(pf.at) < pushBackoff(pf.n):
 			res.pushErr = fmt.Sprintf("推送失败 %d 次,%s 后再试: %s", pf.n, (pushBackoff(pf.n) - time.Since(pf.at)).Round(time.Second), pf.cause)

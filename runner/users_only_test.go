@@ -22,3 +22,24 @@ func TestOnlyUsersDiffer(t *testing.T) {
 		}
 	}
 }
+
+// 上游热更新能兜住的范围:只差出站和 / 或入站用户表;线路、路由一动就不行。
+func TestSameExceptOutboundsUsers(t *testing.T) {
+	base := `{"inbounds":[{"tag":"a","type":"socks","listen_port":1,"users":[{"username":"x","password":"1"}]}],"outbounds":[{"type":"direct","tag":"direct"},{"type":"socks","tag":"up","server_port":1}],"route":{"rules":[{"inbound":["a"],"outbound":"up"}]}}`
+	both := `{"inbounds":[{"tag":"a","type":"socks","listen_port":1,"users":[]}],"outbounds":[{"type":"direct","tag":"direct"},{"type":"socks","tag":"up","server_port":2}],"route":{"rules":[{"inbound":["a"],"outbound":"up"}]}}`
+	port := `{"inbounds":[{"tag":"a","type":"socks","listen_port":9,"users":[{"username":"x","password":"1"}]}],"outbounds":[{"type":"direct","tag":"direct"},{"type":"socks","tag":"up","server_port":2}],"route":{"rules":[{"inbound":["a"],"outbound":"up"}]}}`
+	route := `{"inbounds":[{"tag":"a","type":"socks","listen_port":1,"users":[{"username":"x","password":"1"}]}],"outbounds":[{"type":"direct","tag":"direct"},{"type":"socks","tag":"up","server_port":1}],"route":{"rules":[{"inbound":["a"],"outbound":"direct"}]}}`
+	if !sameExceptOutboundsUsers([]byte(base), []byte(both)) || !sameExceptOutboundsUsers([]byte(base), []byte(base)) {
+		t.Fatal("只差出站与用户表(或完全相同)应判为 true")
+	}
+	for name, next := range map[string]string{"线路端口变了": port, "路由变了": route, "不是 JSON": "{"} {
+		if sameExceptOutboundsUsers([]byte(base), []byte(next)) {
+			t.Fatalf("%s:热换出站兜不住,不该判为 true", name)
+		}
+	}
+	// 热换出站之后、换用户表之前在跑的样子:旧配置 + 新出站
+	running := withOutboundsOf([]byte(base), []byte(both))
+	if !sameExceptOutboundsUsers(running, []byte(base)) || !onlyUsersDiffer(running, []byte(both)) {
+		t.Fatalf("应是旧配置换上新出站(用户表仍是旧的): %s", running)
+	}
+}

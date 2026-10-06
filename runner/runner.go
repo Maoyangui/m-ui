@@ -525,7 +525,7 @@ func outboundsOf(raw []byte) (map[string]string, error) {
 }
 
 // ReloadUpstreams 只增删改有变化的出站,不重启数据面,现有用户连接不受影响。
-// 适用于上游增删改(线路与路由未变)。任一步失败则回退到全量重载。
+// 适用于上游增删改(线路与路由未变);同一份配置里的用户变化一并热更新。任一步失败则回退到全量重载。
 func (r *Runner) ReloadUpstreams() (err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -548,6 +548,11 @@ func (r *Runner) ReloadUpstreams() (err error) {
 	// 找不到出口而断流。这种情况必须整体重启,让规则和出站一起换。
 	if r.appliedRaw != nil && !sameRuleOutbounds(r.appliedRaw, raw) {
 		logger.Info("路由引用的出站变化(如上游改名),改为全量重载")
+		return r.reloadAllLocked(raw)
+	}
+	// 除了出站和入站用户表还有别的变化(线路、路由、证书……):热换出站兜不住,整体重载才能让它们一起生效
+	if r.appliedRaw != nil && !sameExceptOutboundsUsers(r.appliedRaw, raw) {
+		logger.Info("除了上游还有线路 / 路由等变化,改为全量重载")
 		return r.reloadAllLocked(raw)
 	}
 	changed := 0
@@ -579,6 +584,20 @@ func (r *Runner) ReloadUpstreams() (err error) {
 		changed++
 	}
 	r.applied = want
+	// 运行中的配置记录跟着换成新出站:之后整份配置起不来要回滚时,回到的是最近真正在跑的上游,
+	// 而不是热更新之前的那个(以前这里不更新,回滚会把已经换掉的旧上游请回来)
+	if r.appliedRaw != nil {
+		if running := withOutboundsOf(r.appliedRaw, raw); running != nil {
+			r.appliedRaw = running
+		}
+	}
+	// 同一份配置里的用户变化也要生效:副机失联期间先改上游、再停用用户,恢复后一份快照推过来,
+	// 副机只会走到这里;只换出站就确认成功,被停用的用户还能拿旧凭据建新连接
+	if err := r.reloadUsersLocked(raw); err != nil {
+		logger.Warning("上游已热更新,用户表热更新失败,改为全量重载: ", err)
+		return r.reloadAllLocked(raw)
+	}
+	r.appliedRaw = raw
 	logger.Info("上游已热更新(", changed, " 个出站变化,数据面未重启)")
 	return nil
 }
@@ -1037,33 +1056,62 @@ func sameRuleOutbounds(prev, next []byte) bool {
 // onlyUsersDiffer 两份 sing-box 配置是否只有入站用户表不同(入站的 users 字段抹掉后逐字节相同)。
 // 解析不了就按"不止用户变了"处理,让调用方走稳妥的重启路径。
 func onlyUsersDiffer(prev, next []byte) bool {
-	strip := func(raw []byte) []byte {
-		var cfg map[string]json.RawMessage
-		if json.Unmarshal(raw, &cfg) != nil {
+	a, b := stripForCompare(prev, false), stripForCompare(next, false)
+	return a != nil && b != nil && bytes.Equal(a, b) && !bytes.Equal(prev, next)
+}
+
+// sameExceptOutboundsUsers 两份配置除了出站和入站用户表之外是否完全一样(上游热更新能兜住的范围)。
+func sameExceptOutboundsUsers(prev, next []byte) bool {
+	a, b := stripForCompare(prev, true), stripForCompare(next, true)
+	return a != nil && b != nil && bytes.Equal(a, b)
+}
+
+// withOutboundsOf prev 的配置换上 next 的出站(上游热换之后、用户表换之前数据面实际在跑的样子);解析失败返回 nil。
+func withOutboundsOf(prev, next []byte) []byte {
+	var p, n map[string]json.RawMessage
+	if json.Unmarshal(prev, &p) != nil || json.Unmarshal(next, &n) != nil {
+		return nil
+	}
+	if ob, ok := n["outbounds"]; ok {
+		p["outbounds"] = ob
+	} else {
+		delete(p, "outbounds")
+	}
+	out, err := json.Marshal(p)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+// stripForCompare 去掉入站的 users(dropOutbounds 时连 outbounds 一起去掉)后按键排序序列化,供比对;解析失败返回 nil。
+func stripForCompare(raw []byte, dropOutbounds bool) []byte {
+	var cfg map[string]json.RawMessage
+	if json.Unmarshal(raw, &cfg) != nil {
+		return nil
+	}
+	if dropOutbounds {
+		delete(cfg, "outbounds")
+	}
+	var inbounds []map[string]json.RawMessage
+	if in, ok := cfg["inbounds"]; ok {
+		if json.Unmarshal(in, &inbounds) != nil {
 			return nil
 		}
-		var inbounds []map[string]json.RawMessage
-		if in, ok := cfg["inbounds"]; ok {
-			if json.Unmarshal(in, &inbounds) != nil {
-				return nil
-			}
-			for _, ib := range inbounds {
-				delete(ib, "users")
-			}
-			b, err := json.Marshal(inbounds)
-			if err != nil {
-				return nil
-			}
-			cfg["inbounds"] = b
+		for _, ib := range inbounds {
+			delete(ib, "users")
 		}
-		out, err := json.Marshal(cfg) // map 序列化按键排序,两边一致
+		b, err := json.Marshal(inbounds)
 		if err != nil {
 			return nil
 		}
-		return out
+		cfg["inbounds"] = b
 	}
-	a, b := strip(prev), strip(next)
-	return a != nil && b != nil && bytes.Equal(a, b) && !bytes.Equal(prev, next)
+	out, err := json.Marshal(cfg) // map 序列化按键排序,两边一致
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 // outboundsOfSafe 与 outboundsOf 相同,解析失败时返回 nil(回滚路径上不该再报错)。
