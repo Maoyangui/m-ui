@@ -20,7 +20,7 @@
     <tr><th>Match</th><th>Example</th><th>Notes</th></tr>
     <tr><td class="nw">Domain suffix</td><td><code>netflix.com</code></td><td>The domain itself and all its subdomains (<code>www.netflix.com</code>), not <code>notnetflix.com</code>.</td></tr>
     <tr><td class="nw">Full domain</td><td><code>www.example.com</code></td><td>Exactly that name.</td></tr>
-    <tr><td class="nw">Domain keyword</td><td><code>ads</code></td><td>Any domain containing those letters.</td></tr>
+    <tr><td class="nw">Domain keyword</td><td><code>ads</code></td><td>Any domain containing those letters. A very short keyword (like <code>ai</code>) also catches unrelated sites.</td></tr>
     <tr><td class="nw">IP range</td><td><code>91.108.4.0/22</code>, <code>1.2.3.4</code></td><td>A single IP becomes /32. This matches the destination address: traffic requested by domain may not match an IP range, so prefer domain rules where you can.</td></tr>
     <tr><td class="nw">Port</td><td><code>25</code>, <code>8000-9000</code></td><td>A single port or a range.</td></tr>
   </table>
@@ -29,6 +29,7 @@
   <ul>
     <li><b>Streaming through another exit</b>: the line goes direct, while <code>netflix.com</code> and <code>nflxvideo.net</code> use a US upstream.</li>
     <li><b>Blocking what you don't want to carry</b>: by keyword or by port, for example outbound mail on port 25.</li>
+    <li><b>All of an app's domains</b>: apps rarely use just one. Douyin serves video from <code>douyinvod.com</code> but its API lives on <code>amemv.com</code> and <code>snssdk.com</code>, so a <code>douyin</code> keyword only catches part of it; add them all.</li>
     <li><b>Special-casing a network</b>: on a line that exits through WARP, send one service's IP range direct.</li>
   </ul>
 

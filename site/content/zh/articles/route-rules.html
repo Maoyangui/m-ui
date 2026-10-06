@@ -20,7 +20,7 @@
     <tr><th>方式</th><th>例子</th><th>说明</th></tr>
     <tr><td class="nw">域名后缀</td><td><code>netflix.com</code></td><td>匹配这个域名本身和它的所有子域名(<code>www.netflix.com</code>),不匹配 <code>notnetflix.com</code>。</td></tr>
     <tr><td class="nw">完整域名</td><td><code>www.example.com</code></td><td>只匹配这一个。</td></tr>
-    <tr><td class="nw">域名关键字</td><td><code>ads</code></td><td>域名里含这几个字母就算。</td></tr>
+    <tr><td class="nw">域名关键字</td><td><code>ads</code></td><td>域名里含这几个字母就算。太短的关键字(如 <code>ai</code>)会把不相干的网站也带走。</td></tr>
     <tr><td class="nw">IP 段</td><td><code>91.108.4.0/22</code>、<code>1.2.3.4</code></td><td>单个 IP 自动写成 /32。按 IP 匹配的是目标地址:客户端按域名访问的流量不一定能按 IP 段匹配上,能用域名规则就优先用域名规则。</td></tr>
     <tr><td class="nw">端口</td><td><code>25</code>、<code>8000-9000</code></td><td>单个端口或端口区间。</td></tr>
   </table>
@@ -29,6 +29,7 @@
   <ul>
     <li><b>流媒体走另一个落地</b>:线路默认直连,<code>netflix.com</code>、<code>nflxvideo.net</code> 走美国的上游。</li>
     <li><b>拦掉不想放行的</b>:按关键字或端口拦,比如发信的 25 端口。</li>
+    <li><b>一个 App 的全部域名</b>:App 往往不止一个域名,比如抖音的视频在 <code>douyinvod.com</code>,接口在 <code>amemv.com</code>、<code>snssdk.com</code>,只写 <code>douyin</code> 关键字只能带走一部分,要一起加。</li>
     <li><b>某些网段单独处理</b>:默认走 WARP 的线路,把某个服务的 IP 段改成直连。</li>
   </ul>
 

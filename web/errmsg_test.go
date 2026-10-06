@@ -20,7 +20,7 @@ import (
 func TestErrorMessagesHaveEnglish(t *testing.T) {
 	src, ops := backendMessages(t, ".", "../hop", "../upstream", "../ext", "../rules", "../creds", "../ops", "../selfupdate",
 		"../acme", "../reach", "../render", "../runner", "../hub", "../certutil", "../backup", "../importer", "../jobs",
-		"../monitor", "../stats", "../totp", "../database")
+		"../monitor", "../stats", "../totp", "../database", "../appdomains")
 	js, err := os.ReadFile("assets/js/errmsg.js")
 	if err != nil {
 		t.Fatal(err)

@@ -108,6 +108,8 @@ main#page { padding: 1.25rem 1.5rem 2.5rem; max-width: 1280px; width: 100%; marg
 /* ===== 表格 ===== */
 .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow-x: auto; }
 table.grid { width: 100%; border-collapse: collapse; min-width: 640px; }
+/* 中文名称每个字之间都能断行,自动列宽一挤就成了一字一行:名称列至少留约 6 个字,放不下整表横向滚动 */
+table.grid td.primary-cell { min-width: 6.5em; }
 .grid th, .grid td { padding: .6rem .8rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .grid th { background: var(--surface-2); font-weight: 600; font-size: .76rem; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; position: sticky; top: 0; }
 .grid tbody tr:hover { background: var(--surface-2); }
@@ -233,6 +235,11 @@ details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; m
 .rr-row textarea { min-height: 2.15rem; resize: vertical; line-height: 1.35; }
 .rr-row textarea.bad { border-color: var(--danger); }
 .rr-err { grid-column: 3 / -1; margin-top: -.15rem; font-size: .76rem; color: var(--danger); }
+/* "应用(查域名)"那一条:输入框下面一个按钮 + 说明 / 结果 */
+.rr-app { grid-column: 3 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: .3rem .6rem; margin-top: -.15rem; }
+.rr-app .btn { flex: none; }
+.rr-app-msg { font-size: .76rem; color: var(--muted); line-height: 1.5; }
+.rr-app-msg button.link { border: 0; background: none; padding: 0 .15rem; font: inherit; color: var(--primary-text); text-decoration: underline; cursor: pointer; }
 .rr-ops { display: flex; justify-content: flex-end; gap: .1rem; }
 .rr-ops .btn { padding: .32rem .48rem; }
 .rr-ops .btn:disabled { opacity: .3; }
@@ -244,7 +251,8 @@ details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; m
 .rr-add:hover { border-color: var(--primary); background: var(--primary-soft); }
 @container (max-width: 640px) { /* 窄:第一行 序号 / 匹配方式 / 排序删除,下面匹配内容、问题、出口各占一行 */
   .rr-head { display: none; }
-  .rr-row { grid-template-columns: 1.2rem minmax(0, 1fr) auto; grid-template-areas: "no type ops" ". val val" ". err err" ". to to"; }
+  .rr-row { grid-template-columns: 1.2rem minmax(0, 1fr) auto; grid-template-areas: "no type ops" ". val val" ". app app" ". err err" ". to to"; }
+  .rr-row > .rr-app { grid-area: app; margin-top: 0; }
   .rr-row > .rr-no { grid-area: no; }
   .rr-row > .rr-type { grid-area: type; }
   .rr-row > .rr-ops { grid-area: ops; }

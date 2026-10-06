@@ -1,5 +1,5 @@
 import { state, load } from '../app.js';
-import { get, post, put, del } from '../api.js';
+import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML } from '../ui.js';
 
@@ -377,7 +377,8 @@ async function editLine(id, cloneFrom, preset) {
 }
 
 // ---- 分流规则:同一条线路按域名 / IP 段 / 端口分给不同出口,没命中的走线路的上游(后端见 render/route_rules.go) ----
-const RR_TYPES = ['domain_suffix', 'domain', 'domain_keyword', 'ip_cidr', 'port'];
+// app 只在编辑框里用:填应用名,点"查域名"换成域名规则(后端只认前五种)
+const RR_TYPES = ['domain_suffix', 'domain', 'domain_keyword', 'ip_cidr', 'port', 'app'];
 const RR_NEW = () => ({ type: 'domain_suffix', values: [], to: 0 });
 function rrOf(l) { const v = parseJ(l.routeRules); return Array.isArray(v) ? v : []; }
 
@@ -400,8 +401,54 @@ function rrRowHTML(r, i, n) {
       <button type="button" class="btn sm ghost" data-rr="down" title="${esc(t('line.rr.down'))}" aria-label="${esc(t('line.rr.down'))}" ${i === n - 1 ? 'disabled' : ''}>↓</button>
       <button type="button" class="btn sm ghost danger" data-rr="del" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}">✕</button>
     </span>
+    <div class="rr-app" ${type === 'app' ? '' : 'hidden'}>
+      <button type="button" class="btn sm" data-rr="lookup">${esc(t('line.rr.lookup'))}</button>
+      <span class="rr-app-msg">${r.note || esc(t('line.rr.appHint'))}</span>
+    </div>
     <div class="rr-err" hidden></div>
   </div>`;
+}
+
+// "应用"那一条里的名字:逗号、顿号、空格、换行隔开都行
+const rrAppNames = s => s.split(/[\s,，;；、/|]+/).filter(Boolean);
+
+// 查域名:面板所在的服务器去公开的域名库(v2fly)里查。查到的换成可以再改的域名规则(后缀 / 完整域名 / 关键字各一条,
+// 出口沿用这一条的),原地放回;没查到的名字留在"应用"这一条里,写上相近的名字(点一下替换)。
+async function rrLookup(row) {
+  const ta = row.querySelector('.rr-values'), msg = row.querySelector('.rr-app-msg'), btn = row.querySelector('[data-rr="lookup"]');
+  const names = rrAppNames(ta.value);
+  if (!names.length) { msg.textContent = t('line.rr.appEmpty'); ta.focus(); return; }
+  btn.disabled = true;
+  btn.textContent = t('line.rr.looking');
+  let res;
+  try {
+    res = (await post('route-apps', { names }, SLOW)).results || [];
+  } catch (e) {
+    msg.textContent = e.message;
+    btn.disabled = false;
+    btn.textContent = t('line.rr.lookup');
+    return;
+  }
+  const to = Number(row.querySelector('.rr-to').value);
+  const found = res.filter(r => !r.error), missed = res.filter(r => r.error);
+  const uniq = key => [...new Set(found.flatMap(r => r[key] || []))];
+  const add = [['domain_suffix', uniq('suffix')], ['domain', uniq('full')], ['domain_keyword', uniq('keyword')]]
+    .filter(([, v]) => v.length).map(([type, values]) => ({ type, values, to }));
+  if (missed.length) {
+    const sug = missed.flatMap(r => (r.suggest || []).map(s => `<button type="button" class="link" data-rr-sug="${esc(s)}" data-q="${esc(r.query)}">${esc(s)}</button>`));
+    add.push({ type: 'app', values: missed.map(r => r.query), to,
+      note: esc(t('line.rr.appMissed', { names: missed.map(r => r.query).join('、') })) + (sug.length ? ' ' + esc(t('line.rr.appSuggest')) + ' ' + sug.join(' ') : '') });
+  }
+  const i = [...document.querySelectorAll('#f-rr-list .rr-row')].indexOf(row);
+  const rules = rrCollect(true);
+  rules.splice(i, 1, ...add);
+  rrRender(rules);
+  if (found.length) {
+    const n = add.filter(r => r.type !== 'app').reduce((s, r) => s + r.values.length, 0);
+    const detail = found.map(r => `${r.query} ${(r.suffix || []).length + (r.full || []).length + (r.keyword || []).length}`).join('、');
+    const total = rrCollect().reduce((s, r) => s + r.values.length, 0);
+    toast(total > 5000 ? t('line.rr.appTooMany', { n: total }) : t('line.rr.appDone', { n, detail }), total > 5000 ? 'err' : 'ok');
+  }
 }
 
 const rrSplit = s => s.split(/[\s,，;；]+/).filter(Boolean);
@@ -410,7 +457,7 @@ const rrSplit = s => s.split(/[\s,，;；]+/).filter(Boolean);
 const rrIPv4 = s => { const p = s.split('.'); return p.length === 4 && p.every(x => /^\d{1,3}$/.test(x) && +x <= 255); };
 const rrIPv6 = s => s.includes(':') && /^[0-9a-f:.]+$/i.test(s);
 function rrBadValue(type, v) {
-  if (type === 'domain_keyword') return '';
+  if (type === 'domain_keyword' || type === 'app') return '';
   if (type === 'ip_cidr') {
     const [a, p, extra] = v.split('/');
     const bits = rrIPv4(a) ? 32 : rrIPv6(a) ? 128 : 0;
@@ -483,8 +530,16 @@ function rrBind(initial) {
   });
   document.getElementById('f-rr-add').addEventListener('click', () => rrRender([...rrCollect(true), RR_NEW()], true));
   list.addEventListener('click', e => {
+    const sug = e.target.closest('[data-rr-sug]');
+    if (sug) { // 点相近的名字:把没找到的那个换成它,再查一次
+      const row = sug.closest('.rr-row'), ta = row.querySelector('.rr-values');
+      ta.value = rrAppNames(ta.value).map(x => x === sug.dataset.q ? sug.dataset.rrSug : x).join(', ');
+      rrLookup(row);
+      return;
+    }
     const b = e.target.closest('[data-rr]');
     if (!b) return;
+    if (b.dataset.rr === 'lookup') { rrLookup(b.closest('.rr-row')); return; }
     const i = [...list.querySelectorAll('.rr-row')].indexOf(b.closest('.rr-row'));
     const rules = rrCollect(true);
     if (b.dataset.rr === 'del') rules.splice(i, 1);
@@ -499,6 +554,7 @@ function rrBind(initial) {
     if (!e.target.classList.contains('rr-type')) return;
     const row = e.target.closest('.rr-row');
     row.querySelector('.rr-values').placeholder = t('line.rr.ph.' + e.target.value);
+    row.querySelector('.rr-app').hidden = e.target.value !== 'app';
     rrRowCheck(row);
   });
   list.addEventListener('input', e => { if (e.target.classList.contains('rr-values')) rrFit(e.target); }); // 长高立刻做,检查稍等一下再做
@@ -511,6 +567,7 @@ function rrRead() {
   const rows = [...document.querySelectorAll('#f-rr-list .rr-row')];
   const rules = rrCollect();
   rules.forEach((r, i) => {
+    if (r.type === 'app') throw new Error(t('line.rr.appPending', { n: i + 1 }));
     if (!r.values.length) throw new Error(t('line.rr.emptyRule', { n: i + 1 }));
     const bad = rrRowCheck(rows[i]);
     if (bad) throw new Error(t('line.rr.errAt', { n: i + 1, msg: bad }));

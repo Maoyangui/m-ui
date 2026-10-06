@@ -168,6 +168,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"health", s.handleHealth) // 只对本机开放:升级守护 / 安装脚本判健康用
 	mux.HandleFunc(api+"status", s.auth(s.handleStatus))
 	mux.HandleFunc(api+"lines", s.auth(s.masterOnly(s.handleLines)))
+	mux.HandleFunc(api+"route-apps", s.auth(s.masterOnly(s.handleRouteApps))) // 分流规则:按应用名查域名
 	mux.HandleFunc(api+"lines/", s.auth(s.masterOnly(s.handleLineItem)))
 	mux.HandleFunc(api+"lines/sort", s.auth(s.masterOnly(s.handleLineSort)))
 	mux.HandleFunc(api+"upstreams", s.auth(s.masterOnly(s.handleUpstreams)))
