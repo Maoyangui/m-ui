@@ -71,12 +71,14 @@ func TestHungNodeDoesNotStallOthers(t *testing.T) {
 		if d := time.Since(start); d > time.Second {
 			t.Fatalf("第 %d 轮 tick 被挂起的副机拖住了 %v", round, d)
 		}
+		// 健康副机收到拉报告就计数了,但这一轮还要落库、放闸;闸没放下一轮 tick 会按设计跳过它,
+		// 所以等它这一轮整个收尾(闸空了)再进下一轮,不然慢机器上会偶发少一次
 		deadline := time.Now().Add(3 * time.Second)
-		for atomic.LoadInt32(&reports) < int32(round) && time.Now().Before(deadline) {
+		for (atomic.LoadInt32(&reports) < int32(round) || len(h.gate(3)) > 0) && time.Now().Before(deadline) {
 			time.Sleep(10 * time.Millisecond)
 		}
-		if got := atomic.LoadInt32(&reports); got < int32(round) {
-			t.Fatalf("第 %d 轮健康副机没按时同步(报告 %d 次)", round, got)
+		if got := atomic.LoadInt32(&reports); got < int32(round) || len(h.gate(3)) > 0 {
+			t.Fatalf("第 %d 轮健康副机没按时同步(报告 %d 次,这一轮收尾了吗:%v)", round, got, len(h.gate(3)) == 0)
 		}
 	}
 	if st := h.Statuses()[3]; !st.OK || !st.CoreRunning {
