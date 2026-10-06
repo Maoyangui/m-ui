@@ -223,8 +223,8 @@ config:
 erDiagram
   RESELLER ||--o{ USER : "their users"
   RESELLER ||--o{ PLAN : "their own plans"
-  RESELLER }o--o{ LINE : "granted lines (can be one server only)"
-  USER }o--o{ LINE : "assigned (down to one server's entry)"
+  RESELLER }o--o{ LINE : "granted lines"
+  USER }o--o{ LINE : "assigned lines"
   PLAN ||..o{ USER : "applied on create"
   LINE }o--|| UPSTREAM : "where it exits"
   LINE }o--o{ NODE : "deployed on"

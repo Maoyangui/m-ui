@@ -223,8 +223,8 @@ config:
 erDiagram
   RESELLER ||--o{ USER : "名下用户"
   RESELLER ||--o{ PLAN : "自己的套餐"
-  RESELLER }o--o{ LINE : "被授权的线路(可收窄到某几台)"
-  USER }o--o{ LINE : "分配(可细到某台服务器上的入口)"
+  RESELLER }o--o{ LINE : "被授权的线路"
+  USER }o--o{ LINE : "分到的线路"
   PLAN ||..o{ USER : "建号时套用"
   LINE }o--|| UPSTREAM : "从哪出去"
   LINE }o--o{ NODE : "部署在哪几台"
