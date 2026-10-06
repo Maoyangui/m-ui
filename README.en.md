@@ -72,7 +72,7 @@ More screenshots (lines, landing page, Chinese UI) live in [docs/screenshots](do
 
 ## Architecture
 
-One binary runs four things: the **panel** (admin UI and API), the **subscription server** (where clients fetch their config), the **data plane** (embedded sing-box, where traffic actually flows) and **background work** (stats, quota enforcement, upstream probes, log cleanup, master/node sync). They share one SQLite file, so a click in the panel is visible to the subscription server and the data plane immediately.
+One binary runs four things: the **panel** (admin UI and API), the **subscription server** (where clients fetch their config), the **data plane** (embedded sing-box, where traffic actually flows) and **background work** (stats, quota and limit-rule enforcement, upstream probes, public IP probing, mainland reachability checks, log cleanup, master/node sync). They share one SQLite file, so a click in the panel is visible to the subscription server and the data plane immediately.
 
 ### What runs on one server
 
@@ -102,7 +102,7 @@ flowchart TB
   WEB --> DB[("m-ui.db")]
   SUB --> DB
   BG --> DB
-  CORE ==> OUT["Exit"]
+  CORE ==> OUT["Exit<br/>direct · WARP · relay<br/>upstream + routing rules"]
 
   classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
   classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
@@ -116,6 +116,8 @@ flowchart TB
 ```
 
 > Ports and paths are all configurable; the values above are the defaults. The panel and the reseller panel are the same frontend — the session scope decides what you can see.
+>
+> Each line has a default upstream (direct, WARP or a relay); with routing rules on, chosen domains / IP ranges / ports can take another exit or be blocked. On an IPv6-only server, direct lines also redirect public DNS such as 1.1.1.1 and 8.8.8.8 to their IPv6 addresses. External services are all optional: GitHub (update check), the v2fly domain list (app domain lookup), Cloudflare / ipify (probing this server's public IPv4 and IPv6), Globalping (mainland reachability) and Telegram (alerts); if one is unreachable only that feature is affected.
 
 ### What happens when you save
 
@@ -186,10 +188,10 @@ sequenceDiagram
   participant N as Node
 
   Note over M,N: Every 5 seconds
-  M->>N: Push snapshot: lines / upstreams / users + revision
+  M->>N: Push snapshot: lines (with routing rules) / upstreams / users / limit states + revision
   N->>N: Same revision, nothing to do
   M->>N: Pull report
-  N--)M: Traffic delta · online IPs · upstream health
+  N--)M: Traffic delta · online IPs · public IPv4 / IPv6 · upstream health
   M->>M: Roll up usage · merge device IPs · judge quota
   M->>N: Over-quota and expired users leave the next snapshot
   Note over M,N: A node keeps forwarding while offline,<br/>catches up by cursor, never double-counts
@@ -207,6 +209,7 @@ erDiagram
   LINE }o--|| UPSTREAM : "where it exits"
   LINE }o--o{ NODE : "deployed on"
   USER ||--o{ SUBLOG : "subscription fetches"
+  RULE }o--o{ USER : "schedule / burst limits"
 
   USER {
     string name "subscription key · inbound credential"
@@ -220,6 +223,13 @@ erDiagram
     int port "listen port"
     json tls_transport "TLS and transport"
     json node_ids "which servers"
+    json route_rules "routing: domain / IP range / port to an exit"
+  }
+  NODE {
+    string addr "connect address (empty = probed public IP)"
+    string public_ip "probed public IPv4 / IPv6"
+    string addr_family "prefer IPv4 or IPv6 in subscriptions"
+    float ratio "traffic multiplier"
   }
   RESELLER {
     int64 quota "traffic / bandwidth / device budget"
@@ -232,12 +242,18 @@ erDiagram
 
 | Every | What happens | Code |
 |---|---|---|
+| 5s | Master pushes snapshots to nodes and pulls back traffic and online IPs | `hub/` |
 | 10s | Read traffic and live connections from the data plane, write per user / line / upstream stats | `jobs/` |
 | 10s | Evaluate limit rules (schedule / burst); active states ride the next snapshot to nodes | `rules/` `jobs/` |
 | 1m | Judge quota, expiry and periodic resets — disable and kick where needed; data-plane watchdog | `jobs/` `monitor/` |
-| 5s | Master pushes snapshots to nodes and pulls back traffic and online IPs | `hub/` |
 | 10m | WAL checkpoint, so the live .db is always safe to copy | `runner/` |
-| 6h | Check whether a newer release exists (check only, never auto-install) | `selfupdate/` |
+| 10m (configurable) | Upstream probes: each server checks only the upstreams its lines use; down / recovered alerts | `monitor/` |
+| 30m (configurable) | Master refreshes external subscriptions; results ride the snapshot to nodes | `runner/` |
+| 90m (configurable) | Master runs the mainland reachability check (Globalping probes in mainland China, IPv4 only for now) | `reach/` |
+| 1h | Probe this server's public IPv4 / IPv6 (an address counts as gone only after 3 missed rounds); expiry and usage warnings; prune stats and logs by retention | `runner/` `monitor/` `jobs/` |
+| 6h | Check whether a newer release exists (check only, never auto-install; through local WARP when GitHub is unreachable directly) | `selfupdate/` |
+| 12h | Certificate renewal check | `runner/` |
+| daily | Daily report; scheduled backup (at the configured hour) | `monitor/` `runner/` |
 | 1h | Prune time series, subscription access log and audit log, each by its own retention; fold minute samples older than 48 h into hourly buckets | `jobs/` |
 | per setting (10m default) | Probe upstreams — every server checks only what its own lines use, results roll up to the master | `monitor/` |
 | 12h | Certificate renewal check (after renewal sing-box swaps the certificate itself, no restart) | `runner/` |

@@ -5,14 +5,15 @@
   <nav class="toc"><a href="#process">One process</a><a href="#save">What a save does</a><a href="#request">A subscription request</a><a href="#sync">Master and nodes</a><a href="#model">Data model</a><a href="#cadence">Background cadence</a><a href="#code">Code layout</a></nav>
 
   <h2 id="process">What runs on one server</h2>
-  <table>
+  <table class="stack">
     <tr><th>Part</th><th>Listens on</th><th>Does</th></tr>
     <tr><td>Panel</td><td><code>:2053 /app/</code> (and <code>:2054 /dl/</code> for resellers)</td><td>Sessions, API, reseller scoping. Same frontend for both, the session decides what is visible.</td></tr>
     <tr><td>Subscription server</td><td><code>:2056 /sub/</code></td><td>Three formats, landing page, client-download page, temporary sharing, the "subscription unavailable" page.</td></tr>
-    <tr><td>Data plane</td><td>line ports</td><td>Embedded sing-box: inbounds per line, outbounds per upstream, traffic and connection tracking, per-user limits.</td></tr>
-    <tr><td>Background</td><td>—</td><td>Stats every 10 s, quota judgment every minute, upstream probes (each server checks only what it uses), log cleanup hourly, certificate renewal, backups, master/node sync every 5 s.</td></tr>
+    <tr><td>Data plane</td><td>line ports</td><td>Embedded sing-box: an inbound per line, an outbound per upstream in use; beyond a line's default upstream, routing rules can send domains / IP ranges / ports to another exit or block them; traffic and connection tracking, per-user limits.</td></tr>
+    <tr><td>Background</td><td>—</td><td>Stats and limit rules every 10 s, quota judgment every minute, upstream probes (each server checks only what it uses), hourly public IPv4 / IPv6 probing and log cleanup, mainland reachability checks, certificate renewal, backups, master/node sync every 5 s.</td></tr>
   </table>
   <p>All four share <code>m-ui.db</code> (SQLite in WAL mode). The panel writes, the data plane and subscription server read, so a click in the panel is visible everywhere immediately. There is no message queue, cache server or second database to run.</p>
+  <p>The only outside calls are optional: GitHub (update check), the v2fly domain list (app domain lookup), Cloudflare / ipify (probing public IPv4 and IPv6), Globalping (mainland reachability) and Telegram (alerts). If one is unreachable only that feature is affected.</p>
 
   <h2 id="save">What a save does</h2>
   <ol>
@@ -26,43 +27,49 @@
   <p><code>GET /sub/&lt;key&gt;</code>: the key is matched as a user name, a random subscription token, or a temporary share token (which serves the same user with a second credential set). Disabled users, expired resellers and unknown keys get 404 — a short explanation page for browsers, a plain 404 for clients. For a live user, a browser gets the landing page; a client gets universal links, Clash YAML or a sing-box config depending on <code>?format=</code>. Nodes are the user's assigned lines × the servers each line is deployed on, plus external nodes and subscriptions.</p>
 
   <h2 id="sync">Master and nodes</h2>
-  <p>Every 5 seconds the master snapshots lines, upstreams, users, credentials, resellers and synced settings, hashes them into a revision, pushes to all nodes concurrently and pulls each node's report (traffic since a cursor, online IPs, status). Nodes never judge quota; users the master disables simply disappear from the next snapshot. Details on the <a href="{{base}}multi-server/">multi-server page</a>.</p>
+  <p>Every 5 seconds the master snapshots lines (with routing rules), upstreams, users, credentials, resellers, active limit-rule states and synced settings, hashes them into a revision, pushes to all nodes concurrently and pulls each node's report (traffic since a cursor, online IPs, public IPv4 / IPv6, upstream health). Each server probes its own public addresses and renders its own config, so an IPv6-only node handles DNS for its own situation. Nodes never judge quota; users the master disables simply disappear from the next snapshot. Details on the <a href="{{base}}multi-server/">multi-server page</a>.</p>
 
   <h2 id="model">Data model</h2>
-  <table>
+  <table class="stack">
     <tr><th>Table</th><th>Holds</th><th>Relations</th></tr>
-    <tr><td>lines</td><td>protocol, port, TLS, transport, options, which servers</td><td>→ upstream (exit); ↔ users via user_lines; ↔ nodes</td></tr>
+    <tr><td>lines</td><td>protocol, port, TLS, transport, options, which servers, routing rules</td><td>→ upstream (exit); ↔ users via user_lines; ↔ nodes</td></tr>
     <tr><td>users</td><td>credentials per protocol, quota and usage, expiry, device and speed limits, subscription key, share token</td><td>↔ lines; → reseller (optional); ← plans on create</td></tr>
     <tr><td>upstreams</td><td>outbound type and options</td><td>← lines</td></tr>
-    <tr><td>nodes</td><td>name, domain / address, API URL and token, ratio</td><td>↔ lines</td></tr>
+    <tr><td>nodes</td><td>name, domain, connect address, probed public IPv4 / IPv6, which one subscriptions use, API URL and token, ratio</td><td>↔ lines</td></tr>
+    <tr><td>rules</td><td>schedule / burst limit rules and whom they apply to</td><td>→ users, resellers</td></tr>
     <tr><td>resellers</td><td>budgets (traffic, bandwidth, devices), expiry, own landing copy, granted lines</td><td>→ users, plans</td></tr>
     <tr><td>stats, agent_counters, traffic_cursors</td><td>time series and cross-server accounting</td><td></td></tr>
     <tr><td>settings, admins, sub_logs, audit</td><td>everything else</td><td></td></tr>
   </table>
 
   <h2 id="cadence">Background cadence</h2>
-  <table>
+  <table class="stack">
     <tr><th>Every</th><th>What</th></tr>
     <tr><td>5 s</td><td>Master → nodes snapshot push and report pull</td></tr>
     <tr><td>10 s</td><td>Read traffic and connections from the data plane, write per user / line / upstream stats</td></tr>
     <tr><td>10 s</td><td>Evaluate limit rules (schedule / burst); active states ride the next snapshot to nodes</td></tr>
     <tr><td>1 min</td><td>Quota, expiry and periodic resets; data-plane watchdog</td></tr>
     <tr><td>10 min</td><td>WAL checkpoint so the live database is always safe to copy</td></tr>
-    <tr><td>6 h</td><td>Version check against GitHub Releases (check only)</td></tr>
-    <tr><td>1 h</td><td>Prune series and logs by retention; fold minute samples older than 48 h into hourly buckets</td></tr>
+    <tr><td>10 min (configurable)</td><td>Upstream probes, down / recovered alerts</td></tr>
+    <tr><td>30 min (configurable)</td><td>Master refreshes external subscriptions</td></tr>
+    <tr><td>90 min (configurable)</td><td>Master runs the mainland reachability check (IPv4 only for now)</td></tr>
+    <tr><td>1 h</td><td>Probe public IPv4 / IPv6; expiry and usage warnings; prune series and logs by retention, fold minute samples older than 48 h into hourly buckets</td></tr>
+    <tr><td>6 h</td><td>Version check against GitHub Releases (check only; through local WARP when GitHub is unreachable directly)</td></tr>
     <tr><td>12 h</td><td>Certificate renewal check (sing-box swaps the renewed certificate itself, no restart)</td></tr>
-    <tr><td>daily</td><td>Daily report</td></tr>
+    <tr><td>daily</td><td>Daily report; scheduled backup</td></tr>
   </table>
 
   <h2 id="code">Code layout</h2>
-  <table>
+  <table class="stack">
     <tr><th>Directory</th><th>Responsibility</th></tr>
     <tr><td><code>web/</code></td><td>Panel and API, reseller panel, external API, embedded frontend (zero-build ES modules)</td></tr>
     <tr><td><code>sub/</code></td><td>Subscription formats, landing page, client downloads, sharing</td></tr>
-    <tr><td><code>render/</code> <code>core/</code></td><td>Lines → sing-box config and its dry run; the embedded data plane and its tracking</td></tr>
+    <tr><td><code>render/</code> <code>core/</code></td><td>Lines → sing-box config and its dry run (routing rules, DNS redirect on IPv6-only servers); the embedded data plane and its tracking</td></tr>
     <tr><td><code>hub/</code></td><td>Snapshot push, traffic reclaim, online aggregation</td></tr>
     <tr><td><code>runner/</code></td><td>Process orchestration, three-tier reload and rollback, certificates, backups</td></tr>
-    <tr><td><code>jobs/</code> <code>monitor/</code></td><td>Stats, quota enforcement, probes, alerts</td></tr>
+    <tr><td><code>jobs/</code> <code>monitor/</code> <code>rules/</code></td><td>Stats, quota enforcement, limit rules, probes, alerts</td></tr>
+    <tr><td><code>reach/</code> <code>acme/</code></td><td>Mainland reachability; certificate issuance and public IP probing</td></tr>
+    <tr><td><code>appdomains/</code></td><td>App name → domains lookup (v2fly domain list)</td></tr>
     <tr><td><code>database/</code></td><td>Models, SQLite open and migration</td></tr>
     <tr><td><code>selfupdate/</code> <code>deploy/</code></td><td>Version check and in-place update, installer</td></tr>
   </table>
