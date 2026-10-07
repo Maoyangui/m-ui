@@ -26,7 +26,7 @@ const (
 // godFallbackVer 兜底版本:拉不到发布源时落地页用它。发版构建(.github/workflows/release.yml)会取佛跳墙
 // 当前最新发布、用 -ldflags "-X github.com/Maoyangui/m-ui/sub.godFallbackVer=…" 写进去,不用手改;
 // 这里的值只给自己从源码编译、没有注入的情况兜底(两边版本号同步发,佛跳墙先发)。
-var godFallbackVer = "0.7.14"
+var godFallbackVer = "0.7.15"
 
 var godTagRe = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.-]*$`)
 

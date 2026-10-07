@@ -288,8 +288,8 @@ func clientTiles(lang string) []clientTile {
 			Key: "macos", Icon: template.HTML(iconMac), OS: "macOS",
 			Apps: []clientApp{
 				{Name: god, Recommended: true, Format: fAny,
-					Desc: pick("自研客户端,内置 sing-box,macOS 13 及以上。下载对应芯片的包,解开后在终端里 sudo sh install.sh(会问一次开机密码);装好在启动台打开「"+god+"」,再回订阅页点「"+god+"」一键导入。2020 年后的机型基本都是 Apple 芯片。",
-						"Our own client with sing-box built in, macOS 13 and up. Download the build for your chip, unpack it and run sudo sh install.sh in Terminal, then open "+god+" from Launchpad and tap "+god+" on the subscription page. Macs from 2020 on are Apple silicon."),
+					Desc: pick("自研客户端,内置 sing-box,macOS 13 及以上。下载对应芯片的包双击解开,照里面的「安装说明」双击「安装佛跳墙.command」,输一次开机密码就装好(第一次会被系统拦一次,说明里写了怎么放行);装好在启动台或聚焦搜索里打开「"+god+"」,再回订阅页点「"+god+"」一键导入。2020 年后的机型基本都是 Apple 芯片。",
+						"Our own client with sing-box built in, macOS 13 and up. Download the build for your chip, unpack it and, as the included guide explains, double-click 安装佛跳墙.command (Install) and enter your Mac password once (macOS blocks it the first time; the guide shows how to allow it). Then open "+god+" from Launchpad or Spotlight and tap "+god+" on the subscription page. Macs from 2020 on are Apple silicon."),
 					Links: []dl{
 						{Text: pick("Apple 芯片 (tar.gz) v"+gv, "Apple silicon (tar.gz) v"+gv), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-macos-arm64.tar.gz"), Primary: true},
 						{Text: pick("Intel 芯片 (tar.gz)", "Intel (tar.gz)"), Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-macos-amd64.tar.gz")},
