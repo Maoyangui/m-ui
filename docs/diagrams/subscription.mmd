@@ -1,0 +1,30 @@
+---
+config:
+  htmlLabels: false
+  markdownAutoWrap: false
+  flowchart:
+    htmlLabels: false
+    wrappingWidth: 600
+---
+flowchart TD
+  Q["GET /sub/&lt;地址&gt;"] --> WHO{"这个地址是谁"}
+  WHO -->|"用户名 / 随机令牌"| U["命中用户"]
+  WHO -->|"临时共享令牌"| S["同一个用户<br/>另一套凭据"]
+  WHO -->|"对不上 · 已停用"| E["404"]
+  U --> UA{"看 User-Agent"}
+  S --> F
+  UA -->|"浏览器"| P["落地页"]
+  UA -->|"代理客户端"| F{"要哪种格式"}
+  F -->|"默认"| F1["通用链接"]
+  F -->|"?format=clash"| F2["Clash YAML"]
+  F -->|"?format=json"| F3["sing-box 配置"]
+
+  classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
+  classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
+  classDef data fill:#334155,stroke:#0f172a,color:#ffffff,stroke-width:1px
+  classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
+  classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
+  class U,S exit
+  class E warn
+  class P,F1,F2,F3 svc
+  class Q who

@@ -1,0 +1,30 @@
+---
+config:
+  htmlLabels: false
+  markdownAutoWrap: false
+  flowchart:
+    htmlLabels: false
+    wrappingWidth: 600
+---
+flowchart TD
+  Q["GET /sub/&lt;key&gt;"] --> WHO{"Whose key is it"}
+  WHO -->|"username / random token"| U["Matched user"]
+  WHO -->|"share token"| S["Same user<br/>separate credentials"]
+  WHO -->|"no match · disabled"| E["404"]
+  U --> UA{"User-Agent"}
+  S --> F
+  UA -->|"browser"| P["Landing page"]
+  UA -->|"proxy client"| F{"Which format"}
+  F -->|"default"| F1["Universal links"]
+  F -->|"?format=clash"| F2["Clash YAML"]
+  F -->|"?format=json"| F3["sing-box config"]
+
+  classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
+  classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
+  classDef data fill:#334155,stroke:#0f172a,color:#ffffff,stroke-width:1px
+  classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
+  classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
+  class U,S exit
+  class E warn
+  class P,F1,F2,F3 svc
+  class Q who

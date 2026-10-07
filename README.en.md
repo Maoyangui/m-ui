@@ -74,54 +74,14 @@ More screenshots (lines, landing page, Chinese UI) live in [docs/screenshots](do
 
 One binary runs four things: the **panel** (admin UI and API), the **subscription server** (where clients fetch their config), the **data plane** (embedded sing-box, where traffic actually flows) and **background work** (stats, quota and limit-rule enforcement, upstream probes, public IP probing, mainland reachability checks, log cleanup, master/node sync). They share one SQLite file, so a click in the panel is visible to the subscription server and the data plane immediately.
 
+<sub>The diagrams below are rendered from the Mermaid sources in [docs/diagrams](docs/diagrams), so the web and the mobile app show the same images; after editing a source, run `node docs/diagrams/render.mjs` to regenerate them.</sub>
+
 ### What runs on one server
 
-```mermaid
----
-config:
-  htmlLabels: false
-  markdownAutoWrap: false
-  flowchart:
-    htmlLabels: false
-    wrappingWidth: 600
----
-flowchart TB
-  subgraph WHO["Who connects"]
-    direction LR
-    ADM["Admin"]
-    DLR["Reseller"]
-    APP["User's client"]
-  end
-
-  subgraph PROC["One m-ui process"]
-    direction LR
-    WEB["Panel"]
-    SUB["Subscriptions"]
-    CORE["Data plane · sing-box"]
-    BG["Background"]
-  end
-
-  ADM -->|":2053 /app/"| WEB
-  DLR -->|":2054 /dl/"| WEB
-  APP -->|":2056 /sub/"| SUB
-  APP ==>|"line ports · traffic"| CORE
-  WEB -.->|"hot reload"| CORE
-  CORE -.->|"traffic · IPs"| BG
-  WEB --> DB[("m-ui.db")]
-  SUB --> DB
-  BG --> DB
-  CORE ==> OUT["Exit<br/>direct · WARP · relay<br/>upstream + routing rules"]
-
-  classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
-  classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
-  classDef data fill:#334155,stroke:#0f172a,color:#ffffff,stroke-width:1px
-  classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
-  classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
-  class ADM,DLR,APP who
-  class WEB,SUB,CORE,BG svc
-  class DB data
-  class OUT exit
-```
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture.en-dark.png">
+  <img src="docs/diagrams/architecture.en-light.png" width="1062" alt="What runs on one m-ui server: admins (:2053 /app/) and resellers (:2054 /dl/) reach the panel; user clients reach the line ports (data plane, real traffic) and the subscription service (:2056 /sub/); the panel hot-reloads or restarts the data plane, which hands traffic and online IPs to background jobs; panel, background jobs and subscriptions share m-ui.db; traffic leaves through the exit (direct, WARP or a relay, per line upstream and routing rules)">
+</picture></p>
 
 > Ports and paths are all configurable; the values above are the defaults. The panel and the reseller panel are the same frontend — the session scope decides what you can see.
 >
@@ -131,65 +91,17 @@ flowchart TB
 
 The panel never edits a running sing-box. It hands the whole new config to sing-box first; only if that parses does anything reach the database or the data plane.
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant B as Browser
-  participant W as Panel
-  participant D as DB
-  participant S as sing-box
-
-  B->>W: Save line / user
-  Note over W: Validate + port check
-  W->>D: Write in a tx
-  W->>S: Dry-run config
-  alt Fails
-    S--)W: Error
-    W->>D: Roll back
-    W--)B: Refused, live untouched
-  else Passes
-    S--)W: OK
-    W->>D: Commit
-    W->>S: Reload by level
-    Note over W,S: users → swap user table<br/>upstream → hot-swap outbound<br/>line → restart, can roll back
-    W--)B: Saved
-  end
-```
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/apply.en-dark.png">
+  <img src="docs/diagrams/apply.en-light.png" width="951" alt="What happens when you save: the panel validates, writes in a transaction and dry-runs the full config in sing-box; if it fails it rolls back and the live config is untouched; if it passes it commits and reloads by level (swap user table, hot-swap outbound, or restart with rollback)">
+</picture></p>
 
 ### How a subscription request is answered
 
-```mermaid
----
-config:
-  htmlLabels: false
-  markdownAutoWrap: false
-  flowchart:
-    htmlLabels: false
-    wrappingWidth: 600
----
-flowchart TD
-  Q["GET /sub/&lt;key&gt;"] --> WHO{"Whose key is it"}
-  WHO -->|"username / random token"| U["Matched user"]
-  WHO -->|"share token"| S["Same user<br/>separate credentials"]
-  WHO -->|"no match · disabled"| E["404"]
-  U --> UA{"User-Agent"}
-  S --> F
-  UA -->|"browser"| P["Landing page"]
-  UA -->|"proxy client"| F{"Which format"}
-  F -->|"default"| F1["Universal links"]
-  F -->|"?format=clash"| F2["Clash YAML"]
-  F -->|"?format=json"| F3["sing-box config"]
-
-  classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
-  classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
-  classDef data fill:#334155,stroke:#0f172a,color:#ffffff,stroke-width:1px
-  classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
-  classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
-  class U,S exit
-  class E warn
-  class P,F1,F2,F3 svc
-  class Q who
-```
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/subscription.en-dark.png">
+  <img src="docs/diagrams/subscription.en-light.png" width="727" alt="How a subscription request is answered: the key identifies the user (username or random token; a share token is the same user with separate credentials; no match or disabled gives 404); for a matched user browsers get the landing page, proxy clients (and share tokens) get universal links, Clash YAML (?format=clash) or a sing-box config (?format=json)">
+</picture></p>
 
 > All three formats build nodes the same way: **the lines assigned to the user × the servers each line is deployed on**, plus external nodes and external subscriptions. Add a server and every subscription grows the matching nodes on its own. Assignment can go down to the entry: a line deployed on several servers is several entries, and users, plans and reseller grants can pick just one server's entry, so the subscription lists only what was given.
 
@@ -197,66 +109,17 @@ flowchart TD
 
 The master does the accounting and pushes config; a node only forwards. Nodes never judge quota themselves, so losing the link never cuts users off by mistake.
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant M as Master
-  participant N as Node
-
-  Note over M,N: Every 5 seconds
-  M->>N: Push snapshot: lines (with routing rules) / upstreams / users / limit states + revision
-  Note over N: Same revision, nothing to do
-  M->>N: Pull report
-  N--)M: Traffic delta · online IPs · public IPv4 / IPv6 · upstream health
-  Note over M: Roll up usage · merge device IPs · judge quota
-  M->>N: Over-quota and expired users leave the next snapshot
-  Note over M,N: A node keeps forwarding while offline,<br/>catches up by cursor, never double-counts
-```
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/sync.en-dark.png">
+  <img src="docs/diagrams/sync.en-light.png" width="1164" alt="Master and nodes: every 5 seconds the master pushes a snapshot (lines with routing rules, upstreams, users, credentials, limit states, revision) and a node with the same revision does nothing; the master pulls a report (traffic delta, online IPs, public IPv4 / IPv6, upstream health), rolls up usage, unions device IPs across servers and judges quota, and over-quota or expired users leave the next snapshot; an offline node keeps forwarding and catches up by cursor without double-counting">
+</picture></p>
 
 ### Data model
 
-```mermaid
----
-config:
-  htmlLabels: false
----
-erDiagram
-  RESELLER ||--o{ USER : "their users"
-  RESELLER ||--o{ PLAN : "their own plans"
-  RESELLER }o--o{ LINE : "granted lines"
-  USER }o--o{ LINE : "assigned lines"
-  PLAN ||..o{ USER : "applied on create"
-  LINE }o--|| UPSTREAM : "where it exits"
-  LINE }o--o{ NODE : "deployed on"
-  USER ||--o{ SUBLOG : "subscription fetches"
-  RULE }o--o{ USER : "schedule / burst limits"
-
-  USER {
-    string name "subscription key · inbound credential"
-    json credentials "per-protocol password / UUID"
-    int64 volume_used "quota and usage"
-    int64 expiry "expiry"
-    int device_limit "concurrent devices"
-  }
-  LINE {
-    string protocol "hysteria2 / vless / ..."
-    int port "listen port"
-    json tls_transport "TLS and transport"
-    json node_ids "which servers"
-    json route_rules "routing: domain / IP range / port to an exit"
-  }
-  NODE {
-    string addr "connect address (empty = probed public IP)"
-    string public_ip "probed public IPv4 / IPv6"
-    string addr_family "prefer IPv4 or IPv6 in subscriptions"
-    float ratio "traffic multiplier"
-  }
-  RESELLER {
-    int64 quota "traffic / bandwidth / device budget"
-    int user_limit "how many users they may create"
-    json page "their own subscription title and landing copy"
-  }
-```
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/data-model.en-dark.png">
+  <img src="docs/diagrams/data-model.en-light.png" width="967" alt="Data model: a reseller (quota, user limit, page) has users and plans and is granted lines; a user is assigned lines and has subscription fetch logs, plans apply on create, rules set schedule and burst limits; a line picks an upstream exit and is deployed on servers (address, public IP, address family, ratio)">
+</picture></p>
 
 ### Background cadence
 

@@ -1,0 +1,44 @@
+---
+config:
+  htmlLabels: false
+  markdownAutoWrap: false
+  flowchart:
+    htmlLabels: false
+    wrappingWidth: 600
+---
+flowchart TB
+  subgraph WHO["谁在连"]
+    direction LR
+    ADM["管理员"]
+    DLR["代理"]
+    APP["用户客户端"]
+  end
+
+  subgraph PROC["一个 m-ui 进程"]
+    direction LR
+    WEB["面板"]
+    SUB["订阅服务"]
+    CORE["数据面 · sing-box"]
+    BG["后台任务"]
+  end
+
+  ADM -->|":2053 /app/"| WEB
+  DLR -->|":2054 /dl/"| WEB
+  APP -->|":2056 /sub/"| SUB
+  APP ==>|"线路端口 · 真流量"| CORE
+  WEB -.->|"热更新 / 重启"| CORE
+  CORE -.->|"流量 · 在线 IP"| BG
+  WEB --> DB[("m-ui.db")]
+  SUB --> DB
+  BG --> DB
+  CORE ==> OUT["出口<br/>直连 · WARP · 落地中转<br/>按线路上游与分流规则"]
+
+  classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
+  classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
+  classDef data fill:#334155,stroke:#0f172a,color:#ffffff,stroke-width:1px
+  classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
+  classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
+  class ADM,DLR,APP who
+  class WEB,SUB,CORE,BG svc
+  class DB data
+  class OUT exit

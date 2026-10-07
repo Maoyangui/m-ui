@@ -1,0 +1,40 @@
+---
+config:
+  htmlLabels: false
+---
+erDiagram
+  RESELLER ||--o{ USER : "名下用户"
+  RESELLER ||--o{ PLAN : "自己的套餐"
+  RESELLER }o--o{ LINE : "被授权的线路"
+  USER }o--o{ LINE : "分到的线路"
+  PLAN ||..o{ USER : "建号时套用"
+  LINE }o--|| UPSTREAM : "从哪出去"
+  LINE }o--o{ NODE : "部署在哪几台"
+  USER ||--o{ SUBLOG : "订阅拉取记录"
+  RULE }o--o{ USER : "时段 / 突发限速"
+
+  USER {
+    string name "订阅地址 · 入站凭据名"
+    json credentials "各协议的密码 / UUID"
+    int64 volume_used "配额与已用"
+    int64 expiry "到期时间"
+    int device_limit "同时在线设备数"
+  }
+  LINE {
+    string protocol "hysteria2 / vless / ..."
+    int port "监听端口"
+    json tls_transport "TLS 与传输层"
+    json node_ids "部署到哪些服务器"
+    json route_rules "按规则分流:域名 / IP 段 / 端口 → 出口"
+  }
+  NODE {
+    string addr "连接地址(空 = 用探测到的公网 IP)"
+    string public_ip "探测到的公网 IPv4 / IPv6"
+    string addr_family "订阅里优先 IPv4 还是 IPv6"
+    float ratio "流量倍率"
+  }
+  RESELLER {
+    int64 quota "流量 / 带宽 / 设备额度"
+    int user_limit "最多能建多少用户"
+    json page "自己的订阅标题与落地页文案"
+  }

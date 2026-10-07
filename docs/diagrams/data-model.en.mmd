@@ -1,0 +1,40 @@
+---
+config:
+  htmlLabels: false
+---
+erDiagram
+  RESELLER ||--o{ USER : "their users"
+  RESELLER ||--o{ PLAN : "their own plans"
+  RESELLER }o--o{ LINE : "granted lines"
+  USER }o--o{ LINE : "assigned lines"
+  PLAN ||..o{ USER : "applied on create"
+  LINE }o--|| UPSTREAM : "where it exits"
+  LINE }o--o{ NODE : "deployed on"
+  USER ||--o{ SUBLOG : "subscription fetches"
+  RULE }o--o{ USER : "schedule / burst limits"
+
+  USER {
+    string name "subscription key · inbound credential"
+    json credentials "per-protocol password / UUID"
+    int64 volume_used "quota and usage"
+    int64 expiry "expiry"
+    int device_limit "concurrent devices"
+  }
+  LINE {
+    string protocol "hysteria2 / vless / ..."
+    int port "listen port"
+    json tls_transport "TLS and transport"
+    json node_ids "which servers"
+    json route_rules "routing: domain / IP range / port to an exit"
+  }
+  NODE {
+    string addr "connect address (empty = probed public IP)"
+    string public_ip "probed public IPv4 / IPv6"
+    string addr_family "prefer IPv4 or IPv6 in subscriptions"
+    float ratio "traffic multiplier"
+  }
+  RESELLER {
+    int64 quota "traffic / bandwidth / device budget"
+    int user_limit "how many users they may create"
+    json page "their own subscription title and landing copy"
+  }

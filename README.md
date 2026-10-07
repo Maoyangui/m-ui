@@ -74,54 +74,14 @@ m-ui 是一个自托管的代理面板:**一个二进制 + 一个数据库文件
 
 一个二进制里跑着四件事:**面板**(管理界面与 API)、**订阅服务**(客户端来拉配置)、**数据面**(内嵌 sing-box,真正过流量)、**后台**(统计、配额与限速规则判定、上游巡检、公网 IP 探测、大陆连通检测、日志清理、主副同步)。它们共用同一个 SQLite 文件,所以面板里点一下保存,订阅和数据面立刻看到同一份数据。
 
+<sub>下面几张图由 [docs/diagrams](docs/diagrams) 里的 Mermaid 源文件渲染而成(网页和手机 App 看到的是同样的图);改了源文件运行 `node docs/diagrams/render.mjs` 重新出图。</sub>
+
 ### 一台服务器里有什么
 
-```mermaid
----
-config:
-  htmlLabels: false
-  markdownAutoWrap: false
-  flowchart:
-    htmlLabels: false
-    wrappingWidth: 600
----
-flowchart TB
-  subgraph WHO["谁在连"]
-    direction LR
-    ADM["管理员"]
-    DLR["代理"]
-    APP["用户客户端"]
-  end
-
-  subgraph PROC["一个 m-ui 进程"]
-    direction LR
-    WEB["面板"]
-    SUB["订阅服务"]
-    CORE["数据面 · sing-box"]
-    BG["后台任务"]
-  end
-
-  ADM -->|":2053 /app/"| WEB
-  DLR -->|":2054 /dl/"| WEB
-  APP -->|":2056 /sub/"| SUB
-  APP ==>|"线路端口 · 真流量"| CORE
-  WEB -.->|"热更新 / 重启"| CORE
-  CORE -.->|"流量 · 在线 IP"| BG
-  WEB --> DB[("m-ui.db")]
-  SUB --> DB
-  BG --> DB
-  CORE ==> OUT["出口<br/>直连 · WARP · 落地中转<br/>按线路上游与分流规则"]
-
-  classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
-  classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
-  classDef data fill:#334155,stroke:#0f172a,color:#ffffff,stroke-width:1px
-  classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
-  classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
-  class ADM,DLR,APP who
-  class WEB,SUB,CORE,BG svc
-  class DB data
-  class OUT exit
-```
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.png">
+  <img src="docs/diagrams/architecture-light.png" width="1006" alt="m-ui 一台服务器里有什么:管理员(:2053 /app/)和代理(:2054 /dl/)连面板,用户客户端连线路端口(数据面,真流量)和订阅服务(:2056 /sub/);面板热更新或重启数据面,数据面把流量与在线 IP 交给后台任务;面板、后台任务、订阅服务共用 m-ui.db;流量经出口(直连 · WARP · 落地中转,按线路上游与分流规则)出去">
+</picture></p>
 
 > 端口和路径都能改;上面写的是默认值。面板与代理面板是同一套前端,靠会话里的作用域区分能看到什么。
 >
@@ -131,65 +91,17 @@ flowchart TB
 
 面板从不直接去改运行中的 sing-box —— 先让 sing-box 自己把整份新配置解析一遍,通过了才落库、才动数据面。
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant B as 浏览器
-  participant W as 面板
-  participant D as 库
-  participant S as sing-box
-
-  B->>W: 保存线路 / 用户
-  Note over W: 校验字段与端口
-  W->>D: 开事务写入
-  W->>S: 全量配置干跑
-  alt 干跑不过
-    S--)W: 报错
-    W->>D: 回滚
-    W--)B: 拒绝,线上没动
-  else 干跑通过
-    S--)W: OK
-    W->>D: 提交
-    W->>S: 分级重载
-    Note over W,S: 改用户 → 换用户表<br/>改上游 → 热换出站<br/>改线路 → 重启并可回滚
-    W--)B: 已保存
-  end
-```
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/apply-dark.png">
+  <img src="docs/diagrams/apply-light.png" width="898" alt="保存一次改动:面板校验后开事务写库,让 sing-box 干跑整份配置;干跑不过就回滚、运行中的不动;通过才提交,并按变化分级重载(换用户表 / 热换出站 / 重启且能回滚)">
+</picture></p>
 
 ### 一次订阅请求怎么走
 
-```mermaid
----
-config:
-  htmlLabels: false
-  markdownAutoWrap: false
-  flowchart:
-    htmlLabels: false
-    wrappingWidth: 600
----
-flowchart TD
-  Q["GET /sub/&lt;地址&gt;"] --> WHO{"这个地址是谁"}
-  WHO -->|"用户名 / 随机令牌"| U["命中用户"]
-  WHO -->|"临时共享令牌"| S["同一个用户<br/>另一套凭据"]
-  WHO -->|"对不上 · 已停用"| E["404"]
-  U --> UA{"看 User-Agent"}
-  S --> F
-  UA -->|"浏览器"| P["落地页"]
-  UA -->|"代理客户端"| F{"要哪种格式"}
-  F -->|"默认"| F1["通用链接"]
-  F -->|"?format=clash"| F2["Clash YAML"]
-  F -->|"?format=json"| F3["sing-box 配置"]
-
-  classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
-  classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
-  classDef data fill:#334155,stroke:#0f172a,color:#ffffff,stroke-width:1px
-  classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
-  classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
-  class U,S exit
-  class E warn
-  class P,F1,F2,F3 svc
-  class Q who
-```
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/subscription-dark.png">
+  <img src="docs/diagrams/subscription-light.png" width="666" alt="一次订阅请求:按地址认人 —— 用户名或随机令牌命中用户,临时共享令牌是同一个用户的另一套凭据,对不上或已停用给 404;命中用户时浏览器看到落地页,代理客户端(以及共享令牌)按格式拿到通用链接、Clash YAML(?format=clash)或 sing-box 配置(?format=json)">
+</picture></p>
 
 > 三种格式里的节点都是同一套来源:**用户已分配的线路 × 该线路已部署的服务器**,再拼上外部节点与外部订阅。所以加一台服务器,所有人的订阅里自动多出对应节点。分配也可以细到入口:一条线路部署在几台服务器上就是几个入口,给用户 / 套餐 / 代理授权时可以只勾其中某台的,订阅里就只出拿到的那些。
 
@@ -197,66 +109,17 @@ flowchart TD
 
 主机算账、推配置;副机只管转发,不自己判定配额,所以断联时也不会误伤用户。
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant M as 主服务器
-  participant N as 副服务器
-
-  Note over M,N: 每 5 秒一轮
-  M->>N: 推快照:线路(含分流规则)/ 上游 / 用户 / 凭据 / 限速状态 + 修订号
-  Note over N: 修订号没变就什么都不做
-  M->>N: 拉报告
-  N--)M: 流量增量 · 在线 IP · 公网 IPv4 / IPv6 · 上游巡检结果
-  Note over M: 汇总用量 · 设备数跨机取并集 · 判定配额
-  M->>N: 超量 / 到期的用户,下一轮快照里就没了
-  Note over M,N: 副机掉线期间照常转发,<br/>恢复后按游标补齐,不会重复计费
-```
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/sync-dark.png">
+  <img src="docs/diagrams/sync-light.png" width="936" alt="主服务器与副服务器:每 5 秒一轮,主机推快照(线路含分流规则、上游、用户、凭据、限速状态和修订号),修订号没变副机什么都不做;主机拉报告(流量增量、在线 IP、公网 IPv4 / IPv6、上游巡检结果),汇总用量、设备数跨机取并集、判定配额,超量和到期的用户下一轮快照里就没了;副机掉线期间照常转发,恢复后按游标补齐,不会重复计费">
+</picture></p>
 
 ### 数据模型
 
-```mermaid
----
-config:
-  htmlLabels: false
----
-erDiagram
-  RESELLER ||--o{ USER : "名下用户"
-  RESELLER ||--o{ PLAN : "自己的套餐"
-  RESELLER }o--o{ LINE : "被授权的线路"
-  USER }o--o{ LINE : "分到的线路"
-  PLAN ||..o{ USER : "建号时套用"
-  LINE }o--|| UPSTREAM : "从哪出去"
-  LINE }o--o{ NODE : "部署在哪几台"
-  USER ||--o{ SUBLOG : "订阅拉取记录"
-  RULE }o--o{ USER : "时段 / 突发限速"
-
-  USER {
-    string name "订阅地址 · 入站凭据名"
-    json credentials "各协议的密码 / UUID"
-    int64 volume_used "配额与已用"
-    int64 expiry "到期时间"
-    int device_limit "同时在线设备数"
-  }
-  LINE {
-    string protocol "hysteria2 / vless / ..."
-    int port "监听端口"
-    json tls_transport "TLS 与传输层"
-    json node_ids "部署到哪些服务器"
-    json route_rules "按规则分流:域名 / IP 段 / 端口 → 出口"
-  }
-  NODE {
-    string addr "连接地址(空 = 用探测到的公网 IP)"
-    string public_ip "探测到的公网 IPv4 / IPv6"
-    string addr_family "订阅里优先 IPv4 还是 IPv6"
-    float ratio "流量倍率"
-  }
-  RESELLER {
-    int64 quota "流量 / 带宽 / 设备额度"
-    int user_limit "最多能建多少用户"
-    json page "自己的订阅标题与落地页文案"
-  }
-```
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/data-model-dark.png">
+  <img src="docs/diagrams/data-model-light.png" width="872" alt="数据模型:代理(额度、可建用户数、页面)名下有用户与套餐,被授权线路;用户分到线路、有订阅拉取记录,套餐建号时套用,规则管时段与突发限速;线路选出口上游、部署到服务器(连接地址、公网 IP、地址族、倍率)">
+</picture></p>
 
 ### 后台节奏
 

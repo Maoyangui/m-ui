@@ -1,0 +1,22 @@
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant W as Panel
+  participant D as DB
+  participant S as sing-box
+
+  B->>W: Save line / user
+  Note over W: Validate + port check
+  W->>D: Write in a tx
+  W->>S: Dry-run config
+  alt Fails
+    S--)W: Error
+    W->>D: Roll back
+    W--)B: Refused, live untouched
+  else Passes
+    S--)W: OK
+    W->>D: Commit
+    W->>S: Reload by level
+    Note over W,S: users → swap user table<br/>upstream → hot-swap outbound<br/>line → restart, can roll back
+    W--)B: Saved
+  end

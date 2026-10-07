@@ -1,0 +1,22 @@
+sequenceDiagram
+  autonumber
+  participant B as 浏览器
+  participant W as 面板
+  participant D as 库
+  participant S as sing-box
+
+  B->>W: 保存线路 / 用户
+  Note over W: 校验字段与端口
+  W->>D: 开事务写入
+  W->>S: 全量配置干跑
+  alt 干跑不过
+    S--)W: 报错
+    W->>D: 回滚
+    W--)B: 拒绝,线上没动
+  else 干跑通过
+    S--)W: OK
+    W->>D: 提交
+    W->>S: 分级重载
+    Note over W,S: 改用户 → 换用户表<br/>改上游 → 热换出站<br/>改线路 → 重启并可回滚
+    W--)B: 已保存
+  end
