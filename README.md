@@ -80,7 +80,7 @@ m-ui 是一个自托管的代理面板:**一个二进制 + 一个数据库文件
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.png">
-  <img src="docs/diagrams/architecture-light.png" width="1006" alt="m-ui 一台服务器里有什么:管理员(:2053 /app/)和代理(:2054 /dl/)连面板,用户客户端连线路端口(数据面,真流量)和订阅服务(:2056 /sub/);面板热更新或重启数据面,数据面把流量与在线 IP 交给后台任务;面板、后台任务、订阅服务共用 m-ui.db;流量经出口(直连 · WARP · 落地中转,按线路上游与分流规则)出去">
+  <img src="docs/diagrams/architecture-light.png" width="918" alt="m-ui 一台服务器里有什么:管理员(:2053 /app/)和代理(:2054 /dl/)连面板,用户客户端连线路端口(数据面,真流量)和订阅服务(:2056 /sub/);面板热更新或重启数据面,数据面把流量与在线 IP 交给后台任务;面板、后台任务、订阅服务共用 m-ui.db;流量经出口(直连 · WARP · 落地中转,按线路上游与分流规则)出去">
 </picture></p>
 
 > 端口和路径都能改;上面写的是默认值。面板与代理面板是同一套前端,靠会话里的作用域区分能看到什么。
@@ -93,14 +93,14 @@ m-ui 是一个自托管的代理面板:**一个二进制 + 一个数据库文件
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/apply-dark.png">
-  <img src="docs/diagrams/apply-light.png" width="898" alt="保存一次改动:面板校验后开事务写库,让 sing-box 干跑整份配置;干跑不过就回滚、运行中的不动;通过才提交,并按变化分级重载(换用户表 / 热换出站 / 重启且能回滚)">
+  <img src="docs/diagrams/apply-light.png" width="882" alt="保存一次改动:面板校验后开事务写库,让 sing-box 干跑整份配置;干跑不过就回滚、运行中的不动;通过才提交,并按变化分级重载(换用户表 / 热换出站 / 重启且能回滚)">
 </picture></p>
 
 ### 一次订阅请求怎么走
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/subscription-dark.png">
-  <img src="docs/diagrams/subscription-light.png" width="666" alt="一次订阅请求:按地址认人 —— 用户名或随机令牌命中用户,临时共享令牌是同一个用户的另一套凭据,对不上或已停用给 404;命中用户时浏览器看到落地页,代理客户端(以及共享令牌)按格式拿到通用链接、Clash YAML(?format=clash)或 sing-box 配置(?format=json)">
+  <img src="docs/diagrams/subscription-light.png" width="578" alt="一次订阅请求:按地址认人 —— 用户名或随机令牌命中用户,临时共享令牌是同一个用户的另一套凭据,对不上或已停用给 404;命中用户时浏览器看到落地页,代理客户端(以及共享令牌)按格式拿到通用链接、Clash YAML(?format=clash)或 sing-box 配置(?format=json)">
 </picture></p>
 
 > 三种格式里的节点都是同一套来源:**用户已分配的线路 × 该线路已部署的服务器**,再拼上外部节点与外部订阅。所以加一台服务器,所有人的订阅里自动多出对应节点。分配也可以细到入口:一条线路部署在几台服务器上就是几个入口,给用户 / 套餐 / 代理授权时可以只勾其中某台的,订阅里就只出拿到的那些。
@@ -111,14 +111,14 @@ m-ui 是一个自托管的代理面板:**一个二进制 + 一个数据库文件
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/sync-dark.png">
-  <img src="docs/diagrams/sync-light.png" width="936" alt="主服务器与副服务器:每 5 秒一轮,主机推快照(线路含分流规则、上游、用户、凭据、限速状态和修订号),修订号没变副机什么都不做;主机拉报告(流量增量、在线 IP、公网 IPv4 / IPv6、上游巡检结果),汇总用量、设备数跨机取并集、判定配额,超量和到期的用户下一轮快照里就没了;副机掉线期间照常转发,恢复后按游标补齐,不会重复计费">
+  <img src="docs/diagrams/sync-light.png" width="920" alt="主服务器与副服务器:每 5 秒一轮,主机推快照(线路含分流规则、上游、用户、凭据、限速状态和修订号),修订号没变副机什么都不做;主机拉报告(流量增量、在线 IP、公网 IPv4 / IPv6、上游巡检结果),汇总用量、设备数跨机取并集、判定配额,超量和到期的用户下一轮快照里就没了;副机掉线期间照常转发,恢复后按游标补齐,不会重复计费">
 </picture></p>
 
 ### 数据模型
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/data-model-dark.png">
-  <img src="docs/diagrams/data-model-light.png" width="872" alt="数据模型:代理(额度、可建用户数、页面)名下有用户与套餐,被授权线路;用户分到线路、有订阅拉取记录,套餐建号时套用,规则管时段与突发限速;线路选出口上游、部署到服务器(连接地址、公网 IP、地址族、倍率)">
+  <img src="docs/diagrams/data-model-light.png" width="856" alt="数据模型:代理(额度、可建用户数、页面)名下有用户与套餐,被授权线路;用户分到线路、有订阅拉取记录,套餐建号时套用,规则管时段与突发限速;线路选出口上游、部署到服务器(连接地址、公网 IP、地址族、倍率)">
 </picture></p>
 
 ### 后台节奏

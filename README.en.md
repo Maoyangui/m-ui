@@ -80,7 +80,7 @@ One binary runs four things: the **panel** (admin UI and API), the **subscriptio
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture.en-dark.png">
-  <img src="docs/diagrams/architecture.en-light.png" width="1062" alt="What runs on one m-ui server: admins (:2053 /app/) and resellers (:2054 /dl/) reach the panel; user clients reach the line ports (data plane, real traffic) and the subscription service (:2056 /sub/); the panel hot-reloads or restarts the data plane, which hands traffic and online IPs to background jobs; panel, background jobs and subscriptions share m-ui.db; traffic leaves through the exit (direct, WARP or a relay, per line upstream and routing rules)">
+  <img src="docs/diagrams/architecture.en-light.png" width="974" alt="What runs on one m-ui server: admins (:2053 /app/) and resellers (:2054 /dl/) reach the panel; user clients reach the line ports (data plane, real traffic) and the subscription service (:2056 /sub/); the panel hot-reloads or restarts the data plane, which hands traffic and online IPs to background jobs; panel, background jobs and subscriptions share m-ui.db; traffic leaves through the exit (direct, WARP or a relay, per line upstream and routing rules)">
 </picture></p>
 
 > Ports and paths are all configurable; the values above are the defaults. The panel and the reseller panel are the same frontend — the session scope decides what you can see.
@@ -93,14 +93,14 @@ The panel never edits a running sing-box. It hands the whole new config to sing-
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/apply.en-dark.png">
-  <img src="docs/diagrams/apply.en-light.png" width="951" alt="What happens when you save: the panel validates, writes in a transaction and dry-runs the full config in sing-box; if it fails it rolls back and the live config is untouched; if it passes it commits and reloads by level (swap user table, hot-swap outbound, or restart with rollback)">
+  <img src="docs/diagrams/apply.en-light.png" width="935" alt="What happens when you save: the panel validates, writes in a transaction and dry-runs the full config in sing-box; if it fails it rolls back and the live config is untouched; if it passes it commits and reloads by level (swap user table, hot-swap outbound, or restart with rollback)">
 </picture></p>
 
 ### How a subscription request is answered
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/subscription.en-dark.png">
-  <img src="docs/diagrams/subscription.en-light.png" width="727" alt="How a subscription request is answered: the key identifies the user (username or random token; a share token is the same user with separate credentials; no match or disabled gives 404); for a matched user browsers get the landing page, proxy clients (and share tokens) get universal links, Clash YAML (?format=clash) or a sing-box config (?format=json)">
+  <img src="docs/diagrams/subscription.en-light.png" width="639" alt="How a subscription request is answered: the key identifies the user (username or random token; a share token is the same user with separate credentials; no match or disabled gives 404); for a matched user browsers get the landing page, proxy clients (and share tokens) get universal links, Clash YAML (?format=clash) or a sing-box config (?format=json)">
 </picture></p>
 
 > All three formats build nodes the same way: **the lines assigned to the user × the servers each line is deployed on**, plus external nodes and external subscriptions. Add a server and every subscription grows the matching nodes on its own. Assignment can go down to the entry: a line deployed on several servers is several entries, and users, plans and reseller grants can pick just one server's entry, so the subscription lists only what was given.
@@ -111,14 +111,14 @@ The master does the accounting and pushes config; a node only forwards. Nodes ne
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/sync.en-dark.png">
-  <img src="docs/diagrams/sync.en-light.png" width="1164" alt="Master and nodes: every 5 seconds the master pushes a snapshot (lines with routing rules, upstreams, users, credentials, limit states, revision) and a node with the same revision does nothing; the master pulls a report (traffic delta, online IPs, public IPv4 / IPv6, upstream health), rolls up usage, unions device IPs across servers and judges quota, and over-quota or expired users leave the next snapshot; an offline node keeps forwarding and catches up by cursor without double-counting">
+  <img src="docs/diagrams/sync.en-light.png" width="1148" alt="Master and nodes: every 5 seconds the master pushes a snapshot (lines with routing rules, upstreams, users, credentials, limit states, revision) and a node with the same revision does nothing; the master pulls a report (traffic delta, online IPs, public IPv4 / IPv6, upstream health), rolls up usage, unions device IPs across servers and judges quota, and over-quota or expired users leave the next snapshot; an offline node keeps forwarding and catches up by cursor without double-counting">
 </picture></p>
 
 ### Data model
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/data-model.en-dark.png">
-  <img src="docs/diagrams/data-model.en-light.png" width="967" alt="Data model: a reseller (quota, user limit, page) has users and plans and is granted lines; a user is assigned lines and has subscription fetch logs, plans apply on create, rules set schedule and burst limits; a line picks an upstream exit and is deployed on servers (address, public IP, address family, ratio)">
+  <img src="docs/diagrams/data-model.en-light.png" width="951" alt="Data model: a reseller (quota, user limit, page) has users and plans and is granted lines; a user is assigned lines and has subscription fetch logs, plans apply on create, rules set schedule and burst limits; a line picks an upstream exit and is deployed on servers (address, public IP, address family, ratio)">
 </picture></p>
 
 ### Background cadence

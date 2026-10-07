@@ -30,13 +30,14 @@ for (const f of files) {
   const code = readFileSync(join(DIR, f), 'utf8').replace(/\r\n/g, '\n');
   for (const [mode, t] of Object.entries(THEMES)) {
     await page.setContent(`<!doctype html><meta charset="utf-8">
-<style>body{margin:0;background:${t.bg}} #w{display:inline-block;padding:20px 24px;background:${t.bg}} #w svg{display:block}</style>
+<style>body{margin:0;background:${t.bg}} #w{display:inline-block;padding:12px 16px;background:${t.bg}} #w svg{display:block}</style>
 <div id="w"><pre class="mermaid"></pre></div>`);
     await page.$eval('pre.mermaid', (el, c) => { el.textContent = c; }, code);
-    // 与 GitHub 渲染 Mermaid 时的参数一致(图里的 frontmatter 照样生效)
+    // 参数与 GitHub 渲染 Mermaid 时一致(图里的 frontmatter 照样生效),只把流程图四周的留白从 48 收到 12:
+    // 图要在手机上缩小显示,留白越少字越大
     const err = await page.evaluate(async ({ url, theme }) => {
       const { default: mermaid } = await import(url);
-      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme, flowchart: { diagramPadding: 48 }, sequence: { diagramMarginY: 40 } });
+      mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme, flowchart: { diagramPadding: 12 }, sequence: { diagramMarginY: 40 } });
       try { await mermaid.run({ querySelector: 'pre.mermaid' }); return ''; } catch (e) { return String(e && e.message || e); }
     }, { url: MERMAID, theme: t.theme });
     if (err) throw new Error(`${f}(${mode})渲染失败:${err}`);
