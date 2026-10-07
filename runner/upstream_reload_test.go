@@ -112,6 +112,38 @@ func TestUpstreamHotUpdateAlsoAppliesUserChanges(t *testing.T) {
 	}
 }
 
+// 只改上游(线路和用户都没变)时,不能原地换用户表的入站(socks / http / mixed)不能被拆了重建 —— 重建会断开
+// 它上面的全部连接。热换出站后运行中的配置记录是重新序列化过的紧凑 JSON,渲染结果带缩进,按字节比会把没变的入站当成变了。
+func TestUpstreamHotUpdateKeepsUnchangedSocksInbound(t *testing.T) {
+	r, up, _, port := upstreamRunner(t)
+	var cfg struct {
+		Inbounds []struct {
+			Tag string `json:"tag"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(r.appliedRaw, &cfg); err != nil || len(cfg.Inbounds) == 0 {
+		t.Fatalf("前提:运行中的配置里应有入站: %v", err)
+	}
+	tag := cfg.Inbounds[0].Tag
+	before, ok := r.core.GetInstance().Inbound().Get(tag)
+	if !ok {
+		t.Fatalf("前提:入站 %s 应在运行", tag)
+	}
+	for i, p := range []int{2, 3} { // 连换两次:第二次是在已经热换过一次的运行记录上比
+		r.db.Model(&model.Upstream{}).Where("id = ?", up.Id).Update("options", []byte(`{"server":"127.0.0.1","server_port":`+itoa(p)+`}`))
+		if err := r.ReloadUpstreams(); err != nil {
+			t.Fatal(err)
+		}
+		after, ok := r.core.GetInstance().Inbound().Get(tag)
+		if !ok || after != before {
+			t.Fatalf("第 %d 次只改上游,socks 入站被拆了重建(它上面的连接会全部断开)", i+1)
+		}
+	}
+	if !socks5Auth(t, port, "alice", "alice-pw") {
+		t.Fatal("入站应照常可用")
+	}
+}
+
 // 除了上游和用户还有别的变化(比如线路端口改了):热换出站兜不住,要整体重载,改动才真正生效。
 func TestUpstreamReloadFallsBackToFullWhenLinesAlsoChanged(t *testing.T) {
 	r, up, _, port := upstreamRunner(t)

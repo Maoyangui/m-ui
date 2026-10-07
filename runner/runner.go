@@ -797,7 +797,7 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 		if !handled {
 			// 该协议不支持原地换用户表(socks/http/mixed、单用户 shadowsocks):只有这个入站本身变了才重建
 			// (重建会断开它上面的全部连接);别人改了用户表和它无关,不能每次都把它重启一遍
-			if prev, ok := prevInbounds[meta.Tag]; ok && bytes.Equal(prev, inbound) {
+			if prev, ok := prevInbounds[meta.Tag]; ok && sameJSON(prev, inbound) {
 				continue
 			}
 			prevDef, wasRunning := prevInbounds[meta.Tag]
@@ -1064,6 +1064,16 @@ func onlyUsersDiffer(prev, next []byte) bool {
 func sameExceptOutboundsUsers(prev, next []byte) bool {
 	a, b := stripForCompare(prev, true), stripForCompare(next, true)
 	return a != nil && b != nil && bytes.Equal(a, b)
+}
+
+// sameJSON 两段 JSON 去掉空白后是否相同。运行中的配置记录在上游热换后是重新序列化过的紧凑 JSON,
+// 渲染结果带缩进;按原始字节比会把没变的入站当成变了,把 socks / http / mixed 入站无谓地拆了重建(连接全断)。
+func sameJSON(a, b []byte) bool {
+	var x, y bytes.Buffer
+	if json.Compact(&x, a) != nil || json.Compact(&y, b) != nil {
+		return false
+	}
+	return bytes.Equal(x.Bytes(), y.Bytes())
 }
 
 // withOutboundsOf prev 的配置换上 next 的出站(上游热换之后、用户表换之前数据面实际在跑的样子);解析失败返回 nil。
