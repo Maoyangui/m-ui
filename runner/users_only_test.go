@@ -1,6 +1,9 @@
 package runner
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // 两份配置只在入站 users 上不同 → 只热换用户,不重启数据面;别的地方也动了 → 必须重启。
 func TestOnlyUsersDiffer(t *testing.T) {
@@ -41,5 +44,35 @@ func TestSameExceptOutboundsUsers(t *testing.T) {
 	running := withOutboundsOf([]byte(base), []byte(both))
 	if !sameExceptOutboundsUsers(running, []byte(base)) || !onlyUsersDiffer(running, []byte(both)) {
 		t.Fatalf("应是旧配置换上新出站(用户表仍是旧的): %s", running)
+	}
+}
+
+// 用户表热更新后记下的"运行中的配置":只有新用户表确实生效了的入站换用户,端口等其余部分保持运行中的样子,
+// 运行中没有的入站不凭空加进来(它们没在跑)。
+func TestWithUsersOfOnlyListedInbounds(t *testing.T) {
+	prev := []byte(`{"inbounds":[{"tag":"a","listen_port":1,"users":[{"name":"x"}]},{"tag":"b","listen_port":2,"users":[{"name":"y"}]}],"outbounds":[{"tag":"direct"}]}`)
+	next := []byte(`{"inbounds":[{"tag":"a","listen_port":9,"users":[{"name":"x2"}]},{"tag":"b","listen_port":2,"users":[{"name":"y2"}]},{"tag":"c","listen_port":3}],"outbounds":[{"tag":"direct"}]}`)
+	got := withUsersOf(prev, next, map[string]bool{"a": true})
+	var cfg struct {
+		Inbounds []struct {
+			Tag   string `json:"tag"`
+			Port  int    `json:"listen_port"`
+			Users []struct {
+				Name string `json:"name"`
+			} `json:"users"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(got, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Inbounds) != 2 {
+		t.Fatalf("只应有运行中的两个入站: %s", got)
+	}
+	a, b := cfg.Inbounds[0], cfg.Inbounds[1]
+	if a.Tag != "a" || a.Port != 1 || len(a.Users) != 1 || a.Users[0].Name != "x2" {
+		t.Fatalf("a 应换上新用户表、端口保持运行中的 1: %+v", a)
+	}
+	if b.Tag != "b" || len(b.Users) != 1 || b.Users[0].Name != "y" {
+		t.Fatalf("b 的新用户表没生效,应保持原样: %+v", b)
 	}
 }

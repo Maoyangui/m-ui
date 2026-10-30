@@ -240,6 +240,7 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		line.Id = 0
+		enabled := line.Enabled // Create 会把 default:true 字段的 false 写成 true 并回填,先记下本意
 		if line.Sort == 0 {
 			var maxSort int
 			s.db.Model(&model.Line{}).Select("COALESCE(MAX(sort),0)").Scan(&maxSort)
@@ -250,6 +251,13 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Create(&line).Error; err != nil {
 				return err
+			}
+			// 建线路时取消了「启用」:以前这里不管,建出来的线路是启用的,端口照样开出来
+			if !enabled {
+				if err := tx.Model(&model.Line{}).Where("id = ?", line.Id).Update("enabled", false).Error; err != nil {
+					return err
+				}
+				line.Enabled = false
 			}
 			if p.AssignAll {
 				if err := assignLineToMainUsers(tx, line.Id); err != nil {

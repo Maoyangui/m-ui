@@ -760,6 +760,7 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 	}
 	box := r.core.GetInstance()
 	keepAll := map[string]map[string]struct{}{} // 入站 → 仍然有效的用户名
+	inEffect := map[string]bool{}                // 新用户表已经在运行中生效的入站
 	sessionsClosed := 0                         // 随换表关掉的整条会话数(被停用 / 换了凭据的用户)
 	var firstErr error
 	for _, inbound := range cfg.Inbounds {
@@ -795,11 +796,8 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 			continue
 		}
 		if !handled {
-			// 该协议不支持原地换用户表(socks/http/mixed、单用户 shadowsocks):只有这个入站本身变了才重建
+			// 该协议不支持原地换用户表(socks/http/mixed):只有它自己的用户表变了才重建
 			// (重建会断开它上面的全部连接);别人改了用户表和它无关,不能每次都把它重启一遍
-			if prev, ok := prevInbounds[meta.Tag]; ok && sameJSON(prev, inbound) {
-				continue
-			}
 			prevDef, wasRunning := prevInbounds[meta.Tag]
 			if !wasRunning {
 				// 运行中的配置里没有这条线路(上一次整机重载没起来、已回滚,或还在冷却期):不往旧配置里补建。
@@ -808,6 +806,21 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 				logger.Warning("入站 ", meta.Tag, " 不在运行中的配置里,等整份配置能启动再开放(补进旧配置会绕开它的上游和分流规则)")
 				continue
 			}
+			// 只换用户表,入站的其余部分(端口、TLS 等)以运行中的为准 —— 那些变化归整机重载管。改端口之类的整机重载
+			// 起不来、回滚之后,库里的定义和运行中的不一样:以前拿库里的去重建,新端口加不上只能补回旧定义(带着旧用户表,
+			// 停用不生效),还报错留下重试,之后每次重试(主机每 5 秒、副机每次重推)都把这条线路上的连接断一遍。
+			want := withInboundUsers(prevDef, inbound)
+			if want == nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("解析入站 %s 的用户表失败", meta.Tag)
+				}
+				continue
+			}
+			if sameJSON(prevDef, want) {
+				inEffect[meta.Tag] = true
+				continue
+			}
+			inbound = want
 			if err := r.core.RemoveInbound(meta.Tag); err != nil && err != os.ErrInvalid {
 				logger.Warning("重建入站 ", meta.Tag, " 失败(移除): ", err)
 				if firstErr == nil && wasRunning {
@@ -828,9 +841,12 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 				} else {
 					logger.Warning("重建入站 ", meta.Tag, " 失败,已恢复旧定义继续服务")
 				}
+			} else {
+				inEffect[meta.Tag] = true
 			}
 			continue
 		}
+		inEffect[meta.Tag] = true
 		// 记下这个入站还有哪些用户,最后一次性断开不在其中的连接(禁用用户即时下线)
 		keep := make(map[string]struct{}, len(meta.Users))
 		for _, u := range meta.Users {
@@ -849,6 +865,14 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 	if sessionsClosed > 0 {
 		// 数据面日志默认只到 warn,这一句必须从面板日志出去:线上出事(比如每次推送都把所有人踢掉)只能靠它看出来
 		logger.Info("热更新用户:断开 ", sessionsClosed, " 条会话(被停用 / 撤销凭据的用户)")
+	}
+	// 新用户表已经生效的入站,运行中的配置记录跟着换(端口等其余部分不动;没换成的入站保持原样)。不然回滚后它一直带着
+	// 旧用户表,下一次换用户表又判成"有变化"把 socks 类入站重建一遍(别的入站失败、后台重试时也一样),
+	// 再起不来要回滚时还会把停用的用户请回来。
+	if r.appliedRaw != nil && len(inEffect) > 0 {
+		if running := withUsersOf(r.appliedRaw, raw, inEffect); running != nil {
+			r.appliedRaw = running
+		}
 	}
 	return errors.Join(firstErr, r.applyLimits())
 }
@@ -1074,6 +1098,77 @@ func sameJSON(a, b []byte) bool {
 		return false
 	}
 	return bytes.Equal(x.Bytes(), y.Bytes())
+}
+
+// withInboundUsers 运行中的入站定义 prevDef 换上 next 的用户表,其余字段(端口、TLS 等)保持运行中的样子;解析失败返回 nil。
+func withInboundUsers(prevDef, next []byte) []byte {
+	var p, n map[string]json.RawMessage
+	if json.Unmarshal(prevDef, &p) != nil || json.Unmarshal(next, &n) != nil || p == nil || n == nil {
+		return nil
+	}
+	if u, ok := n["users"]; ok {
+		p["users"] = u
+	} else {
+		delete(p, "users")
+	}
+	out, err := json.Marshal(p)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+// withUsersOf 运行中的配置 prev 里,only 列出的、两边都有的入站换上 next 的用户表(端口等其余部分、其它入站都不动):
+// 用户表热更新之后数据面实际在跑的样子。解析失败返回 nil。
+func withUsersOf(prev, next []byte, only map[string]bool) []byte {
+	var p map[string]json.RawMessage
+	var n struct {
+		Inbounds []json.RawMessage `json:"inbounds"`
+	}
+	if json.Unmarshal(prev, &p) != nil || json.Unmarshal(next, &n) != nil || p == nil {
+		return nil
+	}
+	var pin []json.RawMessage
+	if raw, ok := p["inbounds"]; ok {
+		if json.Unmarshal(raw, &pin) != nil {
+			return nil
+		}
+	}
+	tagOf := func(raw json.RawMessage) string {
+		var m struct {
+			Tag string `json:"tag"`
+		}
+		_ = json.Unmarshal(raw, &m)
+		return m.Tag
+	}
+	nextBy := map[string]json.RawMessage{}
+	for _, ib := range n.Inbounds {
+		if t := tagOf(ib); t != "" {
+			nextBy[t] = ib
+		}
+	}
+	for i, ib := range pin {
+		tag := tagOf(ib)
+		nb, ok := nextBy[tag]
+		if !ok || !only[tag] {
+			continue
+		}
+		merged := withInboundUsers(ib, nb)
+		if merged == nil {
+			return nil
+		}
+		pin[i] = merged
+	}
+	b, err := json.Marshal(pin)
+	if err != nil {
+		return nil
+	}
+	p["inbounds"] = b
+	out, err := json.Marshal(p)
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 // withOutboundsOf prev 的配置换上 next 的出站(上游热换之后、用户表换之前数据面实际在跑的样子);解析失败返回 nil。

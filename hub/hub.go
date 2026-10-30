@@ -1551,8 +1551,16 @@ func (h *Hub) pushLatest(n model.Node) error {
 		return err
 	}
 	defer h.releaseNode(n.Id)
+	// 拿到闸之后再确认它仍是启用的:停用时已经给它推过一份空用户表(Decommission),这里再推完整快照
+	// 就把服务重新打开了 —— 面板上对停用的副机点「推送」、或停用前一刻开始的「立即同步全部」都会走到这里。
+	if !h.stillEnabled(n.Id) {
+		return ErrNodeDisabled
+	}
 	return h.push(n, h.latestSnapshot())
 }
+
+// ErrNodeDisabled 停用的副机不再推送配置(停用时已撤下它的用户表,推完整快照等于重新开放服务)。
+var ErrNodeDisabled = errors.New("这台副机已停用,不推送配置(停用时已撤下它的用户表);要恢复服务请先启用")
 
 // buildPushSnapshot 在 syncMu 内调用。序号持久化，进程重启后也不会重用旧序号。
 func (h *Hub) buildPushSnapshot() (Snapshot, error) {
@@ -1645,7 +1653,7 @@ func (h *Hub) SyncNow() error {
 				errs <- fmt.Errorf("副机 %s 未配置 API 地址或令牌", n.Name)
 				return
 			}
-			if err := h.pushLatest(n); err != nil {
+			if err := h.pushLatest(n); err != nil && !errors.Is(err, ErrNodeDisabled) { // 中途被停用的不再算它
 				errs <- fmt.Errorf("副机 %s: %w", n.Name, err)
 			}
 		}(n)

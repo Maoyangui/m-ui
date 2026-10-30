@@ -163,6 +163,13 @@ func (s *Server) rulesNow() {
 	}
 }
 
+// applyLimitsNow 按库里的规则状态重新下发本机限速(测试里没有数据面)。
+func (s *Server) applyLimitsNow() {
+	if s.run != nil {
+		s.run.ApplyLimits()
+	}
+}
+
 // handleRules GET /rules 列表;POST /rules 新建
 func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -255,6 +262,9 @@ func (s *Server) handleRuleItem(w http.ResponseWriter, r *http.Request) {
 		s.db.Where("rule_id = ?", id).Delete(&model.LimitState{}) // 它造成的限速立刻解除
 		s.audit(r, "rule", "delete", cur.Name)
 		s.rulesNow()
+		// 状态是上面直接删的,判定那一轮看不出有变化、不会重新下发:本机数据面要显式刷一次,
+		// 否则本机一直按删掉的规则限速(副机随快照同步,不受影响)
+		s.applyLimitsNow()
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})

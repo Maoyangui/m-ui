@@ -1,6 +1,8 @@
 package web
 
 import (
+	"fmt"
+	"net"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -61,4 +63,37 @@ func TestCreateResellerDisabledStaysDisabled(t *testing.T) {
 	if got.Enabled {
 		t.Fatal("建代理时停用,库里应保持停用")
 	}
+}
+
+// 新建线路时取消「启用」:gorm 的 default:true 会把 false 写成 true,以前建出来的线路是启用的,端口照样开出来。
+func TestCreateLineDisabledStaysDisabled(t *testing.T) {
+	run, err := runner.New(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(run.DB())
+	s := NewServer(run)
+	body := fmt.Sprintf(`{"name":"off","protocol":"socks","port":%d,"enabled":false}`, idleTCPPort(t))
+	r := httptest.NewRequest("POST", "http://x/app/api/lines", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	s.handleLines(w, r)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"enabled":false`) {
+		t.Fatalf("建线路失败或回显不对: %d %s", w.Code, w.Body.String())
+	}
+	var got model.Line
+	run.DB().Where("name = ?", "off").First(&got)
+	if got.Id == 0 || got.Enabled {
+		t.Fatalf("建线路时停用,库里应保持停用: %+v", got)
+	}
+}
+
+// idleTCPPort 本机一个空闲的 TCP 端口(这个文件在 -race 下也编译,不能用只在非 race 下才有的 freeTCPPort)。
+func idleTCPPort(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port
 }

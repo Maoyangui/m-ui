@@ -144,6 +144,85 @@ func TestUpstreamHotUpdateKeepsUnchangedSocksInbound(t *testing.T) {
 	}
 }
 
+// socks 线路改端口起不来、回滚之后,库里的定义(新端口)和运行中的(旧端口)不一样。这时停用一个用户:
+// 以前换用户表拿库里的定义去重建 → 新端口被占加不上 → 补回旧定义(带着旧用户表,停用不生效)→ 报错留下待重试,
+// 之后每次重试都把这条线路上的连接断一遍。现在只换用户表、端口以运行中的为准:停用当场生效,重建只发生一次。
+func TestUserChangeAfterFailedPortChangeRollback(t *testing.T) {
+	r, _, alice, port := upstreamRunner(t)
+	bob := model.User{Name: "bob", Enabled: true, Credentials: []byte(`{"socks":{"password":"bob-pw"}}`)}
+	r.db.Create(&bob)
+	var line model.Line
+	r.db.Where("name = ?", "s5").First(&line)
+	r.db.Create(&model.UserLine{UserId: bob.Id, LineId: line.Id})
+	if err := r.ReloadUsers(); err != nil {
+		t.Fatal(err)
+	}
+	if !socks5Auth(t, port, "bob", "bob-pw") {
+		t.Fatal("前提:bob 能认证")
+	}
+
+	busy, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	r.db.Model(&model.Line{}).Where("id = ?", line.Id).Update("port", busy.Addr().(*net.TCPAddr).Port)
+	if err := r.ReloadAll(); err == nil || !strings.Contains(err.Error(), "回滚") {
+		t.Fatalf("改到被占的端口应启动失败并回滚,实际: %v", err)
+	}
+	if !socks5Auth(t, port, "alice", "alice-pw") {
+		t.Fatal("前提:回滚后旧端口照常服务")
+	}
+
+	r.db.Model(&model.User{}).Where("id = ?", alice.Id).Update("enabled", false)
+	if err := r.ReloadUsers(); err != nil {
+		t.Fatalf("回滚后停用用户的热更新不该失败(失败就会留下待重试、反复重建): %v", err)
+	}
+	if socks5Auth(t, port, "alice", "alice-pw") {
+		t.Fatal("停用的 alice 在回滚后的旧端口上仍能认证")
+	}
+	if !socks5Auth(t, port, "bob", "bob-pw") {
+		t.Fatal("bob 应照常可用")
+	}
+	if v := r.setting("userReloadPending"); v != "" {
+		t.Fatalf("不该留下待重试标记: %q", v)
+	}
+
+	tag := func() string {
+		var cfg struct {
+			Inbounds []struct {
+				Tag string `json:"tag"`
+			} `json:"inbounds"`
+		}
+		_ = json.Unmarshal(r.appliedRaw, &cfg)
+		return cfg.Inbounds[0].Tag
+	}()
+	before, ok := r.core.GetInstance().Inbound().Get(tag)
+	if !ok {
+		t.Fatal("入站应在运行")
+	}
+	// 再换一次用户表、再走一次冷却期里的整机重载(副机收到重推就是这条路):用户没变,不能再重建、断连接
+	if err := r.ReloadUsers(); err != nil {
+		t.Fatal(err)
+	}
+	_ = r.ReloadAll() // 冷却期内:同一份起不来的配置只热更新用户,返回"冷却期"错误是预期
+	if after, _ := r.core.GetInstance().Inbound().Get(tag); after != before {
+		t.Fatal("用户没再变,socks 入站却又被拆了重建(上面的连接会被反复断开)")
+	}
+
+	// 之后哪怕再有一次起不来要回滚,回到的也是停用后的用户表,alice 不能被请回来
+	busy2, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy2.Close()
+	r.db.Create(&model.Line{Name: "busy2", Protocol: "socks", Port: busy2.Addr().(*net.TCPAddr).Port, Enabled: true})
+	_ = r.ReloadAll()
+	if socks5Auth(t, port, "alice", "alice-pw") {
+		t.Fatal("再一次回滚后,停用的 alice 又能认证了")
+	}
+}
+
 // 除了上游和用户还有别的变化(比如线路端口改了):热换出站兜不住,要整体重载,改动才真正生效。
 func TestUpstreamReloadFallsBackToFullWhenLinesAlsoChanged(t *testing.T) {
 	r, up, _, port := upstreamRunner(t)

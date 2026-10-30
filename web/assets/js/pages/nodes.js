@@ -106,7 +106,7 @@ function coreCell(n) {
 function actionsCell(n) {
   if (isNodeView()) return '';
   return `<button class="btn sm" data-act="node.test" data-id="${n.id}">${t('common.test')}</button>
-        ${n.isLocal ? '' : `<button class="btn sm" data-act="node.push" data-id="${n.id}">${t('node.push')}</button>`}
+        ${n.isLocal || !n.enabled ? '' : `<button class="btn sm" data-act="node.push" data-id="${n.id}">${t('node.push')}</button>`}
         ${n.isLocal || !n.certFp ? '' : `<button class="btn sm" data-act="node.resetCert" data-id="${n.id}" title="${esc(n.certFp)}">${t('node.resetCert')}</button>`}
         <button class="btn sm" data-act="node.edit" data-id="${n.id}">${t('common.edit')}</button>
         ${n.isLocal ? '' : `<button class="btn sm danger" data-act="node.del" data-id="${n.id}">${t('common.delete')}</button>`}`;
