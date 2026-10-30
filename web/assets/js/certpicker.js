@@ -2,6 +2,10 @@
 // options: [{value, name, sub, badge, chips, current}];badge / chips 是拼好的 HTML,其余按文本转义。
 // onPick(value) 返回 false 表示没选成(比如取消了确认框),抽屉留着。
 import { esc, openDrawer, closeDrawer } from './ui.js';
+import { t } from './i18n.js';
+
+// 证书的显示名:自签证书在库里叫 self-signed,界面上写人话
+export const certLabel = name => (name === 'self-signed' ? t('cert.selfName') : name);
 
 export function openCertDrawer(title, options, onPick) {
   const rows = options.map((o, i) => `<button type="button" class="cert-opt ${o.current ? 'current' : ''}" data-i="${i}">

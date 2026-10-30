@@ -3,7 +3,7 @@ import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, fmtDay, fmtRelative, toast, confirm, registerActions, badge, field, check, copy, fv, fchk } from '../ui.js';
-import { openCertDrawer } from '../certpicker.js';
+import { openCertDrawer, certLabel } from '../certpicker.js';
 
 export const title = () => t('cert.title');
 export const subtitle = () => t('cert.subtitle');
@@ -59,7 +59,7 @@ function useRow(target) {
   const c = certOf(target);
   const path = target === 'panel' ? data.panelCert : target === 'sub' ? data.subCert : data.certPath;
   let cur;
-  if (c) cur = `<b>${esc(c.name)}</b> ${certBadge(c.info)}<div class="sub-cell">${esc(sourceText(c))}${c.info.exists ? ' · ' + fmtDay(new Date(c.info.notAfter).getTime() / 1000) : ''}</div>`;
+  if (c) cur = `<b>${esc(certLabel(c.name))}</b> ${certBadge(c.info)}<div class="sub-cell">${esc(sourceText(c))}${c.info.exists ? ' · ' + fmtDay(new Date(c.info.notAfter).getTime() / 1000) : ''}</div>`;
   else if (path && (target !== 'lines' || data.info.exists)) cur = `<span class="mono small">${esc(path)}</span><div class="sub-cell">${t('cert.notInStore')}</div>`;
   else cur = `<span class="muted">${t(target === 'lines' ? 'cert.none' : 'cert.noHttps')}</span>`;
   return `<div class="cert-use">
@@ -78,7 +78,7 @@ function storeRow(c) {
   if (c.forSub) uses.push(badge(t('cert.useSub'), 'primary'));
   if ((c.lineNames || []).length) uses.push(`<span class="badge" title="${esc(c.lineNames.join('、'))}">${t('cert.nLines', { n: c.lineNames.length })}</span>`);
   return `<tr>
-    <td class="primary-cell">${esc(c.name)}${domains.length && !(domains.length === 1 && domains[0] === c.name) ? `<div class="sub-cell">${domains.map(esc).join(', ')}</div>` : ''}</td>
+    <td class="primary-cell">${esc(certLabel(c.name))}${domains.length && !(domains.length === 1 && domains[0] === c.name) ? `<div class="sub-cell">${domains.map(esc).join(', ')}</div>` : ''}</td>
     <td>${sourceBadge(c)}<div class="sub-cell">${esc(i.issuer || '')}</div></td>
     <td>${i.exists ? `${fmtDay(new Date(i.notAfter).getTime() / 1000)} ${certBadge(i)}` : `<span class="danger small">${esc(trErr(i.error || t('cert.none')))}</span>`}</td>
     <td>${uses.join(' ') || '<span class="muted">—</span>'}</td>
@@ -246,7 +246,7 @@ registerActions({
   'cert.copy': async (_, el) => { await copy(el.dataset.v || ''); toast(t('common.copied'), 'ok'); },
   'cert.pick': target => {
     const opts = certs().map(c => ({
-      value: c.name, name: c.name, badge: certBadge(c.info),
+      value: c.name, name: certLabel(c.name), badge: certBadge(c.info),
       sub: esc(sourceText(c)) + ((c.info.dnsNames || []).length > 1 ? ' · ' + c.info.dnsNames.map(esc).join(', ') : ''),
       current: certOf(target) === c,
     }));
@@ -280,7 +280,7 @@ registerActions({
     } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
   },
   'cert.del': async name => {
-    if (!await confirm(t('common.deleteConfirm', { name }), { danger: true, okText: t('common.delete') })) return;
+    if (!await confirm(t('common.deleteConfirm', { name: certLabel(name) }), { danger: true, okText: t('common.delete') })) return;
     try { await post('cert/delete', { name }); toast(t('cert.deleted'), 'ok'); await reload(); }
     catch (e) { toast(e.message, 'err'); }
   },

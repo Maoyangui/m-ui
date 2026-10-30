@@ -93,7 +93,7 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.saveSettings(map[string]string{
-			"acmeEmail": strings.TrimSpace(req.Email), "acmeMethod": req.Method,
+			"acmeDomain": req.Domain, "acmeEmail": strings.TrimSpace(req.Email), "acmeMethod": req.Method,
 			"acmeStaging": boolStr(req.Staging), "acmeAutoRenew": boolStr(req.AutoRenew),
 		}); err != nil {
 			badRequest(w, fmt.Errorf("保存证书设置失败: %w", err))
