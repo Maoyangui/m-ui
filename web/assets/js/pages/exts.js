@@ -4,6 +4,8 @@ import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, fmtRelative, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, copy, matches } from '../ui.js';
 
+const REACH_TONE = { ok: 'ok', partial: 'warn', blocked: 'danger', ipBlocked: 'danger', portBlocked: 'danger', abroadDown: 'warn', noProbes: '', error: '' };
+
 export const title = () => t('ext.title');
 export const subtitle = () => t('ext.subtitle');
 
@@ -89,14 +91,17 @@ function panelHTML(id, c) {
   return `<div class="toolbar ext-tools">
       <input type="search" data-q="${id}" placeholder="${t('ext.search')}" value="${esc(query[id] || '')}">
       <span class="muted small" id="ext-count-${id}"></span><span class="grow"></span>
+      <button class="btn sm" data-act="ext.hideSel" data-id="${id}" title="${t('ext.hideHelp')}">${t('ext.hideSel')}</button>
+      <button class="btn sm" data-act="ext.showSel" data-id="${id}">${t('ext.showSel')}</button>
       <button class="btn sm" data-act="ext.testAll" data-id="${id}">${t('ext.testAll')}</button>
       <button class="btn sm" data-act="ext.testSel" data-id="${id}">${t('ext.testSel')}</button>
+      <button class="btn sm" data-act="ext.reachSel" data-id="${id}" title="${t('ext.reachHelp')}">${t('ext.reachSel')}</button>
       <button class="btn sm primary" data-act="ext.addUp" data-id="${id}">${t('ext.addUp')}</button>
     </div>
     <div class="table-wrap"><table class="grid ext-grid"><thead><tr>
       <th><input type="checkbox" data-change="ext.pickAll" data-id="${id}" title="${t('common.all')}"></th>
       <th>${t('common.name')}</th><th>${t('common.type')}</th><th>${t('ext.server')}</th>
-      ${(c.servers || []).map(s => `<th class="num" title="${esc(s.name)}">${esc(s.name)}</th>`).join('')}<th></th></tr></thead>
+      ${(c.servers || []).map(s => `<th class="num" title="${esc(s.name)}">${esc(s.name)}</th>`).join('')}<th>${t('ext.reachCol')}</th><th></th></tr></thead>
       <tbody id="ext-nodes-${id}"></tbody></table></div>
     <p class="hint small muted">${t('ext.testHint')}</p>`;
 }
@@ -104,6 +109,14 @@ function panelHTML(id, c) {
 const visible = (id, c) => {
   const q = (query[id] || '').trim();
   return (c.nodes || []).filter(n => !q || matches(q, n.name, n.type, n.server + ':' + n.port));
+};
+
+// 大陆连通那一格:判定 + 三网通的个数放在提示里
+const reachHTML = r => {
+  if (!r) return '<span class="muted">—</span>';
+  if (r.state === 'pending') return '<span class="muted">…</span>';
+  const title = r.error ? trErr(r.error) : (r.groups || []).map(g => t('reach.g.' + g.key) + ' ' + g.ok + '/' + g.total).join(' · ');
+  return `<span class="badge ${REACH_TONE[r.verdict] || ''}" title="${esc(title)}">${esc(t('reach.v.' + (r.verdict || 'none')))}</span>`;
 };
 
 const cellHTML = r => !r ? '<span class="muted">—</span>'
@@ -116,14 +129,19 @@ function renderSubBody(id) {
   if (!tb || !c) return;
   const sel = picked[id] || (picked[id] = new Set());
   const list = visible(id, c), servers = c.servers || [];
-  tb.innerHTML = list.length ? list.map(n => `<tr>
+  tb.innerHTML = list.length ? list.map(n => `<tr class="${n.hidden ? 'ext-hidden' : ''}">
     <td><input type="checkbox" data-change="ext.pick" data-id="${id}" data-idx="${n.index}" ${sel.has(n.index) ? 'checked' : ''}></td>
-    <td class="primary-cell"><a href="#" data-act="ext.detail" data-id="${id}" data-idx="${n.index}">${esc(n.name)}</a></td>
+    <td class="primary-cell"><a href="#" data-act="ext.detail" data-id="${id}" data-idx="${n.index}">${esc(n.rename || n.name)}</a>
+      <button class="btn xs ghost" data-act="ext.rename" data-id="${id}" data-idx="${n.index}" title="${t('ext.rename')}">✎</button>
+      <label class="switch sm" title="${n.keyword ? t('ext.hiddenByKeyword') : t('ext.output')}"><input type="checkbox" data-change="ext.toggleNode" data-id="${id}" data-idx="${n.index}" ${n.hidden ? '' : 'checked'} ${n.keyword ? 'disabled' : ''}><span></span></label>
+      ${n.rename ? `<div class="sub-cell">${t('ext.renamedFrom', { name: esc(n.name) })}</div>` : ''}
+      ${n.keyword ? `<div class="sub-cell">${t('ext.hiddenByKeyword')}</div>` : ''}</td>
     <td>${badge(esc(n.type))}</td>
     <td class="mono small">${esc(n.server)}:${n.port}</td>
     ${servers.map(s => `<td class="num" data-cell="${id}-${n.index}-${s.id}">${cellHTML(n.results && n.results[s.id])}</td>`).join('')}
+    <td data-reach="${id}-${n.index}">${reachHTML(n.reach)}</td>
     <td>${n.upstream ? '' : badge(t('ext.noUpstream'), 'warn')}</td></tr>`).join('')
-    : `<tr><td colspan="${5 + servers.length}">${empty(t('ext.noNodes'))}</td></tr>`;
+    : `<tr><td colspan="${6 + servers.length}">${empty(t('ext.noNodes'))}</td></tr>`;
   updateCount(id);
 }
 
@@ -131,7 +149,8 @@ function updateCount(id) {
   const cnt = document.getElementById('ext-count-' + id), c = cache[id];
   if (!cnt || !c) return;
   const sel = picked[id];
-  cnt.textContent = t('ext.count', { n: (c.nodes || []).length })
+  const out = (c.nodes || []).filter(n => !n.hidden).length;
+  cnt.textContent = t('ext.countOut', { n: (c.nodes || []).length, out })
     + (sel && sel.size ? ' · ' + t('ext.selected', { n: sel.size }) : '')
     + (c.fetchedAt ? ' · ' + t('ext.lastFetch') + ' ' + fmtRelative(c.fetchedAt) : '');
 }
@@ -207,6 +226,57 @@ function tally(results) {
   return { ok, bad };
 }
 
+// ---- 隐藏 / 改名:存的是原名,订阅刷新后还认得 ----
+
+async function savePrefs(id) {
+  const c = cache[id];
+  const nodes = c.nodes || [];
+  const hidden = nodes.filter(n => n.hidden && !n.keyword).map(n => n.name);
+  const renames = {};
+  nodes.forEach(n => { if (n.rename) renames[n.name] = n.rename; });
+  await put(`exts/${id}/nodes/prefs`, { hidden, renames });
+}
+
+async function setHidden(id, indexes, hidden) {
+  const c = cache[id];
+  if (!c) return;
+  const before = (c.nodes || []).map(n => n.hidden);
+  for (const i of indexes) { const n = c.nodes[i]; if (n && !n.keyword) n.hidden = hidden; }
+  try { await savePrefs(id); renderSubBody(id); toast(t('ext.prefsSaved'), 'ok'); }
+  catch (e) { (c.nodes || []).forEach((n, i) => { n.hidden = before[i]; }); renderSubBody(id); toast(e.message, 'err'); }
+}
+
+// ---- 大陆连通:只测勾选的 ----
+
+async function startReach(id, indexes) {
+  const c = cache[id];
+  if (!c) return;
+  if (!indexes.length) { toast(t('ext.pickFirst'), 'err'); return; }
+  let r;
+  try { r = await post(`exts/${id}/nodes/reach`, { indexes, sig: c.sig }, SLOW); }
+  catch (e) { toast(e.message, 'err'); if (e.status === 409) reloadPanel(id); return; }
+  for (const i of indexes) if (c.nodes[i]) c.nodes[i].reach = { state: 'pending' };
+  renderSubBody(id);
+  toast(t('ext.reachStarted', { n: indexes.length }), 'ok');
+  const started = Date.now();
+  const poll = async () => {
+    let st;
+    try { st = await get(`exts/${id}/nodes/reach/${r.job}`); }
+    catch (e) { toast(e.message, 'err'); return; }
+    const now = cache[id];
+    if (!now) return; // 列表作废了
+    for (const [idx, cell] of Object.entries(st.results || {})) {
+      const n = (now.nodes || [])[Number(idx)];
+      if (n) n.reach = cell;
+      const td = document.querySelector(`[data-reach="${id}-${idx}"]`);
+      if (td) td.innerHTML = reachHTML(cell);
+    }
+    if (st.done || Date.now() - started > 15 * 60 * 1000) { toast(t('ext.reachDone'), 'ok'); return; }
+    setTimeout(poll, 2000);
+  };
+  setTimeout(poll, 2000);
+}
+
 // ---- 添加为上游 ----
 
 async function addUpstreams(id) {
@@ -243,11 +313,12 @@ function editExt(id) {
       ${field(t('common.type'), `<select id="f-type"><option value="sub" ${x.type === 'sub' ? 'selected' : ''}>${t('ext.typeSub')}</option><option value="link" ${x.type === 'link' ? 'selected' : ''}>${t('ext.typeLink')}</option></select>`, t('ext.typeHelp'))}
       <div class="full">${field(t('ext.value'), `<textarea id="f-value" style="min-height:5rem">${esc(x.value || '')}</textarea>`, t('ext.valueHelp'))}</div>
       ${field(t('ext.prefix'), `<input id="f-prefix" value="${esc(x.prefix || '')}" placeholder="[中转] ">`, t('ext.prefixHelp'))}
+      ${field(t('ext.exclude'), `<input id="f-exclude" value="${esc(x.exclude || '')}" placeholder="${esc(t('ext.excludePh'))}">`, t('ext.excludeHelp'))}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(x.remark || '')}">`)}
       ${field(t('common.sort'), `<input id="f-sort" type="number" value="${x.sort || 0}">`)}
       ${check('f-enabled', t('common.enabled'), x.enabled !== false)}
     </div>`, async () => {
-    const body = { name: fv('f-name').trim(), type: fv('f-type'), value: fv('f-value').trim(), prefix: fv('f-prefix'), remark: fv('f-remark'), sort: Number(fv('f-sort')) || 0, enabled: fchk('f-enabled') };
+    const body = { name: fv('f-name').trim(), type: fv('f-type'), value: fv('f-value').trim(), prefix: fv('f-prefix'), exclude: fv('f-exclude').trim(), remark: fv('f-remark'), sort: Number(fv('f-sort')) || 0, enabled: fchk('f-enabled') };
     if (id) await put('exts/' + id, body); else await post('exts', body);
     delete cache[id]; // 地址可能改了,展开时重新拉
     await load('exts'); renderRows();
@@ -280,6 +351,25 @@ registerActions({
   },
   'ext.detail': (id, el, e) => { if (e) e.preventDefault(); showDetail(Number(id), Number(el.dataset.idx)); },
   'ext.copy': async (id, el) => { await copy(el.dataset.link || ''); toast(t('common.copied'), 'ok'); },
+  'ext.toggleNode': (id, el) => setHidden(Number(id), [Number(el.dataset.idx)], !el.checked),
+  'ext.hideSel': id => { id = Number(id); const s = picked[id]; if (!s || !s.size) { toast(t('ext.pickFirst'), 'err'); return; } setHidden(id, [...s], true); },
+  'ext.showSel': id => { id = Number(id); const s = picked[id]; if (!s || !s.size) { toast(t('ext.pickFirst'), 'err'); return; } setHidden(id, [...s], false); },
+  'ext.reachSel': id => { id = Number(id); startReach(id, [...(picked[id] || [])]); },
+  'ext.rename': (id, el, e) => {
+    if (e) e.preventDefault();
+    id = Number(id);
+    const c = cache[id], n = c && (c.nodes || [])[Number(el.dataset.idx)];
+    if (!n) return;
+    openModal(t('ext.rename'), `<div class="form-grid"><div class="full">${field(t('ext.renameTo'), `<input id="f-rename" value="${esc(n.rename || n.name)}">`, t('ext.renameHelp', { name: esc(n.name) }))}</div></div>`, async () => {
+      const to = fv('f-rename').trim();
+      const old = n.rename;
+      n.rename = to && to !== n.name ? to : '';
+      try { await savePrefs(id); }
+      catch (err) { n.rename = old; throw err; }
+      renderSubBody(id);
+      toast(t('ext.prefsSaved'), 'ok');
+    });
+  },
   'ext.testAll': id => startTest(Number(id), []),
   'ext.testSel': id => { id = Number(id); const s = picked[id]; if (!s || !s.size) { toast(t('ext.pickFirst'), 'err'); return; } startTest(id, [...s]); },
   'ext.addUp': id => addUpstreams(Number(id)),

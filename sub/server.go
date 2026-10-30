@@ -216,6 +216,7 @@ func (s *Server) externalFor(userID uint) []ExtItem {
 		} else {
 			it = ext.Parse(e.Cache)
 		}
+		it = ext.ParseFilter(e.Hidden, e.Renames, e.Exclude).Apply(it)
 		it = ext.WithPrefix(it, e.Prefix)
 		if len(it.Links) == 0 && len(it.Clash) == 0 {
 			continue

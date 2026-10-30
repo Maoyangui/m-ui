@@ -155,7 +155,7 @@ func (s *Server) handleExtItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		updates := map[string]interface{}{"name": p.Name, "type": p.Type, "value": p.Value, "prefix": p.Prefix, "enabled": p.Enabled, "sort": p.Sort, "remark": p.Remark}
+		updates := map[string]interface{}{"name": p.Name, "type": p.Type, "value": p.Value, "prefix": p.Prefix, "enabled": p.Enabled, "sort": p.Sort, "remark": p.Remark, "exclude": strings.TrimSpace(p.Exclude)}
 		if p.Type != e.Type || p.Value != e.Value {
 			updates["cache"], updates["last_fetch"], updates["last_error"] = "", 0, ""
 			updates["node_count"] = 0

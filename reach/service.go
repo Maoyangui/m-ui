@@ -34,6 +34,7 @@ const (
 	keepRows       = 48   // 库里每台留几条
 	probeListTTL   = 6 * time.Hour
 	parallelChecks = 3
+	anonymousHourly = 250 // Globalping 免登录每小时的测点次
 )
 
 // ErrBusy 已经有一轮在跑。
@@ -377,6 +378,31 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 		}()
 	}
 	wg.Wait()
+}
+
+// CanCheck 现在的额度够不够测 n 个目标:不够就直接说清楚,别一个个失败。
+func (s *Service) CanCheck(n int) error {
+	s.mu.Lock()
+	cost := s.perCheck
+	s.mu.Unlock()
+	q := s.c.Quota()
+	if q.At > 0 && q.Remaining < cost*n && s.d.Now().Unix() < q.ResetAt {
+		return fmt.Errorf("Globalping 额度不够:这次要约 %d 个测点次,还剩 %d。少选几个,或者在设置里填 Globalping Token 提高额度", cost*n, q.Remaining)
+	}
+	if q.At == 0 && strings.TrimSpace(s.d.Setting("reachToken")) == "" && cost*n > anonymousHourly {
+		return fmt.Errorf("免登录额度一小时只够测 %d 个节点,这次选了 %d 个。少选几个,或者在设置里填 Globalping Token 提高额度", anonymousHourly/cost, n)
+	}
+	return nil
+}
+
+// CheckHost 测一个任意地址(外部节点用):和服务器同一套判定,不进历史、不告警。
+func (s *Service) CheckHost(ctx context.Context, name, host string, port int) Result {
+	t := Target{Name: name, Host: host, Port: port}
+	locs, cost, err := s.locations(ctx)
+	if err != nil {
+		return s.failed(t, false, err.Error())
+	}
+	return s.check(ctx, t, locs, cost, false)
 }
 
 // locations 选好这一轮用的测点(列表缓存 6 小时),返回每台服务器一次测量要用的测点次数。

@@ -310,6 +310,7 @@ details.menu .menu-list hr { border: none; border-top: 1px solid var(--border); 
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100vw); background: var(--surface); border-left: 1px solid var(--border); box-shadow: var(--shadow-lg); z-index: 40; transform: translateX(100%); transition: transform .2s; display: flex; flex-direction: column; }
 .drawer.open { transform: none; }
 .drawer.over { z-index: 60; }
+tr.ext-hidden .primary-cell > a { text-decoration: line-through; opacity: .55; }
 .cert-opts { display: flex; flex-direction: column; gap: .5rem; }
 .cert-opt { display: flex; gap: .6rem; width: 100%; padding: .65rem .75rem; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); color: inherit; font: inherit; cursor: pointer; transition: border-color .15s, background .15s; }
 .cert-opt:hover:not(:disabled) { border-color: var(--primary); }

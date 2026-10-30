@@ -19,6 +19,17 @@ type NodeInfo struct {
 	Fields   []Field `json:"fields"`
 	Link     string  `json:"link,omitempty"`
 	Upstream bool    `json:"upstream"` // 能否作为本站上游:协议受支持、且能转成分享链接再解析回来
+	Hidden   bool    `json:"hidden,omitempty"`  // 不输出到用户订阅
+	Keyword  bool    `json:"keyword,omitempty"` // 是关键词排除的(手动显示不了,要改关键词)
+	Rename   string  `json:"rename,omitempty"`  // 改的名字;空 = 用原名
+}
+
+// Annotate 把筛选结果标到节点明细上,面板显示用。
+func Annotate(infos []NodeInfo, f Filter) {
+	for i := range infos {
+		infos[i].Hidden, infos[i].Keyword = f.Hides(infos[i].Name)
+		infos[i].Rename = f.Renames[infos[i].Name]
+	}
 }
 
 // Field 节点的一个参数,值统一成字符串给界面直接显示(嵌套结构用紧凑 JSON)。

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/ext"
+	"github.com/Maoyangui/m-ui/reach"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/upstream"
 )
@@ -106,7 +108,69 @@ func (s *Server) handleExtNodes(w http.ResponseWriter, r *http.Request, e model.
 		}
 		_, servers := s.extTestServers()
 		infos := ext.Details(extItems(e))
-		writeJSON(w, http.StatusOK, map[string]interface{}{"nodes": infos, "servers": servers, "fetchedAt": e.LastFetch, "sig": extSig(infos)})
+		sig := extSig(infos) // 指纹只看节点本身,隐藏 / 改名不影响测速和添加上游按下标指节点
+		ext.Annotate(infos, ext.ParseFilter(e.Hidden, e.Renames, e.Exclude))
+		writeJSON(w, http.StatusOK, map[string]interface{}{"nodes": infos, "servers": servers, "fetchedAt": e.LastFetch, "sig": sig})
+	case sub[0] == "prefs" && len(sub) == 1: // 哪些节点不输出、改了什么名字
+		if r.Method != http.MethodPut {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+			return
+		}
+		var body struct {
+			Hidden  []string          `json:"hidden"`
+			Renames map[string]string `json:"renames"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			badRequest(w, err)
+			return
+		}
+		hidden, _ := json.Marshal(cleanNames(body.Hidden))
+		renames := map[string]string{}
+		for from, to := range body.Renames {
+			if to = strings.TrimSpace(to); to != "" && to != from {
+				renames[from] = to
+			}
+		}
+		rb, _ := json.Marshal(renames)
+		if err := s.db.Model(&model.ExtNode{}).Where("id = ?", e.Id).Updates(map[string]interface{}{"hidden": json.RawMessage(hidden), "renames": json.RawMessage(rb)}).Error; err != nil {
+			badRequest(w, err)
+			return
+		}
+		s.audit(r, "ext", "prefs", e.Name)
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+	case sub[0] == "reach" && len(sub) == 1: // 大陆连通:只测勾选的,一次测点额度有限
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+			return
+		}
+		var body struct {
+			Indexes []int  `json:"indexes"`
+			Sig     string `json:"sig"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if body.Sig != extSig(ext.Details(extItems(e))) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": errExtStale.Error()})
+			return
+		}
+		id, err := s.startExtReach(e, body.Indexes)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		s.audit(r, "ext", "reach-nodes", e.Name)
+		writeJSON(w, http.StatusOK, map[string]string{"job": id})
+	case sub[0] == "reach" && len(sub) == 2:
+		extReachJobs.Lock()
+		job := extReachJobs.m[sub[1]]
+		extReachJobs.Unlock()
+		if job == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "测速任务不存在或已过期"})
+			return
+		}
+		writeJSON(w, http.StatusOK, job.snapshot())
 	case sub[0] == "test" && len(sub) == 1:
 		if r.Method != http.MethodPost {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
@@ -168,6 +232,112 @@ func (s *Server) handleExtNodes(w http.ResponseWriter, r *http.Request, e model.
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// cleanNames 去空、去重。
+func cleanNames(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, n := range in {
+		if n != "" && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// extReachCell 一个外部节点的大陆连通结果。
+type extReachCell struct {
+	State   string         `json:"state"` // pending | done
+	Verdict string         `json:"verdict,omitempty"`
+	Error   string         `json:"error,omitempty"`
+	Groups  []reach.Group  `json:"groups,omitempty"`
+}
+
+type extReachJob struct {
+	mu       sync.Mutex
+	started  time.Time
+	done     bool
+	total    int
+	finished int
+	results  map[int]*extReachCell
+}
+
+func (j *extReachJob) snapshot() map[string]interface{} {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	res := make(map[string]extReachCell, len(j.results))
+	for i, c := range j.results {
+		res[strconv.Itoa(i)] = *c
+	}
+	return map[string]interface{}{"done": j.done, "total": j.total, "finished": j.finished, "results": res}
+}
+
+var extReachJobs = struct {
+	sync.Mutex
+	m map[string]*extReachJob
+}{m: map[string]*extReachJob{}}
+
+// startExtReach 从大陆三网测勾选的外部节点(和服务器页同一套判定,不进历史、不告警)。
+// 每个节点要用十几个测点次,免登录额度一小时只够十来个,所以要先勾选,额度不够直接说清楚。
+func (s *Server) startExtReach(e model.ExtNode, indexes []int) (string, error) {
+	if s.run == nil || s.run.Reach() == nil {
+		return "", errors.New("大陆连通检测没有启用")
+	}
+	if len(indexes) == 0 {
+		return "", errors.New("先勾选要测的节点")
+	}
+	infos := ext.Details(extItems(e))
+	var targets []ext.NodeInfo
+	seen := map[int]bool{}
+	for _, i := range indexes {
+		if i >= 0 && i < len(infos) && !seen[i] {
+			seen[i] = true
+			targets = append(targets, infos[i])
+		}
+	}
+	if len(targets) == 0 {
+		return "", errors.New("没有可测的节点")
+	}
+	if err := s.run.Reach().CanCheck(len(targets)); err != nil {
+		return "", err
+	}
+	job := &extReachJob{started: time.Now(), total: len(targets), results: map[int]*extReachCell{}}
+	for _, n := range targets {
+		job.results[n.Index] = &extReachCell{State: "pending"}
+	}
+	id := newJobID()
+	extReachJobs.Lock()
+	for k, j := range extReachJobs.m {
+		if time.Since(j.started) > 30*time.Minute {
+			delete(extReachJobs.m, k)
+		}
+	}
+	extReachJobs.m[id] = job
+	extReachJobs.Unlock()
+	go func() {
+		sem := make(chan struct{}, 3)
+		var wg sync.WaitGroup
+		for _, n := range targets {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(n ext.NodeInfo) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cancel()
+				res := s.run.Reach().CheckHost(ctx, n.Name, n.Server, n.Port)
+				job.mu.Lock()
+				*job.results[n.Index] = extReachCell{State: "done", Verdict: res.Verdict, Error: res.Error, Groups: res.Groups}
+				job.finished++
+				job.done = job.finished >= job.total
+				job.mu.Unlock()
+			}(n)
+		}
+		wg.Wait()
+	}()
+	return id, nil
 }
 
 // startExtTest 起一个测速任务:每台服务器各一个工人,逐个真连(临时实例本来就是串行的,并发再大也快不了)。

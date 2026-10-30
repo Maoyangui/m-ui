@@ -4,6 +4,10 @@
 import { getLang } from './i18n.js';
 
 const EN = /*BEGIN*/{
+"大陆连通检测没有启用": "The China reachability check is not enabled",
+"先勾选要测的节点": "Tick the nodes to test first",
+"Globalping 额度不够:这次要约 %d 个测点次,还剩 %d。少选几个,或者在设置里填 Globalping Token 提高额度": "Not enough Globalping quota: this needs about %d probes and %d are left. Pick fewer, or add a Globalping token in settings",
+"免登录额度一小时只够测 %d 个节点,这次选了 %d 个。少选几个,或者在设置里填 Globalping Token 提高额度": "The anonymous quota only covers %d nodes an hour and you picked %d. Pick fewer, or add a Globalping token in settings",
 "sing-box 模板不是合法 JSON: %w": "The sing-box template is not valid JSON: %w",
 "保存失败": "Saving failed",
 "加载订阅证书: %w": "Loading the subscription certificate: %w",

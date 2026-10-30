@@ -276,6 +276,10 @@ type ExtNode struct {
 	LastError string `json:"lastError"`
 	NodeCount int    `json:"nodeCount"`
 	Cache     string `json:"cache,omitempty"` // 外部订阅抓取到的内容(主机抓取,随快照下发副机)
+	// 输出到用户订阅前的筛选与改名,都按节点原名记(订阅刷新后顺序会变,原名才认得出)。
+	Hidden  json.RawMessage `json:"hidden,omitempty"`  // 手动隐藏的节点 []原名
+	Renames json.RawMessage `json:"renames,omitempty"` // 改名 {原名: 新名}
+	Exclude string          `json:"exclude"`           // 名字含这些关键词的不输出,逗号分隔(官网、到期、剩余流量这类信息节点)
 }
 
 // UserExt 用户-外部节点 多对多。
