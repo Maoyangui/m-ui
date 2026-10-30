@@ -141,7 +141,7 @@ func TestSingBoxTemplateResolver(t *testing.T) {
 	user := model.User{Name: "u"}
 	resolver := func(tmpl string) interface{} {
 		t.Helper()
-		res, err := BuildSingBoxSub(user, nil, Options{SingBoxTmpl: tmpl})
+		res, err := BuildSingBoxSub(user, nil, Options{SingBoxTmpl: tmpl, External: []ExtItem{{Links: []string{"trojan://p@198.51.100.1:443?sni=a.example.com#n1"}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
