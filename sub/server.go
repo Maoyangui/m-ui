@@ -170,12 +170,8 @@ func (s *Server) options() Options {
 	for i := range entries {
 		entries[i].Insecure, entries[i].InsecureFixed = insecure, fixed
 		// 自动模式:知道这台服务器的默认证书,就按它自己的判断(主机是正式证书、副机是自签时,以前副机的节点连不上)
-		if !fixed {
-			for _, b := range entries[i].Certs {
-				if b.Default {
-					entries[i].Insecure = b.SelfSigned
-				}
-			}
+		if b, ok := defaultCertOf(entries[i].Certs); ok && !fixed {
+			entries[i].Insecure = b.SelfSigned
 		}
 	}
 	return Options{

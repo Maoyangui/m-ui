@@ -380,11 +380,14 @@ func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
 			u.Expiry = 0
 		}
 	}
-	if req.Expiry != nil && u.ActivateDays == 0 {
-		u.Expiry = *req.Expiry
-	} else if req.Days != nil && u.ActivateDays > 0 && req.ActivateDays == nil && *req.Days > 0 {
+	if req.ActivateDays != nil && *req.ActivateDays > 0 {
+		// 这次明确要首次连接才计时:expiry / days 不看
+	} else if req.Expiry != nil {
+		u.Expiry, u.ActivateDays = *req.Expiry, 0 // 明确给了到期时间:不再等首次连接
+	} else if req.Days != nil && u.ActivateDays > 0 && *req.Days > 0 {
 		u.ActivateDays += *req.Days // 还没开始计时的用户:加到等待计时的天数上
-	} else if req.Days != nil && u.ActivateDays == 0 {
+	} else if req.Days != nil {
+		u.ActivateDays = 0
 		base := now
 		if !creating && u.Expiry > now {
 			base = u.Expiry

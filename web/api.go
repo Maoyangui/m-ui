@@ -1311,7 +1311,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		v1, ok1 := in["allowPrivate"]
 		v2, ok2 := in["blockBT"]
-		if (ok1 && strings.TrimSpace(v1) != oldAllowPrivate) || (ok2 && !strings.EqualFold(strings.TrimSpace(v2), oldBlockBT)) {
+		if (ok1 && strings.TrimSpace(v1) != oldAllowPrivate) || (ok2 && strings.EqualFold(strings.TrimSpace(v2), "true") != strings.EqualFold(oldBlockBT, "true")) {
 			s.reloadAll("私网访问 / 屏蔽 BT 开关") // 路由规则变了,只能整体重载
 		} else if v, ok := in["subShareEnabled"]; ok && strings.TrimSpace(v) != oldShare {
 			s.reloadUsers("临时共享开关") // 关掉时已有的共享凭据要立刻从数据面撤下

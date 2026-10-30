@@ -30,6 +30,33 @@ func TestCertSNI(t *testing.T) {
 	}
 }
 
+// 没单独选证书的线路用服务器的默认证书:换了默认证书(比如泛域名)而面板域名没变,SNI 要跟着证书走;
+// 设置里强制了允许不安全时 SNI 是管理员自己定的,不动。
+func TestDefaultCertInSubscription(t *testing.T) {
+	line := model.Line{Id: 1, Name: "l", Protocol: "trojan", Port: 1, Tls: []byte(`{"mode":"cert"}`)}
+	wild := map[string]model.CertBrief{"*.example.net": {Name: "*.example.net", Domains: []string{"*.example.net", "example.net"}, Default: true}}
+	self := map[string]model.CertBrief{"self-signed": {Name: "self-signed", Domains: []string{"panel.example.com"}, SelfSigned: true, Default: true}}
+	base := addr{server: "1.1.1.1", port: 1, sni: "panel.example.com"}
+	if got := certAddr(base, line, Entry{Certs: wild}); got.sni != "example.net" || got.insecure {
+		t.Fatalf("默认证书是泛域名:%+v", got)
+	}
+	if got := certAddr(base, line, Entry{Certs: self}); got.sni != "panel.example.com" || !got.insecure {
+		t.Fatalf("默认证书是自签:%+v", got)
+	}
+	fixed := base
+	fixed.insecure = true
+	if got := certAddr(fixed, line, Entry{Certs: wild, InsecureFixed: true}); got.sni != "panel.example.com" || !got.insecure {
+		t.Fatalf("强制允许不安全时 SNI 不该动:%+v", got)
+	}
+	if got := certAddr(base, line, Entry{}); got != base {
+		t.Fatalf("老版本副机没报清单,地址不动:%+v", got)
+	}
+	reality := model.Line{Id: 2, Name: "r", Protocol: "vless", Port: 1, Tls: []byte(`{"mode":"reality"}`)}
+	if got := certAddr(base, reality, Entry{Certs: wild}); got != base {
+		t.Fatalf("Reality 线路不用证书,地址不动:%+v", got)
+	}
+}
+
 // 线路单独选了证书:有这张证书的服务器,订阅里 SNI 跟着证书走;没有的服务器用它自己的默认证书,地址不动。
 func TestLineCertInSubscription(t *testing.T) {
 	line := model.Line{Id: 1, Name: "l", Protocol: "trojan", Port: 1, Tls: []byte(`{"mode":"cert","cert":"*.example.com"}`)}

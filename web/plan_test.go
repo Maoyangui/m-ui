@@ -65,3 +65,44 @@ func TestApplyPlanFractionalVolume(t *testing.T) {
 		t.Fatalf("2.5 GB 应为 2684354560 字节,实际 %d", u.Volume)
 	}
 }
+
+// 外部 API 改到期:明确给了 expiry,等着首次连接的用户也要听它的,不能静默忽略;给 days 时加到等待的天数上。
+func TestApplyReqExpiryOverridesWaiting(t *testing.T) {
+	now := int64(1_800_000_000)
+	exp, zero, seven, three := now+86400, int64(0), 7, 3
+	u := model.User{ActivateDays: 7}
+	if err := applyReq(&u, apiUserReq{Expiry: &exp}, now, false); err != nil {
+		t.Fatal(err)
+	}
+	if u.Expiry != exp || u.ActivateDays != 0 {
+		t.Fatalf("明确给 expiry: %+v", u)
+	}
+	u = model.User{ActivateDays: 7}
+	if err := applyReq(&u, apiUserReq{Expiry: &zero}, now, false); err != nil {
+		t.Fatal(err)
+	}
+	if u.Expiry != 0 || u.ActivateDays != 0 {
+		t.Fatalf("expiry=0 就是不限期: %+v", u)
+	}
+	u = model.User{ActivateDays: 7}
+	if err := applyReq(&u, apiUserReq{Days: &three}, now, false); err != nil {
+		t.Fatal(err)
+	}
+	if u.ActivateDays != 10 || u.Expiry != 0 {
+		t.Fatalf("等待中的用户加天数: %+v", u)
+	}
+	u = model.User{Expiry: exp}
+	if err := applyReq(&u, apiUserReq{ActivateDays: &seven, Expiry: &exp}, now, false); err != nil {
+		t.Fatal(err)
+	}
+	if u.ActivateDays != 7 || u.Expiry != 0 {
+		t.Fatalf("同时给 activateDays 和 expiry,以 activateDays 为准: %+v", u)
+	}
+	u = model.User{}
+	if err := applyReq(&u, apiUserReq{Days: &three}, now, true); err != nil {
+		t.Fatal(err)
+	}
+	if u.Expiry != now+3*86400 {
+		t.Fatalf("普通用户按天数: %+v", u)
+	}
+}

@@ -130,6 +130,9 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 	if notice != "" {
 		selectList = append(selectList, notice)
 	}
+	if len(proxyNames) == 0 { // 一个节点都没有(线路全被过滤掉):空分组会让整份配置导入失败
+		proxyNames = []string{"DIRECT"}
+	}
 	selectList = append(selectList, "Auto")
 	selectList = append(selectList, topNames...)
 	groups := []interface{}{

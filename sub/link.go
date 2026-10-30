@@ -30,22 +30,37 @@ type Entry struct {
 	InsecureFixed bool
 }
 
-// certAddr 线路单独选了证书:这台服务器有那张证书,SNI 与"允许不安全"就跟着它走;没有那张证书的服务器用的是
-// 自己的默认证书,地址不动。
+// certAddr 这条线路在这台服务器上实际用哪张证书,SNI 与"允许不安全"就跟着它走:单独选了且这台有的用那张,
+// 否则是这台的默认证书(换了默认证书而面板域名没变时,客户端带着旧 SNI 校验不过)。老版本副机没报证书清单,地址不动。
+// 不校验证书的不改 SNI:设置里强制了允许不安全时,SNI 是管理员自己定的。
 func certAddr(a addr, line model.Line, e Entry) addr {
 	tls := render.ParseTLS(line)
-	if tls.Mode != "cert" || tls.Cert == "" {
+	if tls.Mode != "cert" {
 		return a
 	}
 	b, ok := e.Certs[tls.Cert]
 	if !ok {
-		return a
+		if b, ok = defaultCertOf(e.Certs); !ok {
+			return a
+		}
 	}
-	a.sni = certSNI(b, a.sni)
 	if !e.InsecureFixed {
 		a.insecure = b.SelfSigned
 	}
+	if !a.insecure {
+		a.sni = certSNI(b, a.sni)
+	}
 	return a
+}
+
+// defaultCertOf 这台服务器的线路默认证书。
+func defaultCertOf(certs map[string]model.CertBrief) (model.CertBrief, bool) {
+	for _, b := range certs {
+		if b.Default {
+			return b, true
+		}
+	}
+	return model.CertBrief{}, false
 }
 
 // certSNI 用这张证书时客户端该带的 SNI:原来的 SNI 证书能覆盖就不动;否则用证书的第一个具体域名;
