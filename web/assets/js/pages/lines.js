@@ -3,6 +3,7 @@ import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML } from '../ui.js';
+import { openCertDrawer } from '../certpicker.js';
 
 const selected = new Set(); // 批量设置勾选的线路 id
 export const title = () => t('line.title');
@@ -73,6 +74,7 @@ function protoBadges(l) {
   const tr = parseJ(l.transport);
   let h = badge(l.protocol, 'primary');
   if (!(PROTOCOLS[l.protocol] || {}).noTls) h += ' ' + badge(mode === 'reality' ? 'Reality' : mode === 'cert' ? 'TLS' : 'plain', mode === 'reality' ? 'ok' : mode === 'cert' ? '' : 'warn');
+  if (mode === 'cert' && parseJ(l.tls).cert) h += ' ' + badge(parseJ(l.tls).cert);
   if (tr.type && tr.type !== 'tcp') h += ' ' + badge(tr.type);
   return h;
 }
@@ -150,6 +152,7 @@ function tlsSection(protocol, tls) {
   return `<h3>${t('line.tls')}</h3><div class="form-grid">
     ${field(t('line.tlsMode'), sel('f-tlsmode', modes, mode, { cert: t('line.tls.cert'), reality: t('line.tls.reality'), none: t('line.tls.none') }), t('line.tlsHelp.' + mode))}
     ${field(t('line.fp'), sel('f-fp', ['', ...FPS], tls.fingerprint || '', { '': '默认' }))}
+    <div id="f-cert-wrap" class="full" ${mode === 'cert' ? '' : 'hidden'}>${field(t('line.cert'), `<div class="row"><input type="hidden" id="f-cert" value="${esc(tls.cert || '')}"><button type="button" class="btn cert-pick-btn" data-act="line.pickCert" id="f-cert-btn">${esc(tls.cert || t('line.certDefault'))} ▾</button></div>`, t('line.certHelp'))}</div>
     <div id="f-reality" class="form-grid full" ${mode === 'reality' ? '' : 'hidden'}>
       ${field(t('line.reality.server'), `<input id="f-hs" value="${esc(r.handshake_server || 'www.microsoft.com')}">`, t('line.reality.serverHelp'))}
       ${field(t('line.reality.port'), `<input id="f-hsport" type="number" value="${r.handshake_port || 443}">`)}
@@ -213,6 +216,7 @@ function renderDynamic(l) {
   const tm = document.getElementById('f-tlsmode');
   if (tm) tm.addEventListener('change', e => {
     document.getElementById('f-reality').hidden = e.target.value !== 'reality';
+    document.getElementById('f-cert-wrap').hidden = e.target.value !== 'cert';
     const help = tm.closest('.field').querySelector('.help');
     if (help) help.textContent = t('line.tlsHelp.' + e.target.value);
   });
@@ -236,6 +240,7 @@ function readForm(id) {
   if (!spec.noTls) {
     const tls = { mode: fv('f-tlsmode') };
     if (fv('f-fp')) tls.fingerprint = fv('f-fp');
+    if (tls.mode === 'cert' && fv('f-cert')) tls.cert = fv('f-cert');
     if (tls.mode === 'reality') {
       if (!fv('f-priv').trim()) throw new Error(t('line.reality.private') + ' ' + t('line.reality.gen'));
       tls.reality = {
@@ -623,7 +628,43 @@ function batchDialog(action) {
     () => runBatch('nodes', { nodeIds: [...document.querySelectorAll('.b-node-cb:checked')].map(c => Number(c.value)) }));
 }
 
+// 选这条线路的证书:列出各服务器证书库的并集,每张证书标出哪台有、哪台没有(没有的那台用自己的默认证书)
+function pickLineCert() {
+  const parse = v => { try { return Array.isArray(v) ? v : (v ? JSON.parse(v) : []); } catch { return []; } };
+  const checks = [...document.querySelectorAll('.node-cb')];
+  const picked = checks.filter(c => c.checked).map(c => Number(c.value));
+  const servers = (state.nodes || []).filter(n => !picked.length || picked.includes(n.id));
+  const byName = new Map();
+  for (const n of servers) {
+    for (const c of parse(n.certs)) {
+      if (!byName.has(c.name)) byName.set(c.name, { domains: c.domains || [], selfSigned: c.selfSigned, has: new Map() });
+      byName.get(c.name).has.set(n.id, c);
+    }
+  }
+  const cur = fv('f-cert');
+  const now = Date.now() / 1000;
+  const chips = info => servers.map(n => {
+    const c = info.has.get(n.id);
+    if (!c) return badge(n.name + ' · ' + t('line.certMissing'), 'warn');
+    const left = Math.floor((c.notAfter - now) / 86400);
+    return badge(n.name + ' · ' + t('cert.daysLeftN', { n: left }), left <= 14 ? 'warn' : 'ok');
+  }).join('');
+  const opts = [{ value: '', name: t('line.certDefault'), sub: esc(t('line.certDefaultHelp')), current: !cur }];
+  for (const [name, info] of byName) {
+    opts.push({ value: name, name, sub: info.domains.length > 1 ? info.domains.map(esc).join(', ') : (info.selfSigned ? esc(t('cert.srcSelf')) : ''), chips: servers.length ? chips(info) : '', current: cur === name });
+  }
+  // 选过的证书已经不在任何服务器上了:也列出来,不然看不出当前选的是什么
+  if (cur && !byName.has(cur)) opts.push({ value: cur, name: cur, sub: esc(t('line.certMissing')), current: true });
+  if (opts.length === 1) opts[0].sub = esc(t('line.certNoneYet'));
+  openCertDrawer(t('line.certPick'), opts, value => {
+    document.getElementById('f-cert').value = value;
+    document.getElementById('f-cert-btn').textContent = (value || t('line.certDefault')) + ' ▾';
+    return true;
+  });
+}
+
 registerActions({
+  'line.pickCert': () => pickLineCert(),
   'line.sel': (id, cb) => { cb.checked ? selected.add(Number(id)) : selected.delete(Number(id)); renderRows(); },
   'line.clearSel': () => { selected.clear(); renderRows(); },
   'line.batch': async action => {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/acme"
+	"github.com/Maoyangui/m-ui/runner"
 )
 
 // ---- 证书 ----
@@ -25,21 +26,19 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 	}
 	certFile, _ := s.run.DataPlaneCert()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"info":       s.run.CertInfo(),
-		"status":     s.run.CertStatus(),
-		"source":     s.run.CertSource(),
-		"applyPanel": certFile != "" && s.setting("webCertFile") == certFile,
-		"applySub":   certFile != "" && s.setting("subCertFile") == certFile,
-		"certPath":   certFile,
-		// 面板 / 订阅实际引用的证书路径:与数据面不同则说明设置页里手填了另一张证书
+		"info":     s.run.CertInfo(),
+		"status":   s.run.CertStatus(),
+		"source":   s.run.CertSource(),
+		"certs":    s.run.Certs(),
+		"certPath": certFile,
+		// 面板 / 订阅实际引用的证书路径(可能是证书库之外手填的)
 		"panelCert": s.setting("webCertFile"),
 		"subCert":   s.setting("subCertFile"),
 		"settings": map[string]interface{}{
 			"acmeDomain": s.setting("acmeDomain"), "acmeEmail": s.setting("acmeEmail"), "acmeMethod": s.setting("acmeMethod"),
 			"hasCfToken": s.setting("acmeCfToken") != "", "acmeStaging": s.setting("acmeStaging") == "true",
-			"acmeAutoRenew":  s.setting("acmeAutoRenew") != "false",
-			"acmeApplyPanel": s.setting("acmeApplyPanel") != "false", "acmeApplySub": s.setting("acmeApplySub") != "false",
-			"webDomain": s.setting("webDomain"), "certFile": s.setting("certFile"), "keyFile": s.setting("keyFile"),
+			"acmeAutoRenew": s.setting("acmeAutoRenew") != "false",
+			"webDomain":     s.setting("webDomain"), "certFile": s.setting("certFile"), "keyFile": s.setting("keyFile"),
 		},
 		"panelTLS": s.setting("webCertFile") != "",
 		"subTLS":   s.setting("subCertFile") != "",
@@ -68,8 +67,9 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		var req struct {
-			Domain, Email, Method, CfToken           string
-			Staging, AutoRenew, ApplyPanel, ApplySub bool
+			Domain, Email, Method, CfToken string
+			Staging, AutoRenew             bool
+			ForLines, ApplyPanel, ApplySub bool
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			badRequest(w, err)
@@ -84,13 +84,17 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, errors.New("域名格式不对:只能是字母、数字、点与连字符,如 hk.example.com"))
 			return
 		}
-		if req.Method != "cloudflare" {
-			req.Method = "http"
+		if req.Method != acme.MethodCloudflare && req.Method != acme.MethodManual {
+			req.Method = acme.MethodHTTP
+		}
+		// 在这里就拦下,别等 CA 回一个看不懂的错:泛域名没有 http-01
+		if acme.IsWildcard(req.Domain) && req.Method == acme.MethodHTTP {
+			badRequest(w, errors.New("泛域名只能用 DNS 验证:CA 不接受 HTTP 验证。验证方式请选 Cloudflare 或手动 DNS"))
+			return
 		}
 		if err := s.saveSettings(map[string]string{
-			"acmeDomain": req.Domain, "acmeEmail": strings.TrimSpace(req.Email), "acmeMethod": req.Method,
+			"acmeEmail": strings.TrimSpace(req.Email), "acmeMethod": req.Method,
 			"acmeStaging": boolStr(req.Staging), "acmeAutoRenew": boolStr(req.AutoRenew),
-			"acmeApplyPanel": boolStr(req.ApplyPanel), "acmeApplySub": boolStr(req.ApplySub),
 		}); err != nil {
 			badRequest(w, fmt.Errorf("保存证书设置失败: %w", err))
 			return
@@ -101,7 +105,14 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err := s.run.IssueCert(); err != nil {
+		if req.Method == acme.MethodCloudflare && s.setting("acmeCfToken") == "" {
+			badRequest(w, errors.New("dns-01 需要 Cloudflare API Token"))
+			return
+		}
+		if err := s.run.IssueCert(runner.IssueRequest{
+			Domain: req.Domain, Method: req.Method, Staging: req.Staging, AutoRenew: req.AutoRenew,
+			Targets: runner.CertTargets{Lines: req.ForLines, Panel: req.ApplyPanel, Sub: req.ApplySub},
+		}); err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -112,8 +123,8 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		var req struct {
-			Hosts                string
-			ApplyPanel, ApplySub bool
+			Hosts                          string
+			ForLines, ApplyPanel, ApplySub bool
 		}
 		json.NewDecoder(r.Body).Decode(&req)
 		var hosts []string
@@ -122,7 +133,7 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 				hosts = append(hosts, h)
 			}
 		}
-		if err := s.run.SelfSign(hosts, req.ApplyPanel, req.ApplySub); err != nil {
+		if err := s.run.SelfSign(hosts, runner.CertTargets{Lines: req.ForLines, Panel: req.ApplyPanel, Sub: req.ApplySub}); err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -133,33 +144,48 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		var req struct {
-			CertFile, KeyFile    string
-			ApplyPanel, ApplySub bool
+			CertFile, KeyFile              string
+			ForLines, ApplyPanel, ApplySub bool
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			badRequest(w, err)
 			return
 		}
-		if err := s.run.UseExternalCert(req.CertFile, req.KeyFile, req.ApplyPanel, req.ApplySub); err != nil {
+		if err := s.run.UseExternalCert(req.CertFile, req.KeyFile, runner.CertTargets{Lines: req.ForLines, Panel: req.ApplyPanel, Sub: req.ApplySub}); err != nil {
 			badRequest(w, err)
 			return
 		}
 		s.audit(r, "cert", "external", req.CertFile)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
-	case "apply":
+	case "use": // 从证书库里选一张用到某个用途(抽屉里点的)
 		if r.Method != http.MethodPost {
 			break
 		}
-		var req struct{ ApplyPanel, ApplySub bool }
+		var req struct{ Name, Target string }
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			badRequest(w, err)
 			return
 		}
-		if err := s.run.ApplyCertTargets(req.ApplyPanel, req.ApplySub); err != nil {
+		if err := s.run.UseCert(req.Name, req.Target); err != nil {
 			badRequest(w, err)
 			return
 		}
-		s.audit(r, "cert", "apply", map[string]bool{"panel": req.ApplyPanel, "sub": req.ApplySub})
+		s.audit(r, "cert", "use", map[string]string{"name": req.Name, "target": req.Target})
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+	case "delete":
+		if r.Method != http.MethodPost {
+			break
+		}
+		var req struct{ Name string }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if err := s.run.DeleteCert(req.Name); err != nil {
+			badRequest(w, err)
+			return
+		}
+		s.audit(r, "cert", "delete", req.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	default:
 		http.NotFound(w, r)

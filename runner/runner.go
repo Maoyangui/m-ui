@@ -201,6 +201,7 @@ func New(dbPath string) (*Runner, error) {
 	})
 	r.ensureAdmin()
 	r.ensureLocalNode()
+	r.ensureCertStore()
 	r.ensureLedgerEpoch(false)
 	return r, nil
 }
@@ -404,6 +405,7 @@ func (r *Runner) nodeCert() render.NodeCert {
 		ServerName: r.setting("webDomain"),
 		CertPath:   certPath,
 		KeyPath:    keyPath,
+		Named:      r.namedCerts(),
 	}
 }
 

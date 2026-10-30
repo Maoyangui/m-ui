@@ -12,6 +12,7 @@ import (
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/importer"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/runner"
@@ -287,6 +288,11 @@ func runBackup(dbPath, out string) error {
 	var certs []string
 	for _, k := range []string{"certFile", "keyFile", "webCertFile", "webKeyFile", "subCertFile", "subKeyFile"} {
 		certs = append(certs, get(k))
+	}
+	var stored []model.Cert
+	db.Find(&stored) // 证书库里没在用的证书也要进备份
+	for _, c := range stored {
+		certs = append(certs, c.CertFile, c.KeyFile)
 	}
 	f, err := os.Create(out)
 	if err != nil {

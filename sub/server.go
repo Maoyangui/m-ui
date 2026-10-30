@@ -3,6 +3,7 @@ package sub
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -163,9 +164,19 @@ func (s *Server) settingInt(key string, def int) int {
 // options 每次请求时读取,便于面板改设置后即时生效。
 func (s *Server) options() Options {
 	insecure := s.insecure()
+	mode := strings.ToLower(strings.TrimSpace(s.setting("subInsecure")))
+	fixed := mode == "true" || mode == "false"
 	entries := EntriesFromNodes(s.db, s.setting("webDomain"), s.setting("publicIp"), s.setting("publicIp6"), !strings.EqualFold(s.setting("subServerAddr"), "domain"))
 	for i := range entries {
-		entries[i].Insecure = insecure
+		entries[i].Insecure, entries[i].InsecureFixed = insecure, fixed
+		// 自动模式:知道这台服务器的默认证书,就按它自己的判断(主机是正式证书、副机是自签时,以前副机的节点连不上)
+		if !fixed {
+			for _, b := range entries[i].Certs {
+				if b.Default {
+					entries[i].Insecure = b.SelfSigned
+				}
+			}
+		}
 	}
 	return Options{
 		ProfileTitle: pick(s.setting("subProfileTitle"), s.setting("subPageTitle")),
@@ -264,7 +275,7 @@ func EntriesFromNodes(db *gorm.DB, webDomain, localPublicIP, localPublicIP6 stri
 		if host == "" {
 			continue
 		}
-		e := Entry{Name: n.Name, Host: host, SNI: sniFor(domain), NodeId: n.Id, Ratio: n.Ratio, Suffix: "-" + n.Name}
+		e := Entry{Name: n.Name, Host: host, SNI: sniFor(domain), NodeId: n.Id, Ratio: n.Ratio, Suffix: "-" + n.Name, Certs: certsOf(n)}
 		out = append(out, e)
 	}
 	if len(out) == 0 {
@@ -281,6 +292,22 @@ func EntriesFromNodes(db *gorm.DB, webDomain, localPublicIP, localPublicIP6 stri
 		if out[i].Ratio > 0 && out[i].Ratio != 1 {
 			out[i].Suffix += " x" + strconv.FormatFloat(out[i].Ratio, 'f', -1, 64)
 		}
+	}
+	return out
+}
+
+// certsOf 解出服务器记录里的证书清单。
+func certsOf(n model.Node) map[string]model.CertBrief {
+	if len(n.Certs) == 0 {
+		return nil
+	}
+	var list []model.CertBrief
+	if json.Unmarshal(n.Certs, &list) != nil || len(list) == 0 {
+		return nil
+	}
+	out := make(map[string]model.CertBrief, len(list))
+	for _, b := range list {
+		out[b.Name] = b
 	}
 	return out
 }

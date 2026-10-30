@@ -23,11 +23,14 @@ type NodeCert struct {
 	ServerName string
 	CertPath   string
 	KeyPath    string
+	// Named 这台服务器的证书库:线路单独选了证书时按名字找;这台没有那张就用上面的默认证书,不让整份配置起不来。
+	Named map[string]NodeCert
 }
 
 // TLSConfig 是 Line.Tls 的结构。mode 为空时按协议取默认。
 type TLSConfig struct {
 	Mode        string `json:"mode"` // cert | reality | none
+	Cert        string `json:"cert,omitempty"` // cert 模式下单独选的证书(证书库里的名字);空 = 服务器的默认证书
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Reality     struct {
 		PrivateKey      string   `json:"private_key"`
@@ -374,9 +377,13 @@ func inboundBase(line model.Line, cert NodeCert) (map[string]interface{}, error)
 	tlsConf := ParseTLS(line)
 	switch tlsConf.Mode {
 	case "cert":
+		use := cert
+		if named, ok := cert.Named[tlsConf.Cert]; ok && tlsConf.Cert != "" {
+			use = named
+		}
 		inbound["tls"] = map[string]interface{}{
-			"enabled": true, "server_name": cert.ServerName,
-			"certificate_path": cert.CertPath, "key_path": cert.KeyPath,
+			"enabled": true, "server_name": use.ServerName,
+			"certificate_path": use.CertPath, "key_path": use.KeyPath,
 		}
 	case "reality":
 		r := tlsConf.Reality

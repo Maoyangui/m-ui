@@ -2,7 +2,6 @@ package runner
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -14,7 +13,6 @@ import (
 	"github.com/Maoyangui/m-ui/acme"
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database/model"
-	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -28,6 +26,13 @@ type certState struct {
 	lastErr  string
 	lastOK   int64
 	lastTime int64
+	txt      []acme.TXTRecord // 手动 DNS:正在等用户加的记录
+}
+
+func (c *certState) setTXT(recs []acme.TXTRecord) {
+	c.mu.Lock()
+	c.txt = recs
+	c.mu.Unlock()
 }
 
 func (c *certState) logf(format string, a ...interface{}) {
@@ -69,6 +74,11 @@ func saveSettings(db *gorm.DB, values map[string]string) error {
 	return nil
 }
 
+// certFileName 域名变成文件名:* 换成 _(*.example.com → _.example.com)。
+func certFileName(domain string) string {
+	return strings.NewReplacer("/", "", "\\", "", ":", "", "..", "", "*", "_").Replace(strings.TrimSpace(domain))
+}
+
 // certPaths 返回数据面证书路径(未设置时给出默认固定路径)。
 func (r *Runner) certPaths(domain string) (string, string) {
 	c, k := r.setting("certFile"), r.setting("keyFile")
@@ -80,21 +90,11 @@ func (r *Runner) certPaths(domain string) (string, string) {
 
 // defaultCertPaths 面板自己存证书的固定路径(数据目录下 cert/<域名>.crt / .key)。
 func (r *Runner) defaultCertPaths(domain string) (string, string) {
-	name := strings.NewReplacer("/", "", "\\", "", ":", "", "..", "").Replace(strings.TrimSpace(domain))
+	name := certFileName(domain)
 	if name == "" {
 		name = "main"
 	}
 	return filepath.Join(r.DataDir(), "cert", name+".crt"), filepath.Join(r.DataDir(), "cert", name+".key")
-}
-
-// ownCertPaths 面板自己写证书(签发、自签)时写到哪:当前来源是「服务器上已有的证书」时,设置里的路径是
-// certbot / nginx / 商业证书的原件,不能往里写 —— 以前签发与自签都照着 certFile 写回去,把原件(连同 certbot
-// live 目录里的软链接)替换掉。这时改写面板自己的固定路径,写完来源随之换成签发 / 自签。
-func (r *Runner) ownCertPaths(domain string) (string, string) {
-	if r.CertSource() == "external" {
-		return r.defaultCertPaths(domain)
-	}
-	return r.certPaths(domain)
 }
 
 // CertInfo 返回当前数据面证书信息。
@@ -109,56 +109,83 @@ func (r *Runner) CertStatus() map[string]interface{} {
 	defer r.cert.mu.Unlock()
 	return map[string]interface{}{
 		"running": r.cert.running, "log": append([]string(nil), r.cert.log...),
-		"lastError": r.cert.lastErr, "lastOk": r.cert.lastOK, "lastTime": r.cert.lastTime,
+		"lastError": r.cert.lastErr, "lastOk": r.cert.lastOK, "lastTime": r.cert.lastTime, "txt": r.cert.txt,
 	}
 }
 
-// IssueCert 按设置发起一次签发(异步),进度经 CertStatus 查询。
-func (r *Runner) IssueCert() error {
-	r.cert.mu.Lock()
-	if r.cert.running {
-		r.cert.mu.Unlock()
-		return errors.New("已有签发任务在进行")
+// IssueRequest 一次签发:域名与验证方式,签好之后顶替哪些用途。
+type IssueRequest struct {
+	Domain, Method      string
+	Staging, AutoRenew  bool
+	Targets             CertTargets
+	directoryURL        string // 测试用
+}
+
+// IssueCert 发起一次签发(异步),进度经 CertStatus 查询。
+func (r *Runner) IssueCert(req IssueRequest) error {
+	if err := r.startIssue(); err != nil {
+		return err
 	}
-	r.cert.running, r.cert.log, r.cert.lastErr = true, nil, ""
-	r.cert.mu.Unlock()
-	go func() {
-		err := r.issueCert()
-		r.cert.mu.Lock()
-		r.cert.running = false
-		r.cert.lastTime = time.Now().Unix()
-		if err != nil {
-			r.cert.lastErr = err.Error()
-		} else {
-			r.cert.lastOK = time.Now().Unix()
-		}
-		r.cert.mu.Unlock()
-	}()
+	go r.finishIssue(req)
 	return nil
 }
 
-func (r *Runner) issueCert() error {
+func (r *Runner) startIssue() error {
+	r.cert.mu.Lock()
+	defer r.cert.mu.Unlock()
+	if r.cert.running {
+		return errors.New("已有签发任务在进行")
+	}
+	r.cert.running, r.cert.log, r.cert.lastErr, r.cert.txt = true, nil, "", nil
+	return nil
+}
+
+func (r *Runner) finishIssue(req IssueRequest) error {
+	err := r.issueCert(req)
+	r.cert.mu.Lock()
+	r.cert.running, r.cert.txt = false, nil
+	r.cert.lastTime = time.Now().Unix()
+	if err != nil {
+		r.cert.lastErr = err.Error()
+	} else {
+		r.cert.lastOK = time.Now().Unix()
+	}
+	r.cert.mu.Unlock()
+	return err
+}
+
+// runIssue 同步签发一张(自动续期用,一张张来)。
+func (r *Runner) runIssue(req IssueRequest) error {
+	if err := r.startIssue(); err != nil {
+		return err
+	}
+	return r.finishIssue(req)
+}
+
+func (r *Runner) issueCert(req IssueRequest) error {
 	r.certOpMu.Lock()
 	defer r.certOpMu.Unlock()
-	domain := strings.TrimSpace(r.setting("acmeDomain"))
-	if domain == "" {
-		domain = strings.TrimSpace(r.setting("webDomain"))
-	}
+	domain := strings.ToLower(strings.TrimSpace(req.Domain))
 	if domain == "" {
 		err := errors.New("未填写域名")
 		r.cert.logf("%v", err)
 		return err
 	}
-	certFile, keyFile := r.ownCertPaths(domain)
+	if req.Method == "" {
+		req.Method = acme.MethodHTTP
+	}
+	certFile, keyFile := r.storedPaths(domain)
 	cfg := acme.Config{
-		Email: r.setting("acmeEmail"), Domain: domain, Method: r.setting("acmeMethod"),
-		CFToken: r.setting("acmeCfToken"), Staging: strings.EqualFold(r.setting("acmeStaging"), "true"),
+		Email: r.setting("acmeEmail"), Domain: domain, Method: req.Method,
+		CFToken: r.setting("acmeCfToken"), Staging: req.Staging,
 		CertPath: certFile, KeyPath: keyFile, AccountKey: r.setting("acmeAccountKey"), Logf: r.cert.logf,
+		OnTXT: r.cert.setTXT, DirectoryURL: req.directoryURL,
 	}
-	if cfg.Method == "" {
-		cfg.Method = "http"
+	wait := 8 * time.Minute
+	if req.Method == acme.MethodManual {
+		wait = 30 * time.Minute // 要等人去 DNS 服务商加记录
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
 	res, err := acme.Issue(ctx, cfg)
 	if res.AccountKey != "" && res.AccountKey != cfg.AccountKey {
@@ -171,13 +198,15 @@ func (r *Runner) issueCert() error {
 		r.notifier.Event("tgOnCert", "🔴 <b>证书签发失败</b>:"+notify.Esc(domain)+"\n"+notify.Esc(err.Error()))
 		return err
 	}
-	if err := r.afterCertChange(certFile, keyFile, domain,
-		!strings.EqualFold(r.setting("acmeApplyPanel"), "false"),
-		!strings.EqualFold(r.setting("acmeApplySub"), "false"),
-		map[string]string{
-			"certFile": certFile, "keyFile": keyFile, "acmeDomain": domain, "certSource": "acme",
-			"acmeApplyPanel": r.setting("acmeApplyPanel"), "acmeApplySub": r.setting("acmeApplySub"),
-		}); err != nil {
+	if err := r.saveCertRow(model.Cert{Name: domain, Source: "acme", CertFile: certFile, KeyFile: keyFile,
+		Method: req.Method, AutoRenew: req.AutoRenew && req.Method != acme.MethodManual, Staging: req.Staging}); err != nil {
+		return fmt.Errorf("证书已写入 %s,记进证书库失败: %w", certFile, err)
+	}
+	values := map[string]string{"acmeDomain": domain}
+	if req.Targets.Lines {
+		values["certSource"] = "acme"
+	}
+	if err := r.afterCertChange(certFile, keyFile, domain, req.Targets, values); err != nil {
 		return err
 	}
 	r.notifier.Event("tgOnCert", fmt.Sprintf("🟢 <b>证书已签发</b>:%s\n到期 %s", notify.Esc(domain), res.NotAfter.Format("2006-01-02")))
@@ -202,19 +231,22 @@ func (r *Runner) CertSource() string {
 	return ""
 }
 
-// afterCertChange 证书变更后:线路入站(数据面)始终换用新证书;面板与订阅按 applyPanel / applySub 开关,
-// 取消勾选会清掉对应设置(订阅立即重启生效,面板监听器需重启 m-ui)。
-func (r *Runner) afterCertChange(certFile, keyFile, domain string, applyPanel, applySub bool, values map[string]string) error {
-	wantSubCert, wantSubKey := "", ""
-	if applySub {
+// afterCertChange 证书写好之后:targets 勾了的用途换成它(订阅立即重启生效,面板监听器需重启 m-ui),没勾的不动。
+// 这张证书本来就在某个用途上的(续期),路径没变,不用换。
+func (r *Runner) afterCertChange(certFile, keyFile, domain string, targets CertTargets, values map[string]string) error {
+	wantSubCert, wantSubKey := r.setting("subCertFile"), r.setting("subKeyFile")
+	if targets.Sub {
 		wantSubCert, wantSubKey = certFile, keyFile
 	}
-	wantWebCert, wantWebKey := "", ""
-	if applyPanel {
+	wantWebCert, wantWebKey := r.setting("webCertFile"), r.setting("webKeyFile")
+	if targets.Panel {
 		wantWebCert, wantWebKey = certFile, keyFile
 	}
 	if values == nil {
 		values = map[string]string{}
+	}
+	if targets.Lines || r.setting("certFile") == "" { // 还没有默认证书时,第一张就是默认的
+		values["certFile"], values["keyFile"] = certFile, keyFile
 	}
 	var restartSub, webChanged bool
 	if err := r.db.Transaction(func(tx *gorm.DB) error {
@@ -226,7 +258,8 @@ func (r *Runner) afterCertChange(certFile, keyFile, domain string, applyPanel, a
 		for _, row := range rows {
 			current[row.Key] = row.Value
 		}
-		if domain != "" && current["webDomain"] == "" {
+		// 泛域名不能当访问地址(也进不了 SNI):面板域名只从具体域名上取
+		if domain != "" && !acme.IsWildcard(domain) && current["webDomain"] == "" {
 			values["webDomain"] = domain
 		}
 		restartSub = current["subCertFile"] != wantSubCert || current["subKeyFile"] != wantSubKey || current["subRestartPending"] == "true"
@@ -261,57 +294,22 @@ func (r *Runner) afterCertChange(certFile, keyFile, domain string, applyPanel, a
 		}
 	}
 
-	// 证书文件内容变了但路径没变:sing-box 监视着 certificate_path / key_path,写入后自动热加载,
-	// 不用重启数据面(以前每次续期都强制重启,所有人掉线一次);路径变了(换来源)才整体重载。
-	if r.appliedUsesCert(certFile, keyFile) {
-		if err := r.ReloadAll(); err != nil { // 域名(server_name)之类变了时它自己会重启,否则无操作
-			r.cert.logf("数据面重载失败: %v", err)
-			applyErr = errors.Join(applyErr, fmt.Errorf("证书设置已保存，数据面重载失败: %w", err))
-		} else {
-			r.cert.logf("线路入站证书已由数据面自动热加载(路径不变,不重启)")
-		}
-		return applyErr
-	}
-	if err := r.ReloadAllForce(); err != nil {
+	r.syncLocalCerts()
+	// 证书文件内容变了但路径没变:sing-box 监视着 certificate_path / key_path,写入后自动热加载,不用重启数据面
+	// (以前每次续期都强制重启,所有人掉线一次)。ReloadAll 按渲染结果比:路径或域名真变了才重启,否则无操作。
+	if err := r.ReloadAll(); err != nil {
 		r.cert.logf("数据面重载失败: %v", err)
 		applyErr = errors.Join(applyErr, fmt.Errorf("证书设置已保存，数据面重载失败: %w", err))
 	} else {
-		r.cert.logf("线路入站已用新证书重载")
+		r.cert.logf("证书已生效(路径没变的由数据面自动热加载,不重启)")
 	}
 	return applyErr
-}
-
-// appliedUsesCert 当前生效的配置里,入站是否已经引用这两个证书文件路径。
-func (r *Runner) appliedUsesCert(certFile, keyFile string) bool {
-	r.mu.Lock()
-	raw := r.appliedRaw
-	r.mu.Unlock()
-	if raw == nil {
-		return false
-	}
-	var cfg struct {
-		Inbounds []struct {
-			TLS struct {
-				Cert string `json:"certificate_path"`
-				Key  string `json:"key_path"`
-			} `json:"tls"`
-		} `json:"inbounds"`
-	}
-	if json.Unmarshal(raw, &cfg) != nil {
-		return false
-	}
-	for _, ib := range cfg.Inbounds {
-		if ib.TLS.Cert != "" && (ib.TLS.Cert != certFile || ib.TLS.Key != keyFile) {
-			return false
-		}
-	}
-	return true
 }
 
 // SelfSign 生成自签证书(无域名 / 纯 IP 场景)。默认只给线路入站用:
 // 自签证书不被系统信任,面板与订阅走 HTTPS 会让浏览器和客户端报错;
 // 订阅链接会自动带"允许不安全",客户端打开该开关即可连上。
-func (r *Runner) SelfSign(hosts []string, applyPanel, applySub bool) error {
+func (r *Runner) SelfSign(hosts []string, targets CertTargets) error {
 	r.certOpMu.Lock()
 	defer r.certOpMu.Unlock()
 	if len(hosts) == 0 { // 无域名场景不该逼用户填东西:自动用本机探测到的公网 IP / 入口地址
@@ -320,14 +318,19 @@ func (r *Runner) SelfSign(hosts []string, applyPanel, applySub bool) error {
 	if len(hosts) == 0 {
 		return errors.New("没有探测到本机公网 IP,请手动填写服务器 IP")
 	}
-	certFile, keyFile := r.ownCertPaths(r.setting("webDomain"))
+	certFile, keyFile := r.storedPaths(SelfSignedName)
 	if err := certutil.GenerateSelfSigned(hosts, certFile, keyFile, 3650); err != nil {
 		return err
 	}
+	if err := r.saveCertRow(model.Cert{Name: SelfSignedName, Source: "selfsign", CertFile: certFile, KeyFile: keyFile}); err != nil {
+		return err
+	}
 	r.cert.logf("自签证书已生成: %s,包含地址 %s(用于线路入站;订阅里每个节点会自动带允许不安全标记)", certFile, strings.Join(hosts, ", "))
-	return r.afterCertChange(certFile, keyFile, "", applyPanel, applySub,
-		map[string]string{"certFile": certFile, "keyFile": keyFile, "certSource": "selfsign",
-			"acmeApplyPanel": boolText(applyPanel), "acmeApplySub": boolText(applySub)})
+	values := map[string]string{}
+	if targets.Lines {
+		values["certSource"] = "selfsign"
+	}
+	return r.afterCertChange(certFile, keyFile, "", targets, values)
 }
 
 // autoCertHosts 自签证书默认包含的地址:本机公网 IP(v4/v6)、本机节点手填的连接地址、已设置的域名。
@@ -359,7 +362,7 @@ func (r *Runner) autoCertHosts() []string {
 
 // UseExternalCert 使用服务器上已有的证书(如 certbot / nginx / 商业证书):只记录路径,不复制文件,
 // 证书续期后覆盖原文件即可,面板与订阅会自动换用(线路入站在下次重载时生效)。
-func (r *Runner) UseExternalCert(certFile, keyFile string, applyPanel, applySub bool) error {
+func (r *Runner) UseExternalCert(certFile, keyFile string, targets CertTargets) error {
 	r.certOpMu.Lock()
 	defer r.certOpMu.Unlock()
 	certFile, keyFile = strings.TrimSpace(certFile), strings.TrimSpace(keyFile)
@@ -377,29 +380,19 @@ func (r *Runner) UseExternalCert(certFile, keyFile string, applyPanel, applySub 
 	if len(info.DNSNames) > 0 {
 		domain = info.DNSNames[0]
 	}
-	r.cert.logf("已使用外部证书 %s(%s,剩余 %d 天)", certFile, info.Subject, info.DaysLeft)
-	return r.afterCertChange(certFile, keyFile, domain, applyPanel, applySub,
-		map[string]string{"certFile": certFile, "keyFile": keyFile, "certSource": "external",
-			"acmeApplyPanel": boolText(applyPanel), "acmeApplySub": boolText(applySub)})
-}
-
-// ApplyCertTargets 只改套用目标(面板 / 订阅 HTTPS),不换证书。
-func (r *Runner) ApplyCertTargets(applyPanel, applySub bool) error {
-	r.certOpMu.Lock()
-	defer r.certOpMu.Unlock()
-	certFile, keyFile := r.DataPlaneCert()
-	if (applyPanel || applySub) && !acme.Info(certFile).Exists {
-		return errors.New("当前没有可用证书,请先签发、自签或填写已有证书")
+	name := certNameOf(info, certFile)
+	if info.SelfSigned { // 用户自己的自签文件:不能和面板生成的那张抢 self-signed 这个名字
+		name = strings.ToLower(strings.TrimSuffix(filepath.Base(certFile), filepath.Ext(certFile)))
 	}
-	return r.afterCertChange(certFile, keyFile, "", applyPanel, applySub,
-		map[string]string{"acmeApplyPanel": boolText(applyPanel), "acmeApplySub": boolText(applySub)})
-}
-
-func boolText(b bool) string {
-	if b {
-		return "true"
+	if err := r.saveCertRow(model.Cert{Name: name, Source: "external", CertFile: certFile, KeyFile: keyFile}); err != nil {
+		return err
 	}
-	return "false"
+	r.cert.logf("已添加服务器上的证书 %s(%s,剩余 %d 天)", certFile, info.Subject, info.DaysLeft)
+	values := map[string]string{}
+	if targets.Lines {
+		values["certSource"] = "external"
+	}
+	return r.afterCertChange(certFile, keyFile, domain, targets, values)
 }
 
 // RestartSub 用当前设置重启订阅服务(端口/证书变更后)。
@@ -414,32 +407,16 @@ func (r *Runner) RestartSub() error {
 	return r.subSrv.Start()
 }
 
-// certLoop 每天检查一次,到期前 30 天自动续期。
+// certLoop 每 12 小时查一次证书库,到期前 30 天的自动续期(只续自己签发的,服务器上已有的证书和自签不管)。
 func (r *Runner) certLoop(stop <-chan struct{}) {
 	t := time.NewTicker(12 * time.Hour)
 	defer t.Stop()
 	for {
 		select {
 		case <-t.C:
-			r.maybeRenew()
+			r.renewDue()
 		case <-stop:
 			return
 		}
-	}
-}
-
-func (r *Runner) maybeRenew() {
-	// 只续自己签发的:换成服务器上已有的证书或自签后 acmeDomain 还留着,以前到了 30 天照样去签发(并写回外部证书的原件)
-	if strings.EqualFold(r.setting("acmeAutoRenew"), "false") || r.setting("acmeDomain") == "" || r.CertSource() != "acme" {
-		return
-	}
-	info := r.CertInfo()
-	if !info.Exists || info.SelfSigned || info.DaysLeft > 30 {
-		return
-	}
-	if r.notifier.Once("cert-renew", 20*time.Hour) {
-		logger.Info("证书剩余 ", info.DaysLeft, " 天,自动续期")
-		r.cert.logf("自动续期:剩余 %d 天", info.DaysLeft)
-		r.IssueCert()
 	}
 }

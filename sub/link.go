@@ -24,6 +24,66 @@ type Entry struct {
 	Insecure bool    // 服务端为自签证书:客户端需允许不安全
 	NodeId   uint    // 对应 nodes.id(0 = 不按服务器过滤线路)
 	Ratio    float64 // 流量倍率(仅展示)
+	// Certs 这台服务器有哪些证书(证书名 → 清单);老版本副机不报,为空。
+	Certs map[string]model.CertBrief
+	// InsecureFixed 设置里强制了"允许不安全"开或关:不再按证书判断。
+	InsecureFixed bool
+}
+
+// certAddr 线路单独选了证书:这台服务器有那张证书,SNI 与"允许不安全"就跟着它走;没有那张证书的服务器用的是
+// 自己的默认证书,地址不动。
+func certAddr(a addr, line model.Line, e Entry) addr {
+	tls := render.ParseTLS(line)
+	if tls.Mode != "cert" || tls.Cert == "" {
+		return a
+	}
+	b, ok := e.Certs[tls.Cert]
+	if !ok {
+		return a
+	}
+	a.sni = certSNI(b, a.sni)
+	if !e.InsecureFixed {
+		a.insecure = b.SelfSigned
+	}
+	return a
+}
+
+// certSNI 用这张证书时客户端该带的 SNI:原来的 SNI 证书能覆盖就不动;否则用证书的第一个具体域名;
+// 只有泛域名的就在它下面起一个(泛域名下任何一级都验得过)。
+func certSNI(b model.CertBrief, cur string) string {
+	if b.SelfSigned {
+		return cur
+	}
+	for _, d := range b.Domains {
+		if domainCovers(d, cur) {
+			return cur
+		}
+	}
+	for _, d := range b.Domains {
+		if !strings.HasPrefix(d, "*.") {
+			return d
+		}
+	}
+	if len(b.Domains) > 0 {
+		return "www." + strings.TrimPrefix(b.Domains[0], "*.")
+	}
+	return cur
+}
+
+// domainCovers 证书上的名字 pattern 能不能验过 host(泛域名只管一级)。
+func domainCovers(pattern, host string) bool {
+	if host == "" {
+		return false
+	}
+	pattern, host = strings.ToLower(pattern), strings.ToLower(host)
+	if pattern == host {
+		return true
+	}
+	if base, ok := strings.CutPrefix(pattern, "*."); ok {
+		i := strings.IndexByte(host, '.')
+		return i > 0 && host[i+1:] == base
+	}
+	return false
 }
 
 // addr 是一条线路的一个对外地址(展开 Line.Addrs 或回落到入口)。
@@ -76,7 +136,7 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 		if e.NodeId != 0 && len(allowed) > 0 && !allowed[e.NodeId] {
 			continue // 用户在这条线路上只拿了别的服务器
 		}
-		out = append(out, addr{server: e.Host, port: line.Port, sni: e.SNI, remark: e.Suffix, insecure: e.Insecure})
+		out = append(out, certAddr(addr{server: e.Host, port: line.Port, sni: e.SNI, remark: e.Suffix, insecure: e.Insecure}, line, e))
 	}
 	return out
 }

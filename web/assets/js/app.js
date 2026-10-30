@@ -362,7 +362,8 @@ document.getElementById('drawer-close').addEventListener('click', closeDrawer);
 document.addEventListener('keydown', e => {
   // Esc 关闭弹窗/抽屉;Ctrl/⌘+Enter 提交弹窗;"/" 聚焦当前页搜索框
   if (e.key === 'Escape') {
-    if (!modal.hidden) cancelModal();
+    if (drawerOpen() && document.getElementById('drawer').classList.contains('over')) closeDrawer(); // 盖在弹窗上的抽屉先关
+    else if (!modal.hidden) cancelModal();
     else if (drawerOpen()) closeDrawer();
     return;
   }

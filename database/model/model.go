@@ -60,6 +60,28 @@ type Line struct {
 	Sort       int             `json:"sort"`
 }
 
+// Cert 这台服务器证书库里的一张证书。各机各管各的,不随快照同步(见 runner/certstore.go)。
+type Cert struct {
+	Id        uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name      string `json:"name" gorm:"uniqueIndex"` // 域名(含 *.example.com)或 self-signed;线路按它选证书
+	Source    string `json:"source"`                 // acme | selfsign | external
+	CertFile  string `json:"certFile"`
+	KeyFile   string `json:"keyFile"`
+	Method    string `json:"method"`    // ACME 的验证方式:http | cloudflare | manual
+	AutoRenew bool   `json:"autoRenew"` // 到期前 30 天自动续期(手动 DNS 的不能)
+	Staging   bool   `json:"staging"`
+	CreatedAt int64  `json:"createdAt"`
+}
+
+// CertBrief 一台服务器有哪张证书(副机随报告上来,存在 Node.Certs,不含私钥与路径)。
+type CertBrief struct {
+	Name       string   `json:"name"`
+	Domains    []string `json:"domains,omitempty"`
+	SelfSigned bool     `json:"selfSigned,omitempty"`
+	NotAfter   int64    `json:"notAfter"`
+	Default    bool     `json:"default,omitempty"` // 线路默认证书
+}
+
 // Node 入口服务器。IsLocal 标记 Hub 所在机;副机通过 ApiUrl+Token 管理。
 type Node struct {
 	Id       uint   `json:"id" gorm:"primaryKey;autoIncrement"`
@@ -83,6 +105,8 @@ type Node struct {
 	Ratio float64 `json:"ratio" gorm:"default:1"`
 	// CertFP 勾了"跳过证书校验"时记住的副机证书 SHA-256 指纹(首次连接写入),之后指纹变了就拒绝连接;空 = 还没记。
 	CertFP string `json:"certFp,omitempty"`
+	// Certs 这台服务器证书库的清单 []CertBrief(本机由 runner 写入,副机随报告上报)。线路编辑框与订阅的 SNI 用它。
+	Certs json.RawMessage `json:"certs,omitempty"`
 }
 
 // User 订阅用户。配额/流量为两台服务器聚合值,判定只在主端进行。
@@ -390,6 +414,6 @@ func All() []interface{} {
 		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
-		&ReachCheck{},
+		&ReachCheck{}, &Cert{},
 	}
 }

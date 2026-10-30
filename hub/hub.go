@@ -540,6 +540,7 @@ type Report struct {
 	OnlineLinesByIP map[string]map[string][]string `json:"onlineLinesByIp,omitempty"` // 用户 → 源 IP → 线路名
 	OnlineLines     []string                       `json:"onlineLines"`
 	CertDays        int                            `json:"certDays"`
+	Certs           []model.CertBrief              `json:"certs,omitempty"`       // 这台的证书库清单(老版本副机不报)
 	PublicIP        string                         `json:"publicIp"`              // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
 	PublicIP6       string                         `json:"publicIp6"`             // 副机探测到的公网 IPv6(没有为空;老版本副机不带,也是空),主机存入 nodes.public_ip6
 	Conns           []RecentConn                   `json:"conns,omitempty"`       // 最近入站连接,主机概览汇总展示
@@ -547,6 +548,25 @@ type Report struct {
 	Upstreams       []UpstreamHealth               `json:"upstreams,omitempty"`   // 本机线路真正用到的那些上游的巡检结果
 	Reload          *ReloadState                   `json:"reload,omitempty"`      // 副机最近一次重载的结果,失败要让主机面板看见
 	LedgerEpoch     string                         `json:"ledgerEpoch,omitempty"` // 副机流量账本的纪元(见 LedgerEpochKey);老副机不报
+}
+
+// saveNodeCerts 记下副机报上来的证书清单:线路编辑框与订阅的 SNI 用它。老版本副机不报(nil)就不动;
+// 没变不写库,否则每 5 秒写一次,快照修订号也跟着变。
+func (h *Hub) saveNodeCerts(n model.Node, certs []model.CertBrief) {
+	if certs == nil {
+		return
+	}
+	b, err := json.Marshal(certs)
+	if err != nil {
+		return
+	}
+	var cur model.Node
+	if h.d.DB.Select("id, certs").First(&cur, n.Id).Error != nil || bytes.Equal(cur.Certs, b) {
+		return
+	}
+	if err := h.d.DB.Model(&model.Node{}).Where("id = ?", n.Id).Update("certs", json.RawMessage(b)).Error; err != nil {
+		logger.Warning("记录副机 ", n.Name, " 的证书清单失败: ", err)
+	}
 }
 
 // ReloadState 一台机器最近一次数据面重载的结果。
@@ -1385,6 +1405,7 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 	}
 	if rep != nil {
 		st.Version, st.Hostname, st.CoreRunning, st.Uptime, st.Revision, st.CertDays = rep.Version, rep.Hostname, rep.CoreRunning, rep.Uptime, rep.Revision, rep.CertDays
+		h.saveNodeCerts(n, rep.Certs)
 		// hubRevision 在副机 ApplySnapshot 的事务里就写了,数据面有没有真的应用成功要看 ReloadPending。
 		// 不看它,一台新配置起不来、正在跑回滚旧配置的副机会显示"在线 · 已同步",管理员看不出任何异常。
 		st.Synced = rep.Revision == h.revision && !rep.ReloadPending

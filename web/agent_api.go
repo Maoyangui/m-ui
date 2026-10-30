@@ -362,7 +362,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	rep := hub.Report{
 		Version: Version, Hostname: host, CoreRunning: s.run.CoreRunning(), Uptime: s.run.Uptime(),
 		Revision: s.setting("hubRevision"), ReloadPending: strings.TrimSpace(s.setting("hubReloadPending")) != "",
-		Onlines: map[string][]string{}, CertDays: s.run.CertInfo().DaysLeft,
+		Onlines: map[string][]string{}, CertDays: s.run.CertInfo().DaysLeft, Certs: s.run.CertBriefs(),
 		PublicIP:    s.setting("publicIp"),
 		PublicIP6:   s.setting("publicIp6"),
 		Conns:       s.recentConns(50),

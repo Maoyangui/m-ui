@@ -4,6 +4,19 @@
 import { getLang } from './i18n.js';
 
 const EN = /*BEGIN*/{
+"证书文件读不出来:%w": "Cannot read the certificate file: %w",
+"和 CA 通信超时:连不上 CA 或被限流了,过一会儿再试": "Timed out talking to the CA: it is unreachable or rate limiting. Try again later",
+"泛域名只能用 DNS 验证:CA 不接受 HTTP 验证。验证方式请选 Cloudflare 或手动 DNS": "Wildcards need DNS validation; the CA does not accept HTTP validation. Choose Cloudflare or manual DNS",
+"没等到 TXT 记录生效(%s):确认记录加对了再重新申请": "The TXT records never showed up (%s). Check them and apply again",
+"等待超时": "Timed out",
+"证书库里没有这张证书": "This certificate is not in the store",
+"线路默认证书不能为空": "The default certificate for lines cannot be empty",
+"未知的证书用途 %q": "Unknown certificate purpose %q",
+"这张证书是线路默认证书,先换一张再删": "This is the default certificate for lines. Change it before deleting",
+"面板 HTTPS 正在用这张证书,先换一张再删": "The panel HTTPS uses this certificate. Change it before deleting",
+"订阅 HTTPS 正在用这张证书,先换一张再删": "The subscription HTTPS uses this certificate. Change it before deleting",
+"线路「%s」单独选了这张证书,先改掉再删": "Line \"%s\" picked this certificate. Change it before deleting",
+"证书已写入 %s,记进证书库失败: %w": "Certificate written to %s, but adding it to the store failed: %w",
 "Clash 模板不是合法的 YAML: %w": "The Clash template is not valid YAML: %w",
 "Clash 模板太长了,上限 128 KB": "The Clash template is too long (128 KB max)",
 "Clash 模板要是一份 YAML 配置(键值对)": "The Clash template must be a YAML config (key/value pairs)",
@@ -168,7 +181,6 @@ const EN = /*BEGIN*/{
 "已达到用户数上限 %w,不能再建": "User limit %w reached; can't create more",
 "延期天数需大于 0": "Extension days must be greater than 0",
 "开始 / 结束时刻要写成 HH:MM": "Start / end time must be HH:MM",
-"当前没有可用证书,请先签发、自签或填写已有证书": "No certificate available; issue one, self-sign, or enter an existing certificate first",
 "当前环境不支持一键更新(需要在 Linux 上以 root 运行),请用安装脚本更新": "One-click update isn't supported here (needs Linux and root); update with the install script",
 "快照缺少修订号": "Snapshot is missing the revision",
 "打开旧面板数据库: %w": "Opening the old-panel database: %w",

@@ -29,18 +29,42 @@ const (
 	LetsEncryptStaging = "https://acme-staging-v02.api.letsencrypt.org/directory"
 )
 
+// 验证方式。泛域名只能用 DNS 验证(CA 不给 http-01)。
+const (
+	MethodHTTP       = "http"       // 临时监听 80 端口
+	MethodCloudflare = "cloudflare" // 经 Cloudflare API 自动写 TXT
+	MethodManual     = "manual"     // 用户自己到 DNS 服务商加 TXT,这边等它生效
+)
+
+// TXTRecord 一条要加的 dns-01 记录。
+type TXTRecord struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// IsWildcard 是不是泛域名(*.example.com)。
+func IsWildcard(domain string) bool { return strings.HasPrefix(domain, "*.") }
+
+// BaseDomain 去掉泛域名前缀:*.example.com → example.com。
+func BaseDomain(domain string) string { return strings.TrimPrefix(domain, "*.") }
+
 type Config struct {
 	Email      string
-	Domain     string
-	Method     string // http | cloudflare
+	Domain     string // 可以是 *.example.com:连同 example.com 一起签(泛域名本身不含裸域名)
+	Method     string // http | cloudflare | manual
 	CFToken    string
 	Staging    bool
 	CertPath   string
 	KeyPath    string
 	AccountKey string // PEM,空则新建
 	Logf       func(format string, a ...interface{})
+	// OnTXT 手动 DNS 验证时,把要加的记录交给调用方显示给用户(之后等公共 DNS 能查到才继续)。
+	OnTXT func([]TXTRecord)
 	// 可替换的目录地址(测试用)
 	DirectoryURL string
+	// 可替换的 Cloudflare API 地址与 TXT 可见性检查(测试用)
+	CFBaseURL string
+	TXTLookup func(ctx context.Context, name, want string) bool
 }
 
 type Result struct {
@@ -65,8 +89,14 @@ func Issue(ctx context.Context, cfg Config) (Result, error) {
 	if net.ParseIP(cfg.Domain) != nil {
 		return res, errors.New("签发失败:Let's Encrypt 不给 IP 签发证书,请用域名或自签")
 	}
-	if cfg.Method == "cloudflare" && strings.TrimSpace(cfg.CFToken) == "" {
+	if cfg.Method == "" {
+		cfg.Method = MethodHTTP
+	}
+	if cfg.Method == MethodCloudflare && strings.TrimSpace(cfg.CFToken) == "" {
 		return res, errors.New("dns-01 需要 Cloudflare API Token")
+	}
+	if IsWildcard(cfg.Domain) && cfg.Method == MethodHTTP {
+		return res, errors.New("泛域名只能用 DNS 验证:CA 不接受 HTTP 验证。验证方式请选 Cloudflare 或手动 DNS")
 	}
 	if cfg.CertPath == "" || cfg.KeyPath == "" {
 		return res, errors.New("证书输出路径为空")
@@ -92,30 +122,42 @@ func Issue(ctx context.Context, cfg Config) (Result, error) {
 	if cfg.Email != "" {
 		acct.Contact = []string{"mailto:" + cfg.Email}
 	}
-	if _, err := client.Register(ctx, acct, acme.AcceptTOS); err != nil && !errors.Is(err, acme.ErrAccountAlreadyExists) {
-		return res, fmt.Errorf("注册账户: %w", err)
+	sctx, cancel := context.WithTimeout(ctx, stepTimeout)
+	_, err = client.Register(sctx, acct, acme.AcceptTOS)
+	cancel()
+	if err != nil && !errors.Is(err, acme.ErrAccountAlreadyExists) {
+		return res, stepErr(fmt.Errorf("注册账户: %w", err))
 	}
 
-	cfg.logf("创建订单: %s", cfg.Domain)
-	order, err := client.AuthorizeOrder(ctx, acme.DomainIDs(cfg.Domain))
+	names := []string{cfg.Domain}
+	if IsWildcard(cfg.Domain) {
+		names = append(names, BaseDomain(cfg.Domain)) // *.example.com 不含 example.com 本身,一起签,省得再签一张
+	}
+	cfg.logf("创建订单: %s", strings.Join(names, " + "))
+	sctx, cancel = context.WithTimeout(ctx, stepTimeout)
+	order, err := client.AuthorizeOrder(sctx, acme.DomainIDs(names...))
+	cancel()
 	if err != nil {
-		return res, fmt.Errorf("创建订单: %w", err)
+		return res, stepErr(fmt.Errorf("创建订单: %w", err))
 	}
 
+	want := "http-01"
+	if cfg.Method != MethodHTTP {
+		want = "dns-01"
+	}
+	var pending []pendingAuthz
 	for _, authzURL := range order.AuthzURLs {
-		authz, err := client.GetAuthorization(ctx, authzURL)
+		sctx, cancel = context.WithTimeout(ctx, stepTimeout)
+		authz, err := client.GetAuthorization(sctx, authzURL)
+		cancel()
 		if err != nil {
-			return res, fmt.Errorf("读取授权: %w", err)
+			return res, stepErr(fmt.Errorf("读取授权: %w", err))
 		}
 		if authz.Status == acme.StatusValid {
-			cfg.logf("授权已有效,跳过验证")
+			cfg.logf("%s 的授权已有效,跳过验证", authz.Identifier.Value)
 			continue
 		}
 		var chal *acme.Challenge
-		want := "http-01"
-		if cfg.Method == "cloudflare" {
-			want = "dns-01"
-		}
 		for _, c := range authz.Challenges {
 			if c.Type == want {
 				chal = c
@@ -125,27 +167,24 @@ func Issue(ctx context.Context, cfg Config) (Result, error) {
 		if chal == nil {
 			return res, fmt.Errorf("CA 未提供 %s 验证方式", want)
 		}
-
-		var cleanup func()
-		if want == "http-01" {
-			cleanup, err = serveHTTP01(client, chal, cfg.logf)
-		} else {
-			cleanup, err = setDNS01(ctx, client, chal, cfg, cfg.logf)
-		}
-		if err != nil {
+		pending = append(pending, pendingAuthz{authz: authz, chal: chal})
+	}
+	if want == "dns-01" {
+		if err := verifyDNS01(ctx, client, pending, cfg); err != nil {
 			return res, err
 		}
-		cfg.logf("通知 CA 开始验证(%s)", want)
-		if _, err := client.Accept(ctx, chal); err != nil {
+	} else {
+		for _, p := range pending {
+			cleanup, err := serveHTTP01(client, p.chal, cfg.logf)
+			if err != nil {
+				return res, err
+			}
+			err = acceptAndWait(ctx, client, p, cfg)
 			cleanup()
-			return res, fmt.Errorf("接受验证: %w", err)
+			if err != nil {
+				return res, err
+			}
 		}
-		_, err = client.WaitAuthorization(ctx, authz.URI)
-		cleanup()
-		if err != nil {
-			return res, fmt.Errorf("验证失败: %w", err)
-		}
-		cfg.logf("验证通过")
 	}
 
 	cfg.logf("生成私钥与 CSR")
@@ -154,15 +193,17 @@ func Issue(ctx context.Context, cfg Config) (Result, error) {
 		return res, err
 	}
 	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
-		Subject: pkix.Name{CommonName: cfg.Domain}, DNSNames: []string{cfg.Domain},
+		Subject: pkix.Name{CommonName: cfg.Domain}, DNSNames: names,
 	}, certKey)
 	if err != nil {
 		return res, err
 	}
 	cfg.logf("提交订单,等待签发")
-	der, _, err := client.CreateOrderCert(ctx, order.FinalizeURL, csr, true)
+	sctx, cancel = context.WithTimeout(ctx, 2*time.Minute)
+	der, _, err := client.CreateOrderCert(sctx, order.FinalizeURL, csr, true)
+	cancel()
 	if err != nil {
-		return res, fmt.Errorf("签发: %w", err)
+		return res, stepErr(fmt.Errorf("签发: %w", err))
 	}
 	if len(der) == 0 {
 		return res, errors.New("CA 返回空证书")
@@ -222,57 +263,157 @@ func serveHTTP01(client *acme.Client, chal *acme.Challenge, logf func(string, ..
 	return func() { srv.Close() }, nil
 }
 
-// setDNS01 通过 Cloudflare 写入 _acme-challenge TXT,并等待公共 DNS 可见。
-func setDNS01(ctx context.Context, client *acme.Client, chal *acme.Challenge, cfg Config, logf func(string, ...interface{})) (func(), error) {
-	val, err := client.DNS01ChallengeRecord(chal.Token)
-	if err != nil {
-		return nil, err
+// stepTimeout 和 CA 打交道的单步限时。CA 限流时 acme 客户端会一直退避重试,不限时就在"申请中"上一直转,看不出卡在哪。
+const stepTimeout = 90 * time.Second
+
+// stepErr 单步超时要说人话:多半是 CA 限流或网络不通,不是"context deadline exceeded"。
+func stepErr(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return errors.New("和 CA 通信超时:连不上 CA 或被限流了,过一会儿再试")
 	}
-	cf := &Cloudflare{Token: cfg.CFToken}
-	zone, zoneName, err := cf.ZoneFor(ctx, cfg.Domain)
+	return err
+}
+
+// pendingAuthz 一个还没通过的授权和要用的验证方式。
+type pendingAuthz struct {
+	authz *acme.Authorization
+	chal  *acme.Challenge
+}
+
+// challengeName dns-01 的记录名:永远挂在不带 *. 的域名下(*.example.com 和 example.com 都是 _acme-challenge.example.com)。
+func challengeName(domain string) string { return "_acme-challenge." + BaseDomain(domain) }
+
+// acceptAndWait 通知 CA 开始验证并等结果。
+func acceptAndWait(ctx context.Context, client *acme.Client, p pendingAuthz, cfg Config) error {
+	cfg.logf("通知 CA 验证 %s(%s)", p.authz.Identifier.Value, p.chal.Type)
+	sctx, cancel := context.WithTimeout(ctx, stepTimeout)
+	_, err := client.Accept(sctx, p.chal)
+	cancel()
 	if err != nil {
-		return nil, err
+		return stepErr(fmt.Errorf("接受验证: %w", err))
 	}
-	name := "_acme-challenge." + cfg.Domain
-	logf("Cloudflare 区域 %s,写入 TXT %s", zoneName, name)
-	id, err := cf.CreateTXT(ctx, zone, name, val)
+	sctx, cancel = context.WithTimeout(ctx, 3*time.Minute)
+	_, err = client.WaitAuthorization(sctx, p.authz.URI)
+	cancel()
 	if err != nil {
-		return nil, err
+		return stepErr(fmt.Errorf("验证失败: %w", err))
 	}
-	cleanup := func() {
-		c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := cf.DeleteRecord(c, zone, id); err != nil {
-			logf("清理 TXT 失败(可手动删除): %v", err)
+	cfg.logf("%s 验证通过", p.authz.Identifier.Value)
+	return nil
+}
+
+// verifyDNS01 泛域名连裸域名是两个授权、同一个记录名下两个值,必须同时在才验得过,所以先全部写好、都生效了再一起验。
+func verifyDNS01(ctx context.Context, client *acme.Client, pending []pendingAuthz, cfg Config) error {
+	if len(pending) == 0 {
+		return nil
+	}
+	recs := make([]TXTRecord, 0, len(pending))
+	for _, p := range pending {
+		val, err := client.DNS01ChallengeRecord(p.chal.Token)
+		if err != nil {
+			return err
+		}
+		recs = append(recs, TXTRecord{Name: challengeName(p.authz.Identifier.Value), Value: val})
+	}
+	if cfg.Method == MethodManual {
+		if cfg.OnTXT != nil {
+			cfg.OnTXT(recs)
+		}
+		for _, r := range recs {
+			cfg.logf("请到 DNS 服务商添加 TXT 记录:%s = %s", r.Name, r.Value)
+		}
+		cfg.logf("正在等公共 DNS 查到这些记录(加好后不用操作,会自动继续)…")
+		if err := waitTXT(ctx, cfg, recs); err != nil {
+			return fmt.Errorf("没等到 TXT 记录生效(%s):确认记录加对了再重新申请", err)
+		}
+		if cfg.OnTXT != nil {
+			defer cfg.OnTXT(nil)
+		}
+	} else {
+		cf := &Cloudflare{Token: cfg.CFToken, BaseURL: cfg.CFBaseURL}
+		var cleanups []func()
+		defer func() {
+			for _, c := range cleanups {
+				c()
+			}
+		}()
+		for _, r := range recs {
+			zone, zoneName, err := cf.ZoneFor(ctx, BaseDomain(r.Name))
+			if err != nil {
+				return err
+			}
+			cfg.logf("Cloudflare 区域 %s,写入 TXT %s", zoneName, r.Name)
+			id, err := cf.CreateTXT(ctx, zone, r.Name, r.Value)
+			if err != nil {
+				return err
+			}
+			zoneID, recID := zone, id
+			cleanups = append(cleanups, func() {
+				c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				if err := cf.DeleteRecord(c, zoneID, recID); err != nil {
+					cfg.logf("清理 TXT 失败(可手动删除): %v", err)
+				}
+			})
+		}
+		cfg.logf("等待公共 DNS 生效…")
+		wctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		err := waitTXT(wctx, cfg, recs)
+		cancel()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			cfg.logf("2 分钟内公共 DNS 还没查到 TXT,仍尝试让 CA 验证")
+		} else {
+			cfg.logf("TXT 已可见")
 		}
 	}
-	logf("等待公共 DNS 生效…")
-	deadline := time.Now().Add(2 * time.Minute)
-	for time.Now().Before(deadline) {
-		if txtVisible(ctx, name, val) {
-			logf("TXT 已可见")
-			return cleanup, nil
+	for _, p := range pending {
+		if err := acceptAndWait(ctx, client, p, cfg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// waitTXT 每 5 秒查一次,全部记录都能查到才返回;ctx 到期返回错误。
+func waitTXT(ctx context.Context, cfg Config, recs []TXTRecord) error {
+	lookup := cfg.TXTLookup
+	if lookup == nil {
+		lookup = txtVisible
+	}
+	for {
+		all := true
+		for _, r := range recs {
+			if !lookup(ctx, r.Name, r.Value) {
+				all = false
+				break
+			}
+		}
+		if all {
+			return nil
 		}
 		select {
 		case <-ctx.Done():
-			cleanup()
-			return nil, ctx.Err()
+			return errors.New("等待超时")
 		case <-time.After(5 * time.Second):
 		}
 	}
-	logf("2 分钟内未在 1.1.1.1 看到 TXT,仍尝试让 CA 验证")
-	return cleanup, nil
 }
 
+// txtVisible 几家公共 DNS 里有一家查得到就算生效。
 func txtVisible(ctx context.Context, name, want string) bool {
-	r := resolverAt(publicDNS[0].v4+":53", "["+publicDNS[0].v6+"]:53")
-	vals, err := r.LookupTXT(ctx, name)
-	if err != nil {
-		return false
-	}
-	for _, v := range vals {
-		if v == want {
-			return true
+	for _, dns := range publicDNS[:2] {
+		r := resolverAt(dns.v4+":53", "["+dns.v6+"]:53")
+		vals, err := r.LookupTXT(ctx, name)
+		if err != nil {
+			continue
+		}
+		for _, v := range vals {
+			if v == want {
+				return true
+			}
 		}
 	}
 	return false
@@ -389,12 +530,17 @@ type PrecheckResult struct {
 	DNSOk      bool              `json:"dnsOk"`
 	Port80     string            `json:"port80"`     // free | busy | error text
 	Cloudflare bool              `json:"cloudflare"` // A 记录像 Cloudflare 代理 IP 段(不完全判断)
+	Wildcard   bool              `json:"wildcard"`   // 泛域名:不看解析与 80 端口,只能用 DNS 验证
 }
 
 // Precheck 检查域名解析是否指向本机公网 IP、80 端口是否空闲。
 // 本机有 IPv4 时比 A 记录;只有 IPv6(纯 v6 机器)时比 AAAA 记录。
 func Precheck(ctx context.Context, domain string) PrecheckResult {
 	res := PrecheckResult{Domain: domain, Resolved: map[string]string{}, Family: "v4"}
+	if IsWildcard(domain) {
+		res.Wildcard, res.DNSOk, res.Port80 = true, true, "free"
+		return res
+	}
 	v4, v6 := PublicIPs(ctx)
 	res.PublicIP = v4
 	if v4 == "" && v6 != "" {

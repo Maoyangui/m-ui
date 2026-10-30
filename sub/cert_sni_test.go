@@ -1,0 +1,70 @@
+package sub
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/Maoyangui/m-ui/database/model"
+)
+
+func TestCertSNI(t *testing.T) {
+	wild := model.CertBrief{Name: "*.example.com", Domains: []string{"*.example.com", "example.com"}}
+	cases := []struct {
+		b    model.CertBrief
+		cur  string
+		want string
+	}{
+		{wild, "hk.example.com", "hk.example.com"}, // 泛域名覆盖节点域名,不动
+		{wild, "example.com", "example.com"},
+		{wild, "a.b.example.com", "example.com"}, // 泛域名只管一级,换成证书里的具体域名
+		{wild, "other.com", "example.com"},
+		{wild, "", "example.com"},
+		{model.CertBrief{Domains: []string{"*.only.com"}}, "x.com", "www.only.com"}, // 只有泛域名:在它下面起一个
+		{model.CertBrief{Domains: []string{"a.com"}}, "b.com", "a.com"},
+		{model.CertBrief{SelfSigned: true, Domains: []string{"a.com"}}, "b.com", "b.com"}, // 自签靠允许不安全,SNI 不动
+	}
+	for _, c := range cases {
+		if got := certSNI(c.b, c.cur); got != c.want {
+			t.Errorf("certSNI(%v, %q) = %q,应为 %q", c.b.Domains, c.cur, got, c.want)
+		}
+	}
+}
+
+// 线路单独选了证书:有这张证书的服务器,订阅里 SNI 跟着证书走;没有的服务器用它自己的默认证书,地址不动。
+func TestLineCertInSubscription(t *testing.T) {
+	line := model.Line{Id: 1, Name: "l", Protocol: "trojan", Port: 1, Tls: []byte(`{"mode":"cert","cert":"*.example.com"}`)}
+	hasIt := map[string]model.CertBrief{"*.example.com": {Name: "*.example.com", Domains: []string{"*.example.com", "example.com"}}}
+	entries := []Entry{
+		{Name: "a", Host: "1.1.1.1", SNI: "a.other.com", NodeId: 1, Suffix: "-a", Certs: hasIt},
+		{Name: "b", Host: "2.2.2.2", SNI: "b.other.com", NodeId: 2, Suffix: "-b"}, // 老版本副机,没报证书清单
+		{Name: "c", Host: "3.3.3.3", SNI: "hk.example.com", NodeId: 3, Suffix: "-c", Certs: hasIt},
+		{Name: "d", Host: "4.4.4.4", SNI: "d.other.com", NodeId: 4, Suffix: "-d", Certs: map[string]model.CertBrief{"*.example.com": {SelfSigned: true}}},
+		{Name: "e", Host: "5.5.5.5", SNI: "e.other.com", NodeId: 5, Suffix: "-e", InsecureFixed: true, Certs: map[string]model.CertBrief{"*.example.com": {SelfSigned: true}}},
+	}
+	addrs := resolveAddrs(line, entries, nil)
+	want := []struct {
+		sni      string
+		insecure bool
+	}{{"example.com", false}, {"b.other.com", false}, {"hk.example.com", false}, {"d.other.com", true}, {"e.other.com", false}}
+	for i, w := range want {
+		if addrs[i].sni != w.sni || addrs[i].insecure != w.insecure {
+			t.Errorf("第 %d 台: %+v,应为 %+v", i, addrs[i], w)
+		}
+	}
+	// 没选证书的线路完全不受影响
+	plain := model.Line{Id: 2, Name: "p", Protocol: "trojan", Port: 1, Tls: []byte(`{"mode":"cert"}`)}
+	if a := resolveAddrs(plain, entries, nil); a[0].sni != "a.other.com" {
+		t.Fatalf("没选证书的线路 SNI 不该变: %+v", a[0])
+	}
+	// Reality 线路带着 cert 字段也不管
+	reality := model.Line{Id: 3, Name: "r", Protocol: "vless", Port: 1, Tls: []byte(`{"mode":"reality","cert":"*.example.com"}`)}
+	if a := resolveAddrs(reality, entries, nil); a[0].sni != "a.other.com" {
+		t.Fatalf("Reality 不该受证书影响: %+v", a[0])
+	}
+	// 链接里确实带上了
+	user := model.User{Name: "u", Credentials: []byte(`{"trojan":{"password":"p"}}`)}
+	links := GenerateLinks(user, []model.Line{line}, entries[:1])
+	if len(links) != 1 || !strings.Contains(links[0], "sni=example.com") {
+		t.Fatalf("链接里 SNI 不对: %v", links)
+	}
+}

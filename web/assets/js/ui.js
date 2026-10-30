@@ -121,8 +121,9 @@ export function confirm(message, opts = {}) {
 }
 
 // ---- 抽屉(右侧详情面板)----
-export function openDrawer(title, html) {
+export function openDrawer(title, html, opts = {}) {
   const d = document.getElementById('drawer');
+  d.classList.toggle('over', !!opts.over); // 从弹窗里打开的:盖在弹窗上面
   document.getElementById('drawer-title').innerHTML = title;
   document.getElementById('drawer-body').innerHTML = html;
   d.hidden = false;

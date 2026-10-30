@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/backup"
+	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/logger"
 	"gorm.io/gorm"
@@ -29,13 +30,24 @@ func (r *Runner) BackupDir() string {
 	return filepath.Join(r.DataDir(), "backups")
 }
 
-// CertPaths 返回所有设置里引用的证书/私钥路径(去重)。
+// CertPaths 返回所有设置里引用的、证书库里的证书/私钥路径(去重)。
 func (r *Runner) CertPaths() []string {
+	seen := map[string]bool{}
 	var out []string
-	for _, k := range []string{"certFile", "keyFile", "webCertFile", "webKeyFile", "subCertFile", "subKeyFile"} {
-		if v := strings.TrimSpace(r.setting(k)); v != "" {
+	add := func(v string) {
+		if v = strings.TrimSpace(v); v != "" && !seen[v] {
+			seen[v] = true
 			out = append(out, v)
 		}
+	}
+	for _, k := range []string{"certFile", "keyFile", "webCertFile", "webKeyFile", "subCertFile", "subKeyFile"} {
+		add(r.setting(k))
+	}
+	var rows []model.Cert
+	r.db.Find(&rows)
+	for _, c := range rows {
+		add(c.CertFile)
+		add(c.KeyFile)
 	}
 	return out
 }
