@@ -173,6 +173,7 @@ func (s *Server) options() Options {
 		Encode:       s.settingBool("subEncode"),
 		ShowNotice:   s.settingBool("subShowNotice"),
 		ClashTmpl:    s.setting("subClashExt"),
+		SingBoxTmpl:  s.setting("subSingboxExt"),
 		Entries:      entries,
 		Insecure:     insecure,
 		TZ:           s.setting("timezone"),
@@ -478,6 +479,15 @@ func (s *Server) handle() http.HandlerFunc {
 			return
 		}
 		format := r.URL.Query().Get("format")
+		if format == "" && !strings.EqualFold(s.setting("subAutoFormat"), "false") {
+			// 通用地址:按客户端给它能用的格式。记到请求上,订阅日志里也就记成实际给的格式
+			if f, legacy := FormatForUA(r.UserAgent()); f != "" {
+				format, opt.LegacyClash = f, legacy
+				q := r.URL.Query()
+				q.Set("format", f)
+				r.URL.RawQuery = q.Encode()
+			}
+		}
 
 		var res Result
 		switch format {
@@ -504,6 +514,7 @@ func (s *Server) handle() http.HandlerFunc {
 		for k, v := range res.Headers {
 			w.Header().Set(k, v)
 		}
+		w.Header().Set("Vary", "User-Agent") // 同一个地址按客户端给不同内容,中间有缓存也别串
 		w.WriteHeader(http.StatusOK)
 		if r.Method != http.MethodHead {
 			_, _ = w.Write([]byte(res.Body))

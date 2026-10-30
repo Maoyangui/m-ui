@@ -41,7 +41,7 @@ import (
 var SyncedSettings = []string{
 	"timezone", "allowPrivate",
 	"upstreamTestUrl", "upstreamCheckMinutes", "upstreamCheckFailThreshold",
-	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subUpdates",
+	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subSingboxExt", "subAutoFormat", "subUpdates",
 	"subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice", "subShareEnabled", "subPageBuyURL", "subPageBrand",
 }
 

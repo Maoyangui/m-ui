@@ -48,9 +48,26 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 	for _, e := range opt.External {
 		links = append(links, e.Links...)
 	}
+	var tmpl map[string]interface{}
+	if strings.TrimSpace(opt.SingBoxTmpl) != "" {
+		if err := json.Unmarshal([]byte(opt.SingBoxTmpl), &tmpl); err != nil {
+			return Result{}, fmt.Errorf("sing-box 模板不是合法 JSON: %w", err)
+		}
+	}
 	var nodes []map[string]interface{}
 	var tags []string
 	used := map[string]bool{"proxy": true, "auto": true, "direct": true}
+	var ownOutbounds []interface{} // 模板自己写的出站
+	if raw, ok := tmpl["outbounds"].([]interface{}); ok {
+		ownOutbounds = raw
+		for _, o := range raw {
+			if m, ok := o.(map[string]interface{}); ok {
+				if t, _ := m["tag"].(string); t != "" {
+					used[t] = true
+				}
+			}
+		}
+	}
 	for _, l := range links {
 		p, err := upstream.ParseLink(l)
 		if err != nil {
@@ -92,7 +109,76 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 	outbounds = append(outbounds, nodes...)
 	outbounds = append(outbounds, map[string]interface{}{"type": "direct", "tag": "direct"})
 
-	cfg := map[string]interface{}{
+	if tmpl != nil {
+		return singBoxFromTemplate(user, opt, tmpl, ownOutbounds, outbounds, nodes, tags)
+	}
+	cfg := singBoxBase()
+	cfg["outbounds"] = outbounds
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
+}
+
+// singBoxFromTemplate 按模板出配置:模板写了的段(dns、route、inbounds……)原样用,没写的用内置的。
+// 节点接在模板的出站后面;模板的 selector / urltest 里写 "{all}" 会展开成全部节点;
+// proxy / auto / direct 模板没写就补上,写了用模板的。
+func singBoxFromTemplate(user model.User, opt Options, tmpl map[string]interface{}, own []interface{}, generated, nodes []map[string]interface{}, tags []string) (Result, error) {
+	cfg := singBoxBase()
+	for k, v := range tmpl {
+		cfg[k] = v
+	}
+	has := map[string]bool{}
+	out := make([]interface{}, 0, len(own)+len(generated))
+	for _, o := range own {
+		if m, ok := o.(map[string]interface{}); ok {
+			if t, _ := m["tag"].(string); t != "" {
+				has[t] = true
+			}
+			if list, ok := m["outbounds"].([]interface{}); ok {
+				m["outbounds"] = expandAll(list, tags)
+			}
+		}
+		out = append(out, o)
+	}
+	for _, g := range generated {
+		if t, _ := g["tag"].(string); !has[t] {
+			out = append(out, g)
+		}
+	}
+	cfg["outbounds"] = out
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
+}
+
+// expandAll 把列表里的 "{all}" 换成全部节点。
+func expandAll(list []interface{}, tags []string) []interface{} {
+	out := make([]interface{}, 0, len(list)+len(tags))
+	for _, v := range list {
+		if s, _ := v.(string); s == "{all}" {
+			for _, t := range tags {
+				out = append(out, t)
+			}
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// DefaultSingBoxTemplate 内置的 sing-box 骨架(不含节点),面板上「填入内置模板」用它。
+func DefaultSingBoxTemplate() string {
+	b, _ := json.MarshalIndent(singBoxBase(), "", "  ")
+	return string(b)
+}
+
+// singBoxBase 内置的 sing-box 配置骨架:TUN + 本地混合入站、DNS 与基础分流。
+func singBoxBase() map[string]interface{} {
+	return map[string]interface{}{
 		"log": map[string]interface{}{"level": "info", "timestamp": true},
 		"dns": map[string]interface{}{
 			"servers": []map[string]interface{}{
@@ -106,7 +192,6 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 			{"type": "tun", "tag": "tun-in", "address": []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"}, "auto_route": true, "strict_route": false},
 			{"type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080},
 		},
-		"outbounds": outbounds,
 		"route": map[string]interface{}{
 			"rules": []map[string]interface{}{
 				{"action": "sniff"},
@@ -124,9 +209,4 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 			"cache_file": map[string]interface{}{"enabled": true},
 		},
 	}
-	b, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
 }

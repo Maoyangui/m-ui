@@ -55,7 +55,19 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		root = map[string]interface{}{}
 	}
 
+	// 模板里自己写的节点留着,排在最前;同名的本站节点让开
 	var proxies []interface{}
+	used := map[string]bool{}
+	if own, ok := root["proxies"].([]interface{}); ok {
+		for _, p := range own {
+			if m, ok := p.(map[string]interface{}); ok {
+				if n, _ := m["name"].(string); n != "" {
+					used[n] = true
+				}
+			}
+			proxies = append(proxies, p)
+		}
+	}
 	var proxyNames []string // 全部代理(Auto 组)
 	var topNames []string   // Proxy 选择组里的条目:单入口=代理本身;多入口=每条线路一个 url-test 组
 	var lineGroups []interface{}
@@ -69,9 +81,15 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 				if a.insecure {
 					applyInsecure(p)
 				}
+				name, _ := p["name"].(string)
+				for i := 2; used[name]; i++ {
+					name = fmt.Sprintf("%s %d", p["name"], i)
+				}
+				used[name] = true
+				p["name"] = name
 				proxies = append(proxies, p)
-				proxyNames = append(proxyNames, p["name"].(string))
-				names = append(names, p["name"].(string))
+				proxyNames = append(proxyNames, name)
+				names = append(names, name)
 			}
 		}
 		if len(names) > 1 && line.Protocol != "mixed" {
@@ -86,10 +104,6 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		}
 	}
 	// 外部节点:名字去重后追加
-	used := map[string]bool{}
-	for _, n := range proxyNames {
-		used[n] = true
-	}
 	for _, e := range external {
 		for _, p := range e.Clash {
 			name, _ := p["name"].(string)
@@ -123,13 +137,79 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		map[string]interface{}{"name": "Auto", "type": "url-test", "url": "http://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50, "proxies": proxyNames},
 	}
 	groups = append(groups, lineGroups...)
-	root["proxy-groups"] = groups
+	root["proxy-groups"] = mergeClashGroups(groups, root["proxy-groups"])
+	if _, ok := root["rules"]; !ok { // 模板没写规则:Clash 没规则时全部直连,等于没走代理
+		root["rules"] = []string{"GEOIP,Private,DIRECT", "MATCH,Proxy"}
+	}
 	out, err := yaml.Marshal(root)
 	if err != nil {
 		return "", err
 	}
 	return string(out), nil
 }
+
+// mergeClashGroups 模板里写的策略组和生成的合起来:同名的用模板的(放在生成的那个位置),其余的接在后面。
+func mergeClashGroups(generated []interface{}, tmpl interface{}) []interface{} {
+	own, _ := tmpl.([]interface{})
+	if len(own) == 0 {
+		return generated
+	}
+	nameOf := func(g interface{}) string {
+		m, _ := g.(map[string]interface{})
+		n, _ := m["name"].(string)
+		return n
+	}
+	byName := make(map[string]interface{}, len(own))
+	for _, g := range own {
+		byName[nameOf(g)] = g
+	}
+	out := make([]interface{}, 0, len(generated)+len(own))
+	taken := map[string]bool{}
+	for _, g := range generated {
+		n := nameOf(g)
+		if t, ok := byName[n]; ok {
+			g = t
+		}
+		taken[n] = true
+		out = append(out, g)
+	}
+	for _, g := range own {
+		if !taken[nameOf(g)] {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// legacyClashProtocols 老内核 Clash 认识的线路协议。
+var legacyClashProtocols = map[string]bool{"shadowsocks": true, "vmess": true, "trojan": true, "socks": true, "http": true, "mixed": true}
+
+// legacyClashTypes 同上,外部节点按 clash 的 type 字段判断。
+var legacyClashTypes = map[string]bool{"ss": true, "vmess": true, "trojan": true, "socks5": true, "http": true}
+
+// legacyClashOnly 只留老内核 Clash 认识的线路与外部节点。
+func legacyClashOnly(lines []model.Line, external []ExtItem) ([]model.Line, []ExtItem) {
+	keep := make([]model.Line, 0, len(lines))
+	for _, l := range lines {
+		if legacyClashProtocols[l.Protocol] {
+			keep = append(keep, l)
+		}
+	}
+	ext := make([]ExtItem, 0, len(external))
+	for _, e := range external {
+		c := make([]map[string]interface{}, 0, len(e.Clash))
+		for _, p := range e.Clash {
+			if t, _ := p["type"].(string); legacyClashTypes[t] {
+				c = append(c, p)
+			}
+		}
+		ext = append(ext, ExtItem{Name: e.Name, Links: e.Links, Clash: c})
+	}
+	return keep, ext
+}
+
+// DefaultClashTemplate 内置的 Clash 骨架,面板上「填入内置模板」用它。
+func DefaultClashTemplate() string { return basicClashConfig }
 
 // lineToClashProxies 把一条线路的一个地址渲染成 mihomo 代理(mixed 出 socks5 + http 两个)。
 func lineToClashProxies(line model.Line, user model.User, a addr) []map[string]interface{} {

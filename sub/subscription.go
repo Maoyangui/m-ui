@@ -19,6 +19,8 @@ type Options struct {
 	Encode       bool    // link 订阅是否 base64
 	ShowNotice   bool    // 是否注入流量提示节点
 	ClashTmpl    string  // 自定义 clash 模板,空=内置
+	SingBoxTmpl  string  // 自定义 sing-box 模板,空=内置
+	LegacyClash  bool    // 客户端是老内核 Clash:它不认识的协议不发(见 format.go)
 	Entries      []Entry // 对外入口(单入口即一条)
 	// Insecure 为 true 时链接带 insecure=1、clash 带 skip-cert-verify:
 	// 服务端用自签证书(纯 IP 无域名)时客户端必须允许不安全才能连上。
@@ -75,7 +77,11 @@ func BuildClashSub(user model.User, lines []model.Line, opt Options) (Result, er
 	if opt.ShowNotice {
 		notice = noticeText(user)
 	}
-	body, err := BuildClashFor(user, lines, opt.Entries, opt.ClashTmpl, notice, opt.External, opt.LineNodes)
+	external := opt.External
+	if opt.LegacyClash {
+		lines, external = legacyClashOnly(lines, external)
+	}
+	body, err := BuildClashFor(user, lines, opt.Entries, opt.ClashTmpl, notice, external, opt.LineNodes)
 	if err != nil {
 		return Result{}, err
 	}
