@@ -47,7 +47,7 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 | Plans | Templates for quota / duration / devices / speed / lines; apply on create, renew or extend; can bind speed-limit rules for current and future users of the plan |
 | Resellers | Give a reseller lines plus traffic / device / bandwidth budgets and an expiry; they create users and plans in their own panel (port 2054, path /dl). Usage rolls up to the reseller, and going over quota, expiring or being disabled cuts off all of their users at once |
 | Subscriptions | Universal link, Clash and sing-box formats, the right one picked per client from a single address; custom Clash / sing-box templates; external nodes can be hidden, renamed, excluded by keyword and tested from mainland China; landing page in the browser (usage, expiry, one-tap import, QR); users can hand out a temporary share link themselves; external nodes / external subscriptions merged in; `insecure` added automatically for self-signed certs |
-| Multi-server | Master pushes config, collects traffic, enforces quotas; per-server traffic ratio; node offline / recovery alerts; mainland reachability checks (China Mobile / Telecom / Unicom home-broadband probes, manual + scheduled, block alerts) |
+| Multi-server | Master pushes config, collects traffic, enforces quotas; per-server traffic ratio; IPv4 / IPv6 per line on dual-stack servers; node offline / recovery alerts; mainland reachability checks (China Mobile / Telecom / Unicom home-broadband probes, manual + scheduled, block alerts) |
 | Certificates | Several per server: Let's Encrypt via HTTP-01, Cloudflare DNS-01 or manual DNS (wildcards included), auto-renewal, hot reload without restart; line default, panel and subscription each pick their own, and any line can pick its own; one-click self-signed cert when you have no domain |
 | Backup | One zip with a consistent database snapshot and certificates; upload to restore a whole server; scheduled backups, rotation, push to Telegram; migration wizard |
 | Ops | WARP install / enable / disable / uninstall with exit-IP verification; swap, sysctl + BBR, file limits, NTP; cap systemd journal disk usage |
@@ -135,6 +135,7 @@ The master does the accounting and pushes config; a node only forwards. Nodes ne
 | 90m (configurable) | Master runs the mainland reachability check (Globalping probes in mainland China, IPv4 only for now) | `reach/` |
 | 1h | Probe this server's public IPv4 / IPv6 (an address counts as gone only after 3 missed rounds); expiry and usage warnings; prune stats and logs by retention | `runner/` `monitor/` `jobs/` |
 | 6h | Check whether a newer release exists (check only, never auto-install; through local WARP when GitHub is unreachable directly) | `selfupdate/` |
+| 24h | Download an empty file from GitHub once, to count online panels (no identifier, can be turned off) | `runner/` |
 | 12h | Certificate renewal check | `runner/` |
 | daily | Daily report; scheduled backup (at the configured hour) | `monitor/` `runner/` |
 | 1h | Prune time series, subscription access log and audit log, each by its own retention; fold minute samples older than 48 h into hourly buckets | `jobs/` |
@@ -307,9 +308,9 @@ Any number of nodes. To attach one:
 
 How it works: the master compares a snapshot every few seconds and pushes on change; in the same round it pulls the node's traffic ledger, online IPs, status and certificate expiry. Quotas are enforced only on the master; a disabled user reaches every node within about 5 seconds. A node unreachable for over a minute triggers one alert and one more on recovery; while offline it keeps serving users with its last config and stops expired users and resellers by its own clock.
 
-Each server, including the master, can have a **traffic ratio**: traffic through it counts toward users' usage multiplied by the ratio, e.g. 2× for an expensive route.
+Each server, including the master, can have a **traffic ratio**: traffic through it counts toward users' usage multiplied by the ratio, e.g. 2× for an expensive route. A user's usage, the chart in the user details and the chart on the landing page all show the scaled numbers, so they reconcile. A node's landing page only sees the traffic through that node, so it shows no chart.
 
-**Connect address and IPv4 / IPv6**: subscriptions give each server's public IP (the domain is only the SNI). Every server detects both its IPv4 and IPv6 and IPv4 is used by default; set "Auto address uses" to IPv6 when editing a server, and if the chosen one is not detected the other is used. A connect address you enter always wins.
+**Connect address and IPv4 / IPv6**: subscriptions give each server's public IP (the domain is only the SNI). Every server detects both its IPv4 and IPv6 and IPv4 is used by default; set "Auto address uses" to IPv6 when editing a server, and if the chosen one is not detected the other is used. A connect address you enter always wins. On **dual-stack servers** the line form also lets each line pick IPv4 or IPv6; lines that don't pick follow the server setting.
 
 **Mainland reachability**: the "Mainland reach" column on the Servers page. The master uses the public [Globalping](https://globalping.io) network to connect to every server from China Mobile, China Telecom and China Unicom home-broadband probes (no data-center probes), with Hong Kong probes as a control. If none of the three carriers can connect while Hong Kong can, the server is flagged as blocked, and a follow-up ping tells a blocked IP (needs a new IP) from a blocked port (switch ports). The port tested is the first TCP line on that server; a server with only UDP lines (hysteria2 / tuic) is tested on its subscription or panel port, which shows whether the IP is blocked and nothing more. Check on demand or let it run on a schedule (every 90 minutes by default; change or turn off under **Settings → Mainland reachability**). A new problem is rechecked two minutes later before a Telegram alert goes out, and recovery is announced too. Server addresses are sent to Globalping; the anonymous limit is about 250 probe runs per hour (one server uses about 15), more with a free token.
 
@@ -320,7 +321,7 @@ Each server, including the master, can have a **traffic ratio**: traffic through
 ### Certificates
 
 A server can hold several certificates; everything issued, self-signed or added goes into the **store**. Three sources:
-- **With a domain**: Let's Encrypt via HTTP-01 (port 80 reachable), Cloudflare DNS-01 (API token, no port 80) or manual DNS (the panel lists the TXT records to add and only asks for validation once they are visible). **Wildcards** (`*.example.com`) work over DNS and include the bare domain. DNS and port are pre-checked; auto-renewal reloads everything without a restart; manual DNS certificates need the records added again and don't renew on their own.
+- **With a domain**: Let's Encrypt via HTTP-01 (port 80 reachable), Cloudflare DNS-01 (API token, no port 80) or manual DNS (the panel lists the TXT records to add and only asks for validation once they are visible). **Wildcards** (`*.example.com`) work over DNS and include the bare domain. DNS and port are pre-checked; auto-renewal reloads everything without a restart; manual DNS certificates need the records added again and don't renew on their own. A manual DNS wait can be cancelled at any time. The pre-check warns about an AAAA record pointing elsewhere (the CA prefers IPv6, so a wrong record fails validation).
 - **Without a domain**: self-signed certificate for the server IP. Used for line inbounds only by default; subscriptions automatically carry "allow insecure" so clients connect, while panel and subscription stay on HTTP (browsers and clients reject self-signed HTTPS).
 - **Existing certificate**: point at a certificate and key already on the server (certbot, nginx, commercial…). Only paths are stored; they are checked for a matching, unexpired pair. Renew by overwriting the files.
 
@@ -352,6 +353,8 @@ Subscription access log, core log (data plane + panel) and audit log. Logging ca
 ### Settings
 
 **Time zone** (default Asia/Shanghai; every time in the panel uses it), listen address · port · path · certificate for the panel, the subscription server and the reseller panel, subscription display options, landing-page text, Telegram notification toggles, upstream check parameters, data-plane stats granularity, **private-network access** (off by default: the data plane rejects user traffic to 127.0.0.0/8, 10/8, 172.16/12, 192.168/16 and the like; turn it on only if users are meant to reach your internal services). Panel and subscription path changes apply immediately; port, listen address and certificate path changes need a restart (button in the page header). The reseller panel can be switched off entirely (`resellerEnabled`) and never starts on nodes.
+
+**With port 443** (HTTPS) or 80 (HTTP), addresses and subscription links leave the port out, e.g. `https://aa.com/app/` and `https://aa.com/sub/…`. The panel and the subscription server can't share a port, so only one of them can use 443.
 
 ## Command line
 
@@ -467,6 +470,16 @@ Releases: pushing a `v*` tag makes GitHub Actions run the tests, build amd64 / a
 ## Feedback and support
 
 The "Feedback / Support" button in the panel's top-right corner has the author's Telegram and a donation address; issues and pull requests are welcome too.
+
+**Supporters list**: on that page, enter a name and an amount, then send the exact USDT (TRC20) amount shown. If it arrives within 60 minutes it is added to that name, and every panel shows the ranking. The number of online panels appears next to the version.
+
+**m-ui has no telemetry** and collects no usage data. The supporters list and the panel count are the only extra network activity, and they use free public services rather than a server of our own:
+
+- Signing goes through [ntfy.sh](https://ntfy.sh). It is sent only when you click the button and contains only the name and amount.
+- GitHub Actions matches signatures with arrivals from [TronGrid](https://www.trongrid.io) every 10 minutes and writes the result to this repository's `donors` branch. Panels read that list when the page is opened, at most once an hour.
+- Panel count: each panel downloads an empty file from GitHub once a day, and the daily growth of GitHub's download counter is the number of panels. No identifier is sent.
+
+**Settings → Panel → Supporters list and online panel count** turns all of this off with one switch (on by default). When off, this network activity stops and the page no longer shows them.
 
 ## License
 

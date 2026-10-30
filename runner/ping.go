@@ -13,7 +13,7 @@ import (
 
 // pingLoop 统计有多少台面板在运行:每天从 GitHub 下载一次空文件,GitHub 的下载计数一天涨多少就是多少台
 // (deploy/donors 每小时算一次,结果显示在"建议与支持"页)。不带任何标识,也没有多出一家第三方:
-// 检查更新本来就连 GitHub。设置里可以关(statsPing)。
+// 检查更新本来就连 GitHub。设置里的总开关(supportOnline)可以关。
 func (r *Runner) pingLoop(stop <-chan struct{}) {
 	last, _ := strconv.ParseInt(r.setting("statsPingAt"), 10, 64)
 	t := time.NewTimer(firstPing(last, time.Now().Unix(), rand.Int63n(int64(6*time.Hour))))
@@ -21,7 +21,7 @@ func (r *Runner) pingLoop(stop <-chan struct{}) {
 	for {
 		select {
 		case <-t.C:
-			if !strings.EqualFold(r.setting("statsPing"), "false") {
+			if !strings.EqualFold(r.setting("supportOnline"), "false") {
 				ping(brand.PingURL)
 				_ = r.setSetting("statsPingAt", strconv.FormatInt(time.Now().Unix(), 10))
 			}

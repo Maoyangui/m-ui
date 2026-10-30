@@ -14,7 +14,7 @@
   <h2>安装与配置</h2>
   <details><summary>一定要有域名吗?</summary><p>不用。<b>证书 → 自签</b>一键就有 TLS,订阅会自动告诉客户端允许不安全证书。有域名可以签 Let's Encrypt 证书、去掉那个提示 —— 推荐,但不是必须。</p></details>
   <details><summary>要放行哪些端口?</summary><p>面板 <code>2053/tcp</code>、订阅 <code>2056/tcp</code>、开了代理面板再加 <code>2054/tcp</code>,以及每条线路的端口(TCP 或 UDP 看协议)。用 HTTP-01 签证书还需要 <code>80/tcp</code>;Cloudflare DNS-01 不需要。副机的面板端口只需对主机的 IP 放行。</p></details>
-  <details><summary>能改面板端口和路径吗?</summary><p>能,在设置里改;把自己锁在外面了就用 SSH 菜单(<code>m-ui</code>)。路径带不带结尾斜杠都能打开。端口保存前会校验,面板不会重启到一个被线路或别的程序占着的端口上。</p></details>
+  <details><summary>能改面板端口和路径吗?</summary><p>能,在设置里改;把自己锁在外面了就用 SSH 菜单(<code>m-ui</code>)。路径带不带结尾斜杠都能打开。设成 443(HTTPS)或 80(HTTP)后,地址和订阅链接都不带端口;面板和订阅不能同用一个端口。端口保存前会校验,面板不会重启到一个被线路或别的程序占着的端口上。</p></details>
   <details><summary>系统要求?</summary><p>Linux amd64 或 arm64,带 systemd;推荐 Debian 11+ / Ubuntu 20.04+,Rocky / CentOS 等其它 systemd 发行版也行。安装脚本依赖 systemd,所以 Alpine(OpenRC)不支持。安装需要 root。面板本身 1 核 1 GB 足够。CI 真正跑过的平台见<a href="{{base}}zh/getting-started/#tested">自动测试过的平台</a>。</p></details>
   <details><summary>纯 IPv6 的机器能用吗?</summary><p>能:面板、订阅、线路都监听 IPv6,订阅自动给 IPv6 地址(云厂商的安全组要单独放行 IPv6 来源 <code>::/0</code>)。有三处受限:GitHub 不支持 IPv6,检查更新与一键更新要先在运维页装 WARP(装好后自动经它下载),一键安装脚本也下载不了,要手动上传安装包;直连出口打不开只有 IPv4 的网站,线路上游选 WARP 才能访问全网(客户端常用的远程 DNS 如 1.1.1.1、8.8.8.8、9.9.9.9、223.5.5.5,面板会在直连线路上自动改连它们的 IPv6 地址,解析不受影响);大陆连通检测暂只测 IPv4。双栈机器默认在订阅里给 IPv4,服务器编辑里「自动地址用」可改成 IPv6。</p></details>
   <details><summary>为什么新建线路的表单里已经填了端口?</summary><p>它挑了一个没被其它线路、面板和本机任何程序占用的五位端口,还真的绑定了一次确认。可以改;保存时冲突会被拦下。</p></details>
@@ -40,7 +40,7 @@
   <details><summary>更新怎么做?会丢数据吗?</summary><p>GitHub 有新版本时侧栏会出现箭头。点一下:下载压缩包、用 Release 里的 SHA256SUMS 校验、替换程序、重启。数据库、证书、备份、设置都不动。再跑一遍安装命令效果一样。v0.4.9 起更新是一次事务:旧程序留着、先做升级前备份,新版本 90 秒内起不来就自动换回旧程序(必要时连备份一起还原),面板会明确提示。</p></details>
   <details><summary>备份里有什么?</summary><p>数据库(做过检查点,自洽)和证书文件,打成一个 zip。面板里就能还原;换机向导能把整套搬到新服务器。</p></details>
   <details><summary>能从旧面板迁移吗?</summary><p>能 —— 导入器读兼容格式的旧面板数据库,保留端口、凭据、面板路径与订阅地址,既有客户端不用刷新就能继续连。安装时加 <code>--import /path/to/旧面板.db</code>,或者用 用户 → 从旧面板导入 只搬用户。</p></details>
-  <details><summary>m-ui 会上报什么吗?</summary><p>不会。对外连接只有你自己配置的(ACME、Cloudflare、WARP、Telegram),以及每 6 小时向 GitHub Releases 查一次新版本。</p></details>
+  <details><summary>m-ui 会上报什么吗?</summary><p>不会,m-ui 没有遥测,不收集任何使用数据。对外连接只有你自己配置的(ACME、Cloudflare、WARP、Telegram)、每 6 小时向 GitHub Releases 查一次新版本,以及功德箱和在线设备数:打开「建议与支持」页时读一份公开名单,每天从 GitHub 下载一次空文件计数,都不带标识。这两样在设置里一个开关就能关。</p></details>
   <details><summary>去哪提问、报 Bug?</summary><p>提问和想法:<a href="{{github}}/discussions" rel="noopener">GitHub Discussions</a>。确定的 Bug:<a href="{{github}}/issues/new/choose" rel="noopener">用表单提 Issue</a>。日志里的令牌、UUID、订阅地址请先打码。</p></details>
 
   <script type="application/ld+json">
@@ -51,7 +51,7 @@
    {"@type":"Question","name":"m-ui 需要放行哪些端口?","acceptedAnswer":{"@type":"Answer","text":"面板 2053/tcp、订阅 2056/tcp、代理面板 2054/tcp(开启时),以及每条线路的端口。HTTP-01 签证书还需要 80/tcp。副机的面板端口只需对主机 IP 放行。"}},
    {"@type":"Question","name":"更新 m-ui 会丢数据吗?","acceptedAnswer":{"@type":"Answer","text":"不会。更新器校验 Release 摘要后只替换程序本体并重启;数据库、证书、备份和设置都不动。"}},
    {"@type":"Question","name":"m-ui 能管理多台服务器吗?","acceptedAnswer":{"@type":"Answer","text":"能。一台主机每 5 秒把线路、用户、凭据推给任意多台副机,收回流量和在线 IP;配额与设备数统一判定。"}},
-   {"@type":"Question","name":"m-ui 会上报数据吗?","acceptedAnswer":{"@type":"Answer","text":"不会。对外连接只有你自己配置的,以及每 6 小时向 GitHub Releases 查一次新版本。"}}
+   {"@type":"Question","name":"m-ui 会上报数据吗?","acceptedAnswer":{"@type":"Answer","text":"不会,m-ui 没有遥测,不收集任何使用数据。对外连接只有你自己配置的、每 6 小时查一次新版本,以及功德箱和在线设备数(读公开名单、每天下载一次空文件计数,不带标识),这两样在设置里一个开关就能关。"}}
   ]}
   </script>
 </article>

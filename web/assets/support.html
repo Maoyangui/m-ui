@@ -175,7 +175,7 @@ input.fld { flex: 1; }
     <div>
       <h1>{{if eq .Lang "zh"}}建议与支持{{else}}Feedback &amp; Support{{end}}
         <span class="chip"><code>v{{.Version}}</code><button data-copy="m-ui v{{.Version}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button></span>
-        <span class="chip stat" id="devs" hidden title="{{if eq .Lang "zh"}}过去 24 小时在运行的 m-ui 面板,按天统计{{else}}m-ui panels running in the last 24 hours, counted daily{{end}}"><i></i><span>{{if eq .Lang "zh"}}<b></b> 台面板在运行{{else}}<b></b> panels running{{end}}</span></span></h1>
+        {{if .Online}}<span class="chip stat" id="devs" hidden title="{{if eq .Lang "zh"}}过去 24 小时运行过 m-ui 面板的设备数,按天统计{{else}}Devices that ran an m-ui panel in the last 24 hours, counted daily{{end}}"><i></i><span>{{if eq .Lang "zh"}}<b></b> 台设备在运行{{else}}<b></b> devices running{{end}}</span></span>{{end}}</h1>
       <p>{{if eq .Lang "zh"}}一个人维护的开源项目,你的反馈决定它下一步做什么。{{else}}An open-source project maintained by one person — your feedback decides what comes next.{{end}}</p>
     </div>
   </header>
@@ -234,7 +234,7 @@ input.fld { flex: 1; }
       </div>
       <img class="qr" src="support/qr" alt="{{if eq .Lang "zh"}}打赏地址二维码{{else}}Donation address QR code{{end}}">
     </div>
-    <div class="sign">
+    {{if .Online}}<div class="sign">
       <form class="pledge" id="pledge" autocomplete="off" novalidate>
         <input class="fld" id="p-name" maxlength="24" placeholder="{{if eq .Lang "zh"}}你的名字{{else}}Your name{{end}}" aria-label="{{if eq .Lang "zh"}}名字{{else}}Name{{end}}">
         <label class="fld amt"><input id="p-amt" type="number" inputmode="decimal" min="1" step="any" placeholder="{{if eq .Lang "zh"}}金额{{else}}Amount{{end}}" aria-label="{{if eq .Lang "zh"}}金额{{else}}Amount{{end}}"><span>USDT</span></label>
@@ -252,10 +252,10 @@ input.fld { flex: 1; }
         <p class="phint">{{if eq .Lang "zh"}}零头用来对上你的名字,到账金额要完全一致,手续费另算。{{else}}The extra digits identify your transfer. The amount received must match exactly, with fees on top.{{end}}</p>
       </div>
       <p class="pdone" id="p-done" hidden></p>
-    </div>
+    </div>{{end}}
   </section>
 
-  <section class="card" id="board" hidden>
+  {{if .Online}}<section class="card" id="board" hidden>
     <header>
       <span class="ic warm"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.5 12.9 17 22l-5-3-5 3 1.5-9.1"/></svg></span>
       <h2>{{if eq .Lang "zh"}}功德箱{{else}}Supporters{{end}}</h2>
@@ -263,7 +263,7 @@ input.fld { flex: 1; }
     </header>
     <ol class="rank" id="board-list"></ol>
     <button class="more" id="board-more" type="button" hidden></button>
-  </section>
+  </section>{{end}}
 
 </div>
 <script>
@@ -277,7 +277,7 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
     else { var ta = document.createElement('textarea'); ta.value = url; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); done(); }
   });
 });
-// 功德箱与留名
+{{if .Online}}// 功德箱与留名
 (function () {
   var ZH = {{if eq .Lang "zh"}}true{{else}}false{{end}};
   var $ = function (id) { return document.getElementById(id); };
@@ -354,7 +354,7 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
   var cur = load();
   if (cur && cur.expiresAt > Date.now() / 1000) waiting(cur); else save(null);
 })();
-document.querySelectorAll('[data-copy]').forEach(function (b) {
+{{end}}document.querySelectorAll('[data-copy]').forEach(function (b) {
   var label = b.textContent;
   b.addEventListener('click', function () {
     var t = b.getAttribute('data-copy');

@@ -27,6 +27,7 @@ import (
 //   - 各面板打开这页时读 donors.json,最多一小时取一次;取不到就不显示,页面其它部分照常
 //
 // 名单里只有名字和累计金额。谁留的名、从哪台机器留的,都不记。
+// 设置里的总开关(supportOnline,默认开)关掉后,这里不再发任何外部请求,页面上也不显示。
 
 // 这几个地址测试里要换。
 var (
@@ -229,8 +230,15 @@ func (s *Server) allowPledge(peer string, now int64) bool {
 	return true
 }
 
+// supportOnline 总开关:功德箱和在线设备数要不要联网。
+func (s *Server) supportOnline() bool { return !strings.EqualFold(s.setting("supportOnline"), "false") }
+
 // handleSupportDonors GET support/donors:功德箱名单与运行中的面板数。和这页一样不用登录,里面只有公开信息。
 func (s *Server) handleSupportDonors(w http.ResponseWriter, r *http.Request) {
+	if !s.supportOnline() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"code": "off"})
+		return
+	}
 	b := s.donorSnapshot()
 	if b.Donors == nil {
 		b.Donors = []donorRow{}
@@ -241,6 +249,10 @@ func (s *Server) handleSupportDonors(w http.ResponseWriter, r *http.Request) {
 
 // handleSupportPledge POST support/pledge {name, amount}:留名,返回要转的金额。错误只给代码,文案在页面上(有中英文)。
 func (s *Server) handleSupportPledge(w http.ResponseWriter, r *http.Request) {
+	if !s.supportOnline() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"code": "off"})
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"code": "method"})
 		return
@@ -360,6 +372,10 @@ func (s *Server) recentTransfers(ctx context.Context) ([]tronTx, bool) {
 
 // handleSupportCheck GET support/pledge-check?amount=10.037&since=<unix>:这笔到了没有。只查留名之后 60 分钟内的。
 func (s *Server) handleSupportCheck(w http.ResponseWriter, r *http.Request) {
+	if !s.supportOnline() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"code": "off"})
+		return
+	}
 	want, ok := usdtMicros(r.URL.Query().Get("amount"))
 	since, err := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 	now := time.Now().Unix()

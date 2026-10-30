@@ -70,7 +70,7 @@
   <article class="doc" style="padding:0;max-width:none">
     <details><summary>Do I need a domain?</summary><p>No. Self-sign a certificate with one click and use the server IP; clients are told to allow the insecure certificate automatically. A domain lets you issue a real certificate and drop that warning.</p></details>
     <details><summary>Is this a fork of an existing panel?</summary><p>m-ui has its own data model (lines instead of inbound/outbound/routing tables), its own embedded data plane and its own sync protocol. It can import a legacy panel database so existing clients keep working after a switch.</p></details>
-    <details><summary>Does it phone home?</summary><p>No telemetry. The only outbound calls are the ones you configure: certificate issuance, WARP, Telegram, and a version check against GitHub Releases every 6 hours.</p></details>
+    <details><summary>Does it phone home?</summary><p>No telemetry, and no usage data is collected. The only outbound calls are the ones you configure (certificate issuance, WARP, Telegram), a version check against GitHub Releases every 6 hours, and the supporters list and online panel count (reading a public list and one daily download of an empty file, with no identifier). One switch in Settings turns those two off.</p></details>
     <details><summary>What does it run on?</summary><p>Linux, amd64 or arm64, with systemd. A 1 vCPU / 1 GB VPS is plenty for the panel itself.</p></details>
   </article>
   <p style="margin-top:1rem"><a href="{{base}}faq/">More questions →</a></p>

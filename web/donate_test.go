@@ -6,10 +6,16 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
+
+	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 func TestCleanDonorName(t *testing.T) {
@@ -84,7 +90,7 @@ func TestDonorBoardFallbackAndCache(t *testing.T) {
 	old := donorsURLs
 	donorsURLs = []string{bad.URL, good.URL}
 	defer func() { donorsURLs = old }()
-	s := &Server{}
+	s, _ := newTestServerForSupport(t, "")
 	w := httptest.NewRecorder()
 	s.handleSupportDonors(w, httptest.NewRequest("GET", "/app/support/donors", nil))
 	var b donorBoard
@@ -114,7 +120,7 @@ func TestSupportPledge(t *testing.T) {
 	old := pledgeURL
 	pledgeURL = srv.URL
 	defer func() { pledgeURL = old }()
-	s := &Server{}
+	s, _ := newTestServerForSupport(t, "")
 	call := func(body string, mut ...func(*http.Request)) (int, map[string]interface{}) {
 		r := httptest.NewRequest("POST", "http://panel:2053/app/support/pledge", strings.NewReader(body))
 		r.RemoteAddr = "203.0.113.5:1234"
@@ -162,6 +168,44 @@ func TestSupportPledge(t *testing.T) {
 	}
 }
 
+// 总开关关掉:三个接口都不再碰外部服务,页面上也没有这些东西。
+func TestSupportOnlineOff(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { hits++ }))
+	defer srv.Close()
+	oldD, oldP, oldT := donorsURLs, pledgeURL, tronURL
+	donorsURLs, pledgeURL, tronURL = []string{srv.URL}, srv.URL, srv.URL
+	defer func() { donorsURLs, pledgeURL, tronURL = oldD, oldP, oldT }()
+	s, _ := newTestServerForSupport(t, "false")
+	for _, call := range []func(http.ResponseWriter, *http.Request){s.handleSupportDonors, s.handleSupportPledge, s.handleSupportCheck} {
+		w := httptest.NewRecorder()
+		call(w, httptest.NewRequest("POST", "http://panel:2053/x?amount=1&since=1", strings.NewReader(`{"name":"a","amount":5}`)))
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("关掉后应 404,实际 %d", w.Code)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("关掉后不该有外部请求: %d", hits)
+	}
+	w := httptest.NewRecorder()
+	s.handleSupport(w, httptest.NewRequest("GET", "http://panel:2053/app/support", nil))
+	page := w.Body.String()
+	for _, gone := range []string{`id="pledge"`, `id="board"`, `id="devs"`, "support/donors"} {
+		if strings.Contains(page, gone) {
+			t.Fatalf("关掉后页面不该有 %s", gone)
+		}
+	}
+	if !strings.Contains(page, `class="addr"`) {
+		t.Fatal("打赏地址本身不受影响")
+	}
+	s, _ = newTestServerForSupport(t, "")
+	w = httptest.NewRecorder()
+	s.handleSupport(w, httptest.NewRequest("GET", "http://panel:2053/app/support", nil))
+	if !strings.Contains(w.Body.String(), `id="pledge"`) {
+		t.Fatal("默认应该是开着的")
+	}
+}
+
 func TestSupportCheck(t *testing.T) {
 	hits := 0
 	now := time.Now().Unix()
@@ -176,7 +220,7 @@ func TestSupportCheck(t *testing.T) {
 	old := tronURL
 	tronURL = srv.URL
 	defer func() { tronURL = old }()
-	s := &Server{}
+	s, _ := newTestServerForSupport(t, "")
 	ask := func(amount string) map[string]interface{} {
 		w := httptest.NewRecorder()
 		s.handleSupportCheck(w, httptest.NewRequest("GET", "/x?amount="+amount+"&since="+itoa64(now-60), nil))
@@ -202,3 +246,16 @@ func TestSupportCheck(t *testing.T) {
 }
 
 func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
+
+func newTestServerForSupport(t *testing.T, online string) (*Server, *gorm.DB) {
+	t.Helper()
+	db, err := database.Open(filepath.Join(t.TempDir(), "support.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(db) })
+	if online != "" {
+		db.Create(&model.Setting{Key: "supportOnline", Value: online})
+	}
+	return &Server{db: db, sessions: map[string]session{}}, db
+}

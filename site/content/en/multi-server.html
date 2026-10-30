@@ -45,7 +45,7 @@
   </ul>
 
   <h2 id="ratio">Traffic ratio</h2>
-  <p>Each server has a ratio (default 1). Traffic through a server with ratio 2 counts double against the user's quota — useful for premium routes or expensive bandwidth. Time-series charts keep the real bytes; only user quota accounting is scaled.</p>
+  <p>Each server has a ratio (default 1). Traffic through a server with ratio 2 counts double against the user's quota — useful for premium routes or expensive bandwidth. A user's usage and the charts in the user details and on the landing page all show the scaled numbers, so they reconcile. A node's landing page only sees the traffic through that node, so it shows no chart.</p>
 
   <p style="margin-top:2rem">Deeper: <a href="{{base}}articles/multi-server-sync/">how the sync protocol is built</a> · <a href="{{base}}architecture/">architecture overview</a></p>
 </article>

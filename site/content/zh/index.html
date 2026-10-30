@@ -70,7 +70,7 @@
   <article class="doc" style="padding:0;max-width:none">
     <details><summary>一定要有域名吗?</summary><p>不用。一键自签证书,直接用服务器 IP;订阅里会自动告诉客户端允许不安全证书。有域名可以签正式证书,客户端就不再提示。</p></details>
     <details><summary>是某个面板的分支吗?</summary><p>m-ui 有自己的数据模型(线路,而不是入站 / 出站 / 路由三张表)、自己内嵌的数据面和自己的同步协议。它能导入旧面板的数据库,割接后既有客户端不用刷新订阅就能继续连。</p></details>
-    <details><summary>会不会偷偷上报?</summary><p>没有遥测。对外的请求只有你自己配置的:签证书、WARP、Telegram,以及每 6 小时向 GitHub Releases 查一次新版本。</p></details>
+    <details><summary>会不会偷偷上报?</summary><p>没有遥测,不收集任何使用数据。对外的请求只有你自己配置的(签证书、WARP、Telegram)、每 6 小时向 GitHub Releases 查一次新版本,以及功德箱和在线设备数(读一份公开名单、每天下载一次空文件计数,不带任何标识),这两样设置里一个开关就能关。</p></details>
     <details><summary>跑在什么上面?</summary><p>Linux,amd64 或 arm64,systemd。面板本身 1 核 1 GB 的小鸡绰绰有余。</p></details>
   </article>
   <p style="margin-top:1rem"><a href="{{base}}zh/faq/">更多问题 →</a></p>
