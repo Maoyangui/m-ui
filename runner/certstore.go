@@ -275,6 +275,12 @@ func (r *Runner) UseCert(name, target string) error {
 		if err := certutil.Verify(row.CertFile, row.KeyFile); err != nil {
 			return err
 		}
+		// 和签发时一样:面板域名还空着就取这张证书的域名,否则面板和订阅地址还是 IP,证书对不上
+		if row.Source != "selfsign" && !acme.IsWildcard(name) && r.setting("webDomain") == "" {
+			if err := r.setSetting("webDomain", name); err != nil {
+				return fmt.Errorf("保存证书设置失败: %w", err)
+			}
+		}
 	}
 	switch target {
 	case CertForLines:

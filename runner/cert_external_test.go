@@ -280,3 +280,40 @@ func TestIssueCancelAndStoreNotBlocked(t *testing.T) {
 		t.Fatal("已经结束了,不该还有东西可取消")
 	}
 }
+
+// 只进证书库的证书不该改面板域名:实机上第二张证书一签,订阅地址全变成了证书里的域名。真要用上时才取。
+func TestWebDomainOnlyFromUsedCert(t *testing.T) {
+	r := certTestRunner(t)
+	c, k := genCert(t, "a.example.com")
+	if err := r.SelfSign([]string{"1.2.3.4"}, CertTargets{Lines: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.saveCertRow(model.Cert{Name: "a.example.com", Source: "external", CertFile: c, KeyFile: k}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.afterCertChange(c, k, "a.example.com", CertTargets{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.setting("webDomain"); got != "" {
+		t.Fatalf("没用上的证书改了面板域名: %q", got)
+	}
+	if err := r.afterCertChange(c, k, "*.example.com", CertTargets{Panel: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.setting("webDomain"); got != "" {
+		t.Fatalf("泛域名不能当面板域名: %q", got)
+	}
+	if err := r.afterCertChange(c, k, "a.example.com", CertTargets{Panel: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.setting("webDomain"); got != "a.example.com" {
+		t.Fatalf("用上了应该取它的域名: %q", got)
+	}
+	r.setSetting("webDomain", "")
+	if err := r.UseCert("a.example.com", CertForPanel); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.setting("webDomain"); got != "a.example.com" {
+		t.Fatalf("从证书库选用时也一样: %q", got)
+	}
+}

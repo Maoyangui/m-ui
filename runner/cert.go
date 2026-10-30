@@ -284,8 +284,10 @@ func (r *Runner) afterCertChange(certFile, keyFile, domain string, targets CertT
 		for _, row := range rows {
 			current[row.Key] = row.Value
 		}
-		// 泛域名不能当访问地址(也进不了 SNI):面板域名只从具体域名上取
-		if domain != "" && !acme.IsWildcard(domain) && current["webDomain"] == "" {
+		// 面板域名还空着、这张证书又真要用上时才取它的域名:只进证书库的证书不该改掉订阅地址和 SNI。
+		// 泛域名不能当访问地址(也进不了 SNI),面板域名只从具体域名上取
+		used := targets.Panel || targets.Sub || values["certFile"] != ""
+		if used && domain != "" && !acme.IsWildcard(domain) && current["webDomain"] == "" {
 			values["webDomain"] = domain
 		}
 		restartSub = current["subCertFile"] != wantSubCert || current["subKeyFile"] != wantSubKey || current["subRestartPending"] == "true"
