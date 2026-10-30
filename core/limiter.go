@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Maoyangui/m-ui/database/model"
+
 	"github.com/sagernet/sing/common/buf"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
@@ -18,7 +20,7 @@ import (
 //
 // 用户层(per-user)
 //   - 限速:每用户一对令牌桶(上行/下行),该用户所有连接共享总带宽
-//   - 设备数:限制**同时在线**的源 IP 数量
+//   - 设备数:限制**同时在线**的源 IP 数量(IPv6 同一个 /64 算一个,见 model.IPKey)
 //
 // 组层(代理池):代理名下所有用户共用一个池
 //   - 带宽池:每组一对令牌桶,组内所有用户的所有连接再共享一次;每台服务器各一份(带宽是单机物理量)
@@ -105,11 +107,11 @@ func (l *Limiter) reconcileDevicesLocked(now int64) map[string][]string {
 		set := map[string]bool{}
 		mine := map[string]bool{}
 		for ip := range l.ips[user] {
-			set[ip] = true
-			mine[ip] = true
+			set[model.IPKey(ip)] = true
+			mine[model.IPKey(ip)] = true
 		}
 		for ip := range l.externalLocked(user, now) {
-			set[ip] = true
+			set[model.IPKey(ip)] = true
 		}
 		all[user], local[user] = set, mine
 		if limit := l.limits[user].deviceLimit; limit > 0 {
@@ -186,7 +188,7 @@ func (l *Limiter) rejectDeviceLocked(user, ip string) {
 }
 
 func (l *Limiter) deviceRejectedLocked(user, ip string, now int64) bool {
-	return now-l.externalAt <= externalGrace && l.reconciledRejects[user][ip]
+	return now-l.externalAt <= externalGrace && l.reconciledRejects[user][model.IPKey(ip)]
 }
 
 // externalGrace 外部 IP 多久没刷新就作废(秒)。主机每 5 秒下发一次;这里给足几分钟,短暂抖动不误伤,
@@ -311,7 +313,7 @@ func (l *Limiter) GroupState() map[string]GroupState {
 		for _, u := range l.groupUsers[g] {
 			l.pruneLocked(u, now)
 			for ip := range l.ips[u] {
-				set[ip] = true
+				set[model.IPKey(ip)] = true
 			}
 		}
 		out[g] = GroupState{Devices: len(set), Rejects: l.grejects[g]}
@@ -354,14 +356,21 @@ func (l *Limiter) allowConnLocked(user, ip string, now int64) bool {
 		return true
 	}
 	ext := l.externalLocked(user, now)
-	if limit > 0 && !ext[ip] { // 该设备已在别的机器上在线时,视为同一设备切换入口,不占新名额
-		total := len(active)
-		for eip := range ext {
-			if _, dup := active[eip]; !dup {
-				total++
-			}
-		}
-		if total >= limit {
+	key := model.IPKey(ip)
+	seen := make(map[string]bool, len(active)+len(ext)) // 按设备算(IPv6 同一个 /64 算一台,见 model.IPKey)
+	for a := range active {
+		seen[model.IPKey(a)] = true
+	}
+	onlineHere := seen[key]
+	for e := range ext {
+		seen[model.IPKey(e)] = true
+	}
+	if onlineHere { // 同一台设备换了个地址:不占新名额
+		active[ip] = now
+		return true
+	}
+	if limit > 0 && !seen[key] { // 该设备已在别的机器上在线时,视为同一设备切换入口,不占新名额
+		if len(seen) >= limit {
 			return false
 		}
 	}
@@ -381,13 +390,13 @@ func (l *Limiter) groupHasRoomLocked(g, ip string, now int64, limit int) bool {
 	for _, u := range l.groupUsers[g] {
 		l.pruneLocked(u, now)
 		for a := range l.ips[u] {
-			set[a] = true
+			set[model.IPKey(a)] = true
 		}
 		for e := range l.externalLocked(u, now) {
-			set[e] = true
+			set[model.IPKey(e)] = true
 		}
 	}
-	if set[ip] {
+	if set[model.IPKey(ip)] {
 		return true
 	}
 	return len(set) < limit

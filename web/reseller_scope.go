@@ -179,7 +179,7 @@ func (s *Server) resellerStatus(r *http.Request, rid uint) map[string]interface{
 		"expiry":          rs.Expiry,
 		"speedUp":         rs.SpeedUp,
 		"speedDown":       rs.SpeedDown,
-		"onlineDevices":   len(online),
+		"onlineDevices":   model.DeviceCount(online),
 		"users":           userCount,
 		"enabledUsers":    enabledUsers,
 		"lines":           lines,

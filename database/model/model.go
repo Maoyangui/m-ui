@@ -54,6 +54,8 @@ type Line struct {
 	Addrs json.RawMessage `json:"addrs,omitempty"`
 	// NodeIds 该线路部署到哪些服务器 [1,2];空 = 全部服务器。渲染与订阅都按此过滤。
 	NodeIds json.RawMessage `json:"nodeIds,omitempty"`
+	// NodeFamily 双栈服务器上这条线路用哪个 IP 版本 {"服务器 id":"v4"|"v6"};没写的服务器跟随它自己的设置(Node.AddrFamily)。
+	NodeFamily json.RawMessage `json:"nodeFamily,omitempty"`
 	// Tls 线路 TLS 配置 {mode: cert|reality|none, reality:{private_key, public_key, short_ids, handshake_server, handshake_port}}。
 	// 空 = 按协议默认(hy2/anytls/tuic/trojan 用节点证书,vless 用 reality,其余无)。
 	Tls json.RawMessage `json:"tls,omitempty"`
@@ -69,7 +71,7 @@ type Line struct {
 type Cert struct {
 	Id        uint   `json:"id" gorm:"primaryKey;autoIncrement"`
 	Name      string `json:"name" gorm:"uniqueIndex"` // 域名(含 *.example.com)或 self-signed;线路按它选证书
-	Source    string `json:"source"`                 // acme | selfsign | external
+	Source    string `json:"source"`                  // acme | selfsign | external
 	CertFile  string `json:"certFile"`
 	KeyFile   string `json:"keyFile"`
 	Method    string `json:"method"`    // ACME 的验证方式:http | cloudflare | manual

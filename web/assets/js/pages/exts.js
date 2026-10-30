@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, fmtRelative, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, copy, matches } from '../ui.js';
+import { esc, fmtRelative, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, copy, matches, hostPort } from '../ui.js';
 
 const REACH_TONE = { ok: 'ok', partial: 'warn', blocked: 'danger', ipBlocked: 'danger', portBlocked: 'danger', abroadDown: 'warn', noProbes: '', error: '' };
 
@@ -137,7 +137,7 @@ function renderSubBody(id) {
       ${n.rename ? `<div class="sub-cell">${t('ext.renamedFrom', { name: esc(n.name) })}</div>` : ''}
       ${n.keyword ? `<div class="sub-cell">${t('ext.hiddenByKeyword')}</div>` : ''}</td>
     <td>${badge(esc(n.type))}</td>
-    <td class="mono small">${esc(n.server)}:${n.port}</td>
+    <td class="mono small">${esc(hostPort(n.server, n.port))}</td>
     ${servers.map(s => `<td class="num" data-cell="${id}-${n.index}-${s.id}">${cellHTML(n.results && n.results[s.id])}</td>`).join('')}
     <td data-reach="${id}-${n.index}">${reachHTML(n.reach)}</td>
     <td>${n.upstream ? '' : badge(t('ext.noUpstream'), 'warn')}</td></tr>`).join('')
@@ -164,7 +164,7 @@ function showDetail(id, idx) {
   const link = n.link
     ? `<div class="ext-link"><div class="muted small">${t('ext.link')}</div><div class="mono small ext-val">${esc(n.link)}</div><div><button class="btn sm" data-act="ext.copy" data-link="${esc(n.link)}">${t('common.copy')}</button></div></div>`
     : `<p class="muted small">${t('ext.noLink')}</p>`;
-  openDrawer(esc(n.name), `<p class="small muted">${badge(esc(n.type))} ${esc(n.server)}:${n.port}${n.upstream ? '' : ' · ' + t('ext.noUpstream')}</p>
+  openDrawer(esc(n.name), `<p class="small muted">${badge(esc(n.type))} ${esc(hostPort(n.server, n.port))}${n.upstream ? '' : ' · ' + t('ext.noUpstream')}</p>
     <div class="table-wrap"><table class="grid kv"><tbody>${rows}</tbody></table></div>${link}`);
 }
 

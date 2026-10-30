@@ -4,6 +4,8 @@
 import { getLang } from './i18n.js';
 
 const EN = /*BEGIN*/{
+"线路的 IP 版本设置格式不对": "Invalid IP version setting for this line",
+"线路的 IP 版本只能是 v4 或 v6": "A line can only use v4 or v6",
 "已取消": "Cancelled",
 "大陆连通检测没有启用": "The China reachability check is not enabled",
 "先勾选要测的节点": "Tick the nodes to test first",

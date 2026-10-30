@@ -145,7 +145,8 @@ func panelInfo(dbPath string) (url string, user string, defaultPw bool, err erro
 	if !strings.HasSuffix(path, "/") {
 		path += "/"
 	}
-	return fmt.Sprintf("%s://%s%s", scheme, net.JoinHostPort(host, port), path), "admin", s["adminDefault"] == "true", nil
+	portNum, _ := strconv.Atoi(port)
+	return fmt.Sprintf("%s://%s%s", scheme, model.URLHost(scheme, host, portNum), path), "admin", s["adminDefault"] == "true", nil
 }
 
 // infoHost 面板地址里的主机名:订阅域名 → 面板域名 → 公网 IP。
@@ -200,7 +201,7 @@ func printPanelInfo(dbPath string) {
 			scheme = "https"
 		}
 		fmt.Println(colorBold + "  代理面板: " + colorReset + colorGray +
-			fmt.Sprintf("%s://%s%s", scheme, net.JoinHostPort(infoHost(s), rp), rpath) + colorReset)
+			fmt.Sprintf("%s://%s%s", scheme, urlHostStr(scheme, infoHost(s), rp), rpath) + colorReset)
 	}
 	fmt.Println()
 }
@@ -541,3 +542,12 @@ func printInstallSummary(dbPath string) {
 }
 
 var _ = backup.DBName
+
+// urlHostStr 同 model.URLHost,端口是字符串(设置里读出来的)。
+func urlHostStr(scheme, host, port string) string {
+	n, err := strconv.Atoi(port)
+	if err != nil {
+		return net.JoinHostPort(host, port)
+	}
+	return model.URLHost(scheme, host, n)
+}

@@ -197,6 +197,7 @@ func sameLines(a, b []model.Line) bool {
 			out[i].Options = normJSON(out[i].Options)
 			out[i].Addrs = normJSON(out[i].Addrs)
 			out[i].NodeIds = normJSON(out[i].NodeIds)
+			out[i].NodeFamily = normJSON(out[i].NodeFamily)
 			out[i].Tls = normJSON(out[i].Tls)
 			out[i].Transport = normJSON(out[i].Transport)
 			out[i].RouteRules = normJSON(out[i].RouteRules)

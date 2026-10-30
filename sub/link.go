@@ -24,6 +24,8 @@ type Entry struct {
 	Insecure bool    // 服务端为自签证书:客户端需允许不安全
 	NodeId   uint    // 对应 nodes.id(0 = 不按服务器过滤线路)
 	Ratio    float64 // 流量倍率(仅展示)
+	// IP4 / IP6 这台服务器的两个地址(没有的为空):线路单独选了 IP 版本时用,见 Line.NodeFamily。
+	IP4, IP6 string
 	// Certs 这台服务器有哪些证书(证书名 → 清单);老版本副机不报,为空。
 	Certs map[string]model.CertBrief
 	// InsecureFixed 设置里强制了"允许不安全"开或关:不再按证书判断。
@@ -143,6 +145,7 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 		}
 		return out
 	}
+	family := model.ParseNodeFamily(line.NodeFamily)
 	out := make([]addr, 0, len(entries))
 	for _, e := range entries {
 		if e.NodeId != 0 && !render.LineOnNode(line, e.NodeId) {
@@ -151,7 +154,18 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 		if e.NodeId != 0 && len(allowed) > 0 && !allowed[e.NodeId] {
 			continue // 用户在这条线路上只拿了别的服务器
 		}
-		out = append(out, certAddr(addr{server: e.Host, port: line.Port, sni: e.SNI, remark: e.Suffix, insecure: e.Insecure}, line, e))
+		host := e.Host
+		switch family[e.NodeId] { // 这条线路单独选了 IP 版本;这台没有那个地址就还用默认的
+		case "v4":
+			if e.IP4 != "" {
+				host = e.IP4
+			}
+		case "v6":
+			if e.IP6 != "" {
+				host = e.IP6
+			}
+		}
+		out = append(out, certAddr(addr{server: host, port: line.Port, sni: e.SNI, remark: e.Suffix, insecure: e.Insecure}, line, e))
 	}
 	return out
 }

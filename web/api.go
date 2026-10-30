@@ -311,11 +311,14 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cols := []string{"name", "protocol", "port", "upstream_id", "options", "addrs", "node_ids", "tls", "transport", "enabled"}
-		// 分流规则只在请求里带了这个字段时才改:外部程序按老格式改线路(不知道有这个字段)不能把规则清掉
+		// 分流规则、IP 版本只在请求里带了这个字段时才改:外部程序按老格式改线路(不知道有这些字段)不能把它们清掉
 		var keys map[string]json.RawMessage
 		if json.Unmarshal(raw, &keys) == nil {
 			if _, ok := keys["routeRules"]; ok {
 				cols = append(cols, "route_rules")
+			}
+			if _, ok := keys["nodeFamily"]; ok {
+				cols = append(cols, "node_family")
 			}
 		}
 		line.Id = id
@@ -583,6 +586,11 @@ func (s *Server) validateLine(line *model.Line) error {
 	if p := sub.RelayLoop(s.db, *line); p != "" {
 		return fmt.Errorf("这样会绕成环,流量出不去:%s", p)
 	}
+	family, err := model.NormNodeFamily(line.NodeFamily)
+	if err != nil {
+		return err
+	}
+	line.NodeFamily = family
 	return nil
 }
 
@@ -848,11 +856,11 @@ func (s *Server) validateUpstream(up *model.Upstream) error {
 
 type userPayload struct {
 	model.User
-	PlanIdSet       *uint           `json:"planId"`       // 没带这两个字段(外部程序按老格式改用户)就不动
+	PlanIdSet       *uint           `json:"planId"` // 没带这两个字段(外部程序按老格式改用户)就不动
 	ActivateDaysSet *int            `json:"activateDays"`
 	LineIds         []uint          `json:"lineIds"`  // 老字段:整条线路(全部服务器)
-	LineRefs []model.LineRef `json:"lineRefs"` // 新字段:线路 × 服务器;给了它就以它为准
-	ExtIds   []uint          `json:"extIds"`
+	LineRefs        []model.LineRef `json:"lineRefs"` // 新字段:线路 × 服务器;给了它就以它为准
+	ExtIds          []uint          `json:"extIds"`
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {

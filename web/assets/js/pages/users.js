@@ -1,7 +1,7 @@
 import { state, load, isReseller } from '../app.js';
 import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
-import { gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML } from '../ui.js';
+import { deviceCount, gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML } from '../ui.js';
 
 // 生效中的规则限速(主面板才有):列表徽章与详情抽屉都从这里取
 const limitsOf = id => (state.limitStates || []).filter(s => s.userId === id);
@@ -32,7 +32,7 @@ try { const v = Number(localStorage.getItem('m-ui-users-ps')); if (PAGE_SIZES.in
 let lastPager = '';
 const SORTS = {
   id: u => u.id, name: u => u.name.toLowerCase(), usage: u => (u.up || 0) + (u.down || 0),
-  expiry: u => u.expiry || Number.MAX_SAFE_INTEGER, devices: u => (u.onlineIps || []).length, status: u => (u.enabled ? 0 : 1),
+  expiry: u => u.expiry || Number.MAX_SAFE_INTEGER, devices: u => deviceCount(u.onlineIps), status: u => (u.enabled ? 0 : 1),
 };
 const th = (key, label) => `<th class="sortable ${sortKey === key ? 'sorted' : ''}" data-act="user.sort" data-id="${key}">${label}${sortKey === key ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
 
@@ -154,7 +154,7 @@ function renderRows() {
   if (!rows.length) { setHTML(body, `<tr><td colspan="8">${state.users.length ? empty() : firstUserGuide()}</td></tr>`); return; }
   setHTML(body, rows.map(u => {
     const used = (u.up || 0) + (u.down || 0);
-    const ips = (u.onlineIps || []).length;
+    const ips = deviceCount(u.onlineIps);
     return `<tr class="${selected.has(u.id) ? 'selected' : ''}">
       <td><input type="checkbox" class="sel" data-change="user.sel" data-id="${u.id}" ${selected.has(u.id) ? 'checked' : ''}></td>
       <td class="primary-cell">${dot(online.has(u.name))}<a href="#" data-act="user.detail" data-id="${u.id}">${esc(u.name)}</a>${planNameOf(u) ? ` ${badge(planNameOf(u))}` : ''}${u.remark ? `<div class="sub-cell">${esc(u.remark)}</div>` : ''}</td>

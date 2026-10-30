@@ -1,7 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy } from '../ui.js';
+import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy, urlHost } from '../ui.js';
 
 export const title = () => t('set.title');
 
@@ -117,8 +117,8 @@ export async function render(el) {
       <dl class="kv">
         <dt>${t('set.version')}</dt><dd class="mono">${esc(state.status.version || '')}</dd>
         <dt>sing-box</dt><dd class="mono">${esc(state.status.singBox || '—')}</dd>
-        <dt>${t('set.panelUrl')}</dt><dd class="mono">${esc((state.status.panelTLS ? 'https' : 'http') + '://' + (s.webDomain || '<IP>') + ':' + (state.status.webPort || '') + (state.status.webPath || '/'))}</dd>
-        <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + (s.webDomain || '<IP>') + ':' + (state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('set.userPh') + '>?format=clash')}</dd>
+        <dt>${t('set.panelUrl')}</dt><dd class="mono">${esc((state.status.panelTLS ? 'https' : 'http') + '://' + urlHost(state.status.panelTLS ? 'https' : 'http', s.webDomain || '<IP>', state.status.webPort || '') + (state.status.webPath || '/'))}</dd>
+        <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + urlHost(state.status.subTLS ? 'https' : 'http', s.webDomain || '<IP>', state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('set.userPh') + '>?format=clash')}</dd>
         <dt>License</dt><dd>GPL-3.0 · <a href="${esc(state.status.repo || '#')}" target="_blank" rel="noopener">GitHub</a></dd>
       </dl>
       <p class="hint">${t('set.restartNote')}</p>

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -409,7 +408,7 @@ func (s *Server) subBase() string {
 	if host == "" {
 		host = "<服务器IP或域名>"
 	}
-	return fmt.Sprintf("%s://%s%s", scheme, net.JoinHostPort(host, strconv.Itoa(s.settingInt("subPort", 2056))), s.subPath())
+	return fmt.Sprintf("%s://%s%s", scheme, model.URLHost(scheme, host, s.settingInt("subPort", 2056)), s.subPath())
 }
 
 // subKey 订阅地址里代表这个用户的那一段:主面板用户是用户名,代理建的用户是随机令牌。

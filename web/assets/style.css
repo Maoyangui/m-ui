@@ -312,6 +312,12 @@ details.menu .menu-list hr { border: none; border-top: 1px solid var(--border); 
 .drawer.over { z-index: 60; }
 .check-list.one-col { grid-template-columns: 1fr; }
 tr.ext-hidden .primary-cell > a { text-decoration: line-through; opacity: .55; }
+.node-list { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.node-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; min-width: 0; }
+.node-row label { min-width: 0; }
+.node-fam { width: auto; flex: none; padding: .1rem .3rem; font-size: .76rem; }
+.field > select.node-fam { max-width: 12rem; }
+.hint.warn { color: var(--warn, #b45309); }
 .ext-name { display: flex; align-items: center; gap: .4rem; }
 .ext-name > span { min-width: 5em; }
 .ext-url { max-width: 13rem; word-break: break-all; }

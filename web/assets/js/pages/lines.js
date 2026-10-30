@@ -98,9 +98,13 @@ function renderRows() {
   }
   const nodeIdsOf = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
   const serversCell = l => {
-    const ids = nodeIdsOf(l);
-    if (!ids.length) return `<span class="muted">${t('line.allServers')}</span>`;
-    return ids.map(id => { const n = (state.nodes || []).find(x => x.id === id); return badge(n ? n.name : '#' + id, 'primary'); }).join(' ');
+    const ids = nodeIdsOf(l), fam = familyOf(l);
+    const tag = id => { const n = (state.nodes || []).find(x => x.id === id); return badge((n ? n.name : '#' + id) + (fam[id] ? ' · ' + famName(fam[id]) : ''), 'primary'); };
+    if (!ids.length) { // 全部服务器:只把单独选了 IP 版本的列出来
+      const picked = Object.keys(fam).map(Number).filter(id => (state.nodes || []).some(x => x.id === id));
+      return `<span class="muted">${t('line.allServers')}</span>${picked.length ? ' ' + picked.map(tag).join(' ') : ''}`;
+    }
+    return ids.map(tag).join(' ');
   };
   setHTML(body, rows.map(l => `
     <tr draggable="${query ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
@@ -139,6 +143,53 @@ function enableDragSort(tbody) {
       const rect = tr.getBoundingClientRect();
       tr.parentNode.insertBefore(dragged, (e.clientY - rect.top) / rect.height > 0.5 ? tr.nextSibling : tr);
     };
+  });
+}
+
+// ---- 双栈:线路单独选 IP 版本 ----
+const famName = f => (f === 'v6' ? 'IPv6' : 'IPv4');
+function familyOf(l) { const v = parseJ(l.nodeFamily); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+const isV4Addr = s => /^\d+\.\d+\.\d+\.\d+$/.test(s);
+const bareAddr = n => String(n.addr || '').trim().replace(/^\[|\]$/g, '');
+// 这台两个地址都有才算双栈(探测到的,手填的连接地址算它那一族;和后端 model.FamilyIPs 一致)
+function isDualStack(n) {
+  const a = bareAddr(n), pub = String(n.publicIp || '').trim(), pub6 = String(n.publicIp6 || '').trim();
+  return (isV4Addr(a) || isV4Addr(pub)) && (a.includes(':') || pub6.includes(':') || pub.includes(':'));
+}
+// 没单独选时这台实际用哪个版本:手填的连接地址优先,否则看服务器的"自动地址用"
+function serverFamily(n) {
+  const a = bareAddr(n);
+  if (isV4Addr(a)) return 'IPv4';
+  if (a.includes(':')) return 'IPv6';
+  return a ? '' : famName(n.addrFamily);
+}
+const famSelect = (n, cur) => {
+  const def = serverFamily(n);
+  return `<select class="sm node-fam" data-node="${n.id}" aria-label="${esc(t('line.ipVersion'))}">
+    <option value="">${esc(def ? t('line.famDefault', { f: def }) : t('line.famDefaultPlain'))}</option>
+    <option value="v4" ${cur === 'v4' ? 'selected' : ''}>IPv4</option>
+    <option value="v6" ${cur === 'v6' ? 'selected' : ''}>IPv6</option>
+  </select>`;
+};
+// 部署到哪些服务器;双栈的那行多一个小下拉。只有一台服务器时不用勾选,是双栈才露出下拉
+function serversField(l) {
+  const nodes = state.nodes || [];
+  const fam = familyOf(l);
+  if (nodes.length < 2) {
+    return nodes.length && isDualStack(nodes[0]) ? `<div class="full">${field(t('line.ipVersion'), famSelect(nodes[0], fam[nodes[0].id]), t('line.ipVersionHelp'))}</div>` : '';
+  }
+  const ids = (() => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } })();
+  const anyDual = nodes.some(isDualStack);
+  const rows = nodes.map(n => `<div class="node-row"><label><input type="checkbox" class="node-cb" value="${n.id}" ${!ids.length || ids.includes(n.id) ? 'checked' : ''}> ${esc(n.name)}${n.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>${isDualStack(n) ? famSelect(n, fam[n.id]) : ''}</div>`).join('');
+  return `<div class="full">${field(t('line.servers'), `<div class="check-list node-list">${rows}</div>`, t('line.serversHelp') + (anyDual ? ' ' + t('line.famHelp') : ''))}</div>`;
+}
+// 没部署到的服务器,下拉没有意义
+function syncFamily() {
+  const cbs = [...document.querySelectorAll('.node-cb')];
+  const any = cbs.some(c => c.checked);
+  document.querySelectorAll('.node-fam').forEach(s => {
+    const cb = cbs.find(c => c.value === s.dataset.node);
+    s.disabled = !!cb && any && !cb.checked;
   });
 }
 
@@ -238,6 +289,8 @@ function readForm(id) {
   const nodeCbs = [...document.querySelectorAll('.node-cb')];
   const picked = nodeCbs.filter(c => c.checked).map(c => Number(c.value));
   body.nodeIds = (picked.length && picked.length < nodeCbs.length) ? picked : [];
+  body.nodeFamily = {};
+  document.querySelectorAll('.node-fam').forEach(s => { if (s.value && !s.disabled) body.nodeFamily[s.dataset.node] = s.value; });
   // TLS
   if (!spec.noTls) {
     const tls = { mode: fv('f-tlsmode') };
@@ -367,10 +420,7 @@ async function editLine(id, cloneFrom, preset) {
       </div>
       ${check('f-enabled', t('common.enabled'), l.enabled !== false)}
       ${id ? '' : check('f-assign', t('line.assignAll'), true, t('line.assignAllHelp'))}
-      ${(state.nodes || []).length > 1 ? `<div class="full">${field(t('line.servers'), `<div class="check-list">${(state.nodes || []).map(n => {
-        const ids = (() => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } })();
-        return `<label><input type="checkbox" class="node-cb" value="${n.id}" ${!ids.length || ids.includes(n.id) ? 'checked' : ''}> ${esc(n.name)}${n.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>`;
-      }).join('')}</div>`, t('line.serversHelp'))}</div>` : ''}
+      ${serversField(l)}
     </div>
     <div id="f-dyn"></div>
     <details class="adv"><summary>${t('line.advanced')}</summary><textarea id="f-extra"></textarea></details>
@@ -389,6 +439,8 @@ async function editLine(id, cloneFrom, preset) {
   renderDynamic(l);
   rrBind(rrInit);
   document.getElementById('f-protocol').addEventListener('change', () => renderDynamic({ options: {}, tls: {}, transport: {} }));
+  document.querySelectorAll('.node-cb').forEach(c => c.addEventListener('change', syncFamily));
+  syncFamily();
 }
 
 // ---- 分流规则:同一条线路按域名 / IP 段 / 端口分给不同出口,没命中的走线路的上游(后端见 render/route_rules.go) ----

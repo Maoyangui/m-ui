@@ -95,3 +95,65 @@ func TestLineCertInSubscription(t *testing.T) {
 		t.Fatalf("链接里 SNI 不对: %v", links)
 	}
 }
+
+// 双栈服务器:线路单独选的 IP 版本优先,没选的跟随服务器;这台没有那个地址就还用默认的,不把节点弄没。
+func TestLineFamilyInSubscription(t *testing.T) {
+	entries := []Entry{
+		{Name: "a", Host: "1.1.1.1", IP4: "1.1.1.1", IP6: "2001:db8::a", NodeId: 1, Suffix: "-a"},
+		{Name: "b", Host: "2001:db8::b", IP4: "2.2.2.2", IP6: "2001:db8::b", NodeId: 2, Suffix: "-b"},
+		{Name: "c", Host: "3.3.3.3", IP4: "3.3.3.3", NodeId: 3, Suffix: "-c"}, // 没有 IPv6
+	}
+	serverOf := func(family string) map[string]string {
+		l := model.Line{Id: 1, Name: "l", Protocol: "trojan", Port: 443}
+		if family != "" {
+			l.NodeFamily = []byte(family)
+		}
+		out := map[string]string{}
+		for _, a := range resolveAddrs(l, entries, nil) {
+			out[a.remark] = a.server
+		}
+		return out
+	}
+	got := serverOf("")
+	if got["-a"] != "1.1.1.1" || got["-b"] != "2001:db8::b" || got["-c"] != "3.3.3.3" {
+		t.Fatalf("没选时跟随服务器: %v", got)
+	}
+	got = serverOf(`{"1":"v6","2":"v4","3":"v6"}`)
+	if got["-a"] != "2001:db8::a" || got["-b"] != "2.2.2.2" {
+		t.Fatalf("线路选的优先: %v", got)
+	}
+	if got["-c"] != "3.3.3.3" {
+		t.Fatalf("这台没有 IPv6,不能把节点弄没: %v", got)
+	}
+	// 自定义对外地址优先于这项
+	l := model.Line{Id: 1, Name: "l", Protocol: "trojan", Port: 443, NodeFamily: []byte(`{"1":"v6"}`), Addrs: []byte(`[{"server":"9.9.9.9"}]`)}
+	if a := resolveAddrs(l, entries, nil); len(a) != 1 || a[0].server != "9.9.9.9" {
+		t.Fatalf("自定义地址: %+v", a)
+	}
+}
+
+// 节点写成 IPv6 地址时分享链接和 Clash 都要写对;Clash 打开 ipv6 总开关。
+func TestIPv6ServerInOutput(t *testing.T) {
+	user := model.User{Name: "u", Credentials: []byte(`{"trojan":{"password":"p"}}`)}
+	line := model.Line{Id: 1, Name: "l", Protocol: "trojan", Port: 443, Tls: []byte(`{"mode":"cert"}`), NodeFamily: []byte(`{"1":"v6"}`)}
+	entries := []Entry{{Name: "a", Host: "1.1.1.1", IP4: "1.1.1.1", IP6: "2001:db8::a", NodeId: 1}}
+	links := GenerateLinksFor(user, []model.Line{line}, entries, nil)
+	if len(links) != 1 || !strings.Contains(links[0], "@[2001:db8::a]:443") {
+		t.Fatalf("分享链接: %v", links)
+	}
+	y, err := BuildClashFor(user, []model.Line{line}, entries, "", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(y, "ipv6: true") || !strings.Contains(y, "2001:db8::a") {
+		t.Fatalf("Clash:\n%s", y)
+	}
+	line.NodeFamily = nil
+	y, err = BuildClashFor(user, []model.Line{line}, entries, "", "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(y, "ipv6: true") {
+		t.Fatal("没有 IPv6 节点时不用动这个开关")
+	}
+}

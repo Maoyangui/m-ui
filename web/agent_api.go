@@ -7,11 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -132,7 +130,7 @@ func (s *Server) selfApiURL() string {
 	if host == "" {
 		host = "<本机IP>"
 	}
-	return fmt.Sprintf("%s://%s%s", scheme, net.JoinHostPort(host, strconv.Itoa(s.settingInt("webPort", 2053))), s.basePath())
+	return fmt.Sprintf("%s://%s%s", scheme, model.URLHost(scheme, host, s.settingInt("webPort", 2053)), s.basePath())
 }
 
 func (s *Server) handleAgentPing(w http.ResponseWriter, r *http.Request) {

@@ -528,9 +528,10 @@ type PrecheckResult struct {
 	Family     string            `json:"family"`   // v4 = 比的是 A 记录;v6 = 本机只有 IPv6,比的是 AAAA 记录
 	Resolved   map[string]string `json:"resolved"` // resolver → A(或 AAAA)记录
 	DNSOk      bool              `json:"dnsOk"`
-	Port80     string            `json:"port80"`     // free | busy | error text
-	Cloudflare bool              `json:"cloudflare"` // A 记录像 Cloudflare 代理 IP 段(不完全判断)
-	Wildcard   bool              `json:"wildcard"`   // 泛域名:不看解析与 80 端口,只能用 DNS 验证
+	Port80     string            `json:"port80"`              // free | busy | error text
+	Cloudflare bool              `json:"cloudflare"`          // A 记录像 Cloudflare 代理 IP 段(不完全判断)
+	Wildcard   bool              `json:"wildcard"`            // 泛域名:不看解析与 80 端口,只能用 DNS 验证
+	WrongAAAA  string            `json:"wrongAaaa,omitempty"` // 域名的 AAAA 记录不是本机:CA 优先走 IPv6 验证,A 记录全对也会失败
 }
 
 // Precheck 检查域名解析是否指向本机公网 IP、80 端口是否空闲。
@@ -569,6 +570,9 @@ func Precheck(ctx context.Context, domain string) PrecheckResult {
 		res.Resolved[strings.TrimSuffix(r, ":53")] = v
 	}
 	res.DNSOk = all && res.PublicIP != ""
+	if res.Family == "v4" {
+		res.WrongAAAA = wrongAAAA(ctx, domain, v6)
+	}
 	if ln, err := net.Listen("tcp", ":80"); err == nil {
 		ln.Close()
 		res.Port80 = "free"
@@ -576,6 +580,20 @@ func Precheck(ctx context.Context, domain string) PrecheckResult {
 		res.Port80 = "busy: " + err.Error()
 	}
 	return res
+}
+
+// wrongAAAA 域名有 AAAA 记录、却都不是本机的 IPv6 时返回其中一条(本机没有 IPv6 也算);没有 AAAA 或对得上返回空。
+func wrongAAAA(ctx context.Context, domain, v6 string) string {
+	ips, err := resolverAt(net.JoinHostPort(publicDNS[0].v4, "53")).LookupIP(ctx, "ip6", domain)
+	if err != nil || len(ips) == 0 {
+		return ""
+	}
+	for _, ip := range ips {
+		if ip.String() == v6 {
+			return ""
+		}
+	}
+	return ips[0].String()
 }
 
 // PublicIP 探测本机公网 IP,优先 IPv4,纯 IPv6 机器给 IPv6;失败返回空。

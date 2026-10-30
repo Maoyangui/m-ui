@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { lineItems, keysFromRefs, linePicker, refLabels } from '../linepicker.js';
-import { gbValue, gbBytes, esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy } from '../ui.js';
+import { urlHost, gbValue, gbBytes, esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy } from '../ui.js';
 
 export const title = () => t('rs.title');
 export const subtitle = () => t('rs.subtitle');
@@ -42,7 +42,7 @@ function panelURL() {
   const host = s.webDomain || (state.status && state.status.domain) || location.hostname;
   const path = s.resellerPath || '/dl/';
   const scheme = location.protocol === 'https:' ? 'https' : 'http';
-  return `${scheme}://${host}:${s.resellerPort || 2054}${path}`;
+  return `${scheme}://${urlHost(scheme, host, s.resellerPort || 2054)}${path}`;
 }
 
 export async function tick() { if (document.getElementById('rs-body')) await reload(); }

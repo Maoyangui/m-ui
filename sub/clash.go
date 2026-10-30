@@ -3,6 +3,7 @@ package sub
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/render"
@@ -125,6 +126,9 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		}
 	}
 	root["proxies"] = proxies
+	if _, set := root["ipv6"]; !set && hasIPv6Server(proxies) {
+		root["ipv6"] = true // 老内核默认关着 IPv6,关着连不上写成 IPv6 地址的节点
+	}
 
 	selectList := []string{}
 	if notice != "" {
@@ -149,6 +153,18 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		return "", err
 	}
 	return string(out), nil
+}
+
+// hasIPv6Server 节点里有没有写成 IPv6 地址的。
+func hasIPv6Server(proxies []interface{}) bool {
+	for _, p := range proxies {
+		if m, ok := p.(map[string]interface{}); ok {
+			if s, _ := m["server"].(string); strings.Contains(s, ":") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // mergeClashGroups 模板里写的策略组和生成的合起来:同名的用模板的(放在生成的那个位置),其余的接在后面。

@@ -222,6 +222,21 @@ export function progress(used, total) {
   const kind = pct >= 100 ? 'danger' : pct >= 80 ? 'warn' : '';
   return `<div class="progress ${kind}" title="${pct}%"><div class="bar" style="width:${pct}%"></div></div>`;
 }
+// 拼 URL 的主机部分(和后端 model.URLHost 一致):协议的默认端口不写,http 跑在 443 上不能省
+export const urlHost = (scheme, host, port) => ((scheme === 'https' && Number(port) === 443) || (scheme === 'http' && Number(port) === 80) ? host : host + ':' + port);
+
+// 地址 + 端口的显示:IPv6 加方括号,不然分不清端口
+export const hostPort = (host, port) => (String(host).includes(':') ? `[${host}]:${port}` : `${host}:${port}`);
+
+// 设备数按它算(和后端 model.IPKey 一致):IPv6 取 /64,一台设备的几个临时地址算一台
+export function ipKey(ip) {
+  if (!String(ip).includes(':')) return ip;
+  const [h, tail = ''] = String(ip).split('::');
+  const a = h ? h.split(':') : [], b = tail ? tail.split(':') : [];
+  return [...a, ...Array(Math.max(0, 8 - a.length - b.length)).fill('0'), ...b].slice(0, 4).map(x => parseInt(x, 16).toString(16)).join(':');
+}
+export const deviceCount = ips => new Set((ips || []).map(ipKey)).size;
+
 export const field = (label, input, help = '') =>
   `<label class="field"><span class="label">${esc(label)}</span>${input}${help ? `<span class="help">${esc(help)}</span>` : ''}</label>`;
 export const check = (id, label, checked, help = '') =>

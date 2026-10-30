@@ -300,7 +300,7 @@ registerActions({
         <dt>${t('cert.publicIp')}</dt><dd class="mono">${esc(p.publicIp || '—')}</dd>
         ${Object.entries(p.resolved).map(([r, v]) => `<dt class="mono">${esc(r)}</dt><dd class="mono">${esc(v)} ${v === p.publicIp ? badge('✓', 'ok') : badge('✗', 'danger')}</dd>`).join('')}
         <dt>${t('cert.port80')}</dt><dd>${p.port80 === 'free' ? badge(t('cert.port80Free'), 'ok') : badge(t('cert.port80Busy'), 'danger') + ` <span class="small muted">${esc(p.port80)}</span>`}</dd>
-      </dl><p class="hint">${p.dnsOk ? t('cert.dnsOk') : t('cert.dnsBad')}</p>`;
+      </dl><p class="hint">${p.dnsOk ? t('cert.dnsOk') : t('cert.dnsBad')}</p>${p.wrongAaaa ? `<p class="hint warn">${esc(t('cert.aaaaBad', { ip: p.wrongAaaa }))}</p>` : ''}`;
     } catch (e) { box.innerHTML = `<span class="small" style="color:var(--danger)">${esc(e.message)}</span>`; }
     finally { btn.disabled = false; }
   },

@@ -66,6 +66,7 @@ func (s *Server) allow(ip string) bool {
 	if perMin <= 0 || ip == "" {
 		return true
 	}
+	ip = model.IPKey(ip) // IPv6 按 /64:一个 /64 里的地址随便换,按单个地址限流等于没限
 	s.guardMu.Lock()
 	defer s.guardMu.Unlock()
 	if s.buckets == nil {
@@ -257,13 +258,13 @@ func EntriesFromNodes(db *gorm.DB, webDomain, localPublicIP, localPublicIP6 stri
 		if domain == "" && n.IsLocal {
 			domain = webDomain
 		}
+		pub, pub6 := n.PublicIP, n.PublicIP6
+		if n.IsLocal {
+			pub, pub6 = localPublicIP, localPublicIP6
+		}
 		ip := model.BareHost(n.Addr)
 		if ip == "" {
-			if n.IsLocal {
-				ip, _ = model.AutoIP(localPublicIP, localPublicIP6, n.AddrFamily)
-			} else {
-				ip, _ = model.AutoIP(n.PublicIP, n.PublicIP6, n.AddrFamily)
-			}
+			ip, _ = model.AutoIP(pub, pub6, n.AddrFamily)
 		}
 		host := domain
 		if preferIP && ip != "" {
@@ -273,6 +274,7 @@ func EntriesFromNodes(db *gorm.DB, webDomain, localPublicIP, localPublicIP6 stri
 			continue
 		}
 		e := Entry{Name: n.Name, Host: host, SNI: sniFor(domain), NodeId: n.Id, Ratio: n.Ratio, Suffix: "-" + n.Name, Certs: certsOf(n)}
+		e.IP4, e.IP6 = model.FamilyIPs(n.Addr, pub, pub6)
 		out = append(out, e)
 	}
 	if len(out) == 0 {

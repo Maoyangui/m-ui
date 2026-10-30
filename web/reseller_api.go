@@ -258,7 +258,7 @@ func (s *Server) resellerRowWith(rs model.Reseller, online map[string][]string) 
 	}
 	s.db.Raw(`SELECT COUNT(*) n, COALESCE(SUM(device_limit), 0) devices FROM users WHERE reseller_id = ?`, rs.Id).Scan(&agg)
 	row.Users, row.Used, row.Devices = int(agg.N), resellerUsed(s.db, rs), int(agg.Devices)
-	row.Online = len(s.resellerOnlineIPs(rs.Id, online))
+	row.Online = model.DeviceCount(s.resellerOnlineIPs(rs.Id, online))
 	if h := s.run.Hub(); h != nil {
 		row.PoolRejects = h.Rejects(model.ResellerGroup(rs.Id))
 	}

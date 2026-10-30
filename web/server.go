@@ -527,13 +527,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // loginKey 登录限流按什么计数:IPv4 按单个地址;IPv6 按 /64 —— 一台机器通常分到整段 /64,
 // 按完整地址计数的话每次换一个源地址就永远不会被挡。
-func loginKey(ip string) string {
-	p := net.ParseIP(ip)
-	if p == nil || p.To4() != nil {
-		return ip
-	}
-	return p.Mask(net.CIDRMask(64, 128)).String() + "/64"
-}
+func loginKey(ip string) string { return model.IPKey(ip) }
 
 var (
 	dummyHashOnce sync.Once
