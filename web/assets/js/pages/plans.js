@@ -49,7 +49,7 @@ export function editPlan(id) {
     <div class="form-grid">
       ${field(t('common.name'), `<input id="f-name" value="${esc(p.name || '')}" placeholder="${t('plan.namePh')}">`)}
       ${field(t('plan.desc'), `<input id="f-desc" value="${esc(p.desc || '')}">`)}
-      ${field(t('plan.quota') + ' GB', `<input id="f-vol" type="number" min="0" value="${p.volumeGb || 0}">`, t('plan.zeroUnlimited'))}
+      ${field(t('plan.quota') + ' GB', `<input id="f-vol" type="number" min="0" step="any" value="${p.volumeGb || 0}">`, t('plan.zeroUnlimited'))}
       ${field(t('plan.days'), `<input id="f-days" type="number" min="0" value="${p.days || 0}">`, t('plan.zeroUnlimited'))}
       ${field(t('user.f.device'), `<input id="f-device" type="number" min="0" value="${p.deviceLimit || 0}">`)}
       ${field(t('user.f.up'), `<input id="f-up" type="number" min="0" value="${p.speedUp || 0}">`)}

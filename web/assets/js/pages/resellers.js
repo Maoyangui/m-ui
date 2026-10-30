@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { lineItems, keysFromRefs, linePicker, refLabels } from '../linepicker.js';
-import { esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy } from '../ui.js';
+import { gbValue, gbBytes, esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy } from '../ui.js';
 
 export const title = () => t('rs.title');
 export const subtitle = () => t('rs.subtitle');
@@ -128,7 +128,7 @@ function editReseller(id) {
   openModal(id ? t('rs.edit') : t('rs.add'), `
     <div class="form-grid">
       ${field(t('common.name'), `<input id="f-name" value="${esc(r.name || '')}" placeholder="${t('rs.namePh')}">`, t('rs.nameHelp'))}
-      ${field(t('rs.volumeGb'), `<input id="f-vol" type="number" min="0" value="${Math.round((r.volume || 0) / 1073741824)}">`, t('plan.zeroUnlimited'))}
+      ${field(t('rs.volumeGb'), `<input id="f-vol" type="number" min="0" step="any" value="${gbValue(r.volume)}">`, t('plan.zeroUnlimited'))}
       ${field(t('rs.userLimit'), `<input id="f-users" type="number" min="0" value="${r.userLimit || 0}">`, t('rs.userLimitHelp'))}
       ${field(t('rs.deviceLimit'), `<input id="f-device" type="number" min="0" value="${r.deviceLimit || 0}">`, t('rs.deviceHelp'))}
       ${field(t('rs.expiry'), `<input id="f-expiry" type="date" value="${r.expiry ? new Date(r.expiry * 1000).toISOString().slice(0, 10) : ''}">`, t('rs.expiryHelp'))}
@@ -140,7 +140,7 @@ function editReseller(id) {
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), enabled: fchk('f-enabled'),
-      volume: Number(fv('f-vol')) * 1073741824, deviceLimit: Number(fv('f-device')), userLimit: Number(fv('f-users')),
+      volume: gbBytes(fv('f-vol')), deviceLimit: Number(fv('f-device')), userLimit: Number(fv('f-users')),
       speedUp: Number(fv('f-up')), speedDown: Number(fv('f-down')),
       expiry: fv('f-expiry') ? Math.floor(new Date(fv('f-expiry') + 'T23:59:59').getTime() / 1000) : 0,
       lineRefs: picker.read(), lineIds: picker.read().map(x => x.lineId),

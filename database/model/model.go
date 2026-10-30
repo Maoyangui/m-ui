@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"math"
 	"strconv"
 )
 
@@ -190,7 +191,7 @@ type Plan struct {
 	// ResellerId 归属:0=主面板;代理只看得到也只能用自己建的套餐(名称在各自范围内唯一)
 	ResellerId  uint            `json:"resellerId" gorm:"uniqueIndex:idx_plans_owner_name,priority:1;index"`
 	Name        string          `json:"name" gorm:"uniqueIndex:idx_plans_owner_name,priority:2"`
-	VolumeGB    int             `json:"volumeGb"` // 0=不限
+	VolumeGB    float64         `json:"volumeGb"` // 0=不限;可以是小数(0.1 = 约 100 MB)
 	Days        int             `json:"days"`     // 0=不限
 	DeviceLimit int             `json:"deviceLimit"`
 	SpeedUp     int             `json:"speedUp"`
@@ -202,6 +203,9 @@ type Plan struct {
 	Desc        string          `json:"desc"`
 	Sort        int             `json:"sort"`
 }
+
+// GBToBytes GB 换算成字节(1 GB = 1024³,四舍五入)。
+func GBToBytes(gb float64) int64 { return int64(math.Round(gb * (1 << 30))) }
 
 // ExtNode 外部节点:一条分享链接,或一个外部订阅地址;分配给用户后聚合进该用户的订阅。
 type ExtNode struct {

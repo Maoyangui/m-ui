@@ -52,3 +52,16 @@ func TestApplyPlanNewUnlimitedAndLines(t *testing.T) {
 		t.Fatalf("应返回套餐线路: %v", got)
 	}
 }
+
+// 小数额度:0.1 GB 要换算成约 100 MB,不能被截断成 0(0 = 不限量,等于白送)。
+func TestApplyPlanFractionalVolume(t *testing.T) {
+	var u model.User
+	applyPlan(&u, model.Plan{VolumeGB: 0.1, Days: 1}, "new", 1000)
+	if u.Volume != 107374182 {
+		t.Fatalf("0.1 GB 应为 107374182 字节,实际 %d", u.Volume)
+	}
+	applyPlan(&u, model.Plan{VolumeGB: 2.5}, "new", 1000)
+	if u.Volume != 2684354560 {
+		t.Fatalf("2.5 GB 应为 2684354560 字节,实际 %d", u.Volume)
+	}
+}

@@ -143,7 +143,7 @@ func (s *Server) validatePlan(p *model.Plan) error {
 //	renew  续费:从"现在与原到期中较晚者"起算,已用流量清零(进入新周期)
 //	extend 延期:同 renew 的到期计算,但保留已用流量
 func applyPlan(u *model.User, p model.Plan, mode string, now int64) []uint {
-	u.Volume = int64(p.VolumeGB) << 30
+	u.Volume = model.GBToBytes(p.VolumeGB)
 	u.DeviceLimit, u.SpeedUp, u.SpeedDown = p.DeviceLimit, p.SpeedUp, p.SpeedDown
 	u.AutoReset, u.ResetDays = p.AutoReset, p.ResetDays
 

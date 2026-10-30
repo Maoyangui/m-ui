@@ -1,7 +1,7 @@
 import { state, load, isReseller } from '../app.js';
 import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML } from '../ui.js';
+import { gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML } from '../ui.js';
 
 // 生效中的规则限速(主面板才有):列表徽章与详情抽屉都从这里取
 const limitsOf = id => (state.limitStates || []).filter(s => s.userId === id);
@@ -286,7 +286,7 @@ function editUser(id) {
       ${field(nameLabel(), `<input id="f-name" value="${esc(u.name || '')}">`, nameHelp())}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(u.remark || '')}">`)}
       ${state.plans.length ? `<div class="full">${field(t('user.fromPlan'), `<div class="row">${planSelect('f-plan', 0)}<button type="button" class="btn" data-act="user.fillPlan">${t('user.fromPlan')}</button></div>`)}</div>` : ''}
-      ${field(t('user.f.volume'), `<input id="f-volume" type="number" min="0" value="${u.volume ? (u.volume / 1073741824).toFixed(0) : 0}">`)}
+      ${field(t('user.f.volume'), `<input id="f-volume" type="number" min="0" step="any" value="${gbValue(u.volume)}">`)}
       ${field(t('user.f.expiry'), `<input id="f-expiry" type="date" value="${expiryVal}">`)}
       ${field(t('user.f.device'), `<input id="f-device" type="number" min="0" value="${u.deviceLimit || 0}">`, t('user.f.deviceHelp'))}
       ${field(t('user.f.up'), `<input id="f-up" type="number" min="0" value="${u.speedUp || 0}">`)}
@@ -303,7 +303,7 @@ function editUser(id) {
     const expiry = fv('f-expiry');
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), enabled: fchk('f-enabled'),
-      volume: Math.round(Number(fv('f-volume')) * 1073741824),
+      volume: gbBytes(fv('f-volume')),
       expiry: expiry ? Math.floor(new Date(expiry + 'T23:59:59').getTime() / 1000) : 0,
       deviceLimit: Number(fv('f-device')), speedUp: Number(fv('f-up')), speedDown: Number(fv('f-down')),
       autoReset: fchk('f-autoreset'), resetDays: Number(fv('f-resetdays')),

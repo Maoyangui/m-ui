@@ -366,7 +366,7 @@ func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
 	if req.Volume != nil {
 		u.Volume = *req.Volume
 	} else if req.VolumeGB != nil {
-		u.Volume = int64(*req.VolumeGB * float64(1<<30))
+		u.Volume = model.GBToBytes(*req.VolumeGB)
 	}
 	if req.Expiry != nil {
 		u.Expiry = *req.Expiry

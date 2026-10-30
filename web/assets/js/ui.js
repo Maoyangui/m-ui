@@ -17,6 +17,14 @@ export function fmtBytes(n, digits = 2) {
 // 这样页面上的时间、数据面日志里的时间、流量图的分桶才是同一套。
 let TZ = 'Asia/Shanghai';
 const dtfCache = new Map();
+// 流量输入框里显示的 GB 数:最多 6 位小数、去掉尾零。不能取整 —— 0.1 GB 取整成 0,再保存就成了不限量
+export function gbValue(bytes) {
+  if (!bytes) return 0;
+  return +(bytes / 1073741824).toFixed(6) || 0.000001;
+}
+// 输入框里的 GB 数换成字节(后端要整数)
+export const gbBytes = v => Math.round(Number(v) * 1073741824);
+
 export function setTimezone(z) {
   z = (z || '').trim() || 'Asia/Shanghai';
   try { new Intl.DateTimeFormat('zh-CN', { timeZone: z }); } catch { z = 'Asia/Shanghai'; } // 名字无效就回落
