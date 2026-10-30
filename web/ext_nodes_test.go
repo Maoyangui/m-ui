@@ -196,3 +196,45 @@ func TestExtNodesStaleListRejected(t *testing.T) {
 		t.Fatal("列表变了指纹应跟着变")
 	}
 }
+
+// 隐藏和改名:存下来,展开时带着,订阅刷新后按名字接着生效;空名字不算改名。
+func TestExtNodesPrefs(t *testing.T) {
+	s := extNodesServer(t)
+	if code, out := extCall(t, s, http.MethodPost, "1/nodes/prefs", `{"hidden":["a","a"," "],"renames":{"b":"乙","a":"  ","c":"c"}}`); code != http.StatusOK {
+		t.Fatalf("保存失败: %d %v", code, out)
+	}
+	_, out := extCall(t, s, http.MethodGet, "1/nodes", "")
+	nodes, _ := out["nodes"].([]interface{})
+	if len(nodes) != 2 {
+		t.Fatalf("节点数不对: %v", out)
+	}
+	first, second := nodes[0].(map[string]interface{}), nodes[1].(map[string]interface{})
+	if first["hidden"] != true || second["hidden"] == true {
+		t.Fatalf("隐藏不对: %v", nodes)
+	}
+	if second["rename"] != "乙" || first["rename"] != nil {
+		t.Fatalf("改名不对: %v", nodes)
+	}
+	var e model.ExtNode
+	s.db.First(&e, 1)
+	if strings.Count(string(e.Hidden), `"a"`) != 1 || strings.Contains(string(e.Renames), `"c"`) {
+		t.Fatalf("存的内容没整理: hidden=%s renames=%s", e.Hidden, e.Renames)
+	}
+	if code, _ := extCall(t, s, http.MethodPost, "1/nodes/prefs", `{bad`); code != http.StatusBadRequest {
+		t.Fatalf("坏请求应该 400: %d", code)
+	}
+}
+
+// 大陆连通:列表变了就拒绝(序号对不上),查不存在的任务给 404。
+func TestExtNodesReachGuards(t *testing.T) {
+	s := extNodesServer(t)
+	if code, _ := extCall(t, s, http.MethodPost, "1/nodes/reach", `{"indexes":[0],"sig":"stale"}`); code != http.StatusConflict {
+		t.Fatalf("指纹不对应该 409: %d", code)
+	}
+	if code, _ := extCall(t, s, http.MethodGet, "1/nodes/reach/nosuchjob", ""); code != http.StatusNotFound {
+		t.Fatalf("没有的任务应该 404: %d", code)
+	}
+	if code, _ := extCall(t, s, http.MethodGet, "1/nodes/reach", ""); code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET 应该 405: %d", code)
+	}
+}
