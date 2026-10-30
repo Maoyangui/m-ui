@@ -24,6 +24,7 @@ type rulePayload struct {
 	AllUsers    bool    `json:"allUsers"`
 	UserIds     []uint  `json:"userIds"`
 	ResellerIds []uint  `json:"resellerIds"`
+	PlanIds     []uint  `json:"planIds"`
 	Days        string  `json:"days"`
 	Start       string  `json:"start"`
 	End         string  `json:"end"`
@@ -42,6 +43,7 @@ type ruleView struct {
 	model.Rule
 	UserIds     []uint  `json:"userIds"`
 	ResellerIds []uint  `json:"resellerIds"`
+	PlanIds     []uint  `json:"planIds"`
 	ThresholdGB float64 `json:"thresholdGb"`
 	TargetCount int     `json:"targetCount"`
 	ActiveCount int     `json:"activeCount"`
@@ -80,14 +82,15 @@ func (p rulePayload) toRule(cur *model.Rule) (model.Rule, error) {
 		return r, errors.New("上行与下行至少填一个限速")
 	}
 	r.UpMbps, r.DownMbps = p.UpMbps, p.DownMbps
-	if !p.AllUsers && len(p.UserIds) == 0 && len(p.ResellerIds) == 0 {
-		return r, errors.New("至少选一个目标:全部用户、指定用户或某个代理名下的用户")
+	if !p.AllUsers && len(p.UserIds) == 0 && len(p.ResellerIds) == 0 && len(p.PlanIds) == 0 {
+		return r, errors.New("至少选一个目标:全部用户、指定用户、某个代理名下的用户或某个套餐的用户")
 	}
 	r.AllUsers = p.AllUsers
-	r.UserIds, r.ResellerIds = nil, nil
+	r.UserIds, r.ResellerIds, r.PlanIds = nil, nil, nil
 	if !p.AllUsers {
 		r.UserIds, _ = json.Marshal(uniqueIDs(p.UserIds))
 		r.ResellerIds, _ = json.Marshal(uniqueIDs(p.ResellerIds))
+		r.PlanIds, _ = json.Marshal(uniqueIDs(p.PlanIds))
 	}
 	switch r.Kind {
 	case rules.KindSchedule:
@@ -127,7 +130,7 @@ func (p rulePayload) toRule(cur *model.Rule) (model.Rule, error) {
 
 func (s *Server) ruleViews(list []model.Rule) []ruleView {
 	var users []model.User
-	s.db.Select("id, enabled, reseller_id").Find(&users)
+	s.db.Select("id, enabled, reseller_id, plan_id").Find(&users)
 	type cnt struct {
 		RuleId uint
 		N      int
@@ -140,13 +143,16 @@ func (s *Server) ruleViews(list []model.Rule) []ruleView {
 	}
 	out := make([]ruleView, 0, len(list))
 	for _, r := range list {
-		v := ruleView{Rule: r, UserIds: rules.ParseIDs(r.UserIds), ResellerIds: rules.ParseIDs(r.ResellerIds),
+		v := ruleView{Rule: r, UserIds: rules.ParseIDs(r.UserIds), ResellerIds: rules.ParseIDs(r.ResellerIds), PlanIds: rules.ParseIDs(r.PlanIds),
 			ThresholdGB: math.Round(float64(r.ThresholdBytes)/bytesPerGB*100) / 100, ActiveCount: active[r.Id]}
 		if v.UserIds == nil {
 			v.UserIds = []uint{}
 		}
 		if v.ResellerIds == nil {
 			v.ResellerIds = []uint{}
+		}
+		if v.PlanIds == nil {
+			v.PlanIds = []uint{}
 		}
 		if r.Enabled {
 			v.TargetCount = len(rules.Targets(r, users))

@@ -23,10 +23,12 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/reach"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/sub"
 	"github.com/Maoyangui/m-ui/tz"
 
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/mem"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
 
@@ -747,7 +749,9 @@ func (s *Server) validateUpstream(up *model.Upstream) error {
 
 type userPayload struct {
 	model.User
-	LineIds  []uint          `json:"lineIds"`  // 老字段:整条线路(全部服务器)
+	PlanIdSet       *uint           `json:"planId"`       // 没带这两个字段(外部程序按老格式改用户)就不动
+	ActivateDaysSet *int            `json:"activateDays"`
+	LineIds         []uint          `json:"lineIds"`  // 老字段:整条线路(全部服务器)
 	LineRefs []model.LineRef `json:"lineRefs"` // 新字段:线路 × 服务器;给了它就以它为准
 	ExtIds   []uint          `json:"extIds"`
 }
@@ -809,7 +813,17 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		if p.PlanIdSet != nil {
+			p.User.PlanId = *p.PlanIdSet
+		}
+		if p.ActivateDaysSet != nil {
+			p.User.ActivateDays = *p.ActivateDaysSet
+		}
 		if err := s.validateUser(&p.User); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if err := s.planBelongs(p.User.PlanId, scope(r)); err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -885,7 +899,18 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.User.Id = id
+		p.User.PlanId, p.User.ActivateDays = cur.PlanId, cur.ActivateDays
+		if p.PlanIdSet != nil {
+			p.User.PlanId = *p.PlanIdSet
+		}
+		if p.ActivateDaysSet != nil {
+			p.User.ActivateDays = *p.ActivateDaysSet
+		}
 		if err := s.validateUser(&p.User); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if err := s.planBelongs(p.User.PlanId, cur.ResellerId); err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -913,7 +938,7 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&model.User{}).Where("id = ?", id).Select(
 				"name", "enabled", "disabled_reason", "volume", "expiry", "auto_reset", "reset_days",
-				"next_reset", "device_limit", "speed_up", "speed_down", "remark", "desc",
+				"next_reset", "device_limit", "speed_up", "speed_down", "remark", "desc", "plan_id", "activate_days",
 			).Updates(p.User).Error; err != nil {
 				return err
 			}
@@ -931,6 +956,9 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 		}
 		s.audit(r, "user", "update", p.User.Name)
 		s.reloadUsers("修改用户 " + p.User.Name)
+		if p.User.PlanId != cur.PlanId {
+			s.rulesNow() // 换了套餐,按套餐选人的规则要立刻重新判
+		}
 		writeJSON(w, http.StatusOK, p.User)
 	case http.MethodDelete:
 		var u model.User
@@ -958,6 +986,12 @@ func (s *Server) validateUser(u *model.User) error {
 	}
 	if u.DeviceLimit < 0 || u.SpeedUp < 0 || u.SpeedDown < 0 {
 		return errors.New("设备数与限速不能为负")
+	}
+	if u.ActivateDays < 0 {
+		return errors.New("首次连接后的天数不能为负")
+	}
+	if u.ActivateDays > 0 {
+		u.Expiry = 0 // 两者互斥:填了"首次连接后 N 天",到期日要等连上才有
 	}
 	dup := s.db.Model(&model.User{}).Where("name = ?", u.Name)
 	if u.Id != 0 {
@@ -1058,7 +1092,7 @@ var panelSettings = setOf(
 	"webDomain", "timezone", "webListen", "webPort", "webPath", "webCertFile", "webKeyFile",
 	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subProfileTitle", "subUpdates",
 	"subUseUserName", "subEncode", "subShowNotice", "subInsecure", "subServerAddr", "extRefreshMinutes",
-	"subAutoFormat", "subClashExt", "subSingboxExt",
+	"subAutoFormat", "subClashExt", "subSingboxExt", "blockBT",
 	"resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile",
 	"subPageEnabled", "subShareEnabled", "subPageBrand", "subPageTitle", "subPageSupport", "subPageBuyURL", "subPageNotice",
 	"tgEnabled", "tgToken", "tgChatId", "tgProxy", "tgOnLogin", "tgOnUserDisabled", "tgOnUserExpiring", "tgExpiringDays",
@@ -1128,6 +1162,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		if err := validateSubTemplates(in); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if v, ok := in["webDomain"]; ok && strings.Contains(v, "*") {
+			badRequest(w, errors.New("面板域名不能写泛域名,要填具体的访问地址,如 hk.example.com"))
+			return
+		}
 		if v, ok := in["reachMinutes"]; ok && strings.TrimSpace(v) != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(v)); err != nil || n < reach.MinMinutes || n > reach.MaxMinutes {
 				badRequest(w, fmt.Errorf("大陆连通巡检间隔要在 %d 到 %d 分钟之间", reach.MinMinutes, reach.MaxMinutes))
@@ -1137,6 +1179,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		roleChanged := false
 		oldDomain := s.setting("webDomain")
 		oldAllowPrivate := s.setting("allowPrivate")
+		oldBlockBT := s.setting("blockBT")
 		oldShare := s.setting("subShareEnabled")
 		note := "端口、证书与监听地址的改动需重启 m-ui 生效"
 		if v, ok := in["nodeMode"]; ok && strings.EqualFold(strings.TrimSpace(v), "true") && !strings.EqualFold(s.setting("nodeMode"), "true") {
@@ -1167,8 +1210,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if roleChanged {
 			logger.Info("面板角色已切换为: ", s.role())
 		}
-		if v, ok := in["allowPrivate"]; ok && strings.TrimSpace(v) != oldAllowPrivate {
-			s.reloadAll("私网访问开关") // 路由规则变了,只能整体重载
+		v1, ok1 := in["allowPrivate"]
+		v2, ok2 := in["blockBT"]
+		if (ok1 && strings.TrimSpace(v1) != oldAllowPrivate) || (ok2 && !strings.EqualFold(strings.TrimSpace(v2), oldBlockBT)) {
+			s.reloadAll("私网访问 / 屏蔽 BT 开关") // 路由规则变了,只能整体重载
 		} else if v, ok := in["subShareEnabled"]; ok && strings.TrimSpace(v) != oldShare {
 			s.reloadUsers("临时共享开关") // 关掉时已有的共享凭据要立刻从数据面撤下
 		}
@@ -1185,6 +1230,43 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// maxSubTemplate 订阅模板的长度上限:模板随快照发给每台副机,订阅每次都要解析一遍。
+const maxSubTemplate = 128 << 10
+
+// validateSubTemplates 模板写坏了,订阅就出不来(客户端全部更新失败),保存时先拦。
+func validateSubTemplates(in map[string]string) error {
+	if v := strings.TrimSpace(in["subClashExt"]); v != "" {
+		if len(v) > maxSubTemplate {
+			return errors.New("Clash 模板太长了,上限 128 KB")
+		}
+		var doc map[string]interface{}
+		if err := yaml.Unmarshal([]byte(v), &doc); err != nil {
+			return fmt.Errorf("Clash 模板不是合法的 YAML: %w", err)
+		}
+		if doc == nil {
+			return errors.New("Clash 模板要是一份 YAML 配置(键值对)")
+		}
+	}
+	if v := strings.TrimSpace(in["subSingboxExt"]); v != "" {
+		if len(v) > maxSubTemplate {
+			return errors.New("sing-box 模板太长了,上限 128 KB")
+		}
+		var doc map[string]interface{}
+		if err := json.Unmarshal([]byte(v), &doc); err != nil {
+			return fmt.Errorf("sing-box 模板不是合法的 JSON: %w", err)
+		}
+		if doc == nil {
+			return errors.New("sing-box 模板要是一份 JSON 配置(键值对)")
+		}
+	}
+	return nil
+}
+
+// handleSubTemplates GET /sub-templates:内置的 Clash / sing-box 模板,设置页「填入内置模板」用。
+func (s *Server) handleSubTemplates(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"clash": sub.DefaultClashTemplate(), "singbox": sub.DefaultSingBoxTemplate()})
 }
 
 // validatePorts 校验这次提交后的面板 / 订阅 / 代理面板端口:必须是 1-65535 且互不相同。

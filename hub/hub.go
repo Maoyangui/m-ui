@@ -41,7 +41,7 @@ import (
 var SyncedSettings = []string{
 	"timezone", "allowPrivate",
 	"upstreamTestUrl", "upstreamCheckMinutes", "upstreamCheckFailThreshold",
-	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subSingboxExt", "subAutoFormat", "subUpdates",
+	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subSingboxExt", "subAutoFormat", "blockBT", "subUpdates",
 	"subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice", "subShareEnabled", "subPageBuyURL", "subPageBrand",
 }
 
@@ -623,6 +623,7 @@ func ApplyCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 			if dDown > 0 {
 				update["down"] = gorm.Expr("down + ?", dDown)
 			}
+			model.StartOnFirstUse(update, now)
 			res := tx.Model(&model.User{}).Where("name = ?", c.UserName).Updates(update)
 			if res.Error != nil {
 				return res.Error

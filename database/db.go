@@ -81,6 +81,7 @@ func Open(dbPath string) (*gorm.DB, error) {
 		SELECT r.id FROM resellers r WHERE r.volume > 0 AND
 		(SELECT COALESCE(SUM(u.up + u.down + u.total_up + u.total_down), 0) FROM users u WHERE u.reseller_id = r.id) + r.used_carried - r.used_base >= r.volume)`)
 	db.Exec("UPDATE users SET disabled_reason = 'manual' WHERE enabled = 0 AND disabled_reason = ''")
+	backfillUserPlans(db)
 	return db, nil
 }
 

@@ -183,6 +183,9 @@ input, select, textarea { width: 100%; padding: .48rem .65rem; border: 1px solid
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
 input[type=checkbox] { width: auto; accent-color: var(--primary); }
 textarea { min-height: 5rem; font-family: var(--mono); font-size: .82rem; }
+textarea.code-area { min-height: 13rem; white-space: pre; overflow: auto; line-height: 1.45; tab-size: 2; }
+.up-plans { margin-bottom: .6rem; padding-bottom: .6rem; border-bottom: 1px solid var(--border); }
+.up-plans-title { margin-bottom: .35rem; font-size: .85rem; }
 select.sm, input.sm { padding: .3rem .5rem; font-size: .82rem; }
 .btn { display: inline-flex; align-items: center; gap: .35rem; padding: .48rem .9rem; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; font: inherit; font-weight: 500; line-height: 1.2; transition: filter .15s, background .15s; white-space: nowrap; }
 .btn:hover { background: var(--surface-2); }

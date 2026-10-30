@@ -322,6 +322,9 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 			if t.down > 0 {
 				update["down"] = gorm.Expr("down + ?", scale(t.down))
 			}
+			if t.up > 0 || t.down > 0 {
+				model.StartOnFirstUse(update, now)
+			}
 			if err := tx.Model(&model.User{}).Where("name = ?", name).Updates(update).Error; err != nil {
 				return err
 			}

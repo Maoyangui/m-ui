@@ -177,6 +177,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"users/", s.auth(s.masterOnly(s.handleUserItem)))
 	mux.HandleFunc(api+"users/import", s.auth(s.masterOnly(s.handleUsersImport)))
 	mux.HandleFunc(api+"settings", s.auth(s.handleSettings))
+	mux.HandleFunc(api+"sub-templates", s.auth(s.masterOnly(s.handleSubTemplates)))
 	mux.HandleFunc(api+"sublogs", s.auth(s.handleSubLogs))
 	mux.HandleFunc(api+"password", s.auth(s.handlePassword))
 	mux.HandleFunc(api+"reload", s.auth(s.handleReload))

@@ -38,6 +38,11 @@ const groups = () => [
     ['subServerAddr', t('set.subServerAddr'), 'select', t('set.subServerAddrHelp'), [['', t('set.addrIp')], ['domain', t('set.addrDomain')]]],
     ['extRefreshMinutes', t('set.extRefresh'), 'number'],
   ]},
+  { id: 'subtmpl', title: t('set.subTmpl'), masterOnly: true, extra: `<div class="row" style="margin-top:.6rem;flex-wrap:wrap"><button class="btn sm" data-act="set.tmplDefault" data-id="clash">${t('set.tmplFillClash')}</button><button class="btn sm" data-act="set.tmplDefault" data-id="singbox">${t('set.tmplFillSingbox')}</button></div>`, fields: [
+    ['subAutoFormat', t('set.subAutoFormat'), 'boolOn', t('set.subAutoFormatHelp')],
+    ['subClashExt', t('set.subClashExt'), 'code', t('set.subClashExtHelp')],
+    ['subSingboxExt', t('set.subSingboxExt'), 'code', t('set.subSingboxExtHelp')],
+  ]},
   { id: 'reseller', title: t('set.reseller'), restart: true, fields: [
     ['resellerEnabled', t('set.resellerEnabled'), 'boolOn', t('set.resellerEnabledHelp')],
     ['resellerListen', t('set.listen'), 'text'], ['resellerPort', t('set.port'), 'number'],
@@ -79,6 +84,7 @@ const groups = () => [
     ['upstreamTestUrl', t('set.testUrl'), 'text', t('set.testUrlHelp')],
     ['statsBucketSeconds', t('set.bucket'), 'number'], ['trafficAge', t('set.trafficAge'), 'number', t('set.trafficAgeHelp')],
     ['allowPrivate', t('set.allowPrivate'), 'bool', t('set.allowPrivateHelp')],
+    ['blockBT', t('set.blockBT'), 'bool', t('set.blockBTHelp')],
   ]},
 ];
 
@@ -100,11 +106,11 @@ export async function render(el) {
         <div class="form-grid">${g.fields.map(([k, label, type, help, options]) =>
           type === 'bool' || type === 'boolOn'
             ? check('set-' + k, label, s[k] === undefined || s[k] === '' ? (k === 'subPageEnabled' || type === 'boolOn') : String(s[k]).toLowerCase() === 'true', help)
-            : type === 'textarea'
-              ? `<div class="full">${field(label, `<textarea id="set-${k}">${esc(s[k] ?? '')}</textarea>`, help)}</div>`
+            : type === 'textarea' || type === 'code'
+              ? `<div class="full">${field(label, `<textarea id="set-${k}" ${type === 'code' ? 'class="code-area" spellcheck="false" autocomplete="off"' : ''}>${esc(s[k] ?? '')}</textarea>`, help)}</div>`
               : type === 'select'
                 ? field(label, `<select id="set-${k}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(s[k] ?? '') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`, help)
-                : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">`, help)).join('')}</div>
+                : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">`, help)).join('')}</div>${g.extra || ''}
       </section>`).join('')}
     <section class="card">
       <div class="card-head"><h2>${t('set.about')}</h2><a href="#/admin" class="btn sm">${t('nav.admin')} →</a></div>
@@ -159,6 +165,12 @@ registerActions({
       return;
     }
     try { const r = await post('settings', body); await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  'set.tmplDefault': async id => {
+    const box = document.getElementById(id === 'clash' ? 'set-subClashExt' : 'set-subSingboxExt');
+    if (box.value.trim() && !await confirm(t('set.tmplOverwrite'))) return;
+    try { const r = await get('sub-templates'); box.value = r[id]; box.focus(); }
     catch (e) { toast(e.message, 'err'); }
   },
   'set.saveRole': async () => {

@@ -192,6 +192,8 @@ type apiUserView struct {
 	TotalUp        int64               `json:"totalUp"`
 	TotalDown      int64               `json:"totalDown"`
 	Expiry         int64               `json:"expiry"`
+	ActivateDays   int                 `json:"activateDays"`
+	PlanId         uint                `json:"planId"`
 	Expired        bool                `json:"expired"`
 	AutoReset      bool                `json:"autoReset"`
 	ResetDays      int                 `json:"resetDays"`
@@ -284,7 +286,7 @@ func (s *Server) apiUserWith(u model.User, snap *apiSnapshot) apiUserView {
 	now := time.Now().Unix()
 	return apiUserView{
 		Id: u.Id, Name: u.Name, Enabled: u.Enabled, Volume: u.Volume, Used: u.Up + u.Down, Up: u.Up, Down: u.Down,
-		TotalUp: u.TotalUp, TotalDown: u.TotalDown, Expiry: u.Expiry, Expired: u.Expiry > 0 && u.Expiry < now,
+		TotalUp: u.TotalUp, TotalDown: u.TotalDown, Expiry: u.Expiry, ActivateDays: u.ActivateDays, PlanId: u.PlanId, Expired: u.Expiry > 0 && u.Expiry < now,
 		AutoReset: u.AutoReset, ResetDays: u.ResetDays, NextReset: u.NextReset,
 		DeviceLimit: u.DeviceLimit, SpeedUp: u.SpeedUp, SpeedDown: u.SpeedDown, Remark: u.Remark, Desc: u.Desc,
 		CreatedAt: u.CreatedAt, OnlineAt: u.OnlineAt, DisabledReason: u.DisabledReason, ActiveLimits: snap.limitsBy[u.Id],
@@ -325,6 +327,7 @@ type apiUserReq struct {
 	Volume      *int64           `json:"volume"` // 字节,0=不限;与 volumeGb 二选一
 	Days        *int             `json:"days"`   // 创建:自现在起 N 天;修改:在原到期(未过期时)基础上再加 N 天
 	Expiry      *int64           `json:"expiry"` // 到期时间戳(秒),0=不限;优先级高于 days
+	ActivateDays *int            `json:"activateDays"` // 首次连接后 N 天到期;填了就不看 expiry / days
 	DeviceLimit *int             `json:"deviceLimit"`
 	SpeedUp     *int             `json:"speedUp"`
 	SpeedDown   *int             `json:"speedDown"`
@@ -368,9 +371,20 @@ func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
 	} else if req.VolumeGB != nil {
 		u.Volume = model.GBToBytes(*req.VolumeGB)
 	}
-	if req.Expiry != nil {
+	if req.ActivateDays != nil {
+		if *req.ActivateDays < 0 {
+			return errors.New("首次连接后的天数不能为负")
+		}
+		u.ActivateDays = *req.ActivateDays
+		if u.ActivateDays > 0 {
+			u.Expiry = 0
+		}
+	}
+	if req.Expiry != nil && u.ActivateDays == 0 {
 		u.Expiry = *req.Expiry
-	} else if req.Days != nil {
+	} else if req.Days != nil && u.ActivateDays > 0 && req.ActivateDays == nil && *req.Days > 0 {
+		u.ActivateDays += *req.Days // 还没开始计时的用户:加到等待计时的天数上
+	} else if req.Days != nil && u.ActivateDays == 0 {
 		base := now
 		if !creating && u.Expiry > now {
 			base = u.Expiry
@@ -431,6 +445,8 @@ func updateUserFields(u model.User, renew bool) map[string]interface{} {
 		"disabled_reason": u.DisabledReason,
 		"volume":          u.Volume,
 		"expiry":          u.Expiry,
+		"activate_days":   u.ActivateDays,
+		"plan_id":         u.PlanId,
 		"device_limit":    u.DeviceLimit,
 		"speed_up":        u.SpeedUp,
 		"speed_down":      u.SpeedDown,

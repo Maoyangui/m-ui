@@ -4,6 +4,16 @@
 import { getLang } from './i18n.js';
 
 const EN = /*BEGIN*/{
+"Clash 模板不是合法的 YAML: %w": "The Clash template is not valid YAML: %w",
+"Clash 模板太长了,上限 128 KB": "The Clash template is too long (128 KB max)",
+"Clash 模板要是一份 YAML 配置(键值对)": "The Clash template must be a YAML config (key/value pairs)",
+"sing-box 模板不是合法的 JSON: %w": "The sing-box template is not valid JSON: %w",
+"sing-box 模板太长了,上限 128 KB": "The sing-box template is too long (128 KB max)",
+"sing-box 模板要是一份 JSON 配置(键值对)": "The sing-box template must be a JSON config (key/value pairs)",
+"至少选一个目标:全部用户、指定用户、某个代理名下的用户或某个套餐的用户": "Pick at least one target: all users, specific users, a reseller's users or a plan's users",
+"这个套餐不属于该用户的归属": "This plan does not belong to the same owner as the user",
+"面板域名不能写泛域名,要填具体的访问地址,如 hk.example.com": "The panel domain cannot be a wildcard. Use the real address, such as hk.example.com",
+"首次连接后的天数不能为负": "The days after first connection cannot be negative",
 "%s 必须启用 TLS": "%s requires TLS",
 "%s与%s的端口都是 %d,不能重复": "%s and %s both use port %d; they must differ",
 "%s文件不存在: %s": "%s file not found: %s",
@@ -292,7 +302,6 @@ const EN = /*BEGIN*/{
 "缺少 planId 或 plan": "Missing planId or plan",
 "缺少 upstreamId": "Missing upstreamId",
 "缺少服务器地址": "Missing server address",
-"至少选一个目标:全部用户、指定用户或某个代理名下的用户": "Pick at least one target: all users, specific users, or a reseller's users",
 "至少需要一个域名或 IP": "At least one domain or IP is required",
 "规则不存在": "Rule not found",
 "规则名称不能为空,最多 64 字": "Rule name is required, at most 64 characters",

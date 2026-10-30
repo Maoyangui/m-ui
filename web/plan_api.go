@@ -11,6 +11,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/rules"
 
 	"gorm.io/gorm"
 )
@@ -22,25 +23,41 @@ func (s *Server) handlePlans(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		var plans []model.Plan
-		s.db.Where("COALESCE(reseller_id,0) = ?", rid).Order("sort asc, id asc").Find(&plans)
-		writeJSON(w, http.StatusOK, plans)
+		q := s.db.Order("sort asc, id asc")
+		if !(rid == 0 && r.URL.Query().Has("all")) { // 主面板的规则页要连代理的套餐一起选;其余都只看自己的
+			q = q.Where("COALESCE(reseller_id,0) = ?", rid)
+		}
+		q.Find(&plans)
+		writeJSON(w, http.StatusOK, s.planViews(plans, rid))
 	case http.MethodPost:
-		var p model.Plan
-		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		var body planPayload
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			badRequest(w, err)
 			return
 		}
+		p := body.Plan
 		p.ResellerId = rid
 		if err := s.validatePlan(&p); err != nil {
 			badRequest(w, err)
 			return
 		}
 		p.Id = 0
-		if err := s.db.Create(&p).Error; err != nil {
+		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&p).Error; err != nil {
+				return err
+			}
+			if rid == 0 && body.RuleIds != nil {
+				return setPlanRules(tx, p.Id, *body.RuleIds)
+			}
+			return nil
+		}); err != nil {
 			badRequest(w, err)
 			return
 		}
 		s.audit(r, "plan", "create", p.Name)
+		if rid == 0 && body.RuleIds != nil {
+			s.rulesNow()
+		}
 		writeJSON(w, http.StatusOK, p)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
@@ -65,34 +82,145 @@ func (s *Server) handlePlanItem(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodPut:
-		var p model.Plan
-		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		var body planPayload
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			badRequest(w, err)
 			return
 		}
+		p := body.Plan
 		p.Id, p.ResellerId = id, rid
 		if err := s.validatePlan(&p); err != nil {
 			badRequest(w, err)
 			return
 		}
-		if err := s.db.Model(&model.Plan{}).Where("id = ?", id).Select(
-			"name", "volume_gb", "days", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "line_ids", "line_nodes", "desc", "sort",
-		).Updates(p).Error; err != nil {
+		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.Plan{}).Where("id = ?", id).Select(
+				"name", "volume_gb", "days", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "first_use", "line_ids", "line_nodes", "desc", "sort",
+			).Updates(p).Error; err != nil {
+				return err
+			}
+			if rid == 0 && body.RuleIds != nil { // 没带 ruleIds(外部程序按老格式改套餐)就不动规则
+				return setPlanRules(tx, id, *body.RuleIds)
+			}
+			return nil
+		}); err != nil {
 			badRequest(w, err)
 			return
 		}
 		s.audit(r, "plan", "update", p.Name)
+		if rid == 0 && body.RuleIds != nil {
+			s.rulesNow()
+		}
 		writeJSON(w, http.StatusOK, p)
 	case http.MethodDelete:
-		if err := s.db.Delete(&model.Plan{}, id).Error; err != nil {
+		// 套餐删了,用户和规则里指着它的 id 一并清掉:id 不会复用,但留着的话规则页、用户页都对不上名字
+		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Delete(&model.Plan{}, id).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.User{}).Where("plan_id = ?", id).Update("plan_id", 0).Error; err != nil {
+				return err
+			}
+			return setPlanRules(tx, id, nil)
+		}); err != nil {
 			badRequest(w, err)
 			return
 		}
 		s.audit(r, "plan", "delete", id)
+		s.rulesNow()
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// planPayload 新增 / 修改套餐的请求:RuleIds 是这个套餐要跟的限速规则;没带这个字段 = 不动(只有主面板能改)。
+type planPayload struct {
+	model.Plan
+	RuleIds *[]uint `json:"ruleIds"`
+}
+
+// planView 套餐列表:带上有多少用户、跟着哪些限速规则。
+type planView struct {
+	model.Plan
+	UserCount    int64  `json:"userCount"`
+	RuleIds      []uint `json:"ruleIds"`
+	ResellerName string `json:"resellerName,omitempty"`
+}
+
+func (s *Server) planViews(plans []model.Plan, rid uint) []planView {
+	type cnt struct {
+		PlanId uint
+		N      int64
+	}
+	var counts []cnt
+	s.db.Model(&model.User{}).Select("plan_id, COUNT(*) AS n").Where("plan_id > 0").Group("plan_id").Scan(&counts)
+	users := make(map[uint]int64, len(counts))
+	for _, c := range counts {
+		users[c.PlanId] = c.N
+	}
+	byPlan := map[uint][]uint{}
+	if rid == 0 { // 规则是主面板的东西,代理的套餐页看不到
+		var list []model.Rule
+		s.db.Select("id, plan_ids").Where("COALESCE(reseller_id,0) = 0").Order("sort asc, id asc").Find(&list)
+		for _, r := range list {
+			for _, pid := range rules.ParseIDs(r.PlanIds) {
+				byPlan[pid] = append(byPlan[pid], r.Id)
+			}
+		}
+	}
+	names := map[uint]string{}
+	for _, p := range plans {
+		if p.ResellerId != 0 && names[p.ResellerId] == "" {
+			var n string
+			s.db.Model(&model.Reseller{}).Select("name").Where("id = ?", p.ResellerId).Scan(&n)
+			names[p.ResellerId] = n
+		}
+	}
+	out := make([]planView, 0, len(plans))
+	for _, p := range plans {
+		ids := byPlan[p.Id]
+		if ids == nil {
+			ids = []uint{}
+		}
+		out = append(out, planView{Plan: p, UserCount: users[p.Id], RuleIds: ids, ResellerName: names[p.ResellerId]})
+	}
+	return out
+}
+
+// setPlanRules 让主面板的规则里只有 ruleIds 这几条选着这个套餐(规则那边存的是套餐 id 列表,两头改的是同一份数据)。
+func setPlanRules(tx *gorm.DB, planID uint, ruleIds []uint) error {
+	want := make(map[uint]bool, len(ruleIds))
+	for _, id := range ruleIds {
+		want[id] = true
+	}
+	var list []model.Rule
+	if err := tx.Select("id, plan_ids").Where("COALESCE(reseller_id,0) = 0").Find(&list).Error; err != nil {
+		return err
+	}
+	for _, r := range list {
+		ids := rules.ParseIDs(r.PlanIds)
+		has := false
+		kept := make([]uint, 0, len(ids)+1)
+		for _, id := range ids {
+			if id == planID {
+				has = true
+				continue
+			}
+			kept = append(kept, id)
+		}
+		if has == want[r.Id] {
+			continue
+		}
+		if want[r.Id] {
+			kept = append(kept, planID)
+		}
+		b, _ := json.Marshal(kept)
+		if err := tx.Model(&model.Rule{}).Where("id = ?", r.Id).Update("plan_ids", json.RawMessage(b)).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Server) validatePlan(p *model.Plan) error {
@@ -143,6 +271,7 @@ func (s *Server) validatePlan(p *model.Plan) error {
 //	renew  续费:从"现在与原到期中较晚者"起算,已用流量清零(进入新周期)
 //	extend 延期:同 renew 的到期计算,但保留已用流量
 func applyPlan(u *model.User, p model.Plan, mode string, now int64) []uint {
+	u.PlanId = p.Id
 	u.Volume = model.GBToBytes(p.VolumeGB)
 	u.DeviceLimit, u.SpeedUp, u.SpeedDown = p.DeviceLimit, p.SpeedUp, p.SpeedDown
 	u.AutoReset, u.ResetDays = p.AutoReset, p.ResetDays
@@ -151,10 +280,15 @@ func applyPlan(u *model.User, p model.Plan, mode string, now int64) []uint {
 	if mode != "new" && u.Expiry > now {
 		base = u.Expiry
 	}
-	if p.Days > 0 {
-		u.Expiry = base + int64(p.Days)*86400
-	} else {
-		u.Expiry = 0
+	switch {
+	case p.Days <= 0:
+		u.Expiry, u.ActivateDays = 0, 0
+	case u.ActivateDays > 0:
+		u.ActivateDays += p.Days // 还没开始计时:再加一个周期,照样等首次连接
+	case p.FirstUse && u.Expiry <= now:
+		u.Expiry, u.ActivateDays = 0, p.Days // 新号或已过期的:等首次连接才开始计时
+	default:
+		u.Expiry = base + int64(p.Days)*86400 // 正在计时的老用户续费:接着原到期顺延
 	}
 	if mode != "extend" {
 		u.TotalUp += u.Up
@@ -207,6 +341,16 @@ func (s *Server) handleUserPlan(w http.ResponseWriter, r *http.Request, u model.
 		badRequest(w, err)
 		return
 	}
+	if req.Mode == "bind" { // 只归入套餐:额度和到期都不动(老用户想按套餐套规则时用)
+		if err := s.bindUserPlan([]model.User{u}, req.PlanId); err != nil {
+			badRequest(w, err)
+			return
+		}
+		s.audit(r, "user", "plan:bind", u.Name)
+		s.rulesNow()
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "expiry": u.Expiry})
+		return
+	}
 	p, err := s.loadPlan(req.PlanId)
 	if err != nil {
 		badRequest(w, err)
@@ -228,6 +372,38 @@ func (s *Server) handleUserPlan(w http.ResponseWriter, r *http.Request, u model.
 	s.audit(r, "user", "plan:"+req.Mode+":"+p.Name, u.Name)
 	s.reloadUsers("套餐 " + p.Name + " → " + u.Name)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "expiry": u.Expiry})
+}
+
+// planBelongs 套餐和用户必须是同一个归属(主面板 / 同一个代理)。0 = 不属于任何套餐,总是可以。
+func (s *Server) planBelongs(planID, resellerID uint) error {
+	if planID == 0 {
+		return nil
+	}
+	p, err := s.loadPlan(planID)
+	if err != nil {
+		return err
+	}
+	if p.ResellerId != resellerID {
+		return errors.New("这个套餐不属于该用户的归属")
+	}
+	return nil
+}
+
+// bindUserPlan 把用户归入套餐(0 = 移出),不改额度。
+func (s *Server) bindUserPlan(users []model.User, planID uint) error {
+	for _, u := range users {
+		if err := s.planBelongs(planID, u.ResellerId); err != nil {
+			return err
+		}
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		for _, u := range users {
+			if err := tx.Model(&model.User{}).Where("id = ?", u.Id).Update("plan_id", planID).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // applyUserPlan 把套餐套到已有用户上并落库(含套餐指定的线路);调用方负责审计与热更新。
@@ -472,6 +648,17 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case "plan":
+		if req.Mode == "bind" {
+			var users []model.User
+			s.db.Where("id IN ?", req.Ids).Find(&users)
+			if err := s.bindUserPlan(users, req.PlanId); err != nil {
+				badRequest(w, err)
+				return
+			}
+			affected = int64(len(users))
+			s.rulesNow()
+			break
+		}
 		p, err := s.loadPlan(req.PlanId)
 		if err != nil {
 			badRequest(w, err)

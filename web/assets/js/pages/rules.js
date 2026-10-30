@@ -8,7 +8,7 @@ import { esc, toast, confirm, openModal, openDrawer, registerActions, badge, fie
 
 export const title = () => t('rule.title');
 export const subtitle = () => t('rule.subtitle');
-let resellers = [];
+let resellers = [], plans = [];
 
 export async function render(el) {
   el.innerHTML = `
@@ -21,9 +21,10 @@ export async function render(el) {
 }
 
 async function refresh() {
-  const [rules, rs] = await Promise.all([get('rules').catch(() => []), get('resellers').catch(() => [])]);
+  const [rules, rs, ps] = await Promise.all([get('rules').catch(() => []), get('resellers').catch(() => []), get('plans?all=1').catch(() => [])]);
   state.rules = rules || [];
   resellers = rs || [];
+  plans = ps || [];
   renderRows();
 }
 export async function tick() { await refresh(); }
@@ -47,7 +48,7 @@ function renderRows() {
       <td>${badge(t('rule.kind.' + r.kind), r.kind === 'burst' ? 'warn' : 'primary')}</td>
       <td>${esc(condText(r))}</td>
       <td class="num">${limitText(r)}</td>
-      <td>${esc(targetText(r, resellers))}<div class="sub-cell">${t('rule.targetCount', { n: r.targetCount })}</div></td>
+      <td>${esc(targetText(r, resellers, plans))}<div class="sub-cell">${t('rule.targetCount', { n: r.targetCount })}</div></td>
       <td class="num">${r.activeCount ? `<button class="btn sm" data-act="rule.states" data-id="${r.id}">${badge(r.activeCount, 'warn')} ${t('rule.viewActive')}</button>` : '<span class="muted">0</span>'}</td>
       <td>${r.enabled ? badge(t('common.enabled'), 'ok') : badge(t('common.disabled'))}</td>
       <td class="actions">
@@ -58,7 +59,7 @@ function renderRows() {
 }
 
 function editRule(id) {
-  const r = id ? state.rules.find(x => x.id === id) : { kind: 'schedule', enabled: true, tightenOnly: true, days: '', start: '19:00', end: '23:00', windowMin: 10, thresholdGb: 1, penaltyMin: 20, upMbps: 0, downMbps: 20, userIds: [], resellerIds: [] };
+  const r = id ? state.rules.find(x => x.id === id) : { kind: 'schedule', enabled: true, tightenOnly: true, days: '', start: '19:00', end: '23:00', windowMin: 10, thresholdGb: 1, penaltyMin: 20, upMbps: 0, downMbps: 20, userIds: [], resellerIds: [], planIds: [] };
   let kind = r.kind || 'schedule';
   let picker = null;
   const days = new Set(String(r.days || '').split(',').filter(Boolean).map(Number));
@@ -113,7 +114,7 @@ function editRule(id) {
     showKind();
   });
   showKind();
-  picker = userPicker(document.getElementById('f-targets'), { users: state.users || [], resellers, selected: { allUsers: !!r.allUsers, userIds: r.userIds || [], resellerIds: r.resellerIds || [] } });
+  picker = userPicker(document.getElementById('f-targets'), { users: state.users || [], resellers, plans, selected: { allUsers: !!r.allUsers, userIds: r.userIds || [], resellerIds: r.resellerIds || [], planIds: r.planIds || [] } });
 }
 
 async function showStates(id) {

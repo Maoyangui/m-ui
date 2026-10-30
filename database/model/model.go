@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"math"
 	"strconv"
+
+	"gorm.io/gorm"
 )
 
 // Setting 面板设置,key/value。角色开关也存这里:nodeMode=false 为主(HK),true 为副(TW)。
@@ -110,6 +112,10 @@ type User struct {
 	ShareToken  string          `json:"shareToken" gorm:"index"` // 临时共享订阅令牌,空=未开启
 	ShareCreds  json.RawMessage `json:"shareCreds,omitempty"`    // 共享地址专用凭据(与本人凭据不同,取消即失效)
 	ShareAt     int64           `json:"shareAt"`                 // 令牌生成时间
+	// PlanId 所属套餐:最后一次套用的,或手动归入的;0 = 不属于任何套餐。限速规则可以按它选用户(动态,以后套用的也算)。
+	PlanId uint `json:"planId" gorm:"default:0;not null;index"`
+	// ActivateDays 首次连接后多少天到期;0 = 不用。第一次产生流量时换算成 Expiry 并清零,在那之前 Expiry 为 0。
+	ActivateDays int `json:"activateDays" gorm:"default:0;not null"`
 	// DisabledReason 为什么被停用:manual(管理员 / 代理 / 外部 API 手动)、quota(超量)、expired(到期);启用时为空。
 	// 自动恢复(补量、周期重置、延期)只对自动原因生效,手动停的人不会因为清了流量就复活。
 	DisabledReason string `json:"disabledReason"`
@@ -198,10 +204,18 @@ type Plan struct {
 	SpeedDown   int             `json:"speedDown"`
 	AutoReset   bool            `json:"autoReset"`
 	ResetDays   int             `json:"resetDays"`
+	FirstUse    bool            `json:"firstUse"`            // 有时长的套餐从首次连接开始计时,而不是从套用那一刻
 	LineIds     json.RawMessage `json:"lineIds,omitempty"`   // 空=不改动用户线路
 	LineNodes   json.RawMessage `json:"lineNodes,omitempty"` // 线路 → 服务器范围 {"3":[1,2]};没写的线路 = 全部服务器
 	Desc        string          `json:"desc"`
 	Sort        int             `json:"sort"`
+}
+
+// StartOnFirstUse 记流量的那条 UPDATE 顺带做"首次连接开始计时":等着计时的用户此刻换算成到期时间。
+// 和记流量是同一条语句,不多一次写;用的是更新前的 activate_days。
+func StartOnFirstUse(update map[string]interface{}, now int64) {
+	update["expiry"] = gorm.Expr("CASE WHEN activate_days > 0 THEN ? + activate_days * 86400 ELSE expiry END", now)
+	update["activate_days"] = 0
 }
 
 // GBToBytes GB 换算成字节(1 GB = 1024³,四舍五入)。
@@ -268,7 +282,7 @@ type Session struct {
 }
 
 // Rule 限速规则:时段(schedule)或突发(burst)。主机每 10 秒判定,命中时给目标用户写一条 LimitState。
-// 目标三选一可叠加:全部用户 / 指定用户 / 指定代理名下的全部用户(动态,以后新建的也算)。
+// 目标可叠加:全部用户 / 指定用户 / 指定代理名下的全部用户 / 指定套餐的用户(后两种是动态的,以后才归入的也算)。
 type Rule struct {
 	Id          uint            `json:"id" gorm:"primaryKey;autoIncrement"`
 	ResellerId  uint            `json:"resellerId" gorm:"index"` // 归属:0 = 主面板(预留给代理面板自建规则)
@@ -278,6 +292,7 @@ type Rule struct {
 	AllUsers    bool            `json:"allUsers"`
 	UserIds     json.RawMessage `json:"userIds,omitempty"`
 	ResellerIds json.RawMessage `json:"resellerIds,omitempty"`
+	PlanIds     json.RawMessage `json:"planIds,omitempty"` // 指定套餐的用户(动态,以后套用这个套餐的也算)
 	// 时段(面板时区):Days "1,2,5"(1 = 周一,空 = 每天);Start / End "HH:MM",结束早于开始 = 跨午夜,相等 = 全天
 	Days  string `json:"days"`
 	Start string `json:"start"`

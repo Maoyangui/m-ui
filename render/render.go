@@ -101,6 +101,13 @@ func AllowPrivate(db *gorm.DB) bool {
 	return strings.EqualFold(v, "true")
 }
 
+// settingOn 布尔设置:只有写着 true 才算开。
+func settingOn(db *gorm.DB, key string) bool {
+	var v string
+	db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+	return strings.EqualFold(v, "true")
+}
+
 // shareEnabled 设置 subShareEnabled 为 false 时临时共享整体关掉(默认开),与 sub 包的同名判断一致。
 func shareEnabled(db *gorm.DB) bool {
 	var v string
@@ -165,6 +172,10 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 	rules := []json.RawMessage{
 		json.RawMessage(`{"action":"sniff"}`),
 		json.RawMessage(`{"protocol":["dns"],"action":"hijack-dns"}`),
+	}
+	if settingOn(db, "blockBT") {
+		// 屏蔽 BT:VPS 上跑 BT 最常招来版权投诉。靠协议嗅探认(TCP 握手、uTP、UDP tracker),排在所有线路规则之前
+		rules = append(rules, json.RawMessage(`{"protocol":["bittorrent"],"action":"reject"}`))
 	}
 	pureV6 := PureIPv6(db)
 	if !AllowPrivate(db) {

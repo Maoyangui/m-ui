@@ -78,7 +78,7 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 	}
 	var users []model.User
 	if len(ruleList) > 0 {
-		if err := e.DB.Select("id, name, reseller_id, enabled, up, down").Find(&users).Error; err != nil {
+		if err := e.DB.Select("id, name, reseller_id, plan_id, enabled, up, down").Find(&users).Error; err != nil {
 			return false, err
 		}
 	}

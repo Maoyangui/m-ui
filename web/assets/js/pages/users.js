@@ -89,14 +89,20 @@ function statusBadge(u) {
   if (lim.length) return badge(t('user.limited') + ' · ' + lim.map(s => s.ruleName).join(' / '), 'warn');
   return badge(t('common.enabled'), 'ok');
 }
+// 用户所属套餐的名字(套餐删了或没归入就是空)
+const planNameOf = u => { const p = u.planId && state.plans.find(x => x.id === u.planId); return p ? p.name : ''; };
+// 套餐页点人数跳过来:按套餐名搜
+export function showUsersOfPlan(name) { query = name; filter = 'all'; page = 1; }
+
 function expiryCell(u) {
+  if (u.activateDays) return `<span class="muted">${t('user.activateIn', { n: u.activateDays })}</span>`;
   if (!u.expiry) return `<span class="muted">${t('user.never')}</span>`;
   const d = daysLeft(u.expiry);
   const b = d < 0 ? badge(t('user.expired'), 'danger') : d <= 7 ? badge(t('user.daysLeft', { n: d }), 'warn') : badge(t('user.daysLeft', { n: d }));
   return `${fmtDay(u.expiry)}<div class="sub-cell">${b}</div>`;
 }
 function visibleRows() {
-  let rows = state.users.filter(u => matches(query, u.name, u.remark, u.desc));
+  let rows = state.users.filter(u => matches(query, u.name, u.remark, u.desc, planNameOf(u)));
   rows = rows.filter(u => ({ all: true, enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, expired: isExpired(u), over: isOver(u) })[filter]);
   const key = SORTS[sortKey] || SORTS.id;
   return rows.slice().sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * sortDir; });
@@ -151,7 +157,7 @@ function renderRows() {
     const ips = (u.onlineIps || []).length;
     return `<tr class="${selected.has(u.id) ? 'selected' : ''}">
       <td><input type="checkbox" class="sel" data-change="user.sel" data-id="${u.id}" ${selected.has(u.id) ? 'checked' : ''}></td>
-      <td class="primary-cell">${dot(online.has(u.name))}<a href="#" data-act="user.detail" data-id="${u.id}">${esc(u.name)}</a>${u.remark ? `<div class="sub-cell">${esc(u.remark)}</div>` : ''}</td>
+      <td class="primary-cell">${dot(online.has(u.name))}<a href="#" data-act="user.detail" data-id="${u.id}">${esc(u.name)}</a>${planNameOf(u) ? ` ${badge(planNameOf(u))}` : ''}${u.remark ? `<div class="sub-cell">${esc(u.remark)}</div>` : ''}</td>
       <td>${statusBadge(u)}</td>
       <td><span class="num">${fmtBytes(used, 1)}</span> <span class="muted small">/ ${u.volume ? fmtBytes(u.volume, 0) : t('common.unlimited')}</span>${progress(used, u.volume)}</td>
       <td>${expiryCell(u)}</td>
@@ -165,7 +171,7 @@ function renderRows() {
           <button data-act="user.copy" data-id="${u.id}" data-fmt="link">${t('user.subLink')}</button>
           <button data-act="user.copy" data-id="${u.id}" data-fmt="json">${t('user.subJson')}</button>
           <button data-act="user.renew" data-id="${u.id}">${t('user.renew')}</button>
-          ${u.expiry ? `<button data-act="user.extend" data-id="${u.id}">${t('user.extend')}</button>` : ''}
+          ${u.expiry || u.activateDays ? `<button data-act="user.extend" data-id="${u.id}">${t('user.extend')}</button>` : ''}
           <button data-act="user.reset" data-id="${u.id}">${t('user.reset')}</button>
           <button data-act="user.kick" data-id="${u.id}">${t('user.kick')}</button>
           <button data-act="user.rotate" data-id="${u.id}">${t('user.rotate')}</button>
@@ -205,7 +211,8 @@ async function showDetail(id) {
         <dt>${t('user.usage')}</dt><dd>${fmtBytes(used)} / ${u.volume ? fmtBytes(u.volume) : t('common.unlimited')}${progress(used, u.volume)}</dd>
         <dt>${t('dash.up')} / ${t('dash.down')}</dt><dd class="num">${fmtBytes(u.up)} / ${fmtBytes(u.down)}</dd>
         <dt>${t('user.total')}</dt><dd class="num">${fmtBytes((u.totalUp || 0) + (u.totalDown || 0) + used)}</dd>
-        <dt>${t('user.expiry')}</dt><dd>${u.expiry ? fmtDay(u.expiry) : t('user.never')}</dd>
+        <dt>${t('user.expiry')}</dt><dd>${u.activateDays ? t('user.activateIn', { n: u.activateDays }) : u.expiry ? fmtDay(u.expiry) : t('user.never')}</dd>
+        ${planNameOf(u) ? `<dt>${t('user.plan')}</dt><dd>${esc(planNameOf(u))}</dd>` : ''}
         <dt>${t('user.lastOnline')}</dt><dd>${u.onlineAt ? fmtRelative(u.onlineAt) : '—'}</dd>
         <dt>${t('user.f.autoReset')}</dt><dd>${u.autoReset ? `${u.resetDays} ${t('common.day')} · ${fmtDay(u.nextReset)}` : t('common.no')}</dd>
       </dl>
@@ -264,7 +271,9 @@ function fillFromPlan(planId) {
   const p = state.plans.find(x => x.id === Number(planId));
   if (!p) return;
   document.getElementById('f-volume').value = p.volumeGb || 0;
-  document.getElementById('f-expiry').value = p.days ? new Date(Date.now() + p.days * 86400000).toISOString().slice(0, 10) : '';
+  const later = p.days && p.firstUse; // 首次连接才开始计时:到期日留空,填"首次连接后 N 天"
+  document.getElementById('f-expiry').value = p.days && !later ? new Date(Date.now() + p.days * 86400000).toISOString().slice(0, 10) : '';
+  document.getElementById('f-activate').value = later ? p.days : 0;
   document.getElementById('f-device').value = p.deviceLimit || 0;
   document.getElementById('f-up').value = p.speedUp || 0;
   document.getElementById('f-down').value = p.speedDown || 0;
@@ -285,9 +294,10 @@ function editUser(id) {
     <div class="form-grid">
       ${field(nameLabel(), `<input id="f-name" value="${esc(u.name || '')}">`, nameHelp())}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(u.remark || '')}">`)}
-      ${state.plans.length ? `<div class="full">${field(t('user.fromPlan'), `<div class="row">${planSelect('f-plan', 0)}<button type="button" class="btn" data-act="user.fillPlan">${t('user.fromPlan')}</button></div>`)}</div>` : ''}
+      ${state.plans.length ? `<div class="full">${field(t('user.plan'), `<div class="row">${planSelect('f-plan', u.planId || 0)}<button type="button" class="btn" data-act="user.fillPlan">${t('user.fromPlan')}</button></div>`, t('user.planHelp'))}</div>` : ''}
       ${field(t('user.f.volume'), `<input id="f-volume" type="number" min="0" step="any" value="${gbValue(u.volume)}">`)}
       ${field(t('user.f.expiry'), `<input id="f-expiry" type="date" value="${expiryVal}">`)}
+      ${field(t('user.f.activate'), `<input id="f-activate" type="number" min="0" value="${u.activateDays || 0}">`, t('user.f.activateHelp'))}
       ${field(t('user.f.device'), `<input id="f-device" type="number" min="0" value="${u.deviceLimit || 0}">`, t('user.f.deviceHelp'))}
       ${field(t('user.f.up'), `<input id="f-up" type="number" min="0" value="${u.speedUp || 0}">`)}
       ${field(t('user.f.down'), `<input id="f-down" type="number" min="0" value="${u.speedDown || 0}">`, t('user.f.speedHelp'))}
@@ -301,10 +311,12 @@ function editUser(id) {
         </div>`, t('user.f.extsHelp'))}</div>` : ''}
     </div>`, async () => {
     const expiry = fv('f-expiry');
+    const activateDays = Math.max(0, Number(fv('f-activate')) || 0);
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), enabled: fchk('f-enabled'),
+      planId: Number(fv('f-plan')) || 0, activateDays,
       volume: gbBytes(fv('f-volume')),
-      expiry: expiry ? Math.floor(new Date(expiry + 'T23:59:59').getTime() / 1000) : 0,
+      expiry: !activateDays && expiry ? Math.floor(new Date(expiry + 'T23:59:59').getTime() / 1000) : 0,
       deviceLimit: Number(fv('f-device')), speedUp: Number(fv('f-up')), speedDown: Number(fv('f-down')),
       autoReset: fchk('f-autoreset'), resetDays: Number(fv('f-resetdays')),
       nextReset: u.nextReset || 0, desc: u.desc || '',
@@ -322,6 +334,8 @@ function editUser(id) {
   }, { wide: true });
   const items = pickerItems();
   picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refsOf(u), items) });
+  // 新建时选了套餐就直接填好额度;编辑老用户时只是改归属,要填额度再点按钮
+  if (!id) { const sel = document.getElementById('f-plan'); if (sel) sel.addEventListener('change', () => fillFromPlan(sel.value)); }
 }
 
 // ---- 续费 / 延期(套餐)----
@@ -331,7 +345,7 @@ function renewDialog(ids) {
   openModal(t('user.renew') + (single ? ' · ' + single.name : ` (${ids.length})`), `
     <div class="form-grid">
       <div class="full">${field(t('plan.pick'), planSelect('f-plan', state.plans[0].id, false))}</div>
-      <div class="full">${field('', `<select id="f-mode"><option value="renew">${t('plan.renew')}</option><option value="extend">${t('plan.extend')}</option></select>`)}</div>
+      <div class="full">${field('', `<select id="f-mode"><option value="renew">${t('plan.renew')}</option><option value="extend">${t('plan.extend')}</option><option value="bind">${t('plan.bind')}</option></select>`)}</div>
     </div>`, async () => {
     const planId = Number(fv('f-plan')), mode = fv('f-mode');
     if (ids.length === 1) await post(`users/${ids[0]}/plan`, { planId, mode });

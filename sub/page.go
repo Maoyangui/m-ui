@@ -89,6 +89,7 @@ type pageData struct {
 	ExpiryText              string
 	DaysLeft                int
 	HasExpiry, Expired      bool
+	ActivateDays            int // 还没开始计时:首次连接后这么多天到期
 	ResetText               string
 	UpdateHours             int
 	SubLink, SubClash       string
@@ -169,6 +170,7 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 		d.TotalText = fmtBytesHuman(user.Volume)
 		d.Percent = int(math.Min(100, float64(used)/float64(user.Volume)*100))
 	}
+	d.ActivateDays = user.ActivateDays
 	if user.Expiry > 0 {
 		d.HasExpiry = true
 		d.ExpiryText = time.Unix(user.Expiry, 0).In(loc).Format("2006-01-02")

@@ -104,7 +104,7 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
     <div class="usage"><div><b>{{.UsedText}}</b> {{if .Unlimited}}<span style="color:var(--muted)">/ {{if eq .Lang "zh"}}不限{{else}}unlimited{{end}}</span>{{else}}<span style="color:var(--muted)">/ {{.TotalText}}</span>{{end}}</div>{{if not .Unlimited}}<div>{{.Percent}}%</div>{{end}}</div>
     <div class="bar {{if ge .Percent 100}}danger{{else if ge .Percent 80}}warn{{end}}"><i style="width:{{.Percent}}%"></i></div>
     <dl class="kv">
-      <dt>{{if eq .Lang "zh"}}到期{{else}}Expires{{end}}</dt><dd>{{if .HasExpiry}}{{.ExpiryText}}{{if .Expired}} <span class="badge danger">{{if eq .Lang "zh"}}已到期{{else}}expired{{end}}</span>{{else}} <span class="badge">{{if eq .Lang "zh"}}剩 {{.DaysLeft}} 天{{else}}{{.DaysLeft}} days left{{end}}</span>{{end}}{{else}}{{if eq .Lang "zh"}}不限{{else}}never{{end}}{{end}}</dd>
+      <dt>{{if eq .Lang "zh"}}到期{{else}}Expires{{end}}</dt><dd>{{if .HasExpiry}}{{.ExpiryText}}{{if .Expired}} <span class="badge danger">{{if eq .Lang "zh"}}已到期{{else}}expired{{end}}</span>{{else}} <span class="badge">{{if eq .Lang "zh"}}剩 {{.DaysLeft}} 天{{else}}{{.DaysLeft}} days left{{end}}</span>{{end}}{{else if .ActivateDays}}{{if eq .Lang "zh"}}首次连接后 {{.ActivateDays}} 天{{else}}{{.ActivateDays}} days after first connection{{end}}{{else}}{{if eq .Lang "zh"}}不限{{else}}never{{end}}{{end}}</dd>
       {{if .ResetText}}<dt>{{if eq .Lang "zh"}}流量重置{{else}}Traffic resets{{end}}</dt><dd>{{.ResetText}}</dd>{{end}}
       <dt>{{if eq .Lang "zh"}}自动更新{{else}}Auto update{{end}}</dt><dd>{{if eq .Lang "zh"}}每 {{.UpdateHours}} 小时{{else}}every {{.UpdateHours}} h{{end}}</dd>
     </dl>

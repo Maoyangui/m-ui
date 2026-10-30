@@ -29,7 +29,7 @@ func ParseIDs(raw json.RawMessage) []uint {
 	return ids
 }
 
-// Targets 此刻被规则覆盖的用户:全部 / 指定用户 / 指定代理名下的全部用户(动态,以后新建的也算)。
+// Targets 此刻被规则覆盖的用户:全部 / 指定用户 / 指定代理名下的全部用户 / 指定套餐的用户(后两种是动态的,以后才归入的也算)。
 // 停用的用户不参与:他连不上,限不限无意义,状态也不该留着。
 func Targets(rule model.Rule, users []model.User) []model.User {
 	uid := map[uint]bool{}
@@ -40,6 +40,10 @@ func Targets(rule model.Rule, users []model.User) []model.User {
 	for _, id := range ParseIDs(rule.ResellerIds) {
 		rid[id] = true
 	}
+	pid := map[uint]bool{}
+	for _, id := range ParseIDs(rule.PlanIds) {
+		pid[id] = true
+	}
 	var out []model.User
 	for _, u := range users {
 		if !u.Enabled {
@@ -49,7 +53,7 @@ func Targets(rule model.Rule, users []model.User) []model.User {
 		if rule.ResellerId != 0 && u.ResellerId != rule.ResellerId {
 			continue
 		}
-		if rule.AllUsers || uid[u.Id] || (u.ResellerId != 0 && rid[u.ResellerId]) {
+		if rule.AllUsers || uid[u.Id] || (u.ResellerId != 0 && rid[u.ResellerId]) || (u.PlanId != 0 && pid[u.PlanId]) {
 			out = append(out, u)
 		}
 	}
