@@ -4,6 +4,21 @@
 import { getLang } from './i18n.js';
 
 const EN = /*BEGIN*/{
+"sing-box 模板不是合法 JSON: %w": "The sing-box template is not valid JSON: %w",
+"保存失败": "Saving failed",
+"加载订阅证书: %w": "Loading the subscription certificate: %w",
+"生成失败": "Generating failed",
+"生成失败: %w": "Generating failed: %w",
+"这条线路没有部署在所选的服务器上": "This line is not deployed on the selected server",
+"所选的服务器不存在、已停用,或还不知道它的地址": "The selected server does not exist, is disabled, or its address is not known yet",
+"这条线路在所选的服务器上没有可连的地址": "This line has no reachable address on the selected server",
+"不支持把 %s 线路用作上游": "%s lines cannot be used as an upstream",
+"所选的线路不存在": "The selected line does not exist",
+"这条线路已停用": "This line is disabled",
+"请选择用这条线路在哪台服务器上的入口": "Choose which server's entry of this line to use",
+"这样会绕成环,流量出不去:%s": "This creates a loop and traffic cannot get out: %s",
+"上游「%s」用着这条线路,先删掉或改掉它": "Upstream \"%s\" uses this line. Delete or change it first",
+"上游「%s」用着这台服务器上的线路,先删掉或改掉它": "Upstream \"%s\" uses a line on this server. Delete or change it first",
 "证书文件读不出来:%w": "Cannot read the certificate file: %w",
 "和 CA 通信超时:连不上 CA 或被限流了,过一会儿再试": "Timed out talking to the CA: it is unreachable or rate limiting. Try again later",
 "泛域名只能用 DNS 验证:CA 不接受 HTTP 验证。验证方式请选 Cloudflare 或手动 DNS": "Wildcards need DNS validation; the CA does not accept HTTP validation. Choose Cloudflare or manual DNS",

@@ -154,7 +154,9 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 	}
 
 	c.trackConnection(connID, connInfo)
-	c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType)
+	if owner != "" || metadata.User == "" { // 内部用户(线路作上游)不进"最近入站连接"
+		c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType)
+	}
 
 	wrapped := c.createWrappedConn(conn, connID)
 	if c.limiter != nil {
@@ -236,6 +238,9 @@ func (c *ConnTracker) IPLinesByUser() map[string]map[string][]string {
 			continue
 		}
 		user := model.Owner(info.User) // 借用者的设备也算本人的
+		if user == "" {
+			continue // 内部用户(线路作上游)不算在线
+		}
 		if seen[user] == nil {
 			seen[user] = map[string]map[string]bool{}
 		}
@@ -265,8 +270,8 @@ func (c *ConnTracker) ConnCountByUser() map[string]int {
 	defer c.access.Unlock()
 	out := map[string]int{}
 	for _, info := range c.connections {
-		if info.User != "" {
-			out[model.Owner(info.User)]++
+		if owner := model.Owner(info.User); owner != "" {
+			out[owner]++
 		}
 	}
 	return out

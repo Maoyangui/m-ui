@@ -54,8 +54,16 @@ const MinNodeVersion = "0.6.0"
 // 只升级主机不影响旧副机同步。
 const RouteRulesMinNode = "0.6.14"
 
-// minNodeFor 这份快照要求的副机最低版本。
-func minNodeFor(lines []model.Line) string {
+// LineUpstreamMinNode 有上游用的是本面板的线路时副机至少要这个版本:旧版副机不会把专用用户挂到目标线路上,链路连不通。
+const LineUpstreamMinNode = "0.7.16"
+
+// minNodeFor 这份快照要求的副机最低版本。没用到新功能时不抬门槛,只升级主机不影响旧副机同步。
+func minNodeFor(lines []model.Line, upstreams []model.Upstream) string {
+	for _, u := range upstreams {
+		if u.FromLine > 0 {
+			return LineUpstreamMinNode
+		}
+	}
 	for _, l := range lines {
 		if render.HasRouteRules(l) {
 			return RouteRulesMinNode
@@ -318,12 +326,16 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 	upstreamsChanged = !sameUpstreams(oldUps, snap.Upstreams)
 	// 渲染要读的同步设置变了也得全量重载:私网屏蔽是路由规则,热换用户不会重建它。以前主机改了「私网访问」,
 	// 副机只热更新用户表,屏蔽规则在副机上一直按旧开关(审计 M058)
-	if v, ok := snap.Settings["allowPrivate"]; ok {
+	for _, key := range []string{"allowPrivate", "blockBT"} {
+		v, ok := snap.Settings[key]
+		if !ok {
+			continue
+		}
 		var old string
-		if err := db.Model(&model.Setting{}).Select("value").Where("key = ?", "allowPrivate").Scan(&old).Error; err != nil {
+		if err := db.Model(&model.Setting{}).Select("value").Where("key = ?", key).Scan(&old).Error; err != nil {
 			return false, false, err
 		}
-		if strings.EqualFold(v, "true") != strings.EqualFold(old, "true") { // 与 render.AllowPrivate 同一判法
+		if strings.EqualFold(v, "true") != strings.EqualFold(old, "true") { // 与 render 里同一判法
 			linesChanged = true
 		}
 	}
@@ -974,7 +986,7 @@ func (h *Hub) refreshSnapshot() (Snapshot, error) {
 	if err != nil {
 		return snap, err
 	}
-	snap.Version, snap.MinNode = h.d.Version, minNodeFor(snap.Lines)
+	snap.Version, snap.MinNode = h.d.Version, minNodeFor(snap.Lines, snap.Upstreams)
 	h.mu.Lock()
 	h.latest, h.revision = &snap, snap.Revision
 	h.mu.Unlock()

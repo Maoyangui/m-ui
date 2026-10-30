@@ -218,6 +218,22 @@ func hysteria2URI(line model.Line, user model.User, a addr, remark string) strin
 	if ph := portHopping(line); ph != "" {
 		q += "&mport=" + ph // 端口跳跃:Shadowrocket/NekoBox/sing-box 系客户端识别 mport
 	}
+	var o struct {
+		Obfs struct {
+			Type     string `json:"type"`
+			Password string `json:"password"`
+		} `json:"obfs"`
+	}
+	if len(line.Options) > 0 {
+		_ = json.Unmarshal(line.Options, &o)
+	}
+	if o.Obfs.Password != "" { // 带混淆的线路:链接里没有这两项,客户端连不上
+		t := o.Obfs.Type
+		if t == "" {
+			t = "salamander"
+		}
+		q += "&obfs=" + url.QueryEscape(t) + "&obfs-password=" + url.QueryEscape(o.Obfs.Password)
+	}
 	return withFragment(fmt.Sprintf("hysteria2://%s@%s?%s", escapeUserinfo(password), hostPort(a.server, a.port), q), remark)
 }
 

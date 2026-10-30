@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -208,6 +209,7 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			s.run.SetSetting("webDomain", p.Domain)
 		}
 		s.audit(r, "node", "update", p.Name)
+		s.syncRelays() // 地址、域名变了,用这台服务器上的线路当上游的跟着改
 		resp := map[string]interface{}{"ok": "1"}
 		if disabling {
 			if e := s.decommission(node, before); e != "" {
@@ -218,6 +220,11 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		if node.IsLocal {
 			badRequest(w, errors.New("不能删除本机"))
+			return
+		}
+		var relay model.Upstream
+		if s.db.Where("from_node = ?", id).First(&relay).Error == nil {
+			badRequest(w, fmt.Errorf("上游「%s」用着这台服务器上的线路,先删掉或改掉它", relay.Name))
 			return
 		}
 		// 改库之前记下它此刻的配置,删完给它推一份空用户表(见 hub.Decommission)

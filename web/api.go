@@ -340,10 +340,16 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 		}
 		s.audit(r, "line", "update", line.Name)
 		s.reloadAll("修改线路 " + line.Name)
+		s.syncRelays() // 端口、协议参数变了,用它当上游的跟着改
 		writeJSON(w, http.StatusOK, line)
 	case http.MethodDelete:
 		var line model.Line
 		s.db.First(&line, id)
+		var relay model.Upstream
+		if s.db.Where("from_line = ?", id).First(&relay).Error == nil {
+			badRequest(w, fmt.Errorf("上游「%s」用着这条线路,先删掉或改掉它", relay.Name))
+			return
+		}
 		err := s.db.Transaction(func(tx *gorm.DB) error { // 线路和它的分配、授权一起删,不留半截
 			if err := tx.Delete(&model.Line{}, id).Error; err != nil {
 				return err
@@ -574,6 +580,9 @@ func (s *Server) validateLine(line *model.Line) error {
 	if len(rules) > 0 {
 		line.RouteRules, _ = json.Marshal(rules)
 	}
+	if p := sub.RelayLoop(s.db, *line); p != "" {
+		return fmt.Errorf("这样会绕成环,流量出不去:%s", p)
+	}
 	return nil
 }
 
@@ -612,12 +621,33 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		var ups []model.Upstream
 		s.db.Order("id asc").Find(&ups)
-		writeJSON(w, http.StatusOK, ups)
+		// 线路上游:带上现在连不上的原因(线路停用了、服务器下线了),别等用户断网才发现
+		type row struct {
+			model.Upstream
+			RelayProblem string `json:"relayProblem,omitempty"`
+		}
+		out := make([]row, 0, len(ups))
+		for _, u := range ups {
+			rr := row{Upstream: u}
+			if u.FromLine > 0 {
+				rr.RelayProblem = sub.RelayProblem(s.db, u)
+			}
+			rr.RelayCreds = nil // 面板用不到,不往浏览器发
+			out = append(out, rr)
+		}
+		writeJSON(w, http.StatusOK, out)
 	case http.MethodPost:
 		var up model.Upstream
 		if err := json.NewDecoder(r.Body).Decode(&up); err != nil {
 			badRequest(w, err)
 			return
+		}
+		up.Id, up.RelayCreds = 0, nil
+		if up.FromLine > 0 {
+			if err := s.prepareRelayUpstream(&up); err != nil {
+				badRequest(w, err)
+				return
+			}
 		}
 		if err := s.validateUpstream(&up); err != nil {
 			badRequest(w, err)
@@ -633,6 +663,14 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 			if err := tx.Create(&up).Error; err != nil {
 				return err
 			}
+			if up.FromLine > 0 { // 出站里要带自己的 id 算出来的用户名,建好才知道
+				if err := sub.FillRelay(tx, &up); err != nil {
+					return err
+				}
+				if err := tx.Model(&model.Upstream{}).Where("id = ?", up.Id).Updates(map[string]interface{}{"type": up.Type, "options": up.Options}).Error; err != nil {
+					return err
+				}
+			}
 			return validateFullConfig(tx, nodeCert)
 		})
 		if err != nil {
@@ -640,7 +678,11 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.audit(r, "upstream", "create", up.Name)
+		if up.FromLine > 0 {
+			s.reloadUsers("线路上游 " + up.Name) // 目标线路多了一个专用用户
+		}
 		s.reloadUpstreams("新增上游 " + up.Name)
+		up.RelayCreds = nil
 		writeJSON(w, http.StatusOK, up)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
@@ -664,6 +706,28 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		up.Id = id
+		var cur model.Upstream
+		if err := s.db.First(&cur, id).Error; err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "上游不存在"})
+			return
+		}
+		up.RelayCreds = cur.RelayCreds // 凭据只由服务端生成,不经表单
+		if up.FromLine > 0 {
+			if err := s.prepareRelayUpstream(&up); err != nil {
+				badRequest(w, err)
+				return
+			}
+			if p := sub.RelayLoopOf(s.db, up); p != "" {
+				badRequest(w, fmt.Errorf("这样会绕成环,流量出不去:%s", p))
+				return
+			}
+			if err := sub.FillRelay(s.db, &up); err != nil {
+				badRequest(w, err)
+				return
+			}
+		} else {
+			up.FromNode = 0
+		}
 		if err := s.validateUpstream(&up); err != nil {
 			badRequest(w, err)
 			return
@@ -677,7 +741,7 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&model.Upstream{}).Where("id = ?", id).
-				Select("name", "type", "options").Updates(up).Error; err != nil {
+				Select("name", "type", "options", "from_line", "from_node", "relay_creds").Updates(up).Error; err != nil {
 				return err
 			}
 			return validateFullConfig(tx, nodeCert)
@@ -691,8 +755,12 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			// 出站标签就是上游名:路由规则指着旧名字,只换出站会让用它的线路找不到出口,必须整体重载
 			s.reloadAll("上游改名 " + oldName + " → " + up.Name)
 		} else {
+			if cur.FromLine != up.FromLine || cur.FromNode != up.FromNode {
+				s.reloadUsers("线路上游 " + up.Name) // 专用用户换地方了
+			}
 			s.reloadUpstreams("修改上游 " + up.Name)
 		}
+		up.RelayCreds = nil
 		writeJSON(w, http.StatusOK, up)
 	case http.MethodDelete:
 		if inUse := linesUsingUpstream(s.db, id); inUse > 0 {
@@ -704,10 +772,41 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.audit(r, "upstream", "delete", id)
+		s.reloadUsers("删除上游") // 线路上游的专用用户要从目标线路撤下
 		s.reloadUpstreams("删除上游")
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+	}
+}
+
+// prepareRelayUpstream 线路上游保存前:选的线路和服务器要对得上,专用凭据只生成一次。
+// 类型和参数先按线路算一份给校验用,出站里的用户名要等有了 id 才准(新建时在事务里重算)。
+func (s *Server) prepareRelayUpstream(up *model.Upstream) error {
+	var line model.Line
+	if err := s.db.First(&line, up.FromLine).Error; err != nil {
+		return errors.New("所选的线路不存在")
+	}
+	if up.FromNode == 0 {
+		return errors.New("请选择用这条线路在哪台服务器上的入口")
+	}
+	if len(up.RelayCreds) == 0 {
+		up.RelayCreds = generateCredentials(model.RelayUserName(up.Id))
+	}
+	return sub.FillRelay(s.db, up)
+}
+
+// syncRelays 线路或服务器改过之后,把用到它们的线路上游重算一遍。
+func (s *Server) syncRelays() {
+	if s.role() != "master" {
+		return
+	}
+	changed, err := sub.SyncRelayUpstreams(s.db)
+	if err != nil {
+		logger.Warning("更新线路上游失败: ", err)
+	}
+	if changed && s.run != nil {
+		s.reloadUpstreams("线路或服务器有变化,线路上游已更新")
 	}
 }
 

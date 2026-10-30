@@ -31,6 +31,11 @@ type Upstream struct {
 	Type    string          `json:"type"`
 	Options json.RawMessage `json:"options"`
 	Sort    int             `json:"sort"`
+	// FromLine / FromNode 这条上游是本面板的一条线路(链式代理):Type 与 Options 由线路算出来,线路或服务器地址变了自动重算。
+	// 0 = 普通上游。RelayCreds 是上游连那条线路用的专用凭据,渲染时作为内部用户挂到目标线路的入站上。
+	FromLine   uint            `json:"fromLine" gorm:"default:0;not null"`
+	FromNode   uint            `json:"fromNode" gorm:"default:0;not null"`
+	RelayCreds json.RawMessage `json:"relayCreds,omitempty"`
 }
 
 // Line 线路 = 用户在订阅里看到的一个节点。
@@ -198,11 +203,23 @@ type Reseller struct {
 // 这样取消共享只断借用者的连接,本人不受影响。"#" 是用户名里禁止的字符,不会撞名。
 const ShareSuffix = "#share"
 
+// internalUserPrefix 数据面里的内部用户:不是面板用户,不计用量、不算在线(占位用户、线路作上游的专用用户)。
+// "#" 是用户名里禁止的字符,不会撞名。
+const internalUserPrefix = "m-ui#"
+
+// RelayUserName 线路作上游时,上游在目标线路入站上的用户名。
+func RelayUserName(upstreamID uint) string {
+	return internalUserPrefix + "relay-" + strconv.FormatUint(uint64(upstreamID), 10)
+}
+
 // ResellerGroup 代理在数据面里的池名(设备池 / 带宽池按它归组)。
 func ResellerGroup(id uint) string { return "r" + strconv.FormatUint(uint64(id), 10) }
 
-// Owner 把数据面里的名字换回面板用户名(去掉共享后缀)。
+// Owner 把数据面里的名字换回面板用户名(去掉共享后缀);内部用户返回空:不计用量、不算在线、不受设备数限制。
 func Owner(dataPlaneName string) string {
+	if len(dataPlaneName) >= len(internalUserPrefix) && dataPlaneName[:len(internalUserPrefix)] == internalUserPrefix {
+		return ""
+	}
 	if len(dataPlaneName) > len(ShareSuffix) && dataPlaneName[len(dataPlaneName)-len(ShareSuffix):] == ShareSuffix {
 		return dataPlaneName[:len(dataPlaneName)-len(ShareSuffix)]
 	}

@@ -318,6 +318,18 @@ func loadLineUsers(db *gorm.DB, self uint) (map[uint][]model.User, error) {
 			byLine[l.LineId] = append(byLine[l.LineId], shared)
 		}
 	}
+	// 线路作上游:上游的专用凭据挂到目标线路上,只在所选的那台服务器(self 为 0 = 还没有本机记录,按全部算)。
+	// 名字是内部用户(见 model.Owner),不计用量、不算在线;id 往大了给,排在真实用户后面,顺序稳定。
+	var relays []model.Upstream
+	if err := db.Where("from_line > 0").Find(&relays).Error; err != nil {
+		return nil, err
+	}
+	for _, up := range relays {
+		if self > 0 && up.FromNode != self {
+			continue
+		}
+		byLine[up.FromLine] = append(byLine[up.FromLine], model.User{Id: 1<<31 + up.Id, Name: model.RelayUserName(up.Id), Enabled: true, Credentials: up.RelayCreds})
+	}
 	for id := range byLine {
 		sort.Slice(byLine[id], func(i, j int) bool { return byLine[id][i].Id < byLine[id][j].Id })
 	}

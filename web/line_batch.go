@@ -9,6 +9,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/sub"
 
 	"gorm.io/gorm"
 )
@@ -72,6 +73,12 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 			lines[i].UpstreamId = *req.UpstreamId
 		}
 		cols = []string{"upstream_id"}
+		for _, l := range lines {
+			if p := sub.RelayLoop(s.db, l); p != "" {
+				badRequest(w, fmt.Errorf("这样会绕成环,流量出不去:%s", p))
+				return
+			}
+		}
 	case "nodes":
 		if req.NodeIds == nil {
 			badRequest(w, errors.New("缺少 nodeIds"))
@@ -123,6 +130,7 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit(r, "line", "batch:"+req.Action, names)
 	s.reloadAll("批量设置线路 " + req.Action + " ×" + strconv.Itoa(len(lines)))
+	s.syncRelays()
 	writeJSON(w, http.StatusOK, map[string]interface{}{"affected": len(lines)})
 }
 

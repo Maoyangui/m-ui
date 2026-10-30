@@ -15,6 +15,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/sub"
 )
 
 // 证书库:一台服务器可以有多张证书。每张证书一行(model.Cert),文件在数据目录 cert/ 下,或指向服务器上已有的文件。
@@ -351,6 +352,32 @@ func (r *Runner) DeleteCert(name string) error {
 	r.syncLocalCerts()
 	r.cert.logf("已删除证书 %s", name)
 	return nil
+}
+
+// relayLoop 线路当上游时,服务器的公网 IP、域名、证书变了要跟着改:这些变化不一定经过面板操作,所以定时对一遍。
+// 只有主机算(副机的上游随快照下发),没有线路上游时只是一条查询。
+func (r *Runner) relayLoop(stop <-chan struct{}) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			if strings.EqualFold(r.setting("nodeMode"), "true") {
+				continue
+			}
+			changed, err := sub.SyncRelayUpstreams(r.db)
+			if err != nil {
+				logger.Warning("更新线路上游失败: ", err)
+			}
+			if changed {
+				if err := r.ReloadUpstreams(); err != nil {
+					logger.Warning("更新线路上游后重载失败: ", err)
+				}
+			}
+		case <-stop:
+			return
+		}
+	}
 }
 
 // renewDue 自动续期:库里到期前 30 天内的 ACME 证书一张张来。手动 DNS 的续不了,提前 14 天提醒。

@@ -4,6 +4,7 @@ import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML } from '../ui.js';
 import { openCertDrawer } from '../certpicker.js';
+import { editRelayUpstream } from './upstreams.js';
 
 const selected = new Set(); // 批量设置勾选的线路 id
 export const title = () => t('line.title');
@@ -115,6 +116,7 @@ function renderRows() {
       <td class="actions">
         <button class="btn sm" data-act="line.edit" data-id="${l.id}">${t('common.edit')}</button>
         <button class="btn sm" data-act="line.clone" data-id="${l.id}" title="${t('line.clone')}">⧉</button>
+        <button class="btn sm" data-act="line.asUpstream" data-id="${l.id}" title="${t('up.addFromLine')}">⇢</button>
         <button class="btn sm danger" data-act="line.del" data-id="${l.id}">${t('common.delete')}</button>
       </td>
     </tr>`).join(''));
@@ -676,6 +678,7 @@ registerActions({
   'line.add': () => editLine(null),
   'line.edit': id => editLine(Number(id)),
   'line.clone': id => editLine(null, state.lines.find(x => x.id === Number(id))),
+  'line.asUpstream': async id => { await load('nodes').catch(() => {}); editRelayUpstream(null, Number(id)); },
   'line.del': async id => {
     const l = state.lines.find(x => x.id === Number(id));
     if (!await confirm(t('common.deleteConfirm', { name: l.name }), { danger: true, okText: t('common.delete') })) return;

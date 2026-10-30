@@ -29,12 +29,14 @@ const parseOpts = o => { try { return typeof o === 'string' ? JSON.parse(o) : (o
 const sel = (id, opts, cur, labels = {}) => `<select id="${id}">${opts.map(x => `<option value="${x}" ${cur === x ? 'selected' : ''}>${esc(labels[x] ?? x)}</option>`).join('')}</select>`;
 
 export async function render(el) {
+  await load('nodes').catch(() => {}); // 线路上游要显示服务器名
   el.innerHTML = `
     <div class="toolbar">
       <input type="search" id="up-q" placeholder="${t('common.search')}…" value="${esc(query)}">
       <span class="muted small" id="up-count"></span>
       <span class="grow"></span>
       <button class="btn" id="btn-test-all" data-act="up.testAll">${t('common.testAll')}</button>
+      <button class="btn" data-act="up.addLine">${t('up.addFromLine')}</button>
       <button class="btn primary" data-act="up.add">${t('up.add')}</button>
     </div>
     <div class="table-wrap"><table class="grid">
@@ -89,9 +91,15 @@ function resultHTML(id) {
   return `<div class="row" style="gap:.35rem;align-items:center;flex-wrap:wrap">${chips}${more}</div>${detail}`;
 }
 
+// 线路上游:写明是哪条线路、哪台服务器
+const relayNames = u => {
+  const l = state.lines.find(x => x.id === u.fromLine), n = (state.nodes || []).find(x => x.id === u.fromNode);
+  return (l ? l.name : '#' + u.fromLine) + ' @ ' + (n ? n.name : '#' + u.fromNode);
+};
+
 function typeBadges(u) {
   const o = parseOpts(u.options);
-  let h = badge(TYPES[u.type] || u.type);
+  let h = u.fromLine ? badge(t('up.fromLineBadge'), 'primary') + ' ' + badge(TYPES[u.type] || u.type) : badge(TYPES[u.type] || u.type);
   if (o.tls && o.tls.reality && o.tls.reality.enabled) h += ' ' + badge('Reality', 'ok');
   else if (o.tls && o.tls.enabled) h += ' ' + badge('TLS');
   if (o.transport && o.transport.type) h += ' ' + badge(o.transport.type);
@@ -111,7 +119,7 @@ function renderRows() {
     const o = parseOpts(u.options);
     const srv = o.server ? o.server + (o.server_port ? ':' + o.server_port : '') : '';
     return `<tr>
-      <td class="primary-cell">${online.has(u.name) ? '<span class="dot on"></span>' : ''}${esc(u.name)}</td>
+      <td class="primary-cell">${online.has(u.name) ? '<span class="dot on"></span>' : ''}${esc(u.name)}${u.fromLine ? `<div class="sub-cell">${esc(relayNames(u))}${u.relayProblem ? ` · <span class="danger">${esc(trErr(u.relayProblem))}</span>` : ''}</div>` : ''}</td>
       <td>${typeBadges(u)}</td>
       <td class="num">${esc(srv)}</td>
       <td class="num">${usage[u.id] || 0}</td>
@@ -279,8 +287,49 @@ function renderFields(type, o) {
   if (tt) tt.addEventListener('change', e => { document.getElementById('f-tr-c').innerHTML = transportSub(e.target.value, {}, ''); });
 }
 
+// 线路编辑里部署到的服务器:空 = 全部
+const lineNodes = l => {
+  const v = l.nodeIds;
+  let ids = [];
+  try { ids = Array.isArray(v) ? v : (v ? JSON.parse(v) : []); } catch { ids = []; }
+  return (state.nodes || []).filter(n => !ids.length || ids.includes(n.id));
+};
+
+// 新建 / 修改线路上游:选一条线路和它在哪台服务器上的入口。preset 从线路页点进来时带着线路
+export function editRelayUpstream(id, preset) {
+  const u = id ? state.upstreams.find(x => x.id === id) : { fromLine: preset || 0, fromNode: 0 };
+  const lineOpts = state.lines.map(l => `<option value="${l.id}" ${u.fromLine === l.id ? 'selected' : ''}>${esc(l.name)} (${esc(l.protocol)} · ${l.port})</option>`).join('');
+  const nodeOpts = lineId => {
+    const l = state.lines.find(x => x.id === Number(lineId));
+    return (l ? lineNodes(l) : []).map(n => `<option value="${n.id}" ${u.fromNode === n.id ? 'selected' : ''}>${esc(n.name)}</option>`).join('');
+  };
+  openModal(id ? t('up.edit') : t('up.addFromLine'), `
+    <div class="form-grid">
+      <div class="full">${field(t('up.fromLine'), `<select id="f-rline">${lineOpts}</select>`, t('up.fromLineHelp'))}</div>
+      ${field(t('up.fromNode'), `<select id="f-rnode">${nodeOpts(u.fromLine || (state.lines[0] || {}).id)}</select>`, t('up.fromNodeHelp'))}
+      ${field(t('common.name'), `<input id="f-name" value="${esc(u.name || '')}">`)}
+    </div>`, async () => {
+    const body = { name: fv('f-name').trim(), fromLine: Number(fv('f-rline')), fromNode: Number(fv('f-rnode')) };
+    if (!body.fromLine || !body.fromNode) throw new Error(t('up.fromNode'));
+    if (id) await put('upstreams/' + id, body); else await post('upstreams', body);
+    await load('upstreams', 'lines', 'status');
+    renderRows();
+    toast(id ? t('up.updated') : t('up.created'), 'ok');
+  });
+  const lineSel = document.getElementById('f-rline'), nodeSel = document.getElementById('f-rnode'), name = document.getElementById('f-name');
+  const suggest = () => { // 名字没动过就跟着选择走
+    if (id && u.name) return;
+    const l = state.lines.find(x => x.id === Number(lineSel.value)), n = (state.nodes || []).find(x => x.id === Number(nodeSel.value));
+    if (l && n && (!name.value || name.dataset.auto === name.value)) { name.value = l.name + '@' + n.name; name.dataset.auto = name.value; }
+  };
+  lineSel.addEventListener('change', () => { nodeSel.innerHTML = nodeOpts(lineSel.value); suggest(); });
+  nodeSel.addEventListener('change', suggest);
+  suggest();
+}
+
 function editUpstream(id) {
   const u = id ? state.upstreams.find(x => x.id === id) : { type: 'vless', options: {} };
+  if (u.fromLine) { editRelayUpstream(id); return; }
   const o = parseOpts(u.options);
   openModal(id ? t('up.edit') : t('up.add'), `
     <div class="form-grid">
@@ -308,6 +357,10 @@ function editUpstream(id) {
 
 registerActions({
   'up.add': () => editUpstream(null),
+  'up.addLine': () => {
+    if (!state.lines.length) { toast(t('up.noLines'), 'err'); return; }
+    editRelayUpstream(null);
+  },
   'up.edit': id => editUpstream(Number(id)),
   'up.del': async id => {
     const u = state.upstreams.find(x => x.id === Number(id));
