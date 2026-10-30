@@ -3,11 +3,15 @@ package runner
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Maoyangui/m-ui/acme"
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
@@ -233,5 +237,46 @@ func TestLineCertInRender(t *testing.T) {
 	cert = r.NodeCert()
 	if p, _ := inboundCert(`{"mode":"cert","cert":"*.other.example"}`); p != defCert {
 		t.Fatalf("文件没了要退回默认: %s", p)
+	}
+}
+
+// 手动 DNS 要等半小时:这期间证书库的操作不能跟着卡住,填错了域名也能取消。
+func TestIssueCancelAndStoreNotBlocked(t *testing.T) {
+	r := certTestRunner(t)
+	hang := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-hang }))
+	defer srv.Close()
+	defer close(hang)
+	if err := r.IssueCert(IssueRequest{Domain: "a.example.com", Method: acme.MethodManual, directoryURL: srv.URL + "/dir"}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- r.DeleteCert("not-there") }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "没有这张证书") {
+			t.Fatalf("实际 %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("等 CA 的时候,证书库的操作被卡住了")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !r.CancelIssue() {
+		if time.Now().After(deadline) {
+			t.Fatal("取消不了")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	for r.CertStatus()["running"] == true {
+		if time.Now().After(deadline) {
+			t.Fatal("取消之后没有结束")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := r.CertStatus()["lastError"]; got != errIssueCancelled.Error() {
+		t.Fatalf("lastError = %v", got)
+	}
+	if r.CancelIssue() {
+		t.Fatal("已经结束了,不该还有东西可取消")
 	}
 }

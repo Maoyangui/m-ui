@@ -26,7 +26,22 @@ type certState struct {
 	lastErr  string
 	lastOK   int64
 	lastTime int64
-	txt      []acme.TXTRecord // 手动 DNS:正在等用户加的记录
+	txt      []acme.TXTRecord   // 手动 DNS:正在等用户加的记录
+	cancel   context.CancelFunc // 取消正在进行的签发
+}
+
+// errIssueCancelled 用户取消了这次签发。
+var errIssueCancelled = errors.New("已取消")
+
+// CancelIssue 取消正在进行的签发:手动 DNS 填错了域名时,不用干等半小时。返回有没有东西可取消。
+func (r *Runner) CancelIssue() bool {
+	r.cert.mu.Lock()
+	defer r.cert.mu.Unlock()
+	if !r.cert.running || r.cert.cancel == nil {
+		return false
+	}
+	r.cert.cancel()
+	return true
 }
 
 func (c *certState) setTXT(recs []acme.TXTRecord) {
@@ -115,10 +130,10 @@ func (r *Runner) CertStatus() map[string]interface{} {
 
 // IssueRequest 一次签发:域名与验证方式,签好之后顶替哪些用途。
 type IssueRequest struct {
-	Domain, Method      string
-	Staging, AutoRenew  bool
-	Targets             CertTargets
-	directoryURL        string // 测试用
+	Domain, Method     string
+	Staging, AutoRenew bool
+	Targets            CertTargets
+	directoryURL       string // 测试用
 }
 
 // IssueCert 发起一次签发(异步),进度经 CertStatus 查询。
@@ -163,8 +178,6 @@ func (r *Runner) runIssue(req IssueRequest) error {
 }
 
 func (r *Runner) issueCert(req IssueRequest) error {
-	r.certOpMu.Lock()
-	defer r.certOpMu.Unlock()
 	domain := strings.ToLower(strings.TrimSpace(req.Domain))
 	if domain == "" {
 		err := errors.New("未填写域名")
@@ -187,17 +200,30 @@ func (r *Runner) issueCert(req IssueRequest) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
+	r.cert.mu.Lock()
+	r.cert.cancel = cancel
+	r.cert.mu.Unlock()
 	res, err := acme.Issue(ctx, cfg)
+	r.cert.mu.Lock()
+	r.cert.cancel = nil
+	r.cert.mu.Unlock()
 	if res.AccountKey != "" && res.AccountKey != cfg.AccountKey {
 		if saveErr := r.setSetting("acmeAccountKey", res.AccountKey); saveErr != nil {
 			return errors.Join(err, saveErr)
 		}
+	}
+	if err != nil && errors.Is(ctx.Err(), context.Canceled) {
+		r.cert.logf("%v", errIssueCancelled)
+		return errIssueCancelled
 	}
 	if err != nil {
 		r.cert.logf("失败: %v", err)
 		r.notifier.Event("tgOnCert", "🔴 <b>证书签发失败</b>:"+notify.Esc(domain)+"\n"+notify.Esc(err.Error()))
 		return err
 	}
+	// 证书写好之后才占锁:手动 DNS 要等半小时,这期间证书页别的操作(换证书、删证书)不能跟着卡住
+	r.certOpMu.Lock()
+	defer r.certOpMu.Unlock()
 	if err := r.saveCertRow(model.Cert{Name: domain, Source: "acme", CertFile: certFile, KeyFile: keyFile,
 		Method: req.Method, AutoRenew: req.AutoRenew && req.Method != acme.MethodManual, Staging: req.Staging}); err != nil {
 		return fmt.Errorf("证书已写入 %s,记进证书库失败: %w", certFile, err)

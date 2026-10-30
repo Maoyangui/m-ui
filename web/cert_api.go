@@ -51,6 +51,12 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 	switch action {
 	case "status":
 		writeJSON(w, http.StatusOK, s.run.CertStatus())
+	case "cancel": // 手动 DNS 等记录时反悔了
+		if r.Method != http.MethodPost {
+			break
+		}
+		s.run.CancelIssue()
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	case "precheck":
 		var req struct{ Domain string }
 		json.NewDecoder(r.Body).Decode(&req)

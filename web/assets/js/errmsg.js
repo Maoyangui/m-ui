@@ -4,6 +4,7 @@
 import { getLang } from './i18n.js';
 
 const EN = /*BEGIN*/{
+"已取消": "Cancelled",
 "大陆连通检测没有启用": "The China reachability check is not enabled",
 "先勾选要测的节点": "Tick the nodes to test first",
 "Globalping 额度不够:这次要约 %d 个测点次,还剩 %d。少选几个,或者在设置里填 Globalping Token 提高额度": "Not enough Globalping quota: this needs about %d probes and %d are left. Pick fewer, or add a Globalping token in settings",

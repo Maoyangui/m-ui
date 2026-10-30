@@ -180,7 +180,7 @@ function renderTxt(recs) {
   if (!box) return;
   if (!recs || !recs.length) { box.innerHTML = ''; return; }
   box.innerHTML = `<section class="card cert-txt">
-    <div class="card-head"><h2>${t('cert.txtTitle')}</h2><span class="badge primary">${t('cert.txtWaiting')}</span></div>
+    <div class="card-head"><h2>${t('cert.txtTitle')}</h2><span class="row"><span class="badge primary">${t('cert.txtWaiting')}</span><button class="btn sm" data-act="cert.cancel">${t('cert.cancelIssue')}</button></span></div>
     <p class="hint">${t('cert.txtHelp')}</p>
     <div class="table-wrap"><table class="grid"><thead><tr><th>${t('cert.txtName')}</th><th>${t('cert.txtValue')}</th></tr></thead><tbody>
       ${recs.map(r => `<tr><td class="mono small">${esc(r.name)} <button class="btn xs ghost" data-act="cert.copy" data-v="${esc(r.name)}">${t('common.copy')}</button></td>
@@ -244,6 +244,11 @@ registerActions({
   },
   'cert.method': () => syncMethod(),
   'cert.copy': async (_, el) => { await copy(el.dataset.v || ''); toast(t('common.copied'), 'ok'); },
+  'cert.cancel': async () => {
+    stopPoll(); // 取消之后轮询会看到一次"失败",这里自己收尾
+    try { await post('cert/cancel'); toast(t('cert.cancelled'), 'ok'); } catch (e) { toast(e.message, 'err'); }
+    setTimeout(reload, 800);
+  },
   'cert.pick': target => {
     const opts = certs().map(c => ({
       value: c.name, name: certLabel(c.name), badge: certBadge(c.info),
