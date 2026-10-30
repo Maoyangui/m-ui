@@ -230,7 +230,7 @@ func TestTgBotCommands(t *testing.T) {
 	f.mu.Lock()
 	docs := append([]string(nil), f.docs...)
 	f.mu.Unlock()
-	if len(docs) != 1 || !strings.HasSuffix(strings.Split(docs[0], ":")[0], ".db") && !strings.Contains(docs[0], "backup") {
+	if len(docs) != 1 || !strings.HasSuffix(strings.Split(docs[0], ":")[0], ".zip") {
 		t.Fatalf("备份文件: %v", docs)
 	}
 }

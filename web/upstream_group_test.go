@@ -122,12 +122,15 @@ func TestGroupRules(t *testing.T) {
 
 	// 巡检按「谁在用」:用组就算用它的成员
 	users, _ := s.upstreamUsers()
-	s.db.Where("name = ?", "b").First(&a)
-	if len(users[a.Id]) == 0 {
+	idOf := func(name string) uint {
+		var u model.Upstream
+		s.db.Where("name = ?", name).First(&u)
+		return u.Id
+	}
+	if len(users[idOf("b")]) == 0 {
 		t.Fatalf("线路用组,成员也算在用: %v", users)
 	}
-	s.db.Where("name = ?", "c").First(&a)
-	if len(users[a.Id]) != 0 {
+	if len(users[idOf("c")]) != 0 {
 		t.Fatalf("组外的不算: %v", users)
 	}
 
@@ -149,7 +152,7 @@ func TestGroupRules(t *testing.T) {
 // 组里放了指回用这个组的线路的线路上游:绕成环,保存要拒;保存线路时也要查出来。
 func TestGroupRelayLoop(t *testing.T) {
 	s, call := groupServer(t)
-	s.db.Create(&model.Node{Name: "本机", IsLocal: true, Enabled: true, Addr: "1.1.1.1"})
+	s.db.Model(&model.Node{}).Where("is_local = ?", true).Update("addr", "1.1.1.1")
 	line := model.Line{Name: "L", Protocol: "shadowsocks", Port: 31998, Enabled: true, Options: []byte(rrSS)}
 	s.db.Create(&line)
 	code, body := call("POST", "upstreams", socksUp("x", 1))

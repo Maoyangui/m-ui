@@ -147,7 +147,7 @@ func backendMessages(t *testing.T, dirs ...string) (map[string]string, map[strin
 							add(v.Args[0])
 						case name == "http.Error" && len(v.Args) > 1:
 							add(v.Args[1])
-						case (name == "logf" || strings.HasSuffix(name, ".logf")) && len(v.Args) > 0: // 证书页显示的签发日志
+						case (name == "logf" || strings.HasSuffix(name, ".logf")) && len(v.Args) > 0 && !strings.Contains(fset.Position(v.Pos()).Filename, "selfupdate"): // 证书页显示的签发日志;升级日志写文件,不进页面
 							add(v.Args[0])
 						case strings.HasSuffix(name, ".noteReload") && len(v.Args) > 0:
 							if k, ok := keyOf(v.Args[0]); ok {
