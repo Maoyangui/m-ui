@@ -312,7 +312,7 @@ const zh = {
   'node.ip': '连接地址', 'node.addr': '连接地址(可填 IP)', 'node.addrAuto': '自动:探测到的公网 IP', 'node.addrHelp': '订阅里节点的 server 字段。留空 = 用该服务器自动探测的公网 IP(IPv4 还是 IPv6 看“自动地址用”);域名只作 SNI。大陆 DNS 污染时直接给 IP 最稳', 'node.addrManual': '手动',
   'node.family': '自动地址用', 'node.familyV4': 'IPv4(默认)', 'node.familyHelp': '连接地址留空时订阅里用探测到的哪个地址;选的那个没探测到就用另一个,手填了连接地址就不看这项。双栈服务器上每条线路还可以单独选。', 'node.detected': '探测到:IPv4 {v4} · IPv6 {v6}', 'node.none': '无', 'node.v6Fallback': '没有 IPv6,用 IPv4',
   'node.ratio': '流量倍率', 'node.ratioHelp': '经此服务器的流量按倍率计入用户用量(2 = 双倍扣量),节点名会带 x2 标记;1 = 原样',
-  'line.ipVersion': 'IP 版本', 'line.ipVersionHelp': '这台服务器是双栈,可以让这条线路单独用 IPv4 或 IPv6;默认跟服务器页的设置走。', 'line.famDefault': '默认({f})', 'line.famDefaultPlain': '默认', 'line.famHelp': '双栈服务器可以单独选这条线路用 IPv4 还是 IPv6,默认跟服务器页的设置走。', 'line.servers': '部署到服务器', 'line.serversHelp': '不勾选 = 全部服务器(默认);勾选后只在所选服务器上开启该线路,订阅也只出这些入口', 'line.allServers': '全部',
+  'line.ipVersion': 'IP 版本', 'line.ipVersionHelp': '这台服务器是双栈,可以让这条线路单独用 IPv4 或 IPv6;默认跟服务器页的设置走。', 'line.famDefault': '默认({f})', 'line.famDefaultPlain': '默认', 'line.famHelp': '双栈服务器可以单独选这条线路用 IPv4 还是 IPv6,默认跟服务器页的设置走。', 'line.servers': '部署到服务器', 'line.serversHelp': '不勾选 = 全部服务器(默认);勾选后只在所选服务器上开启该线路,订阅也只出这些入口。', 'line.allServers': '全部',
   'set.subServerAddr': '订阅里的节点地址', 'set.subServerAddrHelp': '默认用各服务器的公网 IP(域名只作 SNI),避免客户端本地 DNS 被污染导致连不上;选"域名"则用域名', 'set.addrIp': 'IP(推荐)', 'set.addrDomain': '域名',
   'dash.recentConns': '最近入站连接', 'dash.recentConnsHelp': '客户端"连不上"时先看这里:列表里没有你的 IP,说明连接根本没到服务器(端口被封或客户端配置错);有 IP 但用不了,才是协议/证书/密码问题。', 'dash.noConns': '数据面日志里还没有入站连接', 'dash.connCount': '次数', 'dash.connLast': '最近',
   'mig.s4': '④ 旧机下线', 'mig.s4h': '观察新机在线用户正常后,停掉旧机的 m-ui(systemctl stop m-ui)即可。换副服务器更简单:新副机装好后在"服务器"页更新 API 地址与令牌,主机会自动重新推送。',
