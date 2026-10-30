@@ -20,6 +20,7 @@ import (
 	"github.com/Maoyangui/m-ui/brand"
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database"
+	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/runner"
 	"github.com/Maoyangui/m-ui/selfupdate"
 )
