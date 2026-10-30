@@ -102,6 +102,32 @@ await page.reload({ waitUntil: 'networkidle' });
 await page.waitForTimeout(600);
 if (/smoke-test-2/.test(await page.locator('#page').innerText())) fail('刷新后改动没有复原'); else pass('刷新后复原');
 
+// 证书库、套餐绑定规则、外部节点改名:新接口在演示里也要能走通
+const fresh = await page.evaluate(async () => {
+  const m = await import('./js/api.js');
+  const c = await m.get('cert');
+  await m.post('cert/use', { name: '*.example.net', target: 'panel' });
+  const c2 = await m.get('cert');
+  const plans = await m.get('plans?all=1');
+  await m.put('plans/2', { ...plans[1], ruleIds: [1] });
+  const plans2 = await m.get('plans');
+  const rule = await m.get('rules/1');
+  const ex = await m.get('exts');
+  await m.put('exts/1/nodes/prefs', { hidden: ['HK-1'], renames: { 'JP-2': '日本二号' } });
+  const nodes = await m.get('exts/1/nodes');
+  const tmpl = await m.get('sub-templates');
+  return {
+    certs: c.certs.length, picked: c2.certs.find(x => x.name === '*.example.net').forPanel, panel: c2.panelCert,
+    planRules: plans2[1].ruleIds, rulePlans: rule.planIds, exts: ex.length,
+    hidden: nodes.nodes.find(n => n.name === 'HK-1').hidden, renamed: nodes.nodes.find(n => n.name === 'JP-2').rename, keyword: nodes.nodes.find(n => n.name.includes('官网')).keyword,
+    tmpl: !!tmpl.clash && !!tmpl.singbox,
+  };
+});
+if (fresh.certs === 3 && fresh.picked && /_\.example\.net/.test(fresh.panel) && fresh.planRules.includes(1) && fresh.rulePlans.includes(2) && fresh.exts === 1 && fresh.hidden && fresh.renamed === '日本二号' && fresh.keyword && fresh.tmpl) pass('证书库 / 套餐绑定规则 / 外部节点筛选 / 订阅模板在演示里走得通');
+else fail(`新接口演示异常:${JSON.stringify(fresh)}`);
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForTimeout(400);
+
 // 界面上真的点一下:切到 lines 页,点第一条线路的开关(演示应当成功而不是 403)
 await page.goto(`${DEMO}#/lines`); await page.waitForTimeout(600);
 const toggle = page.locator('#page input[type=checkbox], #page .switch, #page [data-toggle]').first();

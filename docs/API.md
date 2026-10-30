@@ -251,9 +251,10 @@ X-API-Key: <令牌>
 | `enabled` | bool | 启停;显式给 `false` 记为手动停用,之后重置 / 续期不会自动恢复 |
 | `planId` / `plan` | number / string | 套餐 id 或名称,二选一。创建时按 `new` 套用;修改时按 `mode` 套用 |
 | `mode` | string | 和套餐一起用:`renew`(默认)或 `extend`,规则见上表 |
-| `volumeGb` / `volume` | number | 配额,GB 或字节;两者都给以 `volume` 为准;0 = 不限 |
+| `volumeGb` / `volume` | number | 配额,GB(可带小数,如 `0.1`)或字节;两者都给以 `volume` 为准;0 = 不限 |
 | `days` | number | 创建:自现在起 N 天;修改:在原到期(未过期时)基础上再加 N 天;≤ 0 = 不限 |
 | `expiry` | number | 到期时间戳(秒),优先于 `days`;0 = 不限 |
+| `activateDays` | number | 首次连接后 N 天到期:给了就不看 `expiry` / `days`,第一次产生流量时才开始计时;0 = 不用 |
 | `deviceLimit` | number | 同时在线设备数(按源 IP 计,跨服务器合并),0 = 不限 |
 | `speedUp` / `speedDown` | number | 上行 / 下行限速 Mbps,该用户全部连接共享,0 = 不限 |
 | `autoReset` / `resetDays` | bool / number | 周期重置用量:开启时 `resetDays` 必须 > 0;首次开启时下次重置日 = 现在 + 天数;关闭后重置日清零 |
@@ -300,6 +301,8 @@ X-API-Key: <令牌>
 | `id`、`name`、`enabled` | 用户 id、用户名、是否启用 |
 | `disabledReason` | 停用原因:`manual`(手动 / 显式 `enabled: false`)、`quota`(超量)、`expired`(到期);启用时为空 |
 | `volume` | 配额(字节),0 = 不限 |
+| `planId` | 所属套餐 id,0 = 没有 |
+| `activateDays` | 还没开始计时的"首次连接后 N 天";开始计时后变回 0,到期看 `expiry` |
 | `used` | 本周期已用 = `up + down` |
 | `up` / `down` | 本周期上行 / 下行(字节),所有服务器合计,按各服务器的流量倍率计入 |
 | `totalUp` / `totalDown` | 历史累计:每次重置(周期重置、`/reset`、`renew`)前的用量并入这里 |
@@ -333,7 +336,8 @@ X-API-Key: <令牌>
 | 字段 | 说明 |
 |---|---|
 | `resellerId` | 0 = 主面板的套餐;否则是该代理自己建的 |
-| `volumeGb` / `days` | 配额(GB)/ 天数,0 = 不限 |
+| `volumeGb` / `days` | 配额(GB,可带小数)/ 天数,0 = 不限 |
+| `firstUse` | true = 套用后从首次连接开始计时(已经在计时的用户续费照常顺延) |
 | `deviceLimit`、`speedUp`、`speedDown`、`autoReset`、`resetDays` | 套用后写入用户的对应字段 |
 | `lineIds` | 套餐指定的线路;没有这个字段 = 套用时不改动用户线路 |
 | `lineNodes` | 线路 → 服务器范围,如 `{"2": [3]}` 表示线路 2 只给 3 号服务器;没写的线路 = 全部服务器 |

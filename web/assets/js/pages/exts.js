@@ -20,7 +20,7 @@ let rowsSig = '';
 export async function render(el) {
   el.innerHTML = `
     <div class="toolbar"><span class="muted small">${t('ext.help')}</span><span class="grow"></span><button class="btn primary" data-act="ext.add">${t('ext.add')}</button></div>
-    <div class="table-wrap"><table class="grid">
+    <div class="table-wrap"><table class="grid ext-table">
       <thead><tr><th>${t('common.name')}</th><th>${t('common.type')}</th><th>${t('ext.value')}</th><th>${t('ext.nodes')}</th><th>${t('ext.lastFetch')}</th><th>${t('ext.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
       <tbody id="exts-body"></tbody>
     </table></div>`;
@@ -58,9 +58,9 @@ function renderRows() {
 function rowHTML(x) {
   const on = open.has(x.id);
   return `<tr>
-    <td class="primary-cell"><button class="btn sm ext-toggle" data-act="ext.toggle" data-id="${x.id}" title="${on ? t('ext.collapse') : t('ext.expand')}">${on ? '▾' : '▸'}</button>${esc(x.name)}${x.prefix ? `<div class="sub-cell">${t('ext.prefix')}: ${esc(x.prefix)}</div>` : ''}${x.remark ? `<div class="sub-cell">${esc(x.remark)}</div>` : ''}</td>
+    <td class="primary-cell"><div class="ext-name"><button class="btn sm ext-toggle" data-act="ext.toggle" data-id="${x.id}" title="${on ? t('ext.collapse') : t('ext.expand')}">${on ? '▾' : '▸'}</button><span>${esc(x.name)}</span></div>${x.prefix ? `<div class="sub-cell">${t('ext.prefix')}: ${esc(x.prefix)}</div>` : ''}${x.remark ? `<div class="sub-cell">${esc(x.remark)}</div>` : ''}</td>
     <td>${badge(x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink'), x.type === 'sub' ? 'primary' : '')}</td>
-    <td class="mono small" title="${esc(x.value)}">${esc(x.value.length > 60 ? x.value.slice(0, 60) + '…' : x.value)}</td>
+    <td class="mono small ext-url" title="${esc(x.value)}">${esc(x.value.length > 60 ? x.value.slice(0, 60) + '…' : x.value)}</td>
     <td class="num">${x.nodeCount || 0}</td>
     <td>${x.lastError ? badge(t('ext.failed'), 'danger') + `<div class="sub-cell" title="${esc(trErr(x.lastError))}">${esc(trErr(x.lastError).slice(0, 60))}</div>` : (x.lastFetch ? fmtRelative(x.lastFetch) : '—')}</td>
     <td class="num">${x.userCount || 0}</td>
@@ -285,8 +285,8 @@ async function addUpstreams(id) {
   const ext = (state.exts || []).find(x => x.id === id) || {};
   const list = [...sel].sort((a, b) => a - b).map(i => (c.nodes || [])[i]).filter(Boolean);
   const html = `<p class="hint">${t('ext.addUpHelp')}</p><div class="form-grid">` + list.map(n => n.upstream
-    ? field(esc(n.name), `<input id="ext-up-${n.index}" value="${esc((ext.name ? ext.name + '-' : '') + n.name)}">`)
-    : field(esc(n.name), `<span class="muted small">${t('ext.noUpstream')}</span>`)).join('') + '</div>';
+    ? field(n.name, `<input id="ext-up-${n.index}" value="${esc((ext.name ? ext.name + '-' : '') + n.name)}">`)
+    : field(n.name, `<span class="muted small">${t('ext.noUpstream')}</span>`)).join('') + '</div>';
   openModal(t('ext.addUp'), html, async () => {
     const items = list.filter(n => n.upstream).map(n => ({ index: n.index, name: fv(`ext-up-${n.index}`).trim() }));
     if (!items.length) throw new Error(t('ext.noneAddable'));

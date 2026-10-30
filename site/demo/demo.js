@@ -45,7 +45,22 @@ function extNodes(id, seg, method, body) {
   let servers = ((S.nodes && S.nodes.nodes) || (Array.isArray(S.nodes) ? S.nodes : [])).filter(n => n.enabled !== false).map(n => ({ id: n.id, name: n.name, isLocal: !!n.isLocal }));
   if (!servers.length) servers = [{ id: 1, name: '主机', isLocal: true }, { id: 2, name: '副机', isLocal: false }];
   const nodes = demoExtNodes(id);
-  if (!seg[3]) return { nodes, servers, fetchedAt: now() - 600 };
+  const ext = S.exts.find(e => e.id === id) || {};
+  const words = String(ext.exclude || '').split(',').map(s => s.trim()).filter(Boolean);
+  for (const n of nodes) {
+    if (words.some(w => n.name.includes(w))) { n.hidden = true; n.keyword = true; }
+    else if ((ext.hidden || []).includes(n.name)) n.hidden = true;
+    if ((ext.renames || {})[n.name]) n.rename = ext.renames[n.name];
+  }
+  if (!seg[3]) return { nodes, servers, fetchedAt: now() - 600, sig: 'demo' };
+  if (seg[3] === 'prefs') { ext.hidden = (body && body.hidden) || []; ext.renames = (body && body.renames) || {}; return ok(); }
+  if (seg[3] === 'reach' && !seg[4]) { S.reachIdx = (body && body.indexes) || []; return { job: 'demo-reach-' + id }; }
+  if (seg[3] === 'reach') {
+    // 演示用:第一个被墙,其余通
+    const results = {};
+    (S.reachIdx || []).forEach((i, k) => { results[i] = { state: 'done', verdict: k === 0 ? 'blocked' : 'ok', groups: [{ key: 'ct', ok: k === 0 ? 0 : 3, total: 3 }, { key: 'cu', ok: k === 0 ? 0 : 3, total: 3 }, { key: 'cm', ok: k === 0 ? 0 : 3, total: 3 }] }; });
+    return { done: true, results };
+  }
   if (seg[3] === 'test' && !seg[4]) return { job: 'demo-' + id };
   if (seg[3] === 'test') {
     const results = {};
@@ -57,6 +72,7 @@ function extNodes(id, seg, method, body) {
 }
 // 演示用的外部订阅节点:三种协议各两个,带完整参数
 const demoExtNodes = id => [
+  ['trojan', '官网 www.example.net', 'www.example.net', 443, [['password', 'x' + id]]],
   ['hysteria2', 'HK-1', 'hk1.example.net', 443, [['password', 'p' + id + 'a'], ['sni', 'hk1.example.net'], ['skip-cert-verify', 'false'], ['alpn', '["h3"]']]],
   ['hysteria2', 'HK-2', 'hk2.example.net', 443, [['password', 'p' + id + 'b'], ['sni', 'hk2.example.net'], ['up', '100'], ['down', '500']]],
   ['tuic', 'JP-1', 'jp1.example.net', 8443, [['uuid', '3f2a1c9e-0000-4000-8000-00000000' + String(id).padStart(4, '0')], ['password', 'tp' + id], ['sni', 'jp1.example.net'], ['congestion-controller', 'bbr'], ['udp-relay-mode', 'native']]],
@@ -97,7 +113,35 @@ S.rules = [
   { id: 2, name: '突发惩罚 Burst penalty', enabled: true, kind: 'burst', allUsers: false, userIds: [1, 2], resellerIds: [], days: '', start: '', end: '', windowMin: 10, thresholdGb: 1, penaltyMin: 20, upMbps: 0, downMbps: 20, tightenOnly: true, remark: '', sort: 0, createdAt: now() - 86400 * 3 },
 ];
 S.limitStates = [{ id: 1, ruleId: 2, ruleName: '突发惩罚 Burst penalty', userId: 1, userName: 'demo-alice', upMbps: 0, downMbps: 20, tightenOnly: true, since: now() - 300, until: now() + 900, reason: '10 分钟内 1.2 GB' }];
-const ruleView = r => ({ ...r, targetCount: r.allUsers ? S.users.filter(u => u.enabled).length : (r.userIds || []).length + S.users.filter(u => (r.resellerIds || []).includes(u.resellerId)).length, activeCount: S.limitStates.filter(s => s.ruleId === r.id).length });
+// 选了套餐的规则:Basic 套餐的用户(现有和以后的)晚上限速
+S.rules.push({ ...S.rules[0], id: 3, name: 'Basic 套餐晚间 Basic plan nights', allUsers: false, planIds: [1], downMbps: 50 });
+for (const u of S.users) if (u.name === 'demo-alice' || u.name === 'demo-charlie') u.planId = 1; else if (u.name === 'demo-bob') u.planId = 2;
+const planView = p => ({ ...p, userCount: S.users.filter(u => u.planId === p.id).length, ruleIds: S.rules.filter(r => (r.planIds || []).includes(p.id)).map(r => r.id), resellerName: '' });
+const setPlanRules = (planId, ruleIds) => { if (!ruleIds) return; for (const r of S.rules) { const on = ruleIds.includes(r.id); r.planIds = (r.planIds || []).filter(x => x !== planId); if (on) r.planIds.push(planId); } };
+// 证书库(导出实例只有一张自签):一张域名证书给线路默认、面板、订阅用,一张泛域名给单独选了它的线路用,一张自签闲着
+const DAY = 86400;
+const certOf = (id, name, source, method, names, days, self, lineNames) => ({
+  id, name, source, method, autoRenew: source === 'acme' && method !== 'manual', staging: false, createdAt: now() - 30 * DAY,
+  certFile: '/etc/m-ui/certs/' + name.replace('*', '_') + '.crt', keyFile: '/etc/m-ui/certs/' + name.replace('*', '_') + '.key',
+  info: { exists: true, path: '/etc/m-ui/certs/' + name.replace('*', '_') + '.crt', subject: names[0], dnsNames: names, ips: null, issuer: self ? names[0] : "Let's Encrypt", notBefore: new Date((now() - 30 * DAY) * 1000).toISOString(), notAfter: new Date((now() + days * DAY) * 1000).toISOString(), daysLeft: days, selfSigned: !!self },
+  forLines: false, forPanel: false, forSub: false, lineNames,
+});
+S.certs = [
+  certOf(1, 'panel.example.com', 'acme', 'http', ['panel.example.com'], 61, false, []),
+  certOf(2, '*.example.net', 'acme', 'manual', ['*.example.net', 'example.net'], 74, false, ['Tokyo-HY2']),
+  certOf(3, 'self-signed', 'selfsign', '', ['panel.example.com'], 3640, true, []),
+];
+S.certUse = { lines: S.certs[0].certFile, panel: S.certs[0].certFile, sub: S.certs[0].certFile };
+const syncCertUse = () => { for (const c of S.certs) { c.forLines = c.certFile === S.certUse.lines; c.forPanel = c.certFile === S.certUse.panel; c.forSub = c.certFile === S.certUse.sub; } };
+syncCertUse();
+// 线路选证书的抽屉按服务器列:本机三张都有,副机没有泛域名那张
+const briefs = list => JSON.stringify(list.map(c => ({ name: c.name, domains: c.info.dnsNames, selfSigned: c.info.selfSigned, notAfter: now() + c.info.daysLeft * DAY, default: c.forLines })));
+for (const n of S.nodes.nodes || []) n.certs = briefs(n.isLocal ? S.certs : S.certs.filter(c => c.id !== 2));
+const tlsOf = l => { try { return typeof l.tls === 'string' ? JSON.parse(l.tls || '{}') : (l.tls || {}); } catch { return {}; } };
+for (const l of S.lines) if (l.name === 'Tokyo-HY2' && tlsOf(l).mode === 'cert') l.tls = JSON.stringify({ ...tlsOf(l), cert: '*.example.net' });
+// 外部订阅(导出实例没有):关键词已排除带"官网"的,展开能隐藏、改名、测大陆连通
+if (!S.exts.length) S.exts.push({ id: 1, name: 'Demo Sub', type: 'sub', value: 'https://sub.example.net/demo', prefix: '', enabled: true, sort: 1, remark: '', lastFetch: now() - 600, lastError: '', nodeCount: 7, exclude: '官网', hidden: [], renames: {} });
+const ruleView = r => ({ ...r, targetCount: r.allUsers ? S.users.filter(u => u.enabled).length : new Set([...(r.userIds || []), ...S.users.filter(u => (r.resellerIds || []).includes(u.resellerId) || (r.planIds || []).includes(u.planId)).map(u => u.id)]).size, activeCount: S.limitStates.filter(s => s.ruleId === r.id).length });
 
 function status() {
   const s = fx('GET status') || {};
@@ -120,7 +164,7 @@ function route(method, path, query, body) {
       case 'lines': return clone(S.lines);
       case 'upstreams': if (seg[1] === 'health') return fx('GET upstreams/health') || {}; return clone(S.upstreams);
       case 'users': if (seg[2] === 'sub') { const u = find(S.users, id); return { link: subUrl(u), clash: subUrl(u) + '?format=clash', json: subUrl(u) + '?format=json' }; } return clone(S.users);
-      case 'plans': return clone(S.plans);
+      case 'plans': return S.plans.map(planView);
       case 'nodes': return clone(S.nodes);
       case 'exts': if (seg[2] === 'nodes') return extNodes(id, seg, 'GET', null); return clone(S.exts);
       case 'onlines': return clone(S.onlines);
@@ -135,7 +179,8 @@ function route(method, path, query, body) {
           cc: 'bbr', qdisc: 'fq', nofile: 1048576, ntp: 'yes', tuned: true, limits: true,
           warp: { ...((o.info || {}).warp || {}), installed: true, service: 'active', socks: 'active', port: 40000, listening: true, status: 'Connected', exit: 'on', exitIp: '104.28.0.1', exitLoc: 'JP', exitColo: 'NRT' } };
         o.status = o.status || { running: false, log: [] }; return o; }
-      case 'cert': if (seg[1] === 'status') return fx('GET cert/status') || { running: false, log: [] }; return fx('GET cert') || { info: {}, settings: S.settings, status: {} };
+      case 'cert': if (seg[1] === 'status') return fx('GET cert/status') || { running: false, log: [] }; { const c = fx('GET cert') || { settings: S.settings, status: {} }; const use = S.certs.find(x => x.certFile === S.certUse.lines); return { ...c, certs: clone(S.certs), certPath: S.certUse.lines, panelCert: S.certUse.panel, subCert: S.certUse.sub, panelTLS: !!S.certUse.panel, subTLS: !!S.certUse.sub, source: use ? use.source : '', info: use ? clone(use.info) : { exists: false } }; }
+      case 'sub-templates': return { clash: '# 只写想加的部分,节点和分组由面板填\nrules:\n  - DOMAIN-SUFFIX,example.org,DIRECT\n  - MATCH,PROXY\n', singbox: '{\n  "route": {\n    "rules": [{ "domain_suffix": ["example.org"], "outbound": "direct" }],\n    "final": "proxy"\n  }\n}\n' };
       case 'stats': { const q = new URLSearchParams(query); const tag = q.get('tag'); const hours = q.get('hours') || '24'; const bucket = q.get('bucket') || '3600';
         if (seg[1] === 'top') return listByPrefix('stats/top') || [];
         const k = tag ? `GET stats?resource=user&tag=${tag}&hours=${hours}&bucket=${bucket}` : `GET stats?resource=user&hours=${hours}&bucket=${bucket}`;
@@ -204,10 +249,10 @@ function route(method, path, query, body) {
       return ok();
     }
     case 'plans': {
-      if (method === 'POST' && !seg[1]) { const p = { id: nextId(S.plans), ...body }; S.plans.push(p); return clone(p); }
+      if (method === 'POST' && !seg[1]) { const { ruleIds, ...rest } = body || {}; const p = { id: nextId(S.plans), ...rest }; S.plans.push(p); setPlanRules(p.id, ruleIds); return planView(p); }
       const p = find(S.plans, id);
-      if (method === 'DELETE') { S.plans = S.plans.filter(x => x.id !== id); return ok(); }
-      if (method === 'PUT') { Object.assign(p, body, { id }); return clone(p); }
+      if (method === 'DELETE') { S.plans = S.plans.filter(x => x.id !== id); for (const u of S.users) if (u.planId === id) u.planId = 0; setPlanRules(id, []); return ok(); }
+      if (method === 'PUT') { const { ruleIds, ...rest } = body || {}; Object.assign(p, rest, { id }); setPlanRules(id, ruleIds); return planView(p); }
       return ok();
     }
     case 'resellers': {
@@ -238,7 +283,10 @@ function route(method, path, query, body) {
     }
     case 'update': throw new ApiError(400, 'Demo mode: nothing to update here');
     case 'backup': if (seg[1] === 'run') return { name: 'm-ui-demo-' + new Date().toISOString().slice(0, 10) + '.zip' }; if (seg[1] === 'inspect') return { users: S.users.length, lines: S.lines.length, note: 'Demo mode' }; return ok();
-    case 'cert': return ok({ note: 'Demo mode' });
+    case 'cert':
+      if (seg[1] === 'use') { const c = S.certs.find(x => x.name === body.name); S.certUse[body.target] = c ? c.certFile : ''; syncCertUse(); return ok(); }
+      if (seg[1] === 'delete') { S.certs = S.certs.filter(x => x.name !== body.name); syncCertUse(); return ok(); }
+      return ok({ note: 'Demo mode' });
     case 'ops': if (seg[1] === 'warp-check') return { exit: 'on', ip: '104.28.0.1', loc: 'US', colo: 'LAX' }; return ok();
     case 'agent': if (seg[1] === 'rotate') return { token: 'demo-' + rnd(32) }; return ok();
     case 'admin': if (seg[1] === 'api' && seg[2] === 'rotate') return { token: 'demo-' + rnd(32) }; if (seg[1] === 'totp' && seg[2] === 'setup') return { secret: 'DEMOSECRET', url: 'otpauth://totp/m-ui:admin?secret=DEMOSECRET', qr: '' }; return ok();

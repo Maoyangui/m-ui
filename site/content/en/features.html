@@ -20,10 +20,10 @@
   </ul>
 
   <h2 id="plans">Plans</h2>
-  <p>Templates for quota, duration, devices, speed and line assignment. Apply on create, on renewal or when extending. Resellers get their own plans, separate from yours.</p>
+  <p>Templates for quota, duration, devices, speed and line assignment. Apply on create, on renewal or when extending. Users remember their plan, and the Plans page shows how many and who. A plan can tick speed-limit rules that its users, now and later, follow. Resellers get their own plans, separate from yours.</p>
 
   <h2 id="rules">Rules</h2>
-  <p>Temporary speed limits layered on top of a user's own. <b>Schedule</b>: chosen weekdays and a time window in the panel time zone, crossing midnight allowed. <b>Burst</b>: X GB within the last N minutes limits the user for M minutes, lifts automatically and applies again on the next burst; a user can be under several rules at once, each independent. Targets are all users, every user of a reseller, or individual users. The master evaluates rules and syncs them to every node; several hits resolve to the strictest, and the default "tighten only" never exceeds the user's own limit. Changes reach live connections immediately, no reconnect needed. The user list shows "Limited"; the landing page never does.</p>
+  <p>Temporary speed limits layered on top of a user's own. <b>Schedule</b>: chosen weekdays and a time window in the panel time zone, crossing midnight allowed. <b>Burst</b>: X GB within the last N minutes limits the user for M minutes, lifts automatically and applies again on the next burst; a user can be under several rules at once, each independent. Targets are all users, users of a plan (including ones who get it later), every user of a reseller, or individual users. The master evaluates rules and syncs them to every node; several hits resolve to the strictest, and the default "tighten only" never exceeds the user's own limit. Changes reach live connections immediately, no reconnect needed. The user list shows "Limited"; the landing page never does.</p>
 
   <h2 id="resellers">Resellers</h2>
   <p>Give a reseller a set of lines plus a traffic quota, a device pool, a bandwidth pool and an expiry. Per-user limits are up to the reseller; the pools cap what all of their users can do at the same time. They get their own panel (default port 2054, path <code>/dl</code>) where they create users and plans, set their own landing-page title, notice and contact, and optionally enable two-factor login. All usage rolls up to the reseller; when the reseller is over budget, expired or disabled, every user of theirs is cut off at once. Reseller users are never mixed into your own user list.</p>
@@ -31,7 +31,8 @@
   <h2 id="subs">Subscriptions</h2>
   <ul>
     <li>Three formats from one address: universal links, Clash / Mihomo YAML, full sing-box JSON — chosen by <code>?format=</code> or the client's User-Agent.</li>
-    <li>Every line is listed once per server it is deployed on; assignment can be narrowed to one server's entry (users, plans and reseller grants alike); external nodes and external subscriptions can be merged in; expand an external subscription to see each node's full parameters, test them on every server and add the ones you pick as upstreams.</li>
+    <li>Every line is listed once per server it is deployed on; assignment can be narrowed to one server's entry (users, plans and reseller grants alike); external nodes and external subscriptions can be merged in; expand an external subscription to see each node's full parameters, test them on every server and from mainland China, add the ones you pick as upstreams, or hide, rename and exclude by keyword (those "official site" and "expires" info nodes); it all survives refreshes.</li>
+    <li>One template each for Clash and sing-box; the panel fills in nodes and groups, and a broken template is refused on save.</li>
     <li>Browser landing page: usage, expiry, notice, one-tap import for Clash, Shadowrocket, Nextin, sing-box, Hiddify and Stash, QR codes for Clash / universal / sing-box, client download page, temporary sharing.</li>
     <li>Optional traffic-notice node at the top of the list; self-signed certificates automatically add <code>insecure</code> for clients.</li>
     <li>Dead subscriptions get a short explanation page with your contact details instead of a blank 404.</li>
@@ -41,7 +42,7 @@
   <p>One master, any number of nodes. The master pushes lines, upstreams, users and credentials every 5 seconds and pulls back traffic deltas and online IPs; nodes only forward. Per-server traffic ratio, per-server deployment of lines, connection tracking across servers; scheduled mainland reachability checks from China Mobile, Telecom and Unicom home-broadband probes, with a Telegram alert when a server gets blocked. See <a href="{{base}}multi-server/">Multi-server</a>.</p>
 
   <h2 id="cert">Certificates</h2>
-  <p>Let's Encrypt via HTTP-01 or Cloudflare DNS-01 with DNS and port pre-checks, automatic renewal and hot reload without a restart. No domain? Self-sign with one click. Bring your own certificate files too.</p>
+  <p>Several per server. Let's Encrypt via HTTP-01, Cloudflare DNS-01 or manual DNS, wildcards included, with DNS and port pre-checks, automatic renewal and hot reload without a restart. No domain? Self-sign with one click. Bring your own certificate files too. The line default, panel and subscription each pick their own, and any line can pick its own from a drawer showing which servers have it and how long is left.</p>
 
   <h2 id="ops">Operations</h2>
   <ul>

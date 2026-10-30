@@ -44,11 +44,11 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 | Lines | Hysteria2, AnyTLS, TUIC, Trojan, VLESS (Reality / Vision), VMess, Shadowsocks (incl. 2022), SOCKS, HTTP, Mixed; WS / gRPC / HTTPUpgrade / HTTP transports; Hysteria2 port hopping; per-server deployment; rule-based routing (send domains / IP ranges / ports to different exits) |
 | Upstreams | VLESS / VMess / Trojan / TUIC / Hysteria2 / Shadowsocks / SOCKS exits, import by pasting a share link; latency test, periodic health checks measured **on the servers that actually use the upstream**, failure / recovery alerts naming the server; one-click WARP |
 | Users | Quota, expiry, periodic reset, concurrent device limit (by source IP, merged across servers), up / down speed limits; auto-disable and kick on overuse or expiry; bulk create, bulk actions, CSV export. Reseller-owned users stay in the reseller's panel and out of the main user list |
-| Plans | Templates for quota / duration / devices / speed / lines; apply on create, renew or extend |
+| Plans | Templates for quota / duration / devices / speed / lines; apply on create, renew or extend; can bind speed-limit rules for current and future users of the plan |
 | Resellers | Give a reseller lines plus traffic / device / bandwidth budgets and an expiry; they create users and plans in their own panel (port 2054, path /dl). Usage rolls up to the reseller, and going over quota, expiring or being disabled cuts off all of their users at once |
-| Subscriptions | Universal link, Clash and sing-box formats; landing page in the browser (usage, expiry, one-tap import, QR); users can hand out a temporary share link themselves; external nodes / external subscriptions merged in; `insecure` added automatically for self-signed certs |
+| Subscriptions | Universal link, Clash and sing-box formats, the right one picked per client from a single address; custom Clash / sing-box templates; external nodes can be hidden, renamed, excluded by keyword and tested from mainland China; landing page in the browser (usage, expiry, one-tap import, QR); users can hand out a temporary share link themselves; external nodes / external subscriptions merged in; `insecure` added automatically for self-signed certs |
 | Multi-server | Master pushes config, collects traffic, enforces quotas; per-server traffic ratio; node offline / recovery alerts; mainland reachability checks (China Mobile / Telecom / Unicom home-broadband probes, manual + scheduled, block alerts) |
-| Certificates | Let's Encrypt via HTTP-01 or Cloudflare DNS-01, auto-renewal, hot reload without restart; one-click self-signed cert when you have no domain |
+| Certificates | Several per server: Let's Encrypt via HTTP-01, Cloudflare DNS-01 or manual DNS (wildcards included), auto-renewal, hot reload without restart; line default, panel and subscription each pick their own, and any line can pick its own; one-click self-signed cert when you have no domain |
 | Backup | One zip with a consistent database snapshot and certificates; upload to restore a whole server; scheduled backups, rotation, push to Telegram; migration wizard |
 | Ops | WARP install / enable / disable / uninstall with exit-IP verification; swap, sysctl + BBR, file limits, NTP; cap systemd journal disk usage |
 | Alerts | Telegram: logins, user expiring / over quota / disabled, upstream failures, data plane down, daily report (its hour and dates follow the panel time zone) |
@@ -236,6 +236,7 @@ No domain is fine: self-signed cert + IP, and every node in the subscription alr
 - Edit visually or paste `vless://`, `hy2://`, `ss://` … share links.
 - Latency test through the upstream, periodic checks; Telegram alert on repeated failure and again on recovery.
 - Enabling WARP on the Ops page creates an upstream named `warp`; pick it on a line to exit through WARP.
+- **Use a line as an upstream** (chained proxy): the → button on a line, or "Add line as upstream" on the Upstreams page; pick the line and which server's entry to use. Parameters follow the line, so changing its port or protocol needs nothing else; dedicated credentials don't count against any user's quota and traffic is counted once; loops and deleting a line or server in use are refused or flagged. Nodes need v0.7.16 or later to receive this.
 
 ### External nodes
 
@@ -243,19 +244,24 @@ Merge nodes from elsewhere into your subscriptions: a single share link, or a wh
 
 Expand an external subscription in the list to see every node it parsed: the full parameters of each node (server, port, SNI, UUID, password, transport and so on) and its share link. Test them for real on every enabled server, one column per server, or tick a few, give each a name and add them as upstreams — with the same validation as a manually created upstream; a duplicate name fails instead of being renamed.
 
+Expanding also controls what reaches users: hide or rename single nodes (stored by original name, so they survive refreshes); "exclude keywords" drops nodes named like "official site", "expires" or "traffic left" in one go, including future ones; ticked nodes can be tested from mainland China networks for blocking.
+
 ### Users and plans
 
 - Per user: quota, expiry, periodic reset (e.g. every 30 days), device limit, speed limit, remark, allowed lines and external nodes.
 - Leaked address? **Reset subscription link** (in the row's More menu and the detail drawer, reseller panel included): the address becomes a new random token, every protocol credential is regenerated and any shared link is revoked. The old address and credentials stop working on every server at once and connected devices are dropped.
 - Over quota or expired → disabled and kicked automatically, with the reason shown in the list (quota / expired / manual); resetting traffic or renewing re-enables them, a manually disabled user only comes back when enabled by hand.
-- Plans are templates: apply on create; *renew* applies again (usage reset, expiry extended); *extend* keeps usage and only extends expiry.
+- Quota can be a decimal (0.1 is about 100 MB), for users and plans alike.
+- Expiry can be set to **N days after first connection**: the clock starts when the user first moves traffic, handy for gift cards and trials. Renewing someone whose clock is already running extends it as usual.
+- Plans are templates: apply on create; *renew* applies again (usage reset, expiry extended); *extend* keeps usage and only extends expiry. Users remember their plan, and the Plans page shows the head count with a link to who they are; on upgrade existing users are matched from the audit log and exact quota matches, and anything uncertain is left unassigned.
+- A plan can tick speed-limit rules: its users, now and later, follow them.
 - Bulk: generate by prefix, select rows for enable / disable / extend / reset / delete, CSV export.
 - User drawer: live devices (each IP shows the line and server it is using), 24h / 7d / 30d chart, subscription links and QR, kick (every server at once; for hysteria2 / TUIC / AnyTLS the whole session is closed, so an already-authenticated session cannot keep opening new streams).
 
 ### Rules
 
 - Temporary speed limits on top of a user's own: **schedule** rules (chosen weekdays and a time window in the panel time zone, crossing midnight allowed) and **burst** rules (when combined up + down usage in the last N minutes reaches X GB, limit for M minutes, lift automatically, limit again on the next burst).
-- Targets combine freely: all users (including ones created later), every user of a reseller (including ones created later), individual users; the picker groups by master panel / each reseller and keeps your ticks when switching groups.
+- Targets combine freely: all users (including ones created later), users of a plan (including ones who get it later), every user of a reseller (including ones created later), individual users; the picker groups by master panel / each reseller and keeps your ticks when switching groups.
 - The master evaluates rules every 10 seconds, writes an active state per hit and ships it to nodes in the snapshot; master and nodes overlay the states on the user's own limits. Several rules on one user resolve to the strictest; a rule with "tighten only" (default) never exceeds the user's own limit, switch it off and the rule value overrides, which lets you relax limits at certain hours. A user can be under several burst rules, each triggering and timing independently.
 - Limit changes hit live connections immediately (token buckets are re-rated in place) — this also fixes the old behaviour where a changed user limit only applied after reconnecting.
 - The user list shows "Limited" with the rule name, the drawer lists every active limit with time left; triggers and lifts go to the audit log, with an optional Telegram notice. Rule limits are visible only in the panel and the external API, **never on the user's landing page**.
@@ -275,9 +281,10 @@ Hand part of the selling to someone else: create a reseller on the Resellers pag
 
 ### Subscriptions
 
-- Universal: `https://<domain-or-ip>:2056/sub/<user>` for nextin, sing-box, Shadowrocket, Surge, Quantumult X, Loon, Karing and others.
+- **One address is enough**: `https://<domain-or-ip>:2056/sub/<user>`. Clients get a format they can use based on their User-Agent: Clash Verge / mihomo / Stash get Clash, SFA / SFI / sing-box get sing-box, and Shadowrocket, Surge, Quantumult X, Loon, Karing, nextin and the like get universal links; anything unrecognised gets universal links. Add `?format=` to force one. Settings → Subscription can turn the detection off.
 - Settings → Subscription → "Use the username as the subscription URL" is on by default. Turn it off and **new** users get an unguessable random token instead (the username stays a plain label); existing users keep their URL, and reseller-created users always get a token.
 - Clash: append `?format=clash` for mihomo / Clash Verge / Stash; each line becomes a latency-selected group of entries.
+- **Custom templates**: Settings → Subscription takes one template each for Clash and sing-box; the panel fills in nodes and groups, and a broken template is refused on save. "Fill in the default" gives you a starting point.
 - sing-box: append `?format=json` for a complete sing-box client config (TUN, groups, DNS, basic routing) that SFA (Android), SFI (iOS) and the desktop build import as a remote profile; the landing page has a one-tap import button.
 - The name clients show comes from Settings → Subscription → "Profile title" (falling back to the landing-page title, then the remark, then the username). It goes out on both `Content-Disposition` and `Profile-Title`, encoded the standard way for non-ASCII. Clients that re-read the title on every update (nextin, sing-box) pick it up on refresh; Shadowrocket and Clash Verge name a profile **when it is added** and never rename it — add it through the landing page's one-tap import (which carries the title) or re-add it.
 - Opening the link in a browser shows a landing page: usage, expiry, one-tap import for each client, QR codes, custom notice and support contact.
@@ -312,12 +319,12 @@ Each server, including the master, can have a **traffic ratio**: traffic through
 
 ### Certificates
 
-Three sources:
-- **With a domain**: Let's Encrypt via HTTP-01 (port 80 reachable) or Cloudflare DNS-01 (API token, no port 80). DNS and port are pre-checked; auto-renewal reloads everything without a restart.
+A server can hold several certificates; everything issued, self-signed or added goes into the **store**. Three sources:
+- **With a domain**: Let's Encrypt via HTTP-01 (port 80 reachable), Cloudflare DNS-01 (API token, no port 80) or manual DNS (the panel lists the TXT records to add and only asks for validation once they are visible). **Wildcards** (`*.example.com`) work over DNS and include the bare domain. DNS and port are pre-checked; auto-renewal reloads everything without a restart; manual DNS certificates need the records added again and don't renew on their own.
 - **Without a domain**: self-signed certificate for the server IP. Used for line inbounds only by default; subscriptions automatically carry "allow insecure" so clients connect, while panel and subscription stay on HTTP (browsers and clients reject self-signed HTTPS).
 - **Existing certificate**: point at a certificate and key already on the server (certbot, nginx, commercial…). Only paths are stored; they are checked for a matching, unexpired pair. Renew by overwriting the files.
 
-Line inbounds always use the current certificate; **panel HTTPS and subscription HTTPS are separate checkboxes** (subscription applies immediately, panel needs an m-ui restart). Nodes keep their own certificates.
+**The line default, panel HTTPS and subscription HTTPS each pick their own** from a drawer listing the store (subscription applies immediately, panel needs an m-ui restart); adding a certificate only touches what you tick. **Any line can pick its own too**: the drawer on the line form shows which servers have that certificate and how long is left, and a server without it uses its own default. SNI and "allow insecure" in subscriptions follow the certificate the line really uses. Certificates are matched by name across servers; nodes keep their own.
 
 ### Backup and migration
 

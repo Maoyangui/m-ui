@@ -122,7 +122,7 @@ function renderForm() {
         ${field(t('cert.method'), `<select id="c-method" data-change="cert.method">
           <option value="http" ${method === 'http' ? 'selected' : ''}>${t('cert.methodHttp')}</option>
           <option value="cloudflare" ${method === 'cloudflare' ? 'selected' : ''}>${t('cert.methodCf')}</option>
-          <option value="manual" ${method === 'manual' ? 'selected' : ''}>${t('cert.methodManual')}</option></select>`, `<span id="c-method-help">${t('cert.methodHelp')}</span>`)}
+          <option value="manual" ${method === 'manual' ? 'selected' : ''}>${t('cert.methodManual')}</option></select>`, t('cert.methodHelp'))}
         <div id="c-cf-wrap" ${method !== 'cloudflare' ? 'hidden' : ''}>${field(t('cert.cfToken'), `<input id="c-cftoken" type="password" placeholder="${s.hasCfToken ? t('cert.cfTokenKeep') : ''}">`, t('cert.cfTokenHelp'))}</div>
         <div id="c-renew-wrap" ${method === 'manual' ? 'hidden' : ''}>${check('c-renew', t('cert.autoRenew'), s.acmeAutoRenew, t('cert.autoRenewHelp'))}</div>
         ${check('c-staging', t('cert.staging'), s.acmeStaging, t('cert.stagingHelp'))}
@@ -165,7 +165,7 @@ function syncWildcard() {
   const http = sel.querySelector('option[value=http]');
   http.disabled = wild;
   if (wild && sel.value === 'http') { sel.value = data.settings.hasCfToken ? 'cloudflare' : 'manual'; syncMethod(); }
-  const help = document.getElementById('c-method-help');
+  const help = sel.closest('.field').querySelector('.help');
   if (help) help.textContent = wild ? t('cert.wildcardHelp') : t('cert.methodHelp');
 }
 function syncMethod() {

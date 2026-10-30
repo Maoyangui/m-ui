@@ -115,7 +115,7 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
   <div class="card">
     <div class="cardhead"><h2>{{if eq .Lang "zh"}}一键导入{{else}}Import into an app{{end}}</h2><a class="getapp" href="{{.ClientsURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10"/><path d="M8.5 10.5 12 14l3.5-3.5"/><path d="M5 19h14"/></svg>{{if eq .Lang "zh"}}客户端下载{{else}}Get a client{{end}}</a></div>
     <div class="apps">{{range .Imports}}<a class="app" href="{{.Href}}"><b>{{.Name}}</b><span>{{.Hint}}</span></a>{{end}}</div>
-    <p class="hint">{{if eq .Lang "zh"}}其它客户端:复制下方地址,在 App 里"添加订阅"粘贴即可。Clash 类用 Clash 地址;sing-box(SFA / SFI)用 sing-box 地址;Surge、Quantumult X、Loon、Karing 等用通用地址。{{else}}Other apps: copy a link below and paste it into the app's "add subscription". Clash-family apps take the Clash link; sing-box (SFA / SFI) takes the sing-box link; Surge, Quantumult X, Loon, Karing and the rest take the universal link.{{end}}</p>
+    <p class="hint">{{if eq .Lang "zh"}}其它客户端:复制下方地址,在 App 里"添加订阅"粘贴即可。通用地址一般都能用,客户端来拉时会自动给对的格式;个别 App 不认再用对应的 Clash 或 sing-box 地址。{{else}}Other apps: copy a link below and paste it into the app's "add subscription". The universal link usually just works, since the right format is picked when the app fetches it; if an app refuses it, use the Clash or sing-box link.{{end}}</p>
   </div>
 
   <div class="card">
