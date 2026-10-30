@@ -35,4 +35,11 @@
     <li>发布与文章订阅:<a href="{{base}}feed.xml">feed.xml</a></li>
     <li>上手:<a href="{{base}}zh/getting-started/">五分钟装好</a></li>
   </ul>
+
+  <section id="supporters" hidden>
+    <h2>功德箱</h2>
+    <p>在面板的「建议与支持」页留名并转 USDT,到账后会出现在这里和每一台面板上。</p>
+    <ol id="supporters-list"></ol>
+  </section>
+  <script>fetch('https://raw.githubusercontent.com/Maoyangui/m-ui/donors/donors.json').then(function(r){return r.json()}).then(function(d){var l=document.getElementById('supporters-list');(d.donors||[]).slice(0,50).forEach(function(x){var li=document.createElement('li');li.textContent=x.name+' · '+Math.round(x.total*100)/100+' USDT';l.appendChild(li)});if(l.children.length)document.getElementById('supporters').hidden=false}).catch(function(){})</script>
 </article>

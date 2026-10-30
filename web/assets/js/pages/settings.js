@@ -27,6 +27,7 @@ const groups = () => [
     ['timezone', t('set.timezone'), 'select', t('set.timezoneHelp'), TIMEZONES.map(z => [z, z])],
     ['webListen', t('set.listen'), 'text'], ['webPort', t('set.port'), 'number'], ['webPath', t('set.path'), 'text', t('set.pathHelp')],
     ['webCertFile', t('set.cert'), 'text', t('set.certManaged')], ['webKeyFile', t('set.key'), 'text'],
+    ['statsPing', t('set.statsPing'), 'boolOn', t('set.statsPingHelp')],
   ]},
   { id: 'sub', title: t('set.sub'), restart: true, fields: [
     ['subListen', t('set.listen'), 'text'], ['subPort', t('set.port'), 'number'], ['subPath', t('set.path'), 'text', t('set.subPathHelp')],

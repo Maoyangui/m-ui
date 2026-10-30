@@ -1,0 +1,39 @@
+name: donors
+
+# 功德箱的"后台":把留名和 USDT 到账对上,结果写进 donors 分支,各面板和文档站读那份 donors.json。
+# 没有服务器:留名走 ntfy.sh,到账查 TronGrid,都是免费公开接口。细节见 deploy/donors/settle.mjs。
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: donors
+  cancel-in-progress: false
+
+jobs:
+  settle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: donors
+          path: donors-data
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node deploy/donors/settle.mjs donors-data
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: 有变化才提交
+        working-directory: donors-data
+        run: |
+          git add -A
+          git diff --cached --quiet && exit 0
+          git -c user.name=Maoyangui -c user.email=324171816+Maoyangui@users.noreply.github.com commit -q -m "更新功德箱"
+          git push

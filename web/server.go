@@ -66,6 +66,7 @@ type Server struct {
 	rListener net.Listener
 
 	mu sync.Mutex
+	donors      donorState // 功德箱(见 donate.go)
 	// resellerUserMu 串行化“检查代理用户数上限 + 创建用户”这个复合操作。
 	// 单独 Count 后再 Create 在并发请求下会同时看到同一个余量，导致 UserLimit 被突破。
 	resellerUserMu sync.Mutex
@@ -214,6 +215,9 @@ func (s *Server) Start() error {
 	mux.HandleFunc(base+"logo.svg", brand.ServeLogo)
 	mux.HandleFunc(base+"support", s.handleSupport)
 	mux.HandleFunc(base+"support/qr", s.handleSupportQR)
+	mux.HandleFunc(base+"support/donors", s.handleSupportDonors)
+	mux.HandleFunc(base+"support/pledge", s.handleSupportPledge)
+	mux.HandleFunc(base+"support/pledge-check", s.handleSupportCheck)
 	mux.HandleFunc(api+"admin/", s.auth(s.handleAdmin))
 	mux.HandleFunc(api+"v1/", s.handlePublicAPI) // 外部 API:Bearer 令牌鉴权,与会话无关
 

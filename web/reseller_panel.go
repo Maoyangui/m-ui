@@ -77,6 +77,9 @@ func (s *Server) StartReseller() error {
 	mux.HandleFunc(base+"logo.svg", brand.ServeLogo)
 	mux.HandleFunc(base+"support", s.handleSupport)
 	mux.HandleFunc(base+"support/qr", s.handleSupportQR)
+	mux.HandleFunc(base+"support/donors", s.handleSupportDonors)
+	mux.HandleFunc(base+"support/pledge", s.handleSupportPledge)
+	mux.HandleFunc(base+"support/pledge-check", s.handleSupportCheck)
 
 	path := s.resellerPath()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

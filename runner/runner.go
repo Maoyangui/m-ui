@@ -1752,7 +1752,7 @@ func Run(dbPath string) error {
 		name string
 		fn   func(<-chan struct{})
 	}{
-		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"线路上游", r.relayLoop}, {"定时备份", r.backupLoop},
+		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"线路上游", r.relayLoop}, {"运行统计", r.pingLoop}, {"定时备份", r.backupLoop},
 		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop}, {"凭据撤销重试", r.secureReloadLoop}, {"用户热更新重试", r.userReloadLoop},
 		{"数据面看护", r.coreWatchLoop},
 	} {

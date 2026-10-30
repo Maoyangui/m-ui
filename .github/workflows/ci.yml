@@ -40,5 +40,7 @@ jobs:
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -tags with_utls -trimpath -ldflags "-w -s" -o /tmp/m-ui-$arch .
           done
+      - name: Donors settle
+        run: node --test deploy/donors/settle.test.mjs
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run

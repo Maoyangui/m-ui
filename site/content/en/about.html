@@ -35,4 +35,11 @@
     <li>Release and article feed: <a href="{{base}}feed.xml">feed.xml</a></li>
     <li>Getting started: <a href="{{base}}getting-started/">install in five minutes</a></li>
   </ul>
+
+  <section id="supporters" hidden>
+    <h2>Supporters</h2>
+    <p>Sign on the Feedback page of your panel and send USDT. Once it arrives, your name shows up here and on every panel.</p>
+    <ol id="supporters-list"></ol>
+  </section>
+  <script>fetch('https://raw.githubusercontent.com/Maoyangui/m-ui/donors/donors.json').then(function(r){return r.json()}).then(function(d){var l=document.getElementById('supporters-list');(d.donors||[]).slice(0,50).forEach(function(x){var li=document.createElement('li');li.textContent=x.name+' · '+Math.round(x.total*100)/100+' USDT';l.appendChild(li)});if(l.children.length)document.getElementById('supporters').hidden=false}).catch(function(){})</script>
 </article>

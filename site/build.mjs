@@ -148,7 +148,7 @@ async function fetchReleases() {
     const headers = { 'User-Agent': 'm-ui-site', Accept: 'application/vnd.github+json' };
     if (process.env.GITHUB_TOKEN) headers.Authorization = 'Bearer ' + process.env.GITHUB_TOKEN;
     const res = await fetch('https://api.github.com/repos/Maoyangui/m-ui/releases?per_page=20', { headers, signal: AbortSignal.timeout(15000) });
-    if (res.ok) return (await res.json()).filter(r => !r.draft);
+    if (res.ok) return (await res.json()).filter(r => !r.draft && !r.prerelease && /^v\d/.test(r.tag_name || ''));
     console.warn(`取不到 Releases(HTTP ${res.status}${res.status === 403 ? ',多半是没带 GITHUB_TOKEN 被限流' : ''}),feed 只含文章`);
   } catch (e) { console.warn('取不到 Releases,feed 只含文章:', e.message); }
   return [];
