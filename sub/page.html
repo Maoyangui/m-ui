@@ -130,11 +130,12 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
     </div>
   </div>
 
-  {{if not .Shared}}<div class="card"><details id="usage">
+  {{if and (not .Shared) (not .NoChart)}}<div class="card"><details id="usage">
     <summary><h2>{{if eq .Lang "zh"}}用量情况{{else}}Usage{{end}}</h2><span class="chev"><span class="o">{{if eq .Lang "zh"}}展开查看流量图{{else}}Show traffic chart{{end}} ▾</span><span class="c">{{if eq .Lang "zh"}}收起{{else}}Hide{{end}} ▴</span></span></summary>
     <div class="ubody">
       <div class="seg" id="u-seg"><button type="button" class="active" data-h="24">{{if eq .Lang "zh"}}24 小时{{else}}24 h{{end}}</button><button type="button" data-h="168">{{if eq .Lang "zh"}}7 天{{else}}7 days{{end}}</button><button type="button" data-h="720">{{if eq .Lang "zh"}}30 天{{else}}30 days{{end}}</button></div>
       <div id="u-chart"><div class="empty">{{if eq .Lang "zh"}}加载中…{{else}}Loading…{{end}}</div></div>
+      {{if .RatioNote}}<p class="hint">{{if eq .Lang "zh"}}部分服务器有流量倍率,图里的流量已按倍率折算,和上面的已用量同一口径。{{else}}Some servers have a traffic ratio. The chart counts traffic after the ratio, the same way as the usage above.{{end}}</p>{{end}}
     </div>
   </details></div>{{end}}
 

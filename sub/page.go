@@ -90,6 +90,8 @@ type pageData struct {
 	DaysLeft                int
 	HasExpiry, Expired      bool
 	ActivateDays            int // 还没开始计时:首次连接后这么多天到期
+	NoChart                 bool // 副机的落地页不出流量图:它只有经过自己的原始流量,和总用量对不上
+	RatioNote               bool // 有服务器设了流量倍率:图下面说明用量已按倍率折算
 	ResetText               string
 	UpdateHours             int
 	SubLink, SubClash       string
@@ -171,6 +173,10 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 		d.Percent = int(math.Min(100, float64(used)/float64(user.Volume)*100))
 	}
 	d.ActivateDays = user.ActivateDays
+	d.NoChart = strings.EqualFold(s.setting("nodeMode"), "true")
+	var ratioNodes int64
+	s.db.Model(&model.Node{}).Where("enabled = ? AND ratio > 0 AND ratio != 1", true).Count(&ratioNodes)
+	d.RatioNote = ratioNodes > 0
 	if user.Expiry > 0 {
 		d.HasExpiry = true
 		d.ExpiryText = time.Unix(user.Expiry, 0).In(loc).Format("2006-01-02")
@@ -276,6 +282,10 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key 
 // serveStats 落地页"用量情况"的数据:GET <地址>?stats=24|168|720[&tz=分钟偏移],返回该用户的时段柱。
 // 只对本人地址开放(共享地址在 server.go 里已拦下);知道地址就能看,和落地页本身同一信任级别。
 func (s *Server) serveStats(w http.ResponseWriter, r *http.Request, user model.User) {
+	if strings.EqualFold(s.setting("nodeMode"), "true") { // 副机只有经过自己的原始流量,和总用量对不上,不给
+		http.NotFound(w, r)
+		return
+	}
 	hours, _ := strconv.Atoi(r.URL.Query().Get("stats"))
 	switch hours {
 	case 24, 168, 720:

@@ -231,6 +231,7 @@ async function showDetail(id) {
       <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:.4rem"><h3 style="margin:0">${t('user.trafficChart')}</h3>
         <div class="seg">${[24, 168, 720].map(h => `<button data-act="user.chartRange" data-id="${h}" class="${h === drawerRange ? 'active' : ''}">${t('dash.range.' + (h === 24 ? '24h' : h === 168 ? '7d' : '30d'))}</button>`).join('')}</div></div>
       <div id="ud-chart"></div>
+      ${state.status && state.status.role === 'node' ? `<p class="hint">${t('user.chartNode')}</p>` : ((state.nodes || []).some(n => n.ratio > 0 && n.ratio !== 1) ? `<p class="hint">${t('user.chartRatio')}</p>` : '')}
     </section>
     <section><h3>${t('user.lines')}</h3><div class="chips">${refLabels(refsOf(u), state.lines, pickerNodes()).map(n => `<span class="chip">${esc(n)}</span>`).join('') || `<span class="muted small">${t('common.none')}</span>`}</div>
       ${(u.extIds || []).length ? `<h3 style="margin-top:.6rem">${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span></span>` : ''; }).join('')}</div>` : ''}</section>`);
