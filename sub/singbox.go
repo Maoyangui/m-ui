@@ -148,11 +148,50 @@ func singBoxFromTemplate(user model.User, opt Options, tmpl map[string]interface
 		}
 	}
 	cfg["outbounds"] = out
+	// 模板的 route 没写默认解析器:sing-box 1.14 起缺了它整份配置起不来(实测 FATAL),而模板作者多半只想改分流。
+	// 从 dns 段里挑一个不走代理的服务器补上;挑不出来就不动,让客户端报错说清楚
+	if route, ok := cfg["route"].(map[string]interface{}); ok {
+		if _, has := route["default_domain_resolver"]; !has {
+			if tag := directDNSTag(cfg["dns"]); tag != "" {
+				route["default_domain_resolver"] = tag
+			}
+		}
+	}
 	b, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return Result{}, err
 	}
 	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
+}
+
+// directDNSTag dns 段里不走代理的服务器:优先系统解析(type local),其次第一个没写 detour 的。
+func directDNSTag(dns interface{}) string {
+	m, _ := dns.(map[string]interface{})
+	var servers []map[string]interface{}
+	switch v := m["servers"].(type) {
+	case []map[string]interface{}:
+		servers = v
+	case []interface{}:
+		for _, s := range v {
+			if x, ok := s.(map[string]interface{}); ok {
+				servers = append(servers, x)
+			}
+		}
+	}
+	first := ""
+	for _, s := range servers {
+		tag, _ := s["tag"].(string)
+		if tag == "" || s["detour"] != nil {
+			continue
+		}
+		if s["type"] == "local" {
+			return tag
+		}
+		if first == "" {
+			first = tag
+		}
+	}
+	return first
 }
 
 // expandAll 把列表里的 "{all}" 换成全部节点。

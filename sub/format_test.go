@@ -136,6 +136,37 @@ rules:
 }
 
 // sing-box 模板:模板写的段原样用、{all} 展开成全部节点、没写的 proxy / auto / direct 补上。
+// 模板只改分流、没写 default_domain_resolver:sing-box 1.14 起整份配置起不来,要从 dns 段补上。
+func TestSingBoxTemplateResolver(t *testing.T) {
+	user := model.User{Name: "u"}
+	resolver := func(tmpl string) interface{} {
+		t.Helper()
+		res, err := BuildSingBoxSub(user, nil, Options{SingBoxTmpl: tmpl})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var doc struct {
+			Route map[string]interface{} `json:"route"`
+		}
+		if err := json.Unmarshal([]byte(res.Body), &doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc.Route["default_domain_resolver"]
+	}
+	if got := resolver(`{"route":{"final":"proxy"}}`); got != "local" {
+		t.Fatalf("没写 dns 段时用内置的 local,实际 %v", got)
+	}
+	if got := resolver(`{"dns":{"servers":[{"type":"https","tag":"r","server":"1.1.1.1","detour":"proxy"},{"type":"udp","tag":"cn","server":"223.5.5.5"}]},"route":{"final":"proxy"}}`); got != "cn" {
+		t.Fatalf("模板自己的 dns:挑不走代理的,实际 %v", got)
+	}
+	if got := resolver(`{"dns":{"servers":[{"type":"https","tag":"r","server":"1.1.1.1","detour":"proxy"}]},"route":{"final":"proxy"}}`); got != nil {
+		t.Fatalf("只有走代理的 dns:不瞎填,实际 %v", got)
+	}
+	if got := resolver(`{"route":{"final":"proxy","default_domain_resolver":"mine"}}`); got != "mine" {
+		t.Fatalf("模板写了就听模板的,实际 %v", got)
+	}
+}
+
 func TestSingBoxTemplate(t *testing.T) {
 	tmpl := `{"route":{"final":"流媒体","rules":[{"action":"sniff"}]},"outbounds":[{"type":"selector","tag":"流媒体","outbounds":["proxy","{all}"]}]}`
 	lines := []model.Line{{Id: 1, Name: "tj", Protocol: "trojan", Port: 2, Enabled: true}}
