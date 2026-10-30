@@ -28,7 +28,7 @@ const SS_METHODS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-ietf-poly1305', '202
 const FPS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random'];
 // 表单接管的 Options 键,其余进"高级参数"
 const OPT_KEYS = {
-  hysteria2: ['up_mbps', 'down_mbps', 'obfs', 'port_hopping'], tuic: ['congestion_control'], shadowsocks: ['method', 'password'],
+  hysteria2: ['up_mbps', 'down_mbps', 'obfs', 'port_hopping', 'masquerade'], tuic: ['congestion_control'], shadowsocks: ['method', 'password'],
   anytls: ['padding_scheme'], vless: ['vision'],
 };
 const parseJ = o => { try { return typeof o === 'string' ? JSON.parse(o) : (o || {}); } catch { return {}; } };
@@ -207,7 +207,7 @@ function tlsSection(protocol, tls) {
     ${field(t('line.fp'), sel('f-fp', ['', ...FPS], tls.fingerprint || '', { '': '默认' }))}
     <div id="f-cert-wrap" class="full" ${mode === 'cert' ? '' : 'hidden'}>${field(t('line.cert'), `<div class="row"><input type="hidden" id="f-cert" value="${esc(tls.cert || '')}"><button type="button" class="btn cert-pick-btn" data-act="line.pickCert" id="f-cert-btn">${esc(tls.cert ? certLabel(tls.cert) : t('line.certDefault'))} ▾</button></div>`, t('line.certHelp'))}</div>
     <div id="f-reality" class="form-grid full" ${mode === 'reality' ? '' : 'hidden'}>
-      ${field(t('line.reality.server'), `<input id="f-hs" value="${esc(r.handshake_server || 'www.microsoft.com')}">`, t('line.reality.serverHelp'))}
+      ${field(t('line.reality.server'), `<div class="row"><input id="f-hs" value="${esc(r.handshake_server || 'www.microsoft.com')}"><button type="button" class="btn sm" data-act="line.realityCheck">${t('line.reality.check')}</button><button type="button" class="btn sm" data-act="line.realityPick">${t('line.reality.pick')}</button></div><div id="f-hs-res" class="hint" hidden></div>`, t('line.reality.serverHelp'))}
       ${field(t('line.reality.port'), `<input id="f-hsport" type="number" value="${r.handshake_port || 443}">`)}
       <div class="full">${field(t('line.reality.private'), `<div class="row"><input id="f-priv" value="${esc(r.private_key || '')}"><button type="button" class="btn" data-act="line.genReality">${t('line.reality.gen')}</button></div>`)}</div>
       <div class="full">${field(t('line.reality.public'), `<input id="f-pub" value="${esc(r.public_key || '')}" readonly>`)}</div>
@@ -243,6 +243,7 @@ function protoSection(protocol, o) {
       h = field(t('line.upMbps'), `<input id="f-up" type="number" value="${o.up_mbps || 0}">`) +
         field(t('line.downMbps'), `<input id="f-down" type="number" value="${o.down_mbps || 0}">`) +
         field(t('line.obfs'), `<input id="f-obfs" value="${esc((o.obfs && o.obfs.password) || '')}">`) +
+        `<div class="full">${field(t('line.masq'), `<input id="f-masq" value="${esc(masqOf(o))}" placeholder="https://www.bing.com">`, t('line.masqHelp'))}</div>` +
         `<div class="full">${field(t('line.hop'), `<input id="f-hop" value="${esc(o.port_hopping || '')}" placeholder="20000-30000">`, t('line.hopHelp'))}</div>`; break;
     case 'tuic': h = field(t('line.cc'), sel('f-cc', ['cubic', 'bbr', 'new_reno'], o.congestion_control || 'cubic')); break;
     case 'shadowsocks':
@@ -333,6 +334,11 @@ function readForm(id) {
       if (Number(fv('f-down')) > 0) o.down_mbps = Number(fv('f-down')); else delete o.down_mbps;
       if (fv('f-obfs')) o.obfs = { type: 'salamander', password: fv('f-obfs') }; else delete o.obfs;
       if (fv('f-hop').trim()) o.port_hopping = fv('f-hop').trim(); else delete o.port_hopping;
+      { // 伪装站点:别人探测这个端口时看到的是这个网站,不是一个报错的代理
+        const m = fv('f-masq').trim();
+        if (m && !/^https?:\/\/[^\s/]+/i.test(m)) throw new Error(t('line.masqBad'));
+        if (m) o.masquerade = { type: 'proxy', url: m, rewrite_host: true }; else delete o.masquerade;
+      }
       break;
     case 'tuic': o.congestion_control = fv('f-cc'); break;
     case 'shadowsocks':
@@ -391,6 +397,7 @@ async function editLine(id, cloneFrom, preset) {
   await load('nodes').catch(() => {}); // 服务器列表可能刚在别的页面改过,"部署到服务器"要用最新的
   const src = cloneFrom || (id ? state.lines.find(x => x.id === id) : null);
   const l = src ? { ...src } : (preset || { protocol: 'vless', enabled: true, options: {}, upstreamId: 0 });
+  formIsNew = !id && !cloneFrom;
   if (cloneFrom) { l.name = t('line.cloneOf', { name: src.name }); l.port = ''; }
   if (!l.port) l.port = await suggestPort(); // 新建/克隆:给个可用端口做默认值,可改
   const rrInit = rrOf(l);
@@ -717,7 +724,45 @@ function pickLineCert() {
   });
 }
 
+// 已有的伪装站点;新建线路给一个默认值,改已有线路时留空就是不伪装
+let formIsNew = false;
+function masqOf(o) {
+  const m = o.masquerade;
+  if (typeof m === 'string') return m;
+  if (m && m.url) return m.url;
+  return formIsNew ? 'https://www.bing.com' : '';
+}
+
+const realityText = r => r.ok ? t('line.reality.ok', { ms: r.ms }) : t('line.reality.bad.' + (r.error || 'connect'));
+
 registerActions({
+  'line.realityCheck': async (_, btn) => {
+    const box = document.getElementById('f-hs-res');
+    btn.disabled = true; box.hidden = false; box.textContent = t('line.reality.checking'); box.className = 'hint';
+    try {
+      const r = await post('reality-check', { server: fv('f-hs').trim(), port: Number(fv('f-hsport')) || 443 }, SLOW);
+      box.textContent = realityText(r);
+      box.className = 'hint ' + (r.ok ? 'ok' : 'bad');
+    } catch (e) { box.textContent = e.message; box.className = 'hint bad'; }
+    btn.disabled = false;
+  },
+  'line.realityPick': async (_, btn) => {
+    const box = document.getElementById('f-hs-res');
+    btn.disabled = true; box.hidden = false; box.textContent = t('line.reality.checking'); box.className = 'hint';
+    try {
+      const { results } = await post('reality-check', {}, SLOW);
+      const good = results.filter(x => x.ok).slice(0, 6);
+      box.innerHTML = good.length
+        ? `<div class="chips">${good.map(x => `<button type="button" class="chip" data-act="line.realityUse" data-id="${esc(x.server)}">${esc(x.server)} · ${x.ms} ms</button>`).join('')}</div>`
+        : esc(t('line.reality.none'));
+    } catch (e) { box.textContent = e.message; box.className = 'hint bad'; }
+    btn.disabled = false;
+  },
+  'line.realityUse': id => {
+    document.getElementById('f-hs').value = id;
+    document.getElementById('f-hsport').value = 443;
+    document.getElementById('f-hs-res').hidden = true;
+  },
   'line.pickCert': () => pickLineCert(),
   'line.sel': (id, cb) => { cb.checked ? selected.add(Number(id)) : selected.delete(Number(id)); renderRows(); },
   'line.clearSel': () => { selected.clear(); renderRows(); },

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -752,6 +753,16 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 				Select("name", "type", "options", "from_line", "from_node", "relay_creds").Updates(up).Error; err != nil {
 				return err
 			}
+			if oldName != "" && oldName != up.Name {
+				if err := renameGroupMember(tx, oldName, up.Name); err != nil {
+					return err
+				}
+			}
+			if render.IsGroup(up) {
+				if err := groupLoopCheck(tx); err != nil {
+					return err
+				}
+			}
 			return validateFullConfig(tx, nodeCert)
 		})
 		if err != nil {
@@ -774,6 +785,13 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 		if inUse := linesUsingUpstream(s.db, id); inUse > 0 {
 			badRequest(w, fmt.Errorf("该上游仍被 %d 条线路使用(含分流规则),无法删除", inUse))
 			return
+		}
+		var delUp model.Upstream
+		if s.db.First(&delUp, id).Error == nil {
+			if g := groupsWith(s.db, delUp.Name); len(g) > 0 {
+				badRequest(w, fmt.Errorf("这条上游在上游组「%s」里,先从组里去掉", g[0]))
+				return
+			}
 		}
 		if err := s.db.Delete(&model.Upstream{}, id).Error; err != nil {
 			badRequest(w, err)
@@ -839,6 +857,11 @@ func (s *Server) validateUpstream(up *model.Upstream) error {
 	var probe map[string]interface{}
 	if err := json.Unmarshal(up.Options, &probe); err != nil {
 		return fmt.Errorf("上游参数不是合法 JSON: %w", err)
+	}
+	if render.IsGroup(*up) {
+		if err := s.validateGroup(up); err != nil {
+			return err
+		}
 	}
 	dup := s.db.Model(&model.Upstream{}).Where("name = ?", up.Name)
 	if up.Id != 0 {
@@ -1199,7 +1222,7 @@ var panelSettings = setOf(
 	"webDomain", "timezone", "webListen", "webPort", "webPath", "webCertFile", "webKeyFile",
 	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subProfileTitle", "subUpdates",
 	"subUseUserName", "subEncode", "subShowNotice", "subInsecure", "subServerAddr", "extRefreshMinutes",
-	"subAutoFormat", "subClashExt", "subSingboxExt", "blockBT", "supportOnline",
+	"subAutoFormat", "subClashExt", "subSingboxExt", "blockBT", "supportOnline", "tgBot", "webhookUrl", "webhookSecret",
 	"resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile",
 	"subPageEnabled", "subShareEnabled", "subPageBrand", "subPageTitle", "subPageSupport", "subPageBuyURL", "subPageNotice",
 	"tgEnabled", "tgToken", "tgChatId", "tgProxy", "tgOnLogin", "tgOnUserDisabled", "tgOnUserExpiring", "tgExpiringDays",
@@ -1213,7 +1236,7 @@ var panelSettings = setOf(
 var hiddenSettings = setOf("totpSecret", "apiToken", "nodeToken", "acmeAccountKey", "acmeCfToken")
 
 // maskedSettings 设置页上要显示"已填"的密钥:只发掩码,原样提交回来的掩码表示不改,清空表示删除。
-var maskedSettings = setOf("tgToken", "reachToken")
+var maskedSettings = setOf("tgToken", "reachToken", "webhookSecret")
 
 const secretMask = "********"
 
@@ -1277,6 +1300,12 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, errors.New("面板域名不能写泛域名,要填具体的访问地址,如 hk.example.com"))
 			return
 		}
+		if v, ok := in["webhookUrl"]; ok && strings.TrimSpace(v) != "" {
+			if u, err := url.Parse(strings.TrimSpace(v)); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+				badRequest(w, errors.New("Webhook 地址要是完整的 http(s) 网址"))
+				return
+			}
+		}
 		if v, ok := in["reachMinutes"]; ok && strings.TrimSpace(v) != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(v)); err != nil || n < reach.MinMinutes || n > reach.MaxMinutes {
 				badRequest(w, fmt.Errorf("大陆连通巡检间隔要在 %d 到 %d 分钟之间", reach.MinMinutes, reach.MaxMinutes))
@@ -1288,6 +1317,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		oldAllowPrivate := s.setting("allowPrivate")
 		oldBlockBT := s.setting("blockBT")
 		oldShare := s.setting("subShareEnabled")
+		oldTestURL := s.setting("upstreamTestUrl")
 		note := "端口、证书与监听地址的改动需重启 m-ui 生效"
 		if v, ok := in["nodeMode"]; ok && strings.EqualFold(strings.TrimSpace(v), "true") && !strings.EqualFold(s.setting("nodeMode"), "true") {
 			// 切成副机后本机的线路 / 用户 / 上游会被主机的快照整表替换:先留一份备份,别静默丢数据
@@ -1316,6 +1346,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if roleChanged {
 			logger.Info("面板角色已切换为: ", s.role())
+		}
+		if s.setting("upstreamTestUrl") != oldTestURL && s.syncGroupTestURL() && s.run != nil {
+			s.reloadUpstreams("测试地址改了")
 		}
 		v1, ok1 := in["allowPrivate"]
 		v2, ok2 := in["blockBT"]

@@ -99,7 +99,7 @@ function expiryCell(u) {
   if (!u.expiry) return `<span class="muted">${t('user.never')}</span>`;
   const d = daysLeft(u.expiry);
   const b = d < 0 ? badge(t('user.expired'), 'danger') : d <= 7 ? badge(t('user.daysLeft', { n: d }), 'warn') : badge(t('user.daysLeft', { n: d }));
-  return `${fmtDay(u.expiry)}<div class="sub-cell">${b}</div>`;
+  return `<span class="nowrap">${fmtDay(u.expiry)} ${b}</span>`;
 }
 function visibleRows() {
   let rows = state.users.filter(u => matches(query, u.name, u.remark, u.desc, planNameOf(u)));

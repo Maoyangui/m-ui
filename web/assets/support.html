@@ -28,15 +28,16 @@
   --err: #f87171; --gold: #facc15; --gold-bg: #3a3010; --silver: #cbd5e1; --silver-bg: #2a3240; --bronze: #fdba74; --bronze-bg: #3b2414;
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .28);
 }
+html { font-size: 15px; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; -webkit-font-smoothing: antialiased; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; -webkit-font-smoothing: antialiased; }
 svg { flex: none; }
 a { color: var(--primary); }
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 8px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
-.wrap { max-width: 640px; margin: 0 auto; padding: .9rem 1.1rem 1.3rem; }
+.wrap { max-width: 600px; margin: 0 auto; padding: .8rem 1rem 1.2rem; }
 
 /* 顶栏 */
 .top { display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; font-size: .85rem; }
@@ -55,7 +56,7 @@ a { color: var(--primary); }
 .chip button:hover { background: var(--primary-soft); color: var(--primary); }
 
 /* 卡片 */
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: .85rem 1rem; box-shadow: var(--shadow); margin-bottom: .6rem; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: .75rem .9rem; box-shadow: var(--shadow); margin-bottom: .6rem; }
 .card > header { display: flex; align-items: center; gap: .6rem; margin-bottom: .35rem; }
 .card h2 { margin: 0; font-size: 1.02rem; font-weight: 600; letter-spacing: -.005em; }
 .ic { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
@@ -94,7 +95,7 @@ a { color: var(--primary); }
 .addr code { font-family: var(--mono); font-size: .82rem; line-height: 1.5; word-break: break-all; flex: 1; min-width: 0; }
 .verify { margin: .45rem 0 0; font-size: .78rem; color: var(--muted); }
 .verify b { color: var(--text); font-family: var(--mono); font-weight: 600; }
-.qr { width: 96px; height: 96px; border: 1px solid var(--border); border-radius: 12px; background: #fff; padding: 7px; flex: none; }
+.qr { width: 84px; height: 84px; border: 1px solid var(--border); border-radius: 12px; background: #fff; padding: 7px; flex: none; }
 
 /* 运行中的面板数:版本号旁边一个小标 */
 .chip.stat { padding: .12rem .55rem; font-size: .75rem; font-weight: 400; gap: .3rem; }

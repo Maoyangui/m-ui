@@ -209,6 +209,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"exts/", s.auth(s.masterOnly(s.handleExtItem)))
 	mux.HandleFunc(api+"nodes", s.auth(s.handleNodes))
 	mux.HandleFunc(api+"nodes/", s.auth(s.handleNodeItem))
+	mux.HandleFunc(api+"reality-check", s.auth(s.handleRealityCheck))
 	mux.HandleFunc(api+"reach", s.auth(s.handleReach))        // 大陆连通检测:状态与结果
 	mux.HandleFunc(api+"reach/run", s.auth(s.handleReachRun)) // 手动检测(一台或全部)
 	mux.HandleFunc(api+"agent/", s.handleAgent)               // 内部按动作分别做令牌/会话鉴权
@@ -290,6 +291,7 @@ func (s *Server) Start() error {
 		logger.Warning("代理面板启动失败: ", err)
 	}
 	go s.reapSessions()
+	go s.tgBotLoop()
 	return nil
 }
 

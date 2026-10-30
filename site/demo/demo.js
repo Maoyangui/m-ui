@@ -18,6 +18,8 @@ const shift = (v, k = '') => Array.isArray(v) ? v.map(x => shift(x)) : (v && typ
 for (const k of Object.keys(F)) F[k] = shift(F[k]);
 const clone = v => JSON.parse(JSON.stringify(v));
 const fx = k => clone(F[k] ?? null);
+// 上游测试结果:上游组写明现在走哪一条
+const demoUpResult = u => ({ name: 'Demo', isLocal: true, state: 'ok', delayMs: 40 + Math.floor(Math.random() * 80), method: u.type === 'urltest' ? 'via:' + ((u.options && u.options.outbounds) || [''])[0] : '' });
 
 // 内存状态:从 fixture 复制一份,增删改都落在这里
 const S = {
@@ -219,6 +221,11 @@ function route(method, path, query, body) {
       return ok();
     }
     case 'route-apps': return { results: demoApps(body && body.names) };
+    case 'reality-check': {
+      const sites = ['www.microsoft.com', 'www.apple.com', 'www.cloudflare.com', 'www.amazon.com', 'www.nvidia.com', 'www.samsung.com'];
+      if (body && body.server) return { server: body.server, port: body.port || 443, ok: true, ms: 12 + Math.floor(Math.random() * 40) };
+      return { results: sites.map((server, i) => ({ server, port: 443, ok: true, ms: 8 + i * 7 })) };
+    }
     case 'lines': {
       if (seg[1] === 'sort') { const ids = body || []; ids.forEach((lid, i) => { const l = S.lines.find(x => x.id === lid); if (l) l.sort = i + 1; }); S.lines.sort((a, b) => (a.sort || 0) - (b.sort || 0)); return ok(); }
       if (method === 'POST' && !seg[1]) { const l = { id: nextId(S.lines), enabled: true, sort: S.lines.length + 1, userCount: 0, ...body }; l.upstreamName = (S.upstreams.find(x => x.id === l.upstreamId) || {}).name || 'direct'; if (body.assignAll) { l.userCount = S.users.length; S.users.forEach(u => { u.lineIds = [...(u.lineIds || []), l.id]; }); } S.lines.push(l); return clone(l); }
@@ -229,11 +236,11 @@ function route(method, path, query, body) {
       return ok();
     }
     case 'upstreams': {
-      if (seg[1] === 'test') return { ok: true, results: S.upstreams.map(u => ({ id: u.id, ok: true, latencyMs: 40 + Math.floor(Math.random() * 80) })) };
+      if (seg[1] === 'test') return S.upstreams.map(u => ({ id: u.id, servers: [demoUpResult(u)] }));
       if (seg[1] === 'parse') return { name: 'Parsed upstream', type: 'shadowsocks', options: { server: '203.0.113.20', server_port: 8388, method: 'aes-256-gcm', password: 'demo' } };
       if (method === 'POST' && !seg[1]) { const u = { id: nextId(S.upstreams), sort: S.upstreams.length + 1, ...body }; S.upstreams.push(u); return clone(u); }
       const u = find(S.upstreams, id);
-      if (seg[2] === 'test') return { ok: true, latencyMs: 40 + Math.floor(Math.random() * 80), exitIp: '203.0.113.20' };
+      if (seg[2] === 'test') return { id, servers: [demoUpResult(u)] };
       if (method === 'DELETE') { S.upstreams = S.upstreams.filter(x => x.id !== id); return ok(); }
       if (method === 'PUT') { Object.assign(u, body, { id }); return clone(u); }
       return ok();

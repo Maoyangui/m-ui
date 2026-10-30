@@ -137,8 +137,10 @@ func RelayLoopOf(db *gorm.DB, up model.Upstream) string {
 	}
 	var lines []model.Line
 	db.Select("id, name, upstream_id, route_rules").Find(&lines)
+	var all []model.Upstream
+	db.Select("id, name, type, options").Find(&all)
 	for _, l := range lines {
-		for _, id := range render.LineUpstreams(l) {
+		for _, id := range render.ExpandIDs(render.LineUpstreams(l), all) { // 线路经上游组用到它也算
 			if id == up.Id { // l 用这条上游:从目标线路走下去如果能回到 l,就是环
 				if l.Id == target.Id {
 					return l.Name + " → " + target.Name
@@ -156,6 +158,8 @@ func RelayLoopOf(db *gorm.DB, up model.Upstream) string {
 func relayPath(db *gorm.DB, from model.Line, to, skip uint) string {
 	var ups []model.Upstream
 	db.Where("from_line > 0").Find(&ups)
+	var all []model.Upstream
+	db.Select("id, name, type, options").Find(&all)
 	byID := make(map[uint]model.Upstream, len(ups))
 	for _, u := range ups {
 		if u.Id != skip {
@@ -169,7 +173,7 @@ func relayPath(db *gorm.DB, from model.Line, to, skip uint) string {
 		if l.Id == to {
 			return strings.Join(path, " → ")
 		}
-		for _, id := range render.LineUpstreams(l) {
+		for _, id := range render.ExpandIDs(render.LineUpstreams(l), all) {
 			up, ok := byID[id]
 			if !ok || seen[up.FromLine] {
 				continue
@@ -199,6 +203,8 @@ func RelayLoop(db *gorm.DB, start model.Line) string {
 	for _, u := range ups {
 		byID[u.Id] = u
 	}
+	var all []model.Upstream
+	db.Select("id, name, type, options").Find(&all)
 	var lines []model.Line
 	db.Select("id, name, upstream_id, route_rules").Find(&lines)
 	lineByID := make(map[uint]model.Line, len(lines)+1)
@@ -212,7 +218,7 @@ func RelayLoop(db *gorm.DB, start model.Line) string {
 	var walk func(l model.Line, path []string) string
 	walk = func(l model.Line, path []string) string {
 		path = append(path, l.Name)
-		for _, id := range render.LineUpstreams(l) {
+		for _, id := range render.ExpandIDs(render.LineUpstreams(l), all) {
 			up, ok := byID[id]
 			if !ok {
 				continue

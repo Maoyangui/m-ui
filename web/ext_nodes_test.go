@@ -200,7 +200,7 @@ func TestExtNodesStaleListRejected(t *testing.T) {
 // 隐藏和改名:存下来,展开时带着,订阅刷新后按名字接着生效;空名字不算改名。
 func TestExtNodesPrefs(t *testing.T) {
 	s := extNodesServer(t)
-	if code, out := extCall(t, s, http.MethodPost, "1/nodes/prefs", `{"hidden":["a","a"," "],"renames":{"b":"乙","a":"  ","c":"c"}}`); code != http.StatusOK {
+	if code, out := extCall(t, s, http.MethodPut, "1/nodes/prefs", `{"hidden":["a","a"," "],"renames":{"b":"乙","a":"  ","c":"c"}}`); code != http.StatusOK {
 		t.Fatalf("保存失败: %d %v", code, out)
 	}
 	_, out := extCall(t, s, http.MethodGet, "1/nodes", "")
@@ -220,7 +220,7 @@ func TestExtNodesPrefs(t *testing.T) {
 	if strings.Count(string(e.Hidden), `"a"`) != 1 || strings.Contains(string(e.Renames), `"c"`) {
 		t.Fatalf("存的内容没整理: hidden=%s renames=%s", e.Hidden, e.Renames)
 	}
-	if code, _ := extCall(t, s, http.MethodPost, "1/nodes/prefs", `{bad`); code != http.StatusBadRequest {
+	if code, _ := extCall(t, s, http.MethodPut, "1/nodes/prefs", `{bad`); code != http.StatusBadRequest {
 		t.Fatalf("坏请求应该 400: %d", code)
 	}
 }

@@ -60,7 +60,7 @@ const LineUpstreamMinNode = "0.7.16"
 // minNodeFor 这份快照要求的副机最低版本。没用到新功能时不抬门槛,只升级主机不影响旧副机同步。
 func minNodeFor(lines []model.Line, upstreams []model.Upstream) string {
 	for _, u := range upstreams {
-		if u.FromLine > 0 {
+		if u.FromLine > 0 || render.IsGroup(u) { // 上游组同一版加的:旧版副机不会把成员渲染出来,整份配置起不来
 			return LineUpstreamMinNode
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/sagernet/sing-box/adapter"
 	urltest "github.com/sagernet/sing-box/common/urltest"
 	"github.com/sagernet/sing-box/option"
 )
@@ -69,6 +70,21 @@ func CheckOutboundIsolated(outbound json.RawMessage, link string) (result CheckO
 	}
 	result.OK, result.Delay = true, delay
 	return result
+}
+
+// OutboundNow 上游组现在走的是哪一条;不是组、没在跑、还没测出结果时返回空。
+func OutboundNow(tag string) string {
+	if outbound_manager == nil {
+		return ""
+	}
+	ob, ok := outbound_manager.Outbound(tag)
+	if !ok {
+		return ""
+	}
+	if g, ok := ob.(adapter.OutboundGroup); ok {
+		return g.Now()
+	}
+	return ""
 }
 
 func CheckOutbound(ctx context.Context, tag string, link string) (result CheckOutboundResult) {

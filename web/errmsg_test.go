@@ -20,7 +20,7 @@ import (
 func TestErrorMessagesHaveEnglish(t *testing.T) {
 	src, ops := backendMessages(t, ".", "../hop", "../upstream", "../ext", "../rules", "../creds", "../ops", "../selfupdate",
 		"../acme", "../reach", "../render", "../runner", "../hub", "../certutil", "../backup", "../importer", "../jobs",
-		"../monitor", "../stats", "../totp", "../database", "../appdomains", "../sub", "../database/model")
+		"../monitor", "../stats", "../totp", "../database", "../appdomains", "../sub", "../database/model", "../notify")
 	js, err := os.ReadFile("assets/js/errmsg.js")
 	if err != nil {
 		t.Fatal(err)
@@ -147,6 +147,8 @@ func backendMessages(t *testing.T, dirs ...string) (map[string]string, map[strin
 							add(v.Args[0])
 						case name == "http.Error" && len(v.Args) > 1:
 							add(v.Args[1])
+						case (name == "logf" || strings.HasSuffix(name, ".logf")) && len(v.Args) > 0: // 证书页显示的签发日志
+							add(v.Args[0])
 						case strings.HasSuffix(name, ".noteReload") && len(v.Args) > 0:
 							if k, ok := keyOf(v.Args[0]); ok {
 								ops[k] = true

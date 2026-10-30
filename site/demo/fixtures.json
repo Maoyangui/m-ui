@@ -213,6 +213,19 @@
           "password": "demo-password"
         },
         "sort": 1
+      },
+      {
+        "id": 3,
+        "name": "Auto-exit",
+        "type": "urltest",
+        "options": {
+          "outbounds": ["Frankfurt-exit", "LA-streaming"],
+          "url": "http://www.gstatic.com/generate_204",
+          "interval": "30s",
+          "tolerance": 300,
+          "interrupt_exist_connections": true
+        },
+        "sort": 2
       }
     ],
     "GET users": [

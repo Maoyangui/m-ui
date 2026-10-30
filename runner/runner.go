@@ -123,6 +123,9 @@ func (r *Runner) Monitor() *monitor.Monitor { return r.monitor }
 // CheckUpstream 对单个上游做健康检查(面板手动测试与定时巡检共用)。
 // 数据面运行时经该上游真实请求测试 URL;未运行时 TCP 类做端口探测,QUIC 类无法离线测试。
 func (r *Runner) CheckUpstream(up model.Upstream) (ok bool, delayMs int, method, errStr string) {
+	if render.IsGroup(up) {
+		return r.checkGroup(up)
+	}
 	testURL := r.setting("upstreamTestUrl")
 	if testURL == "" {
 		testURL = "http://www.gstatic.com/generate_204"
@@ -141,6 +144,45 @@ func (r *Runner) CheckUpstream(up model.Upstream) (ok bool, delayMs int, method,
 	}
 	res := core.CheckOutboundIsolated(ob, testURL)
 	return res.OK, int(res.Delay), "urltest", res.Error
+}
+
+// checkGroup 上游组:成员有一条通就算通,延迟取最低的。全不通才算故障。
+func (r *Runner) checkGroup(group model.Upstream) (bool, int, string, string) {
+	var members []model.Upstream
+	r.db.Where("name IN ?", render.GroupMembers(group)).Find(&members)
+	type res struct {
+		ok  bool
+		ms  int
+		err string
+	}
+	out := make([]res, len(members))
+	var wg sync.WaitGroup
+	for i, m := range members {
+		wg.Add(1)
+		go func(i int, m model.Upstream) {
+			defer wg.Done()
+			ok, ms, _, e := r.CheckUpstream(m)
+			out[i] = res{ok, ms, m.Name + ": " + e}
+		}(i, m)
+	}
+	wg.Wait()
+	best, last := 0, "没有可用的成员"
+	ok := false
+	for _, x := range out {
+		if x.ok && (!ok || x.ms < best) {
+			ok, best = true, x.ms
+		} else if !x.ok {
+			last = x.err
+		}
+	}
+	if ok {
+		method := "urltest"
+		if now := core.OutboundNow(group.Name); now != "" {
+			method = "via:" + now // 面板上写明现在走的是哪一条
+		}
+		return true, best, method, ""
+	}
+	return false, 0, "urltest", last
 }
 
 // DB 暴露数据库句柄给面板层。
@@ -557,34 +599,40 @@ func (r *Runner) ReloadUpstreams() (err error) {
 		logger.Info("除了上游还有线路 / 路由等变化,改为全量重载")
 		return r.reloadAllLocked(raw)
 	}
-	changed := 0
-	for tag, ob := range want {
-		prev, existed := r.applied[tag]
-		if existed && prev == ob {
-			continue
-		}
-		if existed {
-			if err := r.core.RemoveOutbound(tag); err != nil {
-				logger.Warning("热移除出站 ", tag, " 失败,改为全量重载: ", err)
-				return r.reloadAllLocked(raw)
-			}
-		}
-		if err := r.core.AddOutbound([]byte(ob)); err != nil {
-			logger.Warning("热添加出站 ", tag, " 失败,改为全量重载: ", err)
-			return r.reloadAllLocked(raw)
-		}
-		changed++
-	}
-	for tag := range r.applied {
-		if _, keep := want[tag]; keep {
-			continue
-		}
+	plan := planOutbounds(r.applied, want)
+	remove := func(tag string) bool {
 		if err := r.core.RemoveOutbound(tag); err != nil {
 			logger.Warning("热移除出站 ", tag, " 失败,改为全量重载: ", err)
+			return false
+		}
+		return true
+	}
+	add := func(tag string) bool {
+		if err := r.core.AddOutbound([]byte(want[tag])); err != nil {
+			logger.Warning("热添加出站 ", tag, " 失败,改为全量重载: ", err)
+			return false
+		}
+		return true
+	}
+	for _, tag := range plan.dropGroups {
+		if !remove(tag) {
 			return r.reloadAllLocked(raw)
 		}
-		changed++
 	}
+	for _, tag := range plan.swap {
+		if _, existed := r.applied[tag]; existed && !remove(tag) {
+			return r.reloadAllLocked(raw)
+		}
+		if _, wanted := want[tag]; wanted && !add(tag) {
+			return r.reloadAllLocked(raw)
+		}
+	}
+	for _, tag := range plan.addGroups {
+		if !add(tag) {
+			return r.reloadAllLocked(raw)
+		}
+	}
+	changed := len(plan.dropGroups) + len(plan.swap) + len(plan.addGroups)
 	r.applied = want
 	// 运行中的配置记录跟着换成新出站:之后整份配置起不来要回滚时,回到的是最近真正在跑的上游,
 	// 而不是热更新之前的那个(以前这里不更新,回滚会把已经换掉的旧上游请回来)
@@ -1423,7 +1471,7 @@ func (r *Runner) ApplyLimits() {
 // notifyRule 突发限速触发的通知:设置里明确打开才发(默认关,免得高峰期刷屏)。
 func (r *Runner) notifyRule(text string) {
 	if strings.EqualFold(r.setting("tgOnRuleLimit"), "true") {
-		r.notifier.Event("", text)
+		r.notifier.Event("tgOnRuleLimit", text)
 	}
 }
 
@@ -1441,6 +1489,9 @@ func (r *Runner) usedUpstreams() map[uint]bool {
 			}
 		}
 	}
+	var all []model.Upstream
+	r.db.Select("id, name, type, options").Find(&all)
+	render.ExpandGroups(out, all) // 上游组的成员也巡检:组还通时成员挂了也要告诉你
 	return out
 }
 

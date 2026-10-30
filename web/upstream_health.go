@@ -78,6 +78,28 @@ func (s *Server) upstreamUsers() (map[uint]map[uint]bool, []model.Node) {
 			}
 		}
 	}
+	// 上游组的成员:用组的服务器也在用它们
+	var ups []model.Upstream
+	s.db.Select("id, name, type, options").Find(&ups)
+	byName := make(map[string]uint, len(ups))
+	for _, u := range ups {
+		byName[u.Name] = u.Id
+	}
+	for _, g := range ups {
+		if !render.IsGroup(g) {
+			continue
+		}
+		for nodeID := range out[g.Id] {
+			for _, name := range render.GroupMembers(g) {
+				if id, ok := byName[name]; ok {
+					if out[id] == nil {
+						out[id] = map[uint]bool{}
+					}
+					out[id][nodeID] = true
+				}
+			}
+		}
+	}
 	return out, nodes
 }
 

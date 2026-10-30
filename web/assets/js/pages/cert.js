@@ -13,12 +13,16 @@ const certs = () => data.certs || [];
 const certOf = target => certs().find(c => (target === 'lines' ? c.forLines : target === 'panel' ? c.forPanel : c.forSub));
 const USES = { lines: 'cert.useLines', panel: 'cert.usePanel', sub: 'cert.useSub' };
 
+// 签发日志是后端写的中文;英文界面按错误文案同一张表翻译,行首的时间不动
+const logText = st => (st.log || []).map(l => { const m = /^(\d\d:\d\d:\d\d )([\s\S]*)$/.exec(l); return m ? m[1] + trErr(m[2]) : trErr(l); }).join('\n');
+
 export async function render(el) {
   data = await get('cert');
   const s = data.settings, st = data.status;
   // 证书来源:有域名签发 / 无域名自签 / 服务器上已有的证书
   source = source || data.source || (s.webDomain ? 'acme' : 'selfsign');
   el.innerHTML = `
+    <div id="c-txt"></div>
     <div class="grid-2">
       <section class="card">
         <div class="card-head"><h2>${t('cert.inUse')}</h2>${st.running ? badge(t('cert.running'), 'primary') : (st.lastOk ? badge(t('cert.lastOk') + ' ' + fmtRelative(st.lastOk), 'ok') : '')}</div>
@@ -34,7 +38,6 @@ export async function render(el) {
         <div id="c-form" style="margin-top:.8rem"></div>
       </section>
     </div>
-    <div id="c-txt"></div>
     <section class="card">
       <div class="card-head"><h2>${t('cert.store')}</h2><span class="muted small">${t('cert.storeCount', { n: certs().length })}</span></div>
       ${certs().length ? `<div class="table-wrap"><table class="grid">
@@ -42,11 +45,11 @@ export async function render(el) {
         <tbody>${certs().map(storeRow).join('')}</tbody>
       </table></div>` : `<p class="muted">${t('cert.none')}</p>`}
     </section>
-    <section class="card">
-      <div class="card-head"><h2>${t('cert.log')}</h2>${st.lastError ? badge(t('cert.lastFailed'), 'danger') : ''}</div>
-      <pre class="log" id="c-log">${esc((st.log || []).join('\n') || t('common.empty'))}</pre>
+    <details class="card cert-log" ${st.running || st.lastError ? 'open' : ''}>
+      <summary><h2>${t('cert.log')}</h2>${st.lastError ? badge(t('cert.lastFailed'), 'danger') : ''}</summary>
+      <pre class="log" id="c-log">${esc(logText(st) || t('common.empty'))}</pre>
       ${st.lastError ? `<p class="hint" style="color:var(--danger)">${esc(trErr(st.lastError))}</p>` : ''}
-    </section>`;
+    </details>`;
   renderForm();
   renderTxt(st.txt);
   if (st.running) startPoll();
@@ -208,7 +211,7 @@ function startPoll() {
     if (st) {
       fails = 0;
       const log = document.getElementById('c-log');
-      if (log) { log.textContent = (st.log || []).join('\n'); log.scrollTop = log.scrollHeight; }
+      if (log) { log.textContent = logText(st); log.scrollTop = log.scrollHeight; }
       const sig = JSON.stringify(st.txt || []);
       if (sig !== lastTxt) { lastTxt = sig; renderTxt(st.txt); }
       if (!st.running) {

@@ -158,6 +158,7 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 			usedUp[id] = true
 		}
 	}
+	ExpandGroups(usedUp, allUps) // 线路只写了上游组时,成员的出站也要在
 	upstreams := make([]model.Upstream, 0, len(allUps))
 	upstreamById := make(map[uint]model.Upstream, len(allUps))
 	for _, u := range allUps {

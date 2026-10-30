@@ -63,6 +63,8 @@ const groups = () => [
     ['tgEnabled', t('set.tgEnabled'), 'bool', t('set.tgEnabledHelp')],
     ['tgToken', t('set.tgToken'), 'text', t('set.tgTokenHelp')], ['tgChatId', t('set.tgChatId'), 'text', t('set.tgChatIdHelp')],
     ['tgProxy', t('set.tgProxy'), 'text', t('set.tgProxyHelp')],
+    ['tgBot', t('set.tgBot'), 'bool', t('set.tgBotHelp')],
+    ['webhookUrl', t('set.webhookUrl'), 'text', t('set.webhookUrlHelp')], ['webhookSecret', t('set.webhookSecret'), 'text', t('set.webhookSecretHelp')],
     ['tgOnLogin', t('set.tgOnLogin'), 'boolOn'], ['tgOnUserDisabled', t('set.tgOnUserDisabled'), 'boolOn'],
     ['tgOnUserExpiring', t('set.tgOnUserExpiring'), 'boolOn'], ['tgExpiringDays', t('set.tgExpiringDays'), 'number'],
     ['tgOnQuota', t('set.tgOnQuota'), 'boolOn'], ['tgQuotaPercent', t('set.tgQuotaPercent'), 'number'],

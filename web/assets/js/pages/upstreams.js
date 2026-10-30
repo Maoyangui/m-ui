@@ -22,6 +22,7 @@ const FORM_KEYS = {
   socks: ['server', 'server_port', 'version', 'username', 'password'],
 };
 const HAS_TRANSPORT = { vless: 1, vmess: 1, trojan: 1 };
+const GROUP = 'urltest';
 const results = {};
 let query = '';
 
@@ -36,6 +37,7 @@ export async function render(el) {
       <span class="muted small" id="up-count"></span>
       <span class="grow"></span>
       <button class="btn" id="btn-test-all" data-act="up.testAll">${t('common.testAll')}</button>
+      <button class="btn" data-act="up.addGroup">${t('up.addGroup')}</button>
       <button class="btn" data-act="up.addLine">${t('up.addFromLine')}</button>
       <button class="btn primary" data-act="up.add">${t('up.add')}</button>
     </div>
@@ -67,7 +69,7 @@ function resultHTML(id) {
   const one = servers.length === 1 && ((state.status && state.status.nodes) || 0) <= 1;
   const chips = servers.map(sv => {
     const who = one ? '' : `<span class="muted small">${esc(sv.name)}</span> `;
-    if (sv.state === 'ok') return who + badge(sv.delayMs + ' ms', 'ok') + (sv.method === 'tcp' ? ' ' + badge('TCP') : '');
+    if (sv.state === 'ok') return who + badge(sv.delayMs + ' ms', 'ok') + (sv.method === 'tcp' ? ' ' + badge('TCP') : '') + (String(sv.method || '').startsWith('via:') ? ` <span class="muted small">${t('up.groupNow', { name: esc(sv.method.slice(4)) })}</span>` : '');
     if (sv.state === 'fail') return who + badge(t('up.fault'), 'danger');
     if (sv.state === 'stale') return who + badge(t('up.stale'), 'warn');
     return who + badge(t('up.pending'));
@@ -99,6 +101,7 @@ const relayNames = u => {
 
 function typeBadges(u) {
   const o = parseOpts(u.options);
+  if (u.type === GROUP) return badge(t('up.group'), 'primary');
   let h = u.fromLine ? badge(t('up.fromLineBadge'), 'primary') + ' ' + badge(TYPES[u.type] || u.type) : badge(TYPES[u.type] || u.type);
   if (o.tls && o.tls.reality && o.tls.reality.enabled) h += ' ' + badge('Reality', 'ok');
   else if (o.tls && o.tls.enabled) h += ' ' + badge('TLS');
@@ -111,13 +114,19 @@ function renderRows() {
   if (!body) return;
   const usage = {};
   state.lines.forEach(l => { if (l.upstreamId) usage[l.upstreamId] = (usage[l.upstreamId] || 0) + 1; });
+  state.upstreams.filter(u => u.type === GROUP).forEach(g => { // 线路用组,组的成员也算在用
+    (parseOpts(g.options).outbounds || []).forEach(name => {
+      const m = state.upstreams.find(x => x.name === name);
+      if (m && usage[g.id]) usage[m.id] = (usage[m.id] || 0) + usage[g.id];
+    });
+  });
   const online = new Set(state.onlines.upstreams || []);
   const rows = state.upstreams.filter(u => { const o = parseOpts(u.options); return matches(query, u.name, u.type, o.server); });
   document.getElementById('up-count').textContent = `${rows.length} / ${state.upstreams.length}`;
   if (!rows.length) { setHTML(body, `<tr><td colspan="6">${empty()}</td></tr>`); return; }
   setHTML(body, rows.map(u => {
     const o = parseOpts(u.options);
-    const srv = o.server ? o.server + (o.server_port ? ':' + o.server_port : '') : '';
+    const srv = u.type === GROUP ? (o.outbounds || []).join(' · ') : o.server ? o.server + (o.server_port ? ':' + o.server_port : '') : '';
     return `<tr>
       <td class="primary-cell">${online.has(u.name) ? '<span class="dot on"></span>' : ''}${esc(u.name)}${u.fromLine ? `<div class="sub-cell">${esc(relayNames(u))}${u.relayProblem ? ` · <span class="danger">${esc(trErr(u.relayProblem))}</span>` : ''}</div>` : ''}</td>
       <td>${typeBadges(u)}</td>
@@ -327,7 +336,29 @@ export function editRelayUpstream(id, preset) {
   suggest();
 }
 
+// 上游组:选几条上游,内核定时测,用延迟最低的那条能通的,挂了自动换
+function editGroup(id) {
+  const u = id ? state.upstreams.find(x => x.id === id) : {};
+  const cur = new Set(parseOpts(u.options).outbounds || []);
+  const others = state.upstreams.filter(x => x.type !== GROUP && x.id !== id);
+  if (others.length < 2) { toast(t('up.groupNeedTwo'), 'err'); return; }
+  openModal(id ? t('up.edit') : t('up.addGroup'), `
+    <div class="form-grid">
+      <div class="full">${field(t('common.name'), `<input id="f-name" value="${esc(u.name || '')}">`)}</div>
+      <div class="full">${field(t('up.groupMembers'), `<div class="check-list">${others.map(x => `<label><input type="checkbox" class="grp-cb" value="${esc(x.name)}" ${cur.has(x.name) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div>`, t('up.groupHelp'))}</div>
+    </div>`, async () => {
+    const outbounds = [...document.querySelectorAll('.grp-cb:checked')].map(c => c.value);
+    if (outbounds.length < 2) throw new Error(t('up.groupNeedTwo'));
+    const body = { name: fv('f-name').trim(), type: GROUP, options: { outbounds } };
+    if (id) await put('upstreams/' + id, body); else await post('upstreams', body);
+    await load('upstreams', 'lines', 'status');
+    renderRows();
+    toast(id ? t('up.updated') : t('up.created'), 'ok');
+  });
+}
+
 function editUpstream(id) {
+  if (id && (state.upstreams.find(x => x.id === id) || {}).type === GROUP) { editGroup(id); return; }
   const u = id ? state.upstreams.find(x => x.id === id) : { type: 'vless', options: {} };
   if (u.fromLine) { editRelayUpstream(id); return; }
   const o = parseOpts(u.options);
@@ -357,6 +388,7 @@ function editUpstream(id) {
 
 registerActions({
   'up.add': () => editUpstream(null),
+  'up.addGroup': () => editGroup(null),
   'up.addLine': () => {
     if (!state.lines.length) { toast(t('up.noLines'), 'err'); return; }
     editRelayUpstream(null);

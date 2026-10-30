@@ -439,7 +439,17 @@ curl -s -X POST "${H[@]}" "$BASE/users/dl-001/rotate"
 | 404 `接口不存在` | 路径不对 |
 | 405 `方法不允许` | 方法不对 |
 
-## 9. 注意
+## 9. 事件推送(Webhook)
+
+不想轮询的话,在**设置 → 通知**填 Webhook 地址,勾选的事件会 POST 过去:
+
+```json
+{"event":"login","text":"🔐 面板登录:admin\nIP:203.0.113.8\n2026-10-31 02:57:49","time":1793386669}
+```
+
+`event` 是事件类别(`login`、`userdisabled`、`userexpiring`、`quota`、`upstream`、`core`、`cert`、`reach`、`rulelimit`、`daily`,测试按钮发的是 `test`),`text` 是和 Telegram 通知同样的文字。填了密钥就带 `X-M-UI-Signature: sha256=<正文的 HMAC-SHA256 十六进制>`,收到后用同一个密钥算一遍比对。10 秒超时、不重试,返回 2xx 才算收到。
+
+## 10. 注意
 
 - 令牌等同该入口的全部权限:主面板令牌能改任何用户,代理令牌能改该代理的全部用户。只放在服务端程序里。
 - 创建、修改、套餐、启停、重置都会热更新数据面,不会断开无关用户的连接;副服务器在下一次同步(≤ 5 秒)后生效。

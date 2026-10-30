@@ -18,6 +18,9 @@ import (
 // dryRunUpstream 保存前用 sing-box 干跑该出站:拦住会拖垮数据面的坏配置
 // (如 tuic uuid 格式错误),错误原样回给前端。
 func (s *Server) dryRunUpstream(up *model.Upstream) error {
+	if render.IsGroup(*up) {
+		return nil // 单独校验不了(成员不在这份配置里);成员已查过,整份配置的干跑在事务里做
+	}
 	ob, err := render.OutboundJSON(*up)
 	if err != nil {
 		return err

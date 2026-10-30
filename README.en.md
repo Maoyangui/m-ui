@@ -41,8 +41,8 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 
 | Area | What you get |
 |---|---|
-| Lines | Hysteria2, AnyTLS, TUIC, Trojan, VLESS (Reality / Vision), VMess, Shadowsocks (incl. 2022), SOCKS, HTTP, Mixed; WS / gRPC / HTTPUpgrade / HTTP transports; Hysteria2 port hopping; per-server deployment; rule-based routing (send domains / IP ranges / ports to different exits) |
-| Upstreams | VLESS / VMess / Trojan / TUIC / Hysteria2 / Shadowsocks / SOCKS exits, import by pasting a share link; latency test, periodic health checks measured **on the servers that actually use the upstream**, failure / recovery alerts naming the server; one-click WARP |
+| Lines | Hysteria2, AnyTLS, TUIC, Trojan, VLESS (Reality / Vision), VMess, Shadowsocks (incl. 2022), SOCKS, HTTP, Mixed; WS / gRPC / HTTPUpgrade / HTTP transports; Hysteria2 port hopping and masquerade site; one-click check of Reality handshake targets; per-server deployment; rule-based routing (send domains / IP ranges / ports to different exits) |
+| Upstreams | VLESS / VMess / Trojan / TUIC / Hysteria2 / Shadowsocks / SOCKS exits, import by pasting a share link; latency test, periodic health checks measured **on the servers that actually use the upstream**, failure / recovery alerts naming the server; one-click WARP; **a line can be an upstream** (chained proxy); **upstream groups** use the fastest member that works and switch automatically when it fails |
 | Users | Quota, expiry, periodic reset, concurrent device limit (by source IP, merged across servers), up / down speed limits; auto-disable and kick on overuse or expiry; bulk create, bulk actions, CSV export. Reseller-owned users stay in the reseller's panel and out of the main user list |
 | Plans | Templates for quota / duration / devices / speed / lines; apply on create, renew or extend; can bind speed-limit rules for current and future users of the plan |
 | Resellers | Give a reseller lines plus traffic / device / bandwidth budgets and an expiry; they create users and plans in their own panel (port 2054, path /dl). Usage rolls up to the reseller, and going over quota, expiring or being disabled cuts off all of their users at once |
@@ -51,7 +51,7 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 | Certificates | Several per server: Let's Encrypt via HTTP-01, Cloudflare DNS-01 or manual DNS (wildcards included), auto-renewal, hot reload without restart; line default, panel and subscription each pick their own, and any line can pick its own; one-click self-signed cert when you have no domain |
 | Backup | One zip with a consistent database snapshot and certificates; upload to restore a whole server; scheduled backups, rotation, push to Telegram; migration wizard |
 | Ops | WARP install / enable / disable / uninstall with exit-IP verification; swap, sysctl + BBR, file limits, NTP; cap systemd journal disk usage |
-| Alerts | Telegram: logins, user expiring / over quota / disabled, upstream failures, data plane down, daily report (its hour and dates follow the panel time zone) |
+| Alerts | Telegram and webhook: logins, user expiring / over quota / disabled, upstream failures, data plane down, daily report (its hour and dates follow the panel time zone); a **Telegram bot** to look up users, extend, reset traffic, enable or disable and get backups from your phone |
 | Observability | Traffic charts (stacked bars, 1h / 6h / 24h / 7d / 30d), top users, online users and IPs, recent inbound connections for troubleshooting, audit log and subscription access log (each with its own auto-clean retention) |
 | Security | bcrypt passwords, CSRF protection, login cooldown after repeated failures from the same peer, two-factor authentication (TOTP), external API tokens; reseller and admin sessions are strictly separated |
 | Updates | The panel finds new releases by itself and flags them next to the version in the sidebar; one click verifies the SHA256, swaps the binary and restarts — database, certificates and settings are untouched |
@@ -231,6 +231,8 @@ No domain is fine: self-signed cert + IP, and every node in the subscription alr
 - Every save dry-runs the full sing-box config; a failing change is rejected instead of stored.
 
 > New lines get a free five-digit port filled in automatically (still editable): it avoids ports already used by other lines and by the panel / subscription / reseller panel, and the server binds it once to confirm it is free. Ports you type are checked the same way — **including ports held by other software on the same box**: the save is rejected if nginx, another panel or anything else already holds it (an edit that does not change the port skips the check, since the running data plane is what holds it). Conflicts are blocked in both directions: a line cannot take a panel port, and the panel / subscription / reseller ports cannot move onto a port a line or another process is using. You get the error on save instead of a service that fails to start after the next restart.
+- Hysteria2 accepts a **masquerade site**: anyone probing the port sees that website instead of a failing proxy. New lines default to `https://www.bing.com`; empty means no masquerade.
+- Next to the Reality handshake target are **Check** and **Suggest**: the main server really connects and reports whether TLS 1.3, H2 and X25519 all work and how fast; Suggest tests a list of common sites and offers the fastest few, one click to fill in. If the line runs on another server, treat the latency as a hint.
 
 ### Upstreams
 
@@ -238,6 +240,8 @@ No domain is fine: self-signed cert + IP, and every node in the subscription alr
 - Latency test through the upstream, periodic checks; Telegram alert on repeated failure and again on recovery.
 - Enabling WARP on the Ops page creates an upstream named `warp`; pick it on a line to exit through WARP.
 - **Use a line as an upstream** (chained proxy): the → button on a line, or "Add line as upstream" on the Upstreams page; pick the line and which server's entry to use. Parameters follow the line, so changing its port or protocol needs nothing else; dedicated credentials don't count against any user's quota and traffic is counted once; loops and deleting a line or server in use are refused or flagged. Nodes need v0.7.16 or later to receive this.
+
+- **Upstream groups**: "Add upstream group" on the Upstreams page, pick two or more, and choose the group on a line. It tests every 30 seconds, uses the fastest member that works, switches when it fails and closes old connections so apps reconnect at once; the current member stays unless it is over 300 ms slower than the fastest, to avoid flapping. The Upstreams page shows which member each server is using; a group counts as up while any member is up, and a failed member still raises its own alert. Editing a member or the group is hot-swapped without restarting the data plane.
 
 ### External nodes
 
@@ -352,6 +356,11 @@ Subscription access log, core log (data plane + panel) and audit log. Logging ca
 
 ### Settings
 
+**Notifications**: Telegram and webhook work independently and share the event switches.
+
+- **Telegram bot**: when enabled, send commands to the bot: `/status` overview, `/find` search users, `/user` details and subscription address, `/extend name days`, `/reset` traffic, `/enable` `/disable`, `/kick`, `/backup`. It runs on the main server only, polls Telegram and opens no port; it only obeys the configured Chat ID and ignores everyone else (with a group ID, everyone in the group can use it). Actions go to the audit log with the actor telegram.
+- **Webhook**: the ticked events are also POSTed to your URL as JSON with `event`, `text`, `time`; with a secret set, requests carry `X-M-UI-Signature: sha256=HMAC of the body` for verification.
+
 **Time zone** (default Asia/Shanghai; every time in the panel uses it), listen address · port · path · certificate for the panel, the subscription server and the reseller panel, subscription display options, landing-page text, Telegram notification toggles, upstream check parameters, data-plane stats granularity, **private-network access** (off by default: the data plane rejects user traffic to 127.0.0.0/8, 10/8, 172.16/12, 192.168/16 and the like; turn it on only if users are meant to reach your internal services). Panel and subscription path changes apply immediately; port, listen address and certificate path changes need a restart (button in the page header). The reseller panel can be switched off entirely (`resellerEnabled`) and never starts on nodes.
 
 **With port 443** (HTTPS) or 80 (HTTP), addresses and subscription links leave the port out, e.g. `https://aa.com/app/` and `https://aa.com/sub/…`. The panel and the subscription server can't share a port, so only one of them can use 443.
@@ -457,7 +466,7 @@ ext/       external nodes / subscriptions fetching and parsing
 upstream/  share-link parsing (shared by upstream import and the sing-box subscription)
 creds/     per-protocol credential generation
 totp/      two-factor authentication (RFC 6238)
-notify/    Telegram notifications
+notify/    Telegram notifications and bot transport, webhook
 logger/    log buffer behind the panel's log page
 tz/        panel time zone
 web/       panel and reseller-panel HTTP APIs, external API, frontend
