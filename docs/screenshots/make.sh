@@ -22,7 +22,7 @@ M="http://127.0.0.1:19053/app"
 SUBBASE="http://127.0.0.1:19056/sub/"
 TOKEN="demo-node-token-0123456789abcdef0123456789abcdef"
 
-set_kv() { MSYS_NO_PATHCONV=1 "$BIN" set -db "$1" "${@:2}" >/dev/null; }
+set_kv() { [ -e "$1" ] || : > "$1"; MSYS_NO_PATHCONV=1 "$BIN" set -db "$1" "${@:2}" >/dev/null; } # m-ui set 只认已存在的库文件
 start() { "$BIN" run -db "$1" >"$1.log" 2>&1 & PIDS+=($!); } # 不能套子 shell:EXIT trap 会在子 shell 退出时把临时目录连库一起删掉
 wait_http() { for i in $(seq 1 60); do curl -s -m 3 -o /dev/null "$1" && return 0; sleep 0.5; done; echo "等不到 $1,实例日志:"; tail -n 25 "$TMP"/*.log 2>/dev/null | grep -vE "inbound|outbound"; exit 1; }
 
@@ -35,7 +35,8 @@ start "$TMP/master.db"
 
 echo "两台副机"
 for n in 1 2; do
-  set_kv "$TMP/node$n.db" nodeMode=true nodeToken="$TOKEN" webPort=$((19053+100*n)) webPath=/app/ subPort=$((19056+100*n)) resellerPort=$((19054+100*n)) resellerEnabled=false
+  "$BIN" selfsign -hosts "node$n.example.com" -cert "$TMP/node$n.crt" -key "$TMP/node$n.key" >/dev/null # 带 TLS 的线路在副机上要有自己的证书
+  set_kv "$TMP/node$n.db" certFile="$TMP/node$n.crt" keyFile="$TMP/node$n.key" nodeMode=true nodeToken="$TOKEN" webPort=$((19053+100*n)) webPath=/app/ subPort=$((19056+100*n)) resellerPort=$((19054+100*n)) resellerEnabled=false
   start "$TMP/node$n.db"
 done
 wait_http "$M/"
@@ -68,9 +69,9 @@ line() { api -X POST "$M/api/lines" -d "$1" >/dev/null; }
 line "{\"name\":\"Tokyo-HY2\",\"protocol\":\"hysteria2\",\"port\":24443,\"upstreamId\":0,\"enabled\":true,\"nodeIds\":[$LOCAL_ID],\"tls\":{\"mode\":\"cert\"},\"options\":{\"up_mbps\":0,\"down_mbps\":0,\"port_hopping\":\"20000-30000\"},\"routeRules\":[{\"type\":\"domain_suffix\",\"values\":[\"netflix.com\",\"nflxvideo.net\"],\"to\":2},{\"type\":\"domain_keyword\",\"values\":[\"ads\"],\"to\":-1},{\"type\":\"ip_cidr\",\"values\":[\"91.108.4.0/22\",\"149.154.160.0/20\"],\"to\":1}],\"assignAll\":true}"
 line "{\"name\":\"Singapore-AnyTLS\",\"protocol\":\"anytls\",\"port\":28443,\"upstreamId\":0,\"enabled\":true,\"nodeIds\":[$SG_ID],\"tls\":{\"mode\":\"cert\"},\"options\":{},\"assignAll\":true}"
 line "{\"name\":\"Frankfurt-Reality\",\"protocol\":\"vless\",\"port\":24433,\"upstreamId\":0,\"enabled\":true,\"nodeIds\":[$DE_ID],\"tls\":{\"mode\":\"reality\",\"reality\":{\"handshake_server\":\"www.microsoft.com\",\"handshake_port\":443,\"private_key\":\"$PRIV\",\"public_key\":\"$PUB\",\"short_ids\":[\"$SID\"]}},\"options\":{\"vision\":true},\"assignAll\":true}"
-line "{\"name\":\"Global-SS2022\",\"protocol\":\"shadowsocks\",\"port\":28388,\"upstreamId\":1,\"enabled\":true,\"nodeIds\":[],\"options\":{\"method\":\"2022-blake3-aes-128-gcm\",\"password\":\"$SSPW\"},\"assignAll\":true}"
+line "{\"name\":\"Global-SS2022\",\"protocol\":\"shadowsocks\",\"port\":38388,\"upstreamId\":1,\"enabled\":true,\"nodeIds\":[$LOCAL_ID],\"options\":{\"method\":\"2022-blake3-aes-128-gcm\",\"password\":\"$SSPW\"},\"assignAll\":true}"
 
-line '{"name":"Global-TUIC","protocol":"tuic","port":28444,"upstreamId":0,"enabled":true,"nodeIds":[],"tls":{"mode":"cert"},"options":{"congestion_control":"bbr"},"assignAll":true}'
+line '{"name":"Global-TUIC","protocol":"tuic","port":38444,"upstreamId":0,"enabled":true,"nodeIds":['"$LOCAL_ID"'],"tls":{"mode":"cert"},"options":{"congestion_control":"bbr"},"assignAll":true}'
 
 echo "套餐与代理"
 api -X POST "$M/api/plans" -d '{"name":"Basic","desc":"100 GB / 30 days","volumeGb":100,"days":30,"deviceLimit":2,"speedUp":0,"speedDown":0,"autoReset":true,"resetDays":30,"lineIds":[1,2,4]}' >/dev/null
@@ -92,7 +93,7 @@ sleep 12 # 等主副机同步两轮,服务器页显示在线 · 已同步
 
 echo "截图"
 SCRUB="$(hostname)"
-PUBIP="$(api "$M/api/nodes" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d).nodes.map(n=>n.publicIp).filter(Boolean).join(",")))')"
+PUBIP="$(curl -s -b "$C" -m 30 "$M/api/nodes" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d).nodes.map(n=>n.publicIp).filter(Boolean).join(",")))')"
 [ -n "$PUBIP" ] && SCRUB="$SCRUB,$PUBIP"
 MUI_URL="$M/" MUI_SUB="$SUBBASE" MUI_PASS="$PASS" OUT="docs/screenshots" SCRUB="$SCRUB" node docs/screenshots/shoot.mjs
 echo "导出 Live Demo fixture"
