@@ -6,6 +6,11 @@
  },
  "donePledges": [],
  "blocked": [],
- "pings": [],
+ "pings": [
+  {
+   "t": 1793441709,
+   "n": 0
+  }
+ ],
  "devices": 0
 }
