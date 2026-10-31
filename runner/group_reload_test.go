@@ -178,7 +178,8 @@ func TestGroupOnRealCore(t *testing.T) {
 		t.Fatal(err)
 	}
 	s2.ln.Close()
-	until("a 挂了组换到 b", func() bool { return core.OutboundNow("g") == "b" && request() == nil })
+	// 组只在有流量时才定时测:热更新后首测可能赶在 a 挂之前、又选中了 a,这时不发请求它永远不会再测
+	until("a 挂了组换到 b", func() bool { _ = request(); return core.OutboundNow("g") == "b" && request() == nil })
 	if r.core.GetInstance() != box0 {
 		t.Fatal("换成员不该重启数据面")
 	}
