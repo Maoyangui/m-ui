@@ -14,6 +14,7 @@ export async function loadReach() {
   try { reach = await get('reach'); } catch { reach = null; }
   return reach;
 }
+export const reachLoaded = () => reach !== null;
 
 const GROUPS = ['cm', 'ct', 'cu'];
 const BAD = new Set(['blocked', 'ipBlocked', 'portBlocked']);

@@ -50,5 +50,7 @@ jobs:
         run: node --test web/jstest/users.test.mjs
       - name: Frontend (support page)
         run: node --test web/jstest/support.test.mjs
+      - name: Frontend (lines page IP version)
+        run: node --test web/jstest/lines.test.mjs
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run
