@@ -45,6 +45,7 @@ X-API-Key: <令牌>
 - 所有响应为 JSON,`Cache-Control: no-store`。
 - 时间戳单位为**秒**(Unix 时间);流量单位为**字节**;`volumeGb` 按 1 GB = 1073741824 字节换算;限速单位 Mbps。
 - `0` 在配额、到期、设备数、限速上都表示**不限**。
+- 数值上限:配额最多 2^62 字节(约 4.6 EB,即 4294967296 GB),叠加、续 N 期、折算算出来更大的按上限算;天数(`days`、`activateDays`、`resetDays`、套餐的天数与重置天数、批量延期)最多 3650000(约 1 万年),请求里给得更大返回 400。到期时间同样饱和计算,不会溢出。
 - `{name|id}` 先按用户名精确匹配;匹配不到且形如数字时按用户 id。代理令牌下只在自己名下找,找不到一律 404。
 - 失败返回 4xx 与 `{"error": "原因"}`(原因是中文,给人看的;判断请看状态码):
 
@@ -623,6 +624,7 @@ curl -s -X POST "${H[@]}" -d '{"plan":"代理高级月付","mode":"stack","dryRu
 | 400 `代理流量已用尽` | 代理名下用户的全时用量已达代理额度 |
 | 400 `autoReset 需要 resetDays > 0` | 开周期重置没给天数 |
 | 400 `数值字段不能为负` | 配额 / 到期 / 设备数 / 限速为负 |
+| 400 `天数不能超过 3650000(约 1 万年)` | `days` / `activateDays` / `resetDays`(或套餐的天数)超过上限 |
 | 400 `plan_required` | `/change` 没给套餐;`/plan`、`/renew` 没给套餐而用户也没有所属套餐 |
 | 400 `plan_not_found` | 套餐不在用户的归属(`/change`)或调用方的作用域(`/plan`)里 |
 | 400 `bad_mode` / `bad_periods` / `bad_usage` / `bad_request_id` | `mode` 只能是 replace / stack / prorate;期数 1–120(折算可以 0)且总天数不超过 36500;`usage` 只能是 auto / keep / reset;幂等键最长 64 个字符,只能含字母、数字和 `. _ : -` |

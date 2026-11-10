@@ -508,7 +508,7 @@ func (s *Scheduler) runDeplete() {
 				"total_down": gorm.Expr("total_down + down"),
 				"up":         0,
 				"down":       0,
-				"next_reset": now + int64(u.ResetDays)*86400,
+				"next_reset": model.AddDays(now, u.ResetDays), // 重置周期封顶,不会绕成负数(那样就再也不重置,或者每分钟都重置)
 			}
 			if err := tx.Model(&model.User{}).Where("id = ?", u.Id).Updates(updates).Error; err != nil {
 				return err
@@ -524,7 +524,7 @@ func (s *Scheduler) runDeplete() {
 		}
 		if err := tx.Model(&model.User{}).
 			Where("auto_reset = ? AND reset_days > 0 AND next_reset = 0", true).
-			Update("next_reset", gorm.Expr("? + reset_days * 86400", now)).Error; err != nil {
+			Update("next_reset", gorm.Expr("? + MIN(reset_days, ?) * 86400", now, model.MaxDays)).Error; err != nil { // 乘之前封顶:溢出会存成 REAL
 			return err
 		}
 

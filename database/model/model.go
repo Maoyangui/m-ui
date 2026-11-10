@@ -317,15 +317,55 @@ const (
 	PlanOpMaxRows  = 100000 // 每个作用域
 )
 
+// 数值上限。SQLite 的整数加法、乘法溢出时结果会变成 REAL,写进 users 表的整数列以后,整表读用户都会报错
+// (面板、订阅、统计一起停),Go 里溢出则悄悄绕成负数。所以算配额、算天数的地方 —— Go 里和 SQL 里 —— 一律按这两个数
+// 饱和;请求里直接给的天数超过 MaxDays 返回 400。
+const (
+	// MaxVolume 配额上限(字节):2^62,约 4.6 EB(4294967296 GB)。叠加、续 N 期算出来更大的按它算。
+	MaxVolume = int64(1) << 62
+	// MaxDays 天数上限:约 1 万年。套餐天数、重置周期、首次连接后的天数、一次加的天数都不超过它。
+	MaxDays = 3650000
+)
+
+// AddDays 时间戳加 days 天:天数先封到 MaxDays,结果饱和不溢出;days ≤ 0 原样返回。
+func AddDays(ts int64, days int) int64 {
+	if days <= 0 {
+		return ts
+	}
+	d := int64(CapDays(days)) * 86400
+	if ts > math.MaxInt64-d {
+		return math.MaxInt64
+	}
+	return ts + d
+}
+
+// CapDays 天数封到 [0, MaxDays]。
+func CapDays(days int) int { return min(max(days, 0), MaxDays) }
+
+// SumDays 两段天数相加(各自先封顶,和也封顶),不会溢出。
+func SumDays(a, b int) int { return CapDays(CapDays(a) + CapDays(b)) }
+
 // StartOnFirstUse 记流量的那条 UPDATE 顺带做"首次连接开始计时":等着计时的用户此刻换算成到期时间。
-// 和记流量是同一条语句,不多一次写;用的是更新前的 activate_days。
+// 和记流量是同一条语句,不多一次写;用的是更新前的 activate_days。天数按 MaxDays 封顶,乘出来不会溢出成 REAL。
 func StartOnFirstUse(update map[string]interface{}, now int64) {
-	update["expiry"] = gorm.Expr("CASE WHEN activate_days > 0 THEN ? + activate_days * 86400 ELSE expiry END", now)
+	update["expiry"] = gorm.Expr("CASE WHEN activate_days > 0 THEN ? + MIN(activate_days, ?) * 86400 ELSE expiry END", now, MaxDays)
 	update["activate_days"] = 0
 }
 
-// GBToBytes GB 换算成字节(1 GB = 1024³,四舍五入)。
-func GBToBytes(gb float64) int64 { return int64(math.Round(gb * (1 << 30))) }
+// GBToBytes GB 换算成字节(1 GB = 1024³,四舍五入);超出 MaxVolume 的按上限算 —— 浮点转整数越界在不同 CPU 上
+// 结果不同(amd64 上是最小的负数),不能交给它。
+func GBToBytes(gb float64) int64 {
+	b := math.Round(gb * (1 << 30))
+	switch {
+	case math.IsNaN(b):
+		return 0
+	case b >= float64(MaxVolume):
+		return MaxVolume
+	case b <= -float64(MaxVolume):
+		return -MaxVolume
+	}
+	return int64(b)
+}
 
 // ExtNode 外部节点:一条分享链接,或一个外部订阅地址;分配给用户后聚合进该用户的订阅。
 type ExtNode struct {

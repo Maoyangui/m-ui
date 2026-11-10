@@ -74,7 +74,7 @@ func (s *Server) resetUsage(db *gorm.DB, id uint) error {
 // 不限期的不动、返回 false:以前也从现在起算,批量延期 30 天等于给它们设了 30 天后到期(审计 MB11)。
 func (s *Server) extendExpiry(db *gorm.DB, u model.User, days int, now int64) (bool, error) {
 	if u.ActivateDays > 0 { // 还没开始计时:加到等待计时的天数上
-		return true, db.Model(&model.User{}).Where("id = ?", u.Id).Update("activate_days", u.ActivateDays+days).Error
+		return true, db.Model(&model.User{}).Where("id = ?", u.Id).Update("activate_days", model.SumDays(u.ActivateDays, days)).Error
 	}
 	if u.Expiry == 0 {
 		return false, nil
@@ -83,7 +83,7 @@ func (s *Server) extendExpiry(db *gorm.DB, u model.User, days int, now int64) (b
 	if u.Expiry > now {
 		base = u.Expiry
 	}
-	u.Expiry = base + int64(days)*86400
+	u.Expiry = model.AddDays(base, days)
 	autoEnable(&u, now)
 	return true, db.Model(&model.User{}).Where("id = ?", u.Id).Select("expiry", "enabled", "disabled_reason").Updates(u).Error
 }

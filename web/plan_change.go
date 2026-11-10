@@ -33,6 +33,7 @@ import (
 //
 // 记号:N 期数;目标套餐 Q 的天数 D、每期流量 V、重置天数 R;used = up + down。
 // 「一次性额度」= 不周期重置且有上限,配额是整段时长的存量;「周期重置」的流量是每期额度,不叠加。
+// 配额、天数的加法都按 model.MaxVolume / model.MaxDays 饱和(溢出的整数在 SQLite 里会变成 REAL,整表读不出来)。
 
 const (
 	maxPlanPeriods  = 120   // 一次最多续 / 换 120 期
@@ -42,9 +43,6 @@ const (
 	planRemarkMax   = 200   // 套餐记录的备注最多这么多字
 	planOpMasterTag = "主面板"
 )
-
-// maxVolume 配额的饱和上限:套餐的 GB 数是浮点,× 期数可能溢出 int64。
-const maxVolume = int64(1) << 62
 
 var (
 	errPlanRequired     = errors.New("缺少 planId 或 plan")
@@ -276,9 +274,9 @@ func calcPlanOp(u model.User, old *model.Plan, q model.Plan, o planOpOpt, fromRe
 			case q.Days <= 0:
 				next.Expiry, next.ActivateDays = 0, 0
 			case q.FirstUse:
-				next.Expiry, next.ActivateDays = 0, days
+				next.Expiry, next.ActivateDays = 0, model.CapDays(days)
 			default:
-				next.Expiry, next.ActivateDays = now+int64(days)*86400, 0
+				next.Expiry, next.ActivateDays = model.AddDays(now, days), 0
 			}
 		case "stack": // 和续费一样顺延:保留旧订阅剩的时间再加 N 期
 			extendByPlan(next, q, days, now, true)
@@ -304,7 +302,7 @@ func calcPlanOp(u model.User, old *model.Plan, q model.Plan, o planOpOpt, fromRe
 			next.Up, next.Down = 0, 0
 		}
 		if q.AutoReset {
-			r := now + int64(q.ResetDays)*86400
+			r := model.AddDays(now, q.ResetDays)
 			if !c.reset && u.AutoReset && u.NextReset > now && u.NextReset < r {
 				r = u.NextReset // 保留当前周期:重置日不往后推,新周期更短时提前到 now+R
 			}
@@ -335,7 +333,7 @@ func calcPlanOp(u model.User, old *model.Plan, q model.Plan, o planOpOpt, fromRe
 			next.Expiry, next.ActivateDays = 0, 0
 		case q.FirstUse:
 			whole := int(cr.Seconds / 86400) // activateDays 是整天
-			if total := days + whole; total > 0 {
+			if total := model.SumDays(days, whole); total > 0 {
 				next.Expiry, next.ActivateDays = 0, total
 				if drop := cr.Seconds - int64(whole)*86400; drop > 0 {
 					c.warn("credit_rounded", map[string]interface{}{"seconds": drop})
@@ -345,7 +343,7 @@ func calcPlanOp(u model.User, old *model.Plan, q model.Plan, o planOpOpt, fromRe
 				next.Expiry, next.ActivateDays = now+cr.Seconds, 0
 			}
 		default:
-			next.Expiry, next.ActivateDays = now+int64(days)*86400+cr.Seconds, 0
+			next.Expiry, next.ActivateDays = model.AddDays(now, days)+cr.Seconds, 0
 		}
 		if v > 0 && !q.AutoReset {
 			next.Volume = satAdd(satMul(v, n), cr.Bytes)
@@ -361,7 +359,7 @@ func calcPlanOp(u model.User, old *model.Plan, q model.Plan, o planOpOpt, fromRe
 }
 
 // extendByPlan 续费式顺延到期(applyPlan 的规则):不限期的套餐 → 不限;还没开始计时 → 加到等待的天数上;
-// 首次连接才计时的套餐且已过期 / 不限期 → 等首次连接;其余从"现在与原到期中较晚者"顺延。
+// 首次连接才计时的套餐且已过期 / 不限期 → 等首次连接;其余从"现在与原到期中较晚者"顺延。天数与到期都封顶,不会溢出。
 func extendByPlan(u *model.User, p model.Plan, days int, now int64, fromExpiry bool) {
 	base := now
 	if fromExpiry && u.Expiry > now {
@@ -371,11 +369,11 @@ func extendByPlan(u *model.User, p model.Plan, days int, now int64, fromExpiry b
 	case p.Days <= 0:
 		u.Expiry, u.ActivateDays = 0, 0
 	case u.ActivateDays > 0:
-		u.ActivateDays += days // 还没开始计时:照样等首次连接
+		u.ActivateDays = model.SumDays(u.ActivateDays, days) // 还没开始计时:照样等首次连接
 	case p.FirstUse && u.Expiry <= now:
-		u.Expiry, u.ActivateDays = 0, days // 新号或已过期的:等首次连接才开始计时
+		u.Expiry, u.ActivateDays = 0, model.CapDays(days) // 新号或已过期的:等首次连接才开始计时
 	default:
-		u.Expiry = base + int64(days)*86400 // 正在计时的老用户续费:接着原到期顺延
+		u.Expiry = model.AddDays(base, days) // 正在计时的老用户续费:接着原到期顺延
 	}
 }
 
@@ -439,7 +437,7 @@ func lower(from, to int64) bool { return to > 0 && (from <= 0 || to < from) }
 // endOf 用户的有效终点:不限期返回 (0, true);还没开始计时的按"现在 + 等待天数"算。
 func endOf(u model.User, now int64) (int64, bool) {
 	if u.ActivateDays > 0 {
-		return now + int64(u.ActivateDays)*86400, false
+		return model.AddDays(now, u.ActivateDays), false
 	}
 	if u.Expiry == 0 {
 		return 0, true
@@ -562,25 +560,26 @@ func roundBytes(f float64) int64 {
 	if !(f > 0) {
 		return 0
 	}
-	if f >= float64(maxVolume) {
-		return maxVolume
+	if f >= float64(model.MaxVolume) {
+		return model.MaxVolume
 	}
 	return int64(math.Round(f))
 }
 
+// satMul / satAdd 配额的乘、加,按 model.MaxVolume 饱和(参数都是非负的)。
 func satMul(v int64, n int) int64 {
 	if v <= 0 || n <= 0 {
 		return 0
 	}
-	if v > maxVolume/int64(n) {
-		return maxVolume
+	if v > model.MaxVolume/int64(n) {
+		return model.MaxVolume
 	}
 	return v * int64(n)
 }
 
 func satAdd(a, b int64) int64 {
-	if a > maxVolume-b {
-		return maxVolume
+	if a > model.MaxVolume-b {
+		return model.MaxVolume
 	}
 	return a + b
 }
@@ -763,14 +762,16 @@ func buildPlanResult(in planOpInput, call planOpCall, toRefs []model.LineRef, no
 }
 
 // planOpFields 要写回用户行的字段:用量列由 updateUserFields 用 SQL 结算(不吞统计这期间记的流量),
-// stack 的一次性额度结转也在同一条 UPDATE 里算(右边取的是更新前的值)。
+// stack 的一次性额度结转也在同一条 UPDATE 里算(右边取的是更新前的值),按 model.MaxVolume 封顶:
+// 整数加法溢出时 SQLite 会把结果存成 REAL,之后整表读用户都会失败。room = MaxVolume − N×V ≥ 0。
 func planOpFields(c planCalc) map[string]interface{} {
 	f := updateUserFields(c.next, c.reset)
+	room := model.MaxVolume - c.carryAdd
 	switch c.carry {
 	case "keep":
-		f["volume"] = gorm.Expr("volume + ?", c.carryAdd)
+		f["volume"] = gorm.Expr("MIN(volume, ?) + ?", room, c.carryAdd)
 	case "reset":
-		f["volume"] = gorm.Expr("MAX(0, volume - up - down) + ?", c.carryAdd)
+		f["volume"] = gorm.Expr("MIN(MAX(0, volume - up - down), ?) + ?", room, c.carryAdd)
 	}
 	return f
 }

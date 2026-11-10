@@ -424,6 +424,7 @@ const EN = /*BEGIN*/{
 "这次变更有需要确认的影响(见 warnings),确认后带 force: true 重试": "This change has effects that need confirming (see warnings); retry with force: true once confirmed",
 "用户当前套餐与 fromPlanId 不符": "The user's current plan does not match fromPlanId",
 "requestId 已用于另一笔不同的请求": "This requestId was already used for a different request",
+"天数不能超过 %d(约 1 万年)": "Days cannot exceed %d (about 10,000 years)",
 "缺少 upstreamId": "Missing upstreamId",
 "缺少服务器地址": "Missing server address",
 "至少需要一个域名或 IP": "At least one domain or IP is required",

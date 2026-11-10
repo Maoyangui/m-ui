@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -362,8 +363,16 @@ func (s *Server) apiFindPlan(req apiUserReq, rid uint) (*model.Plan, error) {
 	return &p, nil
 }
 
+// errDaysTooMany 请求里给的天数(首次连接后天数、重置周期、days、套餐天数、批量延期)超过上限:换算成秒会溢出。
+var errDaysTooMany = fmt.Errorf("天数不能超过 %d(约 1 万年)", model.MaxDays)
+
 // applyReq 把请求里显式给出的字段写到用户上。
 func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
+	for _, d := range []*int{req.ActivateDays, req.Days, req.ResetDays} {
+		if d != nil && *d > model.MaxDays {
+			return errDaysTooMany
+		}
+	}
 	if req.Enabled != nil { // 显式给了启停就是手动决定
 		u.Enabled, u.DisabledReason = *req.Enabled, ""
 		if !u.Enabled {
@@ -389,7 +398,7 @@ func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
 	} else if req.Expiry != nil {
 		u.Expiry, u.ActivateDays = *req.Expiry, 0 // 明确给了到期时间:不再等首次连接
 	} else if req.Days != nil && u.ActivateDays > 0 && *req.Days > 0 {
-		u.ActivateDays += *req.Days // 还没开始计时的用户:加到等待计时的天数上
+		u.ActivateDays = model.SumDays(u.ActivateDays, *req.Days) // 还没开始计时的用户:加到等待计时的天数上
 	} else if req.Days != nil {
 		u.ActivateDays = 0
 		base := now
@@ -399,7 +408,7 @@ func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
 		if *req.Days <= 0 {
 			u.Expiry = 0
 		} else {
-			u.Expiry = base + int64(*req.Days)*86400
+			u.Expiry = model.AddDays(base, *req.Days)
 		}
 	}
 	if req.DeviceLimit != nil {
@@ -421,7 +430,7 @@ func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
 		return errors.New("autoReset 需要 resetDays > 0")
 	}
 	if u.AutoReset && u.NextReset == 0 {
-		u.NextReset = now + int64(u.ResetDays)*86400
+		u.NextReset = model.AddDays(now, u.ResetDays)
 	}
 	if !u.AutoReset {
 		u.NextReset = 0

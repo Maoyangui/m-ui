@@ -231,6 +231,9 @@ func (s *Server) validatePlan(p *model.Plan) error {
 	if p.VolumeGB < 0 || p.Days < 0 || p.DeviceLimit < 0 || p.SpeedUp < 0 || p.SpeedDown < 0 || p.ResetDays < 0 || p.Price < 0 {
 		return errors.New("数值不能为负")
 	}
+	if p.Days > model.MaxDays || p.ResetDays > model.MaxDays {
+		return errDaysTooMany
+	}
 	if p.AutoReset && p.ResetDays == 0 {
 		p.ResetDays = 30
 	}
@@ -298,7 +301,7 @@ func applyPlanN(u *model.User, p model.Plan, mode string, n int, now int64) []ui
 		if mode == "extend" && u.NextReset > now {
 			// 保留当前周期
 		} else {
-			u.NextReset = now + int64(p.ResetDays)*86400
+			u.NextReset = model.AddDays(now, p.ResetDays)
 		}
 	} else {
 		u.NextReset = 0
@@ -607,6 +610,10 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 	case "extend":
 		if req.Days <= 0 {
 			badRequest(w, errors.New("延期天数需大于 0"))
+			return
+		}
+		if req.Days > model.MaxDays {
+			badRequest(w, errDaysTooMany)
 			return
 		}
 		var users []model.User

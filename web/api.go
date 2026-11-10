@@ -1116,6 +1116,9 @@ func (s *Server) validateUser(u *model.User) error {
 	if u.ActivateDays < 0 {
 		return errors.New("首次连接后的天数不能为负")
 	}
+	if u.ActivateDays > model.MaxDays || u.ResetDays > model.MaxDays {
+		return errDaysTooMany
+	}
 	if u.ActivateDays > 0 {
 		u.Expiry = 0 // 两者互斥:填了"首次连接后 N 天",到期日要等连上才有
 	}
