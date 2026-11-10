@@ -298,14 +298,24 @@ type ExtNode struct {
 	Enabled   bool   `json:"enabled" gorm:"default:true"`
 	Sort      int    `json:"sort"`
 	Remark    string `json:"remark"`
-	LastFetch int64  `json:"lastFetch"`
-	LastError string `json:"lastError"`
-	NodeCount int    `json:"nodeCount"`
-	Cache     string `json:"cache,omitempty"` // 外部订阅抓取到的内容(主机抓取,随快照下发副机)
-	// 输出到用户订阅前的筛选与改名,都按节点原名记(订阅刷新后顺序会变,原名才认得出)。
-	Hidden  json.RawMessage `json:"hidden,omitempty"`  // 手动隐藏的节点 []原名
-	Renames json.RawMessage `json:"renames,omitempty"` // 改名 {原名: 新名}
-	Exclude string          `json:"exclude"`           // 名字含这些关键词的不输出,逗号分隔(官网、到期、剩余流量这类信息节点)
+	LastFetch int64  `json:"lastFetch"`                  // 最近一次抓取成功的时间(内容没变也算)
+	LastTry   int64  `json:"lastTry" gorm:"default:0"`   // 最近一次抓取的时间(成功失败都算;定时刷新按它和 LastFetch 中较晚的一个排期)
+	LastError string `json:"lastError"`                  // 最近一次抓取的错误;成功时清空。失败时缓存保持上次成功的内容
+	NodeCount int    `json:"nodeCount"`                  // 输出到用户订阅的节点数(已扣除隐藏、排除的)
+	NodeTotal int    `json:"nodeTotal" gorm:"default:0"` // 解析出的节点总数
+	Cache     string `json:"cache,omitempty"`            // 外部订阅抓取到的内容(主机抓取,随快照下发副机)
+	// ContentSig 解析出的节点列表的指纹(ext.ContentSig):刷新后内容没变就不重写缓存,面板也据此判断展开的列表是否作废。
+	ContentSig string `json:"contentSig,omitempty"`
+	// FetchAgent 上次抓取成功用的客户端身份:这个身份失败时保留旧缓存,别的身份失败不算数(见 ext.Fetch)。
+	FetchAgent string `json:"fetchAgent,omitempty"`
+	// 输出到用户订阅前的筛选与改名。按名字记的是老数据与名字唯一的节点;按指纹(地址、端口、凭据等,见 ext.Node.Key)
+	// 记的不怕刷新后改名、换顺序,同名节点只按指纹记。两者命中其一就算(细则见 ext.Filter)。
+	Hidden     json.RawMessage `json:"hidden,omitempty"`          // 按名字隐藏 [名字]
+	Renames    json.RawMessage `json:"renames,omitempty"`         // 按名字改名 {名字: 新名}
+	HiddenKeys json.RawMessage `json:"hiddenKeys,omitempty"`      // 按指纹隐藏 {指纹: 隐藏时的名字}
+	RenameKeys json.RawMessage `json:"renameKeys,omitempty"`      // 按指纹改名 {指纹: {from: 改名时的名字, to: 新名}}
+	Exclude    string          `json:"exclude"`                   // 名字含这些关键词的不输出,逗号分隔(官网、到期、剩余流量这类信息节点)
+	PrefsRev   int64           `json:"prefsRev" gorm:"default:0"` // 隐藏 / 改名设置的版本号:面板保存时带上,对不上说明别处改过(乐观锁)
 }
 
 // UserExt 用户-外部节点 多对多。

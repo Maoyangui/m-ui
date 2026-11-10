@@ -4,18 +4,28 @@ import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, fmtRelative, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, copy, matches, hostPort } from '../ui.js';
 
-const REACH_TONE = { ok: 'ok', partial: 'warn', blocked: 'danger', ipBlocked: 'danger', portBlocked: 'danger', abroadDown: 'warn', noProbes: '', error: '' };
+// 外部节点的大陆连通:两边都不通对外部节点就是用不了(服务器巡检里那是"机器自己的问题",给黄色)
+const REACH_TONE = { ok: 'ok', partial: 'warn', blocked: 'danger', ipBlocked: 'danger', portBlocked: 'danger', abroadDown: 'danger', noProbes: '', error: '' };
 
 export const title = () => t('ext.title');
 export const subtitle = () => t('ext.subtitle');
 
 // 展开面板的状态都放在模块里,不放 DOM:列表每几秒重画一次,勾选、搜索词、测速进度不能跟着丢。
-const open = new Set(); // 展开了的外部节点 id
-const cache = {};       // id → { nodes, servers, fetchedAt }
-const picked = {};      // id → Set(节点下标)
-const query = {};       // id → 搜索词
-const jobs = {};        // id → { job, timer } 进行中的测速
+// 节点一律按指纹(key)认:订阅刷新后对方增删、调换了节点,下标会变,指纹不变。
+const open = new Set();  // 展开了的外部节点 id
+const cache = {};        // id → 展开接口的返回 { nodes, servers, fetchedAt, sig, rev, stale }
+const loading = {};      // id → 正在拉的请求(好几处同时要拉时只发一个)
+const picked = {};       // id → Set(节点指纹)
+const query = {};        // id → 搜索词
+const results = {};      // id → { 指纹: { 服务器 id: 测速格 } }:列表刷新、面板重画都不丢
+const reaches = {};      // id → { 指纹: 大陆连通结果 }
+const jobs = {};         // id → { job, timer } 进行中的测速(请求还没回来时就占上,防重复点)
+const reachJobs = {};    // id → { job, timer } 进行中的大陆连通(同上)
+const inclHidden = {};   // id → 测速全部时也测已隐藏的
 let rowsSig = '';
+
+// 名字里带会变的数字(剩余流量、天数、到期日、倍率):这类信息节点每次刷新都改名
+const DYNAMIC = /\d+(\.\d+)?\s*(GB|MB|TB|KB|G|M|T|天|日|小时|%|倍|x)|\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}/i;
 
 export async function render(el) {
   el.innerHTML = `
@@ -36,33 +46,46 @@ export async function render(el) {
 }
 export async function tick() { await load('exts'); renderRows(); }
 
+// listChanged 展开时拿到的节点列表是否已作废:看服务端记的内容指纹(刷新了但内容没变就不作废,测速结果也不丢);
+// 老数据还没有指纹时退回看抓取时间。
+const listChanged = (c, x) => x.contentSig ? x.contentSig !== c.sig : x.lastFetch !== c.fetchedAt;
+
 function renderRows() {
   const body = document.getElementById('exts-body');
   if (!body) return;
   const rows = state.exts || [];
-  // 内容没变就不重画:展开面板里的勾选、搜索、测速进度都在 DOM 里,整表重画会把它们抹掉
-  const sig = rows.map(x => [x.id, x.name, x.type, x.value, x.prefix, x.remark, x.nodeCount, x.lastFetch, x.lastError, x.enabled, x.userCount].join('')).join('') + '|' + [...open].join(',');
+  // 内容没变就不重画:展开面板里的勾选、搜索、测速进度都在 DOM 里,整表重画会把它们抹掉。
+  // 排除关键词、排序也要算进来:以前只改它们时指纹不变、面板不重画,缓存却被删了,之后点开关全都静默不保存
+  const sig = rows.map(x => [x.id, x.name, x.type, x.value, x.prefix, x.remark, x.exclude, x.sort, x.nodeCount, x.nodeTotal,
+    x.lastFetch, x.lastTry, x.lastError, x.contentSig, x.enabled, x.userCount].join('\u0001')).join('\u0002') + '|' + [...open].join(',');
   if (sig === rowsSig) return;
   rowsSig = sig;
   if (!rows.length) { body.innerHTML = `<tr><td colspan="8">${empty(t('ext.empty'))}</td></tr>`; return; }
   body.innerHTML = rows.map(x => rowHTML(x) + (open.has(x.id)
     ? `<tr class="ext-sub"><td colspan="8"><div class="ext-panel" id="ext-panel-${x.id}"><span class="muted small">${t('common.loading')}</span></div></td></tr>` : '')).join('');
   for (const id of open) {
-    // 订阅刷新过:展开时拿的节点列表作废(测速与添加为上游按下标指节点,旧列表会指错)
+    // 订阅内容变了:展开时拿的列表作废,重新拉。测速、连通结果按指纹记,进行中的任务也不停
     const x = rows.find(r => r.id === id);
-    if (cache[id] && x && cache[id].fetchedAt !== x.lastFetch) { stopJob(id); delete cache[id]; }
+    if (cache[id] && x && listChanged(cache[id], x)) delete cache[id];
     fillPanel(id);
   }
 }
 
 function rowHTML(x) {
   const on = open.has(x.id);
+  const total = x.nodeTotal || 0, out = x.nodeCount || 0;
+  const count = total > out
+    ? `<span title="${esc(t('ext.countTitle', { out, n: total }))}">${out} <span class="muted small">/ ${total}</span></span>` : String(out);
+  const fetched = x.lastError
+    ? badge(t('ext.failed'), 'danger') + `<div class="sub-cell" title="${esc(trErr(x.lastError))}">${esc(trErr(x.lastError).slice(0, 60))}</div>`
+      + (x.lastFetch ? `<div class="sub-cell muted">${t('ext.lastOk', { t: fmtRelative(x.lastFetch) })}</div>` : '')
+    : (x.lastFetch ? fmtRelative(x.lastFetch) : '—');
   return `<tr>
     <td class="primary-cell"><div class="ext-name"><button class="btn sm ext-toggle" data-act="ext.toggle" data-id="${x.id}" title="${on ? t('ext.collapse') : t('ext.expand')}">${on ? '▾' : '▸'}</button><span>${esc(x.name)}</span></div>${x.prefix ? `<div class="sub-cell">${t('ext.prefix')}: ${esc(x.prefix)}</div>` : ''}${x.remark ? `<div class="sub-cell">${esc(x.remark)}</div>` : ''}</td>
     <td>${badge(x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink'), x.type === 'sub' ? 'primary' : '')}</td>
     <td class="mono small ext-url" title="${esc(x.value)}">${esc(x.value.length > 60 ? x.value.slice(0, 60) + '…' : x.value)}</td>
-    <td class="num">${x.nodeCount || 0}</td>
-    <td>${x.lastError ? badge(t('ext.failed'), 'danger') + `<div class="sub-cell" title="${esc(trErr(x.lastError))}">${esc(trErr(x.lastError).slice(0, 60))}</div>` : (x.lastFetch ? fmtRelative(x.lastFetch) : '—')}</td>
+    <td class="num">${count}</td>
+    <td>${fetched}</td>
     <td class="num">${x.userCount || 0}</td>
     <td>${badge(x.enabled ? t('common.enabled') : t('common.disabled'), x.enabled ? 'ok' : 'danger')}</td>
     <td class="actions">
@@ -74,28 +97,44 @@ function rowHTML(x) {
 
 // ---- 展开面板:节点子表 ----
 
+// loadNodes 重新拉一遍节点列表。勾选里已经不在列表上的节点去掉。
+function loadNodes(id) {
+  if (!loading[id]) {
+    loading[id] = get(`exts/${id}/nodes`).then(c => {
+      cache[id] = c;
+      const keys = new Set((c.nodes || []).map(n => n.key));
+      if (picked[id]) picked[id] = new Set([...picked[id]].filter(k => keys.has(k)));
+      return c;
+    }).finally(() => { delete loading[id]; });
+  }
+  return loading[id];
+}
+
 async function fillPanel(id) {
   const box = document.getElementById('ext-panel-' + id);
   if (!box) return;
   if (!cache[id]) {
-    try { cache[id] = await get(`exts/${id}/nodes`); }
+    try { await loadNodes(id); }
     catch (e) { const b = document.getElementById('ext-panel-' + id); if (b) b.innerHTML = `<div class="pc-err">${esc(e.message)}</div>`; return; }
   }
   const again = document.getElementById('ext-panel-' + id);
-  if (!again) return; // 等接口的功夫被收起了
+  if (!again || !cache[id]) return; // 等接口的功夫被收起了
   again.innerHTML = panelHTML(id, cache[id]);
   renderSubBody(id);
 }
 
 function panelHTML(id, c) {
+  const stale = c.stale ? `<span class="muted small" title="${esc(t('ext.staleHelp'))}">${t('ext.staleN', { n: c.stale })} <a href="#" data-act="ext.cleanStale" data-id="${id}">${t('ext.cleanStale')}</a></span>` : '';
   return `<div class="toolbar ext-tools">
       <input type="search" data-q="${id}" placeholder="${t('ext.search')}" value="${esc(query[id] || '')}">
-      <span class="muted small" id="ext-count-${id}"></span><span class="grow"></span>
-      <button class="btn sm" data-act="ext.hideSel" data-id="${id}" title="${t('ext.hideHelp')}">${t('ext.hideSel')}</button>
+      <span class="muted small" id="ext-count-${id}"></span>${stale}<span class="grow"></span>
+      <button class="btn sm" data-act="ext.hideSel" data-id="${id}" title="${esc(t('ext.hideHelp'))}">${t('ext.hideSel')}</button>
       <button class="btn sm" data-act="ext.showSel" data-id="${id}">${t('ext.showSel')}</button>
-      <button class="btn sm" data-act="ext.testAll" data-id="${id}">${t('ext.testAll')}</button>
+      <button class="btn sm" data-act="ext.testAll" data-id="${id}" title="${esc(t('ext.testAllHelp'))}">${t('ext.testAll')}</button>
+      <label class="small muted"><input type="checkbox" data-change="ext.inclHidden" data-id="${id}" ${inclHidden[id] ? 'checked' : ''}> ${t('ext.inclHidden')}</label>
       <button class="btn sm" data-act="ext.testSel" data-id="${id}">${t('ext.testSel')}</button>
-      <button class="btn sm" data-act="ext.reachSel" data-id="${id}" title="${t('ext.reachHelp')}">${t('ext.reachSel')}</button>
+      <button class="btn sm danger" data-act="ext.testStop" data-id="${id}" id="ext-stop-${id}" ${jobs[id] && jobs[id].job ? '' : 'hidden'}>${t('ext.testStop')}</button>
+      <button class="btn sm" data-act="ext.reachSel" data-id="${id}" title="${esc(t('ext.reachHelp'))}">${t('ext.reachSel')}</button>
       <button class="btn sm primary" data-act="ext.addUp" data-id="${id}">${t('ext.addUp')}</button>
     </div>
     <div class="table-wrap"><table class="grid ext-grid"><thead><tr>
@@ -108,39 +147,58 @@ function panelHTML(id, c) {
 
 const visible = (id, c) => {
   const q = (query[id] || '').trim();
-  return (c.nodes || []).filter(n => !q || matches(q, n.name, n.type, n.server + ':' + n.port));
+  return (c.nodes || []).filter(n => !q || matches(q, n.name, n.rename || '', n.type, n.server + ':' + n.port));
 };
 
-// 大陆连通那一格:判定 + 三网通的个数放在提示里
+// 大陆连通那一格:判定 + 三网通的个数与提示放在悬停说明里
 const reachHTML = r => {
   if (!r) return '<span class="muted">—</span>';
   if (r.state === 'pending') return '<span class="muted">…</span>';
-  const title = r.error ? trErr(r.error) : (r.groups || []).map(g => t('reach.g.' + g.key) + ' ' + g.ok + '/' + g.total).join(' · ');
-  return `<span class="badge ${REACH_TONE[r.verdict] || ''}" title="${esc(title)}">${esc(t('reach.v.' + (r.verdict || 'none')))}</span>`;
+  const notes = (r.note || '').split(',').filter(Boolean);
+  const title = r.error ? trErr(r.error)
+    : [(r.groups || []).filter(g => g.total).map(g => t('reach.g.' + g.key) + ' ' + g.ok + '/' + g.total).join(' · '), ...notes.map(n => t('ext.reachNote.' + n))].filter(Boolean).join('\n');
+  let label = r.verdict === 'abroadDown' ? t('ext.reachBothDown') : t('reach.v.' + (r.verdict || 'none'));
+  if (notes.includes('udpPing')) label += ' (ping)';
+  else if (notes.length) label += ' *';
+  return `<span class="badge ${REACH_TONE[r.verdict] || ''}" title="${esc(title)}">${esc(label)}</span>`;
 };
 
-const cellHTML = r => !r ? '<span class="muted">—</span>'
-  : r.state === 'pending' ? '<span class="muted">…</span>'
-    : r.state === 'ok' ? badge(r.delayMs + ' ms', 'ok')
-      : `<span class="badge danger" title="${esc(trErr(r.error || ''))}">✗</span>`;
+// 测速那一格:延迟按快慢着色;测不了(协议不支持)和不通分开显示,悬停看原因
+const delayTone = ms => ms <= 300 ? 'ok' : ms <= 800 ? 'warn' : 'danger';
+const cellHTML = r => {
+  if (!r) return '<span class="muted">—</span>';
+  const why = esc(trErr(r.error || ''));
+  switch (r.state) {
+    case 'pending': return '<span class="muted">…</span>';
+    case 'ok': return `<span class="badge ${delayTone(r.delayMs)}" title="${esc(r.at ? t('ext.testedAt', { t: fmtRelative(r.at) }) : '')}">${r.delayMs} ms</span>`;
+    case 'unsupported': return `<span class="badge" title="${why}">${t('ext.cellUnsupported')}</span>`;
+    case 'skip': return `<span class="muted" title="${why}">${t('ext.cellSkip')}</span>`;
+    case 'cancelled': return `<span class="muted" title="${why}">${t('ext.cellCancelled')}</span>`;
+  }
+  return `<span class="badge danger" title="${why}">✗</span>`;
+};
 
 function renderSubBody(id) {
   const tb = document.getElementById('ext-nodes-' + id), c = cache[id];
   if (!tb || !c) return;
   const sel = picked[id] || (picked[id] = new Set());
   const list = visible(id, c), servers = c.servers || [];
-  tb.innerHTML = list.length ? list.map(n => `<tr class="${n.hidden ? 'ext-hidden' : ''}">
-    <td><input type="checkbox" data-change="ext.pick" data-id="${id}" data-idx="${n.index}" ${sel.has(n.index) ? 'checked' : ''}></td>
-    <td class="primary-cell"><a href="#" data-act="ext.detail" data-id="${id}" data-idx="${n.index}">${esc(n.rename || n.name)}</a>
-      <button class="btn xs ghost" data-act="ext.rename" data-id="${id}" data-idx="${n.index}" title="${t('ext.rename')}">✎</button>
-      <label class="switch sm" title="${n.keyword ? t('ext.hiddenByKeyword') : t('ext.output')}"><input type="checkbox" data-change="ext.toggleNode" data-id="${id}" data-idx="${n.index}" ${n.hidden ? '' : 'checked'} ${n.keyword ? 'disabled' : ''}><span></span></label>
+  const res = results[id] || {}, rch = reaches[id] || {};
+  tb.innerHTML = list.length ? list.map(n => {
+    const k = esc(n.key);
+    return `<tr class="${n.hidden ? 'ext-hidden' : ''}">
+    <td><input type="checkbox" data-change="ext.pick" data-id="${id}" data-key="${k}" ${sel.has(n.key) ? 'checked' : ''}></td>
+    <td class="primary-cell"><a href="#" data-act="ext.detail" data-id="${id}" data-key="${k}" data-idx="${n.index}">${esc(n.rename || n.name)}</a>
+      <button class="btn xs ghost" data-act="ext.rename" data-id="${id}" data-key="${k}" data-idx="${n.index}" title="${t('ext.rename')}">✎</button>
+      <label class="switch sm" title="${n.keyword ? t('ext.hiddenByKeyword') : t('ext.output')}"><input type="checkbox" data-change="ext.toggleNode" data-id="${id}" data-key="${k}" data-idx="${n.index}" ${n.hidden ? '' : 'checked'} ${n.keyword ? 'disabled' : ''}><span></span></label>
       ${n.rename ? `<div class="sub-cell">${t('ext.renamedFrom', { name: esc(n.name) })}</div>` : ''}
       ${n.keyword ? `<div class="sub-cell">${t('ext.hiddenByKeyword')}</div>` : ''}</td>
     <td>${badge(esc(n.type))}</td>
     <td class="mono small">${esc(hostPort(n.server, n.port))}</td>
-    ${servers.map(s => `<td class="num" data-cell="${id}-${n.index}-${s.id}">${cellHTML(n.results && n.results[s.id])}</td>`).join('')}
-    <td data-reach="${id}-${n.index}">${reachHTML(n.reach)}</td>
-    <td>${n.upstream ? '' : badge(t('ext.noUpstream'), 'warn')}</td></tr>`).join('')
+    ${servers.map(s => `<td class="num" data-cell="${id}-${k}-${s.id}">${cellHTML(res[n.key] && res[n.key][s.id])}</td>`).join('')}
+    <td data-reach="${id}-${k}">${reachHTML(rch[n.key])}</td>
+    <td>${n.upstream ? '' : `<span class="badge warn" title="${esc(trErr(n.reason || ''))}">${t('ext.noUpstream')}</span>`}</td></tr>`;
+  }).join('')
     : `<tr><td colspan="${6 + servers.length}">${empty(t('ext.noNodes'))}</td></tr>`;
   updateCount(id);
 }
@@ -155,144 +213,225 @@ function updateCount(id) {
     + (c.fetchedAt ? ' · ' + t('ext.lastFetch') + ' ' + fmtRelative(c.fetchedAt) : '');
 }
 
+// findNode 按指纹找节点:先看下标对不对得上(同一份列表),对不上再按指纹找(列表刷新过)。
+function findNode(c, key, idx) {
+  const nodes = (c && c.nodes) || [];
+  const byIdx = nodes[idx];
+  return byIdx && byIdx.key === key ? byIdx : nodes.find(n => n.key === key);
+}
+
 // ---- 节点详情(抽屉)----
 
-function showDetail(id, idx) {
-  const c = cache[id], n = c && (c.nodes || [])[idx];
+function showDetail(id, key, idx) {
+  const n = findNode(cache[id], key, idx);
   if (!n) return;
   const rows = (n.fields || []).map(f => `<tr><td class="muted">${esc(f.k)}</td><td class="mono small ext-val">${esc(f.v)}</td></tr>`).join('');
   const link = n.link
     ? `<div class="ext-link"><div class="muted small">${t('ext.link')}</div><div class="mono small ext-val">${esc(n.link)}</div><div><button class="btn sm" data-act="ext.copy" data-link="${esc(n.link)}">${t('common.copy')}</button></div></div>`
     : `<p class="muted small">${t('ext.noLink')}</p>`;
-  openDrawer(esc(n.name), `<p class="small muted">${badge(esc(n.type))} ${esc(hostPort(n.server, n.port))}${n.upstream ? '' : ' · ' + t('ext.noUpstream')}</p>
+  openDrawer(esc(n.name), `<p class="small muted">${badge(esc(n.type))} ${esc(hostPort(n.server, n.port))}${n.upstream ? '' : ' · ' + t('ext.noUpstream') + (n.reason ? ':' + esc(trErr(n.reason)) : '')}</p>
     <div class="table-wrap"><table class="grid kv"><tbody>${rows}</tbody></table></div>${link}`);
 }
 
-// ---- 测速:起任务,每秒取进度,一格一格填 ----
+// ---- 测速:起任务,每秒取进度,一格一格填。结果按指纹记,列表刷新也不丢 ----
 
-async function startTest(id, indexes) {
+function syncStop(id) {
+  const b = document.getElementById('ext-stop-' + id);
+  if (b) b.hidden = !(jobs[id] && jobs[id].job);
+}
+
+async function startTest(id, keys) {
   if (jobs[id]) { toast(t('ext.testRunning'), 'err'); return; }
-  const c = cache[id];
-  if (!c) return;
-  let r;
-  try { r = await post(`exts/${id}/nodes/test`, { indexes, sig: c.sig }, SLOW); }
-  catch (e) { toast(e.message, 'err'); if (e.status === 409) reloadPanel(id); return; }
-  const want = indexes.length ? new Set(indexes) : null;
-  for (const n of c.nodes || []) {
-    if (want && !want.has(n.index)) continue;
-    n.results = {};
-    for (const s of c.servers || []) n.results[s.id] = { state: 'pending' };
+  jobs[id] = {}; // 请求还没回来也算在跑:防连点起两个
+  let c, r;
+  try {
+    c = cache[id] || await loadNodes(id);
+    r = await post(`exts/${id}/nodes/test`, { keys, includeHidden: !!inclHidden[id] }, SLOW);
+  } catch (e) {
+    delete jobs[id];
+    toast(e.message, 'err');
+    if (e.status === 409) reloadPanel(id);
+    return;
+  }
+  const res = results[id] || (results[id] = {});
+  for (const k of r.keys || []) {
+    res[k] = {};
+    for (const s of c.servers || []) res[k][s.id] = { state: 'pending' };
   }
   renderSubBody(id);
-  toast(t('ext.testStarted', { n: want ? want.size : (c.nodes || []).length, s: (c.servers || []).length }), 'ok');
+  toast(t('ext.testStarted', { n: (r.keys || []).length, s: (c.servers || []).length }), 'ok');
   const started = Date.now();
-  // 上一次进度回来了再约下一次:以前 setInterval 每秒一发不等返回,弱网下请求越积越多(审计 MB31)
+  let errors = 0;
+  // 上一次进度回来了再约下一次:以前 setInterval 每秒一发不等返回,弱网下请求越积越多(审计 MB31)。出错退避重试几次
   const poll = async () => {
     let st;
-    try { st = await get(`exts/${id}/nodes/test/${r.job}`); }
-    catch (e) { if (jobs[id] && jobs[id].job === r.job) { stopJob(id); toast(e.message, 'err'); } return; }
-    if (!jobs[id] || jobs[id].job !== r.job) return; // 这期间被停了(列表作废、重新展开)
+    try { st = await get(`exts/${id}/nodes/test/${r.job}`); errors = 0; }
+    catch (e) {
+      if (!jobs[id] || jobs[id].job !== r.job) return;
+      if (e.status === 404 || ++errors > 5) { stopJob(id); toast(e.message, 'err'); return; }
+      jobs[id].timer = setTimeout(poll, 1000 * 2 ** errors);
+      return;
+    }
+    if (!jobs[id] || jobs[id].job !== r.job) return; // 这期间被停了
     applyResults(id, st.results);
-    if (st.done || Date.now() - started > 20 * 60 * 1000) {
+    if (st.done || Date.now() - started > 15 * 60 * 1000) {
       stopJob(id);
-      const { ok, bad } = tally(st.results);
-      toast(t('ext.testDone', { ok, bad }), bad ? '' : 'ok');
+      renderSubBody(id); // 收尾整表重画一遍:中途重画过的面板也拿到全部结果
+      toast(tallyText(st.results), tally(st.results).bad ? '' : 'ok');
       return;
     }
     jobs[id].timer = setTimeout(poll, 1000);
   };
   jobs[id] = { job: r.job, timer: setTimeout(poll, 1000) };
+  syncStop(id);
 }
-// reloadPanel 节点列表已经变了:丢掉旧的,重新拉一遍。
-function reloadPanel(id) { stopJob(id); delete cache[id]; picked[id] = new Set(); fillPanel(id); }
-function stopJob(id) { if (jobs[id]) { clearTimeout(jobs[id].timer); delete jobs[id]; } }
-function applyResults(id, results) {
-  const c = cache[id];
-  if (!c) return;
-  for (const [idx, row] of Object.entries(results || {})) {
-    const n = (c.nodes || [])[Number(idx)];
-    if (!n) continue;
-    n.results = n.results || {};
+
+async function stopTest(id) {
+  const j = jobs[id];
+  if (!j || !j.job) return;
+  try {
+    const st = await del(`exts/${id}/nodes/test/${j.job}`);
+    applyResults(id, st.results);
+    stopJob(id);
+    toast(t('ext.testStopped'), 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// reloadPanel 节点列表已经变了:丢掉旧的,重新拉一遍(勾选、测速结果按指纹记,还对得上的留着)。
+function reloadPanel(id) { delete cache[id]; fillPanel(id); }
+function stopJob(id) { if (jobs[id]) { clearTimeout(jobs[id].timer); delete jobs[id]; } syncStop(id); }
+function applyResults(id, rs) {
+  const res = results[id] || (results[id] = {});
+  for (const [key, row] of Object.entries(rs || {})) {
+    res[key] = Object.assign(res[key] || {}, row);
     for (const [sid, cell] of Object.entries(row || {})) {
-      n.results[sid] = cell;
-      const td = document.querySelector(`[data-cell="${id}-${idx}-${sid}"]`);
-      if (td) td.innerHTML = cellHTML(cell);
+      document.querySelectorAll(`[data-cell="${id}-${key}-${sid}"]`).forEach(td => { td.innerHTML = cellHTML(cell); });
     }
   }
 }
-function tally(results) {
-  let ok = 0, bad = 0;
-  for (const row of Object.values(results || {})) for (const c of Object.values(row || {})) { if (c.state === 'ok') ok++; else if (c.state === 'fail') bad++; }
-  return { ok, bad };
+function tally(rs) {
+  let ok = 0, bad = 0, na = 0;
+  for (const row of Object.values(rs || {})) for (const c of Object.values(row || {})) {
+    if (c.state === 'ok') ok++; else if (c.state === 'fail') bad++; else if (c.state === 'unsupported') na++;
+  }
+  return { ok, bad, na };
+}
+function tallyText(rs) {
+  const { ok, bad, na } = tally(rs);
+  return t('ext.testDone', { ok, bad }) + (na ? ' · ' + t('ext.testNA', { n: na }) : '');
 }
 
-// ---- 隐藏 / 改名:存的是原名,订阅刷新后还认得 ----
+// ---- 隐藏 / 改名:只发这一次的增量,服务端按名字 + 指纹合并 ----
 
-async function savePrefs(id) {
-  const c = cache[id];
-  const nodes = c.nodes || [];
-  const hidden = nodes.filter(n => n.hidden && !n.keyword).map(n => n.name);
-  const renames = {};
-  nodes.forEach(n => { if (n.rename) renames[n.name] = n.rename; });
-  await put(`exts/${id}/nodes/prefs`, { hidden, renames });
+// savePrefs 发增量;版本号对不上(别的标签页刚改过)就重新拉一遍再试一次。成功后以服务端返回的状态为准。
+async function savePrefs(id, ops) {
+  let c = cache[id] || await loadNodes(id);
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const r = await put(`exts/${id}/nodes/prefs`, { rev: c.rev, ...ops });
+      cache[id] = r;
+      refreshList();
+      return r;
+    } catch (e) {
+      if (e.status !== 409 || attempt > 0) throw e;
+      c = await loadNodes(id);
+    }
+  }
 }
 
-async function setHidden(id, indexes, hidden) {
-  const c = cache[id];
-  if (!c) return;
-  const before = (c.nodes || []).map(n => n.hidden);
-  for (const i of indexes) { const n = c.nodes[i]; if (n && !n.keyword) n.hidden = hidden; }
-  try { await savePrefs(id); renderSubBody(id); toast(t('ext.prefsSaved'), 'ok'); }
-  catch (e) { (c.nodes || []).forEach((n, i) => { n.hidden = before[i]; }); renderSubBody(id); toast(e.message, 'err'); }
+// refreshList 列表上的节点数是输出的个数,隐藏改名后跟着变。
+function refreshList() { load('exts').then(renderRows).catch(() => { /* 下一轮轮询再说 */ }); }
+
+// setHidden 隐藏 / 显示。缓存不在(刚编辑过、列表刚刷新)就先重新拉,按指纹找回节点再保存;
+// 找不到就明说"列表已更新",绝不静默不保存 —— 以前这里直接 return,开关拨过去了却没存,下次刷新又弹回来。
+async function setHidden(id, keys, hidden) {
+  try {
+    const c = cache[id] || await loadNodes(id);
+    const nodes = (c.nodes || []).filter(n => keys.includes(n.key) && !n.keyword);
+    if (!nodes.length) {
+      toast(t(keys.length ? 'ext.listChanged' : 'ext.pickFirst'), 'err');
+      fillPanel(id); // 开关按服务端状态画回去
+      return;
+    }
+    const ops = nodes.map(n => ({ name: n.name, key: n.key }));
+    await savePrefs(id, hidden ? { hide: ops } : { show: ops });
+    fillPanel(id);
+    toast(t('ext.prefsSaved') + (hidden && nodes.some(n => DYNAMIC.test(n.name)) ? ' · ' + t('ext.dynamicHint') : ''), 'ok');
+  } catch (e) {
+    fillPanel(id);
+    toast(e.message, 'err');
+  }
 }
 
-// ---- 大陆连通:只测勾选的 ----
+async function renameNode(id, key, idx) {
+  let c;
+  try { c = cache[id] || await loadNodes(id); }
+  catch (e) { toast(e.message, 'err'); return; }
+  const n = findNode(c, key, idx);
+  if (!n) { toast(t('ext.listChanged'), 'err'); fillPanel(id); return; }
+  openModal(t('ext.rename'), `<div class="form-grid"><div class="full">${field(t('ext.renameTo'), `<input id="f-rename" value="${esc(n.rename || n.name)}">`, t('ext.renameHelp', { name: esc(n.name) }))}</div></div>`, async () => {
+    const to = fv('f-rename').trim();
+    await savePrefs(id, { rename: [{ name: n.name, key: n.key, to: to === n.name ? '' : to }] });
+    fillPanel(id);
+    toast(t('ext.prefsSaved'), 'ok');
+  });
+}
 
-async function startReach(id, indexes) {
-  const c = cache[id];
-  if (!c) return;
-  if (!indexes.length) { toast(t('ext.pickFirst'), 'err'); return; }
+// ---- 大陆连通:只测勾选的;一轮没结束不能再点(每次都扣测点额度) ----
+
+async function startReach(id, keys) {
+  if (!keys.length) { toast(t('ext.pickFirst'), 'err'); return; }
+  if (reachJobs[id]) { toast(t('ext.reachRunning'), 'err'); return; }
+  reachJobs[id] = {};
   let r;
-  try { r = await post(`exts/${id}/nodes/reach`, { indexes, sig: c.sig }, SLOW); }
-  catch (e) { toast(e.message, 'err'); if (e.status === 409) reloadPanel(id); return; }
-  for (const i of indexes) if (c.nodes[i]) c.nodes[i].reach = { state: 'pending' };
+  try { r = await post(`exts/${id}/nodes/reach`, { keys }, SLOW); }
+  catch (e) { delete reachJobs[id]; toast(e.message, 'err'); if (e.status === 409) reloadPanel(id); return; }
+  const rch = reaches[id] || (reaches[id] = {});
+  for (const k of r.keys || []) rch[k] = { state: 'pending' };
   renderSubBody(id);
-  toast(t('ext.reachStarted', { n: indexes.length }), 'ok');
+  toast(t('ext.reachStarted', { n: (r.keys || []).length }), 'ok');
   const started = Date.now();
+  let errors = 0;
   const poll = async () => {
     let st;
-    try { st = await get(`exts/${id}/nodes/reach/${r.job}`); }
-    catch (e) { toast(e.message, 'err'); return; }
-    const now = cache[id];
-    if (!now) return; // 列表作废了
-    for (const [idx, cell] of Object.entries(st.results || {})) {
-      const n = (now.nodes || [])[Number(idx)];
-      if (n) n.reach = cell;
-      const td = document.querySelector(`[data-reach="${id}-${idx}"]`);
-      if (td) td.innerHTML = reachHTML(cell);
+    try { st = await get(`exts/${id}/nodes/reach/${r.job}`); errors = 0; }
+    catch (e) {
+      if (!reachJobs[id] || reachJobs[id].job !== r.job) return;
+      if (e.status === 404 || ++errors > 5) { delete reachJobs[id]; toast(e.message, 'err'); return; }
+      reachJobs[id].timer = setTimeout(poll, 2000 * 2 ** errors); // 出错退避重试,不是一错就停
+      return;
     }
-    if (st.done || Date.now() - started > 15 * 60 * 1000) { toast(t('ext.reachDone'), 'ok'); return; }
-    setTimeout(poll, 2000);
+    if (!reachJobs[id] || reachJobs[id].job !== r.job) return;
+    for (const [key, cell] of Object.entries(st.results || {})) { // 按指纹回填:列表刷新过也不会贴到别的节点上
+      rch[key] = cell;
+      document.querySelectorAll(`[data-reach="${id}-${key}"]`).forEach(td => { td.innerHTML = reachHTML(cell); });
+    }
+    if (st.done || Date.now() - started > 15 * 60 * 1000) { delete reachJobs[id]; toast(t('ext.reachDone'), 'ok'); return; }
+    reachJobs[id].timer = setTimeout(poll, 2000);
   };
-  setTimeout(poll, 2000);
+  reachJobs[id] = { job: r.job, timer: setTimeout(poll, 2000) };
 }
 
 // ---- 添加为上游 ----
 
 async function addUpstreams(id) {
-  const c = cache[id], sel = picked[id];
-  if (!c || !sel || !sel.size) { toast(t('ext.pickFirst'), 'err'); return; }
+  const sel = picked[id];
+  if (!sel || !sel.size) { toast(t('ext.pickFirst'), 'err'); return; }
+  let c;
+  try { c = cache[id] || await loadNodes(id); }
+  catch (e) { toast(e.message, 'err'); return; }
   const ext = (state.exts || []).find(x => x.id === id) || {};
-  const list = [...sel].sort((a, b) => a - b).map(i => (c.nodes || [])[i]).filter(Boolean);
+  const list = [...sel].map(k => (c.nodes || []).find(n => n.key === k)).filter(Boolean);
+  if (!list.length) { toast(t('ext.listChanged'), 'err'); fillPanel(id); return; }
   const html = `<p class="hint">${t('ext.addUpHelp')}</p><div class="form-grid">` + list.map(n => n.upstream
-    ? field(n.name, `<input id="ext-up-${n.index}" value="${esc((ext.name ? ext.name + '-' : '') + n.name)}">`)
-    : field(n.name, `<span class="muted small">${t('ext.noUpstream')}</span>`)).join('') + '</div>';
+    ? field(n.name, `<input id="ext-up-${esc(n.key)}" value="${esc((ext.name ? ext.name + '-' : '') + (n.rename || n.name))}">`)
+    : field(n.name, `<span class="muted small" title="${esc(trErr(n.reason || ''))}">${t('ext.noUpstream')}</span>`)).join('') + '</div>';
   openModal(t('ext.addUp'), html, async () => {
-    const items = list.filter(n => n.upstream).map(n => ({ index: n.index, name: fv(`ext-up-${n.index}`).trim() }));
+    const items = list.filter(n => n.upstream).map(n => ({ key: n.key, name: fv(`ext-up-${n.key}`).trim() }));
     if (!items.length) throw new Error(t('ext.noneAddable'));
     if (items.some(x => !x.name)) throw new Error(t('ext.nameRequired'));
     let r;
-    try { r = await post(`exts/${id}/nodes/add-upstream`, { sig: c.sig, items }, SLOW); }
+    try { r = await post(`exts/${id}/nodes/add-upstream`, { items }, SLOW); }
     catch (e) { if (e.status === 409) reloadPanel(id); throw e; }
     const okN = (r.results || []).filter(x => x.ok).length, bad = (r.results || []).filter(x => !x.ok);
     if (okN) { try { await load('upstreams'); } catch (_) { /* 上游页没打开过也没关系 */ } picked[id] = new Set(); renderSubBody(id); }
@@ -320,7 +459,9 @@ function editExt(id) {
     </div>`, async () => {
     const body = { name: fv('f-name').trim(), type: fv('f-type'), value: fv('f-value').trim(), prefix: fv('f-prefix'), exclude: fv('f-exclude').trim(), remark: fv('f-remark'), sort: Number(fv('f-sort')) || 0, enabled: fchk('f-enabled') };
     if (id) await put('exts/' + id, body); else await post('exts', body);
-    delete cache[id]; // 地址可能改了,展开时重新拉
+    // 地址、关键词可能改了:展开的列表作废、行指纹作废,一定重画(以前只删缓存不重画,面板留着、之后的开关全都不保存)
+    delete cache[id];
+    rowsSig = '';
     await load('exts'); renderRows();
     toast(id ? t('ext.updated') : t('ext.created'), 'ok');
   }, { wide: true });
@@ -331,8 +472,10 @@ registerActions({
   'ext.edit': id => editExt(Number(id)),
   'ext.refresh': async (id, btn) => {
     btn.disabled = true;
-    try { const r = await post(`exts/${id}/refresh`, undefined, SLOW); toast(t('ext.refreshed', { n: r.clash }), 'ok'); delete cache[Number(id)]; }
-    catch (e) { toast(e.message, 'err'); }
+    try {
+      const r = await post(`exts/${id}/refresh`, undefined, SLOW);
+      toast(t(r.unchanged ? 'ext.refreshedSame' : 'ext.refreshed', { n: r.total, out: r.out }), 'ok');
+    } catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; await load('exts'); rowsSig = ''; renderRows(); }
   },
   'ext.del': async id => {
@@ -342,35 +485,30 @@ registerActions({
     catch (e) { toast(e.message, 'err'); }
   },
   'ext.toggle': id => { id = Number(id); if (open.has(id)) open.delete(id); else open.add(id); renderRows(); },
-  'ext.pick': (id, el) => { const s = picked[id] || (picked[id] = new Set()); const i = Number(el.dataset.idx); if (el.checked) s.add(i); else s.delete(i); updateCount(Number(id)); },
+  'ext.pick': (id, el) => { const s = picked[id] || (picked[id] = new Set()); if (el.checked) s.add(el.dataset.key); else s.delete(el.dataset.key); updateCount(Number(id)); },
   'ext.pickAll': (id, el) => {
     id = Number(id); const c = cache[id]; if (!c) return;
     const s = picked[id] || (picked[id] = new Set());
-    for (const n of visible(id, c)) { if (el.checked) s.add(n.index); else s.delete(n.index); }
+    for (const n of visible(id, c)) { if (el.checked) s.add(n.key); else s.delete(n.key); }
     renderSubBody(id);
   },
-  'ext.detail': (id, el, e) => { if (e) e.preventDefault(); showDetail(Number(id), Number(el.dataset.idx)); },
+  'ext.detail': (id, el, e) => { if (e) e.preventDefault(); showDetail(Number(id), el.dataset.key, Number(el.dataset.idx)); },
   'ext.copy': async (id, el) => { await copy(el.dataset.link || ''); toast(t('common.copied'), 'ok'); },
-  'ext.toggleNode': (id, el) => setHidden(Number(id), [Number(el.dataset.idx)], !el.checked),
+  'ext.toggleNode': (id, el) => setHidden(Number(id), [el.dataset.key], !el.checked),
   'ext.hideSel': id => { id = Number(id); const s = picked[id]; if (!s || !s.size) { toast(t('ext.pickFirst'), 'err'); return; } setHidden(id, [...s], true); },
   'ext.showSel': id => { id = Number(id); const s = picked[id]; if (!s || !s.size) { toast(t('ext.pickFirst'), 'err'); return; } setHidden(id, [...s], false); },
   'ext.reachSel': id => { id = Number(id); startReach(id, [...(picked[id] || [])]); },
-  'ext.rename': (id, el, e) => {
+  'ext.rename': (id, el, e) => { if (e) e.preventDefault(); renameNode(Number(id), el.dataset.key, Number(el.dataset.idx)); },
+  'ext.cleanStale': async (id, el, e) => {
     if (e) e.preventDefault();
     id = Number(id);
-    const c = cache[id], n = c && (c.nodes || [])[Number(el.dataset.idx)];
-    if (!n) return;
-    openModal(t('ext.rename'), `<div class="form-grid"><div class="full">${field(t('ext.renameTo'), `<input id="f-rename" value="${esc(n.rename || n.name)}">`, t('ext.renameHelp', { name: esc(n.name) }))}</div></div>`, async () => {
-      const to = fv('f-rename').trim();
-      const old = n.rename;
-      n.rename = to && to !== n.name ? to : '';
-      try { await savePrefs(id); }
-      catch (err) { n.rename = old; throw err; }
-      renderSubBody(id);
-      toast(t('ext.prefsSaved'), 'ok');
-    });
+    if (!await confirm(t('ext.cleanStaleConfirm', { n: (cache[id] || {}).stale || 0 }))) return;
+    try { await savePrefs(id, { clearStale: true }); fillPanel(id); toast(t('ext.prefsSaved'), 'ok'); }
+    catch (err) { toast(err.message, 'err'); }
   },
+  'ext.inclHidden': (id, el) => { inclHidden[Number(id)] = el.checked; },
   'ext.testAll': id => startTest(Number(id), []),
   'ext.testSel': id => { id = Number(id); const s = picked[id]; if (!s || !s.size) { toast(t('ext.pickFirst'), 'err'); return; } startTest(id, [...s]); },
+  'ext.testStop': id => stopTest(Number(id)),
   'ext.addUp': id => addUpstreams(Number(id)),
 });

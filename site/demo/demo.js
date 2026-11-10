@@ -42,34 +42,62 @@ S.onlines.lines = S.lines.slice(0, 2).map(l => l.name);
 for (const n of S.nodes.nodes || []) if (n.status) n.status.uptime = (n.status.uptime || 0) + DELTA; // 副机运行时长随导出日期累加
 
 const nextId = list => list.reduce((m, x) => Math.max(m, x.id || 0), 0) + 1;
-// 外部订阅展开:节点明细 / 逐台测速 / 添加为上游(GET 与 POST 都走这里)
+// 外部订阅展开:节点明细 / 逐台测速 / 大陆连通 / 隐藏改名 / 添加为上游(GET 与 POST 都走这里)。
+// 和真面板一样按节点指纹(key)认节点;隐藏 / 改名只收增量,带版本号。
 function extNodes(id, seg, method, body) {
   let servers = ((S.nodes && S.nodes.nodes) || (Array.isArray(S.nodes) ? S.nodes : [])).filter(n => n.enabled !== false).map(n => ({ id: n.id, name: n.name, isLocal: !!n.isLocal }));
   if (!servers.length) servers = [{ id: 1, name: '主机', isLocal: true }, { id: 2, name: '副机', isLocal: false }];
   const nodes = demoExtNodes(id);
   const ext = S.exts.find(e => e.id === id) || {};
-  const words = String(ext.exclude || '').split(',').map(s => s.trim()).filter(Boolean);
-  for (const n of nodes) {
-    if (words.some(w => n.name.includes(w))) { n.hidden = true; n.keyword = true; }
-    else if ((ext.hidden || []).includes(n.name)) n.hidden = true;
-    if ((ext.renames || {})[n.name]) n.rename = ext.renames[n.name];
+  ext.hiddenSet = ext.hiddenSet || {};
+  ext.renameSet = ext.renameSet || {};
+  ext.prefsRev = ext.prefsRev || 0;
+  const annotate = () => {
+    const words = String(ext.exclude || '').split(',').map(s => s.trim()).filter(Boolean);
+    for (const n of nodes) {
+      n.hidden = n.keyword = false;
+      if (words.some(w => n.name.includes(w))) { n.hidden = true; n.keyword = true; }
+      else if (ext.hiddenSet[n.key]) n.hidden = true;
+      n.rename = ext.renameSet[n.key] || undefined;
+    }
+    ext.nodeCount = nodes.filter(n => !n.hidden).length;
+    ext.nodeTotal = nodes.length;
+  };
+  annotate();
+  const payload = () => ({ nodes, servers, fetchedAt: now() - 600, sig: 'demo', rev: ext.prefsRev, stale: 0 });
+  if (!seg[3]) return payload();
+  if (seg[3] === 'prefs') {
+    if (!body || body.rev !== ext.prefsRev) throw new ApiError(409, '节点的隐藏 / 改名设置已在别处修改,请刷新后重试');
+    for (const x of body.hide || []) ext.hiddenSet[x.key] = true;
+    for (const x of body.show || []) delete ext.hiddenSet[x.key];
+    for (const x of body.rename || []) { if (x.to) ext.renameSet[x.key] = x.to; else delete ext.renameSet[x.key]; }
+    ext.prefsRev++;
+    annotate();
+    return payload();
   }
-  if (!seg[3]) return { nodes, servers, fetchedAt: now() - 600, sig: 'demo' };
-  if (seg[3] === 'prefs') { ext.hidden = (body && body.hidden) || []; ext.renames = (body && body.renames) || {}; return ok(); }
-  if (seg[3] === 'reach' && !seg[4]) { S.reachIdx = (body && body.indexes) || []; return { job: 'demo-reach-' + id }; }
+  const keysOf = b => (b && b.keys && b.keys.length) ? b.keys : nodes.filter(n => !n.hidden || (b && b.includeHidden)).map(n => n.key);
+  if (seg[3] === 'reach' && !seg[4]) { S.reachKeys = keysOf(body); return { job: 'demo-reach-' + id, keys: S.reachKeys }; }
   if (seg[3] === 'reach') {
-    // 演示用:第一个被墙,其余通
+    // 演示用:第一个被墙,其余通;UDP 协议只 ping
     const results = {};
-    (S.reachIdx || []).forEach((i, k) => { results[i] = { state: 'done', verdict: k === 0 ? 'blocked' : 'ok', groups: [{ key: 'ct', ok: k === 0 ? 0 : 3, total: 3 }, { key: 'cu', ok: k === 0 ? 0 : 3, total: 3 }, { key: 'cm', ok: k === 0 ? 0 : 3, total: 3 }] }; });
+    (S.reachKeys || []).forEach((k, i) => {
+      const n = nodes.find(x => x.key === k) || {};
+      const udp = ['hysteria2', 'tuic'].includes(n.type);
+      results[k] = { state: 'done', verdict: i === 0 ? 'blocked' : 'ok', note: udp ? 'udpPing' : '', groups: [{ key: 'ct', ok: i === 0 ? 0 : 3, total: 3 }, { key: 'cu', ok: i === 0 ? 0 : 3, total: 3 }, { key: 'cm', ok: i === 0 ? 0 : 3, total: 3 }] };
+    });
     return { done: true, results };
   }
-  if (seg[3] === 'test' && !seg[4]) return { job: 'demo-' + id };
+  if (seg[3] === 'test' && !seg[4]) { S.testKeys = keysOf(body); return { job: 'demo-' + id, keys: S.testKeys }; }
   if (seg[3] === 'test') {
     const results = {};
-    for (const n of nodes) { results[n.index] = {}; for (const s of servers) results[n.index][s.id] = Math.random() < 0.8 ? { state: 'ok', delayMs: 60 + Math.floor(Math.random() * 300), method: 'urltest' } : { state: 'fail', error: 'timeout' }; }
-    return { done: true, total: nodes.length * servers.length, finished: nodes.length * servers.length, results };
+    for (const k of S.testKeys || []) {
+      results[k] = {};
+      for (const s of servers) results[k][s.id] = Math.random() < 0.8 ? { state: 'ok', delayMs: 60 + Math.floor(Math.random() * 300), method: 'urltest', at: now() } : { state: 'fail', error: 'timeout', at: now() };
+    }
+    const total = (S.testKeys || []).length * servers.length;
+    return { done: true, total, finished: total, results };
   }
-  if (seg[3] === 'add-upstream') return { results: (body || []).map(x => ({ index: x.index, name: x.name, ok: true, id: 900 + x.index })) };
+  if (seg[3] === 'add-upstream') return { results: ((body && body.items) || []).map((x, i) => ({ key: x.key, name: x.name, ok: true, id: 900 + i })) };
   return ok();
 }
 // 演示用的外部订阅节点:三种协议各两个,带完整参数
@@ -82,7 +110,7 @@ const demoExtNodes = id => [
   ['anytls', 'SG-1', 'sg1.example.net', 8444, [['password', 'ap' + id], ['sni', 'sg1.example.net'], ['client-fingerprint', 'chrome']]],
   ['anytls', 'US-1', 'us1.example.net', 8444, [['password', 'aq' + id], ['sni', 'us1.example.net'], ['skip-cert-verify', 'true']]],
 ].map(([type, name, server, port, extra], i) => ({
-  index: i, name, type, server, port, upstream: true,
+  index: i, key: 'd' + id + 'k' + i, name, type, server, port, upstream: true,
   fields: [['name', name], ['type', type], ['server', server], ['port', String(port)], ...extra].map(([k, v]) => ({ k, v })),
   link: type + '://' + encodeURIComponent(extra[0][1]) + '@' + server + ':' + port + '?sni=' + server + '#' + encodeURIComponent(name),
 }));
@@ -150,7 +178,7 @@ for (const n of S.nodes.nodes || []) n.certs = briefs(n.isLocal ? S.certs : S.ce
 const tlsOf = l => { try { return typeof l.tls === 'string' ? JSON.parse(l.tls || '{}') : (l.tls || {}); } catch { return {}; } };
 for (const l of S.lines) if (l.name === 'Tokyo-HY2' && tlsOf(l).mode === 'cert') l.tls = JSON.stringify({ ...tlsOf(l), cert: '*.example.net' });
 // 外部订阅(导出实例没有):关键词已排除带"官网"的,展开能隐藏、改名、测大陆连通
-if (!S.exts.length) S.exts.push({ id: 1, name: 'Demo Sub', type: 'sub', value: 'https://sub.example.net/demo', prefix: '', enabled: true, sort: 1, remark: '', lastFetch: now() - 600, lastError: '', nodeCount: 7, exclude: '官网', hidden: [], renames: {} });
+if (!S.exts.length) S.exts.push({ id: 1, name: 'Demo Sub', type: 'sub', value: 'https://sub.example.net/demo', prefix: '', enabled: true, sort: 1, remark: '', lastFetch: now() - 600, lastError: '', nodeCount: 6, nodeTotal: 7, exclude: '官网' });
 const ruleView = r => ({ ...r, targetCount: r.allUsers ? S.users.filter(u => u.enabled).length : new Set([...(r.userIds || []), ...S.users.filter(u => (r.resellerIds || []).includes(u.resellerId) || (r.planIds || []).includes(u.planId)).map(u => u.id)]).size, activeCount: S.limitStates.filter(s => s.ruleId === r.id).length });
 
 function status() {
@@ -282,7 +310,7 @@ function route(method, path, query, body) {
     case 'exts': {
       if (method === 'POST' && !seg[1]) { const e = { id: nextId(S.exts), enabled: true, nodeCount: 3, ...body }; S.exts.push(e); return clone(e); }
       const e = find(S.exts, id);
-      if (seg[2] === 'refresh') return { clash: 3, link: 3 };
+      if (seg[2] === 'refresh') return { clash: 7, links: 7, total: 7, out: e.nodeCount || 7, unchanged: true };
       if (seg[2] === 'preview') return { nodes: [] };
       if (seg[2] === 'nodes') return extNodes(id, seg, method, body);
       if (method === 'DELETE') { S.exts = S.exts.filter(x => x.id !== id); return ok(); }

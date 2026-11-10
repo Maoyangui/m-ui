@@ -266,18 +266,11 @@ func (s *Server) externalFor(userID uint) []ExtItem {
 		WHERE ue.user_id = ? AND e.enabled = 1 ORDER BY e.sort, e.id`, userID).Scan(&exts)
 	out := make([]ExtItem, 0, len(exts))
 	for _, e := range exts {
-		var it ext.Items
-		if e.Type == "link" {
-			it = ext.Parse(e.Value)
-		} else {
-			it = ext.Parse(e.Cache)
-		}
-		it = ext.ParseFilter(e.Hidden, e.Renames, e.Exclude).Apply(it)
-		it = ext.WithPrefix(it, e.Prefix)
-		if len(it.Links) == 0 && len(it.Clash) == 0 {
+		it := ext.Output(e) // 筛选、改名、前缀:链接侧与 Clash 侧按同一个名字和指纹判定
+		if len(it.Nodes) == 0 {
 			continue
 		}
-		out = append(out, ExtItem{Name: e.Name, Links: it.Links, Clash: it.Clash})
+		out = append(out, ExtItem{Name: e.Name, Links: it.Links(), Clash: it.Clash()})
 	}
 	return out
 }

@@ -28,6 +28,8 @@ func (s *Server) handleExts(w http.ResponseWriter, r *http.Request) {
 		out := make([]row, 0, len(exts))
 		for _, e := range exts {
 			e.Cache = "" // 列表不返回抓取内容
+			// 隐藏 / 改名记录也不返回:列表每几秒轮询一次,这些(最多几千条)只在展开时用,展开接口会给
+			e.Hidden, e.Renames, e.HiddenKeys, e.RenameKeys = nil, nil, nil, nil
 			var n int64
 			s.db.Model(&model.UserExt{}).Where("ext_id = ?", e.Id).Count(&n)
 			out = append(out, row{ExtNode: e, UserCount: n})
@@ -44,8 +46,10 @@ func (s *Server) handleExts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		e.Id, e.Cache, e.LastFetch, e.LastError = 0, "", 0, ""
+		e.LastTry, e.ContentSig, e.FetchAgent, e.PrefsRev, e.NodeCount, e.NodeTotal = 0, "", "", 0, 0, 0
 		if e.Type == "link" {
-			e.NodeCount = 1
+			e.NodeCount, e.NodeTotal = ext.Counts(e)
+			e.ContentSig = ext.ContentSig(ext.ItemsOf(e))
 		}
 		if err := s.db.Create(&e).Error; err != nil {
 			badRequest(w, err)
@@ -128,16 +132,12 @@ func (s *Server) handleExtItem(w http.ResponseWriter, r *http.Request) {
 			s.audit(r, "ext", "refresh", e.Name)
 			writeJSON(w, http.StatusOK, res)
 		case "preview": // 解析结果预览(节点名列表)
-			it := ext.Parse(e.Value)
-			if e.Type == "sub" {
-				it = ext.Parse(e.Cache)
+			it := ext.ItemsOf(e)
+			names := make([]string, 0, len(it.Nodes))
+			for _, n := range it.Nodes {
+				names = append(names, n.Name)
 			}
-			names := make([]string, 0, len(it.Clash))
-			for _, p := range it.Clash {
-				n, _ := p["name"].(string)
-				names = append(names, n)
-			}
-			writeJSON(w, http.StatusOK, map[string]interface{}{"links": len(it.Links), "clash": len(it.Clash), "names": names})
+			writeJSON(w, http.StatusOK, map[string]interface{}{"links": len(it.Links()), "clash": len(it.Clash()), "names": names})
 		default:
 			http.NotFound(w, r)
 		}
@@ -155,14 +155,20 @@ func (s *Server) handleExtItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		updates := map[string]interface{}{"name": p.Name, "type": p.Type, "value": p.Value, "prefix": p.Prefix, "enabled": p.Enabled, "sort": p.Sort, "remark": p.Remark, "exclude": strings.TrimSpace(p.Exclude)}
+		p.Exclude = strings.TrimSpace(p.Exclude)
+		updates := map[string]interface{}{"name": p.Name, "type": p.Type, "value": p.Value, "prefix": p.Prefix, "enabled": p.Enabled, "sort": p.Sort, "remark": p.Remark, "exclude": p.Exclude}
+		// 节点数按改后的地址 / 关键词重算(列表上的节点数是输出到订阅的个数,扣除了隐藏与排除的)
+		next := e
+		next.Type, next.Value, next.Exclude = p.Type, p.Value, p.Exclude
 		if p.Type != e.Type || p.Value != e.Value {
 			updates["cache"], updates["last_fetch"], updates["last_error"] = "", 0, ""
-			updates["node_count"] = 0
+			updates["last_try"], updates["content_sig"], updates["fetch_agent"] = 0, "", ""
+			next.Cache = ""
 			if p.Type == "link" {
-				updates["node_count"] = 1
+				updates["content_sig"] = ext.ContentSig(ext.ItemsOf(next))
 			}
 		}
+		updates["node_count"], updates["node_total"] = ext.Counts(next)
 		if err := s.db.Model(&model.ExtNode{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 			badRequest(w, err)
 			return

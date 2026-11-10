@@ -31,6 +31,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ext"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
 	"github.com/Maoyangui/m-ui/render"
@@ -59,12 +60,35 @@ const RouteRulesMinNode = "0.6.14"
 // LineUpstreamMinNode 有上游用的是本面板的线路时副机至少要这个版本:旧版副机不会把专用用户挂到目标线路上,链路连不通。
 const LineUpstreamMinNode = "0.7.16"
 
+// ExtFilterMinNode 有启用的外部节点用了隐藏、改名或排除关键词时副机至少要这个版本:更早的副机不认识这三个字段,
+// 照收快照、解码时把它们丢掉,订阅地址指向它的用户照样拿到被隐藏的节点,主机还显示"已同步"(副机回报的是主机算好的修订号)。
+const ExtFilterMinNode = "0.7.16"
+
+// ExtKeyMinNode 有启用的外部节点按节点指纹隐藏 / 改名时副机至少要这个版本:0.7.16 只认按名字的记录,
+// 指纹记录(面板上点隐藏、改名都会记)会被它丢掉。
+const ExtKeyMinNode = "0.7.17"
+
 // minNodeFor 这份快照要求的副机最低版本。没用到新功能时不抬门槛,只升级主机不影响旧副机同步。
-func minNodeFor(lines []model.Line, upstreams []model.Upstream) string {
+// 按版本从高到低检查,命中即返回。
+func minNodeFor(lines []model.Line, upstreams []model.Upstream, exts []model.ExtNode) string {
+	var usesFilter bool
+	for _, e := range exts {
+		if !e.Enabled {
+			continue
+		}
+		f := ext.FilterOf(e)
+		if f.UsesKeys() {
+			return ExtKeyMinNode
+		}
+		usesFilter = usesFilter || f.UsesNames()
+	}
 	for _, u := range upstreams {
 		if u.FromLine > 0 || render.IsGroup(u) { // 上游组同一版加的:旧版副机不会把成员渲染出来,整份配置起不来
 			return LineUpstreamMinNode
 		}
+	}
+	if usesFilter {
+		return ExtFilterMinNode
 	}
 	for _, l := range lines {
 		if render.HasRouteRules(l) {
@@ -180,11 +204,15 @@ func revisionOf(s Snapshot) string {
 	}
 	s.Nodes = nodes
 	// 外部订阅的抓取时间 / 报错 / 节点数只是主机自己的记录:每半小时抓一次就推一次全量快照,
-	// 副机热更新一轮、限速桶清一遍,毫无意义。只有抓到的内容(Cache)变了才算配置变了
+	// 副机热更新一轮、限速桶清一遍,毫无意义。抓到的内容也只看"输出到订阅的节点"(筛选、改名、前缀之后)的指纹:
+	// 被隐藏的信息节点里"剩余流量"的数字每次刷新都变,输出没变就不算配置变了;顺带不必每 5 秒把整份缓存序列化一遍。
+	// 筛选条件本身(隐藏、改名、关键词、前缀)照样计入:它们变了副机要按新的重新筛。
 	exts := make([]model.ExtNode, len(s.Exts))
 	copy(exts, s.Exts)
 	for i := range exts {
-		exts[i].LastFetch, exts[i].LastError, exts[i].NodeCount = 0, "", 0
+		exts[i].Cache = ext.OutputSig(exts[i])
+		exts[i].LastFetch, exts[i].LastTry, exts[i].LastError, exts[i].NodeCount, exts[i].NodeTotal = 0, 0, "", 0, 0
+		exts[i].ContentSig, exts[i].FetchAgent, exts[i].PrefsRev = "", "", 0
 	}
 	s.Exts = exts
 	b, _ := json.Marshal(s)
@@ -934,7 +962,7 @@ func (h *Hub) refreshSnapshot() (Snapshot, error) {
 	if err != nil {
 		return snap, err
 	}
-	snap.Version, snap.MinNode = h.d.Version, minNodeFor(snap.Lines, snap.Upstreams)
+	snap.Version, snap.MinNode = h.d.Version, minNodeFor(snap.Lines, snap.Upstreams, snap.Exts)
 	h.mu.Lock()
 	h.latest, h.revision = &snap, snap.Revision
 	h.mu.Unlock()

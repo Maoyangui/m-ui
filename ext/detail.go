@@ -3,22 +3,24 @@ package ext
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
-
-	"github.com/Maoyangui/m-ui/upstream"
+	"strings"
 )
 
 // NodeInfo 面板里展开一条外部订阅时看到的一个节点:基本信息、该协议的全部字段、分享链接。
 type NodeInfo struct {
-	Index    int     `json:"index"` // 在解析结果里的下标,测速与添加为上游按它指
+	Index    int     `json:"index"` // 在解析结果里的下标(只在同一份列表内有效;跨刷新认节点用 Key)
+	Key      string  `json:"key"`   // 身份指纹:隐藏、改名、测速与大陆连通的结果都按它对应节点
 	Name     string  `json:"name"`
 	Type     string  `json:"type"`
 	Server   string  `json:"server"`
 	Port     int     `json:"port"`
 	Fields   []Field `json:"fields"`
 	Link     string  `json:"link,omitempty"`
-	Upstream bool    `json:"upstream"` // 能否作为本站上游:协议受支持、且能转成分享链接再解析回来
+	Upstream bool    `json:"upstream"`          // 能否测速、作为本站上游:能无损转成 sing-box 出站
+	Reason   string  `json:"reason,omitempty"`  // 不能的原因(协议、传输方式、插件不支持等)
 	Hidden   bool    `json:"hidden,omitempty"`  // 不输出到用户订阅
 	Keyword  bool    `json:"keyword,omitempty"` // 是关键词排除的(手动显示不了,要改关键词)
 	Rename   string  `json:"rename,omitempty"`  // 改的名字;空 = 用原名
@@ -26,9 +28,12 @@ type NodeInfo struct {
 
 // Annotate 把筛选结果标到节点明细上,面板显示用。
 func Annotate(infos []NodeInfo, f Filter) {
-	for i := range infos {
-		infos[i].Hidden, infos[i].Keyword = f.Hides(infos[i].Name)
-		infos[i].Rename = f.Renames[infos[i].Name]
+	r := Roster{Names: make([]string, len(infos)), Keys: make([]string, len(infos))}
+	for i, n := range infos {
+		r.Names[i], r.Keys[i] = n.Name, n.Key
+	}
+	for i, d := range f.Decide(r) {
+		infos[i].Hidden, infos[i].Keyword, infos[i].Rename = d.Hidden, d.Keyword, d.Rename
 	}
 }
 
@@ -48,25 +53,42 @@ var fieldOrder = []string{
 	"up", "down", "congestion-controller", "udp-relay-mode", "udp", "tfo",
 }
 
-// Details 把解析结果整理成面板要的节点明细。下标与 Items.Clash 一致。
+// Details 把解析结果整理成面板要的节点明细。下标与 Items.Nodes 一致;只有分享链接、转不成 Clash 的节点也列出来
+// (以前不列,面板上看不到也就没法隐藏,链接订阅里照常输出)。
 func Details(it Items) []NodeInfo {
-	out := make([]NodeInfo, 0, len(it.Clash))
-	for i, p := range it.Clash {
-		n := NodeInfo{Index: i}
-		n.Name, _ = p["name"].(string)
-		n.Type, _ = p["type"].(string)
-		n.Server, _ = p["server"].(string)
-		n.Port = toInt(p["port"])
-		n.Fields = fieldsOf(p)
-		if link, ok := ClashToLink(p); ok {
-			n.Link = link
-			if _, err := upstream.ParseLink(link); err == nil {
-				n.Upstream = true
-			}
+	out := make([]NodeInfo, 0, len(it.Nodes))
+	for i, nd := range it.Nodes {
+		n := NodeInfo{Index: i, Key: nd.Key, Name: nd.Name, Link: nd.Link}
+		if p := nd.Clash; p != nil {
+			n.Type, _ = p["type"].(string)
+			n.Server, _ = p["server"].(string)
+			n.Port = toInt(p["port"])
+			n.Fields = fieldsOf(p)
+		} else {
+			n.Type, n.Server, n.Port = linkBasics(nd.Link)
+			n.Fields = []Field{{Key: "name", Value: nd.Name}, {Key: "type", Value: n.Type}, {Key: "server", Value: n.Server}, {Key: "port", Value: strconv.Itoa(n.Port)}}
+		}
+		if _, _, err := Outbound(nd); err != nil {
+			n.Reason = err.Error()
+		} else {
+			n.Upstream = true
 		}
 		out = append(out, n)
 	}
 	return out
+}
+
+// linkBasics 解析不了的链接也尽量给出协议、地址、端口。
+func linkBasics(link string) (typ, server string, port int) {
+	base, _, _ := strings.Cut(link, "#")
+	if i := strings.Index(base, "://"); i > 0 {
+		typ = strings.ToLower(base[:i])
+	}
+	if u, err := url.Parse(base); err == nil {
+		server = u.Hostname()
+		port, _ = strconv.Atoi(u.Port())
+	}
+	return
 }
 
 func toInt(v interface{}) int {

@@ -26,14 +26,14 @@ import (
 )
 
 const (
-	DefaultMinutes = 90   // 默认每 90 分钟巡检一轮(用户定的)
-	MinMinutes     = 30   // 免登录每小时约 250 个测点次,再密就不够几台服务器用了
-	MaxMinutes     = 1440 // 一天一次
-	perCarrier     = 4    // 每家运营商取几个测点
-	keepHistory    = 24   // 界面上每台显示最近几次
-	keepRows       = 48   // 库里每台留几条
-	probeListTTL   = 6 * time.Hour
-	parallelChecks = 3
+	DefaultMinutes  = 90   // 默认每 90 分钟巡检一轮(用户定的)
+	MinMinutes      = 30   // 免登录每小时约 250 个测点次,再密就不够几台服务器用了
+	MaxMinutes      = 1440 // 一天一次
+	perCarrier      = 4    // 每家运营商取几个测点
+	keepHistory     = 24   // 界面上每台显示最近几次
+	keepRows        = 48   // 库里每台留几条
+	probeListTTL    = 6 * time.Hour
+	parallelChecks  = 3
 	anonymousHourly = 250 // Globalping 免登录每小时的测点次
 )
 
@@ -49,6 +49,7 @@ type Target struct {
 	PortFrom string // line / sub / api
 	PortLine string // PortFrom = line 时的线路名
 	Err      string // 测不了的原因(没有地址等)
+	Ext      bool   // 外部节点:按外部节点那一套下结论(verdictExt),不进历史、不告警
 }
 
 type Deps struct {
@@ -97,6 +98,7 @@ type Service struct {
 
 	mu        sync.Mutex
 	busy      bool
+	extBusy   bool // 外部节点的大陆连通检测在跑(和服务器检测共用测点额度,互斥)
 	running   map[uint]bool
 	latest    map[uint]Result // 最近一次(可能没测成)
 	good      map[uint]Result // 最近一次测成的
@@ -283,7 +285,7 @@ func (s *Service) Run(ids []uint) error {
 func (s *Service) begin(ids []uint) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.busy {
+	if s.busy || s.extBusy {
 		return ErrBusy
 	}
 	s.busy = true
@@ -395,9 +397,49 @@ func (s *Service) CanCheck(n int) error {
 	return nil
 }
 
-// CheckHost 测一个任意地址(外部节点用):和服务器同一套判定,不进历史、不告警。
-func (s *Service) CheckHost(ctx context.Context, name, host string, port int) Result {
-	t := Target{Name: name, Host: host, Port: port}
+// CanCheckExt 外部节点检测的额度够不够:除了这次的 n 个,定时巡检开着时还要给下一轮服务器巡检留出额度,
+// 别让手动测外部节点把巡检挤到"额度用完"、漏报被墙。
+func (s *Service) CanCheckExt(n int) error {
+	auto := s.Auto()
+	s.mu.Lock()
+	cost, reserve := s.perCheck, 0
+	if auto {
+		reserve = cost * len(s.latest)
+	}
+	s.mu.Unlock()
+	q := s.c.Quota()
+	if q.At > 0 && s.d.Now().Unix() < q.ResetAt && q.Remaining < cost*n+reserve {
+		return fmt.Errorf("Globalping 额度不够:这次要约 %d 个测点次,还要给服务器的定时巡检留 %d 个,剩 %d 个。少选几个,或者在设置里填 Globalping Token 提高额度", cost*n, reserve, q.Remaining)
+	}
+	return s.CanCheck(n)
+}
+
+// BeginExt 外部节点的大陆连通检测开始。和服务器检测互斥(共用一份测点额度),外部节点的检测同时也只跑一个;
+// 返回的函数在检测结束时调用。
+func (s *Service) BeginExt() (func(), error) {
+	if s.d.IsNode() {
+		return nil, errors.New("副服务器不做大陆连通检测,请在主机的服务器页操作")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.busy || s.extBusy {
+		return nil, ErrBusy
+	}
+	s.extBusy = true
+	return func() {
+		s.mu.Lock()
+		s.extBusy = false
+		s.mu.Unlock()
+	}, nil
+}
+
+// CheckExt 测一个外部节点:不进历史、不告警,按 verdictExt 下结论。
+// UDP 协议(hysteria、hysteria2、tuic 等)测点没法连 UDP 端口,只 ping 服务器地址(结果里注明);以前当 TCP 端口去连,必然全失败。
+func (s *Service) CheckExt(ctx context.Context, name, host string, port int, udp bool) Result {
+	t := Target{Name: name, Host: host, Port: port, Ext: true}
+	if udp {
+		t.Port = 0
+	}
 	locs, cost, err := s.locations(ctx)
 	if err != nil {
 		return s.failed(t, false, err.Error())
@@ -486,7 +528,11 @@ func (s *Service) check(ctx context.Context, t Target, locs []location, cost int
 			res.ICMPError = err.Error()
 		}
 	}
-	res.Verdict = verdict(gs, icmp, t.Port == 0)
+	if t.Ext {
+		res.Verdict, res.Note = verdictExt(gs, icmp, t.Port == 0)
+	} else {
+		res.Verdict = verdict(gs, icmp, t.Port == 0)
+	}
 	res.Groups = orderedGroups(gs)
 	res.ICMP = icmp
 	return res

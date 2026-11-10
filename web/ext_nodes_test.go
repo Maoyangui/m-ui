@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -28,6 +29,28 @@ func extNodesServer(t *testing.T) *Server {
 	db.Create(&model.Node{Name: "本机", IsLocal: true, Enabled: true})
 	db.Create(&model.ExtNode{Name: "机场A", Type: "sub", Value: "https://example.com/sub", Enabled: true, Cache: extNodesYAML, NodeCount: 2, LastFetch: 1000})
 	return &Server{db: db}
+}
+
+// listNodes 展开接口返回的节点。
+func listNodes(t *testing.T, s *Server) []map[string]interface{} {
+	t.Helper()
+	_, out := extCall(t, s, http.MethodGet, "1/nodes", "")
+	raw, _ := out["nodes"].([]interface{})
+	res := []map[string]interface{}{}
+	for _, x := range raw {
+		res = append(res, x.(map[string]interface{}))
+	}
+	return res
+}
+
+// nodeKeyAt 展开列表里第 i 个节点的指纹。
+func nodeKeyAt(t *testing.T, s *Server, i int) string {
+	t.Helper()
+	nodes := listNodes(t, s)
+	if i >= len(nodes) {
+		t.Fatalf("没有第 %d 个节点", i)
+	}
+	return nodes[i]["key"].(string)
 }
 
 // extSigOf 展开时拿到的节点列表指纹,测速与添加为上游要带上。
@@ -105,9 +128,10 @@ func TestExtNodesTestJob(t *testing.T) {
 		t.Fatalf("任务应结束且只测 1 个节点 × 1 台: %v", st)
 	}
 	res := st["results"].(map[string]interface{})
-	row, ok := res["1"].(map[string]interface{})
-	if !ok || len(row) != 1 {
-		t.Fatalf("应只有下标 1 的结果: %v", res)
+	key := nodeKeyAt(t, s, 1)
+	row, ok := res[key].(map[string]interface{})
+	if !ok || len(res) != 1 || len(row) != 1 {
+		t.Fatalf("结果应按指纹记,只有下标 1 那个节点: %v", res)
 	}
 	for _, c := range row {
 		cell := c.(map[string]interface{})
@@ -197,31 +221,48 @@ func TestExtNodesStaleListRejected(t *testing.T) {
 	}
 }
 
-// 隐藏和改名:存下来,展开时带着,订阅刷新后按名字接着生效;空名字不算改名。
+// 隐藏和改名:只发增量,存下来,展开时带着;新名字去掉两端空白,改回原名就是清掉。
 func TestExtNodesPrefs(t *testing.T) {
 	s := extNodesServer(t)
-	if code, out := extCall(t, s, http.MethodPut, "1/nodes/prefs", `{"hidden":["a","a"," "],"renames":{"b":"乙","a":"  ","c":"c"}}`); code != http.StatusOK {
+	nodes := listNodes(t, s)
+	a, b := nodes[0], nodes[1]
+	op := func(n map[string]interface{}, to string) string {
+		return fmt.Sprintf(`{"name":%q,"key":%q,"to":%q}`, n["name"], n["key"], to)
+	}
+	code, out := extCall(t, s, http.MethodPut, "1/nodes/prefs", `{"rev":0,"hide":[`+op(a, "")+`,`+op(a, "")+`],"rename":[`+op(b, " 乙 ")+`]}`)
+	if code != http.StatusOK || out["rev"] != float64(1) {
 		t.Fatalf("保存失败: %d %v", code, out)
 	}
-	_, out := extCall(t, s, http.MethodGet, "1/nodes", "")
-	nodes, _ := out["nodes"].([]interface{})
-	if len(nodes) != 2 {
-		t.Fatalf("节点数不对: %v", out)
-	}
-	first, second := nodes[0].(map[string]interface{}), nodes[1].(map[string]interface{})
+	got, _ := out["nodes"].([]interface{}) // 保存的返回就是最新的展开内容
+	first, second := got[0].(map[string]interface{}), got[1].(map[string]interface{})
 	if first["hidden"] != true || second["hidden"] == true {
-		t.Fatalf("隐藏不对: %v", nodes)
+		t.Fatalf("隐藏不对: %v", got)
 	}
 	if second["rename"] != "乙" || first["rename"] != nil {
-		t.Fatalf("改名不对: %v", nodes)
+		t.Fatalf("改名不对: %v", got)
 	}
 	var e model.ExtNode
 	s.db.First(&e, 1)
-	if strings.Count(string(e.Hidden), `"a"`) != 1 || strings.Contains(string(e.Renames), `"c"`) {
-		t.Fatalf("存的内容没整理: hidden=%s renames=%s", e.Hidden, e.Renames)
+	if strings.Count(string(e.Hidden), `"a"`) != 1 || !strings.Contains(string(e.HiddenKeys), a["key"].(string)) || e.PrefsRev != 1 {
+		t.Fatalf("应按名字和指纹各记一条: hidden=%s keys=%s rev=%d", e.Hidden, e.HiddenKeys, e.PrefsRev)
+	}
+	if e.NodeCount != 1 || e.NodeTotal != 2 {
+		t.Fatalf("列表上的节点数应扣除隐藏的: %d / %d", e.NodeCount, e.NodeTotal)
+	}
+	// 改回原名 = 清掉;显示 = 删掉隐藏记录
+	code, out = extCall(t, s, http.MethodPut, "1/nodes/prefs", `{"rev":1,"show":[`+op(a, "")+`],"rename":[`+op(b, "b")+`]}`)
+	if code != http.StatusOK {
+		t.Fatalf("保存失败: %d %v", code, out)
+	}
+	s.db.First(&e, 1)
+	if strings.Contains(string(e.Hidden), `"a"`) || strings.Contains(string(e.HiddenKeys), a["key"].(string)) || strings.Contains(string(e.Renames), "乙") || strings.Contains(string(e.RenameKeys), "乙") {
+		t.Fatalf("记录应清掉: %s %s %s %s", e.Hidden, e.HiddenKeys, e.Renames, e.RenameKeys)
 	}
 	if code, _ := extCall(t, s, http.MethodPut, "1/nodes/prefs", `{bad`); code != http.StatusBadRequest {
 		t.Fatalf("坏请求应该 400: %d", code)
+	}
+	if code, _ := extCall(t, s, http.MethodPut, "1/nodes/prefs", `{"rev":2,"hide":[{"name":"a","key":""}]}`); code != http.StatusBadRequest {
+		t.Fatalf("没有指纹应该 400: %d", code)
 	}
 }
 
