@@ -418,7 +418,7 @@ const EN = /*BEGIN*/{
 "用户没有所属套餐,不能按价值折算": "The user has no current plan, so there is nothing to prorate",
 "目标套餐就是当前套餐,不能折算:要从现在重新开始用 replace,要带结转续费用 stack": "The target is the current plan, so it cannot be prorated: use replace to start over now, or stack to renew with carry-over",
 "套餐「%s」没填参考价,不能按价值折算": "Plan \"%s\" has no reference price, so it cannot be prorated",
-"当前订阅不限期也不限量,剩余价值没法估算": "The current subscription has neither an expiry nor a quota, so its remaining value cannot be estimated",
+"当前订阅估不出剩余价值:时间上不限期(或旧套餐不限天数),流量上又没法折(不限量,或保留用量时只按时间估值)": "The remaining value of the current subscription cannot be estimated: it has no time limit (or the old plan has no duration), and its traffic cannot be valued either (unlimited, or usage is kept, which values time only)",
 "目标套餐不限期又不是一次性流量,折算结果没法计入": "The target plan has no duration and no one-off traffic, so there is nothing to credit the value to",
 "没有可折算的剩余价值,期数不能为 0": "Nothing is left to prorate, so periods cannot be 0",
 "这次变更有需要确认的影响(见 warnings),确认后带 force: true 重试": "This change has effects that need confirming (see warnings); retry with force: true once confirmed",

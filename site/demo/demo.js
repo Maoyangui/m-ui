@@ -208,20 +208,27 @@ function demoPlanOp(u, p, op, n, usage, dry, remark) {
   }
   const nx = { ...u, planId: p.id, deviceLimit: p.deviceLimit || 0, speedUp: p.speedUp || 0, speedDown: p.speedDown || 0, autoReset: !!p.autoReset, resetDays: p.resetDays || 0, enabled: true, disabledReason: '' };
   const fromNow = op === 'replace' || op === 'prorate';
-  nx.expiry = !p.days ? 0 : (fromNow ? t : Math.max(t, u.expiry || 0)) + n * p.days * DAY + creditSecs;
-  nx.volume = !v ? 0 : p.autoReset || op === 'extend' ? v : op === 'stack' && u.volume ? (usage === 'reset' ? Math.max(0, u.volume - used) : u.volume) + n * v : n * v;
+  // 叠加:已过期的旧订阅不结转;目标不限期 / 不限量时,原来有限的到期 / 配额照旧保留(和面板一样)
+  const expired = !u.activateDays && u.expiry > 0 && u.expiry <= t, vleft = u.volume ? Math.max(0, u.volume - used) : 0;
+  const keepEnd = op === 'stack' && !p.days && !expired && (u.expiry || u.activateDays), keepVol = op === 'stack' && !v && u.volume && !expired;
+  nx.expiry = keepEnd ? u.expiry : !p.days ? 0 : (fromNow ? t : Math.max(t, u.expiry || 0)) + n * p.days * DAY + creditSecs;
+  nx.volume = keepVol ? (usage === 'reset' ? Math.max(1, vleft) : u.volume) : !v ? 0 : p.autoReset || op === 'extend' ? v
+    : op === 'stack' && u.volume ? (expired ? (usage === 'reset' ? 0 : used) : (usage === 'reset' ? vleft : u.volume)) + n * v : n * v;
   if (usage === 'reset') { nx.up = 0; nx.down = 0; }
   nx.nextReset = p.autoReset ? (usage === 'keep' && u.nextReset > t ? Math.min(u.nextReset, t + p.resetDays * DAY) : t + p.resetDays * DAY) : 0;
   if (p.lineIds && p.lineIds.length) nx.lineIds = [...p.lineIds];
   const warnings = [];
   const nUsed = (nx.up || 0) + (nx.down || 0);
-  if (nx.volume && usage === 'keep' && nUsed >= nx.volume) warnings.push(demoWarn('over_quota', { used: nUsed, volume: nx.volume }, true));
+  if (nx.volume && usage === 'keep' && nUsed >= nx.volume) warnings.push(demoWarn('over_quota', { used: nUsed, volume: nx.volume, nextReset: nx.nextReset || 0 }, true));
   if (nx.expiry && (!u.expiry || nx.expiry < u.expiry - 60)) warnings.push(demoWarn('expiry_earlier', { from: u.expiry || 0, to: nx.expiry }, true));
   if (nx.volume && (!u.volume || nx.volume < u.volume)) warnings.push(demoWarn('volume_lower', { from: u.volume || 0, to: nx.volume }));
-  if (op === 'stack' && p.autoReset && v) warnings.push(demoWarn('per_period_not_stacked', { lost: u.volume ? Math.max(0, u.volume - used) : 0 }));
+  if (op === 'stack' && v && expired && vleft) warnings.push(demoWarn('carry_expired', { lost: vleft }));
+  if (op === 'stack' && p.autoReset && v) warnings.push(demoWarn('per_period_not_stacked', { lost: expired ? 0 : vleft }));
+  if (keepEnd) warnings.push(demoWarn('expiry_kept', { expiry: u.expiry || 0, activateDays: u.activateDays || 0 }));
+  if (keepVol) warnings.push(demoWarn('volume_kept', { left: vleft }));
   const left = u.expiry ? Math.max(0, u.expiry - t) : null;
   const res = { op, direction: (p.volumeGb || 0) > ((old && old.volumeGb) || 0) ? 'upgrade' : old && old.id === p.id ? 'same' : 'downgrade', periods: n, usage, dryRun: !!dry, replayed: false,
-    from: planStateOf(u, old), to: planStateOf(nx, p), remaining: { seconds: left, bytes: u.volume ? Math.max(0, u.volume - used) : null, timeRatio: null, trafficRatio: null, ratio: null },
+    from: planStateOf(u, old), to: planStateOf(nx, p), remaining: { seconds: left, bytes: u.volume ? (expired ? 0 : vleft) : null, timeRatio: null, trafficRatio: null, ratio: null },
     credit, warnings, needsForce: warnings.some(w => w.block) };
   if (dry) return { res };
   S.planOps.unshift({ id: S.planOps.length + 1, createdAt: t, actor: 'admin', userId: u.id, op, fromPlanId: u.planId || 0, fromPlan: old ? old.name : '', toPlanId: p.id, toPlan: p.name, periods: n, usage, remark: remark || '', before: res.from, after: res.to, warnings });

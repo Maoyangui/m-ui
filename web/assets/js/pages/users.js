@@ -411,18 +411,23 @@ function warnText(w) {
   const speeds = v => Array.isArray(v) ? speedText(v[0], v[1]) : '∞'; // 限速是 [上行, 下行]
   // 按 code 各取各的参数(只算命中的那一个:args 的形状因 code 而异)
   const fmt = {
-    over_quota: () => ({ used: fmtBytes(a.used), volume: fmtBytes(a.volume) }),
+    over_quota: () => ({ used: fmtBytes(a.used), volume: fmtBytes(a.volume), date: a.nextReset ? fmtDay(a.nextReset) : '' }),
     expiry_earlier: () => ({ from: a.from ? fmtDay(a.from) : t('user.never'), to: fmtDay(a.to) }),
     volume_lower: () => ({ from: a.from ? fmtBytes(a.from) : t('common.unlimited'), to: fmtBytes(a.to) }),
     fewer_devices: () => ({ from: a.from || '∞', to: a.to }),
     slower: () => ({ from: speeds(a.from), to: speeds(a.to) }),
     lines_removed: () => ({ names: (a.lineIds || []).map(id => (state.lines.find(l => l.id === id) || {}).name || '#' + id).join(', ') }),
     per_period_not_stacked: () => ({ lost: fmtBytes(a.lost) }),
+    carry_unlimited: () => ({ volume: fmtBytes(a.volume || 0) }),
+    carry_expired: () => ({ lost: fmtBytes(a.lost) }),
+    expiry_kept: () => ({ end: a.activateDays ? t('user.activateIn', { n: a.activateDays }) : fmtDay(a.expiry) }),
+    volume_kept: () => ({ left: fmtBytes(a.left || 0) }),
     credit_rounded: () => ({ time: durText(a.seconds || 0) }),
     reseller_pool_low: () => ({ remaining: a.remaining == null ? t('common.unlimited') : fmtBytes(a.remaining), pool: fmtBytes(a.pool) }),
     reseller_expires_first: () => ({ date: fmtDay(a.resellerExpiry) }),
   }[w.code];
-  const key = 'pc.w.' + w.code, s = t(key, fmt ? fmt() : undefined);
+  // 立即超量:新套餐周期重置的到下次重置恢复,不重置的(一次性额度)要续费或清零用量,文案不同
+  const key = 'pc.w.' + w.code + (w.code === 'over_quota' && !a.nextReset ? 'Once' : ''), s = t(key, fmt ? fmt() : undefined);
   return s === key ? (w.text || w.code) : s;
 }
 

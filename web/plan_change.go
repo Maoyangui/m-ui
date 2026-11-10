@@ -59,7 +59,7 @@ var (
 	errPlanBody         = errors.New("请求体要是 JSON 对象")
 	errPlanNoCurrent    = errors.New("用户没有所属套餐,不能按价值折算")
 	errPlanSame         = errors.New("目标套餐就是当前套餐,不能折算:要从现在重新开始用 replace,要带结转续费用 stack")
-	errPlanUnmeasurable = errors.New("当前订阅不限期也不限量,剩余价值没法估算")
+	errPlanUnmeasurable = errors.New("当前订阅估不出剩余价值:时间上不限期(或旧套餐不限天数),流量上又没法折(不限量,或保留用量时只按时间估值)")
 	errPlanNoTimeOrPack = errors.New("目标套餐不限期又不是一次性流量,折算结果没法计入")
 	errPlanNothing      = errors.New("没有可折算的剩余价值,期数不能为 0")
 	errPlanNeedsForce   = errors.New("这次变更有需要确认的影响(见 warnings),确认后带 force: true 重试")
@@ -120,25 +120,35 @@ type planWarning struct {
 }
 
 var planWarnText = map[string]string{
-	"over_quota":             "保留的本周期已用量已达到新配额,下一轮判定就会停用,直到下次重置",
+	"over_quota":             "保留的已用量已达到新配额,下一轮判定就会停用,到下次周期重置才恢复",
 	"expiry_earlier":         "变更后的到期早于现在的到期",
 	"volume_lower":           "配额变少",
 	"fewer_devices":          "设备数上限变少",
 	"slower":                 "限速变低",
 	"lines_removed":          "按套餐替换线路后,用户会少几条线路",
 	"per_period_not_stacked": "周期重置套餐的流量是每期额度,叠加只延长时间",
-	"carry_unlimited":        "原来不限量,没有剩余流量可以结转,新配额从 0 起算",
+	"carry_unlimited":        "原来不限量,没有可结转的剩余流量:新配额就是新套餐给的流量",
+	"carry_expired":          "旧订阅已经过期,剩下的流量随之作废,不结转",
+	"expiry_kept":            "目标套餐不限期:叠加不会把到期改成不限,原来的到期保留(要改成不限期请用立即替换)",
+	"volume_kept":            "目标套餐不限量:叠加不会把配额改成不限,原来剩下的流量保留(要改成不限量请用立即替换)",
 	"credit_rounded":         "目标套餐从首次连接开始计时(按整天算),折算出来不足一天的部分舍去",
 	"enables_manual":         "这个用户是手动停用的,执行后会被启用",
 	"reseller_pool_low":      "变更后用户的剩余配额多于代理剩余的流量额度",
 	"reseller_expires_first": "变更后的到期晚于代理自己的到期,代理到期时用户一并停用",
 }
 
+// overQuotaOnce over_quota 落在不周期重置的套餐上:没有"下次重置",要续费或清零用量才恢复。
+const overQuotaOnce = "保留的已用量已达到新配额,下一轮判定就会停用,要续费或清零用量才恢复"
+
 // planWarnBlock 这两种会立刻伤到用户(下一轮就停用 / 少了时间),/change 正式执行时要带 force。
 var planWarnBlock = map[string]bool{"over_quota": true, "expiry_earlier": true}
 
 func newPlanWarning(code string, args map[string]interface{}) planWarning {
-	return planWarning{Code: code, Text: planWarnText[code], Args: args, Block: planWarnBlock[code]}
+	text := planWarnText[code]
+	if code == "over_quota" && args["nextReset"] == int64(0) {
+		text = overQuotaOnce
+	}
+	return planWarning{Code: code, Text: text, Args: args, Block: planWarnBlock[code]}
 }
 
 // planState 变更前 / 后的套餐状态(预览、套餐记录、重放都用它)。
@@ -170,6 +180,7 @@ func stateOf(u model.User, plan string, refs []model.LineRef) planState {
 }
 
 // planRemaining 旧订阅还剩多少:秒、字节,以及按旧套餐折成的份额(ratio = 还值几期);null = 不限或无从估算。
+// 已经过期的订阅剩余一律是 0(剩下的流量随过期作废)。
 // value = ratio × 旧套餐参考价,只有旧套餐填了参考价才有:商城可以拿它按自己的价目表算差价,再调 replace。
 type planRemaining struct {
 	Seconds      *int64   `json:"seconds"`
@@ -226,10 +237,14 @@ type planResult struct {
 
 // planCalc calcPlanOp 的结果。next 里的用量已按"清零与否"预测好;stack 的配额落库时用 SQL 原子结转(carry)。
 type planCalc struct {
-	next      model.User
-	reset     bool            // 本周期用量并入历史、清零
-	usage     string          // 实际的用量处理:keep | reset
-	carry     string          // stack 结转一次性额度:"" | keep(volume + N×V)| reset(MAX(0, volume - used) + N×V)
+	next  model.User
+	reset bool   // 本周期用量并入历史、清零
+	usage string // 实际的用量处理:keep | reset
+	// carry stack 结转一次性额度(SQL 里算,都按 MaxVolume 封顶):
+	//	keep    volume + N×V
+	//	reset   max(1, max(0, volume − used) + N×V)
+	//	expired max(1, used + N×V)(旧订阅已过期,剩的作废;保留用量时新的一份全额可用)
+	carry     string
 	carryAdd  int64           // 结转时加上的 N×V
 	refs      []model.LineRef // 套餐指定的线路;nil = 不改
 	direction string
@@ -242,6 +257,11 @@ func (c *planCalc) warn(code string, args map[string]interface{}) {
 	c.warnings = append(c.warnings, newPlanWarning(code, args))
 }
 
+// subExpired 订阅已经过期(不是还在等首次连接):剩下的时间和流量都已作废。
+func subExpired(u model.User, now int64) bool {
+	return u.ActivateDays == 0 && u.Expiry > 0 && u.Expiry <= now
+}
+
 // calcPlanOp 算一次套餐操作,不碰数据库。u 是变更前的用户,old 是他现在的套餐(没有为 nil),q 是目标套餐,
 // fromRefs 是他现在的线路。renew / extend 与 applyPlanN 同一套规则(N = 1 时与老的 applyPlan 逐字段一样)。
 func calcPlanOp(u model.User, old *model.Plan, q model.Plan, o planOpOpt, fromRefs []model.LineRef, now int64) (planCalc, error) {
@@ -251,6 +271,7 @@ func calcPlanOp(u model.User, old *model.Plan, q model.Plan, o planOpOpt, fromRe
 		v = 0
 	}
 	used := u.Up + u.Down
+	expired := subExpired(u, now)
 	c := planCalc{next: u}
 	next := &c.next
 
@@ -287,17 +308,41 @@ func calcPlanOp(u model.User, old *model.Plan, q model.Plan, o planOpOpt, fromRe
 				next.Expiry, next.ActivateDays = model.AddDays(now, days), 0
 			}
 		case "stack": // 和续费一样顺延:保留旧订阅剩的时间再加 N 期
-			extendByPlan(next, q, days, now, true)
+			if q.Days <= 0 && !expired && (u.Expiry > 0 || u.ActivateDays > 0) {
+				// 目标不限期:叠加不能把有限的到期悄悄变成不限,原来的到期(或等首次连接的天数)保留。
+				// 已经过期的没有可保留的东西,等于从现在开一份新的,按目标套餐来(下面 extendByPlan 给不限期)
+				c.warn("expiry_kept", map[string]interface{}{"expiry": u.Expiry, "activateDays": u.ActivateDays})
+			} else {
+				extendByPlan(next, q, days, now, true)
+			}
 		} // prorate 的到期要等折算出来(见下)
+		left := max(0, u.Volume-used) // 旧订阅剩的流量
 		switch {
+		case v == 0 && o.Op == "stack" && u.Volume > 0 && !expired:
+			// 目标不限量:同样不把有限的配额悄悄变成不限,原来剩下的保留(清零用量时配额就是剩下的,至少 1 字节:0 = 不限)
+			c.carry, c.carryAdd = usage, 0
+			if c.reset {
+				next.Volume = max(1, min(left, model.MaxVolume))
+			} else {
+				next.Volume = min(u.Volume, model.MaxVolume)
+			}
+			c.warn("volume_kept", map[string]interface{}{"left": left})
 		case v == 0:
 			next.Volume = 0
 		case q.AutoReset:
 			next.Volume = v // 每期额度,不叠加
+		case o.Op == "stack" && u.Volume > 0 && expired:
+			// 旧订阅已过期:剩的流量随之作废,按 0 结转(和折算的估值口径一致);保留用量时已用量照算,新的一份全额可用
+			c.carryAdd = satMul(v, n)
+			next.Volume = c.carryAdd
+			if !c.reset {
+				c.carry = "expired"
+				next.Volume = max(1, satAdd(used, c.carryAdd))
+			}
 		case o.Op == "stack" && u.Volume > 0:
 			c.carry, c.carryAdd = usage, satMul(v, n)
 			if c.reset {
-				next.Volume = satAdd(max(0, u.Volume-used), c.carryAdd)
+				next.Volume = max(1, satAdd(left, c.carryAdd))
 			} else {
 				next.Volume = satAdd(u.Volume, c.carryAdd)
 			}
@@ -362,7 +407,7 @@ func calcPlanOp(u model.User, old *model.Plan, q model.Plan, o planOpOpt, fromRe
 	}
 
 	c.direction = directionOf(tierOfCurrent(u, old), tierOfPlan(q))
-	c.addWarnings(u, q, o, v, used, fromRefs, now)
+	c.addWarnings(u, q, o, v, used, expired, fromRefs, now)
 	return c, nil
 }
 
@@ -386,10 +431,11 @@ func extendByPlan(u *model.User, p model.Plan, days int, now int64, fromExpiry b
 }
 
 // addWarnings 变更的影响:立即超量、到期提前(这两条要 force)、配额 / 设备 / 限速变少、少了线路、叠加不了的每期额度……
-func (c *planCalc) addWarnings(u model.User, q model.Plan, o planOpOpt, v, used int64, fromRefs []model.LineRef, now int64) {
+func (c *planCalc) addWarnings(u model.User, q model.Plan, o planOpOpt, v, used int64, expired bool, fromRefs []model.LineRef, now int64) {
 	next := c.next
 	if next.Volume > 0 && !c.reset && used >= next.Volume {
-		c.warn("over_quota", map[string]interface{}{"used": used, "volume": next.Volume})
+		// nextReset:新套餐周期重置时到那一刻恢复;0 = 不重置,要续费或清零用量
+		c.warn("over_quota", map[string]interface{}{"used": used, "volume": next.Volume, "nextReset": next.NextReset})
 	}
 	oldEnd, oldInf := endOf(u, now)
 	newEnd, newInf := endOf(next, now)
@@ -424,14 +470,19 @@ func (c *planCalc) addWarnings(u model.User, q model.Plan, o planOpOpt, v, used 
 		}
 	}
 	if o.Op == "stack" && v > 0 {
-		if q.AutoReset {
-			lost := int64(0)
-			if u.Volume > 0 {
-				lost = max(0, u.Volume-used)
-			}
-			c.warn("per_period_not_stacked", map[string]interface{}{"lost": lost})
-		} else if u.Volume == 0 {
-			c.warn("carry_unlimited", nil)
+		left := int64(0) // 旧订阅剩的流量:叠加时结转不过来的那部分
+		if u.Volume > 0 {
+			left = max(0, u.Volume-used)
+		}
+		if expired && left > 0 {
+			c.warn("carry_expired", map[string]interface{}{"lost": left}) // 随过期作废,和每期不叠加分开说
+			left = 0
+		}
+		switch {
+		case q.AutoReset:
+			c.warn("per_period_not_stacked", map[string]interface{}{"lost": left})
+		case u.Volume == 0:
+			c.warn("carry_unlimited", map[string]interface{}{"volume": next.Volume})
 		}
 	}
 	if !u.Enabled && u.DisabledReason == model.DisabledManual {
@@ -455,10 +506,12 @@ func endOf(u model.User, now int64) (int64, bool) {
 
 // remainingOf 旧订阅的剩余份额。usageReset 为真时连剩余流量一起估值(用量要清零,剩的流量就作废了);
 // 保留用量时只按时间估值(已用量会随用户带进新套餐,不能再按流量算一次)。只用和用户同一归属的套餐估值。
+// 已经过期的订阅,剩余的时间与流量都按 0 算。
 func remainingOf(u model.User, p *model.Plan, usageReset bool, now int64) planRemaining {
 	var r planRemaining
 	inf := math.Inf(1)
 	used := u.Up + u.Down
+	expired := subExpired(u, now)
 	left := inf
 	switch {
 	case u.ActivateDays > 0:
@@ -473,9 +526,12 @@ func remainingOf(u model.User, p *model.Plan, usageReset bool, now int64) planRe
 		s := int64(left)
 		r.Seconds = &s
 	}
+	bytesLeft := max(0, u.Volume-used)
+	if expired {
+		bytesLeft = 0 // 过期作废
+	}
 	if u.Volume > 0 {
-		b := max(0, u.Volume-used)
-		r.Bytes = &b
+		r.Bytes = &bytesLeft
 	}
 	if p == nil || p.ResellerId != u.ResellerId {
 		return r
@@ -489,7 +545,7 @@ func remainingOf(u model.User, p *model.Plan, usageReset bool, now int64) planRe
 	if !p.AutoReset { // 一次性额度或不限量:时间和流量谁先用完算谁
 		traffic := inf
 		if pv := model.GBToBytes(p.VolumeGB); usageReset && pv > 0 && u.Volume > 0 {
-			traffic = float64(max(0, u.Volume-used)) / float64(pv)
+			traffic = float64(bytesLeft) / float64(pv)
 		}
 		rho = math.Min(timeRatio, traffic)
 		r.TrafficRatio = finite(traffic)
@@ -502,7 +558,7 @@ func remainingOf(u model.User, p *model.Plan, usageReset bool, now int64) planRe
 		cycleLeft = math.Min(cycleLeft, left)
 		f := 1.0
 		if usageReset && u.Volume > 0 {
-			f = math.Max(0, math.Min(1, float64(u.Volume-used)/float64(u.Volume)))
+			f = math.Max(0, math.Min(1, float64(bytesLeft)/float64(u.Volume)))
 		}
 		rho = inf
 		if p.Days > 0 && !math.IsInf(left, 1) {
@@ -820,7 +876,9 @@ func planOpFields(c planCalc) map[string]interface{} {
 	case "keep":
 		f["volume"] = gorm.Expr("MIN(volume, ?) + ?", room, c.carryAdd)
 	case "reset":
-		f["volume"] = gorm.Expr("MIN(MAX(0, volume - up - down), ?) + ?", room, c.carryAdd)
+		f["volume"] = gorm.Expr("MAX(1, MIN(MAX(0, volume - up - down), ?) + ?)", room, c.carryAdd)
+	case "expired":
+		f["volume"] = gorm.Expr("MAX(1, MIN(up + down, ?) + ?)", room, c.carryAdd)
 	}
 	return f
 }
