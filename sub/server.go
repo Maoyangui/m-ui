@@ -40,7 +40,22 @@ type Server struct {
 	misses   map[string]*missAgg
 	stopOnce sync.Once
 	stop     chan struct{}
+
+	// 访问日志先进内存,每几秒一批落库(见 log):以前每个订阅请求同步写一行,高峰时每个请求都去抢写锁、
+	// 占着连接池里的一条连接,写锁紧张时一等 10 秒(审计 I4)
+	logMu   sync.Mutex
+	logBuf  []model.SubLog
+	logDrop int
+	logKick chan struct{}
 }
+
+// 订阅访问日志的缓冲:满 logFlushAt 条提前落一批,最多攒 logBufMax 条(落库一直失败时再多的就丢掉、只计数)。
+const (
+	logFlushEvery = 3 * time.Second
+	logFlushAt    = 2000
+	logBufMax     = 20000
+	logBatch      = 500 // 每条 INSERT 的行数:SQLite 一条语句最多 32766 个变量
+)
 
 type ipBucket struct {
 	lim  *rate.Limiter
@@ -116,9 +131,37 @@ func (s *Server) flushMisses() {
 	}
 	s.guardMu.Unlock()
 	if len(rows) > 0 {
-		if err := s.db.Create(&rows).Error; err != nil {
+		// 分批:被扫描时一个周期几千个来源 IP,一条 INSERT 写完会超过 SQLite 的变量上限,整批日志丢掉(审计 I4)
+		if err := s.db.CreateInBatches(&rows, logBatch).Error; err != nil {
 			logger.Warning("写订阅日志失败: ", err)
 		}
+	}
+}
+
+// flushLogs 把缓冲里的访问日志落库。失败的放回缓冲(超出上限的丢掉),下一轮再试。
+func (s *Server) flushLogs() {
+	s.logMu.Lock()
+	rows, dropped := s.logBuf, s.logDrop
+	s.logBuf, s.logDrop = nil, 0
+	s.logMu.Unlock()
+	if dropped > 0 {
+		logger.Warning("订阅访问日志积压太多,丢掉了 ", dropped, " 条")
+	}
+	if len(rows) == 0 {
+		return
+	}
+	if err := s.db.CreateInBatches(&rows, logBatch).Error; err != nil {
+		logger.Warning("写订阅日志失败: ", err)
+		s.logMu.Lock()
+		rows = append(rows, s.logBuf...)
+		if extra := len(rows) - logBufMax; extra > 0 {
+			rows, s.logDrop = rows[extra:], s.logDrop+extra
+		}
+		for i := range rows {
+			rows[i].Id = 0 // 失败的那批可能已经分到了自增 id
+		}
+		s.logBuf = rows
+		s.logMu.Unlock()
 	}
 }
 
@@ -129,19 +172,35 @@ func spanText(sec int64) string {
 	return fmt.Sprintf("%d 分钟", sec/60)
 }
 
-// housekeeping 每 10 分钟落一次聚合的 404 并清闲置桶;Stop 时再落最后一次。
+// housekeeping 每 10 分钟落一次聚合的 404 并清闲置桶,每几秒落一批访问日志;Stop 时再各落最后一次。
 func (s *Server) housekeeping() {
 	t := time.NewTicker(10 * time.Minute)
 	defer t.Stop()
+	logs := time.NewTicker(logFlushEvery)
+	defer logs.Stop()
 	for {
 		select {
 		case <-t.C:
 			s.flushMisses()
+		case <-logs.C:
+			s.flushLogs()
+		case <-s.logKicks():
+			s.flushLogs()
 		case <-s.stop:
 			s.flushMisses()
+			s.flushLogs()
 			return
 		}
 	}
+}
+
+func (s *Server) logKicks() chan struct{} {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	if s.logKick == nil {
+		s.logKick = make(chan struct{}, 1)
+	}
+	return s.logKick
 }
 
 func (s *Server) setting(key string) string {
@@ -382,7 +441,9 @@ func (s *Server) Stop() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return s.httpSrv.Shutdown(ctx)
+	err := s.httpSrv.Shutdown(ctx)
+	s.flushLogs() // 停机前在途的请求也记上
+	return err
 }
 
 func (s *Server) handle() http.HandlerFunc {
@@ -667,7 +728,22 @@ func (s *Server) log(r *http.Request, user string, shared bool, status int) {
 		Ts: time.Now().Unix(), User: user, Ip: ip,
 		Ua: truncate(r.UserAgent(), 200), Format: format, Status: status, // UA 是请求头,能塞很大
 	}
-	if err := s.db.Create(&entry).Error; err != nil {
-		logger.Warning("写订阅日志失败: ", err)
+	s.logMu.Lock()
+	if len(s.logBuf) >= logBufMax {
+		s.logDrop++
+	} else {
+		s.logBuf = append(s.logBuf, entry)
+	}
+	full := len(s.logBuf) >= logFlushAt
+	if s.logKick == nil {
+		s.logKick = make(chan struct{}, 1)
+	}
+	kick := s.logKick
+	s.logMu.Unlock()
+	if full {
+		select { // 攒够一批就提前落,不等定时
+		case kick <- struct{}{}:
+		default:
+		}
 	}
 }

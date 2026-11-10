@@ -381,6 +381,9 @@ func (r *Runner) IsNode() bool { return strings.EqualFold(r.setting("nodeMode"),
 // Onlines 返回最近统计周期内在线的用户/线路/上游。
 func (r *Runner) Onlines() jobs.Onlines { return r.jobs.Onlines() }
 
+// LedgerFailures 本机流量记账连续失败的轮数(副机随报告上报给主机)。
+func (r *Runner) LedgerFailures() int { return r.jobs.LedgerFailures() }
+
 // KickUser 断开某用户的全部连接,返回断开数。
 // KickUser 只断本机:连接 + 整条会话,再清掉 limiter 里他的在线 IP。返回断开的连接数。
 // 停用 / 删除 / 重置链接这些路径用它就够了:快照 5 秒内推到副机,副机热换用户表时自己关掉被移除 / 换了凭据的会话。

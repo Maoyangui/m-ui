@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -156,8 +157,8 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		return
 	}
-	var snap hub.Snapshot
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<20)).Decode(&snap); err != nil {
+	snap, err := hub.DecodeSnapshot(w, r) // 新主机发 gzip 压缩的,老主机发不压缩的;解压后最多 512 MiB
+	if err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -176,9 +177,20 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 	}
 	s.agentApplyMu.Lock()
 	defer s.agentApplyMu.Unlock()
+	// 排队等上一份应用完的时候主机可能已经放弃了这次请求(超时、停机):不再整表重写,下一轮它会带着最新的那份再来
+	if r.Context().Err() != nil {
+		logger.Info("主机已经放弃了这次推送(", snap.Revision, "),不再应用")
+		return
+	}
 	var previousPending string
 	if err := s.db.Model(&model.Setting{}).Select("value").Where("key = ?", "hubReloadPending").Scan(&previousPending).Error; err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "读取副机待重载状态失败: " + err.Error()})
+		return
+	}
+	// 同一修订、同一序号已经完整应用过(库里是它、数据面也应用成功了、没有待踢线):直接确认,不再整表删了重插、重载一遍。
+	// 主机等确认超时后的重推、每 10 分钟一次的定期重推都会这样;以前每次都整表重写,大库上几十秒,WAL 跟着涨
+	if s.agentAlreadyApplied(snap, previousPending) {
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "revision": snap.Revision})
 		return
 	}
 	revoked, err := hub.RevokedSharesChecked(s.db, snap)
@@ -296,6 +308,31 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "revision": snap.Revision})
 }
 
+// agentAlreadyApplied 这份快照是不是已经完整应用过:修订号、序号、本机 id 都一样,没有待重载、没有待踢线,数据面在跑。
+// 老主机不发序号(0),不走这条捷径。
+func (s *Server) agentAlreadyApplied(snap hub.Snapshot, pendingReload string) bool {
+	if snap.Sequence == 0 || strings.TrimSpace(pendingReload) != "" || !s.run.CoreRunning() {
+		return false
+	}
+	var rows []model.Setting
+	if err := s.db.Where("key IN ?", []string{"hubRevision", "hubSnapshotSequence", agentKickPendingKey}).Find(&rows).Error; err != nil {
+		return false
+	}
+	have := map[string]string{}
+	for _, row := range rows {
+		have[row.Key] = row.Value
+	}
+	if have["hubRevision"] != snap.Revision || have["hubSnapshotSequence"] != strconv.FormatUint(snap.Sequence, 10) ||
+		strings.TrimSpace(have[agentKickPendingKey]) != "" {
+		return false
+	}
+	var self []uint
+	if err := s.db.Model(&model.Node{}).Where("is_local = ?", true).Pluck("id", &self).Error; err != nil {
+		return false
+	}
+	return len(self) == 1 && self[0] == snap.SelfNodeId
+}
+
 // kickBestEffort 本机能踢多少踢多少,不因为副机没确认就一个都不踢。只在"配置应用失败"那条路上用。
 func (s *Server) kickBestEffort(revoked, kickNames []string) {
 	for _, name := range revoked {
@@ -367,6 +404,12 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		Conns:        s.recentConns(50),
 		LedgerEpoch:  s.setting(hub.LedgerEpochKey),
 		ServicePorts: s.reportServicePorts(),
+		KickPending:  strings.TrimSpace(s.setting(agentKickPendingKey)) != "",
+		ApplyGzip:    true, // 本机收得了 gzip 压缩的快照
+		LedgerFails:  s.run.LedgerFailures(),
+	}
+	if seq, err := strconv.ParseUint(s.setting("hubSnapshotSequence"), 10, 64); err == nil {
+		rep.Sequence = seq
 	}
 	rep.OnlineLinesByIP = s.run.OnlineIPLines()
 	rep.Groups = s.run.GroupState()
@@ -393,9 +436,12 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rep)
 }
 
+// externalIPsLimit 外部设备租约请求体的上限:有设备数限制的用户 × 几个 IP,几万用户也就几 MB。
+var externalIPsLimit int64 = 32 << 20
+
 func (s *Server) handleAgentExternalIPs(w http.ResponseWriter, r *http.Request) {
 	var m map[string][]string
-	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, externalIPsLimit)).Decode(&m); err != nil {
 		badRequest(w, err)
 		return
 	}

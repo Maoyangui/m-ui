@@ -9,6 +9,7 @@ import (
 // 副机报上来已删用户的在途流量:不记用户时序(审计 MB28),服务器维度照记。
 func TestApplyCountersSkipsDeletedUserStats(t *testing.T) {
 	db := openDB(t, "orphan.db").DB
+	db.Create(&model.Node{Id: 2, Name: "台湾", Enabled: true})
 	ApplyCounters(db, 2, "台湾", "", []model.AgentCounter{{UserName: "gone", Up: 100, Down: 200}}, 1000, 60, 1)
 	var user, node int64
 	db.Model(&model.Stats{}).Where("resource = ?", "user").Count(&user)

@@ -15,7 +15,10 @@ import (
 )
 
 // settle 等定时同步这一轮发出去的请求都回来、结果都落库(测试里 tick 之后用)。
-func (h *Hub) settle() { h.rounds.Wait() }
+func (h *Hub) settle() {
+	h.rounds.Wait()
+	h.waitMerged()
+}
 
 // 一台挂起的副机(请求进来就不回)不能拖住别的副机:tick 立刻返回;健康副机每一轮都按时同步;
 // 挂起那台上一轮还在途时不再叠加请求;Stop 时在途请求随 ctx 取消立刻收尾。
@@ -81,6 +84,7 @@ func TestHungNodeDoesNotStallOthers(t *testing.T) {
 			t.Fatalf("第 %d 轮健康副机没按时同步(报告 %d 次,这一轮收尾了吗:%v)", round, got, len(h.gate(3)) == 0)
 		}
 	}
+	h.waitMerged() // 结果交给并账协程落库,状态等它落完再看
 	if st := h.Statuses()[3]; !st.OK || !st.CoreRunning {
 		t.Fatalf("健康副机状态不对: %+v", st)
 	}

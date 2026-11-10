@@ -92,7 +92,8 @@ func TestShareLink(t *testing.T) {
 	if token(t, db) != tok {
 		t.Fatal("令牌被共享地址改动")
 	}
-	// 访问记在本人名下并标出是共享
+	// 访问记在本人名下并标出是共享(日志先进缓冲、每几秒一批落库,这里手动落一次)
+	s.flushLogs()
 	var logs []model.SubLog
 	db.Where("format LIKE ?", "%-share").Find(&logs)
 	if len(logs) == 0 || logs[0].User != "alice" {

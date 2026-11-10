@@ -320,7 +320,7 @@ Each server, including the master, can have a **traffic ratio**: traffic through
 
 > Deleting a server strips it from every line's "deploy to servers" list. A line that was deployed only on that server has nowhere left to run, so it is disabled as well (rather than silently spreading to every server). Users and resellers narrowed to only that server on a line lose that line, again rather than falling back to every server of the line. The response and the panel list the disabled lines and the affected people.
 >
-> Disabling or deleting a node first pushes it an empty user table, so it stops serving everyone at once; re-enabling restores it. If the node cannot be reached the panel says so, and you need to turn off node mode or uninstall on that machine.
+> Disabling or deleting a node first pushes it an empty user table, so it stops serving everyone at once; re-enabling restores it. If the node cannot be reached the panel says so and the master keeps retrying until it confirms; to stop it right away, turn off node mode or uninstall on that machine.
 
 ### Certificates
 

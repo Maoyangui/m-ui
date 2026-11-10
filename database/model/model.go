@@ -420,12 +420,17 @@ type Stats struct {
 }
 
 // TrafficCursor 主端:对某副机某用户已计入聚合的单调计数快照。
-// 副机计数器回绕(换机重装)时快照归零重认,保证不重复计、不漏计。
+// 副机计数器比游标小时分两种:主机上同名用户删了又建(副机那本也从头记了)按回绕从 0 计;
+// 同一个用户的计数变小是副机账本回退(断电丢了最近几笔提交、虚机快照回滚),游标对齐、这一次不计。
+// 两者靠游标记下的用户 id 与建号时间区分(老游标为 0 = 不知道,按回退处理,不会整段重算;
+// 建号时间记 -1 表示并账那一刻主机上没有这个用户)。
 type TrafficCursor struct {
-	NodeId   uint   `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
-	UserName string `json:"userName" gorm:"primaryKey"`
-	Up       int64  `json:"up"`
-	Down     int64  `json:"down"`
+	NodeId        uint   `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
+	UserName      string `json:"userName" gorm:"primaryKey"`
+	Up            int64  `json:"up"`
+	Down          int64  `json:"down"`
+	UserId        uint   `json:"userId" gorm:"default:0;not null"`
+	UserCreatedAt int64  `json:"userCreatedAt" gorm:"default:0;not null"`
 }
 
 // AgentCounter 副机端:本机每用户只增不减的流量账本(不直接写 User 表,避免与主端下发冲突)。
@@ -433,6 +438,23 @@ type AgentCounter struct {
 	UserName string `json:"userName" gorm:"primaryKey"`
 	Up       int64  `json:"up"`
 	Down     int64  `json:"down"`
+}
+
+// NodeDecommission 停用 / 删除副机时还没送到的下线推送(一份空用户表):主机每轮重试,直到那台确认。
+// 删掉的副机在 nodes 表里已经没有了,所以地址、令牌、证书指纹和要推的那份快照都记在这里;令牌不出接口。
+type NodeDecommission struct {
+	NodeId    uint   `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
+	Name      string `json:"name"`
+	ApiUrl    string `json:"-"`
+	Token     string `json:"-"`
+	Insecure  bool   `json:"-"`
+	CertFP    string `json:"-"`
+	Revision  string `json:"revision"`
+	Snapshot  []byte `json:"-"` // 要推的快照(JSON),selfNodeId 已经是这台
+	CreatedAt int64  `json:"createdAt"`
+	Attempts  int    `json:"attempts"`
+	LastTry   int64  `json:"lastTry"`
+	LastError string `json:"lastError"`
 }
 
 // Change 审计日志。
@@ -461,6 +483,6 @@ func All() []interface{} {
 		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
-		&ReachCheck{}, &Cert{},
+		&ReachCheck{}, &Cert{}, &NodeDecommission{},
 	}
 }

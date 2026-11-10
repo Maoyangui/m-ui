@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
@@ -99,56 +100,11 @@ type Snapshot struct {
 }
 
 // BuildSnapshot 从主机数据库构造快照并计算修订号(只含会影响副机行为的字段)。
+// 十来条查询放在同一个只读事务里:读到的是同一时刻的一份(以前各查各的,并发写入时可能推出 user_lines 引用了
+// 不在 users 里的用户这种短暂不一致的快照),而且不拿写锁 —— 别的写事务占着锁时照样构造得出来。
 func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 	var s Snapshot
-	if err := db.Order("sort asc, id asc").Find(&s.Nodes).Error; err != nil {
-		return s, err
-	}
-	for i := range s.Nodes {
-		s.Nodes[i].Token = ""
-		if s.Nodes[i].IsLocal {
-			s.MasterId = s.Nodes[i].Id
-		}
-	}
-	if err := db.Order("sort asc, id asc").Find(&s.Upstreams).Error; err != nil {
-		return s, err
-	}
-	if err := db.Order("sort asc, id asc").Find(&s.Lines).Error; err != nil {
-		return s, err
-	}
-	if err := db.Order("id asc").Find(&s.Users).Error; err != nil {
-		return s, err
-	}
-	for i := range s.Users {
-		// 副机不需要也不该拥有主机的计量;凭据/配额/限速/启用状态才是它要的
-		s.Users[i].Up, s.Users[i].Down, s.Users[i].TotalUp, s.Users[i].TotalDown, s.Users[i].OnlineAt = 0, 0, 0, 0, 0
-	}
-	if err := db.Order("id asc").Find(&s.Resellers).Error; err != nil {
-		return s, err
-	}
-	for i := range s.Resellers {
-		s.Resellers[i].Password, s.Resellers[i].TotpSecret, s.Resellers[i].ApiToken = "", "", "" // 副机不跑代理面板,不需要这些
-	}
-	// 下发的是与代理授权取过交集的分配:副机直接照此渲染,不用(也不能)自己再算 —— 旧版主机不下发授权表
-	links, scopes, err := render.EffectiveLines(db, 0)
-	if err != nil {
-		return s, err
-	}
-	s.UserLines, s.UserLineNodes = links, scopes
-	s.ResellerLines, s.ResellerLineNodes = []model.ResellerLine{}, []model.ResellerLineNode{}
-	if err := db.Order("reseller_id asc, line_id asc").Find(&s.ResellerLines).Error; err != nil {
-		return s, err
-	}
-	if err := db.Order("reseller_id asc, line_id asc, node_id asc").Find(&s.ResellerLineNodes).Error; err != nil {
-		return s, err
-	}
-	if err := db.Order("sort asc, id asc").Find(&s.Exts).Error; err != nil {
-		return s, err
-	}
-	if err := db.Order("user_id asc, ext_id asc").Find(&s.UserExts).Error; err != nil {
-		return s, err
-	}
-	if err := db.Order("id asc").Find(&s.LimitStates).Error; err != nil {
+	if err := database.ReadTx(db, func(tx *gorm.DB) error { return readSnapshot(tx, &s) }); err != nil {
 		return s, err
 	}
 	s.Settings = map[string]string{}
@@ -157,6 +113,57 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 	}
 	s.Revision = revisionOf(s)
 	return s, nil
+}
+
+func readSnapshot(db *gorm.DB, s *Snapshot) error {
+	if err := db.Order("sort asc, id asc").Find(&s.Nodes).Error; err != nil {
+		return err
+	}
+	for i := range s.Nodes {
+		s.Nodes[i].Token = ""
+		if s.Nodes[i].IsLocal {
+			s.MasterId = s.Nodes[i].Id
+		}
+	}
+	if err := db.Order("sort asc, id asc").Find(&s.Upstreams).Error; err != nil {
+		return err
+	}
+	if err := db.Order("sort asc, id asc").Find(&s.Lines).Error; err != nil {
+		return err
+	}
+	if err := db.Order("id asc").Find(&s.Users).Error; err != nil {
+		return err
+	}
+	for i := range s.Users {
+		// 副机不需要也不该拥有主机的计量;凭据/配额/限速/启用状态才是它要的
+		s.Users[i].Up, s.Users[i].Down, s.Users[i].TotalUp, s.Users[i].TotalDown, s.Users[i].OnlineAt = 0, 0, 0, 0, 0
+	}
+	if err := db.Order("id asc").Find(&s.Resellers).Error; err != nil {
+		return err
+	}
+	for i := range s.Resellers {
+		s.Resellers[i].Password, s.Resellers[i].TotpSecret, s.Resellers[i].ApiToken = "", "", "" // 副机不跑代理面板,不需要这些
+	}
+	// 下发的是与代理授权取过交集的分配:副机直接照此渲染,不用(也不能)自己再算 —— 旧版主机不下发授权表
+	links, scopes, err := render.EffectiveLines(db, 0)
+	if err != nil {
+		return err
+	}
+	s.UserLines, s.UserLineNodes = links, scopes
+	s.ResellerLines, s.ResellerLineNodes = []model.ResellerLine{}, []model.ResellerLineNode{}
+	if err := db.Order("reseller_id asc, line_id asc").Find(&s.ResellerLines).Error; err != nil {
+		return err
+	}
+	if err := db.Order("reseller_id asc, line_id asc, node_id asc").Find(&s.ResellerLineNodes).Error; err != nil {
+		return err
+	}
+	if err := db.Order("sort asc, id asc").Find(&s.Exts).Error; err != nil {
+		return err
+	}
+	if err := db.Order("user_id asc, ext_id asc").Find(&s.UserExts).Error; err != nil {
+		return err
+	}
+	return db.Order("id asc").Find(&s.LimitStates).Error
 }
 
 // revisionOf 对快照内容做哈希;字段顺序固定,故稳定。
@@ -587,6 +594,11 @@ type Report struct {
 	Reload          *ReloadState                   `json:"reload,omitempty"`       // 副机最近一次重载的结果,失败要让主机面板看见
 	LedgerEpoch     string                         `json:"ledgerEpoch,omitempty"`  // 副机流量账本的纪元(见 LedgerEpochKey);老副机不报
 	ServicePorts    []model.ServicePort            `json:"servicePorts,omitempty"` // 副机自己监听的面板 / 订阅端口(老副机不报)
+	// 以下几项老副机都不报(零值),主机按老办法处理
+	Sequence    uint64 `json:"sequence,omitempty"`    // 副机库里那份快照的推送序号
+	KickPending bool   `json:"kickPending,omitempty"` // 还有旧凭据上的连接没踢完(下次应用时接着踢)
+	ApplyGzip   bool   `json:"applyGzip,omitempty"`   // 收得了 gzip 压缩的快照;不报的照旧发不压缩的
+	LedgerFails int    `json:"ledgerFails,omitempty"` // 流量记账连续失败的轮数
 }
 
 // saveNodeCerts 记下副机报上来的证书清单:线路编辑框与订阅的 SNI 用它。老版本副机不报(nil)就不动;
@@ -635,88 +647,6 @@ type GroupState struct {
 	Rejects int64 `json:"rejects"` // 自上次上报以来设备池满被拒的新设备连接数
 }
 
-// ApplyCounters 把副机的单调账本按游标并入主机:只计增量;计数器回绕(副机重装)时游标归零重认。
-// ratio 为该服务器的流量倍率(≤0 视为 1),增量按倍率计入用户用量与时序。返回并入的用户数。
-func ApplyCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []model.AgentCounter, now int64, bucketSeconds int64, ratio float64) (int, error) {
-	if bucketSeconds < 1 {
-		bucketSeconds = 60
-	}
-	if ratio <= 0 {
-		ratio = 1
-	}
-	bucket := now - now%bucketSeconds
-	n := 0
-	err := db.Transaction(func(tx *gorm.DB) error {
-		baseline, err := ledgerBaseline(tx, nodeId, epoch)
-		if err != nil {
-			return err
-		}
-		for _, c := range counters {
-			var cur model.TrafficCursor
-			tx.Where("node_id = ? AND user_name = ?", nodeId, c.UserName).First(&cur)
-			if baseline {
-				cur.Up, cur.Down = c.Up, c.Down // 只建基线:游标对齐当前计数,这一份不计增量
-			} else if c.Up < cur.Up || c.Down < cur.Down {
-				cur.Up, cur.Down = 0, 0 // 副机计数器回绕(同名用户删了再建,计数从 0 起)
-			}
-			dUp, dDown := c.Up-cur.Up, c.Down-cur.Down
-			if baseline {
-				if err := tx.Clauses(clause.OnConflict{
-					Columns:   []clause.Column{{Name: "node_id"}, {Name: "user_name"}},
-					DoUpdates: clause.AssignmentColumns([]string{"up", "down"}),
-				}).Create(&model.TrafficCursor{NodeId: nodeId, UserName: c.UserName, Up: c.Up, Down: c.Down}).Error; err != nil {
-					return err
-				}
-				continue
-			}
-			if dUp <= 0 && dDown <= 0 {
-				continue
-			}
-			if ratio != 1 {
-				dUp, dDown = int64(float64(dUp)*ratio), int64(float64(dDown)*ratio)
-			}
-			update := map[string]interface{}{"online_at": now}
-			if dUp > 0 {
-				update["up"] = gorm.Expr("up + ?", dUp)
-			}
-			if dDown > 0 {
-				update["down"] = gorm.Expr("down + ?", dDown)
-			}
-			model.StartOnFirstUse(update, now)
-			res := tx.Model(&model.User{}).Where("name = ?", c.UserName).Updates(update)
-			if res.Error != nil {
-				return res.Error
-			}
-			rows := []model.Stats{}
-			// 用户已经删了(副机还在报在途流量)就不记用户时序:孤儿行会让以后同名的新用户看到前人的历史(审计 MB28)
-			known := res.RowsAffected > 0
-			if known && dUp > 0 {
-				rows = append(rows, model.Stats{DateTime: bucket, Resource: "user", Tag: c.UserName, Direction: true, Traffic: dUp})
-			}
-			if known && dDown > 0 {
-				rows = append(rows, model.Stats{DateTime: bucket, Resource: "user", Tag: c.UserName, Direction: false, Traffic: dDown})
-			}
-			rows = append(rows, model.Stats{DateTime: bucket, Resource: "node", Tag: nodeName, Direction: true, Traffic: maxInt64(dUp, 0)})
-			rows = append(rows, model.Stats{DateTime: bucket, Resource: "node", Tag: nodeName, Direction: false, Traffic: maxInt64(dDown, 0)})
-			if err := tx.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "resource"}, {Name: "tag"}, {Name: "date_time"}, {Name: "direction"}},
-				DoUpdates: clause.Assignments(map[string]interface{}{"traffic": gorm.Expr("stats.traffic + excluded.traffic")}),
-			}).Create(&rows).Error; err != nil {
-				return err
-			}
-			if err := tx.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "node_id"}, {Name: "user_name"}},
-				DoUpdates: clause.AssignmentColumns([]string{"up", "down"}),
-			}).Create(&model.TrafficCursor{NodeId: nodeId, UserName: c.UserName, Up: c.Up, Down: c.Down}).Error; err != nil {
-				return err
-			}
-			n++
-		}
-		return nil
-	})
-	return n, err
-}
-
 // LedgerEpochKey 副机账本纪元在 settings 里的键(副机本机的,不随快照同步)。数据面启动时没有就生成,
 // 从备份还原后换新:账本换了一本,主机据此只建基线、不把整段历史当增量再计一遍(审计 M057)。
 const LedgerEpochKey = "agentLedgerEpoch"
@@ -736,46 +666,6 @@ type DuplicateLedgerError struct{ Other uint }
 
 func (e *DuplicateLedgerError) Error() string {
 	return fmt.Sprintf("和副机 #%d 是同一本流量账本(同一台机器加了两次,或者是克隆出来的),这台的流量不重复计入", e.Other)
-}
-
-// ledgerBaseline 按账本纪元判断这一份报告是不是只建基线。以前副机账本没有身份:删了再加(主机游标随副机删掉)、
-// 副机从备份还原(计数倒退,被当成回绕从 0 计)、同一台机器加两次,都会把整段历史流量重算一遍。
-//   - 纪元变了:换了一本账,只建基线;
-//   - 这台第一次报纪元:有游标说明是升级上来的老副机,照常计(不丢流量);没有游标(新加的、删了再加的)只建基线;
-//   - 同一纪元记在另一台副机上:不计入(DuplicateLedgerError);
-//   - 老副机不报纪元(epoch 为空):照旧。
-func ledgerBaseline(tx *gorm.DB, nodeId uint, epoch string) (bool, error) {
-	if epoch == "" {
-		return false, nil
-	}
-	key := LedgerEpochSetting(nodeId)
-	var prev string
-	if err := tx.Model(&model.Setting{}).Select("value").Where("key = ?", key).Scan(&prev).Error; err != nil {
-		return false, err
-	}
-	if prev == epoch {
-		return false, nil
-	}
-	var other model.Setting
-	if err := tx.Where("key LIKE ? AND key <> ? AND value = ?", "ledgerEpoch:%", key, epoch).Limit(1).Find(&other).Error; err != nil {
-		return false, err
-	}
-	if other.Key != "" {
-		id, _ := strconv.ParseUint(strings.TrimPrefix(other.Key, "ledgerEpoch:"), 10, 64)
-		return false, &DuplicateLedgerError{Other: uint(id)}
-	}
-	baseline := prev != ""
-	if !baseline {
-		var cursors int64
-		if err := tx.Model(&model.TrafficCursor{}).Where("node_id = ?", nodeId).Count(&cursors).Error; err != nil {
-			return false, err
-		}
-		baseline = cursors == 0
-	}
-	if baseline {
-		logger.Info("副机 #", nodeId, " 的流量账本是新的一本(纪元 ", epoch, "),这一份只建基线、不计增量")
-	}
-	return baseline, upsertSetting(tx, key, epoch)
 }
 
 func maxInt64(a, b int64) int64 {
@@ -806,11 +696,17 @@ type NodeStatus struct {
 	ReloadError     string `json:"reloadError,omitempty"`
 	ReloadAt        int64  `json:"reloadAt,omitempty"`
 	VersionMismatch bool   `json:"versionMismatch,omitempty"`
-	alerted         bool
-	failSince       int64 // 这一轮连续失败从什么时候开始;0 = 正常
-	unsyncedSince   int64 // 在线但配置没同步上从什么时候开始;0 = 已同步或不在线
-	unsyncedAlerted bool
-	conns           []RecentConn
+	// LedgerFails 副机自己报的流量记账连续失败轮数:失败期间这段流量只在它的内存里,主机收不到、它一重启就丢
+	LedgerFails int `json:"ledgerFails,omitempty"`
+	// LedgerRegressAt / LedgerRegressUsers 最近一次发现这台副机的账本回退(计数比上次小)的时间与人数
+	LedgerRegressAt    int64 `json:"ledgerRegressAt,omitempty"`
+	LedgerRegressUsers int   `json:"ledgerRegressUsers,omitempty"`
+	applyGzip          bool  // 副机报过收得了 gzip 压缩的快照
+	alerted            bool
+	failSince          int64 // 这一轮连续失败从什么时候开始;0 = 正常
+	unsyncedSince      int64 // 在线但配置没同步上从什么时候开始;0 = 已同步或不在线
+	unsyncedAlerted    bool
+	conns              []RecentConn
 }
 
 // RemoteConns 汇总所有在线副机最近上报的入站连接,标注服务器名。
@@ -862,6 +758,24 @@ type Hub struct {
 	gates map[uint]chan struct{}
 	// dbMu 各副机的结果串行落库(并入流量、改状态);网络部分各走各的
 	dbMu sync.Mutex
+	// mergeQueue / mergePending 等着落库的各副机结果:网络部分做完就放闸,结果交给唯一的并账协程(单写者)。
+	// 每台只留最新一份 —— 账本是累计值,丢掉没来得及并的旧报告不丢流量;队列再长也就是副机台数
+	mergeMu      sync.Mutex
+	mergeIdle    *sync.Cond
+	mergeQueue   []uint
+	mergePending map[uint]*nodeResult
+	merging      bool
+	// pushSem 同时推整份快照的副机数上限(见 pushConcurrency)
+	pushSem chan struct{}
+	// wire 当前修订编码好的推送字节(见 wireFor);noGzip 压缩包被拒、不压缩的却成了的副机,以后只发不压缩的
+	wireMu sync.Mutex
+	wire   *wireSnapshot
+	noGzip map[uint]bool
+	// pushRev / pushSeq 上一次落库的推送修订号与序号:修订号没变就直接用,不再每 5 秒开一笔写事务(见 buildPushSnapshot)
+	pushRev string
+	pushSeq uint64
+	// swept 启动后的第一轮同步清过指向已删副机的游标与纪元(见 SweepOrphanLedgers)
+	swept bool
 	// ipsBusy 正在向这台副机下发外部设备租约:同一台机器同一时间最多一个在途请求
 	ipsBusy map[uint]bool
 	// rounds 定时同步发出去、还没回来的请求(各副机的同步、设备租约);Stop 等它们收尾
@@ -902,13 +816,17 @@ type rejectAt struct {
 
 const rejectWindow = 10 * 60 // 秒
 
+// clientTimeout 发往副机的 HTTP 客户端的总时限,只是兜底:每个请求都带着自己的时限(推送快照按大小放宽,最长 applyTimeoutMax)。
+const clientTimeout = 6 * time.Minute
+
 func New(d Deps) *Hub {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{}, remoteAt: map[uint]int64{},
 		remoteLines: map[uint]map[string]map[string][]string{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
 		upHealth: map[uint][]UpstreamHealth{}, kicking: map[string]*kickCall{}, gates: map[uint]chan struct{}{}, ipsBusy: map[uint]bool{},
 		ctx: ctx, cancel: cancel,
-		verified: &http.Client{Timeout: 25 * time.Second}, pinned: map[string]*http.Client{}, pushFail: map[uint]*pushFailure{}}
+		verified: &http.Client{Timeout: clientTimeout}, pinned: map[string]*http.Client{}, pushFail: map[uint]*pushFailure{},
+		mergePending: map[uint]*nodeResult{}, pushSem: make(chan struct{}, pushConcurrency)}
 }
 
 func (h *Hub) Start() {
@@ -942,6 +860,7 @@ func (h *Hub) Stop() {
 	}
 	h.wg.Wait()     // 定时循环先退出,之后不会再有新的 rounds
 	h.rounds.Wait() // 在途请求随 ctx 取消立刻返回
+	h.waitMerged()  // 并账协程看到停机就丢下还没并的(账本是累计值,下次启动后的第一份报告全补上)
 }
 
 // baseCtx 所有发往副机的请求都挂在它下面;测试里直接拼出来的 Hub 没有它。
@@ -1042,7 +961,7 @@ func (h *Hub) remoteNodes() ([]model.Node, error) {
 	return nodes, err
 }
 
-// nodeResult 一台副机这一轮同步的结果:网络部分各台各跑,落库部分经 dbMu 串行做。
+// nodeResult 一台副机这一轮同步的结果:网络部分各台各跑,落库部分交给唯一的并账协程串行做(见 enqueueResult)。
 type nodeResult struct {
 	pushErr string // 这一轮推送没成功(退避中也算),但报告照样拉到了
 	n       model.Node
@@ -1053,7 +972,7 @@ type nodeResult struct {
 // tick 一轮定时同步:按当前库构造快照,给每台副机各发一轮请求就返回,不等任何一台回来。
 // 以前整轮等所有副机:一台黑洞 / 挂起的副机(推送、拉报告、下发设备租约各 25 秒超时)把所有健康副机的
 // 同步周期从 5 秒拖到 75 秒左右 —— 停用、换凭据、超额停用在每台机器上都晚一分多钟生效。
-// 现在上一轮对某台的请求还在途,这一轮就跳过它;结果谁先回来谁先落库。
+// 现在上一轮对某台的请求还在途,这一轮就跳过它;网络部分一做完就放闸,结果交给并账协程排队落库。
 func (h *Hub) tick() {
 	if h.d.IsNode() {
 		return
@@ -1066,6 +985,13 @@ func (h *Hub) tick() {
 	if err != nil {
 		logger.Warning("读取副机列表失败，保留已有缓存: ", err)
 		return
+	}
+	if !h.swept {
+		if err := SweepOrphanLedgers(h.d.DB); err != nil {
+			logger.Warning("清理已删副机留下的游标与账本纪元失败: ", err)
+		} else {
+			h.swept = true
+		}
 	}
 	live := map[uint]bool{}
 	for _, n := range nodes {
@@ -1080,21 +1006,13 @@ func (h *Hub) tick() {
 		h.rounds.Add(1)
 		go func(n model.Node) {
 			defer h.rounds.Done()
-			defer h.releaseNode(n.Id)
-			defer func() {
-				if v := recover(); v != nil {
-					logger.Warning("同步副机 ", n.Name, " 异常: ", v, " | ", string(debug.Stack()))
-				}
-			}()
-			// 同一台机器内部仍是 推送 → 拉报告 的顺序。拿到闸之后再确认它还启用着:停用 / 删除时推的空用户表
-			// 不能被这一轮在途的定时推送盖回去
-			if !h.stillEnabled(n.Id) {
-				return
+			if r := h.syncGated(n); r != nil {
+				h.enqueueResult(r)
 			}
-			h.applyResult(h.syncNode(n, h.latestSnapshot()))
 		}(n)
 	}
 	h.forgetNodes(live)
+	h.retryDecommissions()
 	h.distributeIPs(nodes)
 	// 代理池被拒次数:主机本机这一轮的;各副机的在 applyResult 里随报告记
 	if h.d.LocalGroups != nil {
@@ -1102,7 +1020,87 @@ func (h *Hub) tick() {
 	}
 }
 
-// applyResult 一台副机这一轮的结果落库、更新状态。各副机的结果经 dbMu 串行,不给 SQLite 添堵。
+// syncGated 在这台副机的闸里做网络部分(推送 → 拉报告),返回时闸已经放开。
+// 以前并账也在闸里做:落库排队(别的副机的大事务占着)时闸一直被拿着,停用 / 删除时的下线推送等满 25 秒就放弃(审计 I4)。
+func (h *Hub) syncGated(n model.Node) (r *nodeResult) {
+	defer h.releaseNode(n.Id)
+	defer func() {
+		if v := recover(); v != nil {
+			logger.Warning("同步副机 ", n.Name, " 异常: ", v, " | ", string(debug.Stack()))
+			r = nil
+		}
+	}()
+	// 同一台机器内部仍是 推送 → 拉报告 的顺序。拿到闸之后再确认它还启用着:停用 / 删除时推的空用户表
+	// 不能被这一轮在途的定时推送盖回去
+	if !h.stillEnabled(n.Id) {
+		return nil
+	}
+	return h.syncNode(n, h.latestSnapshot())
+}
+
+// enqueueResult 把一台副机这一轮的结果交给并账协程。同一台还没并的旧结果直接换成新的。
+func (h *Hub) enqueueResult(r *nodeResult) {
+	h.mergeMu.Lock()
+	if h.mergePending == nil {
+		h.mergePending = map[uint]*nodeResult{}
+	}
+	if _, queued := h.mergePending[r.n.Id]; !queued {
+		h.mergeQueue = append(h.mergeQueue, r.n.Id)
+	}
+	h.mergePending[r.n.Id] = r
+	start := !h.merging
+	h.merging = true
+	h.mergeMu.Unlock()
+	if start {
+		go h.mergeLoop()
+	}
+}
+
+// mergeLoop 唯一的并账协程(单写者):队列空了就退出,下一份结果来了再起。
+func (h *Hub) mergeLoop() {
+	for {
+		h.mergeMu.Lock()
+		if len(h.mergeQueue) == 0 || h.baseCtx().Err() != nil {
+			h.mergeQueue, h.mergePending = nil, map[uint]*nodeResult{}
+			h.merging = false
+			h.mergeCond().Broadcast()
+			h.mergeMu.Unlock()
+			return
+		}
+		id := h.mergeQueue[0]
+		h.mergeQueue = h.mergeQueue[1:]
+		r := h.mergePending[id]
+		delete(h.mergePending, id)
+		h.mergeMu.Unlock()
+		func() {
+			defer func() {
+				if v := recover(); v != nil {
+					logger.Warning("并入副机 ", r.n.Name, " 的报告异常: ", v, " | ", string(debug.Stack()))
+				}
+			}()
+			h.applyResult(r)
+		}()
+	}
+}
+
+// mergeCond 并账协程退出时广播(调用方持有 mergeMu)。
+func (h *Hub) mergeCond() *sync.Cond {
+	if h.mergeIdle == nil {
+		h.mergeIdle = sync.NewCond(&h.mergeMu)
+	}
+	return h.mergeIdle
+}
+
+// waitMerged 等并账队列清空、并账协程退出。
+func (h *Hub) waitMerged() {
+	h.mergeMu.Lock()
+	for h.merging {
+		h.mergeCond().Wait()
+	}
+	h.mergeMu.Unlock()
+}
+
+// applyResult 一台副机这一轮的结果落库、更新状态。只在并账协程里(或测试里)调用,dbMu 再兜一层串行。
 func (h *Hub) applyResult(r *nodeResult) {
 	h.dbMu.Lock()
 	defer h.dbMu.Unlock()
@@ -1121,14 +1119,25 @@ func (h *Hub) applyResult(r *nodeResult) {
 		fmt.Sscanf(v, "%d", &bucket)
 	}
 	errStr := r.pushErr // 在线但配置未同步:Error 里写推送原因,Synced 由报告的修订号判
-	if merged, err := ApplyCounters(h.d.DB, r.n.Id, r.n.Name, r.rep.LedgerEpoch, r.rep.Counters, time.Now().Unix(), bucket, r.n.Ratio); err != nil {
+	mr, err := MergeCounters(h.d.DB, r.n.Id, r.n.Name, r.rep.LedgerEpoch, r.rep.Counters, time.Now().Unix(), bucket, r.n.Ratio)
+	if mr.NodeGone {
+		return // 副机在这一轮途中被删了:报告整份丢掉,也不再给它记状态
+	}
+	if err != nil {
 		logger.Warning("并入副机 ", r.n.Name, " 流量失败: ", err)
 		var dup *DuplicateLedgerError
 		if errors.As(err, &dup) { // 要让管理员看见:这台的流量没在计
 			errStr = strings.TrimPrefix(errStr+";"+err.Error(), ";")
 		}
-	} else if merged > 0 && h.d.CountersMerged != nil {
-		h.d.CountersMerged()
+	}
+	if mr.Merged > 0 && h.d.CountersMerged != nil {
+		h.d.CountersMerged() // 中途失败也可能已经并进去几块:照样判一次超量
+	}
+	if mr.Regressed > 0 {
+		st := h.getStatus(r.n)
+		h.mu.Lock()
+		st.LedgerRegressAt, st.LedgerRegressUsers = time.Now().Unix(), mr.Regressed
+		h.mu.Unlock()
 	}
 	h.setStatus(r.n, true, errStr, &r.rep)
 	if r.rep.PublicIP != "" && r.rep.PublicIP != r.n.PublicIP {
@@ -1198,12 +1207,25 @@ func pushRejected(err error) bool {
 	return errors.As(err, &hse) || errors.Is(err, errApplyUnconfirmed)
 }
 
-// pushFailure 某台副机对某个修订的连续推送失败记录(只记"拒绝应用",不记失联)。
+// pushFailure 某台副机对某个修订的连续推送失败记录(只记"拒绝应用"和"连上了但等确认超时",不记失联)。
 type pushFailure struct {
 	rev   string
 	n     int       // 连续失败次数
 	at    time.Time // 最近一次失败
 	cause string
+	slow  bool // 最近一次是等确认超时:副机可能还在应用,看报告确认(见 confirmByReport)
+}
+
+// slowPushBackoffMax 等确认超时的退避上限:副机多半只是慢,不像被拒那样等到 5 分钟。
+const slowPushBackoffMax = time.Minute
+
+// backoff 下一次重推至少要隔多久。
+func (p *pushFailure) backoff() time.Duration {
+	d := pushBackoff(p.n)
+	if p.slow && d > slowPushBackoffMax {
+		d = slowPushBackoffMax
+	}
+	return d
 }
 
 // pushBackoff 同一修订连续失败 n 次之后,下一次重推至少要隔多久:5s、10s、20s … 封顶 5 分钟。
@@ -1237,18 +1259,19 @@ func (h *Hub) syncNode(n model.Node, snap Snapshot) *nodeResult {
 	behind := nodeRev != "" && nodeRev != snap.Revision
 	if pushedRev != snap.Revision || behind || time.Now().Unix()-lastPush > 600 {
 		switch {
-		case pf != nil && pf.rev == snap.Revision && time.Since(pf.at) < pushBackoff(pf.n):
-			res.pushErr = fmt.Sprintf("推送失败 %d 次,%s 后再试: %s", pf.n, (pushBackoff(pf.n) - time.Since(pf.at)).Round(time.Second), pf.cause)
+		case pf != nil && pf.rev == snap.Revision && time.Since(pf.at) < pf.backoff():
+			res.pushErr = fmt.Sprintf("推送失败 %d 次,%s 后再试: %s", pf.n, (pf.backoff() - time.Since(pf.at)).Round(time.Second), pf.cause)
 		default:
 			if err := h.push(n, snap); err != nil {
-				if pushRejected(err) {
+				// 等确认超时也退避:以前超时不算被拒,下一轮又整份重推,副机永远在重做同一份(审计 I4)
+				if slow := isApplyTimeout(err); slow || pushRejected(err) {
 					h.mu.Lock()
 					if pf == nil || pf.rev != snap.Revision {
 						pf = &pushFailure{rev: snap.Revision}
 						h.pushFail[n.Id] = pf
 					}
 					pf.n++
-					pf.at, pf.cause = time.Now(), err.Error()
+					pf.at, pf.cause, pf.slow = time.Now(), err.Error(), slow
 					h.mu.Unlock()
 				}
 				res.pushErr = "推送失败: " + err.Error()
@@ -1270,7 +1293,32 @@ func (h *Hub) syncNode(n model.Node, snap Snapshot) *nodeResult {
 		return res
 	}
 	res.rep = rep
+	if h.confirmByReport(n, snap, rep) {
+		res.pushErr = ""
+	}
 	return res
+}
+
+// confirmByReport 推送等确认超时了(或正为此退避):报告说副机已经在这个修订上、序号不旧、没有待重载也没有待踢线,
+// 它其实应用完了 —— 记为已推送,不再整份重推。返回是否这样确认了。
+func (h *Hub) confirmByReport(n model.Node, snap Snapshot, rep Report) bool {
+	h.mu.Lock()
+	pf := h.pushFail[n.Id]
+	ok := pf != nil && pf.slow && pf.rev == snap.Revision && reportApplied(rep, snap)
+	if ok {
+		delete(h.pushFail, n.Id)
+	}
+	h.mu.Unlock()
+	if ok {
+		logger.Info("副机 ", n.Name, " 回确认超时了,但报告显示它已经应用完 ", snap.Revision)
+		h.markPushed(n, snap.Revision)
+	}
+	return ok
+}
+
+// reportApplied 副机报告里的状态是不是"这份快照已经应用完"。老副机不报序号和待踢线,只看修订号与待重载。
+func reportApplied(rep Report, snap Snapshot) bool {
+	return rep.Revision == snap.Revision && !rep.ReloadPending && !rep.KickPending && (rep.Sequence == 0 || rep.Sequence >= snap.Sequence)
 }
 
 // forgetNodes 清掉已经不存在的副机留下的所有按节点缓存。
@@ -1446,6 +1494,7 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 	}
 	if rep != nil {
 		st.Version, st.Hostname, st.CoreRunning, st.Uptime, st.Revision, st.CertDays = rep.Version, rep.Hostname, rep.CoreRunning, rep.Uptime, rep.Revision, rep.CertDays
+		st.LedgerFails, st.applyGzip = rep.LedgerFails, rep.ApplyGzip
 		h.saveNodeCerts(n, rep.Certs)
 		h.saveNodeServicePorts(n, rep.ServicePorts)
 		// hubRevision 在副机 ApplySnapshot 的事务里就写了,数据面有没有真的应用成功要看 ReloadPending。
@@ -1559,30 +1608,13 @@ func alertText(s string, max int) string {
 	return notify.Esc(s)
 }
 
+// push 把一份快照推给一台副机并等它确认(调用方持有这台的闸)。同一修订、同一序号的快照只编码一次,各台共用。
 func (h *Hub) push(n model.Node, snap Snapshot) error {
-	snap.SelfNodeId = n.Id
-	var out struct {
-		OK       json.RawMessage `json:"ok"`
-		Revision string          `json:"revision"`
-	}
-	if err := h.request(n, "POST", "apply", snap, &out); err != nil {
+	w, err := h.wireFor(snap)
+	if err != nil {
 		return err
 	}
-	ok := strings.Trim(strings.TrimSpace(string(out.OK)), `"`)
-	if ok != "1" && !strings.EqualFold(ok, "true") {
-		return fmt.Errorf("%w:修订 %s (ok=%q)", errApplyUnconfirmed, snap.Revision, ok)
-	}
-	if out.Revision != snap.Revision {
-		return fmt.Errorf("%w:确认的修订号不匹配,期望 %s,收到 %s", errApplyUnconfirmed, snap.Revision, out.Revision)
-	}
-	h.mu.Lock()
-	h.pushed[n.Id] = snap.Revision
-	if st := h.status[n.Id]; st != nil {
-		st.LastPush = time.Now().Unix()
-	}
-	h.mu.Unlock()
-	logger.Info("已向副机 ", n.Name, " 推送配置 ", snap.Revision)
-	return nil
+	return h.pushWire(n, w)
 }
 
 func (h *Hub) fetchReport(n model.Node) (Report, error) {
@@ -1604,33 +1636,6 @@ func (h *Hub) PushNow(n model.Node) error {
 		return err
 	}
 	return h.pushLatest(n)
-}
-
-// Decommission 停用 / 删除副机时调用:给它推一份空用户表(线路照旧、一个用户都没有),那台立刻停止为任何人服务。
-// 以前停用 / 删除只是不再同步,那台的数据面一直按最后一份用户表放行所有人,之后的停用、到期、超额、重置在它上面
-// 都不生效,流量也不记账(审计 M042 / M061)。
-//
-// before 是改库之前的快照(BuildSnapshot):删掉的副机在改库之后的快照里已经没有自己那一行、独占的线路也停了,
-// 拿那份去推,它认不出本机、会把所有线路都当成自己的去渲染。调用时库里已经把它停用 / 删掉:在途的定时推送拿到闸后
-// 看它不再启用,不会把空表盖回去;重新启用后修订号不同,定时同步推回完整快照。
-func (h *Hub) Decommission(n model.Node, before Snapshot) error {
-	if n.IsLocal || h.d.IsNode() {
-		return nil
-	}
-	if n.ApiUrl == "" || n.Token == "" {
-		return errors.New("这台副机没有配置 API 地址或令牌,发不出下线通知")
-	}
-	if err := h.waitNode(n.Id, nodeWait); err != nil {
-		return err
-	}
-	defer h.releaseNode(n.Id)
-	cur, err := h.refreshSnapshot() // 序号取此刻最新的:不低于这台已经收过的任何一份,否则被它当成过期快照拒掉
-	if err != nil {
-		return err
-	}
-	snap := withoutUsers(before)
-	snap.Sequence, snap.Version, snap.MinNode = cur.Sequence, cur.Version, cur.MinNode
-	return h.push(n, snap)
 }
 
 // withoutUsers 同一份快照去掉所有用户及挂在用户上的分配,重算修订号。线路留着:有线路没用户,谁连都认证不过
@@ -1664,6 +1669,15 @@ func (h *Hub) buildPushSnapshot() (Snapshot, error) {
 	if err != nil {
 		return snap, err
 	}
+	// 修订号没变、序号已经就绪:直接用内存里记的,不开事务。以前每 5 秒都开一笔 BEGIN IMMEDIATE 读序号,
+	// 别的写事务占锁超过 10 秒时这一轮"构造同步快照失败",推送、拉报告、设备租约整轮跳过(审计 I4)
+	h.mu.Lock()
+	primed, lastRev, lastSeq := h.sequencePrimed, h.pushRev, h.pushSeq
+	h.mu.Unlock()
+	if primed && lastSeq != 0 && lastRev == snap.Revision {
+		snap.Sequence = lastSeq
+		return snap, nil
+	}
 	err = h.d.DB.Transaction(func(tx *gorm.DB) error {
 		var raw string
 		if err := tx.Model(&model.Setting{}).Select("value").Where("key = ?", "hubPushSequence").Scan(&raw).Error; err != nil {
@@ -1690,7 +1704,7 @@ func (h *Hub) buildPushSnapshot() (Snapshot, error) {
 		if clockNow > 0 {
 			clockSeq = uint64(clockNow)
 		}
-		if raw != "" && previousRevision == snap.Revision && h.sequencePrimed {
+		if raw != "" && previousRevision == snap.Revision && primed {
 			snap.Sequence = seq
 			return nil
 		}
@@ -1722,7 +1736,9 @@ func (h *Hub) buildPushSnapshot() (Snapshot, error) {
 		return upsertSetting(tx, "hubPushRevision", snap.Revision)
 	})
 	if err == nil {
-		h.sequencePrimed = true
+		h.mu.Lock()
+		h.sequencePrimed, h.pushRev, h.pushSeq = true, snap.Revision, snap.Sequence
+		h.mu.Unlock()
 	}
 	return snap, err
 }
@@ -2087,11 +2103,16 @@ func (h *Hub) request(n model.Node, method, path string, body interface{}, out i
 	return h.requestTimeout(n, method, path, body, out, 25*time.Second)
 }
 
-func (h *Hub) requestTimeout(n model.Node, method, path string, body interface{}, out interface{}, timeout time.Duration) error {
+// agentURL 副机 agent 接口的地址。
+func agentURL(n model.Node, path string) string {
 	base := strings.TrimRight(n.ApiUrl, "/")
 	if !strings.HasSuffix(base, "/api") {
 		base += "/api"
 	}
+	return base + "/agent/" + path
+}
+
+func (h *Hub) requestTimeout(n model.Node, method, path string, body interface{}, out interface{}, timeout time.Duration) error {
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -2105,10 +2126,15 @@ func (h *Hub) requestTimeout(n model.Node, method, path string, body interface{}
 	}
 	ctx, cancel := context.WithTimeout(h.baseCtx(), timeout) // Stop 时在途请求立刻返回
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, base+"/agent/"+path, rd)
+	req, err := http.NewRequestWithContext(ctx, method, agentURL(n, path), rd)
 	if err != nil {
 		return err
 	}
+	return h.do(n, req, out)
+}
+
+// do 带上令牌发请求,非 200 归类成 httpStatusError,200 的响应体解进 out。
+func (h *Hub) do(n model.Node, req *http.Request, out interface{}) error {
 	req.Header.Set("X-Agent-Token", n.Token)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := h.clientFor(n).Do(req)
@@ -2170,7 +2196,7 @@ func (h *Hub) clientFor(n model.Node) *http.Client {
 	if d := strings.TrimSpace(n.Domain); net.ParseIP(host) != nil && d != "" {
 		names = append(names, d)
 	}
-	c := &http.Client{Timeout: 25 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{
+	c := &http.Client{Timeout: clientTimeout, Transport: &http.Transport{TLSClientConfig: &tls.Config{
 		InsecureSkipVerify: true, // 不查签发链(自签 / IP 证书都过不了),只认下面记住的指纹
 		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
 			if len(raw) == 0 {

@@ -23,12 +23,14 @@ export async function render(el) {
       ${isNodeView() ? '' : `<button class="btn primary" data-act="node.add">${t('node.add')}</button>`}
     </div>
     <p class="hint" style="margin-bottom:.8rem">${isNodeView() ? t('node.nodeView') : t('node.howto')}</p>
+    <div id="decom-gone"></div>
     <div class="table-wrap"><table class="grid tight nodes">
       <thead><tr><th>${t('common.name')}</th><th>${t('node.domain')}</th><th>${t('common.status')}</th><th title="${esc(t('reach.colHint'))}">${t('reach.col')}</th><th>${t('node.sync')}</th><th>${t('node.core')}</th><th>${t('node.online')}</th><th></th></tr></thead>
       <tbody id="nodes-body"></tbody>
     </table></div>`;
   renderReachBar();
   renderRows();
+  renderDecomGone();
 }
 
 export async function tick() {
@@ -36,7 +38,29 @@ export async function tick() {
   [data] = await Promise.all([get('nodes'), loadReach()]);
   renderReachBar();
   renderRows();
+  renderDecomGone();
   refreshDetail();
+}
+
+// 已经删掉、但还没收到下线通知的服务器:列表里没有它们那一行了,单独提示(主机一直在重试)
+function renderDecomGone() {
+  const gone = data.decommissions || [];
+  setHTML('decom-gone', gone.length && !isNodeView()
+    ? `<p class="hint warn-text" style="margin-bottom:.8rem">${esc(t('node.decomPendingGone', { names: gone.map(d => d.name).join(t('node.sep')) }))}</p>` : '');
+}
+
+// 停用的副机还没收到下线通知:它仍按旧配置为所有用户服务,得让管理员看见
+const decomBadge = n => n.decommission
+  ? ` <span title="${esc(t('node.decomPendingHelp', { n: n.decommission.attempts || 0, err: trErr(n.decommission.lastError || '—') }))}">${badge(t('node.decomPending'), 'warn')}</span>` : '';
+
+// 副机自己报的记账失败、主机发现的账本回退(24 小时内):在线也要看得见
+function ledgerBadges(s) {
+  let out = '';
+  if (s.ledgerFails) out += ` <span title="${esc(t('node.ledgerFailsHelp', { n: s.ledgerFails }))}">${badge(t('node.ledgerFails', { n: s.ledgerFails }), 'danger')}</span>`;
+  if (s.ledgerRegressAt && Date.now() / 1000 - s.ledgerRegressAt < 86400) {
+    out += ` <span title="${esc(t('node.ledgerRegressHelp', { n: s.ledgerRegressUsers || 0, time: fmtRelative(s.ledgerRegressAt) }))}">${badge(t('node.ledgerRegress'), 'warn')}</span>`;
+  }
+  return out;
 }
 
 function renderReachBar() { setHTML('reach-bar', reachToolbar(isNodeView())); }
@@ -48,11 +72,11 @@ function statusCell(n) {
     if (n.id === data.masterId) return `${badge(t('role.master'), 'primary')}${data.appliedAt ? ` <span class="muted small">${t('node.lastSync')} ${fmtRelative(Number(data.appliedAt))}</span>` : ''}`;
     return badge(t('node.byMaster'));
   }
-  if (!n.enabled) return badge(t('common.disabled'));
+  if (!n.enabled) return badge(t('common.disabled')) + decomBadge(n);
   const s = n.status;
   if (!s) return badge(t('node.pending'), 'warn');
-  // 在线但有话要说(配置推不下去、数据面没应用成功):这台机器并没有离线,但管理员必须看见
-  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.error ? `<div class="sub-cell ellip warn-text" title="${esc(trErr(s.error))}">${esc(shortErr(s.error))}</div>` : (s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : '')}`;
+  // 在线但有话要说(配置推不下去、数据面没应用成功、记账出问题):这台机器并没有离线,但管理员必须看见
+  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${ledgerBadges(s)}${s.error ? `<div class="sub-cell ellip warn-text" title="${esc(trErr(s.error))}">${esc(shortErr(s.error))}</div>` : (s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : '')}`;
   return `${badge(t('common.offline'), 'danger')}<div class="sub-cell ellip" title="${esc(trErr(s.error || ''))}">${esc(shortErr(s.error))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
 }
 

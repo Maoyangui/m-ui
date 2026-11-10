@@ -176,7 +176,9 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 	sort.Slice(lifted, func(i, j int) bool { return lifted[i].UserId < lifted[j].UserId })
 	err := e.DB.Transaction(func(tx *gorm.DB) error {
 		if len(add) > 0 {
-			if err := tx.Create(&add).Error; err != nil {
+			// 分批:一行 10 个变量,时段规则选「全部用户」时一条 INSERT 写几千行会超过 SQLite 一条语句 32766 个变量的上限,
+			// 整笔失败,规则永远不生效、也不会随快照下发到副机(审计 I4)
+			if err := tx.CreateInBatches(&add, stateBatch).Error; err != nil {
 				return err
 			}
 		}
@@ -193,8 +195,12 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 			for _, st := range lifted {
 				ids = append(ids, st.Id)
 			}
-			if err := tx.Where("id IN ?", ids).Delete(&model.LimitState{}).Error; err != nil {
-				return err
+			for len(ids) > 0 {
+				k := min(len(ids), stateBatch)
+				if err := tx.Where("id IN ?", ids[:k]).Delete(&model.LimitState{}).Error; err != nil {
+					return err
+				}
+				ids = ids[k:]
 			}
 		}
 		for _, st := range add {
@@ -215,6 +221,9 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 	}
 	return true, nil
 }
+
+// stateBatch 写入 / 撤掉限速状态时每条语句的行数(SQLite 一条语句最多 32766 个变量)。
+const stateBatch = 500
 
 // record 写一条操作审计(和执法任务同一张表、同一个页面看)。
 func record(tx *gorm.DB, now int64, action string, text string) {

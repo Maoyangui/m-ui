@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,6 +102,14 @@ func restrictFiles(dbPath string) {
 			_ = os.Chmod(f, 0o600)
 		}
 	}
+}
+
+// ReadTx 在只读事务里执行 fn:几条查询看到同一份一致的数据,而且不拿写锁。
+// 连接串里的 _txlock=immediate 让普通事务一开头就抢写锁(BEGIN IMMEDIATE),只读的事务也一样:
+// 别的事务在写时它得排队,排满 busy_timeout 就报 database is locked。只读事务走普通 BEGIN,WAL 下读不挡写、写不挡读。
+// fn 里只许读:在这种事务里写,升级写锁时会直接报 SQLITE_BUSY,不排队。
+func ReadTx(db *gorm.DB, fn func(tx *gorm.DB) error) error {
+	return db.Transaction(fn, &sql.TxOptions{ReadOnly: true})
 }
 
 // DBHandle 是测试里携带 *gorm.DB 的小包装。

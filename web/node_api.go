@@ -28,10 +28,18 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		var nodes []model.Node
 		s.db.Order("sort asc, id asc").Find(&nodes)
 		statuses := s.run.Hub().Statuses()
+		// 停用 / 删除时没送到的下线通知(主机一直在重试):停用的那台在它那一行标出来,已经删掉的单独列
+		var pending []model.NodeDecommission
+		s.db.Select("node_id, name, created_at, attempts, last_try, last_error").Order("node_id").Find(&pending)
+		decom := map[uint]model.NodeDecommission{}
+		for _, d := range pending {
+			decom[d.NodeId] = d
+		}
 		type row struct {
 			model.Node
-			HasToken bool        `json:"hasToken"`
-			Status   interface{} `json:"status"`
+			HasToken     bool                    `json:"hasToken"`
+			Status       interface{}             `json:"status"`
+			Decommission *model.NodeDecommission `json:"decommission,omitempty"`
 		}
 		out := make([]row, 0, len(nodes))
 		for _, n := range nodes {
@@ -39,11 +47,22 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			if st, ok := statuses[n.Id]; ok {
 				rr.Status = st
 			}
+			if d, ok := decom[n.Id]; ok {
+				rr.Decommission = &d
+				delete(decom, n.Id)
+			}
 			out = append(out, rr)
+		}
+		gone := make([]model.NodeDecommission, 0, len(decom))
+		for _, d := range pending {
+			if _, ok := decom[d.NodeId]; ok {
+				gone = append(gone, d)
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"nodes": out, "revision": s.run.Hub().Revision(), "role": s.role(),
 			"masterId": s.settingInt("hubMasterId", 0), "appliedAt": s.setting("hubAppliedAt"),
+			"decommissions": gone,
 		})
 	case http.MethodPost:
 		var p nodePayload
@@ -201,7 +220,26 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err := s.db.Model(&model.Node{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		enabling := !node.IsLocal && !node.Enabled && p.Enabled
+		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.Node{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+				return err
+			}
+			if enabling { // 重新启用:还没送到的下线通知作废,定时同步推回完整快照
+				return tx.Where("node_id = ?", id).Delete(&model.NodeDecommission{}).Error
+			}
+			if !node.IsLocal && !p.Enabled { // 停用着改了地址 / 令牌:还没送到的下线通知按新的地址、令牌接着重试
+				rec := map[string]interface{}{"name": p.Name, "api_url": p.ApiUrl, "insecure": p.Insecure}
+				if tok, ok := updates["token"]; ok {
+					rec["token"] = tok
+				}
+				if _, reset := updates["cert_fp"]; reset {
+					rec["cert_fp"] = ""
+				}
+				return tx.Model(&model.NodeDecommission{}).Where("node_id = ?", id).Updates(rec).Error
+			}
+			return nil
+		}); err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -251,8 +289,12 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 			}
-			// 记下的账本纪元随游标一起删:那台机器以后再加回来,只建基线、不重算历史(见 hub.ledgerBaseline)
-			return tx.Where("key = ?", hub.LedgerEpochSetting(id)).Delete(&model.Setting{}).Error
+			// 记下的账本纪元随游标一起删:那台机器以后再加回来,只建基线、不重算历史(见 hub.MergeCounters)
+			if err := tx.Where("key = ?", hub.LedgerEpochSetting(id)).Delete(&model.Setting{}).Error; err != nil {
+				return err
+			}
+			// 顺手清掉老版本留下的孤儿游标与纪元(删副机时和在途并账竞态写回去的):同一台机器重新加回时不再被当成重复账本
+			return hub.SweepOrphanLedgers(tx)
 		})
 		if err != nil {
 			badRequest(w, err)

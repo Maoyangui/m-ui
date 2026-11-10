@@ -2,6 +2,7 @@ package hub
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -18,6 +19,9 @@ func TestLedgerEpoch(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close(db)
+	for id := uint(2); id <= 5; id++ {
+		db.Create(&model.Node{Id: id, Name: fmt.Sprintf("n%d", id), Enabled: true})
+	}
 	db.Create(&model.User{Name: "alice", Enabled: true, Credentials: []byte(`{}`)})
 	usage := func() (int64, int64) {
 		var u model.User
