@@ -810,7 +810,7 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 	}
 	box := r.core.GetInstance()
 	keepAll := map[string]map[string]struct{}{} // 入站 → 仍然有效的用户名
-	inEffect := map[string]bool{}                // 新用户表已经在运行中生效的入站
+	inEffect := map[string]bool{}               // 新用户表已经在运行中生效的入站
 	sessionsClosed := 0                         // 随换表关掉的整条会话数(被停用 / 换了凭据的用户)
 	var firstErr error
 	for _, inbound := range cfg.Inbounds {
@@ -1314,7 +1314,7 @@ func (r *Runner) RecentConns(limit int) []hub.RecentConn {
 	list := box.ConnTracker().Recent(limit)
 	out := make([]hub.RecentConn, 0, len(list))
 	for _, c := range list {
-		out = append(out, hub.RecentConn{IP: c.IP, User: c.User, Line: c.Inbound, Protocol: c.Protocol, Count: c.Count, Ts: c.Last})
+		out = append(out, hub.RecentConn{IP: c.IP, User: c.User, Line: c.Inbound, Protocol: c.Protocol, Count: c.Count, Ts: c.Last, Rejected: c.Rejected})
 	}
 	return out
 }

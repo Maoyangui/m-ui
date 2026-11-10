@@ -147,7 +147,28 @@ func (l *Limiter) reconcileDevicesLocked(now int64) map[string][]string {
 }
 
 // excessExternal 在"本机在线的一律保留"之后,并集里还放不下的那些外部 IP(按固定顺序取,各机算出来一样)。
+// IPv4 地址与 IPv6 /64 各自对上限(见 familyFull),两族分开算再合起来。
 func excessExternal(set, local map[string]bool, limit int) []string {
+	var out []string
+	for _, v6 := range []bool{false, true} {
+		fs, fl := map[string]bool{}, map[string]bool{}
+		for k := range set {
+			if model.IsV6Key(k) == v6 {
+				fs[k] = true
+			}
+		}
+		for k := range local {
+			if model.IsV6Key(k) == v6 {
+				fl[k] = true
+			}
+		}
+		out = append(out, excessExternalFamily(fs, fl, limit)...)
+	}
+	return out
+}
+
+// excessExternalFamily 同一地址族内的 excessExternal。
+func excessExternalFamily(set, local map[string]bool, limit int) []string {
 	if len(set) <= limit {
 		return nil
 	}
@@ -316,7 +337,7 @@ func (l *Limiter) GroupState() map[string]GroupState {
 				set[model.IPKey(ip)] = true
 			}
 		}
-		out[g] = GroupState{Devices: len(set), Rejects: l.grejects[g]}
+		out[g] = GroupState{Devices: model.DeviceCountKeys(set), Rejects: l.grejects[g]}
 		l.grejects[g] = 0
 	}
 	return out
@@ -329,20 +350,48 @@ func (l *Limiter) GroupState() map[string]GroupState {
 // 只要当前在线数没到上限就接纳新 IP;超限只拒绝这一次,不对该 IP 留任何黑名单,
 // 所以别的设备一下线,它下次重连即可进入。用户自己的上限和所属代理池的上限都要过。
 func (l *Limiter) AllowConn(user, ip string) bool {
+	ok, _ := l.AllowConnWhy(user, ip)
+	return ok
+}
+
+// 拒绝原因(给"最近入站连接"标注):设备数超限 / 所属代理的设备池已满。
+const (
+	RejectDevice = "device"
+	RejectPool   = "pool"
+)
+
+// AllowConnWhy 同 AllowConn,拒绝时给出原因(RejectDevice / RejectPool)。
+func (l *Limiter) AllowConnWhy(user, ip string) (bool, string) {
 	if user == "" || ip == "" {
-		return true
+		return true, ""
 	}
 	now := time.Now().Unix()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.allowConnLocked(user, ip, now)
+	why := l.admitLocked(user, ip, now)
+	return why == "", why
 }
 
 // allowConnLocked applies the device limits for a connection or for a device
 // that became active again after the idle window. The caller must hold l.mu.
 func (l *Limiter) allowConnLocked(user, ip string, now int64) bool {
+	return l.admitLocked(user, ip, now) == ""
+}
+
+// familyFull 新设备 key 所在的地址族里,已在线的设备是否已到上限。设备数按地址族分别算:
+// 同一台双栈设备会同时用 IPv4 和 IPv6 连,两族加在一起会把它算成两台(见 model.FamilyCount)。
+func familyFull(seen map[string]bool, key string, limit int) bool {
+	v4, v6 := model.FamilyCount(seen)
+	if model.IsV6Key(key) {
+		return v6 >= limit
+	}
+	return v4 >= limit
+}
+
+// admitLocked 判定并登记;放行返回 "",拒绝返回原因。调用方须持锁。
+func (l *Limiter) admitLocked(user, ip string, now int64) string {
 	if l.deviceRejectedLocked(user, ip, now) {
-		return false
+		return RejectDevice
 	}
 	limit := l.limits[user].deviceLimit
 	l.pruneLocked(user, now)
@@ -353,7 +402,7 @@ func (l *Limiter) allowConnLocked(user, ip string, now int64) bool {
 	}
 	if _, online := active[ip]; online {
 		active[ip] = now
-		return true
+		return ""
 	}
 	ext := l.externalLocked(user, now)
 	key := model.IPKey(ip)
@@ -367,21 +416,20 @@ func (l *Limiter) allowConnLocked(user, ip string, now int64) bool {
 	}
 	if onlineHere { // 同一台设备换了个地址:不占新名额
 		active[ip] = now
-		return true
+		return ""
 	}
-	if limit > 0 && !seen[key] { // 该设备已在别的机器上在线时,视为同一设备切换入口,不占新名额
-		if len(seen) >= limit {
-			return false
-		}
+	// 该设备已在别的机器上在线时,视为同一设备切换入口,不占新名额;上限按地址族分别算(见 familyFull)
+	if limit > 0 && !seen[key] && familyFull(seen, key, limit) {
+		return RejectDevice
 	}
 	if g := l.userGroup[user]; g != "" {
 		if gl := l.groups[g]; gl.deviceLimit > 0 && !l.groupHasRoomLocked(g, ip, now, gl.deviceLimit) {
 			l.grejects[g]++
-			return false
+			return RejectPool
 		}
 	}
 	active[ip] = now
-	return true
+	return ""
 }
 
 // groupHasRoomLocked 代理池里(本机 + 其他机器)同时在线的不同 IP 是否还没到上限;ip 已在池里则不占新名额。
@@ -396,10 +444,11 @@ func (l *Limiter) groupHasRoomLocked(g, ip string, now int64, limit int) bool {
 			set[model.IPKey(e)] = true
 		}
 	}
-	if set[model.IPKey(ip)] {
+	key := model.IPKey(ip)
+	if set[key] {
 		return true
 	}
-	return len(set) < limit
+	return !familyFull(set, key, limit) // 池同样按地址族分别算
 }
 
 // pruneLocked 清掉空闲超时的活跃 IP(调用方须持锁)。

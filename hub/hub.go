@@ -539,6 +539,8 @@ type RecentConn struct {
 	Count    int    `json:"count"`
 	Ts       int64  `json:"ts"`               // 最近一次的绝对时间(unix 秒),由各机按本机时区解析
 	Server   string `json:"server,omitempty"` // 主机汇总时标注来自哪台服务器
+	// Rejected 这条最近一次被拒:device(设备数超限)/ pool(代理设备池已满);放行的为空
+	Rejected string `json:"rejected,omitempty"`
 }
 
 // Report 是副机上报的状态。

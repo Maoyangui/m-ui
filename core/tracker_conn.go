@@ -48,6 +48,8 @@ type RecentConn struct {
 	Protocol string
 	Count    int
 	Last     int64
+	// Rejected 最近一次是被拒的:RejectDevice / RejectPool;放行的为空。同一来源下一次放行就清掉。
+	Rejected string
 	seq      uint64
 }
 
@@ -62,7 +64,9 @@ func NewConnTracker(limiter *Limiter) *ConnTracker {
 }
 
 // noteRecent 记一次入站连接;超过上限时丢掉最久没动的那条。
-func (c *ConnTracker) noteRecent(ip, user, inbound, proto string) {
+// noteRecent 记一次入站。rejected 非空表示这次被设备数 / 设备池拒了:拒绝发生在握手认证之后,
+// 不记的话面板上看起来和"包没到服务器"一模一样,用户只会去查防火墙(v6 双栈设备被算两台就是这样藏住的)。
+func (c *ConnTracker) noteRecent(ip, user, inbound, proto, rejected string) {
 	if ip == "" || inbound == "" {
 		return
 	}
@@ -89,6 +93,7 @@ func (c *ConnTracker) noteRecent(ip, user, inbound, proto string) {
 	r.seq = c.recentSeq
 	r.Count++
 	r.Last = now
+	r.Rejected = rejected
 	if user != "" {
 		r.User = user
 	}
@@ -140,8 +145,11 @@ func (c *ConnTracker) generateConnectionID() string {
 func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) net.Conn {
 	ip := metadata.Source.Addr.String()
 	owner := model.Owner(metadata.User)
-	if c.limiter != nil && !c.limiter.AllowConn(owner, ip) {
-		return rejectedConn{conn}
+	if c.limiter != nil {
+		if ok, why := c.limiter.AllowConnWhy(owner, ip); !ok {
+			c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType, why)
+			return rejectedConn{conn}
+		}
 	}
 	connID := c.generateConnectionID()
 	connInfo := &ConnectionInfo{
@@ -155,7 +163,7 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 
 	c.trackConnection(connID, connInfo)
 	if owner != "" || metadata.User == "" { // 内部用户(线路作上游)不进"最近入站连接"
-		c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType)
+		c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType, "")
 	}
 
 	wrapped := c.createWrappedConn(conn, connID)
@@ -168,9 +176,12 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.PacketConn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) network.PacketConn {
 	ip := metadata.Source.Addr.String()
 	owner := model.Owner(metadata.User)
-	if c.limiter != nil && !c.limiter.AllowConn(owner, ip) {
-		conn.Close()
-		return conn
+	if c.limiter != nil {
+		if ok, why := c.limiter.AllowConnWhy(owner, ip); !ok {
+			c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType, why)
+			conn.Close()
+			return conn
+		}
 	}
 	connID := c.generateConnectionID()
 	connInfo := &ConnectionInfo{
@@ -183,7 +194,7 @@ func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.P
 	}
 
 	c.trackConnection(connID, connInfo)
-	c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType)
+	c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType, "")
 
 	wrapped := c.createWrappedPacketConn(conn, connID)
 	if c.limiter != nil {

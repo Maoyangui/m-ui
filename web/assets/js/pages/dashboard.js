@@ -158,9 +158,9 @@ async function renderConns() {
   const rows = await get('conns/recent');
   if (!rows.length) { setHTML(el, empty(t('dash.noConns'))); return; }
   const multi = rows.some(c => c.server);
-  el.innerHTML = `<div class="table-wrap"><table class="grid conns"><thead><tr><th>IP</th><th>${t('logs.user')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 15).map(c =>
+  el.innerHTML = `<div class="table-wrap"><table class="grid conns"><thead><tr><th>IP</th><th>${t('logs.user')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 30).map(c =>
     `<tr>
-      <td class="mono">${esc(c.ip)}</td>
+      <td class="mono">${esc(c.ip)}${c.rejected ? ' <span class="badge danger" title="' + esc(t('dash.rejectedHelp')) + '">' + esc(t(c.rejected === 'pool' ? 'dash.rejectedPool' : 'dash.rejectedDevice')) + '</span>' : ''}</td>
       <td class="ell" title="${esc(c.user || '')}">${c.user ? esc(c.user) : '<span class="muted">—</span>'}</td>
       <td class="ell">${esc(c.line)} <span class="muted small">${esc(c.protocol)}</span></td>
       ${multi ? `<td class="ell">${esc(c.server || '')}</td>` : ''}

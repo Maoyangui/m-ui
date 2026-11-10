@@ -123,13 +123,38 @@ func IPKey(ip string) string {
 	return p.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
-// DeviceCount 一组来源地址算几台设备(见 IPKey)。
+// IsV6Key IPKey 给出的键是不是 IPv6 的 /64。
+func IsV6Key(key string) bool { return strings.HasSuffix(key, "/64") }
+
+// FamilyCount 一组设备键(见 IPKey)里 IPv4 地址与 IPv6 /64 各有几个。
+//
+// 设备数按地址族分别算:同一台双栈设备会同时用 IPv4 和 IPv6 连(客户端测速、不同线路各走一族),
+// 两族加在一起会把它算成两台,设了上限的用户走 v6 就被静默拒绝。所以上限是"IPv4 地址数、IPv6 /64 数
+// 各自不超过上限",显示的在线设备数取两者较大的那个(见 DeviceCount、core.Limiter)。
+func FamilyCount(keys map[string]bool) (v4, v6 int) {
+	for k := range keys {
+		if IsV6Key(k) {
+			v6++
+		} else {
+			v4++
+		}
+	}
+	return v4, v6
+}
+
+// DeviceCount 一组来源地址算几台设备:IPv4 地址与 IPv6 /64 各自计数,取较大的那个(理由见 FamilyCount)。
 func DeviceCount(ips []string) int {
 	set := make(map[string]bool, len(ips))
 	for _, ip := range ips {
 		set[IPKey(ip)] = true
 	}
-	return len(set)
+	return DeviceCountKeys(set)
+}
+
+// DeviceCountKeys 同 DeviceCount,入参已是设备键。
+func DeviceCountKeys(keys map[string]bool) int {
+	v4, v6 := FamilyCount(keys)
+	return max(v4, v6)
 }
 
 // BareHost 去掉 IPv6 地址外面的方括号([2001:db8::1] → 2001:db8::1);别的写法原样返回。

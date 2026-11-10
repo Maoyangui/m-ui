@@ -76,7 +76,8 @@ func TestIPKey(t *testing.T) {
 	if IPKey("2001:db8:1:2::1") == IPKey("2001:db8:1:3::1") {
 		t.Fatal("不同 /64 不该相同")
 	}
-	if got := DeviceCount([]string{"1.2.3.4", "2001:db8:1:2::1", "2001:db8:1:2::2", "2001:db8:1:3::1"}); got != 3 {
+	// 1 个 IPv4 + 2 个 /64:两族各自计数取较大者(双栈设备不算两台)
+	if got := DeviceCount([]string{"1.2.3.4", "2001:db8:1:2::1", "2001:db8:1:2::2", "2001:db8:1:3::1"}); got != 2 {
 		t.Fatalf("实际 %d", got)
 	}
 }

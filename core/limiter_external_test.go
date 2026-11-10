@@ -47,8 +47,12 @@ func TestLimiterIPv6SamePrefixIsOneDevice(t *testing.T) {
 	if l.AllowConn("u", "2001:db8:1:3::a") {
 		t.Fatal("别的 /64 是另一台设备,应超限")
 	}
-	if l.AllowConn("u", "1.2.3.4") {
-		t.Fatal("IPv4 也是另一台,应超限")
+	// 同一台设备的 IPv4 不占 v6 的名额(设备数按地址族分别算,见 model.FamilyCount);第二个 IPv4 才超限
+	if !l.AllowConn("u", "1.2.3.4") {
+		t.Fatal("IPv4 与 IPv6 各自计数:双栈设备走 v4 不该被拒")
+	}
+	if l.AllowConn("u", "5.6.7.8") {
+		t.Fatal("第二个 IPv4 是另一台,应超限")
 	}
 
 	m := NewLimiter()
