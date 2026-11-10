@@ -492,8 +492,8 @@ The "Feedback / Support" button in the panel's top-right corner has the author's
 **m-ui has no telemetry** and collects no usage data. The supporters list and the panel count are the only extra network activity, and they use free public services rather than a server of our own:
 
 - Signing goes through [ntfy.sh](https://ntfy.sh). It is sent only when you click the button and contains only the name and amount.
-- GitHub Actions matches signatures with arrivals from [TronGrid](https://www.trongrid.io) every 10 minutes and writes the result to this repository's `donors` branch. Panels read that list when the page is opened, at most once an hour.
-- Panel count: each panel downloads an empty file from GitHub once a day, and the daily growth of GitHub's download counter is the number of panels. No identifier is sent.
+- A scheduled GitHub Actions job (GitHub may delay it by several hours) matches signatures with arrivals from [TronGrid](https://www.trongrid.io) and writes the result to this repository's `donors` branch, so a name usually shows up a few hours after the transfer arrives. Panels read that list when the page is opened, at most once an hour.
+- Panel count: each panel downloads an empty file from GitHub once a day (if GitHub can't be reached, it tries again 1–2 hours later, at most 4 times a day), and the daily growth of GitHub's download counter is the number of panels. No identifier is sent.
 
 **Settings → Panel → Supporters list and online panel count** turns all of this off with one switch (on by default). When off, this network activity stops and the page no longer shows them.
 

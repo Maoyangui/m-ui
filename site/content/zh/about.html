@@ -41,5 +41,32 @@
     <p>在面板的「建议与支持」页留名并转 USDT,到账后会出现在这里和每一台面板上。</p>
     <ol id="supporters-list"></ol>
   </section>
-  <script>fetch('https://raw.githubusercontent.com/Maoyangui/m-ui/donors/donors.json').then(function(r){return r.json()}).then(function(d){var l=document.getElementById('supporters-list');(d.donors||[]).slice(0,50).forEach(function(x){var li=document.createElement('li');li.textContent=x.name+' · '+Math.round(x.total*100)/100+' USDT';l.appendChild(li)});if(l.children.length)document.getElementById('supporters').hidden=false}).catch(function(){})</script>
+  <script>
+  // 功德箱:和面板读同一份名单。raw 和 jsDelivr 同时取(raw 在有的地方打不开),两份都到了用新的那份;
+  // 名字按面板的规则(web/donate.go 的 cleanDonorName)过一遍,面板不显示的这里也不显示。
+  (function () {
+    var newest = -1;
+    function clean(s) {
+      if (typeof s !== 'string') return '';
+      s = s.trim().split(/\s+/).join(' ');
+      if (!s || Array.from(s).length > 24 || !/^[\p{L}\p{N}\p{M} ._\-·']+$/u.test(s) || /[a-z0-9-]+\.[a-z]{2,}/i.test(s)) return '';
+      return s;
+    }
+    ['https://raw.githubusercontent.com/Maoyangui/m-ui/donors/donors.json', 'https://cdn.jsdelivr.net/gh/Maoyangui/m-ui@donors/donors.json'].forEach(function (u) {
+      fetch(u).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }).then(function (d) {
+        if (!d || !Array.isArray(d.donors)) return;
+        var at = Math.max(Number(d.updatedAt) || 0, Number(d.devicesAt) || 0);
+        if (at < newest) return;
+        newest = at;
+        var rows = d.donors.map(function (x) { return { name: clean(x && x.name), total: Number(x && x.total) }; })
+          .filter(function (x) { return x.name && x.total > 0 && isFinite(x.total); })
+          .sort(function (a, b) { return b.total - a.total; });
+        var l = document.getElementById('supporters-list');
+        l.textContent = '';
+        rows.slice(0, 50).forEach(function (x) { var li = document.createElement('li'); li.textContent = x.name + ' · ' + Math.round(x.total * 100) / 100 + ' USDT'; l.appendChild(li); });
+        document.getElementById('supporters').hidden = !rows.length;
+      }).catch(function () {});
+    });
+  })();
+  </script>
 </article>
