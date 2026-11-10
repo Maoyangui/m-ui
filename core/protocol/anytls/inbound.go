@@ -23,6 +23,7 @@ import (
 	anytls "github.com/anytls/sing-anytls"
 	"github.com/anytls/sing-anytls/padding"
 
+	"github.com/Maoyangui/m-ui/core/protocol/arrival"
 	"github.com/Maoyangui/m-ui/core/protocol/usersess"
 )
 
@@ -39,13 +40,15 @@ type Inbound struct {
 	service   *anytls.Service
 	sessions  *usersess.Registry // 用户 → 会话登记表:停用 / 换密码 / 踢线时按用户关整条 TLS 会话
 	set       *usersess.Set      // 本数据面全部入站的登记表(踢线时一次扫全部)
+	arrivals  arrival.Recorder   // 握手 / 认证没过的记到"最近入站连接"(只记,不影响放行)
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.AnyTLSInboundOptions) (adapter.Inbound, error) {
 	inbound := &Inbound{
-		Adapter: inbound.NewAdapter(C.TypeAnyTLS, tag),
-		router:  uot.NewRouter(router, logger),
-		logger:  logger,
+		Adapter:  inbound.NewAdapter(C.TypeAnyTLS, tag),
+		router:   uot.NewRouter(router, logger),
+		logger:   logger,
+		arrivals: arrival.FromContext(ctx),
 	}
 
 	if options.TLS != nil && options.TLS.Enabled {
@@ -119,6 +122,7 @@ func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata ada
 		if err != nil {
 			N.CloseOnHandshakeFailure(conn, onClose, err)
 			h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source, ": TLS handshake"))
+			arrival.Note(h.arrivals, metadata.Source, h.Tag(), h.Type(), arrival.TLS, err) // 到了,但证书 / SNI / REALITY 不对
 			return
 		}
 		conn = tlsConn
@@ -130,10 +134,14 @@ func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata ada
 		return // 入站正在关:登记表已关门,会话已被关掉
 	}
 	defer h.sessions.End(sess)
+	ctx, mark := arrival.WithMark(ctx)
 	err := h.service.NewConnection(usersess.WithSession(adapter.WithContext(ctx, &metadata), sess), conn, metadata.Source, onClose)
 	if err != nil {
 		N.CloseOnHandshakeFailure(conn, onClose, err)
 		h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source))
+		if !mark.Passed() { // 没进到路由:密码不对,或不是 anytls 客户端
+			arrival.Note(h.arrivals, metadata.Source, h.Tag(), h.Type(), arrival.Auth, err)
+		}
 	}
 }
 
@@ -148,6 +156,7 @@ func (h *inboundHandler) NewConnectionEx(ctx context.Context, conn net.Conn, sou
 	//nolint:staticcheck
 	metadata.Source = source
 	metadata.Destination = destination.Unwrap()
+	arrival.Pass(ctx)
 	if userName, _ := auth.UserFromContext[string](ctx); userName != "" {
 		metadata.User = userName
 		h.logger.InfoContext(ctx, "[", userName, "] inbound connection to ", metadata.Destination)

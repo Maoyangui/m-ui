@@ -432,6 +432,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		PublicIP:     s.setting("publicIp"),
 		PublicIP6:    s.setting("publicIp6"),
 		Conns:        s.recentConns(50),
+		ConnFails:    s.recentFails(30),
 		LedgerEpoch:  s.setting(hub.LedgerEpochKey),
 		ServicePorts: s.reportServicePorts(),
 		KickPending:  strings.TrimSpace(s.setting(agentKickPendingKey)) != "",

@@ -639,7 +639,7 @@ func upsertSetting(tx *gorm.DB, k, v string) error {
 	}).Create(&model.Setting{Key: k, Value: v}).Error
 }
 
-// RecentConn 数据面日志里聚合出的一条"源 IP × 线路"入站记录(诊断用)。
+// RecentConn 一条"源 IP × 线路"入站记录(诊断用,数据面的连接跟踪器记的)。
 type RecentConn struct {
 	IP       string `json:"ip"`
 	User     string `json:"user,omitempty"` // 认证成功的用户名(日志里带 [用户] 的那条)
@@ -650,6 +650,9 @@ type RecentConn struct {
 	Server   string `json:"server,omitempty"` // 主机汇总时标注来自哪台服务器
 	// Rejected 这条最近一次被拒:device(设备数超限)/ pool(代理设备池已满);放行的为空
 	Rejected string `json:"rejected,omitempty"`
+	// Failed 只在"到了但没过握手 / 认证"那份里有:tls(TLS / REALITY 握手没过)/ auth(协议认证没过);Detail 是原因原文
+	Failed string `json:"failed,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // Report 是副机上报的状态。
@@ -669,6 +672,7 @@ type Report struct {
 	PublicIP        string                         `json:"publicIp"`               // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
 	PublicIP6       string                         `json:"publicIp6"`              // 副机探测到的公网 IPv6(没有为空;老版本副机不带,也是空),主机存入 nodes.public_ip6
 	Conns           []RecentConn                   `json:"conns,omitempty"`        // 最近入站连接,主机概览汇总展示
+	ConnFails       []RecentConn                   `json:"connFails,omitempty"`    // 到了但没过握手 / 认证的来源(老副机不报,老主机不认)
 	Groups          map[string]GroupState          `json:"groups,omitempty"`       // 代理池在这台机器上的状态(在线设备、设备池满被拒次数)
 	Upstreams       []UpstreamHealth               `json:"upstreams,omitempty"`    // 本机线路真正用到的那些上游的巡检结果
 	Reload          *ReloadState                   `json:"reload,omitempty"`       // 副机最近一次重载的结果,失败要让主机面板看见
@@ -787,10 +791,20 @@ type NodeStatus struct {
 	unsyncedSince      int64 // 在线但配置没同步上从什么时候开始;0 = 已同步或不在线
 	unsyncedAlerted    bool
 	conns              []RecentConn
+	connFails          []RecentConn
 }
 
 // RemoteConns 汇总所有在线副机最近上报的入站连接,标注服务器名。
 func (h *Hub) RemoteConns() []RecentConn {
+	return h.remoteConns(func(st *NodeStatus) []RecentConn { return st.conns })
+}
+
+// RemoteConnFails 同 RemoteConns,"到了但没过握手 / 认证"的那份。
+func (h *Hub) RemoteConnFails() []RecentConn {
+	return h.remoteConns(func(st *NodeStatus) []RecentConn { return st.connFails })
+}
+
+func (h *Hub) remoteConns(pick func(*NodeStatus) []RecentConn) []RecentConn {
 	now := time.Now().Unix()
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -799,7 +813,7 @@ func (h *Hub) RemoteConns() []RecentConn {
 		if !h.freshLocked(id, now) {
 			continue
 		}
-		for _, c := range st.conns {
+		for _, c := range pick(st) {
 			c.Server = st.Name
 			out = append(out, c)
 		}
@@ -1601,7 +1615,7 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 			st.Error = "配置已收到,但这台副机的数据面没应用成功(仍在跑上一份可用配置),看副机日志"
 		}
 		st.OnlineUsers = len(rep.Onlines)
-		st.conns = rep.Conns
+		st.conns, st.connFails = rep.Conns, rep.ConnFails
 		st.ReloadError, st.ReloadAt = "", 0
 		if rep.Reload != nil && !rep.Reload.OK {
 			st.ReloadError, st.ReloadAt = rep.Reload.Op+":"+rep.Reload.Error, rep.Reload.At

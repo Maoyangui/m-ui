@@ -3,6 +3,7 @@ package tuic
 import (
 	"context"
 	"net"
+	"net/netip"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/gofrs/uuid/v5"
 
+	"github.com/Maoyangui/m-ui/core/protocol/arrival"
 	"github.com/Maoyangui/m-ui/core/protocol/usersess"
 )
 
@@ -64,6 +66,14 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	}
 	inbound.sessions = usersess.New(nil) // 用户表在下面校验完 UUID 之后再灌进去
 	inbound.wrap = usersess.NewServerTLS(tlsConfig, inbound.sessions, false, false)
+	if rec := arrival.FromContext(ctx); rec != nil {
+		// TUIC 认证没过(UUID / 密码不对、超时没认证)时库自己关掉连接、不经过这里:记一笔"到了但认证没过"(只记,不影响放行)
+		inbound.wrap.OnUnauthed(func(ap netip.AddrPort) {
+			if ap.IsValid() {
+				rec.NoteFailure(ap.Addr().Unmap().String(), tag, C.TypeTUIC, arrival.Auth, "")
+			}
+		})
+	}
 	inbound.set = usersess.SetFromContext(ctx)
 	var udpTimeout time.Duration
 	if options.UDPTimeout != 0 {

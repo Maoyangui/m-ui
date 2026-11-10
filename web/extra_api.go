@@ -186,23 +186,48 @@ func (s *Server) recentConns(limit int) []recentConn {
 	return s.run.RecentConns(limit)
 }
 
+// recentFails 本机"到了但没过握手 / 认证"的来源。
+func (s *Server) recentFails(limit int) []recentConn {
+	if s.run == nil {
+		return nil
+	}
+	return s.run.RecentFails(limit)
+}
+
 // handleRecentConns 本机 + 各副机最近入站连接;多服务器时带服务器名,按最近时间排序。
+// 带 ?fails=1 时后面再接上"到了但没过握手 / 认证"的来源(failed 字段非空,单独限量,刷不掉前面的);
+// 不带时和以前一样只有通过认证的(含被设备数拒的)。
 func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
 	out := s.recentConns(100)
 	remote := s.run.Hub().RemoteConns()
-	if len(remote) > 0 {
+	var fails, remoteFails []recentConn
+	withFails := r.URL.Query().Get("fails") == "1"
+	if withFails {
+		fails, remoteFails = s.recentFails(50), s.run.Hub().RemoteConnFails()
+	}
+	if len(remote) > 0 || len(remoteFails) > 0 {
 		var local model.Node
 		s.db.Where("is_local = ?", true).First(&local)
-		for i := range out {
-			out[i].Server = local.Name
-		}
-		out = append(out, remote...)
-		sort.SliceStable(out, func(i, j int) bool { return out[i].Ts > out[j].Ts })
-		if len(out) > 100 {
-			out = out[:100]
-		}
+		out = mergeRecent(out, remote, local.Name, 100)
+		fails = mergeRecent(fails, remoteFails, local.Name, 50)
+	}
+	if withFails {
+		out = append(out, fails...)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// mergeRecent 本机的标上服务器名,和副机的合在一起按最近时间排,留前 limit 条。
+func mergeRecent(local, remote []recentConn, localName string, limit int) []recentConn {
+	for i := range local {
+		local[i].Server = localName
+	}
+	out := append(local, remote...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Ts > out[j].Ts })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 // ---- 日志 ----

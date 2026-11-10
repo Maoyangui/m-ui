@@ -1352,6 +1352,20 @@ func (r *Runner) RecentConns(limit int) []hub.RecentConn {
 	return out
 }
 
+// RecentFails 本机"到了但没过握手 / 认证"的来源(见 core/protocol/arrival),概览诊断卡与副机报告用。
+func (r *Runner) RecentFails(limit int) []hub.RecentConn {
+	box := r.core.GetInstance()
+	if box == nil {
+		return nil
+	}
+	list := box.ConnTracker().Failures(limit)
+	out := make([]hub.RecentConn, 0, len(list))
+	for _, c := range list {
+		out = append(out, hub.RecentConn{IP: c.IP, Line: c.Inbound, Protocol: c.Protocol, Count: c.Count, Ts: c.Last, Failed: c.Failed, Detail: c.Detail})
+	}
+	return out
+}
+
 // OnlineIPLines 本机上 用户 → 源 IP → 线路名。
 func (r *Runner) OnlineIPLines() map[string]map[string][]string {
 	if box := r.core.GetInstance(); box != nil {

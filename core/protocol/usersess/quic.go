@@ -3,6 +3,7 @@ package usersess
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"net"
 	"net/netip"
 	"sync/atomic"
@@ -36,7 +37,14 @@ type ServerTLS struct {
 	hy2      bool // hysteria2:库的默认路径按混淆与否设版本协商与 stateless reset;TUIC 两者都不设
 	obfs     bool
 	listened atomic.Bool
+	unauthed func(netip.AddrPort) // 见 OnUnauthed
 }
+
+// OnUnauthed 握手完成、却没通过协议认证就被服务端关掉的 QUIC 连接回调一次(给"最近入站连接"记"到了但认证没过")。
+// 只给 TUIC 用:sing-quic 的 TUIC 认证失败(UUID / 密码不对)或超时没认证时,自己关掉连接、不经过入站;
+// 我们能看到的是连接结束时 —— 从来没开过流(登记表里没绑上用户)、不是我们撤销的、也不是对端关的(本端 ApplicationError)。
+// hysteria2 认证失败不关连接(交给伪装站点),在入站里另外认。要在开始监听之前设。
+func (t *ServerTLS) OnUnauthed(fn func(netip.AddrPort)) { t.unauthed = fn }
 
 // NewServerTLS inner 是入站原来的 TLS 配置(入站自己仍要持有它做 Start / Close)。
 func NewServerTLS(inner aTLS.ServerConfig, reg *Registry, hy2, obfs bool) *ServerTLS {
@@ -81,7 +89,7 @@ func (t *ServerTLS) Listen(conn net.PacketConn, config *quic.Config) (qtls.Liste
 	}
 	t.listened.Store(true)
 	t.reg.hookOK.Store(true)
-	return &trackingListener{accept: l.Accept, close: l.Close, addr: l.Addr, reg: t.reg}, nil
+	return &trackingListener{accept: l.Accept, close: l.Close, addr: l.Addr, reg: t.reg, unauthed: t.unauthed}, nil
 }
 
 func (t *ServerTLS) ListenEarly(conn net.PacketConn, config *quic.Config) (qtls.EarlyListener, error) {
@@ -95,7 +103,7 @@ func (t *ServerTLS) ListenEarly(conn net.PacketConn, config *quic.Config) (qtls.
 	}
 	t.listened.Store(true)
 	t.reg.hookOK.Store(true)
-	return &trackingListener{accept: l.Accept, close: l.Close, addr: l.Addr, reg: t.reg}, nil
+	return &trackingListener{accept: l.Accept, close: l.Close, addr: l.Addr, reg: t.reg, unauthed: t.unauthed}, nil
 }
 
 // ConfigureHTTP3 和默认路径一样只为它的副作用(会话票据);NextProtos 已由 qtls.ConfigureHTTP3 预先设好。
@@ -108,10 +116,11 @@ func (t *ServerTLS) ConfigureHTTP3() {
 // trackingListener 每 Accept 到一条 QUIC 连接就登记一条会话,连接结束时注销。
 // 错误原样返回:sing-quic 靠 errors.Is(err, quic.ErrServerClosed) 判断监听是否关闭。
 type trackingListener struct {
-	accept func(context.Context) (*quic.Conn, error)
-	close  func() error
-	addr   func() net.Addr
-	reg    *Registry
+	accept   func(context.Context) (*quic.Conn, error)
+	close    func() error
+	addr     func() net.Addr
+	reg      *Registry
+	unauthed func(netip.AddrPort)
 }
 
 func (l *trackingListener) Accept(ctx context.Context) (*quic.Conn, error) {
@@ -124,9 +133,25 @@ func (l *trackingListener) Accept(ctx context.Context) (*quic.Conn, error) {
 		sl.Store(sess)
 	}
 	if !sess.Closed() {
-		context.AfterFunc(conn.Context(), func() { l.reg.End(sess) })
+		context.AfterFunc(conn.Context(), func() {
+			if l.unauthed != nil && neverAdmitted(sess, l.reg) && closedLocally(context.Cause(conn.Context())) {
+				l.unauthed(addrPortOf(conn.RemoteAddr()))
+			}
+			l.reg.End(sess)
+		})
 	}
 	return conn, nil
+}
+
+// neverAdmitted 这条会话从头到尾没开过流(没绑上用户),也不是我们关的(撤销 / 入站正在关)。
+func neverAdmitted(sess *Session, reg *Registry) bool {
+	return !sess.Closed() && sess.User() == "" && !reg.isClosed()
+}
+
+// closedLocally 连接是本端用 CloseWithError 关的(不是对端关、不是空闲超时、不是握手失败)。
+func closedLocally(err error) bool {
+	var ae *quic.ApplicationError
+	return errors.As(err, &ae) && !ae.Remote
 }
 
 func (l *trackingListener) Close() error   { return l.close() }

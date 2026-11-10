@@ -155,10 +155,13 @@ function renderResellerStats() {
 async function renderConns() {
   const el = document.getElementById('dash-conns');
   if (!el) return;
-  const rows = await get('conns/recent');
-  if (!rows.length) { setHTML(el, empty(t('dash.noConns'))); return; }
-  const multi = rows.some(c => c.server);
-  el.innerHTML = `<div class="table-wrap"><table class="grid conns"><thead><tr><th>IP</th><th>${t('logs.user')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 30).map(c =>
+  const got = await get('conns/recent?fails=1');
+  const all = Array.isArray(got) ? got : []; // 官网演示的假接口没有这项,回的是 {}
+  // 通过了握手与认证的(含被设备数拒的)在上面;"到了但没过握手 / 认证"的单独一张小表,各自限量,扫描刷不掉上面的
+  const rows = all.filter(c => !c.failed), fails = all.filter(c => c.failed);
+  if (!rows.length && !fails.length) { setHTML(el, empty(t('dash.noConns'))); return; }
+  const multi = all.some(c => c.server);
+  const main = rows.length ? `<div class="table-wrap"><table class="grid conns"><thead><tr><th>IP</th><th>${t('logs.user')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 30).map(c =>
     `<tr>
       <td class="mono">${esc(c.ip)}${c.rejected ? ' <span class="badge danger" title="' + esc(t('dash.rejectedHelp')) + '">' + esc(t(c.rejected === 'pool' ? 'dash.rejectedPool' : 'dash.rejectedDevice')) + '</span>' : ''}</td>
       <td class="ell" title="${esc(c.user || '')}">${c.user ? esc(c.user) : '<span class="muted">—</span>'}</td>
@@ -166,7 +169,18 @@ async function renderConns() {
       ${multi ? `<td class="ell">${esc(c.server || '')}</td>` : ''}
       <td class="num">${c.count}</td>
       <td class="mono small">${fmtTime(c.ts)}</td>
-    </tr>`).join('')}</tbody></table></div>`;
+    </tr>`).join('')}</tbody></table></div>` : empty(t('dash.noConns'));
+  const failTable = fails.length ? `<h3 class="conns-sub">${t('dash.failsTitle')}</h3><p class="hint">${t('dash.failsHelp')}</p>
+    <div class="table-wrap"><table class="grid conns fails"><thead><tr><th>IP</th><th>${t('dash.failWhy')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${fails.slice(0, 15).map(c =>
+    `<tr>
+      <td class="mono">${esc(c.ip)}</td>
+      <td><span class="badge warn" title="${esc(t('dash.fail.' + c.failed + '.help') + (c.detail ? '\n' + c.detail : ''))}">${esc(t('dash.fail.' + c.failed))}</span></td>
+      <td class="ell">${esc(c.line)} <span class="muted small">${esc(c.protocol)}</span></td>
+      ${multi ? `<td class="ell">${esc(c.server || '')}</td>` : ''}
+      <td class="num">${c.count}</td>
+      <td class="mono small">${fmtTime(c.ts)}</td>
+    </tr>`).join('')}</tbody></table></div>` : '';
+  el.innerHTML = main + failTable;
 }
 
 async function renderHealth() {

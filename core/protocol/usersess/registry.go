@@ -287,6 +287,13 @@ func (r *Registry) Clear() {
 	r.mu.Unlock()
 }
 
+// isClosed 登记表是否已关门(入站在关)。
+func (r *Registry) isClosed() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
+}
+
 // Len 当前登记的会话数(含还没绑定用户的)。
 func (r *Registry) Len() int {
 	r.mu.Lock()

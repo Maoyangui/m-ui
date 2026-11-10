@@ -20,6 +20,8 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+
+	"github.com/Maoyangui/m-ui/core/protocol/arrival"
 )
 
 func RegisterInbound(registry *inbound.Registry) {
@@ -38,13 +40,15 @@ type Inbound struct {
 	fallbackAddr             M.Socksaddr
 	fallbackAddrTLSNextProto map[string]M.Socksaddr
 	transport                adapter.V2RayServerTransport
+	arrivals                 arrival.Recorder // 握手 / 认证没过的记到"最近入站连接"(只记,不影响放行)
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.TrojanInboundOptions) (adapter.Inbound, error) {
 	inbound := &Inbound{
-		Adapter: inbound.NewAdapter(C.TypeTrojan, tag),
-		router:  router,
-		logger:  logger,
+		Adapter:  inbound.NewAdapter(C.TypeTrojan, tag),
+		router:   router,
+		logger:   logger,
+		arrivals: arrival.FromContext(ctx),
 	}
 	if options.TLS != nil {
 		tlsConfig, err := tls.NewServerWithOptions(tls.ServerOptions{
@@ -167,14 +171,19 @@ func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata ada
 		if err != nil {
 			N.CloseOnHandshakeFailure(conn, onClose, err)
 			h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source, ": TLS handshake"))
+			arrival.Note(h.arrivals, metadata.Source, h.Tag(), h.Type(), arrival.TLS, err) // 到了,但证书 / SNI / REALITY 不对
 			return
 		}
 		conn = tlsConn
 	}
+	ctx, mark := arrival.WithMark(ctx)
 	err := h.service.NewConnection(adapter.WithContext(ctx, &metadata), conn, metadata.Source, onClose)
 	if err != nil {
 		N.CloseOnHandshakeFailure(conn, onClose, err)
 		h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source))
+		if !mark.Passed() { // 没进到路由:密码 / UUID 不对,或不是这个协议的客户端
+			arrival.Note(h.arrivals, metadata.Source, h.Tag(), h.Type(), arrival.Auth, err)
+		}
 	}
 }
 
@@ -186,6 +195,7 @@ func (h *Inbound) newConnection(ctx context.Context, conn net.Conn, metadata ada
 		N.CloseOnHandshakeFailure(conn, onClose, os.ErrInvalid)
 		return
 	}
+	arrival.Pass(ctx)
 	if user != "" {
 		metadata.User = user
 	}
@@ -201,6 +211,7 @@ func (h *Inbound) newPacketConnection(ctx context.Context, conn N.PacketConn, me
 		N.CloseOnHandshakeFailure(conn, onClose, os.ErrInvalid)
 		return
 	}
+	arrival.Pass(ctx)
 	if user != "" {
 		metadata.User = user
 	}
