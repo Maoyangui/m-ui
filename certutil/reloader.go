@@ -356,3 +356,39 @@ func (r *Reloader) tempInfo(service string) (TempCert, bool) {
 	}
 	return TempCert{Service: service, CertFile: r.certPath, KeyFile: r.keyPath, Err: msg, Since: r.since}, true
 }
+
+// SNI 订阅端口按客户端请求的域名在几张证书里挑:哪张写着这个域名就用哪张,都没写(或没带域名)就用第一张。
+// 接任 / 设为主机后,订阅证书换成了随主机身份带来的那张(用户订阅地址里的域名),本机原来的证书还留着给本机自己的域名用。
+type SNI struct {
+	list []*Reloader
+}
+
+// NewSNI 第一张是默认证书。
+func NewSNI(primary *Reloader, others ...*Reloader) *SNI {
+	return &SNI{list: append([]*Reloader{primary}, others...)}
+}
+
+// GetCertificate 供 tls.Config.GetCertificate 使用。
+func (s *SNI) GetCertificate(h *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	if h != nil && h.ServerName != "" && len(s.list) > 1 {
+		for _, r := range s.list {
+			c, err := r.GetCertificate(h)
+			if err != nil || c == nil {
+				continue
+			}
+			leaf := c.Leaf
+			if leaf == nil && len(c.Certificate) > 0 {
+				leaf, _ = x509.ParseCertificate(c.Certificate[0])
+			}
+			if leaf != nil && leaf.VerifyHostname(h.ServerName) == nil {
+				return c, nil
+			}
+		}
+	}
+	return s.list[0].GetCertificate(h)
+}
+
+// TLSConfig 返回按 SNI 挑证书的 tls.Config。
+func (s *SNI) TLSConfig() *tls.Config {
+	return &tls.Config{GetCertificate: s.GetCertificate, MinVersion: tls.VersionTLS12}
+}

@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
-// Cloudflare 是 dns-01 所需的最小 API 客户端(只会读区域、增删 TXT)。
+// Cloudflare 是 dns-01 与主机容灾改 DNS 所需的最小 API 客户端(读区域、增删 TXT、查与改 A / AAAA)。
 type Cloudflare struct {
 	Token   string
 	BaseURL string // 测试用,默认官方地址
@@ -97,4 +98,30 @@ func (c *Cloudflare) CreateTXT(ctx context.Context, zone, name, content string) 
 // DeleteRecord 删除记录。
 func (c *Cloudflare) DeleteRecord(ctx context.Context, zone, id string) error {
 	return c.do(ctx, "DELETE", "/zones/"+zone+"/dns_records/"+id, nil, nil)
+}
+
+// DNSRecord 一条 DNS 记录(主机容灾改 A / AAAA 用)。
+type DNSRecord struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	Content string `json:"content"`
+	Proxied bool   `json:"proxied"`
+	TTL     int    `json:"ttl"`
+}
+
+// ListRecords 列出区域里名字为 name、类型为 typ 的记录。
+func (c *Cloudflare) ListRecords(ctx context.Context, zone, name, typ string) ([]DNSRecord, error) {
+	var out []DNSRecord
+	q := "/zones/" + zone + "/dns_records?per_page=100&name=" + url.QueryEscape(name)
+	if typ != "" {
+		q += "&type=" + url.QueryEscape(typ)
+	}
+	err := c.do(ctx, "GET", q, nil, &out)
+	return out, err
+}
+
+// UpdateContent 只改一条记录的内容(PATCH):类型、名字、橙云、TTL 都保持原样。
+func (c *Cloudflare) UpdateContent(ctx context.Context, zone, id, content string) error {
+	return c.do(ctx, "PATCH", "/zones/"+zone+"/dns_records/"+id, map[string]interface{}{"content": content}, nil)
 }

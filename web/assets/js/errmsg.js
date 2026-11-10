@@ -682,7 +682,9 @@ const EN = /*BEGIN*/{
 "请求太频繁": "Too many requests",
 "还没收到集群密钥": "The cluster key has not been received yet",
 "鉴权失败": "Authentication failed",
-"没有可测的地址": "No address to test"
+"没有可测的地址": "No address to test",
+"先填 Cloudflare 令牌": "Enter the Cloudflare token first",
+"先填要跟着主机走的域名": "Enter the names that follow the master first"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

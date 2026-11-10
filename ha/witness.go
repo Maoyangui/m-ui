@@ -1,7 +1,5 @@
 package ha
 
-// 自动改 DNS 在最后一步补上,这里先放占位。
-
 // WitnessResult 境外见证的结论:up(主机对外正常,只是网络分区)/ down / unknown。
 type WitnessResult struct {
 	Verdict string `json:"verdict"`
@@ -10,16 +8,6 @@ type WitnessResult struct {
 	At      int64  `json:"at"`
 	Error   string `json:"error,omitempty"`
 }
-
-// DnsChange 自动改的一条 DNS 记录。
-type DnsChange struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	From string `json:"from"`
-	To   string `json:"to"`
-}
-
-func (s *Service) updateDNS(formerIP, formerIP6 string) ([]DnsChange, error) { return nil, nil }
 
 // WitnessVerdict 见证结论:至少 2/3 的测点连得上 = up;最多 1/3 = down;其余(含一个都没测成)= unknown。
 func WitnessVerdict(ok, total int) string {

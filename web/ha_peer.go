@@ -80,7 +80,19 @@ func (l *ipLimiter) allow(ip string) bool {
 	return e.l.Allow()
 }
 
-// haDNSTest 主机:只读地测一下 Cloudflare 令牌和要跟着主机走的域名。最后一步补上。
+// haDNSTest 主机:只读地测一下 Cloudflare 令牌和要跟着主机走的域名(不改任何记录;令牌不回显)。
 func (s *Server) haDNSTest(w http.ResponseWriter, r *http.Request, h *ha.Service) {
-	http.NotFound(w, r)
+	var body struct {
+		Token string `json:"token"`
+		Names string `json:"names"`
+	}
+	if !decodeSmall(w, r, &body) {
+		return
+	}
+	res, err := h.DNSTest(body.Token, body.Names)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
 }

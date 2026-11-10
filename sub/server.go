@@ -414,7 +414,9 @@ func (s *Server) Start() error {
 			logger.Error("订阅证书读不出来(", err, "):订阅先用临时自签证书顶着,仍走 HTTPS,但校验证书的客户端会更新失败。",
 				"到证书页给订阅换一张证书,或把文件放回 ", certFile, "(放回后几秒内自动换上)")
 		}
-		ln = tls.NewListener(ln, rl.TLSConfig()) // 证书文件更新后自动换用,续期无需重启
+		// 证书文件更新后自动换用,续期无需重启;客户端请求的域名写在证书库里别的证书上时用那一张
+		// (接任 / 设为主机后订阅证书是随主机身份带来的,本机原来的证书留给本机自己的域名)
+		ln = tls.NewListener(ln, certutil.NewSNI(rl, s.storeCerts(certFile)...).TLSConfig())
 		scheme = "https"
 	}
 	s.TLS.Set("sub", rl)
@@ -431,6 +433,19 @@ func (s *Server) Start() error {
 	}()
 	logger.Info("订阅服务已启动 ", scheme, "://", addr, subPath)
 	return nil
+}
+
+// storeCerts 证书库里除 skip 之外、文件读得出来的证书(订阅端口按 SNI 备选;自签的不算)。
+func (s *Server) storeCerts(skip string) []*certutil.Reloader {
+	var rows []model.Cert
+	s.db.Where("cert_file <> ? AND source <> ?", skip, "selfsign").Find(&rows)
+	var out []*certutil.Reloader
+	for _, c := range rows {
+		if r, err := certutil.NewReloader(c.CertFile, c.KeyFile); err == nil {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func (s *Server) Stop() error {
