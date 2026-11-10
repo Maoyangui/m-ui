@@ -387,7 +387,7 @@ func inboundBase(line model.Line, cert NodeCert) (map[string]interface{}, error)
 	}
 	inbound["type"] = line.Protocol
 	inbound["tag"] = line.Name
-	inbound["listen"] = "::"
+	inbound["listen"] = listenAddr()
 	inbound["listen_port"] = line.Port
 
 	tlsConf := ParseTLS(line)
