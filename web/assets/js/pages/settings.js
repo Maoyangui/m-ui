@@ -3,6 +3,15 @@ import { get, post } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy, urlHost } from '../ui.js';
 
+// boolSetting 开关类设置的显示:和后端同一个判法(model.NormBoolSetting),空值用默认。
+function boolSetting(v, def) {
+  const x = String(v ?? '').trim().toLowerCase();
+  if (x === '') return def;
+  if (['true', '1', 'on', 'yes'].includes(x)) return true;
+  if (['false', '0', 'off', 'no'].includes(x)) return false;
+  return def;
+}
+
 export const title = () => t('set.title');
 
 // 留空时后端采用的默认值,作为输入框占位提示
@@ -108,7 +117,7 @@ export async function render(el) {
         <div class="card-head"><h2>${esc(g.title)}${g.restart ? ` <span class="badge warn" title="${t('set.restartHint')}">${t('set.needRestart')}</span>` : ''}</h2><div class="row">${g.test ? `<button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button>` : ''}<button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div></div>
         <div class="form-grid">${g.fields.map(([k, label, type, help, options]) =>
           type === 'bool' || type === 'boolOn'
-            ? check('set-' + k, label, s[k] === undefined || s[k] === '' ? (k === 'subPageEnabled' || type === 'boolOn') : String(s[k]).toLowerCase() === 'true', help)
+            ? check('set-' + k, label, boolSetting(s[k], k === 'subPageEnabled' || type === 'boolOn'), help)
             : type === 'textarea' || type === 'code'
               ? `<div class="full">${field(label, `<textarea id="set-${k}" ${type === 'code' ? 'class="code-area" spellcheck="false" autocomplete="off"' : ''}>${esc(s[k] ?? '')}</textarea>`, help)}</div>`
               : type === 'select'
@@ -121,7 +130,7 @@ export async function render(el) {
         <dt>${t('set.version')}</dt><dd class="mono">${esc(state.status.version || '')}</dd>
         <dt>sing-box</dt><dd class="mono">${esc(state.status.singBox || '—')}</dd>
         <dt>${t('set.panelUrl')}</dt><dd class="mono">${esc((state.status.panelTLS ? 'https' : 'http') + '://' + urlHost(state.status.panelTLS ? 'https' : 'http', s.webDomain || '<IP>', state.status.webPort || '') + (state.status.webPath || '/'))}</dd>
-        <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + urlHost(state.status.subTLS ? 'https' : 'http', s.webDomain || '<IP>', state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('set.userPh') + '>?format=clash')}</dd>
+        <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + urlHost(state.status.subTLS ? 'https' : 'http', s.webDomain || '<IP>', state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('set.userPh') + '>')}</dd>
         <dt>License</dt><dd>GPL-3.0 · <a href="${esc(state.status.repo || '#')}" target="_blank" rel="noopener">GitHub</a></dd>
       </dl>
       <p class="hint">${t('set.restartNote')}</p>

@@ -29,27 +29,35 @@ var pageFS embed.FS
 var pageTmpl = template.Must(template.ParseFS(pageFS, "page.html"))
 
 // 已知代理客户端的 UA 片段:命中即认为是客户端在拉订阅,返回原始内容。
-var clientUATokens = []string{
-	"clash", "mihomo", "stash", "shadowrocket", "sing-box", "singbox", "sfi/", "sfa/", "sfm/",
-	"hiddify", "v2ray", "xray", "nekobox", "nekoray", "surge", "quantumult", "loon", "karing",
-	"husi", "flclash", "sagernet", "matsuri", "pharos", "kitsunebi", "streisand", "v2box",
-	"hysteria", "tuic", "curl/", "wget/", "go-http-client", "okhttp", "python-requests",
+// 与 format.go 里按格式分的几组合在一起,加上命令行工具;新增客户端只改 format.go 那几组。
+var clientUATokens = concatTokens(linkUATokens, singBoxUATokens, clashUATokens, []string{
+	"flclash", "godusevpn", "hysteria", "tuic", "curl/", "wget/", "go-http-client", "okhttp", "python-requests",
+})
+
+// inAppBrowserTokens iOS 上的 App 内置浏览器(WKWebView)默认 UA 不带 Safari:微信、QQ、钉钉、飞书、支付宝、微博……
+var inAppBrowserTokens = []string{"applewebkit", "micromessenger", "qq/", "dingtalk", "lark/", "alipay", "weibo"}
+
+func concatTokens(lists ...[]string) []string {
+	var out []string
+	for _, l := range lists {
+		out = append(out, l...)
+	}
+	return out
 }
 
 // WantsPage 判断请求来自浏览器(应返回订阅页)还是代理客户端(应返回原始订阅)。
 // ?format=page 强制出页面;其它 format 强制出原始订阅。
 func WantsPage(r *http.Request) bool {
 	if f := r.URL.Query().Get("format"); f != "" {
-		return f == "page"
+		nf, _ := NormalizeFormat(f)
+		return nf == "page"
 	}
 	ua := strings.ToLower(r.UserAgent())
-	for _, tok := range clientUATokens {
-		if strings.Contains(ua, tok) {
-			return false
-		}
+	if containsAny(ua, clientUATokens) {
+		return false
 	}
 	return strings.Contains(ua, "mozilla") &&
-		(strings.Contains(ua, "chrome") || strings.Contains(ua, "safari") || strings.Contains(ua, "firefox") || strings.Contains(ua, "edg"))
+		(containsAny(ua, []string{"chrome", "safari", "firefox", "edg"}) || containsAny(ua, inAppBrowserTokens))
 }
 
 // publicBase 以用户实际访问到的 scheme/host 组装订阅地址,反代/换域名都不用改设置。
@@ -104,6 +112,7 @@ type pageData struct {
 	Lines                   []pageLine
 	Year                    int
 	Brand                   bool // 页脚 "Powered by m-ui":设置可关;代理的落地页不显示
+	AutoFormat              bool // 通用地址按客户端给格式(设置 subAutoFormat);关着时提示改用 Clash / sing-box 地址
 	TZOffset                int  // 面板时区相对 UTC 的分钟数,用量图的时间标签按它显示
 	// Shared:这是共享地址的落地页。只给借用者看得着的:临时共享标识、选购、公告、一键导入、订阅地址、节点;
 	// 本人的用量 / 到期 / 用量图 / 共享管理一概不出,状态卡也只说原因不带数字。
@@ -261,6 +270,7 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key 
 	data.RatioNote = ratioNodes > 0
 	data.Shared = shared
 	data.Brand = rs == nil && !strings.EqualFold(s.setting("subPageBrand"), "false") // 代理的落地页尊重代理品牌
+	data.AutoFormat = autoFormatOn(s.setting("subAutoFormat"))
 	data.BuyURL = s.buyURL(rs)
 	if st := stateOf(user, rs, time.Now().Unix()); st != data.StatusText { // 代理被停用 / 到期也算停用
 		data.StatusText, data.StatusKind, data.Unavailable = st, "danger", true

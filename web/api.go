@@ -1276,6 +1276,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			if maskedSettings[k] && v == secretMask {
 				delete(in, k) // 原样提交回来的掩码 = 不改
 			}
+			if model.BoolSettings[k] { // 开关一律存成 true / false,前后端同一个判法
+				nv, ok := model.NormBoolSetting(v)
+				if !ok {
+					badRequest(w, fmt.Errorf("设置项 %q 只能是 true 或 false", k))
+					return
+				}
+				in[k] = nv
+			}
 		}
 		if err := s.validatePorts(in); err != nil { // 端口写错会导致重启后打不开,先拦下
 			badRequest(w, err)

@@ -42,7 +42,19 @@ func TestFormatForUA(t *testing.T) {
 		{"curl/8.5.0", "", false},
 		{"", "", false},
 		{"Go-http-client/1.1", "", false},
-		{"godusevpn/0.7.15", "", false},
+		{"godusevpn/0.7.15 (sing-box)", "json", false}, // 佛跳墙的真实 UA(godusevpn internal/buildinfo)
+		// sing-box 1.14 官方客户端(SagerNet 源码):不再带 "SFA/版本"
+		{"SFA (sing-box 1.14.0; language zh_CN)", "json", false},
+		{"SFI (sing-box 1.14.0; language zh-Hans_CN)", "json", false},
+		{"SFW (sing-box 1.14.0; language zh_CN)", "json", false},
+		{"SFL (sing-box 1.14.0; language en_US)", "json", false},
+		// Throne 1.0.x 默认 UA 带 "(Prefer ClashMeta Format)",它的 Clash 解析会丢 httpupgrade / VLESS encryption
+		{"Throne/1.0.12 (Prefer ClashMeta Format)", "", false},
+		{"Throne/1.1.0", "", false},
+		{"SomeNewFork/1.0 (Prefer ClashMeta Format)", "", false},
+		// 注释里说带 meta 的不算老内核
+		{"ClashForAndroid/2.5.12.Meta", "clash", false},
+		{"ClashX/1.3.0 (com.metacubex.ClashX.meta; build:1)", "clash", false},
 	}
 	for _, c := range cases {
 		f, legacy := FormatForUA(c.ua)

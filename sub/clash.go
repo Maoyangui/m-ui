@@ -206,21 +206,42 @@ var legacyClashProtocols = map[string]bool{"shadowsocks": true, "vmess": true, "
 // legacyClashTypes 同上,外部节点按 clash 的 type 字段判断。
 var legacyClashTypes = map[string]bool{"ss": true, "vmess": true, "trojan": true, "socks5": true, "http": true}
 
+// legacySSCipher 老内核(go-shadowsocks2)认识的加密方式:SS-2022(2022-blake3-*)与 none 都不认,一条就让整份配置报错。
+func legacySSCipher(m string) bool {
+	m = strings.ToLower(strings.TrimSpace(m))
+	return m != "" && m != "none" && !strings.HasPrefix(m, "2022-")
+}
+
 // legacyClashOnly 只留老内核 Clash 认识的线路与外部节点。
 func legacyClashOnly(lines []model.Line, external []ExtItem) ([]model.Line, []ExtItem) {
 	keep := make([]model.Line, 0, len(lines))
 	for _, l := range lines {
-		if legacyClashProtocols[l.Protocol] {
-			keep = append(keep, l)
+		if !legacyClashProtocols[l.Protocol] {
+			continue
 		}
+		if l.Protocol == "shadowsocks" {
+			var o struct {
+				Method string `json:"method"`
+			}
+			_ = json.Unmarshal(l.Options, &o)
+			if !legacySSCipher(o.Method) {
+				continue
+			}
+		}
+		keep = append(keep, l)
 	}
 	ext := make([]ExtItem, 0, len(external))
 	for _, e := range external {
 		c := make([]map[string]interface{}, 0, len(e.Clash))
 		for _, p := range e.Clash {
-			if t, _ := p["type"].(string); legacyClashTypes[t] {
-				c = append(c, p)
+			t, _ := p["type"].(string)
+			if !legacyClashTypes[t] {
+				continue
 			}
+			if cipher, _ := p["cipher"].(string); t == "ss" && !legacySSCipher(cipher) {
+				continue
+			}
+			c = append(c, p)
 		}
 		ext = append(ext, ExtItem{Name: e.Name, Links: e.Links, Clash: c})
 	}

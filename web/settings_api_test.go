@@ -127,3 +127,51 @@ func TestAdminTotpCannotBeReplacedWhileEnabled(t *testing.T) {
 		t.Fatal("密钥不该被换掉")
 	}
 }
+
+// 设置页的每个勾选框(bool / boolOn)都要在 model.BoolSettings 里:保存时才会规整成 true / false,
+// 否则存成 0 / off 时界面显示关、后端却按开处理。
+func TestBoolSettingsCoverFrontend(t *testing.T) {
+	b, err := fs.ReadFile(assets, "assets/js/pages/settings.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := regexp.MustCompile(`\['([A-Za-z0-9]+)', t\('[^']+'\), '(bool|boolOn)'`).FindAllStringSubmatch(string(b), -1)
+	if len(ms) < 15 {
+		t.Fatalf("没从设置页解析出勾选框(%d 个),正则需要更新", len(ms))
+	}
+	for _, m := range ms {
+		if !model.BoolSettings[m[1]] {
+			t.Errorf("设置页的勾选框 %q 不在 model.BoolSettings 里", m[1])
+		}
+	}
+}
+
+// 开关类设置保存时规整:0 / off → false,1 / on / yes → true,空值保留(用默认),认不出的拒绝且不改动任何设置。
+func TestBoolSettingsNormalizedOnSave(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	call := func(body string) int {
+		r := httptest.NewRequest("POST", "http://x/app/api/settings", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		s.handleSettings(w, r)
+		return w.Code
+	}
+	if code := call(`{"subAutoFormat":"0","blockBT":"ON","tgDaily":"yes","subShowNotice":""}`); code != 200 {
+		t.Fatalf("保存失败: %d", code)
+	}
+	for k, want := range map[string]string{"subAutoFormat": "false", "blockBT": "true", "tgDaily": "true", "subShowNotice": ""} {
+		if got := s.setting(k); got != want {
+			t.Errorf("%s 应存成 %q,得 %q", k, want, got)
+		}
+	}
+	if code := call(`{"tgDaily":"maybe","timezone":"UTC"}`); code != 400 {
+		t.Fatalf("认不出的开关值应被拒,得 %d", code)
+	}
+	if s.setting("timezone") == "UTC" || s.setting("tgDaily") != "true" {
+		t.Fatal("被拒的请求不该改动任何设置")
+	}
+}

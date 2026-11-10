@@ -284,7 +284,7 @@ m-ui            # 菜单选 10 "更新到最新版"
 
 ### 订阅
 
-- **一个地址就够**:`https://<域名或IP>:2056/sub/<用户名>`。客户端来拉时按 User-Agent 给它能用的格式 —— Clash Verge / mihomo / Stash 拿 Clash,SFA / SFI / sing-box 拿 sing-box,Shadowrocket、Surge、Quantumult X、Loon、Karing、nextin 等拿通用链接;认不出的按通用链接给。想强制某种格式就加 `?format=`。设置 → 订阅可以关掉自动识别。
+- **一个地址就够**:`https://<域名或IP>:2056/sub/<用户名>`。客户端来拉时按 User-Agent 给它能用的格式 —— Clash Verge / mihomo / Stash 拿 Clash,SFA / SFI / sing-box 拿 sing-box,NekoBox、Throne、Hiddify、v2rayN、Shadowrocket、Quantumult X、Loon、Karing、nextin 等拿通用链接;认不出的按通用链接给。老内核 Clash(CFW / ClashX / CFA)不会收到它认不出的协议和 SS-2022,写了 `?format=clash` 也一样;要强制按新内核给就写 `?format=mihomo`。想强制某种格式就加 `?format=`(大小写都认)。设置 → 订阅格式与模板 可以关掉自动识别。
 - 设置 → 订阅的"用用户名作订阅地址"默认开着;关掉后**新建**用户的订阅地址改成一串随机令牌(用户名只作名称,地址猜不到),已有用户不受影响,代理建的用户一律是随机令牌。
 - Clash:在链接后加 `?format=clash`,适用于 mihomo / Clash Verge / Stash 等;每条线路生成一个按延迟自动选择的入口组。
 - **自定义模板**:设置 → 订阅 可以给 Clash 和 sing-box 各写一份模板,节点和分组由面板填进去;模板写错保存时就报错。有「填入默认模板」可以照着改。

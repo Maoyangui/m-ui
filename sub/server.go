@@ -504,16 +504,22 @@ func (s *Server) handle() http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		format := r.URL.Query().Get("format")
-		if format == "" && !strings.EqualFold(s.setting("subAutoFormat"), "false") {
-			// 通用地址:按客户端给它能用的格式。记到请求上,订阅日志里也就记成实际给的格式
-			if f, legacy := FormatForUA(r.UserAgent()); f != "" {
-				format, opt.LegacyClash = f, legacy
-				q := r.URL.Query()
-				q.Set("format", f)
-				r.URL.RawQuery = q.Encode()
-			}
+		format, forceMeta := NormalizeFormat(r.URL.Query().Get("format"))
+		if r.URL.Query().Get("format") == "" && autoFormatOn(s.setting("subAutoFormat")) {
+			// 通用地址:按客户端给它能用的格式
+			format, _ = FormatForUA(r.UserAgent())
 		}
+		if format == "clash" && !forceMeta {
+			// 老内核 Clash 不管从通用地址还是 ?format=clash(落地页的 Clash 地址 / clash:// 一键导入)进来,都只发它认识的协议
+			opt.LegacyClash = LegacyClashUA(r.UserAgent())
+		}
+		if format == "page" { // 订阅页关着时 ?format=page 也只能给链接
+			format = ""
+		}
+		// 记到请求上,订阅日志里也就记成实际给的格式(分享链接记 link,别被 WantsPage 记成 page)
+		q := r.URL.Query()
+		q.Set("format", pick(format, "link"))
+		r.URL.RawQuery = q.Encode()
 
 		var res Result
 		switch format {
@@ -525,7 +531,7 @@ func (s *Server) handle() http.HandlerFunc {
 				return
 			}
 			res = out
-		case "json", "sing-box", "singbox", "sfa":
+		case "json":
 			out, err := BuildSingBoxSub(user, lines, opt)
 			if err != nil {
 				s.log(r, user.Name, shared, 500)
@@ -602,6 +608,15 @@ func (s *Server) resellerOf(u model.User) *model.Reseller {
 		return nil
 	}
 	return &rs
+}
+
+// autoFormatOn「按客户端自动给格式」开关:默认开,写成 false / 0 / off / no 才算关(设置页同一判法)。
+func autoFormatOn(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "off", "no":
+		return false
+	}
+	return true
 }
 
 // pageEnabled 订阅页开关:主面板关掉就都不出;代理可以只关自己的。

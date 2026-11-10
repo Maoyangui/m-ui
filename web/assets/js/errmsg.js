@@ -401,6 +401,7 @@ const EN = /*BEGIN*/{
 "记录副机待踢线状态失败: %w": "Failed to record the node's pending-kick state: %w",
 "设备数与限速不能为负": "Devices and speed limits can't be negative",
 "设置项 %q 不能在这里修改": "Setting %q can't be changed here",
+"设置项 %q 只能是 true 或 false": "Setting %q must be true or false",
 "证书与私钥无法加载(格式错误或两者不匹配): %w": "Can't load the certificate and key (bad format or they don't match): %w",
 "证书设置已保存，数据面重载失败: %w": "Certificate settings saved, but reloading the data plane failed: %w",
 "证书设置已保存，重启订阅服务失败: %w": "Certificate settings saved, but restarting the subscription service failed: %w",

@@ -294,6 +294,13 @@ func SetSettings(dbPath string, kv map[string]string) error {
 	}
 	defer database.Close(db)
 	for k, v := range kv {
+		if model.BoolSettings[k] { // 命令行写开关也规整成 true / false,和设置页保存一致
+			nv, ok := model.NormBoolSetting(v)
+			if !ok {
+				return fmt.Errorf("设置项 %q 只能是 true 或 false", k)
+			}
+			v = nv
+		}
 		var existing model.Setting
 		if err := db.Where("key = ?", k).First(&existing).Error; err == nil {
 			if err := db.Model(&model.Setting{}).Where("key = ?", k).Update("value", v).Error; err != nil {
