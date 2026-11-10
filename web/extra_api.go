@@ -470,6 +470,16 @@ func (s *Server) dispatchLineSubroute(w http.ResponseWriter, r *http.Request) bo
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "线路不存在"})
 		return true
 	}
+	if !line.Enabled { // 启用前复核端口(理由见 handleLineBatch 的 enable)
+		if err := s.checkServicePorts(line); err != nil {
+			badRequest(w, err)
+			return true
+		}
+		if name := s.lineOnPort(&line); name != "" {
+			badRequest(w, fmt.Errorf("端口 %d 已被线路%s占用,换一个", line.Port, name))
+			return true
+		}
+	}
 	if err := s.db.Model(&model.Line{}).Where("id = ?", line.Id).Update("enabled", !line.Enabled).Error; err != nil {
 		badRequest(w, err)
 		return true

@@ -453,21 +453,10 @@ func (s *Server) validateLine(line *model.Line) error {
 	if line.Port < 1 || line.Port > 65535 {
 		return errors.New("端口需在 1-65535 之间")
 	}
-	// 干跑校验不绑定端口,和面板/订阅/代理面板撞号要等数据面启动才炸,在这里先拦
-	for _, p := range []struct {
-		label string
-		port  int
-	}{
-		{"面板", s.settingInt("webPort", 2053)},
-		{"订阅", s.settingInt("subPort", 2056)},
-		{"代理面板", s.settingInt("resellerPort", 2054)},
-	} {
-		if p.label == "代理面板" && strings.EqualFold(s.setting("resellerEnabled"), "false") {
-			continue
-		}
-		if line.Port == p.port {
-			return fmt.Errorf("端口 %d 已被%s占用,换一个", line.Port, p.label)
-		}
+	// 干跑校验不绑定端口,和本机面板/订阅/代理面板撞号要等数据面启动才炸,在这里先拦。
+	// 只部署在别的服务器上的线路不占本机端口,和本机这几个端口无关(I3)
+	if err := s.checkServicePorts(*line); err != nil {
+		return err
 	}
 	// 线路之间撞端口(只看部署范围有交集的服务器):后面的 bind 探测只会说"被别的程序占用",
 	// 这里先把占着端口的那条线路点名
@@ -1437,44 +1426,143 @@ func (s *Server) validatePorts(in map[string]string) error {
 		}
 		got[key] = n
 	}
+	// 这次保存之后哪些端口真的会监听:代理面板关着、或本机是副机(副机不起代理面板,见 StartReseller)都不占端口
+	activeAfter := map[string]bool{
+		"webPort": true, "subPort": true,
+		"resellerPort": resellerListens(s.settingOr(in, "resellerEnabled"), s.settingOr(in, "nodeMode")),
+	}
+	activeBefore := map[string]bool{
+		"webPort": true, "subPort": true,
+		"resellerPort": resellerListens(s.setting("resellerEnabled"), s.setting("nodeMode")),
+	}
+	keys := []string{"webPort", "subPort", "resellerPort"} // 固定顺序:报错稳定
 	seen := map[int]string{}
-	for key, n := range got {
-		if key == "resellerPort" && strings.EqualFold(s.settingOr(in, "resellerEnabled"), "false") {
-			continue // 代理面板关着就不占端口
+	for _, key := range keys {
+		if !activeAfter[key] {
+			continue
 		}
+		n := got[key]
 		if other, dup := seen[n]; dup {
-			return fmt.Errorf("%s与%s的端口都是 %d,不能重复", ports[key].label, ports[other].label, n)
+			return fmt.Errorf("%s与%s的端口都是 %d,不能重复", ports[other].label, ports[key].label, n)
 		}
 		seen[n] = key
 	}
+	// 只有"这次改了"或"这次才开始监听"的端口才需要查占用;没动的端口不能让时区、通知、切换角色这类无关保存失败
+	var changed []string
+	for _, key := range keys {
+		if !activeAfter[key] {
+			continue
+		}
+		_, submitted := in[key]
+		if (submitted && got[key] != s.settingInt(key, ports[key].def)) || !activeBefore[key] {
+			changed = append(changed, key)
+		}
+	}
+	// 反方向也要拦:把面板/订阅端口改成某条线路正在用的端口,同样会起不来。先于 bind 探测点名线路(探测只会说"被别的程序占用")。
+	// 只看部署在本机的线路(含"全部服务器",也含停用的——端口给它留着):只在别的服务器上的线路不占本机端口(I3)
+	if len(changed) > 0 {
+		lineByPort := s.localLinesByPort()
+		for _, key := range changed {
+			if name, dup := lineByPort[got[key]]; dup {
+				return fmt.Errorf("%s端口 %d 已被线路 %q 占用,换一个", ports[key].label, got[key], name)
+			}
+		}
+	}
 	// 端口有改动时,确认本机没有别的程序占着(没改的不测:占着它的就是自己)
-	for key, n := range got {
-		if _, active := seen[n]; !active {
-			continue
-		}
-		if _, ok := in[key]; !ok || n == s.settingInt(key, ports[key].def) {
-			continue // 没提交或没变(包括把默认值手动填进去):占着它的正是面板自己
-		}
-		if !portBindable(n) {
-			return fmt.Errorf("%s端口 %d 已被本机其它程序占用,换一个", ports[key].label, n)
-		}
-	}
-	// 反方向也要拦:把面板/订阅端口改成某条线路正在用的端口,同样会起不来
-	lineByPort := map[int]string{}
-	var lines []model.Line
-	s.db.Select("name, port").Find(&lines)
-	for _, l := range lines {
-		lineByPort[l.Port] = l.Name
-	}
-	for key, n := range got {
-		if _, active := seen[n]; !active {
-			continue
-		}
-		if name, dup := lineByPort[n]; dup {
-			return fmt.Errorf("%s端口 %d 已被线路 %q 占用,换一个", ports[key].label, n, name)
+	for _, key := range changed {
+		if !portBindable(got[key]) {
+			return fmt.Errorf("%s端口 %d 已被本机其它程序占用,换一个", ports[key].label, got[key])
 		}
 	}
 	return nil
+}
+
+// resellerListens 代理面板会不会监听:关掉了(resellerEnabled=false)或本机是副机(nodeMode=true)都不监听。
+// 与 StartReseller 的判断保持一致。
+func resellerListens(enabled, nodeMode string) bool {
+	return !strings.EqualFold(strings.TrimSpace(enabled), "false") && !strings.EqualFold(strings.TrimSpace(nodeMode), "true")
+}
+
+// localServicePorts 本机当前会监听的服务端口(面板 / 订阅 / 代理面板)。
+func (s *Server) localServicePorts() []struct {
+	label string
+	port  int
+} {
+	out := []struct {
+		label string
+		port  int
+	}{
+		{"面板", s.settingInt("webPort", 2053)},
+		{"订阅", s.settingInt("subPort", 2056)},
+	}
+	if resellerListens(s.setting("resellerEnabled"), s.setting("nodeMode")) {
+		out = append(out, struct {
+			label string
+			port  int
+		}{"代理面板", s.settingInt("resellerPort", 2054)})
+	}
+	return out
+}
+
+// checkLocalServicePorts 线路部署到本机(含"全部服务器")时,端口不能和本机面板 / 订阅 / 代理面板相同。
+func (s *Server) checkLocalServicePorts(line model.Line) error {
+	if !render.LineOnNode(line, s.localNodeID()) {
+		return nil
+	}
+	for _, p := range s.localServicePorts() {
+		if line.Port == p.port {
+			return fmt.Errorf("端口 %d 已被%s占用,换一个", line.Port, p.label)
+		}
+	}
+	return nil
+}
+
+// defaultServicePorts 副机还没上报端口(老版本 / 主机刚重启还没收到报告)时按安装默认值避让。
+var defaultServicePorts = []model.ServicePort{{Label: "面板", Port: 2053}, {Label: "订阅", Port: 2056}}
+
+// checkServicePorts 线路部署到的每台服务器上,端口都不能和那台机器的面板 / 订阅(/ 代理面板)相同:
+// 本机按本机设置;副机按它上报的端口;没上报的副机按安装默认值 + 主机自己的端口避让(保持修复前的保守口径)。
+func (s *Server) checkServicePorts(line model.Line) error {
+	if err := s.checkLocalServicePorts(line); err != nil {
+		return err
+	}
+	var nodes []model.Node
+	s.db.Select("id, name, is_local, service_ports").Where("is_local = ?", false).Order("sort asc, id asc").Find(&nodes)
+	for _, n := range nodes {
+		if !render.LineOnNode(line, n.Id) {
+			continue
+		}
+		var ports []model.ServicePort
+		if len(n.ServicePorts) == 0 || json.Unmarshal(n.ServicePorts, &ports) != nil || len(ports) == 0 {
+			ports = append([]model.ServicePort{}, defaultServicePorts...)
+			for _, p := range s.localServicePorts() {
+				ports = append(ports, model.ServicePort{Label: p.label, Port: p.port})
+			}
+		}
+		for _, p := range ports {
+			if line.Port == p.Port {
+				return fmt.Errorf("端口 %d 已被服务器「%s」的%s占用,换一个", line.Port, n.Name, p.Label)
+			}
+		}
+	}
+	return nil
+}
+
+// localLinesByPort 部署在本机(含"全部服务器")的线路:端口 → 线路名。停用的也算(端口给它留着)。
+func (s *Server) localLinesByPort() map[int]string {
+	self := s.localNodeID()
+	var lines []model.Line
+	s.db.Select("id, name, port, node_ids").Order("sort asc, id asc").Find(&lines)
+	out := map[int]string{}
+	for _, l := range lines {
+		if !render.LineOnNode(l, self) {
+			continue
+		}
+		if _, ok := out[l.Port]; !ok {
+			out[l.Port] = l.Name
+		}
+	}
+	return out
 }
 
 // settingOr 取这次提交里的值,没提交就取库里的。

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"sort"
@@ -361,10 +362,11 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		Version: Version, Hostname: host, CoreRunning: s.run.CoreRunning(), Uptime: s.run.Uptime(),
 		Revision: s.setting("hubRevision"), ReloadPending: strings.TrimSpace(s.setting("hubReloadPending")) != "",
 		Onlines: map[string][]string{}, CertDays: s.run.CertInfo().DaysLeft, Certs: s.run.CertBriefs(),
-		PublicIP:    s.setting("publicIp"),
-		PublicIP6:   s.setting("publicIp6"),
-		Conns:       s.recentConns(50),
-		LedgerEpoch: s.setting(hub.LedgerEpochKey),
+		PublicIP:     s.setting("publicIp"),
+		PublicIP6:    s.setting("publicIp6"),
+		Conns:        s.recentConns(50),
+		LedgerEpoch:  s.setting(hub.LedgerEpochKey),
+		ServicePorts: s.reportServicePorts(),
 	}
 	rep.OnlineLinesByIP = s.run.OnlineIPLines()
 	rep.Groups = s.run.GroupState()
@@ -487,4 +489,16 @@ func (s *Server) handleAgentUpstreamCheck(w http.ResponseWriter, r *http.Request
 			Method: h.Method, Error: h.Error, CheckedAt: h.CheckedAt, Fails: h.Fails})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// reportServicePorts 副机随报告上报自己监听的服务端口:配置值,外加正在监听、但配置已改(等重启)的旧端口。
+// 副机不起代理面板(StartReseller),不报它。
+func (s *Server) reportServicePorts() []model.ServicePort {
+	out := []model.ServicePort{{Label: "面板", Port: s.settingInt("webPort", 2053)}, {Label: "订阅", Port: s.settingInt("subPort", 2056)}}
+	if s.listener != nil {
+		if a, ok := s.listener.Addr().(*net.TCPAddr); ok && a.Port != out[0].Port {
+			out = append(out, model.ServicePort{Label: "面板", Port: a.Port})
+		}
+	}
+	return out
 }

@@ -332,6 +332,7 @@ const EN = /*BEGIN*/{
 "监听 80 端口失败(http-01 需要 80 端口空闲且公网可达): %w": "Listening on port 80 failed (http-01 needs port 80 free and reachable from the internet): %w",
 "目标 %s 已存在,如需覆盖请加 -force": "Target %s already exists; add -force to overwrite",
 "端口 %d 已被%s占用,换一个": "Port %d is used by %s; pick another",
+"端口 %d 已被服务器「%s」的%s占用,换一个": "Port %d is taken on server \"%s\" by its %s; pick another",
 "端口 %d 已被本机其它程序占用,换一个": "Port %d is in use by another program on this server; pick another",
 "端口 %d 已被线路%s占用,换一个": "Port %d is used by line %s; pick another",
 "端口 %d 落在线路「%s」的端口跳跃范围 %s 里,UDP 包会被转给那条线路,换一个": "Port %[1]d falls inside the port-hopping range %[3]s of line \"%[2]s\"; its UDP packets would go to that line, pick another",

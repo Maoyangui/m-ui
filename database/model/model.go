@@ -89,6 +89,12 @@ type CertBrief struct {
 	Default    bool     `json:"default,omitempty"` // 线路默认证书
 }
 
+// ServicePort 服务器上 m-ui 自己监听的一个端口(面板 / 订阅 / 代理面板)。
+type ServicePort struct {
+	Label string `json:"label"`
+	Port  int    `json:"port"`
+}
+
 // Node 入口服务器。IsLocal 标记 Hub 所在机;副机通过 ApiUrl+Token 管理。
 type Node struct {
 	Id       uint   `json:"id" gorm:"primaryKey;autoIncrement"`
@@ -114,6 +120,8 @@ type Node struct {
 	CertFP string `json:"certFp,omitempty"`
 	// Certs 这台服务器证书库的清单 []CertBrief(本机由 runner 写入,副机随报告上报)。线路编辑框与订阅的 SNI 用它。
 	Certs json.RawMessage `json:"certs,omitempty"`
+	// ServicePorts 这台服务器自己监听的服务端口 []ServicePort(面板 / 订阅;副机随报告上报,主机建线路时按它避让)。空 = 未知(老版本副机)。
+	ServicePorts json.RawMessage `json:"servicePorts,omitempty"`
 }
 
 // User 订阅用户。配额/流量为两台服务器聚合值,判定只在主端进行。

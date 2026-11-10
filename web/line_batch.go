@@ -56,6 +56,14 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 			lines[i].Enabled = req.Action == "enable"
 		}
 		cols = []string{"enabled"}
+		// 启用前复核端口:删服务器时失去全部服务器的线路会被停用并改成"全部服务器"(detachLinesFromNode),
+		// 直接启用就可能落到本机面板端口上,或和别的服务器上的同端口线路撞
+		if req.Action == "enable" {
+			if err := s.checkBatchPorts(lines); err != nil {
+				badRequest(w, err)
+				return
+			}
+		}
 	case "upstream":
 		if req.UpstreamId == nil {
 			badRequest(w, errors.New("缺少 upstreamId"))
@@ -146,6 +154,10 @@ func (s *Server) checkBatchPorts(batch []model.Line) error {
 	var others []model.Line
 	s.db.Select("id, name, port, node_ids").Find(&others)
 	for i, a := range batch {
+		// 改完范围后落到本机的线路,端口不能和本机面板 / 订阅 / 代理面板相同(I3:validateLine 只对本机线路查这一项)
+		if err := s.checkServicePorts(a); err != nil {
+			return fmt.Errorf("线路 %q: %w", a.Name, err)
+		}
 		for _, o := range others {
 			if o.Port != a.Port || inBatch[o.Id] {
 				continue
