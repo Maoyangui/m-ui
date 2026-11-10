@@ -64,7 +64,7 @@ func replicaFor(t *testing.T, m, c *Service, seq uint64) []byte {
 
 // 备用收副本:验签、核对纪元与主机、序号只增,两代轮换;写到一半断了旧的不动;不是封给本机的、来路不对的都拒;
 // 自检解得开、跑得过 integrity_check;删除能删干净;报告里带公钥与副本信息。
-func TestCandidateStore(t *testing.T) {
+func TestStandbyStore(t *testing.T) {
 	m, c := standbyPair(t)
 	r1 := replicaFor(t, m, c, 10)
 	if seq, err := c.ReceiveReplica(bytes.NewReader(r1)); err != nil || seq != 10 {
@@ -150,7 +150,7 @@ func TestCandidateStore(t *testing.T) {
 }
 
 // 副本自检能发现坏库:把 cur 里的密文改坏 → 自检报错。
-func TestCandidateSelfCheckDetectsDamage(t *testing.T) {
+func TestStandbySelfCheckDetectsDamage(t *testing.T) {
 	m, c := standbyPair(t)
 	if _, err := c.ReceiveReplica(bytes.NewReader(replicaFor(t, m, c, 1))); err != nil {
 		t.Fatal(err)

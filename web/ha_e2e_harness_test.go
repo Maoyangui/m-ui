@@ -245,7 +245,7 @@ func waitSwitch(t *testing.T, m *haInst) ha.SwitchState {
 	deadline := time.Now().Add(60 * time.Second)
 	for {
 		st := m.HA().Switch()
-		if !st.Active() {
+		if !st.Active() && !m.HA().Switching() {
 			return st
 		}
 		if time.Now().After(deadline) {

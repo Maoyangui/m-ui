@@ -17,7 +17,7 @@ func waitSwitchDone(t *testing.T, s *Service) SwitchState {
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		st := s.Switch()
-		if !st.Active() || st.Err != "" && st.Stage == StageCommit {
+		if (!st.Active() || st.Err != "" && st.Stage == StageCommit) && !s.Switching() {
 			return st
 		}
 		if time.Now().After(deadline) {

@@ -77,7 +77,7 @@ func newCluster(t *testing.T, n int) *haCluster {
 
 // 副本只发给按顺序的前 N 台合格备用;内容没变不重发、只推"截至";调顺序后名单顺延,被移出的删掉手里的副本;
 // 备用公钥变了不再给它发、告警一次,重新信任后恢复。
-func TestReplicatorCandidates(t *testing.T) {
+func TestReplicatorStandbys(t *testing.T) {
 	cl := newCluster(t, 3)
 	m := cl.m
 	cl.h.RunOnce() // 推容灾状态(副机切到纪元 1)、拉报告(拿到备用公钥)

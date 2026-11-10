@@ -355,12 +355,14 @@ func (w *switcher) run(st SwitchState) {
 	s := w.s
 	fail := func(stage string, err error) {
 		logger.Warning("容灾:设为主机在「", stage, "」这一步失败: ", err)
-		st.Stage, st.Err = StageFailed, err.Error()
+		st.Stage, st.Err, st.UpdatedAt = StageFailed, err.Error(), s.now().Unix()
 		w.mu.Lock()
 		w.grantTo = nil
 		w.mu.Unlock()
-		s.saveSwitch(st)
-		_ = s.set(map[string]string{KeyFreezeUntil: ""})
+		// 失败与解冻一起写:外面看到「没有完成」时写操作已经恢复
+		if e := s.set(map[string]string{KeySwitch: mustJSON(st), KeyFreezeUntil: ""}); e != nil {
+			logger.Warning("容灾:记录设为主机的进度失败: ", e)
+		}
 		s.invalidate()
 		s.addNotice(Notice{Kind: "switchFailed", Name: st.TargetName, Warn: []string{err.Error()}})
 		s.audit("ha", "set-master-failed", map[string]string{"target": st.TargetName, "stage": stage, "err": err.Error()})
@@ -624,3 +626,6 @@ func (w *switcher) isRunning() bool {
 	defer w.mu.Unlock()
 	return w.running
 }
+
+// Switching 设为主机的后台步骤还在跑:进度写成完成或没有完成之后,还要收尾一小会儿(发通知、安排重启、清临时文件)。
+func (s *Service) Switching() bool { return s.sw.isRunning() }
