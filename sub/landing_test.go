@@ -23,7 +23,8 @@ func TestDisabledUserSeesLandingPage(t *testing.T) {
 		t.Fatalf("停用用户在浏览器里应看到落地页(200),实际 %d", w.Code)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"订阅已停用", "已停用", "https://shop.example/buy", "选购 / 续费订阅", "TG: @support", "订阅地址", "id=\"usage\"", "/sub/alice?format=clash"} {
+	// 联系方式里的 TG: @support 自动成了链接(关键词和冒号仍是文字)
+	for _, want := range []string{"订阅已停用", "已停用", "https://shop.example/buy", "选购 / 续费订阅", tgSupportLink, "订阅地址", "id=\"usage\"", "/sub/alice?format=clash"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("落地页缺少 %q", want)
 		}

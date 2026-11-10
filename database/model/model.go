@@ -546,6 +546,20 @@ type NodeDecommission struct {
 	LastError string `json:"lastError"`
 }
 
+// PageLogo 落地页 logo:ResellerId 0 = 主面板,> 0 = 那个代理(他名下用户的落地页用它);每个归属最多一张。
+// 存在库里而不是文件:随 VACUUM INTO 进备份,随快照下发副机(副机的订阅口也出落地页)。
+// 只存 PNG / JPEG / GIF(服务端解码校验过);SVG 在浏览器里先转成 PNG 再传,服务端从不存、也从不输出用户的 SVG。
+type PageLogo struct {
+	Id         uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	ResellerId uint   `json:"resellerId" gorm:"uniqueIndex;not null"` // 不加 default:0:带默认值的零值列 gorm 建行时会省略,0 号(主面板)这一行就靠库的默认值了
+	Mime       string `json:"mime"`                                   // image/png | image/jpeg | image/gif
+	Data       []byte `json:"data"`                                   // 图片原样字节,≤ 64 KB
+	Sum        string `json:"sum"`                                    // sha256 前 8 字节的十六进制:落地页地址里的版本号、ETag
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	UpdatedAt  int64  `json:"updatedAt"`
+}
+
 // Change 审计日志。
 type Change struct {
 	Id       uint64          `json:"id" gorm:"primaryKey;autoIncrement"`
@@ -572,6 +586,6 @@ func All() []interface{} {
 		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
-		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{},
+		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{}, &PageLogo{},
 	}
 }

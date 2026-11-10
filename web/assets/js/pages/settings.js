@@ -2,6 +2,7 @@ import { state, load } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy, urlHost } from '../ui.js';
+import { logoBlock, bindLogo } from '../logo.js';
 
 // boolSetting 开关类设置的显示:和后端同一个判法(model.NormBoolSetting),空值用默认。
 function boolSetting(v, def) {
@@ -29,6 +30,8 @@ const TIMEZONES = [
   'Europe/Paris', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
   'America/Sao_Paulo', 'Australia/Sydney', 'UTC',
 ];
+
+const isNodeRole = () => String(state.settings.nodeMode).toLowerCase() === 'true';
 
 const groups = () => [
   { id: 'panel', title: t('set.panel'), restart: true, fields: [
@@ -59,14 +62,15 @@ const groups = () => [
     ['resellerPath', t('set.path'), 'text', t('set.resellerPathHelp')],
     ['resellerCertFile', t('set.cert'), 'text', t('set.resellerCertHelp')], ['resellerKeyFile', t('set.key'), 'text'],
   ]},
-  { id: 'subpage', title: t('set.subPage'), fields: [
+  // logo 那一块上传即生效(不跟「保存」走);副机只读,随主机同步
+  { id: 'subpage', title: t('set.subPage'), extra: logoBlock('set-logo', { readonly: isNodeRole() }), fields: [
     ['subPageEnabled', t('set.subPageEnabled'), 'bool', t('set.subPageEnabledHelp')],
     ['subShareEnabled', t('set.subShare'), 'boolOn', t('set.subShareHelp')],
     ['subPageBrand', t('set.subPageBrand'), 'boolOn', t('set.subPageBrandHelp')],
     ['subPageTitle', t('set.subPageTitle'), 'text', t('set.subPageTitleHelp')],
-    ['subPageSupport', t('set.subPageSupport'), 'text'],
+    ['subPageSupport', t('set.subPageSupport'), 'text', t('set.subPageSupportHelp')],
     ['subPageBuyURL', t('set.subPageBuyURL'), 'text', t('set.subPageBuyURLHelp')],
-    ['subPageNotice', t('set.subPageNotice'), 'textarea'],
+    ['subPageNotice', t('set.subPageNotice'), 'textarea', t('set.subPageNoticeHelp')],
   ]},
   { id: 'notify', title: t('set.notify'), test: true, fields: [
     ['tgEnabled', t('set.tgEnabled'), 'bool', t('set.tgEnabledHelp')],
@@ -103,7 +107,7 @@ const groups = () => [
 
 export async function render(el) {
   const s = state.settings;
-  const isNode = String(s.nodeMode).toLowerCase() === 'true';
+  const isNode = isNodeRole();
   // 重启按钮放在页头右侧,任何时候都看得到
   document.getElementById('topbar-right').innerHTML = `<button class="btn danger sm" data-act="set.restart" title="${esc(t('set.restartHint'))}">↻ ${t('set.restart')}</button>`;
   el.innerHTML = `
@@ -139,6 +143,7 @@ export async function render(el) {
   document.getElementById('set-nodeMode').addEventListener('change', e => {
     document.getElementById('role-hint').textContent = e.target.checked ? t('set.roleNode') : t('set.roleMaster');
   });
+  bindLogo('set-logo', 'sub-logo');
   if (isNode) renderPairing();
 }
 

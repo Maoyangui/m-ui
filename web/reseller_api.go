@@ -139,6 +139,9 @@ func (s *Server) handleResellerItem(w http.ResponseWriter, r *http.Request) {
 			if err := writeResellerLineRefs(tx, id, nil); err != nil {
 				return err
 			}
+			if err := tx.Where("reseller_id = ?", id).Delete(&model.PageLogo{}).Error; err != nil { // 他的落地页 logo
+				return err
+			}
 			return tx.Delete(&model.Reseller{}, id).Error
 		})
 		if err != nil {

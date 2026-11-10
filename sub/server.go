@@ -454,6 +454,10 @@ func (s *Server) handle() http.HandlerFunc {
 		name := strings.TrimPrefix(r.URL.Path, subPath)
 		wantQR := strings.HasSuffix(name, "/qr")
 		name = strings.TrimSuffix(name, "/qr")
+		wantLogo := !wantQR && strings.HasSuffix(name, "/logo") // 落地页上的 logo;用户名不能含 /,不会和谁撞名
+		if wantLogo {
+			name = strings.TrimSuffix(name, "/logo")
+		}
 		if name == "" || strings.Contains(name, "/") {
 			http.NotFound(w, r)
 			return
@@ -485,6 +489,14 @@ func (s *Server) handle() http.HandlerFunc {
 		// 代理关了「允许临时共享」:已有的共享地址一并失效(数据面也不再下发共享凭据,审计 MB25)
 		if shared && rs != nil && !rs.ShareOn {
 			s.serveNotFound(w, r, name)
+			return
+		}
+		if wantLogo { // 跟落地页同一个开关;停用 / 到期的人照样给(他们的落地页照常出)
+			if !s.pageEnabled(rs) {
+				http.NotFound(w, r)
+				return
+			}
+			s.serveLogo(w, r, rs)
 			return
 		}
 		now := time.Now().Unix()
@@ -541,7 +553,7 @@ func (s *Server) handle() http.HandlerFunc {
 		// 客户端拉取 → 原始订阅,停用则 404
 		if s.pageEnabled(rs) && WantsPage(r) {
 			if r.URL.Query().Has("clients") { // 订阅页里那个下载箭头
-				s.serveClients(w, r, subPath, name, s.pageTitle(rs, opt))
+				s.serveClients(w, r, subPath, name, s.pageTitle(rs, opt), rs)
 				s.log(r, user.Name, shared, 200)
 				return
 			}

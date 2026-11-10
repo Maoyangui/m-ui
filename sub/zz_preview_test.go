@@ -29,7 +29,7 @@ func TestPreviewPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	buf.Reset()
-	cd := clientsData{Lang: "zh", Title: "冒央会社", Back: "https://sub.example:2056/sub/one", Tiles: clientTiles("zh"), Year: 2026,
+	cd := clientsData{Lang: "zh", Icon: d.Icon, IconType: d.IconType, Title: "冒央会社", Back: "https://sub.example:2056/sub/one", Tiles: clientTiles("zh"), Year: 2026,
 		MirrorHint: "经 ghfast.top 中转"}
 	if err := clientsTmpl.Execute(&buf, cd); err != nil {
 		t.Fatal(err)

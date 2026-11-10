@@ -1303,6 +1303,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		if err := validatePageText(in["subPageNotice"], in["subPageSupport"]); err != nil {
+			badRequest(w, err)
+			return
+		}
 		if v, ok := in["webDomain"]; ok && strings.Contains(v, "*") {
 			badRequest(w, errors.New("面板域名不能写泛域名,要填具体的访问地址,如 hk.example.com"))
 			return

@@ -20,7 +20,7 @@ import (
 //go:embed gone.html
 var goneFS embed.FS
 
-var goneTmpl = template.Must(template.ParseFS(goneFS, "gone.html"))
+var goneTmpl = template.Must(template.New("gone.html").Funcs(template.FuncMap{"linkify": linkify}).ParseFS(goneFS, "gone.html"))
 
 type goneData struct {
 	Lang    string

@@ -8,6 +8,9 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
+// tgSupportLink 联系方式 "TG: @support" 在页面上的样子:@用户名自动成了 t.me 链接,关键词和冒号仍是文字。
+const tgSupportLink = `TG: <a href="https://t.me/support" target="_blank" rel="noopener noreferrer nofollow">@support</a>`
+
 // 中文页面:落地页按 Accept-Language 选语言,测试里显式带上
 func doReqZh(s *Server, target string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest("GET", "http://hk.example:2056"+target, nil)
@@ -31,7 +34,7 @@ func TestNotFoundPageForBrowser(t *testing.T) {
 		t.Fatalf("状态码应为 200(落地页),实际 %d", w.Code)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"订阅已停用", "每月 1 号重置流量", "TG: @support"} {
+	for _, want := range []string{"订阅已停用", "每月 1 号重置流量", tgSupportLink} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("页面缺少 %q", want)
 		}
@@ -44,7 +47,7 @@ func TestNotFoundPageForBrowser(t *testing.T) {
 
 	// 地址根本不存在:404 页,同样带公告与联系方式
 	n := doReqZh(s, "/sub/nobody-here")
-	if n.Code != 404 || !strings.Contains(n.Body.String(), "订阅地址无效") || !strings.Contains(n.Body.String(), "TG: @support") {
+	if n.Code != 404 || !strings.Contains(n.Body.String(), "订阅地址无效") || !strings.Contains(n.Body.String(), tgSupportLink) {
 		t.Fatalf("未知地址应给 404 页,实际 %d", n.Code)
 	}
 	if nc := doReq(s, "GET", "/sub/nobody-here", "clash-verge/2.0"); nc.Code != 404 || strings.Contains(nc.Body.String(), "<html") {
@@ -77,7 +80,7 @@ func TestNotFoundPageUsesResellerCopy(t *testing.T) {
 	if c := doReq(s, "GET", "/sub/tok123?format=clash", "clash-verge/2.0"); c.Code != 404 {
 		t.Fatalf("代理停用时客户端应 404,实际 %d", c.Code)
 	}
-	for _, unwanted := range []string{"主面板公告", "TG: @master"} {
+	for _, unwanted := range []string{"主面板公告", "@master"} { // 主面板的 TG: @master 会自动成链接,只查用户名
 		if strings.Contains(body, unwanted) {
 			t.Fatalf("不该出现主面板的文案 %q", unwanted)
 		}

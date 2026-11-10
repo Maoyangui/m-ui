@@ -4,6 +4,7 @@ import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, openModal, registerActions, badge, field, check, fv, fchk, fmtBytes, fmtDay, progress, setHTML } from '../ui.js';
 import { apiTable, apiExample } from '../apidoc.js';
+import { logoBlock, bindLogo } from '../logo.js';
 
 export const title = () => t('acct.title');
 export const subtitle = () => t('acct.subtitle');
@@ -66,12 +67,14 @@ export async function render(el) {
         ${check('sp-share', t('set.subShare'), me.shareOn !== false, t('acct.shareHelp'))}
         ${field(t('set.subTitle'), `<input id="sp-profile" value="${esc(me.profileTitle || '')}" placeholder="${esc(t('acct.inherit'))}">`, t('acct.profileHelp'))}
         ${field(t('set.subPageTitle'), `<input id="sp-title" value="${esc(me.pageTitle || '')}" placeholder="${esc(t('acct.inherit'))}">`)}
-        ${field(t('set.subPageSupport'), `<input id="sp-support" value="${esc(me.pageSupport || '')}" placeholder="${esc(t('acct.inherit'))}">`)}
+        ${field(t('set.subPageSupport'), `<input id="sp-support" value="${esc(me.pageSupport || '')}" placeholder="${esc(t('acct.inherit'))}">`, t('set.subPageSupportHelp'))}
         ${field(t('set.subPageBuyURL'), `<input id="sp-buy" type="url" value="${esc(me.pageBuyURL || '')}" placeholder="${esc(t('acct.inherit'))}">`, t('set.subPageBuyURLHelp'))}
-        <div class="full">${field(t('set.subPageNotice'), `<textarea id="sp-notice" placeholder="${esc(t('acct.inherit'))}">${esc(me.pageNotice || '')}</textarea>`)}</div>
+        <div class="full">${field(t('set.subPageNotice'), `<textarea id="sp-notice" placeholder="${esc(t('acct.inherit'))}">${esc(me.pageNotice || '')}</textarea>`, t('set.subPageNoticeHelp'))}</div>
       </div>
+      ${logoBlock('sp-logo')}
     </section>`;
   bindApiSwitch();
+  bindLogo('sp-logo', 'self/logo', { inherit: true }); // 没设时名下用户看到的是主面板的
 }
 
 // 开关的事件:卡片每次重绘后都要重新挂

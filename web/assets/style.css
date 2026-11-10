@@ -223,6 +223,13 @@ select.sm, input.sm { padding: .24rem .45rem; font-size: .82rem; }
 .field.check { flex-direction: row; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .field.check input { width: auto; }
 .field.check .help { flex-basis: 100%; }
+/* 落地页 logo(设置 → 订阅页、代理面板 我的账号):预览 + 上传 / 恢复默认,上传即生效,和上面的「保存」分开 */
+.logo-field { display: flex; flex-direction: column; gap: .35rem; margin-top: .85rem; padding-top: .75rem; border-top: 1px dashed var(--border); }
+.logo-field .label { font-size: .8rem; color: var(--muted); font-weight: 500; }
+.logo-field .help { font-size: .74rem; color: var(--muted); line-height: 1.35; }
+.logo-row { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem .85rem; }
+.logo-preview { display: flex; align-items: center; gap: .5rem; min-height: 54px; min-width: 7rem; padding: .4rem .7rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.logo-preview img { display: block; height: 40px; width: auto; max-width: 200px; object-fit: contain; }
 details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; margin-bottom: .4rem; }
 .hint { color: var(--muted); font-size: .8rem; margin-top: .5rem; }
 .err { color: var(--danger); font-size: .85rem; min-height: 1.2rem; }

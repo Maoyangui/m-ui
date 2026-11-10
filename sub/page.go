@@ -26,7 +26,8 @@ import (
 //go:embed page.html
 var pageFS embed.FS
 
-var pageTmpl = template.Must(template.ParseFS(pageFS, "page.html"))
+// 公告与联系方式经 linkify 输出(转义 + 只放行白名单协议的链接),是页面上唯一不走模板自动转义的用户内容
+var pageTmpl = template.Must(template.New("page.html").Funcs(template.FuncMap{"linkify": linkify}).ParseFS(pageFS, "page.html"))
 
 // 已知代理客户端的 UA 片段:命中即认为是客户端在拉订阅,返回原始内容。
 // 与 format.go 里按格式分的几组合在一起,加上命令行工具;新增客户端只改 format.go 那几组。
@@ -85,7 +86,8 @@ type pageLine struct {
 
 type pageData struct {
 	Lang                    string
-	Icon                    template.URL // 标签图标(内联 SVG data URI)
+	Icon                    template.URL // 标签图标与页头 logo:内置的是内联 SVG data URI,自定义的是 ./<地址>/logo?v=<摘要>
+	IconType                string       // 标签图标的类型(link rel=icon 的 type)
 	Title, Notice, Support  string
 	Name                    string
 	StatusText, StatusKind  string // active / expired / exhausted / disabled;ok / danger
@@ -171,7 +173,7 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 	_, off := time.Now().In(loc).Zone()
 
 	d := pageData{
-		Lang: pageLang(r), Icon: template.URL(brand.DataURI), Title: title, Notice: notice, Support: support, Name: user.Name,
+		Lang: pageLang(r), Icon: template.URL(brand.DataURI), IconType: builtinIconType, Title: title, Notice: notice, Support: support, Name: user.Name,
 		UsedText: fmtBytesHuman(used), Unlimited: user.Volume == 0, UpdateHours: opt.UpdateHours,
 		SubLink: base, SubClash: clashURL, SubJSON: base + "?format=json", QRClash: template.URL(base + "/qr?format=clash"), QRLink: template.URL(base + "/qr?format=link"), QRJSON: template.URL(base + "/qr?format=json"),
 		ClientsURL: template.URL(base + "?clients=1"),
@@ -264,6 +266,7 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key 
 		opt.Share = false // 借用者不能管理共享
 	}
 	data := buildPageData(r, subPath, key, user, lines, opt, title, notice, support)
+	data.Icon, data.IconType = s.pageIcon(rs, key) // 代理的用户先用代理的 logo,再用主面板的
 	data.NoChart = strings.EqualFold(s.setting("nodeMode"), "true")
 	var ratioNodes int64
 	s.db.Model(&model.Node{}).Where("enabled = ? AND ratio > 0 AND ratio != 1", true).Count(&ratioNodes)

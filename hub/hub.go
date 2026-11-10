@@ -121,6 +121,9 @@ type Snapshot struct {
 	// 旧版主机不发这两项(解码为 nil),副机就不动本机的授权表。
 	ResellerLines     []model.ResellerLine     `json:"resellerLines"`
 	ResellerLineNodes []model.ResellerLineNode `json:"resellerLineNodes"`
+	// Logos 落地页 logo(主面板与各代理的,图片原样字节):副机的订阅口也出落地页。
+	// 旧版主机不发(解码为 nil),副机就不动本机的;旧版副机不认识这个字段,照常应用、显示内置 logo,所以不抬版本门槛。
+	Logos []model.PageLogo `json:"logos"`
 }
 
 // BuildSnapshot 从主机数据库构造快照并计算修订号(只含会影响副机行为的字段)。
@@ -187,6 +190,10 @@ func readSnapshot(db *gorm.DB, s *Snapshot) error {
 	if err := db.Order("user_id asc, ext_id asc").Find(&s.UserExts).Error; err != nil {
 		return err
 	}
+	s.Logos = []model.PageLogo{} // 一张都没有也发空表(不是 nil):副机据此删掉主机已经删了的 logo
+	if err := db.Order("reseller_id asc").Find(&s.Logos).Error; err != nil {
+		return err
+	}
 	return db.Order("id asc").Find(&s.LimitStates).Error
 }
 
@@ -215,6 +222,15 @@ func revisionOf(s Snapshot) string {
 		exts[i].ContentSig, exts[i].FetchAgent, exts[i].PrefsRev = "", "", 0
 	}
 	s.Exts = exts
+	// logo 只看摘要(Sum 就是图片字节的哈希):每 5 秒算一次修订号不用把图片编码一遍;同一张图重新上传只改了时间,不触发推送
+	if s.Logos != nil {
+		logos := make([]model.PageLogo, len(s.Logos))
+		copy(logos, s.Logos)
+		for i := range logos {
+			logos[i].Data, logos[i].UpdatedAt = nil, 0
+		}
+		s.Logos = logos
+	}
 	b, _ := json.Marshal(s)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
@@ -525,6 +541,16 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		if len(snap.LimitStates) > 0 { // 主机判定的规则限速,副机照单执行
 			if err := tx.CreateInBatches(&snap.LimitStates, snapshotBatch).Error; err != nil {
 				return err
+			}
+		}
+		if snap.Logos != nil { // 旧版主机不发 logo:保留本机的,不当成"全部删了"
+			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.PageLogo{}).Error; err != nil {
+				return err
+			}
+			if len(snap.Logos) > 0 {
+				if err := tx.CreateInBatches(&snap.Logos, snapshotBatch).Error; err != nil {
+					return err
+				}
 			}
 		}
 		if err := disableIDs(tx, &model.User{}, offUsers); err != nil {

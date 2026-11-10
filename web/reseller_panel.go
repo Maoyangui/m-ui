@@ -174,7 +174,7 @@ func (s *Server) rauth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 代理面板没有上传接口
+			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 代理面板唯一的上传是落地页 logo(图片 ≤ 64 KB,接口自己再限 128 KB)
 		}
 		if sess.pending && !strings.HasSuffix(r.URL.Path, "/status") && !strings.HasSuffix(r.URL.Path, "/self/password") {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "请先设置密码"})
@@ -323,6 +323,10 @@ func (s *Server) handleResellerSelf(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		if err := validatePageText(p.PageNotice, p.PageSupport); err != nil {
+			badRequest(w, err)
+			return
+		}
 		buy := strings.TrimSpace(p.PageBuyURL)
 		if buy != "" && !strings.HasPrefix(strings.ToLower(buy), "http://") && !strings.HasPrefix(strings.ToLower(buy), "https://") {
 			badRequest(w, errors.New("选购链接必须以 http:// 或 https:// 开头"))
@@ -339,7 +343,7 @@ func (s *Server) handleResellerSelf(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleResellerSelfSub 处理 /self/password 与 /self/totp。
+// handleResellerSelfSub 处理 /self/password、/self/totp、/self/api 与 /self/logo。
 func (s *Server) handleResellerSelfSub(w http.ResponseWriter, r *http.Request) {
 	rs, err := s.current(r)
 	if err != nil {
@@ -349,6 +353,9 @@ func (s *Server) handleResellerSelfSub(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/password"):
 		s.handleResellerPassword(w, r, rs)
+	case strings.HasSuffix(r.URL.Path, "/logo"):
+		// 自己名下用户落地页的 logo:归属取当前会话的代理,不收任何 id 参数,碰不到主面板和别的代理的
+		s.handlePageLogo(w, r, rs.Id, func(action string) { s.auditAs(rs.Name, "reseller", action, rs.Name) })
 	case strings.HasSuffix(r.URL.Path, "/api/rotate"):
 		// 重新生成令牌:旧令牌立即失效
 		if r.Method != http.MethodPost {

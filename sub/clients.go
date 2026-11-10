@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Maoyangui/m-ui/brand"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 // 客户端下载页:订阅页"一键导入"旁边那个下载箭头点开的就是这里。
@@ -60,7 +60,8 @@ type clientTile struct {
 
 type clientsData struct {
 	Lang       string
-	Icon       template.URL
+	Icon       template.URL // 标签图标:和落地页同一个 logo(见 pageIcon)
+	IconType   string
 	Title      string
 	Back       string // 返回订阅页
 	Tiles      []clientTile
@@ -388,15 +389,16 @@ func clientTiles(lang string) []clientTile {
 	return addMirrors(tiles, zh)
 }
 
-// serveClients 输出客户端下载页。页面不带任何用户信息,Back 指回订阅页。
-func (s *Server) serveClients(w http.ResponseWriter, r *http.Request, subPath, key, title string) {
+// serveClients 输出客户端下载页。页面不带任何用户信息,Back 指回订阅页;标签图标和落地页一样(代理的用户用代理的 logo)。
+func (s *Server) serveClients(w http.ResponseWriter, r *http.Request, subPath, key, title string, rs *model.Reseller) {
 	lang := pageLang(r)
 	hint := "经 ghfast.top 镜像中转,大陆网络环境可直接下载;文件与官方发布页相同"
 	if lang != "zh" {
 		hint = "Same file proxied by ghfast.top; downloads from mainland China"
 	}
+	icon, iconType := s.pageIcon(rs, key)
 	d := clientsData{
-		Lang: lang, Icon: template.URL(brand.DataURI), Title: title,
+		Lang: lang, Icon: icon, IconType: iconType, Title: title,
 		Back: publicBase(r, subPath, key), Tiles: clientTiles(lang), Year: time.Now().Year(), MirrorHint: hint,
 	}
 	var buf bytes.Buffer

@@ -244,6 +244,14 @@ function status() {
   return s;
 }
 
+// 落地页 logo 只存在内存里:上传前浏览器已经转成 PNG,宽高从 PNG 头里读
+function logoOf(data) {
+  const b64 = String(data || '').split(',')[1] || '';
+  const head = atob(b64.slice(0, 44));
+  const u32 = i => ((head.charCodeAt(i) << 24) | (head.charCodeAt(i + 1) << 16) | (head.charCodeAt(i + 2) << 8) | head.charCodeAt(i + 3)) >>> 0;
+  return { set: true, sum: rnd(16), mime: 'image/png', width: u32(16), height: u32(20), size: Math.floor(b64.length * 3 / 4), data };
+}
+
 // 一条路由:method + 路径(去掉 ./api/ 与查询串),query 单独给
 function route(method, path, query, body) {
   const seg = path.split('/');
@@ -275,6 +283,7 @@ function route(method, path, query, body) {
           warp: { ...((o.info || {}).warp || {}), installed: true, service: 'active', socks: 'active', port: 40000, listening: true, status: 'Connected', exit: 'on', exitIp: '104.28.0.1', exitLoc: 'JP', exitColo: 'NRT' } };
         o.status = o.status || { running: false, log: [] }; return o; }
       case 'cert': if (seg[1] === 'status') return fx('GET cert/status') || { running: false, log: [] }; { const c = fx('GET cert') || { settings: S.settings, status: {} }; const use = S.certs.find(x => x.certFile === S.certUse.lines); return { ...c, notifyConfigured: true, certs: clone(S.certs), certPath: S.certUse.lines, panelCert: S.certUse.panel, subCert: S.certUse.sub, panelTLS: !!S.certUse.panel, subTLS: !!S.certUse.sub, source: use ? use.source : '', info: use ? clone(use.info) : { exists: false } }; }
+      case 'sub-logo': return clone(S.logo || { set: false });
       case 'sub-templates': return { clash: '# 只写想加的部分,节点和分组由面板填\nrules:\n  - DOMAIN-SUFFIX,example.org,DIRECT\n  - MATCH,Proxy\n', singbox: '{\n  "route": {\n    "rules": [{ "domain_suffix": ["example.org"], "outbound": "direct" }],\n    "final": "proxy"\n  }\n}\n' };
       case 'stats': { const q = new URLSearchParams(query); const tag = q.get('tag'); const hours = q.get('hours') || '24'; const bucket = q.get('bucket') || '3600';
         if (seg[1] === 'top') return listByPrefix('stats/top') || [];
@@ -294,6 +303,7 @@ function route(method, path, query, body) {
     case 'login': return { username: 'admin' };
     case 'logout': return ok();
     case 'settings': Object.assign(S.settings, body || {}); return ok({ note: 'Demo mode' });
+    case 'sub-logo': if (method === 'DELETE') { S.logo = null; return { set: false }; } S.logo = logoOf(body && body.data); return clone(S.logo);
     case 'users': {
       if (seg[1] === 'batch') { const { ids = [], action, days = 0 } = body || {}; let n = 0;
         for (const uid of ids) { const u = S.users.find(x => x.id === uid); if (!u) continue; n++;
