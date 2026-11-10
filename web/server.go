@@ -633,10 +633,18 @@ func clientIP(r *http.Request) string {
 	return peer
 }
 
+// writeJSON 先编码再写:编码失败(结果里混进了 ±Inf 之类)时返回 500 和原因,不能吞掉 —— 以前先写了状态码再编码,
+// 失败了调用方拿到 200 空响应,正式执行的套餐操作其实已经落库。输出与 json.Encoder 逐字节相同(含结尾换行)。
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		logger.Warning("生成响应失败: ", err)
+		status = http.StatusInternalServerError
+		b, _ = json.Marshal(map[string]string{"error": "生成响应失败: " + err.Error()})
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(append(b, '\n'))
 }
 
 func badRequest(w http.ResponseWriter, err error) {

@@ -1,6 +1,8 @@
 package web
 
 import (
+	"encoding/json"
+	"math"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -116,5 +118,83 @@ func TestDaysOverLimitRejected(t *testing.T) {
 	}
 	if w := e.panel(0, "POST", "users/batch", `{"ids":[`+id+`],"action":"extend","days":`+huge+`}`); w.Code != 400 {
 		t.Errorf("批量延期应 400: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// 参考价:有限的非负数,0 = 不填,填了就在 0.01 到 1e9 之间;极端值会让折算结果出现 ±Inf,JSON 编不出来。
+func TestPlanPriceBounds(t *testing.T) {
+	e := newPCEnv(t)
+	post := func(body string) int {
+		r := httptest.NewRequest("POST", "http://panel.example:2053/app/api/plans", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		e.s.handlePlans(w, r)
+		return w.Code
+	}
+	for _, price := range []string{"1e300", "1000000000.5", "0.001", "-1"} {
+		if code := post(`{"name":"p` + price + `","days":30,"price":` + price + `}`); code != 400 {
+			t.Errorf("参考价 %s 应 400: %d", price, code)
+		}
+	}
+	for _, price := range []string{"0", "0.01", "1000000000", "12.5"} {
+		if code := post(`{"name":"p` + price + `","days":30,"price":` + price + `}`); code != 200 {
+			t.Errorf("参考价 %s 应通过: %d", price, code)
+		}
+	}
+	// 上下限的两头一起折算:结果里每个数都是有限的,能编成 JSON
+	from := model.Plan{Id: 1, Name: "贵", VolumeGB: 1, Days: 1, Price: 1e9}
+	to := model.Plan{Id: 2, Name: "便宜", VolumeGB: 1, Price: 0.01} // 不限期的流量包:只折流量
+	u := model.User{Id: 1, Name: "u", Enabled: true, PlanId: 1, Volume: math.MaxInt64, Expiry: math.MaxInt64 / 2}
+	c, err := calcPlanOp(u, &from, to, planOpOpt{Op: "prorate", Periods: 0, Usage: "reset"}, nil, pcNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := json.Marshal(struct {
+		C *planCredit
+		R planRemaining
+	}{c.credit, c.remaining}); err != nil {
+		t.Fatalf("折算结果编不成 JSON: %v %+v", err, c.credit)
+	}
+}
+
+// 生成响应失败(结果里混进了 ±Inf 之类)不能吞掉:以前先写了 200 再编码失败,调用方拿到 200 空响应,
+// 正式执行却已经落库了。
+func TestWriteJSONEncodeFailure(t *testing.T) {
+	w := httptest.NewRecorder()
+	writeJSON(w, 200, map[string]float64{"x": math.Inf(1)})
+	var body map[string]string
+	if w.Code != 500 || json.Unmarshal(w.Body.Bytes(), &body) != nil || body["error"] == "" {
+		t.Fatalf("应返回 500 与错误说明: %d %q", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	writeJSON(w, 201, map[string]string{"a": "<b>"})
+	if w.Code != 201 || w.Body.String() != "{\"a\":\"\\u003cb\\u003e\"}\n" {
+		t.Fatalf("正常输出与以前逐字节相同: %d %q", w.Code, w.Body.String())
+	}
+}
+
+// 套餐 PUT 的白名单里有 price:按老格式保存(请求里没有 price)要保留原来的参考价,不能抹成 0。
+func TestPlanPutKeepsPriceWhenAbsent(t *testing.T) {
+	e := newPCEnv(t)
+	p := e.mkPlan(model.Plan{Name: "月付", VolumeGB: 100, Days: 30, Price: 20})
+	put := func(body string) int {
+		r := httptest.NewRequest("PUT", "http://panel.example:2053/app/api/plans/"+strconv.Itoa(int(p.Id)), strings.NewReader(body))
+		w := httptest.NewRecorder()
+		e.s.handlePlanItem(w, r)
+		return w.Code
+	}
+	if code := put(`{"name":"月付","volumeGb":200,"days":30}`); code != 200 {
+		t.Fatalf("老格式保存: %d", code)
+	}
+	var got model.Plan
+	e.db.First(&got, p.Id)
+	if got.Price != 20 || got.VolumeGB != 200 {
+		t.Fatalf("没带 price 要保留原值: %+v", got)
+	}
+	if code := put(`{"name":"月付","volumeGb":200,"days":30,"price":0}`); code != 200 {
+		t.Fatalf("显式清空: %d", code)
+	}
+	e.db.First(&got, p.Id)
+	if got.Price != 0 {
+		t.Fatalf("显式给 0 就清空: %v", got.Price)
 	}
 }

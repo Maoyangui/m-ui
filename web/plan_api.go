@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -37,6 +38,10 @@ func (s *Server) handlePlans(w http.ResponseWriter, r *http.Request) {
 		}
 		p := body.Plan
 		p.ResellerId = rid
+		p.Price = 0
+		if body.Price != nil {
+			p.Price = *body.Price
+		}
 		if err := s.validatePlan(&p); err != nil {
 			badRequest(w, err)
 			return
@@ -89,6 +94,10 @@ func (s *Server) handlePlanItem(w http.ResponseWriter, r *http.Request) {
 		}
 		p := body.Plan
 		p.Id, p.ResellerId = id, rid
+		p.Price = owner.Price // 没带 price(外部程序按老格式改套餐)就保留原来的参考价,不能抹成 0
+		if body.Price != nil {
+			p.Price = *body.Price
+		}
 		if err := s.validatePlan(&p); err != nil {
 			badRequest(w, err)
 			return
@@ -135,10 +144,20 @@ func (s *Server) handlePlanItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // planPayload 新增 / 修改套餐的请求:RuleIds 是这个套餐要跟的限速规则;没带这个字段 = 不动(只有主面板能改)。
+// Price 盖住 model.Plan 的同名字段,好分清「没带」和「给了 0」:修改时没带就保留原来的参考价。
 type planPayload struct {
 	model.Plan
-	RuleIds *[]uint `json:"ruleIds"`
+	RuleIds *[]uint  `json:"ruleIds"`
+	Price   *float64 `json:"price"`
 }
+
+// 参考价的范围:0 = 不填;填了就在这两个数之间(太大太小都会让折算结果出现 ±Inf,JSON 编不出来)。
+const (
+	minPlanPrice = 0.01
+	maxPlanPrice = 1e9
+)
+
+var errPlanPriceRange = errors.New("参考价要在 0.01 到 1000000000 之间(0 = 不填)")
 
 // planView 套餐列表:带上有多少用户、跟着哪些限速规则。
 type planView struct {
@@ -233,6 +252,9 @@ func (s *Server) validatePlan(p *model.Plan) error {
 	}
 	if p.Days > model.MaxDays || p.ResetDays > model.MaxDays {
 		return errDaysTooMany
+	}
+	if math.IsNaN(p.Price) || math.IsInf(p.Price, 0) || p.Price > maxPlanPrice || (p.Price > 0 && p.Price < minPlanPrice) {
+		return errPlanPriceRange
 	}
 	if p.AutoReset && p.ResetDays == 0 {
 		p.ResetDays = 30

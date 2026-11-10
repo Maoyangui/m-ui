@@ -425,6 +425,8 @@ const EN = /*BEGIN*/{
 "用户当前套餐与 fromPlanId 不符": "The user's current plan does not match fromPlanId",
 "requestId 已用于另一笔不同的请求": "This requestId was already used for a different request",
 "天数不能超过 %d(约 1 万年)": "Days cannot exceed %d (about 10,000 years)",
+"参考价要在 0.01 到 1000000000 之间(0 = 不填)": "The reference price must be between 0.01 and 1000000000 (0 = none)",
+"生成响应失败: %w": "Building the response failed: %w",
 "缺少 upstreamId": "Missing upstreamId",
 "缺少服务器地址": "Missing server address",
 "至少需要一个域名或 IP": "At least one domain or IP is required",
