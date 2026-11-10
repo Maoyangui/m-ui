@@ -51,8 +51,18 @@ p { margin: 0; }
 .login-brand .logo { width: 42px; height: 34px; }
 .support-btn { white-space: nowrap; color: var(--muted); }
 .support-btn:hover { color: var(--primary-text); }
-.support-float { position: fixed; top: .9rem; right: 1rem; z-index: 3; font-size: .85rem; color: var(--muted); text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: .35rem .85rem; background: var(--surface); }
+/* 登录页右上角:帮助说明 + 建议 / 支持 */
+.login-links { position: fixed; top: .9rem; right: 1rem; z-index: 3; display: flex; gap: .5rem; }
+.support-float { display: inline-flex; align-items: center; gap: .35rem; font-size: .85rem; color: var(--muted); text-decoration: none; border: 1px solid var(--border); border-radius: 999px; padding: .35rem .85rem; background: var(--surface); }
 .support-float:hover { color: var(--primary-text); border-color: var(--primary); }
+.support-btn svg, .support-float svg { flex: none; }
+/* 很窄的屏幕上"帮助说明"只留图标、顶栏间距收紧,给页面标题让地方;标题再放不下就省略号收尾,不压到按钮上 */
+@media (max-width: 480px) {
+  #btn-help .help-label, #topbar-right .tb-label { display: none; }
+  #btn-help { padding-left: .45rem; padding-right: .45rem; }
+  .topbar { gap: .5rem; }
+}
+.topbar-title h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ===== 登录 ===== */
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }

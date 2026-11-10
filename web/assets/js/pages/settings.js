@@ -112,7 +112,8 @@ export async function render(el) {
   const s = state.settings;
   const isNode = isNodeRole();
   // 重启按钮放在页头右侧,任何时候都看得到
-  document.getElementById('topbar-right').innerHTML = `<button class="btn danger sm" data-act="set.restart" title="${esc(t('set.restartHint'))}">↻ ${t('set.restart')}</button>`;
+  // 文字包一层:手机宽度下只留 ↻,给页面标题和右上角的帮助、支持按钮让地方(见 style.css .tb-label)
+  document.getElementById('topbar-right').innerHTML = `<button class="btn danger sm" data-act="set.restart" title="${esc(t('set.restartHint'))}" aria-label="${esc(t('set.restart'))}">↻ <span class="tb-label">${t('set.restart')}</span></button>`;
   el.innerHTML = `
     <section class="card">
       <div class="card-head"><h2>${t('set.role')}</h2>${badge(isNode ? t('role.node') : t('role.master'), isNode ? 'node' : 'primary')}</div>

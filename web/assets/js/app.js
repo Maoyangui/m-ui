@@ -101,6 +101,7 @@ function showLogin() {
   document.getElementById('login-submit').textContent = t('login.submit');
   document.getElementById('login-code-label').textContent = t('login.code');
   supportLink(document.getElementById('login-support'));
+  helpLink(document.getElementById('login-help'), 'dashboard');
   document.getElementById('login-code-wrap').hidden = !needTotp;
   setTimeout(() => document.getElementById('lg-user').focus(), 50);
 }
@@ -154,6 +155,28 @@ function supportLink(a) {
   a.href = 'support?lang=' + getLang();
 }
 
+// "帮助说明"按钮:新标签页打开内嵌的帮助页(help/zh.html、help/en.html,跟面板同一个语言),并定位到当前页面对应的章节。
+// 代理面板带上 view=reseller:帮助页只留代理用得上的章节。帮助页和面板其它前端文件一样只在面板路径下提供,用相对地址,
+// 改了面板路径也照样打开。键是页面名,值是帮助页里的章节 id(两种语言一致,web/help_test.go 会核对)。
+const HELP_ANCHOR = {
+  dashboard: 'start', lines: 'lines', upstreams: 'upstreams', exts: 'exts', users: 'users', resellers: 'resellers',
+  plans: 'plans', rules: 'rules', nodes: 'nodes', cert: 'cert', backup: 'backup', ops: 'ops', logs: 'logs',
+  admin: 'security', settings: 'settings',
+};
+const HELP_ANCHOR_RESELLER = { dashboard: 'rs-start', users: 'users', plans: 'plans', account: 'rs-account' };
+const HELP_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.8"/><path d="M12 17.2h.01"/></svg>';
+function helpLink(a, page) {
+  if (!a) return;
+  const rs = isReseller();
+  const anchor = (rs ? HELP_ANCHOR_RESELLER : HELP_ANCHOR)[page] || '';
+  a.href = `help/${getLang() === 'zh' ? 'zh' : 'en'}.html${rs ? '?view=reseller' : ''}${anchor ? '#' + anchor : ''}`;
+  if (a.dataset.lang !== getLang()) { // 文字只在换语言时重画
+    a.dataset.lang = getLang();
+    a.innerHTML = `${HELP_ICON}<span class="help-label">${esc(t('help.btn'))}</span>`;
+    a.title = t('help.btn');
+  }
+}
+
 // ---- 壳:导航、角色、主题、语言 ----
 function renderChrome() {
   document.getElementById('nav').innerHTML = navFor().map(p =>
@@ -162,6 +185,7 @@ function renderChrome() {
   document.getElementById('modal-cancel').textContent = t('common.cancel');
   document.getElementById('btn-logout').textContent = t('common.logout');
   supportLink(document.getElementById('btn-support'));
+  helpLink(document.getElementById('btn-help'), current || pageName());
   const sel = document.getElementById('lang-select');
   sel.innerHTML = Object.entries(langs).map(([k, v]) => `<option value="${k}" ${k === getLang() ? 'selected' : ''}>${v}</option>`).join('');
   renderRole();
@@ -491,6 +515,7 @@ async function route(force = false) {
   current = name;
   routing = true;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.page === name));
+  helpLink(document.getElementById('btn-help'), name);
   const page = pages[name];
   document.getElementById('page-title').textContent = page.title();
   const sub = document.getElementById('page-subtitle');
