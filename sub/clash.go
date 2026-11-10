@@ -126,8 +126,11 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		}
 	}
 	root["proxies"] = proxies
-	if _, set := root["ipv6"]; !set && hasIPv6Server(proxies) {
-		root["ipv6"] = true // 老内核默认关着 IPv6,关着连不上写成 IPv6 地址的节点
+	// 有写成 IPv6 地址的节点就得打开 ipv6 总开关:老内核默认关着,关着时 mihomo 连不上这些节点。
+	// 模板里明写了 ipv6: false 也改成 true(以前只在模板没写时才补,自定义模板照抄内置骨架写了 false 的,
+	// v6 节点全连不上);设置页保存这种模板时会提示(见 ClashTemplateDisablesIPv6)
+	if hasIPv6Server(proxies) {
+		root["ipv6"] = true
 	}
 
 	selectList := []string{}
@@ -153,6 +156,20 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		return "", err
 	}
 	return string(out), nil
+}
+
+// ClashTemplateDisablesIPv6 Clash 模板顶层写了 ipv6: false:订阅里有 IPv6 节点时生成的配置会把它改成 true,
+// 设置页保存这种模板时据此提示一句。
+func ClashTemplateDisablesIPv6(tmpl string) bool {
+	if strings.TrimSpace(tmpl) == "" {
+		return false
+	}
+	var root map[string]interface{}
+	if yaml.Unmarshal([]byte(tmpl), &root) != nil {
+		return false
+	}
+	v, ok := root["ipv6"].(bool)
+	return ok && !v
 }
 
 // hasIPv6Server 节点里有没有写成 IPv6 地址的。

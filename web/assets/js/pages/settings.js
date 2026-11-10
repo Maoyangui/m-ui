@@ -186,7 +186,11 @@ registerActions({
       } catch (e) { toast(e.message, 'err'); }
       return;
     }
-    try { const r = await post('settings', body); await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok'); }
+    try {
+      const r = await post('settings', body); await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok');
+      // Clash 模板写了 ipv6: false:存下了,但有 IPv6 节点时订阅会改成 true,要让人知道
+      if ((r.hints || []).includes('clashIPv6')) confirm(t('set.clashIPv6Hint'), { title: t('set.saved'), okText: t('node.ack'), notice: true });
+    }
     catch (e) { toast(e.message, 'err'); }
   },
   'set.tmplDefault': async id => {

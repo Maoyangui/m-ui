@@ -1312,6 +1312,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		var hints []string // 存得下、但要让管理员知道的事,设置页按代码显示对应文案
+		if v, ok := in["subClashExt"]; ok && sub.ClashTemplateDisablesIPv6(v) {
+			hints = append(hints, "clashIPv6") // 有 IPv6 节点时订阅会把它改成 true,否则 mihomo 连不上这些节点
+		}
 		if v, ok := in["webDomain"]; ok && strings.Contains(v, "*") {
 			badRequest(w, errors.New("面板域名不能写泛域名,要填具体的访问地址,如 hk.example.com"))
 			return
@@ -1379,10 +1383,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		s.audit(r, "settings", "update", keys)
 		// 端口/证书类改动需重启进程才生效,这里提示前端
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		resp := map[string]interface{}{
 			"ok": "1", "role": s.role(),
 			"note": note,
-		})
+		}
+		if len(hints) > 0 {
+			resp["hints"] = hints
+		}
+		writeJSON(w, http.StatusOK, resp)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
