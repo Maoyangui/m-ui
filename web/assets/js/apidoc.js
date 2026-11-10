@@ -47,7 +47,7 @@ export function apiExample(base, token, reseller = false) {
     '',
     `# ${t('adm.ex.renew')}`,
     `curl -X POST ${auth} -H "Idempotency-Key: order-1002" \\`,
-    `  -d '{"periods":3}' ${base}/users/${user}/renew`,
+    `  -d '{"periods":3,"mode":"extend"}' ${base}/users/${user}/renew`,
     '',
     `# ${t('adm.ex.preview')}`,
     `curl -X POST ${auth} \\`,

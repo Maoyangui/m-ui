@@ -93,6 +93,7 @@ export function openModal(title, html, onSave, opts = {}) {
   document.getElementById('modal-err').textContent = '';
   const save = document.getElementById('modal-save');
   save.hidden = !onSave;
+  save.disabled = false; // 上一个对话框可能把它禁用着关掉(换套餐在等预览时禁用提交)
   save.textContent = opts.saveText || t('common.save');
   save.className = 'btn ' + (opts.danger ? 'danger' : 'primary');
   document.getElementById('modal-cancel').hidden = !!opts.noCancel; // 纯提示只留一个「知道了」

@@ -369,7 +369,13 @@ function renewDialog(ids) {
     const planId = Number(fv('f-plan')), mode = fv('f-mode');
     let replayed = false;
     if (ids.length === 1) {
-      const r = await post(`users/${ids[0]}/plan`, mode === 'bind' ? { planId, mode } : { planId, mode, periods: periods(), requestId });
+      let r;
+      try {
+        r = await post(`users/${ids[0]}/plan`, mode === 'bind' ? { planId, mode } : { planId, mode, periods: periods(), requestId });
+      } catch (e) {
+        if (e.data && e.data.code === 'idempotency_conflict') throw await conflictError(ids[0]);
+        throw e;
+      }
       replayed = !!(r && r.replayed);
     } else await post('users/batch', { ids, action: 'plan', planId, mode, periods: periods() });
     await load('users'); renderRows();
@@ -392,6 +398,16 @@ function renewDialog(ids) {
   ['f-plan', 'f-mode'].forEach(k => document.getElementById(k).addEventListener('change', sync));
   document.getElementById('f-periods').addEventListener('input', preview);
   sync();
+}
+
+// conflictError 409 idempotency_conflict:这个对话框之前的一次提交(同一个幂等键)其实已经执行成功了 ——
+// 多半是当时没收到结果,用户改了选项又提交。这次的改动不会再执行;刷新列表,请用户看过套餐记录再决定。
+async function conflictError(id) {
+  try {
+    await load('users'); renderRows();
+    if (drawerUser === id) showDetail(id);
+  } catch { /* 刷新失败不影响提示 */ }
+  return new Error(t('pc.err.idemConflict'));
 }
 
 // ---- 换套餐:立即替换 / 叠加 / 按价值折算。改动后防抖 300 ms 预览(dryRun),有阻断影响时要勾"仍然执行" ----
@@ -466,13 +482,18 @@ function changeDialog(id) {
   const requestId = newRequestId();
   const pick = (state.plans.find(p => p.id !== u.planId) || state.plans[0]).id;
   let mode = 'replace', seq = 0;
-  const body = () => ({ planId: Number(fv('pc-plan')), mode, periods: Math.max(0, Math.floor(Number(fv('pc-periods'))) || 0), usage: fv('pc-usage'), remark: fv('pc-remark').trim() });
-  const show = r => {
-    setHTML('pc-preview', previewHTML(r));
-    const wrap = document.getElementById('pc-force-wrap');
-    if (wrap) wrap.hidden = !r.needsForce;
-    if (!r.needsForce) { const f = document.getElementById('pc-force'); if (f) f.checked = false; }
+  // shown:最近一次成功的预览用的参数。提交时原样带它(而不是表单此刻的值);参数一变就清掉、禁用提交、取消「仍然执行」,
+  // 直到新的预览回来 —— force 只会跟着用户看过的那份预览一起提交。备注不影响预览,提交时现读。
+  let shown = null;
+  const params = () => ({ planId: Number(fv('pc-plan')), mode, periods: Math.max(0, Math.floor(Number(fv('pc-periods'))) || 0), usage: fv('pc-usage') });
+  const el = k => document.getElementById(k);
+  const setReady = ok => { const b = el('modal-save'); if (b) b.disabled = !ok; };
+  const setForce = need => {
+    const wrap = el('pc-force-wrap'), f = el('pc-force');
+    if (wrap) wrap.hidden = !need;
+    if (f) f.checked = false; // 每份新预览都要重新确认
   };
+  const show = (r, p) => { setHTML('pc-preview', previewHTML(r)); setForce(!!r.needsForce); shown = p; setReady(true); };
   openModal(t('pc.title') + ' · ' + u.name, `
     <div class="form-grid">
       <div class="full">${field(t('pc.target'), `<select id="pc-plan">${state.plans.map(p => `<option value="${p.id}" ${p.id === pick ? 'selected' : ''}>${esc(p.name)} · ${planBrief(p)}${p.price > 0 ? ' · ' + esc(t('plan.priceShort', { n: p.price })) : ''}${p.id === u.planId ? ' · ' + t('pc.current') : ''}</option>`).join('')}</select>`)}</div>
@@ -483,11 +504,19 @@ function changeDialog(id) {
     </div>
     <div class="pc-preview" id="pc-preview"><p class="muted small">${t('common.loading')}</p></div>
     <div id="pc-force-wrap" hidden>${check('pc-force', t('pc.force'), false)}</div>`, async () => {
+    if (!shown) throw new Error(t('pc.previewPending')); // 等预览时按钮是禁用的;openModal 出错后会把它重新点亮,这里再拦一道
+    const sent = shown, at = seq, wrap = el('pc-force-wrap');
     let res;
     try {
-      res = await post(`users/${id}/change`, { ...body(), force: fchk('pc-force'), requestId });
+      res = await post(`users/${id}/change`, { ...sent, remark: fv('pc-remark').trim(), force: !!(wrap && !wrap.hidden && fchk('pc-force')), requestId });
     } catch (e) {
-      if (e.data && e.data.code === 'needs_force' && e.data.preview) show(e.data.preview); // 预览之后情况变了:按最新的影响再确认一次
+      const code = e.data && e.data.code;
+      if (code === 'needs_force' && e.data.preview) {
+        // 预览之后情况变了(比如这期间又用了流量):换上服务端的最新预览,重新确认。提交途中又改了选项的,等新选项的预览
+        if (at === seq) show(e.data.preview, sent);
+        throw new Error(t('pc.err.needsForce'));
+      }
+      if (code === 'idempotency_conflict') throw await conflictError(id);
       throw e;
     }
     await load('users'); renderRows();
@@ -504,31 +533,32 @@ function changeDialog(id) {
       if (b.dataset.mode === 'prorate') { b.disabled = !!why; b.title = why; }
     });
     setText('pc-mode-help', t('pc.modeHelp.' + mode) + (why ? ' ' + t('pc.noProrate', { why }) : ''));
-    const per = document.getElementById('pc-periods');
+    const per = el('pc-periods');
     per.min = mode === 'prorate' ? '0' : '1';
     if (mode !== 'prorate' && Number(per.value) < 1) per.value = '1';
   };
   const preview = debounce(async () => {
-    const my = ++seq;
+    const my = seq, p = params();
     try {
-      const r = await post(`users/${id}/change`, { ...body(), dryRun: true });
-      if (my === seq) show(r);
+      const r = await post(`users/${id}/change`, { ...p, dryRun: true });
+      if (my === seq) show(r, p);
     } catch (e) {
       if (my !== seq) return;
       setHTML('pc-preview', `<p class="hint bad">${esc(e.message)}</p>`);
-      const wrap = document.getElementById('pc-force-wrap');
-      if (wrap) wrap.hidden = true;
+      setForce(false); // 没有可确认的预览:提交保持禁用,改一下选项会再预览
     }
   }, 300);
-  document.getElementById('pc-mode').addEventListener('click', e => {
+  // 参数一变:作废在途的预览(seq + 1)、清掉已确认的那份、禁用提交,防抖后重新预览
+  const changed = () => { seq++; shown = null; setForce(false); setReady(false); preview(); };
+  el('pc-mode').addEventListener('click', e => {
     const b = e.target.closest('button[data-mode]');
-    if (b && !b.disabled) { setMode(b.dataset.mode); preview(); }
+    if (b && !b.disabled) { setMode(b.dataset.mode); changed(); }
   });
-  document.getElementById('pc-plan').addEventListener('change', () => { setMode(mode); preview(); });
-  document.getElementById('pc-usage').addEventListener('change', preview);
-  document.getElementById('pc-periods').addEventListener('input', preview);
+  el('pc-plan').addEventListener('change', () => { setMode(mode); changed(); });
+  el('pc-usage').addEventListener('change', changed);
+  el('pc-periods').addEventListener('input', changed);
   setMode('replace');
-  preview();
+  changed();
 }
 
 // ---- 详情抽屉:最近 10 条套餐记录 ----

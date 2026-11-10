@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"io/fs"
 	"os"
 	"regexp"
@@ -9,6 +10,28 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 )
+
+// checkRenewExamples 接口一览的 curl 示例要和文档的续费建议一致:示例里的套餐是月付(周期重置),
+// 提前一次续多期要用 extend(保留本期用量);默认的 renew 会截断当前周期,多给流量。
+func checkRenewExamples(t *testing.T, js string) {
+	t.Helper()
+	ms := regexp.MustCompile(`-d '(\{[^']*\})' \$\{base\}/users/\$\{user\}/(?:renew|plan)\b`).FindAllStringSubmatch(js, -1)
+	if len(ms) == 0 {
+		t.Fatal("apidoc.js 里找不到续费的 curl 示例,正则需要更新")
+	}
+	for _, m := range ms {
+		var body struct {
+			Periods int    `json:"periods"`
+			Mode    string `json:"mode"`
+		}
+		if err := json.Unmarshal([]byte(m[1]), &body); err != nil {
+			t.Fatalf("示例的请求体不是 JSON: %s", m[1])
+		}
+		if body.Periods > 1 && body.Mode != "extend" {
+			t.Errorf("示例一次续 %d 期却没用 extend(周期重置套餐提前续费要用 extend): %s", body.Periods, m[1])
+		}
+	}
+}
 
 // 外部 API 的接口一览只有一份(assets/js/apidoc.js,管理员页与代理「我的账号」页共用):
 // 它要和 docs/API.md 的「接口一览」逐行一致,而且每个路径在外部 API 下都有处理(不是「接口不存在」)。
@@ -45,6 +68,8 @@ func TestAPIDocMatchesDocsAndRoutes(t *testing.T) {
 	if strings.Join(fromJS, "\n") != strings.Join(fromDoc, "\n") {
 		t.Fatalf("apidoc.js 与 docs/API.md 的接口一览不一致:\napidoc.js:\n  %s\ndocs/API.md:\n  %s", strings.Join(fromJS, "\n  "), strings.Join(fromDoc, "\n  "))
 	}
+
+	checkRenewExamples(t, string(js))
 
 	// 每个接口都能路由到处理函数:用一个真实存在的用户,只看是不是「接口不存在」/ 方法不允许
 	e := newPCEnv(t)
