@@ -213,10 +213,19 @@ func (s *Service) SetMasterPlan(id uint) (SetMasterPlan, error) {
 		}
 	}
 	for _, sp := range nodeServicePorts(n) {
-		if sp.Port == subPort && sp.Label != "sub" {
+		if sp.Port == subPort && sp.Label != "订阅" { // 它自己的订阅端口不算冲突(套用身份后就是这个端口)
 			warn("subPort", "port", strconv.Itoa(subPort), "line", sp.Label)
 			p.SubKept = false
 			break
+		}
+	}
+	// 代理面板:副机上不监听,成为主机后才起;端口被它的线路占着就起不来
+	if ok && st.HA != nil && st.HA.ResellerPort > 0 && !strings.EqualFold(s.setting("resellerEnabled"), "false") {
+		for _, l := range lines {
+			if l.Port == st.HA.ResellerPort && !render.UDPOnly(l.Protocol) && render.LineOnNode(l, id) {
+				warn("resellerPort", "port", strconv.Itoa(st.HA.ResellerPort), "line", l.Name)
+				break
+			}
 		}
 	}
 	if l := s.selfLink(); l.ApiUrl == "" {
@@ -354,6 +363,7 @@ func (w *switcher) run(st SwitchState) {
 		_ = s.set(map[string]string{KeyFreezeUntil: ""})
 		s.invalidate()
 		s.addNotice(Notice{Kind: "switchFailed", Name: st.TargetName, Warn: []string{err.Error()}})
+		s.audit("ha", "set-master-failed", map[string]string{"target": st.TargetName, "stage": stage, "err": err.Error()})
 		s.notify("🔴 <b>设为主机没有完成</b>:" + notify.Esc(st.TargetName) + "\n" + notify.Esc(err.Error()) + "\n本机照旧是主机,写操作已恢复,数据没有变化。")
 	}
 	var n model.Node
@@ -495,6 +505,7 @@ func (s *Service) becomeNode(st SwitchState) {
 	s.sw.grantTo = nil
 	s.sw.mu.Unlock()
 	s.addNotice(Notice{Kind: "switched", Name: st.TargetName, URL: st.NewPanel, Host: st.SubHost, IP: st.TargetIP, Dns: st.DnsAuto, File: backup})
+	s.audit("ha", "became-node", map[string]interface{}{"to": st.TargetName, "epoch": st.Epoch, "by": st.Actor, "backup": backup})
 	logger.Warning("容灾:主机已换到 ", st.TargetName, ",本机变为副机;新面板 ", st.NewPanel)
 	msg := fmt.Sprintf("✅ <b>主机已换到「%s」</b>,本机「%s」已变为副机,继续用自己的线路服务。\n新面板:%s(账号、密码、两步验证不变,需要重新登录)",
 		notify.Esc(st.TargetName), notify.Esc(s.selfName()), notify.Esc(st.NewPanel))

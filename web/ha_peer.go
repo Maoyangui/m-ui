@@ -57,7 +57,27 @@ type limiterEntry struct {
 	seen time.Time
 }
 
-var peerLimiter = &ipLimiter{every: rate.Every(2 * time.Second), burst: 10, m: map[string]*limiterEntry{}}
+// 主机容灾新增接口的限流(按来源 IP):同伴接口最严;面板上的读宽松(换主机的进度每 1.5 秒问一次),
+// 写(设为主机、接任、改设置…)每分钟十来次;agent 接口只有主机在调,只防洪水。
+var (
+	peerLimiter    = &ipLimiter{every: rate.Every(2 * time.Second), burst: 10, m: map[string]*limiterEntry{}}
+	haReadLimiter  = &ipLimiter{every: rate.Every(250 * time.Millisecond), burst: 60, m: map[string]*limiterEntry{}}
+	haWriteLimiter = &ipLimiter{every: rate.Every(5 * time.Second), burst: 8, m: map[string]*limiterEntry{}}
+	haAgentLimiter = &ipLimiter{every: rate.Every(50 * time.Millisecond), burst: 200, m: map[string]*limiterEntry{}}
+)
+
+// haLimited 面板上的主机容灾接口:超过频率就回 429,返回 true。
+func haLimited(w http.ResponseWriter, r *http.Request) bool {
+	l := haReadLimiter
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		l = haWriteLimiter
+	}
+	if l.allow(peerIP(r)) {
+		return false
+	}
+	writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+	return true
+}
 
 func (l *ipLimiter) allow(ip string) bool {
 	key := loginKey(ip)

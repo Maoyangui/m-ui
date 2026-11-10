@@ -107,7 +107,7 @@ func TestEnvelopeRoundTripAndTamper(t *testing.T) {
 	}
 }
 
-// 先加密成密文再按候选各拼头部(WriteEnvelopeCT)与一次写成(WriteEnvelope)结果逐字节相同;EnvelopeSize 算得准。
+// 先加密成密文再按备用各拼头部(WriteEnvelopeCT)与一次写成(WriteEnvelope)结果逐字节相同;EnvelopeSize 算得准。
 func TestEnvelopeCTMatches(t *testing.T) {
 	plain := randBytes(chunkSize*2 + 99)
 	key := NewDataKey()

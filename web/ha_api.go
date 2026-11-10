@@ -28,6 +28,9 @@ import (
 // 设为主机、接任、改主机容灾都要再输一次管理员密码(开了两步验证再加动态码),失败按登录同一套限流。
 
 func (s *Server) handleHA(w http.ResponseWriter, r *http.Request) {
+	if haLimited(w, r) {
+		return
+	}
 	h := s.haSvc()
 	if h == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
@@ -142,6 +145,9 @@ func (s *Server) handleHASub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a, ok := s.haSessionActions()[action]; ok {
+		if haLimited(w, r) {
+			return
+		}
 		s.auth(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != a.method {
 				writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})

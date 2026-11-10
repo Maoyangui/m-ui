@@ -43,7 +43,7 @@ func (s *Server) nodeToken() (string, error) {
 }
 
 // agentAuth 主机调用副机接口的鉴权,顺序是 令牌 → 纪元 → 副机模式。
-// 临时主机也保留自己的副机令牌:被接管的旧主机带着旧纪元来请求时,收到的是 409 stale_epoch(它据此降级)而不是 403。
+// 接任后的主机也保留自己当副机时的令牌:原主机回来后带着旧纪元来请求,收到的是 409 stale_epoch(它据此变为副机)而不是 403。
 // 没开过容灾(本机纪元为 0、请求也不带纪元)时和以前一样:不是副机就 403,令牌错 401。
 func (s *Server) agentAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -623,6 +623,10 @@ func (s *Server) reportServicePorts() []model.ServicePort {
 
 // handleAgentHAState 收下主机推来的容灾状态(纪元已在 agentAuth 里对齐)。
 func (s *Server) handleAgentHAState(w http.ResponseWriter, r *http.Request) {
+	if !haAgentLimiter.allow(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		return
@@ -646,6 +650,10 @@ func (s *Server) handleAgentHAState(w http.ResponseWriter, r *http.Request) {
 
 // handleAgentHAReplica 备用收下主机推来的副本(只有一个写入方,写独立文件,不碰本机库)。
 func (s *Server) handleAgentHAReplica(w http.ResponseWriter, r *http.Request) {
+	if !haAgentLimiter.allow(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		return
@@ -689,6 +697,10 @@ func (s *Server) handleAgentHADrop(w http.ResponseWriter, r *http.Request) {
 //	ha/abort     原主机说不做了:丢掉暂存
 //	ha/incoming  暂存到了哪一步(原主机提交没回话时来问)
 func (s *Server) handleAgentHASwitch(w http.ResponseWriter, r *http.Request) {
+	if !haAgentLimiter.allow(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+		return
+	}
 	h := s.haSvc()
 	if h == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})

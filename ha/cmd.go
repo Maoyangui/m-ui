@@ -52,6 +52,9 @@ func (s *Service) cmdTick() {
 		return
 	}
 	res := CmdResult{Id: c.Id, At: s.now().Unix()}
+	if c.Op != "status" {
+		s.audit("cli", c.Op, map[string]interface{}{"target": c.Target, "force": c.Force, "minutes": c.Min})
+	}
 	err := s.runCmd(c, &res)
 	if err != nil {
 		res.Err = err.Error()

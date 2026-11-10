@@ -13,7 +13,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
-// standbyPair 一台开着容灾的主机(纪元 1)和一台把它当主机的候选。
+// standbyPair 一台开着容灾的主机(纪元 1)和一台把它当主机的备用。
 func standbyPair(t *testing.T) (*Service, *Service) {
 	t.Helper()
 	m := testService(t, false, map[string]string{KeyEpoch: "1", KeyMode: ModeConfirm})
@@ -32,7 +32,7 @@ func standbyPair(t *testing.T) (*Service, *Service) {
 	return m, c
 }
 
-// replicaFor 主机生成一份副本、封给候选。
+// replicaFor 主机生成一份副本、封给备用。
 func replicaFor(t *testing.T, m, c *Service, seq uint64) []byte {
 	t.Helper()
 	dir := t.TempDir()
@@ -62,7 +62,7 @@ func replicaFor(t *testing.T, m, c *Service, seq uint64) []byte {
 	return buf.Bytes()
 }
 
-// 候选收副本:验签、核对纪元与主机、序号只增,两代轮换;写到一半断了旧的不动;不是封给本机的、来路不对的都拒;
+// 备用收副本:验签、核对纪元与主机、序号只增,两代轮换;写到一半断了旧的不动;不是封给本机的、来路不对的都拒;
 // 自检解得开、跑得过 integrity_check;删除能删干净;报告里带公钥与副本信息。
 func TestCandidateStore(t *testing.T) {
 	m, c := standbyPair(t)
@@ -133,7 +133,7 @@ func TestCandidateStore(t *testing.T) {
 	st.Standbys = nil
 	c.set(map[string]string{KeyState: mustJSON(st)})
 	if _, err := c.ReceiveReplica(bytes.NewReader(replicaFor(t, m, c, 200))); err == nil {
-		t.Fatal("不在候选名单里不收副本")
+		t.Fatal("不在备用名单里不收副本")
 	}
 	// 删除
 	if err := c.DropReplica(); err != nil {
@@ -145,7 +145,7 @@ func TestCandidateStore(t *testing.T) {
 		}
 	}
 	if _, err := os.Stat(filepath.Join(c.Dir(), fileKey)); err != nil {
-		t.Fatal("候选密钥要留着(公钥不变,以后不用重新信任)")
+		t.Fatal("备用密钥要留着(公钥不变,以后不用重新信任)")
 	}
 }
 

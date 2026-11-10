@@ -25,7 +25,7 @@ type HAHooks interface {
 	Header() (epoch uint64, master uint)
 	// StateFor 这一轮给副机 n 的容灾状态;rev 为空 = 不推
 	StateFor(n model.Node) (body []byte, rev string)
-	// NoteReply 每次请求副机的纪元结果(降级判定用)
+	// NoteReply 每次请求副机的纪元结果(判定本机是不是该变为副机)
 	NoteReply(n model.Node, r EpochReply)
 }
 
@@ -38,7 +38,9 @@ type HAReport struct {
 	Replica  *HAReplica `json:"replica,omitempty"` // 手里那份副本
 	LeaseAgo int64      `json:"leaseAgo"`          // 距上次收到当前主机的请求多少秒
 	DiskFree int64      `json:"diskFree"`          // 数据目录所在盘的剩余字节(-1 = 读不到)
-	Peers    *HAPeers   `json:"peers,omitempty"`   // 和别的副机互通的情况(互相确认与投票要用)
+	// ResellerPort 这台的代理面板端口(副机上不监听;被设为主机后才起,主机据此提前查端口冲突)
+	ResellerPort int      `json:"resellerPort,omitempty"`
+	Peers        *HAPeers `json:"peers,omitempty"` // 和别的副机互通的情况(互相确认与投票要用)
 }
 
 // HAReplica 备用手里那份副本。

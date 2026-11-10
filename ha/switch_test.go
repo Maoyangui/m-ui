@@ -3,6 +3,7 @@ package ha
 import (
 	"bytes"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -202,4 +203,38 @@ func TestYieldAndReclaim(t *testing.T) {
 		}
 	}
 	_ = orphan
+}
+
+// 设为主机前的检查:默认端口不算冲突;订阅端口、代理面板端口被目标上的线路占着要提前说;离线、版本旧的不能设。
+func TestSetMasterPlanChecks(t *testing.T) {
+	cl := newCluster(t, 1)
+	m := cl.m
+	cl.h.RunOnce()
+	cl.h.RunOnce()
+	id := cl.ids[0]
+	m.d.DB.Model(&model.Node{}).Where("id = ?", id).Update("service_ports", []byte(`[{"label":"面板","port":2053},{"label":"订阅","port":2056}]`))
+	p, err := m.SetMasterPlan(id)
+	if err != nil || !p.Ok {
+		t.Fatalf("应能设为主机: %+v %v", p, err)
+	}
+	for _, w := range p.Warnings {
+		if w.Code == "subPort" || w.Code == "resellerPort" {
+			t.Fatalf("默认端口不算冲突: %+v", p.Warnings)
+		}
+	}
+	m.d.DB.Create(&model.Line{Name: "on-2056", Protocol: "vless", Port: 2056, Enabled: true, NodeIds: []byte(`[` + strconv.Itoa(int(id)) + `]`)})
+	m.d.DB.Create(&model.Line{Name: "on-2054", Protocol: "trojan", Port: 2054, Enabled: true, NodeIds: []byte(`[` + strconv.Itoa(int(id)) + `]`)})
+	p, _ = m.SetMasterPlan(id)
+	codes := map[string]bool{}
+	for _, w := range p.Warnings {
+		codes[w.Code] = true
+	}
+	if !codes["subPort"] || !codes["resellerPort"] || p.SubKept {
+		t.Fatalf("线路占着订阅端口、代理面板端口要提前说: %+v", p.Warnings)
+	}
+	cl.agents[0].setDown(true)
+	cl.h.RunOnce()
+	if p, _ := m.SetMasterPlan(id); p.Ok || len(p.Blockers) == 0 || p.Blockers[0].Code != "offline" {
+		t.Fatalf("离线的不能设为主机: %+v", p.Blockers)
+	}
 }

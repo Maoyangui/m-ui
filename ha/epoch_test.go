@@ -38,7 +38,7 @@ func TestDecide(t *testing.T) {
 		{"票投给了别人", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Vote: &Vote{Epoch: 2, Candidate: 6}}, 2, 5, true, CodeFollowing, false},
 		{"有交接标记", NodeView{Epoch: 2, MasterId: 5, LastContact: fresh, Grant: &Grant{Epoch: 3, To: 1}}, 3, 1, true, "", true},
 		{"交接标记是给别人的", NodeView{Epoch: 2, MasterId: 5, LastContact: fresh, Grant: &Grant{Epoch: 3, To: 7}}, 3, 1, true, CodeFollowing, false},
-		{"已降级", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Demoted: true}, 2, 5, true, "", true},
+		{"回来后变成副机的原主机", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Demoted: true}, 2, 5, true, "", true},
 		{"本机还没进过容灾", NodeView{LastContact: fresh}, 1, 1, true, "", true},
 		{"本机还没进过容灾但动作不能升", NodeView{LastContact: fresh}, 1, 1, false, CodeNotAdopted, false},
 	}
@@ -121,7 +121,7 @@ func TestCheckAgentNode(t *testing.T) {
 	if rej := s.CheckAgent(hdr(1, 1), "report"); rej != nil {
 		t.Fatalf("同纪元同主机应放行: %+v", rej)
 	}
-	// 候选 #5 以纪元 2 来推:本机刚联系过主机 1,不换主
+	// 备用 #5 以纪元 2 来推:本机刚联系过主机 1,不换主
 	if rej := s.CheckAgent(hdr(2, 5), "apply"); rej == nil || rej.Code != CodeFollowing || rej.Epoch != 1 {
 		t.Fatalf("租约还在时应回 still_following: %+v", rej)
 	}
@@ -161,7 +161,7 @@ func TestCheckAgentMaster(t *testing.T) {
 func TestCheckAgentDemoted(t *testing.T) {
 	s := testService(t, true, map[string]string{KeyEpoch: "1", KeyMasterId: "1", KeyRole: RoleDemoted, KeyDemoted: `{"epoch":2}`})
 	if rej := s.CheckAgent(hdr(3, 7), "ha/state"); rej != nil {
-		t.Fatalf("已降级的机器应接受更高纪元: %+v", rej)
+		t.Fatalf("回来后变成副机的原主机应接受更高纪元: %+v", rej)
 	}
 	if setting(s.d.DB, KeyRole) != "" || setting(s.d.DB, KeyDemoted) == "" {
 		t.Fatal("切到新主机后角色清掉、变为副机的记录保留")

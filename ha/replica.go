@@ -130,7 +130,7 @@ func copyTables(src *gorm.DB, out *gorm.DB, o copyOpts, h hash.Hash) (map[string
 			}
 			counts[ob.Name] = n
 		}
-		// 自增序列照原库的:删过的最大 id 不会在接管后被新行重新用掉
+		// 自增序列照原库的:删过的最大 id 不会在接任后被新行重新用掉
 		var seqs []struct {
 			Name string
 			Seq  int64

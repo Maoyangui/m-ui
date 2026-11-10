@@ -224,6 +224,12 @@ func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bo
 			}
 		}
 		b.Identity = res
+		// 审计记进新库:旧库重启时就换下去了
+		actor, action := "ha:"+nonEmpty(b.By, "panel"), "takeover"
+		if b.How == HowSetMaster {
+			actor, action = "ha", "became-master"
+		}
+		auditTo(tx, s.now().Unix(), actor, action, map[string]interface{}{"former": b.FormerName, "epoch": b.Epoch, "replicaAt": b.ReplicaAt})
 		return upsert(tx, map[string]string{KeyBecame: mustJSON(b)})
 	})
 	if cerr := database.Close(ndb); err == nil {

@@ -46,7 +46,7 @@ type haCluster struct {
 	clk    *testClock
 }
 
-// newCluster 一台开着容灾的主机(纪元 1、手动、候选 2 台)+ n 台副机。
+// newCluster 一台开着容灾的主机(纪元 1、确认后接任、备用 2 台)+ n 台副机。
 func newCluster(t *testing.T, n int) *haCluster {
 	t.Helper()
 	fastReplicas(t)
@@ -75,12 +75,12 @@ func newCluster(t *testing.T, n int) *haCluster {
 	return cl
 }
 
-// 副本只发给按顺序的前 N 台合格候选;内容没变不重发、只推"截至";排除一台后名单顺延,被移出的删掉手里的副本;
-// 候选公钥变了不再给它发、告警一次,重新信任后恢复。
+// 副本只发给按顺序的前 N 台合格备用;内容没变不重发、只推"截至";调顺序后名单顺延,被移出的删掉手里的副本;
+// 备用公钥变了不再给它发、告警一次,重新信任后恢复。
 func TestReplicatorCandidates(t *testing.T) {
 	cl := newCluster(t, 3)
 	m := cl.m
-	cl.h.RunOnce() // 推容灾状态(副机切到纪元 1)、拉报告(拿到候选公钥)
+	cl.h.RunOnce() // 推容灾状态(副机切到纪元 1)、拉报告(拿到备用公钥)
 	for i, c := range cl.cands {
 		if c.Epoch() != 1 {
 			t.Fatalf("副机 %d 应已切到纪元 1", i)
@@ -93,11 +93,11 @@ func TestReplicatorCandidates(t *testing.T) {
 	r2, ok2 := cl.cands[1].replicaInfo()
 	_, ok3 := cl.cands[2].replicaInfo()
 	if !ok1 || !ok2 || ok3 || r1.Seq == 0 || r1.Seq != r2.Seq {
-		t.Fatalf("副本只给前两台候选,同一份: %v %v %v %+v %+v", ok1, ok2, ok3, r1, r2)
+		t.Fatalf("副本只给前两台备用,同一份: %v %v %v %+v %+v", ok1, ok2, ok3, r1, r2)
 	}
 	st, _ := cl.cands[0].NodeState()
 	if st.rank() != 1 || len(st.Standbys) != 2 {
-		t.Fatalf("候选要知道自己的名次: %+v", st)
+		t.Fatalf("备用要知道自己的名次: %+v", st)
 	}
 	// 内容没变:不重发,下一轮容灾状态把"截至"推过去
 	cl.h.RunOnce()
@@ -111,7 +111,7 @@ func TestReplicatorCandidates(t *testing.T) {
 	}
 	cl.h.RunOnce()
 	if ri, _ := cl.cands[0].replicaInfo(); ri.Seq != r1.Seq || ri.AsOf < cl.clk.now().Unix() {
-		t.Fatalf("内容没变时候选那份的「截至」要更新: %+v (now %d)", ri, cl.clk.now().Unix())
+		t.Fatalf("内容没变时备用那份的「截至」要更新: %+v (now %d)", ri, cl.clk.now().Unix())
 	}
 	// 内容变了:发新的一份
 	m.d.DB.Model(&model.User{}).Where("name = ?", "alice").Update("up", 99)
@@ -136,7 +136,7 @@ func TestReplicatorCandidates(t *testing.T) {
 	if got := m.rep.standbyIds(); len(got) != 2 || got[0] != cl.ids[1] || got[1] != cl.ids[2] {
 		t.Fatalf("备用按服务器顺序选: %v", got)
 	}
-	// 第二台的候选公钥变了(重装):不再发、告警一次;重新信任后恢复
+	// 第二台的备用公钥变了(重装):不再发、告警一次;重新信任后恢复
 	os.Remove(filepath.Join(cl.cands[1].Dir(), fileKey))
 	cl.h.RunOnce()
 	_ = m.ReplicateNow()
@@ -170,7 +170,7 @@ func TestReplicatorCandidates(t *testing.T) {
 	}
 }
 
-// 刚启动的主机(状态还没拉齐)用上次记下的名单:第一轮容灾状态不会让候选把副本删掉。
+// 刚启动的主机(状态还没拉齐)用上次记下的名单:第一轮容灾状态不会让备用把副本删掉。
 func TestReplicatorWarmupKeepsList(t *testing.T) {
 	cl := newCluster(t, 1)
 	cl.h.RunOnce()
@@ -183,7 +183,7 @@ func TestReplicatorWarmupKeepsList(t *testing.T) {
 	h2 := testHub(t, m2)
 	h2.RunOnce()
 	if _, ok := cl.cands[0].replicaInfo(); !ok {
-		t.Fatal("主机刚重启时第一轮容灾状态不能让候选删掉副本")
+		t.Fatal("主机刚重启时第一轮容灾状态不能让备用删掉副本")
 	}
 	if got := m2.rep.standbyIds(); len(got) != 1 || got[0] != cl.ids[0] {
 		t.Fatalf("刚启动时用上次记下的名单: %v", got)

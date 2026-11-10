@@ -109,7 +109,7 @@ func TestBuildReplicaContents(t *testing.T) {
 	var cur int64
 	db.Raw("SELECT up FROM traffic_cursors WHERE node_id = 2").Scan(&cur)
 	if cur != 50 {
-		t.Fatal("并账游标要带上(接管后靠它把副机流量补回来)")
+		t.Fatal("并账游标要带上(接任后靠它把副机流量补回来)")
 	}
 	var changes []model.Change
 	db.Raw("SELECT * FROM changes").Scan(&changes)

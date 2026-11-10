@@ -341,7 +341,7 @@ func TestPeerAuthAndVote(t *testing.T) {
 	if vr.Granted {
 		t.Fatal("同一纪元已经投给别人:不再给")
 	}
-	// 冒充别人要票:发起方和候选人对不上
+	// 冒充别人要票:发起方和被投票的人对不上
 	h.Set(peerHeaderNode, strconv.FormatUint(uint64(a.SelfId()), 10))
 	if _, err := b.ServePeer("vote", h, other); err == nil {
 		t.Fatal("只能给自己要票")

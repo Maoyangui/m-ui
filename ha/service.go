@@ -419,3 +419,13 @@ func (s *Service) Tick() {
 
 // Switch 设为主机的进度与结果。
 func (s *Service) Switch() SwitchState { return s.switchState() }
+
+// auditTo 记一条操作审计(面板「操作审计」里看得到,key 为 ha):接任、成为主机、变为副机、原主机回来、命令行的操作……
+func auditTo(db *gorm.DB, at int64, actor, action string, obj interface{}) {
+	b, _ := json.Marshal(obj)
+	db.Create(&model.Change{DateTime: at, Actor: actor, Key: "ha", Action: action, Obj: b})
+}
+
+func (s *Service) audit(actor, action string, obj interface{}) {
+	auditTo(s.d.DB, s.now().Unix(), actor, action, obj)
+}

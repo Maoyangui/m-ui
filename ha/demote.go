@@ -234,6 +234,11 @@ func (s *Service) Demote(d Demoted) error {
 	}
 	msg += "\n想让本机重新当主机:在新主机的服务器列表里对本机「设为主机」。"
 	s.notify(msg)
+	action := "demoted"
+	if d.Yield {
+		action = "yielded"
+	}
+	s.audit("ha", action, map[string]interface{}{"master": d.MasterName, "epoch": d.Epoch, "divergent": d.Divergent, "backup": d.Backup})
 	s.addNotice(Notice{Kind: "demoted", Name: d.MasterName, N: d.Divergent, File: d.Backup, At: d.At})
 	s.restart(3 * time.Second)
 	return nil
@@ -342,6 +347,7 @@ func (s *Service) reclaim(seen uint64, force bool) (uint64, error) {
 	}
 	s.invalidate()
 	s.rep.kick()
+	s.audit("ha", "reclaim", map[string]interface{}{"epoch": next, "from": L, "granted": granted, "force": force})
 	logger.Warning("容灾:以纪元 ", next, " 收回跟过别的主机的副机(原纪元 ", L, ",已给 ", granted, " 台发交接标记)")
 	s.notify(fmt.Sprintf("🟠 <b>已收回脱离的副机</b>:有副机跟过一台纪元更高、现在已经不在的主机。本机以纪元 %d 继续当主机,它们会自动回来。", next))
 	return next, nil

@@ -208,6 +208,7 @@ func (s *Service) formerTick() {
 	s.invalidate()
 	s.rep.kick()
 	logger.Info("容灾:原主机 ", n.Name, " 已恢复,作为副机运行")
+	s.audit("ha", "former-back", map[string]string{"name": n.Name})
 	s.addNotice(Notice{Kind: "formerBack", Name: n.Name})
 	s.notify("🟢 <b>原主机「" + notify.Esc(n.Name) + "」已恢复</b>,已作为副机运行。\n想让它重新当主机,在服务器列表里对它「设为主机」。")
 }

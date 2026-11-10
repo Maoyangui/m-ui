@@ -181,7 +181,7 @@ func (s *Service) readiness(c Config, infos []StandbyInfo) []Check {
 	for _, i := range infos {
 		if i.Eligible {
 			eligible++
-			if i.Plain && (i.Rank > 0 || len(out) < c.Standbys) {
+			if i.Plain && i.Rank > 0 {
 				plain = append(plain, i.Name)
 			}
 		}
@@ -282,7 +282,8 @@ func itoa(n int) string { return strconv.Itoa(n) }
 // (老主机不认这个字段,忽略)。
 func (s *Service) Report() *hub.HAReport {
 	L := s.Epoch()
-	rep := &hub.HAReport{Epoch: L, LeaseAgo: int64(s.LeaseAgo().Seconds()), DiskFree: s.diskFree(), Role: s.Role(), Version: s.d.Version}
+	rep := &hub.HAReport{Epoch: L, LeaseAgo: int64(s.LeaseAgo().Seconds()), DiskFree: s.diskFree(), Role: s.Role(), Version: s.d.Version,
+		ResellerPort: s.settingInt("resellerPort", 2054, 1, 65535)}
 	if L > 0 && s.IsNode() {
 		if k, err := s.standbyKey(); err == nil {
 			rep.Pub = k.PubString()
