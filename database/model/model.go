@@ -310,10 +310,11 @@ type PlanOp struct {
 	CreatedAt  int64           `json:"createdAt" gorm:"index"`
 }
 
-// 套餐记录的保留:一年(幂等键也只在这段时间里有效),总量再兜一道上限。
+// 套餐记录的保留:一年(幂等键也只在这段时间里有效),条数再兜一道上限 —— 按作用域(主面板 / 每个代理)各算各的,
+// 一个代理刷记录只会挤掉他自己最旧的,碰不到主面板和别的代理的记录与幂等键。
 const (
 	PlanOpKeepDays = 365
-	PlanOpMaxRows  = 100000
+	PlanOpMaxRows  = 100000 // 每个作用域
 )
 
 // StartOnFirstUse 记流量的那条 UPDATE 顺带做"首次连接开始计时":等着计时的用户此刻换算成到期时间。

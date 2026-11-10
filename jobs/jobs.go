@@ -712,12 +712,36 @@ func (s *Scheduler) runCleanup() {
 		}
 	}
 	trim(s.d.DB, &model.Change{}, 200000, "审计日志")
-	// 套餐记录(兼外部 API 的幂等键):固定保留一年,和清空审计日志无关;总量再兜一道上限
+	// 套餐记录(兼外部 API 的幂等键):固定保留一年,和清空审计日志无关;条数按作用域各自封顶
 	cutoff := now.AddDate(0, 0, -model.PlanOpKeepDays).Unix()
 	if err := s.d.DB.Where("created_at < ?", cutoff).Delete(&model.PlanOp{}).Error; err != nil {
 		logger.Warning("清理套餐记录失败: ", err)
 	}
-	trim(s.d.DB, &model.PlanOp{}, model.PlanOpMaxRows, "套餐记录")
+	trimPlanOps(s.d.DB, model.PlanOpMaxRows)
+}
+
+// trimPlanOps 套餐记录按作用域(reseller_id:0 = 主面板,否则是那个代理)各留最新的 keep 条。
+// 以前按全表裁:一个代理刷够 10 万条,主面板和别的代理一年内的记录、幂等键就被挤掉了,商城重试时又会重复加时。
+func trimPlanOps(db *gorm.DB, keep int64) {
+	var over []struct {
+		ResellerId uint
+		N          int64
+	}
+	if err := db.Model(&model.PlanOp{}).Select("reseller_id, COUNT(*) AS n").Group("reseller_id").
+		Having("COUNT(*) > ?", keep).Scan(&over).Error; err != nil {
+		logger.Warning("裁剪套餐记录失败: ", err)
+		return
+	}
+	for _, o := range over {
+		var cut uint64
+		db.Model(&model.PlanOp{}).Where("reseller_id = ?", o.ResellerId).Order("id desc").Offset(int(keep)).Limit(1).Pluck("id", &cut)
+		if cut == 0 {
+			continue
+		}
+		if err := db.Where("reseller_id = ? AND id <= ?", o.ResellerId, cut).Delete(&model.PlanOp{}).Error; err != nil {
+			logger.Warning("裁剪套餐记录失败: ", err)
+		}
+	}
 }
 
 // RollupStats 把 before 之前、不在整点上的时序行并入所在小时的桶(同键累加),再删掉原始行。
