@@ -157,7 +157,7 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
     <div class="lines">{{range .Lines}}<div class="line"><span>{{.Name}}</span><span class="tags"><span class="tag">{{.Protocol}}</span>{{if .TLS}}<span class="tag">{{.TLS}}</span>{{end}}{{if .Transport}}<span class="tag">{{.Transport}}</span>{{end}}</span></div>{{end}}</div></details>
   </div>{{end}}
 
-  <div class="foot">{{if .Support}}{{.Support}} · {{end}}© {{.Year}} {{.Title}}{{if .Brand}} · <a class="powered" href="https://maoyangui.github.io/m-ui/" rel="noopener" target="_blank">Powered by m-ui</a>{{end}}</div>
+  <div class="foot">{{if .Support}}{{.Support}} · {{end}}© {{.Year}} {{if .Brand}}github-maoyangui · <a class="powered" href="https://maoyangui.github.io/m-ui/" rel="noopener" target="_blank">Powered by m-ui</a>{{else}}{{.Title}}{{end}}</div>
 </div>
 <div class="toast" id="toast"></div>
 <script>
