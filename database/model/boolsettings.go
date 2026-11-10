@@ -9,7 +9,7 @@ var BoolSettings = map[string]bool{
 	"supportOnline": true, "subUseUserName": true, "subEncode": true, "subShowNotice": true, "subAutoFormat": true,
 	"resellerEnabled": true, "subPageEnabled": true, "subShareEnabled": true, "subPageBrand": true,
 	"tgEnabled": true, "tgBot": true, "tgOnLogin": true, "tgOnUserDisabled": true, "tgOnUserExpiring": true,
-	"tgOnQuota": true, "tgOnRuleLimit": true, "tgOnUpstream": true, "tgOnCore": true, "tgOnReach": true, "tgDaily": true,
+	"tgOnQuota": true, "tgOnRuleLimit": true, "tgOnUpstream": true, "tgOnCore": true, "tgOnReach": true, "tgOnCert": true, "tgDaily": true,
 	"reachAuto": true, "allowPrivate": true, "blockBT": true, "nodeMode": true, "backupTelegram": true,
 }
 
