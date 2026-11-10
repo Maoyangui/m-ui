@@ -368,6 +368,14 @@ func (s *Server) handleUserPlan(w http.ResponseWriter, r *http.Request, u model.
 		if req.PlanId != nil {
 			pid = *req.PlanId
 		}
+		if req.DryRun { // 预览只校验:不改归属、不写审计、不触发规则重判
+			if err := s.planBelongs(pid, u.ResellerId); err != nil {
+				badRequest(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "dryRun": true, "expiry": u.Expiry, "planId": pid})
+			return
+		}
 		if err := s.bindUserPlan([]model.User{u}, pid); err != nil {
 			badRequest(w, err)
 			return
@@ -661,6 +669,9 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		p, err := s.loadPlan(req.PlanId)
+		if rid := scope(r); err == nil && rid > 0 && p.ResellerId != rid {
+			err = errPlanNotFound // 先核对归属再校验期数:别人的套餐和不存在的套餐同一个错误,探不出别人的套餐与天数
+		}
 		if err != nil {
 			badRequest(w, err)
 			return
@@ -687,7 +698,8 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		sc := planScope{rid: scope(r), actor: s.actor(r)}
 		replanned := false
 		for _, u := range users {
-			res, err := s.runPlanOp(sc, u.Id, planOpCall{endpoint: "batch", opt: planOpOpt{Op: req.Mode, Periods: n}, target: p, quiet: true})
+			res, err := s.runPlanOp(sc, u.Id, planOpCall{endpoint: "batch", opt: planOpOpt{Op: req.Mode, Periods: n}, target: p, quiet: true,
+				reqHash: planHash("batch", u.Id, p.Id, req.Mode, n)})
 			if err != nil {
 				writePlanErr(w, err)
 				return

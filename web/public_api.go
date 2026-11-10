@@ -343,6 +343,8 @@ type apiUserReq struct {
 	LineIds      *[]uint          `json:"lineIds"`
 	LineRefs     *[]model.LineRef `json:"lineRefs"` // 线路 × 服务器;给了它就以它为准
 	ExtIds       *[]uint          `json:"extIds"`
+	// RequestId 幂等键(也可以用请求头 Idempotency-Key):只有修改时同时带了套餐(等同一次续费)才认
+	RequestId string `json:"requestId"`
 }
 
 // apiFindPlan 找套餐:主面板令牌只看主面板的套餐,代理令牌只看该代理自己的。
@@ -567,6 +569,8 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiSco
 	writeJSON(w, http.StatusOK, s.apiUser(u))
 }
 
+// apiUpdateUser PATCH / PUT /users/{name|id}:只改请求里给出的字段。同时带了 planId / plan 的等同一次续费,
+// 交给 apiUpdateUserPlan 走套餐操作的执行器(记套餐记录、认幂等键);没带套餐的照旧在这里改。
 func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.User, sc apiScope) {
 	var req apiUserReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -579,21 +583,9 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 		badRequest(w, err)
 		return
 	}
-	var planRefsV []model.LineRef
-	planRenews := false
 	if plan != nil {
-		mode := req.Mode
-		if mode != "extend" {
-			mode = "renew"
-			planRenews = true
-		}
-		before := u.Expiry
-		planRefsV = applyPlanRefs(&u, *plan, mode, now)
-		// 显式字段优先于套餐:同时给了 days 就由它替代套餐自带的天数(同样从原到期起算)。以前在套餐延好的到期上
-		// 再加一遍,多给一个周期(审计 MB09)
-		if req.Days != nil && req.Expiry == nil {
-			u.Expiry = before
-		}
+		s.apiUpdateUserPlan(w, r, u, sc, req, *plan)
+		return
 	}
 	oldName := u.Name
 	if req.Name != nil && *req.Name != u.Name {
@@ -613,8 +605,6 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 		refs = *req.LineRefs
 	case req.LineIds != nil:
 		refs = lineRefsOf(*req.LineIds, nil)
-	case planRefsV != nil:
-		refs = planRefsV
 	}
 	if sc.rid > 0 {
 		check := refs
@@ -631,7 +621,7 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 	}
 	err = s.db.Transaction(func(tx *gorm.DB) error { // 用户字段与分配一个事务
 		if err := tx.Model(&model.User{}).Where("id = ?", u.Id).
-			Updates(updateUserFields(u, planRenews)).Error; err != nil {
+			Updates(updateUserFields(u, false)).Error; err != nil {
 			return err
 		}
 		if err := moveUserStats(tx, oldName, u.Name); err != nil {
@@ -651,18 +641,9 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 		badRequest(w, err)
 		return
 	}
-	action := "update"
-	if plan != nil {
-		action += ":plan:" + plan.Name
-	}
-	s.auditAs(sc.actor, "user", action, u.Name)
+	s.auditAs(sc.actor, "user", "update", u.Name)
 	s.reloadUsers("外部 API 修改用户 " + u.Name)
-	// 返回数据库中的最新用量，避免把请求开始时的旧快照回传给调用方。
-	if err := s.db.First(&u, u.Id).Error; err != nil {
-		badRequest(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, s.apiUser(u))
+	s.writeFreshUser(w, u.Id, false) // 返回数据库中的最新用量，避免把请求开始时的旧快照回传给调用方
 }
 
 func (s *Server) apiUserAction(w http.ResponseWriter, r *http.Request, u model.User, action string, sc apiScope) {

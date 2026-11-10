@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -24,33 +26,37 @@ import (
 
 // ---- 套餐操作:续费 N 期、换套餐(立即替换 / 叠加 / 按价值折算)、预览、幂等 ----
 //
-// 面板的续费、批量续费、换套餐,外部 API 的 /plan、/renew、/change 都走这里:
+// 面板的续费、批量续费、换套餐,外部 API 的 /plan、/renew、/change 以及带套餐的 PATCH /users 都走这里:
 //
 //	calcPlanOp  纯函数,只算:变更后的用户、要写的线路、用量怎么处理、折算与告警。预览和正式执行用同一个。
-//	runPlanOp   执行器:一个 BEGIN IMMEDIATE 事务里依次查幂等键 → 重新读用户 → 核对 fromPlanId → 计算 → 护栏
-//	            → 写用户(用量列用 SQL 原子结算)、线路、套餐记录、审计。事务体里只能用 tx:用 s.db 写会向第二条连接要写锁,
-//	            一直等到 busy_timeout(10 秒)才失败。
+//	runPlanOp   执行器:一个 BEGIN IMMEDIATE 事务里依次查幂等键 → 重新读用户 → 核对 fromPlanId 与「续当前套餐」的目标
+//	            → 计算 → 护栏 → 写用户(用量列用 SQL 原子结算)、线路、套餐记录、审计。事务体里只能用 tx:用 s.db 写会向
+//	            第二条连接要写锁,一直等到 busy_timeout(10 秒)才失败;用 s.db 读在并发时会把连接池耗尽(排队等写锁的
+//	            事务各占着一条连接)。所以要用 s.db 读的校验(找套餐、代理授权、整理线路)都在事务外先做。
 //
 // 记号:N 期数;目标套餐 Q 的天数 D、每期流量 V、重置天数 R;used = up + down。
 // 「一次性额度」= 不周期重置且有上限,配额是整段时长的存量;「周期重置」的流量是每期额度,不叠加。
 // 配额、天数的加法都按 model.MaxVolume / model.MaxDays 饱和(溢出的整数在 SQLite 里会变成 REAL,整表读不出来)。
 
 const (
-	maxPlanPeriods  = 120   // 一次最多续 / 换 120 期
-	maxPlanDays     = 36500 // 期数 × 套餐天数不超过约 100 年
-	maxCreditDays   = 3650  // 折算出来的时长封顶
-	earlierSlack    = 60    // 到期只早这么几秒不算"提前"(预览到执行之间的时间差)
-	planRemarkMax   = 200   // 套餐记录的备注最多这么多字
-	planOpMasterTag = "主面板"
+	maxPlanPeriods   = 120   // 一次最多续 / 换 120 期
+	maxPlanDays      = 36500 // 期数 × 套餐天数不超过约 100 年
+	maxCreditDays    = 3650  // 折算出来的时长封顶
+	earlierSlack     = 60    // 到期只早这么几秒不算"提前"(预览到执行之间的时间差)
+	planRemarkMax    = 200   // 套餐记录的备注最多这么多字
+	planOpMasterTag  = "主面板"
+	planCurrentTries = 3 // 续当前套餐:事务里发现所属套餐刚被换掉时,按最新的用户重来几次
 )
 
 var (
 	errPlanRequired     = errors.New("缺少 planId 或 plan")
 	errPlanNoUserPlan   = errors.New("用户没有所属套餐,请给 planId 或 plan")
+	errPlanNotFound     = errors.New("套餐不存在")
 	errPlanBadMode      = errors.New("mode 只能是 replace / stack / prorate")
 	errPlanBadPeriods   = errors.New("期数需在 1 到 120 之间(折算可为 0),且总天数不超过 36500")
 	errPlanBadUsage     = errors.New("usage 只能是 auto / keep / reset")
 	errPlanBadRequestID = errors.New("requestId 最长 64 个字符,只能含字母、数字和 . _ : -")
+	errPlanBody         = errors.New("请求体要是 JSON 对象")
 	errPlanNoCurrent    = errors.New("用户没有所属套餐,不能按价值折算")
 	errPlanSame         = errors.New("目标套餐就是当前套餐,不能折算:要从现在重新开始用 replace,要带结转续费用 stack")
 	errPlanUnmeasurable = errors.New("当前订阅不限期也不限量,剩余价值没法估算")
@@ -58,6 +64,7 @@ var (
 	errPlanNothing      = errors.New("没有可折算的剩余价值,期数不能为 0")
 	errPlanNeedsForce   = errors.New("这次变更有需要确认的影响(见 warnings),确认后带 force: true 重试")
 	errPlanChanged      = errors.New("用户当前套餐与 fromPlanId 不符")
+	errPlanMoved        = errors.New("用户的所属套餐刚被别的操作换掉了,请确认后重试")
 	errPlanIdemConflict = errors.New("requestId 已用于另一笔不同的请求")
 	errPlanUserGone     = errors.New("用户不存在")
 )
@@ -211,7 +218,8 @@ type planResult struct {
 	NeedsForce bool          `json:"needsForce"`
 	User       *apiUserView  `json:"user,omitempty"`
 
-	calc planCalc // 执行器落库用,不出接口
+	calc      planCalc        // 执行器落库用,不出接口
+	writeRefs []model.LineRef // 要写的线路(已整理);nil = 不改
 }
 
 // ---- 计算 ----
@@ -655,26 +663,46 @@ type planScope struct {
 
 // planOpCall 一次套餐操作(参数已校验、目标套餐已找到、代理校验已做)。
 type planOpCall struct {
-	endpoint  string // change | plan(/renew 同)| batch:算幂等指纹用
+	endpoint  string // change | plan(/renew 同)| batch | update(带套餐的 PATCH /users)
 	opt       planOpOpt
 	target    model.Plan
+	current   bool  // 续当前套餐:事务里核对用户的所属套餐仍是 target(没被并发的换套餐换掉、也没被改过),否则放弃重来
 	fromPlan  *uint // 前置条件:用户现在的 planId 必须是它
 	force     bool
 	dryRun    bool
 	requestID string
+	reqHash   string // 幂等指纹:按请求本身的内容算(套餐按请求里的写法),见 planHash
 	remark    string
-	quiet     bool // 批量:不逐个写审计、不逐个热更新(调用方最后统一做)
+	quiet     bool       // 批量:不逐个写审计、不逐个热更新(调用方最后统一做)
+	patch     *userPatch // 带套餐的 PATCH /users:套餐之后再盖上请求里显式给出的字段
+	audit     string     // 审计动作;空 = plan:<动作>:<套餐名>
 }
 
-// fingerprint 规范化后的请求内容:同一个幂等键只认同一份内容。
-func (c planOpCall) fingerprint(uid uint) string {
-	from := int64(-1)
-	if c.fromPlan != nil {
-		from = int64(*c.fromPlan)
-	}
-	b, _ := json.Marshal([]interface{}{c.endpoint, uid, c.target.Id, c.opt.Op, c.opt.Periods, c.opt.Usage, from, c.force, c.remark})
+// planHash 幂等指纹:规范化后的请求内容,同一个幂等键只认同一份内容。目标套餐按请求里的写法记(planSelector),
+// 不按解析出来的套餐:已经成功的请求重试时,套餐后来改了名或删了,照样认得出是同一笔。
+func planHash(parts ...interface{}) string {
+	b, _ := json.Marshal(parts)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// planSelector 请求里怎么指定的目标套餐:id:<n> / name:<名字> / current(没给套餐)。
+func planSelector(req planOpReq) string {
+	switch {
+	case req.PlanId != nil && *req.PlanId > 0:
+		return "id:" + strconv.FormatUint(uint64(*req.PlanId), 10)
+	case req.Plan != nil && strings.TrimSpace(*req.Plan) != "":
+		return "name:" + strings.TrimSpace(*req.Plan)
+	}
+	return "current"
+}
+
+// fromOf fromPlanId 进指纹:没给记 -1(0 是"必须没有套餐")。
+func fromOf(p *uint) int64 {
+	if p == nil {
+		return -1
+	}
+	return int64(*p)
 }
 
 // planOpInput 计算要读的东西,用传进来的 db 读(正式执行时是事务里的 tx)。
@@ -713,25 +741,46 @@ func loadPlanOpInput(db *gorm.DB, uid uint) (planOpInput, error) {
 }
 
 // buildPlanResult 计算并组装结果;toRefs 是整理好的套餐线路(套餐不带线路时为 nil)。
-func buildPlanResult(in planOpInput, call planOpCall, toRefs []model.LineRef, now int64) (*planResult, error) {
+func buildPlanResult(sc planScope, in planOpInput, call planOpCall, toRefs []model.LineRef, now int64) (*planResult, error) {
 	if call.fromPlan != nil && *call.fromPlan != in.user.PlanId {
 		return nil, opErr(http.StatusConflict, "plan_changed", errPlanChanged)
 	}
-	c, err := calcPlanOp(in.user, in.old, call.target, call.opt, in.fromRefs, now)
+	if call.current && (in.old == nil || !reflect.DeepEqual(*in.old, call.target)) {
+		// 续当前套餐:事务外按请求开始时的用户找到、校验过的那个套餐,到事务里已经不是他的当前套餐了(并发的换套餐先提交),
+		// 或者套餐刚被改过。不能照旧续,那会把用户静默改回旧套餐;调用方按最新的用户重新解析再来
+		return nil, opErr(http.StatusConflict, "plan_changed", errPlanMoved)
+	}
+	old := in.old
+	if old != nil && sc.rid > 0 && old.ResellerId != sc.rid {
+		old = nil // 别人的套餐(主面板套到代理用户上的):名字不给代理看,也不拿它比升降级(估值本来就只认同归属的)
+	}
+	c, err := calcPlanOp(in.user, old, call.target, call.opt, in.fromRefs, now)
 	if err != nil {
 		return nil, err
 	}
+	if call.patch != nil {
+		if err := call.patch.apply(&c, in.user, now); err != nil {
+			return nil, err
+		}
+	}
+	var write []model.LineRef
+	if c.refs != nil {
+		write = toRefs
+	}
+	if p := call.patch; p != nil && p.refsGiven {
+		write = p.refs // 请求里显式给的线路优先于套餐的(给了空列表 = 不改,和以前一样)
+	}
 	oldName := ""
-	if in.old != nil {
-		oldName = in.old.Name
+	if old != nil {
+		oldName = old.Name
 	}
 	refsTo := in.fromRefs
-	if c.refs != nil {
-		refsTo = toRefs
+	if write != nil {
+		refsTo = write
 	}
 	res := &planResult{Op: call.opt.Op, Direction: c.direction, Periods: call.opt.Periods, Usage: c.usage,
 		From: stateOf(in.user, oldName, in.fromRefs), To: stateOf(c.next, call.target.Name, refsTo),
-		Remaining: c.remaining, Credit: c.credit, Warnings: c.warnings, calc: c}
+		Remaining: c.remaining, Credit: c.credit, Warnings: c.warnings, calc: c, writeRefs: write}
 	if rs := in.reseller; rs != nil {
 		pool := &planPool{Volume: rs.Volume, Used: in.rsUsed}
 		if rs.Volume > 0 {
@@ -787,7 +836,7 @@ func (s *Server) runPlanOp(sc planScope, uid uint, call planOpCall) (*planResult
 			if err != nil {
 				return err
 			}
-			res, err = buildPlanResult(in, call, toRefs, now)
+			res, err = buildPlanResult(sc, in, call, toRefs, now)
 			return err
 		})
 		if err != nil {
@@ -797,7 +846,7 @@ func (s *Server) runPlanOp(sc planScope, uid uint, call planOpCall) (*planResult
 		return res, nil
 	}
 
-	hash := call.fingerprint(uid)
+	hash := call.reqHash
 	var res *planResult
 	var prev *model.PlanOp
 	var before model.User
@@ -821,7 +870,7 @@ func (s *Server) runPlanOp(sc planScope, uid uint, call planOpCall) (*planResult
 		if err != nil {
 			return err
 		}
-		res, err = buildPlanResult(in, call, toRefs, now)
+		res, err = buildPlanResult(sc, in, call, toRefs, now)
 		if err != nil {
 			return err
 		}
@@ -832,9 +881,19 @@ func (s *Server) runPlanOp(sc planScope, uid uint, call planOpCall) (*planResult
 		if err := tx.Model(&model.User{}).Where("id = ?", uid).Updates(planOpFields(res.calc)).Error; err != nil {
 			return err
 		}
-		if res.calc.refs != nil {
-			if err := writeUserLineRefs(tx, uid, toRefs); err != nil {
+		if res.writeRefs != nil {
+			if err := writeUserLineRefs(tx, uid, res.writeRefs); err != nil {
 				return err
+			}
+		}
+		if p := call.patch; p != nil { // PATCH 顺带的改名、外部节点
+			if err := moveUserStats(tx, in.user.Name, res.calc.next.Name); err != nil {
+				return err
+			}
+			if p.extIds != nil {
+				if err := writeUserExts(tx, uid, *p.extIds); err != nil {
+					return err
+				}
 			}
 		}
 		rec := newPlanOp(sc, call, hash, in.user, res, now)
@@ -843,8 +902,12 @@ func (s *Server) runPlanOp(sc planScope, uid uint, call planOpCall) (*planResult
 		}
 		res.OpId = rec.Id
 		if !call.quiet {
-			obj, _ := json.Marshal(in.user.Name) // 和老的套用套餐审计同一格式:老库补「所属套餐」时按它解析
-			return tx.Create(&model.Change{DateTime: now, Actor: actorOr(sc.actor), Key: "user", Action: "plan:" + call.opt.Op + ":" + call.target.Name, Obj: obj}).Error
+			action := call.audit
+			if action == "" {
+				action = "plan:" + call.opt.Op + ":" + call.target.Name
+			}
+			obj, _ := json.Marshal(res.calc.next.Name) // 和老的套用套餐审计同一格式:老库补「所属套餐」时按它解析
+			return tx.Create(&model.Change{DateTime: now, Actor: actorOr(sc.actor), Key: "user", Action: action, Obj: obj}).Error
 		}
 		return nil
 	})
@@ -867,13 +930,13 @@ func (s *Server) runPlanOp(sc planScope, uid uint, call planOpCall) (*planResult
 	}
 	res.RequestId = call.requestID
 	if !call.quiet {
-		s.reloadUsers("套餐 " + call.target.Name + " → " + before.Name)
+		s.reloadUsers("套餐 " + call.target.Name + " → " + res.calc.next.Name)
 		if before.PlanId != call.target.Id {
 			s.rulesNow() // 换了套餐,按套餐选人的限速规则要立刻重判
 		}
 	}
 	if next := res.calc.next; res.calc.reset || (before.Volume > 0 && (next.Volume == 0 || next.Volume > before.Volume)) {
-		s.forgetQuotaAlert(before.Name) // 用量清零或配额变大:再到阈值要能再提醒
+		s.forgetQuotaAlert(next.Name) // 用量清零或配额变大:再到阈值要能再提醒
 	}
 	return res, nil
 }
@@ -896,8 +959,27 @@ func findPlanOp(db *gorm.DB, rid uint, key string) (*model.PlanOp, error) {
 	return &op, nil
 }
 
+// replayPlanOp 幂等键已经执行过:同内容原样重放,内容不同 409。调用方把它排在找套餐、校验期数、代理校验之前 ——
+// 已经成功的请求重试时,套餐后来改了名或删了、天数改了、代理额度用完了,照样拿到 200 重放,而不是 4xx。
+// 预览不看键(也不占用键)。没执行过返回 (nil, nil),由执行器在事务里再查一遍(并发的同键请求)。
+func (s *Server) replayPlanOp(sc planScope, key, hash string, dryRun bool) (*planResult, error) {
+	if key == "" || dryRun {
+		return nil, nil
+	}
+	p, err := findPlanOp(s.db, sc.rid, key)
+	if err != nil || p == nil {
+		return nil, err
+	}
+	if p.ReqHash != hash {
+		return nil, opErr(http.StatusConflict, "idempotency_conflict", errPlanIdemConflict)
+	}
+	r := planResultFromOp(*p)
+	r.Replayed = true
+	return r, nil
+}
+
 func newPlanOp(sc planScope, call planOpCall, hash string, u model.User, res *planResult, now int64) model.PlanOp {
-	op := model.PlanOp{ResellerId: sc.rid, ReqHash: hash, UserId: u.Id, UserName: u.Name, Actor: actorOr(sc.actor),
+	op := model.PlanOp{ResellerId: sc.rid, ReqHash: hash, UserId: u.Id, UserName: res.calc.next.Name, Actor: actorOr(sc.actor),
 		Op: call.opt.Op, Usage: res.Usage, Direction: res.Direction, FromPlanId: u.PlanId, FromPlan: res.From.Plan,
 		ToPlanId: call.target.Id, ToPlan: call.target.Name, Periods: call.opt.Periods, Remark: call.remark, CreatedAt: now}
 	if call.requestID != "" {
@@ -958,14 +1040,38 @@ type planOpReq struct {
 	DryRun     bool    `json:"dryRun"`
 	RequestId  string  `json:"requestId"`
 	Remark     string  `json:"remark"`
+
+	// planGiven 请求体里有 planId / plan 字段(不管值是什么)。/plan、/renew 只有完全没带套餐字段才续当前套餐;
+	// 带了却是 0、空串或 null 的,和以前一样 400。
+	planGiven bool
 }
 
-// decodePlanOpReq 读请求体;空请求体等于 {}(续当前套餐时什么都不用带)。?dryRun=true 也算预览。
+// decodePlanOpReq 读请求体;空请求体等于 {}(续当前套餐时什么都不用带),不是 JSON 对象的 400。?dryRun=true 也算预览。
 func decodePlanOpReq(r *http.Request) (planOpReq, error) {
 	var req planOpReq
+	var body []byte
 	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		b, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
 			return req, errors.New("请求体不是合法 JSON: " + err.Error())
+		}
+		body = bytes.TrimSpace(b)
+	}
+	if len(body) > 0 {
+		if body[0] != '{' {
+			return req, errPlanBody
+		}
+		var keys map[string]json.RawMessage
+		if err := json.NewDecoder(bytes.NewReader(body)).Decode(&keys); err != nil {
+			return req, errors.New("请求体不是合法 JSON: " + err.Error())
+		}
+		if err := json.NewDecoder(bytes.NewReader(body)).Decode(&req); err != nil {
+			return req, errors.New("请求体不是合法 JSON: " + err.Error())
+		}
+		for k := range keys {
+			if strings.EqualFold(k, "planId") || strings.EqualFold(k, "plan") { // 和 encoding/json 一样不分大小写
+				req.planGiven = true
+			}
 		}
 	}
 	if v := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("dryRun"))); v == "1" || v == "true" {
@@ -991,8 +1097,8 @@ func planRequestID(r *http.Request, body string) (string, error) {
 	return key, nil
 }
 
-// planPeriods 期数:默认 1,1–120(折算可以 0);多期时 N × 套餐天数不超过 36500。
-func planPeriods(p *int, op string, days int) (int, error) {
+// planPeriodsN 期数本身:默认 1,1–120(折算可以 0)。和套餐无关,能在找套餐之前校验。
+func planPeriodsN(p *int, op string) (int, error) {
 	n := 1
 	if p != nil {
 		n = *p
@@ -1001,10 +1107,27 @@ func planPeriods(p *int, op string, days int) (int, error) {
 	if op == "prorate" {
 		least = 0
 	}
-	if n < least || n > maxPlanPeriods || (n > 1 && days > 0 && n*days > maxPlanDays) {
+	if n < least || n > maxPlanPeriods {
 		return 0, opErr(http.StatusBadRequest, "bad_periods", errPlanBadPeriods)
 	}
 	return n, nil
+}
+
+// checkPlanDays 多期时 N × 套餐天数不超过 36500(一期不受限,和以前一样能续)。写成除法,天数再大也不会乘溢出。
+func checkPlanDays(n, days int) error {
+	if n > 1 && days > maxPlanDays/n {
+		return opErr(http.StatusBadRequest, "bad_periods", errPlanBadPeriods)
+	}
+	return nil
+}
+
+// planPeriods 期数:默认 1,1–120(折算可以 0);多期时 N × 套餐天数不超过 36500。
+func planPeriods(p *int, op string, days int) (int, error) {
+	n, err := planPeriodsN(p, op)
+	if err != nil {
+		return 0, err
+	}
+	return n, checkPlanDays(n, days)
 }
 
 func planUsage(s string) (string, error) {
@@ -1026,40 +1149,51 @@ func planRemark(s string) string {
 }
 
 // ---- 两类操作的入口(面板与外部 API 共用)----
+//
+// 顺序:先校验请求本身(方式、期数、用量处理、幂等键的格式)→ 查幂等键(执行过就重放 / 409)→ 找目标套餐并核对归属
+// → 按套餐天数校验期数 → 代理校验 → 执行。
 
-// renewUserPlan 续费 / 延期 N 期。没给套餐就续用户现在的套餐。byScope 为真(外部 API)时给的套餐只在调用方作用域里找,
-// 和以前的 /plan 一致;面板按 id 找,代理照旧只能用自己的套餐。
-func (s *Server) renewUserPlan(r *http.Request, sc planScope, u model.User, req planOpReq, byScope bool) (*planResult, error) {
-	var q model.Plan
-	switch {
-	case (req.PlanId != nil && *req.PlanId > 0) || (req.Plan != nil && strings.TrimSpace(*req.Plan) != ""):
+// renewTarget 续费的目标套餐。给了就按给的找:外部 API(byScope)只在调用方作用域里找,和以前的 /plan 一致;面板按 id 找,
+// 代理只认自己的。没给就是用户现在的套餐(current = true:执行时在事务里核对它没被换掉)。先核对归属再看别的 ——
+// 代理拿别人的套餐 id 和拿不存在的 id 得到同一个错误,探不出别人有没有这个套餐、天数是多少。
+func (s *Server) renewTarget(sc planScope, u model.User, req planOpReq, byScope bool) (model.Plan, bool, error) {
+	notFound := opErr(http.StatusBadRequest, "plan_not_found", errPlanNotFound)
+	if planSelector(req) != "current" {
 		if byScope || req.PlanId == nil || *req.PlanId == 0 {
 			p, err := s.apiFindPlan(apiUserReq{PlanId: req.PlanId, Plan: req.Plan}, sc.rid)
 			if err != nil {
-				return nil, opErr(http.StatusBadRequest, "plan_not_found", err)
+				return model.Plan{}, false, opErr(http.StatusBadRequest, "plan_not_found", err)
 			}
-			q = *p
-		} else {
-			p, err := s.loadPlan(*req.PlanId)
-			if err != nil {
-				return nil, opErr(http.StatusBadRequest, "plan_not_found", err)
-			}
-			q = p
+			return *p, false, nil
 		}
-	case u.PlanId == 0:
-		return nil, opErr(http.StatusBadRequest, "plan_required", errPlanNoUserPlan)
-	default:
-		p, err := s.loadPlan(u.PlanId)
-		if err != nil {
-			return nil, opErr(http.StatusBadRequest, "plan_not_found", err)
+		p, err := s.loadPlan(*req.PlanId)
+		if err != nil || (sc.rid > 0 && p.ResellerId != sc.rid) {
+			return model.Plan{}, false, notFound
 		}
-		q = p
+		return p, false, nil
 	}
+	if u.PlanId == 0 {
+		return model.Plan{}, false, opErr(http.StatusBadRequest, "plan_required", errPlanNoUserPlan)
+	}
+	p, err := s.loadPlan(u.PlanId)
+	if err != nil || (sc.rid > 0 && p.ResellerId != sc.rid) {
+		return model.Plan{}, false, notFound
+	}
+	return p, true, nil
+}
+
+// renewUserPlan 续费 / 延期 N 期。没带套餐字段就续用户现在的套餐(在执行的事务里核对);带了套餐字段却是 0 / 空 / null
+// 的 400。byScope 为真(外部 API)时给的套餐只在调用方作用域里找,和以前的 /plan 一致;面板按 id 找,代理照旧只能用自己的套餐。
+func (s *Server) renewUserPlan(r *http.Request, sc planScope, u model.User, req planOpReq, byScope bool) (*planResult, error) {
 	mode := req.Mode
 	if mode != "extend" {
 		mode = "renew" // 未知值照旧按 renew(兼容老调用方)
 	}
-	n, err := planPeriods(req.Periods, mode, q.Days)
+	sel := planSelector(req)
+	if req.planGiven && sel == "current" {
+		return nil, opErr(http.StatusBadRequest, "plan_required", errPlanRequired)
+	}
+	n, err := planPeriodsN(req.Periods, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -1067,16 +1201,34 @@ func (s *Server) renewUserPlan(r *http.Request, sc planScope, u model.User, req 
 	if err != nil {
 		return nil, err
 	}
-	if sc.rid > 0 { // 代理:只能续自己的套餐,线路在授权内,代理本身可用(启用、未到期、额度未用尽)
-		if q.ResellerId != sc.rid {
-			return nil, opErr(http.StatusBadRequest, "plan_not_found", errors.New("套餐不存在: id "+strconv.Itoa(int(q.Id))))
+	remark := planRemark(req.Remark)
+	hash := planHash("plan", u.Id, sel, mode, n, fromOf(req.FromPlanId), remark)
+	if prev, err := s.replayPlanOp(sc, key, hash, req.DryRun); prev != nil || err != nil {
+		return prev, err
+	}
+	for try := 1; ; try++ {
+		q, current, err := s.renewTarget(sc, u, req, byScope)
+		if err != nil {
+			return nil, err
 		}
-		if err := s.checkResellerPlan(sc.rid, u, q); err != nil {
-			return nil, opErr(http.StatusBadRequest, "reseller_denied", err)
+		if err := checkPlanDays(n, q.Days); err != nil {
+			return nil, err
+		}
+		if sc.rid > 0 { // 代理:线路在授权内,代理本身可用(启用、未到期、额度未用尽)
+			if err := s.checkResellerPlan(sc.rid, u, q); err != nil {
+				return nil, opErr(http.StatusBadRequest, "reseller_denied", err)
+			}
+		}
+		res, err := s.runPlanOp(sc, u.Id, planOpCall{endpoint: "plan", opt: planOpOpt{Op: mode, Periods: n}, target: q, current: current,
+			fromPlan: req.FromPlanId, dryRun: req.DryRun, requestID: key, reqHash: hash, remark: remark})
+		if !current || !errors.Is(err, errPlanMoved) || try >= planCurrentTries {
+			return res, err
+		}
+		// 事务里发现所属套餐刚被换掉(或刚改过):按最新的用户重新解析、重新校验再来
+		if e := s.db.First(&u, u.Id).Error; e != nil {
+			return nil, opErr(http.StatusNotFound, "", errPlanUserGone)
 		}
 	}
-	return s.runPlanOp(sc, u.Id, planOpCall{endpoint: "plan", opt: planOpOpt{Op: mode, Periods: n}, target: q,
-		fromPlan: req.FromPlanId, dryRun: req.DryRun, requestID: key, remark: planRemark(req.Remark)})
 }
 
 // changeUserPlan 换套餐:mode 必填(replace / stack / prorate)。目标套餐按**用户的归属**找:主面板用户找主面板的套餐,
@@ -1090,19 +1242,28 @@ func (s *Server) changeUserPlan(r *http.Request, sc planScope, u model.User, req
 	if err != nil {
 		return nil, err
 	}
-	p, err := s.apiFindPlan(apiUserReq{PlanId: req.PlanId, Plan: req.Plan}, u.ResellerId)
-	if err != nil {
-		return nil, opErr(http.StatusBadRequest, "plan_not_found", err)
-	}
-	if p == nil {
+	sel := planSelector(req)
+	if sel == "current" {
 		return nil, opErr(http.StatusBadRequest, "plan_required", errPlanRequired)
 	}
-	n, err := planPeriods(req.Periods, mode, p.Days)
+	n, err := planPeriodsN(req.Periods, mode)
 	if err != nil {
 		return nil, err
 	}
 	key, err := planRequestID(r, req.RequestId)
 	if err != nil {
+		return nil, err
+	}
+	remark := planRemark(req.Remark)
+	hash := planHash("change", u.Id, sel, mode, n, usage, fromOf(req.FromPlanId), req.Force, remark)
+	if prev, err := s.replayPlanOp(sc, key, hash, req.DryRun); prev != nil || err != nil {
+		return prev, err
+	}
+	p, err := s.apiFindPlan(apiUserReq{PlanId: req.PlanId, Plan: req.Plan}, u.ResellerId)
+	if err != nil {
+		return nil, opErr(http.StatusBadRequest, "plan_not_found", err)
+	}
+	if err := checkPlanDays(n, p.Days); err != nil {
 		return nil, err
 	}
 	if sc.rid > 0 {
@@ -1111,7 +1272,129 @@ func (s *Server) changeUserPlan(r *http.Request, sc planScope, u model.User, req
 		}
 	}
 	return s.runPlanOp(sc, u.Id, planOpCall{endpoint: "change", opt: planOpOpt{Op: mode, Periods: n, Usage: usage}, target: *p,
-		fromPlan: req.FromPlanId, force: req.Force, dryRun: req.DryRun, requestID: key, remark: planRemark(req.Remark)})
+		fromPlan: req.FromPlanId, force: req.Force, dryRun: req.DryRun, requestID: key, reqHash: hash, remark: remark})
+}
+
+// ---- 带套餐的 PATCH / PUT /users ----
+
+// userPatch 修改用户时同时带了套餐:先按套餐续一期,再把请求里显式给出的字段盖上去(显式字段优先于套餐),
+// 和以前同一套规则;线路、改名、外部节点也在执行器的同一个事务里写。
+type userPatch struct {
+	req       apiUserReq
+	rename    string          // 改名(已校验、已去空格);空 = 不改
+	refs      []model.LineRef // 请求里显式给的线路(已整理);refsGiven 为假时不看
+	refsGiven bool
+	extIds    *[]uint // 只有主面板令牌能改
+}
+
+// apply 在套餐算好的 next 上盖显式字段;before 是套用前的用户(days 要从套用前的到期起算)。
+func (p *userPatch) apply(c *planCalc, before model.User, now int64) error {
+	next := &c.next
+	if p.req.Days != nil && p.req.Expiry == nil {
+		// 同时给了 days 就由它替代套餐自带的天数(同样从原到期起算)。以前在套餐延好的到期上再加一遍,多给一个周期(审计 MB09)
+		next.Expiry = before.Expiry
+	}
+	if p.rename != "" {
+		next.Name = p.rename
+		if next.ActivateDays > 0 {
+			next.Expiry = 0 // 以前改名会过一遍 validateUser,它顺带做这一步
+		}
+	}
+	if err := applyReq(next, p.req, now, false); err != nil {
+		return opErr(http.StatusBadRequest, "", err)
+	}
+	return nil
+}
+
+// apiUpdateUserPlan PATCH / PUT /users/{name|id} 同时带了 planId / plan:等同一次续费(renew / extend 一期),
+// 走和 /plan 同一个执行器 —— 事务里重读用户、记套餐记录、认幂等键(requestId 或 Idempotency-Key);请求与响应的格式不变:
+// 请求里其它显式字段照旧盖在套餐上面,返回用户对象,审计仍记 update:plan:<套餐名>。
+func (s *Server) apiUpdateUserPlan(w http.ResponseWriter, r *http.Request, u model.User, sc apiScope, req apiUserReq, plan model.Plan) {
+	mode := req.Mode
+	if mode != "extend" {
+		mode = "renew"
+	}
+	key, err := planRequestID(r, req.RequestId)
+	if err != nil {
+		writePlanErr(w, err)
+		return
+	}
+	ps := planScope{rid: sc.rid, actor: sc.actor}
+	canon := req
+	canon.RequestId = ""
+	hash := planHash("update", u.Id, canon)
+	if prev, err := s.replayPlanOp(ps, key, hash, false); prev != nil || err != nil {
+		if err != nil {
+			writePlanErr(w, err)
+			return
+		}
+		s.writeFreshUser(w, u.Id, true)
+		return
+	}
+	// 事务外先在请求开始时读到的用户上算一遍:校验显式字段、改名、代理授权(都要用 s.db 读);落库时执行器按事务里重读的用户再算
+	now := time.Now().Unix()
+	pre, err := calcPlanOp(u, nil, plan, planOpOpt{Op: mode, Periods: 1}, nil, now)
+	if err != nil {
+		writePlanErr(w, err)
+		return
+	}
+	patch := &userPatch{req: req}
+	if req.Name != nil && *req.Name != u.Name {
+		tmp := pre.next
+		tmp.Name = *req.Name
+		if err := s.validateUser(&tmp); err != nil {
+			badRequest(w, err)
+			return
+		}
+		patch.rename = tmp.Name
+	}
+	if err := patch.apply(&pre, u, now); err != nil {
+		writePlanErr(w, err)
+		return
+	}
+	refs := pre.refs // 套餐带线路就换成套餐的,请求里显式给了以请求为准
+	switch {
+	case req.LineRefs != nil:
+		refs, patch.refsGiven = *req.LineRefs, true
+	case req.LineIds != nil:
+		refs, patch.refsGiven = lineRefsOf(*req.LineIds, nil), true
+	}
+	if sc.rid > 0 {
+		check := refs
+		if check == nil { // 没改线路就按现有的校验(已与当前授权取交集,收回的线路不算越权)
+			check = s.userLineRefs(u.Id)
+		}
+		if err := s.checkResellerUser(sc.rid, u.Id, &pre.next, check); err != nil {
+			badRequest(w, err)
+			return
+		}
+	}
+	if patch.refsGiven {
+		patch.refs = s.normalizeRefs(refs) // 给了空列表整理出来是 nil:不改线路,和以前一样
+	}
+	if req.ExtIds != nil && sc.rid == 0 {
+		patch.extIds = req.ExtIds
+	}
+	res, err := s.runPlanOp(ps, u.Id, planOpCall{endpoint: "update", opt: planOpOpt{Op: mode, Periods: 1}, target: plan,
+		requestID: key, reqHash: hash, patch: patch, audit: "update:plan:" + plan.Name})
+	if err != nil {
+		writePlanErr(w, err)
+		return
+	}
+	s.writeFreshUser(w, u.Id, res.Replayed)
+}
+
+// writeFreshUser 返回库里的最新用户对象(含统计这期间记的流量);重放时带 Idempotent-Replayed。
+func (s *Server) writeFreshUser(w http.ResponseWriter, id uint, replayed bool) {
+	var fresh model.User
+	if err := s.db.First(&fresh, id).Error; err != nil {
+		writePlanErr(w, opErr(http.StatusNotFound, "", errPlanUserGone))
+		return
+	}
+	if replayed {
+		w.Header().Set("Idempotent-Replayed", "true")
+	}
+	writeJSON(w, http.StatusOK, s.apiUser(fresh))
 }
 
 // ---- HTTP ----
@@ -1134,7 +1417,7 @@ func (s *Server) handleUserChange(w http.ResponseWriter, r *http.Request, u mode
 	writeJSON(w, http.StatusOK, res)
 }
 
-// apiRenew 外部 API:POST /users/{name|id}/plan(别名 /renew)。正式执行返回用户对象(和以前一样),预览返回结果对象。
+// apiRenew 外部 API:POST /users/{name|id}/plan(别名 /renew)。正式执行与重放都返回用户对象(和以前一样),预览返回结果对象。
 func (s *Server) apiRenew(w http.ResponseWriter, r *http.Request, u model.User, sc apiScope) {
 	req, err := decodePlanOpReq(r)
 	if err != nil {
@@ -1150,15 +1433,7 @@ func (s *Server) apiRenew(w http.ResponseWriter, r *http.Request, u model.User, 
 		writeJSON(w, http.StatusOK, res)
 		return
 	}
-	if res.Replayed {
-		w.Header().Set("Idempotent-Replayed", "true")
-	}
-	var fresh model.User // 落库后的最新值(含统计这期间记的流量)
-	if err := s.db.First(&fresh, u.Id).Error; err != nil {
-		writePlanErr(w, opErr(http.StatusNotFound, "", errPlanUserGone))
-		return
-	}
-	writeJSON(w, http.StatusOK, s.apiUser(fresh))
+	s.writeFreshUser(w, u.Id, res.Replayed)
 }
 
 // apiChange 外部 API:POST /users/{name|id}/change。返回结果对象,正式执行与重放时带上最新的用户对象。
@@ -1201,10 +1476,41 @@ func (s *Server) writePlanOps(w http.ResponseWriter, r *http.Request, u model.Us
 	if ops == nil {
 		ops = []model.PlanOp{}
 	}
-	for i := range ops {
-		if rid > 0 && ops[i].ResellerId != rid {
+	if rid > 0 {
+		// 不是他自己操作的记录:操作人显示「主面板」,不是他的套餐不显示名字(主面板可能给他的用户套过主面板的套餐)。
+		// 他自己的记录在写入时已经按他的视角处理过
+		var mine []uint
+		s.db.Model(&model.Plan{}).Where("reseller_id = ?", rid).Pluck("id", &mine)
+		own := make(map[uint]bool, len(mine))
+		for _, id := range mine {
+			own[id] = true
+		}
+		for i := range ops {
+			if ops[i].ResellerId == rid {
+				continue
+			}
 			ops[i].Actor = planOpMasterTag
+			if !own[ops[i].FromPlanId] {
+				ops[i].FromPlan, ops[i].Before = "", hidePlanName(ops[i].Before)
+			}
+			if !own[ops[i].ToPlanId] {
+				ops[i].ToPlan, ops[i].After = "", hidePlanName(ops[i].After)
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, ops)
+}
+
+// hidePlanName 把记录里变更前 / 后状态的套餐名抹掉(套餐 id 照留)。
+func hidePlanName(raw json.RawMessage) json.RawMessage {
+	var m map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &m) != nil {
+		return raw
+	}
+	m["plan"] = json.RawMessage(`""`)
+	b, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return b
 }
