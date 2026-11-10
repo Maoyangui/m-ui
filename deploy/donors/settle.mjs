@@ -33,6 +33,17 @@ export function validName(s) {
   return name;
 }
 
+// 以名字为键的表(donors)一律不带原型:名字可以是 constructor、toString、__proto__,在普通对象上
+// donors['constructor'] 读到的是继承来的函数,写 donors['__proto__'] 会被原型的 setter 吞掉。读写都用 hasOwn;
+// JSON 读回来的是普通对象,先用 dict 转一遍。交易号、留名 id 都放在 Set 里,按名字合计用 Map。
+const hasOwn = Object.hasOwn;
+const isTable = o => !!o && typeof o === 'object' && !Array.isArray(o);
+export function dict(o) {
+  const d = Object.create(null);
+  if (isTable(o)) for (const [k, v] of Object.entries(o)) d[k] = v;
+  return d;
+}
+
 export const toMicros = s => {
   const m = /^(\d{1,9})(?:\.(\d{1,6}))?$/.exec(String(s));
   return m ? Number(m[1]) * 1e6 + Number((m[2] || '').padEnd(6, '0')) : 0;
@@ -51,7 +62,7 @@ export function parsePledge(msg) {
 // 对账:纯函数,不碰网络。state = { pending, seenTx, donors:{名字:微 USDT}, blocked:[] }。
 // transfers 为 null 表示这次读不到到账:新留名照样收进待对账,但不对账,待对账也先不按 48 小时清(它们还没核对过)。
 export function settle(state, pledges, transfers, now) {
-  const s = { pending: [...(state.pending || [])], seenTx: [...(state.seenTx || [])], donors: { ...(state.donors || {}) } };
+  const s = { pending: [...(state.pending || [])], seenTx: [...(state.seenTx || [])], donors: dict(state.donors) };
   const blocked = new Set((state.blocked || []).map(x => x.toLowerCase()));
   const known = new Set(s.pending.map(p => p.id).concat(state.donePledges || []));
   for (const p of pledges) {
@@ -69,7 +80,7 @@ export function settle(state, pledges, transfers, now) {
       const i = s.pending.findIndex(p => p.micros === value && p.at <= at && at <= p.at + WINDOW);
       if (i < 0) continue; // 没留名的转账不上榜;也不记下来,说不定留名消息还在路上
       const [p] = s.pending.splice(i, 1);
-      s.donors[p.name] = (s.donors[p.name] || 0) + value;
+      s.donors[p.name] = (hasOwn(s.donors, p.name) ? s.donors[p.name] : 0) + value;
       s.seenTx.push(t.transaction_id);
       seen.add(t.transaction_id);
       done.push(p.id);
@@ -154,6 +165,7 @@ export async function run({ dir, fetch = globalThis.fetch, now = Math.floor(Date
   if (!dir) throw new Error('用法: node deploy/donors/settle.mjs <donors 分支的工作目录>');
   const statePath = path.join(dir, 'state.json'), boardPath = path.join(dir, 'donors.json');
   const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')) : {};
+  if (isTable(state.donors)) state.donors = dict(state.donors); // 读回来的是普通对象,名字是 __proto__ 之类的也要当普通的键
   checkDonors(state.donors); // 手动记账写错了先报出来,不带着错数据往下算
   const get = async (url, headers = {}) => {
     const r = await fetch(url, { headers, signal: AbortSignal.timeout(30000) });

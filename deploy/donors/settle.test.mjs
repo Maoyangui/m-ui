@@ -99,8 +99,50 @@ test('对不上的都不算', () => {
   ]) {
     const r = settle({}, [p], [t], 1200);
     assert.equal(r.changed, false, name);
-    assert.deepEqual(r.state.donors, {}, name);
+    assert.deepEqual(Object.keys(r.state.donors), [], name);
   }
+});
+
+// 名字恰好是 Object.prototype 上的成员名:以前 donors 是普通对象,donors['constructor'] 读到的是继承来的函数,
+// 加上金额拼成一串字符,整轮在发榜单时失败(待对账的那条留着,之后每轮都失败,最长约 49 小时);
+// donors['__proto__'] = … 被原型的 setter 吞掉,这笔捐赠静默丢失。名字规则允许这些名字,面板也照常显示。
+const PROTO_NAMES = ['constructor', 'toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf', 'propertyIsEnumerable', 'toLocaleString', '__proto__', '__defineGetter__', '__defineSetter__', '__lookupGetter__', '__lookupSetter__'];
+
+test('名字是 constructor、toString、__proto__ 这类原型上的名字也照常记账、累加、上榜', () => {
+  for (const name of PROTO_NAMES) {
+    assert.equal(validName(name), name, name);
+    const r = settle({}, [pledge('p', name, 10.037, 1000)], [tx('t', 10.037, 1100)], 1200);
+    assert.equal(r.changed, true, name);
+    assert.ok(Object.hasOwn(r.state.donors, name), name);
+    assert.equal(r.state.donors[name], 10037000, name);
+    const r2 = settle(r.state, [pledge('p2', name, 1.5, 2000)], [tx('t2', 1.5, 2100)], 2200);
+    assert.equal(r2.state.donors[name], 11537000, name);
+    assert.deepEqual(Object.keys(r2.state.donors), [name], name);
+    assert.deepEqual(publicBoard(r2.state, { updatedAt: 1, devices: 0, devicesAt: 0 }).donors, [{ name, total: 11.537 }], name);
+  }
+});
+
+test('run:这类名字写进 state.json 再读回来也照常累加,和别的名字互不影响', async () => {
+  const now = 1_800_000_000;
+  const d = workdir({ donors: { 'Larry Wang': 10000000 } });
+  const usdt = (round, i) => round + i / 1000; // 每个名字一个金额,互相对不错
+  const micros = (round, i) => Math.round(usdt(round, i) * 1e6);
+  const msgs1 = PROTO_NAMES.map((n, i) => ntfyMsg('a' + i, n, usdt(2, i).toFixed(3), now - 1200 + i));
+  const txs1 = PROTO_NAMES.map((n, i) => tx('ta' + i, usdt(2, i), now - 600 + i));
+  const r1 = await run({ dir: d, fetch: fakeNet({ now, ntfy: msgs1, tron: txs1 }).fetch, now, ...quiet });
+  assert.equal(r1.changed, true);
+  const t = now + 1800;
+  const msgs2 = PROTO_NAMES.map((n, i) => ntfyMsg('b' + i, n, usdt(3, i).toFixed(3), t - 900 + i));
+  const txs2 = PROTO_NAMES.map((n, i) => tx('tb' + i, usdt(3, i), t - 300 + i));
+  await run({ dir: d, fetch: fakeNet({ now: t, ntfy: [...msgs1, ...msgs2], tron: [...txs1, ...txs2] }).fetch, now: t, ...quiet });
+  const s = read(d, 'state.json');
+  assert.deepEqual(Object.keys(s.donors).sort(), ['Larry Wang', ...PROTO_NAMES].sort());
+  for (const [i, name] of PROTO_NAMES.entries()) assert.equal(s.donors[name], micros(2, i) + micros(3, i), name);
+  assert.equal(s.donors['Larry Wang'], 10000000);
+  assert.equal(s.pending.length, 0);
+  const b = read(d, 'donors.json');
+  assert.deepEqual(b.donors.map(x => x.name).sort(), ['Larry Wang', ...PROTO_NAMES].sort());
+  assert.equal(b.donors.find(x => x.name === '__proto__').total, (micros(2, 7) + micros(3, 7)) / 1e6);
 });
 
 test('同样的金额两个人留名:先到先得,第二笔给第二个人', () => {
@@ -122,7 +164,7 @@ test('待对账的留名留 48 小时,屏蔽名单生效', () => {
   r = settle(r.state, [], [], 1000 + PENDING_KEEP + 1);
   assert.equal(r.state.pending.length, 0, '48 小时后清掉');
   const r2 = settle({ blocked: ['bad guy'] }, [pledge('b', 'Bad Guy', 1.5, 1000)], [tx('t', 1.5, 1100)], 1200);
-  assert.deepEqual(r2.state.donors, {});
+  assert.deepEqual(Object.keys(r2.state.donors), []);
 });
 
 test('读不到到账(transfers 为 null):新留名照样收下,不对账;没核对过的不按 48 小时清,只清以后也对不上的', () => {
