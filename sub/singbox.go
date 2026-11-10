@@ -82,12 +82,11 @@ func warnBadOwnLink(link string, err error) {
 // SFA(Android)、SFI(iOS)、sing-box 桌面版都只认这种"远程配置",链接列表和 clash YAML 它们导不进去。
 // 节点与链接订阅同源(本站线路 + 外部节点的分享链接),外加 proxy 选择组 / auto 测速组、
 // TUN + 本地混合入站、DNS 与基础分流;字段按 sing-box 1.12+ 写法,不使用已废弃的 legacy 字段。
+//
+// 部署在多台服务器上的线路和 Clash 一样再出一个线路测速组(urltest,判断条件同 clash.go 的 url-test 组):
+// 客户端选这条线路,由组在这几台服务器里挑延迟低的,出口和计费口径不变。节点逐条线路展开,
+// 展开顺序、去重规则都和 GenerateLinksFor 一样,节点的 tag 与顺序一字不变;组名等全部节点定完名字再起,撞了只改组名。
 func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, error) {
-	links := GenerateLinksFor(user, lines, opt.Entries, opt.LineNodes)
-	own := len(links) // 前面这些是本站线路的链接,后面是外部节点的
-	for _, e := range opt.External {
-		links = append(links, e.Links...)
-	}
 	var tmpl map[string]interface{}
 	if strings.TrimSpace(opt.SingBoxTmpl) != "" {
 		if err := json.Unmarshal([]byte(opt.SingBoxTmpl), &tmpl); err != nil {
@@ -108,14 +107,15 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 			}
 		}
 	}
-	for i, l := range links {
+	// add 把一条分享链接转成节点出站,返回它的 tag;认不出的链接跳过,返回空串(own = 本站线路生成的)
+	add := func(l string, own bool) string {
 		p, err := upstream.ParseLink(l)
 		if err != nil {
 			if p = httpLink(l); p == nil {
-				if i < own {
+				if own {
 					warnBadOwnLink(l, err) // 本站线路生成的链接也解析不了:节点少了一个,要让管理员看见
 				}
-				continue // 外部节点里认不出的链接照旧跳过
+				return "" // 外部节点里认不出的链接照旧跳过
 			}
 		}
 		tag := p.Name
@@ -133,6 +133,31 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 		ob["type"], ob["tag"] = p.Type, tag
 		nodes = append(nodes, ob)
 		tags = append(tags, tag)
+		return tag
+	}
+	type lineGroup struct {
+		name    string
+		members []string
+	}
+	var pending []lineGroup
+	for _, line := range lines {
+		var names []string
+		for _, a := range resolveAddrs(line, opt.Entries, opt.LineNodes[line.Id]) {
+			for _, l := range lineToURIs(line, user, a, line.Name+a.remark) {
+				if tag := add(l, true); tag != "" {
+					names = append(names, tag)
+				}
+			}
+		}
+		// 与 clash.go 的 url-test 组同一个条件:这条线路有不止一个入口(mixed 一个入口本来就出 socks + http 两个,不算)
+		if len(names) > 1 && line.Protocol != "mixed" && strings.TrimSpace(line.Name) != "" {
+			pending = append(pending, lineGroup{line.Name, names})
+		}
+	}
+	for _, e := range opt.External { // 外部节点不成组
+		for _, l := range e.Links {
+			add(l, false)
+		}
 	}
 	if len(nodes) == 0 {
 		// 一个节点都没有(线路还没分配):给一份能加载的配置,客户端不会因为 500 把整个订阅标成坏的
@@ -145,10 +170,25 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 		return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
 	}
 
+	// 线路组的名字在全部节点定名之后再起:撞了节点、模板出站或 proxy / auto / direct,只给组名加序号,节点名一字不动
+	var groups []map[string]interface{}
+	var groupTags []string
+	for _, g := range pending {
+		tag := g.name
+		for i := 2; used[tag]; i++ {
+			tag = fmt.Sprintf("%s %d", g.name, i)
+		}
+		used[tag] = true
+		groupTags = append(groupTags, tag)
+		groups = append(groups, map[string]interface{}{"type": "urltest", "tag": tag, "outbounds": g.members,
+			"url": "http://www.gstatic.com/generate_204", "interval": "3m", "tolerance": 50})
+	}
+	selectList := append(append([]string{"auto"}, groupTags...), tags...)
 	outbounds := []map[string]interface{}{
-		{"type": "selector", "tag": "proxy", "outbounds": append([]string{"auto"}, tags...), "default": "auto", "interrupt_exist_connections": true},
+		{"type": "selector", "tag": "proxy", "outbounds": selectList, "default": "auto", "interrupt_exist_connections": true},
 		{"type": "urltest", "tag": "auto", "outbounds": tags, "url": "http://www.gstatic.com/generate_204", "interval": "3m", "tolerance": 50},
 	}
+	outbounds = append(outbounds, groups...)
 	outbounds = append(outbounds, nodes...)
 	outbounds = append(outbounds, map[string]interface{}{"type": "direct", "tag": "direct"})
 
@@ -165,8 +205,8 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 }
 
 // singBoxFromTemplate 按模板出配置:模板写了的段(dns、route、inbounds……)原样用,没写的用内置的。
-// 节点接在模板的出站后面;模板的 selector / urltest 里写 "{all}" 会展开成全部节点;
-// proxy / auto / direct 模板没写就补上,写了用模板的。
+// 节点接在模板的出站后面;模板的 selector / urltest 里写 "{all}" 会展开成全部节点(只是节点,不含线路组);
+// proxy / auto / direct 与线路组模板没写就补上,写了用模板的。
 func singBoxFromTemplate(user model.User, opt Options, tmpl map[string]interface{}, own []interface{}, generated, nodes []map[string]interface{}, tags []string) (Result, error) {
 	cfg := singBoxBase()
 	for k, v := range tmpl {
