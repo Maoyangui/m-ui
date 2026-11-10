@@ -559,3 +559,80 @@ func TestHATakeoverE2E(t *testing.T) {
 		}
 	}
 }
+
+// 自动接任:只有一台备用连不上主机(另一台副机还连得上)时不接任 —— 副机之间经 HMAC 同伴接口互相确认;
+// 主机真的不在了,两台副机都联系不上它,备用 1 拿到过半票(集群 3 台要 2 票)后接任,另一台副机认它。
+func TestHAAutoTakeoverPartitionE2E(t *testing.T) {
+	hkClk, twClk, jpClk := &haClock{}, &haClock{}, &haClock{}
+	hk := newHAInst(t, "HK", false, hkClk)
+	tw := newHAInst(t, "TW", true, twClk)
+	jp := newHAInst(t, "JP", true, jpClk)
+	seedHAMaster(t, hk)
+	addNode(t, hk, tw, 2)
+	jpId := addNode(t, hk, jp, 3)
+	hk.sync()
+	if err := hk.HA().SaveConfig(ha.ConfigInput{Config: ha.Config{Mode: ha.ModeAuto, Standbys: 1, ReplicaMinutes: 5, ConfirmMinutes: 3,
+		AutoMinutes: 5, RankStepMinutes: 3}}); err != nil {
+		t.Fatal(err)
+	}
+	hk.sync()
+	hk.sync()
+	if err := hk.HA().ReplicateNow(); err != nil {
+		t.Fatal(err)
+	}
+	hk.sync() // 集群密钥、备用名单随状态到副机
+	// 只有 TW 和主机之间断了:JP 还联系得上主机
+	twClk.add(6 * time.Minute)
+	tw.HA().Tick()
+	if tw.restarted() {
+		t.Fatal("另一台副机还联系得上主机:不能接任")
+	}
+	if v := tw.HA().View(false); v.Node.Evidence == nil || v.Node.Evidence.Reason != "peerSeesMaster" || v.Node.Evidence.PeersOK != 1 {
+		t.Fatalf("要经同伴接口问到 JP 还联系得上主机: %+v", v.Node.Evidence)
+	}
+	// 主机真的不在了
+	hk.setDown(true)
+	jpClk.add(6 * time.Minute)
+	twClk.add(time.Minute)
+	tw.HA().Tick()
+	if !tw.restarted() {
+		t.Fatalf("两台副机都联系不上主机、票过半:应接任: %+v", tw.HA().View(false).Node.Evidence)
+	}
+	tw.restart()
+	tw.sync()
+	if jp.setting(ha.KeyEpoch) != "2" {
+		t.Fatal("投过票的 JP 要认接任的新主机")
+	}
+	if st, ok := tw.R().Hub().StatusOf(jpId); !ok || !st.Synced {
+		t.Fatalf("JP 要在新主机那里同步上: %+v", st)
+	}
+}
+
+// 同伴接口不要会话,但只认集群密钥签名;按来源限流。
+func TestHAPeerEndpointAuth(t *testing.T) {
+	clk := &haClock{}
+	tw := newHAInst(t, "TW", true, clk)
+	call := func() int {
+		req := httptest.NewRequest(http.MethodPost, "/app/api/ha/peer/status", strings.NewReader("{}"))
+		req.RemoteAddr = "198.51.100.7:1234"
+		req.Header.Set("X-Peer-Node", "3")
+		req.Header.Set("X-Peer-Ts", strconv.FormatInt(time.Now().Unix(), 10))
+		req.Header.Set("X-Peer-Sig", "00")
+		w := httptest.NewRecorder()
+		tw.srv.handleHASub(w, req)
+		return w.Code
+	}
+	if code := call(); code != http.StatusUnauthorized {
+		t.Fatalf("签名不对应 401: %d", code)
+	}
+	limited := false
+	for i := 0; i < 20; i++ {
+		if call() == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Fatal("同一来源连续请求要限流")
+	}
+}

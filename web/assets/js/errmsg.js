@@ -671,7 +671,18 @@ const EN = /*BEGIN*/{
 "这不是副本": "This is not a replica",
 "这不是整库数据": "This is not full data",
 "这台副机已跟随纪元更高的主机(纪元 %d,主机 #%d):本机可能已经不是主机了": "This node already follows a master with a higher epoch (epoch %d, master #%d): this server may no longer be the master",
-"这台副机还跟随原来的主机(纪元 %d):等它的租约到期,或设为主机的交接完成": "This node still follows its previous master (epoch %d): wait for its lease to expire, or for the Set as master handover to complete"
+"这台副机还跟随原来的主机(纪元 %d):等它的租约到期,或设为主机的交接完成": "This node still follows its previous master (epoch %d): wait for its lease to expire, or for the Set as master handover to complete",
+"m-ui 服务没有回应:它在运行吗?(systemctl status m-ui)": "The m-ui service did not respond: is it running? (systemctl status m-ui)",
+"不认识的操作 %q": "Unknown operation %q",
+"同伴 %s 回了 %d": "Peer %s answered %d",
+"同伴 %s 的回复签名不对": "Peer %s's reply has a wrong signature",
+"本机已经是主机。主机和别的主机僵持时,要以更高的纪元把副机收回来,加 --force": "This server is already the master. If it is deadlocked with another master, add --force to reclaim the nodes with a higher epoch",
+"没有这台服务器:%s": "No such server: %s",
+"要指定服务器:名字或 id": "Specify a server: name or ID",
+"请求太频繁": "Too many requests",
+"还没收到集群密钥": "The cluster key has not been received yet",
+"鉴权失败": "Authentication failed",
+"没有可测的地址": "No address to test"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

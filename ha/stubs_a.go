@@ -1,26 +1,6 @@
 package ha
 
-import "github.com/Maoyangui/m-ui/hub"
-
-// 失联判定(副机互相确认与投票、境外见证、Telegram 确认)、命令行请求、自动改 DNS 在后面几步补上,这里先放占位。
-
-type engine struct{ s *Service }
-
-func newEngine(s *Service) *engine          { return &engine{s: s} }
-func (e *engine) tick()                     {}
-func (e *engine) contact()                  {}
-func (e *engine) adopted(uint64, uint)      {}
-func (e *engine) peerSummary() *hub.HAPeers { return nil }
-func (e *engine) promptView() *PromptView   { return nil }
-func (e *engine) evidenceView() *EvidenceView {
-	return nil
-}
-
-// PromptView 确认后接任:正在等确认。
-type PromptView struct{}
-
-// EvidenceView 失联判定的证据。
-type EvidenceView struct{}
+// 自动改 DNS 在最后一步补上,这里先放占位。
 
 // WitnessResult 境外见证的结论:up(主机对外正常,只是网络分区)/ down / unknown。
 type WitnessResult struct {
@@ -40,4 +20,16 @@ type DnsChange struct {
 }
 
 func (s *Service) updateDNS(formerIP, formerIP6 string) ([]DnsChange, error) { return nil, nil }
-func (s *Service) cmdTick()                                                  {}
+
+// WitnessVerdict 见证结论:至少 2/3 的测点连得上 = up;最多 1/3 = down;其余(含一个都没测成)= unknown。
+func WitnessVerdict(ok, total int) string {
+	switch {
+	case total == 0:
+		return "unknown"
+	case 3*ok >= 2*total:
+		return "up"
+	case 3*ok <= total:
+		return "down"
+	}
+	return "unknown"
+}

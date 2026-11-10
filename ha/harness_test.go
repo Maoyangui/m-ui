@@ -2,6 +2,7 @@ package ha
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -48,7 +49,12 @@ func (a *miniAgent) setDown(v bool) {
 }
 
 func (a *miniAgent) serve(w http.ResponseWriter, r *http.Request) {
-	action := r.URL.Path[strings.Index(r.URL.Path, "/agent/")+len("/agent/"):]
+	action := r.URL.Path
+	if i := strings.Index(action, "/agent/"); i >= 0 {
+		action = action[i+len("/agent/"):]
+	} else if i := strings.Index(action, "/ha/peer/"); i >= 0 {
+		action = "peer/" + action[i+len("/ha/peer/"):]
+	}
 	a.mu.Lock()
 	a.calls = append(a.calls, action)
 	down := a.down
@@ -62,6 +68,22 @@ func (a *miniAgent) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		http.Error(w, "down", 502)
+		return
+	}
+	if strings.HasPrefix(action, "peer/") { // 副机之间:集群密钥 HMAC,不要令牌
+		body, _ := io.ReadAll(r.Body)
+		rep, err := a.svc.ServePeer(strings.TrimPrefix(action, "peer/"), r.Header, body)
+		if err != nil {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		for k, vs := range rep.Header {
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(rep.Status)
+		w.Write(rep.Body)
 		return
 	}
 	if r.Header.Get("X-Agent-Token") != a.token {

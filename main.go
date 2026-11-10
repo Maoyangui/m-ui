@@ -47,6 +47,7 @@ func usage() {
 		{"passwd -db <m-ui.db> [-password 新密码]", "重置管理员密码"},
 		{"set -db <m-ui.db> key=value ...", "写入设置(如 webPort=3053 nodeMode=true)"},
 		{"render -db <m-ui.db>", "打印并校验 sing-box 配置"},
+		{"ha status|takeover|set-master|pause|resume", "主机容灾与设为主机(要 root,见 m-ui ha)"},
 		{"version", "显示版本"},
 	}
 	for _, r := range rows {
@@ -246,6 +247,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, "渲染失败:", err)
 			os.Exit(1)
 		}
+	case "ha":
+		runHA(os.Args[2:])
 	case "run":
 		fs := flag.NewFlagSet("run", flag.ExitOnError)
 		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径(默认取 systemd 单元里的,没有则 /etc/m-ui/m-ui.db)")

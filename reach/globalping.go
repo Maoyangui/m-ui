@@ -265,3 +265,44 @@ func (c *client) measure(ctx context.Context, req measureRequest, poll time.Dura
 		}
 	}
 }
+
+// WitnessLocations 主机容灾见证用的测点:美、德、日、新、港各 2 个,不用大陆测点 —— 要回答的是"主机还活着吗",
+// 不是"被墙了吗"。
+var WitnessLocations = []string{"US", "DE", "JP", "SG", "HK"}
+
+// Witness 从境外测点 TCP 连 host 的端口(逐个试,第一个端口大多数测点连得上就不再试下一个),返回连上的测点数与总数。
+// 主机容灾的备用用它判断"主机对外是不是还活着"。
+func (s *Service) Witness(ctx context.Context, host string, ports []int) (ok, total int, err error) {
+	if host == "" || len(ports) == 0 {
+		return 0, 0, errors.New("没有可测的地址")
+	}
+	locs := make([]location, 0, len(WitnessLocations))
+	for _, c := range WitnessLocations {
+		locs = append(locs, location{Country: c, Limit: 2})
+	}
+	for i, port := range ports {
+		if i >= 2 {
+			break
+		}
+		c, cancel := context.WithTimeout(ctx, 45*time.Second)
+		m, err := s.c.measure(c, measureRequest{Type: "ping", Target: host, Locs: locs, Options: pingOptions{Packets: 2, Protocol: "TCP", Port: port}}, s.d.Poll)
+		cancel()
+		if err != nil {
+			return ok, total, err
+		}
+		ok, total = 0, 0
+		for _, r := range m.Results {
+			if r.Result.Status == "offline" || r.Result.Status == "in-progress" {
+				continue
+			}
+			total++
+			if r.Result.Status == "finished" && r.Result.Stats != nil && r.Result.Stats.Rcv > 0 {
+				ok++
+			}
+		}
+		if total > 0 && 3*ok >= 2*total {
+			return ok, total, nil
+		}
+	}
+	return ok, total, nil
+}

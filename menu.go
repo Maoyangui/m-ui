@@ -234,6 +234,7 @@ func runMenu() {
 		fmt.Println("  12. 切换 主机 / 副机 角色")
 		fmt.Println("  13. 关闭两步验证(2FA,手机丢失时用)")
 		fmt.Println("  14. 卸载 m-ui")
+		fmt.Println("  15. 主机容灾 / 设为主机")
 		fmt.Println("   0. 退出")
 		choice := ask(colorBold + "  请输入数字: " + colorReset)
 		switch choice {
@@ -407,6 +408,8 @@ func runMenu() {
 			_ = os.Remove(binPath)
 			fmt.Println(colorGreen + "  m-ui 已卸载" + colorReset)
 			return
+		case "15":
+			haMenu(dbPath, ask)
 		default:
 			fmt.Println("  无效选项")
 		}

@@ -175,13 +175,9 @@ func (h *Hub) pushHAState(n model.Node) error {
 	var hse *httpStatusError
 	switch {
 	case err == nil:
-		h.mu.Lock()
-		h.haPushed[n.Id] = haPushed{rev: rev, at: time.Now()}
-		h.mu.Unlock()
+		h.notePushed(n.Id, haPushed{rev: rev, at: time.Now()})
 	case errors.As(err, &hse) && hse.Status == http.StatusNotFound:
-		h.mu.Lock()
-		h.haPushed[n.Id] = haPushed{legacy: true, at: time.Now()}
-		h.mu.Unlock()
+		h.notePushed(n.Id, haPushed{legacy: true, at: time.Now()})
 		return nil
 	case IsEpochError(err):
 		return err
@@ -189,6 +185,16 @@ func (h *Hub) pushHAState(n model.Node) error {
 		logger.Warning("向副机 ", n.Name, " 推送容灾状态被拒: ", err) // 连不上不在这里记:这一轮拉报告也会失败,状态里有
 	}
 	return nil
+}
+
+// notePushed 记下推成功的修订(推的途中容灾服务可能刚让 hub 全部重推:表被清空了就重建)。
+func (h *Hub) notePushed(id uint, p haPushed) {
+	h.mu.Lock()
+	if h.haPushed == nil {
+		h.haPushed = map[uint]haPushed{}
+	}
+	h.haPushed[id] = p
+	h.mu.Unlock()
 }
 
 type haPushed struct {

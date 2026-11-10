@@ -683,3 +683,34 @@ func TestFailedAttemptKeepsLastResult(t *testing.T) {
 		t.Fatalf("测成之后不该再挂着失败说明: %+v", r)
 	}
 }
+
+// 主机容灾的境外见证:只从境外测点 TCP 连主机的端口;第一个端口多数测点连得上就不再试下一个。
+func TestWitness(t *testing.T) {
+	h := newHarness(t)
+	ok, total, err := h.svc.Witness(context.Background(), "203.0.113.7", []int{2053, 2056})
+	if err != nil || ok != 6 || total != 6 {
+		t.Fatalf("全通: %d/%d %v", ok, total, err)
+	}
+	h.api.mu.Lock()
+	req := h.api.requests[len(h.api.requests)-1]
+	n := len(h.api.requests)
+	h.api.mu.Unlock()
+	b, _ := json.Marshal(req.Locs)
+	if strings.Contains(string(b), `"CN"`) || !strings.Contains(string(b), `"US"`) || req.Options.Protocol != "TCP" || req.Options.Port != 2053 {
+		t.Fatalf("见证只用境外测点、TCP 连第一个端口: %s %+v", b, req.Options)
+	}
+	if n != 1 {
+		t.Fatal("第一个端口通了就不再测第二个")
+	}
+	h.api.set(map[string]bool{"cm": false, "ct": false, "cu": false, "hk": false}, nil)
+	ok, total, err = h.svc.Witness(context.Background(), "203.0.113.7", []int{2053, 2056})
+	h.api.mu.Lock()
+	tried := len(h.api.requests) - n
+	h.api.mu.Unlock()
+	if err != nil || ok != 0 || total != 6 || tried != 2 {
+		t.Fatalf("全不通:要把两个端口都试过: %d/%d tried=%d %v", ok, total, tried, err)
+	}
+	if _, _, err := h.svc.Witness(context.Background(), "", nil); err == nil {
+		t.Fatal("没有地址应报错")
+	}
+}
