@@ -52,7 +52,10 @@ func (h *Hub) queueDecommission(n model.Node, before Snapshot) (model.NodeDecomm
 		return model.NodeDecommission{}, err
 	}
 	snap := withoutUsers(before)
-	snap.SelfNodeId, snap.Sequence, snap.Version, snap.MinNode = n.Id, seq, h.d.Version, minNodeFor(snap.Lines, snap.Upstreams)
+	// 外部节点只给用户用,下线推送里没有用户,不带它们:否则用了按指纹隐藏 / 改名时版本门槛会抬到 0.7.17,
+	// 老副机就会拒收这份下线通知、继续为所有人服务
+	snap.Exts = nil
+	snap.SelfNodeId, snap.Sequence, snap.Version, snap.MinNode = n.Id, seq, h.d.Version, minNodeFor(snap.Lines, snap.Upstreams, nil)
 	b, err := json.Marshal(snap)
 	if err != nil {
 		return model.NodeDecommission{}, err

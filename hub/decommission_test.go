@@ -126,3 +126,35 @@ func TestDecommissionPushesEmptyUserTable(t *testing.T) {
 		})
 	}
 }
+
+// 外部节点用了按指纹隐藏(需要 0.7.17 的副机)时,下线推送也不能被这道版本门槛挡住:
+// 快照里不带外部节点、版本门槛按线路与上游算,老副机照样收得下这份空用户表、停止为所有人服务。
+func TestDecommissionNotGatedByExtKeys(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	fake := newRecordingNode(t)
+	db.Create(&model.Node{Name: "本机", IsLocal: true, Enabled: true})
+	node := model.Node{Name: "n1", ApiUrl: fake.srv.URL + "/app/", Token: "t", Enabled: true}
+	db.Create(&node)
+	db.Create(&model.Line{Name: "l1", Protocol: "vless", Port: 20001, Enabled: true, NodeIds: json.RawMessage(`[2]`)})
+	db.Create(&model.ExtNode{Name: "机场", Enabled: true, HiddenKeys: json.RawMessage(`{"0123456789abcdef":"剩余流量"}`)})
+	h := New(Deps{DB: db, Setting: func(string) string { return "" }, IsNode: func() bool { return false }})
+	before, err := BuildSnapshot(db, h.d.Setting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := minNodeFor(before.Lines, before.Upstreams, before.Exts); got != ExtKeyMinNode {
+		t.Fatalf("前提:完整快照的门槛应是 %s,得 %s", ExtKeyMinNode, got)
+	}
+	db.Model(&model.Node{}).Where("id = ?", node.Id).Update("enabled", false)
+	if err := h.Decommission(node, before); err != nil {
+		t.Fatal(err)
+	}
+	got, n := fake.last()
+	if n == 0 || len(got.Exts) != 0 || got.MinNode == ExtKeyMinNode {
+		t.Fatalf("下线推送不该带外部节点、门槛不该被抬到 %s: 外部节点 %d,门槛 %s", ExtKeyMinNode, len(got.Exts), got.MinNode)
+	}
+}
