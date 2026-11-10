@@ -675,7 +675,7 @@ func (s *Scheduler) disableDepleted(tx *gorm.DB, now int64) ([]string, error) {
 
 // ---- cleanup ----
 
-// runCleanup 按各自的保留天数清理:流量时序、订阅访问日志、审计日志。
+// runCleanup 按各自的保留天数清理:流量时序、订阅访问日志、审计日志;套餐记录固定留一年。
 // 三者分开设置 —— 订阅日志以前跟着"流量记录保留"走,想把日志收到 1 天就会把流量图的历史一起删掉。
 func (s *Scheduler) runCleanup() {
 	now := time.Now()
@@ -712,6 +712,12 @@ func (s *Scheduler) runCleanup() {
 		}
 	}
 	trim(s.d.DB, &model.Change{}, 200000, "审计日志")
+	// 套餐记录(兼外部 API 的幂等键):固定保留一年,和清空审计日志无关;总量再兜一道上限
+	cutoff := now.AddDate(0, 0, -model.PlanOpKeepDays).Unix()
+	if err := s.d.DB.Where("created_at < ?", cutoff).Delete(&model.PlanOp{}).Error; err != nil {
+		logger.Warning("清理套餐记录失败: ", err)
+	}
+	trim(s.d.DB, &model.PlanOp{}, model.PlanOpMaxRows, "套餐记录")
 }
 
 // RollupStats 把 before 之前、不在整点上的时序行并入所在小时的桶(同键累加),再删掉原始行。

@@ -42,7 +42,8 @@ export async function api(path, opts = {}) {
   }
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) { onUnauthorized(); const e = new ApiError(401, trErr(data.error || '未登录')); e.data = data; throw e; }
-  if (!res.ok) throw new ApiError(res.status, trErr(data.error) || t('api.failed', { s: res.status }));
+  // 其它错误也把响应体挂在 e.data 上:换套餐的 409 带着 code、warnings 与 preview,界面要读
+  if (!res.ok) { const e = new ApiError(res.status, trErr(data.error) || t('api.failed', { s: res.status })); e.data = data; throw e; }
   return data;
 }
 

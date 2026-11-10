@@ -90,3 +90,42 @@ func TestCleanupRetention(t *testing.T) {
 		t.Fatalf("trafficAge=0 表示不清理流量时序,实际剩 %d", n)
 	}
 }
+
+// 套餐记录(兼幂等键)固定保留一年,和审计日志的设置无关;总量超过上限时裁掉最旧的。
+func TestCleanupPlanOps(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	now := time.Now()
+	for _, d := range []int{400, 366, 10, 0} {
+		db.Create(&model.PlanOp{UserId: 1, Op: "renew", CreatedAt: now.AddDate(0, 0, -d).Unix()})
+	}
+	count := func() int64 {
+		var n int64
+		db.Model(&model.PlanOp{}).Count(&n)
+		return n
+	}
+	s := New(Deps{DB: db, IsNode: func() bool { return false }, Setting: func(k string) string { return map[string]string{"auditAge": "1"}[k] }})
+	s.runCleanup()
+	if n := count(); n != 2 {
+		t.Fatalf("应删掉一年以前的 2 条、留 2 条,实际剩 %d", n)
+	}
+	// 总量上限:多出来的最旧几条被裁掉
+	extra := int64(model.PlanOpMaxRows + 3)
+	if err := db.Exec(`INSERT INTO plan_ops (user_id, op, periods, created_at)
+		WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?)
+		SELECT x, 'renew', 1, ? FROM c`, extra, now.Unix()).Error; err != nil {
+		t.Fatal(err)
+	}
+	s.runCleanup()
+	if n := count(); n != model.PlanOpMaxRows {
+		t.Fatalf("裁到 %d 条,实际 %d", model.PlanOpMaxRows, n)
+	}
+	var oldest int64
+	db.Model(&model.PlanOp{}).Select("MIN(created_at)").Scan(&oldest)
+	if oldest != now.Unix() {
+		t.Fatal("裁掉的应是最旧的那几条")
+	}
+}

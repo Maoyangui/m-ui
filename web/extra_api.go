@@ -270,7 +270,8 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 // ---- 用户子操作:reset / kick / qr / sub ----
 
-// dispatchUserSubroute 处理 /users/{id}/reset|kick|qr|sub。返回 true 表示已处理。
+// dispatchUserSubroute 处理 /users/{id}/plan|change|plan-ops|reset|kick|rotate|share|qr|sub。返回 true 表示已处理。
+// 主面板与代理面板共用;代理面板进来之前 guardScope 已核对过用户归属。
 func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bool {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	idx := strings.LastIndex(path, "/users/")
@@ -310,6 +311,18 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 			break
 		}
 		s.handleUserPlan(w, r, u)
+		return true
+	case "change": // 换套餐(立即替换 / 叠加 / 按价值折算),dryRun 即预览
+		if r.Method != http.MethodPost {
+			break
+		}
+		s.handleUserChange(w, r, u)
+		return true
+	case "plan-ops": // 套餐记录
+		if r.Method != http.MethodGet {
+			break
+		}
+		s.writePlanOps(w, r, u, scope(r))
 		return true
 	case "reset":
 		if r.Method != http.MethodPost {

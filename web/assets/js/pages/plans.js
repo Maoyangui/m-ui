@@ -33,7 +33,7 @@ function renderRows() {
   body.innerHTML = state.plans.map(p => {
     const lines = Array.isArray(p.lineIds) ? p.lineIds.length : (p.lineIds ? JSON.parse(p.lineIds).length : 0);
     return `<tr>
-      <td class="primary-cell">${esc(p.name)}${p.desc ? `<div class="sub-cell">${esc(p.desc)}</div>` : ''}</td>
+      <td class="primary-cell">${esc(p.name)}${p.desc ? `<div class="sub-cell">${esc(p.desc)}</div>` : ''}${p.price > 0 ? `<div class="sub-cell">${esc(t('plan.priceShort', { n: p.price }))}</div>` : ''}</td>
       <td class="num">${p.volumeGb ? p.volumeGb + ' GB' : t('common.unlimited')}</td>
       <td class="num">${p.days ? p.days + ' ' + t('common.day') : t('common.unlimited')}${p.days && p.firstUse ? `<div class="sub-cell">${t('plan.firstUseShort')}</div>` : ''}</td>
       <td class="num">${p.deviceLimit || '∞'}</td>
@@ -74,6 +74,7 @@ export async function editPlan(id) {
       ${field(t('user.f.resetDays'), `<input id="f-resetdays" type="number" min="1" value="${p.resetDays || 30}">`)}
       ${check('f-autoreset', t('user.f.autoReset'), !!p.autoReset, t('plan.autoResetHelp'))}
       ${check('f-firstuse', t('plan.firstUse'), !!p.firstUse, t('plan.firstUseHelp'))}
+      ${field(t('plan.price'), `<input id="f-price" type="number" min="0" step="any" value="${p.price || 0}">`, t('plan.priceHelp'))}
       <div class="full">${field(t('plan.lines'), `<div id="f-lines"></div>`, t('plan.linesHelp'))}</div>
       ${isReseller() ? '' : `<div class="full">${field(t('plan.rules'), rules.length ? `<div class="check-list one-col">${rules.map(r => `<label class="${r.enabled ? '' : 'muted'}"><input type="checkbox" class="plan-rule" value="${r.id}" ${r.allUsers ? 'checked disabled' : ((p.ruleIds || []).includes(r.id) ? 'checked' : '')}> ${esc(r.name)} <span class="muted small">${esc(ruleCond(r))} · ${r.upMbps || '—'}/${r.downMbps || '—'} M${r.enabled ? '' : ' · ' + t('common.disabled')}${r.allUsers ? ' · ' + t('plan.ruleAll') : ''}</span></label>`).join('')}</div>` : `<span class="muted small">${t('plan.rulesNone')}</span>`, t('plan.rulesHelp'))}</div>`}
     </div>`, async () => {
@@ -81,6 +82,7 @@ export async function editPlan(id) {
       name: fv('f-name').trim(), desc: fv('f-desc'), volumeGb: Number(fv('f-vol')), days: Number(fv('f-days')),
       deviceLimit: Number(fv('f-device')), speedUp: Number(fv('f-up')), speedDown: Number(fv('f-down')),
       autoReset: fchk('f-autoreset'), resetDays: Number(fv('f-resetdays')), firstUse: fchk('f-firstuse'),
+      price: Math.max(0, Number(fv('f-price')) || 0),
     };
     if (!isReseller()) body.ruleIds = [...document.querySelectorAll('.plan-rule:checked:not(:disabled)')].map(c => Number(c.value));
     const picked = picker.read();

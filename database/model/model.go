@@ -276,7 +276,45 @@ type Plan struct {
 	LineNodes   json.RawMessage `json:"lineNodes,omitempty"` // 线路 → 服务器范围 {"3":[1,2]};没写的线路 = 全部服务器
 	Desc        string          `json:"desc"`
 	Sort        int             `json:"sort"`
+	// Price 参考价:只用于换套餐时按剩余价值折算、预览里估值,不收钱,也不给终端用户看;0 = 没填(不能折算)。
+	// 后加的列:老库升级时 AutoMigrate 补上,老套餐都是 0。
+	Price float64 `json:"price" gorm:"default:0;not null"`
 }
+
+// PlanOp 一次套餐操作(续费 / 延期 / 换套餐)的记录:既是用户详情里的「套餐记录」,也是外部 API 的幂等表。
+// 只在主机上,不进快照。Before / After 是变更前后的套餐状态,重放时原样返回。
+type PlanOp struct {
+	Id uint64 `json:"id" gorm:"primaryKey;autoIncrement"`
+	// ResellerId 发起方的作用域(不是用户的归属):0 = 主面板(面板会话与主令牌共用),否则是那个代理(代理面板与代理令牌共用)。
+	// 和 RequestId 组成唯一键:同一作用域里同一个幂等键只能执行一次,不同作用域互不干扰。
+	ResellerId uint            `json:"-" gorm:"uniqueIndex:idx_plan_ops_req,priority:1;default:0;not null"`
+	RequestId  *string         `json:"requestId,omitempty" gorm:"uniqueIndex:idx_plan_ops_req,priority:2"` // 幂等键;NULL = 调用方没给(NULL 不参与唯一)
+	ReqHash    string          `json:"-"`                                                                  // 规范化请求的 SHA-256:同键不同内容返回 409
+	UserId     uint            `json:"userId" gorm:"index"`
+	UserName   string          `json:"userName"`
+	Actor      string          `json:"actor"`
+	Op         string          `json:"op"`        // renew | extend | replace | stack | prorate
+	Usage      string          `json:"usage"`     // 本周期用量实际怎么处理的:keep | reset
+	Direction  string          `json:"direction"` // upgrade | downgrade | same | mixed
+	FromPlanId uint            `json:"fromPlanId"`
+	FromPlan   string          `json:"fromPlan"` // 名字随记录存一份:套餐以后改名或删了,记录照样看得懂
+	ToPlanId   uint            `json:"toPlanId"`
+	ToPlan     string          `json:"toPlan"`
+	Periods    int             `json:"periods"`
+	Before     json.RawMessage `json:"before"`
+	After      json.RawMessage `json:"after"`
+	Remaining  json.RawMessage `json:"remaining,omitempty"`
+	Credit     json.RawMessage `json:"credit,omitempty"`
+	Warnings   json.RawMessage `json:"warnings,omitempty"`
+	Remark     string          `json:"remark"`
+	CreatedAt  int64           `json:"createdAt" gorm:"index"`
+}
+
+// 套餐记录的保留:一年(幂等键也只在这段时间里有效),总量再兜一道上限。
+const (
+	PlanOpKeepDays = 365
+	PlanOpMaxRows  = 100000
+)
 
 // StartOnFirstUse 记流量的那条 UPDATE 顺带做"首次连接开始计时":等着计时的用户此刻换算成到期时间。
 // 和记流量是同一条语句,不多一次写;用的是更新前的 activate_days。
@@ -493,6 +531,6 @@ func All() []interface{} {
 		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
-		&ReachCheck{}, &Cert{}, &NodeDecommission{},
+		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{},
 	}
 }

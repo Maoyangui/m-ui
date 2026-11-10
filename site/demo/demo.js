@@ -5,6 +5,7 @@
 // 这里只做两件事:按 "METHOD path" 找 fixture,以及把增删改落到内存里的几张表上。
 import { setTransport, setQrUrl, ApiError } from './api.js';
 import { toast } from './ui.js';
+import { trErr } from './errmsg.js';
 
 const SITE = 'https://maoyangui.github.io/m-ui/';
 const GITHUB = 'https://github.com/Maoyangui/m-ui';
@@ -181,6 +182,54 @@ for (const l of S.lines) if (l.name === 'Tokyo-HY2' && tlsOf(l).mode === 'cert')
 if (!S.exts.length) S.exts.push({ id: 1, name: 'Demo Sub', type: 'sub', value: 'https://sub.example.net/demo', prefix: '', enabled: true, sort: 1, remark: '', lastFetch: now() - 600, lastError: '', nodeCount: 6, nodeTotal: 7, exclude: '官网' });
 const ruleView = r => ({ ...r, targetCount: r.allUsers ? S.users.filter(u => u.enabled).length : new Set([...(r.userIds || []), ...S.users.filter(u => (r.resellerIds || []).includes(u.resellerId) || (r.planIds || []).includes(u.planId)).map(u => u.id)]).size, activeCount: S.limitStates.filter(s => s.ruleId === r.id).length });
 
+// 换套餐 / 续 N 期的演示版:和面板同一套规则的简化(不处理首次连接计时),只改内存;套餐记录也记在内存里
+const GB = 1073741824;
+for (const p of S.plans) if (p.price === undefined) p.price = ({ Basic: 5, Pro: 20 })[p.name] || 0; // 演示用的参考价
+S.planOps = [];
+const planStateOf = (u, plan) => ({ planId: u.planId || 0, plan: plan ? plan.name : '', volume: u.volume || 0, used: (u.up || 0) + (u.down || 0), expiry: u.expiry || 0,
+  activateDays: u.activateDays || 0, autoReset: !!u.autoReset, resetDays: u.resetDays || 0, nextReset: u.nextReset || 0, deviceLimit: u.deviceLimit || 0,
+  speedUp: u.speedUp || 0, speedDown: u.speedDown || 0, enabled: u.enabled !== false, disabledReason: u.disabledReason || '', lineRefs: (u.lineIds || []).map(id => ({ lineId: id })) });
+const demoErr = (status, zh) => new ApiError(status, trErr(zh)); // 英文界面也看得懂
+const demoWarn = (code, args, block) => ({ code, text: code, args, block: !!block });
+function demoPlanOp(u, p, op, n, usage, dry, remark) {
+  const t = now(), v = Math.round((p.volumeGb || 0) * GB), used = (u.up || 0) + (u.down || 0);
+  const old = S.plans.find(x => x.id === u.planId);
+  if (!usage || usage === 'auto') usage = op === 'stack' && u.volume ? 'keep' : 'reset';
+  if (op === 'renew') usage = 'reset'; else if (op === 'extend') usage = 'keep';
+  let credit = null, creditSecs = 0;
+  if (op === 'prorate') {
+    if (!old) throw demoErr(400, '用户没有所属套餐,不能按价值折算');
+    if (old.id === p.id) throw demoErr(400, '目标套餐就是当前套餐,不能折算:要从现在重新开始用 replace,要带结转续费用 stack');
+    if (!(old.price > 0) || !(p.price > 0)) throw demoErr(400, `套餐「${!(old.price > 0) ? old.name : p.name}」没填参考价,不能按价值折算`);
+    const ratio = old.days && u.expiry ? Math.max(0, u.expiry - t) / (old.days * DAY) : 0;
+    const periods = ratio * old.price / p.price;
+    creditSecs = Math.round(periods * (p.days || 0) * DAY);
+    credit = { fromPrice: old.price, toPrice: p.price, ratio, value: ratio * old.price, periods, seconds: creditSecs, bytes: 0 };
+  }
+  const nx = { ...u, planId: p.id, deviceLimit: p.deviceLimit || 0, speedUp: p.speedUp || 0, speedDown: p.speedDown || 0, autoReset: !!p.autoReset, resetDays: p.resetDays || 0, enabled: true, disabledReason: '' };
+  const fromNow = op === 'replace' || op === 'prorate';
+  nx.expiry = !p.days ? 0 : (fromNow ? t : Math.max(t, u.expiry || 0)) + n * p.days * DAY + creditSecs;
+  nx.volume = !v ? 0 : p.autoReset || op === 'extend' ? v : op === 'stack' && u.volume ? (usage === 'reset' ? Math.max(0, u.volume - used) : u.volume) + n * v : n * v;
+  if (usage === 'reset') { nx.up = 0; nx.down = 0; }
+  nx.nextReset = p.autoReset ? (usage === 'keep' && u.nextReset > t ? Math.min(u.nextReset, t + p.resetDays * DAY) : t + p.resetDays * DAY) : 0;
+  if (p.lineIds && p.lineIds.length) nx.lineIds = [...p.lineIds];
+  const warnings = [];
+  const nUsed = (nx.up || 0) + (nx.down || 0);
+  if (nx.volume && usage === 'keep' && nUsed >= nx.volume) warnings.push(demoWarn('over_quota', { used: nUsed, volume: nx.volume }, true));
+  if (nx.expiry && (!u.expiry || nx.expiry < u.expiry - 60)) warnings.push(demoWarn('expiry_earlier', { from: u.expiry || 0, to: nx.expiry }, true));
+  if (nx.volume && (!u.volume || nx.volume < u.volume)) warnings.push(demoWarn('volume_lower', { from: u.volume || 0, to: nx.volume }));
+  if (op === 'stack' && p.autoReset && v) warnings.push(demoWarn('per_period_not_stacked', { lost: u.volume ? Math.max(0, u.volume - used) : 0 }));
+  const left = u.expiry ? Math.max(0, u.expiry - t) : null;
+  const res = { op, direction: (p.volumeGb || 0) > ((old && old.volumeGb) || 0) ? 'upgrade' : old && old.id === p.id ? 'same' : 'downgrade', periods: n, usage, dryRun: !!dry, replayed: false,
+    from: planStateOf(u, old), to: planStateOf(nx, p), remaining: { seconds: left, bytes: u.volume ? Math.max(0, u.volume - used) : null, timeRatio: null, trafficRatio: null, ratio: null },
+    credit, warnings, needsForce: warnings.some(w => w.block) };
+  if (dry) return { res };
+  S.planOps.unshift({ id: S.planOps.length + 1, createdAt: t, actor: 'admin', userId: u.id, op, fromPlanId: u.planId || 0, fromPlan: old ? old.name : '', toPlanId: p.id, toPlan: p.name, periods: n, usage, remark: remark || '', before: res.from, after: res.to, warnings });
+  Object.assign(u, nx);
+  res.opId = S.planOps.length;
+  return { res };
+}
+
 function status() {
   const s = fx('GET status') || {};
   s.users = S.users.length; s.enabledUsers = S.users.filter(u => u.enabled).length; s.lines = S.lines.length; s.linesEnabled = S.lines.filter(l => l.enabled).length;
@@ -201,7 +250,8 @@ function route(method, path, query, body) {
       case 'settings': return clone(S.settings);
       case 'lines': return clone(S.lines);
       case 'upstreams': if (seg[1] === 'health') return fx('GET upstreams/health') || {}; return clone(S.upstreams);
-      case 'users': if (seg[2] === 'sub') { const u = find(S.users, id); return { link: subUrl(u), clash: subUrl(u) + '?format=clash', json: subUrl(u) + '?format=json' }; } return clone(S.users);
+      case 'users': if (seg[2] === 'plan-ops') return clone(S.planOps.filter(o => o.userId === id).slice(0, Number(new URLSearchParams(query).get('limit')) || 20));
+        if (seg[2] === 'sub') { const u = find(S.users, id); return { link: subUrl(u), clash: subUrl(u) + '?format=clash', json: subUrl(u) + '?format=json' }; } return clone(S.users);
       case 'plans': return S.plans.map(planView);
       case 'nodes': return clone(S.nodes);
       case 'exts': if (seg[2] === 'nodes') return extNodes(id, seg, 'GET', null); return clone(S.exts);
@@ -241,7 +291,8 @@ function route(method, path, query, body) {
       if (seg[1] === 'batch') { const { ids = [], action, days = 0 } = body || {}; let n = 0;
         for (const uid of ids) { const u = S.users.find(x => x.id === uid); if (!u) continue; n++;
           if (action === 'enable') u.enabled = true; else if (action === 'disable') u.enabled = false; else if (action === 'reset') { u.up = 0; u.down = 0; }
-          else if (action === 'extend') u.expiry = Math.max(u.expiry || 0, now()) + days * 86400; else if (action === 'delete') S.users = S.users.filter(x => x.id !== uid); }
+          else if (action === 'extend') u.expiry = Math.max(u.expiry || 0, now()) + days * 86400; else if (action === 'delete') S.users = S.users.filter(x => x.id !== uid);
+          else if (action === 'plan' && body.mode !== 'bind') { const p = S.plans.find(x => x.id === body.planId); if (p) demoPlanOp(u, p, body.mode === 'extend' ? 'extend' : 'renew', Math.max(1, body.periods || 1)); } }
         return { affected: n }; }
       if (seg[1] === 'bulk') { const { prefix = 'user', count = 1 } = body || {}; const made = [];
         for (let i = 0; i < Math.min(count, 50); i++) { const u = { id: nextId(S.users), name: `${prefix}-${rnd(5)}`, enabled: true, volume: body.volume || 0, expiry: 0, up: 0, down: 0, deviceLimit: 0, lineIds: body.lineIds || S.lines.map(l => l.id), onlineIps: [], createdAt: now() }; u.subUrl = subUrl(u); S.users.push(u); made.push({ name: u.name, link: u.subUrl + '?format=clash' }); }
@@ -252,7 +303,14 @@ function route(method, path, query, body) {
       if (method === 'PUT') { Object.assign(u, body, { id }); u.subUrl = subUrl(u); return clone(u); }
       if (seg[2] === 'reset') { u.up = 0; u.down = 0; return ok(); }
       if (seg[2] === 'kick') { const n = (u.onlineIps || []).length; u.onlineIps = []; S.onlines.users = S.onlines.users.filter(n2 => n2 !== u.name); return { closed: n }; }
-      if (seg[2] === 'plan') { const p = S.plans.find(x => x.id === (body && body.planId)); if (p) { u.volume = (p.volumeGb || 0) * 1073741824; u.expiry = p.days ? now() + p.days * 86400 : 0; u.deviceLimit = p.deviceLimit || 0; } return ok(); }
+      if (seg[2] === 'plan') { const b = body || {}; if (b.mode === 'bind') { u.planId = b.planId || 0; return ok(); }
+        const p = S.plans.find(x => x.id === (b.planId || u.planId)); if (!p) throw demoErr(400, '用户没有所属套餐,请给 planId 或 plan');
+        const { res } = demoPlanOp(u, p, b.mode === 'extend' ? 'extend' : 'renew', Math.max(1, b.periods || 1), '', b.dryRun, b.remark); return b.dryRun ? res : ok({ expiry: u.expiry }); }
+      if (seg[2] === 'change') { const b = body || {}; const p = S.plans.find(x => x.id === b.planId); if (!p) throw demoErr(400, '缺少 planId 或 plan');
+        const pre = demoPlanOp(u, p, b.mode, Math.max(b.mode === 'prorate' ? 0 : 1, b.periods ?? 1), b.usage, true).res;
+        if (b.dryRun) return pre;
+        if (pre.needsForce && !b.force) { const e = demoErr(409, '这次变更有需要确认的影响(见 warnings),确认后带 force: true 重试'); e.data = { code: 'needs_force', warnings: pre.warnings, preview: pre }; throw e; }
+        return demoPlanOp(u, p, b.mode, Math.max(b.mode === 'prorate' ? 0 : 1, b.periods ?? 1), b.usage, false, b.remark).res; }
       if (seg[2] === 'share') { if (method === 'DELETE') { u.shareUrl = ''; return ok(); } u.shareUrl = subUrl(u).replace(/\/sub\/.*$/, '/sub/share-' + rnd(20)); return { url: u.shareUrl }; }
       return ok();
     }

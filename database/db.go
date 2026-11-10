@@ -71,6 +71,8 @@ func Open(dbPath string) (*gorm.DB, error) {
 	// 套餐从"全局唯一名"改成"按归属唯一",老库里那个唯一索引要去掉
 	db.Exec("UPDATE plans SET reseller_id = 0 WHERE reseller_id IS NULL")
 	db.Exec("DROP INDEX IF EXISTS idx_plans_name")
+	// 参考价是后加的列(NOT NULL DEFAULT 0,老套餐本来就是 0);防一手别的工具改过库留下 NULL,折算时 NULL 会被当成没填
+	db.Exec("UPDATE plans SET price = 0 WHERE price IS NULL")
 	// 停用原因是后加的列:老库里已停用的用户按当时的状态推断一次(幂等:有原因的行不再动)。
 	// 超量记 quota、到期记 expired、所属代理额度已用尽的记 quota(旧版是把他名下用户整体停掉的),其余当手动。
 	db.Exec("UPDATE users SET disabled_reason = '' WHERE disabled_reason IS NULL")

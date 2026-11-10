@@ -80,6 +80,8 @@ type Server struct {
 	totpPendingRS  map[uint]string // 同上,按代理
 	lastTotpStep   int64           // 最近一次登录成功用掉的时间步,同一验证码不能再用(防重放)
 	lastTotpStepRS map[uint]int64  // 同上,按代理
+
+	onRulesNow func() // 测试用:数"立刻重判限速规则"被触发了几次(测试里没有数据面)
 }
 
 func NewServer(run *runner.Runner) *Server {

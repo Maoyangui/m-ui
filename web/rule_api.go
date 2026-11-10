@@ -164,6 +164,9 @@ func (s *Server) ruleViews(list []model.Rule) []ruleView {
 
 // rulesNow 规则变了立刻判一轮并重新下发限速(测试里没有数据面)。
 func (s *Server) rulesNow() {
+	if s.onRulesNow != nil {
+		s.onRulesNow()
+	}
 	if s.run != nil {
 		s.run.RulesNow()
 	}

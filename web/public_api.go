@@ -34,8 +34,12 @@ import (
 //	DELETE /api/v1/users/{name|id}          删除
 //	POST   /api/v1/users/{name|id}/enable | disable | reset | kick
 //	POST   /api/v1/users/{name|id}/rotate   重置订阅链接:新随机地址 + 新凭据,收回临时共享,旧的立即失效
-//	POST   /api/v1/users/{name|id}/plan     套用套餐 {planId|plan, mode: renew|extend}
+//	POST   /api/v1/users/{name|id}/plan     续费 / 延期 N 期 {planId|plan(不给 = 当前套餐), mode: renew|extend, periods, dryRun, requestId}(/renew 同)
+//	POST   /api/v1/users/{name|id}/change   换套餐 {planId|plan, mode: replace|stack|prorate, periods, usage, force, dryRun, requestId}
+//	GET    /api/v1/users/{name|id}/plan-ops 套餐记录(最新的在前)
 //	GET    /api/v1/users/{name|id}/sub      订阅地址
+//
+// 套餐操作支持幂等:requestId 或请求头 Idempotency-Key,同一作用域同一个键只执行一次(见 plan_change.go)。
 
 // apiToken 从请求头取令牌:Authorization: Bearer 优先,其次 X-API-Key。
 func apiToken(r *http.Request) string {
@@ -318,26 +322,26 @@ func (s *Server) apiListUsers(w http.ResponseWriter, r *http.Request, sc apiScop
 
 // apiUserReq 创建/修改用户的请求体;指针字段缺省表示"不改动"。
 type apiUserReq struct {
-	Name        *string          `json:"name"`
-	Enabled     *bool            `json:"enabled"`
-	PlanId      *uint            `json:"planId"`
-	Plan        *string          `json:"plan"` // 套餐名,与 planId 二选一
-	Mode        string           `json:"mode"` // 套用套餐的方式:renew(默认,清零用量)| extend(保留用量)
-	VolumeGB    *float64         `json:"volumeGb"`
-	Volume      *int64           `json:"volume"` // 字节,0=不限;与 volumeGb 二选一
-	Days        *int             `json:"days"`   // 创建:自现在起 N 天;修改:在原到期(未过期时)基础上再加 N 天
-	Expiry      *int64           `json:"expiry"` // 到期时间戳(秒),0=不限;优先级高于 days
-	ActivateDays *int            `json:"activateDays"` // 首次连接后 N 天到期;填了就不看 expiry / days
-	DeviceLimit *int             `json:"deviceLimit"`
-	SpeedUp     *int             `json:"speedUp"`
-	SpeedDown   *int             `json:"speedDown"`
-	AutoReset   *bool            `json:"autoReset"`
-	ResetDays   *int             `json:"resetDays"`
-	Remark      *string          `json:"remark"`
-	Desc        *string          `json:"desc"`
-	LineIds     *[]uint          `json:"lineIds"`
-	LineRefs    *[]model.LineRef `json:"lineRefs"` // 线路 × 服务器;给了它就以它为准
-	ExtIds      *[]uint          `json:"extIds"`
+	Name         *string          `json:"name"`
+	Enabled      *bool            `json:"enabled"`
+	PlanId       *uint            `json:"planId"`
+	Plan         *string          `json:"plan"` // 套餐名,与 planId 二选一
+	Mode         string           `json:"mode"` // 套用套餐的方式:renew(默认,清零用量)| extend(保留用量)
+	VolumeGB     *float64         `json:"volumeGb"`
+	Volume       *int64           `json:"volume"`       // 字节,0=不限;与 volumeGb 二选一
+	Days         *int             `json:"days"`         // 创建:自现在起 N 天;修改:在原到期(未过期时)基础上再加 N 天
+	Expiry       *int64           `json:"expiry"`       // 到期时间戳(秒),0=不限;优先级高于 days
+	ActivateDays *int             `json:"activateDays"` // 首次连接后 N 天到期;填了就不看 expiry / days
+	DeviceLimit  *int             `json:"deviceLimit"`
+	SpeedUp      *int             `json:"speedUp"`
+	SpeedDown    *int             `json:"speedDown"`
+	AutoReset    *bool            `json:"autoReset"`
+	ResetDays    *int             `json:"resetDays"`
+	Remark       *string          `json:"remark"`
+	Desc         *string          `json:"desc"`
+	LineIds      *[]uint          `json:"lineIds"`
+	LineRefs     *[]model.LineRef `json:"lineRefs"` // 线路 × 服务器;给了它就以它为准
+	ExtIds       *[]uint          `json:"extIds"`
 }
 
 // apiFindPlan 找套餐:主面板令牌只看主面板的套餐,代理令牌只看该代理自己的。
@@ -657,6 +661,14 @@ func (s *Server) apiUserAction(w http.ResponseWriter, r *http.Request, u model.U
 		writeJSON(w, http.StatusOK, s.subLinks(u))
 		return
 	}
+	if action == "plan-ops" { // 套餐记录:只读
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+			return
+		}
+		s.writePlanOps(w, r, u, sc.rid)
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		return
@@ -700,38 +712,10 @@ func (s *Server) apiUserAction(w http.ResponseWriter, r *http.Request, u model.U
 		}
 		s.auditAs(sc.actor, "user", "rotate", u.Name)
 		writeJSON(w, http.StatusOK, s.apiUser(nu))
-	case "plan", "renew":
-		var req apiUserReq
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			badRequest(w, errors.New("请求体不是合法 JSON: "+err.Error()))
-			return
-		}
-		plan, err := s.apiFindPlan(req, sc.rid)
-		if err != nil {
-			badRequest(w, err)
-			return
-		}
-		if plan == nil {
-			badRequest(w, errors.New("缺少 planId 或 plan"))
-			return
-		}
-		mode := req.Mode
-		if mode != "extend" {
-			mode = "renew"
-		}
-		if sc.rid > 0 {
-			if err := s.checkResellerPlan(sc.rid, u, *plan); err != nil {
-				badRequest(w, err)
-				return
-			}
-		}
-		if err := s.applyUserPlan(&u, *plan, mode); err != nil {
-			badRequest(w, err)
-			return
-		}
-		s.auditAs(sc.actor, "user", "plan:"+mode+":"+plan.Name, u.Name)
-		s.reloadUsers("外部 API 套餐 " + plan.Name + " → " + u.Name)
-		writeJSON(w, http.StatusOK, s.apiUser(u))
+	case "plan", "renew": // 续费 / 延期 N 期;不给套餐就续当前套餐
+		s.apiRenew(w, r, u, sc)
+	case "change": // 换套餐:replace / stack / prorate
+		s.apiChange(w, r, u, sc)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "接口不存在"})
 	}

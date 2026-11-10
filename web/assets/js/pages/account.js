@@ -3,6 +3,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, openModal, registerActions, badge, field, check, fv, fchk, fmtBytes, fmtDay, progress, setHTML } from '../ui.js';
+import { apiTable, apiExample } from '../apidoc.js';
 
 export const title = () => t('acct.title');
 export const subtitle = () => t('acct.subtitle');
@@ -11,17 +12,22 @@ let me = {};
 let pendingSecret = '';
 let api = { enabled: false, token: '' };
 
-// 代理自己的外部 API:开关 + 令牌;接口前缀就是当前面板地址下的 api/v1/
+// 代理自己的外部 API:开关 + 令牌;接口前缀就是当前面板地址下的 api/v1/。接口一览和主面板同一份(作用域只限自己名下),没开时折起来
 function apiBase() { return location.origin + location.pathname.replace(/[^/]*$/, '') + 'api/v1/'; }
 function apiCard() {
   const on = !!api.enabled;
+  const docs = `<p class="hint">${t('acct.apiDocs')} <a href="${esc((state.status.repo || 'https://github.com/Maoyangui/m-ui') + '/blob/main/docs/API.md')}" target="_blank" rel="noopener">docs/API.md</a></p>`;
   return `<div class="card-head"><h2>${t('acct.api')}</h2><div class="row" style="align-items:center;gap:.5rem">${badge(on ? t('common.enabled') : t('common.disabled'), on ? 'ok' : '')}<label class="switch" title="${esc(t('acct.apiEnable'))}"><input type="checkbox" id="acct-api-on" ${on ? 'checked' : ''}><span></span></label></div></div>
     <p class="hint">${t('acct.apiHelp')}</p>
     ${on ? `<dl class="kv">
       <dt>${t('acct.apiBase')}</dt><dd><div class="sub-box"><code>${esc(apiBase())}</code><button class="btn sm" data-act="acct.copy" data-id="${esc(apiBase())}">${t('common.copy')}</button></div></dd>
       <dt>${t('acct.apiToken')}</dt><dd><div class="sub-box"><code>${esc(api.token || '')}</code><button class="btn sm" data-act="acct.copy" data-id="${esc(api.token || '')}">${t('common.copy')}</button><button class="btn sm danger" data-act="acct.apiRotate">${t('acct.apiRotate')}</button></div></dd>
     </dl>
-    <p class="hint">${t('acct.apiDocs')} <a href="${esc((state.status.repo || 'https://github.com/Maoyangui/m-ui') + '/blob/main/docs/API.md')}" target="_blank" rel="noopener">docs/API.md</a></p>` : ''}`;
+    <h3 class="sub-title">${t('adm.apiEndpoints')}</h3>
+    ${apiTable()}
+    <h3 class="sub-title">${t('adm.apiExample')}</h3>
+    <pre class="log code">${esc(apiExample(apiBase(), api.token || '', true))}</pre>
+    ${docs}` : `<details class="adv api-list"><summary>${t('adm.apiEndpointsOff')}</summary>${apiTable()}${docs}</details>`}`;
 }
 
 export async function render(el) {

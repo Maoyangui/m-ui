@@ -573,3 +573,17 @@ button.reach-cell:focus-visible { outline: 2px solid var(--primary); outline-off
   .btn.sm { padding: .3rem .6rem; }
   #nav a { padding: .55rem .7rem; }
 }
+
+/* 换套餐:变更前后两栏(窄屏上下排)、变了的值加粗、影响提示;用户详情里的套餐记录 */
+.pc-preview { margin-top: .7rem; border-top: 1px dashed var(--border); padding-top: .6rem; }
+.pc-preview h3 { margin: 0 0 .35rem; font-size: .85rem; }
+.pc-cols dd.chg { font-weight: 600; color: var(--primary-text); }
+.pc-warn { margin: .5rem 0 0; padding-left: 1.1rem; font-size: .8rem; line-height: 1.5; }
+.pc-warn li.warn { color: var(--warn); }
+.pc-warn li.bad, .pc-bad { color: var(--danger); font-weight: 500; }
+.seg button:disabled { opacity: .45; cursor: not-allowed; }
+.plan-ops { list-style: none; margin: 0; padding: 0; font-size: .8rem; }
+.plan-ops li { padding: .35rem 0; border-bottom: 1px dashed var(--border); line-height: 1.5; }
+.plan-ops li:last-child { border-bottom: none; }
+details.api-list { margin-top: .6rem; }
+@media (max-width: 700px) { .pc-cols { grid-template-columns: 1fr; } }

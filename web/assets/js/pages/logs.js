@@ -100,9 +100,11 @@ async function loadAudit() {
   const body = document.getElementById('logs-rows');
   if (!body) return;
   body.innerHTML = rows.map(r => {
-    let obj = ''; try { obj = JSON.parse(r.obj); } catch { obj = r.obj; }
-    if (Array.isArray(obj)) obj = obj.join(', ');
-    if (obj === null) obj = '';
+    // obj 是任意 JSON:字符串原样,对象 / 数组里的对象写成 JSON(以前显示成 [object Object])
+    const show = v => (v === null || v === undefined) ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+    let obj = r.obj;
+    if (typeof obj === 'string') { try { obj = JSON.parse(obj); } catch { /* 普通字符串 */ } }
+    obj = Array.isArray(obj) ? obj.map(show).join(', ') : show(obj);
     return `<tr><td class="num">${fmtDate(r.dateTime)}</td><td>${esc(r.actor)}</td><td>${esc(r.key)}</td><td>${esc(r.action)}</td><td class="ua" title="${esc(String(obj))}">${esc(String(obj))}</td></tr>`;
   }).join('') || `<tr><td colspan="5">${empty()}</td></tr>`;
 }
