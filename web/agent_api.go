@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ha"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/monitor"
@@ -41,9 +42,15 @@ func (s *Server) nodeToken() (string, error) {
 	return tok, nil
 }
 
+// agentAuth 主机调用副机接口的鉴权,顺序是 令牌 → 纪元 → 副机模式。
+// 临时主机也保留自己的副机令牌:被接管的旧主机带着旧纪元来请求时,收到的是 409 stale_epoch(它据此降级)而不是 403。
+// 没开过容灾(本机纪元为 0、请求也不带纪元)时和以前一样:不是副机就 403,令牌错 401。
 func (s *Server) agentAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !strings.EqualFold(s.setting("nodeMode"), "true") {
+		isNode := strings.EqualFold(s.setting("nodeMode"), "true")
+		h := s.haSvc()
+		haActive := h != nil && (r.Header.Get(ha.HeaderEpoch) != "" || h.Epoch() > 0)
+		if !isNode && (!haActive || s.setting("nodeToken") == "") {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "本机不是副机(设置里未开启副服务器模式)"})
 			return
 		}
@@ -58,8 +65,29 @@ func (s *Server) agentAuth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "令牌错误"})
 			return
 		}
+		if haActive {
+			action := strings.TrimPrefix(r.URL.Path, innerBase+"api/agent/")
+			if rej := h.CheckAgent(r.Header, action); rej != nil {
+				w.Header().Set(ha.HeaderNode, strconv.FormatUint(h.Epoch(), 10))
+				writeJSON(w, http.StatusConflict, rej)
+				return
+			}
+			w.Header().Set(ha.HeaderNode, strconv.FormatUint(h.Epoch(), 10))
+		}
+		if !isNode {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "本机不是副机(设置里未开启副服务器模式)"})
+			return
+		}
 		next(w, r)
 	}
+}
+
+// haSvc 本机的容灾服务(测试里拼出来的 Server 可能没有)。
+func (s *Server) haSvc() *ha.Service {
+	if s.run == nil {
+		return nil
+	}
+	return s.run.HA()
 }
 
 func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +113,8 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentUpstreamCheck)(w, r)
 	case "outbound-test": // 主机让本机实测一个临时出站(外部订阅展开后的逐台测速),不落库
 		s.agentAuth(s.handleAgentOutboundTest)(w, r)
+	case "ha/state": // 主机推来的容灾状态(纪元、候选名单、暂停、交接标记……)
+		s.agentAuth(s.handleAgentHAState)(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -580,4 +610,27 @@ func (s *Server) reportServicePorts() []model.ServicePort {
 		}
 	}
 	return out
+}
+
+// handleAgentHAState 收下主机推来的容灾状态(纪元已在 agentAuth 里对齐)。
+func (s *Server) handleAgentHAState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	h := s.haSvc()
+	if h == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
+		return
+	}
+	var st ha.State
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&st); err != nil {
+		badRequest(w, err)
+		return
+	}
+	if err := h.ApplyState(st); err != nil {
+		badRequest(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }

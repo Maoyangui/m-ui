@@ -44,12 +44,16 @@ type BackupFile struct {
 }
 
 // CreateBackupFile 在备份目录生成一个备份并按 backupKeep 轮转,返回文件名。
-func (r *Runner) CreateBackupFile() (BackupFile, error) {
+func (r *Runner) CreateBackupFile() (BackupFile, error) { return r.CreateBackupFileNamed("m-ui-") }
+
+// CreateBackupFileNamed 同 CreateBackupFile,文件名用指定前缀(降级前的分叉备份 fenced-、迁回前的 pre-handover-):
+// 只有 m-ui- 开头的参与按份数轮转,别的留着给人核对。
+func (r *Runner) CreateBackupFileNamed(prefix string) (BackupFile, error) {
 	dir := r.BackupDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return BackupFile{}, err
 	}
-	name := "m-ui-" + time.Now().Format("20060102-150405") + ".zip"
+	name := prefix + time.Now().Format("20060102-150405") + ".zip"
 	// 备份里有全部用户凭据与证书私钥,按 0600 建文件(目录已是 0700,再加一层)
 	f, err := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -179,8 +183,15 @@ func (r *Runner) backupLoop(stop <-chan struct{}) {
 	}
 }
 
+// SetRestartFunc 替换 ScheduleRestart 的动作(测试里不真的重新执行进程)。
+func (r *Runner) SetRestartFunc(fn func(time.Duration)) { r.restartFn = fn }
+
 // ScheduleRestart 在短暂延迟后重启进程(还原备份、改端口后使用)。
 func (r *Runner) ScheduleRestart(delay time.Duration) {
+	if r.restartFn != nil {
+		r.restartFn(delay)
+		return
+	}
 	go func() {
 		time.Sleep(delay)
 		logger.Info("正在重启 m-ui")

@@ -20,6 +20,7 @@ import (
 	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ha"
 	"github.com/Maoyangui/m-ui/hop"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/reach"
@@ -126,6 +127,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		status["reachBad"] = s.run.Reach().Bad() // 大陆连通异常的服务器:概览页顶部提示
 		// IPv6 入站不通的服务器(只算 down,和服务器页同一份;没有时是空数组,主机上这个键始终在):概况"需要处理"用,不并进 reachBad
 		status["v6Bad"] = s.run.Reach().V6Bad()
+	}
+	if h := s.haSvc(); h != nil { // 容灾角色(只做显示,判定仍看 nodeMode):temp 临时主机、fenced 已降级、promoting 接管中
+		status["haRole"] = h.Role()
+		if e := h.Epoch(); e > 0 {
+			status["haEpoch"] = e
+		}
 	}
 	status["singBox"] = singBoxVersion
 	status["dbSize"] = dbFileSize(s.run.DBPath())
@@ -1269,7 +1276,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.db.Find(&rows)
 		out := map[string]string{}
 		for _, row := range rows {
-			if hiddenSettings[row.Key] {
+			if hiddenSettings[row.Key] || ha.Hidden(row.Key) { // 容灾的键一律不发(签名私钥、集群密钥、迁回码哈希……),容灾页走专用接口
 				continue
 			}
 			if maskedSettings[row.Key] && row.Value != "" {

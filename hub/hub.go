@@ -838,6 +838,8 @@ type Deps struct {
 	CountersMerged func()                       // 并入了副机用量:触发一次超量 / 到期判定(可为 nil,不能阻塞)
 	// OnceDurable 去重记录落库的节流(notify.Notifier.OnceDurable):代副机发的证书告警每台每张每天一次,重启不重复;nil = 不发
 	OnceDurable func(key string, ttl time.Duration) bool
+	// HA 主机容灾的钩子(见 ha.go);nil = 没有容灾
+	HA HAHooks
 }
 
 type Hub struct {
@@ -906,6 +908,8 @@ type Hub struct {
 	// kicking 按用户名单飞的踢线派发:面板连点两下只向副机发一轮请求,后到的等同一份结果
 	kickMu  sync.Mutex
 	kicking map[string]*kickCall
+	// haPushed 各副机最近一次推成功的容灾状态修订(见 ha.go)
+	haPushed map[uint]haPushed
 }
 
 type rejectAt struct {
@@ -1368,6 +1372,12 @@ func (h *Hub) syncNode(n model.Node, snap Snapshot) *nodeResult {
 	pf := h.pushFail[n.Id]
 	h.mu.Unlock()
 	res := &nodeResult{n: n}
+	// 开着容灾时先推容灾状态:副机要先切到本机的纪元,配置和报告才收得下。副机按纪元拒绝了(它跟着别的主机),
+	// 这一轮别的请求也不用发了,状态里写明原因(降级判定由容灾那边按多数做)
+	if err := h.pushHAState(n); err != nil {
+		res.err = haErrText(err)
+		return res
+	}
 	// 副机报告的修订号和要推的不一样也要推:推一份新配置失败后(副机库里已经是那份失败的修订、数据面回滚了),
 	// 管理员把改动撤回,内容回到上一次推成功的那份,修订号(内容哈希)也就一样 —— 只比 pushed 会以为副机早已是它,
 	// 一直不推,副机库里留着撤掉的线路、待重载不清、一直未同步,要等下面 10 分钟一次的定期重推。
@@ -1380,7 +1390,7 @@ func (h *Hub) syncNode(n model.Node, snap Snapshot) *nodeResult {
 		default:
 			if err := h.push(n, snap); err != nil {
 				// 等确认超时也退避:以前超时不算被拒,下一轮又整份重推,副机永远在重做同一份(审计 I4)
-				if slow := isApplyTimeout(err); slow || pushRejected(err) {
+				if slow := isApplyTimeout(err); !IsEpochError(err) && (slow || pushRejected(err)) { // 纪元判定不退避:交接一完成副机就收
 					h.mu.Lock()
 					if pf == nil || pf.rev != snap.Revision {
 						pf = &pushFailure{rev: snap.Revision}
@@ -1454,6 +1464,7 @@ func (h *Hub) forgetNodes(live map[uint]bool) {
 		delete(h.remoteLines, id)
 		delete(h.nodeNames, id)
 		delete(h.upHealth, id)
+		delete(h.haPushed, id)
 	}
 }
 
@@ -2256,13 +2267,19 @@ func (h *Hub) requestTimeout(n model.Node, method, path string, body interface{}
 // do 带上令牌发请求,非 200 归类成 httpStatusError,200 的响应体解进 out。
 func (h *Hub) do(n model.Node, req *http.Request, out interface{}) error {
 	req.Header.Set("X-Agent-Token", n.Token)
-	req.Header.Set("Content-Type", "application/json")
+	if req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	h.setHAHeader(req)
 	resp, err := h.clientFor(n).Do(req)
 	if err != nil {
-		return err
+		return h.noteReply(n, nil, nil, err)
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err := h.noteReply(n, resp, b, nil); err != nil {
+		return err // 副机按纪元规则拒绝
+	}
 	if resp.StatusCode != 200 {
 		var e struct{ Error string }
 		json.Unmarshal(b, &e)

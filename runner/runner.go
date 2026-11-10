@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,7 @@ import (
 	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ha"
 	"github.com/Maoyangui/m-ui/hop"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/jobs"
@@ -64,6 +66,7 @@ type Runner struct {
 	monitor      *monitor.Monitor
 	reach        *reach.Service
 	hub          *hub.Hub
+	ha           *ha.Service
 	dbPath       string
 	cert         certState
 	certOpMu     sync.Mutex        // 串行化签发、切换来源与套用目标
@@ -92,6 +95,7 @@ type Runner struct {
 
 	// resolve4 大陆连通检测在主机上把域名解析成 IPv4 用的解析器;nil = 系统解析器(见 lookupIPv4)。只给测试替换。
 	resolve4 func(ctx context.Context, host string) ([]net.IP, error)
+	restartFn func(time.Duration) // 测试里替换 ScheduleRestart(不真的重新执行进程)
 }
 
 // ReloadStatus 最近一次数据面重载(启动、全量、热换出站、热更新用户)的结果。
@@ -262,6 +266,16 @@ func New(dbPath string) (*Runner, error) {
 		Notify: func(toggle, text string) { r.notifier.Event(toggle, text) },
 		UA:     "m-ui/" + Version + " (+" + brand.Repo + ")",
 	})
+	r.ha = ha.New(ha.Deps{
+		DB: db, DBPath: dbPath, Version: Version,
+		Notify:      func(toggle, text string) { r.notifier.Event(toggle, text) },
+		Restart:     func(d time.Duration) { r.ScheduleRestart(d) },
+		Backup:      func(prefix string) (string, error) { bf, err := r.CreateBackupFileNamed(prefix); return bf.Name, err },
+		PanelURL:    r.PanelURL,
+		ResellerURL: r.ResellerURL,
+		CertPaths:   r.CertPaths,
+		Witness:     r.haWitness,
+	})
 	r.hub = hub.New(hub.Deps{
 		DB: db, Setting: r.setting, IsNode: r.IsNode, Version: Version,
 		Notify:         func(toggle, text string) { r.notifier.Event(toggle, text) },
@@ -270,7 +284,9 @@ func New(dbPath string) (*Runner, error) {
 		SetExternalIPs: r.SetExternalIPs,
 		LocalGroups:    r.GroupState,
 		CountersMerged: r.jobs.KickDeplete,
+		HA:             r.ha,
 	})
+	r.ha.SetHub(r.hub)
 	r.ensureAdmin()
 	r.ensureLocalNode()
 	r.ensureCertStore()
@@ -305,6 +321,9 @@ func (r *Runner) ensureLocalNode() {
 
 // Hub 暴露主副机同步器。
 func (r *Runner) Hub() *hub.Hub { return r.hub }
+
+// HA 暴露主机容灾服务。
+func (r *Runner) HA() *ha.Service { return r.ha }
 
 // SetExternalIPs 下发其他机器上在线的 IP 给本机限制器(跨机设备数)。
 func (r *Runner) SetExternalIPs(m map[string][]string) {
@@ -1759,6 +1778,51 @@ func (r *Runner) localRatio() float64 {
 	return n.Ratio
 }
 
+// PanelURL 本机面板的对外地址(猜的:面板域名或公网 IP + 端口 + 路径),容灾通知与副机配对显示用。
+func (r *Runner) PanelURL() string {
+	return r.serviceURL("webCertFile", "webKeyFile", "webPort", 2053, "webPath", "/app/")
+}
+
+// ResellerURL 本机代理面板的对外地址;没开代理面板为空。
+func (r *Runner) ResellerURL() string {
+	if strings.EqualFold(r.setting("resellerEnabled"), "false") {
+		return ""
+	}
+	if r.setting("resellerCertFile") == "" && r.setting("resellerKeyFile") == "" {
+		return r.serviceURL("webCertFile", "webKeyFile", "resellerPort", 2054, "resellerPath", "/dl/")
+	}
+	return r.serviceURL("resellerCertFile", "resellerKeyFile", "resellerPort", 2054, "resellerPath", "/dl/")
+}
+
+func (r *Runner) serviceURL(certKey, keyKey, portKey string, defPort int, pathKey, defPath string) string {
+	scheme := "http"
+	if r.setting(certKey) != "" && r.setting(keyKey) != "" {
+		scheme = "https"
+	}
+	host := strings.TrimSpace(r.setting("webDomain"))
+	if host == "" {
+		host = strings.TrimSpace(r.setting("publicIp"))
+	}
+	if host == "" {
+		host = "<本机IP>"
+	}
+	port := defPort
+	if n, err := strconv.Atoi(strings.TrimSpace(r.setting(portKey))); err == nil && n > 0 && n < 65536 {
+		port = n
+	}
+	p := strings.TrimSpace(r.setting(pathKey))
+	if p == "" {
+		p = defPath
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	return fmt.Sprintf("%s://%s%s", scheme, model.URLHost(scheme, host, port), p)
+}
+
 // PublicHost 返回对外地址:订阅域名 → 面板域名 → 本机公网 IP。
 func (r *Runner) PublicHost() string {
 	for _, k := range []string{"subDomain", "webDomain", "publicIp"} {
@@ -1842,6 +1906,12 @@ func Run(dbPath string) error {
 	}
 	logger.Info("m-ui 数据面已启动")
 
+	// 容灾启动自检:开着容灾的主机在跑主机任务之前先问一圈副机,过半已跟随更高纪元就直接降为只读副机(随后重启)
+	if r.ha.StartupCheck() {
+		logger.Warning("本机已被接管,降为只读副机,稍后自动重启")
+	}
+	r.ha.Start()
+	defer r.ha.Stop()
 	r.jobs.Start()
 	defer r.jobs.Stop()
 	r.monitor.Start()
