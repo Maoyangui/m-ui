@@ -86,6 +86,8 @@ const EN = /*BEGIN*/{
 "不支持把 %s 线路用作上游": "%s lines cannot be used as an upstream",
 "所选的线路不存在": "The selected line does not exist",
 "这条线路已停用": "This line is disabled",
+"目标线路在「%s」上给的是 IPv6 地址,入口服务器「%s」没有 IPv6,连不上:把目标线路在那台服务器的 IP 版本改成 IPv4,或给入口服务器配好 IPv6": "The target line gives an IPv6 address on \"%s\", but entry server \"%s\" has no IPv6, so it cannot connect: set the target line's IP version on that server to IPv4, or give the entry server IPv6",
+"目标线路在「%s」上给的是 IPv4 地址,入口服务器「%s」只有 IPv6,连不上:把目标线路在那台服务器的 IP 版本改成 IPv6,或给入口服务器配好 IPv4": "The target line gives an IPv4 address on \"%s\", but entry server \"%s\" has IPv6 only, so it cannot connect: set the target line's IP version on that server to IPv6, or give the entry server IPv4",
 "请选择用这条线路在哪台服务器上的入口": "Choose which server's entry of this line to use",
 "这样会绕成环,流量出不去:%s": "This creates a loop and traffic cannot get out: %s",
 "上游「%s」用着这条线路,先删掉或改掉它": "Upstream \"%s\" uses this line. Delete or change it first",
