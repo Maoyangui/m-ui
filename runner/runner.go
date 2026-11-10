@@ -146,6 +146,24 @@ func (r *Runner) CheckUpstream(up model.Upstream) (ok bool, delayMs int, method,
 	return res.OK, int(res.Delay), "urltest", res.Error
 }
 
+// TestOutbound 外部节点测速:不看数据面,直接起只含它的临时实例测(见 core.TestOutboundIsolated),通了再测一次取较小延迟。
+// method 为 "config" 表示出站建不起来(sing-box 不认这些参数):测不了,不等于不通。
+func (r *Runner) TestOutbound(ctx context.Context, up model.Upstream) (ok bool, delayMs int, method, errStr string) {
+	testURL := r.setting("upstreamTestUrl")
+	if testURL == "" {
+		testURL = "http://www.gstatic.com/generate_204"
+	}
+	ob, err := render.OutboundJSON(up)
+	if err != nil {
+		return false, 0, "config", err.Error()
+	}
+	res := core.TestOutboundIsolated(ctx, ob, testURL, 2)
+	if res.Config {
+		return false, 0, "config", res.Error
+	}
+	return res.OK, res.DelayMs, "urltest", res.Error
+}
+
 // checkGroup 上游组:成员有一条通就算通,延迟取最低的。全不通才算故障。
 func (r *Runner) checkGroup(group model.Upstream) (bool, int, string, string) {
 	var members []model.Upstream

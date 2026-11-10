@@ -517,7 +517,8 @@ func (s *Server) handleAgentOutboundTest(w http.ResponseWriter, r *http.Request)
 	if up.Name == "" {
 		up.Name = "ext-test"
 	}
-	ok, ms, meth, errStr := s.run.CheckUpstream(up)
+	// 只有外部节点测速用这个接口:直接起临时实例测(不在数据面里找同名出站),method "config" = 出站建不起来、测不了
+	ok, ms, meth, errStr := s.run.TestOutbound(r.Context(), up)
 	writeJSON(w, http.StatusOK, hub.UpstreamHealth{Name: up.Name, OK: ok, DelayMs: ms, Method: meth, Error: errStr, CheckedAt: time.Now().Unix()})
 }
 
