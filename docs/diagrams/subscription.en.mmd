@@ -17,9 +17,9 @@ flowchart TD
   UA -->|"proxy client"| B{"Disabled · expired · out of traffic"}
   B -->|"yes"| X["404"]
   B -->|"no"| F{"Which format"}
-  F -->|"default"| F1["Universal links"]
-  F -->|"?format=clash"| F2["Clash YAML"]
-  F -->|"?format=json"| F3["sing-box config"]
+  F -->|"Clash-family app or ?format=clash"| F2["Clash YAML"]
+  F -->|"sing-box app or ?format=json"| F3["sing-box config"]
+  F -->|"anything else"| F1["Universal links"]
 
   classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
   classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px

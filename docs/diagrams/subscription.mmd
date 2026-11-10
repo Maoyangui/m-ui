@@ -17,9 +17,9 @@ flowchart TD
   UA -->|"代理客户端"| B{"停用 · 到期 · 用尽"}
   B -->|"是"| X["404"]
   B -->|"否"| F{"要哪种格式"}
-  F -->|"默认"| F1["通用链接"]
-  F -->|"?format=clash"| F2["Clash YAML"]
-  F -->|"?format=json"| F3["sing-box 配置"]
+  F -->|"Clash 系客户端 或 ?format=clash"| F2["Clash YAML"]
+  F -->|"sing-box 系客户端 或 ?format=json"| F3["sing-box 配置"]
+  F -->|"其它"| F1["通用链接"]
 
   classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
   classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px

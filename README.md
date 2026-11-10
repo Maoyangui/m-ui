@@ -100,7 +100,7 @@ m-ui 是一个自托管的代理面板:**一个二进制 + 一个数据库文件
 
 <p align="center"><picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/subscription-dark.png">
-  <img src="docs/diagrams/subscription-light.png" width="578" alt="一次订阅请求:按地址认人 —— 用户名或随机令牌命中用户,临时共享令牌是同一个用户的另一套凭据,对不上给 404(浏览器看到「订阅地址无效」页);命中用户时看 User-Agent:浏览器看到落地页(停用、到期、用尽时顶部标明原因,共享令牌是精简版),代理客户端在停用、到期、用尽时拿到 404,否则按格式拿到通用链接、Clash YAML(?format=clash)或 sing-box 配置(?format=json)">
+  <img src="docs/diagrams/subscription-light.png" width="848" alt="一次订阅请求:按地址认人 —— 用户名或随机令牌命中用户,临时共享令牌是同一个用户的另一套凭据,对不上给 404(浏览器看到「订阅地址无效」页);命中用户时看 User-Agent:浏览器看到落地页(停用、到期、用尽时顶部标明原因,共享令牌是精简版),代理客户端在停用、到期、用尽时拿到 404,否则 Clash 系客户端或 ?format=clash 拿到 Clash YAML,sing-box 系客户端或 ?format=json 拿到 sing-box 配置,其它拿到通用链接">
 </picture></p>
 
 > 三种格式里的节点都是同一套来源:**用户已分配的线路 × 该线路已部署的服务器**,再拼上外部节点与外部订阅。所以加一台服务器,所有人的订阅里自动多出对应节点。分配也可以细到入口:一条线路部署在几台服务器上就是几个入口,给用户 / 套餐 / 代理授权时可以只勾其中某台的,订阅里就只出拿到的那些。
