@@ -2,12 +2,16 @@ package sub
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/upstream"
 )
 
@@ -39,12 +43,48 @@ func httpLink(raw string) *upstream.Parsed {
 	return &upstream.Parsed{Type: "http", Name: u.Fragment, Options: opts}
 }
 
+var (
+	badLinkMu     sync.Mutex
+	badLinkWarned = map[string]time.Time{}
+)
+
+// warnBadOwnLink 本站线路生成的链接 sing-box 那边解析不了(多半是线路的自定义地址写坏了,比如老数据里的 [v6]):
+// 这个节点写不进配置。以前静默跳过,用户只看到少了一个节点,面板毫无提示。
+// 链接里有凭据:日志只记节点名(# 后面)、协议和去掉了原链接的原因;同一个节点一小时只记一次(客户端会定时刷订阅)。
+func warnBadOwnLink(link string, err error) {
+	scheme, name := "", ""
+	if i := strings.Index(link, "://"); i > 0 {
+		scheme = link[:i]
+	}
+	if i := strings.LastIndex(link, "#"); i >= 0 {
+		name, _ = url.PathUnescape(link[i+1:])
+	}
+	var ue *url.Error // url.Parse 的错误会带上整条链接(含密码),只留里面的原因
+	if errors.As(err, &ue) {
+		err = ue.Err
+	}
+	key := scheme + "|" + name
+	now := time.Now()
+	badLinkMu.Lock()
+	if now.Sub(badLinkWarned[key]) < time.Hour {
+		badLinkMu.Unlock()
+		return
+	}
+	if len(badLinkWarned) > 1000 {
+		badLinkWarned = map[string]time.Time{}
+	}
+	badLinkWarned[key] = now
+	badLinkMu.Unlock()
+	logger.Warning("sing-box 订阅:本站节点「", name, "」(", scheme, ")的链接解析不了,没写进配置,检查这条线路的自定义地址: ", err)
+}
+
 // BuildSingBoxSub 生成 sing-box 客户端配置(JSON,?format=json):
 // SFA(Android)、SFI(iOS)、sing-box 桌面版都只认这种"远程配置",链接列表和 clash YAML 它们导不进去。
 // 节点与链接订阅同源(本站线路 + 外部节点的分享链接),外加 proxy 选择组 / auto 测速组、
 // TUN + 本地混合入站、DNS 与基础分流;字段按 sing-box 1.12+ 写法,不使用已废弃的 legacy 字段。
 func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, error) {
 	links := GenerateLinksFor(user, lines, opt.Entries, opt.LineNodes)
+	own := len(links) // 前面这些是本站线路的链接,后面是外部节点的
 	for _, e := range opt.External {
 		links = append(links, e.Links...)
 	}
@@ -68,11 +108,14 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 			}
 		}
 	}
-	for _, l := range links {
+	for i, l := range links {
 		p, err := upstream.ParseLink(l)
 		if err != nil {
 			if p = httpLink(l); p == nil {
-				continue // 认不出的链接跳过
+				if i < own {
+					warnBadOwnLink(l, err) // 本站线路生成的链接也解析不了:节点少了一个,要让管理员看见
+				}
+				continue // 外部节点里认不出的链接照旧跳过
 			}
 		}
 		tag := p.Name

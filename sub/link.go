@@ -141,7 +141,9 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 			if port == 0 {
 				port = line.Port
 			}
-			out = append(out, addr{server: c.Server, port: port, sni: c.SNI, remark: c.Remark, insecure: insecure})
+			// 保存时已规整(web.normLineAddrs);老数据里把 IPv6 写成 [v6] 的,这里再去一次方括号,
+			// 不然拼出 [[v6]]:端口,sing-box 订阅里这个节点直接解析失败
+			out = append(out, addr{server: model.BareHost(c.Server), port: port, sni: c.SNI, remark: c.Remark, insecure: insecure})
 		}
 		return out
 	}

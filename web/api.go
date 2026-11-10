@@ -588,6 +588,11 @@ func (s *Server) validateLine(line *model.Line) error {
 		return err
 	}
 	line.NodeFamily = family
+	addrs, err := normLineAddrs(line.Addrs)
+	if err != nil {
+		return err
+	}
+	line.Addrs = addrs
 	return nil
 }
 
