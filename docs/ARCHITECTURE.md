@@ -13,7 +13,7 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 | 多服务器,只管一台;用户/出站/路由/流量/日期全同步 | Hub/Agent:主机推快照、回收账本、集中判定 |
 | 入站按延迟自适应;clash 为主,Shadowrocket 多 | 订阅按服务器展开节点 + 每线路 url-test 组,客户端选延迟低的入口 |
 | 定期换机,一键还原全部状态 | 单 zip 备份(库 + 证书),上传即整机还原自动重启;换机向导 |
-| 单用户同时在线设备数、上下行限速 | 数据面 Limiter:按源 IP 并发计数(跨机并集)+ 令牌桶 |
+| 单用户同时在线设备数、上下行限速 | 数据面 Limiter:按源 IP 并发计数(IPv4 地址与 IPv6 /64 各自计数,跨机并集)+ 令牌桶 |
 | 角色开关:关=主,开=副 | 设置 `nodeMode` 一个布尔 |
 | 从旧面板备份无缝迁移 | importer:端口/凭据/面板路径/订阅 URL 全保留 |
 
@@ -91,7 +91,7 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 - **拉**:同一轮 `GET /api/agent/report` 拿到副机的单调账本、在线 IP、运行状态、证书剩余天数。网络部分做完就放开这台的闸,报告交给唯一的并账协程(每台只留最新一份)。主机按 `TrafficCursor` 只计增量:没变化的计数器不碰写锁,有变化的每 1000 个一笔短事务;计数器变小时,同名用户删了又建(游标记下的用户 id / 建号时间对不上)从 0 计,同一个用户变小按账本回退处理(游标对齐、这一次不计、告警)。增量写入用户与 `Stats`(resource=user 与 resource=node)。已删副机在途的报告整份丢弃。
 - **下线**:停用 / 删除副机时给它推空用户表;没送到的落库(`node_decommissions`),每轮重试直到它确认。
 - **判定只在主机**:副机 `jobs` 不执法。主机禁用用户 → 快照变化 → 5s 内推到副机 → 副机热换用户表踢线(连接与整条会话一起关)。面板的「踢下线」另走 `POST /api/agent/kick` 即时派发到各副机,不等快照。
-- **升级内核必须核对**:`core/protocol/usersess` 的会话登记靠 sing-quic 的 `qtls.ServerConfig` 扩展点(`ListenWithOptions` / `ListenEarlyWithOptions` / `ConfigureHTTP3` 对 TLS 配置做类型断言)接管 QUIC 监听,`usersess/quic.go` 里复制了 sing-quic 默认路径的 Transport 参数(hy2 无混淆时的 StatelessResetKey、有混淆时关版本协商包、`SetSingleUse`)。升 sing-box / sing-quic / quic-go 时逐项对照上游 `qtls` 与 `hysteria2/service.go`、`tuic/service.go`,参数变了这里要跟着改;`usersess/registry_test.go` 与 `M_UI_E2E=1` 的真实入站测试(`core/usersess_e2e_test.go`)都要过。
+- **升级内核必须核对**:`core/protocol/usersess` 的会话登记靠 sing-quic 的 `qtls.ServerConfig` 扩展点(`ListenWithOptions` / `ListenEarlyWithOptions` / `ConfigureHTTP3` 对 TLS 配置做类型断言)接管 QUIC 监听,`usersess/quic.go` 里复制了 sing-quic 默认路径的 Transport 参数(hy2 无混淆时的 StatelessResetKey、有混淆时关版本协商包、`SetSingleUse`)。升 sing-box / sing-quic / quic-go 时逐项对照上游 `qtls` 与 `hysteria2/service.go`、`tuic/service.go`,参数变了这里要跟着改;`usersess/registry_test.go` 与 `M_UI_E2E=1` 的真实入站测试(`core/usersess_e2e_test.go`)都要过。另有两处靠 sing-quic 的行为认出"到了但认证没过"(见 `core/protocol/arrival`):hysteria2 密码不对时把认证请求(`POST https://hysteria/auth`)交给伪装站点 —— 入站在伪装站点外面包了一层认它;tuic 认证失败 / 超时用 `CloseWithError(0, "")` 关连接 —— 会话登记表在连接结束时认"从没开过流、本端关的"。升级后 `core/arrival_e2e_test.go` 要过。
 - **老连接的设备数**:limiter 对空闲后恢复的 IP 重新执行设备上限;副机上报超过 300 秒没刷新的在线 IP 不再计入并集(失联副机的名单不能拿来拒新设备、断老连接)。
 - **设备数跨机**:主机把"其他机器上在线的 IP"下发给每台机器的 Limiter;本机计数 = 本机活跃 IP ∪ 外部 IP,同一 IP 切换入口不占新名额。
 - **失联**:>60s 拉不到报告告警一次,恢复再告警一次;副机离线期间主机照常工作,副机继续用最后一份配置服务用户(只是账本回收延后)。
@@ -131,7 +131,10 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 
 ## 9.5 诊断
 
-- 概览"最近入站连接":数据面的连接跟踪器在每次入站连接时记一笔(源 IP × 线路,带认证到的用户),不扫日志。客户端"连不上"先看它:没有客户端 IP = 包没到服务器(端口被封 / DNS 污染 / 客户端配置),有 IP 但不可用 = 协议/证书/密码。
+- 概览"最近入站连接":数据面的连接跟踪器在每次入站连接通过握手与认证、被路由时记一笔(源 IP × 线路,带认证到的用户),被设备数 / 代理设备池拒绝的也记并标出原因,不扫日志。"到了但没过握手 / 认证"另存一份(`core/protocol/arrival`):trojan / vless / vmess / anytls 的 TLS(含 REALITY)握手失败、协议认证失败,hysteria2 / tuic 的认证失败;连上就断、被重置、超时的不记(端口扫描、TCP 连通探测);独立上限 100 个来源、新来源按令牌桶限频,扫描刷不掉正常记录;只记,不改放行判定;副机随报告上报(`connFails`)。客户端"连不上"先看它:在通过认证的列表里 = 连上了;在"到了但没过"里 = 证书 / SNI / 密码不对;两处都没有 = 多半包没到服务器(安全组、防火墙、端口被封、客户端网络)。ws / grpc 等传输层里的 TLS 失败,以及 shadowsocks / socks / http 线路不记。
+- 大陆连通检测(`reach/`)按地址族选端口:订阅里走 IPv6 的线路不拿来测 IPv4 地址;有走 IPv6 的线路的服务器,同一轮再从境外支持 IPv6 的测点 TCP 连它订阅里的 IPv6 地址 + 第一条走 IPv6 的 TCP 线路端口(目标是 IPv6 地址时 Globalping 只派支持 IPv6 的测点)。不比对网卡:Azure 这类 1:1 NAT 的公网 IPv6 不在网卡上,入站却可用。UDP 线路测不了,注明抓包确认。
+- 入站监听 `::`(Go 对通配地址开 `IPV6_V6ONLY=0`,双栈,不受 `net.ipv6.bindv6only` 影响);没有 `/proc/net/if_inet6`(内核关了 IPv6)时改听 `0.0.0.0`,常规机器的配置逐字节不变。
+- 已知上游限制:hysteria2 开了混淆(salamander / gecko)时 UDP 套接字被包了一层,quic-go 拿不到 PKTINFO,多地址的 IPv6 主机上回包可能用错源地址。
 - 重载失败不再静默:最近一次重载的结果挂在 `/api/status`,失败时页面顶部常驻提示并可一键重试;副机的重载结果随报告回主机,服务器页标出。`/api/health`(只认本机回环)给升级脚本判断"线路有入站在跑"。
 - 防护:数据面默认拒绝用户访问私网地址(`allowPrivate` 可放行);订阅端口按来源 IP 令牌桶限流(`subRateLimit`,默认 120/分钟),对不上任何人的地址按 IP 聚合记一条访问日志,扫描器刷不爆表。
 - 上游巡检、副机状态、证书剩余天数、公网 IP 探测都在面板上可见;审计日志记录每一次改动的操作者。
