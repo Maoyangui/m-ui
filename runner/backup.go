@@ -46,7 +46,7 @@ type BackupFile struct {
 // CreateBackupFile 在备份目录生成一个备份并按 backupKeep 轮转,返回文件名。
 func (r *Runner) CreateBackupFile() (BackupFile, error) { return r.CreateBackupFileNamed("m-ui-") }
 
-// CreateBackupFileNamed 同 CreateBackupFile,文件名用指定前缀(降级前的分叉备份 fenced-、迁回前的 pre-handover-):
+// CreateBackupFileNamed 同 CreateBackupFile,文件名用指定前缀(原主机变为副机前的 former-master-、设为主机前的 before-set-master-):
 // 只有 m-ui- 开头的参与按份数轮转,别的留着给人核对。
 func (r *Runner) CreateBackupFileNamed(prefix string) (BackupFile, error) {
 	dir := r.BackupDir()
@@ -193,6 +193,9 @@ func (r *Runner) ScheduleRestart(delay time.Duration) {
 		return
 	}
 	go func() {
+		if r.ha != nil {
+			r.ha.PauseForRestart() // 主机计划内重启:先让备用暂停几分钟,别把这一两分钟当成失联
+		}
 		time.Sleep(delay)
 		logger.Info("正在重启 m-ui")
 		r.Stop()

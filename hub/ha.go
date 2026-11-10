@@ -29,6 +29,36 @@ type HAHooks interface {
 	NoteReply(n model.Node, r EpochReply)
 }
 
+// HAReport 副机随报告上报的容灾信息(开过容灾的副机才带;老主机不认这个字段,忽略)。
+type HAReport struct {
+	Epoch    uint64     `json:"epoch"`
+	Role     string     `json:"role,omitempty"`
+	Version  string     `json:"version,omitempty"`
+	Pub      string     `json:"pub,omitempty"`     // 备用公钥(X25519):主机首次见到时记住,之后变了就不再发副本
+	Replica  *HAReplica `json:"replica,omitempty"` // 手里那份副本
+	LeaseAgo int64      `json:"leaseAgo"`          // 距上次收到当前主机的请求多少秒
+	DiskFree int64      `json:"diskFree"`          // 数据目录所在盘的剩余字节(-1 = 读不到)
+	Peers    *HAPeers   `json:"peers,omitempty"`   // 和别的副机互通的情况(互相确认与投票要用)
+}
+
+// HAReplica 备用手里那份副本。
+type HAReplica struct {
+	Epoch      uint64 `json:"epoch"`
+	Seq        uint64 `json:"seq"`
+	At         int64  `json:"at"`   // 生成时间
+	Size       int64  `json:"size"` // 明文字节数
+	AsOf       int64  `json:"asOf"` // 主机确认它到这时为止仍是最新的
+	VerifiedAt int64  `json:"verifiedAt,omitempty"`
+	Err        string `json:"err,omitempty"` // 自检失败的原因
+}
+
+// HAPeers 副机之间面板端口互通的情况。
+type HAPeers struct {
+	OK    int   `json:"ok"`
+	Total int   `json:"total"`
+	At    int64 `json:"at"`
+}
+
 // EpochReply 一次请求里副机回的纪元信息。
 type EpochReply struct {
 	Aware       bool   // 副机认得纪元(响应带 X-HA-Node,或回了纪元判定)
@@ -38,6 +68,7 @@ type EpochReply struct {
 	Epoch       uint64 // 判定里副机认的纪元
 	MasterId    uint   // 判定里副机认的主机
 	SinceChange uint64
+	LeaseAgo    int64 // 副机距上次收到它认的那台主机的请求多少秒
 }
 
 // EpochError 副机按纪元规则拒绝了请求(409 + code)。不算"推送被拒":不退避,也不当作配置有问题。
@@ -53,9 +84,9 @@ type EpochError struct {
 func (e *EpochError) Error() string {
 	switch e.Code {
 	case "stale_epoch":
-		return fmt.Errorf("这台副机已跟随更新的主机(纪元 %d,主机 #%d):本机可能已被接管", e.Epoch, e.MasterId).Error()
+		return fmt.Errorf("这台副机已跟随纪元更高的主机(纪元 %d,主机 #%d):本机可能已经不是主机了", e.Epoch, e.MasterId).Error()
 	case "still_following":
-		return fmt.Errorf("这台副机还跟随原来的主机(纪元 %d):等它的租约到期,或迁回交接完成", e.Epoch).Error()
+		return fmt.Errorf("这台副机还跟随原来的主机(纪元 %d):等它的租约到期,或设为主机的交接完成", e.Epoch).Error()
 	}
 	return fmt.Errorf("这台副机还没切到本机的纪元(它在纪元 %d):下一轮推送容灾状态后会切过来", e.Epoch).Error()
 }
@@ -101,9 +132,10 @@ func (h *Hub) noteReply(n model.Node, resp *http.Response, body []byte, err erro
 				Epoch       uint64 `json:"epoch"`
 				MasterId    uint   `json:"masterId"`
 				SinceChange uint64 `json:"sinceChange"`
+				LeaseAgo    int64  `json:"leaseAgo"`
 			}
 			if json.Unmarshal(body, &rej) == nil && rej.Code != "" {
-				r.Aware, r.Code, r.Epoch, r.MasterId, r.SinceChange = true, rej.Code, rej.Epoch, rej.MasterId, rej.SinceChange
+				r.Aware, r.Code, r.Epoch, r.MasterId, r.SinceChange, r.LeaseAgo = true, rej.Code, rej.Epoch, rej.MasterId, rej.SinceChange, rej.LeaseAgo
 				err = &EpochError{Code: rej.Code, Epoch: rej.Epoch, MasterId: rej.MasterId, SinceChange: rej.SinceChange, Msg: rej.Error}
 			}
 		}
@@ -165,14 +197,14 @@ type haPushed struct {
 	legacy bool
 }
 
-// ForgetHAState 下一轮重推容灾状态(纪元、候选名单变了时容灾服务调用)。
+// ForgetHAState 下一轮重推容灾状态(纪元、备用名单变了时容灾服务调用)。
 func (h *Hub) ForgetHAState() {
 	h.mu.Lock()
 	h.haPushed = nil
 	h.mu.Unlock()
 }
 
-// Send 给副机发一个请求(带令牌、纪元请求头、证书指纹校验),给容灾推副本、推状态、交接用。
+// Send 给副机发一个请求(带令牌、纪元请求头、证书指纹校验),给容灾推副本、推状态、设为主机用。
 // body 可为 nil;size 为请求体字节数(未知填 -1);out 非 nil 时把 200 的 JSON 响应解进去。
 func (h *Hub) Send(n model.Node, method, path string, body io.Reader, size int64, hdr http.Header, timeout time.Duration, out interface{}) error {
 	if timeout <= 0 {

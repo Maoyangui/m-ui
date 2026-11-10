@@ -687,6 +687,8 @@ type Report struct {
 	KickPending bool   `json:"kickPending,omitempty"` // 还有旧凭据上的连接没踢完(下次应用时接着踢)
 	ApplyGzip   bool   `json:"applyGzip,omitempty"`   // 收得了 gzip 压缩的快照;不报的照旧发不压缩的
 	LedgerFails int    `json:"ledgerFails,omitempty"` // 流量记账连续失败的轮数
+	// HA 主机容灾的信息(开过容灾的副机才带)
+	HA *HAReport `json:"ha,omitempty"`
 }
 
 // saveNodeCerts 记下副机报上来的证书清单:线路编辑框与订阅的 SNI 用它。老版本副机不报(nil)就不动;
@@ -790,13 +792,15 @@ type NodeStatus struct {
 	// LedgerRegressAt / LedgerRegressUsers 最近一次发现这台副机的账本回退(计数比上次小)的时间与人数
 	LedgerRegressAt    int64 `json:"ledgerRegressAt,omitempty"`
 	LedgerRegressUsers int   `json:"ledgerRegressUsers,omitempty"`
-	applyGzip          bool  // 副机报过收得了 gzip 压缩的快照
-	alerted            bool
-	failSince          int64 // 这一轮连续失败从什么时候开始;0 = 正常
-	unsyncedSince      int64 // 在线但配置没同步上从什么时候开始;0 = 已同步或不在线
-	unsyncedAlerted    bool
-	conns              []RecentConn
-	connFails          []RecentConn
+	// HA 副机最近一份报告里的容灾信息(备用公钥、副本、租约……;没开容灾为空)
+	HA              *HAReport `json:"ha,omitempty"`
+	applyGzip       bool      // 副机报过收得了 gzip 压缩的快照
+	alerted         bool
+	failSince       int64 // 这一轮连续失败从什么时候开始;0 = 正常
+	unsyncedSince   int64 // 在线但配置没同步上从什么时候开始;0 = 已同步或不在线
+	unsyncedAlerted bool
+	conns           []RecentConn
+	connFails       []RecentConn
 }
 
 // RemoteConns 汇总所有在线副机最近上报的入站连接,标注服务器名。
@@ -1621,7 +1625,7 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 	}
 	if rep != nil {
 		st.Version, st.Hostname, st.CoreRunning, st.Uptime, st.Revision, st.CertDays = rep.Version, rep.Hostname, rep.CoreRunning, rep.Uptime, rep.Revision, rep.CertDays
-		st.LedgerFails, st.applyGzip = rep.LedgerFails, rep.ApplyGzip
+		st.LedgerFails, st.applyGzip, st.HA = rep.LedgerFails, rep.ApplyGzip, rep.HA
 		h.saveNodeCerts(n, rep.Certs)
 		h.saveNodeServicePorts(n, rep.ServicePorts)
 		// hubRevision 在副机 ApplySnapshot 的事务里就写了,数据面有没有真的应用成功要看 ReloadPending。

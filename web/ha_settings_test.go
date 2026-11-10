@@ -17,7 +17,7 @@ import (
 	"github.com/Maoyangui/m-ui/runner"
 )
 
-// 容灾的设置分类(设计 3.2):本机设置不进副本、接管时保留候选自己的;其余全局,随副本复制。
+// 容灾的设置分类(设计 3.2):本机设置不进副本、接任时保留新主机自己的;其余全局,随副本复制。
 // 扫一遍源码里所有读写过的设置键,每个都必须归了类 —— 新加设置时就得想清楚它是哪边的。
 func TestEverySettingIsClassified(t *testing.T) {
 	re := regexp.MustCompile(`(?:[sS]etting|settingInt|SetSetting|settingOr\(in,)\(\s*"([A-Za-z][A-Za-z0-9]*)"`)
@@ -84,14 +84,14 @@ func TestEverySettingIsClassified(t *testing.T) {
 			t.Errorf("%s 应是本机设置", k)
 		}
 	}
-	for _, k := range []string{"apiToken", "totpSecret", "tgToken", hub.LedgerEpochSetting(3), ha.KeyMode, ha.KeyPubPrefix + "2"} {
+	for _, k := range []string{"apiToken", "totpSecret", "tgToken", hub.LedgerEpochSetting(3), ha.KeyMode, ha.KeyPubPrefix + "2", ha.KeyDnsToken} {
 		if !ha.IsGlobal(k) {
 			t.Errorf("%s 应是全局设置", k)
 		}
 	}
 }
 
-// GET /api/settings 不发任何 ha 开头的键:签名私钥、集群密钥、迁回码哈希都在里面。
+// GET /api/settings 不发任何 ha 开头的键:签名私钥、集群密钥、Cloudflare 令牌都在里面。
 func TestSettingsHideHAKeys(t *testing.T) {
 	run, err := runner.New(filepath.Join(t.TempDir(), "m.db"))
 	if err != nil {
@@ -99,7 +99,7 @@ func TestSettingsHideHAKeys(t *testing.T) {
 	}
 	defer run.Stop()
 	s := NewServer(run)
-	if err := run.SetSettings(map[string]string{ha.KeySignKey: "secret-seed", ha.KeyClusterKey: "k", ha.KeyExportCode: "h", "timezone": "Asia/Shanghai"}); err != nil {
+	if err := run.SetSettings(map[string]string{ha.KeySignKey: "secret-seed", ha.KeyClusterKey: "k", ha.KeyDnsToken: "cf-secret", "timezone": "Asia/Shanghai"}); err != nil {
 		t.Fatal(err)
 	}
 	tok := s.newSession("admin")
@@ -121,7 +121,7 @@ func TestSettingsHideHAKeys(t *testing.T) {
 	}
 }
 
-// agent 鉴权顺序:令牌 → 纪元 → 副机模式。临时主机保留了副机令牌,旧主机来请求收到 409 stale_epoch 而不是 403;
+// agent 鉴权顺序:令牌 → 纪元 → 副机模式。接任后的主机保留了副机令牌,原主机来请求收到 409 stale_epoch 而不是 403;
 // 没开过容灾的主机照旧 403;副机响应头带本机纪元(只在用到纪元时)。
 func TestAgentAuthEpochOrder(t *testing.T) {
 	run, err := runner.New(filepath.Join(t.TempDir(), "t.db"))
@@ -151,8 +151,8 @@ func TestAgentAuthEpochOrder(t *testing.T) {
 	if code, body, h := call("x", 0, 0); code != http.StatusForbidden || h != "" {
 		t.Fatalf("普通主机应 403 且不带纪元头: %d %s %q", code, body, h)
 	}
-	// 临时主机:纪元 2,保留了当副机时的令牌
-	if err := run.SetSettings(map[string]string{"nodeToken": "tok", ha.KeyEpoch: "2", ha.KeyRole: ha.RoleTemp}); err != nil {
+	// 接任后的主机:纪元 2,保留了当副机时的令牌
+	if err := run.SetSettings(map[string]string{"nodeToken": "tok", ha.KeyEpoch: "2"}); err != nil {
 		t.Fatal(err)
 	}
 	if code, body, _ := call("bad", 1, 1); code != http.StatusUnauthorized {
@@ -160,7 +160,7 @@ func TestAgentAuthEpochOrder(t *testing.T) {
 	}
 	code, body, h := call("tok", 1, 1)
 	if code != http.StatusConflict || !strings.Contains(body, ha.CodeStale) || h != "2" {
-		t.Fatalf("旧主机带纪元 1 来请求临时主机应 409 stale_epoch: %d %s %q", code, body, h)
+		t.Fatalf("原主机带纪元 1 来请求接任后的主机应 409 stale_epoch: %d %s %q", code, body, h)
 	}
 	// 切成副机:纪元 0 的老主机(不带请求头)来拉报告 → stale;纪元相同但主机 id 对不上 → stale
 	if err := run.SetSettings(map[string]string{"nodeMode": "true", ha.KeyRole: "", ha.KeyMasterId: "4"}); err != nil {

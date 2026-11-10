@@ -1,16 +1,19 @@
 package ha
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
@@ -29,25 +32,24 @@ type State struct {
 	MasterPub   string       `json:"masterPub"`
 	Self        uint         `json:"self"` // 接收方在服务器表里的 id
 	Mode        string       `json:"mode"`
-	Candidates  []uint       `json:"candidates"`  // 候选,按名次
+	Standbys    []uint       `json:"standbys"`    // 备用,按接任顺序
 	ClusterSize int          `json:"clusterSize"` // 启用的服务器总数(含主机)
 	ConfirmMin  int          `json:"confirmMin"`
 	AutoMin     int          `json:"autoMin"`
 	RankStepMin int          `json:"rankStepMin"`
 	ReplicaMin  int          `json:"replicaMin"`
-	PauseUntil  int64        `json:"pauseUntil,omitempty"` // 这之前候选不得发起接管(手动暂停、升级前、迁回冻结)
+	PauseUntil  int64        `json:"pauseUntil,omitempty"` // 这之前备用不得接任(手动暂停、升级与重启前、设为主机进行中)
 	Witness     bool         `json:"witness"`
 	Probe       *Probe       `json:"probe,omitempty"`      // 见证测哪里:主机的公网 IP 与端口
 	ClusterKey  string       `json:"clusterKey,omitempty"` // 副机之间互相确认的 HMAC 密钥
-	Recovery    bool         `json:"recovery,omitempty"`
-	SinceChange uint64       `json:"sinceChange,omitempty"` // 这个纪元接管所用副本的最大审计 id(副机回 stale 时带给旧主机)
-	Handover    *Grant       `json:"handover,omitempty"`    // 迁回交接:纪元 Epoch 的新主机是 To
-	Notify      string       `json:"notify,omitempty"`      // 只发候选:用候选公钥密封的通知设置
-	Replica     *ReplicaMark `json:"replica,omitempty"`     // 只发候选:主机确认它手里的副本到什么时候为止仍是最新的
+	SinceChange uint64       `json:"sinceChange,omitempty"`
+	Handover    *Grant       `json:"handover,omitempty"` // 设为主机的交接:纪元 Epoch 的主机是 To
+	Notify      string       `json:"notify,omitempty"`   // 只发备用:用备用公钥密封的通知设置
+	Replica     *ReplicaMark `json:"replica,omitempty"`  // 只发备用:主机确认它手里的副本到什么时候为止仍是最新的
 	Rev         string       `json:"rev"`
 }
 
-// ReplicaMark 候选手里序号为 Seq 的副本,内容截至 At 都没变(主机这之后生成的副本和它一样,就不重发了)。
+// ReplicaMark 备用手里序号为 Seq 的副本,内容截至 At 都没变(主机这之后生成的副本和它一样,就不重发了)。
 type ReplicaMark struct {
 	Seq uint64 `json:"seq"`
 	At  int64  `json:"at"`
@@ -60,12 +62,12 @@ type Probe struct {
 	Ports []int  `json:"ports,omitempty"`
 }
 
-// notifyKeys 候选发通知要用的设置(主机只发给候选,密封在候选公钥下)。
+// notifyKeys 备用发通知要用的设置(主机只发给备用,密封在备用公钥下)。
 var notifyKeys = []string{"tgEnabled", "tgToken", "tgChatId", "tgProxy", "tgApiBase", "webhookUrl", "webhookSecret"}
 
 // ---- 主机侧 ----
 
-// signKey 本机签名密钥:没有就生成(开着容灾的主机、临时主机才会用到)。返回公钥。
+// signKey 本机签名密钥:没有就生成。返回公钥。
 func (s *Service) signKey() (string, error) {
 	seed := s.setting(KeySignKey)
 	if k, err := SignKey(seed); err == nil {
@@ -126,9 +128,19 @@ func (s *Service) freezeUntil() int64 {
 	return f
 }
 
-// Frozen 临时主机正在迁回:管理员、代理、外部 API、Telegram 机器人的写操作一律暂停。
+// Frozen 正在设为主机:管理员、代理、外部 API、Telegram 机器人的写操作一律暂停(超时自动解冻)。
 func (s *Service) Frozen() bool {
 	return !s.IsNode() && s.freezeUntil() > s.now().Unix()
+}
+
+// FrozenText 写操作被暂停时给出的说明。
+func (s *Service) FrozenText() string {
+	sw := s.switchState()
+	name := sw.TargetName
+	if name == "" {
+		name = "另一台服务器"
+	}
+	return fmt.Errorf("正在把主机换到 %s,写操作暂停(最多几分钟,完成或失败后自动恢复)", name).Error()
 }
 
 // probe 见证要测的地址:主机的公网 IP、面板与订阅端口、主机上第一条 TCP 线路的端口。
@@ -175,21 +187,24 @@ func (s *Service) baseState() (State, error) {
 	cfg := s.Config()
 	st := State{
 		Epoch: s.Epoch(), MasterId: s.SelfId(), MasterName: s.selfName(), MasterPub: pub, Mode: cfg.Mode,
-		Candidates: s.rep.candidateIds(), ClusterSize: s.clusterSize(),
+		Standbys: s.rep.standbyIds(), ClusterSize: s.clusterSize(),
 		ConfirmMin: cfg.ConfirmMinutes, AutoMin: cfg.AutoMinutes, RankStepMin: cfg.RankStepMinutes, ReplicaMin: cfg.ReplicaMinutes,
-		PauseUntil: s.pauseUntil(), Witness: cfg.Witness, Recovery: cfg.Recovery,
+		PauseUntil: s.pauseUntil(), Witness: cfg.Witness,
 	}
-	if cfg.Mode != ModeOff {
+	if cfg.Mode == ModeOff {
+		st.Standbys = []uint{}
+	} else {
 		st.Probe = s.probe()
 		st.ClusterKey = s.clusterKey()
 	}
-	var pf PromotedFrom
-	if s.getJSON(KeyPromotedFrom, &pf) {
-		st.SinceChange = pf.MaxChangeId
+	var b Became
+	if s.getJSON(KeyBecame, &b) && b.Epoch == st.Epoch {
+		st.SinceChange = b.MaxChangeId
 	}
-	var g Grant
-	if s.getJSON(KeyHandoverGrant, &g) && g.Epoch > st.Epoch {
-		st.Handover = &g
+	if g := s.sw.grant(); g != nil && g.Epoch > st.Epoch {
+		st.Handover = g
+	} else if g := s.pendingGrant(); g != nil && g.Epoch > st.Epoch {
+		st.Handover = g
 	}
 	return st, nil
 }
@@ -214,7 +229,7 @@ func (s *Service) baseCached() (State, error) {
 	return st, nil
 }
 
-// invalidate 配置、名单、纪元变了:下一轮重新组装状态,并让 hub 尽快重推。
+// invalidate 设置、名单、纪元变了:下一轮重新组装状态,并让 hub 尽快重推。
 func (s *Service) invalidate() {
 	s.mu.Lock()
 	s.base = nil
@@ -235,7 +250,7 @@ func (s *Service) clusterSize() int {
 }
 
 // StateFor 这一轮给副机 n 的容灾状态与它的修订号(给 hub 用;rev 为空 = 不推)。
-// 本机纪元为 0(没开过容灾)时一律不推:主副机之间的请求和以前一字不差。
+// 本机纪元为 0(没开过容灾、没换过主机)时一律不推:主副机之间的请求和以前一字不差。
 func (s *Service) StateFor(n model.Node) ([]byte, string) {
 	if s.Epoch() == 0 || s.IsNode() {
 		return nil, ""
@@ -247,7 +262,7 @@ func (s *Service) StateFor(n model.Node) ([]byte, string) {
 	}
 	st.Self = n.Id
 	plainSig := ""
-	if s.rep.rankOf(n.Id) > 0 && st.Mode != ModeOff {
+	if st.Mode != ModeOff && containsId(st.Standbys, n.Id) {
 		if pub := s.setting(KeyPubPrefix + strconv.FormatUint(uint64(n.Id), 10)); pub != "" {
 			st.Notify, plainSig = s.notifyBlock(pub)
 		}
@@ -255,9 +270,6 @@ func (s *Service) StateFor(n model.Node) ([]byte, string) {
 	}
 	st.Rev = stateRev(st, plainSig)
 	b, _ := json.Marshal(st)
-	s.mu.Lock()
-	s.stateRev[n.Id] = st.Rev
-	s.mu.Unlock()
 	return b, st.Rev
 }
 
@@ -269,7 +281,7 @@ func stateRev(st State, notifySig string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// notifyBlock 给候选的通知块(密封在它的公钥下)与明文指纹;明文没变就用缓存的密文。
+// notifyBlock 给备用的通知块(密封在它的公钥下)与明文指纹;明文没变就用缓存的密文。
 func (s *Service) notifyBlock(pub string) (string, string) {
 	m := map[string]string{}
 	for _, k := range notifyKeys {
@@ -302,13 +314,71 @@ func (s *Service) notifyBlock(pub string) (string, string) {
 	return sealed, sig
 }
 
+// pushState 立刻给一台副机推一份容灾状态(不等 hub 的下一轮)。
+func (s *Service) pushState(n model.Node, timeout time.Duration) error {
+	if s.d.Hub == nil {
+		return errors.New("本机容灾服务未初始化")
+	}
+	body, rev := s.StateFor(n)
+	if rev == "" {
+		return nil
+	}
+	return s.d.Hub.Send(n, http.MethodPost, "ha/state", bytes.NewReader(body), int64(len(body)), nil, timeout, nil)
+}
+
+// remoteNodes 启用的远端副机(有地址和令牌的)。
+func (s *Service) remoteNodes() []model.Node {
+	var nodes []model.Node
+	s.d.DB.Where("enabled = ? AND is_local = ? AND COALESCE(api_url, '') <> '' AND COALESCE(token, '') <> ''", true, false).
+		Order("sort asc, id asc").Find(&nodes)
+	return nodes
+}
+
+// pushAll 立刻给一组副机推容灾状态(并发、尽力而为),返回推成功的台数。
+func (s *Service) pushAll(nodes []model.Node, timeout time.Duration) int {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	ok := 0
+	for _, n := range nodes {
+		wg.Add(1)
+		go func(n model.Node) {
+			defer wg.Done()
+			if err := s.pushState(n, timeout); err == nil {
+				mu.Lock()
+				ok++
+				mu.Unlock()
+			}
+		}(n)
+	}
+	wg.Wait()
+	return ok
+}
+
+// pushStandbys 立刻把状态推给备用(暂停、恢复时;重启就在眼前,等不到 hub 的下一轮)。
+func (s *Service) pushStandbys(timeout time.Duration) {
+	if s.Epoch() == 0 || s.IsNode() {
+		return
+	}
+	ids := s.rep.standbyIds()
+	var list []model.Node
+	for _, n := range s.remoteNodes() {
+		if containsId(ids, n.Id) {
+			list = append(list, n)
+		}
+	}
+	s.pushAll(list, timeout)
+}
+
+// pushStandbysSoon 同上,在后台做(界面上点了暂停不用等)。
+func (s *Service) pushStandbysSoon() { go s.pushStandbys(10 * time.Second) }
+
 // ---- 副机侧 ----
 
 // canAdopt 只有这两个动作能把副机的纪元升上去:其余动作(拉报告、踢线、设备租约……)都得等它先切过来。
 func canAdopt(action string) bool { return action == "apply" || action == "ha/state" }
 
-// CheckAgent 副机按纪元规则判定一个令牌已经验过的请求(agent 鉴权里调用)。返回 nil 放行;否则调用方回 409 和这个正文。
-// 本机是主机(含临时主机)时也会判:被接管的旧主机来请求,收到的是 409 stale_epoch 而不是 403,它据此降级。
+// CheckAgent 按纪元规则判定一个令牌已经验过的请求(agent 鉴权里调用)。返回 nil 放行;否则调用方回 409 和这个正文。
+// 本机是主机时也会判:原主机回来后带着旧纪元来请求,收到的是 409 stale_epoch 而不是 403,它据此变为副机。
 func (s *Service) CheckAgent(h http.Header, action string) *Reject {
 	e, m := Header(h)
 	L := s.Epoch()
@@ -316,7 +386,7 @@ func (s *Service) CheckAgent(h http.Header, action string) *Reject {
 		return nil
 	}
 	reject := func(code string) *Reject {
-		r := &Reject{Error: RejectText(code), Code: code, Epoch: L}
+		r := &Reject{Error: RejectText(code), Code: code, Epoch: L, LeaseAgo: int64(s.LeaseAgo() / time.Second)}
 		var st State
 		if s.getJSON(KeyState, &st) {
 			r.SinceChange = st.SinceChange
@@ -324,9 +394,9 @@ func (s *Service) CheckAgent(h http.Header, action string) *Reject {
 		r.MasterId, _ = s.masterId()
 		if !s.IsNode() {
 			r.MasterId = s.SelfId()
-			var pf PromotedFrom
-			if s.getJSON(KeyPromotedFrom, &pf) {
-				r.SinceChange = pf.MaxChangeId
+			var b Became
+			if s.getJSON(KeyBecame, &b) && b.Epoch == L {
+				r.SinceChange = b.MaxChangeId
 			}
 		}
 		return r
@@ -336,12 +406,12 @@ func (s *Service) CheckAgent(h http.Header, action string) *Reject {
 		case e < L, e == L && m != s.SelfId():
 			return reject(CodeStale)
 		case e > L:
-			return reject(CodeFollowing) // 本机还是主机:不会因为别人推送就让位(迁回要走提交)
+			return reject(CodeFollowing) // 本机还是主机:不会因为别人推送就让位(换主机要走设为主机)
 		}
 		return nil
 	}
 	mid, _ := s.masterId()
-	v := NodeView{Epoch: L, MasterId: mid, Fenced: s.setting(KeyRole) == RoleFenced}
+	v := NodeView{Epoch: L, MasterId: mid, Demoted: s.setting(KeyRole) == RoleDemoted}
 	s.mu.Lock()
 	v.LastContact = s.lastContact
 	s.mu.Unlock()
@@ -392,6 +462,7 @@ func (s *Service) LeaseAgo() time.Duration {
 // adopt 副机切到更高的纪元:同一事务里写新纪元、新主机,快照序号基线清零(新主机的序号不和旧主机的比)。
 func (s *Service) adopt(e uint64, m uint) error {
 	old := s.Epoch()
+	wasDemoted := false
 	err := s.d.DB.Transaction(func(tx *gorm.DB) error {
 		values := map[string]string{
 			KeyEpoch: strconv.FormatUint(e, 10), KeyMasterId: strconv.FormatUint(uint64(m), 10),
@@ -399,8 +470,9 @@ func (s *Service) adopt(e uint64, m uint) error {
 		}
 		var role string
 		tx.Raw("SELECT value FROM settings WHERE key = ?", KeyRole).Scan(&role)
-		if role == RoleFenced {
-			values[KeyRole] = "" // 已降级的原主机作为副机加入了新主机:横幅撤掉,降级记录(分叉改动)留着
+		if role == RoleDemoted {
+			wasDemoted = true
+			values[KeyRole] = "" // 回来的原主机已经被新主机接上:是普通副机了(变为副机的记录留着)
 		}
 		var g Grant
 		var raw string
@@ -416,6 +488,9 @@ func (s *Service) adopt(e uint64, m uint) error {
 		s.lastContact = s.now()
 		s.mu.Unlock()
 		s.eng.adopted(e, m)
+		if wasDemoted {
+			s.addNotice(Notice{Kind: "joined", At: s.now().Unix()})
+		}
 	}
 	return err
 }
@@ -431,11 +506,11 @@ func (s *Service) ApplyState(st State) error {
 	}
 	notify, key, handover := st.Notify, st.ClusterKey, st.Handover
 	st.Notify, st.ClusterKey = "", ""
-	values := map[string]string{KeyState: mustJSON(st), KeyMasterPub: st.MasterPub, KeyNotify: notify, KeyClusterKeyLocal: key}
+	values := map[string]string{KeyState: mustJSON(st), KeyMasterPub: st.MasterPub, KeyNotify: notify, KeyPeerKey: key}
 	if handover != nil && handover.Epoch > L {
 		handover.At = s.now().Unix()
 		values[KeyGrant] = mustJSON(handover)
-		logger.Info("容灾:收到迁回交接标记,纪元 ", handover.Epoch, " 的主机是服务器 #", handover.To)
+		logger.Info("容灾:收到交接标记,纪元 ", handover.Epoch, " 的主机是服务器 #", handover.To)
 	}
 	if err := s.set(values); err != nil {
 		return err
@@ -443,7 +518,7 @@ func (s *Service) ApplyState(st State) error {
 	if st.Replica != nil {
 		s.noteReplicaMark(*st.Replica)
 	}
-	if !containsId(st.Candidates, st.Self) || st.Mode == ModeOff {
+	if !containsId(st.Standbys, st.Self) || st.Mode == ModeOff {
 		if err := s.DropReplica(); err != nil {
 			logger.Warning("删除本机副本失败: ", err)
 		}
@@ -458,9 +533,9 @@ func (s *Service) NodeState() (State, bool) {
 	return st, ok
 }
 
-// rank 本机在候选名单里的名次(1 起;不是候选为 0)。
+// rank 本机在备用名单里的名次(1 起;不是备用为 0)。
 func (st State) rank() int {
-	for i, id := range st.Candidates {
+	for i, id := range st.Standbys {
 		if id == st.Self {
 			return i + 1
 		}

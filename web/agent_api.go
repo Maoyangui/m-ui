@@ -113,8 +113,14 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentUpstreamCheck)(w, r)
 	case "outbound-test": // 主机让本机实测一个临时出站(外部订阅展开后的逐台测速),不落库
 		s.agentAuth(s.handleAgentOutboundTest)(w, r)
-	case "ha/state": // 主机推来的容灾状态(纪元、候选名单、暂停、交接标记……)
+	case "ha/state": // 主机推来的容灾状态(纪元、备用名单、暂停、交接标记……)
 		s.agentAuth(s.handleAgentHAState)(w, r)
+	case "ha/replica": // 备用:收下主机推来的加密副本
+		s.agentAuth(s.handleAgentHAReplica)(w, r)
+	case "ha/drop": // 不再是备用:删掉手里的副本
+		s.agentAuth(s.handleAgentHADrop)(w, r)
+	case "ha/prepare", "ha/handover", "ha/commit", "ha/abort", "ha/incoming": // 本机被设为主机的各步
+		s.agentAuth(s.handleAgentHASwitch)(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -473,6 +479,9 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	if seq, err := strconv.ParseUint(s.setting("hubSnapshotSequence"), 10, 64); err == nil {
 		rep.Sequence = seq
 	}
+	if h := s.haSvc(); h != nil {
+		rep.HA = h.Report() // 版本、磁盘、角色;进过纪元的还有备用公钥、手里的副本、租约
+	}
 	rep.OnlineLinesByIP = s.run.OnlineIPLines()
 	rep.Groups = s.run.GroupState()
 	if rl := s.run.ReloadStatus(); rl.At > 0 {
@@ -633,4 +642,107 @@ func (s *Server) handleAgentHAState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// handleAgentHAReplica 备用收下主机推来的副本(只有一个写入方,写独立文件,不碰本机库)。
+func (s *Server) handleAgentHAReplica(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	h := s.haSvc()
+	if h == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
+		return
+	}
+	seq, err := h.ReceiveReplica(http.MaxBytesReader(w, r.Body, ha.MaxReplica+(1<<20)))
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "seq": seq})
+}
+
+// handleAgentHADrop 主机说本机不再是备用:删掉手里的副本。
+func (s *Server) handleAgentHADrop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	h := s.haSvc()
+	if h == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
+		return
+	}
+	if err := h.DropReplica(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// handleAgentHASwitch 本机被设为主机的各步(令牌鉴权 + 纪元规则已在 agentAuth 里过了):
+//
+//	ha/prepare   给出一次性公钥,检查能不能接手
+//	ha/handover  收整库数据(用那把一次性公钥加密的),组好新库暂存
+//	ha/commit    提交:下次启动换上新库,马上重启
+//	ha/abort     原主机说不做了:丢掉暂存
+//	ha/incoming  暂存到了哪一步(原主机提交没回话时来问)
+func (s *Server) handleAgentHASwitch(w http.ResponseWriter, r *http.Request) {
+	h := s.haSvc()
+	if h == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
+		return
+	}
+	action := strings.TrimPrefix(r.URL.Path, innerBase+"api/agent/ha/")
+	if action == "incoming" {
+		writeJSON(w, http.StatusOK, map[string]string{"stage": h.IncomingStage()})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	var nonce struct {
+		Nonce string `json:"nonce"`
+	}
+	switch action {
+	case "prepare":
+		var req ha.PrepareRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+			badRequest(w, err)
+			return
+		}
+		rep, err := h.Prepare(req)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, rep)
+	case "handover":
+		st, err := h.ReceiveBundle(http.MaxBytesReader(w, r.Body, ha.MaxBundle+(1<<20)))
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "users": st.Users})
+	case "commit", "abort":
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&nonce); err != nil {
+			badRequest(w, err)
+			return
+		}
+		var err error
+		if action == "commit" {
+			err = h.Commit(nonce.Nonce)
+		} else {
+			err = h.Abort(nonce.Nonce)
+		}
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+	default:
+		http.NotFound(w, r)
+	}
 }

@@ -109,6 +109,10 @@ func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) publicAPI(w http.ResponseWriter, r *http.Request, sc apiScope) {
+	if frozen, msg := s.haFrozen(r); frozen { // 正在设为主机:写操作暂停
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+		return
+	}
 	full := strings.TrimSuffix(r.URL.Path, "/")
 	idx := strings.LastIndex(full, "/v1/")
 	if idx < 0 {

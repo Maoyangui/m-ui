@@ -179,6 +179,10 @@ func (s *Server) rauth(next http.HandlerFunc) http.HandlerFunc {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 代理面板唯一的上传是落地页 logo(图片 ≤ 64 KB,接口自己再限 128 KB)
 		}
+		if frozen, msg := s.haFrozen(r); frozen { // 正在设为主机:写操作暂停
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+			return
+		}
 		if sess.pending && !strings.HasSuffix(r.URL.Path, "/status") && !strings.HasSuffix(r.URL.Path, "/self/password") {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "请先设置密码"})
 			return

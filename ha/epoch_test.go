@@ -38,7 +38,7 @@ func TestDecide(t *testing.T) {
 		{"票投给了别人", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Vote: &Vote{Epoch: 2, Candidate: 6}}, 2, 5, true, CodeFollowing, false},
 		{"有交接标记", NodeView{Epoch: 2, MasterId: 5, LastContact: fresh, Grant: &Grant{Epoch: 3, To: 1}}, 3, 1, true, "", true},
 		{"交接标记是给别人的", NodeView{Epoch: 2, MasterId: 5, LastContact: fresh, Grant: &Grant{Epoch: 3, To: 7}}, 3, 1, true, CodeFollowing, false},
-		{"已降级", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Fenced: true}, 2, 5, true, "", true},
+		{"已降级", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Demoted: true}, 2, 5, true, "", true},
 		{"本机还没进过容灾", NodeView{LastContact: fresh}, 1, 1, true, "", true},
 		{"本机还没进过容灾但动作不能升", NodeView{LastContact: fresh}, 1, 1, false, CodeNotAdopted, false},
 	}
@@ -142,9 +142,9 @@ func TestCheckAgentNode(t *testing.T) {
 	}
 }
 
-// 临时主机(不是副机,但保留了副机令牌)对旧主机回 stale,对更高纪元回 still_following(不会因推送让位)。
+// 接任后的主机(不是副机,但保留了副机令牌)对原主机回 stale,对更高纪元回 still_following(不会因推送让位)。
 func TestCheckAgentMaster(t *testing.T) {
-	s := testService(t, false, map[string]string{KeyEpoch: "2", KeyRole: RoleTemp})
+	s := testService(t, false, map[string]string{KeyEpoch: "2"})
 	s.d.DB.Create(&model.Node{Name: "TW", IsLocal: true, Enabled: true})
 	if rej := s.CheckAgent(hdr(1, 1), "report"); rej == nil || rej.Code != CodeStale || rej.Epoch != 2 {
 		t.Fatalf("旧主机来请求应 409 stale: %+v", rej)
@@ -157,44 +157,44 @@ func TestCheckAgentMaster(t *testing.T) {
 	}
 }
 
-// 已降级的原主机作为副机:接受任何更高的纪元,切过去后横幅撤掉、降级记录留着。
-func TestCheckAgentFenced(t *testing.T) {
-	s := testService(t, true, map[string]string{KeyEpoch: "1", KeyMasterId: "1", KeyRole: RoleFenced, KeyFencedBy: `{"epoch":2}`})
+// 回来后变成副机的原主机:接受任何更高的纪元,切过去后角色清掉、变为副机的记录留着。
+func TestCheckAgentDemoted(t *testing.T) {
+	s := testService(t, true, map[string]string{KeyEpoch: "1", KeyMasterId: "1", KeyRole: RoleDemoted, KeyDemoted: `{"epoch":2}`})
 	if rej := s.CheckAgent(hdr(3, 7), "ha/state"); rej != nil {
 		t.Fatalf("已降级的机器应接受更高纪元: %+v", rej)
 	}
-	if setting(s.d.DB, KeyRole) != "" || setting(s.d.DB, KeyFencedBy) == "" {
-		t.Fatal("切到新主机后角色清掉、降级记录保留")
+	if setting(s.d.DB, KeyRole) != "" || setting(s.d.DB, KeyDemoted) == "" {
+		t.Fatal("切到新主机后角色清掉、变为副机的记录保留")
 	}
 }
 
-// 降级的多数判定(设计 4.3):过半才降,只有一台副机时它说了算,老副机不计,没回齐不下结论。
-func TestFenceTally(t *testing.T) {
+// 变为副机的多数判定(设计 4.3):过半才变,只有一台副机时它说了算,老副机不计,没回齐不下结论。
+func TestDemoteTally(t *testing.T) {
 	cases := []struct {
 		name string
-		t    fenceTally
+		t    demoteTally
 		want bool
 	}{
-		{"没人回 stale", fenceTally{total: 3, aware: 3}, false},
-		{"三台里一台 stale", fenceTally{total: 3, aware: 3, stale: 1}, false},
-		{"三台里两台 stale", fenceTally{total: 3, aware: 3, stale: 2}, true},
-		{"只有一台副机", fenceTally{total: 1, aware: 1, stale: 1}, true},
-		{"两台里一台 stale", fenceTally{total: 2, aware: 2, stale: 1}, false},
-		{"三台里一台 stale、两台失联", fenceTally{total: 3, aware: 1, stale: 1}, true},
-		{"还有没回话的,stale 不过全部的半数", fenceTally{total: 3, aware: 1, stale: 1, unknown: 2}, false},
-		{"stale 已过全部的半数", fenceTally{total: 3, aware: 2, stale: 2, unknown: 1}, true},
+		{"没人回 stale", demoteTally{total: 3, aware: 3}, false},
+		{"三台里一台 stale", demoteTally{total: 3, aware: 3, stale: 1}, false},
+		{"三台里两台 stale", demoteTally{total: 3, aware: 3, stale: 2}, true},
+		{"只有一台副机", demoteTally{total: 1, aware: 1, stale: 1}, true},
+		{"两台里一台 stale", demoteTally{total: 2, aware: 2, stale: 1}, false},
+		{"三台里一台 stale、两台失联", demoteTally{total: 3, aware: 1, stale: 1}, true},
+		{"还有没回话的,stale 不过全部的半数", demoteTally{total: 3, aware: 1, stale: 1, unknown: 2}, false},
+		{"stale 已过全部的半数", demoteTally{total: 3, aware: 2, stale: 2, unknown: 1}, true},
 	}
 	for _, c := range cases {
-		if got := c.t.shouldFence(); got != c.want {
+		if got := c.t.shouldDemote(); got != c.want {
 			t.Errorf("%s: 期望 %v,实际 %v", c.name, c.want, got)
 		}
 	}
 }
 
-// 主机侧:一台副机说 stale、另两台还认本机 → 不降级,标"已脱离"并告警;两台说 stale → 降级(只做一次)、写好降级记录。
-func TestFenceByMajority(t *testing.T) {
+// 主机侧:一台副机说 stale、另两台还认本机 → 不变,标"已脱离"并告警;两台说 stale → 变为副机(只做一次)、写好记录。
+func TestDemoteByMajority(t *testing.T) {
 	var notes []string
-	s := testService(t, false, map[string]string{KeyEpoch: "1", KeyMode: ModeManual})
+	s := testService(t, false, map[string]string{KeyEpoch: "1", KeyMode: ModeConfirm})
 	s.d.Notify = func(_, text string) { notes = append(notes, text) }
 	restarted := 0
 	s.d.Restart = func(time.Duration) { restarted++ }
@@ -216,7 +216,7 @@ func TestFenceByMajority(t *testing.T) {
 	s.NoteReply(model.Node{Id: ids[1]}, ok)
 	s.NoteReply(model.Node{Id: ids[2]}, ok)
 	if s.IsNode() || restarted != 0 {
-		t.Fatal("少数说 stale 不能降级")
+		t.Fatal("少数说 stale 不能变为副机")
 	}
 	if len(notes) != 1 {
 		t.Fatalf("应告警一次'已脱离',实际 %d 条", len(notes))
@@ -226,14 +226,17 @@ func TestFenceByMajority(t *testing.T) {
 		t.Fatal("同一台已脱离只告警一次")
 	}
 	s.NoteReply(model.Node{Id: ids[1]}, stale)
-	if !s.IsNode() || setting(db, KeyRole) != RoleFenced || restarted != 1 {
-		t.Fatalf("过半说 stale 应降级并重启: node=%v role=%q restarted=%d", s.IsNode(), setting(db, KeyRole), restarted)
+	if !s.IsNode() || setting(db, KeyRole) != RoleDemoted || restarted != 1 {
+		t.Fatalf("过半说 stale 应变为副机并重启: node=%v role=%q restarted=%d", s.IsNode(), setting(db, KeyRole), restarted)
 	}
-	var fb FencedBy
-	if !s.getJSON(KeyFencedBy, &fb) || fb.Epoch != 2 || fb.OldEpoch != 1 || fb.Divergent != 2 || fb.Backup != "fenced-E1-x.zip" {
-		t.Fatalf("降级记录不对: %+v", fb)
+	var fb Demoted
+	if !s.getJSON(KeyDemoted, &fb) || fb.Epoch != 2 || fb.OldEpoch != 1 || fb.Divergent != 2 || fb.Backup != "former-master-E1-x.zip" {
+		t.Fatalf("变为副机的记录不对: %+v", fb)
 	}
 	if setting(db, hub.LedgerEpochKey) == "" {
-		t.Fatal("降级时要换一本新的流量账本")
+		t.Fatal("变为副机时要换一本新的流量账本")
+	}
+	if n := s.Notices(); len(n) != 1 || n[0].Kind != "demoted" {
+		t.Fatalf("面板顶部要留一条提示: %+v", n)
 	}
 }

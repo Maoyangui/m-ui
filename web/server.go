@@ -215,8 +215,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"reach", s.auth(s.handleReach))        // 大陆连通检测:状态与结果
 	mux.HandleFunc(api+"reach/run", s.auth(s.handleReachRun)) // 手动检测(一台或全部)
 	mux.HandleFunc(api+"agent/", s.handleAgent)               // 内部按动作分别做令牌/会话鉴权
-	mux.HandleFunc(api+"ha", s.auth(s.handleHA))              // 主机容灾:配置与状态
-	mux.HandleFunc(api+"ha/", s.handleHASub)                  // 内部按动作分别做会话 / 一次性码 / HMAC 鉴权
+	mux.HandleFunc(api+"ha", s.auth(s.handleHA))              // 主机容灾与设为主机:设置与状态
+	mux.HandleFunc(api+"ha/", s.handleHASub)                  // 内部按动作分别做会话 / HMAC(副机之间)鉴权
 	mux.HandleFunc(base+"logo.svg", brand.ServeLogo)
 	mux.HandleFunc(base+"support", s.handleSupport)
 	mux.HandleFunc(base+"support/qr", s.handleSupportQR)
@@ -463,6 +463,11 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		c, err := r.Cookie(sessionCookie)
 		if err != nil || !s.validSession(c.Value) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+			return
+		}
+		// 正在设为主机:写操作暂停(主机容灾自己的接口除外,要看进度)
+		if frozen, msg := s.haFrozen(r); frozen && !strings.HasPrefix(r.URL.Path, innerBase+"api/ha") {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
 			return
 		}
 		next(w, r)

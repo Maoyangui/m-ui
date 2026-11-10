@@ -115,6 +115,12 @@ func (s *Server) tgCommand(text string) string {
 	args := f[1:]
 	name := strings.Join(args, " ") // 用户名里可能有空格
 	switch cmd {
+	case "/extend", "/reset", "/enable", "/disable", "/kick", "/backup":
+		if h := s.haSvc(); h != nil && h.Frozen() { // 正在设为主机:写操作暂停
+			return notify.Esc(h.FrozenText())
+		}
+	}
+	switch cmd {
 	case "/start", "/help":
 		return tgBotHelp
 	case "/status":

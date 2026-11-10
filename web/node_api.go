@@ -253,6 +253,7 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			if e := s.decommission(node, before); e != "" {
 				resp["decommissionError"] = e
 			}
+			s.haForget(node)
 		}
 		writeJSON(w, http.StatusOK, resp)
 	case http.MethodDelete:
@@ -311,10 +312,23 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		if e := s.decommission(node, before); e != "" {
 			resp["decommissionError"] = e
 		}
+		s.haForget(node)
 		writeJSON(w, http.StatusOK, resp)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// haForget 停用 / 删除副机后:让它删掉手里的数据副本,换集群密钥(它手里的旧密钥不能再拿来冒充同伴投票);
+// 它要是失联的原主机,不再等它回来。没进过纪元什么都不做。
+func (s *Server) haForget(node model.Node) {
+	h := s.haSvc()
+	if h == nil || h.Epoch() == 0 || node.IsLocal {
+		return
+	}
+	h.ForgetNode(node.Id)
+	h.RotateClusterKey()
+	go h.DropOn(node)
 }
 
 // revokeSoleNodeScopes 删除服务器时:用户 / 代理在某条线路上只收窄到这台的,撤掉那条分配 / 授权,返回受影响的名字。

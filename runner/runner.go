@@ -94,7 +94,7 @@ type Runner struct {
 	extLocks sync.Map // 外部节点 id → *sync.Mutex:同一条的手动刷新与定时刷新不并发(见 RefreshExt)
 
 	// resolve4 大陆连通检测在主机上把域名解析成 IPv4 用的解析器;nil = 系统解析器(见 lookupIPv4)。只给测试替换。
-	resolve4 func(ctx context.Context, host string) ([]net.IP, error)
+	resolve4  func(ctx context.Context, host string) ([]net.IP, error)
 	restartFn func(time.Duration) // 测试里替换 ScheduleRestart(不真的重新执行进程)
 }
 
@@ -273,7 +273,6 @@ func New(dbPath string) (*Runner, error) {
 		Backup:      func(prefix string) (string, error) { bf, err := r.CreateBackupFileNamed(prefix); return bf.Name, err },
 		PanelURL:    r.PanelURL,
 		ResellerURL: r.ResellerURL,
-		CertPaths:   r.CertPaths,
 		Witness:     r.haWitness,
 	})
 	r.hub = hub.New(hub.Deps{
@@ -1778,7 +1777,7 @@ func (r *Runner) localRatio() float64 {
 	return n.Ratio
 }
 
-// PanelURL 本机面板的对外地址(猜的:面板域名或公网 IP + 端口 + 路径),容灾通知与副机配对显示用。
+// PanelURL 本机面板的对外地址(面板域名或公网 IP + 端口 + 路径),主机容灾的通知、设为主机后的新地址、副机配对显示用。
 func (r *Runner) PanelURL() string {
 	return r.serviceURL("webCertFile", "webKeyFile", "webPort", 2053, "webPath", "/app/")
 }
@@ -1884,6 +1883,12 @@ func Run(dbPath string) error {
 		logger.Info("已从备份还原数据库与证书")
 	}
 	restored := applied || err != nil // 出错时库也可能已经换成备份里的了
+	// 接任为主机 / 被设为主机:换上组好的新库(当前库留作 <库>.pre-promote-<时间>)
+	if promoted, err := ha.ApplyPending(dbPath); err != nil {
+		logger.Error("换上接任用的新库失败(仍用原来的库启动): ", err)
+	} else if promoted {
+		logger.Info("已换上接任用的新库,本机以主机身份启动")
+	}
 	r, err := New(dbPath)
 	if err != nil {
 		return err
@@ -1906,9 +1911,10 @@ func Run(dbPath string) error {
 	}
 	logger.Info("m-ui 数据面已启动")
 
-	// 容灾启动自检:开着容灾的主机在跑主机任务之前先问一圈副机,过半已跟随更高纪元就直接降为只读副机(随后重启)
+	// 容灾启动自检:进过纪元的主机在跑主机任务之前先问一圈副机,过半已跟随更高纪元(本机失联期间别的机器接任了)
+	// 就直接变为副机(随后重启),不先跑一轮主机任务
 	if r.ha.StartupCheck() {
-		logger.Warning("本机已被接管,降为只读副机,稍后自动重启")
+		logger.Warning("主机已由别的服务器接任,本机变为副机,稍后自动重启")
 	}
 	r.ha.Start()
 	defer r.ha.Stop()
