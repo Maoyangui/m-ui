@@ -41,11 +41,12 @@ func (p probe) hasTag(t string) bool {
 
 // location 测量请求里的选点条件。同一对象里的各字段是"且";limit 是这个条件最多取几个测点。
 type location struct {
-	Country string   `json:"country,omitempty"`
-	City    string   `json:"city,omitempty"`
-	ASN     int      `json:"asn,omitempty"`
-	Tags    []string `json:"tags,omitempty"`
-	Limit   int      `json:"limit,omitempty"`
+	Continent string   `json:"continent,omitempty"` // IPv6 入站检测按洲选境外测点(见 v6Locations)
+	Country   string   `json:"country,omitempty"`
+	City      string   `json:"city,omitempty"`
+	ASN       int      `json:"asn,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	Limit     int      `json:"limit,omitempty"`
 }
 
 type pingOptions struct {

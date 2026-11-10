@@ -448,6 +448,8 @@ const EN = /*BEGIN*/{
 "订阅内容为空": "The subscription is empty",
 "订阅地址必须是 http(s) URL": "Subscription URL must be an http(s) URL",
 "订阅里这台用的是 IPv6 地址,大陆连通检测暂只支持 IPv4": "Subscriptions give this server's IPv6 address; the mainland reachability check supports IPv4 only for now",
+"这台订阅里的 IPv6 地址不是公网地址(内网或保留段),测点连不到": "This server's IPv6 address in subscriptions is not public (private or reserved), so probes cannot reach it",
+"没有可测的地址": "No address to test",
 "记录凭据撤销待重试状态: %w": "Recording the credential revocation retry state: %w",
 "记录副机待踢线状态失败: %w": "Failed to record the node's pending-kick state: %w",
 "设备数与限速不能为负": "Devices and speed limits can't be negative",

@@ -5,6 +5,7 @@ import { trErr } from '../errmsg.js';
 import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML } from '../ui.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 import { editRelayUpstream } from './upstreams.js';
+import { loadReach, v6Of, v6Badge } from '../reach.js';
 
 const selected = new Set(); // 批量设置勾选的线路 id
 export const title = () => t('line.title');
@@ -62,6 +63,7 @@ export async function render(el) {
     renderRows();
   });
   renderRows();
+  loadReach().then(renderRows); // 走 IPv6 的线路标上服务器页那份 IPv6 入站检测结果;拿不到不影响列表
 }
 function visibleRows() { return state.lines.filter(l => matches(query, l.name, l.protocol, l.port, l.upstreamName)); }
 export function tick() { renderRows(); }
@@ -99,7 +101,10 @@ function renderRows() {
   const nodeIdsOf = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
   const serversCell = l => {
     const ids = nodeIdsOf(l), fam = familyOf(l);
-    const tag = id => { const n = (state.nodes || []).find(x => x.id === id); return badge((n ? n.name : '#' + id) + (fam[id] ? ' · ' + famName(fam[id]) : ''), 'primary'); };
+    const tag = id => {
+      const n = (state.nodes || []).find(x => x.id === id);
+      return badge((n ? n.name : '#' + id) + (fam[id] ? ' · ' + famName(fam[id]) : ''), 'primary') + (n && lineUsesV6(l, n) ? ' ' + v6Badge(v6Of(id)) : '');
+    };
     if (!ids.length) { // 全部服务器:只把单独选了 IP 版本的列出来
       const picked = Object.keys(fam).map(Number).filter(id => (state.nodes || []).some(x => x.id === id));
       return `<span class="muted">${t('line.allServers')}</span>${picked.length ? ' ' + picked.map(tag).join(' ') : ''}`;
@@ -155,6 +160,23 @@ const bareAddr = n => String(n.addr || '').trim().replace(/^\[|\]$/g, '');
 function isDualStack(n) {
   const a = bareAddr(n), pub = String(n.publicIp || '').trim(), pub6 = String(n.publicIp6 || '').trim();
   return (isV4Addr(a) || isV4Addr(pub)) && (a.includes(':') || pub6.includes(':') || pub.includes(':'));
+}
+// 这台两族各自的地址(和后端 model.FamilyIPs 一致):探测到的两个,手填的连接地址是哪一族就顶替哪一族
+function famIPs(n) {
+  const a = bareAddr(n), pub = String(n.publicIp || '').trim(), pub6 = String(n.publicIp6 || '').trim();
+  let v4 = isV4Addr(pub) ? pub : '', v6 = pub6.includes(':') ? pub6 : (pub.includes(':') ? pub : '');
+  if (isV4Addr(a)) v4 = a; else if (a.includes(':')) v6 = a;
+  return { v4, v6 };
+}
+// 这条线路在这台服务器上订阅里给不给 IPv6(和后端 sub.resolveAddrs 一致):用自定义地址的不算;
+// 单独选了、且这台有那一族的地址就按选的,否则跟服务器的默认
+function lineUsesV6(l, n, f = familyOf(l)[n.id]) {
+  const custom = parseJ(l.addrs);
+  if (Array.isArray(custom) && custom.length) return false;
+  const ips = famIPs(n);
+  if (f === 'v6' && ips.v6) return true;
+  if (f === 'v4' && ips.v4) return false;
+  return serverFamily(n) === 'IPv6';
 }
 // 没单独选时这台实际用哪个版本:手填的连接地址优先,否则看服务器的"自动地址用"
 function serverFamily(n) {

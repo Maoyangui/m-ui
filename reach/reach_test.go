@@ -178,10 +178,13 @@ type fakeAPI struct {
 	icmpOK    map[string]bool
 	remaining int
 	token     string
+	// IPv6 入站检测(目标是 IPv6 地址):境外测点连不连得上、派几个测点
+	v6OK     bool
+	v6Probes int
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
-	f := &fakeAPI{bodies: map[string]map[string]interface{}{}, remaining: 250,
+	f := &fakeAPI{bodies: map[string]map[string]interface{}{}, remaining: 250, v6OK: true, v6Probes: 4,
 		tcpOK: map[string]bool{"cm": true, "ct": true, "cu": true, "hk": true}, icmpOK: map[string]bool{"cm": true, "ct": true, "cu": true, "hk": true}}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
@@ -225,6 +228,16 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-RateLimit-Reset", "1800")
 		f.seq++
 		id := fmt.Sprintf("m%d", f.seq)
+		if strings.Contains(req.Target, ":") { // IPv6 地址:Globalping 只派支持 IPv6 的测点(这里是欧洲、北美的)
+			var rs []fakeResult
+			for i := 0; i < f.v6Probes; i++ {
+				rs = append(rs, fakeResult{country: []string{"DE", "US"}[i%2], city: "X", asn: 3320, network: "Some ISP", ok: f.v6OK})
+			}
+			f.bodies[id] = fakeBody(id, rs)
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "probesCount": len(rs)})
+			return
+		}
 		ok := f.tcpOK
 		if req.Options.Protocol == "" {
 			ok = f.icmpOK

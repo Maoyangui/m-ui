@@ -1,5 +1,6 @@
 // Package reach 大陆连通性检测:借 Globalping 公共测试网络,从大陆移动、电信、联通的家庭宽带测点
 // 去连每台服务器,同时用香港测点作对照,判断服务器的 IP 或端口是不是被墙了。
+// 订阅里有走 IPv6 的线路的服务器,同一轮再从境外有 IPv6 的测点测一次 IPv6 入站(见 v6.go)。
 //
 // 只在主机上运行:测点在大陆,请求由哪台机器发起都一样,各台副机的地址主机都知道。
 // 服务器地址会发给 Globalping(设置页写明了),机房测点一律不算(用户要求)。
@@ -50,6 +51,11 @@ type Target struct {
 	PortLine string // PortFrom = line 时的线路名
 	Err      string // 测不了的原因(没有地址等)
 	Ext      bool   // 外部节点:按外部节点那一套下结论(verdictExt),不进历史、不告警
+	// TCPv6Only 这台的 TCP 线路都走 IPv6:Port 是订阅 / API 端口(不拿 IPv6 线路的端口测 IPv4 地址)
+	TCPv6Only bool
+	// V6 这台订阅里有走 IPv6 的线路时,同一轮顺带测的 IPv6 入站(见 v6.go);nil = 不测。
+	// Err 不为空(比如订阅里这台默认给 IPv6、大陆检测不测)时 V6 照样测
+	V6 *V6Target
 }
 
 type Deps struct {
@@ -100,8 +106,9 @@ type Service struct {
 	busy      bool
 	extBusy   bool // 外部节点的大陆连通检测在跑(和服务器检测共用测点额度,互斥)
 	running   map[uint]bool
-	latest    map[uint]Result // 最近一次(可能没测成)
-	good      map[uint]Result // 最近一次测成的
+	latest    map[uint]Result    // 最近一次(可能没测成)
+	good      map[uint]Result    // 最近一次测成的
+	goodV6    map[uint]*V6Result // 最近一次测成的 IPv6 入站(和大陆那项各算各的:一项没测成不抹掉另一项)
 	history   map[uint][]Point
 	alerted   map[uint]string // 已经告过警的状态类别,防止同一件事反复发
 	lastRun   int64           // 最近一次全部服务器都测过的时间(定时与手动都算)
@@ -134,7 +141,8 @@ func New(d Deps) *Service {
 	if d.FirstDelay == 0 {
 		d.FirstDelay = 2 * time.Minute
 	}
-	s := &Service{d: d, running: map[uint]bool{}, latest: map[uint]Result{}, good: map[uint]Result{}, history: map[uint][]Point{}, alerted: map[uint]string{}, perCheck: 3*perCarrier + 3}
+	s := &Service{d: d, running: map[uint]bool{}, latest: map[uint]Result{}, good: map[uint]Result{}, goodV6: map[uint]*V6Result{},
+		history: map[uint][]Point{}, alerted: map[uint]string{}, perCheck: 3*perCarrier + 3}
 	s.c = &client{base: d.API, http: d.HTTP, ua: d.UA, now: d.Now, token: func() string { return d.Setting("reachToken") }}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.load()
@@ -180,6 +188,9 @@ func (s *Service) load() {
 			s.latest[r.NodeId] = res
 			if measured(res.Verdict) {
 				s.good[r.NodeId] = res
+			}
+			if v6Measured(res.V6) {
+				s.goodV6[r.NodeId] = res.V6
 			}
 			if c := class(res.Verdict); c != "" {
 				s.alerted[r.NodeId] = c
@@ -373,6 +384,10 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 				case <-ctx.Done():
 				}
 			}
+			// IPv6 入站和大陆检测是两回事:大陆那项没测成(额度、没有大陆测点、订阅里这台给的是 IPv6)也照测
+			if t.V6 != nil && ctx.Err() == nil {
+				res.V6 = s.checkV6(ctx, t.V6)
+			}
 			if ctx.Err() != nil && res.Verdict == VerdictError {
 				return // 面板正在退出:别把"被取消"记成一次失败
 			}
@@ -405,6 +420,11 @@ func (s *Service) CanCheckExt(n int) error {
 	cost, reserve := s.perCheck, 0
 	if auto {
 		reserve = cost * len(s.latest)
+		for _, r := range s.latest { // 上一轮测过 IPv6 入站的,下一轮也要测
+			if r.V6 != nil && r.V6.Port > 0 {
+				reserve += v6Cost()
+			}
+		}
 	}
 	s.mu.Unlock()
 	q := s.c.Quota()
@@ -486,7 +506,7 @@ func (s *Service) locations(ctx context.Context) ([]location, int, error) {
 }
 
 func (s *Service) failed(t Target, auto bool, msg string) Result {
-	return Result{NodeId: t.NodeId, Name: t.Name, Target: t.Host, Port: t.Port, PortFrom: t.PortFrom, PortLine: t.PortLine,
+	return Result{NodeId: t.NodeId, Name: t.Name, Target: t.Host, Port: t.Port, PortFrom: t.PortFrom, PortLine: t.PortLine, TCPv6Only: t.TCPv6Only,
 		At: s.d.Now().Unix(), Auto: auto, Verdict: VerdictError, Error: msg, Groups: orderedGroups(summarize(nil))}
 }
 
@@ -501,7 +521,7 @@ func (s *Service) check(ctx context.Context, t Target, locs []location, cost int
 	if q := s.c.Quota(); q.At > 0 && q.Remaining < cost && s.d.Now().Unix() < q.ResetAt {
 		return s.failed(t, auto, (&QuotaError{Wait: time.Unix(q.ResetAt, 0).Sub(s.d.Now())}).Error())
 	}
-	res := Result{NodeId: t.NodeId, Name: t.Name, Target: t.Host, Port: t.Port, PortFrom: t.PortFrom, PortLine: t.PortLine, At: s.d.Now().Unix(), Auto: auto}
+	res := Result{NodeId: t.NodeId, Name: t.Name, Target: t.Host, Port: t.Port, PortFrom: t.PortFrom, PortLine: t.PortLine, TCPv6Only: t.TCPv6Only, At: s.d.Now().Unix(), Auto: auto}
 	opts := pingOptions{Packets: 3}
 	if t.Port > 0 {
 		opts.Protocol, opts.Port = "TCP", t.Port
@@ -570,6 +590,9 @@ func (s *Service) store(res Result) {
 	if measured(res.Verdict) {
 		s.good[res.NodeId] = res
 	}
+	if v6Measured(res.V6) {
+		s.goodV6[res.NodeId] = res.V6
+	}
 	s.history[res.NodeId] = appendPoint(s.history[res.NodeId], Point{At: res.At, Verdict: res.Verdict, Auto: res.Auto})
 	prevAlert := s.alerted[res.NodeId]
 	c := class(res.Verdict)
@@ -585,7 +608,7 @@ func (s *Service) store(res Result) {
 		}
 		s.d.DB.Exec("DELETE FROM reach_checks WHERE node_id = ? AND id NOT IN (SELECT id FROM reach_checks WHERE node_id = ? ORDER BY id DESC LIMIT ?)", res.NodeId, res.NodeId, keepRows)
 	}
-	logger.Info("大陆连通检测 ", res.Name, " ", res.Target, ": ", res.Verdict, summaryLine(res))
+	logger.Info("大陆连通检测 ", res.Name, " ", res.Target, ": ", res.Verdict, summaryLine(res), v6Summary(res.V6))
 
 	// 只有定时巡检发告警;手动检测的结果你已经在页面上看到了,但同样更新基线,之后不重复告同一件事
 	if !res.Auto || c == "" || c == prevAlert || s.d.Notify == nil {
@@ -613,6 +636,7 @@ func (s *Service) forgetMissing(targets []Target) {
 		if !keep[id] {
 			delete(s.latest, id)
 			delete(s.good, id)
+			delete(s.goodV6, id)
 			delete(s.alerted, id)
 		}
 	}
@@ -633,6 +657,7 @@ func (s *Service) Forget(id uint) {
 	defer s.mu.Unlock()
 	delete(s.latest, id)
 	delete(s.good, id)
+	delete(s.goodV6, id)
 	delete(s.history, id)
 	delete(s.alerted, id)
 }
@@ -665,6 +690,7 @@ func (s *Service) View() View {
 			r = g
 			r.Attempt = &Attempt{At: last.At, Verdict: last.Verdict, Error: last.Error}
 		}
+		r.V6 = s.viewV6Locked(id, last.V6)
 		v.Results = append(v.Results, r)
 		v.History[id] = append([]Point(nil), s.history[id]...)
 	}

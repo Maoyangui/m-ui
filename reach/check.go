@@ -32,6 +32,7 @@ const (
 
 // ProbeResult 一个测点的结果。
 type ProbeResult struct {
+	Country string  `json:"country,omitempty"` // 只有 IPv6 入站检测填(境外测点,各国都有);大陆检测按运营商分组,不填
 	City    string  `json:"city"`
 	ASN     int     `json:"asn"`
 	Network string  `json:"network"`
@@ -77,6 +78,11 @@ type Result struct {
 	Error        string     `json:"error,omitempty"`
 	Note         string     `json:"note,omitempty"` // 外部节点检测的提示代码,逗号分隔(见 verdictExt)
 	Measurements []string   `json:"measurements,omitempty"`
+	// TCPv6Only 这台的 TCP 线路在订阅里都走 IPv6:IPv4 这项不拿它们的端口去测(测出"通"也不是用户连的那条路),
+	// 改测订阅 / API 端口
+	TCPv6Only bool `json:"tcpV6Only,omitempty"`
+	// V6 同一轮做的 IPv6 入站检测(这台订阅里有走 IPv6 的线路时才有,见 v6.go)
+	V6 *V6Result `json:"v6,omitempty"`
 	// Attempt 只出现在给面板的结果里:最近一次没测成(额度用完、接口出错),上面显示的是再上一次测成的结果
 	Attempt *Attempt `json:"attempt,omitempty"`
 }

@@ -24,6 +24,36 @@ export const isBad = v => BAD.has(v) || v === 'partial';
 const resultOf = id => ((reach && reach.results) || []).find(r => r.nodeId === id);
 const runningFor = id => !!(reach && reach.running && (reach.runningIds || []).includes(id));
 
+// ---- IPv6 入站(同一轮里的另一项,见后端 reach/v6.go)----
+// 结论 → 颜色:通绿、不通红、其余(只有 UDP 线路、测点不够、没测成)灰
+const V6TONE = { ok: 'ok', down: 'danger', unsure: '', udp: '', none: '', error: '' };
+const V6CHIP = { ok: 'ok', down: 'down' };
+// 这台服务器最近一次 IPv6 入站检测(线路页也用);没有 = 这台订阅里没有走 IPv6 的线路,或还没测过
+export const v6Of = id => { const r = resultOf(id); return r && r.v6 ? r.v6 : null; };
+export const v6Label = v => t('reach.v6.s.' + (v.state || 'error'));
+const v6Addr = v => (v.port ? `[${v.target}]:${v.port}` : v.target);
+// 一句话说明这次的结论(悬停提示、详情抽屉、线路表单共用)
+export function v6Explain(v) {
+  if (!v) return '';
+  const udp = (v.udpLines || []).join(t('reach.sep'));
+  if (v.state === 'udp') return t('reach.v6.x.udp', { lines: udp });
+  let s = v.state === 'error' ? t('reach.v6.x.error', { err: trErr(v.error || '') }) : t('reach.v6.x.' + v.state, { addr: v6Addr(v) });
+  if (v.port && v.portLine) s += ' ' + t('reach.v6.portOf', { name: v.portLine, port: v.port });
+  if (udp && v.state !== 'udp') s += ' ' + t('reach.v6.udpAlso', { lines: udp });
+  if (v.attempt) s += ' ' + t('reach.v6.attempt', { t: fmtTime(v.attempt.at), err: trErr(v.attempt.error || '') });
+  return s;
+}
+// 服务器列表里那一格的小标签
+function v6Chip(v) {
+  const val = v.state === 'ok' ? '✓' : v.state === 'down' ? '✕' : v.state === 'udp' ? 'UDP' : '?';
+  return `<span class="rc ${V6CHIP[v.state] || ''}" title="${esc(t('reach.v6.title') + ':' + v6Label(v) + ' · ' + v6Explain(v))}">v6<b>${esc(val)}</b></span>`;
+}
+// 线路页、线路表单里用的徽章
+export function v6Badge(v) {
+  if (!v) return '';
+  return `<span class="badge ${V6TONE[v.state] || ''}" title="${esc(v6Explain(v) + ' · ' + fmtTime(v.at))}">${esc(t('reach.v6.short', { s: v6Label(v) }))}</span>`;
+}
+
 function groupChip(g) {
   const label = t('reach.g.' + g.key + '.short');
   const title = `${t('reach.g.' + g.key)} ${g.total ? t('reach.okOf', { ok: g.ok, total: g.total }) : t('reach.noProbe')}${g.ok && g.avgMs ? ' · ' + Math.round(g.avgMs) + ' ms' : ''}`;
@@ -40,9 +70,9 @@ export function reachCell(n, nodeView) {
     return `<button class="reach-cell" data-act="reach.detail" data-id="${n.id}"><span class="badge primary"><span class="spin"></span> ${t('reach.running')}</span>${r ? `<div class="sub-cell">${t('reach.last')} ${esc(verdictLabel(r.verdict))}</div>` : ''}</button>`;
   }
   if (!r) return `<button class="reach-cell" data-act="reach.one" data-id="${n.id}"><span class="badge">${t('reach.never')}</span><div class="sub-cell link">${t('reach.clickToCheck')}</div></button>`;
-  const chips = r.verdict === 'error' || r.verdict === 'noProbes'
+  const chips = (r.verdict === 'error' || r.verdict === 'noProbes'
     ? `<span class="muted small ellip" title="${esc(trErr(r.error || ''))}">${esc(shortReason(r))}</span>`
-    : (r.groups || []).filter(g => GROUPS.includes(g.key)).map(groupChip).join('');
+    : (r.groups || []).filter(g => GROUPS.includes(g.key)).map(groupChip).join('')) + (r.v6 ? v6Chip(r.v6) : '');
   const warn = r.attempt ? ` <span class="warn-text small" title="${esc(t('reach.attemptFailed', { t: fmtTime(r.attempt.at), err: trErr(r.attempt.error || '') }))}">⚠</span>` : '';
   return `<button class="reach-cell" data-act="reach.detail" data-id="${n.id}" title="${esc(t('reach.openDetail'))}">
     <span class="badge ${TONE[r.verdict] || ''}">${esc(verdictLabel(r.verdict))}</span> <span class="muted small">${fmtRelative(r.at)}</span>${warn}
@@ -96,6 +126,17 @@ function groupBlock(g) {
     </div>`;
 }
 
+// 详情抽屉里的"IPv6 入站"一节
+function v6Block(v) {
+  const probes = (v.probes || []).map(p => `<li><span class="ellip">${esc([p.country, p.city].filter(Boolean).join(' · ') || '?')} · ${esc(p.network || '')} <span class="muted">AS${p.asn}</span></span>
+      <span class="${p.offline ? 'muted' : p.ok ? 'ok-text' : 'danger-text'}">${p.offline ? t('reach.offline') : p.ok ? (p.avgMs ? Math.round(p.avgMs) + ' ms' : '✓') : t('reach.fail')}</span></li>`).join('');
+  return `<section><h3>${t('reach.v6.title')}</h3>
+    <div class="reach-hero ${V6TONE[v.state] || ''}"><div class="v">${esc(v6Label(v))}${v.total ? ` <span class="badge">${esc(t('reach.okOf', { ok: v.ok, total: v.total }))}</span>` : ''}</div><p>${esc(v6Explain(v))}</p></div>
+    <dl class="kv reach-meta"><dt>${t('reach.target')}</dt><dd class="mono">${esc(v6Addr(v))}</dd><dt>${t('reach.at')}</dt><dd>${fmtTime(v.at)}</dd></dl>
+    ${probes ? `<details><summary>${t('reach.probes', { n: (v.probes || []).length })}</summary><ul class="reach-probes">${probes}</ul></details>` : ''}
+    <p class="hint">${t('reach.v6.note')}</p></section>`;
+}
+
 function historyStrip(id) {
   const h = ((reach && reach.history) || {})[id] || [];
   if (!h.length) return '';
@@ -115,14 +156,14 @@ function detailHTML(n) {
       <dt>${t('reach.target')}</dt><dd class="mono">${esc(r.target || '—')}${r.port ? ':' + r.port : ''}</dd>
       <dt>${t('reach.portFrom')}</dt><dd>${esc(portText(r))}</dd>
       <dt>${t('reach.at')}</dt><dd>${fmtTime(r.at)} · ${t(r.auto ? 'reach.auto' : 'reach.manual')}</dd>
-    </dl>${r.portFrom === 'sub' || r.portFrom === 'api' || !r.port ? `<p class="hint">${t(r.port ? 'reach.noTcpLine' : 'reach.pingOnly')}</p>` : ''}` : `<p class="hint">${t('reach.neverHint')}</p>`;
+    </dl>${r.portFrom === 'sub' || r.portFrom === 'api' || !r.port ? `<p class="hint">${t(r.tcpV6Only ? 'reach.v6TcpOnly' : r.port ? 'reach.noTcpLine' : 'reach.pingOnly')}</p>` : ''}` : `<p class="hint">${t('reach.neverHint')}</p>`;
   const groups = r && r.verdict !== 'error' ? `<section><h3>${t('reach.byCarrier')}</h3>${(r.groups || []).map(groupBlock).join('')}</section>` : '';
   const icmp = r && r.icmp ? `<p class="hint">${esc(t('reach.icmp', { cn: `${r.icmp.cnOk}/${r.icmp.cnTotal}`, hk: `${r.icmp.hkOk}/${r.icmp.hkTotal}` }))}</p>`
     : r && r.icmpError ? `<p class="hint">${esc(t('reach.icmpFail', { err: trErr(r.icmpError) }))}</p>` : '';
   const quota = q ? `<p class="hint">${esc(t('reach.quota', { r: q.remaining, l: q.limit, n: reach.perCheck || 15 }))}${q.resetAt ? ' · ' + esc(t('reach.quotaReset', { t: fmtTime(q.resetAt) })) : ''}</p>` : '';
   return `${head}
     <div class="row" style="margin:.8rem 0 1rem"><button class="btn primary" data-act="reach.one" data-id="${n.id}" ${running || (reach && reach.running) ? 'disabled' : ''}>${running ? `<span class="spin"></span> ${t('reach.running')}` : t('reach.checkNow')}</button></div>
-    ${groups}${icmp}${historyStrip(n.id)}
+    ${groups}${icmp}${r && r.v6 ? v6Block(r.v6) : ''}${historyStrip(n.id)}
     <section><p class="hint">${t('reach.note')}</p>${quota}${reach && reach.error ? `<p class="hint danger-text">${esc(trErr(reach.error))}</p>` : ''}</section>`;
 }
 
