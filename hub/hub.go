@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"runtime/debug"
@@ -168,6 +169,7 @@ func revisionOf(s Snapshot) string {
 	for i := range nodes {
 		nodes[i].IsLocal = false
 		nodes[i].ServicePorts = nil // 副机端口只给主机做校验用,变了不必整份重推
+		nodes[i].Certs = certsForRevision(nodes[i].Certs)
 	}
 	s.Nodes = nodes
 	// 外部订阅的抓取时间 / 报错 / 节点数只是主机自己的记录:每半小时抓一次就推一次全量快照,
@@ -181,6 +183,26 @@ func revisionOf(s Snapshot) string {
 	b, _ := json.Marshal(s)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:8])
+}
+
+// certsForRevision 证书清单里影响副机的只有名字、域名、到期时间这些(订阅的 SNI 用);续期状态(失败原因、
+// 重试时间……)是给主机告警和面板看的,变了不该把整份快照重推给所有副机。
+func certsForRevision(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var list []model.CertBrief
+	if json.Unmarshal(raw, &list) != nil {
+		return raw
+	}
+	for i, b := range list {
+		list[i] = model.CertBrief{Name: b.Name, Domains: b.Domains, SelfSigned: b.SelfSigned, NotAfter: b.NotAfter, Default: b.Default}
+	}
+	out, err := json.Marshal(list)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 // sameLines / sameUpstreams 按 id 排好序、把空的 JSON 字段归一(nil 与 "" 与 "null" 一律视为空)后逐条比较,
@@ -819,6 +841,8 @@ type Deps struct {
 	SetExternalIPs func(map[string][]string)
 	LocalGroups    func() map[string]GroupState // 主机本机的代理池状态(与副机上报的合并给面板看)
 	CountersMerged func()                       // 并入了副机用量:触发一次超量 / 到期判定(可为 nil,不能阻塞)
+	// OnceDurable 去重记录落库的节流(notify.Notifier.OnceDurable):代副机发的证书告警每台每张每天一次,重启不重复;nil = 不发
+	OnceDurable func(key string, ttl time.Duration) bool
 }
 
 type Hub struct {
@@ -1488,7 +1512,39 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 		for _, m := range msgs {
 			h.d.Notify("tgOnCore", m)
 		}
+		if ok && rep != nil {
+			for _, m := range h.nodeCertAlerts(n, rep.Certs) {
+				h.d.Notify("tgOnCert", m)
+			}
+		}
 	}
+}
+
+// nodeCertAlerts 副机报上来的证书里要主机出面的:自动续期在失败的、正用着又不会自动续的快到期了(判断见
+// model.CertBrief.Trouble)。副机一般没配通知(通知设置不随快照同步),续期失败以前只写进副机自己的日志,
+// 没人知道;现在主机用自己的通知渠道代它说。去重记录落库:每台每张每天一次,重启不重复。
+func (h *Hub) nodeCertAlerts(n model.Node, certs []model.CertBrief) []string {
+	if h.d.OnceDurable == nil {
+		return nil
+	}
+	now := time.Now()
+	var msgs []string
+	for _, c := range certs {
+		trouble := c.Trouble(now)
+		if trouble == "" || !h.d.OnceDurable(fmt.Sprintf("node-cert:%d:%s:%s", n.Id, c.Name, trouble), 23*time.Hour) {
+			continue
+		}
+		node, name, left := alertText(n.Name, 64), alertText(c.Name, 128), notify.LeftText(time.Unix(c.NotAfter, 0).Sub(now))
+		switch {
+		case trouble == model.CertFailing:
+			msgs = append(msgs, fmt.Sprintf("🔴 <b>副机证书自动续期失败</b>:%s 的 %s %s,已连续失败 %d 次\n%s", node, name, left, c.RenewFails, alertText(c.RenewErr, 300)))
+		case c.Source == "acme" && c.Method == "manual":
+			msgs = append(msgs, fmt.Sprintf("🟡 <b>副机证书要手动续期</b>:%s 的 %s %s。它用手动 DNS 验证,不能自动续期:到那台服务器的证书页点「续期」,按提示加 TXT 记录", node, name, left))
+		default:
+			msgs = append(msgs, fmt.Sprintf("🟡 <b>副机证书快到期</b>:%s 的 %s %s,自动续期管不到它:到那台服务器的证书页看看", node, name, left))
+		}
+	}
+	return msgs
 }
 
 // unsyncedAlertAfter 副机在线但配置持续多久没同步上才告警(秒)。
@@ -2097,7 +2153,7 @@ func (h *Hub) clientFor(n model.Node) *http.Client {
 	if !n.Insecure {
 		return h.verified
 	}
-	key := fmt.Sprintf("%d:%s", n.Id, n.CertFP)
+	key := fmt.Sprintf("%d:%s:%s", n.Id, n.CertFP, n.Domain)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if c := h.pinned[key]; c != nil {
@@ -2107,6 +2163,12 @@ func (h *Hub) clientFor(n model.Node) *http.Client {
 	host := ""
 	if u, err := url.Parse(n.ApiUrl); err == nil {
 		host = u.Hostname()
+	}
+	// API 地址填的是 IP 时,副机的证书多半是给服务器域名签的(Let's Encrypt 不给 IP 签):按 IP 校验必然失败,
+	// 副机一续期主机就报"指纹变了"失联,看到的证书天数从此不再更新。这时也按服务器的域名校验
+	names := []string{host}
+	if d := strings.TrimSpace(n.Domain); net.ParseIP(host) != nil && d != "" {
+		names = append(names, d)
 	}
 	c := &http.Client{Timeout: 25 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{
 		InsecureSkipVerify: true, // 不查签发链(自签 / IP 证书都过不了),只认下面记住的指纹
@@ -2121,7 +2183,7 @@ func (h *Hub) clientFor(n model.Node) *http.Client {
 				logger.Info("已记住副机 ", name, " 的证书指纹 ", got[:16])
 				return nil
 			}
-			if got != want && host != "" && h.chainValid(raw, host) {
+			if got != want && h.chainValidFor(raw, names) {
 				// 正规 CA 自动续期换了证书:新证书能按 API 地址的主机名过根证书校验,就换记新指纹。以前每次续期都失联,
 				// 得手点「重置指纹」(审计 M063)。自签证书换了照旧拒绝 —— 那正是钉指纹要防的
 				h.d.DB.Model(&model.Node{}).Where("id = ? AND cert_fp = ?", id, want).Update("cert_fp", got)
@@ -2143,6 +2205,16 @@ func (h *Hub) clientFor(n model.Node) *http.Client {
 	}
 	h.pinned[key] = c
 	return c
+}
+
+// chainValidFor 证书链能按其中任一个名字过根证书校验就算(空名字跳过)。
+func (h *Hub) chainValidFor(raw [][]byte, names []string) bool {
+	for _, n := range names {
+		if n != "" && h.chainValid(raw, n) {
+			return true
+		}
+	}
+	return false
 }
 
 // chainValid 副机出示的证书链能不能按 host 过根证书校验(正规 CA 签的)。

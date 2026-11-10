@@ -139,7 +139,7 @@ func (s *Server) handleAgentPing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"version": Version, "role": s.role(), "hostname": host,
 		"coreRunning": s.run.CoreRunning(), "uptime": s.run.Uptime(),
-		"revision": s.setting("hubRevision"), "certDays": s.run.CertInfo().DaysLeft,
+		"revision": s.setting("hubRevision"), "certDays": s.run.CertDaysInUse(),
 	})
 }
 
@@ -361,7 +361,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	rep := hub.Report{
 		Version: Version, Hostname: host, CoreRunning: s.run.CoreRunning(), Uptime: s.run.Uptime(),
 		Revision: s.setting("hubRevision"), ReloadPending: strings.TrimSpace(s.setting("hubReloadPending")) != "",
-		Onlines: map[string][]string{}, CertDays: s.run.CertInfo().DaysLeft, Certs: s.run.CertBriefs(),
+		Onlines: map[string][]string{}, CertDays: s.run.CertDaysInUse(), Certs: s.run.CertBriefs(),
 		PublicIP:     s.setting("publicIp"),
 		PublicIP6:    s.setting("publicIp6"),
 		Conns:        s.recentConns(50),

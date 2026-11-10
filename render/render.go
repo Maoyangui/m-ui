@@ -29,7 +29,7 @@ type NodeCert struct {
 
 // TLSConfig 是 Line.Tls 的结构。mode 为空时按协议取默认。
 type TLSConfig struct {
-	Mode        string `json:"mode"` // cert | reality | none
+	Mode        string `json:"mode"`           // cert | reality | none
 	Cert        string `json:"cert,omitempty"` // cert 模式下单独选的证书(证书库里的名字);空 = 服务器的默认证书
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Reality     struct {
@@ -61,6 +61,9 @@ var Protocols = map[string]struct {
 	"http":        {TLSDefault: "cert", CredKey: "http"},
 	"mixed":       {TLSDefault: "none", CredKey: "socks"},
 }
+
+// UDPOnly 只监听 UDP 的协议(QUIC):不占同号的 TCP 端口(比如 HTTP 验证要用的 TCP 80)。
+func UDPOnly(protocol string) bool { return protocol == "hysteria2" || protocol == "tuic" }
 
 // ParseTLS 解析线路的 TLS 配置并补默认模式。
 func ParseTLS(line model.Line) TLSConfig {

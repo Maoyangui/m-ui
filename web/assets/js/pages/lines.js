@@ -704,11 +704,15 @@ function pickLineCert() {
   }
   const cur = fv('f-cert');
   const now = Date.now() / 1000;
+  // 各服务器上这张证书的剩余天数:剩 14 天以内、或会自动续却过了续期时间还没续上的变黄,自动续期在失败的变红(悬停看原因)
   const chips = info => servers.map(n => {
     const c = info.has.get(n.id);
     if (!c) return badge(n.name + ' · ' + t('line.certMissing'), 'warn');
     const left = Math.floor((c.notAfter - now) / 86400);
-    return badge(n.name + ' · ' + t('cert.daysLeftN', { n: left }), left <= 14 ? 'warn' : 'ok');
+    const overdue = c.autoRenew && c.renewBefore && c.notAfter - now <= c.renewBefore;
+    const kind = c.autoRenew && c.renewErr ? 'danger' : left <= 14 || overdue ? 'warn' : 'ok';
+    const label = n.name + ' · ' + t('cert.daysLeftN', { n: left });
+    return c.renewErr ? `<span class="badge ${kind}" title="${esc(trErr(c.renewErr))}">${esc(label)}</span>` : badge(label, kind);
   }).join('');
   const opts = [{ value: '', name: t('line.certDefault'), sub: esc(t('line.certDefaultHelp')), current: !cur }];
   for (const [name, info] of byName) {

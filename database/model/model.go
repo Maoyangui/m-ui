@@ -75,9 +75,15 @@ type Cert struct {
 	CertFile  string `json:"certFile"`
 	KeyFile   string `json:"keyFile"`
 	Method    string `json:"method"`    // ACME 的验证方式:http | cloudflare | manual
-	AutoRenew bool   `json:"autoRenew"` // 到期前 30 天自动续期(手动 DNS 的不能)
+	AutoRenew bool   `json:"autoRenew"` // 进入续期窗口后自动续期(手动 DNS 的不能)
 	Staging   bool   `json:"staging"`
 	CreatedAt int64  `json:"createdAt"`
+	// 续期状态:每次签发 / 续期(自动的和手点的)之后写回,重启后照样在。证书页、主机代副机告警看它(见 runner/certrenew.go)。
+	LastRenewAt  int64  `json:"lastRenewAt" gorm:"default:0;not null"` // 最近一次尝试的时间
+	LastRenewOK  int64  `json:"lastRenewOk" gorm:"default:0;not null"` // 最近一次成功的时间
+	LastRenewErr string `json:"lastRenewErr"`                          // 最近一次失败的原因;成功后清空
+	RenewFails   int    `json:"renewFails" gorm:"default:0;not null"`  // 连续失败次数;成功后清零
+	NextRenewAt  int64  `json:"nextRenewAt" gorm:"default:0;not null"` // 失败后退避:这之前不再自动重试;0 = 进了续期窗口就试
 }
 
 // CertBrief 一台服务器有哪张证书(副机随报告上来,存在 Node.Certs,不含私钥与路径)。
@@ -87,6 +93,16 @@ type CertBrief struct {
 	SelfSigned bool     `json:"selfSigned,omitempty"`
 	NotAfter   int64    `json:"notAfter"`
 	Default    bool     `json:"default,omitempty"` // 线路默认证书
+	// 以下是续期状态,老版本副机不报(全部可省):主机据此代副机告警,服务器页、线路选证书时标出续期失败。
+	// 不进快照修订号(见 hub.revisionOf):续期失败一次不该把整份配置重推给所有副机。
+	Source      string `json:"source,omitempty"`      // acme | selfsign | external
+	Method      string `json:"method,omitempty"`      // http | cloudflare | manual
+	AutoRenew   bool   `json:"autoRenew,omitempty"`   // 面板会自动续这张
+	RenewBefore int64  `json:"renewBefore,omitempty"` // 到期前多少秒开始续
+	RenewErr    string `json:"renewErr,omitempty"`    // 自动续期正在失败:最近一次的原因
+	RenewFails  int    `json:"renewFails,omitempty"`  // 连续失败次数
+	NextRenewAt int64  `json:"nextRenewAt,omitempty"` // 下次重试不早于
+	InUse       bool   `json:"inUse,omitempty"`       // 线路默认、线路单独选的、面板、订阅、代理面板正用着
 }
 
 // ServicePort 服务器上 m-ui 自己监听的一个端口(面板 / 订阅 / 代理面板)。

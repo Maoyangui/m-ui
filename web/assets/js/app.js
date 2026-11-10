@@ -61,7 +61,7 @@ function resetState() {
 export async function load(...what) {
   const all = what.length === 0;
   const jobs = [];
-  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); reloadNotice(); reachNotice(); }));
+  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); reloadNotice(); reachNotice(); certNotice(); }));
   if (all || what.includes('settings')) jobs.push(get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
   if (all || what.includes('lines')) jobs.push(get('lines').then(l => { state.lines = l; }));
   if (!isReseller() && (all || what.includes('upstreams'))) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
@@ -278,6 +278,43 @@ function reloadNotice() {
     try { await post('reload', undefined, LONG); toast(t('dash.reloaded'), 'ok'); }
     catch (err) { toast(err.message, 'err'); }
     finally { await load('status').catch(() => {}); }
+  });
+}
+
+// 证书要处理:自动续期在失败、正用着又快到期 / 过期 / 文件读不出来的(主机连副机的一起;副机一般没配通知,
+// 它的证书出了问题以前只有主机面板上锁图标后的天数能看出来)。顶部常驻一条,可以按当前这组情况关掉,情况变了再出现。
+function certNotice() {
+  const list = (!isReseller() && state.status && state.status.certAlerts) || [];
+  let bar = document.getElementById('cert-bar');
+  const sig = list.map(a => `${a.nodeId || 0}:${a.name}:${a.trouble}`).join(',');
+  let dismissed = '';
+  try { dismissed = localStorage.getItem('m-ui.certDismissed') || ''; } catch {}
+  if (!list.length || dismissed === sig) { if (bar) bar.remove(); return; }
+  const what = a => {
+    if (a.trouble === 'failing') return t('alert.certFailing');
+    if (a.trouble === 'missing') return t('alert.certMissing');
+    const left = Math.floor((a.notAfter - Date.now() / 1000) / 86400);
+    if (left < 0) return t('alert.certExpired');
+    return t(a.method === 'manual' ? 'alert.certManual' : 'alert.certLeft', { n: left });
+  };
+  const shown = list.slice(0, 4).map(a => (a.node ? a.node + ' · ' : '') + a.name + ' ' + what(a)).join(t('reach.sep'));
+  const text = t('alert.certs', { list: shown + (list.length > 4 ? t('alert.certMore', { n: list.length - 4 }) : '') });
+  if (bar && bar.dataset.sig === sig && bar.dataset.text === text) return;
+  const main = document.querySelector('.main'), page = document.getElementById('page');
+  if (!main || !page) return;
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'cert-bar';
+    main.insertBefore(bar, page);
+  }
+  bar.className = 'alert-bar' + (list.some(a => a.trouble !== 'expiring') ? '' : ' warn');
+  bar.dataset.sig = sig;
+  bar.dataset.text = text;
+  const where = list.some(a => !a.nodeId) ? 'cert' : 'nodes'; // 本机的去证书页,只有副机的去服务器页
+  bar.innerHTML = `<span><b>${esc(text)}</b></span><div class="row"><a href="#/${where}" class="btn sm">${esc(t('alert.certView'))}</a><button class="btn sm ghost" id="cert-dismiss">${esc(t('reach.dismiss'))}</button></div>`;
+  bar.querySelector('#cert-dismiss').addEventListener('click', () => {
+    try { localStorage.setItem('m-ui.certDismissed', sig); } catch {}
+    bar.remove();
   });
 }
 

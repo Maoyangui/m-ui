@@ -89,18 +89,30 @@ function syncCell(n) {
 // 重载失败:线上还是旧配置,要在这一行里看得见
 const reloadBadge = err => err ? ` <span class="badge danger" title="${esc(err)}">${t('node.reloadFailed')}</span>` : '';
 
+// 证书自动续期在失败:红色徽标,悬停看是哪张、为什么(副机一般没配通知,以前只看得到锁后面的天数)
+function certFailBadge(n) {
+  let list = [];
+  try { list = Array.isArray(n.certs) ? n.certs : (n.certs ? JSON.parse(n.certs) : []); } catch { list = []; }
+  const bad = list.filter(c => c.autoRenew && c.renewErr);
+  if (!bad.length) return '';
+  const why = bad.map(c => `${c.name}: ${trErr(c.renewErr)}`).join('\n');
+  return ` <span class="badge danger" title="${esc(why)}">${t('node.certFail')}</span>`;
+}
+// 锁后面的天数(正用着的证书里最少的):剩 14 天以内变黄、7 天以内变红
+const certDaysCell = d => ` <span class="small ${d <= 7 ? 'danger-text' : d <= 14 ? 'warn-text' : 'muted'}" title="${t('cert.daysLeft')}">🔒 ${d}d</span>`;
+
 function coreCell(n) {
   if (n.isLocal) {
     const rl = state.status.reload || {};
     return badge(state.status.coreRunning ? t('dash.running') : t('dash.stopped'), state.status.coreRunning ? 'ok' : 'danger')
-      + reloadBadge(rl.at && !rl.ok ? `${trErr(rl.op)}: ${trErr(rl.error)}` : '');
+      + reloadBadge(rl.at && !rl.ok ? `${trErr(rl.op)}: ${trErr(rl.error)}` : '') + certFailBadge(n);
   }
   const s = n.status || {};
   if (!s.ok) return '—';
   return badge(s.coreRunning ? t('dash.running') : t('dash.stopped'), s.coreRunning ? 'ok' : 'danger')
     + (s.uptime ? ` <span class="muted small">${fmtDuration(s.uptime)}</span>` : '')
-    + (s.certDays !== undefined ? ` <span class="muted small" title="${t('cert.daysLeft')}">🔒 ${s.certDays}d</span>` : '')
-    + reloadBadge(s.reloadError);
+    + (s.certDays !== undefined ? certDaysCell(s.certDays) : '')
+    + reloadBadge(s.reloadError) + certFailBadge(n);
 }
 
 function actionsCell(n) {

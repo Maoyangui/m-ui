@@ -79,6 +79,7 @@ const groups = () => [
     ['tgOnQuota', t('set.tgOnQuota'), 'boolOn'], ['tgQuotaPercent', t('set.tgQuotaPercent'), 'number'],
     ['tgOnRuleLimit', t('set.tgOnRuleLimit'), 'bool'],
     ['tgOnUpstream', t('set.tgOnUpstream'), 'boolOn'], ['tgOnCore', t('set.tgOnCore'), 'boolOn'], ['tgOnReach', t('set.tgOnReach'), 'boolOn'],
+    ['tgOnCert', t('set.tgOnCert'), 'boolOn', t('set.tgOnCertHelp')],
     ['tgDaily', t('set.tgDaily'), 'boolOn'], ['tgDailyHour', t('set.tgDailyHour'), 'number'],
   ]},
   { id: 'monitor', title: t('set.monitor'), fields: [

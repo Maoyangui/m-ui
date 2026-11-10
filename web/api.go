@@ -117,7 +117,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status["subPath"] = s.setting("subPath")
 	status["webPort"] = s.settingInt("webPort", 2053)
 	status["webPath"] = s.basePath()
-	status["reload"] = s.run.ReloadStatus() // 最近一次重载:失败会在页面顶部常驻提示
+	status["reload"] = s.run.ReloadStatus()   // 最近一次重载:失败会在页面顶部常驻提示
+	status["certAlerts"] = s.run.CertAlerts() // 续期失败、正用着又快到期的证书(主机连副机的一起):页面顶部提示
 	if !s.run.IsNode() {
 		status["reachBad"] = s.run.Reach().Bad() // 大陆连通异常的服务器:概览页顶部提示
 	}
@@ -469,6 +470,12 @@ func (s *Server) validateLine(line *model.Line) error {
 		if name, rng := s.hopCovering(line); name != "" {
 			return fmt.Errorf("端口 %d 落在线路「%s」的端口跳跃范围 %s 里,UDP 包会被转给那条线路,换一个", line.Port, name, rng)
 		}
+	}
+	// HTTP 验证每次续期都要临时占 TCP 80:新占用 80 的线路(新建或改端口)部署到有这种证书的服务器上就拦下
+	// (以前一条走 CDN 的 80 线路推到全部服务器,这些证书从此天天续期失败)。原本就在 80 上的线路不拦:
+	// 续期前的预检会点它的名,证书页也会提示
+	if err := s.checkHTTP01Port(line); err != nil {
+		return err
 	}
 	// 机器上可能还跑着别的项目:端口有变化时试着监听一次,占着就别让它进库
 	// (端口没改的编辑不测——那时占着它的正是本机运行中的数据面;
@@ -1215,7 +1222,7 @@ var panelSettings = setOf(
 	"resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile",
 	"subPageEnabled", "subShareEnabled", "subPageBrand", "subPageTitle", "subPageSupport", "subPageBuyURL", "subPageNotice",
 	"tgEnabled", "tgToken", "tgChatId", "tgProxy", "tgOnLogin", "tgOnUserDisabled", "tgOnUserExpiring", "tgExpiringDays",
-	"tgOnQuota", "tgQuotaPercent", "tgOnRuleLimit", "tgOnUpstream", "tgOnCore", "tgOnReach", "tgDaily", "tgDailyHour",
+	"tgOnQuota", "tgQuotaPercent", "tgOnRuleLimit", "tgOnUpstream", "tgOnCore", "tgOnReach", "tgOnCert", "tgDaily", "tgDailyHour",
 	"upstreamCheckMinutes", "upstreamCheckFailThreshold", "reachAuto", "reachMinutes", "reachToken",
 	"certFile", "keyFile", "upstreamTestUrl", "statsBucketSeconds", "trafficAge", "allowPrivate",
 	"nodeMode", "backupHour", "backupKeep", "backupTelegram", "subLogAge", "auditAge",
@@ -1554,6 +1561,48 @@ func (s *Server) checkServicePorts(line model.Line) error {
 		}
 	}
 	return nil
+}
+
+// checkHTTP01Port 线路要新占 TCP 80(新建或改端口)时,部署范围里有服务器的证书靠 HTTP 验证自动续期的,拒绝并点名。
+// 只走 UDP 的 hy2 / tuic 不占 TCP 80。
+func (s *Server) checkHTTP01Port(line *model.Line) error {
+	if line.Port != 80 || render.UDPOnly(line.Protocol) || !s.portChanged(line) {
+		return nil
+	}
+	var nodes []model.Node
+	s.db.Select("id", "name", "is_local", "certs").Order("sort asc, id asc").Find(&nodes)
+	if len(nodes) == 0 { // 还没有服务器记录(全新库):只看本机证书库
+		nodes = []model.Node{{IsLocal: true}}
+	}
+	for _, n := range nodes {
+		if !render.LineOnNode(*line, n.Id) {
+			continue
+		}
+		if cert := s.http01CertOn(n); cert != "" {
+			return fmt.Errorf("80 端口要留给证书续期:服务器「%s」上的证书 %s 用 HTTP 验证自动续期,每次续期都要临时占用 80 端口。线路换个端口,或者把那张证书改用 DNS 验证重新签发", n.Name, cert)
+		}
+	}
+	return nil
+}
+
+// http01CertOn 这台服务器上靠 HTTP 验证自动续期的一张证书(没有返回空):本机查证书库,副机看它报上来的清单
+// (老版本副机不报验证方式,当作没有)。
+func (s *Server) http01CertOn(n model.Node) string {
+	if n.IsLocal {
+		var name string
+		s.db.Model(&model.Cert{}).Select("name").Where("source = ? AND auto_renew = ? AND (method = ? OR method = '') AND name NOT LIKE ?", "acme", true, "http", "*.%").Order("name asc").Limit(1).Scan(&name)
+		return name
+	}
+	var list []model.CertBrief
+	if len(n.Certs) == 0 || json.Unmarshal(n.Certs, &list) != nil {
+		return ""
+	}
+	for _, b := range list {
+		if b.Source == "acme" && b.AutoRenew && (b.Method == "http" || b.Method == "") {
+			return b.Name
+		}
+	}
+	return ""
 }
 
 // localLinesByPort 部署在本机(含"全部服务器")的线路:端口 → 线路名。停用的也算(端口给它留着)。

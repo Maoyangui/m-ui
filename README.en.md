@@ -136,11 +136,11 @@ The master does the accounting and pushes config; a node only forwards. Nodes ne
 | 1h | Probe this server's public IPv4 / IPv6 (an address counts as gone only after 3 missed rounds); expiry and usage warnings; prune stats and logs by retention | `runner/` `monitor/` `jobs/` |
 | 6h | Check whether a newer release exists (check only, never auto-install; through local WARP when GitHub is unreachable directly) | `selfupdate/` |
 | 24h | Download an empty file from GitHub once, to count online panels (no identifier, can be turned off) | `runner/` |
-| 12h | Certificate renewal check | `runner/` |
+| 3m after start, then 1h | Certificate renewal check: renews what is due, retries failures with backoff; daily reminders for certificates it cannot renew | `runner/` |
 | daily | Daily report; scheduled backup (at the configured hour) | `monitor/` `runner/` |
 | 1h | Prune time series, subscription access log and audit log, each by its own retention; fold minute samples older than 48 h into hourly buckets | `jobs/` |
 | per setting (10m default) | Probe upstreams — every server checks only what its own lines use, results roll up to the master | `monitor/` |
-| 12h | Certificate renewal check (after renewal sing-box swaps the certificate itself, no restart) | `runner/` |
+| 3m after start, then 1h | Certificate renewal check (after renewal sing-box swaps the certificate itself, no restart; the outcome is stored on each certificate and survives restarts) | `runner/` |
 | daily | Daily report | `monitor/` |
 
 ### Code layout
@@ -325,9 +325,15 @@ Each server, including the master, can have a **traffic ratio**: traffic through
 ### Certificates
 
 A server can hold several certificates; everything issued, self-signed or added goes into the **store**. Three sources:
-- **With a domain**: Let's Encrypt via HTTP-01 (port 80 reachable), Cloudflare DNS-01 (API token, no port 80) or manual DNS (the panel lists the TXT records to add and only asks for validation once they are visible). **Wildcards** (`*.example.com`) work over DNS and include the bare domain. DNS and port are pre-checked; auto-renewal reloads everything without a restart; manual DNS certificates need the records added again and don't renew on their own. A manual DNS wait can be cancelled at any time. The pre-check warns about an AAAA record pointing elsewhere (the CA prefers IPv6, so a wrong record fails validation).
+- **With a domain**: Let's Encrypt via HTTP-01 (port 80 reachable), Cloudflare DNS-01 (API token, no port 80) or manual DNS (the panel lists the TXT records to add and only asks for validation once they are visible). **Wildcards** (`*.example.com`) work over DNS and include the bare domain. DNS and port are pre-checked, and renewals reload everything without a restart. A manual DNS wait can be cancelled at any time. The pre-check warns about an AAAA record pointing elsewhere (the CA prefers IPv6, so a wrong record fails validation).
 - **Without a domain**: self-signed certificate for the server IP. Used for line inbounds only by default; subscriptions automatically carry "allow insecure" so clients connect, while panel and subscription stay on HTTP (browsers and clients reject self-signed HTTPS).
 - **Existing certificate**: point at a certificate and key already on the server (certbot, nginx, commercial…). Only paths are stored; they are checked for a matching, unexpired pair. Renew by overwriting the files.
+
+**Auto-renewal** runs 3 minutes after start and then every hour; a certificate is renewed in the last third of its lifetime (30 days before expiry for 90-day certificates, 15 for 45-day ones). Each certificate keeps its renewal state in the store (last result, failure reason, next retry), shown in the certificate page's Auto-renew column, where you can also renew now or turn auto-renewal off. Failures retry with 1, 2, 4 hour backoff (6 hours at most, 2 hours within the last 7 days); the first failure is notified at once, then once a day. Keep in mind:
+- **Manual DNS certificates cannot renew automatically** (the TXT records are needed again every time). The page says so, and a reminder goes out daily from 30 days before expiry; reissue with Cloudflare validation to get auto-renewal.
+- **HTTP-01 binds port 80 on every renewal**: a TCP line on port 80 makes it fail, and the pre-check names the line; creating a TCP line on port 80 is refused on servers that hold such a certificate.
+- Certificates already on the server are renewed by the tool that issued them (certbot or similar); the panel only reads the files and reminds you from 14 days before expiry.
+- **Nodes issue and renew their own certificates**, but nodes usually have no notifications set up: the main server alerts on their renewal failures and in-use certificates close to expiry, and flags them at the top of the page and on the Servers page. Let's Encrypt no longer sends expiry emails, so set up Telegram or Webhook at least on the main server.
 
 **The line default, panel HTTPS and subscription HTTPS each pick their own** from a drawer listing the store (subscription applies immediately, panel needs an m-ui restart); adding a certificate only touches what you tick. **Any line can pick its own too**: the drawer on the line form shows which servers have that certificate and how long is left, and a server without it uses its own default. SNI and "allow insecure" in subscriptions follow the certificate the line really uses. Certificates are matched by name across servers; nodes keep their own.
 

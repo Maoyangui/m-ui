@@ -200,6 +200,7 @@ func New(dbPath string) (*Runner, error) {
 		logger.Info("已为 ", n, " 个用户补全新协议凭据")
 	}
 	r := &Runner{db: db, core: core.NewCore(), dbPath: dbPath}
+	r.cert.kick = make(chan struct{}, 1)
 	r.subSrv = r.newSubServer()
 	r.notifier = notify.New(r.setting)
 	r.notifier.Persist(func() string { return r.setting("notifyOnce") }, func(v string) {
@@ -226,6 +227,7 @@ func New(dbPath string) (*Runner, error) {
 		SelfName:      r.LocalNodeName,
 		SelfNodeId:    r.LocalNodeId,
 		Alerting:      func() bool { return !r.IsNode() },
+		CertSummary:   r.certSummary,
 		DB:            db, Setting: r.setting, CoreRunning: r.CoreRunning, Check: r.CheckUpstream, Notify: r.notifier,
 	})
 	r.reach = reach.New(reach.Deps{
@@ -236,6 +238,7 @@ func New(dbPath string) (*Runner, error) {
 	r.hub = hub.New(hub.Deps{
 		DB: db, Setting: r.setting, IsNode: r.IsNode, Version: Version,
 		Notify:         func(toggle, text string) { r.notifier.Event(toggle, text) },
+		OnceDurable:    r.notifier.OnceDurable,
 		LocalIPs:       r.OnlineIPs,
 		SetExternalIPs: r.SetExternalIPs,
 		LocalGroups:    r.GroupState,

@@ -34,3 +34,18 @@ func TestOnceDurablePersistsAndForget(t *testing.T) {
 		t.Fatal("Forget(quota:alice) 不该清掉 alicex 的记录")
 	}
 }
+
+// 证书提醒里的剩余时间:整天数、不到一天、已过期;时间读不出来(零值)也不能算出负数天。
+func TestLeftText(t *testing.T) {
+	day := 24 * time.Hour
+	for left, want := range map[time.Duration]string{
+		23*day + time.Hour: "还剩 23 天", 3 * time.Hour: "不到 1 天就到期", -3 * time.Hour: "已过期 1 天", -2 * day: "已过期 2 天",
+	} {
+		if got := LeftText(left); got != want {
+			t.Errorf("LeftText(%v) = %q,应是 %q", left, got, want)
+		}
+	}
+	if got := LeftText(time.Time{}.Sub(time.Now())); !strings.HasPrefix(got, "已过期 ") || strings.Contains(got, "-") {
+		t.Errorf("零值时间: %q", got)
+	}
+}
