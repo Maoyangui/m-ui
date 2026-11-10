@@ -615,3 +615,51 @@ button.reach-cell:focus-visible { outline: 2px solid var(--primary); outline-off
 .plan-ops li:last-child { border-bottom: none; }
 details.api-list { margin-top: .6rem; }
 @media (max-width: 700px) { .pc-cols { grid-template-columns: 1fr; } }
+/* ===== 主机容灾:服务器列表的角色标签与小卡片、设为主机的确认框与进度、设置页 ===== */
+button.role-chip { display: inline-flex; align-items: center; gap: .22rem; font: inherit; font-size: .72rem; line-height: 1.35; padding: .12rem .42rem .12rem .55rem; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); cursor: pointer; white-space: nowrap; vertical-align: middle; margin-right: .25rem; }
+button.role-chip .caret { font-size: .6rem; opacity: .75; }
+button.role-chip:hover { filter: brightness(.96); }
+button.role-chip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+button.role-chip[aria-expanded="true"] { box-shadow: 0 0 0 2px var(--primary-soft); }
+button.role-chip.k-master { background: var(--primary-soft); color: var(--primary-text); border-color: transparent; }
+button.role-chip.k-standby { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+button.role-chip.k-lost { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+.ha-pop { position: fixed; z-index: 70; width: min(22rem, calc(100vw - 1rem)); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: .75rem .9rem; font-size: .84rem; line-height: 1.55; }
+.ha-pop:focus { outline: none; }
+.ha-pop h4 { margin: 0 0 .3rem; font-size: .88rem; font-weight: 600; }
+.ha-pop p { margin: .25rem 0; color: var(--text); }
+.ha-pop p.muted { color: var(--muted); }
+.ha-pop .actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
+.ha-pop .why { color: var(--warn); font-size: .78rem; margin-top: .35rem; }
+.ha-pop .why:empty { display: none; }
+.ha-plan { margin: .1rem 0 .7rem; padding-left: 1.15rem; line-height: 1.6; }
+.ha-plan li { margin: .18rem 0; }
+.ha-note { border-left: 3px solid var(--border-strong); background: var(--surface-2); border-radius: var(--radius-sm); padding: .5rem .7rem; margin: .4rem 0 .7rem; font-size: .85rem; }
+.ha-note ul { margin: .25rem 0 0; padding-left: 1.1rem; }
+.ha-note.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+.ha-note.bad { border-left-color: var(--danger); background: var(--danger-soft); }
+.ha-note.ok { border-left-color: var(--ok); background: var(--ok-soft); }
+.ha-steps { list-style: none; padding: 0; margin: .6rem 0; display: grid; gap: .4rem; }
+.ha-steps li { display: flex; align-items: center; gap: .55rem; color: var(--muted); }
+.ha-steps li .ic { width: 1.1rem; text-align: center; }
+.ha-steps li.done { color: var(--ok); }
+.ha-steps li.cur { color: var(--text); font-weight: 500; }
+.ha-steps li.fail { color: var(--danger); }
+.ha-modes { margin: .6rem 0 .8rem; }
+.ha-modes label { display: flex; gap: .6rem; align-items: flex-start; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .55rem .7rem; margin-bottom: .45rem; cursor: pointer; line-height: 1.5; }
+.ha-modes label.sel { border-color: var(--primary); background: var(--primary-soft); }
+.ha-modes input[type=radio] { width: auto; margin-top: .25rem; accent-color: var(--primary); }
+.ha-sub { margin: .9rem 0 .4rem; font-size: .85rem; font-weight: 600; color: var(--muted); }
+.ha-check { list-style: none; padding: 0; margin: .2rem 0 .6rem; display: grid; gap: .3rem; }
+.ha-check li { display: grid; grid-template-columns: 1.2rem 1fr; gap: .35rem; font-size: .85rem; line-height: 1.5; }
+.ha-check li .ic { font-weight: 700; text-align: center; }
+.ha-check li.lv-ok .ic { color: var(--ok); }
+.ha-check li.lv-warn .ic { color: var(--warn); }
+.ha-check li.lv-bad .ic { color: var(--danger); }
+.ha-check li.lv-info .ic { color: var(--muted); }
+.ha-pause { gap: .4rem; flex-wrap: wrap; align-items: center; margin: .3rem 0 .6rem; }
+.ha-adv summary { cursor: pointer; color: var(--muted); margin: .4rem 0; }
+.field.check.inline { display: inline-flex; margin: 0 0 0 .6rem; }
+.alert-bar.ha-info { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-text); }
+.alert-bar.ha-info a { text-decoration: underline; }
+@media (max-width: 700px) { .ha-pop { font-size: .88rem; } }

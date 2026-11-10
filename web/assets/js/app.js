@@ -20,6 +20,7 @@ import * as ops from './pages/ops.js';
 import * as logs from './pages/logs.js';
 import * as settings from './pages/settings.js';
 import * as admin from './pages/admin.js';
+import { haNotices } from './ha.js';
 
 export const state = {
   status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [], exts: [], rules: [], limitStates: [],
@@ -61,7 +62,7 @@ function resetState() {
 export async function load(...what) {
   const all = what.length === 0;
   const jobs = [];
-  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); restoreNotice(); reloadNotice(); reachNotice(); certNotice(); }));
+  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); restoreNotice(); reloadNotice(); reachNotice(); certNotice(); haNotices(s); }));
   if (all || what.includes('settings')) jobs.push(get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
   if (all || what.includes('lines')) jobs.push(get('lines').then(l => { state.lines = l; }));
   if (!isReseller() && (all || what.includes('upstreams'))) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));

@@ -4,6 +4,7 @@ import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, setHTML } from '../ui.js';
 import { loadReach, reachCell, reachToolbar, refreshDetail, setNodes, setReachListener } from '../reach.js';
+import { loadHA, roleChip, haMoreMenu, setHARefresh } from '../ha.js';
 
 export const title = () => t('node.title');
 export const subtitle = () => t('node.subtitle');
@@ -12,9 +13,10 @@ const isNodeView = () => data.role === 'node';
 
 setNodes(() => data.nodes);
 setReachListener(() => { renderReachBar(); renderRows(); refreshDetail(); });
+setHARefresh(() => renderRows());
 
 export async function render(el) {
-  [data] = await Promise.all([get('nodes'), loadReach()]);
+  [data] = await Promise.all([get('nodes'), loadReach(), loadHA()]);
   el.innerHTML = `
     <div class="toolbar">
       <span class="muted small">${t('node.revision')} <code>${esc(data.revision || '—')}</code></span>
@@ -35,7 +37,7 @@ export async function render(el) {
 
 export async function tick() {
   if (!document.getElementById('nodes-body')) return;
-  [data] = await Promise.all([get('nodes'), loadReach()]);
+  [data] = await Promise.all([get('nodes'), loadReach(), loadHA()]);
   renderReachBar();
   renderRows();
   renderDecomGone();
@@ -68,19 +70,21 @@ const subByDomain = () => String((state.settings || {}).subServerAddr || '').toL
 
 function renderReachBar() { setHTML('reach-bar', reachToolbar(isNodeView())); }
 
-// 副机视角:自己是"本机",主机那行标"主机 · 最近同步",其它副机标"主机管理";副机不探测别的机器
+// 副机视角:自己是"本机",主机那行标"主机 · 最近同步",其它副机标"主机管理";副机不探测别的机器。
+// 第一个标签是主机容灾里的角色(主机 · 本机 / 备用 N / 副机 / 原主机 · 失联),点开是小卡片(见 ha.js)
 function statusCell(n) {
-  if (n.isLocal) return badge(t('node.local'), 'primary');
+  const chip = roleChip(n, data);
+  if (n.isLocal) return chip || badge(t('node.local'), 'primary');
   if (isNodeView()) {
-    if (n.id === data.masterId) return `${badge(t('role.master'), 'primary')}${data.appliedAt ? ` <span class="muted small">${t('node.lastSync')} ${fmtRelative(Number(data.appliedAt))}</span>` : ''}`;
-    return badge(t('node.byMaster'));
+    if (n.id === data.masterId) return `${chip || badge(t('role.master'), 'primary')}${data.appliedAt ? ` <span class="muted small">${t('node.lastSync')} ${fmtRelative(Number(data.appliedAt))}</span>` : ''}`;
+    return chip || badge(t('node.byMaster'));
   }
-  if (!n.enabled) return badge(t('common.disabled')) + decomBadge(n);
+  if (!n.enabled) return chip + badge(t('common.disabled')) + decomBadge(n);
   const s = n.status;
-  if (!s) return badge(t('node.pending'), 'warn');
+  if (!s) return chip + badge(t('node.pending'), 'warn');
   // 在线但有话要说(配置推不下去、数据面没应用成功、记账出问题):这台机器并没有离线,但管理员必须看见
-  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.noConnFails ? ` <span title="${esc(t('node.noConnFailsHelp'))}">${badge(t('node.noConnFails'))}</span>` : ''}${ledgerBadges(s)}${s.error ? `<div class="sub-cell ellip warn-text" title="${esc(trErr(s.error))}">${esc(shortErr(s.error))}</div>` : (s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : '')}`;
-  return `${badge(t('common.offline'), 'danger')}<div class="sub-cell ellip" title="${esc(trErr(s.error || ''))}">${esc(shortErr(s.error))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
+  if (s.ok) return `${chip}${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.noConnFails ? ` <span title="${esc(t('node.noConnFailsHelp'))}">${badge(t('node.noConnFails'))}</span>` : ''}${ledgerBadges(s)}${s.error ? `<div class="sub-cell ellip warn-text" title="${esc(trErr(s.error))}">${esc(shortErr(s.error))}</div>` : (s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : '')}`;
+  return `${chip}${badge(t('common.offline'), 'danger')}<div class="sub-cell ellip" title="${esc(trErr(s.error || ''))}">${esc(shortErr(s.error))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
 }
 
 // 副机报错原文是 Go 的网络错误,又长又带完整 URL(列表里会把表格撑出横向滚动条)。
@@ -148,7 +152,7 @@ function actionsCell(n) {
         ${n.isLocal || !n.enabled ? '' : `<button class="btn sm" data-act="node.push" data-id="${n.id}">${t('node.push')}</button>`}
         ${n.isLocal || !n.certFp ? '' : `<button class="btn sm" data-act="node.resetCert" data-id="${n.id}" title="${esc(n.certFp)}">${t('node.resetCert')}</button>`}
         <button class="btn sm" data-act="node.edit" data-id="${n.id}">${t('common.edit')}</button>
-        ${n.isLocal ? '' : `<button class="btn sm danger" data-act="node.del" data-id="${n.id}">${t('common.delete')}</button>`}`;
+        ${n.isLocal ? '' : `<button class="btn sm danger" data-act="node.del" data-id="${n.id}">${t('common.delete')}</button>`}${haMoreMenu(n)}`;
 }
 
 // 探测到的 IPv4 / IPv6(publicIp 有 IPv4 时是 IPv4,老版本副机在纯 IPv6 机器上报的是 v6)

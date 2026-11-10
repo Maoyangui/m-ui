@@ -47,7 +47,7 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 | Plans | Templates for quota / duration / devices / speed / lines; apply on create, renew (several periods at once) or extend; change plans by replacing, stacking or prorating at a reference price, previewed before you confirm; can bind speed-limit rules for current and future users of the plan |
 | Resellers | Give a reseller lines plus traffic / device / bandwidth budgets and an expiry; they create users and plans in their own panel (port 2054, path /dl). Usage rolls up to the reseller, and going over quota, expiring or being disabled cuts off all of their users at once |
 | Subscriptions | Universal link, Clash and sing-box formats, the right one picked per client from a single address; custom Clash / sing-box templates; external nodes can be hidden, renamed, excluded by keyword and tested from mainland China; landing page in the browser (usage, expiry, one-tap import, QR); users can hand out a temporary share link themselves; external nodes / external subscriptions merged in; `insecure` added automatically for self-signed certs |
-| Multi-server | Master pushes config, collects traffic, enforces quotas; per-server traffic ratio; IPv4 / IPv6 per line on dual-stack servers; node offline / recovery alerts; mainland reachability checks (China Mobile / Telecom / Unicom home-broadband probes, manual + scheduled, block alerts) |
+| Multi-server | Master pushes config, collects traffic, enforces quotas; per-server traffic ratio; IPv4 / IPv6 per line on dual-stack servers; node offline / recovery alerts; mainland reachability checks (China Mobile / Telecom / Unicom home-broadband probes, manual + scheduled, block alerts); **Set as master** (move the master to another server in one step, subscription addresses unchanged) and **master failover** (a standby takes over when the master dies, after confirmation or automatically) |
 | Certificates | Several per server: Let's Encrypt via HTTP-01, Cloudflare DNS-01 or manual DNS (wildcards included), auto-renewal, hot reload without restart; line default, panel and subscription each pick their own, and any line can pick its own; one-click self-signed cert when you have no domain |
 | Backup | One zip with a consistent database snapshot and certificates; upload to restore a whole server; scheduled backups, rotation, push to Telegram; migration wizard |
 | Ops | WARP install / enable / disable / uninstall with exit-IP verification; swap, sysctl + BBR, file limits, NTP; cap systemd journal disk usage |
@@ -329,6 +329,27 @@ Each server, including the master, can have a **traffic ratio**: traffic through
 >
 > Disabling or deleting a node first pushes it an empty user table, so it stops serving everyone at once; re-enabling restores it. If the node cannot be reached the panel says so and the master keeps retrying until it confirms; to stop it right away, run `systemctl disable --now m-ui` on that machine or uninstall it (turning off node mode does not stop it: it becomes a standalone master and keeps serving with its last configuration).
 
+### Master failover and Set as master
+
+There are just two things:
+
+- **Set as master**: move the master to another server. On the Servers page click that server's **role tag** (the first small tag in the status column, e.g. "Standby 1 ▾" or "Node ▾") and choose "Set as master" in its card; the "⋯" menu at the end of the row has it too. The dialog spells out what will happen and asks for the admin password once (plus the two-factor code if enabled); progress is shown throughout and the new panel address is given at the end. What happens: changes are paused → a one-time public key is requested from that server over the existing server link (API address + token + certificate fingerprint) → all master data (users, lines, plans, resellers, settings, traffic history) is pushed to it, end-to-end encrypted with that key → it takes over with a new epoch and every node follows it → the old master becomes a node by itself and keeps serving with its own lines. Both servers restart once; users on them reconnect after a few seconds, other servers are not affected. If any step fails, the change is cancelled automatically, changes are allowed again and no data changes.
+  - **A fresh VPS as master**: install m-ui as usual, add it as a node (just like any node), and once it is synced, use "Set as master" on it.
+  - **Subscription addresses stay the same**: the subscription domain, port, path and certificate move with the master role; once the subscription domain's DNS points to the new master, users' existing subscription addresses keep working (if the subscription address uses an IP it changes, and the dialog says so in advance). The panel and reseller panel use the new master's own addresses, given on the page and in Telegram when it finishes.
+  - Nodes that are offline, not synced or too old cannot be set as master; the card says why.
+- **Master failover** (**Settings → Master failover**, off by default):
+  - **Off**: if the master dies, a person has to act; nodes keep serving with their own lines.
+  - **Take over after confirmation when the master is lost** (recommended): 3 minutes after the standby finds the master lost it sends a Telegram message; reply "/takeover code" (or "接任 code"), or click "Take over as master" in the standby's panel.
+  - **Take over automatically when the master is lost**: takes over after 10 minutes. With three or more servers a majority of nodes must vote yes; with one master and one node the overseas probes must not reach the master either.
+
+When it is on, the first nodes in server-list order (2 by default, 1–3) are **standbys** that keep an encrypted data replica (every 5 minutes, plus one within 30 seconds of a change; encrypted to the standby's own key and signed by the master, kept out of its database and backups); the Servers page marks them "Standby 1", "Standby 2". If the master dies, standby 1 takes over (standby 2 if 1 is gone too), and from then on it is the master with every master duty (quotas and expiry, ledger merging, subscriptions, reseller panel, alerts, backups, certificate renewal, Telegram bot, external API) and can stay so. Traffic on the nodes' lines is recovered from the ledgers; what can be lost is a few minutes of admin changes after the last replica and the former master's own line traffic. When the former master comes back it becomes a node by itself (changes it may have received while lost are kept in a backup) and the master panel shows a one-time notice; to make it master again, use "Set as master" on it.
+
+**When the master counts as lost**: the standby has heard nothing from it for over a minute, other nodes cannot reach it either (if one can, the problem is between that standby and the master), overseas probes (US, DE, JP, SG, HK — no mainland probes) cannot reach the master's public IP either (if they can, it is a network partition), and the wait is over. A block from mainland China, a cut between one node and the master, or a master upgrade or restart (one-click upgrades and planned restarts pause takeovers automatically) does not count. **Split-brain protection**: every takeover or Set as master raises the epoch and nodes follow only the highest; a node that can still reach the former master does not switch, and the former master becomes a node only when a majority of nodes already follow a higher epoch.
+
+The **readiness check** in Settings ticks each item and gives a one-line fix for anything missing: eligible standbys, node versions, self-checked replicas, https links to the standbys (http works too — the data is end-to-end encrypted — but https is recommended; a self-signed certificate with a fingerprint is enough), a domain for subscriptions, Telegram notifications, nodes reaching each other, the overseas witness. **Advanced** has the wait times, the replica interval, and automatic Cloudflare DNS (a separate Zone.DNS edit token and the names that follow the master; when the master changes only A / AAAA records pointing to the former master's IP are pointed to the new one, keeping proxying and TTL; failures only alert; "Test token and records" checks it first).
+
+> Requirements: every node on 0.7.17 or newer (older nodes keep syncing but cannot be standbys and ignore epochs); the panel port open between nodes (used to confirm a loss with each other; without it the overseas witness or a person decides). See `m-ui ha` below for the command line.
+
 ### Certificates
 
 A server can hold several certificates; everything issued, self-signed or added goes into the **store**. Three sources:
@@ -391,8 +412,14 @@ m-ui restore -db <db> -from backup.zip       restore (service stopped)
 m-ui import -from old-panel.db -to <db>      import an old panel database
 m-ui selfsign -hosts domain,ip               generate a self-signed certificate
 m-ui render -db <db>                         print and validate the sing-box config
+m-ui ha status                               master failover: role, standbys, whether the master is lost (root, as below)
+m-ui ha takeover [--force]                   take over as master on a standby; --force ignores recent master contact
+m-ui ha set-master <server name or id>       on the master, set a node as master (waits and prints the new panel URL)
+m-ui ha pause <minutes> / m-ui ha resume     on the master, pause / resume takeovers (before upgrades, maintenance)
 m-ui version
 ```
+
+`m-ui ha` hands the action to the running service (through the database); when the service is not running, `status` only shows what the database records. On a master, `takeover --force` means "reclaim nodes that followed another master with a higher epoch"; use it only when two masters are deadlocked.
 
 Without `-db` the path comes from the systemd unit (default `/etc/m-ui/m-ui.db`); if the database does not exist the command fails instead of silently creating an empty one and backing up or resetting that.
 
@@ -406,6 +433,7 @@ Run `m-ui` without arguments for the menu (Chinese):
  5. reset admin password          12. switch master / node role
  6. change panel port / path      13. disable two-factor auth
  7. reset all settings            14. uninstall
+                                  15. master failover / set as master
 ```
 
 ## Migrating from an old panel

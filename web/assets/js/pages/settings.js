@@ -3,6 +3,7 @@ import { get, post } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy, urlHost, charCount, bindCharCounts, PAGE_TEXT_MAX } from '../ui.js';
 import { logoBlock, bindLogo } from '../logo.js';
+import { renderHASettings } from '../ha.js';
 
 // boolSetting 开关类设置的显示:和后端同一个判法(model.NormBoolSetting),空值用默认。
 function boolSetting(v, def) {
@@ -150,6 +151,16 @@ export async function render(el) {
   bindLogo('set-logo', 'sub-logo');
   bindCharCounts(el);
   if (isNode) renderPairing();
+  // 主机容灾:紧跟在角色卡片后面(服务器页角色卡片里的「去设置」跳到这里)
+  const haCard = document.createElement('section');
+  haCard.className = 'card';
+  haCard.id = 'ha-card';
+  document.querySelector('section.card').after(haCard);
+  renderHASettings(haCard).then(() => {
+    let to = '';
+    try { to = sessionStorage.getItem('m-ui.scrollTo') || ''; sessionStorage.removeItem('m-ui.scrollTo'); } catch {}
+    if (to === 'ha-card') haCard.scrollIntoView({ block: 'start' });
+  });
 }
 
 // 副机:展示配对信息(API 地址 + 令牌),复制到主机的"服务器"页即可接入
