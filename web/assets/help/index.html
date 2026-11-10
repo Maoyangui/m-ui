@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>m-ui</title>
+<link rel="icon" href="../logo.svg" type="image/svg+xml">
+<!-- 直接打开 help/ 时按面板同一套判断选语言:地址里的 lang → 面板记住的语言 → 浏览器语言;视图参数和 #锚点 原样带过去 -->
+<script>
+(function () {
+  var q = /[?&]lang=(zh|en)(&|$)/.exec(location.search), l = q ? q[1] : null;
+  if (!l) { try { l = localStorage.getItem('m-ui-lang'); } catch (e) {} }
+  if (l !== 'zh' && l !== 'en') l = String(navigator.language || '').indexOf('zh') === 0 ? 'zh' : 'en';
+  location.replace(l + '.html' + location.search + location.hash);
+})();
+</script>
+</head>
+<body>
+<p><a href="zh.html">帮助说明(中文)</a> · <a href="en.html" lang="en">Help (English)</a></p>
+</body>
+</html>

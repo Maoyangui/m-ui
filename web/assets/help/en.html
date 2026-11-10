@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>Help · m-ui</title>
+<link rel="icon" href="../logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="help.css">
+<script>try{var m=localStorage.getItem('m-ui-theme');if(m==='light'||m==='dark')document.documentElement.dataset.theme=m}catch(e){}if(/[?&]view=reseller(&|$)/.test(location.search))document.documentElement.classList.add('rv')</script>
+</head>
+<body>
+<header class="head">
+  <a class="brand" href="#top"><img src="../logo.svg" alt=""><span>m-ui Help</span><span class="badge rv-only">Reseller panel</span></a>
+  <span class="grow"></span>
+  <button class="toc-btn" id="toc-btn" type="button" aria-controls="toc" aria-expanded="false">Contents ▾</button>
+  <label class="search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="Search help (press /)" aria-label="Search help" autocomplete="off" spellcheck="false"><button class="clear" id="q-clear" type="button" aria-label="Clear search" hidden>✕</button></label>
+  <nav class="links"><a id="lang-link" href="zh.html" hreflang="zh-CN" lang="zh-CN">中文</a><a href="../">Back to panel</a></nav>
+</header>
+<div class="wrap">
+<nav class="toc" id="toc" aria-label="Contents"><div id="toc-list"></div></nav>
+<main class="doc" id="doc">
+<div class="intro" id="top">
+  <h1><span class="av-only">m-ui Help</span><span class="rv-only">Reseller panel help</span></h1>
+  <p>Find a feature in the contents on the left, or use the search box above. Text in grey boxes matches the buttons and titles in the panel exactly, so you can look for it and click it.<span class="rv-only"> This view only covers what the reseller panel can do.</span></p>
+</div>
+<div class="status" id="status" hidden data-found="{n} matching sections" data-none="Nothing found for “{q}”. Try other words, such as a feature or a button label."><span></span><button type="button">Clear search</button></div>
+<div class="parts">
+
+<div class="part" data-title="Start">
+<section class="chap" id="start">
+  <h2>Getting started</h2>
+  <p class="lede av-only">m-ui is a self-hosted proxy panel: lines, users, subscriptions, certificates, backups and multiple servers, all managed in the browser.</p>
+  <p class="lede rv-only">The reseller panel manages the users under your account: create them, renew them, watch their usage, and send them their subscription links.</p>
+
+  <section class="sec" id="concepts">
+    <h3>A few words first</h3>
+    <p class="lede">These ideas come up everywhere in the panel; knowing them makes the rest easy.</p>
+    <ul>
+      <li><b>Line</b>: the entry clients connect to, a protocol plus a port, and where its traffic leaves from. The nodes in a user's subscription are generated from lines.</li>
+      <li data-scope="admin"><b>Upstream</b>: the exit of a line. The default is direct (straight out of this server); it can also be WARP or another exit server.</li>
+      <li><b>User</b>: one subscription link with a traffic quota, expiry, device limit and speed limit; it is disabled automatically when it runs over.</li>
+      <li><b>Plan</b>: a template of quota, duration, devices, speed and lines, applied in one click when creating or renewing a user.</li>
+      <li><b>Subscription</b>: the link clients import; opened in a browser, the same link shows the user's own landing page.</li>
+      <li data-scope="admin"><b>Master / node servers</b>: the master holds all data and does the accounting; nodes only forward traffic and get their configuration from the master.</li>
+      <li><b>Reseller</b>: someone who sells accounts for the site owner and only manages their own users in their own reseller panel.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="first-login" data-scope="admin">
+    <h3>First sign-in</h3>
+    <p class="lede">Open the panel in a browser after installing, and change the default password first.</p>
+    <ol class="steps">
+      <li>Open <code>http://SERVER-IP:2053/app/</code> (use the port and path printed at the end of the installation).</li>
+      <li>Sign in with the default account <code>admin</code> / <code>admin</code>.</li>
+      <li>A red bar at the top warns about the default password. Click <b data-k="alert.changeNow">Change now</b>; on the <b data-k="nav.admin">Admin</b> page, under <b data-k="adm.account">Login account</b>, fill in <b data-k="set.oldPass">Current password</b> and <b data-k="set.newPass">New password</b>, click <b data-k="set.updateAdmin">Update account</b>, then sign in again with the new password.</li>
+    </ol>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>Opening just <code>http://SERVER-IP:2053/</code> gives a 404 on purpose: the panel path is not revealed to port scanners. Always include the full path.</li>
+      <li>The page does not load: check that the cloud security group / firewall allows 2053/tcp.</li>
+      <li>Forgot the address or password: SSH into the server and run <code>m-ui</code>; option 1 shows the panel address, option 5 resets the admin password.</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="five-steps" data-scope="admin">
+    <h3>Five steps to go live</h3>
+    <p class="lede">The <b data-k="qs.title">Quick start</b> checklist on the dashboard is exactly these steps; after the first four you can hand out accounts.</p>
+    <ol class="steps">
+      <li><b>Change the default password</b> (see above).</li>
+      <li><b>Get a certificate</b>: <b data-k="nav.cert">Certificate</b> page → <b data-k="cert.add">Add a certificate</b>. With a domain, choose <b data-k="cert.srcAcme">Domain (auto-issue)</b>; without one, choose <b data-k="cert.srcSelf">No domain (self-signed)</b> and click <b data-k="cert.selfsign">Generate self-signed</b>. See <a href="#cert">Certificates</a>.</li>
+      <li><b>Create a line</b>: <b data-k="nav.lines">Lines</b> page → <b data-k="line.quick">Quick add</b>; beginners pick Hysteria2 or AnyTLS and save. See <a href="#lines">Lines and protocols</a>.</li>
+      <li><b>Create a user</b>: <b data-k="nav.users">Users</b> page → <b data-k="user.add">Add user</b>; fill in a name and the quota, tick the <b data-k="user.f.lines">Lines</b> they may use, save.</li>
+      <li><b>Send the subscription</b>: click the user's name to open the details, copy the subscription link and send it, or let them scan the QR code. Opened in a browser, the link offers one-tap import into their app.</li>
+    </ol>
+    <div class="tip"><b>No domain? No problem</b>A self-signed certificate plus the server IP works: subscriptions tell clients to allow the insecure certificate automatically, so users change no settings. Issue a real certificate later when you have a domain; users just refresh their subscription once.</div>
+    <div class="pit"><b>Common pitfall</b>Open each line's port in the cloud security group and the system firewall: Hysteria2 and TUIC use UDP, most others use TCP. A closed port is the most common reason for "cannot connect".</div>
+  </section>
+
+  <section class="sec" id="rs-start" data-scope="reseller">
+    <h3>Reseller: three steps to start</h3>
+    <p class="lede">Once the site owner has created your reseller account, these three steps get you selling.</p>
+    <ol class="steps">
+      <li>Open the reseller panel address you were given (default port 2054, path <code>/dl/</code>). Enter your reseller name as the username; on the first sign-in leave the password empty and click <b data-k="login.submit">Sign in</b>, then set a password when asked. See <a href="#rs-login">First sign-in and password</a>.</li>
+      <li>(Optional) Create a few plans on the <b data-k="nav.plans">Plans</b> page so new accounts and renewals take one click.</li>
+      <li>On the <b data-k="nav.users">Users</b> page click <b data-k="user.add">Add user</b>: enter a name, choose a plan or fill in the quota, tick the <b data-k="user.f.lines">Lines</b>, save. Click the user's name to open the details and send them the subscription link.</li>
+    </ol>
+    <div class="tip"><b>The reseller panel has four pages</b><b data-k="nav.dashboard">Dashboard</b>, <b data-k="nav.users">Users</b>, <b data-k="nav.plans">Plans</b> and <b data-k="nav.account">Account</b>. You only see your own users and the plans you created.</div>
+  </section>
+
+  <section class="sec" id="tour" data-scope="admin">
+    <h3>Finding your way around</h3>
+    <p class="lede">Navigation is on the left, help and feedback are at the top right, and coloured bars at the top of the page are reminders that need your attention.</p>
+    <ul>
+      <li>The navigation, top to bottom: <b data-k="nav.dashboard">Dashboard</b>, <b data-k="nav.lines">Lines</b>, <b data-k="nav.upstreams">Upstreams</b>, <b data-k="nav.exts">External nodes</b>, <b data-k="nav.users">Users</b>, <b data-k="nav.resellers">Resellers</b>, <b data-k="nav.plans">Plans</b>, <b data-k="nav.rules">Rules</b>, <b data-k="nav.nodes">Servers</b>, <b data-k="nav.cert">Certificate</b>, <b data-k="nav.backup">Backup</b>, <b data-k="nav.ops">Ops</b>, <b data-k="nav.logs">Logs</b>, <b data-k="nav.admin">Admin</b>, <b data-k="nav.settings">Settings</b>.</li>
+      <li>Bottom left: theme (◐ follow the system, ☀ light, ☾ dark), language and <b data-k="common.logout">Sign out</b>. An arrow next to the version number means an update is available; click it to update (see <a href="#update">Updating</a>).</li>
+      <li>Top right: <b data-k="help.btn">Help</b> (this page) and <b data-k="support.btn">Feedback / Support</b> (contact the author, report problems).</li>
+      <li>Reminder bars at the top: default password still in use, certificates need attention, mainland reachability problems, a failed data-plane reload and so on. Follow the hint; bars that can be dismissed have <b data-k="reach.dismiss">Got it</b>.</li>
+      <li>On a node server's own panel, pages such as lines and users are read-only; make changes on the master.</li>
+      <li>Shortcuts: <kbd>/</kbd> jumps to the page's search box, <kbd>Esc</kbd> closes dialogs, <kbd>Ctrl</kbd> + <kbd>Enter</kbd> submits a dialog. On a phone, tap ☰ at the top left to open the navigation.</li>
+    </ul>
+  </section>
+</section>
+</div>
+
+<div class="part" data-title="Set up">
+<section class="chap" id="nodes" data-scope="admin">
+  <h2>Servers: master and nodes</h2>
+  <p class="lede">One master server holds all the data; any number of node servers can be added as extra entry points. Each line appears once per server in subscriptions, and clients pick the fastest.</p>
+
+  <section class="sec" id="nodes-why">
+    <h3>Do I need nodes?</h3>
+    <p class="lede">One server is enough to start; add nodes when you want more regions or more entry points.</p>
+    <ul>
+      <li>Every 5 seconds the master pushes lines and users to the nodes and collects their traffic and online devices; quotas and expiry are judged on the master only.</li>
+      <li>Nodes only forward traffic. If the master is unreachable for a while, nodes keep serving with the last configuration they got; traffic is reconciled afterwards and never billed twice.</li>
+      <li>Add a server and every user's subscription gains the matching nodes automatically.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="nodes-add">
+    <h3>Attach a node</h3>
+    <p class="lede">Install m-ui on the node and enter its pairing details on the master.</p>
+    <ol class="steps">
+      <li>Install m-ui on the node server the same way and sign in to its panel (change the default password first).</li>
+      <li>On the node: <b data-k="nav.settings">Settings</b> → <b data-k="set.role">Role</b>, tick <b data-k="set.roleSwitch">Run as node (secondary server)</b> and click <b data-k="common.save">Save</b>.</li>
+      <li>On the node: <b data-k="nav.settings">Settings</b> → <b data-k="set.pairing">Pairing</b>, copy the <b data-k="node.apiUrl">API URL</b> and the <b data-k="node.token">Pairing token</b>.</li>
+      <li>On the master: <b data-k="nav.nodes">Servers</b> page → <b data-k="node.add">Add server</b>. Enter a <b data-k="common.name">Name</b> (it becomes the suffix of node names in subscriptions, such as "HK"), the API URL and the pairing token. If the node's panel uses a self-signed certificate or a bare IP, tick <b data-k="node.insecure">Skip certificate verification</b>.</li>
+      <li>A few seconds after saving the row should show <b data-k="node.synced">synced</b>.</li>
+    </ol>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>With an <code>http://</code> API URL the token and every user's credentials travel in plain text; the row is marked <b data-k="node.plain">Plaintext</b>. Give the node's panel HTTPS (self-signed is fine), or allow its panel port only from the master's IP.</li>
+      <li>Each node issues and renews its own certificates on its own <b data-k="nav.cert">Certificate</b> page.</li>
+      <li>On a node's panel, lines, users and plans are read-only; make changes on the master.</li>
+      <li>Keep master and nodes on the same version: when a row says <b data-k="node.versionMismatch">version differs from master</b>, update the node.</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="nodes-addr">
+    <h3>Connect address, IPv4 and IPv6</h3>
+    <p class="lede">By default subscriptions use each server's detected public IP, with the domain used only as SNI, so a poisoned DNS on the client cannot break the connection.</p>
+    <ul>
+      <li>Edit a server → <b data-k="node.addr">Connect address (IP allowed)</b>: leave it empty to use the detected public IP, or enter a fixed IP or domain.</li>
+      <li><b data-k="node.family">Auto address uses</b>: dual-stack servers give IPv4 by default and can switch to IPv6; if the chosen family was not detected, the other one is used. A manual connect address ignores this setting.</li>
+      <li>On dual-stack servers each line can also pick its own <b data-k="line.ipVersion">IP version</b> in the line form.</li>
+      <li>To put the domain instead of the IP into subscriptions: <b data-k="nav.settings">Settings</b> → <b data-k="set.sub">Subscription</b> → <b data-k="set.subServerAddr">Node address in subscriptions</b>, choose <b data-k="set.addrDomain">domain</b>.</li>
+    </ul>
+    <div class="tip" data-pending="v6"><b>IPv6 inbound check</b>When a server uses IPv6 by default, or a line is set to IPv6 on it, the master checks from outside whether its IPv6 ports can be reached and shows the result on the <b data-k="nav.nodes">Servers</b> page. "Unreachable" usually means the security group does not allow <code>::/0</code> or the server's own firewall blocks IPv6. UDP lines (hysteria2, tuic) cannot be checked this way; capture packets on the server to confirm.</div>
+    <div class="pit"><b>IPv6 pitfalls</b><ul>
+      <li>Cloud IPv6 needs its own security-group rules for <code>::/0</code> (separate TCP and UDP rules); ip6tables / ufw on the server must allow it too. Flushing iptables does not open IPv6.</li>
+      <li>Outbound-only IPv6 (WARP, NAT and the like) cannot be used by clients to connect.</li>
+      <li>IPv6-only servers: install WARP before checking for updates (see <a href="#warp">WARP</a>). Direct exits cannot reach IPv4-only sites; choose warp as the line's upstream to reach the whole internet.</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="nodes-ratio">
+    <h3>Traffic ratio</h3>
+    <p class="lede">Charge more for an expensive server: traffic through it counts towards users' quotas with a multiplier.</p>
+    <ul>
+      <li>Edit a server → <b data-k="node.ratio">Traffic ratio</b>: <code>2</code> counts double and adds an <code>x2</code> tag to node names; <code>1</code> counts as is. The master can have a ratio too.</li>
+      <li>Users' usage, the chart in their details and the numbers on their landing page all use the converted figures, so they add up; line and upstream statistics show actual traffic.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reach">
+    <h3>Mainland reachability</h3>
+    <p class="lede">Find out whether a server is blocked in mainland China: home-broadband probes of China Mobile, China Telecom and China Unicom connect to it, with Hong Kong probes as a control.</p>
+    <ul>
+      <li>The <b data-k="reach.col">Mainland reach</b> column on the <b data-k="nav.nodes">Servers</b> page shows the result. Click a cell for details, or <b data-k="reach.checkAll">Check mainland reach</b> to test every server.</li>
+      <li>Reading the result: <b data-k="reach.v.ok">OK</b>; <b data-k="reach.v.partial">Partly down</b> (one carrier cannot connect); <b data-k="reach.v.blocked">Likely blocked</b>; <b data-k="reach.v.ipBlocked">IP blocked</b> (change the IP); <b data-k="reach.v.portBlocked">Port blocked</b> (change the port); <b data-k="reach.v.abroadDown">Down abroad too</b> (a server, port or security-group problem, not a block).</li>
+      <li>Scheduled checks: <b data-k="nav.settings">Settings</b> → <b data-k="set.reach">Mainland reachability</b> → <b data-k="set.reachAuto">Automatic checks</b> (every 90 minutes by default), with a Telegram alert when a server gets blocked or recovers.</li>
+    </ul>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>The server address is sent to the public Globalping network. Without an account you get about 250 probe runs per hour and one server uses about 15; if that is not enough, add a free <b data-k="set.reachToken">Globalping token (optional)</b> in the settings.</li>
+      <li>The check uses the port of the server's first TCP line; with only hysteria2 / tuic (UDP) lines it can only tell whether the IP is blocked. Only IPv4 is checked for now.</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="nodes-off">
+    <h3>Disabling, deleting and offline nodes</h3>
+    <p class="lede">Disabling or deleting a node stops it serving right away; when a node shows offline, start with the reason shown in its row.</p>
+    <ul>
+      <li>Edit a server and untick <b data-k="common.enabled">Enabled</b>: it immediately stops serving everyone; enable it again to resume.</li>
+      <li>Deleting a server disables lines that were deployed only there, and users or resellers that only used it lose that line; the affected lines and people are listed afterwards.</li>
+      <li><b data-k="node.decomPending">shutdown notice pending</b>: that machine has not yet received the notice to stop serving; the master keeps retrying. To stop it at once, turn off node mode on that machine or uninstall m-ui there.</li>
+      <li>Offline reasons: <b data-k="node.errTimeout">connection timed out</b>, <b data-k="node.errRefused">connection refused</b> (port not open or panel not running), <b data-k="node.errDns">DNS lookup failed</b>, <b data-k="node.errCert">certificate not trusted</b> (tick skip certificate verification), <b data-k="node.errToken">token mismatch</b> (copy the pairing token again), <b data-k="node.errFp">Certificate fingerprint changed</b> (if you really re-issued the node's certificate, click <b data-k="node.resetCert">Reset fingerprint</b>).</li>
+      <li>Replacing a node: install the new one, then edit the old row on the <b data-k="nav.nodes">Servers</b> page with the new API URL and token; the master pushes everything again.</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="ha" data-scope="admin" data-pending="ha">
+  <h2>Master failover</h2>
+  <p class="lede">If the master's VPS goes down or is deleted by mistake, a node near the top of the server list can take over as a temporary master; later the data moves back to a new master. Off by default.</p>
+
+  <section class="sec" id="ha-how">
+    <h3>How it works</h3>
+    <p class="lede">The master regularly sends an encrypted full copy of its data, only to the first few nodes in server order (the candidates).</p>
+    <ul>
+      <li>2 candidates by default (1–3 allowed), taken in the order of the <b data-k="nav.nodes">Servers</b> page; a candidate's API URL must be HTTPS.</li>
+      <li>A copy is sent every 5 minutes by default and again shortly after changes; it stays encrypted until a takeover.</li>
+      <li>While the master is unreachable, nodes keep forwarding and users notice nothing; a takeover restores management, accounting, subscriptions and alerts.</li>
+      <li>After a takeover, node traffic is reconciled automatically; management changes made on the old master after the last copy (new users, for example) must be redone.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="ha-takeover">
+    <h3>Takeover modes</h3>
+    <p class="lede">Choose a takeover mode when you turn failover on: the more automatic, the less work, and the more care is needed against false alarms.</p>
+    <ul>
+      <li><b>Manual</b>: when the master is lost, the candidate sends a Telegram alert; you take over from the candidate's panel, or over SSH with the m-ui command line.</li>
+      <li><b>Telegram confirmation</b>: after the master has been gone for the set number of minutes, the bot sends a confirmation code, and the takeover happens only after you reply.</li>
+      <li><b>Fully automatic</b>: takes over once the master has been gone for the set time. With just one master and one node an outside witness (Globalping) must be on, so a broken link between the two alone does not trigger a takeover.</li>
+      <li>When the takeover is done, Telegram sends the temporary master's panel address; accounts, passwords and 2FA are the same as on the old master, and everyone signs in again.</li>
+    </ul>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>Do not take over by hand while the master is merely updating or restarting; it is back in a few minutes.</li>
+      <li>If the subscription address points at the old master, users cannot refresh their subscriptions after a takeover (nodes already imported keep working). Use a separate subscription domain with a short TTL and point it at the temporary master after a takeover, or turn on the Cloudflare option below.</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="ha-fence">
+    <h3>When the old master comes back</h3>
+    <p class="lede">The old master does not fight the temporary master: it automatically becomes a read-only node.</p>
+    <ul>
+      <li>It changes no data from then on; changes it received after the takeover are kept aside so you can compare and redo them.</li>
+      <li>To make it the master again, move the data back from the temporary master as described next.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="ha-back">
+    <h3>Moving back to a new master</h3>
+    <p class="lede">The temporary master is only a bridge: once the data is moved to a new master it returns to being a node. The new master can be the demoted old master or a fresh VPS with m-ui installed.</p>
+    <ul>
+      <li>Working on the new master: generate a one-time move-back code in the temporary master's panel, then enter the temporary master's address and the code in the new master's panel.</li>
+      <li>Working on the temporary master: generate a one-time receive code in the new master's panel, then enter the new master's address and the code in the temporary master's panel.</li>
+      <li>You can keep the old master's identity (ports, paths, domain and certificates stay the same, so subscription links are unchanged once DNS points back), or use the new master's own settings (subscription links change).</li>
+      <li>During the move the temporary master briefly freezes management changes, then unfreezes and turns back into a node.</li>
+    </ul>
+    <div class="pit"><b>Common pitfall</b>Move-back and receive codes work once and expire quickly. They are only shown in the panel; never post them in a group chat.</div>
+  </section>
+
+  <section class="sec" id="ha-dns">
+    <h3>Automatic Cloudflare DNS (optional)</h3>
+    <p class="lede">If your domain is on Cloudflare, takeovers and move-backs can update the DNS records to the new machine automatically. Off by default.</p>
+    <ul>
+      <li>Needs a Cloudflare API token with DNS edit permission.</li>
+      <li>Only records that currently point to the old master's IP are changed.</li>
+      <li>Without it, update DNS yourself after a takeover or move-back, following the Telegram message.</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="lines" data-scope="admin">
+  <h2>Lines and protocols</h2>
+  <p class="lede">A line decides how clients connect: inbound protocol + port → where the traffic leaves. Each line appears once for every server it is deployed on.</p>
+
+  <section class="sec" id="lines-new">
+    <h3>Create a line</h3>
+    <p class="lede"><b data-k="line.quick">Quick add</b> is the easiest start: the protocol settings are ready and a free port is picked for you.</p>
+    <ol class="steps">
+      <li>On the <b data-k="nav.lines">Lines</b> page, click <b data-k="line.quick">Quick add</b> at the top right and pick a preset: <b data-lit="js/pages/lines.js">Hysteria2</b>, <b data-lit="js/pages/lines.js">AnyTLS</b>, <b data-lit="js/pages/lines.js">VLESS + Reality</b>, <b data-lit="js/pages/lines.js">Trojan</b>, <b data-lit="js/pages/lines.js">Shadowsocks 2022</b> or <b data-lit="js/pages/lines.js">VMess + WS</b>.</li>
+      <li>The form is filled in; check the <b data-k="common.name">Name</b> (the node name shown in subscriptions) and the <b data-k="common.port">Port</b>, then save.</li>
+      <li>To configure everything yourself, click <b data-k="line.add">Add line</b>: choose the <b data-k="line.protocol">Protocol</b> and a port; the <b data-k="line.upstream">Upstream</b> defaults to <b data-k="line.direct">direct</b> (straight out of this server).</li>
+    </ol>
+    <ul>
+      <li>New lines have <b data-k="line.assignAll" class="wrap">Assign to all existing users (not resellers' users)</b> ticked. If you untick it, the line only shows up in subscriptions after you tick it for each user.</li>
+      <li>A free five-digit port is filled in for you and can be changed; a clash with the panel or subscription ports, or with another program on the server, is rejected when you save.</li>
+      <li>Before saving, the whole configuration is test-run by the core; if it fails nothing changes and running lines are untouched. Changing a line restarts the data plane briefly, and online users reconnect by themselves.</li>
+    </ul>
+    <div class="pit"><b>Common pitfall</b>Open the port in the security group / firewall; for UDP protocols (Hysteria2, TUIC) open UDP.</div>
+  </section>
+
+  <section class="sec" id="protocols">
+    <h3>Choosing a protocol</h3>
+    <p class="lede">Not sure? Use Hysteria2 as the main line and add one TCP line (AnyTLS or VLESS + Reality) as a backup.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Protocol</th><th>Runs on</th><th>Certificate</th><th>Strengths / best for</th></tr></thead>
+      <tbody>
+        <tr><td>Hysteria2</td><td>UDP</td><td>Required (self-signed works)</td><td>Fast and resilient to packet loss; the first choice. Add port hopping if your ISP throttles UDP.</td></tr>
+        <tr><td>TUIC</td><td>UDP</td><td>Required</td><td>Same family as Hysteria2 (QUIC-based); an alternative.</td></tr>
+        <tr><td>AnyTLS</td><td>TCP</td><td>Required</td><td>Weak traffic fingerprint; the first TCP choice when UDP does not work well.</td></tr>
+        <tr><td>VLESS + Reality</td><td>TCP</td><td>Not needed</td><td>No domain or certificate; borrows a big site's TLS handshake and resists probing well. Turn on Vision.</td></tr>
+        <tr><td>Trojan</td><td>TCP</td><td>Required</td><td>Classic TLS protocol supported by nearly every client.</td></tr>
+        <tr><td>VMess / VLESS + WS</td><td>TCP</td><td>Optional</td><td>Can sit behind a CDN (needs a domain); for direct use the ones above are better.</td></tr>
+        <tr><td>Shadowsocks</td><td>TCP / UDP</td><td>None</td><td>No certificate, the widest client support. The 2022 ciphers are stronger, but old Clash cores cannot use them, so subscriptions leave them out for those clients.</td></tr>
+        <tr><td>SOCKS / HTTP / Mixed</td><td>TCP</td><td>—</td><td>Plain proxies for LAN devices or for chaining other programs; not meant for getting past censorship directly.</td></tr>
+      </tbody>
+    </table></div>
+    <div class="tip"><b>Without a domain</b>VLESS + Reality is the simplest; Hysteria2 / AnyTLS also work with a self-signed certificate, and subscriptions add "allow insecure" automatically.</div>
+  </section>
+
+  <section class="sec" id="tls">
+    <h3>TLS: node certificate, Reality or none</h3>
+    <p class="lede"><b data-k="line.tlsMode">TLS mode</b> decides how the node encrypts and disguises itself; Hysteria2, TUIC and AnyTLS always need TLS.</p>
+    <ul>
+      <li><b data-k="line.tls.cert">Node certificate</b>: uses a certificate on the server and clients verify the domain. Each server's default certificate is used unless you pick one for this line under <b data-k="line.cert">Certificate</b>.</li>
+      <li><b data-k="line.tls.reality">Reality</b>: no certificate; it imitates the TLS of the site in <b data-k="line.reality.server">Handshake target (masquerade domain)</b>. <b data-k="line.reality.check">Check</b> tests whether that site works; <b data-k="line.reality.pick">Suggest</b> tests a list of popular sites and ranks them by latency, one click fills one in. Next to <b data-k="line.reality.private">Private key</b> click <b data-k="line.reality.gen">Generate keypair</b>; next to Short ID click <b data-k="line.gen">Generate</b>.</li>
+      <li><b data-k="line.tls.none">None</b>: plain text, only for CDN origins or internal networks.</li>
+      <li>Leave <b data-k="line.fp">Client fingerprint</b> at the default unless you know you need another.</li>
+    </ul>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>A Reality handshake target must support TLS 1.3 and H2 and be reachable from the server; when the line runs on another server, the measured latency is only a hint.</li>
+      <li>With a self-signed certificate clients must allow insecure certificates. Subscriptions add this automatically (the setting is <b data-k="set.subInsecure">Allow insecure certificate in subscriptions</b>).</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="transport">
+    <h3>Transport</h3>
+    <p class="lede">Only VLESS, VMess and Trojan have a <b data-k="line.transport.type">Transport</b> choice; if unsure keep the default <b data-k="line.transport.tcp">TCP (direct)</b>.</p>
+    <ul>
+      <li><b data-k="line.transport.tcp">TCP (direct)</b>: the fastest.</li>
+      <li>ws, httpupgrade: can go through a CDN.</li>
+      <li>grpc: pairs well with Reality.</li>
+      <li>For VLESS, tick <b data-k="line.vision" class="wrap">Enable XTLS Vision (TCP + TLS only, recommended)</b>.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="hy2">
+    <h3>Hysteria2 port hopping and masquerade</h3>
+    <p class="lede">Use port hopping when your ISP throttles single UDP ports; use a masquerade site so probes do not reveal a proxy.</p>
+    <ul>
+      <li><b data-k="line.hop">Port hopping range</b>: such as <code>20000-30000</code>. The server forwards that whole UDP range to the line's port and clients hop between ports at random. Open the whole UDP range in the security group / firewall; leave it empty to turn hopping off.</li>
+      <li><b data-k="line.masq">Masquerade site</b>: anyone probing the port sees this website instead of a proxy error. Enter a full URL; new lines default to <code>https://www.bing.com</code>. Empty = no masquerade.</li>
+      <li><b data-k="line.upMbps">Up Mbps (0 = unlimited)</b> / <b data-k="line.downMbps">Down Mbps (0 = unlimited)</b>: usually leave at 0.</li>
+      <li><b data-k="line.obfs" class="wrap">Obfs password (salamander; empty = off)</b>: usually empty; if you set one, subscriptions pass it to clients automatically.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="lines-nodes">
+    <h3>Which servers run a line</h3>
+    <p class="lede">With several servers, a line can run on only some of them.</p>
+    <ul>
+      <li><b data-k="line.servers">Deploy on servers</b>: nothing ticked = all servers (the default); tick servers to run the line only there, and subscriptions only list those entries.</li>
+      <li>Dual-stack servers get an extra drop-down in their row, so the line can use IPv4 or IPv6 on that server (the default follows the Servers page).</li>
+      <li>A line on several servers has several "entries"; when assigning lines to users, plans or resellers you can tick just the entry on one server.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="route-rules">
+    <h3>Rule-based routing</h3>
+    <p class="lede">Within one line, send chosen sites out through another exit (streaming through an unlocking server, say) or block them.</p>
+    <ol class="steps">
+      <li>Edit the line and tick <b data-k="line.rr.on">Rule-based routing</b>.</li>
+      <li>Click <b data-k="line.rr.add">+ Add rule</b>: choose the <b data-k="line.rr.type">Match</b> type (<b data-k="line.rr.t.domain_suffix">Domain suffix</b>, <b data-k="line.rr.t.domain">Full domain</b>, <b data-k="line.rr.t.domain_keyword">Domain keyword</b>, <b data-k="line.rr.t.ip_cidr">IP range</b>, <b data-k="line.rr.t.port">Port</b>), enter the values (separate several with commas or new lines) and choose the <b data-k="line.rr.to">Egress</b>: direct, an upstream, or <b data-k="line.rr.reject">Block</b>.</li>
+      <li>To add by app: type app names (such as douyin, netflix, openai) in the box next to it and click <b data-k="line.rr.lookup">Look up</b>; rules are added for you and you pick the egress in each.</li>
+      <li>Save.</li>
+    </ol>
+    <ul>
+      <li>Rules are checked top to bottom and the first match wins; anything unmatched uses the line's own <b data-k="line.upstream">Upstream</b>.</li>
+      <li>An app often uses several domains, so add them together; very short keywords (like ai) catch unrelated sites; traffic to a domain may not match an IP range, so prefer domain rules.</li>
+      <li>Untick <b data-k="line.rr.on">Rule-based routing</b> and save to remove all rules.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="lines-batch">
+    <h3>Batch actions, order and cloning</h3>
+    <p class="lede">Tick several lines and a batch bar appears at the top.</p>
+    <ul>
+      <li><b data-k="line.batch.enable">Enable</b>, <b data-k="line.batch.disable">Disable</b>, <b data-k="line.batch.upstream">Set upstream</b>, <b data-k="line.batch.nodes">Deploy on</b> (only with several servers), <b data-k="line.batch.clear">Clear</b>. A batch change reloads the data plane only once.</li>
+      <li>Drag rows to reorder; subscriptions list nodes in the same order.</li>
+      <li>At the end of a row, ⧉ is <b data-k="line.clone">Clone</b> (a new port is picked) and ⇢ is <b data-k="up.addFromLine">Add a line as upstream</b> (see <a href="#up-chain">Lines as upstreams</a>).</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="upstreams" data-scope="admin">
+  <h2>Upstreams and external nodes</h2>
+  <p class="lede">Upstreams decide where a line's traffic leaves; external nodes merge nodes from elsewhere into your users' subscriptions.</p>
+
+  <section class="sec" id="up-add">
+    <h3>Add an upstream</h3>
+    <p class="lede">An upstream is an exit server: once added, choose it as a line's <b data-k="line.upstream">Upstream</b> and that line's traffic leaves from there.</p>
+    <ol class="steps">
+      <li><b data-k="nav.upstreams">Upstreams</b> page → <b data-k="up.add">Add upstream</b>.</li>
+      <li>Paste the exit node's share link into <b data-k="up.import">Import from share link</b> and click <b data-k="up.parse">Parse</b>, check the fields and save; or pick the type and fill in the fields yourself.</li>
+      <li>Click <b data-k="common.test">Test</b> to see the latency, then set it as the upstream of a line on the <b data-k="nav.lines">Lines</b> page.</li>
+    </ol>
+    <ul>
+      <li>VLESS, VMess, Trojan, TUIC, Hysteria2, Shadowsocks and SOCKS exits are supported.</li>
+      <li>An upstream still used by lines cannot be deleted; change those lines' upstream first.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="warp">
+    <h3>WARP</h3>
+    <p class="lede">Cloudflare WARP gives lines a clean exit, often used for streaming or to let IPv6-only servers reach IPv4 sites.</p>
+    <ol class="steps">
+      <li>On the <b data-k="nav.ops">Ops</b> page, in the <b data-lit="js/pages/ops.js">Cloudflare WARP</b> card, click <b data-k="ops.t.warp-install">Install</b>, then <b data-k="ops.t.warp-enable">Enable</b>.</li>
+      <li>Click <b data-k="ops.checkExit">Check exit</b> to confirm the exit IP.</li>
+      <li>If the <b data-k="ops.upstream">Upstream</b> row has no warp yet, click <b data-k="ops.addUpstream">Add as upstream "warp"</b>.</li>
+      <li>Choose warp as a line's upstream.</li>
+    </ol>
+    <div class="pit"><b>Common pitfall</b>WARP's local port (<b data-k="ops.warpPort">SOCKS5 port</b>) is 40000 by default and enabling fails if it is taken; after changing the port, enable WARP again. Ops tasks only work on Linux with m-ui running as root.</div>
+  </section>
+
+  <section class="sec" id="up-chain">
+    <h3>Lines as upstreams (chaining)</h3>
+    <p class="lede">Forward an entry line's traffic into another of your own lines, for example in through a domestic relay and out through an overseas server.</p>
+    <ul>
+      <li>On the <b data-k="nav.upstreams">Upstreams</b> page click <b data-k="up.addFromLine">Add a line as upstream</b> (or ⇢ at the end of a line's row), then choose the line and <b data-k="up.fromNode">Use its entry on server</b>.</li>
+      <li>Its settings follow the line automatically, even if the line changes port or protocol; it uses dedicated credentials, takes nothing from users' quotas, and traffic is counted once.</li>
+      <li>Loops, deleted lines and deleted entry servers are blocked or flagged. Nodes need v0.7.16 or later.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="up-group">
+    <h3>Upstream groups (automatic failover)</h3>
+    <p class="lede">Group several upstreams to always use the fastest one that works and switch automatically when it fails.</p>
+    <ul>
+      <li><b data-k="nav.upstreams">Upstreams</b> page → <b data-k="up.addGroup">Add upstream group</b>, pick at least two <b data-k="up.groupMembers">Members</b>, then choose the group as a line's upstream.</li>
+      <li>Members are tested every 30 seconds; the current one is kept unless it is more than 300 ms slower than the fastest, to avoid flapping. On a switch old connections are closed so apps reconnect at once.</li>
+      <li>The Upstreams page shows which member each server is using now.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="up-check">
+    <h3>Health checks and alerts</h3>
+    <p class="lede">Upstreams are tested on a schedule, with optional Telegram alerts on failure and recovery.</p>
+    <ul>
+      <li>Each server only tests the upstreams its own lines use; upstreams no line uses are marked <b data-k="up.unused">Unused</b> and are neither tested nor alerted on.</li>
+      <li>The status column can show <b data-k="up.fault">Down</b>, <b data-k="up.pending">Pending</b> or <b data-k="up.stale">Stale</b>; the arrow at the end of the row shows each server's results and errors.</li>
+      <li><b data-k="nav.settings">Settings</b> → <b data-k="set.monitor">Upstream health checks</b>: <b data-k="set.checkMinutes">Interval (minutes)</b> (0 = off) and <b data-k="set.checkThreshold">Consecutive failures before alert</b>.</li>
+      <li>The <b data-k="dash.health">Upstream health</b> card on the dashboard has <b data-k="dash.healthRun">Check now</b>.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="exts">
+    <h3>External nodes</h3>
+    <p class="lede">Merge nodes from elsewhere (an airport subscription, a single share link) into your users' subscriptions, after your own nodes.</p>
+    <ol class="steps">
+      <li><b data-k="nav.exts">External nodes</b> page → <b data-k="ext.add">Add external node</b>: choose <b data-k="ext.typeSub">Subscription</b> (one subscription URL fetched on a schedule) or <b data-k="ext.typeLink">Share link</b> (a single node).</li>
+      <li>Fill in <b data-k="ext.value">Link / subscription URL</b>; a <b data-k="ext.prefix">Name prefix</b> (such as "[Relay] ") helps users tell them apart. Save.</li>
+      <li>On the <b data-k="nav.users">Users</b> page, edit the users who should get them and tick <b data-k="user.f.exts">External nodes</b>.</li>
+    </ol>
+    <ul>
+      <li>The master fetches them on a schedule set in <b data-k="nav.settings">Settings</b> → <b data-k="set.sub">Subscription</b> → <b data-k="set.extRefresh" class="wrap">External subscription refresh interval (minutes)</b>; when a fetch fails, the last good content is kept and the error is shown in the list.</li>
+      <li>base64 or plain link lists, Clash YAML and sing-box JSON are supported.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="ext-filter">
+    <h3>Hide, rename, exclude keywords</h3>
+    <p class="lede">Info nodes such as "traffic left" or "website" that airports add, and nodes you do not want to hand out, can be left out.</p>
+    <ul>
+      <li>Click <b data-k="ext.expand">Show nodes</b> to see every parsed node; tick some and click <b data-k="ext.hideSel">Hide selected</b> / <b data-k="ext.showSel">Show selected</b>; single nodes can be given a new name with <b data-k="ext.rename">Rename</b>.</li>
+      <li>Hiding and renaming remember both the name and the node's fingerprint (address, port, password and so on), so they survive renames and reordering by the provider.</li>
+      <li><b data-k="ext.exclude">Exclude keywords</b>: nodes whose names contain these words are not output; separate with commas, such as <code>website,expire,traffic left</code>. It also catches nodes that appear later, which suits info nodes whose names change on every refresh.</li>
+      <li>When nodes disappear for a while their hide / rename records are kept and apply again when they return; click <b data-k="ext.cleanStale">Clean up</b> once you are sure they are gone.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="ext-test">
+    <h3>Speed tests, mainland checks, use as upstreams</h3>
+    <p class="lede">With the nodes shown you can test them right there and turn good ones into upstreams.</p>
+    <ul>
+      <li><b data-k="ext.testAll">Test all</b> / <b data-k="ext.testSel">Test selected</b>: each enabled server really connects once and measures latency, which tells you how the node works as an upstream; tick <b data-k="ext.inclHidden">with hidden</b> to include hidden nodes; <b data-k="ext.testStop">Stop test</b> any time. <b data-k="ext.cellUnsupported">Unsupported</b> means the protocol cannot be turned into an outbound here and cannot be tested.</li>
+      <li><b data-k="ext.reachSel">Test from China</b>: mainland probes of the three carriers connect to the selected nodes to see whether they are blocked; UDP protocols such as hysteria2 and tuic can only be pinged; domestic relay entries failing from Hong Kong is normal.</li>
+      <li><b data-k="ext.addUp">Add as upstreams</b>: tick nodes and give each a name to turn them into upstreams (a duplicate name is an error, nothing is renamed for you).</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="cert" data-scope="admin">
+  <h2>Certificates</h2>
+  <p class="lede">Certificates give lines, the panel and subscriptions TLS / HTTPS. A server can hold several, and issued ones renew automatically.</p>
+
+  <section class="sec" id="cert-add">
+    <h3>Add a certificate</h3>
+    <p class="lede"><b data-k="nav.cert">Certificate</b> page → <b data-k="cert.add">Add a certificate</b>, then choose the <b data-k="cert.source">Certificate source</b> depending on whether you have a domain.</p>
+    <ul>
+      <li><b data-k="cert.srcAcme">Domain (auto-issue)</b>: first point the domain's A record to the server IP at your DNS provider. Enter the domain and choose the <b data-k="cert.method">Validation</b>:
+        <ul>
+          <li><b data-k="cert.methodHttp">HTTP (temporary listener on port 80)</b>: port 80 must be free and reachable from the internet.</li>
+          <li><b data-k="cert.methodCf">DNS (Cloudflare API)</b>: for domains on Cloudflare; enter a <b data-k="cert.cfToken">Cloudflare API token</b> (with Zone.DNS edit permission). Port 80 is not needed and renewal is automatic.</li>
+          <li><b data-k="cert.methodManual">DNS (add a TXT record by hand)</b>: for other DNS providers; add the TXT records shown, and issuing continues once public DNS sees them.</li>
+        </ul>
+        Click <b data-k="cert.precheck">Pre-check DNS / port</b> first, then <b data-k="cert.issueBtn">Issue certificate</b>. Wildcards (<code>*.example.com</code>) need DNS validation.</li>
+      <li><b data-k="cert.srcSelf">No domain (self-signed)</b>: click <b data-k="cert.selfsign">Generate self-signed</b>; leave <b data-k="cert.hosts" class="wrap">Addresses in the certificate (auto if empty)</b> empty to use the server's public IP. Every node in subscriptions gets "allow insecure" automatically, so clients need no settings; keep the panel and subscriptions on HTTP.</li>
+      <li><b data-k="cert.srcExternal">Existing certificate</b>: if certbot, aaPanel, nginx or a commercial certificate is already on the server, enter the paths of the <b data-k="cert.certPath">Certificate file (fullchain)</b> and the <b data-k="cert.keyPath">Private key file</b> and click <b data-k="cert.useExternal">Use this certificate</b>.</li>
+    </ul>
+    <div class="tip"><b>Choose what it is for</b>Under <b data-k="cert.applyTo">Apply to</b> tick <b data-k="cert.forLines">Make it the default for lines</b>, <b data-k="cert.applyPanel">Use for panel HTTPS</b> and / or <b data-k="cert.applySub">Use for subscription HTTPS</b>; uses you leave unticked stay as they are.</div>
+  </section>
+
+  <section class="sec" id="cert-use">
+    <h3>Where certificates are used</h3>
+    <p class="lede"><b data-k="cert.useLines">Line inbounds</b>, <b data-k="cert.usePanel">Panel</b>, <b data-k="cert.useSub">Subscription</b> and <b data-k="cert.useReseller">Reseller panel</b> each have their own certificate, changed in the <b data-k="cert.inUse">In use</b> card.</p>
+    <ul>
+      <li>Click <b data-k="cert.change">Change</b> next to an item and pick a certificate from the store, or <b data-k="cert.noHttps">No HTTPS</b>.</li>
+      <li>Subscription changes apply immediately (users need the new https link); a new panel certificate needs <b data-k="cert.restartBtn">Restart m-ui</b>; changing the default line certificate restarts the data plane once.</li>
+      <li>To give one line its own certificate: edit the line → <b data-k="line.cert">Certificate</b>; servers without that certificate keep using their own default.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="cert-renew">
+    <h3>Automatic renewal</h3>
+    <p class="lede">Issued certificates renew before they expire and are swapped in without a restart.</p>
+    <ul>
+      <li>Checked a few minutes after start, then every hour; renewal starts in the last third of the validity period (30 days before expiry for a 90-day certificate).</li>
+      <li>Failures are retried after 1, 2 and 4 hours; the first failure is reported at once, then once a day.</li>
+      <li>The <b data-k="cert.renewCol">Auto-renew</b> column of the <b data-k="cert.store">Certificate store</b> shows each certificate's state: last renewal, number of failures and next retry. Click <b data-k="cert.renewBtn">Renew</b> to renew now, or turn auto-renewal off for one certificate.</li>
+      <li>When a certificate needs attention (renewal failing, expiring soon, expired, file unreadable), a "certificates need attention" bar appears at the top; click <b data-k="alert.certView">View</b> to handle it. Node certificates are reported on the master too.</li>
+    </ul>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>Certificates issued with <b data-k="cert.methodManual">DNS (add a TXT record by hand)</b> cannot renew automatically: every renewal needs new TXT records. Re-issue with Cloudflare validation to renew automatically.</li>
+      <li>HTTP validation needs port 80 for a moment on every renewal; a TCP line using port 80 makes renewal fail.</li>
+      <li>An extra AAAA (IPv6) record that does not point to this server makes validation fail: point it here or delete it.</li>
+      <li>Let's Encrypt no longer sends expiry emails: set up Telegram or a webhook at least on the master (see <a href="#notify">Notifications</a>).</li>
+      <li>An <b data-k="cert.srcExternal">Existing certificate</b> is renewed by the tool that issued it (such as certbot); the panel only reads the files and starts reminding you 14 days before expiry.</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="cert-nodes">
+    <h3>Certificates on nodes</h3>
+    <p class="lede">Every server manages its own certificates on the <b data-k="nav.cert">Certificate</b> page of its own panel.</p>
+    <ul>
+      <li>Certificates are matched by name across servers: if a line picks a certificate, servers without it use their own default; the line's certificate picker shows which servers have it and how many days are left.</li>
+      <li>Nodes usually have no notifications set up, so the master reports their renewal failures and expiries, and the master's Servers page marks <b data-k="node.certFail">cert renewal failing</b>.</li>
+    </ul>
+  </section>
+</section>
+</div>
+
+<div class="part" data-title="Operate">
+<section class="chap" id="users">
+  <h2>Users and plans</h2>
+  <p class="lede">A user is one subscription link with a traffic quota, expiry, device limit and speed limit; a plan is a template of those limits.</p>
+
+  <section class="sec" id="users-new">
+    <h3>Create a user</h3>
+    <p class="lede"><b data-k="nav.users">Users</b> page → <b data-k="user.add">Add user</b>; fill in the limits, tick the lines and save, and the subscription link is ready.</p>
+    <ul>
+      <li data-scope="admin"><b data-k="user.f.name">Username (subscription id)</b>: on the main panel the username is the subscription id by default, so no spaces or / ? # &amp;. If "use the username in subscription links" is turned off in the settings, it is just a name and the link gets a random token.</li>
+      <li data-scope="reseller"><b data-k="user.f.nameOnly">Username</b>: just a name; the subscription link gets a random token automatically.</li>
+      <li>With plans, choose the <b data-k="user.plan">Plan</b> and click <b data-k="user.fromPlan">Fill from plan</b> to fill in every limit at once. Otherwise fill in <b data-k="user.f.volume">Quota GB (0 = unlimited)</b>, <b data-k="user.f.expiry">Expiry (empty = never)</b>, <b data-k="user.f.device">Concurrent devices (0 = unlimited)</b>, <b data-k="user.f.up">Upload limit Mbps (0 = unlimited)</b> and <b data-k="user.f.down">Download limit Mbps (0 = unlimited)</b>.</li>
+      <li>For monthly plans whose traffic resets, tick <b data-k="user.f.autoReset">Periodic traffic reset</b> and set the <b data-k="user.f.resetDays">Reset period (days)</b>.</li>
+      <li>Tick the <b data-k="user.f.lines">Lines</b>. A line on several servers has several entries, and you can give just the entry on one server (switch between server groups; ticks are kept).</li>
+      <li data-scope="admin"><b data-k="user.f.exts">External nodes</b>: ticked external nodes are added after your own nodes in the user's subscription.</li>
+      <li><b data-k="user.f.remark">Remark</b>: an order number, contact details and so on.</li>
+    </ul>
+    <div class="tip"><b>Gift cards and trials</b>Set <b data-k="user.f.activate" class="wrap">Expire N days after first connection (0 = off)</b>: the clock starts only when the user first uses traffic, and the expiry date is ignored.</div>
+  </section>
+
+  <section class="sec" id="users-quota">
+    <h3>How quota, expiry and devices are counted</h3>
+    <p class="lede">Users who run over or expire are disabled and kicked automatically; renewing or resetting traffic brings them back.</p>
+    <ul>
+      <li>Traffic: upload + download together; quotas can be decimals (0.1 is about 100 MB). Traffic through a server with a traffic ratio counts with that multiplier.</li>
+      <li>Expiry: the user is disabled when it passes. "Expire N days after first connection" overrides the expiry date.</li>
+      <li>Periodic reset: every N days used traffic goes back to zero, and users disabled for going over are re-enabled.</li>
+      <li>Devices: counted by source IPs online at the same time, across all servers. Several devices behind one Wi-Fi (one public IPv4, or one IPv6 /64) count as one; IPv4 and IPv6 are counted against the limit separately, so one device using both is not counted twice.</li>
+      <li>When the limit is reached only new devices are refused; connected ones are not affected. A slot frees up about a minute after another device goes offline.</li>
+      <li data-scope="admin">Refused connections are shown in red as <b data-k="dash.rejectedDevice">Refused: device limit</b> in <b data-k="dash.recentConns">Recent inbound connections</b> on the dashboard.</li>
+      <li>Speed limits: all of the user's connections share the bandwidth, and changes apply immediately.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="users-sub">
+    <h3>Subscription links, QR codes and sharing</h3>
+    <p class="lede">Click a user's name (or <b data-k="common.details">Details</b>) to open the details; the subscription links and QR code are at the top.</p>
+    <ul>
+      <li>Under <b data-k="user.subscription">Subscription</b>, click <b data-k="common.copy">Copy</b> and send the link; phones can scan the QR code. The <b data-k="common.more">More</b> menu in the list can also copy the <b data-k="user.subClash">Clash subscription</b>, <b data-k="user.subLink">Link subscription</b> or <b data-k="user.subJson">sing-box subscription</b>.</li>
+      <li>Opened in a browser, the link shows the user's landing page: usage, expiry, one-tap import for each app and a QR code (see <a href="#sub">Subscriptions and landing page</a>).</li>
+      <li><b data-k="user.share">Shared</b>: users can create a temporary link for a friend on their landing page; traffic and devices count against them. The details show that link, and <b data-k="user.unshare">Revoke</b> cancels it at once.</li>
+      <li>Link leaked? <b data-k="common.more">More</b> → <b data-k="user.rotate">Reset subscription link</b>. The link gets a new random token, all protocol credentials are regenerated, the old link stops working and online devices are disconnected; send the new link to the user.</li>
+      <li>The details also show <b data-k="user.onlineIps">Online devices (IP)</b> (and which line each IP uses), a traffic chart and the user's lines.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="users-renew" data-pending="plan-api">
+    <h3>Renew, extend and change plans</h3>
+    <p class="lede">In the <b data-k="common.more">More</b> menu (or the user's details), <b data-k="user.renewMenu">Renew…</b> and <b data-k="user.changeMenu">Change plan…</b> handle renewals, upgrades and downgrades.</p>
+    <ul>
+      <li><b data-k="user.renewMenu">Renew…</b>: <b data-k="plan.pick">Choose a plan</b> (the user's current plan by default), then the mode: <b data-k="plan.renew">Renew (reset traffic, extend)</b>, <b data-k="plan.extend">Extend (keep traffic)</b> or <b data-k="plan.bind" class="wrap">Only assign to this plan (keep quota and expiry)</b>. <b data-k="pc.periods">Periods</b> renews several periods at once (1–120): enter 3 or 12 to sell a monthly plan quarterly or yearly. For a single user the new expiry and quota are previewed below as you type.</li>
+      <li><b data-k="user.extend">Extend 30 days</b>: one click adds 30 days for users who have an expiry date.</li>
+      <li><b data-k="user.changeMenu">Change plan…</b>: choose the <b data-k="pc.target">New plan</b> and one of three ways under <b data-k="pc.mode">How</b>:
+        <ul>
+          <li><b data-k="pc.mode.replace">Replace now</b>: the new plan starts now for N periods; time and traffic left on the old subscription are dropped.</li>
+          <li><b data-k="pc.mode.stack">Stack</b>: keeps the time left (and one-off traffic) and adds N periods; for plans with periodic resets traffic is a per-period allowance and does not stack.</li>
+          <li><b data-k="pc.mode.prorate">Prorate</b>: converts the value left on the old subscription into time on the new plan, using both plans' <b data-k="plan.price">Reference price (optional)</b>; both plans need a price, and periods can be 0.</li>
+        </ul></li>
+      <li><b data-k="pc.usage">This period's usage</b>: <b data-k="pc.usage.auto">Auto</b> (reset for replace and prorate, kept for stack), <b data-k="pc.usage.keep">Keep (carry on)</b> or <b data-k="pc.usage.reset">Reset (new period)</b>.</li>
+      <li>The dialog previews <b data-k="pc.before">Before</b> and <b data-k="pc.after">After</b> live and marks it as an <b data-k="pc.dir.upgrade">upgrade</b> or a <b data-k="pc.dir.downgrade">downgrade</b>. Effects that hurt the user, such as an earlier expiry or going over quota at once, are shown in red, and you must tick <b data-k="pc.force" class="wrap">I have read the effects marked in red, proceed anyway</b> before <b data-k="pc.confirm">Change plan</b> works.</li>
+      <li>Every time the dialog opens it gets its own duplicate-protection id, so a double click or a network retry only runs once.</li>
+      <li><b data-k="pc.history">Plan history</b> in the details lists recent renewals and plan changes.</li>
+    </ul>
+    <div class="tip"><b>Connecting a shop</b>Renewals and plan changes are also available through the external API, with a preview before you commit (see <a href="#api">External API</a>).</div>
+  </section>
+
+  <section class="sec" id="plans">
+    <h3>Plans</h3>
+    <p class="lede">A plan is a template of limits that new accounts, renewals and batch actions can apply directly.</p>
+    <ol class="steps">
+      <li><b data-k="nav.plans">Plans</b> page → <b data-k="plan.add">Add plan</b>: a <b data-k="common.name">Name</b> (such as 100G/month), <b data-k="plan.desc">Description</b>, <b data-k="plan.quota">Quota</b> (GB), <b data-k="plan.days">Duration (days)</b>, devices and speed limits.</li>
+      <li>Tick <b data-k="user.f.autoReset">Periodic traffic reset</b> for monthly resets, and <b data-k="plan.firstUse">Start the clock at first connection</b> for gift cards.</li>
+      <li><b data-k="plan.lines">Lines</b>: applying the plan replaces the user's lines with these; empty = keep the user's lines.</li>
+      <li data-scope="admin"><b data-k="plan.rules">Rate-limit rules</b>: ticked rules apply to every user of the plan, current and future.</li>
+      <li data-pending="plan-api"><b data-k="plan.price">Reference price (optional)</b>: only used by "prorate" when changing plans and never shown to users; give two plans the same price to swap them at equal value.</li>
+    </ol>
+    <ul>
+      <li>The Plans page shows how many users each plan has.</li>
+      <li>Editing a plan does not change users who already applied it; renew or change their plan to move them to the new limits.</li>
+      <li data-scope="reseller">Resellers only see and use the plans they created themselves.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="users-batch">
+    <h3>Batch actions</h3>
+    <p class="lede">Tick several users and a batch bar appears at the top (the header checkbox ticks the current page only).</p>
+    <ul>
+      <li><b data-k="user.batch.enable">Enable</b>, <b data-k="user.batch.disable">Disable</b>, <b data-k="user.batch.extend">Extend</b>, <b data-k="user.batch.plan">Apply plan</b>, <b data-k="user.batch.reset">Reset traffic</b>, <b data-k="user.batch.delete">Delete</b>.</li>
+      <li data-scope="admin"><b data-k="user.bulk">Bulk create</b>: creates <b data-k="user.bulkCount">Count</b> users at once from a <b data-k="user.bulkPrefix">Username prefix</b>; for <b data-k="user.bulkMode">Naming</b> choose <b data-k="user.bulkRandom">prefix + 8 random chars</b> or <b data-k="user.bulkSeq" class="wrap">prefix + sequence (001…, random subscription URL)</b>. All the subscription links can be copied afterwards.</li>
+      <li data-scope="admin"><b data-k="user.batch.export">Export CSV</b>: exports the user list.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="users-state">
+    <h3>Why a user is disabled, and kicking</h3>
+    <p class="lede">The status column says why a user is disabled, which tells you how they come back.</p>
+    <ul>
+      <li><b data-k="user.reason.quota">over quota</b>, <b data-k="user.reason.expired">expired</b>: renewing, resetting traffic or extending the expiry re-enables them automatically.</li>
+      <li><b data-k="user.reason.manual">manual</b>: disabled by hand, and only enabling them by hand brings them back.</li>
+      <li data-scope="admin"><b data-k="user.limited">Limited</b>: temporarily slowed down by a rule (see <a href="#rules">Rules</a>).</li>
+      <li><b data-k="user.kick">Kick</b>: closes the user's connections on every server (hysteria2, TUIC and AnyTLS sessions are closed entirely). If the user is still enabled the app reconnects right away, so disable them first to cut them off.</li>
+      <li>Filter the list with <b data-k="user.filter.all">All</b>, <b data-k="user.filter.enabled">Enabled</b>, <b data-k="user.filter.disabled">Disabled</b>, <b data-k="user.filter.expired">Expired</b> or <b data-k="user.filter.over">Over quota</b>.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="users-import" data-scope="admin">
+    <h3>Import users from an old panel</h3>
+    <p class="lede">Use this when your lines are already set up in m-ui and you only want to bring the old users over.</p>
+    <ul>
+      <li>On the <b data-k="nav.users">Users</b> page click <b data-k="user.import">Import from old panel</b>, upload the old panel's .db file and click <b data-k="user.importGo">Import</b>.</li>
+      <li>Users with the same name only get their usage, quota, expiry and status updated; the rest are created with their old credentials (clients need no changes). You can tick <b data-k="user.importAssign">Give newly created users every existing line</b>.</li>
+      <li>To move lines, upstreams and settings too, see <a href="#bk-import">Moving from an old panel</a>.</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="rules" data-scope="admin">
+  <h2>Rules (temporary speed limits)</h2>
+  <p class="lede">Rules slow users down for a while: for example everyone at 30 Mbps in the evening peak, or 20 minutes of limits for anyone who used 1 GB within 10 minutes.</p>
+
+  <section class="sec" id="rules-kinds">
+    <h3>Two kinds of rules</h3>
+    <ul>
+      <li><b data-k="rule.kind.schedule">Schedule</b>: limits during a time window on chosen days of the week and lifts them outside it. Times use the panel time zone, and an end before the start means the window crosses midnight; no <b data-k="rule.days">Weekdays</b> ticked means every day.</li>
+      <li><b data-k="rule.kind.burst">Burst</b>: when upload + download within the last <b data-k="rule.windowMin">Window (minutes)</b> reaches <b data-k="rule.thresholdGb">Trigger (GB, up + down)</b>, the user is limited for <b data-k="rule.penaltyMin">Limit for (minutes)</b>; it lifts by itself and triggers again if reached again.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="rules-new">
+    <h3>Create a rule</h3>
+    <ol class="steps">
+      <li><b data-k="nav.rules">Rules</b> page → <b data-k="rule.add">Add rule</b>: give it a name, choose the <b data-k="rule.kind">Type</b> and fill in the condition.</li>
+      <li>Set <b data-k="rule.up">Upload Mbps</b> / <b data-k="rule.down">Download Mbps</b>; 0 leaves that direction unchanged.</li>
+      <li><b data-k="rule.tightenOnly">Tighten only</b>: when on (the default) the result is never faster than the user's own limit; turn it off to apply the rule's values directly, for example to loosen limits at certain hours.</li>
+      <li><b data-k="rule.targets">Targets</b> can be combined: all users (including future ones), users of a plan, all users of a reseller, or users ticked one by one.</li>
+      <li>Save.</li>
+    </ol>
+    <div class="tip"><b>Limits by plan</b>You can also tick <b data-k="plan.rules">Rate-limit rules</b> while editing a plan so every user of that plan follows them.</div>
+  </section>
+
+  <section class="sec" id="rules-active">
+    <h3>Which limits are active</h3>
+    <ul>
+      <li>When several rules hit the same user, the strictest wins.</li>
+      <li>In the <b data-k="rule.active">Active</b> column, <b data-k="rule.viewActive">view</b> shows who is limited right now and for how long; the user list also marks them <b data-k="user.limited">Limited</b>.</li>
+      <li>Changes apply to live connections immediately; the master evaluates rules every 10 seconds and syncs them to nodes. Disabling a rule lifts its limits at once.</li>
+      <li>Rule limits are not shown on users' landing pages. To hear about burst limits: <b data-k="nav.settings">Settings</b> → <b data-k="set.notify">Notifications</b> → <b data-k="set.tgOnRuleLimit">Notify when a burst limit triggers</b>.</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="resellers">
+  <h2>Reseller panel</h2>
+  <p class="lede av-only">Resellers sell accounts for you: you give them lines and quotas, they create users in their own reseller panel, and they only ever see their own users and the plans they made.</p>
+  <p class="lede rv-only">The reseller panel only covers the users under your account: the site owner gives you lines and quotas, and you create accounts, renew them and watch usage here.</p>
+
+  <section class="sec" id="rs-create" data-scope="admin">
+    <h3>Create a reseller</h3>
+    <ol class="steps">
+      <li><b data-k="nav.resellers">Resellers</b> page → <b data-k="rs.add">Add reseller</b>: the <b data-k="common.name">Name</b> is the reseller's login name.</li>
+      <li>Tick the <b data-k="rs.lines">Allowed lines</b>: resellers can only give these lines to their users, and you can allow just the entry on one server.</li>
+      <li>Set the limits: <b data-k="rs.volumeGb">Traffic quota GB</b>, <b data-k="rs.userLimit">Max users</b>, <b data-k="rs.deviceLimit">Device pool</b>, <b data-k="rs.speedUp">Bandwidth pool · up Mbps</b> / <b data-k="rs.speedDown">Bandwidth pool · down Mbps</b>, <b data-k="rs.expiry">Expires (empty = never)</b>; 0 = unlimited.</li>
+      <li>Send them the reseller panel address shown at the top of the page (default port 2054, path <code>/dl/</code>).</li>
+    </ol>
+    <ul>
+      <li>New resellers have no password: within 24 hours they sign in with their name and an empty password, then set one. If that window passed or they forgot the password: <b data-k="common.more">More</b> → <b data-k="rs.passwd">Reset password</b> (this also clears their 2FA and API token and opens a new 24-hour window).</li>
+      <li>Unticking a line removes it from all of that reseller's users at once.</li>
+      <li><b data-k="rs.reset">Reset traffic</b> sets the used traffic of all their users back to zero.</li>
+      <li>Resellers' users do not appear on the main panel's Users page; open the reseller's <b data-k="common.details">Details</b> to see them.</li>
+      <li>The reseller panel's port, path and certificate are under <b data-k="nav.settings">Settings</b> → <b data-k="set.reseller">Reseller panel</b>; untick <b data-k="set.resellerEnabled">Enable the reseller panel</b> if you do not need it, and remember to open 2054/tcp in the firewall.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="rs-quota">
+    <h3>How reseller limits work</h3>
+    <ul>
+      <li>Traffic quota: counts all usage of all their users; resetting traffic, renewing or deleting users on the reseller panel does not reduce it. Only "reset traffic" on the main panel sets it back to zero.</li>
+      <li><b data-k="rs.deviceLimit">Device pool</b>: the most devices all their users may have online at once (across all servers). When it is full only new devices are refused; connected ones are not affected.</li>
+      <li>Bandwidth pool: the combined speed of all their users, one pool per server.</li>
+      <li>Any single user can be given any value, but the totals are capped by these pools.</li>
+      <li>If the reseller expires, is disabled or runs over the traffic quota, all their users are disabled at once and their subscriptions stop working.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="rs-login">
+    <h3>First sign-in and password</h3>
+    <ol class="steps">
+      <li>Open the reseller panel address you were given (default <code>http(s)://SERVER:2054/dl/</code>).</li>
+      <li>Enter your reseller name as the username; the first time, leave the password empty and click <b data-k="login.submit">Sign in</b>.</li>
+      <li>When asked, <b data-k="acct.setPassword">Set a password</b> (at least 8 characters), and sign in with it from then on.</li>
+    </ol>
+    <div class="pit"><b>Common pitfall</b>A new reseller account can only be claimed within 24 hours. If it expired or you forgot the password, ask the site owner to reset it on the main panel, which opens a new 24 hours. After signing in, turn on two-factor authentication on the <b data-k="nav.account">Account</b> page.</div>
+  </section>
+
+  <section class="sec" id="rs-panel">
+    <h3>What the reseller panel can do</h3>
+    <ul>
+      <li><b data-k="nav.dashboard">Dashboard</b>: traffic used against the quota, number of users, online users and devices.</li>
+      <li><b data-k="nav.users">Users</b>: add, edit, renew, extend, reset traffic, kick, reset subscription links, batch actions, usage charts and online devices. New users only need a name; their subscription link is a random token.</li>
+      <li><b data-k="nav.plans">Plans</b>: only the plans you created yourself are visible and usable.</li>
+      <li><b data-k="nav.account">Account</b>: quota, password, two-factor authentication, your own subscription page texts and the external API.</li>
+      <li>You can only assign the lines the site owner allowed (possibly just on some servers).</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="rs-account">
+    <h3>Account page</h3>
+    <p class="lede">The reseller panel's <b data-k="nav.account">Account</b> page holds your sign-in security, your quota, and the subscription page your users see.</p>
+    <ul>
+      <li><b data-k="acct.quota">My quota</b>: traffic used, the device pool (online / limit, and the total handed out to users), bandwidth, expiry and number of users. When the device pool is full it also says how many new devices were refused recently.</li>
+      <li><b data-k="acct.password">Password</b>: change your password.</li>
+      <li><b data-k="adm.totp">Two-factor authentication (2FA)</b>: see <a href="#sec-account">Account and two-factor authentication</a>.</li>
+      <li><b data-k="set.subPage">Subscription page</b>: the texts your users see: <b data-k="set.subTitle">Profile title</b> (the subscription name shown in apps), <b data-k="set.subPageTitle">Page title</b>, <b data-k="set.subPageSupport">Footer contact</b>, <b data-k="set.subPageBuyURL">Purchase / renew link</b> and <b data-k="set.subPageNotice">Notice (multi-line)</b>; empty fields use the main panel's. You can also turn off the page or temporary sharing for your users.</li>
+      <li data-pending="landing"><b data-k="set.subPageLogo">Landing page logo</b>: upload your own logo; without one, the main panel's is used.</li>
+      <li><b data-k="acct.api">External API</b>: for your own shop or bot (see <a href="#api">External API</a>).</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="sub">
+  <h2>Subscriptions and landing page</h2>
+  <p class="lede">Clients import the subscription link; the same link opened in a browser is the user's own landing page.</p>
+
+  <section class="sec" id="sub-url">
+    <h3>Subscription links and formats</h3>
+    <ul>
+      <li>They look like <code>http(s)://DOMAIN-OR-IP:2056/sub/USERNAME</code> (or a random token).</li>
+      <li>One link is enough: the format follows the client that fetches it. Clash-type apps (Clash Verge, mihomo, Stash) get a Clash config, sing-box apps (SFA, SFI and so on) get a sing-box config, and NekoBox, v2rayN, Shadowrocket and others get plain links.</li>
+      <li>To force a format, append <code>?format=clash</code> (Clash), <code>?format=json</code> (sing-box) or <code>?format=mihomo</code> (Clash for the new core).</li>
+      <li>Each line appears once per server, with the server name as a suffix; servers whose traffic ratio is not 1 get a tag such as <code>x2</code>.</li>
+      <li>Node addresses are server IPs by default (the domain is only the SNI), so a poisoned DNS on the client cannot break them.</li>
+      <li>Disabled, expired or used-up users get a 404 when their client fetches the subscription, and the lines stop letting them in.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="sub-import">
+    <h3>How users import it</h3>
+    <ul>
+      <li>Easiest: send the link and have the user open it in a phone or computer browser, then tap one-tap import for their app or scan the QR code.</li>
+      <li>The download arrow at the top right of the one-tap import button opens a download page with apps for each system (iOS, Android, Windows, macOS, Linux); it holds no user data and can be forwarded as is.</li>
+      <li>Users can also copy the link and paste it into their app's "add subscription".</li>
+      <li>The name shown in apps comes from <b data-k="set.subTitle">Profile title</b>. Shadowrocket and Clash Verge fix the name when the subscription is added, so after changing the title users must remove and re-add it, or use one-tap import on the landing page (which carries the title).</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="sub-settings" data-scope="admin">
+    <h3>Subscription settings</h3>
+    <p class="lede">Under <b data-k="nav.settings">Settings</b> → <b data-k="set.sub">Subscription</b> and <b data-k="set.subTmpl">Subscription formats and templates</b>.</p>
+    <ul>
+      <li><b data-k="set.subTitle">Profile title</b>, <b data-k="set.subUpdates">Update interval (hours)</b>.</li>
+      <li><b data-k="set.subUseUserName">Use the username as the subscription URL</b>: on by default; when off, new users get random tokens and existing users keep their links.</li>
+      <li><b data-k="set.subInsecure">Allow insecure certificate in subscriptions</b>: automatic by default (on with a self-signed certificate).</li>
+      <li><b data-k="set.subServerAddr">Node address in subscriptions</b>: <b data-k="set.addrIp">IP (recommended)</b> or <b data-k="set.addrDomain">domain</b>.</li>
+      <li><b data-k="set.subEncode">Base64-encode link subscription</b>, <b data-k="set.subNotice">Show traffic notice node on top</b>, <b data-k="set.extRefresh" class="wrap">External subscription refresh interval (minutes)</b>.</li>
+      <li><b data-k="set.subAutoFormat">Pick the format by client</b>: on by default; when off, links without <code>?format=</code> always get plain links.</li>
+      <li>Custom templates: <b data-k="set.subClashExt" class="wrap">Clash template (YAML, empty = built-in)</b> / <b data-k="set.subSingboxExt" class="wrap">sing-box template (JSON, empty = built-in)</b>. Start with <b data-k="set.tmplFillClash">Fill in the built-in Clash template</b> and edit it; nodes and groups are filled in by the panel, and mistakes are reported when you save.</li>
+    </ul>
+    <div class="pit"><b>Common pitfall</b>Changing the subscription <b data-k="set.path">Path</b> or port breaks every existing subscription link; send users their new links.</div>
+  </section>
+
+  <section class="sec" id="landing">
+    <h3>Landing page</h3>
+    <p class="lede">What users see when they open their subscription link in a browser: usage, expiry, one-tap import, QR codes, plus your notice and contact details.</p>
+    <ul>
+      <li data-scope="admin">Edit it under <b data-k="nav.settings">Settings</b> → <b data-k="set.subPage">Subscription page</b>; resellers edit theirs under <b data-k="nav.account">Account</b> → <b data-k="set.subPage">Subscription page</b> (empty fields follow the main panel).</li>
+      <li data-scope="reseller">Edit it under <b data-k="nav.account">Account</b> → <b data-k="set.subPage">Subscription page</b>; empty fields use the main panel's.</li>
+      <li><b data-k="set.subPageEnabled" class="wrap">Show a page when the subscription URL is opened in a browser</b>: when off, browsers just get the subscription content.</li>
+      <li><b data-k="set.subPageTitle">Page title</b>, <b data-k="set.subPageSupport">Footer contact</b>, <b data-k="set.subPageNotice">Notice (multi-line)</b>.</li>
+      <li><b data-k="set.subPageBuyURL">Purchase / renew link</b>: adds a purchase / renew button to the landing page (the main button when the user has expired, run out or been disabled).</li>
+      <li data-scope="admin"><b data-k="set.subPageBrand" class="wrap">Show “Powered by m-ui” at the bottom of landing pages</b>: resellers' landing pages never show it.</li>
+      <li data-pending="landing"><b data-k="set.subPageLogo">Landing page logo</b>: click <b data-k="set.logoUpload">Upload / replace</b>; it applies at once, no save needed. PNG, JPEG, GIF, WebP and SVG are accepted; the browser scales the image to fit 480×160 and converts it to PNG (64 KB at most). It is shown 28 pixels high on the landing page and used as the browser tab icon. <b data-k="set.logoReset">Restore default</b> brings back the built-in logo. Resellers without a logo use the main panel's, and nodes follow the master.</li>
+      <li>Users who ran out, expired or were disabled can still open their landing page, which shows the reason and whom to contact; their clients get a 404. Links that match no user show an "invalid subscription link" page in browsers.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="landing-links" data-pending="landing">
+    <h3>Links in the notice and contact details</h3>
+    <p class="lede"><b data-k="set.subPageNotice">Notice (multi-line)</b> and <b data-k="set.subPageSupport">Footer contact</b> can contain clickable links; only the text is shown on the page.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Write</th><th>Shown on the page</th></tr></thead>
+      <tbody>
+        <tr><td><code>Support(https://t.me/support)</code></td><td>"Support", clickable</td></tr>
+        <tr><td><code>[Clash/Mihomo guide](https://example.com/a)</code></td><td>"Clash/Mihomo guide", clickable</td></tr>
+        <tr><td><code>Website https://example.com</code></td><td>the address itself becomes a link</td></tr>
+        <tr><td><code>Tg: @username</code></td><td>@username, opens Telegram</td></tr>
+        <tr><td><code>WhatsApp: +34 600 000 000</code></td><td>the number, opens WhatsApp</td></tr>
+      </tbody>
+    </table></div>
+    <ul>
+      <li>If the text contains <code>/</code> or the link contains brackets, use the <code>[text](link)</code> form.</li>
+      <li>Telegram keywords are Tg, Telegram, 电报 and 飞机, followed by <code>@username</code>; WhatsApp keywords are WA and WhatsApp, followed by <code>+number</code>; an English or Chinese colon both work.</li>
+      <li>Only http(s), tg, mailto and tel links are accepted; anything else is shown as plain text.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="share">
+    <h3>Temporary sharing</h3>
+    <p class="lede">Users can create a temporary link on their landing page for someone else, and take it back any time.</p>
+    <ul>
+      <li>One per user; the other person gets the same nodes with a separate set of credentials. Traffic, devices, speed and expiry all count against the owner.</li>
+      <li>Cancelling or regenerating it stops the old shared link at once and disconnects whoever was using it.</li>
+      <li>Opened in a browser, a shared link shows a reduced landing page without the owner's usage or expiry.</li>
+      <li><b data-k="set.subShare">Let users create a temporary share link</b> (on by default) turns the feature off for everyone: on the main panel under <span data-scope="admin"><b data-k="nav.settings">Settings</b> → </span><b data-k="set.subPage">Subscription page</b>, for resellers under <b data-k="nav.account">Account</b> → <b data-k="set.subPage">Subscription page</b> (if the main panel turns it off, resellers cannot turn it on).</li>
+      <li>The user's details show their shared link; <b data-k="user.unshare">Revoke</b> cancels it at once.</li>
+    </ul>
+  </section>
+</section>
+</div>
+
+<div class="part" data-title="Maintain">
+<section class="chap" id="backup" data-scope="admin">
+  <h2>Backup and migration</h2>
+  <p class="lede">One zip file is the whole panel: the database (lines, users, traffic, settings) plus certificates. Keep it safe and you can move or reinstall without losing anything.</p>
+
+  <section class="sec" id="bk-now">
+    <h3>Back up</h3>
+    <ul>
+      <li><b data-k="nav.backup">Backup</b> page → <b data-k="bk.now">Backup now</b>: <b data-k="bk.download">Download</b> it, or <b data-k="bk.saveLocal">Save on server</b> (listed under <b data-k="bk.local">Backups on server</b>).</li>
+      <li><b data-k="bk.schedule">Scheduled backup</b>: <b data-k="bk.hour">Hour of day (-1 = off)</b> (server local time) and <b data-k="bk.keep">Copies to keep</b>; tick <b data-k="bk.telegram">Also push to Telegram</b> once Telegram notifications are set up.</li>
+      <li>Command line: <code>m-ui backup -db /etc/m-ui/m-ui.db -out backup.zip</code>, or option 9 in the <code>m-ui</code> menu.</li>
+    </ul>
+    <div class="pit"><b>Common pitfall</b>Backups contain every user's credentials and the certificates' private keys; never put them anywhere public.</div>
+  </section>
+
+  <section class="sec" id="bk-restore">
+    <h3>Restore</h3>
+    <ol class="steps">
+      <li><b data-k="nav.backup">Backup</b> page → <b data-k="bk.restore">Restore</b>: choose the backup file (zip or .db) and click <b data-k="bk.restoreBtn">Restore</b>.</li>
+      <li>After you confirm, m-ui restarts by itself and replaces the database and certificates; the previous database is kept as a <code>.bak-*</code> file.</li>
+    </ol>
+    <ul>
+      <li>A new server can install and restore in one step (the command is in the migration wizard below).</li>
+      <li>With the service stopped you can also restore from the command line: <code>m-ui restore -db /etc/m-ui/m-ui.db -from backup.zip</code>.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="bk-migrate">
+    <h3>Moving to another server</h3>
+    <p class="lede">The <b data-k="mig.title">Migration wizard</b> on the <b data-k="nav.backup">Backup</b> page moves the whole panel in four steps; ports, credentials and subscription links stay the same, so users notice nothing.</p>
+    <ol class="steps">
+      <li>Install m-ui on the new server and restore the backup (the wizard has the ready-made command; certificates are restored too).</li>
+      <li>Open the panel with the new server's IP (same port and path as before) and check that the lines are running; nodes are reconnected automatically.</li>
+      <li>Point your domain to the new IP at your DNS provider, and use <b data-k="mig.check">Check DNS</b> in the wizard to see whether the major resolvers have picked it up.</li>
+      <li>When users are fine on the new server, stop the old one: <code>systemctl stop m-ui</code>.</li>
+    </ol>
+    <div class="tip"><b>Replacing only a node is simpler</b>Install the new node, then on the master's <b data-k="nav.nodes">Servers</b> page update that row with the new API URL and token; the master pushes everything again.</div>
+  </section>
+
+  <section class="sec" id="bk-import">
+    <h3>Moving from an old panel</h3>
+    <ul>
+      <li>Everything (lines, upstreams, users, settings): add a parameter when installing, <code>bash install.sh --import /path/to/old-panel.db</code>. Ports, user credentials, the panel path and subscription links are kept, so clients need no changes.</li>
+      <li>Users only: <b data-k="nav.users">Users</b> page → <b data-k="user.import">Import from old panel</b> (see <a href="#users-import">Import users from an old panel</a>).</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="notify" data-scope="admin">
+  <h2>Notifications (Telegram)</h2>
+  <p class="lede">Get alerts on Telegram (or a webhook): users expiring, upstreams failing, certificate renewals failing, servers getting blocked… and manage users from your phone with the bot.</p>
+
+  <section class="sec" id="tg-setup">
+    <h3>Set up Telegram notifications</h3>
+    <ol class="steps">
+      <li>In Telegram, create a bot with @BotFather and copy its token (like <code>123456:ABC-DEF…</code>).</li>
+      <li>Message @userinfobot to get your chat ID (group and channel IDs are negative). Then send your own bot a message, otherwise it cannot write to you.</li>
+      <li><b data-k="nav.settings">Settings</b> → <b data-k="set.notify">Notifications</b>: tick <b data-k="set.tgEnabled">Enable Telegram notifications</b>, fill in <b data-k="set.tgToken">Bot token</b> and <b data-k="set.tgChatId">Chat ID</b>, click <b data-k="common.save">Save</b>.</li>
+      <li>Click <b data-k="set.tgTest">Send test message</b>; if it arrives on your phone, you are done.</li>
+    </ol>
+    <div class="pit"><b>Common pitfall</b>If the server cannot reach Telegram (in mainland China, for example), set a <b data-k="set.tgProxy">Proxy (optional)</b>; with WARP installed use <code>socks5://127.0.0.1:40000</code>.</div>
+  </section>
+
+  <section class="sec" id="tg-events">
+    <h3>What gets notified</h3>
+    <p class="lede">Tick each event in the <b data-k="set.notify">Notifications</b> group; Telegram and the webhook share these switches.</p>
+    <ul>
+      <li><b data-k="set.tgOnLogin">Panel login / repeated failures</b></li>
+      <li><b data-k="set.tgOnUserDisabled">User auto-disabled (expired / quota)</b>, <b data-k="set.tgOnUserExpiring">User expiring soon</b> (how early: <b data-k="set.tgExpiringDays">Days before expiry</b>), <b data-k="set.tgOnQuota">User quota warning</b> (at <b data-k="set.tgQuotaPercent">Warn at usage percent</b>)</li>
+      <li><b data-k="set.tgOnRuleLimit">Notify when a burst limit triggers</b></li>
+      <li><b data-k="set.tgOnUpstream">Upstream down / recovered</b>, <b data-k="set.tgOnCore">Data plane stopped / recovered</b></li>
+      <li><b data-k="set.tgOnReach">Mainland reach problem / recovered</b></li>
+      <li><b data-k="set.tgOnCert">Certificate issued / renewal / expiry</b> (node certificates are reported by the master too)</li>
+      <li><b data-k="set.tgDaily">Daily report</b>, sent at <b data-k="set.tgDailyHour">Daily report hour (0-23, panel time zone)</b></li>
+      <li data-pending="ha">Master failover: candidates report a lost master, a finished takeover and a finished move-back here too (see <a href="#ha">Master failover</a>).</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="tg-bot">
+    <h3>Telegram bot</h3>
+    <p class="lede">With <b data-k="set.tgBot">Telegram bot</b> ticked you can send commands to the bot from your phone to manage users.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>/status</code></td><td>Overview</td></tr>
+        <tr><td><code>/find keyword</code></td><td>Find users</td></tr>
+        <tr><td><code>/user name</code></td><td>User details and subscription link</td></tr>
+        <tr><td><code>/extend name days</code></td><td>Extend the expiry</td></tr>
+        <tr><td><code>/reset name</code></td><td>Reset traffic</td></tr>
+        <tr><td><code>/enable name</code>, <code>/disable name</code></td><td>Enable / disable (disabling also disconnects)</td></tr>
+        <tr><td><code>/kick name</code></td><td>Disconnect</td></tr>
+        <tr><td><code>/backup</code></td><td>Send a backup</td></tr>
+        <tr><td><code>/help</code></td><td>List all commands</td></tr>
+      </tbody>
+    </table></div>
+    <div class="pit"><b>Common pitfall</b>The bot only listens to the chat ID in the settings; if that is a group ID, everyone in the group can use it. The bot runs only on the master and needs no open port; its actions are written to the audit log with the actor telegram.</div>
+  </section>
+
+  <section class="sec" id="webhook">
+    <h3>Webhook</h3>
+    <p class="lede">To feed alerts into your own system (a chat relay, a ticket system…), use a webhook.</p>
+    <ul>
+      <li><b data-k="set.webhookUrl">Webhook URL</b>: ticked events are also POSTed here as JSON with <code>event</code>, <code>text</code> and <code>time</code>. Empty = not sent.</li>
+      <li><b data-k="set.webhookSecret">Webhook secret</b>: when set, requests carry an <code>X-M-UI-Signature</code> header (<code>sha256=</code> HMAC of the body) so the receiver can verify them.</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="ops" data-scope="admin">
+  <h2>Ops, logs and updates</h2>
+  <p class="lede">Tune the server, read logs, troubleshoot connections and update, all without a terminal.</p>
+
+  <section class="sec" id="ops-tune">
+    <h3>System tuning</h3>
+    <p class="lede"><b data-k="ops.tune">System tuning</b> on the <b data-k="nav.ops">Ops</b> page: swap, the open-file limit, time sync, kernel parameters and BBR; the defaults suit most VPSes.</p>
+    <ul>
+      <li><b data-k="ops.t.tune-all">Tune everything</b> applies them all, or adjust one item and click <b data-k="common.run">Run</b>; progress appears live in <b data-k="ops.log">Task output</b>.</li>
+      <li>The same page can cap the system log (journald) size and retention. It holds the logs of every service on the machine; limiting it does not affect the panel.</li>
+      <li>WARP is on this page too (see <a href="#warp">WARP</a>). Ops tasks only work on Linux with m-ui running as root.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="logs">
+    <h3>Logs</h3>
+    <p class="lede">The <b data-k="nav.logs">Logs</b> page has three kinds: <b data-k="logs.sub">Subscription access</b>, <b data-k="logs.core">Core log</b> and <b data-k="logs.audit">Audit</b>.</p>
+    <ul>
+      <li><b data-k="logs.sub">Subscription access</b>: who fetched a subscription, from which IP and with which app.</li>
+      <li><b data-k="logs.core">Core log</b>: the data plane's and panel's runtime log, kept in memory only (up to 10,000 lines, cleared on restart). <b data-k="logs.enabled">Logging</b> can be switched off to save resources.</li>
+      <li><b data-k="logs.coreLevel">Data-plane level</b>: warn by default, warnings and errors only. Switch to info or debug while troubleshooting (it applies at once) and back to warn afterwards; info writes tens of thousands of lines an hour and slows the disk down.</li>
+      <li><b data-k="logs.audit">Audit</b>: who did what and when (panel, external API and Telegram bot actions).</li>
+      <li>Subscription access and audit logs can <b data-k="logs.keep">Auto-clean</b> (keep 1 day, 1 week, 1 month or forever); every kind can be emptied with <b data-k="logs.clear">Clear</b>.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="recent-conns">
+    <h3>Recent inbound connections</h3>
+    <p class="lede"><b data-k="dash.recentConns">Recent inbound connections</b> at the bottom of the dashboard helps when a user says they cannot connect: did their IP reach the server, and on which line?</p>
+    <ul>
+      <li>It lists connections that passed the protocol handshake and authentication, with user, line, server, count and last time.</li>
+      <li>Connections refused by a device limit or a reseller's device pool are listed in red too: <b data-k="dash.rejectedDevice">Refused: device limit</b>, <b data-k="dash.rejectedPool">Refused: reseller device pool full</b>.</li>
+      <li data-pending="v6">Connections that failed the handshake or authentication (wrong certificate, password or SNI) are listed as well, with the reason.</li>
+      <li>An IP missing from the list usually means the packets never reached the server (security group, firewall, client network). To check whether they arrive, set <b data-k="logs.coreLevel">Data-plane level</b> to info for a while and look for <code>inbound connection from</code>, or capture packets on the server.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="update">
+    <h3>Updating</h3>
+    <p class="lede">When a new version is out, an arrow appears next to the version number at the bottom left; click it to update in one step.</p>
+    <ul>
+      <li>Arrow → <b data-k="update.now">Update now</b>: the download is verified, the program replaced and restarted, and the panel reloads after a dozen seconds. Users, lines, subscription links and certificates stay as they are; connections on this machine drop for a moment.</li>
+      <li>If the new version fails to start, the old one is put back automatically and a bar at the top explains it; <b data-k="update.ack">Got it</b> dismisses it.</li>
+      <li>Nodes are full installations and update from their own panels; keep master and nodes on the same version.</li>
+      <li>You can also run <code>m-ui</code> over SSH and choose option 10, or run the one-line installer again. IPv6-only servers cannot reach GitHub until WARP is installed.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="cli">
+    <h3>Command line and SSH menu</h3>
+    <p class="lede">If the panel will not open or you forgot the password, run <code>m-ui</code> on the server for a numbered menu.</p>
+    <ul>
+      <li>Menu: 1 show panel address / account, 2 restart, 3 stop, 4 start, 5 reset the admin password, 6 change panel port / path / subscription port, 7 reset all settings, 8 recent logs, 9 back up now, 10 update to the latest version, 11 generate a self-signed certificate, 12 switch between master and node, 13 turn off two-factor authentication, 14 uninstall.</li>
+      <li><code>m-ui info</code>: prints the panel address, path and account status.</li>
+      <li><code>m-ui passwd</code>: resets the admin password (and turns off two-factor authentication).</li>
+      <li><code>m-ui set -db /etc/m-ui/m-ui.db key=value</code>: changes a setting directly, such as <code>webPort=3053</code>.</li>
+      <li><code>m-ui render</code>: prints and validates the current sing-box configuration.</li>
+      <li>Data lives in <code>/etc/m-ui/</code>: <code>m-ui.db</code> (database), <code>cert/</code> (certificates), <code>backups/</code> (scheduled backups).</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="settings" data-scope="admin">
+  <h2>Settings at a glance</h2>
+  <p class="lede">The <b data-k="nav.settings">Settings</b> page saves group by group, each with its own <b data-k="common.save">Save</b>. Groups marked <b data-k="set.needRestart">restart to apply</b> need <b data-k="set.restart">Restart m-ui</b> (top of the page) after changes.</p>
+
+  <section class="sec" id="set-panel">
+    <h3>Role and panel</h3>
+    <ul>
+      <li><b data-k="set.role">Role</b>: <b data-k="set.roleSwitch">Run as node (secondary server)</b> (see <a href="#nodes-add">Attach a node</a>).</li>
+      <li><b data-k="set.panel">Panel</b>: <b data-k="set.webDomain">Domain</b> (the domain used by subscriptions and nodes, also the TLS SNI), <b data-k="set.timezone">Time zone</b> (all times in the panel use it), <b data-k="set.listen">Listen address</b>, <b data-k="set.port">Port</b>, <b data-k="set.path">Path</b>, <b data-k="set.cert">Certificate</b> / <b data-k="set.key">Private key</b> (normally filled in from the Certificate page), <b data-k="set.supportOnline" class="wrap">Supporters list and online panel count</b>.</li>
+      <li>A new panel path applies as soon as you save and the browser follows it; port, listen address and certificate changes need a restart.</li>
+      <li>With port 443 (HTTPS) or 80 (HTTP), addresses need no port number; the panel and subscriptions cannot share a port.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="set-sub">
+    <h3>Subscriptions, subscription page, reseller panel</h3>
+    <ul>
+      <li><b data-k="set.sub">Subscription</b>, <b data-k="set.subTmpl">Subscription formats and templates</b>: see <a href="#sub-settings">Subscription settings</a>.</li>
+      <li><b data-k="set.subPage">Subscription page</b>: landing page texts, the purchase link and the sharing switch; see <a href="#landing">Landing page</a>.</li>
+      <li><b data-k="set.reseller">Reseller panel</b>: <b data-k="set.resellerEnabled">Enable the reseller panel</b>, listen address, port (default 2054), path (default <code>/dl/</code>) and certificate (empty = same as the panel).</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="set-other">
+    <h3>Notifications, health checks, data plane</h3>
+    <ul>
+      <li><b data-k="set.notify">Notifications</b>: see <a href="#notify">Notifications (Telegram)</a>.</li>
+      <li><b data-k="set.monitor">Upstream health checks</b>: <b data-k="set.checkMinutes">Interval (minutes)</b> (0 = off), <b data-k="set.checkThreshold">Consecutive failures before alert</b>.</li>
+      <li><b data-k="set.reach">Mainland reachability</b>: <b data-k="set.reachAuto">Automatic checks</b>, <b data-k="set.reachMinutes">Interval (minutes)</b>, <b data-k="set.reachToken">Globalping token (optional)</b>.</li>
+      <li><b data-k="set.core">Data plane</b>: <b data-k="set.certFile">Data-plane certificate</b>, <b data-k="set.testUrl">Upstream test URL</b>, <b data-k="set.bucket">Stats bucket (seconds)</b>, <b data-k="set.trafficAge">Keep traffic history (days)</b>, <b data-k="set.allowPrivate">Let users reach private / local addresses</b> (off by default), <b data-k="set.blockBT">Block BitTorrent</b>. Changing the last two restarts the data plane once and syncs to nodes.</li>
+      <li><b data-k="set.about">About</b>: version number and what the panel and subscription addresses look like.</li>
+    </ul>
+  </section>
+</section>
+</div>
+
+<div class="part" data-title="More and help">
+<section class="chap" id="api">
+  <h2>External API</h2>
+  <p class="lede">For shops, billing systems and bots: with one token they can create users, renew, change plans, enable or disable users and fetch subscription links, without signing in to the panel.</p>
+
+  <section class="sec" id="api-on">
+    <h3>Turning it on</h3>
+    <ol class="steps">
+      <li data-scope="admin"><b data-k="nav.admin">Admin</b> page → <b data-k="adm.api">External API</b>: switch on <b data-k="adm.apiToggle">Enable / disable the external API</b>, then copy the <b data-k="adm.apiBase">Base URL</b> and the <b data-k="adm.apiToken">Token</b>.</li>
+      <li data-scope="reseller"><b data-k="nav.account">Account</b> page → <b data-k="acct.api">External API</b>: switch on <b data-k="acct.apiEnable">Enable external API</b>, then copy the <b data-k="acct.apiBase">Base URL</b> and the <b data-k="acct.apiToken">Token</b>.</li>
+      <li>Send the token with every request: the header <code>Authorization: Bearer TOKEN</code> (or <code>X-API-Key: TOKEN</code>), with JSON request bodies.</li>
+      <li>The endpoint list further down that page explains every call with a curl example you can copy.</li>
+    </ol>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>The token carries all of your panel permissions: keep it in server-side code only, never in a web page or an app. If it leaks, click <b data-k="adm.apiRotate">Regenerate</b> and the old token stops working at once.</li>
+      <li data-scope="admin">Call the API on the master only; write calls on a node are refused.</li>
+      <li data-scope="reseller">A reseller token only reaches your own users, your own plans and the lines you were allowed; it stops working as soon as you are disabled, expire or have your password reset.</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="api-calls">
+    <h3>Common calls</h3>
+    <p class="lede">Paths go after the base URL; <code>{name}</code> can be the username or the user id.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Call</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET /ping</code></td><td>Connectivity and version</td></tr>
+        <tr><td><code>GET /plans</code></td><td>List plans</td></tr>
+        <tr><td><code>GET /users</code></td><td>List users (<code>?q=</code> to search)</td></tr>
+        <tr><td><code>POST /users</code></td><td>Create a user; pass <code>plan</code> to apply a plan at once</td></tr>
+        <tr><td><code>GET /users/{name}</code></td><td>User details (subscription links, online IPs)</td></tr>
+        <tr><td><code>PATCH /users/{name}</code></td><td>Change fields: expiry, quota, devices, lines…</td></tr>
+        <tr><td><code>POST /users/{name}/enable</code> · <code>/disable</code></td><td>Enable / disable</td></tr>
+        <tr><td><code>POST /users/{name}/reset</code> · <code>/kick</code></td><td>Reset this period's usage / kick</td></tr>
+        <tr><td><code>POST /users/{name}/rotate</code></td><td>Reset the subscription link and credentials</td></tr>
+        <tr><td><code>POST /users/{name}/plan</code></td><td>Renew (<code>renew</code>) or extend (<code>extend</code>)<span data-pending="plan-api">; <code>periods</code> renews N periods at once, and without a plan the current plan is renewed</span></td></tr>
+        <tr data-pending="plan-api"><td><code>POST /users/{name}/change</code></td><td>Change plan: <code>replace</code>, <code>stack</code> or <code>prorate</code></td></tr>
+        <tr data-pending="plan-api"><td><code>GET /users/{name}/plan-ops</code></td><td>Plan history, newest first</td></tr>
+        <tr><td><code>GET /users/{name}/sub</code></td><td>Subscription links</td></tr>
+        <tr><td><code>DELETE /users/{name}</code></td><td>Delete the user</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec" id="api-safe" data-pending="plan-api">
+    <h3>Preview, no duplicates, confirm downgrades</h3>
+    <p class="lede">Renewals and plan changes touch users' money and time, so the API has three safety nets.</p>
+    <ul>
+      <li>Preview: <code>"dryRun": true</code> only calculates and returns before / after, which a shop can use for quotes.</li>
+      <li>No duplicates (idempotency): send a <code>requestId</code> (or the <code>Idempotency-Key</code> header, such as your order number) and retries with the same id run only once, so time is never added twice.</li>
+      <li>Downgrade confirmation: if a plan change would put the user over quota at once or bring the expiry forward, the API answers 409 with the full preview; call again with <code>"force": true</code> to go ahead.</li>
+      <li>Calls marked "idempotent" and "preview" in the panel's endpoint list support these.</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="security">
+  <h2>Security</h2>
+  <p class="lede">A changed default password, two-factor authentication and a hidden panel address stop most trouble.</p>
+
+  <section class="sec" id="sec-account">
+    <h3>Account and two-factor authentication</h3>
+    <ul>
+      <li data-scope="admin">Change the password or username: <b data-k="adm.account">Login account</b> on the <b data-k="nav.admin">Admin</b> page.</li>
+      <li data-scope="reseller">Change the password: <b data-k="acct.password">Password</b> on the <b data-k="nav.account">Account</b> page.</li>
+      <li><b data-k="adm.totp">Two-factor authentication (2FA)</b>: click <b data-k="adm.totpGen">Generate secret</b>, scan the QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password…), enter the 6-digit code it shows and click <b data-k="adm.totpVerify">Verify &amp; enable</b>. From then on signing in needs the password plus a code.</li>
+      <li data-scope="admin">Lost your phone? SSH in and run <code>m-ui</code>: option 13 turns two-factor authentication off; resetting the password with option 5 turns it off too.</li>
+      <li data-scope="reseller">Lost your phone or password? Ask the site owner to reset your password on the main panel (two-factor authentication is cleared with it).</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="sec-path" data-scope="admin">
+    <h3>Panel address and ports</h3>
+    <ul>
+      <li>Change the default port and path: <b data-k="nav.settings">Settings</b> → <b data-k="set.panel">Panel</b> → <b data-k="set.port">Port</b> / <b data-k="set.path">Path</b>. <code>IP:port/</code> alone always returns 404, so a port scan does not reveal the panel.</li>
+      <li>Serve the panel over HTTPS: when adding a certificate, tick <b data-k="cert.applyPanel">Use for panel HTTPS</b> (applies after a restart).</li>
+      <li>Open only the ports you need in the firewall, and allow nodes' panel ports only from the master's IP.</li>
+      <li>Login protection: 10 wrong attempts from one source within 10 minutes block it for 5 minutes, and 5 wrong attempts in a row can send a Telegram alert (<b data-k="set.tgOnLogin">Panel login / repeated failures</b>).</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="sec-core" data-scope="admin">
+    <h3>Data-plane safety switches</h3>
+    <ul>
+      <li><b data-k="set.allowPrivate">Let users reach private / local addresses</b>: off by default, so users cannot reach the panel, the WARP port or your internal network through the proxy. Turn it on only if users really need internal services.</li>
+      <li><b data-k="set.blockBT">Block BitTorrent</b>: refuses BitTorrent through the proxy so your VPS does not attract copyright complaints.</li>
+      <li>Give nodes HTTPS API URLs; otherwise tokens and user credentials are synced in plain text.</li>
+      <li>Backup zips contain user credentials and private keys, and the external API token equals admin rights: keep all of them safe.</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="faq">
+  <h2>FAQ and troubleshooting</h2>
+  <p class="lede">Start from the symptom; if it is not here, search for a keyword at the top.</p>
+
+  <section class="sec" id="faq-connect">
+    <h3>Cannot connect</h3>
+    <dl class="qa">
+      <dt>The subscription refreshes, but nodes do not connect?</dt>
+      <dd>Have the user refresh the subscription once, then check in this order: is the line's port open in the security group / firewall (Hysteria2 and TUIC need UDP); is the user disabled (see the status column); is the device limit full. <span data-scope="admin"><b data-k="dash.recentConns">Recent inbound connections</b> on the dashboard shows whether their IP reached the server.</span></dd>
+      <dt>Device limit reached / some devices cannot connect?</dt>
+      <dd>The devices online at the same time (by source IP, across all servers) hit the limit, so new devices are refused. Wait about a minute after another device goes offline, or raise the limit. A phone switching between Wi-Fi and mobile data changes IP and may count twice for a short while.</dd>
+      <dt data-scope="admin">IPv6 nodes do not work?</dt>
+      <dd data-scope="admin">Usually the cloud security group lacks <code>::/0</code> rules (add TCP and UDP separately) or ip6tables / ufw blocks it; also make sure the user's own network has IPv6. Outbound-only IPv6 such as WARP or NAT cannot take incoming connections. <span data-pending="v6">The IPv6 inbound check on the Servers page tells you directly whether it is reachable.</span></dd>
+      <dt data-scope="admin">Everyone in one region suddenly cannot connect?</dt>
+      <dd data-scope="admin">On the <b data-k="nav.nodes">Servers</b> page click <b data-k="reach.checkAll">Check mainland reach</b>: <b data-k="reach.v.ipBlocked">IP blocked</b> means change the IP, <b data-k="reach.v.portBlocked">Port blocked</b> means change the port.</dd>
+    </dl>
+  </section>
+
+  <section class="sec" id="faq-panel" data-scope="admin">
+    <h3>Panel and servers</h3>
+    <dl class="qa">
+      <dt>Opening <code>IP:2053/</code> shows 404?</dt>
+      <dd>On purpose: the root does not redirect, so the panel path is not given away to scanners. Open the full address, such as <code>http://IP:2053/app/</code>. Forgot the path? SSH in, run <code>m-ui</code> and choose option 1.</dd>
+      <dt>Forgot the password / lost the 2FA phone?</dt>
+      <dd>SSH in and run <code>m-ui</code>: option 5 resets the admin password (and turns off 2FA), option 13 only turns off 2FA.</dd>
+      <dt>Port, listen address or certificate changes do nothing?</dt>
+      <dd>They need a restart: <b data-k="set.restart">Restart m-ui</b> at the top of the Settings page, or menu option 2. A new path applies on save.</dd>
+      <dt>A node shows offline?</dt>
+      <dd>Read the reason on the Servers page and see <a href="#nodes-off">offline nodes</a>. Nodes with self-signed certificates need <b data-k="node.insecure">Skip certificate verification</b>; after re-issuing a node's certificate click <b data-k="node.resetCert">Reset fingerprint</b>.</dd>
+      <dt>Certificate renewal fails?</dt>
+      <dd>Check the reason in the <b data-k="cert.renewCol">Auto-renew</b> column of the certificate store: HTTP validation needs port 80 free; manual-DNS certificates cannot renew automatically; an AAAA record pointing elsewhere also breaks validation. See <a href="#cert-renew">Automatic renewal</a>.</dd>
+      <dt>WARP will not enable?</dt>
+      <dd>Read the task output on the Ops page; most often port 40000 is taken, so set another <b data-k="ops.warpPort">SOCKS5 port</b> and enable again.</dd>
+      <dt>Subscriptions return 429?</dt>
+      <dd>One IP fetched a subscription more than 120 times in a minute and was rate-limited, usually an app refreshing too often. If you really need more, run <code>m-ui set -db /etc/m-ui/m-ui.db subRateLimit=COUNT</code> on the server (0 = unlimited).</dd>
+    </dl>
+  </section>
+
+  <section class="sec" id="faq-sub">
+    <h3>Subscriptions and users</h3>
+    <dl class="qa">
+      <dt>The subscription name in the app is wrong?</dt>
+      <dd><span data-scope="admin">Set <b data-k="set.subTitle">Profile title</b> under <b data-k="nav.settings">Settings</b> → <b data-k="set.sub">Subscription</b> (resellers set theirs on their Account page).</span><span data-scope="reseller">Set <b data-k="set.subTitle">Profile title</b> under <b data-k="nav.account">Account</b> → <b data-k="set.subPage">Subscription page</b>.</span> Shadowrocket and Clash Verge fix the name when the subscription is added, so users must remove and re-add it, or use one-tap import on the landing page.</dd>
+      <dt>What do users see after running out or expiring?</dt>
+      <dd>Their landing page still opens in a browser, with the reason, contact details and a renew button (if a purchase link is set) at the top; their apps get a 404. Renewing or resetting traffic brings them back at once.</dd>
+      <dt>A subscription link leaked?</dt>
+      <dd>The user's <b data-k="common.more">More</b> → <b data-k="user.rotate">Reset subscription link</b>: the old link and credentials stop working at once; send the new link.</dd>
+      <dt>A reseller cannot sign in?</dt>
+      <dd>New resellers sign in the first time with an empty password. If the 24-hour window passed or the password is forgotten, the site owner uses <b data-k="nav.resellers">Resellers</b> → <b data-k="common.more">More</b> → <b data-k="rs.passwd">Reset password</b> on the main panel.</dd>
+    </dl>
+  </section>
+</section>
+
+<section class="chap" id="support">
+  <h2>Feedback, support and supporters</h2>
+  <p class="lede"><b data-k="support.btn">Feedback / Support</b> at the top right of the panel: reach the author, report problems and support the project.</p>
+  <section class="sec" id="support-page">
+    <h3>Reporting problems</h3>
+    <ul>
+      <li>The page links to the author's Telegram, the docs, bug reports and discussions. Include the version number when reporting (one click copies it on that page).</li>
+      <li>Mask tokens, UUIDs and subscription links in logs before sharing them.</li>
+    </ul>
+  </section>
+  <section class="sec" id="donate">
+    <h3>Supporters list</h3>
+    <ul>
+      <li>Under "Support the project", enter your name and amount and click <b data-lit="support.html">Add my name</b>, then send exactly the amount shown in USDT (TRC20); if it arrives within 60 minutes it is credited to that name.</li>
+      <li data-pending="donors">It usually appears within a few hours in the <b data-lit="support.html">Supporters</b> list, which every panel shows.</li>
+      <li>m-ui has no telemetry. The supporters list and the online panel count are the only extra network connections, and neither carries any identifier.</li>
+      <li data-scope="admin">To turn them off: <b data-k="nav.settings">Settings</b> → <b data-k="set.panel">Panel</b> → untick <b data-k="set.supportOnline" class="wrap">Supporters list and online panel count</b>.</li>
+    </ul>
+  </section>
+</section>
+</div>
+
+</div>
+<footer class="foot">This help follows the panel version. Still stuck? Click <b data-k="support.btn">Feedback / Support</b> at the top right of the panel and ask the author.</footer>
+</main>
+</div>
+<script src="help.js"></script>
+</body>
+</html>
