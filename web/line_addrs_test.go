@@ -76,3 +76,47 @@ func TestValidateLineAddrsNormalizesIPv6(t *testing.T) {
 		}
 	}
 }
+
+// 键名不分大小写(审查第 12 条):订阅那边 json.Unmarshal 本来就这么读,写成 "Server"、"Server_Port" 的老数据一直能用,
+// 升级后改个名字保存不能被拦;保存时改写成小写键,类型照样校验。同一个键大小写不同写了两遍的拦下并说清楚。
+func TestValidateLineAddrsKeysCaseInsensitive(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	save := func(addrs string) (json.RawMessage, error) {
+		l := model.Line{Name: "a", Protocol: "trojan", Port: 30461, Tls: []byte(`{"mode":"cert"}`), Addrs: json.RawMessage(addrs)}
+		err := s.validateLine(&l)
+		return l.Addrs, err
+	}
+	got, err := save(`[{"Server":" [2001:db8::1] ","Server_Port":443,"Node_Id":2,"SNI":"a.example.com","REMARK":"-备用","other":1}]`)
+	if err != nil {
+		t.Fatalf("大写键的老数据应能保存: %v", err)
+	}
+	var list []map[string]interface{}
+	if err := json.Unmarshal(got, &list); err != nil || len(list) != 1 {
+		t.Fatalf("回写: %s %v", got, err)
+	}
+	m := list[0]
+	if m["server"] != "2001:db8::1" || m["server_port"] != float64(443) || m["node_id"] != float64(2) || m["sni"] != "a.example.com" || m["remark"] != "-备用" || m["other"] != float64(1) {
+		t.Fatalf("应改写成小写键并规整: %v", m)
+	}
+	for _, k := range []string{"Server", "Server_Port", "Node_Id", "SNI", "REMARK"} {
+		if _, ok := m[k]; ok {
+			t.Fatalf("大写的 %s 应去掉: %v", k, m)
+		}
+	}
+	for _, c := range []struct{ in, want string }{
+		{`[{"Server":"1.2.3.4","Server_Port":"443"}]`, "0-65535"}, // 类型照样校验
+		{`[{"SNI":5,"server":"1.2.3.4"}]`, "sni"},
+		{`[{"Server":"1.2.3.4:443"}]`, "不带端口"},
+		{`[{"server":"1.2.3.4","Server":"5.6.7.8"}]`, "写了不止一次"},
+		{`[{"Server":"1.2.3.4","SERVER":"5.6.7.8"}]`, "写了不止一次"},
+	} {
+		if _, err := save(c.in); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s 应被拦下(含 %q),得 %v", c.in, c.want, err)
+		}
+	}
+}

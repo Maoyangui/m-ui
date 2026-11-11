@@ -69,6 +69,7 @@ const EN = /*BEGIN*/{
 "第 %d 个自定义地址 %q 不对:server 只填 IP 或域名,不带端口、协议头和路径(端口写在 server_port)": "Custom address #%d %q is invalid: server takes only an IP or a domain, without port, scheme or path (put the port in server_port)",
 "第 %d 个自定义地址的 server_port 要是 0-65535 的整数(0 = 用线路端口)": "server_port of custom address #%d must be an integer from 0 to 65535 (0 = the line port)",
 "第 %d 个自定义地址的 %s 格式不对": "The %[2]s of custom address #%[1]d has the wrong format",
+"第 %d 个自定义地址里 %s 写了不止一次(键名大小写不同)": "Custom address #%d has %s more than once (keys differing only in case)",
 "已取消": "Cancelled",
 "大陆连通检测没有启用": "The China reachability check is not enabled",
 "先勾选要测的节点": "Tick the nodes to test first",
