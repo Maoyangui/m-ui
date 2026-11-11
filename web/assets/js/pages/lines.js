@@ -507,7 +507,9 @@ async function presetLine(pid) {
   const p = PRESETS.find(x => x.id === pid);
   if (!p) return;
   const port = await suggestPort();
-  const l = { protocol: p.protocol, enabled: true, options: p.options || {}, upstreamId: 0, port, name: `${p.label}-${port}`, tls: p.tls, transport: p.transport };
+  const l = { protocol: p.protocol, enabled: true, options: { ...(p.options || {}) }, upstreamId: 0, port, name: `${p.label}-${port}`, tls: p.tls, transport: p.transport };
+  // Shadowsocks 2022 的密码是固定长度的密钥:和其它预设一样先生成好,打开表单就能直接保存
+  if (p.protocol === 'shadowsocks' && ss2022Bytes(l.options.method)) l.options.password = ss2022Key(l.options.method);
   if (p.tls && p.tls.mode === 'reality') {
     try {
       const kp = await get('keygen?type=reality');
@@ -935,11 +937,17 @@ registerActions({
   },
   'line.genSsPw': async () => {
     const m = fv('f-method');
-    const n = m.startsWith('2022-blake3-aes-128') ? 16 : m.startsWith('2022') ? 32 : 16;
-    if (m.startsWith('2022')) {
-      // 2022 算法要求 base64 的 16/32 字节密钥
-      const bytes = new Uint8Array(n); crypto.getRandomValues(bytes);
-      document.getElementById('f-sspw').value = btoa(String.fromCharCode(...bytes));
-    } else document.getElementById('f-sspw').value = (await get('keygen?type=password&len=16')).password;
+    document.getElementById('f-sspw').value = ss2022Bytes(m) ? ss2022Key(m) : (await get('keygen?type=password&len=16')).password;
   },
 });
+
+// Shadowsocks 2022 算法要求 base64 的 16 / 32 字节密钥(aes-128 是 16 字节,其余 32);不是 2022 算法返回 0
+function ss2022Bytes(method) {
+  const m = String(method || '');
+  return m.startsWith('2022-blake3-aes-128') ? 16 : m.startsWith('2022') ? 32 : 0;
+}
+function ss2022Key(method) {
+  const bytes = new Uint8Array(ss2022Bytes(method));
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes));
+}
