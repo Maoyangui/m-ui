@@ -63,6 +63,9 @@ function ledgerBadges(s) {
   return out;
 }
 
+// 订阅里的节点地址设成了"域名"(设置 → 订阅):连接地址、自动地址用只对单独选了 IP 版本的线路生效,没填域名的副机不进订阅
+const subByDomain = () => String((state.settings || {}).subServerAddr || '').toLowerCase() === 'domain';
+
 function renderReachBar() { setHTML('reach-bar', reachToolbar(isNodeView())); }
 
 // 副机视角:自己是"本机",主机那行标"主机 · 最近同步",其它副机标"主机管理";副机不探测别的机器
@@ -76,7 +79,7 @@ function statusCell(n) {
   const s = n.status;
   if (!s) return badge(t('node.pending'), 'warn');
   // 在线但有话要说(配置推不下去、数据面没应用成功、记账出问题):这台机器并没有离线,但管理员必须看见
-  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${ledgerBadges(s)}${s.error ? `<div class="sub-cell ellip warn-text" title="${esc(trErr(s.error))}">${esc(shortErr(s.error))}</div>` : (s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : '')}`;
+  if (s.ok) return `${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.noConnFails ? ` <span title="${esc(t('node.noConnFailsHelp'))}">${badge(t('node.noConnFails'))}</span>` : ''}${ledgerBadges(s)}${s.error ? `<div class="sub-cell ellip warn-text" title="${esc(trErr(s.error))}">${esc(shortErr(s.error))}</div>` : (s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : '')}`;
   return `${badge(t('common.offline'), 'danger')}<div class="sub-cell ellip" title="${esc(trErr(s.error || ''))}">${esc(shortErr(s.error))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
 }
 
@@ -200,9 +203,9 @@ function editNode(id) {
   openModal(id ? t('node.edit') : t('node.add'), `
     <div class="form-grid">
       ${field(t('common.name'), `<input id="f-name" value="${esc(n.name || '')}" placeholder="台湾">`, t('node.nameHelp'))}
-      ${field(t('node.domain'), `<input id="f-domain" value="${esc(n.domain || '')}" placeholder="tw.example.com">`, t('node.domainHelp'))}
-      ${field(t('node.addr'), `<input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(autoAddr(n).ip || t('node.addrAuto'))}">`, t('node.addrHelp'))}
-      ${field(t('node.family'), `<select id="f-family"><option value="">${t('node.familyV4')}</option><option value="v6" ${n.addrFamily === 'v6' ? 'selected' : ''}>IPv6</option></select>`, t('node.familyHelp') + (id ? ' ' + detectedText(n) : '') + (String(state.settings.subServerAddr || '').toLowerCase() === 'domain' ? ' ' + t('node.familyDnsHelp') : ''))}
+      ${field(t('node.domain'), `<input id="f-domain" value="${esc(n.domain || '')}" placeholder="tw.example.com">`, t('node.domainHelp') + (subByDomain() ? ' ' + t('node.domainDnsHelp') : ''))}
+      ${field(t('node.addr'), `<input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(autoAddr(n).ip || t('node.addrAuto'))}">`, t('node.addrHelp') + (subByDomain() ? ' ' + t('node.addrDnsHelp') : ''))}
+      ${field(t('node.family'), `<select id="f-family"><option value="">${t('node.familyV4')}</option><option value="v6" ${n.addrFamily === 'v6' ? 'selected' : ''}>IPv6</option></select>`, t('node.familyHelp') + (id ? ' ' + detectedText(n) : '') + (subByDomain() ? ' ' + t('node.familyDnsHelp') : ''))}
       ${field(t('node.ratio'), `<input id="f-ratio" type="number" min="0" max="100" step="0.1" value="${n.ratio || 1}">`, t('node.ratioHelp'))}
       ${field(t('common.sort'), `<input id="f-sort" type="number" value="${n.sort || 0}">`)}
       ${n.isLocal ? '' : `

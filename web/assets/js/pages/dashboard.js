@@ -159,7 +159,10 @@ async function renderConns() {
   const all = Array.isArray(got) ? got : []; // 官网演示的假接口没有这项,回的是 {}
   // 通过了握手与认证的(含被设备数拒的)在上面;"到了但没过握手 / 认证"的单独一张小表,各自限量,扫描刷不掉上面的
   const rows = all.filter(c => !c.failed), fails = all.filter(c => c.failed);
-  if (!rows.length && !fails.length) { setHTML(el, empty(t('dash.noConns'))); return; }
+  // 在线但版本较旧、不上报握手 / 认证失败的副机(主机按报告里有没有 connFailsOk 标出):它们上面的问题不会出现在下面,不能当成包没到
+  const old = (nodeSummary && nodeSummary.noFails) || [];
+  const oldNote = old.length ? `<p class="hint warn-text">${esc(t('dash.failsOldNodes', { names: old.join(t('reach.sep')) }))}</p>` : '';
+  if (!rows.length && !fails.length) { setHTML(el, empty(t('dash.noConns')) + oldNote); return; }
   const multi = all.some(c => c.server);
   const main = rows.length ? `<div class="table-wrap"><table class="grid conns"><thead><tr><th>IP</th><th>${t('logs.user')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 30).map(c =>
     `<tr>
@@ -180,7 +183,7 @@ async function renderConns() {
       <td class="num">${c.count}</td>
       <td class="mono small">${fmtTime(c.ts)}</td>
     </tr>`).join('')}</tbody></table></div>` : '';
-  el.innerHTML = main + failTable;
+  el.innerHTML = main + failTable + oldNote;
 }
 
 async function renderHealth() {
@@ -204,7 +207,7 @@ async function renderHealth() {
     ${bad.length ? `<div class="chips">${bad.map(x => `<a class="chip" href="#/upstreams" title="${esc(x.error)}">✗ ${esc(x.name)}${one || !x.server ? '' : ' · ' + esc(x.server)}</a>`).join('')}</div>` : ''}`);
 }
 
-let nodeSummary = null; // {online, total, bad:[names]},仅多服务器时填充
+let nodeSummary = null; // {online, total, bad:[names], noFails:[不上报握手失败的老副机]},仅多服务器时填充
 
 function renderStats() {
   const s = state.status;
@@ -227,7 +230,8 @@ async function refreshNodeSummary() {
     const d = await get('nodes');
     const remote = d.nodes.filter(n => !n.isLocal && n.enabled);
     const bad = remote.filter(n => !n.status || !n.status.ok).map(n => n.name);
-    nodeSummary = { online: remote.length - bad.length + 1, total: remote.length + 1, bad };
+    const noFails = remote.filter(n => n.status && n.status.ok && n.status.noConnFails).map(n => n.name);
+    nodeSummary = { online: remote.length - bad.length + 1, total: remote.length + 1, bad, noFails };
   } catch { nodeSummary = null; }
 }
 
