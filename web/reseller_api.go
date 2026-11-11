@@ -139,10 +139,11 @@ func (s *Server) handleResellerItem(w http.ResponseWriter, r *http.Request) {
 			if err := writeResellerLineRefs(tx, id, nil); err != nil {
 				return err
 			}
-			if err := tx.Where("reseller_id = ?", id).Delete(&model.PageLogo{}).Error; err != nil { // 他的落地页 logo
+			if err := tx.Delete(&model.Reseller{}, id).Error; err != nil {
 				return err
 			}
-			return tx.Delete(&model.Reseller{}, id).Error
+			// 他的落地页 logo;顺带清掉以前留下的没主的行(删代理与他上传 logo 并发时可能有过)
+			return tx.Where("reseller_id > 0 AND reseller_id NOT IN (SELECT id FROM resellers)").Delete(&model.PageLogo{}).Error
 		})
 		if err != nil {
 			badRequest(w, err)

@@ -20,6 +20,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -136,10 +137,25 @@ func (s *Server) handlePageLogo(w http.ResponseWriter, r *http.Request, reseller
 		}
 		row := model.PageLogo{ResellerId: resellerID, Mime: img.mime, Data: img.data, Sum: img.sum,
 			Width: img.width, Height: img.height, UpdatedAt: time.Now().Unix()}
-		if err := s.db.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "reseller_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"mime", "data", "sum", "width", "height", "updated_at"}),
-		}).Create(&row).Error; err != nil {
+		// 代理的 logo:请求体读完(慢网络上要几秒)时这个代理可能已经被删了。和删代理的事务一样一开始就取写锁
+		// (库连接是 _txlock=immediate),在同一个事务里确认代理还在再写:要么先写、删代理时一起删掉,要么代理已删、这里报错,
+		// 不会留下没主的一行(没有界面删得掉,却每次都随快照推给副机)
+		err = s.db.Transaction(func(tx *gorm.DB) error {
+			if resellerID > 0 {
+				var n int64
+				if err := tx.Model(&model.Reseller{}).Where("id = ?", resellerID).Count(&n).Error; err != nil {
+					return err
+				}
+				if n == 0 {
+					return errors.New("代理不存在")
+				}
+			}
+			return tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "reseller_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"mime", "data", "sum", "width", "height", "updated_at"}),
+			}).Create(&row).Error
+		})
+		if err != nil {
 			badRequest(w, err)
 			return
 		}

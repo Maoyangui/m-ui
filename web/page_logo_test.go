@@ -12,6 +12,7 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
@@ -379,6 +381,55 @@ func TestResellerLogoScopedToSelf(t *testing.T) {
 	}
 	if rows := logoRows(t, db); len(rows) != 1 || rows[0].Sum != logoSum(master) {
 		t.Fatalf("删代理后他的 logo 应一并删掉、主面板的留着: %+v", rows)
+	}
+}
+
+// 删代理与他上传 logo 并发:上传在读请求体(慢网络上要几秒)时代理被删了,不能留下没主的一行 ——
+// 没有界面删得掉,却每次都随快照推给副机、跟着备份走。以前读完请求体直接写库,代理已经删了也照样插进去。
+// 以前留下的没主的行,删别的代理时顺带清掉。
+func TestResellerLogoUploadRacingDelete(t *testing.T) {
+	s, db := logoTestServer(t)
+	rs := model.Reseller{Name: "dl-gone", Enabled: true}
+	db.Create(&rs)
+	pr, pw := io.Pipe()
+	r := httptest.NewRequest("POST", "http://x/dl/api/self/logo", pr)
+	r = r.WithContext(context.WithValue(r.Context(), scopeKey, rs.Id))
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { defer close(done); s.handleResellerSelfSub(w, r) }()
+	time.Sleep(200 * time.Millisecond) // 上传那边已经确认过代理还在,正等请求体
+	del := httptest.NewRecorder()
+	s.handleResellerItem(del, httptest.NewRequest("DELETE", "http://x/app/api/resellers/"+strconv.Itoa(int(rs.Id)), nil))
+	if del.Code != 200 {
+		t.Fatalf("删代理应成功: %d %s", del.Code, del.Body.String())
+	}
+	io.WriteString(pw, logoBody(dataURI("image/png", logoPNG(t, 120, 40, 3))))
+	pw.Close()
+	<-done
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "代理不存在") {
+		t.Fatalf("代理已删,上传应被拒并说明原因,得 %d %s", w.Code, w.Body.String())
+	}
+	if rows := logoRows(t, db); len(rows) != 0 {
+		t.Fatalf("不该留下没主的 logo: %+v", rows)
+	}
+
+	// 以前留下的没主的行:删别的代理时顺带清掉;主面板的、别的代理的不动
+	img := logoPNG(t, 120, 40, 4)
+	keep := model.Reseller{Name: "dl-keep", Enabled: true}
+	gone := model.Reseller{Name: "dl-other", Enabled: true}
+	db.Create(&keep)
+	db.Create(&gone)
+	for _, owner := range []uint{0, keep.Id, gone.Id, gone.Id + 50} {
+		db.Create(&model.PageLogo{ResellerId: owner, Mime: "image/png", Data: img, Sum: logoSum(img), Width: 120, Height: 40})
+	}
+	del = httptest.NewRecorder()
+	s.handleResellerItem(del, httptest.NewRequest("DELETE", "http://x/app/api/resellers/"+strconv.Itoa(int(gone.Id)), nil))
+	if del.Code != 200 {
+		t.Fatalf("删代理应成功: %d %s", del.Code, del.Body.String())
+	}
+	rows := logoRows(t, db)
+	if _, ok := rows[gone.Id+50]; ok || len(rows) != 2 || rows[0].Sum == "" || rows[keep.Id].Sum == "" {
+		t.Fatalf("应只剩主面板与现存代理的 logo: %+v", rows)
 	}
 }
 
