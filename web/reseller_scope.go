@@ -194,6 +194,10 @@ func (s *Server) resellerStatus(r *http.Request, rid uint) map[string]interface{
 		"version":         Version,
 		"coreRunning":     s.run.CoreRunning(),
 		"uptime":          s.run.Uptime(),
+		// 概况「需要处理」用:额度已用尽(名下用户已停服)、用户数上限、设备池最近 10 分钟拒绝了几台新设备
+		"depleted":    rs.Depleted,
+		"userLimit":   rs.UserLimit,
+		"poolRejects": s.run.Hub().Rejects(model.ResellerGroup(rid)),
 	}
 }
 

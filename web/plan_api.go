@@ -611,6 +611,7 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().Unix()
 	var affected int64
+	auditAction := "batch:" + req.Action
 	switch req.Action {
 	case "enable", "disable":
 		n, err := s.setEnabled(s.db, req.Ids, req.Action == "enable")
@@ -658,6 +659,7 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		}
 	case "plan":
 		if req.Mode == "bind" {
+			auditAction = "batch:plan:bind"
 			var users []model.User
 			s.db.Where("id IN ?", req.Ids).Find(&users)
 			if err := s.bindUserPlan(users, req.PlanId); err != nil {
@@ -679,6 +681,8 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		if req.Mode != "extend" {
 			req.Mode = "renew"
 		}
+		// 和单人的 plan:<方式>:<套餐名> 同一写法,概况「最近操作」才写得出是哪个套餐、续费还是延期
+		auditAction = "batch:plan:" + req.Mode + ":" + p.Name
 		n, err := planPeriods(req.Periods, req.Mode, p.Days)
 		if err != nil {
 			writePlanErr(w, err)
@@ -714,7 +718,7 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, fmt.Errorf("未知操作 %q", req.Action))
 		return
 	}
-	s.audit(r, "user", "batch:"+req.Action, req.Ids)
+	s.audit(r, "user", auditAction, req.Ids)
 	s.reloadUsers(fmt.Sprintf("批量 %s %d 个用户", req.Action, affected))
 	writeJSON(w, http.StatusOK, map[string]int64{"affected": affected})
 }

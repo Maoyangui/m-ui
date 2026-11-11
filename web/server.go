@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
@@ -82,6 +83,19 @@ type Server struct {
 	lastTotpStepRS map[uint]int64  // 同上,按代理
 
 	onRulesNow func() // 测试用:数"立刻重判限速规则"被触发了几次(测试里没有数据面)
+
+	// 概况「需要处理」的计数(见 attention.go):60 秒缓存
+	attnMu sync.Mutex
+	attnAt time.Time
+	attn   attentionView
+	// 副机:主机最近一次带令牌请求本机的时间(unix 秒),概况据此提示"主机多久没联系本机"
+	hubSeenAt atomic.Int64
+	// 副机:最近一次没应用成主机推来的配置(见 dash_extras.go)
+	applyRes applyState
+	// 代理名下用户 → 代理名,60 秒缓存(概况的在线名单链接用)
+	ownersMu sync.Mutex
+	owners   map[string]string
+	ownersAt time.Time
 }
 
 func NewServer(run *runner.Runner) *Server {

@@ -783,6 +783,21 @@ func (s *Service) View() View {
 	return v
 }
 
+// State 检测器自己的状况(概况用来发现"检测停摆了":额度用尽、接口出错、很久没测成):是否自动、间隔、最近一次全部测完的时间、最近的错误。
+// 只读内存,不碰测点。
+type State struct {
+	Auto    bool   `json:"auto"`
+	Minutes int    `json:"minutes"`
+	LastRun int64  `json:"lastRun"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (s *Service) State() State {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return State{Auto: s.Auto(), Minutes: s.Minutes(), LastRun: s.lastRun, Error: s.lastErr}
+}
+
 // Bad 当前有异常的服务器(概览页顶部提示用)。
 func (s *Service) Bad() []Result {
 	s.mu.Lock()

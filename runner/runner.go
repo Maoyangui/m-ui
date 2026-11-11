@@ -88,6 +88,11 @@ type Runner struct {
 	reloadMu sync.Mutex
 	reload   ReloadStatus // 最近一次重载的结果:面板据此在页面上明说"已保存但没生效"
 
+	// 最近一次定时备份失败的原因与时间(成功后清空):概况「需要处理」提示"定时备份失败"
+	backupErrMu sync.Mutex
+	backupErr   string
+	backupErrAt int64
+
 	extLocks sync.Map // 外部节点 id → *sync.Mutex:同一条的手动刷新与定时刷新不并发(见 RefreshExt)
 
 	// resolve4 大陆连通检测在主机上把域名解析成 IPv4 用的解析器;nil = 系统解析器(见 lookupIPv4)。只给测试替换。

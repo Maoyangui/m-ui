@@ -22,6 +22,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hop"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/ops"
 	"github.com/Maoyangui/m-ui/reach"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/sub"
@@ -126,6 +127,24 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		status["reachBad"] = s.run.Reach().Bad() // 大陆连通异常的服务器:概览页顶部提示
 		// IPv6 入站不通的服务器(只算 down,和服务器页同一份;没有时是空数组,主机上这个键始终在):概况"需要处理"用,不并进 reachBad
 		status["v6Bad"] = s.run.Reach().V6Bad()
+		status["attention"] = s.attention()          // 概况「需要处理」:用户快到期 / 流量将尽、代理额度、定时备份(60 秒缓存)
+		status["reachState"] = s.run.Reach().State() // 大陆连通检测自己有没有在跑(停摆时概况不能说"一切正常")
+	} else {
+		// 副机:主机最近一次联系本机的时间、本机流量记账连续失败的轮数(概况「需要处理」与「与主机同步」卡用)
+		if at := s.hubSeenAt.Load(); at > 0 {
+			status["hubSeenAt"] = at
+		}
+		status["ledgerFails"] = s.run.LedgerFailures()
+		// 最近一次没应用成主机推来的配置(版本太低被拒收、数据面应用失败),之后应用成功就清掉
+		if msg, at := s.applyRes.get(); msg != "" {
+			status["applyErr"], status["applyErrAt"] = msg, at
+		}
+		// 副机库里有主机下发的全部线路,本机只跑部署到自己的那些:概况的「线路」卡按本机算
+		status["linesLocal"], status["linesLocalEnabled"] = s.localLineCounts()
+	}
+	// 数据目录所在盘的总量与剩余(概况「本机负载」卡):一次 statfs;取不到(Windows 开发机)就不给
+	if total, free := ops.DiskUsage(s.run.DataDir()); total > 0 {
+		status["disk"] = map[string]int64{"total": total, "free": free}
 	}
 	status["singBox"] = singBoxVersion
 	status["dbSize"] = dbFileSize(s.run.DBPath())

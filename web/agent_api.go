@@ -58,6 +58,8 @@ func (s *Server) agentAuth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "令牌错误"})
 			return
 		}
+		// 配对令牌只有主机手里有:带对令牌的请求就是主机来的。副机概况据此显示"主机多久没联系本机"
+		s.hubSeenAt.Store(time.Now().Unix())
 		next(w, r)
 	}
 }
@@ -72,7 +74,7 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 	case "ping":
 		s.agentAuth(s.handleAgentPing)(w, r)
 	case "apply":
-		s.agentAuth(s.handleAgentApply)(w, r)
+		s.agentAuth(s.handleAgentApplyRecorded)(w, r)
 	case "report":
 		s.agentAuth(s.handleAgentReport)(w, r)
 	case "external-ips":

@@ -159,6 +159,7 @@ func (r *Runner) backupLoop(stop <-chan struct{}) {
 				continue
 			}
 			bf, err := r.CreateBackupFile()
+			r.noteBackup(err)
 			if err != nil {
 				logger.Warning("定时备份失败: ", err)
 				r.notifier.Event("tgOnCore", "🔴 <b>定时备份失败</b>\n"+notify.Esc(err.Error()))
@@ -177,6 +178,24 @@ func (r *Runner) backupLoop(stop <-chan struct{}) {
 			return
 		}
 	}
+}
+
+// noteBackup 记下这次定时备份的结果:失败记原因和时间,成功清空。
+func (r *Runner) noteBackup(err error) {
+	r.backupErrMu.Lock()
+	defer r.backupErrMu.Unlock()
+	if err == nil {
+		r.backupErr, r.backupErrAt = "", 0
+		return
+	}
+	r.backupErr, r.backupErrAt = err.Error(), time.Now().Unix()
+}
+
+// BackupError 最近一次定时备份失败的原因与时间(没失败过、或之后成功过为空)。
+func (r *Runner) BackupError() (string, int64) {
+	r.backupErrMu.Lock()
+	defer r.backupErrMu.Unlock()
+	return r.backupErr, r.backupErrAt
 }
 
 // ScheduleRestart 在短暂延迟后重启进程(还原备份、改端口后使用)。

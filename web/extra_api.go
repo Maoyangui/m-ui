@@ -45,6 +45,11 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 	if key := r.URL.Query().Get("key"); key != "" {
 		q = q.Where("key = ?", key)
 	}
+	// actor=human:只要人做的操作(管理员、代理、Telegram、外部 API),
+	// 不要定时任务批量写的(ResetJob / DepleteJob / RuleJob 这类以 Job 结尾的),概况的「最近操作」用
+	if r.URL.Query().Get("actor") == "human" {
+		q = q.Where("actor NOT LIKE ?", "%Job")
+	}
 	var rows []model.Change
 	q.Find(&rows)
 	writeJSON(w, http.StatusOK, rows)
@@ -99,9 +104,26 @@ func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 		}
 		lines, ups = s.grantedLineNames(rid, lines), []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	out := map[string]interface{}{
 		"users": users, "lines": lines, "upstreams": ups, "connCounts": counts,
-	})
+		"devices": onlineDevices(users, s.onlineIPsAll()),
+	}
+	if scope(r) == 0 && !s.run.IsNode() { // 主面板:在线的代理名下用户 → 代理名(用户页只列直属用户,概况的链接据此指到代理)
+		out["owners"] = s.onlineOwners(users)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// onlineDevices 在线用户 → 设备数(本机与副机的源 IP 合并,IPv4 一个地址一台、IPv6 按 /64 算,和设备数限制同一口径)。
+// 概况按它给在线名单排序、标数字;只算传进来的这些用户(代理作用域已经只剩名下的)。
+func onlineDevices(users []string, ips map[string][]string) map[string]int {
+	out := make(map[string]int, len(users))
+	for _, u := range users {
+		if n := model.DeviceCount(ips[u]); n > 0 {
+			out[u] = n
+		}
+	}
+	return out
 }
 
 // grantedLineNames 只留授权给该代理的线路名。
@@ -159,9 +181,11 @@ func (s *Server) handleStatsTop(w http.ResponseWriter, r *http.Request) {
 	}
 	since := time.Now().Unix() - int64(hours)*3600
 	type row struct {
-		Tag  string `json:"name"`
-		Up   int64  `json:"up"`
-		Down int64  `json:"down"`
+		Tag   string `json:"name"`
+		Up    int64  `json:"up"`
+		Down  int64  `json:"down"`
+		Owner string `json:"owner,omitempty"` // 代理名下的用户:所属代理(主面板的用户页不列他们)
+		Gone  bool   `json:"gone,omitempty"`  // 用户已经删了(流量记录还在)
 	}
 	var rows []row
 	s.db.Raw(`SELECT tag, COALESCE(SUM(CASE WHEN direction = 1 THEN traffic ELSE 0 END),0) AS up,
@@ -169,6 +193,23 @@ func (s *Server) handleStatsTop(w http.ResponseWriter, r *http.Request) {
 		FROM stats WHERE resource = 'user' AND date_time > ? GROUP BY tag ORDER BY (up + down) DESC LIMIT ?`, since, limit).Scan(&rows)
 	if rows == nil {
 		rows = []row{}
+	}
+	if len(rows) > 0 { // 概况点名字要去对地方:代理名下的去代理页,删掉的不给链接
+		names := make([]string, len(rows))
+		for i, x := range rows {
+			names[i] = x.Tag
+		}
+		type who struct{ Name, Owner string }
+		var ws []who
+		s.db.Raw(`SELECT u.name AS name, COALESCE(r.name, '') AS owner FROM users u LEFT JOIN resellers r ON r.id = u.reseller_id WHERE u.name IN ?`, names).Scan(&ws)
+		by := make(map[string]string, len(ws))
+		for _, x := range ws {
+			by[x.Name] = x.Owner
+		}
+		for i := range rows {
+			owner, ok := by[rows[i].Tag]
+			rows[i].Owner, rows[i].Gone = owner, !ok
+		}
 	}
 	writeJSON(w, http.StatusOK, rows)
 }
