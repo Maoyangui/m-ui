@@ -198,7 +198,8 @@ func TestInflightOldLedgerNotBilledToRecreatedUser(t *testing.T) {
 
 // 兼容:升级前的账本(没记主人,UserId 为 0)照老办法并 —— 计数没变小按增量;记账时也不给老账本认主人
 // (它可能是同一轮里删掉的前一个同名用户的,认了主机会当成新账本从 0 计,把前人的用量记到新用户头上)。
-// 升级前留下的游标(不知道是谁的)遇到记了主人的账本:那是升级后新开的一本,从 0 计。
+// 升级前留下的游标(不知道是谁的)遇到记了主人的账本:不一定是另一本 —— 升级是一台一台做的,先升副机时同一本账
+// 也会碰上老主机写的游标(见 TestMixedVersionAgentUpgradedFirst),只能按计数判断:没变小按增量,变小从 0 计。
 func TestAgentLedgerIdentityUpgradeCompat(t *testing.T) {
 	r := newRecreateRig(t)
 	u := r.newUser(100)
@@ -215,27 +216,37 @@ func TestAgentLedgerIdentityUpgradeCompat(t *testing.T) {
 	if got := r.usage(u.Id); got != 110 {
 		t.Fatalf("老账本按增量计,应是 110,实际 %d", got)
 	}
-	// 另一个用户:升级前删掉的同名用户留下了游标(不知道是谁的),升级后新开的账本记了主人
+	// 另两个用户:升级前删掉的同名用户留下了游标(不知道是谁的),升级后新开的账本记了主人。
+	// 首份比游标小:是新开的一本,从 0 计;不比游标小:分不出是不是同一本,按同一本只计增量 ——
+	// 少计这一段只在过渡期发生一次,当成另一本从 0 计却会在先升副机时把整本账再计一遍
 	bob := model.User{Name: "bob", Enabled: true, CreatedAt: 500}
+	carol := model.User{Name: "carol", Enabled: true, CreatedAt: 600}
 	r.host.Create(&bob)
+	r.host.Create(&carol)
 	r.host.Create(&model.TrafficCursor{NodeId: 2, UserName: "bob", Up: 700, Down: 700})
+	r.host.Create(&model.TrafficCursor{NodeId: 2, UserName: "carol", Up: 700, Down: 700})
 	r.sync()
-	if err := model.AddAgentCounters(r.agent, []model.AgentCounter{{UserName: "bob", Up: 800, Down: 800}}, 100); err != nil {
+	if err := model.AddAgentCounters(r.agent, []model.AgentCounter{{UserName: "bob", Up: 800, Down: 800}, {UserName: "carol", Up: 300, Down: 300}}, 100); err != nil {
 		t.Fatal(err)
 	}
-	r.report(1005)
-	var b model.User
-	r.host.First(&b, bob.Id)
-	if b.Down != 800 {
-		t.Fatalf("升级后新开的账本应从 0 计(800),实际 %d", b.Down)
+	res := r.report(1005)
+	if b, c := r.usageOf("bob"), r.usageOf("carol"); b != 100 || c != 300 || res.Restarted != 1 || res.Recreated != 0 {
+		t.Fatalf("不知道是哪一本的游标按计数判断:bob 按增量 100、carol 从 0 计 300,实际 %d、%d(%+v)", b, c, res)
+	}
+	// 游标记下了主人和代号:之后按代号认账本
+	if err := model.AddAgentCounters(r.agent, []model.AgentCounter{{UserName: "bob", Up: 10, Down: 10}}, 100); err != nil {
+		t.Fatal(err)
+	}
+	r.report(1007)
+	if b := r.usageOf("bob"); b != 110 {
+		t.Fatalf("同一本按增量,bob 应是 110,实际 %d", b)
 	}
 	// 老版本副机(上报不带主人):行为不变
 	if _, err := MergeCounters(r.host, 2, "n2", "", []model.AgentCounter{{UserName: "bob", Up: 850, Down: 850}}, 1010, 60, 1); err != nil {
 		t.Fatal(err)
 	}
-	r.host.First(&b, bob.Id)
-	if b.Down != 850 {
-		t.Fatalf("老副机的上报按增量计,应是 850,实际 %d", b.Down)
+	if b := r.usageOf("bob"); b != 150 {
+		t.Fatalf("老副机的上报按增量计,应是 150,实际 %d", b)
 	}
 }
 

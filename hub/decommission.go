@@ -94,10 +94,16 @@ func (h *Hub) deliverDecommission(rec model.NodeDecommission) error {
 	if h.d.DB.Select("id, cert_fp").Where("id = ?", rec.NodeId).Limit(1).Find(&cur).Error == nil && cur.Id != 0 && cur.CertFP != "" {
 		n.CertFP = cur.CertFP // 停用的副机还在表里:证书指纹以表里记住的为准
 	}
-	err := h.pushWire(n, fixedWire(rec.Revision, rec.Snapshot))
+	ack, err := h.pushWire(n, fixedWire(rec.Revision, rec.Snapshot))
 	if err == nil {
 		h.forgetDecommission(rec)
 		logger.Info("副机 ", rec.Name, " 已确认收到下线通知(空用户表),不再为任何人服务")
+		if !ack.LedgerKept {
+			// 老副机应用空用户表时把账本整本清掉了:重新启用后同一个人从 0 重开,第一次计数变小按重开计,不当账本回退
+			if err := markLedgerCleared(h.d.DB, rec.NodeId, true); err != nil {
+				logger.Warning("记下副机 ", rec.Name, " 的账本已清空失败(重新启用后第一份变小的计数会按账本回退处理): ", err)
+			}
+		}
 		return nil
 	}
 	var hse *httpStatusError

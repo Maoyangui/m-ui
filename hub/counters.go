@@ -50,7 +50,8 @@ type MergeResult struct {
 	Merged    int  // 有增量、记了账的用户数
 	Regressed int  // 同一个用户的计数比游标小:按账本回退处理(游标对齐、这一次不计)
 	Recreated int  // 主机上删了又建的同名用户,副机那本也从头记了:从 0 计
-	Reopened  int  // 同一个用户的账本被整本清掉后从 0 重开了一本(改名后再改回):从 0 计
+	Reopened  int  // 同一个用户的账本被整本清掉后从 0 重开了一本(改名后再改回、老副机停用时清了账):从 0 计
+	Restarted int  // 游标不知道是哪一本(主机 / 副机升级或回滚的过渡期),计数比游标小:当成新开的一本从 0 计
 	NodeGone  bool // 副机已经删除,整份丢弃
 }
 
@@ -74,6 +75,12 @@ func ApplyCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 // 以前同一主人计数比游标小当成账本回退(对齐不计,还误报)、追上游标只计差值,每个用户漏掉 min(首份, 旧游标)。
 // 账本主人和主机上现在这个同名用户对不上(主机已经删了又建、副机还没收到快照时报来的旧账本),只计服务器维度。
 // 老副机 / 升级前的老账本不报主人,照下面的老办法。
+//
+// 游标不一定知道这是哪一本:升级是一台一台做的,老版本主机写的游标没有主人和代号(主机升级之前、回滚期间),
+// 老副机的报告也不带代号。同一本账照样会碰上这样的游标,不能当成另一本从 0 计 —— 那是把整本账再计一遍
+// (先升副机、新副机挂老主机、主机或副机回滚再升回来都会这样)。这时只能按计数判断:没变小就是同一本,按增量;
+// 变小了是新开的一本,从 0 计。代价是升级前删掉的同名用户留下的游标遇到重建用户的首份报告不小于它时少计一段,
+// 只在过渡期发生一次,比整本重复计费安全。
 func MergeCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []model.AgentCounter, now int64, bucketSeconds int64, ratio float64) (MergeResult, error) {
 	var res MergeResult
 	if bucketSeconds < 1 {
@@ -152,6 +159,10 @@ func MergeCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 		if res.Reopened > 0 {
 			logger.Info("副机 ", nodeName, " 上有 ", res.Reopened, " 个用户的账本是清掉后重开的(比如改名后又改回),从 0 开始计")
 		}
+		if res.Restarted > 0 {
+			logger.Info("副机 ", nodeName, " 上有 ", res.Restarted, " 个用户的计数比上次小,游标是升级或回滚过渡期留下的、",
+				"不知道是哪一本,按新开的一本从 0 开始计")
+		}
 	}()
 	for len(changed) > 0 {
 		k := min(len(changed), counterChunk)
@@ -163,6 +174,7 @@ func MergeCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 		res.Regressed += r.Regressed
 		res.Recreated += r.Recreated
 		res.Reopened += r.Reopened
+		res.Restarted += r.Restarted
 		if errors.Is(err, errNodeGone) {
 			res.NodeGone = true
 			return res, nil
@@ -214,29 +226,51 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 				hasUser = false
 			}
 			dUp, dDown := c.Up, c.Down // 没有游标:从 0 计
+			dropped := hasOld && (c.Up < old.Up || c.Down < old.Down)
 			switch {
 			case !hasOld:
-			case owned && !sameOwner(old, c):
+			case owned && sameLedger(old, c):
+				// 游标记的就是这一本。代号是随机取的,对得上就是副机上同一行账 —— 老主机回滚期间只改过计数也是这一行的
+				if dropped {
+					res.Regressed++ // 同一本账计数变小:账本回退,对齐不计
+					dUp, dDown = 0, 0
+				} else {
+					dUp, dDown = c.Up-old.Up, c.Down-old.Down
+				}
+			case owned && cursorTrusted(old) && old.PrevLedgerId != 0 && old.PrevLedgerId == c.LedgerId:
+				// 报上来的是游标换下去的上一本:副机的库回到了重开之前(虚机快照回滚)。按账本回退对齐、告警,
+				// 不当成又重开了一本、把这一本从 0 再计一遍
+				res.Regressed++
+				dUp, dDown = 0, 0
+			case owned && cursorKnowsOwner(old) && !sameOwner(old, c):
 				// 账本记着主人,和游标记的不是同一个人:同名用户删了又建,副机那本是新开的、从 0 记的。
 				// 不管计数比游标大还是小都从 0 计 —— 以前只认"比游标小",新用户首份报告追上旧游标时只计差值、相等时整份跳过
 				res.Recreated++
-			case owned && !sameLedger(old, c):
+			case owned && cursorKnowsOwner(old) && old.LedgerId != 0:
 				// 主人一样、不是游标记的那一本:这个用户的账本被整本清掉后从 0 重开了(改名后再改回)。
 				// 不能当账本回退对齐不计,也不能只计比游标多出来的那段
 				res.Reopened++
-			case owned && (c.Up < old.Up || c.Down < old.Down):
-				res.Regressed++ // 同一本账计数变小:账本回退,对齐不计
-				dUp, dDown = 0, 0
+			case owned && cursorTrusted(old) && old.Cleared:
+				res.Reopened++ // 老副机清掉过这个人的账本(停用推的空用户表、改名或删除,见 markLedgerCleared),升级后新开的这一本从 0 记
 			case owned:
-				dUp, dDown = c.Up-old.Up, c.Down-old.Down
+				// 游标不知道是哪一本:老版本主机写的(主机升级之前、回滚期间),或者是按老副机的报告写的(没有代号)。
+				// 同一本账也会碰上这样的游标,只能按计数判断:没变小就是同一本,按增量;变小了是新开的一本,从 0 计
+				if dropped {
+					res.Restarted++
+				} else {
+					dUp, dDown = c.Up-old.Up, c.Down-old.Down
+				}
 			default:
 				// 老副机 / 升级前的老账本不报主人,只能按计数猜
-				dropped := c.Up < old.Up || c.Down < old.Down
-				known := old.UserId != 0 || old.UserCreatedAt == userAbsent // 游标记得当时是谁(老游标不知道)
+				known := cursorKnowsOwner(old) // 游标记得当时是谁(老游标、老主机动过的不知道)
 				recreated := hasUser && known && (old.UserId != u.Id || old.UserCreatedAt != u.CreatedAt)
 				switch {
 				case dropped && recreated:
 					res.Recreated++ // 主机上删了又建,副机那本也从头记了:从 0 计
+				case dropped && cursorTrusted(old) && old.Cleared:
+					// 老副机清掉过这个人的账本(停用推的空用户表、改名或删除,见 markLedgerCleared),这是之后从 0 记的一本:
+					// 从 0 计,不告警(停用再启用、改名后又改回)
+					res.Reopened++
 				case dropped:
 					res.Regressed++ // 同一个用户(或老游标、已删的用户)计数变小:账本回退,对齐不计
 					dUp, dDown = 0, 0
@@ -246,7 +280,7 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 					dUp, dDown = c.Up-old.Up, c.Down-old.Down
 				}
 			}
-			next = append(next, cursorFor(nodeId, c, u, hasUser))
+			next = append(next, cursorFor(nodeId, c, u, hasUser, old, hasOld))
 			if dUp <= 0 && dDown <= 0 {
 				continue
 			}
@@ -322,7 +356,7 @@ func alignCursors(db *gorm.DB, nodeId uint, epoch string, counters []model.Agent
 		rows := make([]model.TrafficCursor, 0, len(counters))
 		for _, c := range counters {
 			u, ok := users[c.UserName]
-			rows = append(rows, cursorFor(nodeId, c, u, ok))
+			rows = append(rows, cursorFor(nodeId, c, u, ok, model.TrafficCursor{}, false)) // 新的一本账:旧游标记的都不算数
 		}
 		if err := upsertCursors(tx, rows); err != nil {
 			return err
@@ -376,17 +410,45 @@ func SweepOrphanLedgers(db *gorm.DB) error {
 	})
 }
 
-// cursorFor 记到这个计数为止的游标,连同这本账是谁的:副机报了账本主人就记账本主人(同名用户删了又建靠它认出新账本);
-// 老副机 / 升级前的老账本不报,记此刻主机上这个用户是谁。
-func cursorFor(nodeId uint, c model.AgentCounter, u model.User, exists bool) model.TrafficCursor {
-	cur := model.TrafficCursor{NodeId: nodeId, UserName: c.UserName, Up: c.Up, Down: c.Down, UserId: u.Id, UserCreatedAt: u.CreatedAt}
+// cursorFor 记到这个计数为止的游标,连同这本账是谁的,计数抄进 StampUp / StampDown(见 cursorTrusted);清账标记随之清掉。
+//   - 副机报了账本主人:记账本主人与代号(同名用户删了又建、整本清掉后重开靠它认出新账本);换了一本的话,
+//     换下去的那本代号记进 PrevLedgerId,副机的库回滚到重开之前时认得出来;
+//   - 老副机 / 升级前的老账本不报:记此刻主机上这个用户是谁。游标原来记的就是这个人的那本账时代号留着 ——
+//     副机回滚到老版本又升回来、报出原来的代号,是同一本,不能当成重开再计一遍;
+//   - 主机上没有这个用户:记"当时没有这个人"。
+func cursorFor(nodeId uint, c model.AgentCounter, u model.User, exists bool, old model.TrafficCursor, hasOld bool) model.TrafficCursor {
+	cur := model.TrafficCursor{NodeId: nodeId, UserName: c.UserName, Up: c.Up, Down: c.Down, StampUp: c.Up, StampDown: c.Down}
 	switch {
 	case ownedLedger(c):
 		cur.UserId, cur.UserCreatedAt, cur.LedgerId = c.UserId, c.UserCreatedAt, c.LedgerId
-	case !exists:
+		switch {
+		case hasOld && sameLedger(old, c):
+			cur.PrevLedgerId = old.PrevLedgerId
+		case hasOld && cursorTrusted(old) && old.LedgerId != 0:
+			cur.PrevLedgerId = old.LedgerId
+		}
+	case exists:
+		cur.UserId, cur.UserCreatedAt = u.Id, u.CreatedAt
+		if hasOld && cursorTrusted(old) && old.UserId == u.Id && old.UserCreatedAt == u.CreatedAt {
+			cur.LedgerId, cur.PrevLedgerId = old.LedgerId, old.PrevLedgerId
+		}
+	default:
 		cur.UserId, cur.UserCreatedAt = 0, userAbsent
 	}
 	return cur
+}
+
+// cursorTrusted 游标上记的这本账是谁的(主人、代号、上一本的代号、清账标记)还能不能信。这些都是本版主机连同计数一起写的,
+// 写时把计数抄进 StampUp / StampDown;老版本主机(0.7.16:升级之前、回滚期间)只认计数两列,插入的新游标这些列都是 0,
+// 已有的只改计数、别的原样留着 —— 回滚期间这个人的账本可能已经换了一本(改名后又改回、删了又建)。
+// 计数和抄本对不上就是老主机动过。
+func cursorTrusted(cur model.TrafficCursor) bool {
+	return cur.StampUp == cur.Up && cur.StampDown == cur.Down
+}
+
+// cursorKnowsOwner 游标记得这本账是谁的:能信,而且记了主人(或者"当时没有这个人")。升级前的老游标不知道。
+func cursorKnowsOwner(cur model.TrafficCursor) bool {
+	return cursorTrusted(cur) && (cur.UserId != 0 || cur.UserCreatedAt == userAbsent)
 }
 
 // ownedLedger 副机报了这本账的主人(新版副机、升级后新开的账本):主人的 id 与建号时间,
@@ -395,14 +457,12 @@ func ownedLedger(c model.AgentCounter) bool {
 	return c.UserId != 0 || c.UserCreatedAt == userAbsent
 }
 
-// sameOwner 游标记的和这份报告是不是同一本账。升级前留下的游标(不知道是谁的)遇到记了主人的账本也不是同一本:
-// 记了主人的账本都是升级后新开的(老账本一直不认主人),从 0 记的。
+// sameOwner 游标记的主人和这本账的主人是不是同一个人。游标记得是谁时(cursorKnowsOwner)才拿来下结论。
 func sameOwner(cur model.TrafficCursor, c model.AgentCounter) bool {
 	return cur.UserId == c.UserId && cur.UserCreatedAt == c.UserCreatedAt
 }
 
-// sameLedger 主人一样的前提下是不是游标记的那一本:账本代号也一样。升级前留下的游标(代号 0)遇到有代号的账本不是同一本 ——
-// 记了代号的都是升级后新开的。没有代号的账本(升级过程中新开的)只能看主人。
+// sameLedger 游标记的就是这一本:主人和账本代号都一样。没有代号的账本(只在升级途中的测试版本上出现过)只能看主人。
 func sameLedger(cur model.TrafficCursor, c model.AgentCounter) bool {
 	return sameOwner(cur, c) && cur.LedgerId == c.LedgerId
 }
@@ -459,7 +519,29 @@ func upsertCursors(tx *gorm.DB, rows []model.TrafficCursor) error {
 		return nil
 	}
 	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "node_id"}, {Name: "user_name"}},
-		DoUpdates: clause.AssignmentColumns([]string{"up", "down", "user_id", "user_created_at", "ledger_id"}),
+		Columns: []clause.Column{{Name: "node_id"}, {Name: "user_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"up", "down", "user_id", "user_created_at", "ledger_id",
+			"prev_ledger_id", "stamp_up", "stamp_down", "cleared"}),
 	}).CreateInBatches(&rows, counterChunk).Error
+}
+
+// markLedgerCleared 老副机(确认推送时不回 ledgerKept 的)确认应用了一份快照:老版本应用完把快照里没有的用户的账本清掉,
+// 同名的以后再出现是从 0 重开的一本 —— 停用推的空用户表就是整本清掉(all),平时是主机上已经没有这个名字的
+// (改名、删除)。老副机不报账本代号,同一个人计数变小本来只能当账本回退(对齐不计、告警);给这些游标打上清账标记,
+// 之后第一次变小按重开从 0 计、不告警。没变小(清账没成、在途的旧报告)照常按增量,标记随这次写入清掉。
+// 平时拿主机现在的用户表代替推过去的那份:两者只差推送前后这一刻改过的几个名字,对不上的那几个最多白打一次标记。
+// 标记要靠计数抄本才认得出之后有没有被老版本主机动过:老主机动过、主人和代号已经不可信的,这里一并清成"不知道",再按现在的计数抄一份。
+func markLedgerCleared(db *gorm.DB, nodeId uint, all bool) error {
+	const trusted = "stamp_up = up AND stamp_down = down"
+	where := "node_id = ? AND (NOT cleared OR NOT (" + trusted + "))"
+	if !all {
+		where += " AND user_name NOT IN (SELECT name FROM users)"
+	}
+	return db.Exec(`UPDATE traffic_cursors SET cleared = 1,
+		user_id = CASE WHEN `+trusted+` THEN user_id ELSE 0 END,
+		user_created_at = CASE WHEN `+trusted+` THEN user_created_at ELSE 0 END,
+		ledger_id = CASE WHEN `+trusted+` THEN ledger_id ELSE 0 END,
+		prev_ledger_id = CASE WHEN `+trusted+` THEN prev_ledger_id ELSE 0 END,
+		stamp_up = up, stamp_down = down
+		WHERE `+where, nodeId).Error
 }

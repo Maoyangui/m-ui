@@ -1749,7 +1749,14 @@ func (h *Hub) push(n model.Node, snap Snapshot) error {
 	if err != nil {
 		return err
 	}
-	return h.pushWire(n, w)
+	ack, err := h.pushWire(n, w)
+	if err == nil && !ack.LedgerKept {
+		// 老副机应用完把快照里没有的用户的账本清掉了:同名的以后再出现是从 0 重开的一本,不是账本回退
+		if err := markLedgerCleared(h.d.DB, n.Id, false); err != nil {
+			logger.Warning("记下副机 ", n.Name, " 清掉的账本失败(同名用户再出现时第一份变小的计数会按账本回退处理): ", err)
+		}
+	}
+	return err
 }
 
 func (h *Hub) fetchReport(n model.Node) (Report, error) {

@@ -517,7 +517,14 @@ type Stats struct {
 // 两者靠游标记下的用户 id 与建号时间区分(老游标为 0 = 不知道,按回退处理,不会整段重算;
 // 建号时间记 -1 表示并账那一刻主机上没有这个用户)。新版副机报了账本主人(AgentCounter.UserId)时记的是账本主人:
 // 主人对不上就是删了又建后新开的一本,从 0 计,不看计数大小;LedgerId 记副机那本账的代号,主人一样、代号不一样
-// 也是新开的一本(账本被整本清掉后同一个人从 0 重开:改名后再改回)。
+// 也是新开的一本(账本被整本清掉后同一个人从 0 重开:改名后再改回)。PrevLedgerId 记换下去的上一本的代号:
+// 副机的库回滚到重开之前(虚机快照)报回上一本时按账本回退处理,不当成又重开了一本。
+//
+// 主人、代号这些都是本版主机连同计数一起写的,写时把计数抄进 StampUp / StampDown。老版本主机(0.7.16:升级之前、
+// 回滚期间)只认 up / down 两列:插入的新游标这些列都是 0,已有的只改计数、别的原样留着 —— 那时副机那本可能已经换了。
+// 计数和抄本对不上就是老主机动过,主人、代号都不能信(见 hub.cursorTrusted)。
+// Cleared:老副机确认应用了没有这个名字的快照(停用推的空用户表,或者改名、删除之后),这本账已经被它清掉,
+// 下一份计数变小是从 0 重开的,不是账本回退;这个游标再写一次就清掉。
 type TrafficCursor struct {
 	NodeId        uint   `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
 	UserName      string `json:"userName" gorm:"primaryKey"`
@@ -526,6 +533,10 @@ type TrafficCursor struct {
 	UserId        uint   `json:"userId" gorm:"default:0;not null"`
 	UserCreatedAt int64  `json:"userCreatedAt" gorm:"default:0;not null"`
 	LedgerId      int64  `json:"ledgerId" gorm:"default:0;not null"`
+	PrevLedgerId  int64  `json:"prevLedgerId" gorm:"default:0;not null"`
+	StampUp       int64  `json:"stampUp" gorm:"default:0;not null"`
+	StampDown     int64  `json:"stampDown" gorm:"default:0;not null"`
+	Cleared       bool   `json:"cleared" gorm:"default:false;not null"`
 }
 
 // AgentCounter 副机端:本机每用户只增不减的流量账本(不直接写 User 表,避免与主端下发冲突)。

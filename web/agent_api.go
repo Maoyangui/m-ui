@@ -240,7 +240,7 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 	// 同一修订、同一序号已经完整应用过(库里是它、数据面也应用成功了、没有待踢线):直接确认,不再整表删了重插、重载一遍。
 	// 主机等确认超时后的重推、每 10 分钟一次的定期重推都会这样;以前每次都整表重写,大库上几十秒,WAL 跟着涨
 	if s.agentAlreadyApplied(snap, previousPending) {
-		writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "revision": snap.Revision})
+		writeJSON(w, http.StatusOK, hub.ApplyOK(snap.Revision))
 		return
 	}
 	revoked, err := hub.RevokedSharesChecked(s.db, snap)
@@ -279,7 +279,8 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 	}
 	// ================= D. 本机账本只增不删:主机已经不认识的用户(或者同名的已经换了人),它的计数器没人再回收,清掉 =================
 	// 主机那边的游标还留着,记着是谁的那本;同名用户以后再建,新账本记着新主人,主机按主人认出来从 0 计。
-	// 停用推来的空用户表不清(见 PruneAgentCounters):停用前还没报上去的那段等重新启用后照常报
+	// 停用推来的空用户表不清(见 PruneAgentCounters):停用前还没报上去的那段等重新启用后照常报。
+	// 确认时回 ledgerKept(hub.ApplyOK)告诉主机这一点 —— 老副机会整本清掉,主机据此区分(见 hub.markLedgerCleared)
 	if err := model.PruneAgentCounters(s.db); err != nil {
 		logger.Warning("清理本机账本里主机已删的用户失败(下次应用快照再清): ", err)
 	}
@@ -362,7 +363,7 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		logger.Warning("记录本版程序已应用快照 ", snap.Revision, " 失败: ", err)
 	}
 	logger.Info("已应用主机配置 ", snap.Revision, "(线路变化: ", linesChanged, ",上游变化: ", upsChanged, ")")
-	writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "revision": snap.Revision})
+	writeJSON(w, http.StatusOK, hub.ApplyOK(snap.Revision))
 }
 
 // agentAlreadyApplied 这份快照是不是已经完整应用过:没有待重载、数据面在跑,库里也正是它(见 agentSnapshotInDB)。

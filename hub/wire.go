@@ -187,22 +187,35 @@ func isApplyTimeout(err error) bool {
 	return errors.As(err, &te)
 }
 
+// applyAck 副机确认应用时回的话(除了修订号)。
+type applyAck struct {
+	// LedgerKept 本版起的副机:收到空用户表(停用推来的)不清账本,平时清掉的账本重开时换新代号,主机自己认得出。
+	// 老副机不说:它应用快照后把快照里没有的用户的账本清掉,停用推的空用户表就是整本清掉,
+	// 主机得自己记下来(见 markLedgerCleared)
+	LedgerKept bool
+}
+
+// ApplyOK 副机确认应用了修订 rev 时回的内容(agent/apply 的成功应答):带上 ledgerKept,主机据此知道这台不会整本清账(见 applyAck)。
+func ApplyOK(rev string) map[string]string {
+	return map[string]string{"ok": "1", "revision": rev, "ledgerKept": "1"}
+}
+
 // pushWire 把编码好的快照推给一台副机,等它确认应用(调用方持有这台的闸)。确认了就记为已推送。
-func (h *Hub) pushWire(n model.Node, w *wireSnapshot) error {
+func (h *Hub) pushWire(n model.Node, w *wireSnapshot) (applyAck, error) {
 	if !w.fixed && h.pushSem != nil {
 		select {
 		case h.pushSem <- struct{}{}:
 			defer func() { <-h.pushSem }()
 		case <-h.baseCtx().Done():
-			return h.baseCtx().Err()
+			return applyAck{}, h.baseCtx().Err()
 		}
 	}
 	gz := h.acceptsGzip(n.Id)
-	err := h.postApply(n, w, gz)
+	ack, err := h.postApply(n, w, gz)
 	var hse *httpStatusError
 	if gz && errors.As(err, &hse) && (hse.Status == http.StatusBadRequest || hse.Status == http.StatusUnsupportedMediaType) {
 		// 压缩包被拒(副机降过级、中间的反代动了请求体):当场改发不压缩的再试一次;成了就说明是压缩的问题,这台以后都发不压缩的
-		if err = h.postApply(n, w, false); err == nil {
+		if ack, err = h.postApply(n, w, false); err == nil {
 			logger.Warning("副机 ", n.Name, " 收不了压缩的快照,以后给它发不压缩的")
 			h.mu.Lock()
 			if h.noGzip == nil {
@@ -213,16 +226,16 @@ func (h *Hub) pushWire(n model.Node, w *wireSnapshot) error {
 		}
 	}
 	if err != nil {
-		return err
+		return applyAck{}, err
 	}
 	h.markPushed(n, w.rev)
-	return nil
+	return ack, nil
 }
 
-func (h *Hub) postApply(n model.Node, w *wireSnapshot, gz bool) error {
+func (h *Hub) postApply(n model.Node, w *wireSnapshot, gz bool) (applyAck, error) {
 	parts, err := w.parts(n.Id, gz)
 	if err != nil {
-		return err
+		return applyAck{}, err
 	}
 	timeout := applyTimeout(w.size())
 	ctx, cancel := context.WithTimeout(h.baseCtx(), timeout)
@@ -232,7 +245,7 @@ func (h *Hub) postApply(n model.Node, w *wireSnapshot, gz bool) error {
 	body, size := joinedReader(parts)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, agentURL(n, "apply"), body)
 	if err != nil {
-		return err
+		return applyAck{}, err
 	}
 	req.ContentLength = size
 	req.GetBody = func() (io.ReadCloser, error) { // 连接池里的旧连接断了时传输层要能重发
@@ -243,24 +256,25 @@ func (h *Hub) postApply(n model.Node, w *wireSnapshot, gz bool) error {
 		req.Header.Set("Content-Encoding", "gzip")
 	}
 	var out struct {
-		OK       json.RawMessage `json:"ok"`
-		Revision string          `json:"revision"`
+		OK         json.RawMessage `json:"ok"`
+		Revision   string          `json:"revision"`
+		LedgerKept string          `json:"ledgerKept"` // 老副机不回
 	}
 	if err := h.do(n, req, &out); err != nil {
 		// 连上了才算"它在处理";根本没连上(失联)照旧不算被拒、不退避,副机一回来下一轮就拿到配置
 		if connected.Load() && errors.Is(ctx.Err(), context.DeadlineExceeded) && h.baseCtx().Err() == nil {
-			return &applyTimeoutError{after: timeout, size: w.size(), err: err}
+			return applyAck{}, &applyTimeoutError{after: timeout, size: w.size(), err: err}
 		}
-		return err
+		return applyAck{}, err
 	}
 	ok := strings.Trim(strings.TrimSpace(string(out.OK)), `"`)
 	if ok != "1" && !strings.EqualFold(ok, "true") {
-		return fmt.Errorf("%w:修订 %s (ok=%q)", errApplyUnconfirmed, w.rev, ok)
+		return applyAck{}, fmt.Errorf("%w:修订 %s (ok=%q)", errApplyUnconfirmed, w.rev, ok)
 	}
 	if out.Revision != w.rev {
-		return fmt.Errorf("%w:确认的修订号不匹配,期望 %s,收到 %s", errApplyUnconfirmed, w.rev, out.Revision)
+		return applyAck{}, fmt.Errorf("%w:确认的修订号不匹配,期望 %s,收到 %s", errApplyUnconfirmed, w.rev, out.Revision)
 	}
-	return nil
+	return applyAck{LedgerKept: out.LedgerKept == "1"}, nil
 }
 
 // markPushed 记下这台副机已经在这一修订上。
