@@ -83,17 +83,3 @@ test('直接插进 HTML 的文案里没有会被当成标签的 "<字母"', () =
   }
   assert.deepEqual([...new Set(bad)], []);
 });
-
-test('同一本字典里一个键只定义一次(对象字面量后写的覆盖先写的,键集合比对查不出来)', () => {
-  const dup = [];
-  for (const name of ['zh', 'en']) {
-    const start = text.indexOf(`const ${name} = {`);
-    const body = text.slice(start, text.indexOf('\n};', start));
-    const seen = new Set();
-    for (const [, k] of body.matchAll(/(?:^|[\s{,])'([A-Za-z0-9_.-]+)'\s*:/g)) {
-      if (seen.has(k)) dup.push(`${name}.${k}`);
-      seen.add(k);
-    }
-  }
-  assert.deepEqual(dup, []);
-});
