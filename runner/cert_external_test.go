@@ -317,3 +317,56 @@ func TestWebDomainOnlyFromUsedCert(t *testing.T) {
 		t.Fatalf("从证书库选用时也一样: %q", got)
 	}
 }
+
+// 换机还原时放进 cert/restored/ 的副本:证书库里那一行删掉后就没人用它了,文件一并删掉;
+// 别的行或设置还引用着同一个文件时不删;数据目录外的原件照旧不碰。
+func TestDeleteCertRemovesRestoredCopy(t *testing.T) {
+	r := certTestRunner(t)
+	src, srcKey := genCert(t, "le.example")
+	dir := restoredCertDir(r.DataDir())
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cp := func(from, name string) string {
+		b, err := os.ReadFile(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		to := filepath.Join(dir, name)
+		if err := os.WriteFile(to, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return to
+	}
+	c1, k1 := cp(src, "le.example-fullchain.pem"), cp(srcKey, "le.example-privkey.pem")
+	if err := r.saveCertRow(model.Cert{Name: "le.example", Source: "external", CertFile: c1, KeyFile: k1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.DeleteCert("le.example"); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{c1, k1} {
+		if _, err := os.Stat(f); err == nil {
+			t.Fatalf("还原的副本 %s 应随证书库那一行一并删掉", f)
+		}
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Fatal("数据目录外的原件不能删")
+	}
+
+	// 私钥同一个文件还被设置引用着(手填的路径):证书删、私钥留
+	c2, k2 := cp(src, "x-fullchain.pem"), cp(srcKey, "x-privkey.pem")
+	if err := r.saveCertRow(model.Cert{Name: "x.example", Source: "external", CertFile: c2, KeyFile: k2}); err != nil {
+		t.Fatal(err)
+	}
+	r.setSetting("resellerKeyFile", k2)
+	if err := r.DeleteCert("x.example"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(c2); err == nil {
+		t.Fatal("没人引用的副本应删掉")
+	}
+	if _, err := os.Stat(k2); err != nil {
+		t.Fatal("设置还引用着的副本不能删")
+	}
+}
