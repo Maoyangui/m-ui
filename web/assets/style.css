@@ -230,8 +230,16 @@ select.sm, input.sm { padding: .24rem .45rem; font-size: .82rem; }
 .logo-field .label { font-size: .8rem; color: var(--muted); font-weight: 500; }
 .logo-field .help { font-size: .74rem; color: var(--muted); line-height: 1.35; }
 .logo-row { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem .85rem; }
-.logo-preview { display: flex; align-items: center; gap: .5rem; min-height: 54px; min-width: 7rem; padding: .4rem .7rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
-.logo-preview img { display: block; height: 40px; width: auto; max-width: 200px; object-fit: contain; }
+.logo-preview { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; min-height: 54px; }
+/* 按落地页的浅色、深色两种背景各画一块(颜色与 logo 尺寸照 sub/page.html),不跟面板自己的主题走 */
+.logo-preview .lp { margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .3rem; min-width: 6.5rem; min-height: 54px; padding: .45rem .7rem .35rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.logo-preview .lp[hidden] { display: none; }
+.logo-preview .lp.light { background: #f4f6f9; color: #64748b; }
+.logo-preview .lp.dark { background: #0f1216; color: #8b95a5; border-color: #2a313b; }
+.logo-preview .lp img { display: block; height: 28px; width: auto; max-width: 160px; object-fit: contain; }
+.logo-preview .lp img.custom { height: 32px; padding: 2px 4px; border-radius: 6px; max-width: 168px; box-sizing: border-box; }
+.logo-preview .lp.dark img.custom { background: #f4f6f9; }
+.logo-preview .lp figcaption { font-size: .68rem; line-height: 1; }
 details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; margin-bottom: .4rem; }
 .hint { color: var(--muted); font-size: .8rem; margin-top: .5rem; }
 .err { color: var(--danger); font-size: .85rem; min-height: 1.2rem; }

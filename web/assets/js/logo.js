@@ -97,11 +97,17 @@ export async function prepLogo(file) {
 const bound = {};
 
 // logoBlock 设置卡片里的一块:预览、上传 / 更换、恢复默认。readonly 是副机(随主机同步,不能改)。
+// 预览并排画落地页的浅色、深色两种背景(落地页跟随访客系统的深色模式,和面板自己的主题无关),
+// 深色那块和落地页一样给上传的 logo 垫浅色底:透明底的深色 / 白色 logo 哪种底色上看不清,上传的人一眼能看出来。
 export function logoBlock(prefix, { readonly = false } = {}) {
   return `<div class="logo-field">
     <span class="label">${esc(t('set.subPageLogo'))}</span>
     <div class="logo-row">
-      <div class="logo-preview"><img id="${prefix}-img" alt="" hidden><span id="${prefix}-none" class="muted small"></span></div>
+      <div class="logo-preview">
+        <figure class="lp light" hidden><img id="${prefix}-img" alt=""><figcaption>${esc(t('set.logoLight'))}</figcaption></figure>
+        <figure class="lp dark" hidden><img id="${prefix}-img-dark" alt=""><figcaption>${esc(t('set.logoDark'))}</figcaption></figure>
+        <span id="${prefix}-none" class="muted small"></span>
+      </div>
       ${readonly ? '' : `<div class="row">
         <button class="btn sm" data-act="logo.pick" data-id="${prefix}">${esc(t('set.logoUpload'))}</button>
         <button class="btn sm ghost" data-act="logo.reset" data-id="${prefix}" id="${prefix}-reset" hidden>${esc(t('set.logoReset'))}</button>
@@ -113,19 +119,23 @@ export function logoBlock(prefix, { readonly = false } = {}) {
 }
 
 function show(prefix, v) {
-  const img = document.getElementById(prefix + '-img'), none = document.getElementById(prefix + '-none');
-  if (!img || !none) return; // 页面已经切走
+  const img = document.getElementById(prefix + '-img'), dark = document.getElementById(prefix + '-img-dark');
+  const none = document.getElementById(prefix + '-none');
+  if (!img || !dark || !none) return; // 页面已经切走
   const reset = document.getElementById(prefix + '-reset');
   const on = !!(v && v.set && v.data);
   const inherit = bound[prefix] && bound[prefix].inherit;
-  if (on) {
-    img.src = v.data;
-    img.title = `${v.width}×${v.height} · ${fmtBytes(v.size, 1)}`;
-  } else if (!inherit) {
-    img.src = 'logo.svg'; // 主面板没设:落地页用的就是内置这张
-    img.title = '';
+  for (const el of [img, dark]) {
+    if (on) {
+      el.src = v.data;
+      el.title = `${v.width}×${v.height} · ${fmtBytes(v.size, 1)}`;
+    } else if (!inherit) {
+      el.src = 'logo.svg'; // 主面板没设:落地页用的就是内置这张
+      el.title = '';
+    }
+    el.closest('.lp').hidden = !on && inherit;
   }
-  img.hidden = !on && inherit;
+  for (const el of [img, dark]) el.classList.toggle('custom', on); // 和落地页一样:上传的四周留一圈,深色背景上垫浅色底;内置的不垫
   none.textContent = on ? '' : t(inherit ? 'acct.logoInherit' : 'set.logoDefault');
   none.hidden = on;
   if (reset) reset.hidden = !on;

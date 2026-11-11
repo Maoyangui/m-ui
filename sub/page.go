@@ -88,6 +88,7 @@ type pageData struct {
 	Lang                    string
 	Icon                    template.URL // 标签图标与页头 logo:内置的是内联 SVG data URI,自定义的是 ./<地址>/logo?v=<摘要>
 	IconType                string       // 标签图标的类型(link rel=icon 的 type)
+	CustomLogo              bool         // 页头是上传的 logo(不是内置的):深色模式下给它垫一块浅色底,透明底的深色 logo 才看得见
 	Title, Notice, Support  string
 	Name                    string
 	StatusText, StatusKind  string // active / expired / exhausted / disabled;ok / danger
@@ -266,7 +267,8 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key 
 		opt.Share = false // 借用者不能管理共享
 	}
 	data := buildPageData(r, subPath, key, user, lines, opt, title, notice, support)
-	data.Icon, data.IconType = s.pageIcon(rs, key) // 代理的用户先用代理的 logo,再用主面板的
+	data.Icon, data.IconType = s.pageIcon(rs, key)     // 代理的用户先用代理的 logo,再用主面板的
+	data.CustomLogo = data.IconType != builtinIconType // 上传的只会是 PNG / JPEG / GIF,内置的是 SVG
 	data.NoChart = strings.EqualFold(s.setting("nodeMode"), "true")
 	var ratioNodes int64
 	s.db.Model(&model.Node{}).Where("enabled = ? AND ratio > 0 AND ratio != 1", true).Count(&ratioNodes)

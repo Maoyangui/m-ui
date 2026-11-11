@@ -64,6 +64,9 @@ func TestLandingLogoBuiltinByDefault(t *testing.T) {
 	if strings.Count(body, builtinIcon) != 2 || !strings.Contains(body, `type="image/svg+xml"`) || strings.Contains(body, "/logo?v=") {
 		t.Fatal("没传 logo 时标签图标与页头应是内置 SVG")
 	}
+	if !strings.Contains(body, `<img class="logo" src="`+builtinIcon) {
+		t.Fatal("内置 logo 不带 custom(深色模式下不垫浅色底,它本身两种底色都看得清)")
+	}
 	if cl := iconPage(s, "/sub/alice?clients=1"); !strings.Contains(cl, `<link rel="icon" href="`+builtinIcon) || !strings.Contains(cl, `type="image/svg+xml"`) {
 		t.Fatal("客户端下载页的标签图标应是内置 SVG")
 	}
@@ -76,8 +79,8 @@ func TestLandingLogoFromMaster(t *testing.T) {
 	lg := testLogo(t, db, 0, 480, 160, 30)
 	want := "./alice/logo?v=" + lg.Sum
 	body := iconPage(s, "/sub/alice")
-	if !strings.Contains(body, `<link rel="icon" href="`+want+`" type="image/png">`) || !strings.Contains(body, `<img class="logo" src="`+want+`"`) {
-		t.Fatalf("落地页应引用主面板的 logo %s", want)
+	if !strings.Contains(body, `<link rel="icon" href="`+want+`" type="image/png">`) || !strings.Contains(body, `<img class="logo custom" src="`+want+`"`) {
+		t.Fatalf("落地页应引用主面板的 logo %s(带 custom:深色模式下垫浅色底)", want)
 	}
 	if strings.Contains(body, builtinIcon) {
 		t.Fatal("有自定义 logo 时不该再内联内置 SVG")
@@ -327,5 +330,27 @@ func TestShareCardHintMentionsBrowserImport(t *testing.T) {
 	}
 	if shared := doReqZh(s, "/sub/"+token(t, db)).Body.String(); strings.Contains(shared, "把这个地址发给对方") || strings.Contains(shared, `id="share"`) {
 		t.Fatal("借用者的落地页不该出现共享卡")
+	}
+}
+
+// 深色模式下透明底的深色 logo 看不见:上传的 logo 带 custom,深色时垫一块浅色底(不改原图);内置的不垫。
+// 窄屏上宽幅 logo 加不带空格的长标题:文字这一栏能收窄、长词能断开,logo 也按屏宽封顶,页头不撑出屏幕。
+func TestLandingLogoDarkBackdropAndNarrowHeader(t *testing.T) {
+	s, db := shareServer(t)
+	testLogo(t, db, 0, 480, 80, 30)
+	body := doReqZh(s, "/sub/alice").Body.String()
+	for _, want := range []string{
+		`@media(prefers-color-scheme:dark){.logo.custom{background:#f4f6f9}}`,
+		`.logo.custom{height:32px;padding:2px 4px;border-radius:6px;max-width:min(168px,44vw)}`,
+		`max-width:min(160px,42vw)`,
+		`.brand>div{min-width:0}`,
+		`.brand h1,.brand .u{overflow-wrap:anywhere;word-break:break-word}`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("落地页样式里缺 %s", want)
+		}
+	}
+	if !strings.Contains(body, `<img class="logo custom" src="./alice/logo?v=`) {
+		t.Fatal("上传的 logo 应带 custom")
 	}
 }
