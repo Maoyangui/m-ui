@@ -169,6 +169,9 @@ func (in *incoming) cleanupLocked() {
 	_ = os.Remove(s.stagedFile())
 	_ = os.RemoveAll(filepath.Join(s.Dir(), "incoming"))
 	_ = os.Remove(filepath.Join(s.Dir(), "incoming.env"))
+	if _, err := os.Stat(promoteFile(s.d.DBPath)); err != nil { // 新库已经换上(或没有):上次提交留下的时效标记没用了
+		_ = os.Remove(promoteMarkFile(s.d.DBPath))
+	}
 	in.reset()
 }
 
