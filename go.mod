@@ -106,3 +106,10 @@ require (
 	modernc.org/memory v1.5.0 // indirect
 	modernc.org/sqlite v1.23.1 // indirect
 )
+
+// 上游 sing-anytls v0.0.11(到 v0.0.13 仍未修)的 session 包有数据竞争:Stream.dieErr / dieHook 在关闭时写、
+// 转发中的 Read / Write 和 Client.CreateStream 在别的 goroutine 里不加锁读写;OpenStream 不加锁改 buffering。
+// third_party/sing-anytls 是 v0.0.11 原样副本,只改了 session/ 下 stream.go、client.go、session.go 这几处
+// (每个文件开头有说明),守护用例 core/protocol/anytls/stream_race_test.go(-race 下跑)。
+// 上游修好后升级并删掉这一行和 third_party/sing-anytls。
+replace github.com/anytls/sing-anytls => ./third_party/sing-anytls

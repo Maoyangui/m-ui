@@ -13,4 +13,11 @@ Third-party code and attributions (retained as required by their licenses):
   derived from alireza0/s-ui (GPL-3.0).
 - sing-box (SagerNet) — GPL-3.0 with additional terms; see
   https://github.com/SagerNet/sing-box/blob/main/LICENSE
+- sing-anytls (github.com/anytls/sing-anytls v0.0.11, see
+  third_party/sing-anytls/LICENSE) — vendored in third_party/sing-anytls via a
+  go.mod replace directive. Modified (marked at the top of each file):
+  session/stream.go, session/client.go and session/session.go, to fix data
+  races between closing a session and concurrent stream Read / Write /
+  CreateStream (Stream.dieErr and Stream.dieHook become atomic pointers;
+  Session.buffering is cleared under connLock). All other files are unchanged.
 - Go module dependencies are listed in go.mod with their respective licenses.
