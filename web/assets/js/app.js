@@ -98,6 +98,7 @@ const PAGE_DATA = {
 let needTotp = false; // 服务端要求过两步验证码后,登录框一直显示验证码栏
 function showLogin() {
   document.getElementById('app').hidden = true;
+  document.documentElement.lang = getLang() === 'zh' ? 'zh-CN' : 'en';
   const l = document.getElementById('login');
   l.hidden = false;
   document.getElementById('login-title').textContent = t('login.title');
@@ -190,6 +191,7 @@ function helpLink(a, page) {
 
 // ---- 壳:导航、角色、主题、语言 ----
 function renderChrome() {
+  document.documentElement.lang = getLang() === 'zh' ? 'zh-CN' : 'en'; // 换成英文时页面语言跟着换(读屏、表头折行规则看它)
   document.getElementById('nav').innerHTML = navFor().map(p =>
     `<a href="#/${p}" data-page="${p}"><span class="ic">${ICONS[p] || ''}</span>${t('nav.' + p)}</a>`).join('');
   reachNotice(); // 导航重画后补上"服务器"的红点

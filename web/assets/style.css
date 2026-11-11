@@ -128,6 +128,8 @@ table.grid { width: 100%; border-collapse: collapse; min-width: 640px; }
 table.grid td.primary-cell { min-width: 6.5em; }
 .grid th, .grid td { padding: .45rem .7rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .grid th { background: var(--surface-2); font-weight: 600; font-size: .76rem; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; position: sticky; top: 0; z-index: 2; }
+/* 英文表头是大写加字距,多词的("DURATION (DAYS)" 之类)很宽:英文界面里允许在空格处折行,窄窗口下表格不必横向滚动。中文表头不折(一字一行很难看) */
+:lang(en) .grid:not(.ext-grid) th { white-space: normal; }
 .grid tbody tr:hover { background: var(--surface-2); }
 .grid tbody tr:last-child td { border-bottom: none; }
 .grid tbody tr.dragging { opacity: .4; }
@@ -324,7 +326,7 @@ details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; m
 .empty { color: var(--muted); text-align: center; padding: 1.5rem; font-size: .85rem; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: .35rem 1rem; font-size: .85rem; }
 .kv dt { color: var(--muted); }
-.kv dd { margin: 0; }
+.kv dd { margin: 0; overflow-wrap: anywhere; } /* 地址之类的长串在窄屏上折行,不把页面撑出横向滚动 */
 
 /* 菜单 */
 details.menu { position: relative; display: inline-block; }
