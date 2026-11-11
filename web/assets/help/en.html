@@ -472,7 +472,7 @@
       <li><b data-k="cert.srcAcme">Domain (auto-issue)</b>: first point the domain's A record to the server IP at your DNS provider. Enter the domain and choose the <b data-k="cert.method">Validation</b>:
         <ul>
           <li><b data-k="cert.methodHttp">HTTP (temporary listener on port 80)</b>: port 80 must be free and reachable from the internet.</li>
-          <li><b data-k="cert.methodCf">DNS (Cloudflare API)</b>: for domains on Cloudflare; enter a <b data-k="cert.cfToken">Cloudflare API token</b> (with Zone.DNS edit permission). Port 80 is not needed and renewal is automatic.</li>
+          <li><b data-k="cert.methodCf">DNS (Cloudflare API)</b>: for domains on Cloudflare; enter a <b data-k="cert.cfToken">Cloudflare API token</b> (with DNS edit permission for the domain; see <a href="#cf-token">Creating a Cloudflare API token</a>). Port 80 is not needed and renewal is automatic.</li>
           <li><b data-k="cert.methodManual">DNS (add a TXT record by hand)</b>: for other DNS providers; add the TXT records shown, and issuing continues once public DNS sees them.</li>
         </ul>
         Click <b data-k="cert.precheck">Pre-check DNS / port</b> first, then <b data-k="cert.issueBtn">Issue certificate</b>. Wildcards (<code>*.example.com</code>) need DNS validation.</li>
@@ -480,6 +480,23 @@
       <li><b data-k="cert.srcExternal">Existing certificate</b>: if certbot, aaPanel, nginx or a commercial certificate is already on the server, enter the paths of the <b data-k="cert.certPath">Certificate file (fullchain)</b> and the <b data-k="cert.keyPath">Private key file</b> and click <b data-k="cert.useExternal">Use this certificate</b>.</li>
     </ul>
     <div class="tip"><b>Choose what it is for</b>Under <b data-k="cert.applyTo">Apply to</b> tick <b data-k="cert.forLines">Make it the default for lines</b>, <b data-k="cert.applyPanel">Use for panel HTTPS</b> and / or <b data-k="cert.applySub">Use for subscription HTTPS</b>; uses you leave unticked stay as they are.</div>
+  </section>
+
+  <section class="sec" id="cf-token">
+    <h3>Creating a Cloudflare API token</h3>
+    <p class="lede">Issuing certificates with <b data-k="cert.methodCf">DNS (Cloudflare API)</b> needs a Cloudflare API token. Let it manage only the DNS of your domain, so a leak cannot touch anything else.</p>
+    <ol class="steps">
+      <li>Open <a href="https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22zone%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22dns%22%2C%22type%22%3A%22edit%22%7D%5D&amp;accountId=*&amp;zoneId=all&amp;name=m-ui" target="_blank" rel="noopener">Cloudflare's token page with the permissions filled in</a> and sign in to your Cloudflare account. The permissions are already set, "Zone → Zone → Read" and "Zone → DNS → Edit", and the token is named m-ui.</li>
+      <li>Change "Zone Resources" to "Include → Specific zone → your domain"; do not leave "All zones".</li>
+      <li>Click "Continue to summary", then "Create Token".</li>
+      <li>Copy the token shown and paste it into <b data-k="cert.cfToken">Cloudflare API token</b> on m-ui's Certificate page. It is shown only this once: after you leave the page it cannot be viewed again, and a lost token has to be created anew.</li>
+    </ol>
+    <div class="tip"><b>If the link does not open or the page looks different, create it by hand</b>In the Cloudflare dashboard: your avatar at the top right → My Profile → API Tokens → Create Token → the "Edit zone DNS" template → Zone Resources "Include → Specific zone → your domain" → Continue to summary → Create Token. If issuing then says the zone cannot be found, add one more permission to the token: "Zone → Zone → Read".</div>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>Keep it minimal: the two permissions above, on just the domain you use. Do not use the Global API Key, and do not grant account-level permissions.</li>
+      <li>Token leaked? Delete or roll it on the same page and put the new token into m-ui.</li>
+      <li data-pending="ha">The automatic DNS update of master failover takes its own token (see <a href="#ha-dns">Automatic Cloudflare DNS</a>); create another one the same way.</li>
+    </ul></div>
   </section>
 
   <section class="sec" id="cert-use">

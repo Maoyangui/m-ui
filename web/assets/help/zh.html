@@ -472,7 +472,7 @@
       <li><b data-k="cert.srcAcme">有域名(自动签发)</b>:先到域名服务商把 A 记录解析到服务器 IP。填域名,选 <b data-k="cert.method">验证方式</b>:
         <ul>
           <li><b data-k="cert.methodHttp">HTTP(临时监听 80 端口)</b>:80 端口要空闲、公网能访问。</li>
-          <li><b data-k="cert.methodCf">DNS(Cloudflare API)</b>:域名在 Cloudflare 上时用,填 <b data-k="cert.cfToken">Cloudflare API Token</b>(要有 Zone.DNS 编辑权限),不用开 80 端口,能自动续期。</li>
+          <li><b data-k="cert.methodCf">DNS(Cloudflare API)</b>:域名在 Cloudflare 上时用,填 <b data-k="cert.cfToken">Cloudflare API Token</b>(要有这个域名的 DNS 编辑权限,怎么创建见 <a href="#cf-token">Cloudflare API 令牌怎么创建</a>),不用开 80 端口,能自动续期。</li>
           <li><b data-k="cert.methodManual">DNS(手动加 TXT 记录)</b>:其它 DNS 服务商用,按页面提示加 TXT 记录,公共 DNS 查到后自动继续。</li>
         </ul>
         先点 <b data-k="cert.precheck">预检 DNS / 端口</b> 看看,再点 <b data-k="cert.issueBtn">签发证书</b>。泛域名(<code>*.example.com</code>)只能用 DNS 验证。</li>
@@ -480,6 +480,23 @@
       <li><b data-k="cert.srcExternal">已有证书</b>:服务器上已经有 certbot、宝塔、nginx 或商业证书时,填 <b data-k="cert.certPath">证书文件(fullchain)</b> 和 <b data-k="cert.keyPath">私钥文件</b> 的路径,点 <b data-k="cert.useExternal">使用该证书</b>。</li>
     </ul>
     <div class="tip"><b>选用途</b>在 <b data-k="cert.applyTo">添加后用于</b> 里勾:<b data-k="cert.forLines">设为线路默认证书</b>、<b data-k="cert.applyPanel">用于面板 HTTPS</b>、<b data-k="cert.applySub">用于订阅 HTTPS</b>;没勾的用途不受影响。</div>
+  </section>
+
+  <section class="sec" id="cf-token">
+    <h3>Cloudflare API 令牌怎么创建</h3>
+    <p class="lede">用 <b data-k="cert.methodCf">DNS(Cloudflare API)</b> 签证书,要一个 Cloudflare API 令牌。只让它管你这个域名的 DNS,泄露了也动不了别的。</p>
+    <ol class="steps">
+      <li>打开 <a href="https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22zone%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22dns%22%2C%22type%22%3A%22edit%22%7D%5D&amp;accountId=*&amp;zoneId=all&amp;name=m-ui" target="_blank" rel="noopener">Cloudflare 的令牌创建页(已预填权限)</a>,登录你的 Cloudflare 账号。权限已经填好:「区域 → 区域 → 读取」和「区域 → DNS → 编辑」,令牌名叫 m-ui。</li>
+      <li>「区域资源」改成「包括 → 特定区域 → 你的域名」,不要留「所有区域」。</li>
+      <li>点「继续以显示摘要」,再点「创建令牌」。</li>
+      <li>复制页面上显示的令牌,粘贴到 m-ui 证书页的 <b data-k="cert.cfToken">Cloudflare API Token</b>。令牌只显示这一次,离开页面就看不到了,丢了只能重新创建。</li>
+    </ol>
+    <div class="tip"><b>链接打不开、或页面和上面说的不一样时,手动创建</b>Cloudflare 控制台右上角头像 → 我的个人资料 → API 令牌 → 创建令牌 → 用「编辑区域 DNS」模板 → 区域资源选「包括 → 特定区域 → 你的域名」→ 继续以显示摘要 → 创建令牌。签发时如果报找不到区域(zone),给这个令牌再加一条权限「区域 → 区域 → 读取」。</div>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>权限最小化:只要上面两项权限,区域只选要用的域名。不要用「Global API Key」(全局 API 密钥),也不要给账户级的权限。</li>
+      <li>令牌泄露了:到同一页把它删掉或轮转,再把新令牌填回 m-ui。</li>
+      <li data-pending="ha">主机容灾的自动改 DNS 单独填一个令牌(见 <a href="#ha-dns">Cloudflare 自动改 DNS</a>),照同样的步骤再建一个就行。</li>
+    </ul></div>
   </section>
 
   <section class="sec" id="cert-use">
