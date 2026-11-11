@@ -1229,7 +1229,7 @@
         <tr data-pending="ha"><td>Globalping、Cloudflare API</td><td>主机容灾:判断主机是否失联时让境外测点连主机;主机变了以后自动改 DNS</td><td>关掉 <b data-k="ha.set.witness">境外测点见证</b>;不填 Cloudflare 令牌就不改 DNS</td></tr>
         <tr><td>Google(<code>www.gstatic.com</code>)</td><td>上游巡检和测试:<b data-k="set.testUrl">上游测试地址</b> 默认就是它。本机有线路用了上游(WARP、落地机等)时,每 10 分钟经各条上游连一次;线路用了上游组的,内核还会每 30 秒经组里每条上游连一次;点上游的 <b data-k="common.test">测试</b>、外部节点测速时也连</td><td>把 <b data-k="set.testUrl">上游测试地址</b> 换成别的地址;<b data-k="set.checkMinutes">巡检间隔(分钟)</b> 填 0 只关掉定时巡检,上游组的测速照样跑</td></tr>
         <tr><td>你自己填的地址</td><td>Webhook、外部订阅、Telegram 代理</td><td>不填就不连</td></tr>
-        <tr><td>点了才连</td><td>更新、安装 WARP(Cloudflare 的软件源)和 <b data-k="ops.checkExit">检测出口</b>、按规则分流里的 <b data-k="line.rr.lookup">查域名</b>(GitHub 上的 v2fly 域名列表)、Reality 的 <b data-k="line.reality.check">检测</b> 和 <b data-k="line.reality.pick">帮我挑</b>(连候选网站)、外部节点测速、证书页的 <b data-k="cert.precheck">预检 DNS / 端口</b> 和换机向导的 <b data-k="mig.check">检查解析</b>(向 Cloudflare、Google、阿里的公共 DNS 查解析)</td><td>不点就不连</td></tr>
+        <tr><td>点了才连</td><td>更新、安装 WARP(Cloudflare 的软件源)和 <b data-k="ops.checkExit">检测出口</b>、按规则分流里的 <b data-k="line.rr.lookup">查域名</b>(GitHub 上的 v2fly 域名列表)、Reality 的 <b data-k="line.reality.check">检测</b> 和 <b data-k="line.reality.pick">帮我挑</b>(连候选网站)、外部节点测速、证书页的 <b data-k="cert.precheck">预检 DNS / 端口</b> 和换机向导的 <b data-k="mig.check">检查解析</b>(向 Cloudflare、Google、阿里的公共 DNS 查解析,并测一次本机公网 IP)</td><td>不点就不连</td></tr>
       </tbody>
     </table></div>
   </section>
