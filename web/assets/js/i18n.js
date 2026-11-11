@@ -632,7 +632,7 @@ const zh = {
   'dash.attn.reachStale': '大陆连通检测上次测完是 {ago}(应每 {n} 分钟一次)', 'dash.attn.reachNever': '大陆连通检测还没测成过',
   'dash.attn.healthStale': '上游巡检上次跑是 {ago}(应每 {n} 分钟一次)', 'dash.scope.localUsed': '本机在用',
   'dash.linesLocalTitle': '本机部署的线路;主机下发的全部线路 {n} 条', 'dash.upsLocalTitle': '本机线路在用的上游;主机下发的全部上游 {n} 个',
-  'dash.sync.applyErr': '没应用:{err}', 'dash.top.gone': '用户已删除', 'dash.audit.batch': '批量{op}', 'dash.audit.batchBind': '批量归入套餐',
+  'dash.sync.applyErr': '没应用:{err}', 'dash.top.gone': '用户已删除', 'dash.audit.batch': '批量{op}', 'dash.audit.batchBind': '批量改所属套餐', 'dash.audit.bind': '改所属套餐',
   'dash.conn.more': '再显示 {n} 条(还有 {left} 条)',
   'rs.onlyAttn': '只看要处理的', 'rs.onlyAttnHelp': '额度用尽、7 天内到期或过去 7 天里刚到期的代理(只算启用的)',
 };
@@ -1278,7 +1278,7 @@ const en = {
   'dash.attn.reachStale': 'Mainland reachability check last completed {ago} (due every {n} min)', 'dash.attn.reachNever': 'Mainland reachability check has never completed',
   'dash.attn.healthStale': 'Upstream checks last ran {ago} (due every {n} min)', 'dash.scope.localUsed': 'in use here',
   'dash.linesLocalTitle': 'Lines deployed on this server; {n} lines in total from the master', 'dash.upsLocalTitle': 'Upstreams used by the lines on this server; {n} in total from the master',
-  'dash.sync.applyErr': 'not applied: {err}', 'dash.top.gone': 'user deleted', 'dash.audit.batch': 'Batch {op}', 'dash.audit.batchBind': 'Batch plan assignment',
+  'dash.sync.applyErr': 'not applied: {err}', 'dash.top.gone': 'user deleted', 'dash.audit.batch': 'Batch {op}', 'dash.audit.batchBind': 'Batch plan assignment', 'dash.audit.bind': 'Plan assignment',
   'dash.conn.more': 'Show {n} more ({left} left)',
   'rs.onlyAttn': 'Needs attention only', 'rs.onlyAttnHelp': 'Enabled resellers whose quota is used up, or that expire within 7 days or expired in the last 7 days',
 };

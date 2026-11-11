@@ -655,6 +655,7 @@ function renderConns() {
 function auditAction(r) {
   const b = r.key === 'user' && /^batch:plan:(renew|extend|bind)(?::(.*))?$/.exec(r.action || '');
   if (b) return b[1] === 'bind' ? t('dash.audit.batchBind') : `${t('dash.audit.batch', { op: t('pc.op.' + b[1]) })} · ${b[2] || ''}`;
+  if (r.key === 'user' && r.action === 'plan:bind') return t('dash.audit.bind'); // 只改所属套餐(也可能是移出套餐),额度和到期不动
   const m = r.key === 'user' && /^plan:(renew|extend|replace|stack|prorate):(.*)$/.exec(r.action || '');
   if (!m) return `${r.key}.${r.action}`;
   if (m[1] === 'renew' || m[1] === 'extend') return `${t('pc.op.' + m[1])} · ${m[2]}`;
