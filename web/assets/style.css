@@ -698,9 +698,11 @@ td .chips { display: inline-flex; vertical-align: middle; }
 .ext-tools { row-gap: .4rem; }
 .ext-tools .ext-row2 { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; flex-basis: 100%; }
 .ext-grid th.sortable { cursor: pointer; }
-.ext-sum { display: flex; flex-direction: column; gap: .05rem; line-height: 1.25; }
+.ext-sum { display: flex; flex-direction: column; align-items: flex-start; gap: .05rem; line-height: 1.25; }
 .ext-sum .sub { font-size: .72rem; color: var(--muted); white-space: nowrap; }
-.ext-sum button.link { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+/* 汇总格本身是个按钮(点开看逐台延迟):去掉浏览器默认的灰底边框,悬停时下划线提示能点 */
+button.ext-sum { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underline; }
 .ext-more { display: flex; justify-content: center; padding: .5rem; }
 .ext-cols .menu-list { max-height: 60vh; overflow: auto; min-width: 14rem; }
 .ext-cols .menu-list label { display: flex; align-items: center; gap: .4rem; padding: .25rem .5rem; font-size: .82rem; white-space: nowrap; }
@@ -737,8 +739,9 @@ td .chips { display: inline-flex; vertical-align: middle; }
 .stat .k { display: block; }
 .stat.warn { border-color: var(--warn); } .stat.warn .s { color: var(--warn); }
 .stats.stale { opacity: .7; }
-.meters { display: grid; gap: .25rem; margin-top: .3rem; }
-.meter { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) 2.6rem; align-items: center; gap: .35rem; font-size: .74rem; color: var(--muted); }
+/* 三行共用一套列(subgrid):标签列按最长的标签定宽,英文的 Memory 不会压到进度条上,三条进度条照样对齐 */
+.meters { display: grid; grid-template-columns: max-content minmax(0, 1fr) 2.6rem; gap: .25rem .35rem; margin-top: .3rem; }
+.meter { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; font-size: .74rem; color: var(--muted); }
 .meter .progress { margin: 0; min-width: 0; }
 .meter > span:last-child { text-align: right; font-family: var(--mono); }
 /* 卡片头的小字:人数、口径、过期徽章 */
