@@ -269,6 +269,11 @@ function route(method, path, query, body) {
         if (seg[2] === 'sub') { const u = find(S.users, id); return { link: subUrl(u), clash: subUrl(u) + '?format=clash', json: subUrl(u) + '?format=json' }; } return clone(S.users);
       case 'plans': return S.plans.map(planView);
       case 'nodes': return clone(S.nodes);
+      // 主机容灾:演示站是一台没开容灾的主机(没有这一条时界面拿到 {},会把每台都标成「副机」)
+      case 'ha': { if (seg[1]) return notFound(); // 设为主机的计划等:演示站不真的换主机
+        const me = (S.nodes.nodes || []).find(n => n.isLocal) || {};
+        return { role: 'master', epoch: 0, selfId: me.id || 1, selfName: me.name || '', masterId: me.id || 1, masterName: me.name || '', version: 'demo', mode: 'off', notices: [], standbyIds: [],
+          config: { mode: 'off', standbys: 2, replicaMinutes: 5, confirmMinutes: 3, autoMinutes: 10, rankStepMinutes: 3, witness: true, pauseUntil: 0, dnsNames: '', dnsTokenSet: false }, ready: [] }; }
       case 'exts': if (seg[2] === 'nodes') return extNodes(id, seg, 'GET', null); return clone(S.exts);
       case 'onlines': return clone(S.onlines);
       case 'rules': if (seg[2] === 'states') return clone(S.limitStates.filter(s => s.ruleId === id)); if (seg[1]) return ruleView(find(S.rules, id)); return S.rules.map(ruleView);
