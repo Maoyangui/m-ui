@@ -101,11 +101,13 @@ function showLogin() {
   document.getElementById('login-submit').textContent = t('login.submit');
   document.getElementById('login-code-label').textContent = t('login.code');
   supportLink(document.getElementById('login-support'));
-  helpLink(document.getElementById('login-help'), 'dashboard');
+  helpLink(document.getElementById('login-help'), 'login');
   document.getElementById('login-code-wrap').hidden = !needTotp;
   setTimeout(() => document.getElementById('lg-user').focus(), 50);
 }
-setUnauthorizedHandler(showLogin);
+// 401 时回到登录页。代理面板的 401 带 scope: 'reseller'(web/reseller_panel.go):还没登录、没有 status 时,
+// 登录页靠它认出这是代理面板,「帮助说明」打开代理视图
+setUnauthorizedHandler(d => { if (d && d.scope) panelScope = d.scope; showLogin(); });
 
 document.getElementById('login-form').addEventListener('submit', async ev => {
   ev.preventDefault();
@@ -157,17 +159,21 @@ function supportLink(a) {
 
 // "帮助说明"按钮:新标签页打开内嵌的帮助页(help/zh.html、help/en.html,跟面板同一个语言),并定位到当前页面对应的章节。
 // 代理面板带上 view=reseller:帮助页只留代理用得上的章节。帮助页和面板其它前端文件一样只在面板路径下提供,用相对地址,
-// 改了面板路径也照样打开。键是页面名,值是帮助页里的章节 id(两种语言一致,web/help_test.go 会核对)。
+// 改了面板路径也照样打开。键是页面名(login 是登录页),值是帮助页里的章节 id(两种语言一致,web/help_test.go 会核对)。
 const HELP_ANCHOR = {
-  dashboard: 'start', lines: 'lines', upstreams: 'upstreams', exts: 'exts', users: 'users', resellers: 'resellers',
+  login: 'first-login', dashboard: 'start', lines: 'lines', upstreams: 'upstreams', exts: 'exts', users: 'users', resellers: 'resellers',
   plans: 'plans', rules: 'rules', nodes: 'nodes', cert: 'cert', backup: 'backup', ops: 'ops', logs: 'logs',
   admin: 'security', settings: 'settings',
 };
-const HELP_ANCHOR_RESELLER = { dashboard: 'rs-start', users: 'users', plans: 'plans', account: 'rs-account' };
+const HELP_ANCHOR_RESELLER = { login: 'rs-login', dashboard: 'rs-start', users: 'users', plans: 'plans', account: 'rs-account' };
 const HELP_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.8"/><path d="M12 17.2h.01"/></svg>';
+// panelScope 记住这是哪个面板:登录后取 status.scope;没登录时取接口 401 带回来的(见 setUnauthorizedHandler)。
+// 退出登录回到登录页时 status 已经不作数,也还认得出是代理面板
+let panelScope = '';
 function helpLink(a, page) {
   if (!a) return;
-  const rs = isReseller();
+  if ((state.status || {}).scope) panelScope = state.status.scope;
+  const rs = panelScope === 'reseller';
   const anchor = (rs ? HELP_ANCHOR_RESELLER : HELP_ANCHOR)[page] || '';
   a.href = `help/${getLang() === 'zh' ? 'zh' : 'en'}.html${rs ? '?view=reseller' : ''}${anchor ? '#' + anchor : ''}`;
   if (a.dataset.lang !== getLang()) { // 文字只在换语言时重画

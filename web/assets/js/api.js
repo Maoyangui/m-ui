@@ -41,7 +41,8 @@ export async function api(path, opts = {}) {
     if (timer) clearTimeout(timer);
   }
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401) { onUnauthorized(); const e = new ApiError(401, trErr(data.error || '未登录')); e.data = data; throw e; }
+  // 401 的响应体也交给登录页:代理面板的带 scope: 'reseller',还没登录也认得出是哪个面板
+  if (res.status === 401) { onUnauthorized(data); const e = new ApiError(401, trErr(data.error || '未登录')); e.data = data; throw e; }
   // 其它错误也把响应体挂在 e.data 上:换套餐的 409 带着 code、warnings 与 preview,界面要读
   if (!res.ok) { const e = new ApiError(res.status, trErr(data.error) || t('api.failed', { s: res.status })); e.data = data; throw e; }
   return data;

@@ -148,6 +148,12 @@ func (s *Server) StopReseller() error {
 	return err
 }
 
+// resellerUnauthorized 代理面板的"未登录":带上 scope,登录页还没有 status 时也认得出这是代理面板
+// (右上角的「帮助说明」直接打开代理视图,见 app.js helpLink)。主面板的 401 不带它。
+func resellerUnauthorized(w http.ResponseWriter) {
+	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录", "scope": "reseller"})
+}
+
 // rauth 代理面板鉴权:必须是代理会话;还没设密码的会话只放行状态与设密码。
 func (s *Server) rauth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -157,12 +163,12 @@ func (s *Server) rauth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		c, err := r.Cookie(resellerCookie)
 		if err != nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+			resellerUnauthorized(w)
 			return
 		}
 		sess, ok := s.getSession(c.Value)
 		if !ok || sess.reseller == 0 || !s.sessionCredentialValid(c.Value, sess) {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+			resellerUnauthorized(w)
 			return
 		}
 		var rs model.Reseller

@@ -60,5 +60,7 @@ jobs:
         run: node --test web/jstest/fair.test.mjs
       - name: Frontend (certificate and restore alert bars)
         run: node --test web/jstest/certbar.test.mjs
+      - name: Frontend (help link on the login page)
+        run: node --test web/jstest/helplink.test.mjs
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run

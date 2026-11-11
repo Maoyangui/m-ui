@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -157,6 +158,37 @@ func TestHelpAnchorsFromPanel(t *testing.T) {
 	}
 	if !strings.Contains(string(js), "'help.btn'") {
 		t.Error("app.js 没用 help.btn 文案")
+	}
+}
+
+// 代理面板的登录页还没有 status,只能靠接口的 401 认出自己是代理面板(「帮助说明」要打开代理视图,见
+// web/jstest/helplink.test.mjs):代理面板的 401 带 scope=reseller,不论是没带会话还是会话无效;主面板的 401 不带。
+func TestUnauthorizedTellsResellerPanel(t *testing.T) {
+	s := &Server{sessions: map[string]session{}}
+	ok := func(w http.ResponseWriter, r *http.Request) { t.Fatal("没登录不该放行") }
+	call := func(h http.HandlerFunc, cookie *http.Cookie) map[string]string {
+		r := httptest.NewRequest(http.MethodGet, "http://x/app/api/status", nil)
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		h(w, r)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("应 401,得 %d", w.Code)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	for _, c := range []*http.Cookie{nil, {Name: resellerCookie, Value: "no-such-session"}} {
+		if b := call(s.rauth(ok), c); b["scope"] != "reseller" || b["error"] == "" {
+			t.Fatalf("代理面板的 401 要带 scope=reseller 和错误文字,得 %v", b)
+		}
+	}
+	if b := call(s.auth(ok), nil); b["scope"] != "" {
+		t.Fatalf("主面板的 401 不该带 scope,得 %v", b)
 	}
 }
 
