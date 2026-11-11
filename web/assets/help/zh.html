@@ -909,7 +909,7 @@
     <h3>还原</h3>
     <ol class="steps">
       <li><b data-k="nav.backup">备份</b> 页 → <b data-k="bk.restore">还原</b>:选备份文件(zip 或 .db),点 <b data-k="bk.restoreBtn">还原</b>。</li>
-      <li>确认后 m-ui 自动重启,替换数据库和证书。<span data-pending="backup-certs">设置里引用的数据目录外的证书文件(比如 <b data-k="cert.srcExternal">已有证书</b>、从旧面板导入的证书路径):这台机器原路径上有能用的同一张(同样的域名、不比备份里的旧)就接着用它;没有才把备份里那份放进 <code>/etc/m-ui/cert/restored/</code>,并改好设置里的路径。面板、订阅和代理面板的证书文件万一还是缺了,先用临时自签证书启动并告警,不会起不来。</span></li>
+      <li>确认后 m-ui 自动重启,替换数据库和证书。<span data-pending="backup-certs">设置和证书库里引用的数据目录外的证书文件(比如 <b data-k="cert.srcExternal">已有证书</b>、从旧面板导入的证书路径):这台机器原路径上有能用的同一张(同样的域名、不比备份里的旧)就接着用它;没有才把备份里那份放进 <code>/etc/m-ui/cert/restored/</code>,并把设置和证书库改指过去。面板、订阅和代理面板的证书文件万一还是缺了,先用临时自签证书启动并告警,不会起不来。</span></li>
       <li>原来的库保留为 <code>.bak-*</code> 文件,只留最近两份:连着还原几次,最早那份会被删掉。拿不准该用哪份备份时,先点 <b data-k="bk.now">立即备份</b> 把当前的库下载下来再试。</li>
     </ol>
     <ul>
@@ -934,7 +934,7 @@
     </ol>
     <div class="pit"><b>常见坑</b><ul>
       <li>订阅地址里是 IP(没给订阅配域名)时,换机后订阅地址和主机上的节点地址都会变成新机的 IP,第 3 步也用不上。最好先给订阅配一个域名、把新地址发给用户一次再换机;只能换机后再把新地址发给所有用户的,旧机要一直开到大部分人换好,这期间照下面两条做。</li>
-      <li>有副机、旧机又要多开一阵的,还原之前先到每台副机 <b data-k="nav.settings">设置</b> → <b data-k="set.pairing">配对信息</b> 点 <b data-k="set.rotateToken">更换令牌</b>,新机还原好后把新令牌填进新主机 <b data-k="nav.nodes">服务器</b> 页那一行(<b data-k="common.edit">编辑</b> → <b data-k="node.token">配对令牌</b>),旧主机拿着旧令牌就推不动副机了。不换的话,两台同时运行期间旧主机上一有自动发生的改动(用户到期或超量被自动停用、周期重置),它就把过期的配置推给副机,新主机上新建、续费的用户在副机上就连不上了。</li>
+      <li>有副机、旧机又要多开一阵的,还原之前先到每台副机 <b data-k="nav.settings">设置</b> → <b data-k="set.pairing">配对信息</b> 点 <b data-k="set.rotateToken">更换令牌</b>,新机还原好后把各台的新令牌填进新主机 <b data-k="nav.nodes">服务器</b> 页对应的那一行(<b data-k="common.edit">编辑</b> → <b data-k="node.token">配对令牌</b>),旧主机拿着旧令牌就推不动副机了。不换的话,两台同时运行期间旧主机上一有自动发生的改动(用户到期或超量被自动停用、周期重置),它就把过期的配置推给副机,新主机上新建、续费的用户在副机上就连不上了。</li>
       <li>旧机要多开一阵的,在旧机 <b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b> 取消 <b data-k="set.tgEnabled">启用 Telegram 通知</b>:两台是同一个机器人,一起跑会互相顶掉,发给机器人的命令可能落到旧机上、改的是旧数据,通知也会收到两份。</li>
       <li>新机的安全组和防火墙要放行和旧机一样的端口:面板、订阅、代理面板、每条线路(Hysteria2、TUIC 和端口跳跃的范围要放 UDP)。</li>
       <li>WARP 是装在系统里的,不在备份里:线路上游用了 warp 的,先在新机 <b data-k="nav.ops">运维</b> 页安装并启用 WARP(端口和旧机一样)。</li>
