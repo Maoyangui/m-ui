@@ -725,7 +725,6 @@ const EN = /*BEGIN*/{
 "本机还没钉住主机的签名公钥(没收到主机的容灾状态),不收整库数据:等主机推送一轮以后再试": "This server has not pinned the master's signing key yet (it has not received the failover state) and does not accept the full data: try again after the master's next push",
 "数据来自纪元 %d,本机在纪元 %d": "The data comes from epoch %d, this server is at epoch %d",
 "证书文件里没有证书": "The certificate file contains no certificate",
-"纪元已到上限": "The epoch has reached its limit",
 "订阅域名只填一个具体的域名(如 sub.example.com),不带 http://、端口和路径;用 IP 的留空": "Enter one specific domain as the subscription domain (such as sub.example.com), without http://, port or path; leave it empty to use the IP",
 "只能是 http:// 或 https:// 地址": "Must be an http:// or https:// address",
 "缺主机名": "The host name is missing",
