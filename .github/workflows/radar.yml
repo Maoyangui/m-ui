@@ -28,21 +28,6 @@ jobs:
           name: radar-${{ github.run_id }}
           path: radar.json
           retention-days: 90
+      # 摘要只按 radar.mjs 当前的输出取值,缺字段写"未知"、读不到文件也只写进摘要,这一步不会让工作流失败
       - name: Summary
-        run: |
-          node -e '
-            const r = require("./radar.json");
-            const lines = [];
-            lines.push("## m-ui radar · " + r.generated, "");
-            lines.push("### awesome-selfhosted", "", `- eligible from **${r.awesomeSelfhosted.eligibleFrom}** (${r.awesomeSelfhosted.rule}) → ${r.awesomeSelfhosted.eligible ? "**eligible now — submit a PR**" : "not yet"}`, "");
-            lines.push("### Summary", "", `- auto (PR-able now): ${r.summary.auto.join(", ") || "none"}`, `- blocked: ${r.summary.blocked.length}`, `- prohibited: ${r.summary.prohibited.length}`, `- done: ${r.summary.done.join(", ") || "none"}`, "");
-            for (const x of r.summary.blocked) lines.push(`  - blocked: ${x}`);
-            for (const x of r.summary.prohibited) lines.push(`  - prohibited: ${x}`);
-            lines.push("", "### Lists (maintained, ≥20★)", "", "| repo | ★ | pushed | category | reason |", "|---|---|---|---|---|");
-            for (const l of r.lists) lines.push(`| [${l.repo}](${l.url}) | ${l.stars} | ${l.pushed} | ${l.category} | ${l.reason} |`);
-            lines.push("", "### Mentions", "", `- repositories: ${r.mentions.repositories.length}`, `- issues / discussions: ${r.mentions.issuesAndDiscussions.length}`, `- code: ${r.mentions.code.length}`, "");
-            for (const m of r.mentions.repositories) lines.push(`- repo: [${m.repo}](${m.url}) (${m.stars}★)`);
-            for (const m of r.mentions.issuesAndDiscussions) lines.push(`- thread: [${m.title}](${m.url}) · ${m.updated}`);
-            for (const m of r.mentions.code) lines.push(`- code: [${m.repo} · ${m.path}](${m.url})`);
-            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
-          '
+        run: node site/tools/radar-summary.mjs radar.json >> "$GITHUB_STEP_SUMMARY"
