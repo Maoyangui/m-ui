@@ -207,6 +207,27 @@ test('换套餐:提交时 409 needs_force 给面板用户看得懂的提示,按�
   assert.deepEqual(sent(be.submits()[1].body), { planId: 2, mode: 'replace', periods: 1, usage: 'auto', force: true });
 });
 
+test('换套餐:预览已经要「仍然执行」、没勾就点确认:提示先勾选(不说「情况有变」),不发请求;勾了再提交', async () => {
+  const { be, A } = await setup();
+  A['user.change']('1');
+  await flush();
+  be.previews[0].resolve(result(true));
+  await flush();
+  assert.equal($('pc-force-wrap').hidden, false);
+  be.submit = async (b) => {
+    if (!b.force) throw Object.assign(new Error('这次变更有需要确认的影响(见 warnings),确认后带 force: true 重试'), { status: 409, data: { code: 'needs_force', preview: result(true), warnings: [] } });
+    return { ...result(true), dryRun: false };
+  };
+  await assert.rejects(save(), (e) => e.message === 'pc.err.tickForce');
+  assert.equal(be.submits().length, 0, '没勾就不发请求');
+  assert.equal($('pc-force-wrap').hidden, false, '勾选框还在');
+  $('pc-force').checked = true;
+  await save();
+  assert.equal(be.submits().length, 1);
+  assert.equal(be.submits()[0].body.force, true);
+  assert.deepEqual(globalThis.__toasts.at(-1), ['ok', 'pc.done']);
+});
+
 test('换套餐:409 idempotency_conflict 说明上一次提交其实已经生效,并刷新列表', async () => {
   const { be, A } = await setup();
   A['user.change']('1');

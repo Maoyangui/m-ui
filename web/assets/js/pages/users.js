@@ -590,10 +590,12 @@ function changeDialog(id) {
     <div class="pc-preview" id="pc-preview"><p class="muted small">${t('common.loading')}</p></div>
     <div id="pc-force-wrap" hidden>${check('pc-force', t('pc.force'), false)}</div>`, async () => {
     if (!shown) throw new Error(t('pc.previewPending')); // 等预览时按钮是禁用的;openModal 出错后会把它重新点亮,这里再拦一道
-    const sent = shown, at = seq, wrap = el('pc-force-wrap');
+    const sent = shown, at = seq, wrap = el('pc-force-wrap'), needForce = !!(wrap && !wrap.hidden);
+    // 预览已经说了要确认、用户还没勾:直接让他先勾,不发请求(发了服务端也是 409 needs_force,提示成「情况有变」会误导)
+    if (needForce && !fchk('pc-force')) throw new Error(t('pc.err.tickForce'));
     let res;
     try {
-      res = await post(`users/${id}/change`, { ...sent, remark: fv('pc-remark').trim(), force: !!(wrap && !wrap.hidden && fchk('pc-force')), requestId });
+      res = await post(`users/${id}/change`, { ...sent, remark: fv('pc-remark').trim(), force: needForce, requestId });
     } catch (e) {
       const code = e.data && e.data.code;
       if (code === 'needs_force' && e.data.preview) {
