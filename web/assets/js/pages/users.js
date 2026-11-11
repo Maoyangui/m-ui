@@ -70,9 +70,11 @@ export async function render(el) {
     planFilter = 0;
     query = hp.get('q') || '';
     page = 1;
+    selected.clear(); // 换成了另一份列表:以前勾的人不能悄悄带进下一次批量操作
     const hit = query ? state.users.filter(u => u.name === query) : [];
     if (hit.length === 1) openId = hit[0].id;
   }
+  if (planFilter && !state.plans.some(p => p.id === planFilter)) planFilter = 0; // 筛着的套餐删掉了:下拉显示「全部套餐」,列表也别再按它筛
   el.innerHTML = `
     <div class="toolbar">
       <input type="search" id="user-q" placeholder="${t('common.search')}…" value="${esc(query)}">
@@ -125,10 +127,15 @@ function statusBadge(u) {
   if (lim.length) return badge(t('user.limited') + ' · ' + lim.map(s => s.ruleName).join(' / '), 'warn');
   return badge(t('common.enabled'), 'ok');
 }
+// 批量操作已经生效之后的刷新:在后台跑,失败只提示「已生效、列表没刷新」
+function refreshAfterBatch() {
+  renderRows();
+  load('users', 'lines', 'status').then(() => renderRows(), e => toast(t('user.batchRefreshFail', { err: e.message }), 'warn'));
+}
 // 用户所属套餐的名字(套餐删了或没归入就是空)
 const planNameOf = u => { const p = u.planId && state.plans.find(x => x.id === u.planId); return p ? p.name : ''; };
-// 套餐页点人数跳过来:按套餐名搜
-export function showUsersOfPlan(name) { query = name; filter = 'all'; page = 1; }
+// 套餐页点人数跳过来:按套餐筛(和套餐页的人数一致;以前按名字搜,「月付」会搜出「月付Plus」的人),其它筛选和已选都复位
+export function showUsersOfPlan(id) { query = ''; filter = 'all'; only = ''; planFilter = id; page = 1; selected.clear(); }
 
 function expiryCell(u) {
   if (u.activateDays) return `<span class="muted">${t('user.activateIn', { n: u.activateDays })}</span>`;
@@ -182,18 +189,20 @@ function renderRows() {
   const body = document.getElementById('users-body');
   if (!body) return;
   const online = new Set(state.onlines.users || []);
-  const total = visibleRows().length;
+  const vis = visibleRows(), total = vis.length;
   const rows = pageRows();
   document.getElementById('user-count').textContent = `${total} / ${state.users.length}`;
   setHTML('user-only', only ? `<span class="chip">${esc(t('user.filter.only', { what: only === 'expiring' ? t('user.filter.expiring', { d: expiringDays() }) : t('user.filter.quota', { p: quotaPct() }) }))} <button type="button" class="btn xs ghost" data-act="user.clearOnly" title="${esc(t('user.filter.clear'))}">✕</button></span>` : '');
   const bar = document.getElementById('batch-bar');
   bar.hidden = selected.size === 0;
   document.getElementById('batch-count').textContent = t('user.selected', { n: selected.size });
-  // 当前页全选了、筛选结果又不止一页:给一个"选中全部 N 个筛选结果"
+  // 当前页全选了、筛选结果又不止一页:给一个"选中全部 N 个筛选结果"(筛选结果里还有没勾上的才给)。
+  // 手机上表格没有表头、也就没有全选框:勾了任意一个就给,不用先把一页卡片逐个勾满
   const allBtn = document.getElementById('sel-all-filtered');
   if (allBtn) {
     const pageAll = rows.length > 0 && rows.every(u => selected.has(u.id));
-    allBtn.hidden = !(pageAll && total > rows.length && selected.size < total);
+    const mobile = typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches;
+    allBtn.hidden = !((pageAll || mobile) && total > rows.length && vis.some(u => !selected.has(u.id)));
     allBtn.textContent = t('user.selAllFiltered', { n: total });
   }
   const selAll = document.getElementById('sel-all');
@@ -438,7 +447,14 @@ function renewDialog(ids) {
         throw e;
       }
       replayed = !!(r && r.replayed);
-    } else await post('users/batch', { ids, action: 'plan', planId, mode, periods: periods() });
+    } else {
+      // 批量续费没有幂等键:提交成功就关弹窗,刷新失败只提示(以前刷新一失败弹窗还开着,再点「保存」会再续一遍)
+      await post('users/batch', { ids, action: 'plan', planId, mode, periods: periods() });
+      selected.clear();
+      toast(t('plan.applied'), 'ok');
+      refreshAfterBatch();
+      return;
+    }
     await load('users'); renderRows();
     if (drawerUser && ids.includes(drawerUser)) showDetail(drawerUser);
     toast(replayed ? t('pc.replayed') : t('plan.applied'), 'ok');
@@ -681,7 +697,8 @@ async function fullUpdate(u, patch) {
 registerActions({
   'user.filter': id => { filter = id; page = 1; document.querySelectorAll('#user-filter button').forEach(b => b.classList.toggle('active', b.dataset.id === id)); renderRows(); },
   'user.clearOnly': () => { only = ''; page = 1; renderRows(); },
-  'user.selAllFiltered': () => { visibleRows().forEach(u => selected.add(u.id)); renderRows(); },
+  // 选中 = 当前筛选结果的全部(替换,不并进以前勾的):按钮上写的是 N 个,批量操作的也就是这 N 个
+  'user.selAllFiltered': () => { selected.clear(); visibleRows().forEach(u => selected.add(u.id)); renderRows(); },
   'user.page': id => { page += id === 'next' ? 1 : -1; renderRows(); },
   'user.chartRange': async id => {
     drawerRange = Number(id);
@@ -729,20 +746,26 @@ registerActions({
   'user.batch': async action => {
     const ids = [...selected];
     if (!ids.length) return;
+    // 已选跨筛选保留(搜 alice 勾上、再搜 bob 勾上、一起停用):其中有当前列表里看不到的人时先说清楚
+    const vis = new Set(visibleRows().map(u => u.id));
+    const hidden = ids.filter(id => !vis.has(id)).length;
+    if (action === 'delete') {
+      if (!await confirm(t('user.batchDeleteConfirm', { n: ids.length }) + (hidden ? ' ' + t('user.batchHidden', { n: hidden }) : ''), { danger: true, okText: t('common.delete') })) return;
+    } else if (hidden && !await confirm(t('user.batchHiddenConfirm', { n: ids.length, hidden }))) return;
     if (action === 'plan') { renewDialog(ids); return; }
     if (action === 'extend') { // 输入天数用面板自己的弹窗(浏览器原生 prompt 在一些环境里被拦)
-      openModal(t('user.batch.extend') + ` (${ids.length})`, `<div class="form-grid">${field(t('user.batchDays'), '<input id="f-days" type="number" min="1" max="3650" value="30">')}</div>`, async () => {
-        const days = Math.floor(Number(fv('f-days')));
-        if (!(days > 0)) throw new Error(t('user.batchDays'));
+      openModal(t('user.batch.extend') + ` (${ids.length})`, `<div class="form-grid">${field(t('user.batchDays'), '<input id="f-days" type="number" min="1" max="3650" step="1" value="30">')}</div>`, async () => {
+        const days = Number(fv('f-days'));
+        if (!(Number.isInteger(days) && days >= 1 && days <= 3650)) throw new Error(t('user.batchDaysBad'));
         const r = await post('users/batch', { ids, action, days });
+        // 延期不是幂等的:提交成功就关弹窗,之后刷新失败只提示,不能让人在弹窗里再点一次「保存」又延一遍
         selected.clear();
-        await load('users', 'lines', 'status'); renderRows();
         toast(t('user.batchDone', { n: r.affected }), 'ok');
+        refreshAfterBatch();
       });
       return;
     }
     const days = 0;
-    if (action === 'delete' && !await confirm(t('user.batchDeleteConfirm', { n: ids.length }), { danger: true, okText: t('common.delete') })) return;
     try {
       const r = await post('users/batch', { ids, action, days });
       selected.clear();

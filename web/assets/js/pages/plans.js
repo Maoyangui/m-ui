@@ -107,7 +107,7 @@ registerActions({
   'plan.users': (id, _, e) => {
     if (e) e.preventDefault();
     const p = state.plans.find(x => x.id === Number(id));
-    if (p) { showUsersOfPlan(p.name); location.hash = '#/users'; }
+    if (p) { showUsersOfPlan(p.id); location.hash = '#/users'; }
   },
   'plan.del': async id => {
     const p = state.plans.find(x => x.id === Number(id));

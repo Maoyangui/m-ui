@@ -16,7 +16,7 @@ fs.mkdirSync(path.join(dir, 'pages'));
 fs.copyFileSync(src, path.join(dir, 'pages', 'users.js'));
 const stub = (name, body) => fs.writeFileSync(path.join(dir, name), body);
 stub('app.js', `export const state = globalThis.__state;
-export async function load(...what) { globalThis.__loads.push(what.join(',')); }
+export async function load(...what) { globalThis.__loads.push(what.join(',')); if (globalThis.__loadFail) throw new Error('load failed'); }
 export const isReseller = () => false;
 // 列表页从地址栏带进来的筛选(#/users?f=…):用例不带,给空的
 export const takeHashParams = () => new URLSearchParams(globalThis.__hash || '');`);
@@ -38,7 +38,7 @@ export const gbValue = (b) => b / 1073741824; export const gbBytes = (g) => g * 
 export const fmtBytes = (n) => String(n) + 'B'; export const fmtDay = (n) => 'D' + n; export const fmtDate = (n) => 'T' + n;
 export const fmtDuration = (n) => n + 's'; export const fmtRelative = () => 'x'; export const daysLeft = () => 10;
 export const toast = (m, k = '') => { globalThis.__toasts.push([k, m]); };
-export const confirm = async () => true;
+export const confirm = async (m) => { globalThis.__confirms.push(m); return globalThis.__confirmAns ?? true; };
 export const openModal = (title, html, onSave, opts) => { globalThis.__modal = { title, html, onSave, opts }; };
 export const closeModal = () => {}; export const openDrawer = () => {}; export const closeDrawer = () => {};
 export const registerActions = (a) => { globalThis.__actions = Object.assign(globalThis.__actions || {}, a); };
@@ -87,7 +87,7 @@ function backend() {
       be.previews.push({ body, resolve, reject });
       return pr;
     }
-    if (method === 'POST' && (/\/change$/.test(p) || /\/plan$/.test(p))) return be.submit(body);
+    if (method === 'POST' && (/\/change$/.test(p) || /\/plan$/.test(p) || p === 'users/batch')) return be.submit(body);
     if (method === 'GET') return Promise.resolve(be.onGet ? be.onGet(p) : []);
     return Promise.reject(new Error('404 ' + method + ' ' + p));
   };
@@ -102,6 +102,9 @@ async function setup() {
   els = {};
   globalThis.__toasts = [];
   globalThis.__loads = [];
+  globalThis.__confirms = [];
+  globalThis.__confirmAns = true;
+  globalThis.__loadFail = false;
   for (const k of Object.keys(globalThis.__state)) delete globalThis.__state[k];
   Object.assign(globalThis.__state, {
     users: [{ id: 1, name: 'alice', planId: 1, enabled: true, up: 0, down: 0, volume: 10, expiry: 100 }],
@@ -346,4 +349,73 @@ test('「更多」菜单:Clash / 链接 / sing-box 订阅各复制对应格式�
   globalThis.__copied = [];
   for (const fmt of ['clash', 'link', 'json']) await A['user.copy']('1', { dataset: { fmt } });
   assert.deepEqual(globalThis.__copied, [links.clash, links.link, links.json]);
+});
+
+// ---- 批量操作与「选中全部 N 个筛选结果」 ----
+const plain = (id, name, o = {}) => ({ id, name, planId: 1, enabled: true, up: 0, down: 0, volume: 0, expiry: 0, ...o });
+const batchPosts = (be) => be.calls.filter((c) => c.method === 'POST' && c.p === 'users/batch').map((c) => c.body);
+
+test('「选中全部 N 个筛选结果」替换已选,不并进换筛选之前勾的人', async () => {
+  const { be, A } = await setup();
+  globalThis.__state.users = [plain(1, 'alice'), plain(2, 'bob', { enabled: false }), plain(3, 'carol')];
+  be.submit = async () => ({ affected: 2 });
+  A['user.sel']('2', { checked: true }); // 全部里勾了停用的 bob
+  A['user.filter']('enabled'); // 换到「启用」:bob 不在列表里
+  A['user.selAllFiltered']();
+  await A['user.batch']('disable');
+  assert.deepEqual(globalThis.__confirms, [], '已选全在当前列表里,不用多问');
+  assert.deepEqual(batchPosts(be).map((b) => b.ids.slice().sort()), [[1, 3]]);
+});
+
+test('已选里有当前列表看不到的人:批量启停先确认,取消就不提交;删除的确认里写明', async () => {
+  const { be, A } = await setup();
+  globalThis.__state.users = [plain(1, 'alice'), plain(2, 'bob', { enabled: false })];
+  be.submit = async () => ({ affected: 2 });
+  A['user.sel']('2', { checked: true });
+  A['user.filter']('enabled');
+  A['user.sel']('1', { checked: true });
+  globalThis.__confirmAns = false;
+  await A['user.batch']('disable');
+  assert.equal(globalThis.__confirms.length, 1);
+  assert.match(globalThis.__confirms[0], /user\.batchHiddenConfirm\|n=2\|hidden=1/);
+  assert.equal(batchPosts(be).length, 0, '取消了就不提交');
+  await A['user.batch']('delete');
+  assert.match(globalThis.__confirms[1], /user\.batchDeleteConfirm\|n=2 user\.batchHidden\|n=1/);
+  globalThis.__confirmAns = true;
+  await A['user.batch']('enable');
+  assert.deepEqual(batchPosts(be).map((b) => b.ids.slice().sort()), [[1, 2]]);
+});
+
+test('批量延期:提交成功后刷新失败也关弹窗、只提交一次;天数要是 1–3650 的整数', async () => {
+  const { be, A } = await setup();
+  globalThis.__state.users = [plain(1, 'alice'), plain(2, 'bob')];
+  be.submit = async () => ({ affected: 2 });
+  A['user.sel']('1', { checked: true });
+  A['user.sel']('2', { checked: true });
+  await A['user.batch']('extend');
+  for (const bad of ['0', '5000', '2.5', '']) {
+    $('f-days').value = bad;
+    await assert.rejects(save(), /user\.batchDaysBad/, bad);
+  }
+  assert.equal(batchPosts(be).length, 0);
+  $('f-days').value = '30';
+  globalThis.__loadFail = true;
+  await save(); // 不抛错 = 弹窗关掉,不会再点一次「保存」又延一遍
+  await flush();
+  assert.deepEqual(batchPosts(be).map((b) => [b.action, b.days, b.ids.length]), [['extend', 30, 2]]);
+  assert.ok(globalThis.__toasts.some(([k, m]) => k === 'warn' && /user\.batchRefreshFail/.test(m)), JSON.stringify(globalThis.__toasts));
+});
+
+test('套餐页点人数:按套餐筛、复位其它筛选和已选;筛着的套餐删掉后不再按它筛', async () => {
+  const { A, mod } = await setup();
+  globalThis.__state.users = [plain(1, 'alice', { planId: 1 }), plain(2, 'bob', { planId: 2 }), plain(3, '月付Plus 的人', { planId: 2, remark: '月付' })];
+  A['user.sel']('3', { checked: true });
+  mod.showUsersOfPlan(1);
+  const host = { innerHTML: '' };
+  await mod.render(host);
+  assert.match(document.getElementById('user-count').textContent, /^1 \//, '只剩套餐 1 的 alice(以前按名字搜「月付」还会搜出备注里写了月付的人)');
+  assert.equal(document.getElementById('batch-bar').hidden, true, '已选清掉了');
+  globalThis.__state.plans = globalThis.__state.plans.filter((p) => p.id !== 1);
+  await mod.render(host);
+  assert.match(document.getElementById('user-count').textContent, /^3 \//, '套餐删了:不再按它筛');
 });
