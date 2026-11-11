@@ -147,7 +147,7 @@
       <li>双栈服务器在线路表单里还能按线路单独选 <b data-k="line.ipVersion">IP 版本</b>。</li>
       <li>想让订阅里写域名而不是 IP:<b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> → <b data-k="set.subServerAddr">订阅里的节点地址</b> 选 <b data-k="set.addrDomain">域名</b>。选之前先给每台服务器填好 <b data-k="node.domain">域名 / IP</b>(本机留空就用面板域名):这个模式下 <b data-k="node.addr">连接地址(可填 IP)</b> 不生效,没填域名的服务器不会出现在订阅里。</li>
     </ul>
-    <div class="tip" data-pending="v6"><b>IPv6 入站检测</b>服务器默认用 IPv6、或者有线路选了 IPv6 时,主机会从外面测它的 IPv6 端口能不能连进来,结果标在 <b data-k="nav.nodes">服务器</b> 页。显示不通,多半是安全组没放行 <code>::/0</code> 或者本机防火墙拦了 IPv6。UDP 线路(hysteria2、tuic)测不了,只能在服务器上抓包确认。</div>
+    <div class="tip"><b>IPv6 入站检测</b>订阅里这台有走 IPv6 的线路时(<b data-k="node.family">自动地址用</b> 选了 IPv6,或者有线路的 <b data-k="line.ipVersion">IP 版本</b> 选了 IPv6),主机在大陆连通检测的同一轮里,从境外有 IPv6 的测点连它订阅里的 IPv6 地址和第一条走 IPv6 的 TCP 线路的端口(每台约多用 4 个测点次),结果是 <b data-k="nav.nodes">服务器</b> 页 <b data-k="reach.col">大陆连通</b> 一列里的 v6 小格,点格子看明细。显示不通,多半是安全组没放行 <code>::/0</code> 或者本机防火墙拦了 IPv6。每台只测一个端口,别的端口要各自放行;UDP 线路(hysteria2、tuic)测不了,只能在服务器上抓包确认。</div>
     <div class="pit"><b>IPv6 常见坑</b><ul>
       <li>云服务器的 IPv6 要在安全组里给 <code>::/0</code> 单独放行(TCP、UDP 分开加);系统里的 ip6tables / ufw 也要放行,只清空 iptables 不会放开 IPv6。</li>
       <li>WARP、NAT 这类只能出站的 IPv6 不能给用户连。</li>
@@ -211,7 +211,7 @@
       <li>订阅地址不变:订阅的域名、端口、路径和证书跟着主机走,把订阅域名的 DNS 改指向新主机就行。订阅地址用的是 IP、或者迁过去的订阅端口和那台的面板 / 代理面板 / WARP 端口或线路端口相同时,那台继续用自己的订阅端口,订阅地址会变,确认框的 <b data-k="ha.sm.warn">注意</b> 里提前说。面板和代理面板用新主机自己的地址。</li>
       <li>订阅证书是 <b data-k="cert.srcExternal">已有证书</b>(由 certbot 等工具续期)、新主机上又没有同名证书的,带过去的是一份副本,新主机上没人续它:做完后就在新主机 <b data-k="nav.cert">证书</b> 页重新签发,或者在新主机装好 certbot 后重新添加。</li>
       <li>离线、停用、配置没同步上、版本太旧、磁盘不够(那台和本机都要够)、它连不上本机、本机作为副机的地址拼不出来时不能设为主机,卡片里写明原因。代理面板端口在那台被线路占着时,成为主机后代理面板起不来,也在 <b data-k="ha.sm.warn">注意</b> 里列出。</li>
-      <li>从打包数据到原主机重启之间(通常一两分钟)原主机自己线路上的流量,以及那台收到数据到重启之间它自己线路上的流量,不计入用户用量;其它副机线路上的流量照常补回。</li>
+      <li>设为主机不保证一字节流量都不漏:从打包数据到原主机重启之间(通常一两分钟)原主机自己线路上的流量,以及那台收到数据到重启之间它自己线路上的流量,不计入用户用量;其它副机线路上的流量照常补回。按流量计费卡得很紧的,挑用的人少的时候做。</li>
     </ul>
     <div class="pit"><b>常见坑</b><ul>
       <li>交接期间写操作暂停,通常一两分钟,最长按库的大小算(15–60 分钟),进度框和页面顶部写着截止时间:面板只读,外部 API、代理面板、Telegram 机器人、订阅页的临时共享返回 503,对接的程序要能重试。</li>
@@ -584,7 +584,7 @@
       <li>HTTP 验证每次续期都要临时占用 80 端口,有 TCP 线路占着 80 会续期失败。</li>
       <li>域名多出一条不指向本机的 AAAA(IPv6)记录会让验证失败:改成本机的地址,或者删掉它。</li>
       <li>Let's Encrypt 已经不发到期提醒邮件了:至少在主机上配好 Telegram 或 Webhook(见 <a href="#notify">通知</a>)。</li>
-      <li><b data-k="cert.srcExternal">已有证书</b> 由签发它的工具(如 certbot)续期,面板只读文件,剩 14 天起提醒。<span data-pending="backup-certs">换机还原时放进 <code>/etc/m-ui/cert/restored/</code> 的是副本,没有工具再续它,证书库里却照样显示 <b data-k="cert.rExternal">外部工具续期</b>:要自己重新签发或重新添加(见 <a href="#bk-restore">还原</a>)。</span></li>
+      <li><b data-k="cert.srcExternal">已有证书</b> 由签发它的工具(如 certbot)续期,面板只读文件,剩 14 天起提醒。换机还原时放进 <code>/etc/m-ui/cert/restored/</code> 的是备份那一刻的副本,没有工具再续它:证书库里标 <b data-k="cert.rRestored">还原的副本,没人续期</b>,剩 30 天起每天提醒,要自己重新签发或重新添加(见 <a href="#bk-restore">还原</a>)。</li>
     </ul></div>
   </section>
 
@@ -652,7 +652,7 @@
     <h3>续费、延期与换套餐</h3>
     <p class="lede">列表的 <b data-k="common.more">更多</b> 菜单(或用户详情)里,<b data-k="user.renewMenu">续费…</b> 和 <b data-k="user.changeMenu">换套餐…</b> 管续费、升级、降级。</p>
     <ul>
-      <li><b data-k="user.renewMenu">续费…</b>:先 <b data-k="plan.pick">选择套餐</b>(默认是他现在的套餐),再选方式:<b data-k="plan.renew">续费(清零流量并顺延)</b>、<b data-k="plan.extend">延期(保留已用流量)</b>,或 <b data-k="plan.bind" class="wrap">只归入这个套餐(流量与到期都不动)</b>。<b data-k="pc.periods">期数</b> 是一次续几期(1–120),月付套餐按季、按年卖就填 3、12;单个用户时,下面会实时显示到期和配额会变成多少。用套餐续费、延期是明确的开通动作,会把 <b data-k="user.reason.manual">手动</b> 停用的人也一并启用<span data-pending="backup-certs">(面板会先提示)</span>。</li>
+      <li><b data-k="user.renewMenu">续费…</b>:先 <b data-k="plan.pick">选择套餐</b>(默认是他现在的套餐),再选方式:<b data-k="plan.renew">续费(清零流量并顺延)</b>、<b data-k="plan.extend">延期(保留已用流量)</b>,或 <b data-k="plan.bind" class="wrap">只归入这个套餐(流量与到期都不动)</b>。<b data-k="pc.periods">期数</b> 是一次续几期(1–120),月付套餐按季、按年卖就填 3、12;单个用户时,下面会实时显示到期和配额会变成多少。用套餐续费、延期是明确的开通动作,会把 <b data-k="user.reason.manual">手动</b> 停用的人也一并启用(对话框里会先提示;选 <b data-k="plan.bind" class="wrap">只归入这个套餐(流量与到期都不动)</b> 不改启停)。</li>
       <li><b data-k="user.extend">延长 30 天</b>:有到期日的用户一键加 30 天(还没开始计时的"首次连接后 N 天"加到 N 上);因到期停用的会恢复,手动停用的仍停着。</li>
       <li><b data-k="user.changeMenu">换套餐…</b>:<b data-k="pc.target">换成</b> 选新套餐,<b data-k="pc.mode">方式</b> 三选一:
         <ul>
@@ -700,7 +700,7 @@
     <p class="lede">列表的状态一列写明为什么停用,也就决定了怎么恢复。</p>
     <ul>
       <li><b data-k="user.reason.quota">超量</b>、<b data-k="user.reason.expired">到期</b>:续费、重置流量或延长到期后自动恢复。</li>
-      <li><b data-k="user.reason.manual">手动</b>:手动停用的不会因为重置流量、延长到期或周期重置而自动恢复。但用套餐续费或延期(<b data-k="user.renewMenu">续费…</b>、批量 <b data-k="user.batch.plan">套用套餐</b>)和 <b data-k="user.changeMenu">换套餐…</b> 是明确的开通动作,会把他一并启用<span data-pending="backup-certs">:续费和批量套用套餐时,面板会先提示里面有手动停用的人、续费后会被启用</span>。外部 API 的续费、换套餐也一样会启用。</li>
+      <li><b data-k="user.reason.manual">手动</b>:手动停用的不会因为重置流量、延长到期或周期重置而自动恢复。但用套餐续费或延期(<b data-k="user.renewMenu">续费…</b>、批量 <b data-k="user.batch.plan">套用套餐</b>)和 <b data-k="user.changeMenu">换套餐…</b> 是明确的开通动作,会把他一并启用:续费、批量套用套餐和换套餐的对话框里会先提示里面有手动停用的人、做完会被启用,批量时列出是谁,不想启用的先取消勾选。外部 API 的续费、换套餐也一样会启用。</li>
       <li data-scope="admin"><b data-k="user.limited">限速中</b>:正被规则临时限速(见 <a href="#rules">规则</a>)。</li>
       <li><b data-k="user.kick">踢下线</b>:断开这个用户在所有服务器上的连接(hysteria2、TUIC、AnyTLS 整条会话一起关)。没停用的话客户端会马上重连,想彻底断就先停用。</li>
       <li>列表上方可以按 <b data-k="user.filter.all">全部</b>、<b data-k="user.filter.online">在线</b>、<b data-k="user.filter.enabled">启用</b>、<b data-k="user.filter.disabled">停用</b>、<b data-k="user.filter.expired">已过期</b>、<b data-k="user.filter.over">超量</b> 筛选,也可以只看某个套餐。在当前页全选后(手机上勾任意一个后),批量条上可以一键选中全部筛选结果,一起操作;这一下会换掉之前勾的人,只留当前的筛选结果。换筛选、换搜索之前勾的人会一直留着,批量操作时其中有当前列表里看不到的,会先问一句再处理。</li>
@@ -917,7 +917,7 @@
 <div class="part" data-title="维护">
 <section class="chap" id="backup" data-scope="admin">
   <h2>备份与迁移</h2>
-  <p class="lede">一个 zip 就是整个面板:数据库(线路、用户、流量、设置)加证书<span data-pending="backup-certs">,设置里引用的数据目录外的证书文件也在里面</span>。备份好它,换机、重装都能把数据原样恢复。</p>
+  <p class="lede">一个 zip 就是整个面板:数据库(线路、用户、流量、设置)加证书,设置和证书库里引用的数据目录外的证书文件(比如 certbot 签的)也在里面。备份好它,换机、重装都能把数据原样恢复。</p>
 
   <section class="sec" id="bk-now">
     <h3>备份</h3>
@@ -933,15 +933,16 @@
     <h3>还原</h3>
     <ol class="steps">
       <li><b data-k="nav.backup">备份</b> 页 → <b data-k="bk.restore">还原</b>:选备份文件(zip 或 .db),点 <b data-k="bk.restoreBtn">还原</b>。</li>
-      <li>确认后 m-ui 自动重启,替换数据库和证书。<span data-pending="backup-certs">设置和证书库里引用的数据目录外的证书文件(比如 <b data-k="cert.srcExternal">已有证书</b>、从旧面板导入的证书路径):这台机器原路径上有能用的同一张(同样的域名、不比备份里的旧)就接着用它;没有才把备份里那份放进 <code>/etc/m-ui/cert/restored/</code>,并把设置和证书库改指过去。面板、订阅和代理面板的证书文件万一还是缺了,先用临时自签证书启动并告警,不会起不来。</span></li>
+      <li>确认后 m-ui 自动重启,替换数据库和证书。设置和证书库里引用的数据目录外的证书文件(比如 <b data-k="cert.srcExternal">已有证书</b>、从旧面板导入的证书路径)不往原路径写:这台机器原路径上的证书能接着用(现在有效、包含备份里那张的全部域名、和私钥配得上,而且不比备份里的旧或者还剩两周以上)就接着用它;不能用才把备份里那份放进 <code>/etc/m-ui/cert/restored/</code>,并把设置和证书库改指过去。还原结果在页面顶部提示一次。面板、订阅和代理面板的证书文件万一还是缺了,先用临时自签证书启动(仍走 HTTPS)并告警,不会起不来。</li>
       <li>原来的库保留为 <code>.bak-*</code> 文件,只留最近两份:连着还原几次,最早那份会被删掉。拿不准该用哪份备份时,先点 <b data-k="bk.now">立即备份</b> 把当前的库下载下来再试。</li>
     </ol>
     <ul>
       <li>新机器可以在安装时一步装好并还原(命令见下面的 <a href="#bk-migrate">换服务器</a>)。</li>
       <li>服务停着时也能用命令行还原:<code>m-ui restore -db /etc/m-ui/m-ui.db -from 备份.zip</code>。</li>
     </ul>
-    <div class="pit" data-pending="backup-certs"><b>常见坑</b><ul>
-      <li>放进 <code>/etc/m-ui/cert/restored/</code> 的是备份那一刻的副本:原来由 certbot、宝塔等工具续期的,以后没人再续它,证书库里却照样显示 <b data-k="cert.rExternal">外部工具续期</b>。还原后就到证书页重新签发,或者在这台装好 certbot 后重新用 <b data-k="cert.srcExternal">已有证书</b> 指过去,别等剩 14 天的到期提醒。</li>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>放进 <code>/etc/m-ui/cert/restored/</code> 的是备份那一刻的副本:原来由 certbot、宝塔等工具续期的,以后没人再续它,证书库里标 <b data-k="cert.rRestored">还原的副本,没人续期</b>。还原后就到证书页重新签发,或者在这台装好 certbot 后重新用 <b data-k="cert.srcExternal">已有证书</b> 添加,再换过去,别等剩 30 天的到期提醒。</li>
+      <li>把主机的备份还原到另一台机器并启动,这台就成了主机:它以更高的纪元接管全部副机,原主机之后再起来会自动变为副机(没开过主机容灾也一样,见 <a href="#ha-restore">备份、还原与换机</a>)。只想看看备份里有什么,别在联网的机器上还原并启动它。</li>
       <li>顶着临时自签证书期间,客户端更新订阅会报证书错误,浏览器打开面板、代理面板也会提示不安全:照页面顶部的证书提醒把证书补上,或者换一张。</li>
     </ul></div>
   </section>
@@ -962,7 +963,7 @@
       <li>旧机要多开一阵的,在旧机 <b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b> 取消 <b data-k="set.tgEnabled">启用 Telegram 通知</b>:两台是同一个机器人,一起跑会互相顶掉,发给机器人的命令可能落到旧机上、改的是旧数据,通知也会收到两份。</li>
       <li>新机的安全组和防火墙要放行和旧机一样的端口:面板、订阅、代理面板、每条线路(Hysteria2、TUIC 和端口跳跃的范围要放 UDP)。</li>
       <li>WARP 是装在系统里的,不在备份里:线路上游用了 warp 的,先在新机 <b data-k="nav.ops">运维</b> 页安装并启用 WARP(端口和旧机一样)。</li>
-      <li data-pending="backup-certs">原来用 <b data-k="cert.srcExternal">已有证书</b> 接 certbot、宝塔等工具的,新机上没有这些工具,还原出来的是一份不会再续期的副本(见 <a href="#bk-restore">还原</a>):换机后就在新机证书页重新签发,或者在新机装好 certbot 后重新添加。</li>
+      <li>原来用 <b data-k="cert.srcExternal">已有证书</b> 接 certbot、宝塔等工具的,新机上没有这些工具,还原出来的是一份不会再续期的副本(见 <a href="#bk-restore">还原</a>):换机后就在新机证书页重新签发,或者在新机装好 certbot 后重新添加。</li>
       <li>副机的面板端口只对旧主机 IP 放行的,先把新主机的 IP 加进去,不然新主机连不上副机。</li>
       <li>两台同时运行期间,旧面板上除了关掉 Telegram 通知,别的都不要改;同时运行的时间越短越好。</li>
     </ul></div>
@@ -1078,8 +1079,8 @@
       <li>记录的是通过了协议握手和认证的连接,带用户、线路、服务器、次数和最近时间。</li>
       <li>被设备数上限或代理设备池拒绝的连接也会列出来:整行标红、带 <b data-k="dash.conn.rejected">被拒</b> 徽章,鼠标停在徽章上看是 <b data-k="dash.rejectedDevice">设备数超限被拒</b> 还是 <b data-k="dash.rejectedPool">代理设备池已满被拒</b>。</li>
       <li>默认列最近 10 条,点「显示全部」在卡片里展开(可以按 IP、用户、线路筛选);上方的筛选切换连接、被拒和握手失败。</li>
-      <li data-pending="v6">握手或认证失败的连接(证书、密码、SNI 不对)在「握手失败」筛选里,写明失败原因;版本较旧的副机不上报这一项,概况会写明是哪几台。</li>
-      <li>列表里没有某个 IP,多半是包没到服务器(安全组、防火墙、客户端网络)。要确认包到没到:TCP 线路可以到日志页把 <b data-k="logs.coreLevel">数据面级别</b> 临时调到 info,看有没有 <code>inbound connection from</code>。Hysteria2、TUIC 这类 UDP 线路只有握手和认证都成功后才记这一行(密码、SNI 不对时什么也不记),看不到不代表包没到,要在服务器上抓包确认,比如 <code>tcpdump -ni any udp port 端口</code>。</li>
+      <li>包到了、却没过握手或认证的来源(证书、SNI、REALITY 公钥 / short_id、密码 / UUID 不对)在「握手失败」筛选里,分 <b data-k="dash.fail.tls">TLS 握手失败</b> 和 <b data-k="dash.fail.auth">认证失败</b>,写明原因;hysteria2、tuic 只记认证失败。版本较旧的副机不上报这一项,卡片里写明是哪几台。</li>
+      <li>列表里没有某个 IP,多半是包没到服务器(安全组、防火墙、客户端网络)。要确认包到没到:TCP 线路可以到日志页把 <b data-k="logs.coreLevel">数据面级别</b> 临时调到 info,看有没有 <code>inbound connection from</code>。Hysteria2、TUIC 这类 UDP 线路只有握手和认证都成功后才记这一行(证书、SNI 不对时哪里都不记,密码不对的只在「握手失败」里),看不到不代表包没到,要在服务器上抓包确认,比如 <code>tcpdump -ni any udp port 端口</code>。</li>
     </ul>
   </section>
 
@@ -1272,7 +1273,7 @@
       <dt>提示设备数超限 / 有的设备连不上?</dt>
       <dd>同时在线的设备(按来源 IP 算,所有服务器合计)到了上限,新设备会被拒绝。等别的设备下线约 1 分钟,或者调高设备数。手机切换 WiFi 和流量会换 IP,短时间内可能算两台。</dd>
       <dt data-scope="admin">IPv6 的节点不通?</dt>
-      <dd data-scope="admin">多半是云安全组没给 <code>::/0</code> 放行(TCP、UDP 分开加),或者系统的 ip6tables / ufw 拦着;再确认用户自己的网络有 IPv6。WARP、NAT 之类只能出站的 IPv6 不能给用户连。<span data-pending="v6">服务器页的 IPv6 入站检测能直接告诉你通不通。</span></dd>
+      <dd data-scope="admin">多半是云安全组没给 <code>::/0</code> 放行(TCP、UDP 分开加),或者系统的 ip6tables / ufw 拦着;再确认用户自己的网络有 IPv6。WARP、NAT 之类只能出站的 IPv6 不能给用户连。服务器页的 IPv6 入站检测能直接告诉你通不通(见 <a href="#nodes-addr">连接地址与 IPv4 / IPv6</a>)。</dd>
       <dt data-scope="admin">某个地区突然全连不上?</dt>
       <dd data-scope="admin">到 <b data-k="nav.nodes">服务器</b> 页点 <b data-k="reach.checkAll">检测大陆连通</b>:<b data-k="reach.v.ipBlocked">IP 被墙</b> 要换 IP,<b data-k="reach.v.portBlocked">端口被封</b> 换个端口就行。</dd>
     </dl>
