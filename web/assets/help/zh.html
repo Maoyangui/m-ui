@@ -638,7 +638,7 @@
         </ul></li>
       <li><b data-k="pc.usage">本周期用量</b>:<b data-k="pc.usage.auto">自动</b>(立即替换和折算清零,叠加保留)、<b data-k="pc.usage.keep">保留(接着算)</b>、<b data-k="pc.usage.reset">清零(从新周期开始)</b>。</li>
       <li>对话框下方实时预览 <b data-k="pc.before">变更前</b> 和 <b data-k="pc.after">变更后</b>,标出 <b data-k="pc.dir.upgrade">升级</b> 还是 <b data-k="pc.dir.downgrade">降级</b>。到期提前、马上超量这类会让用户吃亏的影响标红,要勾 <b data-k="pc.force" class="wrap">我已确认上面标红的影响,仍然执行</b> 才能 <b data-k="pc.confirm">确认换套餐</b>。</li>
-      <li>每次打开对话框都带一个防重复的编号:双击、网络重试都只会执行一次。</li>
+      <li>只选一个用户时,<b data-k="user.renewMenu">续费…</b> 和 <b data-k="user.changeMenu">换套餐…</b> 的对话框每次打开都带一个防重复的编号:双击、网络重试都只会执行一次。勾了多个用户再批量 <b data-k="user.batch.plan">套用套餐</b> 时没有这层保护:中途报错,已经续上的人不会撤回;重试前先看列表里的到期日(或者详情里的 <b data-k="pc.history">套餐记录</b>),把已经续上的人去掉再选。</li>
       <li>详情里的 <b data-k="pc.history">套餐记录</b> 能看到最近的续费和换套餐。</li>
     </ul>
     <div class="tip"><b>接商城</b>续费、换套餐也能用外部 API 做,而且可以先预览再执行(见 <a href="#api">外部 API</a>)。</div>

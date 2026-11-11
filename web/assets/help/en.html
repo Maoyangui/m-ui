@@ -638,7 +638,7 @@
         </ul></li>
       <li><b data-k="pc.usage">This period's usage</b>: <b data-k="pc.usage.auto">Auto</b> (reset for replace and prorate, kept for stack), <b data-k="pc.usage.keep">Keep (carry on)</b> or <b data-k="pc.usage.reset">Reset (new period)</b>.</li>
       <li>The dialog previews <b data-k="pc.before">Before</b> and <b data-k="pc.after">After</b> live and marks it as an <b data-k="pc.dir.upgrade">upgrade</b> or a <b data-k="pc.dir.downgrade">downgrade</b>. Effects that hurt the user, such as an earlier expiry or going over quota at once, are shown in red, and you must tick <b data-k="pc.force" class="wrap">I have read the effects marked in red, proceed anyway</b> before <b data-k="pc.confirm">Change plan</b> works.</li>
-      <li>Every time the dialog opens it gets its own duplicate-protection id, so a double click or a network retry only runs once.</li>
+      <li>With a single user, the <b data-k="user.renewMenu">Renew…</b> and <b data-k="user.changeMenu">Change plan…</b> dialogs get their own duplicate-protection id each time they open, so a double click or a network retry only runs once. Batch <b data-k="user.batch.plan">Apply plan</b> on several selected users has no such protection: if it stops with an error partway, the users already renewed stay renewed; before retrying, check their expiry in the list (or <b data-k="pc.history">Plan history</b> in the details) and leave out those already done.</li>
       <li><b data-k="pc.history">Plan history</b> in the details lists recent renewals and plan changes.</li>
     </ul>
     <div class="tip"><b>Connecting a shop</b>Renewals and plan changes are also available through the external API, with a preview before you commit (see <a href="#api">External API</a>).</div>
