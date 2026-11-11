@@ -24,7 +24,8 @@ export const put = (p, b, o) => globalThis.__api('PUT', p, b);
 export const del = (p, o) => globalThis.__api('DELETE', p);
 export const qrUrl = () => '';
 export const upload = async () => ({});`);
-stub('i18n.js', `export const t = (k) => k;`);
+// 带参数的文案把参数拼在后面(k|名=值|…),用例能看出传了什么
+stub('i18n.js', `export const t = (k, p) => p && Object.keys(p).length ? k + '|' + Object.entries(p).map(([a, b]) => a + '=' + b).join('|') : k;`);
 stub('chart.js', `export const barChart = () => ''; export const bucketFor = () => 3600;`);
 stub('linepicker.js', `export const lineItems = () => []; export const keysFromRefs = () => []; export const refLabels = () => [];
 export const linePicker = () => ({ read: () => [] });`);
@@ -36,7 +37,7 @@ export const fmtBytes = (n) => String(n) + 'B'; export const fmtDay = (n) => 'D'
 export const fmtDuration = (n) => n + 's'; export const fmtRelative = () => 'x'; export const daysLeft = () => 10;
 export const toast = (m, k = '') => { globalThis.__toasts.push([k, m]); };
 export const confirm = async () => true;
-export const openModal = (title, html, onSave, opts) => { globalThis.__modal = { title, onSave, opts }; };
+export const openModal = (title, html, onSave, opts) => { globalThis.__modal = { title, html, onSave, opts }; };
 export const closeModal = () => {}; export const openDrawer = () => {}; export const closeDrawer = () => {};
 export const registerActions = (a) => { globalThis.__actions = Object.assign(globalThis.__actions || {}, a); };
 export const badge = (s) => String(s); export const dot = () => ''; export const progress = () => '';
@@ -220,6 +221,88 @@ test('续费:409 idempotency_conflict 同样给面板用户看得懂的提示', 
   be.submit = async () => { throw Object.assign(new Error('requestId 已用于另一笔不同的请求'), { status: 409, data: { code: 'idempotency_conflict' } }); };
   await assert.rejects(save(), (e) => e.message === 'pc.err.idemConflict');
   assert.ok(globalThis.__loads.includes('users'));
+});
+
+// 套用套餐(续费 / 延期 / 换套餐)一律会启用手动停用的用户(外部 API 也一样,计费系统依赖这个行为),
+// 而「延长 30 天」、批量延期、重置流量都不会:执行前要在对话框里说清楚,免得月底批量续费把封掉的人放回来。
+const manualOff = (o = {}) => ({ planId: 1, enabled: false, disabledReason: 'manual', up: 0, down: 0, volume: 10, expiry: 100, ...o });
+
+test('续费:手动停用的用户,对话框里明说续费后会被启用;只归入套餐不改启停,不提示', async () => {
+  const { A } = await setup();
+  Object.assign(globalThis.__state.users[0], manualOff());
+  Object.assign($('f-plan'), { value: '1' });
+  Object.assign($('f-mode'), { value: 'renew' });
+  Object.assign($('f-periods'), { value: '1' });
+  A['user.renew']('1');
+  await flush();
+  assert.match(globalThis.__modal.html, /user\.manualRenew/, '要有手动停用的提示');
+  assert.equal($('rn-manual').hidden, false);
+  $('f-mode').value = 'bind';
+  $('f-mode').fire('change');
+  assert.equal($('rn-manual').hidden, true, '只归入套餐不改启停,不该提示');
+  $('f-mode').value = 'extend';
+  $('f-mode').fire('change');
+  assert.equal($('rn-manual').hidden, false, '延期(保留已用流量)同样会启用');
+});
+
+test('续费:超量、到期停用的和启用中的用户不提示', async () => {
+  for (const u of [{ enabled: true }, manualOff({ disabledReason: 'quota' }), manualOff({ disabledReason: 'expired' })]) {
+    const { A } = await setup();
+    Object.assign(globalThis.__state.users[0], u);
+    Object.assign($('f-plan'), { value: '1' });
+    Object.assign($('f-mode'), { value: 'renew' });
+    A['user.renew']('1');
+    await flush();
+    assert.doesNotMatch(globalThis.__modal.html, /user\.manual/, JSON.stringify(u));
+  }
+});
+
+test('批量套用套餐:选中的人里有手动停用的,确认框里列出人数和名字', async () => {
+  const { A } = await setup();
+  globalThis.__state.users = [
+    { id: 1, name: 'alice', planId: 1, enabled: true, up: 0, down: 0, volume: 10, expiry: 100 },
+    manualOff({ id: 2, name: 'bob' }),
+    manualOff({ id: 3, name: 'carol', disabledReason: 'quota' }),
+    manualOff({ id: 4, name: 'dave' }),
+  ];
+  for (const id of ['1', '2', '3', '4']) A['user.sel'](id, { checked: true });
+  Object.assign($('f-plan'), { value: '1' });
+  Object.assign($('f-mode'), { value: 'renew' });
+  await A['user.batch']('plan');
+  await flush();
+  const html = globalThis.__modal.html;
+  assert.match(html, /user\.manualBatch\|n=2\|/, '要列出人数');
+  assert.match(html, /bob/);
+  assert.match(html, /dave/);
+  assert.doesNotMatch(html, /carol/, '超量停用的不算');
+  $('f-mode').value = 'bind';
+  $('f-mode').fire('change');
+  assert.equal($('rn-manual').hidden, true);
+});
+
+test('批量套用套餐:选中的人里没有手动停用的,不提示', async () => {
+  const { A } = await setup();
+  globalThis.__state.users = [
+    { id: 1, name: 'alice', planId: 1, enabled: true, up: 0, down: 0, volume: 10, expiry: 100 },
+    manualOff({ id: 3, name: 'carol', disabledReason: 'expired' }),
+  ];
+  for (const id of ['1', '3']) A['user.sel'](id, { checked: true });
+  await A['user.batch']('plan');
+  await flush();
+  assert.doesNotMatch(globalThis.__modal.html, /user\.manual/);
+});
+
+test('换套餐:手动停用的用户,对话框里明说执行后会被启用,预览里不再重复一遍', async () => {
+  const { be, A } = await setup();
+  Object.assign(globalThis.__state.users[0], manualOff());
+  A['user.change']('1');
+  await flush();
+  assert.match(globalThis.__modal.html, /user\.manualChange/, '要有手动停用的提示');
+  be.previews[0].resolve(result(false, { warnings: [{ code: 'enables_manual', text: '这个用户是手动停用的,执行后会被启用', args: null, block: false }, { code: 'volume_lower', text: '配额变少', args: { from: 2, to: 1 }, block: false }] }));
+  await flush();
+  const pv = $('pc-preview').innerHTML;
+  assert.doesNotMatch(pv, /enables_manual|执行后会被启用/, '上面已经说了,预览的影响列表里不再重复');
+  assert.match(pv, /pc\.w\.volume_lower/, '其它影响照常列出');
 });
 
 // 真实的 ui.js:换套餐对话框在等预览时禁用了提交按钮,用户这时关掉对话框,下一个对话框的提交按钮不能还禁用着。

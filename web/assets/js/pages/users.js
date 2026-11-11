@@ -353,18 +353,31 @@ const expiryText = s => s.activateDays ? t('user.activateIn', { n: s.activateDay
 const volText = s => s.volume ? fmtBytes(s.volume, 0) : t('common.unlimited');
 const durText = sec => sec >= 86400 ? `${+(sec / 86400).toFixed(2)} ${t('common.day')}` : fmtDuration(sec);
 
+// 套用套餐(续费 / 延期 / 换套餐)一律会启用手动停用的用户,外部 API 也一样(计费系统依赖这个行为,不改);
+// 而「延长 30 天」、批量延期、重置流量都不会。执行前在对话框里说清楚,免得月底批量续费把封掉的人放回来。
+const manualOff = u => !!u && !u.enabled && u.disabledReason === 'manual';
+function manualNote(ids, key) {
+  const users = ids.map(id => state.users.find(x => x.id === id)).filter(manualOff);
+  if (!users.length) return '';
+  if (ids.length === 1) return t(key);
+  const names = users.slice(0, 5).map(u => u.name).join(t('reach.sep')) + (users.length > 5 ? '…' : '');
+  return t('user.manualBatch', { n: users.length, names });
+}
+
 function renewDialog(ids) {
   if (!state.plans.length) { toast(t('plan.empty'), 'err'); return; }
   const single = ids.length === 1 ? state.users.find(x => x.id === ids[0]) : null;
   const def = single && state.plans.some(p => p.id === single.planId) ? single.planId : state.plans[0].id; // 默认续他现在的套餐
   const requestId = newRequestId();
   const periods = () => Math.max(1, Math.floor(Number(fv('f-periods'))) || 1);
+  const manual = manualNote(ids, 'user.manualRenew');
   openModal(t('user.renew') + (single ? ' · ' + single.name : ` (${ids.length})`), `
     <div class="form-grid">
       <div class="full">${field(t('plan.pick'), planSelect('f-plan', def, false))}</div>
       <div class="full">${field('', `<select id="f-mode"><option value="renew">${t('plan.renew')}</option><option value="extend">${t('plan.extend')}</option><option value="bind">${t('plan.bind')}</option></select>`)}</div>
       ${field(t('pc.periods'), `<input id="f-periods" type="number" min="1" max="120" value="1">`, t('pc.periodsHelp'))}
     </div>
+    ${manual ? `<p class="hint warn" id="rn-manual">${esc(manual)}</p>` : ''}
     ${single ? `<p class="hint" id="rn-preview"></p>` : ''}`, async () => {
     const planId = Number(fv('f-plan')), mode = fv('f-mode');
     let replayed = false;
@@ -394,7 +407,12 @@ function renewDialog(ids) {
       setHTML('rn-preview', esc(t('pc.renewPreview', { from: expiryText(r.from), to: expiryText(r.to), vfrom: volText(r.from), vto: volText(r.to) })) + warn);
     } catch (e) { if (my === seq) setHTML('rn-preview', `<span class="pc-bad">${esc(e.message)}</span>`); }
   }, 300);
-  const sync = () => { const p = document.getElementById('f-periods'); if (p) p.disabled = fv('f-mode') === 'bind'; preview(); };
+  const sync = () => {
+    const bind = fv('f-mode') === 'bind', p = document.getElementById('f-periods'), m = document.getElementById('rn-manual');
+    if (p) p.disabled = bind;
+    if (m) m.hidden = bind; // 只归入套餐不改启停
+    preview();
+  };
   ['f-plan', 'f-mode'].forEach(k => document.getElementById(k).addEventListener('change', sync));
   document.getElementById('f-periods').addEventListener('input', preview);
   sync();
@@ -462,13 +480,14 @@ function stateCol(s, cmp) {
   return `<dl class="kv">${rows.map(([k, v], i) => `<dt>${k}</dt><dd class="${base && String(base[i][1]) !== String(v) ? 'chg' : ''}">${v}</dd>`).join('')}</dl>`;
 }
 const DIR_KIND = { upgrade: 'ok', downgrade: 'warn', mixed: 'primary', same: '' };
-function previewHTML(r) {
+function previewHTML(r, hide = []) {
   const rem = r.remaining || {}, c = r.credit;
   const left = t('pc.remaining', { time: rem.seconds == null ? t('common.unlimited') : durText(rem.seconds), bytes: rem.bytes == null ? t('common.unlimited') : fmtBytes(rem.bytes) })
     + (rem.value != null ? ' · ' + t('pc.remainingValue', { v: +Number(rem.value).toFixed(2) }) : '');
   const credit = c ? `<p class="hint">${esc(t('pc.creditLine', { value: +Number(c.value).toFixed(2), from: c.fromPrice, to: c.toPrice, periods: +Number(c.periods).toFixed(3), time: durText(c.seconds || 0), bytes: fmtBytes(c.bytes || 0) }))}</p>` : '';
   const pool = r.pool && r.pool.volume ? `<p class="hint">${esc(t('pc.pool', { remaining: fmtBytes(r.pool.remaining), volume: fmtBytes(r.pool.volume) }))}</p>` : '';
-  const warns = (r.warnings || []).length ? `<ul class="pc-warn">${r.warnings.map(w => `<li class="${w.block ? 'bad' : 'warn'}">${esc(warnText(w))}</li>`).join('')}</ul>` : '';
+  const ws = (r.warnings || []).filter(w => !hide.includes(w.code)); // 对话框上面已经单独说了的不再重复
+  const warns = ws.length ? `<ul class="pc-warn">${ws.map(w => `<li class="${w.block ? 'bad' : 'warn'}">${esc(warnText(w))}</li>`).join('')}</ul>` : '';
   return `<div class="grid-2 pc-cols">
       <div><h3>${t('pc.before')}</h3>${stateCol(r.from)}</div>
       <div><h3>${t('pc.after')} ${badge(t('pc.dir.' + r.direction), DIR_KIND[r.direction] || '')}</h3>${stateCol(r.to, r.from)}</div>
@@ -493,7 +512,8 @@ function changeDialog(id) {
     if (wrap) wrap.hidden = !need;
     if (f) f.checked = false; // 每份新预览都要重新确认
   };
-  const show = (r, p) => { setHTML('pc-preview', previewHTML(r)); setForce(!!r.needsForce); shown = p; setReady(true); };
+  const manual = manualOff(u);
+  const show = (r, p) => { setHTML('pc-preview', previewHTML(r, manual ? ['enables_manual'] : [])); setForce(!!r.needsForce); shown = p; setReady(true); };
   openModal(t('pc.title') + ' · ' + u.name, `
     <div class="form-grid">
       <div class="full">${field(t('pc.target'), `<select id="pc-plan">${state.plans.map(p => `<option value="${p.id}" ${p.id === pick ? 'selected' : ''}>${esc(p.name)} · ${planBrief(p)}${p.price > 0 ? ' · ' + esc(t('plan.priceShort', { n: p.price })) : ''}${p.id === u.planId ? ' · ' + t('pc.current') : ''}</option>`).join('')}</select>`)}</div>
@@ -502,6 +522,7 @@ function changeDialog(id) {
       ${field(t('pc.usage'), `<select id="pc-usage">${['auto', 'keep', 'reset'].map(v => `<option value="${v}">${t('pc.usage.' + v)}</option>`).join('')}</select>`, t('pc.usageHelp'))}
       <div class="full">${field(t('pc.remark'), `<input id="pc-remark" maxlength="200" placeholder="${esc(t('pc.remarkPh'))}">`)}</div>
     </div>
+    ${manual ? `<p class="hint warn">${esc(t('user.manualChange'))}</p>` : ''}
     <div class="pc-preview" id="pc-preview"><p class="muted small">${t('common.loading')}</p></div>
     <div id="pc-force-wrap" hidden>${check('pc-force', t('pc.force'), false)}</div>`, async () => {
     if (!shown) throw new Error(t('pc.previewPending')); // 等预览时按钮是禁用的;openModal 出错后会把它重新点亮,这里再拦一道
