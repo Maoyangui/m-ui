@@ -256,7 +256,9 @@ export async function run({ dir, fetch = globalThis.fetch, now = Math.floor(Date
   const getJSON = async (url, headers) => (await get(url, headers)).json();
   const errs = {}; // 这次读不到的数据源 → 错误
 
-  // 留名:ntfy 公共服务只缓存 12 小时。读不到就当这次没有新留名,已经收进来的照常对账
+  // 留名:ntfy 公共服务只缓存 12 小时。读不到就当这次没有新留名,已经收进来的照常对账。
+  // 两次运行隔超过 12 小时(GitHub 推迟了定时任务),中间的留名就丢了(donors.yml 第一步会报警):所以面板上不承诺
+  // 几小时内上榜,只说"通常几小时内上榜,超过一天还没上榜请联系",来联系的手动记账
   let pledges = [];
   try {
     const text = await (await get(`https://ntfy.sh/${TOPIC}/json?poll=1&since=12h`)).text();

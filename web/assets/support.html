@@ -359,7 +359,9 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
         idle();
         $('pledge').hidden = true; $('p-hint').hidden = true;
         var done = $('p-done'); done.hidden = false;
-        done.textContent = ZH ? '✓ 收到了,谢谢 ' + p.name + '!通常几小时内上榜。' : "✓ Received, thank you " + p.name + "! You'll usually appear within a few hours.";
+        // 上榜靠 GitHub 的定时任务对账,常常晚几个小时,两次运行隔太久时留名还可能丢:不承诺几小时内上榜,超过一天的来找我手动记上
+        done.textContent = ZH ? '✓ 收到了,谢谢 ' + p.name + '!通常几小时内上榜;超过一天还没上榜,请在 Telegram 联系我。'
+          : '✓ Received, thank you ' + p.name + "! You'll usually appear on the list within a few hours. If you're not on it after a day, message me on Telegram.";
       }).catch(function () { if (me === session && cur === c) known = false; }).then(function () {
         if (cur !== c) return;
         cur = null;
@@ -369,7 +371,8 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
     };
     var verdict = function () {
       idle(known === true ? (ZH ? '超过 60 分钟未到账,可重新留名。' : 'Not received within 60 minutes. You can sign again.')
-        : (ZH ? '暂时无法确认是否到账,若已转账会在几小时内上榜。' : "We couldn't confirm whether it arrived. If you sent it, you'll appear on the list within a few hours."));
+        : (ZH ? '暂时无法确认是否到账。若已转账,通常几小时内上榜;超过一天还没上榜,请在 Telegram 联系我。'
+          : "We couldn't confirm whether it arrived. If you sent it, you'll usually appear on the list within a few hours. If you're not on it after a day, message me on Telegram."));
     };
     // 到期后下结论:刚发出的那次核对还在路上就等它回来;最近一次核对比 STALE 旧(或还没核对过)就先再核对一次,
     // 不拿冻结前的结果断言"没到账"。最后这次最多等 WAIT,等不到就是"不知道"

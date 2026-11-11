@@ -124,10 +124,13 @@ async function openPage(lang, onCheck, { start = 500 } = {}) {
   return pg;
 }
 
-const RECEIVED = { zh: /收到了,谢谢 Larry/, en: /Received, thank you Larry/ };
+const RECEIVED = { zh: /收到了,谢谢 Larry!/, en: /Received, thank you Larry! [A-Z]/ };
 const NOT_ARRIVED = { zh: /超过 60 分钟未到账/, en: /Not received within 60 minutes/ };
 const UNKNOWN = { zh: /暂时无法确认是否到账/, en: /couldn't confirm whether it arrived/ };
 const ended = pg => pg.el('p-wait').hidden && !pg.store.has('m-ui-pledge');
+// 上榜靠 GitHub 的定时任务,常常晚几个小时,两次运行隔太久时留名还会丢:不能承诺"几小时内上榜",要给出超过一天的办法
+const SOFT = { zh: /通常几小时内上榜;超过一天还没上榜,请在 Telegram 联系我/, en: /usually appear on the list within a few hours\. If you're not on it after a day, message me on Telegram/ };
+const HARD = { zh: /会在几小时内上榜/, en: /you'll appear on the list within/ };
 
 for (const lang of ['zh', 'en']) {
   test(`[${lang}] 标签页冻结一个多小时后回来:先再核对一次,冻结期间到账了就说收到了,不拿冻结前的结果断言没到账`, async () => {
@@ -252,5 +255,22 @@ for (const lang of ['zh', 'en']) {
     await pg.advance(1000);
     const left = T0 + 3600 - Math.floor(pg.clock.ms / 1000);
     assert.equal(pg.el('p-left').textContent, Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'));
+  });
+
+  test(`[${lang}] 到账、无法确认时的提示不做硬承诺:通常几小时内上榜,超过一天还没上榜就联系`, async () => {
+    let n = 0;
+    const pg = await openPage(lang, (url, reply) => reply({ known: true, arrived: n++ > 0 }));
+    await pg.advance(20e3); // 第二次核对时到账了
+    assert.ok(ended(pg));
+    assert.match(pg.el('p-done').textContent, RECEIVED[lang]);
+    assert.match(pg.el('p-done').textContent, SOFT[lang]);
+    assert.doesNotMatch(pg.el('p-done').textContent, HARD[lang]);
+
+    const pg2 = await openPage(lang, () => Promise.reject(new TypeError('Failed to fetch')));
+    await pg2.advance(H + 20e3);
+    assert.ok(ended(pg2));
+    assert.match(pg2.el('p-hint').textContent, UNKNOWN[lang]);
+    assert.match(pg2.el('p-hint').textContent, SOFT[lang]);
+    assert.doesNotMatch(pg2.el('p-hint').textContent, HARD[lang]);
   });
 }
