@@ -70,6 +70,28 @@ func AddAgentCounters(tx *gorm.DB, rows []AgentCounter, batch int) error {
 	}).CreateInBatches(&rows, batch).Error
 }
 
+// SelfLedgerKey 本机设置:主机在「设为主机」交接途中,本机流量除了照常记进用户用量,还另记一本副机那样的账本
+// (agent_counters),值是这本账的纪元。整库数据里带着这本账此刻的计数(和用户用量是同一时刻的)和纪元,目标据此记下
+// 本机的游标;本机变为副机后接着这本账记、上报,新主机只按增量回收 —— 导出整库之后、本机变为副机之前本机记的流量
+// 不会随原主机的库丢掉。交接没成(本机照旧当主机)时清掉:用户用量一直照常在记,这本账只是没用上。
+const SelfLedgerKey = "haSelfLedger"
+
+// AddSelfLedger 主机记账时(和用户用量同一笔事务)调用:交接途中(SelfLedgerKey 有值)把这一轮各用户的原始字节另记一本账。
+// 开关在事务里读:和置开关的那笔事务先后分明,导出整库时的用户用量与这本账的计数是同一时刻的。
+func AddSelfLedger(tx *gorm.DB, rows []AgentCounter, batch int) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	var on string
+	if err := tx.Raw("SELECT value FROM settings WHERE key = ?", SelfLedgerKey).Scan(&on).Error; err != nil {
+		return err
+	}
+	if on == "" {
+		return nil
+	}
+	return AddAgentCounters(tx, rows, batch)
+}
+
 // newLedgerId 新账本的代号:随机、非 0(0 表示升级前没有代号的账本)。不用时间:时钟回拨、粗粒度时钟下
 // 先后两本可能撞上同一个值。
 func newLedgerId() int64 {
@@ -80,10 +102,15 @@ func newLedgerId() int64 {
 	}
 }
 
-// PruneAgentCounters 副机应用完主机快照后清账本:主机已经不认识的用户,它的计数器没人再回收,清掉;
-// 记了主人的账本,主人已经不在(同名用户在同一轮同步里删了又建,本机没见过"没有他"的那份快照)也清掉,
-// 新用户从 0 另起一本。升级前的老账本(不知道主人)只按名字清。
+// PruneAgentCounters 副机应用完主机快照后清账本:主人已经不在的账本没人再回收,清掉 —— 记了主人的按主人(用户 id 与建号时间)
+// 认:主机上删了这个人(包括同名用户在同一轮同步里删了又建,本机没见过"没有他"的那份快照),新用户从 0 另起一本;
+// "记账时本机已经没有这个用户"的尾巴也清掉。升级前的老账本(不知道主人)只按名字清。
 // 主机那边的游标留着(记着是谁的那本):还在路上的旧账本报告按它只计服务器维度,不算到新用户头上。
+//
+// 主人还在、只是改了名的,原名那本留着:推送在前、拉报告在后,应用改名的快照时,上次拉取之后记在原名下的流量还没报
+// (和主机失联期间改名,用户照常连本机,没报的可能很多)。以前按"名字不在用户表"清掉,这段永远不计费;
+// 现在照常上报,主机按主人计到改名后的用户头上。原名已经给了另一个人的照旧清掉:老版本主机(先升副机的过渡期)
+// 只认名字,报上去会把前一个人的尾巴算到新的同名用户头上。
 //
 // 本机一个用户都没有时不清:那是停用副机推来的空用户表(或者主机上真的一个用户都没了)。停用期间主机不再拉取,
 // 清了的话上次拉取之后还没报上去的那段永远不计费;重新启用后同一个人从 0 重开一本,主机还会误报"账本回退"。
@@ -96,7 +123,10 @@ func PruneAgentCounters(db *gorm.DB) error {
 	if anyUser == 0 {
 		return nil
 	}
-	return db.Exec(`DELETE FROM agent_counters WHERE user_name NOT IN (SELECT name FROM users)
-		OR (NOT (user_id = 0 AND user_created_at = 0) AND NOT EXISTS (SELECT 1 FROM users u
-			WHERE u.name = agent_counters.user_name AND u.id = agent_counters.user_id AND u.created_at = agent_counters.user_created_at))`).Error
+	return db.Exec(`DELETE FROM agent_counters WHERE
+		(user_id = 0 AND user_created_at = 0 AND user_name NOT IN (SELECT name FROM users))
+		OR (NOT (user_id = 0 AND user_created_at = 0) AND (
+			NOT EXISTS (SELECT 1 FROM users u WHERE u.id = agent_counters.user_id AND u.created_at = agent_counters.user_created_at)
+			OR EXISTS (SELECT 1 FROM users u WHERE u.name = agent_counters.user_name
+				AND NOT (u.id = agent_counters.user_id AND u.created_at = agent_counters.user_created_at))))`).Error
 }

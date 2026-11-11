@@ -218,7 +218,7 @@ func (r *Runner) ScheduleRestart(delay time.Duration) {
 		}
 		time.Sleep(delay)
 		logger.Info("正在重启 m-ui")
-		r.Stop()
+		r.stopFlushed()
 		if r.subSrv != nil {
 			r.subSrv.Stop()
 		}

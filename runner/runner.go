@@ -1642,6 +1642,19 @@ func (r *Runner) Stop() {
 	}
 }
 
+// stopFlushed 计划内重启前停数据面:上一轮统计之后的流量(最多 10 秒)先记账,停下来之后再收一次停的途中最后那点,
+// 不随进程丢掉。变为副机(原主机让位、被接任)时记进新换的账本;接任 / 被设为主机时记进旧库的账本,换库时并进新库。
+func (r *Runner) stopFlushed() {
+	if r.jobs != nil && !r.jobs.FlushStats() {
+		logger.Warning("重启前统计落库失败,上一轮统计之后的这段流量会丢")
+	}
+	box := r.core.GetInstance()
+	r.Stop()
+	if box != nil && r.jobs != nil {
+		r.jobs.FlushStatsBox(box)
+	}
+}
+
 // 数据面看护:没在跑就隔一会儿再拉一次。退避从 coreWatchMin 起翻倍,最长 coreWatchMax。
 var (
 	coreWatchTick = 10 * time.Second

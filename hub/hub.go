@@ -681,6 +681,7 @@ type Report struct {
 	Upstreams       []UpstreamHealth               `json:"upstreams,omitempty"`    // 本机线路真正用到的那些上游的巡检结果
 	Reload          *ReloadState                   `json:"reload,omitempty"`       // 副机最近一次重载的结果,失败要让主机面板看见
 	LedgerEpoch     string                         `json:"ledgerEpoch,omitempty"`  // 副机流量账本的纪元(见 LedgerEpochKey);老副机不报
+	LedgerFresh     bool                           `json:"ledgerFresh,omitempty"`  // 这本账是纪元开始时清空重开的(见 LedgerFreshKey)
 	ServicePorts    []model.ServicePort            `json:"servicePorts,omitempty"` // 副机自己监听的面板 / 订阅端口(老副机不报)
 	// 以下几项老副机都不报(零值),主机按老办法处理
 	Sequence    uint64 `json:"sequence,omitempty"`    // 副机库里那份快照的推送序号
@@ -741,6 +742,16 @@ type GroupState struct {
 // 从备份还原后换新:账本换了一本,主机据此只建基线、不把整段历史当增量再计一遍(审计 M057)。
 const LedgerEpochKey = "agentLedgerEpoch"
 
+// LedgerFreshKey 本机设置:值等于当前账本纪元时,表示这本账是换纪元那一刻清空重开的(原主机变为副机时),
+// 纪元里的每一笔都还没被哪台主机计过。随报告报给主机(Report.LedgerFresh),见 LedgerAwaitFresh。
+const LedgerFreshKey = "agentLedgerFresh"
+
+// LedgerAwaitFresh 主机记在某台副机账本纪元上的占位值:这台是原来的主机(本机接任 / 被设为主机时记下),
+// 它变为副机后会清空账本、换一本新纪元的账。新纪元的报告声明了是清空重开的(LedgerFresh),就从 0 计、不只建基线 ——
+// 这台在库里没有自己的游标(当主机时本机流量直接记进用户用量),只建基线的话,从变为副机到第一次被拉取之间的流量全丢。
+// 真实的纪元是 16 位十六进制,不会和它相同。
+const LedgerAwaitFresh = "await-fresh"
+
 // NewLedgerEpoch 一个新的随机账本纪元。
 func NewLedgerEpoch() string {
 	b := make([]byte, 8)
@@ -750,6 +761,33 @@ func NewLedgerEpoch() string {
 
 // LedgerEpochSetting 主机记下的某台副机的账本纪元(删除副机时一并删掉)。
 func LedgerEpochSetting(nodeId uint) string { return fmt.Sprintf("ledgerEpoch:%d", nodeId) }
+
+// LocalLedger 本机(副机)的流量账本连同纪元,报告与接任时并账都用它。账本和纪元在同一个只读事务里读:
+// 变为副机时清空账本、换纪元是同一笔事务,分开读可能拿到旧账本配新纪元 —— 新纪元声明从 0 开始,旧账本就被整本计一遍。
+func LocalLedger(db *gorm.DB) (LedgerReport, error) {
+	var l LedgerReport
+	var kv []model.Setting
+	err := database.ReadTx(db, func(tx *gorm.DB) error {
+		if err := tx.Find(&l.Counters).Error; err != nil {
+			return err
+		}
+		return tx.Where("key IN ?", []string{LedgerEpochKey, LedgerFreshKey}).Find(&kv).Error
+	})
+	if err != nil {
+		return LedgerReport{}, err
+	}
+	var fresh string
+	for _, s := range kv {
+		switch s.Key {
+		case LedgerEpochKey:
+			l.Epoch = s.Value
+		case LedgerFreshKey:
+			fresh = s.Value
+		}
+	}
+	l.Fresh = l.Epoch != "" && fresh == l.Epoch
+	return l, nil
+}
 
 // DuplicateLedgerError 这份报告的账本纪元已经记在另一台副机上:同一台机器加了两次(或克隆出来的),流量只按先记下的那台算。
 type DuplicateLedgerError struct{ Other uint }
@@ -1073,10 +1111,11 @@ func (h *Hub) remoteNodes() ([]model.Node, error) {
 
 // nodeResult 一台副机这一轮同步的结果:网络部分各台各跑,落库部分交给唯一的并账协程串行做(见 enqueueResult)。
 type nodeResult struct {
-	pushErr string // 这一轮推送没成功(退避中也算),但报告照样拉到了
-	n       model.Node
-	rep     Report
-	err     string // 非空 = 这一轮失败(推送或拉报告)
+	pushErr   string // 这一轮推送没成功(退避中也算),但报告照样拉到了
+	n         model.Node
+	rep       Report
+	fetchedAt int64  // 拉报告的请求发出的时刻(UnixNano):并账时据此分清报告是在老副机清账之前还是之后拉的
+	err       string // 非空 = 这一轮失败(推送或拉报告)
 }
 
 // tick 一轮定时同步:按当前库构造快照,给每台副机各发一轮请求就返回,不等任何一台回来。
@@ -1230,7 +1269,8 @@ func (h *Hub) applyResult(r *nodeResult) {
 		fmt.Sscanf(v, "%d", &bucket)
 	}
 	errStr := r.pushErr // 在线但配置未同步:Error 里写推送原因,Synced 由报告的修订号判
-	mr, err := MergeCounters(h.d.DB, r.n.Id, r.n.Name, r.rep.LedgerEpoch, r.rep.Counters, time.Now().Unix(), bucket, r.n.Ratio)
+	ledger := LedgerReport{Epoch: r.rep.LedgerEpoch, Fresh: r.rep.LedgerFresh, Counters: r.rep.Counters, FetchedAt: r.fetchedAt}
+	mr, err := MergeReport(h.d.DB, r.n.Id, r.n.Name, ledger, time.Now().Unix(), bucket, r.n.Ratio)
 	if mr.NodeGone {
 		return // 副机在这一轮途中被删了:报告整份丢掉,也不再给它记状态
 	}
@@ -1418,6 +1458,7 @@ func (h *Hub) syncNode(n model.Node, snap Snapshot) *nodeResult {
 	}
 	// 推送成没成,报告都要拉:流量回收、超额停用、跨机设备并集全靠它。0.6.10 在推送失败时直接返回,
 	// 于是一台配置没应用成功的副机,它的流量不再并入主机、它上面的设备 300 秒后就不再计入设备数。
+	res.fetchedAt = time.Now().UnixNano()
 	rep, err := h.fetchReport(n)
 	if err != nil {
 		res.err = "拉取报告失败: " + err.Error()
@@ -1800,11 +1841,20 @@ func (h *Hub) push(n model.Node, snap Snapshot) error {
 	ack, err := h.pushWire(n, w)
 	if err == nil && !ack.LedgerKept {
 		// 老副机应用完把快照里没有的用户的账本清掉了:同名的以后再出现是从 0 重开的一本,不是账本回退
-		if err := markLedgerCleared(h.d.DB, n.Id, false); err != nil {
+		if err := markLedgerCleared(h.d.DB, n.Id, userNames(snap)); err != nil {
 			logger.Warning("记下副机 ", n.Name, " 清掉的账本失败(同名用户再出现时第一份变小的计数会按账本回退处理): ", err)
 		}
 	}
 	return err
+}
+
+// userNames 快照里的用户名:老副机应用完只留这些名字的账本。
+func userNames(snap Snapshot) map[string]bool {
+	out := make(map[string]bool, len(snap.Users))
+	for _, u := range snap.Users {
+		out[u.Name] = true
+	}
+	return out
 }
 
 func (h *Hub) fetchReport(n model.Node) (Report, error) {

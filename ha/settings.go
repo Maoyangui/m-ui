@@ -29,13 +29,13 @@ var localKeys = setOf(
 	// 本机探测值
 	"publicIp", "publicIp6",
 	// 角色、同步与待处理状态
-	"nodeMode", "nodeToken", "agentLedgerEpoch", "userReloadPending", "secureReloadPending", "subRestartPending",
+	"nodeMode", "nodeToken", "agentLedgerEpoch", "agentLedgerFresh", "userReloadPending", "secureReloadPending", "subRestartPending",
 	// 运维参数
 	"warpPort", "logEnabled", "coreLogLevel", "backupDir", "statsPingAt",
 	// 容灾的本机状态
 	KeyEpoch, KeyRole, KeyMasterId, KeyMasterPub, KeySignKey, KeyVote, KeyGrant, KeyState, KeyNotify, KeyPeerKey,
 	KeyDemoted, KeyBecame, KeyFreezeUntil, KeySwitch, KeyIncoming, KeyReplicaSeq, KeyStandbyList,
-	KeyNotices, KeyCmd, KeyCmdResult, KeyDnsChanged, KeyDropPending,
+	KeyNotices, KeyCmd, KeyCmdResult, KeyDnsChanged, KeyDropPending, KeySelfLedger,
 )
 
 // localPrefixes 按前缀归为本机的设置:hub*(主副机同步的本机状态)、ops*(运维页)、acme*(证书签发)。
@@ -149,6 +149,7 @@ const (
 	KeyCmdResult   = "haCmdResult"   // 上面请求的结果
 	KeyDnsChanged  = "haDnsChanged"  // 最近一次自动改 DNS 的记录(原值、新值)
 	KeyDropPending = "haDropPending" // 主机:停用 / 删除的副机还没确认删掉副本(连同地址、令牌,副本循环每轮重试)
+	KeySelfLedger  = "haSelfLedger"  // 主机:设为主机交接途中本机流量另记的那本账的纪元(就是 model.SelfLedgerKey)
 )
 
 // 角色(haRole)。

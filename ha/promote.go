@@ -14,7 +14,6 @@ import (
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
-	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/selfupdate"
 
@@ -318,17 +317,9 @@ func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bo
 		clean()
 		return fmt.Errorf("数据里没有本机(服务器 #%d):这份数据不是本机所在集群的", selfId)
 	}
-	// 本机还没上报的流量并进去:按数据里本机的游标只计增量,不多算、不漏算
-	var counters []model.AgentCounter
-	s.d.DB.Find(&counters)
-	bucket := int64(atoiDef(s.settingFrom(ndb, "statsBucketSeconds"), 60))
-	if bucket <= 0 {
-		bucket = 60
-	}
-	if len(counters) > 0 {
-		if _, err := hub.ApplyCounters(ndb, selfId, self.Name, s.setting(hub.LedgerEpochKey), counters, s.now().Unix(), bucket, self.Ratio); err != nil {
-			logger.Warning("容灾:并入本机还没上报的流量失败(继续): ", err)
-		}
+	// 本机还没上报的流量并进去:按数据里本机的游标只计增量,不多算、不漏算(组库之后到重启前再记的,换库时再并一次)
+	if _, err := mergeOwnLedger(ndb, selfId, self, s.d.DB, s.now()); err != nil {
+		logger.Warning("容灾:并入本机还没上报的流量失败(继续): ", err)
 	}
 	var res identityResult
 	err = ndb.Transaction(func(tx *gorm.DB) error {
@@ -356,6 +347,14 @@ func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bo
 		}
 		if meta.MasterId != 0 && meta.MasterId != selfId {
 			if err := s.applyFormerRow(tx, meta.MasterId, selfId, meta.Identity, b.How); err != nil {
+				return err
+			}
+			// 原主机变为副机后报上来的第一份怎么并(这一步要在清空 agent_counters 之前:设为主机时那里是原主机交接途中另记的账)
+			ledger := ""
+			if b.How == HowSetMaster && meta.Full {
+				ledger = meta.Ledger
+			}
+			if err := installFormerLedger(tx, meta.MasterId, ledger); err != nil {
 				return err
 			}
 			if b.How == HowTakeover {
@@ -433,12 +432,6 @@ func withoutId(ids []uint, id uint) []uint {
 		}
 	}
 	return out
-}
-
-func (s *Service) settingFrom(db *gorm.DB, key string) string {
-	var v string
-	db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
-	return v
 }
 
 // dropOnPromote 成为主机时不带过去的本机设置:主副机同步的进度、副机才有的容灾状态。
@@ -571,6 +564,8 @@ func ApplyPendingAt(dbPath string, now time.Time) (bool, error) {
 	}
 	_ = os.Remove(promoteMetaFile(dbPath))
 	syncDir(dataDir)
+	// 组好新库之后到这次重启之前本机记的流量还在旧库的账本里:按新库里本机的游标并进去
+	mergeOldLedger(dbPath, old, now)
 	// 本机成了主机:备用手里的旧副本不要了(里面是原主机的全部数据)
 	dir := HADir(dataDir)
 	for _, n := range []string{fileCur, filePrev, fileTmp, fileInfo} {

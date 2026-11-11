@@ -520,6 +520,8 @@ const EN = /*BEGIN*/{
 "读取出站: %w": "Reading outbounds: %w",
 "读取副机待踢线状态失败: %w": "Failed to read the node's pending-kick state: %w",
 "读取副机待重载状态失败: %w": "Failed to read the node's pending-reload state: %w",
+"读取本机流量账本失败: %w": "Failed to read this server's traffic ledger: %w",
+"另起本机流量账本: %w": "Starting a separate traffic ledger for this server: %w",
 "读取备份 zip: %w": "Reading the backup zip: %w",
 "读取客户端: %w": "Reading clients: %w",
 "读取快照序号: %w": "Reading the snapshot sequence: %w",

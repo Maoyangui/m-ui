@@ -209,6 +209,9 @@ func TestSetMasterUnknownFencesTarget(t *testing.T) {
 	if _, ok := m.BeginWrite(); ok {
 		t.Fatal("结果不明时写操作保持暂停")
 	}
+	if m.setting(KeySelfLedger) == "" {
+		t.Fatal("结果不明期间本机流量照常另记一本账(目标其实接手了的话,本机变为副机后由它回收)")
+	}
 	m.sw.tick() // 冻结截止前:问不到就继续等
 	if st := m.Switch(); st.Stage != StageUnknown || !m.Frozen() {
 		t.Fatalf("截止前继续等: %+v", st)
@@ -221,6 +224,9 @@ func TestSetMasterUnknownFencesTarget(t *testing.T) {
 	st = m.Switch()
 	if st.Stage != StageFenced || st.FenceEpoch != L+2 || m.Epoch() != L+2 || m.Frozen() || m.IsNode() {
 		t.Fatalf("截止后以纪元 E+2 隔离目标再解冻: %+v epoch=%d", st, m.Epoch())
+	}
+	if m.setting(KeySelfLedger) != "" {
+		t.Fatal("隔离后本机照旧当主机:另记的那本账清掉")
 	}
 	if done, ok := m.BeginWrite(); !ok {
 		t.Fatal("隔离后写操作恢复")

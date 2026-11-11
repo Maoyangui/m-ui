@@ -725,10 +725,11 @@ func (s *Service) Demote(d Demoted) error {
 	}
 	values := map[string]string{
 		"nodeMode": "true", KeyRole: RoleDemoted, KeyDemoted: mustJSON(d),
-		hub.LedgerEpochKey: hub.NewLedgerEpoch(), // 本机的流量账本换一本:作为副机加入后,新主机只建基线
-		KeySignKey:         "", KeyFreezeUntil: "", KeyMasterId: strconv.FormatUint(uint64(d.MasterId), 10),
+		KeySignKey: "", KeyFreezeUntil: "", KeyMasterId: strconv.FormatUint(uint64(d.MasterId), 10),
 	}
-	if err := s.set(values); err != nil {
+	// 本机的流量账本换一本、清空、声明从 0 开始:当主机时本机流量直接记进用户用量,新主机库里没有本机的游标,
+	// 它组库时记下了等这本(hub.LedgerAwaitFresh),第一份就从 0 计
+	if err := s.setNode(values, false); err != nil {
 		s.mu.Lock()
 		s.demoting = false
 		s.mu.Unlock()

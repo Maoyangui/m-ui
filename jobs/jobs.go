@@ -342,22 +342,35 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 	return true
 }
 
-// writeLedger 记账:副机写本机单调账本(批量 upsert,主机按游标回收);主机直接加到用户用量上。
+// writeLedger 记账:副机写本机单调账本(批量 upsert,主机按游标回收);主机直接加到用户用量上,
+// 「设为主机」交接途中同一笔事务里另记一本原始字节的账(见 model.SelfLedgerKey)。
 func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]*userBytes, now int64, scale func(int64) int64) error {
 	if len(names) == 0 {
 		return nil
 	}
-	if isNode {
+	raw := func() []model.AgentCounter {
 		rows := make([]model.AgentCounter, 0, len(names))
 		for _, name := range names {
 			t := traffic[name]
 			rows = append(rows, model.AgentCounter{UserName: name, Up: t.up, Down: t.down})
 		}
+		return rows
+	}
+	if isNode {
 		return s.d.DB.Transaction(func(tx *gorm.DB) error {
-			return model.AddAgentCounters(tx, rows, statsBatch)
+			return model.AddAgentCounters(tx, raw(), statsBatch)
 		})
 	}
 	return s.d.DB.Transaction(func(tx *gorm.DB) error {
+		// 本机这一刻正好变为副机(原主机让位、失联后被接任:换角色和清空 / 交接账本在同一笔事务里):这一轮按副机记进账本,
+		// 不落进已经不再算数的用户用量
+		var mode string
+		if err := tx.Raw("SELECT value FROM settings WHERE key = ?", "nodeMode").Scan(&mode).Error; err != nil {
+			return err
+		}
+		if strings.EqualFold(mode, "true") {
+			return model.AddAgentCounters(tx, raw(), statsBatch)
+		}
 		for _, name := range names {
 			t := traffic[name]
 			update := map[string]interface{}{"online_at": now}
@@ -374,7 +387,7 @@ func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]
 				return err
 			}
 		}
-		return nil
+		return model.AddSelfLedger(tx, raw(), statsBatch)
 	})
 }
 

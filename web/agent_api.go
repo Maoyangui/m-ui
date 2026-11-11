@@ -476,6 +476,12 @@ func (s *Server) saveAgentKicks(names []string) error {
 }
 
 func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
+	// 账本连同纪元一次读出:读失败就整份报错,不报一本空账(纪元新的时候主机会只记下纪元、不建基线,下一份就把整本当增量)
+	ledger, err := hub.LocalLedger(s.db)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "读取本机流量账本失败: " + err.Error()})
+		return
+	}
 	host, _ := os.Hostname()
 	rep := hub.Report{
 		Version: Version, Hostname: host, CoreRunning: s.run.CoreRunning(), Uptime: s.run.Uptime(),
@@ -486,7 +492,9 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		Conns:        s.recentConns(50),
 		ConnFails:    s.recentFails(30),
 		ConnFailsOK:  true,
-		LedgerEpoch:  s.setting(hub.LedgerEpochKey),
+		LedgerEpoch:  ledger.Epoch,
+		LedgerFresh:  ledger.Fresh,
+		Counters:     ledger.Counters,
 		ServicePorts: s.reportServicePorts(),
 		KickPending:  strings.TrimSpace(s.setting(agentKickPendingKey)) != "",
 		ApplyGzip:    true, // 本机收得了 gzip 压缩的快照
@@ -507,7 +515,6 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		rep.Upstreams = append(rep.Upstreams, hub.UpstreamHealth{Id: h.Id, Name: h.Name, OK: h.OK,
 			DelayMs: h.DelayMs, Method: h.Method, Error: h.Error, CheckedAt: h.CheckedAt, Fails: h.Fails})
 	}
-	s.db.Find(&rep.Counters)
 	o := s.run.Onlines()
 	allIPs := s.run.OnlineIPsAll() // 一次锁拿全量,不按用户逐个抢数据面的锁
 	for _, u := range o.Users {

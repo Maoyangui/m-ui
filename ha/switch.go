@@ -577,6 +577,11 @@ func (w *switcher) run(st SwitchState) {
 		w.fail(st, StagePrepare, err)
 		return
 	}
+	// 本机流量从此另记一本账(同时照常记进用户用量):导出整库之后本机记的,换完由新主机按增量回收
+	if err := s.startSelfLedger(); err != nil {
+		w.fail(st, StagePrepare, fmt.Errorf("另起本机流量账本: %w", err))
+		return
+	}
 	logger.Warning("容灾:设为主机,写操作暂停到 ", time.Unix(st.FreezeUntil, 0).In(s.loc()).Format("15:04:05"))
 	// 2. 向目标要一次性公钥、它以后的签名公钥;它要已经认了本机(纪元、签名公钥)
 	var prep PrepareReply
@@ -728,6 +733,7 @@ func (w *switcher) fail(st SwitchState, stage string, err error) {
 	if !s.saveSwitch(st, map[string]string{KeyFreezeUntil: ""}) {
 		return
 	}
+	s.stopSelfLedger() // 本机照旧当主机:流量一直照常记在用户用量上,另记的那本账不用了
 	s.invalidate()
 	if st.GrantSent { // 已经发过交接标记:马上推一轮带撤销的状态,不等 hub 的下一轮
 		got := s.pushAll(s.remoteNodes(), 10*time.Second)
@@ -820,12 +826,13 @@ func (s *Service) becomeNode(st SwitchState) {
 	st.UpdatedAt = now.Unix()
 	values := map[string]string{
 		"nodeMode": "true", KeyRole: "", KeyMasterId: strconv.FormatUint(uint64(st.Target), 10),
-		KeyGrant:           mustJSON(g),
-		hub.LedgerEpochKey: hub.NewLedgerEpoch(), // 本机的流量账本换一本:新主机只建基线
-		KeySignKey:         "", KeyFreezeUntil: "", KeyFormer: "", KeyStandbyList: "",
+		KeyGrant:   mustJSON(g),
+		KeySignKey: "", KeyFreezeUntil: "", KeyFormer: "", KeyStandbyList: "",
 		KeySwitch: mustJSON(st),
 	}
-	err := s.set(values)
+	// 接着冻结以来另记的那本账:它的纪元和导出整库那一刻的计数已经随整库数据交给新主机(当游标),
+	// 导出之后本机记的流量新主机按增量回收(没有那本账的话换一本新的、从 0 开始)
+	err := s.setNode(values, true)
 	w.saveMu.Unlock()
 	if err != nil {
 		logger.Warning("容灾:变为副机失败: ", err)
@@ -982,6 +989,7 @@ func (w *switcher) fence(st SwitchState, actor string) error {
 	if !s.saveSwitch(st, map[string]string{KeyFreezeUntil: ""}) {
 		return nil
 	}
+	s.stopSelfLedger()
 	s.invalidate()
 	by := nonEmpty(actor, "timeout")
 	s.addNotice(Notice{Kind: "switchFailed", Reason: "fenced", Name: st.TargetName, N: int64(e)})
@@ -1067,6 +1075,9 @@ func (w *switcher) tick() {
 		_ = s.set(map[string]string{KeyFreezeUntil: ""})
 		s.invalidate()
 		logger.Info("容灾:写操作冻结到期,已解冻")
+	}
+	if s.selfLedgerLeftover() { // 设为主机已经收尾(没做成),另记账本的开关还开着:收尾时进程退出了
+		s.stopSelfLedger()
 	}
 }
 

@@ -171,7 +171,7 @@ func TestOldAgentRenamedBackReopensLedger(t *testing.T) {
 	}
 }
 
-// 推给老副机的每份快照之后都要看一眼有没有要打清账标记的游标,绝大多数时候没有:那就不该去拿写锁
+// 推给老副机的每份快照之后都要看一眼有没有要打清账标记的游标(快照里没有的名字),绝大多数时候没有:那就不该去拿写锁
 // (别的写事务占着锁时要干等满 busy_timeout,推送那一轮跟着拖住)。
 func TestMarkLedgerClearedNoopTakesNoWriteLock(t *testing.T) {
 	db := openDB(t, "m.db").DB
@@ -184,18 +184,17 @@ func TestMarkLedgerClearedNoopTakesNoWriteLock(t *testing.T) {
 	release := holdWriteLock(t, db)
 	defer release()
 	t0 := time.Now()
-	err := markLedgerCleared(db, 2, false)
+	err := markLedgerCleared(db, 2, map[string]bool{"alice": true})
 	if d := time.Since(t0); err != nil || d > 2*time.Second {
-		t.Fatalf("alice 还在、没有要标的,不该等写锁:用了 %v, err=%v", d, err)
+		t.Fatalf("推过去的快照里还有 alice、没有要标的,不该等写锁:用了 %v, err=%v", d, err)
 	}
 	release()
-	db.Delete(&model.User{}, "name = ?", "alice")
-	if err := markLedgerCleared(db, 2, false); err != nil {
+	if err := markLedgerCleared(db, 2, map[string]bool{"bob": true}); err != nil {
 		t.Fatal(err)
 	}
 	var cur model.TrafficCursor
 	db.Where("node_id = ? AND user_name = ?", 2, "alice").First(&cur)
-	if !cur.Cleared {
-		t.Fatalf("主机上已经没有 alice,游标应打上清账标记: %+v", cur)
+	if !cur.Cleared || cur.ClearedAt == 0 {
+		t.Fatalf("推过去的快照里没有 alice,游标应打上清账标记并记下时刻: %+v", cur)
 	}
 }
