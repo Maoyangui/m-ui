@@ -134,14 +134,14 @@ func (r *replicator) dropOne(t dropTask) (done, dropped bool, err error) {
 	}
 	n := model.Node{Id: t.Id, Name: t.Name, ApiUrl: t.ApiUrl, Token: t.Token, CertFP: t.CertFP, Insecure: t.Insecure}
 	if !t.Dropped {
-		if err := s.d.Hub.Send(n, http.MethodPost, "ha/drop", nil, 0, nil, 15*time.Second, nil); err != nil && !notFound(err) {
+		if err := s.sendCtl(n, "ha/drop", 15*time.Second); err != nil && !notFound(err) {
 			return false, false, err
 		}
 		logger.Info("容灾:副机 ", t.Name, " 已删掉手里的副本")
 		dropped = true
 	}
 	if t.Leave {
-		if err := s.d.Hub.Send(n, http.MethodPost, "ha/leave", nil, 0, nil, 15*time.Second, nil); err != nil && !notFound(err) {
+		if err := s.sendCtl(n, "ha/leave", 15*time.Second); err != nil && !notFound(err) {
 			return false, dropped, err
 		}
 		logger.Info("容灾:已删除的副机 ", t.Name, " 已离开集群(清了纪元与备用密钥)")

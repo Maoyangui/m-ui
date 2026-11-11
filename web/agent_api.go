@@ -657,7 +657,7 @@ func (s *Server) handleAgentHAState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }
 
-// handleAgentHALeave 主机删除了本机(纪元判定已在 agentAuth 里过了:只认当前主机):退出容灾集群。
+// handleAgentHALeave 主机删除了本机(纪元判定已在 agentAuth 里过了;正文要当前主机签名):退出容灾集群。
 func (s *Server) handleAgentHALeave(w http.ResponseWriter, r *http.Request) {
 	if !haAgentLimiter.allow(peerIP(r)) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
@@ -672,8 +672,13 @@ func (s *Server) handleAgentHALeave(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
 		return
 	}
-	if err := h.LeaveCluster(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	if err := h.LeaveSigned(raw); err != nil { // 只认主机签过名的(本纪元钉住的那把公钥):只拿到副机令牌的人清不掉本机的纪元
+		badRequest(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
@@ -702,8 +707,12 @@ func (s *Server) handleAgentHAReplica(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "seq": seq})
 }
 
-// handleAgentHADrop 主机说本机不再是备用:删掉手里的副本。
+// handleAgentHADrop 主机说本机不再是备用(正文要当前主机签名):删掉手里的副本。
 func (s *Server) handleAgentHADrop(w http.ResponseWriter, r *http.Request) {
+	if !haAgentLimiter.allow(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+		return
+	}
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		return
@@ -713,8 +722,13 @@ func (s *Server) handleAgentHADrop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
 		return
 	}
-	if err := h.DropReplica(); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	if err := h.DropSigned(raw); err != nil { // 只认主机签过名的
+		badRequest(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})

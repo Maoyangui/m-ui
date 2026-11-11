@@ -725,7 +725,7 @@ func (s *Service) DropOn(n model.Node) {
 	if s.d.Hub == nil || n.ApiUrl == "" || n.Token == "" || s.Epoch() == 0 || s.IsNode() {
 		return
 	}
-	if err := s.d.Hub.Send(n, http.MethodPost, "ha/drop", nil, 0, nil, 15*time.Second, nil); err != nil {
+	if err := s.sendCtl(n, "ha/drop", 15*time.Second); err != nil {
 		logger.Warning("容灾:让副机 ", n.Name, " 删掉副本失败: ", err)
 		return
 	}
