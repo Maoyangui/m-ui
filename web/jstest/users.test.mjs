@@ -44,7 +44,7 @@ export const badge = (s) => String(s); export const dot = () => ''; export const
 export const field = () => ''; export const check = () => ''; export const empty = () => '';
 export const fv = (id) => el(id).value; export const fchk = (id) => !!el(id).checked;
 export const matches = () => true; export const debounce = (fn) => (...a) => fn(...a);
-export const copy = async () => {};
+export const copy = async (s) => { (globalThis.__copied ||= []).push(s); };
 export const setHTML = (t, h) => { const e = typeof t === 'string' ? el(t) : t; if (e) e.innerHTML = h; };
 export const setText = (t, s) => { const e = typeof t === 'string' ? el(t) : t; if (e) e.textContent = s; };
 export const tzOffsetMinutes = () => 0;`);
@@ -84,7 +84,7 @@ function backend() {
       return pr;
     }
     if (method === 'POST' && (/\/change$/.test(p) || /\/plan$/.test(p))) return be.submit(body);
-    if (method === 'GET') return Promise.resolve([]);
+    if (method === 'GET') return Promise.resolve(be.onGet ? be.onGet(p) : []);
     return Promise.reject(new Error('404 ' + method + ' ' + p));
   };
   be.submits = () => be.calls.filter((c) => c.method === 'POST' && c.body && !c.body.dryRun);
@@ -104,13 +104,13 @@ async function setup() {
     plans: [plan(1, '月付'), plan(2, '季付')], lines: [], nodes: [], onlines: { users: [] }, limitStates: [], status: {},
   });
   const be = backend();
-  await import(pathToFileURL(path.join(dir, 'pages', 'users.js')).href + '?case=' + (++seq));
+  const mod = await import(pathToFileURL(path.join(dir, 'pages', 'users.js')).href + '?case=' + (++seq));
   // 表单初值(真实页面里由 openModal 渲染出来)
   Object.assign(document.getElementById('pc-plan'), { value: '2' });
   Object.assign(document.getElementById('pc-periods'), { value: '1' });
   Object.assign(document.getElementById('pc-usage'), { value: 'auto' });
   Object.assign(document.getElementById('pc-remark'), { value: '' });
-  return { be, A: globalThis.__actions };
+  return { be, A: globalThis.__actions, mod };
 }
 const save = () => globalThis.__modal.onSave();
 const $ = (id) => document.getElementById(id);
@@ -326,4 +326,20 @@ test('openModal 打开时把提交按钮恢复成可用', async () => {
   } finally {
     fs.rmSync(uiDir, { recursive: true, force: true });
   }
+});
+
+// 列表「更多」菜单里的三种订阅各复制各的地址:sing-box 那项以前复制成了 Clash 地址(代理面板用的是同一份代码)。
+test('「更多」菜单:Clash / 链接 / sing-box 订阅各复制对应格式的地址', async () => {
+  const { be, A, mod } = await setup();
+  const links = { link: 'https://h:2056/sub/alice', clash: 'https://h:2056/sub/alice?format=clash', json: 'https://h:2056/sub/alice?format=json' };
+  be.onGet = (p) => (p === 'users/1/sub' ? links : []);
+  // 菜单里每个按钮的 data-fmt 和它的文字对得上
+  await mod.render(document.getElementById('page'));
+  const menu = $('users-body').innerHTML;
+  for (const [fmt, label] of [['clash', 'user.subClash'], ['link', 'user.subLink'], ['json', 'user.subJson']]) {
+    assert.ok(menu.includes(`data-act="user.copy" data-id="1" data-fmt="${fmt}">${label}<`), `${label} 的按钮要带 data-fmt="${fmt}"`);
+  }
+  globalThis.__copied = [];
+  for (const fmt of ['clash', 'link', 'json']) await A['user.copy']('1', { dataset: { fmt } });
+  assert.deepEqual(globalThis.__copied, [links.clash, links.link, links.json]);
 });

@@ -652,7 +652,8 @@ registerActions({
   'user.edit': id => editUser(Number(id)),
   'user.detail': id => showDetail(Number(id)),
   'user.copyText': id => copy(id),
-  'user.copy': async (id, btn) => { const l = await get(`users/${id}/sub`); copy(btn.dataset.fmt === 'link' ? l.link : l.clash); },
+  // 「更多」里的三种订阅:data-fmt 是 clash / link / json,各复制各的地址(以前只认 link,sing-box 那项复制成了 Clash 地址)
+  'user.copy': async (id, btn) => { const l = await get(`users/${id}/sub`); const f = btn.dataset.fmt; copy((f === 'link' || f === 'json') && l[f] ? l[f] : l.clash); },
   'user.fillPlan': () => fillFromPlan(fv('f-plan')),
   'user.renew': id => renewDialog([Number(id)]),
   'user.change': id => changeDialog(Number(id)),
