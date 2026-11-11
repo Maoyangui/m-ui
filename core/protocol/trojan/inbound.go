@@ -41,6 +41,7 @@ type Inbound struct {
 	fallbackAddrTLSNextProto map[string]M.Socksaddr
 	transport                adapter.V2RayServerTransport
 	arrivals                 arrival.Recorder // 握手 / 认证没过的记到"最近入站连接"(只记,不影响放行)
+	reality                  bool             // TLS 是 REALITY:握手失败时要看客户端发没发过 TLS 记录(见 arrival.Watch)
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.TrojanInboundOptions) (adapter.Inbound, error) {
@@ -49,6 +50,7 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		router:   router,
 		logger:   logger,
 		arrivals: arrival.FromContext(ctx),
+		reality:  options.TLS != nil && options.TLS.Reality != nil && options.TLS.Reality.Enabled,
 	}
 	if options.TLS != nil {
 		tlsConfig, err := tls.NewServerWithOptions(tls.ServerOptions{
@@ -167,11 +169,12 @@ func (h *Inbound) Close() error {
 
 func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	if h.tlsConfig != nil && h.transport == nil {
-		tlsConn, err := tls.ServerHandshake(ctx, conn, h.tlsConfig)
+		hsConn, watched := arrival.Watch(conn, h.reality)
+		tlsConn, err := tls.ServerHandshake(ctx, hsConn, h.tlsConfig)
 		if err != nil {
 			N.CloseOnHandshakeFailure(conn, onClose, err)
 			h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source, ": TLS handshake"))
-			arrival.Note(h.arrivals, metadata.Source, h.Tag(), h.Type(), arrival.TLS, err) // 到了,但证书 / SNI / REALITY 不对
+			arrival.NoteTLS(h.arrivals, watched, metadata.Source, h.Tag(), h.Type(), err) // 到了,但证书 / SNI / REALITY 不对(连上就断的探测不记)
 			return
 		}
 		conn = tlsConn

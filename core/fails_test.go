@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	M "github.com/sagernet/sing/common/metadata"
+	N "github.com/sagernet/sing/common/network"
 
 	"github.com/Maoyangui/m-ui/core/protocol/arrival"
 )
@@ -108,4 +111,99 @@ func TestArrivalMark(t *testing.T) {
 	if nilMark.Passed() {
 		t.Fatal("nil 标记")
 	}
+}
+
+// REALITY 线路(arrival.Watch 套一层,只看客户端发来的第一个字节):
+//   - 连上就断(一个字节不发,面板自己的大陆 / IPv6 入站检测就是这样)不记,哪怕 REALITY 报的是 processed invalid connection;
+//   - 发来的不是 TLS 记录(HTTP 一类的扫描)不记:REALITY 把它整条转给了伪装目标;
+//   - 发来的是 TLS 记录(0x16:普通 TLS 客户端、公钥 / short_id 不对的 REALITY 客户端)才记;
+//   - 伪装目标连不上的照记(一个字节没收到也记:谁都连不上,是服务器这边要修的);
+//   - 普通 TLS(观察器为 nil)照旧按错误类型认:EOF / 重置 / 超时不记,其它照记。
+func TestArrivalRealityNeedsTLSRecord(t *testing.T) {
+	src := M.SocksaddrFrom(netip.MustParseAddr("198.51.100.7"), 50000)
+	invalid := errors.New("REALITY: processed invalid connection")
+	try := func(send []byte, err error) []string {
+		t.Helper()
+		rec := &fakeRecorder{}
+		srv, cli := net.Pipe()
+		hs, w := arrival.Watch(srv, true)
+		if hs == srv || w == nil {
+			t.Fatal("REALITY 要套一层")
+		}
+		go func() {
+			if len(send) > 0 {
+				_, _ = cli.Write(send)
+			}
+			cli.Close()
+		}()
+		buf := make([]byte, 64)
+		for {
+			if _, err := hs.Read(buf); err != nil {
+				break
+			}
+		}
+		arrival.NoteTLS(rec, w, src, "rl", "vless", err)
+		return rec.got
+	}
+	if got := try(nil, invalid); len(got) != 0 {
+		t.Fatalf("连上就断不该记: %v", got)
+	}
+	if got := try([]byte("GET / HTTP/1.1\r\n\r\n"), invalid); len(got) != 0 {
+		t.Fatalf("不是 TLS 的不该记: %v", got)
+	}
+	if got := try([]byte{0x16, 0x03, 0x01, 0x00, 0x05, 1, 2, 3, 4, 5}, invalid); len(got) != 1 || got[0] != "198.51.100.7|rl|vless|tls|REALITY: processed invalid connection" {
+		t.Fatalf("发来 TLS 记录的要记: %v", got)
+	}
+	if got := try(nil, errors.New("REALITY: failed to dial dest: dial tcp 127.0.0.1:1: connect: connection refused")); len(got) != 1 {
+		t.Fatalf("伪装目标连不上要记: %v", got)
+	}
+
+	// 普通 TLS:不套,按错误类型认
+	srv, _ := net.Pipe()
+	if hs, w := arrival.Watch(srv, false); hs != srv || w != nil {
+		t.Fatal("普通 TLS 不该套")
+	}
+	rec := &fakeRecorder{}
+	arrival.NoteTLS(rec, nil, src, "tj", "trojan", io.EOF)
+	arrival.NoteTLS(rec, nil, src, "tj", "trojan", errors.New("tls: first record does not look like a TLS handshake"))
+	if len(rec.got) != 1 || !strings.Contains(rec.got[0], "first record") {
+		t.Fatalf("普通 TLS 按错误类型认: %v", rec.got)
+	}
+}
+
+// 套的那一层对 sing 的拆包透明(kTLS、vision 按类型找底层 TCP 连接),转给伪装目标时的 io.Copy 交给底层连接。
+func TestArrivalWatchTransparent(t *testing.T) {
+	base := &copyConn{}
+	hs, w := arrival.Watch(base, true)
+	if N.UnwrapReader(hs) != net.Conn(base) || N.UnwrapWriter(hs) != net.Conn(base) {
+		t.Fatal("拆包要拆到底层连接")
+	}
+	if c, ok := N.CastReader[*copyConn](hs); !ok || c != base {
+		t.Fatal("按类型要找得到底层连接")
+	}
+	if _, err := io.Copy(io.Discard, hs); err != nil || !base.wroteTo {
+		t.Fatalf("io.Copy 读这一头要交给底层的 WriteTo: %v %v", err, base.wroteTo)
+	}
+	if _, err := io.Copy(hs, struct{ io.Reader }{strings.NewReader("x")}); err != nil || !base.readFrom {
+		t.Fatalf("io.Copy 写这一头要交给底层的 ReadFrom: %v %v", err, base.readFrom)
+	}
+	if _, ok := w.First(); ok {
+		t.Fatal("没经 Read 读过,不该当成收到了")
+	}
+}
+
+// copyConn 带 WriteTo / ReadFrom 的假连接(像 *net.TCPConn)。
+type copyConn struct {
+	net.Conn
+	wroteTo, readFrom bool
+}
+
+func (c *copyConn) Read([]byte) (int, error) { return 0, io.EOF }
+func (c *copyConn) WriteTo(io.Writer) (int64, error) {
+	c.wroteTo = true
+	return 0, nil
+}
+func (c *copyConn) ReadFrom(r io.Reader) (int64, error) {
+	c.readFrom = true
+	return io.Copy(io.Discard, r)
 }
