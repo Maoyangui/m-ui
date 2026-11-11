@@ -21,6 +21,7 @@ import (
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ha"
 	"github.com/Maoyangui/m-ui/runner"
 	"github.com/Maoyangui/m-ui/selfupdate"
 )
@@ -150,9 +151,9 @@ func panelInfo(dbPath string) (url string, user string, defaultPw bool, err erro
 	return fmt.Sprintf("%s://%s%s", scheme, model.URLHost(scheme, host, portNum), path), "admin", s["adminDefault"] == "true", nil
 }
 
-// infoHost 面板地址里的主机名:订阅域名 → 面板域名 → 公网 IP。
+// infoHost 面板地址里的主机名:面板域名 → 公网 IP(不用订阅域名:订阅可能单独一个域名,换过主机后还是随主机身份迁来的)。
 func infoHost(s map[string]string) string {
-	for _, k := range []string{"subDomain", "webDomain", "publicIp"} {
+	for _, k := range []string{"webDomain", "publicIp"} {
 		if v := strings.TrimSpace(s[k]); v != "" {
 			return v
 		}
@@ -243,6 +244,7 @@ func runMenu() {
 		case "1":
 			printPanelInfo(dbPath)
 		case "2":
+			haPauseBefore(dbPath, 5, "重启前")
 			systemctl("restart", "m-ui")
 			time.Sleep(2 * time.Second)
 			fmt.Println("  状态:", stateColored())
@@ -298,6 +300,7 @@ func runMenu() {
 			}
 			fmt.Println(colorGreen + "  已写入,重启后生效" + colorReset)
 			if ask("  现在重启? [Y/n]: ") != "n" {
+				haPauseBefore(dbPath, 5, "重启前")
 				systemctl("restart", "m-ui")
 				time.Sleep(2 * time.Second)
 				printPanelInfo(dbPath)
@@ -356,6 +359,7 @@ func runMenu() {
 			fmt.Println(colorGreen+"  自签证书已生成并设为数据面证书:", crt, colorReset)
 			fmt.Println(colorGray + "  订阅会自动带 allow-insecure;重启后生效" + colorReset)
 			if ask("  现在重启? [Y/n]: ") != "n" {
+				haPauseBefore(dbPath, 5, "重启前")
 				systemctl("restart", "m-ui")
 			}
 		case "12":
@@ -378,6 +382,12 @@ func runMenu() {
 				} else {
 					fmt.Println("  已备份到:", out)
 				}
+			}
+			// 换了角色就是换了集群:清掉本机的主机容灾状态(纪元、认的主机、交接标记、副本……),
+			// 不然新主机(或没开容灾的主机)发来的请求会一律被当成旧主机拒掉
+			if err := haResetLocal(dbPath); err != nil {
+				fmt.Println(colorRed+"  清掉本机的主机容灾状态失败:", err, colorReset)
+				break
 			}
 			_ = runner.SetSettings(dbPath, map[string]string{"nodeMode": strconv.FormatBool(!cur)})
 			fmt.Println(colorGreen + "  已切换,重启生效" + colorReset)
@@ -434,14 +444,74 @@ func stateColored() string {
 	return colorGray + s + colorReset
 }
 
-// resetSettings 清空 settings 表(保留其它表),管理员密码不在其中。
+// resetSettings 清空设置表(管理员表、线路、用户等不动)。主机容灾的本机状态(纪元、认的主机、签名密钥……)留着:
+// 主机容灾的本机状态(纪元、认的主机、签名密钥……)留着:它们回退了,副机会把本机当成旧主机拒掉,甚至本机把自己降成副机。
 func resetSettings(dbPath string) error {
 	db, err := database.Open(dbPath)
 	if err != nil {
 		return err
 	}
 	defer database.Close(db)
-	return db.Exec("DELETE FROM settings").Error
+	var keys []string
+	if err := db.Raw("SELECT key FROM settings").Scan(&keys).Error; err != nil {
+		return err
+	}
+	for _, k := range keys {
+		if strings.HasPrefix(k, "ha") && ha.IsLocal(k) {
+			continue
+		}
+		if err := db.Exec("DELETE FROM settings WHERE key = ?", k).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// haResetLocal 清掉本机的主机容灾状态(菜单切换角色时用)。
+func haResetLocal(dbPath string) error {
+	db, err := database.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	defer database.Close(db)
+	return ha.ResetLocal(db, filepath.Dir(dbPath))
+}
+
+// haPauseBefore 升级、重启前暂停接任(本机是开着主机容灾的主机时):服务在跑就交给它(马上推给备用),
+// 没在跑或没回应就直接写 haPauseUntil。已经暂停得更久的不缩短;没开容灾、本机是副机时什么都不做。
+// 不暂停的话,升级重启那一两分钟备用会判主机失联、发确认接任的提示。
+func haPauseBefore(dbPath string, minutes int, why string) {
+	s, err := settingsRO(dbPath)
+	if err != nil || strings.EqualFold(s["nodeMode"], "true") {
+		return
+	}
+	if e, _ := strconv.ParseUint(strings.TrimSpace(s[ha.KeyEpoch]), 10, 64); e == 0 {
+		return
+	}
+	switch strings.TrimSpace(s[ha.KeyMode]) {
+	case ha.ModeConfirm, ha.ModeAuto:
+	default:
+		return
+	}
+	until := time.Now().Add(time.Duration(minutes) * time.Minute).Unix()
+	if cur, _ := strconv.ParseInt(strings.TrimSpace(s[ha.KeyPauseUntil]), 10, 64); cur >= until {
+		return
+	}
+	if serviceState() == "active" {
+		if db, err := database.Open(dbPath); err == nil {
+			r, err := ha.SubmitCmd(db, ha.Cmd{Op: "pause", Min: minutes}, 20*time.Second)
+			database.Close(db)
+			if err == nil && r.OK {
+				fmt.Println(colorGray + "  " + why + "已暂停接任 " + strconv.Itoa(minutes) + " 分钟(备用不会误判主机失联)" + colorReset)
+				return
+			}
+		}
+	}
+	if err := runner.SetSettings(dbPath, map[string]string{ha.KeyPauseUntil: strconv.FormatInt(until, 10)}); err != nil {
+		fmt.Println(colorRed+"  "+why+"暂停接任失败:", err, colorReset)
+		return
+	}
+	fmt.Println(colorGray + "  " + why + "已暂停接任 " + strconv.Itoa(minutes) + " 分钟" + colorReset)
 }
 
 // selfUpdate:菜单里的"更新到最新版"。与面板按钮共用 selfupdate 的升级事务:
@@ -506,6 +576,7 @@ func selfUpdate(ask func(string) string) error {
 	}
 	selfupdate.ClearStatus(plan.StatusPath)
 	fmt.Println(colorGreen + "  已换上 " + tag + ",重启服务并等它起来(最多 90 秒)…" + colorReset)
+	haPauseBefore(dbPath, 15, "升级前")
 	systemctl("restart", "m-ui")
 	st, err := selfupdate.Watch(plan, os.Stdout)
 	switch {
