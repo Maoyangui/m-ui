@@ -1,5 +1,8 @@
 //go:build !race
 
+// 起真实的内嵌数据面(sing-box 实例 + 本机回环上的 SOCKS 上游),所以不在 -race 下跑:sing-box 起停实例时有上游库自己的竞态
+// (和 CI 竞态检测步骤原先不跑 runner、core/arrival_e2e_test.go 同一个原因),会淹掉真正要看的报告。普通 go test 照跑。
+
 package runner
 
 import (
