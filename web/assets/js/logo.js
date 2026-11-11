@@ -25,6 +25,17 @@ const blobToDataURL = blob => new Promise((resolve, reject) => {
   r.readAsDataURL(blob);
 });
 
+// svgLength SVG 根元素宽高的取值换成 px:不带单位和 px 原样,绝对单位按 CSS 的换算(1in = 96px = 2.54cm = 72pt = 6pc);
+// 百分比、em 之类相对单位和不认识的写法返回 NaN(按没写尺寸处理)。以前只认不带单位和 px:width="100mm" 又没有 viewBox 的
+// (老版 Inkscape 等导出的)被当成没写尺寸、补一个 0 0 300 150 的 viewBox,可内容是按 378×113 画的,右边被裁掉一截、下面多出空白。
+const SVG_UNITS = { px: 1, pt: 4 / 3, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, q: 96 / 101.6 };
+export function svgLength(v) {
+  const m = /^\s*(\+?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(px|pt|pc|in|cm|mm|q)?\s*$/i.exec(v || '');
+  if (!m) return NaN;
+  const n = parseFloat(m[1]) * SVG_UNITS[(m[2] || 'px').toLowerCase()];
+  return Number.isFinite(n) ? n : NaN;
+}
+
 // svgURL 把 SVG 的宽高改写成长边 SVG_SIDE(比例取自原来写的宽高,没写就取 viewBox),返回可加载的地址。
 // 只有 viewBox、或宽高写成百分比的,Firefox 画不到 canvas 上;写了 24×24 这种小尺寸的,按原样栅格化放到落地页上会糊。
 // 矢量图放大不损失清晰度,所以一律先按大尺寸画,再和位图一样缩到 480×160 以内。
@@ -32,15 +43,14 @@ async function svgURL(file) {
   const doc = new DOMParser().parseFromString(await file.text(), 'image/svg+xml');
   const svg = doc.documentElement;
   if (!svg || svg.localName !== 'svg' || doc.getElementsByTagName('parsererror').length) throw new Error(t('set.logoBad'));
-  const px = v => (/^\s*[\d.]+(px)?\s*$/i.test(v || '') ? parseFloat(v) : NaN);
-  let w = px(svg.getAttribute('width')), h = px(svg.getAttribute('height'));
+  let w = svgLength(svg.getAttribute('width')), h = svgLength(svg.getAttribute('height'));
   const vb = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
   const hasVB = vb.length === 4 && vb.every(Number.isFinite) && vb[2] > 0 && vb[3] > 0;
   if (!(w > 0 && h > 0)) {
     if (hasVB) {
       w = vb[2]; h = vb[3];
     } else {
-      w = 300; h = 150; // 浏览器对没写尺寸的 SVG 也是按 300×150 算
+      w = 300; h = 150; // 浏览器对没写尺寸(或写的是百分比这类相对尺寸)的 SVG 也是按 300×150 算
     }
   }
   // 没有 viewBox 时按原来的画布补一个:改大宽高时内容跟着放大,而不是只多出空白

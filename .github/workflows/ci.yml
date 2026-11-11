@@ -42,6 +42,8 @@ jobs:
           done
       - name: Donors settle
         run: node --test deploy/donors/settle.test.mjs
+      - name: Frontend (landing page logo upload)
+        run: node --test web/jstest/logo.test.mjs
       - name: Frontend (external nodes page)
         run: node --test web/jstest/exts.test.mjs
       - name: Frontend (users page plan dialogs)
