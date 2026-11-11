@@ -1190,7 +1190,7 @@
     <h3>Data-plane safety switches</h3>
     <ul>
       <li><b data-k="set.allowPrivate">Let users reach private / local addresses</b>: off by default, so users cannot reach services that listen only on 127.0.0.1 (such as the WARP port) or your internal network through the proxy. Turn it on only if users really need internal services.</li>
-      <li>The panel port is not covered: users can still open <code>SERVER-PUBLIC-IP:PANEL-PORT</code> through the proxy, and that traffic goes through the server's loopback, so firewall IP allow-lists do not stop it. Do not rely on allow-lists alone to protect a panel: change the default port and path, use a strong password and turn on two-factor authentication.</li>
+      <li>The panel port is not covered: users can still open <code>SERVER-PUBLIC-IP:PANEL-PORT</code> through the proxy; on the many VPSes whose public IP sits on the network card, that traffic goes through the server's loopback, so firewall IP allow-lists do not stop it. Do not rely on allow-lists alone to protect a panel: change the default port and path, use a strong password and turn on two-factor authentication.</li>
       <li><b data-k="set.blockBT">Block BitTorrent</b>: refuses BitTorrent through the proxy so your VPS does not attract copyright complaints.</li>
       <li>Give nodes HTTPS API URLs; otherwise tokens and user credentials are synced in plain text.</li>
       <li>Backup zips contain user credentials and private keys, and the external API token equals admin rights: keep all of them safe.</li>
