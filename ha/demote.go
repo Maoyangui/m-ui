@@ -289,6 +289,28 @@ func (s *Service) nodeKnown(id uint) bool {
 // evaluateDemote 按最近的回复判定要不要变为副机、收回(见文件开头的判定顺序)。startup 为真表示启动自检:每台都已经问过一遍,
 // 没回的就当不可达。返回是否变为副机了。
 func (s *Service) evaluateDemote(startup bool) bool {
+	// 同一时刻只判一次:判定里会推状态(收回、抬纪元),推出去的回复又会进来要求判定 —— 那些不重入,
+	// 只让正在判的那一次做完后再判一轮(最多再判两轮:推状态引来的回复不能让它一直转下去)
+	c := s.core()
+	for round := 0; round < 3; round++ {
+		if !c.evalMu.TryLock() {
+			c.evalAgain.Store(true)
+			if !c.evalMu.TryLock() {
+				return false // 持锁的那一次放锁后会看到 evalAgain,再判一轮
+			}
+		}
+		c.evalAgain.Store(false)
+		done := s.evaluateDemoteLocked(startup)
+		c.evalMu.Unlock()
+		if done || !c.evalAgain.Load() {
+			return done
+		}
+	}
+	return false
+}
+
+// evaluateDemoteLocked 判定本身(持 evalMu)。
+func (s *Service) evaluateDemoteLocked(startup bool) bool {
 	if s.IsNode() {
 		return false
 	}
@@ -298,12 +320,6 @@ func (s *Service) evaluateDemote(startup bool) bool {
 	if demoting {
 		return false
 	}
-	// 同一时刻只判一次:判定里会推状态(收回、抬纪元),推出去的回复又会进来要求判定 —— 那些只记下,不重入
-	c := s.core()
-	if !c.evalMu.TryLock() {
-		return false
-	}
-	defer c.evalMu.Unlock()
 	t := s.tally()
 	if startup {
 		t.unknown = 0

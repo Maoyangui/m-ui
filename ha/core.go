@@ -3,6 +3,7 @@ package ha
 import (
 	"crypto/ed25519"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -11,6 +12,8 @@ import (
 type coreState struct {
 	mu     sync.Mutex // 管下面的字段(baseKey、notListed 除外)
 	evalMu sync.Mutex // 主机侧的判定同一时刻只做一次(TryLock:判定里推状态,回复又会进来要求判定)
+	// evalAgain 判定进行中又来了新回复:做完这一次再判一次(不然几台同时回 stale 时,后到的那条只记下、没人再判)
+	evalAgain atomic.Bool
 
 	inst    string             // 本机实例号(<数据目录>/ha/instance,读一次就缓存)
 	baseKey ed25519.PrivateKey // 与 Service.base 一起缓存的签名私钥(归 Service.mu 管)
