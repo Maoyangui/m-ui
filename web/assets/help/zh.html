@@ -680,7 +680,7 @@
       <li><b data-k="user.reason.manual">手动</b>:手动停用的不会因为重置流量、延长到期或周期重置而自动恢复。但用套餐续费或延期(<b data-k="user.renewMenu">续费…</b>、批量 <b data-k="user.batch.plan">套用套餐</b>)和 <b data-k="user.changeMenu">换套餐…</b> 是明确的开通动作,会把他一并启用<span data-pending="backup-certs">:续费和批量套用套餐时,面板会先提示里面有手动停用的人、续费后会被启用</span>。外部 API 的续费、换套餐也一样会启用。</li>
       <li data-scope="admin"><b data-k="user.limited">限速中</b>:正被规则临时限速(见 <a href="#rules">规则</a>)。</li>
       <li><b data-k="user.kick">踢下线</b>:断开这个用户在所有服务器上的连接(hysteria2、TUIC、AnyTLS 整条会话一起关)。没停用的话客户端会马上重连,想彻底断就先停用。</li>
-      <li>列表上方可以按 <b data-k="user.filter.all">全部</b>、<b data-k="user.filter.online">在线</b>、<b data-k="user.filter.enabled">启用</b>、<b data-k="user.filter.disabled">停用</b>、<b data-k="user.filter.expired">已过期</b>、<b data-k="user.filter.over">超量</b> 筛选,也可以只看某个套餐。在当前页全选后,批量条上可以一键选中全部筛选结果,一起操作。</li>
+      <li>列表上方可以按 <b data-k="user.filter.all">全部</b>、<b data-k="user.filter.online">在线</b>、<b data-k="user.filter.enabled">启用</b>、<b data-k="user.filter.disabled">停用</b>、<b data-k="user.filter.expired">已过期</b>、<b data-k="user.filter.over">超量</b> 筛选,也可以只看某个套餐。在当前页全选后(手机上勾任意一个后),批量条上可以一键选中全部筛选结果,一起操作;这一下会换掉之前勾的人,只留当前的筛选结果。换筛选、换搜索之前勾的人会一直留着,批量操作时其中有当前列表里看不到的,会先问一句再处理。</li>
     </ul>
   </section>
 
