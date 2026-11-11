@@ -583,13 +583,13 @@
     <h3>Create a user</h3>
     <p class="lede"><b data-k="nav.users">Users</b> page → <b data-k="user.add">Add user</b>; fill in the limits, tick the lines and save, and the subscription link is ready.</p>
     <ul>
-      <li data-scope="admin"><b data-k="user.f.name">Username (subscription id)</b>: on the main panel the username is the subscription id by default, so no spaces or / ? # &amp;. If "use the username in subscription links" is turned off in the settings, it is just a name and the link gets a random token.</li>
-      <li data-scope="reseller"><b data-k="user.f.nameOnly">Username</b>: just a name; the subscription link gets a random token automatically.</li>
+      <li data-scope="admin"><b data-k="user.f.name">Username (subscription id)</b>: on the main panel the username is the subscription id by default, so no spaces or / ? # &amp;, and it must be unique. Anyone who knows the username can fetch the subscription, so avoid easy guesses such as test, user1 or real names; safer still, turn off <b data-k="set.subUseUserName" class="wrap">Use the username as the subscription URL</b> under <b data-k="nav.settings">Settings</b> → <b data-k="set.sub">Subscription</b> so new users get a random token (the username is then just a name), and use <b data-k="user.rotate">Reset subscription link</b> to give existing users random links.</li>
+      <li data-scope="reseller"><b data-k="user.f.nameOnly">Username</b>: just a name that does not appear in the subscription link (the link gets a random token automatically). It still cannot contain spaces or / ? # &amp;, and it must be unique across the whole site: a name another reseller or the main panel already uses is refused, so add your own prefix to every name.</li>
       <li>With plans, choose the <b data-k="user.plan">Plan</b> and click <b data-k="user.fromPlan">Fill from plan</b> to fill in every limit at once. Otherwise fill in <b data-k="user.f.volume">Quota GB (0 = unlimited)</b>, <b data-k="user.f.expiry">Expiry (empty = never)</b>, <b data-k="user.f.device">Concurrent devices (0 = unlimited)</b>, <b data-k="user.f.up">Upload limit Mbps (0 = unlimited)</b> and <b data-k="user.f.down">Download limit Mbps (0 = unlimited)</b>.</li>
       <li>For monthly plans whose traffic resets, tick <b data-k="user.f.autoReset">Periodic traffic reset</b> and set the <b data-k="user.f.resetDays">Reset period (days)</b>.</li>
       <li>Tick the <b data-k="user.f.lines">Lines</b>. A line on several servers has several entries, and you can give just the entry on one server (switch between server groups; ticks are kept).</li>
       <li data-scope="admin"><b data-k="user.f.exts">External nodes</b>: ticked external nodes are added after your own nodes in the user's subscription.</li>
-      <li><b data-k="user.f.remark">Remark</b>: an order number, contact details and so on.</li>
+      <li><b data-k="user.f.remark">Remark</b>: an order number, contact details and so on. Note: when neither <b data-k="set.subTitle">Profile title</b> nor <b data-k="set.subPageTitle">Page title</b> is set, apps show the remark as the subscription name (the username when the remark is empty), so keep anything users should not see out of it.</li>
     </ul>
     <div class="tip"><b>Gift cards and trials</b>Set <b data-k="user.f.activate" class="wrap">Expire N days after first connection (0 = off)</b>: the clock starts only when the user first uses traffic, and the expiry date is ignored.</div>
   </section>
@@ -604,7 +604,7 @@
       <li>Devices: counted by source IPs online at the same time, across all servers. Several devices behind one Wi-Fi (one public IPv4, or one IPv6 /64) count as one; IPv4 and IPv6 are counted against the limit separately, so one device using both is not counted twice.</li>
       <li>When the limit is reached only new devices are refused; connected ones are not affected. A slot frees up about a minute after another device goes offline.</li>
       <li data-scope="admin">Refused connections are shown in red as <b data-k="dash.rejectedDevice">Refused: device limit</b> in <b data-k="dash.recentConns">Recent inbound connections</b> on the dashboard.</li>
-      <li>Speed limits: all of the user's connections share the bandwidth, and changes apply immediately.</li>
+      <li>Speed limits: on one server, all of the user's connections share the bandwidth; using several servers at once gives one allowance per server. Changes apply immediately.</li>
     </ul>
   </section>
 
@@ -612,7 +612,9 @@
     <h3>Subscription links, QR codes and sharing</h3>
     <p class="lede">Click a user's name (or <b data-k="common.details">Details</b>) to open the details; the subscription links and QR code are at the top.</p>
     <ul>
-      <li>Under <b data-k="user.subscription">Subscription</b>, click <b data-k="common.copy">Copy</b> and send the link; phones can scan the QR code. The <b data-k="common.more">More</b> menu in the list can also copy the <b data-k="user.subClash">Clash subscription</b>, <b data-k="user.subLink">Link subscription</b> or <b data-k="user.subJson">sing-box subscription</b>.</li>
+      <li>Under <b data-k="user.subscription">Subscription</b> there are two links: the one with <code>?format=clash</code> is for Clash only; the one without <code>?format=</code> is the universal link, and that is the one to send (a browser opens the landing page, and apps get the right format when they fetch it). Click <b data-k="common.copy">Copy</b> next to it.</li>
+      <li>The QR code in the details is the Clash link, meant for scanning with a Clash-type app; a phone camera would only download a config file, so let such users open their landing page and scan or import from there.</li>
+      <li>The <b data-k="common.more">More</b> menu in the list can also copy the <b data-k="user.subClash">Clash subscription</b>, the <b data-k="user.subLink">Link subscription</b> (the universal link) or the <b data-k="user.subJson">sing-box subscription</b>.</li>
       <li>Opened in a browser, the link shows the user's landing page: usage, expiry, one-tap import for each app and a QR code (see <a href="#sub">Subscriptions and landing page</a>).</li>
       <li><b data-k="user.share">Shared</b>: users can create a temporary link for a friend on their landing page; traffic and devices count against them. The details show that link, and <b data-k="user.unshare">Revoke</b> cancels it at once.</li>
       <li>Link leaked? <b data-k="common.more">More</b> → <b data-k="user.rotate">Reset subscription link</b>. The link gets a new random token, all protocol credentials are regenerated, the old link stops working and online devices are disconnected; send the new link to the user.</li>
@@ -620,17 +622,17 @@
     </ul>
   </section>
 
-  <section class="sec" id="users-renew" data-pending="plan-api">
+  <section class="sec" id="users-renew">
     <h3>Renew, extend and change plans</h3>
     <p class="lede">In the <b data-k="common.more">More</b> menu (or the user's details), <b data-k="user.renewMenu">Renew…</b> and <b data-k="user.changeMenu">Change plan…</b> handle renewals, upgrades and downgrades.</p>
     <ul>
-      <li><b data-k="user.renewMenu">Renew…</b>: <b data-k="plan.pick">Choose a plan</b> (the user's current plan by default), then the mode: <b data-k="plan.renew">Renew (reset traffic, extend)</b>, <b data-k="plan.extend">Extend (keep traffic)</b> or <b data-k="plan.bind" class="wrap">Only assign to this plan (keep quota and expiry)</b>. <b data-k="pc.periods">Periods</b> renews several periods at once (1–120): enter 3 or 12 to sell a monthly plan quarterly or yearly. For a single user the new expiry and quota are previewed below as you type.</li>
-      <li><b data-k="user.extend">Extend 30 days</b>: one click adds 30 days for users who have an expiry date.</li>
+      <li><b data-k="user.renewMenu">Renew…</b>: <b data-k="plan.pick">Choose a plan</b> (the user's current plan by default), then the mode: <b data-k="plan.renew">Renew (reset traffic, extend)</b>, <b data-k="plan.extend">Extend (keep traffic)</b> or <b data-k="plan.bind" class="wrap">Only assign to this plan (keep quota and expiry)</b>. <b data-k="pc.periods">Periods</b> renews several periods at once (1–120): enter 3 or 12 to sell a monthly plan quarterly or yearly. For a single user the new expiry and quota are previewed below as you type. Renewing or extending with a plan is an explicit sale, so users disabled as <b data-k="user.reason.manual">manual</b> are enabled too<span data-pending="backup-certs"> (the panel warns first)</span>.</li>
+      <li><b data-k="user.extend">Extend 30 days</b>: one click adds 30 days for users who have an expiry date (for "N days after first connection" users whose clock has not started, it is added to N); users disabled for expiry come back, users disabled by hand stay disabled.</li>
       <li><b data-k="user.changeMenu">Change plan…</b>: choose the <b data-k="pc.target">New plan</b> and one of three ways under <b data-k="pc.mode">How</b>:
         <ul>
           <li><b data-k="pc.mode.replace">Replace now</b>: the new plan starts now for N periods; time and traffic left on the old subscription are dropped.</li>
-          <li><b data-k="pc.mode.stack">Stack</b>: keeps the time left (and one-off traffic) and adds N periods; for plans with periodic resets traffic is a per-period allowance and does not stack.</li>
-          <li><b data-k="pc.mode.prorate">Prorate</b>: converts the value left on the old subscription into time on the new plan, using both plans' <b data-k="plan.price">Reference price (optional)</b>; both plans need a price, and periods can be 0.</li>
+          <li><b data-k="pc.mode.stack">Stack</b>: keeps the time left (and one-off traffic) and adds N periods; for plans with periodic resets traffic is a per-period allowance and does not stack. An expired subscription carries nothing over; if the new plan has no time or traffic limit, the existing finite expiry or quota is kept.</li>
+          <li><b data-k="pc.mode.prorate">Prorate</b>: converts the value left on the old subscription into time on the new plan (one-off traffic plans also get traffic), using both plans' <b data-k="plan.price">Reference price (optional)</b>; the new plan starts now. The user must have a plan and change to a different one, both plans need a price, and periods can be 0.</li>
         </ul></li>
       <li><b data-k="pc.usage">This period's usage</b>: <b data-k="pc.usage.auto">Auto</b> (reset for replace and prorate, kept for stack), <b data-k="pc.usage.keep">Keep (carry on)</b> or <b data-k="pc.usage.reset">Reset (new period)</b>.</li>
       <li>The dialog previews <b data-k="pc.before">Before</b> and <b data-k="pc.after">After</b> live and marks it as an <b data-k="pc.dir.upgrade">upgrade</b> or a <b data-k="pc.dir.downgrade">downgrade</b>. Effects that hurt the user, such as an earlier expiry or going over quota at once, are shown in red, and you must tick <b data-k="pc.force" class="wrap">I have read the effects marked in red, proceed anyway</b> before <b data-k="pc.confirm">Change plan</b> works.</li>
@@ -648,7 +650,7 @@
       <li>Tick <b data-k="user.f.autoReset">Periodic traffic reset</b> for monthly resets, and <b data-k="plan.firstUse">Start the clock at first connection</b> for gift cards.</li>
       <li><b data-k="plan.lines">Lines</b>: applying the plan replaces the user's lines with these; empty = keep the user's lines.</li>
       <li data-scope="admin"><b data-k="plan.rules">Rate-limit rules</b>: ticked rules apply to every user of the plan, current and future.</li>
-      <li data-pending="plan-api"><b data-k="plan.price">Reference price (optional)</b>: only used by "prorate" when changing plans and never shown to users; give two plans the same price to swap them at equal value.</li>
+      <li><b data-k="plan.price">Reference price (optional)</b>: only used by "prorate" when changing plans and never shown to users; give two plans the same price to swap them at equal value.</li>
     </ol>
     <ul>
       <li>The Plans page shows how many users each plan has.</li>
@@ -662,8 +664,8 @@
     <p class="lede">Tick several users and a batch bar appears at the top (the header checkbox ticks the current page only).</p>
     <ul>
       <li><b data-k="user.batch.enable">Enable</b>, <b data-k="user.batch.disable">Disable</b>, <b data-k="user.batch.extend">Extend</b>, <b data-k="user.batch.plan">Apply plan</b>, <b data-k="user.batch.reset">Reset traffic</b>, <b data-k="user.batch.delete">Delete</b>.</li>
-      <li data-scope="admin"><b data-k="user.bulk">Bulk create</b>: creates <b data-k="user.bulkCount">Count</b> users at once from a <b data-k="user.bulkPrefix">Username prefix</b>; for <b data-k="user.bulkMode">Naming</b> choose <b data-k="user.bulkRandom">prefix + 8 random chars</b> or <b data-k="user.bulkSeq" class="wrap">prefix + sequence (001…, random subscription URL)</b>. All the subscription links can be copied afterwards.</li>
-      <li data-scope="admin"><b data-k="user.batch.export">Export CSV</b>: exports the user list.</li>
+      <li data-scope="admin"><b data-k="user.bulk">Bulk create</b>: creates <b data-k="user.bulkCount">Count</b> users at once from a <b data-k="user.bulkPrefix">Username prefix</b>; for <b data-k="user.bulkMode">Naming</b> choose <b data-k="user.bulkRandom">prefix + 8 random chars</b> or <b data-k="user.bulkSeq" class="wrap">prefix + sequence (001…, random subscription URL)</b>. Afterwards every new user's link is listed and can be copied in one go. These are Clash links (ending in <code>?format=clash</code>); for users who do not use Clash, remove the <code>?format=clash</code> at the end to get the universal link.</li>
+      <li data-scope="admin"><b data-k="user.batch.export">Export CSV</b>: exports the user list; its subscription column holds Clash links too.</li>
     </ul>
   </section>
 
@@ -672,7 +674,7 @@
     <p class="lede">The status column says why a user is disabled, which tells you how they come back.</p>
     <ul>
       <li><b data-k="user.reason.quota">over quota</b>, <b data-k="user.reason.expired">expired</b>: renewing, resetting traffic or extending the expiry re-enables them automatically.</li>
-      <li><b data-k="user.reason.manual">manual</b>: disabled by hand, and only enabling them by hand brings them back.</li>
+      <li><b data-k="user.reason.manual">manual</b>: resetting traffic, extending the expiry or a periodic reset never brings them back. Renewing or extending with a plan (<b data-k="user.renewMenu">Renew…</b>, batch <b data-k="user.batch.plan">Apply plan</b>) and <b data-k="user.changeMenu">Change plan…</b> are explicit sales and do enable them<span data-pending="backup-certs">: when renewing or applying a plan in a batch, the panel first warns that users disabled by hand will be enabled</span>. Renewals and plan changes through the external API enable them as well.</li>
       <li data-scope="admin"><b data-k="user.limited">Limited</b>: temporarily slowed down by a rule (see <a href="#rules">Rules</a>).</li>
       <li><b data-k="user.kick">Kick</b>: closes the user's connections on every server (hysteria2, TUIC and AnyTLS sessions are closed entirely). If the user is still enabled the app reconnects right away, so disable them first to cut them off.</li>
       <li>Filter the list with <b data-k="user.filter.all">All</b>, <b data-k="user.filter.enabled">Enabled</b>, <b data-k="user.filter.disabled">Disabled</b>, <b data-k="user.filter.expired">Expired</b> or <b data-k="user.filter.over">Over quota</b>.</li>
@@ -684,7 +686,8 @@
     <p class="lede">Use this when your lines are already set up in m-ui and you only want to bring the old users over.</p>
     <ul>
       <li>On the <b data-k="nav.users">Users</b> page click <b data-k="user.import">Import from old panel</b>, upload the old panel's .db file and click <b data-k="user.importGo">Import</b>.</li>
-      <li>Users with the same name only get their usage, quota, expiry and status updated; the rest are created with their old credentials (clients need no changes). You can tick <b data-k="user.importAssign">Give newly created users every existing line</b>.</li>
+      <li>Users with the same name are overwritten with the old database's usage, quota, expiry, status and periodic reset, plus a non-empty remark and description; the rest are created with the old panel's credentials. You can tick <b data-k="user.importAssign">Give newly created users every existing line</b>.</li>
+      <li>Importing only users keeps m-ui's own lines, inbound ports, subscription port and path: users must import their new m-ui subscription link, so send it to everyone before you turn the old panel off.</li>
       <li>To move lines, upstreams and settings too, see <a href="#bk-import">Moving from an old panel</a>.</li>
     </ul>
   </section>
@@ -736,7 +739,7 @@
       <li><b data-k="nav.resellers">Resellers</b> page → <b data-k="rs.add">Add reseller</b>: the <b data-k="common.name">Name</b> is the reseller's login name.</li>
       <li>Tick the <b data-k="rs.lines">Allowed lines</b>: resellers can only give these lines to their users, and you can allow just the entry on one server.</li>
       <li>Set the limits: <b data-k="rs.volumeGb">Traffic quota GB</b>, <b data-k="rs.userLimit">Max users</b>, <b data-k="rs.deviceLimit">Device pool</b>, <b data-k="rs.speedUp">Bandwidth pool · up Mbps</b> / <b data-k="rs.speedDown">Bandwidth pool · down Mbps</b>, <b data-k="rs.expiry">Expires (empty = never)</b>; 0 = unlimited.</li>
-      <li>Send them the reseller panel address shown at the top of the page (default port 2054, path <code>/dl/</code>).</li>
+      <li>Send them the reseller panel address: it is shown below the reseller list and in the message after creating one (default port 2054, path <code>/dl/</code>).</li>
     </ol>
     <ul>
       <li>New resellers have no password: within 24 hours they sign in with their name and an empty password, then set one. If that window passed or they forgot the password: <b data-k="common.more">More</b> → <b data-k="rs.passwd">Reset password</b> (this also clears their 2FA and API token and opens a new 24-hour window).</li>
@@ -787,7 +790,7 @@
       <li><b data-k="acct.password">Password</b>: change your password.</li>
       <li><b data-k="adm.totp">Two-factor authentication (2FA)</b>: see <a href="#sec-account">Account and two-factor authentication</a>.</li>
       <li><b data-k="set.subPage">Subscription page</b>: the texts your users see: <b data-k="set.subTitle">Profile title</b> (the subscription name shown in apps), <b data-k="set.subPageTitle">Page title</b>, <b data-k="set.subPageSupport">Footer contact</b>, <b data-k="set.subPageBuyURL">Purchase / renew link</b> and <b data-k="set.subPageNotice">Notice (multi-line)</b>; empty fields use the main panel's. You can also turn off the page or temporary sharing for your users.</li>
-      <li data-pending="landing"><b data-k="set.subPageLogo">Landing page logo</b>: upload your own logo; without one, the main panel's is used.</li>
+      <li><b data-k="set.subPageLogo">Landing page logo</b>: upload your own logo, which applies at once; without one, the main panel's is used.</li>
       <li><b data-k="acct.api">External API</b>: for your own shop or bot (see <a href="#api">External API</a>).</li>
     </ul>
   </section>
@@ -812,10 +815,10 @@
   <section class="sec" id="sub-import">
     <h3>How users import it</h3>
     <ul>
-      <li>Easiest: send the link and have the user open it in a phone or computer browser, then tap one-tap import for their app or scan the QR code.</li>
-      <li>The download arrow at the top right of the one-tap import button opens a download page with apps for each system (iOS, Android, Windows, macOS, Linux); it holds no user data and can be forwarded as is.</li>
+      <li>Easiest: send the universal link (the one without <code>?format=</code>) and have the user open it in a phone or computer browser, then tap one-tap import for their app or scan the QR code.</li>
+      <li>The download arrow at the top right of the one-tap import button opens a download page with apps for each system (iOS, Android, Windows, macOS, Linux). Its address contains the user's own subscription link (so does its "← Back to subscription" link), so do not forward it; to help someone install an app, send them the app's website or release page.</li>
       <li>Users can also copy the link and paste it into their app's "add subscription".</li>
-      <li>The name shown in apps comes from <b data-k="set.subTitle">Profile title</b>. Shadowrocket and Clash Verge fix the name when the subscription is added, so after changing the title users must remove and re-add it, or use one-tap import on the landing page (which carries the title).</li>
+      <li>The name shown in apps is the first non-empty one of <b data-k="set.subTitle">Profile title</b>, <b data-k="set.subPageTitle">Page title</b>, the user's <b data-k="user.f.remark">Remark</b> and the username. Shadowrocket and Clash Verge fix the name when the subscription is added, so after changing the title users must remove and re-add it, or use one-tap import on the landing page (which carries the title).</li>
     </ul>
   </section>
 
@@ -824,7 +827,7 @@
     <p class="lede">Under <b data-k="nav.settings">Settings</b> → <b data-k="set.sub">Subscription</b> and <b data-k="set.subTmpl">Subscription formats and templates</b>.</p>
     <ul>
       <li><b data-k="set.subTitle">Profile title</b>, <b data-k="set.subUpdates">Update interval (hours)</b>.</li>
-      <li><b data-k="set.subUseUserName">Use the username as the subscription URL</b>: on by default; when off, new users get random tokens and existing users keep their links.</li>
+      <li><b data-k="set.subUseUserName" class="wrap">Use the username as the subscription URL</b>: on by default; when off, new users get random tokens and existing users keep their links.</li>
       <li><b data-k="set.subInsecure">Allow insecure certificate in subscriptions</b>: automatic by default (on with a self-signed certificate).</li>
       <li><b data-k="set.subServerAddr">Node address in subscriptions</b>: <b data-k="set.addrIp">IP (recommended)</b> or <b data-k="set.addrDomain">domain</b>.</li>
       <li><b data-k="set.subEncode">Base64-encode link subscription</b>, <b data-k="set.subNotice">Show traffic notice node on top</b>, <b data-k="set.extRefresh" class="wrap">External subscription refresh interval (minutes)</b>.</li>
@@ -844,12 +847,12 @@
       <li><b data-k="set.subPageTitle">Page title</b>, <b data-k="set.subPageSupport">Footer contact</b>, <b data-k="set.subPageNotice">Notice (multi-line)</b>.</li>
       <li><b data-k="set.subPageBuyURL">Purchase / renew link</b>: adds a purchase / renew button to the landing page (the main button when the user has expired, run out or been disabled).</li>
       <li data-scope="admin"><b data-k="set.subPageBrand" class="wrap">Show “Powered by m-ui” at the bottom of landing pages</b>: resellers' landing pages never show it.</li>
-      <li data-pending="landing"><b data-k="set.subPageLogo">Landing page logo</b>: click <b data-k="set.logoUpload">Upload / replace</b>; it applies at once, no save needed. PNG, JPEG, GIF, WebP and SVG are accepted; the browser scales the image to fit 480×160 and converts it to PNG (64 KB at most). It is shown 28 pixels high on the landing page and used as the browser tab icon. <b data-k="set.logoReset">Restore default</b> brings back the built-in logo. Resellers without a logo use the main panel's, and nodes follow the master.</li>
+      <li><b data-k="set.subPageLogo">Landing page logo</b>: click <b data-k="set.logoUpload">Upload / replace</b>; it applies at once, no save needed. PNG, JPEG, GIF, WebP and SVG are accepted; the browser scales the image to fit 480×160 and converts it to PNG (64 KB at most). It is shown 28 pixels high and at most 160 wide on the landing page, and used as the browser tab icon. Landing pages follow the visitor's dark mode and put a light backdrop behind the logo there, and the preview in the settings shows both; a white logo on a transparent background is hard to see in either. <b data-k="set.logoReset">Restore default</b> brings back the built-in logo. Resellers without a logo use the main panel's, and nodes follow the master.</li>
       <li>Users who ran out, expired or were disabled can still open their landing page, which shows the reason and whom to contact; their clients get a 404. Links that match no user show an "invalid subscription link" page in browsers.</li>
     </ul>
   </section>
 
-  <section class="sec" id="landing-links" data-pending="landing">
+  <section class="sec" id="landing-links">
     <h3>Links in the notice and contact details</h3>
     <p class="lede"><b data-k="set.subPageNotice">Notice (multi-line)</b> and <b data-k="set.subPageSupport">Footer contact</b> can contain clickable links; only the text is shown on the page.</p>
     <div class="tbl"><table>
@@ -863,9 +866,11 @@
       </tbody>
     </table></div>
     <ul>
-      <li>If the text contains <code>/</code> or the link contains brackets, use the <code>[text](link)</code> form.</li>
-      <li>Telegram keywords are Tg, Telegram, 电报 and 飞机, followed by <code>@username</code>; WhatsApp keywords are WA and WhatsApp, followed by <code>+number</code>; an English or Chinese colon both work.</li>
+      <li>If the text contains <code>/</code> or a colon, or the link contains brackets, use the <code>[text](link)</code> form. Half-width and full-width brackets both work, including <code>【text】（link）</code> as typed with a Chinese input method.</li>
+      <li>In <code>text(link)</code> a space before the bracket is fine; the link text runs back from the bracket to the nearest punctuation or the previous link.</li>
+      <li>Telegram keywords are Tg, Telegram, 电报 and 飞机, followed by <code>@username</code> or <code>+number</code>; WhatsApp keywords are WhatsApp, WA and WS, followed by <code>+number</code>; an English or Chinese colon both work.</li>
       <li>Only http(s), tg, mailto and tel links are accepted; anything else is shown as plain text.</li>
+      <li>The notice can be up to 4000 characters and the contact details up to 300; the current count is shown below each box.</li>
     </ul>
   </section>
 

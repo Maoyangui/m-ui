@@ -583,13 +583,13 @@
     <h3>新建用户</h3>
     <p class="lede"><b data-k="nav.users">用户</b> 页 → <b data-k="user.add">新增用户</b>,填好额度、勾上线路,保存后就有订阅地址了。</p>
     <ul>
-      <li data-scope="admin"><b data-k="user.f.name">用户名(即订阅地址)</b>:主面板默认用用户名当订阅地址,不能含空格和 / ? # &amp;。在设置里关掉"用用户名作订阅地址"后,这里只是个名称,地址是一串随机令牌。</li>
-      <li data-scope="reseller"><b data-k="user.f.nameOnly">用户名</b>:只是个名称,订阅地址会自动生成一串随机令牌。</li>
+      <li data-scope="admin"><b data-k="user.f.name">用户名(即订阅地址)</b>:主面板默认用用户名当订阅地址,不能含空格和 / ? # &amp;,全站不能重名。知道用户名就能拿到他的订阅,别用 test、user1、姓名拼音这类好猜的名字;更稳妥的是在 <b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> 关掉 <b data-k="set.subUseUserName">用用户名作订阅地址</b>,之后新建的用户地址是一串随机令牌(用户名只是个名称),已有的用户点 <b data-k="user.rotate">重置订阅链接</b> 换成随机地址。</li>
+      <li data-scope="reseller"><b data-k="user.f.nameOnly">用户名</b>:只是个名称,不出现在订阅地址里(订阅地址自动生成一串随机令牌)。但不能含空格和 / ? # &amp;,而且全站唯一:别的代理或主面板用过的名字也不能再用,建议统一加上自己的前缀。</li>
       <li>有套餐就选 <b data-k="user.plan">所属套餐</b>,点 <b data-k="user.fromPlan">按套餐填写</b> 一键填好额度。没有就手填:<b data-k="user.f.volume">流量配额 GB(0=不限)</b>、<b data-k="user.f.expiry">到期日(留空=不限)</b>、<b data-k="user.f.device">同时在线设备(0=不限)</b>、<b data-k="user.f.up">上行限速 Mbps(0=不限)</b>、<b data-k="user.f.down">下行限速 Mbps(0=不限)</b>。</li>
       <li>按月清零的(月付),勾 <b data-k="user.f.autoReset">周期重置流量</b>,填 <b data-k="user.f.resetDays">重置周期(天)</b>。</li>
       <li>勾 <b data-k="user.f.lines">可用线路</b>。一条线路在几台服务器上就有几个入口,可以只给其中某台(按服务器切换分组勾选,已勾的不会丢)。</li>
       <li data-scope="admin"><b data-k="user.f.exts">外部节点</b>:勾上的外部节点会追加到他订阅里本站节点的后面。</li>
-      <li><b data-k="user.f.remark">备注</b>:记订单号、联系方式之类。</li>
+      <li><b data-k="user.f.remark">备注</b>:记订单号、联系方式之类。注意:没填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b> 和 <b data-k="set.subPageTitle">页面标题</b> 时,客户端里显示的订阅名就是备注(备注也空就用用户名),不想让用户看到的内容别写进备注。</li>
     </ul>
     <div class="tip"><b>发卡、试用</b>填 <b data-k="user.f.activate">首次连接后 N 天到期(0 = 不用)</b>:用户第一次产生流量时才开始计时,不用管到期日。</div>
   </section>
@@ -604,7 +604,7 @@
       <li>设备数:按同时在线的来源 IP 算,所有服务器合在一起算。同一个 WiFi(同一个公网 IPv4,或同一个 IPv6 /64 网段)下的几台设备算 1 台;IPv4 和 IPv6 各自对上限计数,同一台设备同时走 IPv4 和 IPv6 不会被当成两台。</li>
       <li>设备满了只拒绝新设备,已经连着的不受影响;别的设备下线约 1 分钟后名额就空出来了。</li>
       <li data-scope="admin">被拒的连接会在概览的 <b data-k="dash.recentConns">最近入站连接</b> 里标红 <b data-k="dash.rejectedDevice">设备数超限被拒</b>。</li>
-      <li>限速:这个用户的全部连接共享这份带宽,改了马上生效。</li>
+      <li>限速:同一台服务器上,这个用户的全部连接共享这份带宽;他同时走几台服务器就有几份。改了马上生效。</li>
     </ul>
   </section>
 
@@ -612,7 +612,9 @@
     <h3>订阅地址、二维码与临时共享</h3>
     <p class="lede">点用户名(或 <b data-k="common.details">详情</b>)打开详情,订阅地址和二维码就在最上面。</p>
     <ul>
-      <li><b data-k="user.subscription">订阅</b> 下面有地址,点 <b data-k="common.copy">复制</b> 发给用户;二维码给手机扫。列表里的 <b data-k="common.more">更多</b> 菜单也能直接复制 <b data-k="user.subClash">Clash 订阅</b>、<b data-k="user.subLink">链接订阅</b>、<b data-k="user.subJson">sing-box 订阅</b>。</li>
+      <li><b data-k="user.subscription">订阅</b> 下面有两个地址:带 <code>?format=clash</code> 的是 Clash 专用;不带 <code>?format=</code> 的是通用地址,发给用户的就是它(浏览器打开是落地页,客户端来拉时按类型给格式)。点旁边的 <b data-k="common.copy">复制</b>。</li>
+      <li>详情里的二维码是 Clash 地址,适合用 Clash 系客户端直接扫;用手机相机扫只会下载到一个配置文件,这种情况让用户打开落地页,在那里扫码或一键导入。</li>
+      <li>列表里的 <b data-k="common.more">更多</b> 菜单也能直接复制 <b data-k="user.subClash">Clash 订阅</b>、<b data-k="user.subLink">链接订阅</b>(就是通用地址)、<b data-k="user.subJson">sing-box 订阅</b>。</li>
       <li>用户用浏览器打开自己的订阅地址,会看到落地页:用量、到期、各客户端的一键导入、二维码(见 <a href="#sub">订阅与落地页</a>)。</li>
       <li><b data-k="user.share">临时共享</b>:用户在落地页生成给朋友用的临时地址,流量和设备都算他自己的。详情里能看到这个地址,点 <b data-k="user.unshare">收回</b> 立即作废。</li>
       <li>地址泄露了:<b data-k="common.more">更多</b> → <b data-k="user.rotate">重置订阅链接</b>。地址换成新的随机令牌,全部协议凭据重新生成,旧地址立刻失效、在线设备被断开,再把新地址发给用户。</li>
@@ -620,17 +622,17 @@
     </ul>
   </section>
 
-  <section class="sec" id="users-renew" data-pending="plan-api">
+  <section class="sec" id="users-renew">
     <h3>续费、延期与换套餐</h3>
     <p class="lede">列表的 <b data-k="common.more">更多</b> 菜单(或用户详情)里,<b data-k="user.renewMenu">续费…</b> 和 <b data-k="user.changeMenu">换套餐…</b> 管续费、升级、降级。</p>
     <ul>
-      <li><b data-k="user.renewMenu">续费…</b>:先 <b data-k="plan.pick">选择套餐</b>(默认是他现在的套餐),再选方式:<b data-k="plan.renew">续费(清零流量并顺延)</b>、<b data-k="plan.extend">延期(保留已用流量)</b>,或 <b data-k="plan.bind" class="wrap">只归入这个套餐(流量与到期都不动)</b>。<b data-k="pc.periods">期数</b> 是一次续几期(1–120),月付套餐按季、按年卖就填 3、12;单个用户时,下面会实时显示到期和配额会变成多少。</li>
-      <li><b data-k="user.extend">延长 30 天</b>:有到期日的用户一键加 30 天。</li>
+      <li><b data-k="user.renewMenu">续费…</b>:先 <b data-k="plan.pick">选择套餐</b>(默认是他现在的套餐),再选方式:<b data-k="plan.renew">续费(清零流量并顺延)</b>、<b data-k="plan.extend">延期(保留已用流量)</b>,或 <b data-k="plan.bind" class="wrap">只归入这个套餐(流量与到期都不动)</b>。<b data-k="pc.periods">期数</b> 是一次续几期(1–120),月付套餐按季、按年卖就填 3、12;单个用户时,下面会实时显示到期和配额会变成多少。用套餐续费、延期是明确的开通动作,会把 <b data-k="user.reason.manual">手动</b> 停用的人也一并启用<span data-pending="backup-certs">(面板会先提示)</span>。</li>
+      <li><b data-k="user.extend">延长 30 天</b>:有到期日的用户一键加 30 天(还没开始计时的"首次连接后 N 天"加到 N 上);因到期停用的会恢复,手动停用的仍停着。</li>
       <li><b data-k="user.changeMenu">换套餐…</b>:<b data-k="pc.target">换成</b> 选新套餐,<b data-k="pc.mode">方式</b> 三选一:
         <ul>
           <li><b data-k="pc.mode.replace">立即替换</b>:新套餐从现在开始算 N 期,旧订阅剩下的时间和流量作废。</li>
-          <li><b data-k="pc.mode.stack">叠加</b>:保留旧订阅剩下的时间(和一次性流量),再加 N 期;按周期重置的套餐,流量是每期额度,不叠加。</li>
-          <li><b data-k="pc.mode.prorate">按价值折算</b>:按两个套餐的 <b data-k="plan.price">参考价(可选)</b>,把旧订阅剩下的价值折成新套餐的时长;两个套餐都要填参考价,期数可以填 0。</li>
+          <li><b data-k="pc.mode.stack">叠加</b>:保留旧订阅剩下的时间(和一次性流量),再加 N 期;按周期重置的套餐,流量是每期额度,不叠加。已经过期的旧订阅不结转;新套餐不限期或不限量时,原来有限的到期或配额照旧保留。</li>
+          <li><b data-k="pc.mode.prorate">按价值折算</b>:按两个套餐的 <b data-k="plan.price">参考价(可选)</b>,把旧订阅剩下的价值折成新套餐的时长(一次性流量的套餐同时折流量),新套餐从现在开始;用户要有所属套餐、换成另一个套餐,两个都要填参考价,期数可以填 0。</li>
         </ul></li>
       <li><b data-k="pc.usage">本周期用量</b>:<b data-k="pc.usage.auto">自动</b>(立即替换和折算清零,叠加保留)、<b data-k="pc.usage.keep">保留(接着算)</b>、<b data-k="pc.usage.reset">清零(从新周期开始)</b>。</li>
       <li>对话框下方实时预览 <b data-k="pc.before">变更前</b> 和 <b data-k="pc.after">变更后</b>,标出 <b data-k="pc.dir.upgrade">升级</b> 还是 <b data-k="pc.dir.downgrade">降级</b>。到期提前、马上超量这类会让用户吃亏的影响标红,要勾 <b data-k="pc.force" class="wrap">我已确认上面标红的影响,仍然执行</b> 才能 <b data-k="pc.confirm">确认换套餐</b>。</li>
@@ -648,7 +650,7 @@
       <li>按月清零的勾 <b data-k="user.f.autoReset">周期重置流量</b>;发卡、礼品卡勾 <b data-k="plan.firstUse">从首次连接开始计时</b>。</li>
       <li><b data-k="plan.lines">线路</b>:套用时把用户的线路换成这些;留空 = 套用时不改动用户已有的线路。</li>
       <li data-scope="admin"><b data-k="plan.rules">限速规则</b>:勾上的规则对这个套餐的用户(现有的和以后套用的)都生效。</li>
-      <li data-pending="plan-api"><b data-k="plan.price">参考价(可选)</b>:只在换套餐用"按价值折算"时用,不给用户看;两个套餐填同样的价就是同价互换。</li>
+      <li><b data-k="plan.price">参考价(可选)</b>:只在换套餐用"按价值折算"时用,不给用户看;两个套餐填同样的价就是同价互换。</li>
     </ol>
     <ul>
       <li>套餐页显示每个套餐有多少用户。</li>
@@ -662,8 +664,8 @@
     <p class="lede">勾选多个用户后,顶部出现批量操作条(表头的全选只勾当前这一页)。</p>
     <ul>
       <li><b data-k="user.batch.enable">启用</b>、<b data-k="user.batch.disable">停用</b>、<b data-k="user.batch.extend">延期</b>、<b data-k="user.batch.plan">套用套餐</b>、<b data-k="user.batch.reset">重置流量</b>、<b data-k="user.batch.delete">删除</b>。</li>
-      <li data-scope="admin"><b data-k="user.bulk">批量生成</b>:按 <b data-k="user.bulkPrefix">用户名前缀</b> 一次建 <b data-k="user.bulkCount">数量</b> 个,<b data-k="user.bulkMode">命名方式</b> 选 <b data-k="user.bulkRandom">前缀 + 随机 8 位</b> 或 <b data-k="user.bulkSeq" class="wrap">前缀 + 序号(001…,订阅地址用随机串)</b>;生成后可以复制全部订阅地址。</li>
-      <li data-scope="admin"><b data-k="user.batch.export">导出 CSV</b>:导出用户列表。</li>
+      <li data-scope="admin"><b data-k="user.bulk">批量生成</b>:按 <b data-k="user.bulkPrefix">用户名前缀</b> 一次建 <b data-k="user.bulkCount">数量</b> 个,<b data-k="user.bulkMode">命名方式</b> 选 <b data-k="user.bulkRandom">前缀 + 随机 8 位</b> 或 <b data-k="user.bulkSeq" class="wrap">前缀 + 序号(001…,订阅地址用随机串)</b>;生成后列出每个人的订阅地址,可以整段复制。这里给的是 Clash 地址(带 <code>?format=clash</code>),发给不用 Clash 的用户时,去掉末尾的 <code>?format=clash</code> 就是通用地址。</li>
+      <li data-scope="admin"><b data-k="user.batch.export">导出 CSV</b>:导出用户列表,订阅那一列也是 Clash 地址。</li>
     </ul>
   </section>
 
@@ -672,7 +674,7 @@
     <p class="lede">列表的状态一列写明为什么停用,也就决定了怎么恢复。</p>
     <ul>
       <li><b data-k="user.reason.quota">超量</b>、<b data-k="user.reason.expired">到期</b>:续费、重置流量或延长到期后自动恢复。</li>
-      <li><b data-k="user.reason.manual">手动</b>:手动停用的,只有手动启用才会恢复。</li>
+      <li><b data-k="user.reason.manual">手动</b>:手动停用的不会因为重置流量、延长到期或周期重置而自动恢复。但用套餐续费或延期(<b data-k="user.renewMenu">续费…</b>、批量 <b data-k="user.batch.plan">套用套餐</b>)和 <b data-k="user.changeMenu">换套餐…</b> 是明确的开通动作,会把他一并启用<span data-pending="backup-certs">:续费和批量套用套餐时,面板会先提示里面有手动停用的人、续费后会被启用</span>。外部 API 的续费、换套餐也一样会启用。</li>
       <li data-scope="admin"><b data-k="user.limited">限速中</b>:正被规则临时限速(见 <a href="#rules">规则</a>)。</li>
       <li><b data-k="user.kick">踢下线</b>:断开这个用户在所有服务器上的连接(hysteria2、TUIC、AnyTLS 整条会话一起关)。没停用的话客户端会马上重连,想彻底断就先停用。</li>
       <li>列表上方可以按 <b data-k="user.filter.all">全部</b>、<b data-k="user.filter.enabled">启用</b>、<b data-k="user.filter.disabled">停用</b>、<b data-k="user.filter.expired">已过期</b>、<b data-k="user.filter.over">超量</b> 筛选。</li>
@@ -684,7 +686,8 @@
     <p class="lede">线路已经在 m-ui 上建好、只想把老用户搬过来时用。</p>
     <ul>
       <li><b data-k="nav.users">用户</b> 页点 <b data-k="user.import">从旧面板导入</b>,上传旧面板的 .db 文件,点 <b data-k="user.importGo">开始导入</b>。</li>
-      <li>同名用户只更新用量、配额、到期和启停;其余的新建,并沿用旧凭据(客户端不用改)。可以勾 <b data-k="user.importAssign">给新建的用户分配全部现有线路</b>。</li>
+      <li>同名用户会被旧库的值覆盖用量、配额、到期、启停、周期重置,以及旧库里不空的备注和说明;其余的新建,沿用旧面板的用户凭据。可以勾 <b data-k="user.importAssign">给新建的用户分配全部现有线路</b>。</li>
+      <li>只导入用户时,线路、入站端口、订阅端口和路径都还是 m-ui 自己的:用户要用 m-ui 的新订阅地址重新导入,停掉旧面板之前先把新地址发给大家。</li>
       <li>连线路、上游、设置一起搬,见 <a href="#bk-import">从旧面板迁移</a>。</li>
     </ul>
   </section>
@@ -736,7 +739,7 @@
       <li><b data-k="nav.resellers">代理</b> 页 → <b data-k="rs.add">新增代理</b>:<b data-k="common.name">名称</b> 就是代理的登录名。</li>
       <li>勾 <b data-k="rs.lines">可用线路</b>:代理只能把这些线路分给他的用户;可以只授权某台服务器上的入口。</li>
       <li>填额度:<b data-k="rs.volumeGb">流量额度 GB</b>、<b data-k="rs.userLimit">用户数上限</b>、<b data-k="rs.deviceLimit">设备池</b>、<b data-k="rs.speedUp">带宽池 · 上行 Mbps</b> / <b data-k="rs.speedDown">带宽池 · 下行 Mbps</b>、<b data-k="rs.expiry">到期日(留空=不限)</b>;0 = 不限。</li>
-      <li>保存后把代理面板地址发给他(页面顶部写着,默认端口 2054、路径 <code>/dl/</code>)。</li>
+      <li>保存后把代理面板地址发给他:代理列表下方写着,新建成功的提示里也有(默认端口 2054、路径 <code>/dl/</code>)。</li>
     </ol>
     <ul>
       <li>新代理没有密码:24 小时内他用名称登录、密码留空直接点登录,进去后先设密码。过期没认领、或者忘了密码:<b data-k="common.more">更多</b> → <b data-k="rs.passwd">重置密码</b>(会一并清掉他的两步验证和外部 API 令牌,再开 24 小时)。</li>
@@ -787,7 +790,7 @@
       <li><b data-k="acct.password">登录密码</b>:改密码。</li>
       <li><b data-k="adm.totp">两步验证(2FA)</b>:见 <a href="#sec-account">账号与两步验证</a>。</li>
       <li><b data-k="set.subPage">订阅页</b>:你名下用户看到的订阅页文案:<b data-k="set.subTitle">订阅标题(Profile-Title)</b>(客户端里显示的名字)、<b data-k="set.subPageTitle">页面标题</b>、<b data-k="set.subPageSupport">页脚联系方式</b>、<b data-k="set.subPageBuyURL">选购 / 续费链接</b>、<b data-k="set.subPageNotice">公告(支持换行)</b>;留空就用主面板的。也能单独关掉订阅页或临时共享。</li>
-      <li data-pending="landing"><b data-k="set.subPageLogo">落地页 logo</b>:上传你自己的 logo;没设时用主面板的。</li>
+      <li><b data-k="set.subPageLogo">落地页 logo</b>:上传你自己的 logo,上传即生效;没设时用主面板的。</li>
       <li><b data-k="acct.api">外部 API</b>:给你自己的商城、机器人用(见 <a href="#api">外部 API</a>)。</li>
     </ul>
   </section>
@@ -812,10 +815,10 @@
   <section class="sec" id="sub-import">
     <h3>用户怎么导入</h3>
     <ul>
-      <li>最简单:把订阅地址发给用户,让他用手机或电脑浏览器打开,在落地页点自己客户端的一键导入,或者扫二维码。</li>
-      <li>落地页一键导入按钮右上角的下载箭头,会打开各系统客户端的下载页(iOS、Android、Windows、macOS、Linux);这一页不含用户信息,可以直接转发。</li>
+      <li>最简单:把通用订阅地址(不带 <code>?format=</code> 的那个)发给用户,让他用手机或电脑浏览器打开,在落地页点自己客户端的一键导入,或者扫二维码。</li>
+      <li>落地页一键导入按钮右上角的下载箭头,会打开各系统客户端的下载页(iOS、Android、Windows、macOS、Linux)。这一页的地址里带着本人的订阅地址(页内「← 返回订阅页」也是),不要转发;想让别人装客户端,转发各客户端的官网或发布页。</li>
       <li>也可以复制地址,粘贴到客户端的"添加订阅"里。</li>
-      <li>客户端里显示的订阅名来自 <b data-k="set.subTitle">订阅标题(Profile-Title)</b>。Shadowrocket、Clash Verge 只在添加订阅那一刻定名字,改了标题要让用户删掉重加,或者用落地页的一键导入(会把标题一起带上)。</li>
+      <li>客户端里显示的订阅名依次取 <b data-k="set.subTitle">订阅标题(Profile-Title)</b>、<b data-k="set.subPageTitle">页面标题</b>、用户的 <b data-k="user.f.remark">备注</b>、用户名,用第一个不空的。Shadowrocket、Clash Verge 只在添加订阅那一刻定名字,改了标题要让用户删掉重加,或者用落地页的一键导入(会把标题一起带上)。</li>
     </ul>
   </section>
 
@@ -844,12 +847,12 @@
       <li><b data-k="set.subPageTitle">页面标题</b>、<b data-k="set.subPageSupport">页脚联系方式</b>、<b data-k="set.subPageNotice">公告(支持换行)</b>。</li>
       <li><b data-k="set.subPageBuyURL">选购 / 续费链接</b>:填了以后落地页出现"选购 / 续费"按钮(用户到期、用完、被停用时它是主按钮)。</li>
       <li data-scope="admin"><b data-k="set.subPageBrand">落地页底部显示 Powered by m-ui</b>:代理的落地页不显示。</li>
-      <li data-pending="landing"><b data-k="set.subPageLogo">落地页 logo</b>:点 <b data-k="set.logoUpload">上传 / 更换</b>,上传即生效,不用点保存。支持 PNG、JPEG、GIF、WebP、SVG,会先缩到 480×160 以内并转成 PNG(不超过 64 KB);落地页上显示高 28 像素,也用作浏览器标签图标。<b data-k="set.logoReset">恢复默认</b> 换回内置 logo。代理没设时用主面板的,副机随主机同步。</li>
+      <li><b data-k="set.subPageLogo">落地页 logo</b>:点 <b data-k="set.logoUpload">上传 / 更换</b>,上传即生效,不用点保存。支持 PNG、JPEG、GIF、WebP、SVG,会先缩到 480×160 以内并转成 PNG(不超过 64 KB);落地页上显示高 28 像素、最宽 160,也用作浏览器标签图标。落地页跟随访客的深色模式,深色时 logo 下面垫一块浅色底,设置里的预览并排显示两种效果;透明底的白色 logo 两种都看不清。<b data-k="set.logoReset">恢复默认</b> 换回内置 logo。代理没设时用主面板的,副机随主机同步。</li>
       <li>用户用完、到期、被停用时,浏览器里仍能打开自己的落地页,顶部写明原因和找谁续费;客户端拉取则是 404。地址对不上任何用户时,浏览器显示"订阅地址无效"。</li>
     </ul>
   </section>
 
-  <section class="sec" id="landing-links" data-pending="landing">
+  <section class="sec" id="landing-links">
     <h3>公告和联系方式里写链接</h3>
     <p class="lede"><b data-k="set.subPageNotice">公告(支持换行)</b> 和 <b data-k="set.subPageSupport">页脚联系方式</b> 里可以写可点的链接,页面上只显示文字。</p>
     <div class="tbl"><table>
@@ -863,9 +866,11 @@
       </tbody>
     </table></div>
     <ul>
-      <li>文字里带 <code>/</code>,或者链接里有括号时,用 <code>[文字](链接)</code> 的写法。</li>
-      <li>Telegram 的关键词认 Tg、Telegram、电报、飞机,后面跟 <code>@用户名</code>;WhatsApp 认 WA、WhatsApp,后面跟 <code>+号码</code>;冒号中英文都行。</li>
+      <li>文字里带 <code>/</code>、冒号,或者链接里有括号时,用 <code>[文字](链接)</code> 的写法。方括号、圆括号半角全角都行,中文输入法打出来的 <code>【文字】（链接）</code> 也认。</li>
+      <li><code>文字(链接)</code> 的括号前可以空一格;链接文字从括号往前取,到最近的标点或上一个链接为止。</li>
+      <li>Telegram 的关键词认 Tg、Telegram、电报、飞机,后面跟 <code>@用户名</code> 或 <code>+号码</code>;WhatsApp 认 WhatsApp、WA、WS,后面跟 <code>+号码</code>;冒号中英文都行。</li>
       <li>只认 http(s)、tg、mailto、tel 链接,别的原样显示、不能点。</li>
+      <li>公告最多 4000 字,联系方式最多 300 字,输入框下面显示当前字数。</li>
     </ul>
   </section>
 
