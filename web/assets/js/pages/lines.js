@@ -172,12 +172,33 @@ function famIPs(n) {
   if (isV4Addr(a)) v4 = a; else if (a.includes(':')) v6 = a;
   return { v4, v6 };
 }
-// 地址是哪一族:IPv4 字面量 'v4'(IPv4 映射地址也算,和后端一致),IPv6 字面量 'v6',域名 ''
+// IPv6 地址的规范写法(补全 8 段、去掉前导零、小写),不是 IPv6 返回 '':写法不同(大写、省略的零、方括号)也认得出是同一个地址
+function v6Norm(s) {
+  let a = String(s ?? '').trim().replace(/^\[|\]$/g, '').toLowerCase();
+  if (!a.includes(':') || !/^[0-9a-f:.]+$/.test(a)) return '';
+  const m = a.match(/^(.*:)(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/); // 末尾嵌着 IPv4 的写法(::ffff:1.2.3.4)
+  if (m) {
+    const o = m.slice(2).map(Number);
+    if (o.some(x => x > 255)) return '';
+    a = m[1] + ((o[0] << 8) | o[1]).toString(16) + ':' + ((o[2] << 8) | o[3]).toString(16);
+  }
+  const parts = a.split('::');
+  if (parts.length > 2) return '';
+  const head = parts[0] ? parts[0].split(':') : [], tail = parts.length === 2 && parts[1] ? parts[1].split(':') : [];
+  const fill = 8 - head.length - tail.length;
+  if (parts.length === 2 ? fill < 1 : fill !== 0) return '';
+  const groups = [...head, ...Array(parts.length === 2 ? fill : 0).fill('0'), ...tail];
+  return groups.every(g => /^[0-9a-f]{1,4}$/.test(g)) ? groups.map(g => parseInt(g, 16).toString(16)).join(':') : '';
+}
+// 地址是哪一族:IPv4 字面量 'v4'(IPv4 映射地址也算,和后端一致),IPv6 字面量 'v6',域名(和写错的)''
 function ipFam(s) {
   const a = String(s ?? '').trim().replace(/^\[|\]$/g, '');
-  if (isV4Addr(a) || /^::ffff:\d+\.\d+\.\d+\.\d+$/i.test(a)) return 'v4';
-  return a.includes(':') && /^[0-9a-f:.]+$/i.test(a) ? 'v6' : '';
+  if (isV4Addr(a)) return 'v4';
+  const n = v6Norm(a);
+  return !n ? '' : n.startsWith('0:0:0:0:0:ffff:') ? 'v4' : 'v6';
 }
+// 这台自己的 IPv6(和后端 runner.subAddrs.own6 一致):手填的连接地址、探测到的公网 IPv6
+const own6 = n => new Set([bareAddr(n), n.publicIp6, n.publicIp].map(v6Norm).filter(a => a && !a.startsWith('0:0:0:0:0:ffff:')));
 // 自定义地址里取键:不分大小写(和订阅、后端保存时的读法一致)
 const keyOf = (o, k) => {
   if (!o || typeof o !== 'object') return undefined;
@@ -190,11 +211,16 @@ function customFor(l, n) {
   if (!Array.isArray(list) || !list.length) return null;
   return list.filter(c => { const id = Number(keyOf(c, 'node_id')) || 0; return !id || id === n.id; });
 }
-// 这条线路在这台服务器上订阅里给不给 IPv6(和后端 sub.resolveAddrs、runner.lineUse 一致):
-// 填了自定义地址的看这台拿得到的那几条里有没有 IPv6 字面量;否则单独选了、且这台有那一族的地址就按选的,再否则跟服务器的默认
+// 这条线路在这台服务器上订阅里给不给这台的 IPv6(和后端 sub.resolveAddrs、runner.lineUse 一致):
+// 填了自定义地址的看这台拿得到的那几条里有没有写成这台自己 IPv6 的 —— 别的 IPv6(国内中转、CDN 的入口)不算,
+// 写不写 node_id 都一样:用户连的是中转,这台不用为它放行 IPv6,IPv6 入站检测也不测它;
+// 否则单独选了、且这台有那一族的地址就按选的,再否则跟服务器的默认
 function lineUsesV6(l, n, f = familyOf(l)[n.id]) {
   const mine = customFor(l, n);
-  if (mine) return mine.some(c => ipFam(keyOf(c, 'server')) === 'v6');
+  if (mine) {
+    const own = own6(n);
+    return mine.some(c => ipFam(keyOf(c, 'server')) === 'v6' && own.has(v6Norm(keyOf(c, 'server'))));
+  }
   const ips = famIPs(n);
   if (f === 'v6' && ips.v6) return true;
   if (f === 'v4' && ips.v4) return false;
@@ -237,9 +263,9 @@ function serversField(l) {
   return `<div class="full">${field(t('line.servers'), `<div class="check-list node-list">${rows}</div>`, t('line.serversHelp') + (anyDual ? ' ' + famHelp : ''))}</div>`;
 }
 // 给前端测试用(web/jstest/lines.test.mjs)
-export { serverFamily, lineUsesV6, formV6Servers, formLine, allServersShown, v6TipsOpen };
+export { serverFamily, lineUsesV6, formV6Servers, formLine, allServersShown, v6TipsOpen, v6Norm };
 // "全部服务器"的线路在列表里列出哪几台:单独选了 IP 版本的,以及这条线路在上面走 IPv6 的(纯 IPv6 机器、"自动地址用 IPv6"、
-// 自定义地址写成 IPv6 的)—— 它们后面要跟 IPv6 入站结论,以前只列单独选了的,默认给 IPv6 的服务器永远看不到结论
+// 自定义地址写成这台自己 IPv6 的)—— 它们后面要跟 IPv6 入站结论,以前只列单独选了的,默认给 IPv6 的服务器永远看不到结论
 function allServersShown(l) {
   const fam = familyOf(l);
   return (state.nodes || []).filter(n => fam[n.id] || (n.enabled !== false && lineUsesV6(l, n))).map(n => n.id);
@@ -250,7 +276,7 @@ function formLine() {
   try { addrs = JSON.parse(fv('f-addrs').trim() || '[]'); } catch { addrs = []; }
   return { name: fv('f-name').trim(), protocol: fv('f-protocol'), port: Number(fv('f-port')) || 0, addrs: Array.isArray(addrs) ? addrs : [] };
 }
-// 按表单当前的勾选算:这条线路在哪些服务器上会给 IPv6(填了自定义地址的看自定义地址)
+// 按表单当前的勾选算:这条线路在哪些服务器上会给这台的 IPv6(填了自定义地址的看有没有写成那台自己的 IPv6)
 function formV6Servers() {
   const nodes = state.nodes || [];
   const l = formLine();

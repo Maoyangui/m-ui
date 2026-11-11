@@ -24,7 +24,7 @@ var tcpProtocols = map[string]bool{"anytls": true, "trojan": true, "vless": true
 
 // reachTargets 列出要测的服务器:地址优先用手填的连接地址(IP),其次探测到的公网 IP,最后解析域名;
 // 端口优先用部署在这台上、订阅里走 IPv4 的第一条 TCP 线路(用户实际连的就是它),没有就用订阅端口(本机)或面板 API 端口(副机)。
-// 订阅里走 IPv6 的线路(含自定义地址写成 IPv6 的)不拿来测 IPv4 地址(端口是同一个、IPv4 照样通,测出"通"却不是用户连的那条路),
+// 订阅里走 IPv6 的线路(含自定义地址写成这台自己的 IPv6 的)不拿来测 IPv4 地址(端口是同一个、IPv4 照样通,测出"通"却不是用户连的那条路),
 // 而是另测一项 IPv6 入站(Target.V6):测它在订阅里的 IPv6 地址 + 第一条走 IPv6 的 TCP 线路的端口。
 // 这台的线路在订阅里都不走 IPv4 时大陆那项不测(NoPort:灰色、不告警,会盖掉以前测出的结论)。
 func (r *Runner) reachTargets(ctx context.Context) []reach.Target {
@@ -33,28 +33,28 @@ func (r *Runner) reachTargets(ctx context.Context) []reach.Target {
 	var lines []model.Line
 	r.db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&lines)
 	domainMode := strings.EqualFold(r.setting("subServerAddr"), "domain")
-	enabled := make([]uint, 0, len(nodes))
-	for _, n := range nodes {
-		enabled = append(enabled, n.Id)
-	}
 	out := make([]reach.Target, 0, len(nodes))
 	for _, n := range nodes {
 		t := reach.Target{NodeId: n.Id, Name: n.Name}
 		a := r.nodeSubAddrs(n, domainMode)
 		anyV4, anyV6, anyV6TCP := false, false, false
-		var v6 *reach.V6Target // 第一条走 IPv6 的 TCP 线路:先用订阅给这台自己 IPv6 的,其次是自定义地址里写明属于这台的 IPv6
+		var v6 *reach.V6Target // 第一条走 IPv6 的 TCP 线路:先用订阅给这台 IPv6 的,其次是自定义地址写成这台自己 IPv6 的
 		v6Custom := false
 		var v6UDP []string
+		udpHost6 := "" // 走 IPv6 的 UDP 线路在订阅里给的这台的 IPv6(这台走 IPv6 的只有 UDP 线路时显示用)
 		for _, l := range lines {
 			if l.Port <= 0 || !render.LineOnNode(l, n.Id) {
 				continue
 			}
-			u := a.lineUse(l, n.Id, onlyOn(l, n.Id, enabled))
+			u := a.lineUse(l, n.Id)
 			if u.v6 {
 				anyV6 = true
 				switch {
 				case render.UDPOnly(l.Protocol):
 					v6UDP = append(v6UDP, l.Name)
+					if udpHost6 == "" {
+						udpHost6 = u.host6
+					}
 				case tcpProtocols[l.Protocol]:
 					anyV6TCP = true
 					custom := hasCustomAddrs(l)
@@ -93,10 +93,15 @@ func (r *Runner) reachTargets(ctx context.Context) []reach.Target {
 		}
 		if v6 != nil || len(v6UDP) > 0 {
 			if v6 == nil {
-				v6 = &reach.V6Target{Host: a.ip6}
+				// 走 IPv6 的只有 UDP 线路:测不了,不发请求(reach 记 V6UDP),地址只用来显示;
+				// 认不出地址时不报"不是公网地址"(那是说给手填了内网 v6 的,不是说这台没有 IPv6)
+				v6 = &reach.V6Target{Host: udpHost6}
+				if v6.Host == "" {
+					v6.Host = a.ip6
+				}
 			}
 			v6.UDPLines = v6UDP
-			if !publicIPv6(v6.Host) {
+			if v6.Host != "" && !publicIPv6(v6.Host) {
 				v6.Err = "这台订阅里的 IPv6 地址不是公网地址(内网或保留段),测点连不到"
 			}
 			t.V6 = v6
@@ -108,8 +113,9 @@ func (r *Runner) reachTargets(ctx context.Context) []reach.Target {
 
 // subAddrs 订阅里这台服务器给的地址:没单独选 IP 版本的线路用哪一族(defV6),以及两族各自的地址(和 sub.EntriesFromNodes 一致)。
 type subAddrs struct {
-	defV6    bool   // 没单独选的线路给 IPv6:手填了 v6 地址,或留空而自动地址落在 IPv6(选了 IPv6 / 纯 IPv6 机器)
-	ip4, ip6 string // 单独选了 IPv4 / IPv6 的线路用的地址(model.FamilyIPs)
+	defV6    bool         // 没单独选的线路给 IPv6:手填了 v6 地址,或留空而自动地址落在 IPv6(选了 IPv6 / 纯 IPv6 机器)
+	ip4, ip6 string       // 单独选了 IPv4 / IPv6 的线路用的地址(model.FamilyIPs)
+	own6     []netip.Addr // 这台自己的 IPv6:手填的连接地址、探测到的公网 IPv6(自定义地址写成其中之一才算这台的 IPv6 入口)
 }
 
 // nodeSubAddrs 算出这台的 subAddrs。订阅给域名时客户端自己解析,没单独选的线路算不出地址族,按 IPv4 处理
@@ -121,6 +127,11 @@ func (r *Runner) nodeSubAddrs(n model.Node, domainMode bool) subAddrs {
 	}
 	var a subAddrs
 	a.ip4, a.ip6 = model.FamilyIPs(n.Addr, pub, pub6)
+	for _, s := range []string{model.BareHost(n.Addr), pub6, pub} {
+		if ip, err := netip.ParseAddr(strings.TrimSpace(s)); err == nil && ip.Is6() && !ip.Is4In6() && !slices.Contains(a.own6, ip.WithZone("")) {
+			a.own6 = append(a.own6, ip.WithZone(""))
+		}
+	}
 	if domainMode {
 		return a
 	}
@@ -155,16 +166,19 @@ func (a subAddrs) lineFamily(l model.Line, nodeID uint) string {
 
 // lineUse 这条线路在这台服务器上,订阅里给出的地址是哪一族(和 sub.resolveAddrs 一致),以及走 IPv6 时测哪个地址、哪个端口。
 type lineUse struct {
-	v4, v6 bool   // 给 IPv4(或域名:由客户端解析,和以前一样按 IPv4 一侧算)/ 给 IPv6
-	host6  string // 走 IPv6 时测的地址:这台在订阅里的 IPv6;自定义地址里写明属于这台的 IPv6。认不出属于这台(可能是中转)就空,不测
+	v4, v6 bool   // 给 IPv4(或域名、中转之类不是这台的地址:和以前一样按 IPv4 一侧算)/ 给这台自己的 IPv6
+	host6  string // 走 IPv6 时测的地址:这台在订阅里的 IPv6,或自定义地址里写成这台自己 IPv6 的那个
 	port6  int
 }
 
-// lineUse 见 lineUse 类型。自定义地址整体替换服务器地址:这台能拿到的是 node_id 写这台的、和没写 node_id 的(总是给);
-// 写成 IPv6 字面量的按 IPv6 算(端口不拿去测这台的 IPv4)。只有 node_id 写明是这台、或线路只部署在这台时,
-// 才把那个 IPv6 当成这台的入站地址去测(没写 node_id 的可能是中转、CDN 的地址,测出来也不是这台)。
+// lineUse 见 lineUse 类型。自定义地址整体替换服务器地址:这台能拿到的是 node_id 写这台的、和没写 node_id 的(总是给)。
+// 只有写成这台自己的 IPv6(手填的连接地址、探测到的公网 IPv6,见 subAddrs.own6)才按 IPv6 算:端口不拿去测这台的 IPv4,
+// 那个地址 + server_port 参与 IPv6 入站检测。别的 IPv6(国内中转、CDN 的入口:用户连它、它再连这台)和 IPv4、域名一样,
+// 按以前的办法放在 IPv4 一侧 —— 端口照样拿来测这台的 IPv4,不当成这台的 IPv6 入口去测(测到的是中转,结论却记在这台名下),
+// 也不会因为它让这台变成"无可测端口"(中转连不上这台时就没人告警了)。node_id 不能证明地址属于这台:
+// 中转给每台落地机各写一条带 node_id 的入口是常见写法。
 // 自定义地址都写给了别的服务器时这台在订阅里没有这条线路的入口,和以前一样只借它的端口测这台的 IPv4。
-func (a subAddrs) lineUse(l model.Line, nodeID uint, onlyHere bool) lineUse {
+func (a subAddrs) lineUse(l model.Line, nodeID uint) lineUse {
 	custom := customAddrs(l)
 	if len(custom) == 0 {
 		if a.lineFamily(l, nodeID) == "v6" {
@@ -173,27 +187,25 @@ func (a subAddrs) lineUse(l model.Line, nodeID uint, onlyHere bool) lineUse {
 		return lineUse{v4: true}
 	}
 	var u lineUse
-	mine := false
 	for _, c := range custom {
 		if c.NodeId != 0 && c.NodeId != nodeID {
 			continue
 		}
-		mine = true
 		ip, err := netip.ParseAddr(model.BareHost(c.Server))
-		if err != nil || ip.Unmap().Is4() {
-			u.v4 = true // IPv4 或域名
+		if err != nil || ip.Unmap().Is4() || !slices.Contains(a.own6, ip.WithZone("")) {
+			u.v4 = true // IPv4、域名,或不是这台自己的 IPv6
 			continue
 		}
 		u.v6 = true
-		if u.host6 == "" && (c.NodeId == nodeID || onlyHere) {
-			u.host6, u.port6 = ip.String(), c.ServerPort
+		if u.host6 == "" {
+			u.host6, u.port6 = ip.WithZone("").String(), c.ServerPort
 			if u.port6 <= 0 {
 				u.port6 = l.Port
 			}
 		}
 	}
-	if !mine {
-		u.v4 = true
+	if !u.v6 {
+		u.v4 = true // 包括自定义地址都写给了别的服务器的
 	}
 	return u
 }
@@ -217,27 +229,6 @@ func customAddrs(l model.Line) []customAddr {
 func hasCustomAddrs(l model.Line) bool {
 	s := strings.TrimSpace(string(l.Addrs))
 	return s != "" && s != "null" && s != "[]"
-}
-
-// onlyOn 这条线路是不是只部署在这一台上(勾了这一台,或"全部服务器"而启用的只有这一台)。
-func onlyOn(l model.Line, nodeID uint, enabled []uint) bool {
-	var ids []uint
-	if len(l.NodeIds) > 0 {
-		_ = json.Unmarshal(l.NodeIds, &ids)
-	}
-	if len(ids) == 0 {
-		ids = enabled
-	}
-	n := 0
-	for _, id := range ids {
-		if slices.Contains(enabled, id) {
-			if id != nodeID {
-				return false
-			}
-			n++
-		}
-	}
-	return n > 0
 }
 
 // publicIPv6 是公网 IPv6(全局单播,不是内网 fc00::/7、链路本地、回环)。

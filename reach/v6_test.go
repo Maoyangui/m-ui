@@ -100,18 +100,23 @@ func TestV6CheckVerdicts(t *testing.T) {
 	}
 }
 
-// 走 IPv6 的只有 UDP 线路(hy2 / tuic)、地址不能测:不发请求,如实标出。
+// 走 IPv6 的只有 UDP 线路(hy2 / tuic)、地址不能测:不发请求,如实标出。只有 UDP 线路而地址空着(认不出这台的 IPv6)
+// 也是"只有 UDP 线路",不报"没有可测的地址"(本来就不发请求,也不是没测成)。
 func TestV6NoRequestWhenUntestable(t *testing.T) {
 	h := newHarness(t)
 	h.targets[0].V6 = &V6Target{Host: "2001:db8::7", UDPLines: []string{"hy6", "tuic6"}}
 	h.targets = append(h.targets, Target{NodeId: 2, Name: "内网v6", Host: "198.51.100.2", Port: 443, PortFrom: "line",
-		V6: &V6Target{Host: "fd00::5", Port: 443, PortLine: "tj6", Err: "这台订阅里的 IPv6 地址不是公网地址(内网或保留段),测点连不到"}})
+		V6: &V6Target{Host: "fd00::5", Port: 443, PortLine: "tj6", Err: "这台订阅里的 IPv6 地址不是公网地址(内网或保留段),测点连不到"}},
+		Target{NodeId: 3, Name: "UDP没地址", Host: "198.51.100.3", Port: 443, PortFrom: "line", V6: &V6Target{UDPLines: []string{"hy6"}}})
 	h.runManual(t)
 	if v := latest(t, h, 1).V6; v == nil || v.State != V6UDP || len(v.UDPLines) != 2 || v.Port != 0 {
 		t.Fatalf("只有 UDP 线路: %+v", v)
 	}
 	if v := latest(t, h, 2).V6; v == nil || v.State != V6Error || !strings.Contains(v.Error, "不是公网地址") {
 		t.Fatalf("内网地址: %+v", v)
+	}
+	if v := latest(t, h, 3).V6; v == nil || v.State != V6UDP || v.Error != "" {
+		t.Fatalf("只有 UDP 线路、地址空着: %+v", v)
 	}
 	if qs := v6Reqs(h.api); len(qs) != 0 {
 		t.Fatalf("测不了的不该发请求: %+v", qs)

@@ -87,17 +87,18 @@ func (s *Service) viewV6Locked(id uint, last *V6Result) *V6Result {
 }
 
 // checkV6 测一台的 IPv6 入站。地址不能测、只有 UDP 线路、额度不够时不发请求。
+// 只有 UDP 线路时本来就不发请求,地址空着也照样是"只有 UDP 线路",不报"没有可测的地址"。
 func (s *Service) checkV6(ctx context.Context, t *V6Target) *V6Result {
 	res := &V6Result{Target: t.Host, Port: t.Port, PortLine: t.PortLine, UDPLines: t.UDPLines, At: s.d.Now().Unix()}
 	switch {
 	case t.Err != "":
 		res.State, res.Error = V6Error, t.Err
 		return res
-	case t.Host == "":
-		res.State, res.Error = V6Error, "没有可测的地址"
-		return res
 	case t.Port == 0:
 		res.State = V6UDP
+		return res
+	case t.Host == "":
+		res.State, res.Error = V6Error, "没有可测的地址"
 		return res
 	}
 	if q := s.c.Quota(); q.At > 0 && q.Remaining < v6Cost() && s.d.Now().Unix() < q.ResetAt {
