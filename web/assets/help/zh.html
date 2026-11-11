@@ -591,7 +591,7 @@
       <li>按月清零的(月付),勾 <b data-k="user.f.autoReset">周期重置流量</b>,填 <b data-k="user.f.resetDays">重置周期(天)</b>。</li>
       <li>勾 <b data-k="user.f.lines">可用线路</b>。一条线路在几台服务器上就有几个入口,可以只给其中某台(按服务器切换分组勾选,已勾的不会丢)。</li>
       <li data-scope="admin"><b data-k="user.f.exts">外部节点</b>:勾上的外部节点会追加到他订阅里本站节点的后面。</li>
-      <li><b data-k="user.f.remark">备注</b>:记订单号、联系方式之类。注意:没填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b> 和 <b data-k="set.subPageTitle">页面标题</b> 时,客户端里显示的订阅名就是备注(备注也空就用用户名),不想让用户看到的内容别写进备注。</li>
+      <li><b data-k="user.f.remark">备注</b>:记订单号、联系方式之类。注意:<span class="rv-only">你和主面板都</span>没填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b> 和 <b data-k="set.subPageTitle">页面标题</b> 时,客户端里显示的订阅名就是备注(备注也空就用用户名),不想让用户看到的内容别写进备注。</li>
     </ul>
     <div class="tip"><b>发卡、试用</b>填 <b data-k="user.f.activate">首次连接后 N 天到期(0 = 不用)</b>:用户第一次产生流量时才开始计时,不用管到期日。</div>
   </section>
@@ -820,7 +820,7 @@
       <li>最简单:把通用订阅地址(不带 <code>?format=</code> 的那个)发给用户,让他用手机或电脑浏览器打开,在落地页点自己客户端的一键导入,或者扫二维码。</li>
       <li>落地页一键导入按钮右上角的下载箭头,会打开各系统客户端的下载页(iOS、Android、Windows、macOS、Linux)。这一页的地址里带着本人的订阅地址(页内「← 返回订阅页」也是),不要转发;想让别人装客户端,转发各客户端的官网或发布页。</li>
       <li>也可以复制地址,粘贴到客户端的"添加订阅"里。</li>
-      <li>客户端里显示的订阅名依次取 <b data-k="set.subTitle">订阅标题(Profile-Title)</b>、<b data-k="set.subPageTitle">页面标题</b>、用户的 <b data-k="user.f.remark">备注</b>、用户名,用第一个不空的。Shadowrocket、Clash Verge 只在添加订阅那一刻定名字,改了标题要让用户删掉重加,或者用落地页的一键导入(会把标题一起带上)。</li>
+      <li>客户端里显示的订阅名依次取<span class="rv-only">你填的</span> <b data-k="set.subTitle">订阅标题(Profile-Title)</b>、<b data-k="set.subPageTitle">页面标题</b>、<span class="rv-only">主面板的订阅标题和页面标题、</span>用户的 <b data-k="user.f.remark">备注</b>、用户名,用第一个不空的。<span class="rv-only">不想让客户看到站长的名字,就自己填一个订阅标题。</span>Shadowrocket、Clash Verge 只在添加订阅那一刻定名字,改了标题要让用户删掉重加,或者用落地页的一键导入(会把标题一起带上)。</li>
     </ul>
   </section>
 
@@ -1270,7 +1270,7 @@
     <h3>订阅与用户</h3>
     <dl class="qa">
       <dt>客户端里订阅名不对?</dt>
-      <dd><span data-scope="admin">到 <b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> 填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b>(代理在自己账号页的订阅页里填);没填时依次用页面标题、用户备注、用户名。</span><span data-scope="reseller">到 <b data-k="nav.account">账号</b> → <b data-k="set.subPage">订阅页</b> 填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b>;没填时依次用页面标题、用户备注、用户名。</span>Shadowrocket、Clash Verge 只在添加订阅时定名字,要让用户删掉重加,或者用落地页的一键导入。</dd>
+      <dd><span data-scope="admin">到 <b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> 填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b>(代理在自己账号页的订阅页里填,他的订阅标题和页面标题都空着时,他名下的用户也用你的);没填时依次用页面标题、用户备注、用户名。</span><span data-scope="reseller">到 <b data-k="nav.account">账号</b> → <b data-k="set.subPage">订阅页</b> 填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b>;没填时依次用你的页面标题、主面板的订阅标题和页面标题、用户备注、用户名。不想让客户看到站长的名字,就自己填一个订阅标题。</span>Shadowrocket、Clash Verge 只在添加订阅时定名字,要让用户删掉重加,或者用落地页的一键导入。</dd>
       <dt>用户用完、到期后看到什么?</dt>
       <dd>浏览器打开订阅地址仍是他的落地页,顶部写明原因、联系方式和续费按钮(如果填了选购链接);客户端拉订阅拿到 404。续费或重置流量后马上恢复。</dd>
       <dt>订阅地址泄露了?</dt>
