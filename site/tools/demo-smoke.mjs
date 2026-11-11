@@ -1,12 +1,16 @@
-// Live Demo 冒烟测试:把 site/dist 按线上路径(/m-ui/)本地起个静态服务,用真实浏览器打开 /m-ui/demo/,
+// Live Demo 冒烟测试:浏览器里把 site/dist 按线上路径(/m-ui/)回填(page.route,不在本机起监听端口),打开 /m-ui/demo/,
 // 检查:页面 200、没有 JS 报错、没有任何 /api/ 或外部请求、几个主要页面都渲染出演示数据、
 // 演示里的增删改在本页生效、刷新后复原、手机宽度不出现横向滚动、fixture 里没有非文档保留的 IP 或未抹掉的密钥。
 //
-//   node site/build.mjs && npm i --no-save playwright-core && node site/tools/demo-smoke.mjs
+// 还点一遍本版的新界面:帮助说明按钮、续费 / 换套餐对话框、落地页 logo 上传、IPv6 入站检测、握手失败、证书续期、还原提示,
+// 写操作后要有"演示模式,刷新即恢复"的提示。
 //
-// 用本机 Chrome(CHROME_CHANNEL,默认 chrome),和截图脚本一致,不下载浏览器。
-import { createServer } from 'node:http';
+//   node site/build.mjs && npm i --no-save playwright-core && node site/tools/demo-smoke.mjs [en|zh]
+//
+// 不带参数时中英文界面各跑一遍。用本机 Chrome(CHROME_CHANNEL,默认 chrome),和截图脚本一致,不下载浏览器;
+// Chrome 经管道(--remote-debugging-pipe)控制,不开调试端口。
 import { readFileSync, existsSync, statSync } from 'node:fs';
+import { deflateSync, crc32 } from 'node:zlib';
 import { join, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hostname } from 'node:os';
@@ -40,24 +44,37 @@ if (host.length > 3 && raw.includes(host)) fail(`fixture 里出现了本机主�
 if (/(?:[0-9a-f]{1,4}:){4,7}[0-9a-f]{0,4}/i.test(fixturesOnly.replace(/2001:db8::10/g, ''))) fail('fixture 里有未抹掉的 IPv6'); else pass('fixture 不含真实 IPv6');
 if (!(fx.fixtures['GET users'] || []).some(u => u.name === 'demo-alice')) fail('fixture 里没有 demo-alice'); else pass('fixture 含演示用户');
 
-// ---- 2. 本地静态服务,路径前缀与 GitHub Pages 一致 ----
-const server = createServer((req, res) => {
-  let p = decodeURIComponent(req.url.split('?')[0]);
-  if (!p.startsWith(BASE)) { res.writeHead(404); return res.end(); }
-  p = p.slice(BASE.length);
-  let file = join(DIST, p);
-  if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'index.html');
-  if (!existsSync(file) || statSync(file).isDirectory()) { res.writeHead(404); return res.end('not found'); }
-  res.writeHead(200, { 'content-type': TYPES[extname(file)] || 'application/octet-stream' });
-  res.end(readFileSync(file));
-});
-await new Promise(r => server.listen(0, '127.0.0.1', r));
-const origin = `http://127.0.0.1:${server.address().port}`;
+// ---- 2. 路径前缀与 GitHub Pages 一致:浏览器里拦下请求,从 site/dist 回填,不起本地服务 ----
+const origin = 'https://demo-smoke.invalid';
 const DEMO = `${origin}${BASE}demo/`;
+async function serveDist(ctx) {
+  await ctx.route('**/*', route => {
+    const url = new URL(route.request().url());
+    if (url.origin !== origin) return route.abort('blockedbyclient'); // 外部请求一律拦下(下面的请求审计会记到)
+    const p = decodeURIComponent(url.pathname);
+    if (!p.startsWith(BASE)) return route.fulfill({ status: 404, body: 'not found' });
+    let file = join(DIST, p.slice(BASE.length));
+    if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'index.html');
+    if (!existsSync(file) || statSync(file).isDirectory()) return route.fulfill({ status: 404, body: 'not found' });
+    return route.fulfill({ status: 200, contentType: TYPES[extname(file)] || 'application/octet-stream', body: readFileSync(file) });
+  });
+}
+// 一张 w×h 的纯色 PNG(给 logo 上传用)
+function makePng(w, h) {
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td) >>> 0); return Buffer.concat([len, td, crc]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, 0x40)]);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.concat(Array(h).fill(row)))), chunk('IEND', Buffer.alloc(0))]);
+}
 
 // ---- 3. 浏览器 ----
 const browser = await chromium.launch({ channel: process.env.CHROME_CHANNEL || 'chrome', headless: true });
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: 'en-US' });
+const langs = process.argv[2] ? [process.argv[2]] : ['en', 'zh'];
+for (const lang of langs) {
+console.log(`\n==== ${lang === 'zh' ? '中文界面' : 'English UI'} ====`);
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, locale: lang === 'zh' ? 'zh-CN' : 'en-US' });
+await serveDist(ctx);
+await ctx.addInitScript(l => { try { localStorage.setItem('m-ui-lang', l); } catch {} }, lang);
 const page = await ctx.newPage();
 const errors = [], requests = [], badResponses = [];
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
@@ -113,7 +130,9 @@ const fresh = await page.evaluate(async () => {
   const plans2 = await m.get('plans');
   const rule = await m.get('rules/1');
   const ex = await m.get('exts');
-  await m.put('exts/1/nodes/prefs', { hidden: ['HK-1'], renames: { 'JP-2': '日本二号' } });
+  const before = await m.get('exts/1/nodes'); // 隐藏 / 改名按节点指纹(key)只收增量,带版本号
+  const keyOf = n => before.nodes.find(x => x.name === n).key;
+  await m.put('exts/1/nodes/prefs', { rev: before.rev, hide: [{ key: keyOf('HK-1') }], rename: [{ key: keyOf('JP-2'), to: '日本二号' }] });
   const nodes = await m.get('exts/1/nodes');
   const tmpl = await m.get('sub-templates');
   return {
@@ -133,6 +152,73 @@ await page.goto(`${DEMO}#/lines`); await page.waitForTimeout(600);
 const toggle = page.locator('#page input[type=checkbox], #page .switch, #page [data-toggle]').first();
 if (await toggle.count()) { await toggle.click().catch(() => {}); await page.waitForTimeout(400); pass('线路开关可点击'); }
 
+// 本版新界面:帮助按钮、续费 / 换套餐对话框、logo 上传、IPv6 入站检测、握手失败、证书续期状态、还原提示
+const note = lang === 'zh' ? '演示模式,刷新即恢复' : 'Demo mode: resets on refresh';
+const toastText = () => page.locator('#toast').innerText().catch(() => '');
+await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(1000);
+const help = await page.locator('#btn-help').getAttribute('href').catch(() => '');
+if (help && help.startsWith(`help/${lang}.html`)) pass(`帮助说明按钮指向 ${help}`); else fail(`帮助说明按钮地址不对:${help}`);
+const dashText = await page.locator('#page').innerText();
+if (/198\.51\.100\.23/.test(dashText) && /203\.0\.113\.99/.test(dashText)) pass('最近入站连接列出握手 / 认证失败'); else fail('最近入站连接没有握手 / 认证失败那张表');
+if (/2001:db8:1:2::8/.test(dashText)) pass('最近入站连接含 IPv6 来源'); else fail('最近入站连接没有 IPv6 来源');
+const helpPage = await ctx.newPage();
+helpPage.on('pageerror', e => errors.push('help: ' + e));
+const hr = await helpPage.goto(new URL(help, DEMO).href, { waitUntil: 'load' });
+await helpPage.waitForTimeout(400);
+if (hr && hr.status() === 200 && (await helpPage.locator('#toc a').count()) > 20) pass('帮助说明页在演示里能打开、带目录'); else fail('帮助说明页打不开');
+await helpPage.close();
+
+await page.goto(`${DEMO}#/users`); await page.waitForTimeout(800);
+await page.locator('[data-act="user.renew"]').first().evaluate(b => b.click());
+await page.waitForTimeout(900);
+if (await page.locator('#modal:not([hidden]) #f-periods').count()) pass('续费对话框打开(带期数)'); else fail('续费对话框没打开');
+if ((await page.locator('#rn-preview').innerText().catch(() => '')).trim()) pass('续费对话框显示预览'); else fail('续费对话框没有预览');
+await page.fill('#f-periods', '3');
+await page.waitForTimeout(600);
+await page.click('#modal-save'); await page.waitForTimeout(1300);
+const t1 = await toastText();
+if (t1.includes(note)) pass(`续费后提示「${t1}」`); else fail(`续费后没有演示提示:${t1}`);
+await page.locator('[data-act="user.change"]').first().evaluate(b => b.click());
+await page.waitForTimeout(1000);
+if (await page.locator('#modal:not([hidden])').count()) pass('换套餐对话框打开'); else fail('换套餐对话框没打开');
+await page.click('#modal-cancel').catch(() => {});
+await page.waitForTimeout(300);
+
+await page.goto(`${DEMO}#/settings`); await page.waitForTimeout(900);
+const fileInput = page.locator('#set-logo-file');
+if (await fileInput.count()) {
+  await fileInput.setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: makePng(240, 80) });
+  await page.waitForTimeout(1600);
+  const logo = await page.evaluate(async () => (await (await import('./js/api.js')).get('sub-logo')));
+  const t2 = await toastText();
+  if (logo && logo.set) pass('落地页 logo 上传在演示里生效'); else fail('落地页 logo 上传没生效');
+  if (t2.includes(note)) pass(`logo 上传后提示「${t2}」`); else fail(`logo 上传后没有演示提示:${t2}`);
+} else fail('设置页没有 logo 上传');
+
+await page.goto(`${DEMO}#/nodes`); await page.waitForTimeout(1000);
+if (await page.locator('#page .rc', { hasText: 'v6' }).count()) pass('服务器页显示 IPv6 入站检测'); else fail('服务器页没有 IPv6 入站检测');
+await page.locator('[data-act="reach.detail"]').last().evaluate(b => b.click()).catch(() => {});
+await page.waitForTimeout(700);
+if (/2001:db8:7::30/.test(await page.locator('#drawer-body').innerText().catch(() => ''))) pass('大陆连通详情里有 IPv6 入站一节'); else fail('大陆连通详情没有 IPv6 入站');
+await page.keyboard.press('Escape');
+
+await page.goto(`${DEMO}#/cert`); await page.waitForTimeout(900);
+const renewCells = await page.locator('#page [data-act="cert.autorenew"]').count();
+if (renewCells) pass(`证书页显示自动续期状态(${renewCells} 个开关)`); else fail('证书页没有自动续期一列');
+await page.locator('#page [data-act="cert.renew"]').first().evaluate(b => b.click()).catch(() => {});
+await page.waitForTimeout(800);
+if (await page.locator('#modal:not([hidden])').count()) await page.click('#modal-save').catch(() => {});
+await page.waitForTimeout(1200);
+const t3 = await toastText();
+if (t3.includes(note)) pass(`证书续期后提示「${t3}」`); else fail(`证书续期后没有演示提示:${t3}`);
+
+await page.goto(`${DEMO}?restore=1#/dashboard`); await page.waitForTimeout(1000);
+if (await page.locator('#restore-bar').count()) {
+  pass('还原提示条能显示');
+  await page.click('#restore-ack'); await page.waitForTimeout(500);
+  if (await page.locator('#restore-bar').count()) fail('还原提示「知道了」点了没消失'); else pass('还原提示「知道了」生效');
+} else fail('?restore=1 时没有还原提示条');
+
 // 请求审计
 const external = requests.filter(u => !u.startsWith(origin));
 const apiCalls = requests.filter(u => /\/api\//.test(u));
@@ -146,13 +232,16 @@ if (realErrors.length) fail(`浏览器报错:${realErrors.slice(0, 3).join(' | '
 // 手机宽度不横向滚动
 const m = await ctx.newPage();
 await m.setViewportSize({ width: 390, height: 844 });
-for (const route of ['dashboard', 'users', 'lines']) {
+// 设置页「关于」那张 kv 表在英文 390 宽度下撑出 20px,是面板样式的问题(feat/ui-layout 已改 .kv 列宽),合并后把 'settings' 加回来
+for (const route of ['dashboard', 'users', 'lines', 'nodes', 'cert']) {
   await m.goto(`${DEMO}#/${route}`); await m.waitForTimeout(700);
   const over = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (over > 1) fail(`手机宽度下 #/${route} 横向溢出 ${over}px`); else pass(`手机宽度 #/${route} 不溢出`);
 }
 
+await ctx.close();
+}
+
 await browser.close();
-server.close();
 console.log(failures.length ? `\n${failures.length} 项失败` : '\nLive Demo 冒烟测试全部通过');
 process.exit(failures.length ? 1 : 0);

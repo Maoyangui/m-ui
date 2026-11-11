@@ -43,7 +43,8 @@ for (const lang of Object.keys(LANGS)) {
     if (!m) throw new Error('缺 meta 注释: ' + file);
     const meta = JSON.parse(m[1]);
     const slug = file.slice(dir.length + 1).replace(/\\/g, '/').replace(/\.html$/, '');
-    const page = { lang, slug, meta, body: raw.slice(m[0].length).trim() };
+    // 正文里的 HTML 注释只给写文档的人看(比如给还没合并的功能留的位置),不进生成的页面
+    const page = { lang, slug, meta, body: raw.slice(m[0].length).replace(/<!--[\s\S]*?-->\s*/g, '').trim() };
     if (meta.date && meta.date > TODAY && !INCLUDE_FUTURE) { scheduled.push(page); continue; }
     pages.push(page);
   }
@@ -249,7 +250,10 @@ const urls = pages.map(p => {
 });
 out('sitemap.xml', `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${urls.join('\n')}\n</urlset>\n`);
 out('robots.txt', `User-agent: *\nAllow: /\nSitemap: ${SITE}sitemap.xml\n`);
-out('404.html', render({ lang: 'en', slug: '404', meta: { title: 'Not found · m-ui', description: '' }, body: `<section class="hero"><h1>404</h1><p class="lead">That page does not exist. <a href="${BASE}">Back to the start</a>.</p></section>` }));
+// 404 页没有自己的地址(GitHub Pages 对任何不存在的路径回它):不写指向 /404/ 的 canonical,告诉搜索引擎别收录
+out('404.html', render({ lang: 'en', slug: '404', meta: { title: 'Not found · m-ui', description: '' }, body: `<section class="hero"><h1>404</h1><p class="lead">That page does not exist. <a href="${BASE}">Back to the start</a>.</p></section>` })
+  .replace(/<link rel="canonical" href="[^"]*">/, '<meta name="robots" content="noindex">')
+  .replace(SITE + '404/', SITE));
 
 // IndexNow 密钥文件:内容就是密钥本身,放在站点根目录
 const keyFile = join(ROOT, 'indexnow.key');

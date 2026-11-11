@@ -16,7 +16,7 @@
     <li>Panel: <code>http://&lt;server-ip&gt;:2053/app/</code></li>
     <li>Default account: <code>admin</code> / <code>admin</code></li>
   </ul>
-  <p>A banner stays at the top until the default password is changed — do that on the <b>Admin</b> page first. Port, path and credentials can also be changed later from the SSH menu (<code>m-ui</code>). The UI is available in English and Chinese; switch at the bottom of the sidebar.</p>
+  <p>A banner stays at the top until the default password is changed — do that on the <b>Admin</b> page first. Port, path and credentials can also be changed later from the SSH menu (<code>m-ui</code>). The UI is available in English and Chinese; switch at the bottom of the sidebar. <b>Help</b> in the top-right corner opens the built-in manual at the chapter for the current page — look there first when you are unsure what a field means.</p>
 
   <h2 id="cert">3. Certificate</h2>
   <p>Most protocols need TLS. You have two equally supported options:</p>
@@ -25,6 +25,7 @@
     <tr><td>A domain pointing at the server</td><td><b>Certificate → Issue</b>: Let's Encrypt via HTTP-01 (port 80 reachable) or Cloudflare DNS-01 (API token, no port 80). Renews itself.</td><td>Real certificate, no client warnings.</td></tr>
     <tr><td>Only an IP</td><td><b>Certificate → Self-sign</b>, one click.</td><td>Works everywhere; subscriptions automatically tell clients to allow the insecure certificate. Add a domain later and switch.</td></tr>
   </table>
+  <!-- To fill in once the overview redesign is merged: the new overview layout and its cards. Do not describe it before then. -->
   <p>The Quick Start card on the dashboard treats both as "certificate ready". A domain is a recommendation, not a prerequisite.</p>
 
   <h2 id="line">4. Create a line</h2>
@@ -41,6 +42,7 @@
     <li><code>?format=clash</code> — Clash / Mihomo / Clash Verge / FlClash / Stash</li>
     <li><code>?format=json</code> — a complete sing-box configuration for SFA / SFI / desktop sing-box</li>
   </ul>
+  <p>Hand out the plain address without parameters: each client gets its own format when it fetches — Clash-family clients get Clash, sing-box clients such as SFA / SFI get sing-box, everything else gets universal links. Add <code>?format=</code> only to force a format.</p>
   <p>Opened in a browser, the same address is a landing page: usage, expiry, one-tap import buttons, QR code and client downloads. Users can also generate a temporary share link there if you allow it. When a subscription is exhausted, expired or disabled, the browser shows a short explanation and your contact details instead of a blank 404.</p>
 
   <h2 id="tested">Tested automatically</h2>
@@ -49,6 +51,7 @@
 
   <h2 id="upgrade">Upgrade</h2>
   <p>Click the update arrow next to the version number in the sidebar (the panel checks GitHub Releases every 6 hours), or run the install command again, or pick "Update" in the <code>m-ui</code> SSH menu. Only the binary is replaced; database, certificates and settings stay where they are. If the new version fails to start, the previous binary is restored automatically (a pre-upgrade backup is kept under <code>/etc/m-ui/backups/</code>).</p>
+  <p>With nodes, <b>upgrade the nodes first, then the master</b>: once the master uses a newer feature, a node that is too old rejects the whole sync and keeps serving its last configuration until it is upgraded too. Each node is a full installation and updates the same way from its own panel.</p>
 
   <h2 id="uninstall">Uninstall</h2>
   <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --uninstall</code></pre>

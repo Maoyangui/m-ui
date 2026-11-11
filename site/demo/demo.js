@@ -237,10 +237,40 @@ function demoPlanOp(u, p, op, n, usage, dry, remark) {
   return { res };
 }
 
+// 大陆连通 + IPv6 入站检测(导出实例没有这项):三台三网都通;法兰克福默认走 IPv6,境外 IPv6 测点连得进来
+const probe = (city, network, asn, ms, country) => ({ ...(country ? { country } : {}), city, asn, network, ok: true, avgMs: ms, loss: 0 });
+const cnGroups = base => [
+  { key: 'cm', state: 'ok', ok: 3, total: 3, avgMs: base + 18, probes: [probe('Guangzhou', 'China Mobile', 9808, base + 15), probe('Shanghai', 'China Mobile', 56040, base + 20), probe('Beijing', 'China Mobile', 56048, base + 19)] },
+  { key: 'ct', state: 'ok', ok: 3, total: 3, avgMs: base + 9, probes: [probe('Shanghai', 'China Telecom', 4812, base + 7), probe('Guangzhou', 'China Telecom', 4134, base + 10), probe('Chengdu', 'China Telecom', 4134, base + 11)] },
+  { key: 'cu', state: 'ok', ok: 3, total: 3, avgMs: base + 14, probes: [probe('Beijing', 'China Unicom', 4808, base + 12), probe('Tianjin', 'China Unicom', 4837, base + 15), probe('Shenyang', 'China Unicom', 4837, base + 16)] },
+  { key: 'hk', state: 'ok', ok: 2, total: 2, avgMs: 8, probes: [probe('Hong Kong', 'Example HK', 64510, 8), probe('Hong Kong', 'Example HK', 64511, 9)] },
+];
+S.reach = { auto: true, minutes: 90, nextRun: now() + 50 * 60, running: false, runningIds: [], perCheck: 15, quota: { remaining: 210, limit: 250, resetAt: now() + 40 * 60 }, history: {}, results: [
+  { nodeId: 1, name: 'Tokyo', target: '192.0.2.10', port: 24443, portFrom: 'sub', at: now() - 40 * 60, auto: true, verdict: 'ok', groups: cnGroups(52) },
+  { nodeId: 2, name: 'Singapore', target: '198.51.100.10', port: 28443, portFrom: 'line', portLine: 'Singapore-AnyTLS', at: now() - 40 * 60, auto: true, verdict: 'ok', groups: cnGroups(68) },
+  { nodeId: 3, name: 'Frankfurt', target: '203.0.113.30', port: 24433, portFrom: 'line', portLine: 'Frankfurt-Reality', at: now() - 40 * 60, auto: true, verdict: 'ok', groups: cnGroups(160),
+    v6: { state: 'ok', target: '2001:db8:7::30', port: 24433, portLine: 'Frankfurt-Reality', ok: 4, total: 4, at: now() - 40 * 60,
+      probes: [probe('Amsterdam', 'Example Net', 64500, 9, 'NL'), probe('Paris', 'Example Net', 64501, 14, 'FR'), probe('New York', 'Example Net', 64502, 82, 'US'), probe('Tokyo', 'Example Net', 64503, 230, 'JP')] } },
+] };
+for (const r of S.reach.results) S.reach.history[r.nodeId] = Array.from({ length: 8 }, (_, i) => ({ at: r.at - (8 - i) * 90 * 60, verdict: 'ok', auto: true }));
+// 概览「最近入站连接」:通过握手与认证的、被设备数上限拒的,以及到了但没过握手 / 认证的(都用文档保留地址)
+const recentConns = () => [
+  { ip: '203.0.113.5', user: 'demo-alice', line: 'Tokyo-HY2', protocol: 'hysteria2', count: 14, ts: now() - 60, server: 'Tokyo', nodeId: 1, family: 'v4' },
+  { ip: '2001:db8:1:2::8', user: 'demo-alice', line: 'Frankfurt-Reality', protocol: 'vless', count: 6, ts: now() - 180, server: 'Frankfurt', nodeId: 3, family: 'v6' },
+  { ip: '198.51.100.7', user: 'demo-alice', line: 'Singapore-AnyTLS', protocol: 'anytls', count: 3, ts: now() - 420, server: 'Singapore', nodeId: 2, family: 'v4' },
+  { ip: '192.0.2.44', user: 'demo-bob', line: 'Global-SS2022', protocol: 'shadowsocks', count: 9, ts: now() - 240, server: 'Tokyo', nodeId: 1, family: 'v4' },
+  { ip: '192.0.2.77', user: 'demo-bob', line: 'Global-SS2022', protocol: 'shadowsocks', count: 2, ts: now() - 900, server: 'Singapore', nodeId: 2, family: 'v4', rejected: 'device' },
+  { ip: '198.51.100.23', line: 'Frankfurt-Reality', protocol: 'vless', count: 4, ts: now() - 600, server: 'Frankfurt', nodeId: 3, family: 'v4', failed: 'tls', detail: 'REALITY: processed invalid connection' },
+  { ip: '203.0.113.99', line: 'Global-TUIC', protocol: 'tuic', count: 2, ts: now() - 1500, server: 'Tokyo', nodeId: 1, family: 'v4', failed: 'auth', detail: 'authentication failed' },
+];
+// 「换机还原」的顶部提示只在地址带 ?restore 时演示(正常演示不挂一条警告)
+const showRestore = /[?&]restore\b/.test(location.search);
+
 function status() {
   const s = fx('GET status') || {};
   s.users = S.users.length; s.enabledUsers = S.users.filter(u => u.enabled).length; s.lines = S.lines.length; s.linesEnabled = S.lines.filter(l => l.enabled).length;
   s.upstreams = S.upstreams.length; s.onlineUsers = S.onlines.users.length; s.version = 'demo'; s.repo = GITHUB; s.defaultPassword = false;
+  if (showRestore && !S.restoreAcked) s.restore = { at: now() - 300, copies: [{ from: '/etc/letsencrypt/live/panel.example.com/fullchain.pem', to: '/etc/m-ui/cert/restored/panel.example.com.crt', names: ['panel.example.com'], notAfter: now() + 61 * DAY }] };
   return s;
 }
 
@@ -284,6 +314,8 @@ function route(method, path, query, body) {
         o.status = o.status || { running: false, log: [] }; return o; }
       case 'cert': if (seg[1] === 'status') return fx('GET cert/status') || { running: false, log: [] }; { const c = fx('GET cert') || { settings: S.settings, status: {} }; const use = S.certs.find(x => x.certFile === S.certUse.lines); return { ...c, notifyConfigured: true, certs: clone(S.certs), certPath: S.certUse.lines, panelCert: S.certUse.panel, subCert: S.certUse.sub, panelTLS: !!S.certUse.panel, subTLS: !!S.certUse.sub, source: use ? use.source : '', info: use ? clone(use.info) : { exists: false } }; }
       case 'sub-logo': return clone(S.logo || { set: false });
+      case 'reach': return clone(S.reach);
+      case 'conns': return recentConns();
       case 'sub-templates': return { clash: '# 只写想加的部分,节点和分组由面板填\nrules:\n  - DOMAIN-SUFFIX,example.org,DIRECT\n  - MATCH,Proxy\n', singbox: '{\n  "route": {\n    "rules": [{ "domain_suffix": ["example.org"], "outbound": "direct" }],\n    "final": "proxy"\n  }\n}\n' };
       case 'stats': { const q = new URLSearchParams(query); const tag = q.get('tag'); const hours = q.get('hours') || '24'; const bucket = q.get('bucket') || '3600';
         if (seg[1] === 'top') return listByPrefix('stats/top') || [];
@@ -400,11 +432,16 @@ function route(method, path, query, body) {
       return ok();
     }
     case 'update': throw new ApiError(400, 'Demo mode: nothing to update here');
-    case 'backup': if (seg[1] === 'run') return { name: 'm-ui-demo-' + new Date().toISOString().slice(0, 10) + '.zip' }; if (seg[1] === 'inspect') return { users: S.users.length, lines: S.lines.length, note: 'Demo mode' }; return ok();
+    case 'backup': if (seg[1] === 'restore-ack') { S.restoreAcked = true; return ok(); } if (seg[1] === 'run') return { name: 'm-ui-demo-' + new Date().toISOString().slice(0, 10) + '.zip' }; if (seg[1] === 'inspect') return { users: S.users.length, lines: S.lines.length, note: 'Demo mode' }; return ok();
     case 'cert':
       if (seg[1] === 'use') { const c = S.certs.find(x => x.name === body.name); S.certUse[body.target] = c ? c.certFile : ''; syncCertUse(); return ok(); }
       if (seg[1] === 'delete') { S.certs = S.certs.filter(x => x.name !== body.name); syncCertUse(); return ok(); }
+      if (seg[1] === 'renew') { const c = S.certs.find(x => x.name === body.name); if (c && c.renewable) { c.lastRenewOk = now(); c.renewFails = 0; c.lastRenewErr = ''; } return ok({ note: 'Demo mode' }); }
+      if (seg[1] === 'autorenew') { const c = S.certs.find(x => x.name === body.name); if (c && c.source === 'acme' && c.method !== 'manual') { c.autoRenew = !!body.on; Object.assign(c, body.on ? renewOf(c.source, c.method, c.info.daysLeft, c.info.selfSigned) : { renewable: false, reason: 'disabled' }); } return ok(); }
       return ok({ note: 'Demo mode' });
+    case 'reach': { const ids = body && body.nodeId ? [body.nodeId] : S.reach.results.map(r => r.nodeId);
+      for (const r of S.reach.results) if (ids.includes(r.nodeId)) { r.at = now(); r.auto = false; if (r.v6) r.v6.at = now(); (S.reach.history[r.nodeId] = S.reach.history[r.nodeId] || []).push({ at: now(), verdict: r.verdict, auto: false }); }
+      return ok(); }
     case 'ops': if (seg[1] === 'warp-check') return { exit: 'on', ip: '104.28.0.1', loc: 'US', colo: 'LAX' }; return ok();
     case 'agent': if (seg[1] === 'rotate') return { token: 'demo-' + rnd(32) }; return ok();
     case 'admin': if (seg[1] === 'api' && seg[2] === 'rotate') return { token: 'demo-' + rnd(32) }; if (seg[1] === 'totp' && seg[2] === 'setup') return { secret: 'DEMOSECRET', url: 'otpauth://totp/m-ui:admin?secret=DEMOSECRET', qr: '' }; return ok();
@@ -419,9 +456,29 @@ setTransport(async (rawPath, opts = {}) => {
   const [path, query = ''] = rawPath.split('?');
   let body = null; if (opts.body) { try { body = JSON.parse(opts.body); } catch { body = null; } }
   await new Promise(r => setTimeout(r, 40)); // 像一次真实请求
-  return route(method, path, query, body);
+  const res = route(method, path, query, body);
+  if (method !== 'GET' && !(body && body.dryRun) && !READONLY_POST.test(path)) demoNote();
+  return res;
 });
 setQrUrl((id, fmt) => (data.qr || {})[`${id}:${fmt}`] || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
+
+// 写操作在本页内存里"成功"后提示一句:面板自己的提示(已保存、已续费……)后面接上"演示模式,刷新即恢复";
+// 面板这次没弹提示就单独弹一条。只算真正改东西的请求:测速、预览、解析、生成密钥这类不算。
+const READONLY_POST = /^(login|logout|upstreams\/(parse|test|\d+\/test)|exts\/\d+\/(preview|nodes\/(test|reach))|nodes\/\d+\/test|reality-check|route-apps|cert\/precheck|backup\/inspect|ops\/warp-check|keygen)/;
+let noteWanted = 0, noteTimer = 0;
+const noteText = () => ((localStorage.getItem('m-ui-lang') || navigator.language || 'en').startsWith('zh') ? '演示模式,刷新即恢复' : 'Demo mode: resets on refresh');
+function demoNote() {
+  noteWanted = Date.now();
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(() => { if (noteWanted) { noteWanted = 0; toast(noteText(), 'ok'); } }, 700);
+}
+const toastEl = document.getElementById('toast');
+if (toastEl) new MutationObserver(() => {
+  if (!noteWanted || toastEl.hidden || Date.now() - noteWanted > 3000) return;
+  const note = noteText();
+  noteWanted = 0; clearTimeout(noteTimer);
+  if (!toastEl.textContent.includes(note)) toastEl.textContent += ' · ' + note;
+}).observe(toastEl, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class'] });
 
 // 演示提示条 + 把"支持"链接指到官网;登录框不会出现(status 直接返回),退出登录后随便填也能进
 const zh = (localStorage.getItem('m-ui-lang') || navigator.language || 'en').startsWith('zh');
