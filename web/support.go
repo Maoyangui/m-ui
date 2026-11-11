@@ -31,8 +31,16 @@ func (s *Server) handleSupport(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSupportQR 打赏地址二维码(PNG)。
+// 图里不带二维码库默认的 4 格白边:页面上这张图本来就放在白底小框里,两层白边叠起来是一大圈白;
+// 扫码需要的静区由框的内边距给(约 2 格),见 support.html 的 .qr。
 func (s *Server) handleSupportQR(w http.ResponseWriter, r *http.Request) {
-	png, err := qrcode.Encode(brand.Tron, qrcode.Medium, 300)
+	q, err := qrcode.New(brand.Tron, qrcode.Medium)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	q.DisableBorder = true
+	png, err := q.PNG(300)
 	if err != nil {
 		badRequest(w, err)
 		return
