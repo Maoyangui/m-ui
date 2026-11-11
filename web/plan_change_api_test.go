@@ -575,11 +575,23 @@ func TestPlanOpPanelRoutes(t *testing.T) {
 	if e.count(&model.PlanOp{}) != ops+2 || e.count(&model.Change{}) != changes+1 {
 		t.Fatalf("批量:记录 +2、审计 +1,实际 %d %d", e.count(&model.PlanOp{})-ops, e.count(&model.Change{})-changes)
 	}
+	// 整批那条审计写明方式和套餐名(概况「最近操作」据此写成「批量延期 · 套餐名」)
+	lastAudit := func() string {
+		var c model.Change
+		e.db.Order("id desc").First(&c)
+		return c.Action
+	}
+	if got := lastAudit(); got != "batch:plan:extend:"+monthly.Name {
+		t.Fatalf("批量续费的审计: %q", got)
+	}
 	if got := e.user("bob").Expiry; got != bob.Expiry+150*86400 {
 		t.Fatalf("批量 2 期: %+d 天", (got-bob.Expiry)/86400)
 	}
 	if w := e.panel(0, "POST", "users/batch", `{"ids":[`+id(alice)+`],"action":"plan","planId":`+strconv.Itoa(int(monthly.Id))+`,"periods":0}`); w.Code != 400 {
 		t.Fatalf("批量期数为 0 应拒: %d", w.Code)
+	}
+	if w := e.panel(0, "POST", "users/batch", `{"ids":[`+id(alice)+`],"action":"plan","planId":`+strconv.Itoa(int(monthly.Id))+`,"mode":"bind"}`); w.Code != 200 || lastAudit() != "batch:plan:bind" {
+		t.Fatalf("批量归入套餐: %d %s 审计 %q", w.Code, w.Body.String(), lastAudit())
 	}
 }
 

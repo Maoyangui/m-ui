@@ -46,8 +46,15 @@ func (s *Server) setEnabled(db *gorm.DB, ids []uint, on bool) (int64, error) {
 	if !on {
 		upd["disabled_reason"] = model.DisabledManual
 	}
-	res := db.Model(&model.User{}).Where("id IN ?", ids).Updates(upd)
-	return res.RowsAffected, res.Error
+	var n int64
+	for _, part := range idChunks(ids) { // 分批:一条 IN 放不下上万个 id
+		res := db.Model(&model.User{}).Where("id IN ?", part).Updates(upd)
+		if res.Error != nil {
+			return n, res.Error
+		}
+		n += res.RowsAffected
+	}
+	return n, nil
 }
 
 // resetUsage 本周期用量清零(并入历史累计),超量被停的自动恢复,并允许用量告警再次发出。

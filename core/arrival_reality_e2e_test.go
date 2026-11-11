@@ -42,7 +42,15 @@ func TestRealityHandshakeFailuresE2E(t *testing.T) {
 			"enabled": true, "handshake": map[string]interface{}{"server": "127.0.0.1", "server_port": p}, "private_key": privKey, "short_id": []string{sid}}}
 	}
 	rlPort, rdPort, rvPort := e2eFreeTCP(t), e2eFreeTCP(t), e2eFreeTCP(t)
-	closedPort := fmt.Sprint(e2eFreeTCP(t)) // 没人监听:伪装目标连不上
+	// 伪装目标连不上:用 1 号端口,不用 e2eFreeTCP 拿来再放掉的端口。后者在临时端口范围里,放掉之后既可能被同一进程里
+	// 别的监听(前几轮、别的用例的回显 / 客户端)重新占上,也可能碰上 TCP 自连(拨号选的源端口恰好就是目标端口,
+	// 自己连上自己):REALITY 就真连上了「伪装目标」,记成 processed invalid connection,第 6 步偶发失败
+	// (-count=60 -cpu=1,2,8 的 180 轮里出现过一次)。1 号端口不在临时端口范围、普通用户也绑不了,一定是拒绝连接。
+	const closedPort = "1"
+	if c, err := net.DialTimeout("tcp", "127.0.0.1:"+closedPort, time.Second); err == nil {
+		c.Close()
+		t.Skip("本机 1 号端口有程序在监听,没法模拟伪装目标连不上")
+	}
 	cfg, _ := json.Marshal(map[string]interface{}{
 		"log": map[string]interface{}{"level": "error"},
 		"inbounds": []map[string]interface{}{

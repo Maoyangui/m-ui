@@ -3,6 +3,8 @@ package sub
 import (
 	"bytes"
 	"context"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
@@ -104,7 +106,7 @@ func TestClientsPageRender(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := buf.String()
-	for _, want := range []string{"客户端下载", "Nextin", "Clash Verge Rev", "Clash Meta for Android", "ghfast.top", "id6754002454"} {
+	for _, want := range []string{"客户端下载", "Nextin", "Clash Verge Rev", "Clash Meta for Android", ghMirrorHost, "id6754002454"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("页面里缺少 %q", want)
 		}
@@ -209,4 +211,75 @@ func TestGodusevpnAtomLive(t *testing.T) {
 		t.Fatalf("拿到的版本号不对: %q", v)
 	}
 	t.Logf("最新发布: %s", v)
+}
+
+// 客户端下载页上的每个链接都真的去请求一次(默认跳过,平时不联网跑测试):
+// M_UI_NET_TEST=1 go test -run TestClientLinksLive ./sub/
+// 官方直链、国内镜像、「全部版本」、App Store 都要 2xx / 3xx;写死的版本号对不上发布里的文件名、镜像站封了某个仓库
+// (ghfast.top 曾对 clash-verge-rev 回 403)都会在这里红。只取第一个字节,不真的下载整个安装包。
+func TestClientLinksLive(t *testing.T) {
+	if os.Getenv("M_UI_NET_TEST") != "1" {
+		t.Skip("联网用例,设 M_UI_NET_TEST=1 再跑")
+	}
+	seen := map[string]bool{}
+	var links []string
+	for _, lang := range []string{"zh", "en"} {
+		for _, tile := range clientTiles(lang) {
+			for _, app := range tile.Apps {
+				for _, l := range app.Links {
+					if h := string(l.Href); !seen[h] {
+						seen[h] = true
+						links = append(links, h)
+					}
+				}
+			}
+		}
+	}
+	client := &http.Client{Timeout: 40 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	type res struct {
+		url  string
+		code int
+		err  error
+	}
+	out := make(chan res, len(links))
+	sem := make(chan struct{}, 6)
+	for _, u := range links {
+		go func(u string) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			var last res
+			for try := 0; try < 3; try++ { // 镜像站偶尔抖一下,连续三次都不行才算坏
+				req, _ := http.NewRequest(http.MethodGet, u, nil)
+				req.Header.Set("Range", "bytes=0-0")
+				req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36")
+				resp, err := client.Do(req)
+				last = res{url: u, err: err}
+				if err == nil {
+					last.code = resp.StatusCode
+					_, _ = io.CopyN(io.Discard, resp.Body, 4096)
+					resp.Body.Close()
+					if resp.StatusCode < 400 {
+						break
+					}
+				}
+				time.Sleep(2 * time.Second)
+			}
+			out <- last
+		}(u)
+	}
+	bad := 0
+	for range links {
+		r := <-out
+		switch {
+		case r.err != nil:
+			bad++
+			t.Errorf("请求失败 %s: %v", r.url, r.err)
+		case r.code >= 400:
+			bad++
+			t.Errorf("%d %s", r.code, r.url)
+		default:
+			t.Logf("%d %s", r.code, r.url)
+		}
+	}
+	t.Logf("共 %d 个链接,坏 %d 个", len(links), bad)
 }

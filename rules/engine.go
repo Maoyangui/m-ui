@@ -2,6 +2,7 @@ package rules
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/logger"
 
 	"gorm.io/gorm"
 )
@@ -26,6 +28,7 @@ type Engine struct {
 
 	mu      sync.Mutex
 	windows map[wkey]*window
+	warned  map[uint]bool // 上一轮读不出来的规则(告警只在刚坏掉时打一次)
 }
 
 type wkey struct{ rule, user uint }
@@ -64,8 +67,8 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 	if e.windows == nil {
 		e.windows = map[wkey]*window{}
 	}
-	var ruleList []model.Rule
-	if err := e.DB.Where("enabled = ?", true).Order("id asc").Find(&ruleList).Error; err != nil {
+	ruleList, broken, err := e.loadRules()
+	if err != nil {
 		return false, err
 	}
 	var states []model.LimitState
@@ -95,6 +98,18 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 	}
 	desired := map[wkey]model.LimitState{}
 	keep := map[wkey]bool{}
+	// 读不出来的规则:它名下生效中的状态原样保留(不能因为一行坏数据就悄悄解除),到期的突发状态照常解除;
+	// 它的突发窗口也留着,修好后接着算
+	for k, st := range existing {
+		if broken[k.rule] && (st.Until == 0 || st.Until > nowU) {
+			desired[k] = st
+		}
+	}
+	for k := range e.windows {
+		if broken[k.rule] {
+			keep[k] = true
+		}
+	}
 	var notes []string
 	for _, rule := range ruleList {
 		targets := Targets(rule, users)
@@ -174,7 +189,7 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 	}
 	sort.Slice(add, func(i, j int) bool { return add[i].UserId < add[j].UserId })
 	sort.Slice(lifted, func(i, j int) bool { return lifted[i].UserId < lifted[j].UserId })
-	err := e.DB.Transaction(func(tx *gorm.DB) error {
+	err = e.DB.Transaction(func(tx *gorm.DB) error {
 		if len(add) > 0 {
 			// 分批:一行 10 个变量,时段规则选「全部用户」时一条 INSERT 写几千行会超过 SQLite 一条语句 32766 个变量的上限,
 			// 整笔失败,规则永远不生效、也不会随快照下发到副机(审计 I4)
@@ -222,13 +237,39 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 	return true, nil
 }
 
+// loadRules 逐行读启用中的规则:一行读不出来(手工改库、user_ids 存成了别的类型等)只跳过这一行并告警,
+// 不让整轮判定失败(审计 Q-33①)。broken 是读不出来的规则 id;同一条只在刚坏掉时告警一次,修好后清掉记号。
+func (e *Engine) loadRules() (list []model.Rule, broken map[uint]bool, err error) {
+	var ids []uint
+	if err := e.DB.Model(&model.Rule{}).Where("enabled = ?", true).Order("id asc").Pluck("id", &ids).Error; err != nil {
+		return nil, nil, err
+	}
+	broken = map[uint]bool{}
+	for _, id := range ids {
+		var r model.Rule
+		if err := e.DB.Where("id = ?", id).Take(&r).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue // 两次查询之间被删了
+			}
+			broken[id] = true
+			if !e.warned[id] {
+				logger.Warningf("限速规则 #%d 读不出来,本轮跳过这一条(它名下生效中的限速保持不动,到期的突发限速照常解除),请在规则页重新保存或删除它: %v", id, err)
+			}
+			continue
+		}
+		list = append(list, r)
+	}
+	e.warned = broken
+	return list, broken, nil
+}
+
 // stateBatch 写入 / 撤掉限速状态时每条语句的行数(SQLite 一条语句最多 32766 个变量)。
 const stateBatch = 500
 
 // record 写一条操作审计(和执法任务同一张表、同一个页面看)。
 func record(tx *gorm.DB, now int64, action string, text string) {
 	b, _ := json.Marshal(text)
-	tx.Create(&model.Change{DateTime: now, Actor: "RuleJob", Key: "rule", Action: action, Obj: b})
+	tx.Create(&model.Change{DateTime: now, Actor: model.ActorRuleJob, Key: "rule", Action: action, Obj: b})
 }
 
 func escapeHTML(s string) string {

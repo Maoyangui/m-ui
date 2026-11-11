@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
@@ -59,8 +60,13 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 				gone = append(gone, d)
 			}
 		}
+		// 副机不生成快照,Hub 里的修订号是空的:用最近应用的那份(概况「与主机同步」卡、服务器页的修订号)
+		rev := s.run.Hub().Revision()
+		if rev == "" && s.run.IsNode() {
+			rev = s.setting("hubRevision")
+		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"nodes": out, "revision": s.run.Hub().Revision(), "role": s.role(),
+			"nodes": out, "revision": rev, "role": s.role(), "now": time.Now().Unix(), // 服务器时间:前端按它判断离线防抖,不受浏览器时钟偏差影响
 			"masterId": s.settingInt("hubMasterId", 0), "appliedAt": s.setting("hubAppliedAt"),
 			"decommissions": gone,
 		})

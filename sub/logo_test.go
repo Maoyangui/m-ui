@@ -3,6 +3,7 @@ package sub
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"html"
 	"image"
@@ -352,5 +353,45 @@ func TestLandingLogoDarkBackdropAndNarrowHeader(t *testing.T) {
 	}
 	if !strings.Contains(body, `<img class="logo custom" src="./alice/logo?v=`) {
 		t.Fatal("上传的 logo 应带 custom")
+	}
+}
+
+// 「订阅地址无效」页的标签图标与页头 logo 和落地页同一取法:代理名下(反查得到代理,例如代理关了共享后的共享地址)
+// 先用代理的,再用主面板的,都没传用内置的。地址对不上任何人时 ./<地址>/logo 路由是 404,
+// 所以这页把图内联成 data URI(上传上限 64 KiB),类型取库里的。
+func TestNotFoundPageLogoFollowsLanding(t *testing.T) {
+	s, db := shareServer(t)
+	dataURI := func(lg model.PageLogo) string {
+		return "data:" + lg.Mime + ";base64," + base64.StdEncoding.EncodeToString(lg.Data)
+	}
+	body := iconPage(s, "/sub/nobody-here")
+	if !strings.Contains(body, `<link rel="icon" href="`+builtinIcon) || !strings.Contains(body, `type="image/svg+xml"`) ||
+		!strings.Contains(body, `<img class="logo" src="`+builtinIcon) {
+		t.Fatal("没传 logo 时无效页的标签图标与页头应是内置 SVG")
+	}
+
+	master := testLogo(t, db, 0, 120, 40, 10)
+	body = iconPage(s, "/sub/nobody-here")
+	if !strings.Contains(body, `<link rel="icon" href="`+dataURI(master)+`" type="image/png">`) ||
+		!strings.Contains(body, `<img class="logo custom" src="`+dataURI(master)+`"`) || strings.Contains(body, builtinIcon) {
+		t.Fatal("主面板传了 logo:无效页的标签图标与页头应是主面板的 logo")
+	}
+
+	// 代理关了共享:共享地址落到无效页,反查得到代理 → 先用代理的 logo
+	rs := model.Reseller{Name: "dl1", Enabled: true, PageEnabled: true, ShareOn: true}
+	db.Create(&rs)
+	db.Create(&model.User{Name: "bob", Enabled: true, ResellerId: rs.Id, SubToken: "tok123", ShareToken: "shr-bob-abcdefghijklmnop",
+		Credentials: []byte(`{"hysteria2":{"password":"p"}}`), ShareCreds: []byte(`{"hysteria2":{"password":"s"}}`)})
+	db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Update("share_on", false)
+	if body := iconPage(s, "/sub/shr-bob-abcdefghijklmnop"); !strings.Contains(body, `src="`+dataURI(master)+`"`) {
+		t.Fatal("代理没传 logo 时应回落到主面板的")
+	}
+	own := testLogo(t, db, rs.Id, 120, 40, 90)
+	body = iconPage(s, "/sub/shr-bob-abcdefghijklmnop")
+	if !strings.Contains(body, `<link rel="icon" href="`+dataURI(own)+`" type="image/png">`) || !strings.Contains(body, `src="`+dataURI(own)+`"`) || strings.Contains(body, dataURI(master)) {
+		t.Fatal("代理传了 logo 时无效页应用代理的")
+	}
+	if body := iconPage(s, "/sub/nobody-here"); strings.Contains(body, dataURI(own)) {
+		t.Fatal("对不上任何人的地址不该看到代理的 logo")
 	}
 }

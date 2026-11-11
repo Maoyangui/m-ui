@@ -120,10 +120,19 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 	if s.run != nil { // 事务里不能再走连接池,先取好;测试里没有数据面
 		nodeCert = s.run.NodeCert()
 	}
+	var widened *scopeWidened
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		widened = &scopeWidened{}
 		for _, l := range lines {
 			if err := tx.Model(&model.Line{}).Where("id = ?", l.Id).Select(cols).Updates(l).Error; err != nil {
 				return err
+			}
+			if req.Action == "nodes" { // 和单条修改一样整理指向已撤服务器的收窄(见 fixLineScopesTx)
+				w, err := fixLineScopesTx(tx, l.Id, deployNodeIDs(l.NodeIds))
+				if err != nil {
+					return err
+				}
+				widened.merge(w)
 			}
 		}
 		return validateFullConfig(tx, nodeCert)
@@ -137,9 +146,15 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 		names = append(names, l.Name)
 	}
 	s.audit(r, "line", "batch:"+req.Action, names)
+	resp := map[string]interface{}{"affected": len(lines)}
+	if !widened.empty() {
+		widened.Users, widened.Resellers, widened.Plans = dedupSorted(widened.Users), dedupSorted(widened.Resellers), dedupSorted(widened.Plans)
+		s.audit(r, "line", "scope:widen", map[string]interface{}{"lines": names, "widened": widened})
+		resp["scopeWidened"] = widened
+	}
 	s.reloadAll("批量设置线路 " + req.Action + " ×" + strconv.Itoa(len(lines)))
 	s.syncRelays()
-	writeJSON(w, http.StatusOK, map[string]interface{}{"affected": len(lines)})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // checkBatchPorts 改完部署范围后,同端口的线路在任何一台服务器上都不能有两条。

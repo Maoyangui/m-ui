@@ -23,8 +23,31 @@ test('中英两份的键一一对应', () => {
   assert.deepEqual(Object.keys(en).filter(k => !(k in zh)), [], '只有英文的键');
 });
 
+// 对象字面量里同一个键写两次,后一句会悄悄盖掉前一句(审查:common.refresh、common.test 各写了两次)。
+test('同一本字典里没有重复的键', () => {
+  const bad = [];
+  for (const name of ['zh', 'en']) {
+    const start = text.indexOf(`const ${name} = {`);
+    const body = text.slice(start, text.indexOf('\n};', start));
+    const seen = new Set();
+    for (const m of body.matchAll(/^\s*'([^']+)'\s*:|[,{]\s*'([^']+)'\s*:/gm)) {
+      const k = m[1] || m[2];
+      if (seen.has(k)) bad.push(`${name}.${k}`);
+      seen.add(k);
+    }
+  }
+  assert.deepEqual(bad, []);
+});
+
+// 「A、B 等 N 台」/「A, B and M more」:中文习惯说总数、英文说还剩几个,两边占位不同是有意的。
+// 这几条的调用处 {n}(总数)和 {more}(没列出的个数)都传,所以各取所需;新加的键不在这里就必须一致
+const TOTAL_VS_MORE = new Set(['alert.certMore', 'common.andMore', 'reach.more', 'dash.etc.nodes', 'dash.etc.certs', 'dash.etc.ups', 'dash.etc.users']);
+const sameHoles = (k) => TOTAL_VS_MORE.has(k)
+  ? holes(zh[k]).map(h => (h === '{n}' ? '{more}' : h)).sort().join() === holes(en[k]).sort().join()
+  : holes(zh[k]).sort().join() === holes(en[k]).sort().join();
+
 test('中英占位一致', () => {
-  const bad = Object.keys(zh).filter(k => k in en && holes(zh[k]).sort().join() !== holes(en[k]).sort().join());
+  const bad = Object.keys(zh).filter(k => k in en && !sameHoles(k));
   assert.deepEqual(bad, []);
 });
 

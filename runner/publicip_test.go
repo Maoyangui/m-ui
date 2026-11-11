@@ -100,3 +100,24 @@ func TestIPv6OnlyChanged(t *testing.T) {
 		}
 	}
 }
+
+// 公网地址变了要不要重新渲染:有没有 IPv4 变了总要(纯 IPv6 换公共 DNS);「允许访问内网」关着时,
+// 私网屏蔽里带着本机公网地址,IPv4 / IPv6 任何一个变了都要重新渲染,新地址才拦得住。
+func TestPublicIPReloadNeeded(t *testing.T) {
+	for _, c := range []struct {
+		old, pub, old6, pub6 string
+		allowPrivate         bool
+		want                 bool
+	}{
+		{"203.0.113.1", "203.0.113.1", "2001:db8::1", "2001:db8::1", false, false},
+		{"203.0.113.1", "203.0.113.2", "", "", false, true},
+		{"203.0.113.1", "203.0.113.2", "", "", true, false},
+		{"203.0.113.1", "203.0.113.1", "2001:db8::1", "2001:db8::2", false, true},
+		{"203.0.113.1", "203.0.113.1", "", "2001:db8::2", true, false},
+		{"203.0.113.1", "2001:db8::1", "", "2001:db8::1", true, true}, // 有没有 IPv4 变了,开着也要
+	} {
+		if got := publicIPReloadNeeded(c.old, c.pub, c.old6, c.pub6, c.allowPrivate); got != c.want {
+			t.Errorf("publicIPReloadNeeded(%+v) = %v,应为 %v", c, got, c.want)
+		}
+	}
+}

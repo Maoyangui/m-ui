@@ -22,10 +22,11 @@
     <li>On the master, <b>Servers → Add server</b>, paste the address and token, give it a name and a domain or IP. Each node issues its own certificate (self-signed is fine).</li>
   </ol>
   <p>That is the whole procedure. Within five seconds the node shows <i>online · synced</i> and starts serving the lines deployed to it.</p>
+  <p><b>Versions</b>: keep the master and the nodes on the same version, and upgrade the nodes first, then the master. Once the master uses a newer feature, a node that is too old rejects the whole sync and keeps serving its last configuration (the Servers page marks it "Version differs from master") until it is upgraded.</p>
 
   <h2 id="sync">What gets synced, and how</h2>
   <p>Every 5 seconds the master builds a snapshot — lines, upstreams, users with credentials, user↔line assignments, external nodes, resellers and the subscription settings — hashes it into a <b>revision</b>, and pushes it to every node <b>concurrently</b>. A node that already has that revision does nothing; one that does not applies it and reloads its data plane using the same three-tier reload as the master: user changes hot-swap the inbound user table, upstream changes hot-swap outbounds, only line changes restart sing-box (with rollback if the new config fails to start).</p>
-  <p>In the same round the master pulls each node's <b>report</b>: traffic since the last cursor, online source IPs per user, version, core status, certificate days left. A slow or unreachable node only delays itself; the others sync on time.</p>
+  <p>In the same round the master pulls each node's <b>report</b>: traffic since the last cursor, online source IPs per user, version, core status, certificate days left and renewal results, recent inbound connections. Nodes usually have no notifications of their own, so the master alerts for their failed renewals and expiring certificates. A slow or unreachable node only delays itself; the others sync on time.</p>
 
   <h2 id="traffic">Traffic, quota and device limits across servers</h2>
   <ul>
@@ -43,6 +44,7 @@
     <li>The master marks it offline, sends a Telegram alert after a minute if configured, and keeps trying every 5 seconds.</li>
     <li>When it returns, the cursor picks up traffic from where it left off and the current snapshot is pushed. Users disabled meanwhile are removed on that push.</li>
   </ul>
+  <!-- To fill in once master failover is merged: promote a node to master, the three failover modes, standbys and encrypted replicas, the m-ui ha command. Do not describe it before then. -->
 
   <h2 id="ratio">Traffic ratio</h2>
   <p>Each server has a ratio (default 1). Traffic through a server with ratio 2 counts double against the user's quota — useful for premium routes or expensive bandwidth. A user's usage and the charts in the user details and on the landing page all show the scaled numbers, so they reconcile. A node's landing page only sees the traffic through that node, so it shows no chart.</p>

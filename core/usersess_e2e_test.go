@@ -130,6 +130,9 @@ func TestUserSessionsE2E(t *testing.T) {
 	for _, p := range protos {
 		p := p
 		t.Run(p.name, func(t *testing.T) {
+			if p.name == "anytls" {
+				anytlsRaceSkip(t)
+			}
 			proxy := e2eClientBox(t, p.outbound(p.port, "pa"))
 			dial := func() (net.Conn, error) { return e2eSocksDial(proxy, echoAddr) }
 

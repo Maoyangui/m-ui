@@ -17,6 +17,8 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/sub"
+
+	"gorm.io/gorm"
 )
 
 // 证书库:一台服务器可以有多张证书。每张证书一行(model.Cert),文件在数据目录 cert/ 下,或指向服务器上已有的文件。
@@ -159,6 +161,21 @@ func (r *Runner) isRestoredCopy(certFile string) bool {
 	return underDir(certFile, restoredCertDir(r.DataDir()))
 }
 
+// certFileReferenced 证书库里还有哪一行、或哪个设置(线路默认、面板、订阅、代理面板的证书 / 私钥)引用着这个文件。
+func (r *Runner) certFileReferenced(f string) bool {
+	var n int64
+	r.db.Model(&model.Cert{}).Where("cert_file = ? OR key_file = ?", f, f).Count(&n)
+	if n > 0 {
+		return true
+	}
+	for _, k := range []string{"certFile", "keyFile", "webCertFile", "webKeyFile", "subCertFile", "subKeyFile", "resellerCertFile", "resellerKeyFile"} {
+		if r.setting(k) == f {
+			return true
+		}
+	}
+	return false
+}
+
 // underDir path 是不是在 dir 里面(按路径比,不是按字符串前缀:/etc/m-ui-old 不在 /etc/m-ui 里)。
 func underDir(path, dir string) bool {
 	rel, err := filepath.Rel(dir, path)
@@ -299,9 +316,11 @@ func (r *Runner) linesByCert() map[string][]string {
 }
 
 // namedCerts 给渲染用的证书库:名字 → 文件路径。文件不在了的不算(线路退回默认证书,不让整份配置起不来)。
-func (r *Runner) namedCerts() map[string]render.NodeCert {
+func (r *Runner) namedCerts() map[string]render.NodeCert { return namedCertsOf(r.db) }
+
+func namedCertsOf(db *gorm.DB) map[string]render.NodeCert {
 	var rows []model.Cert
-	if r.db.Find(&rows).Error != nil {
+	if db.Find(&rows).Error != nil {
 		return nil
 	}
 	out := make(map[string]render.NodeCert, len(rows))
@@ -457,6 +476,13 @@ func (r *Runner) DeleteCert(name string) error {
 	if row.Source != "external" && strings.HasPrefix(row.CertFile, filepath.Join(r.DataDir(), "cert")) {
 		_ = os.Remove(row.CertFile)
 		_ = os.Remove(row.KeyFile)
+	}
+	// 换机还原时放进 cert/restored/ 的副本(数据目录外证书的复制品):这一行删了就没人用它,一并删掉;
+	// 别的行或设置还引用着同一个文件(手填过路径)就留着。数据目录外的原件不在这个目录里,碰不到。
+	for _, f := range []string{row.CertFile, row.KeyFile} {
+		if r.isRestoredCopy(f) && !r.certFileReferenced(f) {
+			_ = os.Remove(f)
+		}
 	}
 	r.syncLocalCerts()
 	r.notifier.Forget("cert:" + name) // 这张的续期 / 到期提醒记录不用留了

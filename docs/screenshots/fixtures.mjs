@@ -11,7 +11,7 @@ const curl = (p, bin) => { try { return execFileSync('curl', ['-s', '-b', C, '-m
 const json = p => { try { return JSON.parse(curl(p)); } catch { return null; } };
 
 const keys = ['status', 'settings', 'lines', 'upstreams', 'users', 'plans', 'nodes', 'exts', 'onlines', 'resellers', 'update', 'cert', 'ops', 'self',
-  'audit?limit=8', 'logs?count=40&level=info', 'upstreams/health', 'conns/recent', 'sublogs', 'cert/status', 'ops/status', 'backup/list', 'admin/info', 'agent/info',
+  'audit?limit=8', 'audit?limit=40', 'audit?limit=40&actor=human', 'logs?count=40&level=info', 'upstreams/health', 'conns/recent', 'sublogs', 'cert/status', 'ops/status', 'backup/list', 'admin/info', 'agent/info',
   'stats/top?hours=24&limit=10', 'stats/top?hours=168&limit=10', 'stats/top?hours=720&limit=10',
   'stats?resource=user&hours=1&bucket=60', 'stats?resource=user&hours=6&bucket=300', 'stats?resource=user&hours=24&bucket=3600', 'stats?resource=user&hours=168&bucket=3600'];
 const fixtures = {};
@@ -20,6 +20,17 @@ for (const k of keys) fixtures['GET ' + k] = json(k);
 const UAS = ['ClashMetaForAndroid/2.11.12.Meta', 'Shadowrocket/2.2.60 (iPhone; iOS 18.5)', 'sing-box/1.12.4', 'clash-verge/v2.3.2', 'Hiddify/2.5.7 (Android)', 'Stash/3.1.0 (iOS)'];
 for (const [i, l] of (fixtures['GET sublogs'] || []).entries()) if (l && typeof l === 'object' && 'ua' in l) l.ua = UAS[i % UAS.length];
 const users = fixtures['GET users'] || [];
+// 演示实例没有真实客户端连进来,概况的「最近入站连接」会是空的:补几条(文档保留段的 IP),含 1 条设备数超限被拒
+if (!(fixtures['GET conns/recent'] || []).length && users.length && (fixtures['GET lines'] || []).length) {
+  const ls = fixtures['GET lines'], srv = ((fixtures['GET nodes'] || {}).nodes || []).filter(n => n.enabled !== false), now = Math.floor(Date.now() / 1000);
+  fixtures['GET conns/recent'] = ['203.0.113.5', '198.51.100.7', '2001:db8:5e::27', '192.0.2.44', '203.0.113.88', '198.51.100.23'].map((ip, i) => {
+    const l = ls[i % ls.length];
+    const c = { ip, user: users[i % users.length].name, line: l.name, protocol: l.protocol, count: [42, 17, 9, 6, 3, 1][i], ts: now - i * 95 };
+    if (srv.length > 1) c.server = srv[i % srv.length].name;
+    if (i === 4) c.rejected = 'device';
+    return c;
+  });
+}
 for (const u of users) {
   fixtures[`GET users/${u.id}/sub`] = json(`users/${u.id}/sub`);
   for (const h of [24, 168, 720]) fixtures[`GET stats?resource=user&tag=${u.name}&hours=${h}&bucket=3600`] = json(`stats?resource=user&tag=${encodeURIComponent(u.name)}&hours=${h}&bucket=3600`);

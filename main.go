@@ -340,17 +340,7 @@ func runRender(dbPath, out string, validate bool) error {
 		return err
 	}
 	defer database.Close(db)
-	get := func(key string) string {
-		var v string
-		db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
-		return v
-	}
-	cert := render.NodeCert{
-		ServerName: get("webDomain"),
-		CertPath:   get("webCertFile"),
-		KeyPath:    get("webKeyFile"),
-	}
-	raw, err := render.BuildConfig(db, cert)
+	raw, err := render.BuildConfig(db, runner.NodeCertOf(db)) // 和运行时同一套证书取法(certFile 优先,再是面板证书)
 	if err != nil {
 		return err
 	}

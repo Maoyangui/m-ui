@@ -99,12 +99,12 @@ func TestEffective(t *testing.T) {
 	if up, down := Effective(50, 60, nil); up != 50 || down != 60 {
 		t.Fatalf("无状态: %d/%d", up, down)
 	}
-	// 只升不降:规则 20 比自己的 50 严 → 20;规则 80 比自己的宽 → 仍是 50
+	// 不超过用户自己的限速:规则 20 比自己的 50 严 → 20;规则 80 比自己的宽 → 仍是 50
 	if up, _ := Effective(50, 0, []model.LimitState{tight(20, 0)}); up != 20 {
-		t.Fatalf("只升不降取更严: %d", up)
+		t.Fatalf("不超过用户自己的限速取更严: %d", up)
 	}
 	if up, _ := Effective(50, 0, []model.LimitState{tight(80, 0)}); up != 50 {
-		t.Fatalf("只升不降不能放宽: %d", up)
+		t.Fatalf("不超过用户自己的限速不能放宽: %d", up)
 	}
 	// 覆盖:规则 80 可以高于自己的 50
 	if up, _ := Effective(50, 0, []model.LimitState{over(80, 0)}); up != 80 {
@@ -114,7 +114,7 @@ func TestEffective(t *testing.T) {
 	if up, _ := Effective(0, 0, []model.LimitState{tight(20, 0)}); up != 20 {
 		t.Fatalf("用户不限时规则值生效: %d", up)
 	}
-	// 多条同时生效取最严;覆盖那条不能越过只升不降那条
+	// 多条同时生效取最严;覆盖那条不能越过不超过用户自己的限速那条
 	if up, _ := Effective(50, 0, []model.LimitState{tight(20, 0), over(80, 0)}); up != 20 {
 		t.Fatalf("多条取最严: %d", up)
 	}

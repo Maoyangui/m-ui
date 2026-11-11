@@ -67,6 +67,7 @@ func (r *Runner) CreateBackupFileNamed(prefix string) (BackupFile, error) {
 	f.Close()
 	st, _ := os.Stat(f.Name())
 	r.rotateBackups()
+	r.noteBackup(nil) // 任何一次备份成功(手动、Telegram /backup、定时)都说明问题已经解决:概况不再报「定时备份失败」
 	return BackupFile{Name: name, Size: st.Size(), Time: st.ModTime().Unix()}, nil
 }
 
@@ -163,6 +164,7 @@ func (r *Runner) backupLoop(stop <-chan struct{}) {
 				continue
 			}
 			bf, err := r.CreateBackupFile()
+			r.noteBackup(err)
 			if err != nil {
 				logger.Warning("定时备份失败: ", err)
 				r.notifier.Event("tgOnCore", "🔴 <b>定时备份失败</b>\n"+notify.Esc(err.Error()))
@@ -185,6 +187,24 @@ func (r *Runner) backupLoop(stop <-chan struct{}) {
 
 // SetRestartFunc 替换 ScheduleRestart 的动作(测试里不真的重新执行进程)。
 func (r *Runner) SetRestartFunc(fn func(time.Duration)) { r.restartFn = fn }
+
+// noteBackup 记下备份的结果:定时备份失败记原因和时间;任何一次备份成功清空。
+func (r *Runner) noteBackup(err error) {
+	r.backupErrMu.Lock()
+	defer r.backupErrMu.Unlock()
+	if err == nil {
+		r.backupErr, r.backupErrAt = "", 0
+		return
+	}
+	r.backupErr, r.backupErrAt = err.Error(), time.Now().Unix()
+}
+
+// BackupError 最近一次定时备份失败的原因与时间(没失败过、或之后成功过为空)。
+func (r *Runner) BackupError() (string, int64) {
+	r.backupErrMu.Lock()
+	defer r.backupErrMu.Unlock()
+	return r.backupErr, r.backupErrAt
+}
 
 // ScheduleRestart 在短暂延迟后重启进程(还原备份、改端口后使用)。
 func (r *Runner) ScheduleRestart(delay time.Duration) {

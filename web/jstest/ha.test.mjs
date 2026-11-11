@@ -98,6 +98,7 @@ doc.querySelectorAll = sel => doc.body.querySelectorAll(sel);
 const mk = (tag, props = {}, parent = doc.body) => Object.assign(parent.appendChild(new El(tag)), props);
 globalThis.document = doc;
 globalThis.window = { innerWidth: 1200, innerHeight: 800, on: {}, addEventListener(type, fn) { (this.on[type] ||= []).push(fn); } };
+globalThis.Element ||= class {}; // ui.js 的滚动收起菜单要认 instanceof Element
 globalThis.CustomEvent = class { constructor(type) { this.type = type; } };
 globalThis.sessionStorage = { getItem: () => null, setItem() {}, removeItem() {} };
 globalThis.location = { hash: '' };

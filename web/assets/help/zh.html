@@ -73,7 +73,7 @@
       <li><b>建用户</b>:<b data-k="nav.users">用户</b> 页 → <b data-k="user.add">新增用户</b>,填用户名和额度,勾上 <b data-k="user.f.lines">可用线路</b>,保存。</li>
       <li><b>发订阅</b>:点用户名打开详情,<b data-k="user.subscription">订阅</b> 下面有两个地址,把不带 <code>?format=</code> 的那个(通用地址)发给用户:用浏览器打开是他自己的落地页,能一键导入客户端;客户端来拉时按类型给格式(见 <a href="#users-sub">订阅地址、二维码与临时共享</a>)。</li>
     </ol>
-    <div class="tip"><b>没有域名也能用</b>自签证书 + 服务器 IP 就行:订阅会自动告诉客户端"允许不安全证书",客户端不用另外设置。以后有了域名签正式证书时注意:证书页默认勾着 <b data-k="cert.applySub">用于订阅 HTTPS</b>,勾了订阅地址就变成 <code>https://域名…</code>,要把新地址发给每个用户;不想换地址就取消这个勾,用户刷新一次订阅即可。</div>
+    <div class="tip"><b>没有域名也能用</b>自签证书 + 服务器 IP 就行:订阅会自动告诉客户端"允许不安全证书",客户端不用另外设置。以后有了域名签正式证书时注意:已经有用户时证书页默认不勾 <b data-k="cert.applySub">用于订阅 HTTPS</b>;勾了的话所有用户的订阅地址都会变成 <code>https://域名…</code>,旧地址立即失效,每个客户端都要重新导入,签发前会再提示一次。不勾就保持原地址,用户刷新一次订阅即可。</div>
     <div class="pit"><b>常见坑</b>线路的端口要在云服务器安全组和系统防火墙里放行:Hysteria2、TUIC 走 UDP,其它大多走 TCP。没放行是"连不上"最常见的原因。</div>
   </section>
 
@@ -90,12 +90,13 @@
 
   <section class="sec" id="tour" data-scope="admin">
     <h3>界面导览</h3>
-    <p class="lede">左边是功能导航,右上角是帮助和反馈,页面顶部的彩色横条是需要你处理的提醒。</p>
+    <p class="lede">左边是功能导航,右上角是帮助和反馈;要你处理的事集中在 <b data-k="nav.dashboard">概览</b> 最上面的 <b data-k="dash.attn.title">需要处理</b>,其它页面顶部的彩色横条也会提醒。</p>
     <ul>
       <li>左侧导航依次是:<b data-k="nav.dashboard">概览</b>、<b data-k="nav.lines">线路</b>、<b data-k="nav.upstreams">上游</b>、<b data-k="nav.exts">外部节点</b>、<b data-k="nav.users">用户</b>、<b data-k="nav.resellers">代理</b>、<b data-k="nav.plans">套餐</b>、<b data-k="nav.rules">规则</b>、<b data-k="nav.nodes">服务器</b>、<b data-k="nav.cert">证书</b>、<b data-k="nav.backup">备份</b>、<b data-k="nav.ops">运维</b>、<b data-k="nav.logs">日志</b>、<b data-k="nav.admin">管理员</b>、<b data-k="nav.settings">设置</b>。</li>
       <li>左下角:主题切换(◐ 跟随系统、☀ 浅色、☾ 深色)、语言、<b data-k="common.logout">退出登录</b>。版本号旁出现箭头表示有新版本,点它就能更新(见 <a href="#update">更新</a>)。</li>
       <li>右上角:<b data-k="help.btn">帮助说明</b>(就是本页)和 <b data-k="support.btn">建议 / 支持</b>(联系作者、反馈问题)。</li>
-      <li>顶部提醒条:默认密码没改、证书要处理、大陆连通异常、数据面重载失败等,按提示处理;能关的点 <b data-k="reach.dismiss">知道了</b>。</li>
+      <li><b data-k="dash.attn.title">需要处理</b>:数据面重载失败、服务器离线或没同步、证书要处理、大陆连通异常、上游故障、用户快到期或流量将尽、定时备份失败等,每类一行,按轻重排,点行尾的链接去处理;一切正常时只剩一行「✓」。证书和大陆连通可以点 <b data-k="reach.dismiss">知道了</b>,情况有变化会再出现。</li>
+      <li>顶部提醒条:在概览以外的页面,默认密码没改、证书要处理、大陆连通异常、数据面重载失败等会在页面顶部提醒,按提示处理。</li>
       <li>副服务器的面板里,线路、用户这些页面是只读的,要到主机面板改。</li>
       <li>快捷键:<kbd>/</kbd> 跳到当前页的搜索框,<kbd>Esc</kbd> 关闭弹窗,<kbd>Ctrl</kbd> + <kbd>Enter</kbd> 提交弹窗。手机上点左上角 ☰ 打开导航。</li>
     </ul>
@@ -173,7 +174,7 @@
     </ul>
     <div class="pit"><b>常见坑</b><ul>
       <li>检测时服务器地址(IP 和端口)会发给 Globalping 公共测试网络,自动巡检也一样;不想发就去掉 <b data-k="set.reachAuto">自动巡检</b>,只在需要时手动点检测。免登录每小时约 250 个测点次,测一台约用 15 个;不够用就在设置里填免费申请的 <b data-k="set.reachToken">Globalping 令牌(可选)</b>。</li>
-      <li>测的是这台第一条 TCP 线路的端口;只有 hysteria2、tuic(UDP)线路时,只能看出 IP 有没有被墙。目前只测 IPv4。</li>
+      <li>测的是这台第一条 TCP 线路的端口;只有 hysteria2、tuic(UDP)线路时,只能看出 IP 有没有被墙。目前只测 IPv4:大陆的家庭宽带测点大多没有 IPv6,拿它们测 IPv6 会把正常的服务器误判成被墙(见 <a href="#limits">已知限制</a>)。</li>
     </ul></div>
   </section>
 
@@ -184,7 +185,7 @@
       <li>编辑服务器去掉 <b data-k="common.enabled">启用</b>:那台立刻停止为任何人服务,重新启用后恢复。</li>
       <li>删除服务器:只部署在它上面的线路会被停用,只用它的用户 / 代理会失去那条线路;操作后会列出受影响的线路和人。</li>
       <li>标 <b data-k="node.decomPending">下线通知未送达</b>:那台还没收到停止服务的通知,主机会一直重试。要立刻停掉,就 SSH 到那台机器上执行 <code>systemctl disable --now m-ui</code>(停掉并取消开机自启),或者用 <code>m-ui</code> 菜单 14 卸载。只关掉副机模式停不了服务:它会变成一台独立的主机,按最后一份配置继续给所有人用。</li>
-      <li>离线原因:<b data-k="node.errTimeout">连接超时</b>、<b data-k="node.errRefused">连接被拒绝</b>(端口没放行或面板没在运行)、<b data-k="node.errDns">域名解析失败</b>、<b data-k="node.errCert">证书不受信任</b>(勾上跳过证书校验)、<b data-k="node.errToken">令牌不匹配</b>(重新复制配对令牌)、<b data-k="node.errFp">证书指纹变了</b>(确实重签过副机证书,就点 <b data-k="node.resetCert">重置指纹</b>)。</li>
+      <li>离线原因:<b data-k="node.errTimeout">连接超时</b>、<b data-k="node.errRefused">连接被拒绝</b>(端口没放行或面板没在运行)、<b data-k="node.errDns">域名解析失败</b>、<b data-k="node.errCert">证书不受信任</b>(勾上跳过证书校验)、<b data-k="node.errToken">令牌不匹配</b>(重新复制配对令牌)、<b data-k="node.errFp">证书指纹变了</b>(确实重签过副机证书,就在那一行的 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>)。</li>
       <li>换一台副机:新副机装好后,在 <b data-k="nav.nodes">服务器</b> 页编辑原来那一行,换成新的 API 地址和令牌,主机会自动重新推送。</li>
     </ul>
   </section>
@@ -385,7 +386,7 @@
     <h3>部署到哪些服务器</h3>
     <p class="lede">有多台服务器时,一条线路可以只在其中几台上开。</p>
     <ul>
-      <li><b data-k="line.servers">部署到服务器</b>:默认全部勾着 = 全部服务器,以后新加的服务器也会自动开这条线路(全都不勾也按全部算);只勾其中几台,才是只在这几台上开,订阅也只出这些入口。</li>
+      <li><b data-k="line.servers">部署到服务器</b>:默认全部勾着 = 全部服务器,以后新加的服务器也会自动开这条线路(全都不勾也按全部算);只勾其中几台,才是只在这几台上开,订阅也只出这些入口。从部署里去掉某台服务器时,用户、代理授权、套餐在这条线路上选了那台的,一并去掉那台;只选了被去掉的服务器的,改回这条线路的全部服务器(保存后弹窗点名),不会悄悄没了这条线路。</li>
       <li>双栈服务器那一行多一个下拉,可以让这条线路在那台单独用 IPv4 或 IPv6(默认跟服务器页的设置)。</li>
       <li>一条线路部署在几台服务器上就是几个"入口";给用户、套餐、代理分配线路时,可以只勾其中某台服务器上的入口。</li>
     </ul>
@@ -413,7 +414,7 @@
     <ul>
       <li><b data-k="line.batch.enable">启用</b>、<b data-k="line.batch.disable">停用</b>、<b data-k="line.batch.upstream">设上游</b>、<b data-k="line.batch.nodes">部署服务器</b>(有多台服务器时才有)、<b data-k="line.batch.clear">取消选择</b>。批量改只重载一次数据面。</li>
       <li>拖动行调整顺序,订阅里的节点按这个顺序排。</li>
-      <li>行末 ⧉ 是 <b data-k="line.clone">克隆</b>(会重新挑一个端口),⇢ 是 <b data-k="up.addFromLine">把线路加为上游</b>(见 <a href="#up-chain">线路作上游</a>)。</li>
+      <li>行末 <b data-k="common.more">更多</b> 里有 <b data-k="line.clone">克隆</b>(会重新挑一个端口)、<b data-k="up.addFromLine">把线路加为上游</b>(见 <a href="#up-chain">线路作上游</a>)和删除。</li>
     </ul>
   </section>
 </section>
@@ -456,7 +457,7 @@
     <h3>线路作上游(链式代理)</h3>
     <p class="lede">让入口线路的流量再转到你自己的另一条线路出去,比如国内中转机进、海外机出。</p>
     <ul>
-      <li><b data-k="nav.upstreams">上游</b> 页点 <b data-k="up.addFromLine">把线路加为上游</b>(或在线路行末点 ⇢),选线路和 <b data-k="up.fromNode">用它在哪台服务器上的入口</b>。</li>
+      <li><b data-k="nav.upstreams">上游</b> 页点 <b data-k="up.addFromLine">把线路加为上游</b>(或在线路行末的 <b data-k="common.more">更多</b> 里点),选线路和 <b data-k="up.fromNode">用它在哪台服务器上的入口</b>。</li>
       <li>参数跟着线路自动走,线路改端口、换协议都不用管;用的是专用凭据,不占用户配额,流量只算一次。</li>
       <li>成环、线路被删、入口服务器被删都会被拦下或标出来。副机要 v0.7.16 及以上。</li>
     </ul>
@@ -539,7 +540,7 @@
       <li><b data-k="cert.srcSelf">无域名(自签)</b>:点 <b data-k="cert.selfsign">生成自签证书</b>;<b data-k="cert.hosts">证书包含的地址(留空自动)</b> 留空就用本机公网 IP。订阅里每个节点会自动带"允许不安全",客户端不用设置;面板和订阅建议保持 HTTP。</li>
       <li><b data-k="cert.srcExternal">已有证书</b>:服务器上已经有 certbot、宝塔、nginx 或商业证书时,填 <b data-k="cert.certPath">证书文件(fullchain)</b> 和 <b data-k="cert.keyPath">私钥文件</b> 的路径,点 <b data-k="cert.useExternal">使用该证书</b>。</li>
     </ul>
-    <div class="tip"><b>选用途</b>在 <b data-k="cert.applyTo">添加后用于</b> 里勾:<b data-k="cert.forLines">设为线路默认证书</b>、<b data-k="cert.applyPanel">用于面板 HTTPS</b>、<b data-k="cert.applySub">用于订阅 HTTPS</b>;没勾的用途不受影响。默认勾选:还没有正式证书时勾着 <b data-k="cert.forLines">设为线路默认证书</b>;添加的不是自签证书、而面板或订阅还没用 HTTPS 时,也会勾着后两项。勾了 <b data-k="cert.applySub">用于订阅 HTTPS</b>,订阅地址会变成 <code>https://</code>,要把新地址发给用户;勾了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后面板也换成 <code>https://</code>。</div>
+    <div class="tip"><b>选用途</b>在 <b data-k="cert.applyTo">添加后用于</b> 里勾:<b data-k="cert.forLines">设为线路默认证书</b>、<b data-k="cert.applyPanel">用于面板 HTTPS</b>、<b data-k="cert.applySub">用于订阅 HTTPS</b>;没勾的用途不受影响。默认勾选:还没有正式证书时勾着 <b data-k="cert.forLines">设为线路默认证书</b>;添加的不是自签证书、而面板还没用 HTTPS 时勾着 <b data-k="cert.applyPanel">用于面板 HTTPS</b>;订阅还没用 HTTPS 且一个用户都还没有时勾着 <b data-k="cert.applySub">用于订阅 HTTPS</b>,已有用户时默认不勾。勾了 <b data-k="cert.applySub">用于订阅 HTTPS</b>,所有用户的订阅地址都会从 <code>http://</code> 变成 <code>https://</code>,旧地址立即失效,客户端要重新导入(添加前、在 <b data-k="cert.inUse">正在使用</b> 里换订阅证书时、在设置页「订阅」里直接填上或清空证书路径时都会再提示一次);勾了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后面板也换成 <code>https://</code>。</div>
   </section>
 
   <section class="sec" id="cf-token">
@@ -628,7 +629,7 @@
       <li>周期重置:每过 N 天把已用流量清零,因超量被停用的也会自动解禁。</li>
       <li>设备数:按同时在线的来源 IP 算,所有服务器合在一起算。同一个 WiFi(同一个公网 IPv4,或同一个 IPv6 /64 网段)下的几台设备算 1 台;IPv4 和 IPv6 各自对上限计数,同一台设备同时走 IPv4 和 IPv6 不会被当成两台。</li>
       <li>设备满了只拒绝新设备,已经连着的不受影响;别的设备下线约 1 分钟后名额就空出来了。</li>
-      <li data-scope="admin">被拒的连接会在概览的 <b data-k="dash.recentConns">最近入站连接</b> 里标红 <b data-k="dash.rejectedDevice">设备数超限被拒</b>。</li>
+      <li data-scope="admin">被拒的连接会在概览的 <b data-k="dash.recentConns">最近入站连接</b> 里整行标红、带 <b data-k="dash.conn.rejected">被拒</b> 徽章,鼠标停在徽章上看原因(<b data-k="dash.rejectedDevice">设备数超限被拒</b>);最近 10 分钟有被拒的,<b data-k="dash.attn.title">需要处理</b> 里也会提一句。</li>
       <li>限速:同一台服务器上,这个用户的全部连接共享这份带宽;他同时走几台服务器就有几份。改了马上生效。</li>
     </ul>
   </section>
@@ -702,7 +703,7 @@
       <li><b data-k="user.reason.manual">手动</b>:手动停用的不会因为重置流量、延长到期或周期重置而自动恢复。但用套餐续费或延期(<b data-k="user.renewMenu">续费…</b>、批量 <b data-k="user.batch.plan">套用套餐</b>)和 <b data-k="user.changeMenu">换套餐…</b> 是明确的开通动作,会把他一并启用<span data-pending="backup-certs">:续费和批量套用套餐时,面板会先提示里面有手动停用的人、续费后会被启用</span>。外部 API 的续费、换套餐也一样会启用。</li>
       <li data-scope="admin"><b data-k="user.limited">限速中</b>:正被规则临时限速(见 <a href="#rules">规则</a>)。</li>
       <li><b data-k="user.kick">踢下线</b>:断开这个用户在所有服务器上的连接(hysteria2、TUIC、AnyTLS 整条会话一起关)。没停用的话客户端会马上重连,想彻底断就先停用。</li>
-      <li>列表上方可以按 <b data-k="user.filter.all">全部</b>、<b data-k="user.filter.enabled">启用</b>、<b data-k="user.filter.disabled">停用</b>、<b data-k="user.filter.expired">已过期</b>、<b data-k="user.filter.over">超量</b> 筛选。</li>
+      <li>列表上方可以按 <b data-k="user.filter.all">全部</b>、<b data-k="user.filter.online">在线</b>、<b data-k="user.filter.enabled">启用</b>、<b data-k="user.filter.disabled">停用</b>、<b data-k="user.filter.expired">已过期</b>、<b data-k="user.filter.over">超量</b> 筛选,也可以只看某个套餐。在当前页全选后(手机上勾任意一个后),批量条上可以一键选中全部筛选结果,一起操作;这一下会换掉之前勾的人,只留当前的筛选结果。换筛选、换搜索之前勾的人会一直留着,批量操作时其中有当前列表里看不到的,会先问一句再处理。</li>
     </ul>
   </section>
 
@@ -735,7 +736,7 @@
     <ol class="steps">
       <li><b data-k="nav.rules">规则</b> 页 → <b data-k="rule.add">新增规则</b>:起个名字,选 <b data-k="rule.kind">类型</b>,填条件。</li>
       <li>填 <b data-k="rule.up">上行 Mbps</b> / <b data-k="rule.down">下行 Mbps</b>,0 = 这个方向不改。</li>
-      <li><b data-k="rule.tightenOnly">只升不降</b>:开着(默认)时结果不会高于用户自己的限速,只会更严;关掉就直接用规则的值,可以用来在某个时段放宽。</li>
+      <li><b data-k="rule.tightenOnly">不超过用户自己的限速</b>:开着(默认)时结果不会高于用户自己的限速,只会更严;关掉就直接用规则的值,可以用来在某个时段放宽。</li>
       <li><b data-k="rule.targets">目标</b> 可以叠加:全部用户(含以后新建的)、某个套餐的用户、某个代理名下的全部用户、逐个勾选。</li>
       <li>保存。</li>
     </ol>
@@ -799,7 +800,7 @@
   <section class="sec" id="rs-panel">
     <h3>代理面板里能做什么</h3>
     <ul>
-      <li><b data-k="nav.dashboard">概览</b>:已用流量和额度、用户数、在线用户和设备。</li>
+      <li><b data-k="nav.dashboard">概览</b>:已用额度、账号到期、用户数、在线用户和设备;额度、到期、设备池快到头时 <b data-k="dash.attn.title">需要处理</b> 会提醒;<b data-k="dash.rs.expiringList">即将到期</b> 和 <b data-k="dash.rs.quotaList">流量快用完</b> 列出该续费的用户。</li>
       <li><b data-k="nav.users">用户</b>:新增、编辑、续费、延期、重置流量、踢线、重置订阅链接、批量操作、看用量曲线和在线设备。建号只填名称,订阅地址是随机令牌。</li>
       <li><b data-k="nav.plans">套餐</b>:只看得到、也只能用自己建的套餐。</li>
       <li><b data-k="nav.account">账号</b>:额度、密码、两步验证、自己的订阅页文案、外部 API。</li>
@@ -1072,11 +1073,12 @@
 
   <section class="sec" id="recent-conns">
     <h3>最近入站连接</h3>
-    <p class="lede">概览页底部的 <b data-k="dash.recentConns">最近入站连接</b> 用来排查"用户说连不上":看他的 IP 有没有连到服务器、连的哪条线路。</p>
+    <p class="lede">概览页的 <b data-k="dash.recentConns">最近入站连接</b> 用来排查"用户说连不上":看他的 IP 有没有连到服务器、连的哪条线路。</p>
     <ul>
       <li>记录的是通过了协议握手和认证的连接,带用户、线路、服务器、次数和最近时间。</li>
-      <li>被设备数上限或代理设备池拒绝的连接也会列出来并标红:<b data-k="dash.rejectedDevice">设备数超限被拒</b>、<b data-k="dash.rejectedPool">代理设备池已满被拒</b>。</li>
-      <li data-pending="v6">握手或认证失败的连接(证书、密码、SNI 不对)也会列出,并写明失败原因。</li>
+      <li>被设备数上限或代理设备池拒绝的连接也会列出来:整行标红、带 <b data-k="dash.conn.rejected">被拒</b> 徽章,鼠标停在徽章上看是 <b data-k="dash.rejectedDevice">设备数超限被拒</b> 还是 <b data-k="dash.rejectedPool">代理设备池已满被拒</b>。</li>
+      <li>默认列最近 10 条,点「显示全部」在卡片里展开(可以按 IP、用户、线路筛选);上方的筛选切换连接、被拒和握手失败。</li>
+      <li data-pending="v6">握手或认证失败的连接(证书、密码、SNI 不对)在「握手失败」筛选里,写明失败原因;版本较旧的副机不上报这一项,概况会写明是哪几台。</li>
       <li>列表里没有某个 IP,多半是包没到服务器(安全组、防火墙、客户端网络)。要确认包到没到:TCP 线路可以到日志页把 <b data-k="logs.coreLevel">数据面级别</b> 临时调到 info,看有没有 <code>inbound connection from</code>。Hysteria2、TUIC 这类 UDP 线路只有握手和认证都成功后才记这一行(密码、SNI 不对时什么也不记),看不到不代表包没到,要在服务器上抓包确认,比如 <code>tcpdump -ni any udp port 端口</code>。</li>
     </ul>
   </section>
@@ -1228,7 +1230,7 @@
   <section class="sec" id="sec-core" data-scope="admin">
     <h3>数据面的安全开关</h3>
     <ul>
-      <li><b data-k="set.allowPrivate">允许用户访问内网 / 本机地址</b>:默认关,用户经代理碰不到只监听 127.0.0.1 的服务(比如 WARP 端口)和你的内网。确实要给用户访问内网服务时再打开。</li>
+      <li><b data-k="set.allowPrivate">允许用户访问内网 / 本机地址</b>:默认关,用户经代理碰不到只监听 127.0.0.1 的服务(比如 WARP 端口)和你的内网,也碰不到这台服务器自己的公网 IPv4 / IPv6(全部端口,面板、代理面板、订阅、副机接口都在内;主副机各拦各自的地址,地址变了自动更新):你按来源 IP 限制面板访问时,用户不能借代理从服务器自己这头绕进来。确实要给用户访问内网服务时再打开。</li>
       <li>面板端口不在此列:用户经代理照样能打开 <code>服务器公网IP:面板端口</code>;公网 IP 直接绑在网卡上的 VPS(很常见)上,这类流量走本机回环,防火墙的 IP 白名单拦不住。所以别只靠白名单保护面板:改掉默认的端口和路径,用强密码,打开两步验证。</li>
       <li><b data-k="set.blockBT">屏蔽 BT 下载</b>:拒绝经代理的 BT 连接,免得 VPS 招来版权投诉。</li>
       <li>副机的 API 地址用 HTTPS,否则同步时令牌和用户凭据走明文。</li>
@@ -1286,7 +1288,7 @@
       <dt>改了端口、监听地址、证书不生效?</dt>
       <dd>这些要重启 m-ui:设置页页头的 <b data-k="set.restart">重启 m-ui</b>,或菜单 2。改路径保存就生效。</dd>
       <dt>副机显示离线?</dt>
-      <dd>看服务器页写的原因,对照 <a href="#nodes-off">离线排查</a>。用自签证书的副机要勾 <b data-k="node.insecure">跳过证书校验</b>;重签过副机证书要点 <b data-k="node.resetCert">重置指纹</b>。</dd>
+      <dd>看服务器页写的原因,对照 <a href="#nodes-off">离线排查</a>。用自签证书的副机要勾 <b data-k="node.insecure">跳过证书校验</b>;重签过副机证书要在 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>。</dd>
       <dt>证书续期失败?</dt>
       <dd>看证书库 <b data-k="cert.renewCol">自动续期</b> 一列的原因:HTTP 验证要 80 端口空闲;手动 DNS 的证书不能自动续;域名多了指向别处的 AAAA 记录也会失败。见 <a href="#cert-renew">自动续期</a>。</dd>
       <dt>WARP 启用失败?</dt>
@@ -1308,6 +1310,17 @@
       <dt>代理登录不上?</dt>
       <dd>新代理第一次登录密码留空;24 小时认领时间过了、或忘了密码,要站长在主面板 <b data-k="nav.resellers">代理</b> 页 <b data-k="common.more">更多</b> → <b data-k="rs.passwd">重置密码</b>。</dd>
     </dl>
+  </section>
+
+  <section class="sec" id="limits" data-scope="admin">
+    <h3>已知限制</h3>
+    <p>这几处是现在的设计边界,不是故障;以后可能改进。</p>
+    <ul>
+      <li><b>VLESS / VMess 的多路复用(Mux)与 XUDP:</b>客户端开了 Mux,或用 XUDP 转发 UDP 时,一条外层连接只认证一次,里面再开多少条流都不再看用户表;服务端碰到就接受,线路上没有开关能拦。停用、删除用户、重置订阅链接或踢线时只断得了里面正在跑的流,外层连接还活着,客户端断开重连之前仍能在里面开新流。要立刻彻底断开,停用这条线路再启用(会全量重载),或重启 m-ui。Hysteria2、TUIC、AnyTLS 没有这个问题:停用和踢线会关掉整条会话。</li>
+      <li><b>跨服务器的设备数约有 5 秒的判定窗口:</b>各台服务器的在线 IP 由主机每 5 秒汇总一轮再下发,同一个用户在这几秒里同时从几台服务器连进来,合计可能超过上限。超出后不会把已经连上的设备踢掉(设备满了只拒新设备,已连接的不动),等多出来的设备空闲约 1 分钟下线后才回到上限以内。</li>
+      <li><b>全量重载时 Hysteria2 不发关闭通知:</b>新建 / 删除线路、改端口或协议这类改动要全量重载数据面,正在连着的 Hysteria2 客户端收不到连接关闭的通知,要等约 30 秒的空闲超时才发现断了并重连,这段时间里像是卡住。只改用户、限速、上游时是热更新,不受影响。</li>
+      <li><b>大陆连通检测只测 IPv4:</b>大陆的家庭宽带测点大多没有 IPv6,用它们测 IPv6 会把正常的服务器误判成被墙,所以只测 IPv4;IPv6 入站另从境外测点测一项(只看端口通不通,不判断墙)。见 <a href="#reach">大陆连通检测</a>。</li>
+    </ul>
   </section>
 </section>
 

@@ -33,9 +33,14 @@ function rangeText(t, span) {
   return `${day(a)} ${hm(a)} – ${hm(b)}`;
 }
 
-// barChart(container, points, {span, height, upLabel, downLabel, totalLabel, peakLabel, emptyText})
+// barChart(container, points, {span, width, height, upLabel, downLabel, totalLabel, peakLabel, emptyText})
+// 按容器的实际像素宽出图(viewBox 与显示尺寸 1:1):坐标轴字始终是 11px,不会因为卡片窄被缩成 4~8px;
+// 宽度变了调用方可以用 container.__chart 缓存的数据重画,不用重新请求。
 export function barChart(container, points, opts = {}) {
-  const W = 800, H = opts.height || 220, PL = 58, PR = 12, PT = 10, PB = 26;
+  const W = opts.width || Math.max(280, Math.round(container.clientWidth || 800));
+  const H = opts.height || (W < 480 ? 170 : 210), PL = 58, PR = 12, PT = 10, PB = 26;
+  container.__chart = { points, opts };
+  const maxL = Math.max(3, Math.floor((W - PL - PR) / 72)); // X 轴标签个数上限:一个标签约占 72px
   const iw = W - PL - PR, ih = H - PT - PB;
   const n = points.length;
   const upLabel = opts.upLabel || '上行', downLabel = opts.downLabel || '下行';
@@ -68,7 +73,7 @@ export function barChart(container, points, opts = {}) {
       <rect class="seg up" x="${x(i).toFixed(1)}" y="${yU.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, yD - yU).toFixed(1)}" rx="1"/>
     </g>`;
   }
-  // X 轴标签:跨多天且桶宽小于一天时,只在每天零点处标日期(天数多则隔天标);否则均匀取 ≤8 个标签
+  // X 轴标签:跨多天且桶宽小于一天时,只在每天零点处标日期(天数多则隔天标);否则均匀取,个数按图宽定
   const totalSpan = points[n - 1].t - points[0].t + span;
   const multiDay = totalSpan > 36 * 3600 && span < 86400;
   let xl = '';
@@ -79,11 +84,11 @@ export function barChart(container, points, opts = {}) {
       const d = tzDate(points[i].t);
       if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) dayStarts.push(i);
     }
-    const step = Math.max(1, Math.ceil(dayStarts.length / 8));
+    const step = Math.max(1, Math.ceil(dayStarts.length / maxL));
     dayStarts.forEach((i, k) => { if (k % step === 0) put(i, labelFor(points[i].t, 86400)); });
     if (!dayStarts.length) put(0, labelFor(points[0].t, span, true));
   } else {
-    const every = Math.max(1, Math.ceil(n / 8));
+    const every = Math.max(1, Math.ceil(n / maxL));
     for (let i = 0; i < n; i += every) put(i, labelFor(points[i].t, span, false));
   }
   container.innerHTML = `

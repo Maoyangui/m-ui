@@ -16,8 +16,10 @@ fs.mkdirSync(path.join(dir, 'pages'));
 fs.copyFileSync(src, path.join(dir, 'pages', 'users.js'));
 const stub = (name, body) => fs.writeFileSync(path.join(dir, name), body);
 stub('app.js', `export const state = globalThis.__state;
-export async function load(...what) { globalThis.__loads.push(what.join(',')); }
-export const isReseller = () => false;`);
+export async function load(...what) { globalThis.__loads.push(what.join(',')); if (globalThis.__loadFail) throw new Error('load failed'); }
+export const isReseller = () => false;
+// 列表页从地址栏带进来的筛选(#/users?f=…):用例不带,给空的
+export const takeHashParams = () => new URLSearchParams(globalThis.__hash || '');`);
 stub('api.js', `export const get = (p, o) => globalThis.__api('GET', p);
 export const post = (p, b, o) => globalThis.__api('POST', p, b);
 export const put = (p, b, o) => globalThis.__api('PUT', p, b);
@@ -28,7 +30,7 @@ export const upload = async () => ({});`);
 stub('i18n.js', `export const t = (k, p) => p && Object.keys(p).length ? k + '|' + Object.entries(p).map(([a, b]) => a + '=' + b).join('|') : k;`);
 stub('chart.js', `export const barChart = () => ''; export const bucketFor = () => 3600;`);
 stub('linepicker.js', `export const lineItems = () => []; export const keysFromRefs = () => []; export const refLabels = () => [];
-export const linePicker = () => ({ read: () => [] });`);
+export const linePicker = () => ({ read: () => [] }); export const refChips = () => '';`);
 stub('ui.js', `const el = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 export const deviceCount = (a) => (a || []).length;
@@ -36,18 +38,20 @@ export const gbValue = (b) => b / 1073741824; export const gbBytes = (g) => g * 
 export const fmtBytes = (n) => String(n) + 'B'; export const fmtDay = (n) => 'D' + n; export const fmtDate = (n) => 'T' + n;
 export const fmtDuration = (n) => n + 's'; export const fmtRelative = () => 'x'; export const daysLeft = () => 10;
 export const toast = (m, k = '') => { globalThis.__toasts.push([k, m]); };
-export const confirm = async () => true;
+export const confirm = async (m) => { globalThis.__confirms.push(m); return globalThis.__confirmAns ?? true; };
 export const openModal = (title, html, onSave, opts) => { globalThis.__modal = { title, html, onSave, opts }; };
 export const closeModal = () => {}; export const openDrawer = () => {}; export const closeDrawer = () => {};
 export const registerActions = (a) => { globalThis.__actions = Object.assign(globalThis.__actions || {}, a); };
 export const badge = (s) => String(s); export const dot = () => ''; export const progress = () => '';
-export const field = () => ''; export const check = () => ''; export const empty = () => '';
+export const field = () => ''; export const fieldBox = () => ''; export const check = () => ''; export const empty = () => '';
 export const fv = (id) => el(id).value; export const fchk = (id) => !!el(id).checked;
 export const matches = () => true; export const debounce = (fn) => (...a) => fn(...a);
 export const copy = async (s) => { (globalThis.__copied ||= []).push(s); };
 export const setHTML = (t, h) => { const e = typeof t === 'string' ? el(t) : t; if (e) e.innerHTML = h; };
 export const setText = (t, s) => { const e = typeof t === 'string' ? el(t) : t; if (e) e.textContent = s; };
-export const tzOffsetMinutes = () => 0;`);
+export const tzOffsetMinutes = () => 0;
+// 长名单折叠成 +N:用例只看内容,原样拼起来
+export const chipList = (items) => '<span class="chips">' + (items || []).join('') + '</span>';`);
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 // ---- 桩 DOM:按 id 取元素(没有就建),能挂事件、触发事件 ----
@@ -83,7 +87,7 @@ function backend() {
       be.previews.push({ body, resolve, reject });
       return pr;
     }
-    if (method === 'POST' && (/\/change$/.test(p) || /\/plan$/.test(p))) return be.submit(body);
+    if (method === 'POST' && (/\/change$/.test(p) || /\/plan$/.test(p) || p === 'users/batch')) return be.submit(body);
     if (method === 'GET') return Promise.resolve(be.onGet ? be.onGet(p) : []);
     return Promise.reject(new Error('404 ' + method + ' ' + p));
   };
@@ -98,6 +102,9 @@ async function setup() {
   els = {};
   globalThis.__toasts = [];
   globalThis.__loads = [];
+  globalThis.__confirms = [];
+  globalThis.__confirmAns = true;
+  globalThis.__loadFail = false;
   for (const k of Object.keys(globalThis.__state)) delete globalThis.__state[k];
   Object.assign(globalThis.__state, {
     users: [{ id: 1, name: 'alice', planId: 1, enabled: true, up: 0, down: 0, volume: 10, expiry: 100 }],
@@ -198,6 +205,27 @@ test('换套餐:提交时 409 needs_force 给面板用户看得懂的提示,按�
   be.submit = async () => ({ ...preview, dryRun: false });
   await save();
   assert.deepEqual(sent(be.submits()[1].body), { planId: 2, mode: 'replace', periods: 1, usage: 'auto', force: true });
+});
+
+test('换套餐:预览已经要「仍然执行」、没勾就点确认:提示先勾选(不说「情况有变」),不发请求;勾了再提交', async () => {
+  const { be, A } = await setup();
+  A['user.change']('1');
+  await flush();
+  be.previews[0].resolve(result(true));
+  await flush();
+  assert.equal($('pc-force-wrap').hidden, false);
+  be.submit = async (b) => {
+    if (!b.force) throw Object.assign(new Error('这次变更有需要确认的影响(见 warnings),确认后带 force: true 重试'), { status: 409, data: { code: 'needs_force', preview: result(true), warnings: [] } });
+    return { ...result(true), dryRun: false };
+  };
+  await assert.rejects(save(), (e) => e.message === 'pc.err.tickForce');
+  assert.equal(be.submits().length, 0, '没勾就不发请求');
+  assert.equal($('pc-force-wrap').hidden, false, '勾选框还在');
+  $('pc-force').checked = true;
+  await save();
+  assert.equal(be.submits().length, 1);
+  assert.equal(be.submits()[0].body.force, true);
+  assert.deepEqual(globalThis.__toasts.at(-1), ['ok', 'pc.done']);
 });
 
 test('换套餐:409 idempotency_conflict 说明上一次提交其实已经生效,并刷新列表', async () => {
@@ -342,4 +370,98 @@ test('「更多」菜单:Clash / 链接 / sing-box 订阅各复制对应格式�
   globalThis.__copied = [];
   for (const fmt of ['clash', 'link', 'json']) await A['user.copy']('1', { dataset: { fmt } });
   assert.deepEqual(globalThis.__copied, [links.clash, links.link, links.json]);
+});
+
+// ---- 批量操作与「选中全部 N 个筛选结果」 ----
+const plain = (id, name, o = {}) => ({ id, name, planId: 1, enabled: true, up: 0, down: 0, volume: 0, expiry: 0, ...o });
+const batchPosts = (be) => be.calls.filter((c) => c.method === 'POST' && c.p === 'users/batch').map((c) => c.body);
+
+test('「选中全部 N 个筛选结果」替换已选,不并进换筛选之前勾的人', async () => {
+  const { be, A } = await setup();
+  globalThis.__state.users = [plain(1, 'alice'), plain(2, 'bob', { enabled: false }), plain(3, 'carol')];
+  be.submit = async () => ({ affected: 2 });
+  A['user.sel']('2', { checked: true }); // 全部里勾了停用的 bob
+  A['user.filter']('enabled'); // 换到「启用」:bob 不在列表里
+  A['user.selAllFiltered']();
+  await A['user.batch']('disable');
+  assert.deepEqual(globalThis.__confirms, [], '已选全在当前列表里,不用多问');
+  assert.deepEqual(batchPosts(be).map((b) => b.ids.slice().sort()), [[1, 3]]);
+});
+
+test('已选里有当前列表看不到的人:批量启停先确认,取消就不提交;删除的确认里写明', async () => {
+  const { be, A } = await setup();
+  globalThis.__state.users = [plain(1, 'alice'), plain(2, 'bob', { enabled: false })];
+  be.submit = async () => ({ affected: 2 });
+  A['user.sel']('2', { checked: true });
+  A['user.filter']('enabled');
+  A['user.sel']('1', { checked: true });
+  globalThis.__confirmAns = false;
+  await A['user.batch']('disable');
+  assert.equal(globalThis.__confirms.length, 1);
+  assert.match(globalThis.__confirms[0], /user\.batchHiddenConfirm\|n=2\|hidden=1/);
+  assert.equal(batchPosts(be).length, 0, '取消了就不提交');
+  await A['user.batch']('delete');
+  assert.match(globalThis.__confirms[1], /user\.batchDeleteConfirm\|n=2 user\.batchHidden\|n=1/);
+  globalThis.__confirmAns = true;
+  await A['user.batch']('enable');
+  assert.deepEqual(batchPosts(be).map((b) => b.ids.slice().sort()), [[1, 2]]);
+});
+
+test('批量延期:提交成功后刷新失败也关弹窗、只提交一次;天数要是 1–3650 的整数', async () => {
+  const { be, A } = await setup();
+  globalThis.__state.users = [plain(1, 'alice'), plain(2, 'bob')];
+  be.submit = async () => ({ affected: 2 });
+  A['user.sel']('1', { checked: true });
+  A['user.sel']('2', { checked: true });
+  await A['user.batch']('extend');
+  for (const bad of ['0', '5000', '2.5', '']) {
+    $('f-days').value = bad;
+    await assert.rejects(save(), /user\.batchDaysBad/, bad);
+  }
+  assert.equal(batchPosts(be).length, 0);
+  $('f-days').value = '30';
+  globalThis.__loadFail = true;
+  await save(); // 不抛错 = 弹窗关掉,不会再点一次「保存」又延一遍
+  await flush();
+  assert.deepEqual(batchPosts(be).map((b) => [b.action, b.days, b.ids.length]), [['extend', 30, 2]]);
+  assert.ok(globalThis.__toasts.some(([k, m]) => k === 'warn' && /user\.batchRefreshFail/.test(m)), JSON.stringify(globalThis.__toasts));
+});
+
+test('套餐页点人数:按套餐筛、复位其它筛选和已选;筛着的套餐删掉后不再按它筛', async () => {
+  const { A, mod } = await setup();
+  globalThis.__state.users = [plain(1, 'alice', { planId: 1 }), plain(2, 'bob', { planId: 2 }), plain(3, '月付Plus 的人', { planId: 2, remark: '月付' })];
+  A['user.sel']('3', { checked: true });
+  mod.showUsersOfPlan(1);
+  const host = { innerHTML: '' };
+  await mod.render(host);
+  assert.match(document.getElementById('user-count').textContent, /^1 \//, '只剩套餐 1 的 alice(以前按名字搜「月付」还会搜出备注里写了月付的人)');
+  assert.equal(document.getElementById('batch-bar').hidden, true, '已选清掉了');
+  globalThis.__state.plans = globalThis.__state.plans.filter((p) => p.id !== 1);
+  await mod.render(host);
+  assert.match(document.getElementById('user-count').textContent, /^3 \//, '套餐删了:不再按它筛');
+});
+
+test('批量生成:建好后换成「生成结果」框,只给「关闭」,能一键复制全部', async () => {
+  await setup();
+  const A = globalThis.__actions;
+  const made = [{ name: 'user-a1', link: 'https://x/s/a1' }, { name: 'user-b2', link: 'https://x/s/b2' }];
+  globalThis.__api = async (method, p, body) => {
+    if (method === 'POST' && p === 'users/bulk') { assert.equal(body.count, 2); return made; }
+    throw new Error('404 ' + method + ' ' + p);
+  };
+  A['user.bulk']();
+  Object.assign($('f-prefix'), { value: 'user-' }); Object.assign($('f-count'), { value: '2' }); Object.assign($('f-mode'), { value: 'random' });
+  Object.assign($('f-start'), { value: '1' }); Object.assign($('f-remark'), { value: '' }); Object.assign($('f-plan'), { value: '0' });
+  await save();
+  const m = globalThis.__modal;
+  assert.equal(m.title, 'user.bulkResult');
+  assert.equal(m.onSave, null, '结果框只是给看的,没有保存');
+  assert.equal(m.opts && m.opts.cancelText, 'common.close');
+  assert.match(m.html, /user-a1\thttps:\/\/x\/s\/a1\nuser-b2\thttps:\/\/x\/s\/b2/);
+  assert.match(m.html, /data-act="user\.bulkCopy"/);
+  // 复制:取结果框里的全部内容
+  $('bulk-result').value = 'user-a1\thttps://x/s/a1\nuser-b2\thttps://x/s/b2';
+  globalThis.__copied = [];
+  A['user.bulkCopy']();
+  assert.deepEqual(globalThis.__copied, ['user-a1\thttps://x/s/a1\nuser-b2\thttps://x/s/b2']);
 });

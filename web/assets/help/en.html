@@ -73,7 +73,7 @@
       <li><b>Create a user</b>: <b data-k="nav.users">Users</b> page → <b data-k="user.add">Add user</b>; fill in a name and the quota, tick the <b data-k="user.f.lines">Lines</b> they may use, save.</li>
       <li><b>Send the subscription</b>: click the user's name to open the details. Under <b data-k="user.subscription">Subscription</b> there are two links; send the one without <code>?format=</code> (the universal link): in a browser it opens the user's own landing page with one-tap import, and apps get the right format when they fetch it (see <a href="#users-sub">Subscription links, QR codes and sharing</a>).</li>
     </ol>
-    <div class="tip"><b>No domain? No problem</b>A self-signed certificate plus the server IP works: subscriptions tell clients to allow the insecure certificate automatically, so users change no settings. When you later issue a real certificate for a domain, note that the Certificate page ticks <b data-k="cert.applySub">Use for subscription HTTPS</b> by default: with it ticked the subscription link becomes <code>https://DOMAIN…</code> and every user needs the new link. Untick it to keep the old link, and users just refresh their subscription once.</div>
+    <div class="tip"><b>No domain? No problem</b>A self-signed certificate plus the server IP works: subscriptions tell clients to allow the insecure certificate automatically, so users change no settings. When you later issue a real certificate for a domain: once you have users, the Certificate page leaves <b data-k="cert.applySub">Use for subscription HTTPS</b> unticked by default. If you tick it, the subscription link of every user becomes <code>https://DOMAIN…</code>, the old links stop working at once and every client must re-import; you are asked once more before issuing. Leave it unticked to keep the old links, and users just refresh their subscription once.</div>
     <div class="pit"><b>Common pitfall</b>Open each line's port in the cloud security group and the system firewall: Hysteria2 and TUIC use UDP, most others use TCP. A closed port is the most common reason for "cannot connect".</div>
   </section>
 
@@ -90,12 +90,13 @@
 
   <section class="sec" id="tour" data-scope="admin">
     <h3>Finding your way around</h3>
-    <p class="lede">Navigation is on the left, help and feedback are at the top right, and coloured bars at the top of the page are reminders that need your attention.</p>
+    <p class="lede">Navigation is on the left, help and feedback are at the top right; things that need you are collected in <b data-k="dash.attn.title">Needs attention</b> at the top of the <b data-k="nav.dashboard">Dashboard</b>, and coloured bars at the top of other pages remind you too.</p>
     <ul>
       <li>The navigation, top to bottom: <b data-k="nav.dashboard">Dashboard</b>, <b data-k="nav.lines">Lines</b>, <b data-k="nav.upstreams">Upstreams</b>, <b data-k="nav.exts">External nodes</b>, <b data-k="nav.users">Users</b>, <b data-k="nav.resellers">Resellers</b>, <b data-k="nav.plans">Plans</b>, <b data-k="nav.rules">Rules</b>, <b data-k="nav.nodes">Servers</b>, <b data-k="nav.cert">Certificate</b>, <b data-k="nav.backup">Backup</b>, <b data-k="nav.ops">Ops</b>, <b data-k="nav.logs">Logs</b>, <b data-k="nav.admin">Admin</b>, <b data-k="nav.settings">Settings</b>.</li>
       <li>Bottom left: theme (◐ follow the system, ☀ light, ☾ dark), language and <b data-k="common.logout">Sign out</b>. An arrow next to the version number means an update is available; click it to update (see <a href="#update">Updating</a>).</li>
       <li>Top right: <b data-k="help.btn">Help</b> (this page) and <b data-k="support.btn">Feedback / Support</b> (contact the author, report problems).</li>
-      <li>Reminder bars at the top: default password still in use, certificates need attention, mainland reachability problems, a failed data-plane reload and so on. Follow the hint; bars that can be dismissed have <b data-k="reach.dismiss">Got it</b>.</li>
+      <li><b data-k="dash.attn.title">Needs attention</b>: a failed data-plane reload, servers offline or not synced, certificates needing attention, mainland reachability problems, failing upstreams, users about to expire or run out of data, a failed scheduled backup and so on, one row per kind, most serious first, each with a link to fix it; when everything is fine only a single "✓" line remains. Certificate and reachability rows have <b data-k="reach.dismiss">Got it</b>; they come back when the situation changes.</li>
+      <li>Reminder bars at the top: on pages other than the dashboard, a default password, certificates needing attention, mainland reachability problems, a failed data-plane reload and so on are shown at the top of the page. Follow the hint.</li>
       <li>On a node server's own panel, pages such as lines and users are read-only; make changes on the master.</li>
       <li>Shortcuts: <kbd>/</kbd> jumps to the page's search box, <kbd>Esc</kbd> closes dialogs, <kbd>Ctrl</kbd> + <kbd>Enter</kbd> submits a dialog. On a phone, tap ☰ at the top left to open the navigation.</li>
     </ul>
@@ -173,7 +174,7 @@
     </ul>
     <div class="pit"><b>Common pitfalls</b><ul>
       <li>The server address (IP and port) is sent to the public Globalping network, by the automatic checks too; if you do not want that, untick <b data-k="set.reachAuto">Automatic checks</b> and only check by hand when needed. Without an account you get about 250 probe runs per hour and one server uses about 15; if that is not enough, add a free <b data-k="set.reachToken">Globalping token (optional)</b> in the settings.</li>
-      <li>The check uses the port of the server's first TCP line; with only hysteria2 / tuic (UDP) lines it can only tell whether the IP is blocked. Only IPv4 is checked for now.</li>
+      <li>The check uses the port of the server's first TCP line; with only hysteria2 / tuic (UDP) lines it can only tell whether the IP is blocked. Only IPv4 is checked for now: most mainland home-broadband probes have no IPv6, so testing IPv6 from them would report healthy servers as blocked (see <a href="#limits">Known limitations</a>).</li>
     </ul></div>
   </section>
 
@@ -184,7 +185,7 @@
       <li>Edit a server and untick <b data-k="common.enabled">Enabled</b>: it immediately stops serving everyone; enable it again to resume.</li>
       <li>Deleting a server disables lines that were deployed only there, and users or resellers that only used it lose that line; the affected lines and people are listed afterwards.</li>
       <li><b data-k="node.decomPending">shutdown notice pending</b>: that machine has not yet received the notice to stop serving; the master keeps retrying. To stop it at once, SSH in and run <code>systemctl disable --now m-ui</code> (stops it and keeps it from starting at boot), or uninstall with option 14 of the <code>m-ui</code> menu. Turning off node mode does not stop it: the machine becomes a standalone master and keeps serving everyone with its last configuration.</li>
-      <li>Offline reasons: <b data-k="node.errTimeout">connection timed out</b>, <b data-k="node.errRefused">connection refused</b> (port not open or panel not running), <b data-k="node.errDns">DNS lookup failed</b>, <b data-k="node.errCert">certificate not trusted</b> (tick skip certificate verification), <b data-k="node.errToken">token mismatch</b> (copy the pairing token again), <b data-k="node.errFp">Certificate fingerprint changed</b> (if you really re-issued the node's certificate, click <b data-k="node.resetCert">Reset fingerprint</b>).</li>
+      <li>Offline reasons: <b data-k="node.errTimeout">connection timed out</b>, <b data-k="node.errRefused">connection refused</b> (port not open or panel not running), <b data-k="node.errDns">DNS lookup failed</b>, <b data-k="node.errCert">certificate not trusted</b> (tick skip certificate verification), <b data-k="node.errToken">token mismatch</b> (copy the pairing token again), <b data-k="node.errFp">Certificate fingerprint changed</b> (if you really re-issued the node's certificate, open <b data-k="common.more">More</b> on that row and click <b data-k="node.resetCert">Reset fingerprint</b>).</li>
       <li>Replacing a node: install the new one, then edit the old row on the <b data-k="nav.nodes">Servers</b> page with the new API URL and token; the master pushes everything again.</li>
     </ul>
   </section>
@@ -385,7 +386,7 @@
     <h3>Which servers run a line</h3>
     <p class="lede">With several servers, a line can run on only some of them.</p>
     <ul>
-      <li><b data-k="line.servers">Deploy on servers</b>: all ticked (the default) means every server, including servers added later (none ticked counts as all too); tick only some to run the line just there, and subscriptions only list those entries.</li>
+      <li><b data-k="line.servers">Deploy on servers</b>: all ticked (the default) means every server, including servers added later (none ticked counts as all too); tick only some to run the line just there, and subscriptions only list those entries. When you take a server off the line, users, reseller grants and plans that picked that server on this line drop it; those that had picked only removed servers switch to all of the line's servers (named in a dialog after saving), so nobody silently loses the line.</li>
       <li>Dual-stack servers get an extra drop-down in their row, so the line can use IPv4 or IPv6 on that server (the default follows the Servers page).</li>
       <li>A line on several servers has several "entries"; when assigning lines to users, plans or resellers you can tick just the entry on one server.</li>
     </ul>
@@ -413,7 +414,7 @@
     <ul>
       <li><b data-k="line.batch.enable">Enable</b>, <b data-k="line.batch.disable">Disable</b>, <b data-k="line.batch.upstream">Set upstream</b>, <b data-k="line.batch.nodes">Deploy on</b> (only with several servers), <b data-k="line.batch.clear">Clear</b>. A batch change reloads the data plane only once.</li>
       <li>Drag rows to reorder; subscriptions list nodes in the same order.</li>
-      <li>At the end of a row, ⧉ is <b data-k="line.clone">Clone</b> (a new port is picked) and ⇢ is <b data-k="up.addFromLine">Add a line as upstream</b> (see <a href="#up-chain">Lines as upstreams</a>).</li>
+      <li><b data-k="common.more">More</b> at the end of a row has <b data-k="line.clone">Clone</b> (a new port is picked), <b data-k="up.addFromLine">Add a line as upstream</b> (see <a href="#up-chain">Lines as upstreams</a>) and delete.</li>
     </ul>
   </section>
 </section>
@@ -456,7 +457,7 @@
     <h3>Lines as upstreams (chaining)</h3>
     <p class="lede">Forward an entry line's traffic into another of your own lines, for example in through a domestic relay and out through an overseas server.</p>
     <ul>
-      <li>On the <b data-k="nav.upstreams">Upstreams</b> page click <b data-k="up.addFromLine">Add a line as upstream</b> (or ⇢ at the end of a line's row), then choose the line and <b data-k="up.fromNode">Use its entry on server</b>.</li>
+      <li>On the <b data-k="nav.upstreams">Upstreams</b> page click <b data-k="up.addFromLine">Add a line as upstream</b> (or the same item under <b data-k="common.more">More</b> at the end of a line's row), then choose the line and <b data-k="up.fromNode">Use its entry on server</b>.</li>
       <li>Its settings follow the line automatically, even if the line changes port or protocol; it uses dedicated credentials, takes nothing from users' quotas, and traffic is counted once.</li>
       <li>Loops, deleted lines and deleted entry servers are blocked or flagged. Nodes need v0.7.16 or later.</li>
     </ul>
@@ -539,7 +540,7 @@
       <li><b data-k="cert.srcSelf">No domain (self-signed)</b>: click <b data-k="cert.selfsign">Generate self-signed</b>; leave <b data-k="cert.hosts" class="wrap">Addresses in the certificate (auto if empty)</b> empty to use the server's public IP. Every node in subscriptions gets "allow insecure" automatically, so clients need no settings; keep the panel and subscriptions on HTTP.</li>
       <li><b data-k="cert.srcExternal">Existing certificate</b>: if certbot, aaPanel, nginx or a commercial certificate is already on the server, enter the paths of the <b data-k="cert.certPath">Certificate file (fullchain)</b> and the <b data-k="cert.keyPath">Private key file</b> and click <b data-k="cert.useExternal">Use this certificate</b>.</li>
     </ul>
-    <div class="tip"><b>Choose what it is for</b>Under <b data-k="cert.applyTo">Apply to</b> tick <b data-k="cert.forLines">Make it the default for lines</b>, <b data-k="cert.applyPanel">Use for panel HTTPS</b> and / or <b data-k="cert.applySub">Use for subscription HTTPS</b>; uses you leave unticked stay as they are. Defaults: <b data-k="cert.forLines">Make it the default for lines</b> is ticked while there is no real certificate yet; for a certificate that is not self-signed, the other two are ticked too while the panel or subscriptions have no HTTPS. With <b data-k="cert.applySub">Use for subscription HTTPS</b> ticked, subscription links become <code>https://</code>, so send users their new links; with <b data-k="cert.applyPanel">Use for panel HTTPS</b> ticked, the panel switches to <code>https://</code> after a restart.</div>
+    <div class="tip"><b>Choose what it is for</b>Under <b data-k="cert.applyTo">Apply to</b> tick <b data-k="cert.forLines">Make it the default for lines</b>, <b data-k="cert.applyPanel">Use for panel HTTPS</b> and / or <b data-k="cert.applySub">Use for subscription HTTPS</b>; uses you leave unticked stay as they are. Defaults: <b data-k="cert.forLines">Make it the default for lines</b> is ticked while there is no real certificate yet; for a certificate that is not self-signed, <b data-k="cert.applyPanel">Use for panel HTTPS</b> is ticked while the panel has no HTTPS, and <b data-k="cert.applySub">Use for subscription HTTPS</b> is ticked only while subscriptions have no HTTPS and there are no users yet. With <b data-k="cert.applySub">Use for subscription HTTPS</b> ticked, the subscription link of every user changes from <code>http://</code> to <code>https://</code>, the old links stop working at once and clients must re-import (you are asked once more before adding, when switching the subscription certificate under <b data-k="cert.inUse">In use</b>, and when filling in or clearing the certificate paths in the Subscription group of Settings); with <b data-k="cert.applyPanel">Use for panel HTTPS</b> ticked, the panel switches to <code>https://</code> after a restart.</div>
   </section>
 
   <section class="sec" id="cf-token">
@@ -628,7 +629,7 @@
       <li>Periodic reset: every N days used traffic goes back to zero, and users disabled for going over are re-enabled.</li>
       <li>Devices: counted by source IPs online at the same time, across all servers. Several devices behind one Wi-Fi (one public IPv4, or one IPv6 /64) count as one; IPv4 and IPv6 are counted against the limit separately, so one device using both is not counted twice.</li>
       <li>When the limit is reached only new devices are refused; connected ones are not affected. A slot frees up about a minute after another device goes offline.</li>
-      <li data-scope="admin">Refused connections are shown in red as <b data-k="dash.rejectedDevice">Refused: device limit</b> in <b data-k="dash.recentConns">Recent inbound connections</b> on the dashboard.</li>
+      <li data-scope="admin">Refused connections are highlighted in red in <b data-k="dash.recentConns">Recent inbound connections</b> on the dashboard, with a <b data-k="dash.conn.rejected">Refused</b> badge; hover it for the reason (<b data-k="dash.rejectedDevice">Refused: device limit</b>). When there were refusals in the last 10 minutes, <b data-k="dash.attn.title">Needs attention</b> mentions it too.</li>
       <li>Speed limits: on one server, all of the user's connections share the bandwidth; using several servers at once gives one allowance per server. Changes apply immediately.</li>
     </ul>
   </section>
@@ -702,7 +703,7 @@
       <li><b data-k="user.reason.manual">manual</b>: resetting traffic, extending the expiry or a periodic reset never brings them back. Renewing or extending with a plan (<b data-k="user.renewMenu">Renew…</b>, batch <b data-k="user.batch.plan">Apply plan</b>) and <b data-k="user.changeMenu">Change plan…</b> are explicit sales and do enable them<span data-pending="backup-certs">: when renewing or applying a plan in a batch, the panel first warns that users disabled by hand will be enabled</span>. Renewals and plan changes through the external API enable them as well.</li>
       <li data-scope="admin"><b data-k="user.limited">Limited</b>: temporarily slowed down by a rule (see <a href="#rules">Rules</a>).</li>
       <li><b data-k="user.kick">Kick</b>: closes the user's connections on every server (hysteria2, TUIC and AnyTLS sessions are closed entirely). If the user is still enabled the app reconnects right away, so disable them first to cut them off.</li>
-      <li>Filter the list with <b data-k="user.filter.all">All</b>, <b data-k="user.filter.enabled">Enabled</b>, <b data-k="user.filter.disabled">Disabled</b>, <b data-k="user.filter.expired">Expired</b> or <b data-k="user.filter.over">Over quota</b>.</li>
+      <li>Filter the list with <b data-k="user.filter.all">All</b>, <b data-k="user.filter.online">Online</b>, <b data-k="user.filter.enabled">Enabled</b>, <b data-k="user.filter.disabled">Disabled</b>, <b data-k="user.filter.expired">Expired</b> or <b data-k="user.filter.over">Over quota</b>, or show one plan only. After selecting the whole page (on a phone, after ticking any user), the batch bar can select every match at once; this replaces the earlier selection with exactly the current matches. Users ticked before you changed the filter or search stay selected, and a batch action asks first when some of them are not in the current list.</li>
     </ul>
   </section>
 
@@ -735,7 +736,7 @@
     <ol class="steps">
       <li><b data-k="nav.rules">Rules</b> page → <b data-k="rule.add">Add rule</b>: give it a name, choose the <b data-k="rule.kind">Type</b> and fill in the condition.</li>
       <li>Set <b data-k="rule.up">Upload Mbps</b> / <b data-k="rule.down">Download Mbps</b>; 0 leaves that direction unchanged.</li>
-      <li><b data-k="rule.tightenOnly">Tighten only</b>: when on (the default) the result is never faster than the user's own limit; turn it off to apply the rule's values directly, for example to loosen limits at certain hours.</li>
+      <li><b data-k="rule.tightenOnly">Cap at the user's own limit</b>: when on (the default) the result is never faster than the user's own limit; turn it off to apply the rule's values directly, for example to loosen limits at certain hours.</li>
       <li><b data-k="rule.targets">Targets</b> can be combined: all users (including future ones), users of a plan, all users of a reseller, or users ticked one by one.</li>
       <li>Save.</li>
     </ol>
@@ -799,7 +800,7 @@
   <section class="sec" id="rs-panel">
     <h3>What the reseller panel can do</h3>
     <ul>
-      <li><b data-k="nav.dashboard">Dashboard</b>: traffic used against the quota, number of users, online users and devices.</li>
+      <li><b data-k="nav.dashboard">Dashboard</b>: quota used, account expiry, number of users, online users and devices; <b data-k="dash.attn.title">Needs attention</b> warns when the quota, expiry or device pool is close to the limit, and <b data-k="dash.rs.expiringList">Expiring soon</b> and <b data-k="dash.rs.quotaList">Running out of data</b> list the users who need a renewal.</li>
       <li><b data-k="nav.users">Users</b>: add, edit, renew, extend, reset traffic, kick, reset subscription links, batch actions, usage charts and online devices. New users only need a name; their subscription link is a random token.</li>
       <li><b data-k="nav.plans">Plans</b>: only the plans you created yourself are visible and usable.</li>
       <li><b data-k="nav.account">Account</b>: quota, password, two-factor authentication, your own subscription page texts and the external API.</li>
@@ -1072,11 +1073,12 @@
 
   <section class="sec" id="recent-conns">
     <h3>Recent inbound connections</h3>
-    <p class="lede"><b data-k="dash.recentConns">Recent inbound connections</b> at the bottom of the dashboard helps when a user says they cannot connect: did their IP reach the server, and on which line?</p>
+    <p class="lede"><b data-k="dash.recentConns">Recent inbound connections</b> on the dashboard helps when a user says they cannot connect: did their IP reach the server, and on which line?</p>
     <ul>
       <li>It lists connections that passed the protocol handshake and authentication, with user, line, server, count and last time.</li>
-      <li>Connections refused by a device limit or a reseller's device pool are listed in red too: <b data-k="dash.rejectedDevice">Refused: device limit</b>, <b data-k="dash.rejectedPool">Refused: reseller device pool full</b>.</li>
-      <li data-pending="v6">Connections that failed the handshake or authentication (wrong certificate, password or SNI) are listed as well, with the reason.</li>
+      <li>Connections refused by a device limit or a reseller's device pool are listed too, highlighted in red with a <b data-k="dash.conn.rejected">Refused</b> badge; hover it to see whether it was <b data-k="dash.rejectedDevice">Refused: device limit</b> or <b data-k="dash.rejectedPool">Refused: reseller device pool full</b>.</li>
+      <li>The latest 10 are shown; "Show all" expands the list inside the card (and lets you filter by IP, user or line). The filter above switches between connections, refused ones and handshake failures.</li>
+      <li data-pending="v6">Connections that failed the handshake or authentication (wrong certificate, password or SNI) are under the "Handshake failed" filter, with the reason; older nodes do not report these, and the dashboard names them.</li>
       <li>An IP missing from the list usually means the packets never reached the server (security group, firewall, client network). To check whether they arrive on a TCP line, set <b data-k="logs.coreLevel">Data-plane level</b> to info for a while and look for <code>inbound connection from</code>. Hysteria2, TUIC and other UDP lines only log that line after the handshake and authentication succeed (nothing at all for a wrong password or SNI), so its absence proves nothing there; capture packets on the server instead, such as <code>tcpdump -ni any udp port PORT</code>.</li>
     </ul>
   </section>
@@ -1228,7 +1230,7 @@
   <section class="sec" id="sec-core" data-scope="admin">
     <h3>Data-plane safety switches</h3>
     <ul>
-      <li><b data-k="set.allowPrivate">Let users reach private / local addresses</b>: off by default, so users cannot reach services that listen only on 127.0.0.1 (such as the WARP port) or your internal network through the proxy. Turn it on only if users really need internal services.</li>
+      <li><b data-k="set.allowPrivate">Let users reach private / local addresses</b>: off by default, so users cannot reach services that listen only on 127.0.0.1 (such as the WARP port) or your internal network through the proxy, nor this server's own public IPv4 / IPv6 (all ports, including the panel, reseller panel, subscription and node API; master and each node block their own addresses and follow address changes automatically): if you restrict panel access by source IP, users cannot get around it through the proxy from the server itself. Turn it on only if users really need internal services.</li>
       <li>The panel port is not covered: users can still open <code>SERVER-PUBLIC-IP:PANEL-PORT</code> through the proxy; on the many VPSes whose public IP sits on the network card, that traffic goes through the server's loopback, so firewall IP allow-lists do not stop it. Do not rely on allow-lists alone to protect a panel: change the default port and path, use a strong password and turn on two-factor authentication.</li>
       <li><b data-k="set.blockBT">Block BitTorrent</b>: refuses BitTorrent through the proxy so your VPS does not attract copyright complaints.</li>
       <li>Give nodes HTTPS API URLs; otherwise tokens and user credentials are synced in plain text.</li>
@@ -1286,7 +1288,7 @@
       <dt>Port, listen address or certificate changes do nothing?</dt>
       <dd>They need a restart: <b data-k="set.restart">Restart m-ui</b> at the top of the Settings page, or menu option 2. A new path applies on save.</dd>
       <dt>A node shows offline?</dt>
-      <dd>Read the reason on the Servers page and see <a href="#nodes-off">offline nodes</a>. Nodes with self-signed certificates need <b data-k="node.insecure">Skip certificate verification</b>; after re-issuing a node's certificate click <b data-k="node.resetCert">Reset fingerprint</b>.</dd>
+      <dd>Read the reason on the Servers page and see <a href="#nodes-off">offline nodes</a>. Nodes with self-signed certificates need <b data-k="node.insecure">Skip certificate verification</b>; after re-issuing a node's certificate use <b data-k="common.more">More</b> → <b data-k="node.resetCert">Reset fingerprint</b>.</dd>
       <dt>Certificate renewal fails?</dt>
       <dd>Check the reason in the <b data-k="cert.renewCol">Auto-renew</b> column of the certificate store: HTTP validation needs port 80 free; manual-DNS certificates cannot renew automatically; an AAAA record pointing elsewhere also breaks validation. See <a href="#cert-renew">Automatic renewal</a>.</dd>
       <dt>WARP will not enable?</dt>
@@ -1308,6 +1310,17 @@
       <dt>A reseller cannot sign in?</dt>
       <dd>New resellers sign in the first time with an empty password. If the 24-hour window passed or the password is forgotten, the site owner uses <b data-k="nav.resellers">Resellers</b> → <b data-k="common.more">More</b> → <b data-k="rs.passwd">Reset password</b> on the main panel.</dd>
     </dl>
+  </section>
+
+  <section class="sec" id="limits" data-scope="admin">
+    <h3>Known limitations</h3>
+    <p>These are current design limits, not faults; they may improve later.</p>
+    <ul>
+      <li><b>VLESS / VMess multiplexing (Mux) and XUDP:</b> when a client turns on Mux, or carries UDP over XUDP, one outer connection is authenticated once and the streams opened inside it never look at the user table again; the server accepts this unconditionally and no line setting can block it. Disabling or deleting a user, resetting a subscription link or kicking a user only closes the streams running inside; the outer connection stays up, and the client can open new streams in it until it reconnects. To cut it off at once, disable and re-enable the line (a full reload) or restart m-ui. Hysteria2, TUIC and AnyTLS are not affected: disabling and kicking close the whole session.</li>
+      <li><b>Device limits across servers have a window of about 5 seconds:</b> the master collects every server's online IPs and hands them out every 5 seconds, so a user who connects through several servers within those seconds can go over the limit in total. Devices that are already connected are not kicked when that happens (a full device pool only refuses new devices); the count drops back once the extra devices have been idle for about a minute.</li>
+      <li><b>A full reload does not send Hysteria2 a close notice:</b> changes such as adding or deleting a line, or changing its port or protocol, reload the whole data plane; connected Hysteria2 clients get no connection-close notice and only notice after an idle timeout of about 30 seconds, then reconnect, so it looks stuck for a while. Changes to users, speed limits and upstreams are applied hot and are not affected.</li>
+      <li><b>The mainland reachability check covers IPv4 only:</b> most mainland home-broadband probes have no IPv6, so testing IPv6 from them would report healthy servers as blocked; only IPv4 is checked, and IPv6 inbound gets a separate check from probes outside the mainland (it only shows whether the port answers and does not judge blocking). See <a href="#reach">Mainland reachability</a>.</li>
+    </ul>
   </section>
 </section>
 

@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
@@ -73,6 +74,7 @@ type Server struct {
 	agentApplyMu   sync.Mutex // 快照落库、重载和确认必须作为同一轮串行完成
 	sessions       map[string]session
 	loginFails     map[string][]int64 // ip → 最近失败时间
+	apiFails       map[string][]int64 // 外部 API 鉴权失败:ip → 最近失败时间(主面板令牌与代理令牌共用,见 body_limit.go)
 	ops            *ops.Runner
 
 	totpPending    string          // 两步验证:已生成、待认证器验证一次后才生效的密钥
@@ -81,10 +83,24 @@ type Server struct {
 	lastTotpStepRS map[uint]int64  // 同上,按代理
 
 	onRulesNow func() // 测试用:数"立刻重判限速规则"被触发了几次(测试里没有数据面)
+
+	// 概况「需要处理」的计数(见 attention.go):60 秒缓存
+	attnMu sync.Mutex
+	attnAt time.Time
+	attn   attentionView
+	// 副机:主机最近一次带令牌请求本机的时间(unix 秒),概况据此提示"主机多久没联系本机"
+	hubSeenAt atomic.Int64
+	startedAt int64 // 进程启动时间:副机重启后主机一直没来联系时,概况按它算「多久没联系」
+	// 副机:最近一次没应用成主机推来的配置(见 dash_extras.go)
+	applyRes applyState
+	// 代理名下用户 → 代理名,60 秒缓存(概况的在线名单链接用)
+	ownersMu sync.Mutex
+	owners   map[string]string
+	ownersAt time.Time
 }
 
 func NewServer(run *runner.Runner) *Server {
-	return &Server{run: run, db: run.DB(), sessions: map[string]session{},
+	return &Server{run: run, db: run.DB(), sessions: map[string]session{}, startedAt: time.Now().Unix(),
 		totpPendingRS: map[uint]string{}, lastTotpStepRS: map[uint]int64{}, ops: ops.NewRunner()}
 }
 
@@ -398,11 +414,8 @@ func (s *Server) reapSessions() {
 				delete(s.sessions, token)
 			}
 		}
-		for ip, fails := range s.loginFails { // 扫描器会留下大量 IP,过期的清掉
-			if len(fails) == 0 || now.Unix()-fails[len(fails)-1] > 600 {
-				delete(s.loginFails, ip)
-			}
-		}
+		reapFails(s.loginFails, now.Unix()) // 扫描器会留下大量 IP,过期的清掉
+		reapFails(s.apiFails, now.Unix())
 		s.mu.Unlock()
 		s.db.Where("exp < ?", now.Unix()).Delete(&model.Session{})
 	}
@@ -464,6 +477,9 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 		if err != nil || !s.validSession(c.Value) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 			return
+		}
+		if !isPanelUpload(r) {
+			limitJSONBody(w, r, panelBodyLimit)
 		}
 		// 正在设为主机:写操作暂停(主机容灾自己的接口另外处理:要看进度、要能放弃);没冻结的写登记在途,
 		// 设为主机置冻结后等它们做完才导出
@@ -584,25 +600,9 @@ func dummyPasswordCheck(plain string) {
 // loginBlocked 该 IP(IPv6 为所在 /64)是否处于冷却期:10 分钟内失败 10 次就先挡 5 分钟,
 // 否则空密码首登、弱口令都能被慢速爆破(每次失败只 sleep 300ms)。
 func (s *Server) loginBlocked(ip string) bool {
-	ip = loginKey(ip)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fails, ok := s.loginFails[ip]
-	if !ok {
-		return false // 没失败过的来源不建条目,扫描器换着地址来也不会把这张表撑大
-	}
-	now := time.Now().Unix()
-	var recent []int64
-	for _, ts := range fails {
-		if now-ts < 600 {
-			recent = append(recent, ts)
-		}
-	}
-	s.loginFails[ip] = recent
-	if len(recent) < 10 {
-		return false
-	}
-	return now-recent[len(recent)-1] < 300
+	return failBlocked(s.loginFails, loginKey(ip), time.Now().Unix())
 }
 
 // noteLoginFailure 记录某 IP 的失败次数,10 分钟内达到 5 次告警一次。
@@ -612,16 +612,7 @@ func (s *Server) noteLoginFailure(ip string) {
 	if s.loginFails == nil {
 		s.loginFails = map[string][]int64{}
 	}
-	now := time.Now().Unix()
-	recent := s.loginFails[ip][:0]
-	for _, ts := range s.loginFails[ip] {
-		if now-ts < 600 {
-			recent = append(recent, ts)
-		}
-	}
-	recent = append(recent, now)
-	s.loginFails[ip] = recent
-	n := len(recent)
+	n := failNote(s.loginFails, ip, time.Now().Unix())
 	s.mu.Unlock()
 	if n == 5 {
 		s.run.Notifier().Event("tgOnLogin", "⚠️ <b>面板登录连续失败</b>\nIP:"+notify.Esc(ip)+" 10 分钟内失败 5 次")

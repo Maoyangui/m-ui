@@ -26,11 +26,11 @@ type fakeCA struct {
 	srv *httptest.Server
 	mu  sync.Mutex
 
-	wildcard bool     // 是否泛域名订单
-	accepted []string // Accept 过的挑战(按 authz 域名)
+	wildcard bool        // 是否泛域名订单
+	accepted []string    // Accept 过的挑战(按 authz 域名)
 	lookedUp func() bool // 验证时看 TXT 是否都已写好
-	failAuth bool     // 验证失败
-	hang     bool     // 下单时一直挂着(模拟限流)
+	failAuth bool        // 验证失败
+	hang     bool        // 下单时一直挂着(模拟限流)
 	csr      *x509.CertificateRequest
 	order    []string
 }

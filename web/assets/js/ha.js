@@ -1,6 +1,6 @@
 // 主机容灾与设为主机的界面:服务器列表状态栏里的角色标签 + 小卡片、行内「更多」里的「设为主机…」、
 // 设为主机确认框(带进度、完成后给新面板地址)、备用接任、设置页的「主机容灾」卡片、页面顶部的提示。
-// 都收在这一个模块里,服务器页只调 roleChip / haMoreMenu,方便和别的界面改动合并。
+// 都收在这一个模块里,服务器页只调 roleChip / haMenuItems,方便和别的界面改动合并。
 import { get, post, SLOW, LONG } from './api.js';
 import { t } from './i18n.js';
 import { trErr } from './errmsg.js';
@@ -76,11 +76,10 @@ export function roleChip(n, data) {
   return `<button type="button" class="role-chip ${chipTone(r)}" data-act="ha.card" data-id="${n.id}" aria-haspopup="dialog" aria-expanded="${popId === n.id ? 'true' : 'false'}" title="${esc(t('ha.chipHint'))}">${esc(chipText(r))}<span class="caret" aria-hidden="true">▾</span></button>`;
 }
 
-// haMoreMenu 行内「更多」:设为主机…(第二入口:窄屏下状态栏被藏起来时也能用)。只在主机上、对副机有。
-export function haMoreMenu(n) {
+// haMenuItems 服务器行「更多」菜单里容灾的项:设为主机…(第二入口:窄屏下状态栏被藏起来时也能用)。只在主机上、对副机有。
+export function haMenuItems(n) {
   if (!isMasterView() || n.isLocal) return '';
-  return `<details class="menu ha-more"><summary class="btn sm" title="${esc(t('common.more'))}" aria-label="${esc(t('common.more'))}">⋯</summary><div class="menu-list">
-    <button data-act="ha.setMaster" data-id="${n.id}">${t('ha.setMaster')}…</button></div></details>`;
+  return `<button data-act="ha.setMaster" data-id="${n.id}">${t('ha.setMaster')}…</button>`;
 }
 
 // ---- 小卡片 ----

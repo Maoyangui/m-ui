@@ -467,7 +467,7 @@ type Rule struct {
 	// 限到多少 Mbps:0 = 该方向不改
 	UpMbps   int `json:"upMbps"`
 	DownMbps int `json:"downMbps"`
-	// TightenOnly 只升不降:结果不会高于用户自己的限速;关掉后规则值直接覆盖(可用于放宽)
+	// TightenOnly 界面叫「不超过用户自己的限速」:结果不会高于用户自己的限速;关掉后规则值直接覆盖(可用于放宽)
 	TightenOnly bool   `json:"tightenOnly"`
 	Remark      string `json:"remark"`
 	Sort        int    `json:"sort"`
@@ -572,6 +572,16 @@ type Change struct {
 	Action   string          `json:"action"`
 	Obj      json.RawMessage `json:"obj"`
 }
+
+// 定时任务写审计时用的执行者名(jobs 的流量重置 / 用尽停用、规则引擎)。概况「最近操作」的「人工」档按这份名单排除。
+const (
+	ActorResetJob   = "ResetJob"
+	ActorDepleteJob = "DepleteJob"
+	ActorRuleJob    = "RuleJob"
+)
+
+// JobActors 全部定时任务执行者名(新加任务时一并加进来)。
+var JobActors = []string{ActorResetJob, ActorDepleteJob, ActorRuleJob}
 
 // All 供 AutoMigrate 使用。
 // ReachCheck 一次大陆连通检测(每台服务器只留最近几十条)。Detail 是完整结果的 JSON,界面展开明细时用。

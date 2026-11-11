@@ -1,8 +1,9 @@
-import { state, load } from '../app.js';
+import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del, SLOW, LONG } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtTime } from '../ui.js';
+import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtTime, chipList, fieldBox } from '../ui.js';
+import { upstreamBad } from '../issues.js';
 // 展开查看细节的上游 id:一行只显示各服务器的延迟,点开才看检查时间、方式与完整报错
 const expanded = new Set();
 
@@ -25,15 +26,19 @@ const HAS_TRANSPORT = { vless: 1, vmess: 1, trojan: 1 };
 const GROUP = 'urltest';
 const results = {};
 let query = '';
+let onlyBad = false; // 只看故障:在真正用它的服务器上有失败的(和概况「需要处理」同一口径)
 
 const parseOpts = o => { try { return typeof o === 'string' ? JSON.parse(o) : (o || {}); } catch { return {}; } };
 const sel = (id, opts, cur, labels = {}) => `<select id="${id}">${opts.map(x => `<option value="${x}" ${cur === x ? 'selected' : ''}>${esc(labels[x] ?? x)}</option>`).join('')}</select>`;
 
 export async function render(el) {
+  const hp = takeHashParams('upstreams'); // 概况的「查看全部」:#/upstreams?f=bad
+  if (hp.has('f')) { onlyBad = hp.get('f') === 'bad'; query = ''; }
   await load('nodes').catch(() => {}); // 线路上游要显示服务器名
   el.innerHTML = `
     <div class="toolbar">
       <input type="search" id="up-q" placeholder="${t('common.search')}…" value="${esc(query)}">
+      <label class="small muted" style="display:inline-flex;align-items:center;gap:.3rem"><input type="checkbox" id="up-onlybad" ${onlyBad ? 'checked' : ''}> ${t('up.onlyBad')}</label>
       <span class="muted small" id="up-count"></span>
       <span class="grow"></span>
       <button class="btn" id="btn-test-all" data-act="up.testAll">${t('common.testAll')}</button>
@@ -41,11 +46,12 @@ export async function render(el) {
       <button class="btn" data-act="up.addLine">${t('up.addFromLine')}</button>
       <button class="btn primary" data-act="up.add">${t('up.add')}</button>
     </div>
-    <div class="table-wrap"><table class="grid">
-      <thead><tr><th>${t('common.name')}</th><th>${t('common.type')}</th><th>${t('common.server')}</th><th>${t('up.linesUsing')}</th><th>${t('up.latency')}</th><th></th></tr></thead>
+    <div class="table-wrap fill"><table class="grid">
+      <thead><tr><th>${t('common.name')}</th><th>${t('common.type')}</th><th>${t('common.server')}</th><th class="c-p3">${t('up.linesUsing')}</th><th>${t('up.latency')}</th><th></th></tr></thead>
       <tbody id="up-body"></tbody>
     </table></div>`;
   document.getElementById('up-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
+  document.getElementById('up-onlybad').addEventListener('change', e => { onlyBad = e.target.checked; renderRows(); });
   renderRows();
   // 用定时巡检结果填充尚未手动测试过的行
   try {
@@ -75,8 +81,10 @@ function resultHTML(id) {
     return who + badge(t('up.pending'));
   }).join(' <span class="muted">·</span> ');
   const bad = servers.filter(sv => sv.error); // 折叠时预览第一条真正带报错的,“数据过期”没有报错文字
+  // 服务器多(>4 台)时一行放不下每台的延迟:折叠时写"n/m 台正常 · 中位延迟",故障 / 过期的服务器先列出来(多了折成 +N),展开看逐台
+  const many = servers.length > 4;
   // 展开只在有话可说时才给:全部正常的话,折叠这一行已经把每台的延迟写全了,再点开只是重复一遍。
-  const worth = servers.some(sv => sv.state !== 'ok' || sv.error);
+  const worth = many || servers.some(sv => sv.state !== 'ok' || sv.error);
   const more = worth ? `<button class="btn xs ghost" data-act="up.expand" data-id="${id}" title="${t('up.detail')}">${expanded.has(id) ? '▴' : '▾'}</button>` : '';
   let detail = '';
   if (worth && expanded.has(id)) {
@@ -89,6 +97,15 @@ function resultHTML(id) {
     }).join('') + '</div>';
   } else if (bad.length) {
     detail = `<div class="sub-cell" title="${esc(trErr(bad[0].error))}">${esc(trErr(bad[0].error)).slice(0, 60)}</div>`;
+  }
+  if (many && !expanded.has(id)) {
+    const okd = servers.filter(sv => sv.state === 'ok').map(sv => sv.delayMs).sort((a, b) => a - b);
+    const median = okd.length ? okd[Math.floor((okd.length - 1) / 2)] : 0;
+    const trouble = servers.filter(sv => sv.state === 'fail' || sv.state === 'stale');
+    const tags = trouble.sort((a, b) => (a.state === 'fail' ? 0 : 1) - (b.state === 'fail' ? 0 : 1))
+      .map(sv => `<span class="badge ${sv.state === 'fail' ? 'danger' : 'warn'}" title="${esc(trErr(sv.error || ''))}">${esc(sv.name)} · ${esc(sv.state === 'fail' ? t('up.fault') : t('up.stale'))}</span>`);
+    return `<div class="up-sum">${badge(t('up.okOf', { n: okd.length, m: servers.length }), okd.length === servers.length ? 'ok' : okd.length ? 'warn' : 'danger')}${median ? ` <span class="muted small">${esc(t('up.median', { ms: median }))}</span>` : ''}${more}</div>`
+      + (tags.length ? `<div class="sub-cell">${chipList(tags, { key: 'up-bad-' + id, max: 6 })}</div>` : '') + (bad.length ? `<div class="sub-cell" title="${esc(trErr(bad[0].error))}">${esc(trErr(bad[0].error)).slice(0, 60)}</div>` : '');
   }
   return `<div class="row" style="gap:.35rem;align-items:center;flex-wrap:wrap">${chips}${more}</div>${detail}`;
 }
@@ -121,7 +138,7 @@ function renderRows() {
     });
   });
   const online = new Set(state.onlines.upstreams || []);
-  const rows = state.upstreams.filter(u => { const o = parseOpts(u.options); return matches(query, u.name, u.type, o.server); });
+  const rows = state.upstreams.filter(u => { const o = parseOpts(u.options); return matches(query, u.name, u.type, o.server) && (!onlyBad || upstreamBad(results[u.id])); });
   document.getElementById('up-count').textContent = `${rows.length} / ${state.upstreams.length}`;
   if (!rows.length) { setHTML(body, `<tr><td colspan="6">${empty()}</td></tr>`); return; }
   setHTML(body, rows.map(u => {
@@ -131,7 +148,7 @@ function renderRows() {
       <td class="primary-cell">${online.has(u.name) ? '<span class="dot on"></span>' : ''}${esc(u.name)}${u.fromLine ? `<div class="sub-cell">${esc(relayNames(u))}${u.relayProblem ? ` · <span class="danger">${esc(trErr(u.relayProblem))}</span>` : ''}</div>` : ''}</td>
       <td>${typeBadges(u)}</td>
       <td class="num">${esc(srv)}</td>
-      <td class="num">${usage[u.id] || 0}</td>
+      <td class="num c-p3">${usage[u.id] || 0}</td>
       <td id="up-res-${u.id}">${resultHTML(u.id)}</td>
       <td class="actions">
         <button class="btn sm" data-act="up.test" data-id="${u.id}">${t('common.test')}</button>
@@ -345,7 +362,7 @@ function editGroup(id) {
   openModal(id ? t('up.edit') : t('up.addGroup'), `
     <div class="form-grid">
       <div class="full">${field(t('common.name'), `<input id="f-name" value="${esc(u.name || '')}">`)}</div>
-      <div class="full">${field(t('up.groupMembers'), `<div class="check-list">${others.map(x => `<label><input type="checkbox" class="grp-cb" value="${esc(x.name)}" ${cur.has(x.name) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div>`, t('up.groupHelp'))}</div>
+      <div class="full">${fieldBox(t('up.groupMembers'), `<div class="check-list">${others.map(x => `<label><input type="checkbox" class="grp-cb" value="${esc(x.name)}" ${cur.has(x.name) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div>`, t('up.groupHelp'))}</div>
     </div>`, async () => {
     const outbounds = [...document.querySelectorAll('.grp-cb:checked')].map(c => c.value);
     if (outbounds.length < 2) throw new Error(t('up.groupNeedTwo'));

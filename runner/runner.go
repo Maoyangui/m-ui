@@ -91,6 +91,11 @@ type Runner struct {
 	reloadMu sync.Mutex
 	reload   ReloadStatus // 最近一次重载的结果:面板据此在页面上明说"已保存但没生效"
 
+	// 最近一次定时备份失败的原因与时间(成功后清空):概况「需要处理」提示"定时备份失败"
+	backupErrMu sync.Mutex
+	backupErr   string
+	backupErrAt int64
+
 	extLocks sync.Map // 外部节点 id → *sync.Mutex:同一条的手动刷新与定时刷新不并发(见 RefreshExt)
 
 	// resolve4 大陆连通检测在主机上把域名解析成 IPv4 用的解析器;nil = 系统解析器(见 lookupIPv4)。只给测试替换。
@@ -496,18 +501,26 @@ func (r *Runner) setting(key string) string {
 }
 
 // nodeCert 读取本机证书材料(各机各签,路径固定)。
-func (r *Runner) nodeCert() render.NodeCert {
-	// 数据面证书优先用 certFile/keyFile(证书页签发的固定路径),
-	// 未设置时回落到面板证书,兼容从旧库导入的配置。
-	certPath, keyPath := r.setting("certFile"), r.setting("keyFile")
+func (r *Runner) nodeCert() render.NodeCert { return NodeCertOf(r.db) }
+
+// NodeCertOf 按库里的设置取本机数据面证书材料:运行时和 m-ui render 共用这一份,校验的就是实际要跑的配置。
+// 数据面证书优先用 certFile/keyFile(证书页签发的固定路径),未设置时回落到面板证书,兼容从旧库导入的配置;
+// 线路单独选的证书库证书按名字给(见 namedCertsOf)。
+func NodeCertOf(db *gorm.DB) render.NodeCert {
+	get := func(key string) string {
+		var v string
+		db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+		return v
+	}
+	certPath, keyPath := get("certFile"), get("keyFile")
 	if certPath == "" || keyPath == "" {
-		certPath, keyPath = r.setting("webCertFile"), r.setting("webKeyFile")
+		certPath, keyPath = get("webCertFile"), get("webKeyFile")
 	}
 	return render.NodeCert{
-		ServerName: r.setting("webDomain"),
+		ServerName: get("webDomain"),
 		CertPath:   certPath,
 		KeyPath:    keyPath,
-		Named:      r.namedCerts(),
+		Named:      namedCertsOf(db),
 	}
 }
 
@@ -1462,7 +1475,7 @@ func (r *Runner) readLimits() (map[string]core.UserLimitSpec, map[string]core.Gr
 		// 空切片会被 SetGroups 清空代理池,反而把一次短暂的数据库抖动变成限速绕过 —— 所以整体报错
 		return nil, nil, fmt.Errorf("读取代理限速策略: %w", err)
 	}
-	// 规则限速:生效中的状态叠加到用户自己的限速上(只升不降 / 覆盖,多条取最严);
+	// 规则限速:生效中的状态叠加到用户自己的限速上(不超过用户自己的限速 / 覆盖,多条取最严);
 	// 到期的不算,主机失联时副机也能按到期时间自行放开
 	var states []model.LimitState
 	if err := r.db.Find(&states).Error; err != nil {
@@ -1718,6 +1731,16 @@ func ipv6OnlyChanged(old, pub string) bool {
 	return v6only(old) != v6only(pub)
 }
 
+// publicIPReloadNeeded 探测到的公网地址变了要不要重新渲染数据面配置:
+//   - 有没有 IPv4 变了:纯 IPv6 机器的直连线路要把公共 DNS 换成 IPv6 地址(render.v6DNSRules);
+//   - 「允许访问内网」关着时,私网屏蔽里带着本机公网地址(render.ownPublicCIDRs),IPv4 / IPv6 任何一个变了都要换上新地址。
+func publicIPReloadNeeded(old, pub, old6, pub6 string, allowPrivate bool) bool {
+	if ipv6OnlyChanged(old, pub) {
+		return true
+	}
+	return !allowPrivate && (old != pub || old6 != pub6)
+}
+
 // syncLocalNodeIPs 本机服务器记录也同步探测值(服务器列表显示用)。
 // 0.6.15 之前建的库里 public_ip6 这一列是 NULL,NULL != 'x' 在 SQL 里不成立,得先当成空串比。
 func syncLocalNodeIPs(db *gorm.DB, pub, pub6 string) {
@@ -1740,12 +1763,6 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 		if pub != old {
 			r.setSetting("publicIp", pub)
 			logger.Info("本机公网 IP: ", pub)
-			// 有没有 IPv4 变了:纯 IPv6 机器的直连线路要把公共 DNS 换成 IPv6 地址(render.v6DNSRules),重新渲染
-			if ipv6OnlyChanged(old, pub) && r.core.IsRunning() {
-				if err := r.ReloadAll(); err != nil {
-					logger.Warning("本机有无 IPv4 变了,重新渲染配置失败: ", err)
-				}
-			}
 		}
 		if pub6 != old6 {
 			r.setSetting("publicIp6", pub6)
@@ -1756,6 +1773,11 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 			}
 		}
 		syncLocalNodeIPs(r.db, pub, pub6)
+		if publicIPReloadNeeded(old, pub, old6, pub6, render.AllowPrivate(r.db)) && r.core.IsRunning() {
+			if err := r.ReloadAll(); err != nil {
+				logger.Warning("本机公网地址变了,重新渲染配置失败: ", err)
+			}
+		}
 	}
 	probe()
 	t := time.NewTicker(time.Hour)

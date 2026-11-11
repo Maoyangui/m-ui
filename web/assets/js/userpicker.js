@@ -12,18 +12,23 @@ export function userPicker(host, { users, resellers, plans, selected }) {
   let allUsers = !!(selected && selected.allUsers);
   let tab = 0; // 0 = 主面板
   let q = '';
+  let onlySel = false; // 只看已选(含被套餐 / 整代理覆盖的)
   const tabs = [{ id: 0, name: t('up.master') }, ...(resellers || []).map(r => ({ id: r.id, name: r.name }))];
   const inTab = u => (tab === 0 ? !u.resellerId : u.resellerId === tab);
   const hit = u => !q || (u.name || '').toLowerCase().includes(q); // 只按用户名找,列表也只显示用户名(备注可能是多行订单信息)
-  const visible = () => users.filter(u => inTab(u) && hit(u));
+  // 已经被选中的套餐、或"该代理名下全部用户"覆盖的用户:勾着、不用再单独选
+  const covered = u => (tab !== 0 && resellerIds.has(tab)) || (u.planId && planIds.has(u.planId));
+  const visible = () => users.filter(u => inTab(u) && hit(u) && (!onlySel || userIds.has(u.id) || covered(u)));
+  const tabCount = id => users.filter(u => (id === 0 ? !u.resellerId : u.resellerId === id)).length;
+  // 分组切换:≤6 组是可换行的按钮,更多用下拉框(选项带人数),不会被裁掉
+  const tabsHTML = () => (tabs.length <= 6
+    ? `<div class="lp-nodetabs">${tabs.map(n => `<button type="button" data-up-tab="${n.id}" class="${n.id === tab ? 'active' : ''}">${esc(n.name)}${n.id ? ` <span class="muted small">(${t('up.reseller')})</span>` : ''}</button>`).join('')}</div>`
+    : `<select class="sm up-tab" style="width:auto;max-width:18rem" aria-label="${esc(t('up.reseller'))}">${tabs.map(n => `<option value="${n.id}" ${n.id === tab ? 'selected' : ''}>${esc(n.id ? t('up.tabOpt', { name: n.name, n: tabCount(n.id) }) : t('up.tabOptMaster', { name: n.name, n: tabCount(0) }))}</option>`).join('')}</select>`);
   const countText = () => t('up.count', { users: userIds.size, resellers: resellerIds.size, plans: planIds.size });
 
   const listHTML = () => {
     const rows = visible();
-    const whole = tab !== 0 && resellerIds.has(tab);
     if (!rows.length) return `<p class="hint">${t('up.none')}</p>`;
-    // 已经被选中的套餐覆盖的用户:和"该代理名下全部用户"一样,勾着、不用再单独选
-    const covered = u => whole || (u.planId && planIds.has(u.planId));
     return `<div class="check-list lp-list">${rows.map(u => `<label class="${!u.enabled ? 'muted' : ''}"><input type="checkbox" class="up-cb" data-id="${u.id}" ${userIds.has(u.id) || covered(u) ? 'checked' : ''} ${covered(u) ? 'disabled' : ''}> ${esc(u.name)}${!u.enabled ? ` <span class="muted small">(${t('common.disabled')})</span>` : ''}</label>`).join('')}</div>`;
   };
   const render = () => {
@@ -32,9 +37,10 @@ export function userPicker(host, { users, resellers, plans, selected }) {
       <div class="up-body" ${allUsers ? 'style="opacity:.45;pointer-events:none"' : ''}>
         ${(plans || []).length ? `<div class="up-plans"><div class="up-plans-title"><b>${t('up.plans')}</b></div><div class="check-list">${plans.map(p => `<label><input type="checkbox" class="up-plan" data-id="${p.id}" ${planIds.has(p.id) ? 'checked' : ''}> ${esc(planLabel(p))} <span class="muted small">${t('up.planUsers', { n: p.userCount || 0 })}</span></label>`).join('')}</div></div>` : ''}
         <div class="lp-head">
-          <div class="seg lp-tabs">${tabs.map(n => `<button type="button" data-up-tab="${n.id}" class="${n.id === tab ? 'active' : ''}">${esc(n.name)}${n.id ? ` <span class="muted small">(${t('up.reseller')})</span>` : ''}</button>`).join('')}</div>
+          ${tabsHTML()}
+          <input type="search" class="sm up-search" placeholder="${t('up.search')}" value="${esc(q)}" style="max-width:11rem">
+          <label class="lp-only"><input type="checkbox" class="up-onlysel" ${onlySel ? 'checked' : ''}> ${t('lp.onlySel')}</label>
           <span class="grow"></span>
-          <input class="up-search" placeholder="${t('up.search')}" value="${esc(q)}" style="max-width:11rem">
           <button type="button" class="btn sm ghost" data-up="all">${t('lp.selectGroup')}</button>
           <button type="button" class="btn sm ghost" data-up="none">${t('lp.clearGroup')}</button>
           <span class="muted small up-count">${countText()}</span>
@@ -61,6 +67,8 @@ export function userPicker(host, { users, resellers, plans, selected }) {
   });
   host.addEventListener('change', e => {
     if (e.target.id === 'up-all') { allUsers = e.target.checked; render(); return; }
+    if (e.target.classList.contains('up-tab')) { tab = Number(e.target.value) || 0; render(); return; }
+    if (e.target.classList.contains('up-onlysel')) { onlySel = e.target.checked; refreshList(); return; }
     if (e.target.classList.contains('up-plan')) {
       const id = Number(e.target.dataset.id);
       e.target.checked ? planIds.add(id) : planIds.delete(id);
