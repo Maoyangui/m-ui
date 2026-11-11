@@ -703,6 +703,8 @@ td .chips { display: inline-flex; vertical-align: middle; }
 /* 汇总格本身是个按钮(点开看逐台延迟):去掉浏览器默认的灰底边框,悬停时下划线提示能点 */
 button.ext-sum { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
 button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underline; }
+/* 手机卡片里其它值都靠右,汇总格也靠右 */
+@media (max-width: 700px) { button.ext-sum { margin-left: auto; align-items: flex-end; text-align: right; } }
 .ext-more { display: flex; justify-content: center; padding: .5rem; }
 .ext-cols .menu-list { max-height: 60vh; overflow: auto; min-width: 14rem; }
 .ext-cols .menu-list label { display: flex; align-items: center; gap: .4rem; padding: .25rem .5rem; font-size: .82rem; white-space: nowrap; }
