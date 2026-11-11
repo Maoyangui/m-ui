@@ -231,6 +231,8 @@ const EN = /*BEGIN*/{
 "副机未确认应用": "The node did not confirm applying it",
 "副机没有出示证书": "The node presented no certificate",
 "副机证书指纹变了(记住的 %s…,现在 %s…):要是你重签了证书,到服务器页点「重置指纹」重新信任": "The node's certificate fingerprint changed (remembered %s…, now %s…): if you re-issued the certificate, click \"Reset fingerprint\" on the Servers page to trust it again",
+"副机的证书文件读不出来,正用临时自签证书顶着,和记住的指纹(%s…)对不上:打开副机面板看顶部提示,把证书文件放回原处(放回后自动恢复连接)或者换一张证书;急着先连上,可以到服务器页点「重置指纹」信任这张临时证书(它在副机重启后不变)": "The node cannot read its certificate files and is serving a temporary self-signed certificate, which does not match the remembered fingerprint (%s…): open the node's panel and read the notice at the top, then put the certificate files back (the connection recovers by itself) or switch to another certificate; to connect right away, click \"Reset fingerprint\" on the Servers page to trust this temporary certificate (it stays the same across node restarts)",
+"副机的证书文件读不出来,正用临时自签证书顶着,校验不过:打开副机面板看顶部提示,把证书文件放回原处(放回后自动恢复连接)或者换一张证书(%w)": "The node cannot read its certificate files and is serving a temporary self-signed certificate, which fails verification: open the node's panel and read the notice at the top, then put the certificate files back (the connection recovers by itself) or switch to another certificate (%w)",
 "协议 %s 不支持按用户下发": "Protocol %s doesn't support per-user credentials",
 "协议参数不是合法 JSON: %w": "Protocol options are not valid JSON: %w",
 "压缩包里没有 m-ui": "The archive doesn't contain m-ui",

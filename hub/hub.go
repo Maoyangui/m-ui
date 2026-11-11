@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/ext"
@@ -923,7 +924,7 @@ func New(d Deps) *Hub {
 		remoteLines: map[uint]map[string]map[string][]string{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
 		upHealth: map[uint][]UpstreamHealth{}, kicking: map[string]*kickCall{}, gates: map[uint]chan struct{}{}, ipsBusy: map[uint]bool{},
 		ctx: ctx, cancel: cancel,
-		verified: &http.Client{Timeout: clientTimeout}, pinned: map[string]*http.Client{}, pushFail: map[uint]*pushFailure{},
+		verified: &http.Client{Timeout: clientTimeout, Transport: tempCertExplained{http.DefaultTransport}}, pinned: map[string]*http.Client{}, pushFail: map[uint]*pushFailure{},
 		mergePending: map[uint]*nodeResult{}, pushSem: make(chan struct{}, pushConcurrency)}
 }
 
@@ -2332,6 +2333,12 @@ func (h *Hub) clientFor(n model.Node) *http.Client {
 				logger.Info("副机 ", name, " 的证书已由正规 CA 续期,指纹换记为 ", got[:16])
 				return nil
 			}
+			if got != want && tempCertPresented(raw) {
+				// 副机的证书文件读不出来(换机还原后不在、被删……),面板正用临时自签证书顶着:说清楚是这个原因,
+				// 不让人以为是重签了证书或者中间人。临时证书存在副机数据目录里、重启不变,急着先连上可以重置指纹信任它
+				return fmt.Errorf("副机的证书文件读不出来,正用临时自签证书顶着,和记住的指纹(%s…)对不上:打开副机面板看顶部提示,"+
+					"把证书文件放回原处(放回后自动恢复连接)或者换一张证书;急着先连上,可以到服务器页点「重置指纹」信任这张临时证书(它在副机重启后不变)", want[:16])
+			}
 			if got != want {
 				return fmt.Errorf("副机证书指纹变了(记住的 %s…,现在 %s…):要是你重签了证书,到服务器页点「重置指纹」重新信任", want[:16], got[:16])
 			}
@@ -2347,6 +2354,35 @@ func (h *Hub) clientFor(n model.Node) *http.Client {
 	}
 	h.pinned[key] = c
 	return c
+}
+
+// tempCertPresented 副机出示的是不是 m-ui 的临时自签证书(它的证书文件读不出来时顶上的那张,见 certutil.IsTempCert)。
+func tempCertPresented(raw [][]byte) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	c, err := x509.ParseCertificate(raw[0])
+	return err == nil && certutil.IsTempCert(c)
+}
+
+// tempCertExplained 正常校验证书的副机(没勾"跳过证书校验")出示的是临时自签证书时,校验必然失败,原来的报错只有
+// "x509: certificate signed by unknown authority",看不出是副机的证书文件读不出来了。这里换成说清原因的错误,原错误接在后面。
+type tempCertExplained struct{ base http.RoundTripper }
+
+func (t tempCertExplained) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	var ve *tls.CertificateVerificationError
+	if err != nil && errors.As(err, &ve) && len(ve.UnverifiedCertificates) > 0 && certutil.IsTempCert(ve.UnverifiedCertificates[0]) {
+		return nil, fmt.Errorf("副机的证书文件读不出来,正用临时自签证书顶着,校验不过:打开副机面板看顶部提示,把证书文件放回原处(放回后自动恢复连接)或者换一张证书(%w)", err)
+	}
+	return resp, err
+}
+
+// CloseIdleConnections 让 http.Client.CloseIdleConnections 照样关到底层的连接。
+func (t tempCertExplained) CloseIdleConnections() {
+	if c, ok := t.base.(interface{ CloseIdleConnections() }); ok {
+		c.CloseIdleConnections()
+	}
 }
 
 // chainValidFor 证书链能按其中任一个名字过根证书校验就算(空名字跳过)。

@@ -1,8 +1,12 @@
 package certutil
 
 import (
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -78,6 +82,91 @@ func TestReloaderOrTempUsesGoodFiles(t *testing.T) {
 	}
 	if NewReloaderOrTemp(crt, other).Temp() == nil {
 		t.Fatal("私钥和证书配不上,应当顶临时证书")
+	}
+}
+
+func certFP(t *testing.T, r *Reloader) string {
+	t.Helper()
+	c, err := r.GetCertificate(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(c.Certificate[0])
+	return hex.EncodeToString(sum[:])
+}
+
+// 面板、订阅、代理面板的临时证书存进 TempDir、重启沿用同一张:副机面板顶着临时证书时,主机钉住的指纹以前每次重启都对不上,
+// 照提示「重置指纹」后副机一重启又失联。各服务各一张;存着的不是临时证书、配不上、快过期的重新生成;
+// 没设 TempDir(或 nil 的 Watch)只在内存里;证书读得出来时什么都不写。
+func TestWatchReloaderKeepsTempCert(t *testing.T) {
+	dir := t.TempDir()
+	tempDir := filepath.Join(dir, "cert", "temp")
+	gone, goneKey := filepath.Join(dir, "live", "fullchain.pem"), filepath.Join(dir, "live", "privkey.pem")
+	w := &Watch{TempDir: tempDir}
+
+	first := w.Reloader("panel", gone, goneKey, "a.example.com")
+	if first.Temp() == nil {
+		t.Fatal("证书文件不在,应顶着临时证书")
+	}
+	fp := certFP(t, first)
+	if again := certFP(t, w.Reloader("panel", gone, goneKey, "a.example.com")); again != fp {
+		t.Fatal("重启后临时证书换了,主机钉住的指纹会对不上")
+	}
+	if again := certFP(t, w.Reloader("panel", gone, goneKey, "b.example.com")); again != fp {
+		t.Fatal("面板域名改了也沿用同一张:临时证书本来就不受信任,指纹不变更要紧")
+	}
+	if other := certFP(t, w.Reloader("sub", gone, goneKey, "a.example.com")); other == fp {
+		t.Fatal("各服务各一张")
+	}
+	leaf := servedLeaf(t, first)
+	if !IsTempCert(leaf) || leaf.DNSNames[0] != "a.example.com" || time.Until(leaf.NotAfter) < 300*24*time.Hour {
+		t.Fatalf("存下来的应是写着面板域名、一年有效的临时证书: %s %v %v", leaf.Subject, leaf.DNSNames, leaf.NotAfter)
+	}
+	if runtime.GOOS != "windows" {
+		if st, err := os.Stat(filepath.Join(tempDir, "panel.key")); err != nil || st.Mode().Perm() != 0o600 {
+			t.Fatalf("临时证书的私钥应是 0600: %v %v", st, err)
+		}
+	}
+
+	// 存着的被换成了别的证书(不是临时证书)、或者快过期了:重新生成一张临时证书,不拿它顶
+	if err := GenerateSelfSigned([]string{"x.example.com"}, filepath.Join(tempDir, "panel.crt"), filepath.Join(tempDir, "panel.key"), 30); err != nil {
+		t.Fatal(err)
+	}
+	if l := servedLeaf(t, w.Reloader("panel", gone, goneKey, "a.example.com")); !IsTempCert(l) {
+		t.Fatalf("不是临时证书的不能拿来顶: %s", l.Subject)
+	}
+	certPEM, keyPEM, err := selfSignedPEM([]string{"a.example.com"}, 3, TempOrg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveTemp(filepath.Join(tempDir, "panel"), certPEM, keyPEM); err != nil {
+		t.Fatal(err)
+	}
+	if l := servedLeaf(t, w.Reloader("panel", gone, goneKey, "a.example.com")); time.Until(l.NotAfter) < 300*24*time.Hour {
+		t.Fatalf("只剩 3 天的临时证书应换一张新的: %v", l.NotAfter)
+	}
+
+	// 没设 TempDir、nil 的 Watch:只在内存里,不写文件
+	other := filepath.Join(dir, "other")
+	var nilWatch *Watch
+	for _, r := range []*Reloader{nilWatch.Reloader("panel", gone, goneKey), (&Watch{}).Reloader("panel", gone, goneKey)} {
+		if r.Temp() == nil || !IsTempCert(servedLeaf(t, r)) {
+			t.Fatal("没设 TempDir 也照样顶临时证书")
+		}
+	}
+	// 证书读得出来:和 NewReloader 一样,什么都不写
+	good, goodKey := filepath.Join(dir, "a.crt"), filepath.Join(dir, "a.key")
+	if err := GenerateSelfSigned([]string{"a.example.com"}, good, goodKey, 30); err != nil {
+		t.Fatal(err)
+	}
+	if r := (&Watch{TempDir: other}).Reloader("panel", good, goodKey); r.Temp() != nil || IsTempCert(servedLeaf(t, r)) {
+		t.Fatal("证书读得出来就用它")
+	}
+	if _, err := os.Stat(other); !os.IsNotExist(err) {
+		t.Fatal("用不着临时证书时不该建目录、写文件")
+	}
+	if IsTempCert(nil) {
+		t.Fatal("nil 不是临时证书")
 	}
 }
 

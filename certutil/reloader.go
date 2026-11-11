@@ -1,9 +1,12 @@
 package certutil
 
 import (
+	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -41,18 +44,24 @@ func NewReloader(certPath, keyPath string) (*Reloader, error) {
 	return r, nil
 }
 
-// NewReloaderOrTemp 同 NewReloader,但证书读不出来时不报错:先用一张只在内存里的临时自签证书顶上,照样走 HTTPS
+// NewReloaderOrTemp 同 NewReloader,但证书读不出来时不报错:先用一张临时自签证书顶上,照样走 HTTPS
 // (浏览器会提示不受信任),之后按间隔再试原来的文件,读出来了就换回去,不用重启。
 // 面板、订阅、代理面板用它:换机还原后证书文件不在,以前整个进程起不来,systemd 一直重启,面板再也打不开。
 // hosts 写进临时证书(空的跳过;一个都没有时用 localhost)。Temp 报告现在是不是在顶着、为什么。
+// 这里的临时证书只在内存里,每次启动重新生成;面板、订阅、代理面板走 Watch.Reloader,临时证书存进数据目录、重启沿用。
 func NewReloaderOrTemp(certPath, keyPath string, hosts ...string) *Reloader {
+	return newReloaderOrTemp(certPath, keyPath, "", hosts)
+}
+
+// newReloaderOrTemp tempBase 不空时临时证书存成 tempBase.crt / tempBase.key,下次启动接着用同一张(见 tempCert)。
+func newReloaderOrTemp(certPath, keyPath, tempBase string, hosts []string) *Reloader {
 	r := &Reloader{certPath: certPath, keyPath: keyPath}
 	err := r.load()
 	if err == nil {
 		return r
 	}
 	r.temp, r.tempErr, r.since, r.checkedAt = true, err, time.Now(), time.Now()
-	if c, gerr := tempCert(hosts); gerr == nil {
+	if c, gerr := tempCert(hosts, tempBase); gerr == nil {
 		r.cert = c
 	} else {
 		logger.Error("生成临时自签证书失败: ", gerr)
@@ -60,8 +69,103 @@ func NewReloaderOrTemp(certPath, keyPath string, hosts ...string) *Reloader {
 	return r
 }
 
-// tempCert 临时自签证书:只在内存里,30 天(进程重启会重新生成)。
-func tempCert(hosts []string) (*tls.Certificate, error) {
+// TempOrg 临时自签证书的组织名。主机连副机时据此认出"副机的证书文件读不出来、正用临时证书顶着"(IsTempCert),报错说清原因。
+const TempOrg = "m-ui temporary"
+
+// tempDays 临时证书的有效期。存进数据目录、重启沿用:给长一些,免得隔几周就换一把私钥(主机钉住的指纹跟着变)。
+const tempDays = 365
+
+// tempRenewBefore 存着的临时证书剩不到这么久就换一张新的。
+const tempRenewBefore = 7 * 24 * time.Hour
+
+// IsTempCert c 是不是 m-ui 的临时自签证书(证书文件读不出来时顶上的那张)。
+func IsTempCert(c *x509.Certificate) bool {
+	if c == nil || !bytes.Equal(c.RawIssuer, c.RawSubject) {
+		return false
+	}
+	for _, o := range c.Subject.Organization {
+		if o == TempOrg {
+			return true
+		}
+	}
+	return false
+}
+
+// tempCert 临时自签证书。base 为空时只在内存里(每次启动重新生成)。base 不空时先用存着的 base.crt / base.key
+// (确实是临时证书、和私钥配得上、还剩 tempRenewBefore 以上),没有才生成一张存进去(私钥 0600):以前每次启动都换一把私钥,
+// 副机面板顶着临时证书时,主机钉住的指纹每次重启都对不上,照提示「重置指纹」后副机一重启又失联。存不进去也照样用这张。
+// 存着的那张写的地址可能和现在的设置不一样:临时证书反正不受信任,地址对不上不影响什么,指纹不变更要紧。
+func tempCert(hosts []string, base string) (*tls.Certificate, error) {
+	if base != "" {
+		if c := loadTemp(base); c != nil {
+			return c, nil
+		}
+	}
+	certPEM, keyPEM, err := tempPEM(hosts)
+	if err != nil {
+		return nil, err
+	}
+	c, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, err
+	}
+	if base != "" {
+		if err := saveTemp(base, certPEM, keyPEM); err != nil {
+			logger.Warning("临时自签证书存不进 ", filepath.Dir(base), "(", err, "):这次照样用它,下次启动会换一张")
+		}
+	}
+	return &c, nil
+}
+
+// loadTemp 读存着的临时证书;不是临时证书、配不上、快过期的不用。
+func loadTemp(base string) *tls.Certificate {
+	c, err := tls.LoadX509KeyPair(base+".crt", base+".key")
+	if err != nil || len(c.Certificate) == 0 {
+		return nil
+	}
+	leaf, err := x509.ParseCertificate(c.Certificate[0])
+	if err != nil || !IsTempCert(leaf) || time.Until(leaf.NotAfter) < tempRenewBefore {
+		return nil
+	}
+	c.Leaf = leaf
+	return &c
+}
+
+// saveTemp 存临时证书:目录 0700,私钥 0600;先写私钥再写证书,各自先写临时文件再改名(写一半断电,下次配不上就重新生成)。
+func saveTemp(base string, certPEM, keyPEM []byte) error {
+	if err := os.MkdirAll(filepath.Dir(base), 0o700); err != nil {
+		return err
+	}
+	if err := writeFileAtomic(base+".key", keyPEM, 0o600); err != nil {
+		return err
+	}
+	return writeFileAtomic(base+".crt", certPEM, 0o644)
+}
+
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.Write(data)
+	if cerr := f.Chmod(mode); err == nil {
+		err = cerr
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
+}
+
+// tempPEM 生成一张临时自签证书(写着 hosts;设置里的域名写坏了进不了证书时退回 localhost)。
+func tempPEM(hosts []string) ([]byte, []byte, error) {
 	var list []string
 	seen := map[string]bool{}
 	for _, h := range hosts {
@@ -75,18 +179,11 @@ func tempCert(hosts []string) (*tls.Certificate, error) {
 	if len(list) == 0 {
 		list = []string{"localhost"}
 	}
-	certPEM, keyPEM, err := selfSignedPEM(list, 30, "m-ui temporary")
+	certPEM, keyPEM, err := selfSignedPEM(list, tempDays, TempOrg)
 	if err != nil && list[0] != "localhost" { // 设置里的域名写坏了(进不了证书):至少用 localhost 顶上
-		certPEM, keyPEM, err = selfSignedPEM([]string{"localhost"}, 30, "m-ui temporary")
+		certPEM, keyPEM, err = selfSignedPEM([]string{"localhost"}, tempDays, TempOrg)
 	}
-	if err != nil {
-		return nil, err
-	}
-	c, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return nil, err
-	}
-	return &c, nil
+	return certPEM, keyPEM, err
 }
 
 func (r *Reloader) load() error {
@@ -161,6 +258,19 @@ type Watch struct {
 	m  map[string]*Reloader
 	// OnTemp 登记进来的加载器正顶着临时证书时调一次(另起 goroutine):runner 用它发 Telegram。只在启动前设置。
 	OnTemp func(TempCert)
+	// TempDir 临时证书存放的目录(<数据目录>/cert/temp,每个服务一对 <服务>.crt / <服务>.key,重启沿用);
+	// 空 = 只在内存里。只在启动前设置。
+	TempDir string
+}
+
+// Reloader 给某个服务(panel / sub / reseller)建证书加载器:同 NewReloaderOrTemp,只是临时证书存进 TempDir、重启沿用同一张,
+// 副机面板顶着临时证书时主机钉住的指纹不会每次重启都变。nil 的 Watch(或没设 TempDir)退回只在内存里的临时证书。
+func (w *Watch) Reloader(service, certPath, keyPath string, hosts ...string) *Reloader {
+	base := ""
+	if w != nil && w.TempDir != "" && service != "" {
+		base = filepath.Join(w.TempDir, service)
+	}
+	return newReloaderOrTemp(certPath, keyPath, base, hosts)
 }
 
 // TempCert 一个正用临时自签证书顶着的服务。

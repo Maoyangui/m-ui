@@ -48,7 +48,8 @@ type Server struct {
 	logDrop int
 	logKick chan struct{}
 
-	// TLS 登记订阅端口用的证书加载器(runner 的 Watch):证书读不出来、正用临时自签证书顶着时,面板顶部据此提示。nil 不登记。
+	// TLS 登记订阅端口用的证书加载器(runner 的 Watch):证书读不出来、正用临时自签证书顶着时,面板顶部据此提示;
+	// 临时证书存在它的 TempDir 里、重启沿用。nil 不登记,临时证书只在内存里。
 	TLS *certutil.Watch
 }
 
@@ -408,7 +409,7 @@ func (s *Server) Start() error {
 	if certFile != "" && keyFile != "" {
 		// 证书读不出来(换机还原后文件不在、私钥配不上……)不能让整个进程起不来:先用临时自签证书顶着,照样走 HTTPS
 		// (订阅地址是 https://,降成 http 客户端全断),文件放回原处几秒内自动换上
-		rl = certutil.NewReloaderOrTemp(certFile, keyFile, s.setting("webDomain"), s.setting("publicIp"), s.setting("publicIp6"))
+		rl = s.TLS.Reloader("sub", certFile, keyFile, s.setting("webDomain"), s.setting("publicIp"), s.setting("publicIp6"))
 		if err := rl.Temp(); err != nil {
 			logger.Error("订阅证书读不出来(", err, "):订阅先用临时自签证书顶着,仍走 HTTPS,但校验证书的客户端会更新失败。",
 				"到证书页给订阅换一张证书,或把文件放回 ", certFile, "(放回后几秒内自动换上)")

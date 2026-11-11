@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/Maoyangui/m-ui/certutil"
@@ -14,6 +15,10 @@ import (
 
 // TLSWatch 面板 / 代理面板登记各自证书加载器的地方(订阅服务由 runner 自己登记)。
 func (r *Runner) TLSWatch() *certutil.Watch { return &r.tls }
+
+// tempCertDir 临时自签证书存放的目录:每个服务一对 <服务>.crt / <服务>.key,重启沿用同一张 —— 副机面板顶着临时证书时,
+// 主机钉住的指纹不会每次重启都对不上。在 cert/ 的子目录里:ensureCertStore 只收 cert/*.crt,备份只带库里引用的证书,都碰不到它。
+func tempCertDir(dataDir string) string { return filepath.Join(dataDir, "cert", "temp") }
 
 var tempServiceLabel = map[string]string{"panel": "面板", "sub": "订阅", "reseller": "代理面板"}
 

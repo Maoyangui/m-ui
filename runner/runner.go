@@ -227,6 +227,7 @@ func New(dbPath string) (*Runner, error) {
 	r := &Runner{db: db, core: core.NewCore(), dbPath: dbPath}
 	r.cert.kick = make(chan struct{}, 1)
 	r.tls.OnTemp = r.noticeTempCert
+	r.tls.TempDir = tempCertDir(r.DataDir())
 	r.subSrv = r.newSubServer()
 	r.notifier = notify.New(r.setting)
 	r.notifier.Persist(func() string { return r.setting("notifyOnce") }, func(v string) {
