@@ -2275,7 +2275,14 @@ func (h *Hub) do(n model.Node, req *http.Request, out interface{}) error {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	h.setHAHeader(req)
-	resp, err := h.clientFor(n).Do(req)
+	c := h.clientFor(n)
+	if dl, ok := req.Context().Deadline(); ok && c.Timeout > 0 && time.Until(dl) > c.Timeout {
+		// 大传输(设为主机的整库、大副本)给的时限比客户端兜底的总时限长:用同一个连接池与指纹校验、不设总时限的拷贝,只靠 ctx
+		long := *c
+		long.Timeout = 0
+		c = &long
+	}
+	resp, err := c.Do(req)
 	if err != nil {
 		return h.noteReply(n, nil, nil, err)
 	}
