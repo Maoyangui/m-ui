@@ -86,19 +86,23 @@ export function toast(msg, kind = '') {
 }
 
 // ---- 弹窗 ----
+// 标题和按钮固定、正文自己滚动(长表单也看得见「保存」);opts.wide 加宽,opts.size === 'xl' 给带选择器的编辑框用。
 export function openModal(title, html, onSave, opts = {}) {
   const m = document.getElementById('modal');
   document.getElementById('modal-title').textContent = title;
-  document.getElementById('modal-body').innerHTML = html;
+  const body = document.getElementById('modal-body');
+  body.innerHTML = html;
+  body.scrollTop = 0;
+  enhanceCheckLists(body);
   document.getElementById('modal-err').textContent = '';
   const save = document.getElementById('modal-save');
   save.hidden = !onSave;
   save.disabled = false; // 上一个对话框可能把它禁用着关掉(换套餐在等预览时禁用提交)
-  save.textContent = opts.saveText || t('common.save');
+  save.textContent = opts.saveText || opts.okText || t('common.save');
   save.className = 'btn ' + (opts.danger ? 'danger' : 'primary');
   document.getElementById('modal-cancel').hidden = !!opts.noCancel; // 纯提示只留一个「知道了」
   m.hidden = false;
-  m.querySelector('.modal-box').classList.toggle('wide', !!opts.wide);
+  m.querySelector('.modal-box').className = 'modal-box' + (opts.wide ? ' wide' : '') + (opts.size === 'xl' ? ' xl' : '');
   save.onclick = async () => {
     save.disabled = true;
     try { await onSave(); closeModal(); }
@@ -125,6 +129,7 @@ export function confirm(message, opts = {}) {
 export function openDrawer(title, html, opts = {}) {
   const d = document.getElementById('drawer');
   d.classList.toggle('over', !!opts.over); // 从弹窗里打开的:盖在弹窗上面
+  d.classList.toggle('wide', !!opts.wide); // 内容宽的(用户详情的流量图、各服务器延迟表)用宽抽屉
   document.getElementById('drawer-title').innerHTML = title;
   document.getElementById('drawer-body').innerHTML = html;
   d.hidden = false;
@@ -276,4 +281,88 @@ export function matches(q, ...fields) {
 export function debounce(fn, ms = 200) {
   let tm;
   return (...a) => { clearTimeout(tm); tm = setTimeout(() => fn(...a), ms); };
+}
+
+// ---- chip 折叠:服务器、在线用户这类可能很多的名单,先露前 max 个,其余收进「+N」----
+// 展开状态按 key 记在模块里,5 秒一轮的 setHTML 重画后不会自己收起。
+// lazy:折起时只渲染露出来的那几个(2000 人在线也只画几十个),展开后最多渲染 cap 个;
+// 这种情况切换展开要让页面重画,页面用 onChipToggle(key, fn) 登记重画函数。
+const openChips = new Set();
+const chipRedraw = {};
+export const chipOpen = key => openChips.has(key);
+export function onChipToggle(key, fn) { chipRedraw[key] = fn; }
+export function chipList(items, { key = '', max = 12, lazy = false, cap = 300, cls = '' } = {}) {
+  const base = 'chips' + (cls ? ' ' + cls : '');
+  if (items.length <= max) return `<span class="${base}">${items.join('')}</span>`;
+  const open = !!key && openChips.has(key), n = items.length - max;
+  const shown = lazy ? items.slice(0, open ? Math.max(max, cap) : max) : items;
+  return `<span class="${base} fold${open ? ' open' : ''}">${shown.map((h, i) => (i < max ? h : `<span class="fold-x">${h}</span>`)).join('')}` +
+    `<button type="button" class="chip more" data-act="ui.chips" data-id="${esc(key)}" data-n="${n}" aria-expanded="${open}">${open ? esc(t('common.less')) : '+' + n}</button></span>`;
+}
+registerActions({
+  'ui.chips': (key, el) => {
+    const box = el.closest('.fold');
+    const o = key ? !openChips.has(key) : !(box && box.classList.contains('open'));
+    if (key) { if (o) openChips.add(key); else openChips.delete(key); }
+    if (key && chipRedraw[key]) { chipRedraw[key](); return; }
+    if (box) box.classList.toggle('open', o);
+    el.textContent = o ? t('common.less') : '+' + el.dataset.n;
+    el.setAttribute('aria-expanded', String(o));
+  },
+});
+
+// ---- 审计对象的显示(概况「最近操作」和日志页共用)----
+// 字符串原样,对象写成 JSON,null / undefined 为空;数组超过 max 项写成「a, b, c 等 N 个」(max 为 0 不截)。
+// 截断交给 CSS 的省略号,全文放 title:不在这里按字数切(切出半个 &amp; 还没有省略号)。
+export function auditText(v, { max = 3 } = {}) {
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return v; } }
+  const one = x => (x === null || x === undefined ? '' : typeof x === 'object' ? JSON.stringify(x) : String(x));
+  if (Array.isArray(v)) {
+    const parts = v.map(one);
+    if (max > 0 && parts.length > max) return t('common.andMore', { list: parts.slice(0, max).join(', '), n: parts.length, more: parts.length - max });
+    return parts.join(', ');
+  }
+  return one(v);
+}
+
+// ---- 长勾选列表:超过 12 项的 .check-list 前面加 筛选 / 全选 / 全不选 / 计数 ----
+// 只作用于看得见、没禁用的勾选框,并补发 change 事件(线路编辑里的 IP 版本联动照常);筛掉的只是藏起来,勾选不丢。
+// 选择器自己有搜索的列表(.lp-list)不加。openModal 写入正文后自动调用,别处渲染的列表可以自己调。
+export function enhanceCheckLists(root) {
+  if (!root || !root.querySelectorAll) return;
+  for (const list of root.querySelectorAll('.check-list:not(.lp-list)')) {
+    if (list.dataset.cl || list.children.length <= 12) continue;
+    list.dataset.cl = '1';
+    const bar = document.createElement('div');
+    bar.className = 'cl-tools';
+    bar.innerHTML = `<input type="search" class="sm cl-q" placeholder="${esc(t('cl.filter'))}" aria-label="${esc(t('cl.filter'))}">
+      <button type="button" class="btn sm ghost" data-cl="all">${esc(t('cl.all'))}</button>
+      <button type="button" class="btn sm ghost" data-cl="none">${esc(t('cl.none'))}</button>
+      <span class="muted small cl-count"></span>`;
+    list.before(bar);
+    const boxes = () => [...list.querySelectorAll('input[type=checkbox]')];
+    const count = () => {
+      const all = boxes();
+      bar.querySelector('.cl-count').textContent = t('lp.count', { n: all.filter(c => c.checked).length, total: all.length });
+    };
+    bar.querySelector('.cl-q').addEventListener('input', e => {
+      const q = e.target.value.trim().toLowerCase();
+      for (const item of list.children) item.hidden = !!q && !(item.textContent || '').toLowerCase().includes(q);
+    });
+    bar.addEventListener('click', e => {
+      const b = e.target.closest('[data-cl]');
+      if (!b) return;
+      for (const item of list.children) {
+        if (item.hidden) continue;
+        const cb = item.matches('input[type=checkbox]') ? item : item.querySelector('input[type=checkbox]');
+        const want = b.dataset.cl === 'all';
+        if (!cb || cb.disabled || cb.checked === want) continue;
+        cb.checked = want;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      count();
+    });
+    list.addEventListener('change', count);
+    count();
+  }
 }
