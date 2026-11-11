@@ -714,6 +714,7 @@ func (s *Service) Demote(d Demoted) error {
 	if d.SinceChange > 0 {
 		s.d.DB.Model(&model.Change{}).Where("id > ?", d.SinceChange).Count(&d.Divergent)
 	}
+	s.demoteDNS(&d)
 	if s.d.Backup != nil {
 		// 先留一份主机身份的备份(失联期间本机收的改动在里面);已经标了"正在变为副机",备份期间再来的回复不会再触发一次
 		if name, err := s.d.Backup(fmt.Sprintf("former-master-E%d-", d.OldEpoch)); err != nil {
@@ -746,6 +747,26 @@ func (s *Service) Demote(d Demoted) error {
 	return nil
 }
 
+// demoteDNS 变为副机前(不论原因):本任期自动改过 DNS 的,把仍指向本机的记录改掉 —— 指向现在的主机(服务器表里记着它的
+// 公网 IP),不知道就改回原值。不然订阅域名、haDnsNames 会一直指着已经变为副机的本机。新主机是本机的另一个实例(换机还原)时不动:
+// 那时服务器表里"它"的 IP 就是本机的。
+func (s *Service) demoteDNS(d *Demoted) {
+	if len(d.Dns) > 0 || d.MasterId == 0 || d.MasterId == s.SelfId() {
+		return
+	}
+	var b Became
+	if !s.getJSON(KeyBecame, &b) || b.Epoch != d.OldEpoch || len(b.Dns) == 0 {
+		return
+	}
+	var n model.Node
+	s.d.DB.Where("id = ?", d.MasterId).Limit(1).Find(&n)
+	changes, err := s.revertDNS(b, n.PublicIP, n.PublicIP6)
+	if err != nil {
+		logger.Warning("容灾:变为副机前把 DNS 改掉失败: ", err)
+	}
+	d.Dns = changes
+}
+
 // demoteText 变为副机的 Telegram 通知。
 func demoteText(d Demoted) string {
 	name := notify.Esc(d.MasterName)
@@ -761,7 +782,7 @@ func demoteText(d Demoted) string {
 		msg = fmt.Sprintf("🟠 <b>本机已变为副机</b>\n本机失联期间「%s」已接任主机。本机继续用自己的线路服务,不再推送配置、不再跑主机任务,新主机会把本机当副机管起来。", name)
 	}
 	for _, c := range d.Dns {
-		msg += fmt.Sprintf("\nDNS 已改回:%s %s %s → %s", notify.Esc(c.Name), c.Type, notify.Esc(c.To), notify.Esc(c.From))
+		msg += fmt.Sprintf("\nDNS 已改:%s %s %s → %s", notify.Esc(c.Name), c.Type, notify.Esc(c.From), notify.Esc(c.To))
 	}
 	switch {
 	case d.Divergent > 0:
@@ -862,13 +883,6 @@ func (s *Service) evaluateYield() {
 	var b Became
 	if s.getJSON(KeyBecame, &b) && b.Epoch == L {
 		d.SinceChange = b.MaxChangeId
-		if len(b.Dns) > 0 {
-			changes, err := s.revertDNS(b)
-			if err != nil {
-				logger.Warning("容灾:让出时把 DNS 改回去失败: ", err)
-			}
-			d.Dns = changes
-		}
 	}
 	if err := s.Demote(d); err != nil {
 		logger.Warning("容灾:让出主机失败: ", err)

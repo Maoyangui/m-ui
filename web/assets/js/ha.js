@@ -601,6 +601,7 @@ export function noticeHTML(n) {
       let s = `<b>${esc(t('ha.n.demoted.' + why, { name: n.name || '' }))}</b>`;
       if (Number(n.n) < 0) s += ' ' + esc(t('ha.n.divergentUnknown', { file: n.file || '' }));
       else if (n.n) s += ' ' + esc(t(why === 'yielded' ? 'ha.n.divergentYield' : 'ha.n.divergent', { n: n.n, file: n.file || '' }));
+      if ((n.changes || []).length) s += ' ' + esc(t('ha.n.dnsMoved') + ' ' + changesText(n.changes)); // 本任期改过、仍指向本机的 DNS 记录已改掉
       return s + (dns ? ' ' + dns : '') + warn;
     }
     case 'rolledBack': return `<b>${esc(t('ha.n.rolledBack', { n: n.epoch || '' }))}</b>${warn}`;

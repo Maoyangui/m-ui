@@ -190,8 +190,9 @@ func (s *Service) becameDNS(b *Became, ip string) DnsOutcome {
 	return out
 }
 
-// revertDNS 让出主机时:本任期自动改过、当前仍指向本机的记录改回原值(别人后来改过的不动)。返回改回了哪些。
-func (s *Service) revertDNS(b Became) ([]DnsChange, error) {
+// revertDNS 本机不再当主机时(让出、同纪元输了、被更高纪元接管):本任期自动改过、当前仍指向本机的记录改掉(别人后来改过的不动)。
+// 知道现在的主机的 IP(ip4 / ip6,按记录类型)就指向它,不知道就改回本任期改之前的原值。返回改了哪些。
+func (s *Service) revertDNS(b Became, ip4, ip6 string) ([]DnsChange, error) {
 	tok := strings.TrimSpace(s.setting(KeyDnsToken))
 	var todo []DnsChange
 	for _, c := range b.Dns {
@@ -223,16 +224,20 @@ func (s *Service) revertDNS(b Became) ([]DnsChange, error) {
 			errs = append(errs, fmt.Errorf("%s %s: %w", c.Name, c.Type, err))
 			continue
 		}
+		to := c.From
+		if ip := dnsTarget(c.Type, ip4, ip6); ip != "" {
+			to = ip
+		}
 		for _, r := range recs {
-			if !sameIP(r.Content, c.To) {
+			if !sameIP(r.Content, c.To) || sameIP(r.Content, to) {
 				continue
 			}
-			if err := cf.UpdateContent(ctx, zone, r.ID, c.From); err != nil {
+			if err := cf.UpdateContent(ctx, zone, r.ID, to); err != nil {
 				errs = append(errs, fmt.Errorf("%s %s: %w", c.Name, c.Type, err))
 				continue
 			}
-			done = append(done, DnsChange{Name: c.Name, Type: c.Type, From: r.Content, To: c.From})
-			logger.Info("容灾:让出主机,DNS ", c.Name, " ", c.Type, " ", r.Content, " → ", c.From)
+			done = append(done, DnsChange{Name: c.Name, Type: c.Type, From: r.Content, To: to})
+			logger.Info("容灾:本机不再当主机,DNS ", c.Name, " ", c.Type, " ", r.Content, " → ", to)
 		}
 	}
 	err := errors.Join(errs...)
@@ -242,6 +247,21 @@ func (s *Service) revertDNS(b Became) ([]DnsChange, error) {
 	}
 	_ = s.set(map[string]string{KeyDnsChanged: mustJSON(rec)})
 	return done, err
+}
+
+// dnsTarget 按记录类型取现在的主机的 IP(A 要 IPv4、AAAA 要 IPv6;对不上的不用)。
+func dnsTarget(typ, ip4, ip6 string) string {
+	switch typ {
+	case "A":
+		if ip := net.ParseIP(strings.TrimSpace(ip4)); ip != nil && ip.To4() != nil {
+			return ip.String()
+		}
+	case "AAAA":
+		if ip := net.ParseIP(strings.TrimSpace(ip6)); ip != nil && ip.To4() == nil {
+			return ip.String()
+		}
+	}
+	return ""
 }
 
 // shortErr 错误文字截到 n 个字以内(多条错误只留第一条,注明另有几项):通知、提示里不放整段网页。

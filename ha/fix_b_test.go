@@ -768,7 +768,7 @@ func TestDNSPartialAndRevert(t *testing.T) {
 		t.Fatalf("通知里写原值 → 新值,跳过的要手动处理: %q", txt)
 	}
 	// 让出:改回
-	got, err := s.revertDNS(b)
+	got, err := s.revertDNS(b, "", "")
 	if err != nil || len(got) != 1 || got[0].From != "203.0.113.7" || got[0].To != "198.51.100.1" {
 		t.Fatalf("改回原值: %+v %v", got, err)
 	}
