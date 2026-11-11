@@ -143,18 +143,26 @@ dl.qa dd { margin: .2rem 0 0; }
 @media (max-width: 900px) {
   :root { --head-h: 104px; }
   .head { height: auto; min-height: var(--head-h); flex-wrap: wrap; row-gap: .5rem; padding: .55rem .8rem; align-content: center; }
-  .head .brand { order: 1; flex: 1; }
+  /* 第一行:品牌 + 语言 / 返回面板 + 目录;品牌放不下就省略号收尾,不压到右边的链接上。搜索框固定独占第二行 */
+  .head .brand { order: 1; flex: 1 1 0; min-width: 0; overflow: hidden; }
+  .head .brand > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .head .brand .badge { flex: none; }
   .head .links { order: 2; }
   .head .grow { display: none; }
-  .toc-btn { display: inline-flex; order: 3; }
-  .search { order: 4; flex: 1 1 10rem; }
+  .toc-btn { display: inline-flex; order: 3; flex: none; }
+  .search { order: 4; flex: 1 1 100%; }
   .wrap { display: block; }
-  .toc { position: fixed; top: var(--head-h); left: 0; right: 0; z-index: 19; height: auto; max-height: calc(100vh - var(--head-h)); border-right: 0; border-bottom: 1px solid var(--border); background: var(--surface); padding: .6rem .8rem 1.2rem; box-shadow: 0 10px 30px rgba(16, 24, 40, .18); display: none; }
+  /* 100vh 在手机浏览器里按收起工具栏的大视口算,工具栏展开时目录最后几项会被挡住:支持 dvh 的按实际可见高度 */
+  .toc { position: fixed; top: var(--head-h); left: 0; right: 0; z-index: 19; height: auto; max-height: calc(100vh - var(--head-h)); max-height: calc(100dvh - var(--head-h)); border-right: 0; border-bottom: 1px solid var(--border); background: var(--surface); padding: .6rem .8rem 1.2rem; box-shadow: 0 10px 30px rgba(16, 24, 40, .18); display: none; }
   .toc.open { display: block; }
   .toc ul.s { display: block; }
   .doc { padding: 1rem 1rem 3rem; }
   .intro h1 { font-size: 1.35rem; }
   .chap > h2 { font-size: 1.25rem; }
+}
+@media (max-width: 480px) {
+  /* 很窄时代理视图的「代理面板」徽标收起来(正文标题已经写着是代理面板帮助),免得把品牌名挤没 */
+  .head .brand .badge { display: none; }
 }
 @media (max-width: 420px) {
   body { font-size: 14.5px; }

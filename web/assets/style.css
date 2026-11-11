@@ -60,7 +60,7 @@ p { margin: 0; }
 @media (max-width: 480px) {
   #btn-help .help-label, #topbar-right .tb-label { display: none; }
   #btn-help { padding-left: .45rem; padding-right: .45rem; }
-  .topbar { gap: .5rem; }
+  .main .topbar { gap: .5rem; } /* 比后面的 .topbar 基础规则更具体:这条写在前面也要生效 */
 }
 .topbar-title h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

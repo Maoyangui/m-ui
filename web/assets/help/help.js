@@ -14,8 +14,9 @@
   var each = function (list, fn) { Array.prototype.forEach.call(list, fn); };
   var toArray = function (list) { return Array.prototype.slice.call(list); };
 
-  // 当前视图里不显示的内容,目录和搜索都要跳过:代理视图藏 data-scope="admin",管理员视图藏 data-scope="reseller"
-  var hiddenScope = reseller ? '[data-scope~="admin"]' : '[data-scope~="reseller"]';
+  // 当前视图里不显示的内容,目录和搜索都要跳过:代理视图藏 data-scope="admin" 和 .av-only,管理员视图藏 data-scope="reseller"
+  // 和 .rv-only(和 help.css 里藏起来的一一对应,搜不到看不见的字)
+  var hiddenScope = reseller ? '[data-scope~="admin"], .av-only' : '[data-scope~="reseller"], .rv-only';
   var scoped = function (el) { return !!(el && el.closest && el.closest(hiddenScope)); };
   var chapters = toArray(doc.querySelectorAll('.chap')).filter(function (c) { return !scoped(c); });
   var sectionsOf = function (c) { return toArray(c.children).filter(function (s) { return s.classList.contains('sec') && !scoped(s); }); };
@@ -84,13 +85,34 @@
   var current = null;
   var searching = false;
   function headerHeight() { return document.querySelector('.head').getBoundingClientRect().height; }
+  // 地址里的 #锚点 对应的元素;锚点写坏了(不合法的百分号编码)就按原样找,找不到返回 null
+  function hashTarget() {
+    var raw = location.hash.slice(1), id = raw;
+    if (!raw) return null;
+    try { id = decodeURIComponent(raw); } catch (e) { /* 原样用 */ }
+    return document.getElementById(id);
+  }
   function spy() {
-    var line = headerHeight() + 24, found = null;
+    var line = headerHeight() + 24, found = null, shown = [];
     chapters.forEach(function (c) {
       if (c.hidden) return;
+      shown.push(c);
       if (c.getBoundingClientRect().top <= line) found = c;
-      sectionsOf(c).forEach(function (s) { if (!s.hidden && s.getBoundingClientRect().top <= line) found = s; });
+      sectionsOf(c).forEach(function (s) {
+        if (s.hidden) return;
+        shown.push(s);
+        if (s.getBoundingClientRect().top <= line) found = s;
+      });
     });
+    // 滚到了底:最后一章很短,顶端到不了判定线。点过的那一节(地址里的锚点)在屏幕里就停在它,否则取屏幕里最后一块。
+    // 页面没有可滚的(比如搜索结果很少)时不算
+    if (shown.length && window.scrollY > 0 && window.innerHeight + window.scrollY >= root.scrollHeight - 2) {
+      var top = headerHeight() - 1, bottom = window.innerHeight;
+      var inView = function (el) { var t = el.getBoundingClientRect().top; return t >= top && t < bottom; };
+      var target = hashTarget();
+      if (target && shown.indexOf(target) >= 0 && inView(target)) found = target;
+      else for (var i = shown.length - 1; i >= 0; i--) if (inView(shown[i])) { found = shown[i]; break; }
+    }
     if (!found && chapters.length) found = chapters[0];
     if (!found || found === current) return;
     current = found;
@@ -105,10 +127,10 @@
     keepVisible(links[found.id]);
     if (!searching && userScrolled && history.replaceState) history.replaceState(null, '', '#' + found.id);
   }
-  // 目录自己滚到能看见当前项(只动目录,不动页面)
+  // 目录自己滚到能看见当前项(只动目录,不动页面)。位置按屏幕坐标算:目录是 sticky 的,offsetTop 会随页面滚动变
   function keepVisible(a) {
     if (!a || toc.classList.contains('open') || getComputedStyle(toc).position === 'fixed') return;
-    var t = a.offsetTop - toc.offsetTop, h = toc.clientHeight;
+    var t = a.getBoundingClientRect().top - toc.getBoundingClientRect().top + toc.scrollTop, h = toc.clientHeight;
     if (t < toc.scrollTop + 40) toc.scrollTop = Math.max(0, t - 40);
     else if (t > toc.scrollTop + h - 60) toc.scrollTop = t - h + 60;
   }
@@ -219,8 +241,9 @@
     var phraseHit = terms.length > 1 && blocks.some(function (b) { return b.text.indexOf(phrase) >= 0; });
     mark(marked, phraseHit ? [phrase] : terms);
     status.hidden = false;
-    var tpl = hits ? status.getAttribute('data-found') : status.getAttribute('data-none');
-    status.querySelector('span').textContent = tpl.replace('{n}', hits).replace('{q}', q.trim());
+    // 只命中一处时用单数的写法(英文);占位符用 split / join 换,搜索词里的 $& 之类原样显示
+    var tpl = !hits ? status.getAttribute('data-none') : (hits === 1 && status.getAttribute('data-found-one')) || status.getAttribute('data-found');
+    status.querySelector('span').textContent = tpl.split('{n}').join(String(hits)).split('{q}').join(q.trim());
     current = null;
     window.scrollTo(0, 0);
     spy();
@@ -257,9 +280,7 @@
   buildToc();
   addAnchors();
   // 打开时带着 #锚点:等目录建好再定位一次(窄屏顶栏更高,浏览器自己那一下可能被挡住)
-  if (location.hash) {
-    var target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
-    if (target && !target.closest('[hidden]') && !scoped(target)) target.scrollIntoView();
-  }
+  var target = hashTarget();
+  if (target && !target.closest('[hidden]') && !scoped(target)) target.scrollIntoView();
   spy();
 })();
