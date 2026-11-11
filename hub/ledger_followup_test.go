@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
 
@@ -248,7 +247,7 @@ func TestLedgerBilledToOwnerAfterRename(t *testing.T) {
 	}
 }
 
-// ---- 老副机清账之后:按拉取时刻分清报告是清账前还是清账后的 ----
+// ---- 老副机清账之后:按拉取先后(序号)分清报告是清账前还是清账后的 ----
 
 // oldNode 照 0.7.16 真代码的老副机替身:应用快照时把快照里没有的名字的账本清掉(停用推的空用户表就整本清掉),
 // 确认时不回 ledgerKept;报告只有名字和计数。afterApply 在应用完、回确认之前调用(模拟用户在下一次拉取前已经用了多少)。
@@ -306,7 +305,7 @@ func (n *oldNode) use(name string, v int64) {
 
 // 本版主机配老副机:停用再启用、改名后又改回,老副机清掉的账本从 0 重开。以前清账标记只在计数变小时才认 ——
 // 怕在路上的旧报告 —— 重开后第一份不小于旧游标时只计差值(停用再启用首份 1000:应计 2000 实计 1000;首份 1200:
-// 应计 2200 实计 1200)。现在标记记下打标记的时刻,拉取晚于它的报告就是清账之后的那本,不管大小都从 0 计。
+// 应计 2200 实计 1200)。现在标记记下打标记时的序号,拉取序号比它大的报告就是清账之后的那本,不管大小都从 0 计。
 // 走真实的 hub 一轮:推送(确认后打标记)→ 拉报告 → 并账。
 func TestOldAgentClearedLedgerCountedFromZero(t *testing.T) {
 	for _, tc := range []struct {
@@ -368,17 +367,17 @@ func TestOldAgentClearedLedgerCountedFromZero(t *testing.T) {
 }
 
 // 在路上的旧报告:拉取早于清账标记(老副机确认之前就拉到的那份,并账排在后面),里面还是清账前那本 ——
-// 照常按增量、不消耗标记;之后拉到的清账后的那本照样从 0 计。
+// 照常按增量、不消耗标记;之后拉到的清账后的那本照样从 0 计。先后比的是序号(见 Hub.ledgerSeq)。
 func TestOldAgentInflightReportBeforeClear(t *testing.T) {
 	db := openDB(t, "m.db").DB
 	db.Create(&model.Node{Name: "本机", IsLocal: true, Enabled: true})
 	db.Create(&model.Node{Name: "n2", Enabled: true})
 	u := model.User{Name: "alice", Enabled: true, CreatedAt: 100}
 	db.Create(&u)
-	merge := func(fetched time.Time, n int64) MergeResult {
+	merge := func(seq, n int64) MergeResult {
 		t.Helper()
 		res, err := MergeReport(db, 2, "n2", LedgerReport{Counters: []model.AgentCounter{{UserName: "alice", Up: n, Down: n}},
-			FetchedAt: fetched.UnixNano()}, 1000, 60, 1)
+			FetchSeq: seq}, 1000, 60, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -389,13 +388,15 @@ func TestOldAgentInflightReportBeforeClear(t *testing.T) {
 		db.First(&x, u.Id)
 		return x.Down
 	}
-	merge(time.Now(), 1000)
-	inflight := time.Now() // 这一份在清账之前就拉到了
-	time.Sleep(2 * time.Millisecond)
-	if err := markLedgerCleared(db, 2, nil); err != nil { // 老副机确认了空用户表
+	merge(1, 1000)
+	const inflight = 2 // 这一份在清账之前就拉到了
+	cands, err := clearCandidates(db, 2, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2 * time.Millisecond)
+	if _, err := markLedgerCleared(db, 2, cands, nil, 3); err != nil { // 老副机确认了空用户表
+		t.Fatal(err)
+	}
 	if res := merge(inflight, 1050); usage() != 1050 || res.Reopened != 0 {
 		t.Fatalf("清账前拉到的旧报告按增量,应是 1050,实际 %d(%+v)", usage(), res)
 	}
@@ -404,10 +405,10 @@ func TestOldAgentInflightReportBeforeClear(t *testing.T) {
 	if !cur.Cleared {
 		t.Fatalf("清账前的报告不消耗清账标记: %+v", cur)
 	}
-	if res := merge(time.Now(), 1050); usage() != 2100 || res.Reopened != 1 {
+	if res := merge(4, 1050); usage() != 2100 || res.Reopened != 1 {
 		t.Fatalf("清账后拉到的一本从 0 计(哪怕和游标一样大),应是 2100,实际 %d(%+v)", usage(), res)
 	}
-	merge(time.Now(), 1060)
+	merge(5, 1060)
 	if usage() != 2110 {
 		t.Fatalf("之后按增量,应是 2110,实际 %d", usage())
 	}
@@ -435,7 +436,7 @@ func TestMarkLedgerClearedFollowsPushedSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Delete(&model.User{}, alice.Id) // 推送之前主机上删了 alice:这份快照里还有她
-	if err := h.push(node, snap); err != nil {
+	if _, err := h.push(node, snap); err != nil {
 		t.Fatal(err)
 	}
 	cleared := func(name string) bool {
@@ -450,7 +451,7 @@ func TestMarkLedgerClearedFollowsPushedSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.push(node, snap2); err != nil {
+	if _, err := h.push(node, snap2); err != nil {
 		t.Fatal(err)
 	}
 	if !cleared("alice") || cleared("bob") {

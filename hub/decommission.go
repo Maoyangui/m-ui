@@ -99,10 +99,11 @@ func (h *Hub) deliverDecommission(rec model.NodeDecommission) error {
 		h.forgetDecommission(rec)
 		logger.Info("副机 ", rec.Name, " 已确认收到下线通知(空用户表),不再为任何人服务")
 		if !ack.LedgerKept {
-			// 老副机应用空用户表时把账本整本清掉了:重新启用后同一个人从 0 重开,第一次计数变小按重开计,不当账本回退
-			if err := markLedgerCleared(h.d.DB, rec.NodeId, nil); err != nil {
-				logger.Warning("记下副机 ", rec.Name, " 的账本已清空失败(重新启用后第一份变小的计数会按账本回退处理): ", err)
-			}
+			// 老副机应用空用户表时把账本整本清掉了:重新启用后同一个人从 0 重开,第一份按重开计,不当账本回退。
+			// 打标记之前拉一份报告核对它真清了(见 oldAgentCleared):没清成的照常按增量,不把整本旧账再计一遍。
+			// 停用期间不拉报告,拉到的这份只用来核对;标记改了这台的游标,下一次推送重新看要不要打
+			h.oldAgentCleared(n, nil, nil)
+			h.cursorsChanged(rec.NodeId)
 		}
 		return nil
 	}

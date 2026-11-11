@@ -682,6 +682,7 @@ type Report struct {
 	Reload          *ReloadState                   `json:"reload,omitempty"`       // 副机最近一次重载的结果,失败要让主机面板看见
 	LedgerEpoch     string                         `json:"ledgerEpoch,omitempty"`  // 副机流量账本的纪元(见 LedgerEpochKey);老副机不报
 	LedgerFresh     bool                           `json:"ledgerFresh,omitempty"`  // 这本账是纪元开始时清空重开的(见 LedgerFreshKey)
+	LedgerKept      bool                           `json:"ledgerKept,omitempty"`   // 本版起的副机:应用快照不整本清账(同 agent/apply 确认里的 ledgerKept);老副机不报
 	ServicePorts    []model.ServicePort            `json:"servicePorts,omitempty"` // 副机自己监听的面板 / 订阅端口(老副机不报)
 	// 以下几项老副机都不报(零值),主机按老办法处理
 	Sequence    uint64 `json:"sequence,omitempty"`    // 副机库里那份快照的推送序号
@@ -955,6 +956,16 @@ type Hub struct {
 	kicking map[string]*kickCall
 	// haPushed 各副机最近一次推成功的容灾状态修订(见 ha.go)
 	haPushed map[uint]haPushed
+	// seq 清账标记与拉报告共用的序号,seqReady 已经接在库里最大的标记后面(见 ledgerSeq)
+	seqMu    sync.Mutex
+	seq      int64
+	seqReady bool
+	// clearSeen 各台老副机上一次看过要不要打清账标记时的快照名单指纹与游标代数;cursorGen 并账给这台新建游标、去掉清账标记一次加一;
+	// printRev / printVal 上一次算过名单指纹的快照修订号与指纹(见 clearmark.go)
+	clearSeen map[uint]clearSeen
+	cursorGen map[uint]uint64
+	printRev  string
+	printVal  uint64
 }
 
 type rejectAt struct {
@@ -1111,11 +1122,11 @@ func (h *Hub) remoteNodes() ([]model.Node, error) {
 
 // nodeResult 一台副机这一轮同步的结果:网络部分各台各跑,落库部分交给唯一的并账协程串行做(见 enqueueResult)。
 type nodeResult struct {
-	pushErr   string // 这一轮推送没成功(退避中也算),但报告照样拉到了
-	n         model.Node
-	rep       Report
-	fetchedAt int64  // 拉报告的请求发出的时刻(UnixNano):并账时据此分清报告是在老副机清账之前还是之后拉的
-	err       string // 非空 = 这一轮失败(推送或拉报告)
+	pushErr  string // 这一轮推送没成功(退避中也算),但报告照样拉到了
+	n        model.Node
+	rep      Report
+	fetchSeq int64  // 拉报告时取的序号(见 ledgerSeq):并账时据此分清报告是在老副机清账之前还是之后拉的
+	err      string // 非空 = 这一轮失败(推送或拉报告)
 }
 
 // tick 一轮定时同步:按当前库构造快照,给每台副机各发一轮请求就返回,不等任何一台回来。
@@ -1269,10 +1280,13 @@ func (h *Hub) applyResult(r *nodeResult) {
 		fmt.Sscanf(v, "%d", &bucket)
 	}
 	errStr := r.pushErr // 在线但配置未同步:Error 里写推送原因,Synced 由报告的修订号判
-	ledger := LedgerReport{Epoch: r.rep.LedgerEpoch, Fresh: r.rep.LedgerFresh, Counters: r.rep.Counters, FetchedAt: r.fetchedAt}
+	ledger := LedgerReport{Epoch: r.rep.LedgerEpoch, Fresh: r.rep.LedgerFresh, Counters: r.rep.Counters, FetchSeq: r.fetchSeq}
 	mr, err := MergeReport(h.d.DB, r.n.Id, r.n.Name, ledger, time.Now().Unix(), bucket, r.n.Ratio)
 	if mr.NodeGone {
 		return // 副机在这一轮途中被删了:报告整份丢掉,也不再给它记状态
+	}
+	if mr.Unmarked > 0 {
+		h.cursorsChanged(r.n.Id) // 下一次推给老副机时重新看要不要打清账标记
 	}
 	if err != nil {
 		logger.Warning("并入副机 ", r.n.Name, " 流量失败: ", err)
@@ -1431,12 +1445,15 @@ func (h *Hub) syncNode(n model.Node, snap Snapshot) *nodeResult {
 	// 一直不推,副机库里留着撤掉的线路、待重载不清、一直未同步,要等下面 10 分钟一次的定期重推。
 	// 同一修订连续失败的退避照旧(下面按 pushFail 判),不会因此每 5 秒去拆一次副机的数据面。
 	behind := nodeRev != "" && nodeRev != snap.Revision
+	var checked *checkedReport // 老副机确认之后为核对清账拉到的报告:就是这一轮的报告
 	if pushedRev != snap.Revision || behind || time.Now().Unix()-lastPush > 600 {
 		switch {
 		case pf != nil && pf.rev == snap.Revision && time.Since(pf.at) < pf.backoff():
 			res.pushErr = fmt.Sprintf("推送失败 %d 次,%s 后再试: %s", pf.n, (pf.backoff() - time.Since(pf.at)).Round(time.Second), pf.cause)
 		default:
-			if err := h.push(n, snap); err != nil {
+			chk, err := h.push(n, snap)
+			checked = chk
+			if err != nil {
 				// 等确认超时也退避:以前超时不算被拒,下一轮又整份重推,副机永远在重做同一份(审计 I4)
 				if slow := isApplyTimeout(err); !IsEpochError(err) && (slow || pushRejected(err)) { // 纪元判定不退避:交接一完成副机就收
 					h.mu.Lock()
@@ -1456,9 +1473,13 @@ func (h *Hub) syncNode(n model.Node, snap Snapshot) *nodeResult {
 			}
 		}
 	}
+	if checked != nil { // 推送刚确认,紧接着拉的:不用再拉一次
+		res.rep, res.fetchSeq = checked.rep, checked.seq
+		return res
+	}
 	// 推送成没成,报告都要拉:流量回收、超额停用、跨机设备并集全靠它。0.6.10 在推送失败时直接返回,
 	// 于是一台配置没应用成功的副机,它的流量不再并入主机、它上面的设备 300 秒后就不再计入设备数。
-	res.fetchedAt = time.Now().UnixNano()
+	res.fetchSeq = h.ledgerSeq()
 	rep, err := h.fetchReport(n)
 	if err != nil {
 		res.err = "拉取报告失败: " + err.Error()
@@ -1468,18 +1489,20 @@ func (h *Hub) syncNode(n model.Node, snap Snapshot) *nodeResult {
 		return res
 	}
 	res.rep = rep
-	if h.confirmByReport(n, snap, rep) {
+	if h.confirmByReport(n, snap, checkedReport{rep: rep, seq: res.fetchSeq}) {
 		res.pushErr = ""
 	}
 	return res
 }
 
 // confirmByReport 推送等确认超时了(或正为此退避):报告说副机已经在这个修订上、序号不旧、没有待重载也没有待踢线,
-// 它其实应用完了 —— 记为已推送,不再整份重推。返回是否这样确认了。
-func (h *Hub) confirmByReport(n model.Node, snap Snapshot, rep Report) bool {
+// 它其实应用完了 —— 记为已推送,不再整份重推。老副机应用完同样清掉了快照里没有的名字的账本:拿这份报告核对、打清账标记,
+// 和推送确认时一样(以前要等 10 分钟一次的定期重推,这期间同一个名字又出现,重开的那本会被当成账本回退少计)。
+// 返回是否这样确认了。调用方持有这台的闸。
+func (h *Hub) confirmByReport(n model.Node, snap Snapshot, got checkedReport) bool {
 	h.mu.Lock()
 	pf := h.pushFail[n.Id]
-	ok := pf != nil && pf.slow && pf.rev == snap.Revision && reportApplied(rep, snap)
+	ok := pf != nil && pf.slow && pf.rev == snap.Revision && reportApplied(got.rep, snap)
 	if ok {
 		delete(h.pushFail, n.Id)
 	}
@@ -1487,6 +1510,9 @@ func (h *Hub) confirmByReport(n model.Node, snap Snapshot, rep Report) bool {
 	if ok {
 		logger.Info("副机 ", n.Name, " 回确认超时了,但报告显示它已经应用完 ", snap.Revision)
 		h.markPushed(n, snap.Revision)
+		if !got.rep.LedgerKept {
+			h.oldAgentApplied(n, snap, &got)
+		}
 	}
 	return ok
 }
@@ -1514,6 +1540,8 @@ func (h *Hub) forgetNodes(live map[uint]bool) {
 		delete(h.nodeNames, id)
 		delete(h.upHealth, id)
 		delete(h.haPushed, id)
+		delete(h.clearSeen, id)
+		delete(h.cursorGen, id)
 	}
 	for id := range h.idents {
 		if !live[id] {
@@ -1833,19 +1861,18 @@ func alertText(s string, max int) string {
 }
 
 // push 把一份快照推给一台副机并等它确认(调用方持有这台的闸)。同一修订、同一序号的快照只编码一次,各台共用。
-func (h *Hub) push(n model.Node, snap Snapshot) error {
+// 老副机应用完把快照里没有的用户的账本清掉了:同名的以后再出现是从 0 重开的一本,不是账本回退 —— 打清账标记
+// (见 oldAgentApplied)。为核对它真清了而拉到的报告交回给调用方(定时同步拿它当这一轮的报告),没拉为 nil。
+func (h *Hub) push(n model.Node, snap Snapshot) (*checkedReport, error) {
 	w, err := h.wireFor(snap)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ack, err := h.pushWire(n, w)
-	if err == nil && !ack.LedgerKept {
-		// 老副机应用完把快照里没有的用户的账本清掉了:同名的以后再出现是从 0 重开的一本,不是账本回退
-		if err := markLedgerCleared(h.d.DB, n.Id, userNames(snap)); err != nil {
-			logger.Warning("记下副机 ", n.Name, " 清掉的账本失败(同名用户再出现时第一份变小的计数会按账本回退处理): ", err)
-		}
+	if err != nil || ack.LedgerKept {
+		return nil, err
 	}
-	return err
+	return h.oldAgentApplied(n, snap, nil), nil
 }
 
 // userNames 快照里的用户名:老副机应用完只留这些名字的账本。
@@ -1897,7 +1924,8 @@ func (h *Hub) pushLatest(n model.Node) error {
 	if !h.stillEnabled(n.Id) {
 		return ErrNodeDisabled
 	}
-	return h.push(n, h.latestSnapshot())
+	_, err := h.push(n, h.latestSnapshot())
+	return err
 }
 
 // ErrNodeDisabled 停用的副机不再推送配置(停用时已撤下它的用户表,推完整快照等于重新开放服务)。

@@ -184,17 +184,20 @@ func TestMarkLedgerClearedNoopTakesNoWriteLock(t *testing.T) {
 	release := holdWriteLock(t, db)
 	defer release()
 	t0 := time.Now()
-	err := markLedgerCleared(db, 2, map[string]bool{"alice": true})
-	if d := time.Since(t0); err != nil || d > 2*time.Second {
-		t.Fatalf("推过去的快照里还有 alice、没有要标的,不该等写锁:用了 %v, err=%v", d, err)
+	cands, err := clearCandidates(db, 2, map[string]bool{"alice": true})
+	if d := time.Since(t0); err != nil || len(cands) != 0 || d > 2*time.Second {
+		t.Fatalf("推过去的快照里还有 alice、没有要标的,不该等写锁:用了 %v, %d 个, err=%v", d, len(cands), err)
 	}
 	release()
-	if err := markLedgerCleared(db, 2, map[string]bool{"bob": true}); err != nil {
+	if cands, err = clearCandidates(db, 2, map[string]bool{"bob": true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := markLedgerCleared(db, 2, cands, nil, 7); err != nil {
 		t.Fatal(err)
 	}
 	var cur model.TrafficCursor
 	db.Where("node_id = ? AND user_name = ?", 2, "alice").First(&cur)
-	if !cur.Cleared || cur.ClearedAt == 0 {
-		t.Fatalf("推过去的快照里没有 alice,游标应打上清账标记并记下时刻: %+v", cur)
+	if !cur.Cleared || cur.ClearedAt != 7 {
+		t.Fatalf("推过去的快照里没有 alice,游标应打上清账标记并记下序号: %+v", cur)
 	}
 }

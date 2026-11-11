@@ -53,14 +53,17 @@ type MergeResult struct {
 	Reopened  int  // 同一个用户的账本被整本清掉后从 0 重开了一本(改名后再改回、老副机停用时清了账):从 0 计
 	Restarted int  // 游标不知道是哪一本(主机 / 副机升级或回滚的过渡期),计数比游标小:当成新开的一本从 0 计
 	NodeGone  bool // 副机已经删除,整份丢弃
+	// Unmarked 新建的游标、清账标记没了的游标(按清账后的报告并过、建基线时整个重写):老副机下一次确认快照时
+	// 得重新看它们要不要打标记(见 Hub.oldAgentApplied)
+	Unmarked int
 }
 
 // LedgerReport 一份报告里并账用到的部分(见 MergeReport、LocalLedger)。
 type LedgerReport struct {
-	Epoch     string               // 账本纪元(见 LedgerEpochKey);老副机不报
-	Fresh     bool                 // 这本账是换纪元那一刻清空重开的(见 LedgerFreshKey、LedgerAwaitFresh)
-	Counters  []model.AgentCounter // 整本账
-	FetchedAt int64                // 拉这份报告的请求发出的时刻(UnixNano,主机的钟);0 = 不知道
+	Epoch    string               // 账本纪元(见 LedgerEpochKey);老副机不报
+	Fresh    bool                 // 这本账是换纪元那一刻清空重开的(见 LedgerFreshKey、LedgerAwaitFresh)
+	Counters []model.AgentCounter // 整本账
+	FetchSeq int64                // 拉这份报告时取的序号(见 Hub.ledgerSeq),和清账标记的序号比先后;0 = 不知道
 }
 
 // ApplyCounters 把副机的单调账本按游标并入主机,返回并入的用户数。见 MergeCounters。
@@ -69,7 +72,7 @@ func ApplyCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 	return r.Merged, err
 }
 
-// MergeCounters 同 MergeReport,只给纪元和账本(不知道拉取时刻、没有清空重开的声明)。
+// MergeCounters 同 MergeReport,只给纪元和账本(不知道拉取序号、没有清空重开的声明)。
 func MergeCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []model.AgentCounter, now int64, bucketSeconds int64, ratio float64) (MergeResult, error) {
 	return MergeReport(db, nodeId, nodeName, LedgerReport{Epoch: epoch, Counters: counters}, now, bucketSeconds, ratio)
 }
@@ -95,7 +98,7 @@ func MergeCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 // 老副机的报告也不带代号。同一本账照样会碰上这样的游标,不能当成另一本从 0 计 —— 那是把整本账再计一遍
 // (先升副机、新副机挂老主机、主机或副机回滚再升回来都会这样)。这时只能按计数判断:没变小就是同一本,按增量;
 // 变小了是新开的一本,从 0 计。代价是升级前删掉的同名用户留下的游标遇到重建用户的首份报告不小于它时少计一段,
-// 只在过渡期发生一次,比整本重复计费安全。老副机清过账(游标打了清账标记)的,看报告是标记之前还是之后拉的(FetchedAt):
+// 只在过渡期发生一次,比整本重复计费安全。老副机清过账(游标打了清账标记)的,看报告是标记之前还是之后拉的(FetchSeq):
 // 之后拉的就是清账后从 0 重开的那本,不管大小都从 0 计;之前拉的是在路上的旧报告,照常按增量。
 func MergeReport(db *gorm.DB, nodeId uint, nodeName string, l LedgerReport, now int64, bucketSeconds int64, ratio float64) (MergeResult, error) {
 	epoch, counters := l.Epoch, l.Counters
@@ -132,7 +135,7 @@ func MergeReport(db *gorm.DB, nodeId uint, nodeName string, l LedgerReport, now 
 	changed := make([]model.AgentCounter, 0, 64)
 	at := map[string]int{}
 	for _, c := range counters {
-		if cur, ok := known[c.UserName]; ok && unchanged(cur, c, l.FetchedAt) {
+		if cur, ok := known[c.UserName]; ok && unchanged(cur, c, l.FetchSeq) {
 			continue
 		}
 		if i, ok := at[c.UserName]; ok {
@@ -148,6 +151,9 @@ func MergeReport(db *gorm.DB, nodeId uint, nodeName string, l LedgerReport, now 
 		if errors.Is(err, errNodeGone) {
 			res.NodeGone = true
 			return res, nil
+		}
+		if err == nil {
+			res.Unmarked = len(changed) // 整个重写:新建的、原来打着清账标记的都成了没标记的
 		}
 		return res, err
 	case epochFirst, epochFresh:
@@ -193,7 +199,7 @@ func MergeReport(db *gorm.DB, nodeId uint, nodeName string, l LedgerReport, now 
 	for len(changed) > 0 {
 		k := min(len(changed), counterChunk)
 		t0 := time.Now()
-		r, err := mergeChunk(db, nodeId, changed[:k], now, bucket, ratio, nodeName, l.FetchedAt)
+		r, err := mergeChunk(db, nodeId, changed[:k], now, bucket, ratio, nodeName, l.FetchSeq)
 		held := time.Since(t0)
 		changed = changed[k:]
 		res.Merged += r.Merged
@@ -201,6 +207,7 @@ func MergeReport(db *gorm.DB, nodeId uint, nodeName string, l LedgerReport, now 
 		res.Recreated += r.Recreated
 		res.Reopened += r.Reopened
 		res.Restarted += r.Restarted
+		res.Unmarked += r.Unmarked
 		if errors.Is(err, errNodeGone) {
 			res.NodeGone = true
 			return res, nil
@@ -214,8 +221,8 @@ func MergeReport(db *gorm.DB, nodeId uint, nodeName string, l LedgerReport, now 
 	return res, nil
 }
 
-// mergeChunk 并一块计数器:一笔短事务,事务里复核游标。fetchedAt 见 LedgerReport.FetchedAt。
-func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket int64, ratio float64, nodeName string, fetchedAt int64) (MergeResult, error) {
+// mergeChunk 并一块计数器:一笔短事务,事务里复核游标。fetchSeq 见 LedgerReport.FetchSeq。
+func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket int64, ratio float64, nodeName string, fetchSeq int64) (MergeResult, error) {
 	var res MergeResult
 	err := db.Transaction(func(tx *gorm.DB) error {
 		res = MergeResult{}
@@ -245,7 +252,7 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 		next := make([]model.TrafficCursor, 0, len(part))
 		for _, c := range part {
 			old, hasOld := cursors[c.UserName]
-			if hasOld && unchanged(old, c, fetchedAt) {
+			if hasOld && unchanged(old, c, fetchSeq) {
 				continue // 读游标之后已经有人并过(重复的报告)
 			}
 			u, hasUser := users[c.UserName]
@@ -258,10 +265,10 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 			}
 			dUp, dDown := c.Up, c.Down // 没有游标:从 0 计
 			dropped := hasOld && (c.Up < old.Up || c.Down < old.Down)
-			// 老副机清过这本账(见 markLedgerCleared):这份报告是在打标记之后拉的,还是之前就在路上的
+			// 老副机清过这本账(见 markLedgerCleared):这份报告是在打标记之后拉的,还是之前就在路上的(比序号,不比时钟)
 			marked := hasOld && cursorTrusted(old) && old.Cleared
-			afterClear := hasOld && fetchedAfterClear(old, fetchedAt)
-			beforeClear := marked && old.ClearedAt != 0 && fetchedAt != 0 && fetchedAt <= old.ClearedAt
+			afterClear := hasOld && fetchedAfterClear(old, fetchSeq)
+			beforeClear := marked && old.ClearedAt != 0 && fetchSeq != 0 && fetchSeq <= old.ClearedAt
 			keepMark := false
 			switch {
 			case !hasOld:
@@ -308,7 +315,7 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 				case dropped && recreated:
 					res.Recreated++ // 主机上删了又建,副机那本也从头记了:从 0 计
 				case dropped && marked && !beforeClear:
-					// 老副机清掉过这个人的账本,这是之后从 0 记的一本(不知道拉取时刻的,只认变小的):从 0 计,不告警
+					// 老副机清掉过这个人的账本,这是之后从 0 记的一本(不知道拉取先后的,只认变小的):从 0 计,不告警
 					res.Reopened++
 				case dropped:
 					res.Regressed++ // 同一个用户(或老游标、已删的用户)计数变小:账本回退,对齐不计
@@ -321,7 +328,11 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 				// 清账之前就在路上的旧报告:不消耗清账标记,之后拉到的清账后那本照样从 0 计
 				keepMark = beforeClear
 			}
-			next = append(next, cursorFor(nodeId, c, u, hasUser, old, hasOld, keepMark))
+			cur := cursorFor(nodeId, c, u, hasUser, old, hasOld, keepMark)
+			if !hasOld || (old.Cleared && !cur.Cleared) {
+				res.Unmarked++
+			}
+			next = append(next, cur)
 			if dUp <= 0 && dDown <= 0 {
 				continue
 			}
@@ -571,20 +582,20 @@ func sameLedger(cur model.TrafficCursor, c model.AgentCounter) bool {
 
 // unchanged 这份报告和游标一模一样(同一本账、计数没动),不用并。老副机不报主人,只看计数 ——
 // 老副机清过账、这份是清账之后拉的:计数一样也是重开的另一本(见 fetchedAfterClear)。
-func unchanged(cur model.TrafficCursor, c model.AgentCounter, fetchedAt int64) bool {
+func unchanged(cur model.TrafficCursor, c model.AgentCounter, fetchSeq int64) bool {
 	if cur.Up != c.Up || cur.Down != c.Down {
 		return false
 	}
 	if ownedLedger(c) {
 		return sameLedger(cur, c)
 	}
-	return !fetchedAfterClear(cur, fetchedAt)
+	return !fetchedAfterClear(cur, fetchSeq)
 }
 
 // fetchedAfterClear 老副机清过这本账(游标打了清账标记,见 markLedgerCleared),这份报告是打标记之后才拉的:
-// 报的是清账之后从 0 重开的那本。拉取时刻不知道(0)或标记是老格式(没有时刻)的不算。
-func fetchedAfterClear(cur model.TrafficCursor, fetchedAt int64) bool {
-	return cursorTrusted(cur) && cur.Cleared && cur.ClearedAt != 0 && fetchedAt > cur.ClearedAt
+// 报的是清账之后从 0 重开的那本。先后比的是序号(见 Hub.ledgerSeq);拉取序号不知道(0)或标记是老格式(没有序号)的不算。
+func fetchedAfterClear(cur model.TrafficCursor, fetchSeq int64) bool {
+	return cursorTrusted(cur) && cur.Cleared && cur.ClearedAt != 0 && fetchSeq > cur.ClearedAt
 }
 
 func nodeGone(db *gorm.DB, nodeId uint) (bool, error) {
@@ -670,32 +681,55 @@ func upsertCursors(tx *gorm.DB, rows []model.TrafficCursor) error {
 	}).CreateInBatches(&rows, counterChunk).Error
 }
 
-// markLedgerCleared 老副机(确认推送时不回 ledgerKept 的)确认应用了一份快照:老版本应用完把快照里没有的用户的账本清掉,
-// 同名的以后再出现是从 0 重开的一本 —— 停用推的空用户表就是整本清掉(kept 为 nil),平时是快照里已经没有这个名字的
-// (改名、删除)。kept 是推过去的那份快照里的用户名:按它打,不按主机现在的用户表 —— 推送之后、确认之前主机上才删的名字,
+// clearMarkTrusted 游标上的清账标记(和主人、代号)还能信:计数和抄本对得上(见 cursorTrusted)。
+const clearMarkTrusted = "stamp_up = up AND stamp_down = down"
+
+// clearMarkWhere 这台副机上还没打清账标记的游标,或者标记已经不可信的(老版本主机动过)。
+const clearMarkWhere = "node_id = ? AND (NOT cleared OR NOT (" + clearMarkTrusted + "))"
+
+// clearCandidates 老副机(确认推送时不回 ledgerKept 的)确认应用了一份快照之后,要打清账标记的游标:老版本应用完把快照里没有的
+// 用户的账本清掉,同名的以后再出现是从 0 重开的一本 —— 停用推的空用户表就是整本清掉(kept 为 nil),平时是快照里已经没有这个名字的
+// (改名、删除)。kept 是推过去的那份快照里的用户名:按它挑,不按主机现在的用户表 —— 推送之后、确认之前主机上才删的名字,
 // 快照里还有,老副机没清它的账本,打错了标记,清账后拉到的报告从 0 计就会把这本账整本再计一遍。
-// 老副机不报账本代号,同一个人的计数本来分不出是不是重开的;标记记下打标记的时刻(确认之后),拉取晚于它的报告就是
-// 清账之后从 0 记的那本,不管大小都从 0 计、不告警;拉取早于它的是清账之前就在路上的旧报告,照常按增量、标记留着。
-// 标记要靠计数抄本才认得出之后有没有被老版本主机动过:老主机动过、主人和代号已经不可信的,这里一并清成"不知道",再按现在的计数抄一份。
-func markLedgerCleared(db *gorm.DB, nodeId uint, kept map[string]bool) error {
-	const trusted = "stamp_up = up AND stamp_down = down"
-	where := "node_id = ? AND (NOT cleared OR NOT (" + trusted + "))"
-	// 推给老副机的每份快照都会走到这里,绝大多数时候没有要标的:先只读地看一眼,没有就不碰写锁
-	var names []string
-	if err := db.Model(&model.TrafficCursor{}).Where(where, nodeId).Pluck("user_name", &names).Error; err != nil {
-		return err
+// 只读;返回的游标只带名字和计数(核对老副机是不是真清了用,见 markLedgerCleared)。
+func clearCandidates(db *gorm.DB, nodeId uint, kept map[string]bool) ([]model.TrafficCursor, error) {
+	var curs []model.TrafficCursor
+	if err := db.Model(&model.TrafficCursor{}).Select("user_name, up, down").Where(clearMarkWhere, nodeId).Find(&curs).Error; err != nil {
+		return nil, err
 	}
-	marks := names[:0]
-	for _, n := range names {
-		if !kept[n] {
-			marks = append(marks, n)
+	out := curs[:0]
+	for _, c := range curs {
+		if !kept[c.UserName] {
+			out = append(out, c)
 		}
 	}
-	if len(marks) == 0 {
-		return nil
+	return out, nil
+}
+
+// markLedgerCleared 给 cands(见 clearCandidates)打清账标记,标记记下序号 seq(见 Hub.ledgerSeq):拉取序号比它大的报告就是
+// 清账之后从 0 记的那本,不管大小都从 0 计、不告警;比它小的是清账之前就在路上的旧报告,照常按增量、标记留着。老副机不报账本代号,
+// 同一个人的计数本来分不出是不是重开的,靠这个标记。
+//
+// held 是老副机应用完之后拉到的报告里的账本(没拉到为 nil):一个名字还在里面、计数不小于游标,就是老副机没清成 —— 0.7.16 清账那条
+// DELETE 不看错误,库忙没删成也照样确认 —— 不打标记:打了的话,之后拉到的这本旧账会被当成清账后重开的一本,整本再计一遍。
+// 清成了的这个名字不在报告里(或者只有应用之后才记上的一点尾巴,比游标小)。返回这样没打的个数。
+//
+// 标记要靠计数抄本才认得出之后有没有被老版本主机动过:老主机动过、主人和代号已经不可信的,这里一并清成"不知道",再按现在的计数抄一份。
+func markLedgerCleared(db *gorm.DB, nodeId uint, cands []model.TrafficCursor, held map[string]model.AgentCounter, seq int64) (int, error) {
+	marks := make([]string, 0, len(cands))
+	skipped := 0
+	for _, c := range cands {
+		if r, ok := held[c.UserName]; ok && r.Up >= c.Up && r.Down >= c.Down {
+			skipped++
+			continue
+		}
+		marks = append(marks, c.UserName)
 	}
-	at := time.Now().UnixNano()
-	return db.Transaction(func(tx *gorm.DB) error {
+	if len(marks) == 0 {
+		return skipped, nil
+	}
+	const trusted = clearMarkTrusted
+	return skipped, db.Transaction(func(tx *gorm.DB) error {
 		for rest := marks; len(rest) > 0; {
 			k := min(len(rest), nameChunk)
 			if err := tx.Exec(`UPDATE traffic_cursors SET cleared = 1, cleared_at = ?,
@@ -707,7 +741,7 @@ func markLedgerCleared(db *gorm.DB, nodeId uint, kept map[string]bool) error {
 				prev_ledger_id3 = CASE WHEN `+trusted+` THEN prev_ledger_id3 ELSE 0 END,
 				prev_ledger_id4 = CASE WHEN `+trusted+` THEN prev_ledger_id4 ELSE 0 END,
 				stamp_up = up, stamp_down = down
-				WHERE `+where+` AND user_name IN ?`, at, nodeId, rest[:k]).Error; err != nil {
+				WHERE `+clearMarkWhere+` AND user_name IN ?`, seq, nodeId, rest[:k]).Error; err != nil {
 				return err
 			}
 			rest = rest[k:]

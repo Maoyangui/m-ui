@@ -526,8 +526,9 @@ type Stats struct {
 // PrevLedgerId2..4 比 PrevLedgerId 更早换下去的几本的代号(越往后越早):同一个人的账本重开过不止一次,
 // 副机的库回滚到更早那本时也认得出是账本回退。
 // Cleared:老副机确认应用了没有这个名字的快照(停用推的空用户表,或者改名、删除之后),这本账已经被它清掉,
-// 之后拉到的报告是从 0 重开的那本,不是账本回退;ClearedAt 是打标记的时刻(UnixNano,主机的钟,确认收到之后):
-// 拉取早于它的报告是清账之前就在路上的,不算数、也不消耗标记。这个游标按清账之后的报告写一次就清掉。
+// 之后拉到的报告是从 0 重开的那本,不是账本回退;ClearedAt 是打标记时取的序号(主机给清账标记和拉报告发的同一个严格递增的号,
+// 见 hub.Hub.ledgerSeq;不是时刻 —— 时钟会往回拨,换主机后新主机的钟也可能比原主机慢):拉取序号比它小的报告是清账之前
+// 就在路上的,按增量计、不消耗标记。这个游标按清账之后的报告写一次就清掉。0 = 老格式的标记,只认计数变小。
 type TrafficCursor struct {
 	NodeId        uint   `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
 	UserName      string `json:"userName" gorm:"primaryKey"`

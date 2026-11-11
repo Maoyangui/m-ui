@@ -495,6 +495,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		ConnFailsOK:  true,
 		LedgerEpoch:  ledger.Epoch,
 		LedgerFresh:  ledger.Fresh,
+		LedgerKept:   true, // 应用快照不整本清账:主机等确认超时、看报告确认时据此知道不用打清账标记
 		Counters:     ledger.Counters,
 		ServicePorts: s.reportServicePorts(),
 		KickPending:  strings.TrimSpace(s.setting(agentKickPendingKey)) != "",
