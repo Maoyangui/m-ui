@@ -41,6 +41,14 @@ type HAReport struct {
 	// ResellerPort 这台的代理面板端口(副机上不监听;被设为主机后才起,主机据此提前查端口冲突)
 	ResellerPort int      `json:"resellerPort,omitempty"`
 	Peers        *HAPeers `json:"peers,omitempty"` // 和别的副机互通的情况(互相确认与投票要用)
+	// 以下为容灾修复契约(设计 3.2)新增
+	Instance     string `json:"inst,omitempty"`         // 本机实例号(换机还原围栏用)
+	WebPort      int    `json:"webPort,omitempty"`      // 面板端口
+	SubPort      int    `json:"subPort,omitempty"`      // 订阅端口
+	WarpPort     int    `json:"warpPort,omitempty"`     // WARP 端口(在用时)
+	ResellerURL  string `json:"resellerUrl,omitempty"`  // 当主机后的代理面板地址
+	ReplicaBytes int64  `json:"replicaBytes,omitempty"` // 手里两代副本文件占的磁盘
+	SignFP       string `json:"signFp,omitempty"`       // 本机签名公钥指纹
 }
 
 // HAReplica 备用手里那份副本。
