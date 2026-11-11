@@ -24,6 +24,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/runner"
 
 	"gorm.io/gorm"
 )
@@ -486,5 +487,131 @@ func TestPageTextLimits(t *testing.T) {
 	db.First(&cur, rs.Id)
 	if cur.PageNotice != "本店公告" || cur.PageSupport != "Tg: @shop_support" {
 		t.Fatalf("文案应已保存: %+v", cur)
+	}
+}
+
+// 已有的超长公告 / 联系方式(升级前、或从旧备份还原的)原样提交回来时放行:设置页、代理面板都是整组提交,
+// 以前改同一组里的任何一项(比如关掉临时共享,把发出去的共享地址收回)都被这段旧文字挡住。改过的照样限长。
+func TestPageTextLimitOnlyOnChange(t *testing.T) {
+	s, db := logoTestServer(t)
+	long, longSup := strings.Repeat("公", maxPageNotice+1000), strings.Repeat("联", maxPageSupport+50)
+	db.Create(&model.Setting{Key: "subPageNotice", Value: long})
+	db.Create(&model.Setting{Key: "subPageSupport", Value: longSup})
+	db.Create(&model.Setting{Key: "subShareEnabled", Value: "true"})
+	post := func(in map[string]string) (int, string) {
+		body, _ := json.Marshal(in)
+		r := httptest.NewRequest("POST", "http://x/app/api/settings", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		s.handleSettings(w, r)
+		return w.Code, w.Body.String()
+	}
+	// 设置页"订阅页"这一组原样提交回来,只关掉临时共享:放行
+	group := map[string]string{"subPageEnabled": "true", "subShareEnabled": "false", "subPageBrand": "true", "subPageTitle": "",
+		"subPageSupport": longSup, "subPageBuyURL": "", "subPageNotice": long}
+	if code, body := post(group); code != 200 {
+		t.Fatalf("超长的旧文字原样提交回来应放行,得 %d %s", code, body)
+	}
+	if s.setting("subShareEnabled") != "false" || s.setting("subPageNotice") != long || s.setting("subPageSupport") != longSup {
+		t.Fatal("开关应已保存,旧文字原样留着")
+	}
+	// 首尾多了空白也算没改(存的本来就是去掉首尾空白的)
+	group["subPageNotice"] = "\n" + long + "  "
+	if code, body := post(group); code != 200 {
+		t.Fatalf("只差首尾空白也算没改,得 %d %s", code, body)
+	}
+	// 改了、还是超长:拦下,写明上限
+	group["subPageNotice"] = long + "多"
+	if code, body := post(group); code != 400 || !strings.Contains(body, "公告太长了,上限 4000 字") {
+		t.Fatalf("改过的超长公告应被拒,得 %d %s", code, body)
+	}
+	group["subPageNotice"], group["subPageSupport"] = long, longSup+"多"
+	if code, body := post(group); code != 400 || !strings.Contains(body, "联系方式太长了,上限 300 字") {
+		t.Fatalf("改过的超长联系方式应被拒,得 %d %s", code, body)
+	}
+	// 改短到上限以内:放行
+	group["subPageNotice"], group["subPageSupport"] = "短公告", "Tg: @abcdef"
+	if code, body := post(group); code != 200 || s.setting("subPageNotice") != "短公告" {
+		t.Fatalf("改短后应能保存,得 %d %s", code, body)
+	}
+
+	// 代理面板同理:整卡提交,超长的旧文字原样回来时放行
+	rs := model.Reseller{Name: "dl", Enabled: true, PageNotice: long, PageSupport: longSup}
+	db.Create(&rs)
+	db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Update("share_on", true)
+	put := func(in map[string]interface{}) (int, string) {
+		body, _ := json.Marshal(in)
+		r := httptest.NewRequest("PUT", "http://x/dl/api/self", bytes.NewReader(body))
+		r = r.WithContext(context.WithValue(r.Context(), scopeKey, rs.Id))
+		w := httptest.NewRecorder()
+		s.handleResellerSelf(w, r)
+		return w.Code, w.Body.String()
+	}
+	card := map[string]interface{}{"pageEnabled": true, "shareOn": false, "pageNotice": long, "pageSupport": longSup}
+	if code, body := put(card); code != 200 {
+		t.Fatalf("代理原样提交超长的旧文字应放行,得 %d %s", code, body)
+	}
+	var cur model.Reseller
+	db.First(&cur, rs.Id)
+	if cur.ShareOn || cur.PageNotice != long {
+		t.Fatalf("代理的开关应已保存、旧文字留着: share=%v", cur.ShareOn)
+	}
+	card["pageNotice"] = long + "多"
+	if code, body := put(card); code != 400 || !strings.Contains(body, "公告太长了,上限 4000 字") {
+		t.Fatalf("代理改过的超长公告应被拒,得 %d %s", code, body)
+	}
+}
+
+// 代理的公告、联系方式和主面板一样去掉首尾空白再限长、再存:以前按去空白后的字数判、存的却是原文,
+// 首尾垫几十万个空格换行(请求体上限 1 MB)就绕过了上限,随快照推给每台副机、原样出现在落地页上。
+func TestResellerPageTextTrimmed(t *testing.T) {
+	s, db := logoTestServer(t)
+	rs := model.Reseller{Name: "dl", Enabled: true}
+	db.Create(&rs)
+	put := func(notice, support string) (int, string) {
+		body, _ := json.Marshal(map[string]interface{}{"pageEnabled": true, "shareOn": true, "pageTitle": "  店名  ", "pageNotice": notice, "pageSupport": support})
+		r := httptest.NewRequest("PUT", "http://x/dl/api/self", bytes.NewReader(body))
+		r = r.WithContext(context.WithValue(r.Context(), scopeKey, rs.Id))
+		w := httptest.NewRecorder()
+		s.handleResellerSelf(w, r)
+		return w.Code, w.Body.String()
+	}
+	if code, body := put("x"+strings.Repeat(" \n", 200000), "\t Tg: @abcdef "+strings.Repeat(" ", 5000)); code != 200 {
+		t.Fatalf("去掉首尾空白后不超长,应能保存,得 %d %s", code, body)
+	}
+	var cur model.Reseller
+	db.First(&cur, rs.Id)
+	if cur.PageNotice != "x" || cur.PageSupport != "Tg: @abcdef" || cur.PageTitle != "店名" {
+		t.Fatalf("应存去掉首尾空白的: notice=%d 字节 support=%q title=%q", len(cur.PageNotice), cur.PageSupport, cur.PageTitle)
+	}
+	if code, body := put("x"+strings.Repeat("y", maxPageNotice), ""); code != 400 || !strings.Contains(body, "公告太长了") {
+		t.Fatalf("去掉空白后仍超长应被拒,得 %d %s", code, body)
+	}
+}
+
+// 主面板(或外部接口)建代理的请求里带了落地页文案:同样去首尾空白、限长(平时由代理自己在代理面板里改)。
+func TestCreateResellerPageTextLimited(t *testing.T) {
+	run, err := runner.New(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(run.DB())
+	s, db := NewServer(run), run.DB()
+	create := func(notice string) (int, string) {
+		body, _ := json.Marshal(map[string]interface{}{"name": "dl2", "enabled": true, "pageNotice": notice})
+		r := httptest.NewRequest("POST", "http://x/app/api/resellers", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+		s.handleResellers(w, r)
+		return w.Code, w.Body.String()
+	}
+	if code, body := create(strings.Repeat("公", maxPageNotice+1)); code != 400 || !strings.Contains(body, "公告太长了") {
+		t.Fatalf("建代理带超长公告应被拒,得 %d %s", code, body)
+	}
+	if code, body := create("  本店公告\n\n"); code != 200 {
+		t.Fatalf("建代理应成功,得 %d %s", code, body)
+	}
+	var made model.Reseller
+	db.Where("name = ?", "dl2").First(&made)
+	if made.PageNotice != "本店公告" {
+		t.Fatalf("建代理时的文案应去掉首尾空白: %q", made.PageNotice)
 	}
 }

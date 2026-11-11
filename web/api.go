@@ -1303,7 +1303,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		if err := validatePageText(in["subPageNotice"], in["subPageSupport"]); err != nil {
+		if err := validatePageTextChange(in["subPageNotice"], s.setting("subPageNotice"), in["subPageSupport"], s.setting("subPageSupport")); err != nil {
 			badRequest(w, err)
 			return
 		}

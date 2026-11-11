@@ -242,6 +242,27 @@ export const field = (label, input, help = '') =>
   `<label class="field"><span class="label">${esc(label)}</span>${input}${help ? `<span class="help">${esc(help)}</span>` : ''}</label>`;
 export const check = (id, label, checked, help = '') =>
   `<label class="field check"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><span>${esc(label)}</span>${help ? `<span class="help">${esc(help)}</span>` : ''}</label>`;
+// 落地页公告、联系方式的字数上限(和后端 web/page_logo.go 的 maxPageNotice / maxPageSupport 一致)
+export const PAGE_TEXT_MAX = { notice: 4000, support: 300 };
+
+// 有字数上限的文字框:框下面显示"当前字数 / 上限",和后端同一个算法(去掉首尾空白后按字符数),超过了标红。
+// charCount 放在框后面,画好之后调一次 bindCharCounts 挂上输入事件。上限以后端为准。
+export const charCount = (id, max) => `<span class="count" data-count-for="${esc(id)}" data-max="${Number(max)}"></span>`;
+export function bindCharCounts(root = document) {
+  root.querySelectorAll('[data-count-for]').forEach(el => {
+    const box = document.getElementById(el.dataset.countFor);
+    if (!box || el.dataset.bound) return;
+    el.dataset.bound = '1';
+    const max = Number(el.dataset.max);
+    const show = () => {
+      const n = [...box.value.trim()].length;
+      el.textContent = t('common.charCount', { n, max });
+      el.classList.toggle('over', n > max);
+    };
+    box.addEventListener('input', show);
+    show();
+  });
+}
 export const empty = (text) => `<div class="empty">${esc(text || t('common.empty'))}</div>`;
 export const fv = id => ((document.getElementById(id) || {}).value || '');
 export const fchk = id => !!(document.getElementById(id) || {}).checked;

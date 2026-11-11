@@ -1,7 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy, urlHost } from '../ui.js';
+import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy, urlHost, charCount, bindCharCounts, PAGE_TEXT_MAX } from '../ui.js';
 import { logoBlock, bindLogo } from '../logo.js';
 
 // boolSetting 开关类设置的显示:和后端同一个判法(model.NormBoolSetting),空值用默认。
@@ -22,6 +22,9 @@ const defaults = {
   tgExpiringDays: 3, tgQuotaPercent: 80, tgDailyHour: 9, upstreamCheckMinutes: 10, upstreamCheckFailThreshold: 2, extRefreshMinutes: 30,
   upstreamTestUrl: 'http://www.gstatic.com/generate_204', statsBucketSeconds: 60, trafficAge: 30, reachMinutes: 90,
 };
+
+// 有字数上限的文案:框下面显示当前字数与上限
+const textMax = { subPageNotice: PAGE_TEXT_MAX.notice, subPageSupport: PAGE_TEXT_MAX.support };
 
 // 面板时间显示用的时区(默认 Asia/Shanghai);列表覆盖常见地区,够用且不会写错名字
 const TIMEZONES = [
@@ -124,10 +127,10 @@ export async function render(el) {
           type === 'bool' || type === 'boolOn'
             ? check('set-' + k, label, boolSetting(s[k], k === 'subPageEnabled' || type === 'boolOn'), help)
             : type === 'textarea' || type === 'code'
-              ? `<div class="full">${field(label, `<textarea id="set-${k}" ${type === 'code' ? 'class="code-area" spellcheck="false" autocomplete="off"' : ''}>${esc(s[k] ?? '')}</textarea>`, help)}</div>`
+              ? `<div class="full">${field(label, `<textarea id="set-${k}" ${type === 'code' ? 'class="code-area" spellcheck="false" autocomplete="off"' : ''}>${esc(s[k] ?? '')}</textarea>${textMax[k] ? charCount('set-' + k, textMax[k]) : ''}`, help)}</div>`
               : type === 'select'
                 ? field(label, `<select id="set-${k}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(s[k] ?? '') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`, help)
-                : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">`, help)).join('')}</div>${g.extra || ''}
+                : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">${textMax[k] ? charCount('set-' + k, textMax[k]) : ''}`, help)).join('')}</div>${g.extra || ''}
       </section>`).join('')}
     <section class="card">
       <div class="card-head"><h2>${t('set.about')}</h2><a href="#/admin" class="btn sm">${t('nav.admin')} →</a></div>
@@ -144,6 +147,7 @@ export async function render(el) {
     document.getElementById('role-hint').textContent = e.target.checked ? t('set.roleNode') : t('set.roleMaster');
   });
   bindLogo('set-logo', 'sub-logo');
+  bindCharCounts(el);
   if (isNode) renderPairing();
 }
 

@@ -188,7 +188,8 @@ const (
 	maxPageSupport = 300
 )
 
-// validatePageText 主面板设置与代理面板保存落地页文案时共用。
+// validatePageText 主面板设置与代理面板保存落地页文案时共用。按去掉首尾空白后的字数算,存的也是去掉首尾空白的
+// (主面板保存设置一律去首尾空白,代理面板也一样),首尾垫空白绕不过上限。
 func validatePageText(notice, support string) error {
 	if utf8.RuneCountInString(strings.TrimSpace(notice)) > maxPageNotice {
 		return fmt.Errorf("公告太长了,上限 %d 字", maxPageNotice)
@@ -197,4 +198,16 @@ func validatePageText(notice, support string) error {
 		return fmt.Errorf("联系方式太长了,上限 %d 字", maxPageSupport)
 	}
 	return nil
+}
+
+// validatePageTextChange 保存时只拦这次改了的:和库里现有的一样(升级前、或从旧备份还原的超长文字原样提交回来)就放行。
+// 设置页与代理面板都是整组提交,不放行的话改同一组里的任何一项(比如关掉临时共享)都会被这段旧文字挡住。
+func validatePageTextChange(notice, oldNotice, support, oldSupport string) error {
+	if strings.TrimSpace(notice) == strings.TrimSpace(oldNotice) {
+		notice = ""
+	}
+	if strings.TrimSpace(support) == strings.TrimSpace(oldSupport) {
+		support = ""
+	}
+	return validatePageText(notice, support)
 }

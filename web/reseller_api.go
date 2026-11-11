@@ -51,6 +51,12 @@ func (s *Server) handleResellers(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		// 落地页文案平时由代理自己在代理面板里改;建代理的请求里带了,也照样去首尾空白、限长
+		p.PageTitle, p.PageNotice, p.PageSupport = strings.TrimSpace(p.PageTitle), strings.TrimSpace(p.PageNotice), strings.TrimSpace(p.PageSupport)
+		if err := validatePageText(p.PageNotice, p.PageSupport); err != nil {
+			badRequest(w, err)
+			return
+		}
 		p.Id, p.CreatedAt = 0, time.Now().Unix()
 		p.Password, p.TotpSecret, p.TotpEnabled = "", "", false // 新代理无密码,首次登录时自行设置
 		p.ClaimBefore = p.CreatedAt + 24*3600                   // 24 小时内首登设密码,过期要重新重置

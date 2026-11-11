@@ -323,7 +323,9 @@ func (s *Server) handleResellerSelf(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		if err := validatePageText(p.PageNotice, p.PageSupport); err != nil {
+		// 和主面板一样去掉首尾空白再限长、再存:以前按去空白后的字数判、存的却是原文,首尾垫几十万个空格换行就绕过了上限
+		p.PageNotice, p.PageSupport = strings.TrimSpace(p.PageNotice), strings.TrimSpace(p.PageSupport)
+		if err := validatePageTextChange(p.PageNotice, rs.PageNotice, p.PageSupport, rs.PageSupport); err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -334,7 +336,7 @@ func (s *Server) handleResellerSelf(w http.ResponseWriter, r *http.Request) {
 		}
 		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{
 			"page_enabled": p.PageEnabled, "share_on": p.ShareOn, "profile_title": strings.TrimSpace(p.ProfileTitle),
-			"page_title": p.PageTitle, "page_notice": p.PageNotice, "page_support": p.PageSupport, "page_buy_url": buy,
+			"page_title": strings.TrimSpace(p.PageTitle), "page_notice": p.PageNotice, "page_support": p.PageSupport, "page_buy_url": buy,
 		})
 		s.auditAs(rs.Name, "reseller", "subpage", rs.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})

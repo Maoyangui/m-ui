@@ -220,6 +220,8 @@ select.sm, input.sm { padding: .24rem .45rem; font-size: .82rem; }
 .field { display: flex; flex-direction: column; gap: .2rem; }
 .field .label { font-size: .8rem; color: var(--muted); font-weight: 500; }
 .field .help { font-size: .74rem; color: var(--muted); line-height: 1.35; }
+.field .count { align-self: flex-end; font-size: .72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.field .count.over { color: var(--danger); font-weight: 600; }
 .field.check { flex-direction: row; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .field.check input { width: auto; }
 .field.check .help { flex-basis: 100%; }
