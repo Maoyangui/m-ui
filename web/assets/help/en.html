@@ -190,63 +190,91 @@
 </section>
 
 <section class="chap" id="ha" data-scope="admin" data-pending="ha">
-  <h2>Master failover</h2>
-  <p class="lede">If the master's VPS goes down or is deleted by mistake, a node near the top of the server list can take over as a temporary master; later the data moves back to a new master. Off by default.</p>
+  <h2>Set as master and master failover</h2>
+  <p class="lede">Two things: <b data-k="ha.setMaster">Set as master</b> moves the master to another server in one go (planned moves and moves to a fresh VPS both use it); <b data-k="ha.title">Master failover</b> lets a standby take over as master when the master dies (VPS down or deleted by mistake). Failover is off by default.</p>
+
+  <section class="sec" id="ha-switch">
+    <h3>Set as master</h3>
+    <p class="lede">From the master's panel, make any node the master: the data is handed over in one go and the old master becomes a node.</p>
+    <ol class="steps">
+      <li>On the <b data-k="nav.nodes">Servers</b> page, click the role tag at the start of that server's <b data-k="common.status">Status</b> column (such as "Node ▾" or "Standby 1 ▾") and choose <b data-k="ha.setMaster">Set as master</b> in the card that opens; the ⋯ (<b data-k="common.more">More</b>) menu at the end of the row has it too.</li>
+      <li>The confirmation lists what will happen: the checks, the new panel address and the IP the subscription domain should point to. Enter the admin password (and the 2FA code if it is on).</li>
+      <li>Progress is shown all the way, and the new panel address is given at the end. Account, password and 2FA stay the same; sign in again on the new panel.</li>
+    </ol>
+    <ul>
+      <li>All of the master's data (users, lines, plans, resellers, settings, traffic history) is encrypted end to end and handed to that server, which becomes the master; the old master becomes a node and keeps serving with its own lines. Both restart once: users on those two servers drop for a few seconds and reconnect by themselves, other servers are not affected.</li>
+      <li>If any step fails, everything is cancelled: the old master stays the master, writes resume and no data changes.</li>
+      <li>Moving to a fresh VPS: install m-ui as usual, attach it like a node (see <a href="#nodes-add">Attach a node</a>), and once it shows <b data-k="node.synced">synced</b>, use <b data-k="ha.setMaster">Set as master</b> on it. No backup or restore needed.</li>
+      <li>Subscription links stay the same: the subscription domain, port, path and certificate move with the master, so just point the subscription domain at the new master (links that use an IP do change, and the confirmation says so beforehand). The panel and the reseller panel use the new master's own addresses.</li>
+      <li>Nodes that are offline, not synced, too old, short of disk space or with a port conflict cannot be made master; the card says why.</li>
+    </ul>
+    <div class="pit"><b>Common pitfall</b>Writes are paused during the handover (usually a few minutes, 15 at most): the panel is read-only, and write calls from the external API, the reseller panel and the Telegram bot get 503, so connected programs must be able to retry.</div>
+  </section>
 
   <section class="sec" id="ha-how">
-    <h3>How it works</h3>
-    <p class="lede">The master regularly sends an encrypted full copy of its data, only to the first few nodes in server order (the candidates).</p>
+    <h3>How master failover works</h3>
+    <p class="lede">Turn it on under <b data-k="nav.settings">Settings</b> → <b data-k="ha.title">Master failover</b> on the master (saving asks for the admin password). Then the first few nodes in server order become standbys and keep an encrypted copy of the data.</p>
     <ul>
-      <li>2 candidates by default (1–3 allowed), taken in the order of the <b data-k="nav.nodes">Servers</b> page; a candidate's API URL must be HTTPS.</li>
-      <li>A copy is sent every 5 minutes by default and again shortly after changes; it stays encrypted until a takeover.</li>
-      <li>While the master is unreachable, nodes keep forwarding and users notice nothing; a takeover restores management, accounting, subscriptions and alerts.</li>
-      <li>After a takeover, node traffic is reconciled automatically; management changes made on the old master after the last copy (new users, for example) must be redone.</li>
+      <li><b data-k="ha.set.standbys">Standbys</b>: 2 by default (1–3), taken in the order of the <b data-k="nav.nodes">Servers</b> page and tagged "Standby 1", "Standby 2" there; reordering the servers changes who takes over first.</li>
+      <li>The master sends the standbys a data copy regularly (every 5 minutes by default, and within 30 seconds after changes). Each copy is encrypted with the standby's own key and signed by the master, and is only opened for a takeover.</li>
+      <li>While the master is unreachable, nodes keep forwarding and connected users notice nothing; a takeover restores management, accounting, subscriptions and alerts.</li>
+      <li>After a takeover that server is the master and can stay so. Traffic on node lines is reconciled automatically; management changes made on the old master after the last copy, and a few minutes of traffic on the old master's own lines, cannot be recovered.</li>
+      <li>The <b data-k="ha.set.ready">Readiness check</b> in the settings ticks off each item: eligible standbys, node versions, copy self-checks, https links to the standbys, a subscription domain, Telegram, nodes reaching each other and the overseas witness; anything that fails comes with a one-line fix.</li>
     </ul>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>Nodes must run v0.7.17 or later: older ones keep syncing but cannot be standbys.</li>
+      <li>Open the panel ports between nodes so they can confirm with each other that the master is really gone; without that, only the overseas probes or a person can confirm.</li>
+      <li>After m-ui is reinstalled on a standby its key changes: click <b data-k="ha.repin">Trust again</b> in its card before it receives copies again.</li>
+    </ul></div>
   </section>
 
   <section class="sec" id="ha-takeover">
     <h3>Takeover modes</h3>
-    <p class="lede">Choose a takeover mode when you turn failover on: the more automatic, the less work, and the more care is needed against false alarms.</p>
+    <p class="lede">Pick one of three when you turn failover on; the default asks for confirmation.</p>
     <ul>
-      <li><b>Manual</b>: when the master is lost, the candidate sends a Telegram alert; you take over from the candidate's panel, or over SSH with the m-ui command line.</li>
-      <li><b>Telegram confirmation</b>: after the master has been gone for the set number of minutes, the bot sends a confirmation code, and the takeover happens only after you reply.</li>
-      <li><b>Fully automatic</b>: takes over once the master has been gone for the set time. With just one master and one node an outside witness (Globalping) must be on, so a broken link between the two alone does not trigger a takeover.</li>
-      <li>When the takeover is done, Telegram sends the temporary master's panel address; accounts, passwords and 2FA are the same as on the old master, and everyone signs in again.</li>
+      <li><b data-k="ha.mode.off">Off</b>: if the master dies a person has to act; nodes keep serving with their own lines.</li>
+      <li><b data-k="ha.mode.confirm" class="wrap">Take over after confirmation when the master is lost</b> (the default, recommended): 3 minutes after the standby finds the master lost it sends a Telegram message; reply with the <code>/takeover CODE</code> it gives, or click <b data-k="ha.takeover">Take over as master</b> in the standby's panel, and it takes over. If the master comes back first, the request is cancelled.</li>
+      <li><b data-k="ha.mode.auto" class="wrap">Take over automatically when the master is lost</b>: 10 minutes after the master is lost the standby takes over by itself. With three or more servers a majority of nodes must agree; with one master and one node the overseas probes must not reach the master either, so <b data-k="ha.set.witness">Overseas probe witness</b> must be on.</li>
+      <li>What counts as lost: the standby has heard nothing from the master for over a minute, the other nodes cannot reach it either, and overseas probes (US, Germany, Japan, Singapore, Hong Kong) cannot reach its public IP. A block from mainland China, a cut between one node and the master, or a master upgrading or restarting does not count.</li>
+      <li>No split brain: every takeover or Set as master moves to a higher epoch, and nodes only follow the server with the highest one.</li>
+      <li>How long to wait before asking, before taking over automatically, and the copy interval are under <b data-k="ha.set.advanced">Advanced</b>.</li>
     </ul>
     <div class="pit"><b>Common pitfalls</b><ul>
-      <li>Do not take over by hand while the master is merely updating or restarting; it is back in a few minutes.</li>
-      <li>If the subscription address points at the old master, users cannot refresh their subscriptions after a takeover (nodes already imported keep working). Use a separate subscription domain with a short TTL and point it at the temporary master after a takeover, or turn on the Cloudflare option below.</li>
+      <li>Pause takeovers before upgrades or maintenance (the pause buttons in the settings, or <code>m-ui ha pause MINUTES</code> on the master); updating from the panel or changes that restart it, such as a new port, pause takeovers for a while by themselves.</li>
+      <li>Without Telegram notifications, the confirmation mode can only be confirmed in the standby's panel.</li>
+      <li>If the subscription link holds an IP, users must import a new one after a takeover. Use a domain for subscriptions and point it at the new master after a takeover (or turn on the automatic Cloudflare DNS below).</li>
     </ul></div>
   </section>
 
   <section class="sec" id="ha-fence">
     <h3>When the old master comes back</h3>
-    <p class="lede">The old master does not fight the temporary master: it automatically becomes a read-only node.</p>
+    <p class="lede">The old master becomes a node by itself when it returns; it does not fight the new master.</p>
     <ul>
-      <li>It changes no data from then on; changes it received after the takeover are kept aside so you can compare and redo them.</li>
-      <li>To make it the master again, move the data back from the temporary master as described next.</li>
+      <li>In the new master's server list it is first tagged "Former master · lost" and left out of subscriptions; once back it turns into a "Node" again, gets the configuration and its lines return to subscriptions.</li>
+      <li>If it took changes while it was cut off, it keeps a backup of them before becoming a node, and a note at the top of the page says how many changes did not reach the new master.</li>
+      <li>To make it the master again, use <b data-k="ha.setMaster">Set as master</b> on it in the server list.</li>
     </ul>
-  </section>
-
-  <section class="sec" id="ha-back">
-    <h3>Moving back to a new master</h3>
-    <p class="lede">The temporary master is only a bridge: once the data is moved to a new master it returns to being a node. The new master can be the demoted old master or a fresh VPS with m-ui installed.</p>
-    <ul>
-      <li>Working on the new master: generate a one-time move-back code in the temporary master's panel, then enter the temporary master's address and the code in the new master's panel.</li>
-      <li>Working on the temporary master: generate a one-time receive code in the new master's panel, then enter the new master's address and the code in the temporary master's panel.</li>
-      <li>You can keep the old master's identity (ports, paths, domain and certificates stay the same, so subscription links are unchanged once DNS points back), or use the new master's own settings (subscription links change).</li>
-      <li>During the move the temporary master briefly freezes management changes, then unfreezes and turns back into a node.</li>
-    </ul>
-    <div class="pit"><b>Common pitfall</b>Move-back and receive codes work once and expire quickly. They are only shown in the panel; never post them in a group chat.</div>
   </section>
 
   <section class="sec" id="ha-dns">
     <h3>Automatic Cloudflare DNS (optional)</h3>
-    <p class="lede">If your domain is on Cloudflare, takeovers and move-backs can update the DNS records to the new machine automatically. Off by default.</p>
+    <p class="lede">If the subscription domain is on Cloudflare, its DNS can follow the master automatically after a takeover or Set as master. Off by default, and it needs a Cloudflare API token.</p>
     <ul>
-      <li>Needs a Cloudflare API token with DNS edit permission.</li>
-      <li>Only records that currently point to the old master's IP are changed.</li>
-      <li>Without it, update DNS yourself after a takeover or move-back, following the Telegram message.</li>
+      <li>Under <b data-k="ha.set.advanced">Advanced</b> → <b data-k="ha.set.dns" class="wrap">Update DNS automatically (Cloudflare, optional)</b> in the <b data-k="ha.title">Master failover</b> settings, enter the <b data-k="ha.set.dnsToken">Cloudflare token</b> and the <b data-k="ha.set.dnsNames">Names that follow the master</b> (the subscription domain, say), then click <b data-k="ha.set.dnsTest">Test token and records</b> to see which records would change.</li>
+      <li>The token needs DNS edit permission for that domain and is stored separately from the certificate token; see <a href="#cf-token">Creating a Cloudflare API token</a>.</li>
+      <li>Only A / AAAA records of those names that currently point to the old master's IP are changed, keeping proxying and TTL; other records are left alone. A failure only raises an alert and never blocks the switch.</li>
+      <li>Without it, update DNS yourself after a takeover or Set as master, using the IP shown at the top of the page and in the Telegram message.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="ha-cli">
+    <h3>Command line</h3>
+    <p class="lede">Over SSH use <code>m-ui ha</code> (as root); option 15 of the <code>m-ui</code> menu is master failover too.</p>
+    <ul>
+      <li><code>m-ui ha status</code>: this server's role, epoch, mode, standbys and copy times; works roughly even while the service is stopped.</li>
+      <li><code>m-ui ha takeover</code>: take over as master on a standby; refused while the master is still in touch. <code>--force</code> takes over regardless, only for when you know the master is gone or two masters are stuck.</li>
+      <li><code>m-ui ha set-master NAME-OR-ID</code>: on the master, make a node the master and print the new panel address when done.</li>
+      <li><code>m-ui ha pause MINUTES</code> / <code>m-ui ha resume</code>: pause / resume takeovers on the master.</li>
     </ul>
   </section>
 </section>
@@ -921,7 +949,7 @@
       <li><b data-k="set.tgOnReach">Mainland reach problem / recovered</b></li>
       <li><b data-k="set.tgOnCert">Certificate issued / renewal / expiry</b> (node certificates are reported by the master too)</li>
       <li><b data-k="set.tgDaily">Daily report</b>, sent at <b data-k="set.tgDailyHour">Daily report hour (0-23, panel time zone)</b></li>
-      <li data-pending="ha">Master failover: candidates report a lost master, a finished takeover and a finished move-back here too (see <a href="#ha">Master failover</a>).</li>
+      <li data-pending="ha">Master failover: a standby noticing the master is lost, waiting for your confirmation code, a finished takeover, a master switch that finished or failed, and the old master coming back as a node are reported too (see <a href="#ha">Set as master and master failover</a>).</li>
     </ul>
   </section>
 
@@ -1012,6 +1040,7 @@
       <li><code>m-ui passwd</code>: resets the admin password (and turns off two-factor authentication).</li>
       <li><code>m-ui set -db /etc/m-ui/m-ui.db key=value</code>: changes a setting directly, such as <code>webPort=3053</code>.</li>
       <li><code>m-ui render</code>: prints and validates the current sing-box configuration.</li>
+      <li data-pending="ha">Option 15 and <code>m-ui ha status</code> / <code>takeover</code> / <code>set-master</code> / <code>pause</code> / <code>resume</code>: Set as master and master failover (see <a href="#ha-cli">Command line</a>).</li>
       <li>Data lives in <code>/etc/m-ui/</code>: <code>m-ui.db</code> (database), <code>cert/</code> (certificates), <code>backups/</code> (scheduled backups).</li>
     </ul>
   </section>
