@@ -57,3 +57,14 @@ test('refLabels:按线路聚合,整条写线路名,部分写「线路名 · n/m 
   assert.match(chips, /title="Breach\.sepC"/, '服务器名放进 title(桩里的 t 原样返回键名,分隔符就是 reach.sep)');
   assert.equal(lp.refChips([], lines, nodes), '');
 });
+
+test('refLabels:只算线路现在还部署着的服务器;换套餐预览可以写出服务器名', () => {
+  // 线路 11 现在部署在 2、3;用户分配里还留着已撤下的 1 和 2:是 1/2 台,不是整条
+  assert.deepEqual(lp.refLabels([{ lineId: 11, nodeIds: [1, 2] }], lines, nodes), ['two · lp.nOf{"n":1,"m":2}']);
+  assert.deepEqual(lp.refLabels([{ lineId: 11, nodeIds: [1, 2, 3] }], lines, nodes), ['two'], '现部署的都在 = 整条');
+  // 同一线路换了同样台数的服务器:默认写法一样,servers 写法能看出差别(按名字排序,和顺序无关)
+  const a = [{ lineId: 10, nodeIds: [1, 2] }], b = [{ lineId: 10, nodeIds: [3, 1] }];
+  assert.deepEqual(lp.refLabels(a, lines, nodes), lp.refLabels(b, lines, nodes));
+  assert.deepEqual(lp.refLabels(a, lines, nodes, { servers: true }), ['all-servers · Areach.sepB']);
+  assert.deepEqual(lp.refLabels(b, lines, nodes, { servers: true }), ['all-servers · Areach.sepC']);
+});

@@ -537,7 +537,7 @@ const stateRows = s => [
   [t('user.f.autoReset'), s.autoReset ? `${s.resetDays} ${t('common.day')} · ${fmtDay(s.nextReset)}` : t('common.no')],
   [t('user.devices'), s.deviceLimit || '∞'],
   [t('user.speed'), speedText(s.speedUp, s.speedDown)],
-  [t('user.lines'), esc(refLabels(s.lineRefs || [], state.lines, pickerNodes()).join(', ') || t('common.none'))],
+  [t('user.lines'), esc(refLabels(s.lineRefs || [], state.lines, pickerNodes(), { servers: true }).join(', ') || t('common.none'))],
 ];
 function stateCol(s, cmp) {
   const rows = stateRows(s), base = cmp ? stateRows(cmp) : null;

@@ -116,13 +116,15 @@ export function linePicker(host, { items, selected }) {
     if (!list.length) return '';
     const on = list.filter(it => keys.has(it.key)).length;
     const pickedAll = g.items.filter(it => keys.has(it.key)).length;
-    const whole = pickedAll === g.items.length && !g.narrowed && g.items.length > 1;
+    // 整条勾满且没被授权收窄:写回的是整条线路(以后新加的服务器也算进来),只部署在一台上的线路也一样要说清楚
+    const whole = pickedAll === g.items.length && !g.narrowed;
     const many = g.items.length > 1;
+    const one = !many && g.items[0];
     const open = byServer || expanded.has(g.id) || g.items.length <= CHIP_OPEN_MAX;
     const chip = it => `<button type="button" class="chip lp-chip ${keys.has(it.key) ? 'on' : ''}" data-key="${it.key}" aria-pressed="${keys.has(it.key)}">${esc(it.nodeName || '—')}${it.local ? ` <span class="small">(${esc(t('node.local'))})</span>` : ''}</button>`;
     return `<div class="lp-line" data-line="${g.id}">
       <label title="${esc(g.name)}"><input type="checkbox" class="lp-lcb" data-line="${g.id}" ${on && on === list.length ? 'checked' : ''} ${on && on < list.length ? 'data-ind="1"' : ''}> <span class="lp-name">${esc(g.name)}</span></label>
-      <span class="lp-n">${many ? esc(t('lp.nOf', { n: pickedAll, m: g.items.length })) : ''}${whole ? ' ' + `<span class="badge primary" title="${esc(t('lp.wholeLineHelp'))}">${esc(t('lp.wholeLine'))}</span>` : ''}</span>
+      <span class="lp-n">${many ? esc(t('lp.nOf', { n: pickedAll, m: g.items.length })) : one ? `<span class="muted small">${esc(one.nodeName || '—')}${one.local ? ` (${esc(t('node.local'))})` : ''}</span>` : ''}${whole ? ' ' + `<span class="badge primary" title="${esc(t('lp.wholeLineHelp'))}">${esc(t('lp.wholeLine'))}</span>` : ''}</span>
       ${many && !byServer && g.items.length > CHIP_OPEN_MAX ? `<button type="button" class="lp-x" data-lp-x="${g.id}" aria-expanded="${open}" title="${esc(t(open ? 'common.less' : 'common.more'))}">${open ? '▴' : '▾'}</button>` : '<span></span>'}
       ${many && open ? `<div class="lp-nodes">${list.map(chip).join('')}</div>` : ''}
     </div>`;
@@ -242,15 +244,19 @@ function refGroups(refs, lines, nodes) {
     if (!l) continue;
     const all = nodes.length ? nodeIdsOf(l, nodes) : [];
     if (!r.nodeIds || !r.nodeIds.length || nodes.length < 2) { out.push({ name: l.name, full: true, servers: [], n: all.length, m: all.length }); continue; }
-    const names = r.nodeIds.map(nid => { const n = nodes.find(x => x.id === nid); return n ? n.name : '#' + nid; });
-    out.push({ name: l.name, full: r.nodeIds.length >= all.length && all.length > 0, servers: names, n: r.nodeIds.length, m: all.length || r.nodeIds.length });
+    // 只算线路现在还部署着的服务器:线路撤下某台后,用户分配里可能还留着那台的 id(改部署时后端不清),不能因此把部分分配算成整条
+    const eff = all.length ? r.nodeIds.filter(id => all.includes(id)) : r.nodeIds;
+    const names = eff.map(nid => { const n = nodes.find(x => x.id === nid); return n ? n.name : '#' + nid; });
+    out.push({ name: l.name, full: all.length > 0 && eff.length === all.length, servers: names, n: eff.length, m: all.length || eff.length });
   }
   return out;
 }
 
-// refLabels 把分配渲染成可读的名字:整条线路写线路名;只分了部分服务器写「线路名 · 3/24 台」
-export function refLabels(refs, lines, nodes) {
-  return refGroups(refs, lines, nodes).map(g => (g.full ? g.name : `${g.name} · ${t('lp.nOf', { n: g.n, m: g.m })}`));
+// refLabels 把分配渲染成可读的名字:整条线路写线路名;只分了部分服务器写「线路名 · 3/24 台」。
+// servers: true 时部分分配写出服务器名(按名字排序):换套餐预览靠字符串比较标出变化,同一线路换了同样台数的服务器也要看得出来
+export function refLabels(refs, lines, nodes, { servers = false } = {}) {
+  return refGroups(refs, lines, nodes).map(g => (g.full ? g.name
+    : `${g.name} · ${servers ? [...g.servers].sort().join(t('reach.sep')) || t('lp.nOf', { n: g.n, m: g.m }) : t('lp.nOf', { n: g.n, m: g.m })}`));
 }
 
 // refChips 同上,做成 chip(服务器名放 title),多了折成「+N」;展开状态按 key 记住
