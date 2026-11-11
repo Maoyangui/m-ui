@@ -57,6 +57,7 @@ type session struct {
 
 // Server 是面板 HTTP 服务。
 type Server struct {
+	credID   atomic.Uint64 // 凭据缓存的编号(见 credPrefix)
 	run      *runner.Runner
 	db       *gorm.DB
 	httpSrv  *http.Server

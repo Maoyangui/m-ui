@@ -117,7 +117,7 @@ func TestSettingsHideHAKeys(t *testing.T) {
 		}
 	}
 	if out["timezone"] != "Asia/Shanghai" {
-		t.Fatal("普通设置照常返回")
+		t.Fatalf("普通设置照常返回: %d %s", w.Code, w.Body.String())
 	}
 }
 
