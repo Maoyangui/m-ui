@@ -65,6 +65,7 @@ type Service struct {
 	baseAt      time.Time
 	storeMu     sync.Mutex // 备用:副本只有一个写入方
 	promoteMu   sync.Mutex // 接任 / 设为主机:同一时间只做一件
+	keyMu       sync.Mutex // 主机签名密钥:读和生成串行,并发第一次用时只生成一把(见 signPriv)
 	rep         *replicator
 	eng         *engine
 	sw          *switcher

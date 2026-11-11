@@ -91,27 +91,30 @@ var notifyKeys = []string{"tgEnabled", "tgToken", "tgChatId", "tgProxy", "tgApiB
 
 // signKey 本机签名密钥:没有就生成。返回公钥。
 func (s *Service) signKey() (string, error) {
-	seed := s.setting(KeySignKey)
-	if k, err := SignKey(seed); err == nil {
-		return PubOf(k), nil
-	}
-	seed = NewSignKey()
-	if err := s.set(map[string]string{KeySignKey: seed}); err != nil {
+	k, err := s.signPriv()
+	if err != nil {
 		return "", err
 	}
-	k, _ := SignKey(seed)
 	return PubOf(k), nil
 }
 
 // SignPub 本机的签名公钥(没有就生成):主机签容灾状态、副本、整库;候选人要票、被设为主机前先生成,当上主机后沿用它。
 func (s *Service) SignPub() (string, error) { return s.signKey() }
 
-// signPriv 本机签名私钥(没有就生成)。
+// signPriv 本机签名私钥(没有就生成)。读和生成都在 keyMu 里做:还没有密钥的主机(库里没带签名密钥、直接处在某个纪元)
+// 第一次同时向几台副机推容灾状态、发副本时,以前各自看到"还没有"就各生成一把,后写的覆盖先写的;先收到的副机钉住了
+// 被覆盖的那把公钥,同一纪元之后的推送全被拒("同一纪元不换签名公钥"),签名也会和正文里的公钥对不上。
 func (s *Service) signPriv() (ed25519.PrivateKey, error) {
-	if _, err := s.signKey(); err != nil {
+	s.keyMu.Lock()
+	defer s.keyMu.Unlock()
+	if k, err := SignKey(s.setting(KeySignKey)); err == nil {
+		return k, nil
+	}
+	seed := NewSignKey()
+	if err := s.set(map[string]string{KeySignKey: seed}); err != nil {
 		return nil, err
 	}
-	return SignKey(s.setting(KeySignKey))
+	return SignKey(seed)
 }
 
 // signer 用本机签名密钥签名的函数。
