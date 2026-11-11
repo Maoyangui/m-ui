@@ -15,7 +15,7 @@ func TestLimitSpecsOverlayRuleStates(t *testing.T) {
 	resellers := []model.Reseller{{Id: 7, SpeedDown: 200}}
 	states := []model.LimitState{
 		{UserName: "a", DownMbps: 20, TightenOnly: true}, // 100 → 20
-		{UserName: "a", UpMbps: 80, TightenOnly: true},   // 只升不降:不能放宽到 80,还是 50
+		{UserName: "a", UpMbps: 80, TightenOnly: true},   // 不超过用户自己的限速:不能放宽到 80,还是 50
 		{UserName: "b", UpMbps: 10, DownMbps: 10},        // 不限的用户被规则限住
 	}
 	specs, groups := limitSpecs(users, resellers, states)

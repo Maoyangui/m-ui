@@ -1450,7 +1450,7 @@ func (r *Runner) readLimits() (map[string]core.UserLimitSpec, map[string]core.Gr
 		// 空切片会被 SetGroups 清空代理池,反而把一次短暂的数据库抖动变成限速绕过 —— 所以整体报错
 		return nil, nil, fmt.Errorf("读取代理限速策略: %w", err)
 	}
-	// 规则限速:生效中的状态叠加到用户自己的限速上(只升不降 / 覆盖,多条取最严);
+	// 规则限速:生效中的状态叠加到用户自己的限速上(不超过用户自己的限速 / 覆盖,多条取最严);
 	// 到期的不算,主机失联时副机也能按到期时间自行放开
 	var states []model.LimitState
 	if err := r.db.Find(&states).Error; err != nil {

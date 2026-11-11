@@ -467,7 +467,7 @@ type Rule struct {
 	// 限到多少 Mbps:0 = 该方向不改
 	UpMbps   int `json:"upMbps"`
 	DownMbps int `json:"downMbps"`
-	// TightenOnly 只升不降:结果不会高于用户自己的限速;关掉后规则值直接覆盖(可用于放宽)
+	// TightenOnly 界面叫「不超过用户自己的限速」:结果不会高于用户自己的限速;关掉后规则值直接覆盖(可用于放宽)
 	TightenOnly bool   `json:"tightenOnly"`
 	Remark      string `json:"remark"`
 	Sort        int    `json:"sort"`
