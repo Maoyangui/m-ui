@@ -30,3 +30,18 @@ test('「正在使用」里给订阅换证书:http → https、https → 不用 
   assert.equal(subSchemeChange({ subCert: '/x/sub.crt', subUsers: 2 }, 'other.example.com'), null);
   assert.equal(subSchemeChange({ subCert: '', subUsers: 2 }, ''), null);
 });
+
+test('设置页「订阅」组直接改证书 / 私钥路径:http ↔ https 一换就要提示,只换路径不提示', async () => {
+  const { subSettingsChange } = await import(pathToFileURL(process.env.SUBTLS_JS || path.join(here, '..', 'assets', 'js', 'subtls.js')).href);
+  assert.equal(typeof subSettingsChange, 'function', 'subtls.js 应导出 subSettingsChange');
+  const http = { subCertFile: '', subKeyFile: '' };
+  const https = { subCertFile: '/x/sub.crt', subKeyFile: '/x/sub.key' };
+  assert.deepEqual(subSettingsChange(http, https, 4), { from: 'http', to: 'https', n: 4 }, '填上证书和私钥:http → https');
+  assert.deepEqual(subSettingsChange(https, http, 4), { from: 'https', to: 'http', n: 4 }, '清空:https → http');
+  assert.deepEqual(subSettingsChange(https, { subCertFile: '/x/sub.crt', subKeyFile: '' }, 4), { from: 'https', to: 'http', n: 4 },
+    '只清空私钥也会退回 http(订阅服务要证书和私钥都在才走 HTTPS)');
+  assert.equal(subSettingsChange(http, { subCertFile: '/x/sub.crt', subKeyFile: '' }, 4), null, '只填证书不填私钥,仍是 http');
+  assert.equal(subSettingsChange(https, { subCertFile: '/y/a.crt', subKeyFile: '/y/a.key' }, 4), null, '换成另一张证书,地址不变');
+  assert.equal(subSettingsChange(http, https, 0), null, '没有用户不用提示');
+  assert.equal(subSettingsChange({}, { subCertFile: ' /x/sub.crt ', subKeyFile: ' /x/sub.key ' }, 2)?.to, 'https', '设置值缺省 / 带空白也按同一个判法');
+});

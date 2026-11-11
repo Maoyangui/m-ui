@@ -22,3 +22,12 @@ export function subSchemeChange(data, next) {
   if (now === after) return null;
   return { from: now ? 'https' : 'http', to: after ? 'https' : 'http', n };
 }
+
+// 订阅服务的判法(sub/server.go):证书和私钥路径都填了才走 HTTPS,缺一个就是 http。
+const subHttps = v => !!String(v?.subCertFile ?? '').trim() && !!String(v?.subKeyFile ?? '').trim();
+
+// subSettingsChange 设置页「订阅」组直接改 subCertFile / subKeyFile:before 是现在的设置,after 是要保存的值,
+// n 是用户数。http ↔ https 一换就返回 { from, to, n },只是换了路径(scheme 不变)或没有用户返回 null。
+export function subSettingsChange(before, after, n) {
+  return subSchemeChange({ subCert: subHttps(before) ? 'on' : '', subUsers: n }, subHttps(after) ? 'on' : '');
+}

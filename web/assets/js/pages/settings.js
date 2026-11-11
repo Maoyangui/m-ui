@@ -3,6 +3,7 @@ import { get, post } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy, urlHost, charCount, bindCharCounts, PAGE_TEXT_MAX } from '../ui.js';
 import { logoBlock, bindLogo } from '../logo.js';
+import { subSettingsChange } from '../subtls.js';
 
 // boolSetting 开关类设置的显示:和后端同一个判法(model.NormBoolSetting),空值用默认。
 function boolSetting(v, def) {
@@ -46,7 +47,7 @@ const groups = () => [
   ]},
   { id: 'sub', title: t('set.sub'), restart: true, fields: [
     ['subListen', t('set.listen'), 'text'], ['subPort', t('set.port'), 'number'], ['subPath', t('set.path'), 'text', t('set.subPathHelp')],
-    ['subCertFile', t('set.cert'), 'text', t('set.certManaged')], ['subKeyFile', t('set.key'), 'text'],
+    ['subCertFile', t('set.cert'), 'text', t('set.subCertHelp')], ['subKeyFile', t('set.key'), 'text'],
     ['subProfileTitle', t('set.subTitle'), 'text'], ['subUpdates', t('set.subUpdates'), 'number'],
     ['subUseUserName', t('set.subUseUserName'), 'boolOn', t('set.subUseUserNameHelp')],
     ['subEncode', t('set.subEncode'), 'bool'], ['subShowNotice', t('set.subNotice'), 'bool'],
@@ -171,12 +172,25 @@ async function renderPairing() {
   role.after(card);
 }
 
+// 设置页直接改订阅证书路径时的确认(判法见 subtls.js):scheme 不变或没有用户时直接放行。
+// 用户数取 GET /cert 的 subUsers(含停用的、代理名下的);取不到时退回本页已加载的用户列表。
+async function confirmSubScheme(body) {
+  if (!subSettingsChange(state.settings, body, 1)) return true;
+  let n;
+  try { n = Number((await get('cert')).subUsers); } catch { /* 下面退回本地列表 */ }
+  if (!Number.isFinite(n)) n = (state.users || []).length;
+  const ch = subSettingsChange(state.settings, body, n);
+  return !ch || confirm(t('cert.subSchemeConfirm', { n: ch.n, from: ch.from, to: ch.to }), { danger: true });
+}
+
 registerActions({
   'set.save': async id => {
     const g = groups().find(x => x.id === id);
     const body = {};
     g.fields.forEach(([k, , type]) => { body[k] = (type === 'bool' || type === 'boolOn') ? String(fchk('set-' + k)) : fv('set-' + k).trim(); });
     // 面板路径改动保存即生效:旧地址随即失效,保存成功后直接跳到新地址(不能再用旧前缀请求接口)
+    // 订阅证书 / 私钥路径一改,订阅可能在 http ↔ https 之间切换:所有用户手里的订阅地址都会变,和证书页一样先确认
+    if (id === 'sub' && !await confirmSubScheme(body)) return;
     const norm = p => { p = (p || '/app/').trim(); if (!p.startsWith('/')) p = '/' + p; if (!p.endsWith('/')) p += '/'; return p; };
     if (id === 'panel' && norm(body.webPath) !== norm(state.status.webPath)) {
       try {
