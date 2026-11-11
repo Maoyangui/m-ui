@@ -349,12 +349,7 @@ func ResetLocal(db *gorm.DB, dataDir string) error {
 	if _, err := os.Stat(dir); err != nil {
 		return nil
 	}
-	var firstErr error
-	for _, n := range []string{fileCur, filePrev, fileTmp, fileInfo, fileKey} {
-		if err := os.Remove(filepath.Join(dir, n)); err != nil && !os.IsNotExist(err) && firstErr == nil {
-			firstErr = err
-		}
-	}
+	firstErr := dropStandbyFiles(dir, true) // 两代副本及其说明、备用密钥(含写到一半的)
 	if err := writeEpochRecord(dir, epochRecord{At: time.Now().Unix()}); err != nil && firstErr == nil {
 		firstErr = err
 	}

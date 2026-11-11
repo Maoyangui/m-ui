@@ -111,6 +111,9 @@ func (s *Service) NoteReply(n model.Node, r hub.EpochReply) {
 	if L == 0 && k == replyLegacy && !r.Down {
 		k = replyOK // 纪元 0 的请求不带纪元头,副机也不回纪元头:放行就是认本机
 	}
+	if k != replyOK && k != replyLegacy && !s.nodeKnown(n.Id) {
+		return // 已从服务器表删掉的(删除后重试"删副本、离开集群"那几次):它说什么都不进降级、让出、告警的判定
+	}
 	now := s.now()
 	s.mu.Lock()
 	s.replies[n.Id] = reply{at: now, kind: k, epoch: r.Epoch, master: r.MasterId, since: r.SinceChange, leaseAgo: r.LeaseAgo,
