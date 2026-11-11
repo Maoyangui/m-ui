@@ -393,12 +393,53 @@ type Link struct {
 }
 
 // selfLink 本机作为副机时别人该怎么连:接任 / 设为主机后,新主机凭它把本机当副机管起来。
+// 面板域名要是随主机身份迁移的名字(没单独设订阅域名时订阅主机名就是面板域名;或在要跟着主机走的域名里),换主机后它指向
+// 新主机,新主机拿它连的是自己:这时改用本机的公网 IP 拼(端口、路径照旧,带面板证书指纹,新主机那一行按指纹钉)。
 func (s *Service) selfLink() Link {
 	l := Link{ApiUrl: s.panelURL(), Token: s.nodeToken(), CertFP: s.panelCertFP()}
+	if movingName(s.setting("webDomain"), s.subHost(), splitNames(s.setting(KeyDnsNames))) {
+		l.ApiUrl = s.panelIPURL()
+	}
 	if strings.Contains(l.ApiUrl, "<") { // 没有域名也没探测到公网 IP:拼不出能用的地址
 		l.ApiUrl = ""
 	}
 	return l
+}
+
+// movingName 这个名字是不是随主机身份迁移的(订阅主机名、要跟着主机走的域名):换主机后它指向新主机。
+func movingName(name, subHost string, dnsNames []string) bool {
+	name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+	if name == "" || isIPHost(name) {
+		return false
+	}
+	return strings.EqualFold(name, strings.TrimSuffix(strings.TrimSpace(subHost), ".")) || containsName(dnsNames, name)
+}
+
+// panelIPURL 用本机公网 IP 拼的面板地址(纯 IPv6 机器用 IPv6);没有 IP 返回空。
+func (s *Service) panelIPURL() string {
+	v4, v6 := s.ownIPs()
+	host := v4
+	if host == "" {
+		host = v6
+	}
+	if host == "" {
+		return ""
+	}
+	scheme := "http"
+	if strings.TrimSpace(s.setting("webCertFile")) != "" && strings.TrimSpace(s.setting("webKeyFile")) != "" {
+		scheme = "https"
+	}
+	p := strings.TrimSpace(s.setting("webPath"))
+	if p == "" {
+		p = "/app/"
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	return scheme + "://" + model.URLHost(scheme, host, s.settingInt("webPort", 2053, 1, 65535)) + p
 }
 
 // startupTasks 进程起来后要做一次的事:刚接任 / 刚成为主机的发通知、改 DNS;刚变为副机的清掉手里的旧副本。
