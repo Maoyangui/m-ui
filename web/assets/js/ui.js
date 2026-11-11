@@ -86,7 +86,11 @@ export function toast(msg, kind = '') {
 }
 
 // ---- 弹窗 ----
+// modalGen 每打开、关掉一次对话框就变:在对话框里异步刷新内容的(设为主机的进度)拿它判断窗口是不是已经换成别的了
+let modalSeq = 0;
+export const modalGen = () => modalSeq;
 export function openModal(title, html, onSave, opts = {}) {
+  modalSeq++;
   const m = document.getElementById('modal');
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = html;
@@ -96,7 +100,9 @@ export function openModal(title, html, onSave, opts = {}) {
   save.disabled = false; // 上一个对话框可能把它禁用着关掉(换套餐在等预览时禁用提交)
   save.textContent = opts.saveText || t('common.save');
   save.className = 'btn ' + (opts.danger ? 'danger' : 'primary');
-  document.getElementById('modal-cancel').hidden = !!opts.noCancel; // 纯提示只留一个「知道了」
+  const cancel = document.getElementById('modal-cancel');
+  cancel.hidden = !!opts.noCancel; // 纯提示只留一个「知道了」
+  cancel.textContent = opts.cancelText || t('common.cancel'); // 上一个对话框可能把它改成了「关闭」(设为主机的进度框)
   m.hidden = false;
   m.querySelector('.modal-box').classList.toggle('wide', !!opts.wide);
   save.onclick = async () => {
@@ -108,7 +114,14 @@ export function openModal(title, html, onSave, opts = {}) {
   const first = m.querySelector('input,select,textarea');
   if (first) setTimeout(() => first.focus(), 50);
 }
-export function closeModal() { document.getElementById('modal').hidden = true; }
+export function closeModal() { modalSeq++; document.getElementById('modal').hidden = true; }
+
+// ---- Cloudflare 令牌 ----
+// CF_TOKEN_URL Cloudflare 的令牌创建页:权限已预填「区域 → 区域 → 读取」「区域 → DNS → 编辑」,令牌名 m-ui
+export const CF_TOKEN_URL = 'https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22zone%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22dns%22%2C%22type%22%3A%22edit%22%7D%5D&accountId=*&zoneId=all&name=m-ui';
+// cfTokenLink 填 Cloudflare 令牌的输入框下面:新标签页打开的创建链接,下一行是链接打不开时的手动步骤。
+// 证书页(签证书)和主机容灾(自动改 DNS)两处共用。
+export const cfTokenLink = () => `<span class="cf-link"><a href="${esc(CF_TOKEN_URL)}" target="_blank" rel="noopener noreferrer">${esc(t('cf.create'))} ↗</a><span class="cf-steps">${esc(t('cf.steps'))}</span></span>`;
 
 // ---- 确认框(替代 window.confirm,风格一致且可 await)----
 export function confirm(message, opts = {}) {

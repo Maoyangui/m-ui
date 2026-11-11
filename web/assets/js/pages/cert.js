@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, fmtDay, fmtDate, fmtRelative, toast, confirm, registerActions, badge, field, check, copy, fv, fchk } from '../ui.js';
+import { esc, fmtDay, fmtDate, fmtRelative, toast, confirm, registerActions, badge, field, check, copy, fv, fchk, cfTokenLink } from '../ui.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 
 export const title = () => t('cert.title');
@@ -170,7 +170,7 @@ function renderForm() {
           <option value="http" ${method === 'http' ? 'selected' : ''}>${t('cert.methodHttp')}</option>
           <option value="cloudflare" ${method === 'cloudflare' ? 'selected' : ''}>${t('cert.methodCf')}</option>
           <option value="manual" ${method === 'manual' ? 'selected' : ''}>${t('cert.methodManual')}</option></select>`, t('cert.methodHelp'))}
-        <div id="c-cf-wrap" ${method !== 'cloudflare' ? 'hidden' : ''}>${field(t('cert.cfToken'), `<input id="c-cftoken" type="password" placeholder="${s.hasCfToken ? t('cert.cfTokenKeep') : ''}">`, t('cert.cfTokenHelp'))}</div>
+        <div id="c-cf-wrap" ${method !== 'cloudflare' ? 'hidden' : ''}>${field(t('cert.cfToken'), `<input id="c-cftoken" type="password" placeholder="${s.hasCfToken ? t('cert.cfTokenKeep') : ''}">${cfTokenLink()}`, t('cert.cfTokenHelp'))}</div>
         <div id="c-renew-wrap">${check('c-renew', t('cert.autoRenew'), s.acmeAutoRenew, t('cert.autoRenewHelp'))}<p class="hint danger-text" id="c-renew-manual" ${method === 'manual' ? '' : 'hidden'}>${esc(t('cert.manualNoRenew'))}</p></div>
         ${check('c-staging', t('cert.staging'), s.acmeStaging, t('cert.stagingHelp'))}
       </div>
