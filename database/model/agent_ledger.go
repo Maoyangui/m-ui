@@ -111,17 +111,24 @@ func newLedgerId() int64 {
 // (和主机失联期间改名,用户照常连本机,没报的可能很多)。以前按"名字不在用户表"清掉,这段永远不计费;
 // 现在照常上报,主机按主人计到改名后的用户头上。原名已经给了另一个人的照旧清掉:老版本主机(先升副机的过渡期)
 // 只认名字,报上去会把前一个人的尾巴算到新的同名用户头上。
+// byOwner:推来快照的主机按账本主人计费(0.7.17 起,见 hub.MasterBillsByOwner)。老版本主机只认名字,原名那本留着也计不到
+// 改了名的人头上,原名之后给了新用户、推送又没送到(拉报告照常成功)时还会算到新用户头上:照旧按名字清,用户表里没有这个名字的一律清掉。
 //
 // 本机一个用户都没有时不清:那是停用副机推来的空用户表(或者主机上真的一个用户都没了)。停用期间主机不再拉取,
 // 清了的话上次拉取之后还没报上去的那段永远不计费;重新启用后同一个人从 0 重开一本,主机还会误报"账本回退"。
 // 留着,重新启用推回完整快照时再按那份清:还在的用户接着同一本记,那段照常报上去。
-func PruneAgentCounters(db *gorm.DB) error {
+func PruneAgentCounters(db *gorm.DB, byOwner bool) error {
 	var anyUser int64
 	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM users)").Scan(&anyUser).Error; err != nil {
 		return err
 	}
 	if anyUser == 0 {
 		return nil
+	}
+	if !byOwner {
+		return db.Exec(`DELETE FROM agent_counters WHERE user_name NOT IN (SELECT name FROM users)
+			OR (NOT (user_id = 0 AND user_created_at = 0) AND NOT EXISTS (SELECT 1 FROM users u
+				WHERE u.name = agent_counters.user_name AND u.id = agent_counters.user_id AND u.created_at = agent_counters.user_created_at))`).Error
 	}
 	return db.Exec(`DELETE FROM agent_counters WHERE
 		(user_id = 0 AND user_created_at = 0 AND user_name NOT IN (SELECT name FROM users))

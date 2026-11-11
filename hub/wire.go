@@ -20,6 +20,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/selfupdate"
 )
 
 // ApplyBodyLimit 副机收一份快照的上限:请求体与解压后的 JSON 都不超过它。以前是 64 MiB 的请求体、不压缩,
@@ -198,6 +199,15 @@ type applyAck struct {
 // ApplyOK 副机确认应用了修订 rev 时回的内容(agent/apply 的成功应答):带上 ledgerKept,主机据此知道这台不会整本清账(见 applyAck)。
 func ApplyOK(rev string) map[string]string {
 	return map[string]string{"ok": "1", "revision": rev, "ledgerKept": "1"}
+}
+
+// OwnerBillingVersion 主机从这一版起按账本主人计费:副机上改名前原名那本没报完的尾巴,照常计到改名后的用户头上(见 MergeReport)。
+const OwnerBillingVersion = "0.7.17"
+
+// MasterBillsByOwner 推来快照的主机(快照里的 Version)按不按账本主人计费,副机据此决定改名后原名那本留不留(见
+// model.PruneAgentCounters)。只有明确低于 0.7.17 的主机只认名字;版本号解析不出来的(开发版)按本版算。
+func MasterBillsByOwner(version string) bool {
+	return !selfupdate.Newer(OwnerBillingVersion, version)
 }
 
 // pushWire 把编码好的快照推给一台副机,等它确认应用(调用方持有这台的闸)。确认了就记为已推送。

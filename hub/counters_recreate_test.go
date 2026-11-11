@@ -34,7 +34,7 @@ func (r *recreateRig) newUser(createdAt int64) model.User {
 func (r *recreateRig) sync() {
 	r.t.Helper()
 	r.syncUsersOnly()
-	if err := model.PruneAgentCounters(r.agent); err != nil {
+	if err := model.PruneAgentCounters(r.agent, true); err != nil {
 		r.t.Fatal(err)
 	}
 }
@@ -148,7 +148,7 @@ func TestRecreatedUserWithinOneSyncRound(t *testing.T) {
 	if c.Down != 1500 || c.UserId != fresh.Id || c.UserCreatedAt != 200 {
 		t.Fatalf("账本主人换了应换一本从 0 记:%+v", c)
 	}
-	if err := model.PruneAgentCounters(r.agent); err != nil {
+	if err := model.PruneAgentCounters(r.agent, true); err != nil {
 		t.Fatal(err)
 	}
 	r.report(1005)
@@ -312,7 +312,7 @@ func (r *recreateRig) decommission() {
 	if err := r.agent.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.User{}).Error; err != nil {
 		r.t.Fatal(err)
 	}
-	if err := model.PruneAgentCounters(r.agent); err != nil {
+	if err := model.PruneAgentCounters(r.agent, true); err != nil {
 		r.t.Fatal(err)
 	}
 }
