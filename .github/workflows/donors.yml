@@ -10,7 +10,7 @@ on:
 
 permissions:
   contents: write
-  actions: read # 查上一次成功运行是什么时候
+  actions: read # 查上一次运行是什么时候
 
 concurrency:
   group: donors
@@ -29,16 +29,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: 上一次成功运行太久就报警
+      - name: 上一次运行太久就报警
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          last=$(gh api "repos/${{ github.repository }}/actions/workflows/donors.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].created_at // empty')
+          # 只看 GitHub 有没有按时跑:被最后一步标成失败的那些(数据源太久没读到)也照常算完、提交了,算跑过;
+          # 取消、跳过的不算。对账那一步本身失败的运行也是红的,GitHub 会发通知,不靠这里
+          last=$(gh api "repos/${{ github.repository }}/actions/workflows/donors.yml/runs?status=completed&per_page=30" --jq '[.workflow_runs[] | select(.conclusion == "success" or .conclusion == "failure")][0].created_at // empty')
           [ -n "$last" ] || exit 0
           gap=$(( $(date -u +%s) - $(date -u -d "$last" +%s) ))
           if [ "$gap" -gt 21600 ]; then
-            msg="上一次成功运行在 $((gap / 3600)) 小时前($last;GitHub 推迟了定时任务,或者中间几次失败了):面板数和功德箱都会晚更新;隔超过 12 小时的话,这期间有一部分留名会丢(ntfy 只缓存 12 小时)。"
+            msg="上一次运行在 $((gap / 3600)) 小时前($last;GitHub 推迟了定时任务):面板数和功德箱都会晚更新;隔超过 12 小时的话,这期间有一部分留名会丢(ntfy 只缓存 12 小时)。"
             echo "::warning::$msg"
             echo "**注意**:$msg" >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -69,3 +71,7 @@ jobs:
           done
           echo "::error::推送 3 次都失败,这一轮的结果没有保存"
           exit 1
+      - name: 数据源太久没读到就让这次运行失败
+        # 放在提交之后:算出来的状态已经保存,这一步只把问题写进摘要、把运行标成失败(GitHub 会发通知)。
+        # 只写警告的话没人会去翻运行记录,一直读不到的数据源(接口改了、被限流、ping 文件没了)会让留名和到账无声地丢。
+        run: node deploy/donors/settle.mjs --check donors-data

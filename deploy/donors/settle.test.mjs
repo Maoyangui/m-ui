@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { settle, parsePledge, validName, toMicros, deviceCount, publicBoard, checkDonors, run, ADDRESS, USDT, TOPIC, MAX_MICROS, PENDING_KEEP } from './settle.mjs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { settle, parsePledge, validName, toMicros, deviceCount, publicBoard, checkDonors, run, check, trackSources, staleSources, ADDRESS, USDT, TOPIC, MAX_MICROS, PENDING_KEEP } from './settle.mjs';
+
+const SETTLE = fileURLToPath(new URL('./settle.mjs', import.meta.url));
 
 // 测试一律不联网:stats 的下载计数是公开的(打一次就多算一台),ntfy、TronGrid 也是别人的服务。
 // run() 都传假的 fetch;万一哪里漏了走到全局 fetch,直接失败。
@@ -434,4 +438,108 @@ test('run:手动记账的名字不合规时不上榜(面板也不会显示),并�
   assert.deepEqual(read(d, 'donors.json').donors, [{ name: 'Larry Wang', total: 10 }]);
   assert.match(warns.join('\n'), /a\.com/);
   assert.equal(read(d, 'state.json').donors['a.com'], 5000000);
+});
+
+// ---- 数据源多久没读成功(state.sources):一直读不到时运行不能还算成功 ----
+
+test('trackSources:读成功记 okAt(50 分钟内不重复挪,免得每次运行都多一个提交),失败记错误和从什么时候开始失败', () => {
+  const t = 1_800_000_000;
+  let s = trackSources(undefined, {}, t);
+  assert.deepEqual(s, { ntfy: { okAt: t }, tron: { okAt: t }, stats: { okAt: t } });
+  s = trackSources(s, {}, t + 600);
+  assert.equal(s.ntfy.okAt, t, '50 分钟内不挪');
+  s = trackSources(s, {}, t + 3000);
+  assert.equal(s.ntfy.okAt, t + 3000);
+  s = trackSources(s, { tron: 'https://api.trongrid.io/v1/accounts/X/transactions/trc20?only_to=true&min_timestamp=1 → 429' }, t + 3600);
+  assert.deepEqual(s.tron, { okAt: t + 3000, err: 'https://api.trongrid.io/v1/accounts/X/transactions/trc20 → 429', errAt: t + 3600 }, '错误里去掉查询参数(每次都变的话,失败期间每次运行都多一个提交)');
+  assert.deepEqual(s.ntfy, { okAt: t + 3000 }, '别的数据源不受影响');
+  s = trackSources(s, { tron: 'fetch failed' }, t + 7200);
+  assert.deepEqual(s.tron, { okAt: t + 3000, err: 'fetch failed', errAt: t + 3600 }, '一直失败:errAt 是开始失败的时间');
+  s = trackSources(s, {}, t + 7300);
+  assert.deepEqual(s.tron, { okAt: t + 7300 }, '恢复了马上记');
+  assert.deepEqual(trackSources({ stats: { okAt: 'x' } }, { stats: 'boom' }, t).stats, { err: 'boom', errAt: t }, '没有成功过的记录');
+  assert.deepEqual(trackSources({ ntfy: { okAt: t + DAY } }, {}, t).ntfy, { okAt: t }, '记录的时间比现在还晚(手改坏了)就按现在记');
+});
+
+test('staleSources:还在失败、距上次成功超过 6 小时的数据源', () => {
+  const t = 1_800_000_000;
+  const src = {
+    ntfy: { okAt: t - 7 * H, err: 'x', errAt: t - 6 * H },
+    tron: { okAt: t - 5 * H, err: 'y', errAt: t - 4 * H },
+    stats: { okAt: t - 9 * H }, // 最近一次是读成功的:不算(多久没运行由 donors.yml 的第一步管)
+  };
+  assert.deepEqual(staleSources(src, t).map(x => [x.source, x.since]), [['ntfy', t - 7 * H]]);
+  assert.deepEqual(staleSources({ stats: { err: 'z', errAt: t - 7 * H } }, t).map(x => [x.source, x.since]), [['stats', t - 7 * H]], '没成功过的,从开始失败算');
+  assert.deepEqual(staleSources(undefined, t), []);
+  assert.deepEqual(staleSources({ ntfy: 'x', tron: null }, t), []);
+});
+
+test('run:每个数据源最近一次读成功的时间和错误记进 state.sources;榜单 donors.json 不变', async () => {
+  const now = 1_800_000_000;
+  const d = workdir({ donors: {} });
+  const r = await run({ dir: d, fetch: fakeNet({ now, tronStatus: 502 }).fetch, now, ...quiet });
+  const s = read(d, 'state.json');
+  assert.deepEqual(s.sources.ntfy, { okAt: now });
+  assert.deepEqual(s.sources.stats, { okAt: now });
+  assert.equal(s.sources.tron.errAt, now);
+  assert.match(s.sources.tron.err, /502/);
+  assert.doesNotMatch(s.sources.tron.err, /min_timestamp/);
+  assert.equal(s.sources.tron.okAt, undefined);
+  assert.deepEqual(Object.keys(read(d, 'donors.json')).sort(), ['devices', 'devicesAt', 'donors', 'updatedAt']);
+  assert.deepEqual(r.problems, [], '才失败一次,不报');
+  // ping 文件里的计数不是整数:也算读不到
+  const d2 = workdir({ donors: {} });
+  const r2 = await run({ dir: d2, fetch: fakeNet({ now, count: '12' }).fetch, now, ...quiet });
+  assert.equal(r2.ok.stats, false);
+  assert.match(read(d2, 'state.json').sources.stats.err, /计数/);
+});
+
+test('run + check:TronGrid 超过 6 小时没读成功,照常保存算出来的状态;check 写进摘要、报错', async () => {
+  const now = 1_800_000_000;
+  const sources = { ntfy: { okAt: now - 600 }, tron: { okAt: now - 7 * H, err: 'old', errAt: now - 6 * H }, stats: { okAt: now - 600 } };
+  const d = workdir({ donors: {}, pending: [pledge('p1', 'A', 5.037, now - 600)], sources });
+  const logs = [];
+  const r = await run({ dir: d, fetch: fakeNet({ now, ntfy: [ntfyMsg('p2', 'B', '2.011', now - 100)], tronStatus: 503 }).fetch, now, log: m => logs.push(m), warn() {} });
+  assert.equal(r.problems.length, 1);
+  assert.match(r.problems[0], /TronGrid/);
+  assert.match(logs.join('\n'), /TronGrid/);
+  const s = read(d, 'state.json');
+  assert.deepEqual(s.pending.map(p => p.id), ['p1', 'p2'], '照常收留名、保存');
+  assert.deepEqual(s.sources.tron, { okAt: now - 7 * H, err: s.sources.tron.err, errAt: now - 6 * H });
+  assert.match(s.sources.tron.err, /503/);
+  // donors.yml 最后一步:写进这次运行的摘要,返回问题(命令行据此非零退出)
+  const summary = path.join(d, 'summary.md');
+  const problems = check({ dir: d, now: now + 60, summary, log() {} });
+  assert.equal(problems.length, 1);
+  const md = fs.readFileSync(summary, 'utf8');
+  assert.match(md, /TronGrid/);
+  assert.match(md, /7 小时/);
+  assert.match(md, /503/);
+  // 恢复之后不再报
+  await run({ dir: d, fetch: fakeNet({ now: now + 600 }).fetch, now: now + 600, ...quiet });
+  assert.deepEqual(check({ dir: d, now: now + 660, summary: path.join(d, 'ok.md'), log() {} }), []);
+  assert.equal(fs.existsSync(path.join(d, 'ok.md')), false);
+});
+
+test('命令行 --check:有问题时写摘要、打 ::error:: 并以 1 退出;没问题退出 0(不联网)', () => {
+  const now = Math.floor(Date.now() / 1000); // 命令行用真实的时间
+  const bad = workdir({ donors: {}, sources: { ntfy: { okAt: now - 13 * H, err: 'fetch failed', errAt: now - 12 * H }, tron: { okAt: now - 60 }, stats: { okAt: now - 60 } } });
+  const md = path.join(bad, 'summary.md');
+  let cli = spawnSync(process.execPath, [SETTLE, '--check', bad], { env: { ...process.env, GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: md }, encoding: 'utf8' });
+  assert.equal(cli.status, 1, cli.stderr + cli.stdout);
+  assert.match(cli.stdout, /::error::.*ntfy/);
+  assert.match(fs.readFileSync(md, 'utf8'), /ntfy/);
+  const good = workdir({ donors: {}, sources: { ntfy: { okAt: now - 5 * H, err: 'fetch failed', errAt: now - 4 * H }, tron: { okAt: now - 60 }, stats: { okAt: now - 60 } } });
+  cli = spawnSync(process.execPath, [SETTLE, '--check', good], { env: { ...process.env, GITHUB_STEP_SUMMARY: path.join(good, 'summary.md') }, encoding: 'utf8' });
+  assert.equal(cli.status, 0, cli.stderr + cli.stdout);
+  assert.equal(fs.existsSync(path.join(good, 'summary.md')), false);
+});
+
+test('donors.yml:先提交算出来的状态,再跑 --check 让运行失败;多久没运行只看有没有跑,不看成没成功', () => {
+  const yml = fs.readFileSync(new URL('../../.github/workflows/donors.yml', import.meta.url), 'utf8');
+  const push = yml.indexOf('push -q origin HEAD:donors'), chk = yml.indexOf('node deploy/donors/settle.mjs --check donors-data');
+  assert.ok(push > 0 && chk > push, '--check 要在推送之后');
+  assert.ok(yml.indexOf('--check') > push, '对账那一步里不能带 --check(非零退出会跳过提交)');
+  assert.doesNotMatch(yml, /runs\?status=success/);
+  assert.match(yml, /runs\?status=completed/);
 });
