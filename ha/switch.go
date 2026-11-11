@@ -109,6 +109,7 @@ type switcher struct {
 	running   bool
 	fencing   bool       // 正在以更高纪元隔离目标:这一轮状态要带撤销
 	lastProbe time.Time  // 结果不明时上次问目标的时间
+	lastFence time.Time  // 上次隔离没做成的时间(隔离要推全部副机:失败后隔一会儿再试)
 	saveMu    sync.Mutex // 进度的写入:变为副机之后不再被别处的进度盖掉
 	unkMu     sync.Mutex // 结果不明的收尾(定时问目标、放弃)同一时间只做一件
 }
@@ -902,6 +903,9 @@ func (w *switcher) fence(st SwitchState, actor string) error {
 	w.fencing = false
 	w.mu.Unlock()
 	if err != nil {
+		w.mu.Lock()
+		w.lastFence = time.Now()
+		w.mu.Unlock()
 		logger.Warning("容灾:隔离设为主机的目标失败(保持冻结,稍后再试): ", err)
 		if until := s.now().Add(2 * time.Minute).Unix(); s.freezeUntil() < until {
 			_ = s.set(map[string]string{KeyFreezeUntil: strconv.FormatInt(until, 10)})
@@ -965,7 +969,12 @@ func (w *switcher) tickUnknown() {
 		st = s.switchState()
 	}
 	if s.now().Unix() >= st.FreezeUntil { // 冻结截止(交接标记也作废了)仍不明:不再等它,隔离
-		_ = w.fence(st, "")
+		w.mu.Lock()
+		recent := !w.lastFence.IsZero() && time.Since(w.lastFence) < 30*time.Second
+		w.mu.Unlock()
+		if !recent {
+			_ = w.fence(st, "")
+		}
 		return
 	}
 	w.mu.Lock()
