@@ -55,8 +55,9 @@ func TestHASetMasterE2E(t *testing.T) {
 	}
 	tw.restart()
 	hk.restart()
-	if tw.isNode() || tw.setting(ha.KeyEpoch) != "1" {
-		t.Fatalf("TW 应以纪元 1 成为主机: node=%v epoch=%s", tw.isNode(), tw.setting(ha.KeyEpoch))
+	// 没进过纪元的集群:设为主机先进入纪元 1(目标要先认本机的签名公钥),目标以纪元 2 接手
+	if tw.isNode() || tw.setting(ha.KeyEpoch) != "2" {
+		t.Fatalf("TW 应以纪元 2 成为主机: node=%v epoch=%s", tw.isNode(), tw.setting(ha.KeyEpoch))
 	}
 	checkMasterData(t, tw, 1000)
 	if !haAudited(tw, "became-master") || !haAudited(hk, "became-node") {
@@ -79,8 +80,8 @@ func TestHASetMasterE2E(t *testing.T) {
 		in *haInst
 		id uint
 	}{{hk, hkId}, {jp, jpId}} {
-		if n.in.setting(ha.KeyEpoch) != "1" || n.in.setting(ha.KeyMasterId) != strconv.Itoa(int(twId)) {
-			t.Fatalf("%s 要改听 TW(纪元 1): epoch=%s master=%s", n.in.name, n.in.setting(ha.KeyEpoch), n.in.setting(ha.KeyMasterId))
+		if n.in.setting(ha.KeyEpoch) != "2" || n.in.setting(ha.KeyMasterId) != strconv.Itoa(int(twId)) {
+			t.Fatalf("%s 要改听 TW(纪元 2): epoch=%s master=%s", n.in.name, n.in.setting(ha.KeyEpoch), n.in.setting(ha.KeyMasterId))
 		}
 		if st, ok := tw.R().Hub().StatusOf(n.id); !ok || !st.Synced {
 			t.Fatalf("%s 要在新主机那里同步上: %+v", n.in.name, st)
@@ -112,15 +113,15 @@ func TestHASetMasterE2E(t *testing.T) {
 	}
 	nw.restart()
 	tw.restart()
-	if nw.isNode() || nw.setting(ha.KeyEpoch) != "2" {
-		t.Fatal("全新实例应以纪元 2 成为主机")
+	if nw.isNode() || nw.setting(ha.KeyEpoch) != "3" {
+		t.Fatal("全新实例应以纪元 3 成为主机")
 	}
 	checkMasterData(t, nw, 1000)
 	nw.sync()
 	nw.sync()
 	for _, in := range []*haInst{hk, tw, jp} {
-		if in.setting(ha.KeyEpoch) != "2" || !in.isNode() {
-			t.Fatalf("%s 要改听全新的主机(纪元 2)", in.name)
+		if in.setting(ha.KeyEpoch) != "3" || !in.isNode() {
+			t.Fatalf("%s 要改听全新的主机(纪元 3)", in.name)
 		}
 	}
 }

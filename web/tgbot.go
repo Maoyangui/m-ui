@@ -116,8 +116,12 @@ func (s *Server) tgCommand(text string) string {
 	name := strings.Join(args, " ") // 用户名里可能有空格
 	switch cmd {
 	case "/extend", "/reset", "/enable", "/disable", "/kick", "/backup":
-		if h := s.haSvc(); h != nil && h.Frozen() { // 正在设为主机:写操作暂停
-			return notify.Esc(h.FrozenText())
+		if h := s.haSvc(); h != nil { // 正在设为主机:写操作暂停;没冻结的写登记在途,做完才放
+			done, ok := h.BeginWrite()
+			if !ok {
+				return notify.Esc(h.FrozenText())
+			}
+			defer done()
 		}
 	}
 	switch cmd {

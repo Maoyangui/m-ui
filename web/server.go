@@ -465,10 +465,15 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 			return
 		}
-		// 正在设为主机:写操作暂停(主机容灾自己的接口除外,要看进度)
-		if frozen, msg := s.haFrozen(r); frozen && !strings.HasPrefix(r.URL.Path, innerBase+"api/ha") {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
-			return
+		// 正在设为主机:写操作暂停(主机容灾自己的接口另外处理:要看进度、要能放弃);没冻结的写登记在途,
+		// 设为主机置冻结后等它们做完才导出
+		if !strings.HasPrefix(r.URL.Path, innerBase+"api/ha") {
+			done, ok, msg := s.haWrite(r)
+			if !ok {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+				return
+			}
+			defer done()
 		}
 		next(w, r)
 	}

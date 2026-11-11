@@ -1966,6 +1966,16 @@ func Run(dbPath string) error {
 func (r *Runner) newSubServer() *sub.Server {
 	s := sub.NewServer(r.db)
 	s.TLS = &r.tls
+	s.WriteGate = func() (func(), bool, string) { // 设为主机冻结写操作时订阅页也不能改共享状态(容灾服务在 New 里随后建好)
+		if r.ha == nil {
+			return func() {}, true, ""
+		}
+		done, ok := r.ha.BeginWrite()
+		if !ok {
+			return done, false, r.ha.FrozenText()
+		}
+		return done, true, ""
+	}
 	s.OnShareChange = func(name string, kick bool) {
 		go func() {
 			if err := r.ReloadUsers(); err != nil {

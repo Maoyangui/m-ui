@@ -69,6 +69,8 @@ type Service struct {
 	eng         *engine
 	sw          *switcher
 	inc         *incoming
+	gate        writeGate    // 设为主机冻结写操作的闸
+	dnsAPI      atomic.Value // 换掉的 Cloudflare 接口地址(SetDNSAPI;只供测试)
 
 	clock atomic.Value // 测试换掉的钟(func() time.Time);没换用 d.Now
 
