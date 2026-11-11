@@ -10,7 +10,11 @@
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-body { overflow-x: hidden; overflow-x: clip; } /* 首页标题区的光晕左右各伸出 40vw:手机上别因此出现横向滚动(clip 不影响顶栏吸顶) */
+/* 首页标题区的光晕左右各伸出 40vw,手机上不能因此变宽。只给 body 写 overflow 不够:html 是 visible 时 body 的 overflow 会交给视口,
+   视口上的 clip 按 hidden 算,手机浏览器照样按内容宽度撑宽布局视口(390 宽的手机上首页的布局视口是 527,右边多出一条空白)。
+   html 也写 clip,body 的 clip 才留在 body 上真正裁掉光晕;clip 不建立滚动容器,顶栏照样吸顶。不认 clip 的老浏览器忽略 html 这条,和以前一样 */
+html { overflow-x: clip; }
+body { overflow-x: hidden; overflow-x: clip; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -110,6 +114,7 @@ article.doc .meta { color: var(--muted); font-size: .85rem; margin-bottom: 1.2re
 article.doc .note { background: var(--primary-soft); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .7rem .9rem; margin: 1rem 0; font-size: .95rem; }
 article.doc figure.shot { margin: 1.4rem 0; }
 article.doc figure.shot.fit, article.doc figure.shot.phone { margin-left: auto; margin-right: auto; }
+#supporters-list li { overflow-wrap: anywhere; } /* 支持者名字是捐赠人自己填的(最多 24 个字符),断不开的长名字在手机上折行,不撑出屏幕 */
 .toc { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 1.2rem; }
 .toc a { font-size: .85rem; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: .2rem .7rem; color: var(--muted); }
 .toc a:hover { color: var(--primary); border-color: var(--primary); text-decoration: none; }
