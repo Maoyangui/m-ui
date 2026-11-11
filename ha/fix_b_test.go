@@ -157,7 +157,7 @@ func TestSetMasterCommittedSeenKeepsFrozen(t *testing.T) {
 	if tgt.IncomingStage() != incCommitted || cl.agents[0].count("ha/abort") != 0 {
 		t.Fatal("看到已提交以后不能再让目标丢弃")
 	}
-	if _, err := os.Stat(promoteMarkFile(tgt.d.DBPath)); err != nil {
+	if _, err := os.Stat(promoteMetaFile(tgt.d.DBPath)); err != nil {
 		t.Fatal("提交时要写下新库的时效标记")
 	}
 	var mark struct {
@@ -165,7 +165,7 @@ func TestSetMasterCommittedSeenKeepsFrozen(t *testing.T) {
 		How     string `json:"how"`
 		Expires int64  `json:"expires"`
 	}
-	b, _ := os.ReadFile(promoteMarkFile(tgt.d.DBPath))
+	b, _ := os.ReadFile(promoteMetaFile(tgt.d.DBPath))
 	if json.Unmarshal(b, &mark) != nil || mark.Epoch != st.Epoch || mark.How != HowSetMaster || mark.Expires <= time.Now().Unix() {
 		t.Fatalf("时效标记: %s", b)
 	}

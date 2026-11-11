@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -170,7 +169,7 @@ func (in *incoming) cleanupLocked() {
 	_ = os.RemoveAll(filepath.Join(s.Dir(), "incoming"))
 	_ = os.Remove(filepath.Join(s.Dir(), "incoming.env"))
 	if _, err := os.Stat(promoteFile(s.d.DBPath)); err != nil { // 新库已经换上(或没有):上次提交留下的时效标记没用了
-		_ = os.Remove(promoteMarkFile(s.d.DBPath))
+		_ = os.Remove(promoteMetaFile(s.d.DBPath))
 	}
 	in.reset()
 }
@@ -314,12 +313,11 @@ func (s *Service) Commit(nonce string) error {
 		return errors.New("暂存的数据已经过期")
 	}
 	// 先写时效标记再换名:提交以后 10 分钟内重启才换上新库(过期的启动时改名留档,不再生效)
-	mark, _ := json.Marshal(map[string]interface{}{"epoch": in.epoch, "how": HowSetMaster, "expires": s.now().Add(promoteMarkTTL).Unix()})
-	if err := writeFileAtomic(promoteMarkFile(s.d.DBPath), mark); err != nil {
+	if err := writePromoteMeta(s.d.DBPath, promoteMeta{Epoch: in.epoch, How: HowSetMaster, Expires: s.now().Add(promoteMarkTTL).Unix()}); err != nil {
 		return err
 	}
 	if err := os.Rename(s.stagedFile(), promoteFile(s.d.DBPath)); err != nil {
-		_ = os.Remove(promoteMarkFile(s.d.DBPath))
+		_ = os.Remove(promoteMetaFile(s.d.DBPath))
 		return err
 	}
 	syncDir(filepath.Dir(s.d.DBPath))
@@ -357,9 +355,6 @@ var (
 	errAlreadyCommitted = errors.New("本机已经提交了,正在以主机身份重启")
 	errNoPinnedPub      = errors.New("本机还没钉住主机的签名公钥(没收到主机的容灾状态),不收整库数据:等主机推送一轮以后再试")
 )
-
-// promoteMarkFile 提交时写下的时效标记(<库>.promote.json):过期的新库启动时不换上。
-func promoteMarkFile(dbPath string) string { return promoteFile(dbPath) + ".json" }
 
 // committedPending 上次已经提交、新库还在等着换上(进程重启过却还是副机 = 换库没成,下次启动可能再换)。
 func (s *Service) committedPending() bool {

@@ -36,6 +36,7 @@ type Notice struct {
 	Yield    bool        `json:"yield,omitempty"`
 	Reason   string      `json:"reason,omitempty"`
 	SubKept  bool        `json:"subKept,omitempty"`  // 用户的订阅地址不变(DNS 指过来以后)
+	SubDone  bool        `json:"subDone,omitempty"`  // 订阅主机名本身的匹配记录全部改好(= DnsOutcome.SubDone)
 	DnsState string      `json:"dnsState,omitempty"` // "" | done | partial | failed | todo
 	Changes  []DnsChange `json:"changes,omitempty"`  // 改过 / 改回的 DNS 记录(原值 → 新值)
 	Items    []PlanItem  `json:"items,omitempty"`    // 带代码的告警(界面按代码翻译)
@@ -115,7 +116,9 @@ func (s *Service) afterBecame() {
 	_ = s.set(map[string]string{KeyBecame: mustJSON(b)})
 	items := identityItems(b.Identity)
 	n := Notice{Kind: "became", How: b.How, Name: b.FormerName, URL: s.panelURL(), Host: b.Identity.SubHost, IP: ip,
-		Dns: out.State == "done", DnsState: out.State, Changes: out.Changes, SubKept: b.Identity.SubURLKept, Items: items}
+		Dns: out.State == "done", SubDone: out.SubDone, DnsState: out.State, SubKept: b.Identity.SubURLKept, Items: items,
+		Changes: append(append([]DnsChange{}, out.Changes...), out.Skipped...)} // 跳过的记录(Skip 非空、To 为空)也列出,界面写明要手动改
+
 	for _, it := range items {
 		n.Warn = append(n.Warn, identityWarnText(it))
 	}

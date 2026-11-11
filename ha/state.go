@@ -255,6 +255,9 @@ func (s *Service) baseState() (State, error) {
 		st.Former = &FormerMark{Id: f.Id, SinceChange: f.SinceChange}
 	}
 	st.Revoke = s.revoked()
+	if r := s.sw.revoke(); r > st.Revoke { // 设为主机没做成 / 正在隔离目标:撤销已经发出去的交接标记
+		st.Revoke = r
+	}
 	// 设为主机的交接标记(switch.go)与收回 / 围栏给自己的交接标记:取纪元高的那个(撤销过的不再发)
 	for _, g := range []*Grant{s.sw.grant(), s.pendingGrant()} {
 		if g != nil && g.Epoch > st.Epoch && g.Epoch > st.Revoke && (st.Handover == nil || g.Epoch > st.Handover.Epoch) {
