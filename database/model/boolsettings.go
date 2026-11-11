@@ -11,7 +11,8 @@ var BoolSettings = map[string]bool{
 	"tgEnabled": true, "tgBot": true, "tgOnLogin": true, "tgOnUserDisabled": true, "tgOnUserExpiring": true,
 	"tgOnQuota": true, "tgOnRuleLimit": true, "tgOnUpstream": true, "tgOnCore": true, "tgOnReach": true, "tgOnCert": true, "tgDaily": true,
 	"reachAuto": true, "allowPrivate": true, "blockBT": true, "nodeMode": true, "backupTelegram": true,
-	"haWitness": true, // 主机容灾的境外测点见证(在主机容灾设置里改;命令行 m-ui set 写它也规整)
+	"haWitness":    true, // 主机容灾的境外测点见证(在主机容灾设置里改;命令行 m-ui set 写它也规整)
+	"haAllowPlain": true, // 主机容灾:允许明文链接的副机当备用
 }
 
 // NormBoolSetting 把开关类设置的写法规整成 "true" / "false";空值原样保留(表示用默认值)。ok=false 表示认不出。
