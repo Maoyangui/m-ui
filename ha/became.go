@@ -111,7 +111,7 @@ func (s *Service) afterBecame() {
 	out := s.becameDNS(&b, ip)
 	_ = s.set(map[string]string{KeyBecame: mustJSON(b)})
 	n := Notice{Kind: "became", How: b.How, Name: b.FormerName, URL: s.panelURL(), Host: b.Identity.SubHost, IP: ip,
-		Dns: out.SubDone, SubKept: b.Identity.SubURLKept, DnsState: out.State, Changes: out.Changes, Items: b.Identity.Warnings}
+		Dns: out.SubDone, SubKept: b.Identity.SubURLKept, DnsState: out.State, Changes: append(append([]DnsChange{}, out.Changes...), out.Skipped...), Items: b.Identity.Warnings}
 	if u := s.resellerURL(); u != "" && !strings.EqualFold(s.setting("resellerEnabled"), "false") {
 		n.Reseller = u
 	}
