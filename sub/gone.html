@@ -6,7 +6,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <title>{{if eq .Lang "zh"}}订阅地址无效{{else}}Invalid subscription link{{end}} · {{.Title}}</title>
-<link rel="icon" href="{{.Icon}}" type="image/svg+xml">
+<link rel="icon" href="{{.Icon}}" type="{{.IconType}}">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--text:#1a202c;--muted:#64748b;--border:#e2e8f0;--primary:#2563eb;--soft:#eff6ff}
 @media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--text:#e6e9ef;--muted:#8b95a5;--border:#2a313b;--primary:#3b82f6;--soft:#1e293b}}
@@ -24,11 +24,15 @@ h1{margin:0 0 .45rem;font-size:1.05rem}
 .contact .v{white-space:pre-wrap;word-break:break-word}
 .contact .v a,.notice a{color:var(--primary);text-decoration:none}.contact .v a:hover,.notice a:hover{text-decoration:underline}
 .notice{margin-top:.9rem;background:var(--soft);border-radius:10px;padding:.7rem .85rem;font-size:.86rem;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left}
+.brand{display:flex;justify-content:center;margin:0 0 1rem}.logo{display:block;height:28px;width:auto;max-width:min(160px,60vw);object-fit:contain}
+.logo.custom{height:32px;padding:2px 4px;border-radius:6px;max-width:min(168px,62vw)}
+@media(prefers-color-scheme:dark){.logo.custom{background:#f4f6f9}}
 .foot{text-align:center;color:var(--muted);font-size:.76rem;margin-top:1.2rem}
 </style>
 </head>
 <body>
 <div class="wrap">
+  <div class="brand"><img class="logo{{if .Custom}} custom{{end}}" src="{{.Icon}}" alt=""></div>
   <div class="card">
     <div class="mark">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

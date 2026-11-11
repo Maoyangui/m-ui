@@ -2,6 +2,7 @@ package sub
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"html/template"
 	"net/http"
@@ -65,6 +66,15 @@ func (s *Server) pageLogo(rs *model.Reseller) (model.PageLogo, bool) {
 func (s *Server) pageIcon(rs *model.Reseller, key string) (template.URL, string) {
 	if sum, mime := s.pageLogoMeta(rs); sum != "" {
 		return template.URL("./" + url.PathEscape(key) + "/logo?v=" + url.QueryEscape(sum)), mime
+	}
+	return template.URL(brand.DataURI), builtinIconType
+}
+
+// inlineIcon 同 pageIcon 的取法(代理的用户先用代理的,再用主面板的,都没有用内置的),但把图内联成 data URI:
+// 「订阅地址无效」页的地址对不上任何人,./<地址>/logo 在那里是 404,引用不到。上传上限 64 KiB,内联得起。
+func (s *Server) inlineIcon(rs *model.Reseller) (template.URL, string) {
+	if row, ok := s.pageLogo(rs); ok {
+		return template.URL("data:" + row.Mime + ";base64," + base64.StdEncoding.EncodeToString(row.Data)), row.Mime
 	}
 	return template.URL(brand.DataURI), builtinIconType
 }
