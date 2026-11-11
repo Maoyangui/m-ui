@@ -147,7 +147,39 @@ func settingIn(db *gorm.DB, key string) string {
 	return v
 }
 
-// selfLedgerLeftover 本机是主机、没有在设为主机,却还开着另记账本的开关(交接收尾时进程退出了):清掉。
-func (s *Service) selfLedgerLeftover() bool {
-	return !s.IsNode() && strings.TrimSpace(s.setting(KeySelfLedger)) != ""
+// selfLedgerLeftover 本机是主机、没有在设为主机,却还开着另记账本的开关(交接收尾时清它出了错,或者进程退出了):返回开关里
+// 那本账的纪元,没有为空。读到之后要清的话用 dropSelfLedger,只清这一本。
+func (s *Service) selfLedgerLeftover() string {
+	if s.IsNode() {
+		return ""
+	}
+	v := s.setting(KeySelfLedger)
+	if strings.TrimSpace(v) == "" {
+		return ""
+	}
+	return v
+}
+
+// dropSelfLedger 清掉交接收尾时没清成、留下来的那本另记的账(纪元 epoch,selfLedgerLeftover 读到的):开关还是它、本机也还不是副机,
+// 才在同一笔事务里关开关、清账本。看过之后管理员又发起了一次设为主机、另起了新的一本,开关就不是它了,不动 ——
+// 以前看过就不管三七二十一清掉,新开的这本连同开关一起没了:导出的整库数据里没有它,原主机从导出到变为副机之间的流量就丢了。
+// 已经变为副机的,账本是副机自己的账,也不动。
+func (s *Service) dropSelfLedger(epoch string) {
+	err := s.d.DB.Transaction(func(tx *gorm.DB) error {
+		var node string
+		if err := tx.Raw("SELECT value FROM settings WHERE key = ?", "nodeMode").Scan(&node).Error; err != nil {
+			return err
+		}
+		if strings.EqualFold(strings.TrimSpace(node), "true") {
+			return nil
+		}
+		r := tx.Exec("UPDATE settings SET value = '' WHERE key = ? AND value = ?", KeySelfLedger, epoch)
+		if r.Error != nil || r.RowsAffected != 1 {
+			return r.Error
+		}
+		return tx.Exec("DELETE FROM agent_counters").Error
+	})
+	if err != nil {
+		logger.Warning("容灾:清掉设为主机途中另记的账本失败(下一轮再清): ", err)
+	}
 }

@@ -1076,8 +1076,10 @@ func (w *switcher) tick() {
 		s.invalidate()
 		logger.Info("容灾:写操作冻结到期,已解冻")
 	}
-	if s.selfLedgerLeftover() { // 设为主机已经收尾(没做成),另记账本的开关还开着:收尾时进程退出了
-		s.stopSelfLedger()
+	// 设为主机已经收尾(没做成),另记账本的开关还开着:收尾时清它出了错,或者进程退出了。读到开关之后再看一眼没在设为主机 ——
+	// 开头那一眼之后管理员可能刚发起了一次,读到的就是新开的那本;清的时候也只清读到的这一本(见 dropSelfLedger)
+	if e := s.selfLedgerLeftover(); e != "" && !w.isRunning() {
+		s.dropSelfLedger(e)
 	}
 }
 
