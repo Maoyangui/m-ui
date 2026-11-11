@@ -12,7 +12,7 @@ export async function render(el) {
   el.innerHTML = `
     <div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="plan.add">${t('plan.add')}</button></div>
     <div class="table-wrap"><table class="grid">
-      <thead><tr><th>${t('common.name')}</th><th>${t('plan.quota')}</th><th>${t('plan.days')}</th><th>${t('user.devices')}</th><th>${t('user.speed')}</th><th>${t('plan.reset')}</th><th>${t('plan.lines')}</th><th>${t('plan.users')}</th>${isReseller() ? '' : `<th>${t('plan.rules')}</th>`}<th></th></tr></thead>
+      <thead><tr><th>${t('common.name')}</th><th>${t('plan.quota')}</th><th>${t('plan.days')}</th><th>${t('user.devices')}</th><th class="c-p2">${t('user.speed')}</th><th class="c-p3">${t('plan.reset')}</th><th>${t('plan.lines')}</th><th>${t('plan.users')}</th>${isReseller() ? '' : `<th class="c-p3">${t('plan.rules')}</th>`}<th></th></tr></thead>
       <tbody id="plans-body"></tbody>
     </table></div>`;
   if (!isReseller()) rules = await get('rules').catch(() => []) || [];
@@ -37,11 +37,11 @@ function renderRows() {
       <td class="num">${p.volumeGb ? p.volumeGb + ' GB' : t('common.unlimited')}</td>
       <td class="num">${p.days ? p.days + ' ' + t('common.day') : t('common.unlimited')}${p.days && p.firstUse ? `<div class="sub-cell">${t('plan.firstUseShort')}</div>` : ''}</td>
       <td class="num">${p.deviceLimit || '∞'}</td>
-      <td class="num">${(p.speedUp || p.speedDown) ? `${p.speedUp || '∞'}/${p.speedDown || '∞'} M` : '∞'}</td>
-      <td>${p.autoReset ? badge(p.resetDays + ' ' + t('common.day'), 'primary') : badge(t('common.no'))}</td>
+      <td class="num c-p2">${(p.speedUp || p.speedDown) ? `${p.speedUp || '∞'}/${p.speedDown || '∞'} M` : '∞'}</td>
+      <td class="c-p3">${p.autoReset ? badge(p.resetDays + ' ' + t('common.day'), 'primary') : badge(t('common.no'))}</td>
       <td class="num">${lines || t('plan.keepLines')}</td>
       <td class="num">${p.userCount ? `<a href="#" data-act="plan.users" data-id="${p.id}">${p.userCount}</a>` : '<span class="muted">0</span>'}</td>
-      ${isReseller() ? '' : `<td>${ruleChips(p)}</td>`}
+      ${isReseller() ? '' : `<td class="c-p3">${ruleChips(p)}</td>`}
       <td class="actions">
         <button class="btn sm" data-act="plan.edit" data-id="${p.id}">${t('common.edit')}</button>
         <button class="btn sm danger" data-act="plan.del" data-id="${p.id}">${t('common.delete')}</button>

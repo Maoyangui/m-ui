@@ -43,7 +43,7 @@ export async function render(el) {
     <section class="card">
       <div class="card-head"><h2>${t('cert.store')}</h2><span class="muted small">${t('cert.storeCount', { n: certs().length })}</span></div>
       ${certs().length ? `<div class="table-wrap"><table class="grid">
-        <thead><tr><th>${t('cert.subject')}</th><th>${t('cert.issuer')}</th><th>${t('cert.validity')}</th><th>${t('cert.renewCol')}</th><th>${t('cert.usedBy')}</th><th></th></tr></thead>
+        <thead><tr><th>${t('cert.subject')}</th><th class="c-p2">${t('cert.issuer')}</th><th>${t('cert.validity')}</th><th>${t('cert.renewCol')}</th><th>${t('cert.usedBy')}</th><th></th></tr></thead>
         <tbody>${certs().map(storeRow).join('')}</tbody>
       </table></div>` : `<p class="muted">${t('cert.none')}</p>`}
     </section>
@@ -92,7 +92,7 @@ function storeRow(c) {
   if ((c.lineNames || []).length) uses.push(`<span class="badge" title="${esc(c.lineNames.join('、'))}">${t('cert.nLines', { n: c.lineNames.length })}</span>`);
   return `<tr>
     <td class="primary-cell">${esc(certLabel(c.name))}${domains.length && !(domains.length === 1 && domains[0] === c.name) ? `<div class="sub-cell">${domains.map(esc).join(', ')}</div>` : ''}</td>
-    <td>${sourceBadge(c)}<div class="sub-cell">${esc(i.issuer || '')}</div></td>
+    <td class="c-p2">${sourceBadge(c)}<div class="sub-cell">${esc(i.issuer || '')}</div></td>
     <td>${i.exists ? `${fmtDay(new Date(i.notAfter).getTime() / 1000)} ${certBadge(i, c)}` : `<span class="danger small">${esc(trErr(i.error || t('cert.none')))}</span>`}</td>
     <td>${renewCell(c)}</td>
     <td>${uses.join(' ') || '<span class="muted">—</span>'}</td>

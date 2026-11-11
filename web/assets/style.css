@@ -120,6 +120,8 @@ main#page[data-layout="fluid"] { max-width: var(--page-max-fluid); }
 .toolbar { display: flex; align-items: center; gap: .5rem; margin-bottom: .65rem; flex-wrap: wrap; }
 .toolbar .grow { flex: 1; min-width: 1rem; }
 .toolbar input[type=search] { max-width: 16rem; }
+/* 工具栏里的分段按钮(线路页的协议筛选、用户页的状态筛选)放不下时自己折行,不把整页撑出横向滚动 */
+.toolbar .seg { flex-wrap: wrap; max-width: 100%; }
 
 /* ===== 表格 ===== */
 .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow-x: auto; }
@@ -393,7 +395,7 @@ details.cert-log[open] > summary::after { content: "▴"; }
 
 /* ===== 弹窗 / toast ===== */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; padding: 1rem; z-index: 50; }
-.modal-box { width: 100%; max-width: 36rem; max-height: min(92dvh, 64rem); display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0; box-shadow: var(--shadow-lg); }
+.modal-box { width: 100%; max-width: 36rem; max-height: 92vh; max-height: min(92vh, 64rem); max-height: min(92dvh, 64rem); display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0; box-shadow: var(--shadow-lg); }
 .modal-box.wide { max-width: min(56rem, 96vw); }
 .modal-box.xl { max-width: min(76rem, 96vw); }
 .modal-box > h2 { margin: 0; padding: 1rem 1.1rem .7rem; font-size: 1rem; flex: none; }
@@ -630,20 +632,23 @@ details.api-list { margin-top: .6rem; }
   .main > :is(#reload-bar, #cert-bar, #reach-bar-top) > span:first-child { -webkit-line-clamp: 3; }
   .main > .alert-bar > .row, .main > .alert-bar > .btn { align-self: flex-end; }
 }
-/* 主机容灾的顶部条:一次性提示最多同时露两条(点「知道了」后下一条补上);概况页上失联、写操作暂停这两条由「需要处理」那一行代替 */
-.main > .alert-bar[data-ha^="ha-n-"] ~ .alert-bar[data-ha^="ha-n-"] ~ .alert-bar[data-ha^="ha-n-"] { display: none; }
+/* 主机容灾的顶部条:一次性提示最多同时露最新的两条(新的追加在后面,所以藏的是后面还跟着两条及以上的那些;点「知道了」后更早的一条补上);
+   不支持 :has 的浏览器全部显示,不会误藏。概况页上失联、写操作暂停这两条由「需要处理」那一行代替 */
+.main > .alert-bar[data-ha^="ha-n-"]:has(~ .alert-bar[data-ha^="ha-n-"] ~ .alert-bar[data-ha^="ha-n-"]) { display: none; }
 .main:has(> #page[data-page="dashboard"]) > .alert-bar:is([data-ha="ha-lost"], [data-ha="ha-frozen"]) { display: none; }
 
 /* 长表:宽屏时表格自带限高滚动区,表头吸在区域顶部,横向滚动条始终在视口里;手机仍是卡片 + 页面滚动 */
 @media (min-width: 701px) {
-  .table-wrap.fill { overflow: auto; max-height: max(18rem, calc(100dvh - var(--topbar-h) - var(--fill-reserve, 7.5rem))); }
+  .table-wrap.fill { overflow: auto; max-height: max(18rem, calc(100vh - var(--topbar-h) - var(--fill-reserve, 7.5rem))); max-height: max(18rem, calc(100dvh - var(--topbar-h) - var(--fill-reserve, 7.5rem))); }
 }
 /* 列优先级:窗口不够宽时先藏 c-p3,再藏 c-p2(表头与单元格同名 class) */
 @media (min-width: 701px) and (max-width: 1239px) { .grid .c-p3 { display: none; } }
 @media (min-width: 701px) and (max-width: 1099px) { .grid .c-p2 { display: none; } }
 /* 单元格里很长的一段(上游名):一行省略,全文在 title */
 .cell-clip { display: inline-block; max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-@media (max-width: 1239px) { .cell-clip { max-width: 6.5rem; } }
+@media (min-width: 701px) and (max-width: 1239px) { .cell-clip { max-width: 6.5rem; } }
+/* 手机卡片里不截断:触屏点不出 title,上游名等要能看全 */
+@media (max-width: 700px) { .cell-clip { display: inline; max-width: none; white-space: normal; overflow: visible; } }
 .pc-err { color: var(--danger); font-size: .85rem; padding: .5rem 0; }
 label.switch.sm { width: 28px; height: 16px; vertical-align: middle; }
 label.switch.sm span::before { width: 12px; height: 12px; }
@@ -743,9 +748,10 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
 .stat .k { display: block; }
 .stat.warn { border-color: var(--warn); } .stat.warn .s { color: var(--warn); }
 .stats.stale { opacity: .7; }
-/* 三行共用一套列(subgrid):标签列按最长的标签定宽,英文的 Memory 不会压到进度条上,三条进度条照样对齐 */
+/* 三行共用一套列(subgrid):标签列按最长的标签定宽,英文的 Memory 不会压到进度条上,三条进度条照样对齐。
+   不认识 subgrid 的浏览器丢掉后一条,用前一条的固定列宽(每行各自成网格,标签列定宽才能对齐) */
 .meters { display: grid; grid-template-columns: max-content minmax(0, 1fr) 2.6rem; gap: .25rem .35rem; margin-top: .3rem; }
-.meter { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; font-size: .74rem; color: var(--muted); }
+.meter { grid-column: 1 / -1; display: grid; grid-template-columns: 4.2em minmax(0, 1fr) 2.6rem; column-gap: .35rem; grid-template-columns: subgrid; align-items: center; font-size: .74rem; color: var(--muted); }
 .meter .progress { margin: 0; min-width: 0; }
 .meter > span:last-child { text-align: right; font-family: var(--mono); }
 /* 卡片头的小字:人数、口径、过期徽章 */

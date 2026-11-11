@@ -23,7 +23,7 @@ export async function render(el) {
       <span class="grow"></span><button class="btn primary" data-act="rs.add">${t('rs.add')}</button></div>
     <div class="table-wrap"><table class="grid">
       <thead><tr><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('rs.users')}</th><th>${t('rs.used')}</th>
-        <th>${t('rs.devices')}</th><th>${t('rs.speed')}</th><th>${t('user.expiry')}</th><th>${t('rs.online')}</th><th></th></tr></thead>
+        <th>${t('rs.devices')}</th><th class="c-p3">${t('rs.speed')}</th><th>${t('user.expiry')}</th><th class="c-p2">${t('rs.online')}</th><th></th></tr></thead>
       <tbody id="rs-body"></tbody>
     </table></div>
     <p class="hint">${esc(t('rs.panelHint', { url: panelURL() }))}</p>`;
@@ -85,9 +85,9 @@ function renderRows() {
     <td class="num">${r.users} / ${r.userLimit || '∞'}</td>
     <td class="num">${fmtBytes(r.used)}${r.volume ? ' / ' + fmtBytes(r.volume) : ''}${progress(r.used, r.volume)}</td>
     <td class="num">${r.online} / ${r.deviceLimit || '∞'}${r.poolRejects ? ' <span class="badge warn" title="' + esc(t('rs.poolFull', { n: r.poolRejects })) + '">!</span>' : ''}</td>
-    <td class="num">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'}/${r.speedDown || '∞'} M` : '∞'}</td>
+    <td class="num c-p3">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'}/${r.speedDown || '∞'} M` : '∞'}</td>
     <td class="${expired(r) ? 'danger' : ''}">${r.expiry ? fmtDay(r.expiry) : `<span class="muted small">${t('user.never')}</span>`}</td>
-    <td class="num">${r.online}</td>
+    <td class="num c-p2">${r.online}</td>
     <td class="actions">
       <button class="btn sm" data-act="rs.detail" data-id="${r.id}">${t('common.details')}</button>
       <button class="btn sm" data-act="rs.edit" data-id="${r.id}">${t('common.edit')}</button>
