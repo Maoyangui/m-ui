@@ -47,6 +47,7 @@ export function dict(o) {
   if (isTable(o)) for (const [k, v] of Object.entries(o)) d[k] = v;
   return d;
 }
+const validMicros = m => Number.isSafeInteger(m) && m >= 1e6; // donors 里的值:微 USDT 整数,至少 1 USDT
 
 export const toMicros = s => {
   const m = /^(\d{1,9})(?:\.(\d{1,6}))?$/.exec(String(s));
@@ -65,8 +66,12 @@ export function parsePledge(msg) {
 
 // 对账:纯函数,不碰网络。state = { pending, seenTx, donors:{名字:微 USDT}, blocked:[] }。
 // transfers 为 null 表示这次读不到到账:新留名照样收进待对账,但不对账,待对账也先不按 48 小时清(它们还没核对过)。
+// 手动记账把某个名字(或整个 donors)写错了:这个名字的到账先不记,不和错的值相加(666 加上 5.037 USDT 就成了"合法"的
+// 5037666,错误从此看不出来);留名留在待对账里,这笔到账也不算对过,改好后下一轮再对。
 export function settle(state, pledges, transfers, now) {
-  const s = { pending: [...(state.pending || [])], seenTx: [...(state.seenTx || [])], donors: dict(state.donors) };
+  const table = state.donors === undefined || isTable(state.donors);
+  const s = { pending: [...(state.pending || [])], seenTx: [...(state.seenTx || [])], donors: table ? dict(state.donors) : state.donors };
+  const creditable = name => table && (!hasOwn(s.donors, name) || validMicros(s.donors[name]));
   const blocked = new Set((state.blocked || []).map(x => x.toLowerCase()));
   const known = new Set(s.pending.map(p => p.id).concat(state.donePledges || []));
   for (const p of pledges) {
@@ -83,6 +88,7 @@ export function settle(state, pledges, transfers, now) {
       const at = Math.floor(t.block_timestamp / 1000), value = Number(t.value);
       const i = s.pending.findIndex(p => p.micros === value && p.at <= at && at <= p.at + WINDOW);
       if (i < 0) continue; // 没留名的转账不上榜;也不记下来,说不定留名消息还在路上
+      if (!creditable(s.pending[i].name)) continue; // 先到先得的那条的名字记账写错了:谁都先不记,也不能记到后留名的人头上
       const [p] = s.pending.splice(i, 1);
       s.donors[p.name] = (hasOwn(s.donors, p.name) ? s.donors[p.name] : 0) + value;
       s.seenTx.push(t.transaction_id);
@@ -123,14 +129,23 @@ export function deviceCount(points, count, now) {
   return { points: pts, devices: Math.max(0, Math.round(count - base)), reset };
 }
 
-// state.donors 的值必须是微 USDT 整数(USDT × 1000000)。手动记账写成 USDT、小数或字符串时直接报错让这次运行失败,
-// 不悄悄显示成 0.001 或拼接出来的怪数。
+// state.donors 的值必须是微 USDT 整数(USDT × 1000000)。手动记账写成 USDT、小数或字符串的,不悄悄显示成 0.001 或
+// 拼接出来的怪数。badDonors 返回写错的地方 [{ name, value }],name 为 null 表示整个 donors 就不是 {名字: 数}:
+// run 照常收留名、对账、算面板数,只是榜单留着上次的;--check 写明哪个名字、什么值不对并让运行失败。
+export function badDonors(donors) {
+  if (donors === undefined) return [];
+  if (!isTable(donors)) return [{ name: null, value: donors }];
+  return Object.entries(donors).filter(([, m]) => !validMicros(m)).map(([name, value]) => ({ name, value }));
+}
+const short = v => { const s = JSON.stringify(v); return s === undefined ? String(v) : s.length > 80 ? s.slice(0, 80) + '…' : s; };
+const badDonorText = ({ name, value }) => name === null
+  ? `state.json 的 donors 要写成 {"名字": 微 USDT 整数},现在是 ${short(value)}`
+  : `state.json 的 donors[${JSON.stringify(name)}] = ${short(value)}:要写微 USDT 整数(USDT × 1000000,至少 1000000)`;
+
+// 发榜单之前再查一遍,写错了就报错,不带着错数据发出去。
 export function checkDonors(donors) {
-  if (donors === undefined) return;
-  if (!donors || typeof donors !== 'object' || Array.isArray(donors)) throw new Error('state.json 的 donors 要写成 {"名字": 微 USDT 整数}');
-  for (const [name, m] of Object.entries(donors)) {
-    if (!Number.isSafeInteger(m) || m < 1e6) throw new Error(`state.json 的 donors[${JSON.stringify(name)}] = ${JSON.stringify(m)}:要写微 USDT 整数(USDT × 1000000,至少 1000000)`);
-  }
+  const [bad] = badDonors(donors);
+  if (bad) throw new Error(badDonorText(bad));
 }
 
 // 公开的榜单。名字和面板用同一规则:面板不显示的名字这里也不放,文档站和面板看到的一样。
@@ -201,13 +216,19 @@ const SOURCE_INFO = {
 };
 const utc = t => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
 
-// 要人处理的问题。run 写进日志;提交之后的检查(--check,donors.yml 最后一步)写进这次运行的摘要并让运行失败。
+// 要人处理的问题:数据源太久没读成功、手动记账写错。run 写进日志;提交之后的检查(--check,donors.yml 最后一步)
+// 写进这次运行的摘要并让运行失败。
 export function problems(state, now) {
-  return staleSources(state.sources, now).map(x => {
+  const out = staleSources(state.sources, now).map(x => {
     const [what, risk] = SOURCE_INFO[x.source];
     const last = x.okAt ? `上次成功是 ${utc(x.okAt)}` : `从 ${utc(x.since)} 起一直没成功过`;
     return `${what}已经 ${Math.floor((now - x.since) / 3600)} 小时没读成功(${last};最近的错误:${x.err}):${risk}`;
   });
+  for (const b of badDonors(state.donors)) {
+    out.push(`手动记账写错了:${badDonorText(b)}。改好之前榜单不更新(donors.json 留着上次的),` +
+      (b.name === null ? '到账先不记(待对账最多留 48 小时);留名和面板数照常' : '这个名字的到账先不记(待对账最多留 48 小时);留名、别的名字的对账和面板数照常'));
+  }
+  return out;
 }
 
 // GitHub Actions 的注解(::warning:: / ::error::),本地跑时原样输出。
@@ -226,8 +247,7 @@ function readState(file) {
 export async function run({ dir, fetch = globalThis.fetch, now = Math.floor(Date.now() / 1000), token = process.env.GITHUB_TOKEN, log = console.log, warn = defaultWarn } = {}) {
   if (!dir) throw new Error('用法: node deploy/donors/settle.mjs <donors 分支的工作目录>');
   const statePath = path.join(dir, 'state.json'), boardPath = path.join(dir, 'donors.json');
-  const state = readState(statePath);
-  checkDonors(state.donors); // 手动记账写错了先报出来,不带着错数据往下算
+  const state = readState(statePath); // 手动记账写错了也照常往下算:settle 不碰写错的名字,榜单留着上次的
   const get = async (url, headers = {}) => {
     const r = await fetch(url, { headers, signal: AbortSignal.timeout(30000) });
     if (!r.ok) throw new Error(url + ' → ' + r.status);
@@ -270,8 +290,12 @@ export async function run({ dir, fetch = globalThis.fetch, now = Math.floor(Date
   let old = {};
   try { old = JSON.parse(fs.readFileSync(boardPath, 'utf8')) || {}; } catch { old = {}; }
   const shown = devicesAt > 0 && now - devicesAt <= DEVICES_FRESH ? devices : 0; // 太久没算出来就不公开,老版本面板也就不显示了
-  const board = publicBoard(next, { updatedAt: old.updatedAt || now, devices: shown, devicesAt }, warn); // 不合规的名字只可能是手动记账写的,报警让人看见
-  if (changed || shown !== old.devices || JSON.stringify(board.donors) !== JSON.stringify(old.donors)) board.updatedAt = now;
+  // 手动记账写错了:榜单留着上次的(面板数照常),改好后下一轮再发;--check 写明哪里错了并让这次运行失败
+  const keep = badDonors(next.donors).length > 0;
+  const board = keep
+    ? { updatedAt: old.updatedAt || now, devices: shown, devicesAt, donors: Array.isArray(old.donors) ? old.donors : [] }
+    : publicBoard(next, { updatedAt: old.updatedAt || now, devices: shown, devicesAt }, warn); // 不合规的名字只可能是手动记账写的,报警让人看见
+  if ((changed && !keep) || shown !== old.devices || JSON.stringify(board.donors) !== JSON.stringify(old.donors)) board.updatedAt = now;
   fs.writeFileSync(statePath, JSON.stringify(next, null, 1) + '\n');
   fs.writeFileSync(boardPath, JSON.stringify(board, null, 1) + '\n');
   log(`留名 ${pledges.length} 条,待对账 ${next.pending.length} 条,上榜 ${board.donors.length} 人,运行中 ${shown} 台${changed ? ',有新到账' : ''}`);

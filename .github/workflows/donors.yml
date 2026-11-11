@@ -34,7 +34,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 只看 GitHub 有没有按时跑:被最后一步标成失败的那些(数据源太久没读到)也照常算完、提交了,算跑过;
+          # 只看 GitHub 有没有按时跑:被最后一步标成失败的那些(数据源太久没读到、手动记账写错)也照常算完、提交了,算跑过;
           # 取消、跳过的不算。对账那一步本身失败的运行也是红的,GitHub 会发通知,不靠这里
           last=$(gh api "repos/${{ github.repository }}/actions/workflows/donors.yml/runs?status=completed&per_page=30" --jq '[.workflow_runs[] | select(.conclusion == "success" or .conclusion == "failure")][0].created_at // empty')
           [ -n "$last" ] || exit 0
@@ -71,7 +71,8 @@ jobs:
           done
           echo "::error::推送 3 次都失败,这一轮的结果没有保存"
           exit 1
-      - name: 数据源太久没读到就让这次运行失败
+      - name: 数据源太久没读到、手动记账写错时让这次运行失败
         # 放在提交之后:算出来的状态已经保存,这一步只把问题写进摘要、把运行标成失败(GitHub 会发通知)。
-        # 只写警告的话没人会去翻运行记录,一直读不到的数据源(接口改了、被限流、ping 文件没了)会让留名和到账无声地丢。
+        # 只写警告的话没人会去翻运行记录:一直读不到的数据源(接口改了、被限流、ping 文件没了)会让留名和到账无声地丢,
+        # 手动记账写错时榜单一直停在上次。
         run: node deploy/donors/settle.mjs --check donors-data

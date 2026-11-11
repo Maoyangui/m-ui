@@ -400,15 +400,85 @@ test('run:计数回退后面板数不出数也不更新统计时间,满 24 小�
   assert.equal(s.devicesAt, now + DAY);
 });
 
-test('run:donors 写错时整次失败,文件不动', async () => {
+// 手动记账写错(单位、类型):以前整轮在读 ntfy 之前就失败,留名收集和面板数一起停摆,ntfy 只缓存 12 小时,留名就丢了。
+// 现在照常收留名、对账、算面板数并保存,只是榜单留着上次的;check(donors.yml 最后一步)写明哪个名字、什么值不对。
+const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+test('run:手动记账写错时照常收留名、对账、算面板数并保存,榜单留着上次的;check 写明哪个名字、什么值不对', async () => {
+  const now = 1_800_000_000;
+  for (const bad of ['50000000', 666, 50.5, null, -1]) {
+    const st = { donors: { 'Larry Wang': 10000000, maomaocloud: bad }, pings: [{ t: now - 25 * H, n: 100 }, { t: now - 20 * H, n: 110 }], devices: 9, devicesAt: now - 7 * H };
+    const oldBoard = { updatedAt: now - 7 * H, devices: 9, devicesAt: now - 7 * H, donors: [{ name: 'Larry Wang', total: 10 }, { name: 'Old Friend', total: 1 }] };
+    const d = workdir(st, oldBoard);
+    const net = fakeNet({ now, ntfy: [ntfyMsg('p1', 'Bob', '5.037', now - 1200), ntfyMsg('p2', 'Carol', '2.011', now - 100)], tron: [tx('t1', 5.037, now - 600)], count: 150 });
+    const r = await run({ dir: d, fetch: net.fetch, now, ...quiet });
+    const s = read(d, 'state.json');
+    assert.equal(s.donors.Bob, 5037000, '别的名字照常对账');
+    assert.deepEqual(s.pending.map(p => p.id), ['p2'], '照常收留名');
+    assert.deepEqual(s.donors.maomaocloud, bad, '写错的那条原样留着');
+    assert.equal(s.devices, 48);
+    assert.equal(s.devicesAt, now);
+    const b = read(d, 'donors.json');
+    assert.deepEqual(b.donors, oldBoard.donors, '榜单留着上次的');
+    assert.equal(b.devices, 48, '面板数照常更新');
+    assert.equal(b.devicesAt, now);
+    assert.equal(b.updatedAt, now, '面板数变了');
+    assert.equal(r.problems.length, 1, JSON.stringify(bad));
+    const summary = path.join(d, 'summary.md');
+    const problems = check({ dir: d, now, summary, log() {} });
+    assert.equal(problems.length, 1);
+    assert.match(problems[0], new RegExp(escapeRe(`donors["maomaocloud"] = ${JSON.stringify(bad)}`)));
+    assert.match(fs.readFileSync(summary, 'utf8'), /maomaocloud/);
+  }
+});
+
+test('run:名字的手动记账写错时,这个名字的到账先不记(不和错的值相加),留名留在待对账里;改好后下一轮补上', async () => {
   const now = 1_800_000_000;
   for (const bad of ['50000000', 666, 50.5]) {
-    const st = { donors: { maomaocloud: bad } };
-    const d = workdir(st);
-    await assert.rejects(run({ dir: d, fetch: fakeNet({ now }).fetch, now, ...quiet }), /微 USDT/);
-    assert.deepEqual(read(d, 'state.json'), st);
-    assert.equal(fs.existsSync(path.join(d, 'donors.json')), false);
+    const d = workdir({ donors: { maomaocloud: bad } }, { updatedAt: 1, devices: 0, devicesAt: 0, donors: [] });
+    // 同样金额还有一个后留名的 Bob:到账按先到先得该归 maomaocloud,不能因为它的记账写错就记到 Bob 头上
+    const msgs = [ntfyMsg('p1', 'maomaocloud', '5.037', now - 1200), ntfyMsg('p2', 'Bob', '5.037', now - 1100)], txs = [tx('t1', 5.037, now - 600)];
+    const r = await run({ dir: d, fetch: fakeNet({ now, ntfy: msgs, tron: txs, ghStatus: 503 }).fetch, now, ...quiet });
+    assert.equal(r.changed, false);
+    let s = read(d, 'state.json');
+    assert.deepEqual(s.donors, { maomaocloud: bad }, '不能拼成 "500000005037000",也不能把 666 加成"合法"的 5037666');
+    assert.deepEqual(s.pending.map(p => p.id), ['p1', 'p2']);
+    assert.deepEqual(s.seenTx, []);
+    s.donors.maomaocloud = 50000000; // 改好
+    fs.writeFileSync(path.join(d, 'state.json'), JSON.stringify(s));
+    const r2 = await run({ dir: d, fetch: fakeNet({ now: now + 600, ntfy: msgs, tron: txs, ghStatus: 503 }).fetch, now: now + 600, ...quiet });
+    assert.equal(r2.changed, true);
+    assert.deepEqual(r2.problems, []);
+    s = read(d, 'state.json');
+    assert.deepEqual(s.donors, { maomaocloud: 55037000 });
+    assert.deepEqual(s.pending.map(p => p.id), ['p2']);
+    assert.deepEqual(read(d, 'donors.json').donors, [{ name: 'maomaocloud', total: 55.037 }]);
   }
+});
+
+test('run:donors 整个写错(不是 {名字: 数}),照常收留名、算面板数,到账一笔也不记,donors 原样留着', async () => {
+  const now = 1_800_000_000;
+  for (const bad of [[], 'x', null, 5]) {
+    const d = workdir({ donors: bad, pings: [{ t: now - 25 * H, n: 100 }] }, { updatedAt: 1, devices: 0, devicesAt: 0, donors: [{ name: 'Larry Wang', total: 10 }] });
+    const r = await run({ dir: d, fetch: fakeNet({ now, ntfy: [ntfyMsg('p1', 'Bob', '5.037', now - 1200)], tron: [tx('t1', 5.037, now - 600)], count: 150 }).fetch, now, ...quiet });
+    const s = read(d, 'state.json');
+    assert.deepEqual(s.donors, bad, JSON.stringify(bad));
+    assert.deepEqual(s.pending.map(p => p.id), ['p1']);
+    assert.equal(s.devicesAt, now);
+    const b = read(d, 'donors.json');
+    assert.deepEqual(b.donors, [{ name: 'Larry Wang', total: 10 }]);
+    assert.equal(b.devices, 48);
+    assert.equal(r.problems.length, 1);
+    assert.match(r.problems[0], /donors 要写成/);
+  }
+});
+
+test('命令行 --check:手动记账写错时以 1 退出,摘要里写明名字和值', () => {
+  const d = workdir({ donors: { 'Larry Wang': 10000000, maomaocloud: '50000000' } });
+  const md = path.join(d, 'summary.md');
+  const cli = spawnSync(process.execPath, [SETTLE, '--check', d], { env: { ...process.env, GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: md }, encoding: 'utf8' });
+  assert.equal(cli.status, 1, cli.stderr + cli.stdout);
+  assert.match(cli.stdout, /::error::.*maomaocloud/);
+  assert.match(fs.readFileSync(md, 'utf8'), /donors\["maomaocloud"\] = "50000000"/);
 });
 
 test('run:手动改了 donors 也刷新 updatedAt;state 里手动加的其它字段留着', async () => {
