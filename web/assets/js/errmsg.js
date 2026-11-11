@@ -61,6 +61,8 @@ const EN = /*BEGIN*/{
 "这条上游在上游组「%s」里,先从组里去掉": "This upstream is in the group \"%s\"; remove it from the group first",
 "握手目标要填域名,不带协议和端口": "Enter a domain for the handshake target, without scheme or port",
 "Webhook 地址要是完整的 http(s) 网址": "The webhook URL must be a full http(s) address",
+"受信任的反向代理里 %q 不是有效的 IP 或网段": "Trusted reverse proxies: %q is not a valid IP address or CIDR range",
+"受信任的反向代理不能写 0.0.0.0/0 或 ::/0:那样谁都能自己写转发头,限流就没用了": "Trusted reverse proxies cannot be 0.0.0.0/0 or ::/0: anyone could then write the forwarding headers and the limits would be useless",
 "Webhook 发送失败: %w": "Webhook delivery failed: %w",
 "对方返回 %d": "The receiver returned %d",
 "线路的 IP 版本设置格式不对": "Invalid IP version setting for this line",
