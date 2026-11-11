@@ -120,14 +120,15 @@ export function openModal(title, html, onSave, opts = {}) {
     let hint = '';
     const t1 = setTimeout(() => { if (my === modalSeq) save.textContent = t('common.saving'); }, 1500);
     const t2 = setTimeout(() => { if (my === modalSeq && !err.textContent) err.textContent = hint = t('common.savingSlow'); }, 4000);
-    try { await onSave(); if (my === modalSeq) closeModal(); }
+    let closedHere = false; // 保存成功由这里关掉:closeModal 会让 modalSeq 变,收尾仍要把按钮文字、提示复原
+    try { await onSave(); if (my === modalSeq) { closeModal(); closedHere = true; } }
     catch (e) {
       if (my === modalSeq) { err.textContent = e.message; hint = ''; }
       else toast(e.message, 'err'); // 弹窗已经换成别的了,错误不能写进别人的弹窗
     }
     finally {
       clearTimeout(t1); clearTimeout(t2);
-      if (my === modalSeq) {
+      if (my === modalSeq || closedHere) {
         save.disabled = false;
         if (save.textContent === t('common.saving')) save.textContent = label;
         if (hint && err.textContent === hint) err.textContent = '';
