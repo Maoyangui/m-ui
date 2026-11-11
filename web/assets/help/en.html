@@ -173,7 +173,7 @@
     </ul>
     <div class="pit"><b>Common pitfalls</b><ul>
       <li>The server address (IP and port) is sent to the public Globalping network, by the automatic checks too; if you do not want that, untick <b data-k="set.reachAuto">Automatic checks</b> and only check by hand when needed. Without an account you get about 250 probe runs per hour and one server uses about 15; if that is not enough, add a free <b data-k="set.reachToken">Globalping token (optional)</b> in the settings.</li>
-      <li>The check uses the port of the server's first TCP line; with only hysteria2 / tuic (UDP) lines it can only tell whether the IP is blocked. Only IPv4 is checked for now.</li>
+      <li>The check uses the port of the server's first TCP line; with only hysteria2 / tuic (UDP) lines it can only tell whether the IP is blocked. Only IPv4 is checked for now: most mainland home-broadband probes have no IPv6, so testing IPv6 from them would report healthy servers as blocked (see <a href="#limits">Known limitations</a>).</li>
     </ul></div>
   </section>
 
@@ -1285,6 +1285,17 @@
       <dt>A reseller cannot sign in?</dt>
       <dd>New resellers sign in the first time with an empty password. If the 24-hour window passed or the password is forgotten, the site owner uses <b data-k="nav.resellers">Resellers</b> → <b data-k="common.more">More</b> → <b data-k="rs.passwd">Reset password</b> on the main panel.</dd>
     </dl>
+  </section>
+
+  <section class="sec" id="limits" data-scope="admin">
+    <h3>Known limitations</h3>
+    <p>These are current design limits, not faults; they may improve later.</p>
+    <ul>
+      <li><b>VLESS / VMess multiplexing (Mux) and XUDP:</b> when a client turns on Mux, or carries UDP over XUDP, one outer connection is authenticated once and the streams opened inside it never look at the user table again; the server accepts this unconditionally and no line setting can block it. Disabling or deleting a user, resetting a subscription link or kicking a user only closes the streams running inside; the outer connection stays up, and the client can open new streams in it until it reconnects. To cut it off at once, disable and re-enable the line (a full reload) or restart m-ui. Hysteria2, TUIC and AnyTLS are not affected: disabling and kicking close the whole session.</li>
+      <li><b>Device limits across servers have a window of about 5 seconds:</b> the master collects every server's online IPs and hands them out every 5 seconds, so a user who connects through several servers within those seconds can go over the limit in total. Devices that are already connected are not kicked when that happens (a full device pool only refuses new devices); the count drops back once the extra devices have been idle for about a minute.</li>
+      <li><b>A full reload does not send Hysteria2 a close notice:</b> changes such as adding or deleting a line, or changing its port or protocol, reload the whole data plane; connected Hysteria2 clients get no connection-close notice and only notice after an idle timeout of about 30 seconds, then reconnect, so it looks stuck for a while. Changes to users, speed limits and upstreams are applied hot and are not affected.</li>
+      <li><b>The mainland reachability check covers IPv4 only:</b> most mainland home-broadband probes have no IPv6, so testing IPv6 from them would report healthy servers as blocked; only IPv4 is checked, and IPv6 inbound gets a separate check from probes outside the mainland (it only shows whether the port answers and does not judge blocking). See <a href="#reach">Mainland reachability</a>.</li>
+    </ul>
   </section>
 </section>
 
