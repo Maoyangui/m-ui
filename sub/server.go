@@ -418,9 +418,9 @@ func (s *Server) Start() error {
 			logger.Error("订阅证书读不出来(", err, "):订阅先用临时自签证书顶着,仍走 HTTPS,但校验证书的客户端会更新失败。",
 				"到证书页给订阅换一张证书,或把文件放回 ", certFile, "(放回后几秒内自动换上)")
 		}
-		// 证书文件更新后自动换用,续期无需重启;客户端请求的域名写在证书库里别的证书上时用那一张
-		// (接任 / 设为主机后订阅证书是随主机身份带来的,本机原来的证书留给本机自己的域名)
-		ln = tls.NewListener(ln, certutil.NewSNI(rl, s.storeCerts(certFile)...).TLSConfig())
+		// 证书文件更新后自动换用,续期无需重启。本机接任 / 被设为主机过(订阅证书是随主机身份带来的,本机原来的证书留给
+		// 本机自己的域名):客户端请求的域名写在证书库里别的证书上时用那一张;没迁过身份的和以前一样只用订阅证书
+		ln = tls.NewListener(ln, certutil.NewSNI(rl, s.sniCerts(certFile)...).TLSConfig())
 		scheme = "https"
 	}
 	s.TLS.Set("sub", rl)
@@ -437,6 +437,14 @@ func (s *Server) Start() error {
 	}()
 	logger.Info("订阅服务已启动 ", scheme, "://", addr, subPath)
 	return nil
+}
+
+// sniCerts 订阅端口按 SNI 备选的证书:只在本机迁过主机身份(haBecame 有记录)时才有;库里的证书在订阅服务启动时读一次。
+func (s *Server) sniCerts(skip string) []*certutil.Reloader {
+	if strings.TrimSpace(s.setting("haBecame")) == "" {
+		return nil
+	}
+	return s.storeCerts(skip)
 }
 
 // storeCerts 证书库里除 skip 之外、文件读得出来的证书(订阅端口按 SNI 备选;自签的不算)。
