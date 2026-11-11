@@ -5,7 +5,7 @@ import { trErr } from '../errmsg.js';
 import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML } from '../ui.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 import { editRelayUpstream } from './upstreams.js';
-import { loadReach, reachLoaded, v6Of, v6Badge } from '../reach.js';
+import { loadReach, reachLoaded, v6Of, v6LineBadge, v6ForLine } from '../reach.js';
 
 const selected = new Set(); // 批量设置勾选的线路 id
 export const title = () => t('line.title');
@@ -101,15 +101,19 @@ function renderRows() {
   const nodeIdsOf = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
   const serversCell = l => {
     const ids = nodeIdsOf(l), fam = familyOf(l);
-    const tag = id => {
+    // 走 IPv6 的服务器后面跟这条线路自己的 IPv6 入站结论(按它的端口和传输层,见 reach.js v6ForLine)
+    const tag = (id, inAll) => {
       const n = (state.nodes || []).find(x => x.id === id);
-      return badge((n ? n.name : '#' + id) + (fam[id] ? ' · ' + famName(fam[id]) : ''), 'primary') + (n && lineUsesV6(l, n) ? ' ' + v6Badge(v6Of(id)) : '');
+      const v6 = !!n && lineUsesV6(l, n);
+      // "全部服务器"里因为默认走 IPv6 才列出来的那台,名字后面注明 IPv6(不然还没测过时看不出为什么列它)
+      const fl = fam[id] ? ' · ' + famName(fam[id]) : inAll && v6 ? ' · IPv6' : '';
+      return badge((n ? n.name : '#' + id) + fl, 'primary') + (v6 ? ' ' + v6LineBadge(v6Of(id), l) : '');
     };
-    if (!ids.length) { // 全部服务器:只把单独选了 IP 版本的列出来
-      const picked = Object.keys(fam).map(Number).filter(id => (state.nodes || []).some(x => x.id === id));
-      return `<span class="muted">${t('line.allServers')}</span>${picked.length ? ' ' + picked.map(tag).join(' ') : ''}`;
+    if (!ids.length) { // 全部服务器:把单独选了 IP 版本的、以及这条线路在上面走 IPv6 的(默认给 IPv6 的服务器)列出来
+      const shown = allServersShown(l);
+      return `<span class="muted">${t('line.allServers')}</span>${shown.length ? ' ' + shown.map(id => tag(id, true)).join(' ') : ''}`;
     }
-    return ids.map(tag).join(' ');
+    return ids.map(id => tag(id, false)).join(' ');
   };
   setHTML(body, rows.map(l => `
     <tr draggable="${query ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
@@ -168,11 +172,29 @@ function famIPs(n) {
   if (isV4Addr(a)) v4 = a; else if (a.includes(':')) v6 = a;
   return { v4, v6 };
 }
-// 这条线路在这台服务器上订阅里给不给 IPv6(和后端 sub.resolveAddrs 一致):用自定义地址的不算;
-// 单独选了、且这台有那一族的地址就按选的,否则跟服务器的默认
+// 地址是哪一族:IPv4 字面量 'v4'(IPv4 映射地址也算,和后端一致),IPv6 字面量 'v6',域名 ''
+function ipFam(s) {
+  const a = String(s ?? '').trim().replace(/^\[|\]$/g, '');
+  if (isV4Addr(a) || /^::ffff:\d+\.\d+\.\d+\.\d+$/i.test(a)) return 'v4';
+  return a.includes(':') && /^[0-9a-f:.]+$/i.test(a) ? 'v6' : '';
+}
+// 自定义地址里取键:不分大小写(和订阅、后端保存时的读法一致)
+const keyOf = (o, k) => {
+  if (!o || typeof o !== 'object') return undefined;
+  for (const [kk, v] of Object.entries(o)) if (kk.toLowerCase() === k) return v;
+  return undefined;
+};
+// 自定义地址里这台拿得到的那几条(node_id 写这台的、没写的);没填自定义地址返回 null
+function customFor(l, n) {
+  const list = parseJ(l.addrs);
+  if (!Array.isArray(list) || !list.length) return null;
+  return list.filter(c => { const id = Number(keyOf(c, 'node_id')) || 0; return !id || id === n.id; });
+}
+// 这条线路在这台服务器上订阅里给不给 IPv6(和后端 sub.resolveAddrs、runner.lineUse 一致):
+// 填了自定义地址的看这台拿得到的那几条里有没有 IPv6 字面量;否则单独选了、且这台有那一族的地址就按选的,再否则跟服务器的默认
 function lineUsesV6(l, n, f = familyOf(l)[n.id]) {
-  const custom = parseJ(l.addrs);
-  if (Array.isArray(custom) && custom.length) return false;
+  const mine = customFor(l, n);
+  if (mine) return mine.some(c => ipFam(keyOf(c, 'server')) === 'v6');
   const ips = famIPs(n);
   if (f === 'v6' && ips.v6) return true;
   if (f === 'v4' && ips.v4) return false;
@@ -204,37 +226,58 @@ const famSelect = (n, cur) => {
 function serversField(l) {
   const nodes = state.nodes || [];
   const fam = familyOf(l);
+  // 订阅给域名时"默认跟服务器页的设置走"不成立(服务器的"自动地址用"不起作用),换成域名模式的说明,不接在后面自相矛盾
   if (nodes.length < 2) {
-    return nodes.length && isDualStack(nodes[0]) ? `<div class="full">${field(t('line.ipVersion'), famSelect(nodes[0], fam[nodes[0].id]), t('line.ipVersionHelp') + (subByDomain() ? ' ' + t('line.famDnsHelp') : ''))}</div>` : '';
+    return nodes.length && isDualStack(nodes[0]) ? `<div class="full">${field(t('line.ipVersion'), famSelect(nodes[0], fam[nodes[0].id]), subByDomain() ? t('line.famPick') + ' ' + t('line.famDnsHelp') : t('line.ipVersionHelp'))}</div>` : '';
   }
   const ids = (() => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } })();
   const anyDual = nodes.some(isDualStack);
   const rows = nodes.map(n => `<div class="node-row"><label><input type="checkbox" class="node-cb" value="${n.id}" ${!ids.length || ids.includes(n.id) ? 'checked' : ''}> ${esc(n.name)}${n.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>${isDualStack(n) ? famSelect(n, fam[n.id]) : ''}</div>`).join('');
-  return `<div class="full">${field(t('line.servers'), `<div class="check-list node-list">${rows}</div>`, t('line.serversHelp') + (anyDual ? ' ' + t('line.famHelp') + (subByDomain() ? ' ' + t('line.famDnsHelp') : '') : ''))}</div>`;
+  const famHelp = subByDomain() ? t('line.famPickMulti') + ' ' + t('line.famDnsHelp') : t('line.famHelp');
+  return `<div class="full">${field(t('line.servers'), `<div class="check-list node-list">${rows}</div>`, t('line.serversHelp') + (anyDual ? ' ' + famHelp : ''))}</div>`;
 }
 // 给前端测试用(web/jstest/lines.test.mjs)
-export { serverFamily, lineUsesV6, formV6Servers };
-// 按表单当前的勾选算:这条线路在哪些服务器上会给 IPv6(填了自定义地址就不用服务器的地址)
+export { serverFamily, lineUsesV6, formV6Servers, formLine, allServersShown, v6TipsOpen };
+// "全部服务器"的线路在列表里列出哪几台:单独选了 IP 版本的,以及这条线路在上面走 IPv6 的(纯 IPv6 机器、"自动地址用 IPv6"、
+// 自定义地址写成 IPv6 的)—— 它们后面要跟 IPv6 入站结论,以前只列单独选了的,默认给 IPv6 的服务器永远看不到结论
+function allServersShown(l) {
+  const fam = familyOf(l);
+  return (state.nodes || []).filter(n => fam[n.id] || (n.enabled !== false && lineUsesV6(l, n))).map(n => n.id);
+}
+// 表单里正在编辑的这条线路(算按线路的 IPv6 入站结论用):名字、协议、端口、自定义地址
+function formLine() {
+  let addrs = [];
+  try { addrs = JSON.parse(fv('f-addrs').trim() || '[]'); } catch { addrs = []; }
+  return { name: fv('f-name').trim(), protocol: fv('f-protocol'), port: Number(fv('f-port')) || 0, addrs: Array.isArray(addrs) ? addrs : [] };
+}
+// 按表单当前的勾选算:这条线路在哪些服务器上会给 IPv6(填了自定义地址的看自定义地址)
 function formV6Servers() {
   const nodes = state.nodes || [];
-  let custom = [];
-  try { custom = JSON.parse(fv('f-addrs').trim() || '[]'); } catch { custom = []; }
-  if (Array.isArray(custom) && custom.length) return [];
+  const l = formLine();
   const cbs = [...document.querySelectorAll('.node-cb')];
   const picked = cbs.filter(c => c.checked).map(c => Number(c.value));
   const famSel = id => { const s = document.querySelector(`.node-fam[data-node="${id}"]`); return s && !s.disabled ? s.value : ''; };
-  return nodes.filter(n => !picked.length || picked.includes(n.id)).filter(n => lineUsesV6({}, n, famSel(n.id)));
+  return nodes.filter(n => !picked.length || picked.includes(n.id)).filter(n => lineUsesV6(l, n, famSel(n.id)));
 }
-// 线路会在某台服务器上给 IPv6 时,在表单里列出 IPv6 自检要点和那台的 IPv6 入站检测结果
+// 自检要点要不要直接展开:这条线路的端口测出不通;UDP 线路(测不了,只能照着要点抓包)也展开
+function v6TipsOpen(l, servers) {
+  return servers.some(n => { const st = v6ForLine(v6Of(n.id), l); return st === 'down' || st === 'udpLine'; });
+}
+// 线路会在某台服务器上给 IPv6 时,在表单里列出 IPv6 自检要点和这条线路在那台的 IPv6 入站结论
 function syncV6Tips() {
   const box = document.getElementById('f-v6tips');
   if (!box) return;
   const v6 = formV6Servers();
   box.hidden = !v6.length;
   if (!v6.length) { box.innerHTML = ''; return; }
-  const status = v6.map(n => `<span class="nowrap">${esc(n.name)} ${v6Of(n.id) ? v6Badge(v6Of(n.id)) : `<span class="muted small">${esc(t('line.v6Never'))}</span>`}</span>`).join(' · ');
-  const down = v6.some(n => (v6Of(n.id) || {}).state === 'down'); // 检测出不通时直接展开
-  box.innerHTML = `<details class="adv v6-tips" ${down ? 'open' : ''}><summary>${esc(t('line.v6Tips'))}</summary>
+  const l = formLine();
+  const status = v6.map(n => {
+    const b = v6LineBadge(v6Of(n.id), l);
+    return `<span class="nowrap">${esc(n.name)} ${b || `<span class="muted small">${esc(t('line.v6Never'))}</span>`}</span>`;
+  }).join(' · ');
+  const was = box.querySelector('details');
+  const open = (was && was.open) || v6TipsOpen(l, v6); // 改名字、端口时重画,别把用户点开的收起来
+  box.innerHTML = `<details class="adv v6-tips" ${open ? 'open' : ''}><summary>${esc(t('line.v6Tips'))}</summary>
     <p class="hint">${esc(t('line.v6Status'))} ${status}</p>
     <ol class="hint">${[1, 2, 3, 4, 5, 6].map(i => `<li>${esc(t('line.v6Tip' + i))}</li>`).join('')}</ol></details>`;
 }
@@ -502,7 +545,8 @@ async function editLine(id, cloneFrom, preset) {
   }, { wide: true });
   renderDynamic(l);
   rrBind(rrInit);
-  document.getElementById('f-protocol').addEventListener('change', () => renderDynamic({ options: {}, tls: {}, transport: {} }));
+  document.getElementById('f-protocol').addEventListener('change', () => { renderDynamic({ options: {}, tls: {}, transport: {} }); syncV6Tips(); });
+  ['f-name', 'f-port'].forEach(id => document.getElementById(id).addEventListener('input', debounce(syncV6Tips, 400)));
   document.querySelectorAll('.node-cb').forEach(c => c.addEventListener('change', syncFamily));
   document.querySelectorAll('.node-fam').forEach(c => c.addEventListener('change', syncV6Tips));
   document.getElementById('f-addrs').addEventListener('input', debounce(syncV6Tips, 400));

@@ -52,5 +52,9 @@ jobs:
         run: node --test web/jstest/support.test.mjs
       - name: Frontend (lines page IP version)
         run: node --test web/jstest/lines.test.mjs
+      - name: Frontend (reachability and IPv6 inbound per line)
+        run: node --test web/jstest/reach.test.mjs
+      - name: Frontend (i18n zh / en keys and placeholders)
+        run: node --test web/jstest/i18n.test.mjs
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run

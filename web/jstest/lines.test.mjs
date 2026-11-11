@@ -24,7 +24,8 @@ export const openModal = () => {}; export const registerActions = () => {}; expo
 export const field = () => ''; export const check = () => ''; export const empty = () => ''; export const fv = (id) => (globalThis.__fv || {})[id] ?? '';
 export const fchk = () => true; export const matches = () => true; export const debounce = (f) => f; export const setHTML = () => {};`);
 stub('certpicker.js', `export const openCertDrawer = () => {}; export const certLabel = (s) => s;`);
-stub('reach.js', `export const loadReach = async () => null; export const reachLoaded = () => true; export const v6Of = () => null; export const v6Badge = () => '';`);
+stub('reach.js', `export const loadReach = async () => null; export const reachLoaded = () => true; export const v6Of = (id) => (globalThis.__v6 || {})[id] || null;
+export const v6LineBadge = () => ''; export const v6ForLine = (v, l) => ((l.protocol === 'hysteria2' || l.protocol === 'tuic') ? 'udpLine' : v ? v.state : null);`);
 stub(path.join('pages', 'upstreams.js'), `export const editRelayUpstream = () => {};`);
 
 globalThis.__state = { settings: {}, nodes: [], lines: [] };
@@ -60,16 +61,41 @@ test('订阅地址用域名时:默认由 DNS 决定,服务器的"自动地址用
   } finally { globalThis.__state.settings = {}; }
 });
 
-test('线路在这台给不给 IPv6:单独选了且有那个地址才算;自定义地址不算', () => {
+test('线路在这台给不给 IPv6:单独选了且有那个地址才算;自定义地址看这台拿得到的那几条里有没有 IPv6', () => {
   assert.equal(lines.lineUsesV6({ nodeFamily: { 1: 'v6' } }, dual), true);
   assert.equal(lines.lineUsesV6({ nodeFamily: { 3: 'v6' } }, v6Missing), false); // 没有 IPv6:订阅里退回 IPv4
   assert.equal(lines.lineUsesV6({ nodeFamily: { 2: 'v4' } }, dualV6), false);
   assert.equal(lines.lineUsesV6({}, dualV6), true);
   assert.equal(lines.lineUsesV6({ nodeFamily: '{"1":"v6"}' }, dual), true); // 接口里是 JSON 字符串
+  // 自定义地址整体替换服务器地址:写成 IPv4 / 域名的不算(单独选了 v6 也不算),写成 IPv6 的算(审查第 9 条)
   assert.equal(lines.lineUsesV6({ nodeFamily: { 1: 'v6' }, addrs: [{ server: '1.2.3.4' }] }, dual), false);
+  assert.equal(lines.lineUsesV6({ addrs: [{ server: 'hk.example.com' }] }, dualV6), false);
+  assert.equal(lines.lineUsesV6({ addrs: [{ server: '::ffff:1.2.3.4' }] }, dual), false); // IPv4 映射地址按 IPv4
+  assert.equal(lines.lineUsesV6({ addrs: '[{"server":"[2001:db8::9]"}]' }, dual), true);
+  // node_id 写了别的服务器的地址这台拿不到;键名不分大小写(老数据)
+  assert.equal(lines.lineUsesV6({ addrs: [{ server: '2001:db8::9', node_id: 2 }] }, dual), false);
+  assert.equal(lines.lineUsesV6({ addrs: [{ Server: '2001:db8::9', Node_Id: 1 }] }, dual), true);
 });
 
-test('表单:按勾选的服务器与下拉算出哪些服务器走 IPv6(全不勾 = 全部;填了自定义地址就没有)', () => {
+test('"全部服务器"的线路:单独选了 IP 版本的、以及线路在上面走 IPv6 的服务器都列出来(审查第 15 条)', () => {
+  globalThis.__state.nodes = [dual, dualV6, v6Missing, pure6, { ...pure6, id: 6, enabled: false }];
+  assert.deepEqual(lines.allServersShown({}), [2, 5]); // 默认给 IPv6 的两台(停用的那台不列)
+  assert.deepEqual(lines.allServersShown({ nodeFamily: { 1: 'v6', 3: 'v4' } }), [1, 2, 3, 5]);
+  assert.deepEqual(lines.allServersShown({ addrs: [{ server: '1.2.3.4' }] }), []);
+});
+
+test('表单里的这条线路:名字、协议、端口、自定义地址;UDP 线路和测出不通的直接展开自检要点', () => {
+  globalThis.__fv = { 'f-name': ' hy6 ', 'f-protocol': 'hysteria2', 'f-port': '8444', 'f-addrs': '' };
+  const l = lines.formLine();
+  assert.deepEqual(l, { name: 'hy6', protocol: 'hysteria2', port: 8444, addrs: [] });
+  globalThis.__v6 = { 1: { state: 'ok' }, 2: { state: 'down' } };
+  assert.equal(lines.v6TipsOpen(l, [dual]), true); // UDP:测不了,只能照着要点抓包
+  assert.equal(lines.v6TipsOpen({ ...l, protocol: 'trojan' }, [dual]), false);
+  assert.equal(lines.v6TipsOpen({ ...l, protocol: 'trojan' }, [dual, dualV6]), true);
+  globalThis.__v6 = {};
+});
+
+test('表单:按勾选的服务器与下拉算出哪些服务器走 IPv6(全不勾 = 全部;填了自定义地址的看自定义地址)', () => {
   globalThis.__state.nodes = [dual, dualV6, v6Missing];
   cbs = [{ value: '1', checked: true }, { value: '2', checked: false }, { value: '3', checked: true }];
   fams = { 1: 'v6', 3: 'v6' };
@@ -78,5 +104,10 @@ test('表单:按勾选的服务器与下拉算出哪些服务器走 IPv6(全不�
   cbs = cbs.map(c => ({ ...c, checked: false }));
   assert.deepEqual(lines.formV6Servers().map(n => n.id), [1, 2]);
   globalThis.__fv = { 'f-addrs': '[{"server":"2001:db8::9"}]' };
+  assert.deepEqual(lines.formV6Servers().map(n => n.id), [1, 2, 3]); // 没写 node_id:每台都给这个 IPv6
+  globalThis.__fv = { 'f-addrs': '[{"server":"2001:db8::9","node_id":3}]' };
+  assert.deepEqual(lines.formV6Servers().map(n => n.id), [3]);
+  globalThis.__fv = { 'f-addrs': '[{"server":"1.2.3.4"}]' };
   assert.deepEqual(lines.formV6Servers(), []);
+  globalThis.__fv = {};
 });

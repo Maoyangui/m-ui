@@ -19,7 +19,9 @@ export const reachLoaded = () => reach !== null;
 const GROUPS = ['cm', 'ct', 'cu'];
 const BAD = new Set(['blocked', 'ipBlocked', 'portBlocked']);
 // 结论 → 徽章颜色
-const TONE = { ok: 'ok', partial: 'warn', blocked: 'danger', ipBlocked: 'danger', portBlocked: 'danger', abroadDown: 'danger', noProbes: '', error: '' };
+const TONE = { ok: 'ok', partial: 'warn', blocked: 'danger', ipBlocked: 'danger', portBlocked: 'danger', abroadDown: 'danger', noProbes: '', error: '', noPort: '' };
+// 没有结论、只给原因的几种(服务器列表那一格只写原因,不画三网的小格)
+const NO_VERDICT = new Set(['error', 'noProbes', 'noPort']);
 
 export const isBad = v => BAD.has(v) || v === 'partial';
 const resultOf = id => ((reach && reach.results) || []).find(r => r.nodeId === id);
@@ -41,7 +43,7 @@ export function v6Explain(v) {
   let s = v.state === 'error' ? t('reach.v6.x.error', { err: trErr(v.error || '') }) : t('reach.v6.x.' + v.state, { addr: v6Addr(v) });
   if (v.port && v.portLine) s += ' ' + t('reach.v6.portOf', { name: v.portLine, port: v.port });
   if (udp && v.state !== 'udp') s += ' ' + t('reach.v6.udpAlso', { lines: udp });
-  if (v.attempt) s += ' ' + t('reach.v6.attempt', { t: fmtTime(v.attempt.at), err: trErr(v.attempt.error || '') });
+  if (v.attempt) s += ' ' + (v.attempt.verdict === 'none' ? t('reach.v6.attemptNone', { t: fmtTime(v.attempt.at) }) : t('reach.v6.attempt', { t: fmtTime(v.attempt.at), err: trErr(v.attempt.error || '') }));
   return s;
 }
 // 服务器列表里那一格的小标签
@@ -49,10 +51,44 @@ function v6Chip(v) {
   const val = v.state === 'ok' ? '✓' : v.state === 'down' ? '✕' : v.state === 'udp' ? 'UDP' : '?';
   return `<span class="rc ${V6CHIP[v.state] || ''}" title="${esc(t('reach.v6.title') + ':' + v6Label(v) + ' · ' + v6Explain(v))}">v6<b>${esc(val)}</b></span>`;
 }
-// 线路页、线路表单里用的徽章
+// 服务器这一份结论的徽章(服务器级)
 export function v6Badge(v) {
   if (!v) return '';
   return `<span class="badge ${V6TONE[v.state] || ''}" title="${esc(v6Explain(v) + ' · ' + fmtTime(v.at))}">${esc(t('reach.v6.short', { s: v6Label(v) }))}</span>`;
+}
+
+// ---- 一条线路在某台服务器上的 IPv6 入站结论(线路页、线路表单)----
+// 每台服务器只测一个端口(第一条走 IPv6 的 TCP 线路),UDP 线路(hysteria2 / tuic)测点测不了。所以按线路说话:
+// 测到的就是这条线路的端口才给通 / 不通;UDP 线路写"未测(UDP)";别的 TCP 线路写"未测到此端口",不借别的线路的结论
+// (以前整台服务器的"通"贴在每条线路上:安全组只放了 TCP 时 hysteria2 那行也是绿色的"通")。没测成、没有测点是整台的事,照旧显示。
+const UDP_PROTOS = new Set(['hysteria2', 'tuic']);
+const hasCustomAddrs = l => {
+  let a = l.addrs;
+  if (typeof a === 'string') { try { a = JSON.parse(a); } catch { a = null; } }
+  return Array.isArray(a) && a.length > 0;
+};
+// 返回 ok / down / unsure / none / error(服务器那份结论),udpLine(UDP 线路),otherPort(没测到这条线路的端口);
+// 没有结论也不是 UDP 线路时返回 null
+export function v6ForLine(v, l) {
+  if (UDP_PROTOS.has(l.protocol)) return 'udpLine';
+  if (!v) return null;
+  if (v.state === 'error' || v.state === 'none') return v.state;
+  // 自定义地址的线路测的可能是 server_port,只按线路名认;其余按线路名或端口认(端口在一台服务器上不会重复)
+  const tested = v.port > 0 && (v.portLine === l.name || (!hasCustomAddrs(l) && v.port === Number(l.port)));
+  return tested ? v.state : 'otherPort';
+}
+export function v6LineBadge(v, l) {
+  const st = v6ForLine(v, l);
+  if (!st) return '';
+  if (st === 'udpLine') {
+    return `<span class="badge" title="${esc(t('reach.v6.lineUdp', { port: l.port || '' }))}">${esc(t('reach.v6.short', { s: t('reach.v6.s.udpLine') }))}</span>`;
+  }
+  if (st === 'otherPort') {
+    const why = v.state === 'udp' ? t('reach.v6.lineNoTcp', { port: l.port || '' })
+      : t('reach.v6.lineOther', { port: l.port || '', name: v.portLine || '', tport: v.port, s: v6Label(v) });
+    return `<span class="badge" title="${esc(why + ' · ' + fmtTime(v.at))}">${esc(t('reach.v6.short', { s: t('reach.v6.s.otherPort') }))}</span>`;
+  }
+  return v6Badge(v);
 }
 
 function groupChip(g) {
@@ -71,7 +107,7 @@ export function reachCell(n, nodeView) {
     return `<button class="reach-cell" data-act="reach.detail" data-id="${n.id}"><span class="badge primary"><span class="spin"></span> ${t('reach.running')}</span>${r ? `<div class="sub-cell">${t('reach.last')} ${esc(verdictLabel(r.verdict))}</div>` : ''}</button>`;
   }
   if (!r) return `<button class="reach-cell" data-act="reach.one" data-id="${n.id}"><span class="badge">${t('reach.never')}</span><div class="sub-cell link">${t('reach.clickToCheck')}</div></button>`;
-  const chips = (r.verdict === 'error' || r.verdict === 'noProbes'
+  const chips = (NO_VERDICT.has(r.verdict)
     ? `<span class="muted small ellip" title="${esc(trErr(r.error || ''))}">${esc(shortReason(r))}</span>`
     : (r.groups || []).filter(g => GROUPS.includes(g.key)).map(groupChip).join('')) + (r.v6 ? v6Chip(r.v6) : '');
   const warn = r.attempt ? ` <span class="warn-text small" title="${esc(t('reach.attemptFailed', { t: fmtTime(r.attempt.at), err: trErr(r.attempt.error || '') }))}">⚠</span>` : '';
@@ -79,6 +115,9 @@ export function reachCell(n, nodeView) {
     <span class="badge ${TONE[r.verdict] || ''}">${esc(verdictLabel(r.verdict))}</span> <span class="muted small">${fmtRelative(r.at)}</span>${warn}
     <div class="rc-row">${chips}</div></button>`;
 }
+
+// 大陆那项根本没测(没有可测的 IPv4 入口,没发请求)
+const untested = r => r.verdict === 'noPort' && !(r.measurements || []).length;
 
 function shortReason(r) {
   if (r.verdict === 'noProbes') return t('reach.v.noProbes');
@@ -104,10 +143,12 @@ function explain(r) {
     return t('reach.x.partial', { down: down.join(t('reach.sep')) });
   }
   if (r.verdict === 'error') return t('reach.x.error', { err: trErr(r.error || '') });
+  if (r.verdict === 'noPort') return t('reach.x.noPort', { why: trErr(r.error || '') });
   return t('reach.x.' + r.verdict);
 }
 
 function portText(r) {
+  if (untested(r)) return t('reach.port.untested');
   if (!r.port) return t('reach.port.none');
   if (r.portFrom === 'line') return t('reach.port.line', { port: r.port, name: r.portLine || '' });
   if (r.portFrom === 'sub') return t('reach.port.sub', { port: r.port });
@@ -157,8 +198,8 @@ function detailHTML(n) {
       <dt>${t('reach.target')}</dt><dd class="mono">${esc(r.target || '—')}${r.port ? ':' + r.port : ''}</dd>
       <dt>${t('reach.portFrom')}</dt><dd>${esc(portText(r))}</dd>
       <dt>${t('reach.at')}</dt><dd>${fmtTime(r.at)} · ${t(r.auto ? 'reach.auto' : 'reach.manual')}</dd>
-    </dl>${r.portFrom === 'sub' || r.portFrom === 'api' || !r.port ? `<p class="hint">${t(r.tcpV6Only ? 'reach.v6TcpOnly' : r.port ? 'reach.noTcpLine' : 'reach.pingOnly')}</p>` : ''}` : `<p class="hint">${t('reach.neverHint')}</p>`;
-  const groups = r && r.verdict !== 'error' ? `<section><h3>${t('reach.byCarrier')}</h3>${(r.groups || []).map(groupBlock).join('')}</section>` : '';
+    </dl>${!untested(r) && (r.portFrom === 'sub' || r.portFrom === 'api' || !r.port) ? `<p class="hint">${t(r.tcpV6Only ? 'reach.v6TcpOnly' : r.port ? 'reach.noTcpLine' : 'reach.pingOnly')}${r.portFrom === 'api' && !r.tcpV6Only ? ' ' + t('reach.apiPortNote') : ''}</p>` : ''}` : `<p class="hint">${t('reach.neverHint')}</p>`;
+  const groups = r && r.verdict !== 'error' && !untested(r) ? `<section><h3>${t('reach.byCarrier')}</h3>${(r.groups || []).map(groupBlock).join('')}</section>` : '';
   const icmp = r && r.icmp ? `<p class="hint">${esc(t('reach.icmp', { cn: `${r.icmp.cnOk}/${r.icmp.cnTotal}`, hk: `${r.icmp.hkOk}/${r.icmp.hkTotal}` }))}</p>`
     : r && r.icmpError ? `<p class="hint">${esc(t('reach.icmpFail', { err: trErr(r.icmpError) }))}</p>` : '';
   const quota = q ? `<p class="hint">${esc(t('reach.quota', { r: q.remaining, l: q.limit, n: reach.perCheck || 15 }))}${q.resetAt ? ' · ' + esc(t('reach.quotaReset', { t: fmtTime(q.resetAt) })) : ''}</p>` : '';
