@@ -12,7 +12,6 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
-	"github.com/Maoyangui/m-ui/logger"
 
 	"gorm.io/gorm"
 )
@@ -71,11 +70,16 @@ type apiScope struct {
 
 func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if s.apiAuthBlocked(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
+		return
+	}
 	if !s.publicAuth(r) {
-		logger.Warning("外部 API 鉴权失败,来源 ", clientIP(r), " ", r.Method, " ", r.URL.Path)
+		s.noteAPIAuthFailure(r, "")
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
+	limitJSONBody(w, r, apiBodyLimit)
 	// 副机上的写操作会被主机下一次快照整表覆盖(新号消失、删掉的号复活),调用方却以为成功了;与面板一样只放行只读与踢线
 	if s.role() == "node" && r.Method != http.MethodGet && r.Method != http.MethodHead && !strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/kick") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": nodeReadOnly})
@@ -99,12 +103,17 @@ func (s *Server) resellerByAPIToken(tok string) (model.Reseller, bool) {
 // handleResellerPublicAPI 代理面板上的 /api/v1/:令牌属于哪个代理,就只操作那个代理名下的东西。
 func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if s.apiAuthBlocked(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
+		return
+	}
 	rs, ok := s.resellerByAPIToken(apiToken(r))
 	if !ok {
-		logger.Warning("代理外部 API 鉴权失败,来源 ", clientIP(r), " ", r.Method, " ", r.URL.Path)
+		s.noteAPIAuthFailure(r, "代理")
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
+	limitJSONBody(w, r, apiBodyLimit)
 	s.publicAPI(w, r, apiScope{rid: rs.Id, actor: "api:" + rs.Name})
 }
 

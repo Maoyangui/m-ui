@@ -73,6 +73,7 @@ type Server struct {
 	agentApplyMu   sync.Mutex // 快照落库、重载和确认必须作为同一轮串行完成
 	sessions       map[string]session
 	loginFails     map[string][]int64 // ip → 最近失败时间
+	apiFails       map[string][]int64 // 外部 API 鉴权失败:ip → 最近失败时间(主面板令牌与代理令牌共用,见 body_limit.go)
 	ops            *ops.Runner
 
 	totpPending    string          // 两步验证:已生成、待认证器验证一次后才生效的密钥
@@ -396,11 +397,8 @@ func (s *Server) reapSessions() {
 				delete(s.sessions, token)
 			}
 		}
-		for ip, fails := range s.loginFails { // 扫描器会留下大量 IP,过期的清掉
-			if len(fails) == 0 || now.Unix()-fails[len(fails)-1] > 600 {
-				delete(s.loginFails, ip)
-			}
-		}
+		reapFails(s.loginFails, now.Unix()) // 扫描器会留下大量 IP,过期的清掉
+		reapFails(s.apiFails, now.Unix())
 		s.mu.Unlock()
 		s.db.Where("exp < ?", now.Unix()).Delete(&model.Session{})
 	}
@@ -463,6 +461,7 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 			return
 		}
+		limitJSONBody(w, r, panelBodyLimit)
 		next(w, r)
 	}
 }
@@ -572,25 +571,9 @@ func dummyPasswordCheck(plain string) {
 // loginBlocked 该 IP(IPv6 为所在 /64)是否处于冷却期:10 分钟内失败 10 次就先挡 5 分钟,
 // 否则空密码首登、弱口令都能被慢速爆破(每次失败只 sleep 300ms)。
 func (s *Server) loginBlocked(ip string) bool {
-	ip = loginKey(ip)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fails, ok := s.loginFails[ip]
-	if !ok {
-		return false // 没失败过的来源不建条目,扫描器换着地址来也不会把这张表撑大
-	}
-	now := time.Now().Unix()
-	var recent []int64
-	for _, ts := range fails {
-		if now-ts < 600 {
-			recent = append(recent, ts)
-		}
-	}
-	s.loginFails[ip] = recent
-	if len(recent) < 10 {
-		return false
-	}
-	return now-recent[len(recent)-1] < 300
+	return failBlocked(s.loginFails, loginKey(ip), time.Now().Unix())
 }
 
 // noteLoginFailure 记录某 IP 的失败次数,10 分钟内达到 5 次告警一次。
@@ -600,16 +583,7 @@ func (s *Server) noteLoginFailure(ip string) {
 	if s.loginFails == nil {
 		s.loginFails = map[string][]int64{}
 	}
-	now := time.Now().Unix()
-	recent := s.loginFails[ip][:0]
-	for _, ts := range s.loginFails[ip] {
-		if now-ts < 600 {
-			recent = append(recent, ts)
-		}
-	}
-	recent = append(recent, now)
-	s.loginFails[ip] = recent
-	n := len(recent)
+	n := failNote(s.loginFails, ip, time.Now().Unix())
 	s.mu.Unlock()
 	if n == 5 {
 		s.run.Notifier().Event("tgOnLogin", "⚠️ <b>面板登录连续失败</b>\nIP:"+notify.Esc(ip)+" 10 分钟内失败 5 次")

@@ -261,6 +261,7 @@ const EN = /*BEGIN*/{
 "外部订阅地址必须以 http:// 或 https:// 开头": "External subscription URL must start with http:// or https://",
 "大陆连通巡检间隔要在 %d 到 %d 分钟之间": "Mainland reachability check interval must be %d to %d minutes",
 "失败次数过多,请 5 分钟后再试": "Too many failed attempts; try again in 5 minutes",
+"请求内容过大,超出上限": "The request body is too large",
 "套餐不存在": "Plan not found",
 "套餐不存在: %w": "Plan not found: %w",
 "套餐不存在: id %w": "Plan not found: id %w",
