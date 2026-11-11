@@ -207,6 +207,7 @@
       <li>中途任何一步失败都会自动取消:原主机照旧当主机,写操作恢复,数据不变。</li>
       <li>换到全新 VPS:照常装好 m-ui,像副机一样接入(见 <a href="#nodes-add">接入一台副机</a>),显示 <b data-k="node.synced">已同步</b> 后对它点 <b data-k="ha.setMaster">设为主机</b>,不用备份、还原。</li>
       <li>订阅地址不变:订阅的域名、端口、路径和证书跟着主机走,把订阅域名的 DNS 改指向新主机就行(订阅地址用的是 IP 时会变,确认框会提前说)。面板和代理面板用新主机自己的地址。</li>
+      <li>订阅证书是 <b data-k="cert.srcExternal">已有证书</b>(由 certbot 等工具续期)、新主机上又没有同名证书的,带过去的是一份副本,新主机上没人续它:做完后就在新主机 <b data-k="nav.cert">证书</b> 页重新签发,或者在新主机装好 certbot 后重新添加。</li>
       <li>离线、配置没同步上、版本太旧、磁盘不够、端口冲突的副机不能设为主机,卡片里写明原因。</li>
     </ul>
     <div class="pit"><b>常见坑</b>交接期间写操作暂停(一般几分钟,最多 15 分钟):面板只读,外部 API、代理面板、Telegram 机器人的写操作返回 503,对接的程序要能重试。</div>
@@ -558,7 +559,7 @@
       <li>HTTP 验证每次续期都要临时占用 80 端口,有 TCP 线路占着 80 会续期失败。</li>
       <li>域名多出一条不指向本机的 AAAA(IPv6)记录会让验证失败:改成本机的地址,或者删掉它。</li>
       <li>Let's Encrypt 已经不发到期提醒邮件了:至少在主机上配好 Telegram 或 Webhook(见 <a href="#notify">通知</a>)。</li>
-      <li><b data-k="cert.srcExternal">已有证书</b> 由签发它的工具(如 certbot)续期,面板只读文件,剩 14 天起提醒。</li>
+      <li><b data-k="cert.srcExternal">已有证书</b> 由签发它的工具(如 certbot)续期,面板只读文件,剩 14 天起提醒。<span data-pending="backup-certs">换机还原时放进 <code>/etc/m-ui/cert/restored/</code> 的是副本,没有工具再续它,证书库里却照样显示 <b data-k="cert.rExternal">外部工具续期</b>:要自己重新签发或重新添加(见 <a href="#bk-restore">还原</a>)。</span></li>
     </ul></div>
   </section>
 
@@ -907,13 +908,17 @@
     <h3>还原</h3>
     <ol class="steps">
       <li><b data-k="nav.backup">备份</b> 页 → <b data-k="bk.restore">还原</b>:选备份文件(zip 或 .db),点 <b data-k="bk.restoreBtn">还原</b>。</li>
-      <li>确认后 m-ui 自动重启,替换数据库和证书。<span data-pending="backup-certs">设置里引用的数据目录外的证书文件(比如 <b data-k="cert.srcExternal">已有证书</b>、从旧面板导入的证书路径)会还原到 <code>/etc/m-ui/</code> 下并改好路径;证书文件万一缺了,面板和订阅先临时用自签证书启动并告警,不会起不来。</span></li>
+      <li>确认后 m-ui 自动重启,替换数据库和证书。<span data-pending="backup-certs">设置里引用的数据目录外的证书文件(比如 <b data-k="cert.srcExternal">已有证书</b>、从旧面板导入的证书路径):这台机器原路径上有能用的同一张(同样的域名、不比备份里的旧)就接着用它;没有才把备份里那份放进 <code>/etc/m-ui/cert/restored/</code>,并改好设置里的路径。面板、订阅和代理面板的证书文件万一还是缺了,先用临时自签证书启动并告警,不会起不来。</span></li>
       <li>原来的库保留为 <code>.bak-*</code> 文件,只留最近两份:连着还原几次,最早那份会被删掉。拿不准该用哪份备份时,先点 <b data-k="bk.now">立即备份</b> 把当前的库下载下来再试。</li>
     </ol>
     <ul>
       <li>新机器可以在安装时一步装好并还原(命令见下面的 <a href="#bk-migrate">换服务器</a>)。</li>
       <li>服务停着时也能用命令行还原:<code>m-ui restore -db /etc/m-ui/m-ui.db -from 备份.zip</code>。</li>
     </ul>
+    <div class="pit" data-pending="backup-certs"><b>常见坑</b><ul>
+      <li>放进 <code>/etc/m-ui/cert/restored/</code> 的是备份那一刻的副本:原来由 certbot、宝塔等工具续期的,以后没人再续它,证书库里却照样显示 <b data-k="cert.rExternal">外部工具续期</b>。还原后就到证书页重新签发,或者在这台装好 certbot 后重新用 <b data-k="cert.srcExternal">已有证书</b> 指过去,别等剩 14 天的到期提醒。</li>
+      <li>顶着临时自签证书期间,客户端更新订阅会报证书错误,浏览器打开面板、代理面板也会提示不安全:照页面顶部的证书提醒把证书补上,或者换一张。</li>
+    </ul></div>
   </section>
 
   <section class="sec" id="bk-migrate">
@@ -932,6 +937,7 @@
       <li>旧机要多开一阵的,在旧机 <b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b> 取消 <b data-k="set.tgEnabled">启用 Telegram 通知</b>:两台是同一个机器人,一起跑会互相顶掉,发给机器人的命令可能落到旧机上、改的是旧数据,通知也会收到两份。</li>
       <li>新机的安全组和防火墙要放行和旧机一样的端口:面板、订阅、代理面板、每条线路(Hysteria2、TUIC 和端口跳跃的范围要放 UDP)。</li>
       <li>WARP 是装在系统里的,不在备份里:线路上游用了 warp 的,先在新机 <b data-k="nav.ops">运维</b> 页安装并启用 WARP(端口和旧机一样)。</li>
+      <li data-pending="backup-certs">原来用 <b data-k="cert.srcExternal">已有证书</b> 接 certbot、宝塔等工具的,新机上没有这些工具,还原出来的是一份不会再续期的副本(见 <a href="#bk-restore">还原</a>):换机后就在新机证书页重新签发,或者在新机装好 certbot 后重新添加。</li>
       <li>副机的面板端口只对旧主机 IP 放行的,先把新主机的 IP 加进去,不然新主机连不上副机。</li>
       <li>两台同时运行期间,旧面板上除了关掉 Telegram 通知,别的都不要改;同时运行的时间越短越好。</li>
     </ul></div>

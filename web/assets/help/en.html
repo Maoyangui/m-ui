@@ -207,6 +207,7 @@
       <li>If any step fails, everything is cancelled: the old master stays the master, writes resume and no data changes.</li>
       <li>Moving to a fresh VPS: install m-ui as usual, attach it like a node (see <a href="#nodes-add">Attach a node</a>), and once it shows <b data-k="node.synced">synced</b>, use <b data-k="ha.setMaster">Set as master</b> on it. No backup or restore needed.</li>
       <li>Subscription links stay the same: the subscription domain, port, path and certificate move with the master, so just point the subscription domain at the new master (links that use an IP do change, and the confirmation says so beforehand). The panel and the reseller panel use the new master's own addresses.</li>
+      <li>If the subscription certificate is an <b data-k="cert.srcExternal">Existing certificate</b> (renewed by certbot or a similar tool) and the new master has none of the same name, what moves over is a copy that nothing on the new master renews: afterwards issue a new one on the new master's <b data-k="nav.cert">Certificate</b> page, or install certbot there and add it again.</li>
       <li>Nodes that are offline, not synced, too old, short of disk space or with a port conflict cannot be made master; the card says why.</li>
     </ul>
     <div class="pit"><b>Common pitfall</b>Writes are paused during the handover (usually a few minutes, 15 at most): the panel is read-only, and write calls from the external API, the reseller panel and the Telegram bot get 503, so connected programs must be able to retry.</div>
@@ -558,7 +559,7 @@
       <li>HTTP validation needs port 80 for a moment on every renewal; a TCP line using port 80 makes renewal fail.</li>
       <li>An extra AAAA (IPv6) record that does not point to this server makes validation fail: point it here or delete it.</li>
       <li>Let's Encrypt no longer sends expiry emails: set up Telegram or a webhook at least on the master (see <a href="#notify">Notifications</a>).</li>
-      <li>An <b data-k="cert.srcExternal">Existing certificate</b> is renewed by the tool that issued it (such as certbot); the panel only reads the files and starts reminding you 14 days before expiry.</li>
+      <li>An <b data-k="cert.srcExternal">Existing certificate</b> is renewed by the tool that issued it (such as certbot); the panel only reads the files and starts reminding you 14 days before expiry.<span data-pending="backup-certs"> A copy placed in <code>/etc/m-ui/cert/restored/</code> by a restore on another server is renewed by nothing, although the store still shows <b data-k="cert.rExternal">Renewed externally</b>: issue a new one or add the certificate again yourself (see <a href="#bk-restore">Restore</a>).</span></li>
     </ul></div>
   </section>
 
@@ -907,13 +908,17 @@
     <h3>Restore</h3>
     <ol class="steps">
       <li><b data-k="nav.backup">Backup</b> page → <b data-k="bk.restore">Restore</b>: choose the backup file (zip or .db) and click <b data-k="bk.restoreBtn">Restore</b>.</li>
-      <li>After you confirm, m-ui restarts by itself and replaces the database and certificates. <span data-pending="backup-certs">Certificate files outside the data directory that the settings point to (an <b data-k="cert.srcExternal">Existing certificate</b>, or certificate paths imported from an old panel) are restored under <code>/etc/m-ui/</code> with the paths updated; should a certificate file still be missing, the panel and subscriptions start with a temporary self-signed certificate and raise an alert instead of failing to start.</span></li>
+      <li>After you confirm, m-ui restarts by itself and replaces the database and certificates. <span data-pending="backup-certs">Certificate files outside the data directory that the settings point to (an <b data-k="cert.srcExternal">Existing certificate</b>, or certificate paths imported from an old panel): if this server has a usable copy of the same certificate at the original path (same domain, not older than the one in the backup), it stays in use; otherwise the copy from the backup goes into <code>/etc/m-ui/cert/restored/</code> and the settings are pointed there. Should a panel, subscription or reseller-panel certificate file still be missing, that service starts with a temporary self-signed certificate and raises an alert instead of failing to start.</span></li>
       <li>The previous database is kept as a <code>.bak-*</code> file, but only the latest two are kept: after several restores in a row the oldest one is deleted. If you are unsure which backup to use, first click <b data-k="bk.now">Backup now</b> and download the current database.</li>
     </ol>
     <ul>
       <li>A new server can install and restore in one step (the command is under <a href="#bk-migrate">Moving to another server</a>).</li>
       <li>With the service stopped you can also restore from the command line: <code>m-ui restore -db /etc/m-ui/m-ui.db -from backup.zip</code>.</li>
     </ul>
+    <div class="pit" data-pending="backup-certs"><b>Common pitfalls</b><ul>
+      <li>What goes into <code>/etc/m-ui/cert/restored/</code> is a copy taken at backup time: if certbot, aaPanel or a similar tool used to renew it, nothing renews it any more, yet the certificate store still shows <b data-k="cert.rExternal">Renewed externally</b>. Right after restoring, issue a new one on the Certificate page, or install certbot on this server and point an <b data-k="cert.srcExternal">Existing certificate</b> at its files again; do not wait for the 14-day expiry reminder.</li>
+      <li>While a temporary self-signed certificate stands in, apps get a certificate error when updating subscriptions, and browsers warn on the panel and the reseller panel: put the certificate back or switch to another one, as the certificate alert at the top of the page says.</li>
+    </ul></div>
   </section>
 
   <section class="sec" id="bk-migrate">
@@ -932,6 +937,7 @@
       <li>If the old server stays up for a while, untick <b data-k="set.tgEnabled">Enable Telegram notifications</b> under <b data-k="nav.settings">Settings</b> → <b data-k="set.notify">Notifications</b> on it: both servers use the same bot and keep cutting each other off, so bot commands may land on the old server and change stale data, and notifications arrive twice.</li>
       <li>Open the same ports on the new server's security group and firewall as on the old one: panel, subscriptions, reseller panel and every line (UDP for Hysteria2, TUIC and port-hopping ranges).</li>
       <li>WARP is installed into the system and is not in the backup: if lines use the warp upstream, install and enable WARP on the new server's <b data-k="nav.ops">Ops</b> page first (same port as before).</li>
+      <li data-pending="backup-certs">If an <b data-k="cert.srcExternal">Existing certificate</b> was renewed by certbot, aaPanel or a similar tool, the new server does not have that tool, and what gets restored is a copy that nothing renews (see <a href="#bk-restore">Restore</a>): after moving, issue a new one on the new server's Certificate page, or install certbot there and add it again.</li>
       <li>If nodes allow their panel port only from the old master's IP, add the new master's IP first, or the new master cannot reach them.</li>
       <li>Apart from turning off Telegram notifications, change nothing on the old panel while both run, and keep that time as short as possible.</li>
     </ul></div>
