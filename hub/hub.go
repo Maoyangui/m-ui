@@ -647,7 +647,9 @@ type RecentConn struct {
 	Protocol string `json:"protocol"`
 	Count    int    `json:"count"`
 	Ts       int64  `json:"ts"`               // 最近一次的绝对时间(unix 秒),由各机按本机时区解析
-	Server   string `json:"server,omitempty"` // 主机汇总时标注来自哪台服务器
+	Server   string `json:"server,omitempty"` // 主机汇总时标注来自哪台服务器(多服务器时才有)
+	NodeId   uint   `json:"nodeId,omitempty"` // 主机汇总时标注来自哪台服务器(服务器 id,单服务器也有)
+	Family   string `json:"family,omitempty"` // 主机汇总时按来源 IP 标:v4 / v6
 	// Rejected 这条最近一次被拒:device(设备数超限)/ pool(代理设备池已满);放行的为空
 	Rejected string `json:"rejected,omitempty"`
 	// Failed 只在"到了但没过握手 / 认证"那份里有:tls(TLS / REALITY 握手没过)/ auth(协议认证没过);Detail 是原因原文
@@ -673,6 +675,7 @@ type Report struct {
 	PublicIP6       string                         `json:"publicIp6"`              // 副机探测到的公网 IPv6(没有为空;老版本副机不带,也是空),主机存入 nodes.public_ip6
 	Conns           []RecentConn                   `json:"conns,omitempty"`        // 最近入站连接,主机概览汇总展示
 	ConnFails       []RecentConn                   `json:"connFails,omitempty"`    // 到了但没过握手 / 认证的来源(老副机不报,老主机不认)
+	ConnFailsOK     bool                           `json:"connFailsOk,omitempty"`  // 新版恒为 true。老副机不带:主机据此标出不上报握手失败的服务器(ConnFails 为空时被 omitempty 省掉,单看它分不清)
 	Groups          map[string]GroupState          `json:"groups,omitempty"`       // 代理池在这台机器上的状态(在线设备、设备池满被拒次数)
 	Upstreams       []UpstreamHealth               `json:"upstreams,omitempty"`    // 本机线路真正用到的那些上游的巡检结果
 	Reload          *ReloadState                   `json:"reload,omitempty"`       // 副机最近一次重载的结果,失败要让主机面板看见
@@ -780,6 +783,7 @@ type NodeStatus struct {
 	ReloadError     string `json:"reloadError,omitempty"`
 	ReloadAt        int64  `json:"reloadAt,omitempty"`
 	VersionMismatch bool   `json:"versionMismatch,omitempty"`
+	NoConnFails     bool   `json:"noConnFails,omitempty"` // 这台副机版本较旧,不上报"到了但没过握手 / 认证"(概览里它那份永远是空的,不能当成包没到)
 	// LedgerFails 副机自己报的流量记账连续失败轮数:失败期间这段流量只在它的内存里,主机收不到、它一重启就丢
 	LedgerFails int `json:"ledgerFails,omitempty"`
 	// LedgerRegressAt / LedgerRegressUsers 最近一次发现这台副机的账本回退(计数比上次小)的时间与人数
@@ -814,7 +818,7 @@ func (h *Hub) remoteConns(pick func(*NodeStatus) []RecentConn) []RecentConn {
 			continue
 		}
 		for _, c := range pick(st) {
-			c.Server = st.Name
+			c.Server, c.NodeId = st.Name, id
 			out = append(out, c)
 		}
 	}
@@ -1616,6 +1620,7 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 		}
 		st.OnlineUsers = len(rep.Onlines)
 		st.conns, st.connFails = rep.Conns, rep.ConnFails
+		st.NoConnFails = !rep.ConnFailsOK
 		st.ReloadError, st.ReloadAt = "", 0
 		if rep.Reload != nil && !rep.Reload.OK {
 			st.ReloadError, st.ReloadAt = rep.Reload.Op+":"+rep.Reload.Error, rep.Reload.At

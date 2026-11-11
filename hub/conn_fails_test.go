@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 // 副机上报"到了但没过握手 / 认证"的来源:新字段带 omitempty,老主机不认、新主机收老副机的报告就是空;
@@ -35,10 +37,43 @@ func TestReportConnFailsCompatAndFresh(t *testing.T) {
 		remoteAt: map[uint]int64{1: now - remoteReportGrace - 1, 2: now},
 	}
 	fails := h.RemoteConnFails()
-	if len(fails) != 1 || fails[0].IP != "9.9.9.9" || fails[0].Server != "在线" || fails[0].Failed != "tls" {
-		t.Fatalf("只汇总宽限期内的、标上服务器名: %+v", fails)
+	if len(fails) != 1 || fails[0].IP != "9.9.9.9" || fails[0].Server != "在线" || fails[0].NodeId != 2 || fails[0].Failed != "tls" {
+		t.Fatalf("只汇总宽限期内的、标上服务器名与 id: %+v", fails)
 	}
 	if conns := h.RemoteConns(); len(conns) != 1 || conns[0].IP != "2.2.2.2" || conns[0].Failed != "" {
 		t.Fatalf("正常的最近连接不混进失败记录: %+v", conns)
+	}
+}
+
+// 老副机不上报握手 / 认证失败:报告里没有 connFailsOk。主机把它标出来(服务器页、概览据此注明"这台不上报"),
+// 新副机没有失败时 connFails 被 omitempty 省掉,但 connFailsOk 在,不会被误标。
+func TestNodeStatusMarksOldNodesWithoutConnFails(t *testing.T) {
+	var sent sentAlerts
+	h := sent.hub()
+	n := model.Node{Id: 2, Name: "老副机"}
+	var old Report
+	if err := json.Unmarshal([]byte(`{"version":"0.7.16","conns":[{"ip":"1.1.1.1","line":"tj"}]}`), &old); err != nil {
+		t.Fatal(err)
+	}
+	h.setStatus(n, true, "", &old)
+	if st := h.Statuses()[2]; !st.NoConnFails {
+		t.Fatalf("老副机要标出来: %+v", st)
+	}
+	b, _ := json.Marshal(h.Statuses()[2])
+	if !strings.Contains(string(b), `"noConnFails":true`) {
+		t.Fatalf("接口里要带上: %s", b)
+	}
+	var fresh Report
+	b, _ = json.Marshal(Report{Version: "0.7.17", ConnFailsOK: true})
+	if err := json.Unmarshal(b, &fresh); err != nil || strings.Contains(string(b), "connFails\"") {
+		t.Fatalf("新副机没有失败时只带能力标记: %s %v", b, err)
+	}
+	h.setStatus(n, true, "", &fresh)
+	if st := h.Statuses()[2]; st.NoConnFails {
+		t.Fatalf("升级后不再标: %+v", st)
+	}
+	b, _ = json.Marshal(h.Statuses()[2])
+	if strings.Contains(string(b), "noConnFails") {
+		t.Fatalf("新副机不带这个字段: %s", b)
 	}
 }

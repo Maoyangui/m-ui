@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -194,40 +195,85 @@ func (s *Server) recentFails(limit int) []recentConn {
 	return s.run.RecentFails(limit)
 }
 
-// handleRecentConns 本机 + 各副机最近入站连接;多服务器时带服务器名,按最近时间排序。
-// 带 ?fails=1 时后面再接上"到了但没过握手 / 认证"的来源(failed 字段非空,单独限量,刷不掉前面的);
+// handleRecentConns 本机 + 各副机最近入站连接,最近的在前;每条带服务器 id(nodeId)和来源的地址族(family:v4 / v6),
+// 多服务器时还带服务器名。带 ?fails=1 时后面再接上"到了但没过握手 / 认证"的来源(failed 字段非空,单独限量,刷不掉前面的);
 // 不带时和以前一样只有通过认证的(含被设备数拒的)。
+//
+// 多服务器时按服务器公平取(fairMerge):每台轮流取自己最近的一条,直到总数到上限 —— 一台有扫描噪声、连接特别多的服务器
+// 挤不掉别的服务器的记录(以前混在一起按时间取前 N 条,安静的那台服务器上用户刚试过的那条可能整条看不到)。
 func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
-	out := s.recentConns(100)
-	remote := s.run.Hub().RemoteConns()
-	var fails, remoteFails []recentConn
 	withFails := r.URL.Query().Get("fails") == "1"
+	remote, remoteFails := s.run.Hub().RemoteConns(), []recentConn(nil)
 	if withFails {
-		fails, remoteFails = s.recentFails(50), s.run.Hub().RemoteConnFails()
+		remoteFails = s.run.Hub().RemoteConnFails()
 	}
-	if len(remote) > 0 || len(remoteFails) > 0 {
-		var local model.Node
-		s.db.Where("is_local = ?", true).First(&local)
-		out = mergeRecent(out, remote, local.Name, 100)
-		fails = mergeRecent(fails, remoteFails, local.Name, 50)
+	var self model.Node
+	s.db.Where("is_local = ?", true).First(&self)
+	// 多服务器:有别的启用服务器,或副机报来了记录(刚停用的那台在宽限期内还会报)。副机自己的面板只有它自己,不标服务器名
+	multi := len(remote) > 0 || len(remoteFails) > 0
+	if !multi && !s.run.IsNode() {
+		var others int64
+		s.db.Model(&model.Node{}).Where("is_local = ? AND enabled = ?", false, true).Count(&others)
+		multi = others > 0
 	}
+	out := fairMerge(s.recentConns(100), remote, self, multi, 100)
 	if withFails {
-		out = append(out, fails...)
+		out = append(out, fairMerge(s.recentFails(50), remoteFails, self, multi, 50)...)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
 
-// mergeRecent 本机的标上服务器名,和副机的合在一起按最近时间排,留前 limit 条。
-func mergeRecent(local, remote []recentConn, localName string, limit int) []recentConn {
-	for i := range local {
-		local[i].Server = localName
+// fairMerge 本机的记录标上服务器 id(多服务器时还有名字),和副机的(hub 已标好)合在一起,每条按来源 IP 标地址族;
+// 超过 limit 条时按服务器轮流取各自最近的一条(谁最近活动过谁先取),取够为止;结果按最近时间排。
+func fairMerge(local, remote []recentConn, self model.Node, multi bool, limit int) []recentConn {
+	groups := map[uint][]recentConn{}
+	var order []uint
+	add := func(c recentConn) {
+		c.Family = ipFamily(c.IP)
+		if _, ok := groups[c.NodeId]; !ok {
+			order = append(order, c.NodeId)
+		}
+		groups[c.NodeId] = append(groups[c.NodeId], c)
 	}
-	out := append(local, remote...)
+	for _, c := range local {
+		c.NodeId = self.Id
+		if multi {
+			c.Server = self.Name
+		}
+		add(c)
+	}
+	for _, c := range remote {
+		add(c)
+	}
+	total := 0
+	for _, id := range order {
+		g := groups[id]
+		sort.SliceStable(g, func(i, j int) bool { return g[i].Ts > g[j].Ts })
+		total += len(g)
+	}
+	sort.SliceStable(order, func(i, j int) bool { return groups[order[i]][0].Ts > groups[order[j]][0].Ts })
+	out := make([]recentConn, 0, min(total, limit))
+	for i := 0; len(out) < limit && len(out) < total; i++ {
+		for _, id := range order {
+			if g := groups[id]; i < len(g) && len(out) < limit {
+				out = append(out, g[i])
+			}
+		}
+	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Ts > out[j].Ts })
-	if len(out) > limit {
-		out = out[:limit]
-	}
 	return out
+}
+
+// ipFamily 来源 IP 是 IPv4 还是 IPv6(IPv4 映射地址按 IPv4)。
+func ipFamily(ip string) string {
+	a, err := netip.ParseAddr(strings.TrimSpace(ip))
+	switch {
+	case err != nil:
+		return ""
+	case a.Unmap().Is4():
+		return "v4"
+	}
+	return "v6"
 }
 
 // ---- 日志 ----
