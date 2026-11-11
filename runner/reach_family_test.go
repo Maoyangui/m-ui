@@ -3,7 +3,9 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Maoyangui/m-ui/database"
@@ -292,10 +294,45 @@ func TestReachTargetsLocalAllV6(t *testing.T) {
 	if v := got["本机"].V6; v == nil || v.Host != "2001:db8:1::1" || v.Port != 8443 || v.PortLine != "tj6" || len(v.UDPLines) != 1 {
 		t.Fatalf("主机的 IPv6 入站照测 = %+v", v)
 	}
-	// 订阅域名:订阅地址不是 IPv6 字面量,照测(测的是这台的 IPv4,不在主机上解析订阅域名)
-	r.setSetting("subDomain", "sub.example.com")
-	wantSub("填了订阅域名", targets(), true)
-	r.setSetting("subDomain", "")
+	// 订阅地址是域名:在主机上查它的 A 记录(审查:只有 AAAA 时没人连主机的 IPv4,以前照样拿主机的 IPv4 测订阅端口 ——
+	// NAT 共享 IPv4 的机器每轮报"境外也不通",IPv4 被墙照样告警)。A 记录是这台的 IPv4(多个 A 里有这台的也算)照测这台;
+	// 解析出错(超时)、只解析到内网地址时说不准,退回测这台的 IPv4,不因为一次解析失败就盖掉以前的结论
+	r.resolve4 = fakeResolve4(map[string][]string{
+		"sub.example.com":   {"203.0.113.1"},
+		"multi.example.com": {"198.51.100.80", "203.0.113.1"},
+		"cdn.example.com":   {"198.51.100.81", "198.51.100.80"},
+		"lan.example.com":   {"10.0.0.8"},
+		"localhost":         {"127.0.0.1"},
+	})
+	for _, d := range []string{"sub.example.com", "multi.example.com", "flaky.example.com", "lan.example.com"} {
+		r.setSetting("subDomain", d)
+		wantSub("订阅域名 "+d, targets(), true)
+	}
+	// A 记录不是这台的(CDN、这台的另一个 IP):测订阅地址解析出来的那个 IPv4,用户刷新订阅连的就是它(多个时取最小的,每轮一样)
+	r.setSetting("subDomain", "cdn.example.com")
+	if g := targets()["本机"]; g.NoPort != "" || g.Err != "" || g.Host != "198.51.100.80" || g.Port != 2096 || g.PortFrom != "sub" || !g.TCPv6Only {
+		t.Fatalf("订阅域名解析到别的 IPv4:测解析出来的那个 = %+v", g)
+	}
+	// 订阅域名只有 AAAA(没有 A 记录):和订阅地址是 IPv6 字面量一样不测;没填订阅域名时订阅地址是面板域名,同样
+	for _, k := range []string{"subDomain", "webDomain"} {
+		r.setSetting("subDomain", "")
+		r.setSetting(k, "v6only.example.com")
+		got := targets()
+		if g := got["本机"]; g.NoPort == "" || g.Err != "" || g.Host != "" || g.Port != 0 || g.PortFrom != "" || g.TCPv6Only {
+			t.Fatalf("%s 只有 AAAA:主机不测大陆那项 = %+v", k, g)
+		}
+		if s := got["副机"]; s.NoPort == "" || s.Port != 0 {
+			t.Fatalf("%s 只有 AAAA:副机照旧不测 = %+v", k, s)
+		}
+		if v := got["本机"].V6; v == nil || v.Port != 8443 {
+			t.Fatalf("%s 只有 AAAA:IPv6 入站照测 = %+v", k, v)
+		}
+		r.setSetting(k, "")
+	}
+	// 订阅地址是公网 IP(没填域名):测的就是它,不是连接地址里另一个 IPv4(用户刷新订阅连的是订阅地址)
+	db.Model(&model.Node{}).Where("id = ?", local.Id).Update("addr", "198.51.100.7")
+	wantSub("连接地址是另一个 IPv4", targets(), true)
+	db.Model(&model.Node{}).Where("id = ?", local.Id).Update("addr", "")
 	// 服务器选了"自动地址用 IPv6"、线路都没单独选(以前这一支记"无可测端口",会把以前测出的"被墙"清掉)
 	db.Model(&model.Node{}).Where("id IN ?", []uint{local.Id, sub.Id}).Update("addr_family", "v6")
 	db.Model(&model.Line{}).Where("1 = 1").Update("node_family", nil)
@@ -314,6 +351,98 @@ func TestReachTargetsLocalAllV6(t *testing.T) {
 	r.setSetting("webDomain", "localhost") // 只解析到回环地址,不算
 	if g := targets()["本机"]; g.NoPort == "" || g.Err != "" || g.Port != 0 {
 		t.Fatalf("没有 IPv4:主机不测大陆那项 = %+v", g)
+	}
+}
+
+// 这台根本没有 IPv4(只上报了 IPv6,连接地址不是 IPv4,域名也解析不到 IPv4)时,大陆那项一律记"无可测端口"(审查):
+// 线路自定义地址写成中转(IPv4、IPv6、域名都按 IPv4 一侧算)、订阅给域名时也一样,主机副机都一样 —— 以前这些情况报
+// "没有可测的地址:服务器还没上报公网 IP"(其实报了),没测成不算结论,以前测出的"IP 被墙"和概览顶部的提示一直挂着。
+// 解析域名出错(超时等,不是"没有这条记录")时说不准有没有 IPv4,照旧算没测成,原因写成解析失败;什么都没上报的照旧报"还没上报"。
+func TestReachTargetsNoIPv4(t *testing.T) {
+	r, err := New(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(r.db)
+	db := r.db
+	db.Model(&model.Node{}).Where("is_local = ?", true).Update("name", "本机")
+	var local model.Node
+	db.Where("is_local = ?", true).First(&local)
+	r.setSetting("publicIp", "2001:db8:1::1") // 纯 IPv6 的主机:公网 IP 记的就是 IPv6
+	r.setSetting("publicIp6", "2001:db8:1::1")
+	r.resolve4 = fakeResolve4(map[string][]string{"dual.example.com": {"203.0.113.15"}})
+	mk := func(name, ip6, domain string) model.Node {
+		n := model.Node{Name: name, Enabled: true, ApiUrl: "https://n.example.com:2053/app/", PublicIP: ip6, PublicIP6: ip6, Domain: domain}
+		db.Create(&n)
+		return n
+	}
+	relay6 := mk("中转v6", "2001:db8:11::1", "")
+	relay4 := mk("中转v4", "2001:db8:12::1", "")
+	relayD := mk("中转域名", "2001:db8:13::1", "")
+	flaky := mk("解析失败", "2001:db8:14::1", "flaky.example.com")
+	dual := mk("域名有v4", "2001:db8:15::1", "dual.example.com")
+	v6dom := mk("域名只有v6", "2001:db8:16::1", "v6only.example.com")
+	none := mk("没上报", "", "")
+	ids := func(v ...uint) json.RawMessage { raw, _ := json.Marshal(v); return raw }
+	line := func(name, proto string, port int, nodeIds json.RawMessage, addrs string) {
+		l := model.Line{Name: name, Protocol: proto, Port: port, NodeIds: nodeIds, Enabled: true}
+		if addrs != "" {
+			l.Addrs = json.RawMessage(addrs)
+		}
+		db.Create(&l)
+	}
+	// 落地机(主机也一样)的线路只经国内中转:用户连中转、中转连这台。这台没有 IPv4,大陆那项没东西可测
+	line("r6", "trojan", 6443, ids(local.Id, relay6.Id), `[{"server":"240e:1:2::1","server_port":30000}]`)
+	line("r4", "vless", 6444, ids(relay4.Id, flaky.Id, dual.Id), `[{"server":"198.51.100.50"}]`)
+	line("rd", "vmess", 6445, ids(relayD.Id), `[{"server":"relay.example.com"}]`)
+	line("plain", "anytls", 7443, ids(v6dom.Id, none.Id), "")
+
+	targets := func() map[string]reach.Target {
+		got := map[string]reach.Target{}
+		for _, g := range r.reachTargets(context.Background()) {
+			got[g.Name] = g
+		}
+		return got
+	}
+	check := func(step string) {
+		t.Helper()
+		got := targets()
+		for _, name := range []string{"本机", "中转v6", "中转v4", "中转域名", "域名只有v6"} {
+			if g := got[name]; g.NoPort == "" || g.Err != "" || g.Host != "" || g.Port != 0 || g.PortFrom != "" || g.PortLine != "" {
+				t.Fatalf("%s:%s 没有 IPv4,大陆那项记无可测端口(不报没测成,也不留借来的线路端口)= %+v", step, name, g)
+			}
+		}
+		if g := got["解析失败"]; g.NoPort != "" || !strings.Contains(g.Err, "解析域名失败") {
+			t.Fatalf("%s:解析域名出错时说不准有没有 IPv4,算没测成、原因写解析失败 = %+v", step, g)
+		}
+		if g := got["没上报"]; g.NoPort != "" || g.Err != "没有可测的地址:服务器还没上报公网 IP,也没填连接地址或域名" {
+			t.Fatalf("%s:什么都没上报的照旧报还没上报 = %+v", step, g)
+		}
+		if g := got["域名有v4"]; g.NoPort != "" || g.Err != "" || g.Host != "203.0.113.15" || g.Port != 6444 || g.PortFrom != "line" || g.PortLine != "r4" {
+			t.Fatalf("%s:域名解析得到 IPv4 的照测 = %+v", step, g)
+		}
+	}
+	check("订阅给 IP")
+	// 订阅给域名:没单独选 IP 版本的线路按 IPv4 一侧算;纯 IPv6 的副机(域名只有 AAAA)、主机(面板域名只有 AAAA)同样不测
+	r.setSetting("subServerAddr", "domain")
+	r.setSetting("webDomain", "v6only.example.com")
+	check("订阅给域名")
+}
+
+// fakeResolve4 测试用的 IPv4 解析:表里有的照给;flaky.example.com 超时(说不准有没有 A 记录);其余当没有 A 记录(只有 AAAA,或域名不存在)。
+func fakeResolve4(table map[string][]string) func(context.Context, string) ([]net.IP, error) {
+	return func(_ context.Context, host string) ([]net.IP, error) {
+		if host == "flaky.example.com" {
+			return nil, &net.DNSError{Err: "i/o timeout", Name: host, IsTimeout: true, IsTemporary: true}
+		}
+		if list, ok := table[host]; ok {
+			ips := make([]net.IP, 0, len(list))
+			for _, s := range list {
+				ips = append(ips, net.ParseIP(s))
+			}
+			return ips, nil
+		}
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
 	}
 }
 

@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/netip"
 	"net/url"
@@ -27,7 +28,9 @@ var tcpProtocols = map[string]bool{"anytls": true, "trojan": true, "vless": true
 // 订阅里走 IPv6 的线路(含自定义地址写成这台自己的 IPv6 的)不拿来测 IPv4 地址(端口是同一个、IPv4 照样通,测出"通"却不是用户连的那条路),
 // 而是另测一项 IPv6 入站(Target.V6):测它在订阅里的 IPv6 地址 + 第一条走 IPv6 的 TCP 线路的端口。
 // 副机的线路在订阅里都不走 IPv4 时大陆那项不测(NoPort:灰色、不告警,会盖掉以前测出的结论);
-// 主机照测订阅端口(用户刷新订阅连的是它),订阅地址是 IPv6、或这台没有 IPv4 时才记 NoPort。
+// 主机这时测订阅地址的 IPv4、订阅端口(用户刷新订阅连的是它),订阅地址是 IPv6、或是没有 A 记录的域名时才记 NoPort(见 subAddrIPv4)。
+// 这台根本没有 IPv4(只上报了 IPv6,连接地址、域名也解析不到 IPv4)时,线路走中转、订阅给域名也一样记 NoPort,主机副机都是;
+// 解析域名出错(超时等)时说不准,算没测成(Err)。
 func (r *Runner) reachTargets(ctx context.Context) []reach.Target {
 	var nodes []model.Node
 	r.db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&nodes)
@@ -73,22 +76,35 @@ func (r *Runner) reachTargets(ctx context.Context) []reach.Target {
 			}
 		}
 		// 订阅里这台的线路都不给 IPv4。副机这时没有用户会连它的 IPv4(面板 API 端口不是用户入口),大陆那项不测;
-		// 主机照测订阅端口:用户刷新订阅连的是它(订阅地址见 Runner.PublicHost:订阅域名 → 面板域名 → 公网 IP),
-		// 订阅地址的 IPv4 被墙时大陆用户拿不到新节点。订阅地址本身是 IPv6、或这台根本没有 IPv4 时才不测
+		// 主机测订阅地址的 IPv4(见 subAddrIPv4):用户刷新订阅连的是它,被墙时大陆用户拿不到新节点
 		noV4 := !anyV4 && (a.defV6 || anyV6)
+		var dnsErr error
 		switch {
 		case noV4 && !n.IsLocal && a.defV6:
 			t.NoPort = "订阅里这台用的是 IPv6 地址,大陆连通检测暂只支持 IPv4"
 		case noV4 && !n.IsLocal:
 			t.NoPort = "这台的线路在订阅里都走 IPv6,大陆连通检测暂只支持 IPv4"
-		case noV4 && isIPv6Literal(r.PublicHost()):
-			t.NoPort = "这台的线路在订阅里都不走 IPv4,订阅地址也是 IPv6,大陆连通检测暂只支持 IPv4"
+		case noV4:
+			dnsErr = r.subAddrIPv4(ctx, n, &t)
 		default:
-			if t.Host = r.reachHost(ctx, n); t.Host == "" && noV4 && a.ip4 == "" && a.ip6 != "" {
-				t.NoPort = "这台只有 IPv6 地址,域名也解析不到 IPv4,大陆连通检测暂只支持 IPv4"
-			} else if t.Host == "" {
+			t.Host, dnsErr = r.reachHost(ctx, n)
+		}
+		if t.Host == "" && t.NoPort == "" {
+			switch {
+			case dnsErr != nil:
+				// 解析域名出错(超时等,不是"没有这条记录"):说不准这台有没有 IPv4,算没测成,不盖掉以前的结论
+				t.Err = "没有可测的地址:解析域名失败(不是没有记录,可能是 DNS 超时),这一轮没测"
+			case a.ip4 == "" && a.ip6 != "":
+				// 这台根本没有 IPv4:只上报了 IPv6,连接地址不是 IPv4,域名也解析不到 IPv4。线路走中转(中转的地址按 IPv4 一侧算)、
+				// 订阅给域名时也一样,主机副机都一样:大陆那项没东西可测。记"无可测端口"会盖掉以前的结论 —— 这台已经没有那个 IPv4 了,
+				// 留着"没测成"的话以前测出的"IP 被墙"和概览顶部的提示永远清不掉
+				t.NoPort = "这台只有 IPv6 地址(没有上报 IPv4,连接地址和域名也解析不到 IPv4),大陆连通检测暂只支持 IPv4"
+			default:
 				t.Err = "没有可测的地址:服务器还没上报公网 IP,也没填连接地址或域名"
 			}
+		}
+		if t.NoPort != "" {
+			t.Port, t.PortFrom, t.PortLine = 0, "", "" // 不测:详情里别列出从线路借来、却没测的端口
 		}
 		if t.Port == 0 && t.NoPort == "" {
 			// 走 IPv4 的线路没有 TCP 的(只有 hysteria2 / tuic,或 TCP 线路都走 IPv6;主机还有线路都不走 IPv4 的):
@@ -253,38 +269,113 @@ func publicIPv6(s string) bool {
 	return ip != nil && ip.To4() == nil && ip.IsGlobalUnicast() && !ip.IsPrivate()
 }
 
+// subAddrIPv4 主机的线路在订阅里都不走 IPv4 时,大陆那项测订阅地址(Runner.PublicHost:订阅域名 → 面板域名 → 公网 IP)的 IPv4,
+// 端口用订阅端口:用户刷新订阅连的就是它。填 t.Host(要测的 IPv4)或 t.NoPort(不测的原因):
+//   - 订阅地址是 IPv6 字面量,或是域名而没有 A 记录(只有 AAAA):没有用户会连这台的 IPv4,不测;
+//   - 是域名、解析到公网 IPv4:有这台自己的 IPv4 就测它,没有(CDN、这台的另一个 IP)就测解析出来的那个(多个取最小的,每轮一样);
+//   - 解析出错(超时等,不是"没有记录")、只解析到内网 / 回环地址时说不准,退回 reachHost 测这台的 IPv4
+//     (不因为一次解析失败就盖掉以前的结论;这台也没有 IPv4 时把解析错误交回去,算没测成)。
+func (r *Runner) subAddrIPv4(ctx context.Context, n model.Node, t *reach.Target) (dnsErr error) {
+	ph := model.BareHost(r.PublicHost())
+	switch {
+	case isIPv6Literal(ph):
+		t.NoPort = "这台的线路在订阅里都不走 IPv4,订阅地址也是 IPv6,大陆连通检测暂只支持 IPv4"
+		return nil
+	case net.ParseIP(ph) != nil:
+		if t.Host = publicIPv4(ph); t.Host != "" {
+			return nil
+		}
+	case ph != "":
+		ips, err := r.lookupIPv4(ctx, ph)
+		if noIPv4Record(err) {
+			t.NoPort = "这台的线路在订阅里都不走 IPv4,订阅地址的域名也没有 IPv4(A)记录,大陆连通检测暂只支持 IPv4"
+			return nil
+		}
+		if t.Host = pickIPv4(ips, publicIPv4(n.Addr), publicIPv4(n.PublicIP), publicIPv4(r.setting("publicIp"))); t.Host != "" {
+			return nil
+		}
+		dnsErr = err
+	}
+	var err error
+	if t.Host, err = r.reachHost(ctx, n); dnsErr == nil {
+		dnsErr = err
+	}
+	return dnsErr
+}
+
+// pickIPv4 域名解析出的公网 IPv4 里挑一个测:有这台自己的(own 里的)就测它,没有就取最小的(每轮一样);一个公网的都没有时返回空。
+func pickIPv4(ips []net.IP, own ...string) string {
+	var found []netip.Addr
+	for _, ip := range ips {
+		if a, err := netip.ParseAddr(publicIPv4(ip.String())); err == nil {
+			found = append(found, a)
+		}
+	}
+	if len(found) == 0 {
+		return ""
+	}
+	for _, o := range own {
+		if a, err := netip.ParseAddr(o); err == nil && slices.Contains(found, a) {
+			return a.String()
+		}
+	}
+	return slices.MinFunc(found, netip.Addr.Compare).String()
+}
+
+// noIPv4Record 解析的结果是"没有 IPv4 记录":域名只有 AAAA、或域名不存在(DNSError.IsNotFound),
+// 或解析出了地址却没有 IPv4(hosts 文件里只写了 IPv6 时是 AddrError)。超时、服务器出错之类说不准的不算。
+func noIPv4Record(err error) bool {
+	if de, ok := errors.AsType[*net.DNSError](err); ok {
+		return de.IsNotFound
+	}
+	_, ok := errors.AsType[*net.AddrError](err)
+	return ok
+}
+
 // 连接地址可能故意填成 127.0.0.1(不做入站的主机让订阅里它那组节点指向本机),
 // 这种地址测不了、也不代表这台服务器,跳过它去用探测到的公网 IP。
-func (r *Runner) reachHost(ctx context.Context, n model.Node) string {
+// 都没有时 dnsErr 是解析域名遇到的、不是"没有 IPv4 记录"的错误(超时等:说不准这台有没有 IPv4)。
+func (r *Runner) reachHost(ctx context.Context, n model.Node) (host string, dnsErr error) {
 	if ip := publicIPv4(n.Addr); ip != "" {
-		return ip
+		return ip, nil
 	}
 	pub := n.PublicIP
 	if n.IsLocal && publicIPv4(pub) == "" {
 		pub = r.setting("publicIp")
 	}
 	if ip := publicIPv4(pub); ip != "" {
-		return ip
+		return ip, nil
 	}
 	// 域名在主机上解析成 IPv4 再测:让大陆测点自己解析会撞上 DNS 污染,测出来的就不是这台服务器了
 	for _, host := range []string{n.Addr, n.Domain, localDomain(r, n)} {
 		host = strings.TrimSpace(host)
-		if host == "" || net.ParseIP(host) != nil {
+		if host == "" || net.ParseIP(model.BareHost(host)) != nil {
 			continue
 		}
-		c, cancel := context.WithTimeout(ctx, 5*time.Second)
-		ips, err := net.DefaultResolver.LookupIP(c, "ip4", host)
-		cancel()
+		ips, err := r.lookupIPv4(ctx, host)
 		if err != nil {
+			if dnsErr == nil && !noIPv4Record(err) {
+				dnsErr = err
+			}
 			continue
 		}
 		for _, ip := range ips {
 			if s := publicIPv4(ip.String()); s != "" {
-				return s
+				return s, nil
 			}
 		}
 	}
-	return ""
+	return "", dnsErr
+}
+
+// lookupIPv4 在主机上把域名解析成 IPv4,5 秒超时(测试里可替换 Runner.resolve4)。
+func (r *Runner) lookupIPv4(ctx context.Context, host string) ([]net.IP, error) {
+	c, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if r.resolve4 != nil {
+		return r.resolve4(c, host)
+	}
+	return net.DefaultResolver.LookupIP(c, "ip4", host)
 }
 
 func localDomain(r *Runner, n model.Node) string {
