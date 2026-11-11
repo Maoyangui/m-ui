@@ -543,7 +543,7 @@ func TestPeerReplayRejected(t *testing.T) {
 	if n, _ := a.requestVotes(context.Background(), 2); n != 1 {
 		t.Fatal("对得上的同意要算")
 	}
-	var v voteRec
+	var v Vote
 	if !a.getJSON(KeyVote, &v) || v.CandPub == "" {
 		t.Fatal("自己的票要带当主机后的签名公钥")
 	}

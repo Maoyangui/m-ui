@@ -45,11 +45,9 @@ func TestNextEpochBounds(t *testing.T) {
 	}
 	plusOne := regexp.MustCompile(`(?:^|[^!<>=])(?::=|=)\s*(?:max\(.*\)|L|E|s\.Epoch\(\))\s*\+\s*1\b|Epoch:\s*(?:L|E|s\.Epoch\(\))\s*\+\s*1\b`)
 	write := regexp.MustCompile(`\bKeyEpoch\s*:|\[KeyEpoch\]\s*=`)
-	// 这几个文件归别的修复者,他们的分支里已改成 NextEpoch / EnterEpoch:合并后删掉这张表
-	pending := map[string]bool{"switch.go": true, "incoming.go": true, "config.go": true}
 	files, _ := filepath.Glob("*.go")
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") || pending[f] {
+		if strings.HasSuffix(f, "_test.go") {
 			continue
 		}
 		b, err := os.ReadFile(f)

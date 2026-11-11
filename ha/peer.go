@@ -42,8 +42,6 @@ const (
 	peerHeaderTs   = "X-Peer-Ts"
 	peerHeaderSig  = "X-Peer-Sig"
 	peerSkew       = 10 * time.Minute
-	// peerVoteTTL 票的有效期:一次没成功的选举留下的票过了这么久就不再挡别的候选(与 A 的 Decide 用同一时长)
-	peerVoteTTL = 30 * time.Minute
 )
 
 // PeerStatus 一台副机对同伴说的自己的情况。
@@ -79,17 +77,8 @@ type VoteReply struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-// voteRec 落库的票。CandPub 字段在 A 的契约里加进 Vote;这里外包一层先写进去(同名 JSON 键),
-// 集成后可直接用 Vote{…, CandPub: …}。
-type voteRec struct {
-	Vote
-	CandPub string `json:"candPub,omitempty"`
-}
-
-// voteLive 票还在有效期内。
-func (s *Service) voteLive(v Vote) bool {
-	return v.At > 0 && s.now().Sub(time.Unix(v.At, 0)) < peerVoteTTL
-}
+// voteLive 票还在有效期内(与 Decide 认票用同一个 voteTTL:一次没成功的选举留下的票过期后不再挡别的候选)。
+func (s *Service) voteLive(v Vote) bool { return v.valid(s.now()) }
 
 func peerKey(raw string) []byte {
 	b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(raw))
@@ -219,7 +208,7 @@ func (s *Service) grantVote(req VoteRequest) VoteReply {
 		r.Reason = "candPub"
 		return r
 	}
-	rec := voteRec{Vote: Vote{Epoch: req.Epoch, Candidate: req.Candidate, At: s.now().Unix()}, CandPub: req.CandPub}
+	rec := Vote{Epoch: req.Epoch, Candidate: req.Candidate, CandPub: req.CandPub, At: s.now().Unix()}
 	if err := s.set(map[string]string{KeyVote: mustJSON(rec)}); err != nil {
 		r.Reason = "store"
 		return r
@@ -356,7 +345,7 @@ func (s *Service) requestVotes(ctx context.Context, epoch uint64) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	rec := voteRec{Vote: Vote{Epoch: epoch, Candidate: self, At: s.now().Unix()}, CandPub: candPub}
+	rec := Vote{Epoch: epoch, Candidate: self, CandPub: candPub, At: s.now().Unix()}
 	if err := s.set(map[string]string{KeyVote: mustJSON(rec)}); err != nil {
 		return 0, err
 	}
