@@ -46,5 +46,7 @@ jobs:
         run: node --test web/jstest/exts.test.mjs
       - name: Frontend (users page plan dialogs)
         run: node --test web/jstest/users.test.mjs
+      - name: Frontend (support page)
+        run: node --test web/jstest/support.test.mjs
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run

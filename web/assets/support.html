@@ -324,43 +324,72 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
   }).catch(function () {});
 
   // 留名后这页关了也能接着等:记在浏览器里,60 分钟后作废
-  var KEY = 'm-ui-pledge', timer = null, poll = null;
+  var KEY = 'm-ui-pledge', timer = null, poll = null, giveUp = null, session = 0;
+  // 到期时最近一次核对比 STALE 旧(毫秒,按这台电脑的钟)就先再核对一次:正常 20 秒一次,标签页被冻结、后台节流或电脑睡眠后
+  // 回来,手上的结果可能是一个小时前的。一次核对最多等 WAIT:过了还没回来就当它丢了(到期时就是"不知道"),它的结果也不再算
+  var STALE = 30000, WAIT = 15000;
   var ERR = { name_empty: ZH ? '请填名字' : 'Enter a name', name_long: ZH ? '名字最多 24 个字' : 'Names can be 24 characters at most', name_bad: ZH ? '名字只能用文字、数字和空格,不能带链接' : 'Names can only use letters, digits and spaces, no links', amount: ZH ? '金额需在 1 到 100000 之间' : 'The amount must be between 1 and 100000', rate: ZH ? '提交太频繁,稍后再试' : 'Too many tries, try again later', send: ZH ? '暂时无法留名,稍后再试' : "Can't sign right now, try again later", origin: ZH ? '请从面板页面提交' : 'Please submit from the panel page', bad: ZH ? '提交有误,请重试' : 'Invalid request, please retry' };
   var load = function () { try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; } };
   var save = function (p) { try { if (p) localStorage.setItem(KEY, JSON.stringify(p)); else localStorage.removeItem(KEY); } catch (e) {} };
-  function stop() { clearInterval(timer); clearInterval(poll); timer = poll = null; }
+  function stop() { clearInterval(timer); clearInterval(poll); clearTimeout(giveUp); timer = poll = giveUp = null; }
   var HINT = $('p-hint').textContent;
   function hint(msg, err) { var h = $('p-hint'); h.textContent = msg || HINT; h.classList.toggle('err', !!err); }
-  function idle(msg) { stop(); save(null); $('pledge').hidden = false; $('p-hint').hidden = false; hint(msg); $('p-wait').hidden = true; }
+  function idle(msg) { session++; stop(); save(null); $('pledge').hidden = false; $('p-hint').hidden = false; hint(msg); $('p-wait').hidden = true; }
   function waiting(p) {
+    stop();
+    var me = ++session; // 这一次等待:取消、到账或下了结论之后,还在路上的核对结果作废
     if (typeof p.skew === 'number' && isFinite(p.skew)) skew = p.skew;
     // 最近一次核对:true = 面板查到了链上记录(没有就是真没到);其它 = 面板暂时查不了,不能断言没到账
-    var known = null;
+    // cur = 还在路上的那次核对(发出的时间 at),sentAt = 最近一次发出的时间,after = 等它回来再做的事
+    var known = null, cur = null, sentAt = 0, after = [], last = false;
+    var waitingFor = function () { var age = cur ? Date.now() - cur.at : -1; return age >= 0 && age < WAIT; };
     $('pledge').hidden = true; $('p-hint').hidden = true; $('p-done').hidden = true; $('p-wait').hidden = false;
     $('p-pay').textContent = p.amount;
     $('p-copy').setAttribute('data-copy', p.amount);
-    var tick = function () {
-      var left = Math.floor(p.expiresAt - serverNow());
-      if (left <= 0) {
-        idle(known === true ? (ZH ? '超过 60 分钟未到账,可重新留名。' : 'Not received within 60 minutes. You can sign again.')
-          : (ZH ? '暂时无法确认是否到账,若已转账会在几小时内上榜。' : "We couldn't confirm whether it arrived. If you sent it, you'll appear on the list within a few hours."));
-        return;
-      }
-      $('p-left').textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
-    };
-    var check = function () {
+    var check = function (then) {
+      if (typeof then === 'function') after.push(then);
+      if (waitingFor()) return; // 上一次刚发出还没回来:等它,不叠着查
+      var c = cur = { at: Date.now() };
+      sentAt = c.at;
       fetch('support/pledge-check?amount=' + encodeURIComponent(p.amount) + '&since=' + p.at).then(function (r) { return r.json(); }).then(function (d) {
-        learnSkew(d.now);
+        if (me !== session || cur !== c) return; // 取消了,或者等太久已经另查了:这次的结果不算
+        if (Date.now() - c.at < WAIT) learnSkew(d.now); // 冻结前发出、回来才处理的响应带的是旧的服务器时间,拿它算钟差倒计时会往回跳
         known = d.known === true;
         if (!d.arrived) return;
         idle();
         $('pledge').hidden = true; $('p-hint').hidden = true;
         var done = $('p-done'); done.hidden = false;
         done.textContent = ZH ? '✓ 收到了,谢谢 ' + p.name + '!通常几小时内上榜。' : "✓ Received, thank you " + p.name + "! You'll usually appear within a few hours.";
-      }).catch(function () { known = false; });
+      }).catch(function () { if (me === session && cur === c) known = false; }).then(function () {
+        if (cur !== c) return;
+        cur = null;
+        var fns = after; after = [];
+        fns.forEach(function (f) { f(); });
+      });
     };
-    tick(); check();
-    timer = setInterval(tick, 1000); poll = setInterval(check, 20000);
+    var verdict = function () {
+      idle(known === true ? (ZH ? '超过 60 分钟未到账,可重新留名。' : 'Not received within 60 minutes. You can sign again.')
+        : (ZH ? '暂时无法确认是否到账,若已转账会在几小时内上榜。' : "We couldn't confirm whether it arrived. If you sent it, you'll appear on the list within a few hours."));
+    };
+    // 到期后下结论:刚发出的那次核对还在路上就等它回来;最近一次核对比 STALE 旧(或还没核对过)就先再核对一次,
+    // 不拿冻结前的结果断言"没到账"。最后这次最多等 WAIT,等不到就是"不知道"
+    var conclude = function () {
+      if (me !== session) return;
+      if (waitingFor()) { after.push(conclude); return; }
+      var age = Date.now() - sentAt;
+      if (!last && (cur || !sentAt || age > STALE || age < 0)) { last = true; known = null; check(conclude); return; }
+      verdict();
+    };
+    var tick = function () {
+      var left = Math.floor(p.expiresAt - serverNow());
+      if (left > 0) { $('p-left').textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'); return; }
+      $('p-left').textContent = '0:00';
+      stop(); // 不再倒计时、不再定时核对
+      giveUp = setTimeout(function () { if (me === session) { known = null; verdict(); } }, WAIT);
+      conclude();
+    };
+    timer = setInterval(tick, 1000); poll = setInterval(function () { check(); }, 20000);
+    check(); tick();
   }
   $('pledge').addEventListener('submit', function (e) {
     e.preventDefault();
