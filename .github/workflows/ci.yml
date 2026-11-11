@@ -58,5 +58,7 @@ jobs:
         run: node --test web/jstest/i18n.test.mjs
       - name: Frontend (recent inbound connections fair per server)
         run: node --test web/jstest/fair.test.mjs
+      - name: Frontend (certificate alert bar)
+        run: node --test web/jstest/certbar.test.mjs
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run

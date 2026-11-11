@@ -286,7 +286,9 @@ function reloadNotice() {
 function certNotice() {
   const list = (!isReseller() && state.status && state.status.certAlerts) || [];
   let bar = document.getElementById('cert-bar');
-  const sig = list.map(a => `${a.nodeId || 0}:${a.name}:${a.trouble}`).join(',');
+  // 签名带上顶着临时证书的服务:关掉过「文件读不出来」后面板 / 订阅改用临时自签证书(重启之后),那是新情况,要再提示。
+  // 没有 fallback 的条目签名和以前一样,已经关掉的不会因为升级又冒出来
+  const sig = list.map(a => `${a.nodeId || 0}:${a.name}:${a.trouble}${a.fallback ? '+' + a.fallback : ''}`).join(',');
   let dismissed = '';
   try { dismissed = localStorage.getItem('m-ui.certDismissed') || ''; } catch {}
   if (!list.length || dismissed === sig) { if (bar) bar.remove(); return; }
