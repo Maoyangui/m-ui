@@ -20,9 +20,11 @@ import (
 //   - 其它副机也都联系不上它(谁还联系得上,就是本机和主机之间的网络问题,不接任);
 //   - 境外测点(Globalping,不用大陆测点)也连不上主机的公网 IP(连得上就是网络分区,不接任);
 //   - 主机没有在暂停接任(升级、计划内重启前自动暂停),Telegram 也没显示主机的机器人还在跑;
-//   - 时间到了:确认后接任默认 3 分钟、自动接任默认 10 分钟;备用 2 再多等 3 分钟,而且要确认备用 1 也不在。
+//   - 时间到了:先确认再接任默认 3 分钟、自动接任默认 10 分钟;备用 2 再多等 3 分钟,而且要确认备用 1 也不在
+//     (或者它接不了:副本没过自检、比本机旧太多、刚接任失败过;再多等两个名次间隔后不再等它)。
 //
-// 确认后接任:发一条 Telegram,回复 /takeover <码>(或「接任 <码>」)或在本机面板点「接任为主机」才动手;
+// 先确认再接任:发一条 Telegram(确认码绑着要接任的纪元),回复 /takeover <码>(或「接任 <码>」)或在本机面板点「接任为主机」才动手;
+// 判定走到"等确认"之后证据又变了(同伴联系上主机、见证说主机还在、别的备用已经接任……),这次确认作废。
 // 自动接任:三台以上的集群要过半副机投票同意(而且境外测点没说主机还活着),只有一主一副时必须境外测点也说主机不通。
 
 var (
@@ -44,16 +46,19 @@ type engine struct {
 	witnessAt  time.Time
 	tgConflict time.Time // getUpdates 最近一次 409:另有实例在长轮询(多半是主机的机器人还活着)
 	prompt     *prompt
+	verdictAt  time.Time // 最近一次判定走到"等确认"的时间:面板、命令行的接任只认新鲜的判定
 	alerted    map[string]bool
 	reason     string // 最近一次不接任的原因(面板显示)
 	running    bool
 }
 
+// promptFresh "等确认"的判定多久以内算新鲜(判定每 10 秒一次,证据每 30 秒刷新)。
+var promptFresh = 90 * time.Second
+
 type prompt struct {
 	code   string
-	epoch  uint64
+	epoch  uint64 // 确认的是接任到这个纪元:纪元变了确认码作废
 	sentAt time.Time
-	offset int64
 	stop   chan struct{}
 }
 
@@ -84,7 +89,7 @@ func (e *engine) peerSummary() *hub.HAPeers {
 	return e.peerSum
 }
 
-// PromptView 确认后接任:正在等确认(面板显示,不含确认码)。
+// PromptView 先确认再接任:正在等确认(面板显示,不含确认码)。
 type PromptView struct {
 	SentAt int64  `json:"sentAt"`
 	Epoch  uint64 `json:"epoch"`
@@ -147,6 +152,74 @@ func (e *engine) setReason(r string) {
 	e.mu.Unlock()
 }
 
+// blockText 确认作废时说明原因。
+var blockText = map[string]string{
+	"paused":         "主机暂停了接任",
+	"higherEpoch":    "别的备用已经接任了",
+	"peerSeesMaster": "别的副机还联系得上主机",
+	"witnessUp":      "境外测点能连上主机",
+	"betterStandby":  "排在前面的备用还在",
+	"waiting":        "还没到接任的时间",
+	"noReplica":      "本机没有可用的副本",
+	"epoch":          "纪元已到上限",
+}
+
+// block 这一轮不接任:记下原因;已经发出的确认作废(证据变了,旧的确认码不能再拿来接任)。
+func (e *engine) block(reason string) {
+	e.mu.Lock()
+	p := e.prompt
+	e.prompt, e.reason = nil, reason
+	e.mu.Unlock()
+	if p == nil {
+		return
+	}
+	close(p.stop)
+	why := blockText[reason]
+	if why == "" {
+		why = reason
+	}
+	logger.Warning("容灾:之前的接任确认作废(", why, ")")
+	go e.s.standbyNotify("⚪ 之前发出的接任确认已作废:" + why + ",先不接任。之后还需要接任会再发新的确认码。")
+}
+
+// verdict 现在能不能手动接任到纪元 next:有给 next 的确认提示,而且判定还新鲜。不能的给原因代码。
+func (e *engine) verdict(next uint64) (bool, string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.prompt == nil || e.prompt.epoch != next {
+		switch e.reason {
+		case "peerSeesMaster", "witnessUp", "betterStandby", "higherEpoch":
+			return false, e.reason
+		}
+		return false, "noPrompt"
+	}
+	if e.s.now().Sub(e.verdictAt) > promptFresh {
+		return false, "noPrompt"
+	}
+	return true, ""
+}
+
+// takeoverVerdict 面板、命令行、Telegram(不带 --force)现在能不能接任:模式是先确认再接任、失联判定已经走到"等确认"
+// (同伴、见证、名次、暂停都过了)、确认是给下一个纪元的、判定还新鲜、主机仍失联。自动接任模式不给手动接任
+// (自动接任没做成看判定原因;确实要接任用命令行 --force)。不能的给原因代码。
+func (s *Service) takeoverVerdict() (bool, string) {
+	st, ok := s.NodeState()
+	switch {
+	case !ok || st.Mode == ModeOff:
+		return false, "off"
+	case st.Mode == ModeAuto:
+		return false, "auto"
+	}
+	if s.LeaseAgo() < SuspectAfter {
+		return false, "masterOnline"
+	}
+	next, err := NextEpoch(s.Epoch())
+	if err != nil {
+		return false, "noPrompt"
+	}
+	return s.eng.verdict(next)
+}
+
 // alertOnce 这一轮疑似失联里同一件事只说一次。
 func (e *engine) alertOnce(key, text string) {
 	e.mu.Lock()
@@ -200,7 +273,7 @@ func (e *engine) tick() {
 		return // 不是备用:只回答同伴的问询和投票
 	}
 	if st.PauseUntil > now.Unix() {
-		e.setReason("paused")
+		e.block("paused")
 		return
 	}
 	if needEvidence {
@@ -215,15 +288,15 @@ func (e *engine) tick() {
 	L := s.Epoch()
 	// 有人纪元比本机高:别的备用已经接任了,等它来推
 	for _, o := range peers {
-		if o.ok && o.st.Epoch > L {
-			e.setReason("higherEpoch")
+		if o.ok && o.st.Epoch > L && EpochClaimOK(L, o.st.Epoch) {
+			e.block("higherEpoch")
 			return
 		}
 	}
 	// 别的副机还联系得上主机:是本机和主机之间的网络问题
 	for id, o := range peers {
 		if o.ok && o.st.Epoch == L && o.st.LeaseAgo*int64(time.Second) < int64(SuspectAfter) {
-			e.setReason("peerSeesMaster")
+			e.block("peerSeesMaster")
 			e.alertOnce("peer", fmt.Sprintf("🟠 <b>本机连不上主机「%s」已 %d 分钟</b>,但 %s 还能连上:多半是本机和主机之间的网络问题,不接任。",
 				notify.Esc(st.MasterName), int(lease.Minutes()), notify.Esc(s.nodeName(id))))
 			return
@@ -231,29 +304,28 @@ func (e *engine) tick() {
 	}
 	// 境外测点见证:主机对外正常就是网络分区
 	if w := e.witnessNow(ctx, st, lease); w != nil && w.Verdict == "up" {
-		e.setReason("witnessUp")
+		e.block("witnessUp")
 		e.alertOnce("witness", fmt.Sprintf("🟠 <b>本机和其它副机都连不上主机「%s」已 %d 分钟</b>,但境外测点 %d/%d 能连上它:可能是网络分区,不接任。",
 			notify.Esc(st.MasterName), int(lease.Minutes()), w.OK, w.Total))
 		return
-	}
-	// 名次接力:排在前面的备用还在、手里有副本,让它先来
-	for _, o := range peers {
-		if o.ok && o.st.Rank > 0 && o.st.Rank < rank && o.st.ReplicaAt > 0 && o.st.Epoch == L {
-			e.setReason("betterStandby")
-			return
-		}
 	}
 	wait := time.Duration(st.ConfirmMin) * time.Minute
 	if st.Mode == ModeAuto {
 		wait = time.Duration(st.AutoMin) * time.Minute
 	}
-	wait += time.Duration(rank-1) * time.Duration(st.RankStepMin) * time.Minute
+	step := time.Duration(st.RankStepMin) * time.Minute
+	wait += time.Duration(rank-1) * step
+	// 名次接力:排在前面的备用还在、接得了,让它先来
+	if e.betterStandby(peers, rank, L, lease, wait+2*step, st.ReplicaMin) {
+		e.block("betterStandby")
+		return
+	}
 	if lease < wait {
-		e.setReason("waiting")
+		e.block("waiting")
 		return
 	}
 	if _, ok := s.replicaInfo(); !ok {
-		e.setReason("noReplica")
+		e.block("noReplica")
 		return
 	}
 	switch st.Mode {
@@ -262,6 +334,34 @@ func (e *engine) tick() {
 	case ModeAuto:
 		e.autoTakeover(ctx, st, lease)
 	}
+}
+
+// betterStandby 有没有排在本机前面、还在、接得了的备用(让它先来):它手里的副本过了自检、不比本机的旧 3 个副本间隔以上、
+// 没在暂停、10 分钟内没接任失败过。本机已经等过 giveUp(阈值再加两个名次间隔)的,前面的还在也不再等。
+func (e *engine) betterStandby(peers map[uint]peerObs, rank int, L uint64, lease, giveUp time.Duration, replicaMin int) bool {
+	if lease >= giveUp {
+		return false
+	}
+	s := e.s
+	now := s.now().Unix()
+	var mineAt int64
+	if ri, ok := s.replicaInfo(); ok {
+		mineAt = ri.AsOf
+	}
+	gap := int64(3 * max(replicaMin, 1) * 60)
+	for _, o := range peers {
+		errAt := peerTakeoverErrAt(o.st)
+		switch {
+		case !o.ok || o.st.Rank <= 0 || o.st.Rank >= rank || o.st.Epoch != L:
+		case o.st.ReplicaAt <= 0 || !o.st.ReplicaOK:
+		case mineAt > 0 && o.st.ReplicaAt < mineAt-gap:
+		case o.st.PauseUntil > now:
+		case errAt > 0 && now-errAt < 600:
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func (e *engine) notePeers(obs map[uint]peerObs) {
@@ -309,20 +409,29 @@ func (e *engine) witnessNow(ctx context.Context, st State, lease time.Duration) 
 	return &w
 }
 
-// askConfirm 确认后接任:发一次 Telegram(带确认码),等回复或面板上点。
+// askConfirm 先确认再接任:发一次 Telegram(确认码绑着要接任的纪元),等回复或面板上点。每一轮走到这里都刷新判定时间。
 func (e *engine) askConfirm(st State, lease time.Duration, peers map[uint]peerObs) {
 	s := e.s
-	e.mu.Lock()
-	if e.prompt != nil {
-		e.mu.Unlock()
-		e.setReason("awaitConfirm")
+	next, err := NextEpoch(s.Epoch())
+	if err != nil {
+		e.block("epoch")
 		return
 	}
-	p := &prompt{code: randCode(), epoch: s.Epoch() + 1, sentAt: s.now(), stop: make(chan struct{})}
-	e.prompt = p
-	e.reason = "awaitConfirm"
+	now := s.now()
+	e.mu.Lock()
+	if e.prompt != nil && e.prompt.epoch == next {
+		e.reason, e.verdictAt = "awaitConfirm", now
+		e.mu.Unlock()
+		return
+	}
+	old := e.prompt
+	p := &prompt{code: randCode(), epoch: next, sentAt: now, stop: make(chan struct{})}
+	e.prompt, e.reason, e.verdictAt = p, "awaitConfirm", now
 	w := e.witness
 	e.mu.Unlock()
+	if old != nil {
+		close(old.stop)
+	}
 	ri, _ := s.replicaInfo()
 	lost, total := 0, 0
 	for _, o := range peers {
@@ -339,14 +448,19 @@ func (e *engine) askConfirm(st State, lease time.Duration, peers map[uint]peerOb
 	if w != nil && w.Total > 0 {
 		fmt.Fprintf(&sb, "境外测点 %d/%d 能连上它。", w.OK, w.Total)
 	}
-	fmt.Fprintf(&sb, "\n回复 <code>/takeover %s</code>(或「接任 %s」)由「%s」接任为主机(数据截至 %s),也可以在 %s 的面板上点「接任为主机」。主机恢复后自动取消。",
-		p.code, p.code, notify.Esc(s.selfName()), time.Unix(ri.AsOf, 0).In(s.loc()).Format("01-02 15:04:05"), notify.Esc(s.selfName()))
+	fmt.Fprintf(&sb, "\n回复 <code>/takeover %s</code>(或「接任 %s」)由「%s」接任为主机(数据截至 %s,纪元 %d),也可以在 %s 的面板上点「接任为主机」。主机恢复后自动取消。",
+		p.code, p.code, notify.Esc(s.selfName()), time.Unix(ri.AsOf, 0).In(s.loc()).Format("01-02 15:04:05"), next, notify.Esc(s.selfName()))
 	logger.Warning("容灾:主机失联 ", int(lease.Minutes()), " 分钟,等确认接任")
 	go s.standbyNotify(sb.String())
 	go e.pollConfirm(p)
 }
 
-// pollConfirm 等 Telegram 上的确认(只在等确认期间长轮询,只认设置里的 Chat ID)。收到 409 记为"主机的机器人可能还活着"。
+// tgPollGap 队列里有消息(不确认任何消息,所以它们会一直在)时两次查看之间隔多久。
+var tgPollGap = 5 * time.Second
+
+// pollConfirm 等 Telegram 上的确认(只在等确认期间,只认设置里的 Chat ID、确认提示之后来的消息)。
+// 用的是主机机器人的令牌:不确认(offset 一直为 0)任何消息,主机的机器人回来照样收得到;收到 409(另一个程序正在长轮询,
+// 多半是主机的机器人还活着)就停下,这次只能在面板或命令行确认。
 func (e *engine) pollConfirm(p *prompt) {
 	s := e.s
 	n := s.standbyNotifier()
@@ -354,43 +468,49 @@ func (e *engine) pollConfirm(p *prompt) {
 		return
 	}
 	chat := s.standbyNotifySetting("tgChatId")
-	ctx0, cancel0 := context.WithTimeout(context.Background(), 20*time.Second)
-	ups, err := n.Poll(ctx0, -1, 0) // 丢掉之前积压的消息
-	cancel0()
-	if err == nil {
-		for _, u := range ups {
-			p.offset = u.ID + 1
+	stopped := func(d time.Duration) bool {
+		select {
+		case <-p.stop:
+			return true
+		case <-time.After(d):
+			return false
 		}
 	}
+	base := int64(-1) // 确认提示之前就在队列里的消息里最大的编号:它们不算
 	for {
 		select {
 		case <-p.stop:
 			return
 		default:
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		ups, err := n.Poll(ctx, p.offset, 25)
+		wait := 25
+		if base < 0 {
+			wait = 0
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(wait+20)*time.Second)
+		ups, err := n.Poll(ctx, 0, wait)
 		cancel()
 		if err != nil {
 			if strings.Contains(err.Error(), "409") {
-				e.mu.Lock()
-				first := e.tgConflict.IsZero()
-				e.tgConflict = s.now()
-				e.mu.Unlock()
-				if first {
-					go s.standbyNotify("ℹ️ Telegram 显示另一个程序正在用这个机器人收消息:主机的机器人可能还在运行,主机也许还活着。确认后再接任。")
-				}
-			}
-			select {
-			case <-p.stop:
+				e.tgConflictStop()
 				return
-			case <-time.After(10 * time.Second):
+			}
+			if stopped(10 * time.Second) {
+				return
+			}
+			continue
+		}
+		if base < 0 {
+			base = 0
+			for _, u := range ups {
+				if u.ID > base {
+					base = u.ID
+				}
 			}
 			continue
 		}
 		for _, u := range ups {
-			p.offset = u.ID + 1
-			if u.ChatID != chat || !confirmText(u.Text, p.code) {
+			if u.ID <= base || u.ChatID != chat || !confirmText(u.Text, p.code) {
 				continue
 			}
 			if s.LeaseAgo() < SuspectAfter {
@@ -398,11 +518,28 @@ func (e *engine) pollConfirm(p *prompt) {
 				return
 			}
 			logger.Warning("容灾:Telegram 上确认了接任")
-			if err := s.Takeover(TakeoverOpts{By: "telegram"}); err != nil {
+			if err := s.Takeover(TakeoverOpts{By: "telegram", Expect: p.epoch}); err != nil {
 				go s.standbyNotify("🔴 接任没做成:" + notify.Esc(err.Error()))
 			}
 			return
 		}
+		if len(ups) > 0 && stopped(tgPollGap) {
+			return
+		}
+	}
+}
+
+// tgConflictStop Telegram 回 409:另一个程序正在用这个机器人收消息(多半是主机的机器人还活着)。停止这次轮询,告警一次。
+func (e *engine) tgConflictStop() {
+	s := e.s
+	e.mu.Lock()
+	first := e.tgConflict.IsZero()
+	e.tgConflict = s.now()
+	e.mu.Unlock()
+	logger.Warning("容灾:Telegram 显示另一个程序正在用这个机器人收消息,停止在 Telegram 上等确认")
+	if first {
+		go s.standbyNotify("ℹ️ Telegram 显示另一个程序正在用这个机器人收消息:主机的机器人可能还在运行,主机也许还活着。" +
+			"这次不在 Telegram 上等确认了:核实主机确实不在后,在本机面板上点「接任为主机」或执行 m-ui ha takeover。")
 	}
 }
 
@@ -430,6 +567,11 @@ func randCode() string {
 // autoTakeover 自动接任:三台以上要过半副机投票同意,一主一副要境外测点也说主机不通。
 func (e *engine) autoTakeover(ctx context.Context, st State, lease time.Duration) {
 	s := e.s
+	next, err := NextEpoch(s.Epoch())
+	if err != nil {
+		e.block("epoch")
+		return
+	}
 	e.mu.Lock()
 	conflict := !e.tgConflict.IsZero() && s.now().Sub(e.tgConflict) < 5*time.Minute
 	w := e.witness
@@ -448,7 +590,12 @@ func (e *engine) autoTakeover(ctx context.Context, st State, lease time.Duration
 			return
 		}
 	} else {
-		granted, err := s.requestVotes(ctx, s.Epoch()+1)
+		// 要票前先备好以后的签名密钥:票里带它的公钥,同伴凭这张票换主后只认用它签的状态
+		if _, err := s.SignPub(); err != nil {
+			e.setReason("vote")
+			return
+		}
+		granted, err := s.requestVotes(ctx, next)
 		if err != nil {
 			e.setReason("vote")
 			return
@@ -467,7 +614,7 @@ func (e *engine) autoTakeover(ctx context.Context, st State, lease time.Duration
 		return
 	}
 	logger.Warning("容灾:主机失联 ", int(lease.Minutes()), " 分钟,自动接任")
-	if err := s.Takeover(TakeoverOpts{By: "auto"}); err != nil {
+	if err := s.Takeover(TakeoverOpts{By: "auto", Expect: next}); err != nil {
 		logger.Warning("容灾:自动接任失败: ", err)
 		e.setReason("takeoverFailed")
 	}
