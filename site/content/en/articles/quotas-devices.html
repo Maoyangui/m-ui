@@ -14,7 +14,7 @@
   <p>Enable auto-reset with a period in days and m-ui zeros the usage on schedule, re-enables users who were disabled for exceeding it, and records lifetime totals separately. The next reset date is shown on the user and on their landing page. Resetting manually is one click, in bulk too.</p>
 
   <h2>Device limits, fleet-wide</h2>
-  <p>A "device" is a distinct source IP seen on any inbound. On one server that is trivial; across servers each machine only sees its own clients. The master merges online IPs from every node with its own and, in the same 5-second round, sends each node the set of IPs seen <i>elsewhere</i>. Every server then enforces the limit against the union. A limit of 3 is three devices in total. Enforcement is local and immediate; only IP lists travel.</p>
+  <p>A "device" is a source IP seen on any inbound: each IPv4 address counts once and IPv6 counts per /64, and the two families are counted separately, each within the limit (a dual-stack device never counts twice, so a limit of 3 means at most 3 IPv4 addresses plus 3 IPv6 /64s). On one server that is trivial; across servers each machine only sees its own clients. The master merges online IPs from every node with its own and, in the same 5-second round, sends each node the set of IPs seen <i>elsewhere</i>. Every server then enforces the limit against the union, so it holds fleet-wide. Enforcement is local and immediate; only IP lists travel.</p>
   <p>Two things to know: a phone on Wi-Fi and the same phone on mobile data are two IPs; and the user's detail drawer lists current IPs with the lines they are using, which usually explains a "why am I blocked" ticket in one look.</p>
 
   <h2>Speed limits</h2>

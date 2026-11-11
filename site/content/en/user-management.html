@@ -16,7 +16,7 @@
   <p>A date, or none. Expired users are disabled and kicked; the landing page tells them so. "Extend 30 days" and "Renew" (apply a plan again) are one click on the user, and bulk-extend exists for the whole list. Telegram can warn you <i>N</i> days before expiry.</p>
 
   <h2 id="devices">Device limit</h2>
-  <p>A device is a distinct source IP seen on any inbound. The master merges online IPs from every node and pushes each node the IPs seen elsewhere, so a limit of 3 means three devices across your whole fleet, not three per server. Connections beyond the limit are refused; the user's detail drawer lists the current IPs and the lines they are on.</p>
+  <p>Devices are counted by source IP: each IPv4 address is one device and IPv6 counts per /64 (the devices of one home connection share a /64, just as they share the router's address over IPv4). The two families are counted separately and each must stay within the limit, so a dual-stack device never counts twice; conversely, a limit of 3 allows up to 3 IPv4 addresses plus 3 IPv6 /64s online at once (twice the limit), and the online count shows the larger of the two. The master merges online IPs from every node and pushes each node the IPs seen elsewhere, so the limit applies across your whole fleet, not per server. Connections beyond the limit are refused; the user's detail drawer lists the current IPs and the lines they are on.</p>
 
   <h2 id="speed">Speed limits</h2>
   <p>Upload and download limits in Mbps, per user, applied by the data plane on every server. Useful for trial accounts and for keeping one user from saturating a small VPS.</p>

@@ -31,7 +31,7 @@
   <ul>
     <li><b>Traffic</b> is accounted once. Nodes keep a monotonic per-user counter; the master stores a cursor per node and adds only the delta. A node that reinstalls (counter resets) is detected and re-based, so nothing is double-counted.</li>
     <li><b>Quota and expiry</b> are judged on the master only. A user who runs out is simply absent from the next snapshot, so every server stops serving them within seconds.</li>
-    <li><b>Device limit</b> is the number of distinct source IPs across all servers. The master merges online IPs from every node and pushes each node the IPs seen elsewhere, so a limit of 3 means 3 devices in total, not 3 per server.</li>
+    <li><b>Device limit</b> counts source IPs across all servers: IPv4 addresses and IPv6 /64s are counted separately and each must stay within the limit (a dual-stack device never counts twice; a limit of 3 allows up to 3 IPv4 addresses plus 3 IPv6 /64s). The master merges online IPs from every node and pushes each node the IPs seen elsewhere, so the limit applies to the whole fleet, not to each server.</li>
   </ul>
 
   <h2 id="subs">Subscriptions with many servers</h2>
