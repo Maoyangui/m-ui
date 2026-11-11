@@ -216,6 +216,11 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		}
 		if tok := strings.TrimSpace(p.Token); tok != "" {
 			updates["token"] = tok // 留空保留原令牌
+			if tok != node.Token {
+				// 换了令牌 = 重新配对,多半是换了一台服务器接着用(域名、API 地址不变):旧机器的证书指纹作废,
+				// 新机器第一次被认可(令牌对、返回 200)时重新记住,不用再去点「重置指纹」
+				updates["cert_fp"] = ""
+			}
 		}
 		// 停用副机:改库之前记下它此刻的配置,改完给它推一份空用户表(见 hub.Decommission)
 		disabling := !node.IsLocal && node.Enabled && !p.Enabled

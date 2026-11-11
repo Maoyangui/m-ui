@@ -186,7 +186,7 @@
       <li>删除服务器:只部署在它上面的线路会被停用,只用它的用户 / 代理会失去那条线路;操作后会列出受影响的线路和人。</li>
       <li>标 <b data-k="node.decomPending">下线通知未送达</b>:那台还没收到停止服务的通知,主机会一直重试。要立刻停掉,就 SSH 到那台机器上执行 <code>systemctl disable --now m-ui</code>(停掉并取消开机自启),或者用 <code>m-ui</code> 菜单 14 卸载。只关掉副机模式停不了服务:它会变成一台独立的主机,按最后一份配置继续给所有人用。</li>
       <li>离线原因:<b data-k="node.errTimeout">连接超时</b>、<b data-k="node.errRefused">连接被拒绝</b>(端口没放行或面板没在运行)、<b data-k="node.errDns">域名解析失败</b>、<b data-k="node.errCert">证书不受信任</b>(勾上跳过证书校验)、<b data-k="node.errToken">令牌不匹配</b>(重新复制配对令牌)、<b data-k="node.errFp">证书指纹变了</b>(确实重签过副机证书,就在那一行的 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>)。</li>
-      <li>换一台副机:新副机装好后,在 <b data-k="nav.nodes">服务器</b> 页编辑原来那一行,换成新的 API 地址和令牌,主机会自动重新推送。</li>
+      <li>换一台副机:新副机装好后,在 <b data-k="nav.nodes">服务器</b> 页编辑原来那一行,换成新的 API 地址和令牌,主机会自动重新推送。域名和 API 地址不变(域名已经解析到新机器)的,只把令牌换成新机器的就行:主机当它是一台新机器,不再复用连着旧机器的连接,推送、拉报告、设备数合并立刻都走新机器;勾了 <b data-k="node.insecure">跳过证书校验</b> 的,记住的旧指纹随令牌一起作废,新机器第一次连上时重新记住,不用再点 <b data-k="node.resetCert">重置指纹</b>。</li>
     </ul>
   </section>
 </section>
