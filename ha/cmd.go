@@ -19,12 +19,13 @@ import (
 
 // Cmd 命令行交给服务的一个请求。
 type Cmd struct {
-	Id     string `json:"id"`
-	Op     string `json:"op"` // status | takeover | set-master | pause | resume
-	Target string `json:"target,omitempty"`
-	Force  bool   `json:"force,omitempty"`
-	Min    int    `json:"min,omitempty"`
-	At     int64  `json:"at"`
+	Id         string `json:"id"`
+	Op         string `json:"op"` // status | takeover | set-master | pause | resume | reset
+	Target     string `json:"target,omitempty"`
+	Force      bool   `json:"force,omitempty"`
+	AllowPlain bool   `json:"allowPlain,omitempty"` // set-master:目标是明文 http 链接也继续(已确认风险)
+	Min        int    `json:"min,omitempty"`
+	At         int64  `json:"at"`
 }
 
 // CmdResult 服务做完的结果。
@@ -53,7 +54,7 @@ func (s *Service) cmdTick() {
 	}
 	res := CmdResult{Id: c.Id, At: s.now().Unix()}
 	if c.Op != "status" {
-		s.audit("cli", c.Op, map[string]interface{}{"target": c.Target, "force": c.Force, "minutes": c.Min})
+		s.audit("cli", c.Op, map[string]interface{}{"target": c.Target, "force": c.Force, "minutes": c.Min, "allowPlain": c.AllowPlain})
 	}
 	err := s.runCmd(c, &res)
 	if err != nil {
@@ -76,11 +77,12 @@ func (s *Service) runCmd(c Cmd, res *CmdResult) error {
 			if !c.Force {
 				return errors.New("本机已经是主机。主机和别的主机僵持时,要以更高的纪元把副机收回来,加 --force")
 			}
-			e, err := s.reclaim(0, true)
+			// 新纪元高于本机见过的全部纪元(各副机报的、回复里的),给全部启用的副机推交接标记
+			e, err := s.ReclaimNow()
 			if err != nil {
 				return err
 			}
-			res.Text = fmt.Sprintf("本机以纪元 %d 继续当主机,已给认本机的副机发交接标记", e)
+			res.Text = fmt.Sprintf("本机以纪元 %d 继续当主机,已给全部副机发交接标记", e)
 			return nil
 		}
 		if err := s.Takeover(TakeoverOpts{Force: c.Force, By: "cli"}); err != nil {
@@ -93,7 +95,7 @@ func (s *Service) runCmd(c Cmd, res *CmdResult) error {
 		if err != nil {
 			return err
 		}
-		st, err := s.SetMaster(n.Id, "cli")
+		st, err := s.setMasterWith(n.Id, "cli", SetMasterOpts{AllowPlain: c.AllowPlain})
 		if err != nil {
 			return err
 		}
@@ -112,6 +114,17 @@ func (s *Service) runCmd(c Cmd, res *CmdResult) error {
 			return err
 		}
 		res.Text = "已恢复接任"
+		return nil
+	case "reset":
+		if !s.IsNode() && s.Epoch() > 0 && !c.Force {
+			return errors.New("本机是主机:重置会让副机不再认本机(它们会回 409),确实要这样做加 --force")
+		}
+		if err := ResetLocal(s.d.DB, s.DataDir()); err != nil {
+			return err
+		}
+		s.invalidate()
+		res.Text = "已清掉本机的主机容灾状态(纪元、跟随的主机、副本、备用密钥),马上重启"
+		s.restart(2 * time.Second)
 		return nil
 	}
 	return fmt.Errorf("不认识的操作 %q", c.Op)
