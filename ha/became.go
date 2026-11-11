@@ -29,6 +29,15 @@ type Notice struct {
 	File string   `json:"file,omitempty"`
 	Warn []string `json:"warn,omitempty"`
 	At   int64    `json:"at"`
+	// 契约 A0 新增
+	Yield    bool        `json:"yield,omitempty"`
+	Reason   string      `json:"reason,omitempty"` // takenOver|yielded|sameEpoch|restoredElsewhere|rolledBack|switched
+	SubKept  bool        `json:"subKept,omitempty"`
+	DnsState string      `json:"dnsState,omitempty"` // ""|done|partial|failed|todo
+	Changes  []DnsChange `json:"changes,omitempty"`
+	Items    []PlanItem  `json:"items,omitempty"`
+	Reseller string      `json:"reseller,omitempty"`
+	Count    int         `json:"count,omitempty"`
 }
 
 func randID() string {
@@ -95,19 +104,17 @@ func (s *Service) afterBecame() {
 	if err := s.set(map[string]string{KeyBecame: mustJSON(b)}); err != nil { // 先记下:改 DNS、发通知只做一次
 		return
 	}
-	changes, err := s.updateDNS(b.FormerIP, b.FormerIP6)
-	b.Dns = changes
-	if err != nil {
-		b.DnsErr = err.Error()
-		logger.Warning("容灾:自动改 DNS 失败: ", err)
-	}
-	_ = s.set(map[string]string{KeyBecame: mustJSON(b)})
 	ip := s.setting("publicIp")
 	if ip == "" {
 		ip = s.setting("publicIp6")
 	}
+	out := s.becameDNS(&b, ip)
+	_ = s.set(map[string]string{KeyBecame: mustJSON(b)})
 	n := Notice{Kind: "became", How: b.How, Name: b.FormerName, URL: s.panelURL(), Host: b.Identity.SubHost, IP: ip,
-		Dns: len(b.Dns) > 0, Warn: b.Identity.Warnings}
+		Dns: out.SubDone, SubKept: b.Identity.SubURLKept, DnsState: out.State, Changes: out.Changes, Items: b.Identity.Warnings}
+	if u := s.resellerURL(); u != "" && !strings.EqualFold(s.setting("resellerEnabled"), "false") {
+		n.Reseller = u
+	}
 	s.addNotice(n)
 	s.notify(s.becameText(b, ip))
 	logger.Info("容灾:本机已成为主机(", b.How, "),纪元 ", b.Epoch)
@@ -135,30 +142,12 @@ func (s *Service) becameText(b Became, ip string) string {
 	}
 	sb.WriteString(s.dnsText(b, ip))
 	for _, w := range b.Identity.Warnings {
-		sb.WriteString("⚠️ " + notify.Esc(w) + "\n")
+		sb.WriteString("⚠️ " + notify.Esc(identityWarnText(w)) + "\n")
 	}
 	if b.How == HowTakeover {
 		sb.WriteString("原主机回来后会自动变为副机;想让它重新当主机,在服务器列表里对它「设为主机」。")
 	}
 	return strings.TrimRight(sb.String(), "\n")
-}
-
-// dnsText 订阅地址要不要改 DNS 的那一句。
-func (s *Service) dnsText(b Became, ip string) string {
-	host := b.Identity.SubHost
-	switch {
-	case host == "" || isIPHost(host) || !b.Identity.SubURLKept:
-		return ""
-	case len(b.Dns) > 0:
-		var names []string
-		for _, c := range b.Dns {
-			names = append(names, c.Name)
-		}
-		return fmt.Sprintf("DNS:已自动把 %s 改指向本机(%s),用户的订阅地址不变。\n", notify.Esc(strings.Join(names, "、")), notify.Esc(ip))
-	case b.DnsErr != "":
-		return fmt.Sprintf("DNS:自动修改失败(%s)。请手动把 %s 改指向本机 IP %s,用户的订阅地址不变。\n", notify.Esc(b.DnsErr), notify.Esc(host), notify.Esc(ip))
-	}
-	return fmt.Sprintf("DNS:把 %s 改指向本机 IP %s,用户的订阅地址就不变(改好之前用户刷新订阅会失败,已连上的线路照常可用)。\n", notify.Esc(host), notify.Esc(ip))
 }
 
 func (s *Service) loc() *time.Location {

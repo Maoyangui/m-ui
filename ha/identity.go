@@ -101,10 +101,16 @@ func (s *Service) captureIdentity(zw *zip.Writer) (Identity, error) {
 
 // identityResult 新主机套用主机身份的结果(写进通知、面板)。
 type identityResult struct {
-	SubURLKept bool     `json:"subUrlKept"` // 用户的订阅地址不变(DNS 指过来以后)
-	SubHost    string   `json:"subHost"`
-	Warnings   []string `json:"warnings,omitempty"`
+	SubURLKept  bool       `json:"subUrlKept"` // 用户的订阅地址不变(DNS 指过来以后)
+	SubHost     string     `json:"subHost"`
+	Warnings    []PlanItem `json:"warnings,omitempty"`
+	PrevSubPort int        `json:"prevSubPort,omitempty"`
 }
+
+// identityWarnText 身份告警的中文(Telegram 用;界面按 Code 翻译)。
+func identityWarnText(it PlanItem) string { return it.Args["text"] }
+
+func textItem(t string) PlanItem { return PlanItem{Code: "text", Args: map[string]string{"text": t}} }
 
 // applyIdentity 在要接任的库里套用原主机的身份(订阅端口、路径、域名、证书)。selfId 是新主机自己的服务器 id,
 // extracted 是解出来的 zip 目录。证书写到新主机数据目录 cert/ 下(同名的已有就用已有的)。
@@ -123,7 +129,7 @@ func applyIdentity(tx *gorm.DB, id Identity, selfId uint, extracted, dataDir str
 		tx.Where("enabled = ?", true).Find(&lines)
 		for _, l := range lines {
 			if l.Port == port && !render.UDPOnly(l.Protocol) && render.LineOnNode(l, selfId) {
-				res.Warnings = append(res.Warnings, fmt.Sprintf("订阅端口 %d 在本机被线路「%s」占用,订阅仍用本机的端口 %s:用户的订阅地址会变", port, l.Name, nonEmpty(get("subPort"), "2056")))
+				res.Warnings = append(res.Warnings, textItem(fmt.Sprintf("订阅端口 %d 在本机被线路「%s」占用,订阅仍用本机的端口 %s:用户的订阅地址会变", port, l.Name, nonEmpty(get("subPort"), "2056"))))
 				port = 0
 				break
 			}
@@ -140,7 +146,7 @@ func applyIdentity(tx *gorm.DB, id Identity, selfId uint, extracted, dataDir str
 	switch {
 	case id.SubHost == "":
 	case isIPHost(id.SubHost):
-		res.Warnings = append(res.Warnings, fmt.Sprintf("原主机的订阅地址用的是 IP(%s):换主机后订阅地址会变,用户要重新导入订阅。以后建议给订阅配一个域名", id.SubHost))
+		res.Warnings = append(res.Warnings, textItem(fmt.Sprintf("原主机的订阅地址用的是 IP(%s):换主机后订阅地址会变,用户要重新导入订阅。以后建议给订阅配一个域名", id.SubHost)))
 	default:
 		if err := set("subDomain", id.SubHost); err != nil {
 			return res, err
@@ -149,7 +155,7 @@ func applyIdentity(tx *gorm.DB, id Identity, selfId uint, extracted, dataDir str
 	res.SubURLKept = port > 0 && id.SubHost != "" && !isIPHost(id.SubHost)
 	if id.SubCert == nil {
 		if get("subCertFile") != "" && res.SubURLKept {
-			res.Warnings = append(res.Warnings, "原主机的订阅是 http,本机的订阅是 https:订阅地址的开头会从 http 变成 https")
+			res.Warnings = append(res.Warnings, textItem("原主机的订阅是 http,本机的订阅是 https:订阅地址的开头会从 http 变成 https"))
 			res.SubURLKept = false
 		}
 		return res, nil
@@ -157,7 +163,7 @@ func applyIdentity(tx *gorm.DB, id Identity, selfId uint, extracted, dataDir str
 	cc := id.SubCert
 	certPath, keyPath, err := placeCert(tx, cc, extracted, dataDir)
 	if err != nil {
-		res.Warnings = append(res.Warnings, "订阅证书没能装上("+err.Error()+"),订阅仍用本机原来的证书")
+		res.Warnings = append(res.Warnings, textItem("订阅证书没能装上("+err.Error()+"),订阅仍用本机原来的证书"))
 		return res, nil
 	}
 	if err := set("subCertFile", certPath); err != nil {
@@ -228,6 +234,30 @@ func placeCert(tx *gorm.DB, cc *CarriedCert, extracted, dataDir string) (string,
 		tx.Model(&model.Cert{}).Where("id = ?", nr.Id).Update("auto_renew", false)
 	}
 	return certPath, keyPath, nil
+}
+
+// applyFormerRow 新库里原主机那一行:填上它作为副机时怎么连;接任时先停用(失联期间不进订阅),记下等它回来。
+func (s *Service) applyFormerRow(tx *gorm.DB, formerId, selfId uint, id Identity, how string) error {
+	if formerId == 0 || formerId == selfId {
+		return nil
+	}
+	up := map[string]interface{}{"is_local": false}
+	if l := id.Self; l.ApiUrl != "" && l.Token != "" {
+		up["api_url"], up["token"], up["cert_fp"] = l.ApiUrl, l.Token, l.CertFP
+		up["insecure"] = strings.HasPrefix(strings.ToLower(l.ApiUrl), "https://")
+	}
+	if how == HowTakeover {
+		up["enabled"] = false // 失联期间不进订阅;它回来自动变为副机时再启用
+	}
+	if err := tx.Model(&model.Node{}).Where("id = ?", formerId).Updates(up).Error; err != nil {
+		return err
+	}
+	if how == HowTakeover {
+		if err := upsert(tx, map[string]string{KeyFormer: mustJSON(Former{Id: formerId, Name: id.MasterName, Since: s.now().Unix()})}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func atoiDef(s string, def int) int {

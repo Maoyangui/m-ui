@@ -41,6 +41,7 @@ type PrepareRequest struct {
 	Master  Link   `json:"master"` // 原主机变为副机后别人该怎么连:本机试着连一下,连不上提前告诉它
 	Version string `json:"version"`
 	Size    int64  `json:"size"`
+	TTL     int64  `json:"ttl,omitempty"` // 暂存多久(秒);0 = 旧默认
 }
 
 // PrepareReply 本机给的一次性公钥。
@@ -50,6 +51,9 @@ type PrepareReply struct {
 	Version     string `json:"version"`
 	DiskFree    int64  `json:"diskFree"`
 	MasterReach string `json:"masterReach,omitempty"` // 空 = 连得上原主机的面板地址;否则是原因
+	Epoch       uint64 `json:"epoch"`
+	MasterPubFP string `json:"masterPubFp"`
+	SignPub     string `json:"signPub"`
 }
 
 // IncomingState 暂存的进度(本机设置 haIncoming,不含任何密钥)。
@@ -223,7 +227,7 @@ func (s *Service) ReceiveBundle(body io.Reader) (IncomingState, error) {
 	next := max(s.Epoch(), hd.Epoch) + 1
 	b := Became{How: HowSetMaster, Epoch: next, FormerId: meta.MasterId, FormerName: meta.MasterName, At: s.now().Unix(),
 		MaxChangeId: meta.MaxChangeId, By: "panel", FormerIP: meta.Identity.PublicIP, FormerIP6: meta.Identity.PublicIP6}
-	if err := s.buildPromote(dir, meta, b, true); err != nil {
+	if err := s.buildPromote(dir, meta, b, true, promoteOpts{}); err != nil {
 		return fail(err)
 	}
 	_ = os.RemoveAll(dir)

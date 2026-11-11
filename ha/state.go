@@ -44,6 +44,7 @@ type State struct {
 	ClusterKey  string       `json:"clusterKey,omitempty"` // 副机之间互相确认的 HMAC 密钥
 	SinceChange uint64       `json:"sinceChange,omitempty"`
 	Handover    *Grant       `json:"handover,omitempty"` // 设为主机的交接:纪元 Epoch 的主机是 To
+	Revoke      uint64       `json:"revoke,omitempty"`   // 撤销:副机清掉纪元不高于它的交接标记
 	Notify      string       `json:"notify,omitempty"`   // 只发备用:用备用公钥密封的通知设置
 	Replica     *ReplicaMark `json:"replica,omitempty"`  // 只发备用:主机确认它手里的副本到什么时候为止仍是最新的
 	Rev         string       `json:"rev"`
@@ -205,6 +206,9 @@ func (s *Service) baseState() (State, error) {
 		st.Handover = g
 	} else if g := s.pendingGrant(); g != nil && g.Epoch > st.Epoch {
 		st.Handover = g
+	}
+	if r := s.sw.revoke(); r > st.Revoke {
+		st.Revoke = r
 	}
 	return st, nil
 }
@@ -507,7 +511,13 @@ func (s *Service) ApplyState(st State) error {
 	notify, key, handover := st.Notify, st.ClusterKey, st.Handover
 	st.Notify, st.ClusterKey = "", ""
 	values := map[string]string{KeyState: mustJSON(st), KeyMasterPub: st.MasterPub, KeyNotify: notify, KeyPeerKey: key}
-	if handover != nil && handover.Epoch > L {
+	if st.Revoke > 0 {
+		var g Grant
+		if s.getJSON(KeyGrant, &g) && g.Epoch <= st.Revoke {
+			values[KeyGrant] = ""
+		}
+	}
+	if handover != nil && handover.Epoch > L && handover.Epoch > st.Revoke {
 		handover.At = s.now().Unix()
 		values[KeyGrant] = mustJSON(handover)
 		logger.Info("容灾:收到交接标记,纪元 ", handover.Epoch, " 的主机是服务器 #", handover.To)

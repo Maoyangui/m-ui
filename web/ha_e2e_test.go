@@ -43,7 +43,7 @@ func TestHASetMasterE2E(t *testing.T) {
 	if p, _ := hk.HA().SetMasterPlan(hkId); p.Ok || len(p.Blockers) == 0 || p.Blockers[0].Code != "self" {
 		t.Fatalf("主机自己不能设为主机: %+v", p)
 	}
-	if _, err := hk.HA().SetMaster(twId, "admin"); err != nil {
+	if _, err := hk.HA().SetMaster(twId, "admin", ha.SetMasterOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	st := waitSwitch(t, hk)
@@ -104,7 +104,7 @@ func TestHASetMasterE2E(t *testing.T) {
 	nwId := addNode(t, tw, nw, 4)
 	tw.sync()
 	tw.sync()
-	if _, err := tw.HA().SetMaster(nwId, "admin"); err != nil {
+	if _, err := tw.HA().SetMaster(nwId, "admin", ha.SetMasterOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if st := waitSwitch(t, tw); st.Stage != ha.StageDone {
@@ -135,7 +135,7 @@ func TestHASetMasterFailureRecovers(t *testing.T) {
 	hk.sync()
 	hk.sync()
 	tw.setFail("ha/handover")
-	if _, err := hk.HA().SetMaster(twId, "admin"); err != nil {
+	if _, err := hk.HA().SetMaster(twId, "admin", ha.SetMasterOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	st := waitSwitch(t, hk)
@@ -175,7 +175,7 @@ func TestHASetMasterFailureRecovers(t *testing.T) {
 		t.Fatal("数据不变")
 	}
 	// 再来一次就成功
-	if _, err := hk.HA().SetMaster(twId, "admin"); err != nil {
+	if _, err := hk.HA().SetMaster(twId, "admin", ha.SetMasterOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if st := waitSwitch(t, hk); st.Stage != ha.StageDone {
@@ -290,7 +290,7 @@ func TestHATakeoverE2E(t *testing.T) {
 	_ = jpId
 	_ = twId
 	// 想让原主机重新当主机:对它「设为主机」
-	if _, err := tw.HA().SetMaster(hkId, "admin"); err != nil {
+	if _, err := tw.HA().SetMaster(hkId, "admin", ha.SetMasterOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	if st := waitSwitch(t, tw); st.Stage != ha.StageDone {

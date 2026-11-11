@@ -41,6 +41,11 @@ type HAReport struct {
 	// ResellerPort 这台的代理面板端口(副机上不监听;被设为主机后才起,主机据此提前查端口冲突)
 	ResellerPort int      `json:"resellerPort,omitempty"`
 	Peers        *HAPeers `json:"peers,omitempty"` // 和别的副机互通的情况(互相确认与投票要用)
+	// 契约 A0 新增:这台自己的面板 / 订阅 / WARP 端口(0 = 不知道或没在用)、代理面板地址
+	WebPort     int    `json:"webPort,omitempty"`
+	SubPort     int    `json:"subPort,omitempty"`
+	WarpPort    int    `json:"warpPort,omitempty"`
+	ResellerURL string `json:"resellerUrl,omitempty"`
 }
 
 // HAReplica 备用手里那份副本。

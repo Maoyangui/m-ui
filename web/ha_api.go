@@ -232,7 +232,7 @@ func (s *Server) haSetMaster(w http.ResponseWriter, r *http.Request, h *ha.Servi
 	if !s.reauth(w, r, body.Password, body.Code) {
 		return
 	}
-	st, err := h.SetMaster(body.Id, s.actor(r))
+	st, err := h.SetMaster(body.Id, s.actor(r), ha.SetMasterOpts{})
 	if err != nil {
 		badRequest(w, err)
 		return

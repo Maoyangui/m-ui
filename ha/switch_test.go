@@ -104,7 +104,7 @@ func TestSetMasterCommitUnknown(t *testing.T) {
 	a.mu.Lock()
 	a.dropCommit = true
 	a.mu.Unlock()
-	if _, err := m.SetMaster(id, "admin"); err != nil {
+	if _, err := m.SetMaster(id, "admin", SetMasterOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	st := waitSwitchDone(t, m)
@@ -118,7 +118,7 @@ func TestSetMasterCommitUnknown(t *testing.T) {
 	a.mu.Lock()
 	a.dropCommit, a.dieAfterHandover = false, true
 	a.mu.Unlock()
-	if _, err := m.SetMaster(id, "admin"); err != nil {
+	if _, err := m.SetMaster(id, "admin", SetMasterOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	st = waitSwitchDone(t, m)

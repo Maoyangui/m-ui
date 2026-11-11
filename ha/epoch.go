@@ -50,9 +50,13 @@ type Vote struct {
 
 // Grant 交接标记:设为主机时原主机发给所有副机,纪元 Epoch 的主机是服务器 To。
 type Grant struct {
-	Epoch uint64 `json:"epoch"`
-	To    uint   `json:"to"`
-	At    int64  `json:"at"`
+	Epoch     uint64 `json:"epoch"`
+	To        uint   `json:"to"`
+	ToPub     string `json:"toPub,omitempty"`     // 新主机的签名公钥
+	From      uint   `json:"from,omitempty"`      // 签发的主机
+	FromEpoch uint64 `json:"fromEpoch,omitempty"` // 签发时的纪元
+	Expires   int64  `json:"expires,omitempty"`   // 过期作废
+	At        int64  `json:"at"`
 }
 
 // NodeView 副机判定时用到的本机状态。
@@ -94,7 +98,7 @@ func Decide(v NodeView, e uint64, m uint, canAdopt bool, now time.Time) Verdict 
 	}
 	switch {
 	case v.Vote != nil && v.Vote.Epoch == e && v.Vote.Candidate == m:
-	case v.Grant != nil && v.Grant.Epoch == e && v.Grant.To == m:
+	case v.Grant != nil && v.Grant.Epoch == e && v.Grant.To == m && (v.Grant.Expires == 0 || now.Unix() < v.Grant.Expires):
 	case v.Demoted, v.Epoch == 0:
 	case v.LastContact.IsZero() || now.Sub(v.LastContact) >= LeaseExpire:
 	default:

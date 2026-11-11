@@ -150,6 +150,9 @@ func (s *Service) evaluateDemote(startup bool) bool {
 	if startup {
 		t.unknown = 0
 	}
+	if t.stale > 0 && s.switchTargetUp(t.best.master, t.best.epoch) { // 设为主机的目标已以新纪元起来:按换主机完成收尾
+		return true
+	}
 	if t.shouldDemote() {
 		d := Demoted{Epoch: t.best.epoch, MasterId: t.best.master, SinceChange: t.best.since, OldEpoch: s.Epoch(), At: s.now().Unix()}
 		if err := s.Demote(d); err != nil {

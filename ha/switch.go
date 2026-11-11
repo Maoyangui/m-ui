@@ -67,6 +67,10 @@ type SwitchState struct {
 	TargetIP   string `json:"targetIp,omitempty"`
 	Actor      string `json:"actor,omitempty"`
 	Size       int64  `json:"size,omitempty"`
+	// 契约 A0 新增
+	Unknown     bool   `json:"unknown,omitempty"`
+	FreezeUntil int64  `json:"freezeUntil,omitempty"`
+	NewReseller string `json:"newReseller,omitempty"`
 }
 
 // Active 还在进行中。
@@ -103,8 +107,9 @@ func (w *switcher) grant() *Grant {
 
 // PlanItem 设为主机前的一项检查结果(界面按 Code 翻译,Args 是要填进去的值)。
 type PlanItem struct {
-	Code string            `json:"code"`
-	Args map[string]string `json:"args,omitempty"`
+	Code  string            `json:"code"`
+	Args  map[string]string `json:"args,omitempty"`
+	Names []string          `json:"names,omitempty"`
 }
 
 // SetMasterPlan 点「设为主机」时确认框里要讲清楚的事。
@@ -123,6 +128,9 @@ type SetMasterPlan struct {
 	Warnings   []PlanItem `json:"warnings"`
 	Size       int64      `json:"size"`
 	Ok         bool       `json:"ok"`
+	// 契约 A0 新增
+	NewReseller string `json:"newReseller,omitempty"`
+	PlainAck    bool   `json:"plainAck,omitempty"`
 }
 
 func item(code string, kv ...string) PlanItem {
@@ -284,8 +292,11 @@ func splitNames(raw string) []string {
 	return out
 }
 
+// SetMasterOpts 设为主机的选项。
+type SetMasterOpts struct{ AllowPlain bool }
+
 // SetMaster 把服务器 id 设为主机(在后台进行,进度看 SwitchState)。actor 记进审计与通知。
-func (s *Service) SetMaster(id uint, actor string) (SwitchState, error) {
+func (s *Service) SetMaster(id uint, actor string, o SetMasterOpts) (SwitchState, error) {
 	if !s.promoteMu.TryLock() {
 		return SwitchState{}, errTakeoverBusy
 	}
@@ -620,6 +631,15 @@ func (w *switcher) tick() {
 	s.invalidate()
 	logger.Info("容灾:写操作冻结到期,已解冻")
 }
+
+// revoke 这一轮随容灾状态推出去的撤销纪元(B 新增给 baseState 用的接口;桩)。
+func (w *switcher) revoke() uint64 { return 0 }
+
+// switchTargetUp 降级判定发现设为主机的目标已以新纪元起来(契约 A0 的桩)。
+func (s *Service) switchTargetUp(target uint, epoch uint64) bool { return false }
+
+// AbandonSwitch 放弃结果不明的设为主机(契约 A0 的桩)。
+func (s *Service) AbandonSwitch(actor string) error { return errors.New("本机不是主机") }
 
 func (w *switcher) isRunning() bool {
 	w.mu.Lock()

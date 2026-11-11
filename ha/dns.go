@@ -10,6 +10,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/acme"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/notify"
 )
 
 // 主机变了(接任或设为主机)以后自动改 DNS(Cloudflare,默认不开):对每个要跟着主机走的域名,只把当前值等于
@@ -104,6 +105,33 @@ func (s *Service) updateDNS(formerIP, formerIP6 string) ([]DnsChange, error) {
 	return changes, err
 }
 
+// DnsOutcome 一次自动改 DNS 的结果(契约 A0)。
+type DnsOutcome struct {
+	State            string // done | partial | failed | todo | ""
+	SubDone          bool   // 订阅主机名本身的匹配记录全部改好
+	Changes, Skipped []DnsChange
+	Err              string
+}
+
+// becameDNS 刚成为主机:改 DNS,结果写进 b(契约 A0:包装 updateDNS)。
+func (s *Service) becameDNS(b *Became, ip string) DnsOutcome {
+	changes, err := s.updateDNS(b.FormerIP, b.FormerIP6)
+	b.Dns = changes
+	out := DnsOutcome{Changes: changes, SubDone: len(changes) > 0}
+	if err != nil {
+		b.DnsErr = err.Error()
+		out.Err = b.DnsErr
+		logger.Warning("容灾:自动改 DNS 失败: ", err)
+	}
+	return out
+}
+
+// revertDNS 让出主机时把本任期改过的 DNS 改回去(契约 A0 的桩)。
+func (s *Service) revertDNS(b Became) ([]DnsChange, error) { return nil, nil }
+
+// SetDNSAPI 换掉 Cloudflare 接口地址(测试用)。
+func (s *Service) SetDNSAPI(u string) { s.d.DNSAPI = u }
+
 func sameIP(a, b string) bool {
 	x, y := net.ParseIP(strings.TrimSpace(a)), net.ParseIP(strings.TrimSpace(b))
 	return x != nil && y != nil && x.Equal(y)
@@ -179,4 +207,22 @@ func (s *Service) DNSTest(token, names string) (DNSTestResult, error) {
 		res.Error = err.Error()
 	}
 	return res, nil
+}
+
+// dnsText 订阅地址要不要改 DNS 的那一句。
+func (s *Service) dnsText(b Became, ip string) string {
+	host := b.Identity.SubHost
+	switch {
+	case host == "" || isIPHost(host) || !b.Identity.SubURLKept:
+		return ""
+	case len(b.Dns) > 0:
+		var names []string
+		for _, c := range b.Dns {
+			names = append(names, c.Name)
+		}
+		return fmt.Sprintf("DNS:已自动把 %s 改指向本机(%s),用户的订阅地址不变。\n", notify.Esc(strings.Join(names, "、")), notify.Esc(ip))
+	case b.DnsErr != "":
+		return fmt.Sprintf("DNS:自动修改失败(%s)。请手动把 %s 改指向本机 IP %s,用户的订阅地址不变。\n", notify.Esc(b.DnsErr), notify.Esc(host), notify.Esc(ip))
+	}
+	return fmt.Sprintf("DNS:把 %s 改指向本机 IP %s,用户的订阅地址就不变(改好之前用户刷新订阅会失败,已连上的线路照常可用)。\n", notify.Esc(host), notify.Esc(ip))
 }

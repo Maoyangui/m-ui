@@ -127,7 +127,7 @@ func (s *Service) Takeover(o TakeoverOpts) error {
 	if err := s.set(map[string]string{KeyRole: RolePromoting, KeyEpoch: strconv.FormatUint(next, 10)}); err != nil {
 		return err
 	}
-	if err := s.buildPromote(dir, meta, b, false); err != nil {
+	if err := s.buildPromote(dir, meta, b, false, promoteOpts{}); err != nil {
 		_ = s.set(map[string]string{KeyRole: ""}) // 纪元留着(只升不降):本机以后照样能接任,只是原主机来请求时回 stale
 		return err
 	}
@@ -145,9 +145,12 @@ func (s *Service) replicaUsable(ri ReplicaInfo) error {
 	return nil
 }
 
+// promoteOpts 组新库的选项:SignSeed 新主机以后用的签名密钥(设为主机时目标在 prepare 生成)。
+type promoteOpts struct{ SignSeed string }
+
 // buildPromote 用解开的数据(dir 下 replica.db、identity/*)组新库,写成 <库>.promote(staged 为真时写成 .promote.staged,
 // 等提交时再改名)。b 写进新库的 haBecame。
-func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bool) error {
+func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bool, o promoteOpts) error {
 	src := filepath.Join(dir, "replica.db")
 	tmp := s.d.DBPath + ".promote.tmp"
 	for _, p := range []string{tmp, tmp + "-wal", tmp + "-shm"} {
@@ -200,22 +203,12 @@ func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bo
 		if err := tx.Exec("UPDATE nodes SET is_local = ?, enabled = ? WHERE id = ?", true, true, selfId).Error; err != nil {
 			return err
 		}
-		if meta.MasterId != 0 && meta.MasterId != selfId {
-			up := map[string]interface{}{"is_local": false}
-			if l := meta.Identity.Self; l.ApiUrl != "" && l.Token != "" {
-				up["api_url"], up["token"], up["cert_fp"] = l.ApiUrl, l.Token, l.CertFP
-				up["insecure"] = strings.HasPrefix(strings.ToLower(l.ApiUrl), "https://")
-			}
-			if b.How == HowTakeover {
-				up["enabled"] = false // 失联期间不进订阅;它回来自动变为副机时再启用
-			}
-			if err := tx.Model(&model.Node{}).Where("id = ?", meta.MasterId).Updates(up).Error; err != nil {
+		if err := s.applyFormerRow(tx, meta.MasterId, selfId, meta.Identity, b.How); err != nil {
+			return err
+		}
+		if o.SignSeed != "" {
+			if err := upsert(tx, map[string]string{KeySignKey: o.SignSeed}); err != nil {
 				return err
-			}
-			if b.How == HowTakeover {
-				if err := upsert(tx, map[string]string{KeyFormer: mustJSON(Former{Id: meta.MasterId, Name: meta.MasterName, Since: s.now().Unix()})}); err != nil {
-					return err
-				}
 			}
 		}
 		for _, t := range []string{"sessions", "agent_counters"} {
