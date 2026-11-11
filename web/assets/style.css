@@ -663,3 +663,14 @@ button.role-chip.k-lost { background: var(--danger-soft); color: var(--danger); 
 .alert-bar.ha-info { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-text); }
 .alert-bar.ha-info a { text-decoration: underline; }
 @media (max-width: 700px) { .ha-pop { font-size: .88rem; } }
+/* 从卡片点「去设置」跳过来:标题和保存按钮别被吸顶的顶栏盖住 */
+#ha-card { scroll-margin-top: 4.5rem; }
+.ha-steps li.cur.warn { color: var(--warn); }
+.ha-ack { margin: .2rem 0 .6rem; }
+.ha-abandon { border-top: 1px solid var(--border); margin-top: .6rem; padding-top: .5rem; }
+.ha-abandon .row { margin-top: .4rem; }
+.fp { word-break: break-all; }
+/* 「去 Cloudflare 创建 ↗」和下一行的手动步骤 */
+.cf-link { display: flex; flex-direction: column; gap: .15rem; margin-top: .3rem; font-size: .8rem; line-height: 1.45; }
+.cf-link a { color: var(--primary-text); text-decoration: underline; width: fit-content; }
+.cf-link .cf-steps { color: var(--muted); }
