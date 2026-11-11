@@ -23,9 +23,11 @@ export const post = (p, b, o) => globalThis.__api('POST', p, b, o);
 export const SLOW = { timeout: 90000 };
 export const LONG = { timeout: 600000 };
 `);
-// 文案:带参数的拼成 键|名=值|…,用例能看出用的是哪条、传了什么;字典里「有」的键用 __has 控制
+// 文案:带参数的拼成 键|名=值|…,用例能看出用的是哪条、传了什么;字典里「有」的键用 __has 控制;
+// __dict 里有的键按真的字典换占位(看占位没换掉时的样子)
 fs.writeFileSync(path.join(dir, 'i18n.js'), `
-export const t = (k, p) => (globalThis.__has && !globalThis.__has(k) ? k : (p && Object.keys(p).length ? k + '|' + Object.entries(p).map(([a, b]) => a + '=' + b).join('|') : k + '·'));
+const real = (s, p) => { for (const [a, b] of Object.entries(p || {})) s = s.split('{' + a + '}').join(b); return s; };
+export const t = (k, p) => (globalThis.__dict && k in globalThis.__dict ? real(globalThis.__dict[k], p) : globalThis.__has && !globalThis.__has(k) ? k : (p && Object.keys(p).length ? k + '|' + Object.entries(p).map(([a, b]) => a + '=' + b).join('|') : k + '·'));
 export const getLang = () => 'zh';
 `);
 fs.writeFileSync(path.join(dir, 'errmsg.js'), `export const trErr = s => 'tr(' + s + ')';`);
@@ -323,4 +325,12 @@ test('请求超时档:设为主机、保存、重新信任、放弃、DNS 测试
   assert.equal(call('ha/dns-test'), 'SLOW');
   assert.equal(call('ha/takeover'), 'LONG');
   assert.match(src, /post\('ha', \{ \.\.\.body, password, code \}, SLOW\)/);
+});
+
+test('后端少给了参数时不把 {占位} 原样露给用户', () => {
+  globalThis.__dict = { 'ha.ready.standbyPorts.warn': '端口 {port}:{names}', 'reach.sep': '、' };
+  try {
+    assert.equal(ha.readyText({ code: 'standbyPorts', level: 'warn', names: ['TW', 'JP'] }), '端口 —:TW、JP');
+    assert.equal(ha.readyText({ code: 'standbyPorts', level: 'warn', names: ['TW'], args: { port: '2096' } }), '端口 2096:TW');
+  } finally { globalThis.__dict = undefined; }
 });

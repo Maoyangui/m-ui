@@ -37,6 +37,9 @@ function argsOf(it) {
   return a;
 }
 
+// fill 后端给的代码配上文案;后端少给了参数时不把 {占位} 原样露给用户
+const fill = (key, args) => t(key, args).replace(/\{[A-Za-z0-9_]+\}/g, '—');
+
 // roleOf 一台服务器在主机容灾里的角色:master / standby(rank)/ node / former(失联的原主机)。
 function roleOf(n, masterId) {
   if (!view) return null;
@@ -188,6 +191,7 @@ export function cardHTML(n, r) {
         ${c.pauseUntil > Date.now() / 1000 ? `<p class="warn-text">${esc(t('ha.card.paused', { t: fmtTime(c.pauseUntil) }))}</p>` : ''}
         ${on && view.replicaErr ? `<p class="warn-text small">${esc(t('ha.card.replicaErr', { err: trErr(view.replicaErr) }))}</p>` : ''}
         ${b ? `<p>${esc(t(b.how === 'takeover' ? 'ha.card.tookOver' : 'ha.card.setBy', { t: fmtTime(b.at), name: b.formerName || '' }))}</p>` : ''}
+        ${view.signFp ? `<p class="muted small fp">${esc(t('ha.card.signFp', { fp: view.signFp }))}</p>` : ''}
         <p>${t('ha.card.howSwitch')}</p>
         <div class="actions"><a class="btn sm" href="#/settings" data-act="ha.toSettings">${t('ha.toSettings')}</a></div>`;
     }
@@ -228,7 +232,7 @@ export function cardHTML(n, r) {
 
 export function planText(it) {
   if (it.code === 'text') return trErr((it.args || {}).text || '');
-  return t('ha.plan.' + it.code, argsOf(it));
+  return fill('ha.plan.' + it.code, argsOf(it));
 }
 
 // ---- 设为主机 ----
@@ -575,7 +579,7 @@ export function dnsHTML(n) {
 }
 
 // idwText 身份迁移告警(后端给代码 + 参数;code 为 text 的是旧写法,原文再翻译)
-const idwText = it => (it.code === 'text' ? trErr((it.args || {}).text || '') : t('ha.idw.' + it.code, argsOf(it)));
+const idwText = it => (it.code === 'text' ? trErr((it.args || {}).text || '') : fill('ha.idw.' + it.code, argsOf(it)));
 
 const link = url => `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>`;
 
@@ -617,7 +621,7 @@ const MODES = ['off', 'confirm', 'auto'];
 const LEVEL_ICON = { ok: '✓', warn: '!', bad: '✗', info: '·' };
 
 // readyText 就绪检查一条:键是 ha.ready.<代码>.<级别>,名单(names)按界面语言拼
-export const readyText = ch => t('ha.ready.' + ch.code + '.' + ch.level, argsOf(ch));
+export const readyText = ch => fill('ha.ready.' + ch.code + '.' + ch.level, argsOf(ch));
 
 // renderHASettings 设置页里的「主机容灾」卡片(只在主机上;副机上说明一句到主机改,并显示本机的备用公钥指纹)。
 export async function renderHASettings(container) {
@@ -650,6 +654,7 @@ export async function renderHASettings(container) {
     <p class="hint">${t('ha.set.lostRule')}</p>
     <h4 class="ha-sub">${t('ha.set.ready')}</h4>
     <ul class="ha-check">${ready}</ul>
+    ${(v.dropPending || []).length ? `<p class="warn-text small">${esc(t('ha.set.dropPending', { names: joinNames(v.dropPending.map(d => d.name || '#' + d.id)) }))}</p>` : ''}
     <div class="row ha-pause">
       ${paused ? `<span class="warn-text small">${esc(t('ha.card.paused', { t: fmtTime(c.pauseUntil) }))}</span> <button class="btn sm" data-act="ha.pause" data-id="0">${t('ha.resume')}</button>`
     : `<span class="muted small">${t('ha.set.pause')}</span> ${[60, 360, 1440].map(m => `<button class="btn sm" data-act="ha.pause" data-id="${m}">${t('ha.pauseFor', { h: m / 60 })}</button>`).join(' ')}`}
