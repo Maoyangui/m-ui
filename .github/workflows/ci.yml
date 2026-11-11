@@ -56,5 +56,7 @@ jobs:
         run: node --test web/jstest/reach.test.mjs
       - name: Frontend (i18n zh / en keys and placeholders)
         run: node --test web/jstest/i18n.test.mjs
+      - name: Frontend (recent inbound connections fair per server)
+        run: node --test web/jstest/fair.test.mjs
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run

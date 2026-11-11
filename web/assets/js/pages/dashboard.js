@@ -3,6 +3,7 @@ import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, fmtBytes, fmtDuration, fmtRelative, fmtTime, tzOffsetMinutes, toast, registerActions, badge, dot, empty, setHTML } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
+import { fairPick } from '../fair.js';
 
 export const title = () => t('nav.dashboard');
 let range = 24, logLevel = 'info', topHours = 24;
@@ -157,14 +158,15 @@ async function renderConns() {
   if (!el) return;
   const got = await get('conns/recent?fails=1');
   const all = Array.isArray(got) ? got : []; // 官网演示的假接口没有这项,回的是 {}
-  // 通过了握手与认证的(含被设备数拒的)在上面;"到了但没过握手 / 认证"的单独一张小表,各自限量,扫描刷不掉上面的
+  // 通过了握手与认证的(含被设备数拒的)在上面;"到了但没过握手 / 认证"的单独一张小表,各自限量,扫描刷不掉上面的。
+  // 两张表都只显示前几条:按服务器轮流取各自最近的(fairPick),一台扫描多的服务器挤不掉别的服务器那一两条
   const rows = all.filter(c => !c.failed), fails = all.filter(c => c.failed);
   // 在线但版本较旧、不上报握手 / 认证失败的副机(主机按报告里有没有 connFailsOk 标出):它们上面的问题不会出现在下面,不能当成包没到
   const old = (nodeSummary && nodeSummary.noFails) || [];
   const oldNote = old.length ? `<p class="hint warn-text">${esc(t('dash.failsOldNodes', { names: old.join(t('reach.sep')) }))}</p>` : '';
   if (!rows.length && !fails.length) { setHTML(el, empty(t('dash.noConns')) + oldNote); return; }
   const multi = all.some(c => c.server);
-  const main = rows.length ? `<div class="table-wrap"><table class="grid conns"><thead><tr><th>IP</th><th>${t('logs.user')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${rows.slice(0, 30).map(c =>
+  const main = rows.length ? `<div class="table-wrap"><table class="grid conns"><thead><tr><th>IP</th><th>${t('logs.user')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${fairPick(rows, 30).map(c =>
     `<tr>
       <td class="mono">${esc(c.ip)}${c.rejected ? ' <span class="badge danger" title="' + esc(t('dash.rejectedHelp')) + '">' + esc(t(c.rejected === 'pool' ? 'dash.rejectedPool' : 'dash.rejectedDevice')) + '</span>' : ''}</td>
       <td class="ell" title="${esc(c.user || '')}">${c.user ? esc(c.user) : '<span class="muted">—</span>'}</td>
@@ -174,7 +176,7 @@ async function renderConns() {
       <td class="mono small">${fmtTime(c.ts)}</td>
     </tr>`).join('')}</tbody></table></div>` : empty(t('dash.noConns'));
   const failTable = fails.length ? `<h3 class="conns-sub">${t('dash.failsTitle')}</h3><p class="hint">${t('dash.failsHelp')}</p>
-    <div class="table-wrap"><table class="grid conns fails"><thead><tr><th>IP</th><th>${t('dash.failWhy')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${fails.slice(0, 15).map(c =>
+    <div class="table-wrap"><table class="grid conns fails"><thead><tr><th>IP</th><th>${t('dash.failWhy')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${fairPick(fails, 15).map(c =>
     `<tr>
       <td class="mono">${esc(c.ip)}</td>
       <td><span class="badge warn" title="${esc(t('dash.fail.' + c.failed + '.help') + (c.detail ? '\n' + c.detail : ''))}">${esc(t('dash.fail.' + c.failed))}</span></td>
