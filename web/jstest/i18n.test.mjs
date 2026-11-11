@@ -1,5 +1,5 @@
-// 界面文案(web/assets/js/i18n.js):中英两份的键要一一对应、占位一致,同一句里一个占位只能出现一次
-// (t() 只替换第一处,第二处会原样显示 {port})。后端返回的中文错误另由 web/errmsg_test.go 核对 errmsg.js。
+// 界面文案(web/assets/js/i18n.js):中英两份的键要一一对应、占位一致;同一句里一个占位可以出现几次,
+// t() 每一处都要换掉(以前只换第一处,第二处会原样显示 {port})。后端返回的中文错误另由 web/errmsg_test.go 核对 errmsg.js。
 // 运行:node --test web/jstest/i18n.test.mjs(CI 里和其它前端测试一起跑)。
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,15 +28,26 @@ test('中英占位一致', () => {
   assert.deepEqual(bad, []);
 });
 
-test('同一句里一个占位只出现一次(t() 只替换第一处)', () => {
-  const bad = [];
+test('t() 把同一个占位的每一处都换掉(同一句里一个占位可以出现几次)', async () => {
+  // 整个 i18n.js 跑一遍:末尾读 localStorage / navigator,给个最小替身
+  // (新版 Node 自带一个没配存储文件就不能用的 localStorage,直接盖掉)
+  Object.defineProperty(globalThis, 'localStorage', { value: { getItem: () => null, setItem() {} }, configurable: true, writable: true });
+  if (!globalThis.navigator) Object.defineProperty(globalThis, 'navigator', { value: { language: 'zh-CN' }, configurable: true });
+  fs.writeFileSync(path.join(dir, 'full.mjs'), text);
+  const { t, setLang } = await import(pathToFileURL(path.join(dir, 'full.mjs')).href);
+  let multi = 0;
   for (const [name, d] of [['zh', zh], ['en', en]]) {
+    setLang(name);
     for (const [k, v] of Object.entries(d)) {
       const h = holes(v);
-      if (new Set(h).size !== h.length) bad.push(`${name}.${k}`);
+      if (!h.length) continue;
+      if (new Set(h).size !== h.length) multi++;
+      const vars = Object.fromEntries(h.map(x => [x.slice(1, -1), '@@']));
+      const out = t(k, vars);
+      assert.ok(!h.some(x => out.includes(x)), `${name}.${k} 还剩占位: ${out}`);
     }
   }
-  assert.deepEqual(bad, []);
+  assert.ok(multi > 0, '至少有一句用了重复的占位(否则这条测不到什么)');
 });
 
 // 模板里直接插 ${t('…')}(没经过 esc)的文案进的是 innerHTML:里面的 "<字母" 会被当成标签吞掉(审查:英文概览的
