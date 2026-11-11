@@ -537,6 +537,11 @@ func markLedgerCleared(db *gorm.DB, nodeId uint, all bool) error {
 	if !all {
 		where += " AND user_name NOT IN (SELECT name FROM users)"
 	}
+	// 推给老副机的每份快照都会走到这里,绝大多数时候没有要标的:先只读地看一眼,没有就不碰写锁
+	var pending int64
+	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM traffic_cursors WHERE "+where+")", nodeId).Scan(&pending).Error; err != nil || pending == 0 {
+		return err
+	}
 	return db.Exec(`UPDATE traffic_cursors SET cleared = 1,
 		user_id = CASE WHEN `+trusted+` THEN user_id ELSE 0 END,
 		user_created_at = CASE WHEN `+trusted+` THEN user_created_at ELSE 0 END,

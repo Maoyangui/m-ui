@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
 )
@@ -167,5 +168,34 @@ func TestOldAgentRenamedBackReopensLedger(t *testing.T) {
 	merge(1010, 350)
 	if res := merge(1015, 340); res.Regressed != 1 || usage() != 1350 {
 		t.Fatalf("标记只管一次,之后的回退照常对齐不计,应是 1350,实际 %d(%+v)", usage(), res)
+	}
+}
+
+// 推给老副机的每份快照之后都要看一眼有没有要打清账标记的游标,绝大多数时候没有:那就不该去拿写锁
+// (别的写事务占着锁时要干等满 busy_timeout,推送那一轮跟着拖住)。
+func TestMarkLedgerClearedNoopTakesNoWriteLock(t *testing.T) {
+	db := openDB(t, "m.db").DB
+	db.Create(&model.Node{Name: "本机", IsLocal: true, Enabled: true})
+	db.Create(&model.Node{Name: "n2", Enabled: true})
+	db.Create(&model.User{Name: "alice", Enabled: true, CreatedAt: 100})
+	if _, err := MergeCounters(db, 2, "n2", "", []model.AgentCounter{{UserName: "alice", Up: 10, Down: 10}}, 1000, 60, 1); err != nil {
+		t.Fatal(err)
+	}
+	release := holdWriteLock(t, db)
+	defer release()
+	t0 := time.Now()
+	err := markLedgerCleared(db, 2, false)
+	if d := time.Since(t0); err != nil || d > 2*time.Second {
+		t.Fatalf("alice 还在、没有要标的,不该等写锁:用了 %v, err=%v", d, err)
+	}
+	release()
+	db.Delete(&model.User{}, "name = ?", "alice")
+	if err := markLedgerCleared(db, 2, false); err != nil {
+		t.Fatal(err)
+	}
+	var cur model.TrafficCursor
+	db.Where("node_id = ? AND user_name = ?", 2, "alice").First(&cur)
+	if !cur.Cleared {
+		t.Fatalf("主机上已经没有 alice,游标应打上清账标记: %+v", cur)
 	}
 }
