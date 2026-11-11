@@ -45,6 +45,7 @@ const KeyInstance = "haInstance"
 type epochRecord struct {
 	Epoch  uint64 `json:"epoch"`
 	Master uint   `json:"master"`
+	Pub    string `json:"pub,omitempty"` // 副机:这个纪元钉住的主机签名公钥(库纪元被回退、抬回时一并恢复,不重新信任谁先推来的)
 	At     int64  `json:"at"`
 }
 
@@ -71,6 +72,23 @@ func raiseEpochRecord(dir string, e uint64, master uint, now time.Time) error {
 		return nil
 	}
 	return writeEpochRecord(dir, epochRecord{Epoch: e, Master: master, At: now.Unix()})
+}
+
+// pinEpochRecord 副机钉住了 (e, master) 这个纪元主机的签名公钥:记进纪元记录(记录对得上才记)。
+func pinEpochRecord(dir string, e uint64, master uint, pub string) error {
+	r := readEpochRecord(dir)
+	if pub == "" || r.Epoch != e || r.Master != master || r.Pub == pub {
+		return nil
+	}
+	r.Pub = pub
+	return writeEpochRecord(dir, r)
+}
+
+// notePinned 副机钉住当前纪元主机的签名公钥之后调用(失败只记日志:少了的只是还原后的这层兜底)。
+func (s *Service) notePinned(e uint64, master uint, pub string) {
+	if err := pinEpochRecord(s.Dir(), e, master, pub); err != nil {
+		logger.Warning("容灾:记下钉住的主机公钥失败(继续): ", err)
+	}
 }
 
 // instanceID 读本机实例号,没有就生成。
@@ -195,7 +213,8 @@ func (s *Service) Boot(restored bool) BootResult {
 		}
 		logger.Warning("容灾:库里的纪元 ", L, " 比本机记下的 ", rec.Epoch, " 低(还原了旧备份或重置过设置),已抬回,并以纪元 ", res.To, " 继续当主机")
 	case node && rec.Master != 0 && rec.Epoch > L:
-		if err := s.setEpoch(rec.Epoch, rec.Master, map[string]string{"hubSnapshotSequence": "", KeyMasterPub: "", KeyState: "", KeyVote: "", KeyGrant: ""}); err != nil {
+		// 钉住的主机公钥一并恢复成记录里的(没记过的才清空、等这个纪元第一份状态):不然谁抢先推一份自己签的状态就钉谁
+		if err := s.setEpoch(rec.Epoch, rec.Master, map[string]string{"hubSnapshotSequence": "", KeyMasterPub: rec.Pub, KeyState: "", KeyVote: "", KeyGrant: ""}); err != nil {
 			logger.Warning("容灾:把纪元抬回 ", rec.Epoch, " 失败: ", err)
 		} else {
 			logger.Warning("容灾:库里的纪元 ", L, " 比本机记下的 ", rec.Epoch, " 低,已抬回(主机 #", rec.Master, ")")

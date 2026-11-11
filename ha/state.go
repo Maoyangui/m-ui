@@ -630,6 +630,7 @@ func (s *Service) adopt(e uint64, m uint, pin string) error {
 	}
 	err := s.setEpoch(e, m, more)
 	if err == nil {
+		s.notePinned(e, m, pin)
 		logger.Info("容灾:本机切到纪元 ", e, "(原 ", old, "),主机是服务器 #", m)
 		s.mu.Lock()
 		s.lastContact = s.now()
@@ -721,6 +722,9 @@ func (s *Service) applyState(st State, body []byte, sig string) error {
 	}
 	if err := s.set(values); err != nil {
 		return err
+	}
+	if pinned == "" {
+		s.notePinned(L, st.MasterId, st.MasterPub)
 	}
 	if st.Replica != nil {
 		s.noteReplicaMark(*st.Replica)
