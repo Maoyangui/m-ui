@@ -1,8 +1,8 @@
-<!--meta {"title":"Backup and server migration with m-ui: one zip, zero client changes","description":"What an m-ui backup contains, how scheduled backups and Telegram delivery work, how to restore on a new server from the panel or the installer, and the migration order that keeps ports, credentials and subscription addresses unchanged so users never notice.","type":"article","date":"2026-10-23","discussion":true,"summary":"A consistent SQLite snapshot plus certificates in one zip; restore from the panel or with the installer; the migration checklist that moves a whole panel without touching a single client."} -->
+<!--meta {"title":"Backup and server migration with m-ui: one zip, zero client changes with a domain","description":"What an m-ui backup contains, how scheduled backups and Telegram delivery work, how to restore on a new server from the panel or the installer, and the migration order that keeps ports, credentials and subscription addresses unchanged so users never notice (when subscriptions use a domain).","type":"article","date":"2026-10-23","discussion":true,"summary":"A consistent SQLite snapshot plus certificates in one zip; restore from the panel or with the installer; the migration checklist that moves a whole panel without touching a single client."} -->
 <article class="doc">
   <p class="meta">Guide · 2026-10-23</p>
   <h1>Backup and server migration with m-ui</h1>
-  <p class="lead">Because m-ui keeps everything in one SQLite file and one certificate directory, a backup is one zip and a migration is "restore that zip somewhere else". This is how to do both so that no user has to re-import anything.</p>
+  <p class="lead">Because m-ui keeps everything in one SQLite file and one certificate directory, a backup is one zip and a migration is "restore that zip somewhere else". This is how to do both; when subscriptions use a domain, no user has to re-import anything.</p>
 
   <h2>What a backup contains</h2>
   <ul>
@@ -18,18 +18,18 @@
   <p>Two ways, same result:</p>
   <ol>
     <li><b>From the panel:</b> Backup → Restore, upload the zip. m-ui inspects it, shows what is inside, then swaps the database and certificates in and restarts itself.</li>
-    <li><b>From the installer:</b> <code>bash install.sh --restore backup.zip</code> on a fresh server installs m-ui and restores in one go — useful when the old panel is already gone.</li>
+    <li><b>From the installer:</b> a fresh server does not have the script yet, so upload the backup zip and run the one-line installer with <code>--restore</code>; it installs m-ui and restores in one go — useful when the old panel is already gone:<br><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --restore /root/m-ui-backup.zip</code><br>(use your own backup path; as a non-root user run <code>curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh | sudo bash -s -- --restore /root/m-ui-backup.zip</code>.)</li>
   </ol>
   <p>Either way the restore is atomic: the old database is replaced only after the new one has been validated and copied into place.</p>
 
   <h2>Migrating to a new server</h2>
   <p>The order matters, because subscriptions point at a name or address and clients cache it:</p>
   <ol>
-    <li>Install m-ui on the new server and restore the latest backup. Ports, panel path, credentials and subscription addresses are now identical to the old server.</li>
+    <li>Install m-ui on the new server and restore the latest backup. Ports, panel path and credentials are now identical to the old server, and so are subscription addresses if they use a domain.</li>
     <li>Open the new panel and check the dashboard: data plane running, lines listening, users present. The migration wizard on the Backup page walks through exactly this.</li>
-    <li>If you use a domain, point it at the new server. The wizard can query the major public resolvers so you can watch the change propagate. If you use an IP, edit the server's address on the Servers page — subscriptions update on the client's next refresh.</li>
+    <li>If you use a domain, point it at the new server. The wizard can query the major public resolvers so you can watch the change propagate. With an IP there is no seamless switch: the subscription address contains the old server's IP, so a client refresh still goes to the old server (or fails once it is off) and never learns the new address. Send every user the new subscription address (with the new IP) to re-import; to make future moves invisible to users, give the panel and subscriptions a domain first.</li>
     <li>Nodes need nothing: the master contacts them, not the other way round, and their tokens travelled with the database.</li>
-    <li>Turn the old server off once traffic has moved. Nothing on clients changed: same credentials, same ports, same subscription link.</li>
+    <li>Turn the old server off once traffic has moved. With a domain nothing on clients changed: same credentials, same ports, same subscription link.</li>
   </ol>
 
   <h2>Things that are easy to forget</h2>
