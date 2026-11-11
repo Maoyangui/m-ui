@@ -87,7 +87,11 @@ export function toast(msg, kind = '') {
 
 // ---- 弹窗 ----
 // 标题和按钮固定、正文自己滚动(长表单也看得见「保存」);opts.wide 加宽,opts.size === 'xl' 给带选择器的编辑框用。
+// 页面上只有一个弹窗:保存回调里又打开了新的弹窗(比如批量生成完弹出结果框),回调结束后不能再按旧弹窗收尾 ——
+// 关掉、写错误、重新点亮按钮都只对还开着的这一个做,否则刚弹出来的结果框会立刻被关掉。
+let modalSeq = 0;
 export function openModal(title, html, onSave, opts = {}) {
+  const my = ++modalSeq;
   closeMenus(); // 菜单的层级比弹窗高,开着就会压在弹窗上
   const m = document.getElementById('modal');
   document.getElementById('modal-title').textContent = title;
@@ -101,14 +105,19 @@ export function openModal(title, html, onSave, opts = {}) {
   save.disabled = false; // 上一个对话框可能把它禁用着关掉(换套餐在等预览时禁用提交)
   save.textContent = opts.saveText || opts.okText || t('common.save');
   save.className = 'btn ' + (opts.danger ? 'danger' : 'primary');
-  document.getElementById('modal-cancel').hidden = !!opts.noCancel; // 纯提示只留一个「知道了」
+  const cancel = document.getElementById('modal-cancel');
+  cancel.hidden = !!opts.noCancel; // 纯提示只留一个「知道了」
+  cancel.textContent = opts.cancelText || t('common.cancel'); // 只给看结果、没有保存按钮的(批量生成的结果框)写「关闭」
   m.hidden = false;
   m.querySelector('.modal-box').className = 'modal-box' + (opts.wide ? ' wide' : '') + (opts.size === 'xl' ? ' xl' : '');
   save.onclick = async () => {
     save.disabled = true;
-    try { await onSave(); closeModal(); }
-    catch (e) { document.getElementById('modal-err').textContent = e.message; }
-    finally { save.disabled = false; }
+    try { await onSave(); if (my === modalSeq) closeModal(); }
+    catch (e) {
+      if (my === modalSeq) document.getElementById('modal-err').textContent = e.message;
+      else toast(e.message, 'err'); // 弹窗已经换成别的了,错误不能写进别人的弹窗
+    }
+    finally { if (my === modalSeq) save.disabled = false; }
   };
   const first = m.querySelector('input,select,textarea');
   if (first) setTimeout(() => first.focus(), 50);

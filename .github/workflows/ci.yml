@@ -76,5 +76,7 @@ jobs:
         run: node --test web/jstest/linepicker.test.mjs
       - name: Frontend (dropdown menus close on item click and under dialogs)
         run: node --test web/jstest/menu.test.mjs
+      - name: Frontend (dialog save flow keeps a dialog opened from inside it)
+        run: node --test web/jstest/modal.test.mjs
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run

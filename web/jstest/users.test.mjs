@@ -419,3 +419,28 @@ test('套餐页点人数:按套餐筛、复位其它筛选和已选;筛着的套
   await mod.render(host);
   assert.match(document.getElementById('user-count').textContent, /^3 \//, '套餐删了:不再按它筛');
 });
+
+test('批量生成:建好后换成「生成结果」框,只给「关闭」,能一键复制全部', async () => {
+  await setup();
+  const A = globalThis.__actions;
+  const made = [{ name: 'user-a1', link: 'https://x/s/a1' }, { name: 'user-b2', link: 'https://x/s/b2' }];
+  globalThis.__api = async (method, p, body) => {
+    if (method === 'POST' && p === 'users/bulk') { assert.equal(body.count, 2); return made; }
+    throw new Error('404 ' + method + ' ' + p);
+  };
+  A['user.bulk']();
+  Object.assign($('f-prefix'), { value: 'user-' }); Object.assign($('f-count'), { value: '2' }); Object.assign($('f-mode'), { value: 'random' });
+  Object.assign($('f-start'), { value: '1' }); Object.assign($('f-remark'), { value: '' }); Object.assign($('f-plan'), { value: '0' });
+  await save();
+  const m = globalThis.__modal;
+  assert.equal(m.title, 'user.bulkResult');
+  assert.equal(m.onSave, null, '结果框只是给看的,没有保存');
+  assert.equal(m.opts && m.opts.cancelText, 'common.close');
+  assert.match(m.html, /user-a1\thttps:\/\/x\/s\/a1\nuser-b2\thttps:\/\/x\/s\/b2/);
+  assert.match(m.html, /data-act="user\.bulkCopy"/);
+  // 复制:取结果框里的全部内容
+  $('bulk-result').value = 'user-a1\thttps://x/s/a1\nuser-b2\thttps://x/s/b2';
+  globalThis.__copied = [];
+  A['user.bulkCopy']();
+  assert.deepEqual(globalThis.__copied, ['user-a1\thttps://x/s/a1\nuser-b2\thttps://x/s/b2']);
+});

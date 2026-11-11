@@ -1,7 +1,7 @@
 import { state, load, isReseller, takeHashParams } from '../app.js';
 import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
-import { deviceCount, gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtDate, fmtDuration, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML, setText, chipList, fieldBox } from '../ui.js';
+import { deviceCount, gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtDate, fmtDuration, fmtRelative, daysLeft, toast, confirm, openModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML, setText, chipList, fieldBox } from '../ui.js';
 
 // 生效中的规则限速(主面板才有):列表徽章与详情抽屉都从这里取
 const limitsOf = id => (state.limitStates || []).filter(s => s.userId === id);
@@ -681,8 +681,9 @@ function bulkDialog() {
     });
     await load('users', 'lines', 'status'); renderRows();
     toast(t('user.bulkDone', { n: res.length }), 'ok');
-    closeModal();
-    openModal(t('user.bulkResult'), `<textarea style="min-height:16rem" readonly>${esc(res.map(r => r.name + '\t' + r.link).join('\n'))}</textarea>`, null);
+    // 直接换成结果框:openModal 认得出保存回调里换了弹窗,不会再把它关掉;用户自己点「关闭」才关
+    openModal(t('user.bulkResult'), `<textarea id="bulk-result" style="min-height:16rem" readonly>${esc(res.map(r => r.name + '\t' + r.link).join('\n'))}</textarea>
+      <div class="toolbar"><button type="button" class="btn" data-act="user.bulkCopy">${t('common.copy')}</button></div>`, null, { cancelText: t('common.close') });
   }, { size: 'xl' });
   const items = pickerItems();
   picker = linePicker(document.getElementById('f-lines'), { items, selected: new Set(items.map(it => it.key)) });
@@ -725,6 +726,7 @@ registerActions({
   'user.renew': id => renewDialog([Number(id)]),
   'user.change': id => changeDialog(Number(id)),
   'user.bulk': () => bulkDialog(),
+  'user.bulkCopy': () => { const ta = document.getElementById('bulk-result'); if (ta) copy(ta.value); },
   'user.export': () => { window.open('./api/users/export', '_blank'); },
   'user.import': () => {
     openModal(t('user.importTitle'), `
