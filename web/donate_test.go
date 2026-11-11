@@ -209,6 +209,28 @@ func TestSupportOnlineOff(t *testing.T) {
 	}
 }
 
+// 建议与支持页中英文都要整页渲染出来:html/template 会按 JS 语法跟踪脚本里的上下文,脚本写得让它误判时
+// Execute 出错、页面是空的或只剩一半,而 handleSupport 不看这个错误。顺带看到账后的提示没有硬承诺。
+func TestSupportPageRendersFully(t *testing.T) {
+	s, _ := newTestServerForSupport(t, "")
+	for lang, want := range map[string]string{
+		"zh": "通常几小时内上榜;超过一天还没上榜,请在 Telegram 联系我。",
+		"en": "If you're not on it after a day, message me on Telegram.",
+	} {
+		w := httptest.NewRecorder()
+		s.handleSupport(w, httptest.NewRequest("GET", "http://panel:2053/app/support?lang="+lang, nil))
+		page := w.Body.String()
+		for _, frag := range []string{want, "support/pledge-check", "var STALE = 30000", "querySelectorAll('[data-copy]')", "</script>\n</body>\n</html>"} {
+			if !strings.Contains(page, frag) {
+				t.Fatalf("%s: 页面里应有 %q,渲染没完成?(共 %d 字节)", lang, frag, len(page))
+			}
+		}
+		if strings.Contains(page, "会在几小时内上榜") || strings.Contains(page, "you'll appear on the list within") {
+			t.Fatalf("%s: 还有硬承诺", lang)
+		}
+	}
+}
+
 func TestSupportCheck(t *testing.T) {
 	hits := 0
 	now := time.Now().Unix()
