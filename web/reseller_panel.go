@@ -19,6 +19,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/totp"
+	"github.com/Maoyangui/m-ui/util/slowreq"
 
 	"github.com/skip2/go-qrcode"
 	"golang.org/x/crypto/bcrypt"
@@ -126,7 +127,8 @@ func (s *Server) StartReseller() error {
 		s.watchTLS("reseller", nil)
 	}
 	s.rListener = ln
-	s.rSrv = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	slow := &slowreq.Logger{Name: "代理面板", Shape: panelRouteShape}
+	s.rSrv = &http.Server{Handler: slow.Wrap(handler), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		if err := s.rSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			logger.Warning("代理面板退出: ", err)

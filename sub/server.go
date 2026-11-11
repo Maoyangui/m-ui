@@ -20,6 +20,7 @@ import (
 	"github.com/Maoyangui/m-ui/ext"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/util/slowreq"
 
 	"gorm.io/gorm"
 )
@@ -426,7 +427,8 @@ func (s *Server) Start() error {
 	s.TLS.Set("sub", rl)
 
 	s.listener = ln
-	s.httpSrv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	slow := &slowreq.Logger{Name: "订阅", Shape: func(r *http.Request) string { return subRouteShape(r.URL.Path, s.currentPath()) }}
+	s.httpSrv = &http.Server{Handler: slow.Wrap(mux), ReadHeaderTimeout: 10 * time.Second}
 	s.stop = make(chan struct{})
 	go s.housekeeping()
 	s.startGodusevpnRefresh() // 落地页里佛跳墙的下载链接始终指向最新发布
@@ -473,6 +475,24 @@ func (s *Server) Stop() error {
 	err := s.httpSrv.Shutdown(ctx)
 	s.flushLogs() // 停机前在途的请求也记上
 	return err
+}
+
+// subRouteShape 慢请求日志里订阅请求的路由形状:订阅路径记成 {sub},订阅键(用户名 / 订阅令牌 / 共享令牌)一律打码成 :key,
+// 只留 /qr、/logo 这样的固定后缀;不在订阅路径下的记成 {other}。
+func subRouteShape(path, subPath string) string {
+	if !strings.HasPrefix(path, subPath) {
+		return "{other}"
+	}
+	name := strings.TrimPrefix(path, subPath)
+	switch {
+	case name == "":
+		return "{sub}/"
+	case strings.HasSuffix(name, "/qr"):
+		return "{sub}/:key/qr"
+	case strings.HasSuffix(name, "/logo"):
+		return "{sub}/:key/logo"
+	}
+	return "{sub}/:key"
 }
 
 func (s *Server) handle() http.HandlerFunc {

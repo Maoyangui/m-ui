@@ -28,6 +28,7 @@ import (
 	"github.com/Maoyangui/m-ui/ops"
 	"github.com/Maoyangui/m-ui/runner"
 	"github.com/Maoyangui/m-ui/totp"
+	"github.com/Maoyangui/m-ui/util/slowreq"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -295,7 +296,8 @@ func (s *Server) Start() error {
 	}
 
 	s.listener = ln
-	s.httpSrv = &http.Server{Handler: outer, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	slow := &slowreq.Logger{Name: "面板", Shape: panelRouteShape} // 处理超过 3 秒记一条(同一路由每分钟最多一条)
+	s.httpSrv = &http.Server{Handler: slow.Wrap(outer), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		if err := s.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			logger.Warning("面板服务退出: ", err)
@@ -340,6 +342,12 @@ func (s *Server) tlsWatch() *certutil.Watch {
 // assetCache 给内嵌前端加上按内容哈希生成的 ETag,并要求浏览器每次校验(no-cache)。
 // 内嵌文件没有修改时间,浏览器会按启发式长期缓存 ES 模块,升级后就会看到旧界面;
 // 这里用整套资源的哈希做 ETag:未升级时全部 304,升级后立即拿到新文件。
+// panelRouteShape 慢请求日志里面板 / 代理面板请求的路由形状:处理完以后路径已改写到 innerBase 之下,去掉前缀
+// (对外路径本身是秘密,从不写进日志),数字 id 与令牌之类打码,如 /api/lines/:id。
+func panelRouteShape(r *http.Request) string {
+	return slowreq.RouteShape(r.URL.Path, innerBase)
+}
+
 func assetCache(fsys fs.FS, next http.Handler) http.Handler {
 	h := sha256.New()
 	fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
