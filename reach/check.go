@@ -15,6 +15,10 @@ const (
 	VerdictAbroadDown  = "abroadDown"  // 香港也连不上:服务器、端口或安全组的问题,不是墙
 	VerdictNoProbes    = "noProbes"    // 这次没有可用的大陆测点
 	VerdictError       = "error"       // 检测没做成(接口出错、额度用完、没有可测的地址)
+
+	// VerdictNoPort 没有可测的 IPv4 入口:这台的线路在订阅里都走 IPv6;或走 IPv4 的只有 UDP 线路、借来的面板 API 端口
+	// 连香港也连不上(多半只对主机放行)。灰色、不告警;和"没测成"不同,算作结论,会盖掉以前测出的"被墙"
+	VerdictNoPort = "noPort"
 )
 
 // IsBlocked 是否属于"被墙"一类。

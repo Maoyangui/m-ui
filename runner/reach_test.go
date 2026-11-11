@@ -66,7 +66,7 @@ func TestReachTargets(t *testing.T) {
 	}
 }
 
-// 订阅里给的是 IPv6 的服务器不测(测点不一定有 IPv6,测不通会被误判成被墙),如实标出;双栈默认 IPv4 照测。
+// 订阅里给的是 IPv6 的服务器不测大陆那项(测点不一定有 IPv6,测不通会被误判成被墙),如实标出;双栈默认 IPv4 照测。
 // 订阅给域名时不看地址族。
 func TestReachTargetsIPv6(t *testing.T) {
 	r, err := New(filepath.Join(t.TempDir(), "m.db"))
@@ -92,7 +92,7 @@ func TestReachTargetsIPv6(t *testing.T) {
 		t.Helper()
 		got := map[string]string{}
 		for _, tg := range r.reachTargets(context.Background()) {
-			if tg.Err != "" {
+			if tg.NoPort != "" { // 不测大陆那项(记"无可测端口",会盖掉以前的结论,不像 Err 那样只算没测成)
 				got[tg.Name] = "v6"
 				if tg.Host != "" {
 					t.Fatalf("%s 标了不测却还带着地址 %q", tg.Name, tg.Host)

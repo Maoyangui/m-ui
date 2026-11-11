@@ -216,13 +216,24 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		var req measureRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		f.requests = append(f.requests, req)
-		if f.remaining <= 0 {
+		// 按这次要的测点数扣额度(和 Globalping 一样):选点条件的 limit 加起来;复用上一次的测点按 8 个算
+		charge := 8
+		if b, err := json.Marshal(req.Locs); err == nil {
+			var locs []location
+			if json.Unmarshal(b, &locs) == nil && len(locs) > 0 {
+				charge = 0
+				for _, l := range locs {
+					charge += l.Limit
+				}
+			}
+		}
+		if f.remaining < charge {
 			w.Header().Set("X-RateLimit-Reset", "1200")
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte(`{"error":{"message":"rate limit"}}`))
 			return
 		}
-		f.remaining -= 8
+		f.remaining -= charge
 		w.Header().Set("X-RateLimit-Limit", "250")
 		w.Header().Set("X-RateLimit-Remaining", fmt.Sprint(f.remaining))
 		w.Header().Set("X-RateLimit-Reset", "1800")

@@ -135,6 +135,12 @@ func (c *client) noteQuota(h http.Header) {
 		q.ResetAt = c.now().Unix() + int64(sec)
 	}
 	c.mu.Lock()
+	// 几个请求并发时,响应处理的先后和服务端扣额度的先后不一定一样:同一个额度窗口里剩余只会变少,
+	// 读到更大的多半是早先那个请求的响应,不能拿它把额度"加回去"(会以为还有余量,把大陆检测要用的额度挪给 IPv6 入站)。
+	// 过了恢复时间(新窗口)、上限变了(填了令牌)才整个换。
+	if old := c.quota; old.At > 0 && old.Limit == q.Limit && q.At < old.ResetAt && q.Remaining > old.Remaining {
+		q.Remaining, q.ResetAt = old.Remaining, old.ResetAt
+	}
 	c.quota = q
 	c.mu.Unlock()
 }

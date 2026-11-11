@@ -15,7 +15,7 @@ import (
 )
 
 // 英文界面靠 assets/js/errmsg.js 把后端中文错误翻成英文(审计 MB08)。这里扫一遍会把错误送到面板的包:
-// 每条带中文的错误文案(errors.New / fmt.Errorf / "error": … / Error 字段 / fail(…) / 拼接的前缀)都要在表里有译文、占位个数一致,
+// 每条带中文的错误文案(errors.New / fmt.Errorf / "error": … / Error 字段 / fail(…) / 拼接的前缀 / 错误类型 Error() 方法里 return 的)都要在表里有译文、占位个数一致,
 // 表里也不能留源码里已经没有的条目;数据面重载的操作名(noteReload)要在 LABELS 里。
 func TestErrorMessagesHaveEnglish(t *testing.T) {
 	src, ops := backendMessages(t, ".", "../hop", "../upstream", "../ext", "../rules", "../creds", "../ops", "../selfupdate",
@@ -107,7 +107,7 @@ func backendMessages(t *testing.T, dirs ...string) (map[string]string, map[strin
 		}
 		return "", false
 	}
-	errField := map[string]bool{"Error": true, "Err": true, "err": true, "error": true}
+	errField := map[string]bool{"Error": true, "Err": true, "err": true, "error": true, "NoPort": true} // NoPort:大陆连通不测的原因,结果里当 error 给面板
 	msgs, ops := map[string]string{}, map[string]bool{}
 	for _, dir := range dirs {
 		fset := token.NewFileSet()
@@ -165,6 +165,23 @@ func backendMessages(t *testing.T, dirs ...string) (map[string]string, map[strin
 							if sel, ok := l.(*ast.SelectorExpr); ok && errField[sel.Sel.Name] && i < len(v.Rhs) {
 								add(v.Rhs[i])
 							}
+						}
+					case *ast.FuncDecl: // 错误类型自己的 Error() 方法里 return 的文案(QuotaError 这类:"测试额度已用完,约 %d 分钟后恢复")
+						if v.Recv != nil && v.Name.Name == "Error" && v.Body != nil {
+							ast.Inspect(v.Body, func(n ast.Node) bool {
+								if r, ok := n.(*ast.ReturnStmt); ok {
+									for _, e := range r.Results {
+										if c, ok := e.(*ast.CallExpr); ok {
+											if sel, ok := c.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Sprintf" && len(c.Args) > 0 {
+												add(c.Args[0])
+											}
+											continue
+										}
+										add(e)
+									}
+								}
+								return true
+							})
 						}
 					case *ast.CompositeLit:
 						if id, ok := v.Type.(*ast.Ident); ok && id.Name == "keyErr" && len(v.Elts) > 0 {

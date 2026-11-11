@@ -65,16 +65,17 @@ type V6Result struct {
 	Attempt *Attempt `json:"attempt,omitempty"`
 }
 
-// v6Measured 这次 IPv6 入站检测有结论(没测成的不算,不能拿它盖掉上一次的结论)。
-func v6Measured(r *V6Result) bool { return r != nil && r.State != V6Error }
+// v6Measured 这次 IPv6 入站检测有结论。没测成的、这次没有可用测点的都不算,不能拿它盖掉上一次的结论
+// (和大陆那项的 measured 一样:VerdictError、VerdictNoProbes 都不算)。
+func v6Measured(r *V6Result) bool { return r != nil && r.State != V6Error && r.State != V6None }
 
 // viewV6Locked 面板上这台显示哪次 IPv6 入站检测:最近一轮没带(这台已经没有走 IPv6 的线路)就不显示;
-// 最近一次没测成而以前测成过,显示以前那次并注明最近这次的原因(和大陆那项的 Attempt 一样)。调用方持锁。
+// 最近一次没测成或没有可用测点,而以前测成过,显示以前那次并注明最近这次的情况(和大陆那项的 Attempt 一样)。调用方持锁。
 func (s *Service) viewV6Locked(id uint, last *V6Result) *V6Result {
 	if last == nil {
 		return nil
 	}
-	if last.State == V6Error {
+	if !v6Measured(last) {
 		if g := s.goodV6[id]; g != nil && g != last {
 			r := *g
 			r.Attempt = &Attempt{At: last.At, Verdict: last.State, Error: last.Error}

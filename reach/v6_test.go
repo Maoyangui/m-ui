@@ -3,6 +3,8 @@ package reach
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -200,5 +202,147 @@ func TestCanCheckExtReservesV6(t *testing.T) {
 	h.svc.c.mu.Unlock()
 	if err := h.svc.CanCheckExt(1); err != nil {
 		t.Fatalf("额度刚好够: %v", err)
+	}
+}
+
+// 这次没有可用的 IPv6 测点(测点中途掉线、被判超时,结果里一个都没测到):和没测成一样,不盖掉上一次的结论,
+// 面板上照旧显示上一次的"不通"并注明最近这次的情况;概况的 v6Bad 也照旧算它。
+func TestV6NoneKeepsLastMeasured(t *testing.T) {
+	h := newHarness(t)
+	h.targets[0].V6 = &V6Target{Host: "2001:db8::7", Port: 8443, PortLine: "tj6"}
+	h.api.mu.Lock()
+	h.api.v6OK = false
+	h.api.mu.Unlock()
+	h.runManual(t)
+	first := latest(t, h, 1).V6
+	if first == nil || first.State != V6Down {
+		t.Fatalf("第一次应测出不通: %+v", first)
+	}
+	h.advance(time.Minute)
+	h.api.mu.Lock()
+	h.api.v6Probes = 0
+	h.api.mu.Unlock()
+	h.runManual(t)
+	v := latest(t, h, 1).V6
+	if v == nil || v.State != V6Down || v.At != first.At || v.Attempt == nil || v.Attempt.Verdict != V6None {
+		t.Fatalf("没有测点时应留着上一次的不通并注明: %+v", v)
+	}
+	if bad := h.svc.V6Bad(); len(bad) != 1 || bad[0].NodeId != 1 {
+		t.Fatalf("v6Bad 照旧算上一次的不通: %+v", bad)
+	}
+	// 从来没测成过、这次又没有测点:就显示"无可用测点"
+	h2 := newHarness(t)
+	h2.targets[0].V6 = &V6Target{Host: "2001:db8::7", Port: 8443, PortLine: "tj6"}
+	h2.api.mu.Lock()
+	h2.api.v6Probes = 0
+	h2.api.mu.Unlock()
+	h2.runManual(t)
+	if v := latest(t, h2, 1).V6; v == nil || v.State != V6None || v.Attempt != nil {
+		t.Fatalf("没有可比的上一次时如实显示: %+v", v)
+	}
+}
+
+// 概况"需要处理"用的 v6Bad:只算 down(unsure / udp / none / error 不算),和服务器页显示的是同一份;
+// 这台不再有走 IPv6 的线路就不算了;没有时是空数组。
+func TestV6Bad(t *testing.T) {
+	h := newHarness(t)
+	if b, _ := json.Marshal(h.svc.V6Bad()); string(b) != "[]" {
+		t.Fatalf("没有时要是空数组: %s", b)
+	}
+	h.targets = []Target{
+		{NodeId: 1, Name: "不通", Host: "203.0.113.7", Port: 443, PortFrom: "line", V6: &V6Target{Host: "2001:db8::1", Port: 8443, PortLine: "tj6"}},
+		{NodeId: 2, Name: "只有UDP", Host: "203.0.113.8", Port: 443, PortFrom: "line", V6: &V6Target{Host: "2001:db8::2", UDPLines: []string{"hy6"}}},
+		{NodeId: 3, Name: "内网", Host: "203.0.113.9", Port: 443, PortFrom: "line", V6: &V6Target{Host: "fd00::3", Port: 443, Err: "不是公网地址"}},
+	}
+	h.api.mu.Lock()
+	h.api.v6OK = false
+	h.api.mu.Unlock()
+	h.runManual(t)
+	bad := h.svc.V6Bad()
+	if len(bad) != 1 || bad[0].NodeId != 1 || bad[0].Name != "不通" || bad[0].Target != "2001:db8::1" || bad[0].Port != 8443 || bad[0].At == 0 {
+		t.Fatalf("只算 down 的那台: %+v", bad)
+	}
+	b, _ := json.Marshal(bad[0])
+	for _, k := range []string{`"nodeId":1`, `"name":"不通"`, `"target":"2001:db8::1"`, `"port":8443`, `"at":`} {
+		if !strings.Contains(string(b), k) {
+			t.Fatalf("字段 %s: %s", k, b)
+		}
+	}
+	if len(h.svc.Bad()) != 0 {
+		t.Fatalf("不并进 reachBad: %+v", h.svc.Bad())
+	}
+	// 线路改回 IPv4:这台不再有 IPv6 入站,概况上也不再算
+	h.targets[0].V6 = nil
+	h.advance(time.Minute)
+	h.runManual(t)
+	if bad := h.svc.V6Bad(); len(bad) != 0 {
+		t.Fatalf("没有走 IPv6 的线路了还算不通: %+v", bad)
+	}
+}
+
+// 额度先保大陆检测:IPv6 入站只用大陆检测剩下的。5 台服务器都有走 IPv6 的线路,额度只够 5 台大陆检测再加一次 IPv6 入站:
+// 以前按服务器顺序每台"大陆 + IPv6"交替花,排在后面的服务器大陆检测被挤成"额度已用完"(被墙也不告警);
+// 现在 5 台大陆检测都测成,IPv6 入站测成一次,其余的注明额度不够、留着上一次的结论。
+func TestMainlandQuotaBeforeV6(t *testing.T) {
+	h := newHarness(t)
+	h.targets = nil
+	for i := 1; i <= 5; i++ {
+		h.targets = append(h.targets, Target{NodeId: uint(i), Name: fmt.Sprintf("s%d", i), Host: fmt.Sprintf("203.0.113.%d", i), Port: 443, PortFrom: "line",
+			V6: &V6Target{Host: fmt.Sprintf("2001:db8::%d", i), Port: 8443, PortLine: "tj6"}})
+	}
+	// 大陆一次 8 个测点次(假接口:移动 2、电信 2、联通 1、香港 3),IPv6 一次 4 个
+	h.api.mu.Lock()
+	h.api.remaining = 5*8 + 4 + 2
+	h.api.mu.Unlock()
+	h.runManual(t)
+	v6ok := 0
+	for i := uint(1); i <= 5; i++ {
+		r := latest(t, h, i)
+		if r.Verdict != VerdictOK {
+			t.Fatalf("s%d 的大陆检测被 IPv6 入站挤掉了: %+v", i, r)
+		}
+		switch {
+		case r.V6 == nil:
+			t.Fatalf("s%d 没有 IPv6 入站结果", i)
+		case r.V6.State == V6OK:
+			v6ok++
+		case r.V6.State != V6Error || !strings.Contains(r.V6.Error, "额度"):
+			t.Fatalf("s%d 的 IPv6 入站应注明额度不够: %+v", i, r.V6)
+		}
+	}
+	if v6ok != 1 {
+		t.Fatalf("剩下的额度正好够一次 IPv6 入站,实际测成 %d 次", v6ok)
+	}
+}
+
+// 额度缓存:几个请求并发时响应处理的先后不定,同一个窗口里读到更大的剩余多半是早先那个请求的,不能把额度"加回去";
+// 过了恢复时间、上限变了(填了令牌)才整个换。
+func TestQuotaCacheNeverGoesBackUpWithinWindow(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	c := &client{now: func() time.Time { return now }}
+	hdr := func(limit, remaining, reset int) http.Header {
+		h := http.Header{}
+		h.Set("X-RateLimit-Limit", fmt.Sprint(limit))
+		h.Set("X-RateLimit-Remaining", fmt.Sprint(remaining))
+		h.Set("X-RateLimit-Reset", fmt.Sprint(reset))
+		return h
+	}
+	c.noteQuota(hdr(250, 30, 1800))
+	c.noteQuota(hdr(250, 46, 1801)) // 早先那个请求的响应后到
+	if q := c.Quota(); q.Remaining != 30 {
+		t.Fatalf("同一窗口里不该变多: %+v", q)
+	}
+	c.noteQuota(hdr(250, 22, 1799))
+	if q := c.Quota(); q.Remaining != 22 {
+		t.Fatalf("变少照记: %+v", q)
+	}
+	c.noteQuota(hdr(500, 480, 1799)) // 填了令牌,上限变了
+	if q := c.Quota(); q.Remaining != 480 || q.Limit != 500 {
+		t.Fatalf("上限变了整个换: %+v", q)
+	}
+	now = now.Add(31 * time.Minute) // 过了恢复时间:新窗口
+	c.noteQuota(hdr(500, 496, 3600))
+	if q := c.Quota(); q.Remaining != 496 {
+		t.Fatalf("新窗口整个换: %+v", q)
 	}
 }

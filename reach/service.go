@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
@@ -53,6 +54,8 @@ type Target struct {
 	Ext      bool   // 外部节点:按外部节点那一套下结论(verdictExt),不进历史、不告警
 	// TCPv6Only 这台的 TCP 线路都走 IPv6:Port 是订阅 / API 端口(不拿 IPv6 线路的端口测 IPv4 地址)
 	TCPv6Only bool
+	// NoPort 不测大陆那项的原因(这台的线路在订阅里都不走 IPv4):不发请求,结论记为 VerdictNoPort
+	NoPort string
 	// V6 这台订阅里有走 IPv6 的线路时,同一轮顺带测的 IPv6 入站(见 v6.go);nil = 不测。
 	// Err 不为空(比如订阅里这台默认给 IPv6、大陆检测不测)时 V6 照样测
 	V6 *V6Target
@@ -350,6 +353,34 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 	}
 	s.mu.Unlock()
 
+	// 额度先保大陆检测(带告警的主功能):IPv6 入站只用大陆检测剩下的。一台做完大陆检测时,剩下的额度扣掉还没做完的
+	// 那几台大陆检测要用的,不够这一次 IPv6 入站,就先让出并发名额,等这一轮的大陆检测全做完再用剩下的额度测
+	// measures 大陆那项要发请求;mainlandLeft 还没做完大陆检测的服务器
+	measures := func(t Target) bool { return err == nil && t.NoPort == "" && t.Err == "" && t.Host != "" }
+	var mainlandLeft atomic.Int64
+	var mainlandWG sync.WaitGroup
+	mainlandDone := make(chan struct{})
+	for _, t := range targets {
+		if measures(t) {
+			mainlandLeft.Add(1)
+			mainlandWG.Add(1)
+		}
+	}
+	go func() { mainlandWG.Wait(); close(mainlandDone) }()
+	// 放行一次 IPv6 入站时先记下它要用的测点次,测完再去掉:几台同时做完大陆检测时,不会一起看到同一份余量、一起放行
+	var v6Mu sync.Mutex
+	v6Reserved := 0
+	admitV6 := func() bool {
+		v6Mu.Lock()
+		defer v6Mu.Unlock()
+		if !s.v6Room(int(mainlandLeft.Load()), cost, v6Reserved) {
+			return false
+		}
+		v6Reserved += v6Cost()
+		return true
+	}
+	releaseV6 := func() { v6Mu.Lock(); v6Reserved -= v6Cost(); v6Mu.Unlock() }
+
 	sem := make(chan struct{}, parallelChecks)
 	var wg sync.WaitGroup
 	for _, t := range targets {
@@ -359,6 +390,13 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
+			mainlandFinished := sync.OnceFunc(func() {
+				if measures(t) {
+					mainlandLeft.Add(-1)
+					mainlandWG.Done()
+				}
+			})
+			defer mainlandFinished() // 中途出了异常也要放行等着的 IPv6 入站
 			defer func() {
 				if v := recover(); v != nil {
 					logger.Warning("大陆连通检测异常: ", t.Name, " ", v, " | ", string(debug.Stack()))
@@ -368,9 +406,12 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 				s.mu.Unlock()
 			}()
 			var res Result
-			if err != nil {
+			switch {
+			case t.NoPort != "":
+				res = s.noPort(t, auto)
+			case err != nil:
 				res = s.failed(t, auto, err.Error())
-			} else {
+			default:
 				res = s.check(ctx, t, locs, cost, auto)
 			}
 			if auto && s.needsRecheck(res) {
@@ -384,9 +425,26 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 				case <-ctx.Done():
 				}
 			}
+			mainlandFinished()
 			// IPv6 入站和大陆检测是两回事:大陆那项没测成(额度、没有大陆测点、订阅里这台给的是 IPv6)也照测
 			if t.V6 != nil && ctx.Err() == nil {
-				res.V6 = s.checkV6(ctx, t.V6)
+				reserved := admitV6()
+				if !reserved {
+					<-sem
+					select {
+					case <-mainlandDone:
+					case <-ctx.Done():
+					}
+					sem <- struct{}{}
+				}
+				func() {
+					if reserved {
+						defer releaseV6()
+					}
+					if ctx.Err() == nil {
+						res.V6 = s.checkV6(ctx, t.V6)
+					}
+				}()
 			}
 			if ctx.Err() != nil && res.Verdict == VerdictError {
 				return // 面板正在退出:别把"被取消"记成一次失败
@@ -419,9 +477,11 @@ func (s *Service) CanCheckExt(n int) error {
 	s.mu.Lock()
 	cost, reserve := s.perCheck, 0
 	if auto {
-		reserve = cost * len(s.latest)
-		for _, r := range s.latest { // 上一轮测过 IPv6 入站的,下一轮也要测
-			if r.V6 != nil && r.V6.Port > 0 {
+		for _, r := range s.latest {
+			if r.Verdict != VerdictNoPort || len(r.Measurements) > 0 { // 不测大陆那项的不占
+				reserve += cost
+			}
+			if r.V6 != nil && r.V6.Port > 0 { // 上一轮测过 IPv6 入站的,下一轮也要测
 				reserve += v6Cost()
 			}
 		}
@@ -505,6 +565,23 @@ func (s *Service) locations(ctx context.Context) ([]location, int, error) {
 	return locs, cost, nil
 }
 
+// noPort 不测大陆那项(这台的线路在订阅里都不走 IPv4):不发请求,结论记为 noPort。
+func (s *Service) noPort(t Target, auto bool) Result {
+	return Result{NodeId: t.NodeId, Name: t.Name, Target: t.Host, At: s.d.Now().Unix(), Auto: auto,
+		Verdict: VerdictNoPort, Error: t.NoPort, Groups: orderedGroups(summarize(nil))}
+}
+
+// v6Room 现在测一次 IPv6 入站,会不会挤掉这一轮还没做完的大陆检测(每台约 cost 个测点次):
+// 额度已知、没到恢复时间,且剩下的扣掉 pending 台大陆检测要用的、已放行还没测完的 IPv6 入站(reserved)后
+// 不够 v6Cost 时返回 false。
+func (s *Service) v6Room(pending, cost, reserved int) bool {
+	q := s.c.Quota()
+	if q.At == 0 || s.d.Now().Unix() >= q.ResetAt {
+		return true
+	}
+	return q.Remaining-pending*cost-reserved >= v6Cost()
+}
+
 func (s *Service) failed(t Target, auto bool, msg string) Result {
 	return Result{NodeId: t.NodeId, Name: t.Name, Target: t.Host, Port: t.Port, PortFrom: t.PortFrom, PortLine: t.PortLine, TCPv6Only: t.TCPv6Only,
 		At: s.d.Now().Unix(), Auto: auto, Verdict: VerdictError, Error: msg, Groups: orderedGroups(summarize(nil))}
@@ -512,6 +589,9 @@ func (s *Service) failed(t Target, auto bool, msg string) Result {
 
 // check 测一台:先从大陆三网 + 香港连端口;大陆全不通时再用同一批测点 ping 一次,分清 IP 被墙还是端口被封。
 func (s *Service) check(ctx context.Context, t Target, locs []location, cost int, auto bool) Result {
+	if t.NoPort != "" {
+		return s.noPort(t, auto)
+	}
 	if t.Err != "" {
 		return s.failed(t, auto, t.Err)
 	}
@@ -552,6 +632,11 @@ func (s *Service) check(ctx context.Context, t Target, locs []location, cost int
 		res.Verdict, res.Note = verdictExt(gs, icmp, t.Port == 0)
 	} else {
 		res.Verdict = verdict(gs, icmp, t.Port == 0)
+	}
+	if res.Verdict == VerdictAbroadDown && t.PortFrom == "api" {
+		// 借来的面板 API 端口连香港也连不上:多半只对主机放行(FAQ 就这么建议),不是这台出了问题;
+		// 这台走 IPv4 的线路又没有 TCP 端口可测,只能说测不了,不报红色的"境外也不通"
+		res.Verdict, res.Error = VerdictNoPort, "面板 API 端口连香港测点也连不上(多半只对主机放行),这台走 IPv4 的线路又没有 TCP 端口可测"
 	}
 	res.Groups = orderedGroups(gs)
 	res.ICMP = icmp
@@ -706,6 +791,31 @@ func (s *Service) Bad() []Result {
 	for _, r := range s.good { // 没测成的那次不能把"被墙"的提示抹掉
 		if IsBlocked(r.Verdict) || r.Verdict == VerdictPartial {
 			out = append(out, Result{NodeId: r.NodeId, Name: r.Name, Target: r.Target, Verdict: r.Verdict, At: r.At, Groups: r.Groups})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].NodeId < out[j].NodeId })
+	return out
+}
+
+// V6BadItem 概况"需要处理"里的一台 IPv6 入站不通的服务器。
+type V6BadItem struct {
+	NodeId uint   `json:"nodeId"`
+	Name   string `json:"name"`
+	Target string `json:"target"`
+	Port   int    `json:"port"`
+	At     int64  `json:"at"`
+}
+
+// V6Bad IPv6 入站不通的服务器(概况页"需要处理"用,只读内存)。和服务器页显示的是同一份(最近一次;没测成、没有测点时
+// 用上一次测成的),只算 down,unsure / udp / none / error 不算;这台不再有走 IPv6 的线路时就不算了。
+// 不并进 Bad():那边的结论、提示条的忽略签名都按大陆那项来。没有时是空数组,主机上这个键始终存在。
+func (s *Service) V6Bad() []V6BadItem {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []V6BadItem{}
+	for id, last := range s.latest {
+		if v := s.viewV6Locked(id, last.V6); v != nil && v.State == V6Down {
+			out = append(out, V6BadItem{NodeId: id, Name: last.Name, Target: v.Target, Port: v.Port, At: v.At})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].NodeId < out[j].NodeId })
