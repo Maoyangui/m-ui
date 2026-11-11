@@ -591,7 +591,7 @@ async function editLine(id, cloneFrom, preset) {
     renderRows();
     toast(id ? t('line.updated') : t('line.created'), 'ok');
     scopeWidenedNotice(saved && saved.scopeWidened);
-  }, { size: 'xl' });
+  }, { size: 'xl', slowHint: t('common.savingCheck') });
   renderDynamic(l);
   rrBind(rrInit);
   document.getElementById('f-protocol').addEventListener('change', () => { renderDynamic({ options: {}, tls: {}, transport: {} }); syncV6Tips(); });

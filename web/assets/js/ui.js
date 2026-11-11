@@ -114,12 +114,25 @@ export function openModal(title, html, onSave, opts = {}) {
   m.querySelector('.modal-box').className = 'modal-box' + (opts.wide ? ' wide' : '') + (opts.size === 'xl' ? ' xl' : '');
   save.onclick = async () => {
     save.disabled = true;
+    // 保存慢了要让人知道还在做、没卡死:1.5 秒后按钮改成「保存中…」,4 秒后在错误栏位置写一句在等什么
+    // (opts.slowHint:线路、上游要先用 sing-box 校验整份配置,别的保存或数据面重载正在校验时要排队)
+    const label = save.textContent, err = document.getElementById('modal-err');
+    let hint = '';
+    const t1 = setTimeout(() => { if (my === modalSeq) save.textContent = t('common.saving'); }, 1500);
+    const t2 = setTimeout(() => { if (my === modalSeq && !err.textContent) err.textContent = hint = opts.slowHint || t('common.savingSlow'); }, 4000);
     try { await onSave(); if (my === modalSeq) closeModal(); }
     catch (e) {
-      if (my === modalSeq) document.getElementById('modal-err').textContent = e.message;
+      if (my === modalSeq) { err.textContent = e.message; hint = ''; }
       else toast(e.message, 'err'); // 弹窗已经换成别的了,错误不能写进别人的弹窗
     }
-    finally { if (my === modalSeq) save.disabled = false; }
+    finally {
+      clearTimeout(t1); clearTimeout(t2);
+      if (my === modalSeq) {
+        save.disabled = false;
+        if (save.textContent === t('common.saving')) save.textContent = label;
+        if (hint && err.textContent === hint) err.textContent = '';
+      }
+    }
   };
   const first = m.querySelector('input,select,textarea');
   if (first) setTimeout(() => first.focus(), 50);

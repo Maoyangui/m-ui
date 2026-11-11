@@ -18,7 +18,6 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/ext"
 	"github.com/Maoyangui/m-ui/reach"
-	"github.com/Maoyangui/m-ui/render"
 )
 
 // ---- 外部订阅展开:节点明细、逐台服务器测速、大陆连通、添加为上游、隐藏与改名 ----
@@ -769,10 +768,6 @@ func (s *Server) addUpstreamsFromExt(r *http.Request, e model.ExtNode, it ext.It
 	}
 	out := make([]extAddResult, 0, len(items))
 	created := 0
-	var nodeCert render.NodeCert
-	if s.run != nil {
-		nodeCert = s.run.NodeCert()
-	}
 	for _, x := range items {
 		res := extAddResult{Key: x.Key, Index: x.Index, Name: strings.TrimSpace(x.Name)}
 		fail := func(msg string) {
@@ -807,15 +802,15 @@ func (s *Server) addUpstreamsFromExt(r *http.Request, e model.ExtNode, it ext.It
 			fail(err.Error())
 			continue
 		}
-		err = s.db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Create(&up).Error; err != nil {
-				return err
-			}
-			if s.run == nil {
-				return nil
-			}
-			return validateFullConfig(tx, nodeCert)
-		})
+		create := func(tx *gorm.DB) error {
+			up.Id = 0 // 可能要写第二遍:每遍都从同样的输入写起
+			return tx.Create(&up).Error
+		}
+		if s.run == nil {
+			err = s.db.Transaction(create)
+		} else {
+			err = s.commitValidated(create) // 干跑通过才提交,干跑时不占写锁(见 commitValidated)
+		}
 		if err != nil {
 			fail(err.Error())
 			continue

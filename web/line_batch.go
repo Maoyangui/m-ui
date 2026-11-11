@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	"github.com/Maoyangui/m-ui/database/model"
-	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/sub"
 
 	"gorm.io/gorm"
@@ -116,12 +115,8 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var nodeCert render.NodeCert
-	if s.run != nil { // 事务里不能再走连接池,先取好;测试里没有数据面
-		nodeCert = s.run.NodeCert()
-	}
 	var widened *scopeWidened
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	err := s.commitValidated(func(tx *gorm.DB) error { // 干跑通过才提交,干跑时不占写锁(见 commitValidated)
 		widened = &scopeWidened{}
 		for _, l := range lines {
 			if err := tx.Model(&model.Line{}).Where("id = ?", l.Id).Select(cols).Updates(l).Error; err != nil {
@@ -135,7 +130,7 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 				widened.merge(w)
 			}
 		}
-		return validateFullConfig(tx, nodeCert)
+		return nil
 	})
 	if err != nil {
 		badRequest(w, err)

@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
-	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/ha"
@@ -281,9 +280,10 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 			s.db.Model(&model.Line{}).Select("COALESCE(MAX(sort),0)").Scan(&maxSort)
 			line.Sort = maxSort + 1
 		}
-		// 在事务里写入并对整套配置做 sing-box 干跑:通不过就回滚,绝不让一条坏线路留在库里拖垮后续所有重载
-		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
-		err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 整套配置通过 sing-box 干跑才落库:通不过就什么都不留,绝不让一条坏线路留在库里拖垮后续所有重载。
+		// 干跑在事务外做(见 commitValidated),排队等干跑时不占数据库写锁
+		err := s.commitValidated(func(tx *gorm.DB) error {
+			line.Id, line.Enabled = 0, enabled // 可能要写第二遍:每遍都从同样的输入写起
 			if err := tx.Create(&line).Error; err != nil {
 				return err
 			}
@@ -295,11 +295,9 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 				line.Enabled = false
 			}
 			if p.AssignAll {
-				if err := assignLineToMainUsers(tx, line.Id); err != nil {
-					return err
-				}
+				return assignLineToMainUsers(tx, line.Id)
 			}
-			return validateFullConfig(tx, nodeCert)
+			return nil
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -363,18 +361,15 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
 		var widened *scopeWidened
-		err := s.db.Transaction(func(tx *gorm.DB) error {
+		err := s.commitValidated(func(tx *gorm.DB) error { // 干跑通过才提交,干跑时不占写锁(见 commitValidated)
 			if err := tx.Model(&model.Line{}).Where("id = ?", id).Select(cols).Updates(line).Error; err != nil {
 				return err
 			}
 			// 部署服务器收窄了:指向已撤服务器的分配 / 授权 / 套餐范围一并整理(只剩已撤的改回全部并点名)
 			var err error
-			if widened, err = fixLineScopesTx(tx, id, deployNodeIDs(line.NodeIds)); err != nil {
-				return err
-			}
-			return validateFullConfig(tx, nodeCert)
+			widened, err = fixLineScopesTx(tx, id, deployNodeIDs(line.NodeIds))
+			return err
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -439,15 +434,13 @@ func assignLineToMainUsers(tx *gorm.DB, lineID uint) error {
 // validateFullConfig 用事务内的当前数据渲染整套 sing-box 配置并干跑初始化。
 // 单条入站/出站的 parse 校验抓不住"初始化才报错"的问题(如 ss2022 缺 PSK),
 // 而这类错误会让之后每一次重载都失败,所以保存前必须整体干跑一遍。
+// 保存走 commitValidated(干跑在事务外);这里给"就地校验当前库"的场合用。
 func validateFullConfig(tx *gorm.DB, cert render.NodeCert) error {
-	raw, err := render.BuildConfig(tx, cert)
+	raw, err := renderFullConfig(tx, cert)
 	if err != nil {
-		return fmt.Errorf("渲染配置失败(已取消保存): %w", err)
+		return err
 	}
-	if err := core.ValidateConfig(raw); err != nil {
-		return fmt.Errorf("配置未通过 sing-box 校验(已取消保存): %w", err)
-	}
-	return nil
+	return dryRunFullConfig(raw)
 }
 
 // validateLine 校验线路必填项与唯一性(端口/名称)。
@@ -710,9 +703,8 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		up.Id = 0
-		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
-		err := s.db.Transaction(func(tx *gorm.DB) error {
+		err := s.commitValidated(func(tx *gorm.DB) error { // 干跑通过才提交,干跑时不占写锁(见 commitValidated)
+			up.Id = 0 // 可能要写第二遍:每遍都从同样的输入写起
 			if err := tx.Create(&up).Error; err != nil {
 				return err
 			}
@@ -720,11 +712,9 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 				if err := sub.FillRelay(tx, &up); err != nil {
 					return err
 				}
-				if err := tx.Model(&model.Upstream{}).Where("id = ?", up.Id).Updates(map[string]interface{}{"type": up.Type, "options": up.Options}).Error; err != nil {
-					return err
-				}
+				return tx.Model(&model.Upstream{}).Where("id = ?", up.Id).Updates(map[string]interface{}{"type": up.Type, "options": up.Options}).Error
 			}
-			return validateFullConfig(tx, nodeCert)
+			return nil
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -791,8 +781,7 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 		}
 		var oldName string
 		s.db.Model(&model.Upstream{}).Select("name").Where("id = ?", id).Scan(&oldName)
-		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
-		err := s.db.Transaction(func(tx *gorm.DB) error {
+		err := s.commitValidated(func(tx *gorm.DB) error { // 干跑通过才提交,干跑时不占写锁(见 commitValidated)
 			if err := tx.Model(&model.Upstream{}).Where("id = ?", id).
 				Select("name", "type", "options", "from_line", "from_node", "relay_creds").Updates(up).Error; err != nil {
 				return err
@@ -803,11 +792,9 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if render.IsGroup(up) {
-				if err := groupLoopCheck(tx); err != nil {
-					return err
-				}
+				return groupLoopCheck(tx)
 			}
-			return validateFullConfig(tx, nodeCert)
+			return nil
 		})
 		if err != nil {
 			badRequest(w, err)

@@ -341,7 +341,7 @@ export function editRelayUpstream(id, preset) {
     await load('upstreams', 'lines', 'status');
     renderRows();
     toast(id ? t('up.updated') : t('up.created'), 'ok');
-  });
+  }, { slowHint: t('common.savingCheck') });
   const lineSel = document.getElementById('f-rline'), nodeSel = document.getElementById('f-rnode'), name = document.getElementById('f-name');
   const suggest = () => { // 名字没动过就跟着选择走
     if (id && u.name) return;
@@ -371,7 +371,7 @@ function editGroup(id) {
     await load('upstreams', 'lines', 'status');
     renderRows();
     toast(id ? t('up.updated') : t('up.created'), 'ok');
-  });
+  }, { slowHint: t('common.savingCheck') });
 }
 
 function editUpstream(id) {
@@ -398,7 +398,7 @@ function editUpstream(id) {
     await load('upstreams', 'lines', 'status');
     renderRows();
     toast(id ? t('up.updated') : t('up.created'), 'ok');
-  }, { wide: true });
+  }, { wide: true, slowHint: t('common.savingCheck') });
   renderFields(u.type, o);
   document.getElementById('f-type').addEventListener('change', e => renderFields(e.target.value, { server: fv('f-server'), server_port: Number(fv('f-port')) || undefined }));
 }
