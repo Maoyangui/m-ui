@@ -17,6 +17,8 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/sub"
+
+	"gorm.io/gorm"
 )
 
 // 证书库:一台服务器可以有多张证书。每张证书一行(model.Cert),文件在数据目录 cert/ 下,或指向服务器上已有的文件。
@@ -299,9 +301,11 @@ func (r *Runner) linesByCert() map[string][]string {
 }
 
 // namedCerts 给渲染用的证书库:名字 → 文件路径。文件不在了的不算(线路退回默认证书,不让整份配置起不来)。
-func (r *Runner) namedCerts() map[string]render.NodeCert {
+func (r *Runner) namedCerts() map[string]render.NodeCert { return namedCertsOf(r.db) }
+
+func namedCertsOf(db *gorm.DB) map[string]render.NodeCert {
 	var rows []model.Cert
-	if r.db.Find(&rows).Error != nil {
+	if db.Find(&rows).Error != nil {
 		return nil
 	}
 	out := make(map[string]render.NodeCert, len(rows))

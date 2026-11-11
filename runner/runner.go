@@ -476,18 +476,26 @@ func (r *Runner) setting(key string) string {
 }
 
 // nodeCert 读取本机证书材料(各机各签,路径固定)。
-func (r *Runner) nodeCert() render.NodeCert {
-	// 数据面证书优先用 certFile/keyFile(证书页签发的固定路径),
-	// 未设置时回落到面板证书,兼容从旧库导入的配置。
-	certPath, keyPath := r.setting("certFile"), r.setting("keyFile")
+func (r *Runner) nodeCert() render.NodeCert { return NodeCertOf(r.db) }
+
+// NodeCertOf 按库里的设置取本机数据面证书材料:运行时和 m-ui render 共用这一份,校验的就是实际要跑的配置。
+// 数据面证书优先用 certFile/keyFile(证书页签发的固定路径),未设置时回落到面板证书,兼容从旧库导入的配置;
+// 线路单独选的证书库证书按名字给(见 namedCertsOf)。
+func NodeCertOf(db *gorm.DB) render.NodeCert {
+	get := func(key string) string {
+		var v string
+		db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+		return v
+	}
+	certPath, keyPath := get("certFile"), get("keyFile")
 	if certPath == "" || keyPath == "" {
-		certPath, keyPath = r.setting("webCertFile"), r.setting("webKeyFile")
+		certPath, keyPath = get("webCertFile"), get("webKeyFile")
 	}
 	return render.NodeCert{
-		ServerName: r.setting("webDomain"),
+		ServerName: get("webDomain"),
 		CertPath:   certPath,
 		KeyPath:    keyPath,
-		Named:      r.namedCerts(),
+		Named:      namedCertsOf(db),
 	}
 }
 
