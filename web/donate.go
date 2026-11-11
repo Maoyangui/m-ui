@@ -50,6 +50,7 @@ const (
 	donorsBudget    = 12 * time.Second // 一轮最多取这么久
 	donorsRetry     = 5 * time.Minute  // 都取不到:过这么久再试,别每次打开都等
 	devicesFresh    = int64(48 * 3600) // 面板数这么久没更新(deploy/donors 停了或读不到下载计数)就不显示
+	boardClockSkew  = int64(10 * 60)   // 名单里的时间最多比本机晚这么多还算可信(两边时钟的误差);再晚的是写错了,不拿来比新旧
 	donorsMaxBytes  = 512 << 10
 	donorsMaxRows   = 500
 	donorNameMax    = 24
@@ -70,11 +71,24 @@ type donorBoard struct {
 	Donors    []donorRow `json:"donors"`
 }
 
-// olderThan 名单 b 比手上的 cur 旧(看两个时间里较大的那个)。jsDelivr 上的分支文件最多旧 12 小时,
-// raw 偶尔没取到时别拿它把手上新的换掉。cur 的时间比现在晚一天以上(写错了)就不比,免得一份写错的名单把以后的都挡在外面。
+// stamp 名单是什么时候的:UpdatedAt 和 DevicesAt 里较大的那个。比本机现在晚出时钟误差(boardClockSkew)的时间
+// 是写错了,不可信,不算;两个都不可信(或都没有)就是 0,不知道。
+func (b donorBoard) stamp(now int64) int64 {
+	s := int64(0)
+	for _, t := range []int64{b.UpdatedAt, b.DevicesAt} {
+		if t <= now+boardClockSkew {
+			s = max(s, t)
+		}
+	}
+	return s
+}
+
+// olderThan 名单 b 比手上的 cur 旧。jsDelivr 上的分支文件最多旧 12 小时,raw 偶尔没取到时别拿它把手上新的换掉。
+// 只比可信的时间:写在未来的不参与比较,一份时间写成几小时后的名单不会让之后这几个小时的正常名单都被拒收;
+// 哪一份没有可信的时间就不比(照样换上,也挡不住之后的)。
 func (b donorBoard) olderThan(cur donorBoard, now int64) bool {
-	stamp := func(x donorBoard) int64 { return max(x.UpdatedAt, x.DevicesAt) }
-	return stamp(b) < stamp(cur) && stamp(cur) <= now+86400
+	bs, cs := b.stamp(now), cur.stamp(now)
+	return bs > 0 && cs > 0 && bs < cs
 }
 
 // donorState 这台面板手上的一份名单。

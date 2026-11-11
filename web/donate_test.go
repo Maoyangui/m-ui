@@ -463,6 +463,51 @@ func TestDonorBoardNeverGoesBack(t *testing.T) {
 	}
 }
 
+// 时间写在未来(超出时钟误差)的名单不可信,那个时间不参与新旧比较:以前"不倒退"只排除比现在晚一天以上的,
+// 一份时间写成几小时后的名单会让所有面板在这几个小时里拒收正常的更新。时钟误差以内的照常比较,旧的照样挡住。
+func TestDonorBoardFutureStampNotTrusted(t *testing.T) {
+	now := time.Now().Unix()
+	var body atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, body.Load().(string))
+	}))
+	defer srv.Close()
+	old := donorsURLs
+	donorsURLs = []string{srv.URL}
+	defer func() { donorsURLs = old }()
+	s, _ := newTestServerForSupport(t, "")
+	round := func(b string) string {
+		body.Store(b)
+		s.donors.mu.Lock()
+		s.donors.next = time.Time{} // 到了该再取的时候
+		s.donors.mu.Unlock()
+		getDonors(t, s)
+		waitDonorsIdle(t, s)
+		got, _ := getDonors(t, s)
+		names := []string{}
+		for _, d := range got.Donors {
+			names = append(names, d.Name)
+		}
+		return strings.Join(names, ",")
+	}
+	for i, c := range []struct {
+		board string
+		want  string
+	}{
+		{boardJSON(now-600, 52, now-600, "Larry Wang", "Bob"), "Larry Wang,Bob"},
+		{boardJSON(now+3*3600, 50, now+3*3600, "Future"), "Future"},                     // 时间不可信:照样换上,但不靠它算"新"
+		{boardJSON(now, 53, now, "Larry Wang", "Bob", "Carol"), "Larry Wang,Bob,Carol"}, // 以前这里要被拒收 3 个小时
+		{boardJSON(now+3*3600, 50, now-60, "UpdatedAtWrong"), "Larry Wang,Bob,Carol"},   // updatedAt 写在未来不算,按 devicesAt 比:旧一分钟
+		{boardJSON(now-12*3600, 50, now-12*3600, "Larry Wang"), "Larry Wang,Bob,Carol"},
+		{boardJSON(now+120, 54, now+120, "Larry Wang", "Bob", "Carol", "Dan"), "Larry Wang,Bob,Carol,Dan"}, // 晚 2 分钟:时钟误差以内
+		{boardJSON(now+60, 54, now+60, "Larry Wang"), "Larry Wang,Bob,Carol,Dan"},                          // 比手上的旧:照样挡住
+	} {
+		if got := round(c.board); got != c.want {
+			t.Fatalf("第 %d 轮: %s,应为 %s", i+1, got, c.want)
+		}
+	}
+}
+
 // 面板数的统计时间没有(老版本写的名单)或超过 48 小时:不显示(返回 0),名单照常。
 func TestDonorDevicesHiddenWhenStale(t *testing.T) {
 	var body atomic.Value
