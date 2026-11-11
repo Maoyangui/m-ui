@@ -416,7 +416,13 @@ Full migration (lines, upstreams, users and settings):
 bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --import /path/to/old-panel.db
 ```
 
-Inbound ports, user credentials, the panel path and the subscription path are preserved; the subscription port becomes 2056 and a separate subscription domain is not carried over. If the old panel differed, change the port back with menu option 6 and add the domain with `m-ui set -db /etc/m-ui/m-ui.db subDomain=DOMAIN`, and clients need no changes; the import report lists what was checked.
+Inbound ports, user credentials, the panel path and the subscription path are preserved; match the items below yourself so that clients need no changes (the import report lists what was checked):
+
+- Certificates: the panel and subscriptions both keep using the old panel's panel-certificate paths, but the files do not come with the database. If the old panel used HTTPS, copy the certificate and key to the same paths on the new server before installing; nothing renews the copied files there, so once the domain points at the new server, issue a new certificate on the Certificate page and switch to it.
+- If the old panel had a separate certificate for subscriptions (usual when the subscription domain differs from the panel's), subscriptions now use the panel certificate and apps report a certificate mismatch when updating: copy that certificate over too, then after installing add it on the Certificate page as an "Existing certificate" with only "Use for subscription HTTPS" ticked under "Apply to". If the old panel served subscriptions over http while the panel used https, subscriptions are now https as well: in "In use", change Subscription to "No HTTPS".
+- The subscription port becomes 2056: if it was different, change it back with menu option 6 after installing.
+- A separate subscription domain is not carried over: add it with `m-ui set -db /etc/m-ui/m-ui.db subDomain=DOMAIN`.
+- If subscription links use a domain, point it at the new server; if they use the old server's IP, the links change after the move and users need the new ones.
 
 Users only (lines already rebuilt on m-ui, you just want the old users' names, usage, quota and expiry): Users page → **Import from old panel**, or
 

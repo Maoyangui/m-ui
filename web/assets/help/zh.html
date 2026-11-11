@@ -948,7 +948,14 @@
   <section class="sec" id="bk-import">
     <h3>从旧面板迁移</h3>
     <ul>
-      <li>整机迁移(线路、上游、用户、设置都带过来):在新服务器上安装时加参数,<code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --import /path/to/旧面板.db</code>。入站端口、用户凭据、面板路径和订阅路径都保留;但订阅端口会改成 2056,单独的订阅域名也不会带过来:旧面板的订阅不在 2056 端口的,装好后用 <code>m-ui</code> 菜单 6 把订阅端口改回原来的;有单独订阅域名的,用 <code>m-ui set -db /etc/m-ui/m-ui.db subDomain=域名</code> 补上。这两项都对上了,客户端才不用改。</li>
+      <li>整机迁移(线路、上游、用户、设置都带过来):在新服务器上安装时加参数,<code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --import /path/to/旧面板.db</code>。入站端口、用户凭据、面板路径和订阅路径都保留;下面几项要自己对上,客户端才不用改:
+        <ul>
+          <li>证书:面板和订阅都沿用旧面板的面板证书路径,证书文件不会跟着数据库过来。旧面板开了 HTTPS 的,先把证书和私钥拷到新机同样的路径再装;拷来的文件在新机上没人续期,域名解析到新机后到 <b data-k="nav.cert">证书</b> 页重新签发一张换上。</li>
+          <li>旧面板的订阅单独配了证书的(订阅域名和面板域名不同时通常如此),导入后订阅用的是面板那张,客户端更新时会报证书不匹配:把订阅那张也拷过来,装好后到 <b data-k="nav.cert">证书</b> 页 <b data-k="cert.add">添加证书</b> → <b data-k="cert.srcExternal">已有证书</b>,在 <b data-k="cert.applyTo">添加后用于</b> 里只勾 <b data-k="cert.applySub">用于订阅 HTTPS</b>。旧面板的订阅是 http、面板却是 https 的,导入后订阅也成了 https:在 <b data-k="cert.inUse">正在使用</b> 里点 <b data-k="cert.useSub">订阅</b> 旁边的 <b data-k="cert.change">更换</b>,选 <b data-k="cert.noHttps">不用 HTTPS</b>。</li>
+          <li>订阅端口会改成 2056:旧面板的订阅不在 2056 端口的,装好后用 <code>m-ui</code> 菜单 6 改回原来的。</li>
+          <li>单独的订阅域名不会带过来:用 <code>m-ui set -db /etc/m-ui/m-ui.db subDomain=域名</code> 补上。</li>
+          <li>订阅地址用的是域名的,把它解析到新机;用的是旧机 IP 的,换机后地址会变,要把新地址发给用户。</li>
+        </ul></li>
       <li>只搬用户:<b data-k="nav.users">用户</b> 页 <b data-k="user.import">从旧面板导入</b>(见 <a href="#users-import">从旧面板导入用户</a>)。</li>
     </ul>
   </section>
