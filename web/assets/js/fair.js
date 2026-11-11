@@ -21,8 +21,8 @@ export function fairPick(list, n) {
 // 概览"最近入站连接"两张表各显示的行数:通过认证的(含被设备数拒的)、"到了但没过握手 / 认证"的。
 export const CONN_ROWS = 30, FAIL_ROWS = 15;
 
-// shownConns 概览"最近入站连接"两张表各显示哪几行:接口给的一份(带 failed 的是"到了但没过"的)分成两张表,各自按 fairPick 取。
-// 页面只管渲染,截断都在这里(改版的概览要多显示几行、"显示全部"时把行数传进来,别在页面里按时间 slice)。
+// shownConns 概览"最近入站连接"各筛选显示哪几行:接口给的一份分成通过认证的(rows,「连接」/「被拒」筛选传进来的已是对应子集)
+// 与带 failed 的"到了但没过"(fails,「握手失败」筛选),各自按 fairPick 取。页面只管渲染,截断都在这里(行数由页面传入,别在页面里按时间 slice)。
 export function shownConns(all, rows = CONN_ROWS, fails = FAIL_ROWS) {
   const list = Array.isArray(all) ? all : []; // 官网演示的假接口没有这项,回的是 {}
   return { rows: fairPick(list.filter(c => !c.failed), rows), fails: fairPick(list.filter(c => c.failed), fails) };

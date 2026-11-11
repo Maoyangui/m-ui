@@ -25,8 +25,7 @@
     <tr><td>A domain pointing at the server</td><td><b>Certificate → Issue</b>: Let's Encrypt via HTTP-01 (port 80 reachable) or Cloudflare DNS-01 (API token, no port 80). Renews itself.</td><td>Real certificate, no client warnings.</td></tr>
     <tr><td>Only an IP</td><td><b>Certificate → Self-sign</b>, one click.</td><td>Works everywhere; subscriptions automatically tell clients to allow the insecure certificate. Add a domain later and switch.</td></tr>
   </table>
-  <!-- To fill in once the overview redesign is merged: the new overview layout and its cards. Do not describe it before then. -->
-  <p>The Quick Start card on the dashboard treats both as "certificate ready". A domain is a recommendation, not a prerequisite.</p>
+  <p>The Quick start card at the top of the dashboard treats both as "certificate ready". A domain is a recommendation, not a prerequisite. Once the required steps are done, the card shrinks to a single "Basic setup complete" line with the optional extras beside it.</p>
 
   <h2 id="line">4. Create a line</h2>
   <p>A <b>line</b> is inbound protocol + port → where traffic exits (direct, or an upstream you add later). On the Lines page use <b>Quick add</b> — Hysteria2, AnyTLS, VLESS + Reality, Trojan, Shadowsocks 2022 or VMess + WS come with sane defaults and a free five-digit port already filled in. Ports are checked against other lines, the panel and anything else listening on the server before the save is accepted.</p>
