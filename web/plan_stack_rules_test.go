@@ -130,7 +130,9 @@ func TestPlanOpStackExecutionMatchesPreview(t *testing.T) {
 			t.Fatalf("%s: %d %s", c.name, w.Code, w.Body.String())
 		}
 		u := e.user(name)
-		if u.Volume != pre.To.Volume || u.Expiry != pre.To.Expiry || u.ActivateDays != pre.To.ActivateDays || u.Up+u.Down != pre.To.Used {
+		// 从“现在”起算的到期(旧订阅已过期)由预览、执行各自取当前时间:两次请求之间跨过整秒(-race 下常见)会差 1 秒,
+		// 这不是不一致;差得更多才算
+		if d := u.Expiry - pre.To.Expiry; u.Volume != pre.To.Volume || d < -2 || d > 2 || (pre.To.Expiry == 0) != (u.Expiry == 0) || u.ActivateDays != pre.To.ActivateDays || u.Up+u.Down != pre.To.Used {
 			t.Fatalf("%s:落库 %+v 与预览 %+v 不一致", c.name, u, pre.To)
 		}
 		if u.Volume == 0 && c.user.Expiry > now {
