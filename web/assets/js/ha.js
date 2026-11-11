@@ -485,7 +485,7 @@ registerActions({
 // ---- 页面顶部的提示 ----
 
 const MAX_BARS = 3; // 一次性提示最多显示几条,其余折叠
-const WARN_KINDS = ['switchFailed', 'demoted', 'fenced', 'versionKeep'];
+const WARN_KINDS = ['switchFailed', 'demoted', 'fenced', 'versionKeep', 'reclaimed', 'promoteExpired', 'formerPlain'];
 let noticesOpen = false;
 let lastStatus = null;
 
@@ -607,7 +607,13 @@ export function noticeHTML(n) {
     case 'joined': return `<b>${esc(t('ha.n.joined'))}</b>`;
     case 'switched': return `<b>${esc(t('ha.n.switched', { name: n.name || '' }))}</b> ${esc(t('ha.sm.newPanel'))} ${link(n.url || '')}${reseller}${dns ? ' ' + dns : ''}${warn}`;
     case 'switchFailed': return `<b>${esc(t(n.reason === 'fenced' ? 'ha.n.fenced' : 'ha.n.switchFailed', { name: n.name || '' }))}</b>${warn}`;
-    case 'fenced': return `<b>${esc(t('ha.n.fenced', { name: n.name || '' }))}</b>${warn}`;
+    case 'fenced': // 本机启动 / 运行中以更高纪元继续当主机:库被回退过(rolledBack)或换机还原(restoredElsewhere)
+      if (n.reason === 'rolledBack') return `<b>${esc(t('ha.n.rolledBack'))}</b>${warn}`;
+      if (n.reason === 'restoredElsewhere') return `<b>${esc(t('ha.n.restoredHere', { n: n.n || '' }))}</b>${warn}`;
+      return `<b>${esc(t('ha.n.fenced', { name: n.name || '' }))}</b>${warn}`;
+    case 'reclaimed': return `<b>${esc(t('ha.n.reclaimed', { n: n.n || '' }))}</b>${warn}`;
+    case 'promoteExpired': return `<b>${esc(t('ha.n.promoteExpired'))}</b>${warn}`;
+    case 'formerPlain': return `<b>${esc(t('ha.n.formerPlain', { name: n.name || '' }))}</b>${warn}`;
     case 'dnsReverted': return `<b>${esc(t('ha.n.dnsReverted'))}</b> ${esc(changesText(n.changes))}${warn}`;
     case 'standbyNew': return `<b>${esc(t('ha.n.standbyNew', { name: n.name || '' }))}</b>${warn}`;
     case 'versionKeep': return `<b>${esc(t('ha.n.versionKeep', { name: n.name || '' }))}</b>${warn}`;
