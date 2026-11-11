@@ -449,6 +449,7 @@
     <div class="pit"><b>常见坑</b><ul>
       <li>WARP 的本地端口(<b data-k="ops.warpPort">SOCKS5 端口</b>)默认 40000,被占用会启用失败;改了端口要重新启用。</li>
       <li>一键安装只支持 Ubuntu / Debian;其它系统要自己装 cloudflare-warp(代理模式),让它的 SOCKS5 监听同一个端口。运维任务只在 Linux 上、m-ui 以 root 运行时能用。</li>
+      <li>安装时本机 DNS 解析不了软件源(有的云厂商自带的 DNS 偶尔会这样),任务会临时改用公共 DNS(1.1.1.1 / 8.8.8.8;不是 systemd-resolved 的系统改为临时写 /etc/hosts),装完自动恢复,输出里会写明;还是解析不了就停下并说明是哪个域名。apt 被系统自动更新占着时会等最多 5 分钟,并写明是哪个进程。</li>
       <li>有多台服务器时,warp 上游指向的是每台服务器自己的 <code>127.0.0.1:端口</code>:用 warp 的线路部署在哪几台,就要在哪几台的 <b data-k="nav.ops">运维</b> 页都安装并启用 WARP(端口和主机一样);做不到就把这条线路只部署到装了 WARP 的服务器。</li>
     </ul></div>
   </section>
@@ -1255,7 +1256,7 @@
         <tr><td>Globalping、Cloudflare API</td><td>主机容灾:判断主机是否失联时让境外测点连主机;主机变了以后自动改 DNS</td><td>关掉 <b data-k="ha.set.witness">境外测点见证</b>;不填 Cloudflare 令牌就不改 DNS</td></tr>
         <tr><td>Google(<code>www.gstatic.com</code>)</td><td>上游巡检和测试:<b data-k="set.testUrl">上游测试地址</b> 默认就是它。本机有线路用了上游(WARP、落地机等)时,每 10 分钟经各条上游连一次;线路用了上游组的,内核还会每 30 秒经组里每条上游连一次;点上游的 <b data-k="common.test">测试</b>、外部节点测速时也连</td><td>把 <b data-k="set.testUrl">上游测试地址</b> 换成别的地址;<b data-k="set.checkMinutes">巡检间隔(分钟)</b> 填 0 只关掉定时巡检,上游组的测速照样跑</td></tr>
         <tr><td>你自己填的地址</td><td>Webhook、外部订阅、Telegram 代理</td><td>不填就不连</td></tr>
-        <tr><td>点了才连</td><td>更新、安装 WARP(Cloudflare 的软件源)和 <b data-k="ops.checkExit">检测出口</b>、按规则分流里的 <b data-k="line.rr.lookup">查域名</b>(GitHub 上的 v2fly 域名列表)、Reality 的 <b data-k="line.reality.check">检测</b> 和 <b data-k="line.reality.pick">帮我挑</b>(连候选网站)、外部节点测速、证书页的 <b data-k="cert.precheck">预检 DNS / 端口</b> 和换机向导的 <b data-k="mig.check">检查解析</b>(向 Cloudflare、Google、阿里的公共 DNS 查解析,并测一次本机公网 IP)</td><td>不点就不连</td></tr>
+        <tr><td>点了才连</td><td>更新、安装 WARP(Cloudflare 的软件源;本机 DNS 解析不了软件源时还会向 1.1.1.1、8.8.8.8 查解析)和 <b data-k="ops.checkExit">检测出口</b>、按规则分流里的 <b data-k="line.rr.lookup">查域名</b>(GitHub 上的 v2fly 域名列表)、Reality 的 <b data-k="line.reality.check">检测</b> 和 <b data-k="line.reality.pick">帮我挑</b>(连候选网站)、外部节点测速、证书页的 <b data-k="cert.precheck">预检 DNS / 端口</b> 和换机向导的 <b data-k="mig.check">检查解析</b>(向 Cloudflare、Google、阿里的公共 DNS 查解析,并测一次本机公网 IP)</td><td>不点就不连</td></tr>
       </tbody>
     </table></div>
   </section>

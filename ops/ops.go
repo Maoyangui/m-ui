@@ -384,7 +384,7 @@ func Script(name string, p Params) (string, error) {
 	s = strings.ReplaceAll(s, "{{JOURNAL_MB}}", strconv.Itoa(p.JournalMB))
 	s = strings.ReplaceAll(s, "{{JOURNAL_DAYS}}", strconv.Itoa(p.JournalDays))
 	s = strings.ReplaceAll(s, "{{SYSCTL}}", sysctl)
-	return "set -uo pipefail\nexport DEBIAN_FRONTEND=noninteractive\n" + s, nil
+	return "set -uo pipefail\nexport DEBIAN_FRONTEND=noninteractive\n" + scriptLib + s, nil
 }
 
 // Runner 串行执行任务并保留输出。
@@ -452,8 +452,7 @@ func (r *Runner) Start(name string, p Params, done func(ok bool, err error)) err
 	go func() {
 		defer cancel()
 		r.appendLog(fmt.Sprintf("[%s] 开始 %s", time.Now().Format("15:04:05"), name))
-		cmd := exec.CommandContext(ctx, "bash", "-c", script)
-		cmd.Env = append(os.Environ(), "LANG=C.UTF-8")
+		cmd := newTaskCmd(ctx, script)
 		pr, pw := io.Pipe()
 		cmd.Stdout, cmd.Stderr = pw, pw
 		go func() {
@@ -504,16 +503,24 @@ if command -v warp-cli >/dev/null 2>&1; then
   echo "warp-cli 已安装,跳过安装步骤"
 else
   echo "[1/4] 安装依赖"
-  apt-get update -y >/dev/null
-  apt-get install -y ca-certificates curl gnupg >/dev/null
+  mui_apt "更新软件源" "updating package lists" update -y
+  mui_apt "安装依赖 ca-certificates curl gnupg" "installing ca-certificates curl gnupg" install -y ca-certificates curl gnupg
   echo "[2/4] 添加 Cloudflare 软件源"
-  curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --batch --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+  mui_dns_check pkg.cloudflareclient.com || mui_die_dns "$MUI_DNS_BAD"
+  key="$(mktemp)"
+  if ! curl -fsSL --retry 2 --max-time 60 -o "$key" https://pkg.cloudflareclient.com/pubkey.gpg; then
+    rm -f "$key"; echo "错误:下载 Cloudflare 公钥失败,请检查这台机器能否访问 pkg.cloudflareclient.com(failed to download the Cloudflare key)"; exit 1
+  fi
+  if ! gpg --batch --yes --dearmor -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg "$key"; then
+    rm -f "$key"; echo "错误:导入 Cloudflare 公钥失败(failed to import the Cloudflare key)"; exit 1
+  fi
+  rm -f "$key"
   chmod 0644 /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ ${VERSION_CODENAME:-noble} main" > /etc/apt/sources.list.d/cloudflare-client.list
   chmod 0644 /etc/apt/sources.list.d/cloudflare-client.list
   echo "[3/4] 安装 cloudflare-warp"
-  apt-get update -y >/dev/null
-  apt-get install -y cloudflare-warp
+  mui_apt "更新软件源" "updating package lists" update -y
+  mui_apt "安装 cloudflare-warp" "installing cloudflare-warp" install -y cloudflare-warp
 fi
 echo "[4/4] 启动 warp-svc 并注册"
 systemctl enable --now warp-svc.service
@@ -526,7 +533,9 @@ for _ in $(seq 1 30); do
 done
 case "$registration_state" in
   existing) echo "WARP 已注册,保留现有注册";;
-  missing) warp-cli --accept-tos registration new && echo "注册完成";;
+  missing)
+    mui_dns_check api.cloudflareclient.com || echo "警告:解析不了 api.cloudflareclient.com,注册可能失败(warning: cannot resolve api.cloudflareclient.com)"
+    warp-cli --accept-tos registration new && echo "注册完成" || { echo "错误:WARP 注册失败(WARP registration failed)"; exit 1; };;
   *) echo "$out"; echo "错误:无法确认 WARP 注册状态"; exit 1;;
 esac
 echo "WARP 安装完成,下一步:启用 SOCKS5"
@@ -606,7 +615,7 @@ const scriptWarpUninstall = `
 systemctl disable --now warp-socks5.service 2>/dev/null || true
 command -v warp-cli >/dev/null 2>&1 && warp-cli --accept-tos disconnect || true
 systemctl disable --now warp-svc.service 2>/dev/null || true
-apt-get remove -y cloudflare-warp || true
+mui_apt_soft "移除 cloudflare-warp" "removing cloudflare-warp" remove -y cloudflare-warp || true
 rm -f /etc/systemd/system/warp-socks5.service /usr/local/sbin/warp-socks5-start /etc/apt/sources.list.d/cloudflare-client.list /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
 systemctl daemon-reload
 echo "WARP 已卸载"
@@ -670,6 +679,6 @@ echo "== NTP =="
 if command -v timedatectl >/dev/null 2>&1; then
   timedatectl set-ntp true && echo "NTP 同步: $(timedatectl show -p NTPSynchronized --value)  时区: $(timedatectl show -p Timezone --value)"
 else
-  apt-get install -y chrony >/dev/null && systemctl enable --now chrony && echo "已安装 chrony"
+  mui_apt "安装 chrony" "installing chrony" install -y chrony && systemctl enable --now chrony && echo "已安装 chrony"
 fi
 `
