@@ -104,3 +104,35 @@ test('确认框点取消:返回 false,弹窗关掉', async () => {
   assert.equal(await p, false);
   assert.equal(els.modal.hidden, true);
 });
+
+// 保存慢了:1.5 秒后按钮写「保存中…」,4 秒后错误栏写「还在保存」—— 只说还在保存,不猜在等什么
+// (慢的原因没法在前端分辨:服务端排队校验、保存后刷新列表的请求、浏览器连接排队都可能),
+// 调用方也不能塞进一句断言原因的话。保存完成后两处都复原;出错时显示错误本身。
+test('保存慢了只说「还在保存」,完成后复原', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let finish;
+  ui.openModal('编辑线路', '', () => new Promise(r => { finish = r; }), { slowHint: '在排队等 sing-box 校验' });
+  const p = save();
+  t.mock.timers.tick(1500);
+  assert.equal(els['modal-save'].textContent, 'common.saving');
+  assert.equal(els['modal-err'].textContent, '');
+  t.mock.timers.tick(2500);
+  assert.equal(els['modal-err'].textContent, 'common.savingSlow');
+  finish();
+  await p;
+  assert.equal(els.modal.hidden, true);
+  assert.equal(els['modal-save'].textContent, 'common.save');
+  assert.equal(els['modal-err'].textContent, '');
+
+  let fail;
+  ui.openModal('编辑上游', '', () => new Promise((_, j) => { fail = j; }));
+  const q = save();
+  t.mock.timers.tick(4000);
+  assert.equal(els['modal-err'].textContent, 'common.savingSlow');
+  fail(new Error('名字重复'));
+  await q;
+  assert.equal(els.modal.hidden, false);
+  assert.equal(els['modal-err'].textContent, '名字重复');
+  assert.equal(els['modal-save'].textContent, 'common.save');
+  assert.equal(els['modal-save'].disabled, false);
+});

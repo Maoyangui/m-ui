@@ -114,12 +114,12 @@ export function openModal(title, html, onSave, opts = {}) {
   m.querySelector('.modal-box').className = 'modal-box' + (opts.wide ? ' wide' : '') + (opts.size === 'xl' ? ' xl' : '');
   save.onclick = async () => {
     save.disabled = true;
-    // 保存慢了要让人知道还在做、没卡死:1.5 秒后按钮改成「保存中…」,4 秒后在错误栏位置写一句在等什么
-    // (opts.slowHint:线路、上游要先用 sing-box 校验整份配置,别的保存或数据面重载正在校验时要排队)
+    // 保存慢了要让人知道还在做、没卡死:1.5 秒后按钮改成「保存中…」,4 秒后在错误栏位置写「还在保存」。
+    // 只说还在保存,不猜在等什么:慢的原因不止一种(服务端排队校验、保存后刷新列表的请求、浏览器连接排队),说错了反而误导
     const label = save.textContent, err = document.getElementById('modal-err');
     let hint = '';
     const t1 = setTimeout(() => { if (my === modalSeq) save.textContent = t('common.saving'); }, 1500);
-    const t2 = setTimeout(() => { if (my === modalSeq && !err.textContent) err.textContent = hint = opts.slowHint || t('common.savingSlow'); }, 4000);
+    const t2 = setTimeout(() => { if (my === modalSeq && !err.textContent) err.textContent = hint = t('common.savingSlow'); }, 4000);
     try { await onSave(); if (my === modalSeq) closeModal(); }
     catch (e) {
       if (my === modalSeq) { err.textContent = e.message; hint = ''; }
