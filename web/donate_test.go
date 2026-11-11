@@ -508,6 +508,68 @@ func TestDonorBoardFutureStampNotTrusted(t *testing.T) {
 	}
 }
 
+// 返回给页面的服务器时间要在写响应之前取:TronGrid / ntfy 慢的时候,先取的 now 少算了这段耗时,页面按它算钟差,
+// 倒计时会前后跳。留名时间 at 仍是发出之前的(页面的截止时间不晚于对账那边按 ntfy 时间算的)。
+func TestSupportServerTimeTakenAfterUpstream(t *testing.T) {
+	const delay = 1200 * time.Millisecond
+	var tronFail atomic.Bool
+	slowTron := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(delay)
+		if tronFail.Load() {
+			http.Error(w, "busy", http.StatusBadGateway)
+			return
+		}
+		io.WriteString(w, `{"data":[]}`)
+	}))
+	defer slowTron.Close()
+	slowNtfy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(delay)
+		io.WriteString(w, `{}`)
+	}))
+	defer slowNtfy.Close()
+	oldT, oldP := tronURL, pledgeURL
+	tronURL, pledgeURL = slowTron.URL, slowNtfy.URL
+	defer func() { tronURL, pledgeURL = oldT, oldP }()
+
+	check := func(s *Server) map[string]interface{} {
+		start := time.Now()
+		w := httptest.NewRecorder()
+		s.handleSupportCheck(w, httptest.NewRequest("GET", "/x?amount=10.037&since="+itoa64(start.Unix()-60), nil))
+		var out map[string]interface{}
+		json.Unmarshal(w.Body.Bytes(), &out)
+		if n, _ := out["now"].(float64); w.Code != 200 || int64(n) < start.Add(delay).Unix() {
+			t.Fatalf("核对:now 应在查完 TronGrid 之后取: %d %v(开始于 %d)", w.Code, out, start.Unix())
+		}
+		return out
+	}
+	s, _ := newTestServerForSupport(t, "")
+	if out := check(s); out["known"] != true {
+		t.Fatalf("%v", out)
+	}
+	tronFail.Store(true)
+	s2, _ := newTestServerForSupport(t, "")
+	if out := check(s2); out["known"] != false {
+		t.Fatalf("TronGrid 失败时是不知道: %v", out)
+	}
+
+	start := time.Now()
+	r := httptest.NewRequest("POST", "http://panel:2053/app/support/pledge", strings.NewReader(`{"name":"Larry Wang","amount":10}`))
+	r.RemoteAddr = "203.0.113.77:1234"
+	w := httptest.NewRecorder()
+	s.handleSupportPledge(w, r)
+	var out map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &out)
+	at, _ := out["at"].(float64)
+	exp, _ := out["expiresAt"].(float64)
+	now, _ := out["now"].(float64)
+	if w.Code != 200 || int64(now) < start.Add(delay).Unix() {
+		t.Fatalf("留名:now 应在发完 ntfy 之后取: %d %v(开始于 %d)", w.Code, out, start.Unix())
+	}
+	if int64(at) < start.Unix() || int64(at) >= int64(now) || int64(exp)-int64(at) != pledgeWindow {
+		t.Fatalf("留名时间应是发出之前的,截止时间按它算: %v(开始于 %d)", out, start.Unix())
+	}
+}
+
 // 面板数的统计时间没有(老版本写的名单)或超过 48 小时:不显示(返回 0),名单照常。
 func TestDonorDevicesHiddenWhenStale(t *testing.T) {
 	var body atomic.Value

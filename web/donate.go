@@ -364,8 +364,8 @@ func (s *Server) handleSupportPledge(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "amount"})
 		return
 	}
-	now := time.Now().Unix()
-	if !s.allowPledge(peerIP(r), now) {
+	at := time.Now().Unix() // 留名时间:在发出之前取,页面的截止时间按它算,不会比对账那边按 ntfy 收到的时间算的晚
+	if !s.allowPledge(peerIP(r), at) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"code": "rate"})
 		return
 	}
@@ -393,8 +393,9 @@ func (s *Server) handleSupportPledge(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"code": "send"})
 		return
 	}
-	// now 是服务器时间:页面按它和浏览器时钟的差来倒计时,电脑时区或时钟不对也不会一留名就"超时"
-	writeJSON(w, http.StatusOK, map[string]interface{}{"amount": pay, "name": name, "at": now, "expiresAt": now + pledgeWindow, "address": brand.Tron, "now": now})
+	// now 是服务器时间:页面按它和浏览器时钟的差来倒计时,电脑时区或时钟不对也不会一留名就"超时"。
+	// 写响应前才取:发 ntfy 可能要好几秒,先取的话钟差会少算这段,倒计时会前后跳
+	writeJSON(w, http.StatusOK, map[string]interface{}{"amount": pay, "name": name, "at": at, "expiresAt": at + pledgeWindow, "address": brand.Tron, "now": time.Now().Unix()})
 }
 
 // usdtMicros "10.037" → 10037000(USDT 六位小数,按字符串算,不经浮点)。
@@ -486,6 +487,7 @@ func (s *Server) handleSupportCheck(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 	defer cancel()
 	txs, got := s.recentTransfers(ctx)
+	now = time.Now().Unix() // 给页面的服务器时间在写响应前取:查 TronGrid 可能要好几秒,先取的话钟差会少算这段,倒计时会前后跳
 	if !got {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"known": false, "arrived": false, "now": now})
 		return
