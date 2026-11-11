@@ -729,6 +729,8 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
 @container (min-width: 78.1rem) and (max-width: 104.35rem) { .dash-grid > .dash-log-card { grid-column: 1 / -1; } }
 @container (min-width: 104.4rem) and (max-width: 130.65rem) { .dash-grid > .dash-log-card { grid-column: span 3; } }
 .dash-grid .card-head h2 { min-width: 0; }
+/* 手机上标题按自己的宽度排,放不下时把右边的分段按钮 / 刷新换到下一行,不再把标题挤成一字一行 */
+@media (max-width: 700px) { .dash-grid .card-head h2 { flex: 1 1 auto; } }
 /* 统计条是网格里占整行的一项:2×3 / 3×2 / 一行 6 张,单数时最后一张占满一行 */
 .dash-grid > .stats { margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .dash-grid > .stats > .stat:last-child:nth-child(odd) { grid-column: 1 / -1; }
