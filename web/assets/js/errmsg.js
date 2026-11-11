@@ -457,6 +457,8 @@ const EN = /*BEGIN*/{
 "订阅地址必须是 http(s) URL": "Subscription URL must be an http(s) URL",
 "订阅里这台用的是 IPv6 地址,大陆连通检测暂只支持 IPv4": "Subscriptions give this server's IPv6 address; the mainland reachability check supports IPv4 only for now",
 "这台的线路在订阅里都走 IPv6,大陆连通检测暂只支持 IPv4": "All lines on this server use IPv6 in subscriptions; the mainland reachability check supports IPv4 only for now",
+"这台的线路在订阅里都不走 IPv4,订阅地址也是 IPv6,大陆连通检测暂只支持 IPv4": "No line on this server uses IPv4 in subscriptions and the subscription address is IPv6 too; the mainland reachability check supports IPv4 only for now",
+"这台只有 IPv6 地址,域名也解析不到 IPv4,大陆连通检测暂只支持 IPv4": "This server has only an IPv6 address and its domain does not resolve to IPv4 either; the mainland reachability check supports IPv4 only for now",
 "面板 API 端口连香港测点也连不上(多半只对主机放行),这台走 IPv4 的线路又没有 TCP 端口可测": "Even Hong Kong probes cannot reach the panel API port (it is probably open to the master only), and this server's IPv4 lines have no TCP port to test",
 "测试额度已用完": "The test quota is used up",
 "测试额度已用完,1 分钟内恢复": "The test quota is used up; it resets within a minute",

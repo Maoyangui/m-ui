@@ -242,6 +242,81 @@ func TestReachTargetsCustomAddrs(t *testing.T) {
 	}
 }
 
+// 主机的线路在订阅里都走 IPv6(审查:noPort 不能用到主机上):用户刷新订阅连的是主机的订阅地址(订阅域名 → 面板域名 → 公网 IP),
+// 照测订阅端口、注明是订阅端口(TCPv6Only),订阅地址的 IPv4 被墙照样能告警;副机同样的配置不测(面板 API 端口不是用户入口)。
+// 订阅地址本身是 IPv6 字面量、或这台根本没有 IPv4 时才记"无可测端口"。
+func TestReachTargetsLocalAllV6(t *testing.T) {
+	r, err := New(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(r.db)
+	db := r.db
+	db.Model(&model.Node{}).Where("is_local = ?", true).Update("name", "本机")
+	var local model.Node
+	db.Where("is_local = ?", true).First(&local)
+	r.setSetting("publicIp", "203.0.113.1")
+	r.setSetting("publicIp6", "2001:db8:1::1")
+	r.setSetting("subPort", "2096")
+	sub := model.Node{Name: "副机", Enabled: true, ApiUrl: "https://b.example.com:2053/app/", PublicIP: "203.0.113.2", PublicIP6: "2001:db8:2::1"}
+	db.Create(&sub)
+	ids, _ := json.Marshal([]uint{local.Id, sub.Id})
+	fam, _ := json.Marshal(map[string]string{jsonID(local.Id): "v6", jsonID(sub.Id): "v6"})
+	for _, l := range []model.Line{
+		{Name: "tj6", Protocol: "trojan", Port: 8443, Sort: 1, NodeIds: ids, NodeFamily: fam},
+		{Name: "hy6", Protocol: "hysteria2", Port: 8444, Sort: 2, NodeIds: ids, NodeFamily: fam},
+	} {
+		l.Enabled = true
+		db.Create(&l)
+	}
+	targets := func() map[string]reach.Target {
+		got := map[string]reach.Target{}
+		for _, g := range r.reachTargets(context.Background()) {
+			got[g.Name] = g
+		}
+		return got
+	}
+	wantSub := func(step string, got map[string]reach.Target, tcpV6Only bool) {
+		t.Helper()
+		g := got["本机"]
+		if g.NoPort != "" || g.Err != "" || g.Host != "203.0.113.1" || g.Port != 2096 || g.PortFrom != "sub" || g.TCPv6Only != tcpV6Only {
+			t.Fatalf("%s:主机照测订阅端口 = %+v", step, g)
+		}
+		if s := got["副机"]; s.NoPort == "" || s.Port != 0 {
+			t.Fatalf("%s:副机的线路都走 IPv6,不测 = %+v", step, s)
+		}
+	}
+	// 线路单独选了 IPv6
+	got := targets()
+	wantSub("单独选了 IPv6", got, true)
+	if v := got["本机"].V6; v == nil || v.Host != "2001:db8:1::1" || v.Port != 8443 || v.PortLine != "tj6" || len(v.UDPLines) != 1 {
+		t.Fatalf("主机的 IPv6 入站照测 = %+v", v)
+	}
+	// 订阅域名:订阅地址不是 IPv6 字面量,照测(测的是这台的 IPv4,不在主机上解析订阅域名)
+	r.setSetting("subDomain", "sub.example.com")
+	wantSub("填了订阅域名", targets(), true)
+	r.setSetting("subDomain", "")
+	// 服务器选了"自动地址用 IPv6"、线路都没单独选(以前这一支记"无可测端口",会把以前测出的"被墙"清掉)
+	db.Model(&model.Node{}).Where("id IN ?", []uint{local.Id, sub.Id}).Update("addr_family", "v6")
+	db.Model(&model.Line{}).Where("1 = 1").Update("node_family", nil)
+	wantSub("自动地址用 IPv6", targets(), true)
+	// 只有 UDP 线路走 IPv6:照测订阅端口(不说"TCP 线路都走 IPv6")
+	db.Model(&model.Line{}).Where("name = ?", "tj6").Update("enabled", false)
+	wantSub("只有 UDP 线路", targets(), false)
+	db.Model(&model.Line{}).Where("name = ?", "tj6").Update("enabled", true)
+
+	// 纯 IPv6 的主机:订阅地址就是 IPv6(公网 IP 记的是 IPv6),大陆那项测不了
+	r.setSetting("publicIp", "2001:db8:1::1")
+	if g := targets()["本机"]; g.NoPort == "" || g.Port != 0 || g.Host != "" || g.Err != "" || g.V6 == nil || g.V6.Port != 8443 {
+		t.Fatalf("订阅地址是 IPv6:主机不测大陆那项,IPv6 入站照测 = %+v / %+v", g, g.V6)
+	}
+	// 填了面板域名、却解析不到 IPv4:这台没有 IPv4,同样不测(不报"服务器还没上报公网 IP")
+	r.setSetting("webDomain", "localhost") // 只解析到回环地址,不算
+	if g := targets()["本机"]; g.NoPort == "" || g.Err != "" || g.Port != 0 {
+		t.Fatalf("没有 IPv4:主机不测大陆那项 = %+v", g)
+	}
+}
+
 func jsonID(id uint) string {
 	b, _ := json.Marshal(id)
 	return string(b)

@@ -96,3 +96,19 @@ test('无可测端口:服务器列表那一格灰色、写原因,不画三网的
   assert.match(globalThis.__drawer, /reach.byCarrier/);
   assert.match(globalThis.__drawer, /reach.apiPortNote/);
 });
+
+test('TCP 线路都走 IPv6 时 IPv4 测的是哪个端口:主机说订阅端口(看订阅地址的 IPv4),副机说面板 API 端口', async () => {
+  globalThis.__reach = { results: [
+    { nodeId: 3, name: '主机', verdict: 'ok', target: '203.0.113.1', port: 2056, portFrom: 'sub', tcpV6Only: true, measurements: ['m'], at: 1, groups: [{ key: 'cm', state: 'ok', ok: 4, total: 4 }] },
+    { nodeId: 4, name: '副机', verdict: 'ok', target: '203.0.113.2', port: 2053, portFrom: 'api', tcpV6Only: true, measurements: ['m'], at: 1, groups: [{ key: 'cm', state: 'ok', ok: 4, total: 4 }] },
+  ], runningIds: [] };
+  await reach.loadReach();
+  reach.setNodes(() => [{ id: 3, name: '主机' }, { id: 4, name: '副机' }]);
+  globalThis.__actions['reach.detail']('3');
+  assert.match(globalThis.__drawer, /reach\.v6TcpOnlySub/);
+  assert.match(globalThis.__drawer, /reach\.port\.sub/);
+  assert.doesNotMatch(globalThis.__drawer, /reach\.apiPortNote|reach\.v6TcpOnly[^S]/);
+  globalThis.__actions['reach.detail']('4');
+  assert.match(globalThis.__drawer, /reach\.v6TcpOnly[^S]/);
+  assert.doesNotMatch(globalThis.__drawer, /reach\.v6TcpOnlySub/);
+});

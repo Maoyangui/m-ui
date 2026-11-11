@@ -26,7 +26,8 @@ var tcpProtocols = map[string]bool{"anytls": true, "trojan": true, "vless": true
 // 端口优先用部署在这台上、订阅里走 IPv4 的第一条 TCP 线路(用户实际连的就是它),没有就用订阅端口(本机)或面板 API 端口(副机)。
 // 订阅里走 IPv6 的线路(含自定义地址写成这台自己的 IPv6 的)不拿来测 IPv4 地址(端口是同一个、IPv4 照样通,测出"通"却不是用户连的那条路),
 // 而是另测一项 IPv6 入站(Target.V6):测它在订阅里的 IPv6 地址 + 第一条走 IPv6 的 TCP 线路的端口。
-// 这台的线路在订阅里都不走 IPv4 时大陆那项不测(NoPort:灰色、不告警,会盖掉以前测出的结论)。
+// 副机的线路在订阅里都不走 IPv4 时大陆那项不测(NoPort:灰色、不告警,会盖掉以前测出的结论);
+// 主机照测订阅端口(用户刷新订阅连的是它),订阅地址是 IPv6、或这台没有 IPv4 时才记 NoPort。
 func (r *Runner) reachTargets(ctx context.Context) []reach.Target {
 	var nodes []model.Node
 	r.db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&nodes)
@@ -71,18 +72,27 @@ func (r *Runner) reachTargets(ctx context.Context) []reach.Target {
 				t.Port, t.PortFrom, t.PortLine = l.Port, "line", l.Name
 			}
 		}
+		// 订阅里这台的线路都不给 IPv4。副机这时没有用户会连它的 IPv4(面板 API 端口不是用户入口),大陆那项不测;
+		// 主机照测订阅端口:用户刷新订阅连的是它(订阅地址见 Runner.PublicHost:订阅域名 → 面板域名 → 公网 IP),
+		// 订阅地址的 IPv4 被墙时大陆用户拿不到新节点。订阅地址本身是 IPv6、或这台根本没有 IPv4 时才不测
+		noV4 := !anyV4 && (a.defV6 || anyV6)
 		switch {
-		case a.defV6 && !anyV4:
+		case noV4 && !n.IsLocal && a.defV6:
 			t.NoPort = "订阅里这台用的是 IPv6 地址,大陆连通检测暂只支持 IPv4"
-		case anyV6 && !anyV4:
+		case noV4 && !n.IsLocal:
 			t.NoPort = "这台的线路在订阅里都走 IPv6,大陆连通检测暂只支持 IPv4"
+		case noV4 && isIPv6Literal(r.PublicHost()):
+			t.NoPort = "这台的线路在订阅里都不走 IPv4,订阅地址也是 IPv6,大陆连通检测暂只支持 IPv4"
 		default:
-			if t.Host = r.reachHost(ctx, n); t.Host == "" {
+			if t.Host = r.reachHost(ctx, n); t.Host == "" && noV4 && a.ip4 == "" && a.ip6 != "" {
+				t.NoPort = "这台只有 IPv6 地址,域名也解析不到 IPv4,大陆连通检测暂只支持 IPv4"
+			} else if t.Host == "" {
 				t.Err = "没有可测的地址:服务器还没上报公网 IP,也没填连接地址或域名"
 			}
 		}
 		if t.Port == 0 && t.NoPort == "" {
-			// 走 IPv4 的线路没有 TCP 的(只有 hysteria2 / tuic,或 TCP 线路都走 IPv6):借订阅 / 面板 API 端口看 IPv4 地址有没有被墙。
+			// 走 IPv4 的线路没有 TCP 的(只有 hysteria2 / tuic,或 TCP 线路都走 IPv6;主机还有线路都不走 IPv4 的):
+			// 借订阅 / 面板 API 端口看 IPv4 地址有没有被墙。
 			// 面板 API 端口常常只对主机放行,香港也连不上时那一项记成"无可测端口"(见 reach.Service.check),不报"境外也不通"
 			t.TCPv6Only = anyV6TCP && t.Err == "" // 大陆那项不测时不用解释端口
 			if n.IsLocal {
@@ -229,6 +239,12 @@ func customAddrs(l model.Line) []customAddr {
 func hasCustomAddrs(l model.Line) bool {
 	s := strings.TrimSpace(string(l.Addrs))
 	return s != "" && s != "null" && s != "[]"
+}
+
+// isIPv6Literal 是写成 IPv6 字面量的地址(可带方括号;IPv4 映射地址不算)。
+func isIPv6Literal(s string) bool {
+	ip, err := netip.ParseAddr(model.BareHost(s))
+	return err == nil && ip.Is6() && !ip.Is4In6()
 }
 
 // publicIPv6 是公网 IPv6(全局单播,不是内网 fc00::/7、链路本地、回环)。

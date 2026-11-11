@@ -198,7 +198,7 @@ function detailHTML(n) {
       <dt>${t('reach.target')}</dt><dd class="mono">${esc(r.target || '—')}${r.port ? ':' + r.port : ''}</dd>
       <dt>${t('reach.portFrom')}</dt><dd>${esc(portText(r))}</dd>
       <dt>${t('reach.at')}</dt><dd>${fmtTime(r.at)} · ${t(r.auto ? 'reach.auto' : 'reach.manual')}</dd>
-    </dl>${!untested(r) && (r.portFrom === 'sub' || r.portFrom === 'api' || !r.port) ? `<p class="hint">${t(r.tcpV6Only ? 'reach.v6TcpOnly' : r.port ? 'reach.noTcpLine' : 'reach.pingOnly')}${r.portFrom === 'api' && !r.tcpV6Only ? ' ' + t('reach.apiPortNote') : ''}</p>` : ''}` : `<p class="hint">${t('reach.neverHint')}</p>`;
+    </dl>${!untested(r) && (r.portFrom === 'sub' || r.portFrom === 'api' || !r.port) ? `<p class="hint">${t(r.tcpV6Only ? (r.portFrom === 'sub' ? 'reach.v6TcpOnlySub' : 'reach.v6TcpOnly') : r.port ? 'reach.noTcpLine' : 'reach.pingOnly')}${r.portFrom === 'api' && !r.tcpV6Only ? ' ' + t('reach.apiPortNote') : ''}</p>` : ''}` : `<p class="hint">${t('reach.neverHint')}</p>`;
   const groups = r && r.verdict !== 'error' && !untested(r) ? `<section><h3>${t('reach.byCarrier')}</h3>${(r.groups || []).map(groupBlock).join('')}</section>` : '';
   const icmp = r && r.icmp ? `<p class="hint">${esc(t('reach.icmp', { cn: `${r.icmp.cnOk}/${r.icmp.cnTotal}`, hk: `${r.icmp.hkOk}/${r.icmp.hkTotal}` }))}</p>`
     : r && r.icmpError ? `<p class="hint">${esc(t('reach.icmpFail', { err: trErr(r.icmpError) }))}</p>` : '';

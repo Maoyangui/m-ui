@@ -66,7 +66,8 @@ func TestReachTargets(t *testing.T) {
 	}
 }
 
-// 订阅里给的是 IPv6 的服务器不测大陆那项(测点不一定有 IPv6,测不通会被误判成被墙),如实标出;双栈默认 IPv4 照测。
+// 订阅里给的是 IPv6 的副机不测大陆那项(测点不一定有 IPv6,测不通会被误判成被墙),如实标出;双栈默认 IPv4 照测。
+// 主机选了"自动地址用 IPv6"也照测订阅端口:用户刷新订阅连的是订阅地址(这里是公网 IPv4),见 TestReachTargetsLocalAllV6。
 // 订阅给域名时不看地址族。
 func TestReachTargetsIPv6(t *testing.T) {
 	r, err := New(filepath.Join(t.TempDir(), "m.db"))
@@ -107,7 +108,7 @@ func TestReachTargetsIPv6(t *testing.T) {
 			}
 		}
 	}
-	check(map[string]string{"本机": "v6", "双栈": "203.0.113.2", "选v6": "v6", "选v6没有": "203.0.113.4", "纯v6": "v6", "手填v6": "v6"})
+	check(map[string]string{"本机": "203.0.113.1", "双栈": "203.0.113.2", "选v6": "v6", "选v6没有": "203.0.113.4", "纯v6": "v6", "手填v6": "v6"})
 	r.setSetting("subServerAddr", "domain")
 	check(map[string]string{"本机": "203.0.113.1", "选v6": "203.0.113.3"})
 }
