@@ -261,6 +261,8 @@ func TestAgentLedgerRegressSameOwner(t *testing.T) {
 // (之后同名的新用户也不会接着它记),服务器维度照记;下次应用快照清掉。
 func TestOrphanAgentLedgerNotBilled(t *testing.T) {
 	r := newRecreateRig(t)
+	// 主机上还有别的用户:一个用户都不剩的空用户表(停用副机)不清账本,见 TestAgentLedgerSurvivesDecommission
+	r.host.Create(&model.User{Name: "bob", Enabled: true, CreatedAt: 50})
 	old := r.newUser(100)
 	r.sync()
 	r.use(1000)
@@ -290,6 +292,17 @@ func TestOrphanAgentLedgerNotBilled(t *testing.T) {
 	r.report(1010)
 	if got := r.usage(fresh.Id); got != 1000 {
 		t.Fatalf("新用户用了 1000,应全部计费,实际 %d", got)
+	}
+}
+
+// decommission 停用副机:主机推一份空用户表,副机整表换成空的、照常清账本(见 agent/apply)。
+func (r *recreateRig) decommission() {
+	r.t.Helper()
+	if err := r.agent.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.User{}).Error; err != nil {
+		r.t.Fatal(err)
+	}
+	if err := model.PruneAgentCounters(r.agent); err != nil {
+		r.t.Fatal(err)
 	}
 }
 
@@ -351,5 +364,36 @@ func TestAgentLedgerRenamedBack(t *testing.T) {
 	}
 	if got := r.usage(u.Id); got != 1500 {
 		t.Fatalf("改名前 1000 + 改名后 300 + 改回后 200,应是 1500,实际 %d", got)
+	}
+}
+
+// 停用再启用:停用推的是空用户表,副机不再为任何人服务;账本不跟着清 —— 上次主机拉取之后还没报上去的那段
+// (停用期间主机不再拉取)在重新启用后照常报上来计费,重新启用后接着同一本记,不误报"账本回退"。
+func TestAgentLedgerSurvivesDecommission(t *testing.T) {
+	r := newRecreateRig(t)
+	u := r.newUser(100)
+	r.sync()
+	r.use(1000)
+	r.report(1000)
+	r.use(50) // 还没报上去,副机就被停用了
+	r.decommission()
+	r.sync() // 重新启用,推回完整快照
+	r.use(100)
+	res := r.report(1005)
+	if res.Regressed != 0 {
+		t.Fatalf("停用再启用不是账本回退,不该告警: %+v", res)
+	}
+	if got := r.usage(u.Id); got != 1150 {
+		t.Fatalf("停用前没报上去的 50 和启用后的 100 都应计费,应是 1150,实际 %d", got)
+	}
+	// 停用期间主机删掉了这个用户:重新启用时那本照常清掉
+	r.decommission()
+	r.host.Delete(&model.User{}, u.Id)
+	r.newUser(200)
+	r.sync()
+	var n int64
+	r.agent.Model(&model.AgentCounter{}).Count(&n)
+	if n != 0 {
+		t.Fatalf("停用期间删掉的用户,重新启用时账本应清掉,还剩 %d 本", n)
 	}
 }

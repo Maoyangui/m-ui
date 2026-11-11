@@ -278,7 +278,8 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// ================= D. 本机账本只增不删:主机已经不认识的用户(或者同名的已经换了人),它的计数器没人再回收,清掉 =================
-	// 主机那边的游标还留着,记着是谁的那本;同名用户以后再建,新账本记着新主人,主机按主人认出来从 0 计
+	// 主机那边的游标还留着,记着是谁的那本;同名用户以后再建,新账本记着新主人,主机按主人认出来从 0 计。
+	// 停用推来的空用户表不清(见 PruneAgentCounters):停用前还没报上去的那段等重新启用后照常报
 	if err := model.PruneAgentCounters(s.db); err != nil {
 		logger.Warning("清理本机账本里主机已删的用户失败(下次应用快照再清): ", err)
 	}

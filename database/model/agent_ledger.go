@@ -84,7 +84,18 @@ func newLedgerId() int64 {
 // 记了主人的账本,主人已经不在(同名用户在同一轮同步里删了又建,本机没见过"没有他"的那份快照)也清掉,
 // 新用户从 0 另起一本。升级前的老账本(不知道主人)只按名字清。
 // 主机那边的游标留着(记着是谁的那本):还在路上的旧账本报告按它只计服务器维度,不算到新用户头上。
+//
+// 本机一个用户都没有时不清:那是停用副机推来的空用户表(或者主机上真的一个用户都没了)。停用期间主机不再拉取,
+// 清了的话上次拉取之后还没报上去的那段永远不计费;重新启用后同一个人从 0 重开一本,主机还会误报"账本回退"。
+// 留着,重新启用推回完整快照时再按那份清:还在的用户接着同一本记,那段照常报上去。
 func PruneAgentCounters(db *gorm.DB) error {
+	var anyUser int64
+	if err := db.Raw("SELECT EXISTS (SELECT 1 FROM users)").Scan(&anyUser).Error; err != nil {
+		return err
+	}
+	if anyUser == 0 {
+		return nil
+	}
 	return db.Exec(`DELETE FROM agent_counters WHERE user_name NOT IN (SELECT name FROM users)
 		OR (NOT (user_id = 0 AND user_created_at = 0) AND NOT EXISTS (SELECT 1 FROM users u
 			WHERE u.name = agent_counters.user_name AND u.id = agent_counters.user_id AND u.created_at = agent_counters.user_created_at))`).Error
