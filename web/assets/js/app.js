@@ -475,6 +475,14 @@ document.getElementById('drawer-close').addEventListener('click', closeDrawer);
 document.addEventListener('keydown', e => {
   // Esc 关闭弹窗/抽屉;Ctrl/⌘+Enter 提交弹窗;"/" 聚焦当前页搜索框
   if (e.key === 'Escape') {
+    // 弹窗里的搜索框(线路选择器、勾选列表、用户选择器)有字时,Esc 只清空它,不关掉整个弹窗、丢掉没保存的修改
+    const a = document.activeElement;
+    if (a && !modal.hidden && modal.contains(a) && a.matches('input[type=search]') && a.value) {
+      e.preventDefault();
+      a.value = '';
+      a.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
     if (drawerOpen() && document.getElementById('drawer').classList.contains('over')) closeDrawer(); // 盖在弹窗上的抽屉先关
     else if (!modal.hidden) cancelModal();
     else if (drawerOpen()) closeDrawer();

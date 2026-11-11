@@ -183,10 +183,18 @@ function panelHTML(id, c) {
 
 // 视图、服务器列变了:所有展开的面板按新设置重画,子表滚动位置留着
 function redrawPanels() {
+  // 面板连工具栏一起重建:记下按着的是哪个按钮(切汇总 / 逐台、列菜单的全选 / 清空),重建后把焦点放回同一个按钮(在收起的菜单里就放回菜单)
+  const a = document.activeElement;
+  const was = a && a.dataset && a.dataset.act ? { act: a.dataset.act, id: a.dataset.id || '', v: a.dataset.v || '' } : null;
   for (const x of open) {
     const w = document.getElementById('ext-wrap-' + x);
     if (w) keepTop[x] = w.scrollTop;
     if (cache[x]) fillPanel(x);
+  }
+  if (was && !document.activeElement?.dataset?.act) {
+    const b = [...document.querySelectorAll('[data-act]')].find(x => x.dataset.act === was.act && (x.dataset.id || '') === was.id && (x.dataset.v || '') === was.v);
+    const menu = b && b.closest('details.menu:not([open])');
+    (menu ? menu.querySelector('summary') : b)?.focus();
   }
 }
 

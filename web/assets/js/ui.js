@@ -157,8 +157,20 @@ export function setHTML(target, html) {
   if (!el) return false;
   if (el.__muiHTML === html) return false;
   el.__muiHTML = html;
+  // 5 秒一轮的重画会把打开着的「更多」菜单换成一个没打开的(运行时长、在线人数一变就整表重画):
+  // 按菜单里第一个按钮的 data-act + data-id 认出是哪一个,重画后再打开(toggle 会重新定位)
+  const menus = typeof el.querySelectorAll === 'function' ? [...el.querySelectorAll('details.menu[open]')].map(menuKey).filter(Boolean) : [];
   el.innerHTML = html;
+  for (const [act, id] of menus) {
+    const b = [...el.querySelectorAll('details.menu .menu-list [data-act]')].find(x => x.dataset.act === act && (x.dataset.id || '') === id);
+    const d = b && b.closest('details.menu');
+    if (d) d.open = true;
+  }
   return true;
+}
+function menuKey(d) {
+  const b = d.querySelector('.menu-list [data-act]');
+  return b ? [b.dataset.act, b.dataset.id || ''] : null;
 }
 
 export function setText(target, text) {
@@ -203,8 +215,10 @@ document.addEventListener('toggle', e => {
   if (r.bottom + 4 + h > window.innerHeight) list.style.top = Math.max(8, r.top - 4 - h) + 'px';
 }, true);
 // 页面滚动/缩放时收起(fixed 定位会脱离原位置);刚打开 300ms 内的滚动事件(如 scrollIntoView 尾巴)忽略
-['scroll', 'resize'].forEach(ev => window.addEventListener(ev, () => {
+['scroll', 'resize'].forEach(ev => window.addEventListener(ev, e => {
   if (Date.now() - menuOpenedAt < 300) return;
+  // 菜单自己的列表在滚(外部节点的「服务器列」菜单服务器多时限高滚动):不收,不然后面几台勾不到
+  if (e && e.target instanceof Element && e.target.closest('details.menu')) return;
   document.querySelectorAll('details.menu[open]').forEach(d => d.removeAttribute('open'));
 }, true));
 
