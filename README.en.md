@@ -296,7 +296,7 @@ Hand part of the selling to someone else: create a reseller on the Resellers pag
 - Opening the link in a browser shows a landing page: usage, expiry, one-tap import for each client, QR codes, custom logo, notice and support contact.
 - Landing-page logo: upload it under Settings → Subscription page (a reseller uploads their own under Account → Subscription page in their panel); it takes effect at once. PNG, JPEG, GIF, WebP and SVG all work — the browser first shrinks the image to fit 480×160 and converts it to PNG (64 KB at most), and the server accepts only PNG / JPEG / GIF. Reseller users fall back to the main panel's logo, then to the built-in one. It is also the browser tab icon, syncs to nodes with the snapshot and is included in backups. Landing pages follow the visitor’s dark mode and put a light backdrop behind an uploaded logo there (so a dark logo on a transparent background stays visible); the preview in the settings shows the light and dark versions side by side.
 - Links in the notice and support contact: `text(https://…)` or `[text](https://…)` shows only the text on the page, with half- or full-width brackets in both forms (`【text】（link）` as typed by a Chinese IME works too). In `text(link)` a space before the parenthesis is fine; the link text runs back from the parenthesis to the nearest punctuation, the previous link, or an address / @handle / number recognised earlier on the line. `Tg: @username` (also Telegram, 电报, 飞机, even right after Chinese text) and `WhatsApp: +number` (also WA, WS) become clickable links automatically; a bare `https://…` address links to itself. Only http(s), tg, mailto and tel links are made; anything else stays plain text, and the font size never changes. Use `[text](link)` when the text contains a `/` or the link contains parentheses.
-- Client downloads: a small download arrow next to "Import into an app" opens a separate page with per-OS install links — iOS / iPadOS / Apple TV (Nextin, with a note on switching App Store region), Android / Android TV (Clash Meta for Android), Windows / macOS / Linux (Clash Verge Rev, plus a FlClash AppImage for Linux). Every tile carries the official direct link, a China-friendly mirror and an "all releases" link. The page holds no user data, so it can be forwarded as-is; reseller users get the same page.
+- Client downloads: a small download arrow next to "Import into an app" opens a separate page with per-OS install links — iOS / iPadOS / Apple TV (Nextin, with a note on switching App Store region), Android / Android TV (Clash Meta for Android), Windows / macOS / Linux (Clash Verge Rev, plus a FlClash AppImage for Linux). Every tile carries the official direct link, a China-friendly mirror and an "all releases" link. The page's address, and its "Back to subscription" link, carry the user's own subscription link, so do not forward it; to help someone install an app, send them the app's website or release page. Reseller users get the same page.
 - A user who is out of traffic, expired or disabled (or whose reseller is depleted / expired) can still open their landing page in a browser: the reason, the next reset date and the contact details that apply are shown at the top (reseller users see the reseller’s own). Only clients are cut off — they get a 404 from that moment on and the line inbounds stop accepting them. An address that matches nobody gets a short "invalid subscription address" page in browsers and a plain 404 for clients.
 - The subscription port is rate-limited per source IP (120 requests a minute by default, setting `subRateLimit`, 429 above that), and misses are logged as one aggregated row per IP so scanners cannot flood the access log.
 - Temporary sharing: from the landing page a user can create one random link to lend their subscription, one per user. The link carries the same nodes but a **separate set of credentials** registered under the owner's name, so traffic, devices, speed limits and expiry all count against the owner. Cancelling (or regenerating) pulls those credentials immediately and drops the connections, so nodes already imported by the borrower stop working too. Opened in a browser, a shared link also shows a landing page — a trimmed one (shared-link badge, purchase button, notice, one-tap import, subscription links and nodes, never the owner's usage, expiry or account details) — while clients fetching it still get the subscription. Settings → Subscription page turns the whole thing off.
@@ -327,7 +327,7 @@ Each server, including the master, can have a **traffic ratio**: traffic through
 
 > Deleting a server strips it from every line's "deploy to servers" list. A line that was deployed only on that server has nowhere left to run, so it is disabled as well (rather than silently spreading to every server). Users and resellers narrowed to only that server on a line lose that line, again rather than falling back to every server of the line. The response and the panel list the disabled lines and the affected people.
 >
-> Disabling or deleting a node first pushes it an empty user table, so it stops serving everyone at once; re-enabling restores it. If the node cannot be reached the panel says so and the master keeps retrying until it confirms; to stop it right away, turn off node mode or uninstall on that machine.
+> Disabling or deleting a node first pushes it an empty user table, so it stops serving everyone at once; re-enabling restores it. If the node cannot be reached the panel says so and the master keeps retrying until it confirms; to stop it right away, run `systemctl disable --now m-ui` on that machine or uninstall it (turning off node mode does not stop it: it becomes a standalone master and keeps serving with its last configuration).
 
 ### Certificates
 
@@ -347,8 +347,8 @@ A server can hold several certificates; everything issued, self-signed or added 
 ### Backup and migration
 
 - Backup page: download a zip (consistent DB snapshot + certs); scheduled backups with rotation, optionally pushed to Telegram.
-- Restore: upload the zip on the new server's Backup page and m-ui restarts fully restored, or `bash install.sh --restore backup.zip` at install time.
-- Migration wizard: install and restore on the new server → check the panel → point DNS at the new IP (the page checks major resolvers) → retire the old server. Ports, credentials and subscription URLs stay the same, users notice nothing.
+- Restore: upload the zip on the new server's Backup page and m-ui restarts fully restored, or add `--restore` to the one-line installer on the new server: `bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --restore /root/m-ui-20261111-030000.zip` (use your own backup file).
+- Migration wizard: install and restore on the new server → check the panel → point DNS at the new IP (the page checks major resolvers) → retire the old server (`systemctl disable --now m-ui` or uninstall; after a mere stop it starts again on reboot). With a subscription domain, ports, credentials and subscription URLs stay the same and users notice nothing; a subscription URL with an IP in it changes, so send users the new one.
 
 ### Ops
 
@@ -413,10 +413,10 @@ Run `m-ui` without arguments for the menu (Chinese):
 Full migration (lines, upstreams, users and settings):
 
 ```bash
-bash install.sh --import /path/to/old-panel.db
+bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --import /path/to/old-panel.db
 ```
 
-Inbound ports, user credentials, panel path and subscription URLs are preserved, so clients need no changes; the import report lists what was checked.
+Inbound ports, user credentials, the panel path and the subscription path are preserved; the subscription port becomes 2056 and a separate subscription domain is not carried over. If the old panel differed, change the port back with menu option 6 and add the domain with `m-ui set -db /etc/m-ui/m-ui.db subDomain=DOMAIN`, and clients need no changes; the import report lists what was checked.
 
 Users only (lines already rebuilt on m-ui, you just want the old users' names, usage, quota and expiry): Users page → **Import from old panel**, or
 
@@ -424,7 +424,7 @@ Users only (lines already rebuilt on m-ui, you just want the old users' names, u
 m-ui import -from /path/to/old-panel.db -to /etc/m-ui/m-ui.db -users-only && systemctl restart m-ui
 ```
 
-Existing names only get usage / quota / expiry / enabled updated; new users are created with their old credentials and, by default, every existing line.
+Existing names are overwritten with the old database's usage / quota / expiry / enabled / periodic reset (and a non-empty remark or description); new users are created with their old credentials and, by default, every existing line. When moving users only, lines, ports and subscription links are m-ui's own, so send users their new subscription links.
 
 ## FAQ
 
