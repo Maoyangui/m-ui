@@ -139,7 +139,8 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 			"interval": 300, "tolerance": 50, "proxies": g.members,
 		})
 	}
-	// 外部节点:名字去重后追加(撞上线路组名也是外部节点改名)
+	reserveLineNames(lines, used) // 没出组的线路名也不让给外部节点(见 linegroup.go)
+	// 外部节点:名字去重后追加(撞上线路组名、线路名也是外部节点改名)
 	for _, e := range external {
 		for _, p := range e.Clash {
 			name, _ := p["name"].(string)

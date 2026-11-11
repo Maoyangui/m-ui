@@ -454,3 +454,95 @@ func TestClashTemplateLineGroup(t *testing.T) {
 		}
 	}
 }
+
+// 线路名一直为本站保留(两种格式同一规则):线路组因为用户被收窄到一台、线路改成只部署一台、部署的服务器停用到
+// 只剩一台或一台不剩而不出时,线路名也不让给外部节点 —— 外部订阅里和线路同名的节点一直叫「hy 2」,线路组回来时也不变,
+// 选过线路组 hy 的客户端在组不出的这段时间里不会被落到第三方节点上。本站节点的名字和顺序照旧(sing-box 与上一版对照)。
+func TestLineNameReservedWithoutGroup(t *testing.T) {
+	cert := raw(map[string]interface{}{"mode": "cert"})
+	user := fullUser()
+	three := []Entry{twoServers[0], twoServers[1],
+		{Name: "C", Host: "c.example.com", SNI: "c.example.com", Suffix: "-C", NodeId: 3}}
+	hyOn := func(ids ...uint) []model.Line {
+		return []model.Line{
+			{Id: 1, Name: "hy", Protocol: "hysteria2", Port: 443, Tls: cert, Enabled: true, NodeIds: raw(ids)},
+			{Id: 2, Name: "jp", Protocol: "trojan", Port: 9443, Tls: cert, Enabled: true}, // 三台都部署
+		}
+	}
+	ext := []ExtItem{{Name: "ext",
+		Links: []string{
+			"trojan://p@198.51.100.1:443?sni=x.example.com#hy",
+			"trojan://q@198.51.100.2:443?sni=y.example.com#jp",
+			"trojan://r@198.51.100.3:443?sni=z.example.com#other",
+		},
+		Clash: []map[string]interface{}{
+			{"name": "hy", "type": "trojan", "server": "198.51.100.1", "port": 443, "password": "p", "sni": "x.example.com"},
+			{"name": "jp", "type": "trojan", "server": "198.51.100.2", "port": 443, "password": "q", "sni": "y.example.com"},
+			{"name": "other", "type": "trojan", "server": "198.51.100.3", "port": 443, "password": "r", "sni": "z.example.com"},
+		}}}
+	extNames := []string{"hy 2", "jp 2", "other"}
+	cases := []struct {
+		name      string
+		lines     []model.Line
+		entries   []Entry
+		lineNodes map[uint]map[uint]bool
+		own       []string // 本站节点,按顺序
+		groups    []string // 线路组
+	}{
+		{"线路组在", hyOn(1, 2), three, nil, []string{"hy-A", "hy-B", "jp-A", "jp-B", "jp-C"}, []string{"hy", "jp"}},
+		{"收窄到一台", hyOn(1, 2), three, map[uint]map[uint]bool{1: {1: true}}, []string{"hy-A", "jp-A", "jp-B", "jp-C"}, []string{"jp"}},
+		{"只部署一台", hyOn(1), three, nil, []string{"hy-A", "jp-A", "jp-B", "jp-C"}, []string{"jp"}},
+		{"停用一台", hyOn(1, 2), []Entry{three[0], three[2]}, nil, []string{"hy-A", "jp-A", "jp-C"}, []string{"jp"}},
+		{"两台都停用", hyOn(1, 2), []Entry{three[2]}, nil, []string{"jp-C"}, nil},
+		{"线路组回来", hyOn(1, 2), three, nil, []string{"hy-A", "hy-B", "jp-A", "jp-B", "jp-C"}, []string{"hy", "jp"}},
+	}
+	for _, c := range cases {
+		want := append(append([]string{}, c.own...), extNames...)
+
+		body, err := BuildClashFor(user, c.lines, c.entries, "", "", ext, c.lineNodes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc := checkClash(t, body)
+		if !reflect.DeepEqual(doc.proxyNames(), want) {
+			t.Fatalf("%s:Clash 节点名应是 %v,得 %v", c.name, want, doc.proxyNames())
+		}
+		if got, _ := doc.lineGroups(); !reflect.DeepEqual(got, c.groups) {
+			t.Fatalf("%s:Clash 线路组应是 %v,得 %v", c.name, c.groups, got)
+		}
+
+		opt := Options{Entries: c.entries, LineNodes: c.lineNodes, External: ext}
+		res, err := BuildSingBoxSub(user, c.lines, opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		validateClientConfig(t, res.Body)
+		sb := parseSB(t, res.Body)
+		nodes := nodeOutbounds(sb)
+		var tags []string
+		for _, n := range nodes {
+			tags = append(tags, n["tag"].(string))
+		}
+		if !reflect.DeepEqual(tags, want) {
+			t.Fatalf("%s:sing-box 节点 tag 应是 %v,得 %v", c.name, want, tags)
+		}
+		if got := singBoxLineGroups(sb); !reflect.DeepEqual(got, c.groups) {
+			t.Fatalf("%s:sing-box 线路组应是 %v,得 %v", c.name, c.groups, got)
+		}
+		// 本站节点:tag、内容、顺序和上一版(没有线路组、也不保留线路名)一字不差
+		old, err := legacySingBox(user, c.lines, Options{Entries: c.entries, LineNodes: c.lineNodes})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if oldNodes := nodeOutbounds(parseSB(t, old.Body)); !reflect.DeepEqual(nodes[:len(c.own)], oldNodes) {
+			t.Fatalf("%s:本站节点变了\n得 %v\n应 %v", c.name, nodes[:len(c.own)], oldNodes)
+		}
+		by := byTagSB(sb)
+		if n := by["hy 2"]; n == nil || n["server"] != "198.51.100.1" {
+			t.Fatalf("%s:hy 2 应一直是外部节点: %v", c.name, n)
+		}
+		if g := by["hy"]; g != nil && g["type"] != "urltest" {
+			t.Fatalf("%s:hy 只能是本站的线路组,不能是外部节点: %v", c.name, g)
+		}
+	}
+}

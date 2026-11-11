@@ -434,10 +434,12 @@ func TestSingBoxLineGroupKeepsNameOverExternal(t *testing.T) {
 	}
 }
 
-// 升级前后对照:上一版 sing-box JSON 没有线路组,外部订阅里和多服务器线路同名的节点一直叫线路名(hy)。现在线路组占了
-// 这个名字,改名的只有这一个外部节点(hy → hy 2),而且只改 tag:出站参数一字不变,客户端可以按内容把选择跟过去;
-// 别的节点 tag、内容、顺序都和上一版一样,上一版 proxy 里能选的名字现在都还在,只有 hy 换了所指(这一次性的切换是
-// 有意的取舍,见 linegroup.go)。本站的名字优先也不是新规矩:单台服务器时线路节点就叫 hy,同名的外部节点上一版就是 hy 2。
+// 升级前后对照:上一版 sing-box JSON 没有线路组,外部订阅里和线路同名的节点只要线路名没被本站节点占着,就叫线路名(hy、tj)。
+// 现在用户手里每条线路的名字都为本站保留:多服务器线路 hy 的名字给了线路组,只部署一台、不出组的 tj 也保留(不然 tj
+// 哪天多部署一台出了组,外部节点又得改一次名;反过来组没了它又改回来),所以和它们同名的两个外部节点改名
+// (hy → hy 2、tj → tj 2),而且只改 tag:出站参数一字不变,客户端可以按内容把选择跟过去;别的节点 tag、内容、顺序
+// 都和上一版一样(这一次性的切换是有意的取舍,见 linegroup.go)。本站的名字优先也不是新规矩:单台服务器时线路节点就叫 hy,
+// 同名的外部节点上一版就是 hy 2。
 func TestSingBoxUpgradeRenamesOnlyClashingExternal(t *testing.T) {
 	cert := raw(map[string]interface{}{"mode": "cert"})
 	lines := []model.Line{
@@ -446,7 +448,7 @@ func TestSingBoxUpgradeRenamesOnlyClashingExternal(t *testing.T) {
 	}
 	ext := []ExtItem{{Name: "ext", Links: []string{
 		"trojan://p@198.51.100.1:443?sni=x.example.com#hy", // 和多服务器线路同名
-		"trojan://q@198.51.100.2:443?sni=y.example.com#tj", // 和只部署一台的线路同名:那条线路不出组,它照旧叫 tj
+		"trojan://q@198.51.100.2:443?sni=y.example.com#tj", // 和只部署一台的线路同名:那条线路不出组,名字也保留,它叫 tj 2
 		"trojan://r@198.51.100.3:443?sni=z.example.com#jp",
 	}}}
 	user := fullUser()
@@ -489,8 +491,8 @@ func TestSingBoxUpgradeRenamesOnlyClashingExternal(t *testing.T) {
 			renamed = append(renamed, fmt.Sprintf("%v → %v", b["tag"], n["tag"]))
 		}
 	}
-	if !reflect.DeepEqual(renamed, []string{"hy → hy 2"}) {
-		t.Fatalf("只该有和线路组同名的那个外部节点改名: %v", renamed)
+	if !reflect.DeepEqual(renamed, []string{"hy → hy 2", "tj → tj 2"}) {
+		t.Fatalf("只该有和用户的线路同名的两个外部节点改名: %v", renamed)
 	}
 	by := byTagSB(now)
 	if g := by["hy"]; g == nil || g["type"] != "urltest" || !reflect.DeepEqual(strList(g["outbounds"]), []string{"hy-A", "hy-B"}) {
@@ -498,11 +500,12 @@ func TestSingBoxUpgradeRenamesOnlyClashingExternal(t *testing.T) {
 	}
 	got, old := strList(by["proxy"]["outbounds"]), strList(byTagSB(before)["proxy"]["outbounds"])
 	if !reflect.DeepEqual(old, []string{"auto", "hy-A", "hy-B", "tj-A", "hy", "tj", "jp"}) ||
-		!reflect.DeepEqual(got, []string{"auto", "hy", "hy-A", "hy-B", "tj-A", "hy 2", "tj", "jp"}) {
+		!reflect.DeepEqual(got, []string{"auto", "hy", "hy-A", "hy-B", "tj-A", "hy 2", "tj 2", "jp"}) {
 		t.Fatalf("proxy 选择组:\n上一版 %v\n现在   %v", old, got)
 	}
 
-	// 单台服务器:不出线路组,线路节点就叫 hy / tj,同名的外部节点上一版就让名(hy 2、tj 2),现在逐字节一样
+	// 单台服务器(倍率为 1,节点名不带后缀):不出线路组,线路节点本身就叫 hy / tj,线路名早被本站节点占着,
+	// 同名的外部节点上一版就让名(hy 2、tj 2);保留线路名不改变任何名字,现在仍和上一版逐字节一样
 	nowBody, beforeBody = build(Options{Entries: hkEntry, External: ext})
 	if nowBody != beforeBody {
 		t.Fatalf("单台服务器时配置应和上一版逐字节一样\n得 %s\n应 %s", nowBody, beforeBody)
@@ -515,6 +518,20 @@ func TestSingBoxUpgradeRenamesOnlyClashingExternal(t *testing.T) {
 		if o := by[tag]; o == nil || o["type"] != want[0] || o["server"] != want[1] {
 			t.Fatalf("单台服务器时 %s 应是 %v: %v", tag, want, o)
 		}
+	}
+
+	// 单台服务器但节点名带后缀(倍率不是 1:「hy-港 x2」):线路名没被本站节点占着,上一版同名的外部节点就叫 hy / tj;
+	// 现在线路名照规则保留,它们改叫 hy 2 / tj 2,和多服务器、出组时同一个名字 —— 这台服务器之后多一台出了组,
+	// 或者多的那台停用、组又没了,外部节点的名字都不再变。除了这两个 tag,和上一版逐字节一样。
+	x2 := []Entry{{Name: "港", Host: "hk.joinvip.vip", SNI: "hk.joinvip.vip", Suffix: "-港 x2", Ratio: 2}}
+	nowBody, beforeBody = build(Options{Entries: x2, External: ext})
+	if strings.Contains(nowBody, `"tag": "hy"`) || strings.Contains(nowBody, `"tag": "tj"`) ||
+		!strings.Contains(beforeBody, `"tag": "hy"`) || !strings.Contains(beforeBody, `"tag": "tj"`) {
+		t.Fatalf("带后缀的单台服务器:外部节点上一版叫 hy / tj,现在应改叫 hy 2 / tj 2\n得 %s", nowBody)
+	}
+	renameExt := strings.NewReplacer(`"hy"`, `"hy 2"`, `"tj"`, `"tj 2"`)
+	if renameExt.Replace(beforeBody) != nowBody {
+		t.Fatalf("带后缀的单台服务器:除了两个外部节点改名,应和上一版逐字节一样\n得 %s\n应 %s", nowBody, renameExt.Replace(beforeBody))
 	}
 }
 
