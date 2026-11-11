@@ -2,7 +2,7 @@
 // 检查:页面 200、没有 JS 报错、没有任何 /api/ 或外部请求、几个主要页面都渲染出演示数据、
 // 演示里的增删改在本页生效、刷新后复原、手机宽度不出现横向滚动、fixture 里没有非文档保留的 IP 或未抹掉的密钥。
 //
-// 还点一遍本版的新界面:帮助说明按钮、续费 / 换套餐对话框、落地页 logo 上传、IPv6 入站检测、握手失败、证书续期、还原提示,
+// 还点一遍本版的新界面:帮助说明按钮、续费 / 换套餐对话框、落地页 logo 上传、IPv6 入站检测、「握手失败」筛选、证书续期、还原提示,
 // 写操作后要有"演示模式,刷新即恢复"的提示。
 //
 //   node site/build.mjs && npm i --no-save playwright-core && node site/tools/demo-smoke.mjs [en|zh]
@@ -158,9 +158,18 @@ const toastText = () => page.locator('#toast').innerText().catch(() => '');
 await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(1000);
 const help = await page.locator('#btn-help').getAttribute('href').catch(() => '');
 if (help && help.startsWith(`help/${lang}.html`)) pass(`帮助说明按钮指向 ${help}`); else fail(`帮助说明按钮地址不对:${help}`);
+// 最近入站连接是一张表三档筛选(连接 / 被拒 / 握手失败),默认显示「连接」;握手 / 认证失败要点「握手失败」才列出
 const dashText = await page.locator('#page').innerText();
-if (/198\.51\.100\.23/.test(dashText) && /203\.0\.113\.99/.test(dashText)) pass('最近入站连接列出握手 / 认证失败'); else fail('最近入站连接没有握手 / 认证失败那张表');
 if (/2001:db8:1:2::8/.test(dashText)) pass('最近入站连接含 IPv6 来源'); else fail('最近入站连接没有 IPv6 来源');
+const failSeg = page.locator('#dash-conn-seg [data-act="dash.connF"][data-id="failed"]');
+if (await failSeg.count()) {
+  const segLabel = (await failSeg.innerText()).trim();
+  if (/2/.test(segLabel)) pass(`「握手失败」筛选按钮写出条数:${segLabel}`); else fail(`「握手失败」筛选按钮没写条数:${segLabel}`);
+  await failSeg.click(); await page.waitForTimeout(500);
+  const failText = await page.locator('#dash-conns').innerText().catch(() => '');
+  if (/198\.51\.100\.23/.test(failText) && /203\.0\.113\.99/.test(failText)) pass('「握手失败」筛选列出握手 / 认证失败的来源'); else fail(`「握手失败」筛选里没有握手 / 认证失败的来源:${failText.slice(0, 200)}`);
+  if (/198\.51\.100\.23|203\.0\.113\.99/.test(dashText)) fail('「连接」筛选里混进了握手失败的来源'); else pass('「连接」筛选里不含握手失败的来源');
+} else fail('最近入站连接没有「握手失败」筛选');
 const helpPage = await ctx.newPage();
 helpPage.on('pageerror', e => errors.push('help: ' + e));
 const hr = await helpPage.goto(new URL(help, DEMO).href, { waitUntil: 'load' });
@@ -232,8 +241,7 @@ if (realErrors.length) fail(`浏览器报错:${realErrors.slice(0, 3).join(' | '
 // 手机宽度不横向滚动
 const m = await ctx.newPage();
 await m.setViewportSize({ width: 390, height: 844 });
-// 设置页「关于」那张 kv 表在英文 390 宽度下撑出 20px,是面板样式的问题(feat/ui-layout 已改 .kv 列宽),合并后把 'settings' 加回来
-for (const route of ['dashboard', 'users', 'lines', 'nodes', 'cert']) {
+for (const route of ['dashboard', 'users', 'lines', 'nodes', 'cert', 'settings']) {
   await m.goto(`${DEMO}#/${route}`); await m.waitForTimeout(700);
   const over = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (over > 1) fail(`手机宽度下 #/${route} 横向溢出 ${over}px`); else pass(`手机宽度 #/${route} 不溢出`);
