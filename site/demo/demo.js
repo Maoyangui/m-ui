@@ -270,6 +270,7 @@ function status() {
   const s = fx('GET status') || {};
   s.users = S.users.length; s.enabledUsers = S.users.filter(u => u.enabled).length; s.lines = S.lines.length; s.linesEnabled = S.lines.filter(l => l.enabled).length;
   s.upstreams = S.upstreams.length; s.onlineUsers = S.onlines.users.length; s.version = 'demo'; s.repo = GITHUB; s.defaultPassword = false;
+  s.ha = { role: 'master', epoch: HA.epoch, mode: HA.config.mode, notices: [] };
   if (showRestore && !S.restoreAcked) s.restore = { at: now() - 300, copies: [{ from: '/etc/letsencrypt/live/panel.example.com/fullchain.pem', to: '/etc/m-ui/cert/restored/panel.example.com.crt', names: ['panel.example.com'], notAfter: now() + 61 * DAY }] };
   return s;
 }
@@ -281,6 +282,47 @@ function logoOf(data) {
   const u32 = i => ((head.charCodeAt(i) << 24) | (head.charCodeAt(i + 1) << 16) | (head.charCodeAt(i + 2) << 8) | head.charCodeAt(i + 3)) >>> 0;
   return { set: true, sum: rnd(16), mime: 'image/png', width: u32(16), height: u32(20), size: Math.floor(b64.length * 3 / 4), data };
 }
+
+// 主机容灾:演示站是一台开着「先确认再接任」的主机,服务器列表里前两台副机当备用,手里各有一份刚自检过的副本。
+// 设置页的模式、台数、高级里的数字和暂停在本页内存里生效;设为主机、接任、重新信任这类不真做(卡片里写明演示模式)。
+const haFp = seed => Array.from({ length: 16 }, (_, i) => '0123456789abcdef'[(seed * 7 + i * 5) % 16]).join('');
+const HA = {
+  epoch: 3,
+  config: { mode: 'confirm', standbys: 2, replicaMinutes: 5, confirmMinutes: 3, autoMinutes: 10, rankStepMinutes: 3, witness: true, pauseUntil: 0, dnsNames: 'sub.example.com', dnsTokenSet: false, allowPlain: false },
+};
+const haNodes = () => ((S.nodes && S.nodes.nodes) || []).filter(n => n.enabled !== false);
+function haStandbys() {
+  const c = HA.config, t0 = now();
+  return haNodes().filter(n => !n.isLocal).map((n, i) => {
+    const rank = c.mode !== 'off' && i < c.standbys ? i + 1 : 0;
+    const fp = haFp(n.id);
+    const replica = rank ? { epoch: HA.epoch, seq: 412 + n.id, at: t0 - 75, size: 18 * 1048576 + n.id * 4096, asOf: t0 - 20, verifiedAt: t0 - 60 } : undefined;
+    return { id: n.id, name: n.name, rank, eligible: true, version: 'demo', pubFp: fp, pinnedFp: fp, replica,
+      ack: rank ? { seq: 412 + n.id, sentAt: t0 - 75, asOf: t0 - 20, size: replica.size } : undefined,
+      leaseAgo: 3, diskFree: 24 * 1073741824, peers: { ok: 2, total: 2, at: t0 - 40 }, epoch: HA.epoch, webPort: 2053, resellerPort: 2054 };
+  });
+}
+function haView(full) {
+  const me = haNodes().find(n => n.isLocal) || {};
+  const c = HA.config, on = c.mode !== 'off';
+  const sb = haStandbys(), picked = sb.filter(x => x.rank);
+  const v = { role: 'master', epoch: HA.epoch, selfId: me.id || 1, selfName: me.name || '', masterId: me.id || 1, masterName: me.name || '', version: 'demo', mode: c.mode,
+    notices: [], config: clone(c), standbys: on || full ? sb : [], standbyIds: on ? picked.map(x => x.id) : [], signFp: haFp(1) };
+  if (full) {
+    v.ready = on ? [
+      { code: 'standbys', level: picked.length >= c.standbys ? 'ok' : 'warn', args: { n: String(picked.length), want: String(c.standbys) } },
+      { code: 'versions', level: 'ok' }, { code: 'replica', level: 'ok' }, { code: 'https', level: 'ok' },
+      { code: 'selfLink', level: 'ok', args: { url: `https://${subBase}:2053/app/` } },
+      { code: 'subDomain', level: 'ok', args: { host: 'sub.example.com' } }, { code: 'telegram', level: 'ok' }, { code: 'peers', level: 'ok' },
+      c.witness ? { code: 'witness', level: 'ok' } : { code: 'witness', level: c.mode === 'auto' && haNodes().length <= 2 ? 'bad' : 'info' },
+      c.dnsTokenSet ? { code: 'dns', level: 'ok', names: c.dnsNames.split(/[\s,]+/).filter(Boolean), args: { names: c.dnsNames } } : { code: 'dns', level: 'info' },
+    ] : [{ code: 'standbys', level: 'info' }, { code: 'replica', level: 'info' }];
+    if (!on) v.standbys = sb.map(x => ({ ...x, replica: undefined, ack: undefined }));
+  }
+  return v;
+}
+// 设为主机的检查:演示站不真的换主机,卡片里写明原因(code 为 text 的原文照样显示)
+const haDemoBlock = () => ({ ok: false, blockers: [{ code: 'text', args: { text: zh ? '演示模式:不会真的换主机。装好以后在这里一键把主机换到这台。' : 'Demo mode: the master is not actually moved. On a real install this hands the master over to this server in one step.' } }] });
 
 // 一条路由:method + 路径(去掉 ./api/ 与查询串),query 单独给
 function route(method, path, query, body) {
@@ -299,11 +341,9 @@ function route(method, path, query, body) {
         if (seg[2] === 'sub') { const u = find(S.users, id); return { link: subUrl(u), clash: subUrl(u) + '?format=clash', json: subUrl(u) + '?format=json' }; } return clone(S.users);
       case 'plans': return S.plans.map(planView);
       case 'nodes': return clone(S.nodes);
-      // 主机容灾:演示站是一台没开容灾的主机(没有这一条时界面拿到 {},会把每台都标成「副机」)
-      case 'ha': { if (seg[1]) return notFound(); // 设为主机的计划等:演示站不真的换主机
-        const me = (S.nodes.nodes || []).find(n => n.isLocal) || {};
-        return { role: 'master', epoch: 0, selfId: me.id || 1, selfName: me.name || '', masterId: me.id || 1, masterName: me.name || '', version: 'demo', mode: 'off', notices: [], standbyIds: [],
-          config: { mode: 'off', standbys: 2, replicaMinutes: 5, confirmMinutes: 3, autoMinutes: 10, rankStepMinutes: 3, witness: true, pauseUntil: 0, dnsNames: '', dnsTokenSet: false }, ready: [] }; }
+      // 主机容灾(见 haView;没有这一条时界面拿到 {},会把每台都标成「副机」)
+      case 'ha': if (seg[1] === 'plan') return haDemoBlock(); if (seg[1]) return notFound();
+        return haView(/(^|&)full=1(&|$)/.test(query));
       case 'exts': if (seg[2] === 'nodes') return extNodes(id, seg, 'GET', null); return clone(S.exts);
       case 'onlines': return clone(S.onlines);
       case 'rules': if (seg[2] === 'states') return clone(S.limitStates.filter(s => s.ruleId === id)); if (seg[1]) return ruleView(find(S.rules, id)); return S.rules.map(ruleView);
@@ -437,6 +477,18 @@ function route(method, path, query, body) {
       return ok();
     }
     case 'update': throw new ApiError(400, 'Demo mode: nothing to update here');
+    case 'ha':
+      if (!seg[1]) { // 保存设置
+        const b = body || {}, c = HA.config;
+        for (const k of ['mode', 'standbys', 'replicaMinutes', 'confirmMinutes', 'autoMinutes', 'rankStepMinutes', 'witness', 'allowPlain', 'dnsNames']) if (b[k] !== undefined) c[k] = b[k];
+        if (b.dnsToken) c.dnsTokenSet = true;
+        if (b.clearDnsToken) c.dnsTokenSet = false;
+        return ok();
+      }
+      if (seg[1] === 'pause') { HA.config.pauseUntil = body && body.minutes > 0 ? now() + body.minutes * 60 : 0; return ok(); }
+      if (seg[1] === 'notice') return ok();
+      if (seg[1] === 'dns-test') return { records: [], error: zh ? '演示模式:不连 Cloudflare' : 'Demo mode: Cloudflare is not contacted' };
+      throw new ApiError(400, zh ? '演示模式:不会真的换主机或接任' : 'Demo mode: the master is not actually moved or taken over');
     case 'backup': if (seg[1] === 'restore-ack') { S.restoreAcked = true; return ok(); } if (seg[1] === 'run') return { name: 'm-ui-demo-' + new Date().toISOString().slice(0, 10) + '.zip' }; if (seg[1] === 'inspect') return { users: S.users.length, lines: S.lines.length, note: 'Demo mode' }; return ok();
     case 'cert':
       if (seg[1] === 'use') { const c = S.certs.find(x => x.name === body.name); S.certUse[body.target] = c ? c.certFile : ''; syncCertUse(); return ok(); }

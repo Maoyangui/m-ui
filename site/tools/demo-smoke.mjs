@@ -2,7 +2,7 @@
 // 检查:页面 200、没有 JS 报错、没有任何 /api/ 或外部请求、几个主要页面都渲染出演示数据、
 // 演示里的增删改在本页生效、刷新后复原、手机宽度不出现横向滚动、fixture 里没有非文档保留的 IP 或未抹掉的密钥。
 //
-// 还点一遍本版的新界面:帮助说明按钮、续费 / 换套餐对话框、落地页 logo 上传、IPv6 入站检测、「握手失败」筛选、证书续期、还原提示,
+// 还点一遍本版的新界面:帮助说明按钮、续费 / 换套餐对话框、落地页 logo 上传、IPv6 入站检测、「握手失败」筛选、主机容灾(角色标签、备用卡片、设置页就绪检查)、证书续期、还原提示,
 // 写操作后要有"演示模式,刷新即恢复"的提示。
 //
 //   node site/build.mjs && npm i --no-save playwright-core && node site/tools/demo-smoke.mjs [en|zh]
@@ -210,6 +210,23 @@ await page.locator('[data-act="reach.detail"]').last().evaluate(b => b.click()).
 await page.waitForTimeout(700);
 if (/2001:db8:7::30/.test(await page.locator('#drawer-body').innerText().catch(() => ''))) pass('大陆连通详情里有 IPv6 入站一节'); else fail('大陆连通详情没有 IPv6 入站');
 await page.keyboard.press('Escape');
+
+// 主机容灾:服务器页的角色标签(主机 · 本机、备用 1、备用 2)、点开的卡片、设置页的容灾卡片与就绪检查
+await page.goto(`${DEMO}#/nodes`); await page.waitForTimeout(1000);
+const chips = await page.locator('#page .role-chip').allInnerTexts();
+const want = lang === 'zh' ? ['主机', '备用 1', '备用 2'] : ['Master', 'Standby 1', 'Standby 2'];
+if (want.every(w => chips.some(c => c.includes(w)))) pass(`服务器页显示容灾角色:${chips.map(c => c.replace(/\s*▾/, '')).join(' / ')}`); else fail(`服务器页容灾角色不对:${JSON.stringify(chips)}`);
+await page.locator('#page .role-chip.k-standby').first().evaluate(b => b.click()).catch(() => {});
+await page.waitForTimeout(900);
+const card = await page.locator('.ha-pop').innerText().catch(() => '');
+if (card && /[0-9a-f]{16}/.test(card) && !/ha\.|\{[a-z]+\}|undefined|NaN/.test(card)) pass('备用卡片显示副本时间与公钥指纹'); else fail(`备用卡片内容不对:${card.slice(0, 160)}`);
+if (/(演示模式|Demo mode)/.test(card) && await page.locator('.ha-pop [data-act="ha.setMaster"][disabled]').count()) pass('卡片里「设为主机」写明演示不真做'); else fail('卡片里的「设为主机」没写明演示模式');
+await page.keyboard.press('Escape');
+await page.goto(`${DEMO}#/settings`); await page.waitForTimeout(1200);
+const haCard = await page.locator('#ha-card').innerText().catch(() => '');
+const ready = await page.locator('#ha-card .ha-check li').count();
+const confirmSel = await page.locator('#ha-card input[name="ha-mode"][value="confirm"]').isChecked().catch(() => false);
+if (ready >= 5 && confirmSel && !/ha\.ready|\{[a-z]+\}|undefined/.test(haCard)) pass(`设置页主机容灾:默认「先确认再接任」,就绪检查 ${ready} 项`); else fail(`设置页主机容灾卡片不对(选中确认模式:${confirmSel},检查 ${ready} 项):${haCard.slice(0, 160)}`);
 
 await page.goto(`${DEMO}#/cert`); await page.waitForTimeout(900);
 const renewCells = await page.locator('#page [data-act="cert.autorenew"]').count();

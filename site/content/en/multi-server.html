@@ -1,8 +1,8 @@
-<!--meta {"title":"Multi-server sing-box panel · m-ui master and nodes","description":"How m-ui manages many servers from one panel: master/node roles, 5-second config sync with revisions, traffic cursors, online-IP sharing for device limits, per-server subscription nodes, and what happens when a node goes offline.","nav":"Multi-server","order":4} -->
+<!--meta {"title":"Multi-server sing-box panel · m-ui master and nodes","description":"How m-ui manages many servers from one panel: master/node roles, 5-second config sync with revisions, traffic cursors, online-IP sharing for device limits, per-server subscription nodes, what happens when a node goes offline, and set as master and master failover.","nav":"Multi-server","order":4} -->
 <article class="doc">
   <h1>One master, any number of nodes</h1>
   <p class="lead">m-ui is a multi-server sing-box panel by design, not by add-on. Every server runs the same binary; one is the master and does the accounting, the others only forward traffic.</p>
-  <nav class="toc"><a href="#roles">Roles</a><a href="#pair">Pairing</a><a href="#sync">What gets synced</a><a href="#traffic">Traffic and limits</a><a href="#subs">Subscriptions</a><a href="#failure">When a node is down</a><a href="#ratio">Traffic ratio</a></nav>
+  <nav class="toc"><a href="#roles">Roles</a><a href="#pair">Pairing</a><a href="#sync">What gets synced</a><a href="#traffic">Traffic and limits</a><a href="#subs">Subscriptions</a><a href="#failure">When a node is down</a><a href="#failover">Master failover</a><a href="#ratio">Traffic ratio</a></nav>
 
   <figure class="shot"><img src="{{base}}img/nodes-en.png" alt="Servers page showing a master and two nodes, online and synced" loading="lazy"></figure>
 
@@ -37,6 +37,7 @@
 
   <h2 id="subs">Subscriptions with many servers</h2>
   <p>A line deployed to N servers appears N times in the user's subscription, named <i>line – server</i>, with each server's own domain or IP. Clash, sing-box and universal-link clients then pick by latency or let the user choose. Adding a server to a line updates every subscription on the next refresh — no per-user edits. When you do want a user, a plan or a reseller grant to carry only one server's entry of a line, pick that entry instead of the whole line; the subscription then lists just that one.</p>
+  <p>A line deployed on several servers gets a latency-tested group named after the line in Clash and sing-box subscriptions (not when the user only has one server on that line), with node names and order unchanged. Line names always stay with your own lines: external nodes with the same name become "X 2" whether or not the group appears, so a client that picked the line group never lands on a third-party node of the same name.</p>
 
   <h2 id="failure">When a node goes offline</h2>
   <ul>
@@ -44,7 +45,26 @@
     <li>The master marks it offline, sends a Telegram alert after a minute if configured, and keeps trying every 5 seconds.</li>
     <li>When it returns, the cursor picks up traffic from where it left off and the current snapshot is pushed. Users disabled meanwhile are removed on that push.</li>
   </ul>
-  <!-- To fill in once master failover is merged: promote a node to master, the three failover modes, standbys and encrypted replicas, the m-ui ha command. Do not describe it before then. -->
+  <h2 id="failover">Moving the master, and when the master dies</h2>
+  <p>Two things: <b>Set as master</b> moves the master to another server as planned; <b>master failover</b> lets a standby take over when the master dies (the VPS crashes or gets deleted). Both are done on the master's panel, or over SSH with <code>m-ui ha status | takeover | set-master | pause | resume</code>.</p>
+  <h3>Set as master</h3>
+  <ul>
+    <li>Click the server's role tag on the Servers page → "Set as master" and enter the admin password once. The confirmation lists the new panel address, the new reseller-panel address and the IP the subscription domain should point to.</li>
+    <li>All of the master's data is handed to that server encrypted end to end; it becomes the master with a higher epoch and the old master turns into a node. To move to a fresh VPS, add it like a node and set it as master once synced, with no backup or restore.</li>
+    <li>Writes pause for a minute or two (at most 15–60 minutes depending on the database size, with a deadline shown); if any step fails before the commit, it is cancelled automatically and the old master carries on.</li>
+    <li>If the link to that server is plain http, you must tick a risk acknowledgement first: an active man in the middle on the link could read and rewrite the whole database. Switch to https first if you can; a self-signed certificate with a pinned fingerprint is fine.</li>
+    <li>It does not promise that every byte gets counted: traffic on these two servers' own lines between packing the data and their restarts is not counted towards users' usage; traffic on the other nodes is recovered through the cursors as usual.</li>
+  </ul>
+  <h3>Master failover</h3>
+  <ul>
+    <li>Turn it on in <b>Settings → Master failover</b>; it is off by default. The first few nodes in the server list (2 by default, 1–3) become standbys and regularly receive a replica of the data, encrypted to their own public key and signed by the master.</li>
+    <li>Takeover modes: <b>Off</b>, <b>Confirm, then take over</b> (the default: 3 minutes after the master is lost a Telegram message arrives; reply with the code or click on the standby's panel) and <b>Take over automatically when the master is lost</b> (after 10 minutes; a majority of nodes must agree with three or more servers, and with one master and one node overseas probes must fail to reach the master too).</li>
+    <li>Lost means all of: the standby has heard nothing from the master for over a minute, the other nodes cannot reach it either, and overseas probes cannot reach it. The master being blocked from mainland China, one node losing its link, or the master upgrading or restarting does not count; you can also pause takeovers before an upgrade.</li>
+    <li>Against split brain, every change of master raises the epoch and nodes only follow the highest one; an old master that comes back turns into a node. A takeover cannot recover changes made after the last replica or a few minutes of traffic on the old master's own lines.</li>
+    <li>Nodes linked over plain http are not standbys by default; allow them under Advanced only if you trust the link. Every node needs v0.7.17 or later, and <b>upgrade the nodes first, then the master</b>.</li>
+    <li>Restoring the master's backup on another server and starting it moves the master there: the old master is pushed down to a node if it starts again. If you only want to look inside a backup, do not start it on a machine that is online.</li>
+    <li>If the subscription domain is on Cloudflare, enter a token under Advanced that can only edit this domain's DNS (off by default, kept apart from the certificate token; "Create one on Cloudflare" in the panel opens the creation page with the permissions filled in), and the A / AAAA records move to the new master automatically.</li>
+  </ul>
 
   <h2 id="ratio">Traffic ratio</h2>
   <p>Each server has a ratio (default 1). Traffic through a server with ratio 2 counts double against the user's quota — useful for premium routes or expensive bandwidth. A user's usage and the charts in the user details and on the landing page all show the scaled numbers, so they reconcile. A node's landing page only sees the traffic through that node, so it shows no chart.</p>
