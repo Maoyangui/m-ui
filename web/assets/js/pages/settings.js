@@ -115,7 +115,8 @@ export async function render(el) {
   // 重启按钮放在页头右侧,任何时候都看得到
   // 文字包一层:手机宽度下只留 ↻,给页面标题和右上角的帮助、支持按钮让地方(见 style.css .tb-label)
   document.getElementById('topbar-right').innerHTML = `<button class="btn danger sm" data-act="set.restart" title="${esc(t('set.restartHint'))}" aria-label="${esc(t('set.restart'))}">↻ <span class="tb-label">${t('set.restart')}</span></button>`;
-  el.innerHTML = `
+  // 大屏上分组卡片排成多栏(瀑布流),不再把一张卡拉得很宽很长
+  el.innerHTML = `<div class="masonry">
     <section class="card">
       <div class="card-head"><h2>${t('set.role')}</h2>${badge(isNode ? t('role.node') : t('role.master'), isNode ? 'node' : 'primary')}</div>
       <label class="field check"><input type="checkbox" id="set-nodeMode" ${isNode ? 'checked' : ''}><span>${t('set.roleSwitch')}</span></label>
@@ -144,7 +145,7 @@ export async function render(el) {
         <dt>License</dt><dd>GPL-3.0 · <a href="${esc(state.status.repo || '#')}" target="_blank" rel="noopener">GitHub</a></dd>
       </dl>
       <p class="hint">${t('set.restartNote')}</p>
-    </section>`;
+    </section></div>`;
   document.getElementById('set-nodeMode').addEventListener('change', e => {
     document.getElementById('role-hint').textContent = e.target.checked ? t('set.roleNode') : t('set.roleMaster');
   });

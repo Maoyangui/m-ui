@@ -95,7 +95,7 @@ export async function editPlan(id) {
     if (!isReseller()) rules = await get('rules').catch(() => rules) || [];
     renderRows();
     toast(id ? t('plan.updated') : t('plan.created'), 'ok');
-  }, { wide: true });
+  }, { size: 'xl' });
   const nodes = (Array.isArray(state.nodes) && state.nodes.length) ? state.nodes : (Array.isArray(state.status.nodes) ? state.status.nodes : []);
   const items = lineItems(state.lines, nodes, state.status.scope === 'reseller' ? (state.status.grants || []) : null);
   picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refs, items) });

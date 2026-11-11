@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML } from '../ui.js';
+import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, chipList } from '../ui.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 import { editRelayUpstream } from './upstreams.js';
 import { loadReach, reachLoaded, v6Of, v6LineBadge, v6ForLine } from '../reach.js';
@@ -11,6 +11,7 @@ const selected = new Set(); // 批量设置勾选的线路 id
 export const title = () => t('line.title');
 export const subtitle = () => t('line.subtitle');
 let query = '';
+let nodeFilter = 0, protoFilter = ''; // 快捷筛选:部署在某台服务器上(部署到全部服务器的也算)、某种协议
 
 // 与后端 render.Protocols 对应:TLS 是否必需、默认模式、是否支持传输层
 const PROTOCOLS = {
@@ -38,6 +39,8 @@ export async function render(el) {
   el.innerHTML = `
     <div class="toolbar">
       <input type="search" id="line-q" placeholder="${t('common.search')}…" value="${esc(query)}">
+      ${(state.nodes || []).length > 1 ? `<select class="sm" id="line-node" style="width:auto;max-width:14rem" aria-label="${esc(t('nav.nodes'))}"><option value="0">${esc(t('line.allNodes'))}</option>${state.nodes.map(n => `<option value="${n.id}" ${n.id === nodeFilter ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select>` : ''}
+      <span id="line-protos"></span>
       <span class="muted small" id="line-count"></span>
       <span class="grow"></span>
       <details class="menu"><summary class="btn">${t('line.quick')} ▾</summary><div class="menu-list">
@@ -53,11 +56,13 @@ export async function render(el) {
       ${(state.nodes || []).length > 1 ? `<button class="btn sm" data-act="line.batch" data-id="nodes">${t('line.batch.nodes')}</button>` : ''}
       <button class="btn sm ghost" data-act="line.clearSel">${t('line.batch.clear')}</button>
     </div>
-    <div class="table-wrap"><table class="grid">
-      <thead><tr><th></th><th style="width:1.5rem"><input type="checkbox" id="line-sel-all"></th><th>${t('common.name')}</th><th>${t('line.protocol')}</th><th>${t('common.port')}</th><th>${t('line.upstream')}</th><th>${t('nav.nodes')}</th><th>${t('line.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
+    <div class="table-wrap fill"><table class="grid">
+      <thead><tr><th></th><th style="width:1.5rem"><input type="checkbox" id="line-sel-all"></th><th>${t('common.name')}</th><th>${t('line.protocol')}</th><th>${t('common.port')}</th><th>${t('line.upstream')}</th><th>${t('nav.nodes')}</th><th class="c-p3">${t('line.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
       <tbody id="lines-body"></tbody>
     </table></div>`;
   document.getElementById('line-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
+  const ns = document.getElementById('line-node');
+  if (ns) ns.addEventListener('change', e => { nodeFilter = Number(e.target.value) || 0; renderRows(); });
   document.getElementById('line-sel-all').addEventListener('change', e => {
     visibleRows().forEach(l => e.target.checked ? selected.add(l.id) : selected.delete(l.id));
     renderRows();
@@ -65,8 +70,20 @@ export async function render(el) {
   renderRows();
   loadReach().then(renderRows); // 走 IPv6 的线路标上服务器页那份 IPv6 入站检测结果;拿不到不影响列表
 }
-function visibleRows() { return state.lines.filter(l => matches(query, l.name, l.protocol, l.port, l.upstreamName)); }
+const lineNodeIds = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
+function visibleRows() {
+  return state.lines.filter(l => matches(query, l.name, l.protocol, l.port, l.upstreamName)
+    && (!nodeFilter || !lineNodeIds(l).length || lineNodeIds(l).includes(nodeFilter))
+    && (!protoFilter || l.protocol === protoFilter));
+}
+// 协议筛选只列实际用到的协议(两种以上才出现)
+function renderProtoSeg() {
+  const used = [...new Set(state.lines.map(l => l.protocol))];
+  if (protoFilter && !used.includes(protoFilter)) protoFilter = '';
+  setHTML('line-protos', used.length > 1 ? `<div class="seg sm">${['', ...used].map(pr => `<button data-act="line.proto" data-id="${esc(pr)}" class="${pr === protoFilter ? 'active' : ''}">${esc(pr || t('line.allProtocols'))}</button>`).join('')}</div>` : '');
+}
 export function tick() { renderRows(); }
+const filtering = () => !!(query || nodeFilter || protoFilter);
 
 function tlsModeOf(l) {
   const tls = parseJ(l.tls);
@@ -86,6 +103,7 @@ function renderRows() {
   const body = document.getElementById('lines-body');
   if (!body) return;
   const online = new Set(state.onlines.lines || []);
+  renderProtoSeg();
   const rows = visibleRows();
   document.getElementById('line-count').textContent = `${rows.length} / ${state.lines.length}`;
   for (const id of [...selected]) if (!state.lines.some(l => l.id === id)) selected.delete(id); // 被删掉的线路不再算选中
@@ -113,18 +131,18 @@ function renderRows() {
       const shown = allServersShown(l);
       return `<span class="muted">${t('line.allServers')}</span>${shown.length ? ' ' + shown.map(id => tag(id, true)).join(' ') : ''}`;
     }
-    return ids.map(id => tag(id, false)).join(' ');
+    return chipList(ids.map(id => tag(id, false)), { key: 'ln-' + l.id, max: 3 }); // 服务器多时只露前 3 个,其余折成 +N(展开状态 5 秒刷新不丢)
   };
   setHTML(body, rows.map(l => `
-    <tr draggable="${query ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
+    <tr draggable="${filtering() ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
       <td class="handle" title="拖动排序">⠿</td>
       <td><input type="checkbox" class="sel" data-change="line.sel" data-id="${l.id}" ${selected.has(l.id) ? 'checked' : ''}></td>
       <td class="primary-cell">${dot(online.has(l.name))}${esc(l.name)}</td>
       <td>${protoBadges(l)}</td>
       <td class="num">${l.port}</td>
-      <td>${esc(l.upstreamName)}${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
+      <td><span class="cell-clip" title="${esc(l.upstreamName)}">${esc(l.upstreamName)}</span>${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
       <td>${serversCell(l)}</td>
-      <td class="num">${l.userCount}</td>
+      <td class="num c-p3">${l.userCount}</td>
       <td><label class="switch" title="${l.enabled ? t('common.enabled') : t('common.disabled')}"><input type="checkbox" data-change="line.toggle" data-id="${l.id}" ${l.enabled ? 'checked' : ''}><span></span></label></td>
       <td class="actions">
         <button class="btn sm" data-act="line.edit" data-id="${l.id}">${t('common.edit')}</button>
@@ -133,7 +151,7 @@ function renderRows() {
         <button class="btn sm danger" data-act="line.del" data-id="${l.id}">${t('common.delete')}</button>
       </td>
     </tr>`).join(''));
-  if (!query) enableDragSort(body);
+  if (!filtering()) enableDragSort(body); // 筛选后看到的不是全部线路,拖动排序会打乱没显示的那些
 }
 
 function enableDragSort(tbody) {
@@ -571,7 +589,7 @@ async function editLine(id, cloneFrom, preset) {
     renderRows();
     toast(id ? t('line.updated') : t('line.created'), 'ok');
     scopeWidenedNotice(saved && saved.scopeWidened);
-  }, { wide: true });
+  }, { size: 'xl' });
   renderDynamic(l);
   rrBind(rrInit);
   document.getElementById('f-protocol').addEventListener('change', () => { renderDynamic({ options: {}, tls: {}, transport: {} }); syncV6Tips(); });
@@ -849,18 +867,28 @@ function pickLineCert() {
   const cur = fv('f-cert');
   const now = Date.now() / 1000;
   // 各服务器上这张证书的剩余天数:剩 14 天以内、或会自动续却过了续期时间还没续上的变黄,自动续期在失败的变红(悬停看原因)
-  const chips = info => servers.map(n => {
+  const cell = (n, info) => {
     const c = info.has.get(n.id);
-    if (!c) return badge(n.name + ' · ' + t('line.certMissing'), 'warn');
+    if (!c) return { kind: 'warn', missing: true, html: badge(n.name + ' · ' + t('line.certMissing'), 'warn') };
     const left = Math.floor((c.notAfter - now) / 86400);
     const overdue = c.autoRenew && c.renewBefore && c.notAfter - now <= c.renewBefore;
     const kind = c.autoRenew && c.renewErr ? 'danger' : left <= 14 || overdue ? 'warn' : 'ok';
     const label = n.name + ' · ' + t('cert.daysLeftN', { n: left });
-    return c.renewErr ? `<span class="badge ${kind}" title="${esc(trErr(c.renewErr))}">${esc(label)}</span>` : badge(label, kind);
-  }).join('');
+    return { kind, html: c.renewErr ? `<span class="badge ${kind}" title="${esc(trErr(c.renewErr))}">${esc(label)}</span>` : badge(label, kind) };
+  };
+  const chips = (info, name) => {
+    const cells = servers.map(n => cell(n, info));
+    const have = servers.filter(n => info.has.get(n.id)).length, missing = servers.length - have;
+    const soon = cells.filter(x => x.kind !== 'ok' && !x.missing).length;
+    if (servers.length <= 3) return cells.map(x => x.html).join('');
+    const sum = `<span class="muted small">${esc(t('cert.srvSum', { have, missing, soon }))}</span>`;
+    const bad = cells.filter(x => x.kind !== 'ok').map(x => x.html);
+    return sum + (bad.length ? ' ' + chipList(bad, { key: 'lc-' + name, max: 6 }) : '')
+      + `<details class="adv" style="margin-top:.25rem"><summary>${esc(t('cert.srvAll'))}</summary><span class="chips">${cells.map(x => x.html).join('')}</span></details>`;
+  };
   const opts = [{ value: '', name: t('line.certDefault'), sub: esc(t('line.certDefaultHelp')), current: !cur }];
   for (const [name, info] of byName) {
-    opts.push({ value: name, name: certLabel(name), sub: info.domains.length > 1 ? info.domains.map(esc).join(', ') : (info.selfSigned ? esc(t('cert.srcSelf')) : ''), chips: servers.length ? chips(info) : '', current: cur === name });
+    opts.push({ value: name, name: certLabel(name), sub: info.domains.length > 1 ? info.domains.map(esc).join(', ') : (info.selfSigned ? esc(t('cert.srcSelf')) : ''), chips: servers.length ? chips(info, name) : '', current: cur === name });
   }
   // 选过的证书已经不在任何服务器上了:也列出来,不然看不出当前选的是什么
   if (cur && !byName.has(cur)) opts.push({ value: cur, name: certLabel(cur), sub: esc(t('line.certMissing')), current: true });
@@ -884,6 +912,7 @@ function masqOf(o) {
 const realityText = r => r.ok ? t('line.reality.ok', { ms: r.ms }) : t('line.reality.bad.' + (r.error || 'connect'));
 
 registerActions({
+  'line.proto': id => { protoFilter = id || ''; renderRows(); },
   'line.realityCheck': async (_, btn) => {
     const box = document.getElementById('f-hs-res');
     btn.disabled = true; box.hidden = false; box.textContent = t('line.reality.checking'); box.className = 'hint';

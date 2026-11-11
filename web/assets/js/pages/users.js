@@ -1,7 +1,7 @@
-import { state, load, isReseller } from '../app.js';
+import { state, load, isReseller, takeHashParams } from '../app.js';
 import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
-import { deviceCount, gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtDate, fmtDuration, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML, setText } from '../ui.js';
+import { deviceCount, gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtDate, fmtDuration, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML, setText, chipList } from '../ui.js';
 
 // 生效中的规则限速(主面板才有):列表徽章与详情抽屉都从这里取
 const limitsOf = id => (state.limitStates || []).filter(s => s.userId === id);
@@ -12,7 +12,7 @@ function ruleLimitsHTML(u) {
   return `<h3 style="margin-top:.6rem">${t('user.ruleLimits')}</h3><div class="chips">${lim.map(s => `<span class="chip" title="${esc(s.reason || '')}">${esc(s.ruleName)} · ${s.upMbps || '—'}/${s.downMbps || '—'} M · ${s.until ? t('rule.remaining', { n: Math.max(0, Math.ceil((s.until - now) / 60)) }) : t('rule.untilWindowEnd')}</span>`).join('')}</div>`;
 }
 import { barChart, bucketFor } from '../chart.js';
-import { lineItems, keysFromRefs, linePicker, refLabels } from '../linepicker.js';
+import { lineItems, keysFromRefs, linePicker, refLabels, refChips } from '../linepicker.js';
 
 // 代理面板没有服务器页:服务器名与授权范围来自 status;主面板用 state.nodes
 const pickerNodes = () => (Array.isArray(state.nodes) && state.nodes.length) ? state.nodes : (Array.isArray(state.status.nodes) ? state.status.nodes : []);
@@ -24,6 +24,9 @@ import { tzOffsetMinutes } from '../ui.js';
 export const title = () => t('user.title');
 export const subtitle = () => t('user.subtitle');
 let query = '', filter = 'all', drawerUser = null, sortKey = 'id', sortDir = 1;
+// 快捷筛选:套餐(0 = 不限);only = 'expiring' | 'quota'(概况的"查看全部"带过来,工具栏里显示一个可清除的 chip,不进状态按钮)
+let planFilter = 0, only = '';
+// 全选只勾当前页;筛选结果多于一页时,批量条里另给"选中全部 N 个筛选结果"
 const selected = new Set();
 // 分页:全部用户 → 搜索 → 筛选 → 排序 → 只渲染当前页。上千用户时不再一次画出整张表。
 const PAGE_SIZES = [25, 50, 100];
@@ -34,19 +37,48 @@ const SORTS = {
   id: u => u.id, name: u => u.name.toLowerCase(), usage: u => (u.up || 0) + (u.down || 0),
   expiry: u => u.expiry || Number.MAX_SAFE_INTEGER, devices: u => deviceCount(u.onlineIps), status: u => (u.enabled ? 0 : 1),
 };
-const th = (key, label) => `<th class="sortable ${sortKey === key ? 'sorted' : ''}" data-act="user.sort" data-id="${key}">${label}${sortKey === key ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
+const th = (key, label, cls = '') => `<th class="sortable ${sortKey === key ? 'sorted' : ''} ${cls}" data-act="user.sort" data-id="${key}">${label}${sortKey === key ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
 
 const now = () => Math.floor(Date.now() / 1000);
 const isExpired = u => u.expiry > 0 && u.expiry < now();
 const isOver = u => u.volume > 0 && (u.up + u.down) > u.volume;
+// 「快到期」「流量将尽」的口径:主面板跟 Telegram 预警同一组设置(默认 3 天 / 80%),代理面板固定 7 天 / 80%。概况共用
+export function expiringDays() {
+  if (isReseller()) return 7;
+  const d = Number((state.settings || {}).tgExpiringDays);
+  return d > 0 ? d : 3;
+}
+export function quotaPct() {
+  if (isReseller()) return 80;
+  const p = Number((state.settings || {}).tgQuotaPercent);
+  return p > 0 && p <= 100 ? p : 80;
+}
+const isExpiring = u => u.enabled && u.expiry > now() && u.expiry - now() <= expiringDays() * 86400;
+const isQuota = u => u.enabled && u.volume > 0 && (u.up + u.down) * 100 >= u.volume * quotaPct();
+const onlineSet = () => new Set((state.onlines && state.onlines.users) || []);
 const planSelect = (id, cur, allowNone = true) =>
   `<select id="${id}">${allowNone ? `<option value="0">${t('plan.none')}</option>` : ''}${state.plans.map(p => `<option value="${p.id}" ${cur === p.id ? 'selected' : ''}>${esc(p.name)} · ${p.volumeGb ? p.volumeGb + 'GB' : '∞'} / ${p.days ? p.days + t('common.day') : '∞'}</option>`).join('')}</select>`;
 
 export async function render(el) {
+  // 概况等页面的链接:#/users?f=online|expiring|quota、#/users?q=名字(恰好一个同名用户时直接打开详情)
+  const hp = takeHashParams('users');
+  let openId = 0;
+  if (hp.has('f') || hp.has('q')) {
+    const f = hp.get('f') || '';
+    filter = ['online', 'enabled', 'disabled', 'expired', 'over'].includes(f) ? f : 'all';
+    only = f === 'expiring' || f === 'quota' ? f : '';
+    planFilter = 0;
+    query = hp.get('q') || '';
+    page = 1;
+    const hit = query ? state.users.filter(u => u.name === query) : [];
+    if (hit.length === 1) openId = hit[0].id;
+  }
   el.innerHTML = `
     <div class="toolbar">
       <input type="search" id="user-q" placeholder="${t('common.search')}…" value="${esc(query)}">
-      <div class="seg" id="user-filter">${['all', 'enabled', 'disabled', 'expired', 'over'].map(f => `<button data-act="user.filter" data-id="${f}" class="${f === filter ? 'active' : ''}">${t('user.filter.' + f)}</button>`).join('')}</div>
+      <div class="seg" id="user-filter">${['all', 'online', 'enabled', 'disabled', 'expired', 'over'].map(f => `<button data-act="user.filter" data-id="${f}" class="${f === filter ? 'active' : ''}">${t('user.filter.' + f)}</button>`).join('')}</div>
+      ${state.plans.length ? `<select class="sm" id="user-plan" style="width:auto;max-width:12rem" aria-label="${esc(t('user.plan'))}"><option value="0">${esc(t('user.allPlans'))}</option>${state.plans.map(pl => `<option value="${pl.id}" ${pl.id === planFilter ? 'selected' : ''}>${esc(pl.name)}</option>`).join('')}</select>` : ''}
+      <span id="user-only"></span>
       <span class="muted small" id="user-count"></span>
       <span class="grow"></span>
       ${isReseller() ? '' : `<button class="btn" data-act="user.import">${t('user.import')}</button>
@@ -56,6 +88,7 @@ export async function render(el) {
     </div>
     <div class="toolbar batch-bar" id="batch-bar" hidden>
       <span class="badge primary" id="batch-count"></span>
+      <button class="btn sm ghost" data-act="user.selAllFiltered" id="sel-all-filtered" hidden></button>
       <button class="btn sm" data-act="user.batch" data-id="enable">${t('user.batch.enable')}</button>
       <button class="btn sm" data-act="user.batch" data-id="disable">${t('user.batch.disable')}</button>
       <button class="btn sm" data-act="user.batch" data-id="extend">${t('user.batch.extend')}</button>
@@ -65,8 +98,8 @@ export async function render(el) {
       <span class="grow"></span>
       <button class="btn sm ghost" data-act="user.clearSel">${t('common.cancel')}</button>
     </div>
-    <div class="table-wrap"><table class="grid">
-      <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sel-all"></th>${th('name', t('common.name'))}${th('status', t('common.status'))}${th('usage', t('user.usage'))}${th('expiry', t('user.expiry'))}${th('devices', t('user.devices'))}<th>${t('user.speed')}</th><th></th></tr></thead>
+    <div class="table-wrap fill" style="--fill-reserve:10rem"><table class="grid">
+      <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sel-all"></th>${th('name', t('common.name'))}${th('status', t('common.status'))}${th('usage', t('user.usage'))}${th('expiry', t('user.expiry'))}${th('devices', t('user.devices'), 'c-p2')}<th class="c-p3">${t('user.speed')}</th><th></th></tr></thead>
       <tbody id="users-body"></tbody>
     </table></div>
     <div class="pager" id="user-pager" hidden></div>`;
@@ -76,8 +109,11 @@ export async function render(el) {
     pageRows().forEach(u => e.target.checked ? selected.add(u.id) : selected.delete(u.id));
     renderRows();
   });
+  const ps = document.getElementById('user-plan');
+  if (ps) ps.addEventListener('change', e => { planFilter = Number(e.target.value) || 0; page = 1; renderRows(); });
   lastPager = '';
   renderRows();
+  if (openId) showDetail(openId);
 }
 export async function tick() { await load('users'); renderRows(); if (drawerUser) refreshDrawerLive(); }
 
@@ -103,7 +139,11 @@ function expiryCell(u) {
 }
 function visibleRows() {
   let rows = state.users.filter(u => matches(query, u.name, u.remark, u.desc, planNameOf(u)));
-  rows = rows.filter(u => ({ all: true, enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, expired: isExpired(u), over: isOver(u) })[filter]);
+  const on = filter === 'online' ? onlineSet() : null;
+  rows = rows.filter(u => ({ all: true, online: on && on.has(u.name), enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, expired: isExpired(u), over: isOver(u) })[filter]);
+  if (planFilter) rows = rows.filter(u => u.planId === planFilter);
+  if (only === 'expiring') rows = rows.filter(isExpiring);
+  if (only === 'quota') rows = rows.filter(isQuota);
   const key = SORTS[sortKey] || SORTS.id;
   return rows.slice().sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * sortDir; });
 }
@@ -145,9 +185,17 @@ function renderRows() {
   const total = visibleRows().length;
   const rows = pageRows();
   document.getElementById('user-count').textContent = `${total} / ${state.users.length}`;
+  setHTML('user-only', only ? `<span class="chip">${esc(t('user.filter.only', { what: only === 'expiring' ? t('user.filter.expiring', { d: expiringDays() }) : t('user.filter.quota', { p: quotaPct() }) }))} <button type="button" class="btn xs ghost" data-act="user.clearOnly" title="${esc(t('user.filter.clear'))}">✕</button></span>` : '');
   const bar = document.getElementById('batch-bar');
   bar.hidden = selected.size === 0;
   document.getElementById('batch-count').textContent = t('user.selected', { n: selected.size });
+  // 当前页全选了、筛选结果又不止一页:给一个"选中全部 N 个筛选结果"
+  const allBtn = document.getElementById('sel-all-filtered');
+  if (allBtn) {
+    const pageAll = rows.length > 0 && rows.every(u => selected.has(u.id));
+    allBtn.hidden = !(pageAll && total > rows.length && selected.size < total);
+    allBtn.textContent = t('user.selAllFiltered', { n: total });
+  }
   const selAll = document.getElementById('sel-all');
   if (selAll) selAll.checked = rows.length > 0 && rows.every(u => selected.has(u.id));
   renderPager(total);
@@ -161,8 +209,8 @@ function renderRows() {
       <td>${statusBadge(u)}</td>
       <td><span class="num">${fmtBytes(used, 1)}</span> <span class="muted small">/ ${u.volume ? fmtBytes(u.volume, 0) : t('common.unlimited')}</span>${progress(used, u.volume)}</td>
       <td>${expiryCell(u)}</td>
-      <td class="num">${ips} / ${u.deviceLimit || '∞'}</td>
-      <td class="num">${(u.speedUp || u.speedDown) ? `${u.speedUp || '∞'}/${u.speedDown || '∞'} M` : '∞'}</td>
+      <td class="num c-p2">${ips} / ${u.deviceLimit || '∞'}</td>
+      <td class="num c-p3">${(u.speedUp || u.speedDown) ? `${u.speedUp || '∞'}/${u.speedDown || '∞'} M` : '∞'}</td>
       <td class="actions">
         <button class="btn sm" data-act="user.detail" data-id="${u.id}">${t('common.details')}</button>
         <button class="btn sm" data-act="user.edit" data-id="${u.id}">${t('common.edit')}</button>
@@ -236,8 +284,8 @@ async function showDetail(id) {
       <div id="ud-chart"></div>
       ${state.status && state.status.role === 'node' ? `<p class="hint">${t('user.chartNode')}</p>` : ((state.nodes || []).some(n => n.ratio > 0 && n.ratio !== 1) ? `<p class="hint">${t('user.chartRatio')}</p>` : '')}
     </section>
-    <section><h3>${t('user.lines')}</h3><div class="chips">${refLabels(refsOf(u), state.lines, pickerNodes()).map(n => `<span class="chip">${esc(n)}</span>`).join('') || `<span class="muted small">${t('common.none')}</span>`}</div>
-      ${(u.extIds || []).length ? `<h3 style="margin-top:.6rem">${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span></span>` : ''; }).join('')}</div>` : ''}</section>`);
+    <section><h3>${t('user.lines')}</h3>${refChips(refsOf(u), state.lines, pickerNodes(), { key: 'ud-lines-' + u.id, max: 20 }) || `<span class="muted small">${t('common.none')}</span>`}
+      ${(u.extIds || []).length ? `<h3 style="margin-top:.6rem">${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span></span>` : ''; }).join('')}</div>` : ''}</section>`, { wide: true });
   refreshDrawerLive();
   loadPlanOps(id);
   await renderUserChart(u.name, drawerRange);
@@ -336,7 +384,7 @@ function editUser(id) {
     toast(id ? t('user.updated') : t('user.created'), 'ok');
     // 系统里的第一个用户:直接打开详情抽屉,订阅地址 / 二维码 / 复制就在眼前,不用再找
     if (created && created.id && state.users.length === 1) showDetail(created.id);
-  }, { wide: true });
+  }, { size: 'xl' });
   const items = pickerItems();
   picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refsOf(u), items) });
   // 新建时选了套餐就直接填好额度;编辑老用户时只是改归属,要填额度再点按钮
@@ -619,7 +667,7 @@ function bulkDialog() {
     toast(t('user.bulkDone', { n: res.length }), 'ok');
     closeModal();
     openModal(t('user.bulkResult'), `<textarea style="min-height:16rem" readonly>${esc(res.map(r => r.name + '\t' + r.link).join('\n'))}</textarea>`, null);
-  }, { wide: true });
+  }, { size: 'xl' });
   const items = pickerItems();
   picker = linePicker(document.getElementById('f-lines'), { items, selected: new Set(items.map(it => it.key)) });
 }
@@ -632,6 +680,8 @@ async function fullUpdate(u, patch) {
 
 registerActions({
   'user.filter': id => { filter = id; page = 1; document.querySelectorAll('#user-filter button').forEach(b => b.classList.toggle('active', b.dataset.id === id)); renderRows(); },
+  'user.clearOnly': () => { only = ''; page = 1; renderRows(); },
+  'user.selAllFiltered': () => { visibleRows().forEach(u => selected.add(u.id)); renderRows(); },
   'user.page': id => { page += id === 'next' ? 1 : -1; renderRows(); },
   'user.chartRange': async id => {
     drawerRange = Number(id);
@@ -680,11 +730,18 @@ registerActions({
     const ids = [...selected];
     if (!ids.length) return;
     if (action === 'plan') { renewDialog(ids); return; }
-    let days = 0;
-    if (action === 'extend') {
-      days = Number(prompt(t('user.batchDays'), '30'));
-      if (!days) return;
+    if (action === 'extend') { // 输入天数用面板自己的弹窗(浏览器原生 prompt 在一些环境里被拦)
+      openModal(t('user.batch.extend') + ` (${ids.length})`, `<div class="form-grid">${field(t('user.batchDays'), '<input id="f-days" type="number" min="1" max="3650" value="30">')}</div>`, async () => {
+        const days = Math.floor(Number(fv('f-days')));
+        if (!(days > 0)) throw new Error(t('user.batchDays'));
+        const r = await post('users/batch', { ids, action, days });
+        selected.clear();
+        await load('users', 'lines', 'status'); renderRows();
+        toast(t('user.batchDone', { n: r.affected }), 'ok');
+      });
+      return;
     }
+    const days = 0;
     if (action === 'delete' && !await confirm(t('user.batchDeleteConfirm', { n: ids.length }), { danger: true, okText: t('common.delete') })) return;
     try {
       const r = await post('users/batch', { ids, action, days });

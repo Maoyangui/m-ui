@@ -1,33 +1,48 @@
-import { state, load } from '../app.js';
+import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, setHTML } from '../ui.js';
-import { loadReach, reachCell, reachToolbar, refreshDetail, setNodes, setReachListener } from '../reach.js';
+import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, setHTML, matches, debounce } from '../ui.js';
+import { loadReach, reachCell, reachToolbar, refreshDetail, setNodes, setReachListener, reach, isBad, v6Of } from '../reach.js';
+import { nodeIssues, trackUnsynced } from '../issues.js';
 
 export const title = () => t('node.title');
 export const subtitle = () => t('node.subtitle');
 let data = { nodes: [], revision: '', role: 'master', masterId: 0, appliedAt: '' };
 const isNodeView = () => data.role === 'node';
+let query = '', onlyBad = false;
+const unsyncedSince = new Map(); // 服务器名 → 第一次看到"未同步"的时间(一次保存后副机会有几秒未同步,不到 30 秒不算异常)
+const MANY = 10; // 服务器超过这么多才给搜索框和「只看异常」(从概况点进来时不论多少台都给)
 
 setNodes(() => data.nodes);
 setReachListener(() => { renderReachBar(); renderRows(); refreshDetail(); });
 
 export async function render(el) {
+  const hp = takeHashParams('nodes'); // 概况、提示条的「查看」:#/nodes?f=bad
+  if (hp.has('f')) { onlyBad = hp.get('f') === 'bad'; query = ''; }
   [data] = await Promise.all([get('nodes'), loadReach()]);
+  trackUnsynced(unsyncedSince, data.nodes);
+  const tools = data.nodes.length > MANY || onlyBad;
   el.innerHTML = `
     <div class="toolbar">
       <span class="muted small">${t('node.revision')} <code>${esc(data.revision || '—')}</code></span>
+      ${tools ? `<input type="search" id="node-q" class="sm" style="max-width:13rem" placeholder="${t('common.search')}…" value="${esc(query)}">
+      <label class="small muted" style="display:inline-flex;align-items:center;gap:.3rem" title="${esc(t('node.onlyBadHelp'))}"><input type="checkbox" id="node-onlybad" ${onlyBad ? 'checked' : ''}> ${t('node.onlyBad')}</label>
+      <span class="muted small" id="node-count"></span>` : ''}
       <span class="grow"></span>
       <span class="row" id="reach-bar"></span>
       ${isNodeView() ? '' : `<button class="btn primary" data-act="node.add">${t('node.add')}</button>`}
     </div>
     <p class="hint" style="margin-bottom:.8rem">${isNodeView() ? t('node.nodeView') : t('node.howto')}</p>
     <div id="decom-gone"></div>
-    <div class="table-wrap"><table class="grid tight nodes">
-      <thead><tr><th>${t('common.name')}</th><th>${t('node.domain')}</th><th>${t('common.status')}</th><th title="${esc(t('reach.colHint'))}">${t('reach.col')}</th><th>${t('node.sync')}</th><th>${t('node.core')}</th><th>${t('node.online')}</th><th></th></tr></thead>
+    <div class="table-wrap fill"><table class="grid tight nodes">
+      <thead><tr><th>${t('common.name')}</th><th>${t('node.domain')}</th><th>${t('common.status')}</th><th class="c-reach" title="${esc(t('reach.colHint'))}">${t('reach.col')}</th><th class="c-sync c-p3">${t('node.sync')}</th><th class="c-core">${t('node.core')}</th><th class="c-online c-p3">${t('node.online')}</th><th class="c-act"></th></tr></thead>
       <tbody id="nodes-body"></tbody>
     </table></div>`;
+  const q = document.getElementById('node-q');
+  if (q) q.addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
+  const ob = document.getElementById('node-onlybad');
+  if (ob) ob.addEventListener('change', e => { onlyBad = e.target.checked; renderRows(); });
   renderReachBar();
   renderRows();
   renderDecomGone();
@@ -36,6 +51,7 @@ export async function render(el) {
 export async function tick() {
   if (!document.getElementById('nodes-body')) return;
   [data] = await Promise.all([get('nodes'), loadReach()]);
+  trackUnsynced(unsyncedSince, data.nodes);
   renderReachBar();
   renderRows();
   renderDecomGone();
@@ -144,11 +160,35 @@ function coreCell(n) {
 
 function actionsCell(n) {
   if (isNodeView()) return '';
+  // 更多菜单里的项:一项一个按钮;容灾等以后加的操作也往这里放
+  const more = [
+    n.isLocal || !n.enabled ? '' : `<button data-act="node.push" data-id="${n.id}">${t('node.push')}</button>`,
+    n.isLocal || !n.certFp ? '' : `<button data-act="node.resetCert" data-id="${n.id}" title="${esc(n.certFp)}">${t('node.resetCert')}</button>`,
+    n.isLocal ? '' : `<hr><button class="danger" data-act="node.del" data-id="${n.id}">${t('common.delete')}</button>`,
+  ].filter(Boolean);
   return `<button class="btn sm" data-act="node.test" data-id="${n.id}">${t('common.test')}</button>
-        ${n.isLocal || !n.enabled ? '' : `<button class="btn sm" data-act="node.push" data-id="${n.id}">${t('node.push')}</button>`}
-        ${n.isLocal || !n.certFp ? '' : `<button class="btn sm" data-act="node.resetCert" data-id="${n.id}" title="${esc(n.certFp)}">${t('node.resetCert')}</button>`}
         <button class="btn sm" data-act="node.edit" data-id="${n.id}">${t('common.edit')}</button>
-        ${n.isLocal ? '' : `<button class="btn sm danger" data-act="node.del" data-id="${n.id}">${t('common.delete')}</button>`}`;
+        ${more.length ? `<details class="menu"><summary class="btn sm">${t('common.more')} ▾</summary><div class="menu-list">${more.join('').replace(/^<hr>/, '')}</div></details>` : ''}`;
+}
+
+// 「只看异常」的口径(和概况「需要处理」同一份,见 issues.js):离线、数据面停止、重载失败、下线通知未送达、记账失败、
+// 未同步超过 30 秒、版本不一致;再加上大陆连通不通 / 部分不通、证书有问题、IPv6 入站不通(有检测结果时)
+function nodeBad(n) {
+  if (!n.isLocal && nodeIssues(n, { unsyncedFor: trackUnsynced(unsyncedSince, data.nodes)(n.name) }).length) return true;
+  if (n.isLocal) {
+    const rl = state.status.reload || {};
+    if ((rl.at && !rl.ok) || !state.status.coreRunning) return true;
+  }
+  if (n.status && n.status.ledgerRegressAt && Date.now() / 1000 - n.status.ledgerRegressAt < 86400) return true; // 和这一行的「账本回退」徽章一致
+  const r = ((reach && reach.results) || []).find(x => x.nodeId === n.id);
+  if (r && isBad(r.verdict)) return true;
+  const v6 = v6Of(n.id);
+  if (v6 && v6.state === 'down') return true;
+  if ((state.status.certAlerts || []).some(a => (a.nodeId || 0) === (n.isLocal ? 0 : n.id))) return true;
+  return certFailBadge(n) !== '';
+}
+function visibleNodes() {
+  return data.nodes.filter(n => matches(query, n.name, n.domain, n.addr, n.publicIp, n.publicIp6) && (!onlyBad || nodeBad(n)));
 }
 
 // 探测到的 IPv4 / IPv6(publicIp 有 IPv4 时是 IPv4,老版本副机在纯 IPv6 机器上报的是 v6)
@@ -181,20 +221,23 @@ function addrCell(n) {
 function renderRows() {
   const body = document.getElementById('nodes-body');
   if (!body) return;
-  if (!data.nodes.length) { setHTML(body, `<tr><td colspan="8">${empty()}</td></tr>`); return; }
+  const rows = visibleNodes();
+  const cnt = document.getElementById('node-count');
+  if (cnt) cnt.textContent = `${rows.length} / ${data.nodes.length}`;
+  if (!rows.length) { setHTML(body, `<tr><td colspan="8">${empty(onlyBad && data.nodes.length ? t('node.noBad') : undefined)}</td></tr>`); return; }
   // 每 5 秒刷新一次:内容没变就不动 DOM(整表重画会让鼠标下的按钮、提示闪一下)
-  setHTML(body, data.nodes.map(n => {
+  setHTML(body, rows.map(n => {
     const s = n.status || {};
     const domain = n.domain || (n.isLocal ? state.settings.webDomain || '' : '');
     return `<tr>
       <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl && !isNodeView() ? `${isPlain(n.apiUrl) ? ` <span title="${esc(t('node.plainHelp'))}">${badge(t('node.plain'), 'warn')}</span>` : ''}<div class="sub-cell mono ellip" title="${esc(n.apiUrl)}">${esc(n.apiUrl)}</div>` : ''}</td>
       <td class="mono"><span class="ellip" title="${esc(domain)}">${esc(domain || '—')}</span>${addrCell(n)}</td>
       <td>${statusCell(n)}</td>
-      <td class="reach-td">${reachCell(n, isNodeView())}</td>
-      <td>${syncCell(n)}</td>
-      <td>${coreCell(n)}</td>
-      <td class="num">${n.isLocal ? (state.status.onlineUsers ?? '—') : (s.ok ? s.onlineUsers : '—')}</td>
-      <td class="actions">${actionsCell(n)}</td></tr>`;
+      <td class="reach-td c-reach">${reachCell(n, isNodeView())}</td>
+      <td class="c-sync c-p3">${syncCell(n)}</td>
+      <td class="c-core">${coreCell(n)}</td>
+      <td class="num c-online c-p3">${n.isLocal ? (state.status.onlineUsers ?? '—') : (s.ok ? s.onlineUsers : '—')}</td>
+      <td class="actions c-act">${actionsCell(n)}</td></tr>`;
   }).join(''));
 }
 

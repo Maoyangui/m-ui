@@ -22,7 +22,28 @@ const reaches = {};      // id → { 指纹: 大陆连通结果 }
 const jobs = {};         // id → { job, timer } 进行中的测速(请求还没回来时就占上,防重复点)
 const reachJobs = {};    // id → { job, timer } 进行中的大陆连通(同上)
 const inclHidden = {};   // id → 测速全部时也测已隐藏的
+const filt = {};         // id → 筛选:all | ok(有能通的)| bad(有不通的)| hidden | sel(已选)
+const sorts = {};        // id → { k: 'name' | 'delay', dir: 1 | -1 };没有 = 按订阅里的顺序
+const limits = {};       // id → 当前画了多少行(节点很多时分批画,每批 PAGE 个)
+const keepTop = {};      // id → 列表重画、面板重建前子表的滚动位置
+let focusNext = 0;       // 刚展开的那个:画好后滚到面板顶部,整个滚动区落在视口里
 let rowsSig = '';
+const PAGE = 200;
+// 视图:汇总(每个节点一格:最快的那台 + n/m 台通)/ 逐台(每台服务器一列)。服务器超过 6 台默认汇总,切过就记住;手机只看汇总
+const LS_VIEW = 'm-ui.extView', LS_COLS = 'm-ui.extCols';
+const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* 隐私模式 */ } };
+const mobile = () => typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches;
+const viewOf = c => (mobile() ? 'sum' : lsGet(LS_VIEW) || ((c.servers || []).length > 6 ? 'sum' : 'grid'));
+// 逐台视图显示哪几台服务器的列(存的是服务器 id;没选过、或选的都不在了 = 全部)
+function colIds(c) {
+  const all = (c.servers || []).map(x => x.id);
+  let pick = null;
+  try { pick = JSON.parse(lsGet(LS_COLS) || 'null'); } catch { pick = null; }
+  if (!Array.isArray(pick)) return all;
+  const set = new Set(pick), out = all.filter(id => set.has(id));
+  return out.length ? out : all;
+}
 
 // 名字里带会变的数字(剩余流量、天数、到期日、倍率):这类信息节点每次刷新都改名
 const DYNAMIC = /\d+(\.\d+)?\s*(GB|MB|TB|KB|G|M|T|天|日|小时|%|倍|x)|\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}/i;
@@ -60,6 +81,7 @@ function renderRows() {
     x.lastFetch, x.lastTry, x.lastError, x.contentSig, x.enabled, x.userCount].join('\u0001')).join('\u0002') + '|' + [...open].join(',');
   if (sig === rowsSig) return;
   rowsSig = sig;
+  for (const id of open) { const w = document.getElementById('ext-wrap-' + id); if (w && w.scrollTop) keepTop[id] = w.scrollTop; }
   if (!rows.length) { body.innerHTML = `<tr><td colspan="8">${empty(t('ext.empty'))}</td></tr>`; return; }
   body.innerHTML = rows.map(x => rowHTML(x) + (open.has(x.id)
     ? `<tr class="ext-sub"><td colspan="8"><div class="ext-panel" id="ext-panel-${x.id}"><span class="muted small">${t('common.loading')}</span></div></td></tr>` : '')).join('');
@@ -120,35 +142,122 @@ async function fillPanel(id) {
   const again = document.getElementById('ext-panel-' + id);
   if (!again || !cache[id]) return; // 等接口的功夫被收起了
   again.innerHTML = panelHTML(id, cache[id]);
-  renderSubBody(id);
+  renderTable(id);
+  const w = document.getElementById('ext-wrap-' + id);
+  if (w && keepTop[id]) w.scrollTop = keepTop[id];
+  if (focusNext === id) { focusNext = 0; if (again.scrollIntoView) again.scrollIntoView({ block: 'start' }); }
 }
 
+// 工具栏两行:第一行搜索、筛选、视图、服务器列;第二行是动作。子表放在自带滚动区里(表头吸顶、前两列吸左)
+const FILTERS = ['all', 'ok', 'bad', 'hidden', 'sel'];
 function panelHTML(id, c) {
   const stale = c.stale ? `<span class="muted small" title="${esc(t('ext.staleHelp'))}">${t('ext.staleN', { n: c.stale })} <a href="#" data-act="ext.cleanStale" data-id="${id}">${t('ext.cleanStale')}</a></span>` : '';
+  const servers = c.servers || [], view = viewOf(c), f = filt[id] || 'all';
+  const cols = new Set(colIds(c));
+  const colMenu = view === 'grid' && servers.length > 1 ? `<details class="menu ext-cols"><summary class="btn sm">${t('ext.cols')} ▾</summary><div class="menu-list">
+      <div class="row" style="padding:.2rem .4rem"><button type="button" class="btn xs" data-act="ext.colsAll" data-id="${id}">${t('cl.all')}</button><button type="button" class="btn xs" data-act="ext.colsNone" data-id="${id}">${t('cl.none')}</button></div>
+      ${servers.map(x => `<label><input type="checkbox" data-change="ext.col" data-id="${id}" data-sid="${x.id}" ${cols.has(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}
+    </div></details>` : '';
   return `<div class="toolbar ext-tools">
       <input type="search" data-q="${id}" placeholder="${t('ext.search')}" value="${esc(query[id] || '')}">
+      <div class="seg sm">${FILTERS.map(k => `<button data-act="ext.filter" data-id="${id}" data-f="${k}" class="${k === f ? 'active' : ''}">${t('ext.f.' + k)}</button>`).join('')}</div>
+      ${servers.length > 1 ? `<div class="seg sm ext-view">${['sum', 'grid'].map(v => `<button data-act="ext.view" data-id="${id}" data-v="${v}" class="${v === view ? 'active' : ''}" title="${esc(t('ext.view.' + v + 'Help'))}">${t('ext.view.' + v)}</button>`).join('')}</div>` : ''}
+      ${colMenu}
       <span class="muted small" id="ext-count-${id}"></span>${stale}<span class="grow"></span>
-      <button class="btn sm" data-act="ext.hideSel" data-id="${id}" title="${esc(t('ext.hideHelp'))}">${t('ext.hideSel')}</button>
-      <button class="btn sm" data-act="ext.showSel" data-id="${id}">${t('ext.showSel')}</button>
-      <button class="btn sm" data-act="ext.testAll" data-id="${id}" title="${esc(t('ext.testAllHelp'))}">${t('ext.testAll')}</button>
-      <label class="small muted"><input type="checkbox" data-change="ext.inclHidden" data-id="${id}" ${inclHidden[id] ? 'checked' : ''}> ${t('ext.inclHidden')}</label>
-      <button class="btn sm" data-act="ext.testSel" data-id="${id}">${t('ext.testSel')}</button>
-      <button class="btn sm danger" data-act="ext.testStop" data-id="${id}" id="ext-stop-${id}" ${jobs[id] && jobs[id].job ? '' : 'hidden'}>${t('ext.testStop')}</button>
-      <button class="btn sm" data-act="ext.reachSel" data-id="${id}" title="${esc(t('ext.reachHelp'))}">${t('ext.reachSel')}</button>
-      <button class="btn sm primary" data-act="ext.addUp" data-id="${id}">${t('ext.addUp')}</button>
+      <div class="ext-row2">
+        <button class="btn sm" data-act="ext.hideSel" data-id="${id}" title="${esc(t('ext.hideHelp'))}">${t('ext.hideSel')}</button>
+        <button class="btn sm" data-act="ext.showSel" data-id="${id}">${t('ext.showSel')}</button>
+        <span class="grow"></span>
+        <button class="btn sm" data-act="ext.testAll" data-id="${id}" title="${esc(t('ext.testAllHelp'))}">${t('ext.testAll')}</button>
+        <label class="small muted"><input type="checkbox" data-change="ext.inclHidden" data-id="${id}" ${inclHidden[id] ? 'checked' : ''}> ${t('ext.inclHidden')}</label>
+        <button class="btn sm" data-act="ext.testSel" data-id="${id}">${t('ext.testSel')}</button>
+        <button class="btn sm danger" data-act="ext.testStop" data-id="${id}" id="ext-stop-${id}" ${jobs[id] && jobs[id].job ? '' : 'hidden'}>${t('ext.testStop')}</button>
+        <button class="btn sm" data-act="ext.reachSel" data-id="${id}" title="${esc(t('ext.reachHelp'))}">${t('ext.reachSel')}</button>
+        <button class="btn sm primary" data-act="ext.addUp" data-id="${id}">${t('ext.addUp')}</button>
+      </div>
     </div>
-    <div class="table-wrap"><table class="grid ext-grid"><thead><tr>
-      <th><input type="checkbox" data-change="ext.pickAll" data-id="${id}" title="${t('common.all')}"></th>
-      <th>${t('common.name')}</th><th>${t('common.type')}</th><th>${t('ext.server')}</th>
-      ${(c.servers || []).map(s => `<th class="num" title="${esc(s.name)}">${esc(s.name)}</th>`).join('')}<th>${t('ext.reachCol')}</th><th></th></tr></thead>
-      <tbody id="ext-nodes-${id}"></tbody></table></div>
+    <div class="table-wrap fill ext-wrap" id="ext-wrap-${id}" style="--fill-reserve:9rem"></div>
+    <div class="ext-more" id="ext-more-${id}" hidden></div>
     <p class="hint small muted">${t('ext.testHint')}</p>`;
 }
 
+// 视图、服务器列变了:所有展开的面板按新设置重画,子表滚动位置留着
+function redrawPanels() {
+  for (const x of open) {
+    const w = document.getElementById('ext-wrap-' + x);
+    if (w) keepTop[x] = w.scrollTop;
+    if (cache[x]) fillPanel(x);
+  }
+}
+
+// 表头随视图变:汇总一列「延迟」,逐台每台服务器一列(只列选中的服务器)
+function renderTable(id) {
+  const w = document.getElementById('ext-wrap-' + id), c = cache[id];
+  if (!w || !c) return;
+  const view = viewOf(c), so = sorts[id];
+  const cols = view === 'grid' ? (c.servers || []).filter(x => colIds(c).includes(x.id)) : [];
+  const sortTh = (k, label, cls = '') => `<th class="sortable ${cls} ${so && so.k === k ? 'sorted' : ''}" data-act="ext.sort" data-id="${id}" data-k="${k}">${label}${so && so.k === k ? (so.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
+  w.innerHTML = `<table class="grid ext-grid"><thead><tr>
+      <th><input type="checkbox" data-change="ext.pickAll" data-id="${id}" title="${t('common.all')}"></th>
+      ${sortTh('name', t('common.name'))}<th>${t('common.type')}</th><th>${t('ext.server')}</th>
+      ${view === 'sum' ? sortTh('delay', t('ext.delay')) : cols.map(x => `<th class="num srv" title="${esc(x.name)}">${esc(x.name)}</th>`).join('')}<th>${t('ext.reachCol')}</th><th></th></tr></thead>
+      <tbody id="ext-nodes-${id}"></tbody></table>`;
+  renderSubBody(id);
+}
+
+// 搜索 → 筛选 → 排序。全选、测速选中都作用于筛选后的全部(不只是画出来的那一批)
 const visible = (id, c) => {
-  const q = (query[id] || '').trim();
-  return (c.nodes || []).filter(n => !q || matches(q, n.name, n.rename || '', n.type, n.server + ':' + n.port));
+  const q = (query[id] || '').trim(), f = filt[id] || 'all';
+  const res = results[id] || {}, sel = picked[id] || new Set(), servers = c.servers || [];
+  let list = (c.nodes || []).filter(n => !q || matches(q, n.name, n.rename || '', n.type, n.server + ':' + n.port));
+  if (f !== 'all') {
+    list = list.filter(n => {
+      const row = res[n.key] || {};
+      const cells = servers.map(x => row[x.id]).filter(Boolean);
+      if (f === 'ok') return cells.some(x => x.state === 'ok');
+      if (f === 'bad') return cells.some(x => x.state === 'fail');
+      if (f === 'hidden') return !!n.hidden;
+      return sel.has(n.key);
+    });
+  }
+  const so = sorts[id];
+  if (so) {
+    const best = n => { const b = sumOf(res[n.key], servers).best; return b ? b.delayMs : Infinity; };
+    list = list.slice().sort((a, b) => {
+      if (so.k === 'name') return so.dir * String(a.rename || a.name).localeCompare(String(b.rename || b.name));
+      const x = best(a), y = best(b); // 不通、没测的不管升序降序都排在后面
+      if (x === Infinity || y === Infinity) return (x === Infinity) - (y === Infinity);
+      return (x - y) * so.dir;
+    });
+  }
+  return list;
 };
+
+// 一个节点在各服务器上的测速汇总:最快的那台、几台通、还有几台在测
+function sumOf(row, servers) {
+  let best = null, ok = 0, done = 0, pending = 0, tested = 0;
+  for (const x of servers) {
+    const c = row && row[x.id];
+    if (!c) continue;
+    tested++;
+    if (c.state === 'pending') { pending++; continue; }
+    if (c.state === 'skip' || c.state === 'cancelled' || c.state === 'unsupported') continue;
+    done++;
+    if (c.state === 'ok') { ok++; if (!best || c.delayMs < best.delayMs) best = { delayMs: c.delayMs, name: x.name }; }
+  }
+  return { best, ok, done, pending, tested };
+}
+// 汇总那一格:最快延迟 + 服务器名,下面小字"22/24 台通";全部不通标红;测速中显示进度。点开看各服务器延迟
+function sumHTML(id, n, c) {
+  const servers = c.servers || [];
+  const s = sumOf((results[id] || {})[n.key], servers);
+  if (!s.tested) return '<span class="muted">—</span>';
+  if (s.pending) return `<span class="muted">… ${s.tested - s.pending}/${s.tested}</span>`;
+  if (!s.done) return `<span class="muted">${t('ext.cellUnsupported')}</span>`;
+  const top = s.best ? `<span class="badge ${delayTone(s.best.delayMs)}">${s.best.delayMs} ms</span>${servers.length > 1 ? ` <span class="muted small">${esc(s.best.name)}</span>` : ''}` : '<span class="badge danger">✗</span>';
+  const sub = servers.length < 2 ? '' : s.ok ? `<span class="sub">${t('ext.okOf', { n: s.ok, m: s.done })}</span>` : `<span class="sub danger-text">${t('ext.allFail')}</span>`;
+  return `<button type="button" class="link ext-sum" data-act="ext.detail" data-id="${id}" data-key="${esc(n.key)}" data-idx="${n.index}" title="${esc(t('ext.perServer'))}">${top}${sub}</button>`;
+}
 
 // 大陆连通那一格:判定 + 三网通的个数与提示放在悬停说明里
 const reachHTML = r => {
@@ -182,7 +291,11 @@ function renderSubBody(id) {
   const tb = document.getElementById('ext-nodes-' + id), c = cache[id];
   if (!tb || !c) return;
   const sel = picked[id] || (picked[id] = new Set());
-  const list = visible(id, c), servers = c.servers || [];
+  const all = visible(id, c), servers = c.servers || [];
+  const lim = limits[id] || PAGE;
+  const list = all.slice(0, lim);
+  const view = viewOf(c);
+  const cols = view === 'grid' ? servers.filter(x => colIds(c).includes(x.id)) : [];
   const res = results[id] || {}, rch = reaches[id] || {};
   tb.innerHTML = list.length ? list.map(n => {
     const k = esc(n.key);
@@ -195,11 +308,16 @@ function renderSubBody(id) {
       ${n.keyword ? `<div class="sub-cell">${t('ext.hiddenByKeyword')}</div>` : ''}</td>
     <td>${badge(esc(n.type))}</td>
     <td class="mono small">${esc(hostPort(n.server, n.port))}</td>
-    ${servers.map(s => `<td class="num" data-cell="${id}-${k}-${s.id}">${cellHTML(res[n.key] && res[n.key][s.id])}</td>`).join('')}
+    ${view === 'sum' ? `<td data-sum="${id}-${k}">${sumHTML(id, n, c)}</td>` : cols.map(x => `<td class="num srv" data-cell="${id}-${k}-${x.id}">${cellHTML(res[n.key] && res[n.key][x.id])}</td>`).join('')}
     <td data-reach="${id}-${k}">${reachHTML(rch[n.key])}</td>
     <td>${n.upstream ? '' : `<span class="badge warn" title="${esc(trErr(n.reason || ''))}">${t('ext.noUpstream')}</span>`}</td></tr>`;
   }).join('')
-    : `<tr><td colspan="${6 + servers.length}">${empty(t('ext.noNodes'))}</td></tr>`;
+    : `<tr><td colspan="${6 + (view === 'sum' ? 1 : cols.length)}">${empty(t('ext.noNodes'))}</td></tr>`;
+  const more = document.getElementById('ext-more-' + id);
+  if (more) {
+    more.hidden = all.length <= lim;
+    more.innerHTML = all.length > lim ? `<button class="btn sm" data-act="ext.more" data-id="${id}">${t('ext.more', { n: Math.min(PAGE, all.length - lim), left: all.length - lim })}</button>` : '';
+  }
   updateCount(id);
 }
 
@@ -208,7 +326,9 @@ function updateCount(id) {
   if (!cnt || !c) return;
   const sel = picked[id];
   const out = (c.nodes || []).filter(n => !n.hidden).length;
+  const shown = (filt[id] || 'all') !== 'all' || (query[id] || '').trim() ? visible(id, c).length : -1;
   cnt.textContent = t('ext.countOut', { n: (c.nodes || []).length, out })
+    + (shown >= 0 ? ' · ' + t('ext.shown', { n: shown }) : '')
     + (sel && sel.size ? ' · ' + t('ext.selected', { n: sel.size }) : '')
     + (c.fetchedAt ? ' · ' + t('ext.lastFetch') + ' ' + fmtRelative(c.fetchedAt) : '');
 }
@@ -229,8 +349,12 @@ function showDetail(id, key, idx) {
   const link = n.link
     ? `<div class="ext-link"><div class="muted small">${t('ext.link')}</div><div class="mono small ext-val">${esc(n.link)}</div><div><button class="btn sm" data-act="ext.copy" data-link="${esc(n.link)}">${t('common.copy')}</button></div></div>`
     : `<p class="muted small">${t('ext.noLink')}</p>`;
+  const servers = (cache[id] && cache[id].servers) || [], row = (results[id] || {})[n.key] || {};
+  const tested = servers.filter(x => row[x.id]);
+  const rank = x => { const c = row[x.id]; return c.state === 'ok' ? c.delayMs : c.state === 'pending' ? 1e9 : 2e9; };
+  const per = tested.length ? `<h3 style="margin:.4rem 0 .3rem">${t('ext.perServer')}</h3><div class="table-wrap"><table class="grid kv"><tbody>${tested.slice().sort((a, b) => rank(a) - rank(b)).map(x => `<tr><td>${esc(x.name)}${x.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</td><td>${cellHTML(row[x.id])}</td></tr>`).join('')}</tbody></table></div>` : '';
   openDrawer(esc(n.name), `<p class="small muted">${badge(esc(n.type))} ${esc(hostPort(n.server, n.port))}${n.upstream ? '' : ' · ' + t('ext.noUpstream') + (n.reason ? ':' + esc(trErr(n.reason)) : '')}</p>
-    <div class="table-wrap"><table class="grid kv"><tbody>${rows}</tbody></table></div>${link}`);
+    ${per}<div class="table-wrap"><table class="grid kv"><tbody>${rows}</tbody></table></div>${link}`, { wide: tested.length > 0 });
 }
 
 // ---- 测速:起任务,每秒取进度,一格一格填。结果按指纹记,列表刷新也不丢 ----
@@ -302,11 +426,14 @@ function reloadPanel(id) { delete cache[id]; fillPanel(id); }
 function stopJob(id) { if (jobs[id]) { clearTimeout(jobs[id].timer); delete jobs[id]; } syncStop(id); }
 function applyResults(id, rs) {
   const res = results[id] || (results[id] = {});
+  const c = cache[id];
   for (const [key, row] of Object.entries(rs || {})) {
     res[key] = Object.assign(res[key] || {}, row);
     for (const [sid, cell] of Object.entries(row || {})) {
       document.querySelectorAll(`[data-cell="${id}-${key}-${sid}"]`).forEach(td => { td.innerHTML = cellHTML(cell); });
     }
+    const n = c && (c.nodes || []).find(x => x.key === key);
+    if (n) document.querySelectorAll(`[data-sum="${id}-${key}"]`).forEach(td => { td.innerHTML = sumHTML(id, n, c); });
   }
 }
 function tally(rs) {
@@ -484,7 +611,29 @@ registerActions({
     try { await del('exts/' + id); open.delete(Number(id)); await load('exts', 'users'); renderRows(); toast(t('ext.deleted'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
-  'ext.toggle': id => { id = Number(id); if (open.has(id)) open.delete(id); else open.add(id); renderRows(); },
+  'ext.toggle': id => { id = Number(id); if (open.has(id)) open.delete(id); else { open.add(id); focusNext = id; } renderRows(); },
+  'ext.filter': (id, el) => {
+    id = Number(id); filt[id] = el.dataset.f;
+    el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === el));
+    renderSubBody(id);
+  },
+  'ext.view': (id, el) => { lsSet(LS_VIEW, el.dataset.v); redrawPanels(); },
+  'ext.col': (id, el) => {
+    id = Number(id);
+    const box = el.closest('.menu-list');
+    const ids = box ? [...box.querySelectorAll('input[data-sid]')].filter(x => x.checked).map(x => Number(x.dataset.sid)) : [];
+    lsSet(LS_COLS, JSON.stringify(ids));
+    for (const x of open) renderTable(x);
+  },
+  'ext.colsAll': id => { lsSet(LS_COLS, 'null'); redrawPanels(); },
+  'ext.colsNone': id => { const c = cache[Number(id)]; lsSet(LS_COLS, JSON.stringify(c && c.servers && c.servers.length ? [c.servers[0].id] : [])); redrawPanels(); },
+  'ext.sort': (id, el) => {
+    id = Number(id);
+    const k = el.dataset.k, cur = sorts[id];
+    sorts[id] = cur && cur.k === k ? (cur.dir > 0 ? { k, dir: -1 } : undefined) : { k, dir: 1 }; // 升序 → 降序 → 原顺序
+    renderTable(id);
+  },
+  'ext.more': id => { id = Number(id); limits[id] = (limits[id] || PAGE) + PAGE; renderSubBody(id); },
   'ext.pick': (id, el) => { const s = picked[id] || (picked[id] = new Set()); if (el.checked) s.add(el.dataset.key); else s.delete(el.dataset.key); updateCount(Number(id)); },
   'ext.pickAll': (id, el) => {
     id = Number(id); const c = cache[id]; if (!c) return;

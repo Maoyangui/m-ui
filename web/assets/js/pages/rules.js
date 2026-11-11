@@ -100,7 +100,7 @@ function editRule(id) {
     if (id) await put('rules/' + id, body); else await post('rules', body);
     await refresh();
     toast(id ? t('rule.updated') : t('rule.created'), 'ok');
-  }, { wide: true });
+  }, { size: 'xl' });
   const showKind = () => {
     document.getElementById('sec-schedule').hidden = kind !== 'schedule';
     document.getElementById('sec-burst').hidden = kind !== 'burst';
@@ -125,7 +125,7 @@ async function showStates(id) {
     ? `<div class="table-wrap"><table class="grid"><thead><tr><th>${t('user.title')}</th><th>${t('rule.reason')}</th><th>${t('rule.since')}</th><th>${t('rule.until')}</th></tr></thead><tbody>${list.map(s => `<tr>
         <td class="primary-cell">${esc(s.userName)}</td><td>${esc(s.reason || '')}</td><td>${fmtTime(s.since)} <span class="muted small">${fmtRelative(s.since)}</span></td>
         <td>${s.until ? `${fmtTime(s.until)} <span class="muted small">${t('rule.remaining', { n: Math.max(0, Math.ceil((s.until - now) / 60)) })}</span>` : t('rule.untilWindowEnd')}</td></tr>`).join('')}</tbody></table></div>`
-    : `<p class="muted">${t('rule.activeNone')}</p>`);
+    : `<p class="muted">${t('rule.activeNone')}</p>`, { wide: true });
 }
 
 registerActions({
