@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -137,9 +138,106 @@ func byTagSB(d sbDoc) map[string]map[string]interface{} {
 	return m
 }
 
-// validateClientConfig 内嵌 sing-box 干跑:服务端构建没有注册 tun 入站(客户端才有),干跑前去掉它。
+// singBoxProblem 照 sing-box 启动时的检查把出站之间的引用查一遍,返回第一个会让配置起不来的问题。
+// 内嵌 sing-box 的干跑(core.ValidateConfig)只建实例、不启动,组成员找不到、出站互相引用成环它都查不出来:
+// 这些在启动出站时才查(adapter/outbound/manager.go 的 startOutbounds),route / dns 找出站也在启动时。
+//   - 出站的依赖 = selector / urltest 的成员 + detour,都要找得到,不能成环;tag 不能重复;selector 的 default 要在成员里;
+//   - route 的 final 与规则的 outbound、dns 服务器的 detour 要找得到。
+func singBoxProblem(body string) error {
+	var doc struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+		Route     struct {
+			Final string                   `json:"final"`
+			Rules []map[string]interface{} `json:"rules"`
+		} `json:"route"`
+		DNS struct {
+			Servers []map[string]interface{} `json:"servers"`
+		} `json:"dns"`
+	}
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		return err
+	}
+	deps := map[string][]string{}
+	for _, o := range doc.Outbounds {
+		tag, _ := o["tag"].(string)
+		if _, dup := deps[tag]; dup || tag == "" {
+			return fmt.Errorf("duplicate outbound/endpoint tag: %q", tag)
+		}
+		members := stringList(o["outbounds"])
+		if def, _ := o["default"].(string); def != "" && !slices.Contains(members, def) {
+			return fmt.Errorf("outbound[%s]: default outbound not found: %s", tag, def)
+		}
+		if d, _ := o["detour"].(string); d != "" {
+			members = append(members, d)
+		}
+		deps[tag] = members
+	}
+	for tag, ds := range deps {
+		for _, d := range ds {
+			if _, ok := deps[d]; !ok {
+				return fmt.Errorf("dependency[%s] not found for outbound[%s]", d, tag)
+			}
+		}
+	}
+	for tag := range deps {
+		for _, d := range deps[tag] {
+			if reaches(d, tag, func(n string) []string { return deps[n] }) {
+				return fmt.Errorf("circular outbound dependency: %s -> %s -> … -> %s", tag, d, tag)
+			}
+		}
+	}
+	refs := []string{doc.Route.Final}
+	for _, r := range doc.Route.Rules {
+		o, _ := r["outbound"].(string)
+		refs = append(refs, o)
+	}
+	for _, s := range doc.DNS.Servers {
+		d, _ := s["detour"].(string)
+		refs = append(refs, d)
+	}
+	for _, r := range refs {
+		if _, ok := deps[r]; r != "" && !ok {
+			return fmt.Errorf("outbound not found: %s", r)
+		}
+	}
+	return nil
+}
+
+// 检查器自己先过一遍:几种启动时才报的错它都得认出来,正常的配置不能误报。
+func TestSingBoxCheckerCatchesBadConfigs(t *testing.T) {
+	ob := func(list ...string) string { return `{"outbounds":[` + strings.Join(list, ",") + `]}` }
+	direct := `{"type":"direct","tag":"direct"}`
+	for name, body := range map[string]string{
+		"组和 proxy 互相引用":  ob(`{"type":"selector","tag":"proxy","outbounds":["hy"]}`, `{"type":"selector","tag":"hy","outbounds":["proxy","direct"]}`, direct),
+		"组列了自己":          ob(`{"type":"urltest","tag":"hy","outbounds":["hy","direct"]}`, direct),
+		"经 detour 绕回":    ob(`{"type":"selector","tag":"proxy","outbounds":["relay"]}`, `{"type":"socks","tag":"relay","server":"127.0.0.1","server_port":1,"detour":"proxy"}`),
+		"成员找不到":          ob(`{"type":"urltest","tag":"hy","outbounds":["hy-A","hy-B"]}`, direct),
+		"default 不在成员里":  ob(`{"type":"selector","tag":"proxy","outbounds":["direct"],"default":"auto"}`, direct),
+		"tag 重复":         ob(direct, direct),
+		"route 出口找不到":    `{"outbounds":[` + direct + `],"route":{"final":"proxy"}}`,
+		"dns detour 找不到": `{"outbounds":[` + direct + `],"dns":{"servers":[{"type":"https","tag":"remote","server":"1.1.1.1","detour":"proxy"}]}}`,
+	} {
+		if err := singBoxProblem(body); err == nil {
+			t.Errorf("%s:检查器没认出来\n%s", name, body)
+		}
+	}
+	good := `{"outbounds":[{"type":"selector","tag":"proxy","outbounds":["auto","hy","direct"],"default":"auto"},` +
+		`{"type":"urltest","tag":"auto","outbounds":["direct","relay"]},{"type":"urltest","tag":"hy","outbounds":["relay"]},` +
+		`{"type":"socks","tag":"relay","server":"127.0.0.1","server_port":1,"detour":"direct"},` + direct + `],` +
+		`"route":{"final":"proxy","rules":[{"action":"sniff"},{"ip_is_private":true,"outbound":"direct"}]},` +
+		`"dns":{"servers":[{"type":"https","tag":"remote","server":"1.1.1.1","detour":"proxy"},{"type":"local","tag":"local"}]}}`
+	if err := singBoxProblem(good); err != nil {
+		t.Fatalf("正常的配置被误报: %v", err)
+	}
+}
+
+// validateClientConfig 内嵌 sing-box 干跑,再按启动时的规矩查出站之间的引用(干跑查不到,见 singBoxProblem)。
+// 服务端构建没有注册 tun 入站(客户端才有),干跑前去掉它。
 func validateClientConfig(t *testing.T, body string) {
 	t.Helper()
+	if err := singBoxProblem(body); err != nil {
+		t.Fatalf("sing-box 启动时会拒绝生成的客户端配置: %v\n%s", err, body)
+	}
 	var full map[string]interface{}
 	if err := json.Unmarshal([]byte(body), &full); err != nil {
 		t.Fatal(err)
@@ -336,16 +434,22 @@ func TestSingBoxLineGroupKeepsNameOverExternal(t *testing.T) {
 	}
 }
 
-// 模板模式:模板里 "{all}" 只展开成节点(不含线路组);线路组和 proxy / auto 一样补进出站,模板写了同名的用模板的。
+// 模板模式:模板里 "{all}" 只展开成节点(不含线路组);线路组和 proxy / auto 一样补进出站,模板写了同名的 selector / urltest
+// 就用模板的,不另补一份。同名的是别的出站(direct、节点),或者模板的这个组会顺着成员 / detour 绕回生成的 proxy
+// (proxy 列着它,成环,sing-box 整份起不来),线路组改名另起,模板的不动。
 func TestSingBoxLineGroupsWithTemplate(t *testing.T) {
 	cert := raw(map[string]interface{}{"mode": "cert"})
 	lines := []model.Line{{Id: 1, Name: "hy", Protocol: "hysteria2", Port: 443, Tls: cert, Enabled: true}}
-	tmpl := `{"route":{"final":"流媒体","rules":[{"action":"sniff"}]},"outbounds":[{"type":"selector","tag":"流媒体","outbounds":["proxy","{all}"]}]}`
-	res, err := BuildSingBoxSub(fullUser(), lines, Options{Entries: twoServers, SingBoxTmpl: tmpl})
-	if err != nil {
-		t.Fatal(err)
+	build := func(tmpl string) map[string]map[string]interface{} {
+		t.Helper()
+		res, err := BuildSingBoxSub(fullUser(), lines, Options{Entries: twoServers, SingBoxTmpl: tmpl})
+		if err != nil {
+			t.Fatal(err)
+		}
+		validateClientConfig(t, res.Body)
+		return byTagSB(parseSB(t, res.Body))
 	}
-	by := byTagSB(parseSB(t, res.Body))
+	by := build(`{"route":{"final":"流媒体","rules":[{"action":"sniff"}]},"outbounds":[{"type":"selector","tag":"流媒体","outbounds":["proxy","{all}"]}]}`)
 	if got := strList(by["流媒体"]["outbounds"]); !reflect.DeepEqual(got, []string{"proxy", "hy-A", "hy-B"}) {
 		t.Fatalf("{all} 只该展开成节点: %v", got)
 	}
@@ -355,17 +459,42 @@ func TestSingBoxLineGroupsWithTemplate(t *testing.T) {
 	if got := strList(by["proxy"]["outbounds"]); !reflect.DeepEqual(got, []string{"auto", "hy", "hy-A", "hy-B"}) {
 		t.Fatalf("补上的 proxy 应列线路组: %v", got)
 	}
-	validateClientConfig(t, res.Body)
 
-	// 模板自己有个出站叫 hy:线路组让开改名,模板的不动
-	tmpl2 := `{"outbounds":[{"type":"direct","tag":"hy"}]}`
-	res, err = BuildSingBoxSub(fullUser(), lines, Options{Entries: twoServers, SingBoxTmpl: tmpl2})
-	if err != nil {
-		t.Fatal(err)
+	// 模板自己写了同名的 urltest:用模板的(测速间隔照模板),不另补 hy 2;生成的 proxy 列的就是它
+	by = build(`{"outbounds":[{"type":"urltest","tag":"hy","outbounds":["hy-B","hy-A"],"interval":"10m"}]}`)
+	if g := by["hy"]; g["interval"] != "10m" || !reflect.DeepEqual(strList(g["outbounds"]), []string{"hy-B", "hy-A"}) || by["hy 2"] != nil {
+		t.Fatalf("模板写了同名的 urltest 应用模板的,不再补 hy 2: %v / %v", g, by["hy 2"])
 	}
-	by = byTagSB(parseSB(t, res.Body))
-	if by["hy"]["type"] != "direct" || by["hy 2"]["type"] != "urltest" {
-		t.Fatalf("和模板出站撞名时线路组改名: %v / %v", by["hy"], by["hy 2"])
+	if got := strList(by["proxy"]["outbounds"]); !reflect.DeepEqual(got, []string{"auto", "hy", "hy-A", "hy-B"}) {
+		t.Fatalf("proxy 应列模板的线路组: %v", got)
 	}
-	validateClientConfig(t, res.Body)
+
+	// 模板自己写了 proxy:生成的 proxy 不出,模板的 hy 列着 proxy 也不成环,照样用模板的
+	by = build(`{"outbounds":[{"type":"selector","tag":"proxy","outbounds":["{all}"]},{"type":"selector","tag":"hy","outbounds":["proxy","{all}"]}]}`)
+	if by["hy"]["type"] != "selector" || by["hy 2"] != nil {
+		t.Fatalf("模板写了 proxy 时同名的 selector 照样用模板的: %v / %v", by["hy"], by["hy 2"])
+	}
+
+	// 同名的不是组,或者模板的 hy 会绕回生成的 proxy(直接列、经别的组、经 detour):线路组改名另起,模板的 hy 不动
+	for name, c := range map[string]struct{ tmpl, first string }{ // first:模板的 hy 列的第一个成员
+		"同名的是 direct": {`{"outbounds":[{"type":"direct","tag":"hy"}]}`, ""},
+		"直接列了 proxy":  {`{"outbounds":[{"type":"selector","tag":"hy","outbounds":["proxy","{all}"]}]}`, "proxy"},
+		"经别的组绕回":      {`{"outbounds":[{"type":"selector","tag":"hy","outbounds":["中转"]},{"type":"selector","tag":"中转","outbounds":["proxy","direct"]}]}`, "中转"},
+		"经 detour 绕回": {`{"outbounds":[{"type":"urltest","tag":"hy","outbounds":["relay"]},{"type":"socks","tag":"relay","server":"127.0.0.1","server_port":1080,"detour":"proxy"}]}`, "relay"},
+	} {
+		by = build(c.tmpl)
+		first := ""
+		if l := stringList(by["hy"]["outbounds"]); len(l) > 0 {
+			first = l[0]
+		}
+		if by["hy"] == nil || first != c.first {
+			t.Fatalf("%s:模板的 hy 应原样留着: %v", name, by["hy"])
+		}
+		if g := by["hy 2"]; g == nil || g["type"] != "urltest" || !reflect.DeepEqual(strList(g["outbounds"]), []string{"hy-A", "hy-B"}) {
+			t.Fatalf("%s:线路组应改名为 hy 2: %v", name, g)
+		}
+		if got := strList(by["proxy"]["outbounds"]); !reflect.DeepEqual(got, []string{"auto", "hy 2", "hy-A", "hy-B"}) {
+			t.Fatalf("%s:proxy 应列改了名的线路组: %v", name, got)
+		}
+	}
 }

@@ -73,12 +73,12 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 			proxies = append(proxies, p)
 		}
 	}
-	tmplGroups := map[string]bool{} // 模板里写的策略组
+	tmplGroups := map[string][]string{} // 模板里写的策略组 → 它列的成员
 	if own, ok := root["proxy-groups"].([]interface{}); ok {
 		for _, g := range own {
 			m, _ := g.(map[string]interface{})
 			if n, _ := m["name"].(string); n != "" {
-				used[n], tmplGroups[n] = true, true
+				used[n], tmplGroups[n] = true, stringList(m["proxies"])
 			}
 		}
 	}
@@ -118,14 +118,19 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		}
 	}
 	// 线路组在本站节点之后、外部节点之前起名,规则和 sing-box JSON 一样(见 linegroup.go)。
-	// 模板里同名的策略组照旧顶替生成的(mergeClashGroups),线路组就叫这个名字
+	// 模板里同名的策略组照旧顶替生成的(mergeClashGroups),线路组就叫这个名字;只是它顺着成员走得回 Proxy 时
+	// (生成的 Proxy 要列它,成环,mihomo 整份拒收)不顶替,线路组改名另起。模板自己写了 Proxy 时生成的那个不出,不会成环
 	providers := map[string]bool{} // 列了成员的策略组在 mihomo 里还占一个同名 provider,不能和模板的 proxy-providers 重名
 	if pp, ok := root["proxy-providers"].(map[string]interface{}); ok {
 		for n := range pp {
 			providers[n] = true
 		}
 	}
-	groupNames := nameLineGroups(pending, used, providers, func(name string) bool { return tmplGroups[name] })
+	_, ownProxy := tmplGroups["Proxy"]
+	groupNames := nameLineGroups(pending, used, providers, func(name string) bool {
+		_, ok := tmplGroups[name]
+		return ok && (ownProxy || !reaches(name, "Proxy", func(n string) []string { return tmplGroups[n] }))
+	})
 	var lineGroups []interface{}
 	for i, g := range pending {
 		topNames[groupAt[i]] = groupNames[i]

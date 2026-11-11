@@ -399,3 +399,58 @@ func TestLineGroupNamesSameInClashAndSingBox(t *testing.T) {
 		}
 	}
 }
+
+// Clash 模板里写了和线路同名的策略组:照旧用模板的(放在生成的那个位置),Proxy 列的就是它,不另补 hy 2;
+// 模板的这个组会绕回 Proxy(直接列、经别的组)时,用了就成环、mihomo 整份拒收,线路组改名另起,模板的不动;
+// 模板自己写了 Proxy 时生成的 Proxy 不出,同名的组列着 Proxy 也不成环,照样用模板的。
+func TestClashTemplateLineGroup(t *testing.T) {
+	cert := raw(map[string]interface{}{"mode": "cert"})
+	lines := []model.Line{{Id: 1, Name: "hy", Protocol: "trojan", Port: 1001, Tls: cert, Enabled: true}}
+	build := func(tmpl string) clashDoc {
+		t.Helper()
+		body, err := BuildClashFor(fullUser(), lines, twoServers, tmpl, "", nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return checkClash(t, body)
+	}
+	groupNames := func(d clashDoc) []string {
+		var out []string
+		for _, g := range d.Groups {
+			out = append(out, g["name"].(string))
+		}
+		return out
+	}
+
+	doc := build("proxy-groups:\n  - {name: hy, type: fallback, proxies: [hy-B, hy-A]}\n")
+	if g := doc.group("hy"); g["type"] != "fallback" || doc.group("hy 2") != nil {
+		t.Fatalf("模板写了同名的策略组应用模板的,不再补 hy 2: %v", doc.Groups)
+	}
+	if got := groupNames(doc); !reflect.DeepEqual(got, []string{"Proxy", "Auto", "hy"}) {
+		t.Fatalf("模板的组放在生成的那个位置: %v", got)
+	}
+	if got := stringList(doc.group("Proxy")["proxies"]); !reflect.DeepEqual(got, []string{"Auto", "hy"}) {
+		t.Fatalf("Proxy 应列模板的线路组: %v", got)
+	}
+
+	doc = build("proxy-groups:\n  - {name: Proxy, type: select, proxies: [Auto, DIRECT]}\n  - {name: hy, type: select, proxies: [Proxy, hy-A, hy-B]}\n")
+	if doc.group("hy")["type"] != "select" || doc.group("hy 2") != nil {
+		t.Fatalf("模板写了 Proxy 时同名的组照样用模板的: %v", doc.Groups)
+	}
+
+	for name, tmpl := range map[string]string{
+		"直接列了 Proxy": "proxy-groups:\n  - {name: hy, type: select, proxies: [Proxy, DIRECT]}\n",
+		"经别的组绕回":     "proxy-groups:\n  - {name: hy, type: select, proxies: [中转]}\n  - {name: 中转, type: select, proxies: [Proxy, DIRECT]}\n",
+	} {
+		doc := build(tmpl)
+		if g := doc.group("hy"); g["type"] != "select" {
+			t.Fatalf("%s:模板的 hy 应原样留着: %v", name, g)
+		}
+		if g := doc.group("hy 2"); g["type"] != "url-test" || !reflect.DeepEqual(stringList(g["proxies"]), []string{"hy-A", "hy-B"}) {
+			t.Fatalf("%s:线路组应改名为 hy 2: %v", name, g)
+		}
+		if got := stringList(doc.group("Proxy")["proxies"]); !reflect.DeepEqual(got, []string{"Auto", "hy 2"}) {
+			t.Fatalf("%s:Proxy 应列改了名的线路组: %v", name, got)
+		}
+	}
+}

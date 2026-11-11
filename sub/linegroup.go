@@ -14,7 +14,11 @@ import (
 //   - 本站节点先定名(名字和以前一样),接着给线路组起名,外部节点最后:外部订阅里冒出和线路同名的节点时,
 //     改名的是外部节点,选过这个线路组的客户端不会被悄悄换到第三方节点上;
 //   - 组名就是线路名,撞了两种格式的内置名(lineGroupReserved)、模板里写的名字、本站节点或前面的线路组就加序号
-//     (「香港 2」「香港 3」……)。mihomo 和 sing-box 里节点与组共用一张名字表,重名整份配置导入失败。
+//     (「香港 2」「香港 3」……)。mihomo 和 sing-box 里节点与组共用一张名字表,重名整份配置导入失败;
+//   - 模板里写了与线路同名的组(Clash 的策略组、sing-box 的 selector / urltest),就用模板的,不另补一份
+//     (和 Proxy / Auto、proxy / auto 一样「写了用模板的」,管理员可以在模板里改某条线路的组)。
+//     同名的不是组(节点、direct……),或者模板的这个组会顺着成员绕回生成的选择组(生成的 Proxy / proxy 列着它,
+//     它又走回 Proxy / proxy,成环,客户端整份拒收),模板的照旧,线路组加序号另起。
 
 // clashBuiltins mihomo 内置的出站:节点、策略组都不能和它们重名。
 var clashBuiltins = []string{"DIRECT", "REJECT", "REJECT-DROP", "PASS", "PASS-RULE", "COMPATIBLE"}
@@ -63,4 +67,21 @@ func nameLineGroups(groups []lineGroup, used, avoid map[string]bool, tmplGroup f
 		names[i] = name
 	}
 	return names
+}
+
+// reaches 从 from 顺着 refs(一个名字直接引用的名字)走,能不能走到 target。
+func reaches(from, target string, refs func(string) []string) bool {
+	seen := map[string]bool{}
+	for stack := []string{from}; len(stack) > 0; {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if n == target {
+			return true
+		}
+		if !seen[n] {
+			seen[n] = true
+			stack = append(stack, refs(n)...)
+		}
+	}
+	return false
 }

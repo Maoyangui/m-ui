@@ -86,7 +86,8 @@ func warnBadOwnLink(link string, err error) {
 // 部署在多台服务器上的线路和 Clash 一样再出一个线路测速组(urltest,判断条件同 clash.go 的 url-test 组):
 // 客户端选这条线路,由组在这几台服务器里挑延迟低的,出口和计费口径不变。节点逐条线路展开,
 // 展开顺序、去重规则都和 GenerateLinksFor 一样,节点的 tag 与顺序一字不变(只有和线路组同名的外部节点改名);
-// 组名在本站节点之后、外部节点之前起:撞了本站节点只改组名,外部节点撞上组名由外部节点改名。
+// 组名和 Clash 订阅按同一套规则起(见 linegroup.go):在本站节点之后、外部节点之前起,撞了本站节点只改组名,
+// 外部节点撞上组名由外部节点改名。
 func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, error) {
 	var tmpl map[string]interface{}
 	if strings.TrimSpace(opt.SingBoxTmpl) != "" {
@@ -97,13 +98,14 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 	var nodes []map[string]interface{}
 	var tags []string
 	used := map[string]bool{"proxy": true, "auto": true, "direct": true}
-	var ownOutbounds []interface{} // 模板自己写的出站
+	var ownOutbounds []interface{}                 // 模板自己写的出站
+	tmplOut := map[string]map[string]interface{}{} // 同上,按 tag 查
 	if raw, ok := tmpl["outbounds"].([]interface{}); ok {
 		ownOutbounds = raw
 		for _, o := range raw {
 			if m, ok := o.(map[string]interface{}); ok {
 				if t, _ := m["tag"].(string); t != "" {
-					used[t] = true
+					used[t], tmplOut[t] = true, m
 				}
 			}
 		}
@@ -152,8 +154,9 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 	}
 	// 线路组在本站节点之后、外部节点之前起名,规则和 Clash 订阅一样(见 linegroup.go):撞了本站节点、模板出站或内置名
 	// 只给组名加序号,本站节点名一字不动;外部节点最后定名,撞上组名由外部节点加序号,外部订阅里冒出一个和线路同名的节点
-	// 也挤不动线路组的名字,选过这个组的客户端(SFA / SFI 按 tag 记住选择)不会被悄悄换到第三方节点上
-	groupTags := nameLineGroups(pending, used, nil, func(string) bool { return false })
+	// 也挤不动线路组的名字,选过这个组的客户端(SFA / SFI 按 tag 记住选择)不会被悄悄换到第三方节点上。
+	// 模板里同名的 selector / urltest 就用模板的(见 singBoxTmplGroup)
+	groupTags := nameLineGroups(pending, used, nil, func(tag string) bool { return singBoxTmplGroup(tmplOut, tag) })
 	for _, e := range opt.External { // 外部节点不成组
 		for _, l := range e.Links {
 			add(l, false)
@@ -196,9 +199,29 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
 }
 
+// singBoxTmplGroup 模板里叫 tag 的出站能不能直接当这条线路的组:得是 selector / urltest(direct、节点之类当不了,
+// 线路组改名另起),而且生成的 proxy 列上它不会成环 —— 它顺着成员或 detour 走得回 proxy 就会(sing-box 启动时报
+// circular outbound dependency,整份配置起不来)。模板自己写了 proxy 时生成的那个不出,不会多出这条引用。
+func singBoxTmplGroup(tmplOut map[string]map[string]interface{}, tag string) bool {
+	if t, _ := tmplOut[tag]["type"].(string); t != "selector" && t != "urltest" {
+		return false
+	}
+	if tmplOut["proxy"] != nil {
+		return true
+	}
+	return !reaches(tag, "proxy", func(n string) []string {
+		refs := stringList(tmplOut[n]["outbounds"])
+		if d, _ := tmplOut[n]["detour"].(string); d != "" {
+			refs = append(refs, d)
+		}
+		return refs
+	})
+}
+
 // singBoxFromTemplate 按模板出配置:模板写了的段(dns、route、inbounds……)原样用,没写的用内置的。
 // 节点接在模板的出站后面;模板的 selector / urltest 里写 "{all}" 会展开成全部节点(只是节点,不含线路组);
-// proxy / auto / direct 与线路组模板没写就补上,写了用模板的。
+// proxy / auto / direct 模板没写就补上,写了用模板的。线路组同样:模板写了同名的 selector / urltest 就用模板的;
+// 同名的是别的出站、或者用了会成环(见 singBoxTmplGroup)时,线路组已经改名加序号,两个都留着。
 func singBoxFromTemplate(user model.User, opt Options, tmpl map[string]interface{}, own []interface{}, generated, nodes []map[string]interface{}, tags []string) (Result, error) {
 	cfg := singBoxBase()
 	for k, v := range tmpl {
