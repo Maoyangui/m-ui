@@ -891,13 +891,13 @@
 <div class="part" data-title="Maintain">
 <section class="chap" id="backup" data-scope="admin">
   <h2>Backup and migration</h2>
-  <p class="lede">One zip file is the whole panel: the database (lines, users, traffic, settings) plus certificates. Keep it safe and you can move or reinstall without losing anything.</p>
+  <p class="lede">One zip file is the whole panel: the database (lines, users, traffic, settings) plus certificates<span data-pending="backup-certs">, including certificate files outside the data directory that the settings point to</span>. Keep it safe and you can move or reinstall without losing any data.</p>
 
   <section class="sec" id="bk-now">
     <h3>Back up</h3>
     <ul>
       <li><b data-k="nav.backup">Backup</b> page → <b data-k="bk.now">Backup now</b>: <b data-k="bk.download">Download</b> it, or <b data-k="bk.saveLocal">Save on server</b> (listed under <b data-k="bk.local">Backups on server</b>).</li>
-      <li><b data-k="bk.schedule">Scheduled backup</b>: <b data-k="bk.hour">Hour of day (-1 = off)</b> (server local time) and <b data-k="bk.keep">Copies to keep</b>; tick <b data-k="bk.telegram">Also push to Telegram</b> once Telegram notifications are set up.</li>
+      <li><b data-k="bk.schedule">Scheduled backup</b>: <b data-k="bk.hour">Hour of day (-1 = off)</b> (in the panel time zone, see <b data-k="nav.settings">Settings</b> → <b data-k="set.panel">Panel</b> → <b data-k="set.timezone">Time zone</b>) and <b data-k="bk.keep">Copies to keep</b>; tick <b data-k="bk.telegram">Also push to Telegram</b> once Telegram notifications are set up.</li>
       <li>Command line: <code>m-ui backup -db /etc/m-ui/m-ui.db -out backup.zip</code>, or option 9 in the <code>m-ui</code> menu.</li>
     </ul>
     <div class="pit"><b>Common pitfall</b>Backups contain every user's credentials and the certificates' private keys; never put them anywhere public.</div>
@@ -907,30 +907,39 @@
     <h3>Restore</h3>
     <ol class="steps">
       <li><b data-k="nav.backup">Backup</b> page → <b data-k="bk.restore">Restore</b>: choose the backup file (zip or .db) and click <b data-k="bk.restoreBtn">Restore</b>.</li>
-      <li>After you confirm, m-ui restarts by itself and replaces the database and certificates; the previous database is kept as a <code>.bak-*</code> file.</li>
+      <li>After you confirm, m-ui restarts by itself and replaces the database and certificates. <span data-pending="backup-certs">Certificate files outside the data directory that the settings point to (an <b data-k="cert.srcExternal">Existing certificate</b>, or certificate paths imported from an old panel) are restored under <code>/etc/m-ui/</code> with the paths updated; should a certificate file still be missing, the panel and subscriptions start with a temporary self-signed certificate and raise an alert instead of failing to start.</span></li>
+      <li>The previous database is kept as a <code>.bak-*</code> file, but only the latest two are kept: after several restores in a row the oldest one is deleted. If you are unsure which backup to use, first click <b data-k="bk.now">Backup now</b> and download the current database.</li>
     </ol>
     <ul>
-      <li>A new server can install and restore in one step (the command is in the migration wizard below).</li>
+      <li>A new server can install and restore in one step (the command is under <a href="#bk-migrate">Moving to another server</a>).</li>
       <li>With the service stopped you can also restore from the command line: <code>m-ui restore -db /etc/m-ui/m-ui.db -from backup.zip</code>.</li>
     </ul>
   </section>
 
   <section class="sec" id="bk-migrate">
     <h3>Moving to another server</h3>
-    <p class="lede">The <b data-k="mig.title">Migration wizard</b> on the <b data-k="nav.backup">Backup</b> page moves the whole panel in four steps; ports, credentials and subscription links stay the same, so users notice nothing.</p>
+    <p class="lede">The <b data-k="mig.title">Migration wizard</b> on the <b data-k="nav.backup">Backup</b> page moves the whole panel to a new server from a backup in four steps. When subscriptions use a domain, ports, credentials and subscription links stay the same: point the domain at the new server and users follow.</p>
+    <div class="tip" data-pending="ha"><b>While the old master still runs, use Set as master instead</b>Install m-ui on the new server, attach it like a node (see <a href="#nodes-add">Attach a node</a>), and once it is synced use <b data-k="ha.setMaster">Set as master</b> on it on the <b data-k="nav.nodes">Servers</b> page: the data is handed over in one go, no backup or restore, and the old master becomes a node (see <a href="#ha-switch">Set as master</a>). The four steps below are for when the old master is gone and only a backup is left.</div>
     <ol class="steps">
-      <li>Install m-ui on the new server and restore the backup (the wizard has the ready-made command; certificates are restored too).</li>
+      <li>Copy the backup zip to the new server and run <code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --restore /root/m-ui-20261111-030000.zip</code> (use your own file path; the same command works on amd64 and arm64, installs the latest version, then restores, certificates included). The wizard shows this command too.</li>
       <li>Open the panel with the new server's IP (same port and path as before) and check that the lines are running; nodes are reconnected automatically.</li>
       <li>Point your domain to the new IP at your DNS provider, and use <b data-k="mig.check">Check DNS</b> in the wizard to see whether the major resolvers have picked it up.</li>
-      <li>When users are fine on the new server, stop the old one: <code>systemctl stop m-ui</code>.</li>
+      <li>When users are fine on the new server, run <code>systemctl disable --now m-ui</code> on the old one (stops it and keeps it from starting at boot), or uninstall with option 14 of the <code>m-ui</code> menu. <code>systemctl stop</code> alone is not enough: both servers hold the same data, node tokens and Telegram bot, so when the old VPS reboots (provider maintenance, say) it starts again and keeps serving, pushing to nodes and notifying with stale data.</li>
     </ol>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>If the subscription link holds an IP (no domain for subscriptions), it changes to the new server's IP, and so do the master's node addresses; step 3 does not help then. Either give subscriptions a domain and send users the new link once before moving, or send everyone the new link after moving and keep the old server running until most have switched.</li>
+      <li>Open the same ports on the new server's security group and firewall as on the old one: panel, subscriptions, reseller panel and every line (UDP for Hysteria2, TUIC and port-hopping ranges).</li>
+      <li>WARP is installed into the system and is not in the backup: if lines use the warp upstream, install and enable WARP on the new server's <b data-k="nav.ops">Ops</b> page first (same port as before).</li>
+      <li>If nodes allow their panel port only from the old master's IP, add the new master's IP first, or the new master cannot reach them.</li>
+      <li>Make no changes on the old panel while both run, and keep that time as short as possible.</li>
+    </ul></div>
     <div class="tip"><b>Replacing only a node is simpler</b>Install the new node, then on the master's <b data-k="nav.nodes">Servers</b> page update that row with the new API URL and token; the master pushes everything again.</div>
   </section>
 
   <section class="sec" id="bk-import">
     <h3>Moving from an old panel</h3>
     <ul>
-      <li>Everything (lines, upstreams, users, settings): add a parameter when installing, <code>bash install.sh --import /path/to/old-panel.db</code>. Ports, user credentials, the panel path and subscription links are kept, so clients need no changes.</li>
+      <li>Everything (lines, upstreams, users, settings): add a parameter when installing on the new server, <code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --import /path/to/old-panel.db</code>. Inbound ports, user credentials, the panel path and the subscription path are kept, but the subscription port becomes 2056 and a separate subscription domain is not carried over: if the old panel served subscriptions on another port, change it back with option 6 of the <code>m-ui</code> menu after installing; if it had its own subscription domain, add it with <code>m-ui set -db /etc/m-ui/m-ui.db subDomain=DOMAIN</code>. Only with both matching do clients need no changes.</li>
       <li>Users only: <b data-k="nav.users">Users</b> page → <b data-k="user.import">Import from old panel</b> (see <a href="#users-import">Import users from an old panel</a>).</li>
     </ul>
   </section>
@@ -1015,7 +1024,7 @@
     <p class="lede">The <b data-k="nav.logs">Logs</b> page has three kinds: <b data-k="logs.sub">Subscription access</b>, <b data-k="logs.core">Core log</b> and <b data-k="logs.audit">Audit</b>.</p>
     <ul>
       <li><b data-k="logs.sub">Subscription access</b>: who fetched a subscription, from which IP and with which app.</li>
-      <li><b data-k="logs.core">Core log</b>: the data plane's and panel's runtime log, kept in memory only (up to 10,000 lines, cleared on restart). <b data-k="logs.enabled">Logging</b> can be switched off to save resources.</li>
+      <li><b data-k="logs.core">Core log</b>: the data plane's and panel's runtime log. The copy in the panel lives in memory only (about 10,000 lines at most, cleared on restart); the same lines also go to the system log (see <code>journalctl -u m-ui</code>), and <b data-k="logs.clear">Clear</b> only empties the panel's copy. Cap the system log's size and retention on the <b data-k="nav.ops">Ops</b> page. <b data-k="logs.enabled">Logging</b> can be switched off to save resources.</li>
       <li><b data-k="logs.coreLevel">Data-plane level</b>: warn by default, warnings and errors only. Switch to info or debug while troubleshooting (it applies at once) and back to warn afterwards; info writes tens of thousands of lines an hour and slows the disk down.</li>
       <li><b data-k="logs.audit">Audit</b>: who did what and when (panel, external API and Telegram bot actions).</li>
       <li>Subscription access and audit logs can <b data-k="logs.keep">Auto-clean</b> (keep 1 day, 1 week, 1 month or forever); every kind can be emptied with <b data-k="logs.clear">Clear</b>.</li>
@@ -1029,7 +1038,7 @@
       <li>It lists connections that passed the protocol handshake and authentication, with user, line, server, count and last time.</li>
       <li>Connections refused by a device limit or a reseller's device pool are listed in red too: <b data-k="dash.rejectedDevice">Refused: device limit</b>, <b data-k="dash.rejectedPool">Refused: reseller device pool full</b>.</li>
       <li data-pending="v6">Connections that failed the handshake or authentication (wrong certificate, password or SNI) are listed as well, with the reason.</li>
-      <li>An IP missing from the list usually means the packets never reached the server (security group, firewall, client network). To check whether they arrive, set <b data-k="logs.coreLevel">Data-plane level</b> to info for a while and look for <code>inbound connection from</code>, or capture packets on the server.</li>
+      <li>An IP missing from the list usually means the packets never reached the server (security group, firewall, client network). To check whether they arrive on a TCP line, set <b data-k="logs.coreLevel">Data-plane level</b> to info for a while and look for <code>inbound connection from</code>. Hysteria2, TUIC and other UDP lines only log that line after the handshake and authentication succeed (nothing at all for a wrong password or SNI), so its absence proves nothing there; capture packets on the server instead, such as <code>tcpdump -ni any udp port PORT</code>.</li>
     </ul>
   </section>
 
@@ -1040,7 +1049,7 @@
       <li>Arrow → <b data-k="update.now">Update now</b>: the download is verified, the program replaced and restarted, and the panel reloads after a dozen seconds. Users, lines, subscription links and certificates stay as they are; connections on this machine drop for a moment.</li>
       <li>If the new version fails to start, the old one is put back automatically and a bar at the top explains it; <b data-k="update.ack">Got it</b> dismisses it.</li>
       <li>Nodes are full installations and update from their own panels; keep master and nodes on the same version.</li>
-      <li>You can also run <code>m-ui</code> over SSH and choose option 10, or run the one-line installer again. IPv6-only servers cannot reach GitHub until WARP is installed.</li>
+      <li>You can also run <code>m-ui</code> over SSH and choose option 10. Like the arrow in the panel, it retries through the local WARP when GitHub cannot be reached directly, so IPv6-only servers (which cannot reach GitHub) update fine once WARP is installed. Running the one-line installer again also updates, but the script does not use WARP by itself: on an IPv6-only server first run <code>export ALL_PROXY=socks5h://127.0.0.1:40000</code> (use your WARP port), or upload the package by hand.</li>
     </ul>
   </section>
 
@@ -1103,10 +1112,10 @@
   <section class="sec" id="api-on">
     <h3>Turning it on</h3>
     <ol class="steps">
-      <li data-scope="admin"><b data-k="nav.admin">Admin</b> page → <b data-k="adm.api">External API</b>: switch on <b data-k="adm.apiToggle">Enable / disable the external API</b>, then copy the <b data-k="adm.apiBase">Base URL</b> and the <b data-k="adm.apiToken">Token</b>.</li>
-      <li data-scope="reseller"><b data-k="nav.account">Account</b> page → <b data-k="acct.api">External API</b>: switch on <b data-k="acct.apiEnable">Enable external API</b>, then copy the <b data-k="acct.apiBase">Base URL</b> and the <b data-k="acct.apiToken">Token</b>.</li>
+      <li data-scope="admin"><b data-k="nav.admin">Admin</b> page → <b data-k="adm.api">External API</b>: turn on the switch at the top right of the card (hovering it shows <b data-k="adm.apiToggle">Enable / disable the external API</b>), then copy the <b data-k="adm.apiBase">Base URL</b> and the <b data-k="adm.apiToken">Token</b>.</li>
+      <li data-scope="reseller"><b data-k="nav.account">Account</b> page → <b data-k="acct.api">External API</b>: turn on the switch at the top right of the card (hovering it shows <b data-k="acct.apiEnable">Enable external API</b>), then copy the <b data-k="acct.apiBase">Base URL</b> and the <b data-k="acct.apiToken">Token</b>.</li>
       <li>Send the token with every request: the header <code>Authorization: Bearer TOKEN</code> (or <code>X-API-Key: TOKEN</code>), with JSON request bodies.</li>
-      <li>The endpoint list further down that page explains every call with a curl example you can copy.</li>
+      <li>Once it is on, <b data-k="adm.apiEndpoints">Endpoints</b> (what each call does) and an <b data-k="adm.apiExample">Example (curl)</b> with your base URL and token filled in appear below the token, ready to copy; while it is off the endpoint list is folded away but can still be read.</li>
     </ol>
     <div class="pit"><b>Common pitfalls</b><ul>
       <li>The token carries all of your panel permissions: keep it in server-side code only, never in a web page or an app. If it leaks, click <b data-k="adm.apiRotate">Regenerate</b> and the old token stops working at once.</li>
@@ -1130,23 +1139,24 @@
         <tr><td><code>POST /users/{name}/enable</code> · <code>/disable</code></td><td>Enable / disable</td></tr>
         <tr><td><code>POST /users/{name}/reset</code> · <code>/kick</code></td><td>Reset this period's usage / kick</td></tr>
         <tr><td><code>POST /users/{name}/rotate</code></td><td>Reset the subscription link and credentials</td></tr>
-        <tr><td><code>POST /users/{name}/plan</code></td><td>Renew (<code>renew</code>) or extend (<code>extend</code>)<span data-pending="plan-api">; <code>periods</code> renews N periods at once, and without a plan the current plan is renewed</span></td></tr>
-        <tr data-pending="plan-api"><td><code>POST /users/{name}/change</code></td><td>Change plan: <code>replace</code>, <code>stack</code> or <code>prorate</code></td></tr>
-        <tr data-pending="plan-api"><td><code>GET /users/{name}/plan-ops</code></td><td>Plan history, newest first</td></tr>
+        <tr><td><code>POST /users/{name}/plan</code></td><td>Renew (<code>renew</code>) or extend (<code>extend</code>); <code>periods</code> renews N periods at once, and a request without any plan field renews the current plan. <code>/renew</code> is an alias</td></tr>
+        <tr><td><code>POST /users/{name}/change</code></td><td>Change plan: <code>replace</code>, <code>stack</code> or <code>prorate</code></td></tr>
+        <tr><td><code>GET /users/{name}/plan-ops</code></td><td>Plan history, newest first</td></tr>
         <tr><td><code>GET /users/{name}/sub</code></td><td>Subscription links</td></tr>
         <tr><td><code>DELETE /users/{name}</code></td><td>Delete the user</td></tr>
       </tbody>
     </table></div>
   </section>
 
-  <section class="sec" id="api-safe" data-pending="plan-api">
+  <section class="sec" id="api-safe">
     <h3>Preview, no duplicates, confirm downgrades</h3>
     <p class="lede">Renewals and plan changes touch users' money and time, so the API has three safety nets.</p>
     <ul>
       <li>Preview: <code>"dryRun": true</code> only calculates and returns before / after, which a shop can use for quotes.</li>
       <li>No duplicates (idempotency): send a <code>requestId</code> (or the <code>Idempotency-Key</code> header, such as your order number) and retries with the same id run only once, so time is never added twice.</li>
       <li>Downgrade confirmation: if a plan change would put the user over quota at once or bring the expiry forward, the API answers 409 with the full preview; call again with <code>"force": true</code> to go ahead.</li>
-      <li>Calls marked "idempotent" and "preview" in the panel's endpoint list support these.</li>
+      <li>Calls marked <b data-k="adm.apiIdem">idempotent</b> and <b data-k="adm.apiDry">dry run</b> in the panel's endpoint list support these.</li>
+      <li>Renewals and plan changes are explicit sales: users disabled by hand are enabled as well, so do not renew someone you want to keep disabled.</li>
     </ul>
   </section>
 </section>
@@ -1171,7 +1181,7 @@
     <ul>
       <li>Change the default port and path: <b data-k="nav.settings">Settings</b> → <b data-k="set.panel">Panel</b> → <b data-k="set.port">Port</b> / <b data-k="set.path">Path</b>. <code>IP:port/</code> alone always returns 404, so a port scan does not reveal the panel.</li>
       <li>Serve the panel over HTTPS: when adding a certificate, tick <b data-k="cert.applyPanel">Use for panel HTTPS</b> (applies after a restart).</li>
-      <li>Open only the ports you need in the firewall, and allow nodes' panel ports only from the master's IP.</li>
+      <li>Open only the ports you need in the firewall, and allow nodes' panel ports only from the master's IP (add the new master's IP after changing masters). This keeps out outsiders, not users who come in through the proxy; see the next section.</li>
       <li>Login protection: 10 wrong attempts from one source within 10 minutes block it for 5 minutes, and 5 wrong attempts in a row can send a Telegram alert (<b data-k="set.tgOnLogin">Panel login / repeated failures</b>).</li>
     </ul>
   </section>
@@ -1179,11 +1189,32 @@
   <section class="sec" id="sec-core" data-scope="admin">
     <h3>Data-plane safety switches</h3>
     <ul>
-      <li><b data-k="set.allowPrivate">Let users reach private / local addresses</b>: off by default, so users cannot reach the panel, the WARP port or your internal network through the proxy. Turn it on only if users really need internal services.</li>
+      <li><b data-k="set.allowPrivate">Let users reach private / local addresses</b>: off by default, so users cannot reach services that listen only on 127.0.0.1 (such as the WARP port) or your internal network through the proxy. Turn it on only if users really need internal services.</li>
+      <li>The panel port is not covered: users can still open <code>SERVER-PUBLIC-IP:PANEL-PORT</code> through the proxy, and that traffic goes through the server's loopback, so firewall IP allow-lists do not stop it. Do not rely on allow-lists alone to protect a panel: change the default port and path, use a strong password and turn on two-factor authentication.</li>
       <li><b data-k="set.blockBT">Block BitTorrent</b>: refuses BitTorrent through the proxy so your VPS does not attract copyright complaints.</li>
       <li>Give nodes HTTPS API URLs; otherwise tokens and user credentials are synced in plain text.</li>
       <li>Backup zips contain user credentials and private keys, and the external API token equals admin rights: keep all of them safe.</li>
     </ul>
+  </section>
+
+  <section class="sec" id="sec-net" data-scope="admin">
+    <h3>Which outside services the panel contacts</h3>
+    <p class="lede">m-ui has no telemetry and collects no usage data. Apart from your own servers, the panel only contacts outside services in these cases; the table also says how to turn each one off.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Service</th><th>When and why</th><th>How to turn it off</th></tr></thead>
+      <tbody>
+        <tr><td>GitHub</td><td>Update check: about 20 seconds after start, then every 6 hours; the subscription service also checks the client version for the landing page's download page every 6 hours. Updates are downloaded from here too.</td><td>Cannot be turned off; if GitHub is unreachable the panel works the same, just without update notices</td></tr>
+        <tr><td>Cloudflare (<code>cdn-cgi/trace</code>), ipify</td><td>Detecting the server's public IPv4 / IPv6 (used for node addresses in subscriptions by default): at start, then every hour</td><td>Cannot be turned off</td></tr>
+        <tr><td>Globalping</td><td>Mainland reachability: the server's IP and port are sent to its public probe network, when you click a check and for <b data-k="set.reachAuto">Automatic checks</b> (on by default, every 90 minutes)</td><td><b data-k="nav.settings">Settings</b> → <b data-k="set.reach">Mainland reachability</b> → untick <b data-k="set.reachAuto">Automatic checks</b></td></tr>
+        <tr><td>Let's Encrypt</td><td>Issuing and renewing <b data-k="cert.srcAcme">Domain (auto-issue)</b> certificates; normally only the local expiry date is checked, and it connects only when a renewal is due</td><td>Do not use auto-issue, or turn off auto-renewal for that certificate in the store</td></tr>
+        <tr><td>Cloudflare API</td><td>Adding and removing TXT records when issuing or renewing with <b data-k="cert.methodCf">DNS (Cloudflare API)</b></td><td>Not contacted unless you use that validation</td></tr>
+        <tr><td>Telegram</td><td>Sending notifications and running the Telegram bot</td><td>Not contacted unless enabled under <b data-k="nav.settings">Settings</b> → <b data-k="set.notify">Notifications</b></td></tr>
+        <tr><td>GitHub, jsDelivr, ntfy.sh, TronGrid</td><td>Supporters list: reading the list when the <b data-k="support.btn">Feedback / Support</b> page is opened (at most hourly), adding a name and checking for the payment; online panel count: one download of an empty file from GitHub a day</td><td><b data-k="nav.settings">Settings</b> → <b data-k="set.panel">Panel</b> → untick <b data-k="set.supportOnline" class="wrap">Supporters list and online panel count</b></td></tr>
+        <tr data-pending="ha"><td>Globalping, Cloudflare API</td><td>Master failover: overseas probes try the master when deciding whether it is lost; DNS is updated automatically after the master changes</td><td>Turn off <b data-k="ha.set.witness">Overseas probe witness</b>; without a Cloudflare token DNS is not touched</td></tr>
+        <tr><td>Addresses you enter</td><td>Webhook, external subscriptions, the Telegram proxy; upstream health checks reach the <b data-k="set.testUrl">Upstream test URL</b> through each upstream</td><td>Leave them empty; set <b data-k="set.checkMinutes">Interval (minutes)</b> to 0 to turn upstream checks off</td></tr>
+        <tr><td>Only when you click</td><td>Updating, installing WARP (Cloudflare's package repository) and <b data-k="ops.checkExit">Check exit</b>, <b data-k="line.rr.lookup">Look up</b> in rule-based routing (the v2fly domain lists on GitHub), Reality <b data-k="line.reality.check">Check</b> and <b data-k="line.reality.pick">Suggest</b> (connect to candidate sites), external node speed tests</td><td>Not contacted unless you click</td></tr>
+      </tbody>
+    </table></div>
   </section>
 </section>
 
@@ -1219,9 +1250,9 @@
       <dt>Certificate renewal fails?</dt>
       <dd>Check the reason in the <b data-k="cert.renewCol">Auto-renew</b> column of the certificate store: HTTP validation needs port 80 free; manual-DNS certificates cannot renew automatically; an AAAA record pointing elsewhere also breaks validation. See <a href="#cert-renew">Automatic renewal</a>.</dd>
       <dt>WARP will not enable?</dt>
-      <dd>Read the task output on the Ops page; most often port 40000 is taken, so set another <b data-k="ops.warpPort">SOCKS5 port</b> and enable again.</dd>
+      <dd>Read the task output on the Ops page. Common causes: port 40000 is taken, so set another <b data-k="ops.warpPort">SOCKS5 port</b> and enable again; or the system is not Ubuntu / Debian, which one-click install does not support, so install WARP yourself (see <a href="#warp">WARP</a>).</dd>
       <dt>Subscriptions return 429?</dt>
-      <dd>One IP fetched a subscription more than 120 times in a minute and was rate-limited, usually an app refreshing too often. If you really need more, run <code>m-ui set -db /etc/m-ui/m-ui.db subRateLimit=COUNT</code> on the server (0 = unlimited).</dd>
+      <dd>One IP fetched a subscription more than 120 times in a minute and was rate-limited, usually an app refreshing too often. The limit is also the main protection against someone guessing usernames to collect subscriptions, so do not turn it off; if you really need more, raise it (to 600, say): <code>m-ui set -db /etc/m-ui/m-ui.db subRateLimit=600</code>, and consider turning off <b data-k="set.subUseUserName" class="wrap">Use the username as the subscription URL</b> so new users get random tokens.</dd>
     </dl>
   </section>
 
@@ -1229,7 +1260,7 @@
     <h3>Subscriptions and users</h3>
     <dl class="qa">
       <dt>The subscription name in the app is wrong?</dt>
-      <dd><span data-scope="admin">Set <b data-k="set.subTitle">Profile title</b> under <b data-k="nav.settings">Settings</b> → <b data-k="set.sub">Subscription</b> (resellers set theirs on their Account page).</span><span data-scope="reseller">Set <b data-k="set.subTitle">Profile title</b> under <b data-k="nav.account">Account</b> → <b data-k="set.subPage">Subscription page</b>.</span> Shadowrocket and Clash Verge fix the name when the subscription is added, so users must remove and re-add it, or use one-tap import on the landing page.</dd>
+      <dd><span data-scope="admin">Set <b data-k="set.subTitle">Profile title</b> under <b data-k="nav.settings">Settings</b> → <b data-k="set.sub">Subscription</b> (resellers set theirs on their Account page); without it the page title, the user's remark and the username are used, in that order.</span><span data-scope="reseller">Set <b data-k="set.subTitle">Profile title</b> under <b data-k="nav.account">Account</b> → <b data-k="set.subPage">Subscription page</b>; without it the page title, the user's remark and the username are used, in that order.</span> Shadowrocket and Clash Verge fix the name when the subscription is added, so users must remove and re-add it, or use one-tap import on the landing page.</dd>
       <dt>What do users see after running out or expiring?</dt>
       <dd>Their landing page still opens in a browser, with the reason, contact details and a renew button (if a purchase link is set) at the top; their apps get a 404. Renewing or resetting traffic brings them back at once.</dd>
       <dt>A subscription link leaked?</dt>
@@ -1254,9 +1285,9 @@
     <h3>Supporters list</h3>
     <ul>
       <li>Under "Support the project", enter your name and amount and click <b data-lit="support.html">Add my name</b>, then send exactly the amount shown in USDT (TRC20); if it arrives within 60 minutes it is credited to that name.</li>
-      <li data-pending="donors">It usually appears within a few hours in the <b data-lit="support.html">Supporters</b> list, which every panel shows.</li>
-      <li>m-ui has no telemetry. The supporters list and the online panel count are the only extra network connections, and neither carries any identifier.</li>
-      <li data-scope="admin">To turn them off: <b data-k="nav.settings">Settings</b> → <b data-k="set.panel">Panel</b> → untick <b data-k="set.supportOnline" class="wrap">Supporters list and online panel count</b>.</li>
+      <li>The list is matched with payments by a scheduled job on GitHub, which GitHub often delays by hours, so a name usually appears in the <b data-lit="support.html">Supporters</b> list of every panel a few hours after the payment arrives; if it is still missing after a day, message the author on Telegram.</li>
+      <li>m-ui has no telemetry and collects no usage data. The supporters list and the online panel count (each panel downloads an empty file from GitHub once a day, and the download count says how many are running) are the only connections that serve none of the panel's features, and neither carries any identifier.</li>
+      <li data-scope="admin">To stop these two: <b data-k="nav.settings">Settings</b> → <b data-k="set.panel">Panel</b> → untick <b data-k="set.supportOnline" class="wrap">Supporters list and online panel count</b>. That switch covers only these two; for its features the panel also contacts GitHub (update checks), Globalping (mainland reachability), Let's Encrypt, Telegram and others, listed with how to turn each off under <a href="#sec-net">Which outside services the panel contacts</a>.</li>
     </ul>
   </section>
 </section>
