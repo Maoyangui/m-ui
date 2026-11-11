@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
@@ -195,3 +196,77 @@ func TestJSONBodyLimited(t *testing.T) {
 	}
 }
 
+// 只有「令牌对不上」才算猜令牌:令牌是对的、只是外部 API 开关关着 / 代理已停用 / 已到期 / 代理关了 API,
+// 照常 401 但不计入失败 —— 不然到期代理的对接程序照常每分钟调用,10 分钟就把同一出口 IP 上
+// 管理员自己和其他代理的正常调用一起挡成 429。
+func TestPublicAPIAuthLimitIgnoresKnownTokens(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	db.Create(&model.Setting{Key: "apiEnabled", Value: "true"})
+	db.Create(&model.Setting{Key: "apiToken", Value: "good-token-0123456789"})
+	db.Create(&model.Reseller{Name: "ok", Enabled: true, ApiEnabled: true, ApiToken: "ok-token-0123456789"})
+	off := model.Reseller{Name: "off", Enabled: true, ApiEnabled: true, ApiToken: "off-token-0123456789"}
+	db.Create(&off)
+	db.Model(&off).Update("enabled", false)
+	db.Create(&model.Reseller{Name: "exp", Enabled: true, ApiEnabled: true, ApiToken: "exp-token-0123456789", Expiry: time.Now().Add(-time.Hour).Unix()})
+	noapi := model.Reseller{Name: "noapi", Enabled: true, ApiEnabled: true, ApiToken: "noapi-token-0123456789"}
+	db.Create(&noapi)
+	db.Model(&noapi).Update("api_enabled", false)
+
+	call := func(reseller bool, ip, token string) int {
+		path := "http://x/app/api/v1/users"
+		if reseller {
+			path = "http://x/dl/api/v1/users"
+		}
+		req := httptest.NewRequest("GET", path, nil)
+		req.RemoteAddr = ip + ":40000"
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		if reseller {
+			s.handleResellerPublicAPI(w, req)
+		} else {
+			s.handlePublicAPI(w, req)
+		}
+		return w.Code
+	}
+	const ip = "203.0.113.8"
+	for i := 0; i < 12; i++ {
+		for _, tok := range []string{"off-token-0123456789", "exp-token-0123456789", "noapi-token-0123456789"} {
+			if code := call(true, ip, tok); code != 401 {
+				t.Fatalf("第 %d 轮 %s:代理不可用应 401: %d", i+1, tok, code)
+			}
+		}
+	}
+	if code := call(true, ip, "ok-token-0123456789"); code != 200 {
+		t.Fatalf("同一出口的正常代理不应被连带挡住: %d", code)
+	}
+	if code := call(false, ip, "good-token-0123456789"); code != 200 {
+		t.Fatalf("同一出口的管理员对接不应被连带挡住: %d", code)
+	}
+	// 主面板关掉外部 API 后,带着原来那个(对的)令牌继续调用也不计数
+	db.Model(&model.Setting{}).Where("key = ?", "apiEnabled").Update("value", "false")
+	for i := 0; i < 12; i++ {
+		if code := call(false, ip, "good-token-0123456789"); code != 401 {
+			t.Fatalf("开关关着应 401: %d", code)
+		}
+	}
+	if code := call(true, ip, "ok-token-0123456789"); code != 200 {
+		t.Fatalf("主面板关了外部 API 后,同一出口代理的正常调用不应被挡: %d", code)
+	}
+	var n int64
+	db.Model(&model.Change{}).Where("key = ? AND action LIKE ?", "api", "auth:%").Count(&n)
+	if n != 0 {
+		t.Fatalf("令牌对得上的不该记成鉴权失败: %d 条审计", n)
+	}
+	// 真的猜错照样计数
+	for i := 0; i < 10; i++ {
+		call(true, ip, "guess")
+	}
+	if code := call(true, ip, "ok-token-0123456789"); code != http.StatusTooManyRequests {
+		t.Fatalf("错令牌 10 次后应被挡: %d", code)
+	}
+}

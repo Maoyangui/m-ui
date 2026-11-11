@@ -50,16 +50,15 @@ func apiToken(r *http.Request) string {
 	return got
 }
 
-func (s *Server) publicAuth(r *http.Request) bool {
-	if s.setting("apiEnabled") != "true" {
-		return false
-	}
+// publicAuth 主面板入口的鉴权。known:令牌与主面板令牌对得上(哪怕开关关着),
+// 这种失败不算猜令牌,不计入限流 —— 关掉外部 API 后对接程序照常调用,不该把同一出口 IP 上别人的调用一起挡掉。
+func (s *Server) publicAuth(r *http.Request) (ok, known bool) {
 	want := s.setting("apiToken")
-	if want == "" {
-		return false
-	}
 	got := apiToken(r)
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+	if want == "" || got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+		return false, false
+	}
+	return s.setting("apiEnabled") == "true", true
 }
 
 // apiScope 一次调用的作用域:主面板令牌 rid=0 看全部;代理令牌只看自己名下。
@@ -74,8 +73,10 @@ func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return
 	}
-	if !s.publicAuth(r) {
-		s.noteAPIAuthFailure(r, "")
+	if ok, known := s.publicAuth(r); !ok {
+		if !known {
+			s.noteAPIAuthFailure(r, "")
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
@@ -90,14 +91,23 @@ func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 
 // resellerByAPIToken 按令牌找到开启了外部 API 的代理;停用、到期的代理视同令牌错误。
 func (s *Server) resellerByAPIToken(tok string) (model.Reseller, bool) {
-	var rs model.Reseller
-	if tok == "" || s.db.Where("api_enabled = ? AND api_token = ? AND api_token <> ''", true, tok).First(&rs).Error != nil {
-		return rs, false
+	rs, ok, _ := s.resellerAPIToken(tok)
+	return rs, ok
+}
+
+// resellerAPIToken 同上,另外报告令牌是否对得上某个代理(known):对得上、只是代理关了外部 API、
+// 已停用或已到期的,调用方照常拒绝,但不算猜令牌、不计入限流。
+func (s *Server) resellerAPIToken(tok string) (rs model.Reseller, ok, known bool) {
+	if tok == "" || s.db.Where("api_token = ? AND api_token <> ''", tok).Order("api_enabled DESC").First(&rs).Error != nil {
+		return rs, false, false
 	}
-	if subtle.ConstantTimeCompare([]byte(tok), []byte(rs.ApiToken)) != 1 || !rs.Enabled || (rs.Expiry > 0 && rs.Expiry < time.Now().Unix()) {
-		return rs, false
+	if subtle.ConstantTimeCompare([]byte(tok), []byte(rs.ApiToken)) != 1 {
+		return rs, false, false
 	}
-	return rs, true
+	if !rs.ApiEnabled || !rs.Enabled || (rs.Expiry > 0 && rs.Expiry < time.Now().Unix()) {
+		return rs, false, true
+	}
+	return rs, true, true
 }
 
 // handleResellerPublicAPI 代理面板上的 /api/v1/:令牌属于哪个代理,就只操作那个代理名下的东西。
@@ -107,9 +117,11 @@ func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return
 	}
-	rs, ok := s.resellerByAPIToken(apiToken(r))
+	rs, ok, known := s.resellerAPIToken(apiToken(r))
 	if !ok {
-		s.noteAPIAuthFailure(r, "代理")
+		if !known {
+			s.noteAPIAuthFailure(r, "代理")
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
