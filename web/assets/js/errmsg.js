@@ -392,6 +392,7 @@ const EN = /*BEGIN*/{
 "主机未启用多服务器": "Multi-server is not enabled on the master",
 "副机没有配置 API 地址或令牌": "The node has no API URL or token",
 "副机版本过旧,没有踢线接口": "The node is too old to support kicking",
+"副机版本 v%s 低于主机要求的 v%s,请先升级这台副机": "This node runs v%s, older than the v%s the master requires; upgrade this node first",
 "协议 %s 暂不支持测速和作上游": "Protocol %s cannot be tested or used as an upstream yet",
 "参数 %s=%v 暂不支持": "Parameter %s=%v is not supported yet",
 "缺少参数 %s": "Missing parameter %s",

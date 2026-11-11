@@ -171,8 +171,9 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if snap.MinNode != "" && selfupdate.Newer(snap.MinNode, Version) {
-		// 主机的快照里有本机不认识的字段(比如停用原因、代理额度标志):应用了也是错的,直接拒绝并说清楚
-		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("副机版本 v%s 低于主机要求的 v%s,请先升级这台副机", Version, snap.MinNode)})
+		// 主机的快照里有本机不认识的字段(比如停用原因、代理额度标志):应用了也是错的,直接拒绝并说清楚。
+		// 这句现在也显示在本机概况的「与主机同步」上,写成 fmt.Errorf 让 errmsg 测试能扫到、英文界面有译文
+		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Errorf("副机版本 v%s 低于主机要求的 v%s,请先升级这台副机", Version, snap.MinNode).Error()})
 		return
 	}
 	if s.run == nil {
