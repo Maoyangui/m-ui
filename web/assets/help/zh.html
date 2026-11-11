@@ -190,7 +190,7 @@
   </section>
 </section>
 
-<section class="chap" id="ha" data-scope="admin" data-pending="ha">
+<section class="chap" id="ha" data-scope="admin">
   <h2>设为主机与主机容灾</h2>
   <p class="lede">两件事:<b data-k="ha.setMaster">设为主机</b> 一键把主机换到另一台服务器(计划内换机、换到全新 VPS 都用它);<b data-k="ha.title">主机容灾</b> 在主机挂了(VPS 宕机、被误删)时由备用接任为主机。容灾默认关闭。</p>
 
@@ -199,53 +199,60 @@
     <p class="lede">在主机面板上把任意一台副机设为主机:数据一次交接过去,原来的主机自动变为副机。</p>
     <ol class="steps">
       <li><b data-k="nav.nodes">服务器</b> 页,点那台服务器 <b data-k="common.status">状态</b> 一栏开头的角色标签(如「副机 ▾」「备用 1 ▾」),在弹出的卡片里点 <b data-k="ha.setMaster">设为主机</b>;行末的 ⋯(<b data-k="common.more">更多</b>)菜单里也有。</li>
-      <li>确认框里写清会发生什么:检查结果、新的面板地址、订阅域名的 DNS 该指向哪个 IP。输一次管理员密码(开了两步验证再输动态码)。</li>
-      <li>之后全程有进度,完成后给出新面板地址。账号、密码、两步验证都不变,到新面板重新登录。</li>
+      <li>确认框里写清会发生什么:检查结果、新的面板地址和代理面板地址、订阅域名的 DNS 该指向哪个 IP。输一次管理员密码(开了两步验证再输动态码)。</li>
+      <li>之后全程有进度,完成后给出新面板和代理面板地址。账号、密码、两步验证都不变,到新面板重新登录。</li>
     </ol>
     <ul>
       <li>主机的全部数据(用户、线路、套餐、代理、设置、流量记录)端到端加密后交给那台,它成为主机;原来的主机变为副机,继续用自己的线路服务。两台各重启一次,连在这两台上的用户断开几秒后自动重连,别的服务器不受影响。</li>
-      <li>中途任何一步失败都会自动取消:原主机照旧当主机,写操作恢复,数据不变。</li>
+      <li>提交之前任何一步失败(包括传得太慢、快到截止)都会自动取消:原主机照旧当主机,写操作恢复,数据不变。</li>
       <li>换到全新 VPS:照常装好 m-ui,像副机一样接入(见 <a href="#nodes-add">接入一台副机</a>),显示 <b data-k="node.synced">已同步</b> 后对它点 <b data-k="ha.setMaster">设为主机</b>,不用备份、还原。</li>
-      <li>订阅地址不变:订阅的域名、端口、路径和证书跟着主机走,把订阅域名的 DNS 改指向新主机就行(订阅地址用的是 IP 时会变,确认框会提前说)。面板和代理面板用新主机自己的地址。</li>
+      <li>和那台的链接是明文 http 时,确认框里要勾选 <b data-k="ha.sm.plainAck" class="wrap">我知道和它的链接是明文 http:链路上的主动中间人能拿到并改写整库,仍要继续</b> 才能点。能换成 https 就先换(自签证书 + 指纹也行)。</li>
+      <li>订阅地址不变:订阅的域名、端口、路径和证书跟着主机走,把订阅域名的 DNS 改指向新主机就行。订阅地址用的是 IP、或者迁过去的订阅端口和那台的面板 / 代理面板 / WARP 端口或线路端口相同时,那台继续用自己的订阅端口,订阅地址会变,确认框的 <b data-k="ha.sm.warn">注意</b> 里提前说。面板和代理面板用新主机自己的地址。</li>
       <li>订阅证书是 <b data-k="cert.srcExternal">已有证书</b>(由 certbot 等工具续期)、新主机上又没有同名证书的,带过去的是一份副本,新主机上没人续它:做完后就在新主机 <b data-k="nav.cert">证书</b> 页重新签发,或者在新主机装好 certbot 后重新添加。</li>
-      <li>离线、停用、配置没同步上、版本太旧、磁盘不够的副机不能设为主机,卡片里写明原因。</li>
-      <li>端口冲突不挡设为主机,只在确认框的 <b data-k="ha.sm.warn">注意</b> 里列出来,点之前看清:订阅端口在那台已被占用(线路或它自己的面板用着)时,订阅改用它自己的端口,订阅地址跟着变;代理面板端口在那台被线路占着时,成为主机后代理面板起不来。想避免就先把那台上冲突的端口改掉再设。</li>
+      <li>离线、停用、配置没同步上、版本太旧、磁盘不够(那台和本机都要够)、它连不上本机、本机作为副机的地址拼不出来时不能设为主机,卡片里写明原因。代理面板端口在那台被线路占着时,成为主机后代理面板起不来,也在 <b data-k="ha.sm.warn">注意</b> 里列出。</li>
+      <li>从打包数据到原主机重启之间(通常一两分钟)原主机自己线路上的流量,以及那台收到数据到重启之间它自己线路上的流量,不计入用户用量;其它副机线路上的流量照常补回。</li>
     </ul>
-    <div class="pit"><b>常见坑</b>交接期间写操作暂停(一般几分钟,最多 15 分钟):面板只读,外部 API、代理面板、Telegram 机器人的写操作返回 503,对接的程序要能重试。</div>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>交接期间写操作暂停,通常一两分钟,最长按库的大小算(15–60 分钟),进度框和页面顶部写着截止时间:面板只读,外部 API、代理面板、Telegram 机器人、订阅页的临时共享返回 503,对接的程序要能重试。</li>
+      <li>提交请求发出后没收到回话,进度框显示结果不明:写操作继续暂停,原主机每 10 秒问一次那台。到截止还没结论,或你点 <b data-k="ha.sm.abandon">放弃(隔离目标)</b> 并再输一次密码,原主机以更高的纪元继续当主机、恢复写操作;那台之后就算起来,副机也不认它,它会自动变为副机,它那份数据不生效。</li>
+    </ul></div>
   </section>
 
   <section class="sec" id="ha-how">
     <h3>主机容灾怎么工作</h3>
     <p class="lede">在主机的 <b data-k="nav.settings">设置</b> → <b data-k="ha.title">主机容灾</b> 里打开(保存时要输管理员密码)。开启后,服务器顺序排在最前面的几台副机当备用,保存加密的数据副本。</p>
     <ul>
-      <li><b data-k="ha.set.standbys">备用台数</b> 默认 2(可设 1–3),按 <b data-k="nav.nodes">服务器</b> 页的顺序挑,列表里标「备用 1」「备用 2」;调顺序就是调谁先接任。</li>
-      <li>主机定时把数据副本发给备用(默认每 5 分钟一份,有改动后 30 秒内补一份)。副本用备用自己的公钥加密、主机签名,只有接任时才解开。</li>
+      <li><b data-k="ha.set.standbys">备用台数</b> 默认 2(可设 1–3),按 <b data-k="nav.nodes">服务器</b> 页的顺序挑,列表里标「备用 1」「备用 2」;调顺序就是调谁先接任。前排暂时离线、磁盘不够时名次先保留 30 分钟再顺延;新进名单的备用会发 Telegram。</li>
+      <li>主机定时把数据副本发给备用(默认每 5 分钟一份,有改动后 30 秒内补一份)。副本用备用自己的公钥加密、主机签名,只有接任时才解开。发送连续失败时,卡片和 <b data-k="ha.set.ready">就绪检查</b> 写出原因。</li>
       <li>主机失联期间副机照常转发,已连上的用户不受影响;接任是为了恢复管理、计费、订阅和告警。</li>
-      <li>接任后它就是主机,可以长期当。副机线路上的流量会自动补回;最后一份副本之后在原主机上做的管理改动、原主机自己线路上那几分钟的流量补不回来。</li>
-      <li>设置页的 <b data-k="ha.set.ready">就绪检查</b> 逐项打勾:合格的备用、副机版本、副本自检、和备用的链接是不是 https、订阅是不是用域名、Telegram、副机之间是否互通、境外见证;没通过的给一句修法。</li>
+      <li>接任后它就是主机,可以长期当。副机线路上的流量会自动补回。补不回来的:最后一份副本之后在原主机上做的管理改动、原主机自己线路上那几分钟的流量;副本本来就不带流量时序图(概况、落地页的图表)和订阅日志,操作审计只带最近 7 天、最多 2 万条,接任后这些从空白开始,原主机回来也不会合并回来。</li>
+      <li>设置页的 <b data-k="ha.set.ready">就绪检查</b> 逐项打勾:合格的备用、副机版本、副本自检、和副机的链接是不是 https、订阅是不是用域名、Telegram、副机之间是否互通、境外见证;没通过的给一句修法。</li>
+      <li>备用卡片里有它的公钥指纹,和那台副机 <b data-k="nav.settings">设置</b> → <b data-k="ha.title">主机容灾</b> 里显示的本机指纹应该一样。</li>
     </ul>
     <div class="pit"><b>常见坑</b><ul>
-      <li>副机都要升级到 v0.7.17 或更新:旧版照常同步,但不能当备用。</li>
+      <li>副机都要升级到 v0.7.17 或更新:旧版照常同步,但不能当备用。<b>升级时先升副机,再升主机</b>:版本比主机旧的备用保留名次和手里的旧副本,但收不到新副本,合格备用不够时告警一次。</li>
+      <li>和副机的链接是明文 http 时,它默认不当备用:http 链接上的主动中间人能拿到并改写数据副本。确实可信时,在 <b data-k="ha.set.advanced">高级</b> 里打开 <b data-k="ha.set.allowPlain">允许明文链接的副机当备用</b>。</li>
       <li>副机之间要互相放开面板端口,好互相确认主机是不是真的失联;不通时只能靠境外测点或人工确认。</li>
-      <li>备用重装过 m-ui,它的公钥会变:卡片里点 <b data-k="ha.repin">重新信任</b> 后才会再给它发副本。</li>
+      <li>备用重装过 m-ui,它的公钥会变:卡片里点 <b data-k="ha.repin">重新信任</b>,核对指纹、再输一次管理员密码后才会再给它发副本。指纹对不上又没重装过,可能是有人在冒充它。</li>
     </ul></div>
   </section>
 
   <section class="sec" id="ha-takeover">
     <h3>接任方式</h3>
-    <p class="lede">打开容灾时三选一,默认是确认后再接任。</p>
+    <p class="lede">打开容灾时三选一,默认是 <b data-k="ha.mode.confirm">先确认再接任</b>。</p>
     <ul>
       <li><b data-k="ha.mode.off">关闭</b>:主机挂了要人来处理,副机照常用自己的线路服务。</li>
-      <li><b data-k="ha.mode.confirm">主机失联后确认再接任</b>(默认,推荐):备用发现主机失联 3 分钟后发 Telegram,回复消息里给的 <code>/takeover 码</code>(或「接任 码」),或者到备用的面板上点 <b data-k="ha.takeover">接任为主机</b>,它就接任。主机在这之前回来,提醒自动取消。</li>
-      <li><b data-k="ha.mode.auto">主机失联后自动接任</b>:失联 10 分钟后备用自己接任。三台以上要过半副机同意;一主一副时还要境外测点也连不上主机,所以必须开着 <b data-k="ha.set.witness">境外测点见证</b>。</li>
+      <li><b data-k="ha.mode.confirm">先确认再接任</b>(默认,推荐):备用确认主机失联 3 分钟后发 Telegram,回复消息里给的 <code>/takeover 码</code>(或「接任 码」),或者到备用的面板上点 <b data-k="ha.takeover">接任为主机</b>,它就接任。按钮只在发出确认之后才出现;没到时间、证据不够时,备用页面顶部写着为什么不接任。主机在这之前回来,提醒自动取消。</li>
+      <li><b data-k="ha.mode.auto">主机失联后自动接任</b>:失联 10 分钟后备用自己接任。三台以上要过半副机同意;一主一副时还要境外测点也连不上主机,所以必须开着 <b data-k="ha.set.witness">境外测点见证</b>。这个模式不给接任按钮,真要强行接任用命令行 <code>m-ui ha takeover --force</code>。</li>
       <li>什么算失联:备用 1 分钟以上没收到主机的消息,其它副机也联系不上它,境外测点(美、德、日、新、港)也连不上它的公网 IP。只是国内到主机被墙、某一台和主机之间断网,或者主机在升级、重启,都不算。</li>
-      <li>防脑裂:每次接任或设为主机都换一个更高的纪元,副机只听纪元最高的那台。</li>
+      <li>防脑裂:每次接任或设为主机都换一个更高的纪元,副机只听纪元最高的那台。主机推给副机的状态带签名,交接标记带时效、绑定新主机的公钥,只拿到副机令牌伪造不了。</li>
       <li>等多久发确认、等多久自动接任、副本间隔,都在 <b data-k="ha.set.advanced">高级</b> 里调。</li>
     </ul>
     <div class="pit"><b>常见坑</b><ul>
-      <li>升级、维护前可以先暂停接任(设置页的暂停按钮,或主机上 <code>m-ui ha pause 分钟数</code>);在面板里点升级、改端口这类会重启的操作,会自动暂停一会儿。</li>
+      <li>升级、维护前可以先暂停接任(设置页的暂停按钮,或主机上 <code>m-ui ha pause 分钟数</code>)。在面板里点升级、改端口这类会重启的操作,以及 <code>m-ui</code> 菜单里的升级(暂停 15 分钟)和重启(暂停 5 分钟),都会自动先暂停。</li>
       <li>没开 Telegram 通知时,确认模式只能到备用的面板上点接任。</li>
       <li>订阅地址里是 IP 时,接任后用户要重新导入订阅。订阅最好用域名,接任后把它指向新主机(或者打开下面的 Cloudflare 自动改 DNS)。</li>
+      <li>备用的数据副本比它现在的纪元旧(上一任新主机期间的改动不在里面)时不给接任按钮;真要接任用命令行 <code>m-ui ha takeover --force</code>,那些改动会丢。</li>
     </ul></div>
   </section>
 
@@ -255,7 +262,19 @@
     <ul>
       <li>新主机的服务器列表里它先标「原主机 · 失联」,暂时不进订阅;回来后变回「副机」,重新收到配置,线路回到订阅。</li>
       <li>它失联期间如果还收了改动,变为副机前会先留一份备份,页面顶部提示有几条改动没进新主机。</li>
+      <li>备用在原主机其实还在时接任过(比如网络分区),多数副机仍跟着原主机时,它会把主机让回去,自动改过的 DNS 也改回原值,页面顶部写明是「让回」而不是失联。</li>
       <li>想让它重新当主机,在服务器列表里对它点 <b data-k="ha.setMaster">设为主机</b>。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="ha-restore">
+    <h3>备份、还原与换机</h3>
+    <p class="lede">纪元只升不降:在主机上还原一份旧备份、或在菜单里「重置全部设置」,都不会让纪元回退,副机照常跟着,页面顶部提示一次纪元已恢复。</p>
+    <ul>
+      <li><b>把主机的备份还原到别的机器并启动,等于把主机换到那台</b>:新机以更高的纪元接管全部副机;旧主机之后若被服务商重启,会自动变为副机并提示「同一份数据已在另一台服务器上当主机」。旧机不要了就在它上面执行 <code>systemctl disable --now m-ui</code>。</li>
+      <li>只想看看备份里有什么,别在联网的机器上启动它。</li>
+      <li>删除一台副机、在副机上 <b data-k="set.rotateToken">更换令牌</b>,都会清掉它的容灾记录,它可以再被别的主机接入。副机离线时被删,它回来后照样会清。</li>
+      <li>把主机降回 0.7.16 或更早之前,先在每台副机执行 <code>m-ui ha reset</code>,不然旧主机管不了进过纪元的副机。</li>
     </ul>
   </section>
 
@@ -263,21 +282,25 @@
     <h3>Cloudflare 自动改 DNS(可选)</h3>
     <p class="lede">订阅域名托管在 Cloudflare 时,主机变了(接任或设为主机)可以自动把解析改到新主机。默认关闭,要一个 Cloudflare API 令牌。</p>
     <ul>
-      <li>在 <b data-k="ha.title">主机容灾</b> 设置的 <b data-k="ha.set.advanced">高级</b> → <b data-k="ha.set.dns" class="wrap">自动改 DNS(Cloudflare,可选)</b> 里填 <b data-k="ha.set.dnsToken">Cloudflare 令牌</b> 和 <b data-k="ha.set.dnsNames">跟着主机走的域名</b>(比如订阅域名),点 <b data-k="ha.set.dnsTest">测试令牌与记录</b> 看哪些记录会被改。</li>
-      <li>令牌要有这个域名的 DNS 编辑权限,单独存、和签证书用的分开;怎么创建见 <a href="#cf-token">Cloudflare API 令牌怎么创建</a>。</li>
+      <li>在 <b data-k="ha.title">主机容灾</b> 设置的 <b data-k="ha.set.advanced">高级</b> → <b data-k="ha.set.dns" class="wrap">自动改 DNS(Cloudflare,可选)</b> 里填 <b data-k="ha.set.dnsToken">Cloudflare 令牌</b> 和 <b data-k="ha.set.dnsNames">跟着主机走的域名</b>(比如订阅域名),点 <b data-k="ha.set.dnsTest">测试令牌与记录</b> 看哪些记录会被改;令牌无效、区域找不到时这里直接写出错误。</li>
+      <li>令牌要有这个域名的 DNS 编辑权限,单独存、和签证书用的分开。输入框下面的 <b data-k="cf.create">去 Cloudflare 创建</b> ↗ 打开权限已预填的创建页;详细步骤见 <a href="#cf-token">Cloudflare API 令牌怎么创建</a>。</li>
       <li>只改这些域名里当前指向原主机 IP 的 A / AAAA 记录,橙云和 TTL 不动,别的记录不碰;改不成只告警,不挡换主机。</li>
+      <li>结果分三种:全部改好、只改好一部分、失败。页面顶部和 Telegram 写出每条记录的原值 → 新值;新主机缺 IPv6(或 IPv4)、令牌管不到某个区域时,把没改的记录列出来,要你手动改或删。</li>
+      <li>误接任后让回原主机时,本机自动改过、而且现在仍指向本机的记录会改回原值。</li>
       <li>不配的话,接任或设为主机后按页面顶部和 Telegram 里写的 IP,自己去改解析。</li>
     </ul>
+    <div class="tip"><b>测试地址</b>环境变量 <code>M_UI_TEST_CF_API</code> 能把 Cloudflare 接口换成测试地址,只供演练、测试用;设了它,设置页会提示、操作审计里有记录,证书签发不受影响。</div>
   </section>
 
   <section class="sec" id="ha-cli">
     <h3>命令行</h3>
     <p class="lede">SSH 到服务器上用 <code>m-ui ha</code>(要 root);<code>m-ui</code> 菜单第 15 项也是主机容灾。</p>
     <ul>
-      <li><code>m-ui ha status</code>:本机角色、纪元、模式、备用、副本时间;服务停着时也能看个大概。</li>
-      <li><code>m-ui ha takeover</code>:在备用上接任为主机,主机还在联系它时会被拒绝;加 <code>--force</code> 不管主机有没有联系都接任,只在确认主机已经不在、或两台主机僵持时用。</li>
-      <li><code>m-ui ha set-master 服务器名或 id</code>:在主机上把一台副机设为主机,做完打印新面板地址。</li>
+      <li><code>m-ui ha status</code>:本机角色、纪元、模式、备用、副本时间、本机公钥指纹;服务停着时也能看个大概。</li>
+      <li><code>m-ui ha takeover</code>:在备用上接任为主机,证据不够时会被拒绝;加 <code>--force</code> 不等确认、不看证据直接接任,只在确认主机已经不在时用。在主机上加 <code>--force</code> 是以高于已知最高的纪元把跟过别的主机的副机收回来,只在两台主机僵持时用。</li>
+      <li><code>m-ui ha set-master 服务器名或 id</code>:在主机上把一台副机设为主机,做完打印新面板地址;链接是 http 时要加 <code>--allow-plain</code>。结果不明时打印原因和最晚截止时间。</li>
       <li><code>m-ui ha pause 分钟数</code> / <code>m-ui ha resume</code>:在主机上暂停 / 恢复接任。</li>
+      <li><code>m-ui ha reset</code>:清掉本机的容灾记录(纪元、跟随的主机、副本),本机可以再被别的主机接入;在主机上要加 <code>--force</code>。</li>
     </ul>
   </section>
 </section>
@@ -532,7 +555,7 @@
     <div class="pit"><b>常见坑</b><ul>
       <li>权限最小化:只要上面两项权限,区域只选要用的域名。不要用「Global API Key」(全局 API 密钥),也不要给账户级的权限。</li>
       <li>令牌泄露了:到同一页把它删掉或轮转,再把新令牌填回 m-ui。</li>
-      <li data-pending="ha">主机容灾的自动改 DNS 单独填一个令牌(见 <a href="#ha-dns">Cloudflare 自动改 DNS</a>),照同样的步骤再建一个就行。</li>
+      <li>主机容灾的自动改 DNS 单独填一个令牌(见 <a href="#ha-dns">Cloudflare 自动改 DNS</a>),照同样的步骤再建一个就行。</li>
     </ul></div>
   </section>
 
@@ -925,7 +948,7 @@
   <section class="sec" id="bk-migrate">
     <h3>换服务器</h3>
     <p class="lede"><b data-k="nav.backup">备份</b> 页的 <b data-k="mig.title">换机向导</b> 用备份分四步把整个面板搬到新服务器。订阅用的是域名时,端口、凭据、订阅地址都不变,把域名解析改到新机,用户就跟过来了。</p>
-    <div class="tip" data-pending="ha"><b>旧主机还在运行时,优先用「设为主机」</b>新机装好 m-ui、像副机一样接入(见 <a href="#nodes-add">接入一台副机</a>),同步上以后在 <b data-k="nav.nodes">服务器</b> 页对它点 <b data-k="ha.setMaster">设为主机</b>:数据一次交接过去,不用备份、还原,旧主机自动变为副机(见 <a href="#ha-switch">设为主机</a>)。下面的四步留给旧主机已经不在、只能靠备份的时候。</div>
+    <div class="tip"><b>旧主机还在运行时,优先用「设为主机」</b>新机装好 m-ui、像副机一样接入(见 <a href="#nodes-add">接入一台副机</a>),同步上以后在 <b data-k="nav.nodes">服务器</b> 页对它点 <b data-k="ha.setMaster">设为主机</b>:数据一次交接过去,不用备份、还原,旧主机自动变为副机(见 <a href="#ha-switch">设为主机</a>)。下面的四步留给旧主机已经不在、只能靠备份的时候。还原后启动,就等于把主机换到这台:旧主机之后若又被启动,会自动变为副机,不要了就在旧机上执行 <code>systemctl disable --now m-ui</code>(见 <a href="#ha-restore">备份、还原与换机</a>)。</div>
     <ol class="steps">
       <li>把备份 zip 传到新机,执行 <code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --restore /root/m-ui-20261111-030000.zip</code>(换成你的文件路径;amd64、arm64 都是这一条,脚本先装最新版再还原,证书一起还原)。向导里也有这条命令。</li>
       <li>用新机 IP 打开面板(端口和路径同旧机),确认线路在运行;有副机的话,新主机会自动重新连上它们。</li>
@@ -987,7 +1010,7 @@
       <li><b data-k="set.tgOnReach">大陆连通异常 / 恢复</b></li>
       <li><b data-k="set.tgOnCert">证书签发 / 续期 / 到期提醒</b>(副机证书的也由主机发)</li>
       <li><b data-k="set.tgDaily">每日报告</b>,几点发在 <b data-k="set.tgDailyHour" class="wrap">每日报告时间(小时,0–23,按面板时区)</b></li>
-      <li data-pending="ha">主机容灾:备用发现主机失联、等你回复确认码接任、接任完成、设为主机做完或没做成、原主机回来变为副机时,也会发通知(见 <a href="#ha">设为主机与主机容灾</a>)。</li>
+      <li>主机容灾:备用发现主机失联、等你回复确认码接任、接任完成、设为主机做完或没做成、原主机回来变为副机时,也会发通知(见 <a href="#ha">设为主机与主机容灾</a>);这些通知不受 <b data-k="set.tgOnCore">数据面停止 / 恢复</b> 开关管。</li>
     </ul>
   </section>
 
@@ -1078,7 +1101,7 @@
       <li><code>m-ui passwd</code>:重置管理员密码(同时关掉两步验证)。</li>
       <li><code>m-ui set -db /etc/m-ui/m-ui.db 键=值</code>:直接改设置,比如 <code>webPort=3053</code>。</li>
       <li><code>m-ui render</code>:打印并校验当前的 sing-box 配置。</li>
-      <li data-pending="ha">菜单 15 和 <code>m-ui ha status</code> / <code>takeover</code> / <code>set-master</code> / <code>pause</code> / <code>resume</code>:主机容灾与设为主机(见 <a href="#ha-cli">命令行</a>)。</li>
+      <li>菜单 15 和 <code>m-ui ha status</code> / <code>takeover</code> / <code>set-master</code> / <code>pause</code> / <code>resume</code> / <code>reset</code>:主机容灾与设为主机(见 <a href="#ha-cli">命令行</a>)。菜单里的升级、重启会先暂停接任。</li>
       <li>数据在 <code>/etc/m-ui/</code>:<code>m-ui.db</code>(数据库)、<code>cert/</code>(证书)、<code>backups/</code>(定时备份)。</li>
     </ul>
   </section>
@@ -1226,7 +1249,7 @@
         <tr><td>Cloudflare API</td><td>用 <b data-k="cert.methodCf">DNS(Cloudflare API)</b> 签发、续期时加删 TXT 记录</td><td>不用这种验证方式就不连</td></tr>
         <tr><td>Telegram</td><td>发通知、跑 Telegram 机器人</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b> 不启用就不连</td></tr>
         <tr><td>GitHub、jsDelivr、ntfy.sh、TronGrid</td><td>功德箱:打开 <b data-k="support.btn">建议 / 支持</b> 页时读名单(最多一小时一次),点留名、核对到账时;在线设备数:每天从 GitHub 下载一次空文件</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → 关掉 <b data-k="set.supportOnline">功德箱与在线设备数</b></td></tr>
-        <tr data-pending="ha"><td>Globalping、Cloudflare API</td><td>主机容灾:判断主机是否失联时让境外测点连主机;主机变了以后自动改 DNS</td><td>关掉 <b data-k="ha.set.witness">境外测点见证</b>;不填 Cloudflare 令牌就不改 DNS</td></tr>
+        <tr><td>Globalping、Cloudflare API</td><td>主机容灾:判断主机是否失联时让境外测点连主机;主机变了以后自动改 DNS</td><td>关掉 <b data-k="ha.set.witness">境外测点见证</b>;不填 Cloudflare 令牌就不改 DNS</td></tr>
         <tr><td>Google(<code>www.gstatic.com</code>)</td><td>上游巡检和测试:<b data-k="set.testUrl">上游测试地址</b> 默认就是它。本机有线路用了上游(WARP、落地机等)时,每 10 分钟经各条上游连一次;线路用了上游组的,内核还会每 30 秒经组里每条上游连一次;点上游的 <b data-k="common.test">测试</b>、外部节点测速时也连</td><td>把 <b data-k="set.testUrl">上游测试地址</b> 换成别的地址;<b data-k="set.checkMinutes">巡检间隔(分钟)</b> 填 0 只关掉定时巡检,上游组的测速照样跑</td></tr>
         <tr><td>你自己填的地址</td><td>Webhook、外部订阅、Telegram 代理</td><td>不填就不连</td></tr>
         <tr><td>点了才连</td><td>更新、安装 WARP(Cloudflare 的软件源)和 <b data-k="ops.checkExit">检测出口</b>、按规则分流里的 <b data-k="line.rr.lookup">查域名</b>(GitHub 上的 v2fly 域名列表)、Reality 的 <b data-k="line.reality.check">检测</b> 和 <b data-k="line.reality.pick">帮我挑</b>(连候选网站)、外部节点测速、证书页的 <b data-k="cert.precheck">预检 DNS / 端口</b> 和换机向导的 <b data-k="mig.check">检查解析</b>(向 Cloudflare、Google、阿里的公共 DNS 查解析,并测一次本机公网 IP)</td><td>不点就不连</td></tr>

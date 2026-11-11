@@ -46,6 +46,7 @@ const groups = () => [
     ['supportOnline', t('set.supportOnline'), 'boolOn', t('set.supportOnlineHelp')],
   ]},
   { id: 'sub', title: t('set.sub'), restart: true, fields: [
+    ['subDomain', t('set.subDomain'), 'text', t('set.subDomainHelp')],
     ['subListen', t('set.listen'), 'text'], ['subPort', t('set.port'), 'number'], ['subPath', t('set.path'), 'text', t('set.subPathHelp')],
     ['subCertFile', t('set.cert'), 'text', t('set.certManaged')], ['subKeyFile', t('set.key'), 'text'],
     ['subProfileTitle', t('set.subTitle'), 'text'], ['subUpdates', t('set.subUpdates'), 'number'],
@@ -140,7 +141,7 @@ export async function render(el) {
         <dt>${t('set.version')}</dt><dd class="mono">${esc(state.status.version || '')}</dd>
         <dt>sing-box</dt><dd class="mono">${esc(state.status.singBox || '—')}</dd>
         <dt>${t('set.panelUrl')}</dt><dd class="mono">${esc((state.status.panelTLS ? 'https' : 'http') + '://' + urlHost(state.status.panelTLS ? 'https' : 'http', s.webDomain || '<IP>', state.status.webPort || '') + (state.status.webPath || '/'))}</dd>
-        <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + urlHost(state.status.subTLS ? 'https' : 'http', s.webDomain || '<IP>', state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('set.userPh') + '>')}</dd>
+        <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + urlHost(state.status.subTLS ? 'https' : 'http', s.subDomain || s.webDomain || '<IP>', state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('set.userPh') + '>')}</dd>
         <dt>License</dt><dd>GPL-3.0 · <a href="${esc(state.status.repo || '#')}" target="_blank" rel="noopener">GitHub</a></dd>
       </dl>
       <p class="hint">${t('set.restartNote')}</p>
