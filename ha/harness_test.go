@@ -108,12 +108,12 @@ func (a *miniAgent) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	switch action {
 	case "ha/state":
-		var st State
-		if err := json.NewDecoder(r.Body).Decode(&st); err != nil {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
 			reply(nil, err)
 			return
 		}
-		reply(map[string]string{"ok": "1"}, a.svc.ApplyState(st))
+		reply(map[string]string{"ok": "1"}, a.svc.ReceiveState(r.Header, raw))
 	case "ha/replica":
 		seq, err := a.svc.ReceiveReplica(r.Body)
 		reply(map[string]interface{}{"ok": "1", "seq": seq}, err)

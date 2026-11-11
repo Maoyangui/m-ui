@@ -102,12 +102,12 @@ func TestEngineAutoTakeoverQuorum(t *testing.T) {
 	if ev := c.eng.evidenceView(); ev == nil || ev.Reason != "noQuorum" {
 		t.Fatalf("要写明票不够: %+v", ev)
 	}
-	// 第三台回来:3 票过半,接任
+	// 第三台回来:3 票过半,接任(新库带纪元 2;本机库的纪元要等换上新库才变)
 	p.agents[2].setDown(false)
 	p.clocks[0].add(time.Minute) // 过了证据刷新间隔
 	c.eng.tick()
-	if p.restarted(0) != 1 || c.setting(KeyRole) != RolePromoting || c.Epoch() != 2 {
-		t.Fatalf("票够了应接任(纪元 2): restarts=%d role=%q epoch=%d", p.restarted(0), c.setting(KeyRole), c.Epoch())
+	if m, ok := readPromoteMeta(c.d.DBPath); p.restarted(0) != 1 || c.setting(KeyRole) != RolePromoting || c.Epoch() != 1 || !ok || m.Epoch != 2 {
+		t.Fatalf("票够了应接任(新库纪元 2): restarts=%d role=%q epoch=%d meta=%+v", p.restarted(0), c.setting(KeyRole), c.Epoch(), m)
 	}
 	var v Vote
 	if !p.cands[1].getJSON(KeyVote, &v) || v.Epoch != 2 || v.Candidate != p.ids[0] {
@@ -204,6 +204,7 @@ func TestEngineConfirmViaTelegram(t *testing.T) {
 	var mu sync.Mutex
 	var sent []string
 	var replied bool
+	badOffset := ""
 	codeRe := regexp.MustCompile(`/takeover (\d{4})`)
 	tg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -224,7 +225,11 @@ func TestEngineConfirmViaTelegram(t *testing.T) {
 					code = m[1]
 				}
 			}
-			first := !replied && code != "" && r.URL.Query().Get("offset") != "-1"
+			if r.URL.Query().Get("offset") != "0" {
+				badOffset = r.URL.Query().Get("offset") // 不能确认(吃掉)任何消息:主机的机器人回来照样要收得到
+			}
+			// 确认提示之后才来的消息:先看一眼队列(timeout=0)时还不在
+			first := !replied && code != "" && r.URL.Query().Get("timeout") != "0"
 			if first {
 				replied = true
 			}
@@ -262,13 +267,16 @@ func TestEngineConfirmViaTelegram(t *testing.T) {
 	for p.restarted(0) == 0 && time.Now().Before(deadline) {
 		time.Sleep(20 * time.Millisecond)
 	}
-	if p.restarted(0) != 1 || c.Epoch() != 2 {
-		t.Fatalf("回复了对的码应接任: restarts=%d epoch=%d", p.restarted(0), c.Epoch())
+	if m, ok := readPromoteMeta(c.d.DBPath); p.restarted(0) != 1 || !ok || m.Epoch != 2 {
+		t.Fatalf("回复了对的码应接任: restarts=%d meta=%+v", p.restarted(0), m)
 	}
 	mu.Lock()
 	defer mu.Unlock()
 	if len(sent) == 0 || !strings.Contains(sent[0], "已失联") {
 		t.Fatalf("确认消息要说清主机失联: %q", sent)
+	}
+	if badOffset != "" {
+		t.Fatalf("等确认时不能确认任何 Telegram 消息(offset 一直是 0),实际用了 %s", badOffset)
 	}
 }
 

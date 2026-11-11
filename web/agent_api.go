@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -119,6 +120,8 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentHAReplica)(w, r)
 	case "ha/drop": // 不再是备用:删掉手里的副本
 		s.agentAuth(s.handleAgentHADrop)(w, r)
+	case "ha/leave": // 主机删除了本机:退出集群(纪元清零,副本与备用密钥删掉)
+		s.agentAuth(s.handleAgentHALeave)(w, r)
 	case "ha/prepare", "ha/handover", "ha/commit", "ha/abort", "ha/incoming": // 本机被设为主机的各步
 		s.agentAuth(s.handleAgentHASwitch)(w, r)
 	default:
@@ -153,6 +156,12 @@ func (s *Server) handleAgentRotate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		return
+	}
+	// 换令牌就是重新配对:副机退出原来的容灾集群(纪元清零、副本与备用密钥删掉),新主机配上来时从头认
+	if h := s.haSvc(); h != nil && strings.EqualFold(s.setting("nodeMode"), "true") {
+		if err := h.LeaveCluster(); err != nil {
+			logger.Warning("换令牌后退出容灾集群失败: ", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"token": tok})
 }
@@ -636,13 +645,35 @@ func (s *Server) handleAgentHAState(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
 		return
 	}
-	var st ha.State
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&st); err != nil {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
 		badRequest(w, err)
 		return
 	}
-	if err := h.ApplyState(st); err != nil {
+	if err := h.ReceiveState(r.Header, raw); err != nil { // 只收主机签过名的(本纪元钉住的那把公钥)
 		badRequest(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// handleAgentHALeave 主机删除了本机(纪元判定已在 agentAuth 里过了:只认当前主机):退出容灾集群。
+func (s *Server) handleAgentHALeave(w http.ResponseWriter, r *http.Request) {
+	if !haAgentLimiter.allow(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	h := s.haSvc()
+	if h == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
+		return
+	}
+	if err := h.LeaveCluster(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})

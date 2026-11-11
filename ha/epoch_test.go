@@ -34,10 +34,16 @@ func TestDecide(t *testing.T) {
 		{"高纪元但动作不能升", NodeView{Epoch: 1, MasterId: 1, LastContact: stale}, 2, 5, false, CodeNotAdopted, false},
 		{"高纪元但租约还在", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh}, 2, 5, true, CodeFollowing, false},
 		{"高纪元且租约过期", NodeView{Epoch: 1, MasterId: 1, LastContact: stale}, 2, 5, true, "", true},
-		{"投过票", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Vote: &Vote{Epoch: 2, Candidate: 5}}, 2, 5, true, "", true},
-		{"票投给了别人", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Vote: &Vote{Epoch: 2, Candidate: 6}}, 2, 5, true, CodeFollowing, false},
-		{"有交接标记", NodeView{Epoch: 2, MasterId: 5, LastContact: fresh, Grant: &Grant{Epoch: 3, To: 1}}, 3, 1, true, "", true},
-		{"交接标记是给别人的", NodeView{Epoch: 2, MasterId: 5, LastContact: fresh, Grant: &Grant{Epoch: 3, To: 7}}, 3, 1, true, CodeFollowing, false},
+		{"投过票", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Vote: &Vote{Epoch: 2, Candidate: 5, At: now.Unix()}}, 2, 5, true, "", true},
+		{"票投给了别人", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Vote: &Vote{Epoch: 2, Candidate: 6, At: now.Unix()}}, 2, 5, true, CodeFollowing, false},
+		{"票过期了", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Vote: &Vote{Epoch: 2, Candidate: 5, At: now.Add(-voteTTL).Unix()}}, 2, 5, true, CodeFollowing, false},
+		{"有交接标记", NodeView{Epoch: 2, MasterId: 5, LastContact: fresh, Grant: &Grant{Epoch: 3, To: 1, Expires: now.Add(time.Minute).Unix()}}, 3, 1, true, "", true},
+		{"交接标记是给别人的", NodeView{Epoch: 2, MasterId: 5, LastContact: fresh, Grant: &Grant{Epoch: 3, To: 7, Expires: now.Add(time.Minute).Unix()}}, 3, 1, true, CodeFollowing, false},
+		{"交接标记过期了", NodeView{Epoch: 2, MasterId: 5, LastContact: fresh, Grant: &Grant{Epoch: 3, To: 1, Expires: now.Unix()}}, 3, 1, true, CodeFollowing, false},
+		{"本机写下的交接标记 10 分钟内有效", NodeView{Epoch: 2, MasterId: 1, LastContact: fresh, Grant: &Grant{Epoch: 3, To: 1, At: now.Add(-time.Minute).Unix()}}, 3, 1, true, "", true},
+		{"本机写下的交接标记过了 10 分钟作废", NodeView{Epoch: 2, MasterId: 1, LastContact: fresh, Grant: &Grant{Epoch: 3, To: 1, At: now.Add(-grantTTL).Unix()}}, 3, 1, true, CodeFollowing, false},
+		{"纪元跳得太高不升", NodeView{Epoch: 2, MasterId: 5, LastContact: stale}, 2 + MaxEpochJump + 1, 5, true, CodeNotAdopted, false},
+		{"纪元到上限不升", NodeView{LastContact: stale}, MaxEpoch, 5, true, CodeNotAdopted, false},
 		{"回来后变成副机的原主机", NodeView{Epoch: 1, MasterId: 1, LastContact: fresh, Demoted: true}, 2, 5, true, "", true},
 		{"本机还没进过容灾", NodeView{LastContact: fresh}, 1, 1, true, "", true},
 		{"本机还没进过容灾但动作不能升", NodeView{LastContact: fresh}, 1, 1, false, CodeNotAdopted, false},
@@ -171,21 +177,22 @@ func TestCheckAgentDemoted(t *testing.T) {
 // 变为副机的多数判定(设计 4.3):过半才变,只有一台副机时它说了算,老副机不计,没回齐不下结论。
 func TestDemoteTally(t *testing.T) {
 	cases := []struct {
-		name string
-		t    demoteTally
-		want bool
+		name  string
+		t     demoteTally
+		stale int
+		want  bool
 	}{
-		{"没人回 stale", demoteTally{total: 3, aware: 3}, false},
-		{"三台里一台 stale", demoteTally{total: 3, aware: 3, stale: 1}, false},
-		{"三台里两台 stale", demoteTally{total: 3, aware: 3, stale: 2}, true},
-		{"只有一台副机", demoteTally{total: 1, aware: 1, stale: 1}, true},
-		{"两台里一台 stale", demoteTally{total: 2, aware: 2, stale: 1}, false},
-		{"三台里一台 stale、两台失联", demoteTally{total: 3, aware: 1, stale: 1}, true},
-		{"还有没回话的,stale 不过全部的半数", demoteTally{total: 3, aware: 1, stale: 1, unknown: 2}, false},
-		{"stale 已过全部的半数", demoteTally{total: 3, aware: 2, stale: 2, unknown: 1}, true},
+		{"没人回 stale", demoteTally{total: 3, aware: 3}, 0, false},
+		{"三台里一台 stale", demoteTally{total: 3, aware: 3}, 1, false},
+		{"三台里两台 stale", demoteTally{total: 3, aware: 3}, 2, true},
+		{"只有一台副机", demoteTally{total: 1, aware: 1}, 1, true},
+		{"两台里一台 stale", demoteTally{total: 2, aware: 2}, 1, false},
+		{"三台里一台 stale、两台失联", demoteTally{total: 3, aware: 1}, 1, true},
+		{"还有没回话的,stale 不过全部的半数", demoteTally{total: 3, aware: 1, unknown: 2}, 1, false},
+		{"stale 已过全部的半数", demoteTally{total: 3, aware: 2, unknown: 1}, 2, true},
 	}
 	for _, c := range cases {
-		if got := c.t.shouldDemote(); got != c.want {
+		if got := c.t.enough(c.stale); got != c.want {
 			t.Errorf("%s: 期望 %v,实际 %v", c.name, c.want, got)
 		}
 	}
@@ -196,6 +203,8 @@ func TestDemoteByMajority(t *testing.T) {
 	var notes []string
 	s := testService(t, false, map[string]string{KeyEpoch: "1", KeyMode: ModeConfirm})
 	s.d.Notify = func(_, text string) { notes = append(notes, text) }
+	clk := &testClock{t: time.Now()}
+	s.SetNow(clk.now)
 	restarted := 0
 	s.d.Restart = func(time.Duration) { restarted++ }
 	s.d.Backup = func(prefix string) (string, error) { return prefix + "x.zip", nil }
@@ -218,6 +227,13 @@ func TestDemoteByMajority(t *testing.T) {
 	if s.IsNode() || restarted != 0 {
 		t.Fatal("少数说 stale 不能变为副机")
 	}
+	if len(notes) != 0 {
+		t.Fatalf("刚回 stale 的那一条不告'已脱离'(可能正碰上切换),实际 %q", notes)
+	}
+	clk.add(20 * time.Second) // 持续回 stale:告一次
+	s.NoteReply(model.Node{Id: ids[1]}, ok)
+	s.NoteReply(model.Node{Id: ids[2]}, ok)
+	s.NoteReply(model.Node{Id: ids[0]}, stale)
 	if len(notes) != 1 {
 		t.Fatalf("应告警一次'已脱离',实际 %d 条", len(notes))
 	}

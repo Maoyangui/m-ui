@@ -2,11 +2,13 @@ package hub
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
 )
@@ -111,8 +113,10 @@ func TestHAHeadersAndStatePush(t *testing.T) {
 			t.Fatalf("纪元为 0 时不能推容灾状态、不能带容灾请求头: %s %v", p, hdrs[i])
 		}
 	}
-	if len(ha.replies) != 0 {
-		t.Fatal("纪元为 0 时不该把回复交给容灾")
+	for _, r := range ha.replies {
+		if r.Code != "" {
+			t.Fatalf("纪元为 0 时副机正常回话,不该有纪元判定: %+v", r)
+		}
 	}
 
 	ha.mu.Lock()
@@ -209,5 +213,85 @@ func TestHAStaleEpochStopsRound(t *testing.T) {
 	err := h.Send(model.Node{Id: 9, Name: "S", ApiUrl: srv.URL + "/app/", Token: "t"}, http.MethodGet, "ping", nil, 0, nil, 0, nil)
 	if !IsEpochError(err) {
 		t.Fatalf("Send 也要把 409 纪元判定归成 EpochError: %v", err)
+	}
+}
+
+// 本机纪元为 0 时副机回 409 纪元判定:照样解析成 EpochError 交给容灾(没开过容灾就设为主机、从开启前的备份还原回来的原主机要认得出);
+// 别的 409(版本门槛之类)不是纪元判定。
+func TestHAEpochZeroParses409(t *testing.T) {
+	db := openDB(t, "m.db").DB
+	db.Create(&model.Node{Name: "本机", IsLocal: true, Enabled: true})
+	node := &haNode{mode: "stale"}
+	srv := httptest.NewServer(node.handler())
+	defer srv.Close()
+	ha := &fakeHA{}
+	h := New(Deps{DB: db, Setting: func(string) string { return "" }, IsNode: func() bool { return false }, HA: ha})
+	n := model.Node{Id: 9, Name: "S", ApiUrl: srv.URL + "/app/", Token: "t"}
+	err := h.Send(n, http.MethodGet, "ha/incoming", nil, 0, nil, 0, nil)
+	var ee *EpochError
+	if !errors.As(err, &ee) || ee.Code != "stale_epoch" || ee.Epoch != 3 {
+		t.Fatalf("纪元为 0 也要把 409 纪元判定解析成 EpochError: %v", err)
+	}
+	ha.mu.Lock()
+	got := append([]EpochReply(nil), ha.replies...)
+	ha.mu.Unlock()
+	if len(got) != 1 || got[0].Code != "stale_epoch" || got[0].MasterId != 7 {
+		t.Fatalf("要交给容灾判定: %+v", got)
+	}
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`{"error":"副机版本太旧","code":"version"}`))
+	}))
+	defer other.Close()
+	err = h.Send(model.Node{Id: 10, Name: "O", ApiUrl: other.URL + "/app/", Token: "t"}, http.MethodGet, "ping", nil, 0, nil, 0, nil)
+	if IsEpochError(err) {
+		t.Fatalf("不在白名单里的 409 不是纪元判定: %v", err)
+	}
+}
+
+// 老副机(ha/state 404)升级上来以后:回话带了纪元头,下一轮立刻推容灾状态,不等 10 分钟。
+func TestHALegacyMarkClearedOnUpgrade(t *testing.T) {
+	db := openDB(t, "m.db").DB
+	db.Create(&model.Node{Name: "本机", IsLocal: true, Enabled: true})
+	node := &haNode{mode: "legacy"}
+	srv := httptest.NewServer(node.handler())
+	defer srv.Close()
+	db.Create(&model.Node{Name: "L", ApiUrl: srv.URL + "/app/", Token: "t", Enabled: true})
+	ha := &fakeHA{epoch: 2, master: 1, rev: "r"}
+	h := New(Deps{DB: db, Setting: func(string) string { return "" }, IsNode: func() bool { return false }, HA: ha})
+	h.RunOnce()
+	node.mu.Lock()
+	node.mode = "" // 升级到认得纪元的版本
+	node.mu.Unlock()
+	h.RunOnce() // 这一轮回话带了纪元头:清掉老副机标记
+	h.RunOnce()
+	paths, _ := node.snapshot()
+	states := 0
+	for _, p := range paths {
+		if p == "ha/state" {
+			states++
+		}
+	}
+	if states < 2 {
+		t.Fatalf("升级后要马上重推容灾状态: %v", paths)
+	}
+}
+
+// 设为主机的整库、大副本给的时限比客户端兜底的总时限长:不能被客户端的总时限截断,只按请求自己的时限。
+func TestHALongTransferNoClientTimeout(t *testing.T) {
+	db := openDB(t, "m.db").DB
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		w.Write([]byte(`{"ok":"1"}`))
+	}))
+	defer slow.Close()
+	h := New(Deps{DB: db, Setting: func(string) string { return "" }, IsNode: func() bool { return false }})
+	h.verified = &http.Client{Timeout: 100 * time.Millisecond}
+	n := model.Node{Id: 9, Name: "S", ApiUrl: slow.URL + "/app/", Token: "t"}
+	if err := h.Send(n, http.MethodPost, "ha/handover", nil, 0, nil, 5*time.Second, nil); err != nil {
+		t.Fatalf("请求自己的时限更长:不受客户端兜底时限限制: %v", err)
+	}
+	if err := h.Send(n, http.MethodPost, "ha/handover", nil, 0, nil, 50*time.Millisecond, nil); err == nil {
+		t.Fatal("请求自己的时限照样管用")
 	}
 }

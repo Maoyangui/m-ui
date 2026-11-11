@@ -182,7 +182,8 @@ func TestYieldAndReclaim(t *testing.T) {
 		t.Fatalf("记下是让出: %+v", d)
 	}
 
-	// 收回:M(纪元 1)有 2 台副机认它,1 台跟过纪元 2 的主机、那台主机早已不在(租约过期 5 分钟)
+	// 收回:M(纪元 1)有 2 台副机认它,1 台跟过纪元 2 的主机、那台主机早已不在(租约过期 5 分钟;
+	// 它说的"主机"是第二台,而第二台回话认 M,说明它不是主机)
 	cl := newCluster(t, 3)
 	m := cl.m
 	cl.h.RunOnce()
@@ -190,7 +191,7 @@ func TestYieldAndReclaim(t *testing.T) {
 		t.Fatal("前提:M 在纪元 1")
 	}
 	orphan := cl.ids[2]
-	cl.cands[2].set(map[string]string{KeyEpoch: "2", KeyMasterId: "77"})
+	cl.cands[2].set(map[string]string{KeyEpoch: "2", KeyMasterId: strconv.FormatUint(uint64(cl.ids[1]), 10)})
 	cl.cands[2].SetNow(func() time.Time { return time.Now().Add(5 * time.Minute) })
 	cl.h.RunOnce() // 两台回 ok,第三台回 stale(纪元 2,租约过期)→ 收回
 	if m.Epoch() != 3 {
