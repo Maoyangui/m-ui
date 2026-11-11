@@ -43,7 +43,7 @@ export const openModal = (title, html, onSave, opts) => { globalThis.__modal = {
 export const closeModal = () => {}; export const openDrawer = () => {}; export const closeDrawer = () => {};
 export const registerActions = (a) => { globalThis.__actions = Object.assign(globalThis.__actions || {}, a); };
 export const badge = (s) => String(s); export const dot = () => ''; export const progress = () => '';
-export const field = () => ''; export const check = () => ''; export const empty = () => '';
+export const field = () => ''; export const fieldBox = () => ''; export const check = () => ''; export const empty = () => '';
 export const fv = (id) => el(id).value; export const fchk = (id) => !!el(id).checked;
 export const matches = () => true; export const debounce = (fn) => (...a) => fn(...a);
 export const copy = async (s) => { (globalThis.__copied ||= []).push(s); };

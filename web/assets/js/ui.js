@@ -259,6 +259,10 @@ export const deviceCount = ips => new Set((ips || []).map(ipKey)).size;
 
 export const field = (label, input, help = '') =>
   `<label class="field"><span class="label">${esc(label)}</span>${input}${help ? `<span class="help">${esc(help)}</span>` : ''}</label>`;
+// fieldBox 同 field,但外层是 <div>:选择器、勾选列表、一排勾选框这类复合控件不能包在 <label> 里 ——
+// 点标签字、说明或空白处,浏览器会把点击转给里面第一个控件(规则目标被切成「全部用户」、第一台服务器被勾掉)
+export const fieldBox = (label, inner, help = '') =>
+  `<div class="field"><span class="label">${esc(label)}</span>${inner}${help ? `<span class="help">${esc(help)}</span>` : ''}</div>`;
 export const check = (id, label, checked, help = '') =>
   `<label class="field check"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><span>${esc(label)}</span>${help ? `<span class="help">${esc(help)}</span>` : ''}</label>`;
 // 落地页公告、联系方式的字数上限(和后端 web/page_logo.go 的 maxPageNotice / maxPageSupport 一致)

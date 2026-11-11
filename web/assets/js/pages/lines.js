@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, chipList } from '../ui.js';
+import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, chipList, fieldBox } from '../ui.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 import { editRelayUpstream } from './upstreams.js';
 import { loadReach, reachLoaded, v6Of, v6LineBadge, v6ForLine } from '../reach.js';
@@ -280,7 +280,7 @@ function serversField(l) {
   const anyDual = nodes.some(isDualStack);
   const rows = nodes.map(n => `<div class="node-row"><label><input type="checkbox" class="node-cb" value="${n.id}" ${!ids.length || ids.includes(n.id) ? 'checked' : ''}> ${esc(n.name)}${n.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>${isDualStack(n) ? famSelect(n, fam[n.id]) : ''}</div>`).join('');
   const famHelp = subByDomain() ? t('line.famPickMulti') + ' ' + t('line.famDnsHelp') : t('line.famHelp');
-  return `<div class="full">${field(t('line.servers'), `<div class="check-list node-list">${rows}</div>`, t('line.serversHelp') + (anyDual ? ' ' + famHelp : ''))}</div>`;
+  return `<div class="full">${fieldBox(t('line.servers'), `<div class="check-list node-list">${rows}</div>`, t('line.serversHelp') + (anyDual ? ' ' + famHelp : ''))}</div>`;
 }
 // 给前端测试用(web/jstest/lines.test.mjs)
 export { serverFamily, lineUsesV6, formV6Servers, formLine, allServersShown, v6TipsOpen, v6Norm };
@@ -849,7 +849,7 @@ function batchDialog(action) {
       () => runBatch('upstream', { upstreamId: Number(fv('b-upstream')) }));
     return;
   }
-  openModal(t('line.batchNodes', { n }), `<div class="form-grid"><div class="full">${field(t('line.servers'), `<div class="check-list">${(state.nodes || []).map(nd => `<label><input type="checkbox" class="b-node-cb" value="${nd.id}"> ${esc(nd.name)}${nd.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>`).join('')}</div>`, t('line.batchNodesHelp'))}</div></div>`,
+  openModal(t('line.batchNodes', { n }), `<div class="form-grid"><div class="full">${fieldBox(t('line.servers'), `<div class="check-list">${(state.nodes || []).map(nd => `<label><input type="checkbox" class="b-node-cb" value="${nd.id}"> ${esc(nd.name)}${nd.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>`).join('')}</div>`, t('line.batchNodesHelp'))}</div></div>`,
     () => runBatch('nodes', { nodeIds: [...document.querySelectorAll('.b-node-cb:checked')].map(c => Number(c.value)) }));
 }
 

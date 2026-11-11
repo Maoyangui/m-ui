@@ -2,7 +2,7 @@ import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { lineItems, keysFromRefs, linePicker, refChips } from '../linepicker.js';
-import { urlHost, gbValue, gbBytes, esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy, matches, debounce } from '../ui.js';
+import { urlHost, gbValue, gbBytes, esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy, matches, debounce, fieldBox } from '../ui.js';
 
 export const title = () => t('rs.title');
 export const subtitle = () => t('rs.subtitle');
@@ -158,7 +158,7 @@ function editReseller(id) {
       ${field(t('rs.speedDown'), `<input id="f-down" type="number" min="0" value="${r.speedDown || 0}">`, t('rs.speedHelp'))}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(r.remark || '')}">`)}
       ${check('f-enabled', t('common.enabled'), r.enabled !== false)}
-      <div class="full">${field(t('rs.lines'), `<div id="f-lines"></div>`, t('rs.linesHelp'))}</div>
+      <div class="full">${fieldBox(t('rs.lines'), `<div id="f-lines"></div>`, t('rs.linesHelp'))}</div>
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), enabled: fchk('f-enabled'),

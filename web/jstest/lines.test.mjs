@@ -21,7 +21,7 @@ stub('i18n.js', `export const t = (k) => k;`);
 stub('errmsg.js', `export const trErr = (m) => m;`);
 stub('ui.js', `export const esc = (s) => String(s ?? ''); export const toast = () => {}; export const confirm = async () => true;
 export const openModal = () => {}; export const registerActions = () => {}; export const badge = (s) => String(s); export const dot = () => '';
-export const field = () => ''; export const check = () => ''; export const empty = () => ''; export const fv = (id) => (globalThis.__fv || {})[id] ?? '';
+export const field = () => ''; export const fieldBox = () => ''; export const check = () => ''; export const empty = () => ''; export const fv = (id) => (globalThis.__fv || {})[id] ?? '';
 export const fchk = () => true; export const matches = () => true; export const debounce = (f) => f; export const setHTML = () => {};
 export const chipList = (a) => a.join('');`);
 stub('certpicker.js', `export const openCertDrawer = () => {}; export const certLabel = (s) => s;`);

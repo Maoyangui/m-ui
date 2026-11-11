@@ -3,7 +3,7 @@ import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { lineItems, keysFromRefs, linePicker } from '../linepicker.js';
 import { showUsersOfPlan } from './users.js';
-import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk } from '../ui.js';
+import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, fieldBox } from '../ui.js';
 
 export const title = () => t('plan.title');
 export const subtitle = () => t('plan.subtitle');
@@ -75,8 +75,8 @@ export async function editPlan(id) {
       ${check('f-autoreset', t('user.f.autoReset'), !!p.autoReset, t('plan.autoResetHelp'))}
       ${check('f-firstuse', t('plan.firstUse'), !!p.firstUse, t('plan.firstUseHelp'))}
       ${field(t('plan.price'), `<input id="f-price" type="number" min="0" step="any" value="${p.price || 0}">`, t('plan.priceHelp'))}
-      <div class="full">${field(t('plan.lines'), `<div id="f-lines"></div>`, t('plan.linesHelp'))}</div>
-      ${isReseller() ? '' : `<div class="full">${field(t('plan.rules'), rules.length ? `<div class="check-list one-col">${rules.map(r => `<label class="${r.enabled ? '' : 'muted'}"><input type="checkbox" class="plan-rule" value="${r.id}" ${r.allUsers ? 'checked disabled' : ((p.ruleIds || []).includes(r.id) ? 'checked' : '')}> ${esc(r.name)} <span class="muted small">${esc(ruleCond(r))} · ${r.upMbps || '—'}/${r.downMbps || '—'} M${r.enabled ? '' : ' · ' + t('common.disabled')}${r.allUsers ? ' · ' + t('plan.ruleAll') : ''}</span></label>`).join('')}</div>` : `<span class="muted small">${t('plan.rulesNone')}</span>`, t('plan.rulesHelp'))}</div>`}
+      <div class="full">${fieldBox(t('plan.lines'), `<div id="f-lines"></div>`, t('plan.linesHelp'))}</div>
+      ${isReseller() ? '' : `<div class="full">${fieldBox(t('plan.rules'), rules.length ? `<div class="check-list one-col">${rules.map(r => `<label class="${r.enabled ? '' : 'muted'}"><input type="checkbox" class="plan-rule" value="${r.id}" ${r.allUsers ? 'checked disabled' : ((p.ruleIds || []).includes(r.id) ? 'checked' : '')}> ${esc(r.name)} <span class="muted small">${esc(ruleCond(r))} · ${r.upMbps || '—'}/${r.downMbps || '—'} M${r.enabled ? '' : ' · ' + t('common.disabled')}${r.allUsers ? ' · ' + t('plan.ruleAll') : ''}</span></label>`).join('')}</div>` : `<span class="muted small">${t('plan.rulesNone')}</span>`, t('plan.rulesHelp'))}</div>`}
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), desc: fv('f-desc'), volumeGb: Number(fv('f-vol')), days: Number(fv('f-days')),

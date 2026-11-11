@@ -216,3 +216,15 @@ test('大陆连通检测停摆(reachStall):lastRun 每轮都往前走,额度用�
   assert.equal(I.reachStall({ ...base, lastOk: 0 }, now), 'never');
   assert.equal(I.reachStall({ auto: true, minutes: m, lastRun: now - 60 }, now), '', '老后端没有 lastOk / tried:只按 idle、error');
 });
+
+test('复合控件(线路 / 用户选择器、勾选列表、一排勾选框)不包在 <label> 里:用 fieldBox,不用 field', () => {
+  assert.match(ui.fieldBox('L', '<div id="x"></div>', 'h'), /^<div class="field">/);
+  assert.match(ui.field('L', '<input>'), /^<label class="field">/);
+  const pages = path.join(assets, 'pages');
+  const bad = [];
+  for (const f of fs.readdirSync(pages).filter(n => n.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(pages, f), 'utf8');
+    for (const m of src.matchAll(/\bfield\(([^`]{0,80})`(<div (?:id="f-(?:lines|targets)"|class="check-list)|<div class="row"[^>]*>\$\{\[1, 2)/g)) bad.push(`${f}: field(${m[1]}\`${m[2]}`);
+  }
+  assert.deepEqual(bad, [], '点标签字或空白会被浏览器转给里面第一个控件');
+});

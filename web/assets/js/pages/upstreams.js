@@ -2,7 +2,7 @@ import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del, SLOW, LONG } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtTime, chipList } from '../ui.js';
+import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtTime, chipList, fieldBox } from '../ui.js';
 import { upstreamBad } from '../issues.js';
 // 展开查看细节的上游 id:一行只显示各服务器的延迟,点开才看检查时间、方式与完整报错
 const expanded = new Set();
@@ -362,7 +362,7 @@ function editGroup(id) {
   openModal(id ? t('up.edit') : t('up.addGroup'), `
     <div class="form-grid">
       <div class="full">${field(t('common.name'), `<input id="f-name" value="${esc(u.name || '')}">`)}</div>
-      <div class="full">${field(t('up.groupMembers'), `<div class="check-list">${others.map(x => `<label><input type="checkbox" class="grp-cb" value="${esc(x.name)}" ${cur.has(x.name) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div>`, t('up.groupHelp'))}</div>
+      <div class="full">${fieldBox(t('up.groupMembers'), `<div class="check-list">${others.map(x => `<label><input type="checkbox" class="grp-cb" value="${esc(x.name)}" ${cur.has(x.name) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div>`, t('up.groupHelp'))}</div>
     </div>`, async () => {
     const outbounds = [...document.querySelectorAll('.grp-cb:checked')].map(c => c.value);
     if (outbounds.length < 2) throw new Error(t('up.groupNeedTwo'));

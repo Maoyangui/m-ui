@@ -1,7 +1,7 @@
 import { state, load, isReseller, takeHashParams } from '../app.js';
 import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
-import { deviceCount, gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtDate, fmtDuration, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML, setText, chipList } from '../ui.js';
+import { deviceCount, gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtDate, fmtDuration, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML, setText, chipList, fieldBox } from '../ui.js';
 
 // 生效中的规则限速(主面板才有):列表徽章与详情抽屉都从这里取
 const limitsOf = id => (state.limitStates || []).filter(s => s.userId === id);
@@ -366,8 +366,8 @@ function editUser(id) {
       ${field(t('user.f.resetDays'), `<input id="f-resetdays" type="number" min="1" value="${u.resetDays || 30}">`)}
       ${check('f-enabled', t('user.f.enabled'), u.enabled !== false)}
       ${check('f-autoreset', t('user.f.autoReset'), !!u.autoReset)}
-      <div class="full">${field(t('user.f.lines'), `<div id="f-lines"></div>`, t('lp.help'))}</div>
-      ${(state.exts || []).length ? `<div class="full">${field(t('user.f.exts'), `
+      <div class="full">${fieldBox(t('user.f.lines'), `<div id="f-lines"></div>`, t('lp.help'))}</div>
+      ${(state.exts || []).length ? `<div class="full">${fieldBox(t('user.f.exts'), `
         <div class="check-list">
           ${(state.exts || []).map(x => `<label><input type="checkbox" class="ext-cb" value="${x.id}" ${(u.extIds || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name)} <span class="muted small">${x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink')} · ${x.nodeCount || 0}</span></label>`).join('')}
         </div>`, t('user.f.extsHelp'))}</div>` : ''}
@@ -672,7 +672,7 @@ function bulkDialog() {
       ${field(t('user.bulkStart'), `<input id="f-start" type="number" min="1" value="1">`)}
       ${field(t('user.f.remark'), `<input id="f-remark" value="">`)}
       ${field(t('plan.pick'), planSelect('f-plan', 0), t('user.bulkHelp'))}
-      <div class="full">${field(t('user.f.lines'), `<div id="f-lines"></div>`, t('lp.help'))}</div>
+      <div class="full">${fieldBox(t('user.f.lines'), `<div id="f-lines"></div>`, t('lp.help'))}</div>
     </div>`, async () => {
     const res = await post('users/bulk', {
       prefix: fv('f-prefix').trim(), count: Number(fv('f-count')), nameMode: fv('f-mode'), startIndex: Number(fv('f-start')),

@@ -4,7 +4,7 @@ import { state } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { userPicker, targetText } from '../userpicker.js';
-import { esc, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, fmtTime, fmtRelative } from '../ui.js';
+import { esc, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, fmtTime, fmtRelative, fieldBox } from '../ui.js';
 
 export const title = () => t('rule.title');
 export const subtitle = () => t('rule.subtitle');
@@ -71,7 +71,7 @@ function editRule(id) {
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(r.remark || '')}">`)}
       <div class="full" id="sec-schedule">
         <div class="form-grid">
-          <div class="full">${field(t('rule.days'), `<div class="row" style="flex-wrap:wrap;gap:.6rem">${[1, 2, 3, 4, 5, 6, 7].map(d => `<label style="display:inline-flex;align-items:center;gap:.25rem"><input type="checkbox" class="f-day" value="${d}" ${!days.size || days.has(d) ? 'checked' : ''}> ${t('rule.day.' + d)}</label>`).join('')}</div>`, t('rule.daysHelp'))}</div>
+          <div class="full">${fieldBox(t('rule.days'), `<div class="row" style="flex-wrap:wrap;gap:.6rem">${[1, 2, 3, 4, 5, 6, 7].map(d => `<label style="display:inline-flex;align-items:center;gap:.25rem"><input type="checkbox" class="f-day" value="${d}" ${!days.size || days.has(d) ? 'checked' : ''}> ${t('rule.day.' + d)}</label>`).join('')}</div>`, t('rule.daysHelp'))}</div>
           ${field(t('rule.start'), `<input id="f-start" type="time" value="${esc(r.start || '19:00')}">`)}
           ${field(t('rule.end'), `<input id="f-end" type="time" value="${esc(r.end || '23:00')}">`, t('rule.timeHelp'))}
         </div>
@@ -87,7 +87,7 @@ function editRule(id) {
       ${field(t('rule.down'), `<input id="f-down" type="number" min="0" value="${r.downMbps || 0}">`, t('rule.limitHelp'))}
       ${check('f-tighten', t('rule.tightenOnly'), r.tightenOnly !== false, t('rule.tightenOnlyHelp'))}
       ${check('f-enabled', t('common.enabled'), r.enabled !== false)}
-      <div class="full">${field(t('rule.targets'), `<div id="f-targets"></div>`, t('rule.targetsHelp'))}</div>
+      <div class="full">${fieldBox(t('rule.targets'), `<div id="f-targets"></div>`, t('rule.targetsHelp'))}</div>
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), kind, enabled: fchk('f-enabled'), tightenOnly: fchk('f-tighten'),
