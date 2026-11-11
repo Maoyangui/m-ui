@@ -110,6 +110,7 @@ type switcher struct {
 	fencing   bool       // 正在以更高纪元隔离目标:这一轮状态要带撤销
 	lastProbe time.Time  // 结果不明时上次问目标的时间
 	lastFence time.Time  // 上次隔离没做成的时间(隔离要推全部副机:失败后隔一会儿再试)
+	blockedId string     // 已经通知过"撤销确认不够、暂不隔离"的那次设为主机
 	saveMu    sync.Mutex // 进度的写入:变为副机之后不再被别处的进度盖掉
 	unkMu     sync.Mutex // 结果不明的收尾(定时问目标、放弃)同一时间只做一件
 }
@@ -657,10 +658,16 @@ func (w *switcher) run(st SwitchState) {
 		return
 	}
 	st.Stage = StageCommit
-	s.saveSwitch(st, nil)
+	// 提交请求发出之后、结论明确之前写闸一直关着:当场追问可能越过冻结截止,写闸不能在那时自己打开(有结论时 fail / becomeNode 清掉)
+	if !s.saveSwitch(st, map[string]string{KeyFreezeUntil: strconv.FormatInt(st.FreezeUntil+int64(holdAfterDeadline/time.Second), 10)}) {
+		_ = w.abort(n, prep.Nonce)
+		w.fail(st, StageCommit, errors.New("记录设为主机的进度失败"))
+		return
+	}
 	b, _ := json.Marshal(map[string]string{"nonce": prep.Nonce})
 	if err := s.d.Hub.Send(n, http.MethodPost, "ha/commit", bytes.NewReader(b), int64(len(b)), nil, 30*time.Second, nil); err != nil {
-		switch w.waitCommitted(n, st, switchCommitWait) {
+		limit := min(switchCommitWait, time.Unix(st.FreezeUntil, 0).Sub(s.now())) // 当场追问不越过冻结截止:之后交给定时的问询与隔离
+		switch w.waitCommitted(n, st, limit) {
 		case commitNot:
 			w.fail(st, StageCommit, fmt.Errorf("目标没有接手: %w", err))
 			return
@@ -766,7 +773,7 @@ func (w *switcher) probeCommit(n model.Node, st SwitchState) commitResult {
 	return commitUnknown
 }
 
-// waitCommitted 提交请求没回话时当场问目标,最多 limit。
+// waitCommitted 提交请求没回话时当场问目标,最多 limit(至少问一次)。
 func (w *switcher) waitCommitted(n model.Node, st SwitchState, limit time.Duration) commitResult {
 	deadline := time.Now().Add(limit) // 等的是网络:按真实时间
 	for {
@@ -776,7 +783,7 @@ func (w *switcher) waitCommitted(n model.Node, st SwitchState, limit time.Durati
 		if time.Now().After(deadline) || w.s.stopping() {
 			return commitUnknown
 		}
-		time.Sleep(min(3*time.Second, limit/4))
+		time.Sleep(max(min(3*time.Second, limit/4), 10*time.Millisecond))
 	}
 }
 
@@ -864,10 +871,17 @@ func (s *Service) becomeNode(st SwitchState) {
 
 // switchTargetUp 降级判定看到设为主机的目标已以新纪元起来(提交那一步结果不明、或还在当场问):按"换主机完成"收尾,
 // 而不是"失联期间被接任"。返回是否接手了这次判定。
+// 冻结截止之后也认:结果不明期间写闸一直关着(隔离做成才解冻),目标以新纪元起来只可能是提交生效了,跟它走不丢写。
+// 正在问目标 / 隔离时(持 unkMu)不在这里收尾:那边自己看证据,免得一边升纪元一边变为副机。
 func (s *Service) switchTargetUp(target uint, epoch uint64) bool {
+	w := s.sw
+	if !w.unkMu.TryLock() {
+		return false
+	}
+	defer w.unkMu.Unlock()
 	st := s.switchState()
-	if st.Target == 0 || st.Target != target || epoch < st.Epoch || s.now().Unix() >= st.FreezeUntil {
-		return false // 冻结截止之后不再认它:那时本机要隔离它
+	if st.Target == 0 || st.Target != target || epoch < st.Epoch {
+		return false
 	}
 	switch st.Stage {
 	case StageCommit, StageUnknown:
@@ -892,25 +906,75 @@ func (s *Service) AbandonSwitch(actor string) error {
 }
 
 // fence 以更高纪元隔离目标(FenceAbandon:撤销交接标记、给本机发自交接、本机纪元再升),成功后解冻。
-// 没做成就保持冻结(结果不明时不能恢复写),下一轮再试。
+// 隔离之前先看目标是不是其实已经接手了:当场问它一次,再给其余副机推一轮状态拿到它们最新的回复 ——
+// 目标自己说已是主机、或有副机正被它以新纪元推着,就按换主机完成收尾(冻结期间没收写,不丢数据),不隔离。
+// 撤销要有足够的副机确认收到才升纪元、解冻:冻结截止前(管理员放弃)要目标以外的每一台都确认 —— 没收到撤销的副机手里
+// 的交接标记到截止前一直有效,目标那时起来它们会跟它;截止后交接标记都已作废,要目标以外的副机连同本机过半。
+// 不够就保持冻结、记下原因,下一轮再试(结果不明时不能恢复写)。
 func (w *switcher) fence(st SwitchState, actor string) error {
 	s := w.s
+	var tn model.Node
+	if s.d.Hub != nil && s.d.DB.Where("id = ?", st.Target).Limit(1).Find(&tn).Error == nil && tn.Id != 0 {
+		switch w.probeCommit(tn, st) {
+		case commitDone:
+			s.becomeNode(st)
+			return nil
+		case commitNot:
+			w.fail(st, StageCommit, errors.New("目标确认没有接手(已丢掉暂存的数据)"))
+			return nil
+		}
+	}
+	since := time.Unix(st.StartedAt, 0)
+	others := s.nodesExcept(st.Target)
+	before := s.now()
+	got := s.pushAll(others, 15*time.Second) // 回复经 NoteReply 记下
+	if s.leaving() {
+		return nil // 推的回复里看到目标已是主机,已经按换主机完成收尾
+	}
+	if s.targetUpSeen(st.Target, st.Epoch, since) {
+		s.becomeNode(st)
+		return nil
+	}
+	voters := len(others) - s.legacyAmong(others, before)
+	need := (voters + 1) / 2
+	if s.now().Unix() < st.FreezeUntil {
+		need = voters
+	}
+	if got < need {
+		return w.fenceBlocked(st, got, need)
+	}
 	w.mu.Lock()
 	w.fencing = true
 	w.mu.Unlock()
-	e, err := s.FenceAbandon(st.Target, st.Epoch)
+	e, err := s.FenceAbandon(st.Target, st.Epoch, func(granted int) error {
+		if s.targetUpSeen(st.Target, st.Epoch, since) {
+			return errTargetUp
+		}
+		if granted < need {
+			return fenceShort(granted, need)
+		}
+		return nil
+	})
 	w.mu.Lock()
 	w.fencing = false
 	w.mu.Unlock()
+	if errors.Is(err, errTargetUp) {
+		s.becomeNode(st)
+		return nil
+	}
 	if err != nil {
+		if s.leaving() {
+			return nil
+		}
+		var short *fenceShortError
+		if errors.As(err, &short) {
+			return w.fenceBlocked(st, short.got, short.need)
+		}
 		w.mu.Lock()
 		w.lastFence = time.Now()
 		w.mu.Unlock()
 		logger.Warning("容灾:隔离设为主机的目标失败(保持冻结,稍后再试): ", err)
-		if until := s.now().Add(2 * time.Minute).Unix(); s.freezeUntil() < until {
-			_ = s.set(map[string]string{KeyFreezeUntil: strconv.FormatInt(until, 10)})
-			s.invalidate()
-		}
+		w.holdFreeze()
 		return err
 	}
 	st.Stage, st.DoneAt, st.FenceEpoch = StageFenced, s.now().Unix(), e
@@ -926,6 +990,57 @@ func (w *switcher) fence(st SwitchState, actor string) error {
 	s.notify(fmt.Sprintf("🟠 <b>设为主机结果不明,已放弃</b>:本机以纪元 %d 继续当主机,写操作已恢复。\n「%s」若之后以纪元 %d 起来,会被副机拒绝并自动变为副机,它那份数据不会生效。",
 		e, notify.Esc(st.TargetName), st.Epoch))
 	return nil
+}
+
+// errTargetUp 隔离途中看到目标已经以新纪元当了主机。
+var errTargetUp = errors.New("目标已经以新纪元当了主机")
+
+// fenceShortError 撤销确认的台数不够。
+type fenceShortError struct{ got, need int }
+
+func (e *fenceShortError) Error() string {
+	return fmt.Sprintf("只有 %d 台副机确认收到撤销,要 %d 台", e.got, e.need)
+}
+
+func fenceShort(got, need int) error { return &fenceShortError{got: got, need: need} }
+
+// fenceBlocked 撤销确认的台数不够:不升纪元、保持冻结,记下原因(界面显示),每次设为主机只通知一次。
+func (w *switcher) fenceBlocked(st SwitchState, got, need int) error {
+	s := w.s
+	w.mu.Lock()
+	w.lastFence = time.Now()
+	first := w.blockedId != st.Id
+	w.blockedId = st.Id
+	w.mu.Unlock()
+	w.holdFreeze()
+	err := fmt.Errorf("只有 %d 台副机确认收到撤销(要 %d 台):为免目标其实已经接手、两台主机同时收写,先不隔离,写操作保持暂停,稍后自动再试", got, need)
+	if cur := s.switchState(); cur.Id == st.Id && cur.Stage == StageUnknown && cur.Err != err.Error() {
+		cur.Err = err.Error()
+		s.saveSwitch(cur, nil)
+	}
+	logger.Warning("容灾:", err)
+	if first {
+		s.notify(fmt.Sprintf("🟠 <b>设为主机结果不明,暂不隔离</b>:「%s」%s。连不上的副机恢复后会自动完成;冻结截止前放弃要目标以外的副机全部确认,截止后过半即可。",
+			notify.Esc(st.TargetName), notify.Esc(err.Error())))
+	}
+	return err
+}
+
+// holdFreeze 结果不明、隔离没做成:写闸至少再关 2 分钟。
+func (w *switcher) holdFreeze() {
+	s := w.s
+	if until := s.now().Add(2 * time.Minute).Unix(); s.freezeUntil() < until {
+		_ = s.set(map[string]string{KeyFreezeUntil: strconv.FormatInt(until, 10)})
+		s.invalidate()
+	}
+}
+
+// leaving 本机已经(或正在)变为副机。
+func (s *Service) leaving() bool {
+	s.mu.Lock()
+	d := s.demoting
+	s.mu.Unlock()
+	return d || s.IsNode()
 }
 
 // tick 每 5 秒:结果不明的继续问目标、到期隔离;进程在设为主机途中重启过的,把半截的记录收尾;残留的冻结到期解冻。

@@ -182,8 +182,16 @@ func (s *Service) freezeUntil() int64 {
 }
 
 // Frozen 正在设为主机:管理员、代理、外部 API、Telegram 机器人的写操作一律暂停(超时自动解冻)。
+// 提交请求发出之后、结论明确之前(commit / unknown)一律算冻结:写闸不因冻结时间到了自己打开。
 func (s *Service) Frozen() bool {
-	return !s.IsNode() && s.freezeUntil() > s.now().Unix()
+	if s.IsNode() {
+		return false
+	}
+	if s.freezeUntil() > s.now().Unix() {
+		return true
+	}
+	st := s.switchState()
+	return st.Stage == StageCommit || st.Stage == StageUnknown
 }
 
 // FrozenText 写操作被暂停时给出的说明。
@@ -426,6 +434,17 @@ func (s *Service) remoteNodes() []model.Node {
 	s.d.DB.Where("enabled = ? AND is_local = ? AND COALESCE(api_url, '') <> '' AND COALESCE(token, '') <> ''", true, false).
 		Order("sort asc, id asc").Find(&nodes)
 	return nodes
+}
+
+// nodesExcept 启用的远端副机,去掉 id 那台。
+func (s *Service) nodesExcept(id uint) []model.Node {
+	var out []model.Node
+	for _, n := range s.remoteNodes() {
+		if n.Id != id {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // pushAll 立刻给一组副机推容灾状态(并发、尽力而为),返回推成功的台数。

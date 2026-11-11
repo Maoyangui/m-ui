@@ -276,6 +276,43 @@ func (s *Service) sameEpochRivalPlausible(L uint64) bool {
 	return s.getJSON(KeyBecame, &b) && b.Epoch == L && b.How == HowTakeover
 }
 
+// targetUpSeen 有没有证据说明设为主机的目标已经以新纪元(不低于 epoch)当了主机:它自己回话说是主机,
+// 或有副机回 stale 说跟着它、而且正被它推着(租约新鲜,同第 4 条"新主机活着"的标准)。只看 since 之后的回复。
+// 目标只有提交生效了才可能以新纪元当主机(副机要它用交接标记里的公钥签过名才认),所以这是"已提交"的证据。
+func (s *Service) targetUpSeen(target uint, epoch uint64, since time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, r := range s.replies {
+		if r.at.Before(since) || r.epoch < epoch || epoch == 0 {
+			continue
+		}
+		switch r.kind {
+		case replyRival:
+			if id == target {
+				return true
+			}
+		case replyStale:
+			if r.master == target && r.leaseAgo < int64(freshLease/time.Second) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// legacyAmong nodes 里 since 之后回话说明自己不认纪元的老副机有几台(它们不认交接标记,也就不会跟目标走)。
+func (s *Service) legacyAmong(nodes []model.Node, since time.Time) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, x := range nodes {
+		if r, ok := s.replies[x.Id]; ok && !r.at.Before(since) && r.kind == replyLegacy {
+			n++
+		}
+	}
+	return n
+}
+
 // nodeKnown 本机服务器表里有没有这台。
 func (s *Service) nodeKnown(id uint) bool {
 	if id == 0 {
@@ -344,6 +381,8 @@ func (s *Service) evaluateDemoteLocked(startup bool) bool {
 		if toTarget {
 			if rv, ok := t.rivals[sw.Target]; ok && rv.epoch > L {
 				s.switchTargetUp(sw.Target, rv.epoch)
+			} else if sw.Epoch > L && s.targetUpSeen(sw.Target, sw.Epoch, time.Unix(sw.StartedAt, 0)) {
+				s.switchTargetUp(sw.Target, sw.Epoch) // 副机正被目标以新纪元推着:提交生效了
 			}
 			return false
 		}
@@ -535,7 +574,7 @@ func (s *Service) healRollback(top uint64) {
 	}
 	next, err := NextEpoch(top)
 	if err == nil {
-		_, err = s.fenceTo(next, 0, s.remoteNodes())
+		_, err = s.fenceTo(next, 0, s.remoteNodes(), nil)
 	}
 	if err != nil {
 		logger.Warning("容灾:以更高纪元继续当主机失败: ", err)
@@ -564,7 +603,7 @@ func (s *Service) reclaimOrphans(x uint, top uint64) {
 		logger.Warning("容灾:收回脱离的副机失败: ", err)
 		return
 	}
-	granted, err := s.fenceTo(next, 0, s.remoteNodes())
+	granted, err := s.fenceTo(next, 0, s.remoteNodes(), nil)
 	if err != nil {
 		logger.Warning("容灾:收回脱离的副机失败: ", err)
 		return
@@ -615,7 +654,7 @@ func (s *Service) ReclaimNow() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	granted, err := s.fenceTo(next, 0, nodes)
+	granted, err := s.fenceTo(next, 0, nodes, nil)
 	if err != nil {
 		return 0, err
 	}

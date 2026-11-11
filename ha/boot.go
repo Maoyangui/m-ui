@@ -264,7 +264,7 @@ func (s *Service) runFence(f *BootResult) {
 	if f == nil || !f.Fence || s.IsNode() || s.Epoch() != f.From {
 		return
 	}
-	granted, err := s.fenceTo(f.To, 0, s.remoteNodes())
+	granted, err := s.fenceTo(f.To, 0, s.remoteNodes(), nil)
 	if err != nil {
 		logger.Warning("容灾:以纪元 ", f.To, " 围栏失败: ", err)
 		return
@@ -283,7 +283,8 @@ func (s *Service) runFence(f *BootResult) {
 
 // fenceTo 以更高的纪元 next 继续当主机:先在当前纪元给 nodes 推带自交接标记(给本机、绑本机签名公钥,10 分钟有效)
 // 与撤销的签名状态,再把本机纪元升到 next。认本机的副机凭标记立刻跟上;租约已过期的副机本来就接受更高纪元。返回推成功的台数。
-func (s *Service) fenceTo(next, revoke uint64, nodes []model.Node) (int, error) {
+// check 不为空时,推完、升纪元之前先问它(参数是推成功的台数):返回错误就不升纪元,原样返回这个错误。
+func (s *Service) fenceTo(next, revoke uint64, nodes []model.Node, check func(granted int) error) (int, error) {
 	if s.IsNode() {
 		return 0, errors.New("本机不是主机")
 	}
@@ -311,6 +312,14 @@ func (s *Service) fenceTo(next, revoke uint64, nodes []model.Node) (int, error) 
 		s.invalidate()
 		granted = s.pushAll(nodes, 15*time.Second)
 	}
+	if check != nil {
+		if err := check(granted); err != nil {
+			return granted, err
+		}
+	}
+	if s.IsNode() || s.Epoch() != L { // 推的这段时间里本机已经变为副机(或纪元已被别处改过):不再升
+		return granted, errors.New("本机的角色或纪元在隔离途中变了")
+	}
 	if err := s.setEpoch(next, self, nil); err != nil {
 		return granted, err
 	}
@@ -320,13 +329,24 @@ func (s *Service) fenceTo(next, revoke uint64, nodes []model.Node) (int, error) 
 
 // FenceAbandon 设为主机提交结果不明、冻结到期或管理员放弃时:先撤销给目标的交接标记(纪元 targetEpoch),
 // 再以高于它的纪元继续当主机。目标之后以 targetEpoch 起来会被副机按纪元拒绝、自动变为副机,它那份数据不会生效。返回新纪元。
-func (s *Service) FenceAbandon(target uint, targetEpoch uint64) (uint64, error) {
+// 撤销只推给目标以外的副机;check 见 fenceTo(推完、升纪元前的最后一道检查:目标其实已经起来了、确认的台数不够,都不升)。
+func (s *Service) FenceAbandon(target uint, targetEpoch uint64, check func(granted int) error) (uint64, error) {
 	L := s.Epoch()
 	next, err := NextEpoch(L, targetEpoch)
 	if err != nil {
 		return 0, err
 	}
-	granted, err := s.fenceTo(next, targetEpoch, s.remoteNodes())
+	var tn model.Node
+	hasT := s.d.DB.Where("id = ? AND enabled = ?", target, true).Limit(1).Find(&tn).Error == nil && tn.Id != 0 && tn.ApiUrl != "" && tn.Token != ""
+	granted, err := s.fenceTo(next, targetEpoch, s.nodesExcept(target), func(g int) error {
+		if hasT && s.d.Hub != nil {
+			_ = s.pushState(tn, 15*time.Second) // 目标若其实没接手、还是副机,也让它跟上;不计入确认台数。它若已是主机,回话就是证据
+		}
+		if check != nil {
+			return check(g)
+		}
+		return nil
+	})
 	if err != nil {
 		return 0, err
 	}

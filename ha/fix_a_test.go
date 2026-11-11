@@ -924,7 +924,7 @@ func TestFenceAbandonRaisesAboveTarget(t *testing.T) {
 	m := cl.m
 	cl.h.RunOnce()
 	cl.h.RunOnce()
-	next, err := m.FenceAbandon(cl.ids[0], 2)
+	next, err := m.FenceAbandon(cl.ids[0], 2, nil)
 	if err != nil || next != 3 || m.Epoch() != 3 {
 		t.Fatalf("以高于目标(纪元 2)的纪元继续当主机: %d %v", next, err)
 	}
