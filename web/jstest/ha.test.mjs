@@ -292,6 +292,39 @@ test('顶部提示多时:露最要紧的两条(警示优先、其余最新在前
   api = () => Promise.resolve({});
 });
 
+test('展开后把提示清到不用折叠,再来一批时回到折叠(露两条 + 「还有 N 条」),不直接全部摊开', async () => {
+  const haBars = () => main.kids.filter(k => k.dataset && k.dataset.ha).map(k => k.dataset.ha);
+  const actBtn = (barKey, act, id) => {
+    const b = doc.createElement('button');
+    b.dataset.act = act;
+    if (id !== undefined) b.dataset.id = id;
+    doc.querySelector(`.alert-bar[data-ha="${barKey}"]`).appendChild(b);
+    return b;
+  };
+  const status = { ha: { notices: [
+    { id: 's1', kind: 'standbyNew', name: 'A', at: 10 }, { id: 'b1', kind: 'became', name: 'HK', at: 20 },
+    { id: 'f1', kind: 'formerBack', name: 'HK', at: 30 },
+  ] } };
+  ha.haNotices(status);
+  click(actBtn('ha-more', 'ha.noticesMore'));
+  assert.deepEqual(haBars(), ['ha-n-formerBack', 'ha-n-became', 'ha-n-standbyNew', 'ha-more']);
+  // 展开着逐条点「知道了」,剩两条时折叠行消失
+  click(actBtn('ha-n-formerBack', 'ha.notice', 'f1'));
+  await flush();
+  assert.deepEqual(haBars(), ['ha-n-became', 'ha-n-standbyNew']);
+  // 之后又来两条:应回到折叠,只露两条,折叠行写「还有 N 条」而不是「收起」
+  status.ha.notices.push({ id: 'd1', kind: 'dnsReverted', at: 40, changes: [] }, { id: 'r1', kind: 'formerBack', name: 'JP', at: 50 });
+  ha.haNotices(status);
+  assert.deepEqual(haBars(), ['ha-n-formerBack', 'ha-n-dnsReverted', 'ha-more']);
+  assert.match(doc.querySelector('.alert-bar[data-ha="ha-more"]').innerHTML, /ha\.bar\.more\|n=2/);
+  // 整个容灾状态没了(关掉容灾)也一样复位
+  click(actBtn('ha-more', 'ha.noticesMore'));
+  ha.haNotices({ ha: null });
+  ha.haNotices(status);
+  assert.match(doc.querySelector('.alert-bar[data-ha="ha-more"]').innerHTML, /ha\.bar\.more\|n=2/);
+  ha.haNotices({ ha: null });
+});
+
 test('样式表不再按数量藏容灾提示条(上限由 haNotices 管,藏了展开也看不到)', () => {
   const css = fs.readFileSync(path.join(jsDir, '..', 'style.css'), 'utf8');
   assert.ok(!/data-ha\^="ha-n-"\][^{]*~[^{]*\{\s*display:\s*none/.test(css), 'style.css 里还有按数量藏 ha-n- 提示条的规则');

@@ -521,6 +521,7 @@ export function haNotices(status) {
   if (!main || !page) return;
   const ha = (status && status.ha) || null;
   const want = new Map();
+  if (!ha) noticesOpen = false;
   if (ha) {
     if (ha.frozenUntil) {
       const txt = ha.frozenTarget ? t('ha.bar.frozen', { name: ha.frozenTarget, t: fmtTime(ha.frozenUntil) }) : trErr(ha.frozenText || '');
@@ -535,6 +536,8 @@ export function haNotices(status) {
       });
     }
     const groups = groupNotices(ha.notices);
+    // 提示清到不需要折叠了就回到折叠状态,免得之后再来一批时直接全部摊开
+    if (groups.length <= MAX_BARS) noticesOpen = false;
     const shown = noticesOpen ? groups : groups.slice(0, MAX_BARS);
     for (const g of shown) {
       const n = g.latest;
