@@ -17,7 +17,9 @@ fs.copyFileSync(src, path.join(dir, 'pages', 'users.js'));
 const stub = (name, body) => fs.writeFileSync(path.join(dir, name), body);
 stub('app.js', `export const state = globalThis.__state;
 export async function load(...what) { globalThis.__loads.push(what.join(',')); }
-export const isReseller = () => false;`);
+export const isReseller = () => false;
+// 列表页从地址栏带进来的筛选(#/users?f=…):用例不带,给空的
+export const takeHashParams = () => new URLSearchParams(globalThis.__hash || '');`);
 stub('api.js', `export const get = (p, o) => globalThis.__api('GET', p);
 export const post = (p, b, o) => globalThis.__api('POST', p, b);
 export const put = (p, b, o) => globalThis.__api('PUT', p, b);
@@ -28,7 +30,7 @@ export const upload = async () => ({});`);
 stub('i18n.js', `export const t = (k, p) => p && Object.keys(p).length ? k + '|' + Object.entries(p).map(([a, b]) => a + '=' + b).join('|') : k;`);
 stub('chart.js', `export const barChart = () => ''; export const bucketFor = () => 3600;`);
 stub('linepicker.js', `export const lineItems = () => []; export const keysFromRefs = () => []; export const refLabels = () => [];
-export const linePicker = () => ({ read: () => [] });`);
+export const linePicker = () => ({ read: () => [] }); export const refChips = () => '';`);
 stub('ui.js', `const el = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 export const deviceCount = (a) => (a || []).length;
@@ -47,7 +49,9 @@ export const matches = () => true; export const debounce = (fn) => (...a) => fn(
 export const copy = async (s) => { (globalThis.__copied ||= []).push(s); };
 export const setHTML = (t, h) => { const e = typeof t === 'string' ? el(t) : t; if (e) e.innerHTML = h; };
 export const setText = (t, s) => { const e = typeof t === 'string' ? el(t) : t; if (e) e.textContent = s; };
-export const tzOffsetMinutes = () => 0;`);
+export const tzOffsetMinutes = () => 0;
+// 长名单折叠成 +N:用例只看内容,原样拼起来
+export const chipList = (items) => '<span class="chips">' + (items || []).join('') + '</span>';`);
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 // ---- 桩 DOM:按 id 取元素(没有就建),能挂事件、触发事件 ----
