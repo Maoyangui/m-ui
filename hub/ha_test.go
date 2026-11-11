@@ -286,8 +286,8 @@ func TestHALongTransferNoClientTimeout(t *testing.T) {
 	}))
 	defer slow.Close()
 	h := New(Deps{DB: db, Setting: func(string) string { return "" }, IsNode: func() bool { return false }})
-	h.verified = &http.Client{Timeout: 100 * time.Millisecond}
 	n := model.Node{Id: 9, Name: "S", ApiUrl: slow.URL + "/app/", Token: "t"}
+	h.clients = map[uint]*nodeClient{n.Id: {key: nodeClientKey(n), c: &http.Client{Timeout: 100 * time.Millisecond}}}
 	if err := h.Send(n, http.MethodPost, "ha/handover", nil, 0, nil, 5*time.Second, nil); err != nil {
 		t.Fatalf("请求自己的时限更长:不受客户端兜底时限限制: %v", err)
 	}
