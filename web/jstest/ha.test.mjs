@@ -334,3 +334,34 @@ test('后端少给了参数时不把 {占位} 原样露给用户', () => {
     assert.equal(ha.readyText({ code: 'standbyPorts', level: 'warn', names: ['TW'], args: { port: '2096' } }), '端口 2096:TW');
   } finally { globalThis.__dict = undefined; }
 });
+
+test('顶部提示:后端发的每种提示都有自己的文案(不露出种类名),fenced 按原因分开写', () => {
+  const h = n => ha.noticeHTML({ at: 1, ...n });
+  assert.match(h({ kind: 'fenced', reason: 'rolledBack', n: 5 }), /ha\.n\.rolledBack/);
+  assert.match(h({ kind: 'fenced', reason: 'restoredElsewhere', n: 7 }), /ha\.n\.restoredHere\|n=7/);
+  assert.match(h({ kind: 'reclaimed', n: 9 }), /ha\.n\.reclaimed\|n=9/);
+  assert.match(h({ kind: 'promoteExpired', how: 'takeover', n: 3 }), /ha\.n\.promoteExpired/);
+  assert.match(h({ kind: 'formerPlain', name: 'HK' }), /ha\.n\.formerPlain\|name=HK/);
+  assert.match(h({ kind: 'switchFailed', reason: 'fenced', name: 'SG' }), /ha\.n\.fenced\|name=SG/);
+  // 后端源码里出现的提示种类,界面都要认得
+  const goDir = path.join(here, '..', '..', 'ha');
+  const kinds = new Set();
+  for (const f of fs.readdirSync(goDir).filter(f => f.endsWith('.go') && !f.endsWith('_test.go'))) {
+    for (const m of fs.readFileSync(path.join(goDir, f), 'utf8').matchAll(/Notice\{Kind: "([a-zA-Z]+)"/g)) kinds.add(m[1]);
+  }
+  assert.ok(kinds.size >= 8, '没找到后端的提示种类');
+  for (const k of kinds) assert.notEqual(h({ kind: k, name: 'X', n: 1 }), k, `提示种类 ${k} 界面不认得`);
+});
+
+test('字典:后端发的计划代码、身份告警代码中英都有', () => {
+  const dict = fs.readFileSync(path.join(jsDir, 'i18n.js'), 'utf8');
+  const goDir = path.join(here, '..', '..', 'ha');
+  const src = ['switch.go', 'identity.go'].map(f => fs.readFileSync(path.join(goDir, f), 'utf8')).join('\n');
+  const codes = new Set([...src.matchAll(/\b(?:warn|block)\("([a-zA-Z]+)"/g)].map(m => 'ha.plan.' + m[1]));
+  for (const m of src.matchAll(/\bidw[A-Za-z]+ += "([a-zA-Z]+)"/g)) codes.add('ha.idw.' + m[1]);
+  assert.ok(codes.size >= 15, '没找到后端的代码');
+  for (const k of codes) {
+    const n = dict.split(`'${k}':`).length - 1;
+    assert.equal(n, 2, `${k} 要中英各一条(现在 ${n} 条)`);
+  }
+});
