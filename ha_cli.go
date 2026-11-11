@@ -160,13 +160,6 @@ func haSubmit(db *gorm.DB, c ha.Cmd, wait time.Duration) error {
 	return nil
 }
 
-// switchView 设为主机的进度(在 ha.SwitchState 之外读结果不明时的字段;B 的 SwitchState 带上后可直接用它的)。
-type switchView struct {
-	ha.SwitchState
-	Unknown     bool  `json:"unknown,omitempty"`
-	FreezeUntil int64 `json:"freezeUntil,omitempty"`
-}
-
 // haWaitSwitch 设为主机:等它做完(本机最后会变为副机并重启),打印新面板地址;没完成、结果不明都把原因与冻结截止打出来。
 func haWaitSwitch(db *gorm.DB) error {
 	deadline := time.Now().Add(70 * time.Minute) // 冻结最长 60 分钟,再留出结果不明时的隔离
@@ -174,12 +167,12 @@ func haWaitSwitch(db *gorm.DB) error {
 	for time.Now().Before(deadline) {
 		var raw string
 		db.Raw("SELECT value FROM settings WHERE key = ?", ha.KeySwitch).Scan(&raw)
-		var st switchView
+		var st ha.SwitchState
 		if json.Unmarshal([]byte(raw), &st) == nil {
 			if st.Stage != last {
 				fmt.Println("  …", switchStageText(st.Stage))
 				last = st.Stage
-				if st.FreezeUntil > 0 && st.Stage != ha.StageDone && st.Stage != ha.StageFailed {
+				if st.FreezeUntil > 0 && st.Stage != ha.StageDone && st.Stage != ha.StageFailed && st.Stage != ha.StageFenced {
 					fmt.Println("    写操作暂停到 " + time.Unix(st.FreezeUntil, 0).Format("2006-01-02 15:04:05") + "(通常一两分钟就完成)")
 				}
 			}
@@ -196,8 +189,8 @@ func haWaitSwitch(db *gorm.DB) error {
 				return nil
 			case ha.StageFailed:
 				return fmt.Errorf("没有完成:%s(本机照旧是主机)", st.Err)
-			case "fenced":
-				return fmt.Errorf("结果不明,已以纪元 %d 隔离目标、本机继续当主机:%s", st.Epoch+1, or(st.Err, "目标之后起来会被副机拒绝并自动变为副机"))
+			case ha.StageFenced:
+				return fmt.Errorf("结果不明,已以纪元 %d 隔离目标、本机继续当主机:%s", st.FenceEpoch, or(st.Err, "目标之后起来会被副机拒绝并自动变为副机"))
 			}
 		}
 		time.Sleep(time.Second)
@@ -221,9 +214,9 @@ func switchStageText(stage string) string {
 		return "本机变为副机"
 	case ha.StageFailed:
 		return "失败"
-	case "unknown":
+	case ha.StageUnknown:
 		return "目标有没有接手还不确定:保持冻结,继续问目标(到期仍不明会隔离目标)"
-	case "fenced":
+	case ha.StageFenced:
 		return "结果不明,已隔离目标"
 	}
 	return stage
