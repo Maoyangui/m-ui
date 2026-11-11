@@ -8,7 +8,7 @@ import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, fmtBytes, fmtDuration, fmtRelative, fmtTime, fmtDate, fmtDay, tzOffsetMinutes, toast, registerActions, badge, dot, empty, setHTML, chipList, onChipToggle, chipOpen, auditText, daysLeft, hostPort, matches } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
-import { NODE_CODES, summarizeNodes, trackUnsynced, worstCode, healthSummary, sortCerts, certSig, certCounts, certLeftDays, sortReach, reachSig, reachHard } from '../issues.js';
+import { NODE_CODES, summarizeNodes, trackUnsynced, worstCode, healthSummary, sortCerts, certSig, certCounts, certLeftDays, sortReach, reachSig, reachHard, reachStall } from '../issues.js';
 import { expiringDays, quotaPct } from './users.js';
 import { shownConns } from '../fair.js';
 
@@ -345,8 +345,13 @@ function attnItems() {
   }
   // 12b 检测器自己停摆:检测不跑了,"没有异常"就不可信
   const rs = !node && s.reachState;
-  if (rs && rs.auto && rs.minutes > 0 && ((rs.lastRun && now() - rs.lastRun > 3 * rs.minutes * 60) || (!rs.lastRun && rs.error))) {
-    add(12, 'warn', { title: rs.lastRun ? t('dash.attn.reachStale', { ago: fmtRelative(rs.lastRun), n: rs.minutes }) : t('dash.attn.reachNever'), names: rs.error ? trErr(rs.error) : '', go: '#/nodes' });
+  const stall = rs ? reachStall(rs, now()) : '';
+  if (stall) {
+    const title = stall === 'idle' ? t('dash.attn.reachStale', { ago: fmtRelative(rs.lastRun), n: rs.minutes })
+      : stall === 'failing' && rs.lastOk ? t('dash.attn.reachFailing', { ago: fmtRelative(rs.lastOk) })
+      : stall === 'failing' ? t('dash.attn.reachFailNow') : t('dash.attn.reachNever');
+    const why = rs.error || rs.failErr;
+    add(12, 'warn', { title, names: why ? trErr(why) : '', go: '#/nodes' });
   }
   if (hs && hs.rows.length && hs.interval > 0 && now() - hs.lastRun > 3 * hs.interval * 60) {
     add(12, 'warn', { title: t('dash.attn.healthStale', { ago: fmtRelative(hs.lastRun), n: hs.interval }), go: '#/upstreams' });

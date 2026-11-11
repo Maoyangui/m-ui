@@ -683,3 +683,30 @@ func TestFailedAttemptKeepsLastResult(t *testing.T) {
 		t.Fatalf("测成之后不该再挂着失败说明: %+v", r)
 	}
 }
+
+// 检测器自己的状况:额度用尽时 lastRun 照样往前走,State 要能看出这一轮一台都没测成、最近一次测成是什么时候(概况据此报"检测停摆")。
+func TestStateReportsFailingRounds(t *testing.T) {
+	h := newHarness(t)
+	h.runAuto(t)
+	st := h.svc.State()
+	if st.LastRun == 0 || st.LastOk == 0 || st.Tried != 1 || st.Failed != 0 || st.FailErr != "" {
+		t.Fatalf("测成的一轮: %+v", st)
+	}
+	okAt := st.LastOk
+	h.advance(2 * time.Hour)
+	h.api.mu.Lock()
+	h.api.remaining = 0
+	h.api.mu.Unlock()
+	h.runAuto(t)
+	st = h.svc.State()
+	if st.LastRun <= okAt || st.LastOk != okAt || st.Tried != 1 || st.Failed != 1 || !strings.Contains(st.FailErr, "额度") {
+		t.Fatalf("额度用尽的一轮: %+v", st)
+	}
+	// 重启后从库里恢复最近一次测成的时间(没测成的记录不算)
+	h2 := New(Deps{DB: h.svc.d.DB, IsNode: func() bool { return false }, Setting: func(string) string { return "" },
+		Targets: func(context.Context) []Target { return nil }, API: h.api.srv.URL, Now: func() time.Time { return h.now }, FirstDelay: time.Hour})
+	defer h2.Stop()
+	if st2 := h2.State(); st2.LastOk != okAt || st2.LastRun != st.LastRun {
+		t.Fatalf("重启后: %+v,要 lastOk=%d lastRun=%d", st2, okAt, st.LastRun)
+	}
+}

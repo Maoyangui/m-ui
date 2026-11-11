@@ -142,3 +142,19 @@ export const certLeftDays = (a, now = Date.now() / 1000) => Math.floor(((a.notAf
 export const sortReach = list => (list || []).slice().sort((a, b) => (a.verdict === 'partial') - (b.verdict === 'partial'));
 export const reachSig = list => (list || []).map(r => r.nodeId + ':' + r.verdict).join(',');
 export const reachHard = list => (list || []).filter(r => r.verdict !== 'partial');
+
+// reachStall 大陆连通检测自己是不是停摆了(GET status 的 reachState),返回原因代码,没停摆给 '':
+// idle 巡检很久没跑完(超过 3 个间隔);error 取测点列表出错;failing 最近一轮全量巡检一台都没测成(额度用尽、令牌无效、接口出错),
+// 或者有测成过、但已经超过 3 个间隔没测成;never 跑过却从没测成过。
+// lastRun 每轮都往前走,不管测没测成,所以不能只看它。老后端没有 lastOk / tried 时只按 idle、error 判断
+export function reachStall(rs, now = Date.now() / 1000) {
+  if (!rs || !rs.auto || !(rs.minutes > 0)) return '';
+  const lim = 3 * rs.minutes * 60;
+  if (rs.lastRun && now - rs.lastRun > lim) return 'idle';
+  if (rs.error) return 'error';
+  const newer = 'lastOk' in rs;
+  if (newer && rs.lastRun && !rs.lastOk) return 'never';
+  if (rs.tried > 0 && rs.failed >= rs.tried) return 'failing';
+  if (newer && rs.lastOk && now - rs.lastOk > lim) return 'failing';
+  return '';
+}

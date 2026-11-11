@@ -198,3 +198,17 @@ test('chipList:展开状态按 key 记住(5 秒一轮重画后不收起),lazy �
   assert.equal(b2.textContent, 'common.less');
   assert.equal(ui.chipOpen('k4'), true);
 });
+
+test('大陆连通检测停摆(reachStall):lastRun 每轮都往前走,额度用尽、一台都没测成也要报出来', () => {
+  const now = 1_800_000_000, m = 60;
+  const base = { auto: true, minutes: m, lastRun: now - 60, lastOk: now - 60, tried: 3, failed: 0 };
+  assert.equal(I.reachStall(base, now), '');
+  assert.equal(I.reachStall({ ...base, auto: false, lastRun: 1 }, now), '', '没开自动检测不算');
+  assert.equal(I.reachStall({ ...base, lastRun: now - 3 * m * 60 - 1 }, now), 'idle');
+  assert.equal(I.reachStall({ ...base, error: 'x' }, now), 'error', '取测点出错:以前要求 lastRun 为 0,第一轮之后永远不报');
+  assert.equal(I.reachStall({ ...base, failed: 3 }, now), 'failing', '最近一轮全没测成(额度用尽)');
+  assert.equal(I.reachStall({ ...base, failed: 2 }, now), '', '部分没测成不报');
+  assert.equal(I.reachStall({ ...base, lastOk: now - 3 * m * 60 - 1, failed: 1 }, now), 'failing', '在跑但很久没测成');
+  assert.equal(I.reachStall({ ...base, lastOk: 0 }, now), 'never');
+  assert.equal(I.reachStall({ auto: true, minutes: m, lastRun: now - 60 }, now), '', '老后端没有 lastOk / tried:只按 idle、error');
+});

@@ -105,20 +105,24 @@ type Service struct {
 	d Deps
 	c *client
 
-	mu        sync.Mutex
-	busy      bool
-	extBusy   bool // 外部节点的大陆连通检测在跑(和服务器检测共用测点额度,互斥)
-	running   map[uint]bool
-	latest    map[uint]Result    // 最近一次(可能没测成)
-	good      map[uint]Result    // 最近一次测成的
-	goodV6    map[uint]*V6Result // 最近一次测成的 IPv6 入站(和大陆那项各算各的:一项没测成不抹掉另一项)
-	history   map[uint][]Point
-	alerted   map[uint]string // 已经告过警的状态类别,防止同一件事反复发
-	lastRun   int64           // 最近一次全部服务器都测过的时间(定时与手动都算)
-	lastErr   string
-	perCheck  int
-	probeList []probe
-	probeAt   time.Time
+	mu      sync.Mutex
+	busy    bool
+	extBusy bool // 外部节点的大陆连通检测在跑(和服务器检测共用测点额度,互斥)
+	running map[uint]bool
+	latest  map[uint]Result    // 最近一次(可能没测成)
+	good    map[uint]Result    // 最近一次测成的
+	goodV6  map[uint]*V6Result // 最近一次测成的 IPv6 入站(和大陆那项各算各的:一项没测成不抹掉另一项)
+	history map[uint][]Point
+	alerted map[uint]string // 已经告过警的状态类别,防止同一件事反复发
+	lastRun int64           // 最近一次全部服务器都测过的时间(定时与手动都算;不管测没测成)
+	lastErr string          // 最近一轮取测点列表的错误
+	lastOk  int64           // 最近一次有服务器测成的时间(lastRun 每轮都往前走,额度用尽时也一样,看不出检测其实停摆了)
+	// 最近一轮全量巡检:要发请求测的台数、其中没测成的台数、第一条没测成的原因(额度用尽、令牌无效、接口出错)
+	roundTried, roundFailed int
+	roundErr                string
+	perCheck                int
+	probeList               []probe
+	probeAt                 time.Time
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -191,6 +195,9 @@ func (s *Service) load() {
 			s.latest[r.NodeId] = res
 			if measured(res.Verdict) {
 				s.good[r.NodeId] = res
+				if r.At > s.lastOk {
+					s.lastOk = r.At
+				}
 			}
 			if v6Measured(res.V6) {
 				s.goodV6[r.NodeId] = res.V6
@@ -381,6 +388,9 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 	}
 	releaseV6 := func() { v6Mu.Lock(); v6Reserved -= v6Cost(); v6Mu.Unlock() }
 
+	// 这一轮要发请求测的台数与没测成的台数:全量巡检结束时记下,概况据此发现"检测在跑、但一台都没测成"
+	var roundMu sync.Mutex
+	tried, failed, firstErr := 0, 0, ""
 	sem := make(chan struct{}, parallelChecks)
 	var wg sync.WaitGroup
 	for _, t := range targets {
@@ -449,10 +459,26 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 			if ctx.Err() != nil && res.Verdict == VerdictError {
 				return // 面板正在退出:别把"被取消"记成一次失败
 			}
+			if measures(t) {
+				roundMu.Lock()
+				tried++
+				if !measured(res.Verdict) {
+					failed++
+					if firstErr == "" {
+						firstErr = res.Error
+					}
+				}
+				roundMu.Unlock()
+			}
 			s.store(res)
 		}()
 	}
 	wg.Wait()
+	if full && ctx.Err() == nil {
+		s.mu.Lock()
+		s.roundTried, s.roundFailed, s.roundErr = tried, failed, firstErr
+		s.mu.Unlock()
+	}
 }
 
 // CanCheck 现在的额度够不够测 n 个目标:不够就直接说清楚,别一个个失败。
@@ -674,6 +700,9 @@ func (s *Service) store(res Result) {
 	s.latest[res.NodeId] = res
 	if measured(res.Verdict) {
 		s.good[res.NodeId] = res
+		if res.At > s.lastOk {
+			s.lastOk = res.At
+		}
 	}
 	if v6Measured(res.V6) {
 		s.goodV6[res.NodeId] = res.V6
@@ -783,19 +812,25 @@ func (s *Service) View() View {
 	return v
 }
 
-// State 检测器自己的状况(概况用来发现"检测停摆了":额度用尽、接口出错、很久没测成):是否自动、间隔、最近一次全部测完的时间、最近的错误。
+// State 检测器自己的状况(概况用来发现"检测停摆了":额度用尽、接口出错、很久没测成):是否自动、间隔、
+// 最近一次全部测完的时间(不管测没测成)、最近一次有服务器测成的时间、最近一轮全量巡检测了几台 / 几台没测成及原因、取测点列表的错误。
 // 只读内存,不碰测点。
 type State struct {
 	Auto    bool   `json:"auto"`
 	Minutes int    `json:"minutes"`
 	LastRun int64  `json:"lastRun"`
+	LastOk  int64  `json:"lastOk"`
+	Tried   int    `json:"tried"`
+	Failed  int    `json:"failed"`
+	FailErr string `json:"failErr,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
 
 func (s *Service) State() State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return State{Auto: s.Auto(), Minutes: s.Minutes(), LastRun: s.lastRun, Error: s.lastErr}
+	return State{Auto: s.Auto(), Minutes: s.Minutes(), LastRun: s.lastRun, LastOk: s.lastOk,
+		Tried: s.roundTried, Failed: s.roundFailed, FailErr: s.roundErr, Error: s.lastErr}
 }
 
 // Bad 当前有异常的服务器(概览页顶部提示用)。
