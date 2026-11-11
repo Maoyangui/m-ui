@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/acme"
+	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/runner"
 )
 
@@ -25,6 +26,10 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	certFile, _ := s.run.DataPlaneCert()
+	// 用户数(含停用的、代理名下的):订阅 http ↔ https 一换,这些人手里的地址都会变。证书页据此决定
+	// 「用于订阅 HTTPS」默不默认勾、要不要先确认(assets/js/subtls.js)
+	var subUsers int64
+	s.db.Model(&model.User{}).Count(&subUsers)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"info":     s.run.CertInfo(),
 		"status":   s.run.CertStatus(),
@@ -34,6 +39,7 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		// 面板 / 订阅实际引用的证书路径(可能是证书库之外手填的)
 		"panelCert": s.setting("webCertFile"),
 		"subCert":   s.setting("subCertFile"),
+		"subUsers":  subUsers,
 		"settings": map[string]interface{}{
 			"acmeDomain": s.setting("acmeDomain"), "acmeEmail": s.setting("acmeEmail"), "acmeMethod": s.setting("acmeMethod"),
 			"hasCfToken": s.setting("acmeCfToken") != "", "acmeStaging": s.setting("acmeStaging") == "true",

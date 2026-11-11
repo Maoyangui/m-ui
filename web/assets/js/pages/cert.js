@@ -4,6 +4,7 @@ import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, fmtDay, fmtDate, fmtRelative, toast, confirm, registerActions, badge, field, check, copy, fv, fchk } from '../ui.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
+import { subDefaultOn, subSchemeChange } from '../subtls.js';
 
 export const title = () => t('cert.title');
 export const subtitle = () => t('cert.subtitle');
@@ -151,7 +152,7 @@ function targetChecks() {
     <div class="form-grid">
       ${check('c-lines', t('cert.forLines'), !hasReal, t('cert.forLinesHelp'))}
       ${check('c-panel', t('cert.applyPanel'), !self && !data.panelCert, t('cert.applyPanelHelp'))}
-      ${check('c-sub', t('cert.applySub'), !self && !data.subCert, t('cert.applySubHelp'))}
+      ${check('c-sub', t('cert.applySub'), subDefaultOn(data, self), data.subCert || !(data.subUsers > 0) ? t('cert.applySubHelp') : t('cert.applySubWarn', { n: data.subUsers }))}
     </div>`;
 }
 
@@ -295,6 +296,14 @@ async function reload() {
 
 const targets = () => ({ forLines: fchk('c-lines'), applyPanel: fchk('c-panel'), applySub: fchk('c-sub') });
 
+// 订阅 http ↔ https 一换,所有用户手里的订阅地址都会变(见 subtls.js):返回要补进确认框的那句,不会变返回空
+const subSchemeText = next => {
+  const ch = subSchemeChange(data, next);
+  return ch ? t('cert.subSchemeConfirm', { n: ch.n, from: ch.from, to: ch.to }) : '';
+};
+// 添加证书(自签 / 已有证书)勾了「用于订阅 HTTPS」且订阅地址会变:先确认一次
+const confirmSubScheme = async () => { const w = subSchemeText(fchk('c-sub')); return !w || confirm(w, { danger: true }); };
+
 registerActions({
   'cert.source': id => {
     source = id;
@@ -317,6 +326,8 @@ registerActions({
     if (target !== 'lines') opts.unshift({ value: '', name: t('cert.noHttps'), sub: esc(t('cert.noHttpsHelp')), current: !certOf(target) && !(target === 'panel' ? data.panelCert : data.subCert) });
     openCertDrawer(t('cert.pickFor.' + target), opts, async value => {
       if (target === 'lines' && !await confirm(t('cert.switchLinesConfirm'))) return false;
+      const subWarn = target === 'sub' ? subSchemeText(value) : '';
+      if (subWarn && !await confirm(subWarn, { danger: true })) return false;
       try {
         await post('cert/use', { name: value, target }, SLOW);
         if (target === 'panel') panelChanged = true;
@@ -380,7 +391,8 @@ registerActions({
       staging: fchk('c-staging'), autoRenew: method !== 'manual' && fchk('c-renew'), ...targets(),
     };
     if (!body.domain) { toast(t('cert.needDomain'), 'err'); return; }
-    if (!await confirm(t('cert.issueConfirm', { domain: body.domain }))) return;
+    const subWarn = subSchemeText(body.applySub); // 签发确认框里一并写明:所有用户的订阅地址会变
+    if (!await confirm(t('cert.issueConfirm', { domain: body.domain }) + (subWarn ? ' ' + subWarn : ''), subWarn ? { danger: true } : {})) return;
     btn.disabled = true;
     try {
       const res = await post('cert/issue', body);
@@ -390,6 +402,7 @@ registerActions({
   },
   'cert.selfsign': async (_, btn) => {
     const hosts = fv('ss-hosts').trim(); // 留空 = 后端自动用本机公网 IP
+    if (!await confirmSubScheme()) return;
     btn.disabled = true;
     try {
       await post('cert/selfsign', { hosts, ...targets() });
@@ -400,6 +413,7 @@ registerActions({
   'cert.external': async (_, btn) => {
     const body = { certFile: fv('ex-cert').trim(), keyFile: fv('ex-key').trim(), ...targets() };
     if (!body.certFile || !body.keyFile) { toast(t('cert.needPaths'), 'err'); return; }
+    if (!await confirmSubScheme()) return;
     btn.disabled = true;
     try {
       try { await post('cert/external', body); }

@@ -73,7 +73,7 @@
       <li><b>建用户</b>:<b data-k="nav.users">用户</b> 页 → <b data-k="user.add">新增用户</b>,填用户名和额度,勾上 <b data-k="user.f.lines">可用线路</b>,保存。</li>
       <li><b>发订阅</b>:点用户名打开详情,<b data-k="user.subscription">订阅</b> 下面有两个地址,把不带 <code>?format=</code> 的那个(通用地址)发给用户:用浏览器打开是他自己的落地页,能一键导入客户端;客户端来拉时按类型给格式(见 <a href="#users-sub">订阅地址、二维码与临时共享</a>)。</li>
     </ol>
-    <div class="tip"><b>没有域名也能用</b>自签证书 + 服务器 IP 就行:订阅会自动告诉客户端"允许不安全证书",客户端不用另外设置。以后有了域名签正式证书时注意:证书页默认勾着 <b data-k="cert.applySub">用于订阅 HTTPS</b>,勾了订阅地址就变成 <code>https://域名…</code>,要把新地址发给每个用户;不想换地址就取消这个勾,用户刷新一次订阅即可。</div>
+    <div class="tip"><b>没有域名也能用</b>自签证书 + 服务器 IP 就行:订阅会自动告诉客户端"允许不安全证书",客户端不用另外设置。以后有了域名签正式证书时注意:已经有用户时证书页默认不勾 <b data-k="cert.applySub">用于订阅 HTTPS</b>;勾了的话所有用户的订阅地址都会变成 <code>https://域名…</code>,旧地址立即失效,每个客户端都要重新导入,签发前会再提示一次。不勾就保持原地址,用户刷新一次订阅即可。</div>
     <div class="pit"><b>常见坑</b>线路的端口要在云服务器安全组和系统防火墙里放行:Hysteria2、TUIC 走 UDP,其它大多走 TCP。没放行是"连不上"最常见的原因。</div>
   </section>
 
@@ -516,7 +516,7 @@
       <li><b data-k="cert.srcSelf">无域名(自签)</b>:点 <b data-k="cert.selfsign">生成自签证书</b>;<b data-k="cert.hosts">证书包含的地址(留空自动)</b> 留空就用本机公网 IP。订阅里每个节点会自动带"允许不安全",客户端不用设置;面板和订阅建议保持 HTTP。</li>
       <li><b data-k="cert.srcExternal">已有证书</b>:服务器上已经有 certbot、宝塔、nginx 或商业证书时,填 <b data-k="cert.certPath">证书文件(fullchain)</b> 和 <b data-k="cert.keyPath">私钥文件</b> 的路径,点 <b data-k="cert.useExternal">使用该证书</b>。</li>
     </ul>
-    <div class="tip"><b>选用途</b>在 <b data-k="cert.applyTo">添加后用于</b> 里勾:<b data-k="cert.forLines">设为线路默认证书</b>、<b data-k="cert.applyPanel">用于面板 HTTPS</b>、<b data-k="cert.applySub">用于订阅 HTTPS</b>;没勾的用途不受影响。默认勾选:还没有正式证书时勾着 <b data-k="cert.forLines">设为线路默认证书</b>;添加的不是自签证书、而面板或订阅还没用 HTTPS 时,也会勾着后两项。勾了 <b data-k="cert.applySub">用于订阅 HTTPS</b>,订阅地址会变成 <code>https://</code>,要把新地址发给用户;勾了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后面板也换成 <code>https://</code>。</div>
+    <div class="tip"><b>选用途</b>在 <b data-k="cert.applyTo">添加后用于</b> 里勾:<b data-k="cert.forLines">设为线路默认证书</b>、<b data-k="cert.applyPanel">用于面板 HTTPS</b>、<b data-k="cert.applySub">用于订阅 HTTPS</b>;没勾的用途不受影响。默认勾选:还没有正式证书时勾着 <b data-k="cert.forLines">设为线路默认证书</b>;添加的不是自签证书、而面板还没用 HTTPS 时勾着 <b data-k="cert.applyPanel">用于面板 HTTPS</b>;订阅还没用 HTTPS 且一个用户都还没有时勾着 <b data-k="cert.applySub">用于订阅 HTTPS</b>,已有用户时默认不勾。勾了 <b data-k="cert.applySub">用于订阅 HTTPS</b>,所有用户的订阅地址都会从 <code>http://</code> 变成 <code>https://</code>,旧地址立即失效,客户端要重新导入(添加前和在 <b data-k="cert.inUse">正在使用</b> 里换订阅证书时都会再提示一次);勾了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后面板也换成 <code>https://</code>。</div>
   </section>
 
   <section class="sec" id="cf-token">
