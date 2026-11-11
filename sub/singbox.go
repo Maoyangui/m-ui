@@ -85,7 +85,8 @@ func warnBadOwnLink(link string, err error) {
 //
 // 部署在多台服务器上的线路和 Clash 一样再出一个线路测速组(urltest,判断条件同 clash.go 的 url-test 组):
 // 客户端选这条线路,由组在这几台服务器里挑延迟低的,出口和计费口径不变。节点逐条线路展开,
-// 展开顺序、去重规则都和 GenerateLinksFor 一样,节点的 tag 与顺序一字不变;组名等全部节点定完名字再起,撞了只改组名。
+// 展开顺序、去重规则都和 GenerateLinksFor 一样,节点的 tag 与顺序一字不变(只有和线路组同名的外部节点改名);
+// 组名在本站节点之后、外部节点之前起:撞了本站节点只改组名,外部节点撞上组名由外部节点改名。
 func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, error) {
 	var tmpl map[string]interface{}
 	if strings.TrimSpace(opt.SingBoxTmpl) != "" {
@@ -154,6 +155,21 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 			pending = append(pending, lineGroup{line.Name, names})
 		}
 	}
+	// 线路组在本站节点之后、外部节点之前起名:撞了本站节点、模板出站或 proxy / auto / direct,只给组名加序号,本站节点名一字不动。
+	// 外部节点最后定名,撞上组名由外部节点加序号:外部订阅里冒出一个和线路同名的节点,也挤不动本站线路组的名字,
+	// 选过这个组的客户端(SFA / SFI 按 tag 记住选择)不会被悄悄换到第三方节点上
+	var groups []map[string]interface{}
+	var groupTags []string
+	for _, g := range pending {
+		tag := g.name
+		for i := 2; used[tag]; i++ {
+			tag = fmt.Sprintf("%s %d", g.name, i)
+		}
+		used[tag] = true
+		groupTags = append(groupTags, tag)
+		groups = append(groups, map[string]interface{}{"type": "urltest", "tag": tag, "outbounds": g.members,
+			"url": "http://www.gstatic.com/generate_204", "interval": "3m", "tolerance": 50})
+	}
 	for _, e := range opt.External { // 外部节点不成组
 		for _, l := range e.Links {
 			add(l, false)
@@ -170,19 +186,6 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 		return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
 	}
 
-	// 线路组的名字在全部节点定名之后再起:撞了节点、模板出站或 proxy / auto / direct,只给组名加序号,节点名一字不动
-	var groups []map[string]interface{}
-	var groupTags []string
-	for _, g := range pending {
-		tag := g.name
-		for i := 2; used[tag]; i++ {
-			tag = fmt.Sprintf("%s %d", g.name, i)
-		}
-		used[tag] = true
-		groupTags = append(groupTags, tag)
-		groups = append(groups, map[string]interface{}{"type": "urltest", "tag": tag, "outbounds": g.members,
-			"url": "http://www.gstatic.com/generate_204", "interval": "3m", "tolerance": 50})
-	}
 	selectList := append(append([]string{"auto"}, groupTags...), tags...)
 	outbounds := []map[string]interface{}{
 		{"type": "selector", "tag": "proxy", "outbounds": selectList, "default": "auto", "interrupt_exist_connections": true},

@@ -304,6 +304,38 @@ func TestSingBoxLineGroupNameClash(t *testing.T) {
 	validateClientConfig(t, res.Body)
 }
 
+// 线路组在外部节点之前起名:外部订阅里冒出一个和线路同名的节点,改名的是外部节点(hy 2),线路组一直叫 hy。
+// 外部节点出现、消失,线路组的名字都不变 —— 客户端按名字记住选择,选过线路组的不会被悄悄换到第三方节点上。
+func TestSingBoxLineGroupKeepsNameOverExternal(t *testing.T) {
+	cert := raw(map[string]interface{}{"mode": "cert"})
+	lines := []model.Line{{Id: 1, Name: "hy", Protocol: "hysteria2", Port: 443, Tls: cert, Enabled: true}}
+	user := fullUser()
+	ext := []ExtItem{{Name: "ext", Links: []string{"trojan://p@198.51.100.1:443?sni=x.example.com#hy"}}}
+	for _, opt := range []Options{{Entries: twoServers, External: ext}, {Entries: twoServers}} {
+		res, err := BuildSingBoxSub(user, lines, opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		by := byTagSB(parseSB(t, res.Body))
+		if g := by["hy"]; g == nil || g["type"] != "urltest" || !reflect.DeepEqual(strList(g["outbounds"]), []string{"hy-A", "hy-B"}) {
+			t.Fatalf("线路组应一直叫 hy(外部节点 %d 组): %v", len(opt.External), g)
+		}
+		validateClientConfig(t, res.Body)
+		if len(opt.External) == 0 {
+			continue
+		}
+		if n := by["hy 2"]; n == nil || n["type"] != "trojan" || n["server"] != "198.51.100.1" {
+			t.Fatalf("和线路组同名的外部节点应改名为 hy 2: %v", n)
+		}
+		if got := strList(by["proxy"]["outbounds"]); !reflect.DeepEqual(got, []string{"auto", "hy", "hy-A", "hy-B", "hy 2"}) {
+			t.Fatalf("proxy 选择组应列 auto、线路组、全部节点: %v", got)
+		}
+		if got := strList(by["auto"]["outbounds"]); !reflect.DeepEqual(got, []string{"hy-A", "hy-B", "hy 2"}) {
+			t.Fatalf("auto 应覆盖全部节点(含改了名的外部节点): %v", got)
+		}
+	}
+}
+
 // 模板模式:模板里 "{all}" 只展开成节点(不含线路组);线路组和 proxy / auto 一样补进出站,模板写了同名的用模板的。
 func TestSingBoxLineGroupsWithTemplate(t *testing.T) {
 	cert := raw(map[string]interface{}{"mode": "cert"})
