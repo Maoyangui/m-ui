@@ -174,7 +174,7 @@ function actionsCell(n) {
 // 「只看异常」的口径(和概况「需要处理」同一份,见 issues.js):离线、数据面停止、重载失败、下线通知未送达、记账失败、
 // 未同步超过 30 秒、版本不一致;再加上大陆连通不通 / 部分不通、证书有问题、IPv6 入站不通(有检测结果时)
 function nodeBad(n) {
-  if (!n.isLocal && nodeIssues(n, { unsyncedFor: trackUnsynced(unsyncedSince, data.nodes)(n.name) }).length) return true;
+  if (!n.isLocal && nodeIssues(n, { unsyncedFor: trackUnsynced(unsyncedSince, data.nodes)(n.name), now: data.now || Date.now() / 1000 }).length) return true;
   if (n.isLocal) {
     const rl = state.status.reload || {};
     if ((rl.at && !rl.ok) || !state.status.coreRunning) return true;

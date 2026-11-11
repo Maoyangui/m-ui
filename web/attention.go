@@ -30,6 +30,8 @@ type attentionView struct {
 	ResellersDepleted int64           `json:"resellersDepleted"` // 启用、额度已用尽
 	ResellersExpiring int64           `json:"resellersExpiring"` // 启用、7 天内到期(还没到期)
 	ResellersExpired  int64           `json:"resellersExpired"`  // 启用、过去 7 天里到期的(更早到期的不再常驻提示,代理页能看到)
+	UsersAttn         int64           `json:"usersAttn"`         // 上面两类用户去重后的人数
+	ResellersAttn     int64           `json:"resellersAttn"`     // 上面三类代理去重后的个数
 	Backup            attentionBackup `json:"backup"`
 }
 
@@ -76,6 +78,13 @@ func (s *Server) computeAttention(now time.Time) attentionView {
 	if files := s.run.ListBackups(); len(files) > 0 {
 		v.Backup.LastAt = files[0].Time
 	}
-	v.Backup.LastErr, v.Backup.LastErrAt = s.run.BackupError()
+	if v.Backup.Auto { // 关了定时备份就不再报它失败过
+		v.Backup.LastErr, v.Backup.LastErrAt = s.run.BackupError()
+	}
+	// 同时快到期又流量将尽的人、同时额度用尽又快到期的代理只算一次:「需要处理」的标题用这两个数,分项仍各算各的
+	s.db.Model(&model.User{}).Where(direct, true).
+		Where("(expiry > ? AND expiry <= ?) OR (volume > 0 AND (up + down) * 100 >= volume * ?)", ts, ts+int64(days)*86400, pct).Count(&v.UsersAttn)
+	s.db.Model(&model.Reseller{}).Where("enabled = ?", true).
+		Where("depleted = ? OR (expiry > ? AND expiry <= ?)", true, ts-7*86400, ts+7*86400).Count(&v.ResellersAttn)
 	return v
 }

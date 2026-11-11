@@ -579,6 +579,34 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 // ---- 批量操作 ----
 
 // handleUsersBatch POST /users/batch {ids, action: enable|disable|delete|reset|extend|plan, days, planId, mode, periods}
+// idChunks 把 id 切成每批 500 个:SQLite 一条语句最多 32766 个变量,「选中全部筛选结果」一次能送上万个 id,
+// 一条 IN 放不下时 Find 报错、结果为空,以前被当成"处理了 0 个"照样返回 200、写审计
+func idChunks(ids []uint) [][]uint {
+	const n = 500
+	var out [][]uint
+	for len(ids) > n {
+		out = append(out, ids[:n])
+		ids = ids[n:]
+	}
+	if len(ids) > 0 {
+		out = append(out, ids)
+	}
+	return out
+}
+
+// usersByIDs 按批取用户,任一批出错就返回错误(不当成空)。
+func (s *Server) usersByIDs(ids []uint) ([]model.User, error) {
+	var out []model.User
+	for _, part := range idChunks(ids) {
+		var got []model.User
+		if err := s.db.Where("id IN ?", part).Find(&got).Error; err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+	}
+	return out, nil
+}
+
 func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
@@ -602,7 +630,14 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	if rid := scope(r); rid > 0 { // 代理:只留自己的用户
 		var mine []uint
-		s.db.Model(&model.User{}).Where("id IN ? AND reseller_id = ?", req.Ids, rid).Pluck("id", &mine)
+		for _, part := range idChunks(req.Ids) {
+			var got []uint
+			if err := s.db.Model(&model.User{}).Where("id IN ? AND reseller_id = ?", part, rid).Pluck("id", &got).Error; err != nil {
+				badRequest(w, err)
+				return
+			}
+			mine = append(mine, got...)
+		}
 		if len(mine) == 0 {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权限"})
 			return
@@ -621,8 +656,11 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		affected = n
 	case "delete":
-		var users []model.User
-		s.db.Where("id IN ?", req.Ids).Find(&users)
+		users, err := s.usersByIDs(req.Ids)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
 		for _, u := range users {
 			if err := s.deleteUser(u, s.actor(r)); err != nil {
 				badRequest(w, err)
@@ -647,8 +685,11 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, errDaysTooMany)
 			return
 		}
-		var users []model.User
-		s.db.Where("id IN ?", req.Ids).Find(&users)
+		users, err := s.usersByIDs(req.Ids)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
 		for _, u := range users {
 			if ok, err := s.extendExpiry(s.db, u, req.Days, now); err != nil {
 				badRequest(w, err)
@@ -660,8 +701,11 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 	case "plan":
 		if req.Mode == "bind" {
 			auditAction = "batch:plan:bind"
-			var users []model.User
-			s.db.Where("id IN ?", req.Ids).Find(&users)
+			users, err := s.usersByIDs(req.Ids)
+			if err != nil {
+				badRequest(w, err)
+				return
+			}
 			if err := s.bindUserPlan(users, req.PlanId); err != nil {
 				badRequest(w, err)
 				return
@@ -688,8 +732,11 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 			writePlanErr(w, err)
 			return
 		}
-		var users []model.User
-		s.db.Where("id IN ?", req.Ids).Find(&users)
+		users, err := s.usersByIDs(req.Ids)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
 		if rid := scope(r); rid > 0 {
 			for _, u := range users {
 				if err := s.checkResellerPlan(rid, u, p); err != nil {

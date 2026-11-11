@@ -90,6 +90,7 @@ type Server struct {
 	attn   attentionView
 	// 副机:主机最近一次带令牌请求本机的时间(unix 秒),概况据此提示"主机多久没联系本机"
 	hubSeenAt atomic.Int64
+	startedAt int64 // 进程启动时间:副机重启后主机一直没来联系时,概况按它算「多久没联系」
 	// 副机:最近一次没应用成主机推来的配置(见 dash_extras.go)
 	applyRes applyState
 	// 代理名下用户 → 代理名,60 秒缓存(概况的在线名单链接用)
@@ -99,7 +100,7 @@ type Server struct {
 }
 
 func NewServer(run *runner.Runner) *Server {
-	return &Server{run: run, db: run.DB(), sessions: map[string]session{},
+	return &Server{run: run, db: run.DB(), sessions: map[string]session{}, startedAt: time.Now().Unix(),
 		totpPendingRS: map[uint]string{}, lastTotpStepRS: map[uint]int64{}, ops: ops.NewRunner()}
 }
 

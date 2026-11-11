@@ -28,6 +28,7 @@ let logOpen = null; // localStorage m-ui.dashLog;没存过时手机默认折起
 let nodesData = null, nodesErr = null, health = null, healthErr = null, conns = null, connsErr = null;
 let dayFromChart = null, day = null, dayErr = null; // 24 小时合计:图在 24 小时档时直接用图的,否则单独取
 let okAt = {};
+let srcAt = {}; // nodes / health / conns 最近一次取成功的时间(后来失败时「需要处理」写明显示的是几点的数据)
 const unsyncedSince = new Map(); // 服务器名 → 第一次看到"未同步"的时间
 let ticks = 0;
 
@@ -126,7 +127,9 @@ export async function render(el) {
   // 数据缓存不沿用上一次(可能是别的账号登录时的)
   nodesData = nodesErr = health = healthErr = conns = connsErr = dayFromChart = day = dayErr = null;
   okAt = {};
+  srcAt = {};
   ticks = 0;
+  unsyncedSince.clear(); // 和其它缓存一样进页面时清空:离开时正好未同步的副机,回来不能立刻跳过 30 秒门槛报出来
   if (isReseller()) return renderReseller(el);
   if (logOpen === null) { const v = ls('m-ui.dashLog'); logOpen = v === null ? !narrow() : v === '1'; }
   const node = isNode(), many = multi();
@@ -181,11 +184,19 @@ export async function tick() {
   renderStats(); renderCore(); renderOnline(); renderAttn();
 }
 
+// 面板状态取失败了、且显示的数据已超过 15 秒:返回那份数据的时间,否则 0。
+// 只看时间差会误报:同一轮里别的请求一慢(大库上 7 天的流量、挂到超时的请求),下一次 status 刷新就被推迟
+function statusStaleAt() {
+  const sat = state.at && state.at.status;
+  return sat && state.err && state.err.status && Date.now() - sat > 15000 ? sat : 0;
+}
+
 // ---- 数据 ----
 async function fetchNodes() {
   try {
     nodesData = await get('nodes');
     nodesErr = null;
+    srcAt.nodes = Date.now();
     trackUnsynced(unsyncedSince, nodesData.nodes || []);
     renderConns(); // 「老副机不上报握手失败」的说明跟着服务器列表变
   } catch (e) {
@@ -195,7 +206,7 @@ async function fetchNodes() {
   }
 }
 async function fetchHealth() {
-  try { health = await get('upstreams/health'); healthErr = null; }
+  try { health = await get('upstreams/health'); healthErr = null; srcAt.health = Date.now(); }
   catch (e) { healthErr = e; throw e; }
   renderHealth();
 }
@@ -204,6 +215,7 @@ async function fetchConns() {
     const got = await get('conns/recent?fails=1');
     conns = Array.isArray(got) ? got : []; // 老后端 / 演示站的假接口可能回 {}
     connsErr = null;
+    srcAt.conns = Date.now();
   } catch (e) { connsErr = e; throw e; }
   renderConns();
 }
@@ -330,20 +342,24 @@ function attnItems() {
   // 9 主机多久没联系本机(副机、没开容灾;字段存在才有)
   const haOn = s.ha && (s.ha.epoch > 0 || s.ha.node);
   if (node && !haOn && s.hubSeenAt && now() - s.hubSeenAt > 120) add(9, 'warn', { title: t('dash.attn.hubSilent', { dur: fmtDuration(now() - s.hubSeenAt) }), names: t('dash.attn.hubSilentHint') });
+  // hubSeenAt 只在内存里:副机重启后主机一直没来联系时没有它,后端改给本次启动的时间
+  else if (node && !haOn && !s.hubSeenAt && s.hubQuietSince && now() - s.hubQuietSince > 120) add(9, 'warn', { title: t('dash.attn.hubQuiet', { dur: fmtDuration(now() - s.hubQuietSince) }), names: t('dash.attn.hubSilentHint') });
   // 10 / 11 / 12 用户、代理、备份(主面板;status.attention 存在才有)
   const at = (!node && s.attention) || null;
   if (at) {
     const ne = at.usersExpiring || 0, nq = at.usersQuota || 0;
-    if (ne + nq > 0) add(10, 'warn', { title: t('dash.attn.users', { n: ne + nq }),
+    if (ne + nq > 0) add(10, 'warn', { title: t('dash.attn.users', { n: at.usersAttn ?? ne + nq }), // 同时满足两项的人只算一次(老后端没有去重数时按相加)
       parts: [ne && `<a href="#/users?f=expiring">${esc(t('dash.attn.users.expiring', { d: at.expiringDays || expiringDays(), n: ne }))}</a>`,
         nq && `<a href="#/users?f=quota">${esc(t('dash.attn.users.quota', { p: at.quotaPct || quotaPct(), n: nq }))}</a>`] });
     const rd = at.resellersDepleted || 0, rx = at.resellersExpiring || 0, rgone = at.resellersExpired || 0;
-    if (rd + rx + rgone > 0) add(11, rd || rgone ? 'bad' : 'warn', { title: t('dash.attn.resellers', { n: rd + rx + rgone }),
+    if (rd + rx + rgone > 0) add(11, rd || rgone ? 'bad' : 'warn', { title: t('dash.attn.resellers', { n: at.resellersAttn ?? rd + rx + rgone }),
       parts: [rd && esc(t('dash.attn.rs.depleted', { n: rd })), rgone && esc(t('dash.attn.rs.justExpired', { n: rgone })), rx && esc(t('dash.attn.rs.expiring', { n: rx }))], go: '#/resellers?f=attn' });
     const b = at.backup;
-    if (b && (b.lastErr || (b.auto && b.lastAt && b.lastAt < now() - 48 * 3600))) add(12, 'warn', {
-      title: b.lastErr ? t('dash.attn.backupFailed') : t('dash.attn.backupStale', { ago: fmtRelative(b.lastAt) }),
-      names: b.lastErr ? trErr(b.lastErr) + (b.lastErrAt ? ' · ' + fmtTime(b.lastErrAt) : '') : '', go: '#/backup' });
+    // 失败只在开着定时备份、且之后没有更新的备份文件时报(手动备份成功、关掉定时备份后都不再常驻)
+    const bFail = b && b.lastErr && b.auto && !(b.lastAt > b.lastErrAt);
+    if (b && (bFail || (b.auto && b.lastAt && b.lastAt < now() - 48 * 3600))) add(12, 'warn', {
+      title: bFail ? t('dash.attn.backupFailed') : t('dash.attn.backupStale', { ago: fmtRelative(b.lastAt) }),
+      names: bFail ? trErr(b.lastErr) + (b.lastErrAt ? ' · ' + fmtTime(b.lastErrAt) : '') : '', go: '#/backup' });
   }
   // 12b 检测器自己停摆:检测不跑了,"没有异常"就不可信
   const rs = !node && s.reachState;
@@ -367,10 +383,15 @@ function attnItems() {
       names: etc([...new Set(rj.map(c => c.user).filter(Boolean))], 'users'), acts: btn('dash.showRejected', '', t('dash.attn.showRejected'), 'ghost') });
   }
   // 14 面板状态过期(status 超过 15 秒没取到)
-  const sat = state.at && state.at.status;
-  if (sat && Date.now() - sat > 15000) add(14, 'warn', { title: t('dash.attn.statusStale', { time: fmtTime(Math.floor(sat / 1000)) }), names: errText(state.err && state.err.status), acts: btn('dash.retry', 'status', t('dash.retry')) });
+  const sat = statusStaleAt();
+  if (sat) add(14, 'warn', { title: t('dash.attn.statusStale', { time: fmtTime(Math.floor(sat / 1000)) }), names: errText(state.err && state.err.status), acts: btn('dash.retry', 'status', t('dash.retry')) });
   // 15 数据源第一次就没取到:不能说"一切正常"
-  const src = (key, err, data, id) => { if (err && !data) add(15, 'warn', { title: t('dash.attn.srcFail', { what: t('dash.attn.src.' + key) }), names: errText(err), acts: btn('dash.retry', id, t('dash.retry')) }); };
+  // 以前取成功过、这次失败的也算:显示的是旧数据,不能说"一切正常"
+  const src = (key, err, data, id) => {
+    if (!err) return;
+    const what = t('dash.attn.src.' + key);
+    add(15, 'warn', { title: data && srcAt[key] ? t('dash.attn.srcStale', { what, time: fmtTime(Math.floor(srcAt[key] / 1000)) }) : t('dash.attn.srcFail', { what }), names: errText(err), acts: btn('dash.retry', id, t('dash.retry')) });
+  };
   if (!node) src('nodes', nodesErr, nodesData, 'nodes');
   src('health', healthErr, health, 'dash-health');
   src('conns', connsErr, conns, 'dash-conns');
@@ -462,7 +483,7 @@ function renderStats() {
     title: localUps ? t('dash.upsLocalTitle', { n: s.upstreams ?? 0 }) : '',
     s: hs ? (hs.bad.length ? t('dash.up.bad', { n: hs.bad.length }) : t('dash.up.ok', { ago: fmtRelative(hs.lastRun) })) : health ? t('dash.healthNever') : '' }));
   cards.push(loadCard());
-  el.classList.toggle('stale', !!(state.at && state.at.status && Date.now() - state.at.status > 15000));
+  el.classList.toggle('stale', !!statusStaleAt());
   setHTML(el, cards.join(''));
 }
 
@@ -475,7 +496,8 @@ function syncCard() {
   const seen = lease || s.hubSeenAt || 0;
   const applied = Number(nd.appliedAt) || 0;
   const lost = !!hn.lost || (typeof ha.lost === 'number' && ha.lost > 0);
-  const silent = seen && now() - seen > 120;
+  // 副机重启后主机一直没来联系:没有 hubSeenAt,后端给本次启动时间 hubQuietSince
+  const silent = (seen && now() - seen > 120) || (!seen && s.hubQuietSince && now() - s.hubQuietSince > 120);
   const sub = s.applyErr ? t('dash.sync.applyErr', { err: trErr(s.applyErr) })
     : seen ? t('dash.sync.seen', { ago: fmtRelative(seen) }) + (applied ? ' · ' + t('dash.sync.applied', { ago: fmtRelative(applied) }) : '')
     : applied ? t('dash.sync.applied', { ago: fmtRelative(applied) }) : nodesData ? t('dash.sync.never') : nodesErr ? errText(nodesErr) : '…';
@@ -527,8 +549,10 @@ function watchChart() {
 async function renderChart() {
   const el = document.getElementById('dash-chart');
   if (!el) return;
-  const d = await get(`stats?resource=user&hours=${range}&bucket=${bucketFor(range)}&tz=${tzOffsetMinutes()}`);
-  if (range === 24) dayFromChart = { up: d.totalUp || 0, down: d.totalDown || 0 };
+  const h = range; // 发请求时的时段:等待期间切了时段,旧响应不写「24 小时流量」卡、不画图
+  const d = await get(`stats?resource=user&hours=${h}&bucket=${bucketFor(h)}&tz=${tzOffsetMinutes()}`);
+  if (h !== range) return;
+  if (h === 24) dayFromChart = { up: d.totalUp || 0, down: d.totalDown || 0 };
   barChart(el, d.points || [], { span: d.span, upLabel: t('dash.up'), downLabel: t('dash.down'), totalLabel: t('dash.total'), peakLabel: t('dash.peak'), emptyText: t('dash.noTraffic') });
   renderStats();
 }
@@ -547,6 +571,8 @@ function renderOnline() {
   if (q) q.hidden = n <= max && !onlineQ;
   const oat = state.at && state.at.onlines;
   staleMark('dash-online', oat && Date.now() - oat > 15000 ? (state.err && state.err.onlines) || 'stale' : null, oat);
+  // 从没取到过在线名单:写明没取到,不能显示成"没有人在线"
+  if (!oat && state.err && state.err.onlines) { setHTML(el, `<div class="dash-err"><span class="msg">⚠ ${esc(t('dash.loadFailed', { err: errText(state.err.onlines) }))}</span><button class="btn sm" data-act="dash.retry" data-id="onlines">${esc(t('dash.retry'))}</button></div>`); return; }
   if (!n) { setHTML(el, empty(t('dash.noOnline'))); return; }
   const key = u => (devs ? Number(devs[u]) || 0 : Number(counts[u]) || 0);
   let list = users.slice().sort((a, b) => key(b) - key(a) || a.localeCompare(b));
@@ -560,8 +586,10 @@ function renderOnline() {
   };
   let body;
   const mob = narrow();
-  if (onlineQ) body = list.length ? `<span class="chips ${mob ? '' : 'scroll'}">${list.slice(0, mob ? max + onlineMore : 300).map(chip).join('')}</span>` : empty(t('dash.online.noMatch'));
-  else if (mob) { // 手机:原地多露一批,不开内滚区
+  if (onlineQ && !list.length) body = empty(t('dash.online.noMatch'));
+  else if (onlineQ && !mob) { // 桌面搜索:内滚区里最多画 300 个,再多写明还有几个
+    body = `<span class="chips scroll">${list.slice(0, 300).map(chip).join('')}</span>` + (list.length > 300 ? `<p class="muted small">${esc(t('dash.online.cap', { n: list.length - 300 }))}</p>` : '');
+  } else if (mob) { // 搜索与否都一样 // 手机:原地多露一批,不开内滚区
     const shown = Math.min(list.length, max + onlineMore, 300); // 最多也只画 300 个,再多请搜索或到用户页
     const left = list.length - shown;
     body = `<span class="chips">${list.slice(0, shown).map(chip).join('')}${left && shown < 300 ? `<button type="button" class="chip more" data-act="dash.onlineMore">+${left}</button>` : ''}</span>`
@@ -571,6 +599,7 @@ function renderOnline() {
     if (chipOpen('dash-online') && n > 300) body += `<p class="muted small">${esc(t('dash.online.cap', { n: n - 300 }))}</p>`;
   }
   const folded = !onlineQ && (mob ? n > max + onlineMore : !chipOpen('dash-online') && n > max);
+  if (onlineQ && list.length) setHTML('dash-online-n', esc(t('dash.online.matchN', { m: list.length, n })));
   setHTML(el, body + (folded ? `<div class="card-foot"><a href="#/users?f=online"${isReseller() ? '' : ` title="${esc(t('dash.online.viewAllTitle'))}"`}>${esc(t('dash.online.viewAll'))}</a></div>` : ''));
 }
 
@@ -668,12 +697,14 @@ function auditAction(r) {
   if (m[1] === 'renew' || m[1] === 'extend') return `${t('pc.op.' + m[1])} · ${m[2]}`;
   return `${t('dash.audit.planChange', { mode: t('pc.mode.' + m[1]) })} → ${m[2]}`;
 }
+// 定时任务写审计的执行者名(和后端 model.JobActors 同一份):按名单排除,不按「以 Job 结尾」,名字以 job 结尾的人不会被藏掉
+const JOB_ACTORS = ['ResetJob', 'DepleteJob', 'RuleJob'];
 async function renderAudit() {
   const el = document.getElementById('dash-audit');
   if (!el) return;
   const human = auditScope === 'human';
   const rows = (await get(human ? 'audit?limit=40&actor=human' : 'audit?limit=40')) || [];
-  const list = human ? rows.filter(r => !/Job$/.test(r.actor || '')) : rows; // 老后端不认 actor 参数时也对
+  const list = human ? rows.filter(r => !JOB_ACTORS.includes(r.actor)) : rows; // 老后端不认 actor 参数时也对
   const runs = [];
   for (const r of list) { const p = runs[runs.length - 1]; if (p && p.actor === r.actor && p.key === r.key && p.action === r.action) p.n++; else runs.push({ ...r, n: 1 }); }
   if (!runs.length) { setHTML(el, empty(human ? t('dash.audit.noHuman') : undefined)); return; }
@@ -714,11 +745,16 @@ function renderReseller(el) {
 async function tickReseller() {
   ticks++;
   renderResellerStats(); renderOnline(); renderResellerAttn();
-  if (ticks % 12 === 0) { await load('users').catch(() => {}); renderResellerLists(); }
+  if (ticks % 12 === 0) await load('users').then(() => {
+    renderResellerLists(); staleMark('dash-expiring', null); staleMark('dash-quota', null);
+  }, e => { // 失败时 state.users 还是旧的(或初始的空):别重画成"没有快到期的用户"
+    if (state.at && state.at.users) { staleMark('dash-expiring', e, state.at.users); staleMark('dash-quota', e, state.at.users); }
+  });
 }
 function resellerNums() {
   const s = state.status || {};
-  return { s, pct: s.volume ? Math.round((s.used || 0) / s.volume * 100) : 0, left: s.expiry ? daysLeft(s.expiry) : null };
+  // 已到期按时间判断:daysLeft 向上取整,到期后 24 小时内是 0,会显示成「0 天后到期」
+  return { s, pct: s.volume ? Math.round((s.used || 0) / s.volume * 100) : 0, left: s.expiry ? (s.expiry <= now() ? -1 : daysLeft(s.expiry)) : null };
 }
 function renderResellerStats() {
   const { s, pct: p, left } = resellerNums();
@@ -745,8 +781,8 @@ function renderResellerAttn() {
   if (left != null && left <= 7) items.push({ sev: left <= 3 ? 'bad' : 'warn', title: left < 0 ? t('dash.attn.rs.expired') : t('dash.attn.rs.expiresIn', { n: Math.max(0, left) }), names: t('rs.expiryHelp') });
   if (s.deviceLimit && s.onlineDevices >= s.deviceLimit) items.push({ sev: 'warn', title: s.poolRejects > 0 ? t('rs.poolFull', { n: s.poolRejects }) : t('dash.attn.rs.poolFull'), names: t('dash.attn.rs.poolFullHint', { a: s.onlineDevices, b: s.deviceLimit }) });
   if (s.userLimit && (s.users || 0) >= s.userLimit * 0.9) items.push({ sev: 'warn', title: t('dash.attn.rs.userLimit', { a: s.users || 0, b: s.userLimit }) });
-  const sat = state.at && state.at.status;
-  if (sat && Date.now() - sat > 15000) items.push({ sev: 'warn', title: t('dash.attn.statusStale', { time: fmtTime(Math.floor(sat / 1000)) }), names: errText(state.err && state.err.status), acts: btn('dash.retry', 'status', t('dash.retry')) });
+  const sat = statusStaleAt();
+  if (sat) items.push({ sev: 'warn', title: t('dash.attn.statusStale', { time: fmtTime(Math.floor(sat / 1000)) }), names: errText(state.err && state.err.status), acts: btn('dash.retry', 'status', t('dash.retry')) });
   items.sort((a, b) => SEV[a.sev] - SEV[b.sev]);
   document.getElementById('dash-attn-card')?.classList.toggle('ok', !items.length);
   setHTML('dash-attn-n', items.length ? esc(t('dash.attn.count', { n: items.length })) : `<span class="attn-ok">${esc(t('dash.attn.ok'))}</span>`);
@@ -772,6 +808,7 @@ const retryFns = {
   'dash-chart': () => guard('dash-chart', renderChart), 'dash-log': () => guard('dash-log', renderLog), 'dash-audit': () => guard('dash-audit', renderAudit),
   'dash-top': () => guard('dash-top', renderTop), 'dash-health': () => guard('dash-health', fetchHealth), 'dash-conns': () => guard('dash-conns', fetchConns),
   nodes: () => fetchNodes().catch(() => {}), status: () => load('status').catch(() => {}),
+  onlines: () => load('onlines').then(renderOnline, renderOnline),
 };
 registerActions({
   'dash.range': async id => {

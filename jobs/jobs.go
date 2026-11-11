@@ -519,7 +519,7 @@ func (s *Scheduler) runDeplete() {
 				return err
 			}
 			forgets = append(forgets, "quota:"+u.Name) // 新周期从零开始,再到阈值要能再提醒
-			record(tx, "ResetJob", "user", "reset", u.Name)
+			record(tx, model.ActorResetJob, "user", "reset", u.Name)
 			changed = true
 		}
 		if err := tx.Model(&model.User{}).
@@ -544,11 +544,11 @@ func (s *Scheduler) runDeplete() {
 				var n int64
 				tx.Model(&model.User{}).Where("reseller_id = ?", rs.Id).Count(&n)
 				if depleted {
-					record(tx, "DepleteJob", "reseller", "depleted", rs.Name)
+					record(tx, model.ActorDepleteJob, "reseller", "depleted", rs.Name)
 					logger.Info("代理 ", rs.Name, " 流量用尽,名下 ", n, " 个用户已从数据面撤下")
 					notes = append(notes, fmt.Sprintf("⛔ <b>代理流量用尽</b>:%s(名下 %d 个用户已停止服务,补量后自动恢复)", escapeHTML(rs.Name), n))
 				} else {
-					record(tx, "DepleteJob", "reseller", "restored", rs.Name)
+					record(tx, model.ActorDepleteJob, "reseller", "restored", rs.Name)
 					logger.Info("代理 ", rs.Name, " 额度恢复,名下 ", n, " 个用户已恢复服务")
 				}
 				changed = true
@@ -563,7 +563,7 @@ func (s *Scheduler) runDeplete() {
 					changed = true // 新变得不可用(典型是到期):数据面要撤下他的用户
 					for _, rs := range resellers {
 						if rs.Id == id && rs.Enabled && !rs.Depleted && rs.Expiry > 0 && rs.Expiry < now {
-							record(tx, "DepleteJob", "reseller", "expired", rs.Name)
+							record(tx, model.ActorDepleteJob, "reseller", "expired", rs.Name)
 							notes = append(notes, fmt.Sprintf("⛔ <b>代理已到期</b>:%s(名下用户已停止服务)", escapeHTML(rs.Name)))
 						}
 					}
@@ -666,7 +666,7 @@ func (s *Scheduler) disableDepleted(tx *gorm.DB, now int64) ([]string, error) {
 			Updates(map[string]interface{}{"enabled": false, "disabled_reason": reason}).Error; err != nil {
 			return nil, err
 		}
-		record(tx, "DepleteJob", "user", "disable:"+reason, u.Name)
+		record(tx, model.ActorDepleteJob, "user", "disable:"+reason, u.Name)
 		logger.Info("用户 ", u.Name, " 已禁用(", reason, ")")
 		notes = append(notes, fmt.Sprintf("⛔ <b>用户已禁用</b>:%s(%s)", escapeHTML(u.Name), why))
 	}

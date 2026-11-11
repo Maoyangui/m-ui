@@ -63,6 +63,7 @@ func (r *Runner) CreateBackupFile() (BackupFile, error) {
 	f.Close()
 	st, _ := os.Stat(f.Name())
 	r.rotateBackups()
+	r.noteBackup(nil) // 任何一次备份成功(手动、Telegram /backup、定时)都说明问题已经解决:概况不再报「定时备份失败」
 	return BackupFile{Name: name, Size: st.Size(), Time: st.ModTime().Unix()}, nil
 }
 
@@ -180,7 +181,7 @@ func (r *Runner) backupLoop(stop <-chan struct{}) {
 	}
 }
 
-// noteBackup 记下这次定时备份的结果:失败记原因和时间,成功清空。
+// noteBackup 记下备份的结果:定时备份失败记原因和时间;任何一次备份成功清空。
 func (r *Runner) noteBackup(err error) {
 	r.backupErrMu.Lock()
 	defer r.backupErrMu.Unlock()

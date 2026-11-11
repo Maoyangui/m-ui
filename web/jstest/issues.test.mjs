@@ -25,8 +25,8 @@ after(() => fs.rmSync(dir, { recursive: true, force: true }));
 const on = (name, st = {}) => ({ name, enabled: true, status: { ok: true, coreRunning: true, synced: true, ...st } });
 
 test('nodeIssues:离线时只报离线;在线时按严重程度列出各项;本机不算', () => {
-  assert.deepEqual(I.nodeIssues({ name: 'a', enabled: true, status: null }), [{ code: 'offline', sev: 'bad' }]);
-  assert.deepEqual(I.nodeIssues({ name: 'a', enabled: true, status: { ok: false, coreRunning: false, synced: false } }).map(x => x.code), ['offline']);
+  assert.deepEqual(I.nodeIssues({ name: 'a', enabled: true, status: { ok: false, error: 'timeout' } }), [{ code: 'offline', sev: 'bad' }]);
+  assert.deepEqual(I.nodeIssues({ name: 'a', enabled: true, status: { ok: false, error: 'x', coreRunning: false, synced: false } }).map(x => x.code), ['offline']);
   assert.deepEqual(I.nodeIssues({ name: 'l', isLocal: true, enabled: true, status: null }), []);
   const many = on('b', { coreRunning: false, reloadError: 'bind', ledgerFails: 3, synced: false, versionMismatch: true });
   assert.deepEqual(I.nodeIssues(many).map(x => x.code), ['coreStopped', 'reloadErr', 'ledger', 'unsynced', 'version']);
@@ -38,9 +38,19 @@ test('nodeIssues:离线也防抖:一轮同步失败、上次联系上不到 30 �
   const now = 10_000;
   assert.deepEqual(I.nodeIssues({ name: 'a', enabled: true, status: { ok: false, lastSeen: now - 10 } }, { now }), []);
   assert.deepEqual(I.nodeIssues({ name: 'a', enabled: true, status: { ok: false, lastSeen: now - 30 } }, { now }).map(x => x.code), ['offline']);
-  assert.deepEqual(I.nodeIssues({ name: 'a', enabled: true, status: { ok: false } }, { now }).map(x => x.code), ['offline']);
+  assert.deepEqual(I.nodeIssues({ name: 'a', enabled: true, status: { ok: false, error: 'connection refused' } }, { now }).map(x => x.code), ['offline']);
   const sum = I.summarizeNodes({ nodes: [{ name: 'l', isLocal: true, enabled: true }, { name: 'blip', enabled: true, status: { ok: false, lastSeen: now - 5 } }] }, { now });
   assert.deepEqual([sum.total, sum.online, sum.red], [2, 2, 0]);
+});
+
+test('nodeIssues:主机还没轮到的(刚启动、刚添加)算待定不算离线;离线防抖按服务器时间(GET nodes 的 now)', () => {
+  const now = 10_000;
+  assert.deepEqual(I.nodeIssues({ name: 'a', enabled: true, status: null }, { now }), [], '主机刚启动,状态还没建');
+  assert.deepEqual(I.nodeIssues({ name: 'a', enabled: true, status: { ok: false } }, { now }), [], '首轮同步还在途');
+  // 浏览器时钟快了 10 分钟:按服务器给的 now 算,刚失联 5 秒的不报
+  const resp = { now, nodes: [{ name: 'blip', enabled: true, status: { ok: false, lastSeen: now - 5, error: 'x' } }] };
+  assert.equal(I.summarizeNodes(resp).offline, 0);
+  assert.equal(I.summarizeNodes({ ...resp, now: now + 60 }).offline, 1);
 });
 
 test('nodeIssues:未同步要连续 30 秒才算(一次保存后会有几秒未同步)', () => {
@@ -74,7 +84,7 @@ test('summarizeNodes:总数 = 启用的远端 + 本机;已删除但通知没送�
     nodes: [
       { name: 'local', isLocal: true, enabled: true },
       on('ok'),
-      { name: 'down', enabled: true, status: { ok: false } },
+      { name: 'down', enabled: true, status: { ok: false, error: 'timeout' } },
       on('stopped', { coreRunning: false }),
       on('old', { versionMismatch: true }),
       { name: 'off', enabled: false, decommission: {} },

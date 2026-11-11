@@ -571,7 +571,8 @@ async function route(force = false) {
     await prev.catch(() => {});
     if (gen !== routeGen) return; // 排队期间又换页了,这一次直接不画
     try {
-      await ensure(...(PAGE_DATA[name] || []));
+      // 能自己显示"没取到"的页面(概况,导出 tickOnError):预取失败照样画,哪块没取到哪块写明,不整页换成报错卡
+      await ensure(...(PAGE_DATA[name] || [])).catch(e => { if (e.status === 401 || !page.tickOnError) throw e; });
       if (gen !== routeGen) return;
       await page.render(el);
     } catch (e) {

@@ -16,7 +16,9 @@ export const OFFLINE_GRACE = 30;
 // nodeIssues 一台服务器的问题:[{code, sev}]。只看远端服务器(本机的数据面与重载另有来源)。
 // 停用的服务器只看"下线通知未送达";离线时不再看其它项(状态是上一次的,不可信)。
 // unsyncedFor:已经连续看到"未同步"多少秒(调用方记,见 trackUnsynced);不给时按已超过门槛算。
-// now:当前时间(秒,测试用);离线要上次联系上(lastSeen)已过 OFFLINE_GRACE 秒、或者从没联系上过才算。
+// now:当前时间(秒;按服务器时间算,GET nodes 带了 now 时用它,浏览器时钟偏了也不误判);
+// 离线要上次联系上(lastSeen)已过 OFFLINE_GRACE 秒、或者从没联系上过(且主机已经试过、记下了原因)才算。
+// 主机还没轮到它(主机刚启动、刚添加:没有 status,或者 status 里既没 lastSeen 也没 error)算待定,和服务器页的「等待连接」一致。
 export function nodeIssues(n, { unsyncedFor = Infinity, now = Date.now() / 1000 } = {}) {
   const out = [];
   if (!n || n.isLocal) return out;
@@ -24,8 +26,10 @@ export function nodeIssues(n, { unsyncedFor = Infinity, now = Date.now() / 1000 
   if (n.decommission) add('decom');
   if (!n.enabled) return out;
   const s = n.status;
-  if (!s || !s.ok) {
-    if (s && s.lastSeen && now - s.lastSeen < OFFLINE_GRACE) return sortIssues(out); // 刚失联一轮:先不报
+  if (!s) return sortIssues(out); // 主机还没轮到它
+  if (!s.ok) {
+    if (!s.lastSeen && !s.error) return sortIssues(out); // 首轮同步还在途(主机先建了状态项)
+    if (s.lastSeen && now - s.lastSeen < OFFLINE_GRACE) return sortIssues(out); // 刚失联一轮:先不报
     add('offline');
     return sortIssues(out);
   }
@@ -59,7 +63,7 @@ export function trackUnsynced(since, nodes, nowMs = Date.now()) {
 // 已删除但下线通知还没送到的(decommissions[])也计入 decom。
 // offline / fault(数据面停止 + 重载失败 + 下线通知未送达 + 记账失败)/ warn(未同步 + 版本不一致)是台次,
 // names(sev) 按严重程度列出有问题的服务器(去重)。
-export function summarizeNodes(resp, { unsyncedFor, now = Date.now() / 1000 } = {}) {
+export function summarizeNodes(resp, { unsyncedFor, now = (resp && resp.now) || Date.now() / 1000 } = {}) {
   const nodes = ((resp && resp.nodes) || []).filter(n => !n.isLocal);
   const byCode = {};
   for (const c of NODE_CODES) byCode[c] = [];

@@ -46,9 +46,10 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 		q = q.Where("key = ?", key)
 	}
 	// actor=human:只要人做的操作(管理员、代理、Telegram、外部 API),
-	// 不要定时任务批量写的(ResetJob / DepleteJob / RuleJob 这类以 Job 结尾的),概况的「最近操作」用
+	// 不要定时任务批量写的(model.JobActors),概况的「最近操作」用。按名单排除:以前按「以 Job 结尾」(SQLite 的 LIKE 还不分大小写)
+	// 会把名字以 job 结尾的管理员、代理也藏掉
 	if r.URL.Query().Get("actor") == "human" {
-		q = q.Where("actor NOT LIKE ?", "%Job")
+		q = q.Where("actor NOT IN ?", model.JobActors)
 	}
 	var rows []model.Change
 	q.Find(&rows)
@@ -108,7 +109,7 @@ func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 		"users": users, "lines": lines, "upstreams": ups, "connCounts": counts,
 		"devices": onlineDevices(users, s.onlineIPsAll()),
 	}
-	if scope(r) == 0 && !s.run.IsNode() { // 主面板:在线的代理名下用户 → 代理名(用户页只列直属用户,概况的链接据此指到代理)
+	if scope(r) == 0 { // 主面板与副机面板:在线的代理名下用户 → 代理名(用户页只列直属用户,概况的链接据此指到代理;副机库里同样有代理和归属)
 		out["owners"] = s.onlineOwners(users)
 	}
 	writeJSON(w, http.StatusOK, out)

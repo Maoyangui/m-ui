@@ -269,7 +269,7 @@ const stateBatch = 500
 // record 写一条操作审计(和执法任务同一张表、同一个页面看)。
 func record(tx *gorm.DB, now int64, action string, text string) {
 	b, _ := json.Marshal(text)
-	tx.Create(&model.Change{DateTime: now, Actor: "RuleJob", Key: "rule", Action: action, Obj: b})
+	tx.Create(&model.Change{DateTime: now, Actor: model.ActorRuleJob, Key: "rule", Action: action, Obj: b})
 }
 
 func escapeHTML(s string) string {

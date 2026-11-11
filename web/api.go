@@ -133,6 +133,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		// 副机:主机最近一次联系本机的时间、本机流量记账连续失败的轮数(概况「需要处理」与「与主机同步」卡用)
 		if at := s.hubSeenAt.Load(); at > 0 {
 			status["hubSeenAt"] = at
+		} else if s.setting("hubRevision") != "" && s.startedAt > 0 { // 配过对,但本次启动以来主机还没联系过(hubSeenAt 只在内存里)
+			status["hubQuietSince"] = s.startedAt
 		}
 		status["ledgerFails"] = s.run.LedgerFailures()
 		// 最近一次没应用成主机推来的配置(版本太低被拒收、数据面应用失败),之后应用成功就清掉
