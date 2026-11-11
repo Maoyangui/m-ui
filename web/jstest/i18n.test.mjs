@@ -38,3 +38,25 @@ test('同一句里一个占位只出现一次(t() 只替换第一处)', () => {
   }
   assert.deepEqual(bad, []);
 });
+
+// 模板里直接插 ${t('…')}(没经过 esc)的文案进的是 innerHTML:里面的 "<字母" 会被当成标签吞掉(审查:英文概览的
+// "tcpdump -ni any port <port>"、"udp portrange <from>-<to>" 显示成 "port ,"、"portrange -")。
+// 这类键(含 ${t('前缀.' + …)} 拼出来的整组)中英两份都不能有;要写尖括号占位的文案,用的地方包 esc()。
+test('直接插进 HTML 的文案里没有会被当成标签的 "<字母"', () => {
+  const root = path.join(here, '..', 'assets', 'js');
+  const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+  const tagLike = /<[A-Za-z!/?]/;
+  const bad = [];
+  for (const f of walk(root).filter(f => f.endsWith('.js') && path.basename(f) !== 'i18n.js')) {
+    const code = fs.readFileSync(f, 'utf8');
+    for (const m of code.matchAll(/\$\{\s*t\(\s*'([^']*)'\s*(\+)?/g)) {
+      const keys = m[2] ? Object.keys(en).filter(k => k.startsWith(m[1])) : [m[1]];
+      for (const k of keys) {
+        for (const [name, d] of [['zh', zh], ['en', en]]) {
+          if (tagLike.test(String(d[k] ?? ''))) bad.push(`${path.relative(root, f)}: ${name}.${k}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual([...new Set(bad)], []);
+});

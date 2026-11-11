@@ -98,7 +98,7 @@ export async function render(el) {
     </section>
     <section class="card">
       <div class="card-head"><h2>${t('dash.recentConns')}</h2><button class="btn sm" data-act="dash.connsRefresh">${t('common.refresh')}</button></div>
-      <p class="hint">${t('dash.recentConnsHelp')}</p>
+      <p class="hint">${esc(t('dash.recentConnsHelp'))}</p>
       <div id="dash-conns" style="margin-top:.5rem"></div>
     </section>
     <section class="card"><h2>${t('dash.recentAudit')}</h2><div id="dash-audit" style="margin-top:.6rem"></div></section>
@@ -175,7 +175,7 @@ async function renderConns() {
       <td class="num">${c.count}</td>
       <td class="mono small">${fmtTime(c.ts)}</td>
     </tr>`).join('')}</tbody></table></div>` : empty(t('dash.noConns'));
-  const failTable = fails.length ? `<h3 class="conns-sub">${t('dash.failsTitle')}</h3><p class="hint">${t('dash.failsHelp')}</p>
+  const failTable = fails.length ? `<h3 class="conns-sub">${t('dash.failsTitle')}</h3><p class="hint">${esc(t('dash.failsHelp'))}</p>
     <div class="table-wrap"><table class="grid conns fails"><thead><tr><th>IP</th><th>${t('dash.failWhy')}</th><th>${t('nav.lines')}</th>${multi ? `<th>${t('common.server')}</th>` : ''}<th class="num">${t('dash.connCount')}</th><th>${t('dash.connLast')}</th></tr></thead><tbody>${fairPick(fails, 15).map(c =>
     `<tr>
       <td class="mono">${esc(c.ip)}</td>
