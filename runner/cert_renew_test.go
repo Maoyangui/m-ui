@@ -164,6 +164,10 @@ func TestGuessSourceLetsEncrypt(t *testing.T) {
 	if got := guessSource(acme.CertInfo{Exists: true, Issuer: "R11"}, data+"-old/cert/a.example.com.crt", data); got != "external" {
 		t.Errorf("只是路径前缀相同的别的目录不算数据目录,得 %q", got)
 	}
+	// 还原时放进 cert/restored/ 的是 certbot 等外部证书的副本,不是面板签发的
+	if got := guessSource(acme.CertInfo{Exists: true, Issuer: "R11"}, filepath.Join(data, "cert", "restored", "a.example.com-fullchain.pem"), data); got != "external" {
+		t.Errorf("还原进来的外部证书副本应算外部证书,得 %q", got)
+	}
 }
 
 // 老版本留在数据目录 cert/ 下的 Let's Encrypt 证书,升级时收进库要记成 acme 并开着自动续期。
@@ -191,12 +195,15 @@ func TestEnsureCertStoreRepairsMisclassifiedLE(t *testing.T) {
 	now := time.Now()
 	in, inKey := leCert(t, filepath.Join(dir, "cert"), "sgv6.example.com", "YE1", now.Add(-50*day), now.Add(40*day))
 	out, outKey := leCert(t, t.TempDir(), "ext.example.com", "YE1", now.Add(-50*day), now.Add(40*day))
+	// 还原备份时放进 cert/restored/ 的 certbot 证书副本:在数据目录 cert/ 下,但不是面板签发的
+	copied, copiedKey := leCert(t, filepath.Join(dir, "cert", "restored"), "copy.example.com", "YE1", now.Add(-50*day), now.Add(40*day))
 	db, err := database.Open(filepath.Join(dir, "m.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	db.Create(&model.Cert{Name: "sgv6.example.com", Source: "external", CertFile: in, KeyFile: inKey, CreatedAt: 1})
 	db.Create(&model.Cert{Name: "ext.example.com", Source: "external", CertFile: out, KeyFile: outKey, CreatedAt: 1})
+	db.Create(&model.Cert{Name: "copy.example.com", Source: "external", CertFile: copied, KeyFile: copiedKey, CreatedAt: 1})
 	database.Close(db)
 
 	r, err := New(filepath.Join(dir, "m.db"))
@@ -216,6 +223,9 @@ func TestEnsureCertStoreRepairsMisclassifiedLE(t *testing.T) {
 	}
 	if c := row("ext.example.com"); c.Source != "external" || c.AutoRenew {
 		t.Fatalf("数据目录外的证书不能动: %+v", c)
+	}
+	if c := row("copy.example.com"); c.Source != "external" || c.AutoRenew {
+		t.Fatalf("还原进来的外部证书副本不能改成面板签发的: %+v", c)
 	}
 	// 只修一次:管理员事后又把它改回外部证书,下次启动不再动它
 	r.db.Model(&model.Cert{}).Where("name = ?", "sgv6.example.com").Updates(map[string]interface{}{"source": "external", "auto_renew": false})

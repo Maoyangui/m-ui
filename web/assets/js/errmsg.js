@@ -286,6 +286,7 @@ const EN = /*BEGIN*/{
 "数值不能为负": "Values can't be negative",
 "数值字段不能为负": "Numeric fields can't be negative",
 "数据库已从备份还原%s,但 %d 个证书没写成: %s": "Database restored from backup%s, but %d certificates weren't written: %s",
+"同名文件太多": "Too many files with the same name",
 "没有可用的证书": "No certificate available",
 "数据库快照: %w": "Database snapshot: %w",
 "数据面已应用,但待重载状态未能持久化: %w": "The data plane applied it, but the pending-reload state couldn't be saved: %w",

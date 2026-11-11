@@ -33,6 +33,8 @@ type Meta struct {
 	Time    int64       `json:"time"`
 	Host    string      `json:"host"`
 	Certs   []CertEntry `json:"certs"`
+	// CertsUnreadable 库里引用、备份时却读不出来的证书文件(没打进包)。老版本不认这个字段,照常还原。
+	CertsUnreadable []string `json:"certsUnreadable,omitempty"`
 }
 
 // Create 把数据库一致快照 + 证书文件打成 zip 写入 w(快照临时文件放系统临时目录)。
@@ -42,27 +44,34 @@ func Create(db *gorm.DB, certPaths []string, version string, w io.Writer) error 
 
 // CreateIn 同 Create,快照临时文件放在 tmpDir(数据目录):/tmp 可能是很小的内存盘,库大一点就写不下。
 func CreateIn(db *gorm.DB, certPaths []string, version, tmpDir string, w io.Writer) error {
+	_, err := CreateInMeta(db, certPaths, version, tmpDir, w)
+	return err
+}
+
+// CreateInMeta 同 CreateIn,并返回写进包里的 meta(m-ui backup 据此提示哪些证书没读到)。
+func CreateInMeta(db *gorm.DB, certPaths []string, version, tmpDir string, w io.Writer) (Meta, error) {
+	var meta Meta
 	tmp, err := os.CreateTemp(tmpDir, "m-ui-snap-*.db")
 	if err != nil {
-		return err
+		return meta, err
 	}
 	tmpPath := tmp.Name()
 	tmp.Close()
 	os.Remove(tmpPath) // VACUUM INTO 要求目标不存在
 	defer os.Remove(tmpPath)
 	if err := db.Exec("VACUUM INTO '" + strings.ReplaceAll(filepath.ToSlash(tmpPath), "'", "''") + "'").Error; err != nil {
-		return fmt.Errorf("数据库快照: %w", err)
+		return meta, fmt.Errorf("数据库快照: %w", err)
 	}
 	snap, err := os.ReadFile(tmpPath)
 	if err != nil {
-		return err
+		return meta, err
 	}
 
 	host, _ := os.Hostname()
-	meta := Meta{Version: version, Time: time.Now().Unix(), Host: host}
+	meta = Meta{Version: version, Time: time.Now().Unix(), Host: host}
 	zw := zip.NewWriter(w)
 	if err := addFile(zw, DBName, snap); err != nil {
-		return err
+		return meta, err
 	}
 	seen := map[string]bool{}
 	for i, p := range certPaths {
@@ -71,21 +80,22 @@ func CreateIn(db *gorm.DB, certPaths []string, version, tmpDir string, w io.Writ
 			continue
 		}
 		seen[p] = true
-		b, err := os.ReadFile(p)
+		b, err := os.ReadFile(p) // 符号链接读的是它指向的内容(certbot 的 live/ 全是链接)
 		if err != nil {
-			continue // 证书缺失不阻止备份
+			meta.CertsUnreadable = append(meta.CertsUnreadable, p) // 证书缺失不阻止备份,但记下来:还原时好说清楚
+			continue
 		}
 		name := fmt.Sprintf("cert/%d-%s", i, filepath.Base(p))
 		if err := addFile(zw, name, b); err != nil {
-			return err
+			return meta, err
 		}
 		meta.Certs = append(meta.Certs, CertEntry{Path: p, Zip: name})
 	}
 	mb, _ := json.MarshalIndent(meta, "", "  ")
 	if err := addFile(zw, "meta.json", mb); err != nil {
-		return err
+		return meta, err
 	}
-	return zw.Close()
+	return meta, zw.Close()
 }
 
 func addFile(zw *zip.Writer, name string, data []byte) error {
@@ -201,13 +211,23 @@ func PendingPath(dbPath string) string {
 }
 
 // ApplyPending 在进程启动、数据库尚未打开时应用待还原文件:
-// 当前库改名为 <db>.bak-<时间>,写入备份中的库与证书文件。
+// 当前库改名为 <db>.bak-<时间>,写入备份中的库与证书文件。证书各自的去向写进日志(见 Report)。
 func ApplyPending(dbPath string) (bool, error) {
 	p := PendingPath(dbPath)
 	if p == "" {
 		return false, nil
 	}
-	if err := Restore(dbPath, p); err != nil {
+	rep, err := Restore(dbPath, p)
+	if rep.DB {
+		for _, l := range rep.Lines() {
+			if l.Warn {
+				logger.Warning("还原备份:", strings.TrimSpace(l.Text))
+			} else {
+				logger.Info("还原备份:", strings.TrimSpace(l.Text))
+			}
+		}
+	}
+	if err != nil {
 		os.Rename(p, p+".failed")
 		return false, err
 	}
@@ -246,23 +266,20 @@ func underDir(root, p string) bool {
 	return abs == root || strings.HasPrefix(abs, root+string(os.PathSeparator))
 }
 
-// Restore 直接把备份应用到 dbPath(要求该库当前未被打开)。
-func Restore(dbPath, srcPath string) error {
-	var skipped []string
-	defer func() {
-		if len(skipped) > 0 {
-			logger.Warning("备份里的证书路径不在数据目录内,已跳过: ", strings.Join(skipped, ", "))
-		}
-	}()
+// Restore 直接把备份应用到 dbPath(要求该库当前未被打开),返回这次还原做了什么。
+// 证书的规则见 certs.go:数据目录外的不往外写,本机能用的接着用,不能用的放进 <数据目录>/cert/restored/ 并改指。
+// 出错时报告里照样有已经做了的部分:DB 为真说明数据库已经换成备份里的了。
+func Restore(dbPath, srcPath string) (Report, error) {
+	var rep Report
 	dbBytes, meta, isZip, err := extract(srcPath)
 	if err != nil {
-		return err
+		return rep, err
 	}
 	bak := ""
 	if _, err := os.Stat(dbPath); err == nil {
 		bak = dbPath + ".bak-" + time.Now().Format("20060102-150405")
 		if err := os.Rename(dbPath, bak); err != nil {
-			return fmt.Errorf("备份当前库: %w", err)
+			return rep, fmt.Errorf("备份当前库: %w", err)
 		}
 		pruneBaks(dbPath, 2) // 每次还原都留一份旧库,只保留最近两份,别越积越多
 	}
@@ -270,67 +287,89 @@ func Restore(dbPath, srcPath string) error {
 		os.Remove(dbPath + suffix)
 	}
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		return err
+		return rep, err
 	}
 	if err := os.WriteFile(dbPath, dbBytes, 0o600); err != nil {
-		return err
+		return rep, err
 	}
-	if !isZip {
-		return nil
+	rep.DB, rep.Bak = true, bak
+	// 走到这里数据库**已经**换成备份里的了。之后任何一个证书写失败,都不能再说"还原失败、继续用当前库":
+	// 0.6.10 在第一个出错的证书上直接 return,ApplyPending 把包改名 .failed,日志却说"继续用当前库" ——
+	// 管理员信了、再传一次再还原,每次还原都生成一份 .bak 而 pruneBaks 只留两份,试到第三次原库就没了。
+	// 这里把能写的证书都写完,最后把实情报出来:库已还原、原库在哪、哪些证书没写成。
+	db, dbErr := database.OpenNoMigrate(dbPath)
+	if dbErr == nil {
+		defer database.Close(db)
 	}
+	if isZip {
+		root, _ := filepath.Abs(filepath.Dir(dbPath))
+		if entries, err := zipCerts(srcPath, root, meta, &rep); err != nil {
+			rep.Failed = append(rep.Failed, CertNote{Path: srcPath, Reason: err.Error()})
+		} else {
+			restoreCerts(db, dbErr, root, entries, &rep)
+		}
+	}
+	if dbErr == nil {
+		rep.Missing = missingCerts(db, meta.CertsUnreadable)
+	}
+	if len(rep.Failed) > 0 {
+		where := "(之前没有数据库)"
+		if bak != "" {
+			where = "原库在 " + bak
+		}
+		var list []string
+		for _, f := range rep.Failed {
+			list = append(list, f.Path+": "+f.Reason)
+		}
+		return rep, fmt.Errorf("数据库已从备份还原%s,但 %d 个证书没写成: %s", where, len(rep.Failed), strings.Join(list, "; "))
+	}
+	return rep, nil
+}
+
+// zipCerts 读出备份 zip 里的证书文件。证书路径来自 zip 里的 meta.json,是不可信输入:否则一个伪造的备份
+// 就能以 root 身份往任意位置写文件(systemd 单元、authorized_keys…)。所以它只用来判断在不在数据目录 root 里;
+// 数据目录外的只决定放进 cert/restored/ 时叫什么,绝不往原路径写。
+func zipCerts(srcPath, root string, meta Meta, rep *Report) ([]certEntry, error) {
 	raw, err := os.ReadFile(srcPath)
 	if err != nil {
-		return fmt.Errorf("重新读取备份 zip: %w", err)
+		return nil, fmt.Errorf("重新读取备份 zip: %w", err)
 	}
 	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil {
-		return fmt.Errorf("读取备份 zip: %w", err)
+		return nil, fmt.Errorf("读取备份 zip: %w", err)
 	}
 	files := map[string]*zip.File{}
 	for _, f := range zr.File {
 		files[f.Name] = f
 	}
-	// 证书路径来自 zip 里的 meta.json,是不可信输入:限制在数据目录内,
-	// 否则一个伪造的备份就能以 root 身份往任意位置写文件(systemd 单元、authorized_keys…)。
-	root, _ := filepath.Abs(filepath.Dir(dbPath))
-	// 走到这里数据库**已经**换成备份里的了。之后任何一个证书写失败,都不能再说"还原失败、继续用当前库":
-	// 0.6.10 在第一个出错的证书上直接 return,ApplyPending 把包改名 .failed,日志却说"继续用当前库" ——
-	// 管理员信了、再传一次再还原,每次还原都生成一份 .bak 而 pruneBaks 只留两份,试到第三次原库就没了。
-	// 这里把能写的证书都写完,最后把实情报出来:库已还原、原库在哪、哪些证书没写成。
-	var certErrs []string
+	var out []certEntry
+	seen := map[string]bool{}
 	for _, c := range meta.Certs {
 		f := files[c.Zip]
 		if f == nil || c.Path == "" {
-			certErrs = append(certErrs, c.Zip+": 备份里缺这一条")
+			name := c.Path
+			if name == "" {
+				name = c.Zip
+			}
+			rep.Failed = append(rep.Failed, CertNote{Path: name, Reason: "备份里缺这一条"})
 			continue
 		}
-		if !underDir(root, c.Path) {
-			skipped = append(skipped, c.Path)
+		if seen[c.Path] {
 			continue
 		}
+		seen[c.Path] = true
 		b, err := readZipFile(f)
 		if err != nil {
-			certErrs = append(certErrs, c.Path+": "+err.Error())
+			rep.Failed = append(rep.Failed, CertNote{Path: c.Path, Reason: err.Error()})
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(c.Path), 0o755); err != nil {
-			certErrs = append(certErrs, c.Path+": 创建目录: "+err.Error())
-			continue
+		e := certEntry{path: c.Path, data: b, inRoot: underDir(root, c.Path)}
+		if e.inRoot {
+			if st, err := os.Lstat(c.Path); err == nil && st.Mode()&os.ModeSymlink != 0 {
+				e.link = true
+			}
 		}
-		mode := os.FileMode(0o644)
-		if strings.HasSuffix(c.Path, ".key") {
-			mode = 0o600
-		}
-		if err := os.WriteFile(c.Path, b, mode); err != nil {
-			certErrs = append(certErrs, c.Path+": "+err.Error())
-		}
+		out = append(out, e)
 	}
-	if len(certErrs) > 0 {
-		where := "(之前没有数据库)"
-		if bak != "" {
-			where = "原库在 " + bak
-		}
-		return fmt.Errorf("数据库已从备份还原%s,但 %d 个证书没写成: %s", where, len(certErrs), strings.Join(certErrs, "; "))
-	}
-	return nil
+	return out, nil
 }

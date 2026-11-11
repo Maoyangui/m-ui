@@ -123,6 +123,14 @@ func OpenReadOnly(dbPath string) (*gorm.DB, error) {
 	return gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Discard})
 }
 
+// OpenNoMigrate 打开一个既有库做几行修补(还原备份时改写证书路径),不建表、不迁移:表结构迁移留给启动时的 Open。用完 Close。
+func OpenNoMigrate(dbPath string) (*gorm.DB, error) {
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil, err
+	}
+	return gorm.Open(sqlite.Open(dbPath+"?_pragma=busy_timeout(10000)"), &gorm.Config{Logger: logger.Discard})
+}
+
 // Checkpoint 把 WAL 中的改动全部并回主库文件并截断 WAL。
 // 备份、导入、迁移之后必须调用:否则单独复制 .db 文件会丢失尚在 WAL 中的数据。
 func Checkpoint(db *gorm.DB) error {

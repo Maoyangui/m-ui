@@ -450,7 +450,7 @@ Existing names only get usage / quota / expiry / enabled updated; new users are 
 
 **A reseller cannot sign in?** New resellers have a 24-hour claim window: sign in with the reseller name and an empty password, then set a password. Once it expires — or if they forget the password — Resellers → More → Reset password clears it and reopens the window (two-factor and the API token are cleared too).
 
-**Where is the data?** `/etc/m-ui/m-ui.db` (database), `/etc/m-ui/cert/` (certificates), `/etc/m-ui/backups/` (scheduled backups). Backup zips contain user credentials and private keys, keep them safe; on restore, certificates are only written back to paths inside the data directory.
+**Where is the data?** `/etc/m-ui/m-ui.db` (database), `/etc/m-ui/cert/` (certificates), `/etc/m-ui/backups/` (scheduled backups). Backup zips contain user credentials and private keys, keep them safe. On restore, certificates inside the data directory go back to their paths; those outside it ("existing certificate" files from certbot, nginx and the like, or paths carried over from an old panel) keep using this server's copy when it is the same usable certificate, otherwise they are placed under `/etc/m-ui/cert/restored/` and the settings are pointed there (a snapshot from the backup: if certbot renewed it before, reissue it on the Certificates page after moving); nothing is ever written outside the data directory. A panel, subscription or reseller-panel certificate that cannot be read no longer stops m-ui: a temporary self-signed certificate stands in (still HTTPS) and the page header says so.
 
 ## Development
 

@@ -46,7 +46,7 @@ func TestCreateInspectRestore(t *testing.T) {
 	dst := filepath.Join(dir, "new", "m-ui.db")
 	os.MkdirAll(filepath.Dir(dst), 0o755)
 	os.WriteFile(dst, []byte("old"), 0o600)
-	if err := Restore(dst, zipPath); err != nil {
+	if _, err := Restore(dst, zipPath); err != nil {
 		t.Fatal(err)
 	}
 	db2, err := database.Open(dst)
@@ -74,7 +74,7 @@ func TestCreateInspectRestore(t *testing.T) {
 	zip2 := filepath.Join(dir, "b2.zip")
 	os.WriteFile(zip2, buf2.Bytes(), 0o600)
 	os.WriteFile(outside, []byte("KEEP"), 0o644)
-	if err := Restore(dst, zip2); err != nil {
+	if _, err := Restore(dst, zip2); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(outside); string(b) != "KEEP" {

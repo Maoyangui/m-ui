@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/backup"
-	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/logger"
 	"gorm.io/gorm"
@@ -30,27 +29,8 @@ func (r *Runner) BackupDir() string {
 	return filepath.Join(r.DataDir(), "backups")
 }
 
-// CertPaths 返回所有设置里引用的、证书库里的证书/私钥路径(去重)。
-func (r *Runner) CertPaths() []string {
-	seen := map[string]bool{}
-	var out []string
-	add := func(v string) {
-		if v = strings.TrimSpace(v); v != "" && !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	for _, k := range []string{"certFile", "keyFile", "webCertFile", "webKeyFile", "subCertFile", "subKeyFile"} {
-		add(r.setting(k))
-	}
-	var rows []model.Cert
-	r.db.Find(&rows)
-	for _, c := range rows {
-		add(c.CertFile)
-		add(c.KeyFile)
-	}
-	return out
-}
+// CertPaths 返回所有设置里引用的(线路默认、面板、订阅、代理面板)、证书库里的证书/私钥路径(去重),备份打包的就是这些。
+func (r *Runner) CertPaths() []string { return backup.CertPaths(r.db) }
 
 // WriteBackup 把备份 zip 写到 w。
 func (r *Runner) WriteBackup(w io.Writer) error {

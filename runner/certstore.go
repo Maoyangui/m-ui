@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/acme"
+	"github.com/Maoyangui/m-ui/backup"
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
@@ -140,11 +141,17 @@ func (r *Runner) ensureCertStore() {
 // guessSource 老文件没记来源:数据目录下、Let's Encrypt 签的算面板签发的(acme),其余算服务器上已有的。
 // 认 Let's Encrypt 看签发者的组织与中间证书命名(acme.CertInfo.IsLetsEncrypt):以前只看 CN 里有没有 "encrypt",
 // 现在的中间证书叫 R11、E6、YE1,全被当成了外部证书,从此不再自动续期(审计 I2)。
+// 还原时放进 cert/restored/ 的是数据目录外证书(certbot 等)的副本,不是面板签发的,照旧算外部的。
 func guessSource(info acme.CertInfo, certFile, dataDir string) string {
-	if info.IsLetsEncrypt() && underDir(certFile, dataDir) {
+	if info.IsLetsEncrypt() && underDir(certFile, dataDir) && !underDir(certFile, restoredCertDir(dataDir)) {
 		return "acme"
 	}
 	return "external"
+}
+
+// restoredCertDir 还原备份时,数据目录外的证书放进数据目录的地方(见 backup.RestoredDir)。
+func restoredCertDir(dataDir string) string {
+	return filepath.Join(dataDir, "cert", backup.RestoredDir)
 }
 
 // underDir path 是不是在 dir 里面(按路径比,不是按字符串前缀:/etc/m-ui-old 不在 /etc/m-ui 里)。
@@ -186,7 +193,7 @@ func (r *Runner) repairMisclassifiedLE() {
 	dir := filepath.Join(r.DataDir(), "cert")
 	for _, c := range rows {
 		info := acme.Info(c.CertFile)
-		if !underDir(c.CertFile, dir) || !info.Exists || info.SelfSigned || !info.IsLetsEncrypt() {
+		if !underDir(c.CertFile, dir) || underDir(c.CertFile, restoredCertDir(r.DataDir())) || !info.Exists || info.SelfSigned || !info.IsLetsEncrypt() {
 			continue
 		}
 		method := r.guessMethod(c.Name)
