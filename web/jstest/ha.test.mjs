@@ -220,7 +220,7 @@ test('DNS 提示按三态写、列原值 → 新值;订阅地址保不保持用�
   assert.match(ha.dnsHTML({ subKept: true, host: 'sub.example.com', ip: '2.2.2.2' }), /ha\.n\.dnsTodo/);
 });
 
-test('顶部提示:同类合并、带次数,最多 3 条其余折叠;有未读的「变为副机」时「已接入」并进去', () => {
+test('顶部提示:同类合并、带次数,最多露 2 条其余折叠;有未读的「变为副机」时「已接入」并进去', () => {
   const ns = [
     { id: 'a1', kind: 'switchFailed', name: 'TW', at: 1 }, { id: 'a2', kind: 'switchFailed', name: 'TW', at: 2 },
     { id: 'a3', kind: 'switchFailed', name: 'TW', at: 3 }, { id: 'a4', kind: 'switchFailed', name: 'JP', at: 4 },
@@ -235,14 +235,66 @@ test('顶部提示:同类合并、带次数,最多 3 条其余折叠;有未读�
   assert.deepEqual(groups.find(g => g.kind === 'demoted').ids.sort(), ['d1', 'j1']);
   ha.haNotices({ ha: { notices: ns } });
   const bars = doc.querySelectorAll('.alert-bar[data-ha]');
-  assert.equal(bars.filter(b => b.dataset.ha.startsWith('ha-n-')).length, 3);
-  assert.ok(bars.some(b => b.dataset.ha === 'ha-more'));
+  assert.equal(bars.filter(b => b.dataset.ha.startsWith('ha-n-')).length, 2);
+  assert.match(bars.find(b => b.dataset.ha === 'ha-more').innerHTML, /ha\.bar\.more\|n=2/);
   const sfBar = bars.find(b => b.dataset.ha === 'ha-n-switchFailed');
   assert.match(sfBar.innerHTML, /ha\.n\.times\|n=4/);
   assert.match(sfBar.innerHTML, /data-id="a4,a3,a2,a1"/);
   assert.match(bars.find(b => b.dataset.ha === 'ha-n-demoted').innerHTML, /ha\.n\.demoted\.yielded/);
   ha.haNotices({ ha: { notices: [] } });
   assert.equal(doc.querySelectorAll('.alert-bar[data-ha]').length, 0);
+});
+
+test('顶部提示多时:露最要紧的两条(警示优先、其余最新在前),「还有 N 条」在最后;展开看全部;「知道了」后下一条立刻补上', async () => {
+  const haBars = () => main.kids.filter(k => k.dataset && k.dataset.ha).map(k => k.dataset.ha);
+  const ns = [
+    { id: 's1', kind: 'standbyNew', name: 'A', at: 10 }, { id: 'b1', kind: 'became', name: 'HK', at: 20 },
+    { id: 'f1', kind: 'formerBack', name: 'HK', at: 30 }, { id: 'v1', kind: 'versionKeep', name: 'JP', at: 5 },
+  ];
+  const status = { ha: { notices: ns.slice() } };
+  ha.haNotices(status);
+  // 警示类(versionKeep)排第一,其余按时间新到旧;多出来的两条折成一行,排在最后、#page 之前
+  assert.deepEqual(haBars(), ['ha-n-versionKeep', 'ha-n-formerBack', 'ha-more']);
+  assert.equal(main.kids[main.kids.length - 1], page);
+  assert.match(doc.querySelector('.alert-bar[data-ha="ha-more"]').innerHTML, /ha\.bar\.more\|n=2/);
+  // 新来一条更新的提示:挤到前面,不是追加在后面
+  status.ha.notices.push({ id: 'd1', kind: 'dnsReverted', at: 40, changes: [] });
+  ha.haNotices(status);
+  assert.deepEqual(haBars(), ['ha-n-versionKeep', 'ha-n-dnsReverted', 'ha-more']);
+  assert.match(doc.querySelector('.alert-bar[data-ha="ha-more"]').innerHTML, /ha\.bar\.more\|n=3/);
+  // 展开:全部露出,折叠行改成「收起」(桩 DOM 不解析 innerHTML,按钮另挂一个同样 data-act 的上去点)
+  const actBtn = (barKey, act, id) => {
+    const b = doc.createElement('button');
+    b.dataset.act = act;
+    if (id !== undefined) b.dataset.id = id;
+    doc.querySelector(`.alert-bar[data-ha="${barKey}"]`).appendChild(b);
+    return b;
+  };
+  click(actBtn('ha-more', 'ha.noticesMore'));
+  assert.deepEqual(haBars(), ['ha-n-versionKeep', 'ha-n-dnsReverted', 'ha-n-formerBack', 'ha-n-became', 'ha-n-standbyNew', 'ha-more']);
+  assert.match(doc.querySelector('.alert-bar[data-ha="ha-more"]').innerHTML, /ha\.bar\.foldBtn/);
+  click(actBtn('ha-more', 'ha.noticesMore'));
+  assert.deepEqual(haBars(), ['ha-n-versionKeep', 'ha-n-dnsReverted', 'ha-more']);
+  // 「知道了」:标已读,本地马上重画,下一条补上,N 减一
+  const posted = [];
+  api = (m, p, b) => { posted.push([p, b && b.id]); return Promise.resolve({}); };
+  click(actBtn('ha-n-versionKeep', 'ha.notice', 'v1'));
+  await flush();
+  assert.deepEqual(posted, [['ha/notice', 'v1']]);
+  assert.deepEqual(haBars(), ['ha-n-dnsReverted', 'ha-n-formerBack', 'ha-more']);
+  assert.match(doc.querySelector('.alert-bar[data-ha="ha-more"]').innerHTML, /ha\.bar\.more\|n=2/);
+  // 只剩两条时不出折叠行
+  status.ha.notices = status.ha.notices.filter(n => n.id === 'd1' || n.id === 'f1');
+  ha.haNotices(status);
+  assert.deepEqual(haBars(), ['ha-n-dnsReverted', 'ha-n-formerBack']);
+  ha.haNotices({ ha: null });
+  assert.deepEqual(haBars(), []);
+  api = () => Promise.resolve({});
+});
+
+test('样式表不再按数量藏容灾提示条(上限由 haNotices 管,藏了展开也看不到)', () => {
+  const css = fs.readFileSync(path.join(jsDir, '..', 'style.css'), 'utf8');
+  assert.ok(!/data-ha\^="ha-n-"\][^{]*~[^{]*\{\s*display:\s*none/.test(css), 'style.css 里还有按数量藏 ha-n- 提示条的规则');
 });
 
 test('顶部条:不能接任时不给按钮,写原因', () => {

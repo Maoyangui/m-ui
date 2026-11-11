@@ -691,9 +691,8 @@ button.role-chip.k-lost { background: var(--danger-soft); color: var(--danger); 
   .main > :is(#reload-bar, #cert-bar, #reach-bar-top) > span:first-child { -webkit-line-clamp: 3; }
   .main > .alert-bar > .row, .main > .alert-bar > .btn { align-self: flex-end; }
 }
-/* 主机容灾的顶部条:一次性提示最多同时露最新的两条(新的追加在后面,所以藏的是后面还跟着两条及以上的那些;点「知道了」后更早的一条补上);
-   不支持 :has 的浏览器全部显示,不会误藏。概况页上失联、写操作暂停这两条由「需要处理」那一行代替 */
-.main > .alert-bar[data-ha^="ha-n-"]:has(~ .alert-bar[data-ha^="ha-n-"] ~ .alert-bar[data-ha^="ha-n-"]) { display: none; }
+/* 主机容灾的顶部条:一次性提示最多同时露两条、其余折叠成「还有 N 条」,由 ha.js 的 haNotices 管(这里不按数量藏,藏了展开也看不到)。
+   概况页上失联、写操作暂停这两条由「需要处理」那一行代替 */
 .main:has(> #page[data-page="dashboard"]) > .alert-bar:is([data-ha="ha-lost"], [data-ha="ha-frozen"]) { display: none; }
 
 /* 长表:宽屏时表格自带限高滚动区,表头吸在区域顶部,横向滚动条始终在视口里;手机仍是卡片 + 页面滚动 */

@@ -462,6 +462,10 @@ registerActions({
     await Promise.all(String(id).split(',').filter(Boolean).map(x => post('ha/notice', { id: x }).catch(() => {})));
     const bar = btn.closest('.alert-bar');
     if (bar) bar.remove();
+    // 不等下一轮状态:本地先去掉这几条重画,后面折叠着的一条立刻补上来,「还有 N 条」跟着减
+    const gone = new Set(String(id).split(','));
+    const ha = lastStatus && lastStatus.ha;
+    if (ha && Array.isArray(ha.notices)) { ha.notices = ha.notices.filter(n => !gone.has(String(n.id))); haNotices(lastStatus); }
   },
   'ha.noticesMore': () => { noticesOpen = !noticesOpen; haNotices(lastStatus); },
   'ha.pause': async min => {
@@ -483,7 +487,9 @@ registerActions({
 
 // ---- 页面顶部的提示 ----
 
-const MAX_BARS = 3; // 一次性提示最多显示几条,其余折叠
+// 一次性提示同时最多露两条(要警示的优先,其余最新的在前),其余折叠成「还有 N 条」一行,点开看全部;
+// 点「知道了」后下一条补上来。上限只在这里管,样式表不再按数量藏条(藏了展开也看不到,也数不进 N)
+const MAX_BARS = 2;
 const WARN_KINDS = ['switchFailed', 'demoted', 'fenced', 'versionKeep', 'reclaimed', 'promoteExpired', 'formerPlain'];
 let noticesOpen = false;
 let lastStatus = null;
@@ -545,6 +551,7 @@ export function haNotices(status) {
     }
   }
   document.querySelectorAll('.alert-bar[data-ha]').forEach(b => { if (!want.has(b.dataset.ha)) b.remove(); });
+  const bars = [];
   for (const [key, v] of want) {
     let bar = document.querySelector(`.alert-bar[data-ha="${key}"]`);
     if (!bar) {
@@ -554,7 +561,11 @@ export function haNotices(status) {
     }
     bar.className = 'alert-bar ' + v.cls;
     if (bar.dataset.html !== v.html) { bar.dataset.html = v.html; bar.innerHTML = v.html; }
+    bars.push(bar);
   }
+  // 顺序跟着排序走(新来一条更要紧的提示时排到前面,「还有 N 条」始终在最后);顺序本来就对时不挪,免得按钮丢焦点
+  const now = [...main.querySelectorAll('.alert-bar[data-ha]')];
+  if (now.length !== bars.length || now.some((b, i) => b !== bars[i])) for (const b of bars) main.insertBefore(b, page);
 }
 
 // changesText DNS 改动逐条「名字 类型:原值 → 新值」,多了截断
