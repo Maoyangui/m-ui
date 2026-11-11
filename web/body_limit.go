@@ -69,7 +69,7 @@ func (s *Server) apiAuthBlocked(ip string) bool {
 // noteAPIAuthFailure 记一次外部 API 鉴权失败:每次写日志;这个来源在窗口内第一次失败、以及被挡时各记一条审计
 // (不是每次都写,扫描器撑不大审计表),被挡时再发一条 Telegram(和登录失败告警同一个开关)。
 func (s *Server) noteAPIAuthFailure(r *http.Request, entry string) {
-	ip := loginKey(peerIP(r))
+	ip := loginKey(s.sourceIP(r))
 	s.mu.Lock()
 	if s.apiFails == nil {
 		s.apiFails = map[string][]int64{}

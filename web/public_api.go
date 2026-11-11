@@ -69,7 +69,7 @@ type apiScope struct {
 
 func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if s.apiAuthBlocked(peerIP(r)) {
+	if s.apiAuthBlocked(s.sourceIP(r)) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return
 	}
@@ -113,7 +113,7 @@ func (s *Server) resellerAPIToken(tok string) (rs model.Reseller, ok, known bool
 // handleResellerPublicAPI 代理面板上的 /api/v1/:令牌属于哪个代理,就只操作那个代理名下的东西。
 func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if s.apiAuthBlocked(peerIP(r)) {
+	if s.apiAuthBlocked(s.sourceIP(r)) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return
 	}

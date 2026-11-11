@@ -96,7 +96,7 @@ var (
 // reauth 敏感操作前再验一次当前管理员的密码(开了两步验证再验动态码);不通过时已经写好响应,返回 false。
 // 失败计入登录限流(同一来源 10 分钟 10 次就挡 5 分钟),验证码不能重放。
 func (s *Server) reauth(w http.ResponseWriter, r *http.Request, password, code string) bool {
-	ip := peerIP(r)
+	ip := s.sourceIP(r)
 	if s.loginBlocked(ip) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return false

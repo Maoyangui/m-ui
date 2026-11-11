@@ -513,7 +513,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "跨站请求被拒绝"})
 		return
 	}
-	if s.loginBlocked(peerIP(r)) {
+	if s.loginBlocked(s.sourceIP(r)) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return
 	}
@@ -530,14 +530,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		dummyPasswordCheck(req.Password)
 		time.Sleep(300 * time.Millisecond)
 		logger.Warning("面板登录失败,来源 ", clientIP(r))
-		s.noteLoginFailure(peerIP(r))
+		s.noteLoginFailure(s.sourceIP(r))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
 		return
 	}
 	if !checkPassword(req.Password, admin.Password) {
 		time.Sleep(300 * time.Millisecond)
 		logger.Warning("面板登录失败,来源 ", clientIP(r))
-		s.noteLoginFailure(peerIP(r))
+		s.noteLoginFailure(s.sourceIP(r))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
 		return
 	}
@@ -557,7 +557,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		if !ok || replay {
 			time.Sleep(300 * time.Millisecond)
 			logger.Warning("面板两步验证失败,来源 ", clientIP(r))
-			s.noteLoginFailure(peerIP(r))
+			s.noteLoginFailure(s.sourceIP(r))
 			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "两步验证码错误", "totp": true})
 			return
 		}

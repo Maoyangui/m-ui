@@ -208,7 +208,7 @@ func (s *Server) handleResellerLogin(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	ip, peer := clientIP(r), peerIP(r)
+	ip, peer := clientIP(r), s.sourceIP(r)
 	if s.loginBlocked(peer) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return

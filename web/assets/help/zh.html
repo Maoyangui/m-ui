@@ -1119,7 +1119,7 @@
     <h3>角色与面板</h3>
     <ul>
       <li><b data-k="set.role">角色</b>:<b data-k="set.roleSwitch">作为副服务器运行</b>(见 <a href="#nodes-add">接入一台副机</a>)。</li>
-      <li><b data-k="set.panel">面板</b>:<b data-k="set.webDomain">域名</b>(订阅与节点用的域名,也是 TLS 的 SNI)、<b data-k="set.timezone">时区</b>(面板里所有时间按它显示)、<b data-k="set.listen">监听地址</b>、<b data-k="set.port">端口</b>、<b data-k="set.path">路径</b>、<b data-k="set.cert">证书文件</b> / <b data-k="set.key">私钥文件</b>(一般在证书页勾选,自动写入)、<b data-k="set.supportOnline">功德箱与在线设备数</b>。</li>
+      <li><b data-k="set.panel">面板</b>:<b data-k="set.webDomain">域名</b>(订阅与节点用的域名,也是 TLS 的 SNI)、<b data-k="set.timezone">时区</b>(面板里所有时间按它显示)、<b data-k="set.listen">监听地址</b>、<b data-k="set.port">端口</b>、<b data-k="set.path">路径</b>、<b data-k="set.cert">证书文件</b> / <b data-k="set.key">私钥文件</b>(一般在证书页勾选,自动写入)、<b data-k="set.trustedProxies">受信任的反向代理</b>(见<a href="#sec-path">面板地址与端口</a>)、<b data-k="set.supportOnline">功德箱与在线设备数</b>。</li>
       <li>改面板路径保存就生效,浏览器自动跳到新地址;改端口、监听地址、证书要重启。</li>
       <li>端口设成 443(HTTPS)或 80(HTTP)时,地址里不用写端口;面板和订阅不能用同一个端口。</li>
     </ul>
@@ -1225,7 +1225,8 @@
       <li>把默认的端口和路径改掉:<b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.port">端口</b> / <b data-k="set.path">路径</b>。只打开 <code>IP:端口/</code> 永远是 404,别人扫到端口也看不出这是面板。</li>
       <li>面板走 HTTPS:证书页添加证书时勾 <b data-k="cert.applyPanel">用于面板 HTTPS</b>(重启后生效)。</li>
       <li>防火墙只放必要的端口;副机的面板端口只对主机 IP 放行(换了主机记得把新主机的 IP 加进去)。这只防得住外面的人,防不住经代理连进来的用户,见下一节。</li>
-      <li>登录保护:同一来源 10 分钟内输错 10 次,先挡 5 分钟;连续输错 5 次可以发 Telegram 提醒(<b data-k="set.tgOnLogin">面板登录 / 连续登录失败</b>)。</li>
+      <li>登录保护:同一来源 10 分钟内输错 10 次,先挡 5 分钟;连续输错 5 次可以发 Telegram 提醒(<b data-k="set.tgOnLogin">面板登录 / 连续登录失败</b>)。外部 API 令牌错 10 次同样暂停这个来源 5 分钟(和登录分开计数)。</li>
+      <li>面板、代理面板或外部 API 挂在反向代理(Nginx、Caddy 等)后面时,在 <b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.trustedProxies">受信任的反向代理</b> 填反代的地址(同机反代填 <code>127.0.0.1, ::1</code>)。不填的话所有请求的来源都是反代自己,一个人连错 10 次就把所有人(管理员、代理、商城、机器人)一起挡 5 分钟。填了以后,只有来自名单里地址的请求才按 <code>X-Forwarded-For</code>(从右往左第一个不在名单里的地址)或 <code>X-Real-IP</code> 认来源;反代要自己追加或覆盖这个头(Nginx:<code>proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;</code>,Caddy 默认就会)。没用反代就留空。</li>
     </ul>
   </section>
 

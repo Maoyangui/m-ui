@@ -44,6 +44,7 @@ const groups = () => [
     ['timezone', t('set.timezone'), 'select', t('set.timezoneHelp'), TIMEZONES.map(z => [z, z])],
     ['webListen', t('set.listen'), 'text'], ['webPort', t('set.port'), 'number'], ['webPath', t('set.path'), 'text', t('set.pathHelp')],
     ['webCertFile', t('set.cert'), 'text', t('set.certManaged')], ['webKeyFile', t('set.key'), 'text'],
+    ['trustedProxies', t('set.trustedProxies'), 'text', t('set.trustedProxiesHelp')],
     ['supportOnline', t('set.supportOnline'), 'boolOn', t('set.supportOnlineHelp')],
   ]},
   { id: 'sub', title: t('set.sub'), restart: true, fields: [

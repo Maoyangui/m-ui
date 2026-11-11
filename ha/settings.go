@@ -26,6 +26,8 @@ var localKeys = setOf(
 	"certFile", "keyFile", "certSource",
 	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subDomain",
 	"resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile",
+	// 本机前面挂的反向代理(各台机器各自的部署)
+	"trustedProxies",
 	// 本机探测值
 	"publicIp", "publicIp6",
 	// 角色、同步与待处理状态

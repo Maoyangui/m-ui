@@ -1253,7 +1253,7 @@ func generateCredentials(name string) json.RawMessage {
 // 两步验证、外部 API 令牌、配对令牌、ACME 账户这类键各有专门的接口(带各自的校验),这里一律不收 ——
 // 否则拿到会话就能绕过"关闭两步验证要密码 + 验证码"。设置页加字段时要同步加到这里(测试会核对)。
 var panelSettings = setOf(
-	"webDomain", "timezone", "webListen", "webPort", "webPath", "webCertFile", "webKeyFile",
+	"webDomain", "timezone", "webListen", "webPort", "webPath", "webCertFile", "webKeyFile", "trustedProxies",
 	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subDomain", "subProfileTitle", "subUpdates",
 	"subUseUserName", "subEncode", "subShowNotice", "subInsecure", "subServerAddr", "extRefreshMinutes",
 	"subAutoFormat", "subClashExt", "subSingboxExt", "blockBT", "supportOnline", "tgBot", "webhookUrl", "webhookSecret",
@@ -1363,6 +1363,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				badRequest(w, errors.New("Webhook 地址要是完整的 http(s) 网址"))
 				return
 			}
+		}
+		if v, ok := in["trustedProxies"]; ok { // 受信任的反向代理:写错的地址当场拦下,存规范化后的写法
+			_, norm, err := parseTrustedProxies(v)
+			if err != nil {
+				badRequest(w, err)
+				return
+			}
+			in["trustedProxies"] = norm
 		}
 		if v, ok := in["reachMinutes"]; ok && strings.TrimSpace(v) != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(v)); err != nil || n < reach.MinMinutes || n > reach.MaxMinutes {
