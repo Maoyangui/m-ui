@@ -566,10 +566,11 @@ async function editLine(id, cloneFrom, preset) {
     const addrs = fv('f-addrs').trim();
     if (addrs) body.addrs = JSON.parse(addrs);
     if (!id) body.assignAll = fchk('f-assign');
-    if (id) await put('lines/' + id, body); else await post('lines', body);
+    const saved = id ? await put('lines/' + id, body) : await post('lines', body);
     await load('lines', 'status', 'users');
     renderRows();
     toast(id ? t('line.updated') : t('line.created'), 'ok');
+    scopeWidenedNotice(saved && saved.scopeWidened);
   }, { wide: true });
   renderDynamic(l);
   rrBind(rrInit);
@@ -808,7 +809,18 @@ async function runBatch(action, extra = {}) {
     selected.clear();
     await load('lines', 'status'); renderRows();
     toast(t('line.batchDone', { n: r.affected }), 'ok');
+    scopeWidenedNotice(r.scopeWidened);
   } catch (e) { toast(e.message, 'err'); }
+}
+
+// 收窄部署服务器后,只选了被撤服务器的用户 / 代理 / 套餐被改回这条线路的全部服务器:点名给管理员看
+function scopeWidenedNotice(w) {
+  if (!w) return;
+  const sep = t('node.sep');
+  const parts = [['users', 'line.scopeWidenedUsers'], ['resellers', 'line.scopeWidenedResellers'], ['plans', 'line.scopeWidenedPlans']]
+    .filter(([k]) => (w[k] || []).length).map(([k, key]) => t(key, { names: w[k].join(sep) }));
+  if (!parts.length) return;
+  setTimeout(() => confirm([t('line.scopeWidened'), ...parts].join('\n'), { title: t('line.scopeWidenedTitle'), okText: t('node.ack'), notice: true }), 0);
 }
 function batchDialog(action) {
   const n = selected.size;

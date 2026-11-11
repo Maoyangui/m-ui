@@ -338,8 +338,14 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
+		var widened *scopeWidened
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&model.Line{}).Where("id = ?", id).Select(cols).Updates(line).Error; err != nil {
+				return err
+			}
+			// 部署服务器收窄了:指向已撤服务器的分配 / 授权 / 套餐范围一并整理(只剩已撤的改回全部并点名)
+			var err error
+			if widened, err = fixLineScopesTx(tx, id, deployNodeIDs(line.NodeIds)); err != nil {
 				return err
 			}
 			return validateFullConfig(tx, nodeCert)
@@ -349,9 +355,15 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.audit(r, "line", "update", line.Name)
+		if !widened.empty() {
+			s.audit(r, "line", "scope:widen", map[string]interface{}{"line": line.Name, "widened": widened})
+		}
 		s.reloadAll("修改线路 " + line.Name)
 		s.syncRelays() // 端口、协议参数变了,用它当上游的跟着改
-		writeJSON(w, http.StatusOK, line)
+		writeJSON(w, http.StatusOK, struct {
+			model.Line
+			ScopeWidened *scopeWidened `json:"scopeWidened,omitempty"`
+		}{line, widened})
 	case http.MethodDelete:
 		var line model.Line
 		s.db.First(&line, id)

@@ -362,7 +362,7 @@
     <h3>Which servers run a line</h3>
     <p class="lede">With several servers, a line can run on only some of them.</p>
     <ul>
-      <li><b data-k="line.servers">Deploy on servers</b>: all ticked (the default) means every server, including servers added later (none ticked counts as all too); tick only some to run the line just there, and subscriptions only list those entries.</li>
+      <li><b data-k="line.servers">Deploy on servers</b>: all ticked (the default) means every server, including servers added later (none ticked counts as all too); tick only some to run the line just there, and subscriptions only list those entries. When you take a server off the line, users, reseller grants and plans that picked that server on this line drop it; those that had picked only removed servers switch to all of the line's servers (named in a dialog after saving), so nobody silently loses the line.</li>
       <li>Dual-stack servers get an extra drop-down in their row, so the line can use IPv4 or IPv6 on that server (the default follows the Servers page).</li>
       <li>A line on several servers has several "entries"; when assigning lines to users, plans or resellers you can tick just the entry on one server.</li>
     </ul>
