@@ -208,6 +208,9 @@ document.addEventListener('change', e => {
 
 // ---- 下拉菜单:表格容器有 overflow 会裁掉菜单,展开时改为 fixed 定位到 summary 下方 ----
 let menuOpenedAt = 0;
+// 「更多」按钮被表格容器裁掉一半时,点它会先把容器滚一下,这次 scroll 事件比 toggle 晚一帧到、却比 toggle 里记的打开时间早:
+// 从按下按钮起就算「刚打开」,不然下面的滚动收起会把刚点开的菜单马上收掉
+document.addEventListener('pointerdown', e => { if (e.target instanceof Element && e.target.closest('details.menu > summary')) menuOpenedAt = Date.now(); }, true);
 document.addEventListener('toggle', e => {
   const d = e.target;
   if (!(d instanceof HTMLDetailsElement) || !d.classList.contains('menu')) return;

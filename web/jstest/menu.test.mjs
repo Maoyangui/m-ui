@@ -40,7 +40,12 @@ globalThis.document = {
   getElementById: id => (els[id] ||= mkEl(id)),
   dispatchEvent() {},
 };
-globalThis.window = { addEventListener() {}, innerWidth: 1280, innerHeight: 800 };
+const winListeners = {};
+globalThis.window = { addEventListener: (type, f) => (winListeners[type] ||= []).push(f), innerWidth: 1280, innerHeight: 800 };
+globalThis.Element = class {};
+// 按到「更多」按钮上 / 页面别处
+const mkTarget = onSummary => Object.assign(new Element(), { closest: sel => (onSummary && sel === 'details.menu > summary' ? {} : null) });
+const fire = (type, e) => { for (const f of [...(listeners[type] || []), ...(winListeners[type] || [])]) f(e); };
 
 const ui = await import(pathToFileURL(path.join(dir, 'ui.js')).href);
 const calls = [];
@@ -89,4 +94,22 @@ test('closeMenus 收起全部', () => {
   const a = mkMenu(), b = mkMenu();
   ui.closeMenus();
   assert.deepEqual([a.open, b.open], [false, false]);
+});
+
+test('按下「更多」后紧跟着的滚动(浏览器把被裁一半的按钮滚进来)不收起刚打开的菜单;过后的滚动照常收起', async () => {
+  const m = mkMenu();
+  fire('pointerdown', { target: mkTarget(true) });
+  fire('scroll', { target: mkTarget(false) });
+  assert.equal(m.open, true);
+  await new Promise(r => setTimeout(r, 320));
+  fire('scroll', { target: mkTarget(false) });
+  assert.equal(m.open, false);
+});
+
+test('按在页面别处不算打开菜单:之后的滚动照常收起', async () => {
+  await new Promise(r => setTimeout(r, 320));
+  const m = mkMenu();
+  fire('pointerdown', { target: mkTarget(false) });
+  fire('scroll', { target: mkTarget(false) });
+  assert.equal(m.open, false);
 });
