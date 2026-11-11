@@ -277,9 +277,11 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	// ================= D. 本机账本只增不删:主机已经不认识的用户,它的计数器没人再回收,清掉 =================
-	// 主机那边的游标还留着;同名用户以后再建,计数从 0 起小于游标,会被当成回绕重认,不会多算
-	s.db.Exec("DELETE FROM agent_counters WHERE user_name NOT IN (SELECT name FROM users)")
+	// ================= D. 本机账本只增不删:主机已经不认识的用户(或者同名的已经换了人),它的计数器没人再回收,清掉 =================
+	// 主机那边的游标还留着,记着是谁的那本;同名用户以后再建,新账本记着新主人,主机按主人认出来从 0 计
+	if err := model.PruneAgentCounters(s.db); err != nil {
+		logger.Warning("清理本机账本里主机已删的用户失败(下次应用快照再清): ", err)
+	}
 	// 配置接口只有在本机数据面真正应用完成后才确认 revision。这样主机
 	// 看到 HTTP 错误会保留重试机会，而不是把“请求已收到”误当成“已生效”。
 	// 数据库快照先落地、数据面后重载。若重载失败，保留一个只在本机使用的

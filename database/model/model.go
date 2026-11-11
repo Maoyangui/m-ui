@@ -515,7 +515,8 @@ type Stats struct {
 // 副机计数器比游标小时分两种:主机上同名用户删了又建(副机那本也从头记了)按回绕从 0 计;
 // 同一个用户的计数变小是副机账本回退(断电丢了最近几笔提交、虚机快照回滚),游标对齐、这一次不计。
 // 两者靠游标记下的用户 id 与建号时间区分(老游标为 0 = 不知道,按回退处理,不会整段重算;
-// 建号时间记 -1 表示并账那一刻主机上没有这个用户)。
+// 建号时间记 -1 表示并账那一刻主机上没有这个用户)。新版副机报了账本主人(AgentCounter.UserId)时记的是账本主人:
+// 主人对不上就是删了又建后新开的一本,从 0 计,不看计数大小。
 type TrafficCursor struct {
 	NodeId        uint   `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
 	UserName      string `json:"userName" gorm:"primaryKey"`
@@ -526,10 +527,15 @@ type TrafficCursor struct {
 }
 
 // AgentCounter 副机端:本机每用户只增不减的流量账本(不直接写 User 表,避免与主端下发冲突)。
+// UserId / UserCreatedAt 记这本账是哪个用户的(主机同步下来的 id 与建号时间):同名用户删了又建是另一本账,
+// 主机据此从 0 计,不靠"计数比游标小"去猜。都是 0 = 不知道(升级前就有的账本、或者老版本副机),主机按老办法处理;
+// id 为 0、建号时间为 OwnerAbsent = 记账时本机已经没有这个用户。
 type AgentCounter struct {
-	UserName string `json:"userName" gorm:"primaryKey"`
-	Up       int64  `json:"up"`
-	Down     int64  `json:"down"`
+	UserName      string `json:"userName" gorm:"primaryKey"`
+	Up            int64  `json:"up"`
+	Down          int64  `json:"down"`
+	UserId        uint   `json:"userId,omitempty" gorm:"default:0;not null"`
+	UserCreatedAt int64  `json:"userCreatedAt,omitempty" gorm:"default:0;not null"`
 }
 
 // NodeDecommission 停用 / 删除副机时还没送到的下线推送(一份空用户表):主机每轮重试,直到那台确认。

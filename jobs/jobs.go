@@ -354,13 +354,7 @@ func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]
 			rows = append(rows, model.AgentCounter{UserName: name, Up: t.up, Down: t.down})
 		}
 		return s.d.DB.Transaction(func(tx *gorm.DB) error {
-			return tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "user_name"}},
-				DoUpdates: clause.Assignments(map[string]interface{}{
-					"up":   gorm.Expr("agent_counters.up + excluded.up"),
-					"down": gorm.Expr("agent_counters.down + excluded.down"),
-				}),
-			}).CreateInBatches(&rows, statsBatch).Error
+			return model.AddAgentCounters(tx, rows, statsBatch)
 		})
 	}
 	return s.d.DB.Transaction(func(tx *gorm.DB) error {

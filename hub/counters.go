@@ -40,7 +40,7 @@ func yieldAfter(held time.Duration) time.Duration {
 
 // userAbsent 游标里的建号时间记成它:并账那一刻主机上没有这个用户(已经删了,副机还在报在途流量)。
 // 以后同名的用户再建出来就是"删了又建",和老版本留下的、不知道是谁的游标(id 与建号时间都是 0)区分开。
-const userAbsent = -1
+const userAbsent = model.OwnerAbsent
 
 // errNodeGone 副机已经删除:它在途的报告整份丢掉。
 var errNodeGone = errors.New("副机已删除")
@@ -65,6 +65,12 @@ func ApplyCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 // 计数器比游标小分两种:主机上同名用户删了又建(游标记下的用户 id / 建号时间对不上),副机那本也从头记了,从 0 计;
 // 同一个用户的计数变小是副机账本回退(synchronous=NORMAL 下断电丢了最后几笔提交、虚机快照回滚),
 // 游标对齐到现在的值、这一次不计 —— 以前一律当回绕,把整段历史再记一遍(回退 15 MB,多记 400 GB)。
+//
+// 新版副机的账本记着主人(用户 id 与建号时间,见 model.AddAgentCounters),游标也记账本主人:主人和游标对不上就是
+// 同名用户删了又建后新开的一本,不管计数比游标大还是小都从 0 计。只靠"比游标小"会漏:新用户在这台机器上用得和前人
+// 一样多或更多时,首份报告追上旧游标,以前只计差值、相等时整份当"没变化"跳过(Azure 真机 run3,13 个用户的副机流量全漏)。
+// 账本主人和主机上现在这个同名用户对不上(主机已经删了又建、副机还没收到快照时报来的旧账本),只计服务器维度。
+// 老副机 / 升级前的老账本不报主人,照下面的老办法。
 func MergeCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []model.AgentCounter, now int64, bucketSeconds int64, ratio float64) (MergeResult, error) {
 	var res MergeResult
 	if bucketSeconds < 1 {
@@ -88,11 +94,12 @@ func MergeCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 	for _, c := range curs {
 		known[c.UserName] = c
 	}
-	// 只留有变化的;同名的只留最后一份(副机账本按用户名唯一,这里只是防御)
+	// 只留有变化的;同名的只留最后一份(副机账本按用户名唯一,这里只是防御)。
+	// 计数和游标一样、但账本换了主人(删了又建,新用户在这台机器上恰好用到和前人一样多)不是"没变化"
 	changed := make([]model.AgentCounter, 0, 64)
 	at := map[string]int{}
 	for _, c := range counters {
-		if cur, ok := known[c.UserName]; ok && cur.Up == c.Up && cur.Down == c.Down {
+		if cur, ok := known[c.UserName]; ok && unchanged(cur, c) {
 			continue
 		}
 		if i, ok := at[c.UserName]; ok {
@@ -189,12 +196,30 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 		next := make([]model.TrafficCursor, 0, len(part))
 		for _, c := range part {
 			old, hasOld := cursors[c.UserName]
-			if hasOld && old.Up == c.Up && old.Down == c.Down {
+			if hasOld && unchanged(old, c) {
 				continue // 读游标之后已经有人并过(重复的报告)
 			}
 			u, hasUser := users[c.UserName]
+			owned := ownedLedger(c)
+			if owned && hasUser && (u.Id != c.UserId || u.CreatedAt != c.UserCreatedAt) {
+				// 副机报的是前一个同名用户那本账(主机上已经删了又建,副机还没收到快照),或者副机那边已经没有这个用户:
+				// 在途流量不算到现在这个同名用户头上,服务器维度照记
+				hasUser = false
+			}
 			dUp, dDown := c.Up, c.Down // 没有游标:从 0 计
-			if hasOld {
+			switch {
+			case !hasOld:
+			case owned && !sameOwner(old, c):
+				// 账本记着主人,和游标记的不是同一个人:同名用户删了又建,副机那本是新开的、从 0 记的。
+				// 不管计数比游标大还是小都从 0 计 —— 以前只认"比游标小",新用户首份报告追上旧游标时只计差值、相等时整份跳过
+				res.Recreated++
+			case owned && (c.Up < old.Up || c.Down < old.Down):
+				res.Regressed++ // 同一本账计数变小:账本回退,对齐不计
+				dUp, dDown = 0, 0
+			case owned:
+				dUp, dDown = c.Up-old.Up, c.Down-old.Down
+			default:
+				// 老副机 / 升级前的老账本不报主人,只能按计数猜
 				dropped := c.Up < old.Up || c.Down < old.Down
 				known := old.UserId != 0 || old.UserCreatedAt == userAbsent // 游标记得当时是谁(老游标不知道)
 				recreated := hasUser && known && (old.UserId != u.Id || old.UserCreatedAt != u.CreatedAt)
@@ -340,13 +365,34 @@ func SweepOrphanLedgers(db *gorm.DB) error {
 	})
 }
 
-// cursorFor 记到这个计数为止的游标,连同此刻主机上这个用户是谁。
+// cursorFor 记到这个计数为止的游标,连同这本账是谁的:副机报了账本主人就记账本主人(同名用户删了又建靠它认出新账本);
+// 老副机 / 升级前的老账本不报,记此刻主机上这个用户是谁。
 func cursorFor(nodeId uint, c model.AgentCounter, u model.User, exists bool) model.TrafficCursor {
 	cur := model.TrafficCursor{NodeId: nodeId, UserName: c.UserName, Up: c.Up, Down: c.Down, UserId: u.Id, UserCreatedAt: u.CreatedAt}
-	if !exists {
+	switch {
+	case ownedLedger(c):
+		cur.UserId, cur.UserCreatedAt = c.UserId, c.UserCreatedAt
+	case !exists:
 		cur.UserId, cur.UserCreatedAt = 0, userAbsent
 	}
 	return cur
+}
+
+// ownedLedger 副机报了这本账的主人(新版副机、升级后新开的账本):主人的 id 与建号时间,
+// 或者"记账时副机上已经没有这个用户"(OwnerAbsent)。都是 0 的是老副机 / 升级前的老账本,不知道主人。
+func ownedLedger(c model.AgentCounter) bool {
+	return c.UserId != 0 || c.UserCreatedAt == userAbsent
+}
+
+// sameOwner 游标记的和这份报告是不是同一本账。升级前留下的游标(不知道是谁的)遇到记了主人的账本也不是同一本:
+// 记了主人的账本都是升级后新开的(老账本一直不认主人),从 0 记的。
+func sameOwner(cur model.TrafficCursor, c model.AgentCounter) bool {
+	return cur.UserId == c.UserId && cur.UserCreatedAt == c.UserCreatedAt
+}
+
+// unchanged 这份报告和游标一模一样(同一本账、计数没动),不用并。老副机不报主人,只看计数。
+func unchanged(cur model.TrafficCursor, c model.AgentCounter) bool {
+	return cur.Up == c.Up && cur.Down == c.Down && (!ownedLedger(c) || sameOwner(cur, c))
 }
 
 func nodeGone(db *gorm.DB, nodeId uint) (bool, error) {
