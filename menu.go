@@ -445,7 +445,7 @@ func stateColored() string {
 }
 
 // resetSettings 清空设置表(管理员表、线路、用户等不动)。主机容灾的本机状态(纪元、认的主机、签名密钥……)留着:
-// 主机容灾的本机状态(纪元、认的主机、签名密钥……)留着:它们回退了,副机会把本机当成旧主机拒掉,甚至本机把自己降成副机。
+// 它们回退了,副机会把本机当成旧主机拒掉,甚至本机把自己降成副机。
 func resetSettings(dbPath string) error {
 	db, err := database.Open(dbPath)
 	if err != nil {

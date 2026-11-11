@@ -242,7 +242,7 @@ func haStatus(db *gorm.DB) error {
 		v.Mode = get(ha.KeyMode)
 	}
 	roles := map[string]string{"master": "主机", "node": "副机", "demoted": "副机(原主机,等新主机来接)", "promoting": "正在接任为主机"}
-	modes := map[string]string{"": "关闭", ha.ModeOff: "关闭", ha.ModeConfirm: "先确认再接任", ha.ModeAuto: "自动接任"}
+	modes := map[string]string{"": "关闭", ha.ModeOff: "关闭", ha.ModeConfirm: "先确认再接任", ha.ModeAuto: "主机失联后自动接任"}
 	fmt.Printf("  本机:%s(%s),纪元 %d\n", or(v.SelfName, "-"), roles[v.Role], v.Epoch)
 	if v.SignFP != "" {
 		fmt.Printf("  本机签名公钥指纹:%s\n", v.SignFP)
