@@ -173,5 +173,16 @@ type DropPendingView struct {
 	Err   string `json:"err,omitempty"`
 }
 
-// RetryDrops 马上重试一轮(同步;测试用)。
-func (s *Service) RetryDrops() { s.rep.runDrops() }
+// RetryDrops 马上重试一轮(同步;测试用):正有一轮在跑就等它跑完再来一轮。
+func (s *Service) RetryDrops() {
+	for i := 0; i < 600; i++ {
+		s.rep.dropMu.Lock()
+		running := s.rep.dropRunning
+		s.rep.dropMu.Unlock()
+		if !running {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	s.rep.runDrops()
+}
