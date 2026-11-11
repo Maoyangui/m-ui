@@ -40,7 +40,7 @@
     <ul>
       <li><b>线路</b>:客户端连进来的入口,等于"协议 + 端口",再决定流量从哪出去。用户订阅里的节点就是由线路生成的。</li>
       <li data-scope="admin"><b>上游</b>:线路的出口。默认 direct(本机直出),也可以是 WARP 或别的落地机。</li>
-      <li><b>用户</b>:一个订阅地址,带流量、到期、设备数和限速,超了会自动停用。</li>
+      <li><b>用户</b>:一个订阅地址,带流量、到期、设备数和限速。流量用完或到期会自动停用;设备数满了只拒绝新设备,限速只限制速度。</li>
       <li><b>套餐</b>:流量、时长、设备数、限速、线路的模板,建号、续费时一键套用。</li>
       <li><b>订阅</b>:给客户端导入的地址;同一个地址用浏览器打开,是用户自己的落地页。</li>
       <li data-scope="admin"><b>主服务器 / 副服务器</b>:主机存全部数据、负责算账;副机只转发流量,配置由主机推送。</li>
@@ -71,9 +71,9 @@
       <li><b>准备证书</b>:<b data-k="nav.cert">证书</b> 页 → <b data-k="cert.add">添加证书</b>。有域名选 <b data-k="cert.srcAcme">有域名(自动签发)</b> 签一张;没有域名选 <b data-k="cert.srcSelf">无域名(自签)</b>,点 <b data-k="cert.selfsign">生成自签证书</b>。详见 <a href="#cert">证书</a>。</li>
       <li><b>建线路</b>:<b data-k="nav.lines">线路</b> 页 → <b data-k="line.quick">快速添加</b>,新手选 Hysteria2 或 AnyTLS,保存。详见 <a href="#lines">线路与协议</a>。</li>
       <li><b>建用户</b>:<b data-k="nav.users">用户</b> 页 → <b data-k="user.add">新增用户</b>,填用户名和额度,勾上 <b data-k="user.f.lines">可用线路</b>,保存。</li>
-      <li><b>发订阅</b>:点用户名打开详情,复制订阅地址发给用户,或者让他扫二维码。用户用浏览器打开订阅地址,就能一键导入客户端。</li>
+      <li><b>发订阅</b>:点用户名打开详情,<b data-k="user.subscription">订阅</b> 下面有两个地址,把不带 <code>?format=</code> 的那个(通用地址)发给用户:用浏览器打开是他自己的落地页,能一键导入客户端;客户端来拉时按类型给格式(见 <a href="#users-sub">订阅地址、二维码与临时共享</a>)。</li>
     </ol>
-    <div class="tip"><b>没有域名也能用</b>自签证书 + 服务器 IP 就行:订阅会自动告诉客户端"允许不安全证书",客户端不用另外设置。以后有了域名再签正式证书,用户刷新一次订阅即可。</div>
+    <div class="tip"><b>没有域名也能用</b>自签证书 + 服务器 IP 就行:订阅会自动告诉客户端"允许不安全证书",客户端不用另外设置。以后有了域名签正式证书时注意:证书页默认勾着 <b data-k="cert.applySub">用于订阅 HTTPS</b>,勾了订阅地址就变成 <code>https://域名…</code>,要把新地址发给每个用户;不想换地址就取消这个勾,用户刷新一次订阅即可。</div>
     <div class="pit"><b>常见坑</b>线路的端口要在云服务器安全组和系统防火墙里放行:Hysteria2、TUIC 走 UDP,其它大多走 TCP。没放行是"连不上"最常见的原因。</div>
   </section>
 
@@ -83,7 +83,7 @@
     <ol class="steps">
       <li>打开站长给你的代理面板地址(默认端口 2054,路径 <code>/dl/</code>)。用户名填代理名,第一次登录密码留空,直接点 <b data-k="login.submit">登录</b>,按提示设置密码。详见 <a href="#rs-login">第一次登录与设密码</a>。</li>
       <li>(可选)到 <b data-k="nav.plans">套餐</b> 页建几个套餐,以后建号、续费一键套用。</li>
-      <li>到 <b data-k="nav.users">用户</b> 页点 <b data-k="user.add">新增用户</b>:填名称,选套餐或者手填额度,勾上 <b data-k="user.f.lines">可用线路</b>,保存;点用户名打开详情,把订阅地址发给用户。</li>
+      <li>到 <b data-k="nav.users">用户</b> 页点 <b data-k="user.add">新增用户</b>:填名称,选套餐或者手填额度,勾上 <b data-k="user.f.lines">可用线路</b>,保存;点用户名打开详情,把 <b data-k="user.subscription">订阅</b> 下不带 <code>?format=</code> 的那个地址发给用户。</li>
     </ol>
     <div class="tip"><b>代理面板只有四页</b><b data-k="nav.dashboard">概览</b>、<b data-k="nav.users">用户</b>、<b data-k="nav.plans">套餐</b>、<b data-k="nav.account">账号</b>。你只看得到自己名下的用户和自己建的套餐。</div>
   </section>
@@ -131,8 +131,9 @@
     <div class="pit"><b>常见坑</b><ul>
       <li>API 地址是 <code>http://</code> 时,令牌和全部用户凭据都是明文传输,列表里会标 <b data-k="node.plain">明文</b>。建议给副机面板开 HTTPS(自签就行),或者让副机面板端口只对主机 IP 放行。</li>
       <li>副机的证书在副机自己的 <b data-k="nav.cert">证书</b> 页签发,各自续期。</li>
+      <li>副机面板改成 HTTPS 后(副机证书页勾了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后生效),要到主机 <b data-k="nav.nodes">服务器</b> 页编辑这一行,把 <b data-k="node.apiUrl">API 地址</b> 换成副机 <b data-k="set.pairing">配对信息</b> 里新的 <code>https://</code> 地址(自签证书或用 IP 访问的勾 <b data-k="node.insecure">跳过证书校验</b>),不然这台会显示离线。在副机上签正式证书时这一项默认勾着,不打算改 API 地址就取消它。</li>
       <li>副机面板里线路、用户、套餐这些页面是只读的,改动都在主机上做。</li>
-      <li>主副机版本要一致:列表里标 <b data-k="node.versionMismatch">版本与主机不同</b> 时,把副机升级到同一版本。</li>
+      <li>主副机版本要一致:列表里标 <b data-k="node.versionMismatch">版本与主机不同</b> 时,把副机升级到同一版本。用到较新的功能后,版本不够的副机会整份拒收同步、继续按旧配置服务:按规则分流要 v0.6.14 及以上,线路作上游、上游组、外部节点的排除关键词要 v0.7.16 及以上,外部节点的隐藏和改名要 v0.7.17 及以上。</li>
     </ul></div>
   </section>
 
@@ -143,7 +144,7 @@
       <li>编辑服务器 → <b data-k="node.addr">连接地址(可填 IP)</b>:留空就用探测到的公网 IP;想用固定的 IP 或域名就手填。</li>
       <li><b data-k="node.family">自动地址用</b>:双栈服务器默认给 IPv4,可以改成 IPv6;选的那个没探测到就用另一个。手填了连接地址就不看这一项。</li>
       <li>双栈服务器在线路表单里还能按线路单独选 <b data-k="line.ipVersion">IP 版本</b>。</li>
-      <li>想让订阅里写域名而不是 IP:<b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> → <b data-k="set.subServerAddr">订阅里的节点地址</b> 选 <b data-k="set.addrDomain">域名</b>。</li>
+      <li>想让订阅里写域名而不是 IP:<b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> → <b data-k="set.subServerAddr">订阅里的节点地址</b> 选 <b data-k="set.addrDomain">域名</b>。选之前先给每台服务器填好 <b data-k="node.domain">域名 / IP</b>(本机留空就用面板域名):这个模式下 <b data-k="node.addr">连接地址(可填 IP)</b> 不生效,没填域名的服务器不会出现在订阅里。</li>
     </ul>
     <div class="tip" data-pending="v6"><b>IPv6 入站检测</b>服务器默认用 IPv6、或者有线路选了 IPv6 时,主机会从外面测它的 IPv6 端口能不能连进来,结果标在 <b data-k="nav.nodes">服务器</b> 页。显示不通,多半是安全组没放行 <code>::/0</code> 或者本机防火墙拦了 IPv6。UDP 线路(hysteria2、tuic)测不了,只能在服务器上抓包确认。</div>
     <div class="pit"><b>IPv6 常见坑</b><ul>
@@ -168,10 +169,10 @@
     <ul>
       <li><b data-k="nav.nodes">服务器</b> 页的 <b data-k="reach.col">大陆连通</b> 一列显示结果:点格子看明细,点 <b data-k="reach.checkAll">检测大陆连通</b> 一次测全部。</li>
       <li>结果怎么看:<b data-k="reach.v.ok">正常</b>;<b data-k="reach.v.partial">部分不通</b>(某一家运营商连不上);<b data-k="reach.v.blocked">疑似被墙</b>;<b data-k="reach.v.ipBlocked">IP 被墙</b>(要换 IP);<b data-k="reach.v.portBlocked">端口被封</b>(换个端口);<b data-k="reach.v.abroadDown">境外也不通</b>(是服务器、端口或安全组的问题,不是墙)。</li>
-      <li>定时巡检:<b data-k="nav.settings">设置</b> → <b data-k="set.reach">大陆连通检测</b> → <b data-k="set.reachAuto">自动巡检</b>(默认每 90 分钟),发现被墙或恢复时发 Telegram。</li>
+      <li>定时巡检:<b data-k="nav.settings">设置</b> → <b data-k="set.reach">大陆连通检测</b> → <b data-k="set.reachAuto">自动巡检</b>,默认开着:m-ui 启动约 2 分钟后测第一轮,之后默认每 90 分钟一轮,发现被墙或恢复时发 Telegram。</li>
     </ul>
     <div class="pit"><b>常见坑</b><ul>
-      <li>检测时服务器地址会发给 Globalping 公共测试网络。免登录每小时约 250 个测点次,测一台约用 15 个;不够用就在设置里填免费申请的 <b data-k="set.reachToken">Globalping 令牌(可选)</b>。</li>
+      <li>检测时服务器地址(IP 和端口)会发给 Globalping 公共测试网络,自动巡检也一样;不想发就去掉 <b data-k="set.reachAuto">自动巡检</b>,只在需要时手动点检测。免登录每小时约 250 个测点次,测一台约用 15 个;不够用就在设置里填免费申请的 <b data-k="set.reachToken">Globalping 令牌(可选)</b>。</li>
       <li>测的是这台第一条 TCP 线路的端口;只有 hysteria2、tuic(UDP)线路时,只能看出 IP 有没有被墙。目前只测 IPv4。</li>
     </ul></div>
   </section>
@@ -182,7 +183,7 @@
     <ul>
       <li>编辑服务器去掉 <b data-k="common.enabled">启用</b>:那台立刻停止为任何人服务,重新启用后恢复。</li>
       <li>删除服务器:只部署在它上面的线路会被停用,只用它的用户 / 代理会失去那条线路;操作后会列出受影响的线路和人。</li>
-      <li>标 <b data-k="node.decomPending">下线通知未送达</b>:那台还没收到停止服务的通知,主机会一直重试;要立刻停掉,就到那台机器上关掉副机模式或卸载。</li>
+      <li>标 <b data-k="node.decomPending">下线通知未送达</b>:那台还没收到停止服务的通知,主机会一直重试。要立刻停掉,就 SSH 到那台机器上执行 <code>systemctl disable --now m-ui</code>(停掉并取消开机自启),或者用 <code>m-ui</code> 菜单 14 卸载。只关掉副机模式停不了服务:它会变成一台独立的主机,按最后一份配置继续给所有人用。</li>
       <li>离线原因:<b data-k="node.errTimeout">连接超时</b>、<b data-k="node.errRefused">连接被拒绝</b>(端口没放行或面板没在运行)、<b data-k="node.errDns">域名解析失败</b>、<b data-k="node.errCert">证书不受信任</b>(勾上跳过证书校验)、<b data-k="node.errToken">令牌不匹配</b>(重新复制配对令牌)、<b data-k="node.errFp">证书指纹变了</b>(确实重签过副机证书,就点 <b data-k="node.resetCert">重置指纹</b>)。</li>
       <li>换一台副机:新副机装好后,在 <b data-k="nav.nodes">服务器</b> 页编辑原来那一行,换成新的 API 地址和令牌,主机会自动重新推送。</li>
     </ul>
@@ -359,7 +360,7 @@
     <h3>部署到哪些服务器</h3>
     <p class="lede">有多台服务器时,一条线路可以只在其中几台上开。</p>
     <ul>
-      <li><b data-k="line.servers">部署到服务器</b>:全不勾 = 全部服务器(默认);勾了就只在所选服务器上开,订阅也只出这些入口。</li>
+      <li><b data-k="line.servers">部署到服务器</b>:默认全部勾着 = 全部服务器,以后新加的服务器也会自动开这条线路(全都不勾也按全部算);只勾其中几台,才是只在这几台上开,订阅也只出这些入口。</li>
       <li>双栈服务器那一行多一个下拉,可以让这条线路在那台单独用 IPv4 或 IPv6(默认跟服务器页的设置)。</li>
       <li>一条线路部署在几台服务器上就是几个"入口";给用户、套餐、代理分配线路时,可以只勾其中某台服务器上的入口。</li>
     </ul>
@@ -419,7 +420,11 @@
       <li><b data-k="ops.upstream">上游</b> 一栏还没有 warp 的话,点 <b data-k="ops.addUpstream">添加为上游 warp</b>。</li>
       <li>在线路的上游里选 warp。</li>
     </ol>
-    <div class="pit"><b>常见坑</b>WARP 的本地端口(<b data-k="ops.warpPort">SOCKS5 端口</b>)默认 40000,被占用会启用失败;改了端口要重新启用。运维任务只在 Linux 上、m-ui 以 root 运行时能用。</div>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>WARP 的本地端口(<b data-k="ops.warpPort">SOCKS5 端口</b>)默认 40000,被占用会启用失败;改了端口要重新启用。</li>
+      <li>一键安装只支持 Ubuntu / Debian;其它系统要自己装 cloudflare-warp(代理模式),让它的 SOCKS5 监听同一个端口。运维任务只在 Linux 上、m-ui 以 root 运行时能用。</li>
+      <li>有多台服务器时,warp 上游指向的是每台服务器自己的 <code>127.0.0.1:端口</code>:用 warp 的线路部署在哪几台,就要在哪几台的 <b data-k="nav.ops">运维</b> 页都安装并启用 WARP(端口和主机一样);做不到就把这条线路只部署到装了 WARP 的服务器。</li>
+    </ul></div>
   </section>
 
   <section class="sec" id="up-chain">
@@ -439,6 +444,7 @@
       <li><b data-k="nav.upstreams">上游</b> 页 → <b data-k="up.addGroup">新增上游组</b>,<b data-k="up.groupMembers">成员</b> 至少选两条;线路的上游选这个组。</li>
       <li>每 30 秒测一次;现在用的这条只要不比最快的慢 300 毫秒以上就不换,免得来回切。切换时断开旧连接,让应用马上重连。</li>
       <li>上游页会写明每台服务器现在走的是哪一条。</li>
+      <li>副机要 v0.7.16 及以上:只要建了上游组(哪怕还没有线路在用),版本更低的副机就会整份拒收同步。</li>
     </ul>
   </section>
 
@@ -475,6 +481,7 @@
       <li>隐藏和改名按名字 + 节点指纹(地址、端口、密码等)一起记,机场改名、调顺序后照样认得。</li>
       <li><b data-k="ext.exclude">排除关键词</b>:名字含这些词的节点不输出,逗号分隔,如 <code>官网,到期,剩余流量,套餐</code>;以后新出现的也管用。名字每次刷新都会变的信息节点,用它最合适。</li>
       <li>节点暂时消失时,隐藏 / 改名记录会保留,回来照样生效;确定不要了点 <b data-k="ext.cleanStale">清理</b>。</li>
+      <li>有副机时:隐藏和改名要求副机 v0.7.17 及以上,排除关键词要求 v0.7.16 及以上,版本更低的副机会整份拒收同步。</li>
     </ul>
   </section>
 
@@ -507,7 +514,7 @@
       <li><b data-k="cert.srcSelf">无域名(自签)</b>:点 <b data-k="cert.selfsign">生成自签证书</b>;<b data-k="cert.hosts">证书包含的地址(留空自动)</b> 留空就用本机公网 IP。订阅里每个节点会自动带"允许不安全",客户端不用设置;面板和订阅建议保持 HTTP。</li>
       <li><b data-k="cert.srcExternal">已有证书</b>:服务器上已经有 certbot、宝塔、nginx 或商业证书时,填 <b data-k="cert.certPath">证书文件(fullchain)</b> 和 <b data-k="cert.keyPath">私钥文件</b> 的路径,点 <b data-k="cert.useExternal">使用该证书</b>。</li>
     </ul>
-    <div class="tip"><b>选用途</b>在 <b data-k="cert.applyTo">添加后用于</b> 里勾:<b data-k="cert.forLines">设为线路默认证书</b>、<b data-k="cert.applyPanel">用于面板 HTTPS</b>、<b data-k="cert.applySub">用于订阅 HTTPS</b>;没勾的用途不受影响。</div>
+    <div class="tip"><b>选用途</b>在 <b data-k="cert.applyTo">添加后用于</b> 里勾:<b data-k="cert.forLines">设为线路默认证书</b>、<b data-k="cert.applyPanel">用于面板 HTTPS</b>、<b data-k="cert.applySub">用于订阅 HTTPS</b>;没勾的用途不受影响。默认勾选:还没有正式证书时勾着 <b data-k="cert.forLines">设为线路默认证书</b>;添加的不是自签证书、而面板或订阅还没用 HTTPS 时,也会勾着后两项。勾了 <b data-k="cert.applySub">用于订阅 HTTPS</b>,订阅地址会变成 <code>https://</code>,要把新地址发给用户;勾了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后面板也换成 <code>https://</code>。</div>
   </section>
 
   <section class="sec" id="cf-token">
@@ -529,7 +536,7 @@
 
   <section class="sec" id="cert-use">
     <h3>证书用在哪</h3>
-    <p class="lede"><b data-k="cert.useLines">线路默认</b>、<b data-k="cert.usePanel">面板</b>、<b data-k="cert.useSub">订阅</b>、<b data-k="cert.useReseller">代理面板</b> 各用各的证书,在 <b data-k="cert.inUse">正在使用</b> 卡片里换。</p>
+    <p class="lede"><b data-k="cert.useLines">线路默认</b>、<b data-k="cert.usePanel">面板</b>、<b data-k="cert.useSub">订阅</b> 各用各的证书,在 <b data-k="cert.inUse">正在使用</b> 卡片里换。<b data-k="cert.useReseller">代理面板</b> 默认和面板共用一张;要单独用,到 <b data-k="nav.settings">设置</b> → <b data-k="set.reseller">代理面板</b> 填 <b data-k="set.cert">证书文件</b> 和 <b data-k="set.key">私钥文件</b> 的路径(重启生效)。</p>
     <ul>
       <li>点每一项旁边的 <b data-k="cert.change">更换</b>,从证书库里挑一张,或者选 <b data-k="cert.noHttps">不用 HTTPS</b>。</li>
       <li>订阅的改动立即生效(用户要换成新的 https 地址);面板的证书改了要 <b data-k="cert.restartBtn">重启 m-ui</b> 才生效;换线路默认证书会让数据面重启一次。</li>
@@ -561,6 +568,7 @@
     <ul>
       <li>证书按名字跨服务器匹配:线路选了某张证书,没有这张的服务器用它自己的默认证书;线路的证书选择框里能看到哪台有、还剩几天。</li>
       <li>副机一般不配通知:它的续期失败、快到期由主机代发提醒,主机的服务器页也会标出 <b data-k="node.certFail">证书续期失败</b>。</li>
+      <li>在副机上签正式证书时 <b data-k="cert.applyPanel">用于面板 HTTPS</b> 默认勾着;勾了的话,副机重启后主机要改用 <code>https://</code> 的 API 地址(见 <a href="#nodes-add">接入一台副机</a>),不打算改就取消这一项。</li>
     </ul>
   </section>
 </section>

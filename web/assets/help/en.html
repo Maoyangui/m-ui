@@ -40,7 +40,7 @@
     <ul>
       <li><b>Line</b>: the entry clients connect to, a protocol plus a port, and where its traffic leaves from. The nodes in a user's subscription are generated from lines.</li>
       <li data-scope="admin"><b>Upstream</b>: the exit of a line. The default is direct (straight out of this server); it can also be WARP or another exit server.</li>
-      <li><b>User</b>: one subscription link with a traffic quota, expiry, device limit and speed limit; it is disabled automatically when it runs over.</li>
+      <li><b>User</b>: one subscription link with a traffic quota, expiry, device limit and speed limit. Running out of traffic or expiring disables it automatically; a full device limit only refuses new devices, and the speed limit only slows it down.</li>
       <li><b>Plan</b>: a template of quota, duration, devices, speed and lines, applied in one click when creating or renewing a user.</li>
       <li><b>Subscription</b>: the link clients import; opened in a browser, the same link shows the user's own landing page.</li>
       <li data-scope="admin"><b>Master / node servers</b>: the master holds all data and does the accounting; nodes only forward traffic and get their configuration from the master.</li>
@@ -71,9 +71,9 @@
       <li><b>Get a certificate</b>: <b data-k="nav.cert">Certificate</b> page → <b data-k="cert.add">Add a certificate</b>. With a domain, choose <b data-k="cert.srcAcme">Domain (auto-issue)</b>; without one, choose <b data-k="cert.srcSelf">No domain (self-signed)</b> and click <b data-k="cert.selfsign">Generate self-signed</b>. See <a href="#cert">Certificates</a>.</li>
       <li><b>Create a line</b>: <b data-k="nav.lines">Lines</b> page → <b data-k="line.quick">Quick add</b>; beginners pick Hysteria2 or AnyTLS and save. See <a href="#lines">Lines and protocols</a>.</li>
       <li><b>Create a user</b>: <b data-k="nav.users">Users</b> page → <b data-k="user.add">Add user</b>; fill in a name and the quota, tick the <b data-k="user.f.lines">Lines</b> they may use, save.</li>
-      <li><b>Send the subscription</b>: click the user's name to open the details, copy the subscription link and send it, or let them scan the QR code. Opened in a browser, the link offers one-tap import into their app.</li>
+      <li><b>Send the subscription</b>: click the user's name to open the details. Under <b data-k="user.subscription">Subscription</b> there are two links; send the one without <code>?format=</code> (the universal link): in a browser it opens the user's own landing page with one-tap import, and apps get the right format when they fetch it (see <a href="#users-sub">Subscription links, QR codes and sharing</a>).</li>
     </ol>
-    <div class="tip"><b>No domain? No problem</b>A self-signed certificate plus the server IP works: subscriptions tell clients to allow the insecure certificate automatically, so users change no settings. Issue a real certificate later when you have a domain; users just refresh their subscription once.</div>
+    <div class="tip"><b>No domain? No problem</b>A self-signed certificate plus the server IP works: subscriptions tell clients to allow the insecure certificate automatically, so users change no settings. When you later issue a real certificate for a domain, note that the Certificate page ticks <b data-k="cert.applySub">Use for subscription HTTPS</b> by default: with it ticked the subscription link becomes <code>https://DOMAIN…</code> and every user needs the new link. Untick it to keep the old link, and users just refresh their subscription once.</div>
     <div class="pit"><b>Common pitfall</b>Open each line's port in the cloud security group and the system firewall: Hysteria2 and TUIC use UDP, most others use TCP. A closed port is the most common reason for "cannot connect".</div>
   </section>
 
@@ -83,7 +83,7 @@
     <ol class="steps">
       <li>Open the reseller panel address you were given (default port 2054, path <code>/dl/</code>). Enter your reseller name as the username; on the first sign-in leave the password empty and click <b data-k="login.submit">Sign in</b>, then set a password when asked. See <a href="#rs-login">First sign-in and password</a>.</li>
       <li>(Optional) Create a few plans on the <b data-k="nav.plans">Plans</b> page so new accounts and renewals take one click.</li>
-      <li>On the <b data-k="nav.users">Users</b> page click <b data-k="user.add">Add user</b>: enter a name, choose a plan or fill in the quota, tick the <b data-k="user.f.lines">Lines</b>, save. Click the user's name to open the details and send them the subscription link.</li>
+      <li>On the <b data-k="nav.users">Users</b> page click <b data-k="user.add">Add user</b>: enter a name, choose a plan or fill in the quota, tick the <b data-k="user.f.lines">Lines</b>, save. Click the user's name to open the details and send them the link under <b data-k="user.subscription">Subscription</b> that has no <code>?format=</code>.</li>
     </ol>
     <div class="tip"><b>The reseller panel has four pages</b><b data-k="nav.dashboard">Dashboard</b>, <b data-k="nav.users">Users</b>, <b data-k="nav.plans">Plans</b> and <b data-k="nav.account">Account</b>. You only see your own users and the plans you created.</div>
   </section>
@@ -131,8 +131,9 @@
     <div class="pit"><b>Common pitfalls</b><ul>
       <li>With an <code>http://</code> API URL the token and every user's credentials travel in plain text; the row is marked <b data-k="node.plain">Plaintext</b>. Give the node's panel HTTPS (self-signed is fine), or allow its panel port only from the master's IP.</li>
       <li>Each node issues and renews its own certificates on its own <b data-k="nav.cert">Certificate</b> page.</li>
+      <li>Once a node's panel switches to HTTPS (<b data-k="cert.applyPanel">Use for panel HTTPS</b> ticked on the node's Certificate page; it applies after a restart), edit its row on the master's <b data-k="nav.nodes">Servers</b> page and replace the <b data-k="node.apiUrl">API URL</b> with the new <code>https://</code> one from the node's <b data-k="set.pairing">Pairing</b> (tick <b data-k="node.insecure">Skip certificate verification</b> for a self-signed certificate or a bare IP); otherwise the node shows offline. That option is ticked by default when you issue a real certificate on a node; untick it if you do not want to change the API URL.</li>
       <li>On a node's panel, lines, users and plans are read-only; make changes on the master.</li>
-      <li>Keep master and nodes on the same version: when a row says <b data-k="node.versionMismatch">version differs from master</b>, update the node.</li>
+      <li>Keep master and nodes on the same version: when a row says <b data-k="node.versionMismatch">version differs from master</b>, update the node. Once newer features are in use, a node that is too old refuses the whole sync and keeps serving the old configuration: rule-based routing needs v0.6.14 or later; lines as upstreams, upstream groups and excluded keywords on external nodes need v0.7.16 or later; hiding and renaming external nodes needs v0.7.17 or later.</li>
     </ul></div>
   </section>
 
@@ -143,7 +144,7 @@
       <li>Edit a server → <b data-k="node.addr">Connect address (IP allowed)</b>: leave it empty to use the detected public IP, or enter a fixed IP or domain.</li>
       <li><b data-k="node.family">Auto address uses</b>: dual-stack servers give IPv4 by default and can switch to IPv6; if the chosen family was not detected, the other one is used. A manual connect address ignores this setting.</li>
       <li>On dual-stack servers each line can also pick its own <b data-k="line.ipVersion">IP version</b> in the line form.</li>
-      <li>To put the domain instead of the IP into subscriptions: <b data-k="nav.settings">Settings</b> → <b data-k="set.sub">Subscription</b> → <b data-k="set.subServerAddr">Node address in subscriptions</b>, choose <b data-k="set.addrDomain">domain</b>.</li>
+      <li>To put the domain instead of the IP into subscriptions: <b data-k="nav.settings">Settings</b> → <b data-k="set.sub">Subscription</b> → <b data-k="set.subServerAddr">Node address in subscriptions</b>, choose <b data-k="set.addrDomain">domain</b>. First fill in <b data-k="node.domain">Domain / IP</b> for every server (empty on this server = the panel domain): in this mode the <b data-k="node.addr">Connect address (IP allowed)</b> is ignored, and servers without a domain are left out of subscriptions.</li>
     </ul>
     <div class="tip" data-pending="v6"><b>IPv6 inbound check</b>When a server uses IPv6 by default, or a line is set to IPv6 on it, the master checks from outside whether its IPv6 ports can be reached and shows the result on the <b data-k="nav.nodes">Servers</b> page. "Unreachable" usually means the security group does not allow <code>::/0</code> or the server's own firewall blocks IPv6. UDP lines (hysteria2, tuic) cannot be checked this way; capture packets on the server to confirm.</div>
     <div class="pit"><b>IPv6 pitfalls</b><ul>
@@ -168,10 +169,10 @@
     <ul>
       <li>The <b data-k="reach.col">Mainland reach</b> column on the <b data-k="nav.nodes">Servers</b> page shows the result. Click a cell for details, or <b data-k="reach.checkAll">Check mainland reach</b> to test every server.</li>
       <li>Reading the result: <b data-k="reach.v.ok">OK</b>; <b data-k="reach.v.partial">Partly down</b> (one carrier cannot connect); <b data-k="reach.v.blocked">Likely blocked</b>; <b data-k="reach.v.ipBlocked">IP blocked</b> (change the IP); <b data-k="reach.v.portBlocked">Port blocked</b> (change the port); <b data-k="reach.v.abroadDown">Down abroad too</b> (a server, port or security-group problem, not a block).</li>
-      <li>Scheduled checks: <b data-k="nav.settings">Settings</b> → <b data-k="set.reach">Mainland reachability</b> → <b data-k="set.reachAuto">Automatic checks</b> (every 90 minutes by default), with a Telegram alert when a server gets blocked or recovers.</li>
+      <li>Scheduled checks: <b data-k="nav.settings">Settings</b> → <b data-k="set.reach">Mainland reachability</b> → <b data-k="set.reachAuto">Automatic checks</b>, on by default: the first round runs about 2 minutes after m-ui starts, then every 90 minutes by default, with a Telegram alert when a server gets blocked or recovers.</li>
     </ul>
     <div class="pit"><b>Common pitfalls</b><ul>
-      <li>The server address is sent to the public Globalping network. Without an account you get about 250 probe runs per hour and one server uses about 15; if that is not enough, add a free <b data-k="set.reachToken">Globalping token (optional)</b> in the settings.</li>
+      <li>The server address (IP and port) is sent to the public Globalping network, by the automatic checks too; if you do not want that, untick <b data-k="set.reachAuto">Automatic checks</b> and only check by hand when needed. Without an account you get about 250 probe runs per hour and one server uses about 15; if that is not enough, add a free <b data-k="set.reachToken">Globalping token (optional)</b> in the settings.</li>
       <li>The check uses the port of the server's first TCP line; with only hysteria2 / tuic (UDP) lines it can only tell whether the IP is blocked. Only IPv4 is checked for now.</li>
     </ul></div>
   </section>
@@ -182,7 +183,7 @@
     <ul>
       <li>Edit a server and untick <b data-k="common.enabled">Enabled</b>: it immediately stops serving everyone; enable it again to resume.</li>
       <li>Deleting a server disables lines that were deployed only there, and users or resellers that only used it lose that line; the affected lines and people are listed afterwards.</li>
-      <li><b data-k="node.decomPending">shutdown notice pending</b>: that machine has not yet received the notice to stop serving; the master keeps retrying. To stop it at once, turn off node mode on that machine or uninstall m-ui there.</li>
+      <li><b data-k="node.decomPending">shutdown notice pending</b>: that machine has not yet received the notice to stop serving; the master keeps retrying. To stop it at once, SSH in and run <code>systemctl disable --now m-ui</code> (stops it and keeps it from starting at boot), or uninstall with option 14 of the <code>m-ui</code> menu. Turning off node mode does not stop it: the machine becomes a standalone master and keeps serving everyone with its last configuration.</li>
       <li>Offline reasons: <b data-k="node.errTimeout">connection timed out</b>, <b data-k="node.errRefused">connection refused</b> (port not open or panel not running), <b data-k="node.errDns">DNS lookup failed</b>, <b data-k="node.errCert">certificate not trusted</b> (tick skip certificate verification), <b data-k="node.errToken">token mismatch</b> (copy the pairing token again), <b data-k="node.errFp">Certificate fingerprint changed</b> (if you really re-issued the node's certificate, click <b data-k="node.resetCert">Reset fingerprint</b>).</li>
       <li>Replacing a node: install the new one, then edit the old row on the <b data-k="nav.nodes">Servers</b> page with the new API URL and token; the master pushes everything again.</li>
     </ul>
@@ -359,7 +360,7 @@
     <h3>Which servers run a line</h3>
     <p class="lede">With several servers, a line can run on only some of them.</p>
     <ul>
-      <li><b data-k="line.servers">Deploy on servers</b>: nothing ticked = all servers (the default); tick servers to run the line only there, and subscriptions only list those entries.</li>
+      <li><b data-k="line.servers">Deploy on servers</b>: all ticked (the default) means every server, including servers added later (none ticked counts as all too); tick only some to run the line just there, and subscriptions only list those entries.</li>
       <li>Dual-stack servers get an extra drop-down in their row, so the line can use IPv4 or IPv6 on that server (the default follows the Servers page).</li>
       <li>A line on several servers has several "entries"; when assigning lines to users, plans or resellers you can tick just the entry on one server.</li>
     </ul>
@@ -419,7 +420,11 @@
       <li>If the <b data-k="ops.upstream">Upstream</b> row has no warp yet, click <b data-k="ops.addUpstream">Add as upstream "warp"</b>.</li>
       <li>Choose warp as a line's upstream.</li>
     </ol>
-    <div class="pit"><b>Common pitfall</b>WARP's local port (<b data-k="ops.warpPort">SOCKS5 port</b>) is 40000 by default and enabling fails if it is taken; after changing the port, enable WARP again. Ops tasks only work on Linux with m-ui running as root.</div>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>WARP's local port (<b data-k="ops.warpPort">SOCKS5 port</b>) is 40000 by default and enabling fails if it is taken; after changing the port, enable WARP again.</li>
+      <li>One-click install supports Ubuntu / Debian only; on other systems install cloudflare-warp yourself (proxy mode) and have its SOCKS5 proxy listen on the same port. Ops tasks only work on Linux with m-ui running as root.</li>
+      <li>With several servers, the warp upstream points to each server's own <code>127.0.0.1:PORT</code>: every server that runs a line using warp needs WARP installed and enabled on its own <b data-k="nav.ops">Ops</b> page (same port as on the master); if that is not possible, deploy the line only on servers that have WARP.</li>
+    </ul></div>
   </section>
 
   <section class="sec" id="up-chain">
@@ -439,6 +444,7 @@
       <li><b data-k="nav.upstreams">Upstreams</b> page → <b data-k="up.addGroup">Add upstream group</b>, pick at least two <b data-k="up.groupMembers">Members</b>, then choose the group as a line's upstream.</li>
       <li>Members are tested every 30 seconds; the current one is kept unless it is more than 300 ms slower than the fastest, to avoid flapping. On a switch old connections are closed so apps reconnect at once.</li>
       <li>The Upstreams page shows which member each server is using now.</li>
+      <li>Nodes need v0.7.16 or later: as soon as an upstream group exists (even before any line uses it), older nodes refuse the whole sync.</li>
     </ul>
   </section>
 
@@ -475,6 +481,7 @@
       <li>Hiding and renaming remember both the name and the node's fingerprint (address, port, password and so on), so they survive renames and reordering by the provider.</li>
       <li><b data-k="ext.exclude">Exclude keywords</b>: nodes whose names contain these words are not output; separate with commas, such as <code>website,expire,traffic left</code>. It also catches nodes that appear later, which suits info nodes whose names change on every refresh.</li>
       <li>When nodes disappear for a while their hide / rename records are kept and apply again when they return; click <b data-k="ext.cleanStale">Clean up</b> once you are sure they are gone.</li>
+      <li>With nodes: hiding and renaming need nodes on v0.7.17 or later, excluded keywords v0.7.16 or later; older nodes refuse the whole sync.</li>
     </ul>
   </section>
 
@@ -507,7 +514,7 @@
       <li><b data-k="cert.srcSelf">No domain (self-signed)</b>: click <b data-k="cert.selfsign">Generate self-signed</b>; leave <b data-k="cert.hosts" class="wrap">Addresses in the certificate (auto if empty)</b> empty to use the server's public IP. Every node in subscriptions gets "allow insecure" automatically, so clients need no settings; keep the panel and subscriptions on HTTP.</li>
       <li><b data-k="cert.srcExternal">Existing certificate</b>: if certbot, aaPanel, nginx or a commercial certificate is already on the server, enter the paths of the <b data-k="cert.certPath">Certificate file (fullchain)</b> and the <b data-k="cert.keyPath">Private key file</b> and click <b data-k="cert.useExternal">Use this certificate</b>.</li>
     </ul>
-    <div class="tip"><b>Choose what it is for</b>Under <b data-k="cert.applyTo">Apply to</b> tick <b data-k="cert.forLines">Make it the default for lines</b>, <b data-k="cert.applyPanel">Use for panel HTTPS</b> and / or <b data-k="cert.applySub">Use for subscription HTTPS</b>; uses you leave unticked stay as they are.</div>
+    <div class="tip"><b>Choose what it is for</b>Under <b data-k="cert.applyTo">Apply to</b> tick <b data-k="cert.forLines">Make it the default for lines</b>, <b data-k="cert.applyPanel">Use for panel HTTPS</b> and / or <b data-k="cert.applySub">Use for subscription HTTPS</b>; uses you leave unticked stay as they are. Defaults: <b data-k="cert.forLines">Make it the default for lines</b> is ticked while there is no real certificate yet; for a certificate that is not self-signed, the other two are ticked too while the panel or subscriptions have no HTTPS. With <b data-k="cert.applySub">Use for subscription HTTPS</b> ticked, subscription links become <code>https://</code>, so send users their new links; with <b data-k="cert.applyPanel">Use for panel HTTPS</b> ticked, the panel switches to <code>https://</code> after a restart.</div>
   </section>
 
   <section class="sec" id="cf-token">
@@ -529,7 +536,7 @@
 
   <section class="sec" id="cert-use">
     <h3>Where certificates are used</h3>
-    <p class="lede"><b data-k="cert.useLines">Line inbounds</b>, <b data-k="cert.usePanel">Panel</b>, <b data-k="cert.useSub">Subscription</b> and <b data-k="cert.useReseller">Reseller panel</b> each have their own certificate, changed in the <b data-k="cert.inUse">In use</b> card.</p>
+    <p class="lede"><b data-k="cert.useLines">Line inbounds</b>, <b data-k="cert.usePanel">Panel</b> and <b data-k="cert.useSub">Subscription</b> each have their own certificate, changed in the <b data-k="cert.inUse">In use</b> card. The <b data-k="cert.useReseller">Reseller panel</b> shares the panel's certificate by default; to give it its own, enter the <b data-k="set.cert">Certificate</b> and <b data-k="set.key">Private key</b> paths under <b data-k="nav.settings">Settings</b> → <b data-k="set.reseller">Reseller panel</b> (restart to apply).</p>
     <ul>
       <li>Click <b data-k="cert.change">Change</b> next to an item and pick a certificate from the store, or <b data-k="cert.noHttps">No HTTPS</b>.</li>
       <li>Subscription changes apply immediately (users need the new https link); a new panel certificate needs <b data-k="cert.restartBtn">Restart m-ui</b>; changing the default line certificate restarts the data plane once.</li>
@@ -561,6 +568,7 @@
     <ul>
       <li>Certificates are matched by name across servers: if a line picks a certificate, servers without it use their own default; the line's certificate picker shows which servers have it and how many days are left.</li>
       <li>Nodes usually have no notifications set up, so the master reports their renewal failures and expiries, and the master's Servers page marks <b data-k="node.certFail">cert renewal failing</b>.</li>
+      <li>When you issue a real certificate on a node, <b data-k="cert.applyPanel">Use for panel HTTPS</b> is ticked by default; if you keep it, the master must switch to the node's <code>https://</code> API URL after the node restarts (see <a href="#nodes-add">Attach a node</a>). Untick it if you do not want that.</li>
     </ul>
   </section>
 </section>
