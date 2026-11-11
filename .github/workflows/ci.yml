@@ -74,5 +74,7 @@ jobs:
         run: node --test web/jstest/issues.test.mjs
       - name: Frontend (line picker write-back)
         run: node --test web/jstest/linepicker.test.mjs
+      - name: Frontend (dropdown menus close on item click and under dialogs)
+        run: node --test web/jstest/menu.test.mjs
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run

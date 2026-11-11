@@ -88,6 +88,7 @@ export function toast(msg, kind = '') {
 // ---- 弹窗 ----
 // 标题和按钮固定、正文自己滚动(长表单也看得见「保存」);opts.wide 加宽,opts.size === 'xl' 给带选择器的编辑框用。
 export function openModal(title, html, onSave, opts = {}) {
+  closeMenus(); // 菜单的层级比弹窗高,开着就会压在弹窗上
   const m = document.getElementById('modal');
   document.getElementById('modal-title').textContent = title;
   const body = document.getElementById('modal-body');
@@ -127,6 +128,7 @@ export function confirm(message, opts = {}) {
 
 // ---- 抽屉(右侧详情面板)----
 export function openDrawer(title, html, opts = {}) {
+  closeMenus();
   const d = document.getElementById('drawer');
   d.classList.toggle('over', !!opts.over); // 从弹窗里打开的:盖在弹窗上面
   d.classList.toggle('wide', !!opts.wide); // 内容宽的(用户详情的流量图、各服务器延迟表)用宽抽屉
@@ -168,6 +170,10 @@ export function setHTML(target, html) {
   }
   return true;
 }
+// 收起所有打开着的「更多」等下拉菜单
+export function closeMenus() {
+  document.querySelectorAll('details.menu[open]').forEach(d => d.removeAttribute('open'));
+}
 function menuKey(d) {
   const b = d.querySelector('.menu-list [data-act]');
   return b ? [b.dataset.act, b.dataset.id || ''] : null;
@@ -185,6 +191,10 @@ document.addEventListener('click', e => {
   const fn = actions[el.dataset.act];
   if (!fn) return;
   e.preventDefault();
+  // 点了「更多」菜单里的项就收起菜单:不然 setHTML 重画时会把它当成还开着、重新打开,
+  // 菜单(z-index 高于弹窗)就一直挂着、压在点出来的弹窗上。要连点几下的菜单(外部节点「服务器列」的全选 / 清空)标 data-keep-open
+  const menu = el.closest('details.menu');
+  if (menu && !menu.hasAttribute('data-keep-open')) menu.removeAttribute('open');
   fn(el.dataset.id, el, e);
   // 用户刚动过手,接下来十几秒刷快一点,好让连接数、在线状态这类立刻跟上(app.js 监听)
   document.dispatchEvent(new CustomEvent('mui:acted'));
@@ -219,7 +229,7 @@ document.addEventListener('toggle', e => {
   if (Date.now() - menuOpenedAt < 300) return;
   // 菜单自己的列表在滚(外部节点的「服务器列」菜单服务器多时限高滚动):不收,不然后面几台勾不到
   if (e && e.target instanceof Element && e.target.closest('details.menu')) return;
-  document.querySelectorAll('details.menu[open]').forEach(d => d.removeAttribute('open'));
+  closeMenus();
 }, true));
 
 // ---- 剪贴板 ----

@@ -154,7 +154,7 @@ function panelHTML(id, c) {
   const stale = c.stale ? `<span class="muted small" title="${esc(t('ext.staleHelp'))}">${t('ext.staleN', { n: c.stale })} <a href="#" data-act="ext.cleanStale" data-id="${id}">${t('ext.cleanStale')}</a></span>` : '';
   const servers = c.servers || [], view = viewOf(c), f = filt[id] || 'all';
   const cols = new Set(colIds(c));
-  const colMenu = view === 'grid' && servers.length > 1 ? `<details class="menu ext-cols"><summary class="btn sm">${t('ext.cols')} ▾</summary><div class="menu-list">
+  const colMenu = view === 'grid' && servers.length > 1 ? `<details class="menu ext-cols" data-keep-open><summary class="btn sm">${t('ext.cols')} ▾</summary><div class="menu-list">
       <div class="row" style="padding:.2rem .4rem"><button type="button" class="btn xs" data-act="ext.colsAll" data-id="${id}">${t('cl.all')}</button><button type="button" class="btn xs" data-act="ext.colsNone" data-id="${id}">${t('cl.none')}</button></div>
       ${servers.map(x => `<label><input type="checkbox" data-change="ext.col" data-id="${id}" data-sid="${x.id}" ${cols.has(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}
     </div></details>` : '';
