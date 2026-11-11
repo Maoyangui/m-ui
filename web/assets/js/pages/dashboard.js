@@ -220,7 +220,7 @@ const nodesSum = () => (nodesData && !isNode() ? summarizeNodes(nodesData, { uns
 // ---- 需要处理 ----
 // 只放要人去处理的持续状态。类别固定,每类一行,按 红 → 黄 → 灰、同色按类别序号排;有数据源没取到时不说"一切正常"。
 const SEV = { bad: 0, warn: 1, info: 2 };
-const btn = (act, id, text, cls = '') => `<button class="btn sm ${cls}" data-act="${act}"${id ? ` data-id="${id}"` : ''}>${esc(text)}</button>`;
+const btn = (act, id, text, cls = '', sig) => `<button class="btn sm ${cls}" data-act="${act}"${id ? ` data-id="${id}"` : ''}${sig != null ? ` data-sig="${esc(sig)}"` : ''}>${esc(text)}</button>`;
 
 function certWhat(a) {
   if (a.trouble === 'failing') return a.renewErr ? trErr(a.renewErr) : t('alert.certFailing');
@@ -301,8 +301,9 @@ function attnItems() {
       parts: [n.failing && t('dash.attn.cert.failing', { n: n.failing }), n.missing && t('dash.attn.cert.missing', { n: n.missing }), n.expired && t('dash.attn.cert.expired', { n: n.expired }), n.expiring && t('dash.attn.cert.expiring', { n: n.expiring })].filter(Boolean).map(esc),
       names: etc(sortCerts(ca).map(a => `${a.node ? a.node + ' · ' : ''}${a.name} (${certWhat(a)})`), 'certs'),
       go: ca.some(a => !a.nodeId) ? '#/cert' : '#/nodes?f=bad', kind: 'cert' };
-    if (certSig(ca) === ls('m-ui.certDismissed')) ignored.push(row);
-    else add(4, n.failing + n.missing + n.expired ? 'bad' : 'warn', { ...row, acts: btn('dash.dismiss', 'cert', t('reach.dismiss'), 'ghost') });
+    const sig = certSig(ca);
+    if (sig === ls('m-ui.certDismissed')) ignored.push(row);
+    else add(4, n.failing + n.missing + n.expired ? 'bad' : 'warn', { ...row, acts: btn('dash.dismiss', 'cert', t('reach.dismiss'), 'ghost', sig) });
   }
   // 5 大陆连通(主面板)
   const rb = (!node && s.reachBad) || [];
@@ -311,8 +312,9 @@ function attnItems() {
     const row = { title: t('dash.attn.reach', { n: rb.length }),
       parts: [hard && t('dash.attn.reach.blocked', { n: hard }), rb.length - hard && t('dash.attn.reach.partial', { n: rb.length - hard })].filter(Boolean).map(esc),
       names: etc(sortReach(rb).map(r => `${r.name} ${t('reach.v.' + r.verdict)}`), 'nodes'), go: '#/nodes?f=bad', kind: 'reach' };
-    if (reachSig(rb) === ls('m-ui.reachDismissed')) ignored.push(row);
-    else add(5, hard ? 'bad' : 'warn', { ...row, acts: btn('dash.dismiss', 'reach', t('reach.dismiss'), 'ghost') });
+    const sig = reachSig(rb);
+    if (sig === ls('m-ui.reachDismissed')) ignored.push(row);
+    else add(5, hard ? 'bad' : 'warn', { ...row, acts: btn('dash.dismiss', 'reach', t('reach.dismiss'), 'ghost', sig) });
   }
   // 6 IPv6 入站(字段存在才有)
   if (!node && Array.isArray(s.v6Bad) && s.v6Bad.length) add(6, 'warn', { title: t('dash.attn.v6', { n: s.v6Bad.length }), parts: [esc(t('dash.attn.v6.hint'))],
@@ -337,7 +339,7 @@ function attnItems() {
         nq && `<a href="#/users?f=quota">${esc(t('dash.attn.users.quota', { p: at.quotaPct || quotaPct(), n: nq }))}</a>`] });
     const rd = at.resellersDepleted || 0, rx = at.resellersExpiring || 0, rgone = at.resellersExpired || 0;
     if (rd + rx + rgone > 0) add(11, rd || rgone ? 'bad' : 'warn', { title: t('dash.attn.resellers', { n: rd + rx + rgone }),
-      parts: [rd && esc(t('dash.attn.rs.depleted', { n: rd })), rgone && esc(t('dash.attn.rs.expired', { n: rgone })), rx && esc(t('dash.attn.rs.expiring', { n: rx }))], go: '#/resellers?f=attn' });
+      parts: [rd && esc(t('dash.attn.rs.depleted', { n: rd })), rgone && esc(t('dash.attn.rs.justExpired', { n: rgone })), rx && esc(t('dash.attn.rs.expiring', { n: rx }))], go: '#/resellers?f=attn' });
     const b = at.backup;
     if (b && (b.lastErr || (b.auto && b.lastAt && b.lastAt < now() - 48 * 3600))) add(12, 'warn', {
       title: b.lastErr ? t('dash.attn.backupFailed') : t('dash.attn.backupStale', { ago: fmtRelative(b.lastAt) }),
@@ -799,11 +801,13 @@ registerActions({
   'dash.connsRefresh': () => guard('dash-conns', fetchConns).then(renderAttn),
   'dash.attnAll': () => { attnAll = true; renderAttn(); },
   'dash.attnIgnored': () => { attnIgnoredOpen = !attnIgnoredOpen; renderAttn(); },
-  // 「知道了」和顶部提示条写同一个签名:这里忽略了,别的页面也不再弹;情况变了(签名变了)自动回来
-  'dash.dismiss': id => {
-    const s = state.status || {};
-    if (id === 'cert') lsSet('m-ui.certDismissed', certSig(s.certAlerts || []));
-    if (id === 'reach') lsSet('m-ui.reachDismissed', reachSig(s.reachBad || []));
+  // 「知道了」和顶部提示条写同一个签名:这里忽略了,别的页面也不再弹;情况变了(签名变了)自动回来。
+  // 写的是这一行渲染时的签名(按钮上带着),不按点击那一刻的 state.status 重算:status 先回来、「需要处理」还没重画时,
+  // 重算会把还没显示出来的新问题一起忽略
+  'dash.dismiss': (id, el) => {
+    const sig = el && el.dataset ? el.dataset.sig : undefined;
+    if (sig == null) return;
+    lsSet(id === 'cert' ? 'm-ui.certDismissed' : 'm-ui.reachDismissed', sig);
     renderAttn();
   },
   'dash.undismiss': id => { lsSet(id === 'cert' ? 'm-ui.certDismissed' : 'm-ui.reachDismissed', null); renderAttn(); },

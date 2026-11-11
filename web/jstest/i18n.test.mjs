@@ -41,7 +41,7 @@ test('同一本字典里没有重复的键', () => {
 
 // 「A、B 等 N 台」/「A, B and M more」:中文习惯说总数、英文说还剩几个,两边占位不同是有意的。
 // 这几条的调用处 {n}(总数)和 {more}(没列出的个数)都传,所以各取所需;新加的键不在这里就必须一致
-const TOTAL_VS_MORE = new Set(['common.andMore', 'reach.more', 'dash.etc.nodes', 'dash.etc.certs', 'dash.etc.ups', 'dash.etc.users']);
+const TOTAL_VS_MORE = new Set(['alert.certMore', 'common.andMore', 'reach.more', 'dash.etc.nodes', 'dash.etc.certs', 'dash.etc.ups', 'dash.etc.users']);
 const sameHoles = (k) => TOTAL_VS_MORE.has(k)
   ? holes(zh[k]).map(h => (h === '{n}' ? '{more}' : h)).sort().join() === holes(en[k]).sort().join()
   : holes(zh[k]).sort().join() === holes(en[k]).sort().join();
@@ -82,4 +82,18 @@ test('直接插进 HTML 的文案里没有会被当成标签的 "<字母"', () =
     }
   }
   assert.deepEqual([...new Set(bad)], []);
+});
+
+test('同一本字典里一个键只定义一次(对象字面量后写的覆盖先写的,键集合比对查不出来)', () => {
+  const dup = [];
+  for (const name of ['zh', 'en']) {
+    const start = text.indexOf(`const ${name} = {`);
+    const body = text.slice(start, text.indexOf('\n};', start));
+    const seen = new Set();
+    for (const [, k] of body.matchAll(/(?:^|[\s{,])'([A-Za-z0-9_.-]+)'\s*:/g)) {
+      if (seen.has(k)) dup.push(`${name}.${k}`);
+      seen.add(k);
+    }
+  }
+  assert.deepEqual(dup, []);
 });

@@ -134,7 +134,11 @@ test('证书:续期失败 → 文件读不出 → 已过期 → 快到期;签名
   ];
   assert.deepEqual(I.sortCerts(list, now).map(x => x.name), ['d', 'c', 'a', 'e', 'b']);
   assert.deepEqual(I.certCounts(list, now), { failing: 1, missing: 1, expired: 1, expiring: 2 });
-  assert.equal(I.certSig(list), '2:b:expiring,0:a:expiring,3:c:missing,0:d:failing,4:e:expiring');
+  assert.equal(I.certSig(list, now), '2:b:expiring,0:a:expiring:x,3:c:missing,0:d:failing,4:e:expiring');
+  // 关掉「快到期」后证书过期了:签名变了,提示回来
+  const soon = [{ nodeId: 0, name: 'a', trouble: 'expiring', notAfter: now + 3600 }];
+  assert.notEqual(I.certSig(soon, now), I.certSig(soon, now + 7200));
+  assert.equal(I.certSig(soon, now), '0:a:expiring', '没过期的签名格式和以前一样');
   assert.equal(I.certLeftDays(list[0], now), 5);
   assert.equal(I.certLeftDays(list[1], now), -1);
 });

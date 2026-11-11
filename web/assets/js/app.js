@@ -373,7 +373,7 @@ function certNotice() {
   };
   // 最要紧的在前(续期失败 → 文件读不出 → 已过期 → 快到期),只列 3 张,其余写「等 N 张」
   const shown = sortCerts(list).slice(0, 3).map(a => (a.node ? a.node + ' · ' : '') + a.name + ' ' + what(a)).join(t('reach.sep'));
-  const text = t('alert.certs', { list: shown + (list.length > 3 ? t('alert.certMore', { n: list.length - 3 }) : '') });
+  const text = t('alert.certs', { list: shown + (list.length > 3 ? t('alert.certMore', { n: list.length, more: list.length - 3 }) : '') });
   if (bar && bar.dataset.sig === sig && bar.dataset.text === text) return;
   const main = document.querySelector('.main'), page = document.getElementById('page');
   if (!main || !page) return;

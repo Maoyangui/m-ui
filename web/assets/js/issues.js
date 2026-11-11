@@ -126,8 +126,10 @@ export const sortCerts = (list, now = Date.now() / 1000) =>
   (list || []).slice().sort((a, b) => certRank(a, now) - certRank(b, now) || (a.notAfter || 0) - (b.notAfter || 0));
 // certSig 提示条"知道了"记的签名:按后端给的顺序拼,和以前的格式一致(已经关掉的不会因为升级又冒出来)。
 // 签名带上顶着临时证书的服务:关掉过「文件读不出来」后面板 / 订阅改用临时自签证书(重启之后),那是新情况,要再提示;
-// 没有 fallback 的条目签名和以前一样
-export const certSig = list => (list || []).map(a => `${a.nodeId || 0}:${a.name}:${a.trouble}${a.fallback ? '+' + a.fallback : ''}`).join(',');
+// 已过期的多一个 :x —— 后端对快到期和已过期都给 expiring(续期失败的过期了也还是 failing),不加的话关掉「快到期」后过期了也不再出来。
+// 没有 fallback、没过期的条目签名和以前一样
+export const certSig = (list, now = Date.now() / 1000) => (list || []).map(a =>
+  `${a.nodeId || 0}:${a.name}:${a.trouble}${a.fallback ? '+' + a.fallback : ''}${a.notAfter && a.notAfter < now ? ':x' : ''}`).join(',');
 export function certCounts(list, now = Date.now() / 1000) {
   const c = { failing: 0, missing: 0, expired: 0, expiring: 0 };
   for (const a of list || []) c[['failing', 'missing', 'expired', 'expiring'][certRank(a, now)]]++;
