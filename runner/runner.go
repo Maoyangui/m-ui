@@ -1706,6 +1706,16 @@ func ipv6OnlyChanged(old, pub string) bool {
 	return v6only(old) != v6only(pub)
 }
 
+// publicIPReloadNeeded 探测到的公网地址变了要不要重新渲染数据面配置:
+//   - 有没有 IPv4 变了:纯 IPv6 机器的直连线路要把公共 DNS 换成 IPv6 地址(render.v6DNSRules);
+//   - 「允许访问内网」关着时,私网屏蔽里带着本机公网地址(render.ownPublicCIDRs),IPv4 / IPv6 任何一个变了都要换上新地址。
+func publicIPReloadNeeded(old, pub, old6, pub6 string, allowPrivate bool) bool {
+	if ipv6OnlyChanged(old, pub) {
+		return true
+	}
+	return !allowPrivate && (old != pub || old6 != pub6)
+}
+
 // syncLocalNodeIPs 本机服务器记录也同步探测值(服务器列表显示用)。
 // 0.6.15 之前建的库里 public_ip6 这一列是 NULL,NULL != 'x' 在 SQL 里不成立,得先当成空串比。
 func syncLocalNodeIPs(db *gorm.DB, pub, pub6 string) {
@@ -1728,12 +1738,6 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 		if pub != old {
 			r.setSetting("publicIp", pub)
 			logger.Info("本机公网 IP: ", pub)
-			// 有没有 IPv4 变了:纯 IPv6 机器的直连线路要把公共 DNS 换成 IPv6 地址(render.v6DNSRules),重新渲染
-			if ipv6OnlyChanged(old, pub) && r.core.IsRunning() {
-				if err := r.ReloadAll(); err != nil {
-					logger.Warning("本机有无 IPv4 变了,重新渲染配置失败: ", err)
-				}
-			}
 		}
 		if pub6 != old6 {
 			r.setSetting("publicIp6", pub6)
@@ -1744,6 +1748,11 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 			}
 		}
 		syncLocalNodeIPs(r.db, pub, pub6)
+		if publicIPReloadNeeded(old, pub, old6, pub6, render.AllowPrivate(r.db)) && r.core.IsRunning() {
+			if err := r.ReloadAll(); err != nil {
+				logger.Warning("本机公网地址变了,重新渲染配置失败: ", err)
+			}
+		}
 	}
 	probe()
 	t := time.NewTicker(time.Hour)
