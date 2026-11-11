@@ -47,6 +47,9 @@ type Server struct {
 	logBuf  []model.SubLog
 	logDrop int
 	logKick chan struct{}
+
+	// TLS 登记订阅端口用的证书加载器(runner 的 Watch):证书读不出来、正用临时自签证书顶着时,面板顶部据此提示。nil 不登记。
+	TLS *certutil.Watch
 }
 
 // 订阅访问日志的缓冲:满 logFlushAt 条提前落一批,最多攒 logBufMax 条(落库一直失败时再多的就丢掉、只计数)。
@@ -401,15 +404,19 @@ func (s *Server) Start() error {
 
 	certFile, keyFile := s.setting("subCertFile"), s.setting("subKeyFile")
 	scheme := "http"
+	var rl *certutil.Reloader
 	if certFile != "" && keyFile != "" {
-		rl, err := certutil.NewReloader(certFile, keyFile)
-		if err != nil {
-			ln.Close()
-			return fmt.Errorf("加载订阅证书: %w", err)
+		// 证书读不出来(换机还原后文件不在、私钥配不上……)不能让整个进程起不来:先用临时自签证书顶着,照样走 HTTPS
+		// (订阅地址是 https://,降成 http 客户端全断),文件放回原处几秒内自动换上
+		rl = certutil.NewReloaderOrTemp(certFile, keyFile, s.setting("webDomain"), s.setting("publicIp"), s.setting("publicIp6"))
+		if err := rl.Temp(); err != nil {
+			logger.Error("订阅证书读不出来(", err, "):订阅先用临时自签证书顶着,仍走 HTTPS,但校验证书的客户端会更新失败。",
+				"到证书页给订阅换一张证书,或把文件放回 ", certFile, "(放回后几秒内自动换上)")
 		}
 		ln = tls.NewListener(ln, rl.TLSConfig()) // 证书文件更新后自动换用,续期无需重启
 		scheme = "https"
 	}
+	s.TLS.Set("sub", rl)
 
 	s.listener = ln
 	s.httpSrv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
@@ -429,6 +436,7 @@ func (s *Server) Stop() error {
 	if s.httpSrv == nil {
 		return nil
 	}
+	s.TLS.Set("sub", nil)
 	if s.stop != nil {
 		s.stopOnce.Do(func() { close(s.stop) })
 	}

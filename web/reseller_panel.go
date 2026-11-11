@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
-	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/totp"
@@ -121,13 +120,10 @@ func (s *Server) StartReseller() error {
 		certFile, keyFile = s.setting("webCertFile"), s.setting("webKeyFile")
 	}
 	if certFile != "" && keyFile != "" {
-		rl, err := certutil.NewReloader(certFile, keyFile)
-		if err != nil {
-			ln.Close()
-			return fmt.Errorf("加载代理面板证书: %w", err)
-		}
-		ln = tls.NewListener(ln, rl.TLSConfig())
+		ln = tls.NewListener(ln, s.tlsFor("reseller", "代理面板", certFile, keyFile))
 		scheme = "https"
+	} else {
+		s.watchTLS("reseller", nil)
 	}
 	s.rListener = ln
 	s.rSrv = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
@@ -144,6 +140,7 @@ func (s *Server) StopReseller() error {
 	if s.rSrv == nil {
 		return nil
 	}
+	s.watchTLS("reseller", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := s.rSrv.Shutdown(ctx)

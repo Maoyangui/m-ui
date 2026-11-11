@@ -292,6 +292,8 @@ function certNotice() {
   if (!list.length || dismissed === sig) { if (bar) bar.remove(); return; }
   const what = a => {
     if (a.trouble === 'failing') return t('alert.certFailing');
+    // 面板 / 订阅 / 代理面板读不出这张证书,正用临时自签证书顶着(换机还原后最常见):说清楚是谁在顶
+    if (a.trouble === 'missing' && a.fallback) return t('alert.certFallback', { svc: a.fallback.split(',').map(x => t('alert.svc.' + x)).join(t('reach.sep')) });
     if (a.trouble === 'missing') return t('alert.certMissing');
     const left = Math.floor((a.notAfter - Date.now() / 1000) / 86400);
     if (left < 0) return t('alert.certExpired');

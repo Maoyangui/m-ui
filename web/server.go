@@ -10,7 +10,6 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
@@ -272,12 +271,7 @@ func (s *Server) Start() error {
 	scheme := "http"
 	certFile, keyFile := s.setting("webCertFile"), s.setting("webKeyFile")
 	if certFile != "" && keyFile != "" {
-		rl, err := certutil.NewReloader(certFile, keyFile)
-		if err != nil {
-			ln.Close()
-			return fmt.Errorf("加载面板证书: %w", err)
-		}
-		ln = tls.NewListener(ln, rl.TLSConfig()) // 证书文件更新后自动换用,续期无需重启
+		ln = tls.NewListener(ln, s.tlsFor("panel", "面板", certFile, keyFile)) // 证书文件更新后自动换用,续期无需重启
 		scheme = "https"
 	}
 
@@ -296,6 +290,26 @@ func (s *Server) Start() error {
 	go s.reapSessions()
 	go s.tgBotLoop()
 	return nil
+}
+
+// tlsFor 面板 / 代理面板的证书。读不出来(换机还原后文件不在、私钥配不上……)不能让整个进程起不来:
+// 先用临时自签证书顶着,照样走 HTTPS(降成 http,会话 Cookie 和已经发出去的地址全乱),页面顶部提示;
+// 文件放回原处几秒内自动换上,在证书页换一张也行。
+func (s *Server) tlsFor(service, label, certFile, keyFile string) *tls.Config {
+	rl := certutil.NewReloaderOrTemp(certFile, keyFile, s.setting("webDomain"), s.setting("publicIp"), s.setting("publicIp6"))
+	if err := rl.Temp(); err != nil {
+		logger.Error(label, "证书读不出来(", err, "):", label, "先用临时自签证书顶着,仍走 HTTPS,浏览器会提示证书不受信任。",
+			"到证书页换一张证书,或把文件放回 ", certFile, "(放回后几秒内自动换上)")
+	}
+	s.watchTLS(service, rl)
+	return rl.TLSConfig()
+}
+
+// watchTLS 把面板 / 代理面板现在用的证书加载器登记到 runner(nil = 没走 HTTPS 或已停),证书提示据此列出顶着临时证书的服务。
+func (s *Server) watchTLS(service string, rl *certutil.Reloader) {
+	if s.run != nil {
+		s.run.TLSWatch().Set(service, rl)
+	}
 }
 
 // assetCache 给内嵌前端加上按内容哈希生成的 ETag,并要求浏览器每次校验(no-cache)。

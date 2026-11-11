@@ -449,6 +449,9 @@ type CertAlert struct {
 	Trouble  string `json:"trouble"`            // failing / expiring / missing
 	Method   string `json:"method,omitempty"`   // manual:要手动续
 	RenewErr string `json:"renewErr,omitempty"` // 自动续期失败的原因
+	// Fallback 证书文件读不出来、正用临时自签证书顶着的服务(panel / sub / reseller,逗号分隔);Error 是读不出来的原因
+	Fallback string `json:"fallback,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // CertAlerts 页面顶部常驻提示用:本机看自己的证书库;主机再看各副机报上来的清单(副机一般没配通知,
@@ -464,13 +467,21 @@ func (r *Runner) CertAlerts() []CertAlert {
 	for _, b := range r.CertBriefs() {
 		add(0, "", b)
 	}
+	temps, tempByFile := r.tempCertAlerts()
 	inUse := r.certsInUse()
 	var rows []model.Cert
 	r.db.Order("name asc").Find(&rows)
 	for _, c := range rows {
+		if a := tempByFile[c.CertFile]; a != nil { // 面板 / 订阅 / 代理面板正为它顶着临时证书:用库里的名字,不再另报一条
+			a.Name = c.Name
+			continue
+		}
 		if inUse[c.Name] && !acme.Info(c.CertFile).Exists {
 			out = append(out, CertAlert{Name: c.Name, Trouble: renewMissing})
 		}
+	}
+	for _, a := range temps {
+		out = append(out, *a)
 	}
 	if r.IsNode() {
 		return out

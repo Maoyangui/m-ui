@@ -20,6 +20,7 @@ import (
 	"github.com/Maoyangui/m-ui/acme"
 	"github.com/Maoyangui/m-ui/backup"
 	"github.com/Maoyangui/m-ui/brand"
+	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database"
@@ -57,6 +58,7 @@ type Runner struct {
 	db           *gorm.DB
 	core         *core.Core
 	subSrv       *sub.Server
+	tls          certutil.Watch // 面板、订阅、代理面板的证书加载器:哪个正用临时自签证书顶着(证书文件读不出来),见 tlstemp.go
 	jobs         *jobs.Scheduler
 	notifier     *notify.Notifier
 	monitor      *monitor.Monitor
@@ -224,6 +226,7 @@ func New(dbPath string) (*Runner, error) {
 	}
 	r := &Runner{db: db, core: core.NewCore(), dbPath: dbPath}
 	r.cert.kick = make(chan struct{}, 1)
+	r.tls.OnTemp = r.noticeTempCert
 	r.subSrv = r.newSubServer()
 	r.notifier = notify.New(r.setting)
 	r.notifier.Persist(func() string { return r.setting("notifyOnce") }, func(v string) {
@@ -1885,6 +1888,7 @@ func Run(dbPath string) error {
 // 取消时先热更新撤下共享凭据,再断开该用户的连接——否则借用者已经建立的连接还能接着用。
 func (r *Runner) newSubServer() *sub.Server {
 	s := sub.NewServer(r.db)
+	s.TLS = &r.tls
 	s.OnShareChange = func(name string, kick bool) {
 		go func() {
 			if err := r.ReloadUsers(); err != nil {
