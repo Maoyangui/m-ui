@@ -154,6 +154,11 @@ func restoredCertDir(dataDir string) string {
 	return filepath.Join(dataDir, "cert", backup.RestoredDir)
 }
 
+// isRestoredCopy 证书文件是不是换机还原时放进数据目录的副本(cert/restored/ 下):备份那一刻的样子,没有谁续它。
+func (r *Runner) isRestoredCopy(certFile string) bool {
+	return underDir(certFile, restoredCertDir(r.DataDir()))
+}
+
 // underDir path 是不是在 dir 里面(按路径比,不是按字符串前缀:/etc/m-ui-old 不在 /etc/m-ui 里)。
 func underDir(path, dir string) bool {
 	rel, err := filepath.Rel(dir, path)
@@ -252,7 +257,7 @@ func (r *Runner) Certs() []CertView {
 	for _, c := range rows {
 		info := acme.Info(c.CertFile)
 		v := CertView{Cert: c, Info: info, ForLines: c.CertFile == defCert, ForPanel: c.CertFile == webCert, ForSub: c.CertFile == subCert,
-			ForReseller: resCert != "" && c.CertFile == resCert, LineNames: byName[c.Name], RenewState: renewStateOf(c, info, now)}
+			ForReseller: resCert != "" && c.CertFile == resCert, LineNames: byName[c.Name], RenewState: r.renewState(c, info, now)}
 		if v.LineNames == nil {
 			v.LineNames = []string{}
 		}
@@ -329,11 +334,12 @@ func (r *Runner) CertBriefs() []model.CertBrief {
 		if !info.Exists {
 			continue
 		}
-		st := renewStateOf(c, info, now)
+		st := r.renewState(c, info, now)
 		b := model.CertBrief{
 			Name: c.Name, Domains: info.DNSNames, SelfSigned: info.SelfSigned,
 			NotAfter: info.NotAfter.Unix(), Default: c.CertFile == def,
 			Source: c.Source, Method: c.Method, AutoRenew: st.Renewable, RenewBefore: st.RenewBefore, InUse: inUse[c.Name],
+			Restored: st.Reason == renewRestored,
 		}
 		if st.Renewable && c.RenewFails > 0 {
 			b.RenewErr, b.RenewFails, b.NextRenewAt = c.LastRenewErr, c.RenewFails, c.NextRenewAt

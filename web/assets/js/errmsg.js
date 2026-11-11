@@ -29,6 +29,7 @@ const EN = /*BEGIN*/{
 "80 端口被本机其它程序占用(%v),HTTP 验证没法进行:停掉占用 80 端口的程序,或者改用 DNS 验证重新签发": "Port 80 is taken by another program on this server (%v), so HTTP validation cannot run: stop that program, or reissue with DNS validation",
 "自签证书不用续期,要换地址就重新生成": "Self-signed certificates need no renewal; generate a new one to change the addresses",
 "这是服务器上已有的证书,由签发它的工具(certbot 等)续期,面板续不了": "This certificate already lives on the server and is renewed by the tool that issued it (certbot or similar); the panel cannot renew it",
+"这是换机还原时从备份放进来的副本,面板续不了,也没有工具续它:签一张新的,或者把这台服务器上 certbot 的证书作为「已有证书」添加进来,再换过去": "This is a copy from the backup, placed here when the server was restored: the panel cannot renew it and no tool renews it. Issue a new one, or add this server's own certbot certificate as an existing certificate, then switch to it",
 "自签证书不用续期": "Self-signed certificates need no renewal",
 "这是服务器上已有的证书,由签发它的工具(certbot 等)续期,面板不能替它续": "This certificate already lives on the server and is renewed by the tool that issued it (certbot or similar); the panel cannot renew it for you",
 "手动 DNS 验证的证书不能自动续期:每次续期都要重新加 TXT 记录。改用 Cloudflare 验证重新签发,以后就能自动续期": "Manual DNS certificates cannot renew automatically: every renewal needs the TXT records added again. Reissue with Cloudflare validation and it renews automatically from then on",

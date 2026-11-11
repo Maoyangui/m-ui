@@ -29,7 +29,8 @@ import (
 //   - 能自动续:面板签发的(acme)、开着自动续期、不是手动 DNS。有效期的最后三分之一(最多 30 天)开始续;
 //     失败按 1、2、4 小时退避,最长 6 小时(剩不到 7 天时最长 2 小时),成功后清零。
 //   - 不能自动续的照样提醒(只提醒正用着的):手动 DNS 剩 30 天起每天一次,剩 7、3、1 天各升级一次;
-//     服务器上已有的证书、关了自动续期的剩 14 天起每天一次;证书文件读不出来的马上提醒。
+//     换机还原时放进数据目录的副本(没有谁续它)剩 30 天起每天一次;服务器上已有的证书、关了自动续期的剩 14 天起每天一次;
+//     证书文件读不出来的马上提醒。
 //   - 通知的去重记录落库(notify.OnceDurable),重启不重复;副机一般没配通知,由主机代发(见 hub.nodeCertAlerts)。
 
 // certFirstCheck 启动后多久做第一次续期检查(别和刚起来的数据面抢 80 端口、拖慢启动);之后每 certCheckEvery 查一次。
@@ -108,6 +109,7 @@ func renewBackoff(fails int, left time.Duration) time.Duration {
 const (
 	renewManual   = "manual"   // 手动 DNS 验证:每次续期都要人去加 TXT 记录
 	renewExternal = "external" // 服务器上已有的证书:由签发它的工具(certbot 等)续
+	renewRestored = "restored" // 换机还原时从备份放进数据目录的副本(cert/restored/):原来续它的 certbot 等工具不在这台,没有谁续它
 	renewSelfSign = "selfsign" // 自签证书:十年有效,不用续
 	renewDisabled = "disabled" // 关了自动续期
 	renewMissing  = "missing"  // 证书文件读不出来
@@ -151,6 +153,17 @@ func renewStateOf(c model.Cert, info acme.CertInfo, now time.Time) RenewState {
 	return st
 }
 
+// renewState 同 renewStateOf,另外认出换机还原时放进 cert/restored/ 的副本:面板不续它,和服务器上已有的证书一样,
+// 但也没有 certbot 之类的工具续它。以前它和外部证书一样标"外部工具续期"、提醒里说"由 certbot 续期,请确认已经续上",
+// 新机上根本没有 certbot,照提示"确认"后到期,面板、订阅和所有用这张证书的线路一起失效。
+func (r *Runner) renewState(c model.Cert, info acme.CertInfo, now time.Time) RenewState {
+	st := renewStateOf(c, info, now)
+	if st.Reason == renewExternal && r.isRestoredCopy(c.CertFile) {
+		st.Reason = renewRestored
+	}
+	return st
+}
+
 // renewDue 查一遍证书库:进了续期窗口、过了退避期的自动续;不能自动续的、正用着的按需提醒;最后把本机证书清单
 // 写回服务器记录(certbot 等外部工具续过的证书,线路编辑框里的剩余天数跟着变)。
 func (r *Runner) renewDue() {
@@ -164,7 +177,7 @@ func (r *Runner) renewDue() {
 	busy := false
 	for _, c := range rows {
 		info := acme.Info(c.CertFile)
-		st := renewStateOf(c, info, now)
+		st := r.renewState(c, info, now)
 		if !st.Renewable {
 			if inUse[c.Name] {
 				r.remindNotRenewable(c, info, st.Reason, now)
@@ -266,7 +279,8 @@ func manualStage(left time.Duration) string {
 }
 
 // remindNotRenewable 面板续不了的(正用着的)证书:手动 DNS 剩 30 天起每天提醒,7 / 3 / 1 天各升级一次;
-// 服务器上已有的、关了自动续期的剩 14 天起每天提醒;文件读不出来的马上提醒。自签的十年有效,不提醒。
+// 换机还原放进来的副本剩 30 天起每天提醒;服务器上已有的、关了自动续期的剩 14 天起每天提醒;文件读不出来的马上提醒。
+// 自签的十年有效,不提醒。
 func (r *Runner) remindNotRenewable(c model.Cert, info acme.CertInfo, reason string, now time.Time) {
 	if reason == renewMissing {
 		if r.notifier.OnceDurable("cert:"+c.Name+":missing", 23*time.Hour) {
@@ -299,6 +313,13 @@ func (r *Runner) remindNotRenewable(c model.Cert, info acme.CertInfo, reason str
 			why = "它的自动续期已关闭:到证书页打开自动续期,或者点「续期」"
 		}
 		text = fmt.Sprintf("%s <b>证书快到期</b>:%s %s。%s", icon, name, notify.LeftText(left), why)
+	case renewRestored:
+		if days > 30 || !r.notifier.OnceDurable(key+"expiring", 23*time.Hour) {
+			return
+		}
+		text = fmt.Sprintf("%s <b>证书快到期</b>:%s %s。它是换机还原时从备份放进数据目录的副本(%s),原来续它的 certbot 等工具不在这台服务器上,"+
+			"没有谁会续它:到证书页签一张新的,或者把这台服务器上 certbot 的证书作为「已有证书」添加进来,再在「正在使用」里换过去",
+			icon, name, notify.LeftText(left), notify.Esc(c.CertFile))
 	default:
 		return
 	}
@@ -394,10 +415,12 @@ func (r *Runner) RenewCert(name string) error {
 	if err := r.db.Where("name = ?", name).First(&c).Error; err != nil {
 		return errors.New("证书库里没有这张证书")
 	}
-	switch c.Source {
-	case "acme":
-	case "selfsign":
+	switch {
+	case c.Source == "acme":
+	case c.Source == "selfsign":
 		return errors.New("自签证书不用续期,要换地址就重新生成")
+	case r.isRestoredCopy(c.CertFile):
+		return errors.New("这是换机还原时从备份放进来的副本,面板续不了,也没有工具续它:签一张新的,或者把这台服务器上 certbot 的证书作为「已有证书」添加进来,再换过去")
 	default:
 		return errors.New("这是服务器上已有的证书,由签发它的工具(certbot 等)续期,面板续不了")
 	}
@@ -417,6 +440,8 @@ func (r *Runner) SetCertAutoRenew(name string, on bool) error {
 		switch {
 		case c.Source == "selfsign":
 			return errors.New("自签证书不用续期")
+		case c.Source != "acme" && r.isRestoredCopy(c.CertFile):
+			return errors.New("这是换机还原时从备份放进来的副本,面板续不了,也没有工具续它:签一张新的,或者把这台服务器上 certbot 的证书作为「已有证书」添加进来,再换过去")
 		case c.Source != "acme":
 			return errors.New("这是服务器上已有的证书,由签发它的工具(certbot 等)续期,面板不能替它续")
 		case c.Method == acme.MethodManual:
@@ -449,6 +474,7 @@ type CertAlert struct {
 	Trouble  string `json:"trouble"`            // failing / expiring / missing
 	Method   string `json:"method,omitempty"`   // manual:要手动续
 	RenewErr string `json:"renewErr,omitempty"` // 自动续期失败的原因
+	Restored bool   `json:"restored,omitempty"` // 换机还原时放进来的副本,没有谁续它(页面写"还原的副本,剩 N 天")
 	// Fallback 证书文件读不出来、正用临时自签证书顶着的服务(panel / sub / reseller,逗号分隔);Error 是读不出来的原因
 	Fallback string `json:"fallback,omitempty"`
 	Error    string `json:"error,omitempty"`
@@ -461,7 +487,7 @@ func (r *Runner) CertAlerts() []CertAlert {
 	out := []CertAlert{}
 	add := func(id uint, node string, b model.CertBrief) {
 		if t := b.Trouble(now); t != "" {
-			out = append(out, CertAlert{NodeId: id, Node: node, Name: b.Name, NotAfter: b.NotAfter, Trouble: t, Method: b.Method, RenewErr: b.RenewErr})
+			out = append(out, CertAlert{NodeId: id, Node: node, Name: b.Name, NotAfter: b.NotAfter, Trouble: t, Method: b.Method, RenewErr: b.RenewErr, Restored: b.Restored})
 		}
 	}
 	for _, b := range r.CertBriefs() {

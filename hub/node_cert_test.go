@@ -155,6 +155,31 @@ func TestMasterAlertsNodeCertRenewFailure(t *testing.T) {
 	}
 }
 
+// 副机上换机还原时放进数据目录的证书副本没有谁续:剩 30 天起就由主机代它提醒,写明是还原的副本、怎么换;
+// 同样剩 25 天的外部证书(certbot 等续)还不用提醒。老版本副机不报这一项,照外部证书剩 14 天起。
+func TestMasterAlertsNodeRestoredCopy(t *testing.T) {
+	db := openDB(t, "alert-restored.db").DB
+	store := ""
+	setting := func(string) string { return "" }
+	n := notify.New(setting)
+	n.Persist(func() string { return store }, func(v string) { store = v })
+	var got []string
+	h := New(Deps{DB: db, Setting: setting, IsNode: func() bool { return false }, OnceDurable: n.OnceDurable,
+		Notify: func(_, text string) { got = append(got, text) }})
+	now := time.Now()
+	copied := model.CertBrief{Name: "a.example.com", NotAfter: now.Add(25 * 24 * time.Hour).Unix(), Source: "external", InUse: true, Restored: true}
+	ext := model.CertBrief{Name: "ext.example.com", NotAfter: now.Add(25 * 24 * time.Hour).Unix(), Source: "external", InUse: true}
+	h.setStatus(model.Node{Id: 2, Name: "sg"}, true, "", &Report{Certs: []model.CertBrief{copied, ext}})
+	if len(got) != 1 || !strings.Contains(got[0], "sg") || !strings.Contains(got[0], "a.example.com") || !strings.Contains(got[0], "还原时从备份放进来的副本") {
+		t.Fatalf("副机上还原的副本剩 25 天要提醒,外部证书还不用: %v", got)
+	}
+	far := copied
+	far.NotAfter = now.Add(31*24*time.Hour + time.Hour).Unix() // 剩 31 天出头(按整天数算,正好 31×24 小时减去零头就是 30 天)
+	if far.Trouble(now) != "" || copied.Trouble(now) != model.CertExpiring || ext.Trouble(now) != "" {
+		t.Fatal("还原的副本剩 30 天起算快到期,外部证书剩 14 天起")
+	}
+}
+
 // 证书清单里的续期状态(失败原因、重试时间)变了不改快照修订号:续期失败一次不该把整份配置重推给所有副机;
 // 清单本身变了(续上了,到期时间变了)照旧算。
 func TestRevisionIgnoresCertRenewStatus(t *testing.T) {

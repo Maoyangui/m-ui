@@ -119,6 +119,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status["webPath"] = s.basePath()
 	status["reload"] = s.run.ReloadStatus()   // 最近一次重载:失败会在页面顶部常驻提示
 	status["certAlerts"] = s.run.CertAlerts() // 续期失败、正用着又快到期的证书(主机连副机的一起):页面顶部提示
+	if n := s.run.RestoreNotice(); n != nil { // 上次还原放进数据目录的证书副本(没有谁续)、还缺的:页面顶部提示一次,点「知道了」才消
+		status["restore"] = n
+	}
 	if !s.run.IsNode() {
 		status["reachBad"] = s.run.Reach().Bad() // 大陆连通异常的服务器:概览页顶部提示
 		// IPv6 入站不通的服务器(只算 down,和服务器页同一份;没有时是空数组,主机上这个键始终在):概况"需要处理"用,不并进 reachBad

@@ -1,4 +1,5 @@
-// 页面顶部证书提示条(web/assets/js/app.js 的 certNotice)「知道了」的前端测试:桩模块 + 桩 DOM 加载真实的 app.js。
+// 页面顶部证书提示条(web/assets/js/app.js 的 certNotice)「知道了」、还原提示条(restoreNotice)的前端测试:
+// 桩模块 + 桩 DOM 加载真实的 app.js。
 // 运行:node --test web/jstest/certbar.test.mjs
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -109,7 +110,9 @@ const flush = async (n = 8) => { for (let i = 0; i < n; i++) await new Promise((
 
 // ---- 仿真后端:status 里的 certAlerts 由用例决定 ----
 let status = { version: 't', role: 'master', certAlerts: [] };
+const posts = [];
 globalThis.__api = async (method, p) => {
+  if (method === 'POST') posts.push(p);
   if (method === 'GET' && p === 'status') return JSON.parse(JSON.stringify(status));
   if (method === 'GET' && p === 'settings') return { timezone: 'Asia/Shanghai' };
   return {};
@@ -149,4 +152,30 @@ test('没有 fallback 的提示签名和以前一样:升级前已经关掉的不
   assert.equal(bar(), null);
   await show([{ name: 'b.example.com', trouble: 'expiring', notAfter: left5 }, { nodeId: 2, node: 'sg', name: 'c.example.com', trouble: 'missing' }]);
   assert.ok(bar(), '情况变了照样再提示');
+});
+
+test('上次还原放进数据目录的证书副本、还缺的文件:顶部提示一次,点「知道了」告诉后端并收起', async () => {
+  const restore = { at: 1, copies: [{ from: '/etc/letsencrypt/live/a.example.com/fullchain.pem', to: '/etc/m-ui/cert/restored/a.example.com-fullchain.pem',
+    names: ['a.example.com'], notAfter: 1900000000 }], missing: ['/gone/reseller.pem'] };
+  status = { version: 't', role: 'master', certAlerts: [], restore };
+  await app.load('status');
+  await flush(2);
+  const rb = document.getElementById('restore-bar');
+  assert.ok(rb, '应有还原提示条');
+  assert.ok(rb.innerHTML.includes('alert.restoreCopies|list=alert.restoreCopy|name=a.example.com|date=D1900000000'), '写明哪张、哪天到期');
+  assert.ok(rb.innerHTML.includes('alert.restoreMissing|list=/gone/reseller.pem'), '还缺的文件也写上');
+  assert.ok(rb.innerHTML.includes('href="#/cert"'), '能直接去证书页');
+  posts.length = 0;
+  rb.querySelector('#restore-ack').fire('click');
+  await flush(2);
+  assert.deepEqual(posts, ['backup/restore-ack']);
+  assert.equal(document.getElementById('restore-bar'), null, '点了就收起');
+  status = { version: 't', role: 'master', certAlerts: [] }; // 后端已经删掉了
+  await app.load('status');
+  await flush(2);
+  assert.equal(document.getElementById('restore-bar'), null);
+  status = { version: 't', role: 'master', scope: 'reseller', certAlerts: [], restore };
+  await app.load('status');
+  await flush(2);
+  assert.equal(document.getElementById('restore-bar'), null, '代理面板不显示');
 });

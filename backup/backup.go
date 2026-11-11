@@ -301,8 +301,8 @@ func Restore(dbPath, srcPath string) (Report, error) {
 	if dbErr == nil {
 		defer database.Close(db)
 	}
+	root, _ := filepath.Abs(filepath.Dir(dbPath))
 	if isZip {
-		root, _ := filepath.Abs(filepath.Dir(dbPath))
 		if entries, err := zipCerts(srcPath, root, meta, &rep); err != nil {
 			rep.Failed = append(rep.Failed, CertNote{Path: srcPath, Reason: err.Error()})
 		} else {
@@ -311,6 +311,10 @@ func Restore(dbPath, srcPath string) (Report, error) {
 	}
 	if dbErr == nil {
 		rep.Missing = missingCerts(db, meta.CertsUnreadable)
+	}
+	// 放进数据目录的证书副本、还缺的、没写成的记在数据目录里,面板顶部提示一次(面板上传的还原以前只进启动日志)
+	if err := saveNotice(root, rep.notice(time.Now())); err != nil {
+		logger.Warning("记下还原结果失败(面板顶部不会提示): ", err)
 	}
 	if len(rep.Failed) > 0 {
 		where := "(之前没有数据库)"

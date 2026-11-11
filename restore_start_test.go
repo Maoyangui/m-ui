@@ -148,6 +148,10 @@ func TestRestoredServerStartsWithExternalCerts(t *testing.T) {
 	if alerts := r.CertAlerts(); len(alerts) != 0 {
 		t.Fatalf("证书都在,不该有提示: %+v", alerts)
 	}
+	// 放进数据目录的是备份那一刻的副本,没有谁续它:面板顶部提示一次(证书页的标法见 runner 的 TestRestoredCopyNotRenewedByAnyone)
+	if n := r.RestoreNotice(); n == nil || len(n.Copies) != 1 || n.Copies[0].Names[0] != "a.example.com" {
+		t.Fatalf("面板顶部要提示一次放进数据目录的副本: %+v", n)
+	}
 }
 
 // 备份里本来就没有证书文件(备份时已经读不到,或者老备份没带代理面板的证书):还原后照样起得来,

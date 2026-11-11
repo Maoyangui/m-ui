@@ -103,6 +103,9 @@ type CertBrief struct {
 	RenewFails  int    `json:"renewFails,omitempty"`  // 连续失败次数
 	NextRenewAt int64  `json:"nextRenewAt,omitempty"` // 下次重试不早于
 	InUse       bool   `json:"inUse,omitempty"`       // 线路默认、线路单独选的、面板、订阅、代理面板正用着
+	// Restored 换机还原时从备份放进数据目录的副本(cert/restored/):原来续它的 certbot 等工具不在这台,没有谁续它,
+	// 和手动 DNS 一样剩 30 天起提醒。老版本不认,照外部证书剩 14 天起提醒
+	Restored bool `json:"restored,omitempty"`
 }
 
 // ServicePort 服务器上 m-ui 自己监听的一个端口(面板 / 订阅 / 代理面板)。

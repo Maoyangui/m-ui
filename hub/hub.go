@@ -1706,6 +1706,9 @@ func (h *Hub) nodeCertAlerts(n model.Node, certs []model.CertBrief) []string {
 			msgs = append(msgs, fmt.Sprintf("🔴 <b>副机证书自动续期失败</b>:%s 的 %s %s,已连续失败 %d 次\n%s", node, name, left, c.RenewFails, alertText(c.RenewErr, 300)))
 		case c.Source == "acme" && c.Method == "manual":
 			msgs = append(msgs, fmt.Sprintf("🟡 <b>副机证书要手动续期</b>:%s 的 %s %s。它用手动 DNS 验证,不能自动续期:到那台服务器的证书页点「续期」,按提示加 TXT 记录", node, name, left))
+		case c.Restored:
+			msgs = append(msgs, fmt.Sprintf("🟡 <b>副机证书快到期</b>:%s 的 %s %s。它是那台换机还原时从备份放进来的副本,没有谁续它:"+
+				"到那台服务器的证书页签一张新的,或者把它上面 certbot 的证书作为「已有证书」添加进来,再换过去", node, name, left))
 		default:
 			msgs = append(msgs, fmt.Sprintf("🟡 <b>副机证书快到期</b>:%s 的 %s %s,自动续期管不到它:到那台服务器的证书页看看", node, name, left))
 		}

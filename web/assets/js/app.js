@@ -3,7 +3,7 @@ import { get, post, setUnauthorizedHandler, LONG } from './api.js';
 import { t, setLang, getLang, langs } from './i18n.js';
 import { trErr } from './errmsg.js';
 import { ICONS } from './icons.js';
-import { toast, confirm, closeModal, closeDrawer, drawerOpen, esc, setTimezone } from './ui.js';
+import { toast, confirm, closeModal, closeDrawer, drawerOpen, esc, setTimezone, fmtDay } from './ui.js';
 import * as dashboard from './pages/dashboard.js';
 import * as lines from './pages/lines.js';
 import * as upstreams from './pages/upstreams.js';
@@ -61,7 +61,7 @@ function resetState() {
 export async function load(...what) {
   const all = what.length === 0;
   const jobs = [];
-  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); reloadNotice(); reachNotice(); certNotice(); }));
+  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); restoreNotice(); reloadNotice(); reachNotice(); certNotice(); }));
   if (all || what.includes('settings')) jobs.push(get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
   if (all || what.includes('lines')) jobs.push(get('lines').then(l => { state.lines = l; }));
   if (!isReseller() && (all || what.includes('upstreams'))) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
@@ -256,6 +256,34 @@ function upgradeNotice() {
   });
 }
 
+// 上次从备份还原时,数据目录外的证书放进了数据目录(备份那一刻的副本,没有谁续)、或者还缺 / 没写成证书文件:在页面顶部明说,
+// 管理员点"知道了"才清掉。面板上传的还原在重启时应用,这些以前只写进启动日志(结果文件在数据目录里,重启也不会忘)
+function restoreNotice() {
+  const n = !isReseller() && state.status && state.status.restore;
+  let bar = document.getElementById('restore-bar');
+  if (!n) { if (bar) bar.remove(); return; }
+  if (bar) return;
+  const main = document.querySelector('.main'), page = document.getElementById('page');
+  if (!main || !page) return;
+  const sep = t('reach.sep'), parts = [];
+  if ((n.copies || []).length) {
+    const list = n.copies.map(c => t('alert.restoreCopy', { name: (c.names || [])[0] || c.from, date: fmtDay(c.notAfter) })).join(sep);
+    parts.push(t('alert.restoreCopies', { list }));
+  }
+  if ((n.missing || []).length) parts.push(t('alert.restoreMissing', { list: n.missing.join(sep) }));
+  if ((n.failed || []).length) parts.push(t('alert.restoreFailed', { list: n.failed.join(sep) }));
+  bar = document.createElement('div');
+  bar.id = 'restore-bar';
+  bar.className = 'alert-bar warn';
+  bar.innerHTML = `<span><b>${esc(t('alert.restoreTitle'))}</b> ${esc(parts.join(' '))}</span><div class="row"><a href="#/cert" class="btn sm">${esc(t('alert.certView'))}</a><button class="btn sm ghost" id="restore-ack">${esc(t('update.ack'))}</button></div>`;
+  main.insertBefore(bar, page);
+  bar.querySelector('#restore-ack').addEventListener('click', async () => {
+    await post('backup/restore-ack').catch(() => {});
+    if (state.status) delete state.status.restore;
+    bar.remove();
+  });
+}
+
 // 最近一次数据面重载失败:保存早已返回"成功",线上其实还是旧配置。常驻在页面顶部,直到下一次重载成功。
 function reloadNotice() {
   const rl = state.status && state.status.reload;
@@ -299,6 +327,7 @@ function certNotice() {
     if (a.trouble === 'missing') return t('alert.certMissing');
     const left = Math.floor((a.notAfter - Date.now() / 1000) / 86400);
     if (left < 0) return t('alert.certExpired');
+    if (a.restored) return t('alert.certRestored', { n: left }); // 换机还原放进来的副本:没有谁续它
     return t(a.method === 'manual' ? 'alert.certManual' : 'alert.certLeft', { n: left });
   };
   const shown = list.slice(0, 4).map(a => (a.node ? a.node + ' · ' : '') + a.name + ' ' + what(a)).join(t('reach.sep'));

@@ -105,6 +105,7 @@ function storeRow(c) {
 const REASONS = {
   manual: ['cert.rManual', 'warn', 'cert.rManualHelp'],
   external: ['cert.rExternal', '', 'cert.rExternalHelp'],
+  restored: ['cert.rRestored', 'warn', 'cert.rRestoredHelp'], // 换机还原放进来的副本:没有谁续它
   selfsign: ['cert.rSelf', '', ''],
   disabled: ['cert.rDisabled', 'warn', 'cert.rDisabledHelp'],
   missing: ['cert.rMissing', 'danger', 'cert.rMissingHelp'],

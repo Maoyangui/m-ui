@@ -128,6 +128,12 @@ func (r *Runner) InspectBackup(src string) (backup.Summary, error) { return back
 // RestorePending 报告是否有待应用的还原文件。
 func (r *Runner) RestorePending() bool { return backup.PendingPath(r.dbPath) != "" }
 
+// RestoreNotice 上次还原留下、还没点「知道了」的提示(放进数据目录的证书副本、还缺的、没写成的);没有时为 nil。
+func (r *Runner) RestoreNotice() *backup.Notice { return backup.ReadNotice(r.DataDir()) }
+
+// ClearRestoreNotice 管理员看过还原提示了。
+func (r *Runner) ClearRestoreNotice() error { return backup.ClearNotice(r.DataDir()) }
+
 // StageRestore 把备份文件放到待还原位置,重启后生效。
 func (r *Runner) StageRestore(src string) (backup.Summary, error) {
 	s, err := backup.Inspect(src)

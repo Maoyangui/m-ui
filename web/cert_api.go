@@ -350,6 +350,15 @@ func (s *Server) handleBackupSub(w http.ResponseWriter, r *http.Request) {
 		s.audit(r, "backup", "restore", map[string]interface{}{"users": sum.Users, "lines": sum.Lines, "from": sum.Meta.Host})
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "summary": sum, "restarting": true})
 		s.run.ScheduleRestart(1500 * time.Millisecond)
+	case "restore-ack": // 看过还原提示了
+		if r.Method != http.MethodPost {
+			break
+		}
+		if err := s.run.ClearRestoreNotice(); err != nil {
+			badRequest(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	case "restart":
 		if r.Method != http.MethodPost {
 			break

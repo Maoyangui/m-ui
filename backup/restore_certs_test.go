@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -494,6 +495,60 @@ func TestRestoreReport(t *testing.T) {
 	}
 	if st, err := os.Stat(inKey); err != nil || st.Mode().Perm() != 0o600 {
 		t.Fatalf("数据目录里的私钥写回后也是 0600: %v %v", st.Mode(), err)
+	}
+}
+
+// 还原把放进数据目录的证书副本(域名、到期日)、还缺的文件记进数据目录,面板顶部提示一次 —— 面板上传的还原在重启时应用,
+// 以前这些只进启动日志。私钥不列;点「知道了」删掉;下一次还原没什么要说的,上一次留下的也一并清掉。
+func TestRestoreLeavesNotice(t *testing.T) {
+	base := t.TempDir()
+	le := filepath.Join(base, "letsencrypt")
+	aCert, aKey := certbotPair(t, le, "a.example.com", 90)
+	aPEM, _ := os.ReadFile(aCert)
+	gone := filepath.Join(base, "gone", "reseller.pem")
+	db := openDB(t, filepath.Join(base, "old", DBName))
+	setAll(t, db, map[string]string{"webCertFile": aCert, "webKeyFile": aKey, "resellerCertFile": gone, "resellerKeyFile": gone + ".key"})
+	zipPath := backupTo(t, db, base, CertPaths(db))
+	database.Close(db)
+	os.RemoveAll(le)
+
+	root := filepath.Join(base, "new")
+	dst := filepath.Join(root, DBName)
+	if _, err := Restore(dst, zipPath); err != nil {
+		t.Fatal(err)
+	}
+	n := ReadNotice(root)
+	if n == nil || n.At == 0 || len(n.Copies) != 1 {
+		t.Fatalf("放进数据目录的证书副本要记下来(私钥不列): %+v", n)
+	}
+	if c := n.Copies[0]; c.From != aCert || !underDir(filepath.Join(root, "cert", RestoredDir), c.To) || len(c.Names) != 1 || c.Names[0] != "a.example.com" ||
+		c.NotAfter != leafOf(aPEM).NotAfter.Unix() {
+		t.Fatalf("副本的来处、去处、域名、到期日不对: %+v", c)
+	}
+	if len(n.Missing) != 2 || n.Missing[0] != gone || len(n.Failed) != 0 {
+		t.Fatalf("还缺的代理面板证书也要记下: %+v", n)
+	}
+	if st, err := os.Stat(filepath.Join(root, NoticeFile)); err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
+		t.Fatalf("提示文件应在数据目录里、0600: %v %v", st, err)
+	}
+	if err := ClearNotice(root); err != nil || ReadNotice(root) != nil {
+		t.Fatalf("点了「知道了」就不再提示: %v", err)
+	}
+	if err := ClearNotice(root); err != nil {
+		t.Fatalf("没有提示文件时清掉不算错: %v", err)
+	}
+
+	if _, err := Restore(dst, zipPath); err != nil || ReadNotice(root) == nil {
+		t.Fatalf("再还原一次照样提示: %v", err)
+	}
+	plain := openDB(t, filepath.Join(base, "plain", DBName)) // 不用任何证书的库
+	plainZip := backupTo(t, plain, filepath.Join(base, "plain"), nil)
+	database.Close(plain)
+	if _, err := Restore(dst, plainZip); err != nil {
+		t.Fatal(err)
+	}
+	if n := ReadNotice(root); n != nil {
+		t.Fatalf("这次还原没什么要说的,上一次的提示不该留着: %+v", n)
 	}
 }
 
