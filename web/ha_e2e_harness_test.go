@@ -54,7 +54,10 @@ type haInst struct {
 	srv      *Server
 	down     bool
 	fail     string // 这个 agent 动作回 500(模拟中途失败)
+	fake409  string // 非空时所有 agent 请求一律回 409 和这个正文(模拟被人动过、乱报纪元的副机)
 	restarts int
+	restored bool          // 下次起来时算"刚从备份还原过库"(restoreFile 设)
+	boot     ha.BootResult // 最近一次起来时 Boot 的判定
 }
 
 func newHAInst(t *testing.T, name string, node bool, clk *haClock) *haInst {
@@ -90,7 +93,7 @@ func (in *haInst) url() string { return in.ts.URL + "/app/" }
 
 func (in *haInst) start() {
 	in.t.Helper()
-	if _, err := ha.ApplyPending(in.path); err != nil {
+	if _, err := ha.ApplyPendingAt(in.path, in.clk.now()); err != nil {
 		in.t.Fatal(err)
 	}
 	run, err := runner.New(in.path)
@@ -104,9 +107,63 @@ func (in *haInst) start() {
 	})
 	run.HA().SetNow(in.clk.now)
 	in.mu.Lock()
-	in.run, in.srv = run, NewServer(run)
+	restored := in.restored
+	in.restored = false
+	in.mu.Unlock()
+	boot := run.HA().Boot(restored) // 和 runner.Run 一样:New 之后、启动自检之前
+	in.mu.Lock()
+	in.run, in.srv, in.boot = run, NewServer(run), boot
 	in.mu.Unlock()
 }
+
+// startupCheck 和 runner.Run 一样做一次启动自检(执行 Boot 定下的围栏、问一圈副机),返回是否变为副机了。
+func (in *haInst) startupCheck() bool { return in.HA().StartupCheck() }
+
+// snapshotDB 给一台的库拍一份快照(和备份一样用 VACUUM INTO;它在不在运行都行),返回文件路径。
+func snapshotDB(t *testing.T, src *haInst) string {
+	t.Helper()
+	snap := filepath.Join(t.TempDir(), "snapshot.db")
+	if run := src.R(); run != nil {
+		if err := run.DB().Exec("VACUUM INTO ?", snap).Error; err != nil {
+			t.Fatal(err)
+		}
+		return snap
+	}
+	db, err := database.Open(src.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.Exec("VACUUM INTO ?", snap).Error
+	_ = database.Close(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snap
+}
+
+// restoreFile 把一份库文件还原到 dst:dst 先停,换上这份库,以"刚从备份还原过"(restored=true)重新起来。
+// 实例号、纪元记录在 <数据目录>/ha/ 下,不随库走(和真的备份一样)。
+func restoreFile(t *testing.T, dst *haInst, file string) {
+	t.Helper()
+	dst.stop()
+	for _, suf := range []string{"", "-wal", "-shm"} {
+		_ = os.Remove(dst.path + suf)
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst.path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dst.mu.Lock()
+	dst.restored = true
+	dst.mu.Unlock()
+	dst.start()
+}
+
+// restoreInto 把 src 现在的库当作一份备份,还原到 dst 上。
+func restoreInto(t *testing.T, dst, src *haInst) { restoreFile(t, dst, snapshotDB(t, src)) }
 
 func (in *haInst) stop() {
 	in.mu.Lock()
@@ -150,6 +207,12 @@ func (in *haInst) setFail(action string) {
 	in.mu.Unlock()
 }
 
+func (in *haInst) setFake409(body string) {
+	in.mu.Lock()
+	in.fake409 = body
+	in.mu.Unlock()
+}
+
 func (in *haInst) R() *runner.Runner {
 	in.mu.Lock()
 	defer in.mu.Unlock()
@@ -162,7 +225,7 @@ func (in *haInst) DB() *gorm.DB { return in.R().DB() }
 
 func (in *haInst) serve(w http.ResponseWriter, r *http.Request) {
 	in.mu.Lock()
-	s, down, fail := in.srv, in.down, in.fail
+	s, down, fail, fake := in.srv, in.down, in.fail, in.fake409
 	in.mu.Unlock()
 	if down || s == nil {
 		if hj, ok := w.(http.Hijacker); ok {
@@ -176,6 +239,13 @@ func (in *haInst) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if fail != "" && strings.HasSuffix(r.URL.Path, "/agent/"+fail) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "模拟失败"})
+		return
+	}
+	if fake != "" && strings.Contains(r.URL.Path, "/agent/") {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set(ha.HeaderNode, "1")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(fake))
 		return
 	}
 	switch p := r.URL.Path; {

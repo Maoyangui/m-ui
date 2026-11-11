@@ -222,11 +222,18 @@ func TestHATakeoverE2E(t *testing.T) {
 	}
 	hk.setDown(true)
 	clk.add(4 * time.Minute)
-	if v := tw.HA().View(false); !v.Node.Lost || !v.Node.CanTakeover {
-		t.Fatalf("主机失联后备用面板上要能接任: %+v", v.Node)
+	if err := tw.HA().Takeover(ha.TakeoverOpts{By: "test"}); err == nil {
+		t.Fatal("失联判定还没走到等确认:面板上点也不能接任")
+	}
+	tw.HA().Tick() // 失联判定:同伴也联系不上主机、到了时间 → 发出确认
+	if v := tw.HA().View(false); !v.Node.Lost || !v.Node.CanTakeover || v.Node.Prompt == nil {
+		t.Fatalf("主机失联、等确认时备用面板上要能接任: %+v", v.Node)
 	}
 	if err := tw.HA().Takeover(ha.TakeoverOpts{By: "test"}); err != nil {
 		t.Fatal(err)
+	}
+	if tw.setting(ha.KeyEpoch) != "1" {
+		t.Fatal("新库换上之前本机的纪元不变")
 	}
 	if !tw.restarted() {
 		t.Fatal("接任要重启")
