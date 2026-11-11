@@ -199,8 +199,9 @@ func (s *Server) recentFails(limit int) []recentConn {
 // 多服务器时还带服务器名。带 ?fails=1 时后面再接上"到了但没过握手 / 认证"的来源(failed 字段非空,单独限量,刷不掉前面的);
 // 不带时和以前一样只有通过认证的(含被设备数拒的)。
 //
-// 多服务器时按服务器公平取(fairMerge):每台轮流取自己最近的一条,直到总数到上限 —— 一台有扫描噪声、连接特别多的服务器
-// 挤不掉别的服务器的记录(以前混在一起按时间取前 N 条,安静的那台服务器上用户刚试过的那条可能整条看不到)。
+// 多服务器时按服务器公平取(fairMerge):超过上限时每台先留自己最近的一条,其余按时间补满 —— 一台有扫描噪声、连接特别多的服务器
+// 挤不掉别的服务器最近那条(以前混在一起按时间取前 N 条,安静的那台服务器上用户刚试过的那条可能整条看不到),
+// 别的服务器几天前的旧记录也挤不掉忙的那台刚产生的记录。
 func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
 	withFails := r.URL.Query().Get("fails") == "1"
 	remote, remoteFails := s.run.Hub().RemoteConns(), []recentConn(nil)
@@ -224,43 +225,45 @@ func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
 }
 
 // fairMerge 本机的记录标上服务器 id(多服务器时还有名字),和副机的(hub 已标好)合在一起,每条按来源 IP 标地址族;
-// 超过 limit 条时按服务器轮流取各自最近的一条(谁最近活动过谁先取),取够为止;结果按最近时间排。
+// 超过 limit 条时先给每台服务器留它最近的一条(最近有记录的服务器先留),剩下的名额按时间补满;结果按最近时间排
+// (和概览的 web/assets/js/fair.js 同一个办法)。不严格按服务器轮流取:跟踪器只按条数淘汰、不按时间过期,
+// 安静的服务器上留着几天前的旧记录,轮流取会让它们挤掉忙的那台几分钟前的连接。
 func fairMerge(local, remote []recentConn, self model.Node, multi bool, limit int) []recentConn {
-	groups := map[uint][]recentConn{}
-	var order []uint
-	add := func(c recentConn) {
-		c.Family = ipFamily(c.IP)
-		if _, ok := groups[c.NodeId]; !ok {
-			order = append(order, c.NodeId)
-		}
-		groups[c.NodeId] = append(groups[c.NodeId], c)
-	}
+	all := make([]recentConn, 0, len(local)+len(remote))
 	for _, c := range local {
 		c.NodeId = self.Id
 		if multi {
 			c.Server = self.Name
 		}
-		add(c)
+		all = append(all, c)
 	}
-	for _, c := range remote {
-		add(c)
+	all = append(all, remote...)
+	for i := range all {
+		all[i].Family = ipFamily(all[i].IP)
 	}
-	total := 0
-	for _, id := range order {
-		g := groups[id]
-		sort.SliceStable(g, func(i, j int) bool { return g[i].Ts > g[j].Ts })
-		total += len(g)
+	sort.SliceStable(all, func(i, j int) bool { return all[i].Ts > all[j].Ts })
+	if len(all) <= limit {
+		return all
 	}
-	sort.SliceStable(order, func(i, j int) bool { return groups[order[i]][0].Ts > groups[order[j]][0].Ts })
-	out := make([]recentConn, 0, min(total, limit))
-	for i := 0; len(out) < limit && len(out) < total; i++ {
-		for _, id := range order {
-			if g := groups[id]; i < len(g) && len(out) < limit {
-				out = append(out, g[i])
-			}
+	keep, seen, n := make([]bool, len(all)), map[uint]bool{}, 0
+	for i, c := range all { // 按时间从新到旧:每台第一次出现的那条就是它最近的
+		if n < limit && !seen[c.NodeId] {
+			seen[c.NodeId], keep[i] = true, true
+			n++
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Ts > out[j].Ts })
+	for i := range all {
+		if n < limit && !keep[i] {
+			keep[i] = true
+			n++
+		}
+	}
+	out := make([]recentConn, 0, limit)
+	for i, c := range all {
+		if keep[i] {
+			out = append(out, c)
+		}
+	}
 	return out
 }
 
