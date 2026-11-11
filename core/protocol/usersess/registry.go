@@ -9,6 +9,10 @@
 // 用户表没变、只是顺序变了,一个会话都不关 —— 这一条错了就是全员掉线,因为每次主机推快照都会热更新一遍。
 // 踢线(CloseUsers)按显式名字列表关,并给这些名字打一个撤销点:撤销之前建立、还没开过流的会话,开第一条流时也会被拒。
 //
+// 批量关闭(Commit / CloseUsers / CloseAll)要等被关的连接**真正**断开才返回:QUIC 连接的关闭是交给它自己的
+// 事件循环做的,只发个信号就返回的话,调用方以为"已经断开"的那一刻连接其实还通着 —— 机器一忙,那条循环
+// 迟迟排不上,客户端照样收发,报出去的"断开 N 条"也不实(见 shutAll)。
+//
 // 锁的约定:Registry.mu 是叶子锁,持有它时不调任何外部函数;真正关闭会话一律在锁外做。
 // Set.mu → Registry.mu 是唯一允许的嵌套方向,Set 遍历时先复制再解锁。
 package usersess
@@ -17,6 +21,7 @@ import (
 	"net/netip"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Session 一条会话(hy2 / TUIC 是一条 QUIC 连接,anytls 是一条 TLS 连接)。
@@ -24,7 +29,8 @@ type Session struct {
 	reg    *Registry
 	start  uint64                // 登记时的序号(与换表、撤销共用同一个单调计数器)
 	user   string                // 第一条流进来时绑定,之后不再改;归 reg.mu 管
-	closer func()                // 关整条会话;只会被调一次
+	closer func()                // 发起关闭整条会话;只会被调一次,不能阻塞
+	done   <-chan struct{}       // 底层连接真正关掉时关闭(QUIC:连接的 ctx);nil = closer 返回时就已经关掉(TCP 的 Close)
 	remote func() netip.AddrPort // 当前对端地址(QUIC 连接迁移后会变);TCP 会话为 nil
 	addr   netip.AddrPort        // 登记时的对端地址(已 Unmap),按它建索引;无效 = 不索引
 	closed atomic.Bool
@@ -32,13 +38,18 @@ type Session struct {
 }
 
 // Close 关掉整条会话(幂等)。closer 由登记方给,通常是 conn.CloseWithError / rawConn.Close。
-func (s *Session) Close() {
+// 只发起、不等:要"返回时已经断开"的是批量关闭(Commit / CloseUsers / CloseAll),它们会等。
+func (s *Session) Close() { s.shut() }
+
+// shut 发起关闭;这一次真正把它关掉的返回 true(之前已经关过的返回 false,不重复计数)。
+func (s *Session) shut() bool {
 	if s == nil || !s.closed.CompareAndSwap(false, true) {
-		return
+		return false
 	}
 	if s.closer != nil {
 		s.closer()
 	}
+	return true
 }
 
 // Closed 会话是否已被关掉(或登记时登记表已关闭)。
@@ -82,10 +93,15 @@ func New(creds map[string]string) *Registry {
 	return r
 }
 
-// Begin 登记一条刚建立的会话。closer 关整条会话;remote 取当前对端地址(TCP 会话传 nil)。
+// Begin 登记一条刚建立的会话。closer 关整条会话,返回时连接就已经关掉(TCP 的 Close);remote 取当前对端地址(TCP 会话传 nil)。
 // 登记表已关闭(入站在关)时直接把它关掉并返回一个已关闭的会话:调用方看 Closed() 决定要不要继续。
 func (r *Registry) Begin(closer func(), remote func() netip.AddrPort) *Session {
-	s := &Session{reg: r, closer: closer, remote: remote}
+	return r.begin(closer, nil, remote)
+}
+
+// begin 同 Begin;closer 只发起关闭的(QUIC),done 在连接真正关掉时关闭,批量关闭靠它等到断开为止。
+func (r *Registry) begin(closer func(), done <-chan struct{}, remote func() netip.AddrPort) *Session {
+	s := &Session{reg: r, closer: closer, done: done, remote: remote}
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
@@ -200,7 +216,8 @@ func (r *Registry) Prepare(creds map[string]string) {
 }
 
 // Commit 换表第二步:按名字比对指纹,关掉被移除的和凭据变了的用户的会话,换上新表。
-// 返回被移除、凭据变了的名字,以及关掉的会话数。表没变时三者都为空。
+// 返回被移除、凭据变了的名字,以及这一次关掉的会话数;等这些会话的连接真正断开才返回(见 shutAll)。
+// 表没变时三者都为空。
 func (r *Registry) Commit(creds map[string]string) (removed, changed []string, closed int) {
 	var victims []*Session
 	r.mu.Lock()
@@ -228,15 +245,18 @@ func (r *Registry) Commit(creds map[string]string) (removed, changed []string, c
 	r.creds = next
 	r.pruneLocked()
 	r.mu.Unlock()
-	for _, s := range victims {
-		s.Close()
-	}
-	return removed, changed, len(victims)
+	return removed, changed, shutAll(victims)
 }
 
 // CloseUsers 踢线:关掉这些名字已绑定的会话,并打上撤销点(撤销前建立、还没开流的会话之后也进不来)。
-// 名字精确匹配:踢本人传 [X, X#share],只踢共享传 [X#share]。返回关掉的会话数。
+// 名字精确匹配:踢本人传 [X, X#share],只踢共享传 [X#share]。
+// 返回这一次关掉的会话数;等这些会话的连接真正断开才返回(见 shutAll)。
 func (r *Registry) CloseUsers(names []string) int {
+	return shutAll(r.revoke(names))
+}
+
+// revoke CloseUsers 的锁内部分:打撤销点,返回这些名字已绑定的会话(还没关)。
+func (r *Registry) revoke(names []string) []*Session {
 	var victims []*Session
 	r.mu.Lock()
 	r.seq++
@@ -256,13 +276,10 @@ func (r *Registry) CloseUsers(names []string) int {
 	}
 	r.pruneLocked()
 	r.mu.Unlock()
-	for _, s := range victims {
-		s.Close()
-	}
-	return len(victims)
+	return victims
 }
 
-// CloseAll 入站关闭(anytls):关掉全部会话,之后登记的会话立刻被关。返回关掉的会话数。
+// CloseAll 入站关闭(anytls):关掉全部会话,之后登记的会话立刻被关。返回这一次关掉的会话数。
 func (r *Registry) CloseAll() int {
 	var victims []*Session
 	r.mu.Lock()
@@ -271,10 +288,57 @@ func (r *Registry) CloseAll() int {
 		victims = append(victims, s)
 	}
 	r.mu.Unlock()
+	return shutAll(victims)
+}
+
+// closeWaitLimit 批量关闭最多等多久让连接真正断开。正常是微秒到毫秒级(只是本机的事件循环处理一下、发出
+// CONNECTION_CLOSE,不等对端);这个上限只给卡死的连接兜底,不让换表 / 踢线一直挂着。
+var closeWaitLimit = 2 * time.Second
+
+// shutAll 关掉这批会话,等它们的连接真正断开(最多 closeWaitLimit)再返回;返回这一次真正关掉的条数。
+//
+// 为什么要等:QUIC 会话的 closer 只是起一个协程去 CloseWithError,真正关连接(断开全部流、发 CONNECTION_CLOSE)
+// 是那条连接自己的事件循环做的。以前发完信号就返回:机器一忙,关闭协程和事件循环迟迟排不上,
+// 这段时间里老连接照样收发 —— 端到端测试把进程限在 1 个核上(GOMAXPROCS 4)时约一半的轮次,
+// 踢线 / 移除 / 换密码之后立刻发的探测字节还能经老连接被回显回来("连接还活着")。
+//
+// 为什么不重复计数:被关掉的会话要等连接的 ctx 结束后另起协程才注销(End),在那之前它还挂在 byUser 里;
+// 紧接着的下一次换表 / 踢线会再把它算进来 —— 以前照样算一条("移除应关 1 条,实际 2"),
+// 报给面板的"断开 N 条"也就多了。现在只数这一次真正关掉的;已经关掉的照样等它断干净。
+func shutAll(victims []*Session) int {
+	n := 0
 	for _, s := range victims {
-		s.Close()
+		if s.shut() {
+			n++
+		}
 	}
-	return len(victims)
+	waitShut(victims, closeWaitLimit)
+	return n
+}
+
+// waitShut 等这批会话的连接都真正断开,总共最多等 limit。done 为 nil 的会话(TCP)closer 返回时就已断开,不用等。
+func waitShut(victims []*Session, limit time.Duration) {
+	var timeout <-chan time.Time
+	for _, s := range victims {
+		if s.done == nil {
+			continue
+		}
+		select {
+		case <-s.done:
+			continue
+		default:
+		}
+		if timeout == nil {
+			t := time.NewTimer(limit)
+			defer t.Stop()
+			timeout = t.C
+		}
+		select {
+		case <-s.done:
+		case <-timeout:
+			return
+		}
+	}
 }
 
 // Clear 入站关闭(hy2 / TUIC):QUIC 连接由传输层自己销毁,这里只把表清空并关门。

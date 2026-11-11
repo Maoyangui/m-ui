@@ -32,6 +32,10 @@ import (
 //  3. 移除用户 → 会话关掉,旧凭据连不上;再加回来 → 不关任何会话,又能连;
 //  4. 换密码 → 会话关掉,旧凭据连不上。
 //
+// "关掉"指调用返回时连接已经断开,不是稍后才断:返回之后立刻发的探测字节不许再被回显回来(e2eMustFail)。
+// QUIC 的关闭是连接自己的事件循环做的,以前只发信号不等,机器一忙(把测试限在 1 个核上:
+// go test -exec 'taskset -c 0' -cpu 4)约一半的轮次能复现"连接还活着";返回的会话数也只数这一次真正关掉的。
+//
 // 要开真实端口跑 QUIC,默认跳过:
 //
 //	M_UI_E2E=1 go test -tags with_utls ./core/ -run E2E -v
@@ -143,6 +147,10 @@ func TestUserSessionsE2E(t *testing.T) {
 			// 2. 踢线:整条会话关掉,老连接读到错误;凭据没变,能重连
 			if n := c.GetInstance().CloseUserSessions([]string{"alice"}); n != 1 {
 				t.Fatalf("踢线应关掉 1 条会话,实际 %d(0 = 会话登记没生效,查 sing-quic 的 ServerConfig 扩展点)", n)
+			}
+			// 刚关掉的会话要等连接结束后另起协程才注销,这时多半还挂在登记表里:紧接着再踢一次不能把它再算一条
+			if n := c.GetInstance().CloseUserSessions([]string{"alice"}); n != 0 {
+				t.Fatalf("刚踢过、没有新会话,再踢应关 0 条,实际 %d(已关掉的会话被重复计数)", n)
 			}
 			e2eMustFail(t, c1, "踢线后老连接应断开")
 			c2 := e2eMustEcho(t, dial, "凭据没变,踢线后应能重连")
@@ -266,14 +274,15 @@ func e2eMustEcho(t *testing.T, dial func() (net.Conn, error), why string) net.Co
 	return nil
 }
 
-// e2eMustFail 老连接必须在几秒内读到错误(会话被关 → 流跟着断)。
+// e2eMustFail 老连接必须读到错误(会话被关 → 流跟着断)。调用方在关会话的调用返回之后立刻调它:
+// 探测字节要是还能被回显回来,说明返回时连接其实还通着(只发了关闭信号、没等它真正断开)。
 func e2eMustFail(t *testing.T, conn net.Conn, why string) {
 	t.Helper()
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	buf := make([]byte, 16)
 	_, _ = conn.Write([]byte("x"))
-	if _, err := conn.Read(buf); err == nil {
-		t.Fatalf("%s:连接还活着", why)
+	if n, err := conn.Read(buf); err == nil {
+		t.Fatalf("%s:连接还活着(探测字节被回显:%q)", why, buf[:n])
 	} else if errors.Is(err, os.ErrDeadlineExceeded) {
 		t.Fatalf("%s:10 秒内没断(只关了流、会话还在?)", why)
 	}

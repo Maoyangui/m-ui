@@ -128,7 +128,9 @@ func (l *trackingListener) Accept(ctx context.Context) (*quic.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	sess := l.reg.Begin(func() { go conn.CloseWithError(0, "") }, func() netip.AddrPort { return addrPortOf(conn.RemoteAddr()) })
+	// closer 不能阻塞(Accept 与流的处理协程里也会调),只起协程发 CloseWithError;连接真正关掉
+	// (全部流断开、CONNECTION_CLOSE 已发出)以连接的 ctx 结束为准,换表 / 踢线靠它等到断开再返回。
+	sess := l.reg.begin(func() { go conn.CloseWithError(0, "") }, conn.Context().Done(), func() netip.AddrPort { return addrPortOf(conn.RemoteAddr()) })
 	if sl := slotOf(conn.Context()); sl != nil {
 		sl.Store(sess)
 	}
