@@ -101,6 +101,7 @@ func TestStandbyVersionLagKeepsReplica(t *testing.T) {
 		c.d.Version = "0.7.18"
 	}
 	cl.h.RunOnce()
+	m.d.DB.Model(&model.User{}).Where("name = ?", "alice").Update("up", 4242) // 内容变了才会重发
 	if err := m.ReplicateNow(); err != nil {
 		t.Fatalf("升级后恢复: %v", err)
 	}
@@ -340,17 +341,22 @@ func TestDropPendingRetries(t *testing.T) {
 	var n0, n1 model.Node
 	m.d.DB.First(&n0, cl.ids[0])
 	m.d.DB.First(&n1, cl.ids[1])
+	// 等 QueueDrop 当场那一次试完(连不上:记下一次失败)
 	waitDrops := func() {
-		for i := 0; i < 200; i++ {
-			m.rep.dropMu.Lock()
-			running := m.rep.dropRunning
-			m.rep.dropMu.Unlock()
-			if !running {
+		for i := 0; i < 500; i++ {
+			done := true
+			for _, p := range m.DropPending() {
+				if p.Tries == 0 {
+					done = false
+				}
+			}
+			if done {
+				m.RetryDrops() // 等在跑的那一轮收尾
 				return
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		t.Fatal("重试没结束")
+		t.Fatalf("当场那一次没试完: %+v", m.DropPending())
 	}
 	// 第一台停用、第二台删除,当时都连不上
 	cl.agents[0].setDown(true)
@@ -372,7 +378,7 @@ func TestDropPendingRetries(t *testing.T) {
 	}
 	// 还没到下次重试:不发
 	calls := cl.agents[0].count("ha/drop")
-	m.rep.runDrops()
+	m.RetryDrops()
 	if cl.agents[0].count("ha/drop") != calls {
 		t.Fatal("没到下次重试时间不该发")
 	}
@@ -380,7 +386,7 @@ func TestDropPendingRetries(t *testing.T) {
 	cl.agents[0].setDown(false)
 	cl.agents[1].setDown(false)
 	cl.clk.add(5 * time.Minute)
-	m.rep.runDrops()
+	m.RetryDrops()
 	if p := m.DropPending(); len(p) != 0 {
 		t.Fatalf("确认后清掉待办: %+v", p)
 	}
@@ -401,7 +407,7 @@ func TestDropPendingRetries(t *testing.T) {
 	}
 	m.d.DB.Model(&model.Node{}).Where("id = ?", n0.Id).Update("enabled", true)
 	cl.clk.add(time.Hour)
-	m.rep.runDrops()
+	m.RetryDrops()
 	if len(m.DropPending()) != 0 {
 		t.Fatal("重新启用的副机不再催它删副本")
 	}
