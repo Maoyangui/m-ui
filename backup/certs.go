@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -23,7 +24,8 @@ import (
 // 还原(meta.json 里的路径是不可信输入,数据目录外一个文件都不写):
 //   - 数据目录里的普通文件:写回原路径,还原就是回到备份那一刻;
 //   - 数据目录外的(「已有证书」的 certbot / 宝塔 / nginx 文件、旧面板导入的路径),以及数据目录里的符号链接:
-//     本机那个文件能接着用(是同一张、不比备份旧、和私钥配得上)就不动它 —— 同一台机器上还原时 certbot 续期照常生效;
+//     本机那个文件能接着用(现在有效、写着备份那张的全部域名、不比备份旧或者还剩两周以上、和私钥配得上,见 usableLocal)
+//     就不动它 —— 同一台机器上还原、或新机上已经用 certbot 签好了,续期照常生效;
 //     不能用才写备份里那份:外部的放进 <数据目录>/cert/restored/,设置与证书库改指过去;链接换成文件,不顺着链接写到外面。
 //   - 证书与私钥成对处理:一个要换,另一个跟着换,免得拼出一对配不上的。
 // 老版本做的备份格式相同,照样这样还原;老版本还原新备份:数据目录外的照旧跳过(只打一行 Warning),不会失败。
@@ -118,8 +120,12 @@ type Report struct {
 	Missing  []CertNote // 还原后面板 / 订阅 / 代理面板 / 线路正用着、本机却没有的证书文件
 }
 
-// CertMove 一个数据目录外的证书文件还原到了哪。
-type CertMove struct{ From, To string }
+// CertMove 一个数据目录外的证书文件还原到了哪。证书(不是私钥)另记写着的域名与到期时间:放进来的是副本,没有谁续它。
+type CertMove struct {
+	From, To string
+	Names    []string
+	NotAfter time.Time
+}
 
 // CertNote 一个证书文件和一句说明。
 type CertNote struct{ Path, Reason string }
@@ -153,13 +159,18 @@ func (r Report) Lines() []ReportLine {
 		info("  写回原路径:" + p)
 	}
 	for _, m := range r.Moved {
-		info("  " + m.From + " 在数据目录外、本机没有能用的同一张:已放到 " + m.To + ",设置已改指这里")
+		line := "  " + m.From + " 在数据目录外,本机那里没有能接着用的:已放到 " + m.To + ",设置已改指这里"
+		if len(m.Names) > 0 {
+			line += "(" + strings.Join(m.Names, "、") + "," + m.NotAfter.Local().Format("2006-01-02") + " 到期)"
+		}
+		info(line)
 	}
 	for _, s := range r.Skipped {
 		info("  跳过 " + s.Path + ":" + s.Reason)
 	}
 	if len(r.Moved) > 0 {
-		info("  放进数据目录的是备份那一刻的副本:原来由 certbot 等工具续期的,以后不会再跟着更新,到期前在证书页重新签发,或者把服务器上的证书重新添加进来")
+		info("  放进数据目录的是备份那一刻的副本:原来由 certbot 等工具续期的,以后不会再跟着更新,没有谁续它。到期前在证书页签一张新的," +
+			"或者把这台服务器上 certbot 的证书作为「已有证书」添加进来,再换过去")
 	}
 	for _, f := range r.Failed {
 		warn("  没写成 " + f.Path + ":" + f.Reason)
@@ -248,34 +259,82 @@ func certNames(c *x509.Certificate) []string {
 	return out
 }
 
-// usableLocal 本机 path 上的文件能不能接着用、不换成备份里那份:是个读得出的文件(符号链接跟过去看),
-// 证书要和备份里那张写着同样的域名 / IP,而且不比它旧(同一台机器上 certbot 续过的就比备份新);
-// 同一路径上放着别的站点的证书、或者更旧的一张,都不算。私钥看不出是不是"同一把",由成对校验兜着。
-func usableLocal(path string, backup []byte) bool {
+// localMinLeft 本机的证书比备份里那张旧时,至少还要剩这么久才接着用。certbot 等工具在剩 30 天左右续,有人续着的证书
+// 一般剩得比这多;剩得更少的多半已经没人续了,先用备份里那张(证书页标明它是还原的副本,到期前提醒)。
+const localMinLeft = 14 * 24 * time.Hour
+
+// usableLocal 本机 path 上的文件能不能接着用、不换成备份里那份。先得是个读得出的普通文件(符号链接跟过去看)。
+//   - 私钥:读得出就行,看不出是不是"同一把",配不配得上由成对校验管;
+//   - 证书:现在有效,写着备份那张的全部域名 / IP(多写了不要紧,certbot --expand 加过 www 的照样用),而且不比备份那张旧、
+//     或者还剩 localMinLeft 以上 —— 新机上先装 certbot 签好的,哪怕旧机之后又续过一次、备份里那张更新,也接着用本机这张:
+//     本机这张有人续,备份里那张放进来就再没人续了(以前要求域名完全相同、不比备份旧,这种情况被冻结的副本顶掉)。
+//     同一路径上是别的站点的证书、少了备份那张的某个域名、已经过期、快过期又比备份旧的,都不算。
+//
+// 第二个返回值是接着用的那张证书(私钥、或者备份那份不是证书时为 nil),报告里写明用的是哪张、什么时候到期。
+func usableLocal(path string, backup []byte, now time.Time) (bool, *x509.Certificate) {
 	st, err := os.Stat(path)
 	if err != nil || !st.Mode().IsRegular() {
-		return false
+		return false, nil
 	}
 	if bytes.Contains(backup, []byte("PRIVATE KEY-----")) {
-		return true
+		return true, nil
 	}
 	want := leafOf(backup)
 	if want == nil {
-		return true // 备份里那份本来就不是证书,没法比:用本机的
+		return true, nil // 备份里那份本来就不是证书,没法比:用本机的
 	}
 	local, err := os.ReadFile(path)
 	if err != nil {
-		return false
-	}
-	if bytes.Equal(local, backup) {
-		return true
+		return false, nil
 	}
 	have := leafOf(local)
 	if have == nil {
-		return false
+		return false, nil
 	}
-	a, b := certNames(have), certNames(want)
-	return strings.Join(a, ",") == strings.Join(b, ",") && !have.NotAfter.Before(want.NotAfter)
+	if bytes.Equal(local, backup) {
+		return true, have // 就是同一个文件:换不换都一样
+	}
+	if now.Before(have.NotBefore) || !now.Before(have.NotAfter) || !coversNames(have, certNames(want)) {
+		return false, nil
+	}
+	if have.NotAfter.Before(want.NotAfter) && have.NotAfter.Sub(now) <= localMinLeft {
+		return false, nil
+	}
+	return true, have
+}
+
+// coversNames c 写着 names 里的每一个:同一个名字,或者 c 的泛域名覆盖得到的子域名。
+func coversNames(c *x509.Certificate, names []string) bool {
+	have := map[string]bool{}
+	for _, n := range certNames(c) {
+		have[n] = true
+	}
+	for _, n := range names {
+		if have[n] {
+			continue
+		}
+		if strings.HasPrefix(n, "*.") || c.VerifyHostname(n) != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// keptReason 本机的文件接着用、没换成备份里那份时,报告里怎么说:证书写明是哪张、什么时候到期。
+func keptReason(link bool, c *x509.Certificate, key bool) string {
+	what := "本机已有这个文件,"
+	if link {
+		what = "本机这里是符号链接,指向的文件"
+	}
+	switch {
+	case c != nil:
+		what += fmt.Sprintf("能接着用(%s,%s 到期)", strings.Join(certNames(c), "、"), c.NotAfter.Local().Format("2006-01-02"))
+	case key:
+		what += "和本机的证书配得上,接着用"
+	default:
+		what += "能用"
+	}
+	return what + ",没有换成备份里那份"
 }
 
 // pairOK 本机这对证书与私钥配得上。
@@ -425,9 +484,13 @@ func restoreCerts(db *gorm.DB, dbErr error, root string, entries []certEntry, re
 		cand[e.path] = e
 	}
 	write := map[string]bool{}
+	kept := map[string]*x509.Certificate{} // 接着用的本机证书(报告里写明是哪张)
+	now := time.Now()
 	for p, e := range cand {
-		if !usableLocal(p, e.data) {
+		if ok, c := usableLocal(p, e.data, now); !ok {
 			write[p] = true
+		} else {
+			kept[p] = c
 		}
 	}
 	// 成对:一个要换,另一个跟着换;都不换的,本机这对也得配得上
@@ -458,10 +521,8 @@ func restoreCerts(db *gorm.DB, dbErr error, root string, entries []certEntry, re
 		}
 		key := isPrivateKey(e.path, e.data, refs)
 		switch {
-		case !write[e.path] && e.link:
-			rep.Skipped = append(rep.Skipped, CertNote{Path: e.path, Reason: "本机这里是符号链接,指向的文件能用(同一张、不比备份旧),没有换掉"})
 		case !write[e.path]:
-			rep.Skipped = append(rep.Skipped, CertNote{Path: e.path, Reason: "本机已有这个文件,能用(同一张、不比备份旧),继续用它,没有覆盖"})
+			rep.Skipped = append(rep.Skipped, CertNote{Path: e.path, Reason: keptReason(e.link, kept[e.path], key)})
 		case e.inRoot: // 数据目录里的符号链接,指向的文件用不了:换成备份里的文件
 			if err := writeCertFile(e.path, e.data, key); err != nil {
 				fail(e.path, err.Error())
@@ -482,7 +543,11 @@ func restoreCerts(db *gorm.DB, dbErr error, root string, entries []certEntry, re
 				continue
 			}
 			moved[e.path] = dst
-			rep.Moved = append(rep.Moved, CertMove{From: e.path, To: dst})
+			m := CertMove{From: e.path, To: dst}
+			if c := leafOf(e.data); c != nil && !key {
+				m.Names, m.NotAfter = certNames(c), c.NotAfter
+			}
+			rep.Moved = append(rep.Moved, m)
 		}
 	}
 	if len(moved) == 0 {

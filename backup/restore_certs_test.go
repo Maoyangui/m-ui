@@ -3,13 +3,22 @@ package backup
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database"
@@ -21,6 +30,12 @@ import (
 // certbotPair 按 certbot 的样子放一张证书:archive/<域名>/fullchain1.pem、privkey1.pem 是文件,
 // live/<域名>/fullchain.pem、privkey.pem 是指向它们的符号链接。返回 live/ 下的两个路径。
 func certbotPair(t *testing.T, le, domain string, days int) (string, string) {
+	t.Helper()
+	return certbotNames(t, le, domain, []string{domain}, days)
+}
+
+// certbotNames 同 certbotPair,证书里写着 names(certbot --expand 加过 www 的那种)。
+func certbotNames(t *testing.T, le, domain string, names []string, days int) (string, string) {
 	t.Helper()
 	arch, live := filepath.Join(le, "archive", domain), filepath.Join(le, "live", domain)
 	if err := os.MkdirAll(live, 0o755); err != nil {
@@ -34,7 +49,7 @@ func certbotPair(t *testing.T, le, domain string, days int) (string, string) {
 		n++
 	}
 	ac, ak := filepath.Join(arch, "fullchain"+strconv.Itoa(n)+".pem"), filepath.Join(arch, "privkey"+strconv.Itoa(n)+".pem")
-	if err := certutil.GenerateSelfSigned([]string{domain}, ac, ak, days); err != nil {
+	if err := certutil.GenerateSelfSigned(names, ac, ak, days); err != nil {
 		t.Fatal(err)
 	}
 	c, k := filepath.Join(live, "fullchain.pem"), filepath.Join(live, "privkey.pem")
@@ -223,6 +238,140 @@ func TestRestoreKeepsUsableLocalCerts(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(newRoot, "cert", "restored")); !os.IsNotExist(err) {
 		t.Fatal("本机的证书能用,不该再放一份副本")
+	}
+}
+
+// 换机时先在新机装好 certbot、给同一个域名签好证书,再还原备份。本机这张有人续,要接着用,不能被备份里冻结的副本顶掉:
+// 旧机在新机签发之后又续过一次(备份里那张更新),或者新机签的时候多加了 www,以前都被判成"不能用",设置改指到
+// cert/restored/ 里的副本,新机 certbot 之后的续期全被绕开。报告写明接着用的是哪张、什么时候到期。
+func TestRestoreKeepsCertbotCertIssuedOnNewServer(t *testing.T) {
+	base := t.TempDir()
+	le := filepath.Join(base, "letsencrypt")
+	aCert, aKey := certbotPair(t, le, "a.example.com", 120) // 旧机:备份前刚续过
+	bCert, bKey := certbotPair(t, le, "b.example.com", 90)
+	db := openDB(t, filepath.Join(base, "old", DBName))
+	setAll(t, db, map[string]string{
+		"webCertFile": aCert, "webKeyFile": aKey, "subCertFile": aCert, "subKeyFile": aKey, "certFile": bCert, "keyFile": bKey,
+	})
+	db.Create(&model.Cert{Name: "a.example.com", Source: "external", CertFile: aCert, KeyFile: aKey})
+	db.Create(&model.Cert{Name: "b.example.com", Source: "external", CertFile: bCert, KeyFile: bKey})
+	zipPath := backupTo(t, db, base, CertPaths(db))
+	database.Close(db)
+	os.RemoveAll(le)
+	certbotPair(t, le, "a.example.com", 60)                                                  // 新机上签的:比备份里那张早到期
+	certbotNames(t, le, "b.example.com", []string{"b.example.com", "www.b.example.com"}, 90) // 新机上多签了 www
+	localA, _ := os.ReadFile(aCert)
+	localB, _ := os.ReadFile(bCert)
+
+	root := filepath.Join(base, "new")
+	dst := filepath.Join(root, DBName)
+	rep, err := Restore(dst, zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, rows := restoredState(t, dst)
+	if set["webCertFile"] != aCert || set["subKeyFile"] != aKey || set["certFile"] != bCert || set["keyFile"] != bKey {
+		t.Fatalf("本机 certbot 签好的证书能用,设置不该改指别处: %v", set)
+	}
+	if len(rows) != 2 || rows[0].CertFile != aCert || rows[1].CertFile != bCert {
+		t.Fatalf("证书库也不该改指: %+v", rows)
+	}
+	if len(rep.Moved) != 0 {
+		t.Fatalf("不该放冻结的副本进来: %+v", rep.Moved)
+	}
+	if _, err := os.Stat(filepath.Join(root, "cert", RestoredDir)); !os.IsNotExist(err) {
+		t.Fatal("本机的证书都能用,不该建 cert/restored/")
+	}
+	if b, _ := os.ReadFile(aCert); !bytes.Equal(b, localA) {
+		t.Fatal("本机的证书被改了")
+	}
+	reasons := map[string]string{}
+	for _, s := range rep.Skipped {
+		reasons[s.Path] = s.Reason
+	}
+	day := func(pemBytes []byte) string { return leafOf(pemBytes).NotAfter.Local().Format("2006-01-02") }
+	if r := reasons[aCert]; !strings.Contains(r, "本机已有这个文件,能接着用(a.example.com,"+day(localA)+" 到期)") {
+		t.Fatalf("报告要写明接着用的是本机哪张、什么时候到期: %q", r)
+	}
+	if r := reasons[bCert]; !strings.Contains(r, "(b.example.com、www.b.example.com,"+day(localB)+" 到期)") {
+		t.Fatalf("多签了 www 的本机证书照样接着用: %q", r)
+	}
+	if r := reasons[aKey]; !strings.Contains(r, "和本机的证书配得上") {
+		t.Fatalf("私钥的原因不对: %q", r)
+	}
+}
+
+// pemCert 一张写着 names 的自签证书(有效期 notBefore ~ notAfter),返回 PEM。
+func pemCert(t *testing.T, names []string, notBefore, notAfter time.Time) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := &x509.Certificate{SerialNumber: big.NewInt(time.Now().UnixNano()), Subject: pkix.Name{CommonName: names[0]}, DNSNames: names,
+		NotBefore: notBefore, NotAfter: notAfter}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+// 本机那个文件接不接着用的口径:现在有效、写着备份那张的全部域名(多了不要紧,泛域名覆盖得到的也算),
+// 而且不比备份旧、或者还剩两周以上;私钥读得出就行(配不配得上由成对校验管)。
+func TestUsableLocalRules(t *testing.T) {
+	now := time.Now()
+	const day = 24 * time.Hour
+	names := []string{"a.example.com", "www.a.example.com"}
+	backup := pemCert(t, names, now.Add(-10*day), now.Add(80*day))
+	dir := t.TempDir()
+	for i, c := range []struct {
+		why    string
+		names  []string
+		nb, na time.Duration
+		want   bool
+	}{
+		{"同样的域名,比备份旧但还剩 30 天(新机先签的,旧机后来又续过)", names, -60 * day, 30 * day, true},
+		{"多写了一个域名", []string{"b.example.com", "a.example.com", "www.a.example.com"}, -day, 89 * day, true},
+		{"泛域名覆盖得到 www", []string{"a.example.com", "*.a.example.com"}, -day, 89 * day, true},
+		{"比备份新", names, -day, 120 * day, true},
+		{"少了 www", []string{"a.example.com"}, -day, 89 * day, false},
+		{"别的站点", []string{"other.example.net"}, -day, 89 * day, false},
+		{"已经过期", names, -91 * day, -day, false},
+		{"还没生效", names, day, 91 * day, false},
+		{"比备份旧、只剩 10 天", names, -80 * day, 10 * day, false},
+	} {
+		p := filepath.Join(dir, fmt.Sprintf("%d.pem", i))
+		if err := os.WriteFile(p, pemCert(t, c.names, now.Add(c.nb), now.Add(c.na)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		ok, leaf := usableLocal(p, backup, now)
+		if ok != c.want || (ok && leaf == nil) {
+			t.Errorf("%s: 得 %v(证书 %v),应为 %v", c.why, ok, leaf != nil, c.want)
+		}
+	}
+	// 本机这张只剩 5 天,但备份里那张更旧(只剩 3 天):本机的不比备份差,接着用
+	older := pemCert(t, names, now.Add(-87*day), now.Add(3*day))
+	p := filepath.Join(dir, "newer.pem")
+	if err := os.WriteFile(p, pemCert(t, names, now.Add(-85*day), now.Add(5*day)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := usableLocal(p, older, now); !ok {
+		t.Error("本机这张比备份里那张新,快到期也接着用")
+	}
+	keyPEM := []byte("-----BEGIN EC PRIVATE KEY-----\nAA==\n-----END EC PRIVATE KEY-----\n")
+	kp := filepath.Join(dir, "privkey.pem")
+	if err := os.WriteFile(kp, []byte("本机的私钥"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ok, c := usableLocal(kp, keyPEM, now); !ok || c != nil {
+		t.Errorf("私钥读得出就接着用: %v %v", ok, c)
+	}
+	if ok, _ := usableLocal(filepath.Join(dir, "gone.pem"), backup, now); ok {
+		t.Error("文件不在不能算")
+	}
+	if ok, _ := usableLocal(dir, backup, now); ok {
+		t.Error("目录不能算")
 	}
 }
 
