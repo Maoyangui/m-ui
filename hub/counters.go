@@ -50,6 +50,7 @@ type MergeResult struct {
 	Merged    int  // 有增量、记了账的用户数
 	Regressed int  // 同一个用户的计数比游标小:按账本回退处理(游标对齐、这一次不计)
 	Recreated int  // 主机上删了又建的同名用户,副机那本也从头记了:从 0 计
+	Reopened  int  // 同一个用户的账本被整本清掉后从 0 重开了一本(改名后再改回):从 0 计
 	NodeGone  bool // 副机已经删除,整份丢弃
 }
 
@@ -69,6 +70,8 @@ func ApplyCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 // 新版副机的账本记着主人(用户 id 与建号时间,见 model.AddAgentCounters),游标也记账本主人:主人和游标对不上就是
 // 同名用户删了又建后新开的一本,不管计数比游标大还是小都从 0 计。只靠"比游标小"会漏:新用户在这台机器上用得和前人
 // 一样多或更多时,首份报告追上旧游标,以前只计差值、相等时整份当"没变化"跳过(Azure 真机 run3,13 个用户的副机流量全漏)。
+// 主人一样、账本代号(LedgerId)不一样也是新开的一本:副机账本被整本清掉后同一个人从 0 重开(改名后再改回),
+// 以前同一主人计数比游标小当成账本回退(对齐不计,还误报)、追上游标只计差值,每个用户漏掉 min(首份, 旧游标)。
 // 账本主人和主机上现在这个同名用户对不上(主机已经删了又建、副机还没收到快照时报来的旧账本),只计服务器维度。
 // 老副机 / 升级前的老账本不报主人,照下面的老办法。
 func MergeCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []model.AgentCounter, now int64, bucketSeconds int64, ratio float64) (MergeResult, error) {
@@ -146,6 +149,9 @@ func MergeCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 		if res.Recreated > 0 {
 			logger.Info("副机 ", nodeName, " 上有 ", res.Recreated, " 个同名用户是删了重建的,从 0 开始计")
 		}
+		if res.Reopened > 0 {
+			logger.Info("副机 ", nodeName, " 上有 ", res.Reopened, " 个用户的账本是清掉后重开的(比如改名后又改回),从 0 开始计")
+		}
 	}()
 	for len(changed) > 0 {
 		k := min(len(changed), counterChunk)
@@ -156,6 +162,7 @@ func MergeCounters(db *gorm.DB, nodeId uint, nodeName, epoch string, counters []
 		res.Merged += r.Merged
 		res.Regressed += r.Regressed
 		res.Recreated += r.Recreated
+		res.Reopened += r.Reopened
 		if errors.Is(err, errNodeGone) {
 			res.NodeGone = true
 			return res, nil
@@ -213,6 +220,10 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 				// 账本记着主人,和游标记的不是同一个人:同名用户删了又建,副机那本是新开的、从 0 记的。
 				// 不管计数比游标大还是小都从 0 计 —— 以前只认"比游标小",新用户首份报告追上旧游标时只计差值、相等时整份跳过
 				res.Recreated++
+			case owned && !sameLedger(old, c):
+				// 主人一样、不是游标记的那一本:这个用户的账本被整本清掉后从 0 重开了(改名后再改回)。
+				// 不能当账本回退对齐不计,也不能只计比游标多出来的那段
+				res.Reopened++
 			case owned && (c.Up < old.Up || c.Down < old.Down):
 				res.Regressed++ // 同一本账计数变小:账本回退,对齐不计
 				dUp, dDown = 0, 0
@@ -371,7 +382,7 @@ func cursorFor(nodeId uint, c model.AgentCounter, u model.User, exists bool) mod
 	cur := model.TrafficCursor{NodeId: nodeId, UserName: c.UserName, Up: c.Up, Down: c.Down, UserId: u.Id, UserCreatedAt: u.CreatedAt}
 	switch {
 	case ownedLedger(c):
-		cur.UserId, cur.UserCreatedAt = c.UserId, c.UserCreatedAt
+		cur.UserId, cur.UserCreatedAt, cur.LedgerId = c.UserId, c.UserCreatedAt, c.LedgerId
 	case !exists:
 		cur.UserId, cur.UserCreatedAt = 0, userAbsent
 	}
@@ -390,9 +401,15 @@ func sameOwner(cur model.TrafficCursor, c model.AgentCounter) bool {
 	return cur.UserId == c.UserId && cur.UserCreatedAt == c.UserCreatedAt
 }
 
+// sameLedger 主人一样的前提下是不是游标记的那一本:账本代号也一样。升级前留下的游标(代号 0)遇到有代号的账本不是同一本 ——
+// 记了代号的都是升级后新开的。没有代号的账本(升级过程中新开的)只能看主人。
+func sameLedger(cur model.TrafficCursor, c model.AgentCounter) bool {
+	return sameOwner(cur, c) && cur.LedgerId == c.LedgerId
+}
+
 // unchanged 这份报告和游标一模一样(同一本账、计数没动),不用并。老副机不报主人,只看计数。
 func unchanged(cur model.TrafficCursor, c model.AgentCounter) bool {
-	return cur.Up == c.Up && cur.Down == c.Down && (!ownedLedger(c) || sameOwner(cur, c))
+	return cur.Up == c.Up && cur.Down == c.Down && (!ownedLedger(c) || sameLedger(cur, c))
 }
 
 func nodeGone(db *gorm.DB, nodeId uint) (bool, error) {
@@ -443,6 +460,6 @@ func upsertCursors(tx *gorm.DB, rows []model.TrafficCursor) error {
 	}
 	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "node_id"}, {Name: "user_name"}},
-		DoUpdates: clause.AssignmentColumns([]string{"up", "down", "user_id", "user_created_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"up", "down", "user_id", "user_created_at", "ledger_id"}),
 	}).CreateInBatches(&rows, counterChunk).Error
 }

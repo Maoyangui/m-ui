@@ -292,3 +292,64 @@ func TestOrphanAgentLedgerNotBilled(t *testing.T) {
 		t.Fatalf("新用户用了 1000,应全部计费,实际 %d", got)
 	}
 }
+
+// 副机的账本被整本清掉后同一个主人从 0 重开一本(改名后再改回、老版本副机停用时清了账本):主人和游标一样,
+// 但不是游标记的那一本。以前同一主人计数比游标小当成账本回退(对齐不计,还误报"账本回退"),
+// 追上游标只计差值、相等时整份当没变化跳过 —— 每个用户漏掉 min(首份, 旧游标)。
+func TestAgentLedgerReopenedSameOwner(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		first int64
+	}{{"首份小于旧游标", 300}, {"首份等于旧游标", 1000}, {"首份超过旧游标", 1600}} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRecreateRig(t)
+			u := r.newUser(100)
+			r.sync()
+			r.use(1000)
+			r.report(1000)
+			// 账本整本清掉(比如老版本副机停用时按空用户表清了账本),之后同一个用户重开一本
+			if err := r.agent.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.AgentCounter{}).Error; err != nil {
+				t.Fatal(err)
+			}
+			r.use(tc.first)
+			res := r.report(1005)
+			if res.Regressed != 0 {
+				t.Fatalf("重开的账本不是账本回退,不该告警: %+v", res)
+			}
+			if got := r.usage(u.Id); got != 1000+tc.first {
+				t.Fatalf("重开的账本应从 0 计,应是 %d,实际 %d", 1000+tc.first, got)
+			}
+			r.use(100)
+			r.report(1010)
+			r.report(1015)
+			if got := r.usage(u.Id); got != 1000+tc.first+100 {
+				t.Fatalf("之后按增量计,应是 %d,实际 %d", 1000+tc.first+100, got)
+			}
+		})
+	}
+}
+
+// 改名后再改回:改名时旧名字那本账清掉,改回后同一个主人用回原名、从 0 重开一本;主机上原名的游标还是改名前那本的。
+func TestAgentLedgerRenamedBack(t *testing.T) {
+	r := newRecreateRig(t)
+	u := r.newUser(100)
+	r.sync()
+	r.use(1000)
+	r.report(1000)
+	r.host.Model(&model.User{}).Where("id = ?", u.Id).Update("name", "bob")
+	r.sync() // alice 那本清掉
+	if err := model.AddAgentCounters(r.agent, []model.AgentCounter{{UserName: "bob", Up: 300, Down: 300}}, 100); err != nil {
+		t.Fatal(err)
+	}
+	r.report(1005)
+	r.host.Model(&model.User{}).Where("id = ?", u.Id).Update("name", "alice")
+	r.sync() // bob 那本清掉
+	r.use(200)
+	res := r.report(1010)
+	if res.Regressed != 0 {
+		t.Fatalf("改回原名后重开的账本不是账本回退,不该告警: %+v", res)
+	}
+	if got := r.usage(u.Id); got != 1500 {
+		t.Fatalf("改名前 1000 + 改名后 300 + 改回后 200,应是 1500,实际 %d", got)
+	}
+}

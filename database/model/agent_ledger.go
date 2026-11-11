@@ -1,6 +1,8 @@
 package model
 
 import (
+	"math/rand/v2"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -24,7 +26,9 @@ const sameAgentLedger = "((agent_counters.user_id = 0 AND agent_counters.user_cr
 // AddAgentCounters 副机记账:把这一轮各用户的增量加到本机单调账本上(批量 upsert)。
 // 每本账记下主人(本机用户表里这个名字现在的 id 与建号时间,和主机同步下来的一致):同名用户删了又建是另一本账,
 // 主人换了就换一本从 0 记,主机按主人认出新账本、从 0 计 —— 不靠"计数比游标小"去猜。
-// rows 里的 UserId / UserCreatedAt 由这里填。
+// 新开的一本(插入新行、换了主人换一本)还记一个随机代号 LedgerId,同一本累加时不变:账本被整本清掉后同一个主人
+// 从 0 重开(改名后再改回)主人对得上,主机靠代号认出是另一本、从 0 计,不当成账本回退。
+// rows 里的 UserId / UserCreatedAt / LedgerId 由这里填。
 func AddAgentCounters(tx *gorm.DB, rows []AgentCounter, batch int) error {
 	if len(rows) == 0 {
 		return nil
@@ -45,7 +49,9 @@ func AddAgentCounters(tx *gorm.DB, rows []AgentCounter, batch int) error {
 		}
 		rest = rest[k:]
 	}
+	ledger := newLedgerId()
 	for i := range rows {
+		rows[i].LedgerId = ledger // 只有新开的一本用得上,接着记的保留原来的代号
 		if u, ok := owners[rows[i].UserName]; ok {
 			rows[i].UserId, rows[i].UserCreatedAt = u.Id, u.CreatedAt
 		} else {
@@ -59,8 +65,19 @@ func AddAgentCounters(tx *gorm.DB, rows []AgentCounter, batch int) error {
 			"down":            gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.down + excluded.down ELSE excluded.down END"),
 			"user_id":         gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.user_id ELSE excluded.user_id END"),
 			"user_created_at": gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.user_created_at ELSE excluded.user_created_at END"),
+			"ledger_id":       gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.ledger_id ELSE excluded.ledger_id END"),
 		}),
 	}).CreateInBatches(&rows, batch).Error
+}
+
+// newLedgerId 新账本的代号:随机、非 0(0 表示升级前没有代号的账本)。不用时间:时钟回拨、粗粒度时钟下
+// 先后两本可能撞上同一个值。
+func newLedgerId() int64 {
+	for {
+		if v := rand.Int64(); v != 0 {
+			return v
+		}
+	}
 }
 
 // PruneAgentCounters 副机应用完主机快照后清账本:主机已经不认识的用户,它的计数器没人再回收,清掉;
