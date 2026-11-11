@@ -70,5 +70,9 @@ jobs:
         run: node --test web/jstest/helplink.test.mjs
       - name: Frontend (subscription http / https switch warning)
         run: node --test web/jstest/subtls.test.mjs
+      - name: Frontend (dashboard issue rules, chip folding, audit text)
+        run: node --test web/jstest/issues.test.mjs
+      - name: Frontend (line picker write-back)
+        run: node --test web/jstest/linepicker.test.mjs
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run

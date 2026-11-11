@@ -90,12 +90,13 @@
 
   <section class="sec" id="tour" data-scope="admin">
     <h3>Finding your way around</h3>
-    <p class="lede">Navigation is on the left, help and feedback are at the top right, and coloured bars at the top of the page are reminders that need your attention.</p>
+    <p class="lede">Navigation is on the left, help and feedback are at the top right; things that need you are collected in <b data-k="dash.attn.title">Needs attention</b> at the top of the <b data-k="nav.dashboard">Dashboard</b>, and coloured bars at the top of other pages remind you too.</p>
     <ul>
       <li>The navigation, top to bottom: <b data-k="nav.dashboard">Dashboard</b>, <b data-k="nav.lines">Lines</b>, <b data-k="nav.upstreams">Upstreams</b>, <b data-k="nav.exts">External nodes</b>, <b data-k="nav.users">Users</b>, <b data-k="nav.resellers">Resellers</b>, <b data-k="nav.plans">Plans</b>, <b data-k="nav.rules">Rules</b>, <b data-k="nav.nodes">Servers</b>, <b data-k="nav.cert">Certificate</b>, <b data-k="nav.backup">Backup</b>, <b data-k="nav.ops">Ops</b>, <b data-k="nav.logs">Logs</b>, <b data-k="nav.admin">Admin</b>, <b data-k="nav.settings">Settings</b>.</li>
       <li>Bottom left: theme (◐ follow the system, ☀ light, ☾ dark), language and <b data-k="common.logout">Sign out</b>. An arrow next to the version number means an update is available; click it to update (see <a href="#update">Updating</a>).</li>
       <li>Top right: <b data-k="help.btn">Help</b> (this page) and <b data-k="support.btn">Feedback / Support</b> (contact the author, report problems).</li>
-      <li>Reminder bars at the top: default password still in use, certificates need attention, mainland reachability problems, a failed data-plane reload and so on. Follow the hint; bars that can be dismissed have <b data-k="reach.dismiss">Got it</b>.</li>
+      <li><b data-k="dash.attn.title">Needs attention</b>: a failed data-plane reload, servers offline or not synced, certificates needing attention, mainland reachability problems, failing upstreams, users about to expire or run out of data, a failed scheduled backup and so on, one row per kind, most serious first, each with a link to fix it; when everything is fine only a single "✓" line remains. Certificate and reachability rows have <b data-k="reach.dismiss">Got it</b>; they come back when the situation changes.</li>
+      <li>Reminder bars at the top: on pages other than the dashboard, a default password, certificates needing attention, mainland reachability problems, a failed data-plane reload and so on are shown at the top of the page. Follow the hint.</li>
       <li>On a node server's own panel, pages such as lines and users are read-only; make changes on the master.</li>
       <li>Shortcuts: <kbd>/</kbd> jumps to the page's search box, <kbd>Esc</kbd> closes dialogs, <kbd>Ctrl</kbd> + <kbd>Enter</kbd> submits a dialog. On a phone, tap ☰ at the top left to open the navigation.</li>
     </ul>
@@ -184,7 +185,7 @@
       <li>Edit a server and untick <b data-k="common.enabled">Enabled</b>: it immediately stops serving everyone; enable it again to resume.</li>
       <li>Deleting a server disables lines that were deployed only there, and users or resellers that only used it lose that line; the affected lines and people are listed afterwards.</li>
       <li><b data-k="node.decomPending">shutdown notice pending</b>: that machine has not yet received the notice to stop serving; the master keeps retrying. To stop it at once, SSH in and run <code>systemctl disable --now m-ui</code> (stops it and keeps it from starting at boot), or uninstall with option 14 of the <code>m-ui</code> menu. Turning off node mode does not stop it: the machine becomes a standalone master and keeps serving everyone with its last configuration.</li>
-      <li>Offline reasons: <b data-k="node.errTimeout">connection timed out</b>, <b data-k="node.errRefused">connection refused</b> (port not open or panel not running), <b data-k="node.errDns">DNS lookup failed</b>, <b data-k="node.errCert">certificate not trusted</b> (tick skip certificate verification), <b data-k="node.errToken">token mismatch</b> (copy the pairing token again), <b data-k="node.errFp">Certificate fingerprint changed</b> (if you really re-issued the node's certificate, click <b data-k="node.resetCert">Reset fingerprint</b>).</li>
+      <li>Offline reasons: <b data-k="node.errTimeout">connection timed out</b>, <b data-k="node.errRefused">connection refused</b> (port not open or panel not running), <b data-k="node.errDns">DNS lookup failed</b>, <b data-k="node.errCert">certificate not trusted</b> (tick skip certificate verification), <b data-k="node.errToken">token mismatch</b> (copy the pairing token again), <b data-k="node.errFp">Certificate fingerprint changed</b> (if you really re-issued the node's certificate, open <b data-k="common.more">More</b> on that row and click <b data-k="node.resetCert">Reset fingerprint</b>).</li>
       <li>Replacing a node: install the new one, then edit the old row on the <b data-k="nav.nodes">Servers</b> page with the new API URL and token; the master pushes everything again.</li>
     </ul>
   </section>
@@ -605,7 +606,7 @@
       <li>Periodic reset: every N days used traffic goes back to zero, and users disabled for going over are re-enabled.</li>
       <li>Devices: counted by source IPs online at the same time, across all servers. Several devices behind one Wi-Fi (one public IPv4, or one IPv6 /64) count as one; IPv4 and IPv6 are counted against the limit separately, so one device using both is not counted twice.</li>
       <li>When the limit is reached only new devices are refused; connected ones are not affected. A slot frees up about a minute after another device goes offline.</li>
-      <li data-scope="admin">Refused connections are shown in red as <b data-k="dash.rejectedDevice">Refused: device limit</b> in <b data-k="dash.recentConns">Recent inbound connections</b> on the dashboard.</li>
+      <li data-scope="admin">Refused connections are highlighted in red in <b data-k="dash.recentConns">Recent inbound connections</b> on the dashboard, with a <b data-k="dash.conn.rejected">Refused</b> badge; hover it for the reason (<b data-k="dash.rejectedDevice">Refused: device limit</b>). When there were refusals in the last 10 minutes, <b data-k="dash.attn.title">Needs attention</b> mentions it too.</li>
       <li>Speed limits: on one server, all of the user's connections share the bandwidth; using several servers at once gives one allowance per server. Changes apply immediately.</li>
     </ul>
   </section>
@@ -776,7 +777,7 @@
   <section class="sec" id="rs-panel">
     <h3>What the reseller panel can do</h3>
     <ul>
-      <li><b data-k="nav.dashboard">Dashboard</b>: traffic used against the quota, number of users, online users and devices.</li>
+      <li><b data-k="nav.dashboard">Dashboard</b>: quota used, account expiry, number of users, online users and devices; <b data-k="dash.attn.title">Needs attention</b> warns when the quota, expiry or device pool is close to the limit, and <b data-k="dash.rs.expiringList">Expiring soon</b> and <b data-k="dash.rs.quotaList">Running out of data</b> list the users who need a renewal.</li>
       <li><b data-k="nav.users">Users</b>: add, edit, renew, extend, reset traffic, kick, reset subscription links, batch actions, usage charts and online devices. New users only need a name; their subscription link is a random token.</li>
       <li><b data-k="nav.plans">Plans</b>: only the plans you created yourself are visible and usable.</li>
       <li><b data-k="nav.account">Account</b>: quota, password, two-factor authentication, your own subscription page texts and the external API.</li>
@@ -1049,11 +1050,12 @@
 
   <section class="sec" id="recent-conns">
     <h3>Recent inbound connections</h3>
-    <p class="lede"><b data-k="dash.recentConns">Recent inbound connections</b> at the bottom of the dashboard helps when a user says they cannot connect: did their IP reach the server, and on which line?</p>
+    <p class="lede"><b data-k="dash.recentConns">Recent inbound connections</b> on the dashboard helps when a user says they cannot connect: did their IP reach the server, and on which line?</p>
     <ul>
       <li>It lists connections that passed the protocol handshake and authentication, with user, line, server, count and last time.</li>
-      <li>Connections refused by a device limit or a reseller's device pool are listed in red too: <b data-k="dash.rejectedDevice">Refused: device limit</b>, <b data-k="dash.rejectedPool">Refused: reseller device pool full</b>.</li>
-      <li data-pending="v6">Connections that failed the handshake or authentication (wrong certificate, password or SNI) are listed as well, with the reason.</li>
+      <li>Connections refused by a device limit or a reseller's device pool are listed too, highlighted in red with a <b data-k="dash.conn.rejected">Refused</b> badge; hover it to see whether it was <b data-k="dash.rejectedDevice">Refused: device limit</b> or <b data-k="dash.rejectedPool">Refused: reseller device pool full</b>.</li>
+      <li>The latest 10 are shown; "Show all" expands the list inside the card (and lets you filter by IP, user or line). The filter above switches between connections, refused ones and handshake failures.</li>
+      <li data-pending="v6">Connections that failed the handshake or authentication (wrong certificate, password or SNI) are under the "Handshake failed" filter, with the reason; older nodes do not report these, and the dashboard names them.</li>
       <li>An IP missing from the list usually means the packets never reached the server (security group, firewall, client network). To check whether they arrive on a TCP line, set <b data-k="logs.coreLevel">Data-plane level</b> to info for a while and look for <code>inbound connection from</code>. Hysteria2, TUIC and other UDP lines only log that line after the handshake and authentication succeed (nothing at all for a wrong password or SNI), so its absence proves nothing there; capture packets on the server instead, such as <code>tcpdump -ni any udp port PORT</code>.</li>
     </ul>
   </section>
@@ -1263,7 +1265,7 @@
       <dt>Port, listen address or certificate changes do nothing?</dt>
       <dd>They need a restart: <b data-k="set.restart">Restart m-ui</b> at the top of the Settings page, or menu option 2. A new path applies on save.</dd>
       <dt>A node shows offline?</dt>
-      <dd>Read the reason on the Servers page and see <a href="#nodes-off">offline nodes</a>. Nodes with self-signed certificates need <b data-k="node.insecure">Skip certificate verification</b>; after re-issuing a node's certificate click <b data-k="node.resetCert">Reset fingerprint</b>.</dd>
+      <dd>Read the reason on the Servers page and see <a href="#nodes-off">offline nodes</a>. Nodes with self-signed certificates need <b data-k="node.insecure">Skip certificate verification</b>; after re-issuing a node's certificate use <b data-k="common.more">More</b> → <b data-k="node.resetCert">Reset fingerprint</b>.</dd>
       <dt>Certificate renewal fails?</dt>
       <dd>Check the reason in the <b data-k="cert.renewCol">Auto-renew</b> column of the certificate store: HTTP validation needs port 80 free; manual-DNS certificates cannot renew automatically; an AAAA record pointing elsewhere also breaks validation. See <a href="#cert-renew">Automatic renewal</a>.</dd>
       <dt>WARP will not enable?</dt>

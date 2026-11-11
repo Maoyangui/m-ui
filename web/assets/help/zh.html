@@ -90,12 +90,13 @@
 
   <section class="sec" id="tour" data-scope="admin">
     <h3>界面导览</h3>
-    <p class="lede">左边是功能导航,右上角是帮助和反馈,页面顶部的彩色横条是需要你处理的提醒。</p>
+    <p class="lede">左边是功能导航,右上角是帮助和反馈;要你处理的事集中在 <b data-k="nav.dashboard">概览</b> 最上面的 <b data-k="dash.attn.title">需要处理</b>,其它页面顶部的彩色横条也会提醒。</p>
     <ul>
       <li>左侧导航依次是:<b data-k="nav.dashboard">概览</b>、<b data-k="nav.lines">线路</b>、<b data-k="nav.upstreams">上游</b>、<b data-k="nav.exts">外部节点</b>、<b data-k="nav.users">用户</b>、<b data-k="nav.resellers">代理</b>、<b data-k="nav.plans">套餐</b>、<b data-k="nav.rules">规则</b>、<b data-k="nav.nodes">服务器</b>、<b data-k="nav.cert">证书</b>、<b data-k="nav.backup">备份</b>、<b data-k="nav.ops">运维</b>、<b data-k="nav.logs">日志</b>、<b data-k="nav.admin">管理员</b>、<b data-k="nav.settings">设置</b>。</li>
       <li>左下角:主题切换(◐ 跟随系统、☀ 浅色、☾ 深色)、语言、<b data-k="common.logout">退出登录</b>。版本号旁出现箭头表示有新版本,点它就能更新(见 <a href="#update">更新</a>)。</li>
       <li>右上角:<b data-k="help.btn">帮助说明</b>(就是本页)和 <b data-k="support.btn">建议 / 支持</b>(联系作者、反馈问题)。</li>
-      <li>顶部提醒条:默认密码没改、证书要处理、大陆连通异常、数据面重载失败等,按提示处理;能关的点 <b data-k="reach.dismiss">知道了</b>。</li>
+      <li><b data-k="dash.attn.title">需要处理</b>:数据面重载失败、服务器离线或没同步、证书要处理、大陆连通异常、上游故障、用户快到期或流量将尽、定时备份失败等,每类一行,按轻重排,点行尾的链接去处理;一切正常时只剩一行「✓」。证书和大陆连通可以点 <b data-k="reach.dismiss">知道了</b>,情况有变化会再出现。</li>
+      <li>顶部提醒条:在概览以外的页面,默认密码没改、证书要处理、大陆连通异常、数据面重载失败等会在页面顶部提醒,按提示处理。</li>
       <li>副服务器的面板里,线路、用户这些页面是只读的,要到主机面板改。</li>
       <li>快捷键:<kbd>/</kbd> 跳到当前页的搜索框,<kbd>Esc</kbd> 关闭弹窗,<kbd>Ctrl</kbd> + <kbd>Enter</kbd> 提交弹窗。手机上点左上角 ☰ 打开导航。</li>
     </ul>
@@ -184,7 +185,7 @@
       <li>编辑服务器去掉 <b data-k="common.enabled">启用</b>:那台立刻停止为任何人服务,重新启用后恢复。</li>
       <li>删除服务器:只部署在它上面的线路会被停用,只用它的用户 / 代理会失去那条线路;操作后会列出受影响的线路和人。</li>
       <li>标 <b data-k="node.decomPending">下线通知未送达</b>:那台还没收到停止服务的通知,主机会一直重试。要立刻停掉,就 SSH 到那台机器上执行 <code>systemctl disable --now m-ui</code>(停掉并取消开机自启),或者用 <code>m-ui</code> 菜单 14 卸载。只关掉副机模式停不了服务:它会变成一台独立的主机,按最后一份配置继续给所有人用。</li>
-      <li>离线原因:<b data-k="node.errTimeout">连接超时</b>、<b data-k="node.errRefused">连接被拒绝</b>(端口没放行或面板没在运行)、<b data-k="node.errDns">域名解析失败</b>、<b data-k="node.errCert">证书不受信任</b>(勾上跳过证书校验)、<b data-k="node.errToken">令牌不匹配</b>(重新复制配对令牌)、<b data-k="node.errFp">证书指纹变了</b>(确实重签过副机证书,就点 <b data-k="node.resetCert">重置指纹</b>)。</li>
+      <li>离线原因:<b data-k="node.errTimeout">连接超时</b>、<b data-k="node.errRefused">连接被拒绝</b>(端口没放行或面板没在运行)、<b data-k="node.errDns">域名解析失败</b>、<b data-k="node.errCert">证书不受信任</b>(勾上跳过证书校验)、<b data-k="node.errToken">令牌不匹配</b>(重新复制配对令牌)、<b data-k="node.errFp">证书指纹变了</b>(确实重签过副机证书,就在那一行的 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>)。</li>
       <li>换一台副机:新副机装好后,在 <b data-k="nav.nodes">服务器</b> 页编辑原来那一行,换成新的 API 地址和令牌,主机会自动重新推送。</li>
     </ul>
   </section>
@@ -605,7 +606,7 @@
       <li>周期重置:每过 N 天把已用流量清零,因超量被停用的也会自动解禁。</li>
       <li>设备数:按同时在线的来源 IP 算,所有服务器合在一起算。同一个 WiFi(同一个公网 IPv4,或同一个 IPv6 /64 网段)下的几台设备算 1 台;IPv4 和 IPv6 各自对上限计数,同一台设备同时走 IPv4 和 IPv6 不会被当成两台。</li>
       <li>设备满了只拒绝新设备,已经连着的不受影响;别的设备下线约 1 分钟后名额就空出来了。</li>
-      <li data-scope="admin">被拒的连接会在概览的 <b data-k="dash.recentConns">最近入站连接</b> 里标红 <b data-k="dash.rejectedDevice">设备数超限被拒</b>。</li>
+      <li data-scope="admin">被拒的连接会在概览的 <b data-k="dash.recentConns">最近入站连接</b> 里整行标红、带 <b data-k="dash.conn.rejected">被拒</b> 徽章,鼠标停在徽章上看原因(<b data-k="dash.rejectedDevice">设备数超限被拒</b>);最近 10 分钟有被拒的,<b data-k="dash.attn.title">需要处理</b> 里也会提一句。</li>
       <li>限速:同一台服务器上,这个用户的全部连接共享这份带宽;他同时走几台服务器就有几份。改了马上生效。</li>
     </ul>
   </section>
@@ -776,7 +777,7 @@
   <section class="sec" id="rs-panel">
     <h3>代理面板里能做什么</h3>
     <ul>
-      <li><b data-k="nav.dashboard">概览</b>:已用流量和额度、用户数、在线用户和设备。</li>
+      <li><b data-k="nav.dashboard">概览</b>:已用额度、账号到期、用户数、在线用户和设备;额度、到期、设备池快到头时 <b data-k="dash.attn.title">需要处理</b> 会提醒;<b data-k="dash.rs.expiringList">即将到期</b> 和 <b data-k="dash.rs.quotaList">流量快用完</b> 列出该续费的用户。</li>
       <li><b data-k="nav.users">用户</b>:新增、编辑、续费、延期、重置流量、踢线、重置订阅链接、批量操作、看用量曲线和在线设备。建号只填名称,订阅地址是随机令牌。</li>
       <li><b data-k="nav.plans">套餐</b>:只看得到、也只能用自己建的套餐。</li>
       <li><b data-k="nav.account">账号</b>:额度、密码、两步验证、自己的订阅页文案、外部 API。</li>
@@ -1049,11 +1050,12 @@
 
   <section class="sec" id="recent-conns">
     <h3>最近入站连接</h3>
-    <p class="lede">概览页底部的 <b data-k="dash.recentConns">最近入站连接</b> 用来排查"用户说连不上":看他的 IP 有没有连到服务器、连的哪条线路。</p>
+    <p class="lede">概览页的 <b data-k="dash.recentConns">最近入站连接</b> 用来排查"用户说连不上":看他的 IP 有没有连到服务器、连的哪条线路。</p>
     <ul>
       <li>记录的是通过了协议握手和认证的连接,带用户、线路、服务器、次数和最近时间。</li>
-      <li>被设备数上限或代理设备池拒绝的连接也会列出来并标红:<b data-k="dash.rejectedDevice">设备数超限被拒</b>、<b data-k="dash.rejectedPool">代理设备池已满被拒</b>。</li>
-      <li data-pending="v6">握手或认证失败的连接(证书、密码、SNI 不对)也会列出,并写明失败原因。</li>
+      <li>被设备数上限或代理设备池拒绝的连接也会列出来:整行标红、带 <b data-k="dash.conn.rejected">被拒</b> 徽章,鼠标停在徽章上看是 <b data-k="dash.rejectedDevice">设备数超限被拒</b> 还是 <b data-k="dash.rejectedPool">代理设备池已满被拒</b>。</li>
+      <li>默认列最近 10 条,点「显示全部」在卡片里展开(可以按 IP、用户、线路筛选);上方的筛选切换连接、被拒和握手失败。</li>
+      <li data-pending="v6">握手或认证失败的连接(证书、密码、SNI 不对)在「握手失败」筛选里,写明失败原因;版本较旧的副机不上报这一项,概况会写明是哪几台。</li>
       <li>列表里没有某个 IP,多半是包没到服务器(安全组、防火墙、客户端网络)。要确认包到没到:TCP 线路可以到日志页把 <b data-k="logs.coreLevel">数据面级别</b> 临时调到 info,看有没有 <code>inbound connection from</code>。Hysteria2、TUIC 这类 UDP 线路只有握手和认证都成功后才记这一行(密码、SNI 不对时什么也不记),看不到不代表包没到,要在服务器上抓包确认,比如 <code>tcpdump -ni any udp port 端口</code>。</li>
     </ul>
   </section>
@@ -1263,7 +1265,7 @@
       <dt>改了端口、监听地址、证书不生效?</dt>
       <dd>这些要重启 m-ui:设置页页头的 <b data-k="set.restart">重启 m-ui</b>,或菜单 2。改路径保存就生效。</dd>
       <dt>副机显示离线?</dt>
-      <dd>看服务器页写的原因,对照 <a href="#nodes-off">离线排查</a>。用自签证书的副机要勾 <b data-k="node.insecure">跳过证书校验</b>;重签过副机证书要点 <b data-k="node.resetCert">重置指纹</b>。</dd>
+      <dd>看服务器页写的原因,对照 <a href="#nodes-off">离线排查</a>。用自签证书的副机要勾 <b data-k="node.insecure">跳过证书校验</b>;重签过副机证书要在 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>。</dd>
       <dt>证书续期失败?</dt>
       <dd>看证书库 <b data-k="cert.renewCol">自动续期</b> 一列的原因:HTTP 验证要 80 端口空闲;手动 DNS 的证书不能自动续;域名多了指向别处的 AAAA 记录也会失败。见 <a href="#cert-renew">自动续期</a>。</dd>
       <dt>WARP 启用失败?</dt>
