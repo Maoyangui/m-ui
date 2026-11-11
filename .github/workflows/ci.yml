@@ -25,6 +25,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # 格式:gofmt 不干净就失败(Linux 上跑,行尾是 LF;Windows 检出的 CRLF 会让 gofmt -l 把每个文件都报出来)
+      - name: Format
+        run: |
+          bad=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$bad" ]; then echo "gofmt 不干净,请对这些文件跑 gofmt -w:"; echo "$bad"; exit 1; fi
       - name: Vet
         run: go vet -tags with_utls ./...
       - name: Tests

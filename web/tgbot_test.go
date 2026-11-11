@@ -258,7 +258,7 @@ func TestTgBotRound(t *testing.T) {
 	}
 
 	f.push(99, "/disable alice") // 别的会话
-	f.push(42, "随便说一句")           // 不是命令
+	f.push(42, "随便说一句")          // 不是命令
 	f.push(42, "/status")
 	s.tgBotRound(st, 0)
 	if !enabled() {

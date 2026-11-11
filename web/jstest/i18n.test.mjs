@@ -23,6 +23,22 @@ test('中英两份的键一一对应', () => {
   assert.deepEqual(Object.keys(en).filter(k => !(k in zh)), [], '只有英文的键');
 });
 
+// 对象字面量里同一个键写两次,后一句会悄悄盖掉前一句(审查:common.refresh、common.test 各写了两次)。
+test('同一本字典里没有重复的键', () => {
+  const bad = [];
+  for (const name of ['zh', 'en']) {
+    const start = text.indexOf(`const ${name} = {`);
+    const body = text.slice(start, text.indexOf('\n};', start));
+    const seen = new Set();
+    for (const m of body.matchAll(/^\s*'([^']+)'\s*:|[,{]\s*'([^']+)'\s*:/gm)) {
+      const k = m[1] || m[2];
+      if (seen.has(k)) bad.push(`${name}.${k}`);
+      seen.add(k);
+    }
+  }
+  assert.deepEqual(bad, []);
+});
+
 test('中英占位一致', () => {
   const bad = Object.keys(zh).filter(k => k in en && holes(zh[k]).sort().join() !== holes(en[k]).sort().join());
   assert.deepEqual(bad, []);
