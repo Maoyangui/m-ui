@@ -79,9 +79,76 @@ func TestLinkifyVectors(t *testing.T) {
 		{"裸地址全角逗号", "官网" + fwColon + "https://example.com" + fwComma + "备用" + fwColon + "https://b.example.com" + cnStop,
 			"官网" + fwColon + webLink("https://example.com", "https://example.com") + fwComma + "备用" + fwColon + webLink("https://b.example.com", "https://b.example.com") + cnStop},
 		{"裸地址后面直接跟中文", "请访问https://example.com了解详情", "请访问" + webLink("https://example.com", "https://example.com") + "了解详情"},
-		{"空格加括号里的裸地址", "价格 (https://example.com/p)", "价格 (" + webLink("https://example.com/p", "https://example.com/p") + ")"},
 		{"顶格括号里的裸地址", "(https://example.com)", "(" + webLink("https://example.com", "https://example.com") + ")"},
 		{"裸地址遇到括号截断", "https://example.com/wiki/Foo_(bar)", webLink("https://example.com/wiki/Foo_", "https://example.com/wiki/Foo_") + "(bar)"},
+
+		// 「文字(链接)」往回找文字不越过前面自动识别出的 @用户名、+号码、裸地址:它们各自成链接,看得见的不会链到别处
+		{"关键词后面跟文字链接", "Tg: @MaoyangSupport 官网(https://example.com)",
+			"Tg: " + webLink("https://t.me/MaoyangSupport", "@MaoyangSupport") + " " + webLink("https://example.com", "官网")},
+		{"号码后面跟文字链接", "WhatsApp: +34 671143339 Telegram(https://t.me/MaoyangSupport)",
+			"WhatsApp: " + webLink("https://wa.me/34671143339", "+34 671143339") + " " + webLink("https://t.me/MaoyangSupport", "Telegram")},
+		{"裸地址后面跟文字链接", "官网 https://a.com 客服(https://t.me/x)",
+			"官网 " + webLink("https://a.com", "https://a.com") + " " + webLink("https://t.me/x", "客服")},
+		{"带路径的裸地址不被斜杠截开", "官网 https://a.com/x 备用(https://b.com)",
+			"官网 " + webLink("https://a.com/x", "https://a.com/x") + " " + webLink("https://b.com", "备用")},
+		{"裸地址后面直接跟中文再跟文字链接", "请访问https://example.com/guide了解详情 联系客服(https://t.me/x)",
+			"请访问" + webLink("https://example.com/guide", "https://example.com/guide") + webLink("https://t.me/x", "了解详情 联系客服")},
+		{"裸地址句号后面跟文字链接", "官网 https://a.com. 客服(https://t.me/x)",
+			"官网 " + webLink("https://a.com", "https://a.com") + ". " + webLink("https://t.me/x", "客服")},
+		{"裸地址后面几个句点空格再跟文字链接", "官网 https://a.com. . 客服(https://t.me/x)",
+			"官网 " + webLink("https://a.com", "https://a.com") + ". . " + webLink("https://t.me/x", "客服")},
+		{"关键词的值后面句点再跟文字链接", "Tg: @abcdef. 官网(https://x.com)",
+			"Tg: " + webLink("https://t.me/abcdef", "@abcdef") + ". " + webLink("https://x.com", "官网")},
+		{"公告句子里先关键词后文字链接", "有问题加 Tg: @abcde 或者看教程(https://x.com)",
+			"有问题加 Tg: " + webLink("https://t.me/abcde", "@abcde") + " " + webLink("https://x.com", "或者看教程")},
+		{"括号前紧挨裸地址:两个地址各自显示", "https://a.com(https://b.com)",
+			webLink("https://a.com", "https://a.com") + "(" + webLink("https://b.com", "https://b.com") + ")"},
+		{"括号前隔空格是裸地址:两个地址各自显示", "https://a.com (https://b.com)",
+			webLink("https://a.com", "https://a.com") + " (" + webLink("https://b.com", "https://b.com") + ")"},
+
+		// 括号前有空格:文字照样取括号前那一段,括号、地址连同空格都不显示("不显示链接本身")
+		{"括号前有空格也只显示文字", "价格 (https://example.com/p)", webLink("https://example.com/p", "价格")},
+		{"需求原话加空格", "Tg: @MaoyangSupport (https://t.me/MaoyangSupport)", "Tg: " + webLink("https://t.me/MaoyangSupport", "@MaoyangSupport")},
+		{"英文习惯的空格加括号", "Contact us (https://t.me/x) for help", webLink("https://t.me/x", "Contact us") + " for help"},
+		{"全角空格加全角括号", "价格　" + fwL + "https://example.com/p" + fwR, webLink("https://example.com/p", "价格")},
+		{"空格加括号、前面是冒号:没有文字就显示地址", "官网: (https://a.com)", "官网: (" + webLink("https://a.com", "https://a.com") + ")"},
+		{"两个括号挨着:后一个前面没有文字", "(https://a.com) (https://b.com)",
+			"(" + webLink("https://a.com", "https://a.com") + ") (" + webLink("https://b.com", "https://b.com") + ")"},
+
+		// 关键词前紧贴汉字照认(拉丁字母、数字、下划线紧贴的不认)
+		{"中文紧贴 TG", "联系TG" + fwColon + "@MaoyangSupport", "联系TG" + fwColon + webLink("https://t.me/MaoyangSupport", "@MaoyangSupport")},
+		{"中文紧贴 TG 群", "官方TG群" + fwColon + "@abcde", "官方TG群" + fwColon + webLink("https://t.me/abcde", "@abcde")},
+		{"中文紧贴 Telegram", "官方Telegram" + fwColon + "@MaoyangSupport", "官方Telegram" + fwColon + webLink("https://t.me/MaoyangSupport", "@MaoyangSupport")},
+		{"中文紧贴 WhatsApp", "客服WhatsApp" + fwColon + "+34 671143339", "客服WhatsApp" + fwColon + webLink("https://wa.me/34671143339", "+34 671143339")},
+		{"中文紧贴 ws", "联系ws" + fwColon + "+34671143339", "联系ws" + fwColon + webLink("https://wa.me/34671143339", "+34671143339")},
+		{"中文紧贴关键词再跟括号写法", "客服TG" + fwColon + "@MaoyangSupport" + fwL + "https://t.me/MaoyangSupport" + fwR,
+			"客服TG" + fwColon + webLink("https://t.me/MaoyangSupport", "@MaoyangSupport")},
+		{"数字紧贴的 tg 不算", "1tg: @abcdef", "1tg: @abcdef"},
+		{"下划线紧贴的 tg 不算", "_tg: @abcdef", "_tg: @abcdef"},
+
+		// 关键词只认 ASCII:ſ(U+017F)、K(开尔文符号 U+212A)不当成 s、k,用户名里也进不来
+		{"长 s 进不了用户名", "tg: @ſabcde", "tg: @ſabcde"},
+		{"开尔文符号进不了用户名", "tg: @Kelvin1", "tg: @Kelvin1"},
+		{"长 s 不当关键词里的 s", "wſ: +34 671143339", "wſ: +34 671143339"},
+		{"开尔文符号不进用户名的中间", "tg: @abcdeK", "tg: " + webLink("https://t.me/abcde", "@abcde") + "K"},
+
+		// 方括号、花括号里的裸地址:末尾没配对的 ] } 不算地址(配了对的不动)
+		{"方括号包住的地址", "备用地址[https://b.example.com]", "备用地址[" + webLink("https://b.example.com", "https://b.example.com") + "]"},
+		{"方括号包住带路径的地址再跟句号", "备用 [https://a.com/x].", "备用 [" + webLink("https://a.com/x", "https://a.com/x") + "]."},
+		{"IPv6 地址的方括号保留", "见 [http://[::1]:8080/a]", "见 [" + webLink("http://[::1]:8080/a", "http://[::1]:8080/a") + "]"},
+		{"地址里配了对的方括号不动", "https://a.com/x[1]", webLink("https://a.com/x[1]", "https://a.com/x[1]")},
+		{"查询串里的方括号不动", "https://a.com/?a[]=1", webLink("https://a.com/?a[]=1", "https://a.com/?a[]=1")},
+		{"花括号包住的地址", "{https://a.com}", "{" + webLink("https://a.com", "https://a.com") + "}"},
+
+		// [文字](链接) 也认全角:中文输入法打出来的【】［］（）
+		{"全角方括号与括号", "【教程】" + fwL + "https://a.com/doc" + fwR, webLink("https://a.com/doc", "教程")},
+		{"半角方括号全角括号", "[教程]" + fwL + "https://a.com/doc" + fwR, webLink("https://a.com/doc", "教程")},
+		{"全角方括号半角括号", "［教程］(https://a.com/doc)", webLink("https://a.com/doc", "教程")},
+		{"【】与半角括号", "【Clash/Mihomo 教程】(https://a.com/doc)", webLink("https://a.com/doc", "Clash/Mihomo 教程")},
+		{"全角写法链接带括号", "[维基]" + fwL + "https://en.wikipedia.org/wiki/Foo_(bar)" + fwR, webLink("https://en.wikipedia.org/wiki/Foo_(bar)", "维基")},
+		{"全角写法后面还有全角括号", "【教程】" + fwL + "https://a.com" + fwR + "后面" + fwR, webLink("https://a.com", "教程") + "后面" + fwR},
+		{"【】当标题用不受影响", "【重要】请访问(https://a.com)", "【重要】" + webLink("https://a.com", "请访问")},
+		{"全角 Markdown javascript", "【x】" + fwL + "javascript:alert(1)" + fwR, "【x】" + fwL + "javascript:alert(1)" + fwR},
 
 		// XSS:不合格的一律原样显示成文字,全部转义
 		{"脚本标签", "<script>alert(1)</script>", "&lt;script&gt;alert(1)&lt;/script&gt;"},
@@ -154,7 +221,8 @@ func TestLinkifyPropertyNoInjection(t *testing.T) {
 	t.Parallel()
 	atoms := []string{"<", ">", "\"", "'", "&", "(", ")", fwL, fwR, "[", "]", " ", ":", fwColon, fwComma, cnStop, "/", "\n", "\r", "\t", "@", "+",
 		"javascript:", "JaVaScRiPt:", "data:", "vbscript:", "https://", "http://", "HTTPS://", "tg://", "mailto:", "tel:", "ftp://", "a.com", "x", "1234567",
-		"tg", "wa", "ws", "电报", "飞机", "群", "<script>", "onerror=", "&#106;", "\u202e", "\x00", "%3C", "`", "\\", "abcdef", "t.me/", "+34 671143339", "](", "文字"}
+		"tg", "wa", "ws", "电报", "飞机", "群", "<script>", "onerror=", "&#106;", "\u202e", "\x00", "%3C", "`", "\\", "abcdef", "t.me/", "+34 671143339", "](", "文字",
+		"【", "】", "［", "］", "】" + fwL, "】(", "{", "}", "　", "ſ", "K", "Tg: @abcdef ", "@abcde ", " (", " " + fwL, "客服TG" + fwColon, ".", "WhatsApp:"}
 	r := rand.New(rand.NewSource(1))
 	for i := 0; i < 200000; i++ {
 		var b strings.Builder
@@ -195,11 +263,18 @@ func TestLinkifyHostileInputIsLinear(t *testing.T) {
 		limit = time.Second
 	}
 	for name, in := range map[string]string{
-		"括号与半截地址": strings.Repeat("a(", 50000) + strings.Repeat("https://x.com/(", 20000) + strings.Repeat("tg: +1 2", 20000),
-		"连续的显式链接": strings.Repeat("文字(https://a.com)", 20000),
-		"没闭合的方括号": strings.Repeat("[a](", 60000) + strings.Repeat("]", 60000),
-		"超长链接文字":  strings.Repeat("字", 150000) + "(https://a.com)",
-		"关键词刷屏":   strings.Repeat("tg: @abcdef wa: +34 671143339 ", 15000),
+		"括号与半截地址":    strings.Repeat("a(", 50000) + strings.Repeat("https://x.com/(", 20000) + strings.Repeat("tg: +1 2", 20000),
+		"连续的显式链接":    strings.Repeat("文字(https://a.com)", 20000),
+		"没闭合的方括号":    strings.Repeat("[a](", 60000) + strings.Repeat("]", 60000),
+		"超长链接文字":     strings.Repeat("字", 150000) + "(https://a.com)",
+		"关键词刷屏":      strings.Repeat("tg: @abcdef wa: +34 671143339 ", 15000),
+		"关键词后面跟文字链接": strings.Repeat("Tg: @abcdef 官网(https://x.com) ", 15000),
+		"裸地址后面跟空格括号": strings.Repeat("https://a.com (https://b.com) ", 20000),
+		"括号前一长串空格":   "a" + strings.Repeat(" ", 300000) + "(https://x.com)",
+		"空格括号刷屏":     strings.Repeat(" (https://x.com)", 30000),
+		"地址句点再跟括号":   strings.Repeat("https://a.com. . . .x(https://b.com) ", 15000),
+		"没配对的方括号":    "https://a.com" + strings.Repeat("]", 300000),
+		"全角写法刷屏":     strings.Repeat("【a】（https://a.com）", 20000),
 	} {
 		st := time.Now()
 		out := linkify(in)
