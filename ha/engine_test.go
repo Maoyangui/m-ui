@@ -305,7 +305,7 @@ func TestPeerAuthAndVote(t *testing.T) {
 		h.Set(peerHeaderNode, strconv.FormatUint(uint64(a.SelfId()), 10))
 		h.Set(peerHeaderTs, strconv.FormatInt(ts, 10))
 		if sig == "" {
-			sig = peerMAC(key, http.MethodPost, action, strconv.FormatInt(ts, 10), bodySum(body))
+			sig = peerMAC(key, http.MethodPost, action, strconv.FormatUint(uint64(a.SelfId()), 10), strconv.FormatInt(ts, 10), bodySum(body))
 		}
 		h.Set(peerHeaderSig, sig)
 		return b.ServePeer(action, h, body)
@@ -343,7 +343,7 @@ func TestPeerAuthAndVote(t *testing.T) {
 	h := http.Header{}
 	h.Set(peerHeaderNode, strconv.FormatUint(uint64(p.ids[1]), 10))
 	h.Set(peerHeaderTs, strconv.FormatInt(now, 10))
-	h.Set(peerHeaderSig, peerMAC(key, http.MethodPost, "vote", strconv.FormatInt(now, 10), bodySum(other)))
+	h.Set(peerHeaderSig, peerMAC(key, http.MethodPost, "vote", strconv.FormatUint(uint64(p.ids[1]), 10), strconv.FormatInt(now, 10), bodySum(other)))
 	rep, _ = b.ServePeer("vote", h, other)
 	json.Unmarshal(rep.Body, &vr)
 	if vr.Granted {

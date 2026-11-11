@@ -114,7 +114,7 @@ func (s *Service) afterBecame() {
 	}
 	out := s.becameDNS(&b, ip) // 改好的记录、出错的原因写进 b
 	_ = s.set(map[string]string{KeyBecame: mustJSON(b)})
-	items := identityItems(b.Identity)
+	items := b.Identity.Warnings
 	n := Notice{Kind: "became", How: b.How, Name: b.FormerName, URL: s.panelURL(), Host: b.Identity.SubHost, IP: ip,
 		Dns: out.State == "done", SubDone: out.SubDone, DnsState: out.State, SubKept: b.Identity.SubURLKept, Items: items,
 		Changes: append(append([]DnsChange{}, out.Changes...), out.Skipped...)} // 跳过的记录(Skip 非空、To 为空)也列出,界面写明要手动改
@@ -151,7 +151,7 @@ func (s *Service) becameText(b Became, ip string) string {
 			time.Unix(b.ReplicaAt, 0).In(s.loc()).Format("2006-01-02 15:04:05"))
 	}
 	sb.WriteString(s.dnsText(b, ip))
-	for _, it := range identityItems(b.Identity) {
+	for _, it := range b.Identity.Warnings {
 		sb.WriteString("⚠️ " + notify.Esc(identityWarnText(it)) + "\n")
 	}
 	if b.How == HowTakeover {

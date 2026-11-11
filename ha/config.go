@@ -12,7 +12,7 @@ import (
 
 // Config 主机容灾的设置(全局设置,随副本复制,接任后的主机照用)。Cloudflare 令牌只说有没有设,从不回显。
 type Config struct {
-	Mode            string `json:"mode"`     // off | confirm | auto
+	Mode            string `json:"mode"`     // off | confirm(先确认再接任)| auto(自动接任)
 	Standbys        int    `json:"standbys"` // 备用台数
 	ReplicaMinutes  int    `json:"replicaMinutes"`
 	ConfirmMinutes  int    `json:"confirmMinutes"`
@@ -22,6 +22,7 @@ type Config struct {
 	PauseUntil      int64  `json:"pauseUntil"`
 	DnsNames        string `json:"dnsNames"`
 	DnsTokenSet     bool   `json:"dnsTokenSet"`
+	AllowPlain      bool   `json:"allowPlain"` // 允许明文 http 链接的副机当备用(默认关:链接上的主动中间人能冒充主机)
 }
 
 // 取值范围(界面的"高级"里能改;默认值开箱即用)。
@@ -45,6 +46,7 @@ func (s *Service) Config() Config {
 		Witness:         s.settingBool(KeyWitness, true),
 		DnsNames:        s.setting(KeyDnsNames),
 		DnsTokenSet:     strings.TrimSpace(s.setting(KeyDnsToken)) != "",
+		AllowPlain:      s.settingBool(KeyAllowPlain, false),
 	}
 	c.PauseUntil, _ = strconv.ParseInt(s.setting(KeyPauseUntil), 10, 64)
 	return c
@@ -97,28 +99,21 @@ func (s *Service) SaveConfig(in ConfigInput) error {
 		KeyMode: c.Mode, KeyStandbys: strconv.Itoa(c.Standbys),
 		KeyReplicaMinutes: strconv.Itoa(c.ReplicaMinutes), KeyConfirmMinutes: strconv.Itoa(c.ConfirmMinutes),
 		KeyAutoMinutes: strconv.Itoa(c.AutoMinutes), KeyRankStepMinutes: strconv.Itoa(c.RankStepMinutes),
-		KeyWitness: strconv.FormatBool(c.Witness), KeyDnsNames: names,
+		KeyWitness: strconv.FormatBool(c.Witness), KeyDnsNames: names, KeyAllowPlain: strconv.FormatBool(c.AllowPlain),
 	}
 	if tok := strings.TrimSpace(in.DnsToken); tok != "" {
 		values[KeyDnsToken] = tok
 	} else if in.ClearDnsToken {
 		values[KeyDnsToken] = ""
 	}
-	first := false
-	if c.Mode != ModeOff && s.Epoch() == 0 {
-		first = true
-		values[KeyEpoch] = "1"
-		values[KeyMasterId] = strconv.FormatUint(uint64(s.SelfId()), 10)
-	}
 	if err := s.set(values); err != nil {
 		return err
 	}
-	if first {
-		if _, err := s.signKey(); err != nil {
+	if c.Mode != ModeOff && s.Epoch() == 0 {
+		// 第一次开启:进入纪元 1、生成签名密钥与集群密钥(纪元只经 EnterEpoch / setEpoch 改)
+		if _, err := s.EnterEpoch(); err != nil {
 			return err
 		}
-		s.clusterKey()
-		logger.Info("主机容灾已开启:本机纪元 1")
 	}
 	s.invalidate()
 	s.rep.kick()

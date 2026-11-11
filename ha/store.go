@@ -24,18 +24,27 @@ import (
 //	ha/replica.cur     最新一份副本(信封,0600)
 //	ha/replica.prev    上一份
 //	ha/replica.tmp     正在收的
-//	ha/replica.json    最新一份的信息(序号、时间、自检结果……)
+//	ha/replica.json    最新一份的信息(序号、时间、验签用的主机公钥、自检结果……)
+//	ha/replica.prev.json  上一份的信息(打开上一份时用它记的主机公钥验签)
 
 // MaxReplica 副本信封的上限:主机侧超过 64 MB 就告警,这里留足余量。
 const MaxReplica int64 = 256 << 20
 
 const (
-	fileKey     = "standby.key"
-	fileCur     = "replica.cur"
-	filePrev    = "replica.prev"
-	fileTmp     = "replica.tmp"
-	fileInfo    = "replica.json"
-	selfCheckDT = 24 * time.Hour
+	fileKey      = "standby.key"
+	fileCur      = "replica.cur"
+	filePrev     = "replica.prev"
+	fileTmp      = "replica.tmp"
+	fileInfo     = "replica.json"
+	filePrevInfo = "replica.prev.json"
+	selfCheckDT  = 24 * time.Hour
+)
+
+// selfCheckGap 收到新副本后在后台自检,两次之间至少隔这么久(副本内容常变,不能每份都解一遍)。
+// selfCheckAsync 测试里关掉(后台自检和测试结束时删临时目录抢文件),要测它的测试自己打开并等它做完。
+var (
+	selfCheckGap   = 10 * time.Minute
+	selfCheckAsync = true
 )
 
 // ReplicaInfo 本机手里那份副本的信息(随报告上报,面板显示)。
@@ -50,9 +59,15 @@ type ReplicaInfo struct {
 	MaxChangeId uint64 `json:"maxChangeId"`
 	ReceivedAt  int64  `json:"receivedAt"`
 	AsOf        int64  `json:"asOf"` // 主机确认这份到什么时候为止仍是最新的
+	// 最近一次自检(不随新副本清零:内容常变、每份都重发,清零的话面板几乎一直显示"没自检")
 	VerifiedAt  int64  `json:"verifiedAt,omitempty"`
 	VerifyErr   string `json:"verifyErr,omitempty"`
+	VerifiedSeq uint64 `json:"verifiedSeq,omitempty"` // 自检的是哪一份
 	Sum         string `json:"sum"`
+	// MasterPub 收下时验签用的主机签名公钥:之后本机跟了别的主机,也照样能验这份
+	MasterPub string `json:"masterPub,omitempty"`
+	// DBSize 解开后的库多大(自检时量的;接任时磁盘要放得下)
+	DBSize int64 `json:"dbSize,omitempty"`
 }
 
 // standbyKey 本机的备用密钥:没有就生成。
@@ -127,6 +142,27 @@ func (s *Service) replicaInfo() (ReplicaInfo, bool) {
 		return ri, false
 	}
 	return ri, true
+}
+
+// replicaPrevInfo 上一份副本的信息。
+func (s *Service) replicaPrevInfo() (ReplicaInfo, bool) {
+	var ri ReplicaInfo
+	b, err := os.ReadFile(filepath.Join(s.Dir(), filePrevInfo))
+	if err != nil || json.Unmarshal(b, &ri) != nil {
+		return ri, false
+	}
+	return ri, true
+}
+
+// replicaBytes 本机副本文件(两代)占了多少磁盘:主机算磁盘够不够时把它算回去(它们本来就是给容灾用的)。
+func (s *Service) replicaBytes() int64 {
+	var n int64
+	for _, f := range []string{fileCur, filePrev} {
+		if st, err := os.Stat(filepath.Join(s.Dir(), f)); err == nil {
+			n += st.Size()
+		}
+	}
+	return n
 }
 
 func (s *Service) saveReplicaInfo(ri ReplicaInfo) error {
@@ -205,6 +241,21 @@ func (s *Service) ReceiveReplica(body io.Reader) (uint64, error) {
 	if err := env.VerifySig(pub); err != nil {
 		return fail(err)
 	}
+	old, hadOld := s.replicaInfo()
+	// 接任时要放得下:解开的库(至少和压缩包一样大)、新库一份、压缩包本身。上一份收下后会删,它占的算回来
+	dbHint := hd.Size
+	if hadOld && old.MasterId == hd.MasterId && old.DBSize > 0 && old.Size > 0 {
+		dbHint = max(dbHint, old.DBSize*hd.Size/old.Size)
+	}
+	if free := s.diskFree(); free >= 0 {
+		var prevSize int64
+		if st, err := os.Stat(filepath.Join(s.Dir(), filePrev)); err == nil {
+			prevSize = st.Size()
+		}
+		if need := TakeoverNeed(hd.Size, dbHint); free+prevSize < need {
+			return fail(fmt.Errorf("磁盘剩余空间不够:接任时要约 %d MB,只剩 %d MB,不收副本", need>>20, (free+prevSize)>>20))
+		}
+	}
 	if hd.To != Fingerprint(key.PubString()) {
 		return fail(errors.New("副本不是封给本机的(主机记住的本机公钥和现在的不一样)"))
 	}
@@ -212,11 +263,15 @@ func (s *Service) ReceiveReplica(body io.Reader) (uint64, error) {
 		return fail(fmt.Errorf("副本序号 %d 不比本机已有的 %d 新", hd.Seq, cur.Seq))
 	}
 	cur, prev := filepath.Join(s.Dir(), fileCur), filepath.Join(s.Dir(), filePrev)
-	old, hadOld := s.replicaInfo()
 	if _, err := os.Stat(cur); err == nil {
 		_ = os.Remove(prev)
+		_ = os.Remove(filepath.Join(s.Dir(), filePrevInfo))
 		if err := os.Rename(cur, prev); err != nil {
 			return fail(err)
+		}
+		if hadOld {
+			b, _ := json.MarshalIndent(old, "", "  ")
+			_ = writeFileAtomic(filepath.Join(s.Dir(), filePrevInfo), b)
 		}
 	}
 	if err := os.Rename(tmp, cur); err != nil {
@@ -225,17 +280,14 @@ func (s *Service) ReceiveReplica(body io.Reader) (uint64, error) {
 	syncDir(s.Dir())
 	ri := ReplicaInfo{Epoch: hd.Epoch, Seq: hd.Seq, CreatedAt: hd.CreatedAt, Size: hd.Size, MasterId: hd.MasterId, MasterName: hd.MasterName,
 		Version: hd.Version, MaxChangeId: hd.MaxChangeId, ReceivedAt: s.now().Unix(), AsOf: hd.CreatedAt,
-		Sum: hex.EncodeToString(env.CtSum[:])}
+		Sum: hex.EncodeToString(env.CtSum[:]), MasterPub: pubB64}
+	if hadOld && old.MasterId == hd.MasterId { // 最近一次自检的结果留着,等这一份自己检完再换
+		ri.VerifiedAt, ri.VerifyErr, ri.VerifiedSeq, ri.DBSize = old.VerifiedAt, old.VerifyErr, old.VerifiedSeq, old.DBSize
+	}
 	if err := s.saveReplicaInfo(ri); err != nil {
 		return 0, err
 	}
-	if !hadOld || old.Epoch != hd.Epoch { // 新纪元的第一份当场自检一次(在后台,不拖住主机的请求)
-		go func() {
-			if err := s.SelfCheck(); err != nil {
-				logger.Warning("容灾:副本自检失败: ", err)
-			}
-		}()
-	}
+	s.selfCheckSoon() // 每份都在后台自检(限频),不拖住主机的请求
 	return hd.Seq, nil
 }
 
@@ -255,20 +307,46 @@ func (s *Service) noteReplicaMark(m ReplicaMark) {
 func (s *Service) DropReplica() error {
 	s.storeMu.Lock()
 	defer s.storeMu.Unlock()
-	had := false
-	for _, n := range []string{fileCur, filePrev, fileTmp, fileInfo} {
-		p := filepath.Join(s.Dir(), n)
-		if _, err := os.Stat(p); err == nil {
-			had = true
-			if err := os.Remove(p); err != nil {
-				return err
-			}
-		}
-	}
+	had, err := dropStandbyFilesIn(s.Dir(), false)
 	if had {
 		logger.Info("容灾:本机已不是备用,删掉了手里的副本")
 	}
-	return nil
+	return err
+}
+
+// DropStandbyAll 删掉副本连同备用密钥(本机被主机删除 / 离开集群、重置容灾时;A 的 LeaveCluster 调它)。
+func (s *Service) DropStandbyAll() error {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	had, err := dropStandbyFilesIn(s.Dir(), true)
+	if had {
+		logger.Info("容灾:删掉了手里的副本与备用密钥")
+	}
+	return err
+}
+
+// dropStandbyFiles 删掉容灾目录里的副本文件;withKey 时连备用密钥一起删(服务不在跑时也能用,如 ResetLocal)。
+func dropStandbyFiles(dir string, withKey bool) error {
+	_, err := dropStandbyFilesIn(dir, withKey)
+	return err
+}
+
+func dropStandbyFilesIn(dir string, withKey bool) (bool, error) {
+	names := []string{fileCur, filePrev, fileTmp, fileInfo, filePrevInfo}
+	if withKey {
+		names = append(names, fileKey, fileKey+".w")
+	}
+	had := false
+	for _, n := range names {
+		p := filepath.Join(dir, n)
+		if _, err := os.Stat(p); err == nil {
+			had = true
+			if err := os.Remove(p); err != nil {
+				return had, err
+			}
+		}
+	}
+	return had, nil
 }
 
 // openReplica 解开本机的副本(cur 坏了用 prev)到 dir,返回 meta 与用的是哪一份。
@@ -279,7 +357,7 @@ func (s *Service) openReplica(dir string) (ReplicaMeta, *Envelope, string, error
 		if _, err := os.Stat(p); err != nil {
 			continue
 		}
-		meta, env, err := s.decryptReplica(p, dir)
+		meta, env, err := s.decryptReplica(p, dir, s.replicaPubFor(name))
 		if err == nil {
 			return meta, env, name, nil
 		}
@@ -292,16 +370,33 @@ func (s *Service) openReplica(dir string) (ReplicaMeta, *Envelope, string, error
 	return ReplicaMeta{}, nil, "", lastErr
 }
 
-// decryptReplica 验一份落了盘的副本(哈希、签名)、解密、解压到 dir。
-func (s *Service) decryptReplica(p, dir string) (ReplicaMeta, *Envelope, error) {
+// replicaPubFor 验某一份副本用的主机公钥:收下时记的那把;老格式没记的,用本机现在钉住的。
+func (s *Service) replicaPubFor(name string) string {
+	var ri ReplicaInfo
+	var ok bool
+	if name == filePrev {
+		ri, ok = s.replicaPrevInfo()
+	} else {
+		ri, ok = s.replicaInfo()
+	}
+	if ok && ri.MasterPub != "" {
+		return ri.MasterPub
+	}
+	return s.setting(KeyMasterPub)
+}
+
+// decryptReplica 验一份落了盘的副本(哈希、签名)、解密、解压到 dir。没有验签用的公钥一律不用(不跳过验签)。
+func (s *Service) decryptReplica(p, dir, pubB64 string) (ReplicaMeta, *Envelope, error) {
 	env, err := OpenEnvelopeFile(p)
 	if err != nil {
 		return ReplicaMeta{}, nil, err
 	}
-	if pub, err := ParseSignPub(s.setting(KeyMasterPub)); err == nil {
-		if err := env.VerifySig(pub); err != nil {
-			return ReplicaMeta{}, env, err
-		}
+	pub, err := ParseSignPub(pubB64)
+	if err != nil {
+		return ReplicaMeta{}, env, errors.New("不知道签发这份副本的主机公钥,不能验签,不用它")
+	}
+	if err := env.VerifySig(pub); err != nil {
+		return ReplicaMeta{}, env, err
 	}
 	key, err := s.standbyKey()
 	if err != nil {
@@ -339,14 +434,18 @@ func (s *Service) SelfCheck() error {
 	if !ok {
 		return nil
 	}
-	err := s.selfCheck(ri)
+	s.rep.noteCheck(s.now())
+	dbSize, err := s.selfCheck(ri)
 	s.storeMu.Lock()
 	defer s.storeMu.Unlock()
 	cur, ok := s.replicaInfo()
 	if !ok || cur.Seq != ri.Seq || cur.Epoch != ri.Epoch {
-		return err // 自检期间又收到了新的一份:结果作废,下一份自己再检
+		return err // 自检期间又收到了新的一份:结果作废,新的一份另有一次自检
 	}
-	cur.VerifiedAt, cur.VerifyErr = s.now().Unix(), ""
+	cur.VerifiedAt, cur.VerifyErr, cur.VerifiedSeq = s.now().Unix(), "", cur.Seq
+	if dbSize > 0 {
+		cur.DBSize = dbSize
+	}
 	if err != nil {
 		cur.VerifyErr = err.Error()
 	}
@@ -354,49 +453,86 @@ func (s *Service) SelfCheck() error {
 	return err
 }
 
-func (s *Service) selfCheck(ri ReplicaInfo) error {
+// selfCheckSoon 收到新副本后:离上次自检够久就马上在后台检,否则到点再检(同一时间最多排一次)。
+func (s *Service) selfCheckSoon() {
+	if !selfCheckAsync {
+		return
+	}
+	wait, ok := s.rep.scheduleCheck(s.now())
+	if !ok {
+		return
+	}
+	run := func() {
+		defer s.rep.checkDone()
+		if s.stopping() {
+			return
+		}
+		if err := s.SelfCheck(); err != nil {
+			logger.Warning("容灾:副本自检失败: ", err)
+		}
+	}
+	if wait <= 0 {
+		go run()
+		return
+	}
+	time.AfterFunc(wait, run)
+}
+
+func (s *Service) selfCheck(ri ReplicaInfo) (int64, error) {
 	dir, err := os.MkdirTemp(s.Dir(), "check-")
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer os.RemoveAll(dir)
 	s.storeMu.Lock() // 解密期间别让新的一份把 cur 换掉
-	meta, _, err := s.decryptReplica(filepath.Join(s.Dir(), fileCur), dir)
+	meta, _, err := s.decryptReplica(filepath.Join(s.Dir(), fileCur), dir, s.replicaPubFor(fileCur))
 	s.storeMu.Unlock()
 	if err != nil {
-		return err
+		return 0, err
 	}
-	db, err := database.OpenReadOnly(filepath.Join(dir, "replica.db"))
+	dbPath := filepath.Join(dir, "replica.db")
+	var dbSize int64
+	if st, err := os.Stat(dbPath); err == nil {
+		dbSize = st.Size()
+	}
+	db, err := database.OpenReadOnly(dbPath)
 	if err != nil {
-		return fmt.Errorf("副本里的库打不开: %w", err)
+		return dbSize, fmt.Errorf("副本里的库打不开: %w", err)
 	}
 	defer closeDB(db)
 	var res string
 	if err := db.Raw("PRAGMA integrity_check").Scan(&res).Error; err != nil {
-		return err
+		return dbSize, err
 	}
 	if res != "ok" {
-		return fmt.Errorf("副本库完整性检查没过: %s", res)
+		return dbSize, fmt.Errorf("副本库完整性检查没过: %s", res)
 	}
 	for _, t := range []string{"users", "nodes", "settings", "admins"} {
 		var n int64
 		if err := db.Raw("SELECT COUNT(*) FROM " + t).Scan(&n).Error; err != nil {
-			return fmt.Errorf("副本库读不了 %s: %w", t, err)
+			return dbSize, fmt.Errorf("副本库读不了 %s: %w", t, err)
 		}
 		if want, ok := meta.Counts[t]; ok && want != n {
-			return fmt.Errorf("副本库 %s 有 %d 行,和 meta 记的 %d 对不上", t, n, want)
+			return dbSize, fmt.Errorf("副本库 %s 有 %d 行,和 meta 记的 %d 对不上", t, n, want)
 		}
 	}
-	return nil
+	return dbSize, nil
 }
 
-// selfCheckTick 每天自检一次。
+// selfCheckTick 兜底:最新一份还没检过(收下时排的那次被重启打断了)就检;检过的每天再检一次。
 func (s *Service) selfCheckTick() {
 	if !s.IsNode() {
 		return
 	}
 	ri, ok := s.replicaInfo()
-	if !ok || s.now().Sub(time.Unix(ri.VerifiedAt, 0)) < selfCheckDT {
+	if !ok {
+		return
+	}
+	if ri.VerifiedSeq != ri.Seq {
+		s.selfCheckSoon()
+		return
+	}
+	if s.now().Sub(time.Unix(ri.VerifiedAt, 0)) < selfCheckDT {
 		return
 	}
 	if err := s.SelfCheck(); err != nil {

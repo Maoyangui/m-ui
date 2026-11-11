@@ -350,7 +350,7 @@ func (e *engine) betterStandby(peers map[uint]peerObs, rank int, L uint64, lease
 	}
 	gap := int64(3 * max(replicaMin, 1) * 60)
 	for _, o := range peers {
-		errAt := peerTakeoverErrAt(o.st)
+		errAt := o.st.TakeoverErrAt
 		switch {
 		case !o.ok || o.st.Rank <= 0 || o.st.Rank >= rank || o.st.Epoch != L:
 		case o.st.ReplicaAt <= 0 || !o.st.ReplicaOK:

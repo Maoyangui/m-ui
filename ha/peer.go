@@ -27,16 +27,23 @@ import (
 // 集群密钥由主机生成,经容灾状态发给所有副机;停用 / 删除副机时轮换。副机之间直接连对方的面板接口
 // (POST <API 地址>/api/ha/peer/status|vote),请求与响应都用集群密钥做 HMAC:
 //
-//	X-Peer-Node 发起方的服务器 id   X-Peer-Ts 时间戳(±10 分钟)   X-Peer-Sig HMAC-SHA256(key, 方法|动作|时间戳|sha256(正文))
+//	X-Peer-Node 发起方的服务器 id   X-Peer-Ts 时间戳(±10 分钟)
+//	X-Peer-Sig  HMAC-SHA256(key, 方法|动作|发起方|时间戳|sha256(正文))
 //
-// status 只回最少的信息:纪元、主机、距上次联系主机多久、是不是备用、副本到什么时候、投过的票。
-// vote(纪元 L+1, 发起方):本机也 60 秒以上没联系上主机、L+1 这个纪元还没投给别人时,先把票写进库再回 granted。
+// 响应签名绑定请求:HMAC(key, "resp"|动作|响应时间戳|请求时间戳|请求签名|sha256(正文)),发起方还查响应时间戳在
+// ±10 分钟内。旧的"同意"回复拿去回放给另一次要票,签名对不上。
+//
+// status 只回最少的信息:纪元、主机、距上次联系主机多久、是不是备用、副本到什么时候、投过的票、最近接任失败的时间。
+// vote(纪元 L+1, 发起方, 发起方以后的签名公钥):本机也 60 秒以上没联系上主机、L+1 这个纪元还没投给别人
+// (票 30 分钟后作废)时,先把票写进库再回 granted;回复带纪元与候选人,发起方逐一核对。
 
 const (
 	peerHeaderNode = "X-Peer-Node"
 	peerHeaderTs   = "X-Peer-Ts"
 	peerHeaderSig  = "X-Peer-Sig"
 	peerSkew       = 10 * time.Minute
+	// peerVoteTTL 票的有效期:一次没成功的选举留下的票过了这么久就不再挡别的候选(与 A 的 Decide 用同一时长)
+	peerVoteTTL = 30 * time.Minute
 )
 
 // PeerStatus 一台副机对同伴说的自己的情况。
@@ -52,19 +59,36 @@ type PeerStatus struct {
 	ReplicaOK  bool   `json:"replicaOk,omitempty"` // 自检通过
 	PauseUntil int64  `json:"pauseUntil,omitempty"`
 	Vote       *Vote  `json:"vote,omitempty"`
+	// TakeoverErrAt 本机最近一次接任失败的时间:名次在后的备用据此不再一直让行
+	TakeoverErrAt int64 `json:"takeoverErrAt,omitempty"`
 }
 
-// VoteRequest 请同伴投票:纪元 Epoch 由发起方接任。
+// VoteRequest 请同伴投票:纪元 Epoch 由发起方接任;CandPub 是它当主机后的签名公钥(投票者钉住它,
+// 新主机的第一份容灾状态必须用它签)。
 type VoteRequest struct {
 	Epoch     uint64 `json:"epoch"`
 	Candidate uint   `json:"candidate"`
+	CandPub   string `json:"candPub,omitempty"`
 }
 
-// VoteReply 投票结果。
+// VoteReply 投票结果(带纪元与候选人:发起方核对是不是给这一次要票的回复)。
 type VoteReply struct {
-	Granted bool   `json:"granted"`
-	Epoch   uint64 `json:"epoch"`
-	Reason  string `json:"reason,omitempty"`
+	Granted   bool   `json:"granted"`
+	Epoch     uint64 `json:"epoch"`
+	Candidate uint   `json:"candidate"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// voteRec 落库的票。CandPub 字段在 A 的契约里加进 Vote;这里外包一层先写进去(同名 JSON 键),
+// 集成后可直接用 Vote{…, CandPub: …}。
+type voteRec struct {
+	Vote
+	CandPub string `json:"candPub,omitempty"`
+}
+
+// voteLive 票还在有效期内。
+func (s *Service) voteLive(v Vote) bool {
+	return v.At > 0 && s.now().Sub(time.Unix(v.At, 0)) < peerVoteTTL
 }
 
 func peerKey(raw string) []byte {
@@ -109,11 +133,15 @@ func (s *Service) ServePeer(action string, h http.Header, body []byte) (PeerRepl
 	if err != nil || absDur(s.now().Sub(time.Unix(ts, 0))) > peerSkew {
 		return PeerReply{}, errPeerAuth
 	}
-	want := peerMAC(key, http.MethodPost, action, h.Get(peerHeaderTs), bodySum(body))
-	if !hmac.Equal([]byte(want), []byte(strings.ToLower(h.Get(peerHeaderSig)))) {
+	reqSig := strings.ToLower(h.Get(peerHeaderSig))
+	want := peerMAC(key, http.MethodPost, action, h.Get(peerHeaderNode), h.Get(peerHeaderTs), bodySum(body))
+	if !hmac.Equal([]byte(want), []byte(reqSig)) {
 		return PeerReply{}, errPeerAuth
 	}
-	from, _ := strconv.ParseUint(h.Get(peerHeaderNode), 10, 32)
+	from, err := strconv.ParseUint(h.Get(peerHeaderNode), 10, 32)
+	if err != nil || from == 0 {
+		return PeerReply{}, errPeerAuth
+	}
 	var out interface{}
 	switch action {
 	case "status":
@@ -131,7 +159,7 @@ func (s *Service) ServePeer(action string, h http.Header, body []byte) (PeerRepl
 	rts := strconv.FormatInt(s.now().Unix(), 10)
 	hdr := http.Header{}
 	hdr.Set(peerHeaderTs, rts)
-	hdr.Set(peerHeaderSig, peerMAC(key, "resp", action, rts, bodySum(b)))
+	hdr.Set(peerHeaderSig, peerMAC(key, "resp", action, rts, h.Get(peerHeaderTs), reqSig, bodySum(b)))
 	hdr.Set("Content-Type", "application/json")
 	return PeerReply{Status: http.StatusOK, Body: b, Header: hdr}, nil
 }
@@ -153,9 +181,10 @@ func (s *Service) peerStatus() PeerStatus {
 		ps.ReplicaAt, ps.ReplicaOK = ri.AsOf, ri.VerifyErr == ""
 	}
 	var v Vote
-	if s.getJSON(KeyVote, &v) {
+	if s.getJSON(KeyVote, &v) && s.voteLive(v) {
 		ps.Vote = &v
 	}
+	ps.TakeoverErrAt = s.lastTakeoverErr()
 	return ps
 }
 
@@ -164,7 +193,7 @@ func (s *Service) grantVote(req VoteRequest) VoteReply {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	L := s.Epoch()
-	r := VoteReply{Epoch: req.Epoch}
+	r := VoteReply{Epoch: req.Epoch, Candidate: req.Candidate}
 	if req.Epoch != L+1 {
 		r.Reason = "epoch"
 		return r
@@ -182,12 +211,16 @@ func (s *Service) grantVote(req VoteRequest) VoteReply {
 		return r
 	}
 	var v Vote
-	if s.getJSON(KeyVote, &v) && v.Epoch == req.Epoch && v.Candidate != req.Candidate {
-		r.Reason = "voted"
+	if s.getJSON(KeyVote, &v) && v.Epoch == req.Epoch && v.Candidate != req.Candidate && s.voteLive(v) {
+		r.Reason = "voted" // 过期的票不算:一次没成功的选举不能永远挡住别的候选
 		return r
 	}
-	v = Vote{Epoch: req.Epoch, Candidate: req.Candidate, At: s.now().Unix()}
-	if err := s.set(map[string]string{KeyVote: mustJSON(v)}); err != nil {
+	if _, err := ParseSignPub(req.CandPub); req.CandPub != "" && err != nil {
+		r.Reason = "candPub"
+		return r
+	}
+	rec := voteRec{Vote: Vote{Epoch: req.Epoch, Candidate: req.Candidate, At: s.now().Unix()}, CandPub: req.CandPub}
+	if err := s.set(map[string]string{KeyVote: mustJSON(rec)}); err != nil {
 		r.Reason = "store"
 		return r
 	}
@@ -256,10 +289,12 @@ func (s *Service) callPeer(ctx context.Context, p peer, action string, req inter
 		return err
 	}
 	ts := strconv.FormatInt(s.now().Unix(), 10)
+	self := strconv.FormatUint(uint64(s.SelfId()), 10)
+	sig := peerMAC(key, http.MethodPost, action, self, ts, bodySum(body))
 	hreq.Header.Set("Content-Type", "application/json")
-	hreq.Header.Set(peerHeaderNode, strconv.FormatUint(uint64(s.SelfId()), 10))
+	hreq.Header.Set(peerHeaderNode, self)
 	hreq.Header.Set(peerHeaderTs, ts)
-	hreq.Header.Set(peerHeaderSig, peerMAC(key, http.MethodPost, action, ts, bodySum(body)))
+	hreq.Header.Set(peerHeaderSig, sig)
 	resp, err := peerClient(p.node).Do(hreq)
 	if err != nil {
 		return err
@@ -270,8 +305,11 @@ func (s *Service) callPeer(ctx context.Context, p peer, action string, req inter
 		return fmt.Errorf("同伴 %s 回了 %d", p.node.Name, resp.StatusCode)
 	}
 	rts := resp.Header.Get(peerHeaderTs)
-	if !hmac.Equal([]byte(peerMAC(key, "resp", action, rts, bodySum(b))), []byte(strings.ToLower(resp.Header.Get(peerHeaderSig)))) {
+	if !hmac.Equal([]byte(peerMAC(key, "resp", action, rts, ts, sig, bodySum(b))), []byte(strings.ToLower(resp.Header.Get(peerHeaderSig)))) {
 		return fmt.Errorf("同伴 %s 的回复签名不对", p.node.Name)
+	}
+	if n, err := strconv.ParseInt(rts, 10, 64); err != nil || absDur(s.now().Sub(time.Unix(n, 0))) > peerSkew {
+		return fmt.Errorf("同伴 %s 的回复时间不对(两台的时钟差太多?)", p.node.Name)
 	}
 	return json.Unmarshal(b, out)
 }
@@ -314,7 +352,12 @@ func (s *Service) collectPeers(ctx context.Context) map[uint]peerObs {
 // requestVotes 请同伴为本机在纪元 epoch 接任投票,返回同意的台数(不含本机)。本机自己的票先落库。
 func (s *Service) requestVotes(ctx context.Context, epoch uint64) (int, error) {
 	self := s.SelfId()
-	if err := s.set(map[string]string{KeyVote: mustJSON(Vote{Epoch: epoch, Candidate: self, At: s.now().Unix()})}); err != nil {
+	candPub, err := s.SignPub() // 当主机后用的签名公钥:先生成,投票者钉住它
+	if err != nil {
+		return 0, err
+	}
+	rec := voteRec{Vote: Vote{Epoch: epoch, Candidate: self, At: s.now().Unix()}, CandPub: candPub}
+	if err := s.set(map[string]string{KeyVote: mustJSON(rec)}); err != nil {
 		return 0, err
 	}
 	var granted int
@@ -327,8 +370,12 @@ func (s *Service) requestVotes(ctx context.Context, epoch uint64) (int, error) {
 			c, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 			var r VoteReply
-			if err := s.callPeer(c, p, "vote", VoteRequest{Epoch: epoch, Candidate: self}, &r); err != nil {
+			if err := s.callPeer(c, p, "vote", VoteRequest{Epoch: epoch, Candidate: self, CandPub: candPub}, &r); err != nil {
 				logger.Info("容灾:向 ", p.node.Name, " 要票没成功: ", err)
+				return
+			}
+			if r.Epoch != epoch || r.Candidate != self {
+				logger.Warning("容灾:", p.node.Name, " 的投票回复不是给这一次的(纪元 ", r.Epoch, "、候选 #", r.Candidate, "),不算")
 				return
 			}
 			if r.Granted {

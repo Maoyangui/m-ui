@@ -128,7 +128,7 @@ func (s *Service) Takeover(o TakeoverOpts) error {
 	if err := s.replicaUsable(ri); err != nil {
 		return fail(err)
 	}
-	need := TakeoverNeed(ri.Size, replicaDBSize(ri))
+	need := TakeoverNeed(ri.Size, ri.DBSize)
 	if free := takeoverDiskFree(s); free >= 0 && free < need {
 		return fail(fmt.Errorf("本机磁盘剩余 %d MB,接任至少要 %d MB:先腾出空间再接任", free>>20, need>>20))
 	}
@@ -335,7 +335,7 @@ func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bo
 		if err := s.applyLocal(tx, b.Epoch, selfId, o); err != nil {
 			return err
 		}
-		if ids := withoutId(metaStandbys(meta), selfId); len(ids) > 0 {
+		if ids := withoutId(meta.Standbys, selfId); len(ids) > 0 {
 			// 原主机当时的备用名单(去掉本机):新主机刚起来、各台报告还没拉齐时先按它发副本
 			if err := upsert(tx, map[string]string{KeyStandbyList: mustJSON(ids)}); err != nil {
 				return err

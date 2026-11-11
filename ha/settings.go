@@ -24,7 +24,7 @@ var localKeys = setOf(
 	// 监听、端口、路径、域名、证书
 	"webListen", "webPort", "webPath", "webDomain", "webCertFile", "webKeyFile",
 	"certFile", "keyFile", "certSource",
-	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subDomain", "subServerAddr", "subInsecure", "subRateLimit",
+	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subDomain",
 	"resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile",
 	// 本机探测值
 	"publicIp", "publicIp6",
@@ -34,8 +34,8 @@ var localKeys = setOf(
 	"warpPort", "logEnabled", "coreLogLevel", "backupDir", "statsPingAt",
 	// 容灾的本机状态
 	KeyEpoch, KeyRole, KeyMasterId, KeyMasterPub, KeySignKey, KeyVote, KeyGrant, KeyState, KeyNotify, KeyPeerKey,
-	KeyDemoted, KeyBecame, KeyFreezeUntil, KeySwitch, KeyIncoming, KeyReplicaSeq, KeyStandbyList, KeyFormer,
-	KeyNotices, KeyCmd, KeyCmdResult, KeyDnsChanged,
+	KeyDemoted, KeyBecame, KeyFreezeUntil, KeySwitch, KeyIncoming, KeyReplicaSeq, KeyStandbyList,
+	KeyNotices, KeyCmd, KeyCmdResult, KeyDnsChanged, KeyDropPending,
 )
 
 // localPrefixes 按前缀归为本机的设置:hub*(主副机同步的本机状态)、ops*(运维页)、acme*(证书签发)。
@@ -48,6 +48,8 @@ var globalKeys = setOf(
 	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subSingboxExt", "subAutoFormat", "subUpdates",
 	"subUseUserName", "subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice", "subShareEnabled",
 	"subPageBuyURL", "subPageBrand", "extRefreshMinutes",
+	// 决定订阅内容的三项(节点地址用域名还是 IP、带不带"允许不安全"、订阅口限速):换主机后用户拿到的订阅要和以前一样
+	"subServerAddr", "subInsecure", "subRateLimit",
 	"tgEnabled", "tgToken", "tgChatId", "tgProxy", "tgApiBase", "tgBot", "tgOnLogin", "tgOnUserDisabled", "tgOnUserExpiring",
 	"tgExpiringDays", "tgOnQuota", "tgQuotaPercent", "tgOnRuleLimit", "tgOnUpstream", "tgOnCore", "tgOnReach", "tgOnCert",
 	"tgDaily", "tgDailyHour", "webhookUrl", "webhookSecret", "notifyOnce",
@@ -57,7 +59,9 @@ var globalKeys = setOf(
 	"totpEnabled", "totpSecret", "apiEnabled", "apiToken", "adminDefault", "sessionMaxAge",
 	// 容灾的全局设置
 	KeyMode, KeyStandbys, KeyReplicaMinutes, KeyConfirmMinutes, KeyAutoMinutes, KeyRankStepMinutes,
-	KeyWitness, KeyClusterKey, KeyPauseUntil, KeyDnsToken, KeyDnsNames,
+	KeyWitness, KeyClusterKey, KeyPauseUntil, KeyDnsToken, KeyDnsNames, KeyAllowPlain,
+	// 失联的原主机:设为主机之后新主机也得记得它,它回来时才会自动变为副机
+	KeyFormer,
 )
 
 // globalPrefixes 按前缀归为全局的设置:主机记下的各副机账本纪元、钉住的备用公钥。
@@ -107,10 +111,10 @@ func setOf(keys ...string) map[string]bool {
 // 容灾设置键。
 const (
 	// 全局(随副本复制)
-	KeyMode            = "haMode"            // off | confirm | auto
+	KeyMode            = "haMode"            // off | confirm(先确认再接任)| auto(自动接任)
 	KeyStandbys        = "haStandbys"        // 备用台数 1–3,默认 2
 	KeyReplicaMinutes  = "haReplicaMinutes"  // 定时副本间隔,默认 5
-	KeyConfirmMinutes  = "haConfirmMinutes"  // 确认后接任:失联多久发确认提示,默认 3
+	KeyConfirmMinutes  = "haConfirmMinutes"  // 先确认再接任:失联多久发确认提示,默认 3
 	KeyAutoMinutes     = "haAutoMinutes"     // 自动接任:失联多久接任,默认 10
 	KeyRankStepMinutes = "haRankStepMinutes" // 备用 2 比备用 1 多等多久,默认 3
 	KeyWitness         = "haWitness"         // 境外测点见证(Globalping),默认开
@@ -119,6 +123,8 @@ const (
 	KeyPubPrefix       = "haPub:"            // 钉住的备用公钥(haPub:<服务器 id>)
 	KeyDnsToken        = "haDnsToken"        // Cloudflare 令牌(Zone.DNS:Edit),主机变更后自动改 DNS;不复用签证书的令牌
 	KeyDnsNames        = "haDnsNames"        // 要跟着主机走的域名,逗号分隔
+	KeyAllowPlain      = "haAllowPlain"      // 允许明文 http 链接的副机当备用(默认关)
+	KeyFormer          = "haFormer"          // 失联的原主机,等它回来自动变为副机(全局:设为主机后新主机照样认得它)
 
 	// 本机
 	KeyEpoch       = "haEpoch"       // 本机纪元;0 = 没开过容灾、没换过主机
@@ -138,11 +144,11 @@ const (
 	KeyIncoming    = "haIncoming"    // 被设为主机的副机:收到的数据暂存到哪一步
 	KeyReplicaSeq  = "haReplicaSeq"  // 主机:最近一份副本的序号(只增)
 	KeyStandbyList = "haStandbyList" // 主机:上次算出的备用名单(刚启动、状态还没拉齐时先用它)
-	KeyFormer      = "haFormer"      // 接任的主机:失联的原主机,等它回来自动变为副机
 	KeyNotices     = "haNotices"     // 面板顶部的一次性提示
 	KeyCmd         = "haCmd"         // 命令行交给运行中的服务的请求
 	KeyCmdResult   = "haCmdResult"   // 上面请求的结果
 	KeyDnsChanged  = "haDnsChanged"  // 最近一次自动改 DNS 的记录(原值、新值)
+	KeyDropPending = "haDropPending" // 主机:停用 / 删除的副机还没确认删掉副本(连同地址、令牌,副本循环每轮重试)
 )
 
 // 角色(haRole)。

@@ -57,6 +57,10 @@ type ReplicaMeta struct {
 	Identity    Identity         `json:"identity"`
 	Full        bool             `json:"full,omitempty"` // 整库(设为主机)
 	Sum         string           `json:"sum"`            // 内容指纹:同样的数据得出同样的值(不含时间)
+	// Standbys 生成时的备用名单:接任 / 被设为主机的一方据此马上给其余备用发第一份副本
+	Standbys []uint `json:"standbys,omitempty"`
+	// DBSize 解开后的库多大(主机据此算备用的磁盘够不够接任)
+	DBSize int64 `json:"dbSize,omitempty"`
 }
 
 // openScratch 打开一个临时 SQLite 文件(只本进程用,不要日志、不要同步落盘)。
@@ -337,6 +341,12 @@ func (s *Service) buildArchive(dir string, full bool) (string, ReplicaMeta, erro
 		return "", meta, err
 	}
 	meta.Counts, meta.MaxChangeId = counts, maxChange
+	if st, err := os.Stat(dbPath); err == nil {
+		meta.DBSize = st.Size()
+	}
+	if s.rep != nil {
+		meta.Standbys = s.rep.standbyIds()
+	}
 	zipPath := filepath.Join(dir, "replica.zip")
 	zf, err := os.OpenFile(zipPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
