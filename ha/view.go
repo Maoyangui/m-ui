@@ -283,7 +283,14 @@ func itoa(n int) string { return strconv.Itoa(n) }
 func (s *Service) Report() *hub.HAReport {
 	L := s.Epoch()
 	rep := &hub.HAReport{Epoch: L, LeaseAgo: int64(s.LeaseAgo().Seconds()), DiskFree: s.diskFree(), Role: s.Role(), Version: s.d.Version,
-		ResellerPort: s.settingInt("resellerPort", 2054, 1, 65535)}
+		ResellerPort: s.settingInt("resellerPort", 2054, 1, 65535),
+		WebPort:      s.settingInt("webPort", 2053, 1, 65535), SubPort: s.settingInt("subPort", 2056, 1, 65535)}
+	if strings.TrimSpace(s.setting("warpPort")) != "" {
+		rep.WarpPort = s.settingInt("warpPort", 40000, 1, 65535)
+	}
+	if !strings.EqualFold(s.setting("resellerEnabled"), "false") {
+		rep.ResellerURL = s.resellerURL()
+	}
 	if L > 0 && s.IsNode() {
 		if k, err := s.standbyKey(); err == nil {
 			rep.Pub = k.PubString()

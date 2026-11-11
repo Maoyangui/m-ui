@@ -93,7 +93,7 @@ func (s *Service) runCmd(c Cmd, res *CmdResult) error {
 		if err != nil {
 			return err
 		}
-		st, err := s.SetMaster(n.Id, "cli")
+		st, err := s.SetMaster(n.Id, "cli", SetMasterOpts{})
 		if err != nil {
 			return err
 		}

@@ -100,7 +100,7 @@ func TestUpdateDNSAfterBecame(t *testing.T) {
 	if !b.Notified || len(b.Dns) != 2 {
 		t.Fatalf("改动要记下: %+v", b)
 	}
-	if len(notes) != 1 || !strings.Contains(notes[0], "已自动把") || strings.Contains(notes[0], "cf-secret") {
+	if len(notes) != 1 || !strings.Contains(notes[0], "198.51.100.1 → 203.0.113.7") || !strings.Contains(notes[0], "2001:db8::1 → 2001:db8::7") || strings.Contains(notes[0], "cf-secret") {
 		t.Fatalf("通知要写明改了哪些记录、不带令牌: %q", notes)
 	}
 	if n := s.Notices(); len(n) != 1 || !n[0].Dns {
@@ -138,7 +138,7 @@ func TestUpdateDNSAfterBecame(t *testing.T) {
 // 没配令牌或域名:什么都不做;Cloudflare 出错只告警,通知里写手动改。
 func TestUpdateDNSOffOrFailing(t *testing.T) {
 	s := testService(t, false, map[string]string{KeyEpoch: "2", "publicIp": "203.0.113.7"})
-	if ch, err := s.updateDNS("198.51.100.1", ""); ch != nil || err != nil {
+	if run := s.updateDNS("198.51.100.1", ""); run != nil {
 		t.Fatal("没配就不动")
 	}
 	var notes []string

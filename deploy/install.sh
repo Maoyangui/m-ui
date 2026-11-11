@@ -194,7 +194,11 @@ if [ "$FRESH" = 0 ] && [ -x "$BIN" ]; then
   fi
 fi
 
-if systemctl is-active --quiet m-ui; then systemctl stop m-ui; fi
+if systemctl is-active --quiet m-ui; then
+  # 主机开着主机容灾时先暂停接任 15 分钟:升级重启那一两分钟备用别误判主机失联(老版本没有这个命令,忽略)
+  "$BIN" pause-takeover -db "$DB" 15 2>/dev/null || true
+  systemctl stop m-ui
+fi
 install -m 0755 "$TMP" "$BIN"
 rm -f "$TMP"
 

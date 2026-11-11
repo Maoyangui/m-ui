@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1233,7 +1234,7 @@ func generateCredentials(name string) json.RawMessage {
 // 否则拿到会话就能绕过"关闭两步验证要密码 + 验证码"。设置页加字段时要同步加到这里(测试会核对)。
 var panelSettings = setOf(
 	"webDomain", "timezone", "webListen", "webPort", "webPath", "webCertFile", "webKeyFile",
-	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subProfileTitle", "subUpdates",
+	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subDomain", "subProfileTitle", "subUpdates",
 	"subUseUserName", "subEncode", "subShowNotice", "subInsecure", "subServerAddr", "extRefreshMinutes",
 	"subAutoFormat", "subClashExt", "subSingboxExt", "blockBT", "supportOnline", "tgBot", "webhookUrl", "webhookSecret",
 	"resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile",
@@ -1329,6 +1330,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, errors.New("面板域名不能写泛域名,要填具体的访问地址,如 hk.example.com"))
 			return
 		}
+		if v, ok := in["subDomain"]; ok { // 订阅地址里的主机名(换主机后随主机身份迁来的也在这里改)
+			d, err := normSubDomain(v)
+			if err != nil {
+				badRequest(w, err)
+				return
+			}
+			in["subDomain"] = d
+		}
 		if v, ok := in["webhookUrl"]; ok && strings.TrimSpace(v) != "" {
 			if u, err := url.Parse(strings.TrimSpace(v)); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 				badRequest(w, errors.New("Webhook 地址要是完整的 http(s) 网址"))
@@ -1403,6 +1412,28 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// normSubDomain 订阅域名:空 = 用面板域名(再没有用公网 IP);否则只收一个具体的域名(不带 http://、端口、路径,不能是泛域名)。
+func normSubDomain(v string) (string, error) {
+	d := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(v), "."))
+	if d == "" {
+		return "", nil
+	}
+	if len(d) > 253 || strings.ContainsAny(d, "*/:@?# ") || !strings.Contains(d, ".") || net.ParseIP(d) != nil {
+		return "", errors.New("订阅域名只填一个具体的域名(如 sub.example.com),不带 http://、端口和路径;用 IP 的留空")
+	}
+	for _, label := range strings.Split(d, ".") {
+		if label == "" || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return "", errors.New("订阅域名只填一个具体的域名(如 sub.example.com),不带 http://、端口和路径;用 IP 的留空")
+		}
+		for _, r := range label {
+			if !(r == '-' || r == '_' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+				return "", errors.New("订阅域名只填一个具体的域名(如 sub.example.com),不带 http://、端口和路径;用 IP 的留空")
+			}
+		}
+	}
+	return d, nil
 }
 
 // maxSubTemplate 订阅模板的长度上限:模板随快照发给每台副机,订阅每次都要解析一遍。

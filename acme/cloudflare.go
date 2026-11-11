@@ -55,7 +55,7 @@ func (c *Cloudflare) do(ctx context.Context, method, path string, body interface
 	}
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return fmt.Errorf("cloudflare %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		return fmt.Errorf("cloudflare %d: %s", resp.StatusCode, briefBody(raw))
 	}
 	if !env.Success {
 		msg := "unknown"
@@ -124,4 +124,26 @@ func (c *Cloudflare) ListRecords(ctx context.Context, zone, name, typ string) ([
 // UpdateContent 只改一条记录的内容(PATCH):类型、名字、橙云、TTL 都保持原样。
 func (c *Cloudflare) UpdateContent(ctx context.Context, zone, id, content string) error {
 	return c.do(ctx, "PATCH", "/zones/"+zone+"/dns_records/"+id, map[string]interface{}{"content": content}, nil)
+}
+
+// briefBody 非 JSON 的回复(错误页、被拦截的页面)只留去掉标签后的前 200 个字:整段网页进错误,通知会超长发不出去。
+func briefBody(raw []byte) string {
+	var sb strings.Builder
+	in := false
+	for _, r := range string(raw) {
+		switch {
+		case r == '<':
+			in = true
+		case r == '>':
+			in = false
+			sb.WriteByte(' ')
+		case !in:
+			sb.WriteRune(r)
+		}
+	}
+	out := strings.Join(strings.Fields(sb.String()), " ")
+	if r := []rune(out); len(r) > 200 {
+		out = string(r[:200]) + "…"
+	}
+	return out
 }

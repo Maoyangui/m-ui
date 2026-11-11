@@ -266,6 +266,7 @@ func New(dbPath string) (*Runner, error) {
 		Notify: func(toggle, text string) { r.notifier.Event(toggle, text) },
 		UA:     "m-ui/" + Version + " (+" + brand.Repo + ")",
 	})
+	cfAPI := testCFAPI(db)
 	r.ha = ha.New(ha.Deps{
 		DB: db, DBPath: dbPath, Version: Version,
 		Notify:      func(toggle, text string) { r.notifier.Event(toggle, text) },
@@ -274,6 +275,7 @@ func New(dbPath string) (*Runner, error) {
 		PanelURL:    r.PanelURL,
 		ResellerURL: r.ResellerURL,
 		Witness:     r.haWitness,
+		DNSAPI:      cfAPI,
 	})
 	r.hub = hub.New(hub.Deps{
 		DB: db, Setting: r.setting, IsNode: r.IsNode, Version: Version,
@@ -1896,13 +1898,31 @@ func Run(dbPath string) error {
 	if restored {
 		r.ensureLedgerEpoch(true) // 还原回来的库里是旧账本的纪元
 	}
+	// 容灾的纪元下限与换机围栏:还原旧备份、重置设置不能让纪元回退;主机的库搬到别的机器上运行时以更高纪元围栏
+	// (在跑主机任务、启动自检之前判定;围栏在 StartupCheck 里执行)
+	if b := r.ha.Boot(restored); b.Fence {
+		logger.Warning("主机容灾:", b.Reason, ",启动时以纪元 ", b.To, " 围栏(原纪元 ", b.From, ")")
+	}
 	// core 启动失败(如证书未就绪)不阻塞面板与订阅:
 	// 面板必须先可用,操作者才能在面板里解决问题。
 	if err := r.Start(); err != nil {
 		logger.Error("数据面启动失败(面板与订阅继续运行): ", err)
 	}
 	if err := r.subSrv.Start(); err != nil {
-		return fmt.Errorf("启动订阅服务: %w", err)
+		// 刚接任 / 刚被设为主机:迁来的订阅端口在本机被别的程序占着(检查只看得到本机的线路与服务端口),改回本机原来的端口,
+		// 并在成为主机的通知里说清订阅地址变了 —— 绝不因为这个让新主机起不来
+		port, ok := r.ha.SubPortFallback()
+		if !ok {
+			return fmt.Errorf("启动订阅服务: %w", err)
+		}
+		from := r.settingIntOr("subPort", 2056)
+		logger.Warning("迁来的订阅端口 ", from, " 绑不上(", err, "),改回本机原来的订阅端口 ", port)
+		if e := r.ha.NoteSubPortFallback(from, port, err); e != nil {
+			return fmt.Errorf("启动订阅服务: %w", err)
+		}
+		if err := r.subSrv.Start(); err != nil {
+			return fmt.Errorf("启动订阅服务: %w", err)
+		}
 	}
 	if startPanel != nil {
 		if err := startPanel(r); err != nil {
@@ -1966,6 +1986,16 @@ func Run(dbPath string) error {
 func (r *Runner) newSubServer() *sub.Server {
 	s := sub.NewServer(r.db)
 	s.TLS = &r.tls
+	s.WriteGate = func() (func(), bool, string) { // 设为主机冻结写操作时订阅页也不能改共享状态(容灾服务在 New 里随后建好)
+		if r.ha == nil {
+			return func() {}, true, ""
+		}
+		done, ok := r.ha.BeginWrite()
+		if !ok {
+			return done, false, r.ha.FrozenText()
+		}
+		return done, true, ""
+	}
 	s.OnShareChange = func(name string, kick bool) {
 		go func() {
 			if err := r.ReloadUsers(); err != nil {

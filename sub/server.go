@@ -51,6 +51,10 @@ type Server struct {
 	// TLS 登记订阅端口用的证书加载器(runner 的 Watch):证书读不出来、正用临时自签证书顶着时,面板顶部据此提示;
 	// 临时证书存在它的 TempDir 里、重启沿用。nil 不登记,临时证书只在内存里。
 	TLS *certutil.Watch
+
+	// WriteGate 订阅页的写请求(生成 / 取消临时共享)先过它:设为主机冻结写操作时 ok=false(回 503 和 msg);
+	// 否则登记在途,做完调 done。nil = 不管。
+	WriteGate func() (done func(), ok bool, msg string)
 }
 
 // 订阅访问日志的缓冲:满 logFlushAt 条提前落一批,最多攒 logBufMax 条(落库一直失败时再多的就丢掉、只计数)。
@@ -541,6 +545,15 @@ func (s *Server) handle() http.HandlerFunc {
 			if blocked { // 停用状态下不能生成 / 取消共享
 				http.NotFound(w, r)
 				return
+			}
+			if s.WriteGate != nil { // 正在设为主机:共享状态改了也带不到新主机去,先挡住
+				done, ok, msg := s.WriteGate()
+				if !ok {
+					w.Header().Set("Retry-After", "120")
+					http.Error(w, msg, http.StatusServiceUnavailable)
+					return
+				}
+				defer done()
 			}
 			s.handleShare(w, r, subPath, name, user, rs)
 			return

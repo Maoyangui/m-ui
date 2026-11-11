@@ -20,12 +20,14 @@ import (
 //	POST /api/ha                 主机:保存主机容灾设置 {config…, password, code}(开关、改模式都要再输一次密码)
 //	POST /api/ha/pause           主机:暂停接任 {minutes}(0 = 恢复)
 //	GET  /api/ha/plan?id=        主机:把这台设为主机前的检查与说明
-//	POST /api/ha/set-master      主机:设为主机 {id, password, code}
+//	POST /api/ha/set-master      主机:设为主机 {id, allowPlain, password, code}(目标是明文 http 时要 allowPlain)
+//	POST /api/ha/switch/abandon  主机:放弃结果不明的设为主机(以更高纪元隔离目标、恢复写操作){password, code}
 //	POST /api/ha/takeover        备用:接任为主机 {password, code}
-//	POST /api/ha/repin           主机:重新信任一台备用的公钥 {id}
+//	POST /api/ha/repin           主机:重新信任一台备用的公钥 {id, password, code}
 //	POST /api/ha/notice          清掉一条顶部提示 {id}
 //
-// 设为主机、接任、改主机容灾都要再输一次管理员密码(开了两步验证再加动态码),失败按登录同一套限流。
+// 设为主机、放弃、接任、重新信任、改主机容灾都要再输一次管理员密码(开了两步验证再加动态码),失败按登录同一套限流。
+// 设为主机冻结写操作期间,改主机容灾设置、暂停、重新信任同样被挡(它们改的是会随整库带走的设置)。
 
 func (s *Server) handleHA(w http.ResponseWriter, r *http.Request) {
 	if haLimited(w, r) {
@@ -53,6 +55,12 @@ func (s *Server) handleHA(w http.ResponseWriter, r *http.Request) {
 		if !s.reauth(w, r, body.Password, body.Code) {
 			return
 		}
+		done, ok, msg := s.haWrite(r)
+		if !ok {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+			return
+		}
+		defer done()
 		before := h.Config()
 		if err := h.SaveConfig(body.ConfigInput); err != nil {
 			badRequest(w, err)
@@ -163,13 +171,14 @@ func (s *Server) handleHASub(w http.ResponseWriter, r *http.Request) {
 // haSessionActions 要登录的容灾动作。
 func (s *Server) haSessionActions() map[string]haAction {
 	return map[string]haAction{
-		"pause":      {http.MethodPost, s.haPause},
-		"plan":       {http.MethodGet, s.haPlan},
-		"set-master": {http.MethodPost, s.haSetMaster},
-		"takeover":   {http.MethodPost, s.haTakeover},
-		"repin":      {http.MethodPost, s.haRepin},
-		"notice":     {http.MethodPost, s.haNotice},
-		"dns-test":   {http.MethodPost, s.haDNSTest},
+		"pause":          {http.MethodPost, s.haPause},
+		"plan":           {http.MethodGet, s.haPlan},
+		"set-master":     {http.MethodPost, s.haSetMaster},
+		"switch/abandon": {http.MethodPost, s.haAbandon},
+		"takeover":       {http.MethodPost, s.haTakeover},
+		"repin":          {http.MethodPost, s.haRepin},
+		"notice":         {http.MethodPost, s.haNotice},
+		"dns-test":       {http.MethodPost, s.haDNSTest},
 	}
 }
 
@@ -189,6 +198,12 @@ func (s *Server) haPause(w http.ResponseWriter, r *http.Request, h *ha.Service) 
 	if !decodeSmall(w, r, &body) {
 		return
 	}
+	done, ok, msg := s.haWrite(r)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+		return
+	}
+	defer done()
 	if err := h.Pause(body.Minutes); err != nil {
 		badRequest(w, err)
 		return
@@ -215,12 +230,14 @@ func (s *Server) haPlan(w http.ResponseWriter, r *http.Request, h *ha.Service) {
 	}{p, s.setting("totpEnabled") == "true"})
 }
 
-// haSetMaster 主机:把一台副机设为主机。要再输一次管理员密码。
+// haSetMaster 主机:把一台副机设为主机。要再输一次管理员密码;目标是明文 http 时要勾选确认(allowPlain)。
+// 不能设为主机时 400,正文带检查结果的代码(blockers),界面按代码翻译。
 func (s *Server) haSetMaster(w http.ResponseWriter, r *http.Request, h *ha.Service) {
 	var body struct {
-		Id       uint   `json:"id"`
-		Password string `json:"password"`
-		Code     string `json:"code"`
+		Id         uint   `json:"id"`
+		AllowPlain bool   `json:"allowPlain"`
+		Password   string `json:"password"`
+		Code       string `json:"code"`
 	}
 	if !decodeSmall(w, r, &body) {
 		return
@@ -232,13 +249,39 @@ func (s *Server) haSetMaster(w http.ResponseWriter, r *http.Request, h *ha.Servi
 	if !s.reauth(w, r, body.Password, body.Code) {
 		return
 	}
-	st, err := h.SetMaster(body.Id, s.actor(r))
-	if err != nil {
+	st, err := h.SetMaster(body.Id, s.actor(r), ha.SetMasterOpts{AllowPlain: body.AllowPlain})
+	var pe *ha.PlanError
+	switch {
+	case errors.As(err, &pe):
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error(), "code": "planBlocked", "blockers": pe.Plan.Blockers})
+		return
+	case err != nil:
 		badRequest(w, err)
 		return
 	}
-	s.audit(r, "ha", "set-master", map[string]interface{}{"id": body.Id, "name": st.TargetName})
+	s.audit(r, "ha", "set-master", map[string]interface{}{"id": body.Id, "name": st.TargetName, "allowPlain": body.AllowPlain})
 	writeJSON(w, http.StatusOK, st)
+}
+
+// haAbandon 主机:设为主机的提交结果不明时放弃 —— 以更高的纪元隔离目标(它之后起来会被副机拒绝、自动变为副机),恢复写操作。
+// 要再输一次管理员密码。
+func (s *Server) haAbandon(w http.ResponseWriter, r *http.Request, h *ha.Service) {
+	var body struct {
+		Password string `json:"password"`
+		Code     string `json:"code"`
+	}
+	if !decodeSmall(w, r, &body) {
+		return
+	}
+	if !s.reauth(w, r, body.Password, body.Code) {
+		return
+	}
+	if err := h.AbandonSwitch(s.actor(r)); err != nil {
+		badRequest(w, err)
+		return
+	}
+	s.audit(r, "ha", "set-master-abandon", nil)
+	writeJSON(w, http.StatusOK, s.haView(h, false))
 }
 
 // haTakeover 备用:主机失联时接任为主机。要再输一次本机管理员的密码。
@@ -261,10 +304,13 @@ func (s *Server) haTakeover(w http.ResponseWriter, r *http.Request, h *ha.Servic
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }
 
-// haRepin 主机:忘掉记住的备用公钥(那台重装过 m-ui 后),下一次见到时重新记。
+// haRepin 主机:忘掉记住的备用公钥(那台重装过 m-ui 后),下一次见到时重新记。之后的副本都封给新记的公钥:
+// 要再输一次管理员密码(和设为主机一样敏感),记下的新指纹在卡片上核对。
 func (s *Server) haRepin(w http.ResponseWriter, r *http.Request, h *ha.Service) {
 	var body struct {
-		Id uint `json:"id"`
+		Id       uint   `json:"id"`
+		Password string `json:"password"`
+		Code     string `json:"code"`
 	}
 	if !decodeSmall(w, r, &body) {
 		return
@@ -273,6 +319,15 @@ func (s *Server) haRepin(w http.ResponseWriter, r *http.Request, h *ha.Service) 
 		badRequest(w, errBadNodeID)
 		return
 	}
+	if !s.reauth(w, r, body.Password, body.Code) {
+		return
+	}
+	done, ok, msg := s.haWrite(r)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+		return
+	}
+	defer done()
 	if err := h.Repin(body.Id); err != nil {
 		badRequest(w, err)
 		return
@@ -296,14 +351,16 @@ func (s *Server) haNotice(w http.ResponseWriter, r *http.Request, h *ha.Service)
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }
 
-// haFrozen 设为主机进行中:写操作一律 503(主面板、外部 API、代理面板、Telegram 机器人)。只读请求放行。
-func (s *Server) haFrozen(r *http.Request) (bool, string) {
+// haWrite 写请求过写闸(主面板、外部 API、代理面板;Telegram 机器人与订阅页另外接):设为主机冻结中返回 ok=false 与说明(调用方回 503);
+// 否则登记在途 —— 设为主机置冻结后要等在途的写做完才导出整库,调用方做完一定要调 done。只读请求直接放行。
+func (s *Server) haWrite(r *http.Request) (done func(), ok bool, msg string) {
 	h := s.haSvc()
 	if h == nil || r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
-		return false, ""
+		return func() {}, true, ""
 	}
-	if !h.Frozen() {
-		return false, ""
+	done, ok = h.BeginWrite()
+	if !ok {
+		return done, false, h.FrozenText()
 	}
-	return true, h.FrozenText()
+	return done, true, ""
 }

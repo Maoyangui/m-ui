@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -249,6 +250,20 @@ func main() {
 		}
 	case "ha":
 		runHA(os.Args[2:])
+	case "pause-takeover": // 安装 / 升级脚本重启服务前调用:主机开着容灾时暂停接任(不缩短已有的暂停)
+		fs := flag.NewFlagSet("pause-takeover", flag.ExitOnError)
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径")
+		fs.Parse(os.Args[2:])
+		n, err := strconv.Atoi(fs.Arg(0))
+		if err != nil || n <= 0 || n > 24*60 {
+			fmt.Fprintln(os.Stderr, "用法:m-ui pause-takeover [-db 路径] <分钟>")
+			os.Exit(2)
+		}
+		if err := requireDB(*dbPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		haPauseBefore(*dbPath, n, "升级前")
 	case "run":
 		fs := flag.NewFlagSet("run", flag.ExitOnError)
 		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径(默认取 systemd 单元里的,没有则 /etc/m-ui/m-ui.db)")

@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,14 +22,21 @@ import (
 	"github.com/Maoyangui/m-ui/selfupdate"
 )
 
-// 被设为主机的副机这一边:给出一次性公钥 → 收整库数据、验证、组好新库暂存 → 提交时换上、重启。
-// 一次性私钥只在内存里;20 分钟内没提交就丢掉暂存(进程重启也等于丢掉:私钥没了,原主机那边会失败、解冻)。
+// 被设为主机的副机这一边:给出一次性公钥与本机以后的签名公钥 → 收整库数据(必须是本机钉住的主机签的)、验证、组好新库暂存
+// → 提交时换上、重启。一次性私钥与新签名密钥只在内存里;原主机给的期限(冻结时长再加 5 分钟)内没提交就丢掉暂存
+// (进程重启也等于丢掉:私钥没了,原主机那边会失败、解冻)。提交与丢弃在同一把锁下:丢掉了的就不可能再提交。
 
 // MaxBundle 设为主机时整库数据的上限。
 const MaxBundle int64 = 32 << 30
 
-// incomingTTL 暂存多久没提交就丢掉。
-var incomingTTL = 20 * time.Minute
+// incomingTTL 原主机没说期限时暂存多久没提交就丢掉;incomingTTLMax 最多留多久。
+var (
+	incomingTTL    = 20 * time.Minute
+	incomingTTLMax = 2 * time.Hour
+)
+
+// promoteMarkTTL 提交以后多久之内重启才换上新库(过期的不再换上:原主机那时多半已经隔离了本机)。
+const promoteMarkTTL = 10 * time.Minute
 
 const (
 	incPrepared  = "prepared"
@@ -41,6 +49,7 @@ type PrepareRequest struct {
 	Master  Link   `json:"master"` // 原主机变为副机后别人该怎么连:本机试着连一下,连不上提前告诉它
 	Version string `json:"version"`
 	Size    int64  `json:"size"`
+	TTL     int64  `json:"ttl,omitempty"` // 暂存多久(秒);0 = 旧默认
 }
 
 // PrepareReply 本机给的一次性公钥。
@@ -50,6 +59,9 @@ type PrepareReply struct {
 	Version     string `json:"version"`
 	DiskFree    int64  `json:"diskFree"`
 	MasterReach string `json:"masterReach,omitempty"` // 空 = 连得上原主机的面板地址;否则是原因
+	Epoch       uint64 `json:"epoch"`
+	MasterPubFP string `json:"masterPubFp"`
+	SignPub     string `json:"signPub"`
 }
 
 // IncomingState 暂存的进度(本机设置 haIncoming,不含任何密钥)。
@@ -62,17 +74,19 @@ type IncomingState struct {
 }
 
 type incoming struct {
-	s       *Service
-	mu      sync.Mutex
-	key     *BoxKey
-	nonce   string
-	from    uint
-	expires time.Time
-	stage   string
+	s        *Service
+	mu       sync.Mutex
+	key      *BoxKey
+	signSeed string // 本机成为主机后用的签名密钥(prepare 时生成,组新库时写进去)
+	nonce    string
+	from     uint
+	expires  time.Time
+	stage    string
+	epoch    uint64 // 组好的新库的纪元
 }
 
 func (in *incoming) reset() {
-	in.key, in.nonce, in.from, in.stage, in.expires = nil, "", 0, "", time.Time{}
+	in.key, in.signSeed, in.nonce, in.from, in.stage, in.expires, in.epoch = nil, "", "", 0, "", time.Time{}, 0
 }
 
 func (s *Service) stagedFile() string { return promoteFile(s.d.DBPath) + ".staged" }
@@ -109,13 +123,28 @@ func (s *Service) Prepare(req PrepareRequest) (PrepareReply, error) {
 		return PrepareReply{}, err
 	}
 	nonce := hex.EncodeToString(nb)
+	seed := NewSignKey()
+	sk, err := SignKey(seed)
+	if err != nil {
+		return PrepareReply{}, err
+	}
+	ttl := incomingTTL
+	if req.TTL > 0 {
+		ttl = min(max(time.Duration(req.TTL)*time.Second, 5*time.Minute), incomingTTLMax)
+	}
 	in := s.inc
 	in.mu.Lock()
+	if in.stage == incCommitted || s.committedPending() {
+		in.mu.Unlock()
+		return PrepareReply{}, errAlreadyCommitted
+	}
 	in.cleanupLocked()
-	in.key, in.nonce, in.from, in.stage, in.expires = &k, nonce, s.masterOfRecord(), incPrepared, s.now().Add(incomingTTL)
+	in.key, in.signSeed, in.nonce, in.from, in.stage, in.expires = &k, seed, nonce, s.masterOfRecord(), incPrepared, s.now().Add(ttl)
 	in.persistLocked(0, 0)
 	in.mu.Unlock()
-	rep := PrepareReply{Pub: k.PubString(), Nonce: nonce, Version: s.d.Version, DiskFree: free}
+	// 本机认的纪元与主机签名公钥:原主机核对过才往下做(整库要靠它验签)
+	rep := PrepareReply{Pub: k.PubString(), Nonce: nonce, Version: s.d.Version, DiskFree: free, SignPub: PubOf(sk),
+		Epoch: s.Epoch(), MasterPubFP: Fingerprint(strings.TrimSpace(s.setting(KeyMasterPub)))}
 	if req.Master.ApiUrl != "" {
 		if err := probeLink(req.Master, 8*time.Second); err != nil {
 			rep.MasterReach = err.Error()
@@ -140,6 +169,9 @@ func (in *incoming) cleanupLocked() {
 	_ = os.Remove(s.stagedFile())
 	_ = os.RemoveAll(filepath.Join(s.Dir(), "incoming"))
 	_ = os.Remove(filepath.Join(s.Dir(), "incoming.env"))
+	if _, err := os.Stat(promoteFile(s.d.DBPath)); err != nil { // 新库已经换上(或没有):上次提交留下的时效标记没用了
+		_ = os.Remove(promoteMarkFile(s.d.DBPath))
+	}
 	in.reset()
 }
 
@@ -182,10 +214,16 @@ func (s *Service) ReceiveBundle(body io.Reader) (IncomingState, error) {
 	case in.from != 0 && hd.MasterId != in.from:
 		return fail(fmt.Errorf("数据来自服务器 #%d,不是本机的主机 #%d", hd.MasterId, in.from))
 	}
-	if pub, err := ParseSignPub(s.setting(KeyMasterPub)); err == nil {
-		if err := env.VerifySig(pub); err != nil {
-			return fail(err)
-		}
+	// 只认本机钉住的主机签名公钥签的数据:没钉住就拒收(不跳过验签),纪元也要对得上
+	pub, err := ParseSignPub(s.setting(KeyMasterPub))
+	if err != nil {
+		return fail(errNoPinnedPub)
+	}
+	if err := env.VerifySig(pub); err != nil {
+		return fail(err)
+	}
+	if L := s.Epoch(); hd.Epoch != L {
+		return fail(fmt.Errorf("数据来自纪元 %d,本机在纪元 %d", hd.Epoch, L))
 	}
 	dataKey, err := OpenWith(hd.Wrap, *in.key)
 	if err != nil {
@@ -220,14 +258,17 @@ func (s *Service) ReceiveBundle(body io.Reader) (IncomingState, error) {
 	if err := checkDB(filepath.Join(dir, "replica.db"), meta); err != nil {
 		return fail(err)
 	}
-	next := max(s.Epoch(), hd.Epoch) + 1
+	next, err := NextEpoch(s.Epoch(), hd.Epoch)
+	if err != nil {
+		return fail(err)
+	}
 	b := Became{How: HowSetMaster, Epoch: next, FormerId: meta.MasterId, FormerName: meta.MasterName, At: s.now().Unix(),
 		MaxChangeId: meta.MaxChangeId, By: "panel", FormerIP: meta.Identity.PublicIP, FormerIP6: meta.Identity.PublicIP6}
-	if err := s.buildPromote(dir, meta, b, true); err != nil {
+	if err := s.buildPromote(dir, meta, b, true, promoteOpts{SignSeed: in.signSeed}); err != nil {
 		return fail(err)
 	}
 	_ = os.RemoveAll(dir)
-	in.stage = incStaged
+	in.stage, in.epoch = incStaged, next
 	in.persistLocked(meta.Counts["users"], hd.Size)
 	logger.Info("容灾:主机的数据已收下并组好新库(", meta.Counts["users"], " 个用户),等提交")
 	return IncomingState{Stage: incStaged, From: in.from, Expires: in.expires.Unix(), Users: meta.Counts["users"], Size: hd.Size}, nil
@@ -272,11 +313,17 @@ func (s *Service) Commit(nonce string) error {
 		in.persistLocked(0, 0)
 		return errors.New("暂存的数据已经过期")
 	}
+	// 先写时效标记再换名:提交以后 10 分钟内重启才换上新库(过期的启动时改名留档,不再生效)
+	mark, _ := json.Marshal(map[string]interface{}{"epoch": in.epoch, "how": HowSetMaster, "expires": s.now().Add(promoteMarkTTL).Unix()})
+	if err := writeFileAtomic(promoteMarkFile(s.d.DBPath), mark); err != nil {
+		return err
+	}
 	if err := os.Rename(s.stagedFile(), promoteFile(s.d.DBPath)); err != nil {
+		_ = os.Remove(promoteMarkFile(s.d.DBPath))
 		return err
 	}
 	syncDir(filepath.Dir(s.d.DBPath))
-	in.key = nil // 一次性私钥用完即弃
+	in.key, in.signSeed = nil, "" // 一次性私钥用完即弃;签名密钥已经在新库里
 	in.stage = incCommitted
 	in.persistLocked(0, 0)
 	_ = s.set(map[string]string{KeyRole: RolePromoting})
@@ -285,12 +332,19 @@ func (s *Service) Commit(nonce string) error {
 	return nil
 }
 
-// Abort 原主机说不做了:丢掉暂存。
+// Abort 原主机说不做了:丢掉暂存。和提交同一把锁:这里回了成功,这一次就不可能再提交。
+// 已经提交了的不能丢(回错误);什么都没暂存(过期丢掉了、进程重启过)也算成功:本来就不会再提交。
 func (s *Service) Abort(nonce string) error {
 	in := s.inc
 	in.mu.Lock()
 	defer in.mu.Unlock()
-	if in.nonce == "" || nonce != in.nonce || in.stage == incCommitted {
+	if in.stage == incCommitted || s.committedPending() {
+		return errAlreadyCommitted
+	}
+	if in.nonce == "" {
+		return nil
+	}
+	if nonce != in.nonce {
 		return errors.New("编号对不上")
 	}
 	in.cleanupLocked()
@@ -299,7 +353,26 @@ func (s *Service) Abort(nonce string) error {
 	return nil
 }
 
-// IncomingStage 暂存到了哪一步(原主机提交没回话时来问)。
+var (
+	errAlreadyCommitted = errors.New("本机已经提交了,正在以主机身份重启")
+	errNoPinnedPub      = errors.New("本机还没钉住主机的签名公钥(没收到主机的容灾状态),不收整库数据:等主机推送一轮以后再试")
+)
+
+// promoteMarkFile 提交时写下的时效标记(<库>.promote.json):过期的新库启动时不换上。
+func promoteMarkFile(dbPath string) string { return promoteFile(dbPath) + ".json" }
+
+// committedPending 上次已经提交、新库还在等着换上(进程重启过却还是副机 = 换库没成,下次启动可能再换)。
+func (s *Service) committedPending() bool {
+	var st IncomingState
+	if !s.getJSON(KeyIncoming, &st) || st.Stage != incCommitted {
+		return false
+	}
+	_, err := os.Stat(promoteFile(s.d.DBPath))
+	return err == nil
+}
+
+// IncomingStage 暂存到了哪一步(原主机提交没回话时来问)。只说这个进程里的:提交后重启过还是副机(新库没换上),
+// 说不出"已提交"—— 原主机这时让本机丢弃会被拒(新库还在,下次启动可能换上),它按结果不明处理,到期隔离本机。
 func (s *Service) IncomingStage() string {
 	in := s.inc
 	in.mu.Lock()
@@ -319,10 +392,10 @@ func (in *incoming) tick() {
 		return
 	}
 	if in.stage == "" && s.setting(KeyIncoming) != "" {
-		var st IncomingState
-		if s.getJSON(KeyIncoming, &st) && st.Stage == incCommitted {
-			return // 已提交,等重启
+		if s.committedPending() {
+			return // 已提交,等重启换上
 		}
+		// 暂存随进程重启没了,或提交过的新库已经换上 / 过期没换:清掉记录(原主机来问时说没有暂存)
 		in.cleanupLocked()
 		in.persistLocked(0, 0)
 	}

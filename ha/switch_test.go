@@ -2,6 +2,8 @@ package ha
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strconv"
 	"strings"
@@ -12,12 +14,20 @@ import (
 	"github.com/Maoyangui/m-ui/hub"
 )
 
+// masterPanel 给主机一个连得上的面板地址(目标在 prepare 时会试着连一下原主机的面板)。
+func masterPanel(t *testing.T, m *Service) {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.NotFoundHandler())
+	t.Cleanup(srv.Close)
+	m.d.PanelURL = func() string { return srv.URL + "/app/" }
+}
+
 func waitSwitchDone(t *testing.T, s *Service) SwitchState {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		st := s.Switch()
-		if (!st.Active() || st.Err != "" && st.Stage == StageCommit) && !s.Switching() {
+		if (!st.Active() || st.Stage == StageUnknown) && !s.Switching() {
 			return st
 		}
 		if time.Now().After(deadline) {
@@ -88,15 +98,15 @@ func TestIncomingGuards(t *testing.T) {
 	}
 }
 
-// 设为主机:提交请求没回话时去问目标 —— 目标说还没提交(暂存着)就取消、解冻;问不到就保持冻结,
-// 等冻结超时后解冻,本机继续当主机。
+// 设为主机:提交请求没回话时去问目标 —— 目标说还没提交(暂存着)并确认丢掉了就取消、解冻;问不到就是结果不明:
+// 保持冻结,到冻结截止以更高纪元隔离目标后解冻,本机继续当主机。
 func TestSetMasterCommitUnknown(t *testing.T) {
 	w := switchCommitWait
 	switchCommitWait = 2 * time.Second
 	t.Cleanup(func() { switchCommitWait = w })
 	cl := newCluster(t, 1)
 	m, s, a := cl.m, cl.cands[0], cl.agents[0]
-	m.d.PanelURL = func() string { return "https://hk.example.com:2053/app/" }
+	masterPanel(t, m) // 目标在 prepare 时要连得上原主机的面板
 	cl.h.RunOnce()
 	cl.h.RunOnce()
 	id := cl.ids[0]
@@ -104,7 +114,7 @@ func TestSetMasterCommitUnknown(t *testing.T) {
 	a.mu.Lock()
 	a.dropCommit = true
 	a.mu.Unlock()
-	if _, err := m.SetMaster(id, "admin"); err != nil {
+	if _, err := m.SetMaster(id, "admin", SetMasterOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	st := waitSwitchDone(t, m)
@@ -118,25 +128,19 @@ func TestSetMasterCommitUnknown(t *testing.T) {
 	a.mu.Lock()
 	a.dropCommit, a.dieAfterHandover = false, true
 	a.mu.Unlock()
-	if _, err := m.SetMaster(id, "admin"); err != nil {
+	if _, err := m.SetMaster(id, "admin", SetMasterOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	st = waitSwitchDone(t, m)
-	if st.Stage == StageDone || m.IsNode() {
-		t.Fatalf("不确定目标接手没有时不能变成副机: %+v", st)
+	if st.Stage != StageUnknown || m.IsNode() || !m.Frozen() {
+		t.Fatalf("不确定目标接手没有时不能变成副机,也不能解冻: %+v", st)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for m.sw.isRunning() && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !m.Frozen() && st.Stage != StageFailed {
-		t.Fatal("结果不明时保持冻结")
-	}
-	clk := &testClock{t: time.Now().Add(switchFreeze + time.Minute)}
+	L := m.Epoch()
+	clk := &testClock{t: time.Unix(st.FreezeUntil, 0).Add(time.Second)}
 	m.SetNow(clk.now)
 	m.sw.tick()
-	if m.Frozen() || m.Switch().Stage != StageFailed {
-		t.Fatalf("冻结超时后解冻,记为没完成: %+v", m.Switch())
+	if m.Frozen() || m.Switch().Stage != StageFenced || m.Epoch() != L+2 {
+		t.Fatalf("冻结截止仍不明:以纪元 L+2 隔离目标后解冻: %+v epoch=%d", m.Switch(), m.Epoch())
 	}
 }
 
@@ -206,10 +210,11 @@ func TestYieldAndReclaim(t *testing.T) {
 	_ = orphan
 }
 
-// 设为主机前的检查:默认端口不算冲突;订阅端口、代理面板端口被目标上的线路占着要提前说;离线、版本旧的不能设。
+// 设为主机前的检查:默认端口不算冲突;迁来的订阅端口、代理面板端口被目标上的线路占着要提前说;离线、版本旧的不能设。
 func TestSetMasterPlanChecks(t *testing.T) {
 	cl := newCluster(t, 1)
 	m := cl.m
+	masterPanel(t, m)
 	cl.h.RunOnce()
 	cl.h.RunOnce()
 	id := cl.ids[0]
@@ -223,7 +228,8 @@ func TestSetMasterPlanChecks(t *testing.T) {
 			t.Fatalf("默认端口不算冲突: %+v", p.Warnings)
 		}
 	}
-	m.d.DB.Create(&model.Line{Name: "on-2056", Protocol: "vless", Port: 2056, Enabled: true, NodeIds: []byte(`[` + strconv.Itoa(int(id)) + `]`)})
+	m.set(map[string]string{"subPort": "2096"}) // 本机的订阅端口迁过去会落在目标的线路上
+	m.d.DB.Create(&model.Line{Name: "on-2096", Protocol: "vless", Port: 2096, Enabled: true, NodeIds: []byte(`[` + strconv.Itoa(int(id)) + `]`)})
 	m.d.DB.Create(&model.Line{Name: "on-2054", Protocol: "trojan", Port: 2054, Enabled: true, NodeIds: []byte(`[` + strconv.Itoa(int(id)) + `]`)})
 	p, _ = m.SetMasterPlan(id)
 	codes := map[string]bool{}
