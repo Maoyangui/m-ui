@@ -680,7 +680,7 @@
       <li><b data-k="user.reason.manual">manual</b>: resetting traffic, extending the expiry or a periodic reset never brings them back. Renewing or extending with a plan (<b data-k="user.renewMenu">Renew…</b>, batch <b data-k="user.batch.plan">Apply plan</b>) and <b data-k="user.changeMenu">Change plan…</b> are explicit sales and do enable them<span data-pending="backup-certs">: when renewing or applying a plan in a batch, the panel first warns that users disabled by hand will be enabled</span>. Renewals and plan changes through the external API enable them as well.</li>
       <li data-scope="admin"><b data-k="user.limited">Limited</b>: temporarily slowed down by a rule (see <a href="#rules">Rules</a>).</li>
       <li><b data-k="user.kick">Kick</b>: closes the user's connections on every server (hysteria2, TUIC and AnyTLS sessions are closed entirely). If the user is still enabled the app reconnects right away, so disable them first to cut them off.</li>
-      <li>Filter the list with <b data-k="user.filter.all">All</b>, <b data-k="user.filter.enabled">Enabled</b>, <b data-k="user.filter.disabled">Disabled</b>, <b data-k="user.filter.expired">Expired</b> or <b data-k="user.filter.over">Over quota</b>.</li>
+      <li>Filter the list with <b data-k="user.filter.all">All</b>, <b data-k="user.filter.online">Online</b>, <b data-k="user.filter.enabled">Enabled</b>, <b data-k="user.filter.disabled">Disabled</b>, <b data-k="user.filter.expired">Expired</b> or <b data-k="user.filter.over">Over quota</b>, or show one plan only. After selecting the whole page, the batch bar can select every match at once.</li>
     </ul>
   </section>
 
