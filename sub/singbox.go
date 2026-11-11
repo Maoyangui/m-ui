@@ -15,7 +15,9 @@ import (
 	"github.com/Maoyangui/m-ui/upstream"
 )
 
-// httpLink 把本站 http / https 线路的链接(http://user:pass@host:port#name)转成 sing-box http 出站。
+// httpLink 把本站 http / https 线路的链接(http(s)://user:pass@host:port[?sni=&allowInsecure=1]#name)转成 sing-box http 出站。
+// https 的 server_name 取 sni / peer(没有用主机名),"允许不安全"认 insecure / allowInsecure / allow_insecure / skip-cert-verify
+// 几种常见写法 —— 和 trojan、hy2 等其它 TLS 节点一样,自签证书时带上 tls.insecure。
 func httpLink(raw string) *upstream.Parsed {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
@@ -38,7 +40,22 @@ func httpLink(raw string) *upstream.Parsed {
 		}
 	}
 	if u.Scheme == "https" {
-		opts["tls"] = map[string]interface{}{"enabled": true, "server_name": u.Hostname()}
+		q := u.Query()
+		sni := q.Get("sni")
+		if sni == "" {
+			sni = q.Get("peer")
+		}
+		if sni == "" {
+			sni = u.Hostname()
+		}
+		tls := map[string]interface{}{"enabled": true, "server_name": sni}
+		for _, k := range []string{"insecure", "allowInsecure", "allow_insecure", "skip-cert-verify"} {
+			switch strings.ToLower(q.Get(k)) {
+			case "1", "true", "yes":
+				tls["insecure"] = true
+			}
+		}
+		opts["tls"] = tls
 	}
 	return &upstream.Parsed{Type: "http", Name: u.Fragment, Options: opts}
 }
