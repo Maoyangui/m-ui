@@ -314,11 +314,27 @@ func (s *Service) Header() (uint64, uint) {
 	return e, s.SelfId()
 }
 
-// notify 用本机通知发一条。
+// notifyMax 一条通知最多多少字(Telegram 上限 4096,留出余量;超长整条会被拒,接任后的新面板地址就发不出去)。
+const notifyMax = 3900
+
+// notify 用本机通知发一条。主机容灾的通知不挂在任何开关上(不受「数据面停止 / 恢复」管):接任、换主机、新面板地址必须发出去。
 func (s *Service) notify(text string) {
 	if s.d.Notify != nil {
-		s.d.Notify("tgOnCore", text)
+		s.d.Notify("", clipNotify(text))
 	}
+}
+
+// clipNotify 超长的截到 notifyMax 字以内(按字截,不截半个字;尽量在换行处断)。
+func clipNotify(text string) string {
+	r := []rune(text)
+	if len(r) <= notifyMax {
+		return text
+	}
+	cut := string(r[:notifyMax-2])
+	if i := strings.LastIndex(cut, "\n"); i > len(cut)/2 {
+		cut = cut[:i]
+	}
+	return cut + "\n…"
 }
 
 // restart 安排重启。

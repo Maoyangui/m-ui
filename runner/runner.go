@@ -266,6 +266,7 @@ func New(dbPath string) (*Runner, error) {
 		Notify: func(toggle, text string) { r.notifier.Event(toggle, text) },
 		UA:     "m-ui/" + Version + " (+" + brand.Repo + ")",
 	})
+	cfAPI := testCFAPI(db)
 	r.ha = ha.New(ha.Deps{
 		DB: db, DBPath: dbPath, Version: Version,
 		Notify:      func(toggle, text string) { r.notifier.Event(toggle, text) },
@@ -274,6 +275,7 @@ func New(dbPath string) (*Runner, error) {
 		PanelURL:    r.PanelURL,
 		ResellerURL: r.ResellerURL,
 		Witness:     r.haWitness,
+		DNSAPI:      cfAPI,
 	})
 	r.hub = hub.New(hub.Deps{
 		DB: db, Setting: r.setting, IsNode: r.IsNode, Version: Version,
