@@ -391,7 +391,7 @@
     <ul>
       <li><b data-k="line.batch.enable">启用</b>、<b data-k="line.batch.disable">停用</b>、<b data-k="line.batch.upstream">设上游</b>、<b data-k="line.batch.nodes">部署服务器</b>(有多台服务器时才有)、<b data-k="line.batch.clear">取消选择</b>。批量改只重载一次数据面。</li>
       <li>拖动行调整顺序,订阅里的节点按这个顺序排。</li>
-      <li>行末 ⧉ 是 <b data-k="line.clone">克隆</b>(会重新挑一个端口),⇢ 是 <b data-k="up.addFromLine">把线路加为上游</b>(见 <a href="#up-chain">线路作上游</a>)。</li>
+      <li>行末 <b data-k="common.more">更多</b> 里有 <b data-k="line.clone">克隆</b>(会重新挑一个端口)、<b data-k="up.addFromLine">把线路加为上游</b>(见 <a href="#up-chain">线路作上游</a>)和删除。</li>
     </ul>
   </section>
 </section>
@@ -434,7 +434,7 @@
     <h3>线路作上游(链式代理)</h3>
     <p class="lede">让入口线路的流量再转到你自己的另一条线路出去,比如国内中转机进、海外机出。</p>
     <ul>
-      <li><b data-k="nav.upstreams">上游</b> 页点 <b data-k="up.addFromLine">把线路加为上游</b>(或在线路行末点 ⇢),选线路和 <b data-k="up.fromNode">用它在哪台服务器上的入口</b>。</li>
+      <li><b data-k="nav.upstreams">上游</b> 页点 <b data-k="up.addFromLine">把线路加为上游</b>(或在线路行末的 <b data-k="common.more">更多</b> 里点),选线路和 <b data-k="up.fromNode">用它在哪台服务器上的入口</b>。</li>
       <li>参数跟着线路自动走,线路改端口、换协议都不用管;用的是专用凭据,不占用户配额,流量只算一次。</li>
       <li>成环、线路被删、入口服务器被删都会被拦下或标出来。副机要 v0.7.16 及以上。</li>
     </ul>

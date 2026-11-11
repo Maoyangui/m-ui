@@ -111,7 +111,7 @@ function quickStart() {
   if (!opt.length && !star) return '';
   return `<section class="card qs-done span-all" id="star-card">
     <span>✓ <b>${esc(t('qs.doneTitle'))}</b>${opt.length ? ` <span class="muted small">${esc(t('qs.alsoCan'))}</span>` : ''}</span>
-    ${opt.length ? `<span class="qs-opt">${opt.slice(0, 3).map(i => `<a class="chip" href="#/${i.page}" title="${esc(i.text)}">${esc(i.text.split(/[((::]/)[0].trim())}</a>`).join('')}${opt.length > 3 ? `<span class="muted small">${esc(t('qs.moreN', { n: opt.length - 3 }))}</span>` : ''}</span>` : ''}
+    ${opt.length ? `<span class="qs-opt">${opt.slice(0, 3).map(i => `<a class="chip" href="#/${i.page}" title="${esc(i.text)}">${esc(i.text.split(/[((::]/)[0].trim())}</a>`).join('')}${opt.length > 3 ? `<span class="muted small">${esc(t('qs.moreN', { n: opt.length, more: opt.length - 3 }))}</span>` : ''}</span>` : ''}
     <span class="grow"></span>
     ${star ? `<a class="btn primary sm" href="${esc(s.repo)}" target="_blank" rel="noopener" data-act="dash.starGo" title="${esc(t('star.text'))}">★ ${esc(t('star.btn'))}</a>` : ''}
     <button class="btn ghost sm" data-act="dash.doneHide" title="${esc(t('star.dismiss'))}">✕</button>

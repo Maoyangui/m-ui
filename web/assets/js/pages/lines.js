@@ -146,9 +146,11 @@ function renderRows() {
       <td><label class="switch" title="${l.enabled ? t('common.enabled') : t('common.disabled')}"><input type="checkbox" data-change="line.toggle" data-id="${l.id}" ${l.enabled ? 'checked' : ''}><span></span></label></td>
       <td class="actions">
         <button class="btn sm" data-act="line.edit" data-id="${l.id}">${t('common.edit')}</button>
-        <button class="btn sm" data-act="line.clone" data-id="${l.id}" title="${t('line.clone')}">⧉</button>
-        <button class="btn sm" data-act="line.asUpstream" data-id="${l.id}" title="${t('up.addFromLine')}">⇢</button>
-        <button class="btn sm danger" data-act="line.del" data-id="${l.id}">${t('common.delete')}</button>
+        <details class="menu"><summary class="btn sm">${t('common.more')} ▾</summary><div class="menu-list">
+          <button data-act="line.clone" data-id="${l.id}">⧉ ${t('line.clone')}</button>
+          <button data-act="line.asUpstream" data-id="${l.id}">⇢ ${t('up.addFromLine')}</button>
+          <hr><button class="danger" data-act="line.del" data-id="${l.id}">${t('common.delete')}</button>
+        </div></details>
       </td>
     </tr>`).join(''));
   if (!filtering()) enableDragSort(body); // 筛选后看到的不是全部线路,拖动排序会打乱没显示的那些
@@ -881,10 +883,13 @@ function pickLineCert() {
     const have = servers.filter(n => info.has.get(n.id)).length, missing = servers.length - have;
     const soon = cells.filter(x => x.kind !== 'ok' && !x.missing).length;
     if (servers.length <= 3) return cells.map(x => x.html).join('');
+    // 每个选项本身是一个按钮:里面不能再放可点的东西(折叠按钮、<details> 会被浏览器挪到按钮外面)。
+    // 写摘要,只列缺失 / 要处理的前 6 台,其余的名字放在「+N」的悬停提示里
     const sum = `<span class="muted small">${esc(t('cert.srvSum', { have, missing, soon }))}</span>`;
-    const bad = cells.filter(x => x.kind !== 'ok').map(x => x.html);
-    return sum + (bad.length ? ' ' + chipList(bad, { key: 'lc-' + name, max: 6 }) : '')
-      + `<details class="adv" style="margin-top:.25rem"><summary>${esc(t('cert.srvAll'))}</summary><span class="chips">${cells.map(x => x.html).join('')}</span></details>`;
+    const bad = cells.map((x, i) => ({ ...x, name: servers[i].name })).filter(x => x.kind !== 'ok');
+    const rest = bad.slice(6);
+    return sum + bad.slice(0, 6).map(x => x.html).join('')
+      + (rest.length ? `<span class="badge" title="${esc(rest.map(x => x.name).join(t('reach.sep')))}">+${rest.length}</span>` : '');
   };
   const opts = [{ value: '', name: t('line.certDefault'), sub: esc(t('line.certDefaultHelp')), current: !cur }];
   for (const [name, info] of byName) {

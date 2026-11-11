@@ -391,7 +391,7 @@
     <ul>
       <li><b data-k="line.batch.enable">Enable</b>, <b data-k="line.batch.disable">Disable</b>, <b data-k="line.batch.upstream">Set upstream</b>, <b data-k="line.batch.nodes">Deploy on</b> (only with several servers), <b data-k="line.batch.clear">Clear</b>. A batch change reloads the data plane only once.</li>
       <li>Drag rows to reorder; subscriptions list nodes in the same order.</li>
-      <li>At the end of a row, ⧉ is <b data-k="line.clone">Clone</b> (a new port is picked) and ⇢ is <b data-k="up.addFromLine">Add a line as upstream</b> (see <a href="#up-chain">Lines as upstreams</a>).</li>
+      <li><b data-k="common.more">More</b> at the end of a row has <b data-k="line.clone">Clone</b> (a new port is picked), <b data-k="up.addFromLine">Add a line as upstream</b> (see <a href="#up-chain">Lines as upstreams</a>) and delete.</li>
     </ul>
   </section>
 </section>
@@ -434,7 +434,7 @@
     <h3>Lines as upstreams (chaining)</h3>
     <p class="lede">Forward an entry line's traffic into another of your own lines, for example in through a domestic relay and out through an overseas server.</p>
     <ul>
-      <li>On the <b data-k="nav.upstreams">Upstreams</b> page click <b data-k="up.addFromLine">Add a line as upstream</b> (or ⇢ at the end of a line's row), then choose the line and <b data-k="up.fromNode">Use its entry on server</b>.</li>
+      <li>On the <b data-k="nav.upstreams">Upstreams</b> page click <b data-k="up.addFromLine">Add a line as upstream</b> (or the same item under <b data-k="common.more">More</b> at the end of a line's row), then choose the line and <b data-k="up.fromNode">Use its entry on server</b>.</li>
       <li>Its settings follow the line automatically, even if the line changes port or protocol; it uses dedicated credentials, takes nothing from users' quotas, and traffic is counted once.</li>
       <li>Loops, deleted lines and deleted entry servers are blocked or flagged. Nodes need v0.7.16 or later.</li>
     </ul>

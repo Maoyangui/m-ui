@@ -641,6 +641,7 @@ details.api-list { margin-top: .6rem; }
 @media (min-width: 701px) and (max-width: 1099px) { .grid .c-p2 { display: none; } }
 /* 单元格里很长的一段(上游名):一行省略,全文在 title */
 .cell-clip { display: inline-block; max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+@media (max-width: 1239px) { .cell-clip { max-width: 6.5rem; } }
 .pc-err { color: var(--danger); font-size: .85rem; padding: .5rem 0; }
 label.switch.sm { width: 28px; height: 16px; vertical-align: middle; }
 label.switch.sm span::before { width: 12px; height: 12px; }
