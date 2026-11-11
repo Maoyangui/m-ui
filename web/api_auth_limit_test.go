@@ -146,19 +146,52 @@ func TestJSONBodyLimited(t *testing.T) {
 			t.Fatalf("%s:上限以内应照常: %d %s", name, w.Code, w.Body.String())
 		}
 	}
-	// 主面板的 multipart 上传(备份还原、旧面板导入)不套这个上限
-	gotBody = &countingReader{r: strings.NewReader(strings.Repeat("a", panelBodyLimit+1<<20))}
+	// 只把请求头写成 multipart 不能绕开上限:下游 JSON 处理不看 Content-Type,照样整段读进内存。
+	// 三个入口都要挡(代理面板、外部 API 本来就没有上传接口)。
+	for name, c := range cases {
+		gotBody = huge()
+		w := c.run(gotBody, "multipart/form-data; boundary=x")
+		if w.Code != 400 || !strings.Contains(w.Body.String(), "请求内容过大") {
+			t.Fatalf("%s:请求头写 multipart 的超大请求体也应被拒: %d %s", name, w.Code, w.Body.String())
+		}
+		if gotBody.n > c.limit+64<<10 {
+			t.Fatalf("%s:请求头写 multipart 也应在读到上限时就停,实际读了 %d 字节", name, gotBody.n)
+		}
+	}
+	// 主面板真正收文件的几个接口(备份检查 / 还原、旧面板导入)的 multipart 上传不套这个上限
 	var read int64
 	upload := func(w http.ResponseWriter, r *http.Request) {
 		read, _ = io.Copy(io.Discard, r.Body)
 		writeJSON(w, 200, map[string]string{"ok": "1"})
 	}
-	req := httptest.NewRequest("POST", "http://x/app/api/backup/restore", gotBody)
-	req.Header.Set("Content-Type", "multipart/form-data; boundary=x")
-	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: admin})
-	w := httptest.NewRecorder()
-	s.auth(upload)(w, req)
-	if w.Code != 200 || read != int64(panelBodyLimit+1<<20) {
-		t.Fatalf("multipart 上传不该被 JSON 上限截断: %d 读了 %d", w.Code, read)
+	post := func(path, ct string, body io.Reader) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", path, body)
+		req.Header.Set("Content-Type", ct)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: admin})
+		w := httptest.NewRecorder()
+		s.auth(upload)(w, req)
+		return w
+	}
+	for _, p := range []string{"backup/restore", "backup/inspect", "users/import"} {
+		read = 0
+		w := post("http://x/app/api/"+p, "multipart/form-data; boundary=x", strings.NewReader(strings.Repeat("a", panelBodyLimit+1<<20)))
+		if w.Code != 200 || read != int64(panelBodyLimit+1<<20) {
+			t.Fatalf("%s:multipart 上传不该被 JSON 上限截断: %d 读了 %d", p, w.Code, read)
+		}
+		// 同一个接口发的不是 multipart(备份还原也收 JSON {name}),照样封顶
+		read = 0
+		post("http://x/app/api/"+p, "application/json", strings.NewReader(strings.Repeat("a", panelBodyLimit+1<<20)))
+		if read > panelBodyLimit {
+			t.Fatalf("%s:非 multipart 请求体应封顶,实际读了 %d", p, read)
+		}
+	}
+	// 别的主面板接口不因路径相近而放行
+	for _, p := range []string{"backup/list", "users", "users/importx", "backup/restore/x"} {
+		read = 0
+		post("http://x/app/api/"+p, "multipart/form-data; boundary=x", strings.NewReader(strings.Repeat("a", panelBodyLimit+1<<20)))
+		if read > panelBodyLimit {
+			t.Fatalf("%s:不收文件的接口写 multipart 也应封顶,实际读了 %d", p, read)
+		}
 	}
 }
+

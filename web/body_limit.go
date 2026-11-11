@@ -23,12 +23,23 @@ const (
 // errBodyTooLarge 超过上限时解码器拿到的错误(原样的 "http: request body too large" 界面上看不懂)。
 var errBodyTooLarge = errors.New("请求内容过大,超出上限")
 
-// limitJSONBody 给有请求体的非 multipart 请求套上上限。
+// panelUploadPaths 主面板收文件上传(multipart "file")的接口,相对 innerBase。
+// 代理面板与外部 API 没有上传接口(代理落地页 logo 走 JSON,接口自己另限)。
+var panelUploadPaths = map[string]bool{
+	"api/backup/inspect": true,
+	"api/backup/restore": true,
+	"api/users/import":   true,
+}
+
+// isPanelUpload 这个主面板请求是不是发往收文件接口的 multipart 上传:路径与请求头都要对上。
+func isPanelUpload(r *http.Request) bool {
+	return panelUploadPaths[strings.TrimPrefix(r.URL.Path, innerBase)] &&
+		strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data")
+}
+
+// limitJSONBody 给有请求体的请求套上上限(不管 Content-Type)。
 func limitJSONBody(w http.ResponseWriter, r *http.Request, n int64) {
 	if r.Body == nil || r.Method == http.MethodGet || r.Method == http.MethodHead {
-		return
-	}
-	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
 		return
 	}
 	r.Body = limitedBody{http.MaxBytesReader(w, r.Body, n)}

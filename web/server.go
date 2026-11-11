@@ -461,7 +461,9 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 			return
 		}
-		limitJSONBody(w, r, panelBodyLimit)
+		if !isPanelUpload(r) {
+			limitJSONBody(w, r, panelBodyLimit)
+		}
 		next(w, r)
 	}
 }
