@@ -398,6 +398,7 @@ type Summary struct {
 	MasterName   string   `json:"masterName,omitempty"`
 	Rank         int      `json:"rank,omitempty"`
 	CanTakeover  bool     `json:"canTakeover,omitempty"`
+	Why          string   `json:"why,omitempty"` // 主机失联而本机不能接任时的原因代码(界面按 ha.why.* 翻译)
 	Notices      []Notice `json:"notices"`
 }
 
@@ -419,7 +420,10 @@ func (s *Service) Summary() Summary {
 		if st, ok := s.NodeState(); ok {
 			sm.MasterName, sm.Mode, sm.Rank = st.MasterName, st.Mode, st.rank()
 		}
-		sm.CanTakeover, _ = s.canTakeover()
+		sm.CanTakeover, sm.Why = s.canTakeover()
+		if sm.CanTakeover || sm.Lost == 0 {
+			sm.Why = "" // 只有主机失联而本机又不能接任时,顶部条才写原因
+		}
 	}
 	return sm
 }

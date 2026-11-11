@@ -482,19 +482,36 @@ func (r *replicator) alertOnce(id uint, what, text string) {
 	}
 }
 
-// Repin 忘掉记住的备用公钥:下一次见到时重新记(那台重装过 m-ui 时用)。
+// Repin 重新信任一台备用的公钥(那台重装过 m-ui 时用):它现在报着有效公钥就当场记下这把(就是管理员在卡片上核对过的那把),
+// 没报就先忘掉、下一次见到时再记。
 func (s *Service) Repin(id uint) error {
 	if s.IsNode() {
 		return errors.New("副机上不能改主机容灾:到主机面板改")
 	}
-	if err := s.set(map[string]string{KeyPubPrefix + strconv.FormatUint(uint64(id), 10): ""}); err != nil {
+	pub := ""
+	if s.d.Hub != nil {
+		if st, ok := s.d.Hub.StatusOf(id); ok && st.HA != nil {
+			if _, err := ParsePub(st.HA.Pub); err == nil {
+				pub = st.HA.Pub
+			}
+		}
+	}
+	if err := s.set(map[string]string{KeyPubPrefix + strconv.FormatUint(uint64(id), 10): pub}); err != nil {
 		return err
+	}
+	if pub != "" {
+		logger.Info("容灾:重新信任了服务器 #", id, " 的备用公钥 ", Fingerprint(pub))
 	}
 	s.rep.mu.Lock()
 	delete(s.rep.alerted, id)
 	s.rep.mu.Unlock()
 	s.rep.kick()
 	return nil
+}
+
+// PinnedFP 记住的这台备用的公钥指纹(没记住为空)。
+func (s *Service) PinnedFP(id uint) string {
+	return Fingerprint(s.setting(KeyPubPrefix + strconv.FormatUint(uint64(id), 10)))
 }
 
 // tick 每 10 秒:更新名单,该生成就生成一份(在后台,不挡这一轮)。

@@ -23,7 +23,7 @@ import (
 //	POST /api/ha/set-master      主机:设为主机 {id, allowPlain, password, code}(目标是明文 http 时要 allowPlain)
 //	POST /api/ha/switch/abandon  主机:放弃结果不明的设为主机(以更高纪元隔离目标、恢复写操作){password, code}
 //	POST /api/ha/takeover        备用:接任为主机 {password, code}
-//	POST /api/ha/repin           主机:重新信任一台备用的公钥 {id, password, code}
+//	POST /api/ha/repin           主机:重新信任一台备用的公钥 {id, password, code},回 {pinnedFp}
 //	POST /api/ha/notice          清掉一条顶部提示 {id}
 //
 // 设为主机、放弃、接任、重新信任、改主机容灾都要再输一次管理员密码(开了两步验证再加动态码),失败按登录同一套限流。
@@ -332,8 +332,9 @@ func (s *Server) haRepin(w http.ResponseWriter, r *http.Request, h *ha.Service) 
 		badRequest(w, err)
 		return
 	}
-	s.audit(r, "ha", "repin", body.Id)
-	writeJSON(w, http.StatusOK, s.haView(h, false))
+	fp := h.PinnedFP(body.Id) // 当场记下的新指纹(那台没在报公钥时为空,下次见到再记)
+	s.audit(r, "ha", "repin", map[string]interface{}{"id": body.Id, "pinnedFp": fp})
+	writeJSON(w, http.StatusOK, map[string]string{"pinnedFp": fp})
 }
 
 // haNotice 清掉一条顶部提示(id 为空 = 全清)。
