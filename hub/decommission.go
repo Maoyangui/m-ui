@@ -55,7 +55,8 @@ func (h *Hub) queueDecommission(n model.Node, before Snapshot) (model.NodeDecomm
 	// 外部节点只给用户用,下线推送里没有用户,不带它们:否则用了按指纹隐藏 / 改名时版本门槛会抬到 0.7.17,
 	// 老副机就会拒收这份下线通知、继续为所有人服务
 	snap.Exts = nil
-	// logo 也只给用户的落地页用:不带(nil = 副机保留本机的),免得把图片字节落进这条记录、每轮重试都重推一遍
+	// logo 也只给用户的落地页用:不带(nil,副机按"一张都没有"清掉本机的;它已经不为任何人出落地页,
+	// 重新启用时推回的完整快照会带回来),免得把图片字节落进这条记录、每轮重试都重推一遍
 	snap.Logos = nil
 	snap.SelfNodeId, snap.Sequence, snap.Version, snap.MinNode = n.Id, seq, h.d.Version, minNodeFor(snap.Lines, snap.Upstreams, nil)
 	b, err := json.Marshal(snap)

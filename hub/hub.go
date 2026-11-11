@@ -122,7 +122,9 @@ type Snapshot struct {
 	ResellerLines     []model.ResellerLine     `json:"resellerLines"`
 	ResellerLineNodes []model.ResellerLineNode `json:"resellerLineNodes"`
 	// Logos 落地页 logo(主面板与各代理的,图片原样字节):副机的订阅口也出落地页。
-	// 旧版主机不发(解码为 nil),副机就不动本机的;旧版副机不认识这个字段,照常应用、显示内置 logo,所以不抬版本门槛。
+	// 副机整表替换;旧版主机不发(解码为 nil)也按"一张都没有"清空:旧版主机没有 logo,副机显示内置的才和它一致。
+	// 旧版副机不认识这个字段,照常应用、显示内置 logo,所以不抬版本门槛;它升级后第一份快照会整份应用一次
+	// (副机记着"哪一版程序应用了哪一份",见 web 的 agentAppliedKey),logo 随之落库。
 	Logos []model.PageLogo `json:"logos"`
 }
 
@@ -191,7 +193,8 @@ func readSnapshot(db *gorm.DB, s *Snapshot) error {
 		return err
 	}
 	s.Logos = []model.PageLogo{} // 一张都没有也发空表(不是 nil):副机据此删掉主机已经删了的 logo
-	if err := db.Order("reseller_id asc").Find(&s.Logos).Error; err != nil {
+	// 只发主面板与现存代理的:删代理时他的 logo 一起删,万一留下没主的行也不往副机推(没有落地页会用它)
+	if err := db.Where("reseller_id = 0 OR reseller_id IN (SELECT id FROM resellers)").Order("reseller_id asc").Find(&s.Logos).Error; err != nil {
 		return err
 	}
 	return db.Order("id asc").Find(&s.LimitStates).Error
@@ -543,14 +546,14 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 				return err
 			}
 		}
-		if snap.Logos != nil { // 旧版主机不发 logo:保留本机的,不当成"全部删了"
-			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.PageLogo{}).Error; err != nil {
+		// 落地页 logo 整表替换。旧版主机不发(nil)也清空:它没有 logo 功能,副机留着的(本机当主机时传的、
+		// 之前接过的别的主机推来的)副机上既改不了也删不掉,还可能按代理 id 撞到别家代理的用户头上
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.PageLogo{}).Error; err != nil {
+			return err
+		}
+		if len(snap.Logos) > 0 {
+			if err := tx.CreateInBatches(&snap.Logos, snapshotBatch).Error; err != nil {
 				return err
-			}
-			if len(snap.Logos) > 0 {
-				if err := tx.CreateInBatches(&snap.Logos, snapshotBatch).Error; err != nil {
-					return err
-				}
 			}
 		}
 		if err := disableIDs(tx, &model.User{}, offUsers); err != nil {
@@ -604,6 +607,29 @@ func disableIDs(tx *gorm.DB, table interface{}, ids []uint) error {
 		ids = ids[n:]
 	}
 	return nil
+}
+
+// LogosMatch 副机库里的落地页 logo(只看归属与摘要)是不是正好是快照里的这些;快照不带(nil,旧版主机)= 一张都没有。
+// 副机判断"这份快照已经应用过、可以直接确认"时用:logo 对不上就整份重新应用。
+func LogosMatch(have, want []model.PageLogo) bool {
+	if len(have) != len(want) {
+		return false
+	}
+	key := func(l []model.PageLogo) []string {
+		out := make([]string, len(l))
+		for i, x := range l {
+			out[i] = strconv.FormatUint(uint64(x.ResellerId), 10) + ":" + x.Sum
+		}
+		sort.Strings(out)
+		return out
+	}
+	a, b := key(have), key(want)
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func upsertSetting(tx *gorm.DB, k, v string) error {
@@ -1193,6 +1219,7 @@ func (h *Hub) applyResult(r *nodeResult) {
 		st.LedgerRegressAt, st.LedgerRegressUsers = time.Now().Unix(), mr.Regressed
 		h.mu.Unlock()
 	}
+	h.resyncOnVersionChange(r.n, r.rep.Version) // 要在 setStatus 记下新版本号之前比
 	h.setStatus(r.n, true, errStr, &r.rep)
 	if r.rep.PublicIP != "" && r.rep.PublicIP != r.n.PublicIP {
 		h.d.DB.Model(&model.Node{}).Where("id = ?", r.n.Id).Update("public_ip", r.rep.PublicIP)
@@ -1208,6 +1235,22 @@ func (h *Hub) applyResult(r *nodeResult) {
 	h.upHealth[r.n.Id] = r.rep.Upstreams // 这一轮没有结果就清空:副机改了线路、不再用任何上游时不该留着旧数据
 	h.mu.Unlock()
 	h.recordRejects(r.rep.Groups)
+}
+
+// resyncOnVersionChange 副机换了版本(升级 / 降级)就当它没推过、下一轮立即重推一次,同一修订的推送退避也清掉。
+// 旧版收快照时会丢掉自己不认识的字段(比如落地页 logo)、修订号却照记;新版那边只有"本版程序完整应用过的"
+// 才直接确认,所以这一推会整份应用。不重推的话要等 10 分钟一次的定期重推,这期间服务器页还显示已同步;
+// 因为版本过低被拒而在退避的,升级后也不必再等退避。
+func (h *Hub) resyncOnVersionChange(n model.Node, version string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	st := h.status[n.Id]
+	if st == nil || st.Version == "" || version == "" || st.Version == version {
+		return
+	}
+	delete(h.pushed, n.Id)
+	delete(h.pushFail, n.Id)
+	logger.Info("副机 ", n.Name, " 的版本从 ", st.Version, " 变为 ", version, ",下一轮重推一次配置")
 }
 
 // recordRejects 把一台机器这一轮上报的设备池被拒次数记进滚动窗口。

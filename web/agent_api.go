@@ -20,6 +20,8 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/monitor"
 	"github.com/Maoyangui/m-ui/selfupdate"
+
+	"gorm.io/gorm"
 )
 
 // ---- 副机端:供主机调用的接口(令牌鉴权,不走会话) ----
@@ -304,18 +306,39 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "清除副机待踢线状态失败: " + err.Error()})
 		return
 	}
+	if err := s.run.SetSetting(agentAppliedKey, agentAppliedStamp(snap)); err != nil {
+		// 不影响这次确认:没记下来,同一份快照再来时整份重做一遍而已
+		logger.Warning("记录本版程序已应用快照 ", snap.Revision, " 失败: ", err)
+	}
 	logger.Info("已应用主机配置 ", snap.Revision, "(线路变化: ", linesChanged, ",上游变化: ", upsChanged, ")")
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "revision": snap.Revision})
 }
 
-// agentAlreadyApplied 这份快照是不是已经完整应用过:修订号、序号、本机 id 都一样,没有待重载、没有待踢线,数据面在跑。
+// agentAlreadyApplied 这份快照是不是已经完整应用过:没有待重载、数据面在跑,库里也正是它(见 agentSnapshotInDB)。
 // 老主机不发序号(0),不走这条捷径。
 func (s *Server) agentAlreadyApplied(snap hub.Snapshot, pendingReload string) bool {
 	if snap.Sequence == 0 || strings.TrimSpace(pendingReload) != "" || !s.run.CoreRunning() {
 		return false
 	}
+	return agentSnapshotInDB(s.db, snap)
+}
+
+// agentAppliedKey 记下"哪一版程序完整应用了哪一份快照"(见 agentAppliedStamp)。
+//
+// 旧版程序收快照时会丢掉自己不认识的字段(比如落地页 logo),修订号和序号却照写:只比这两项的话,副机升级以后
+// 主机重推的同一份快照永远被当成"已经应用过",新字段一直落不了库,主机那边还显示已同步。
+// 旧版不写这个键,所以升级后、降级期间收过新快照再升回来、换了任何版本,第一份快照都会整份应用一次。
+const agentAppliedKey = "hubAppliedBy"
+
+func agentAppliedStamp(snap hub.Snapshot) string {
+	return Version + "#" + snap.Revision + "#" + strconv.FormatUint(snap.Sequence, 10)
+}
+
+// agentSnapshotInDB 库里是不是已经是这份快照:修订号、序号一样且是本版程序完整应用的,没有待踢线,本机 id 一样,
+// 落地页 logo 也和快照里的一张不差(旧版主机不发 logo = 一张都没有)。
+func agentSnapshotInDB(db *gorm.DB, snap hub.Snapshot) bool {
 	var rows []model.Setting
-	if err := s.db.Where("key IN ?", []string{"hubRevision", "hubSnapshotSequence", agentKickPendingKey}).Find(&rows).Error; err != nil {
+	if err := db.Where("key IN ?", []string{"hubRevision", "hubSnapshotSequence", agentKickPendingKey, agentAppliedKey}).Find(&rows).Error; err != nil {
 		return false
 	}
 	have := map[string]string{}
@@ -323,14 +346,21 @@ func (s *Server) agentAlreadyApplied(snap hub.Snapshot, pendingReload string) bo
 		have[row.Key] = row.Value
 	}
 	if have["hubRevision"] != snap.Revision || have["hubSnapshotSequence"] != strconv.FormatUint(snap.Sequence, 10) ||
-		strings.TrimSpace(have[agentKickPendingKey]) != "" {
+		have[agentAppliedKey] != agentAppliedStamp(snap) || strings.TrimSpace(have[agentKickPendingKey]) != "" {
 		return false
 	}
 	var self []uint
-	if err := s.db.Model(&model.Node{}).Where("is_local = ?", true).Pluck("id", &self).Error; err != nil {
+	if err := db.Model(&model.Node{}).Where("is_local = ?", true).Pluck("id", &self).Error; err != nil {
 		return false
 	}
-	return len(self) == 1 && self[0] == snap.SelfNodeId
+	if len(self) != 1 || self[0] != snap.SelfNodeId {
+		return false
+	}
+	var logos []model.PageLogo
+	if err := db.Select("reseller_id", "sum").Find(&logos).Error; err != nil {
+		return false
+	}
+	return hub.LogosMatch(logos, snap.Logos)
 }
 
 // kickBestEffort 本机能踢多少踢多少,不因为副机没确认就一个都不踢。只在"配置应用失败"那条路上用。
