@@ -206,3 +206,56 @@ func TestBurstChangedToScheduleClearsUntil(t *testing.T) {
 		t.Fatalf("改成时段规则后应是一条不带截止时间的时段限速: %+v", st)
 	}
 }
+
+// 一行坏数据(手工改库、旧版本留下的 user_ids 不是 BLOB 等)只跳过这一行:别的规则照常判定,
+// 坏行原有的状态保持不动(不能因为读不出来就悄悄解除),整轮不报错(审计 Q-33①)。
+func TestBadRuleRowSkipped(t *testing.T) {
+	e, db := newEngine(t)
+	db.Create(&model.User{Name: "a", Enabled: true})
+	db.Create(&model.User{Name: "b", Enabled: true})
+	db.Create(&model.Rule{Name: "good", Enabled: true, Kind: KindSchedule, UserIds: []byte(`[1]`), Start: "19:00", End: "23:00", DownMbps: 30, TightenOnly: true})
+	db.Create(&model.Rule{Name: "bad", Enabled: true, Kind: KindSchedule, UserIds: []byte(`[2]`), Start: "19:00", End: "23:00", DownMbps: 10, TightenOnly: true})
+	in := time.Date(2026, 9, 11, 20, 0, 0, 0, time.UTC)
+	if _, err := e.Tick(in); err != nil || len(statesOf(t, db)) != 2 {
+		t.Fatalf("两条规则都应生效: %v %+v", err, statesOf(t, db))
+	}
+	// 坏掉:user_ids 成了整数,读进 json.RawMessage 会失败
+	if err := db.Exec("UPDATE rules SET user_ids = 5 WHERE name = ?", "bad").Error; err != nil {
+		t.Fatal(err)
+	}
+	db.Model(&model.Rule{}).Where("name = ?", "good").Update("down_mbps", 20)
+	ch, err := e.Tick(in.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("一行坏数据不该让整轮失败: %v", err)
+	}
+	st := statesOf(t, db)
+	if !ch || len(st) != 2 || st[0].RuleName != "good" || st[0].DownMbps != 20 || st[1].RuleName != "bad" || st[1].DownMbps != 10 {
+		t.Fatalf("好规则照常更新,坏规则的状态保持不动: %v %+v", ch, st)
+	}
+	// 坏行修好后照常判定;出窗口两条都解除
+	db.Model(&model.Rule{}).Where("name = ?", "bad").Update("user_ids", []byte(`[2]`))
+	if _, err := e.Tick(time.Date(2026, 9, 11, 23, 0, 0, 0, time.UTC)); err != nil || len(statesOf(t, db)) != 0 {
+		t.Fatalf("修好后应照常判定: %v %+v", err, statesOf(t, db))
+	}
+}
+
+// 坏行上的突发状态到期照样解除:读不出规则也不能把用户一直限着。
+func TestBadRuleRowExpiredBurstLifted(t *testing.T) {
+	e, db := newEngine(t)
+	db.Create(&model.User{Name: "a", Enabled: true})
+	db.Create(&model.Rule{Name: "burst", Enabled: true, Kind: KindBurst, UserIds: []byte(`[1]`), WindowMin: 10, ThresholdBytes: gb, PenaltyMin: 20, DownMbps: 20, TightenOnly: true})
+	t0 := time.Date(2026, 9, 11, 20, 0, 0, 0, time.UTC)
+	e.Tick(t0)
+	setUsage(db, 1, 2*gb)
+	e.Tick(t0.Add(time.Minute))
+	if len(statesOf(t, db)) != 1 {
+		t.Fatal("应触发突发限速")
+	}
+	db.Exec("UPDATE rules SET user_ids = 5")
+	if _, err := e.Tick(t0.Add(5 * time.Minute)); err != nil || len(statesOf(t, db)) != 1 {
+		t.Fatalf("惩罚期内保持: %v %+v", err, statesOf(t, db))
+	}
+	if _, err := e.Tick(t0.Add(30 * time.Minute)); err != nil || len(statesOf(t, db)) != 0 {
+		t.Fatalf("到期应解除: %v %+v", err, statesOf(t, db))
+	}
+}
