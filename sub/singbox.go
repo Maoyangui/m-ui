@@ -155,6 +155,7 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 	// 线路组在本站节点之后、外部节点之前起名,规则和 Clash 订阅一样(见 linegroup.go):撞了本站节点、模板出站或内置名
 	// 只给组名加序号,本站节点名一字不动;外部节点最后定名,撞上组名由外部节点加序号,外部订阅里冒出一个和线路同名的节点
 	// 也挤不动线路组的名字,选过这个组的客户端(SFA / SFI 按 tag 记住选择)不会被悄悄换到第三方节点上。
+	// 反过来线路组新出现时(比如刚升级上来),外部订阅里同名的节点改名一次、只改 tag,取舍见 linegroup.go。
 	// 模板里同名的 selector / urltest 就用模板的(见 singBoxTmplGroup)
 	groupTags := nameLineGroups(pending, used, nil, func(tag string) bool { return singBoxTmplGroup(tmplOut, tag) })
 	for _, e := range opt.External { // 外部节点不成组

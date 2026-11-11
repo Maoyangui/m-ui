@@ -434,6 +434,90 @@ func TestSingBoxLineGroupKeepsNameOverExternal(t *testing.T) {
 	}
 }
 
+// 升级前后对照:上一版 sing-box JSON 没有线路组,外部订阅里和多服务器线路同名的节点一直叫线路名(hy)。现在线路组占了
+// 这个名字,改名的只有这一个外部节点(hy → hy 2),而且只改 tag:出站参数一字不变,客户端可以按内容把选择跟过去;
+// 别的节点 tag、内容、顺序都和上一版一样,上一版 proxy 里能选的名字现在都还在,只有 hy 换了所指(这一次性的切换是
+// 有意的取舍,见 linegroup.go)。本站的名字优先也不是新规矩:单台服务器时线路节点就叫 hy,同名的外部节点上一版就是 hy 2。
+func TestSingBoxUpgradeRenamesOnlyClashingExternal(t *testing.T) {
+	cert := raw(map[string]interface{}{"mode": "cert"})
+	lines := []model.Line{
+		{Id: 1, Name: "hy", Protocol: "hysteria2", Port: 443, Tls: cert, Enabled: true},
+		{Id: 2, Name: "tj", Protocol: "trojan", Port: 9443, Tls: cert, Enabled: true, NodeIds: raw([]uint{1})}, // 只部署在 A:不出组
+	}
+	ext := []ExtItem{{Name: "ext", Links: []string{
+		"trojan://p@198.51.100.1:443?sni=x.example.com#hy", // 和多服务器线路同名
+		"trojan://q@198.51.100.2:443?sni=y.example.com#tj", // 和只部署一台的线路同名:那条线路不出组,它照旧叫 tj
+		"trojan://r@198.51.100.3:443?sni=z.example.com#jp",
+	}}}
+	user := fullUser()
+	build := func(opt Options) (now, before string) {
+		t.Helper()
+		res, err := BuildSingBoxSub(user, lines, opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		validateClientConfig(t, res.Body)
+		old, err := legacySingBox(user, lines, opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Body, old.Body
+	}
+	stripTag := func(o map[string]interface{}) map[string]interface{} {
+		c := make(map[string]interface{}, len(o))
+		for k, v := range o {
+			if k != "tag" {
+				c[k] = v
+			}
+		}
+		return c
+	}
+
+	nowBody, beforeBody := build(Options{Entries: twoServers, External: ext})
+	now, before := parseSB(t, nowBody), parseSB(t, beforeBody)
+	nowNodes, beforeNodes := nodeOutbounds(now), nodeOutbounds(before)
+	if len(nowNodes) != len(beforeNodes) {
+		t.Fatalf("节点个数变了: %d → %d", len(beforeNodes), len(nowNodes))
+	}
+	var renamed []string
+	for i, b := range beforeNodes {
+		n := nowNodes[i]
+		if !reflect.DeepEqual(stripTag(b), stripTag(n)) {
+			t.Fatalf("第 %d 个节点的出站参数变了:\n上一版 %v\n现在   %v", i, b, n)
+		}
+		if b["tag"] != n["tag"] {
+			renamed = append(renamed, fmt.Sprintf("%v → %v", b["tag"], n["tag"]))
+		}
+	}
+	if !reflect.DeepEqual(renamed, []string{"hy → hy 2"}) {
+		t.Fatalf("只该有和线路组同名的那个外部节点改名: %v", renamed)
+	}
+	by := byTagSB(now)
+	if g := by["hy"]; g == nil || g["type"] != "urltest" || !reflect.DeepEqual(strList(g["outbounds"]), []string{"hy-A", "hy-B"}) {
+		t.Fatalf("hy 现在应是线路组: %v", g)
+	}
+	got, old := strList(by["proxy"]["outbounds"]), strList(byTagSB(before)["proxy"]["outbounds"])
+	if !reflect.DeepEqual(old, []string{"auto", "hy-A", "hy-B", "tj-A", "hy", "tj", "jp"}) ||
+		!reflect.DeepEqual(got, []string{"auto", "hy", "hy-A", "hy-B", "tj-A", "hy 2", "tj", "jp"}) {
+		t.Fatalf("proxy 选择组:\n上一版 %v\n现在   %v", old, got)
+	}
+
+	// 单台服务器:不出线路组,线路节点就叫 hy / tj,同名的外部节点上一版就让名(hy 2、tj 2),现在逐字节一样
+	nowBody, beforeBody = build(Options{Entries: hkEntry, External: ext})
+	if nowBody != beforeBody {
+		t.Fatalf("单台服务器时配置应和上一版逐字节一样\n得 %s\n应 %s", nowBody, beforeBody)
+	}
+	by = byTagSB(parseSB(t, nowBody))
+	for tag, want := range map[string][2]string{
+		"hy": {"hysteria2", "hk.joinvip.vip"}, "hy 2": {"trojan", "198.51.100.1"},
+		"tj": {"trojan", "hk.joinvip.vip"}, "tj 2": {"trojan", "198.51.100.2"}, "jp": {"trojan", "198.51.100.3"},
+	} {
+		if o := by[tag]; o == nil || o["type"] != want[0] || o["server"] != want[1] {
+			t.Fatalf("单台服务器时 %s 应是 %v: %v", tag, want, o)
+		}
+	}
+}
+
 // 模板模式:模板里 "{all}" 只展开成节点(不含线路组);线路组和 proxy / auto 一样补进出站,模板写了同名的 selector / urltest
 // 就用模板的,不另补一份。同名的是别的出站(direct、节点),或者模板的这个组会顺着成员 / detour 绕回生成的 proxy
 // (proxy 列着它,成环,sing-box 整份起不来),线路组改名另起,模板的不动。
