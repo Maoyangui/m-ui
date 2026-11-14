@@ -59,7 +59,11 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 	action := strings.TrimPrefix(r.URL.Path, innerBase+"api/cert/")
 	switch action {
 	case "status":
-		writeJSON(w, http.StatusOK, s.run.CertStatus())
+		st := s.run.CertStatus()
+		if sw := s.panelPending.Load(); sw != nil { // 面板几秒后换监听:证书页据此跳到新地址
+			st["panelSwitch"] = sw
+		}
+		writeJSON(w, http.StatusOK, st)
 	case "cancel": // 手动 DNS 等记录时反悔了
 		if r.Method != http.MethodPost {
 			break
@@ -242,7 +246,11 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.audit(r, "cert", "use", map[string]string{"name": req.Name, "target": req.Target})
-		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+		resp := map[string]interface{}{"ok": "1"}
+		if sw := s.panelPending.Load(); sw != nil && req.Target == "panel" { // 面板换了证书:回复里带新地址,页面跳过去
+			resp["panelSwitch"] = sw
+		}
+		writeJSON(w, http.StatusOK, resp)
 	case "delete":
 		if r.Method != http.MethodPost {
 			break

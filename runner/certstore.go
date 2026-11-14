@@ -424,7 +424,11 @@ func (r *Runner) UseCert(name, target string) error {
 		if err := saveSettings(r.db, map[string]string{"webCertFile": row.CertFile, "webKeyFile": row.KeyFile}); err != nil {
 			return fmt.Errorf("保存证书设置失败: %w", err)
 		}
-		r.cert.logf("面板 HTTPS 已设为 %s,重启 m-ui 后生效", certLabel(row))
+		if u := r.switchPanel(2 * time.Second); u != "" {
+			r.cert.logf("面板 HTTPS 已设为 %s,几秒后改用,新地址 %s(不用重启 m-ui)", certLabel(row), u)
+		} else {
+			r.cert.logf("面板 HTTPS 已设为 %s,重启 m-ui 后生效", certLabel(row))
+		}
 		return nil
 	case CertForSub:
 		if err := saveSettings(r.db, map[string]string{"subCertFile": row.CertFile, "subKeyFile": row.KeyFile, "subRestartPending": "true"}); err != nil {

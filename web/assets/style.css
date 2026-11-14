@@ -1015,3 +1015,14 @@ button.ld-srow:hover { background: var(--surface-2); }
 .ld-fw .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ld-fw .chip.off, .chip.off { opacity: .6; }
 .ld-orow .ips .chip.via { border-color: var(--primary); color: var(--primary-text); }
+
+/* 面板换到新地址(panelmove.js) */
+.pm-mask { z-index: 90; }
+.pm-box { max-width: 30rem; }
+.pm-body { padding: 0 1.1rem .4rem; display: flex; flex-direction: column; gap: .55rem; }
+.pm-url { font-size: .9rem; overflow-wrap: anywhere; }
+.pm-state { display: flex; align-items: center; gap: .55rem; margin: 0; font-size: .86rem; color: var(--muted); }
+.pm-state.warn-text { color: var(--warn); }
+.pm-spin { flex: none; width: 1rem; height: 1rem; border: 2px solid var(--border-strong); border-top-color: var(--primary); border-radius: 50%; animation: pm-spin .8s linear infinite; }
+@keyframes pm-spin { to { transform: rotate(360deg); } }
+.pm-foot { display: flex; justify-content: flex-end; gap: .5rem; padding: .75rem 1.1rem 1rem; }

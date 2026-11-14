@@ -2,6 +2,7 @@ import { state, load } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy, urlHost, charCount, bindCharCounts, PAGE_TEXT_MAX } from '../ui.js';
+import { followPanel } from '../panelmove.js';
 import { logoBlock, bindLogo } from '../logo.js';
 import { renderHASettings } from '../ha.js';
 import { subSettingsChange } from '../subtls.js';
@@ -39,7 +40,7 @@ const TIMEZONES = [
 const isNodeRole = () => String(state.settings.nodeMode).toLowerCase() === 'true';
 
 const groups = () => [
-  { id: 'panel', title: t('set.panel'), restart: true, fields: [
+  { id: 'panel', title: t('set.panel'), fields: [
     ['webDomain', t('set.webDomain'), 'text', t('set.webDomainHelp')],
     ['timezone', t('set.timezone'), 'select', t('set.timezoneHelp'), TIMEZONES.map(z => [z, z])],
     ['webListen', t('set.listen'), 'text'], ['webPort', t('set.port'), 'number'], ['webPath', t('set.path'), 'text', t('set.pathHelp')],
@@ -47,7 +48,7 @@ const groups = () => [
     ['trustedProxies', t('set.trustedProxies'), 'text', t('set.trustedProxiesHelp')],
     ['supportOnline', t('set.supportOnline'), 'boolOn', t('set.supportOnlineHelp')],
   ]},
-  { id: 'sub', title: t('set.sub'), restart: true, fields: [
+  { id: 'sub', title: t('set.sub'), fields: [
     ['subDomain', t('set.subDomain'), 'text', t('set.subDomainHelp')],
     ['subListen', t('set.listen'), 'text'], ['subPort', t('set.port'), 'number'], ['subPath', t('set.path'), 'text', t('set.subPathHelp')],
     ['subCertFile', t('set.cert'), 'text', t('set.subCertHelp')], ['subKeyFile', t('set.key'), 'text'],
@@ -63,7 +64,7 @@ const groups = () => [
     ['subClashExt', t('set.subClashExt'), 'code', t('set.subClashExtHelp')],
     ['subSingboxExt', t('set.subSingboxExt'), 'code', t('set.subSingboxExtHelp')],
   ]},
-  { id: 'reseller', title: t('set.reseller'), restart: true, fields: [
+  { id: 'reseller', title: t('set.reseller'), fields: [
     ['resellerEnabled', t('set.resellerEnabled'), 'boolOn', t('set.resellerEnabledHelp')],
     ['resellerListen', t('set.listen'), 'text'], ['resellerPort', t('set.port'), 'number'],
     ['resellerPath', t('set.path'), 'text', t('set.resellerPathHelp')],
@@ -208,7 +209,8 @@ registerActions({
     const norm = p => { p = (p || '/app/').trim(); if (!p.startsWith('/')) p = '/' + p; if (!p.endsWith('/')) p += '/'; return p; };
     if (id === 'panel' && norm(body.webPath) !== norm(state.status.webPath)) {
       try {
-        await post('settings', body);
+        const r = await post('settings', body);
+        if (r && r.panelSwitch) { followPanel(r.panelSwitch); return; }
         const np = norm(body.webPath);
         toast(t('set.pathChanged', { p: np }), 'ok');
         setTimeout(() => { location.href = np + '#/settings'; }, 900);
@@ -216,7 +218,9 @@ registerActions({
       return;
     }
     try {
-      const r = await post('settings', body); await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok');
+      const r = await post('settings', body);
+      if (r && r.panelSwitch) { toast(t('set.saved'), 'ok'); followPanel(r.panelSwitch); return; }
+      await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok');
       // Clash 模板写了 ipv6: false:存下了,但有 IPv6 节点时订阅会改成 true,要让人知道
       if ((r.hints || []).includes('clashIPv6')) confirm(t('set.clashIPv6Hint'), { title: t('set.saved'), okText: t('node.ack'), notice: true });
     }

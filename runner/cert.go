@@ -380,7 +380,10 @@ func (r *Runner) afterCertChange(certFile, keyFile, domain string, targets CertT
 		}
 	}
 	if webChanged {
-		if wantWebCert == "" {
+		// 几秒后在进程里换面板的监听(不重启 m-ui):证书页的进度里带着新地址,页面等它能连上就跳过去
+		if u := r.switchPanel(5 * time.Second); u != "" {
+			r.cert.logf("面板几秒后改用新的证书设置,新地址 %s(不用重启 m-ui,页面会自动跳过去)", u)
+		} else if wantWebCert == "" {
 			r.cert.logf("面板已取消 HTTPS,重启 m-ui 后生效(地址改回 http://)")
 		} else {
 			r.cert.logf("面板已启用 HTTPS,重启 m-ui 后生效")

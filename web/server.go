@@ -63,6 +63,11 @@ type Server struct {
 	db       *gorm.DB
 	httpSrv  *http.Server
 	listener net.Listener
+	// 面板换监听(见 panel_switch.go):panelMu 串行化换的过程,panelCur 是现在的监听,panelPending 是排着还没换的新地址
+	panelMu      sync.Mutex
+	panelCur     panelListen
+	panelHandler http.Handler
+	panelPending atomic.Pointer[panelSwitch]
 
 	rSrv      *http.Server // 代理面板(独立端口/路径)
 	rListener net.Listener
@@ -277,33 +282,29 @@ func (s *Server) Start() error {
 		mux.ServeHTTP(w, r)
 	})
 
-	listen := s.setting("webListen")
-	if listen == "" {
-		listen = "0.0.0.0"
-	}
-	port := s.settingInt("webPort", 2053)
-	addr := net.JoinHostPort(listen, strconv.Itoa(port))
-	ln, err := net.Listen("tcp", addr)
+	pl := s.wantPanelListen()
+	ln, err := s.openPanelListener(pl) // 证书文件更新后自动换用,续期无需重启
 	if err != nil {
 		return err
 	}
-
 	scheme := "http"
-	certFile, keyFile := s.setting("webCertFile"), s.setting("webKeyFile")
-	if certFile != "" && keyFile != "" {
-		ln = tls.NewListener(ln, s.tlsFor("panel", "面板", certFile, keyFile)) // 证书文件更新后自动换用,续期无需重启
+	if pl.cert != "" {
 		scheme = "https"
 	}
-
-	s.listener = ln
 	slow := &slowreq.Logger{Name: "面板", Shape: panelRouteShape} // 处理超过 3 秒记一条(同一路由每分钟最多一条)
-	s.httpSrv = &http.Server{Handler: slow.Wrap(outer), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
-	go func() {
-		if err := s.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
-			logger.Warning("面板服务退出: ", err)
-		}
-	}()
-	logger.Info("面板已启动 ", scheme, "://", addr, s.basePath())
+	s.panelHandler = slow.Wrap(outer)
+	s.panelMu.Lock()
+	s.servePanel(ln, pl)
+	s.panelMu.Unlock()
+	logger.Info("面板已启动 ", scheme, "://", pl.addr, s.basePath())
+	if s.run != nil { // 证书页 / 签发里换了面板证书:runner 叫这里在进程里换监听,不重启 m-ui
+		s.run.SetPanelSwitchHook(func(delay time.Duration) string {
+			if sw := s.planPanelSwitch(delay); sw != nil {
+				return sw.URL(s.panelHostHint())
+			}
+			return ""
+		})
+	}
 	s.StartUpdateWatch()
 	if err := s.StartReseller(); err != nil {
 		logger.Warning("代理面板启动失败: ", err)
@@ -373,12 +374,15 @@ func assetCache(fsys fs.FS, next http.Handler) http.Handler {
 
 func (s *Server) Stop() error {
 	_ = s.StopReseller()
-	if s.httpSrv == nil {
+	s.panelMu.Lock()
+	srv := s.httpSrv
+	s.panelMu.Unlock()
+	if srv == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return s.httpSrv.Shutdown(ctx)
+	return srv.Shutdown(ctx)
 }
 
 // ---- 会话 ----

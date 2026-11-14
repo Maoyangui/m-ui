@@ -640,8 +640,11 @@ func (s *Server) handleAgentUpstreamCheck(w http.ResponseWriter, r *http.Request
 // 副机不起代理面板(StartReseller),不报它。
 func (s *Server) reportServicePorts() []model.ServicePort {
 	out := []model.ServicePort{{Label: "面板", Port: s.settingInt("webPort", 2053)}, {Label: "订阅", Port: s.settingInt("subPort", 2056)}}
-	if s.listener != nil {
-		if a, ok := s.listener.Addr().(*net.TCPAddr); ok && a.Port != out[0].Port {
+	s.panelMu.Lock() // 面板可能正在换监听(见 panel_switch.go)
+	ln := s.listener
+	s.panelMu.Unlock()
+	if ln != nil {
+		if a, ok := ln.Addr().(*net.TCPAddr); ok && a.Port != out[0].Port {
 			out = append(out, model.ServicePort{Label: "面板", Port: a.Port})
 		}
 	}

@@ -1415,19 +1415,26 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		roleChanged := false
+		// 面板 / 订阅 / 代理面板的监听设置,存之前记下:真变了的保存后当场在进程里换(见 panel_switch.go)
+		listenKeys := []string{"webListen", "webPort", "webCertFile", "webKeyFile", "subListen", "subPort", "subCertFile", "subKeyFile",
+			"resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile"}
+		oldListen := map[string]string{}
+		for _, k := range listenKeys {
+			oldListen[k] = s.setting(k)
+		}
 		oldDomain := s.setting("webDomain")
 		oldAllowPrivate := s.setting("allowPrivate")
 		oldBlockBT := s.setting("blockBT")
 		oldShare := s.setting("subShareEnabled")
 		oldTestURL := s.setting("upstreamTestUrl")
-		note := "端口、证书与监听地址的改动需重启 m-ui 生效"
+		note := ""
 		if v, ok := in["nodeMode"]; ok && strings.EqualFold(strings.TrimSpace(v), "true") && !strings.EqualFold(s.setting("nodeMode"), "true") {
 			// 切成副机后本机的线路 / 用户 / 上游会被主机的快照整表替换:先留一份备份,别静默丢数据
 			if bf, err := s.run.CreateBackupFile(); err != nil {
 				logger.Warning("切换副机前备份失败: ", err)
-				note = "切换前备份失败:" + err.Error() + ";" + note
+				note = "切换前备份失败:" + err.Error()
 			} else {
-				note = "已先备份到 " + bf.Name + "(本机现有线路 / 用户 / 上游会被主机下发的配置替换);" + note
+				note = "已先备份到 " + bf.Name + "(本机现有线路 / 用户 / 上游会被主机下发的配置替换)"
 			}
 		}
 		for k, v := range in {
@@ -1464,10 +1471,37 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			keys = append(keys, k)
 		}
 		s.audit(r, "settings", "update", keys)
-		// 端口/证书类改动需重启进程才生效,这里提示前端
-		resp := map[string]interface{}{
-			"ok": "1", "role": s.role(),
-			"note": note,
+		resp := map[string]interface{}{"ok": "1", "role": s.role()}
+		// 监听设置改了的当场生效,不用重启 m-ui:面板 1.5 秒后换监听(回复里带新地址,页面等它能连上就跳过去),
+		// 订阅服务与代理面板直接重启各自的监听
+		changed := func(ks ...string) bool {
+			for _, k := range ks {
+				if s.setting(k) != oldListen[k] {
+					return true
+				}
+			}
+			return false
+		}
+		if changed("webListen", "webPort", "webCertFile", "webKeyFile") {
+			if sw := s.planPanelSwitch(1500 * time.Millisecond); sw != nil {
+				resp["panelSwitch"] = sw
+			} else if s.run != nil && s.run.IsNode() {
+				note = strings.TrimPrefix(note+";副机的面板端口、证书改了要重启 m-ui 才生效:先到主机服务器页把这台的 API 地址改成新地址,再重启", ";")
+			}
+		}
+		if s.run != nil && changed("subListen", "subPort", "subCertFile", "subKeyFile") { // 订阅路径每次请求现读,改了不用重启
+			if err := s.run.RestartSub(); err != nil {
+				note = strings.TrimPrefix(note+";订阅服务没能用新设置启动: "+err.Error(), ";")
+			}
+		}
+		if s.run != nil && changed("resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile") {
+			_ = s.StopReseller()
+			if err := s.StartReseller(); err != nil {
+				note = strings.TrimPrefix(note+";代理面板没能用新设置启动: "+err.Error(), ";")
+			}
+		}
+		if note != "" {
+			resp["note"] = note
 		}
 		if len(hints) > 0 {
 			resp["hints"] = hints

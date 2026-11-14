@@ -57,6 +57,9 @@ func SetPanelStarter(f func(*Runner) error) { startPanel = f }
 
 // Runner 持有数据面运行所需的一切。
 type Runner struct {
+	// panelSwitch 面板换监听的钩子(web 层登记,见 web/panel_switch.go):换了面板证书后叫它,delay 后在进程里换监听,
+	// 返回新地址(给证书日志);面板监听没变返回空。没登记(测试)为 nil。
+	panelSwitch  func(delay time.Duration) string
 	db           *gorm.DB
 	core         *core.Core
 	subSrv       *sub.Server
@@ -2085,4 +2088,15 @@ func (r *Runner) newSubServer() *sub.Server {
 		}()
 	}
 	return s
+}
+
+// SetPanelSwitchHook web 层登记面板换监听的钩子(见 Runner.panelSwitch)。
+func (r *Runner) SetPanelSwitchHook(fn func(delay time.Duration) string) { r.panelSwitch = fn }
+
+// switchPanel 面板证书换了:有钩子就排上进程内换监听,返回新地址;没有返回空(照旧提示重启生效)。
+func (r *Runner) switchPanel(delay time.Duration) string {
+	if r.panelSwitch == nil {
+		return ""
+	}
+	return r.panelSwitch(delay)
 }

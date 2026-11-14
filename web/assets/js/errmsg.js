@@ -789,7 +789,11 @@ const EN = /*BEGIN*/{
 "端口 %d 落在线路「%s」在「%s」上的端口跳跃范围 %s 里,UDP 包会被转给那条线路,换一个": "Port %[1]d falls inside the port-hopping range %[4]s of line \"%[2]s\" on \"%[3]s\", so its UDP packets would go to that line; pick another",
 "线路「%s」的第 %d 个中转入口转给「%s」,改完后那台不再部署这条线路;先在线路里改掉这个中转入口": "Relay entry %[2]d of line \"%[1]s\" forwards to \"%[3]s\", which would no longer run this line; change that relay entry in the line first",
 "线路「%s」改完后也部署到「%s」,和它经那台的中转入口撞了端口 %d": "After this change line \"%s\" also runs on \"%s\", where its own relay entry uses the same port %d",
-"线路「%s」:%w": "Line \"%s\": %w"
+"线路「%s」:%w": "Line \"%s\": %w",
+"面板没能在 %s 上监听,还在原地址: %w": "The panel could not listen on %s and stays on its old address: %w",
+"面板没能换用新的证书设置,已按原样恢复: %w": "The panel could not switch to the new certificate settings and was restored as before: %w",
+"面板几秒后改用新的证书设置,新地址 %s(不用重启 m-ui,页面会自动跳过去)": "The panel switches to the new certificate settings in a few seconds; new address %s (no m-ui restart needed, the page follows automatically)",
+"面板 HTTPS 已设为 %s,几秒后改用,新地址 %s(不用重启 m-ui)": "Panel HTTPS set to %s, switching in a few seconds; new address %s (no m-ui restart needed)"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

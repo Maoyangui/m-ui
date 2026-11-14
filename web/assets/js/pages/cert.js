@@ -3,6 +3,7 @@ import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, fmtDay, fmtDate, fmtRelative, toast, confirm, registerActions, badge, field, check, copy, fv, fchk, cfTokenLink } from '../ui.js';
+import { followPanel } from '../panelmove.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 import { subDefaultOn, subSchemeChange } from '../subtls.js';
 
@@ -271,6 +272,7 @@ function startPoll() {
       if (log) { log.textContent = logText(st); log.scrollTop = log.scrollHeight; }
       const sig = JSON.stringify(st.txt || []);
       if (sig !== lastTxt) { lastTxt = sig; renderTxt(st.txt); }
+      if (st.panelSwitch) { stopPoll(); followPanel(st.panelSwitch); return; } // 签好了,面板几秒后换到新地址
       if (!st.running) {
         stopPoll();
         toast(st.lastError ? t('cert.failed') : t('cert.done'), st.lastError ? 'err' : 'ok');
@@ -329,8 +331,9 @@ registerActions({
       const subWarn = target === 'sub' ? subSchemeText(value) : '';
       if (subWarn && !await confirm(subWarn, { danger: true })) return false;
       try {
-        await post('cert/use', { name: value, target }, SLOW);
-        if (target === 'panel') panelChanged = true;
+        const r = await post('cert/use', { name: value, target }, SLOW);
+        if (target === 'panel' && r && r.panelSwitch) followPanel(r.panelSwitch);
+        else if (target === 'panel') panelChanged = true; // 老后端没有进程内换监听:照旧提示重启
         toast(t('cert.useOk'), 'ok');
         await reload();
         return true;
