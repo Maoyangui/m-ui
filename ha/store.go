@@ -245,7 +245,7 @@ func (s *Service) ReceiveReplica(body io.Reader) (uint64, error) {
 	// 接任时要放得下:解开的库(至少和压缩包一样大)、新库一份、压缩包本身。上一份收下后会删,它占的算回来
 	dbHint := hd.Size
 	if hadOld && old.MasterId == hd.MasterId && old.DBSize > 0 && old.Size > 0 {
-		dbHint = max(dbHint, old.DBSize*hd.Size/old.Size)
+		dbHint = max(dbHint, scaleSize(old.DBSize, hd.Size, old.Size))
 	}
 	if free := s.diskFree(); free >= 0 {
 		var prevSize int64
@@ -538,4 +538,16 @@ func (s *Service) selfCheckTick() {
 	if err := s.SelfCheck(); err != nil {
 		logger.Warning("容灾:副本自检失败: ", err)
 	}
+}
+
+// scaleSize a*b/c,不溢出:先乘后除在大数上会超过 int64 变成负数,磁盘检查就被当成放得下(大盘机器上测出来的)。
+func scaleSize(a, b, c int64) int64 {
+	if c <= 0 {
+		return a
+	}
+	v := float64(a) * float64(b) / float64(c)
+	if v >= 9e18 {
+		return 9e18
+	}
+	return int64(v)
 }

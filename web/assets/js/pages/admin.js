@@ -4,6 +4,7 @@ import { get, post } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, registerActions, field, fv, copy, badge, openModal } from '../ui.js';
 import { apiTable, apiExample } from '../apidoc.js';
+import { mountApiKeys } from '../apikeys.js';
 
 export const title = () => t('adm.title');
 export const subtitle = () => t('adm.subtitle');
@@ -24,6 +25,7 @@ export async function render(el) {
     </section>
     <section class="card" id="adm-totp">${totpCard()}</section>
     <section class="card" id="adm-api">${apiCard()}</section>`;
+  if (info.apiEnabled) mountApiKeys('admin/api');
   const sw = document.getElementById('adm-api-on');
   if (sw) sw.addEventListener('change', async e => {
     try { await post('admin/api', { enabled: e.target.checked }); toast(t('adm.apiSaved'), 'ok'); await refresh(); }
@@ -79,6 +81,7 @@ function apiCard() {
       <dt>${t('adm.apiBase')}</dt><dd><div class="sub-box"><code>${esc(base)}</code><button class="btn sm" data-act="adm.copy" data-id="${esc(base)}">${t('common.copy')}</button></div></dd>
       <dt>${t('adm.apiToken')}</dt><dd><div class="sub-box"><code>${esc(info.apiToken || '')}</code><button class="btn sm" data-act="adm.copy" data-id="${esc(info.apiToken || '')}">${t('common.copy')}</button><button class="btn sm danger" data-act="adm.apiRotate">${t('adm.apiRotate')}</button></div></dd>
     </dl>
+    <div id="api-keys" class="api-keys-box"></div>
     <h3 class="sub-title">${t('adm.apiEndpoints')}</h3>
     ${apiTable()}
     <h3 class="sub-title">${t('adm.apiExample')}</h3>

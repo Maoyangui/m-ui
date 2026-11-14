@@ -2341,6 +2341,22 @@ func (h *Hub) RemoteIPLinesAll() map[string]map[string][]string {
 	return out
 }
 
+// RemoteIPLinesRaw 各副机(还新鲜的)上报的「用户 → 源 IP → 线路名」原样,按副机 id:按线路统计在线(线路详情、外部 API)用,
+// 线路名不带服务器后缀,和本机的 OnlineIPLines 同一形状。
+func (h *Hub) RemoteIPLinesRaw() map[uint]map[string]map[string][]string {
+	now := time.Now().Unix()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make(map[uint]map[string]map[string][]string, len(h.remoteLines))
+	for id, m := range h.remoteLines {
+		if !h.freshLocked(id, now) || len(m) == 0 {
+			continue
+		}
+		out[id] = m
+	}
+	return out
+}
+
 func (h *Hub) RemoteIPLines(user string) map[string][]string {
 	now := time.Now().Unix()
 	h.mu.Lock()

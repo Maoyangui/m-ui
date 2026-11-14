@@ -29,6 +29,26 @@
 2. "重新生成"后旧令牌立即失效。
 3. 以下任一情况令牌立即返回 401:代理在账号页关掉开关、代理被主面板停用、代理到期、主面板重置了代理密码。
 
+### 多把密钥与权限
+
+上面说的令牌是「默认密钥」,全部权限,升级以后照旧可用。另外可以在同一个地方(管理员页 / 代理的我的账号页 → **外部 API** → **附加密钥**)生成多把附加密钥:每把单独起名、单独勾权限,可以单独停用、重新生成、删除,列表里能看到每把最近一次是什么时候、从哪个 IP 用的。比如给商城一把「查看用户 + 创建用户 + 续费与换套餐 + 查看套餐」,给 Telegram 机器人一把只读的「查看用户 + 面板信息」。附加密钥和默认密钥一样受总开关管:总开关关着时全部 401。
+
+| 权限 | 名称 | 能调的接口 |
+|---|---|---|
+| `users.read` | 查看用户 | `GET /users`、`GET /users/{name\|id}`、`/sub`、`/plan-ops`、`/traffic` |
+| `users.create` | 创建用户 | `POST /users` |
+| `users.update` | 修改用户 | `PATCH / PUT /users/{name\|id}`、`/enable`、`/disable`、`/reset`、`/kick`、`/rotate` |
+| `users.delete` | 删除用户 | `DELETE /users/{name\|id}` |
+| `billing` | 续费与换套餐 | `/plan`、`/renew`、`/change`(含预览) |
+| `plans.read` | 查看套餐 | `GET /plans` |
+| `panel.read` | 面板信息 | `GET /overview`、`/servers`、`/lines`、`/onlines` |
+
+`/ping` 只要密钥有效就能调。密钥没有某项权限时返回 `403 {"error":"这把密钥没有「…」权限","permission":"<权限名>"}`。审计里操作人记为 `api:<密钥名>`(代理的是 `api:<代理名>/<密钥名>`)。附加密钥只在主服务器上生效(副机不提供写操作,也不带这张表);开了主机容灾的,备用接任后照常可用。
+
+### 来源 IP 白名单
+
+同一处还有「来源 IP 白名单」:默认关闭;打开后只有名单里的 IP 或网段(IPv4 / IPv6 都行,一行一个)能调用这个面板的外部 API,默认密钥和附加密钥都算,别的来源一律返回 `403 {"error":"来源 IP 不在外部 API 的白名单里"}`(不计入失败限流)。主面板和每个代理各有一份,互不影响。页面上会显示你当前的来源 IP,点一下就能加进名单。面板挂在反向代理后面时,先在 **设置 → 面板** 填「受信任的反向代理」,白名单才认得出真实来源。
+
 ### 请求头
 
 每个请求带令牌,两种写法任选其一(同时给时以 `Authorization` 为准):
@@ -122,6 +142,11 @@ X-API-Key: <令牌>
 | POST | `/users/{name\|id}/change` | 换套餐:立即替换 / 叠加 / 按价值折算,可预览、可幂等 | [结果对象](#结果--预览对象) |
 | GET | `/users/{name\|id}/plan-ops` | 套餐记录(续费、换套餐的历史) | 记录数组 |
 | GET | `/users/{name\|id}/sub` | 订阅地址 | `{link, clash, json[, share]}` |
+| GET | `/users/{name\|id}/traffic` | 每天的用量(面板时区),`?days=30`,最多 90 天 | `{user, days: [{date, up, down}], totalUp, totalDown}` |
+| GET | `/overview` | 面板概况:用户数、在线、今天 / 本月 / 累计流量、线路;主面板另有服务器数 | 概况对象 |
+| GET | `/servers` | 服务器:在线、版本、在线人数、上次联系时间(代理的密钥 403) | 服务器数组 |
+| GET | `/lines` | 线路与此刻在线人数(代理只看授权给自己的) | 线路数组 |
+| GET | `/onlines` | 此刻在线的用户、设备数与所在线路 | 在线数组 |
 
 面板里的管理员页与代理面板「我的账号」页有同一份接口一览(没开外部 API 时折叠显示)。
 
@@ -420,6 +445,40 @@ X-API-Key: <令牌>
 - `share`:只在用户自己生成了临时共享地址时才有。
 
 用户对象里的 `subLink` / `subClash` / `subJson` 与前三项相同。
+
+### GET /users/{name|id}/traffic
+
+按面板时区每天一格的上下行(字节),默认最近 30 天,`?days=` 最多 90(超出流量记录保留天数的部分是 0):
+
+```json
+{"user": "alice", "days": [{"date": "2026-11-13", "up": 1048576, "down": 52428800}], "totalUp": 1048576, "totalDown": 52428800}
+```
+
+### GET /overview
+
+面板概况(权限 `panel.read`),给机器人发日报、商城后台看总量用。今天 / 本月按面板时区算,来自流量记录(按倍率计);累计与用户页同口径。代理的密钥只算自己名下的用户,`lines` 是授权给自己的线路数,没有 `servers`。
+
+```json
+{
+  "version": "0.7.17", "time": 1794600000, "coreRunning": true,
+  "users": {"total": 120, "enabled": 110, "online": 37, "depleted": 4, "expiringIn7Days": 9},
+  "traffic": {"today": {"up": 0, "down": 0}, "month": {"up": 0, "down": 0}, "total": {"up": 0, "down": 0}},
+  "lines": {"total": 12, "enabled": 11},
+  "servers": {"total": 6, "online": 6}
+}
+```
+
+### GET /servers
+
+每台服务器(只有主面板的密钥能看):`{id, name, enabled, ratio, isLocal, online, version, coreRunning, onlineUsers, lastSeen[, error]}`。本机 `isLocal: true`,总是在线;副机 `online` 是主机最近一轮能不能联系上它。
+
+### GET /lines
+
+`{id, name, protocol, enabled, onlineUsers}`,主面板的密钥另有 `port` 与部署的服务器名 `servers`。在线人数是本机加各副机最近一次上报的,按用户去重。
+
+### GET /onlines
+
+`[{user, devices, lines}]`:设备数和设备数限制同一口径(IPv4 一个地址一台,IPv6 按 /64);`lines` 是「线路名-服务器名」。代理的密钥只列自己名下的用户。
 
 ## 5. 创建 / 修改的请求字段
 

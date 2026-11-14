@@ -5,6 +5,7 @@ import { trErr } from './errmsg.js';
 import { ICONS } from './icons.js';
 import { toast, confirm, closeModal, closeDrawer, drawerOpen, esc, setTimezone, fmtDay } from './ui.js';
 import { sortCerts, certSig, sortReach, reachSig, reachHard } from './issues.js';
+import { mountXmasEgg } from './xmas.js';
 import * as dashboard from './pages/dashboard.js';
 import * as lines from './pages/lines.js';
 import * as upstreams from './pages/upstreams.js';
@@ -200,6 +201,7 @@ function renderChrome() {
   document.getElementById('btn-logout').textContent = t('common.logout');
   supportLink(document.getElementById('btn-support'));
   helpLink(document.getElementById('btn-help'), current || pageName());
+  mountXmasEgg(document.getElementById('xmas-slot'), t('xmas.title')); // 限时圣诞彩蛋(到 12-31),见 xmas.js
   const sel = document.getElementById('lang-select');
   sel.innerHTML = Object.entries(langs).map(([k, v]) => `<option value="${k}" ${k === getLang() ? 'selected' : ''}>${v}</option>`).join('');
   renderRole();

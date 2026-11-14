@@ -58,7 +58,7 @@ var globalKeys = setOf(
 	"reachAuto", "reachMinutes", "reachToken",
 	"statsBucketSeconds", "trafficAge", "subLogAge", "auditAge",
 	"resellerEnabled", "backupHour", "backupKeep", "backupTelegram",
-	"totpEnabled", "totpSecret", "apiEnabled", "apiToken", "adminDefault", "sessionMaxAge",
+	"totpEnabled", "totpSecret", "apiEnabled", "apiToken", "apiIpAllow", "apiIpList", "adminDefault", "sessionMaxAge",
 	// 容灾的全局设置
 	KeyMode, KeyStandbys, KeyReplicaMinutes, KeyConfirmMinutes, KeyAutoMinutes, KeyRankStepMinutes,
 	KeyWitness, KeyClusterKey, KeyPauseUntil, KeyDnsToken, KeyDnsNames, KeyAllowPlain,

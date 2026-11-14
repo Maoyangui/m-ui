@@ -909,3 +909,18 @@ button.badge { cursor: pointer; font: inherit; font-size: .72rem; }
 .masonry { column-width: 34rem; column-gap: .8rem; }
 .masonry > .card { break-inside: avoid; }
 .stat .s:empty::before { content: "\00a0"; }
+
+/* 外部 API 附加密钥:权限两列勾选(手机一列),每项一行名称一行说明 */
+.perm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem .8rem; margin-top: .6rem; }
+.perm-item { display: flex; gap: .45rem; align-items: flex-start; padding: .4rem .5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.perm-item input { margin-top: .15rem; flex: none; }
+.perm-item span { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+.perm-item b { font-weight: 600; font-size: .85rem; }
+.perm-item small { font-size: .74rem; line-height: 1.35; }
+.api-keys td { vertical-align: middle; }
+#apiip-list { width: 100%; font-family: var(--mono); font-size: .82rem; }
+@media (max-width: 700px) { .perm-grid { grid-template-columns: 1fr; } }
+
+/* 限时彩蛋的位置(见 js/xmas.js):空着不占位 */
+.xmas-slot { display: inline-flex; align-items: center; }
+.xmas-slot:empty { display: none; }

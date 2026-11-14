@@ -38,6 +38,14 @@ import (
 //	POST   /api/v1/users/{name|id}/change   换套餐 {planId|plan, mode: replace|stack|prorate, periods, usage, force, dryRun, requestId}
 //	GET    /api/v1/users/{name|id}/plan-ops 套餐记录(最新的在前)
 //	GET    /api/v1/users/{name|id}/sub      订阅地址
+//	GET    /api/v1/users/{name|id}/traffic  每天的用量(?days=30,最多 90)
+//	GET    /api/v1/overview                 面板概况:用户、在线、今天 / 本月 / 累计流量、线路(主面板另有服务器数)
+//	GET    /api/v1/servers                  服务器:在线、版本、在线人数(只有主面板的密钥能看)
+//	GET    /api/v1/lines                    线路与在线人数
+//	GET    /api/v1/onlines                  在线用户、设备数与所在线路
+//
+// 密钥与权限:默认密钥(原来那一把)全部权限;附加密钥按勾的权限(见 api_keys.go 的 apiPermFor),
+// 没有权限返回 403。来源 IP 白名单打开后,名单外的来源返回 403。
 //
 // 套餐操作支持幂等:requestId 或请求头 Idempotency-Key,同一作用域同一个键只执行一次(见 plan_change.go)。
 
@@ -64,7 +72,10 @@ func (s *Server) publicAuth(r *http.Request) (ok, known bool) {
 // apiScope 一次调用的作用域:主面板令牌 rid=0 看全部;代理令牌只看自己名下。
 type apiScope struct {
 	rid   uint
-	actor string // 审计里的操作者:api / api:代理名
+	actor string // 审计里的操作者:api / api:代理名 / api:密钥名
+	// perms 附加密钥的权限(见 api_keys.go);nil = 默认密钥,全部权限
+	perms map[string]bool
+	keyId uint // 附加密钥的 id(记最近使用);默认密钥为 0
 }
 
 func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
@@ -73,11 +84,16 @@ func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return
 	}
-	if ok, known := s.publicAuth(r); !ok {
+	sc, ok, known := s.adminAPIAuth(r)
+	if !ok {
 		if !known {
 			s.noteAPIAuthFailure(r, "")
 		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
+		return
+	}
+	if !s.apiIPCheck(r, 0) { // 白名单挡下的不算猜令牌,不计入失败限流
+		writeIPDenied(w)
 		return
 	}
 	limitJSONBody(w, r, apiBodyLimit)
@@ -86,7 +102,7 @@ func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": nodeReadOnly})
 		return
 	}
-	s.publicAPI(w, r, apiScope{actor: "api"})
+	s.publicAPI(w, r, sc)
 }
 
 // resellerByAPIToken 按令牌找到开启了外部 API 的代理;停用、到期的代理视同令牌错误。
@@ -117,7 +133,7 @@ func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return
 	}
-	rs, ok, known := s.resellerAPIToken(apiToken(r))
+	rs, sc, ok, known := s.resellerAPIAuth(r)
 	if !ok {
 		if !known {
 			s.noteAPIAuthFailure(r, "代理")
@@ -125,8 +141,12 @@ func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
+	if !s.apiIPCheck(r, rs.Id) {
+		writeIPDenied(w)
+		return
+	}
 	limitJSONBody(w, r, apiBodyLimit)
-	s.publicAPI(w, r, apiScope{rid: rs.Id, actor: "api:" + rs.Name})
+	s.publicAPI(w, r, sc)
 }
 
 func (s *Server) publicAPI(w http.ResponseWriter, r *http.Request, sc apiScope) {
@@ -143,7 +163,29 @@ func (s *Server) publicAPI(w http.ResponseWriter, r *http.Request, sc apiScope) 
 		return
 	}
 	parts := strings.Split(full[idx+4:], "/")
+	if need := apiPermFor(r.Method, parts); !sc.allowed(need) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "这把密钥没有「" + permTitle(need) + "」权限", "permission": need})
+		return
+	}
+	if sc.keyId > 0 {
+		s.noteKeyUse(sc.keyId, s.sourceIP(r))
+	}
 	switch {
+	case len(parts) == 1 && parts[0] == "overview" && r.Method == http.MethodGet:
+		s.apiOverview(w, sc)
+	case len(parts) == 1 && parts[0] == "servers" && r.Method == http.MethodGet:
+		s.apiServers(w, sc)
+	case len(parts) == 1 && parts[0] == "lines" && r.Method == http.MethodGet:
+		s.apiLines(w, sc)
+	case len(parts) == 1 && parts[0] == "onlines" && r.Method == http.MethodGet:
+		s.apiOnlines(w, sc)
+	case len(parts) == 3 && parts[0] == "users" && parts[2] == "traffic" && r.Method == http.MethodGet:
+		u, ok := s.apiFindUser(parts[1], sc.rid)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+			return
+		}
+		s.apiUserTraffic(w, r, u)
 	case len(parts) == 1 && parts[0] == "ping":
 		role := s.role()
 		if sc.rid > 0 {

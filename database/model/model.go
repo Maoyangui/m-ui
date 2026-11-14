@@ -223,6 +223,10 @@ type Reseller struct {
 	// 代理自己的外部 API:在代理面板"我的账号"里开启并取令牌,接口与主面板的 v1 相同,作用域限定为该代理名下
 	ApiEnabled bool   `json:"apiEnabled"`
 	ApiToken   string `json:"-" gorm:"index"`
+	// ApiIpAllow / ApiIpList 代理外部 API 的来源 IP 白名单:打开后只有名单里的 IP / 网段能调用(这个代理名下的全部密钥)。
+	// 不进快照(副机不提供代理的外部 API),由「我的账号」页单独读写。
+	ApiIpAllow bool   `json:"-"`
+	ApiIpList  string `json:"-"`
 	// Depleted 流量额度已用尽:主机每分钟判定并写入,随快照下发副机。为真时名下用户不下发数据面、订阅返回 404,
 	// 用户行本身不改(以前是把他名下的用户全部 enabled=false,补量后又整体复活,连手动停用的一起)。
 	Depleted bool `json:"depleted"`
@@ -629,6 +633,21 @@ func All() []interface{} {
 		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
-		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{}, &PageLogo{},
+		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{}, &PageLogo{}, &ApiKey{},
 	}
+}
+
+// ApiKey 外部 API 的附加密钥:主面板(ResellerId 0)或某个代理名下可以各建多把,每把单独起名、单独勾权限。
+// 原来那一把令牌(设置 apiToken / 代理的 ApiToken)照旧可用,界面上叫「默认密钥」,全部权限 —— 升级不用改对接程序,
+// 回退到旧版本也照样能用。附加密钥只在主机上生效(不进快照);主机容灾的副本带着这张表,接任后照常可用。
+type ApiKey struct {
+	Id         uint   `json:"id" gorm:"primaryKey"`
+	ResellerId uint   `json:"resellerId" gorm:"index"`
+	Name       string `json:"name"`
+	Token      string `json:"token" gorm:"uniqueIndex"`
+	Perms      string `json:"perms"` // 逗号分隔的权限名,见 web 包的 apiPerms
+	Enabled    bool   `json:"enabled"`
+	CreatedAt  int64  `json:"createdAt"`
+	LastUsedAt int64  `json:"lastUsedAt"`
+	LastUsedIP string `json:"lastUsedIp"`
 }

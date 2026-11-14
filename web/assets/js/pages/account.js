@@ -4,6 +4,7 @@ import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, openModal, registerActions, badge, field, check, fv, fchk, fmtBytes, fmtDay, progress, setHTML, charCount, bindCharCounts, PAGE_TEXT_MAX } from '../ui.js';
 import { apiTable, apiExample } from '../apidoc.js';
+import { mountApiKeys } from '../apikeys.js';
 import { logoBlock, bindLogo } from '../logo.js';
 
 export const title = () => t('acct.title');
@@ -24,11 +25,12 @@ function apiCard() {
       <dt>${t('acct.apiBase')}</dt><dd><div class="sub-box"><code>${esc(apiBase())}</code><button class="btn sm" data-act="acct.copy" data-id="${esc(apiBase())}">${t('common.copy')}</button></div></dd>
       <dt>${t('acct.apiToken')}</dt><dd><div class="sub-box"><code>${esc(api.token || '')}</code><button class="btn sm" data-act="acct.copy" data-id="${esc(api.token || '')}">${t('common.copy')}</button><button class="btn sm danger" data-act="acct.apiRotate">${t('acct.apiRotate')}</button></div></dd>
     </dl>
+    <div id="api-keys" class="api-keys-box"></div>
     <h3 class="sub-title">${t('adm.apiEndpoints')}</h3>
-    ${apiTable()}
+    ${apiTable(true)}
     <h3 class="sub-title">${t('adm.apiExample')}</h3>
     <pre class="log code">${esc(apiExample(apiBase(), api.token || '', true))}</pre>
-    ${docs}` : `<details class="adv api-list"><summary>${t('adm.apiEndpointsOff')}</summary>${apiTable()}${docs}</details>`}`;
+    ${docs}` : `<details class="adv api-list"><summary>${t('adm.apiEndpointsOff')}</summary>${apiTable(true)}${docs}</details>`}`;
 }
 
 export async function render(el) {
@@ -78,8 +80,9 @@ export async function render(el) {
   bindCharCounts(el);
 }
 
-// 开关的事件:卡片每次重绘后都要重新挂
+// 开关的事件:卡片每次重绘后都要重新挂;开着时把附加密钥与白名单挂进卡片
 function bindApiSwitch() {
+  if (api.enabled) mountApiKeys('self/api');
   const sw = document.getElementById('acct-api-on');
   if (sw) sw.addEventListener('change', async e => {
     try { api = await put('self/api', { enabled: e.target.checked }); toast(t('acct.apiSaved'), 'ok'); setHTML('acct-api', apiCard()); bindApiSwitch(); }

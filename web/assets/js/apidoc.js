@@ -22,13 +22,18 @@ export const API_ENDPOINTS = [
   { m: 'POST', p: '/users/{name|id}/change', k: 'adm.ep.change', idem: true, dry: true },
   { m: 'GET', p: '/users/{name|id}/plan-ops', k: 'adm.ep.planOps' },
   { m: 'GET', p: '/users/{name|id}/sub', k: 'adm.ep.sub' },
+  { m: 'GET', p: '/users/{name|id}/traffic', k: 'adm.ep.traffic' },
+  { m: 'GET', p: '/overview', k: 'adm.ep.overview' },
+  { m: 'GET', p: '/servers', k: 'adm.ep.servers', admin: true },
+  { m: 'GET', p: '/lines', k: 'adm.ep.lines' },
+  { m: 'GET', p: '/onlines', k: 'adm.ep.onlines' },
 ];
 
 // apiTable 接口一览表:方法、路径、说明(支持幂等 / 预览的打标)
-export function apiTable() {
+export function apiTable(reseller = false) {
   const tags = e => [e.idem ? badge(t('adm.apiIdem'), 'primary') : '', e.dry ? badge(t('adm.apiDry')) : ''].filter(Boolean).join(' ');
   return `<div class="table-wrap"><table class="grid api-doc"><thead><tr><th>${t('adm.apiMethod')}</th><th>${t('adm.apiPath')}</th><th>${t('adm.apiDesc')}</th></tr></thead><tbody>
-    ${API_ENDPOINTS.map(e => `<tr><td class="mono">${esc(e.m)}</td><td class="mono">${esc(e.p)}</td><td>${esc(t(e.k))}${tags(e) ? ' ' + tags(e) : ''}</td></tr>`).join('')}
+    ${API_ENDPOINTS.filter(e => !(reseller && e.admin)).map(e => `<tr><td class="mono">${esc(e.m)}</td><td class="mono">${esc(e.p)}</td><td>${esc(t(e.k))}${tags(e) ? ' ' + tags(e) : ''}</td></tr>`).join('')}
   </tbody></table></div>
   <p class="hint">${esc(t('adm.apiIdemHelp'))}</p>`;
 }

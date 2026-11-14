@@ -74,6 +74,10 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]string{"token": tok})
 		})
 	default:
+		if strings.HasPrefix(action, "api/keys") || action == "api/ip" {
+			s.handleAPIKeys(w, r, 0, strings.TrimPrefix(action, "api/"), func(a string, obj interface{}) { s.audit(r, "admin", a, obj) })
+			return
+		}
 		http.NotFound(w, r)
 	}
 }

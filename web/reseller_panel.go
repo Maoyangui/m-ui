@@ -367,6 +367,10 @@ func (s *Server) handleResellerSelfSub(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, "/logo"):
 		// 自己名下用户落地页的 logo:归属取当前会话的代理,不收任何 id 参数,碰不到主面板和别的代理的
 		s.handlePageLogo(w, r, rs.Id, func(action string) { s.auditAs(rs.Name, "reseller", action, rs.Name) })
+	case strings.Contains(r.URL.Path, "/self/api/keys") || strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/self/api/ip"):
+		// 附加密钥与来源 IP 白名单:只动当前会话这个代理名下的(见 api_keys.go)
+		sub := r.URL.Path[strings.Index(r.URL.Path, "/self/api/")+len("/self/api/"):]
+		s.handleAPIKeys(w, r, rs.Id, sub, func(a string, obj interface{}) { s.auditAs(rs.Name, "reseller", a, obj) })
 	case strings.HasSuffix(r.URL.Path, "/api/rotate"):
 		// 重新生成令牌:旧令牌立即失效
 		if r.Method != http.MethodPost {
