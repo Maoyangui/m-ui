@@ -1,10 +1,18 @@
 {
- "updatedAt": 1794614225,
+ "updatedAt": 1794645710,
  "devices": 92,
  "donors": [
   {
+   "name": "赛博云",
+   "total": 666
+  },
+  {
+   "name": "maomaocloud",
+   "total": 50
+  },
+  {
    "name": "Larry Wang",
-   "total": 10
+   "total": 25
   }
  ]
 }

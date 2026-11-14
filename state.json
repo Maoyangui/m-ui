@@ -2,7 +2,9 @@
  "pending": [],
  "seenTx": [],
  "donors": {
-  "Larry Wang": 10000000
+  "Larry Wang": 25000000,
+  "赛博云": 666000000,
+  "maomaocloud": 50000000
  },
  "donePledges": [],
  "blocked": [],
