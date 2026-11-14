@@ -302,3 +302,51 @@ func TestIsWildcardAndChallengeName(t *testing.T) {
 		t.Fatal("challengeName")
 	}
 }
+
+// fakeDNS 别家 DNS 服务商:记下写入、清理的 TXT。
+type fakeDNS struct {
+	mu            sync.Mutex
+	added, delled []string
+	fail          error
+}
+
+func (f *fakeDNS) AddTXT(_ context.Context, name, value string) (func(context.Context) error, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fail != nil {
+		return nil, f.fail
+	}
+	f.added = append(f.added, name+"="+value)
+	return func(context.Context) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.delled = append(f.delled, name)
+		return nil
+	}, nil
+}
+
+// 经别家 DNS 接口(阿里云、腾讯云 DNSPod,主机容灾接任时签订阅证书用)做 dns-01:不要 Cloudflare 令牌,
+// 每条 TXT 经接口写入、验完清理;写入失败直接报错,已写的照样清理。
+func TestIssueGenericDNS(t *testing.T) {
+	ca := newFakeCA(t)
+	dns := &fakeDNS{}
+	cfg := issueConfig(t, ca, "*.example.com", "hadns")
+	cfg.DNS, cfg.DNSLabel = dns, "测试服务商"
+	var logs []string
+	cfg.Logf = func(f string, a ...interface{}) { logs = append(logs, fmt.Sprintf(f, a...)) }
+	if _, err := Issue(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(dns.added) != 2 || !strings.HasPrefix(dns.added[0], "_acme-challenge.example.com=") || len(dns.delled) != 2 {
+		t.Fatalf("TXT 经接口写入、验完清理: %v %v", dns.added, dns.delled)
+	}
+	if !strings.Contains(strings.Join(logs, "\n"), "经 测试服务商 写入 TXT _acme-challenge.example.com") {
+		t.Fatalf("日志写明经哪家写的: %v", logs)
+	}
+	bad := &fakeDNS{fail: fmt.Errorf("权限不够")}
+	cfg2 := issueConfig(t, ca, "sub.example.com", "hadns")
+	cfg2.DNS = bad
+	if _, err := Issue(context.Background(), cfg2); err == nil || !strings.Contains(err.Error(), "权限不够") {
+		t.Fatalf("写入失败要报出来: %v", err)
+	}
+}

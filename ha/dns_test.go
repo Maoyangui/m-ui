@@ -112,7 +112,7 @@ func TestUpdateDNSAfterBecame(t *testing.T) {
 		t.Fatal("成为主机后的收尾只做一次")
 	}
 	// 测试令牌与记录:只读,标出哪些指向本机
-	res, err := s.DNSTest("", "")
+	res, err := s.DNSTest("", "", "")
 	if err != nil || len(res.Records) != 3 {
 		t.Fatalf("应列出 3 条记录: %+v %v", res, err)
 	}
@@ -130,7 +130,7 @@ func TestUpdateDNSAfterBecame(t *testing.T) {
 		t.Fatal("测试不能改记录")
 	}
 	cf.mu.Unlock()
-	if _, err := s.DNSTest("", "not a domain!"); err == nil {
+	if _, err := s.DNSTest("", "", "not a domain!"); err == nil {
 		t.Fatal("域名格式不对应报错")
 	}
 }

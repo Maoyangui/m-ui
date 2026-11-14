@@ -31,7 +31,8 @@ type Identity struct {
 	SubHost     string       `json:"subHost"` // 订阅地址里的主机名
 	SubPort     int          `json:"subPort"`
 	SubPath     string       `json:"subPath"`
-	SubCert     *CarriedCert `json:"subCert,omitempty"` // 订阅走 https 时用的证书(文件在 zip 的 identity/ 下)
+	SubCert     *CarriedCert `json:"subCert,omitempty"`  // 订阅走 https 时用的证书(文件在 zip 的 identity/ 下;不接管订阅时不带)
+	SubHTTPS    bool         `json:"subHttps,omitempty"` // 原主机的订阅走 https(带没带证书都记)
 	AcmeCfToken string       `json:"acmeCfToken,omitempty"`
 	Self        Link         `json:"self"` // 这台主机作为副机时别人该怎么连
 	PublicIP    string       `json:"publicIp,omitempty"`
@@ -63,8 +64,8 @@ func (s *Service) subHost() string {
 // isIPHost 主机名是不是 IP(订阅地址用的是 IP 时,换主机后订阅地址一定会变)。
 func isIPHost(h string) bool { return net.ParseIP(strings.Trim(h, "[]")) != nil }
 
-// captureIdentity 记下本机(主机)的身份,订阅证书文件写进 zip。
-func (s *Service) captureIdentity(zw *zip.Writer) (Identity, error) {
+// captureIdentity 记下本机(主机)的身份,订阅证书文件写进 zip。full:设为主机的整库数据(订阅总是一起迁过去,证书也带上)。
+func (s *Service) captureIdentity(zw *zip.Writer, full bool) (Identity, error) {
 	id := Identity{MasterId: s.SelfId(), MasterName: s.selfName(), SubHost: s.subHost(),
 		SubPort: s.settingInt("subPort", 2056, 1, 65535), SubPath: s.setting("subPath"),
 		Self: s.selfLink(), PublicIP: s.setting("publicIp"), PublicIP6: s.setting("publicIp6"), PanelURL: s.panelURL()}
@@ -73,6 +74,10 @@ func (s *Service) captureIdentity(zw *zip.Writer) (Identity, error) {
 	}
 	certFile, keyFile := strings.TrimSpace(s.setting("subCertFile")), strings.TrimSpace(s.setting("subKeyFile"))
 	if certFile == "" || keyFile == "" {
+		return id, nil
+	}
+	id.SubHTTPS = true
+	if !full && !s.takeSub() { // 接任时不接管订阅:订阅证书(含私钥)不随副本带到备用
 		return id, nil
 	}
 	cb, err1 := os.ReadFile(certFile)
@@ -107,6 +112,8 @@ type identityResult struct {
 	SubHost     string     `json:"subHost"`
 	Warnings    []PlanItem `json:"warnings,omitempty"`
 	PrevSubPort int        `json:"prevSubPort,omitempty"` // 新主机自己原来的订阅端口(迁来的端口启动时绑不上,改回用它)
+	SubHTTPS    bool       `json:"subHttps,omitempty"`    // 接管了订阅、原主机的订阅走 https:新主机要有能用的订阅证书
+	Taken       bool       `json:"taken,omitempty"`       // 接管了订阅(开着「接任时也接管订阅」)
 }
 
 // 身份告警的代码(界面 ha.idw.*)。
@@ -118,6 +125,9 @@ const (
 	idwSubCertFail = "subCertFail" // 订阅证书没能装上:{err}
 	idwAcmeZone    = "acmeZone"    // 本机已有别的签证书令牌,订阅证书续期要它能管那个域名:{name}
 	idwSubPortBind = "subPortBind" // 启动时迁来的订阅端口绑不上,改回本机原来的:{port, own, err}
+	idwSubNotTaken = "subNotTaken" // 接任时没选「连订阅一起接管」:订阅地址还指向原主机:{host}
+	idwSubCertNew  = "subCertNew"  // 订阅证书不能用,正经 DNS 接口给订阅域名重签:{host}
+	idwSubCertTodo = "subCertTodo" // 订阅证书不能用、也没法自动重签,要手动处理:{host}
 )
 
 // svcText 服务端口的称呼。
@@ -151,6 +161,12 @@ func identityWarnText(it PlanItem) string {
 		return "订阅证书 " + a["name"] + " 靠 Cloudflare 续期,而本机已经有自己的签证书令牌(没换成原主机的):确认这个令牌能管 " + a["name"] + " 所在的区域,否则续期会失败"
 	case idwSubPortBind:
 		return "订阅端口 " + a["port"] + " 在本机绑不上(" + a["err"] + "),订阅改回本机原来的端口 " + a["own"] + ":用户的订阅地址会变"
+	case idwSubNotTaken:
+		return "没有接管订阅(容灾设置里没选「连订阅一起接管」):用户的订阅地址还指向原主机 " + a["host"] + ",它回来之前刷新订阅会失败;已连上的线路照常可用"
+	case idwSubCertNew:
+		return "带过来的订阅证书不能用,正用 DNS 接口给 " + a["host"] + " 重新签一张,签好自动换上(几分钟,证书页能看进度)"
+	case idwSubCertTodo:
+		return "订阅证书不能用(没带过来、过期或快到期),又没法自动重签:到证书页给 " + a["host"] + " 签一张并用于订阅"
 	}
 	return a["text"]
 }
@@ -158,7 +174,7 @@ func identityWarnText(it PlanItem) string {
 // applyIdentity 在要接任的库里套用原主机的身份(订阅端口、路径、域名、证书)。selfId 是新主机自己的服务器 id,
 // extracted 是解出来的 zip 目录。证书写到新主机数据目录 cert/ 下(同名的已有就用已有的)。
 func applyIdentity(tx *gorm.DB, id Identity, selfId uint, extracted, dataDir string) (identityResult, error) {
-	res := identityResult{SubHost: id.SubHost}
+	res := identityResult{SubHost: id.SubHost, Taken: true, SubHTTPS: id.SubHTTPS || id.SubCert != nil}
 	set := func(k, v string) error { return upsert(tx, map[string]string{k: v}) }
 	get := func(k string) string {
 		var v string
@@ -310,7 +326,7 @@ func placeCert(tx *gorm.DB, cc *CarriedCert, extracted, dataDir string) (string,
 // applyFormerRow 新库里原主机那一行:填上它作为副机时怎么连(地址用它的公网 IP 时按证书指纹钉);那一行的域名要是随主机身份
 // 迁移的名字(订阅主机名、要跟着主机走的域名),清空 —— 那个名字以后指向新主机,原主机线路的用户不能被指过去,
 // 订阅里按它的 IP 出。接任时先停用(失联期间不进订阅),记下等它回来。
-func (s *Service) applyFormerRow(tx *gorm.DB, formerId, selfId uint, id Identity, how string) error {
+func (s *Service) applyFormerRow(tx *gorm.DB, formerId, selfId uint, id Identity, how string, moveSub bool) error {
 	if formerId == 0 || formerId == selfId {
 		return nil
 	}
@@ -320,10 +336,14 @@ func (s *Service) applyFormerRow(tx *gorm.DB, formerId, selfId uint, id Identity
 		up["insecure"] = strings.HasPrefix(strings.ToLower(l.ApiUrl), "https://")
 	}
 	var row model.Node
-	if tx.Select("id, domain").Where("id = ?", formerId).Limit(1).Find(&row).Error == nil && row.Id != 0 {
-		var dnsNames string
-		tx.Raw("SELECT value FROM settings WHERE key = ?", KeyDnsNames).Scan(&dnsNames)
-		if movingName(row.Domain, id.SubHost, splitNames(dnsNames)) {
+	txGet := func(k string) string {
+		var v string
+		tx.Raw("SELECT value FROM settings WHERE key = ?", k).Scan(&v)
+		return v
+	}
+	// 接管了订阅:那个名字以后指向新主机,原主机那一行不能再用它;没接管的,原主机照旧用自己的域名
+	if moveSub && tx.Select("id, domain").Where("id = ?", formerId).Limit(1).Find(&row).Error == nil && row.Id != 0 {
+		if movingName(row.Domain, id.SubHost, splitNames(txGet(KeyDnsNames))) {
 			up["domain"] = ""
 		}
 	}

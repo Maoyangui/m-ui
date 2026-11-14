@@ -451,3 +451,14 @@ test('字典:后端发的计划代码、身份告警代码中英都有', () => {
     assert.equal(n, 2, `${k} 要中英各一条(现在 ${n} 条)`);
   }
 });
+
+test('字典:就绪检查的每个代码和级别中英都有(后端 view.go 里每个 add("代码", "级别" 都要有文案)', () => {
+  const dict = fs.readFileSync(path.join(jsDir, 'i18n.js'), 'utf8');
+  const src = fs.readFileSync(path.join(here, '..', '..', 'ha', 'view.go'), 'utf8');
+  const keys = new Set([...src.matchAll(/\badd\("([a-zA-Z]+)", "([a-z]+)"/g)].map(m => 'ha.ready.' + m[1] + '.' + m[2]));
+  assert.ok(keys.size >= 20, '没找到后端的就绪检查代码');
+  for (const k of keys) {
+    const n = dict.split(`'${k}':`).length - 1;
+    assert.equal(n, 2, `${k} 要中英各一条(现在 ${n} 条)`);
+  }
+});

@@ -61,7 +61,7 @@ var globalKeys = setOf(
 	"totpEnabled", "totpSecret", "apiEnabled", "apiToken", "apiIpAllow", "apiIpList", "adminDefault", "sessionMaxAge",
 	// 容灾的全局设置
 	KeyMode, KeyStandbys, KeyReplicaMinutes, KeyConfirmMinutes, KeyAutoMinutes, KeyRankStepMinutes,
-	KeyWitness, KeyClusterKey, KeyPauseUntil, KeyDnsToken, KeyDnsNames, KeyAllowPlain,
+	KeyWitness, KeyClusterKey, KeyPauseUntil, KeyDnsToken, KeyDnsNames, KeyAllowPlain, KeyTakeSub, KeyDnsProvider,
 	// 失联的原主机:设为主机之后新主机也得记得它,它回来时才会自动变为副机
 	KeyFormer,
 )
@@ -126,6 +126,8 @@ const (
 	KeyDnsToken        = "haDnsToken"        // Cloudflare 令牌(Zone.DNS:Edit),主机变更后自动改 DNS;不复用签证书的令牌
 	KeyDnsNames        = "haDnsNames"        // 要跟着主机走的域名,逗号分隔
 	KeyAllowPlain      = "haAllowPlain"      // 允许明文 http 链接的副机当备用(默认关)
+	KeyTakeSub         = "haTakeSub"         // 接任时也接管订阅(订阅域名、端口、路径、证书,并改解析);空 = 老设置:配了 DNS 就算开
+	KeyDnsProvider     = "haDnsProvider"     // 改解析用哪家:cloudflare(默认)| aliyun | dnspod(见 dnsapi 包)
 	KeyFormer          = "haFormer"          // 失联的原主机,等它回来自动变为副机(全局:设为主机后新主机照样认得它)
 
 	// 本机

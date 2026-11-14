@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Maoyangui/m-ui/dnsapi"
 	"github.com/Maoyangui/m-ui/hub"
 )
 
@@ -310,10 +311,33 @@ func (s *Service) readiness(c Config, infos []StandbyInfo) []Check {
 	} else {
 		add("selfLink", "ok", nil, "url", l.ApiUrl)
 	}
-	if h := s.subHost(); h == "" || isIPHost(h) {
-		add("subDomain", "warn", nil, "host", h)
+	// 接管范围:默认只接管主机的工作;接管订阅要订阅地址用域名、DNS 接口填好、订阅证书在有效期里(快到期的接任时会经 DNS 接口重签)
+	if !c.TakeSub {
+		add("takeSub", "info", nil, "host", s.subHost())
 	} else {
-		add("subDomain", "ok", nil, "host", h)
+		if h := s.subHost(); h == "" || isIPHost(h) {
+			add("subDomain", "warn", nil, "host", h)
+		} else {
+			add("subDomain", "ok", nil, "host", h)
+		}
+		if !c.DnsTokenSet {
+			add("takeSubDns", "bad", nil)
+		} else {
+			kind := c.DnsProvider // 界面按语言翻译服务商的名字(ha.dnsProv.<kind>)
+			if kind == "" {
+				kind = dnsapi.Cloudflare
+			}
+			add("takeSubDns", "ok", splitNames(c.DnsNames), "provider", kind)
+		}
+		if cf := strings.TrimSpace(s.setting("subCertFile")); cf != "" {
+			if na, err := certFileNotAfter(cf); err != nil {
+				add("takeSubCertErr", "warn", nil, "err", shortErr(err.Error(), 120))
+			} else if days := int(na.Sub(s.now()).Hours() / 24); days < 15 {
+				add("takeSubCert", "warn", nil, "days", itoa(days))
+			} else {
+				add("takeSubCert", "ok", nil, "days", itoa(days))
+			}
+		}
 	}
 	tg := strings.EqualFold(s.setting("tgEnabled"), "true") && s.setting("tgToken") != "" && s.setting("tgChatId") != ""
 	if tg {
@@ -344,12 +368,6 @@ func (s *Service) readiness(c Config, infos []StandbyInfo) []Check {
 		add("witness", "ok", nil)
 	} else {
 		add("witness", "info", nil)
-	}
-	if c.DnsTokenSet && c.DnsNames != "" {
-		names := strings.Split(c.DnsNames, ",")
-		add("dns", "ok", names)
-	} else {
-		add("dns", "info", nil)
 	}
 	if s.d.DNSAPI != "" { // 改 DNS 用的是测试地址
 		add("dnsOverride", "warn", nil, "url", s.d.DNSAPI)

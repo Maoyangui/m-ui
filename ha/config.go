@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Maoyangui/m-ui/dnsapi"
 	"github.com/Maoyangui/m-ui/logger"
 )
 
@@ -23,6 +24,31 @@ type Config struct {
 	DnsNames        string `json:"dnsNames"`
 	DnsTokenSet     bool   `json:"dnsTokenSet"`
 	AllowPlain      bool   `json:"allowPlain"` // 允许明文 http 链接的副机当备用(默认关:链接上的主动中间人能冒充主机)
+	// TakeSub 接任时也接管订阅:新主机换上原主机的订阅域名、端口、路径和证书,并经 DNS 接口把解析改到新主机,用户的订阅地址不变。
+	// 关着(默认)只接管主机的工作(推配置、并流量、到期停用、通知……),订阅地址仍指向原主机。开它要订阅地址用域名、填好 DNS 接口
+	TakeSub     bool   `json:"takeSub"`
+	DnsProvider string `json:"dnsProvider"` // cloudflare | aliyun | dnspod
+}
+
+// takeSubWith 接任时接管不接管订阅(get 读设置:本机库,或接任时要换上的那份库)。没设过(老版本开过的)按配没配 DNS 接口算。
+func takeSubWith(get func(string) string) bool {
+	switch strings.ToLower(strings.TrimSpace(get(KeyTakeSub))) {
+	case "true":
+		return true
+	case "false":
+		return false
+	}
+	return strings.TrimSpace(get(KeyDnsToken)) != "" && strings.TrimSpace(get(KeyDnsNames)) != ""
+}
+
+func (s *Service) takeSub() bool { return takeSubWith(s.setting) }
+
+// dnsKind 改解析用哪家(没设 = Cloudflare,老设置只有它)。
+func (s *Service) dnsKind() string {
+	if k := strings.TrimSpace(s.setting(KeyDnsProvider)); k != "" {
+		return k
+	}
+	return dnsapi.Cloudflare
 }
 
 // 取值范围(界面的"高级"里能改;默认值开箱即用)。
@@ -47,6 +73,8 @@ func (s *Service) Config() Config {
 		DnsNames:        s.setting(KeyDnsNames),
 		DnsTokenSet:     strings.TrimSpace(s.setting(KeyDnsToken)) != "",
 		AllowPlain:      s.settingBool(KeyAllowPlain, false),
+		TakeSub:         s.takeSub(),
+		DnsProvider:     s.dnsKind(),
 	}
 	c.PauseUntil, _ = strconv.ParseInt(s.setting(KeyPauseUntil), 10, 64)
 	return c
@@ -95,11 +123,42 @@ func (s *Service) SaveConfig(in ConfigInput) error {
 	if err != nil {
 		return err
 	}
+	if c.DnsProvider == "" {
+		c.DnsProvider = dnsapi.Cloudflare
+	}
+	if !dnsapi.Valid(c.DnsProvider) {
+		return fmt.Errorf("不支持的 DNS 服务商 %q", c.DnsProvider)
+	}
+	tokSet := strings.TrimSpace(in.DnsToken) != "" || (!in.ClearDnsToken && strings.TrimSpace(s.setting(KeyDnsToken)) != "")
+	if strings.TrimSpace(in.DnsToken) != "" || (c.DnsProvider != s.dnsKind() && tokSet) {
+		// 新填的凭据(或换了服务商还用原来的凭据)格式先过一遍:阿里云、腾讯云要两段
+		tok := in.DnsToken
+		if strings.TrimSpace(tok) == "" {
+			tok = s.setting(KeyDnsToken)
+		}
+		if _, err := dnsapi.New(c.DnsProvider, tok, ""); err != nil {
+			return err
+		}
+	}
+	if c.TakeSub {
+		// 接管订阅:订阅地址得是域名(IP 换了机器就变),得能改解析;订阅主机名自动加进要跟着主机走的域名
+		host := s.subHost()
+		if host == "" || isIPHost(host) {
+			return errors.New("接管订阅要订阅地址用域名:先在设置 → 订阅填订阅域名(或在设置 → 面板填面板域名)")
+		}
+		if !tokSet {
+			return errors.New("接管订阅要先填 DNS 接口(Cloudflare 令牌,或阿里云、腾讯云 DNSPod 的密钥):接任后靠它把订阅域名改指到新主机")
+		}
+		if !containsName(splitNames(names), host) {
+			names = strings.TrimPrefix(names+","+strings.ToLower(host), ",")
+		}
+	}
 	values := map[string]string{
 		KeyMode: c.Mode, KeyStandbys: strconv.Itoa(c.Standbys),
 		KeyReplicaMinutes: strconv.Itoa(c.ReplicaMinutes), KeyConfirmMinutes: strconv.Itoa(c.ConfirmMinutes),
 		KeyAutoMinutes: strconv.Itoa(c.AutoMinutes), KeyRankStepMinutes: strconv.Itoa(c.RankStepMinutes),
 		KeyWitness: strconv.FormatBool(c.Witness), KeyDnsNames: names, KeyAllowPlain: strconv.FormatBool(c.AllowPlain),
+		KeyTakeSub: strconv.FormatBool(c.TakeSub), KeyDnsProvider: c.DnsProvider,
 	}
 	if tok := strings.TrimSpace(in.DnsToken); tok != "" {
 		values[KeyDnsToken] = tok

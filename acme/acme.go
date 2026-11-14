@@ -49,6 +49,11 @@ func IsWildcard(domain string) bool { return strings.HasPrefix(domain, "*.") }
 // BaseDomain 去掉泛域名前缀:*.example.com → example.com。
 func BaseDomain(domain string) string { return strings.TrimPrefix(domain, "*.") }
 
+// DNSProvider 别家 DNS 服务商(见 dnsapi 包):加一条 TXT,返回删掉它的函数。Config.DNS 设了就用它做 dns-01,不看 CFToken。
+type DNSProvider interface {
+	AddTXT(ctx context.Context, name, value string) (cleanup func(context.Context) error, err error)
+}
+
 type Config struct {
 	Email      string
 	Domain     string // 可以是 *.example.com:连同 example.com 一起签(泛域名本身不含裸域名)
@@ -66,6 +71,10 @@ type Config struct {
 	// 可替换的 Cloudflare API 地址与 TXT 可见性检查(测试用)
 	CFBaseURL string
 	TXTLookup func(ctx context.Context, name, want string) bool
+	// DNS 设了就经它写 TXT(阿里云、腾讯云 DNSPod 等,见 dnsapi 包;主机容灾接任时用容灾的 DNS 接口签订阅证书)
+	DNS DNSProvider
+	// DNSLabel 写日志时服务商的名字
+	DNSLabel string
 }
 
 type Result struct {
@@ -93,7 +102,7 @@ func Issue(ctx context.Context, cfg Config) (Result, error) {
 	if cfg.Method == "" {
 		cfg.Method = MethodHTTP
 	}
-	if cfg.Method == MethodCloudflare && strings.TrimSpace(cfg.CFToken) == "" {
+	if cfg.Method == MethodCloudflare && strings.TrimSpace(cfg.CFToken) == "" && cfg.DNS == nil {
 		return res, errors.New("dns-01 需要 Cloudflare API Token")
 	}
 	if IsWildcard(cfg.Domain) && cfg.Method == MethodHTTP {
@@ -338,6 +347,37 @@ func verifyDNS01(ctx context.Context, client *acme.Client, pending []pendingAuth
 		}
 		if cfg.OnTXT != nil {
 			defer cfg.OnTXT(nil)
+		}
+	} else if cfg.DNS != nil {
+		var cleanups []func(context.Context) error
+		defer func() {
+			for _, c := range cleanups {
+				cctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				if err := c(cctx); err != nil {
+					cfg.logf("清理 TXT 失败(可手动删除): %v", err)
+				}
+				cancel()
+			}
+		}()
+		for _, r := range recs {
+			cfg.logf("经 %s 写入 TXT %s", cfg.DNSLabel, r.Name)
+			cleanup, err := cfg.DNS.AddTXT(ctx, r.Name, r.Value)
+			if err != nil {
+				return err
+			}
+			cleanups = append(cleanups, cleanup)
+		}
+		cfg.logf("等待公共 DNS 生效…")
+		wctx, cancel := context.WithTimeout(ctx, 3*time.Minute) // 阿里云、DNSPod 的 TTL 最少 600,生效常比 Cloudflare 慢
+		err := waitTXT(wctx, cfg, recs)
+		cancel()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			cfg.logf("3 分钟内公共 DNS 还没查到 TXT,仍尝试让 CA 验证")
+		} else {
+			cfg.logf("TXT 已可见")
 		}
 	} else {
 		cf := &Cloudflare{Token: cfg.CFToken, BaseURL: cfg.CFBaseURL}

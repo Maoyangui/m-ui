@@ -336,8 +336,22 @@ func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bo
 			return err
 		}
 		var err error
-		if res, err = applyIdentity(tx, meta.Identity, selfId, dir, s.DataDir()); err != nil {
-			return err
+		txGet := func(k string) string {
+			var v string
+			tx.Raw("SELECT value FROM settings WHERE key = ?", k).Scan(&v)
+			return v
+		}
+		// 设为主机(管理员计划内换主机)订阅总是一起迁过去;意外接任按容灾设置的接管范围,默认只接管主机的工作
+		moveSub := b.How == HowSetMaster || takeSubWith(txGet)
+		if moveSub {
+			if res, err = applyIdentity(tx, meta.Identity, selfId, dir, s.DataDir()); err != nil {
+				return err
+			}
+		} else { // 订阅设置(域名、端口、路径、证书)用本机自己的,订阅地址仍指向原主机
+			res = identityResult{SubHost: meta.Identity.SubHost}
+			if h := meta.Identity.SubHost; h != "" {
+				res.Warnings = append(res.Warnings, item(idwSubNotTaken, "host", h))
+			}
 		}
 		if err := tx.Exec("UPDATE nodes SET is_local = ?", false).Error; err != nil {
 			return err
@@ -346,7 +360,7 @@ func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bo
 			return err
 		}
 		if meta.MasterId != 0 && meta.MasterId != selfId {
-			if err := s.applyFormerRow(tx, meta.MasterId, selfId, meta.Identity, b.How); err != nil {
+			if err := s.applyFormerRow(tx, meta.MasterId, selfId, meta.Identity, b.How, moveSub); err != nil {
 				return err
 			}
 			// 原主机变为副机后报上来的第一份怎么并(这一步要在清空 agent_counters 之前:设为主机时那里是原主机交接途中另记的账)

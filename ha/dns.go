@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Maoyangui/m-ui/acme"
+	"github.com/Maoyangui/m-ui/dnsapi"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
 )
 
-// 主机变了(接任或设为主机)以后自动改 DNS(Cloudflare,默认不开):对每个要跟着主机走的域名,只把当前值等于
+// 主机变了(接任或设为主机)以后自动改 DNS(开了「接任时也接管订阅」才改;Cloudflare、阿里云、腾讯云 DNSPod,见 dnsapi 包):对每个要跟着主机走的域名,只把当前值等于
 // 原主机公网 IP 的 A / AAAA 记录改成本机的 IP,类型、橙云、TTL 都不动;记下原值。失败只告警,不挡接任。
 // 本机缺那个地址族(或公网 IP 还没测到)时,指向原主机的记录改不了:明确记成"跳过",通知里写清要手动处理。
 // 误接任后让出主机时,把本任期改过、当前仍指向本机的记录改回原值。
@@ -46,10 +46,10 @@ type DnsOutcome struct {
 	Err              string
 }
 
-// SetDNSAPI 换掉 Cloudflare 接口地址(测试接 httptest;真机只经环境变量 M_UI_TEST_CF_API 设)。
+// SetDNSAPI 换掉 DNS 服务商的接口地址(测试接 httptest;真机只经环境变量 M_UI_TEST_CF_API 设)。
 func (s *Service) SetDNSAPI(u string) { s.dnsAPI.Store(strings.TrimSpace(u)) }
 
-// DNSAPIOverride 换掉了的 Cloudflare 接口地址(没换为空):设置页据此提示"正在用测试地址"。
+// DNSAPIOverride 换掉了的 DNS 服务商接口地址(没换为空):设置页据此提示"正在用测试地址";经容灾 DNS 接口签证书也用它。
 func (s *Service) DNSAPIOverride() string {
 	if v, ok := s.dnsAPI.Load().(string); ok && v != "" {
 		return v
@@ -57,8 +57,9 @@ func (s *Service) DNSAPIOverride() string {
 	return s.d.DNSAPI
 }
 
-func (s *Service) cloudflare(token string) *acme.Cloudflare {
-	return &acme.Cloudflare{Token: token, BaseURL: s.DNSAPIOverride()}
+// provider 按服务商和凭据建改解析的接口(测试换掉的接口地址照用)。
+func (s *Service) provider(kind, token string) (dnsapi.Provider, error) {
+	return dnsapi.New(kind, token, s.DNSAPIOverride())
 }
 
 // ownIPs 本机的公网 IPv4 / IPv6(纯 IPv6 机器 publicIp 记的是 IPv6)。
@@ -93,15 +94,16 @@ func (s *Service) updateDNS(formerIP, formerIP6 string) *dnsRun {
 	v4, v6 := s.ownIPs()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	cf := s.cloudflare(tok)
 	run := &dnsRun{errNames: map[string]bool{}}
-	for _, name := range names {
-		zone, _, err := cf.ZoneFor(ctx, name)
-		if err != nil {
-			run.errs = append(run.errs, fmt.Errorf("%s: %w", name, err))
+	p, err := s.provider(s.dnsKind(), tok)
+	if err != nil {
+		run.errs = append(run.errs, err)
+		for _, name := range names {
 			run.errNames[name] = true
-			continue
 		}
+		names = nil
+	}
+	for _, name := range names {
 		for _, typ := range []string{"A", "AAAA"} {
 			from, to, skip := formerIP, v4, "noV4"
 			if typ == "AAAA" {
@@ -113,7 +115,7 @@ func (s *Service) updateDNS(formerIP, formerIP6 string) *dnsRun {
 			if from == "" || from == to {
 				continue // 原主机没有这个地址族(没有记录指向它),或本来就是本机
 			}
-			recs, err := cf.ListRecords(ctx, zone, name, typ)
+			recs, err := p.Records(ctx, name, typ)
 			if err != nil {
 				run.errs = append(run.errs, fmt.Errorf("%s %s: %w", name, typ, err))
 				run.errNames[name] = true
@@ -127,7 +129,7 @@ func (s *Service) updateDNS(formerIP, formerIP6 string) *dnsRun {
 					run.skipped = append(run.skipped, DnsChange{Name: name, Type: typ, From: r.Content, Skip: skip})
 					continue
 				}
-				if err := cf.UpdateContent(ctx, zone, r.ID, to); err != nil {
+				if err := p.SetContent(ctx, r, to); err != nil {
 					run.errs = append(run.errs, fmt.Errorf("%s %s: %w", name, typ, err))
 					run.errNames[name] = true
 					continue
@@ -205,21 +207,14 @@ func (s *Service) revertDNS(b Became, ip4, ip6 string) ([]DnsChange, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cf := s.cloudflare(tok)
-	zones := map[string]string{}
+	p, err := s.provider(s.dnsKind(), tok)
+	if err != nil {
+		return nil, err
+	}
 	var done []DnsChange
 	var errs []error
 	for _, c := range todo {
-		zone, ok := zones[c.Name]
-		if !ok {
-			z, _, err := cf.ZoneFor(ctx, c.Name)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("%s: %w", c.Name, err))
-				continue
-			}
-			zone, zones[c.Name] = z, z
-		}
-		recs, err := cf.ListRecords(ctx, zone, c.Name, c.Type)
+		recs, err := p.Records(ctx, c.Name, c.Type)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s %s: %w", c.Name, c.Type, err))
 			continue
@@ -232,7 +227,7 @@ func (s *Service) revertDNS(b Became, ip4, ip6 string) ([]DnsChange, error) {
 			if !sameIP(r.Content, c.To) || sameIP(r.Content, to) {
 				continue
 			}
-			if err := cf.UpdateContent(ctx, zone, r.ID, to); err != nil {
+			if err := p.SetContent(ctx, r, to); err != nil {
 				errs = append(errs, fmt.Errorf("%s %s: %w", c.Name, c.Type, err))
 				continue
 			}
@@ -240,7 +235,7 @@ func (s *Service) revertDNS(b Became, ip4, ip6 string) ([]DnsChange, error) {
 			logger.Info("容灾:本机不再当主机,DNS ", c.Name, " ", c.Type, " ", r.Content, " → ", to)
 		}
 	}
-	err := errors.Join(errs...)
+	err = errors.Join(errs...)
 	rec := dnsRecord{At: s.now().Unix(), Changes: done, Revert: true}
 	if err != nil {
 		rec.Err = shortErr(err.Error(), 2000)
@@ -297,9 +292,9 @@ type DNSTestResult struct {
 	Error   string          `json:"error,omitempty"`
 }
 
-// DNSTest 只读地查一遍:令牌能不能用、这些域名现在有哪些 A / AAAA 记录、哪些指向本机(主机变了会被改)。
-// token 为空用已经存的;names 为空用已经存的。
-func (s *Service) DNSTest(token, names string) (DNSTestResult, error) {
+// DNSTest 只读地查一遍:凭据能不能用、这些域名现在有哪些 A / AAAA 记录、哪些指向本机(主机变了会被改)。
+// kind 为空用已经存的服务商;token 为空用已经存的;names 为空用已经存的。
+func (s *Service) DNSTest(kind, token, names string) (DNSTestResult, error) {
 	if s.IsNode() {
 		return DNSTestResult{}, errors.New("副机上不能改主机容灾:到主机面板改")
 	}
@@ -308,7 +303,14 @@ func (s *Service) DNSTest(token, names string) (DNSTestResult, error) {
 		tok = strings.TrimSpace(s.setting(KeyDnsToken))
 	}
 	if tok == "" {
-		return DNSTestResult{}, errors.New("先填 Cloudflare 令牌")
+		return DNSTestResult{}, errors.New("先填 DNS 接口的令牌或密钥")
+	}
+	if strings.TrimSpace(kind) == "" {
+		kind = s.dnsKind()
+	}
+	p, err := s.provider(kind, tok)
+	if err != nil {
+		return DNSTestResult{}, err
 	}
 	norm, err := normDnsNames(names)
 	if err != nil {
@@ -324,17 +326,11 @@ func (s *Service) DNSTest(token, names string) (DNSTestResult, error) {
 	v4, v6 := s.ownIPs()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cf := s.cloudflare(tok)
 	res := DNSTestResult{Records: []DNSTestRecord{}}
 	var errs []error
 	for _, name := range list {
-		zone, _, err := cf.ZoneFor(ctx, name)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", name, err))
-			continue
-		}
 		for _, typ := range []string{"A", "AAAA"} {
-			recs, err := cf.ListRecords(ctx, zone, name, typ)
+			recs, err := p.Records(ctx, name, typ)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", name, err))
 				continue

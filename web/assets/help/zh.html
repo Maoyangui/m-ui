@@ -252,7 +252,7 @@
     <div class="pit"><b>常见坑</b><ul>
       <li>升级、维护前可以先暂停接任(设置页的暂停按钮,或主机上 <code>m-ui ha pause 分钟数</code>)。在面板里点升级、改端口这类会重启的操作,以及 <code>m-ui</code> 菜单里的升级(暂停 15 分钟)和重启(暂停 5 分钟),都会自动先暂停。</li>
       <li>没开 Telegram 通知时,确认模式只能到备用的面板上点接任。</li>
-      <li>订阅地址里是 IP 时,接任后用户要重新导入订阅。订阅最好用域名,接任后把它指向新主机(或者打开下面的 Cloudflare 自动改 DNS)。</li>
+      <li>订阅地址里是 IP 时,接任后用户要重新导入订阅。订阅最好用域名;想接任后订阅地址不变,在下面选 <b data-k="ha.scope.sub">连订阅一起接管</b>。</li>
       <li>备用的数据副本比它现在的纪元旧(上一任新主机期间的改动不在里面)时不给接任按钮;真要接任用命令行 <code>m-ui ha takeover --force</code>,那些改动会丢。</li>
     </ul></div>
   </section>
@@ -280,17 +280,21 @@
   </section>
 
   <section class="sec" id="ha-dns">
-    <h3>Cloudflare 自动改 DNS(可选)</h3>
-    <p class="lede">订阅域名托管在 Cloudflare 时,主机变了(接任或设为主机)可以自动把解析改到新主机。默认关闭,要一个 Cloudflare API 令牌。</p>
+    <h3>接任时接管什么:只接管主机的工作,或连订阅一起接管</h3>
+    <p class="lede">在 <b data-k="ha.title">主机容灾</b> 设置的 <b data-k="ha.set.scope">接任时接管什么</b> 里二选一。默认 <b data-k="ha.scope.master">只接管主机的工作</b>。</p>
     <ul>
-      <li>在 <b data-k="ha.title">主机容灾</b> 设置的 <b data-k="ha.set.advanced">高级</b> → <b data-k="ha.set.dns" class="wrap">自动改 DNS(Cloudflare,可选)</b> 里填 <b data-k="ha.set.dnsToken">Cloudflare 令牌</b> 和 <b data-k="ha.set.dnsNames">跟着主机走的域名</b>(比如订阅域名),点 <b data-k="ha.set.dnsTest">测试令牌与记录</b> 看哪些记录会被改;令牌无效、区域找不到时这里直接写出错误。</li>
-      <li>令牌要有这个域名的 DNS 编辑权限,单独存、和签证书用的分开。输入框下面的 <b data-k="cf.create">去 Cloudflare 创建</b> ↗ 打开权限已预填的创建页;详细步骤见 <a href="#cf-token">Cloudflare API 令牌怎么创建</a>。</li>
-      <li>只改这些域名里当前指向原主机 IP 的 A / AAAA 记录,橙云和 TTL 不动,别的记录不碰;改不成只告警,不挡换主机。</li>
-      <li>结果分三种:全部改好、只改好一部分、失败。页面顶部和 Telegram 写出每条记录的原值 → 新值;新主机缺 IPv6(或 IPv4)、令牌管不到某个区域时,把没改的记录列出来,要你手动改或删。</li>
+      <li><b data-k="ha.scope.master">只接管主机的工作</b>:推配置给副机、并流量、到期 / 超量停用、Telegram 机器人、外部 API 换到新主机;新主机的订阅设置照旧是它自己的,DNS 不动。用户的订阅地址仍指向原主机:原主机失联期间刷新订阅会失败(已连上的线路照常可用),它回来变成副机后照样提供订阅。订阅证书(含私钥)也不随副本带到备用。</li>
+      <li><b data-k="ha.scope.sub">连订阅一起接管</b>:新主机还换上原主机的订阅域名、端口、路径和证书,经 DNS 接口把订阅域名改指到新主机,用户的订阅地址不变。要订阅地址用域名,并填好 <b data-k="ha.set.dnsProvider">DNS 服务商</b> 的接口;没满足时保存会直接说缺什么。</li>
+      <li><b data-k="ha.setMaster">设为主机</b>(计划内换主机)不受这个选项影响:订阅总是一起迁过去,订阅证书随整库数据带过去;配了 DNS 接口、订阅域名在名单里就自动改解析,否则确认框里写着该指向哪个 IP。</li>
+      <li>DNS 服务商可选 <b data-k="ha.dnsProv.cloudflare">Cloudflare</b>(API 令牌,见 <a href="#cf-token">Cloudflare API 令牌怎么创建</a>)、<b data-k="ha.dnsProv.aliyun">阿里云云解析</b>(只授权 AliyunDNSFullAccess 的 RAM 用户的 AccessKey)、<b data-k="ha.dnsProv.dnspod">腾讯云 DNSPod</b>(只授权 QcloudDNSPodFullAccess 的子用户 API 密钥)。凭据单独存、不回显。点 <b data-k="ha.set.dnsTest">测试 DNS 接口与记录</b> 看哪些记录会被改;凭据不对、域名不在这个账号下时这里直接写出错误。</li>
+      <li>订阅证书:订阅走 https 时,备用随加密副本带着主机的订阅证书;接任时它用不了(没带过来、过期、半个月内到期、不含订阅域名),新主机会用同一个 DNS 接口给订阅域名重签一张(DNS 验证不用等解析指过来),签好自动用于订阅、订阅服务原地重启,以后的续期也走这个接口。就绪检查里能看到订阅证书还剩几天。</li>
+      <li>只改 <b data-k="ha.set.dnsNames">跟着主机走的域名</b>(订阅域名自动加上)里当前指向原主机 IP 的 A / AAAA 记录,线路、TTL、橙云都不动,别的记录不碰;改不成只告警,不挡换主机。结果分全部改好、只改好一部分、失败三种,页面顶部和 Telegram 写出每条记录的原值 → 新值,没改成的列出来要你手动改。</li>
       <li>误接任后让回原主机时,本机自动改过、而且现在仍指向本机的记录会改回原值。</li>
-      <li>不配的话,接任或设为主机后按页面顶部和 Telegram 里写的 IP,自己去改解析。</li>
     </ul>
-    <div class="tip"><b>测试地址</b>环境变量 <code>M_UI_TEST_CF_API</code> 能把 Cloudflare 接口换成测试地址,只供演练、测试用;设了它,设置页会提示、操作审计里有记录,证书签发不受影响。</div>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>开过容灾的集群(纪元 ≥ 1)不能在面板上把副机直接改成主机:别的副机只认带纪元的主机,会一律拒收。换主机用 <b data-k="ha.setMaster">设为主机</b>,主机没了等备用接任;确实要脱离集群,先在每台执行 <code>m-ui ha reset</code>。主机改成副机可以,会顺手清掉本机的容灾状态。</li>
+      <li>环境变量 <code>M_UI_TEST_CF_API</code> 能把 DNS 服务商的接口换成测试地址,只供演练、测试用;设了它,设置页会提示、操作审计里有记录。</li>
+    </ul></div>
   </section>
 
   <section class="sec" id="ha-cli">
@@ -588,7 +592,7 @@
     <div class="pit"><b>常见坑</b><ul>
       <li>权限最小化:只要上面两项权限,区域只选要用的域名。不要用「Global API Key」(全局 API 密钥),也不要给账户级的权限。</li>
       <li>令牌泄露了:到同一页把它删掉或轮转,再把新令牌填回 m-ui。</li>
-      <li>主机容灾的自动改 DNS 单独填一个令牌(见 <a href="#ha-dns">Cloudflare 自动改 DNS</a>),照同样的步骤再建一个就行。</li>
+      <li>主机容灾接管订阅用的 DNS 接口单独填一个令牌(见 <a href="#ha-dns">接任时接管什么</a>),照同样的步骤再建一个就行。</li>
     </ul></div>
   </section>
 
@@ -1300,7 +1304,7 @@
         <tr><td>Cloudflare API</td><td>用 <b data-k="cert.methodCf">DNS(Cloudflare API)</b> 签发、续期时加删 TXT 记录</td><td>不用这种验证方式就不连</td></tr>
         <tr><td>Telegram</td><td>发通知、跑 Telegram 机器人</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b> 不启用就不连</td></tr>
         <tr><td>GitHub、jsDelivr、ntfy.sh、TronGrid</td><td>功德箱:打开 <b data-k="support.btn">建议 / 支持</b> 页时读名单(最多一小时一次),点留名、核对到账时;在线设备数:每天从 GitHub 下载一次空文件</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → 关掉 <b data-k="set.supportOnline">功德箱与在线设备数</b></td></tr>
-        <tr><td>Globalping、Cloudflare API</td><td>主机容灾:判断主机是否失联时让境外测点连主机;主机变了以后自动改 DNS</td><td>关掉 <b data-k="ha.set.witness">境外测点见证</b>;不填 Cloudflare 令牌就不改 DNS</td></tr>
+        <tr><td>Globalping、Cloudflare / 阿里云 / 腾讯云 DNSPod 的 API</td><td>主机容灾:判断主机是否失联时让境外测点连主机;选了连订阅一起接管时,主机变了以后经 DNS 接口改订阅域名的解析、必要时给订阅域名重签证书</td><td>关掉 <b data-k="ha.set.witness">境外测点见证</b>;选 <b data-k="ha.scope.master">只接管主机的工作</b>(默认)就不连 DNS 接口</td></tr>
         <tr><td>Google(<code>www.gstatic.com</code>)</td><td>上游巡检和测试:<b data-k="set.testUrl">上游测试地址</b> 默认就是它。本机有线路用了上游(WARP、落地机等)时,每 10 分钟经各条上游连一次;线路用了上游组的,内核还会每 30 秒经组里每条上游连一次;点上游的 <b data-k="common.test">测试</b>、外部节点测速时也连</td><td>把 <b data-k="set.testUrl">上游测试地址</b> 换成别的地址;<b data-k="set.checkMinutes">巡检间隔(分钟)</b> 填 0 只关掉定时巡检,上游组的测速照样跑</td></tr>
         <tr><td>你自己填的地址</td><td>Webhook、外部订阅、Telegram 代理</td><td>不填就不连</td></tr>
         <tr><td>点了才连</td><td>更新、安装 WARP(Cloudflare 的软件源;本机 DNS 解析不了软件源时还会向 1.1.1.1、8.8.8.8 查解析)和 <b data-k="ops.checkExit">检测出口</b>、按规则分流里的 <b data-k="line.rr.lookup">查域名</b>(GitHub 上的 v2fly 域名列表)、Reality 的 <b data-k="line.reality.check">检测</b> 和 <b data-k="line.reality.pick">帮我挑</b>(连候选网站)、外部节点测速、证书页的 <b data-k="cert.precheck">预检 DNS / 端口</b> 和换机向导的 <b data-k="mig.check">检查解析</b>(向 Cloudflare、Google、阿里的公共 DNS 查解析,并测一次本机公网 IP)</td><td>不点就不连</td></tr>

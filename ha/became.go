@@ -2,9 +2,12 @@ package ha
 
 import (
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -112,7 +115,12 @@ func (s *Service) afterBecame() {
 	if ip == "" {
 		ip = s.setting("publicIp6")
 	}
-	out := s.becameDNS(&b, ip) // 改好的记录、出错的原因写进 b
+	var out DnsOutcome
+	// 接任时套用了原主机的订阅身份才改解析、查证书;老版本记下的(没有 Taken)按现在的接管范围算
+	if b.Identity.Taken || s.takeSub() {
+		out = s.becameDNS(&b, ip) // 改好的记录、出错的原因写进 b
+		s.ensureSubCert(&b)
+	}
 	_ = s.set(map[string]string{KeyBecame: mustJSON(b)})
 	items := b.Identity.Warnings
 	n := Notice{Kind: "became", How: b.How, Name: b.FormerName, URL: s.panelURL(), Host: b.Identity.SubHost, IP: ip,
@@ -242,4 +250,54 @@ func (s *Service) ForgetNode(id uint) {
 	if s.getJSON(KeyFormer, &f) && f.Id == id {
 		_ = s.set(map[string]string{KeyFormer: ""})
 	}
+}
+
+// ensureSubCert 接管了订阅、原主机的订阅走 https:新主机上的订阅证书不能用(没带过来、过期、半个月内到期、不含订阅域名)时,
+// 用容灾的 DNS 接口给订阅域名签一张(DNS 验证不用等解析指过来),签好自动用于订阅、订阅服务原地重启;续期也走这个接口。
+// 签不了(没配接口、runner 没给钩子)就在通知里说清要手动处理。
+func (s *Service) ensureSubCert(b *Became) {
+	host := strings.TrimSpace(b.Identity.SubHost)
+	if !b.Identity.Taken || !b.Identity.SubHTTPS || host == "" || isIPHost(host) {
+		return
+	}
+	if subCertUsable(s.setting("subCertFile"), host, 15*24*time.Hour, s.now()) {
+		return
+	}
+	if s.d.IssueSubCert == nil || strings.TrimSpace(s.setting(KeyDnsToken)) == "" {
+		b.Identity.Warnings = append(b.Identity.Warnings, item(idwSubCertTodo, "host", host))
+		return
+	}
+	if err := s.d.IssueSubCert(host); err != nil {
+		logger.Warning("容灾:给订阅域名重签证书没能开始: ", err)
+		b.Identity.Warnings = append(b.Identity.Warnings, item(idwSubCertTodo, "host", host))
+		return
+	}
+	b.Identity.Warnings = append(b.Identity.Warnings, item(idwSubCertNew, "host", host))
+}
+
+// subCertUsable 证书文件在、能解析、含这个域名、离到期还有 min 以上。
+func subCertUsable(path, host string, min time.Duration, now time.Time) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for len(raw) > 0 {
+		var blk *pem.Block
+		blk, raw = pem.Decode(raw)
+		if blk == nil {
+			return false
+		}
+		if blk.Type != "CERTIFICATE" {
+			continue
+		}
+		c, err := x509.ParseCertificate(blk.Bytes)
+		if err != nil {
+			return false
+		}
+		return c.VerifyHostname(host) == nil && c.NotAfter.Sub(now) > min
+	}
+	return false
 }

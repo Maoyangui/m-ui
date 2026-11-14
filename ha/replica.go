@@ -361,7 +361,7 @@ func (s *Service) buildArchive(dir string, full bool) (string, ReplicaMeta, erro
 	if err := zipAddFile(zw, "replica.db", dbPath); err != nil {
 		return "", meta, err
 	}
-	if meta.Identity, err = s.captureIdentity(zw); err != nil {
+	if meta.Identity, err = s.captureIdentity(zw, full); err != nil {
 		return "", meta, err
 	}
 	// 身份进内容指纹(证书文件内容也算:续期换了证书要重发)

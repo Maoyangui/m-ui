@@ -100,16 +100,17 @@ func (l *ipLimiter) allow(ip string) bool {
 	return e.l.Allow()
 }
 
-// haDNSTest 主机:只读地测一下 Cloudflare 令牌和要跟着主机走的域名(不改任何记录;令牌不回显)。
+// haDNSTest 主机:只读地测一下 DNS 接口(Cloudflare / 阿里云 / 腾讯云 DNSPod)和要跟着主机走的域名(不改任何记录;凭据不回显)。
 func (s *Server) haDNSTest(w http.ResponseWriter, r *http.Request, h *ha.Service) {
 	var body struct {
-		Token string `json:"token"`
-		Names string `json:"names"`
+		Provider string `json:"provider"`
+		Token    string `json:"token"`
+		Names    string `json:"names"`
 	}
 	if !decodeSmall(w, r, &body) {
 		return
 	}
-	res, err := h.DNSTest(body.Token, body.Names)
+	res, err := h.DNSTest(body.Provider, body.Token, body.Names)
 	if err != nil {
 		badRequest(w, err)
 		return

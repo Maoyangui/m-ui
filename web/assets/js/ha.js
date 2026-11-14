@@ -33,6 +33,7 @@ function argsOf(it) {
   const a = { ...(it.args || {}) };
   if ((it.names || []).length) a.names = joinNames(it.names);
   if (a.svc) a.svc = t('ha.svc.' + a.svc);
+  if (a.provider) a.provider = t('ha.dnsProv.' + a.provider);
   if (a.err) a.err = trErr(a.err);
   return a;
 }
@@ -477,8 +478,8 @@ registerActions({
     btn.disabled = true;
     const out = document.getElementById('ha-dns-out');
     try {
-      // 服务端最多等 Cloudflare 60 秒
-      const r = await post('ha/dns-test', { token: (document.getElementById('ha-dnsToken') || {}).value || '', names: (document.getElementById('ha-dnsNames') || {}).value || '' }, SLOW);
+      // 服务端最多等 DNS 服务商 60 秒
+      const r = await post('ha/dns-test', { provider: (document.getElementById('ha-dnsProvider') || {}).value || '', token: dnsCred(), names: (document.getElementById('ha-dnsNames') || {}).value || '' }, SLOW);
       if (out) out.innerHTML = dnsTestHTML(r);
     } catch (e) { if (out) out.innerHTML = `<p class="danger-text">${esc(e.message)}</p>`; }
     finally { btn.disabled = false; }
@@ -597,7 +598,7 @@ const idwText = it => (it.code === 'text' ? trErr((it.args || {}).text || '') : 
 const link = url => `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>`;
 
 export function noticeHTML(n) {
-  const ws = [...(n.warn || []).map(w => trErr(w)), ...(n.items || []).map(idwText)];
+  const ws = (n.items || []).length ? n.items.map(idwText) : (n.warn || []).map(w => trErr(w)); // 同一条告警两种写法都发了,只用带代码的那份
   const warn = ws.length ? ' ' + ws.map(esc).join(' ') : '';
   const dns = dnsHTML(n);
   const reseller = n.reseller ? ` ${esc(t('ha.n.reseller'))} ${link(n.reseller)}` : '';
@@ -672,6 +673,7 @@ export async function renderHASettings(container) {
       ${field(t('ha.set.standbys'), `<select id="ha-standbys">${[1, 2, 3].map(n => `<option value="${n}" ${(c.standbys || 2) === n ? 'selected' : ''}>${n}</option>`).join('')}</select>`, t('ha.set.standbysHelp'))}
     </div>
     <p class="hint">${t('ha.set.lostRule')}</p>
+    <div id="ha-scope-slot"></div>
     <h4 class="ha-sub">${t('ha.set.ready')}</h4>
     <ul class="ha-check">${ready}</ul>
     ${(v.dropPending || []).length ? `<p class="warn-text small">${esc(t('ha.set.dropPending', { names: joinNames(v.dropPending.map(d => d.name || '#' + d.id)) }))}</p>` : ''}
@@ -688,18 +690,67 @@ export async function renderHASettings(container) {
         <label class="field check"><input type="checkbox" id="ha-witness" ${c.witness !== false ? 'checked' : ''}><span>${t('ha.set.witness')}</span><span class="help">${esc(t('ha.set.witnessHelp'))}</span></label>
         <label class="field check"><input type="checkbox" id="ha-allowPlain" ${c.allowPlain ? 'checked' : ''}><span>${t('ha.set.allowPlain')}</span><span class="help">${esc(t('ha.set.allowPlainHelp'))}</span></label>
       </div>
-      <h4 class="ha-sub">${t('ha.set.dns')}</h4>
-      <p class="hint">${t('ha.set.dnsHelp')}</p>
-      <div class="form-grid">
-        ${field(t('ha.set.dnsToken'), `<input id="ha-dnsToken" type="password" autocomplete="off" placeholder="${esc(c.dnsTokenSet ? t('ha.set.dnsTokenKeep') : '')}">${cfTokenLink()}`, t('ha.set.dnsTokenHelp'))}
-        ${field(t('ha.set.dnsNames'), `<input id="ha-dnsNames" value="${esc(c.dnsNames || '')}" placeholder="sub.example.com">`, t('ha.set.dnsNamesHelp'))}
-      </div>
-      <div class="row"><button class="btn sm" data-act="ha.dnsTest">${t('ha.set.dnsTest')}</button>${c.dnsTokenSet ? ` <label class="field check inline"><input type="checkbox" id="ha-dnsClear"><span>${t('ha.set.dnsClear')}</span></label>` : ''}</div>
-      <div id="ha-dns-out"></div>
     </details>`;
+  host.querySelector('#ha-scope-slot').innerHTML = scopeHTML(c);
+  bindScope(host, c);
   host.querySelectorAll('input[name="ha-mode"]').forEach(r => r.addEventListener('change', () => {
     host.querySelectorAll('.ha-modes label').forEach(l => l.classList.toggle('sel', l.querySelector('input').checked));
   }));
+}
+
+// ---- 接任时接管什么 ----
+// 默认只接管主机的工作(推配置、并流量、到期停用、通知、外部 API……);选「连订阅一起接管」才出现 DNS 接口:
+// 新主机换上原主机的订阅域名、端口、路径和证书,经 DNS 接口把订阅域名改指到新主机,用户的订阅地址不变。
+const DNS_KINDS = ['cloudflare', 'aliyun', 'dnspod'];
+function scopeHTML(c) {
+  const sub = !!c.takeSub;
+  const opt = (v, on, badgeHTML = '') => `<label class="${on ? 'sel' : ''}"><input type="radio" name="ha-scope" value="${v}" ${on ? 'checked' : ''}>
+    <span><b>${esc(t('ha.scope.' + v))}</b>${badgeHTML}<br><span class="muted small">${esc(t('ha.scope.' + v + 'Help'))}</span></span></label>`;
+  return `<h4 class="ha-sub">${t('ha.set.scope')}</h4>
+    <div class="ha-modes ha-scope" role="radiogroup" aria-label="${esc(t('ha.set.scope'))}">
+      ${opt('master', !sub, ` <span class="badge">${esc(t('ha.scope.default'))}</span>`)}${opt('sub', sub)}
+    </div>
+    <div id="ha-dns-box" class="ha-dns-box" ${sub ? '' : 'hidden'}>
+      <p class="hint">${t('ha.set.dnsHelp')}</p>
+      <div class="form-grid">
+        ${field(t('ha.set.dnsProvider'), `<select id="ha-dnsProvider">${DNS_KINDS.map(k => `<option value="${k}" ${(c.dnsProvider || 'cloudflare') === k ? 'selected' : ''}>${esc(t('ha.dnsProv.' + k))}</option>`).join('')}</select>`)}
+        <div id="ha-dns-cred" class="full"></div>
+        <div class="full">${field(t('ha.set.dnsNames'), `<input id="ha-dnsNames" value="${esc(c.dnsNames || '')}" placeholder="sub.example.com">`, t('ha.set.dnsNamesHelp'))}</div>
+      </div>
+      <div class="row wrap ha-dns-act"><button class="btn sm" data-act="ha.dnsTest">${t('ha.set.dnsTest')}</button>${c.dnsTokenSet ? ` <label class="field check inline"><input type="checkbox" id="ha-dnsClear"><span>${t('ha.set.dnsClear')}</span></label>` : ''}</div>
+      <div id="ha-dns-out"></div>
+    </div>`;
+}
+// 凭据输入框:Cloudflare 一个令牌;阿里云、腾讯云两段(ID 与密钥),存的时候拼成 "ID,密钥"
+function credHTML(kind, c) {
+  const keep = c.dnsTokenSet && kind === (c.dnsProvider || 'cloudflare') ? t('ha.set.dnsTokenKeep') : '';
+  if (kind === 'cloudflare') {
+    return `<div class="form-grid">${field(t('ha.set.dnsToken'), `<input id="ha-dnsToken" type="password" autocomplete="off" placeholder="${esc(keep)}">${cfTokenLink()}`, t('ha.set.dnsTokenHelp'))}</div>`;
+  }
+  return `<div class="form-grid">
+    ${field(t('ha.set.dnsId.' + kind), `<input id="ha-dnsId" autocomplete="off" spellcheck="false" placeholder="${esc(keep)}">`)}
+    ${field(t('ha.set.dnsSecret.' + kind), `<input id="ha-dnsSecret" type="password" autocomplete="off" placeholder="${esc(keep)}">`)}
+    <p class="hint full">${esc(t('ha.set.dnsKeyHelp.' + kind))}</p></div>`;
+}
+function bindScope(host, c) {
+  const box = host.querySelector('#ha-dns-box'), prov = host.querySelector('#ha-dnsProvider'), cred = host.querySelector('#ha-dns-cred');
+  const draw = () => { cred.innerHTML = credHTML(prov.value, c); };
+  draw();
+  prov.addEventListener('change', draw);
+  host.querySelectorAll('input[name="ha-scope"]').forEach(r => r.addEventListener('change', () => {
+    host.querySelectorAll('.ha-scope label').forEach(l => l.classList.toggle('sel', l.querySelector('input').checked));
+    box.hidden = !host.querySelector('input[name="ha-scope"][value="sub"]').checked;
+  }));
+}
+// 现在填的凭据(没填返回空 = 不改)
+function dnsCred() {
+  const v = id => ((document.getElementById(id) || {}).value || '').trim();
+  const kind = (document.getElementById('ha-dnsProvider') || {}).value || 'cloudflare';
+  if (kind === 'cloudflare') return v('ha-dnsToken');
+  const id = v('ha-dnsId'), secret = v('ha-dnsSecret');
+  if (!id && !secret) return '';
+  if (!id || !secret) throw new Error(t('ha.set.dnsPair.' + kind));
+  return id + ',' + secret;
 }
 
 // dnsTestHTML「测试令牌与记录」的结果:有错误先写错误(令牌无效、区域找不到时记录本来就是空的,不能说成「没找到记录」)
@@ -712,6 +763,8 @@ export function dnsTestHTML(r) {
 
 function saveSettings() {
   const num = id => Number((document.getElementById(id) || {}).value) || 0;
+  let dnsToken;
+  try { dnsToken = dnsCred(); } catch (e) { toast(e.message, 'err'); return; } // 阿里云 / 腾讯云只填了一半
   const body = {
     mode: (document.querySelector('input[name="ha-mode"]:checked') || {}).value || 'off',
     standbys: num('ha-standbys') || 2,
@@ -720,8 +773,10 @@ function saveSettings() {
     witness: !!(document.getElementById('ha-witness') || {}).checked,
     allowPlain: !!(document.getElementById('ha-allowPlain') || {}).checked,
     dnsNames: (document.getElementById('ha-dnsNames') || {}).value || '',
-    dnsToken: (document.getElementById('ha-dnsToken') || {}).value || '',
+    dnsToken,
     clearDnsToken: !!(document.getElementById('ha-dnsClear') || {}).checked,
+    takeSub: !!(document.querySelector('input[name="ha-scope"][value="sub"]') || {}).checked,
+    dnsProvider: (document.getElementById('ha-dnsProvider') || {}).value || 'cloudflare',
   };
   askPassword(t('ha.set.confirmSave'), async (password, code) => {
     // 首次开启要进纪元、推状态给全部副机,可能要一会儿

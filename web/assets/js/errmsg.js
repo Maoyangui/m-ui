@@ -717,7 +717,6 @@ const EN = /*BEGIN*/{
 "还没收到集群密钥": "The cluster key has not been received yet",
 "鉴权失败": "Authentication failed",
 "没有可测的地址": "No address to test",
-"先填 Cloudflare 令牌": "Enter the Cloudflare token first",
 "先填要跟着主机走的域名": "Enter the names that follow the master first",
 "记录设为主机的进度失败": "Failed to record the Set as master progress",
 "目标机器的 API 地址是明文 http:链路上的中间人能拿到并改写整库。确认风险后勾选「仍然继续」再做": "The target's API address is plain http: a man-in-the-middle on the link can read and rewrite the whole database. Accept the risk by ticking \"Continue anyway\", then try again",
@@ -793,7 +792,29 @@ const EN = /*BEGIN*/{
 "面板没能在 %s 上监听,还在原地址: %w": "The panel could not listen on %s and stays on its old address: %w",
 "面板没能换用新的证书设置,已按原样恢复: %w": "The panel could not switch to the new certificate settings and was restored as before: %w",
 "面板几秒后改用新的证书设置,新地址 %s(不用重启 m-ui,页面会自动跳过去)": "The panel switches to the new certificate settings in a few seconds; new address %s (no m-ui restart needed, the page follows automatically)",
-"面板 HTTPS 已设为 %s,几秒后改用,新地址 %s(不用重启 m-ui)": "Panel HTTPS set to %s, switching in a few seconds; new address %s (no m-ui restart needed)"
+"面板 HTTPS 已设为 %s,几秒后改用,新地址 %s(不用重启 m-ui)": "Panel HTTPS set to %s, switching in a few seconds; new address %s (no m-ui restart needed)",
+"3 分钟内公共 DNS 还没查到 TXT,仍尝试让 CA 验证": "Public DNS still doesn't show the TXT records after 3 minutes; asking the CA to validate anyway",
+"不支持的 DNS 服务商 %q": "Unsupported DNS provider %q",
+"先填 DNS 接口的令牌或密钥": "Fill in the DNS interface's token or keys first",
+"接管订阅要先填 DNS 接口(Cloudflare 令牌,或阿里云、腾讯云 DNSPod 的密钥):接任后靠它把订阅域名改指到新主机": "Taking over subscriptions needs a DNS interface (a Cloudflare token, or Alibaba Cloud / Tencent Cloud DNSPod keys): after a takeover it points the subscription domain to the new master",
+"接管订阅要订阅地址用域名:先在设置 → 订阅填订阅域名(或在设置 → 面板填面板域名)": "Taking over subscriptions needs a domain in the subscription address: set the subscription domain under Settings → Subscription (or the panel domain under Settings → Panel) first",
+"没填 Cloudflare API 令牌": "No Cloudflare API token",
+"经 %s 写入 TXT %s": "Writing TXT %[2]s through %[1]s",
+"腾讯云 DNSPod 要填 SecretId 和 SecretKey": "Tencent Cloud DNSPod needs a SecretId and a SecretKey",
+"腾讯云 DNSPod: %w %w": "Tencent Cloud DNSPod: %w %w",
+"腾讯云 DNSPod: %w": "Tencent Cloud DNSPod: %w",
+"腾讯云 DNSPod: HTTP %d %s": "Tencent Cloud DNSPod: HTTP %d %s",
+"腾讯云 DNSPod: 回复看不懂(%s)": "Tencent Cloud DNSPod: unreadable reply (%s)",
+"腾讯云 DNSPod: 记录编号不对 %q": "Tencent Cloud DNSPod: bad record ID %q",
+"腾讯云 DNSPod: 这个密钥下没有 %s 所属的域名": "Tencent Cloud DNSPod: these keys have no domain that %s belongs to",
+"这个集群开过主机容灾,别的副机只认带纪元的主机:把这台直接改成主机,它们会一律拒收,整个集群卡住。换主机请在主机的容灾设置里对这台用「设为主机」;主机已经没了就等备用接任(或在备用的面板上点接任)。确实要让这台脱离原来的集群单独当主机,先在这台执行 m-ui ha reset(其它副机也要各自执行一遍)再切": "This cluster has used master failover, so the other nodes only accept a master with an epoch: switching this one to master directly would make them reject it and stall the whole cluster. To change masters, use \"Set as master\" for this server in the master's failover settings; if the master is gone, let a standby take over (or click take over on the standby's panel). If this server really should leave its cluster and run as a master on its own, run m-ui ha reset on it first (and on every other node too), then switch",
+"这张证书靠主机容灾的 DNS 接口验证,但那个接口用不了(%w):到容灾设置里填好,或到证书页换一种验证方式重签": "This certificate is validated through the master failover DNS interface, but that interface can't be used (%w): fill it in under the failover settings, or reissue it with another validation method on the Certificate page",
+"阿里云: %s %s": "Alibaba Cloud: %s %s",
+"阿里云: %w": "Alibaba Cloud: %w",
+"阿里云: HTTP %d %s": "Alibaba Cloud: HTTP %d %s",
+"阿里云: 回复看不懂(%s)": "Alibaba Cloud: unreadable reply (%s)",
+"阿里云: 找不到 %s 所属的域名": "Alibaba Cloud: can't find the domain that %s belongs to",
+"阿里云要填 AccessKey ID 和 AccessKey Secret": "Alibaba Cloud needs an AccessKey ID and an AccessKey Secret"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

@@ -13,6 +13,7 @@ import (
 	"github.com/Maoyangui/m-ui/acme"
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/dnsapi"
 	"github.com/Maoyangui/m-ui/notify"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -147,6 +148,10 @@ type IssueRequest struct {
 	directoryURL string // 测试用
 }
 
+// MethodHADNS 用主机容灾的 DNS 接口(Cloudflare / 阿里云 / 腾讯云 DNSPod,设置 haDnsProvider / haDnsToken)做 DNS 验证:
+// 接任后带过来的订阅证书不能用时给订阅域名签一张(见 ha.ensureSubCert),续期也走它。
+const MethodHADNS = "hadns"
+
 // IssueCert 发起一次签发(异步),进度经 CertStatus 查询。
 func (r *Runner) IssueCert(req IssueRequest) error {
 	if err := r.startIssue(); err != nil {
@@ -216,6 +221,16 @@ func (r *Runner) issueCert(req IssueRequest) error {
 		CFToken: r.setting("acmeCfToken"), Staging: req.Staging,
 		CertPath: certFile, KeyPath: keyFile, AccountKey: r.setting("acmeAccountKey"), Logf: r.cert.logf,
 		OnTXT: r.cert.setTXT, DirectoryURL: req.directoryURL,
+	}
+	if req.Method == MethodHADNS {
+		kind := r.setting("haDnsProvider")
+		p, err := dnsapi.New(kind, r.setting("haDnsToken"), r.ha.DNSAPIOverride()) // 演练时换成测试地址(环境变量 M_UI_TEST_CF_API)
+		if err != nil {
+			err = fmt.Errorf("这张证书靠主机容灾的 DNS 接口验证,但那个接口用不了(%w):到容灾设置里填好,或到证书页换一种验证方式重签", err)
+			r.cert.logf("失败: %v", err)
+			return err
+		}
+		cfg.DNS, cfg.DNSLabel = dnsapi.ACME(p), "主机容灾的 DNS 接口("+dnsapi.Label(kind)+")"
 	}
 	if r.cert.acmeHook != nil {
 		r.cert.acmeHook(&cfg)
@@ -352,7 +367,7 @@ func (r *Runner) afterCertChange(certFile, keyFile, domain string, targets CertT
 		// 面板域名还空着、这张证书又真要用上时才取它的域名:只进证书库的证书不该改掉订阅地址和 SNI。
 		// 泛域名不能当访问地址(也进不了 SNI),面板域名只从具体域名上取
 		used := targets.Panel || targets.Sub || values["certFile"] != ""
-		if used && domain != "" && !acme.IsWildcard(domain) && current["webDomain"] == "" {
+		if used && !targets.keepWeb && domain != "" && !acme.IsWildcard(domain) && current["webDomain"] == "" {
 			values["webDomain"] = domain
 		}
 		restartSub = current["subCertFile"] != wantSubCert || current["subKeyFile"] != wantSubKey || current["subRestartPending"] == "true"

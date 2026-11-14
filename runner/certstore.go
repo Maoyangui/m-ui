@@ -39,6 +39,8 @@ const (
 // CertTargets 新证书要顶替哪些用途;没勾的不动(以前没勾的会被清掉,签第二张证书把面板的 HTTPS 关了)。
 type CertTargets struct {
 	Lines, Panel, Sub bool
+	// keepWeb 面板域名空着时也不拿这张证书的域名去填(接任后给订阅域名签的:订阅域名已随原主机的身份设好,面板仍用新主机自己的地址)
+	keepWeb bool
 }
 
 // CertView 证书库的一行:库里记的(含续期状态)+ 证书文件读出来的 + 正用在哪 + 能不能自动续、为什么。

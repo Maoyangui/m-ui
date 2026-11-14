@@ -1415,6 +1415,20 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		roleChanged := false
+		// 切主副角色和主机容灾(审计中危):开过容灾的集群(纪元 ≥ 1)别的副机只认带纪元的主机。
+		//   - 副机改成主机:它没有纪元,别的副机会一律拒收,整个集群卡住 —— 拒绝,指明该走的路(设为主机 / 等接任 / ha reset);
+		//   - 主机改成副机:和菜单一样先清掉本机的容灾状态,不然新主机发来的请求会被它当成旧主机拒掉。
+		var haLeave bool
+		if v, ok := in["nodeMode"]; ok && s.run != nil {
+			toNode := strings.EqualFold(strings.TrimSpace(v), "true")
+			if h := s.haSvc(); h != nil && h.Epoch() > 0 && toNode != s.run.IsNode() {
+				if !toNode {
+					badRequest(w, errors.New("这个集群开过主机容灾,别的副机只认带纪元的主机:把这台直接改成主机,它们会一律拒收,整个集群卡住。换主机请在主机的容灾设置里对这台用「设为主机」;主机已经没了就等备用接任(或在备用的面板上点接任)。确实要让这台脱离原来的集群单独当主机,先在这台执行 m-ui ha reset(其它副机也要各自执行一遍)再切"))
+					return
+				}
+				haLeave = true
+			}
+		}
 		// 面板 / 订阅 / 代理面板的监听设置,存之前记下:真变了的保存后当场在进程里换(见 panel_switch.go)
 		listenKeys := []string{"webListen", "webPort", "webCertFile", "webKeyFile", "subListen", "subPort", "subCertFile", "subKeyFile",
 			"resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile"}
@@ -1455,6 +1469,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if roleChanged {
 			logger.Info("面板角色已切换为: ", s.role())
+			if haLeave {
+				if err := s.haSvc().LeaveCluster(); err != nil {
+					logger.Warning("切成副机时清掉本机的主机容灾状态失败: ", err)
+				}
+			}
 		}
 		if s.setting("upstreamTestUrl") != oldTestURL && s.syncGroupTestURL() && s.run != nil {
 			s.reloadUpstreams("测试地址改了")

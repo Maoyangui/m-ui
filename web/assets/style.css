@@ -1041,3 +1041,12 @@ button.ld-srow:hover { background: var(--surface-2); }
 .pm-spin { flex: none; width: 1rem; height: 1rem; border: 2px solid var(--border-strong); border-top-color: var(--primary); border-radius: 50%; animation: pm-spin .8s linear infinite; }
 @keyframes pm-spin { to { transform: rotate(360deg); } }
 .pm-foot { display: flex; justify-content: flex-end; gap: .5rem; padding: .75rem 1.1rem 1rem; }
+
+/* 主机容灾:接任时接管什么(两个选项沿用模式选择的样式);选了接管订阅才出现的 DNS 接口 */
+.ha-dns-box { margin: .55rem 0 .2rem; padding: .6rem .75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.ha-dns-box[hidden] { display: none; }
+.ha-dns-box > .hint:first-child { margin-top: 0; }
+/* 「测试」按钮和「清掉凭据」:窄屏时勾选框换到下一行,不被 .row input 撑开 */
+.ha-dns-act { column-gap: .9rem; }
+.ha-dns-act .field.check { flex-wrap: nowrap; margin: 0; }
+.ha-dns-act .field.check input { flex: none; }

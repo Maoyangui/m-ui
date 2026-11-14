@@ -571,13 +571,13 @@ func TestSelfLinkAvoidsMovingName(t *testing.T) {
 	if l := s.selfLink(); l.ApiUrl != "" {
 		t.Fatalf("没有 IP:拼不出来(设为主机会挡住): %+v", l)
 	}
-	// 新主机库里原主机那一行
-	n := testService(t, false, map[string]string{KeyDnsNames: "api.example.com"})
+	// 新主机库里原主机那一行(接管订阅时:订阅域名跟着新主机走,原主机那一行不能再用它)
+	n := testService(t, false, map[string]string{KeyDnsNames: "api.example.com", KeyTakeSub: "true"})
 	n.d.DB.Create(&model.Node{Id: 1, Name: "HK", Domain: "sub.example.com", Enabled: true})
 	n.d.DB.Create(&model.Node{Id: 2, Name: "TW", IsLocal: true, Enabled: true})
 	n.d.DB.Create(&model.Node{Id: 3, Name: "JP", Domain: "api.example.com", Enabled: true})
 	id := Identity{MasterName: "HK", SubHost: "sub.example.com", Self: Link{ApiUrl: "https://203.0.113.5:8443/p/", Token: "t", CertFP: "fp"}}
-	if err := n.applyFormerRow(n.d.DB, 1, 2, id, HowSetMaster); err != nil {
+	if err := n.applyFormerRow(n.d.DB, 1, 2, id, HowSetMaster, true); err != nil {
 		t.Fatal(err)
 	}
 	var row model.Node
@@ -585,8 +585,15 @@ func TestSelfLinkAvoidsMovingName(t *testing.T) {
 	if row.Domain != "" || row.ApiUrl != "https://203.0.113.5:8443/p/" || !row.Insecure || row.CertFP != "fp" || !row.Enabled {
 		t.Fatalf("原主机那一行:按 IP 连、钉指纹,随主机走的域名清空: %+v", row)
 	}
+	// 接任时只接管主机的工作:订阅域名不动,原主机那一行照旧用它
+	n.d.DB.Model(&model.Node{}).Where("id = ?", 1).Update("domain", "sub.example.com")
+	_ = n.applyFormerRow(n.d.DB, 1, 2, id, HowTakeover, false)
+	n.d.DB.First(&row, 1)
+	if row.Domain != "sub.example.com" {
+		t.Fatalf("没接管订阅:原主机那一行的域名不动: %+v", row)
+	}
 	n.d.DB.Model(&model.Node{}).Where("id = ?", 1).Update("domain", "hk.example.com")
-	_ = n.applyFormerRow(n.d.DB, 1, 2, id, HowSetMaster)
+	_ = n.applyFormerRow(n.d.DB, 1, 2, id, HowSetMaster, true)
 	n.d.DB.First(&row, 1)
 	if row.Domain != "hk.example.com" {
 		t.Fatal("它自己的域名(不随主机走)留着")

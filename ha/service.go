@@ -42,9 +42,11 @@ type Deps struct {
 	ResellerURL func() string
 	// Witness 境外测点见证(Globalping):从境外连主机的公网 IP;nil = 不做见证
 	Witness func(ctx context.Context, host string, ports []int) (WitnessResult, error)
-	// DNSAPI 测试里替换 Cloudflare 接口地址
+	// DNSAPI 测试里替换 DNS 服务商的接口地址
 	DNSAPI string
-	Now    func() time.Time
+	// IssueSubCert 用容灾的 DNS 接口给订阅域名签一张证书并用于订阅(异步,runner 实现;nil = 不会签)
+	IssueSubCert func(domain string) error
+	Now          func() time.Time
 }
 
 // Service 一台机器上的容灾服务。主机侧:推容灾状态、推副本、判断要不要变为副机、设为主机;

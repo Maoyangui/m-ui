@@ -316,7 +316,7 @@ function logoOf(data) {
 const haFp = seed => Array.from({ length: 16 }, (_, i) => '0123456789abcdef'[(seed * 7 + i * 5) % 16]).join('');
 const HA = {
   epoch: 3,
-  config: { mode: 'confirm', standbys: 2, replicaMinutes: 5, confirmMinutes: 3, autoMinutes: 10, rankStepMinutes: 3, witness: true, pauseUntil: 0, dnsNames: 'sub.example.com', dnsTokenSet: false, allowPlain: false },
+  config: { mode: 'confirm', standbys: 2, replicaMinutes: 5, confirmMinutes: 3, autoMinutes: 10, rankStepMinutes: 3, witness: true, pauseUntil: 0, dnsNames: 'sub.example.com', dnsTokenSet: false, allowPlain: false, takeSub: false, dnsProvider: 'cloudflare' },
 };
 const haNodes = () => ((S.nodes && S.nodes.nodes) || []).filter(n => n.enabled !== false);
 function haStandbys() {
@@ -341,9 +341,11 @@ function haView(full) {
       { code: 'standbys', level: picked.length >= c.standbys ? 'ok' : 'warn', args: { n: String(picked.length), want: String(c.standbys) } },
       { code: 'versions', level: 'ok' }, { code: 'replica', level: 'ok' }, { code: 'https', level: 'ok' },
       { code: 'selfLink', level: 'ok', args: { url: `https://${subBase}:2053/app/` } },
-      { code: 'subDomain', level: 'ok', args: { host: 'sub.example.com' } }, { code: 'telegram', level: 'ok' }, { code: 'peers', level: 'ok' },
+      ...(c.takeSub ? [{ code: 'subDomain', level: 'ok', args: { host: 'sub.example.com' } },
+        c.dnsTokenSet ? { code: 'takeSubDns', level: 'ok', names: c.dnsNames.split(/[\s,]+/).filter(Boolean), args: { provider: c.dnsProvider || 'cloudflare' } } : { code: 'takeSubDns', level: 'bad' },
+        { code: 'takeSubCert', level: 'ok', args: { days: '71' } }] : [{ code: 'takeSub', level: 'info', args: { host: 'sub.example.com' } }]),
+      { code: 'telegram', level: 'ok' }, { code: 'peers', level: 'ok' },
       c.witness ? { code: 'witness', level: 'ok' } : { code: 'witness', level: c.mode === 'auto' && haNodes().length <= 2 ? 'bad' : 'info' },
-      c.dnsTokenSet ? { code: 'dns', level: 'ok', names: c.dnsNames.split(/[\s,]+/).filter(Boolean), args: { names: c.dnsNames } } : { code: 'dns', level: 'info' },
     ] : [{ code: 'standbys', level: 'info' }, { code: 'replica', level: 'info' }];
     if (!on) v.standbys = sb.map(x => ({ ...x, replica: undefined, ack: undefined }));
   }
@@ -508,14 +510,16 @@ function route(method, path, query, body) {
     case 'ha':
       if (!seg[1]) { // 保存设置
         const b = body || {}, c = HA.config;
-        for (const k of ['mode', 'standbys', 'replicaMinutes', 'confirmMinutes', 'autoMinutes', 'rankStepMinutes', 'witness', 'allowPlain', 'dnsNames']) if (b[k] !== undefined) c[k] = b[k];
+        if (b.takeSub && !b.dnsToken && !c.dnsTokenSet) throw new ApiError(400, zh ? '接管订阅要先填 DNS 接口(Cloudflare 令牌,或阿里云、腾讯云 DNSPod 的密钥):接任后靠它把订阅域名改指到新主机' : 'Taking over subscriptions needs a DNS interface (a Cloudflare token, or Alibaba Cloud / Tencent Cloud DNSPod keys): after a takeover it points the subscription domain to the new master');
+        for (const k of ['mode', 'standbys', 'replicaMinutes', 'confirmMinutes', 'autoMinutes', 'rankStepMinutes', 'witness', 'allowPlain', 'dnsNames', 'takeSub', 'dnsProvider']) if (b[k] !== undefined) c[k] = b[k];
+        if (c.takeSub && !/(^|[\s,])sub\.example\.com([\s,]|$)/.test(c.dnsNames || '')) c.dnsNames = ['sub.example.com', c.dnsNames].filter(Boolean).join(',');
         if (b.dnsToken) c.dnsTokenSet = true;
         if (b.clearDnsToken) c.dnsTokenSet = false;
         return ok();
       }
       if (seg[1] === 'pause') { HA.config.pauseUntil = body && body.minutes > 0 ? now() + body.minutes * 60 : 0; return ok(); }
       if (seg[1] === 'notice') return ok();
-      if (seg[1] === 'dns-test') return { records: [], error: zh ? '演示模式:不连 Cloudflare' : 'Demo mode: Cloudflare is not contacted' };
+      if (seg[1] === 'dns-test') return { records: [], error: zh ? '演示模式:不连 DNS 服务商' : 'Demo mode: the DNS provider is not contacted' };
       throw new ApiError(400, zh ? '演示模式:不会真的换主机或接任' : 'Demo mode: the master is not actually moved or taken over');
     case 'backup': if (seg[1] === 'restore-ack') { S.restoreAcked = true; return ok(); } if (seg[1] === 'run') return { name: 'm-ui-demo-' + new Date().toISOString().slice(0, 10) + '.zip' }; if (seg[1] === 'inspect') return { users: S.users.length, lines: S.lines.length, note: 'Demo mode' }; return ok();
     case 'cert':

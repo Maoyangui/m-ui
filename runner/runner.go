@@ -284,6 +284,10 @@ func New(dbPath string) (*Runner, error) {
 		ResellerURL: r.ResellerURL,
 		Witness:     r.haWitness,
 		DNSAPI:      cfAPI,
+		// 接任后订阅证书不能用:经容灾的 DNS 接口给订阅域名签一张、用于订阅(按续期的口径签,不改证书页表单的默认域名)
+		IssueSubCert: func(domain string) error {
+			return r.IssueCert(IssueRequest{Domain: domain, Method: MethodHADNS, AutoRenew: true, Renew: true, Targets: CertTargets{Sub: true, keepWeb: true}})
+		},
 	})
 	r.hub = hub.New(hub.Deps{
 		DB: db, Setting: r.setting, IsNode: r.IsNode, Version: Version,

@@ -26,9 +26,9 @@ func (r *Runner) haWitness(ctx context.Context, host string, ports []int) (ha.Wi
 	return ha.WitnessResult{Verdict: ha.WitnessVerdict(ok, total), OK: ok, Total: total}, nil
 }
 
-// TestCFAPIEnv 只供测试的 Cloudflare 接口地址覆盖项:真机演练时在 systemd 单元里设(Environment=…,只有 root 改得了),
-// 主机容灾的改 DNS、测试令牌、让出时改回都打到这个地址(例如测试机上的假 Cloudflare)。只读进程环境,不进库,
-// 面板、外部 API 都改不了 —— 做成设置的话,面板管理员就能把已保存的令牌发到任意地址。证书签发不受影响。
+// TestCFAPIEnv 只供测试的 DNS 服务商接口地址覆盖项:真机演练时在 systemd 单元里设(Environment=…,只有 root 改得了),
+// 主机容灾的改 DNS、测试 DNS 接口、让出时改回、接任后经容灾 DNS 接口给订阅域名签证书都打到这个地址(例如测试机上的假 Cloudflare)。
+// 只读进程环境,不进库,面板、外部 API 都改不了 —— 做成设置的话,面板管理员就能把已保存的令牌发到任意地址。证书页的签发不受影响。
 const TestCFAPIEnv = "M_UI_TEST_CF_API"
 
 // testCFAPI 读并校验覆盖项(http / https、有主机名、不带用户信息);设了就在日志与操作审计里各记一条。无效的不用。
@@ -42,7 +42,7 @@ func testCFAPI(db *gorm.DB) string {
 		logger.Warning("环境变量 ", TestCFAPIEnv, " 无效,不用它: ", err)
 		return ""
 	}
-	logger.Warning("主机容灾改 DNS 用的是测试地址 ", u, "(环境变量 ", TestCFAPIEnv, ",只供测试;证书签发不受影响)")
+	logger.Warning("主机容灾改 DNS 用的是测试地址 ", u, "(环境变量 ", TestCFAPIEnv, ",只供测试;证书页的签发不受影响)")
 	b, _ := json.Marshal(map[string]string{"url": u})
 	db.Create(&model.Change{DateTime: time.Now().Unix(), Actor: "system", Key: "ha", Action: "cf-api-override", Obj: b})
 	return u

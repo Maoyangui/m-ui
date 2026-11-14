@@ -201,9 +201,10 @@ func TestBuildReplicaConsistentSnapshot(t *testing.T) {
 	}
 }
 
-// 副本带上订阅用的证书(主机身份):证书库里的那一行一起记下;没有订阅证书时不带。
+// 副本带上订阅用的证书(主机身份,开了「接任时也接管订阅」时):证书库里的那一行一起记下;没有订阅证书时不带。
+// 只接管主机的工作时不带,见 TestCaptureIdentityByScope。
 func TestBuildReplicaSubCert(t *testing.T) {
-	s := testService(t, false, map[string]string{KeyEpoch: "1", KeyMode: ModeConfirm})
+	s := testService(t, false, map[string]string{KeyEpoch: "1", KeyMode: ModeConfirm, KeyTakeSub: "true"})
 	s.d.DB.Create(&model.Node{Name: "HK", IsLocal: true, Enabled: true})
 	_, meta, err := s.buildReplica(t.TempDir())
 	if err != nil || meta.Identity.SubCert != nil {
