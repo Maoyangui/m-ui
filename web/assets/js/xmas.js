@@ -26,13 +26,14 @@ const CSS = `
 
 .xmas-show { position: fixed; inset: 0; z-index: 9999; overflow: hidden; cursor: pointer; color: #fff;
   background: radial-gradient(120% 90% at 50% 15%, #13254d 0%, #0a1430 45%, #04070f 100%);
-  clip-path: circle(0 at var(--ox, 50%) var(--oy, 50%)); animation: xs-reveal 1.1s cubic-bezier(.65,.05,.25,1) forwards; }
-.xmas-show.out { animation: xs-hide 1s cubic-bezier(.65,.05,.25,1) forwards; }
-@keyframes xs-reveal { from { clip-path: circle(0 at var(--ox, 50%) var(--oy, 50%)); } to { clip-path: circle(150% at var(--ox, 50%) var(--oy, 50%)); } }
-@keyframes xs-hide { 0% { clip-path: circle(150% at var(--ox, 50%) var(--oy, 50%)); opacity: 1; } 100% { clip-path: circle(0 at var(--ox, 50%) var(--oy, 50%)); opacity: .4; } }
-.xmas-stage { transition: transform .9s cubic-bezier(.65,.05,.25,1), opacity .8s ease; }
-.xmas-show.out .xmas-stage { transform: scale(.86) translateY(4vh); opacity: 0; }
-.xmas-show.out .xmas-x, .xmas-show.out .xmas-hint { opacity: 0; transition: opacity .3s ease; }
+  opacity: 0; animation: xs-in 1.1s ease forwards; }
+/* 浮现:背景和雪先淡入,树和字从略低处带一点模糊缓缓上浮、变清晰;隐退:内容微微上移、缩小、变模糊淡去,背景随后淡出 */
+.xmas-stage { opacity: 0; transform: translateY(3.5vh) scale(.97); filter: blur(10px); animation: xs-emerge 1.6s cubic-bezier(.2,.75,.2,1) .25s forwards; }
+@keyframes xs-emerge { to { opacity: 1; transform: none; filter: blur(0); } }
+.xmas-show.out { animation: xs-out 1.2s ease .2s both; }
+.xmas-show.out .xmas-stage { animation: xs-recede 1.1s cubic-bezier(.4,0,.6,1) forwards; }
+@keyframes xs-recede { from { opacity: 1; transform: none; filter: blur(0); } to { opacity: 0; transform: translateY(-2.5vh) scale(.96); filter: blur(10px); } }
+.xmas-show.out .xmas-x, .xmas-show.out .xmas-hint { opacity: 0; transition: opacity .4s ease; }
 @keyframes xs-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes xs-out { from { opacity: 1; } to { opacity: 0; } }
 .xmas-show canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -79,6 +80,7 @@ const CSS = `
   .xmas-egg .xb-star, .xmas-egg .xb-l { animation: none; opacity: 1; }
   .xmas-tree .t, .xmas-tree .g, .xmas-tree .b, .xmas-tree .l, .xmas-tree .s, .xmas-tree .gift, .xmas-line span, .xmas-sub { animation: xs-on .6s ease forwards !important; transform: none !important; filter: none !important; stroke-dashoffset: 0 !important; }
   .xmas-tree .rays, .xmas-sub::after { animation: none !important; }
+  .xmas-stage, .xmas-show.out .xmas-stage { transform: none !important; filter: none !important; }
 }
 `;
 
@@ -183,8 +185,6 @@ export function playXmas(origin) {
     <canvas class="xm-front"></canvas>
     <button type="button" class="xmas-x" aria-label="${zh ? '关闭' : 'Close'}" title="${zh ? '关闭' : 'Close'}">×</button>
     <div class="xmas-hint">${zh ? '会自动消失,也可以点 × 或按 Esc 关掉' : 'Closes by itself — or click × / press Esc'}</div>`;
-  { const r = origin && origin.getBoundingClientRect ? origin.getBoundingClientRect() : null; // 从按钮处展开、收回到按钮处
-    if (r) { box.style.setProperty('--ox', (r.left + r.width / 2) + 'px'); box.style.setProperty('--oy', (r.top + r.height / 2) + 'px'); } }
   document.body.appendChild(box);
 
   const back = box.querySelector('.xm-back'), front = box.querySelector('.xm-front');
@@ -301,7 +301,7 @@ export function playXmas(origin) {
     if (closed) return;
     closed = true;
     box.classList.add('out');
-    setTimeout(() => { cancelAnimationFrame(raf); window.removeEventListener('resize', size); document.removeEventListener('keydown', esc); box.remove(); }, 1000);
+    setTimeout(() => { cancelAnimationFrame(raf); window.removeEventListener('resize', size); document.removeEventListener('keydown', esc); box.remove(); }, 1450);
   };
   box.addEventListener('click', close); // 点空白处、点 ×、按 Esc 都能关
   box.querySelector('.xmas-x').addEventListener('click', e => { e.stopPropagation(); close(); });
