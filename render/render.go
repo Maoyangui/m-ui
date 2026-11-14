@@ -212,6 +212,8 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 			rule, _ := json.Marshal(map[string]interface{}{"ip_cidr": own, "action": "reject"})
 			rules = append(rules, rule)
 		}
+		// 集群里别的服务器的管理端口(面板、副机接口、订阅、代理面板),理由与端口取法见 cluster.go
+		rules = append(rules, clusterBlockRules(db)...)
 	}
 	var defaults []json.RawMessage // 纯 IPv6 时各线路的默认出口规则挪到最后(见下)
 	for _, line := range lines {

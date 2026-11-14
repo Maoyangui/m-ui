@@ -1704,6 +1704,43 @@ func (r *Runner) coreWatchLoop(stop <-chan struct{}) {
 	}
 }
 
+// clusterWatchEvery 多久比对一次集群屏蔽的输入(render.ClusterSig)。
+const clusterWatchEvery = time.Minute
+
+// clusterWatchLoop 「允许访问内网」关着时,私网屏蔽里带着集群里别的服务器的管理端口(render 的 cluster.go)。
+// 这些输入不随线路变:加了 / 删了副机、副机换了公网 IP、主机改了面板端口,副机这边快照只换了 nodes 表、走的是用户热更新,
+// 主机那边是副机报告改了 nodes 表,都不会重新渲染路由规则。这里每分钟比对一次摘要,变了就全量重载
+// (渲染结果和当前生效的一样时 ReloadAll 不重启数据面,所以只有规则真变了才会断一次连接)。
+// 启动时 Run 已按当时的库渲染过,第一轮只记下摘要。
+func (r *Runner) clusterWatchLoop(stop <-chan struct{}) {
+	t := time.NewTicker(clusterWatchEvery)
+	defer t.Stop()
+	last := render.ClusterSig(r.db)
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			sig := render.ClusterSig(r.db)
+			if sig == last {
+				continue
+			}
+			if render.AllowPrivate(r.db) && strings.HasPrefix(last, "true") {
+				last = sig // 屏蔽一直关着:集群怎么变都不进配置,不必重载
+				continue
+			}
+			if !r.core.IsRunning() || r.stopping.Load() {
+				continue // 数据面没在跑:拉起时会按最新的库渲染,这里先不记,跑起来后再比
+			}
+			if err := r.ReloadAll(); err != nil {
+				logger.Warning("集群服务器有变化,重新渲染私网屏蔽失败(下一轮再试): ", err)
+				continue
+			}
+			last = sig
+		}
+	}
+}
+
 // publicIPMissLimit 某个地址族连续几轮没测到才把它从记录里去掉:偶尔一轮测不通不该让订阅地址跟着变
 // (双栈机器被换成 v6、选了 IPv6 的节点被打回 IPv4)。
 const publicIPMissLimit = 3
@@ -1990,7 +2027,7 @@ func Run(dbPath string) error {
 	}{
 		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"线路上游", r.relayLoop}, {"运行统计", r.pingLoop}, {"定时备份", r.backupLoop},
 		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop}, {"凭据撤销重试", r.secureReloadLoop}, {"用户热更新重试", r.userReloadLoop},
-		{"数据面看护", r.coreWatchLoop},
+		{"数据面看护", r.coreWatchLoop}, {"集群屏蔽跟进", r.clusterWatchLoop},
 	} {
 		go keepRunning(l.name, l.fn, stopCheckpoint)
 	}

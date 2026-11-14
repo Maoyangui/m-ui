@@ -141,8 +141,30 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 	for _, k := range SyncedSettings {
 		s.Settings[k] = setting(k)
 	}
+	// 主机自己那一行带上自己的面板 / 订阅 / 代理面板端口:副机的私网屏蔽据此拦用户经副机代理去碰主机的管理端口
+	// (见 render 的 cluster.go)。主机自己的库里这一行不存端口(没人给主机上报),只在快照里填
+	for i := range s.Nodes {
+		if s.Nodes[i].IsLocal {
+			s.Nodes[i].ServicePorts, _ = json.Marshal(masterServicePorts(setting))
+		}
+	}
 	s.Revision = revisionOf(s)
 	return s, nil
+}
+
+// masterServicePorts 主机自己监听的管理端口(与 web 的 localServicePorts 同一口径;代理面板关掉或本机是副机时不算)。
+func masterServicePorts(setting func(string) string) []model.ServicePort {
+	port := func(k string, def int) int {
+		if p, err := strconv.Atoi(strings.TrimSpace(setting(k))); err == nil && p > 0 && p < 65536 {
+			return p
+		}
+		return def
+	}
+	out := []model.ServicePort{{Label: "面板", Port: port("webPort", 2053)}, {Label: "订阅", Port: port("subPort", 2056)}}
+	if !strings.EqualFold(strings.TrimSpace(setting("resellerEnabled")), "false") && !strings.EqualFold(strings.TrimSpace(setting("nodeMode")), "true") {
+		out = append(out, model.ServicePort{Label: "代理面板", Port: port("resellerPort", 2054)})
+	}
+	return out
 }
 
 func readSnapshot(db *gorm.DB, s *Snapshot) error {
@@ -209,8 +231,12 @@ func revisionOf(s Snapshot) string {
 	nodes := make([]model.Node, len(s.Nodes))
 	copy(nodes, s.Nodes)
 	for i := range nodes {
+		if !nodes[i].IsLocal {
+			// 副机上报的端口变了不必整份重推(主机建线路时避让用,副机的集群屏蔽等下一次推送再换);
+			// 主机自己的端口(BuildSnapshot 填的)计入:管理员改了面板 / 订阅端口,副机的屏蔽要跟着换
+			nodes[i].ServicePorts = nil
+		}
 		nodes[i].IsLocal = false
-		nodes[i].ServicePorts = nil // 副机端口只给主机做校验用,变了不必整份重推
 		nodes[i].Certs = certsForRevision(nodes[i].Certs)
 	}
 	s.Nodes = nodes
