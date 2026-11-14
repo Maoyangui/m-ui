@@ -1715,17 +1715,18 @@ const clusterWatchEvery = time.Minute
 func (r *Runner) clusterWatchLoop(stop <-chan struct{}) {
 	t := time.NewTicker(clusterWatchEvery)
 	defer t.Stop()
-	last := render.ClusterSig(r.db)
+	// 中转入口转到的地址(出口服务器换 IP、停用)另算一份:私网屏蔽关着时集群变化不进配置,中转却照样要跟着变
+	last, lastFwd := render.ClusterSig(r.db), render.ForwardSig(r.db)
 	for {
 		select {
 		case <-stop:
 			return
 		case <-t.C:
-			sig := render.ClusterSig(r.db)
-			if sig == last {
+			sig, fwd := render.ClusterSig(r.db), render.ForwardSig(r.db)
+			if sig == last && fwd == lastFwd {
 				continue
 			}
-			if render.AllowPrivate(r.db) && strings.HasPrefix(last, "true") {
+			if fwd == lastFwd && render.AllowPrivate(r.db) && strings.HasPrefix(last, "true") {
 				last = sig // 屏蔽一直关着:集群怎么变都不进配置,不必重载
 				continue
 			}
@@ -1733,10 +1734,10 @@ func (r *Runner) clusterWatchLoop(stop <-chan struct{}) {
 				continue // 数据面没在跑:拉起时会按最新的库渲染,这里先不记,跑起来后再比
 			}
 			if err := r.ReloadAll(); err != nil {
-				logger.Warning("集群服务器有变化,重新渲染私网屏蔽失败(下一轮再试): ", err)
+				logger.Warning("集群服务器有变化,重新渲染私网屏蔽 / 中转入口失败(下一轮再试): ", err)
 				continue
 			}
-			last = sig
+			last, lastFwd = sig, fwd
 		}
 	}
 }

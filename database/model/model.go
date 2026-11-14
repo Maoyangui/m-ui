@@ -63,8 +63,10 @@ type Line struct {
 	Transport json.RawMessage `json:"transport,omitempty"`
 	// RouteRules 分流规则 [{type, values, to}]:按目标分给不同出口,没命中的走 UpstreamId;空 = 不分流(见 render.RouteRule)。
 	RouteRules json.RawMessage `json:"routeRules,omitempty"`
-	Enabled    bool            `json:"enabled" gorm:"default:true"`
-	Sort       int             `json:"sort"`
+	// Forwards 中转入口 []LineForward(见 forward.go):客户端经中转连到这条线路;空 = 没有。
+	Forwards json.RawMessage `json:"forwards,omitempty"`
+	Enabled  bool            `json:"enabled" gorm:"default:true"`
+	Sort     int             `json:"sort"`
 }
 
 // Cert 这台服务器证书库里的一张证书。各机各管各的,不随快照同步(见 runner/certstore.go)。

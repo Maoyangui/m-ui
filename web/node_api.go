@@ -283,15 +283,18 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		var disabled, revokedUsers, revokedResellers []string
+		var disabled, revokedUsers, revokedResellers, prunedFwd []string
 		err = s.db.Transaction(func(tx *gorm.DB) error { // 服务器和引用它的一切一起删
 			disabled = s.detachLinesFromNodeTx(tx, id) // 只部署在这台机器上的线路会被停用,不留悬空引用
+			var err error
+			if prunedFwd, err = pruneForwardsTx(tx, id); err != nil { // 经这台中转、或转给这台的中转入口一起去掉
+				return err
+			}
 			if err := tx.Delete(&model.Node{}, id).Error; err != nil {
 				return err
 			}
 			// 用户 / 代理在某条线路上只收窄到这台机器的:收窄行一清就退回"该线路的全部服务器",范围静默扩大到
 			// 别的机器。这条分配 / 授权改为撤掉,并列给管理员看(审计 M062)
-			var err error
 			if revokedUsers, revokedResellers, err = revokeSoleNodeScopes(tx, id); err != nil {
 				return err
 			}
@@ -316,10 +319,10 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			s.run.Reach().Forget(id)
 		}
 		s.audit(r, "node", "delete", node.Name)
-		if len(disabled) > 0 {
+		if len(disabled) > 0 || len(prunedFwd) > 0 {
 			s.reloadAll("删除服务器 " + node.Name)
 		}
-		resp := map[string]interface{}{"ok": "1", "disabledLines": disabled, "revokedUsers": revokedUsers, "revokedResellers": revokedResellers}
+		resp := map[string]interface{}{"ok": "1", "disabledLines": disabled, "revokedUsers": revokedUsers, "revokedResellers": revokedResellers, "prunedForwards": prunedFwd}
 		if e := s.decommission(node, before); e != "" {
 			resp["decommissionError"] = e
 		}

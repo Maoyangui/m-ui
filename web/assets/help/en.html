@@ -339,6 +339,22 @@
     </ul></div>
   </section>
 
+  <section class="sec" id="line-forwards">
+    <h3>Relay entries: reaching a line through another server or an outside relay</h3>
+    <ol class="steps">
+      <li>Edit the line and click <b data-k="line.fw.add">+ Add a relay entry</b> under <b data-k="line.fw.title">Relay entries</b>.</li>
+      <li><b data-k="line.fw.kindVia">Via a server</b>: pick one of your servers as the relay and the port it opens (the line's port by default); if the line runs on several servers, choose which one it <b data-k="line.fw.to">Forwards to</b>. That server passes the encrypted traffic to the exit as is, without decrypting it, and subscriptions gain a "line-exit-relay" node that is speed-tested alongside the direct ones.</li>
+      <li><b data-k="line.fw.kindExt">Outside relay</b>: enter the address and port of your own realm / iptables forwarder or a relay you bought. The panel only puts it in subscriptions; set up the forwarding there yourself (to the line's port on the exit server).</li>
+      <li>Under <b data-k="line.fw.more">More</b> you can set a <b data-k="line.fw.target">Forward-to address</b> (a private address when the two servers share a network) or keep the entry <b data-k="line.fw.off">Paused</b>. In the line list, "⇄ N" after a line's name counts its relay entries; the line details list them at the top.</li>
+    </ol>
+    <div class="tip"><b>How this differs from using a line as an upstream</b>That one decrypts on the relay and runs the protocol there too; a relay entry only moves bytes, saves half the encryption work and also carries UDP protocols such as hysteria2 and TUIC.</div>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>Open the port in the relay server's firewall (your cloud provider's security group): UDP for hysteria2 / TUIC, TCP and UDP for shadowsocks, TCP for the rest.</li>
+      <li>The exit server sees the relay's IP: several devices of one person coming through the same relay count as one IP there, so device limits can't hold back devices on a relay; relay IPs show "⇄ server name" among online IPs.</li>
+      <li>Relay nodes don't carry port hopping; traffic is counted at the exit server's ratio as usual. Deleting a server removes the relay entries that go through it or forward to it.</li>
+    </ul></div>
+  </section>
+
   <section class="sec" id="protocols">
     <h3>Choosing a protocol</h3>
     <p class="lede">Not sure? Use Hysteria2 as the main line and add one TCP line (AnyTLS or VLESS + Reality) as a backup.</p>

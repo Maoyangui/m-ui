@@ -180,6 +180,16 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 		json.RawMessage(`{"action":"sniff"}`),
 		json.RawMessage(`{"protocol":["dns"],"action":"hijack-dns"}`),
 	}
+	// 中转入口(见 forward.go):经本机转给别的服务器的,规则排在最前面,原样走直连出口
+	forwards := forwardInbounds(db, self, all, localPorts(db, lines))
+	if len(forwards) > 0 {
+		tags := make([]string, 0, len(forwards))
+		for _, f := range forwards {
+			tags = append(tags, f.tag)
+		}
+		rule, _ := json.Marshal(map[string]interface{}{"inbound": tags, "action": "route", "outbound": "direct"})
+		rules = append([]json.RawMessage{rule}, rules...)
+	}
 	if settingOn(db, "blockBT") {
 		// 屏蔽 BT:VPS 上跑 BT 最常招来版权投诉。靠协议嗅探认(TCP 握手、uTP、UDP tracker),排在所有线路规则之前
 		rules = append(rules, json.RawMessage(`{"protocol":["bittorrent"],"action":"reject"}`))
@@ -252,6 +262,14 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 	if pureV6 {
 		rules = append(rules, v6DNSRules(lines)...)
 		rules = append(rules, defaults...)
+	}
+
+	for _, f := range forwards {
+		b, err := json.Marshal(f.inbound)
+		if err != nil {
+			return nil, err
+		}
+		inbounds = append(inbounds, b)
 	}
 
 	outbounds, err := renderOutbounds(upstreams)

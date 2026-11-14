@@ -26,6 +26,7 @@ export const fchk = () => true; export const matches = () => true; export const 
 export const chipList = (a) => a.join('');
 export const openDrawer = () => {}; export const drawerOpen = () => false; export const setText = () => {}; export const fmtBytes = (n) => String(n); export const tzOffsetMinutes = () => 0;`);
 stub('chart.js', `export const barChart = () => {}; export const bucketFor = () => 3600;`);
+stub('relayip.js', `export const serverOfIP = () => '';`);
 stub('certpicker.js', `export const openCertDrawer = () => {}; export const certLabel = (s) => s;`);
 stub('reach.js', `export const loadReach = async () => null; export const reachLoaded = () => true; export const v6Of = (id) => (globalThis.__v6 || {})[id] || null;
 export const v6LineBadge = () => ''; export const v6ForLine = (v, l) => ((l.protocol === 'hysteria2' || l.protocol === 'tuic') ? 'udpLine' : v ? v.state : null);`);

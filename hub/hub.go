@@ -306,6 +306,7 @@ func sameLines(a, b []model.Line) bool {
 			out[i].Tls = normJSON(out[i].Tls)
 			out[i].Transport = normJSON(out[i].Transport)
 			out[i].RouteRules = normJSON(out[i].RouteRules)
+			out[i].Forwards = normJSON(out[i].Forwards)
 		}
 		return out
 	}

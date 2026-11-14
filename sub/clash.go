@@ -92,7 +92,7 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 	var groupAt []int // 线路组在 topNames 里的位置:组名等本站节点都定完名再起,先占个位
 	for _, line := range lines {
 		var names []string
-		for _, a := range resolveAddrs(line, entries, lineNodes[line.Id]) {
+		for _, a := range subAddrs(line, entries, lineNodes[line.Id]) {
 			for _, p := range lineToClashProxies(line, user, a) {
 				if a.insecure {
 					applyInsecure(p)
@@ -386,8 +386,8 @@ func lineToClashProxies(line model.Line, user model.User, a addr) []map[string]i
 			p["obfs"], _ = obfs["type"].(string)
 			p["obfs-password"], _ = obfs["password"].(string)
 		}
-		if ph := portHopping(line); ph != "" {
-			p["ports"] = ph // mihomo 端口跳跃
+		if ph := portHopping(line); ph != "" && !a.relay {
+			p["ports"] = ph // mihomo 端口跳跃(中转入口只转一个端口,不带)
 		}
 		return []map[string]interface{}{p}
 	case "anytls":

@@ -161,6 +161,22 @@ func (s *Server) checkBatchPorts(batch []model.Line) error {
 	}
 	var nodes []model.Node
 	s.db.Select("id, name").Order("sort asc, id asc").Find(&nodes)
+	// 中转入口(见 line_forwards.go):转给的服务器得还在新范围里;新范围里各台上别的线路的中转入口不能占着这个端口
+	refs := s.forwardRefs(0)
+	for _, a := range batch {
+		if err := forwardsOutOfScope(a, nodes); err != nil {
+			return err
+		}
+		own := refs[:0:0]
+		for _, r := range refs {
+			if r.LineId != a.Id {
+				own = append(own, r)
+			}
+		}
+		if err := s.forwardOnLinePort(a, own, nodes); err != nil {
+			return fmt.Errorf("线路「%s」:%w", a.Name, err)
+		}
+	}
 	var others []model.Line
 	s.db.Select("id, name, port, node_ids").Find(&others)
 	for i, a := range batch {

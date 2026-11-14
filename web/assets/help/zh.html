@@ -339,6 +339,22 @@
     </ul></div>
   </section>
 
+  <section class="sec" id="line-forwards">
+    <h3>中转入口:经别的服务器或外部中转连进来</h3>
+    <ol class="steps">
+      <li>编辑线路,在 <b data-k="line.fw.title">中转入口</b> 下点 <b data-k="line.fw.add">+ 添加中转入口</b>。</li>
+      <li><b data-k="line.fw.kindVia">经集群服务器</b>:选一台服务器当中转,填它上面开的端口(默认和线路端口一样),线路部署在几台时选 <b data-k="line.fw.to">转给</b> 哪台。那台把收到的加密数据原样转给出口,不解密;订阅里自动多一个「线路名-出口-中转名」的节点,和直连的节点一起测速。</li>
+      <li><b data-k="line.fw.kindExt">外部中转</b>:填你自己跑的 realm / iptables、或买的中转给你的地址和端口;面板只把它写进订阅,转发要在那边配好(转到出口服务器的线路端口)。</li>
+      <li><b data-k="line.fw.more">更多</b> 里可以填 <b data-k="line.fw.target">转到地址</b>(两台内网互通时填内网地址),或者先 <b data-k="line.fw.off">暂停</b>。线路列表里线路名后面的「⇄ N」是这条线路有几个中转入口,线路详情的顶上逐个列出。</li>
+    </ol>
+    <div class="tip"><b>和「把线路加为上游」的区别</b>那种是在中转机上解密再转,中转机也要跑这个协议;中转入口只搬字节,少一半加解密,hysteria2、TUIC 这类 UDP 协议也能转。</div>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>中转服务器的防火墙(云厂商安全组)要放行这个端口:hysteria2 / TUIC 是 UDP,shadowsocks 是 TCP 和 UDP,其余是 TCP。</li>
+      <li>出口服务器看到的来源是中转的 IP:同一个人经同一台中转连进来的几台设备,在出口上只算一个 IP,设备数限制管不住走中转的设备;在线 IP 里中转的 IP 会标「⇄ 服务器名」。</li>
+      <li>中转节点不带端口跳跃;流量照常按出口服务器的倍率计。删掉一台服务器时,经它中转、转给它的中转入口一起去掉。</li>
+    </ul></div>
+  </section>
+
   <section class="sec" id="protocols">
     <h3>协议怎么选</h3>
     <p class="lede">拿不准就这样配:主力用 Hysteria2,再配一条 TCP 的(AnyTLS 或 VLESS + Reality)当备用。</p>

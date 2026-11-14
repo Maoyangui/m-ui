@@ -765,7 +765,31 @@ const EN = /*BEGIN*/{
 "服务器已停用": "The server is disabled",
 "联系不上这台服务器": "Cannot reach this server",
 "这台服务器的版本太旧,升级后才有按线路的流量": "This server is too old; upgrade it to see per-line traffic",
-"缺少线路名": "Missing line name"
+"缺少线路名": "Missing line name",
+"中转入口的格式不对: %w": "The relay entries are malformed: %w",
+"一条线路最多 %d 个中转入口": "A line can have at most %d relay entries",
+"第 %d 个中转入口的名字太长(最多 40 个字)": "The name of relay entry %d is too long (40 characters at most)",
+"第 %d 个中转入口的端口需在 1-65535 之间": "The port of relay entry %d must be between 1 and 65535",
+"第 %d 个中转入口没选转给哪台服务器": "Relay entry %d doesn't say which server it forwards to",
+"第 %d 个中转入口转给的服务器已经不在了,删掉它或换一台": "The server that relay entry %d forwards to no longer exists; remove the entry or pick another server",
+"第 %d 个中转入口转给「%s」,但这条线路没部署在那台": "Relay entry %d forwards to \"%s\", but this line isn't deployed there",
+"第 %d 个中转入口没填中转地址": "Relay entry %d has no relay address",
+"第 %d 个中转入口的地址 %q 不对:只填 IP 或域名,不带端口、协议头和路径": "Relay entry %d: the address %q is invalid; enter only an IP or a domain, without port, scheme or path",
+"第 %d 个中转入口和前面的一个重复了": "Relay entry %d duplicates an earlier one",
+"第 %d 个中转入口的中转服务器已经不在了,删掉它或换一台": "The relay server of relay entry %d no longer exists; remove the entry or pick another server",
+"第 %d 个中转入口的中转服务器和出口是同一台「%s」": "Relay entry %d uses \"%s\" as both the relay and the exit",
+"第 %d 个中转入口的转到地址 %q 不对:只填 IP 或域名,不带端口(端口就是线路的端口)": "Relay entry %d: the forward-to address %q is invalid; enter only an IP or a domain, without a port (the port is the line's port)",
+"第 %d 个中转入口和前面的一个在「%s」上用了同一个端口 %d": "Relay entry %d and an earlier one use the same port on \"%s\": %d",
+"第 %d 个中转入口:%w": "Relay entry %d: %w",
+"第 %d 个中转入口:端口 %d 已被本机其它程序占用,换一个": "Relay entry %d: port %d is taken by another program on this server; pick another",
+"端口 %d 是服务器「%s」的%s端口,换一个": "Port %d is the %[3]s port of server \"%[2]s\"; pick another",
+"这条线路自己在「%s」上就用着端口 %d,换一个": "This line itself already uses port %[2]d on \"%[1]s\"; pick another",
+"端口 %d 在「%s」上已被线路「%s」用着,换一个": "Port %d on \"%s\" is used by line \"%s\"; pick another",
+"端口 %d 在「%s」上已被线路「%s」的中转入口用着,换一个": "Port %d on \"%s\" is used by a relay entry of line \"%s\"; pick another",
+"端口 %d 落在线路「%s」在「%s」上的端口跳跃范围 %s 里,UDP 包会被转给那条线路,换一个": "Port %[1]d falls inside the port-hopping range %[4]s of line \"%[2]s\" on \"%[3]s\", so its UDP packets would go to that line; pick another",
+"线路「%s」的第 %d 个中转入口转给「%s」,改完后那台不再部署这条线路;先在线路里改掉这个中转入口": "Relay entry %[2]d of line \"%[1]s\" forwards to \"%[3]s\", which would no longer run this line; change that relay entry in the line first",
+"线路「%s」改完后也部署到「%s」,和它经那台的中转入口撞了端口 %d": "After this change line \"%s\" also runs on \"%s\", where its own relay entry uses the same port %d",
+"线路「%s」:%w": "Line \"%s\": %w"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

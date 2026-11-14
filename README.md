@@ -43,7 +43,7 @@ m-ui 是一个自托管的代理面板:**一个二进制 + 一个数据库文件
 
 | 模块 | 内容 |
 |---|---|
-| 线路 | Hysteria2、AnyTLS、TUIC、Trojan、VLESS(Reality / Vision)、VMess、Shadowsocks(含 2022)、SOCKS、HTTP、Mixed;传输层 WS / gRPC / HTTPUpgrade / HTTP;Hysteria2 端口跳跃与伪装站点;Reality 握手目标一键检测;按服务器选择部署位置;按规则分流(域名 / IP 段 / 端口分给不同出口) |
+| 线路 | Hysteria2、AnyTLS、TUIC、Trojan、VLESS(Reality / Vision)、VMess、Shadowsocks(含 2022)、SOCKS、HTTP、Mixed;传输层 WS / gRPC / HTTPUpgrade / HTTP;Hysteria2 端口跳跃与伪装站点;Reality 握手目标一键检测;按服务器选择部署位置;按规则分流(域名 / IP 段 / 端口分给不同出口);**中转入口**(经集群里别的服务器或外部中转连进来,加密数据原样转发、UDP 也能转,订阅自动加节点) |
 | 上游 | VLESS / VMess / Trojan / TUIC / Hysteria2 / Shadowsocks / SOCKS 落地,粘贴分享链接导入;一键测延迟、定时巡检、故障 / 恢复告警;WARP 一键接入;**线路也能加为上游**(链式代理),参数跟着线路自动走;**上游组**:几条上游自动用最快能通的,挂了自动换 |
 | 用户 | 配额(可到 0.1 GB)、到期(可设首次连接后才开始计时)、周期重置、同时在线设备数(按源 IP:IPv4 地址与 IPv6 /64 各自计数,跨服务器并集)、上下行限速;超量 / 到期自动禁用并踢线;批量生成、批量操作、CSV 导出。代理的用户归代理管,不混进主面板用户页 |
 | 套餐 | 配额 / 时长 / 设备 / 限速 / 线路的模板,建号、续费(一次 N 期)、延期一键套用;换套餐可立即替换、叠加或按参考价折算,先预览再确认;可绑定限速规则,现有和以后的套餐用户都生效 |

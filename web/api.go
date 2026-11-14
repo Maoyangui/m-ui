@@ -361,6 +361,15 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 				cols = append(cols, "node_family")
 			}
 		}
+		// 中转入口同理:请求里没带就沿用库里的(照样按新的部署范围、端口再校验一遍),带了才改
+		if _, ok := keys["forwards"]; ok {
+			cols = append(cols, "forwards")
+		} else {
+			var cur model.Line
+			if s.db.Select("forwards").First(&cur, id).Error == nil {
+				line.Forwards = cur.Forwards
+			}
+		}
 		line.Id = id
 		if err := s.validateLine(&line); err != nil {
 			badRequest(w, err)
@@ -509,6 +518,12 @@ func (s *Server) validateLine(line *model.Line) error {
 	if name := s.lineOnPort(line); name != "" {
 		return fmt.Errorf("端口 %d 已被线路%s占用,换一个", line.Port, name)
 	}
+	// 部署范围里的服务器上,别的线路的中转入口占着这个端口(中转入口见 line_forwards.go)
+	var named []model.Node
+	s.db.Select("id, name").Order("sort asc, id asc").Find(&named)
+	if err := s.forwardOnLinePort(*line, s.forwardRefs(line.Id), named); err != nil {
+		return err
+	}
 	// 走 UDP 的线路端口不能落进别的 hysteria2 线路的端口跳跃范围:那段 UDP 端口被 nft 整段转给那条线路,
 	// 这条线路建好了也收不到包,干跑照样通过、面板毫无提示(审计 MB04)
 	if usesUDP(line.Protocol) {
@@ -559,6 +574,11 @@ func (s *Server) validateLine(line *model.Line) error {
 			}
 			var ports []int
 			s.db.Model(&model.Line{}).Where("id != ?", line.Id).Pluck("port", &ports)
+			for _, r := range s.forwardRefs(0) { // 集群中转入口的端口同样不能被端口跳跃范围盖住(从严:不分在哪台)
+				if r.Network != "tcp" {
+					ports = append(ports, r.Port)
+				}
+			}
 			if err := hop.Overlaps(rules, ports); err != nil {
 				return err
 			}
@@ -638,7 +658,14 @@ func (s *Server) validateLine(line *model.Line) error {
 		return err
 	}
 	line.Addrs = addrs
-	return nil
+	var old *model.Line
+	if line.Id != 0 {
+		var cur model.Line
+		if s.db.First(&cur, line.Id).Error == nil {
+			old = &cur
+		}
+	}
+	return s.normForwards(line, old)
 }
 
 // handleLineSort 批量保存拖拽后的顺序。

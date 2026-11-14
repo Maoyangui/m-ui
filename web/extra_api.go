@@ -608,6 +608,12 @@ func (s *Server) dispatchLineSubroute(w http.ResponseWriter, r *http.Request) bo
 			badRequest(w, fmt.Errorf("端口 %d 已被线路%s占用,换一个", line.Port, name))
 			return true
 		}
+		var nodes []model.Node
+		s.db.Select("id, name").Order("sort asc, id asc").Find(&nodes)
+		if err := s.forwardOnLinePort(line, s.forwardRefs(line.Id), nodes); err != nil {
+			badRequest(w, err)
+			return true
+		}
 	}
 	if err := s.db.Model(&model.Line{}).Where("id = ?", line.Id).Update("enabled", !line.Enabled).Error; err != nil {
 		badRequest(w, err)

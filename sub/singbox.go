@@ -158,7 +158,7 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 	var pending []lineGroup
 	for _, line := range lines {
 		var names []string
-		for _, a := range resolveAddrs(line, opt.Entries, opt.LineNodes[line.Id]) {
+		for _, a := range subAddrs(line, opt.Entries, opt.LineNodes[line.Id]) {
 			for _, l := range lineToURIs(line, user, a, line.Name+a.remark) {
 				if tag := add(l, true); tag != "" {
 					names = append(names, tag)

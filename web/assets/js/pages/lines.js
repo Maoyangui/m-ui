@@ -4,6 +4,7 @@ import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, toast, confirm, openModal, openDrawer, drawerOpen, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, setText, chipList, fieldBox, fmtBytes, tzOffsetMinutes } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
+import { serverOfIP } from '../relayip.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 import { editRelayUpstream } from './upstreams.js';
 import { loadReach, reachLoaded, v6Of, v6LineBadge, v6ForLine } from '../reach.js';
@@ -138,7 +139,7 @@ function renderRows() {
     <tr draggable="${filtering() ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
       <td class="handle" title="拖动排序">⠿</td>
       <td><input type="checkbox" class="sel" data-change="line.sel" data-id="${l.id}" ${selected.has(l.id) ? 'checked' : ''}></td>
-      <td class="primary-cell">${dot(online.has(l.name))}<a href="#" data-act="line.detail" data-id="${l.id}">${esc(l.name)}</a></td>
+      <td class="primary-cell">${dot(online.has(l.name))}<a href="#" data-act="line.detail" data-id="${l.id}">${esc(l.name)}</a>${fwBadge(l)}</td>
       <td>${protoBadges(l)}</td>
       <td class="num">${l.port}</td>
       <td><span class="cell-clip" title="${esc(l.upstreamName)}">${esc(l.upstreamName)}</span>${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
@@ -432,6 +433,7 @@ function readForm(id) {
     name: fv('f-name').trim(), protocol, port: Number(fv('f-port')),
     upstreamId: Number(fv('f-upstream')), enabled: fchk('f-enabled'),
     routeRules: rrRead(),
+    forwards: fwCollect(),
   };
   // 部署到哪些服务器:全不勾或全勾 = 全部(存空)
   const nodeCbs = [...document.querySelectorAll('.node-cb')];
@@ -547,7 +549,7 @@ async function editLine(id, cloneFrom, preset) {
   const src = cloneFrom || (id ? state.lines.find(x => x.id === id) : null);
   const l = src ? { ...src } : (preset || { protocol: 'vless', enabled: true, options: {}, upstreamId: 0 });
   formIsNew = !id && !cloneFrom;
-  if (cloneFrom) { l.name = t('line.cloneOf', { name: src.name }); l.port = ''; }
+  if (cloneFrom) { l.name = t('line.cloneOf', { name: src.name }); l.port = ''; l.forwards = null; }
   if (!l.port) l.port = await suggestPort(); // 新建/克隆:给个可用端口做默认值,可改
   const rrInit = rrOf(l);
   openModal(id ? t('line.edit') : t('line.add'), `
@@ -578,6 +580,7 @@ async function editLine(id, cloneFrom, preset) {
       ${id ? '' : check('f-assign', t('line.assignAll'), true, t('line.assignAllHelp'))}
       ${serversField(l)}
       <div class="full" id="f-v6tips" hidden></div>
+      ${fwSection()}
     </div>
     <div id="f-dyn"></div>
     <details class="adv"><summary>${t('line.advanced')}</summary><textarea id="f-extra"></textarea></details>
@@ -596,13 +599,174 @@ async function editLine(id, cloneFrom, preset) {
   }, { size: 'xl' });
   renderDynamic(l);
   rrBind(rrInit);
+  fwBind(fwOf(l));
   document.getElementById('f-protocol').addEventListener('change', () => { renderDynamic({ options: {}, tls: {}, transport: {} }); syncV6Tips(); });
   ['f-name', 'f-port'].forEach(id => document.getElementById(id).addEventListener('input', debounce(syncV6Tips, 400)));
-  document.querySelectorAll('.node-cb').forEach(c => c.addEventListener('change', syncFamily));
+  document.querySelectorAll('.node-cb').forEach(c => c.addEventListener('change', () => { syncFamily(); fwRender(fwCollect()); }));
+  document.getElementById('f-port').addEventListener('input', fwHint);
   document.querySelectorAll('.node-fam').forEach(c => c.addEventListener('change', syncV6Tips));
   document.getElementById('f-addrs').addEventListener('input', debounce(syncV6Tips, 400));
   syncFamily();
   if (!reachLoaded()) loadReach().then(syncV6Tips); // 新开页面直接点"添加"时还没拿过检测结果
+}
+
+// ---- 中转入口:客户端经别的服务器(集群中转)或外部中转(自己跑的 realm、买的中转)连到这条线路,加密数据原样转过去 ----
+// 后端:保存校验 web/line_forwards.go、中转服务器上的转发 render/forward.go、订阅里的节点 sub/link.go forwardAddrs。
+// 一行 = 方式 / 中转服务器或地址 / 端口 / 转给哪台 / 节点名后缀 / 更多(转到地址、暂停)与删除;部署范围变了,「转给」跟着变。
+function fwOf(l) { const v = parseJ(l.forwards); return Array.isArray(v) ? v : []; }
+const fwNode = id => (state.nodes || []).find(n => n.id === id);
+const fwNodeName = id => (fwNode(id) || {}).name || '#' + id;
+// 按表单当前勾的服务器:这条线路部署在哪几台(全不勾 = 全部)
+function fwDeployed() {
+  const nodes = state.nodes || [];
+  const picked = [...document.querySelectorAll('.node-cb')].filter(c => c.checked).map(c => Number(c.value));
+  return picked.length ? picked : nodes.map(n => n.id);
+}
+
+// 列表里线路名后面的小标记:有几个中转入口(暂停的不算),悬停看明细
+function fwBadge(l) {
+  const fs = fwOf(l).filter(f => !f.off);
+  if (!fs.length) return '';
+  const tip = fs.map(f => `${f.via ? fwNodeName(f.via) : f.host}:${f.port} → ${fwNodeName(f.to)}${f.name ? ' (' + f.name + ')' : ''}`).join('\n');
+  return ` <span class="badge fw-badge" title="${esc(t('line.fw.title') + '\n' + tip)}">⇄ ${fs.length}</span>`;
+}
+
+function fwSection() {
+  return `<div class="full fw-box">
+    <div class="fw-top"><span class="fw-title">${esc(t('line.fw.title'))}</span><span class="muted small" id="f-fw-n"></span></div>
+    <p class="hint fw-intro">${esc(t('line.fw.help'))}</p>
+    <div id="f-fw" hidden>
+      <div class="fw-row fw-head" aria-hidden="true"><span>${esc(t('line.fw.kind'))}</span><span>${esc(t('line.fw.where'))}</span><span>${esc(t('line.fw.port'))}</span><span>${esc(t('line.fw.to'))}</span><span>${esc(t('line.fw.name'))}</span><span></span></div>
+      <div id="f-fw-list"></div>
+      <p class="hint" id="f-fw-hint"></p>
+    </div>
+    <button type="button" class="rr-add" id="f-fw-add">${esc(t('line.fw.add'))}</button>
+  </div>`;
+}
+
+function fwRowHTML(f) {
+  const nodes = state.nodes || [];
+  const ext = !f.via;
+  const deployed = fwDeployed();
+  const to = deployed.includes(f.to) ? f.to : deployed.length === 1 ? deployed[0] : 0;
+  const toCell = deployed.length > 1
+    ? `<select class="fw-to" aria-label="${esc(t('line.fw.to'))}">${to ? '' : `<option value="0">${esc(t('line.fw.toPick'))}</option>`}${deployed.map(id => `<option value="${id}" ${id === to ? 'selected' : ''}>${esc(fwNodeName(id))}</option>`).join('')}</select>`
+    : `<span class="fw-to-fixed" data-to="${to}" title="${esc(fwNodeName(to))}">→ ${esc(fwNodeName(to))}</span>`;
+  const more = !!(f.target || f.off);
+  return `<div class="fw-row">
+    <select class="fw-kind" aria-label="${esc(t('line.fw.kind'))}"><option value="via" ${ext ? '' : 'selected'} ${nodes.length < 2 ? 'disabled' : ''}>${esc(t('line.fw.kindVia'))}</option><option value="ext" ${ext ? 'selected' : ''}>${esc(t('line.fw.kindExt'))}</option></select>
+    <span class="fw-where">
+      <select class="fw-via" aria-label="${esc(t('line.fw.where'))}" ${ext ? 'hidden' : ''}>${nodes.map(n => `<option value="${n.id}" ${n.id === f.via ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select>
+      <input class="fw-host" value="${esc(f.host || '')}" placeholder="${esc(t('line.fw.hostPh'))}" aria-label="${esc(t('line.fw.where'))}" spellcheck="false" autocomplete="off" ${ext ? '' : 'hidden'}>
+    </span>
+    <input class="fw-port" type="number" min="1" max="65535" value="${f.port || ''}" aria-label="${esc(t('line.fw.port'))}">
+    ${toCell}
+    <input class="fw-name" maxlength="40" value="${esc(f.name || '')}" aria-label="${esc(t('line.fw.name'))}">
+    <span class="rr-ops">
+      <button type="button" class="btn sm ghost${more ? ' on' : ''}" data-fw="more" title="${esc(t('line.fw.more'))}" aria-label="${esc(t('line.fw.more'))}" aria-expanded="${more}">⋯</button>
+      <button type="button" class="btn sm ghost danger" data-fw="del" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}">✕</button>
+    </span>
+    <div class="fw-more" ${more ? '' : 'hidden'}>
+      <label class="fw-target-wrap" ${ext ? 'hidden' : ''}><span>${esc(t('line.fw.target'))}</span><input class="fw-target" value="${esc(f.target || '')}" placeholder="${esc(t('line.fw.targetPh'))}" title="${esc(t('line.fw.targetHelp'))}" spellcheck="false" autocomplete="off"></label>
+      <label class="fw-off-wrap"><input type="checkbox" class="fw-off" ${f.off ? 'checked' : ''}> ${esc(t('line.fw.off'))}</label>
+    </div>
+    <div class="fw-note" hidden></div>
+  </div>`;
+}
+
+// 一行的提示:节点名默认用什么;中转服务器和出口同一台、已停用、版本和主机不一样
+function fwCheckRow(row) {
+  const ext = row.querySelector('.fw-kind').value === 'ext';
+  const via = Number(row.querySelector('.fw-via').value) || 0;
+  const toSel = row.querySelector('.fw-to'), toFixed = row.querySelector('.fw-to-fixed');
+  const to = Number(toSel ? toSel.value : toFixed ? toFixed.dataset.to : 0) || 0;
+  row.querySelector('.fw-name').placeholder = ext ? t('line.fw.namePhExt') : t('line.fw.namePh', { name: fwNodeName(via) });
+  const note = row.querySelector('.fw-note');
+  let msg = '', bad = false;
+  if (!ext && via && via === to) { msg = t('line.fw.same'); bad = true; }
+  else if (!ext && fwNode(via) && fwNode(via).enabled === false) msg = t('line.fw.offNode');
+  else if (!ext && fwNode(via) && (fwNode(via).status || {}).versionMismatch) msg = t('line.fw.old');
+  note.textContent = msg;
+  note.hidden = !msg;
+  note.classList.toggle('bad', bad);
+}
+
+function fwCollect() {
+  return [...document.querySelectorAll('#f-fw-list .fw-row')].map(row => {
+    const ext = row.querySelector('.fw-kind').value === 'ext';
+    const toSel = row.querySelector('.fw-to'), toFixed = row.querySelector('.fw-to-fixed');
+    const f = { port: Number(row.querySelector('.fw-port').value) || 0, to: Number(toSel ? toSel.value : toFixed ? toFixed.dataset.to : 0) || 0 };
+    const name = row.querySelector('.fw-name').value.trim();
+    if (name) f.name = name;
+    if (ext) f.host = row.querySelector('.fw-host').value.trim();
+    else {
+      f.via = Number(row.querySelector('.fw-via').value) || 0;
+      const target = row.querySelector('.fw-target').value.trim();
+      if (target) f.target = target;
+    }
+    if (row.querySelector('.fw-off').checked) f.off = true;
+    return f;
+  });
+}
+
+function fwHint() {
+  const hint = document.getElementById('f-fw-hint');
+  if (hint) hint.textContent = t('line.fw.hint', { port: fv('f-port') || '?' });
+}
+
+function fwRender(list) {
+  const box = document.getElementById('f-fw-list');
+  if (!box) return;
+  box.innerHTML = list.map(fwRowHTML).join('');
+  box.querySelectorAll('.fw-row').forEach(fwCheckRow);
+  document.getElementById('f-fw').hidden = !list.length;
+  document.getElementById('f-fw-n').textContent = list.length ? String(list.length) : '';
+  fwHint();
+}
+
+function fwBind(initial) {
+  const box = document.getElementById('f-fw-list');
+  fwRender(initial);
+  document.getElementById('f-fw-add').addEventListener('click', () => {
+    const nodes = state.nodes || [], deployed = fwDeployed();
+    // 默认经集群里不部署这条线路、还没被前面几行用上的那台中转(没有就用随便一台别的;只有一台服务器只能外部中转),
+    // 端口照线路的端口(按原端口转发);这台这个端口前面已经用了就空着让人填
+    const cur = fwCollect(), used = new Set(cur.filter(f => f.via).map(f => f.via));
+    const spare = nodes.filter(n => !deployed.includes(n.id));
+    const via = (spare.find(n => !used.has(n.id)) || spare[0] || nodes.find(n => deployed.length !== 1 || n.id !== deployed[0]) || {}).id || 0;
+    let port = Number(fv('f-port')) || '';
+    if (cur.some(f => f.via === via && f.port === port)) port = '';
+    const f = { via: nodes.length > 1 ? via : 0, port, to: deployed.length === 1 ? deployed[0] : 0 };
+    fwRender([...fwCollect(), f]);
+    const rows = box.querySelectorAll('.fw-row');
+    const last = rows[rows.length - 1];
+    (last.querySelector(f.via ? '.fw-port' : '.fw-host') || last).focus();
+  });
+  box.addEventListener('click', e => {
+    const b = e.target.closest('[data-fw]');
+    if (!b) return;
+    const row = b.closest('.fw-row');
+    if (b.dataset.fw === 'del') {
+      const rows = [...box.querySelectorAll('.fw-row')];
+      fwRender(fwCollect().filter((_, i) => rows[i] !== row));
+    } else if (b.dataset.fw === 'more') {
+      const m = row.querySelector('.fw-more');
+      m.hidden = !m.hidden;
+      b.setAttribute('aria-expanded', String(!m.hidden));
+    }
+  });
+  box.addEventListener('change', e => {
+    const row = e.target.closest('.fw-row');
+    if (!row) return;
+    if (e.target.classList.contains('fw-kind')) {
+      const ext = e.target.value === 'ext';
+      row.querySelector('.fw-via').hidden = ext;
+      row.querySelector('.fw-host').hidden = !ext;
+      row.querySelector('.fw-target-wrap').hidden = ext;
+      (ext ? row.querySelector('.fw-host') : row.querySelector('.fw-via')).focus();
+    }
+    fwCheckRow(row);
+  });
 }
 
 // ---- 分流规则:同一条线路按域名 / IP 段 / 端口分给不同出口,没命中的走线路的上游(后端见 render/route_rules.go) ----
@@ -938,6 +1102,7 @@ async function showLineDetail(id) {
   ld = { id, hours: ldHours, server: -1, q: '', more: 0, data: null, seq: 0, allSrv: false };
   openDrawer(`${esc(l.name)} ${badge(l.protocol, 'primary')} <span class="muted small num">:${l.port}</span>${l.enabled ? '' : ' ' + badge(t('common.disabled'), 'warn')}`, `
     <div class="ld-sum" id="ld-sum"></div>
+    ${fwDetail(l)}
     <section>
       <div class="ld-head"><h3>${t('line.d.traffic')}</h3>
         <select class="sm" id="ld-srv" hidden aria-label="${esc(t('nav.nodes'))}"></select>
@@ -1031,10 +1196,18 @@ function renderLineOnline() {
   const changed = setHTML('ld-online', `<div class="ld-olist${multi ? ' srv' : ''}${shown.length > 12 ? ' capped' : ''}">${shown.map(o => `<div class="ld-orow">
       <a class="nm" href="#/users?q=${encodeURIComponent(o.user)}" title="${esc(o.user)}">${esc(o.user)}</a>
       ${multi ? `<span class="srv" title="${esc(o.server)}">${esc(o.server)}</span>` : ''}
-      <span class="ips">${chipList((o.ips || []).map(ip => `<span class="chip mono" title="${esc(ip)}">${esc(ip)}</span>`), { key: `ldip-${ld.id}-${o.nodeId}-${o.user}`, max: 3 })}</span>
+      <span class="ips">${chipList((o.ips || []).map(ip => { const via = serverOfIP(ip); return `<span class="chip mono${via ? ' via' : ''}" title="${esc(via ? ip + ' · ' + t('line.fw.viaIP', { name: via }) : ip)}">${via ? '⇄ ' : ''}${esc(ip)}</span>`; }), { key: `ldip-${ld.id}-${o.nodeId}-${o.user}`, max: 3 })}</span>
     </div>`).join('')}</div>` +
     (list.length > n || ld.more ? `<div class="card-foot">${list.length > n ? `<button class="btn sm ghost" data-act="line.dMore">${esc(t('line.d.more', { n: Math.min(LD_PAGE, list.length - n), left: list.length - n }))}</button>` : ''}${ld.more ? `<button class="btn sm ghost" data-act="line.dLess">${esc(t('common.less'))}</button>` : ''}</div>` : ''));
   if (changed) { const b = document.querySelector('#ld-online .ld-olist'); if (b) b.scrollTop = keep; }
+}
+
+// 线路详情顶上的中转入口:一个一枚,多了折叠
+function fwDetail(l) {
+  const fs = fwOf(l);
+  if (!fs.length) return '';
+  const chips = fs.map(f => `<span class="chip${f.off ? ' off' : ''}" title="${esc((f.name ? f.name + ' · ' : '') + (f.via ? t('line.fw.kindVia') : t('line.fw.kindExt')))}">⇄ ${esc(f.via ? fwNodeName(f.via) : f.host)}:${f.port} → ${esc(fwNodeName(f.to))}${f.off ? ' · ' + esc(t('line.fw.off')) : ''}</span>`);
+  return `<div class="ld-fw"><span class="muted small">${esc(t('line.fw.title'))}</span>${chipList(chips, { key: 'ldfw-' + l.id, max: 4 })}</div>`;
 }
 
 // 5 秒一轮:抽屉还开着、还是这条线路的详情,就只刷新在线用户与 IP

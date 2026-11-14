@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/Maoyangui/m-ui/database/model"
@@ -110,6 +111,64 @@ type addr struct {
 	sni      string
 	remark   string
 	insecure bool
+	relay    bool // 中转入口:中转只转这一个端口,端口跳跃不带
+}
+
+// subAddrs 订阅里这条线路的全部地址:各服务器(或自定义地址)之后,接着这条线路的中转入口。
+// 「线路作上游」(relay.go)只要出口本身的地址,用 resolveAddrs,不走这里。
+func subAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []addr {
+	return append(resolveAddrs(line, entries, allowed), forwardAddrs(line, entries, allowed)...)
+}
+
+// forwardAddrs 线路的中转入口(model.LineForward)展开成订阅地址:地址是中转(集群中转用那台的连接地址,外部中转用填的地址),
+// 端口是中转入口的端口;SNI、证书校验跟出口那台走(TLS 在出口上终止)。出口服务器停用、不在部署范围、用户在这条线路上
+// 被收窄到别的服务器,以及集群中转那台停用 / 删了的,都不给。节点名:线路名 + 出口后缀 + "-" + 中转名(倍率仍放最后)。
+func forwardAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []addr {
+	fs := model.ParseForwards(line.Forwards)
+	if len(fs) == 0 {
+		return nil
+	}
+	byNode := make(map[uint]Entry, len(entries))
+	for _, e := range entries {
+		if e.NodeId != 0 {
+			byNode[e.NodeId] = e
+		}
+	}
+	var out []addr
+	for _, f := range fs {
+		if f.Off || f.Port < 1 || f.Port > 65535 || f.Via == f.To {
+			continue
+		}
+		exit, ok := byNode[f.To]
+		if !ok || !render.LineOnNode(line, f.To) || (len(allowed) > 0 && !allowed[f.To]) {
+			continue
+		}
+		host, name := model.BareHost(f.Host), strings.TrimSpace(f.Name)
+		if f.Via != 0 {
+			via, ok := byNode[f.Via]
+			if !ok {
+				continue
+			}
+			host = via.Host
+			if name == "" {
+				name = via.Name
+			}
+		}
+		if host == "" {
+			continue
+		}
+		if name == "" {
+			name = host
+		}
+		a := certAddr(addr{server: host, port: f.Port, sni: exit.SNI, insecure: exit.Insecure, relay: true}, line, exit)
+		ratio := ""
+		if exit.Ratio > 0 && exit.Ratio != 1 {
+			ratio = " x" + strconv.FormatFloat(exit.Ratio, 'f', -1, 64)
+		}
+		a.remark = strings.TrimSuffix(exit.Suffix, ratio) + "-" + name + ratio
+		out = append(out, a)
+	}
+	return out
 }
 
 // resolveAddrs 把线路的对外地址展开为一组 addr。
@@ -193,7 +252,7 @@ func GenerateLinks(user model.User, lines []model.Line, entries []Entry) []strin
 func GenerateLinksFor(user model.User, lines []model.Line, entries []Entry, lineNodes map[uint]map[uint]bool) []string {
 	var links []string
 	for _, line := range lines {
-		for _, a := range resolveAddrs(line, entries, lineNodes[line.Id]) {
+		for _, a := range subAddrs(line, entries, lineNodes[line.Id]) {
 			links = append(links, lineToURIs(line, user, a, line.Name+a.remark)...)
 		}
 	}
@@ -246,7 +305,7 @@ func hysteria2URI(line model.Line, user model.User, a addr, remark string) strin
 	if a.insecure {
 		q += "&insecure=1"
 	}
-	if ph := portHopping(line); ph != "" {
+	if ph := portHopping(line); ph != "" && !a.relay {
 		q += "&mport=" + ph // 端口跳跃:Shadowrocket/NekoBox/sing-box 系客户端识别 mport
 	}
 	var o struct {

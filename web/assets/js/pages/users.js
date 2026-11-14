@@ -12,6 +12,7 @@ function ruleLimitsHTML(u) {
   return `<h3 style="margin-top:.6rem">${t('user.ruleLimits')}</h3><div class="chips">${lim.map(s => `<span class="chip" title="${esc(s.reason || '')}">${esc(s.ruleName)} · ${s.upMbps || '—'}/${s.downMbps || '—'} M · ${s.until ? t('rule.remaining', { n: Math.max(0, Math.ceil((s.until - now) / 60)) }) : t('rule.untilWindowEnd')}</span>`).join('')}</div>`;
 }
 import { barChart, bucketFor } from '../chart.js';
+import { serverOfIP } from '../relayip.js';
 import { lineItems, keysFromRefs, linePicker, refLabels, refChips } from '../linepicker.js';
 
 // 代理面板没有服务器页:服务器名与授权范围来自 status;主面板用 state.nodes
@@ -317,7 +318,7 @@ function refreshDrawerLive() {
   // 每个 IP 右侧标出它正在使用的线路(线路名已带服务器后缀,如 "香港1-高带宽")
   const lines = u.onlineLines || {};
   el.innerHTML = ips.length
-    ? `<div class="ip-list">${ips.map(ip => `<div class="ip"><span class="mono">${esc(ip)}</span><span class="ip-lines">${
+    ? `<div class="ip-list">${ips.map(ip => `<div class="ip"><span class="mono">${esc(ip)}${serverOfIP(ip) ? ` <span class="badge fw-badge" title="${esc(t('line.fw.viaIP', { name: serverOfIP(ip) }))}">⇄ ${esc(serverOfIP(ip))}</span>` : ''}</span><span class="ip-lines">${
         (lines[ip] || []).map(l => badge(l, 'primary')).join(' ') || `<span class="muted small">${t('user.lineUnknown')}</span>`
       }</span></div>`).join('')}</div><p class="hint">${conns} ${t('dash.conns')}</p>`
     : `<p class="muted small">${t('user.noOnline')}</p>`;
