@@ -972,44 +972,59 @@ button.ld-srow:hover { background: var(--surface-2); }
   .ld-head select { max-width: 100%; }
 }
 
-/* 线路的中转入口:一行 = 方式 / 中转服务器或地址 / 端口 / 转给 / 节点名后缀 / 更多删除;「更多」里是转到地址和暂停。按编辑框自己的宽度排 */
+/* 线路的中转入口(勾选才展开):一条一块 —— 第一行「入口 中转:端口 → 出口 地址:端口  暂停 删除」,第二行订阅节点名与要做的事 */
 .fw-box { container-type: inline-size; }
-.fw-top { display: flex; align-items: baseline; gap: .45rem; }
-.fw-title { font-size: .82rem; font-weight: 600; }
-.fw-top .muted { font-variant-numeric: tabular-nums; }
-.fw-intro { margin: .2rem 0 0; }
-#f-fw { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .45rem .75rem .55rem; margin-top: .5rem; background: var(--surface-2); }
-#f-fw .hint { margin: .45rem 0 0; }
-.fw-row { display: grid; grid-template-columns: 8.4rem minmax(0, 1fr) 6.2rem 8.6rem minmax(0, .8fr) 4.4rem; gap: .5rem; align-items: center; padding: .45rem 0; border-top: 1px solid var(--border); }
-.fw-head { padding: 0 0 .3rem; border-top: none; font-size: .74rem; font-weight: 500; color: var(--muted); }
-.fw-head > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fw-where { display: flex; min-width: 0; }
-.fw-where > * { flex: 1 1 auto; min-width: 0; }
-.fw-where > [hidden] { display: none; }
-.fw-row select, .fw-row input:not([type=checkbox]) { width: 100%; min-width: 0; }
-.fw-to-fixed { font-size: .84rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fw-more { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; font-size: .82rem; }
-.fw-more[hidden], .fw-target-wrap[hidden], .fw-note[hidden] { display: none; }
-.fw-target-wrap { display: flex; align-items: center; gap: .45rem; flex: 1 1 16rem; min-width: 0; }
-.fw-target-wrap > span { white-space: nowrap; color: var(--muted); }
-.fw-target-wrap input { flex: 1 1 auto; }
-.fw-off-wrap { display: flex; align-items: center; gap: .3rem; white-space: nowrap; }
-.fw-note { grid-column: 2 / -1; font-size: .76rem; color: var(--warn); }
+#f-fw { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .2rem .75rem .6rem; margin-top: .5rem; background: var(--surface-2); }
+.fw-item { display: flex; flex-direction: column; gap: .3rem; padding: .55rem 0; border-top: 1px solid var(--border); }
+.fw-item:first-child { border-top: none; }
+.fw-path { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .45rem; min-width: 0; }
+.fw-no { flex: none; width: 1.4rem; text-align: center; font-size: .78rem; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fw-lab { flex: none; font-size: .74rem; color: var(--muted); white-space: nowrap; }
+.fw-from { display: flex; gap: .35rem; flex: 0 1 auto; min-width: 0; }
+.fw-from:has(> .fw-host:not([hidden])) { flex: 1 1 18rem; } /* 别处的中转:地址框占剩下的宽度 */
+.fw-from select { flex: 0 1 11rem; min-width: 0; }
+.fw-from input { flex: 1 1 8rem; min-width: 0; }
+.fw-from > [hidden] { display: none; }
+.fw-colon { color: var(--muted); }
+.fw-port { flex: none; width: 5.6rem; }
+.fw-arrow { flex: none; color: var(--muted); font-size: 1rem; }
+.fw-exit { display: flex; align-items: center; min-width: 0; flex: 0 1 auto; }
+.fw-exit select { min-width: 0; }
+.fw-exit-name { font-weight: 600; font-size: .86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fw-dest-wrap { display: flex; align-items: center; min-width: 0; flex: 0 1 auto; font-family: var(--mono); font-size: .78rem; color: var(--muted); }
+.fw-dest { border: 0; background: none; padding: 0; font: inherit; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; cursor: pointer; }
+.fw-dest:not(:disabled):hover { color: var(--primary-text); }
+.fw-dest:disabled { cursor: default; }
+.fw-target { width: 9rem; padding: .2rem .4rem; font-family: var(--mono); font-size: .78rem; }
+.fw-dest-wrap [hidden] { display: none; }
+.fw-tail { display: flex; align-items: center; gap: .4rem; margin-left: auto; }
+.fw-pause { display: flex; align-items: center; gap: .25rem; font-size: .8rem; color: var(--muted); white-space: nowrap; cursor: pointer; }
+.fw-result { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem 1.1rem; padding-left: 1.85rem; font-size: .8rem; min-width: 0; }
+.fw-nn { display: inline-flex; align-items: baseline; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.fw-nn .lab { color: var(--muted); margin-right: .4rem; white-space: nowrap; }
+.fw-nn b { font-weight: 500; overflow-wrap: anywhere; }
+.fw-name { width: 8rem; min-width: 4rem; padding: 0 .2rem; font-size: .8rem; font-weight: 500; border: 0; border-bottom: 1px dashed var(--border-strong); border-radius: 0; background: transparent; }
+.fw-name:focus { border-bottom-color: var(--primary); outline: none; box-shadow: none; }
+.fw-todo { flex: 1 1 16rem; min-width: 0; color: var(--muted); }
+.fw-note { padding-left: 1.85rem; font-size: .76rem; color: var(--warn); }
 .fw-note.bad { color: var(--danger); }
-.rr-ops .btn.on { color: var(--primary); }
-#f-fw-add { margin-top: .5rem; }
+.fw-note[hidden] { display: none; }
+.fw-item.paused .fw-from, .fw-item.paused .fw-port, .fw-item.paused .fw-exit, .fw-item.paused .fw-dest-wrap, .fw-item.paused .fw-result { opacity: .5; }
+.fw-foot { margin: .5rem 0 0; }
+/* 展开后最上面的小图:用户 → 中转 → 出口 → 网站 */
+.fw-flow { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin: .5rem 0 .15rem; }
+.fw-flow-node { padding: .16rem .62rem; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface); font-size: .8rem; font-weight: 500; white-space: nowrap; }
+.fw-flow-node.relay { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-text); }
+.fw-flow-node.exit { border-color: var(--ok); color: var(--ok); }
+.fw-flow-arrow { color: var(--muted); }
+.fw-flow-note { margin: .3rem 0 .15rem; }
+.fw-paren[hidden], .fw-dest-port[hidden] { display: none; }
+#f-fw-add { margin-top: .4rem; }
 .fw-badge { font-size: .7rem; padding: .05rem .4rem; margin-left: .3rem; vertical-align: 1px; cursor: help; }
-@container (max-width: 640px) { /* 窄:方式 + 更多删除一行,地址一行,端口和转给一行,节点名一行 */
-  .fw-head { display: none; }
-  .fw-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; grid-template-areas: "kind kind ops" "where where where" "port to to" "name name name" "more more more" "note note note"; row-gap: .4rem; }
-  .fw-row > .fw-kind { grid-area: kind; }
-  .fw-row > .fw-where { grid-area: where; }
-  .fw-row > .fw-port { grid-area: port; }
-  .fw-row > .fw-to, .fw-row > .fw-to-fixed { grid-area: to; }
-  .fw-row > .fw-name { grid-area: name; }
-  .fw-row > .rr-ops { grid-area: ops; }
-  .fw-row > .fw-more { grid-area: more; }
-  .fw-row > .fw-note { grid-area: note; }
+@container (max-width: 560px) { /* 窄:不缩进,暂停和删除不顶到最右 */
+  .fw-result, .fw-note { padding-left: 0; }
+  .fw-from { flex-basis: 100%; }
+  .fw-tail { margin-left: 0; }
 }
 .ld-fw { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .45rem; margin: -.35rem 0 .95rem; min-width: 0; }
 .ld-fw .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

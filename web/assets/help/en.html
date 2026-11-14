@@ -340,12 +340,14 @@
   </section>
 
   <section class="sec" id="line-forwards">
-    <h3>Relay entries: reaching a line through another server or an outside relay</h3>
+    <h3>Relay entries: letting users come in through another machine</h3>
+    <p>Use this when users' direct connection to this server is slow or blocked (say, routes from mainland China to an overseas machine, or an IP that got blocked): they first connect to a machine with a better route (another of your servers, or a relay you bought), which passes the traffic on to this one as is. The data goes "user → relay → exit (this line's server) → website". The relay only moves data and can't decrypt it. Leave it off if you don't need it.</p>
     <ol class="steps">
-      <li>Edit the line and click <b data-k="line.fw.add">+ Add a relay entry</b> under <b data-k="line.fw.title">Relay entries</b>.</li>
-      <li><b data-k="line.fw.kindVia">Via a server</b>: pick one of your servers as the relay and the port it opens (the line's port by default); if the line runs on several servers, choose which one it <b data-k="line.fw.to">Forwards to</b>. That server passes the encrypted traffic to the exit as is, without decrypting it, and subscriptions gain a "line-exit-relay" node that is speed-tested alongside the direct ones.</li>
-      <li><b data-k="line.fw.kindExt">Outside relay</b>: enter the address and port of your own realm / iptables forwarder or a relay you bought. The panel only puts it in subscriptions; set up the forwarding there yourself (to the line's port on the exit server).</li>
-      <li>Under <b data-k="line.fw.more">More</b> you can set a <b data-k="line.fw.target">Forward-to address</b> (a private address when the two servers share a network) or keep the entry <b data-k="line.fw.off">Paused</b>. In the line list, "⇄ N" after a line's name counts its relay entries; the line details list them at the top.</li>
+      <li>Edit the line and tick <b data-k="line.fw.on">Relay entries</b> (off by default); unticking and saving clears them.</li>
+      <li>Each entry reads as a sentence: <b data-k="line.fw.in">Users connect to</b> which relay, which <b data-k="line.fw.portOf">port</b>, <b data-k="line.fw.out">forwarded to</b> which exit (the address and line port it forwards to are in brackets). Pick another of your servers as the relay and it does the forwarding automatically; a free port on it is filled in, trying the line's own port first.</li>
+      <li>For your own realm / iptables forwarder or a relay you bought, choose <b data-k="line.fw.ext">A relay elsewhere (enter address)</b> and enter its address and port (pasting "address:port" splits them); the line below says what traffic on which port to forward where.</li>
+      <li>The second line shows the <b data-k="line.fw.nodeName">Node</b> name in subscriptions on the left (you can edit the relay part) and what to do on the right (which port to open in which firewall). Port clashes on the relay server (its panel / subscription, lines running there, other relays) turn red at once and block saving.</li>
+      <li>If the two servers share a private network, click the address in brackets to use a private one; tick <b data-k="line.fw.off">Paused</b> to keep an entry without using it. In the line list, "⇄ N" after a line's name counts its relay entries; the line details list them at the top.</li>
     </ol>
     <div class="tip"><b>How this differs from using a line as an upstream</b>That one decrypts on the relay and runs the protocol there too; a relay entry only moves bytes, saves half the encryption work and also carries UDP protocols such as hysteria2 and TUIC.</div>
     <div class="pit"><b>Common pitfalls</b><ul>

@@ -5,7 +5,9 @@
 // 「guys」写在展开的红丝带上,最后一行小字祝福。点开时浏览器自己合成一段《Jingle Bells》铃声(不加载任何外部文件),右上角可静音、记住选择。
 // 整体出场是浮现、消失是隐退;约 12 秒后自动隐退,右上角 ×、点空白处、按 Esc 都能提前关。
 // 到 12 月 31 日为止(按浏览器本地日期),过了自动不显示;以后每年 12 月也会出现。
-// 自带样式,不依赖 style.css:删掉这个文件和 app.js 里的引用就干净了。prefers-reduced-motion:不飘不飞,只淡入。
+// 自带样式,不依赖 style.css:删掉这个文件和 app.js 里的引用就干净了。
+// 系统设了「减少动态效果」(手机上很常见)也照样一样一样出场:这段是点了才放的,本来就是来看动画的,随时能关;
+// 只是雪下得少、慢一些。以前这种情况下所有东西同时淡入,看起来就只剩整体浮现和隐退。
 
 const START = new Date(2026, 10, 14); // 2026-11-14 起
 export function xmasActive(now = new Date()) {
@@ -127,15 +129,6 @@ const CSS = `
 .xmas-hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: .28rem .8rem; border-radius: 999px; background: rgba(8,14,30,.45); backdrop-filter: blur(4px);
   color: rgba(255,255,255,.8); font: 500 .78rem system-ui, sans-serif; white-space: nowrap; pointer-events: none; }
 @media (max-height: 520px) { .xmas-tree { height: 40vh; } }
-@media (prefers-reduced-motion: reduce) {
-  .xm-lights .wire, .xm-lights .bulb, .xm-holly, .xm-land .lay, .xm-land .win, .xm-land .lamp-glow, .xm-snowman .drop, .xm-snowman .pop, .xm-snowman .arm-r, .xm-snowman .scarf-tail,
-  .xm-bells, .xm-ribbon, .xm-wish { animation: xs-on .6s ease forwards !important; transform: none !important; stroke-dashoffset: 0 !important; }
-  .xm-land .smoke { display: none; }
-  .xmas-egg .xb-star, .xmas-egg .xb-l { animation: none; opacity: 1; }
-  .xmas-tree .t, .xmas-tree .g, .xmas-tree .b, .xmas-tree .l, .xmas-tree .s, .xmas-tree .gift, .xmas-line span, .xmas-sub { animation: xs-on .6s ease forwards !important; transform: none !important; filter: none !important; stroke-dashoffset: 0 !important; }
-  .xmas-tree .rays, .xmas-sub::after { animation: none !important; }
-  .xmas-stage, .xmas-show.out .xmas-stage { transform: none !important; filter: none !important; }
-}
 `;
 
 function injectCSS() {
@@ -321,6 +314,8 @@ function jingle() {
   if (!AC) return null;
   let ac;
   try { ac = new AC(); } catch { return null; }
+  if (ac.state === 'suspended' && ac.resume) ac.resume().catch(() => {});
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
   const master = ac.createGain();
   master.gain.value = 0.14;
   master.connect(ac.destination);
@@ -418,15 +413,16 @@ export function playXmas(origin) {
   const bokeh = Array.from({ length: 16 }, () => ({ x: rnd(0, W), y: rnd(H * 0.2, H), r: rnd(18, 60), vy: rnd(-.25, -.08), vx: rnd(-.1, .1), c: ['255,196,90', '255,110,110', '120,220,160', '150,190,255'][Math.floor(rnd(0, 4))], a: rnd(.05, .14) }));
   const moon = { x: W * 0.8, y: H * 0.17, r: Math.max(22, Math.min(W, H) * 0.06) };
   // 前景:三层雪(远、中、近;近处画六角雪花)
-  const flakes = reduce ? [] : Array.from({ length: Math.round(Math.min(220, area / 6500)) }, () => {
+  const slow = reduce ? .5 : 1; // 减少动态效果:雪少一半、慢一半
+  const flakes = Array.from({ length: Math.round(Math.min(220, area / 6500) * slow) }, () => {
     const layer = Math.random() < .5 ? 0 : Math.random() < .7 ? 1 : 2;
-    return { x: rnd(0, W), y: rnd(-H, H), layer, r: [rnd(.6, 1.4), rnd(1.4, 2.6), rnd(4, 7)][layer], vy: [rnd(.3, .6), rnd(.7, 1.2), rnd(1.2, 2)][layer], s: rnd(0, 6.28), rot: rnd(0, 6.28), vr: rnd(-.02, .02) };
+    return { x: rnd(0, W), y: rnd(-H, H), layer, r: [rnd(.6, 1.4), rnd(1.4, 2.6), rnd(4, 7)][layer], vy: [rnd(.3, .6), rnd(.7, 1.2), rnd(1.2, 2)][layer] * slow, s: rnd(0, 6.28), rot: rnd(0, 6.28), vr: rnd(-.02, .02) * slow };
   });
   // 按钮处炸开的星光与小彩球
   const o = origin && origin.getBoundingClientRect ? origin.getBoundingClientRect() : { left: W / 2, top: H / 2, width: 0, height: 0 };
   const ox = o.left + o.width / 2, oy = o.top + o.height / 2;
   const COLORS = ['#ffd54a', '#ff5d5d', '#62d18c', '#62b6ff', '#fff6d0', '#ff9ad5'];
-  const burst = reduce ? [] : Array.from({ length: 70 }, () => {
+  const burst = Array.from({ length: reduce ? 30 : 70 }, () => {
     const a = rnd(Math.PI * .1, Math.PI * .9), sp = rnd(3, 9);
     return { x: ox, y: oy, vx: -Math.cos(a) * sp * (Math.random() < .5 ? -1 : 1), vy: Math.sin(a) * sp * .6 + rnd(0, 2), r: rnd(1.6, 4), c: COLORS[Math.floor(rnd(0, COLORS.length))], life: 1, star: Math.random() < .55, rot: rnd(0, 6), vr: rnd(-.2, .2) };
   });
@@ -485,7 +481,7 @@ export function playXmas(origin) {
       if (f.layer === 2) { fx.globalAlpha = .85; fx.strokeStyle = '#fff'; fx.lineWidth = 1.1; crystal(fx, f.x, f.y, f.r, f.rot); }
       else { fx.globalAlpha = f.layer ? .8 : .45; fx.fillStyle = '#fff'; fx.beginPath(); fx.arc(f.x, f.y, f.r, 0, 6.283); fx.fill(); }
     }
-    const sl = reduce ? null : sleighAt(t);
+    const sl = sleighAt(t);
     if (sl) {
       for (let i = 0; i < 3; i++) trail.push({ x: sl.x - 44 + rnd(-4, 4), y: sl.y + 4 + rnd(-3, 3), r: rnd(.8, 2.4), life: 1, vy: rnd(.1, .6) });
       drawSleigh(fx, sl.x, sl.y);
@@ -514,7 +510,7 @@ export function playXmas(origin) {
     if (closed) return;
     closed = true;
     box.classList.add('out');
-    if (audio) { const a = audio; audio = null; setTimeout(() => a.close().catch(() => {}), 900); }
+    if (audio) { const a = audio; audio = null; setTimeout(() => { a.close().catch(() => {}); try { if (navigator.audioSession) navigator.audioSession.type = 'auto'; } catch {} }, 900); }
     setTimeout(() => { cancelAnimationFrame(raf); window.removeEventListener('resize', size); document.removeEventListener('keydown', esc); box.remove(); }, 1350);
   };
   box.addEventListener('click', close); // 点空白处、点 ×、按 Esc 都能关

@@ -433,7 +433,7 @@ function readForm(id) {
     name: fv('f-name').trim(), protocol, port: Number(fv('f-port')),
     upstreamId: Number(fv('f-upstream')), enabled: fchk('f-enabled'),
     routeRules: rrRead(),
-    forwards: fwCollect(),
+    forwards: fwRead(),
   };
   // 部署到哪些服务器:全不勾或全勾 = 全部(存空)
   const nodeCbs = [...document.querySelectorAll('.node-cb')];
@@ -599,11 +599,12 @@ async function editLine(id, cloneFrom, preset) {
   }, { size: 'xl' });
   renderDynamic(l);
   rrBind(rrInit);
-  fwBind(fwOf(l));
+  fwBind(fwOf(l), id);
   document.getElementById('f-protocol').addEventListener('change', () => { renderDynamic({ options: {}, tls: {}, transport: {} }); syncV6Tips(); });
   ['f-name', 'f-port'].forEach(id => document.getElementById(id).addEventListener('input', debounce(syncV6Tips, 400)));
-  document.querySelectorAll('.node-cb').forEach(c => c.addEventListener('change', () => { syncFamily(); fwRender(fwCollect()); }));
-  document.getElementById('f-port').addEventListener('input', fwHint);
+  document.querySelectorAll('.node-cb').forEach(c => c.addEventListener('change', () => { syncFamily(); fwUpdateAll(); }));
+  ['f-name', 'f-port'].forEach(id => document.getElementById(id).addEventListener('input', fwUpdateAll)); // 节点名预览、转到的端口跟着变
+  document.getElementById('f-protocol').addEventListener('change', fwUpdateAll); // 转 TCP 还是 UDP 跟着协议变
   document.querySelectorAll('.node-fam').forEach(c => c.addEventListener('change', syncV6Tips));
   document.getElementById('f-addrs').addEventListener('input', debounce(syncV6Tips, 400));
   syncFamily();
@@ -612,7 +613,12 @@ async function editLine(id, cloneFrom, preset) {
 
 // ---- 中转入口:客户端经别的服务器(集群中转)或外部中转(自己跑的 realm、买的中转)连到这条线路,加密数据原样转过去 ----
 // 后端:保存校验 web/line_forwards.go、中转服务器上的转发 render/forward.go、订阅里的节点 sub/link.go forwardAddrs。
-// 一行 = 方式 / 中转服务器或地址 / 端口 / 转给哪台 / 节点名后缀 / 更多(转到地址、暂停)与删除;部署范围变了,「转给」跟着变。
+// 默认收起:勾上「中转入口」才出来(和分流规则一样,取消勾选并保存会清掉)。一条一块,读起来就是数据怎么走:
+//   第一行:入口 [中转服务器 ▾ / 外部中转 + 地址] : [端口] → 出口 [服务器] 转到的地址:线路端口  [暂停] [删除]
+//   第二行:订阅里这个节点叫什么(中转那一段可改),以及要做的事(集群中转:那台放行哪种流量的哪个端口;外部中转:在中转上转到哪)
+// 端口在中转服务器上撞了(那台的面板 / 订阅端口、部署在那台的线路、别的中转入口、同一台的另一行)当场标红;
+// 挑了中转服务器没改过端口的,自动给一个那台上空着的端口(先试线路自己的端口,按原端口转发)。
+let fwEditId = 0;
 function fwOf(l) { const v = parseJ(l.forwards); return Array.isArray(v) ? v : []; }
 const fwNode = id => (state.nodes || []).find(n => n.id === id);
 const fwNodeName = id => (fwNode(id) || {}).name || '#' + id;
@@ -622,6 +628,7 @@ function fwDeployed() {
   const picked = [...document.querySelectorAll('.node-cb')].filter(c => c.checked).map(c => Number(c.value));
   return picked.length ? picked : nodes.map(n => n.id);
 }
+const fwOnNode = (l, id) => { const ids = lineNodeIds(l); return !ids.length || ids.includes(id); };
 
 // 列表里线路名后面的小标记:有几个中转入口(暂停的不算),悬停看明细
 function fwBadge(l) {
@@ -631,141 +638,270 @@ function fwBadge(l) {
   return ` <span class="badge fw-badge" title="${esc(t('line.fw.title') + '\n' + tip)}">⇄ ${fs.length}</span>`;
 }
 
+// 转哪种流量(和后端 render.ForwardNetwork 一致;界面上选不出 QUIC 传输,只看协议)
+function fwNet() {
+  const p = fv('f-protocol');
+  return p === 'hysteria2' || p === 'tuic' ? 'udp' : p === 'shadowsocks' ? 'both' : 'tcp';
+}
+// 出口服务器转到哪个地址(显示用,挑法和后端 render.ForwardTarget 一样:中转有 IPv4(或不知道)先用出口的 IPv4)
+function fwExitAddr(exitId, viaId) {
+  const e = fwNode(exitId) || {}, v = fwNode(viaId) || {};
+  const four = x => (x && !String(x).includes(':') ? x : ''), six = x => (x && String(x).includes(':') ? x : '');
+  const e4 = four(e.publicIp), e6 = six(e.publicIp6) || six(e.publicIp), s4 = four(v.publicIp), s6 = six(v.publicIp6) || six(v.publicIp);
+  if (e4 && (s4 || !s6)) return e4;
+  return e6 || e4 || e.addr || e.domain || fwNodeName(exitId);
+}
+// 一台服务器自己监听的服务端口(和后端 servicePortsOf 一致:本机按设置,副机按上报,没上报按默认)
+function fwServicePorts(n) {
+  const label = { '面板': t('line.fw.svcPanel'), '订阅': t('line.fw.svcSub'), '代理面板': t('line.fw.svcReseller') };
+  if (n.isLocal) {
+    const st = state.settings || {};
+    const out = [['面板', st.webPort || 2053], ['订阅', st.subPort || 2056]];
+    if (String(st.resellerEnabled) !== 'false') out.push(['代理面板', st.resellerPort || 2054]);
+    return out.map(([k, p]) => ({ label: label[k], port: Number(p) }));
+  }
+  let list = parseJ(n.servicePorts);
+  if (!Array.isArray(list) || !list.length) list = [{ label: '面板', port: 2053 }, { label: '订阅', port: 2056 }];
+  return list.map(p => ({ label: label[p.label] || p.label, port: Number(p.port) }));
+}
+// 端口在中转服务器 via 上撞了什么(没撞返回空);row 是正在查的这一行(和别的行比)
+function fwPortProblem(via, port, row) {
+  const n = fwNode(via);
+  if (!n) return '';
+  if (!(port >= 1 && port <= 65535)) return t('line.fw.e.port');
+  const svc = fwServicePorts(n).find(p => p.port === port);
+  if (svc) return t('line.fw.e.svc', { port, via: n.name, what: svc.label });
+  if (fwDeployed().includes(via) && Number(fv('f-port')) === port) return t('line.fw.e.self', { port, via: n.name });
+  const other = (state.lines || []).find(l => l.id !== fwEditId && l.port === port && fwOnNode(l, via));
+  if (other) return t('line.fw.e.line', { port, via: n.name, line: other.name });
+  const ofw = (state.lines || []).find(l => l.id !== fwEditId && fwOf(l).some(f => f.via === via && f.port === port));
+  if (ofw) return t('line.fw.e.fw', { port, via: n.name, line: ofw.name });
+  const rows = [...document.querySelectorAll('#f-fw-list .fw-item')];
+  const i = rows.findIndex(r => r !== row && r.querySelector('.fw-via').value === String(via) && Number(r.querySelector('.fw-port').value) === port);
+  if (i >= 0 && rows.indexOf(row) > i) return t('line.fw.e.dup', { n: i + 1, via: n.name });
+  return '';
+}
+// 中转服务器上空着的端口:先试线路自己的端口(按原端口转发),再从 30001、40001 往后找
+function fwFreePort(via, row) {
+  const own = Number(fv('f-port')) || 0;
+  const cands = [own];
+  for (let p = 30001; p <= 30300; p++) cands.push(p);
+  for (let p = 40001; p <= 40300; p++) cands.push(p);
+  return cands.find(p => p >= 1 && p <= 65535 && !fwPortProblem(via, p, row)) || '';
+}
+
+// 展开后最上面一张小图:用户 → 中转 → 出口 → 网站,一眼看懂这是干什么的
 function fwSection() {
+  const node = (k, cls = '') => `<span class="fw-flow-node${cls}">${esc(t(k))}</span>`;
+  const arrow = '<span class="fw-flow-arrow">→</span>';
   return `<div class="full fw-box">
-    <div class="fw-top"><span class="fw-title">${esc(t('line.fw.title'))}</span><span class="muted small" id="f-fw-n"></span></div>
-    <p class="hint fw-intro">${esc(t('line.fw.help'))}</p>
+    ${check('f-fw-on', t('line.fw.on'), false, t('line.fw.onHelp'))}
     <div id="f-fw" hidden>
-      <div class="fw-row fw-head" aria-hidden="true"><span>${esc(t('line.fw.kind'))}</span><span>${esc(t('line.fw.where'))}</span><span>${esc(t('line.fw.port'))}</span><span>${esc(t('line.fw.to'))}</span><span>${esc(t('line.fw.name'))}</span><span></span></div>
+      <div class="fw-flow" aria-hidden="true">${node('line.fw.dUser')}${arrow}${node('line.fw.dRelay', ' relay')}${arrow}${node('line.fw.dExit', ' exit')}${arrow}${node('line.fw.dSite')}</div>
+      <p class="hint fw-flow-note">${esc(t('line.fw.dNote'))}</p>
       <div id="f-fw-list"></div>
-      <p class="hint" id="f-fw-hint"></p>
+      <button type="button" class="rr-add" id="f-fw-add">${esc(t('line.fw.add'))}</button>
+      <p class="hint fw-foot">${esc(t('line.fw.foot'))}</p>
     </div>
-    <button type="button" class="rr-add" id="f-fw-add">${esc(t('line.fw.add'))}</button>
   </div>`;
 }
 
-function fwRowHTML(f) {
+// 一条中转入口的骨架;地址、节点名、要做的事、问题由 fwUpdate 按当前表单填
+function fwItemHTML(f, i) {
   const nodes = state.nodes || [];
   const ext = !f.via;
-  const deployed = fwDeployed();
-  const to = deployed.includes(f.to) ? f.to : deployed.length === 1 ? deployed[0] : 0;
-  const toCell = deployed.length > 1
-    ? `<select class="fw-to" aria-label="${esc(t('line.fw.to'))}">${to ? '' : `<option value="0">${esc(t('line.fw.toPick'))}</option>`}${deployed.map(id => `<option value="${id}" ${id === to ? 'selected' : ''}>${esc(fwNodeName(id))}</option>`).join('')}</select>`
-    : `<span class="fw-to-fixed" data-to="${to}" title="${esc(fwNodeName(to))}">→ ${esc(fwNodeName(to))}</span>`;
-  const more = !!(f.target || f.off);
-  return `<div class="fw-row">
-    <select class="fw-kind" aria-label="${esc(t('line.fw.kind'))}"><option value="via" ${ext ? '' : 'selected'} ${nodes.length < 2 ? 'disabled' : ''}>${esc(t('line.fw.kindVia'))}</option><option value="ext" ${ext ? 'selected' : ''}>${esc(t('line.fw.kindExt'))}</option></select>
-    <span class="fw-where">
-      <select class="fw-via" aria-label="${esc(t('line.fw.where'))}" ${ext ? 'hidden' : ''}>${nodes.map(n => `<option value="${n.id}" ${n.id === f.via ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select>
-      <input class="fw-host" value="${esc(f.host || '')}" placeholder="${esc(t('line.fw.hostPh'))}" aria-label="${esc(t('line.fw.where'))}" spellcheck="false" autocomplete="off" ${ext ? '' : 'hidden'}>
-    </span>
-    <input class="fw-port" type="number" min="1" max="65535" value="${f.port || ''}" aria-label="${esc(t('line.fw.port'))}">
-    ${toCell}
-    <input class="fw-name" maxlength="40" value="${esc(f.name || '')}" aria-label="${esc(t('line.fw.name'))}">
-    <span class="rr-ops">
-      <button type="button" class="btn sm ghost${more ? ' on' : ''}" data-fw="more" title="${esc(t('line.fw.more'))}" aria-label="${esc(t('line.fw.more'))}" aria-expanded="${more}">⋯</button>
-      <button type="button" class="btn sm ghost danger" data-fw="del" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}">✕</button>
-    </span>
-    <div class="fw-more" ${more ? '' : 'hidden'}>
-      <label class="fw-target-wrap" ${ext ? 'hidden' : ''}><span>${esc(t('line.fw.target'))}</span><input class="fw-target" value="${esc(f.target || '')}" placeholder="${esc(t('line.fw.targetPh'))}" title="${esc(t('line.fw.targetHelp'))}" spellcheck="false" autocomplete="off"></label>
-      <label class="fw-off-wrap"><input type="checkbox" class="fw-off" ${f.off ? 'checked' : ''}> ${esc(t('line.fw.off'))}</label>
+  return `<div class="fw-item${f.off ? ' paused' : ''}" data-auto="${f.auto ? 1 : 0}" data-to="${Number(f.to) || 0}">
+    <div class="fw-path">
+      <span class="fw-no">${i + 1}</span>
+      <span class="fw-lab">${esc(t('line.fw.in'))}</span>
+      <span class="fw-from">
+        <select class="fw-via" aria-label="${esc(t('line.fw.in'))}">${nodes.map(n => `<option value="${n.id}" ${!ext && n.id === f.via ? 'selected' : ''}>${esc(n.name)}${n.enabled === false ? ' · ' + esc(t('common.disabled')) : ''}</option>`).join('')}<option value="ext" ${ext ? 'selected' : ''}>${esc(t('line.fw.ext'))}</option></select>
+        <input class="fw-host" value="${esc(f.host || '')}" placeholder="${esc(t('line.fw.hostPh'))}" aria-label="${esc(t('line.fw.hostPh'))}" spellcheck="false" autocomplete="off" ${ext ? '' : 'hidden'}>
+      </span>
+      <span class="fw-lab">${esc(t('line.fw.portOf'))}</span>
+      <input class="fw-port" type="number" min="1" max="65535" value="${f.port || ''}" placeholder="${esc(t('line.fw.portPh'))}" aria-label="${esc(t('line.fw.portPh'))}">
+      <span class="fw-arrow" aria-hidden="true">→</span>
+      <span class="fw-lab">${esc(t('line.fw.out'))}</span>
+      <span class="fw-exit"></span>
+      <span class="fw-dest-wrap"><button type="button" class="fw-dest" title="${esc(t('line.fw.targetHelp'))}"></button><span class="fw-paren" hidden>(</span><input class="fw-target" value="${esc(f.target || '')}" spellcheck="false" autocomplete="off" title="${esc(t('line.fw.targetHelp'))}" ${f.target ? '' : 'hidden'}><span class="fw-dest-port"></span></span>
+      <span class="fw-tail">
+        <label class="fw-pause" title="${esc(t('line.fw.offHelp'))}"><input type="checkbox" class="fw-off" ${f.off ? 'checked' : ''}> ${esc(t('line.fw.off'))}</label>
+        <button type="button" class="btn sm ghost danger fw-del" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}">✕</button>
+      </span>
+    </div>
+    <div class="fw-result">
+      <span class="fw-nn"><span class="lab">${esc(t('line.fw.nodeName'))}</span><b class="fw-nn-pre"></b><input class="fw-name" maxlength="40" value="${esc(f.name || '')}" aria-label="${esc(t('line.fw.nodeName'))}"><b class="fw-nn-ratio"></b></span>
+      <span class="fw-todo"></span>
     </div>
     <div class="fw-note" hidden></div>
   </div>`;
 }
 
-// 一行的提示:节点名默认用什么;中转服务器和出口同一台、已停用、版本和主机不一样
-function fwCheckRow(row) {
-  const ext = row.querySelector('.fw-kind').value === 'ext';
-  const via = Number(row.querySelector('.fw-via').value) || 0;
-  const toSel = row.querySelector('.fw-to'), toFixed = row.querySelector('.fw-to-fixed');
-  const to = Number(toSel ? toSel.value : toFixed ? toFixed.dataset.to : 0) || 0;
-  row.querySelector('.fw-name').placeholder = ext ? t('line.fw.namePhExt') : t('line.fw.namePh', { name: fwNodeName(via) });
+// 按表单当前的线路名、端口、协议、部署范围,把一条中转入口的显示和检查做一遍;返回问题(红的)
+function fwUpdate(row) {
+  const viaSel = row.querySelector('.fw-via');
+  const ext = viaSel.value === 'ext', via = ext ? 0 : Number(viaSel.value) || 0;
+  const host = row.querySelector('.fw-host'), target = row.querySelector('.fw-target'), dest = row.querySelector('.fw-dest');
+  host.hidden = !ext;
+  row.classList.toggle('paused', row.querySelector('.fw-off').checked);
+  // 出口:部署在几台就能选几台(不能是中转自己);只有一台就是那台
+  const deployed = fwDeployed().filter(id => ext || id !== via);
+  const cell = row.querySelector('.fw-exit');
+  const curSel = cell.querySelector('select');
+  let to = Number(curSel ? curSel.value : row.dataset.to) || 0;
+  if (!deployed.includes(to)) to = deployed.length === 1 ? deployed[0] : 0;
+  row.dataset.to = to;
+  const want = deployed.length > 1
+    ? `<select class="fw-to" aria-label="${esc(t('line.fw.out'))}">${to ? '' : `<option value="0">${esc(t('line.fw.toPick'))}</option>`}${deployed.map(id => `<option value="${id}" ${id === to ? 'selected' : ''}>${esc(fwNodeName(id))}</option>`).join('')}</select>`
+    : (to ? `<b class="fw-exit-name" title="${esc(fwNodeName(to))}">${esc(fwNodeName(to))}</b>` : `<span class="muted">${esc(t('line.fw.noExit'))}</span>`);
+  if (cell.__html !== want) { cell.innerHTML = want; cell.__html = want; }
+  // 转到的地址(放在括号里):集群中转可点开改(内网地址);外部中转只是告诉你该转到哪
+  const linePort = Number(fv('f-port')) || 0;
+  const addr = to ? fwExitAddr(to, via) : '';
+  const shown = addr.includes(':') ? '[' + addr + ']' : addr;
+  // 平时整段「(地址:端口) ✎」是一个按钮;点开后换成「( [地址输入框] :端口)」
+  if (ext) target.hidden = true;
+  const editing = !ext && !target.hidden;
+  dest.textContent = to ? '(' + shown + ':' + (linePort || '?') + ')' + (ext ? '' : ' ✎') : '';
+  dest.disabled = ext;
+  dest.hidden = editing || !to;
+  target.placeholder = addr;
+  row.querySelector('.fw-paren').hidden = !editing;
+  const dp = row.querySelector('.fw-dest-port');
+  dp.hidden = !editing;
+  dp.textContent = ':' + (linePort || '?') + ')';
+  // 订阅里的节点名:线路名 + 出口后缀(两台以上服务器时)+ "-" + 中转名 + 倍率(和后端 forwardAddrs 一样)
+  const exitNode = fwNode(to) || {};
+  const multi = (state.nodes || []).filter(n => n.enabled !== false).length > 1;
+  const ratio = exitNode.ratio > 0 && exitNode.ratio !== 1 ? ' x' + exitNode.ratio : '';
+  row.querySelector('.fw-nn-pre').textContent = (fv('f-name').trim() || t('line.fw.lineName')) + (multi && to ? '-' + exitNode.name : '') + '-';
+  row.querySelector('.fw-nn-ratio').textContent = ratio;
+  const port = Number(row.querySelector('.fw-port').value) || 0;
+  row.querySelector('.fw-name').placeholder = ext ? (host.value.trim() || t('line.fw.relayName')) : fwNodeName(via);
+  // 要做的事
+  const net = t('line.fw.net.' + fwNet());
+  row.querySelector('.fw-todo').textContent = !to ? '' : ext
+    ? t('line.fw.todoExt', { port: port || '?', net, dest: (addr.includes(':') ? '[' + addr + ']' : addr) + ':' + (linePort || '?') })
+    : t('line.fw.todoVia', { via: fwNodeName(via), port: port || '?', net });
+  // 问题:红的保存时拦下,黄的只提示
+  let bad = '', warn = '';
+  if (!to) bad = t('line.fw.e.to');
+  else if (ext && !host.value.trim()) bad = t('line.fw.e.host');
+  else if (ext && !(port >= 1 && port <= 65535)) bad = t('line.fw.e.port');
+  else if (!ext) bad = fwPortProblem(via, port, row);
+  if (!bad && !ext && fwNode(via) && fwNode(via).enabled === false) warn = t('line.fw.offNode');
+  else if (!bad && !ext && fwNode(via) && (fwNode(via).status || {}).versionMismatch) warn = t('line.fw.old');
   const note = row.querySelector('.fw-note');
-  let msg = '', bad = false;
-  if (!ext && via && via === to) { msg = t('line.fw.same'); bad = true; }
-  else if (!ext && fwNode(via) && fwNode(via).enabled === false) msg = t('line.fw.offNode');
-  else if (!ext && fwNode(via) && (fwNode(via).status || {}).versionMismatch) msg = t('line.fw.old');
-  note.textContent = msg;
-  note.hidden = !msg;
-  note.classList.toggle('bad', bad);
+  note.textContent = bad || warn;
+  note.hidden = !(bad || warn);
+  note.classList.toggle('bad', !!bad);
+  return bad;
 }
+const fwUpdateAll = () => document.querySelectorAll('#f-fw-list .fw-item').forEach(fwUpdate);
 
-function fwCollect() {
-  return [...document.querySelectorAll('#f-fw-list .fw-row')].map(row => {
-    const ext = row.querySelector('.fw-kind').value === 'ext';
-    const toSel = row.querySelector('.fw-to'), toFixed = row.querySelector('.fw-to-fixed');
-    const f = { port: Number(row.querySelector('.fw-port').value) || 0, to: Number(toSel ? toSel.value : toFixed ? toFixed.dataset.to : 0) || 0 };
+function fwCollect(withMeta) {
+  return [...document.querySelectorAll('#f-fw-list .fw-item')].map(row => {
+    const v = row.querySelector('.fw-via').value, ext = v === 'ext';
+    const f = { port: Number(row.querySelector('.fw-port').value) || 0, to: Number(row.dataset.to) || 0 };
     const name = row.querySelector('.fw-name').value.trim();
     if (name) f.name = name;
     if (ext) f.host = row.querySelector('.fw-host').value.trim();
     else {
-      f.via = Number(row.querySelector('.fw-via').value) || 0;
-      const target = row.querySelector('.fw-target').value.trim();
-      if (target) f.target = target;
+      f.via = Number(v) || 0;
+      const target = row.querySelector('.fw-target');
+      if (!target.hidden && target.value.trim()) f.target = target.value.trim();
     }
     if (row.querySelector('.fw-off').checked) f.off = true;
+    if (withMeta && row.dataset.auto === '1') f.auto = true;
     return f;
   });
 }
 
-function fwHint() {
-  const hint = document.getElementById('f-fw-hint');
-  if (hint) hint.textContent = t('line.fw.hint', { port: fv('f-port') || '?' });
+// 保存时读:没勾 = 清掉;有红的问题就拦下,说清是第几个
+function fwRead() {
+  if (!fchk('f-fw-on')) return [];
+  const rows = [...document.querySelectorAll('#f-fw-list .fw-item')];
+  rows.forEach((row, i) => {
+    const bad = fwUpdate(row);
+    if (bad) throw new Error(t('line.fw.e.at', { n: i + 1, msg: bad }));
+  });
+  return fwCollect();
 }
 
 function fwRender(list) {
   const box = document.getElementById('f-fw-list');
   if (!box) return;
-  box.innerHTML = list.map(fwRowHTML).join('');
-  box.querySelectorAll('.fw-row').forEach(fwCheckRow);
-  document.getElementById('f-fw').hidden = !list.length;
-  document.getElementById('f-fw-n').textContent = list.length ? String(list.length) : '';
-  fwHint();
+  box.innerHTML = list.map(fwItemHTML).join('');
+  fwUpdateAll();
 }
 
-function fwBind(initial) {
-  const box = document.getElementById('f-fw-list');
+function fwAdd() {
+  const nodes = state.nodes || [], deployed = fwDeployed();
+  // 默认经一台不部署这条线路、还没被前面几条用上、没停用的服务器中转(没有就别的任意一台;只有一台服务器就只能外部中转)
+  const used = new Set(fwCollect().filter(f => f.via).map(f => f.via));
+  const spare = nodes.filter(n => !deployed.includes(n.id) && n.enabled !== false);
+  const pick = spare.find(n => !used.has(n.id)) || spare[0] || nodes.find(n => !(deployed.length === 1 && n.id === deployed[0]));
+  const via = nodes.length > 1 && pick ? pick.id : 0;
+  const f = { via, to: deployed.filter(id => id !== via).length === 1 ? deployed.find(id => id !== via) : 0, auto: !!via };
+  fwRender([...fwCollect(true), f]);
+  const rows = document.querySelectorAll('#f-fw-list .fw-item'), row = rows[rows.length - 1];
+  if (via) { row.querySelector('.fw-port').value = fwFreePort(via, row); fwUpdate(row); }
+  (row.querySelector(via ? '.fw-port' : '.fw-host') || row).focus();
+}
+
+function fwBind(initial, editId) {
+  fwEditId = editId || 0;
+  const on = document.getElementById('f-fw-on'), box = document.getElementById('f-fw'), list = document.getElementById('f-fw-list');
+  on.checked = initial.length > 0;
+  box.hidden = !on.checked;
   fwRender(initial);
-  document.getElementById('f-fw-add').addEventListener('click', () => {
-    const nodes = state.nodes || [], deployed = fwDeployed();
-    // 默认经集群里不部署这条线路、还没被前面几行用上的那台中转(没有就用随便一台别的;只有一台服务器只能外部中转),
-    // 端口照线路的端口(按原端口转发);这台这个端口前面已经用了就空着让人填
-    const cur = fwCollect(), used = new Set(cur.filter(f => f.via).map(f => f.via));
-    const spare = nodes.filter(n => !deployed.includes(n.id));
-    const via = (spare.find(n => !used.has(n.id)) || spare[0] || nodes.find(n => deployed.length !== 1 || n.id !== deployed[0]) || {}).id || 0;
-    let port = Number(fv('f-port')) || '';
-    if (cur.some(f => f.via === via && f.port === port)) port = '';
-    const f = { via: nodes.length > 1 ? via : 0, port, to: deployed.length === 1 ? deployed[0] : 0 };
-    fwRender([...fwCollect(), f]);
-    const rows = box.querySelectorAll('.fw-row');
-    const last = rows[rows.length - 1];
-    (last.querySelector(f.via ? '.fw-port' : '.fw-host') || last).focus();
+  on.addEventListener('change', () => {
+    box.hidden = !on.checked;
+    if (on.checked && !list.children.length) fwAdd(); // 勾上就给一条,直接填
   });
-  box.addEventListener('click', e => {
-    const b = e.target.closest('[data-fw]');
-    if (!b) return;
-    const row = b.closest('.fw-row');
-    if (b.dataset.fw === 'del') {
-      const rows = [...box.querySelectorAll('.fw-row')];
-      fwRender(fwCollect().filter((_, i) => rows[i] !== row));
-    } else if (b.dataset.fw === 'more') {
-      const m = row.querySelector('.fw-more');
-      m.hidden = !m.hidden;
-      b.setAttribute('aria-expanded', String(!m.hidden));
-    }
-  });
-  box.addEventListener('change', e => {
-    const row = e.target.closest('.fw-row');
+  document.getElementById('f-fw-add').addEventListener('click', fwAdd);
+  list.addEventListener('click', e => {
+    const row = e.target.closest('.fw-item');
     if (!row) return;
-    if (e.target.classList.contains('fw-kind')) {
-      const ext = e.target.value === 'ext';
-      row.querySelector('.fw-via').hidden = ext;
-      row.querySelector('.fw-host').hidden = !ext;
-      row.querySelector('.fw-target-wrap').hidden = ext;
-      (ext ? row.querySelector('.fw-host') : row.querySelector('.fw-via')).focus();
+    if (e.target.closest('.fw-del')) {
+      row.remove();
+      document.querySelectorAll('#f-fw-list .fw-no').forEach((x, i) => { x.textContent = i + 1; });
+      fwUpdateAll();
+    } else if (e.target.closest('.fw-dest') && !e.target.closest('.fw-dest').disabled) { // 点开改转到的地址
+      const tg = row.querySelector('.fw-target');
+      tg.hidden = false;
+      fwUpdate(row);
+      tg.focus();
     }
-    fwCheckRow(row);
+  });
+  list.addEventListener('change', e => {
+    const row = e.target.closest('.fw-item');
+    if (!row) return;
+    if (e.target.classList.contains('fw-via')) {
+      const ext = e.target.value === 'ext';
+      // 换了中转服务器、端口还是自动给的:换成那台上空着的端口
+      if (!ext && row.dataset.auto === '1') row.querySelector('.fw-port').value = fwFreePort(Number(e.target.value), row);
+      if (ext) row.querySelector('.fw-host').focus();
+    }
+    if (e.target.classList.contains('fw-to')) row.dataset.to = e.target.value;
+    fwUpdateAll(); // 一行改了,别的行的撞端口结论也可能变
+  });
+  list.addEventListener('input', e => {
+    const row = e.target.closest('.fw-item');
+    if (!row) return;
+    if (e.target.classList.contains('fw-port')) row.dataset.auto = '0';
+    fwUpdateAll();
+  });
+  // 外部中转粘贴「地址:端口」:拆开填(IPv6 要写成 [v6]:端口 才拆)
+  list.addEventListener('focusout', e => {
+    if (!e.target.classList.contains('fw-host')) return;
+    const m = /^\[?([^[\]]+?)\]?:(\d{1,5})$/.exec(e.target.value.trim());
+    if (m && (!m[1].includes(':') || e.target.value.trim().startsWith('['))) {
+      e.target.value = m[1];
+      const port = e.target.closest('.fw-item').querySelector('.fw-port');
+      port.value = m[2];
+      fwUpdateAll();
+    }
   });
 }
 
@@ -1206,7 +1342,7 @@ function renderLineOnline() {
 function fwDetail(l) {
   const fs = fwOf(l);
   if (!fs.length) return '';
-  const chips = fs.map(f => `<span class="chip${f.off ? ' off' : ''}" title="${esc((f.name ? f.name + ' · ' : '') + (f.via ? t('line.fw.kindVia') : t('line.fw.kindExt')))}">⇄ ${esc(f.via ? fwNodeName(f.via) : f.host)}:${f.port} → ${esc(fwNodeName(f.to))}${f.off ? ' · ' + esc(t('line.fw.off')) : ''}</span>`);
+  const chips = fs.map(f => `<span class="chip${f.off ? ' off' : ''}" title="${esc((f.name ? f.name + ' · ' : '') + (f.via ? t('line.fw.viaServer') : t('line.fw.ext')))}">⇄ ${esc(f.via ? fwNodeName(f.via) : f.host)}:${f.port} → ${esc(fwNodeName(f.to))}${f.off ? ' · ' + esc(t('line.fw.off')) : ''}</span>`);
   return `<div class="ld-fw"><span class="muted small">${esc(t('line.fw.title'))}</span>${chipList(chips, { key: 'ldfw-' + l.id, max: 4 })}</div>`;
 }
 
