@@ -41,6 +41,11 @@ S.onlines.users = Object.keys(online).filter(n => S.users.some(u => u.name === n
 S.onlines.connCounts = Object.fromEntries(S.onlines.users.map((n, i) => [n, 3 + i * 2]));
 S.onlines.lines = S.lines.slice(0, 2).map(l => l.name);
 for (const n of S.nodes.nodes || []) if (n.status) n.status.uptime = (n.status.uptime || 0) + DELTA; // 副机运行时长随导出日期累加
+// 磁盘占用:第二台副机快满了(服务器页的 💾 标记、概况「需要处理」、清理磁盘都看得到),其余宽裕
+{ const G = 1073741824, at = Math.floor(Date.now() / 1000); let k = 0;
+  for (const n of S.nodes.nodes || []) { if (n.isLocal || !n.status) continue; k++;
+    n.status.disk = k === 2 ? { path: '/etc/m-ui', total: 9.6 * G, used: 8.8 * G, free: 0.8 * G, logs: 4.1 * G, cache: 0.3 * G, swap: 4 * G, opsAgent: true, at }
+      : { path: '/etc/m-ui', total: 40 * G, used: (9 + 4 * k) * G, free: (31 - 4 * k) * G, logs: 0.4 * G, cache: 0.2 * G, swap: 2 * G, at }; } }
 
 const nextId = list => list.reduce((m, x) => Math.max(m, x.id || 0), 0) + 1;
 // 外部订阅展开:节点明细 / 逐台测速 / 大陆连通 / 隐藏改名 / 添加为上游(GET 与 POST 都走这里)。
@@ -354,6 +359,21 @@ function haView(full) {
 // 设为主机的检查:演示站不真的换主机,卡片里写明原因(code 为 text 的原文照样显示)
 const haDemoBlock = () => ({ ok: false, blockers: [{ code: 'text', args: { text: zh ? '演示模式:不会真的换主机。装好以后在这里一键把主机换到这台。' : 'Demo mode: the master is not actually moved. On a real install this hands the master over to this server in one step.' } }] });
 
+// 清理磁盘(演示):开始后两秒多显示「正在清理」,之后给出完整输出,那台的磁盘占用降下来(输出照真机的样子)
+const dcLines = ['[12:00:00] 开始 disk-clean', '== 清理磁盘 ==', '清理前:已用 9011 MB / 共 9830 MB,可用 819 MB(92%)', '已清空 apt 软件包缓存',
+  'journald 回收到 200MB 以内,现在:198.0M', '截断 /var/log/syslog:原 3812MB,只留最后 5MB', '删掉轮转下来的旧日志 14 个,共 286MB',
+  '已装 m-ui-syslog-cap.timer:每小时看一次,syslog 超过 200MB 就立刻轮转', '清理后:已用 4720 MB / 共 9830 MB,可用 5110 MB(49%)', 'm-ui 的数据目录和备份没有动', '[12:00:04] 完成'];
+function demoDiskClean(id, start) {
+  const n = (S.nodes.nodes || []).find(x => x.id === id) || {}; // 不能用 find:顶层的 find 是浏览器的 window.find
+  if (start) S.dc = { id, at: Date.now() };
+  const st = S.dc && S.dc.id === id ? S.dc : null;
+  const d = n.isLocal ? null : (n.status || {}).disk;
+  if (!st) return { running: false, log: [], disk: d };
+  if (Date.now() - st.at < 2500) return { running: true, current: 'disk-clean', log: dcLines.slice(0, 4), disk: d };
+  if (d && !st.applied) { st.applied = true; const used = d.used * 0.5; Object.assign(d, { used, free: d.total - used, logs: 0.2 * 1073741824, cache: 0 }); }
+  return { running: false, log: dcLines, last: { name: 'disk-clean', ok: true, time: now() }, disk: d };
+}
+
 // 一条路由:method + 路径(去掉 ./api/ 与查询串),query 单独给
 function route(method, path, query, body) {
   const seg = path.split('/');
@@ -370,7 +390,7 @@ function route(method, path, query, body) {
       case 'users': if (seg[2] === 'plan-ops') return clone(S.planOps.filter(o => o.userId === id).slice(0, Number(new URLSearchParams(query).get('limit')) || 20));
         if (seg[2] === 'sub') { const u = find(S.users, id); return { link: subUrl(u), clash: subUrl(u) + '?format=clash', json: subUrl(u) + '?format=json' }; } return clone(S.users);
       case 'plans': return S.plans.map(planView);
-      case 'nodes': return clone(S.nodes);
+      case 'nodes': if (seg[2] === 'disk-clean') return demoDiskClean(id, false); return clone(S.nodes);
       // 主机容灾(见 haView;没有这一条时界面拿到 {},会把每台都标成「副机」)
       case 'ha': if (seg[1] === 'plan') return haDemoBlock(); if (seg[1]) return notFound();
         return haView(/(^|&)full=1(&|$)/.test(query));
@@ -386,7 +406,10 @@ function route(method, path, query, body) {
           memTotal: 2 * 1073741824, memAvail: 1.3 * 1073741824, swapTotal: 2 * 1073741824, swapFree: 2 * 1073741824, diskTotal: 40 * 1073741824, diskFree: 29 * 1073741824,
           cc: 'bbr', qdisc: 'fq', nofile: 1048576, ntp: 'yes', tuned: true, limits: true,
           warp: { ...((o.info || {}).warp || {}), installed: true, service: 'active', socks: 'active', port: 40000, listening: true, status: 'Connected', exit: 'on', exitIp: '104.28.0.1', exitLoc: 'JP', exitColo: 'NRT' } };
-        o.status = o.status || { running: false, log: [] }; return o; }
+        o.status = o.status || { running: false, log: [] };
+        if (!(o.tasks || []).some(x => x.name === 'disk-clean')) o.tasks = [...(o.tasks || []), { name: 'disk-clean', title: '清理磁盘', desc: '清掉软件包缓存、把 journald 回收到上限、超过 100MB 的文本日志只留最后 5MB、删掉一天前轮转下来的旧日志,并装一个每小时检查的定时器(syslog 超过 200MB 就立刻轮转)。不碰 m-ui 的数据和备份' }];
+        o.disk = { path: '/etc/m-ui', total: 40 * 1073741824, used: 11 * 1073741824, free: 29 * 1073741824, logs: 1.2 * 1073741824, cache: 0.3 * 1073741824, swap: 2 * 1073741824, at: now() };
+        return o; }
       case 'cert': if (seg[1] === 'status') return fx('GET cert/status') || { running: false, log: [] }; { const c = fx('GET cert') || { settings: S.settings, status: {} }; const use = S.certs.find(x => x.certFile === S.certUse.lines); return { ...c, notifyConfigured: true, certs: clone(S.certs), certPath: S.certUse.lines, panelCert: S.certUse.panel, subCert: S.certUse.sub, panelTLS: !!S.certUse.panel, subTLS: !!S.certUse.sub, source: use ? use.source : '', info: use ? clone(use.info) : { exists: false } }; }
       case 'sub-logo': return clone(S.logo || { set: false });
       case 'reach': return clone(S.reach);
@@ -469,6 +492,7 @@ function route(method, path, query, body) {
       const n = find(list, id);
       if (seg[2] === 'test') return { ok: true, version: 'demo', hostname: 'demo', coreRunning: true };
       if (seg[2] === 'push') return ok();
+      if (seg[2] === 'disk-clean') return demoDiskClean(id, true);
       if (method === 'DELETE') { S.nodes.nodes = list.filter(x => x.id !== id); return ok({ disabledLines: [] }); }
       if (method === 'PUT') { const { token, ...rest } = body || {}; Object.assign(n, rest, { id }); return clone(n); }
       return ok();

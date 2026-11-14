@@ -719,6 +719,8 @@ type Report struct {
 	LedgerFails int    `json:"ledgerFails,omitempty"` // 流量记账连续失败的轮数
 	// HA 主机容灾的信息(开过容灾的副机才带)
 	HA *HAReport `json:"ha,omitempty"`
+	// Disk 数据目录所在盘的占用(老副机不报):主机按它在服务器页、概况、Telegram 提醒快满了
+	Disk *model.DiskStat `json:"disk,omitempty"`
 }
 
 // saveNodeCerts 记下副机报上来的证书清单:线路编辑框与订阅的 SNI 用它。老版本副机不报(nil)就不动;
@@ -860,8 +862,11 @@ type NodeStatus struct {
 	LedgerRegressAt    int64 `json:"ledgerRegressAt,omitempty"`
 	LedgerRegressUsers int   `json:"ledgerRegressUsers,omitempty"`
 	// HA 副机最近一份报告里的容灾信息(备用公钥、副本、租约……;没开容灾为空)
-	HA              *HAReport `json:"ha,omitempty"`
-	applyGzip       bool      // 副机报过收得了 gzip 压缩的快照
+	HA *HAReport `json:"ha,omitempty"`
+	// Disk 副机最近一份报告里的磁盘占用(老副机不报为空)
+	Disk            *model.DiskStat `json:"disk,omitempty"`
+	diskAlerted     string          // 已经为磁盘发过哪一级的告警(model.DiskWarn / DiskBad;恢复后清空)
+	applyGzip       bool            // 副机报过收得了 gzip 压缩的快照
 	alerted         bool
 	failSince       int64 // 这一轮连续失败从什么时候开始;0 = 正常
 	unsyncedSince   int64 // 在线但配置没同步上从什么时候开始;0 = 已同步或不在线
@@ -1770,7 +1775,7 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 	}
 	if rep != nil {
 		st.Version, st.Hostname, st.CoreRunning, st.Uptime, st.Revision, st.CertDays = rep.Version, rep.Hostname, rep.CoreRunning, rep.Uptime, rep.Revision, rep.CertDays
-		st.LedgerFails, st.applyGzip, st.HA = rep.LedgerFails, rep.ApplyGzip, rep.HA
+		st.LedgerFails, st.applyGzip, st.HA, st.Disk = rep.LedgerFails, rep.ApplyGzip, rep.HA, rep.Disk
 		h.saveNodeCerts(n, rep.Certs)
 		h.saveNodeServicePorts(n, rep.ServicePorts)
 		// hubRevision 在副机 ApplySnapshot 的事务里就写了,数据面有没有真的应用成功要看 ReloadPending。
@@ -1831,6 +1836,12 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 			why = "副机上报的配置修订号一直对不上"
 		}
 		msgs = append(msgs, "🟠 <b>副机配置没同步上</b>:"+alertText(n.Name, 64)+"(在线,已持续 "+strconv.FormatInt((now-st.unsyncedSince)/60, 10)+" 分钟)\n"+alertText(why, 300))
+	}
+	// 磁盘快满了 / 满了:各发一次(变严重再发一次),降到告警线以下一截才算恢复(在 90% 上下来回时不反复发)
+	if ok && rep != nil {
+		if m := diskAlert(n.Name, rep.Disk, &st.diskAlerted); m != "" {
+			msgs = append(msgs, m)
+		}
 	}
 	_ = wasOK
 	h.mu.Unlock()
@@ -2711,4 +2722,51 @@ func (h *Hub) saveNodeServicePorts(n model.Node, ports []model.ServicePort) {
 	if err := h.d.DB.Model(&model.Node{}).Where("id = ?", n.Id).Update("service_ports", json.RawMessage(b)).Error; err != nil {
 		logger.Warning("记录副机 ", n.Name, " 的服务端口失败: ", err)
 	}
+}
+
+// diskAlert 副机磁盘的告警文案(没有要发的返回空);alerted 记着已经发过哪一级,在这里更新。
+func diskAlert(name string, d *model.DiskStat, alerted *string) string {
+	return DiskAlertText(false, name, d, alerted)
+}
+
+// DiskAlertText 一台服务器磁盘的告警文案:快满了、满了各发一次(变严重再发一次),降到告警线以下一截才算恢复
+// (见 model.DiskRecovered)。self:主机自己的盘(runner 的本机巡检),否则是副机 name。
+func DiskAlertText(self bool, name string, d *model.DiskStat, alerted *string) string {
+	if d == nil || d.Used+d.Free <= 0 { // 没报、读不到:既不告警也不说恢复
+		return ""
+	}
+	who, how := "副机 "+alertText(name, 64), "到主机面板服务器页对它点「清理磁盘」"
+	if self {
+		who, how = "主机", "到面板运维页点「清理磁盘」"
+	}
+	switch lvl := d.Level(); {
+	case lvl == model.DiskBad && *alerted != model.DiskBad:
+		*alerted = model.DiskBad
+		return "🔴 <b>磁盘满了</b>:" + who + " " + d.Brief() + diskHogs(d) + "\n写库、写日志、签证书随时会失败:" + how + ",或登录服务器腾出空间"
+	case lvl == model.DiskWarn && *alerted == "":
+		*alerted = model.DiskWarn
+		return "🟠 <b>磁盘快满了</b>:" + who + " " + d.Brief() + diskHogs(d) + "\n" + how
+	case lvl == "" && *alerted != "" && model.DiskRecovered(d.Used, d.Free):
+		*alerted = ""
+		return "🟢 <b>磁盘空间恢复</b>:" + who + " " + d.Brief()
+	}
+	return ""
+}
+
+func diskHogs(d *model.DiskStat) string {
+	if h := d.Hogs(); h != "" {
+		return "\n占地方的:" + h
+	}
+	return ""
+}
+
+// DiskClean 让副机清理磁盘(start)或问进度,返回副机的原样回复(见 web 的 diskCleanState)。老版本副机没有这个接口:404(IsNotFound)。
+func (h *Hub) DiskClean(n model.Node, start, opsAgent bool) (json.RawMessage, error) {
+	var out json.RawMessage
+	if start {
+		err := h.requestTimeout(n, "POST", "disk-clean", map[string]bool{"opsAgent": opsAgent}, &out, 15*time.Second)
+		return out, err
+	}
+	err := h.requestTimeout(n, "GET", "disk-clean", nil, &out, 10*time.Second)
+	return out, err
 }

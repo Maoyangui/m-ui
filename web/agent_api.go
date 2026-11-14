@@ -110,6 +110,8 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentExternalIPs)(w, r)
 	case "kick":
 		s.agentAuth(s.handleAgentKick)(w, r)
+	case "disk-clean": // 主机服务器页让本机清理磁盘 / 问进度
+		s.agentAuth(s.handleAgentDiskClean)(w, r)
 	case "line-stats": // 主机的线路详情要本机这条线路的流量时序
 		s.agentAuth(s.handleAgentLineStats)(w, r)
 	case "upstream-test": // 主机让本机立刻测一条上游(面板的"测试"按钮派发过来)
@@ -492,6 +494,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		Onlines: map[string][]string{}, CertDays: s.run.CertDaysInUse(), Certs: s.run.CertBriefs(),
 		PublicIP:     s.setting("publicIp"),
 		PublicIP6:    s.setting("publicIp6"),
+		Disk:         s.run.DiskStat(), // 数据目录所在盘的占用:主机按它提醒快满了(5 分钟缓存)
 		Conns:        s.recentConns(50),
 		ConnFails:    s.recentFails(30),
 		ConnFailsOK:  true,

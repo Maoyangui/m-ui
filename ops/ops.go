@@ -237,11 +237,12 @@ var Tasks = []Task{
 	{Name: "warp-enable", Title: "启用 WARP SOCKS5", Desc: "MASQUE 代理模式,监听 127.0.0.1:<端口>,写 systemd 单元开机自启,验证出口"},
 	{Name: "warp-disable", Title: "停用 WARP", Desc: "断开并禁用 warp-socks5 单元"},
 	{Name: "warp-uninstall", Title: "卸载 WARP", Desc: "移除 cloudflare-warp、单元与源", Danger: true},
-	{Name: "swap", Title: "创建 swap", Desc: "无 swap 时创建 <N>G /swapfile 并写入 fstab"},
+	{Name: "swap", Title: "创建 swap", Desc: "无 swap 时创建 <N>G /swapfile 并写入 fstab;磁盘不够时按余量减小(给系统留 2G、不超过盘的四分之一)"},
 	{Name: "sysctl", Title: "内核参数 + BBR", Desc: "把下方参数写入 /etc/sysctl.d/99-m-ui-tune.conf 并应用(默认 fq+bbr、连接数、端口范围等,可按需修改)"},
 	{Name: "limits", Title: "文件句柄上限", Desc: "为 m-ui.service 写 LimitNOFILE/LimitNPROC override(重启 m-ui 生效)"},
 	{Name: "ntp", Title: "时间同步", Desc: "开启 systemd-timesyncd NTP 同步"},
 	{Name: "tune-all", Title: "一键优化", Desc: "swap + 内核参数 + 文件句柄 + NTP"},
+	{Name: "disk-clean", Title: "清理磁盘", Desc: "清掉软件包缓存、把 journald 回收到上限、超过 100MB 的文本日志只留最后 5MB、删掉一天前轮转下来的旧日志,并装一个每小时检查的定时器(syslog 超过 200MB 就立刻轮转)。不碰 m-ui 的数据和备份"},
 	{Name: "journal", Title: "限制系统日志占用", Desc: "给 journald 设占用上限与保留时长,并立刻回收超出的部分。装的是全机所有服务的日志,不影响 m-ui 运行"},
 }
 
@@ -294,7 +295,11 @@ type Params struct {
 	Sysctl      string // 自定义内核参数(key=value 每行一条),空=默认模板
 	JournalMB   int    // 系统日志占用上限(MB)
 	JournalDays int    // 系统日志保留天数
+	OpsAgent    bool   // 清理磁盘时一并停用谷歌云 Ops Agent
 }
+
+// swapPaths swap 文件与 fstab(测试里换成临时文件)。
+var swapPaths = struct{ File, Fstab string }{"/swapfile", "/etc/fstab"}
 
 // DefaultNoFile 是 limits 任务的默认句柄上限。
 const DefaultNoFile = 1048576
@@ -363,6 +368,8 @@ func Script(name string, p Params) (string, error) {
 		s = scriptWarpDisable
 	case "journal":
 		s = scriptJournal
+	case "disk-clean":
+		s = diskCleanScript(p)
 	case "warp-uninstall":
 		s = scriptWarpUninstall
 	case "swap":
@@ -380,6 +387,8 @@ func Script(name string, p Params) (string, error) {
 	}
 	s = strings.ReplaceAll(s, "{{PORT}}", strconv.Itoa(p.Port))
 	s = strings.ReplaceAll(s, "{{SWAP_GB}}", strconv.Itoa(p.SwapGB))
+	s = strings.ReplaceAll(s, "{{SWAPFILE}}", swapPaths.File)
+	s = strings.ReplaceAll(s, "{{FSTAB}}", swapPaths.Fstab)
 	s = strings.ReplaceAll(s, "{{NOFILE}}", strconv.Itoa(p.NoFile))
 	s = strings.ReplaceAll(s, "{{JOURNAL_MB}}", strconv.Itoa(p.JournalMB))
 	s = strings.ReplaceAll(s, "{{JOURNAL_DAYS}}", strconv.Itoa(p.JournalDays))
@@ -626,10 +635,24 @@ echo "== swap =="
 if swapon --show 2>/dev/null | grep -q .; then
   echo "已有 swap,跳过"; swapon --show
 else
-  fallocate -l {{SWAP_GB}}G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$(( {{SWAP_GB}} * 1024 ))
-  chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
-  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
-  echo "已创建 {{SWAP_GB}}G swap"
+  # 按磁盘余量封顶:给系统留 2G、不超过盘的四分之一;小盘上建大 swap 会把盘占满(谷歌云 8G 小盘上建过 4G)
+  want_mb=$(( {{SWAP_GB}} * 1024 ))
+  avail_mb=$(df -Pm / 2>/dev/null | awk 'NR==2{print $4}'); total_mb=$(df -Pm / 2>/dev/null | awk 'NR==2{print $2}')
+  avail_mb=${avail_mb:-0}; total_mb=${total_mb:-0}
+  cap_mb=$(( avail_mb - 2048 )); quarter_mb=$(( total_mb / 4 ))
+  [ "$cap_mb" -gt "$quarter_mb" ] && cap_mb=$quarter_mb
+  if [ "$cap_mb" -lt 512 ]; then
+    echo "磁盘只剩 ${avail_mb}MB(共 ${total_mb}MB):给系统留 2G 之后不够建 swap,跳过"
+  else
+    if [ "$want_mb" -gt "$cap_mb" ]; then
+      echo "磁盘剩 ${avail_mb}MB(共 ${total_mb}MB):swap 从 {{SWAP_GB}}G 减到 ${cap_mb}MB(给系统留 2G、不超过盘的四分之一)"
+      want_mb=$cap_mb
+    fi
+    fallocate -l "${want_mb}M" {{SWAPFILE}} || dd if=/dev/zero of={{SWAPFILE}} bs=1M count="$want_mb"
+    chmod 600 {{SWAPFILE}} && mkswap {{SWAPFILE}} >/dev/null && swapon {{SWAPFILE}}
+    grep -q '^{{SWAPFILE}} ' {{FSTAB}} || echo '{{SWAPFILE}} none swap sw 0 0' >> {{FSTAB}}
+    echo "已创建 ${want_mb}MB swap"
+  fi
 fi
 `
 

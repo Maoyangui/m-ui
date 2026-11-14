@@ -4,8 +4,8 @@
 // ---- 服务器 ----
 
 // 严重程度从高到低的顺序:「需要处理」的分项、名单都按它排
-export const NODE_CODES = ['offline', 'coreStopped', 'reloadErr', 'decom', 'ledger', 'unsynced', 'version'];
-const RED = new Set(['offline', 'coreStopped', 'reloadErr', 'decom', 'ledger']);
+export const NODE_CODES = ['offline', 'coreStopped', 'reloadErr', 'decom', 'ledger', 'diskFull', 'unsynced', 'disk', 'version'];
+const RED = new Set(['offline', 'coreStopped', 'reloadErr', 'decom', 'ledger', 'diskFull']);
 export const nodeSev = code => (RED.has(code) ? 'bad' : 'warn');
 
 // 一次保存后副机会有几秒"未同步":连续看到这么久才算
@@ -36,6 +36,8 @@ export function nodeIssues(n, { unsyncedFor = Infinity, now = Date.now() / 1000 
   if (!s.coreRunning) add('coreStopped');
   if (s.reloadError) add('reloadErr');
   if (s.ledgerFails > 0) add('ledger');
+  const dl = diskLevel(s.disk);
+  if (dl) add(dl === 'bad' ? 'diskFull' : 'disk');
   if (!s.synced && unsyncedFor >= UNSYNCED_GRACE) add('unsynced');
   if (s.versionMismatch) add('version');
   return sortIssues(out);
@@ -79,8 +81,8 @@ export function summarizeNodes(resp, { unsyncedFor, now = (resp && resp.now) || 
   }
   const total = nodes.filter(n => n.enabled).length + 1;
   const offline = byCode.offline.length;
-  const fault = byCode.coreStopped.length + byCode.reloadErr.length + byCode.decom.length + byCode.ledger.length;
-  const warn = byCode.unsynced.length + byCode.version.length;
+  const fault = byCode.coreStopped.length + byCode.reloadErr.length + byCode.decom.length + byCode.ledger.length + byCode.diskFull.length;
+  const warn = byCode.unsynced.length + byCode.disk.length + byCode.version.length;
   const names = [...new Map(order.sort((a, b) => a.rank - b.rank).map(x => [x.name, x])).keys()];
   return { total, online: total - offline, byCode, offline, fault, warn, red: offline + fault, yellow: warn, names };
 }
@@ -88,6 +90,27 @@ export function summarizeNodes(resp, { unsyncedFor, now = (resp && resp.now) || 
 // worstCode summarizeNodes 结果里最严重、且有服务器的那一类
 export function worstCode(sum) {
   return NODE_CODES.find(c => sum.byCode[c] && sum.byCode[c].length) || '';
+}
+
+// ---- 磁盘 ----
+
+// diskLevel 一块盘的告警级别(和后端 model.DiskLevel 同一口径,百分比按 df 的 Use% 算):
+// '' 正常或读不到;'warn' 快满了(用了 90% 以上或只剩不到 1GB);'bad' 满了(97% 以上或不到 300MB)。
+export function diskLevel(d) {
+  if (!d) return '';
+  const used = Number(d.used) || 0, free = Number(d.free) || 0;
+  if (used < 0 || free < 0 || used + free <= 0) return '';
+  const pct = used / (used + free);
+  if (free < 300 * 2 ** 20 || pct >= 0.97) return 'bad';
+  if (free < 2 ** 30 || pct >= 0.9) return 'warn';
+  return '';
+}
+
+// diskPct 已用百分比(向上取整,和 df 一样);读不到为 0
+export function diskPct(d) {
+  if (!d) return 0;
+  const used = Number(d.used) || 0, free = Number(d.free) || 0;
+  return used + free > 0 ? Math.ceil(used * 100 / (used + free)) : 0;
 }
 
 // ---- 上游巡检 ----

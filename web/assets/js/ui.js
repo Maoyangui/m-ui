@@ -140,6 +140,11 @@ export function openModal(title, html, onSave, opts = {}) {
 }
 export function closeModal() { modalSeq++; document.getElementById('modal').hidden = true; }
 
+// ---- 磁盘占用 ----
+// diskBrief「已用 92%,剩 781 MB(共 8.7 GB)」;diskHogs「系统日志 3.2 GB · 软件包缓存 400 MB · swap 4 GB」(不到 100MB 的不写)
+export const diskBrief = d => t('disk.brief', { pct: d && d.used + d.free > 0 ? Math.ceil(d.used * 100 / (d.used + d.free)) : 0, free: fmtBytes((d && d.free) || 0, 1), total: fmtBytes((d && d.total) || 0, 1) });
+export const diskHogs = d => (d ? [[d.logs, 'disk.logs'], [d.cache, 'disk.cache'], [d.swap, 'disk.swap']].filter(([n]) => n >= 100 * 2 ** 20).map(([n, k]) => t(k) + ' ' + fmtBytes(n, 1)).join(' · ') : '');
+
 // ---- Cloudflare 令牌 ----
 // CF_TOKEN_URL Cloudflare 的令牌创建页:权限已预填「区域 → 区域 → 读取」「区域 → DNS → 编辑」,令牌名 m-ui
 export const CF_TOKEN_URL = 'https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22zone%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22dns%22%2C%22type%22%3A%22edit%22%7D%5D&accountId=*&zoneId=all&name=m-ui';

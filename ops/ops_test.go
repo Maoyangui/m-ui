@@ -15,11 +15,11 @@ func TestScriptParamsAndValidation(t *testing.T) {
 		t.Fatal("非法端口应回落 40000")
 	}
 	s, _ = Script("swap", Params{SwapGB: 4})
-	if !strings.Contains(s, "fallocate -l 4G") {
+	if !strings.Contains(s, "want_mb=$(( 4 * 1024 ))") || strings.Contains(s, "{{SWAPFILE}}") {
 		t.Fatal("swap 大小未替换")
 	}
 	s, _ = Script("tune-all", Params{})
-	for _, want := range []string{"== swap ==", "== sysctl / BBR ==", "== limits ==", "== NTP ==", "fallocate -l 2G"} {
+	for _, want := range []string{"== swap ==", "== sysctl / BBR ==", "== limits ==", "== NTP ==", "want_mb=$(( 2 * 1024 ))"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("一键优化缺少 %q", want)
 		}

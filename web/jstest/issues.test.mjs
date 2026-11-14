@@ -238,3 +238,23 @@ test('复合控件(线路 / 用户选择器、勾选列表、一排勾选框)不
   }
   assert.deepEqual(bad, [], '点标签字或空白会被浏览器转给里面第一个控件');
 });
+
+test('磁盘:快满 / 满了算服务器的问题(和后端 model.DiskLevel 同一口径,按 df 的 Use%);读不到、老副机不报不算', () => {
+  const G = 2 ** 30, M = 2 ** 20;
+  const on = (disk, name = 'd') => ({ name, enabled: true, status: { ok: true, coreRunning: true, synced: true, disk } });
+  assert.deepEqual(I.nodeIssues(on(undefined)), []);
+  assert.deepEqual(I.nodeIssues(on({ used: 0, free: 0 })), []);
+  assert.deepEqual(I.nodeIssues(on({ used: 89 * G, free: 11 * G })), []);
+  assert.deepEqual(I.nodeIssues(on({ used: 90 * G, free: 10 * G })), [{ code: 'disk', sev: 'warn' }]);
+  assert.deepEqual(I.nodeIssues(on({ used: 5 * G, free: 900 * M })), [{ code: 'disk', sev: 'warn' }]);
+  assert.deepEqual(I.nodeIssues(on({ used: 970 * G, free: 30 * G })), [{ code: 'diskFull', sev: 'bad' }]);
+  assert.deepEqual(I.nodeIssues(on({ used: 2 * G, free: 250 * M })), [{ code: 'diskFull', sev: 'bad' }]);
+  assert.equal(I.diskPct({ used: 1, free: 199 }), 1);
+  assert.equal(I.diskPct({ used: 91, free: 9 }), 91);
+  assert.equal(I.diskPct(null), 0);
+  const sum = I.summarizeNodes({ nodes: [on({ used: 98 * G, free: 2 * G }), on({ used: 91 * G, free: 9 * G }, 'e')] });
+  assert.equal(sum.red, 1);
+  assert.equal(sum.yellow, 1);
+  assert.deepEqual(sum.byCode.diskFull, ['d']);
+  assert.deepEqual(sum.byCode.disk, ['e']);
+});

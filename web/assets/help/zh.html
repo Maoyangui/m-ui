@@ -1092,8 +1092,23 @@
     <ul>
       <li>点 <b data-k="ops.t.tune-all">一键优化</b> 全做一遍,也可以逐项改参数后点 <b data-k="common.run">执行</b>;任务输出实时显示在 <b data-k="ops.log">任务输出</b> 里。</li>
       <li>同一页还能限制系统日志(journald)的占用和保留天数:它装的是整台机器所有服务的日志,限制它不影响面板。</li>
+      <li>建 swap 时磁盘不够会按余量减小(给系统留 2G、不超过盘的四分之一),不够 512MB 就不建:小盘上建大 swap 会把盘占满。</li>
       <li>WARP 也在这一页(见 <a href="#warp">WARP</a>)。运维任务只在 Linux 上、m-ui 以 root 运行时可用。</li>
     </ul>
+  </section>
+
+  <section class="sec" id="ops-disk">
+    <h3>磁盘快满了:提醒与清理</h3>
+    <p class="lede">每台服务器上报 m-ui 数据目录所在那块盘的占用。用了 90% 以上或只剩不到 1GB 算快满了,97% 以上或不到 300MB 算满了:写库、写日志、签证书随时会失败。</p>
+    <ul>
+      <li>副机快满了:<b data-k="nav.nodes">服务器</b> 页那一行状态里出现 💾 和已用百分比(悬停看系统日志、软件包缓存、swap 各占多少),概况 <b data-k="dash.attn.title">需要处理</b> 里算一项,Telegram 发一次(变成满了再发一次,降到 87% 以下、剩 1.5GB 以上才说恢复)。主机自己的盘一样提醒,指路到运维页。</li>
+      <li>清理:主机的服务器页在那一行的 <b data-k="common.more">更多</b> 里点 <b data-k="node.diskClean">清理磁盘</b>,不用登录副机;本机在 <b data-k="nav.ops">运维</b> 页点 <b data-k="node.diskClean">清理磁盘</b> 那一项的 <b data-k="common.run">执行</b>。会清掉软件包缓存、把 journald 回收到上限、超过 100MB 的文本日志只留最后 5MB、删掉一天前轮转下来的旧日志,再装一个每小时检查的定时器(m-ui-syslog-cap.timer),syslog 超过 200MB 就立刻轮转。m-ui 的数据和备份不动,线路不中断。</li>
+      <li>谷歌云的机器装着 Ops Agent 时,清理框里多一个勾选项:它上报失败会把整段报错刷进 syslog,是小盘被撑满的常见原因;勾了就停用并屏蔽它(谷歌云控制台里就看不到这台的监控指标了)。</li>
+    </ul>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>老版本副机没有远程清理:先升级它,或登录它自己的面板在运维页清理。</li>
+      <li>撤销定时器:<code>systemctl disable --now m-ui-syslog-cap.timer</code>;恢复 Ops Agent:对它的三个服务 <code>systemctl unmask</code>,再 <code>systemctl enable --now google-cloud-ops-agent</code>。</li>
+    </ul></div>
   </section>
 
   <section class="sec" id="logs">

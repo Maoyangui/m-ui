@@ -1092,8 +1092,23 @@
     <ul>
       <li><b data-k="ops.t.tune-all">Tune everything</b> applies them all, or adjust one item and click <b data-k="common.run">Run</b>; progress appears live in <b data-k="ops.log">Task output</b>.</li>
       <li>The same page can cap the system log (journald) size and retention. It holds the logs of every service on the machine; limiting it does not affect the panel.</li>
+      <li>When disk space is short, swap is made smaller (2G kept free for the system, at most a quarter of the disk), and below 512MB it is skipped: a big swap file on a small disk fills it up.</li>
       <li>WARP is on this page too (see <a href="#warp">WARP</a>). Ops tasks only work on Linux with m-ui running as root.</li>
     </ul>
+  </section>
+
+  <section class="sec" id="ops-disk">
+    <h3>Disk nearly full: alerts and clean-up</h3>
+    <p class="lede">Every server reports how full the disk holding m-ui's data directory is. 90% used or less than 1GB left counts as nearly full, 97% or less than 300MB as full: writing the database, logs or certificates can fail at any moment.</p>
+    <ul>
+      <li>A nearly full node shows 💾 and its used percentage in its status on the <b data-k="nav.nodes">Servers</b> page (hover for how much the system logs, the package cache and swap take), counts as an item in <b data-k="dash.attn.title">Needs attention</b> on the dashboard, and Telegram gets one message (another when it becomes full, and "recovered" once it is below 87% with at least 1.5GB free). The master's own disk is watched the same way and points you to the Ops page.</li>
+      <li>Clean-up: on the master's Servers page open <b data-k="common.more">More</b> on that row and click <b data-k="node.diskClean">Clean up disk</b>, no need to log in to the node; for this server use <b data-k="common.run">Run</b> on <b data-k="node.diskClean">Clean up disk</b> on the <b data-k="nav.ops">Ops</b> page. It clears the package cache, vacuums journald to its limit, keeps only the last 5MB of text logs over 100MB, deletes rotated logs older than a day and installs an hourly timer (m-ui-syslog-cap.timer) that rotates syslog as soon as it passes 200MB. m-ui's data and backups are untouched and lines keep running.</li>
+      <li>On Google Cloud servers with the Ops Agent installed, the dialog has one more checkbox: when its reports fail it floods syslog with whole stack traces, a common reason small disks fill up; ticking it disables and masks the agent (the Google Cloud console then shows no monitoring metrics for that server).</li>
+    </ul>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>Older nodes cannot be cleaned remotely: upgrade them first, or clean up from the Ops page of their own panel.</li>
+      <li>To undo the timer: <code>systemctl disable --now m-ui-syslog-cap.timer</code>; to bring the Ops Agent back: <code>systemctl unmask</code> its three services, then <code>systemctl enable --now google-cloud-ops-agent</code>.</li>
+    </ul></div>
   </section>
 
   <section class="sec" id="logs">

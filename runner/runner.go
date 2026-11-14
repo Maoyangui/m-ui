@@ -63,6 +63,7 @@ type Runner struct {
 	db           *gorm.DB
 	core         *core.Core
 	subSrv       *sub.Server
+	disk         diskCache      // 本机磁盘占用的缓存与告警状态(见 disk.go)
 	tls          certutil.Watch // 面板、订阅、代理面板的证书加载器:哪个正用临时自签证书顶着(证书文件读不出来),见 tlstemp.go
 	jobs         *jobs.Scheduler
 	notifier     *notify.Notifier
@@ -2035,7 +2036,7 @@ func Run(dbPath string) error {
 	}{
 		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"线路上游", r.relayLoop}, {"运行统计", r.pingLoop}, {"定时备份", r.backupLoop},
 		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop}, {"凭据撤销重试", r.secureReloadLoop}, {"用户热更新重试", r.userReloadLoop},
-		{"数据面看护", r.coreWatchLoop}, {"集群屏蔽跟进", r.clusterWatchLoop},
+		{"数据面看护", r.coreWatchLoop}, {"集群屏蔽跟进", r.clusterWatchLoop}, {"磁盘巡检", r.diskLoop},
 	} {
 		go keepRunning(l.name, l.fn, stopCheckpoint)
 	}

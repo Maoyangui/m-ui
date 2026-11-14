@@ -8,6 +8,8 @@ import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, fmtBytes, fmtDuration, fmtRelative, fmtTime, fmtDate, fmtDay, tzOffsetMinutes, toast, registerActions, badge, dot, empty, setHTML, chipList, onChipToggle, chipOpen, auditText, daysLeft, hostPort, matches } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
+import { diskLevel, diskPct } from '../issues.js';
+import { diskHogs } from '../ui.js';
 import { NODE_CODES, summarizeNodes, trackUnsynced, worstCode, healthSummary, sortCerts, certSig, certCounts, certLeftDays, sortReach, reachSig, reachHard, reachStall } from '../issues.js';
 import { expiringDays, quotaPct } from './users.js';
 import { shownConns } from '../fair.js';
@@ -294,6 +296,9 @@ function attnItems() {
   const rl = s.reload;
   if (rl && rl.at && rl.ok === false) add(1, 'bad', { title: t('dash.attn.reload', { op: trErr(rl.op || '') }), names: trErr(rl.error || ''),
     acts: btn('dash.reload', '', t('alert.retryReload')), go: '#/logs?tab=core', goText: t('dash.attn.viewLog') });
+  // 1b 本机磁盘快满 / 满了(主机、副机自己的面板都看;副机的磁盘主机另在「服务器」那一项里报)
+  const dl = diskLevel(s.disk);
+  if (dl) add(1.5, dl, { title: t('dash.attn.disk.' + dl, { pct: diskPct(s.disk), free: fmtBytes(s.disk.free, 1) }), names: diskHogs(s.disk), go: '#/ops', goText: t('dash.attn.goOps') });
   // 2 主机容灾(字段存在才有)
   const ha = haRows(s.ha);
   if (ha) add(2, ha.sev, ha);

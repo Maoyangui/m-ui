@@ -1,6 +1,10 @@
 import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, fmtBytes, fmtDuration, toast, confirm, registerActions, badge, field, fv } from '../ui.js';
+import { esc, fmtBytes, fmtDuration, toast, confirm, registerActions, badge, field, fv, diskBrief, diskHogs } from '../ui.js';
+import { diskLevel } from '../issues.js';
+
+// tx 有译文用译文,没有(中文界面留空的键)用后端原文
+const tx = (k, fb) => { const v = t(k); return v && v !== k ? v : fb; };
 
 export const title = () => t('ops.title');
 export const subtitle = () => t('ops.subtitle');
@@ -13,7 +17,8 @@ export async function render(el, fresh = false) {
   const i = data.info, w = i.warp, st = data.status, p = data.params || { swapGb: 2, noFile: 1048576, sysctl: '', defaultSysctl: '', journalMb: 200, journalDays: 14 };
   const jr = i.journal || { usedMb: 0, limited: false };
   // 后端版本里没有某条任务时给个空壳,免得取 .title 直接把整页打挂
-  const task = n => data.tasks.find(x => x.name === n) || { name: n, title: n, desc: '' };
+  const task = n => { const b = data.tasks.find(x => x.name === n) || { name: n, title: n, desc: '' }; return { ...b, title: tx('ops.task.' + n + '.title', b.title), desc: tx('ops.task.' + n + '.desc', b.desc) }; };
+  const dk = data.disk && data.disk.total ? data.disk : null, dlv = diskLevel(dk);
   const linux = i.linux;
   const dis = linux && i.root ? '' : 'disabled';
   el.innerHTML = `
@@ -82,6 +87,12 @@ export async function render(el, fresh = false) {
           <label class="muted small">${t('ops.journalDays')} <input id="ops-jdays" type="number" min="1" max="3650" value="${p.journalDays}" style="width:5rem"></label>
           <span class="grow"></span><button class="btn sm" data-act="ops.run" data-id="journal" ${dis}>${t('common.run')}</button></div>
       </div>
+      <div class="task" style="margin-top:.75rem">
+        <div class="task-head"><b>${esc(task('disk-clean').title)}</b>${dk ? badge(diskBrief(dk), dlv === 'bad' ? 'danger' : dlv === 'warn' ? 'warn' : 'ok') : ''}</div>
+        <p class="hint">${esc(task('disk-clean').desc)}${dk && diskHogs(dk) ? ` · ${esc(diskHogs(dk))}` : ''}</p>
+        <div class="row">${dk && dk.opsAgent ? `<label class="field check check-wrap ops-agent"><input type="checkbox" id="ops-opsagent"><span>${esc(t('node.dc.opsAgent'))}</span></label>` : ''}
+          <span class="grow"></span><button class="btn sm" data-act="ops.run" data-id="disk-clean" ${dis}>${t('common.run')}</button></div>
+      </div>
     </section>
     <section class="card">
       <div class="card-head"><h2>${t('ops.log')}</h2><div class="row">${st.running ? badge(t('ops.running', { task: st.current }), 'primary') + `<button class="btn sm danger" data-act="ops.cancel">${t('common.cancel')}</button>` : (st.last && st.last.name ? badge((st.last.ok ? '✓ ' : '✗ ') + st.last.name, st.last.ok ? 'ok' : 'danger') : '')}</div></div>
@@ -120,13 +131,14 @@ registerActions({
   'ops.refresh': () => render(document.getElementById('page'), true),
   'ops.run': async (task, btn) => {
     const t2 = data.tasks.find(x => x.name === task);
-    if (!await confirm(t('ops.runConfirm', { task: t2 ? t2.title : task }), { danger: !!(t2 && t2.danger) })) return;
+    if (!await confirm(t('ops.runConfirm', { task: t2 ? tx('ops.task.' + task + '.title', t2.title) : task }), { danger: !!(t2 && t2.danger) })) return;
     btn.disabled = true;
     try {
       await post('ops/run', {
         task, port: Number(fv('ops-port')) || 0, swapGb: Number(fv('ops-swap')) || 0,
         noFile: Number(fv('ops-nofile')) || 0, sysctl: (task === 'sysctl' || task === 'tune-all') ? fv('ops-sysctl') : '',
         journalMb: Number(fv('ops-jmb')) || 0, journalDays: Number(fv('ops-jdays')) || 0,
+        opsAgent: task === 'disk-clean' && !!(document.getElementById('ops-opsagent') || {}).checked,
       });
       toast(t('ops.started'), 'ok');
       await render(document.getElementById('page'));

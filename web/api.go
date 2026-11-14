@@ -146,7 +146,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		status["linesLocal"], status["linesLocalEnabled"] = s.localLineCounts()
 	}
 	// 数据目录所在盘的总量与剩余(概况「本机负载」卡):一次 statfs;取不到(Windows 开发机)就不给
-	if total, free := ops.DiskUsage(s.run.DataDir()); total > 0 {
+	if d := s.run.DiskStat(); d != nil {
+		status["disk"] = d
+	} else if total, free := ops.DiskUsage(s.run.DataDir()); total > 0 {
 		status["disk"] = map[string]int64{"total": total, "free": free}
 	}
 	if h := s.haSvc(); h != nil { // 主机容灾的小结(页面顶部的提示、角色标签用;判定仍看 nodeMode)

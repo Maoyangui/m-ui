@@ -2,9 +2,9 @@ import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, setHTML, matches, debounce } from '../ui.js';
+import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, setHTML, matches, debounce, diskBrief, diskHogs } from '../ui.js';
 import { loadReach, reachCell, reachToolbar, refreshDetail, setNodes, setReachListener, reach, isBad, v6Of } from '../reach.js';
-import { nodeIssues, trackUnsynced } from '../issues.js';
+import { nodeIssues, trackUnsynced, diskLevel, diskPct } from '../issues.js';
 import { loadHA, roleChip, haMenuItems, setHARefresh } from '../ha.js';
 
 export const title = () => t('node.title');
@@ -148,18 +148,26 @@ function certFailBadge(n) {
 // 锁后面的天数(正用着的证书里最少的):剩 14 天以内变黄、7 天以内变红
 const certDaysCell = d => ` <span class="small ${d <= 7 ? 'danger-text' : d <= 14 ? 'warn-text' : 'muted'}" title="${t('cert.daysLeft')}">🔒 ${d}d</span>`;
 
+// 磁盘快满 / 满了:状态一栏加一个小标记,悬停看明细;不到告警线不占地方
+function diskBadge(d) {
+  const lv = diskLevel(d);
+  if (!lv) return '';
+  const tip = [diskBrief(d), diskHogs(d)].filter(Boolean).join('\n');
+  return ` <span class="small ${lv === 'bad' ? 'danger-text' : 'warn-text'}" title="${esc(tip)}">💾 ${diskPct(d)}%</span>`;
+}
+
 function coreCell(n) {
   if (n.isLocal) {
     const rl = state.status.reload || {};
     return badge(state.status.coreRunning ? t('dash.running') : t('dash.stopped'), state.status.coreRunning ? 'ok' : 'danger')
-      + reloadBadge(rl.at && !rl.ok ? `${trErr(rl.op)}: ${trErr(rl.error)}` : '') + certFailBadge(n);
+      + reloadBadge(rl.at && !rl.ok ? `${trErr(rl.op)}: ${trErr(rl.error)}` : '') + certFailBadge(n) + diskBadge(state.status.disk);
   }
   const s = n.status || {};
   if (!s.ok) return '—';
   return badge(s.coreRunning ? t('dash.running') : t('dash.stopped'), s.coreRunning ? 'ok' : 'danger')
     + (s.uptime ? ` <span class="muted small">${fmtDuration(s.uptime)}</span>` : '')
     + (s.certDays !== undefined ? certDaysCell(s.certDays) : '')
-    + reloadBadge(s.reloadError) + certFailBadge(n);
+    + reloadBadge(s.reloadError) + certFailBadge(n) + diskBadge(s.disk);
 }
 
 function actionsCell(n) {
@@ -168,6 +176,7 @@ function actionsCell(n) {
   const more = [
     n.isLocal || !n.enabled ? '' : `<button data-act="node.push" data-id="${n.id}">${t('node.push')}</button>`,
     n.isLocal || !n.certFp ? '' : `<button data-act="node.resetCert" data-id="${n.id}" title="${esc(n.certFp)}">${t('node.resetCert')}</button>`,
+    n.isLocal || n.enabled ? `<button data-act="node.diskClean" data-id="${n.id}">${t('node.diskClean')}</button>` : '',
     haMenuItems(n),
     n.isLocal ? '' : `<hr><button class="danger" data-act="node.del" data-id="${n.id}">${t('common.delete')}</button>`,
   ].filter(Boolean);
@@ -300,6 +309,7 @@ registerActions({
     } catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; }
   },
+  'node.diskClean': id => openDiskClean(Number(id)),
   'node.push': async (id, btn) => {
     btn.disabled = true;
     try { await post(`nodes/${id}/push`, undefined, SLOW); toast(t('node.pushed'), 'ok'); data = await get('nodes'); renderRows(); }
@@ -328,3 +338,42 @@ registerActions({
     } catch (e) { toast(e.message, 'err'); }
   },
 });
+
+// ---- 清理磁盘 ----
+// 先说清会清什么(和运维页同一个任务);装了谷歌云 Ops Agent 的才问要不要一起停用。开始后换成进度框,
+// 每 1.5 秒问一次那台的运维任务输出,结束写结果和清理后的占用,刷新列表。
+function openDiskClean(id) {
+  const n = data.nodes.find(x => x.id === id);
+  if (!n) return;
+  const d = n.isLocal ? state.status.disk : (n.status || {}).disk;
+  const now = d && d.total ? `<p>${esc(t('node.dc.now', { brief: diskBrief(d) }))}${diskHogs(d) ? `<br><span class="muted small">${esc(diskHogs(d))}</span>` : ''}</p>` : '';
+  const agent = d && d.opsAgent ? `<label class="field check check-wrap"><input type="checkbox" id="dc-agent"><span>${esc(t('node.dc.opsAgent'))}</span></label>` : '';
+  openModal(t('node.dc.title', { name: n.name }), `${now}<p class="hint">${esc(t('node.dc.intro'))}</p>${agent}`, async () => {
+    const opsAgent = !!(document.getElementById('dc-agent') || {}).checked;
+    await post(`nodes/${id}/disk-clean`, { opsAgent }, SLOW);
+    diskCleanProgress(n);
+  }, { saveText: t('node.dc.start') });
+}
+
+let dcGen = 0;
+function diskCleanProgress(n) {
+  const gen = ++dcGen;
+  openModal(t('node.dc.title', { name: n.name }), `<p id="dc-state">${esc(t('node.dc.running'))}</p><pre class="log" id="dc-log"></pre>`, null, { cancelText: t('common.close'), wide: true });
+  const open = () => gen === dcGen && !document.getElementById('modal').hidden && document.getElementById('dc-log');
+  const step = async () => {
+    if (!open()) return; // 进度框关了、换成别的了
+    let st;
+    try { st = await get(`nodes/${n.id}/disk-clean`); } catch (e) { st = { error: e.message }; }
+    if (!open()) return;
+    const log = document.getElementById('dc-log'), head = document.getElementById('dc-state');
+    if (st.error) { head.textContent = t('node.dc.failed', { err: st.error }); head.className = 'danger-text'; return; }
+    log.textContent = (st.log || []).join('\n');
+    log.scrollTop = log.scrollHeight;
+    if (st.running) { setTimeout(step, 1500); return; }
+    const last = st.last || {};
+    head.textContent = last.ok ? t('node.dc.done') + (st.disk && st.disk.total ? ' · ' + t('node.dc.after', { brief: diskBrief(st.disk) }) : '') : t('node.dc.failed', { err: trErr(last.error || '') });
+    head.className = last.ok ? 'ok-text' : 'danger-text';
+    get('nodes').then(r => { data = r; renderRows(); }).catch(() => {});
+  };
+  setTimeout(step, 800);
+}

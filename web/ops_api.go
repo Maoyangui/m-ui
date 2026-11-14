@@ -68,6 +68,7 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		"status":       s.ops.Status(),
 		"warpPort":     s.warpPort(),
 		"warpUpstream": hasWarp,
+		"disk":         s.run.DiskStat(), // 磁盘占用的明细(清理磁盘那一栏用;读不到为 null)
 		"params": map[string]interface{}{
 			"swapGb": s.settingInt("opsSwapGb", 2), "noFile": s.settingInt("opsNoFile", ops.DefaultNoFile),
 			"sysctl": sysctl, "defaultSysctl": ops.DefaultSysctl, "defaultNoFile": ops.DefaultNoFile,
@@ -93,6 +94,7 @@ func (s *Server) handleOpsSub(w http.ResponseWriter, r *http.Request) {
 			Sysctl      string `json:"sysctl"`
 			JournalMB   int    `json:"journalMb"`
 			JournalDays int    `json:"journalDays"`
+			OpsAgent    bool   `json:"opsAgent"` // 清理磁盘时一并停用谷歌云 Ops Agent
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			badRequest(w, err)
@@ -137,8 +139,9 @@ func (s *Server) handleOpsSub(w http.ResponseWriter, r *http.Request) {
 			jd = ops.DefaultJournalDays
 		}
 		err := s.ops.Start(task, ops.Params{Port: s.warpPort(), SwapGB: req.SwapGB, NoFile: req.NoFile, Sysctl: req.Sysctl,
-			JournalMB: jm, JournalDays: jd}, func(ok bool, err error) {
+			JournalMB: jm, JournalDays: jd, OpsAgent: req.OpsAgent}, func(ok bool, err error) {
 			invalidateOpsInfo() // 任务改了系统状态,下次打开页面要重新采集
+			s.run.ForgetDiskStat()
 			if ok {
 				logger.Info("运维任务完成: ", task)
 				if task == "warp-enable" {
