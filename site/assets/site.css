@@ -55,6 +55,8 @@ pre { background: var(--surface-2); border: 1px solid var(--border); border-radi
 .install pre { margin: 0; flex: 1; min-width: 0; text-align: left; white-space: pre; background: var(--surface); box-shadow: var(--shadow); }
 .install button { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: var(--radius-sm); padding: .6rem .85rem; cursor: pointer; font: inherit; }
 .install button:hover { border-color: var(--primary); color: var(--primary); }
+.buy { margin: .7rem 0 0; text-align: center; color: var(--muted); font-size: .88rem; }
+.buy a { margin-left: .3rem; font-weight: 600; }
 .proof { display: flex; flex-wrap: wrap; justify-content: center; gap: .4rem 1.2rem; margin: 1.1rem 0 0; color: var(--muted); font-size: .86rem; }
 .proof span::before { content: "✓"; color: var(--ok); margin-right: .35rem; font-weight: 700; }
 .shot { margin: 2.2rem auto 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: 0 30px 60px -32px rgba(15, 23, 42, .45); }

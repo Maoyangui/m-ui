@@ -22,6 +22,8 @@ Then open `http://<server-ip>:2053/app/`, default login `admin / admin` (change 
 
 **Want to look before you install?** The [live demo](https://maoyangui.github.io/m-ui/demo/) is the real panel interface running on sample data: no login, no backend, click anything, refresh to reset. Append `--dry-run` to the install command to see which files it would write first.
 
+**Rather not run your own server?** [Get a ready-made subscription](https://godusevpn.org/subscription/) and just install the client.
+
 <p align="center"><img src="docs/screenshots/dashboard-en.png" alt="m-ui dashboard: traffic chart, data-plane status, online users and top talkers" width="960"></p>
 
 ## What it is

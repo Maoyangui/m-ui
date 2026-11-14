@@ -22,6 +22,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/i
 
 **先看看再装?** [在线演示](https://maoyangui.github.io/m-ui/demo/) 就是真实的面板界面跑在示例数据上:不用登录、没有后端,随便点,刷新即恢复。安装命令后面加 `--dry-run` 可以先看它会写哪些文件。
 
+**不想自己搭建?** 直接[选购节点](https://godusevpn.org/subscription/),装上客户端就能用。
+
 <p align="center"><img src="docs/screenshots/dashboard.png" alt="m-ui 概览:流量走势、数据面状态、在线用户与流量排行" width="960"></p>
 
 ## 这是什么

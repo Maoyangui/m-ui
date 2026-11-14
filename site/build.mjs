@@ -51,8 +51,8 @@ for (const lang of Object.keys(LANGS)) {
 }
 
 const t = {
-  en: { github: 'GitHub', install: 'Install', switch: '中文', switchLang: 'zh', releases: 'Releases', discussions: 'Discussions', feed: 'Feed', about: 'About', articles: 'Articles', articlesNav: 'Articles', articlesDesc: 'Technical write-ups on how m-ui is built: embedded sing-box, hot reload, multi-server sync, lines, quotas, backups.', license: 'GPL-3.0 · built on sing-box · by Maoyangui', readMore: 'Read' },
-  zh: { github: 'GitHub', install: '安装', switch: 'English', switchLang: 'en', releases: '发布', discussions: '讨论区', feed: '订阅', about: '关于', articles: '文章', articlesNav: '文章', articlesDesc: '关于 m-ui 怎么做的技术文章:内嵌 sing-box、热更新、多服务器同步、线路、配额、备份。', license: 'GPL-3.0 · 基于 sing-box · Maoyangui 出品', readMore: '阅读' },
+  en: { github: 'GitHub', install: 'Install', switch: '中文', switchLang: 'zh', releases: 'Releases', discussions: 'Discussions', feed: 'Feed', about: 'About', articles: 'Articles', articlesNav: 'Articles', articlesDesc: 'Technical write-ups on how m-ui is built: embedded sing-box, hot reload, multi-server sync, lines, quotas, backups.', license: 'GPL-3.0 · built on sing-box · by Maoyangui', readMore: 'Read', buy: 'Get a subscription' },
+  zh: { github: 'GitHub', install: '安装', switch: 'English', switchLang: 'en', releases: '发布', discussions: '讨论区', feed: '订阅', about: '关于', articles: '文章', articlesNav: '文章', articlesDesc: '关于 m-ui 怎么做的技术文章:内嵌 sing-box、热更新、多服务器同步、线路、配额、备份。', license: 'GPL-3.0 · 基于 sing-box · Maoyangui 出品', readMore: '阅读', buy: '不想自己搭建?选购节点' },
 };
 
 // 文章索引页由这里生成(不用手写内容文件):/articles/ 与 /zh/articles/
@@ -127,7 +127,7 @@ function render(p) {
     .replaceAll('{{switch_href}}', switchHref)
     .replaceAll('{{switch_label}}', tr.switch)
     .replaceAll('{{brand_line}}', esc(BRAND[p.lang]))
-    .replaceAll('{{t_github}}', tr.github).replaceAll('{{t_install}}', tr.install).replaceAll('{{t_about}}', tr.about).replaceAll('{{t_articles}}', tr.articles)
+    .replaceAll('{{t_github}}', tr.github).replaceAll('{{t_install}}', tr.install).replaceAll('{{t_about}}', tr.about).replaceAll('{{t_articles}}', tr.articles).replaceAll('{{t_buy}}', tr.buy)
     .replaceAll('{{t_releases}}', tr.releases).replaceAll('{{t_discussions}}', tr.discussions).replaceAll('{{t_feed}}', tr.feed).replaceAll('{{t_license}}', tr.license)
     .replaceAll('{{home}}', BASE + pathOf(p.lang, 'index'))
     .replaceAll('{{getting_started}}', BASE + pathOf(p.lang, 'getting-started'))
