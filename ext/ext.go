@@ -18,38 +18,66 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Items 是一份外部内容解析后的节点集合。
-type Items struct {
-	Links []string                 // 分享链接(用于链接订阅)
-	Clash []map[string]interface{} // clash 代理(用于 clash 订阅)
-}
+// fetchAgent 抓取时冒充的一种客户端身份。id 存进库(ExtNode.FetchAgent),UA 串以后改了也认得。
+type fetchAgent struct{ id, ua string }
 
-// fetchAgents 抓取时依次冒充的客户端身份。有的面板按客户端发不同内容:Clash 系给全量 YAML,
+// fetchAgents 按这个顺序试。有的面板按客户端发不同内容:Clash 系给全量 YAML,
 // 通用身份只给它认为该客户端支持的一两种协议(真机遇到过:同一条订阅 5 个 vs 117 个)。
-var fetchAgents = []string{"ClashMeta/1.18.0 (m-ui)", "v2rayN/7.0 m-ui"}
+var fetchAgents = []fetchAgent{{"clash", "ClashMeta/1.18.0 (m-ui)"}, {"v2rayn", "v2rayN/7.0 m-ui"}}
 
-// Fetch 抓取外部订阅:先以 Clash Meta 身份拉,解析不出节点再退回通用身份;
-// 都解析不出就把第一份原样交出去,让调用方报"没有可识别的节点"。
-func Fetch(ctx context.Context, rawURL string) ([]byte, error) {
-	var first []byte
-	var lastErr error
-	for _, ua := range fetchAgents {
-		b, err := fetchAs(ctx, rawURL, ua)
+// fetchAttemptTimeout 每个身份单独计时。以前两次请求共用调用方的 30 秒:第一次超时 25 秒后,第二次只剩 5 秒。
+var fetchAttemptTimeout = 25 * time.Second
+
+// Fetch 抓取外部订阅,返回内容和这次用的身份。先以 Clash Meta 身份要,只有"HTTP 200 但解析不出节点"才换下一个身份。
+// prev 是上次抓取成功用的身份(缓存就是它给的;空 = 还没有缓存):
+//   - 这个身份出错(网络错误、4xx、5xx、超时)直接返回错误,调用方保留旧缓存。以前任何错误都换身份,
+//     机场在 Cloudflare / WAF 后面间歇 429 时,缓存在两种身份的内容之间来回翻,节点集合和名字都变,隐藏随之失配;
+//   - 别的身份出错不算数,接着试下一个(缓存本来就不是它给的);
+//   - 还没有缓存时任何错误都接着试下一个,都失败才报第一个错误。
+//
+// 顺序固定先 Clash 身份:哪怕上次是通用身份给的,Clash 身份恢复了也换回节点更全的那份,不会因为一次维护页永远卡在少的那份上。
+// 都解析不出节点时把第一份 200 的原文交出去,让调用方报"没有可识别的节点"(同样保留旧缓存)。
+func Fetch(ctx context.Context, rawURL, prev string) (body []byte, agent string, err error) {
+	if prev != "" && !knownAgent(prev) {
+		prev = fetchAgents[0].id // 老数据没记身份:当时总是先用 Clash 身份
+	}
+	var spare []byte // 没有能进 Clash 订阅的节点的那份:都没有更好的就交它
+	var spareAgent string
+	spareNodes := false
+	var firstErr error
+	for _, a := range fetchAgents {
+		b, err := fetchAs(ctx, rawURL, a.ua)
 		if err != nil {
-			lastErr = err
+			if a.id == prev {
+				return nil, "", err
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
 			continue
 		}
-		if first == nil {
-			first = b
+		it := Parse(string(b))
+		if len(it.Clash()) > 0 {
+			return b, a.id, nil
 		}
-		if it := Parse(string(b)); len(it.Clash) > 0 {
-			return b, nil
+		// 一个能用的节点都没有(或者只有本站不认识的链接):换下一个身份试;都这样就交第一份(有链接的优先)
+		if spare == nil || (!spareNodes && len(it.Nodes) > 0) {
+			spare, spareAgent, spareNodes = b, a.id, len(it.Nodes) > 0
 		}
 	}
-	if first != nil {
-		return first, nil
+	if spare != nil {
+		return spare, spareAgent, nil
 	}
-	return nil, lastErr
+	return nil, "", firstErr
+}
+
+func knownAgent(id string) bool {
+	for _, a := range fetchAgents {
+		if a.id == id {
+			return true
+		}
+	}
+	return false
 }
 
 func fetchAs(ctx context.Context, rawURL, agent string) ([]byte, error) {
@@ -57,12 +85,14 @@ func fetchAs(ctx context.Context, rawURL, agent string) ([]byte, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, errors.New("订阅地址必须是 http(s) URL")
 	}
+	ctx, cancel := context.WithTimeout(ctx, fetchAttemptTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", agent)
-	c := &http.Client{Timeout: 25 * time.Second}
+	c := &http.Client{Timeout: fetchAttemptTimeout}
 	resp, err := c.Do(req)
 	if err != nil {
 		return nil, err
@@ -82,6 +112,7 @@ func fetchAs(ctx context.Context, rawURL, agent string) ([]byte, error) {
 }
 
 // Parse 解析外部内容:base64 链接列表 / 明文链接列表 / clash YAML(取 proxies)/ sing-box JSON(取 outbounds)。
+// 每个节点同时带名字、指纹、链接与 Clash 代理(见 Node),来自同一次解析。
 func Parse(content string) Items {
 	var it Items
 	text := strings.TrimSpace(content)
@@ -100,10 +131,9 @@ func Parse(content string) Items {
 					continue // selector / urltest / direct 这些不是节点
 				}
 				if p, ok := OutboundToClash(typ, tag, o); ok {
-					it.Clash = append(it.Clash, p)
-					if link, ok := ClashToLink(p); ok {
-						it.Links = append(it.Links, link)
-					}
+					n := clashNode(p)
+					n.SingBox = o
+					it.Nodes = append(it.Nodes, n)
 				}
 			}
 			return it
@@ -116,12 +146,8 @@ func Parse(content string) Items {
 		if yaml.Unmarshal([]byte(text), &doc) == nil {
 			for _, p := range doc.Proxies {
 				if name, _ := p["name"].(string); name != "" {
-					np := normalizeYAML(p)
-					it.Clash = append(it.Clash, np)
 					// clash YAML 里的节点也转成分享链接,链接订阅(小火箭 / nextin 等)才看得到
-					if link, ok := ClashToLink(np); ok {
-						it.Links = append(it.Links, link)
-					}
+					it.Nodes = append(it.Nodes, clashNode(normalizeYAML(p)))
 				}
 			}
 		}
@@ -137,10 +163,7 @@ func Parse(content string) Items {
 		if line == "" || !strings.Contains(line, "://") {
 			continue
 		}
-		it.Links = append(it.Links, line)
-		if p, ok := LinkToClash(line); ok {
-			it.Clash = append(it.Clash, p)
-		}
+		it.Nodes = append(it.Nodes, linkNode(line))
 	}
 	return it
 }
@@ -194,28 +217,15 @@ func normalizeValue(v interface{}) interface{} {
 	return v
 }
 
-// WithPrefix 给节点名加前缀(链接改 fragment,clash 改 name)。
+// WithPrefix 给节点名加前缀。链接和 Clash 按同一个名字改:vmess 改 base64 里的 ps(以前在链接末尾追加 "#前缀",
+// vmess 链接因此不再是合法 base64,sing-box 订阅整条跳过它);没名字的链接以前只剩前缀,现在是前缀 + 服务器地址,和 Clash 一致。
 func WithPrefix(it Items, prefix string) Items {
 	if prefix == "" {
 		return it
 	}
-	out := Items{}
-	for _, l := range it.Links {
-		if i := strings.LastIndex(l, "#"); i >= 0 {
-			out.Links = append(out.Links, l[:i+1]+url.PathEscape(prefix)+l[i+1:])
-		} else {
-			out.Links = append(out.Links, l+"#"+url.PathEscape(prefix))
-		}
-	}
-	for _, p := range it.Clash {
-		q := make(map[string]interface{}, len(p))
-		for k, v := range p {
-			q[k] = v
-		}
-		if name, _ := p["name"].(string); name != "" {
-			q["name"] = prefix + name
-		}
-		out.Clash = append(out.Clash, q)
+	out := Items{Nodes: make([]Node, 0, len(it.Nodes))}
+	for _, n := range it.Nodes {
+		out.Nodes = append(out.Nodes, n.renamed(prefix+n.Name))
 	}
 	return out
 }
@@ -363,8 +373,12 @@ func OutboundToClash(typ, name string, o map[string]interface{}) (map[string]int
 		p["password"] = str("password")
 		p["udp"] = true
 		if plugin := str("plugin"); plugin != "" {
-			p["plugin"] = plugin
-			p["plugin-opts"] = str("plugin_opts")
+			// sing-box 的插件参数是 SIP003 字符串,Clash 要的是 map:原样塞字符串 Clash 不认,整份配置加载失败
+			name, opts := pluginToClash(plugin, str("plugin_opts"))
+			p["plugin"] = name
+			if len(opts) > 0 {
+				p["plugin-opts"] = opts
+			}
 		}
 	case "hysteria2":
 		p["type"] = "hysteria2"

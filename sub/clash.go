@@ -56,9 +56,13 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		root = map[string]interface{}{}
 	}
 
-	// 模板里自己写的节点留着,排在最前;同名的本站节点让开
+	// mihomo 里代理、策略组和内置的 DIRECT / REJECT 等共用一张名字表,重名整份配置导入失败。
+	// 模板里自己写的节点留着,排在最前;本站节点、外部节点给模板的节点与策略组、内置名、生成的 Proxy / Auto、提示节点让名
 	var proxies []interface{}
-	used := map[string]bool{}
+	used := map[string]bool{"Proxy": true, "Auto": true}
+	for _, n := range clashBuiltins {
+		used[n] = true
+	}
 	if own, ok := root["proxies"].([]interface{}); ok {
 		for _, p := range own {
 			if m, ok := p.(map[string]interface{}); ok {
@@ -69,12 +73,23 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 			proxies = append(proxies, p)
 		}
 	}
+	tmplGroups := map[string][]string{} // 模板里写的策略组 → 它列的成员
+	if own, ok := root["proxy-groups"].([]interface{}); ok {
+		for _, g := range own {
+			m, _ := g.(map[string]interface{})
+			if n, _ := m["name"].(string); n != "" {
+				used[n], tmplGroups[n] = true, stringList(m["proxies"])
+			}
+		}
+	}
 	var proxyNames []string // 全部代理(Auto 组)
 	var topNames []string   // Proxy 选择组里的条目:单入口=代理本身;多入口=每条线路一个 url-test 组
-	var lineGroups []interface{}
 	if notice != "" {
+		used[notice] = true
 		proxies = append(proxies, noticeClashProxy(notice))
 	}
+	var pending []lineGroup
+	var groupAt []int // 线路组在 topNames 里的位置:组名等本站节点都定完名再起,先占个位
 	for _, line := range lines {
 		var names []string
 		for _, a := range resolveAddrs(line, entries, lineNodes[line.Id]) {
@@ -93,18 +108,39 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 				names = append(names, name)
 			}
 		}
-		if len(names) > 1 && line.Protocol != "mixed" {
+		if wantsLineGroup(line, len(names)) {
 			// 多入口(如 香港/台湾):同一线路做成 url-test 组,客户端按延迟自动选入口
-			lineGroups = append(lineGroups, map[string]interface{}{
-				"name": line.Name, "type": "url-test", "url": "http://www.gstatic.com/generate_204",
-				"interval": 300, "tolerance": 50, "proxies": names,
-			})
-			topNames = append(topNames, line.Name)
+			groupAt = append(groupAt, len(topNames))
+			topNames = append(topNames, "")
+			pending = append(pending, lineGroup{line.Name, names})
 		} else {
 			topNames = append(topNames, names...)
 		}
 	}
-	// 外部节点:名字去重后追加
+	// 线路组在本站节点之后、外部节点之前起名,规则和 sing-box JSON 一样(见 linegroup.go)。
+	// 模板里同名的策略组照旧顶替生成的(mergeClashGroups),线路组就叫这个名字;只是它顺着成员走得回 Proxy 时
+	// (生成的 Proxy 要列它,成环,mihomo 整份拒收)不顶替,线路组改名另起。模板自己写了 Proxy 时生成的那个不出,不会成环
+	providers := map[string]bool{} // 列了成员的策略组在 mihomo 里还占一个同名 provider,不能和模板的 proxy-providers 重名
+	if pp, ok := root["proxy-providers"].(map[string]interface{}); ok {
+		for n := range pp {
+			providers[n] = true
+		}
+	}
+	_, ownProxy := tmplGroups["Proxy"]
+	groupNames := nameLineGroups(pending, used, providers, func(name string) bool {
+		_, ok := tmplGroups[name]
+		return ok && (ownProxy || !reaches(name, "Proxy", func(n string) []string { return tmplGroups[n] }))
+	})
+	var lineGroups []interface{}
+	for i, g := range pending {
+		topNames[groupAt[i]] = groupNames[i]
+		lineGroups = append(lineGroups, map[string]interface{}{
+			"name": groupNames[i], "type": "url-test", "url": "http://www.gstatic.com/generate_204",
+			"interval": 300, "tolerance": 50, "proxies": g.members,
+		})
+	}
+	reserveLineNames(lines, used) // 没出组的线路名也不让给外部节点(见 linegroup.go)
+	// 外部节点:名字去重后追加(撞上线路组名、线路名也是外部节点改名)
 	for _, e := range external {
 		for _, p := range e.Clash {
 			name, _ := p["name"].(string)
@@ -126,8 +162,11 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		}
 	}
 	root["proxies"] = proxies
-	if _, set := root["ipv6"]; !set && hasIPv6Server(proxies) {
-		root["ipv6"] = true // 老内核默认关着 IPv6,关着连不上写成 IPv6 地址的节点
+	// 有写成 IPv6 地址的节点就得打开 ipv6 总开关:老内核默认关着,关着时 mihomo 连不上这些节点。
+	// 模板里明写了 ipv6: false 也改成 true(以前只在模板没写时才补,自定义模板照抄内置骨架写了 false 的,
+	// v6 节点全连不上);设置页保存这种模板时会提示(见 ClashTemplateDisablesIPv6)
+	if hasIPv6Server(proxies) {
+		root["ipv6"] = true
 	}
 
 	selectList := []string{}
@@ -153,6 +192,20 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		return "", err
 	}
 	return string(out), nil
+}
+
+// ClashTemplateDisablesIPv6 Clash 模板顶层写了 ipv6: false:订阅里有 IPv6 节点时生成的配置会把它改成 true,
+// 设置页保存这种模板时据此提示一句。
+func ClashTemplateDisablesIPv6(tmpl string) bool {
+	if strings.TrimSpace(tmpl) == "" {
+		return false
+	}
+	var root map[string]interface{}
+	if yaml.Unmarshal([]byte(tmpl), &root) != nil {
+		return false
+	}
+	v, ok := root["ipv6"].(bool)
+	return ok && !v
 }
 
 // hasIPv6Server 节点里有没有写成 IPv6 地址的。
@@ -206,21 +259,42 @@ var legacyClashProtocols = map[string]bool{"shadowsocks": true, "vmess": true, "
 // legacyClashTypes 同上,外部节点按 clash 的 type 字段判断。
 var legacyClashTypes = map[string]bool{"ss": true, "vmess": true, "trojan": true, "socks5": true, "http": true}
 
+// legacySSCipher 老内核(go-shadowsocks2)认识的加密方式:SS-2022(2022-blake3-*)与 none 都不认,一条就让整份配置报错。
+func legacySSCipher(m string) bool {
+	m = strings.ToLower(strings.TrimSpace(m))
+	return m != "" && m != "none" && !strings.HasPrefix(m, "2022-")
+}
+
 // legacyClashOnly 只留老内核 Clash 认识的线路与外部节点。
 func legacyClashOnly(lines []model.Line, external []ExtItem) ([]model.Line, []ExtItem) {
 	keep := make([]model.Line, 0, len(lines))
 	for _, l := range lines {
-		if legacyClashProtocols[l.Protocol] {
-			keep = append(keep, l)
+		if !legacyClashProtocols[l.Protocol] {
+			continue
 		}
+		if l.Protocol == "shadowsocks" {
+			var o struct {
+				Method string `json:"method"`
+			}
+			_ = json.Unmarshal(l.Options, &o)
+			if !legacySSCipher(o.Method) {
+				continue
+			}
+		}
+		keep = append(keep, l)
 	}
 	ext := make([]ExtItem, 0, len(external))
 	for _, e := range external {
 		c := make([]map[string]interface{}, 0, len(e.Clash))
 		for _, p := range e.Clash {
-			if t, _ := p["type"].(string); legacyClashTypes[t] {
-				c = append(c, p)
+			t, _ := p["type"].(string)
+			if !legacyClashTypes[t] {
+				continue
 			}
+			if cipher, _ := p["cipher"].(string); t == "ss" && !legacySSCipher(cipher) {
+				continue
+			}
+			c = append(c, p)
 		}
 		ext = append(ext, ExtItem{Name: e.Name, Links: e.Links, Clash: c})
 	}

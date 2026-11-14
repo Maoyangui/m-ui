@@ -370,6 +370,23 @@ func (n *Notifier) SendDocument(filename string, data []byte, caption string) er
 // SetSender 替换发送函数(测试用)。
 func (n *Notifier) SetSender(fn func(token, chatID, text string) error) { n.sendFn = fn }
 
+// LeftText 还剩多久到期,说成人话:"还剩 23 天"、"不到 1 天就到期"、"已过期 3 天"(证书提醒用)。
+func LeftText(left time.Duration) string {
+	const day = 24 * time.Hour
+	switch {
+	case left < 0:
+		over := -(left / day) // 先除再取反:时间读不出来(零值)时 left 是最小值,直接取反会溢出
+		if left%day != 0 {
+			over++
+		}
+		return fmt.Sprintf("已过期 %d 天", over)
+	case left < day:
+		return "不到 1 天就到期"
+	default:
+		return fmt.Sprintf("还剩 %d 天", int(left/day))
+	}
+}
+
 // Esc 转义 HTML 特殊字符,用户名等外部文本进消息前必须经过。
 func Esc(s string) string {
 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -37,6 +38,10 @@ func (s *Server) handlePlans(w http.ResponseWriter, r *http.Request) {
 		}
 		p := body.Plan
 		p.ResellerId = rid
+		p.Price = 0
+		if body.Price != nil {
+			p.Price = *body.Price
+		}
 		if err := s.validatePlan(&p); err != nil {
 			badRequest(w, err)
 			return
@@ -89,13 +94,17 @@ func (s *Server) handlePlanItem(w http.ResponseWriter, r *http.Request) {
 		}
 		p := body.Plan
 		p.Id, p.ResellerId = id, rid
+		p.Price = owner.Price // 没带 price(外部程序按老格式改套餐)就保留原来的参考价,不能抹成 0
+		if body.Price != nil {
+			p.Price = *body.Price
+		}
 		if err := s.validatePlan(&p); err != nil {
 			badRequest(w, err)
 			return
 		}
 		if err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&model.Plan{}).Where("id = ?", id).Select(
-				"name", "volume_gb", "days", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "first_use", "line_ids", "line_nodes", "desc", "sort",
+				"name", "volume_gb", "days", "device_limit", "speed_up", "speed_down", "auto_reset", "reset_days", "first_use", "line_ids", "line_nodes", "desc", "sort", "price",
 			).Updates(p).Error; err != nil {
 				return err
 			}
@@ -135,10 +144,20 @@ func (s *Server) handlePlanItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // planPayload 新增 / 修改套餐的请求:RuleIds 是这个套餐要跟的限速规则;没带这个字段 = 不动(只有主面板能改)。
+// Price 盖住 model.Plan 的同名字段,好分清「没带」和「给了 0」:修改时没带就保留原来的参考价。
 type planPayload struct {
 	model.Plan
-	RuleIds *[]uint `json:"ruleIds"`
+	RuleIds *[]uint  `json:"ruleIds"`
+	Price   *float64 `json:"price"`
 }
+
+// 参考价的范围:0 = 不填;填了就在这两个数之间(太大太小都会让折算结果出现 ±Inf,JSON 编不出来)。
+const (
+	minPlanPrice = 0.01
+	maxPlanPrice = 1e9
+)
+
+var errPlanPriceRange = errors.New("参考价要在 0.01 到 1000000000 之间(0 = 不填)")
 
 // planView 套餐列表:带上有多少用户、跟着哪些限速规则。
 type planView struct {
@@ -228,8 +247,14 @@ func (s *Server) validatePlan(p *model.Plan) error {
 	if p.Name == "" {
 		return errors.New("套餐名称不能为空")
 	}
-	if p.VolumeGB < 0 || p.Days < 0 || p.DeviceLimit < 0 || p.SpeedUp < 0 || p.SpeedDown < 0 || p.ResetDays < 0 {
+	if p.VolumeGB < 0 || p.Days < 0 || p.DeviceLimit < 0 || p.SpeedUp < 0 || p.SpeedDown < 0 || p.ResetDays < 0 || p.Price < 0 {
 		return errors.New("数值不能为负")
+	}
+	if p.Days > model.MaxDays || p.ResetDays > model.MaxDays {
+		return errDaysTooMany
+	}
+	if math.IsNaN(p.Price) || math.IsInf(p.Price, 0) || p.Price > maxPlanPrice || (p.Price > 0 && p.Price < minPlanPrice) {
+		return errPlanPriceRange
 	}
 	if p.AutoReset && p.ResetDays == 0 {
 		p.ResetDays = 30
@@ -271,25 +296,24 @@ func (s *Server) validatePlan(p *model.Plan) error {
 //	renew  续费:从"现在与原到期中较晚者"起算,已用流量清零(进入新周期)
 //	extend 延期:同 renew 的到期计算,但保留已用流量
 func applyPlan(u *model.User, p model.Plan, mode string, now int64) []uint {
+	return applyPlanN(u, p, mode, 1, now)
+}
+
+// applyPlanN 同 applyPlan,一次套 n 期:时长 × n;一次性额度(不周期重置、有上限)续费时配额也 × n,
+// 周期重置套餐的流量是每期额度,不叠加;延期只顺延时间,配额仍是一期的。n = 1 时与以前逐字段相同。
+func applyPlanN(u *model.User, p model.Plan, mode string, n int, now int64) []uint {
+	if n < 1 {
+		n = 1
+	}
 	u.PlanId = p.Id
 	u.Volume = model.GBToBytes(p.VolumeGB)
+	if n > 1 && mode == "renew" && !p.AutoReset && u.Volume > 0 {
+		u.Volume = satMul(u.Volume, n)
+	}
 	u.DeviceLimit, u.SpeedUp, u.SpeedDown = p.DeviceLimit, p.SpeedUp, p.SpeedDown
 	u.AutoReset, u.ResetDays = p.AutoReset, p.ResetDays
 
-	base := now
-	if mode != "new" && u.Expiry > now {
-		base = u.Expiry
-	}
-	switch {
-	case p.Days <= 0:
-		u.Expiry, u.ActivateDays = 0, 0
-	case u.ActivateDays > 0:
-		u.ActivateDays += p.Days // 还没开始计时:再加一个周期,照样等首次连接
-	case p.FirstUse && u.Expiry <= now:
-		u.Expiry, u.ActivateDays = 0, p.Days // 新号或已过期的:等首次连接才开始计时
-	default:
-		u.Expiry = base + int64(p.Days)*86400 // 正在计时的老用户续费:接着原到期顺延
-	}
+	extendByPlan(u, p, n*p.Days, now, mode != "new")
 	if mode != "extend" {
 		u.TotalUp += u.Up
 		u.TotalDown += u.Down
@@ -299,7 +323,7 @@ func applyPlan(u *model.User, p model.Plan, mode string, now int64) []uint {
 		if mode == "extend" && u.NextReset > now {
 			// 保留当前周期
 		} else {
-			u.NextReset = now + int64(p.ResetDays)*86400
+			u.NextReset = model.AddDays(now, p.ResetDays)
 		}
 	} else {
 		u.NextReset = 0
@@ -331,18 +355,28 @@ func (s *Server) loadPlan(id uint) (model.Plan, error) {
 	return p, nil
 }
 
-// handleUserPlan POST /users/{id}/plan {planId, mode}
+// handleUserPlan POST /users/{id}/plan {planId, mode, periods, dryRun, requestId, fromPlanId}:续费 / 延期 N 期,
+// 不给 planId 就续现在的套餐;mode=bind 只归入套餐。正式执行的返回和以前一样,预览返回结果对象。
 func (s *Server) handleUserPlan(w http.ResponseWriter, r *http.Request, u model.User) {
-	var req struct {
-		PlanId uint   `json:"planId"`
-		Mode   string `json:"mode"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		badRequest(w, err)
+	req, err := decodePlanOpReq(r)
+	if err != nil {
+		writePlanErr(w, err)
 		return
 	}
 	if req.Mode == "bind" { // 只归入套餐:额度和到期都不动(老用户想按套餐套规则时用)
-		if err := s.bindUserPlan([]model.User{u}, req.PlanId); err != nil {
+		pid := uint(0)
+		if req.PlanId != nil {
+			pid = *req.PlanId
+		}
+		if req.DryRun { // 预览只校验:不改归属、不写审计、不触发规则重判
+			if err := s.planBelongs(pid, u.ResellerId); err != nil {
+				badRequest(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "dryRun": true, "expiry": u.Expiry, "planId": pid})
+			return
+		}
+		if err := s.bindUserPlan([]model.User{u}, pid); err != nil {
 			badRequest(w, err)
 			return
 		}
@@ -351,27 +385,22 @@ func (s *Server) handleUserPlan(w http.ResponseWriter, r *http.Request, u model.
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "expiry": u.Expiry})
 		return
 	}
-	p, err := s.loadPlan(req.PlanId)
+	// 代理面板:只能用自己的套餐,线路在授权内,代理本身可用(校验在 renewUserPlan 里)
+	res, err := s.renewUserPlan(r, planScope{rid: scope(r), actor: s.actor(r)}, u, req, false)
 	if err != nil {
-		badRequest(w, err)
+		writePlanErr(w, err)
 		return
 	}
-	if req.Mode != "extend" {
-		req.Mode = "renew"
-	}
-	if rid := scope(r); rid > 0 { // 代理套餐同样受线路授权与设备额度约束
-		if err := s.checkResellerPlan(rid, u, p); err != nil {
-			badRequest(w, err)
-			return
-		}
-	}
-	if err := s.applyUserPlan(&u, p, req.Mode); err != nil {
-		badRequest(w, err)
+	if res.DryRun {
+		writeJSON(w, http.StatusOK, res)
 		return
 	}
-	s.audit(r, "user", "plan:"+req.Mode+":"+p.Name, u.Name)
-	s.reloadUsers("套餐 " + p.Name + " → " + u.Name)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "expiry": u.Expiry})
+	out := map[string]interface{}{"ok": "1", "expiry": res.To.Expiry}
+	if res.Replayed {
+		w.Header().Set("Idempotent-Replayed", "true")
+		out["replayed"] = true
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // planBelongs 套餐和用户必须是同一个归属(主面板 / 同一个代理)。0 = 不属于任何套餐,总是可以。
@@ -404,31 +433,6 @@ func (s *Server) bindUserPlan(users []model.User, planID uint) error {
 		}
 		return nil
 	})
-}
-
-// applyUserPlan 把套餐套到已有用户上并落库(含套餐指定的线路);调用方负责审计与热更新。
-func (s *Server) applyUserPlan(u *model.User, p model.Plan, mode string) error {
-	refs := applyPlanRefs(u, p, mode, time.Now().Unix())
-	if refs != nil {
-		refs = s.normalizeRefs(refs)
-	}
-	err := s.db.Transaction(func(tx *gorm.DB) error { // 套餐字段与线路一个事务
-		if err := tx.Model(&model.User{}).Where("id = ?", u.Id).
-			Updates(updateUserFields(*u, mode != "extend")).Error; err != nil {
-			return err
-		}
-		if refs != nil {
-			return writeUserLineRefs(tx, u.Id, refs)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	if mode != "extend" {
-		s.forgetQuotaAlert(u.Name) // 用量清零了,再到阈值要能再提醒
-	}
-	return nil
 }
 
 // ---- 批量生成 ----
@@ -574,18 +578,47 @@ func (s *Server) handleUsersBulk(w http.ResponseWriter, r *http.Request) {
 
 // ---- 批量操作 ----
 
-// handleUsersBatch POST /users/batch {ids, action: enable|disable|delete|reset|extend|plan, days, planId, mode}
+// handleUsersBatch POST /users/batch {ids, action: enable|disable|delete|reset|extend|plan, days, planId, mode, periods}
+// idChunks 把 id 切成每批 500 个:SQLite 一条语句最多 32766 个变量,「选中全部筛选结果」一次能送上万个 id,
+// 一条 IN 放不下时 Find 报错、结果为空,以前被当成"处理了 0 个"照样返回 200、写审计
+func idChunks(ids []uint) [][]uint {
+	const n = 500
+	var out [][]uint
+	for len(ids) > n {
+		out = append(out, ids[:n])
+		ids = ids[n:]
+	}
+	if len(ids) > 0 {
+		out = append(out, ids)
+	}
+	return out
+}
+
+// usersByIDs 按批取用户,任一批出错就返回错误(不当成空)。
+func (s *Server) usersByIDs(ids []uint) ([]model.User, error) {
+	var out []model.User
+	for _, part := range idChunks(ids) {
+		var got []model.User
+		if err := s.db.Where("id IN ?", part).Find(&got).Error; err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+	}
+	return out, nil
+}
+
 func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		return
 	}
 	var req struct {
-		Ids    []uint `json:"ids"`
-		Action string `json:"action"`
-		Days   int    `json:"days"`
-		PlanId uint   `json:"planId"`
-		Mode   string `json:"mode"`
+		Ids     []uint `json:"ids"`
+		Action  string `json:"action"`
+		Days    int    `json:"days"`
+		PlanId  uint   `json:"planId"`
+		Mode    string `json:"mode"`
+		Periods *int   `json:"periods"` // action=plan:一次续 N 期(默认 1)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		badRequest(w, err)
@@ -597,7 +630,14 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	if rid := scope(r); rid > 0 { // 代理:只留自己的用户
 		var mine []uint
-		s.db.Model(&model.User{}).Where("id IN ? AND reseller_id = ?", req.Ids, rid).Pluck("id", &mine)
+		for _, part := range idChunks(req.Ids) {
+			var got []uint
+			if err := s.db.Model(&model.User{}).Where("id IN ? AND reseller_id = ?", part, rid).Pluck("id", &got).Error; err != nil {
+				badRequest(w, err)
+				return
+			}
+			mine = append(mine, got...)
+		}
 		if len(mine) == 0 {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权限"})
 			return
@@ -606,6 +646,7 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().Unix()
 	var affected int64
+	auditAction := "batch:" + req.Action
 	switch req.Action {
 	case "enable", "disable":
 		n, err := s.setEnabled(s.db, req.Ids, req.Action == "enable")
@@ -615,8 +656,11 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		affected = n
 	case "delete":
-		var users []model.User
-		s.db.Where("id IN ?", req.Ids).Find(&users)
+		users, err := s.usersByIDs(req.Ids)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
 		for _, u := range users {
 			if err := s.deleteUser(u, s.actor(r)); err != nil {
 				badRequest(w, err)
@@ -637,8 +681,15 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, errors.New("延期天数需大于 0"))
 			return
 		}
-		var users []model.User
-		s.db.Where("id IN ?", req.Ids).Find(&users)
+		if req.Days > model.MaxDays {
+			badRequest(w, errDaysTooMany)
+			return
+		}
+		users, err := s.usersByIDs(req.Ids)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
 		for _, u := range users {
 			if ok, err := s.extendExpiry(s.db, u, req.Days, now); err != nil {
 				badRequest(w, err)
@@ -649,8 +700,12 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		}
 	case "plan":
 		if req.Mode == "bind" {
-			var users []model.User
-			s.db.Where("id IN ?", req.Ids).Find(&users)
+			auditAction = "batch:plan:bind"
+			users, err := s.usersByIDs(req.Ids)
+			if err != nil {
+				badRequest(w, err)
+				return
+			}
 			if err := s.bindUserPlan(users, req.PlanId); err != nil {
 				badRequest(w, err)
 				return
@@ -660,6 +715,9 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		p, err := s.loadPlan(req.PlanId)
+		if rid := scope(r); err == nil && rid > 0 && p.ResellerId != rid {
+			err = errPlanNotFound // 先核对归属再校验期数:别人的套餐和不存在的套餐同一个错误,探不出别人的套餐与天数
+		}
 		if err != nil {
 			badRequest(w, err)
 			return
@@ -667,8 +725,18 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 		if req.Mode != "extend" {
 			req.Mode = "renew"
 		}
-		var users []model.User
-		s.db.Where("id IN ?", req.Ids).Find(&users)
+		// 和单人的 plan:<方式>:<套餐名> 同一写法,概况「最近操作」才写得出是哪个套餐、续费还是延期
+		auditAction = "batch:plan:" + req.Mode + ":" + p.Name
+		n, err := planPeriods(req.Periods, req.Mode, p.Days)
+		if err != nil {
+			writePlanErr(w, err)
+			return
+		}
+		users, err := s.usersByIDs(req.Ids)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
 		if rid := scope(r); rid > 0 {
 			for _, u := range users {
 				if err := s.checkResellerPlan(rid, u, p); err != nil {
@@ -677,18 +745,27 @@ func (s *Server) handleUsersBatch(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// 每人一笔事务、一条套餐记录;审计照旧整批记一条,热更新与规则重判最后统一做
+		sc := planScope{rid: scope(r), actor: s.actor(r)}
+		replanned := false
 		for _, u := range users {
-			if err := s.applyUserPlan(&u, p, req.Mode); err != nil {
-				badRequest(w, err)
+			res, err := s.runPlanOp(sc, u.Id, planOpCall{endpoint: "batch", opt: planOpOpt{Op: req.Mode, Periods: n}, target: p, quiet: true,
+				reqHash: planHash("batch", u.Id, p.Id, req.Mode, n)})
+			if err != nil {
+				writePlanErr(w, err)
 				return
 			}
+			replanned = replanned || res.From.PlanId != p.Id
 			affected++
+		}
+		if replanned {
+			s.rulesNow()
 		}
 	default:
 		badRequest(w, fmt.Errorf("未知操作 %q", req.Action))
 		return
 	}
-	s.audit(r, "user", "batch:"+req.Action, req.Ids)
+	s.audit(r, "user", auditAction, req.Ids)
 	s.reloadUsers(fmt.Sprintf("批量 %s %d 个用户", req.Action, affected))
 	writeJSON(w, http.StatusOK, map[string]int64{"affected": affected})
 }

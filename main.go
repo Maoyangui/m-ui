@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,7 +14,6 @@ import (
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/database"
-	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/importer"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/runner"
@@ -47,6 +48,7 @@ func usage() {
 		{"passwd -db <m-ui.db> [-password 新密码]", "重置管理员密码"},
 		{"set -db <m-ui.db> key=value ...", "写入设置(如 webPort=3053 nodeMode=true)"},
 		{"render -db <m-ui.db>", "打印并校验 sing-box 配置"},
+		{"ha status|takeover|set-master|pause|resume", "主机容灾与设为主机(要 root,见 m-ui ha)"},
 		{"version", "显示版本"},
 	}
 	for _, r := range rows {
@@ -150,11 +152,15 @@ func main() {
 		if *out == "" {
 			*out = "m-ui-" + time.Now().Format("20060102-150405") + ".zip"
 		}
-		if err := runBackup(*dbPath, *out); err != nil {
+		meta, err := runBackupMeta(*dbPath, *out)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "备份失败:", err)
 			os.Exit(1)
 		}
 		fmt.Println("备份已写入:", *out)
+		if len(meta.CertsUnreadable) > 0 {
+			fmt.Printf("注意:库里引用的 %d 个证书文件读不出来,没打进备份:%s\n", len(meta.CertsUnreadable), strings.Join(meta.CertsUnreadable, "、"))
+		}
 	case "restore":
 		fs := flag.NewFlagSet("restore", flag.ExitOnError)
 		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径(默认取 systemd 单元里的,没有则 /etc/m-ui/m-ui.db)")
@@ -164,16 +170,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, "缺少 -from 参数")
 			os.Exit(2)
 		}
-		sum, err := backup.Inspect(*from)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "备份文件无效:", err)
+		if err := runRestore(*dbPath, *from, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		if err := backup.Restore(*dbPath, *from); err != nil {
-			fmt.Fprintln(os.Stderr, "还原失败:", err)
-			os.Exit(1)
-		}
-		fmt.Printf("已还原:%d 用户 / %d 线路 / %d 上游,证书 %d 个(旧库保留为 .bak-*)\n", sum.Users, sum.Lines, sum.Upstreams, len(sum.Meta.Certs))
 	case "set":
 		fs := flag.NewFlagSet("set", flag.ExitOnError)
 		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径(默认取 systemd 单元里的,没有则 /etc/m-ui/m-ui.db)")
@@ -248,6 +248,22 @@ func main() {
 			fmt.Fprintln(os.Stderr, "渲染失败:", err)
 			os.Exit(1)
 		}
+	case "ha":
+		runHA(os.Args[2:])
+	case "pause-takeover": // 安装 / 升级脚本重启服务前调用:主机开着容灾时暂停接任(不缩短已有的暂停)
+		fs := flag.NewFlagSet("pause-takeover", flag.ExitOnError)
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径")
+		fs.Parse(os.Args[2:])
+		n, err := strconv.Atoi(fs.Arg(0))
+		if err != nil || n <= 0 || n > 24*60 {
+			fmt.Fprintln(os.Stderr, "用法:m-ui pause-takeover [-db 路径] <分钟>")
+			os.Exit(2)
+		}
+		if err := requireDB(*dbPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		haPauseBefore(*dbPath, n, "升级前")
 	case "run":
 		fs := flag.NewFlagSet("run", flag.ExitOnError)
 		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径(默认取 systemd 单元里的,没有则 /etc/m-ui/m-ui.db)")
@@ -272,34 +288,50 @@ func requireDB(path string) error {
 }
 
 func runBackup(dbPath, out string) error {
+	_, err := runBackupMeta(dbPath, out)
+	return err
+}
+
+// runBackupMeta 生成备份:设置里引用的证书(线路默认、面板、订阅、代理面板)与证书库里的每一张都打进去(见 backup.CertPaths)。
+func runBackupMeta(dbPath, out string) (backup.Meta, error) {
 	if err := requireDB(dbPath); err != nil {
-		return err
+		return backup.Meta{}, err
 	}
 	db, err := database.Open(dbPath)
 	if err != nil {
-		return err
+		return backup.Meta{}, err
 	}
 	defer database.Close(db)
-	get := func(key string) string {
-		var v string
-		db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
-		return v
-	}
-	var certs []string
-	for _, k := range []string{"certFile", "keyFile", "webCertFile", "webKeyFile", "subCertFile", "subKeyFile"} {
-		certs = append(certs, get(k))
-	}
-	var stored []model.Cert
-	db.Find(&stored) // 证书库里没在用的证书也要进备份
-	for _, c := range stored {
-		certs = append(certs, c.CertFile, c.KeyFile)
-	}
-	f, err := os.Create(out)
+	f, err := os.OpenFile(out, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600) // 备份里有全部用户凭据与证书私钥
 	if err != nil {
-		return err
+		return backup.Meta{}, err
 	}
 	defer f.Close()
-	return backup.CreateIn(db, certs, version, filepath.Dir(dbPath), f)
+	return backup.CreateInMeta(db, backup.CertPaths(db), version, filepath.Dir(dbPath), f)
+}
+
+// runRestore m-ui restore:还原备份,如实说清楚库换了没有、旧库在哪、每个证书文件的去向(已还原 / 跳过及原因 / 还缺的)。
+func runRestore(dbPath, from string, w io.Writer) error {
+	sum, err := backup.Inspect(from)
+	if err != nil {
+		return fmt.Errorf("备份文件无效: %w", err)
+	}
+	rep, err := backup.Restore(dbPath, from)
+	if !rep.DB {
+		return fmt.Errorf("还原失败: %w", err)
+	}
+	old := "之前没有数据库"
+	if rep.Bak != "" {
+		old = "旧库保留为 " + rep.Bak
+	}
+	fmt.Fprintf(w, "已还原:%d 用户 / %d 线路 / %d 上游(%s)\n", sum.Users, sum.Lines, sum.Upstreams, old)
+	for _, l := range rep.Lines() {
+		fmt.Fprintln(w, l.Text)
+	}
+	if err != nil {
+		return fmt.Errorf("还原没有全部完成(数据库已经换成备份里的了): %w", err)
+	}
+	return nil
 }
 
 func runRender(dbPath, out string, validate bool) error {
@@ -308,17 +340,7 @@ func runRender(dbPath, out string, validate bool) error {
 		return err
 	}
 	defer database.Close(db)
-	get := func(key string) string {
-		var v string
-		db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
-		return v
-	}
-	cert := render.NodeCert{
-		ServerName: get("webDomain"),
-		CertPath:   get("webCertFile"),
-		KeyPath:    get("webKeyFile"),
-	}
-	raw, err := render.BuildConfig(db, cert)
+	raw, err := render.BuildConfig(db, runner.NodeCertOf(db)) // 和运行时同一套证书取法(certFile 优先,再是面板证书)
 	if err != nil {
 		return err
 	}

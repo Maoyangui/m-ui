@@ -16,10 +16,10 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
-	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/totp"
+	"github.com/Maoyangui/m-ui/util/slowreq"
 
 	"github.com/skip2/go-qrcode"
 	"golang.org/x/crypto/bcrypt"
@@ -121,16 +121,14 @@ func (s *Server) StartReseller() error {
 		certFile, keyFile = s.setting("webCertFile"), s.setting("webKeyFile")
 	}
 	if certFile != "" && keyFile != "" {
-		rl, err := certutil.NewReloader(certFile, keyFile)
-		if err != nil {
-			ln.Close()
-			return fmt.Errorf("加载代理面板证书: %w", err)
-		}
-		ln = tls.NewListener(ln, rl.TLSConfig())
+		ln = tls.NewListener(ln, s.tlsFor("reseller", "代理面板", certFile, keyFile))
 		scheme = "https"
+	} else {
+		s.watchTLS("reseller", nil)
 	}
 	s.rListener = ln
-	s.rSrv = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	slow := &slowreq.Logger{Name: "代理面板", Shape: panelRouteShape}
+	s.rSrv = &http.Server{Handler: slow.Wrap(handler), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		if err := s.rSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			logger.Warning("代理面板退出: ", err)
@@ -144,11 +142,18 @@ func (s *Server) StopReseller() error {
 	if s.rSrv == nil {
 		return nil
 	}
+	s.watchTLS("reseller", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := s.rSrv.Shutdown(ctx)
 	s.rSrv = nil
 	return err
+}
+
+// resellerUnauthorized 代理面板的"未登录":带上 scope,登录页还没有 status 时也认得出这是代理面板
+// (右上角的「帮助说明」直接打开代理视图,见 app.js helpLink)。主面板的 401 不带它。
+func resellerUnauthorized(w http.ResponseWriter) {
+	writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录", "scope": "reseller"})
 }
 
 // rauth 代理面板鉴权:必须是代理会话;还没设密码的会话只放行状态与设密码。
@@ -160,12 +165,12 @@ func (s *Server) rauth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		c, err := r.Cookie(resellerCookie)
 		if err != nil {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+			resellerUnauthorized(w)
 			return
 		}
 		sess, ok := s.getSession(c.Value)
 		if !ok || sess.reseller == 0 || !s.sessionCredentialValid(c.Value, sess) {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+			resellerUnauthorized(w)
 			return
 		}
 		var rs model.Reseller
@@ -173,9 +178,13 @@ func (s *Server) rauth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "代理已停用"})
 			return
 		}
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 代理面板没有上传接口
+		limitJSONBody(w, r, resellerBodyLimit)
+		done, ok, msg := s.haWrite(r) // 正在设为主机:写操作暂停;没冻结的写登记在途
+		if !ok {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+			return
 		}
+		defer done()
 		if sess.pending && !strings.HasSuffix(r.URL.Path, "/status") && !strings.HasSuffix(r.URL.Path, "/self/password") {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "请先设置密码"})
 			return
@@ -199,7 +208,7 @@ func (s *Server) handleResellerLogin(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	ip, peer := clientIP(r), peerIP(r)
+	ip, peer := clientIP(r), s.sourceIP(r)
 	if s.loginBlocked(peer) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return
@@ -323,6 +332,12 @@ func (s *Server) handleResellerSelf(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		// 和主面板一样去掉首尾空白再限长、再存:以前按去空白后的字数判、存的却是原文,首尾垫几十万个空格换行就绕过了上限
+		p.PageNotice, p.PageSupport = strings.TrimSpace(p.PageNotice), strings.TrimSpace(p.PageSupport)
+		if err := validatePageTextChange(p.PageNotice, rs.PageNotice, p.PageSupport, rs.PageSupport); err != nil {
+			badRequest(w, err)
+			return
+		}
 		buy := strings.TrimSpace(p.PageBuyURL)
 		if buy != "" && !strings.HasPrefix(strings.ToLower(buy), "http://") && !strings.HasPrefix(strings.ToLower(buy), "https://") {
 			badRequest(w, errors.New("选购链接必须以 http:// 或 https:// 开头"))
@@ -330,7 +345,7 @@ func (s *Server) handleResellerSelf(w http.ResponseWriter, r *http.Request) {
 		}
 		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{
 			"page_enabled": p.PageEnabled, "share_on": p.ShareOn, "profile_title": strings.TrimSpace(p.ProfileTitle),
-			"page_title": p.PageTitle, "page_notice": p.PageNotice, "page_support": p.PageSupport, "page_buy_url": buy,
+			"page_title": strings.TrimSpace(p.PageTitle), "page_notice": p.PageNotice, "page_support": p.PageSupport, "page_buy_url": buy,
 		})
 		s.auditAs(rs.Name, "reseller", "subpage", rs.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
@@ -339,7 +354,7 @@ func (s *Server) handleResellerSelf(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleResellerSelfSub 处理 /self/password 与 /self/totp。
+// handleResellerSelfSub 处理 /self/password、/self/totp、/self/api 与 /self/logo。
 func (s *Server) handleResellerSelfSub(w http.ResponseWriter, r *http.Request) {
 	rs, err := s.current(r)
 	if err != nil {
@@ -349,6 +364,9 @@ func (s *Server) handleResellerSelfSub(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasSuffix(r.URL.Path, "/password"):
 		s.handleResellerPassword(w, r, rs)
+	case strings.HasSuffix(r.URL.Path, "/logo"):
+		// 自己名下用户落地页的 logo:归属取当前会话的代理,不收任何 id 参数,碰不到主面板和别的代理的
+		s.handlePageLogo(w, r, rs.Id, func(action string) { s.auditAs(rs.Name, "reseller", action, rs.Name) })
 	case strings.HasSuffix(r.URL.Path, "/api/rotate"):
 		// 重新生成令牌:旧令牌立即失效
 		if r.Method != http.MethodPost {

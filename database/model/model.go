@@ -75,9 +75,15 @@ type Cert struct {
 	CertFile  string `json:"certFile"`
 	KeyFile   string `json:"keyFile"`
 	Method    string `json:"method"`    // ACME 的验证方式:http | cloudflare | manual
-	AutoRenew bool   `json:"autoRenew"` // 到期前 30 天自动续期(手动 DNS 的不能)
+	AutoRenew bool   `json:"autoRenew"` // 进入续期窗口后自动续期(手动 DNS 的不能)
 	Staging   bool   `json:"staging"`
 	CreatedAt int64  `json:"createdAt"`
+	// 续期状态:每次签发 / 续期(自动的和手点的)之后写回,重启后照样在。证书页、主机代副机告警看它(见 runner/certrenew.go)。
+	LastRenewAt  int64  `json:"lastRenewAt" gorm:"default:0;not null"` // 最近一次尝试的时间
+	LastRenewOK  int64  `json:"lastRenewOk" gorm:"default:0;not null"` // 最近一次成功的时间
+	LastRenewErr string `json:"lastRenewErr"`                          // 最近一次失败的原因;成功后清空
+	RenewFails   int    `json:"renewFails" gorm:"default:0;not null"`  // 连续失败次数;成功后清零
+	NextRenewAt  int64  `json:"nextRenewAt" gorm:"default:0;not null"` // 失败后退避:这之前不再自动重试;0 = 进了续期窗口就试
 }
 
 // CertBrief 一台服务器有哪张证书(副机随报告上来,存在 Node.Certs,不含私钥与路径)。
@@ -87,6 +93,25 @@ type CertBrief struct {
 	SelfSigned bool     `json:"selfSigned,omitempty"`
 	NotAfter   int64    `json:"notAfter"`
 	Default    bool     `json:"default,omitempty"` // 线路默认证书
+	// 以下是续期状态,老版本副机不报(全部可省):主机据此代副机告警,服务器页、线路选证书时标出续期失败。
+	// 不进快照修订号(见 hub.revisionOf):续期失败一次不该把整份配置重推给所有副机。
+	Source      string `json:"source,omitempty"`      // acme | selfsign | external
+	Method      string `json:"method,omitempty"`      // http | cloudflare | manual
+	AutoRenew   bool   `json:"autoRenew,omitempty"`   // 面板会自动续这张
+	RenewBefore int64  `json:"renewBefore,omitempty"` // 到期前多少秒开始续
+	RenewErr    string `json:"renewErr,omitempty"`    // 自动续期正在失败:最近一次的原因
+	RenewFails  int    `json:"renewFails,omitempty"`  // 连续失败次数
+	NextRenewAt int64  `json:"nextRenewAt,omitempty"` // 下次重试不早于
+	InUse       bool   `json:"inUse,omitempty"`       // 线路默认、线路单独选的、面板、订阅、代理面板正用着
+	// Restored 换机还原时从备份放进数据目录的副本(cert/restored/):原来续它的 certbot 等工具不在这台,没有谁续它,
+	// 和手动 DNS 一样剩 30 天起提醒。老版本不认,照外部证书剩 14 天起提醒
+	Restored bool `json:"restored,omitempty"`
+}
+
+// ServicePort 服务器上 m-ui 自己监听的一个端口(面板 / 订阅 / 代理面板)。
+type ServicePort struct {
+	Label string `json:"label"`
+	Port  int    `json:"port"`
 }
 
 // Node 入口服务器。IsLocal 标记 Hub 所在机;副机通过 ApiUrl+Token 管理。
@@ -114,6 +139,8 @@ type Node struct {
 	CertFP string `json:"certFp,omitempty"`
 	// Certs 这台服务器证书库的清单 []CertBrief(本机由 runner 写入,副机随报告上报)。线路编辑框与订阅的 SNI 用它。
 	Certs json.RawMessage `json:"certs,omitempty"`
+	// ServicePorts 这台服务器自己监听的服务端口 []ServicePort(面板 / 订阅;副机随报告上报,主机建线路时按它避让)。空 = 未知(老版本副机)。
+	ServicePorts json.RawMessage `json:"servicePorts,omitempty"`
 }
 
 // User 订阅用户。配额/流量为两台服务器聚合值,判定只在主端进行。
@@ -252,17 +279,96 @@ type Plan struct {
 	LineNodes   json.RawMessage `json:"lineNodes,omitempty"` // 线路 → 服务器范围 {"3":[1,2]};没写的线路 = 全部服务器
 	Desc        string          `json:"desc"`
 	Sort        int             `json:"sort"`
+	// Price 参考价:只用于换套餐时按剩余价值折算、预览里估值,不收钱,也不给终端用户看;0 = 没填(不能折算)。
+	// 后加的列:老库升级时 AutoMigrate 补上,老套餐都是 0。
+	Price float64 `json:"price" gorm:"default:0;not null"`
 }
 
+// PlanOp 一次套餐操作(续费 / 延期 / 换套餐)的记录:既是用户详情里的「套餐记录」,也是外部 API 的幂等表。
+// 只在主机上,不进快照。Before / After 是变更前后的套餐状态,重放时原样返回。
+type PlanOp struct {
+	Id uint64 `json:"id" gorm:"primaryKey;autoIncrement"`
+	// ResellerId 发起方的作用域(不是用户的归属):0 = 主面板(面板会话与主令牌共用),否则是那个代理(代理面板与代理令牌共用)。
+	// 和 RequestId 组成唯一键:同一作用域里同一个幂等键只能执行一次,不同作用域互不干扰。
+	ResellerId uint            `json:"-" gorm:"uniqueIndex:idx_plan_ops_req,priority:1;default:0;not null"`
+	RequestId  *string         `json:"requestId,omitempty" gorm:"uniqueIndex:idx_plan_ops_req,priority:2"` // 幂等键;NULL = 调用方没给(NULL 不参与唯一)
+	ReqHash    string          `json:"-"`                                                                  // 规范化请求的 SHA-256:同键不同内容返回 409
+	UserId     uint            `json:"userId" gorm:"index"`
+	UserName   string          `json:"userName"`
+	Actor      string          `json:"actor"`
+	Op         string          `json:"op"`        // renew | extend | replace | stack | prorate
+	Usage      string          `json:"usage"`     // 本周期用量实际怎么处理的:keep | reset
+	Direction  string          `json:"direction"` // upgrade | downgrade | same | mixed
+	FromPlanId uint            `json:"fromPlanId"`
+	FromPlan   string          `json:"fromPlan"` // 名字随记录存一份:套餐以后改名或删了,记录照样看得懂
+	ToPlanId   uint            `json:"toPlanId"`
+	ToPlan     string          `json:"toPlan"`
+	Periods    int             `json:"periods"`
+	Before     json.RawMessage `json:"before"`
+	After      json.RawMessage `json:"after"`
+	Remaining  json.RawMessage `json:"remaining,omitempty"`
+	Credit     json.RawMessage `json:"credit,omitempty"`
+	Warnings   json.RawMessage `json:"warnings,omitempty"`
+	Remark     string          `json:"remark"`
+	CreatedAt  int64           `json:"createdAt" gorm:"index"`
+}
+
+// 套餐记录的保留:一年(幂等键也只在这段时间里有效),条数再兜一道上限 —— 按作用域(主面板 / 每个代理)各算各的,
+// 一个代理刷记录只会挤掉他自己最旧的,碰不到主面板和别的代理的记录与幂等键。
+const (
+	PlanOpKeepDays = 365
+	PlanOpMaxRows  = 100000 // 每个作用域
+)
+
+// 数值上限。SQLite 的整数加法、乘法溢出时结果会变成 REAL,写进 users 表的整数列以后,整表读用户都会报错
+// (面板、订阅、统计一起停),Go 里溢出则悄悄绕成负数。所以算配额、算天数的地方 —— Go 里和 SQL 里 —— 一律按这两个数
+// 饱和;请求里直接给的天数超过 MaxDays 返回 400。
+const (
+	// MaxVolume 配额上限(字节):2^62,约 4.6 EB(4294967296 GB)。叠加、续 N 期算出来更大的按它算。
+	MaxVolume = int64(1) << 62
+	// MaxDays 天数上限:约 1 万年。套餐天数、重置周期、首次连接后的天数、一次加的天数都不超过它。
+	MaxDays = 3650000
+)
+
+// AddDays 时间戳加 days 天:天数先封到 MaxDays,结果饱和不溢出;days ≤ 0 原样返回。
+func AddDays(ts int64, days int) int64 {
+	if days <= 0 {
+		return ts
+	}
+	d := int64(CapDays(days)) * 86400
+	if ts > math.MaxInt64-d {
+		return math.MaxInt64
+	}
+	return ts + d
+}
+
+// CapDays 天数封到 [0, MaxDays]。
+func CapDays(days int) int { return min(max(days, 0), MaxDays) }
+
+// SumDays 两段天数相加(各自先封顶,和也封顶),不会溢出。
+func SumDays(a, b int) int { return CapDays(CapDays(a) + CapDays(b)) }
+
 // StartOnFirstUse 记流量的那条 UPDATE 顺带做"首次连接开始计时":等着计时的用户此刻换算成到期时间。
-// 和记流量是同一条语句,不多一次写;用的是更新前的 activate_days。
+// 和记流量是同一条语句,不多一次写;用的是更新前的 activate_days。天数按 MaxDays 封顶,乘出来不会溢出成 REAL。
 func StartOnFirstUse(update map[string]interface{}, now int64) {
-	update["expiry"] = gorm.Expr("CASE WHEN activate_days > 0 THEN ? + activate_days * 86400 ELSE expiry END", now)
+	update["expiry"] = gorm.Expr("CASE WHEN activate_days > 0 THEN ? + MIN(activate_days, ?) * 86400 ELSE expiry END", now, MaxDays)
 	update["activate_days"] = 0
 }
 
-// GBToBytes GB 换算成字节(1 GB = 1024³,四舍五入)。
-func GBToBytes(gb float64) int64 { return int64(math.Round(gb * (1 << 30))) }
+// GBToBytes GB 换算成字节(1 GB = 1024³,四舍五入);超出 MaxVolume 的按上限算 —— 浮点转整数越界在不同 CPU 上
+// 结果不同(amd64 上是最小的负数),不能交给它。
+func GBToBytes(gb float64) int64 {
+	b := math.Round(gb * (1 << 30))
+	switch {
+	case math.IsNaN(b):
+		return 0
+	case b >= float64(MaxVolume):
+		return MaxVolume
+	case b <= -float64(MaxVolume):
+		return -MaxVolume
+	}
+	return int64(b)
+}
 
 // ExtNode 外部节点:一条分享链接,或一个外部订阅地址;分配给用户后聚合进该用户的订阅。
 type ExtNode struct {
@@ -274,14 +380,24 @@ type ExtNode struct {
 	Enabled   bool   `json:"enabled" gorm:"default:true"`
 	Sort      int    `json:"sort"`
 	Remark    string `json:"remark"`
-	LastFetch int64  `json:"lastFetch"`
-	LastError string `json:"lastError"`
-	NodeCount int    `json:"nodeCount"`
-	Cache     string `json:"cache,omitempty"` // 外部订阅抓取到的内容(主机抓取,随快照下发副机)
-	// 输出到用户订阅前的筛选与改名,都按节点原名记(订阅刷新后顺序会变,原名才认得出)。
-	Hidden  json.RawMessage `json:"hidden,omitempty"`  // 手动隐藏的节点 []原名
-	Renames json.RawMessage `json:"renames,omitempty"` // 改名 {原名: 新名}
-	Exclude string          `json:"exclude"`           // 名字含这些关键词的不输出,逗号分隔(官网、到期、剩余流量这类信息节点)
+	LastFetch int64  `json:"lastFetch"`                  // 最近一次抓取成功的时间(内容没变也算)
+	LastTry   int64  `json:"lastTry" gorm:"default:0"`   // 最近一次抓取的时间(成功失败都算;定时刷新按它和 LastFetch 中较晚的一个排期)
+	LastError string `json:"lastError"`                  // 最近一次抓取的错误;成功时清空。失败时缓存保持上次成功的内容
+	NodeCount int    `json:"nodeCount"`                  // 输出到用户订阅的节点数(已扣除隐藏、排除的)
+	NodeTotal int    `json:"nodeTotal" gorm:"default:0"` // 解析出的节点总数
+	Cache     string `json:"cache,omitempty"`            // 外部订阅抓取到的内容(主机抓取,随快照下发副机)
+	// ContentSig 解析出的节点列表的指纹(ext.ContentSig):刷新后内容没变就不重写缓存,面板也据此判断展开的列表是否作废。
+	ContentSig string `json:"contentSig,omitempty"`
+	// FetchAgent 上次抓取成功用的客户端身份:这个身份失败时保留旧缓存,别的身份失败不算数(见 ext.Fetch)。
+	FetchAgent string `json:"fetchAgent,omitempty"`
+	// 输出到用户订阅前的筛选与改名。按名字记的是老数据与名字唯一的节点;按指纹(地址、端口、凭据等,见 ext.Node.Key)
+	// 记的不怕刷新后改名、换顺序,同名节点只按指纹记。两者命中其一就算(细则见 ext.Filter)。
+	Hidden     json.RawMessage `json:"hidden,omitempty"`          // 按名字隐藏 [名字]
+	Renames    json.RawMessage `json:"renames,omitempty"`         // 按名字改名 {名字: 新名}
+	HiddenKeys json.RawMessage `json:"hiddenKeys,omitempty"`      // 按指纹隐藏 {指纹: 隐藏时的名字}
+	RenameKeys json.RawMessage `json:"renameKeys,omitempty"`      // 按指纹改名 {指纹: {from: 改名时的名字, to: 新名}}
+	Exclude    string          `json:"exclude"`                   // 名字含这些关键词的不输出,逗号分隔(官网、到期、剩余流量这类信息节点)
+	PrefsRev   int64           `json:"prefsRev" gorm:"default:0"` // 隐藏 / 改名设置的版本号:面板保存时带上,对不上说明别处改过(乐观锁)
 }
 
 // UserExt 用户-外部节点 多对多。
@@ -351,7 +467,7 @@ type Rule struct {
 	// 限到多少 Mbps:0 = 该方向不改
 	UpMbps   int `json:"upMbps"`
 	DownMbps int `json:"downMbps"`
-	// TightenOnly 只升不降:结果不会高于用户自己的限速;关掉后规则值直接覆盖(可用于放宽)
+	// TightenOnly 界面叫「不超过用户自己的限速」:结果不会高于用户自己的限速;关掉后规则值直接覆盖(可用于放宽)
 	TightenOnly bool   `json:"tightenOnly"`
 	Remark      string `json:"remark"`
 	Sort        int    `json:"sort"`
@@ -396,19 +512,85 @@ type Stats struct {
 }
 
 // TrafficCursor 主端:对某副机某用户已计入聚合的单调计数快照。
-// 副机计数器回绕(换机重装)时快照归零重认,保证不重复计、不漏计。
+// 副机计数器比游标小时分两种:主机上同名用户删了又建(副机那本也从头记了)按回绕从 0 计;
+// 同一个用户的计数变小是副机账本回退(断电丢了最近几笔提交、虚机快照回滚),游标对齐、这一次不计。
+// 两者靠游标记下的用户 id 与建号时间区分(老游标为 0 = 不知道,按回退处理,不会整段重算;
+// 建号时间记 -1 表示并账那一刻主机上没有这个用户)。新版副机报了账本主人(AgentCounter.UserId)时记的是账本主人:
+// 主人对不上就是删了又建后新开的一本,从 0 计,不看计数大小;LedgerId 记副机那本账的代号,主人一样、代号不一样
+// 也是新开的一本(账本被整本清掉后同一个人从 0 重开:改名后再改回)。PrevLedgerId 记换下去的上一本的代号:
+// 副机的库回滚到重开之前(虚机快照)报回上一本时按账本回退处理,不当成又重开了一本。
+//
+// 主人、代号这些都是本版主机连同计数一起写的,写时把计数抄进 StampUp / StampDown。老版本主机(0.7.16:升级之前、
+// 回滚期间)只认 up / down 两列:插入的新游标这些列都是 0,已有的只改计数、别的原样留着 —— 那时副机那本可能已经换了。
+// 计数和抄本对不上就是老主机动过,主人、代号都不能信(见 hub.cursorTrusted)。
+// PrevLedgerId2..4 比 PrevLedgerId 更早换下去的几本的代号(越往后越早):同一个人的账本重开过不止一次,
+// 副机的库回滚到更早那本时也认得出是账本回退。
+// Cleared:老副机确认应用了没有这个名字的快照(停用推的空用户表,或者改名、删除之后),这本账已经被它清掉,
+// 之后拉到的报告是从 0 重开的那本,不是账本回退;ClearedAt 是打标记时取的序号(主机给清账标记和拉报告发的同一个严格递增的号,
+// 见 hub.Hub.ledgerSeq;不是时刻 —— 时钟会往回拨,换主机后新主机的钟也可能比原主机慢):拉取序号比它小的报告是清账之前
+// 就在路上的,按增量计、不消耗标记。这个游标按清账之后的报告写一次就清掉。0 = 老格式的标记,只认计数变小。
 type TrafficCursor struct {
-	NodeId   uint   `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
-	UserName string `json:"userName" gorm:"primaryKey"`
-	Up       int64  `json:"up"`
-	Down     int64  `json:"down"`
+	NodeId        uint   `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
+	UserName      string `json:"userName" gorm:"primaryKey"`
+	Up            int64  `json:"up"`
+	Down          int64  `json:"down"`
+	UserId        uint   `json:"userId" gorm:"default:0;not null"`
+	UserCreatedAt int64  `json:"userCreatedAt" gorm:"default:0;not null"`
+	LedgerId      int64  `json:"ledgerId" gorm:"default:0;not null"`
+	PrevLedgerId  int64  `json:"prevLedgerId" gorm:"default:0;not null"`
+	PrevLedgerId2 int64  `json:"prevLedgerId2" gorm:"default:0;not null"`
+	PrevLedgerId3 int64  `json:"prevLedgerId3" gorm:"default:0;not null"`
+	PrevLedgerId4 int64  `json:"prevLedgerId4" gorm:"default:0;not null"`
+	StampUp       int64  `json:"stampUp" gorm:"default:0;not null"`
+	StampDown     int64  `json:"stampDown" gorm:"default:0;not null"`
+	Cleared       bool   `json:"cleared" gorm:"default:false;not null"`
+	ClearedAt     int64  `json:"clearedAt" gorm:"default:0;not null"`
 }
 
 // AgentCounter 副机端:本机每用户只增不减的流量账本(不直接写 User 表,避免与主端下发冲突)。
+// UserId / UserCreatedAt 记这本账是哪个用户的(主机同步下来的 id 与建号时间):同名用户删了又建是另一本账,
+// 主机据此从 0 计,不靠"计数比游标小"去猜。都是 0 = 不知道(升级前就有的账本、或者老版本副机),主机按老办法处理;
+// id 为 0、建号时间为 OwnerAbsent = 记账时本机已经没有这个用户。
+// LedgerId 这本账的代号:新开一本(插入新行、换了主人换一本)时随机取一个,同一本累加时不变。账本被整本清掉后
+// 同一个主人从 0 重开(改名后再改回)主人还是那个人,靠代号认出是另一本。0 = 没有代号(升级前的账本),主机只看主人。
 type AgentCounter struct {
-	UserName string `json:"userName" gorm:"primaryKey"`
-	Up       int64  `json:"up"`
-	Down     int64  `json:"down"`
+	UserName      string `json:"userName" gorm:"primaryKey"`
+	Up            int64  `json:"up"`
+	Down          int64  `json:"down"`
+	UserId        uint   `json:"userId,omitempty" gorm:"default:0;not null"`
+	UserCreatedAt int64  `json:"userCreatedAt,omitempty" gorm:"default:0;not null"`
+	LedgerId      int64  `json:"ledgerId,omitempty" gorm:"default:0;not null"`
+}
+
+// NodeDecommission 停用 / 删除副机时还没送到的下线推送(一份空用户表):主机每轮重试,直到那台确认。
+// 删掉的副机在 nodes 表里已经没有了,所以地址、令牌、证书指纹和要推的那份快照都记在这里;令牌不出接口。
+type NodeDecommission struct {
+	NodeId    uint   `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
+	Name      string `json:"name"`
+	ApiUrl    string `json:"-"`
+	Token     string `json:"-"`
+	Insecure  bool   `json:"-"`
+	CertFP    string `json:"-"`
+	Revision  string `json:"revision"`
+	Snapshot  []byte `json:"-"` // 要推的快照(JSON),selfNodeId 已经是这台
+	CreatedAt int64  `json:"createdAt"`
+	Attempts  int    `json:"attempts"`
+	LastTry   int64  `json:"lastTry"`
+	LastError string `json:"lastError"`
+}
+
+// PageLogo 落地页 logo:ResellerId 0 = 主面板,> 0 = 那个代理(他名下用户的落地页用它);每个归属最多一张。
+// 存在库里而不是文件:随 VACUUM INTO 进备份,随快照下发副机(副机的订阅口也出落地页)。
+// 只存 PNG / JPEG / GIF(服务端解码校验过);SVG 在浏览器里先转成 PNG 再传,服务端从不存、也从不输出用户的 SVG。
+type PageLogo struct {
+	Id         uint   `json:"id" gorm:"primaryKey;autoIncrement"`
+	ResellerId uint   `json:"resellerId" gorm:"uniqueIndex;not null"` // 不加 default:0:带默认值的零值列 gorm 建行时会省略,0 号(主面板)这一行就靠库的默认值了
+	Mime       string `json:"mime"`                                   // image/png | image/jpeg | image/gif
+	Data       []byte `json:"data"`                                   // 图片原样字节,≤ 64 KB
+	Sum        string `json:"sum"`                                    // sha256 前 8 字节的十六进制:落地页地址里的版本号、ETag
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
+	UpdatedAt  int64  `json:"updatedAt"`
 }
 
 // Change 审计日志。
@@ -420,6 +602,16 @@ type Change struct {
 	Action   string          `json:"action"`
 	Obj      json.RawMessage `json:"obj"`
 }
+
+// 定时任务写审计时用的执行者名(jobs 的流量重置 / 用尽停用、规则引擎)。概况「最近操作」的「人工」档按这份名单排除。
+const (
+	ActorResetJob   = "ResetJob"
+	ActorDepleteJob = "DepleteJob"
+	ActorRuleJob    = "RuleJob"
+)
+
+// JobActors 全部定时任务执行者名(新加任务时一并加进来)。
+var JobActors = []string{ActorResetJob, ActorDepleteJob, ActorRuleJob}
 
 // All 供 AutoMigrate 使用。
 // ReachCheck 一次大陆连通检测(每台服务器只留最近几十条)。Detail 是完整结果的 JSON,界面展开明细时用。
@@ -437,6 +629,6 @@ func All() []interface{} {
 		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
-		&ReachCheck{}, &Cert{},
+		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{}, &PageLogo{},
 	}
 }

@@ -197,3 +197,16 @@ func TestDailyReportCountsRemoteUpstreams(t *testing.T) {
 		t.Fatalf("日报应合计副机的巡检结果:\n%s", txt)
 	}
 }
+
+// 日报带上证书一行:正用着的证书里 30 天内到期的、自动续期在失败的、要手动续期的;都没有就不出这一行。
+func TestDailyReportIncludesCerts(t *testing.T) {
+	m, _, _ := setup(t, nil)
+	m.d.CertSummary = func() CertSummary { return CertSummary{} }
+	if txt := m.DailyReport(); strings.Contains(txt, "证书:") {
+		t.Fatalf("没有要说的证书时不出这一行:\n%s", txt)
+	}
+	m.d.CertSummary = func() CertSummary { return CertSummary{Expiring: 3, Failing: 1, Manual: 1} }
+	if txt := m.DailyReport(); !strings.Contains(txt, "证书:30 天内到期 3 张,自动续期失败 1 张,要手动续期 1 张") {
+		t.Fatalf("日报缺证书一行:\n%s", txt)
+	}
+}

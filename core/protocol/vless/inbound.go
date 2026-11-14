@@ -24,6 +24,8 @@ import (
 	"github.com/sagernet/sing/common/logger"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
+
+	"github.com/Maoyangui/m-ui/core/protocol/arrival"
 )
 
 func RegisterInbound(registry *inbound.Registry) {
@@ -41,14 +43,18 @@ type Inbound struct {
 	service   *vless.Service[string]
 	tlsConfig tls.ServerConfig
 	transport adapter.V2RayServerTransport
+	arrivals  arrival.Recorder // 握手 / 认证没过的记到"最近入站连接"(只记,不影响放行)
+	reality   bool             // TLS 是 REALITY:握手失败时要看客户端发没发过 TLS 记录(见 arrival.Watch)
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.VLESSInboundOptions) (adapter.Inbound, error) {
 	inbound := &Inbound{
-		Adapter: inbound.NewAdapter(C.TypeVLESS, tag),
-		ctx:     ctx,
-		router:  uot.NewRouter(router, logger),
-		logger:  logger,
+		Adapter:  inbound.NewAdapter(C.TypeVLESS, tag),
+		ctx:      ctx,
+		arrivals: arrival.FromContext(ctx),
+		reality:  options.TLS != nil && options.TLS.Reality != nil && options.TLS.Reality.Enabled,
+		router:   uot.NewRouter(router, logger),
+		logger:   logger,
 	}
 	var err error
 	inbound.router, err = mux.NewRouterWithOptions(inbound.router, logger, common.PtrValueOrDefault(options.Multiplex))
@@ -146,18 +152,24 @@ func (h *Inbound) Close() error {
 
 func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	if h.tlsConfig != nil && h.transport == nil {
-		tlsConn, err := tls.ServerHandshake(ctx, conn, h.tlsConfig)
+		hsConn, watched := arrival.Watch(conn, h.reality)
+		tlsConn, err := tls.ServerHandshake(ctx, hsConn, h.tlsConfig)
 		if err != nil {
 			N.CloseOnHandshakeFailure(conn, onClose, err)
 			h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source, ": TLS handshake"))
+			arrival.NoteTLS(h.arrivals, watched, metadata.Source, h.Tag(), h.Type(), err) // 到了,但证书 / SNI / REALITY 不对(连上就断的探测不记)
 			return
 		}
 		conn = tlsConn
 	}
+	ctx, mark := arrival.WithMark(ctx)
 	err := h.service.NewConnection(adapter.WithContext(ctx, &metadata), conn, metadata.Source, onClose)
 	if err != nil {
 		N.CloseOnHandshakeFailure(conn, onClose, err)
 		h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source))
+		if !mark.Passed() { // 没进到路由:密码 / UUID 不对,或不是这个协议的客户端
+			arrival.Note(h.arrivals, metadata.Source, h.Tag(), h.Type(), arrival.Auth, err)
+		}
 	}
 }
 
@@ -169,6 +181,7 @@ func (h *Inbound) newConnectionEx(ctx context.Context, conn net.Conn, metadata a
 		N.CloseOnHandshakeFailure(conn, onClose, os.ErrInvalid)
 		return
 	}
+	arrival.Pass(ctx)
 	if user != "" {
 		metadata.User = user
 	}
@@ -184,6 +197,7 @@ func (h *Inbound) newPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 		N.CloseOnHandshakeFailure(conn, onClose, os.ErrInvalid)
 		return
 	}
+	arrival.Pass(ctx)
 	if user != "" {
 		metadata.User = user
 	}
@@ -205,6 +219,7 @@ func (h *inboundTransportHandler) NewConnectionEx(ctx context.Context, conn net.
 	var metadata adapter.InboundContext
 	metadata.Source = source
 	metadata.Destination = destination
+	// 跟随上游 sing-box:InboundDetour 已被上游标为弃用但仍在用,等上游删字段时一起改。
 	//nolint:staticcheck
 	metadata.InboundDetour = h.listener.ListenOptions().Detour
 	//nolint:staticcheck

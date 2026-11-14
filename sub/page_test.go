@@ -58,6 +58,14 @@ func TestBuildPage(t *testing.T) {
 	if len(d.Imports) != 6 || !strings.HasPrefix(string(d.Imports[0].Href), "godusevpn://import?url=https%3A%2F%2Fsub.example") || d.Imports[0].Name != "佛跳墙" {
 		t.Fatalf("佛跳墙应排在第一个: %+v", d.Imports)
 	}
+	// 平台提示与佛跳墙实际登记了 godusevpn:// 的平台一致:Windows(安装包写注册表)、macOS(.app 的 Info.plist)、
+	// 安卓与电视(AndroidManifest);Linux 版没登记,不写
+	if d.Imports[0].Hint != "Windows · macOS · Android · 电视" {
+		t.Fatalf("佛跳墙的平台提示不符: %q", d.Imports[0].Hint)
+	}
+	if en := buildPageData(httptest.NewRequest("GET", "http://sub.example:2056/sub/alice", nil), "/sub/", u.Name, u, lines, Options{}, "m", "", ""); en.Imports[0].Hint != "Windows · macOS · Android · TV" {
+		t.Fatalf("英文页佛跳墙的平台提示不符: %q", en.Imports[0].Hint)
+	}
 	if !strings.HasPrefix(string(d.Imports[1].Href), "clash://install-config?url=https%3A%2F%2Fsub.example") || !strings.HasPrefix(string(d.Imports[4].Href), "sing-box://import-remote-profile?url=") || d.SubJSON != "https://sub.example:2056/sub/alice?format=json" {
 		t.Fatalf("导入链接不符: %+v", d.Imports)
 	}

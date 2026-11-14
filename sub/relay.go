@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/Maoyangui/m-ui/database/model"
@@ -79,10 +80,86 @@ func RelayProblem(db *gorm.DB, up model.Upstream) string {
 	if !line.Enabled {
 		return errors.New("这条线路已停用").Error()
 	}
-	if _, err := RelayOutbound(db, up, line); err != nil {
+	p, err := RelayOutbound(db, up, line)
+	if err != nil {
 		return err.Error()
 	}
-	return ""
+	server, _ := p.Options["server"].(string)
+	return relayFamilyProblem(db, up, server)
+}
+
+// relayFamilyProblem 入口机连不连得上目标地址(按地址族):用这条上游的线路部署在哪些服务器上(入口机),
+// 就从那里直接连目标线路在所选服务器上的地址 —— 和订阅同一套,目标线路在那台单独选了 IPv6(或那台默认给 IPv6)时连的是 IPv6。
+// 入口机没有 IPv6 就连不上;反过来入口机只有 IPv6、目标给的是 IPv4 也一样。以前这种情况显示正常,用的人只看到断网。
+// 入口机有没有某一族看它探测到的公网地址(出站探测得到的,正好说明能不能往外连);还没上报过的不下结论。目标是域名时由入口机自己解析,不管。
+func relayFamilyProblem(db *gorm.DB, up model.Upstream, server string) string {
+	ip := net.ParseIP(model.BareHost(server))
+	if ip == nil {
+		return ""
+	}
+	want6 := ip.To4() == nil
+	var bad []string
+	for _, n := range relayEntryNodes(db, up.Id) {
+		has4, has6, known := egressFamilies(db, n)
+		if known && (want6 && !has6 || !want6 && !has4) {
+			bad = append(bad, n.Name)
+		}
+	}
+	if len(bad) == 0 {
+		return ""
+	}
+	var target model.Node
+	db.Select("id, name").First(&target, up.FromNode)
+	if want6 {
+		return fmt.Errorf("目标线路在「%s」上给的是 IPv6 地址,入口服务器「%s」没有 IPv6,连不上:把目标线路在那台服务器的 IP 版本改成 IPv4,或给入口服务器配好 IPv6",
+			target.Name, strings.Join(bad, "、")).Error()
+	}
+	return fmt.Errorf("目标线路在「%s」上给的是 IPv4 地址,入口服务器「%s」只有 IPv6,连不上:把目标线路在那台服务器的 IP 版本改成 IPv6,或给入口服务器配好 IPv4",
+		target.Name, strings.Join(bad, "、")).Error()
+}
+
+// relayEntryNodes 用这条上游(直接选的、分流规则指向的、经上游组用到的)的启用线路部署在哪些启用的服务器上。
+func relayEntryNodes(db *gorm.DB, upID uint) []model.Node {
+	var lines []model.Line
+	db.Where("enabled = ?", true).Find(&lines)
+	var all []model.Upstream
+	db.Select("id, name, type, options").Find(&all)
+	var users []model.Line
+	for _, l := range lines {
+		for _, id := range render.ExpandIDs(render.LineUpstreams(l), all) {
+			if id == upID {
+				users = append(users, l)
+				break
+			}
+		}
+	}
+	if len(users) == 0 {
+		return nil
+	}
+	var nodes []model.Node
+	db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&nodes)
+	var out []model.Node
+	for _, n := range nodes {
+		for _, l := range users {
+			if render.LineOnNode(l, n.Id) {
+				out = append(out, n)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// egressFamilies 这台能不能往外连 IPv4 / IPv6:看它探测到的公网地址(本机读设置,副机看上报的)。
+// 两个都没有 = 还没上报过(老版本副机、刚加的),known 为 false。
+func egressFamilies(db *gorm.DB, n model.Node) (has4, has6, known bool) {
+	pub, pub6 := n.PublicIP, n.PublicIP6
+	if n.IsLocal {
+		db.Raw("SELECT value FROM settings WHERE key = ?", "publicIp").Scan(&pub)
+		db.Raw("SELECT value FROM settings WHERE key = ?", "publicIp6").Scan(&pub6)
+	}
+	v4, v6 := model.FamilyIPs("", pub, pub6)
+	return v4 != "", v6 != "", v4 != "" || v6 != ""
 }
 
 // SyncRelayUpstreams 线路的端口、凭据参数、服务器地址变了,上游跟着改。返回有没有改动;算不出来的(线路停用、服务器下线)

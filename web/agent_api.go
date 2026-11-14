@@ -7,17 +7,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ha"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/monitor"
 	"github.com/Maoyangui/m-ui/selfupdate"
+
+	"gorm.io/gorm"
 )
 
 // ---- 副机端:供主机调用的接口(令牌鉴权,不走会话) ----
@@ -37,9 +43,15 @@ func (s *Server) nodeToken() (string, error) {
 	return tok, nil
 }
 
+// agentAuth 主机调用副机接口的鉴权,顺序是 令牌 → 纪元 → 副机模式。
+// 接任后的主机也保留自己当副机时的令牌:原主机回来后带着旧纪元来请求,收到的是 409 stale_epoch(它据此变为副机)而不是 403。
+// 没开过容灾(本机纪元为 0、请求也不带纪元)时和以前一样:不是副机就 403,令牌错 401。
 func (s *Server) agentAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !strings.EqualFold(s.setting("nodeMode"), "true") {
+		isNode := strings.EqualFold(s.setting("nodeMode"), "true")
+		h := s.haSvc()
+		haActive := h != nil && (r.Header.Get(ha.HeaderEpoch) != "" || h.Epoch() > 0)
+		if !isNode && (!haActive || s.setting("nodeToken") == "") {
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "本机不是副机(设置里未开启副服务器模式)"})
 			return
 		}
@@ -54,8 +66,31 @@ func (s *Server) agentAuth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "令牌错误"})
 			return
 		}
+		if haActive {
+			action := strings.TrimPrefix(r.URL.Path, innerBase+"api/agent/")
+			if rej := h.CheckAgent(r.Header, action); rej != nil {
+				w.Header().Set(ha.HeaderNode, strconv.FormatUint(h.Epoch(), 10))
+				writeJSON(w, http.StatusConflict, rej)
+				return
+			}
+			w.Header().Set(ha.HeaderNode, strconv.FormatUint(h.Epoch(), 10))
+		}
+		if !isNode {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "本机不是副机(设置里未开启副服务器模式)"})
+			return
+		}
+		// 配对令牌只有主机手里有:带对令牌、纪元判定也过了的请求才是当前主机来的(已被接任的旧主机带旧纪元来,上面就 409 了)。副机概况据此显示"主机多久没联系本机"
+		s.hubSeenAt.Store(time.Now().Unix())
 		next(w, r)
 	}
+}
+
+// haSvc 本机的容灾服务(测试里拼出来的 Server 可能没有)。
+func (s *Server) haSvc() *ha.Service {
+	if s.run == nil {
+		return nil
+	}
+	return s.run.HA()
 }
 
 func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +103,7 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 	case "ping":
 		s.agentAuth(s.handleAgentPing)(w, r)
 	case "apply":
-		s.agentAuth(s.handleAgentApply)(w, r)
+		s.agentAuth(s.handleAgentApplyRecorded)(w, r)
 	case "report":
 		s.agentAuth(s.handleAgentReport)(w, r)
 	case "external-ips":
@@ -81,6 +116,16 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentUpstreamCheck)(w, r)
 	case "outbound-test": // 主机让本机实测一个临时出站(外部订阅展开后的逐台测速),不落库
 		s.agentAuth(s.handleAgentOutboundTest)(w, r)
+	case "ha/state": // 主机推来的容灾状态(纪元、备用名单、暂停、交接标记……)
+		s.agentAuth(s.handleAgentHAState)(w, r)
+	case "ha/replica": // 备用:收下主机推来的加密副本
+		s.agentAuth(s.handleAgentHAReplica)(w, r)
+	case "ha/drop": // 不再是备用:删掉手里的副本
+		s.agentAuth(s.handleAgentHADrop)(w, r)
+	case "ha/leave": // 主机删除了本机:退出集群(纪元清零,副本与备用密钥删掉)
+		s.agentAuth(s.handleAgentHALeave)(w, r)
+	case "ha/prepare", "ha/handover", "ha/commit", "ha/abort", "ha/incoming": // 本机被设为主机的各步
+		s.agentAuth(s.handleAgentHASwitch)(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -114,6 +159,12 @@ func (s *Server) handleAgentRotate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		return
 	}
+	// 换令牌就是重新配对:副机退出原来的容灾集群(纪元清零、副本与备用密钥删掉),新主机配上来时从头认
+	if h := s.haSvc(); h != nil && strings.EqualFold(s.setting("nodeMode"), "true") {
+		if err := h.LeaveCluster(); err != nil {
+			logger.Warning("换令牌后退出容灾集群失败: ", err)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"token": tok})
 }
 
@@ -138,7 +189,7 @@ func (s *Server) handleAgentPing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"version": Version, "role": s.role(), "hostname": host,
 		"coreRunning": s.run.CoreRunning(), "uptime": s.run.Uptime(),
-		"revision": s.setting("hubRevision"), "certDays": s.run.CertInfo().DaysLeft,
+		"revision": s.setting("hubRevision"), "certDays": s.run.CertDaysInUse(),
 	})
 }
 
@@ -155,8 +206,8 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		return
 	}
-	var snap hub.Snapshot
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<20)).Decode(&snap); err != nil {
+	snap, err := hub.DecodeSnapshot(w, r) // 新主机发 gzip 压缩的,老主机发不压缩的;解压后最多 512 MiB
+	if err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -165,8 +216,9 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if snap.MinNode != "" && selfupdate.Newer(snap.MinNode, Version) {
-		// 主机的快照里有本机不认识的字段(比如停用原因、代理额度标志):应用了也是错的,直接拒绝并说清楚
-		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("副机版本 v%s 低于主机要求的 v%s,请先升级这台副机", Version, snap.MinNode)})
+		// 主机的快照里有本机不认识的字段(比如停用原因、代理额度标志):应用了也是错的,直接拒绝并说清楚。
+		// 这句现在也显示在本机概况的「与主机同步」上,写成 fmt.Errorf 让 errmsg 测试能扫到、英文界面有译文
+		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Errorf("副机版本 v%s 低于主机要求的 v%s,请先升级这台副机", Version, snap.MinNode).Error()})
 		return
 	}
 	if s.run == nil {
@@ -175,9 +227,20 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 	}
 	s.agentApplyMu.Lock()
 	defer s.agentApplyMu.Unlock()
+	// 排队等上一份应用完的时候主机可能已经放弃了这次请求(超时、停机):不再整表重写,下一轮它会带着最新的那份再来
+	if r.Context().Err() != nil {
+		logger.Info("主机已经放弃了这次推送(", snap.Revision, "),不再应用")
+		return
+	}
 	var previousPending string
 	if err := s.db.Model(&model.Setting{}).Select("value").Where("key = ?", "hubReloadPending").Scan(&previousPending).Error; err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "读取副机待重载状态失败: " + err.Error()})
+		return
+	}
+	// 同一修订、同一序号已经完整应用过(库里是它、数据面也应用成功了、没有待踢线):直接确认,不再整表删了重插、重载一遍。
+	// 主机等确认超时后的重推、每 10 分钟一次的定期重推都会这样;以前每次都整表重写,大库上几十秒,WAL 跟着涨
+	if s.agentAlreadyApplied(snap, previousPending) {
+		writeJSON(w, http.StatusOK, hub.ApplyOK(snap.Revision))
 		return
 	}
 	revoked, err := hub.RevokedSharesChecked(s.db, snap)
@@ -214,9 +277,14 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	// ================= D. 本机账本只增不删:主机已经不认识的用户,它的计数器没人再回收,清掉 =================
-	// 主机那边的游标还留着;同名用户以后再建,计数从 0 起小于游标,会被当成回绕重认,不会多算
-	s.db.Exec("DELETE FROM agent_counters WHERE user_name NOT IN (SELECT name FROM users)")
+	// ================= D. 本机账本只增不删:主机已经不认识的用户(或者同名的已经换了人),它的计数器没人再回收,清掉 =================
+	// 主机那边的游标还留着,记着是谁的那本;同名用户以后再建,新账本记着新主人,主机按主人认出来从 0 计。
+	// 停用推来的空用户表不清(见 PruneAgentCounters):停用前还没报上去的那段等重新启用后照常报。
+	// 确认时回 ledgerKept(hub.ApplyOK)告诉主机这一点 —— 老副机会整本清掉,主机据此区分(见 hub.markLedgerCleared)。
+	// 改名后原名那本只在主机按账本主人计费(0.7.17 起)时留着;老主机只认名字,照旧按名字清
+	if err := model.PruneAgentCounters(s.db, hub.MasterBillsByOwner(snap.Version)); err != nil {
+		logger.Warning("清理本机账本里主机已删的用户失败(下次应用快照再清): ", err)
+	}
 	// 配置接口只有在本机数据面真正应用完成后才确认 revision。这样主机
 	// 看到 HTTP 错误会保留重试机会，而不是把“请求已收到”误当成“已生效”。
 	// 数据库快照先落地、数据面后重载。若重载失败，保留一个只在本机使用的
@@ -291,8 +359,61 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "清除副机待踢线状态失败: " + err.Error()})
 		return
 	}
+	if err := s.run.SetSetting(agentAppliedKey, agentAppliedStamp(snap)); err != nil {
+		// 不影响这次确认:没记下来,同一份快照再来时整份重做一遍而已
+		logger.Warning("记录本版程序已应用快照 ", snap.Revision, " 失败: ", err)
+	}
 	logger.Info("已应用主机配置 ", snap.Revision, "(线路变化: ", linesChanged, ",上游变化: ", upsChanged, ")")
-	writeJSON(w, http.StatusOK, map[string]string{"ok": "1", "revision": snap.Revision})
+	writeJSON(w, http.StatusOK, hub.ApplyOK(snap.Revision))
+}
+
+// agentAlreadyApplied 这份快照是不是已经完整应用过:没有待重载、数据面在跑,库里也正是它(见 agentSnapshotInDB)。
+// 老主机不发序号(0),不走这条捷径。
+func (s *Server) agentAlreadyApplied(snap hub.Snapshot, pendingReload string) bool {
+	if snap.Sequence == 0 || strings.TrimSpace(pendingReload) != "" || !s.run.CoreRunning() {
+		return false
+	}
+	return agentSnapshotInDB(s.db, snap)
+}
+
+// agentAppliedKey 记下"哪一版程序完整应用了哪一份快照"(见 agentAppliedStamp)。
+//
+// 旧版程序收快照时会丢掉自己不认识的字段(比如落地页 logo),修订号和序号却照写:只比这两项的话,副机升级以后
+// 主机重推的同一份快照永远被当成"已经应用过",新字段一直落不了库,主机那边还显示已同步。
+// 旧版不写这个键,所以升级后、降级期间收过新快照再升回来、换了任何版本,第一份快照都会整份应用一次。
+const agentAppliedKey = "hubAppliedBy"
+
+func agentAppliedStamp(snap hub.Snapshot) string {
+	return Version + "#" + snap.Revision + "#" + strconv.FormatUint(snap.Sequence, 10)
+}
+
+// agentSnapshotInDB 库里是不是已经是这份快照:修订号、序号一样且是本版程序完整应用的,没有待踢线,本机 id 一样,
+// 落地页 logo 也和快照里的一张不差(旧版主机不发 logo = 一张都没有)。
+func agentSnapshotInDB(db *gorm.DB, snap hub.Snapshot) bool {
+	var rows []model.Setting
+	if err := db.Where("key IN ?", []string{"hubRevision", "hubSnapshotSequence", agentKickPendingKey, agentAppliedKey}).Find(&rows).Error; err != nil {
+		return false
+	}
+	have := map[string]string{}
+	for _, row := range rows {
+		have[row.Key] = row.Value
+	}
+	if have["hubRevision"] != snap.Revision || have["hubSnapshotSequence"] != strconv.FormatUint(snap.Sequence, 10) ||
+		have[agentAppliedKey] != agentAppliedStamp(snap) || strings.TrimSpace(have[agentKickPendingKey]) != "" {
+		return false
+	}
+	var self []uint
+	if err := db.Model(&model.Node{}).Where("is_local = ?", true).Pluck("id", &self).Error; err != nil {
+		return false
+	}
+	if len(self) != 1 || self[0] != snap.SelfNodeId {
+		return false
+	}
+	var logos []model.PageLogo
+	if err := db.Select("reseller_id", "sum").Find(&logos).Error; err != nil {
+		return false
+	}
+	return hub.LogosMatch(logos, snap.Logos)
 }
 
 // kickBestEffort 本机能踢多少踢多少,不因为副机没确认就一个都不踢。只在"配置应用失败"那条路上用。
@@ -356,15 +477,36 @@ func (s *Server) saveAgentKicks(names []string) error {
 }
 
 func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
+	// 账本连同纪元一次读出:读失败就整份报错,不报一本空账(纪元新的时候主机会只记下纪元、不建基线,下一份就把整本当增量)
+	ledger, err := hub.LocalLedger(s.db)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "读取本机流量账本失败: " + err.Error()})
+		return
+	}
 	host, _ := os.Hostname()
 	rep := hub.Report{
 		Version: Version, Hostname: host, CoreRunning: s.run.CoreRunning(), Uptime: s.run.Uptime(),
 		Revision: s.setting("hubRevision"), ReloadPending: strings.TrimSpace(s.setting("hubReloadPending")) != "",
-		Onlines: map[string][]string{}, CertDays: s.run.CertInfo().DaysLeft, Certs: s.run.CertBriefs(),
-		PublicIP:    s.setting("publicIp"),
-		PublicIP6:   s.setting("publicIp6"),
-		Conns:       s.recentConns(50),
-		LedgerEpoch: s.setting(hub.LedgerEpochKey),
+		Onlines: map[string][]string{}, CertDays: s.run.CertDaysInUse(), Certs: s.run.CertBriefs(),
+		PublicIP:     s.setting("publicIp"),
+		PublicIP6:    s.setting("publicIp6"),
+		Conns:        s.recentConns(50),
+		ConnFails:    s.recentFails(30),
+		ConnFailsOK:  true,
+		LedgerEpoch:  ledger.Epoch,
+		LedgerFresh:  ledger.Fresh,
+		LedgerKept:   true, // 应用快照不整本清账:主机等确认超时、看报告确认时据此知道不用打清账标记
+		Counters:     ledger.Counters,
+		ServicePorts: s.reportServicePorts(),
+		KickPending:  strings.TrimSpace(s.setting(agentKickPendingKey)) != "",
+		ApplyGzip:    true, // 本机收得了 gzip 压缩的快照
+		LedgerFails:  s.run.LedgerFailures(),
+	}
+	if seq, err := strconv.ParseUint(s.setting("hubSnapshotSequence"), 10, 64); err == nil {
+		rep.Sequence = seq
+	}
+	if h := s.haSvc(); h != nil {
+		rep.HA = h.Report() // 版本、磁盘、角色;进过纪元的还有备用公钥、手里的副本、租约
 	}
 	rep.OnlineLinesByIP = s.run.OnlineIPLines()
 	rep.Groups = s.run.GroupState()
@@ -375,7 +517,6 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		rep.Upstreams = append(rep.Upstreams, hub.UpstreamHealth{Id: h.Id, Name: h.Name, OK: h.OK,
 			DelayMs: h.DelayMs, Method: h.Method, Error: h.Error, CheckedAt: h.CheckedAt, Fails: h.Fails})
 	}
-	s.db.Find(&rep.Counters)
 	o := s.run.Onlines()
 	allIPs := s.run.OnlineIPsAll() // 一次锁拿全量,不按用户逐个抢数据面的锁
 	for _, u := range o.Users {
@@ -391,9 +532,12 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rep)
 }
 
+// externalIPsLimit 外部设备租约请求体的上限:有设备数限制的用户 × 几个 IP,几万用户也就几 MB。
+var externalIPsLimit int64 = 32 << 20
+
 func (s *Server) handleAgentExternalIPs(w http.ResponseWriter, r *http.Request) {
 	var m map[string][]string
-	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, externalIPsLimit)).Decode(&m); err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -469,7 +613,8 @@ func (s *Server) handleAgentOutboundTest(w http.ResponseWriter, r *http.Request)
 	if up.Name == "" {
 		up.Name = "ext-test"
 	}
-	ok, ms, meth, errStr := s.run.CheckUpstream(up)
+	// 只有外部节点测速用这个接口:直接起临时实例测(不在数据面里找同名出站),method "config" = 出站建不起来、测不了
+	ok, ms, meth, errStr := s.run.TestOutbound(r.Context(), up)
 	writeJSON(w, http.StatusOK, hub.UpstreamHealth{Name: up.Name, OK: ok, DelayMs: ms, Method: meth, Error: errStr, CheckedAt: time.Now().Unix()})
 }
 
@@ -487,4 +632,190 @@ func (s *Server) handleAgentUpstreamCheck(w http.ResponseWriter, r *http.Request
 			Method: h.Method, Error: h.Error, CheckedAt: h.CheckedAt, Fails: h.Fails})
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// reportServicePorts 副机随报告上报自己监听的服务端口:配置值,外加正在监听、但配置已改(等重启)的旧端口。
+// 副机不起代理面板(StartReseller),不报它。
+func (s *Server) reportServicePorts() []model.ServicePort {
+	out := []model.ServicePort{{Label: "面板", Port: s.settingInt("webPort", 2053)}, {Label: "订阅", Port: s.settingInt("subPort", 2056)}}
+	if s.listener != nil {
+		if a, ok := s.listener.Addr().(*net.TCPAddr); ok && a.Port != out[0].Port {
+			out = append(out, model.ServicePort{Label: "面板", Port: a.Port})
+		}
+	}
+	return out
+}
+
+// handleAgentHAState 收下主机推来的容灾状态(纪元已在 agentAuth 里对齐)。
+func (s *Server) handleAgentHAState(w http.ResponseWriter, r *http.Request) {
+	if !haAgentLimiter.allow(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	h := s.haSvc()
+	if h == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
+		return
+	}
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	if err := h.ReceiveState(r.Header, raw); err != nil { // 只收主机签过名的(本纪元钉住的那把公钥)
+		badRequest(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// handleAgentHALeave 主机删除了本机(纪元判定已在 agentAuth 里过了;正文要当前主机签名):退出容灾集群。
+func (s *Server) handleAgentHALeave(w http.ResponseWriter, r *http.Request) {
+	if !haAgentLimiter.allow(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	h := s.haSvc()
+	if h == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
+		return
+	}
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	if err := h.LeaveSigned(raw); err != nil { // 只认主机签过名的(本纪元钉住的那把公钥):只拿到副机令牌的人清不掉本机的纪元
+		badRequest(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// handleAgentHAReplica 备用收下主机推来的副本(只有一个写入方,写独立文件,不碰本机库)。
+func (s *Server) handleAgentHAReplica(w http.ResponseWriter, r *http.Request) {
+	if !haAgentLimiter.allow(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	h := s.haSvc()
+	if h == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
+		return
+	}
+	seq, err := h.ReceiveReplica(http.MaxBytesReader(w, r.Body, ha.MaxReplica+(1<<20)))
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "seq": seq})
+}
+
+// handleAgentHADrop 主机说本机不再是备用(正文要当前主机签名):删掉手里的副本。
+func (s *Server) handleAgentHADrop(w http.ResponseWriter, r *http.Request) {
+	if !haAgentLimiter.allow(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	h := s.haSvc()
+	if h == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
+		return
+	}
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	if err := h.DropSigned(raw); err != nil { // 只认主机签过名的
+		badRequest(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// handleAgentHASwitch 本机被设为主机的各步(令牌鉴权 + 纪元规则已在 agentAuth 里过了):
+//
+//	ha/prepare   给出一次性公钥,检查能不能接手
+//	ha/handover  收整库数据(用那把一次性公钥加密的),组好新库暂存
+//	ha/commit    提交:下次启动换上新库,马上重启
+//	ha/abort     原主机说不做了:丢掉暂存
+//	ha/incoming  暂存到了哪一步(原主机提交没回话时来问)
+func (s *Server) handleAgentHASwitch(w http.ResponseWriter, r *http.Request) {
+	if !haAgentLimiter.allow(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+		return
+	}
+	h := s.haSvc()
+	if h == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
+		return
+	}
+	action := strings.TrimPrefix(r.URL.Path, innerBase+"api/agent/ha/")
+	if action == "incoming" {
+		writeJSON(w, http.StatusOK, map[string]string{"stage": h.IncomingStage()})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	var nonce struct {
+		Nonce string `json:"nonce"`
+	}
+	switch action {
+	case "prepare":
+		var req ha.PrepareRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+			badRequest(w, err)
+			return
+		}
+		rep, err := h.Prepare(req)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, rep)
+	case "handover":
+		st, err := h.ReceiveBundle(http.MaxBytesReader(w, r.Body, ha.MaxBundle+(1<<20)))
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "users": st.Users})
+	case "commit", "abort":
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&nonce); err != nil {
+			badRequest(w, err)
+			return
+		}
+		var err error
+		if action == "commit" {
+			err = h.Commit(nonce.Nonce)
+		} else {
+			err = h.Abort(nonce.Nonce)
+		}
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+	default:
+		http.NotFound(w, r)
+	}
 }

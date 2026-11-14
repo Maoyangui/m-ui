@@ -47,6 +47,12 @@ func ValidateConfig(raw []byte) error {
 	return nil
 }
 
+// HoldValidation 占住干跑锁,直到调用返回的函数。给别的包的测试模拟"别的干跑 / 临时实例正占着它"用。
+func HoldValidation() (release func()) {
+	validateMu.Lock()
+	return validateMu.Unlock
+}
+
 // ValidateOutbound 隔离校验单个出站:只把它和 direct 放进一份最小配置干跑,
 // 不受其他对象或证书状态影响。用于保存上游前拦住会拖垮数据面的坏配置。
 func ValidateOutbound(outbound json.RawMessage) error {

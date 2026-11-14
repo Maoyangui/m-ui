@@ -2,16 +2,22 @@ package sub
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/upstream"
 )
 
-// httpLink 把本站 http / https 线路的链接(http://user:pass@host:port#name)转成 sing-box http 出站。
+// httpLink 把本站 http / https 线路的链接(http(s)://user:pass@host:port[?sni=&allowInsecure=1]#name)转成 sing-box http 出站。
+// https 的 server_name 取 sni / peer(没有用主机名),"允许不安全"认 insecure / allowInsecure / allow_insecure / skip-cert-verify
+// 几种常见写法 —— 和 trojan、hy2 等其它 TLS 节点一样,自签证书时带上 tls.insecure。
 func httpLink(raw string) *upstream.Parsed {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
@@ -34,20 +40,72 @@ func httpLink(raw string) *upstream.Parsed {
 		}
 	}
 	if u.Scheme == "https" {
-		opts["tls"] = map[string]interface{}{"enabled": true, "server_name": u.Hostname()}
+		q := u.Query()
+		sni := q.Get("sni")
+		if sni == "" {
+			sni = q.Get("peer")
+		}
+		if sni == "" {
+			sni = u.Hostname()
+		}
+		tls := map[string]interface{}{"enabled": true, "server_name": sni}
+		for _, k := range []string{"insecure", "allowInsecure", "allow_insecure", "skip-cert-verify"} {
+			switch strings.ToLower(q.Get(k)) {
+			case "1", "true", "yes":
+				tls["insecure"] = true
+			}
+		}
+		opts["tls"] = tls
 	}
 	return &upstream.Parsed{Type: "http", Name: u.Fragment, Options: opts}
+}
+
+var (
+	badLinkMu     sync.Mutex
+	badLinkWarned = map[string]time.Time{}
+)
+
+// warnBadOwnLink 本站线路生成的链接 sing-box 那边解析不了(多半是线路的自定义地址写坏了,比如老数据里的 [v6]):
+// 这个节点写不进配置。以前静默跳过,用户只看到少了一个节点,面板毫无提示。
+// 链接里有凭据:日志只记节点名(# 后面)、协议和去掉了原链接的原因;同一个节点一小时只记一次(客户端会定时刷订阅)。
+func warnBadOwnLink(link string, err error) {
+	scheme, name := "", ""
+	if i := strings.Index(link, "://"); i > 0 {
+		scheme = link[:i]
+	}
+	if i := strings.LastIndex(link, "#"); i >= 0 {
+		name, _ = url.PathUnescape(link[i+1:])
+	}
+	var ue *url.Error // url.Parse 的错误会带上整条链接(含密码),只留里面的原因
+	if errors.As(err, &ue) {
+		err = ue.Err
+	}
+	key := scheme + "|" + name
+	now := time.Now()
+	badLinkMu.Lock()
+	if now.Sub(badLinkWarned[key]) < time.Hour {
+		badLinkMu.Unlock()
+		return
+	}
+	if len(badLinkWarned) > 1000 {
+		badLinkWarned = map[string]time.Time{}
+	}
+	badLinkWarned[key] = now
+	badLinkMu.Unlock()
+	logger.Warning("sing-box 订阅:本站节点「", name, "」(", scheme, ")的链接解析不了,没写进配置,检查这条线路的自定义地址: ", err)
 }
 
 // BuildSingBoxSub 生成 sing-box 客户端配置(JSON,?format=json):
 // SFA(Android)、SFI(iOS)、sing-box 桌面版都只认这种"远程配置",链接列表和 clash YAML 它们导不进去。
 // 节点与链接订阅同源(本站线路 + 外部节点的分享链接),外加 proxy 选择组 / auto 测速组、
 // TUN + 本地混合入站、DNS 与基础分流;字段按 sing-box 1.12+ 写法,不使用已废弃的 legacy 字段。
+//
+// 部署在多台服务器上的线路和 Clash 一样再出一个线路测速组(urltest,判断条件同 clash.go 的 url-test 组):
+// 客户端选这条线路,由组在这几台服务器里挑延迟低的,出口和计费口径不变。节点逐条线路展开,
+// 展开顺序、去重规则都和 GenerateLinksFor 一样,节点的 tag 与顺序一字不变(只有和线路组同名的外部节点改名);
+// 组名和 Clash 订阅按同一套规则起(见 linegroup.go):在本站节点之后、外部节点之前起,撞了本站节点只改组名,
+// 外部节点撞上组名由外部节点改名。
 func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, error) {
-	links := GenerateLinksFor(user, lines, opt.Entries, opt.LineNodes)
-	for _, e := range opt.External {
-		links = append(links, e.Links...)
-	}
 	var tmpl map[string]interface{}
 	if strings.TrimSpace(opt.SingBoxTmpl) != "" {
 		if err := json.Unmarshal([]byte(opt.SingBoxTmpl), &tmpl); err != nil {
@@ -57,22 +115,27 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 	var nodes []map[string]interface{}
 	var tags []string
 	used := map[string]bool{"proxy": true, "auto": true, "direct": true}
-	var ownOutbounds []interface{} // 模板自己写的出站
+	var ownOutbounds []interface{}                 // 模板自己写的出站
+	tmplOut := map[string]map[string]interface{}{} // 同上,按 tag 查
 	if raw, ok := tmpl["outbounds"].([]interface{}); ok {
 		ownOutbounds = raw
 		for _, o := range raw {
 			if m, ok := o.(map[string]interface{}); ok {
 				if t, _ := m["tag"].(string); t != "" {
-					used[t] = true
+					used[t], tmplOut[t] = true, m
 				}
 			}
 		}
 	}
-	for _, l := range links {
+	// add 把一条分享链接转成节点出站,返回它的 tag;认不出的链接跳过,返回空串(own = 本站线路生成的)
+	add := func(l string, own bool) string {
 		p, err := upstream.ParseLink(l)
 		if err != nil {
 			if p = httpLink(l); p == nil {
-				continue // 认不出的链接跳过
+				if own {
+					warnBadOwnLink(l, err) // 本站线路生成的链接也解析不了:节点少了一个,要让管理员看见
+				}
+				return "" // 外部节点里认不出的链接照旧跳过
 			}
 		}
 		tag := p.Name
@@ -90,6 +153,34 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 		ob["type"], ob["tag"] = p.Type, tag
 		nodes = append(nodes, ob)
 		tags = append(tags, tag)
+		return tag
+	}
+	var pending []lineGroup
+	for _, line := range lines {
+		var names []string
+		for _, a := range resolveAddrs(line, opt.Entries, opt.LineNodes[line.Id]) {
+			for _, l := range lineToURIs(line, user, a, line.Name+a.remark) {
+				if tag := add(l, true); tag != "" {
+					names = append(names, tag)
+				}
+			}
+		}
+		if wantsLineGroup(line, len(names)) { // 与 Clash 的 url-test 组同一个条件
+			pending = append(pending, lineGroup{line.Name, names})
+		}
+	}
+	// 线路组在本站节点之后、外部节点之前起名,规则和 Clash 订阅一样(见 linegroup.go):撞了本站节点、模板出站或内置名
+	// 只给组名加序号,本站节点名一字不动;外部节点最后定名,撞上组名由外部节点加序号,外部订阅里冒出一个和线路同名的节点
+	// 也挤不动线路组的名字,选过这个组的客户端(SFA / SFI 按 tag 记住选择)不会被悄悄换到第三方节点上。
+	// 这次没出组的线路(收窄到一台、只部署一台、服务器停用)名字也照样保留,外部节点撞上一样改名,
+	// 不随线路出不出组在「X」和「X 2」之间来回变;升级时外部订阅里同名的节点改名一次、只改 tag,取舍见 linegroup.go。
+	// 模板里同名的 selector / urltest 就用模板的(见 singBoxTmplGroup)
+	groupTags := nameLineGroups(pending, used, nil, func(tag string) bool { return singBoxTmplGroup(tmplOut, tag) })
+	reserveLineNames(lines, used)
+	for _, e := range opt.External { // 外部节点不成组
+		for _, l := range e.Links {
+			add(l, false)
+		}
 	}
 	if len(nodes) == 0 {
 		// 一个节点都没有(线路还没分配):给一份能加载的配置,客户端不会因为 500 把整个订阅标成坏的
@@ -102,10 +193,17 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 		return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
 	}
 
+	var groups []map[string]interface{}
+	for i, g := range pending {
+		groups = append(groups, map[string]interface{}{"type": "urltest", "tag": groupTags[i], "outbounds": g.members,
+			"url": "http://www.gstatic.com/generate_204", "interval": "3m", "tolerance": 50})
+	}
+	selectList := append(append([]string{"auto"}, groupTags...), tags...)
 	outbounds := []map[string]interface{}{
-		{"type": "selector", "tag": "proxy", "outbounds": append([]string{"auto"}, tags...), "default": "auto", "interrupt_exist_connections": true},
+		{"type": "selector", "tag": "proxy", "outbounds": selectList, "default": "auto", "interrupt_exist_connections": true},
 		{"type": "urltest", "tag": "auto", "outbounds": tags, "url": "http://www.gstatic.com/generate_204", "interval": "3m", "tolerance": 50},
 	}
+	outbounds = append(outbounds, groups...)
 	outbounds = append(outbounds, nodes...)
 	outbounds = append(outbounds, map[string]interface{}{"type": "direct", "tag": "direct"})
 
@@ -121,9 +219,29 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
 }
 
+// singBoxTmplGroup 模板里叫 tag 的出站能不能直接当这条线路的组:得是 selector / urltest(direct、节点之类当不了,
+// 线路组改名另起),而且生成的 proxy 列上它不会成环 —— 它顺着成员或 detour 走得回 proxy 就会(sing-box 启动时报
+// circular outbound dependency,整份配置起不来)。模板自己写了 proxy 时生成的那个不出,不会多出这条引用。
+func singBoxTmplGroup(tmplOut map[string]map[string]interface{}, tag string) bool {
+	if t, _ := tmplOut[tag]["type"].(string); t != "selector" && t != "urltest" {
+		return false
+	}
+	if tmplOut["proxy"] != nil {
+		return true
+	}
+	return !reaches(tag, "proxy", func(n string) []string {
+		refs := stringList(tmplOut[n]["outbounds"])
+		if d, _ := tmplOut[n]["detour"].(string); d != "" {
+			refs = append(refs, d)
+		}
+		return refs
+	})
+}
+
 // singBoxFromTemplate 按模板出配置:模板写了的段(dns、route、inbounds……)原样用,没写的用内置的。
-// 节点接在模板的出站后面;模板的 selector / urltest 里写 "{all}" 会展开成全部节点;
-// proxy / auto / direct 模板没写就补上,写了用模板的。
+// 节点接在模板的出站后面;模板的 selector / urltest 里写 "{all}" 会展开成全部节点(只是节点,不含线路组);
+// proxy / auto / direct 模板没写就补上,写了用模板的。线路组同样:模板写了同名的 selector / urltest 就用模板的;
+// 同名的是别的出站、或者用了会成环(见 singBoxTmplGroup)时,线路组已经改名加序号,两个都留着。
 func singBoxFromTemplate(user model.User, opt Options, tmpl map[string]interface{}, own []interface{}, generated, nodes []map[string]interface{}, tags []string) (Result, error) {
 	cfg := singBoxBase()
 	for k, v := range tmpl {

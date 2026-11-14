@@ -4,7 +4,7 @@ import { state } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { userPicker, targetText } from '../userpicker.js';
-import { esc, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, fmtTime, fmtRelative } from '../ui.js';
+import { esc, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, fmtTime, fmtRelative, fieldBox } from '../ui.js';
 
 export const title = () => t('rule.title');
 export const subtitle = () => t('rule.subtitle');
@@ -71,7 +71,7 @@ function editRule(id) {
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(r.remark || '')}">`)}
       <div class="full" id="sec-schedule">
         <div class="form-grid">
-          <div class="full">${field(t('rule.days'), `<div class="row" style="flex-wrap:wrap;gap:.6rem">${[1, 2, 3, 4, 5, 6, 7].map(d => `<label style="display:inline-flex;align-items:center;gap:.25rem"><input type="checkbox" class="f-day" value="${d}" ${!days.size || days.has(d) ? 'checked' : ''}> ${t('rule.day.' + d)}</label>`).join('')}</div>`, t('rule.daysHelp'))}</div>
+          <div class="full">${fieldBox(t('rule.days'), `<div class="row" style="flex-wrap:wrap;gap:.6rem">${[1, 2, 3, 4, 5, 6, 7].map(d => `<label style="display:inline-flex;align-items:center;gap:.25rem"><input type="checkbox" class="f-day" value="${d}" ${!days.size || days.has(d) ? 'checked' : ''}> ${t('rule.day.' + d)}</label>`).join('')}</div>`, t('rule.daysHelp'))}</div>
           ${field(t('rule.start'), `<input id="f-start" type="time" value="${esc(r.start || '19:00')}">`)}
           ${field(t('rule.end'), `<input id="f-end" type="time" value="${esc(r.end || '23:00')}">`, t('rule.timeHelp'))}
         </div>
@@ -87,7 +87,7 @@ function editRule(id) {
       ${field(t('rule.down'), `<input id="f-down" type="number" min="0" value="${r.downMbps || 0}">`, t('rule.limitHelp'))}
       ${check('f-tighten', t('rule.tightenOnly'), r.tightenOnly !== false, t('rule.tightenOnlyHelp'))}
       ${check('f-enabled', t('common.enabled'), r.enabled !== false)}
-      <div class="full">${field(t('rule.targets'), `<div id="f-targets"></div>`, t('rule.targetsHelp'))}</div>
+      <div class="full">${fieldBox(t('rule.targets'), `<div id="f-targets"></div>`, t('rule.targetsHelp'))}</div>
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), kind, enabled: fchk('f-enabled'), tightenOnly: fchk('f-tighten'),
@@ -100,7 +100,7 @@ function editRule(id) {
     if (id) await put('rules/' + id, body); else await post('rules', body);
     await refresh();
     toast(id ? t('rule.updated') : t('rule.created'), 'ok');
-  }, { wide: true });
+  }, { size: 'xl' });
   const showKind = () => {
     document.getElementById('sec-schedule').hidden = kind !== 'schedule';
     document.getElementById('sec-burst').hidden = kind !== 'burst';
@@ -125,7 +125,7 @@ async function showStates(id) {
     ? `<div class="table-wrap"><table class="grid"><thead><tr><th>${t('user.title')}</th><th>${t('rule.reason')}</th><th>${t('rule.since')}</th><th>${t('rule.until')}</th></tr></thead><tbody>${list.map(s => `<tr>
         <td class="primary-cell">${esc(s.userName)}</td><td>${esc(s.reason || '')}</td><td>${fmtTime(s.since)} <span class="muted small">${fmtRelative(s.since)}</span></td>
         <td>${s.until ? `${fmtTime(s.until)} <span class="muted small">${t('rule.remaining', { n: Math.max(0, Math.ceil((s.until - now) / 60)) })}</span>` : t('rule.untilWindowEnd')}</td></tr>`).join('')}</tbody></table></div>`
-    : `<p class="muted">${t('rule.activeNone')}</p>`);
+    : `<p class="muted">${t('rule.activeNone')}</p>`, { wide: true });
 }
 
 registerActions({

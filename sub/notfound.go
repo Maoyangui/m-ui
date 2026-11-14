@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Maoyangui/m-ui/brand"
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
@@ -20,16 +19,18 @@ import (
 //go:embed gone.html
 var goneFS embed.FS
 
-var goneTmpl = template.Must(template.ParseFS(goneFS, "gone.html"))
+var goneTmpl = template.Must(template.New("gone.html").Funcs(template.FuncMap{"linkify": linkify}).ParseFS(goneFS, "gone.html"))
 
 type goneData struct {
-	Lang    string
-	Icon    template.URL
-	Title   string
-	Notice  string
-	Support string
-	BuyURL  string // 「选购订阅」按钮(空=不显示)
-	Year    int
+	Lang     string
+	Icon     template.URL // 标签图标与页头 logo,取法同落地页(见 inlineIcon)
+	IconType string
+	Custom   bool // 上传的 logo:深色模式下垫浅色底,同落地页
+	Title    string
+	Notice   string
+	Support  string
+	BuyURL   string // 「选购订阅」按钮(空=不显示)
+	Year     int
 }
 
 // ownerOf 按订阅地址反查用户与其代理,忽略启停状态(停用的人才最需要看到这页)。
@@ -59,9 +60,11 @@ func (s *Server) serveNotFound(w http.ResponseWriter, r *http.Request, key strin
 		notice, support = pick(rs.PageNotice, notice), pick(rs.PageSupport, support)
 	}
 	d := goneData{
-		Lang: pageLang(r), Icon: template.URL(brand.DataURI),
+		Lang:  pageLang(r),
 		Title: s.pageTitle(rs, s.options()), Notice: notice, Support: support, BuyURL: s.buyURL(rs), Year: time.Now().Year(),
 	}
+	d.Icon, d.IconType = s.inlineIcon(rs) // 代理名下的先用代理的 logo,再用主面板的
+	d.Custom = d.IconType != builtinIconType
 	var buf bytes.Buffer
 	if err := goneTmpl.Execute(&buf, d); err != nil {
 		http.NotFound(w, r)

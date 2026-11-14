@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,7 +12,6 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
-	"github.com/Maoyangui/m-ui/logger"
 
 	"gorm.io/gorm"
 )
@@ -34,8 +34,12 @@ import (
 //	DELETE /api/v1/users/{name|id}          删除
 //	POST   /api/v1/users/{name|id}/enable | disable | reset | kick
 //	POST   /api/v1/users/{name|id}/rotate   重置订阅链接:新随机地址 + 新凭据,收回临时共享,旧的立即失效
-//	POST   /api/v1/users/{name|id}/plan     套用套餐 {planId|plan, mode: renew|extend}
+//	POST   /api/v1/users/{name|id}/plan     续费 / 延期 N 期 {planId|plan(不给 = 当前套餐), mode: renew|extend, periods, dryRun, requestId}(/renew 同)
+//	POST   /api/v1/users/{name|id}/change   换套餐 {planId|plan, mode: replace|stack|prorate, periods, usage, force, dryRun, requestId}
+//	GET    /api/v1/users/{name|id}/plan-ops 套餐记录(最新的在前)
 //	GET    /api/v1/users/{name|id}/sub      订阅地址
+//
+// 套餐操作支持幂等:requestId 或请求头 Idempotency-Key,同一作用域同一个键只执行一次(见 plan_change.go)。
 
 // apiToken 从请求头取令牌:Authorization: Bearer 优先,其次 X-API-Key。
 func apiToken(r *http.Request) string {
@@ -46,16 +50,15 @@ func apiToken(r *http.Request) string {
 	return got
 }
 
-func (s *Server) publicAuth(r *http.Request) bool {
-	if s.setting("apiEnabled") != "true" {
-		return false
-	}
+// publicAuth 主面板入口的鉴权。known:令牌与主面板令牌对得上(哪怕开关关着),
+// 这种失败不算猜令牌,不计入限流 —— 关掉外部 API 后对接程序照常调用,不该把同一出口 IP 上别人的调用一起挡掉。
+func (s *Server) publicAuth(r *http.Request) (ok, known bool) {
 	want := s.setting("apiToken")
-	if want == "" {
-		return false
-	}
 	got := apiToken(r)
-	return got != "" && subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+	if want == "" || got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+		return false, false
+	}
+	return s.setting("apiEnabled") == "true", true
 }
 
 // apiScope 一次调用的作用域:主面板令牌 rid=0 看全部;代理令牌只看自己名下。
@@ -66,11 +69,18 @@ type apiScope struct {
 
 func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !s.publicAuth(r) {
-		logger.Warning("外部 API 鉴权失败,来源 ", clientIP(r), " ", r.Method, " ", r.URL.Path)
+	if s.apiAuthBlocked(s.sourceIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
+		return
+	}
+	if ok, known := s.publicAuth(r); !ok {
+		if !known {
+			s.noteAPIAuthFailure(r, "")
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
+	limitJSONBody(w, r, apiBodyLimit)
 	// 副机上的写操作会被主机下一次快照整表覆盖(新号消失、删掉的号复活),调用方却以为成功了;与面板一样只放行只读与踢线
 	if s.role() == "node" && r.Method != http.MethodGet && r.Method != http.MethodHead && !strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/kick") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": nodeReadOnly})
@@ -81,29 +91,51 @@ func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 
 // resellerByAPIToken 按令牌找到开启了外部 API 的代理;停用、到期的代理视同令牌错误。
 func (s *Server) resellerByAPIToken(tok string) (model.Reseller, bool) {
-	var rs model.Reseller
-	if tok == "" || s.db.Where("api_enabled = ? AND api_token = ? AND api_token <> ''", true, tok).First(&rs).Error != nil {
-		return rs, false
+	rs, ok, _ := s.resellerAPIToken(tok)
+	return rs, ok
+}
+
+// resellerAPIToken 同上,另外报告令牌是否对得上某个代理(known):对得上、只是代理关了外部 API、
+// 已停用或已到期的,调用方照常拒绝,但不算猜令牌、不计入限流。
+func (s *Server) resellerAPIToken(tok string) (rs model.Reseller, ok, known bool) {
+	if tok == "" || s.db.Where("api_token = ? AND api_token <> ''", tok).Order("api_enabled DESC").First(&rs).Error != nil {
+		return rs, false, false
 	}
-	if subtle.ConstantTimeCompare([]byte(tok), []byte(rs.ApiToken)) != 1 || !rs.Enabled || (rs.Expiry > 0 && rs.Expiry < time.Now().Unix()) {
-		return rs, false
+	if subtle.ConstantTimeCompare([]byte(tok), []byte(rs.ApiToken)) != 1 {
+		return rs, false, false
 	}
-	return rs, true
+	if !rs.ApiEnabled || !rs.Enabled || (rs.Expiry > 0 && rs.Expiry < time.Now().Unix()) {
+		return rs, false, true
+	}
+	return rs, true, true
 }
 
 // handleResellerPublicAPI 代理面板上的 /api/v1/:令牌属于哪个代理,就只操作那个代理名下的东西。
 func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	rs, ok := s.resellerByAPIToken(apiToken(r))
+	if s.apiAuthBlocked(s.sourceIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
+		return
+	}
+	rs, ok, known := s.resellerAPIToken(apiToken(r))
 	if !ok {
-		logger.Warning("代理外部 API 鉴权失败,来源 ", clientIP(r), " ", r.Method, " ", r.URL.Path)
+		if !known {
+			s.noteAPIAuthFailure(r, "代理")
+		}
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
+	limitJSONBody(w, r, apiBodyLimit)
 	s.publicAPI(w, r, apiScope{rid: rs.Id, actor: "api:" + rs.Name})
 }
 
 func (s *Server) publicAPI(w http.ResponseWriter, r *http.Request, sc apiScope) {
+	done, ok, msg := s.haWrite(r) // 正在设为主机:写操作暂停;没冻结的写登记在途
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+		return
+	}
+	defer done()
 	full := strings.TrimSuffix(r.URL.Path, "/")
 	idx := strings.LastIndex(full, "/v1/")
 	if idx < 0 {
@@ -318,26 +350,28 @@ func (s *Server) apiListUsers(w http.ResponseWriter, r *http.Request, sc apiScop
 
 // apiUserReq 创建/修改用户的请求体;指针字段缺省表示"不改动"。
 type apiUserReq struct {
-	Name        *string          `json:"name"`
-	Enabled     *bool            `json:"enabled"`
-	PlanId      *uint            `json:"planId"`
-	Plan        *string          `json:"plan"` // 套餐名,与 planId 二选一
-	Mode        string           `json:"mode"` // 套用套餐的方式:renew(默认,清零用量)| extend(保留用量)
-	VolumeGB    *float64         `json:"volumeGb"`
-	Volume      *int64           `json:"volume"` // 字节,0=不限;与 volumeGb 二选一
-	Days        *int             `json:"days"`   // 创建:自现在起 N 天;修改:在原到期(未过期时)基础上再加 N 天
-	Expiry      *int64           `json:"expiry"` // 到期时间戳(秒),0=不限;优先级高于 days
-	ActivateDays *int            `json:"activateDays"` // 首次连接后 N 天到期;填了就不看 expiry / days
-	DeviceLimit *int             `json:"deviceLimit"`
-	SpeedUp     *int             `json:"speedUp"`
-	SpeedDown   *int             `json:"speedDown"`
-	AutoReset   *bool            `json:"autoReset"`
-	ResetDays   *int             `json:"resetDays"`
-	Remark      *string          `json:"remark"`
-	Desc        *string          `json:"desc"`
-	LineIds     *[]uint          `json:"lineIds"`
-	LineRefs    *[]model.LineRef `json:"lineRefs"` // 线路 × 服务器;给了它就以它为准
-	ExtIds      *[]uint          `json:"extIds"`
+	Name         *string          `json:"name"`
+	Enabled      *bool            `json:"enabled"`
+	PlanId       *uint            `json:"planId"`
+	Plan         *string          `json:"plan"` // 套餐名,与 planId 二选一
+	Mode         string           `json:"mode"` // 套用套餐的方式:renew(默认,清零用量)| extend(保留用量)
+	VolumeGB     *float64         `json:"volumeGb"`
+	Volume       *int64           `json:"volume"`       // 字节,0=不限;与 volumeGb 二选一
+	Days         *int             `json:"days"`         // 创建:自现在起 N 天;修改:在原到期(未过期时)基础上再加 N 天
+	Expiry       *int64           `json:"expiry"`       // 到期时间戳(秒),0=不限;优先级高于 days
+	ActivateDays *int             `json:"activateDays"` // 首次连接后 N 天到期;填了就不看 expiry / days
+	DeviceLimit  *int             `json:"deviceLimit"`
+	SpeedUp      *int             `json:"speedUp"`
+	SpeedDown    *int             `json:"speedDown"`
+	AutoReset    *bool            `json:"autoReset"`
+	ResetDays    *int             `json:"resetDays"`
+	Remark       *string          `json:"remark"`
+	Desc         *string          `json:"desc"`
+	LineIds      *[]uint          `json:"lineIds"`
+	LineRefs     *[]model.LineRef `json:"lineRefs"` // 线路 × 服务器;给了它就以它为准
+	ExtIds       *[]uint          `json:"extIds"`
+	// RequestId 幂等键(也可以用请求头 Idempotency-Key):只有修改时同时带了套餐(等同一次续费)才认
+	RequestId string `json:"requestId"`
 }
 
 // apiFindPlan 找套餐:主面板令牌只看主面板的套餐,代理令牌只看该代理自己的。
@@ -358,8 +392,16 @@ func (s *Server) apiFindPlan(req apiUserReq, rid uint) (*model.Plan, error) {
 	return &p, nil
 }
 
+// errDaysTooMany 请求里给的天数(首次连接后天数、重置周期、days、套餐天数、批量延期)超过上限:换算成秒会溢出。
+var errDaysTooMany = fmt.Errorf("天数不能超过 %d(约 1 万年)", model.MaxDays)
+
 // applyReq 把请求里显式给出的字段写到用户上。
 func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
+	for _, d := range []*int{req.ActivateDays, req.Days, req.ResetDays} {
+		if d != nil && *d > model.MaxDays {
+			return errDaysTooMany
+		}
+	}
 	if req.Enabled != nil { // 显式给了启停就是手动决定
 		u.Enabled, u.DisabledReason = *req.Enabled, ""
 		if !u.Enabled {
@@ -385,7 +427,7 @@ func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
 	} else if req.Expiry != nil {
 		u.Expiry, u.ActivateDays = *req.Expiry, 0 // 明确给了到期时间:不再等首次连接
 	} else if req.Days != nil && u.ActivateDays > 0 && *req.Days > 0 {
-		u.ActivateDays += *req.Days // 还没开始计时的用户:加到等待计时的天数上
+		u.ActivateDays = model.SumDays(u.ActivateDays, *req.Days) // 还没开始计时的用户:加到等待计时的天数上
 	} else if req.Days != nil {
 		u.ActivateDays = 0
 		base := now
@@ -395,7 +437,7 @@ func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
 		if *req.Days <= 0 {
 			u.Expiry = 0
 		} else {
-			u.Expiry = base + int64(*req.Days)*86400
+			u.Expiry = model.AddDays(base, *req.Days)
 		}
 	}
 	if req.DeviceLimit != nil {
@@ -417,7 +459,7 @@ func applyReq(u *model.User, req apiUserReq, now int64, creating bool) error {
 		return errors.New("autoReset 需要 resetDays > 0")
 	}
 	if u.AutoReset && u.NextReset == 0 {
-		u.NextReset = now + int64(u.ResetDays)*86400
+		u.NextReset = model.AddDays(now, u.ResetDays)
 	}
 	if !u.AutoReset {
 		u.NextReset = 0
@@ -554,6 +596,8 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiSco
 	writeJSON(w, http.StatusOK, s.apiUser(u))
 }
 
+// apiUpdateUser PATCH / PUT /users/{name|id}:只改请求里给出的字段。同时带了 planId / plan 的等同一次续费,
+// 交给 apiUpdateUserPlan 走套餐操作的执行器(记套餐记录、认幂等键);没带套餐的照旧在这里改。
 func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.User, sc apiScope) {
 	var req apiUserReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -566,21 +610,9 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 		badRequest(w, err)
 		return
 	}
-	var planRefsV []model.LineRef
-	planRenews := false
 	if plan != nil {
-		mode := req.Mode
-		if mode != "extend" {
-			mode = "renew"
-			planRenews = true
-		}
-		before := u.Expiry
-		planRefsV = applyPlanRefs(&u, *plan, mode, now)
-		// 显式字段优先于套餐:同时给了 days 就由它替代套餐自带的天数(同样从原到期起算)。以前在套餐延好的到期上
-		// 再加一遍,多给一个周期(审计 MB09)
-		if req.Days != nil && req.Expiry == nil {
-			u.Expiry = before
-		}
+		s.apiUpdateUserPlan(w, r, u, sc, req, *plan)
+		return
 	}
 	oldName := u.Name
 	if req.Name != nil && *req.Name != u.Name {
@@ -600,8 +632,6 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 		refs = *req.LineRefs
 	case req.LineIds != nil:
 		refs = lineRefsOf(*req.LineIds, nil)
-	case planRefsV != nil:
-		refs = planRefsV
 	}
 	if sc.rid > 0 {
 		check := refs
@@ -618,7 +648,7 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 	}
 	err = s.db.Transaction(func(tx *gorm.DB) error { // 用户字段与分配一个事务
 		if err := tx.Model(&model.User{}).Where("id = ?", u.Id).
-			Updates(updateUserFields(u, planRenews)).Error; err != nil {
+			Updates(updateUserFields(u, false)).Error; err != nil {
 			return err
 		}
 		if err := moveUserStats(tx, oldName, u.Name); err != nil {
@@ -638,23 +668,22 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 		badRequest(w, err)
 		return
 	}
-	action := "update"
-	if plan != nil {
-		action += ":plan:" + plan.Name
-	}
-	s.auditAs(sc.actor, "user", action, u.Name)
+	s.auditAs(sc.actor, "user", "update", u.Name)
 	s.reloadUsers("外部 API 修改用户 " + u.Name)
-	// 返回数据库中的最新用量，避免把请求开始时的旧快照回传给调用方。
-	if err := s.db.First(&u, u.Id).Error; err != nil {
-		badRequest(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, s.apiUser(u))
+	s.writeFreshUser(w, u.Id, false) // 返回数据库中的最新用量，避免把请求开始时的旧快照回传给调用方
 }
 
 func (s *Server) apiUserAction(w http.ResponseWriter, r *http.Request, u model.User, action string, sc apiScope) {
 	if action == "sub" {
 		writeJSON(w, http.StatusOK, s.subLinks(u))
+		return
+	}
+	if action == "plan-ops" { // 套餐记录:只读
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+			return
+		}
+		s.writePlanOps(w, r, u, sc.rid)
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -700,38 +729,10 @@ func (s *Server) apiUserAction(w http.ResponseWriter, r *http.Request, u model.U
 		}
 		s.auditAs(sc.actor, "user", "rotate", u.Name)
 		writeJSON(w, http.StatusOK, s.apiUser(nu))
-	case "plan", "renew":
-		var req apiUserReq
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			badRequest(w, errors.New("请求体不是合法 JSON: "+err.Error()))
-			return
-		}
-		plan, err := s.apiFindPlan(req, sc.rid)
-		if err != nil {
-			badRequest(w, err)
-			return
-		}
-		if plan == nil {
-			badRequest(w, errors.New("缺少 planId 或 plan"))
-			return
-		}
-		mode := req.Mode
-		if mode != "extend" {
-			mode = "renew"
-		}
-		if sc.rid > 0 {
-			if err := s.checkResellerPlan(sc.rid, u, *plan); err != nil {
-				badRequest(w, err)
-				return
-			}
-		}
-		if err := s.applyUserPlan(&u, *plan, mode); err != nil {
-			badRequest(w, err)
-			return
-		}
-		s.auditAs(sc.actor, "user", "plan:"+mode+":"+plan.Name, u.Name)
-		s.reloadUsers("外部 API 套餐 " + plan.Name + " → " + u.Name)
-		writeJSON(w, http.StatusOK, s.apiUser(u))
+	case "plan", "renew": // 续费 / 延期 N 期;不给套餐就续当前套餐
+		s.apiRenew(w, r, u, sc)
+	case "change": // 换套餐:replace / stack / prorate
+		s.apiChange(w, r, u, sc)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "接口不存在"})
 	}

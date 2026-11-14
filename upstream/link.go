@@ -180,7 +180,20 @@ func parseHysteria2(u *url.URL) (*Parsed, error) {
 		}
 	}
 	if mport := q.Get("mport"); mport != "" {
-		opts["server_ports"] = strings.Split(strings.ReplaceAll(mport, "-", ":"), ",")
+		// sing-box 的 server_ports 每段都要 "起:止":单个端口("443,20000-30000" 里的 443)要写成 "443:443",否则整个出站建不起来
+		var ports []string
+		for _, part := range strings.Split(strings.ReplaceAll(mport, "-", ":"), ",") {
+			if part = strings.TrimSpace(part); part == "" {
+				continue
+			}
+			if !strings.Contains(part, ":") {
+				part += ":" + part
+			}
+			ports = append(ports, part)
+		}
+		if len(ports) > 0 {
+			opts["server_ports"] = ports
+		}
 	}
 	return &Parsed{Type: "hysteria2", Name: tagOf(u, host), Options: opts}, nil
 }

@@ -3,6 +3,7 @@ import { state } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, registerActions, field, fv, copy, badge, openModal } from '../ui.js';
+import { apiTable, apiExample } from '../apidoc.js';
 
 export const title = () => t('adm.title');
 export const subtitle = () => t('adm.subtitle');
@@ -66,37 +67,11 @@ function totpCard() {
     <div class="row" style="margin-top:.7rem"><button class="btn primary sm" data-act="adm.totpGen">${t('adm.totpGen')}</button><button class="btn sm" data-act="adm.totpManual">${t('adm.totpManual')}</button></div>`;
 }
 
-const endpoints = () => [
-  ['GET', '/ping', t('adm.ep.ping')],
-  ['GET', '/plans', t('adm.ep.plans')],
-  ['GET', '/users', t('adm.ep.users')],
-  ['POST', '/users', t('adm.ep.create')],
-  ['GET', '/users/{name}', t('adm.ep.get')],
-  ['PATCH', '/users/{name}', t('adm.ep.update')],
-  ['DELETE', '/users/{name}', t('adm.ep.delete')],
-  ['POST', '/users/{name}/enable | disable', t('adm.ep.enable')],
-  ['POST', '/users/{name}/reset', t('adm.ep.reset')],
-  ['POST', '/users/{name}/kick', t('adm.ep.kick')],
-  ['POST', '/users/{name}/plan', t('adm.ep.plan')],
-  ['GET', '/users/{name}/sub', t('adm.ep.sub')],
-];
-
-const example = (base, token) => `# 开号并套用套餐
-curl -X POST -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" \\
-  -d '{"name":"alice","plan":"月付","remark":"订单 #1001"}' ${base}/users
-
-# 续费(再套一次套餐)
-curl -X POST -H "Authorization: Bearer ${token}" -H "Content-Type: application/json" \\
-  -d '{"plan":"月付","mode":"renew"}' ${base}/users/alice/plan
-
-# 停用 / 启用 / 取订阅地址
-curl -X POST -H "Authorization: Bearer ${token}" ${base}/users/alice/disable
-curl -X POST -H "Authorization: Bearer ${token}" ${base}/users/alice/enable
-curl -H "Authorization: Bearer ${token}" ${base}/users/alice/sub`;
-
+// 外部 API:开关、前缀与令牌只在开启后显示;接口一览一直在(没开时折起来),先看清能做什么再决定开不开
 function apiCard() {
   const on = !!info.apiEnabled;
   const base = info.apiBase || '';
+  const docs = `<p class="hint">${t('adm.apiDocs')} <a href="${esc((state.status.repo || '') + '/blob/main/docs/API.md')}" target="_blank" rel="noopener">docs/API.md</a></p>`;
   return `<div class="card-head"><h2>${t('adm.api')}</h2><div class="row" style="align-items:center;gap:.5rem">${badge(on ? t('common.enabled') : t('common.disabled'), on ? 'ok' : '')}<label class="switch" title="${esc(t('adm.apiToggle'))}"><input type="checkbox" id="adm-api-on" ${on ? 'checked' : ''}><span></span></label></div></div>
     <p class="hint">${t('adm.apiHelp')}</p>
     ${on ? `
@@ -105,12 +80,11 @@ function apiCard() {
       <dt>${t('adm.apiToken')}</dt><dd><div class="sub-box"><code>${esc(info.apiToken || '')}</code><button class="btn sm" data-act="adm.copy" data-id="${esc(info.apiToken || '')}">${t('common.copy')}</button><button class="btn sm danger" data-act="adm.apiRotate">${t('adm.apiRotate')}</button></div></dd>
     </dl>
     <h3 class="sub-title">${t('adm.apiEndpoints')}</h3>
-    <div class="table-wrap"><table class="grid api-doc"><thead><tr><th>${t('adm.apiMethod')}</th><th>${t('adm.apiPath')}</th><th>${t('adm.apiDesc')}</th></tr></thead><tbody>
-      ${endpoints().map(([m, p, d]) => `<tr><td class="mono">${m}</td><td class="mono">${esc(p)}</td><td>${esc(d)}</td></tr>`).join('')}
-    </tbody></table></div>
+    ${apiTable()}
     <h3 class="sub-title">${t('adm.apiExample')}</h3>
-    <pre class="log code">${esc(example(base, info.apiToken || ''))}</pre>
-    <p class="hint">${t('adm.apiDocs')} <a href="${esc((state.status.repo || '') + '/blob/main/docs/API.md')}" target="_blank" rel="noopener">docs/API.md</a></p>` : ''}`;
+    <pre class="log code">${esc(apiExample(base, info.apiToken || ''))}</pre>
+    ${docs}` : `
+    <details class="adv api-list"><summary>${t('adm.apiEndpointsOff')}</summary>${apiTable()}${docs}</details>`}`;
 }
 
 registerActions({

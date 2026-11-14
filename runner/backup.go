@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/backup"
-	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/logger"
 	"gorm.io/gorm"
@@ -30,27 +29,8 @@ func (r *Runner) BackupDir() string {
 	return filepath.Join(r.DataDir(), "backups")
 }
 
-// CertPaths 返回所有设置里引用的、证书库里的证书/私钥路径(去重)。
-func (r *Runner) CertPaths() []string {
-	seen := map[string]bool{}
-	var out []string
-	add := func(v string) {
-		if v = strings.TrimSpace(v); v != "" && !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	for _, k := range []string{"certFile", "keyFile", "webCertFile", "webKeyFile", "subCertFile", "subKeyFile"} {
-		add(r.setting(k))
-	}
-	var rows []model.Cert
-	r.db.Find(&rows)
-	for _, c := range rows {
-		add(c.CertFile)
-		add(c.KeyFile)
-	}
-	return out
-}
+// CertPaths 返回所有设置里引用的(线路默认、面板、订阅、代理面板)、证书库里的证书/私钥路径(去重),备份打包的就是这些。
+func (r *Runner) CertPaths() []string { return backup.CertPaths(r.db) }
 
 // WriteBackup 把备份 zip 写到 w。
 func (r *Runner) WriteBackup(w io.Writer) error {
@@ -64,12 +44,16 @@ type BackupFile struct {
 }
 
 // CreateBackupFile 在备份目录生成一个备份并按 backupKeep 轮转,返回文件名。
-func (r *Runner) CreateBackupFile() (BackupFile, error) {
+func (r *Runner) CreateBackupFile() (BackupFile, error) { return r.CreateBackupFileNamed("m-ui-") }
+
+// CreateBackupFileNamed 同 CreateBackupFile,文件名用指定前缀(原主机变为副机前的 former-master-、设为主机前的 before-set-master-):
+// 只有 m-ui- 开头的参与按份数轮转,别的留着给人核对。
+func (r *Runner) CreateBackupFileNamed(prefix string) (BackupFile, error) {
 	dir := r.BackupDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return BackupFile{}, err
 	}
-	name := "m-ui-" + time.Now().Format("20060102-150405") + ".zip"
+	name := prefix + time.Now().Format("20060102-150405") + ".zip"
 	// 备份里有全部用户凭据与证书私钥,按 0600 建文件(目录已是 0700,再加一层)
 	f, err := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -83,6 +67,7 @@ func (r *Runner) CreateBackupFile() (BackupFile, error) {
 	f.Close()
 	st, _ := os.Stat(f.Name())
 	r.rotateBackups()
+	r.noteBackup(nil) // 任何一次备份成功(手动、Telegram /backup、定时)都说明问题已经解决:概况不再报「定时备份失败」
 	return BackupFile{Name: name, Size: st.Size(), Time: st.ModTime().Unix()}, nil
 }
 
@@ -148,6 +133,12 @@ func (r *Runner) InspectBackup(src string) (backup.Summary, error) { return back
 // RestorePending 报告是否有待应用的还原文件。
 func (r *Runner) RestorePending() bool { return backup.PendingPath(r.dbPath) != "" }
 
+// RestoreNotice 上次还原留下、还没点「知道了」的提示(放进数据目录的证书副本、还缺的、没写成的);没有时为 nil。
+func (r *Runner) RestoreNotice() *backup.Notice { return backup.ReadNotice(r.DataDir()) }
+
+// ClearRestoreNotice 管理员看过还原提示了。
+func (r *Runner) ClearRestoreNotice() error { return backup.ClearNotice(r.DataDir()) }
+
 // StageRestore 把备份文件放到待还原位置,重启后生效。
 func (r *Runner) StageRestore(src string) (backup.Summary, error) {
 	s, err := backup.Inspect(src)
@@ -173,6 +164,7 @@ func (r *Runner) backupLoop(stop <-chan struct{}) {
 				continue
 			}
 			bf, err := r.CreateBackupFile()
+			r.noteBackup(err)
 			if err != nil {
 				logger.Warning("定时备份失败: ", err)
 				r.notifier.Event("tgOnCore", "🔴 <b>定时备份失败</b>\n"+notify.Esc(err.Error()))
@@ -193,12 +185,40 @@ func (r *Runner) backupLoop(stop <-chan struct{}) {
 	}
 }
 
+// SetRestartFunc 替换 ScheduleRestart 的动作(测试里不真的重新执行进程)。
+func (r *Runner) SetRestartFunc(fn func(time.Duration)) { r.restartFn = fn }
+
+// noteBackup 记下备份的结果:定时备份失败记原因和时间;任何一次备份成功清空。
+func (r *Runner) noteBackup(err error) {
+	r.backupErrMu.Lock()
+	defer r.backupErrMu.Unlock()
+	if err == nil {
+		r.backupErr, r.backupErrAt = "", 0
+		return
+	}
+	r.backupErr, r.backupErrAt = err.Error(), time.Now().Unix()
+}
+
+// BackupError 最近一次定时备份失败的原因与时间(没失败过、或之后成功过为空)。
+func (r *Runner) BackupError() (string, int64) {
+	r.backupErrMu.Lock()
+	defer r.backupErrMu.Unlock()
+	return r.backupErr, r.backupErrAt
+}
+
 // ScheduleRestart 在短暂延迟后重启进程(还原备份、改端口后使用)。
 func (r *Runner) ScheduleRestart(delay time.Duration) {
+	if r.restartFn != nil {
+		r.restartFn(delay)
+		return
+	}
 	go func() {
+		if r.ha != nil {
+			r.ha.PauseForRestart() // 主机计划内重启:先让备用暂停几分钟,别把这一两分钟当成失联
+		}
 		time.Sleep(delay)
 		logger.Info("正在重启 m-ui")
-		r.Stop()
+		r.stopFlushed()
 		if r.subSrv != nil {
 			r.subSrv.Stop()
 		}

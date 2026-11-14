@@ -30,6 +30,7 @@ import (
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/filemanager"
 
+	"github.com/Maoyangui/m-ui/core/protocol/arrival"
 	"github.com/Maoyangui/m-ui/core/protocol/usersess"
 )
 
@@ -47,6 +48,7 @@ type Inbound struct {
 	sessions  *usersess.Registry  // 用户 → 会话登记表:停用 / 换凭据 / 踢线时按用户关整条 QUIC 会话
 	wrap      *usersess.ServerTLS // 包在 tlsConfig 外面的监听扩展点,靠它拿到 QUIC 连接
 	set       *usersess.Set       // 本数据面全部入站的登记表(踢线时一次扫全部)
+	arrivals  arrival.Recorder    // 认证没过的记到"最近入站连接"(只记,不影响放行)
 }
 
 func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.Hysteria2InboundOptions) (adapter.Inbound, error) {
@@ -132,6 +134,11 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	inbound.sessions = usersess.New(hysteriaCreds(options.Users))
 	inbound.wrap = usersess.NewServerTLS(tlsConfig, inbound.sessions, true, salamanderPassword != "" || geckoPassword != "")
 	inbound.set = usersess.SetFromContext(ctx)
+	inbound.arrivals = arrival.FromContext(ctx)
+	if masqueradeHandler == nil {
+		masqueradeHandler = http.NotFoundHandler() // 和 sing-quic 没配伪装站点时的默认一样
+	}
+	authWatch := &authFailWatch{next: masqueradeHandler, in: inbound, rxAmbiguous: options.IgnoreClientBandwidth && options.DownMbps > 0}
 	var udpTimeout time.Duration
 	if options.UDPTimeout != 0 {
 		udpTimeout = time.Duration(options.UDPTimeout)
@@ -211,7 +218,7 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		IgnoreClientBandwidth: options.IgnoreClientBandwidth,
 		UDPTimeout:            udpTimeout,
 		Handler:               inbound,
-		MasqueradeHandler:     masqueradeHandler,
+		MasqueradeHandler:     authWatch, // 认证没过的请求也落到伪装站点:先记一笔再原样交给它
 		BBRProfile:            options.BBRProfile,
 		RealmOptions:          realmOptions,
 	})
@@ -234,6 +241,7 @@ func (h *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, source M.S
 	var metadata adapter.InboundContext
 	metadata.Inbound = h.Tag()
 	metadata.InboundType = h.Type()
+	// 跟随上游 sing-box:InboundDetour 已被上游标为弃用但仍在用,等上游删字段时一起改。
 	//nolint:staticcheck
 	metadata.InboundDetour = h.listener.ListenOptions().Detour
 	//nolint:staticcheck
@@ -265,6 +273,7 @@ func (h *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	var metadata adapter.InboundContext
 	metadata.Inbound = h.Tag()
 	metadata.InboundType = h.Type()
+	// 跟随上游 sing-box:InboundDetour 已被上游标为弃用但仍在用,等上游删字段时一起改。
 	//nolint:staticcheck
 	metadata.InboundDetour = h.listener.ListenOptions().Detour
 	//nolint:staticcheck

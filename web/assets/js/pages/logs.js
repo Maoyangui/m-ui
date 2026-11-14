@@ -1,7 +1,7 @@
-import { state, load } from '../app.js';
+import { state, load, takeHashParams } from '../app.js';
 import { get, post, del } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, fmtDate, registerActions, empty, debounce, confirm, toast } from '../ui.js';
+import { esc, fmtDate, registerActions, empty, debounce, confirm, toast, auditText } from '../ui.js';
 
 export const title = () => t('logs.title');
 let tab = 'sub', userFilter = '', level = 'info';
@@ -37,6 +37,9 @@ function bindRetention(kind) {
 const logSwitch = () => `<label class="row" style="gap:.45rem;align-items:center;cursor:pointer" title="${esc(t('logs.enabledHelp'))}"><span class="switch"><input type="checkbox" id="logs-on" ${logOn() ? 'checked' : ''}><span></span></span><span class="small ${logOn() ? '' : 'muted'}">${t('logs.enabled')}</span></label>`;
 
 export async function render(el) {
+  // 概况的「查看全部操作记录 / 完整日志」:#/logs?tab=audit|core
+  const hp = takeHashParams('logs');
+  if (['sub', 'core', 'audit'].includes(hp.get('tab'))) tab = hp.get('tab');
   el.innerHTML = `
     <div class="tabs">${['sub', 'core', 'audit'].map(k => `<button data-act="logs.tab" data-id="${k}" class="${k === tab ? 'active' : ''}">${t('logs.' + k)}</button>`).join('')}</div>
     <div id="logs-body"></div>`;
@@ -50,7 +53,7 @@ async function renderTab() {
   if (tab === 'sub') {
     el.innerHTML = `
       <div class="toolbar"><input type="search" id="logs-user" placeholder="${t('logs.filterUser')}" value="${esc(userFilter)}"><span class="grow"></span>${retentionSelect('sub')}<button class="btn sm" data-act="logs.refresh">${t('common.refresh')}</button>${clearBtn()}</div>
-      <div class="table-wrap"><table class="grid"><thead><tr><th>${t('logs.time')}</th><th>${t('logs.user')}</th><th>${t('logs.ip')}</th><th>${t('logs.format')}</th><th>${t('common.status')}</th><th>${t('logs.ua')}</th></tr></thead><tbody id="logs-rows"></tbody></table></div>`;
+      <div class="table-wrap fill"><table class="grid"><thead><tr><th>${t('logs.time')}</th><th>${t('logs.user')}</th><th>${t('logs.ip')}</th><th>${t('logs.format')}</th><th>${t('common.status')}</th><th>${t('logs.ua')}</th></tr></thead><tbody id="logs-rows"></tbody></table></div>`;
     document.getElementById('logs-user').addEventListener('input', debounce(e => { userFilter = e.target.value.trim(); loadSub(); }));
     bindRetention('sub');
     await loadSub();
@@ -74,7 +77,7 @@ async function renderTab() {
   } else {
     el.innerHTML = `
       <div class="toolbar"><span class="grow"></span>${retentionSelect('audit')}<button class="btn sm" data-act="logs.refresh">${t('common.refresh')}</button>${clearBtn()}</div>
-      <div class="table-wrap"><table class="grid"><thead><tr><th>${t('logs.time')}</th><th>${t('logs.actor')}</th><th>${t('logs.object')}</th><th>${t('logs.action')}</th><th>${t('common.details')}</th></tr></thead><tbody id="logs-rows"></tbody></table></div>`;
+      <div class="table-wrap fill"><table class="grid"><thead><tr><th>${t('logs.time')}</th><th>${t('logs.actor')}</th><th>${t('logs.object')}</th><th>${t('logs.action')}</th><th>${t('common.details')}</th></tr></thead><tbody id="logs-rows"></tbody></table></div>`;
     bindRetention('audit');
     await loadAudit();
   }
@@ -100,9 +103,8 @@ async function loadAudit() {
   const body = document.getElementById('logs-rows');
   if (!body) return;
   body.innerHTML = rows.map(r => {
-    let obj = ''; try { obj = JSON.parse(r.obj); } catch { obj = r.obj; }
-    if (Array.isArray(obj)) obj = obj.join(', ');
-    if (obj === null) obj = '';
+    // obj 是任意 JSON:字符串原样,对象 / 数组里的对象写成 JSON(以前显示成 [object Object]);日志页不截断
+    const obj = auditText(r.obj, { max: 0 });
     return `<tr><td class="num">${fmtDate(r.dateTime)}</td><td>${esc(r.actor)}</td><td>${esc(r.key)}</td><td>${esc(r.action)}</td><td class="ua" title="${esc(String(obj))}">${esc(String(obj))}</td></tr>`;
   }).join('') || `<tr><td colspan="5">${empty()}</td></tr>`;
 }

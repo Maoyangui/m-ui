@@ -11,11 +11,14 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/acme"
+	"github.com/Maoyangui/m-ui/backup"
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/sub"
+
+	"gorm.io/gorm"
 )
 
 // 证书库:一台服务器可以有多张证书。每张证书一行(model.Cert),文件在数据目录 cert/ 下,或指向服务器上已有的文件。
@@ -38,14 +41,16 @@ type CertTargets struct {
 	Lines, Panel, Sub bool
 }
 
-// CertView 证书库的一行:库里记的 + 证书文件读出来的 + 正用在哪。
+// CertView 证书库的一行:库里记的(含续期状态)+ 证书文件读出来的 + 正用在哪 + 能不能自动续、为什么。
 type CertView struct {
 	model.Cert
-	Info      acme.CertInfo `json:"info"`
-	ForLines  bool          `json:"forLines"`
-	ForPanel  bool          `json:"forPanel"`
-	ForSub    bool          `json:"forSub"`
-	LineNames []string      `json:"lineNames"` // 单独选了这张证书的线路
+	Info        acme.CertInfo `json:"info"`
+	ForLines    bool          `json:"forLines"`
+	ForPanel    bool          `json:"forPanel"`
+	ForSub      bool          `json:"forSub"`
+	ForReseller bool          `json:"forReseller,omitempty"` // 代理面板 HTTPS
+	LineNames   []string      `json:"lineNames"`             // 单独选了这张证书的线路
+	RenewState
 }
 
 // certNameOf 证书在库里的名字:自签的统一叫 self-signed,其余用证书里的第一个域名(泛域名也一样,*.example.com),
@@ -84,6 +89,7 @@ func (r *Runner) ensureCertStore() {
 	add(r.setting("certFile"), r.setting("keyFile"), r.setting("certSource"))
 	add(r.setting("webCertFile"), r.setting("webKeyFile"), "")
 	add(r.setting("subCertFile"), r.setting("subKeyFile"), "")
+	add(r.setting("resellerCertFile"), r.setting("resellerKeyFile"), "") // 代理面板的证书以前不进库,永远不续、不提醒
 	if files, err := filepath.Glob(filepath.Join(r.DataDir(), "cert", "*.crt")); err == nil {
 		sort.Strings(files)
 		for _, f := range files {
@@ -111,12 +117,12 @@ func (r *Runner) ensureCertStore() {
 			row.Source = "selfsign"
 		}
 		if row.Source == "acme" {
-			row.Method = r.setting("acmeMethod")
-			if row.Method == "" {
-				row.Method = acme.MethodHTTP
-			}
-			row.AutoRenew = !strings.EqualFold(r.setting("acmeAutoRenew"), "false")
+			row.Method = r.guessMethod(row.Name)
+			row.AutoRenew = !strings.EqualFold(r.setting("acmeAutoRenew"), "false") && row.Method != acme.MethodManual
 			row.Staging = strings.EqualFold(r.setting("acmeStaging"), "true")
+			if info.IsLetsEncrypt() { // 签发者看得出是不是测试环境,比表单上次的勾选准
+				row.Staging = info.IsStaging()
+			}
 		}
 		// 同名的已经有了(比如数据目录里还留着一份旧文件):留着库里那份,除非这份才是正在用的
 		var same model.Cert
@@ -130,15 +136,100 @@ func (r *Runner) ensureCertStore() {
 			logger.Warning("证书收进证书库失败: ", err)
 		}
 	}
+	r.repairMisclassifiedLE()
 	r.syncLocalCerts()
 }
 
-// guessSource 老文件没记来源:Let's Encrypt 签的算 acme,数据目录外的算服务器上已有的。
+// guessSource 老文件没记来源:数据目录下、Let's Encrypt 签的算面板签发的(acme),其余算服务器上已有的。
+// 认 Let's Encrypt 看签发者的组织与中间证书命名(acme.CertInfo.IsLetsEncrypt):以前只看 CN 里有没有 "encrypt",
+// 现在的中间证书叫 R11、E6、YE1,全被当成了外部证书,从此不再自动续期(审计 I2)。
+// 还原时放进 cert/restored/ 的是数据目录外证书(certbot 等)的副本,不是面板签发的,照旧算外部的。
 func guessSource(info acme.CertInfo, certFile, dataDir string) string {
-	if strings.Contains(strings.ToLower(info.Issuer), "encrypt") && strings.HasPrefix(certFile, dataDir) {
+	if info.IsLetsEncrypt() && underDir(certFile, dataDir) && !underDir(certFile, restoredCertDir(dataDir)) {
 		return "acme"
 	}
 	return "external"
+}
+
+// restoredCertDir 还原备份时,数据目录外的证书放进数据目录的地方(见 backup.RestoredDir)。
+func restoredCertDir(dataDir string) string {
+	return filepath.Join(dataDir, "cert", backup.RestoredDir)
+}
+
+// isRestoredCopy 证书文件是不是换机还原时放进数据目录的副本(cert/restored/ 下):备份那一刻的样子,没有谁续它。
+func (r *Runner) isRestoredCopy(certFile string) bool {
+	return underDir(certFile, restoredCertDir(r.DataDir()))
+}
+
+// certFileReferenced 证书库里还有哪一行、或哪个设置(线路默认、面板、订阅、代理面板的证书 / 私钥)引用着这个文件。
+func (r *Runner) certFileReferenced(f string) bool {
+	var n int64
+	r.db.Model(&model.Cert{}).Where("cert_file = ? OR key_file = ?", f, f).Count(&n)
+	if n > 0 {
+		return true
+	}
+	for _, k := range []string{"certFile", "keyFile", "webCertFile", "webKeyFile", "subCertFile", "subKeyFile", "resellerCertFile", "resellerKeyFile"} {
+		if r.setting(k) == f {
+			return true
+		}
+	}
+	return false
+}
+
+// underDir path 是不是在 dir 里面(按路径比,不是按字符串前缀:/etc/m-ui-old 不在 /etc/m-ui 里)。
+func underDir(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+// guessMethod 老证书没记验证方式:按签发表单上次用的。泛域名不能走 HTTP 验证:有 Cloudflare Token 就用它,否则只能手动 DNS。
+func (r *Runner) guessMethod(name string) string {
+	m := r.setting("acmeMethod")
+	if m != acme.MethodCloudflare && m != acme.MethodManual {
+		m = acme.MethodHTTP
+	}
+	if acme.IsWildcard(name) && m == acme.MethodHTTP {
+		if r.setting("acmeCfToken") != "" {
+			return acme.MethodCloudflare
+		}
+		return acme.MethodManual
+	}
+	return m
+}
+
+// certSourceRepairedKey 记下误判修复做过了(只做一次,之后管理员再改回去不再动)。
+const certSourceRepairedKey = "certSourceRepaired"
+
+// repairMisclassifiedLE 一次性修复:老版本收进库的、数据目录 cert/ 下面板自己签的 Let's Encrypt 证书,因为 guessSource
+// 认不出现在的中间证书,被记成了"服务器上已有的证书"(审计 I2:签发者是 YE1 的就这样),从此不续期、没有「续期」按钮。
+// 只改数据目录 cert/ 下、签发者认得出是 Let's Encrypt 的;数据目录外的(certbot 的原件)一律不动。
+func (r *Runner) repairMisclassifiedLE() {
+	if r.setting(certSourceRepairedKey) != "" {
+		return
+	}
+	var rows []model.Cert
+	if err := r.db.Where("source = ?", "external").Find(&rows).Error; err != nil {
+		logger.Warning("检查证书来源失败: ", err)
+		return
+	}
+	dir := filepath.Join(r.DataDir(), "cert")
+	for _, c := range rows {
+		info := acme.Info(c.CertFile)
+		if !underDir(c.CertFile, dir) || underDir(c.CertFile, restoredCertDir(r.DataDir())) || !info.Exists || info.SelfSigned || !info.IsLetsEncrypt() {
+			continue
+		}
+		method := r.guessMethod(c.Name)
+		if err := r.db.Model(&model.Cert{}).Where("id = ?", c.Id).Updates(map[string]interface{}{
+			"source": "acme", "method": method, "auto_renew": method != acme.MethodManual, "staging": info.IsStaging(),
+		}).Error; err != nil {
+			logger.Warning("修正证书 ", c.Name, " 的来源失败: ", err)
+			return // 下次启动再试
+		}
+		logger.Info("证书 ", c.Name, " 是面板签发的 Let's Encrypt 证书(", c.CertFile, "),以前被误记成服务器上已有的证书,已改回并按 ", method, " 验证自动续期")
+	}
+	if err := r.setSetting(certSourceRepairedKey, "1"); err != nil {
+		logger.Warning("记录证书来源修复失败: ", err)
+	}
 }
 
 // storedPaths 这个名字的证书写到哪:库里有且是面板自己管的就写回原处(路径不变,续期不用重启数据面);
@@ -151,32 +242,50 @@ func (r *Runner) storedPaths(name string) (string, string) {
 	return r.defaultCertPaths(name)
 }
 
-// saveCertRow 新建或更新库里这张证书。
+// saveCertRow 新建或更新库里这张证书。续期状态由 noteRenewResult 写;换成不归面板续的证书(外部 / 自签)时,
+// 旧的续期失败记录一并清掉,免得证书页上一张外部证书还挂着"续期失败"。
 func (r *Runner) saveCertRow(row model.Cert) error {
 	var cur model.Cert
 	if err := r.db.Where("name = ?", row.Name).First(&cur).Error; err == nil {
 		row.Id, row.CreatedAt = cur.Id, cur.CreatedAt
-		return r.db.Model(&model.Cert{}).Where("id = ?", cur.Id).Updates(map[string]interface{}{
+		upd := map[string]interface{}{
 			"source": row.Source, "cert_file": row.CertFile, "key_file": row.KeyFile,
 			"method": row.Method, "auto_renew": row.AutoRenew, "staging": row.Staging,
-		}).Error
+		}
+		if row.Source != "acme" {
+			upd["last_renew_err"], upd["renew_fails"], upd["next_renew_at"] = "", 0, 0
+		}
+		return r.db.Model(&model.Cert{}).Where("id = ?", cur.Id).Updates(upd).Error
 	}
 	row.CreatedAt = time.Now().Unix()
 	return r.db.Create(&row).Error
 }
 
-// Certs 证书库列表:正在用的排前面,其余按名字。
+// Certs 证书库列表:正在用的排前面,其余按名字。每张带上续期情况:能不能自动续、为什么、什么时候续、上次结果。
 func (r *Runner) Certs() []CertView {
 	var rows []model.Cert
 	r.db.Order("name asc").Find(&rows)
 	byName := r.linesByCert()
-	webCert, subCert := r.setting("webCertFile"), r.setting("subCertFile")
+	webCert, subCert, resCert := r.setting("webCertFile"), r.setting("subCertFile"), r.setting("resellerCertFile")
 	defCert := r.setting("certFile")
+	now := time.Now()
+	port80, port80Read := "", false
 	out := make([]CertView, 0, len(rows))
 	for _, c := range rows {
-		v := CertView{Cert: c, Info: acme.Info(c.CertFile), ForLines: c.CertFile == defCert, ForPanel: c.CertFile == webCert, ForSub: c.CertFile == subCert, LineNames: byName[c.Name]}
+		info := acme.Info(c.CertFile)
+		v := CertView{Cert: c, Info: info, ForLines: c.CertFile == defCert, ForPanel: c.CertFile == webCert, ForSub: c.CertFile == subCert,
+			ForReseller: resCert != "" && c.CertFile == resCert, LineNames: byName[c.Name], RenewState: r.renewState(c, info, now)}
 		if v.LineNames == nil {
 			v.LineNames = []string{}
+		}
+		// HTTP 验证自动续的:80 端口被本机线路占着,到续期时必然失败 —— 现在就说
+		if v.Renewable && (c.Method == acme.MethodHTTP || c.Method == "") && !acme.IsWildcard(c.Name) {
+			if !port80Read {
+				port80, port80Read = r.port80Line(), true
+			}
+			if port80 != "" {
+				v.Warn = errPort80Line(port80).Error()
+			}
 		}
 		out = append(out, v)
 	}
@@ -187,7 +296,7 @@ func (r *Runner) Certs() []CertView {
 }
 
 func certRank(v CertView) int {
-	if v.ForLines || v.ForPanel || v.ForSub || len(v.LineNames) > 0 {
+	if v.ForLines || v.ForPanel || v.ForSub || v.ForReseller || len(v.LineNames) > 0 {
 		return 0
 	}
 	return 1
@@ -207,9 +316,11 @@ func (r *Runner) linesByCert() map[string][]string {
 }
 
 // namedCerts 给渲染用的证书库:名字 → 文件路径。文件不在了的不算(线路退回默认证书,不让整份配置起不来)。
-func (r *Runner) namedCerts() map[string]render.NodeCert {
+func (r *Runner) namedCerts() map[string]render.NodeCert { return namedCertsOf(r.db) }
+
+func namedCertsOf(db *gorm.DB) map[string]render.NodeCert {
 	var rows []model.Cert
-	if r.db.Find(&rows).Error != nil {
+	if db.Find(&rows).Error != nil {
 		return nil
 	}
 	out := make(map[string]render.NodeCert, len(rows))
@@ -229,21 +340,30 @@ func (r *Runner) namedCerts() map[string]render.NodeCert {
 	return out
 }
 
-// CertBriefs 这台服务器的证书清单,报给主机(线路编辑框、订阅 SNI 用)。
+// CertBriefs 这台服务器的证书清单,报给主机(线路编辑框、订阅 SNI 用;续期状态让主机代副机告警)。
 func (r *Runner) CertBriefs() []model.CertBrief {
 	var rows []model.Cert
 	r.db.Order("name asc").Find(&rows)
 	def := r.setting("certFile")
+	inUse := r.certsInUse()
+	now := time.Now()
 	out := make([]model.CertBrief, 0, len(rows))
 	for _, c := range rows {
 		info := acme.Info(c.CertFile)
 		if !info.Exists {
 			continue
 		}
-		out = append(out, model.CertBrief{
+		st := r.renewState(c, info, now)
+		b := model.CertBrief{
 			Name: c.Name, Domains: info.DNSNames, SelfSigned: info.SelfSigned,
 			NotAfter: info.NotAfter.Unix(), Default: c.CertFile == def,
-		})
+			Source: c.Source, Method: c.Method, AutoRenew: st.Renewable, RenewBefore: st.RenewBefore, InUse: inUse[c.Name],
+			Restored: st.Reason == renewRestored,
+		}
+		if st.Renewable && c.RenewFails > 0 {
+			b.RenewErr, b.RenewFails, b.NextRenewAt = c.LastRenewErr, c.RenewFails, c.NextRenewAt
+		}
+		out = append(out, b)
 	}
 	return out
 }
@@ -344,6 +464,8 @@ func (r *Runner) DeleteCert(name string) error {
 		return errors.New("面板 HTTPS 正在用这张证书,先换一张再删")
 	case r.setting("subCertFile"):
 		return errors.New("订阅 HTTPS 正在用这张证书,先换一张再删")
+	case r.setting("resellerCertFile"):
+		return errors.New("代理面板 HTTPS 正在用这张证书,先换一张再删")
 	}
 	if names := r.linesByCert()[name]; len(names) > 0 {
 		return fmt.Errorf("线路「%s」单独选了这张证书,先改掉再删", strings.Join(names, "、"))
@@ -355,7 +477,15 @@ func (r *Runner) DeleteCert(name string) error {
 		_ = os.Remove(row.CertFile)
 		_ = os.Remove(row.KeyFile)
 	}
+	// 换机还原时放进 cert/restored/ 的副本(数据目录外证书的复制品):这一行删了就没人用它,一并删掉;
+	// 别的行或设置还引用着同一个文件(手填过路径)就留着。数据目录外的原件不在这个目录里,碰不到。
+	for _, f := range []string{row.CertFile, row.KeyFile} {
+		if r.isRestoredCopy(f) && !r.certFileReferenced(f) {
+			_ = os.Remove(f)
+		}
+	}
 	r.syncLocalCerts()
+	r.notifier.Forget("cert:" + name) // 这张的续期 / 到期提醒记录不用留了
 	r.cert.logf("已删除证书 %s", name)
 	return nil
 }
@@ -382,35 +512,6 @@ func (r *Runner) relayLoop(stop <-chan struct{}) {
 			}
 		case <-stop:
 			return
-		}
-	}
-}
-
-// renewDue 自动续期:库里到期前 30 天内的 ACME 证书一张张来。手动 DNS 的续不了,提前 14 天提醒。
-func (r *Runner) renewDue() {
-	var rows []model.Cert
-	if r.db.Where("source = ?", "acme").Find(&rows).Error != nil {
-		return
-	}
-	for _, c := range rows {
-		info := acme.Info(c.CertFile)
-		if !info.Exists || info.SelfSigned {
-			continue
-		}
-		if c.Method == acme.MethodManual {
-			if info.DaysLeft <= 14 && r.notifier.Once("cert-manual:"+c.Name, 20*time.Hour) {
-				r.cert.logf("证书 %s 剩 %d 天:手动 DNS 验证的证书不能自动续期,请重新申请", c.Name, info.DaysLeft)
-				r.notifier.Event("tgOnCert", fmt.Sprintf("🟡 <b>证书快到期</b>:%s 还剩 %d 天。它用手动 DNS 验证,不能自动续期,请到证书页重新申请", c.Name, info.DaysLeft))
-			}
-			continue
-		}
-		if !c.AutoRenew || info.DaysLeft > 30 || !r.notifier.Once("cert-renew:"+c.Name, 20*time.Hour) {
-			continue
-		}
-		logger.Info("证书 ", c.Name, " 剩余 ", info.DaysLeft, " 天,自动续期")
-		r.cert.logf("自动续期 %s:剩余 %d 天", c.Name, info.DaysLeft)
-		if err := r.runIssue(IssueRequest{Domain: c.Name, Method: c.Method, Staging: c.Staging, AutoRenew: c.AutoRenew}); err != nil {
-			logger.Warning("证书 ", c.Name, " 自动续期失败: ", err)
 		}
 	}
 }

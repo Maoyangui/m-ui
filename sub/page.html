@@ -6,14 +6,19 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="light dark">
 <title>{{.Title}} · {{if .Shared}}{{if eq .Lang "zh"}}临时共享{{else}}Shared link{{end}}{{else}}{{.Name}}{{end}}</title>
-<link rel="icon" href="{{.Icon}}" type="image/svg+xml">
+<link rel="icon" href="{{.Icon}}" type="{{.IconType}}">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--text:#1a202c;--muted:#64748b;--border:#e2e8f0;--primary:#2563eb;--ok:#16a34a;--warn:#d97706;--danger:#dc2626;--soft:#eff6ff;--danger-soft:#fef2f2;--danger-bd:#fecaca;--shadow:0 1px 3px rgba(0,0,0,.05)}
 @media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--text:#e6e9ef;--muted:#8b95a5;--border:#2a313b;--primary:#3b82f6;--soft:#1e293b;--danger-soft:#2a1416;--danger-bd:#5b1f24;--shadow:0 1px 3px rgba(0,0,0,.3)}}
 html{font-size:15px}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{max-width:540px;margin:0 auto;padding:1rem .9rem 2.2rem}
-.brand{display:flex;align-items:center;gap:.55rem;margin-bottom:.8rem}.logo{display:block;width:34px;height:28px}
-.brand h1{margin:0;font-size:1.15rem}.brand .u{color:var(--muted);font-size:.85rem}
+.brand{display:flex;align-items:center;gap:.55rem;margin-bottom:.8rem}.logo{display:block;flex:none;height:28px;width:auto;max-width:min(160px,42vw);object-fit:contain}
+/* 上传的 logo 四周留一圈:深色模式下垫浅色底(透明底的深色 logo 在深色背景上看不见),浅色模式下只留空,两种模式里图本身一样大 */
+.logo.custom{height:32px;padding:2px 4px;border-radius:6px;max-width:min(168px,44vw)}
+@media(prefers-color-scheme:dark){.logo.custom{background:#f4f6f9}}
+/* 窄屏上宽幅 logo 加不带空格的长标题 / 用户名:文字这一栏可以收窄、长词可以断开,不把页头撑出屏幕 */
+.brand>div{min-width:0}
+.brand h1{margin:0;font-size:1.15rem}.brand .u{color:var(--muted);font-size:.85rem}.brand h1,.brand .u{overflow-wrap:anywhere;word-break:break-word}
 .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:.85rem .95rem;margin-bottom:.7rem;box-shadow:var(--shadow)}
 h2{margin:0 0 .7rem;font-size:.95rem}
 .badge{display:inline-block;font-size:.72rem;padding:.15rem .55rem;border-radius:999px;background:var(--soft);color:var(--primary);vertical-align:middle}
@@ -26,7 +31,7 @@ h2{margin:0 0 .7rem;font-size:.95rem}
 .state .mark{flex:none;width:40px;height:40px;border-radius:50%;background:var(--card);color:var(--danger);display:flex;align-items:center;justify-content:center;border:1px solid var(--danger-bd)}
 .state .mark svg{width:22px;height:22px}
 .state-text b{display:block;font-size:1rem}.state-text span{display:block;color:var(--muted);font-size:.86rem;margin-top:.15rem}
-.state .contact{margin-top:.8rem;font-size:.84rem;color:var(--muted);white-space:pre-wrap}
+.state .contact{margin-top:.8rem;font-size:.84rem;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
 /* 共享地址的落地页:说明这是借来的地址 + 选购自己的 */
 .sharedcard{border-color:var(--info-bd,#bfdbfe);background:var(--soft)}
 .sharedcard .mark{flex:none;width:40px;height:40px;border-radius:50%;background:var(--card);color:var(--primary);display:flex;align-items:center;justify-content:center;border:1px solid var(--info-bd,#bfdbfe)}
@@ -40,7 +45,9 @@ h2{margin:0 0 .7rem;font-size:.95rem}
 .bar{height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin:.4rem 0 .6rem}.bar i{display:block;height:100%;background:var(--primary)}
 .bar.warn i{background:var(--warn)}.bar.danger i{background:var(--danger)}
 .kv{display:grid;grid-template-columns:auto 1fr;gap:.3rem 1rem;font-size:.88rem}.kv dt{color:var(--muted)}.kv dd{margin:0}
-.notice{white-space:pre-wrap;background:var(--soft);border-radius:10px;padding:.75rem .9rem;font-size:.9rem}
+.notice{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--soft);border-radius:10px;padding:.75rem .9rem;font-size:.9rem}
+/* 公告与联系方式里的链接:只换颜色,字号跟随段落 */
+.notice a,.state .contact a{color:var(--primary);text-decoration:none}.notice a:hover,.state .contact a:hover{text-decoration:underline}
 .apps{display:grid;grid-template-columns:1fr 1fr;gap:.45rem}
 .app{display:block;text-decoration:none;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:.55rem .7rem;background:var(--card);transition:border-color .15s}
 .app:hover{border-color:var(--primary)}.app b{display:block;font-size:.92rem}.app span{display:block;color:var(--muted);font-size:.74rem;margin-top:.1rem}
@@ -68,13 +75,13 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
 .chart .hit{fill:transparent}.chart .seg.up{fill:var(--primary)}.chart .seg.down{fill:var(--ok)}.chart g.hot .seg{opacity:.75}
 .chart-tip{position:absolute;pointer-events:none;background:var(--text);color:var(--bg);padding:.4rem .6rem;border-radius:6px;font-size:.76rem;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:nowrap;z-index:2}.chart-tip .tt{opacity:.7;margin-bottom:.15rem}
 .empty{color:var(--muted);font-size:.86rem;text-align:center;padding:1.4rem 0}
-.foot{text-align:center;color:var(--muted);font-size:.76rem;margin-top:1.4rem}.foot a.powered{color:inherit;text-decoration:none;opacity:.85}.foot a.powered:hover{text-decoration:underline}.foot a{color:var(--primary);text-decoration:none}
+.foot{text-align:center;color:var(--muted);font-size:.76rem;margin-top:1.4rem}.foot a.powered{color:inherit;text-decoration:none;opacity:.85}.foot a.powered:hover{text-decoration:underline}.foot a{color:var(--primary);text-decoration:none}.foot a:hover{text-decoration:underline}
 .toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:.5rem 1rem;border-radius:8px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none}.toast.show{opacity:1}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="brand"><img class="logo" src="{{.Icon}}" alt=""><div><h1>{{.Title}}</h1><div class="u">{{if .Shared}}<span class="badge">{{if eq .Lang "zh"}}临时共享{{else}}Shared link{{end}}</span>{{else}}{{.Name}}{{end}}</div></div></div>
+  <div class="brand"><img class="logo{{if .CustomLogo}} custom{{end}}" src="{{.Icon}}" alt=""><div><h1>{{.Title}}</h1><div class="u">{{if .Shared}}<span class="badge">{{if eq .Lang "zh"}}临时共享{{else}}Shared link{{end}}</span>{{else}}{{.Name}}{{end}}</div></div></div>
 
   {{if .Unavailable}}<div class="card state">
     <div class="state-row">
@@ -85,7 +92,7 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
       </div>
     </div>
     {{if .BuyURL}}<a class="buy" href="{{.BuyURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>{{if .Shared}}{{if eq .Lang "zh"}}选购自己的订阅{{else}}Get your own subscription{{end}}{{else}}{{if eq .Lang "zh"}}选购 / 续费订阅{{else}}Purchase / renew{{end}}{{end}}</a>{{end}}
-    {{if .Support}}<div class="contact">{{if eq .Lang "zh"}}有疑问请联系:{{else}}Questions? {{end}}{{.Support}}</div>{{end}}
+    {{if .Support}}<div class="contact">{{if eq .Lang "zh"}}有疑问请联系:{{else}}Questions? {{end}}{{linkify .Support}}</div>{{end}}
   </div>{{end}}
 
   {{if .Shared}}<div class="card sharedcard">
@@ -110,12 +117,12 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
     </dl>
   </div>{{end}}
 
-  {{if .Notice}}<div class="card"><h2>{{if eq .Lang "zh"}}公告{{else}}Notice{{end}}</h2><div class="notice">{{.Notice}}</div></div>{{end}}
+  {{if .Notice}}<div class="card"><h2>{{if eq .Lang "zh"}}公告{{else}}Notice{{end}}</h2><div class="notice">{{linkify .Notice}}</div></div>{{end}}
 
   <div class="card">
     <div class="cardhead"><h2>{{if eq .Lang "zh"}}一键导入{{else}}Import into an app{{end}}</h2><a class="getapp" href="{{.ClientsURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10"/><path d="M8.5 10.5 12 14l3.5-3.5"/><path d="M5 19h14"/></svg>{{if eq .Lang "zh"}}客户端下载{{else}}Get a client{{end}}</a></div>
     <div class="apps">{{range .Imports}}<a class="app" href="{{.Href}}"><b>{{.Name}}</b><span>{{.Hint}}</span></a>{{end}}</div>
-    <p class="hint">{{if eq .Lang "zh"}}其它客户端:复制下方地址,在 App 里"添加订阅"粘贴即可。通用地址一般都能用,客户端来拉时会自动给对的格式;个别 App 不认再用对应的 Clash 或 sing-box 地址。{{else}}Other apps: copy a link below and paste it into the app's "add subscription". The universal link usually just works, since the right format is picked when the app fetches it; if an app refuses it, use the Clash or sing-box link.{{end}}</p>
+    <p class="hint">{{if .AutoFormat}}{{if eq .Lang "zh"}}其它客户端:复制下方地址,在 App 里"添加订阅"粘贴即可。通用地址一般都能用,客户端来拉时会自动给对的格式;个别 App 不认再用对应的 Clash 或 sing-box 地址。{{else}}Other apps: copy a link below and paste it into the app's "add subscription". The universal link usually just works, since the right format is picked when the app fetches it; if an app refuses it, use the Clash or sing-box link.{{end}}{{else}}{{if eq .Lang "zh"}}其它客户端:复制下方地址,在 App 里"添加订阅"粘贴。通用地址只给分享链接(Shadowrocket、v2rayN、NekoBox、Hiddify 等用它);Clash 系请用 Clash 地址,sing-box 官方客户端请用 sing-box 地址。{{else}}Other apps: copy a link below and paste it into the app's "add subscription". The universal link only serves share links (for Shadowrocket, v2rayN, NekoBox, Hiddify…); Clash-family apps need the Clash link and official sing-box apps the sing-box link.{{end}}{{end}}</p>
   </div>
 
   <div class="card">
@@ -146,9 +153,9 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
     </div>
     {{if .ShareURL}}
     <div class="link"><code id="l4">{{.ShareURL}}</code><button onclick="cp('l4')">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button></div>
-    <p class="hint">{{if eq .Lang "zh"}}给别人临时用的地址,取消后立即失效;用量、设备数与到期仍算在你名下。{{else}}A temporary link for someone else; it stops working the moment you cancel. Traffic, devices and expiry still count against you.{{end}}</p>
+    <p class="hint">{{if eq .Lang "zh"}}把这个地址发给对方:用浏览器打开就是一键导入页(看不到你的用量和到期),也能直接粘贴到客户端。取消后立即失效;用量、设备数与到期仍算在你名下。{{else}}Send this link to them: opened in a browser it is a one-tap import page (your usage and expiry stay hidden), or it can be pasted straight into an app. It stops working the moment you cancel; traffic, devices and expiry still count against you.{{end}}</p>
     {{else}}
-    <p class="hint">{{if eq .Lang "zh"}}生成一条临时地址给别人用,随时可取消。{{else}}Create a temporary link for someone else. Cancel any time.{{end}}</p>
+    <p class="hint">{{if eq .Lang "zh"}}生成一条临时地址给别人用:对方用浏览器打开即可一键导入,随时可取消。{{else}}Create a temporary link for someone else: they open it in a browser and import it in one tap. Cancel any time.{{end}}</p>
     {{end}}
   </div>{{end}}
 
@@ -157,7 +164,7 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
     <div class="lines">{{range .Lines}}<div class="line"><span>{{.Name}}</span><span class="tags"><span class="tag">{{.Protocol}}</span>{{if .TLS}}<span class="tag">{{.TLS}}</span>{{end}}{{if .Transport}}<span class="tag">{{.Transport}}</span>{{end}}</span></div>{{end}}</div></details>
   </div>{{end}}
 
-  <div class="foot">{{if .Support}}{{.Support}} · {{end}}© {{.Year}} {{.Title}}{{if .Brand}} · <a class="powered" href="https://maoyangui.github.io/m-ui/" rel="noopener" target="_blank">Powered by m-ui</a>{{end}}</div>
+  <div class="foot">{{if .Support}}{{linkify .Support}} · {{end}}© {{.Year}} {{if .Brand}}github-maoyangui · <a class="powered" href="https://maoyangui.github.io/m-ui/" rel="noopener" target="_blank">Powered by m-ui</a>{{else}}{{.Title}}{{end}}</div>
 </div>
 <div class="toast" id="toast"></div>
 <script>

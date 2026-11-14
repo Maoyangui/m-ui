@@ -55,7 +55,7 @@ func TestRuleCRUDAndValidation(t *testing.T) {
 	var v ruleView
 	json.Unmarshal([]byte(body), &v)
 	if !v.Enabled || !v.TightenOnly || v.Days != "1,5" || v.TargetCount != 2 || len(v.UserIds) != 2 || len(v.ResellerIds) != 1 {
-		t.Fatalf("默认启用、默认只升不降、星期去重排序、目标人数(a + 代理 2 的 b,停用的 c 不算): %+v", v)
+		t.Fatalf("默认启用、默认不超过用户自己的限速、星期去重排序、目标人数(a + 代理 2 的 b,停用的 c 不算): %+v", v)
 	}
 	code, body = call("POST", "/rules", `{"name":"突发","kind":"burst","allUsers":true,"windowMin":10,"thresholdGb":1.5,"penaltyMin":20,"downMbps":20,"tightenOnly":false,"enabled":false}`)
 	if code != 200 {

@@ -121,7 +121,7 @@ func InWindow(rule model.Rule, now time.Time, loc *time.Location) bool {
 }
 
 // Effective 用户自己的限速叠加生效中的规则,返回最终上下行 Mbps(0 = 不限)。
-// 每条状态贡献一个值:方向上填 0 的不参与;开了"只升不降"的贡献 min(规则值, 用户自己的值);
+// 每条状态贡献一个值:方向上填 0 的不参与;开了"不超过用户自己的限速"的贡献 min(规则值, 用户自己的值);
 // 多条同时生效取最小(最严)。没有状态碰这个方向就是用户自己的值。
 func Effective(ownUp, ownDown int, states []model.LimitState) (up, down int) {
 	return effectiveDir(ownUp, states, func(s model.LimitState) int { return s.UpMbps }),

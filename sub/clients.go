@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Maoyangui/m-ui/brand"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 // 客户端下载页:订阅页"一键导入"旁边那个下载箭头点开的就是这里。
@@ -25,11 +25,14 @@ var clientsFS embed.FS
 var clientsTmpl = template.Must(template.ParseFS(clientsFS, "clients.html"))
 
 const (
-	verVerge   = "2.5.2"   // Clash Verge Rev(Windows / macOS / Linux)
-	verCMFA    = "2.11.33" // Clash Meta for Android
-	verFlClash = "0.8.96"  // FlClash(Android / Windows / macOS / Linux)
-	verSingBox = "1.14.0"  // sing-box 官方客户端 SFA(Android)/ SFW(Windows)与命令行版
-	ghMirror   = "https://ghfast.top/"
+	verVerge   = "2.5.10"  // Clash Verge Rev(Windows / macOS / Linux)
+	verCMFA    = "2.11.37" // Clash Meta for Android
+	verFlClash = "0.9.3"   // FlClash(Android / Windows / macOS / Linux)
+	verSingBox = "1.14.4"  // sing-box 官方客户端 SFA(Android)/ SFW(Windows)与命令行版
+	// 国内镜像:在 GitHub 直链前加这个前缀。ghfast.top 对 clash-verge-rev 回 403(2026-11 实测),换成 gh-proxy.com;
+	// 换版本或换镜像后跑一遍 M_UI_NET_TEST=1 go test -run TestClientLinksLive ./sub/,每个链接都要 2xx / 3xx
+	ghMirrorHost = "gh-proxy.com"
+	ghMirror     = "https://" + ghMirrorHost + "/"
 )
 
 // dl 是一个下载按钮。Primary 的那个是这款客户端里首选的包。
@@ -38,7 +41,7 @@ type dl struct {
 	Href    template.URL
 	Primary bool
 	Muted   bool // 次要入口(镜像 / 全部版本),弱化显示
-	Mirror  bool // 国内镜像:同一个文件经 ghfast.top 中转,大陆网络环境可直接下载
+	Mirror  bool // 国内镜像:同一个文件经镜像站(ghMirror)中转,大陆网络环境可直接下载
 }
 
 // clientApp 是某个系统上的一款客户端。
@@ -60,7 +63,8 @@ type clientTile struct {
 
 type clientsData struct {
 	Lang       string
-	Icon       template.URL
+	Icon       template.URL // 标签图标:和落地页同一个 logo(见 pageIcon)
+	IconType   string
 	Title      string
 	Back       string // 返回订阅页
 	Tiles      []clientTile
@@ -80,10 +84,10 @@ func mirrorOf(href template.URL) template.URL {
 // 放在数据之后统一处理,新增客户端时不会漏掉。
 func addMirrors(tiles []clientTile, zh bool) []clientTile {
 	text := "国内镜像下载"
-	note := "「国内镜像下载」经 ghfast.top 中转,大陆网络环境可直接下载,文件与官方发布页相同;App Store 应用没有镜像。"
+	note := "「国内镜像下载」经 " + ghMirrorHost + " 中转,大陆网络环境可直接下载,文件与官方发布页相同;App Store 应用没有镜像。"
 	if !zh {
 		text = "China mirror"
-		note = "“China mirror” links are the same files proxied by ghfast.top, so they download from mainland China; App Store apps have no mirror."
+		note = "“China mirror” links are the same files proxied by " + ghMirrorHost + ", so they download from mainland China; App Store apps have no mirror."
 	}
 	for ti := range tiles {
 		has := false
@@ -388,15 +392,16 @@ func clientTiles(lang string) []clientTile {
 	return addMirrors(tiles, zh)
 }
 
-// serveClients 输出客户端下载页。页面不带任何用户信息,Back 指回订阅页。
-func (s *Server) serveClients(w http.ResponseWriter, r *http.Request, subPath, key, title string) {
+// serveClients 输出客户端下载页。页面不带任何用户信息,Back 指回订阅页;标签图标和落地页一样(代理的用户用代理的 logo)。
+func (s *Server) serveClients(w http.ResponseWriter, r *http.Request, subPath, key, title string, rs *model.Reseller) {
 	lang := pageLang(r)
-	hint := "经 ghfast.top 镜像中转,大陆网络环境可直接下载;文件与官方发布页相同"
+	hint := "经 " + ghMirrorHost + " 镜像中转,大陆网络环境可直接下载;文件与官方发布页相同"
 	if lang != "zh" {
-		hint = "Same file proxied by ghfast.top; downloads from mainland China"
+		hint = "Same file proxied by " + ghMirrorHost + "; downloads from mainland China"
 	}
+	icon, iconType := s.pageIcon(rs, key)
 	d := clientsData{
-		Lang: lang, Icon: template.URL(brand.DataURI), Title: title,
+		Lang: lang, Icon: icon, IconType: iconType, Title: title,
 		Back: publicBase(r, subPath, key), Tiles: clientTiles(lang), Year: time.Now().Year(), MirrorHint: hint,
 	}
 	var buf bytes.Buffer

@@ -178,10 +178,13 @@ type fakeAPI struct {
 	icmpOK    map[string]bool
 	remaining int
 	token     string
+	// IPv6 入站检测(目标是 IPv6 地址):境外测点连不连得上、派几个测点
+	v6OK     bool
+	v6Probes int
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
-	f := &fakeAPI{bodies: map[string]map[string]interface{}{}, remaining: 250,
+	f := &fakeAPI{bodies: map[string]map[string]interface{}{}, remaining: 250, v6OK: true, v6Probes: 4,
 		tcpOK: map[string]bool{"cm": true, "ct": true, "cu": true, "hk": true}, icmpOK: map[string]bool{"cm": true, "ct": true, "cu": true, "hk": true}}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
@@ -213,18 +216,39 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		var req measureRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		f.requests = append(f.requests, req)
-		if f.remaining <= 0 {
+		// 按这次要的测点数扣额度(和 Globalping 一样):选点条件的 limit 加起来;复用上一次的测点按 8 个算
+		charge := 8
+		if b, err := json.Marshal(req.Locs); err == nil {
+			var locs []location
+			if json.Unmarshal(b, &locs) == nil && len(locs) > 0 {
+				charge = 0
+				for _, l := range locs {
+					charge += l.Limit
+				}
+			}
+		}
+		if f.remaining < charge {
 			w.Header().Set("X-RateLimit-Reset", "1200")
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte(`{"error":{"message":"rate limit"}}`))
 			return
 		}
-		f.remaining -= 8
+		f.remaining -= charge
 		w.Header().Set("X-RateLimit-Limit", "250")
 		w.Header().Set("X-RateLimit-Remaining", fmt.Sprint(f.remaining))
 		w.Header().Set("X-RateLimit-Reset", "1800")
 		f.seq++
 		id := fmt.Sprintf("m%d", f.seq)
+		if strings.Contains(req.Target, ":") { // IPv6 地址:Globalping 只派支持 IPv6 的测点(这里是欧洲、北美的)
+			var rs []fakeResult
+			for i := 0; i < f.v6Probes; i++ {
+				rs = append(rs, fakeResult{country: []string{"DE", "US"}[i%2], city: "X", asn: 3320, network: "Some ISP", ok: f.v6OK})
+			}
+			f.bodies[id] = fakeBody(id, rs)
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "probesCount": len(rs)})
+			return
+		}
 		ok := f.tcpOK
 		if req.Options.Protocol == "" {
 			ok = f.icmpOK
@@ -657,5 +681,63 @@ func TestFailedAttemptKeepsLastResult(t *testing.T) {
 	}
 	if r := latest(t, h, 1); r.Attempt != nil {
 		t.Fatalf("测成之后不该再挂着失败说明: %+v", r)
+	}
+}
+
+// 主机容灾的境外见证:只从境外测点 TCP 连主机的端口;第一个端口多数测点连得上就不再试下一个。
+func TestWitness(t *testing.T) {
+	h := newHarness(t)
+	ok, total, err := h.svc.Witness(context.Background(), "203.0.113.7", []int{2053, 2056})
+	if err != nil || ok != 6 || total != 6 {
+		t.Fatalf("全通: %d/%d %v", ok, total, err)
+	}
+	h.api.mu.Lock()
+	req := h.api.requests[len(h.api.requests)-1]
+	n := len(h.api.requests)
+	h.api.mu.Unlock()
+	b, _ := json.Marshal(req.Locs)
+	if strings.Contains(string(b), `"CN"`) || !strings.Contains(string(b), `"US"`) || req.Options.Protocol != "TCP" || req.Options.Port != 2053 {
+		t.Fatalf("见证只用境外测点、TCP 连第一个端口: %s %+v", b, req.Options)
+	}
+	if n != 1 {
+		t.Fatal("第一个端口通了就不再测第二个")
+	}
+	h.api.set(map[string]bool{"cm": false, "ct": false, "cu": false, "hk": false}, nil)
+	ok, total, err = h.svc.Witness(context.Background(), "203.0.113.7", []int{2053, 2056})
+	h.api.mu.Lock()
+	tried := len(h.api.requests) - n
+	h.api.mu.Unlock()
+	if err != nil || ok != 0 || total != 6 || tried != 2 {
+		t.Fatalf("全不通:要把两个端口都试过: %d/%d tried=%d %v", ok, total, tried, err)
+	}
+	if _, _, err := h.svc.Witness(context.Background(), "", nil); err == nil {
+		t.Fatal("没有地址应报错")
+	}
+}
+
+// 检测器自己的状况:额度用尽时 lastRun 照样往前走,State 要能看出这一轮一台都没测成、最近一次测成是什么时候(概况据此报"检测停摆")。
+func TestStateReportsFailingRounds(t *testing.T) {
+	h := newHarness(t)
+	h.runAuto(t)
+	st := h.svc.State()
+	if st.LastRun == 0 || st.LastOk == 0 || st.Tried != 1 || st.Failed != 0 || st.FailErr != "" {
+		t.Fatalf("测成的一轮: %+v", st)
+	}
+	okAt := st.LastOk
+	h.advance(2 * time.Hour)
+	h.api.mu.Lock()
+	h.api.remaining = 0
+	h.api.mu.Unlock()
+	h.runAuto(t)
+	st = h.svc.State()
+	if st.LastRun <= okAt || st.LastOk != okAt || st.Tried != 1 || st.Failed != 1 || !strings.Contains(st.FailErr, "额度") {
+		t.Fatalf("额度用尽的一轮: %+v", st)
+	}
+	// 重启后从库里恢复最近一次测成的时间(没测成的记录不算)
+	h2 := New(Deps{DB: h.svc.d.DB, IsNode: func() bool { return false }, Setting: func(string) string { return "" },
+		Targets: func(context.Context) []Target { return nil }, API: h.api.srv.URL, Now: func() time.Time { return h.now }, FirstDelay: time.Hour})
+	defer h2.Stop()
+	if st2 := h2.State(); st2.LastOk != okAt || st2.LastRun != st.LastRun {
+		t.Fatalf("重启后: %+v,要 lastOk=%d lastRun=%d", st2, okAt, st.LastRun)
 	}
 }

@@ -10,14 +10,16 @@ flowchart TD
   Q["GET /sub/&lt;key&gt;"] --> WHO{"Whose key is it"}
   WHO -->|"username / random token"| U["Matched user"]
   WHO -->|"share token"| S["Same user<br/>separate credentials"]
-  WHO -->|"no match · disabled"| E["404"]
+  WHO -->|"no match"| E["404<br/>browsers get an invalid-link page"]
   U --> UA{"User-Agent"}
-  S --> F
-  UA -->|"browser"| P["Landing page"]
-  UA -->|"proxy client"| F{"Which format"}
-  F -->|"default"| F1["Universal links"]
-  F -->|"?format=clash"| F2["Clash YAML"]
-  F -->|"?format=json"| F3["sing-box config"]
+  S --> UA
+  UA -->|"browser"| P["Landing page<br/>reason shown when disabled · expired · out of traffic<br/>trimmed for share tokens"]
+  UA -->|"proxy client"| B{"Disabled · expired · out of traffic"}
+  B -->|"yes"| X["404"]
+  B -->|"no"| F{"Which format"}
+  F -->|"Clash-family app or ?format=clash"| F2["Clash YAML"]
+  F -->|"sing-box app or ?format=json"| F3["sing-box config"]
+  F -->|"anything else"| F1["Universal links"]
 
   classDef svc fill:#1d4ed8,stroke:#1e3a8a,color:#ffffff,stroke-width:1px
   classDef who fill:#e2e8f0,stroke:#94a3b8,color:#0f172a,stroke-width:1px
@@ -25,6 +27,6 @@ flowchart TD
   classDef exit fill:#047857,stroke:#065f46,color:#ffffff,stroke-width:1px
   classDef warn fill:#b91c1c,stroke:#7f1d1d,color:#ffffff,stroke-width:1px
   class U,S exit
-  class E warn
+  class E,X warn
   class P,F1,F2,F3 svc
   class Q who

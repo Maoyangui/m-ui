@@ -1,7 +1,7 @@
-import { state, load, isReseller } from '../app.js';
+import { state, load, isReseller, takeHashParams } from '../app.js';
 import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
-import { deviceCount, gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtRelative, daysLeft, toast, confirm, openModal, closeModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML } from '../ui.js';
+import { deviceCount, gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtDate, fmtDuration, fmtRelative, daysLeft, toast, confirm, openModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML, setText, chipList, fieldBox } from '../ui.js';
 
 // 生效中的规则限速(主面板才有):列表徽章与详情抽屉都从这里取
 const limitsOf = id => (state.limitStates || []).filter(s => s.userId === id);
@@ -12,7 +12,7 @@ function ruleLimitsHTML(u) {
   return `<h3 style="margin-top:.6rem">${t('user.ruleLimits')}</h3><div class="chips">${lim.map(s => `<span class="chip" title="${esc(s.reason || '')}">${esc(s.ruleName)} · ${s.upMbps || '—'}/${s.downMbps || '—'} M · ${s.until ? t('rule.remaining', { n: Math.max(0, Math.ceil((s.until - now) / 60)) }) : t('rule.untilWindowEnd')}</span>`).join('')}</div>`;
 }
 import { barChart, bucketFor } from '../chart.js';
-import { lineItems, keysFromRefs, linePicker, refLabels } from '../linepicker.js';
+import { lineItems, keysFromRefs, linePicker, refLabels, refChips } from '../linepicker.js';
 
 // 代理面板没有服务器页:服务器名与授权范围来自 status;主面板用 state.nodes
 const pickerNodes = () => (Array.isArray(state.nodes) && state.nodes.length) ? state.nodes : (Array.isArray(state.status.nodes) ? state.status.nodes : []);
@@ -24,6 +24,9 @@ import { tzOffsetMinutes } from '../ui.js';
 export const title = () => t('user.title');
 export const subtitle = () => t('user.subtitle');
 let query = '', filter = 'all', drawerUser = null, sortKey = 'id', sortDir = 1;
+// 快捷筛选:套餐(0 = 不限);only = 'expiring' | 'quota'(概况的"查看全部"带过来,工具栏里显示一个可清除的 chip,不进状态按钮)
+let planFilter = 0, only = '';
+// 全选只勾当前页;筛选结果多于一页时,批量条里另给"选中全部 N 个筛选结果"
 const selected = new Set();
 // 分页:全部用户 → 搜索 → 筛选 → 排序 → 只渲染当前页。上千用户时不再一次画出整张表。
 const PAGE_SIZES = [25, 50, 100];
@@ -34,19 +37,50 @@ const SORTS = {
   id: u => u.id, name: u => u.name.toLowerCase(), usage: u => (u.up || 0) + (u.down || 0),
   expiry: u => u.expiry || Number.MAX_SAFE_INTEGER, devices: u => deviceCount(u.onlineIps), status: u => (u.enabled ? 0 : 1),
 };
-const th = (key, label) => `<th class="sortable ${sortKey === key ? 'sorted' : ''}" data-act="user.sort" data-id="${key}">${label}${sortKey === key ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
+const th = (key, label, cls = '') => `<th class="sortable ${sortKey === key ? 'sorted' : ''} ${cls}" data-act="user.sort" data-id="${key}">${label}${sortKey === key ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
 
 const now = () => Math.floor(Date.now() / 1000);
 const isExpired = u => u.expiry > 0 && u.expiry < now();
 const isOver = u => u.volume > 0 && (u.up + u.down) > u.volume;
+// 「快到期」「流量将尽」的口径:主面板跟 Telegram 预警同一组设置(默认 3 天 / 80%),代理面板固定 7 天 / 80%。概况共用
+export function expiringDays() {
+  if (isReseller()) return 7;
+  const d = Number((state.settings || {}).tgExpiringDays);
+  return d > 0 ? d : 3;
+}
+export function quotaPct() {
+  if (isReseller()) return 80;
+  const p = Number((state.settings || {}).tgQuotaPercent);
+  return p > 0 && p <= 100 ? p : 80;
+}
+const isExpiring = u => u.enabled && u.expiry > now() && u.expiry - now() <= expiringDays() * 86400;
+const isQuota = u => u.enabled && u.volume > 0 && (u.up + u.down) * 100 >= u.volume * quotaPct();
+const onlineSet = () => new Set((state.onlines && state.onlines.users) || []);
 const planSelect = (id, cur, allowNone = true) =>
   `<select id="${id}">${allowNone ? `<option value="0">${t('plan.none')}</option>` : ''}${state.plans.map(p => `<option value="${p.id}" ${cur === p.id ? 'selected' : ''}>${esc(p.name)} · ${p.volumeGb ? p.volumeGb + 'GB' : '∞'} / ${p.days ? p.days + t('common.day') : '∞'}</option>`).join('')}</select>`;
 
 export async function render(el) {
+  // 概况等页面的链接:#/users?f=online|expiring|quota、#/users?q=名字(恰好一个同名用户时直接打开详情)
+  const hp = takeHashParams('users');
+  let openId = 0;
+  if (hp.has('f') || hp.has('q')) {
+    const f = hp.get('f') || '';
+    filter = ['online', 'enabled', 'disabled', 'expired', 'over'].includes(f) ? f : 'all';
+    only = f === 'expiring' || f === 'quota' ? f : '';
+    planFilter = 0;
+    query = hp.get('q') || '';
+    page = 1;
+    selected.clear(); // 换成了另一份列表:以前勾的人不能悄悄带进下一次批量操作
+    const hit = query ? state.users.filter(u => u.name === query) : [];
+    if (hit.length === 1) openId = hit[0].id;
+  }
+  if (planFilter && !state.plans.some(p => p.id === planFilter)) planFilter = 0; // 筛着的套餐删掉了:下拉显示「全部套餐」,列表也别再按它筛
   el.innerHTML = `
     <div class="toolbar">
       <input type="search" id="user-q" placeholder="${t('common.search')}…" value="${esc(query)}">
-      <div class="seg" id="user-filter">${['all', 'enabled', 'disabled', 'expired', 'over'].map(f => `<button data-act="user.filter" data-id="${f}" class="${f === filter ? 'active' : ''}">${t('user.filter.' + f)}</button>`).join('')}</div>
+      <div class="seg" id="user-filter">${['all', 'online', 'enabled', 'disabled', 'expired', 'over'].map(f => `<button data-act="user.filter" data-id="${f}" class="${f === filter ? 'active' : ''}">${t('user.filter.' + f)}</button>`).join('')}</div>
+      ${state.plans.length ? `<select class="sm" id="user-plan" style="width:auto;max-width:12rem" aria-label="${esc(t('user.plan'))}"><option value="0">${esc(t('user.allPlans'))}</option>${state.plans.map(pl => `<option value="${pl.id}" ${pl.id === planFilter ? 'selected' : ''}>${esc(pl.name)}</option>`).join('')}</select>` : ''}
+      <span id="user-only"></span>
       <span class="muted small" id="user-count"></span>
       <span class="grow"></span>
       ${isReseller() ? '' : `<button class="btn" data-act="user.import">${t('user.import')}</button>
@@ -56,6 +90,7 @@ export async function render(el) {
     </div>
     <div class="toolbar batch-bar" id="batch-bar" hidden>
       <span class="badge primary" id="batch-count"></span>
+      <button class="btn sm ghost" data-act="user.selAllFiltered" id="sel-all-filtered" hidden></button>
       <button class="btn sm" data-act="user.batch" data-id="enable">${t('user.batch.enable')}</button>
       <button class="btn sm" data-act="user.batch" data-id="disable">${t('user.batch.disable')}</button>
       <button class="btn sm" data-act="user.batch" data-id="extend">${t('user.batch.extend')}</button>
@@ -65,8 +100,8 @@ export async function render(el) {
       <span class="grow"></span>
       <button class="btn sm ghost" data-act="user.clearSel">${t('common.cancel')}</button>
     </div>
-    <div class="table-wrap"><table class="grid">
-      <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sel-all"></th>${th('name', t('common.name'))}${th('status', t('common.status'))}${th('usage', t('user.usage'))}${th('expiry', t('user.expiry'))}${th('devices', t('user.devices'))}<th>${t('user.speed')}</th><th></th></tr></thead>
+    <div class="table-wrap fill" style="--fill-reserve:10rem"><table class="grid">
+      <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sel-all"></th>${th('name', t('common.name'))}${th('status', t('common.status'))}${th('usage', t('user.usage'))}${th('expiry', t('user.expiry'))}${th('devices', t('user.devices'), 'c-p2')}<th class="c-p3">${t('user.speed')}</th><th></th></tr></thead>
       <tbody id="users-body"></tbody>
     </table></div>
     <div class="pager" id="user-pager" hidden></div>`;
@@ -76,8 +111,11 @@ export async function render(el) {
     pageRows().forEach(u => e.target.checked ? selected.add(u.id) : selected.delete(u.id));
     renderRows();
   });
+  const ps = document.getElementById('user-plan');
+  if (ps) ps.addEventListener('change', e => { planFilter = Number(e.target.value) || 0; page = 1; renderRows(); });
   lastPager = '';
   renderRows();
+  if (openId) showDetail(openId);
 }
 export async function tick() { await load('users'); renderRows(); if (drawerUser) refreshDrawerLive(); }
 
@@ -89,10 +127,15 @@ function statusBadge(u) {
   if (lim.length) return badge(t('user.limited') + ' · ' + lim.map(s => s.ruleName).join(' / '), 'warn');
   return badge(t('common.enabled'), 'ok');
 }
+// 批量操作已经生效之后的刷新:在后台跑,失败只提示「已生效、列表没刷新」
+function refreshAfterBatch() {
+  renderRows();
+  load('users', 'lines', 'status').then(() => renderRows(), e => toast(t('user.batchRefreshFail', { err: e.message }), 'warn'));
+}
 // 用户所属套餐的名字(套餐删了或没归入就是空)
 const planNameOf = u => { const p = u.planId && state.plans.find(x => x.id === u.planId); return p ? p.name : ''; };
-// 套餐页点人数跳过来:按套餐名搜
-export function showUsersOfPlan(name) { query = name; filter = 'all'; page = 1; }
+// 套餐页点人数跳过来:按套餐筛(和套餐页的人数一致;以前按名字搜,「月付」会搜出「月付Plus」的人),其它筛选和已选都复位
+export function showUsersOfPlan(id) { query = ''; filter = 'all'; only = ''; planFilter = id; page = 1; selected.clear(); }
 
 function expiryCell(u) {
   if (u.activateDays) return `<span class="muted">${t('user.activateIn', { n: u.activateDays })}</span>`;
@@ -103,7 +146,11 @@ function expiryCell(u) {
 }
 function visibleRows() {
   let rows = state.users.filter(u => matches(query, u.name, u.remark, u.desc, planNameOf(u)));
-  rows = rows.filter(u => ({ all: true, enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, expired: isExpired(u), over: isOver(u) })[filter]);
+  const on = filter === 'online' ? onlineSet() : null;
+  rows = rows.filter(u => ({ all: true, online: on && on.has(u.name), enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, expired: isExpired(u), over: isOver(u) })[filter]);
+  if (planFilter) rows = rows.filter(u => u.planId === planFilter);
+  if (only === 'expiring') rows = rows.filter(isExpiring);
+  if (only === 'quota') rows = rows.filter(isQuota);
   const key = SORTS[sortKey] || SORTS.id;
   return rows.slice().sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * sortDir; });
 }
@@ -142,12 +189,22 @@ function renderRows() {
   const body = document.getElementById('users-body');
   if (!body) return;
   const online = new Set(state.onlines.users || []);
-  const total = visibleRows().length;
+  const vis = visibleRows(), total = vis.length;
   const rows = pageRows();
   document.getElementById('user-count').textContent = `${total} / ${state.users.length}`;
+  setHTML('user-only', only ? `<span class="chip">${esc(t('user.filter.only', { what: only === 'expiring' ? t('user.filter.expiring', { d: expiringDays() }) : t('user.filter.quota', { p: quotaPct() }) }))} <button type="button" class="btn xs ghost" data-act="user.clearOnly" title="${esc(t('user.filter.clear'))}">✕</button></span>` : '');
   const bar = document.getElementById('batch-bar');
   bar.hidden = selected.size === 0;
   document.getElementById('batch-count').textContent = t('user.selected', { n: selected.size });
+  // 当前页全选了、筛选结果又不止一页:给一个"选中全部 N 个筛选结果"(筛选结果里还有没勾上的才给)。
+  // 手机上表格没有表头、也就没有全选框:勾了任意一个就给,不用先把一页卡片逐个勾满
+  const allBtn = document.getElementById('sel-all-filtered');
+  if (allBtn) {
+    const pageAll = rows.length > 0 && rows.every(u => selected.has(u.id));
+    const mobile = typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches;
+    allBtn.hidden = !((pageAll || mobile) && total > rows.length && vis.some(u => !selected.has(u.id)));
+    allBtn.textContent = t('user.selAllFiltered', { n: total });
+  }
   const selAll = document.getElementById('sel-all');
   if (selAll) selAll.checked = rows.length > 0 && rows.every(u => selected.has(u.id));
   renderPager(total);
@@ -161,8 +218,8 @@ function renderRows() {
       <td>${statusBadge(u)}</td>
       <td><span class="num">${fmtBytes(used, 1)}</span> <span class="muted small">/ ${u.volume ? fmtBytes(u.volume, 0) : t('common.unlimited')}</span>${progress(used, u.volume)}</td>
       <td>${expiryCell(u)}</td>
-      <td class="num">${ips} / ${u.deviceLimit || '∞'}</td>
-      <td class="num">${(u.speedUp || u.speedDown) ? `${u.speedUp || '∞'}/${u.speedDown || '∞'} M` : '∞'}</td>
+      <td class="num c-p2">${ips} / ${u.deviceLimit || '∞'}</td>
+      <td class="num c-p3">${(u.speedUp || u.speedDown) ? `${u.speedUp || '∞'}/${u.speedDown || '∞'} M` : '∞'}</td>
       <td class="actions">
         <button class="btn sm" data-act="user.detail" data-id="${u.id}">${t('common.details')}</button>
         <button class="btn sm" data-act="user.edit" data-id="${u.id}">${t('common.edit')}</button>
@@ -170,7 +227,8 @@ function renderRows() {
           <button data-act="user.copy" data-id="${u.id}" data-fmt="clash">${t('user.subClash')}</button>
           <button data-act="user.copy" data-id="${u.id}" data-fmt="link">${t('user.subLink')}</button>
           <button data-act="user.copy" data-id="${u.id}" data-fmt="json">${t('user.subJson')}</button>
-          <button data-act="user.renew" data-id="${u.id}">${t('user.renew')}</button>
+          <button data-act="user.renew" data-id="${u.id}">${t('user.renewMenu')}</button>
+          ${state.plans.length ? `<button data-act="user.change" data-id="${u.id}">${t('user.changeMenu')}</button>` : ''}
           ${u.expiry || u.activateDays ? `<button data-act="user.extend" data-id="${u.id}">${t('user.extend')}</button>` : ''}
           <button data-act="user.reset" data-id="${u.id}">${t('user.reset')}</button>
           <button data-act="user.kick" data-id="${u.id}">${t('user.kick')}</button>
@@ -218,7 +276,8 @@ async function showDetail(id) {
       </dl>
       ${ruleLimitsHTML(u)}
       <div class="row" style="margin-top:.6rem;flex-wrap:wrap">
-        <button class="btn sm primary" data-act="user.renew" data-id="${id}">${t('user.renew')}</button>
+        <button class="btn sm primary" data-act="user.renew" data-id="${id}">${t('user.renewMenu')}</button>
+        ${state.plans.length ? `<button class="btn sm" data-act="user.change" data-id="${id}">${t('user.changeMenu')}</button>` : ''}
         ${u.expiry ? `<button class="btn sm" data-act="user.extend" data-id="${id}">${t('user.extend')}</button>` : ''}
         <button class="btn sm" data-act="user.reset" data-id="${id}">${t('user.reset')}</button>
         <button class="btn sm" data-act="user.kick" data-id="${id}">${t('user.kick')}</button>
@@ -226,6 +285,7 @@ async function showDetail(id) {
         <button class="btn sm" data-act="user.edit" data-id="${id}">${t('common.edit')}</button>
       </div>
     </section>
+    <section><h3>${t('pc.history')}</h3><div id="ud-planops"><span class="muted small">${t('common.loading')}</span></div></section>
     <section><h3>${t('user.onlineIps')}</h3><div id="ud-ips"></div></section>
     <section>
       <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:.4rem"><h3 style="margin:0">${t('user.trafficChart')}</h3>
@@ -233,9 +293,10 @@ async function showDetail(id) {
       <div id="ud-chart"></div>
       ${state.status && state.status.role === 'node' ? `<p class="hint">${t('user.chartNode')}</p>` : ((state.nodes || []).some(n => n.ratio > 0 && n.ratio !== 1) ? `<p class="hint">${t('user.chartRatio')}</p>` : '')}
     </section>
-    <section><h3>${t('user.lines')}</h3><div class="chips">${refLabels(refsOf(u), state.lines, pickerNodes()).map(n => `<span class="chip">${esc(n)}</span>`).join('') || `<span class="muted small">${t('common.none')}</span>`}</div>
-      ${(u.extIds || []).length ? `<h3 style="margin-top:.6rem">${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span></span>` : ''; }).join('')}</div>` : ''}</section>`);
+    <section><h3>${t('user.lines')}</h3>${refChips(refsOf(u), state.lines, pickerNodes(), { key: 'ud-lines-' + u.id, max: 20 }) || `<span class="muted small">${t('common.none')}</span>`}
+      ${(u.extIds || []).length ? `<h3 style="margin-top:.6rem">${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span></span>` : ''; }).join('')}</div>` : ''}</section>`, { wide: true });
   refreshDrawerLive();
+  loadPlanOps(id);
   await renderUserChart(u.name, drawerRange);
 }
 
@@ -305,8 +366,8 @@ function editUser(id) {
       ${field(t('user.f.resetDays'), `<input id="f-resetdays" type="number" min="1" value="${u.resetDays || 30}">`)}
       ${check('f-enabled', t('user.f.enabled'), u.enabled !== false)}
       ${check('f-autoreset', t('user.f.autoReset'), !!u.autoReset)}
-      <div class="full">${field(t('user.f.lines'), `<div id="f-lines"></div>`, t('lp.help'))}</div>
-      ${(state.exts || []).length ? `<div class="full">${field(t('user.f.exts'), `
+      <div class="full">${fieldBox(t('user.f.lines'), `<div id="f-lines"></div>`, t('lp.help'))}</div>
+      ${(state.exts || []).length ? `<div class="full">${fieldBox(t('user.f.exts'), `
         <div class="check-list">
           ${(state.exts || []).map(x => `<label><input type="checkbox" class="ext-cb" value="${x.id}" ${(u.extIds || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name)} <span class="muted small">${x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink')} · ${x.nodeCount || 0}</span></label>`).join('')}
         </div>`, t('user.f.extsHelp'))}</div>` : ''}
@@ -332,29 +393,275 @@ function editUser(id) {
     toast(id ? t('user.updated') : t('user.created'), 'ok');
     // 系统里的第一个用户:直接打开详情抽屉,订阅地址 / 二维码 / 复制就在眼前,不用再找
     if (created && created.id && state.users.length === 1) showDetail(created.id);
-  }, { wide: true });
+  }, { size: 'xl' });
   const items = pickerItems();
   picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refsOf(u), items) });
   // 新建时选了套餐就直接填好额度;编辑老用户时只是改归属,要填额度再点按钮
   if (!id) { const sel = document.getElementById('f-plan'); if (sel) sel.addEventListener('change', () => fillFromPlan(sel.value)); }
 }
 
-// ---- 续费 / 延期(套餐)----
+// ---- 续费 / 延期(套餐):可以一次续 N 期;单个用户时实时预览到期与配额的变化 ----
+// 每次打开对话框生成一个幂等键:双击、网络重试都只执行一次(重放时提示"已执行过")。
+// crypto.randomUUID 只在 HTTPS 下有,面板常走 http://IP:端口,所以用 getRandomValues 拼
+const newRequestId = () => 'ui-' + Array.from(crypto.getRandomValues(new Uint8Array(12)), b => b.toString(16).padStart(2, '0')).join('');
+const planBrief = p => `${p.volumeGb ? p.volumeGb + 'GB' : '∞'} / ${p.days ? p.days + t('common.day') : '∞'}`;
+const speedText = (up, down) => (up || down) ? `${up || '∞'}/${down || '∞'} M` : '∞';
+const expiryText = s => s.activateDays ? t('user.activateIn', { n: s.activateDays }) : s.expiry ? fmtDay(s.expiry) : t('user.never');
+const volText = s => s.volume ? fmtBytes(s.volume, 0) : t('common.unlimited');
+const durText = sec => sec >= 86400 ? `${+(sec / 86400).toFixed(2)} ${t('common.day')}` : fmtDuration(sec);
+
+// 套用套餐(续费 / 延期 / 换套餐)一律会启用手动停用的用户,外部 API 也一样(计费系统依赖这个行为,不改);
+// 而「延长 30 天」、批量延期、重置流量都不会。执行前在对话框里说清楚,免得月底批量续费把封掉的人放回来。
+const manualOff = u => !!u && !u.enabled && u.disabledReason === 'manual';
+function manualNote(ids, key) {
+  const users = ids.map(id => state.users.find(x => x.id === id)).filter(manualOff);
+  if (!users.length) return '';
+  if (ids.length === 1) return t(key);
+  const names = users.slice(0, 5).map(u => u.name).join(t('reach.sep')) + (users.length > 5 ? '…' : '');
+  return t('user.manualBatch', { n: users.length, names });
+}
+
 function renewDialog(ids) {
   if (!state.plans.length) { toast(t('plan.empty'), 'err'); return; }
   const single = ids.length === 1 ? state.users.find(x => x.id === ids[0]) : null;
+  const def = single && state.plans.some(p => p.id === single.planId) ? single.planId : state.plans[0].id; // 默认续他现在的套餐
+  const requestId = newRequestId();
+  const periods = () => Math.max(1, Math.floor(Number(fv('f-periods'))) || 1);
+  const manual = manualNote(ids, 'user.manualRenew');
   openModal(t('user.renew') + (single ? ' · ' + single.name : ` (${ids.length})`), `
     <div class="form-grid">
-      <div class="full">${field(t('plan.pick'), planSelect('f-plan', state.plans[0].id, false))}</div>
+      <div class="full">${field(t('plan.pick'), planSelect('f-plan', def, false))}</div>
       <div class="full">${field('', `<select id="f-mode"><option value="renew">${t('plan.renew')}</option><option value="extend">${t('plan.extend')}</option><option value="bind">${t('plan.bind')}</option></select>`)}</div>
-    </div>`, async () => {
+      ${field(t('pc.periods'), `<input id="f-periods" type="number" min="1" max="120" value="1">`, t('pc.periodsHelp'))}
+    </div>
+    ${manual ? `<p class="hint warn" id="rn-manual">${esc(manual)}</p>` : ''}
+    ${single ? `<p class="hint" id="rn-preview"></p>` : ''}`, async () => {
     const planId = Number(fv('f-plan')), mode = fv('f-mode');
-    if (ids.length === 1) await post(`users/${ids[0]}/plan`, { planId, mode });
-    else await post('users/batch', { ids, action: 'plan', planId, mode });
+    let replayed = false;
+    if (ids.length === 1) {
+      let r;
+      try {
+        r = await post(`users/${ids[0]}/plan`, mode === 'bind' ? { planId, mode } : { planId, mode, periods: periods(), requestId });
+      } catch (e) {
+        if (e.data && e.data.code === 'idempotency_conflict') throw await conflictError(ids[0]);
+        throw e;
+      }
+      replayed = !!(r && r.replayed);
+    } else {
+      // 批量续费没有幂等键:提交成功就关弹窗,刷新失败只提示(以前刷新一失败弹窗还开着,再点「保存」会再续一遍)
+      await post('users/batch', { ids, action: 'plan', planId, mode, periods: periods() });
+      selected.clear();
+      toast(t('plan.applied'), 'ok');
+      refreshAfterBatch();
+      return;
+    }
     await load('users'); renderRows();
     if (drawerUser && ids.includes(drawerUser)) showDetail(drawerUser);
-    toast(t('plan.applied'), 'ok');
+    toast(replayed ? t('pc.replayed') : t('plan.applied'), 'ok');
   });
+  let seq = 0;
+  const preview = debounce(async () => {
+    if (!single) return;
+    const my = ++seq, mode = fv('f-mode');
+    if (mode === 'bind') { setHTML('rn-preview', ''); return; }
+    try {
+      const r = await post(`users/${single.id}/plan`, { planId: Number(fv('f-plan')), mode, periods: periods(), dryRun: true });
+      if (my !== seq) return;
+      const warn = (r.warnings || []).filter(w => w.block).map(w => `<br><span class="pc-bad">${esc(warnText(w))}</span>`).join('');
+      setHTML('rn-preview', esc(t('pc.renewPreview', { from: expiryText(r.from), to: expiryText(r.to), vfrom: volText(r.from), vto: volText(r.to) })) + warn);
+    } catch (e) { if (my === seq) setHTML('rn-preview', `<span class="pc-bad">${esc(e.message)}</span>`); }
+  }, 300);
+  const sync = () => {
+    const bind = fv('f-mode') === 'bind', p = document.getElementById('f-periods'), m = document.getElementById('rn-manual');
+    if (p) p.disabled = bind;
+    if (m) m.hidden = bind; // 只归入套餐不改启停
+    preview();
+  };
+  ['f-plan', 'f-mode'].forEach(k => document.getElementById(k).addEventListener('change', sync));
+  document.getElementById('f-periods').addEventListener('input', preview);
+  sync();
+}
+
+// conflictError 409 idempotency_conflict:这个对话框之前的一次提交(同一个幂等键)其实已经执行成功了 ——
+// 多半是当时没收到结果,用户改了选项又提交。这次的改动不会再执行;刷新列表,请用户看过套餐记录再决定。
+async function conflictError(id) {
+  try {
+    await load('users'); renderRows();
+    if (drawerUser === id) showDetail(id);
+  } catch { /* 刷新失败不影响提示 */ }
+  return new Error(t('pc.err.idemConflict'));
+}
+
+// ---- 换套餐:立即替换 / 叠加 / 按价值折算。改动后防抖 300 ms 预览(dryRun),有阻断影响时要勾"仍然执行" ----
+// 折算的前提:用户有所属套餐、两个套餐都填了参考价、不是同一个套餐;不满足时置灰并说明
+function prorateBlocker(u, target) {
+  const cur = state.plans.find(p => p.id === u.planId);
+  if (!cur) return t('pc.noProrate.noPlan');
+  if (!target) return '';
+  if (target.id === cur.id) return t('pc.noProrate.same');
+  const unpriced = [cur, target].find(p => !(p.price > 0));
+  return unpriced ? t('pc.noProrate.noPrice', { name: unpriced.name }) : '';
+}
+
+// warnText 告警按 code + args 翻译;新版后端多出来的 code 先用它自带的中文
+function warnText(w) {
+  const a = w.args || {};
+  const speeds = v => Array.isArray(v) ? speedText(v[0], v[1]) : '∞'; // 限速是 [上行, 下行]
+  // 按 code 各取各的参数(只算命中的那一个:args 的形状因 code 而异)
+  const fmt = {
+    over_quota: () => ({ used: fmtBytes(a.used), volume: fmtBytes(a.volume), date: a.nextReset ? fmtDay(a.nextReset) : '' }),
+    expiry_earlier: () => ({ from: a.from ? fmtDay(a.from) : t('user.never'), to: fmtDay(a.to) }),
+    volume_lower: () => ({ from: a.from ? fmtBytes(a.from) : t('common.unlimited'), to: fmtBytes(a.to) }),
+    fewer_devices: () => ({ from: a.from || '∞', to: a.to }),
+    slower: () => ({ from: speeds(a.from), to: speeds(a.to) }),
+    lines_removed: () => ({ names: (a.lineIds || []).map(id => (state.lines.find(l => l.id === id) || {}).name || '#' + id).join(', ') }),
+    per_period_not_stacked: () => ({ lost: fmtBytes(a.lost) }),
+    carry_unlimited: () => ({ volume: fmtBytes(a.volume || 0) }),
+    carry_expired: () => ({ lost: fmtBytes(a.lost) }),
+    expiry_kept: () => ({ end: a.activateDays ? t('user.activateIn', { n: a.activateDays }) : fmtDay(a.expiry) }),
+    volume_kept: () => ({ left: fmtBytes(a.left || 0) }),
+    credit_rounded: () => ({ time: durText(a.seconds || 0) }),
+    reseller_pool_low: () => ({ remaining: a.remaining == null ? t('common.unlimited') : fmtBytes(a.remaining), pool: fmtBytes(a.pool) }),
+    reseller_expires_first: () => ({ date: fmtDay(a.resellerExpiry) }),
+  }[w.code];
+  // 立即超量:新套餐周期重置的到下次重置恢复,不重置的(一次性额度)要续费或清零用量,文案不同
+  const key = 'pc.w.' + w.code + (w.code === 'over_quota' && !a.nextReset ? 'Once' : ''), s = t(key, fmt ? fmt() : undefined);
+  return s === key ? (w.text || w.code) : s;
+}
+
+// 变更前 / 后两栏:套餐、流量、到期、周期重置、设备、限速、线路;变了的值加粗
+const stateRows = s => [
+  [t('user.plan'), esc(s.plan || t('plan.none'))],
+  [t('user.usage'), `${fmtBytes(s.used)} / ${s.volume ? fmtBytes(s.volume) : t('common.unlimited')}`],
+  [t('user.expiry'), esc(expiryText(s))],
+  [t('user.f.autoReset'), s.autoReset ? `${s.resetDays} ${t('common.day')} · ${fmtDay(s.nextReset)}` : t('common.no')],
+  [t('user.devices'), s.deviceLimit || '∞'],
+  [t('user.speed'), speedText(s.speedUp, s.speedDown)],
+  [t('user.lines'), esc(refLabels(s.lineRefs || [], state.lines, pickerNodes(), { servers: true }).join(', ') || t('common.none'))],
+];
+function stateCol(s, cmp) {
+  const rows = stateRows(s), base = cmp ? stateRows(cmp) : null;
+  return `<dl class="kv">${rows.map(([k, v], i) => `<dt>${k}</dt><dd class="${base && String(base[i][1]) !== String(v) ? 'chg' : ''}">${v}</dd>`).join('')}</dl>`;
+}
+const DIR_KIND = { upgrade: 'ok', downgrade: 'warn', mixed: 'primary', same: '' };
+function previewHTML(r, hide = []) {
+  const rem = r.remaining || {}, c = r.credit;
+  const left = t('pc.remaining', { time: rem.seconds == null ? t('common.unlimited') : durText(rem.seconds), bytes: rem.bytes == null ? t('common.unlimited') : fmtBytes(rem.bytes) })
+    + (rem.value != null ? ' · ' + t('pc.remainingValue', { v: +Number(rem.value).toFixed(2) }) : '');
+  const credit = c ? `<p class="hint">${esc(t('pc.creditLine', { value: +Number(c.value).toFixed(2), from: c.fromPrice, to: c.toPrice, periods: +Number(c.periods).toFixed(3), time: durText(c.seconds || 0), bytes: fmtBytes(c.bytes || 0) }))}</p>` : '';
+  const pool = r.pool && r.pool.volume ? `<p class="hint">${esc(t('pc.pool', { remaining: fmtBytes(r.pool.remaining), volume: fmtBytes(r.pool.volume) }))}</p>` : '';
+  const ws = (r.warnings || []).filter(w => !hide.includes(w.code)); // 对话框上面已经单独说了的不再重复
+  const warns = ws.length ? `<ul class="pc-warn">${ws.map(w => `<li class="${w.block ? 'bad' : 'warn'}">${esc(warnText(w))}</li>`).join('')}</ul>` : '';
+  return `<div class="grid-2 pc-cols">
+      <div><h3>${t('pc.before')}</h3>${stateCol(r.from)}</div>
+      <div><h3>${t('pc.after')} ${badge(t('pc.dir.' + r.direction), DIR_KIND[r.direction] || '')}</h3>${stateCol(r.to, r.from)}</div>
+    </div><p class="hint">${esc(left)}</p>${credit}${pool}${warns}`;
+}
+
+function changeDialog(id) {
+  const u = state.users.find(x => x.id === id);
+  if (!u) return;
+  if (!state.plans.length) { toast(t('plan.empty'), 'err'); return; }
+  const requestId = newRequestId();
+  const pick = (state.plans.find(p => p.id !== u.planId) || state.plans[0]).id;
+  let mode = 'replace', seq = 0;
+  // shown:最近一次成功的预览用的参数。提交时原样带它(而不是表单此刻的值);参数一变就清掉、禁用提交、取消「仍然执行」,
+  // 直到新的预览回来 —— force 只会跟着用户看过的那份预览一起提交。备注不影响预览,提交时现读。
+  let shown = null;
+  const params = () => ({ planId: Number(fv('pc-plan')), mode, periods: Math.max(0, Math.floor(Number(fv('pc-periods'))) || 0), usage: fv('pc-usage') });
+  const el = k => document.getElementById(k);
+  const setReady = ok => { const b = el('modal-save'); if (b) b.disabled = !ok; };
+  const setForce = need => {
+    const wrap = el('pc-force-wrap'), f = el('pc-force');
+    if (wrap) wrap.hidden = !need;
+    if (f) f.checked = false; // 每份新预览都要重新确认
+  };
+  const manual = manualOff(u);
+  const show = (r, p) => { setHTML('pc-preview', previewHTML(r, manual ? ['enables_manual'] : [])); setForce(!!r.needsForce); shown = p; setReady(true); };
+  openModal(t('pc.title') + ' · ' + u.name, `
+    <div class="form-grid">
+      <div class="full">${field(t('pc.target'), `<select id="pc-plan">${state.plans.map(p => `<option value="${p.id}" ${p.id === pick ? 'selected' : ''}>${esc(p.name)} · ${planBrief(p)}${p.price > 0 ? ' · ' + esc(t('plan.priceShort', { n: p.price })) : ''}${p.id === u.planId ? ' · ' + t('pc.current') : ''}</option>`).join('')}</select>`)}</div>
+      <div class="full"><div class="field"><span class="label">${t('pc.mode')}</span><div class="seg" id="pc-mode">${['replace', 'stack', 'prorate'].map(m => `<button type="button" data-mode="${m}">${t('pc.mode.' + m)}</button>`).join('')}</div><span class="help" id="pc-mode-help"></span></div></div>
+      ${field(t('pc.periods'), `<input id="pc-periods" type="number" min="1" max="120" value="1">`, t('pc.periodsHelp'))}
+      ${field(t('pc.usage'), `<select id="pc-usage">${['auto', 'keep', 'reset'].map(v => `<option value="${v}">${t('pc.usage.' + v)}</option>`).join('')}</select>`, t('pc.usageHelp'))}
+      <div class="full">${field(t('pc.remark'), `<input id="pc-remark" maxlength="200" placeholder="${esc(t('pc.remarkPh'))}">`)}</div>
+    </div>
+    ${manual ? `<p class="hint warn">${esc(t('user.manualChange'))}</p>` : ''}
+    <div class="pc-preview" id="pc-preview"><p class="muted small">${t('common.loading')}</p></div>
+    <div id="pc-force-wrap" hidden>${check('pc-force', t('pc.force'), false)}</div>`, async () => {
+    if (!shown) throw new Error(t('pc.previewPending')); // 等预览时按钮是禁用的;openModal 出错后会把它重新点亮,这里再拦一道
+    const sent = shown, at = seq, wrap = el('pc-force-wrap'), needForce = !!(wrap && !wrap.hidden);
+    // 预览已经说了要确认、用户还没勾:直接让他先勾,不发请求(发了服务端也是 409 needs_force,提示成「情况有变」会误导)
+    if (needForce && !fchk('pc-force')) throw new Error(t('pc.err.tickForce'));
+    let res;
+    try {
+      res = await post(`users/${id}/change`, { ...sent, remark: fv('pc-remark').trim(), force: needForce, requestId });
+    } catch (e) {
+      const code = e.data && e.data.code;
+      if (code === 'needs_force' && e.data.preview) {
+        // 预览之后情况变了(比如这期间又用了流量):换上服务端的最新预览,重新确认。提交途中又改了选项的,等新选项的预览
+        if (at === seq) show(e.data.preview, sent);
+        throw new Error(t('pc.err.needsForce'));
+      }
+      if (code === 'idempotency_conflict') throw await conflictError(id);
+      throw e;
+    }
+    await load('users'); renderRows();
+    if (drawerUser === id) showDetail(id);
+    toast(res && res.replayed ? t('pc.replayed') : t('pc.done'), 'ok');
+  }, { wide: true, saveText: t('pc.confirm') });
+
+  const setMode = m => {
+    const why = prorateBlocker(u, state.plans.find(p => p.id === Number(fv('pc-plan'))));
+    if (m === 'prorate' && why) m = 'replace';
+    mode = m;
+    document.querySelectorAll('#pc-mode button').forEach(b => {
+      b.classList.toggle('active', b.dataset.mode === mode);
+      if (b.dataset.mode === 'prorate') { b.disabled = !!why; b.title = why; }
+    });
+    setText('pc-mode-help', t('pc.modeHelp.' + mode) + (why ? ' ' + t('pc.noProrate', { why }) : ''));
+    const per = el('pc-periods');
+    per.min = mode === 'prorate' ? '0' : '1';
+    if (mode !== 'prorate' && Number(per.value) < 1) per.value = '1';
+  };
+  const preview = debounce(async () => {
+    const my = seq, p = params();
+    try {
+      const r = await post(`users/${id}/change`, { ...p, dryRun: true });
+      if (my === seq) show(r, p);
+    } catch (e) {
+      if (my !== seq) return;
+      setHTML('pc-preview', `<p class="hint bad">${esc(e.message)}</p>`);
+      setForce(false); // 没有可确认的预览:提交保持禁用,改一下选项会再预览
+    }
+  }, 300);
+  // 参数一变:作废在途的预览(seq + 1)、清掉已确认的那份、禁用提交,防抖后重新预览
+  const changed = () => { seq++; shown = null; setForce(false); setReady(false); preview(); };
+  el('pc-mode').addEventListener('click', e => {
+    const b = e.target.closest('button[data-mode]');
+    if (b && !b.disabled) { setMode(b.dataset.mode); changed(); }
+  });
+  el('pc-plan').addEventListener('change', () => { setMode(mode); changed(); });
+  el('pc-usage').addEventListener('change', changed);
+  el('pc-periods').addEventListener('input', changed);
+  setMode('replace');
+  changed();
+}
+
+// ---- 详情抽屉:最近 10 条套餐记录 ----
+const opLabel = op => (op.op === 'renew' || op.op === 'extend')
+  ? t('pc.op.' + op.op) + (op.periods > 1 ? ' ×' + op.periods : '') + (op.toPlan ? ' · ' + op.toPlan : '')
+  : t('pc.op.change', { mode: t('pc.mode.' + op.op), from: op.fromPlan || '—', to: op.toPlan || '—' }) + (op.periods !== 1 ? ' ×' + op.periods : '');
+async function loadPlanOps(id) {
+  let list = [];
+  try { list = await get(`users/${id}/plan-ops?limit=10`); } catch { list = []; }
+  if (drawerUser !== id) return;
+  if (!Array.isArray(list)) list = [];
+  setHTML('ud-planops', list.length ? `<ul class="plan-ops">${list.map(op => {
+    const a = op.before || {}, b = op.after || {};
+    const actor = op.actor === '主面板' ? t('pc.byMaster') : op.actor; // 代理看到的主面板操作
+    return `<li><span class="muted">${fmtDate(op.createdAt)} · ${esc(actor || '')}</span><br>${esc(opLabel(op))} · ${t('user.expiry')} ${esc(expiryText(a))} → ${esc(expiryText(b))} · ${t('plan.quota')} ${volText(a)} → ${volText(b)}${op.remark ? ` · <span class="muted">${esc(op.remark)}</span>` : ''}</li>`;
+  }).join('')}</ul>` : `<span class="muted small">${t('pc.noHistory')}</span>`);
 }
 
 // ---- 批量生成 ----
@@ -367,7 +674,7 @@ function bulkDialog() {
       ${field(t('user.bulkStart'), `<input id="f-start" type="number" min="1" value="1">`)}
       ${field(t('user.f.remark'), `<input id="f-remark" value="">`)}
       ${field(t('plan.pick'), planSelect('f-plan', 0), t('user.bulkHelp'))}
-      <div class="full">${field(t('user.f.lines'), `<div id="f-lines"></div>`, t('lp.help'))}</div>
+      <div class="full">${fieldBox(t('user.f.lines'), `<div id="f-lines"></div>`, t('lp.help'))}</div>
     </div>`, async () => {
     const res = await post('users/bulk', {
       prefix: fv('f-prefix').trim(), count: Number(fv('f-count')), nameMode: fv('f-mode'), startIndex: Number(fv('f-start')),
@@ -376,9 +683,10 @@ function bulkDialog() {
     });
     await load('users', 'lines', 'status'); renderRows();
     toast(t('user.bulkDone', { n: res.length }), 'ok');
-    closeModal();
-    openModal(t('user.bulkResult'), `<textarea style="min-height:16rem" readonly>${esc(res.map(r => r.name + '\t' + r.link).join('\n'))}</textarea>`, null);
-  }, { wide: true });
+    // 直接换成结果框:openModal 认得出保存回调里换了弹窗,不会再把它关掉;用户自己点「关闭」才关
+    openModal(t('user.bulkResult'), `<textarea id="bulk-result" style="min-height:16rem" readonly>${esc(res.map(r => r.name + '\t' + r.link).join('\n'))}</textarea>
+      <div class="toolbar"><button type="button" class="btn" data-act="user.bulkCopy">${t('common.copy')}</button></div>`, null, { cancelText: t('common.close') });
+  }, { size: 'xl' });
   const items = pickerItems();
   picker = linePicker(document.getElementById('f-lines'), { items, selected: new Set(items.map(it => it.key)) });
 }
@@ -391,6 +699,9 @@ async function fullUpdate(u, patch) {
 
 registerActions({
   'user.filter': id => { filter = id; page = 1; document.querySelectorAll('#user-filter button').forEach(b => b.classList.toggle('active', b.dataset.id === id)); renderRows(); },
+  'user.clearOnly': () => { only = ''; page = 1; renderRows(); },
+  // 选中 = 当前筛选结果的全部(替换,不并进以前勾的):按钮上写的是 N 个,批量操作的也就是这 N 个
+  'user.selAllFiltered': () => { selected.clear(); visibleRows().forEach(u => selected.add(u.id)); renderRows(); },
   'user.page': id => { page += id === 'next' ? 1 : -1; renderRows(); },
   'user.chartRange': async id => {
     drawerRange = Number(id);
@@ -411,10 +722,13 @@ registerActions({
   'user.edit': id => editUser(Number(id)),
   'user.detail': id => showDetail(Number(id)),
   'user.copyText': id => copy(id),
-  'user.copy': async (id, btn) => { const l = await get(`users/${id}/sub`); copy(btn.dataset.fmt === 'link' ? l.link : l.clash); },
+  // 「更多」里的三种订阅:data-fmt 是 clash / link / json,各复制各的地址(以前只认 link,sing-box 那项复制成了 Clash 地址)
+  'user.copy': async (id, btn) => { const l = await get(`users/${id}/sub`); const f = btn.dataset.fmt; copy((f === 'link' || f === 'json') && l[f] ? l[f] : l.clash); },
   'user.fillPlan': () => fillFromPlan(fv('f-plan')),
   'user.renew': id => renewDialog([Number(id)]),
+  'user.change': id => changeDialog(Number(id)),
   'user.bulk': () => bulkDialog(),
+  'user.bulkCopy': () => { const ta = document.getElementById('bulk-result'); if (ta) copy(ta.value); },
   'user.export': () => { window.open('./api/users/export', '_blank'); },
   'user.import': () => {
     openModal(t('user.importTitle'), `
@@ -436,13 +750,26 @@ registerActions({
   'user.batch': async action => {
     const ids = [...selected];
     if (!ids.length) return;
+    // 已选跨筛选保留(搜 alice 勾上、再搜 bob 勾上、一起停用):其中有当前列表里看不到的人时先说清楚
+    const vis = new Set(visibleRows().map(u => u.id));
+    const hidden = ids.filter(id => !vis.has(id)).length;
+    if (action === 'delete') {
+      if (!await confirm(t('user.batchDeleteConfirm', { n: ids.length }) + (hidden ? ' ' + t('user.batchHidden', { n: hidden }) : ''), { danger: true, okText: t('common.delete') })) return;
+    } else if (hidden && !await confirm(t('user.batchHiddenConfirm', { n: ids.length, hidden }))) return;
     if (action === 'plan') { renewDialog(ids); return; }
-    let days = 0;
-    if (action === 'extend') {
-      days = Number(prompt(t('user.batchDays'), '30'));
-      if (!days) return;
+    if (action === 'extend') { // 输入天数用面板自己的弹窗(浏览器原生 prompt 在一些环境里被拦)
+      openModal(t('user.batch.extend') + ` (${ids.length})`, `<div class="form-grid">${field(t('user.batchDays'), '<input id="f-days" type="number" min="1" max="3650" step="1" value="30">')}</div>`, async () => {
+        const days = Number(fv('f-days'));
+        if (!(Number.isInteger(days) && days >= 1 && days <= 3650)) throw new Error(t('user.batchDaysBad'));
+        const r = await post('users/batch', { ids, action, days });
+        // 延期不是幂等的:提交成功就关弹窗,之后刷新失败只提示,不能让人在弹窗里再点一次「保存」又延一遍
+        selected.clear();
+        toast(t('user.batchDone', { n: r.affected }), 'ok');
+        refreshAfterBatch();
+      });
+      return;
     }
-    if (action === 'delete' && !await confirm(t('user.batchDeleteConfirm', { n: ids.length }), { danger: true, okText: t('common.delete') })) return;
+    const days = 0;
     try {
       const r = await post('users/batch', { ids, action, days });
       selected.clear();

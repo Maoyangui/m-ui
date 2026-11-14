@@ -137,6 +137,10 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		bin, _ := os.Executable()
 		logf := func(f string, a ...interface{}) { logger.Info("更新: ", f) }
 
+		// 0. 主机容灾:升级重启那一两分钟别让备用当成主机失联(暂停 15 分钟,马上推给备用)
+		if h := s.haSvc(); h != nil {
+			h.PauseForUpgrade()
+		}
 		// 1. 升级前备份(面板自己的备份格式,带 WAL 检查点):回滚时旧程序对新库不放心就还原它
 		backupPath := s.preUpgradeBackup()
 

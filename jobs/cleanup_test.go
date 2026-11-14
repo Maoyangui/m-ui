@@ -90,3 +90,84 @@ func TestCleanupRetention(t *testing.T) {
 		t.Fatalf("trafficAge=0 表示不清理流量时序,实际剩 %d", n)
 	}
 }
+
+// 套餐记录(兼幂等键)固定保留一年,和审计日志的设置无关;总量超过上限时裁掉最旧的。
+func TestCleanupPlanOps(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	now := time.Now()
+	for _, d := range []int{400, 366, 10, 0} {
+		db.Create(&model.PlanOp{UserId: 1, Op: "renew", CreatedAt: now.AddDate(0, 0, -d).Unix()})
+	}
+	count := func() int64 {
+		var n int64
+		db.Model(&model.PlanOp{}).Count(&n)
+		return n
+	}
+	s := New(Deps{DB: db, IsNode: func() bool { return false }, Setting: func(k string) string { return map[string]string{"auditAge": "1"}[k] }})
+	s.runCleanup()
+	if n := count(); n != 2 {
+		t.Fatalf("应删掉一年以前的 2 条、留 2 条,实际剩 %d", n)
+	}
+	// 总量上限:多出来的最旧几条被裁掉
+	extra := int64(model.PlanOpMaxRows + 3)
+	if err := db.Exec(`INSERT INTO plan_ops (user_id, op, periods, created_at)
+		WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?)
+		SELECT x, 'renew', 1, ? FROM c`, extra, now.Unix()).Error; err != nil {
+		t.Fatal(err)
+	}
+	s.runCleanup()
+	if n := count(); n != model.PlanOpMaxRows {
+		t.Fatalf("裁到 %d 条,实际 %d", model.PlanOpMaxRows, n)
+	}
+	var oldest int64
+	db.Model(&model.PlanOp{}).Select("MIN(created_at)").Scan(&oldest)
+	if oldest != now.Unix() {
+		t.Fatal("裁掉的应是最旧的那几条")
+	}
+}
+
+// 条数上限按作用域(主面板 / 每个代理)各算各的:一个代理刷出再多的记录,也只裁他自己最旧的,
+// 主面板和别的代理的记录与幂等键都还在(以前按全表裁,代理刷一轮就能把别人一年内的幂等键挤掉,重试又加一次时)。
+func TestCleanupPlanOpsPerScope(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	now := time.Now()
+	key := func(s string) *string { return &s }
+	old := now.AddDate(0, 0, -30).Unix()
+	db.Create(&model.PlanOp{ResellerId: 0, RequestId: key("order-1"), UserId: 1, Op: "renew", CreatedAt: old})
+	db.Create(&model.PlanOp{ResellerId: 0, UserId: 1, Op: "stack", CreatedAt: old})
+	db.Create(&model.PlanOp{ResellerId: 8, RequestId: key("order-1"), UserId: 2, Op: "renew", CreatedAt: old})
+	// 代理 7 刷了上限 + 3 条,都比上面的新
+	if err := db.Exec(`INSERT INTO plan_ops (reseller_id, user_id, op, periods, created_at)
+		WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < ?)
+		SELECT 7, 3, 'renew', 1, ? + x FROM c`, int64(model.PlanOpMaxRows+3), now.Unix()-int64(model.PlanOpMaxRows+10)).Error; err != nil {
+		t.Fatal(err)
+	}
+	s := New(Deps{DB: db, IsNode: func() bool { return false }, Setting: func(string) string { return "" }})
+	s.runCleanup()
+	count := func(rid uint) int64 {
+		var n int64
+		db.Model(&model.PlanOp{}).Where("reseller_id = ?", rid).Count(&n)
+		return n
+	}
+	if n0, n8, n7 := count(0), count(8), count(7); n0 != 2 || n8 != 1 || n7 != model.PlanOpMaxRows {
+		t.Fatalf("各作用域各自封顶:主面板 %d(应 2)、代理 8 %d(应 1)、代理 7 %d(应 %d)", n0, n8, n7, model.PlanOpMaxRows)
+	}
+	var keys int64
+	db.Model(&model.PlanOp{}).Where("request_id = ?", "order-1").Count(&keys)
+	if keys != 2 {
+		t.Fatalf("主面板与代理 8 的幂等键不该被代理 7 挤掉: %d", keys)
+	}
+	var oldest int64
+	db.Model(&model.PlanOp{}).Where("reseller_id = ?", 7).Select("MIN(created_at)").Scan(&oldest)
+	if oldest != now.Unix()-int64(model.PlanOpMaxRows+10)+4 {
+		t.Fatalf("代理 7 裁掉的应是他自己最旧的 3 条: %d", oldest)
+	}
+}

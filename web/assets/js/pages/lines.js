@@ -2,14 +2,16 @@ import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML } from '../ui.js';
+import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, chipList, fieldBox } from '../ui.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 import { editRelayUpstream } from './upstreams.js';
+import { loadReach, reachLoaded, v6Of, v6LineBadge, v6ForLine } from '../reach.js';
 
 const selected = new Set(); // 批量设置勾选的线路 id
 export const title = () => t('line.title');
 export const subtitle = () => t('line.subtitle');
 let query = '';
+let nodeFilter = 0, protoFilter = ''; // 快捷筛选:部署在某台服务器上(部署到全部服务器的也算)、某种协议
 
 // 与后端 render.Protocols 对应:TLS 是否必需、默认模式、是否支持传输层
 const PROTOCOLS = {
@@ -37,6 +39,8 @@ export async function render(el) {
   el.innerHTML = `
     <div class="toolbar">
       <input type="search" id="line-q" placeholder="${t('common.search')}…" value="${esc(query)}">
+      ${(state.nodes || []).length > 1 ? `<select class="sm" id="line-node" style="width:auto;max-width:14rem" aria-label="${esc(t('nav.nodes'))}"><option value="0">${esc(t('line.allNodes'))}</option>${state.nodes.map(n => `<option value="${n.id}" ${n.id === nodeFilter ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select>` : ''}
+      <span id="line-protos"></span>
       <span class="muted small" id="line-count"></span>
       <span class="grow"></span>
       <details class="menu"><summary class="btn">${t('line.quick')} ▾</summary><div class="menu-list">
@@ -52,19 +56,34 @@ export async function render(el) {
       ${(state.nodes || []).length > 1 ? `<button class="btn sm" data-act="line.batch" data-id="nodes">${t('line.batch.nodes')}</button>` : ''}
       <button class="btn sm ghost" data-act="line.clearSel">${t('line.batch.clear')}</button>
     </div>
-    <div class="table-wrap"><table class="grid">
-      <thead><tr><th></th><th style="width:1.5rem"><input type="checkbox" id="line-sel-all"></th><th>${t('common.name')}</th><th>${t('line.protocol')}</th><th>${t('common.port')}</th><th>${t('line.upstream')}</th><th>${t('nav.nodes')}</th><th>${t('line.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
+    <div class="table-wrap fill"><table class="grid">
+      <thead><tr><th></th><th style="width:1.5rem"><input type="checkbox" id="line-sel-all"></th><th>${t('common.name')}</th><th>${t('line.protocol')}</th><th>${t('common.port')}</th><th>${t('line.upstream')}</th><th>${t('nav.nodes')}</th><th class="c-p3">${t('line.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
       <tbody id="lines-body"></tbody>
     </table></div>`;
   document.getElementById('line-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
+  const ns = document.getElementById('line-node');
+  if (ns) ns.addEventListener('change', e => { nodeFilter = Number(e.target.value) || 0; renderRows(); });
   document.getElementById('line-sel-all').addEventListener('change', e => {
     visibleRows().forEach(l => e.target.checked ? selected.add(l.id) : selected.delete(l.id));
     renderRows();
   });
   renderRows();
+  loadReach().then(renderRows); // 走 IPv6 的线路标上服务器页那份 IPv6 入站检测结果;拿不到不影响列表
 }
-function visibleRows() { return state.lines.filter(l => matches(query, l.name, l.protocol, l.port, l.upstreamName)); }
+const lineNodeIds = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
+function visibleRows() {
+  return state.lines.filter(l => matches(query, l.name, l.protocol, l.port, l.upstreamName)
+    && (!nodeFilter || !lineNodeIds(l).length || lineNodeIds(l).includes(nodeFilter))
+    && (!protoFilter || l.protocol === protoFilter));
+}
+// 协议筛选只列实际用到的协议(两种以上才出现)
+function renderProtoSeg() {
+  const used = [...new Set(state.lines.map(l => l.protocol))];
+  if (protoFilter && !used.includes(protoFilter)) protoFilter = '';
+  setHTML('line-protos', used.length > 1 ? `<div class="seg sm">${['', ...used].map(pr => `<button data-act="line.proto" data-id="${esc(pr)}" class="${pr === protoFilter ? 'active' : ''}">${esc(pr || t('line.allProtocols'))}</button>`).join('')}</div>` : '');
+}
 export function tick() { renderRows(); }
+const filtering = () => !!(query || nodeFilter || protoFilter);
 
 function tlsModeOf(l) {
   const tls = parseJ(l.tls);
@@ -84,6 +103,7 @@ function renderRows() {
   const body = document.getElementById('lines-body');
   if (!body) return;
   const online = new Set(state.onlines.lines || []);
+  renderProtoSeg();
   const rows = visibleRows();
   document.getElementById('line-count').textContent = `${rows.length} / ${state.lines.length}`;
   for (const id of [...selected]) if (!state.lines.some(l => l.id === id)) selected.delete(id); // 被删掉的线路不再算选中
@@ -99,32 +119,41 @@ function renderRows() {
   const nodeIdsOf = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
   const serversCell = l => {
     const ids = nodeIdsOf(l), fam = familyOf(l);
-    const tag = id => { const n = (state.nodes || []).find(x => x.id === id); return badge((n ? n.name : '#' + id) + (fam[id] ? ' · ' + famName(fam[id]) : ''), 'primary'); };
-    if (!ids.length) { // 全部服务器:只把单独选了 IP 版本的列出来
-      const picked = Object.keys(fam).map(Number).filter(id => (state.nodes || []).some(x => x.id === id));
-      return `<span class="muted">${t('line.allServers')}</span>${picked.length ? ' ' + picked.map(tag).join(' ') : ''}`;
+    // 走 IPv6 的服务器后面跟这条线路自己的 IPv6 入站结论(按它的端口和传输层,见 reach.js v6ForLine)
+    const tag = (id, inAll) => {
+      const n = (state.nodes || []).find(x => x.id === id);
+      const v6 = !!n && lineUsesV6(l, n);
+      // "全部服务器"里因为默认走 IPv6 才列出来的那台,名字后面注明 IPv6(不然还没测过时看不出为什么列它)
+      const fl = fam[id] ? ' · ' + famName(fam[id]) : inAll && v6 ? ' · IPv6' : '';
+      return badge((n ? n.name : '#' + id) + fl, 'primary') + (v6 ? ' ' + v6LineBadge(v6Of(id), l) : '');
+    };
+    if (!ids.length) { // 全部服务器:把单独选了 IP 版本的、以及这条线路在上面走 IPv6 的(默认给 IPv6 的服务器)列出来
+      const shown = allServersShown(l);
+      return `<span class="muted">${t('line.allServers')}</span>${shown.length ? ' ' + shown.map(id => tag(id, true)).join(' ') : ''}`;
     }
-    return ids.map(tag).join(' ');
+    return chipList(ids.map(id => tag(id, false)), { key: 'ln-' + l.id, max: 3 }); // 服务器多时只露前 3 个,其余折成 +N(展开状态 5 秒刷新不丢)
   };
   setHTML(body, rows.map(l => `
-    <tr draggable="${query ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
+    <tr draggable="${filtering() ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
       <td class="handle" title="拖动排序">⠿</td>
       <td><input type="checkbox" class="sel" data-change="line.sel" data-id="${l.id}" ${selected.has(l.id) ? 'checked' : ''}></td>
       <td class="primary-cell">${dot(online.has(l.name))}${esc(l.name)}</td>
       <td>${protoBadges(l)}</td>
       <td class="num">${l.port}</td>
-      <td>${esc(l.upstreamName)}${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
+      <td><span class="cell-clip" title="${esc(l.upstreamName)}">${esc(l.upstreamName)}</span>${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
       <td>${serversCell(l)}</td>
-      <td class="num">${l.userCount}</td>
+      <td class="num c-p3">${l.userCount}</td>
       <td><label class="switch" title="${l.enabled ? t('common.enabled') : t('common.disabled')}"><input type="checkbox" data-change="line.toggle" data-id="${l.id}" ${l.enabled ? 'checked' : ''}><span></span></label></td>
       <td class="actions">
         <button class="btn sm" data-act="line.edit" data-id="${l.id}">${t('common.edit')}</button>
-        <button class="btn sm" data-act="line.clone" data-id="${l.id}" title="${t('line.clone')}">⧉</button>
-        <button class="btn sm" data-act="line.asUpstream" data-id="${l.id}" title="${t('up.addFromLine')}">⇢</button>
-        <button class="btn sm danger" data-act="line.del" data-id="${l.id}">${t('common.delete')}</button>
+        <details class="menu"><summary class="btn sm">${t('common.more')} ▾</summary><div class="menu-list">
+          <button data-act="line.clone" data-id="${l.id}">⧉ ${t('line.clone')}</button>
+          <button data-act="line.asUpstream" data-id="${l.id}">⇢ ${t('up.addFromLine')}</button>
+          <hr><button class="danger" data-act="line.del" data-id="${l.id}">${t('common.delete')}</button>
+        </div></details>
       </td>
     </tr>`).join(''));
-  if (!query) enableDragSort(body);
+  if (!filtering()) enableDragSort(body); // 筛选后看到的不是全部线路,拖动排序会打乱没显示的那些
 }
 
 function enableDragSort(tbody) {
@@ -156,17 +185,85 @@ function isDualStack(n) {
   const a = bareAddr(n), pub = String(n.publicIp || '').trim(), pub6 = String(n.publicIp6 || '').trim();
   return (isV4Addr(a) || isV4Addr(pub)) && (a.includes(':') || pub6.includes(':') || pub.includes(':'));
 }
-// 没单独选时这台实际用哪个版本:手填的连接地址优先,否则看服务器的"自动地址用"
+// 这台两族各自的地址(和后端 model.FamilyIPs 一致):探测到的两个,手填的连接地址是哪一族就顶替哪一族
+function famIPs(n) {
+  const a = bareAddr(n), pub = String(n.publicIp || '').trim(), pub6 = String(n.publicIp6 || '').trim();
+  let v4 = isV4Addr(pub) ? pub : '', v6 = pub6.includes(':') ? pub6 : (pub.includes(':') ? pub : '');
+  if (isV4Addr(a)) v4 = a; else if (a.includes(':')) v6 = a;
+  return { v4, v6 };
+}
+// IPv6 地址的规范写法(补全 8 段、去掉前导零、小写),不是 IPv6 返回 '':写法不同(大写、省略的零、方括号)也认得出是同一个地址
+function v6Norm(s) {
+  let a = String(s ?? '').trim().replace(/^\[|\]$/g, '').toLowerCase();
+  if (!a.includes(':') || !/^[0-9a-f:.]+$/.test(a)) return '';
+  const m = a.match(/^(.*:)(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/); // 末尾嵌着 IPv4 的写法(::ffff:1.2.3.4)
+  if (m) {
+    const o = m.slice(2).map(Number);
+    if (o.some(x => x > 255)) return '';
+    a = m[1] + ((o[0] << 8) | o[1]).toString(16) + ':' + ((o[2] << 8) | o[3]).toString(16);
+  }
+  const parts = a.split('::');
+  if (parts.length > 2) return '';
+  const head = parts[0] ? parts[0].split(':') : [], tail = parts.length === 2 && parts[1] ? parts[1].split(':') : [];
+  const fill = 8 - head.length - tail.length;
+  if (parts.length === 2 ? fill < 1 : fill !== 0) return '';
+  const groups = [...head, ...Array(parts.length === 2 ? fill : 0).fill('0'), ...tail];
+  return groups.every(g => /^[0-9a-f]{1,4}$/.test(g)) ? groups.map(g => parseInt(g, 16).toString(16)).join(':') : '';
+}
+// 地址是哪一族:IPv4 字面量 'v4'(IPv4 映射地址也算,和后端一致),IPv6 字面量 'v6',域名(和写错的)''
+function ipFam(s) {
+  const a = String(s ?? '').trim().replace(/^\[|\]$/g, '');
+  if (isV4Addr(a)) return 'v4';
+  const n = v6Norm(a);
+  return !n ? '' : n.startsWith('0:0:0:0:0:ffff:') ? 'v4' : 'v6';
+}
+// 这台自己的 IPv6(和后端 runner.subAddrs.own6 一致):手填的连接地址、探测到的公网 IPv6
+const own6 = n => new Set([bareAddr(n), n.publicIp6, n.publicIp].map(v6Norm).filter(a => a && !a.startsWith('0:0:0:0:0:ffff:')));
+// 自定义地址里取键:不分大小写(和订阅、后端保存时的读法一致)
+const keyOf = (o, k) => {
+  if (!o || typeof o !== 'object') return undefined;
+  for (const [kk, v] of Object.entries(o)) if (kk.toLowerCase() === k) return v;
+  return undefined;
+};
+// 自定义地址里这台拿得到的那几条(node_id 写这台的、没写的);没填自定义地址返回 null
+function customFor(l, n) {
+  const list = parseJ(l.addrs);
+  if (!Array.isArray(list) || !list.length) return null;
+  return list.filter(c => { const id = Number(keyOf(c, 'node_id')) || 0; return !id || id === n.id; });
+}
+// 这条线路在这台服务器上订阅里给不给这台的 IPv6(和后端 sub.resolveAddrs、runner.lineUse 一致):
+// 填了自定义地址的看这台拿得到的那几条里有没有写成这台自己 IPv6 的 —— 别的 IPv6(国内中转、CDN 的入口)不算,
+// 写不写 node_id 都一样:用户连的是中转,这台不用为它放行 IPv6,IPv6 入站检测也不测它;
+// 否则单独选了、且这台有那一族的地址就按选的,再否则跟服务器的默认
+function lineUsesV6(l, n, f = familyOf(l)[n.id]) {
+  const mine = customFor(l, n);
+  if (mine) {
+    const own = own6(n);
+    return mine.some(c => ipFam(keyOf(c, 'server')) === 'v6' && own.has(v6Norm(keyOf(c, 'server'))));
+  }
+  const ips = famIPs(n);
+  if (f === 'v6' && ips.v6) return true;
+  if (f === 'v4' && ips.v4) return false;
+  return serverFamily(n) === 'IPv6';
+}
+// 订阅里的节点地址设成了"域名"(设置 → 订阅):没单独选 IP 版本的线路给的是域名,客户端自己解析
+const subByDomain = () => String((state.settings || {}).subServerAddr || '').toLowerCase() === 'domain';
+// 没单独选时这台在订阅里实际给哪个版本(和后端 sub.EntriesFromNodes 一致):订阅给域名时由客户端解析决定('dns');
+// 否则手填的连接地址优先,再按"自动地址用"挑探测到的地址,选的那个没探测到就用另一个
 function serverFamily(n) {
+  if (subByDomain()) return 'dns';
   const a = bareAddr(n);
   if (isV4Addr(a)) return 'IPv4';
   if (a.includes(':')) return 'IPv6';
-  return a ? '' : famName(n.addrFamily);
+  if (a) return ''; // 手填的是域名:也由解析决定
+  const ips = famIPs(n);
+  if (ips.v6 && (n.addrFamily === 'v6' || !ips.v4)) return 'IPv6';
+  return ips.v4 ? 'IPv4' : famName(n.addrFamily);
 }
 const famSelect = (n, cur) => {
   const def = serverFamily(n);
   return `<select class="sm node-fam" data-node="${n.id}" aria-label="${esc(t('line.ipVersion'))}">
-    <option value="">${esc(def ? t('line.famDefault', { f: def }) : t('line.famDefaultPlain'))}</option>
+    <option value="">${esc(def === 'dns' ? t('line.famDefaultDns') : def ? t('line.famDefault', { f: def }) : t('line.famDefaultPlain'))}</option>
     <option value="v4" ${cur === 'v4' ? 'selected' : ''}>IPv4</option>
     <option value="v6" ${cur === 'v6' ? 'selected' : ''}>IPv6</option>
   </select>`;
@@ -175,13 +272,60 @@ const famSelect = (n, cur) => {
 function serversField(l) {
   const nodes = state.nodes || [];
   const fam = familyOf(l);
+  // 订阅给域名时"默认跟服务器页的设置走"不成立(服务器的"自动地址用"不起作用),换成域名模式的说明,不接在后面自相矛盾
   if (nodes.length < 2) {
-    return nodes.length && isDualStack(nodes[0]) ? `<div class="full">${field(t('line.ipVersion'), famSelect(nodes[0], fam[nodes[0].id]), t('line.ipVersionHelp'))}</div>` : '';
+    return nodes.length && isDualStack(nodes[0]) ? `<div class="full">${field(t('line.ipVersion'), famSelect(nodes[0], fam[nodes[0].id]), subByDomain() ? t('line.famPick') + ' ' + t('line.famDnsHelp') : t('line.ipVersionHelp'))}</div>` : '';
   }
   const ids = (() => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } })();
   const anyDual = nodes.some(isDualStack);
   const rows = nodes.map(n => `<div class="node-row"><label><input type="checkbox" class="node-cb" value="${n.id}" ${!ids.length || ids.includes(n.id) ? 'checked' : ''}> ${esc(n.name)}${n.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>${isDualStack(n) ? famSelect(n, fam[n.id]) : ''}</div>`).join('');
-  return `<div class="full">${field(t('line.servers'), `<div class="check-list node-list">${rows}</div>`, t('line.serversHelp') + (anyDual ? ' ' + t('line.famHelp') : ''))}</div>`;
+  const famHelp = subByDomain() ? t('line.famPickMulti') + ' ' + t('line.famDnsHelp') : t('line.famHelp');
+  return `<div class="full">${fieldBox(t('line.servers'), `<div class="check-list node-list">${rows}</div>`, t('line.serversHelp') + (anyDual ? ' ' + famHelp : ''))}</div>`;
+}
+// 给前端测试用(web/jstest/lines.test.mjs)
+export { serverFamily, lineUsesV6, formV6Servers, formLine, allServersShown, v6TipsOpen, v6Norm };
+// "全部服务器"的线路在列表里列出哪几台:单独选了 IP 版本的,以及这条线路在上面走 IPv6 的(纯 IPv6 机器、"自动地址用 IPv6"、
+// 自定义地址写成这台自己 IPv6 的)—— 它们后面要跟 IPv6 入站结论,以前只列单独选了的,默认给 IPv6 的服务器永远看不到结论
+function allServersShown(l) {
+  const fam = familyOf(l);
+  return (state.nodes || []).filter(n => fam[n.id] || (n.enabled !== false && lineUsesV6(l, n))).map(n => n.id);
+}
+// 表单里正在编辑的这条线路(算按线路的 IPv6 入站结论用):名字、协议、端口、自定义地址
+function formLine() {
+  let addrs = [];
+  try { addrs = JSON.parse(fv('f-addrs').trim() || '[]'); } catch { addrs = []; }
+  return { name: fv('f-name').trim(), protocol: fv('f-protocol'), port: Number(fv('f-port')) || 0, addrs: Array.isArray(addrs) ? addrs : [] };
+}
+// 按表单当前的勾选算:这条线路在哪些服务器上会给这台的 IPv6(填了自定义地址的看有没有写成那台自己的 IPv6)
+function formV6Servers() {
+  const nodes = state.nodes || [];
+  const l = formLine();
+  const cbs = [...document.querySelectorAll('.node-cb')];
+  const picked = cbs.filter(c => c.checked).map(c => Number(c.value));
+  const famSel = id => { const s = document.querySelector(`.node-fam[data-node="${id}"]`); return s && !s.disabled ? s.value : ''; };
+  return nodes.filter(n => !picked.length || picked.includes(n.id)).filter(n => lineUsesV6(l, n, famSel(n.id)));
+}
+// 自检要点要不要直接展开:这条线路的端口测出不通;UDP 线路(测不了,只能照着要点抓包)也展开
+function v6TipsOpen(l, servers) {
+  return servers.some(n => { const st = v6ForLine(v6Of(n.id), l); return st === 'down' || st === 'udpLine'; });
+}
+// 线路会在某台服务器上给 IPv6 时,在表单里列出 IPv6 自检要点和这条线路在那台的 IPv6 入站结论
+function syncV6Tips() {
+  const box = document.getElementById('f-v6tips');
+  if (!box) return;
+  const v6 = formV6Servers();
+  box.hidden = !v6.length;
+  if (!v6.length) { box.innerHTML = ''; return; }
+  const l = formLine();
+  const status = v6.map(n => {
+    const b = v6LineBadge(v6Of(n.id), l);
+    return `<span class="nowrap">${esc(n.name)} ${b || `<span class="muted small">${esc(t('line.v6Never'))}</span>`}</span>`;
+  }).join(' · ');
+  const was = box.querySelector('details');
+  const open = (was && was.open) || v6TipsOpen(l, v6); // 改名字、端口时重画,别把用户点开的收起来
+  box.innerHTML = `<details class="adv v6-tips" ${open ? 'open' : ''}><summary>${esc(t('line.v6Tips'))}</summary>
+    <p class="hint">${esc(t('line.v6Status'))} ${status}</p>
+    <ol class="hint">${[1, 2, 3, 4, 5, 6].map(i => `<li>${esc(t('line.v6Tip' + i))}</li>`).join('')}</ol></details>`;
 }
 // 没部署到的服务器,下拉没有意义
 function syncFamily() {
@@ -191,6 +335,7 @@ function syncFamily() {
     const cb = cbs.find(c => c.value === s.dataset.node);
     s.disabled = !!cb && any && !cb.checked;
   });
+  syncV6Tips();
 }
 
 // ---- 表单 ----
@@ -382,7 +527,9 @@ async function presetLine(pid) {
   const p = PRESETS.find(x => x.id === pid);
   if (!p) return;
   const port = await suggestPort();
-  const l = { protocol: p.protocol, enabled: true, options: p.options || {}, upstreamId: 0, port, name: `${p.label}-${port}`, tls: p.tls, transport: p.transport };
+  const l = { protocol: p.protocol, enabled: true, options: { ...(p.options || {}) }, upstreamId: 0, port, name: `${p.label}-${port}`, tls: p.tls, transport: p.transport };
+  // Shadowsocks 2022 的密码是固定长度的密钥:和其它预设一样先生成好,打开表单就能直接保存
+  if (p.protocol === 'shadowsocks' && ss2022Bytes(l.options.method)) l.options.password = ss2022Key(l.options.method);
   if (p.tls && p.tls.mode === 'reality') {
     try {
       const kp = await get('keygen?type=reality');
@@ -428,6 +575,7 @@ async function editLine(id, cloneFrom, preset) {
       ${check('f-enabled', t('common.enabled'), l.enabled !== false)}
       ${id ? '' : check('f-assign', t('line.assignAll'), true, t('line.assignAllHelp'))}
       ${serversField(l)}
+      <div class="full" id="f-v6tips" hidden></div>
     </div>
     <div id="f-dyn"></div>
     <details class="adv"><summary>${t('line.advanced')}</summary><textarea id="f-extra"></textarea></details>
@@ -438,16 +586,21 @@ async function editLine(id, cloneFrom, preset) {
     const addrs = fv('f-addrs').trim();
     if (addrs) body.addrs = JSON.parse(addrs);
     if (!id) body.assignAll = fchk('f-assign');
-    if (id) await put('lines/' + id, body); else await post('lines', body);
+    const saved = id ? await put('lines/' + id, body) : await post('lines', body);
     await load('lines', 'status', 'users');
     renderRows();
     toast(id ? t('line.updated') : t('line.created'), 'ok');
-  }, { wide: true });
+    scopeWidenedNotice(saved && saved.scopeWidened);
+  }, { size: 'xl' });
   renderDynamic(l);
   rrBind(rrInit);
-  document.getElementById('f-protocol').addEventListener('change', () => renderDynamic({ options: {}, tls: {}, transport: {} }));
+  document.getElementById('f-protocol').addEventListener('change', () => { renderDynamic({ options: {}, tls: {}, transport: {} }); syncV6Tips(); });
+  ['f-name', 'f-port'].forEach(id => document.getElementById(id).addEventListener('input', debounce(syncV6Tips, 400)));
   document.querySelectorAll('.node-cb').forEach(c => c.addEventListener('change', syncFamily));
+  document.querySelectorAll('.node-fam').forEach(c => c.addEventListener('change', syncV6Tips));
+  document.getElementById('f-addrs').addEventListener('input', debounce(syncV6Tips, 400));
   syncFamily();
+  if (!reachLoaded()) loadReach().then(syncV6Tips); // 新开页面直接点"添加"时还没拿过检测结果
 }
 
 // ---- 分流规则:同一条线路按域名 / IP 段 / 端口分给不同出口,没命中的走线路的上游(后端见 render/route_rules.go) ----
@@ -676,7 +829,18 @@ async function runBatch(action, extra = {}) {
     selected.clear();
     await load('lines', 'status'); renderRows();
     toast(t('line.batchDone', { n: r.affected }), 'ok');
+    scopeWidenedNotice(r.scopeWidened);
   } catch (e) { toast(e.message, 'err'); }
+}
+
+// 收窄部署服务器后,只选了被撤服务器的用户 / 代理 / 套餐被改回这条线路的全部服务器:点名给管理员看
+function scopeWidenedNotice(w) {
+  if (!w) return;
+  const sep = t('node.sep');
+  const parts = [['users', 'line.scopeWidenedUsers'], ['resellers', 'line.scopeWidenedResellers'], ['plans', 'line.scopeWidenedPlans']]
+    .filter(([k]) => (w[k] || []).length).map(([k, key]) => t(key, { names: w[k].join(sep) }));
+  if (!parts.length) return;
+  setTimeout(() => confirm([t('line.scopeWidened'), ...parts].join('\n'), { title: t('line.scopeWidenedTitle'), okText: t('node.ack'), notice: true }), 0);
 }
 function batchDialog(action) {
   const n = selected.size;
@@ -685,7 +849,7 @@ function batchDialog(action) {
       () => runBatch('upstream', { upstreamId: Number(fv('b-upstream')) }));
     return;
   }
-  openModal(t('line.batchNodes', { n }), `<div class="form-grid"><div class="full">${field(t('line.servers'), `<div class="check-list">${(state.nodes || []).map(nd => `<label><input type="checkbox" class="b-node-cb" value="${nd.id}"> ${esc(nd.name)}${nd.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>`).join('')}</div>`, t('line.batchNodesHelp'))}</div></div>`,
+  openModal(t('line.batchNodes', { n }), `<div class="form-grid"><div class="full">${fieldBox(t('line.servers'), `<div class="check-list">${(state.nodes || []).map(nd => `<label><input type="checkbox" class="b-node-cb" value="${nd.id}"> ${esc(nd.name)}${nd.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>`).join('')}</div>`, t('line.batchNodesHelp'))}</div></div>`,
     () => runBatch('nodes', { nodeIds: [...document.querySelectorAll('.b-node-cb:checked')].map(c => Number(c.value)) }));
 }
 
@@ -704,15 +868,32 @@ function pickLineCert() {
   }
   const cur = fv('f-cert');
   const now = Date.now() / 1000;
-  const chips = info => servers.map(n => {
+  // 各服务器上这张证书的剩余天数:剩 14 天以内、或会自动续却过了续期时间还没续上的变黄,自动续期在失败的变红(悬停看原因)
+  const cell = (n, info) => {
     const c = info.has.get(n.id);
-    if (!c) return badge(n.name + ' · ' + t('line.certMissing'), 'warn');
+    if (!c) return { kind: 'warn', missing: true, html: badge(n.name + ' · ' + t('line.certMissing'), 'warn') };
     const left = Math.floor((c.notAfter - now) / 86400);
-    return badge(n.name + ' · ' + t('cert.daysLeftN', { n: left }), left <= 14 ? 'warn' : 'ok');
-  }).join('');
+    const overdue = c.autoRenew && c.renewBefore && c.notAfter - now <= c.renewBefore;
+    const kind = c.autoRenew && c.renewErr ? 'danger' : left <= 14 || overdue ? 'warn' : 'ok';
+    const label = n.name + ' · ' + t('cert.daysLeftN', { n: left });
+    return { kind, html: c.renewErr ? `<span class="badge ${kind}" title="${esc(trErr(c.renewErr))}">${esc(label)}</span>` : badge(label, kind) };
+  };
+  const chips = (info, name) => {
+    const cells = servers.map(n => cell(n, info));
+    const have = servers.filter(n => info.has.get(n.id)).length, missing = servers.length - have;
+    const soon = cells.filter(x => x.kind !== 'ok' && !x.missing).length;
+    if (servers.length <= 3) return cells.map(x => x.html).join('');
+    // 每个选项本身是一个按钮:里面不能再放可点的东西(折叠按钮、<details> 会被浏览器挪到按钮外面)。
+    // 写摘要,只列缺失 / 要处理的前 6 台,其余的名字放在「+N」的悬停提示里
+    const sum = `<span class="muted small">${esc(t('cert.srvSum', { have, missing, soon }))}</span>`;
+    const bad = cells.map((x, i) => ({ ...x, name: servers[i].name })).filter(x => x.kind !== 'ok');
+    const rest = bad.slice(6);
+    return sum + bad.slice(0, 6).map(x => x.html).join('')
+      + (rest.length ? `<span class="badge" title="${esc(rest.map(x => x.name).join(t('reach.sep')))}">+${rest.length}</span>` : '');
+  };
   const opts = [{ value: '', name: t('line.certDefault'), sub: esc(t('line.certDefaultHelp')), current: !cur }];
   for (const [name, info] of byName) {
-    opts.push({ value: name, name: certLabel(name), sub: info.domains.length > 1 ? info.domains.map(esc).join(', ') : (info.selfSigned ? esc(t('cert.srcSelf')) : ''), chips: servers.length ? chips(info) : '', current: cur === name });
+    opts.push({ value: name, name: certLabel(name), sub: info.domains.length > 1 ? info.domains.map(esc).join(', ') : (info.selfSigned ? esc(t('cert.srcSelf')) : ''), chips: servers.length ? chips(info, name) : '', current: cur === name });
   }
   // 选过的证书已经不在任何服务器上了:也列出来,不然看不出当前选的是什么
   if (cur && !byName.has(cur)) opts.push({ value: cur, name: certLabel(cur), sub: esc(t('line.certMissing')), current: true });
@@ -736,6 +917,7 @@ function masqOf(o) {
 const realityText = r => r.ok ? t('line.reality.ok', { ms: r.ms }) : t('line.reality.bad.' + (r.error || 'connect'));
 
 registerActions({
+  'line.proto': id => { protoFilter = id || ''; renderRows(); },
   'line.realityCheck': async (_, btn) => {
     const box = document.getElementById('f-hs-res');
     btn.disabled = true; box.hidden = false; box.textContent = t('line.reality.checking'); box.className = 'hint';
@@ -801,11 +983,17 @@ registerActions({
   },
   'line.genSsPw': async () => {
     const m = fv('f-method');
-    const n = m.startsWith('2022-blake3-aes-128') ? 16 : m.startsWith('2022') ? 32 : 16;
-    if (m.startsWith('2022')) {
-      // 2022 算法要求 base64 的 16/32 字节密钥
-      const bytes = new Uint8Array(n); crypto.getRandomValues(bytes);
-      document.getElementById('f-sspw').value = btoa(String.fromCharCode(...bytes));
-    } else document.getElementById('f-sspw').value = (await get('keygen?type=password&len=16')).password;
+    document.getElementById('f-sspw').value = ss2022Bytes(m) ? ss2022Key(m) : (await get('keygen?type=password&len=16')).password;
   },
 });
+
+// Shadowsocks 2022 算法要求 base64 的 16 / 32 字节密钥(aes-128 是 16 字节,其余 32);不是 2022 算法返回 0
+function ss2022Bytes(method) {
+  const m = String(method || '');
+  return m.startsWith('2022-blake3-aes-128') ? 16 : m.startsWith('2022') ? 32 : 0;
+}
+function ss2022Key(method) {
+  const bytes = new Uint8Array(ss2022Bytes(method));
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes));
+}

@@ -29,6 +29,8 @@ body:
       options:
         - 主服务器 · Master
         - 副服务器 · Node
+        - 备用(主机容灾里的副服务器)· Standby (failover node)
+        - 接任后的主机 · Master after takeover
         - 单机 · Single server
         - 代理面板 · Reseller panel
     validations:

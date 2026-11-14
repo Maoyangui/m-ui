@@ -1,7 +1,19 @@
 import { state, load } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy, urlHost } from '../ui.js';
+import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy, urlHost, charCount, bindCharCounts, PAGE_TEXT_MAX } from '../ui.js';
+import { logoBlock, bindLogo } from '../logo.js';
+import { renderHASettings } from '../ha.js';
+import { subSettingsChange } from '../subtls.js';
+
+// boolSetting 开关类设置的显示:和后端同一个判法(model.NormBoolSetting),空值用默认。
+function boolSetting(v, def) {
+  const x = String(v ?? '').trim().toLowerCase();
+  if (x === '') return def;
+  if (['true', '1', 'on', 'yes'].includes(x)) return true;
+  if (['false', '0', 'off', 'no'].includes(x)) return false;
+  return def;
+}
 
 export const title = () => t('set.title');
 
@@ -13,6 +25,9 @@ const defaults = {
   upstreamTestUrl: 'http://www.gstatic.com/generate_204', statsBucketSeconds: 60, trafficAge: 30, reachMinutes: 90,
 };
 
+// 有字数上限的文案:框下面显示当前字数与上限
+const textMax = { subPageNotice: PAGE_TEXT_MAX.notice, subPageSupport: PAGE_TEXT_MAX.support };
+
 // 面板时间显示用的时区(默认 Asia/Shanghai);列表覆盖常见地区,够用且不会写错名字
 const TIMEZONES = [
   'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore',
@@ -21,17 +36,21 @@ const TIMEZONES = [
   'America/Sao_Paulo', 'Australia/Sydney', 'UTC',
 ];
 
+const isNodeRole = () => String(state.settings.nodeMode).toLowerCase() === 'true';
+
 const groups = () => [
   { id: 'panel', title: t('set.panel'), restart: true, fields: [
     ['webDomain', t('set.webDomain'), 'text', t('set.webDomainHelp')],
     ['timezone', t('set.timezone'), 'select', t('set.timezoneHelp'), TIMEZONES.map(z => [z, z])],
     ['webListen', t('set.listen'), 'text'], ['webPort', t('set.port'), 'number'], ['webPath', t('set.path'), 'text', t('set.pathHelp')],
     ['webCertFile', t('set.cert'), 'text', t('set.certManaged')], ['webKeyFile', t('set.key'), 'text'],
+    ['trustedProxies', t('set.trustedProxies'), 'text', t('set.trustedProxiesHelp')],
     ['supportOnline', t('set.supportOnline'), 'boolOn', t('set.supportOnlineHelp')],
   ]},
   { id: 'sub', title: t('set.sub'), restart: true, fields: [
+    ['subDomain', t('set.subDomain'), 'text', t('set.subDomainHelp')],
     ['subListen', t('set.listen'), 'text'], ['subPort', t('set.port'), 'number'], ['subPath', t('set.path'), 'text', t('set.subPathHelp')],
-    ['subCertFile', t('set.cert'), 'text', t('set.certManaged')], ['subKeyFile', t('set.key'), 'text'],
+    ['subCertFile', t('set.cert'), 'text', t('set.subCertHelp')], ['subKeyFile', t('set.key'), 'text'],
     ['subProfileTitle', t('set.subTitle'), 'text'], ['subUpdates', t('set.subUpdates'), 'number'],
     ['subUseUserName', t('set.subUseUserName'), 'boolOn', t('set.subUseUserNameHelp')],
     ['subEncode', t('set.subEncode'), 'bool'], ['subShowNotice', t('set.subNotice'), 'bool'],
@@ -50,14 +69,15 @@ const groups = () => [
     ['resellerPath', t('set.path'), 'text', t('set.resellerPathHelp')],
     ['resellerCertFile', t('set.cert'), 'text', t('set.resellerCertHelp')], ['resellerKeyFile', t('set.key'), 'text'],
   ]},
-  { id: 'subpage', title: t('set.subPage'), fields: [
+  // logo 那一块上传即生效(不跟「保存」走);副机只读,随主机同步
+  { id: 'subpage', title: t('set.subPage'), extra: logoBlock('set-logo', { readonly: isNodeRole() }), fields: [
     ['subPageEnabled', t('set.subPageEnabled'), 'bool', t('set.subPageEnabledHelp')],
     ['subShareEnabled', t('set.subShare'), 'boolOn', t('set.subShareHelp')],
     ['subPageBrand', t('set.subPageBrand'), 'boolOn', t('set.subPageBrandHelp')],
     ['subPageTitle', t('set.subPageTitle'), 'text', t('set.subPageTitleHelp')],
-    ['subPageSupport', t('set.subPageSupport'), 'text'],
+    ['subPageSupport', t('set.subPageSupport'), 'text', t('set.subPageSupportHelp')],
     ['subPageBuyURL', t('set.subPageBuyURL'), 'text', t('set.subPageBuyURLHelp')],
-    ['subPageNotice', t('set.subPageNotice'), 'textarea'],
+    ['subPageNotice', t('set.subPageNotice'), 'textarea', t('set.subPageNoticeHelp')],
   ]},
   { id: 'notify', title: t('set.notify'), test: true, fields: [
     ['tgEnabled', t('set.tgEnabled'), 'bool', t('set.tgEnabledHelp')],
@@ -70,6 +90,7 @@ const groups = () => [
     ['tgOnQuota', t('set.tgOnQuota'), 'boolOn'], ['tgQuotaPercent', t('set.tgQuotaPercent'), 'number'],
     ['tgOnRuleLimit', t('set.tgOnRuleLimit'), 'bool'],
     ['tgOnUpstream', t('set.tgOnUpstream'), 'boolOn'], ['tgOnCore', t('set.tgOnCore'), 'boolOn'], ['tgOnReach', t('set.tgOnReach'), 'boolOn'],
+    ['tgOnCert', t('set.tgOnCert'), 'boolOn', t('set.tgOnCertHelp')],
     ['tgDaily', t('set.tgDaily'), 'boolOn'], ['tgDailyHour', t('set.tgDailyHour'), 'number'],
   ]},
   { id: 'monitor', title: t('set.monitor'), fields: [
@@ -93,10 +114,12 @@ const groups = () => [
 
 export async function render(el) {
   const s = state.settings;
-  const isNode = String(s.nodeMode).toLowerCase() === 'true';
+  const isNode = isNodeRole();
   // 重启按钮放在页头右侧,任何时候都看得到
-  document.getElementById('topbar-right').innerHTML = `<button class="btn danger sm" data-act="set.restart" title="${esc(t('set.restartHint'))}">↻ ${t('set.restart')}</button>`;
-  el.innerHTML = `
+  // 文字包一层:手机宽度下只留 ↻,给页面标题和右上角的帮助、支持按钮让地方(见 style.css .tb-label)
+  document.getElementById('topbar-right').innerHTML = `<button class="btn danger sm" data-act="set.restart" title="${esc(t('set.restartHint'))}" aria-label="${esc(t('set.restart'))}">↻ <span class="tb-label">${t('set.restart')}</span></button>`;
+  // 大屏上分组卡片排成多栏(瀑布流),不再把一张卡拉得很宽很长
+  el.innerHTML = `<div class="masonry">
     <section class="card">
       <div class="card-head"><h2>${t('set.role')}</h2>${badge(isNode ? t('role.node') : t('role.master'), isNode ? 'node' : 'primary')}</div>
       <label class="field check"><input type="checkbox" id="set-nodeMode" ${isNode ? 'checked' : ''}><span>${t('set.roleSwitch')}</span></label>
@@ -108,12 +131,12 @@ export async function render(el) {
         <div class="card-head"><h2>${esc(g.title)}${g.restart ? ` <span class="badge warn" title="${t('set.restartHint')}">${t('set.needRestart')}</span>` : ''}</h2><div class="row">${g.test ? `<button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button>` : ''}<button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div></div>
         <div class="form-grid">${g.fields.map(([k, label, type, help, options]) =>
           type === 'bool' || type === 'boolOn'
-            ? check('set-' + k, label, s[k] === undefined || s[k] === '' ? (k === 'subPageEnabled' || type === 'boolOn') : String(s[k]).toLowerCase() === 'true', help)
+            ? check('set-' + k, label, boolSetting(s[k], k === 'subPageEnabled' || type === 'boolOn'), help)
             : type === 'textarea' || type === 'code'
-              ? `<div class="full">${field(label, `<textarea id="set-${k}" ${type === 'code' ? 'class="code-area" spellcheck="false" autocomplete="off"' : ''}>${esc(s[k] ?? '')}</textarea>`, help)}</div>`
+              ? `<div class="full">${field(label, `<textarea id="set-${k}" ${type === 'code' ? 'class="code-area" spellcheck="false" autocomplete="off"' : ''}>${esc(s[k] ?? '')}</textarea>${textMax[k] ? charCount('set-' + k, textMax[k]) : ''}`, help)}</div>`
               : type === 'select'
                 ? field(label, `<select id="set-${k}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(s[k] ?? '') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`, help)
-                : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">`, help)).join('')}</div>${g.extra || ''}
+                : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">${textMax[k] ? charCount('set-' + k, textMax[k]) : ''}`, help)).join('')}</div>${g.extra || ''}
       </section>`).join('')}
     <section class="card">
       <div class="card-head"><h2>${t('set.about')}</h2><a href="#/admin" class="btn sm">${t('nav.admin')} →</a></div>
@@ -121,15 +144,27 @@ export async function render(el) {
         <dt>${t('set.version')}</dt><dd class="mono">${esc(state.status.version || '')}</dd>
         <dt>sing-box</dt><dd class="mono">${esc(state.status.singBox || '—')}</dd>
         <dt>${t('set.panelUrl')}</dt><dd class="mono">${esc((state.status.panelTLS ? 'https' : 'http') + '://' + urlHost(state.status.panelTLS ? 'https' : 'http', s.webDomain || '<IP>', state.status.webPort || '') + (state.status.webPath || '/'))}</dd>
-        <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + urlHost(state.status.subTLS ? 'https' : 'http', s.webDomain || '<IP>', state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('set.userPh') + '>?format=clash')}</dd>
+        <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + urlHost(state.status.subTLS ? 'https' : 'http', s.subDomain || s.webDomain || '<IP>', state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('set.userPh') + '>')}</dd>
         <dt>License</dt><dd>GPL-3.0 · <a href="${esc(state.status.repo || '#')}" target="_blank" rel="noopener">GitHub</a></dd>
       </dl>
       <p class="hint">${t('set.restartNote')}</p>
-    </section>`;
+    </section></div>`;
   document.getElementById('set-nodeMode').addEventListener('change', e => {
     document.getElementById('role-hint').textContent = e.target.checked ? t('set.roleNode') : t('set.roleMaster');
   });
+  bindLogo('set-logo', 'sub-logo');
+  bindCharCounts(el);
   if (isNode) renderPairing();
+  // 主机容灾:紧跟在角色卡片后面(服务器页角色卡片里的「去设置」跳到这里)
+  const haCard = document.createElement('section');
+  haCard.className = 'card';
+  haCard.id = 'ha-card';
+  document.querySelector('section.card').after(haCard);
+  renderHASettings(haCard).then(() => {
+    let to = '';
+    try { to = sessionStorage.getItem('m-ui.scrollTo') || ''; sessionStorage.removeItem('m-ui.scrollTo'); } catch {}
+    if (to === 'ha-card') haCard.scrollIntoView({ block: 'start' });
+  });
 }
 
 // 副机:展示配对信息(API 地址 + 令牌),复制到主机的"服务器"页即可接入
@@ -151,12 +186,25 @@ async function renderPairing() {
   role.after(card);
 }
 
+// 设置页直接改订阅证书路径时的确认(判法见 subtls.js):scheme 不变或没有用户时直接放行。
+// 用户数取 GET /cert 的 subUsers(含停用的、代理名下的);取不到时退回本页已加载的用户列表。
+async function confirmSubScheme(body) {
+  if (!subSettingsChange(state.settings, body, 1)) return true;
+  let n;
+  try { n = Number((await get('cert')).subUsers); } catch { /* 下面退回本地列表 */ }
+  if (!Number.isFinite(n)) n = (state.users || []).length;
+  const ch = subSettingsChange(state.settings, body, n);
+  return !ch || confirm(t('cert.subSchemeConfirm', { n: ch.n, from: ch.from, to: ch.to }), { danger: true });
+}
+
 registerActions({
   'set.save': async id => {
     const g = groups().find(x => x.id === id);
     const body = {};
     g.fields.forEach(([k, , type]) => { body[k] = (type === 'bool' || type === 'boolOn') ? String(fchk('set-' + k)) : fv('set-' + k).trim(); });
     // 面板路径改动保存即生效:旧地址随即失效,保存成功后直接跳到新地址(不能再用旧前缀请求接口)
+    // 订阅证书 / 私钥路径一改,订阅可能在 http ↔ https 之间切换:所有用户手里的订阅地址都会变,和证书页一样先确认
+    if (id === 'sub' && !await confirmSubScheme(body)) return;
     const norm = p => { p = (p || '/app/').trim(); if (!p.startsWith('/')) p = '/' + p; if (!p.endsWith('/')) p += '/'; return p; };
     if (id === 'panel' && norm(body.webPath) !== norm(state.status.webPath)) {
       try {
@@ -167,7 +215,11 @@ registerActions({
       } catch (e) { toast(e.message, 'err'); }
       return;
     }
-    try { const r = await post('settings', body); await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok'); }
+    try {
+      const r = await post('settings', body); await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok');
+      // Clash 模板写了 ipv6: false:存下了,但有 IPv6 节点时订阅会改成 true,要让人知道
+      if ((r.hints || []).includes('clashIPv6')) confirm(t('set.clashIPv6Hint'), { title: t('set.saved'), okText: t('node.ack'), notice: true });
+    }
     catch (e) { toast(e.message, 'err'); }
   },
   'set.tmplDefault': async id => {

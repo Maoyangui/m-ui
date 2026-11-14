@@ -20,6 +20,7 @@ import (
 	"github.com/Maoyangui/m-ui/ext"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/util/slowreq"
 
 	"gorm.io/gorm"
 )
@@ -40,7 +41,30 @@ type Server struct {
 	misses   map[string]*missAgg
 	stopOnce sync.Once
 	stop     chan struct{}
+
+	// 访问日志先进内存,每几秒一批落库(见 log):以前每个订阅请求同步写一行,高峰时每个请求都去抢写锁、
+	// 占着连接池里的一条连接,写锁紧张时一等 10 秒(审计 I4)
+	logMu   sync.Mutex
+	logBuf  []model.SubLog
+	logDrop int
+	logKick chan struct{}
+
+	// TLS 登记订阅端口用的证书加载器(runner 的 Watch):证书读不出来、正用临时自签证书顶着时,面板顶部据此提示;
+	// 临时证书存在它的 TempDir 里、重启沿用。nil 不登记,临时证书只在内存里。
+	TLS *certutil.Watch
+
+	// WriteGate 订阅页的写请求(生成 / 取消临时共享)先过它:设为主机冻结写操作时 ok=false(回 503 和 msg);
+	// 否则登记在途,做完调 done。nil = 不管。
+	WriteGate func() (done func(), ok bool, msg string)
 }
+
+// 订阅访问日志的缓冲:满 logFlushAt 条提前落一批,最多攒 logBufMax 条(落库一直失败时再多的就丢掉、只计数)。
+const (
+	logFlushEvery = 3 * time.Second
+	logFlushAt    = 2000
+	logBufMax     = 20000
+	logBatch      = 500 // 每条 INSERT 的行数:SQLite 一条语句最多 32766 个变量
+)
 
 type ipBucket struct {
 	lim  *rate.Limiter
@@ -116,9 +140,37 @@ func (s *Server) flushMisses() {
 	}
 	s.guardMu.Unlock()
 	if len(rows) > 0 {
-		if err := s.db.Create(&rows).Error; err != nil {
+		// 分批:被扫描时一个周期几千个来源 IP,一条 INSERT 写完会超过 SQLite 的变量上限,整批日志丢掉(审计 I4)
+		if err := s.db.CreateInBatches(&rows, logBatch).Error; err != nil {
 			logger.Warning("写订阅日志失败: ", err)
 		}
+	}
+}
+
+// flushLogs 把缓冲里的访问日志落库。失败的放回缓冲(超出上限的丢掉),下一轮再试。
+func (s *Server) flushLogs() {
+	s.logMu.Lock()
+	rows, dropped := s.logBuf, s.logDrop
+	s.logBuf, s.logDrop = nil, 0
+	s.logMu.Unlock()
+	if dropped > 0 {
+		logger.Warning("订阅访问日志积压太多,丢掉了 ", dropped, " 条")
+	}
+	if len(rows) == 0 {
+		return
+	}
+	if err := s.db.CreateInBatches(&rows, logBatch).Error; err != nil {
+		logger.Warning("写订阅日志失败: ", err)
+		s.logMu.Lock()
+		rows = append(rows, s.logBuf...)
+		if extra := len(rows) - logBufMax; extra > 0 {
+			rows, s.logDrop = rows[extra:], s.logDrop+extra
+		}
+		for i := range rows {
+			rows[i].Id = 0 // 失败的那批可能已经分到了自增 id
+		}
+		s.logBuf = rows
+		s.logMu.Unlock()
 	}
 }
 
@@ -129,19 +181,35 @@ func spanText(sec int64) string {
 	return fmt.Sprintf("%d 分钟", sec/60)
 }
 
-// housekeeping 每 10 分钟落一次聚合的 404 并清闲置桶;Stop 时再落最后一次。
+// housekeeping 每 10 分钟落一次聚合的 404 并清闲置桶,每几秒落一批访问日志;Stop 时再各落最后一次。
 func (s *Server) housekeeping() {
 	t := time.NewTicker(10 * time.Minute)
 	defer t.Stop()
+	logs := time.NewTicker(logFlushEvery)
+	defer logs.Stop()
 	for {
 		select {
 		case <-t.C:
 			s.flushMisses()
+		case <-logs.C:
+			s.flushLogs()
+		case <-s.logKicks():
+			s.flushLogs()
 		case <-s.stop:
 			s.flushMisses()
+			s.flushLogs()
 			return
 		}
 	}
+}
+
+func (s *Server) logKicks() chan struct{} {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	if s.logKick == nil {
+		s.logKick = make(chan struct{}, 1)
+	}
+	return s.logKick
 }
 
 func (s *Server) setting(key string) string {
@@ -207,18 +275,11 @@ func (s *Server) externalFor(userID uint) []ExtItem {
 		WHERE ue.user_id = ? AND e.enabled = 1 ORDER BY e.sort, e.id`, userID).Scan(&exts)
 	out := make([]ExtItem, 0, len(exts))
 	for _, e := range exts {
-		var it ext.Items
-		if e.Type == "link" {
-			it = ext.Parse(e.Value)
-		} else {
-			it = ext.Parse(e.Cache)
-		}
-		it = ext.ParseFilter(e.Hidden, e.Renames, e.Exclude).Apply(it)
-		it = ext.WithPrefix(it, e.Prefix)
-		if len(it.Links) == 0 && len(it.Clash) == 0 {
+		it := ext.Output(e) // 筛选、改名、前缀:链接侧与 Clash 侧按同一个名字和指纹判定
+		if len(it.Nodes) == 0 {
 			continue
 		}
-		out = append(out, ExtItem{Name: e.Name, Links: it.Links, Clash: it.Clash})
+		out = append(out, ExtItem{Name: e.Name, Links: it.Links(), Clash: it.Clash()})
 	}
 	return out
 }
@@ -349,18 +410,25 @@ func (s *Server) Start() error {
 
 	certFile, keyFile := s.setting("subCertFile"), s.setting("subKeyFile")
 	scheme := "http"
+	var rl *certutil.Reloader
 	if certFile != "" && keyFile != "" {
-		rl, err := certutil.NewReloader(certFile, keyFile)
-		if err != nil {
-			ln.Close()
-			return fmt.Errorf("加载订阅证书: %w", err)
+		// 证书读不出来(换机还原后文件不在、私钥配不上……)不能让整个进程起不来:先用临时自签证书顶着,照样走 HTTPS
+		// (订阅地址是 https://,降成 http 客户端全断),文件放回原处几秒内自动换上
+		rl = s.TLS.Reloader("sub", certFile, keyFile, s.setting("webDomain"), s.setting("publicIp"), s.setting("publicIp6"))
+		if err := rl.Temp(); err != nil {
+			logger.Error("订阅证书读不出来(", err, "):订阅先用临时自签证书顶着,仍走 HTTPS,但校验证书的客户端会更新失败。",
+				"到证书页给订阅换一张证书,或把文件放回 ", certFile, "(放回后几秒内自动换上)")
 		}
-		ln = tls.NewListener(ln, rl.TLSConfig()) // 证书文件更新后自动换用,续期无需重启
+		// 证书文件更新后自动换用,续期无需重启。本机接任 / 被设为主机过(订阅证书是随主机身份带来的,本机原来的证书留给
+		// 本机自己的域名):客户端请求的域名写在证书库里别的证书上时用那一张;没迁过身份的和以前一样只用订阅证书
+		ln = tls.NewListener(ln, certutil.NewSNI(rl, s.sniCerts(certFile)...).TLSConfig())
 		scheme = "https"
 	}
+	s.TLS.Set("sub", rl)
 
 	s.listener = ln
-	s.httpSrv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	slow := &slowreq.Logger{Name: "订阅", Shape: func(r *http.Request) string { return subRouteShape(r.URL.Path, s.currentPath()) }}
+	s.httpSrv = &http.Server{Handler: slow.Wrap(mux), ReadHeaderTimeout: 10 * time.Second}
 	s.stop = make(chan struct{})
 	go s.housekeeping()
 	s.startGodusevpnRefresh() // 落地页里佛跳墙的下载链接始终指向最新发布
@@ -373,16 +441,58 @@ func (s *Server) Start() error {
 	return nil
 }
 
+// sniCerts 订阅端口按 SNI 备选的证书:只在本机迁过主机身份(haBecame 有记录)时才有;库里的证书在订阅服务启动时读一次。
+func (s *Server) sniCerts(skip string) []*certutil.Reloader {
+	if strings.TrimSpace(s.setting("haBecame")) == "" {
+		return nil
+	}
+	return s.storeCerts(skip)
+}
+
+// storeCerts 证书库里除 skip 之外、文件读得出来的证书(订阅端口按 SNI 备选;自签的不算)。
+func (s *Server) storeCerts(skip string) []*certutil.Reloader {
+	var rows []model.Cert
+	s.db.Where("cert_file <> ? AND source <> ?", skip, "selfsign").Find(&rows)
+	var out []*certutil.Reloader
+	for _, c := range rows {
+		if r, err := certutil.NewReloader(c.CertFile, c.KeyFile); err == nil {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func (s *Server) Stop() error {
 	if s.httpSrv == nil {
 		return nil
 	}
+	s.TLS.Set("sub", nil)
 	if s.stop != nil {
 		s.stopOnce.Do(func() { close(s.stop) })
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return s.httpSrv.Shutdown(ctx)
+	err := s.httpSrv.Shutdown(ctx)
+	s.flushLogs() // 停机前在途的请求也记上
+	return err
+}
+
+// subRouteShape 慢请求日志里订阅请求的路由形状:订阅路径记成 {sub},订阅键(用户名 / 订阅令牌 / 共享令牌)一律打码成 :key,
+// 只留 /qr、/logo 这样的固定后缀;不在订阅路径下的记成 {other}。
+func subRouteShape(path, subPath string) string {
+	if !strings.HasPrefix(path, subPath) {
+		return "{other}"
+	}
+	name := strings.TrimPrefix(path, subPath)
+	switch {
+	case name == "":
+		return "{sub}/"
+	case strings.HasSuffix(name, "/qr"):
+		return "{sub}/:key/qr"
+	case strings.HasSuffix(name, "/logo"):
+		return "{sub}/:key/logo"
+	}
+	return "{sub}/:key"
 }
 
 func (s *Server) handle() http.HandlerFunc {
@@ -400,6 +510,10 @@ func (s *Server) handle() http.HandlerFunc {
 		name := strings.TrimPrefix(r.URL.Path, subPath)
 		wantQR := strings.HasSuffix(name, "/qr")
 		name = strings.TrimSuffix(name, "/qr")
+		wantLogo := !wantQR && strings.HasSuffix(name, "/logo") // 落地页上的 logo;用户名不能含 /,不会和谁撞名
+		if wantLogo {
+			name = strings.TrimSuffix(name, "/logo")
+		}
 		if name == "" || strings.Contains(name, "/") {
 			http.NotFound(w, r)
 			return
@@ -433,6 +547,14 @@ func (s *Server) handle() http.HandlerFunc {
 			s.serveNotFound(w, r, name)
 			return
 		}
+		if wantLogo { // 跟落地页同一个开关;停用 / 到期的人照样给(他们的落地页照常出)
+			if !s.pageEnabled(rs) {
+				http.NotFound(w, r)
+				return
+			}
+			s.serveLogo(w, r, rs)
+			return
+		}
 		now := time.Now().Unix()
 		// blocked = 客户端拿不到订阅:本人被停用、流量用尽或到期,或所属代理被停用 / 到期。
 		// 落地页不受影响(顶部标出原因),只是客户端从这一刻起拉不到节点,不用等一分钟一次的执法。
@@ -451,6 +573,15 @@ func (s *Server) handle() http.HandlerFunc {
 			if blocked { // 停用状态下不能生成 / 取消共享
 				http.NotFound(w, r)
 				return
+			}
+			if s.WriteGate != nil { // 正在设为主机:共享状态改了也带不到新主机去,先挡住
+				done, ok, msg := s.WriteGate()
+				if !ok {
+					w.Header().Set("Retry-After", "120")
+					http.Error(w, msg, http.StatusServiceUnavailable)
+					return
+				}
+				defer done()
 			}
 			s.handleShare(w, r, subPath, name, user, rs)
 			return
@@ -487,7 +618,7 @@ func (s *Server) handle() http.HandlerFunc {
 		// 客户端拉取 → 原始订阅,停用则 404
 		if s.pageEnabled(rs) && WantsPage(r) {
 			if r.URL.Query().Has("clients") { // 订阅页里那个下载箭头
-				s.serveClients(w, r, subPath, name, s.pageTitle(rs, opt))
+				s.serveClients(w, r, subPath, name, s.pageTitle(rs, opt), rs)
 				s.log(r, user.Name, shared, 200)
 				return
 			}
@@ -504,16 +635,22 @@ func (s *Server) handle() http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		format := r.URL.Query().Get("format")
-		if format == "" && !strings.EqualFold(s.setting("subAutoFormat"), "false") {
-			// 通用地址:按客户端给它能用的格式。记到请求上,订阅日志里也就记成实际给的格式
-			if f, legacy := FormatForUA(r.UserAgent()); f != "" {
-				format, opt.LegacyClash = f, legacy
-				q := r.URL.Query()
-				q.Set("format", f)
-				r.URL.RawQuery = q.Encode()
-			}
+		format, forceMeta := NormalizeFormat(r.URL.Query().Get("format"))
+		if r.URL.Query().Get("format") == "" && autoFormatOn(s.setting("subAutoFormat")) {
+			// 通用地址:按客户端给它能用的格式
+			format, _ = FormatForUA(r.UserAgent())
 		}
+		if format == "clash" && !forceMeta {
+			// 老内核 Clash 不管从通用地址还是 ?format=clash(落地页的 Clash 地址 / clash:// 一键导入)进来,都只发它认识的协议
+			opt.LegacyClash = LegacyClashUA(r.UserAgent())
+		}
+		if format == "page" { // 订阅页关着时 ?format=page 也只能给链接
+			format = ""
+		}
+		// 记到请求上,订阅日志里也就记成实际给的格式(分享链接记 link,别被 WantsPage 记成 page)
+		q := r.URL.Query()
+		q.Set("format", pick(format, "link"))
+		r.URL.RawQuery = q.Encode()
 
 		var res Result
 		switch format {
@@ -525,7 +662,7 @@ func (s *Server) handle() http.HandlerFunc {
 				return
 			}
 			res = out
-		case "json", "sing-box", "singbox", "sfa":
+		case "json":
 			out, err := BuildSingBoxSub(user, lines, opt)
 			if err != nil {
 				s.log(r, user.Name, shared, 500)
@@ -604,6 +741,15 @@ func (s *Server) resellerOf(u model.User) *model.Reseller {
 	return &rs
 }
 
+// autoFormatOn「按客户端自动给格式」开关:默认开,写成 false / 0 / off / no 才算关(设置页同一判法)。
+func autoFormatOn(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "off", "no":
+		return false
+	}
+	return true
+}
+
 // pageEnabled 订阅页开关:主面板关掉就都不出;代理可以只关自己的。
 func (s *Server) pageEnabled(rs *model.Reseller) bool {
 	if strings.EqualFold(s.setting("subPageEnabled"), "false") {
@@ -652,7 +798,22 @@ func (s *Server) log(r *http.Request, user string, shared bool, status int) {
 		Ts: time.Now().Unix(), User: user, Ip: ip,
 		Ua: truncate(r.UserAgent(), 200), Format: format, Status: status, // UA 是请求头,能塞很大
 	}
-	if err := s.db.Create(&entry).Error; err != nil {
-		logger.Warning("写订阅日志失败: ", err)
+	s.logMu.Lock()
+	if len(s.logBuf) >= logBufMax {
+		s.logDrop++
+	} else {
+		s.logBuf = append(s.logBuf, entry)
+	}
+	full := len(s.logBuf) >= logFlushAt
+	if s.logKick == nil {
+		s.logKick = make(chan struct{}, 1)
+	}
+	kick := s.logKick
+	s.logMu.Unlock()
+	if full {
+		select { // 攒够一批就提前落,不等定时
+		case kick <- struct{}{}:
+		default:
+		}
 	}
 }

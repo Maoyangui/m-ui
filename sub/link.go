@@ -141,7 +141,9 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 			if port == 0 {
 				port = line.Port
 			}
-			out = append(out, addr{server: c.Server, port: port, sni: c.SNI, remark: c.Remark, insecure: insecure})
+			// 保存时已规整(web.normLineAddrs);老数据里把 IPv6 写成 [v6] 的,这里再去一次方括号,
+			// 不然拼出 [[v6]]:端口,sing-box 订阅里这个节点直接解析失败
+			out = append(out, addr{server: model.BareHost(c.Server), port: port, sni: c.SNI, remark: c.Remark, insecure: insecure})
 		}
 		return out
 	}
@@ -517,16 +519,29 @@ func socksURI(user model.User, a addr, remark string) string {
 	return withFragment(fmt.Sprintf("socks5://%s:%s@%s", url.PathEscape(u), url.PathEscape(p), hostPort(a.server, a.port)), remark)
 }
 
-// http(s)://user:pass@host:port#remark
+// http(s)://user:pass@host:port[?sni=<sni>&allowInsecure=1]#remark
+// https 的 sni 与"允许不安全"和其它 TLS 协议一个判定(自签 / 设置里强制允许不安全才带),写法同 trojan / vless 链接;
+// 以前一个都不带,sing-box 订阅(由这条链接转出站)自签证书时报 x509 unknown authority 连不上,
+// 连接地址是 IP 时 server_name 也成了 IP。
 func httpURI(line model.Line, user model.User, a addr, remark string) string {
 	c := userCred(user, "http")
 	u := user.Name // 同 socksURI
 	p, _ := c["password"].(string)
-	scheme := "http"
+	scheme, query := "http", ""
 	if render.ParseTLS(line).Mode == "cert" {
 		scheme = "https"
+		var q []string
+		if a.sni != "" {
+			q = append(q, "sni="+url.QueryEscape(a.sni))
+		}
+		if a.insecure {
+			q = append(q, "allowInsecure=1")
+		}
+		if len(q) > 0 {
+			query = "?" + strings.Join(q, "&")
+		}
 	}
-	return withFragment(fmt.Sprintf("%s://%s:%s@%s", scheme, url.PathEscape(u), url.PathEscape(p), hostPort(a.server, a.port)), remark)
+	return withFragment(fmt.Sprintf("%s://%s:%s@%s%s", scheme, url.PathEscape(u), url.PathEscape(p), hostPort(a.server, a.port), query), remark)
 }
 
 // ---- 工具 ----

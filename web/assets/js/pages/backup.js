@@ -7,6 +7,10 @@ export const title = () => t('bk.title');
 export const subtitle = () => t('bk.subtitle');
 let data = null;
 
+// 换机向导第一步:新机上还没有 install.sh,直接取仓库里的一键安装脚本(自动分 amd64 / arm64,装最新版),再还原备份。
+// 备份文件名按 m-ui-时间.zip 举例,界面上提示换成自己的路径
+const migCmd = () => `bash <(curl -fsSL ${String(state.status.repo || 'https://github.com/Maoyangui/m-ui').replace(/^https:\/\/github\.com\//, 'https://raw.githubusercontent.com/')}/main/deploy/install.sh) --restore /root/m-ui-20261111-030000.zip`;
+
 export async function render(el) {
   data = await get('backup/list');
   data.files = data.files || [];
@@ -44,7 +48,8 @@ export async function render(el) {
       <p class="hint">${t('mig.help')}</p>
       <ol class="mig-steps">
         <li><b>${t('mig.s1')}</b><div class="hint">${t('mig.s1h')}</div>
-          <div class="sub-box"><code>bash install.sh ./m-ui-linux-amd64 --restore m-ui-backup.zip</code><button class="btn sm" data-act="bk.copyCmd">${t('common.copy')}</button></div></li>
+          <div class="sub-box"><code>${esc(migCmd())}</code><button class="btn sm" data-act="bk.copyCmd">${t('common.copy')}</button></div>
+          <div class="hint">${t('mig.cmdHelp')}</div></li>
         <li><b>${t('mig.s2')}</b><div class="hint">${t('mig.s2h')}</div></li>
         <li><b>${t('mig.s3')}</b><div class="hint">${t('mig.s3h')}</div>
           <div class="row" style="margin-top:.4rem;flex-wrap:wrap">
@@ -133,7 +138,7 @@ registerActions({
       }, { okText: t('bk.restoreBtn'), danger: true });
     } catch (e) { toast(e.message, 'err'); }
   },
-  'bk.copyCmd': () => copy('bash install.sh ./m-ui-linux-amd64 --restore m-ui-backup.zip'),
+  'bk.copyCmd': () => copy(migCmd()),
   'bk.dnsCheck': async (_, btn) => {
     const domain = fv('mig-domain').trim(), ip = fv('mig-ip').trim();
     const box = document.getElementById('mig-result');

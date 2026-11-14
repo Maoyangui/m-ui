@@ -1,24 +1,37 @@
-import { state, load } from '../app.js';
+import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
-import { lineItems, keysFromRefs, linePicker, refLabels } from '../linepicker.js';
-import { urlHost, gbValue, gbBytes, esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy } from '../ui.js';
+import { lineItems, keysFromRefs, linePicker, refChips } from '../linepicker.js';
+import { urlHost, gbValue, gbBytes, esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy, matches, debounce, fieldBox } from '../ui.js';
 
 export const title = () => t('rs.title');
 export const subtitle = () => t('rs.subtitle');
 
 let list = [];
+let query = '', onlyAttn = false; // 搜索;只看要处理的(额度用尽、7 天内到期或刚到期)——概况「需要处理」的去处
 
 export async function render(el) {
+  // 概况的链接:#/resellers?q=代理名(恰好一个同名代理时直接打开详情)、#/resellers?f=attn(只看要处理的)
+  const hp = takeHashParams('resellers');
+  const q = hp.get('q') || '';
+  if (hp.has('q') || hp.has('f')) { query = q; onlyAttn = hp.get('f') === 'attn'; }
   el.innerHTML = `
-    <div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="rs.add">${t('rs.add')}</button></div>
+    <div class="toolbar">
+      <input type="search" id="rs-q" placeholder="${t('common.search')}…" value="${esc(query)}">
+      <label class="small muted" style="display:inline-flex;align-items:center;gap:.3rem" title="${esc(t('rs.onlyAttnHelp'))}"><input type="checkbox" id="rs-attn" ${onlyAttn ? 'checked' : ''}> ${t('rs.onlyAttn')}</label>
+      <span class="muted small" id="rs-count"></span>
+      <span class="grow"></span><button class="btn primary" data-act="rs.add">${t('rs.add')}</button></div>
     <div class="table-wrap"><table class="grid">
       <thead><tr><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('rs.users')}</th><th>${t('rs.used')}</th>
-        <th>${t('rs.devices')}</th><th>${t('rs.speed')}</th><th>${t('user.expiry')}</th><th>${t('rs.online')}</th><th></th></tr></thead>
+        <th>${t('rs.devices')}</th><th class="c-p3">${t('rs.speed')}</th><th>${t('user.expiry')}</th><th class="c-p2">${t('rs.online')}</th><th></th></tr></thead>
       <tbody id="rs-body"></tbody>
     </table></div>
     <p class="hint">${esc(t('rs.panelHint', { url: panelURL() }))}</p>`;
+  document.getElementById('rs-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
+  document.getElementById('rs-attn').addEventListener('change', e => { onlyAttn = e.target.checked; renderRows(); });
   await reload();
+  const hit = q ? list.filter(r => r.name === q) : [];
+  if (hit.length === 1) showDetail(hit[0].id);
 }
 
 // 到期也是一种"停":名下用户会被一起停掉,列表要看得出来
@@ -52,20 +65,29 @@ async function reload() {
   renderRows();
 }
 
+// 要处理:额度用尽(名下用户已停服)、7 天内到期、过去 7 天里刚到期的(和概况「需要处理」同一口径,只算启用的)
+function needsAttn(r) {
+  if (!r.enabled) return false;
+  const now = Date.now() / 1000;
+  return !!r.depleted || (r.volume > 0 && r.used >= r.volume) || (r.expiry > 0 && r.expiry > now - 7 * 86400 && r.expiry <= now + 7 * 86400);
+}
 function renderRows() {
   const body = document.getElementById('rs-body');
   if (!body) return;
-  if (!list.length) { body.innerHTML = `<tr><td colspan="9">${empty(t('rs.empty'))}</td></tr>`; return; }
-  body.innerHTML = list.map(r => `<tr>
+  const rows = list.filter(r => matches(query, r.name, r.remark) && (!onlyAttn || needsAttn(r)));
+  const cnt = document.getElementById('rs-count');
+  if (cnt) cnt.textContent = `${rows.length} / ${list.length}`;
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="9">${empty(list.length ? undefined : t('rs.empty'))}</td></tr>`; return; }
+  body.innerHTML = rows.map(r => `<tr>
     <td class="primary-cell"><a href="#" data-act="rs.detail" data-id="${r.id}">${esc(r.name)}</a>
       ${r.remark ? `<div class="sub-cell">${esc(r.remark)}</div>` : ''}</td>
     <td>${statusBadge(r)}${r.totpEnabled ? ' ' + badge('2FA', 'primary') : ''}${claimBadge(r)}</td>
     <td class="num">${r.users} / ${r.userLimit || '∞'}</td>
     <td class="num">${fmtBytes(r.used)}${r.volume ? ' / ' + fmtBytes(r.volume) : ''}${progress(r.used, r.volume)}</td>
     <td class="num">${r.online} / ${r.deviceLimit || '∞'}${r.poolRejects ? ' <span class="badge warn" title="' + esc(t('rs.poolFull', { n: r.poolRejects })) + '">!</span>' : ''}</td>
-    <td class="num">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'}/${r.speedDown || '∞'} M` : '∞'}</td>
+    <td class="num c-p3">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'}/${r.speedDown || '∞'} M` : '∞'}</td>
     <td class="${expired(r) ? 'danger' : ''}">${r.expiry ? fmtDay(r.expiry) : `<span class="muted small">${t('user.never')}</span>`}</td>
-    <td class="num">${r.online}</td>
+    <td class="num c-p2">${r.online}</td>
     <td class="actions">
       <button class="btn sm" data-act="rs.detail" data-id="${r.id}">${t('common.details')}</button>
       <button class="btn sm" data-act="rs.edit" data-id="${r.id}">${t('common.edit')}</button>
@@ -93,14 +115,14 @@ async function showDetail(id) {
         <dt>${t('rs.online')}</dt><dd class="num">${r.online}</dd>
         <dt>${t('rs.users')}</dt><dd class="num">${r.users} / ${r.userLimit || '∞'}</dd>
         <dt>${t('rs.lines')} <span class="muted small">${(r.lineIds || []).length}</span></dt>
-        <dd><div class="chips rs-lines">${refLabels(r.lineRefs || (r.lineIds || []).map(id => ({ lineId: id })), state.lines, state.nodes || []).map(n => `<span class="chip">${esc(n)}</span>`).join('') || `<span class="muted small">${t('common.none')}</span>`}</div></dd>
+        <dd class="rs-lines">${refChips(r.lineRefs || (r.lineIds || []).map(id => ({ lineId: id })), state.lines, state.nodes || [], { key: 'rs-lines-' + r.id, max: 20 }) || `<span class="muted small">${t('common.none')}</span>`}</dd>
         <dt>${t('rs.lastLogin')}</dt><dd class="mono small">${esc(r.lastLogins || '—')}</dd>
       </dl>
     </section>
     <section><h3>${t('rs.users')} <span class="badge">${users.length}</span></h3>
       ${users.length ? `<div class="rs-users">${users.map(u => userRow(u)).join('')}</div>`
         : `<p class="muted small">${t('rs.noUsers')}</p>`}
-    </section>`);
+    </section>`, { wide: true });
 }
 
 // 一个用户两行:概要(名称/用量/到期/设备)+ 订阅地址;在线时再列出每个 IP 走的线路
@@ -136,7 +158,7 @@ function editReseller(id) {
       ${field(t('rs.speedDown'), `<input id="f-down" type="number" min="0" value="${r.speedDown || 0}">`, t('rs.speedHelp'))}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(r.remark || '')}">`)}
       ${check('f-enabled', t('common.enabled'), r.enabled !== false)}
-      <div class="full">${field(t('rs.lines'), `<div id="f-lines"></div>`, t('rs.linesHelp'))}</div>
+      <div class="full">${fieldBox(t('rs.lines'), `<div id="f-lines"></div>`, t('rs.linesHelp'))}</div>
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), enabled: fchk('f-enabled'),
@@ -148,7 +170,7 @@ function editReseller(id) {
     if (id) await put('resellers/' + id, body); else await post('resellers', body);
     await reload();
     toast(id ? t('rs.updated') : t('rs.created', { url: panelURL() }), 'ok');
-  }, { wide: true });
+  }, { size: 'xl' });
   const items = lineItems(state.lines, state.nodes || [], null);
   picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(r.lineRefs || (r.lineIds || []).map(x => ({ lineId: x })), items) });
 }

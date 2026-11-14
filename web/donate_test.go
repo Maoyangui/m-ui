@@ -6,9 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -84,7 +87,7 @@ func TestDonorBoardFallbackAndCache(t *testing.T) {
 	defer bad.Close()
 	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits++
-		io.WriteString(w, `{"updatedAt":1,"devices":12,"donors":[{"name":"Larry Wang","total":10}]}`)
+		fmt.Fprintf(w, `{"updatedAt":1,"devices":12,"devicesAt":%d,"donors":[{"name":"Larry Wang","total":10}]}`, time.Now().Unix())
 	}))
 	defer good.Close()
 	old := donorsURLs
@@ -206,6 +209,28 @@ func TestSupportOnlineOff(t *testing.T) {
 	}
 }
 
+// 建议与支持页中英文都要整页渲染出来:html/template 会按 JS 语法跟踪脚本里的上下文,脚本写得让它误判时
+// Execute 出错、页面是空的或只剩一半,而 handleSupport 不看这个错误。顺带看到账后的提示没有硬承诺。
+func TestSupportPageRendersFully(t *testing.T) {
+	s, _ := newTestServerForSupport(t, "")
+	for lang, want := range map[string]string{
+		"zh": "通常几小时内上榜;超过一天还没上榜,请在 Telegram 联系我。",
+		"en": "If you're not on it after a day, message me on Telegram.",
+	} {
+		w := httptest.NewRecorder()
+		s.handleSupport(w, httptest.NewRequest("GET", "http://panel:2053/app/support?lang="+lang, nil))
+		page := w.Body.String()
+		for _, frag := range []string{want, "support/pledge-check", "var STALE = 30000", "querySelectorAll('[data-copy]')", "</script>\n</body>\n</html>"} {
+			if !strings.Contains(page, frag) {
+				t.Fatalf("%s: 页面里应有 %q,渲染没完成?(共 %d 字节)", lang, frag, len(page))
+			}
+		}
+		if strings.Contains(page, "会在几小时内上榜") || strings.Contains(page, "you'll appear on the list within") {
+			t.Fatalf("%s: 还有硬承诺", lang)
+		}
+	}
+}
+
 func TestSupportCheck(t *testing.T) {
 	hits := 0
 	now := time.Now().Unix()
@@ -258,4 +283,471 @@ func newTestServerForSupport(t *testing.T, online string) (*Server, *gorm.DB) {
 		db.Create(&model.Setting{Key: "supportOnline", Value: online})
 	}
 	return &Server{db: db, sessions: map[string]session{}}, db
+}
+
+// getDonors 打开一次 support/donors,返回名单和响应里的服务器时间。
+func getDonors(t *testing.T, s *Server) (donorBoard, int64) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	s.handleSupportDonors(w, httptest.NewRequest("GET", "/app/support/donors", nil))
+	var out struct {
+		donorBoard
+		Now int64 `json:"now"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err, w.Body.String())
+	}
+	return out.donorBoard, out.Now
+}
+
+func boardJSON(updatedAt int64, devices int, devicesAt int64, names ...string) string {
+	rows := make([]string, 0, len(names))
+	for _, n := range names {
+		rows = append(rows, fmt.Sprintf(`{"name":%q,"total":10}`, n))
+	}
+	return fmt.Sprintf(`{"updatedAt":%d,"devices":%d,"devicesAt":%d,"donors":[%s]}`, updatedAt, devices, devicesAt, strings.Join(rows, ","))
+}
+
+// waitDonorsIdle 等后台这一轮取名单结束。
+func waitDonorsIdle(t *testing.T, s *Server) {
+	t.Helper()
+	for i := 0; i < 300; i++ {
+		s.donors.mu.Lock()
+		busy := s.donors.fetching != nil
+		s.donors.mu.Unlock()
+		if !busy {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("后台取名单一直没结束")
+}
+
+// raw 卡住(一直不回)、jsDelivr 2.5 秒才回:以前一个接一个取,卡住的 raw 吃掉 12 秒预算里的 10 秒,兜底整体失败
+// (之后每 5 分钟重试一次,结果一样);现在同时取,第一轮就拿到名单,第一个打开的人最多等 3 秒。
+func TestDonorBoardHungPrimaryDoesNotStarveFallback(t *testing.T) {
+	release := make(chan struct{})
+	hang := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	defer hang.Close()
+	defer close(release)
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(2500 * time.Millisecond)
+		io.WriteString(w, boardJSON(2, 55, time.Now().Unix(), "Larry Wang"))
+	}))
+	defer slow.Close()
+	old := donorsURLs
+	donorsURLs = []string{hang.URL, slow.URL}
+	defer func() { donorsURLs = old }()
+	s, _ := newTestServerForSupport(t, "")
+	start := time.Now()
+	b, _ := getDonors(t, s)
+	if el := time.Since(start); el > 3500*time.Millisecond {
+		t.Fatalf("第一个打开的人等了 %v,最多该等 3 秒", el)
+	}
+	// 一般第一个人就拿到了;机器忙、刚好超过 3 秒的话,接着打开的人也该在卡住的 raw 超时(10 秒)之前拿到
+	for len(b.Donors) == 0 && time.Since(start) < 6*time.Second {
+		time.Sleep(50 * time.Millisecond)
+		b, _ = getDonors(t, s)
+	}
+	if b.Devices != 55 || len(b.Donors) != 1 {
+		t.Fatalf("raw 卡住时兜底应该取得到: %+v(过了 %v)", b, time.Since(start))
+	}
+}
+
+// 很久没人打开这页(手上那份比 6 小时还旧):第一个打开的人等新的,不再先拿到几天前那份;
+// 只过了一两个小时的,先给手上这份,后台换新的。
+func TestDonorBoardTooOldWaitsForFresh(t *testing.T) {
+	var body atomic.Value
+	body.Store(boardJSON(1, 22, time.Now().Unix(), "Larry Wang"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, body.Load().(string))
+	}))
+	defer srv.Close()
+	old := donorsURLs
+	donorsURLs = []string{srv.URL}
+	defer func() { donorsURLs = old }()
+	s, _ := newTestServerForSupport(t, "")
+	if b, _ := getDonors(t, s); b.Devices != 22 || len(b.Donors) != 1 {
+		t.Fatalf("第一次应该等到名单: %+v", b)
+	}
+	waitDonorsIdle(t, s)
+	age := func(d time.Duration) {
+		s.donors.mu.Lock()
+		s.donors.got, s.donors.next = time.Now().Add(-d), time.Time{}
+		s.donors.mu.Unlock()
+	}
+
+	age(72 * time.Hour)
+	body.Store(boardJSON(2, 55, time.Now().Unix(), "赛博云", "maomaocloud", "Larry Wang"))
+	if b, _ := getDonors(t, s); b.Devices != 55 || len(b.Donors) != 3 {
+		t.Fatalf("三天前那份不该直接给第一个打开的人: %+v", b)
+	}
+	waitDonorsIdle(t, s)
+
+	age(2 * time.Hour)
+	body.Store(boardJSON(3, 60, time.Now().Unix(), "赛博云", "maomaocloud", "Larry Wang", "Bob"))
+	if b, _ := getDonors(t, s); b.Devices != 55 {
+		t.Fatalf("两小时前那份先给出去,后台再换: %+v", b)
+	}
+	waitDonorsIdle(t, s)
+	if b, _ := getDonors(t, s); b.Devices != 60 || len(b.Donors) != 4 {
+		t.Fatalf("后台换好之后应是新的: %+v", b)
+	}
+}
+
+// 同一轮里先到的(比如 jsDelivr)比后到的 raw 旧:先给等着的人,raw 到了再换成新的;后到的更旧就不换。
+func TestDonorBoardPrefersFresherInRound(t *testing.T) {
+	now := time.Now().Unix()
+	older := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, boardJSON(now-12*3600, 50, now-12*3600, "Larry Wang"))
+	}))
+	defer older.Close()
+	newer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		io.WriteString(w, boardJSON(now-600, 52, now-600, "Larry Wang", "Bob"))
+	}))
+	defer newer.Close()
+	old := donorsURLs
+	defer func() { donorsURLs = old }()
+
+	donorsURLs = []string{newer.URL, older.URL}
+	s, _ := newTestServerForSupport(t, "")
+	if b, _ := getDonors(t, s); b.Devices != 50 {
+		t.Fatalf("先到的先给: %+v", b)
+	}
+	waitDonorsIdle(t, s)
+	if b, _ := getDonors(t, s); b.Devices != 52 || len(b.Donors) != 2 {
+		t.Fatalf("后到的更新,应该换上: %+v", b)
+	}
+
+	slowOlder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		io.WriteString(w, boardJSON(now-12*3600, 50, now-12*3600, "Larry Wang"))
+	}))
+	defer slowOlder.Close()
+	fastNewer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, boardJSON(now-600, 52, now-600, "Larry Wang", "Bob"))
+	}))
+	defer fastNewer.Close()
+	donorsURLs = []string{fastNewer.URL, slowOlder.URL}
+	s2, _ := newTestServerForSupport(t, "")
+	getDonors(t, s2)
+	waitDonorsIdle(t, s2)
+	if b, _ := getDonors(t, s2); b.Devices != 52 || len(b.Donors) != 2 {
+		t.Fatalf("后到的更旧,不该换: %+v", b)
+	}
+}
+
+// 隔一轮也不倒退:上一轮从 raw 拿到新的,这一轮只有 jsDelivr 给了更旧的一份,手上新的留着;
+// 时间写错(比现在晚好几天)的那份照样换上,但挡不住之后正常的名单。
+func TestDonorBoardNeverGoesBack(t *testing.T) {
+	now := time.Now().Unix()
+	var body atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, body.Load().(string))
+	}))
+	defer srv.Close()
+	old := donorsURLs
+	donorsURLs = []string{srv.URL}
+	defer func() { donorsURLs = old }()
+	s, _ := newTestServerForSupport(t, "")
+	round := func(b string) []string {
+		body.Store(b)
+		s.donors.mu.Lock()
+		s.donors.next = time.Time{} // 到了该再取的时候
+		s.donors.mu.Unlock()
+		getDonors(t, s)
+		waitDonorsIdle(t, s)
+		got, _ := getDonors(t, s)
+		names := []string{}
+		for _, d := range got.Donors {
+			names = append(names, d.Name)
+		}
+		return names
+	}
+	for i, c := range []struct {
+		board string
+		want  string
+	}{
+		{boardJSON(now-600, 52, now-600, "Larry Wang", "Bob"), "Larry Wang,Bob"},
+		{boardJSON(now-12*3600, 50, now-12*3600, "Larry Wang"), "Larry Wang,Bob"},
+		{boardJSON(now+10*86400, 1, now+10*86400, "Zed"), "Zed"},
+		{boardJSON(now, 53, now, "Larry Wang", "Bob", "Carol"), "Larry Wang,Bob,Carol"},
+	} {
+		if got := strings.Join(round(c.board), ","); got != c.want {
+			t.Fatalf("第 %d 轮: %s,应为 %s", i+1, got, c.want)
+		}
+	}
+}
+
+// 时间写在未来(超出时钟误差)的名单不可信,那个时间不参与新旧比较:以前"不倒退"只排除比现在晚一天以上的,
+// 一份时间写成几小时后的名单会让所有面板在这几个小时里拒收正常的更新。时钟误差以内的照常比较,旧的照样挡住。
+func TestDonorBoardFutureStampNotTrusted(t *testing.T) {
+	now := time.Now().Unix()
+	var body atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, body.Load().(string))
+	}))
+	defer srv.Close()
+	old := donorsURLs
+	donorsURLs = []string{srv.URL}
+	defer func() { donorsURLs = old }()
+	s, _ := newTestServerForSupport(t, "")
+	round := func(b string) string {
+		body.Store(b)
+		s.donors.mu.Lock()
+		s.donors.next = time.Time{} // 到了该再取的时候
+		s.donors.mu.Unlock()
+		getDonors(t, s)
+		waitDonorsIdle(t, s)
+		got, _ := getDonors(t, s)
+		names := []string{}
+		for _, d := range got.Donors {
+			names = append(names, d.Name)
+		}
+		return strings.Join(names, ",")
+	}
+	for i, c := range []struct {
+		board string
+		want  string
+	}{
+		{boardJSON(now-600, 52, now-600, "Larry Wang", "Bob"), "Larry Wang,Bob"},
+		{boardJSON(now+3*3600, 50, now+3*3600, "Future"), "Future"},                     // 时间不可信:照样换上,但不靠它算"新"
+		{boardJSON(now, 53, now, "Larry Wang", "Bob", "Carol"), "Larry Wang,Bob,Carol"}, // 以前这里要被拒收 3 个小时
+		{boardJSON(now+3*3600, 50, now-60, "UpdatedAtWrong"), "Larry Wang,Bob,Carol"},   // updatedAt 写在未来不算,按 devicesAt 比:旧一分钟
+		{boardJSON(now-12*3600, 50, now-12*3600, "Larry Wang"), "Larry Wang,Bob,Carol"},
+		{boardJSON(now+120, 54, now+120, "Larry Wang", "Bob", "Carol", "Dan"), "Larry Wang,Bob,Carol,Dan"}, // 晚 2 分钟:时钟误差以内
+		{boardJSON(now+60, 54, now+60, "Larry Wang"), "Larry Wang,Bob,Carol,Dan"},                          // 比手上的旧:照样挡住
+	} {
+		if got := round(c.board); got != c.want {
+			t.Fatalf("第 %d 轮: %s,应为 %s", i+1, got, c.want)
+		}
+	}
+}
+
+// 返回给页面的服务器时间要在写响应之前取:TronGrid / ntfy 慢的时候,先取的 now 少算了这段耗时,页面按它算钟差,
+// 倒计时会前后跳。留名时间 at 仍是发出之前的(页面的截止时间不晚于对账那边按 ntfy 时间算的)。
+func TestSupportServerTimeTakenAfterUpstream(t *testing.T) {
+	const delay = 1200 * time.Millisecond
+	var tronFail atomic.Bool
+	slowTron := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(delay)
+		if tronFail.Load() {
+			http.Error(w, "busy", http.StatusBadGateway)
+			return
+		}
+		io.WriteString(w, `{"data":[]}`)
+	}))
+	defer slowTron.Close()
+	slowNtfy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(delay)
+		io.WriteString(w, `{}`)
+	}))
+	defer slowNtfy.Close()
+	oldT, oldP := tronURL, pledgeURL
+	tronURL, pledgeURL = slowTron.URL, slowNtfy.URL
+	defer func() { tronURL, pledgeURL = oldT, oldP }()
+
+	check := func(s *Server) map[string]interface{} {
+		start := time.Now()
+		w := httptest.NewRecorder()
+		s.handleSupportCheck(w, httptest.NewRequest("GET", "/x?amount=10.037&since="+itoa64(start.Unix()-60), nil))
+		var out map[string]interface{}
+		json.Unmarshal(w.Body.Bytes(), &out)
+		if n, _ := out["now"].(float64); w.Code != 200 || int64(n) < start.Add(delay).Unix() {
+			t.Fatalf("核对:now 应在查完 TronGrid 之后取: %d %v(开始于 %d)", w.Code, out, start.Unix())
+		}
+		return out
+	}
+	s, _ := newTestServerForSupport(t, "")
+	if out := check(s); out["known"] != true {
+		t.Fatalf("%v", out)
+	}
+	tronFail.Store(true)
+	s2, _ := newTestServerForSupport(t, "")
+	if out := check(s2); out["known"] != false {
+		t.Fatalf("TronGrid 失败时是不知道: %v", out)
+	}
+
+	start := time.Now()
+	r := httptest.NewRequest("POST", "http://panel:2053/app/support/pledge", strings.NewReader(`{"name":"Larry Wang","amount":10}`))
+	r.RemoteAddr = "203.0.113.77:1234"
+	w := httptest.NewRecorder()
+	s.handleSupportPledge(w, r)
+	var out map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &out)
+	at, _ := out["at"].(float64)
+	exp, _ := out["expiresAt"].(float64)
+	now, _ := out["now"].(float64)
+	if w.Code != 200 || int64(now) < start.Add(delay).Unix() {
+		t.Fatalf("留名:now 应在发完 ntfy 之后取: %d %v(开始于 %d)", w.Code, out, start.Unix())
+	}
+	if int64(at) < start.Unix() || int64(at) >= int64(now) || int64(exp)-int64(at) != pledgeWindow {
+		t.Fatalf("留名时间应是发出之前的,截止时间按它算: %v(开始于 %d)", out, start.Unix())
+	}
+}
+
+// 面板数的统计时间没有(老版本写的名单)或超过 48 小时:不显示(返回 0),名单照常。
+func TestDonorDevicesHiddenWhenStale(t *testing.T) {
+	var body atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, body.Load().(string))
+	}))
+	defer srv.Close()
+	old := donorsURLs
+	donorsURLs = []string{srv.URL}
+	defer func() { donorsURLs = old }()
+	now := time.Now().Unix()
+	for _, c := range []struct {
+		name string
+		at   int64
+		want int
+	}{
+		{"一小时前算的", now - 3600, 55},
+		{"47 小时前算的", now - 47*3600, 55},
+		{"49 小时前算的", now - 49*3600, 0},
+		{"没有统计时间", 0, 0},
+	} {
+		body.Store(boardJSON(now, 55, c.at, "Larry Wang"))
+		s, _ := newTestServerForSupport(t, "")
+		b, serverNow := getDonors(t, s)
+		if b.Devices != c.want || len(b.Donors) != 1 || b.DevicesAt != c.at {
+			t.Fatalf("%s: %+v,应显示 %d", c.name, b, c.want)
+		}
+		if serverNow < now || serverNow > time.Now().Unix() {
+			t.Fatalf("%s: 响应里的服务器时间不对: %d", c.name, serverNow)
+		}
+		waitDonorsIdle(t, s)
+	}
+	// 手上那份放久了(之后一直取不到新的),到显示的时候也按 48 小时算
+	s, _ := newTestServerForSupport(t, "")
+	body.Store(boardJSON(now, 55, now-3600, "Larry Wang"))
+	getDonors(t, s)
+	waitDonorsIdle(t, s)
+	s.donors.mu.Lock()
+	s.donors.board.DevicesAt = now - 50*3600
+	s.donors.next = time.Now().Add(time.Hour)
+	s.donors.mu.Unlock()
+	if b, _ := getDonors(t, s); b.Devices != 0 || len(b.Donors) != 1 {
+		t.Fatalf("放了 50 小时的面板数不该再显示: %+v", b)
+	}
+}
+
+// TronGrid 查失败或正在查:这 20 秒内别人问到的都是 known:false("不知道"),不能说成 known:true/arrived:false。
+func TestSupportCheckUnknownWhileFailingOrBusy(t *testing.T) {
+	now := time.Now().Unix()
+	var fail atomic.Bool
+	var hits atomic.Int32
+	fail.Store(true)
+	gate := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		if fail.Load() {
+			http.Error(w, "busy", http.StatusBadGateway)
+			return
+		}
+		<-gate
+		fmt.Fprintf(w, `{"data":[{"block_timestamp":%d000,"to":"TDoUMF4nF244o5GZvBBwX5t9axvnSoP1Cm","type":"Transfer","value":"10037000"}]}`, now-30)
+	}))
+	defer srv.Close()
+	old := tronURL
+	tronURL = srv.URL
+	defer func() { tronURL = old }()
+	s, _ := newTestServerForSupport(t, "")
+	ask := func() map[string]interface{} {
+		w := httptest.NewRecorder()
+		s.handleSupportCheck(w, httptest.NewRequest("GET", "/x?amount=10.037&since="+itoa64(now-60), nil))
+		var out map[string]interface{}
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return out
+	}
+	for i := 0; i < 3; i++ {
+		if out := ask(); out["known"] != false || out["arrived"] != false {
+			t.Fatalf("查失败后第 %d 次: %v", i, out)
+		}
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("20 秒内只该查一次: %d", hits.Load())
+	}
+
+	// 过了 20 秒,这次 TronGrid 慢:查的过程中别人问到的也是"不知道"
+	s.donors.mu.Lock()
+	s.donors.tronAt = time.Time{}
+	s.donors.mu.Unlock()
+	fail.Store(false)
+	first := make(chan map[string]interface{}, 1)
+	go func() { first <- ask() }()
+	for i := 0; hits.Load() < 2; i++ {
+		if i > 500 {
+			t.Fatal("第二次查询一直没发出去")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if out := ask(); out["known"] != false {
+		t.Fatalf("正在查的时候应是 known:false: %v", out)
+	}
+	close(gate)
+	if out := <-first; out["known"] != true || out["arrived"] != true {
+		t.Fatalf("发起查询的那个人应拿到结果: %v", out)
+	}
+	out := ask()
+	if out["known"] != true || out["arrived"] != true || hits.Load() != 2 {
+		t.Fatalf("查好之后 20 秒内直接用结果: %v(查了 %d 次)", out, hits.Load())
+	}
+	if n, _ := out["now"].(float64); int64(n) < now {
+		t.Fatalf("响应要带服务器时间: %v", out)
+	}
+}
+
+// 留名的响应带服务器时间(页面拿它校正倒计时);要转的金额不会超过对账那边认的上限。
+func TestSupportPledgeServerTimeAndLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, `{}`) }))
+	defer srv.Close()
+	old := pledgeURL
+	pledgeURL = srv.URL
+	defer func() { pledgeURL = old }()
+	s, _ := newTestServerForSupport(t, "")
+	r := httptest.NewRequest("POST", "http://panel:2053/app/support/pledge", strings.NewReader(`{"name":"Big","amount":100000}`))
+	r.RemoteAddr = "203.0.113.9:1234"
+	w := httptest.NewRecorder()
+	before := time.Now().Unix()
+	s.handleSupportPledge(w, r)
+	var out map[string]interface{}
+	json.Unmarshal(w.Body.Bytes(), &out)
+	now, _ := out["now"].(float64)
+	exp, _ := out["expiresAt"].(float64)
+	if w.Code != 200 || int64(now) < before || int64(now) > time.Now().Unix() || int64(exp)-int64(now) != pledgeWindow {
+		t.Fatalf("%d %v", w.Code, out)
+	}
+	for i := 0; i < 500; i++ {
+		if m, ok := usdtMicros(payableAmount(pledgeMaxUSDT)); !ok || m > pledgeMaxMicros {
+			t.Fatalf("最大金额加零头超过了对账上限: %d", m)
+		}
+	}
+}
+
+// 面板和 deploy/donors/settle.mjs 各写了一份的常量要一致:留名窗口、金额上限、面板数多久算过期。
+func TestDonorConstantsMatchSettle(t *testing.T) {
+	src, err := os.ReadFile("../deploy/donors/settle.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ re, want string }{
+		{`const WINDOW = (\S+);`, itoa64(pledgeWindow)},
+		{`export const MAX_MICROS = (\S+);`, "100_000_100_000"},
+		{`export const DEVICES_FRESH = (.+?);`, "48 * 3600"},
+	} {
+		m := regexp.MustCompile(c.re).FindSubmatch(src)
+		if m == nil || string(m[1]) != c.want {
+			t.Errorf("settle.mjs 里 %s 应为 %s,实际 %q", c.re, c.want, m)
+		}
+	}
+	if pledgeMaxMicros != 100_000_100_000 || devicesFresh != 48*3600 {
+		t.Fatal("改了这边的常量,settle.mjs 要一起改")
+	}
 }

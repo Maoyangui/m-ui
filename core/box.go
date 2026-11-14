@@ -39,6 +39,7 @@ import (
 	"github.com/sagernet/sing/common/ntp"
 	"github.com/sagernet/sing/service"
 
+	"github.com/Maoyangui/m-ui/core/protocol/arrival"
 	"github.com/Maoyangui/m-ui/core/protocol/usersess"
 	"github.com/sagernet/sing/service/pause"
 )
@@ -244,6 +245,11 @@ func NewBox(options Options) (*Box, error) {
 	// 注意服务注册表是进程级共享的:每次 NewBox 都覆盖同一个槽位,热加的入站也从同一处取 —— 先停旧数据面再起新的,拿到的永远是当前这份。
 	sessions := usersess.NewSet()
 	service.MustRegister[*usersess.Set](ctx, sessions)
+	// 连接跟踪器也要在入站构造之前建好:入站在 TLS 握手、协议认证失败时经 arrival 往里记"到了但没过握手 / 认证"
+	statsTracker := NewStatsTracker()
+	limiter := NewLimiter()
+	connTracker := NewConnTracker(limiter)
+	arrival.Register(ctx, connTracker)
 	// Must register after ConnectionManager: the Apple HTTP engine's proxy bridge reads it from the context when Manager.Start resolves the default client.
 	httpClientManager := httpclient.NewManager(ctx, logFactory.NewLogger("httpclient"), options.HTTPClients, routeOptions.DefaultHTTPClient)
 	service.MustRegister[adapter.HTTPClientManager](ctx, httpClientManager)
@@ -478,9 +484,6 @@ func NewBox(options Options) (*Box, error) {
 		timeService.TimeService = ntpService
 		internalServices = append(internalServices, adapter.NewLifecycleService(ntpService, "ntp service"))
 	}
-	statsTracker := NewStatsTracker()
-	limiter := NewLimiter()
-	connTracker := NewConnTracker(limiter)
 	router.AppendTracker(statsTracker)
 	router.AppendTracker(connTracker)
 

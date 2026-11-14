@@ -1,0 +1,1358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>帮助说明 · m-ui</title>
+<link rel="icon" href="../logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="help.css">
+<script>try{var m=localStorage.getItem('m-ui-theme');if(m==='light'||m==='dark')document.documentElement.dataset.theme=m}catch(e){}if(/[?&]view=reseller(&|$)/.test(location.search))document.documentElement.classList.add('rv')</script>
+</head>
+<body>
+<header class="head">
+  <a class="brand" href="#top"><img src="../logo.svg" alt=""><span>m-ui 帮助说明</span><span class="badge rv-only">代理面板</span></a>
+  <span class="grow"></span>
+  <button class="toc-btn" id="toc-btn" type="button" aria-controls="toc" aria-expanded="false">目录 ▾</button>
+  <label class="search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="q" type="search" placeholder="搜索帮助(按 / 键)" aria-label="搜索帮助" autocomplete="off" spellcheck="false"><button class="clear" id="q-clear" type="button" aria-label="清除搜索" hidden>✕</button></label>
+  <nav class="links"><a id="lang-link" href="en.html" hreflang="en" lang="en">English</a><a href="../">返回面板</a></nav>
+</header>
+<div class="wrap">
+<nav class="toc" id="toc" aria-label="目录"><div id="toc-list"></div></nav>
+<main class="doc" id="doc">
+<div class="intro" id="top">
+  <h1><span class="av-only">m-ui 帮助说明</span><span class="rv-only">代理面板帮助说明</span></h1>
+  <p>按目录找功能(手机上点右上角的「目录」),或者用上面的搜索框。灰框里的字和面板上的按钮、标题一模一样,照着找、照着点就行。<span class="rv-only">这里只列代理面板用得上的内容。</span></p>
+</div>
+<div class="status" id="status" hidden data-found="找到 {n} 处相关内容" data-none="没有找到「{q}」。换个说法试试,比如功能名或按钮上的字。"><span></span><button type="button">清除搜索</button></div>
+<div class="parts">
+
+<div class="part" data-title="开始">
+<section class="chap" id="start">
+  <h2>快速上手</h2>
+  <p class="lede av-only">m-ui 是一个自己搭的代理面板:线路、用户、订阅、证书、备份和多台服务器,都在网页里管。</p>
+  <p class="lede rv-only">代理面板用来管你名下的用户:建号、续费、看用量,再把订阅地址发给用户。</p>
+
+  <section class="sec" id="concepts">
+    <h3>先认识几个词</h3>
+    <p class="lede">面板里反复出现这几个概念,弄清楚了后面就好懂。</p>
+    <ul>
+      <li><b>线路</b>:客户端连进来的入口,等于"协议 + 端口",再决定流量从哪出去。用户订阅里的节点就是由线路生成的。</li>
+      <li data-scope="admin"><b>上游</b>:线路的出口。默认 direct(本机直出),也可以是 WARP 或别的落地机。</li>
+      <li><b>用户</b>:一个订阅地址,带流量、到期、设备数和限速。流量用完或到期会自动停用;设备数满了只拒绝新设备,限速只限制速度。</li>
+      <li><b>套餐</b>:流量、时长、设备数、限速、线路的模板,建号、续费时一键套用。</li>
+      <li><b>订阅</b>:给客户端导入的地址;同一个地址用浏览器打开,是用户自己的落地页。</li>
+      <li data-scope="admin"><b>主服务器 / 副服务器</b>:主机存全部数据、负责算账;副机只转发流量,配置由主机推送。</li>
+      <li><b>代理</b>:帮站长卖号的人,在自己的代理面板里只管自己名下的用户。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="first-login" data-scope="admin">
+    <h3>第一次登录</h3>
+    <p class="lede">装好后用浏览器打开面板,第一件事是把默认密码改掉。</p>
+    <ol class="steps">
+      <li>打开 <code>http://服务器IP:2053/app/</code>(端口和路径以安装结束时打印的为准)。</li>
+      <li>用默认账号 <code>admin</code> / <code>admin</code> 登录。</li>
+      <li>顶部红条提示还是默认密码:点 <b data-k="alert.changeNow">立即修改</b>,在 <b data-k="nav.admin">管理员</b> 页的 <b data-k="adm.account">登录账号</b> 里填 <b data-k="set.oldPass">原密码</b> 和 <b data-k="set.newPass">新密码</b>,点 <b data-k="set.updateAdmin">更新账号</b>,然后用新密码重新登录。</li>
+    </ol>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>只打开 <code>http://服务器IP:2053/</code> 会是 404,这是故意的:不把面板路径告诉扫端口的人。地址要带上完整路径。</li>
+      <li>打不开:先看云服务器的安全组 / 防火墙有没有放行 2053/tcp。</li>
+      <li>忘了地址或密码:SSH 登录服务器执行 <code>m-ui</code>,菜单 1 查看面板地址,菜单 5 重置管理员密码。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="five-steps" data-scope="admin">
+    <h3>五步开始用</h3>
+    <p class="lede">概览页的 <b data-k="qs.title">快速开始</b> 清单就是这几步,做完前四步就能给人用了。</p>
+    <ol class="steps">
+      <li><b>改默认密码</b>(见上一节)。</li>
+      <li><b>准备证书</b>:<b data-k="nav.cert">证书</b> 页 → <b data-k="cert.add">添加证书</b>。有域名选 <b data-k="cert.srcAcme">有域名(自动签发)</b> 签一张;没有域名选 <b data-k="cert.srcSelf">无域名(自签)</b>,点 <b data-k="cert.selfsign">生成自签证书</b>。详见 <a href="#cert">证书</a>。</li>
+      <li><b>建线路</b>:<b data-k="nav.lines">线路</b> 页 → <b data-k="line.quick">快速添加</b>,新手选 Hysteria2 或 AnyTLS,保存。详见 <a href="#lines">线路与协议</a>。</li>
+      <li><b>建用户</b>:<b data-k="nav.users">用户</b> 页 → <b data-k="user.add">新增用户</b>,填用户名和额度,勾上 <b data-k="user.f.lines">可用线路</b>,保存。</li>
+      <li><b>发订阅</b>:点用户名打开详情,<b data-k="user.subscription">订阅</b> 下面有两个地址,把不带 <code>?format=</code> 的那个(通用地址)发给用户:用浏览器打开是他自己的落地页,能一键导入客户端;客户端来拉时按类型给格式(见 <a href="#users-sub">订阅地址、二维码与临时共享</a>)。</li>
+    </ol>
+    <div class="tip"><b>没有域名也能用</b>自签证书 + 服务器 IP 就行:订阅会自动告诉客户端"允许不安全证书",客户端不用另外设置。以后有了域名签正式证书时注意:已经有用户时证书页默认不勾 <b data-k="cert.applySub">用于订阅 HTTPS</b>;勾了的话所有用户的订阅地址都会变成 <code>https://域名…</code>,旧地址立即失效,每个客户端都要重新导入,签发前会再提示一次。不勾就保持原地址,用户刷新一次订阅即可。</div>
+    <div class="pit"><b>常见坑</b>线路的端口要在云服务器安全组和系统防火墙里放行:Hysteria2、TUIC 走 UDP,其它大多走 TCP。没放行是"连不上"最常见的原因。</div>
+  </section>
+
+  <section class="sec" id="rs-start" data-scope="reseller">
+    <h3>代理:三步开始用</h3>
+    <p class="lede">站长给你开通代理之后,按这三步就能开始卖号。</p>
+    <ol class="steps">
+      <li>打开站长给你的代理面板地址(默认端口 2054,路径 <code>/dl/</code>)。用户名填代理名,第一次登录密码留空,直接点 <b data-k="login.submit">登录</b>,按提示设置密码。详见 <a href="#rs-login">第一次登录与设密码</a>。</li>
+      <li>(可选)到 <b data-k="nav.plans">套餐</b> 页建几个套餐,以后建号、续费一键套用。</li>
+      <li>到 <b data-k="nav.users">用户</b> 页点 <b data-k="user.add">新增用户</b>:填名称,选套餐或者手填额度,勾上 <b data-k="user.f.lines">可用线路</b>,保存;点用户名打开详情,把 <b data-k="user.subscription">订阅</b> 下不带 <code>?format=</code> 的那个地址发给用户。</li>
+    </ol>
+    <div class="tip"><b>代理面板只有四页</b><b data-k="nav.dashboard">概览</b>、<b data-k="nav.users">用户</b>、<b data-k="nav.plans">套餐</b>、<b data-k="nav.account">账号</b>。你只看得到自己名下的用户和自己建的套餐。</div>
+  </section>
+
+  <section class="sec" id="tour" data-scope="admin">
+    <h3>界面导览</h3>
+    <p class="lede">左边是功能导航,右上角是帮助和反馈;要你处理的事集中在 <b data-k="nav.dashboard">概览</b> 最上面的 <b data-k="dash.attn.title">需要处理</b>,其它页面顶部的彩色横条也会提醒。</p>
+    <ul>
+      <li>左侧导航依次是:<b data-k="nav.dashboard">概览</b>、<b data-k="nav.lines">线路</b>、<b data-k="nav.upstreams">上游</b>、<b data-k="nav.exts">外部节点</b>、<b data-k="nav.users">用户</b>、<b data-k="nav.resellers">代理</b>、<b data-k="nav.plans">套餐</b>、<b data-k="nav.rules">规则</b>、<b data-k="nav.nodes">服务器</b>、<b data-k="nav.cert">证书</b>、<b data-k="nav.backup">备份</b>、<b data-k="nav.ops">运维</b>、<b data-k="nav.logs">日志</b>、<b data-k="nav.admin">管理员</b>、<b data-k="nav.settings">设置</b>。</li>
+      <li>左下角:主题切换(◐ 跟随系统、☀ 浅色、☾ 深色)、语言、<b data-k="common.logout">退出登录</b>。版本号旁出现箭头表示有新版本,点它就能更新(见 <a href="#update">更新</a>)。</li>
+      <li>右上角:<b data-k="help.btn">帮助说明</b>(就是本页)和 <b data-k="support.btn">建议 / 支持</b>(联系作者、反馈问题)。</li>
+      <li><b data-k="dash.attn.title">需要处理</b>:数据面重载失败、服务器离线或没同步、证书要处理、大陆连通异常、上游故障、用户快到期或流量将尽、定时备份失败等,每类一行,按轻重排,点行尾的链接去处理;一切正常时只剩一行「✓」。证书和大陆连通可以点 <b data-k="reach.dismiss">知道了</b>,情况有变化会再出现。</li>
+      <li>顶部提醒条:在概览以外的页面,默认密码没改、证书要处理、大陆连通异常、数据面重载失败等会在页面顶部提醒,按提示处理。</li>
+      <li>副服务器的面板里,线路、用户这些页面是只读的,要到主机面板改。</li>
+      <li>快捷键:<kbd>/</kbd> 跳到当前页的搜索框,<kbd>Esc</kbd> 关闭弹窗,<kbd>Ctrl</kbd> + <kbd>Enter</kbd> 提交弹窗。手机上点左上角 ☰ 打开导航。</li>
+    </ul>
+  </section>
+</section>
+</div>
+
+<div class="part" data-title="搭建">
+<section class="chap" id="nodes" data-scope="admin">
+  <h2>服务器与主副机</h2>
+  <p class="lede">一台主服务器管全部数据,可以再接任意多台副服务器当入口;订阅里每条线路在每台服务器上各出一个节点,客户端挑延迟低的用。</p>
+
+  <section class="sec" id="nodes-why">
+    <h3>要不要加副机</h3>
+    <p class="lede">一台服务器就能用;想给用户更多地区、更多入口时再加副机。</p>
+    <ul>
+      <li>主机每 5 秒把线路、用户推给副机,同时收回各台的流量和在线设备;配额、到期只在主机上判定。</li>
+      <li>副机只转发流量。主机临时连不上时,副机继续按最后一份配置服务用户;恢复后流量按记录补齐,不会重复计费。</li>
+      <li>加一台服务器,所有人的订阅里自动多出对应的节点。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="nodes-add">
+    <h3>接入一台副机</h3>
+    <p class="lede">在副机上装好 m-ui,把它的配对信息填到主机就行。</p>
+    <ol class="steps">
+      <li>在副机服务器上同样安装 m-ui,登录副机面板(先把默认密码改掉)。</li>
+      <li>副机 <b data-k="nav.settings">设置</b> → <b data-k="set.role">角色</b>:勾 <b data-k="set.roleSwitch">作为副服务器运行</b>,点 <b data-k="common.save">保存</b>。</li>
+      <li>副机 <b data-k="nav.settings">设置</b> → <b data-k="set.pairing">配对信息</b>:复制 <b data-k="node.apiUrl">API 地址</b> 和 <b data-k="node.token">配对令牌</b>。</li>
+      <li>主机 <b data-k="nav.nodes">服务器</b> 页 → <b data-k="node.add">新增服务器</b>:填 <b data-k="common.name">名称</b>(会成为订阅里节点名的后缀,如"香港")、API 地址和配对令牌。副机面板用自签证书或 IP 访问时勾 <b data-k="node.insecure">跳过证书校验</b>。</li>
+      <li>保存后几秒,这一行显示 <b data-k="node.synced">已同步</b> 就好了。</li>
+    </ol>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>API 地址是 <code>http://</code> 时,令牌和全部用户凭据都是明文传输,列表里会标 <b data-k="node.plain">明文</b>。建议给副机面板开 HTTPS(自签就行),或者让副机面板端口只对主机 IP 放行。</li>
+      <li>副机的证书在副机自己的 <b data-k="nav.cert">证书</b> 页签发,各自续期。</li>
+      <li>副机面板改成 HTTPS 后(副机证书页勾了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后生效),要到主机 <b data-k="nav.nodes">服务器</b> 页编辑这一行,把 <b data-k="node.apiUrl">API 地址</b> 换成副机 <b data-k="set.pairing">配对信息</b> 里新的 <code>https://</code> 地址(自签证书或用 IP 访问的勾 <b data-k="node.insecure">跳过证书校验</b>),不然这台会显示离线。在副机上签正式证书时这一项默认勾着,不打算改 API 地址就取消它。</li>
+      <li>副机面板里线路、用户、套餐这些页面是只读的,改动都在主机上做。</li>
+      <li>主副机版本要一致:列表里标 <b data-k="node.versionMismatch">版本与主机不同</b> 时,把副机升级到同一版本。用到较新的功能后,版本不够的副机会整份拒收同步、继续按旧配置服务:按规则分流要 v0.6.14 及以上,线路作上游、上游组、外部节点的排除关键词要 v0.7.16 及以上,外部节点的隐藏和改名要 v0.7.17 及以上。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="nodes-addr">
+    <h3>连接地址与 IPv4 / IPv6</h3>
+    <p class="lede">订阅里的节点地址默认用每台服务器自动探测到的公网 IP,域名只作 SNI,免得客户端 DNS 被污染连不上。</p>
+    <ul>
+      <li>编辑服务器 → <b data-k="node.addr">连接地址(可填 IP)</b>:留空就用探测到的公网 IP;想用固定的 IP 或域名就手填。</li>
+      <li><b data-k="node.family">自动地址用</b>:双栈服务器默认给 IPv4,可以改成 IPv6;选的那个没探测到就用另一个。手填了连接地址就不看这一项。</li>
+      <li>双栈服务器在线路表单里还能按线路单独选 <b data-k="line.ipVersion">IP 版本</b>。</li>
+      <li>想让订阅里写域名而不是 IP:<b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> → <b data-k="set.subServerAddr">订阅里的节点地址</b> 选 <b data-k="set.addrDomain">域名</b>。选之前先给每台服务器填好 <b data-k="node.domain">域名 / IP</b>(本机留空就用面板域名):这个模式下 <b data-k="node.addr">连接地址(可填 IP)</b> 不生效,没填域名的服务器不会出现在订阅里。</li>
+    </ul>
+    <div class="tip"><b>IPv6 入站检测</b>订阅里这台有走 IPv6 的线路时(<b data-k="node.family">自动地址用</b> 选了 IPv6,或者有线路的 <b data-k="line.ipVersion">IP 版本</b> 选了 IPv6),主机在大陆连通检测的同一轮里,从境外有 IPv6 的测点连它订阅里的 IPv6 地址和第一条走 IPv6 的 TCP 线路的端口(每台约多用 4 个测点次),结果是 <b data-k="nav.nodes">服务器</b> 页 <b data-k="reach.col">大陆连通</b> 一列里的 v6 小格,点格子看明细。显示不通,多半是安全组没放行 <code>::/0</code> 或者本机防火墙拦了 IPv6。每台只测一个端口,别的端口要各自放行;UDP 线路(hysteria2、tuic)测不了,只能在服务器上抓包确认。</div>
+    <div class="pit"><b>IPv6 常见坑</b><ul>
+      <li>云服务器的 IPv6 要在安全组里给 <code>::/0</code> 单独放行(TCP、UDP 分开加);系统里的 ip6tables / ufw 也要放行,只清空 iptables 不会放开 IPv6。</li>
+      <li>WARP、NAT 这类只能出站的 IPv6 不能给用户连。</li>
+      <li>纯 IPv6 的机器:检查更新前要先装 WARP(见 <a href="#warp">WARP</a>);直连出口打不开只有 IPv4 的网站,线路上游选 warp 才能访问全网。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="nodes-ratio">
+    <h3>流量倍率</h3>
+    <p class="lede">给贵的服务器多扣流量:经过这台服务器的流量按倍率计入用户用量。</p>
+    <ul>
+      <li>编辑服务器 → <b data-k="node.ratio">流量倍率</b>:<code>2</code> 就是双倍扣量,节点名会带 <code>x2</code> 标记;<code>1</code> 是原样。主机自己也能设。</li>
+      <li>用户的已用量、详情里的流量图、落地页上的数字都是折算后的,账对得上;线路、上游的统计是实际流量。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reach">
+    <h3>大陆连通检测</h3>
+    <p class="lede">看服务器在中国大陆是不是被墙了:从大陆移动、电信、联通的家庭宽带测点去连,香港测点作对照。</p>
+    <ul>
+      <li><b data-k="nav.nodes">服务器</b> 页的 <b data-k="reach.col">大陆连通</b> 一列显示结果:点格子看明细,点 <b data-k="reach.checkAll">检测大陆连通</b> 一次测全部。</li>
+      <li>结果怎么看:<b data-k="reach.v.ok">正常</b>;<b data-k="reach.v.partial">部分不通</b>(某一家运营商连不上);<b data-k="reach.v.blocked">疑似被墙</b>;<b data-k="reach.v.ipBlocked">IP 被墙</b>(要换 IP);<b data-k="reach.v.portBlocked">端口被封</b>(换个端口);<b data-k="reach.v.abroadDown">境外也不通</b>(是服务器、端口或安全组的问题,不是墙)。</li>
+      <li>定时巡检:<b data-k="nav.settings">设置</b> → <b data-k="set.reach">大陆连通检测</b> → <b data-k="set.reachAuto">自动巡检</b>,默认开着:m-ui 启动约 2 分钟后测第一轮,之后默认每 90 分钟一轮,发现被墙或恢复时发 Telegram。</li>
+    </ul>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>检测时服务器地址(IP 和端口)会发给 Globalping 公共测试网络,自动巡检也一样;不想发就去掉 <b data-k="set.reachAuto">自动巡检</b>,只在需要时手动点检测。免登录每小时约 250 个测点次,测一台约用 15 个;不够用就在设置里填免费申请的 <b data-k="set.reachToken">Globalping 令牌(可选)</b>。</li>
+      <li>测的是这台第一条 TCP 线路的端口;只有 hysteria2、tuic(UDP)线路时,只能看出 IP 有没有被墙。目前只测 IPv4:大陆的家庭宽带测点大多没有 IPv6,拿它们测 IPv6 会把正常的服务器误判成被墙(见 <a href="#limits">已知限制</a>)。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="nodes-off">
+    <h3>停用、删除与离线排查</h3>
+    <p class="lede">停用或删除副机会让它立刻停止服务;副机显示离线时,先看列表里写的原因。</p>
+    <ul>
+      <li>编辑服务器去掉 <b data-k="common.enabled">启用</b>:那台立刻停止为任何人服务,重新启用后恢复。</li>
+      <li>删除服务器:只部署在它上面的线路会被停用,只用它的用户 / 代理会失去那条线路;操作后会列出受影响的线路和人。</li>
+      <li>标 <b data-k="node.decomPending">下线通知未送达</b>:那台还没收到停止服务的通知,主机会一直重试。要立刻停掉,就 SSH 到那台机器上执行 <code>systemctl disable --now m-ui</code>(停掉并取消开机自启),或者用 <code>m-ui</code> 菜单 14 卸载。只关掉副机模式停不了服务:它会变成一台独立的主机,按最后一份配置继续给所有人用。</li>
+      <li>离线原因:<b data-k="node.errTimeout">连接超时</b>、<b data-k="node.errRefused">连接被拒绝</b>(端口没放行或面板没在运行)、<b data-k="node.errDns">域名解析失败</b>、<b data-k="node.errCert">证书不受信任</b>(勾上跳过证书校验)、<b data-k="node.errToken">令牌不匹配</b>(重新复制配对令牌)、<b data-k="node.errFp">证书指纹变了</b>(确实重签过副机证书,就在那一行的 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>)。</li>
+      <li>换一台副机:新副机装好后,在 <b data-k="nav.nodes">服务器</b> 页编辑原来那一行,换成新的 API 地址和令牌,主机会自动重新推送。域名和 API 地址不变(域名已经解析到新机器)的,只把令牌换成新机器的就行:主机当它是一台新机器,不再复用连着旧机器的连接,推送、拉报告、设备数合并立刻都走新机器;勾了 <b data-k="node.insecure">跳过证书校验</b> 的,记住的旧指纹随令牌一起作废,新机器第一次连上时重新记住,不用再点 <b data-k="node.resetCert">重置指纹</b>。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="ha" data-scope="admin">
+  <h2>设为主机与主机容灾</h2>
+  <p class="lede">两件事:<b data-k="ha.setMaster">设为主机</b> 一键把主机换到另一台服务器(计划内换机、换到全新 VPS 都用它);<b data-k="ha.title">主机容灾</b> 在主机挂了(VPS 宕机、被误删)时由备用接任为主机。容灾默认关闭。</p>
+
+  <section class="sec" id="ha-switch">
+    <h3>设为主机</h3>
+    <p class="lede">在主机面板上把任意一台副机设为主机:数据一次交接过去,原来的主机自动变为副机。</p>
+    <ol class="steps">
+      <li><b data-k="nav.nodes">服务器</b> 页,点那台服务器 <b data-k="common.status">状态</b> 一栏开头的角色标签(如「副机 ▾」「备用 1 ▾」),在弹出的卡片里点 <b data-k="ha.setMaster">设为主机</b>;行末的 ⋯(<b data-k="common.more">更多</b>)菜单里也有。</li>
+      <li>确认框里写清会发生什么:检查结果、新的面板地址和代理面板地址、订阅域名的 DNS 该指向哪个 IP。输一次管理员密码(开了两步验证再输动态码)。</li>
+      <li>之后全程有进度,完成后给出新面板和代理面板地址。账号、密码、两步验证都不变,到新面板重新登录。</li>
+    </ol>
+    <ul>
+      <li>主机的全部数据(用户、线路、套餐、代理、设置、流量记录)端到端加密后交给那台,它成为主机;原来的主机变为副机,继续用自己的线路服务。两台各重启一次,连在这两台上的用户断开几秒后自动重连,别的服务器不受影响。</li>
+      <li>提交之前任何一步失败(包括传得太慢、快到截止)都会自动取消:原主机照旧当主机,写操作恢复,数据不变。</li>
+      <li>换到全新 VPS:照常装好 m-ui,像副机一样接入(见 <a href="#nodes-add">接入一台副机</a>),显示 <b data-k="node.synced">已同步</b> 后对它点 <b data-k="ha.setMaster">设为主机</b>,不用备份、还原。</li>
+      <li>和那台的链接是明文 http 时,确认框里要勾选 <b data-k="ha.sm.plainAck" class="wrap">我知道和它的链接是明文 http:链路上的主动中间人能拿到并改写整库,仍要继续</b> 才能点。能换成 https 就先换(自签证书 + 指纹也行)。</li>
+      <li>订阅地址不变:订阅的域名、端口、路径和证书跟着主机走,把订阅域名的 DNS 改指向新主机就行。订阅地址用的是 IP、或者迁过去的订阅端口和那台的面板 / 代理面板 / WARP 端口或线路端口相同时,那台继续用自己的订阅端口,订阅地址会变,确认框的 <b data-k="ha.sm.warn">注意</b> 里提前说。面板和代理面板用新主机自己的地址。</li>
+      <li>订阅证书是 <b data-k="cert.srcExternal">已有证书</b>(由 certbot 等工具续期)、新主机上又没有同名证书的,带过去的是一份副本,新主机上没人续它:做完后就在新主机 <b data-k="nav.cert">证书</b> 页重新签发,或者在新主机装好 certbot 后重新添加。</li>
+      <li>离线、停用、配置没同步上、版本太旧、磁盘不够(那台和本机都要够)、它连不上本机、本机作为副机的地址拼不出来时不能设为主机,卡片里写明原因。代理面板端口在那台被线路占着时,成为主机后代理面板起不来,也在 <b data-k="ha.sm.warn">注意</b> 里列出。</li>
+      <li>交接期间两台自己线路上的流量照常计费:原主机从暂停写操作起另记一本账,变为副机后由新主机只收打包之后的那段;那台收到数据之后自己记的,换上新库时并进去;其它副机线路上的流量照常补回。</li>
+    </ul>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>交接期间写操作暂停,通常一两分钟,最长按库的大小算(15–60 分钟),进度框和页面顶部写着截止时间:面板只读,外部 API、代理面板、Telegram 机器人、订阅页的临时共享返回 503,对接的程序要能重试。</li>
+      <li>提交请求发出后没收到回话,进度框显示结果不明:写操作继续暂停,原主机每 10 秒问一次那台。到截止还没结论,或你点 <b data-k="ha.sm.abandon">放弃(隔离目标)</b> 并再输一次密码,原主机先再问一次那台、看各副机跟的是谁:已经有副机跟了那台,就按换主机完成;否则以更高的纪元继续当主机、恢复写操作,那台之后就算起来,副机也不认它,它会自动变为副机,它那份数据不生效。隔离要副机确认收到撤销才做:截止前放弃要那台以外的副机全部确认,截止后过半即可;确认不够时写操作继续暂停,连不上的副机恢复后自动完成。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="ha-how">
+    <h3>主机容灾怎么工作</h3>
+    <p class="lede">在主机的 <b data-k="nav.settings">设置</b> → <b data-k="ha.title">主机容灾</b> 里打开(保存时要输管理员密码)。开启后,服务器顺序排在最前面的几台副机当备用,保存加密的数据副本。</p>
+    <ul>
+      <li><b data-k="ha.set.standbys">备用台数</b> 默认 2(可设 1–3),按 <b data-k="nav.nodes">服务器</b> 页的顺序挑,列表里标「备用 1」「备用 2」;调顺序就是调谁先接任。前排暂时离线、磁盘不够时名次先保留 30 分钟再顺延;新进名单的备用会发 Telegram。</li>
+      <li>主机定时把数据副本发给备用(默认每 5 分钟一份,有改动后 30 秒内补一份)。副本用备用自己的公钥加密、主机签名,只有接任时才解开。发送连续失败时,卡片和 <b data-k="ha.set.ready">就绪检查</b> 写出原因。</li>
+      <li>主机失联期间副机照常转发,已连上的用户不受影响;接任是为了恢复管理、计费、订阅和告警。</li>
+      <li>接任后它就是主机,可以长期当。副机线路上的流量会自动补回。补不回来的:最后一份副本之后在原主机上做的管理改动、原主机自己线路上那几分钟的流量;副本本来就不带流量时序图(概况、落地页的图表)和订阅日志,操作审计只带最近 7 天、最多 2 万条,接任后这些从空白开始,原主机回来也不会合并回来。</li>
+      <li>设置页的 <b data-k="ha.set.ready">就绪检查</b> 逐项打勾:合格的备用、副机版本、副本自检、和副机的链接是不是 https、订阅是不是用域名、Telegram、副机之间是否互通、境外见证;没通过的给一句修法。</li>
+      <li>备用卡片里有它的公钥指纹,和那台副机 <b data-k="nav.settings">设置</b> → <b data-k="ha.title">主机容灾</b> 里显示的本机指纹应该一样。</li>
+    </ul>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>副机都要升级到 v0.7.17 或更新:旧版照常同步,但不能当备用。<b>升级时先升副机,再升主机</b>:版本比主机旧的备用保留名次和手里的旧副本,但收不到新副本,合格备用不够时告警一次。</li>
+      <li>和副机的链接是明文 http 时,它默认不当备用:http 链接上的主动中间人能拿到并改写数据副本。确实可信时,在 <b data-k="ha.set.advanced">高级</b> 里打开 <b data-k="ha.set.allowPlain">允许明文链接的副机当备用</b>。</li>
+      <li>副机之间要互相放开面板端口,好互相确认主机是不是真的失联;不通时只能靠境外测点或人工确认。</li>
+      <li>备用重装过 m-ui,它的公钥会变:卡片里点 <b data-k="ha.repin">重新信任</b>,核对指纹、再输一次管理员密码后才会再给它发副本。指纹对不上又没重装过,可能是有人在冒充它。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="ha-takeover">
+    <h3>接任方式</h3>
+    <p class="lede">打开容灾时三选一,默认是 <b data-k="ha.mode.confirm">先确认再接任</b>。</p>
+    <ul>
+      <li><b data-k="ha.mode.off">关闭</b>:主机挂了要人来处理,副机照常用自己的线路服务。</li>
+      <li><b data-k="ha.mode.confirm">先确认再接任</b>(默认,推荐):备用确认主机失联 3 分钟后发 Telegram,回复消息里给的 <code>/takeover 码</code>(或「接任 码」),或者到备用的面板上点 <b data-k="ha.takeover">接任为主机</b>,它就接任。按钮只在发出确认之后才出现;没到时间、证据不够时,备用页面顶部写着为什么不接任。主机在这之前回来,提醒自动取消。</li>
+      <li><b data-k="ha.mode.auto">主机失联后自动接任</b>:失联 10 分钟后备用自己接任。三台以上要过半副机同意;一主一副时还要境外测点也连不上主机,所以必须开着 <b data-k="ha.set.witness">境外测点见证</b>。这个模式不给接任按钮,真要强行接任用命令行 <code>m-ui ha takeover --force</code>。</li>
+      <li>什么算失联:备用 1 分钟以上没收到主机的消息,其它副机也联系不上它,境外测点(美、德、日、新、港)也连不上它的公网 IP。只是国内到主机被墙、某一台和主机之间断网,或者主机在升级、重启,都不算。</li>
+      <li>防脑裂:每次接任或设为主机都换一个更高的纪元,副机只听纪元最高的那台。主机推给副机的状态带签名,交接标记带时效、绑定新主机的公钥,只拿到副机令牌伪造不了。</li>
+      <li>等多久发确认、等多久自动接任、副本间隔,都在 <b data-k="ha.set.advanced">高级</b> 里调。</li>
+    </ul>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>升级、维护前可以先暂停接任(设置页的暂停按钮,或主机上 <code>m-ui ha pause 分钟数</code>)。在面板里点升级、改端口这类会重启的操作,以及 <code>m-ui</code> 菜单里的升级(暂停 15 分钟)和重启(暂停 5 分钟),都会自动先暂停。</li>
+      <li>没开 Telegram 通知时,确认模式只能到备用的面板上点接任。</li>
+      <li>订阅地址里是 IP 时,接任后用户要重新导入订阅。订阅最好用域名,接任后把它指向新主机(或者打开下面的 Cloudflare 自动改 DNS)。</li>
+      <li>备用的数据副本比它现在的纪元旧(上一任新主机期间的改动不在里面)时不给接任按钮;真要接任用命令行 <code>m-ui ha takeover --force</code>,那些改动会丢。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="ha-fence">
+    <h3>原主机回来了</h3>
+    <p class="lede">原主机恢复后自动变为副机,不会和新主机抢着当主机。</p>
+    <ul>
+      <li>新主机的服务器列表里它先标「原主机 · 失联」,暂时不进订阅;回来后变回「副机」,重新收到配置,线路回到订阅。</li>
+      <li>它失联期间如果还收了改动,变为副机前会先留一份备份,页面顶部提示有几条改动没进新主机。</li>
+      <li>备用在原主机其实还在时接任过(比如网络分区),多数副机仍跟着原主机时,它会把主机让回去,自动改过的 DNS 也改回原值,页面顶部写明是「让回」而不是失联。</li>
+      <li>想让它重新当主机,在服务器列表里对它点 <b data-k="ha.setMaster">设为主机</b>。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="ha-restore">
+    <h3>备份、还原与换机</h3>
+    <p class="lede">纪元只升不降:在主机上还原一份旧备份、或在菜单里「重置全部设置」,都不会让纪元回退,副机照常跟着,页面顶部提示一次纪元已恢复。</p>
+    <ul>
+      <li><b>把主机的备份还原到别的机器并启动,等于把主机换到那台</b>:新机以更高的纪元接管全部副机;旧主机之后若被服务商重启,会自动变为副机并提示「同一份数据已在另一台服务器上当主机」。旧机不要了就在它上面执行 <code>systemctl disable --now m-ui</code>。</li>
+      <li>只想看看备份里有什么,别在联网的机器上启动它。</li>
+      <li>删除一台副机、在副机上 <b data-k="set.rotateToken">更换令牌</b>,都会清掉它的容灾记录,它可以再被别的主机接入。副机离线时被删,它回来后照样会清。</li>
+      <li>把主机降回 0.7.16 或更早之前,先在每台副机执行 <code>m-ui ha reset</code>,不然旧主机管不了进过纪元的副机。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="ha-dns">
+    <h3>Cloudflare 自动改 DNS(可选)</h3>
+    <p class="lede">订阅域名托管在 Cloudflare 时,主机变了(接任或设为主机)可以自动把解析改到新主机。默认关闭,要一个 Cloudflare API 令牌。</p>
+    <ul>
+      <li>在 <b data-k="ha.title">主机容灾</b> 设置的 <b data-k="ha.set.advanced">高级</b> → <b data-k="ha.set.dns" class="wrap">自动改 DNS(Cloudflare,可选)</b> 里填 <b data-k="ha.set.dnsToken">Cloudflare 令牌</b> 和 <b data-k="ha.set.dnsNames">跟着主机走的域名</b>(比如订阅域名),点 <b data-k="ha.set.dnsTest">测试令牌与记录</b> 看哪些记录会被改;令牌无效、区域找不到时这里直接写出错误。</li>
+      <li>令牌要有这个域名的 DNS 编辑权限,单独存、和签证书用的分开。输入框下面的 <b data-k="cf.create">去 Cloudflare 创建</b> ↗ 打开权限已预填的创建页;详细步骤见 <a href="#cf-token">Cloudflare API 令牌怎么创建</a>。</li>
+      <li>只改这些域名里当前指向原主机 IP 的 A / AAAA 记录,橙云和 TTL 不动,别的记录不碰;改不成只告警,不挡换主机。</li>
+      <li>结果分三种:全部改好、只改好一部分、失败。页面顶部和 Telegram 写出每条记录的原值 → 新值;新主机缺 IPv6(或 IPv4)、令牌管不到某个区域时,把没改的记录列出来,要你手动改或删。</li>
+      <li>误接任后让回原主机时,本机自动改过、而且现在仍指向本机的记录会改回原值。</li>
+      <li>不配的话,接任或设为主机后按页面顶部和 Telegram 里写的 IP,自己去改解析。</li>
+    </ul>
+    <div class="tip"><b>测试地址</b>环境变量 <code>M_UI_TEST_CF_API</code> 能把 Cloudflare 接口换成测试地址,只供演练、测试用;设了它,设置页会提示、操作审计里有记录,证书签发不受影响。</div>
+  </section>
+
+  <section class="sec" id="ha-cli">
+    <h3>命令行</h3>
+    <p class="lede">SSH 到服务器上用 <code>m-ui ha</code>(要 root);<code>m-ui</code> 菜单第 15 项也是主机容灾。</p>
+    <ul>
+      <li><code>m-ui ha status</code>:本机角色、纪元、模式、备用、副本时间、本机公钥指纹;服务停着时也能看个大概。</li>
+      <li><code>m-ui ha takeover</code>:在备用上接任为主机,证据不够时会被拒绝;加 <code>--force</code> 不等确认、不看证据直接接任,只在确认主机已经不在时用。在主机上加 <code>--force</code> 是以高于已知最高的纪元把跟过别的主机的副机收回来,只在两台主机僵持时用。</li>
+      <li><code>m-ui ha set-master 服务器名或 id</code>:在主机上把一台副机设为主机,做完打印新面板地址;链接是 http 时要加 <code>--allow-plain</code>。结果不明时打印原因和最晚截止时间。</li>
+      <li><code>m-ui ha pause 分钟数</code> / <code>m-ui ha resume</code>:在主机上暂停 / 恢复接任。</li>
+      <li><code>m-ui ha reset</code>:清掉本机的容灾记录(纪元、跟随的主机、副本),本机可以再被别的主机接入;在主机上要加 <code>--force</code>。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="lines" data-scope="admin">
+  <h2>线路与协议</h2>
+  <p class="lede">线路决定客户端怎么连进来:入口协议 + 端口 → 从哪出去。每条线路在它部署的每台服务器上各出一个节点。</p>
+
+  <section class="sec" id="lines-new">
+    <h3>新建线路</h3>
+    <p class="lede">新手用 <b data-k="line.quick">快速添加</b> 最省事:协议参数是配好的,端口也自动挑好。</p>
+    <ol class="steps">
+      <li><b data-k="nav.lines">线路</b> 页右上角点 <b data-k="line.quick">快速添加</b>,选一个预设:<b data-lit="js/pages/lines.js">Hysteria2</b>、<b data-lit="js/pages/lines.js">AnyTLS</b>、<b data-lit="js/pages/lines.js">VLESS + Reality</b>、<b data-lit="js/pages/lines.js">Trojan</b>、<b data-lit="js/pages/lines.js">Shadowsocks 2022</b>、<b data-lit="js/pages/lines.js">VMess + WS</b>。</li>
+      <li>表单已经填好,看一眼 <b data-k="common.name">名称</b>(订阅里显示的节点名)和 <b data-k="common.port">端口</b>,保存。</li>
+      <li>想自己配就点 <b data-k="line.add">新增线路</b>:选 <b data-k="line.protocol">协议</b>、填端口;<b data-k="line.upstream">上游</b> 默认是 <b data-k="line.direct">direct(本机直出)</b>。</li>
+    </ol>
+    <ul>
+      <li>新建时默认勾着 <b data-k="line.assignAll" class="wrap">分配给全部现有用户(不含代理名下)</b>;不勾的话,要到用户里逐个勾上,新线路才会出现在他们的订阅里。</li>
+      <li>端口会自动填一个空闲的五位数端口,可以改;和面板、订阅端口或本机其它程序撞了,保存时会直接报错。</li>
+      <li>保存前整份配置先交给内核试跑,过不了就不生效,也不影响正在用的线路。改线路会让数据面重启一下,在线用户会自动重连。</li>
+    </ul>
+    <div class="pit"><b>常见坑</b>端口要在安全组 / 防火墙放行,UDP 协议(Hysteria2、TUIC)记得放 UDP。</div>
+  </section>
+
+  <section class="sec" id="protocols">
+    <h3>协议怎么选</h3>
+    <p class="lede">拿不准就这样配:主力用 Hysteria2,再配一条 TCP 的(AnyTLS 或 VLESS + Reality)当备用。</p>
+    <div class="tbl"><table>
+      <thead><tr><th>协议</th><th>走</th><th>证书</th><th>特点 / 适合</th></tr></thead>
+      <tbody>
+        <tr><td>Hysteria2</td><td>UDP</td><td>需要(自签也行)</td><td>速度快、抗丢包,首选。运营商限 UDP 时配端口跳跃。</td></tr>
+        <tr><td>TUIC</td><td>UDP</td><td>需要</td><td>和 Hysteria2 同类(基于 QUIC),作备选。</td></tr>
+        <tr><td>AnyTLS</td><td>TCP</td><td>需要</td><td>流量特征弱;UDP 不好用时首选的 TCP 方案。</td></tr>
+        <tr><td>VLESS + Reality</td><td>TCP</td><td>不需要</td><td>不要域名和证书,借大站的 TLS 握手,抗探测强;建议开 Vision。</td></tr>
+        <tr><td>Trojan</td><td>TCP</td><td>需要</td><td>经典的 TLS 协议,客户端基本都支持。</td></tr>
+        <tr><td>VMess / VLESS + WS</td><td>TCP</td><td>可选</td><td>能套 CDN(要有域名);直连时不如上面几种。</td></tr>
+        <tr><td>Shadowsocks</td><td>TCP / UDP</td><td>不用</td><td>不要证书,客户端支持最广。2022 算法更安全,但老内核 Clash 不支持,订阅会自动不发给它们。</td></tr>
+        <tr><td>SOCKS / HTTP / Mixed</td><td>TCP</td><td>—</td><td>普通代理,适合内网设备或给别的程序当中转,不建议直接拿来翻墙。</td></tr>
+      </tbody>
+    </table></div>
+    <div class="tip"><b>没有域名时</b>VLESS + Reality 最省事;也可以用自签证书跑 Hysteria2 / AnyTLS,订阅会自动带上"允许不安全"。</div>
+  </section>
+
+  <section class="sec" id="tls">
+    <h3>TLS:节点证书、Reality、无</h3>
+    <p class="lede"><b data-k="line.tlsMode">TLS 模式</b> 决定节点怎么加密和伪装;Hysteria2、TUIC、AnyTLS 必须用 TLS。</p>
+    <ul>
+      <li><b data-k="line.tls.cert">节点证书</b>:用本机证书,客户端按域名校验。默认用每台服务器证书页设的默认证书,也可以在 <b data-k="line.cert">证书</b> 里给这条线路单独选一张。</li>
+      <li><b data-k="line.tls.reality">Reality</b>:不用证书,伪装成 <b data-k="line.reality.server">握手目标(伪装域名)</b> 那个网站的 TLS。点 <b data-k="line.reality.check">检测</b> 看能不能用,点 <b data-k="line.reality.pick">帮我挑</b> 自动测一批常见大站、按延迟列出,点一下就填入。<b data-k="line.reality.private">私钥</b> 旁边点 <b data-k="line.reality.gen">生成密钥对</b>,Short ID 旁边点 <b data-k="line.gen">生成</b>。</li>
+      <li><b data-k="line.tls.none">无</b>:明文,只用于 CDN 回源或内网。</li>
+      <li><b data-k="line.fp">客户端指纹</b> 一般保持默认。</li>
+    </ul>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>Reality 的握手目标要支持 TLS 1.3 和 H2,并且从服务器连得上;线路部署在别的服务器时,检测出的延迟只作参考。</li>
+      <li>用自签证书时客户端要允许不安全证书:订阅里会自动带上,一般不用管(设置项是 <b data-k="set.subInsecure">订阅允许不安全证书</b>)。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="transport">
+    <h3>传输方式</h3>
+    <p class="lede">只有 VLESS、VMess、Trojan 能选 <b data-k="line.transport.type">传输方式</b>;拿不准就用默认的 <b data-k="line.transport.tcp">TCP(直连)</b>。</p>
+    <ul>
+      <li><b data-k="line.transport.tcp">TCP(直连)</b>:最快。</li>
+      <li>ws、httpupgrade:可以套 CDN。</li>
+      <li>grpc:适合配 Reality。</li>
+      <li>VLESS 建议勾 <b data-k="line.vision" class="wrap">启用 XTLS Vision(仅 TCP + TLS,推荐)</b>。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="hy2">
+    <h3>Hysteria2 的端口跳跃与伪装</h3>
+    <p class="lede">运营商对单个 UDP 端口限速时用端口跳跃;不想被人探测出是代理,用伪装站点。</p>
+    <ul>
+      <li><b data-k="line.hop">端口跳跃范围</b>:比如 <code>20000-30000</code>。服务器把这一段 UDP 端口都转到线路端口,客户端在范围内随机换端口。安全组 / 防火墙要放行这整段 UDP;留空就是不用。</li>
+      <li><b data-k="line.masq">伪装站点</b>:别人探测这个端口时看到的是这个网站,而不是一个报错的代理。要写完整网址,新线路默认 <code>https://www.bing.com</code>;留空 = 不伪装。</li>
+      <li><b data-k="line.upMbps">上行带宽 Mbps(0=不限)</b> / <b data-k="line.downMbps">下行带宽 Mbps(0=不限)</b>:一般留 0。</li>
+      <li><b data-k="line.obfs" class="wrap">混淆密码(salamander,留空=不用)</b>:一般留空;填了的话订阅会自动带给客户端。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="lines-nodes">
+    <h3>部署到哪些服务器</h3>
+    <p class="lede">有多台服务器时,一条线路可以只在其中几台上开。</p>
+    <ul>
+      <li><b data-k="line.servers">部署到服务器</b>:默认全部勾着 = 全部服务器,以后新加的服务器也会自动开这条线路(全都不勾也按全部算);只勾其中几台,才是只在这几台上开,订阅也只出这些入口。从部署里去掉某台服务器时,用户、代理授权、套餐在这条线路上选了那台的,一并去掉那台;只选了被去掉的服务器的,改回这条线路的全部服务器(保存后弹窗点名),不会悄悄没了这条线路。</li>
+      <li>双栈服务器那一行多一个下拉,可以让这条线路在那台单独用 IPv4 或 IPv6(默认跟服务器页的设置)。</li>
+      <li>一条线路部署在几台服务器上就是几个"入口";给用户、套餐、代理分配线路时,可以只勾其中某台服务器上的入口。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="route-rules">
+    <h3>按规则分流</h3>
+    <p class="lede">同一条线路里,让指定的网站走别的出口(比如流媒体走解锁机),或者直接拦掉。</p>
+    <ol class="steps">
+      <li>编辑线路,勾 <b data-k="line.rr.on">按规则分流</b>。</li>
+      <li>点 <b data-k="line.rr.add">+ 添加规则</b>:选 <b data-k="line.rr.type">匹配方式</b>(<b data-k="line.rr.t.domain_suffix">域名后缀</b>、<b data-k="line.rr.t.domain">完整域名</b>、<b data-k="line.rr.t.domain_keyword">域名关键字</b>、<b data-k="line.rr.t.ip_cidr">IP 段</b>、<b data-k="line.rr.t.port">端口</b>),填匹配内容(多个用逗号或换行隔开),选 <b data-k="line.rr.to">出口</b>:direct、某个上游,或者 <b data-k="line.rr.reject">拦截</b>。</li>
+      <li>想按应用加:在旁边的输入框填应用名(如 抖音、netflix、openai),点 <b data-k="line.rr.lookup">查域名</b>,规则自动加好,出口在规则里选。</li>
+      <li>保存。</li>
+    </ol>
+    <ul>
+      <li>从上往下,第一条命中的生效;都没命中的走线路自己的 <b data-k="line.upstream">上游</b>。</li>
+      <li>一个 App 常常要好几个域名,要一起加;关键字太短(比如 ai)会误伤别的网站;按域名访问的流量不一定能按 IP 段匹配上,优先用域名规则。</li>
+      <li>取消勾选 <b data-k="line.rr.on">按规则分流</b> 再保存,会清掉全部规则。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="lines-batch">
+    <h3>批量操作、排序与克隆</h3>
+    <p class="lede">勾选多条线路后,顶部会出现批量操作条。</p>
+    <ul>
+      <li><b data-k="line.batch.enable">启用</b>、<b data-k="line.batch.disable">停用</b>、<b data-k="line.batch.upstream">设上游</b>、<b data-k="line.batch.nodes">部署服务器</b>(有多台服务器时才有)、<b data-k="line.batch.clear">取消选择</b>。批量改只重载一次数据面。</li>
+      <li>拖动行调整顺序,订阅里的节点按这个顺序排。</li>
+      <li>行末 <b data-k="common.more">更多</b> 里有 <b data-k="line.clone">克隆</b>(会重新挑一个端口)、<b data-k="up.addFromLine">把线路加为上游</b>(见 <a href="#up-chain">线路作上游</a>)和删除。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="upstreams" data-scope="admin">
+  <h2>上游与外部节点</h2>
+  <p class="lede">上游决定线路的流量从哪出去;外部节点把别处的节点并进用户的订阅。</p>
+
+  <section class="sec" id="up-add">
+    <h3>添加上游</h3>
+    <p class="lede">上游就是"落地机":加好后在线路的 <b data-k="line.upstream">上游</b> 里选它,用户的流量就从那台机器出去。</p>
+    <ol class="steps">
+      <li><b data-k="nav.upstreams">上游</b> 页 → <b data-k="up.add">新增上游</b>。</li>
+      <li>把落地节点的分享链接粘贴到 <b data-k="up.import">从分享链接导入</b>,点 <b data-k="up.parse">解析填表</b>,核对后保存;也可以手动选类型、填参数。</li>
+      <li>点 <b data-k="common.test">测试</b> 看延迟;再到 <b data-k="nav.lines">线路</b> 里把线路的上游改成它。</li>
+    </ol>
+    <ul>
+      <li>支持 VLESS、VMess、Trojan、TUIC、Hysteria2、Shadowsocks、SOCKS 落地。</li>
+      <li>还有线路在用的上游删不掉,先把那些线路的上游改掉。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="warp">
+    <h3>WARP</h3>
+    <p class="lede">Cloudflare WARP 给线路一个干净的出口,常用来解锁流媒体,或者让纯 IPv6 的机器访问 IPv4 网站。</p>
+    <ol class="steps">
+      <li><b data-k="nav.ops">运维</b> 页的 <b data-lit="js/pages/ops.js">Cloudflare WARP</b> 卡片里,依次点 <b data-k="ops.t.warp-install">安装</b>、<b data-k="ops.t.warp-enable">启用</b>。</li>
+      <li>点 <b data-k="ops.checkExit">检测出口</b>,确认出口 IP 正常。</li>
+      <li><b data-k="ops.upstream">上游</b> 一栏还没有 warp 的话,点 <b data-k="ops.addUpstream">添加为上游 warp</b>。</li>
+      <li>在线路的上游里选 warp。</li>
+    </ol>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>WARP 的本地端口(<b data-k="ops.warpPort">SOCKS5 端口</b>)默认 40000,被占用会启用失败;改了端口要重新启用。</li>
+      <li>一键安装只支持 Ubuntu / Debian;其它系统要自己装 cloudflare-warp(代理模式),让它的 SOCKS5 监听同一个端口。运维任务只在 Linux 上、m-ui 以 root 运行时能用。</li>
+      <li>安装时本机 DNS 解析不了软件源(有的云厂商自带的 DNS 偶尔会这样),任务会临时改用公共 DNS(1.1.1.1 / 8.8.8.8,只有 IPv6 的机器用 2606:4700:4700::1111 / 2001:4860:4860::8888;不是 systemd-resolved 的系统改为临时写 /etc/hosts),装完自动恢复,输出里会写明;一个域名都解析不了就停下并说明是哪个域名。本机 DNS 正常、只是某个第三方源已废弃(域名已不存在)时只提示一句,照常安装,不改 DNS。apt 被系统自动更新占着时会等最多 5 分钟,并写明是哪个进程。安装到一半取消时,正在解包/配置的软件包会先装完,不会弄坏软件包数据库。</li>
+      <li>有多台服务器时,warp 上游指向的是每台服务器自己的 <code>127.0.0.1:端口</code>:用 warp 的线路部署在哪几台,就要在哪几台的 <b data-k="nav.ops">运维</b> 页都安装并启用 WARP(端口和主机一样);做不到就把这条线路只部署到装了 WARP 的服务器。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="up-chain">
+    <h3>线路作上游(链式代理)</h3>
+    <p class="lede">让入口线路的流量再转到你自己的另一条线路出去,比如国内中转机进、海外机出。</p>
+    <ul>
+      <li><b data-k="nav.upstreams">上游</b> 页点 <b data-k="up.addFromLine">把线路加为上游</b>(或在线路行末的 <b data-k="common.more">更多</b> 里点),选线路和 <b data-k="up.fromNode">用它在哪台服务器上的入口</b>。</li>
+      <li>参数跟着线路自动走,线路改端口、换协议都不用管;用的是专用凭据,不占用户配额,流量只算一次。</li>
+      <li>成环、线路被删、入口服务器被删都会被拦下或标出来。副机要 v0.7.16 及以上。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="up-group">
+    <h3>上游组(自动切换)</h3>
+    <p class="lede">几条上游组成一组,自动用最快且能通的那条,挂了自动换。</p>
+    <ul>
+      <li><b data-k="nav.upstreams">上游</b> 页 → <b data-k="up.addGroup">新增上游组</b>,<b data-k="up.groupMembers">成员</b> 至少选两条;线路的上游选这个组。</li>
+      <li>每 30 秒测一次;现在用的这条只要不比最快的慢 300 毫秒以上就不换,免得来回切。切换时断开旧连接,让应用马上重连。</li>
+      <li>上游页会写明每台服务器现在走的是哪一条。</li>
+      <li>副机要 v0.7.16 及以上:只要建了上游组(哪怕还没有线路在用),版本更低的副机就会整份拒收同步。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="up-check">
+    <h3>巡检与告警</h3>
+    <p class="lede">面板定时测试上游,出故障和恢复时可以发 Telegram。</p>
+    <ul>
+      <li>每台服务器只测自己线路用到的上游;没有线路用的标 <b data-k="up.unused">未使用</b>,不测也不告警。</li>
+      <li>状态列可能显示 <b data-k="up.fault">故障</b>、<b data-k="up.pending">待测</b>、<b data-k="up.stale">数据过期</b>;点行末箭头看每台服务器的检查详情和报错。</li>
+      <li><b data-k="nav.settings">设置</b> → <b data-k="set.monitor">上游巡检</b>:<b data-k="set.checkMinutes">巡检间隔(分钟)</b>(0 = 关闭)、<b data-k="set.checkThreshold">连续失败几次判定故障</b>。</li>
+      <li>概览页的 <b data-k="dash.health">上游巡检</b> 卡片可以点 <b data-k="dash.healthRun">立即巡检</b>。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="exts">
+    <h3>外部节点</h3>
+    <p class="lede">把别处的节点(机场订阅、单条分享链接)并进你的用户订阅,排在本站节点后面。</p>
+    <ol class="steps">
+      <li><b data-k="nav.exts">外部节点</b> 页 → <b data-k="ext.add">新增外部节点</b>:类型选 <b data-k="ext.typeSub">外部订阅</b>(一个订阅地址,定时抓取)或 <b data-k="ext.typeLink">分享链接</b>(单条节点)。</li>
+      <li>填 <b data-k="ext.value">链接 / 订阅地址</b>;可以加 <b data-k="ext.prefix">节点名前缀</b>(如 "[中转] ")方便用户区分。保存。</li>
+      <li>到 <b data-k="nav.users">用户</b> 里编辑要给的人,勾上 <b data-k="user.f.exts">外部节点</b>。</li>
+    </ol>
+    <ul>
+      <li>主机定时抓取,间隔在 <b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> → <b data-k="set.extRefresh">外部订阅刷新间隔(分钟)</b>;抓取失败时保留上次成功的内容,列表里写明错误。</li>
+      <li>支持 base64 / 明文链接列表、Clash YAML、sing-box JSON。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="ext-filter">
+    <h3>隐藏、改名、排除关键词</h3>
+    <p class="lede">机场塞的"剩余流量""官网"之类信息节点,和不想给用户的节点,都可以不输出。</p>
+    <ul>
+      <li>点 <b data-k="ext.expand">展开节点</b> 看解析出的全部节点;勾选后点 <b data-k="ext.hideSel">隐藏选中</b> / <b data-k="ext.showSel">显示选中</b>;单个节点可以 <b data-k="ext.rename">改名</b>。</li>
+      <li>隐藏和改名按名字 + 节点指纹(地址、端口、密码等)一起记,机场改名、调顺序后照样认得。</li>
+      <li><b data-k="ext.exclude">排除关键词</b>:名字含这些词的节点不输出,逗号分隔,如 <code>官网,到期,剩余流量,套餐</code>;以后新出现的也管用。名字每次刷新都会变的信息节点,用它最合适。</li>
+      <li>节点暂时消失时,隐藏 / 改名记录会保留,回来照样生效;确定不要了点 <b data-k="ext.cleanStale">清理</b>。</li>
+      <li>有副机时:隐藏和改名要求副机 v0.7.17 及以上,排除关键词要求 v0.7.16 及以上,版本更低的副机会整份拒收同步。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="ext-test">
+    <h3>测速、测大陆连通、作上游</h3>
+    <p class="lede">展开节点后可以直接测它们能不能用,也能把好用的节点变成上游。</p>
+    <ul>
+      <li><b data-k="ext.testAll">测速全部</b> / <b data-k="ext.testSel">测速选中</b>:从每台启用的服务器真连一次测延迟,代表它作为上游时好不好用;勾 <b data-k="ext.inclHidden">含已隐藏</b> 连隐藏的一起测;随时可以 <b data-k="ext.testStop">停止测速</b>。显示 <b data-k="ext.cellUnsupported">不支持</b> 的是协议转不成本站出站、没法测。</li>
+      <li><b data-k="ext.reachSel">测大陆连通</b>:从大陆三网测点连选中的节点,看有没有被墙;hysteria2、tuic 这类 UDP 协议只能 ping 地址;国内中转入口香港不通属正常。</li>
+      <li><b data-k="ext.addUp">添加为上游</b>:勾选节点、各起一个名字,直接变成上游(重名会报错,不会自动改名)。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="cert" data-scope="admin">
+  <h2>证书</h2>
+  <p class="lede">证书让线路、面板、订阅走 TLS / HTTPS。一台服务器可以放多张,签发后会自动续期。</p>
+
+  <section class="sec" id="cert-add">
+    <h3>添加证书</h3>
+    <p class="lede"><b data-k="nav.cert">证书</b> 页 → <b data-k="cert.add">添加证书</b>,按有没有域名选 <b data-k="cert.source">证书来源</b>。</p>
+    <ul>
+      <li><b data-k="cert.srcAcme">有域名(自动签发)</b>:先到域名服务商把 A 记录解析到服务器 IP。填域名,选 <b data-k="cert.method">验证方式</b>:
+        <ul>
+          <li><b data-k="cert.methodHttp">HTTP(临时监听 80 端口)</b>:80 端口要空闲、公网能访问。</li>
+          <li><b data-k="cert.methodCf">DNS(Cloudflare API)</b>:域名在 Cloudflare 上时用,填 <b data-k="cert.cfToken">Cloudflare API Token</b>(要有这个域名的 DNS 编辑权限,怎么创建见 <a href="#cf-token">Cloudflare API 令牌怎么创建</a>),不用开 80 端口,能自动续期。</li>
+          <li><b data-k="cert.methodManual">DNS(手动加 TXT 记录)</b>:其它 DNS 服务商用,按页面提示加 TXT 记录,公共 DNS 查到后自动继续。</li>
+        </ul>
+        先点 <b data-k="cert.precheck">预检 DNS / 端口</b> 看看,再点 <b data-k="cert.issueBtn">签发证书</b>。泛域名(<code>*.example.com</code>)只能用 DNS 验证。</li>
+      <li><b data-k="cert.srcSelf">无域名(自签)</b>:点 <b data-k="cert.selfsign">生成自签证书</b>;<b data-k="cert.hosts">证书包含的地址(留空自动)</b> 留空就用本机公网 IP。订阅里每个节点会自动带"允许不安全",客户端不用设置;面板和订阅建议保持 HTTP。</li>
+      <li><b data-k="cert.srcExternal">已有证书</b>:服务器上已经有 certbot、宝塔、nginx 或商业证书时,填 <b data-k="cert.certPath">证书文件(fullchain)</b> 和 <b data-k="cert.keyPath">私钥文件</b> 的路径,点 <b data-k="cert.useExternal">使用该证书</b>。</li>
+    </ul>
+    <div class="tip"><b>选用途</b>在 <b data-k="cert.applyTo">添加后用于</b> 里勾:<b data-k="cert.forLines">设为线路默认证书</b>、<b data-k="cert.applyPanel">用于面板 HTTPS</b>、<b data-k="cert.applySub">用于订阅 HTTPS</b>;没勾的用途不受影响。默认勾选:还没有正式证书时勾着 <b data-k="cert.forLines">设为线路默认证书</b>;添加的不是自签证书、而面板还没用 HTTPS 时勾着 <b data-k="cert.applyPanel">用于面板 HTTPS</b>;订阅还没用 HTTPS 且一个用户都还没有时勾着 <b data-k="cert.applySub">用于订阅 HTTPS</b>,已有用户时默认不勾。勾了 <b data-k="cert.applySub">用于订阅 HTTPS</b>,所有用户的订阅地址都会从 <code>http://</code> 变成 <code>https://</code>,旧地址立即失效,客户端要重新导入(添加前、在 <b data-k="cert.inUse">正在使用</b> 里换订阅证书时、在设置页「订阅」里直接填上或清空证书路径时都会再提示一次);勾了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后面板也换成 <code>https://</code>。</div>
+  </section>
+
+  <section class="sec" id="cf-token">
+    <h3>Cloudflare API 令牌怎么创建</h3>
+    <p class="lede">用 <b data-k="cert.methodCf">DNS(Cloudflare API)</b> 签证书,要一个 Cloudflare API 令牌。只让它管你这个域名的 DNS,泄露了也动不了别的。</p>
+    <ol class="steps">
+      <li>打开 <a href="https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22zone%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22dns%22%2C%22type%22%3A%22edit%22%7D%5D&amp;accountId=*&amp;zoneId=all&amp;name=m-ui" target="_blank" rel="noopener">Cloudflare 的令牌创建页(已预填权限)</a>,登录你的 Cloudflare 账号。权限已经填好:「区域 → 区域 → 读取」和「区域 → DNS → 编辑」,令牌名叫 m-ui。</li>
+      <li>「区域资源」改成「包括 → 特定区域 → 你的域名」,不要留「所有区域」。</li>
+      <li>点「继续以显示摘要」,再点「创建令牌」。</li>
+      <li>复制页面上显示的令牌,粘贴到 m-ui 证书页的 <b data-k="cert.cfToken">Cloudflare API Token</b>。令牌只显示这一次,离开页面就看不到了,丢了只能重新创建。</li>
+    </ol>
+    <div class="tip"><b>链接打不开、或页面和上面说的不一样时,手动创建</b>Cloudflare 控制台右上角头像 → 我的个人资料 → API 令牌 → 创建令牌 → 用「编辑区域 DNS」模板 → 区域资源选「包括 → 特定区域 → 你的域名」→ 继续以显示摘要 → 创建令牌。签发时如果报找不到区域(zone),给这个令牌再加一条权限「区域 → 区域 → 读取」。</div>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>权限最小化:只要上面两项权限,区域只选要用的域名。不要用「Global API Key」(全局 API 密钥),也不要给账户级的权限。</li>
+      <li>令牌泄露了:到同一页把它删掉或轮转,再把新令牌填回 m-ui。</li>
+      <li>主机容灾的自动改 DNS 单独填一个令牌(见 <a href="#ha-dns">Cloudflare 自动改 DNS</a>),照同样的步骤再建一个就行。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="cert-use">
+    <h3>证书用在哪</h3>
+    <p class="lede"><b data-k="cert.useLines">线路默认</b>、<b data-k="cert.usePanel">面板</b>、<b data-k="cert.useSub">订阅</b> 各用各的证书,在 <b data-k="cert.inUse">正在使用</b> 卡片里换。<b data-k="cert.useReseller">代理面板</b> 默认和面板共用一张;要单独用,到 <b data-k="nav.settings">设置</b> → <b data-k="set.reseller">代理面板</b> 填 <b data-k="set.cert">证书文件</b> 和 <b data-k="set.key">私钥文件</b> 的路径(重启生效)。</p>
+    <ul>
+      <li>点每一项旁边的 <b data-k="cert.change">更换</b>,从证书库里挑一张,或者选 <b data-k="cert.noHttps">不用 HTTPS</b>。</li>
+      <li>订阅的改动立即生效(用户要换成新的 https 地址);面板的证书改了要 <b data-k="cert.restartBtn">重启 m-ui</b> 才生效;换线路默认证书会让数据面重启一次。</li>
+      <li>某条线路要单独用一张:编辑线路 → <b data-k="line.cert">证书</b>;没有这张证书的服务器继续用它自己的默认证书。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="cert-renew">
+    <h3>自动续期</h3>
+    <p class="lede">签发的证书到期前自动续,续好后自动换上,不用重启。</p>
+    <ul>
+      <li>启动几分钟后先查一次,之后每小时查一次;进入有效期最后三分之一时开始续(90 天的证书剩 30 天时)。</li>
+      <li>失败按 1、2、4 小时退避重试;第一次失败马上通知,之后每天提醒。</li>
+      <li><b data-k="cert.store">证书库</b> 的 <b data-k="cert.renewCol">自动续期</b> 一列能看到每张证书的状态:上次续期时间、失败次数、下次重试时间。可以点 <b data-k="cert.renewBtn">续期</b> 立刻续,也能关掉某张的自动续期。</li>
+      <li>证书出问题(续期失败、快到期、已过期、文件读不出来)时,页面顶部会出现"证书要处理"的提醒,点 <b data-k="alert.certView">查看</b> 去处理;副机的证书也会在主机上提醒。</li>
+    </ul>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>用 <b data-k="cert.methodManual">DNS(手动加 TXT 记录)</b> 签的证书不能自动续期,每次都要重新加 TXT;想自动续,就改用 Cloudflare 验证重新签发。</li>
+      <li>HTTP 验证每次续期都要临时占用 80 端口,有 TCP 线路占着 80 会续期失败。</li>
+      <li>域名多出一条不指向本机的 AAAA(IPv6)记录会让验证失败:改成本机的地址,或者删掉它。</li>
+      <li>Let's Encrypt 已经不发到期提醒邮件了:至少在主机上配好 Telegram 或 Webhook(见 <a href="#notify">通知</a>)。</li>
+      <li><b data-k="cert.srcExternal">已有证书</b> 由签发它的工具(如 certbot)续期,面板只读文件,剩 14 天起提醒。换机还原时放进 <code>/etc/m-ui/cert/restored/</code> 的是备份那一刻的副本,没有工具再续它:证书库里标 <b data-k="cert.rRestored">还原的副本,没人续期</b>,剩 30 天起每天提醒,要自己重新签发或重新添加(见 <a href="#bk-restore">还原</a>)。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="cert-nodes">
+    <h3>副机的证书</h3>
+    <p class="lede">每台服务器各管各的证书,在各自面板的 <b data-k="nav.cert">证书</b> 页签发、续期。</p>
+    <ul>
+      <li>证书按名字跨服务器匹配:线路选了某张证书,没有这张的服务器用它自己的默认证书;线路的证书选择框里能看到哪台有、还剩几天。</li>
+      <li>副机一般不配通知:它的续期失败、快到期由主机代发提醒,主机的服务器页也会标出 <b data-k="node.certFail">证书续期失败</b>。</li>
+      <li>在副机上签正式证书时 <b data-k="cert.applyPanel">用于面板 HTTPS</b> 默认勾着;勾了的话,副机重启后主机要改用 <code>https://</code> 的 API 地址(见 <a href="#nodes-add">接入一台副机</a>),不打算改就取消这一项。</li>
+    </ul>
+  </section>
+</section>
+</div>
+
+<div class="part" data-title="运营">
+<section class="chap" id="users">
+  <h2>用户与套餐</h2>
+  <p class="lede">一个用户就是一个订阅地址,带流量、到期、设备数和限速;套餐是这些额度的模板。</p>
+
+  <section class="sec" id="users-new">
+    <h3>新建用户</h3>
+    <p class="lede"><b data-k="nav.users">用户</b> 页 → <b data-k="user.add">新增用户</b>,填好额度、勾上线路,保存后就有订阅地址了。</p>
+    <ul>
+      <li data-scope="admin"><b data-k="user.f.name">用户名(即订阅地址)</b>:主面板默认用用户名当订阅地址,不能含空格和 / ? # &amp;,全站不能重名。知道用户名就能拿到他的订阅,别用 test、user1、姓名拼音这类好猜的名字;更稳妥的是在 <b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> 关掉 <b data-k="set.subUseUserName">用用户名作订阅地址</b>,之后新建的用户地址是一串随机令牌(用户名只是个名称),已有的用户点 <b data-k="user.rotate">重置订阅链接</b> 换成随机地址。</li>
+      <li data-scope="reseller"><b data-k="user.f.nameOnly">用户名</b>:只是个名称,不出现在订阅地址里(订阅地址自动生成一串随机令牌)。但不能含空格和 / ? # &amp;,而且全站唯一:别的代理或主面板用过的名字也不能再用,建议统一加上自己的前缀。</li>
+      <li>有套餐就选 <b data-k="user.plan">所属套餐</b>,点 <b data-k="user.fromPlan">按套餐填写</b> 一键填好额度。没有就手填:<b data-k="user.f.volume">流量配额 GB(0=不限)</b>、<b data-k="user.f.expiry">到期日(留空=不限)</b>、<b data-k="user.f.device">同时在线设备(0=不限)</b>、<b data-k="user.f.up">上行限速 Mbps(0=不限)</b>、<b data-k="user.f.down">下行限速 Mbps(0=不限)</b>。</li>
+      <li>按月清零的(月付),勾 <b data-k="user.f.autoReset">周期重置流量</b>,填 <b data-k="user.f.resetDays">重置周期(天)</b>。</li>
+      <li>勾 <b data-k="user.f.lines">可用线路</b>。一条线路在几台服务器上就有几个入口,可以只给其中某台(按服务器切换分组勾选,已勾的不会丢)。</li>
+      <li data-scope="admin"><b data-k="user.f.exts">外部节点</b>:勾上的外部节点会追加到他订阅里本站节点的后面。</li>
+      <li><b data-k="user.f.remark">备注</b>:记订单号、联系方式之类。注意:<span class="rv-only">你和主面板都</span>没填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b> 和 <b data-k="set.subPageTitle">页面标题</b> 时,客户端里显示的订阅名就是备注(备注也空就用用户名),不想让用户看到的内容别写进备注。</li>
+    </ul>
+    <div class="tip"><b>发卡、试用</b>填 <b data-k="user.f.activate">首次连接后 N 天到期(0 = 不用)</b>:用户第一次产生流量时才开始计时,不用管到期日。</div>
+  </section>
+
+  <section class="sec" id="users-quota">
+    <h3>流量、到期、设备数怎么算</h3>
+    <p class="lede">超量或到期会自动停用并踢下线;续费、重置流量后自动恢复。</p>
+    <ul>
+      <li>流量:上传 + 下载合计;配额可以写小数(0.1 约等于 100 MB)。经过设了流量倍率的服务器时按倍率计。</li>
+      <li>到期:到点自动停用。填了"首次连接后 N 天到期"就不看到期日。</li>
+      <li>周期重置:每过 N 天把已用流量清零,因超量被停用的也会自动解禁。</li>
+      <li>设备数:按同时在线的来源 IP 算,所有服务器合在一起算。同一个 WiFi(同一个公网 IPv4,或同一个 IPv6 /64 网段)下的几台设备算 1 台;IPv4 和 IPv6 各自对上限计数,同一台设备同时走 IPv4 和 IPv6 不会被当成两台。</li>
+      <li>设备满了只拒绝新设备,已经连着的不受影响;别的设备下线约 1 分钟后名额就空出来了。</li>
+      <li data-scope="admin">被拒的连接会在概览的 <b data-k="dash.recentConns">最近入站连接</b> 里整行标红、带 <b data-k="dash.conn.rejected">被拒</b> 徽章,鼠标停在徽章上看原因(<b data-k="dash.rejectedDevice">设备数超限被拒</b>);最近 10 分钟有被拒的,<b data-k="dash.attn.title">需要处理</b> 里也会提一句。</li>
+      <li>限速:同一台服务器上,这个用户的全部连接共享这份带宽;他同时走几台服务器就有几份。改了马上生效。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="users-sub">
+    <h3>订阅地址、二维码与临时共享</h3>
+    <p class="lede">点用户名(或 <b data-k="common.details">详情</b>)打开详情,订阅地址和二维码就在最上面。</p>
+    <ul>
+      <li><b data-k="user.subscription">订阅</b> 下面有两个地址:带 <code>?format=clash</code> 的是 Clash 专用;不带 <code>?format=</code> 的是通用地址,发给用户的就是它(浏览器打开是落地页,客户端来拉时按类型给格式)。点旁边的 <b data-k="common.copy">复制</b>。</li>
+      <li>详情里的二维码是 Clash 地址,适合用 Clash 系客户端直接扫;用手机相机扫只会下载到一个配置文件,这种情况让用户打开落地页,在那里扫码或一键导入。</li>
+      <li>列表里的 <b data-k="common.more">更多</b> 菜单也能直接复制 <b data-k="user.subClash">Clash 订阅</b>、<b data-k="user.subLink">链接订阅</b>(就是通用地址)、<b data-k="user.subJson">sing-box 订阅</b>。</li>
+      <li>用户用浏览器打开自己的订阅地址,会看到落地页:用量、到期、各客户端的一键导入、二维码(见 <a href="#sub">订阅与落地页</a>)。</li>
+      <li><b data-k="user.share">临时共享</b>:用户在落地页生成给朋友用的临时地址,流量和设备都算他自己的。详情里能看到这个地址,点 <b data-k="user.unshare">收回</b> 立即作废。</li>
+      <li>地址泄露了:<b data-k="common.more">更多</b> → <b data-k="user.rotate">重置订阅链接</b>。地址换成新的随机令牌,全部协议凭据重新生成,旧地址立刻失效、在线设备被断开,再把新地址发给用户。</li>
+      <li>详情里还能看到 <b data-k="user.onlineIps">在线设备(IP)</b>(每个 IP 正在用哪条线路)、流量图和可用线路。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="users-renew">
+    <h3>续费、延期与换套餐</h3>
+    <p class="lede">列表的 <b data-k="common.more">更多</b> 菜单(或用户详情)里,<b data-k="user.renewMenu">续费…</b> 和 <b data-k="user.changeMenu">换套餐…</b> 管续费、升级、降级。</p>
+    <ul>
+      <li><b data-k="user.renewMenu">续费…</b>:先 <b data-k="plan.pick">选择套餐</b>(默认是他现在的套餐),再选方式:<b data-k="plan.renew">续费(清零流量并顺延)</b>、<b data-k="plan.extend">延期(保留已用流量)</b>,或 <b data-k="plan.bind" class="wrap">只归入这个套餐(流量与到期都不动)</b>。<b data-k="pc.periods">期数</b> 是一次续几期(1–120),月付套餐按季、按年卖就填 3、12;单个用户时,下面会实时显示到期和配额会变成多少。用套餐续费、延期是明确的开通动作,会把 <b data-k="user.reason.manual">手动</b> 停用的人也一并启用(对话框里会先提示;选 <b data-k="plan.bind" class="wrap">只归入这个套餐(流量与到期都不动)</b> 不改启停)。</li>
+      <li><b data-k="user.extend">延长 30 天</b>:有到期日的用户一键加 30 天(还没开始计时的"首次连接后 N 天"加到 N 上);因到期停用的会恢复,手动停用的仍停着。</li>
+      <li><b data-k="user.changeMenu">换套餐…</b>:<b data-k="pc.target">换成</b> 选新套餐,<b data-k="pc.mode">方式</b> 三选一:
+        <ul>
+          <li><b data-k="pc.mode.replace">立即替换</b>:新套餐从现在开始算 N 期,旧订阅剩下的时间和流量作废。</li>
+          <li><b data-k="pc.mode.stack">叠加</b>:保留旧订阅剩下的时间(和一次性流量),再加 N 期;按周期重置的套餐,流量是每期额度,不叠加。已经过期的旧订阅不结转;新套餐不限期或不限量时,原来有限的到期或配额照旧保留。</li>
+          <li><b data-k="pc.mode.prorate">按价值折算</b>:按两个套餐的 <b data-k="plan.price">参考价(可选)</b>,把旧订阅剩下的价值折成新套餐的时长(一次性流量的套餐同时折流量),新套餐从现在开始;用户要有所属套餐、换成另一个套餐,两个都要填参考价,期数可以填 0。</li>
+        </ul></li>
+      <li><b data-k="pc.usage">本周期用量</b>:<b data-k="pc.usage.auto">自动</b>(立即替换和折算清零,叠加保留)、<b data-k="pc.usage.keep">保留(接着算)</b>、<b data-k="pc.usage.reset">清零(从新周期开始)</b>。</li>
+      <li>对话框下方实时预览 <b data-k="pc.before">变更前</b> 和 <b data-k="pc.after">变更后</b>,标出 <b data-k="pc.dir.upgrade">升级</b> 还是 <b data-k="pc.dir.downgrade">降级</b>。到期提前、马上超量这类会让用户吃亏的影响标红,要勾 <b data-k="pc.force" class="wrap">我已确认上面标红的影响,仍然执行</b> 才能 <b data-k="pc.confirm">确认换套餐</b>。</li>
+      <li>只选一个用户时,<b data-k="user.renewMenu">续费…</b> 和 <b data-k="user.changeMenu">换套餐…</b> 的对话框每次打开都带一个防重复的编号:双击、网络重试都只会执行一次。勾了多个用户再批量 <b data-k="user.batch.plan">套用套餐</b> 时没有这层保护:中途报错,已经续上的人不会撤回;重试前先看列表里的到期日(或者详情里的 <b data-k="pc.history">套餐记录</b>),把已经续上的人去掉再选。</li>
+      <li>详情里的 <b data-k="pc.history">套餐记录</b> 能看到最近的续费和换套餐。</li>
+    </ul>
+    <div class="tip"><b>接商城</b>续费、换套餐也能用外部 API 做,而且可以先预览再执行(见 <a href="#api">外部 API</a>)。</div>
+  </section>
+
+  <section class="sec" id="plans">
+    <h3>套餐</h3>
+    <p class="lede">套餐是额度的模板,建号、续费、批量操作都能直接套用。</p>
+    <ol class="steps">
+      <li><b data-k="nav.plans">套餐</b> 页 → <b data-k="plan.add">新增套餐</b>:填 <b data-k="common.name">名称</b>(如 100G/月)、<b data-k="plan.desc">说明</b>、<b data-k="plan.quota">流量</b>(GB)、<b data-k="plan.days">时长(天)</b>、设备数和上下行限速。</li>
+      <li>按月清零的勾 <b data-k="user.f.autoReset">周期重置流量</b>;发卡、礼品卡勾 <b data-k="plan.firstUse">从首次连接开始计时</b>。</li>
+      <li><b data-k="plan.lines">线路</b>:套用时把用户的线路换成这些;留空 = 套用时不改动用户已有的线路。</li>
+      <li data-scope="admin"><b data-k="plan.rules">限速规则</b>:勾上的规则对这个套餐的用户(现有的和以后套用的)都生效。</li>
+      <li><b data-k="plan.price">参考价(可选)</b>:只在换套餐用"按价值折算"时用,不给用户看;两个套餐填同样的价就是同价互换。</li>
+    </ol>
+    <ul>
+      <li>套餐页显示每个套餐有多少用户。</li>
+      <li>改套餐不会自动改已经套用过的用户;要让他们按新额度走,就给他们续费或换套餐。</li>
+      <li data-scope="reseller">代理只看得到、也只能用自己建的套餐。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="users-batch">
+    <h3>批量操作</h3>
+    <p class="lede">勾选多个用户后,顶部出现批量操作条(表头的全选只勾当前这一页)。</p>
+    <ul>
+      <li><b data-k="user.batch.enable">启用</b>、<b data-k="user.batch.disable">停用</b>、<b data-k="user.batch.extend">延期</b>、<b data-k="user.batch.plan">套用套餐</b>、<b data-k="user.batch.reset">重置流量</b>、<b data-k="user.batch.delete">删除</b>。</li>
+      <li data-scope="admin"><b data-k="user.bulk">批量生成</b>:按 <b data-k="user.bulkPrefix">用户名前缀</b> 一次建 <b data-k="user.bulkCount">数量</b> 个,<b data-k="user.bulkMode">命名方式</b> 选 <b data-k="user.bulkRandom">前缀 + 随机 8 位</b> 或 <b data-k="user.bulkSeq" class="wrap">前缀 + 序号(001…,订阅地址用随机串)</b>;生成后列出每个人的订阅地址,可以整段复制。这里给的是 Clash 地址(带 <code>?format=clash</code>),发给不用 Clash 的用户时,去掉末尾的 <code>?format=clash</code> 就是通用地址。</li>
+      <li data-scope="admin"><b data-k="user.batch.export">导出 CSV</b>:导出用户列表,订阅那一列也是 Clash 地址。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="users-state">
+    <h3>停用原因与踢线</h3>
+    <p class="lede">列表的状态一列写明为什么停用,也就决定了怎么恢复。</p>
+    <ul>
+      <li><b data-k="user.reason.quota">超量</b>、<b data-k="user.reason.expired">到期</b>:续费、重置流量或延长到期后自动恢复。</li>
+      <li><b data-k="user.reason.manual">手动</b>:手动停用的不会因为重置流量、延长到期或周期重置而自动恢复。但用套餐续费或延期(<b data-k="user.renewMenu">续费…</b>、批量 <b data-k="user.batch.plan">套用套餐</b>)和 <b data-k="user.changeMenu">换套餐…</b> 是明确的开通动作,会把他一并启用:续费、批量套用套餐和换套餐的对话框里会先提示里面有手动停用的人、做完会被启用,批量时列出是谁,不想启用的先取消勾选。外部 API 的续费、换套餐也一样会启用。</li>
+      <li data-scope="admin"><b data-k="user.limited">限速中</b>:正被规则临时限速(见 <a href="#rules">规则</a>)。</li>
+      <li><b data-k="user.kick">踢下线</b>:断开这个用户在所有服务器上的连接(hysteria2、TUIC、AnyTLS 整条会话一起关)。没停用的话客户端会马上重连,想彻底断就先停用。</li>
+      <li>列表上方可以按 <b data-k="user.filter.all">全部</b>、<b data-k="user.filter.online">在线</b>、<b data-k="user.filter.enabled">启用</b>、<b data-k="user.filter.disabled">停用</b>、<b data-k="user.filter.expired">已过期</b>、<b data-k="user.filter.over">超量</b> 筛选,也可以只看某个套餐。在当前页全选后(手机上勾任意一个后),批量条上可以一键选中全部筛选结果,一起操作;这一下会换掉之前勾的人,只留当前的筛选结果。换筛选、换搜索之前勾的人会一直留着,批量操作时其中有当前列表里看不到的,会先问一句再处理。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="users-import" data-scope="admin">
+    <h3>从旧面板导入用户</h3>
+    <p class="lede">线路已经在 m-ui 上建好、只想把老用户搬过来时用。</p>
+    <ul>
+      <li><b data-k="nav.users">用户</b> 页点 <b data-k="user.import">从旧面板导入</b>,上传旧面板的 .db 文件,点 <b data-k="user.importGo">开始导入</b>。</li>
+      <li>同名用户会被旧库的值覆盖用量、配额、到期、启停、周期重置,以及旧库里不空的备注和说明;其余的新建,沿用旧面板的用户凭据。可以勾 <b data-k="user.importAssign">给新建的用户分配全部现有线路</b>。</li>
+      <li>只导入用户时,线路、入站端口、订阅端口和路径都还是 m-ui 自己的:用户要用 m-ui 的新订阅地址重新导入,停掉旧面板之前先把新地址发给大家。</li>
+      <li>连线路、上游、设置一起搬,见 <a href="#bk-import">从旧面板迁移</a>。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="rules" data-scope="admin">
+  <h2>规则(临时限速)</h2>
+  <p class="lede">规则给用户加临时限速:比如晚高峰全员限到 30 Mbps,或者 10 分钟内跑了 1 GB 的人限速 20 分钟。</p>
+
+  <section class="sec" id="rules-kinds">
+    <h3>两种规则</h3>
+    <ul>
+      <li><b data-k="rule.kind.schedule">时段限速</b>:每周指定几天的某个时间段内限速,走出时段自动恢复。按面板时区算,结束早于开始表示跨午夜;<b data-k="rule.days">星期</b> 全不勾等于每天。</li>
+      <li><b data-k="rule.kind.burst">突发限速</b>:最近 <b data-k="rule.windowMin">统计窗口(分钟)</b> 内上下行合计达到 <b data-k="rule.thresholdGb" class="wrap">触发流量(GB,上下行合计)</b>,就限速 <b data-k="rule.penaltyMin">限速时长(分钟)</b>;到时自动解除,再次达到再次限速。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="rules-new">
+    <h3>新建规则</h3>
+    <ol class="steps">
+      <li><b data-k="nav.rules">规则</b> 页 → <b data-k="rule.add">新增规则</b>:起个名字,选 <b data-k="rule.kind">类型</b>,填条件。</li>
+      <li>填 <b data-k="rule.up">上行 Mbps</b> / <b data-k="rule.down">下行 Mbps</b>,0 = 这个方向不改。</li>
+      <li><b data-k="rule.tightenOnly">不超过用户自己的限速</b>:开着(默认)时结果不会高于用户自己的限速,只会更严;关掉就直接用规则的值,可以用来在某个时段放宽。</li>
+      <li><b data-k="rule.targets">目标</b> 可以叠加:全部用户(含以后新建的)、某个套餐的用户、某个代理名下的全部用户、逐个勾选。</li>
+      <li>保存。</li>
+    </ol>
+    <div class="tip"><b>按套餐限速</b>也可以在编辑套餐时勾 <b data-k="plan.rules">限速规则</b>,让这个套餐的用户都跟着规则走。</div>
+  </section>
+
+  <section class="sec" id="rules-active">
+    <h3>生效与查看</h3>
+    <ul>
+      <li>多条规则同时命中同一个用户时,取最严的一条。</li>
+      <li>规则列表的 <b data-k="rule.active">生效中</b> 一列点 <b data-k="rule.viewActive">查看</b>,看现在谁被限速、还剩多久;用户列表也会标 <b data-k="user.limited">限速中</b>。</li>
+      <li>改动对在线连接立即生效,不用等重连;规则由主机每 10 秒判定一次,自动同步到副机。停用规则后,它造成的限速马上解除。</li>
+      <li>规则限速不显示在用户的落地页上。突发限速触发时想收到通知:<b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b> → <b data-k="set.tgOnRuleLimit">突发限速触发时通知</b>。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="resellers">
+  <h2>代理(分销)面板</h2>
+  <p class="lede av-only">代理是帮你卖号的人:你给他线路和额度,他在自己的代理面板里建用户;他只看得到自己名下的用户和自己建的套餐。</p>
+  <p class="lede rv-only">代理面板只管你名下的用户:站长给你线路和额度,你在这里建号、续费、看用量。</p>
+
+  <section class="sec" id="rs-create" data-scope="admin">
+    <h3>开通一个代理</h3>
+    <ol class="steps">
+      <li><b data-k="nav.resellers">代理</b> 页 → <b data-k="rs.add">新增代理</b>:<b data-k="common.name">名称</b> 就是代理的登录名。</li>
+      <li>勾 <b data-k="rs.lines">可用线路</b>:代理只能把这些线路分给他的用户;可以只授权某台服务器上的入口。</li>
+      <li>填额度:<b data-k="rs.volumeGb">流量额度 GB</b>、<b data-k="rs.userLimit">用户数上限</b>、<b data-k="rs.deviceLimit">设备池</b>、<b data-k="rs.speedUp">带宽池 · 上行 Mbps</b> / <b data-k="rs.speedDown">带宽池 · 下行 Mbps</b>、<b data-k="rs.expiry">到期日(留空=不限)</b>;0 = 不限。</li>
+      <li>保存后把代理面板地址发给他:代理列表下方写着,新建成功的提示里也有(默认端口 2054、路径 <code>/dl/</code>)。</li>
+    </ol>
+    <ul>
+      <li>新代理没有密码:24 小时内他用名称登录、密码留空直接点登录,进去后先设密码。过期没认领、或者忘了密码:<b data-k="common.more">更多</b> → <b data-k="rs.passwd">重置密码</b>(会一并清掉他的两步验证和外部 API 令牌,再开 24 小时)。</li>
+      <li>取消勾选某条线路,他名下的用户马上就不能用这条线路了。</li>
+      <li><b data-k="rs.reset">重置流量</b>:把他名下所有用户的已用流量清零。</li>
+      <li>代理的用户不出现在主面板的用户页里;要看就点这个代理的 <b data-k="common.details">详情</b>。</li>
+      <li>代理面板的端口、路径、证书在 <b data-k="nav.settings">设置</b> → <b data-k="set.reseller">代理面板</b> 里改,用不上可以关掉 <b data-k="set.resellerEnabled">启用代理面板</b>;记得在防火墙放行 2054/tcp。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="rs-quota">
+    <h3>额度怎么算</h3>
+    <ul>
+      <li>流量额度:按名下所有用户的全部用量算,代理自己重置流量、续费、删号都抵不掉;只有主面板的"重置流量"能清零。</li>
+      <li><b data-k="rs.deviceLimit">设备池</b>:名下所有用户同时在线的设备总数上限(所有服务器合计)。池满只拒绝新设备,已连着的不受影响。</li>
+      <li>带宽池:名下所有用户合计的速率上限,每台服务器各一份。</li>
+      <li>给单个用户填多少都行,但总量受这几个池限制。</li>
+      <li>到期、被停用、流量超额,任何一条踩线,名下全部用户立刻停用、订阅打不开。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="rs-login">
+    <h3>第一次登录与设密码</h3>
+    <ol class="steps">
+      <li>打开站长给的代理面板地址(默认 <code>http(s)://服务器地址:2054/dl/</code>)。</li>
+      <li>用户名填代理名;第一次登录密码留空,直接点 <b data-k="login.submit">登录</b>。</li>
+      <li>按提示 <b data-k="acct.setPassword">设置登录密码</b>(至少 8 位),以后用新密码登录。</li>
+    </ol>
+    <div class="pit"><b>常见坑</b>新代理只有 24 小时认领时间。过期或者忘了密码,要找站长在主面板重置密码,重开 24 小时。登录后建议在 <b data-k="nav.account">账号</b> 页打开两步验证。</div>
+  </section>
+
+  <section class="sec" id="rs-panel">
+    <h3>代理面板里能做什么</h3>
+    <ul>
+      <li><b data-k="nav.dashboard">概览</b>:已用额度、账号到期、用户数、在线用户和设备;额度、到期、设备池快到头时 <b data-k="dash.attn.title">需要处理</b> 会提醒;<b data-k="dash.rs.expiringList">即将到期</b> 和 <b data-k="dash.rs.quotaList">流量快用完</b> 列出该续费的用户。</li>
+      <li><b data-k="nav.users">用户</b>:新增、编辑、续费、延期、重置流量、踢线、重置订阅链接、批量操作、看用量曲线和在线设备。建号只填名称,订阅地址是随机令牌。</li>
+      <li><b data-k="nav.plans">套餐</b>:只看得到、也只能用自己建的套餐。</li>
+      <li><b data-k="nav.account">账号</b>:额度、密码、两步验证、自己的订阅页文案、外部 API。</li>
+      <li>只能分配站长授权的线路(授权可能只到某台服务器)。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="rs-account">
+    <h3>账号页</h3>
+    <p class="lede">代理面板的 <b data-k="nav.account">账号</b> 页管登录安全、额度,以及你的用户看到的订阅页。</p>
+    <ul>
+      <li><b data-k="acct.quota">我的额度</b>:已用流量、设备池(在线 / 上限,以及已分配给用户的总数)、带宽、到期、用户数。设备池满时这里会写最近拒绝了几台新设备。</li>
+      <li><b data-k="acct.password">登录密码</b>:改密码。</li>
+      <li><b data-k="adm.totp">两步验证(2FA)</b>:见 <a href="#sec-account">账号与两步验证</a>。</li>
+      <li><b data-k="set.subPage">订阅页</b>:你名下用户看到的订阅页文案:<b data-k="set.subTitle">订阅标题(Profile-Title)</b>(客户端里显示的名字)、<b data-k="set.subPageTitle">页面标题</b>、<b data-k="set.subPageSupport">页脚联系方式</b>、<b data-k="set.subPageBuyURL">选购 / 续费链接</b>、<b data-k="set.subPageNotice">公告(支持换行)</b>;留空就用主面板的。也能单独关掉订阅页或临时共享。</li>
+      <li><b data-k="set.subPageLogo">落地页 logo</b>:上传你自己的 logo,上传即生效;没设时用主面板的。</li>
+      <li><b data-k="acct.api">外部 API</b>:给你自己的商城、机器人用(见 <a href="#api">外部 API</a>)。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="sub">
+  <h2>订阅与落地页</h2>
+  <p class="lede">订阅地址给客户端导入;同一个地址用浏览器打开,就是用户自己的落地页。</p>
+
+  <section class="sec" id="sub-url">
+    <h3>订阅地址与格式</h3>
+    <ul>
+      <li>形如 <code>http(s)://域名或IP:2056/sub/用户名</code>(或一串随机令牌)。</li>
+      <li>一个地址就够:客户端来拉时按它的类型给格式。Clash 系(Clash Verge、mihomo、Stash)拿 Clash 配置,sing-box 系(SFA、SFI 等)拿 sing-box 配置,NekoBox、v2rayN、Shadowrocket 等拿通用链接。</li>
+      <li>想指定格式就在地址后面加:<code>?format=clash</code>(Clash)、<code>?format=json</code>(sing-box)、<code>?format=mihomo</code>(强制按新内核 Clash 给)。</li>
+      <li>每条线路在每台服务器上各出一个节点,节点名后缀是服务器名;流量倍率不是 1 的服务器会带 <code>x2</code> 之类的标记。</li>
+      <li>节点地址默认用服务器 IP(域名只作 SNI),免得客户端 DNS 被污染连不上。</li>
+      <li>用户被停用、到期、用完时,客户端拉订阅会拿到 404,线路也不再放行。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="sub-import">
+    <h3>用户怎么导入</h3>
+    <ul>
+      <li>最简单:把通用订阅地址(不带 <code>?format=</code> 的那个)发给用户,让他用手机或电脑浏览器打开,在落地页点自己客户端的一键导入,或者扫二维码。</li>
+      <li>落地页一键导入按钮右上角的下载箭头,会打开各系统客户端的下载页(iOS、Android、Windows、macOS、Linux)。这一页的地址里带着本人的订阅地址(页内「← 返回订阅页」也是),不要转发;想让别人装客户端,转发各客户端的官网或发布页。</li>
+      <li>也可以复制地址,粘贴到客户端的"添加订阅"里。</li>
+      <li>客户端里显示的订阅名依次取<span class="rv-only">你填的</span> <b data-k="set.subTitle">订阅标题(Profile-Title)</b>、<b data-k="set.subPageTitle">页面标题</b>、<span class="rv-only">主面板的订阅标题和页面标题、</span>用户的 <b data-k="user.f.remark">备注</b>、用户名,用第一个不空的。<span class="rv-only">不想让客户看到站长的名字,就自己填一个订阅标题。</span>Shadowrocket、Clash Verge 只在添加订阅那一刻定名字,改了标题要让用户删掉重加,或者用落地页的一键导入(会把标题一起带上)。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="sub-settings" data-scope="admin">
+    <h3>订阅设置</h3>
+    <p class="lede">在 <b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> 和 <b data-k="set.subTmpl">订阅格式与模板</b> 两组里。</p>
+    <ul>
+      <li><b data-k="set.subTitle">订阅标题(Profile-Title)</b>、<b data-k="set.subUpdates">更新周期(小时)</b>。</li>
+      <li><b data-k="set.subUseUserName">用用户名作订阅地址</b>:默认开;关掉后新建用户的地址是随机令牌,已有用户不变。</li>
+      <li><b data-k="set.subInsecure">订阅允许不安全证书</b>:默认自动(用自签证书时打开)。</li>
+      <li><b data-k="set.subServerAddr">订阅里的节点地址</b>:<b data-k="set.addrIp">IP(推荐)</b> 或 <b data-k="set.addrDomain">域名</b>。</li>
+      <li><b data-k="set.subEncode">链接订阅 base64 编码</b>、<b data-k="set.subNotice">顶部显示流量提示节点</b>、<b data-k="set.extRefresh">外部订阅刷新间隔(分钟)</b>。</li>
+      <li><b data-k="set.subAutoFormat">按客户端自动给格式</b>:默认开;关掉后不带 <code>?format=</code> 的地址一律给通用链接。</li>
+      <li>自定义模板:<b data-k="set.subClashExt" class="wrap">Clash 模板(YAML,留空用内置)</b> / <b data-k="set.subSingboxExt" class="wrap">sing-box 模板(JSON,留空用内置)</b>,可以先点 <b data-k="set.tmplFillClash">填入内置 Clash 模板</b> 再照着改;节点和分组由面板填进去,写错了保存时会报错。</li>
+    </ul>
+    <div class="pit"><b>常见坑</b>改了订阅的 <b data-k="set.path">路径</b> 或端口,用户已有的订阅地址全部失效,要重新发给用户。</div>
+  </section>
+
+  <section class="sec" id="landing">
+    <h3>落地页</h3>
+    <p class="lede">用户在浏览器里打开订阅地址看到的页面:用量、到期、一键导入、二维码,还有你的公告和联系方式。</p>
+    <ul>
+      <li data-scope="admin">在 <b data-k="nav.settings">设置</b> → <b data-k="set.subPage">订阅页</b> 里改;代理在自己的 <b data-k="nav.account">账号</b> → <b data-k="set.subPage">订阅页</b> 里改(留空跟主面板)。</li>
+      <li data-scope="reseller">在 <b data-k="nav.account">账号</b> → <b data-k="set.subPage">订阅页</b> 里改,留空就用主面板的。</li>
+      <li><b data-k="set.subPageEnabled" class="wrap">浏览器打开订阅地址时显示订阅页</b>:关掉后浏览器也只拿到订阅内容。</li>
+      <li><b data-k="set.subPageTitle">页面标题</b>、<b data-k="set.subPageSupport">页脚联系方式</b>、<b data-k="set.subPageNotice">公告(支持换行)</b>。</li>
+      <li><b data-k="set.subPageBuyURL">选购 / 续费链接</b>:填了以后落地页出现"选购 / 续费"按钮(用户到期、用完、被停用时它是主按钮)。</li>
+      <li data-scope="admin"><b data-k="set.subPageBrand">落地页底部显示 Powered by m-ui</b>:代理的落地页不显示。</li>
+      <li><b data-k="set.subPageLogo">落地页 logo</b>:点 <b data-k="set.logoUpload">上传 / 更换</b>,上传即生效,不用点保存。支持 PNG、JPEG、GIF、WebP、SVG,会先缩到 480×160 以内并转成 PNG(不超过 64 KB);落地页上显示高 28 像素、最宽 160,也用作浏览器标签图标。落地页跟随访客的深色模式,深色时 logo 下面垫一块浅色底,设置里的预览并排显示两种效果;透明底的白色 logo 两种都看不清。<b data-k="set.logoReset">恢复默认</b> 换回内置 logo。代理没设时用主面板的,副机随主机同步。</li>
+      <li>用户用完、到期、被停用时,浏览器里仍能打开自己的落地页,顶部写明原因和找谁续费;客户端拉取则是 404。地址对不上任何用户时,浏览器显示"订阅地址无效"。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="landing-links">
+    <h3>公告和联系方式里写链接</h3>
+    <p class="lede"><b data-k="set.subPageNotice">公告(支持换行)</b> 和 <b data-k="set.subPageSupport">页脚联系方式</b> 里可以写可点的链接,页面上只显示文字。</p>
+    <div class="tbl"><table>
+      <thead><tr><th>这样写</th><th>页面上显示</th></tr></thead>
+      <tbody>
+        <tr><td><code>客服小王(https://t.me/xiaowang)</code></td><td>"客服小王"可以点</td></tr>
+        <tr><td><code>[Clash/Mihomo 教程](https://example.com/a)</code></td><td>"Clash/Mihomo 教程"可以点</td></tr>
+        <tr><td><code>官网 https://example.com</code></td><td>地址本身变成链接</td></tr>
+        <tr><td><code>Tg: @username</code></td><td>@username,点了打开 Telegram</td></tr>
+        <tr><td><code>WhatsApp: +34 600 000 000</code></td><td>号码,点了打开 WhatsApp</td></tr>
+      </tbody>
+    </table></div>
+    <ul>
+      <li>文字里带 <code>/</code>、冒号,或者链接里有括号时,用 <code>[文字](链接)</code> 的写法。方括号、圆括号半角全角都行,中文输入法打出来的 <code>【文字】（链接）</code> 也认。</li>
+      <li><code>文字(链接)</code> 的括号前可以空一格;链接文字从括号往前取,到最近的标点或上一个链接为止。</li>
+      <li>Telegram 的关键词认 Tg、Telegram、电报、飞机,后面跟 <code>@用户名</code> 或 <code>+号码</code>;WhatsApp 认 WhatsApp、WA、WS,后面跟 <code>+号码</code>;冒号中英文都行。</li>
+      <li>只认 http(s)、tg、mailto、tel 链接,别的原样显示、不能点。</li>
+      <li>公告最多 4000 字,联系方式最多 300 字,输入框下面显示当前字数。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="share">
+    <h3>临时共享</h3>
+    <p class="lede">用户可以在落地页生成一条临时地址给别人用,随时收回。</p>
+    <ul>
+      <li>每人一条;对方拿到的是同一批节点、另一套凭据。流量、设备数、限速、到期都算在本人头上。</li>
+      <li>取消或重新生成后,旧的共享地址立刻失效,借用的人被断开。</li>
+      <li>共享地址用浏览器打开是精简版落地页,看不到本人的用量和到期。</li>
+      <li><b data-k="set.subShare">允许用户生成临时共享地址</b>(默认开)可以整体关掉:主面板在 <span data-scope="admin"><b data-k="nav.settings">设置</b> → </span><b data-k="set.subPage">订阅页</b>,代理在 <b data-k="nav.account">账号</b> → <b data-k="set.subPage">订阅页</b>(主面板关了,代理这边也不生效)。</li>
+      <li>在用户详情里能看到他的共享地址,点 <b data-k="user.unshare">收回</b> 立即作废。</li>
+    </ul>
+  </section>
+</section>
+</div>
+
+<div class="part" data-title="维护">
+<section class="chap" id="backup" data-scope="admin">
+  <h2>备份与迁移</h2>
+  <p class="lede">一个 zip 就是整个面板:数据库(线路、用户、流量、设置)加证书,设置和证书库里引用的数据目录外的证书文件(比如 certbot 签的)也在里面。备份好它,换机、重装都能把数据原样恢复。</p>
+
+  <section class="sec" id="bk-now">
+    <h3>备份</h3>
+    <ul>
+      <li><b data-k="nav.backup">备份</b> 页 → <b data-k="bk.now">立即备份</b>:<b data-k="bk.download">下载</b> 到本地,或者 <b data-k="bk.saveLocal">保存到服务器</b>(在 <b data-k="bk.local">服务器上的备份</b> 列表里)。</li>
+      <li><b data-k="bk.schedule">定时备份</b>:<b data-k="bk.hour">每天几点(-1 关闭)</b>(按面板时区,见 <b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.timezone">时区</b>)、<b data-k="bk.keep">保留份数</b>;可以勾 <b data-k="bk.telegram">同时推送到 Telegram</b>(先配好 Telegram 通知)。</li>
+      <li>命令行:<code>m-ui backup -db /etc/m-ui/m-ui.db -out 备份.zip</code>,或者 <code>m-ui</code> 菜单 9。</li>
+    </ul>
+    <div class="pit"><b>常见坑</b>备份里有全部用户凭据和证书私钥,不要发到公开的地方。</div>
+  </section>
+
+  <section class="sec" id="bk-restore">
+    <h3>还原</h3>
+    <ol class="steps">
+      <li><b data-k="nav.backup">备份</b> 页 → <b data-k="bk.restore">还原</b>:选备份文件(zip 或 .db),点 <b data-k="bk.restoreBtn">还原</b>。</li>
+      <li>确认后 m-ui 自动重启,替换数据库和证书。设置和证书库里引用的数据目录外的证书文件(比如 <b data-k="cert.srcExternal">已有证书</b>、从旧面板导入的证书路径)不往原路径写:这台机器原路径上的证书能接着用(现在有效、包含备份里那张的全部域名、和私钥配得上,而且不比备份里的旧或者还剩两周以上)就接着用它;不能用才把备份里那份放进 <code>/etc/m-ui/cert/restored/</code>,并把设置和证书库改指过去。还原结果在页面顶部提示一次。面板、订阅和代理面板的证书文件万一还是缺了,先用临时自签证书启动(仍走 HTTPS)并告警,不会起不来。</li>
+      <li>原来的库保留为 <code>.bak-*</code> 文件,只留最近两份:连着还原几次,最早那份会被删掉。拿不准该用哪份备份时,先点 <b data-k="bk.now">立即备份</b> 把当前的库下载下来再试。</li>
+    </ol>
+    <ul>
+      <li>新机器可以在安装时一步装好并还原(命令见下面的 <a href="#bk-migrate">换服务器</a>)。</li>
+      <li>服务停着时也能用命令行还原:<code>m-ui restore -db /etc/m-ui/m-ui.db -from 备份.zip</code>。</li>
+    </ul>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>放进 <code>/etc/m-ui/cert/restored/</code> 的是备份那一刻的副本:原来由 certbot、宝塔等工具续期的,以后没人再续它,证书库里标 <b data-k="cert.rRestored">还原的副本,没人续期</b>。还原后就到证书页重新签发,或者在这台装好 certbot 后重新用 <b data-k="cert.srcExternal">已有证书</b> 添加,再换过去,别等剩 30 天的到期提醒。</li>
+      <li>把主机的备份还原到另一台机器并启动,这台就成了主机:它以更高的纪元接管全部副机,原主机之后再起来会自动变为副机(没开过主机容灾也一样,见 <a href="#ha-restore">备份、还原与换机</a>)。只想看看备份里有什么,别在联网的机器上还原并启动它。</li>
+      <li>顶着临时自签证书期间,客户端更新订阅会报证书错误,浏览器打开面板、代理面板也会提示不安全:照页面顶部的证书提醒把证书补上,或者换一张。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="bk-migrate">
+    <h3>换服务器</h3>
+    <p class="lede"><b data-k="nav.backup">备份</b> 页的 <b data-k="mig.title">换机向导</b> 用备份分四步把整个面板搬到新服务器。订阅用的是域名时,端口、凭据、订阅地址都不变,把域名解析改到新机,用户就跟过来了。</p>
+    <div class="tip"><b>旧主机还在运行时,优先用「设为主机」</b>新机装好 m-ui、像副机一样接入(见 <a href="#nodes-add">接入一台副机</a>),同步上以后在 <b data-k="nav.nodes">服务器</b> 页对它点 <b data-k="ha.setMaster">设为主机</b>:数据一次交接过去,不用备份、还原,旧主机自动变为副机(见 <a href="#ha-switch">设为主机</a>)。下面的四步留给旧主机已经不在、只能靠备份的时候。还原后启动,就等于把主机换到这台:旧主机之后若又被启动,会自动变为副机,不要了就在旧机上执行 <code>systemctl disable --now m-ui</code>(见 <a href="#ha-restore">备份、还原与换机</a>)。</div>
+    <ol class="steps">
+      <li>把备份 zip 传到新机,执行 <code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --restore /root/m-ui-20261111-030000.zip</code>(换成你的文件路径;amd64、arm64 都是这一条,脚本先装最新版再还原,证书一起还原)。向导里也有这条命令。</li>
+      <li>用新机 IP 打开面板(端口和路径同旧机),确认线路在运行;有副机的话,新主机会自动重新连上它们。</li>
+      <li>到 DNS 服务商把域名解析改到新机 IP,用向导里的 <b data-k="mig.check">检查解析</b> 看主流解析器是否都已生效。</li>
+      <li>新机上用户都正常后,在旧机上执行 <code>systemctl disable --now m-ui</code>(停掉并取消开机自启),或者用 <code>m-ui</code> 菜单 14 卸载。只 <code>systemctl stop</code> 不够:旧机和新机是同一份数据、同一套副机令牌和 Telegram 机器人,旧 VPS 一重启(比如服务商维护)它就会自己起来,拿过期的数据继续服务、给副机推送、发通知。</li>
+    </ol>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>订阅地址里是 IP(没给订阅配域名)时,换机后订阅地址和主机上的节点地址都会变成新机的 IP,第 3 步也用不上。最好先给订阅配一个域名、把新地址发给用户一次再换机;只能换机后再把新地址发给所有用户的,旧机要一直开到大部分人换好,这期间照下面两条做。</li>
+      <li>有副机、旧机又要多开一阵的,还原之前先到每台副机 <b data-k="nav.settings">设置</b> → <b data-k="set.pairing">配对信息</b> 点 <b data-k="set.rotateToken">更换令牌</b>,新机还原好后把各台的新令牌填进新主机 <b data-k="nav.nodes">服务器</b> 页对应的那一行(<b data-k="common.edit">编辑</b> → <b data-k="node.token">配对令牌</b>),旧主机拿着旧令牌就推不动副机了。不换的话,两台同时运行期间旧主机上一有自动发生的改动(用户到期或超量被自动停用、周期重置),它就把过期的配置推给副机,新主机上新建、续费的用户在副机上就连不上了。</li>
+      <li>旧机要多开一阵的,在旧机 <b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b> 取消 <b data-k="set.tgEnabled">启用 Telegram 通知</b>:两台是同一个机器人,一起跑会互相顶掉,发给机器人的命令可能落到旧机上、改的是旧数据,通知也会收到两份。</li>
+      <li>新机的安全组和防火墙要放行和旧机一样的端口:面板、订阅、代理面板、每条线路(Hysteria2、TUIC 和端口跳跃的范围要放 UDP)。</li>
+      <li>WARP 是装在系统里的,不在备份里:线路上游用了 warp 的,先在新机 <b data-k="nav.ops">运维</b> 页安装并启用 WARP(端口和旧机一样)。</li>
+      <li>原来用 <b data-k="cert.srcExternal">已有证书</b> 接 certbot、宝塔等工具的,新机上没有这些工具,还原出来的是一份不会再续期的副本(见 <a href="#bk-restore">还原</a>):换机后就在新机证书页重新签发,或者在新机装好 certbot 后重新添加。</li>
+      <li>副机的面板端口只对旧主机 IP 放行的,先把新主机的 IP 加进去,不然新主机连不上副机。</li>
+      <li>两台同时运行期间,旧面板上除了关掉 Telegram 通知,别的都不要改;同时运行的时间越短越好。</li>
+    </ul></div>
+    <div class="tip"><b>只换副机更简单</b>新副机装好后,在主机 <b data-k="nav.nodes">服务器</b> 页把那一行的 API 地址和令牌换成新的,主机会自动重新推送。</div>
+  </section>
+
+  <section class="sec" id="bk-import">
+    <h3>从旧面板迁移</h3>
+    <ul>
+      <li>整机迁移(线路、上游、用户、设置都带过来):在新服务器上安装时加参数,<code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --import /path/to/旧面板.db</code>。入站端口、用户凭据、面板路径和订阅路径都保留;下面几项要自己对上,客户端才不用改:
+        <ul>
+          <li>证书:面板和订阅都沿用旧面板的面板证书路径,证书文件不会跟着数据库过来。旧面板开了 HTTPS 的,先把证书和私钥拷到新机同样的路径再装;拷来的文件在新机上没人续期,域名解析到新机后到 <b data-k="nav.cert">证书</b> 页重新签发一张换上。</li>
+          <li>旧面板的订阅单独配了证书的(订阅域名和面板域名不同时通常如此),导入后订阅用的是面板那张,客户端更新时会报证书不匹配:把订阅那张也拷过来,装好后到 <b data-k="nav.cert">证书</b> 页 <b data-k="cert.add">添加证书</b> → <b data-k="cert.srcExternal">已有证书</b>,在 <b data-k="cert.applyTo">添加后用于</b> 里只勾 <b data-k="cert.applySub">用于订阅 HTTPS</b>。旧面板的订阅是 http、面板却是 https 的,导入后订阅也成了 https:在 <b data-k="cert.inUse">正在使用</b> 里点 <b data-k="cert.useSub">订阅</b> 旁边的 <b data-k="cert.change">更换</b>,选 <b data-k="cert.noHttps">不用 HTTPS</b>。</li>
+          <li>订阅端口会改成 2056:旧面板的订阅不在 2056 端口的,装好后用 <code>m-ui</code> 菜单 6 改回原来的。</li>
+          <li>单独的订阅域名不会带过来:用 <code>m-ui set -db /etc/m-ui/m-ui.db subDomain=域名</code> 补上。</li>
+          <li>订阅地址用的是域名的,把它解析到新机;用的是旧机 IP 的,换机后地址会变,要把新地址发给用户。</li>
+        </ul></li>
+      <li>只搬用户:<b data-k="nav.users">用户</b> 页 <b data-k="user.import">从旧面板导入</b>(见 <a href="#users-import">从旧面板导入用户</a>)。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="notify" data-scope="admin">
+  <h2>通知(Telegram)</h2>
+  <p class="lede">用 Telegram(或 Webhook)收告警:用户到期、上游故障、证书续期失败、服务器被墙……还能在手机上用机器人管用户。</p>
+
+  <section class="sec" id="tg-setup">
+    <h3>配置 Telegram 通知</h3>
+    <ol class="steps">
+      <li>在 Telegram 里找 @BotFather 创建一个机器人,拿到 Token(形如 <code>123456:ABC-DEF…</code>)。</li>
+      <li>给 @userinfobot 发条消息,拿到你的 Chat ID(群和频道的 ID 是负数)。再给你自己的机器人发一条消息,它才能主动给你发。</li>
+      <li><b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b>:勾 <b data-k="set.tgEnabled">启用 Telegram 通知</b>,填 <b data-k="set.tgToken">Bot Token</b> 和 <b data-k="set.tgChatId">Chat ID</b>,点 <b data-k="common.save">保存</b>。</li>
+      <li>点 <b data-k="set.tgTest">发送测试消息</b>,手机收到就好了。</li>
+    </ol>
+    <div class="pit"><b>常见坑</b>服务器连不上 Telegram(比如国内机器)时,在 <b data-k="set.tgProxy">代理(可选)</b> 填一个代理;装了 WARP 就填 <code>socks5://127.0.0.1:40000</code>。</div>
+  </section>
+
+  <section class="sec" id="tg-events">
+    <h3>发哪些通知</h3>
+    <p class="lede">在 <b data-k="set.notify">通知</b> 这一组里逐项勾选;Telegram 和 Webhook 共用这些开关。</p>
+    <ul>
+      <li><b data-k="set.tgOnLogin">面板登录 / 连续登录失败</b></li>
+      <li><b data-k="set.tgOnUserDisabled">用户被自动禁用(到期/超量)</b>、<b data-k="set.tgOnUserExpiring">用户即将到期</b>(提前天数在 <b data-k="set.tgExpiringDays">到期前几天提醒</b>)、<b data-k="set.tgOnQuota">用户流量告急</b>(比例在 <b data-k="set.tgQuotaPercent">用量达到百分比时提醒</b>)</li>
+      <li><b data-k="set.tgOnRuleLimit">突发限速触发时通知</b></li>
+      <li><b data-k="set.tgOnUpstream">上游故障 / 恢复</b>、<b data-k="set.tgOnCore">数据面停止 / 恢复</b></li>
+      <li><b data-k="set.tgOnReach">大陆连通异常 / 恢复</b></li>
+      <li><b data-k="set.tgOnCert">证书签发 / 续期 / 到期提醒</b>(副机证书的也由主机发)</li>
+      <li><b data-k="set.tgDaily">每日报告</b>,几点发在 <b data-k="set.tgDailyHour" class="wrap">每日报告时间(小时,0–23,按面板时区)</b></li>
+      <li>主机容灾:备用发现主机失联、等你回复确认码接任、接任完成、设为主机做完或没做成、原主机回来变为副机时,也会发通知(见 <a href="#ha">设为主机与主机容灾</a>);这些通知不受 <b data-k="set.tgOnCore">数据面停止 / 恢复</b> 开关管。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="tg-bot">
+    <h3>Telegram 机器人</h3>
+    <p class="lede">勾上 <b data-k="set.tgBot">Telegram 机器人</b> 后,可以直接在手机上给 Bot 发命令管用户。</p>
+    <div class="tbl"><table>
+      <thead><tr><th>命令</th><th>作用</th></tr></thead>
+      <tbody>
+        <tr><td><code>/status</code></td><td>概况</td></tr>
+        <tr><td><code>/find 关键词</code></td><td>找用户</td></tr>
+        <tr><td><code>/user 名字</code></td><td>用户详情和订阅地址</td></tr>
+        <tr><td><code>/extend 名字 天数</code></td><td>延长到期</td></tr>
+        <tr><td><code>/reset 名字</code></td><td>重置流量</td></tr>
+        <tr><td><code>/enable 名字</code>、<code>/disable 名字</code></td><td>启用 / 停用(停用会同时断开连接)</td></tr>
+        <tr><td><code>/kick 名字</code></td><td>断开连接</td></tr>
+        <tr><td><code>/backup</code></td><td>发一份备份</td></tr>
+        <tr><td><code>/help</code></td><td>看全部命令</td></tr>
+      </tbody>
+    </table></div>
+    <div class="pit"><b>常见坑</b>机器人只听设置里那个 Chat ID;填的是群组 ID 时,群里所有人都能操作。机器人只在主服务器上运行,不用开端口;它做的操作记入操作审计,操作人显示为 telegram。</div>
+  </section>
+
+  <section class="sec" id="webhook">
+    <h3>Webhook</h3>
+    <p class="lede">想把告警接到自己的系统里(企业微信、钉钉中转、工单……),用 Webhook。</p>
+    <ul>
+      <li><b data-k="set.webhookUrl">Webhook 地址</b>:勾选的事件也会 POST 到这里,JSON 里有 <code>event</code>、<code>text</code>、<code>time</code>。留空就不发。</li>
+      <li><b data-k="set.webhookSecret">Webhook 密钥</b>:填了就带 <code>X-M-UI-Signature</code> 头(<code>sha256=</code> 正文的 HMAC),对方可以验证真伪。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="ops" data-scope="admin">
+  <h2>运维、日志与更新</h2>
+  <p class="lede">服务器调优、查日志、排查连接、升级版本,都不用回终端。</p>
+
+  <section class="sec" id="ops-tune">
+    <h3>系统优化</h3>
+    <p class="lede"><b data-k="nav.ops">运维</b> 页的 <b data-k="ops.tune">系统优化</b>:swap、文件句柄上限、时间同步、内核参数和 BBR,一般 VPS 用默认值就行。</p>
+    <ul>
+      <li>点 <b data-k="ops.t.tune-all">一键优化</b> 全做一遍,也可以逐项改参数后点 <b data-k="common.run">执行</b>;任务输出实时显示在 <b data-k="ops.log">任务输出</b> 里。</li>
+      <li>同一页还能限制系统日志(journald)的占用和保留天数:它装的是整台机器所有服务的日志,限制它不影响面板。</li>
+      <li>WARP 也在这一页(见 <a href="#warp">WARP</a>)。运维任务只在 Linux 上、m-ui 以 root 运行时可用。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="logs">
+    <h3>日志</h3>
+    <p class="lede"><b data-k="nav.logs">日志</b> 页有三类:<b data-k="logs.sub">订阅访问</b>、<b data-k="logs.core">核心日志</b>、<b data-k="logs.audit">操作审计</b>。</p>
+    <ul>
+      <li><b data-k="logs.sub">订阅访问</b>:谁、从哪个 IP、用什么客户端拉了订阅。</li>
+      <li><b data-k="logs.core">核心日志</b>:数据面和面板的运行日志。面板里这份只存在内存里(最多约 1 万条,重启就清);同样的内容也会写进系统日志(<code>journalctl -u m-ui</code> 能看到),<b data-k="logs.clear">清空</b> 只清面板里这一份,系统日志的占用和保留天数在 <b data-k="nav.ops">运维</b> 页限制。<b data-k="logs.enabled">记录日志</b> 可以关掉省资源。</li>
+      <li><b data-k="logs.coreLevel">数据面级别</b>:默认 warn,只记警告和错误;排障时临时调到 info 或 debug,改了立即生效,查完记得改回 warn(info 一小时就几万行,会拖慢磁盘)。</li>
+      <li><b data-k="logs.audit">操作审计</b>:谁在什么时候做了什么(面板、外部 API、Telegram 机器人的操作都在)。</li>
+      <li>订阅访问和操作审计可以设 <b data-k="logs.keep">自动清理</b>(保留 1 天、1 周、1 个月或不清理);每类都能 <b data-k="logs.clear">清空</b>。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="recent-conns">
+    <h3>最近入站连接</h3>
+    <p class="lede">概览页的 <b data-k="dash.recentConns">最近入站连接</b> 用来排查"用户说连不上":看他的 IP 有没有连到服务器、连的哪条线路。</p>
+    <ul>
+      <li>记录的是通过了协议握手和认证的连接,带用户、线路、服务器、次数和最近时间。</li>
+      <li>被设备数上限或代理设备池拒绝的连接也会列出来:整行标红、带 <b data-k="dash.conn.rejected">被拒</b> 徽章,鼠标停在徽章上看是 <b data-k="dash.rejectedDevice">设备数超限被拒</b> 还是 <b data-k="dash.rejectedPool">代理设备池已满被拒</b>。</li>
+      <li>默认列最近 10 条,点「显示全部」在卡片里展开(可以按 IP、用户、线路筛选);上方的筛选切换连接、被拒和握手失败。</li>
+      <li>包到了、却没过握手或认证的来源(证书、SNI、REALITY 公钥 / short_id、密码 / UUID 不对)在「握手失败」筛选里,分 <b data-k="dash.fail.tls">TLS 握手失败</b> 和 <b data-k="dash.fail.auth">认证失败</b>,写明原因;hysteria2、tuic 只记认证失败。版本较旧的副机不上报这一项,卡片里写明是哪几台。</li>
+      <li>列表里没有某个 IP,多半是包没到服务器(安全组、防火墙、客户端网络)。要确认包到没到:TCP 线路可以到日志页把 <b data-k="logs.coreLevel">数据面级别</b> 临时调到 info,看有没有 <code>inbound connection from</code>。Hysteria2、TUIC 这类 UDP 线路只有握手和认证都成功后才记这一行(证书、SNI 不对时哪里都不记,密码不对的只在「握手失败」里),看不到不代表包没到,要在服务器上抓包确认,比如 <code>tcpdump -ni any udp port 端口</code>。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="update">
+    <h3>更新</h3>
+    <p class="lede">有新版本时,左下角版本号旁会出现箭头,点它就能一键更新。</p>
+    <ul>
+      <li>点箭头 → <b data-k="update.now">立即更新</b>:校验下载的程序后替换并重启,十几秒后面板自动刷新;用户、线路、订阅地址和证书都不变,这台机器上的连接会断一下。</li>
+      <li>新版本起不来会自动换回旧版本,页面顶部会说明;点 <b data-k="update.ack">知道了</b> 关掉提示。</li>
+      <li>副机也是完整安装,在各自的面板里更新;主副机版本要保持一致。</li>
+      <li>也可以 SSH 执行 <code>m-ui</code> 选菜单 10。它和面板的更新箭头一样,直连 GitHub 不通时会自动经本机的 WARP 再试,所以纯 IPv6 机器(连不上 GitHub)装好 WARP 就能更新。重新执行一键安装脚本也能更新,但脚本不会自己走 WARP:纯 IPv6 机器要先执行 <code>export ALL_PROXY=socks5h://127.0.0.1:40000</code>(端口按 WARP 的设置),或者手动上传安装包。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="cli">
+    <h3>命令行与 SSH 菜单</h3>
+    <p class="lede">面板打不开、忘了密码时,在服务器上执行 <code>m-ui</code> 用数字菜单。</p>
+    <ul>
+      <li>菜单:1 查看面板地址 / 账号、2 重启、3 停止、4 启动、5 重置管理员密码、6 修改面板端口 / 路径 / 订阅端口、7 重置全部设置、8 查看最近日志、9 立即备份、10 更新到最新版、11 生成自签证书、12 切换主机 / 副机角色、13 关闭两步验证、14 卸载。</li>
+      <li><code>m-ui info</code>:打印面板地址、路径和账号状态。</li>
+      <li><code>m-ui passwd</code>:重置管理员密码(同时关掉两步验证)。</li>
+      <li><code>m-ui set -db /etc/m-ui/m-ui.db 键=值</code>:直接改设置,比如 <code>webPort=3053</code>。</li>
+      <li><code>m-ui render</code>:打印并校验当前的 sing-box 配置。</li>
+      <li>菜单 15 和 <code>m-ui ha status</code> / <code>takeover</code> / <code>set-master</code> / <code>pause</code> / <code>resume</code> / <code>reset</code>:主机容灾与设为主机(见 <a href="#ha-cli">命令行</a>)。菜单里的升级、重启会先暂停接任。</li>
+      <li>数据在 <code>/etc/m-ui/</code>:<code>m-ui.db</code>(数据库)、<code>cert/</code>(证书)、<code>backups/</code>(定时备份)。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="settings" data-scope="admin">
+  <h2>设置一览</h2>
+  <p class="lede"><b data-k="nav.settings">设置</b> 页按分组保存,每组右上角有自己的 <b data-k="common.save">保存</b>。标着 <b data-k="set.needRestart">改动需重启</b> 的组,改完点页头的 <b data-k="set.restart">重启 m-ui</b>。</p>
+
+  <section class="sec" id="set-panel">
+    <h3>角色与面板</h3>
+    <ul>
+      <li><b data-k="set.role">角色</b>:<b data-k="set.roleSwitch">作为副服务器运行</b>(见 <a href="#nodes-add">接入一台副机</a>)。</li>
+      <li><b data-k="set.panel">面板</b>:<b data-k="set.webDomain">域名</b>(订阅与节点用的域名,也是 TLS 的 SNI)、<b data-k="set.timezone">时区</b>(面板里所有时间按它显示)、<b data-k="set.listen">监听地址</b>、<b data-k="set.port">端口</b>、<b data-k="set.path">路径</b>、<b data-k="set.cert">证书文件</b> / <b data-k="set.key">私钥文件</b>(一般在证书页勾选,自动写入)、<b data-k="set.trustedProxies">受信任的反向代理</b>(见<a href="#sec-path">面板地址与端口</a>)、<b data-k="set.supportOnline">功德箱与在线设备数</b>。</li>
+      <li>改面板路径保存就生效,浏览器自动跳到新地址;改端口、监听地址、证书要重启。</li>
+      <li>端口设成 443(HTTPS)或 80(HTTP)时,地址里不用写端口;面板和订阅不能用同一个端口。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="set-sub">
+    <h3>订阅、订阅页与代理面板</h3>
+    <ul>
+      <li><b data-k="set.sub">订阅</b>、<b data-k="set.subTmpl">订阅格式与模板</b>:见 <a href="#sub-settings">订阅设置</a>。</li>
+      <li><b data-k="set.subPage">订阅页</b>:落地页的文案、选购链接、临时共享开关,见 <a href="#landing">落地页</a>。</li>
+      <li><b data-k="set.reseller">代理面板</b>:<b data-k="set.resellerEnabled">启用代理面板</b>、监听地址、端口(默认 2054)、路径(默认 <code>/dl/</code>)、证书(留空和面板共用一张)。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="set-other">
+    <h3>通知、巡检与数据面</h3>
+    <ul>
+      <li><b data-k="set.notify">通知</b>:见 <a href="#notify">通知(Telegram)</a>。</li>
+      <li><b data-k="set.monitor">上游巡检</b>:<b data-k="set.checkMinutes">巡检间隔(分钟)</b>(0 = 关闭)、<b data-k="set.checkThreshold">连续失败几次判定故障</b>。</li>
+      <li><b data-k="set.reach">大陆连通检测</b>:<b data-k="set.reachAuto">自动巡检</b>、<b data-k="set.reachMinutes">巡检间隔(分钟)</b>、<b data-k="set.reachToken">Globalping 令牌(可选)</b>。</li>
+      <li><b data-k="set.core">数据面</b>:<b data-k="set.certFile">数据面证书</b>、<b data-k="set.testUrl">上游测试地址</b>、<b data-k="set.bucket">统计粒度(秒)</b>、<b data-k="set.trafficAge">流量记录保留(天)</b>、<b data-k="set.allowPrivate">允许用户访问内网 / 本机地址</b>(默认关)、<b data-k="set.blockBT">屏蔽 BT 下载</b>。后两项改了数据面会重启一次并同步到副机。</li>
+      <li><b data-k="set.about">关于</b>:版本号、面板地址和订阅地址的样子。</li>
+    </ul>
+  </section>
+</section>
+</div>
+
+<div class="part" data-title="进阶与帮助">
+<section class="chap" id="api">
+  <h2>外部 API</h2>
+  <p class="lede">给商城、计费系统、机器人用:凭一个令牌就能建号、续费、换套餐、启停、取订阅地址,不用登录面板。</p>
+
+  <section class="sec" id="api-on">
+    <h3>开启与令牌</h3>
+    <ol class="steps">
+      <li data-scope="admin"><b data-k="nav.admin">管理员</b> 页 → <b data-k="adm.api">外部 API</b>:打开卡片右上角的开关(鼠标停上去写着 <b data-k="adm.apiToggle">开启 / 关闭外部 API</b>),复制 <b data-k="adm.apiBase">接口前缀</b> 和 <b data-k="adm.apiToken">令牌</b>。</li>
+      <li data-scope="reseller"><b data-k="nav.account">账号</b> 页 → <b data-k="acct.api">外部 API</b>:打开卡片右上角的开关(鼠标停上去写着 <b data-k="acct.apiEnable">开启外部 API</b>),复制 <b data-k="acct.apiBase">接口前缀</b> 和 <b data-k="acct.apiToken">令牌</b>。</li>
+      <li>每个请求带上令牌:请求头 <code>Authorization: Bearer 令牌</code>(或 <code>X-API-Key: 令牌</code>),请求体用 JSON。</li>
+      <li>开启后令牌下面有 <b data-k="adm.apiEndpoints">接口一览</b>(每个接口的说明)和 <b data-k="adm.apiExample">示例(curl)</b>(已经填好你的接口前缀和令牌),可以直接照抄;没开时接口一览折叠着,也能先看。</li>
+    </ol>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>令牌等于你在面板里的全部权限,只放在服务端程序里,不要写进网页或客户端。泄露了就点 <b data-k="adm.apiRotate">重新生成</b>,旧令牌立刻失效。</li>
+      <li data-scope="admin">接口只在主服务器上调用;副机上的写操作会被拒绝。</li>
+      <li data-scope="reseller">代理的令牌只能动你名下的用户、你自己的套餐和站长授权给你的线路;代理被停用、到期或被重置密码后,令牌立刻失效。</li>
+    </ul></div>
+  </section>
+
+  <section class="sec" id="api-calls">
+    <h3>常用接口</h3>
+    <p class="lede">路径都接在接口前缀后面;<code>{name}</code> 可以是用户名,也可以是用户 id。</p>
+    <div class="tbl"><table>
+      <thead><tr><th>接口</th><th>做什么</th></tr></thead>
+      <tbody>
+        <tr><td><code>GET /ping</code></td><td>连通性与版本</td></tr>
+        <tr><td><code>GET /plans</code></td><td>套餐列表</td></tr>
+        <tr><td><code>GET /users</code></td><td>用户列表(<code>?q=</code> 搜索)</td></tr>
+        <tr><td><code>POST /users</code></td><td>建号,可以带 <code>plan</code> 直接套用套餐</td></tr>
+        <tr><td><code>GET /users/{name}</code></td><td>用户详情(含订阅地址、在线 IP)</td></tr>
+        <tr><td><code>PATCH /users/{name}</code></td><td>改字段:到期、流量、设备数、线路……</td></tr>
+        <tr><td><code>POST /users/{name}/enable</code> · <code>/disable</code></td><td>启用 / 停用</td></tr>
+        <tr><td><code>POST /users/{name}/reset</code> · <code>/kick</code></td><td>本周期用量清零 / 踢下线</td></tr>
+        <tr><td><code>POST /users/{name}/rotate</code></td><td>重置订阅链接与凭据</td></tr>
+        <tr><td><code>POST /users/{name}/plan</code></td><td>续费(<code>renew</code>)或延期(<code>extend</code>),可带 <code>periods</code> 一次续 N 期;请求里完全不带套餐就续当前套餐。<code>/renew</code> 是它的别名</td></tr>
+        <tr><td><code>POST /users/{name}/change</code></td><td>换套餐:<code>replace</code>(立即替换)、<code>stack</code>(叠加)、<code>prorate</code>(按价值折算)</td></tr>
+        <tr><td><code>GET /users/{name}/plan-ops</code></td><td>套餐记录,最新的在前</td></tr>
+        <tr><td><code>GET /users/{name}/sub</code></td><td>订阅地址</td></tr>
+        <tr><td><code>DELETE /users/{name}</code></td><td>删除用户</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="sec" id="api-safe">
+    <h3>先预览、防重复、降级确认</h3>
+    <p class="lede">续费和换套餐会动用户的钱和时间,接口提供了三道保险。</p>
+    <ul>
+      <li>预览:请求里带 <code>"dryRun": true</code> 只计算不执行,返回变更前后的对比,商城可以拿来报价。</li>
+      <li>防重复(幂等):带 <code>requestId</code>(或请求头 <code>Idempotency-Key</code>,比如用订单号),同一个编号重试只执行一次,不会重复加时。</li>
+      <li>降级确认:换套餐会让用户马上超量、或到期提前时,接口返回 409 和完整预览,确认后带 <code>"force": true</code> 再调一次才执行。</li>
+      <li>面板的接口一览里标着 <b data-k="adm.apiIdem">幂等</b>、<b data-k="adm.apiDry">可预览</b> 的接口支持这些。</li>
+      <li>续费、换套餐是明确的开通动作:被手动停用的用户也会被启用,要先停掉的人别拿去续费。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="security">
+  <h2>安全</h2>
+  <p class="lede">改掉默认密码、打开两步验证、藏好面板地址,就挡住了绝大多数风险。</p>
+
+  <section class="sec" id="sec-account">
+    <h3>账号与两步验证</h3>
+    <ul>
+      <li data-scope="admin">改密码、改用户名:<b data-k="nav.admin">管理员</b> 页的 <b data-k="adm.account">登录账号</b>。</li>
+      <li data-scope="reseller">改密码:<b data-k="nav.account">账号</b> 页的 <b data-k="acct.password">登录密码</b>。</li>
+      <li><b data-k="adm.totp">两步验证(2FA)</b>:点 <b data-k="adm.totpGen">生成密钥</b>,用认证器 App(Google Authenticator、Microsoft Authenticator、Authy、1Password 等)扫二维码,填 App 上的 6 位码,点 <b data-k="adm.totpVerify">验证并开启</b>。开启后登录要密码 + 6 位码。</li>
+      <li data-scope="admin">手机丢了进不去:SSH 执行 <code>m-ui</code>,菜单 13 关闭两步验证;菜单 5 重置密码也会一起关掉。</li>
+      <li data-scope="reseller">手机丢了或忘了密码:找站长在主面板重置密码(两步验证会一起清掉)。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="sec-path" data-scope="admin">
+    <h3>面板地址与端口</h3>
+    <ul>
+      <li>把默认的端口和路径改掉:<b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.port">端口</b> / <b data-k="set.path">路径</b>。只打开 <code>IP:端口/</code> 永远是 404,别人扫到端口也看不出这是面板。</li>
+      <li>面板走 HTTPS:证书页添加证书时勾 <b data-k="cert.applyPanel">用于面板 HTTPS</b>(重启后生效)。</li>
+      <li>防火墙只放必要的端口;副机的面板端口只对主机 IP 放行(换了主机记得把新主机的 IP 加进去)。这只防得住外面的人,防不住经代理连进来的用户,见下一节。</li>
+      <li>登录保护:同一来源 10 分钟内输错 10 次,先挡 5 分钟;连续输错 5 次可以发 Telegram 提醒(<b data-k="set.tgOnLogin">面板登录 / 连续登录失败</b>)。外部 API 令牌错 10 次同样暂停这个来源 5 分钟(和登录分开计数)。</li>
+      <li>面板、代理面板或外部 API 挂在反向代理(Nginx、Caddy 等)后面时,在 <b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.trustedProxies">受信任的反向代理</b> 填反代的地址(同机反代填 <code>127.0.0.1, ::1</code>)。不填的话所有请求的来源都是反代自己,一个人连错 10 次就把所有人(管理员、代理、商城、机器人)一起挡 5 分钟。填了以后,只有来自名单里地址的请求才按 <code>X-Forwarded-For</code>(从右往左第一个不在名单里的地址)或 <code>X-Real-IP</code> 认来源;反代要自己追加或覆盖这个头(Nginx:<code>proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;</code>,Caddy 默认就会)。没用反代就留空。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="sec-core" data-scope="admin">
+    <h3>数据面的安全开关</h3>
+    <ul>
+      <li><b data-k="set.allowPrivate">允许用户访问内网 / 本机地址</b>:默认关,用户经代理碰不到只监听 127.0.0.1 的服务(比如 WARP 端口)和你的内网,也碰不到这台服务器自己的公网 IPv4 / IPv6(全部端口,面板、代理面板、订阅、副机接口都在内;主副机各拦各自的地址,地址变了自动更新),以及集群里别的服务器的管理端口(面板、订阅、代理面板、副机接口;只拦这几个 TCP 端口,别的服务器上的线路照常能连,加了副机或换了地址一分钟内跟上):你按来源 IP 限制面板访问、副机接口只放行主机时,用户不能借代理从集群里的服务器这头绕进来。确实要给用户访问内网服务时再打开。</li>
+      <li>面板端口不在此列:用户经代理照样能打开 <code>服务器公网IP:面板端口</code>;公网 IP 直接绑在网卡上的 VPS(很常见)上,这类流量走本机回环,防火墙的 IP 白名单拦不住。所以别只靠白名单保护面板:改掉默认的端口和路径,用强密码,打开两步验证。</li>
+      <li><b data-k="set.blockBT">屏蔽 BT 下载</b>:拒绝经代理的 BT 连接,免得 VPS 招来版权投诉。</li>
+      <li>副机的 API 地址用 HTTPS,否则同步时令牌和用户凭据走明文。</li>
+      <li>备份 zip 里有用户凭据和证书私钥;外部 API 令牌等于管理员权限:都要妥善保管。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="sec-net" data-scope="admin">
+    <h3>面板会连哪些外部地址</h3>
+    <p class="lede">m-ui 没有遥测,不收集使用数据。除了你自己的服务器,面板只在下面这些情况主动连外部服务,各自怎么关也写在表里。</p>
+    <div class="tbl"><table>
+      <thead><tr><th>连到哪</th><th>什么时候、为什么</th><th>怎么关</th></tr></thead>
+      <tbody>
+        <tr><td>GitHub</td><td>检查新版本:启动后约 20 秒查一次,之后每 6 小时一次;订阅服务每 6 小时查一次落地页客户端下载页要用的客户端版本。点更新时也从这里下载。</td><td>关不掉;连不上也不影响使用,只是看不到新版本提示</td></tr>
+        <tr><td>Cloudflare(<code>cdn-cgi/trace</code>)、ipify</td><td>测本机的公网 IPv4 / IPv6(订阅里的节点地址默认用它):启动时一次,之后每小时一次</td><td>关不掉</td></tr>
+        <tr><td>Globalping</td><td>大陆连通检测:把服务器的 IP 和端口发给它的公共测试网络。点检测时,以及 <b data-k="set.reachAuto">自动巡检</b>(默认开,每 90 分钟)</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.reach">大陆连通检测</b> → 去掉 <b data-k="set.reachAuto">自动巡检</b></td></tr>
+        <tr><td>Let's Encrypt</td><td>签发、续期 <b data-k="cert.srcAcme">有域名(自动签发)</b> 的证书;平时只在本机查到期日,到了该续的时候才连。用 DNS 验证(Cloudflare 或手动加 TXT)时,还会向 Cloudflare、Google 的公共 DNS(1.1.1.1、8.8.8.8)查 TXT 记录生效没有</td><td>不用自动签发,或在证书库里关掉那张的自动续期</td></tr>
+        <tr><td>Cloudflare API</td><td>用 <b data-k="cert.methodCf">DNS(Cloudflare API)</b> 签发、续期时加删 TXT 记录</td><td>不用这种验证方式就不连</td></tr>
+        <tr><td>Telegram</td><td>发通知、跑 Telegram 机器人</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b> 不启用就不连</td></tr>
+        <tr><td>GitHub、jsDelivr、ntfy.sh、TronGrid</td><td>功德箱:打开 <b data-k="support.btn">建议 / 支持</b> 页时读名单(最多一小时一次),点留名、核对到账时;在线设备数:每天从 GitHub 下载一次空文件</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → 关掉 <b data-k="set.supportOnline">功德箱与在线设备数</b></td></tr>
+        <tr><td>Globalping、Cloudflare API</td><td>主机容灾:判断主机是否失联时让境外测点连主机;主机变了以后自动改 DNS</td><td>关掉 <b data-k="ha.set.witness">境外测点见证</b>;不填 Cloudflare 令牌就不改 DNS</td></tr>
+        <tr><td>Google(<code>www.gstatic.com</code>)</td><td>上游巡检和测试:<b data-k="set.testUrl">上游测试地址</b> 默认就是它。本机有线路用了上游(WARP、落地机等)时,每 10 分钟经各条上游连一次;线路用了上游组的,内核还会每 30 秒经组里每条上游连一次;点上游的 <b data-k="common.test">测试</b>、外部节点测速时也连</td><td>把 <b data-k="set.testUrl">上游测试地址</b> 换成别的地址;<b data-k="set.checkMinutes">巡检间隔(分钟)</b> 填 0 只关掉定时巡检,上游组的测速照样跑</td></tr>
+        <tr><td>你自己填的地址</td><td>Webhook、外部订阅、Telegram 代理</td><td>不填就不连</td></tr>
+        <tr><td>点了才连</td><td>更新、安装 WARP(Cloudflare 的软件源;本机 DNS 解析不了软件源时还会向 1.1.1.1、8.8.8.8 查解析)和 <b data-k="ops.checkExit">检测出口</b>、按规则分流里的 <b data-k="line.rr.lookup">查域名</b>(GitHub 上的 v2fly 域名列表)、Reality 的 <b data-k="line.reality.check">检测</b> 和 <b data-k="line.reality.pick">帮我挑</b>(连候选网站)、外部节点测速、证书页的 <b data-k="cert.precheck">预检 DNS / 端口</b> 和换机向导的 <b data-k="mig.check">检查解析</b>(向 Cloudflare、Google、阿里的公共 DNS 查解析,并测一次本机公网 IP)</td><td>不点就不连</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+</section>
+
+<section class="chap" id="faq">
+  <h2>常见问题 / 排错</h2>
+  <p class="lede">先按症状找;没找到就用上面的搜索框搜关键词。</p>
+
+  <section class="sec" id="faq-connect">
+    <h3>连不上</h3>
+    <dl class="qa">
+      <dt>订阅能刷新,但节点连不上?</dt>
+      <dd>先让用户刷新一次订阅,再按顺序查:线路端口有没有在安全组 / 防火墙放行(Hysteria2、TUIC 要放 UDP);用户是否被停用(看状态一列);设备数是不是满了。<span data-scope="admin">概览的 <b data-k="dash.recentConns">最近入站连接</b> 能看到他的 IP 有没有连到服务器。</span></dd>
+      <dt>提示设备数超限 / 有的设备连不上?</dt>
+      <dd>同时在线的设备(按来源 IP 算,所有服务器合计)到了上限,新设备会被拒绝。等别的设备下线约 1 分钟,或者调高设备数。手机切换 WiFi 和流量会换 IP,短时间内可能算两台。</dd>
+      <dt data-scope="admin">IPv6 的节点不通?</dt>
+      <dd data-scope="admin">多半是云安全组没给 <code>::/0</code> 放行(TCP、UDP 分开加),或者系统的 ip6tables / ufw 拦着;再确认用户自己的网络有 IPv6。WARP、NAT 之类只能出站的 IPv6 不能给用户连。服务器页的 IPv6 入站检测能直接告诉你通不通(见 <a href="#nodes-addr">连接地址与 IPv4 / IPv6</a>)。</dd>
+      <dt data-scope="admin">某个地区突然全连不上?</dt>
+      <dd data-scope="admin">到 <b data-k="nav.nodes">服务器</b> 页点 <b data-k="reach.checkAll">检测大陆连通</b>:<b data-k="reach.v.ipBlocked">IP 被墙</b> 要换 IP,<b data-k="reach.v.portBlocked">端口被封</b> 换个端口就行。</dd>
+    </dl>
+  </section>
+
+  <section class="sec" id="faq-panel" data-scope="admin">
+    <h3>面板与服务器</h3>
+    <dl class="qa">
+      <dt>打开 <code>IP:2053/</code> 是 404?</dt>
+      <dd>故意的:根路径不跳转,免得把面板路径告诉扫端口的人。打开完整地址,比如 <code>http://IP:2053/app/</code>。忘了路径就 SSH 执行 <code>m-ui</code> 选菜单 1。</dd>
+      <dt>忘记密码 / 手机丢了进不去?</dt>
+      <dd>SSH 执行 <code>m-ui</code>:菜单 5 重置管理员密码(同时关闭两步验证),或者菜单 13 只关闭两步验证。</dd>
+      <dt>改了端口、监听地址、证书不生效?</dt>
+      <dd>这些要重启 m-ui:设置页页头的 <b data-k="set.restart">重启 m-ui</b>,或菜单 2。改路径保存就生效。</dd>
+      <dt>副机显示离线?</dt>
+      <dd>看服务器页写的原因,对照 <a href="#nodes-off">离线排查</a>。用自签证书的副机要勾 <b data-k="node.insecure">跳过证书校验</b>;重签过副机证书要在 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>。</dd>
+      <dt>证书续期失败?</dt>
+      <dd>看证书库 <b data-k="cert.renewCol">自动续期</b> 一列的原因:HTTP 验证要 80 端口空闲;手动 DNS 的证书不能自动续;域名多了指向别处的 AAAA 记录也会失败。见 <a href="#cert-renew">自动续期</a>。</dd>
+      <dt>WARP 启用失败?</dt>
+      <dd>看运维页的任务输出。常见原因:40000 端口被占用,换个 <b data-k="ops.warpPort">SOCKS5 端口</b> 再启用;系统不是 Ubuntu / Debian,一键安装不支持,要自己装(见 <a href="#warp">WARP</a>)。</dd>
+      <dt>订阅返回 429?</dt>
+      <dd>同一个 IP 每分钟拉订阅超过 120 次被限流了,一般是客户端更新太频繁。这个限流也是防别人猜用户名批量拿订阅的主要手段,别关掉;确实需要就调大(比如 600):<code>m-ui set -db /etc/m-ui/m-ui.db subRateLimit=600</code>,同时建议关掉 <b data-k="set.subUseUserName">用用户名作订阅地址</b>,让新用户用随机令牌。</dd>
+    </dl>
+  </section>
+
+  <section class="sec" id="faq-sub">
+    <h3>订阅与用户</h3>
+    <dl class="qa">
+      <dt>客户端里订阅名不对?</dt>
+      <dd><span data-scope="admin">到 <b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> 填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b>(代理在自己账号页的订阅页里填,他的订阅标题和页面标题都空着时,他名下的用户也用你的);没填时依次用页面标题、用户备注、用户名。</span><span data-scope="reseller">到 <b data-k="nav.account">账号</b> → <b data-k="set.subPage">订阅页</b> 填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b>;没填时依次用你的页面标题、主面板的订阅标题和页面标题、用户备注、用户名。不想让客户看到站长的名字,就自己填一个订阅标题。</span>Shadowrocket、Clash Verge 只在添加订阅时定名字,要让用户删掉重加,或者用落地页的一键导入。</dd>
+      <dt>用户用完、到期后看到什么?</dt>
+      <dd>浏览器打开订阅地址仍是他的落地页,顶部写明原因、联系方式和续费按钮(如果填了选购链接);客户端拉订阅拿到 404。续费或重置流量后马上恢复。</dd>
+      <dt>订阅地址泄露了?</dt>
+      <dd>用户的 <b data-k="common.more">更多</b> → <b data-k="user.rotate">重置订阅链接</b>,旧地址和凭据立刻失效,把新地址发给用户。</dd>
+      <dt>代理登录不上?</dt>
+      <dd>新代理第一次登录密码留空;24 小时认领时间过了、或忘了密码,要站长在主面板 <b data-k="nav.resellers">代理</b> 页 <b data-k="common.more">更多</b> → <b data-k="rs.passwd">重置密码</b>。</dd>
+    </dl>
+  </section>
+
+  <section class="sec" id="limits" data-scope="admin">
+    <h3>已知限制</h3>
+    <p>这几处是现在的设计边界,不是故障;以后可能改进。</p>
+    <ul>
+      <li><b>VLESS / VMess 的多路复用(Mux)与 XUDP:</b>客户端开了 Mux,或用 XUDP 转发 UDP 时,一条外层连接只认证一次,里面再开多少条流都不再看用户表;服务端碰到就接受,线路上没有开关能拦。停用、删除用户、重置订阅链接或踢线时只断得了里面正在跑的流,外层连接还活着,客户端断开重连之前仍能在里面开新流。要立刻彻底断开,停用这条线路再启用(会全量重载),或重启 m-ui。Hysteria2、TUIC、AnyTLS 没有这个问题:停用和踢线会关掉整条会话。</li>
+      <li><b>跨服务器的设备数约有 5 秒的判定窗口:</b>各台服务器的在线 IP 由主机每 5 秒汇总一轮再下发,同一个用户在这几秒里同时从几台服务器连进来,合计可能超过上限。超出后不会把已经连上的设备踢掉(设备满了只拒新设备,已连接的不动),等多出来的设备空闲约 1 分钟下线后才回到上限以内。</li>
+      <li><b>全量重载时 Hysteria2 不发关闭通知:</b>新建 / 删除线路、改端口或协议这类改动要全量重载数据面,正在连着的 Hysteria2 客户端收不到连接关闭的通知,要等约 30 秒的空闲超时才发现断了并重连,这段时间里像是卡住。只改用户、限速、上游时是热更新,不受影响。</li>
+      <li><b>大陆连通检测只测 IPv4:</b>大陆的家庭宽带测点大多没有 IPv6,用它们测 IPv6 会把正常的服务器误判成被墙,所以只测 IPv4;IPv6 入站另从境外测点测一项(只看端口通不通,不判断墙)。见 <a href="#reach">大陆连通检测</a>。</li>
+    </ul>
+  </section>
+</section>
+
+<section class="chap" id="support">
+  <h2>建议与支持 · 功德箱</h2>
+  <p class="lede">面板右上角的 <b data-k="support.btn">建议 / 支持</b>:找作者、报问题、支持这个项目。</p>
+  <section class="sec" id="support-page">
+    <h3>反馈问题</h3>
+    <ul>
+      <li>页面里有作者的 Telegram、文档、报告 Bug 和讨论区的入口。报问题时带上版本号(页面上点一下就能复制)。</li>
+      <li>日志里的令牌、UUID、订阅地址先打码再发。</li>
+    </ul>
+  </section>
+  <section class="sec" id="donate">
+    <h3>功德箱</h3>
+    <ul>
+      <li>在"支持这个项目"里填你的名字和金额,点 <b data-lit="support.html">留名</b>,再按页面给出的金额转 USDT(TRC20),60 分钟内到账就记到这个名字上。</li>
+      <li>上榜靠 GitHub 上的定时任务对账,GitHub 常把定时任务推迟几个小时,所以到账后通常要几个小时才出现在所有面板的 <b data-lit="support.html">功德箱</b> 里;超过一天还没上榜,在 Telegram 联系作者。</li>
+      <li>m-ui 没有遥测,不收集使用数据。功德箱和在线设备数(每台面板每天从 GitHub 下载一次空文件,按下载次数算有多少台在运行)是仅有的两处和面板功能无关的联网,都不带任何标识。</li>
+      <li data-scope="admin">不想要这两处联网:<b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → 关掉 <b data-k="set.supportOnline">功德箱与在线设备数</b>。这个开关只管这两处;面板为各项功能还会连 GitHub(检查更新)、Globalping(大陆连通检测)、Let's Encrypt、Telegram 等,清单和各自怎么关见 <a href="#sec-net">面板会连哪些外部地址</a>。</li>
+    </ul>
+  </section>
+</section>
+</div>
+
+</div>
+<footer class="foot">内容随面板版本更新。找不到答案?回到面板点右上角 <b data-k="support.btn">建议 / 支持</b> 问作者。</footer>
+</main>
+</div>
+<script src="help.js"></script>
+</body>
+</html>

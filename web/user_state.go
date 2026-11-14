@@ -46,8 +46,15 @@ func (s *Server) setEnabled(db *gorm.DB, ids []uint, on bool) (int64, error) {
 	if !on {
 		upd["disabled_reason"] = model.DisabledManual
 	}
-	res := db.Model(&model.User{}).Where("id IN ?", ids).Updates(upd)
-	return res.RowsAffected, res.Error
+	var n int64
+	for _, part := range idChunks(ids) { // 分批:一条 IN 放不下上万个 id
+		res := db.Model(&model.User{}).Where("id IN ?", part).Updates(upd)
+		if res.Error != nil {
+			return n, res.Error
+		}
+		n += res.RowsAffected
+	}
+	return n, nil
 }
 
 // resetUsage 本周期用量清零(并入历史累计),超量被停的自动恢复,并允许用量告警再次发出。
@@ -74,7 +81,7 @@ func (s *Server) resetUsage(db *gorm.DB, id uint) error {
 // 不限期的不动、返回 false:以前也从现在起算,批量延期 30 天等于给它们设了 30 天后到期(审计 MB11)。
 func (s *Server) extendExpiry(db *gorm.DB, u model.User, days int, now int64) (bool, error) {
 	if u.ActivateDays > 0 { // 还没开始计时:加到等待计时的天数上
-		return true, db.Model(&model.User{}).Where("id = ?", u.Id).Update("activate_days", u.ActivateDays+days).Error
+		return true, db.Model(&model.User{}).Where("id = ?", u.Id).Update("activate_days", model.SumDays(u.ActivateDays, days)).Error
 	}
 	if u.Expiry == 0 {
 		return false, nil
@@ -83,7 +90,7 @@ func (s *Server) extendExpiry(db *gorm.DB, u model.User, days int, now int64) (b
 	if u.Expiry > now {
 		base = u.Expiry
 	}
-	u.Expiry = base + int64(days)*86400
+	u.Expiry = model.AddDays(base, days)
 	autoEnable(&u, now)
 	return true, db.Model(&model.User{}).Where("id = ?", u.Id).Select("expiry", "enabled", "disabled_reason").Updates(u).Error
 }

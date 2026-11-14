@@ -42,7 +42,8 @@ func (s *Set) Remove(r *Registry) {
 	s.mu.Unlock()
 }
 
-// CloseUsers 在全部入站上关掉这些名字的会话。先复制登记表列表再解锁,不在持 Set.mu 时进 Registry.mu。
+// CloseUsers 在全部入站上关掉这些名字的会话,等它们的连接真正断开才返回(各入站的一起关、一起等)。
+// 返回这一次关掉的会话数。先复制登记表列表再解锁,不在持 Set.mu 时进 Registry.mu。
 func (s *Set) CloseUsers(names []string) int {
 	if s == nil {
 		return 0
@@ -53,11 +54,11 @@ func (s *Set) CloseUsers(names []string) int {
 		regs = append(regs, r)
 	}
 	s.mu.Unlock()
-	n := 0
+	var victims []*Session
 	for _, r := range regs {
-		n += r.CloseUsers(names)
+		victims = append(victims, r.revoke(names)...)
 	}
-	return n
+	return shutAll(victims)
 }
 
 // Len 登记在册的入站数。

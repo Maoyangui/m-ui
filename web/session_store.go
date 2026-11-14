@@ -4,10 +4,10 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
@@ -69,7 +69,7 @@ var (
 
 // expectedCredentialTag 当前库里该账号的凭据指纹;查不到返回空串。带 TTL 缓存。
 func (s *Server) expectedCredentialTag(role, key string, load func() (identity, password string, ok bool)) string {
-	ck := fmt.Sprintf("%p|%s|%s", s, role, key)
+	ck := s.credPrefix() + role + "|" + key
 	credCacheMu.Lock()
 	if e, ok := credCache[ck]; ok && time.Since(e.at) < credCacheTTL {
 		credCacheMu.Unlock()
@@ -87,9 +87,23 @@ func (s *Server) expectedCredentialTag(role, key string, load func() (identity, 
 	return tag
 }
 
+// credSeq 给每台 Server 发一个编号作凭据缓存的前缀。不用指针地址:前一台 Server 被回收后,新的一台可能分到同一个地址,
+// 读到上一台(另一份库、另一个密码哈希)留下的缓存,会话就被误判为失效(测试里一个进程会建很多台 Server)。
+var credSeq atomic.Uint64
+
+// credPrefix 这台 Server 在凭据缓存里的键前缀(第一次用时领编号)。
+func (s *Server) credPrefix() string {
+	id := s.credID.Load()
+	if id == 0 {
+		s.credID.CompareAndSwap(0, credSeq.Add(1))
+		id = s.credID.Load()
+	}
+	return strconv.FormatUint(id, 10) + "|"
+}
+
 // forgetCredentialTags 改密码 / 重置之后清掉这台 Server 的缓存,新指纹立刻生效。
 func (s *Server) forgetCredentialTags() {
-	prefix := fmt.Sprintf("%p|", s)
+	prefix := s.credPrefix()
 	credCacheMu.Lock()
 	for k := range credCache {
 		if strings.HasPrefix(k, prefix) {

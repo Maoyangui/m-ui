@@ -66,8 +66,9 @@ func TestReachTargets(t *testing.T) {
 	}
 }
 
-// 订阅里给的是 IPv6 的服务器不测(测点不一定有 IPv6,测不通会被误判成被墙),如实标出;双栈默认 IPv4 照测。
-// 订阅给域名时不看地址族。
+// 订阅里给的是 IPv6 的副机不测大陆那项(测点不一定有 IPv6,测不通会被误判成被墙),如实标出;双栈默认 IPv4 照测。
+// 主机选了"自动地址用 IPv6"也照测订阅端口:用户刷新订阅连的是订阅地址(这里是公网 IPv4),见 TestReachTargetsLocalAllV6。
+// 订阅给域名时不看地址族;纯 IPv6 的副机(没有 IPv4、也没有能解析到 IPv4 的域名)照样记无可测端口,不报"还没上报公网 IP"。
 func TestReachTargetsIPv6(t *testing.T) {
 	r, err := New(filepath.Join(t.TempDir(), "m.db"))
 	if err != nil {
@@ -92,7 +93,7 @@ func TestReachTargetsIPv6(t *testing.T) {
 		t.Helper()
 		got := map[string]string{}
 		for _, tg := range r.reachTargets(context.Background()) {
-			if tg.Err != "" {
+			if tg.NoPort != "" { // 不测大陆那项(记"无可测端口",会盖掉以前的结论,不像 Err 那样只算没测成)
 				got[tg.Name] = "v6"
 				if tg.Host != "" {
 					t.Fatalf("%s 标了不测却还带着地址 %q", tg.Name, tg.Host)
@@ -107,7 +108,7 @@ func TestReachTargetsIPv6(t *testing.T) {
 			}
 		}
 	}
-	check(map[string]string{"本机": "v6", "双栈": "203.0.113.2", "选v6": "v6", "选v6没有": "203.0.113.4", "纯v6": "v6", "手填v6": "v6"})
+	check(map[string]string{"本机": "203.0.113.1", "双栈": "203.0.113.2", "选v6": "v6", "选v6没有": "203.0.113.4", "纯v6": "v6", "手填v6": "v6"})
 	r.setSetting("subServerAddr", "domain")
-	check(map[string]string{"本机": "203.0.113.1", "选v6": "203.0.113.3"})
+	check(map[string]string{"本机": "203.0.113.1", "选v6": "203.0.113.3", "纯v6": "v6"})
 }

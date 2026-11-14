@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,11 +18,12 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
-	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ha"
 	"github.com/Maoyangui/m-ui/hop"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/ops"
 	"github.com/Maoyangui/m-ui/reach"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/sub"
@@ -117,9 +119,38 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status["subPath"] = s.setting("subPath")
 	status["webPort"] = s.settingInt("webPort", 2053)
 	status["webPath"] = s.basePath()
-	status["reload"] = s.run.ReloadStatus() // 最近一次重载:失败会在页面顶部常驻提示
+	status["reload"] = s.run.ReloadStatus()   // 最近一次重载:失败会在页面顶部常驻提示
+	status["certAlerts"] = s.run.CertAlerts() // 续期失败、正用着又快到期的证书(主机连副机的一起):页面顶部提示
+	if n := s.run.RestoreNotice(); n != nil { // 上次还原放进数据目录的证书副本(没有谁续)、还缺的:页面顶部提示一次,点「知道了」才消
+		status["restore"] = n
+	}
 	if !s.run.IsNode() {
 		status["reachBad"] = s.run.Reach().Bad() // 大陆连通异常的服务器:概览页顶部提示
+		// IPv6 入站不通的服务器(只算 down,和服务器页同一份;没有时是空数组,主机上这个键始终在):概况"需要处理"用,不并进 reachBad
+		status["v6Bad"] = s.run.Reach().V6Bad()
+		status["attention"] = s.attention()          // 概况「需要处理」:用户快到期 / 流量将尽、代理额度、定时备份(60 秒缓存)
+		status["reachState"] = s.run.Reach().State() // 大陆连通检测自己有没有在跑(停摆时概况不能说"一切正常")
+	} else {
+		// 副机:主机最近一次联系本机的时间、本机流量记账连续失败的轮数(概况「需要处理」与「与主机同步」卡用)
+		if at := s.hubSeenAt.Load(); at > 0 {
+			status["hubSeenAt"] = at
+		} else if s.setting("hubRevision") != "" && s.startedAt > 0 { // 配过对,但本次启动以来主机还没联系过(hubSeenAt 只在内存里)
+			status["hubQuietSince"] = s.startedAt
+		}
+		status["ledgerFails"] = s.run.LedgerFailures()
+		// 最近一次没应用成主机推来的配置(版本太低被拒收、数据面应用失败),之后应用成功就清掉
+		if msg, at := s.applyRes.get(); msg != "" {
+			status["applyErr"], status["applyErrAt"] = msg, at
+		}
+		// 副机库里有主机下发的全部线路,本机只跑部署到自己的那些:概况的「线路」卡按本机算
+		status["linesLocal"], status["linesLocalEnabled"] = s.localLineCounts()
+	}
+	// 数据目录所在盘的总量与剩余(概况「本机负载」卡):一次 statfs;取不到(Windows 开发机)就不给
+	if total, free := ops.DiskUsage(s.run.DataDir()); total > 0 {
+		status["disk"] = map[string]int64{"total": total, "free": free}
+	}
+	if h := s.haSvc(); h != nil { // 主机容灾的小结(页面顶部的提示、角色标签用;判定仍看 nodeMode)
+		status["ha"] = h.Summary()
 	}
 	status["singBox"] = singBoxVersion
 	status["dbSize"] = dbFileSize(s.run.DBPath())
@@ -249,9 +280,10 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 			s.db.Model(&model.Line{}).Select("COALESCE(MAX(sort),0)").Scan(&maxSort)
 			line.Sort = maxSort + 1
 		}
-		// 在事务里写入并对整套配置做 sing-box 干跑:通不过就回滚,绝不让一条坏线路留在库里拖垮后续所有重载
-		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
-		err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 整套配置通过 sing-box 干跑才落库:通不过就什么都不留,绝不让一条坏线路留在库里拖垮后续所有重载。
+		// 干跑在事务外做(见 commitValidated),排队等干跑时不占数据库写锁
+		err := s.commitValidated(func(tx *gorm.DB) error {
+			line.Id, line.Enabled = 0, enabled // 可能要写第二遍:每遍都从同样的输入写起
 			if err := tx.Create(&line).Error; err != nil {
 				return err
 			}
@@ -263,11 +295,9 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 				line.Enabled = false
 			}
 			if p.AssignAll {
-				if err := assignLineToMainUsers(tx, line.Id); err != nil {
-					return err
-				}
+				return assignLineToMainUsers(tx, line.Id)
 			}
-			return validateFullConfig(tx, nodeCert)
+			return nil
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -331,21 +361,30 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
-		err := s.db.Transaction(func(tx *gorm.DB) error {
+		var widened *scopeWidened
+		err := s.commitValidated(func(tx *gorm.DB) error { // 干跑通过才提交,干跑时不占写锁(见 commitValidated)
 			if err := tx.Model(&model.Line{}).Where("id = ?", id).Select(cols).Updates(line).Error; err != nil {
 				return err
 			}
-			return validateFullConfig(tx, nodeCert)
+			// 部署服务器收窄了:指向已撤服务器的分配 / 授权 / 套餐范围一并整理(只剩已撤的改回全部并点名)
+			var err error
+			widened, err = fixLineScopesTx(tx, id, deployNodeIDs(line.NodeIds))
+			return err
 		})
 		if err != nil {
 			badRequest(w, err)
 			return
 		}
 		s.audit(r, "line", "update", line.Name)
+		if !widened.empty() {
+			s.audit(r, "line", "scope:widen", map[string]interface{}{"line": line.Name, "widened": widened})
+		}
 		s.reloadAll("修改线路 " + line.Name)
 		s.syncRelays() // 端口、协议参数变了,用它当上游的跟着改
-		writeJSON(w, http.StatusOK, line)
+		writeJSON(w, http.StatusOK, struct {
+			model.Line
+			ScopeWidened *scopeWidened `json:"scopeWidened,omitempty"`
+		}{line, widened})
 	case http.MethodDelete:
 		var line model.Line
 		s.db.First(&line, id)
@@ -395,15 +434,13 @@ func assignLineToMainUsers(tx *gorm.DB, lineID uint) error {
 // validateFullConfig 用事务内的当前数据渲染整套 sing-box 配置并干跑初始化。
 // 单条入站/出站的 parse 校验抓不住"初始化才报错"的问题(如 ss2022 缺 PSK),
 // 而这类错误会让之后每一次重载都失败,所以保存前必须整体干跑一遍。
+// 保存走 commitValidated(干跑在事务外);这里给"就地校验当前库"的场合用。
 func validateFullConfig(tx *gorm.DB, cert render.NodeCert) error {
-	raw, err := render.BuildConfig(tx, cert)
+	raw, err := renderFullConfig(tx, cert)
 	if err != nil {
-		return fmt.Errorf("渲染配置失败(已取消保存): %w", err)
+		return err
 	}
-	if err := core.ValidateConfig(raw); err != nil {
-		return fmt.Errorf("配置未通过 sing-box 校验(已取消保存): %w", err)
-	}
-	return nil
+	return dryRunFullConfig(raw)
 }
 
 // validateLine 校验线路必填项与唯一性(端口/名称)。
@@ -453,21 +490,10 @@ func (s *Server) validateLine(line *model.Line) error {
 	if line.Port < 1 || line.Port > 65535 {
 		return errors.New("端口需在 1-65535 之间")
 	}
-	// 干跑校验不绑定端口,和面板/订阅/代理面板撞号要等数据面启动才炸,在这里先拦
-	for _, p := range []struct {
-		label string
-		port  int
-	}{
-		{"面板", s.settingInt("webPort", 2053)},
-		{"订阅", s.settingInt("subPort", 2056)},
-		{"代理面板", s.settingInt("resellerPort", 2054)},
-	} {
-		if p.label == "代理面板" && strings.EqualFold(s.setting("resellerEnabled"), "false") {
-			continue
-		}
-		if line.Port == p.port {
-			return fmt.Errorf("端口 %d 已被%s占用,换一个", line.Port, p.label)
-		}
+	// 干跑校验不绑定端口,和本机面板/订阅/代理面板撞号要等数据面启动才炸,在这里先拦。
+	// 只部署在别的服务器上的线路不占本机端口,和本机这几个端口无关(I3)
+	if err := s.checkServicePorts(*line); err != nil {
+		return err
 	}
 	// 线路之间撞端口(只看部署范围有交集的服务器):后面的 bind 探测只会说"被别的程序占用",
 	// 这里先把占着端口的那条线路点名
@@ -480,6 +506,12 @@ func (s *Server) validateLine(line *model.Line) error {
 		if name, rng := s.hopCovering(line); name != "" {
 			return fmt.Errorf("端口 %d 落在线路「%s」的端口跳跃范围 %s 里,UDP 包会被转给那条线路,换一个", line.Port, name, rng)
 		}
+	}
+	// HTTP 验证每次续期都要临时占 TCP 80:新占用 80 的线路(新建或改端口)部署到有这种证书的服务器上就拦下
+	// (以前一条走 CDN 的 80 线路推到全部服务器,这些证书从此天天续期失败)。原本就在 80 上的线路不拦:
+	// 续期前的预检会点它的名,证书页也会提示
+	if err := s.checkHTTP01Port(line); err != nil {
+		return err
 	}
 	// 机器上可能还跑着别的项目:端口有变化时试着监听一次,占着就别让它进库
 	// (端口没改的编辑不测——那时占着它的正是本机运行中的数据面;
@@ -592,6 +624,11 @@ func (s *Server) validateLine(line *model.Line) error {
 		return err
 	}
 	line.NodeFamily = family
+	addrs, err := normLineAddrs(line.Addrs)
+	if err != nil {
+		return err
+	}
+	line.Addrs = addrs
 	return nil
 }
 
@@ -666,9 +703,8 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		up.Id = 0
-		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
-		err := s.db.Transaction(func(tx *gorm.DB) error {
+		err := s.commitValidated(func(tx *gorm.DB) error { // 干跑通过才提交,干跑时不占写锁(见 commitValidated)
+			up.Id = 0 // 可能要写第二遍:每遍都从同样的输入写起
 			if err := tx.Create(&up).Error; err != nil {
 				return err
 			}
@@ -676,11 +712,9 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 				if err := sub.FillRelay(tx, &up); err != nil {
 					return err
 				}
-				if err := tx.Model(&model.Upstream{}).Where("id = ?", up.Id).Updates(map[string]interface{}{"type": up.Type, "options": up.Options}).Error; err != nil {
-					return err
-				}
+				return tx.Model(&model.Upstream{}).Where("id = ?", up.Id).Updates(map[string]interface{}{"type": up.Type, "options": up.Options}).Error
 			}
-			return validateFullConfig(tx, nodeCert)
+			return nil
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -747,8 +781,7 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 		}
 		var oldName string
 		s.db.Model(&model.Upstream{}).Select("name").Where("id = ?", id).Scan(&oldName)
-		nodeCert := s.run.NodeCert() // 事务里不能再走连接池,先取好
-		err := s.db.Transaction(func(tx *gorm.DB) error {
+		err := s.commitValidated(func(tx *gorm.DB) error { // 干跑通过才提交,干跑时不占写锁(见 commitValidated)
 			if err := tx.Model(&model.Upstream{}).Where("id = ?", id).
 				Select("name", "type", "options", "from_line", "from_node", "relay_creds").Updates(up).Error; err != nil {
 				return err
@@ -759,11 +792,9 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if render.IsGroup(up) {
-				if err := groupLoopCheck(tx); err != nil {
-					return err
-				}
+				return groupLoopCheck(tx)
 			}
-			return validateFullConfig(tx, nodeCert)
+			return nil
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -1120,6 +1151,9 @@ func (s *Server) validateUser(u *model.User) error {
 	if u.ActivateDays < 0 {
 		return errors.New("首次连接后的天数不能为负")
 	}
+	if u.ActivateDays > model.MaxDays || u.ResetDays > model.MaxDays {
+		return errDaysTooMany
+	}
 	if u.ActivateDays > 0 {
 		u.Expiry = 0 // 两者互斥:填了"首次连接后 N 天",到期日要等连上才有
 	}
@@ -1219,14 +1253,14 @@ func generateCredentials(name string) json.RawMessage {
 // 两步验证、外部 API 令牌、配对令牌、ACME 账户这类键各有专门的接口(带各自的校验),这里一律不收 ——
 // 否则拿到会话就能绕过"关闭两步验证要密码 + 验证码"。设置页加字段时要同步加到这里(测试会核对)。
 var panelSettings = setOf(
-	"webDomain", "timezone", "webListen", "webPort", "webPath", "webCertFile", "webKeyFile",
-	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subProfileTitle", "subUpdates",
+	"webDomain", "timezone", "webListen", "webPort", "webPath", "webCertFile", "webKeyFile", "trustedProxies",
+	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subDomain", "subProfileTitle", "subUpdates",
 	"subUseUserName", "subEncode", "subShowNotice", "subInsecure", "subServerAddr", "extRefreshMinutes",
 	"subAutoFormat", "subClashExt", "subSingboxExt", "blockBT", "supportOnline", "tgBot", "webhookUrl", "webhookSecret",
 	"resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile",
 	"subPageEnabled", "subShareEnabled", "subPageBrand", "subPageTitle", "subPageSupport", "subPageBuyURL", "subPageNotice",
 	"tgEnabled", "tgToken", "tgChatId", "tgProxy", "tgOnLogin", "tgOnUserDisabled", "tgOnUserExpiring", "tgExpiringDays",
-	"tgOnQuota", "tgQuotaPercent", "tgOnRuleLimit", "tgOnUpstream", "tgOnCore", "tgOnReach", "tgDaily", "tgDailyHour",
+	"tgOnQuota", "tgQuotaPercent", "tgOnRuleLimit", "tgOnUpstream", "tgOnCore", "tgOnReach", "tgOnCert", "tgDaily", "tgDailyHour",
 	"upstreamCheckMinutes", "upstreamCheckFailThreshold", "reachAuto", "reachMinutes", "reachToken",
 	"certFile", "keyFile", "upstreamTestUrl", "statsBucketSeconds", "trafficAge", "allowPrivate",
 	"nodeMode", "backupHour", "backupKeep", "backupTelegram", "subLogAge", "auditAge",
@@ -1260,7 +1294,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		s.db.Find(&rows)
 		out := map[string]string{}
 		for _, row := range rows {
-			if hiddenSettings[row.Key] {
+			if hiddenSettings[row.Key] || ha.Hidden(row.Key) { // 容灾的键一律不发(签名私钥、集群密钥、Cloudflare 令牌……),走专用接口
 				continue
 			}
 			if maskedSettings[row.Key] && row.Value != "" {
@@ -1287,6 +1321,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			if maskedSettings[k] && v == secretMask {
 				delete(in, k) // 原样提交回来的掩码 = 不改
 			}
+			if model.BoolSettings[k] { // 开关一律存成 true / false,前后端同一个判法
+				nv, ok := model.NormBoolSetting(v)
+				if !ok {
+					badRequest(w, fmt.Errorf("设置项 %q 只能是 true 或 false", k))
+					return
+				}
+				in[k] = nv
+			}
 		}
 		if err := s.validatePorts(in); err != nil { // 端口写错会导致重启后打不开,先拦下
 			badRequest(w, err)
@@ -1296,15 +1338,39 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		if err := validatePageTextChange(in["subPageNotice"], s.setting("subPageNotice"), in["subPageSupport"], s.setting("subPageSupport")); err != nil {
+			badRequest(w, err)
+			return
+		}
+		var hints []string // 存得下、但要让管理员知道的事,设置页按代码显示对应文案
+		if v, ok := in["subClashExt"]; ok && sub.ClashTemplateDisablesIPv6(v) {
+			hints = append(hints, "clashIPv6") // 有 IPv6 节点时订阅会把它改成 true,否则 mihomo 连不上这些节点
+		}
 		if v, ok := in["webDomain"]; ok && strings.Contains(v, "*") {
 			badRequest(w, errors.New("面板域名不能写泛域名,要填具体的访问地址,如 hk.example.com"))
 			return
+		}
+		if v, ok := in["subDomain"]; ok { // 订阅地址里的主机名(换主机后随主机身份迁来的也在这里改)
+			d, err := normSubDomain(v)
+			if err != nil {
+				badRequest(w, err)
+				return
+			}
+			in["subDomain"] = d
 		}
 		if v, ok := in["webhookUrl"]; ok && strings.TrimSpace(v) != "" {
 			if u, err := url.Parse(strings.TrimSpace(v)); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 				badRequest(w, errors.New("Webhook 地址要是完整的 http(s) 网址"))
 				return
 			}
+		}
+		if v, ok := in["trustedProxies"]; ok { // 受信任的反向代理:写错的地址当场拦下,存规范化后的写法
+			_, norm, err := parseTrustedProxies(v)
+			if err != nil {
+				badRequest(w, err)
+				return
+			}
+			in["trustedProxies"] = norm
 		}
 		if v, ok := in["reachMinutes"]; ok && strings.TrimSpace(v) != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(v)); err != nil || n < reach.MinMinutes || n > reach.MaxMinutes {
@@ -1363,13 +1429,39 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		s.audit(r, "settings", "update", keys)
 		// 端口/证书类改动需重启进程才生效,这里提示前端
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		resp := map[string]interface{}{
 			"ok": "1", "role": s.role(),
 			"note": note,
-		})
+		}
+		if len(hints) > 0 {
+			resp["hints"] = hints
+		}
+		writeJSON(w, http.StatusOK, resp)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// normSubDomain 订阅域名:空 = 用面板域名(再没有用公网 IP);否则只收一个具体的域名(不带 http://、端口、路径,不能是泛域名)。
+func normSubDomain(v string) (string, error) {
+	d := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(v), "."))
+	if d == "" {
+		return "", nil
+	}
+	if len(d) > 253 || strings.ContainsAny(d, "*/:@?# ") || !strings.Contains(d, ".") || net.ParseIP(d) != nil {
+		return "", errors.New("订阅域名只填一个具体的域名(如 sub.example.com),不带 http://、端口和路径;用 IP 的留空")
+	}
+	for _, label := range strings.Split(d, ".") {
+		if label == "" || len(label) > 63 || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return "", errors.New("订阅域名只填一个具体的域名(如 sub.example.com),不带 http://、端口和路径;用 IP 的留空")
+		}
+		for _, r := range label {
+			if !(r == '-' || r == '_' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')) {
+				return "", errors.New("订阅域名只填一个具体的域名(如 sub.example.com),不带 http://、端口和路径;用 IP 的留空")
+			}
+		}
+	}
+	return d, nil
 }
 
 // maxSubTemplate 订阅模板的长度上限:模板随快照发给每台副机,订阅每次都要解析一遍。
@@ -1437,44 +1529,185 @@ func (s *Server) validatePorts(in map[string]string) error {
 		}
 		got[key] = n
 	}
+	// 这次保存之后哪些端口真的会监听:代理面板关着、或本机是副机(副机不起代理面板,见 StartReseller)都不占端口
+	activeAfter := map[string]bool{
+		"webPort": true, "subPort": true,
+		"resellerPort": resellerListens(s.settingOr(in, "resellerEnabled"), s.settingOr(in, "nodeMode")),
+	}
+	activeBefore := map[string]bool{
+		"webPort": true, "subPort": true,
+		"resellerPort": resellerListens(s.setting("resellerEnabled"), s.setting("nodeMode")),
+	}
+	keys := []string{"webPort", "subPort", "resellerPort"} // 固定顺序:报错稳定
 	seen := map[int]string{}
-	for key, n := range got {
-		if key == "resellerPort" && strings.EqualFold(s.settingOr(in, "resellerEnabled"), "false") {
-			continue // 代理面板关着就不占端口
+	for _, key := range keys {
+		if !activeAfter[key] {
+			continue
 		}
+		n := got[key]
 		if other, dup := seen[n]; dup {
-			return fmt.Errorf("%s与%s的端口都是 %d,不能重复", ports[key].label, ports[other].label, n)
+			return fmt.Errorf("%s与%s的端口都是 %d,不能重复", ports[other].label, ports[key].label, n)
 		}
 		seen[n] = key
 	}
+	// 只有"这次改了"或"这次才开始监听"的端口才需要查占用;没动的端口不能让时区、通知、切换角色这类无关保存失败
+	var changed []string
+	for _, key := range keys {
+		if !activeAfter[key] {
+			continue
+		}
+		_, submitted := in[key]
+		if (submitted && got[key] != s.settingInt(key, ports[key].def)) || !activeBefore[key] {
+			changed = append(changed, key)
+		}
+	}
+	// 反方向也要拦:把面板/订阅端口改成某条线路正在用的端口,同样会起不来。先于 bind 探测点名线路(探测只会说"被别的程序占用")。
+	// 只看部署在本机的线路(含"全部服务器",也含停用的——端口给它留着):只在别的服务器上的线路不占本机端口(I3)
+	if len(changed) > 0 {
+		lineByPort := s.localLinesByPort()
+		for _, key := range changed {
+			if name, dup := lineByPort[got[key]]; dup {
+				return fmt.Errorf("%s端口 %d 已被线路 %q 占用,换一个", ports[key].label, got[key], name)
+			}
+		}
+	}
 	// 端口有改动时,确认本机没有别的程序占着(没改的不测:占着它的就是自己)
-	for key, n := range got {
-		if _, active := seen[n]; !active {
-			continue
-		}
-		if _, ok := in[key]; !ok || n == s.settingInt(key, ports[key].def) {
-			continue // 没提交或没变(包括把默认值手动填进去):占着它的正是面板自己
-		}
-		if !portBindable(n) {
-			return fmt.Errorf("%s端口 %d 已被本机其它程序占用,换一个", ports[key].label, n)
-		}
-	}
-	// 反方向也要拦:把面板/订阅端口改成某条线路正在用的端口,同样会起不来
-	lineByPort := map[int]string{}
-	var lines []model.Line
-	s.db.Select("name, port").Find(&lines)
-	for _, l := range lines {
-		lineByPort[l.Port] = l.Name
-	}
-	for key, n := range got {
-		if _, active := seen[n]; !active {
-			continue
-		}
-		if name, dup := lineByPort[n]; dup {
-			return fmt.Errorf("%s端口 %d 已被线路 %q 占用,换一个", ports[key].label, n, name)
+	for _, key := range changed {
+		if !portBindable(got[key]) {
+			return fmt.Errorf("%s端口 %d 已被本机其它程序占用,换一个", ports[key].label, got[key])
 		}
 	}
 	return nil
+}
+
+// resellerListens 代理面板会不会监听:关掉了(resellerEnabled=false)或本机是副机(nodeMode=true)都不监听。
+// 与 StartReseller 的判断保持一致。
+func resellerListens(enabled, nodeMode string) bool {
+	return !strings.EqualFold(strings.TrimSpace(enabled), "false") && !strings.EqualFold(strings.TrimSpace(nodeMode), "true")
+}
+
+// localServicePorts 本机当前会监听的服务端口(面板 / 订阅 / 代理面板)。
+func (s *Server) localServicePorts() []struct {
+	label string
+	port  int
+} {
+	out := []struct {
+		label string
+		port  int
+	}{
+		{"面板", s.settingInt("webPort", 2053)},
+		{"订阅", s.settingInt("subPort", 2056)},
+	}
+	if resellerListens(s.setting("resellerEnabled"), s.setting("nodeMode")) {
+		out = append(out, struct {
+			label string
+			port  int
+		}{"代理面板", s.settingInt("resellerPort", 2054)})
+	}
+	return out
+}
+
+// checkLocalServicePorts 线路部署到本机(含"全部服务器")时,端口不能和本机面板 / 订阅 / 代理面板相同。
+func (s *Server) checkLocalServicePorts(line model.Line) error {
+	if !render.LineOnNode(line, s.localNodeID()) {
+		return nil
+	}
+	for _, p := range s.localServicePorts() {
+		if line.Port == p.port {
+			return fmt.Errorf("端口 %d 已被%s占用,换一个", line.Port, p.label)
+		}
+	}
+	return nil
+}
+
+// defaultServicePorts 副机还没上报端口(老版本 / 主机刚重启还没收到报告)时按安装默认值避让。
+var defaultServicePorts = []model.ServicePort{{Label: "面板", Port: 2053}, {Label: "订阅", Port: 2056}}
+
+// checkServicePorts 线路部署到的每台服务器上,端口都不能和那台机器的面板 / 订阅(/ 代理面板)相同:
+// 本机按本机设置;副机按它上报的端口;没上报的副机按安装默认值 + 主机自己的端口避让(保持修复前的保守口径)。
+func (s *Server) checkServicePorts(line model.Line) error {
+	if err := s.checkLocalServicePorts(line); err != nil {
+		return err
+	}
+	var nodes []model.Node
+	s.db.Select("id, name, is_local, service_ports").Where("is_local = ?", false).Order("sort asc, id asc").Find(&nodes)
+	for _, n := range nodes {
+		if !render.LineOnNode(line, n.Id) {
+			continue
+		}
+		var ports []model.ServicePort
+		if len(n.ServicePorts) == 0 || json.Unmarshal(n.ServicePorts, &ports) != nil || len(ports) == 0 {
+			ports = append([]model.ServicePort{}, defaultServicePorts...)
+			for _, p := range s.localServicePorts() {
+				ports = append(ports, model.ServicePort{Label: p.label, Port: p.port})
+			}
+		}
+		for _, p := range ports {
+			if line.Port == p.Port {
+				return fmt.Errorf("端口 %d 已被服务器「%s」的%s占用,换一个", line.Port, n.Name, p.Label)
+			}
+		}
+	}
+	return nil
+}
+
+// checkHTTP01Port 线路要新占 TCP 80(新建或改端口)时,部署范围里有服务器的证书靠 HTTP 验证自动续期的,拒绝并点名。
+// 只走 UDP 的 hy2 / tuic 不占 TCP 80。
+func (s *Server) checkHTTP01Port(line *model.Line) error {
+	if line.Port != 80 || render.UDPOnly(line.Protocol) || !s.portChanged(line) {
+		return nil
+	}
+	var nodes []model.Node
+	s.db.Select("id", "name", "is_local", "certs").Order("sort asc, id asc").Find(&nodes)
+	if len(nodes) == 0 { // 还没有服务器记录(全新库):只看本机证书库
+		nodes = []model.Node{{IsLocal: true}}
+	}
+	for _, n := range nodes {
+		if !render.LineOnNode(*line, n.Id) {
+			continue
+		}
+		if cert := s.http01CertOn(n); cert != "" {
+			return fmt.Errorf("80 端口要留给证书续期:服务器「%s」上的证书 %s 用 HTTP 验证自动续期,每次续期都要临时占用 80 端口。线路换个端口,或者把那张证书改用 DNS 验证重新签发", n.Name, cert)
+		}
+	}
+	return nil
+}
+
+// http01CertOn 这台服务器上靠 HTTP 验证自动续期的一张证书(没有返回空):本机查证书库,副机看它报上来的清单
+// (老版本副机不报验证方式,当作没有)。
+func (s *Server) http01CertOn(n model.Node) string {
+	if n.IsLocal {
+		var name string
+		s.db.Model(&model.Cert{}).Select("name").Where("source = ? AND auto_renew = ? AND (method = ? OR method = '') AND name NOT LIKE ?", "acme", true, "http", "*.%").Order("name asc").Limit(1).Scan(&name)
+		return name
+	}
+	var list []model.CertBrief
+	if len(n.Certs) == 0 || json.Unmarshal(n.Certs, &list) != nil {
+		return ""
+	}
+	for _, b := range list {
+		if b.Source == "acme" && b.AutoRenew && (b.Method == "http" || b.Method == "") {
+			return b.Name
+		}
+	}
+	return ""
+}
+
+// localLinesByPort 部署在本机(含"全部服务器")的线路:端口 → 线路名。停用的也算(端口给它留着)。
+func (s *Server) localLinesByPort() map[int]string {
+	self := s.localNodeID()
+	var lines []model.Line
+	s.db.Select("id, name, port, node_ids").Order("sort asc, id asc").Find(&lines)
+	out := map[int]string{}
+	for _, l := range lines {
+		if !render.LineOnNode(l, self) {
+			continue
+		}
+		if _, ok := out[l.Port]; !ok {
+			out[l.Port] = l.Name
+		}
+	}
+	return out
 }
 
 // settingOr 取这次提交里的值,没提交就取库里的。

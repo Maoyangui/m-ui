@@ -18,7 +18,7 @@
   <p>If a counter comes back <i>smaller</i> than the cursor, the node was reinstalled or its database reset. The master re-bases the cursor to the new value instead of subtracting, so a reset never produces negative or doubled usage. Duplicate reports (a retried request) are harmless for the same reason: the delta is zero.</p>
 
   <h2>Device limits across servers</h2>
-  <p>A device limit counts distinct source IPs, and IPs are seen by whichever server the client connected to. Every report carries the node's online IPs per user. The master merges them with its own, and in the same tick sends each node the IPs seen <i>elsewhere</i>. Each server then enforces the limit against the union: three devices means three across the fleet. Enforcement stays local and fast; only the IP lists travel.</p>
+  <p>A device limit counts source IPs (IPv4 addresses and IPv6 /64s separately, each within the limit), and IPs are seen by whichever server the client connected to. Every report carries the node's online IPs per user. The master merges them with its own, and in the same tick sends each node the IPs seen <i>elsewhere</i>. Each server then enforces the limit against the union: the limit holds across the fleet, not per server. Enforcement stays local and fast; only the IP lists travel.</p>
 
   <h2>What travels back</h2>
   <p>Besides counters and IPs, a report carries the node's version, whether its core is running, uptime, certificate days remaining, its detected public IP (used as the node's address in subscriptions unless you set one), and a short list of recent connections for the dashboard. Nothing about the master goes to nodes except the snapshot.</p>

@@ -4,10 +4,10 @@ import "testing"
 
 func TestRecentConnsAggregate(t *testing.T) {
 	c := NewConnTracker(nil)
-	c.noteRecent("39.144.90.180", "LMEC", "美国4", "anytls")
-	c.noteRecent("1.2.3.4", "alice", "香港1", "hysteria2")
-	c.noteRecent("1.2.3.4", "alice", "香港1", "hysteria2") // 同 IP 同线路 → 计数累加
-	c.noteRecent("5.6.7.8", "", "台湾2", "tuic")           // 没认出用户
+	c.noteRecent("39.144.90.180", "LMEC", "美国4", "anytls", "")
+	c.noteRecent("1.2.3.4", "alice", "香港1", "hysteria2", "")
+	c.noteRecent("1.2.3.4", "alice", "香港1", "hysteria2", "") // 同 IP 同线路 → 计数累加
+	c.noteRecent("5.6.7.8", "", "台湾2", "tuic", "")           // 没认出用户
 	got := map[string]RecentConn{}
 	for _, r := range c.Recent(50) {
 		got[r.IP+"|"+r.Inbound] = r
@@ -25,7 +25,7 @@ func TestRecentConnsAggregate(t *testing.T) {
 		t.Fatal("应按最近在前")
 	}
 	for i := 0; i < recentCap+20; i++ {
-		c.noteRecent("10.0.0."+string(rune('a'+i%26))+string(rune('a'+i/26)), "", "x", "vless")
+		c.noteRecent("10.0.0."+string(rune('a'+i%26))+string(rune('a'+i/26)), "", "x", "vless", "")
 	}
 	if n := len(c.Recent(0)); n > recentCap {
 		t.Fatalf("应有上限,实际 %d", n)

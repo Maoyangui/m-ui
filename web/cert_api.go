@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/acme"
+	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/runner"
 )
 
@@ -25,6 +26,10 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	certFile, _ := s.run.DataPlaneCert()
+	// 用户数(含停用的、代理名下的):订阅 http ↔ https 一换,这些人手里的地址都会变。证书页据此决定
+	// 「用于订阅 HTTPS」默不默认勾、要不要先确认(assets/js/subtls.js)
+	var subUsers int64
+	s.db.Model(&model.User{}).Count(&subUsers)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"info":     s.run.CertInfo(),
 		"status":   s.run.CertStatus(),
@@ -34,6 +39,7 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		// 面板 / 订阅实际引用的证书路径(可能是证书库之外手填的)
 		"panelCert": s.setting("webCertFile"),
 		"subCert":   s.setting("subCertFile"),
+		"subUsers":  subUsers,
 		"settings": map[string]interface{}{
 			"acmeDomain": s.setting("acmeDomain"), "acmeEmail": s.setting("acmeEmail"), "acmeMethod": s.setting("acmeMethod"),
 			"hasCfToken": s.setting("acmeCfToken") != "", "acmeStaging": s.setting("acmeStaging") == "true",
@@ -43,6 +49,9 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		"panelTLS": s.setting("webCertFile") != "",
 		"subTLS":   s.setting("subCertFile") != "",
 		"dataDir":  s.run.DataDir(),
+		// 本机配没配通知:没配的话续期失败、快到期的提醒发不出去,证书页顶部要说(副机的由主机代发)
+		"notifyConfigured": s.run.Notifier().Enabled() || strings.TrimSpace(s.setting("webhookUrl")) != "",
+		"nodeMode":         s.run.IsNode(),
 	})
 }
 
@@ -98,10 +107,20 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, errors.New("泛域名只能用 DNS 验证:CA 不接受 HTTP 验证。验证方式请选 Cloudflare 或手动 DNS"))
 			return
 		}
-		if err := s.saveSettings(map[string]string{
+		// 手动 DNS 不能自动续期:表单里隐藏着的勾选框不算数,也不拿它改签发表单的默认值
+		// (以前照样按 true 提交,还把全局的 acmeAutoRenew 写成了 true)
+		manual := req.Method == acme.MethodManual
+		if manual {
+			req.AutoRenew = false
+		}
+		defaults := map[string]string{
 			"acmeDomain": req.Domain, "acmeEmail": strings.TrimSpace(req.Email), "acmeMethod": req.Method,
-			"acmeStaging": boolStr(req.Staging), "acmeAutoRenew": boolStr(req.AutoRenew),
-		}); err != nil {
+			"acmeStaging": boolStr(req.Staging),
+		}
+		if !manual {
+			defaults["acmeAutoRenew"] = boolStr(req.AutoRenew)
+		}
+		if err := s.saveSettings(defaults); err != nil {
 			badRequest(w, fmt.Errorf("保存证书设置失败: %w", err))
 			return
 		}
@@ -123,6 +142,43 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.audit(r, "cert", "issue", req.Domain)
+		resp := map[string]interface{}{"ok": "1", "autoRenew": req.AutoRenew}
+		if manual {
+			resp["reason"] = "manual"
+		}
+		writeJSON(w, http.StatusOK, resp)
+	case "renew": // 证书库的「续期」:按这张自己的验证方式等设置续,不改签发表单的默认值
+		if r.Method != http.MethodPost {
+			break
+		}
+		var req struct{ Name string }
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if err := s.run.RenewCert(req.Name); err != nil {
+			badRequest(w, err)
+			return
+		}
+		s.audit(r, "cert", "renew", req.Name)
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+	case "autorenew": // 打开 / 关掉一张证书的自动续期
+		if r.Method != http.MethodPost {
+			break
+		}
+		var req struct {
+			Name string
+			On   bool
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			badRequest(w, err)
+			return
+		}
+		if err := s.run.SetCertAutoRenew(req.Name, req.On); err != nil {
+			badRequest(w, err)
+			return
+		}
+		s.audit(r, "cert", "autorenew", map[string]interface{}{"name": req.Name, "on": req.On})
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	case "selfsign":
 		if r.Method != http.MethodPost {
@@ -152,12 +208,21 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			CertFile, KeyFile              string
 			ForLines, ApplyPanel, ApplySub bool
+			Force                          bool // 同名证书开着自动续期也照样换(用户在确认框里点了确定)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			badRequest(w, err)
 			return
 		}
-		if err := s.run.UseExternalCert(req.CertFile, req.KeyFile, runner.CertTargets{Lines: req.ForLines, Panel: req.ApplyPanel, Sub: req.ApplySub}); err != nil {
+		use := s.run.UseExternalCert
+		if req.Force {
+			use = s.run.UseExternalCertForce
+		}
+		if err := use(req.CertFile, req.KeyFile, runner.CertTargets{Lines: req.ForLines, Panel: req.ApplyPanel, Sub: req.ApplySub}); err != nil {
+			if errors.Is(err, runner.ErrShadowsAutoRenew) { // 409:前端弹确认框,确定后带 force 再提交
+				writeJSON(w, http.StatusConflict, map[string]interface{}{"error": err.Error(), "needForce": true})
+				return
+			}
 			badRequest(w, err)
 			return
 		}
@@ -291,6 +356,15 @@ func (s *Server) handleBackupSub(w http.ResponseWriter, r *http.Request) {
 		s.audit(r, "backup", "restore", map[string]interface{}{"users": sum.Users, "lines": sum.Lines, "from": sum.Meta.Host})
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "summary": sum, "restarting": true})
 		s.run.ScheduleRestart(1500 * time.Millisecond)
+	case "restore-ack": // 看过还原提示了
+		if r.Method != http.MethodPost {
+			break
+		}
+		if err := s.run.ClearRestoreNotice(); err != nil {
+			badRequest(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	case "restart":
 		if r.Method != http.MethodPost {
 			break

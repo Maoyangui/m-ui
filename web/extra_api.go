@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,6 +44,12 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 	q := s.db.Model(&model.Change{}).Order("id desc").Limit(limit)
 	if key := r.URL.Query().Get("key"); key != "" {
 		q = q.Where("key = ?", key)
+	}
+	// actor=human:只要人做的操作(管理员、代理、Telegram、外部 API),
+	// 不要定时任务批量写的(model.JobActors),概况的「最近操作」用。按名单排除:以前按「以 Job 结尾」(SQLite 的 LIKE 还不分大小写)
+	// 会把名字以 job 结尾的管理员、代理也藏掉
+	if r.URL.Query().Get("actor") == "human" {
+		q = q.Where("actor NOT IN ?", model.JobActors)
 	}
 	var rows []model.Change
 	q.Find(&rows)
@@ -98,9 +105,26 @@ func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 		}
 		lines, ups = s.grantedLineNames(rid, lines), []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	out := map[string]interface{}{
 		"users": users, "lines": lines, "upstreams": ups, "connCounts": counts,
-	})
+		"devices": onlineDevices(users, s.onlineIPsAll()),
+	}
+	if scope(r) == 0 { // 主面板与副机面板:在线的代理名下用户 → 代理名(用户页只列直属用户,概况的链接据此指到代理;副机库里同样有代理和归属)
+		out["owners"] = s.onlineOwners(users)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// onlineDevices 在线用户 → 设备数(本机与副机的源 IP 合并,IPv4 一个地址一台、IPv6 按 /64 算,和设备数限制同一口径)。
+// 概况按它给在线名单排序、标数字;只算传进来的这些用户(代理作用域已经只剩名下的)。
+func onlineDevices(users []string, ips map[string][]string) map[string]int {
+	out := make(map[string]int, len(users))
+	for _, u := range users {
+		if n := model.DeviceCount(ips[u]); n > 0 {
+			out[u] = n
+		}
+	}
+	return out
 }
 
 // grantedLineNames 只留授权给该代理的线路名。
@@ -158,9 +182,11 @@ func (s *Server) handleStatsTop(w http.ResponseWriter, r *http.Request) {
 	}
 	since := time.Now().Unix() - int64(hours)*3600
 	type row struct {
-		Tag  string `json:"name"`
-		Up   int64  `json:"up"`
-		Down int64  `json:"down"`
+		Tag   string `json:"name"`
+		Up    int64  `json:"up"`
+		Down  int64  `json:"down"`
+		Owner string `json:"owner,omitempty"` // 代理名下的用户:所属代理(主面板的用户页不列他们)
+		Gone  bool   `json:"gone,omitempty"`  // 用户已经删了(流量记录还在)
 	}
 	var rows []row
 	s.db.Raw(`SELECT tag, COALESCE(SUM(CASE WHEN direction = 1 THEN traffic ELSE 0 END),0) AS up,
@@ -168,6 +194,23 @@ func (s *Server) handleStatsTop(w http.ResponseWriter, r *http.Request) {
 		FROM stats WHERE resource = 'user' AND date_time > ? GROUP BY tag ORDER BY (up + down) DESC LIMIT ?`, since, limit).Scan(&rows)
 	if rows == nil {
 		rows = []row{}
+	}
+	if len(rows) > 0 { // 概况点名字要去对地方:代理名下的去代理页,删掉的不给链接
+		names := make([]string, len(rows))
+		for i, x := range rows {
+			names[i] = x.Tag
+		}
+		type who struct{ Name, Owner string }
+		var ws []who
+		s.db.Raw(`SELECT u.name AS name, COALESCE(r.name, '') AS owner FROM users u LEFT JOIN resellers r ON r.id = u.reseller_id WHERE u.name IN ?`, names).Scan(&ws)
+		by := make(map[string]string, len(ws))
+		for _, x := range ws {
+			by[x.Name] = x.Owner
+		}
+		for i := range rows {
+			owner, ok := by[rows[i].Tag]
+			rows[i].Owner, rows[i].Gone = owner, !ok
+		}
 	}
 	writeJSON(w, http.StatusOK, rows)
 }
@@ -186,23 +229,96 @@ func (s *Server) recentConns(limit int) []recentConn {
 	return s.run.RecentConns(limit)
 }
 
-// handleRecentConns 本机 + 各副机最近入站连接;多服务器时带服务器名,按最近时间排序。
+// recentFails 本机"到了但没过握手 / 认证"的来源。
+func (s *Server) recentFails(limit int) []recentConn {
+	if s.run == nil {
+		return nil
+	}
+	return s.run.RecentFails(limit)
+}
+
+// handleRecentConns 本机 + 各副机最近入站连接,最近的在前;每条带服务器 id(nodeId)和来源的地址族(family:v4 / v6),
+// 多服务器时还带服务器名。带 ?fails=1 时后面再接上"到了但没过握手 / 认证"的来源(failed 字段非空,单独限量,刷不掉前面的);
+// 不带时和以前一样只有通过认证的(含被设备数拒的)。
+//
+// 多服务器时按服务器公平取(fairMerge):超过上限时每台先留自己最近的一条,其余按时间补满 —— 一台有扫描噪声、连接特别多的服务器
+// 挤不掉别的服务器最近那条(以前混在一起按时间取前 N 条,安静的那台服务器上用户刚试过的那条可能整条看不到),
+// 别的服务器几天前的旧记录也挤不掉忙的那台刚产生的记录。
 func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
-	out := s.recentConns(100)
-	remote := s.run.Hub().RemoteConns()
-	if len(remote) > 0 {
-		var local model.Node
-		s.db.Where("is_local = ?", true).First(&local)
-		for i := range out {
-			out[i].Server = local.Name
-		}
-		out = append(out, remote...)
-		sort.SliceStable(out, func(i, j int) bool { return out[i].Ts > out[j].Ts })
-		if len(out) > 100 {
-			out = out[:100]
-		}
+	withFails := r.URL.Query().Get("fails") == "1"
+	remote, remoteFails := s.run.Hub().RemoteConns(), []recentConn(nil)
+	if withFails {
+		remoteFails = s.run.Hub().RemoteConnFails()
+	}
+	var self model.Node
+	s.db.Where("is_local = ?", true).First(&self)
+	// 多服务器:有别的启用服务器,或副机报来了记录(刚停用的那台在宽限期内还会报)。副机自己的面板只有它自己,不标服务器名
+	multi := len(remote) > 0 || len(remoteFails) > 0
+	if !multi && !s.run.IsNode() {
+		var others int64
+		s.db.Model(&model.Node{}).Where("is_local = ? AND enabled = ?", false, true).Count(&others)
+		multi = others > 0
+	}
+	out := fairMerge(s.recentConns(100), remote, self, multi, 100)
+	if withFails {
+		out = append(out, fairMerge(s.recentFails(50), remoteFails, self, multi, 50)...)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// fairMerge 本机的记录标上服务器 id(多服务器时还有名字),和副机的(hub 已标好)合在一起,每条按来源 IP 标地址族;
+// 超过 limit 条时先给每台服务器留它最近的一条(最近有记录的服务器先留),剩下的名额按时间补满;结果按最近时间排
+// (和概览的 web/assets/js/fair.js 同一个办法)。不严格按服务器轮流取:跟踪器只按条数淘汰、不按时间过期,
+// 安静的服务器上留着几天前的旧记录,轮流取会让它们挤掉忙的那台几分钟前的连接。
+func fairMerge(local, remote []recentConn, self model.Node, multi bool, limit int) []recentConn {
+	all := make([]recentConn, 0, len(local)+len(remote))
+	for _, c := range local {
+		c.NodeId = self.Id
+		if multi {
+			c.Server = self.Name
+		}
+		all = append(all, c)
+	}
+	all = append(all, remote...)
+	for i := range all {
+		all[i].Family = ipFamily(all[i].IP)
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].Ts > all[j].Ts })
+	if len(all) <= limit {
+		return all
+	}
+	keep, seen, n := make([]bool, len(all)), map[uint]bool{}, 0
+	for i, c := range all { // 按时间从新到旧:每台第一次出现的那条就是它最近的
+		if n < limit && !seen[c.NodeId] {
+			seen[c.NodeId], keep[i] = true, true
+			n++
+		}
+	}
+	for i := range all {
+		if n < limit && !keep[i] {
+			keep[i] = true
+			n++
+		}
+	}
+	out := make([]recentConn, 0, limit)
+	for i, c := range all {
+		if keep[i] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// ipFamily 来源 IP 是 IPv4 还是 IPv6(IPv4 映射地址按 IPv4)。
+func ipFamily(ip string) string {
+	a, err := netip.ParseAddr(strings.TrimSpace(ip))
+	switch {
+	case err != nil:
+		return ""
+	case a.Unmap().Is4():
+		return "v4"
+	}
+	return "v6"
 }
 
 // ---- 日志 ----
@@ -270,7 +386,8 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 // ---- 用户子操作:reset / kick / qr / sub ----
 
-// dispatchUserSubroute 处理 /users/{id}/reset|kick|qr|sub。返回 true 表示已处理。
+// dispatchUserSubroute 处理 /users/{id}/plan|change|plan-ops|reset|kick|rotate|share|qr|sub。返回 true 表示已处理。
+// 主面板与代理面板共用;代理面板进来之前 guardScope 已核对过用户归属。
 func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bool {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	idx := strings.LastIndex(path, "/users/")
@@ -310,6 +427,18 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 			break
 		}
 		s.handleUserPlan(w, r, u)
+		return true
+	case "change": // 换套餐(立即替换 / 叠加 / 按价值折算),dryRun 即预览
+		if r.Method != http.MethodPost {
+			break
+		}
+		s.handleUserChange(w, r, u)
+		return true
+	case "plan-ops": // 套餐记录
+		if r.Method != http.MethodGet {
+			break
+		}
+		s.writePlanOps(w, r, u, scope(r))
 		return true
 	case "reset":
 		if r.Method != http.MethodPost {
@@ -469,6 +598,16 @@ func (s *Server) dispatchLineSubroute(w http.ResponseWriter, r *http.Request) bo
 	if err := s.db.First(&line, uint(id)).Error; err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "线路不存在"})
 		return true
+	}
+	if !line.Enabled { // 启用前复核端口(理由见 handleLineBatch 的 enable)
+		if err := s.checkServicePorts(line); err != nil {
+			badRequest(w, err)
+			return true
+		}
+		if name := s.lineOnPort(&line); name != "" {
+			badRequest(w, fmt.Errorf("端口 %d 已被线路%s占用,换一个", line.Port, name))
+			return true
+		}
 	}
 	if err := s.db.Model(&model.Line{}).Where("id = ?", line.Id).Update("enabled", !line.Enabled).Error; err != nil {
 		badRequest(w, err)

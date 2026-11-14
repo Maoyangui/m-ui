@@ -12,9 +12,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Maoyangui/m-ui/core"
@@ -63,7 +65,12 @@ type Scheduler struct {
 	// depleteMu 串行化每分钟的配额判定与并账后的即时判定;kick 是即时判定的触发(容量 1,多次触发合成一次)
 	depleteMu sync.Mutex
 	kick      chan struct{}
+	// ledgerFails 流量记账(主机:用户用量;副机:本机账本)连续失败的轮数,成功一次清零。副机随报告上报给主机
+	ledgerFails atomic.Int64
 }
+
+// LedgerFailures 流量记账连续失败了几轮(0 = 正常)。失败期间这段流量还在数据面的内存里,进程重启就丢了。
+func (s *Scheduler) LedgerFailures() int { return int(s.ledgerFails.Load()) }
 
 // FlushStats synchronously persists the current data-plane counters. Runner
 // calls this immediately before replacing a Box so traffic collected since the
@@ -234,15 +241,27 @@ func (s *Scheduler) runStatsForBox(box *core.Box) (ok bool) {
 	return s.runStatsTracker(box.StatsTracker())
 }
 
-// runStatsTracker 收一轮账:快照 → 落库 → 按快照原值从计数器里扣掉。拆出来是为了不起数据面也能测。
+// userBytes 一个用户这一轮的上下行字节。
+type userBytes struct{ up, down int64 }
+
+// statsBatch 记账、时序每条 INSERT 的行数。SQLite 一条语句最多 32766 个变量:时序一行 5 个变量,
+// 以前一轮的行一条 INSERT 写完,10 秒内三千多个双向有流量的用户就超限、整笔失败;失败的这批还留在内存里,
+// 下一轮只多不少,从此每轮都失败 —— 副机账本停写,主机再也收不到这台的流量(审计 I4)。
+const statsBatch = 1000
+
+// nameBatch 按用户名 IN (...) 查询时每批的个数(同样是变量上限)。
+const nameBatch = 500
+
+// runStatsTracker 收一轮账:快照 → 记账 → 按快照原值从计数器里扣掉 → 记时序。拆出来是为了不起数据面也能测。
+// 账本(主机:用户用量;副机:本机账本 AgentCounter)单独一笔事务先提交:计费只看它。时序只是图表,
+// 另起一笔事务,写失败只告警 —— 以前两者在一个事务里,时序一失败账本跟着回滚,这段流量就一直记不上。
 func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 	s.statsMu.Lock()
 	defer s.statsMu.Unlock()
 	stats := tracker.SnapshotStats()
 	now := time.Now().Unix()
 
-	type traffic struct{ up, down int64 }
-	userTraffic := map[string]*traffic{}
+	userTraffic := map[string]*userBytes{}
 	var online Onlines
 	seenIn, seenOut := map[string]bool{}, map[string]bool{}
 	for _, st := range *stats {
@@ -260,7 +279,7 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 		case "user":
 			t, ok := userTraffic[st.Tag]
 			if !ok {
-				t = &traffic{}
+				t = &userBytes{}
 				userTraffic[st.Tag] = t
 				online.Users = append(online.Users, st.Tag)
 			}
@@ -300,21 +319,60 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 	if bucketSeconds < 1 {
 		bucketSeconds = 60
 	}
-	err := s.d.DB.Transaction(func(tx *gorm.DB) error {
-		for name, t := range userTraffic {
-			if isNode {
-				// 副机:写单调账本,主机按游标回收
-				if err := tx.Clauses(clause.OnConflict{
-					Columns: []clause.Column{{Name: "user_name"}},
-					DoUpdates: clause.Assignments(map[string]interface{}{
-						"up":   gorm.Expr("agent_counters.up + ?", t.up),
-						"down": gorm.Expr("agent_counters.down + ?", t.down),
-					}),
-				}).Create(&model.AgentCounter{UserName: name, Up: t.up, Down: t.down}).Error; err != nil {
-					return err
-				}
-				continue
-			}
+	names := make([]string, 0, len(userTraffic))
+	for name := range userTraffic {
+		names = append(names, name)
+	}
+	sort.Strings(names) // 固定顺序写:并发的写者按同一顺序拿行,也方便排查
+
+	if err := s.writeLedger(isNode, names, userTraffic, now, scale); err != nil {
+		n := s.ledgerFails.Add(1)
+		logger.Warning("流量记账失败(连续第 ", n, " 轮;这段流量留在内存里,下一轮再记): ", err)
+		return false
+	}
+	s.ledgerFails.Store(0)
+	// 账本已经提交:计数器立刻扣掉,时序再出什么错也不会让下一轮把同一段流量再记一遍账
+	tracker.ConsumeStats(*stats)
+
+	if trafficAge > 0 {
+		if err := s.writeSeries(isNode, names, *stats, now-now%bucketSeconds, scale); err != nil {
+			logger.Warning("流量时序落库失败(用量已经记账,只是图表里缺这一段): ", err)
+		}
+	}
+	return true
+}
+
+// writeLedger 记账:副机写本机单调账本(批量 upsert,主机按游标回收);主机直接加到用户用量上,
+// 「设为主机」交接途中同一笔事务里另记一本原始字节的账(见 model.SelfLedgerKey)。
+func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]*userBytes, now int64, scale func(int64) int64) error {
+	if len(names) == 0 {
+		return nil
+	}
+	raw := func() []model.AgentCounter {
+		rows := make([]model.AgentCounter, 0, len(names))
+		for _, name := range names {
+			t := traffic[name]
+			rows = append(rows, model.AgentCounter{UserName: name, Up: t.up, Down: t.down})
+		}
+		return rows
+	}
+	if isNode {
+		return s.d.DB.Transaction(func(tx *gorm.DB) error {
+			return model.AddAgentCounters(tx, raw(), statsBatch)
+		})
+	}
+	return s.d.DB.Transaction(func(tx *gorm.DB) error {
+		// 本机这一刻正好变为副机(原主机让位、失联后被接任:换角色和清空 / 交接账本在同一笔事务里):这一轮按副机记进账本,
+		// 不落进已经不再算数的用户用量
+		var mode string
+		if err := tx.Raw("SELECT value FROM settings WHERE key = ?", "nodeMode").Scan(&mode).Error; err != nil {
+			return err
+		}
+		if strings.EqualFold(mode, "true") {
+			return model.AddAgentCounters(tx, raw(), statsBatch)
+		}
+		for _, name := range names {
+			t := traffic[name]
 			update := map[string]interface{}{"online_at": now}
 			if t.up > 0 {
 				update["up"] = gorm.Expr("up + ?", scale(t.up))
@@ -329,34 +387,34 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 				return err
 			}
 		}
+		return model.AddSelfLedger(tx, raw(), statsBatch)
+	})
+}
 
-		// 流量时序:按桶累加,同一桶内多个周期合并为一行
-		if trafficAge <= 0 {
-			return nil
-		}
-		bucket := now - now%bucketSeconds
-		// 复制一份再按倍率改写:*stats 之后要原样交给 ConsumeStats 扣计数器,就地改会把缩放后的值扣进去 ——
-		// 本机倍率不是 1 时计数器就漂了(倍率 2:多扣一倍、计数器变负、用户隔一轮从在线名单消失;倍率 0.5:余量下一轮重记)
+// writeSeries 流量时序:按桶累加,同一桶内多个周期合并为一行。
+func (s *Scheduler) writeSeries(isNode bool, names []string, stats []model.Stats, bucket int64, scale func(int64) int64) error {
+	return s.d.DB.Transaction(func(tx *gorm.DB) error {
 		// 只给库里还在的用户记时序:删掉的用户在途流量落成孤儿行,以后同名的新用户会看到前人的历史(审计 MB28)
-		names := make([]string, 0, len(userTraffic))
-		for name := range userTraffic {
-			names = append(names, name)
-		}
-		alive := map[string]bool{}
-		if len(names) > 0 {
+		alive := make(map[string]bool, len(names))
+		for rest := names; len(rest) > 0; {
+			k := min(len(rest), nameBatch)
 			var have []string
-			if err := tx.Model(&model.User{}).Where("name IN ?", names).Pluck("name", &have).Error; err != nil {
+			if err := tx.Model(&model.User{}).Where("name IN ?", rest[:k]).Pluck("name", &have).Error; err != nil {
 				return err
 			}
 			for _, n := range have {
 				alive[n] = true
 			}
+			rest = rest[k:]
 		}
-		rows := make([]model.Stats, 0, len(*stats))
-		for _, row := range *stats {
+		// 复制一份再按倍率改写:stats 已经原样交给 ConsumeStats 扣过计数器,就地改会把缩放后的值扣进去 ——
+		// 本机倍率不是 1 时计数器就漂了(倍率 2:多扣一倍、计数器变负、用户隔一轮从在线名单消失;倍率 0.5:余量下一轮重记)
+		rows := make([]model.Stats, 0, len(stats))
+		for _, row := range stats {
 			if row.Resource == "user" && !alive[row.Tag] {
 				continue
 			}
+			row.Id = 0
 			row.DateTime = bucket
 			if !isNode && row.Resource == "user" {
 				row.Traffic = scale(row.Traffic) // 用户维度按倍率记(与用量一致);线路/上游维度保持真实流量
@@ -369,14 +427,8 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 		return tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "resource"}, {Name: "tag"}, {Name: "date_time"}, {Name: "direction"}},
 			DoUpdates: clause.Assignments(map[string]interface{}{"traffic": gorm.Expr("stats.traffic + excluded.traffic")}),
-		}).Create(&rows).Error
+		}).CreateInBatches(&rows, statsBatch).Error
 	})
-	if err != nil {
-		logger.Warning("统计落库失败: ", err)
-		return false
-	}
-	tracker.ConsumeStats(*stats)
-	return true
 }
 
 // runRules 主机每 10 秒判一轮限速规则(时段 / 突发)。单独一个循环而不是挂在统计后面:
@@ -463,7 +515,7 @@ func (s *Scheduler) runDeplete() {
 				"total_down": gorm.Expr("total_down + down"),
 				"up":         0,
 				"down":       0,
-				"next_reset": now + int64(u.ResetDays)*86400,
+				"next_reset": model.AddDays(now, u.ResetDays), // 重置周期封顶,不会绕成负数(那样就再也不重置,或者每分钟都重置)
 			}
 			if err := tx.Model(&model.User{}).Where("id = ?", u.Id).Updates(updates).Error; err != nil {
 				return err
@@ -474,12 +526,12 @@ func (s *Scheduler) runDeplete() {
 				return err
 			}
 			forgets = append(forgets, "quota:"+u.Name) // 新周期从零开始,再到阈值要能再提醒
-			record(tx, "ResetJob", "user", "reset", u.Name)
+			record(tx, model.ActorResetJob, "user", "reset", u.Name)
 			changed = true
 		}
 		if err := tx.Model(&model.User{}).
 			Where("auto_reset = ? AND reset_days > 0 AND next_reset = 0", true).
-			Update("next_reset", gorm.Expr("? + reset_days * 86400", now)).Error; err != nil {
+			Update("next_reset", gorm.Expr("? + MIN(reset_days, ?) * 86400", now, model.MaxDays)).Error; err != nil { // 乘之前封顶:溢出会存成 REAL
 			return err
 		}
 
@@ -499,11 +551,11 @@ func (s *Scheduler) runDeplete() {
 				var n int64
 				tx.Model(&model.User{}).Where("reseller_id = ?", rs.Id).Count(&n)
 				if depleted {
-					record(tx, "DepleteJob", "reseller", "depleted", rs.Name)
+					record(tx, model.ActorDepleteJob, "reseller", "depleted", rs.Name)
 					logger.Info("代理 ", rs.Name, " 流量用尽,名下 ", n, " 个用户已从数据面撤下")
 					notes = append(notes, fmt.Sprintf("⛔ <b>代理流量用尽</b>:%s(名下 %d 个用户已停止服务,补量后自动恢复)", escapeHTML(rs.Name), n))
 				} else {
-					record(tx, "DepleteJob", "reseller", "restored", rs.Name)
+					record(tx, model.ActorDepleteJob, "reseller", "restored", rs.Name)
 					logger.Info("代理 ", rs.Name, " 额度恢复,名下 ", n, " 个用户已恢复服务")
 				}
 				changed = true
@@ -518,7 +570,7 @@ func (s *Scheduler) runDeplete() {
 					changed = true // 新变得不可用(典型是到期):数据面要撤下他的用户
 					for _, rs := range resellers {
 						if rs.Id == id && rs.Enabled && !rs.Depleted && rs.Expiry > 0 && rs.Expiry < now {
-							record(tx, "DepleteJob", "reseller", "expired", rs.Name)
+							record(tx, model.ActorDepleteJob, "reseller", "expired", rs.Name)
 							notes = append(notes, fmt.Sprintf("⛔ <b>代理已到期</b>:%s(名下用户已停止服务)", escapeHTML(rs.Name)))
 						}
 					}
@@ -621,7 +673,7 @@ func (s *Scheduler) disableDepleted(tx *gorm.DB, now int64) ([]string, error) {
 			Updates(map[string]interface{}{"enabled": false, "disabled_reason": reason}).Error; err != nil {
 			return nil, err
 		}
-		record(tx, "DepleteJob", "user", "disable:"+reason, u.Name)
+		record(tx, model.ActorDepleteJob, "user", "disable:"+reason, u.Name)
 		logger.Info("用户 ", u.Name, " 已禁用(", reason, ")")
 		notes = append(notes, fmt.Sprintf("⛔ <b>用户已禁用</b>:%s(%s)", escapeHTML(u.Name), why))
 	}
@@ -630,7 +682,7 @@ func (s *Scheduler) disableDepleted(tx *gorm.DB, now int64) ([]string, error) {
 
 // ---- cleanup ----
 
-// runCleanup 按各自的保留天数清理:流量时序、订阅访问日志、审计日志。
+// runCleanup 按各自的保留天数清理:流量时序、订阅访问日志、审计日志;套餐记录固定留一年。
 // 三者分开设置 —— 订阅日志以前跟着"流量记录保留"走,想把日志收到 1 天就会把流量图的历史一起删掉。
 func (s *Scheduler) runCleanup() {
 	now := time.Now()
@@ -667,6 +719,36 @@ func (s *Scheduler) runCleanup() {
 		}
 	}
 	trim(s.d.DB, &model.Change{}, 200000, "审计日志")
+	// 套餐记录(兼外部 API 的幂等键):固定保留一年,和清空审计日志无关;条数按作用域各自封顶
+	cutoff := now.AddDate(0, 0, -model.PlanOpKeepDays).Unix()
+	if err := s.d.DB.Where("created_at < ?", cutoff).Delete(&model.PlanOp{}).Error; err != nil {
+		logger.Warning("清理套餐记录失败: ", err)
+	}
+	trimPlanOps(s.d.DB, model.PlanOpMaxRows)
+}
+
+// trimPlanOps 套餐记录按作用域(reseller_id:0 = 主面板,否则是那个代理)各留最新的 keep 条。
+// 以前按全表裁:一个代理刷够 10 万条,主面板和别的代理一年内的记录、幂等键就被挤掉了,商城重试时又会重复加时。
+func trimPlanOps(db *gorm.DB, keep int64) {
+	var over []struct {
+		ResellerId uint
+		N          int64
+	}
+	if err := db.Model(&model.PlanOp{}).Select("reseller_id, COUNT(*) AS n").Group("reseller_id").
+		Having("COUNT(*) > ?", keep).Scan(&over).Error; err != nil {
+		logger.Warning("裁剪套餐记录失败: ", err)
+		return
+	}
+	for _, o := range over {
+		var cut uint64
+		db.Model(&model.PlanOp{}).Where("reseller_id = ?", o.ResellerId).Order("id desc").Offset(int(keep)).Limit(1).Pluck("id", &cut)
+		if cut == 0 {
+			continue
+		}
+		if err := db.Where("reseller_id = ? AND id <= ?", o.ResellerId, cut).Delete(&model.PlanOp{}).Error; err != nil {
+			logger.Warning("裁剪套餐记录失败: ", err)
+		}
+	}
 }
 
 // RollupStats 把 before 之前、不在整点上的时序行并入所在小时的桶(同键累加),再删掉原始行。

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,10 +21,12 @@ import (
 	"github.com/Maoyangui/m-ui/acme"
 	"github.com/Maoyangui/m-ui/backup"
 	"github.com/Maoyangui/m-ui/brand"
+	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ha"
 	"github.com/Maoyangui/m-ui/hop"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/jobs"
@@ -57,11 +60,13 @@ type Runner struct {
 	db           *gorm.DB
 	core         *core.Core
 	subSrv       *sub.Server
+	tls          certutil.Watch // 面板、订阅、代理面板的证书加载器:哪个正用临时自签证书顶着(证书文件读不出来),见 tlstemp.go
 	jobs         *jobs.Scheduler
 	notifier     *notify.Notifier
 	monitor      *monitor.Monitor
 	reach        *reach.Service
 	hub          *hub.Hub
+	ha           *ha.Service
 	dbPath       string
 	cert         certState
 	certOpMu     sync.Mutex        // 串行化签发、切换来源与套用目标
@@ -85,6 +90,17 @@ type Runner struct {
 
 	reloadMu sync.Mutex
 	reload   ReloadStatus // 最近一次重载的结果:面板据此在页面上明说"已保存但没生效"
+
+	// 最近一次定时备份失败的原因与时间(成功后清空):概况「需要处理」提示"定时备份失败"
+	backupErrMu sync.Mutex
+	backupErr   string
+	backupErrAt int64
+
+	extLocks sync.Map // 外部节点 id → *sync.Mutex:同一条的手动刷新与定时刷新不并发(见 RefreshExt)
+
+	// resolve4 大陆连通检测在主机上把域名解析成 IPv4 用的解析器;nil = 系统解析器(见 lookupIPv4)。只给测试替换。
+	resolve4  func(ctx context.Context, host string) ([]net.IP, error)
+	restartFn func(time.Duration) // 测试里替换 ScheduleRestart(不真的重新执行进程)
 }
 
 // ReloadStatus 最近一次数据面重载(启动、全量、热换出站、热更新用户)的结果。
@@ -146,6 +162,24 @@ func (r *Runner) CheckUpstream(up model.Upstream) (ok bool, delayMs int, method,
 	return res.OK, int(res.Delay), "urltest", res.Error
 }
 
+// TestOutbound 外部节点测速:不看数据面,直接起只含它的临时实例测(见 core.TestOutboundIsolated),通了再测一次取较小延迟。
+// method 为 "config" 表示出站建不起来(sing-box 不认这些参数):测不了,不等于不通。
+func (r *Runner) TestOutbound(ctx context.Context, up model.Upstream) (ok bool, delayMs int, method, errStr string) {
+	testURL := r.setting("upstreamTestUrl")
+	if testURL == "" {
+		testURL = "http://www.gstatic.com/generate_204"
+	}
+	ob, err := render.OutboundJSON(up)
+	if err != nil {
+		return false, 0, "config", err.Error()
+	}
+	res := core.TestOutboundIsolated(ctx, ob, testURL, 2)
+	if res.Config {
+		return false, 0, "config", res.Error
+	}
+	return res.OK, res.DelayMs, "urltest", res.Error
+}
+
 // checkGroup 上游组:成员有一条通就算通,延迟取最低的。全不通才算故障。
 func (r *Runner) checkGroup(group model.Upstream) (bool, int, string, string) {
 	var members []model.Upstream
@@ -200,6 +234,9 @@ func New(dbPath string) (*Runner, error) {
 		logger.Info("已为 ", n, " 个用户补全新协议凭据")
 	}
 	r := &Runner{db: db, core: core.NewCore(), dbPath: dbPath}
+	r.cert.kick = make(chan struct{}, 1)
+	r.tls.OnTemp = r.noticeTempCert
+	r.tls.TempDir = tempCertDir(r.DataDir())
 	r.subSrv = r.newSubServer()
 	r.notifier = notify.New(r.setting)
 	r.notifier.Persist(func() string { return r.setting("notifyOnce") }, func(v string) {
@@ -226,6 +263,7 @@ func New(dbPath string) (*Runner, error) {
 		SelfName:      r.LocalNodeName,
 		SelfNodeId:    r.LocalNodeId,
 		Alerting:      func() bool { return !r.IsNode() },
+		CertSummary:   r.certSummary,
 		DB:            db, Setting: r.setting, CoreRunning: r.CoreRunning, Check: r.CheckUpstream, Notify: r.notifier,
 	})
 	r.reach = reach.New(reach.Deps{
@@ -233,14 +271,28 @@ func New(dbPath string) (*Runner, error) {
 		Notify: func(toggle, text string) { r.notifier.Event(toggle, text) },
 		UA:     "m-ui/" + Version + " (+" + brand.Repo + ")",
 	})
+	cfAPI := testCFAPI(db)
+	r.ha = ha.New(ha.Deps{
+		DB: db, DBPath: dbPath, Version: Version,
+		Notify:      func(toggle, text string) { r.notifier.Event(toggle, text) },
+		Restart:     func(d time.Duration) { r.ScheduleRestart(d) },
+		Backup:      func(prefix string) (string, error) { bf, err := r.CreateBackupFileNamed(prefix); return bf.Name, err },
+		PanelURL:    r.PanelURL,
+		ResellerURL: r.ResellerURL,
+		Witness:     r.haWitness,
+		DNSAPI:      cfAPI,
+	})
 	r.hub = hub.New(hub.Deps{
 		DB: db, Setting: r.setting, IsNode: r.IsNode, Version: Version,
 		Notify:         func(toggle, text string) { r.notifier.Event(toggle, text) },
+		OnceDurable:    r.notifier.OnceDurable,
 		LocalIPs:       r.OnlineIPs,
 		SetExternalIPs: r.SetExternalIPs,
 		LocalGroups:    r.GroupState,
 		CountersMerged: r.jobs.KickDeplete,
+		HA:             r.ha,
 	})
+	r.ha.SetHub(r.hub)
 	r.ensureAdmin()
 	r.ensureLocalNode()
 	r.ensureCertStore()
@@ -276,6 +328,9 @@ func (r *Runner) ensureLocalNode() {
 // Hub 暴露主副机同步器。
 func (r *Runner) Hub() *hub.Hub { return r.hub }
 
+// HA 暴露主机容灾服务。
+func (r *Runner) HA() *ha.Service { return r.ha }
+
 // SetExternalIPs 下发其他机器上在线的 IP 给本机限制器(跨机设备数)。
 func (r *Runner) SetExternalIPs(m map[string][]string) {
 	if box := r.core.GetInstance(); box != nil {
@@ -294,6 +349,13 @@ func SetSettings(dbPath string, kv map[string]string) error {
 	}
 	defer database.Close(db)
 	for k, v := range kv {
+		if model.BoolSettings[k] { // 命令行写开关也规整成 true / false,和设置页保存一致
+			nv, ok := model.NormBoolSetting(v)
+			if !ok {
+				return fmt.Errorf("设置项 %q 只能是 true 或 false", k)
+			}
+			v = nv
+		}
 		var existing model.Setting
 		if err := db.Where("key = ?", k).First(&existing).Error; err == nil {
 			if err := db.Model(&model.Setting{}).Where("key = ?", k).Update("value", v).Error; err != nil {
@@ -371,6 +433,9 @@ func (r *Runner) IsNode() bool { return strings.EqualFold(r.setting("nodeMode"),
 // Onlines 返回最近统计周期内在线的用户/线路/上游。
 func (r *Runner) Onlines() jobs.Onlines { return r.jobs.Onlines() }
 
+// LedgerFailures 本机流量记账连续失败的轮数(副机随报告上报给主机)。
+func (r *Runner) LedgerFailures() int { return r.jobs.LedgerFailures() }
+
 // KickUser 断开某用户的全部连接,返回断开数。
 // KickUser 只断本机:连接 + 整条会话,再清掉 limiter 里他的在线 IP。返回断开的连接数。
 // 停用 / 删除 / 重置链接这些路径用它就够了:快照 5 秒内推到副机,副机热换用户表时自己关掉被移除 / 换了凭据的会话。
@@ -436,18 +501,26 @@ func (r *Runner) setting(key string) string {
 }
 
 // nodeCert 读取本机证书材料(各机各签,路径固定)。
-func (r *Runner) nodeCert() render.NodeCert {
-	// 数据面证书优先用 certFile/keyFile(证书页签发的固定路径),
-	// 未设置时回落到面板证书,兼容从旧库导入的配置。
-	certPath, keyPath := r.setting("certFile"), r.setting("keyFile")
+func (r *Runner) nodeCert() render.NodeCert { return NodeCertOf(r.db) }
+
+// NodeCertOf 按库里的设置取本机数据面证书材料:运行时和 m-ui render 共用这一份,校验的就是实际要跑的配置。
+// 数据面证书优先用 certFile/keyFile(证书页签发的固定路径),未设置时回落到面板证书,兼容从旧库导入的配置;
+// 线路单独选的证书库证书按名字给(见 namedCertsOf)。
+func NodeCertOf(db *gorm.DB) render.NodeCert {
+	get := func(key string) string {
+		var v string
+		db.Raw("SELECT value FROM settings WHERE key = ?", key).Scan(&v)
+		return v
+	}
+	certPath, keyPath := get("certFile"), get("keyFile")
 	if certPath == "" || keyPath == "" {
-		certPath, keyPath = r.setting("webCertFile"), r.setting("webKeyFile")
+		certPath, keyPath = get("webCertFile"), get("webKeyFile")
 	}
 	return render.NodeCert{
-		ServerName: r.setting("webDomain"),
+		ServerName: get("webDomain"),
 		CertPath:   certPath,
 		KeyPath:    keyPath,
-		Named:      r.namedCerts(),
+		Named:      namedCertsOf(db),
 	}
 }
 
@@ -810,7 +883,7 @@ func (r *Runner) reloadUsersLocked(raw []byte) error {
 	}
 	box := r.core.GetInstance()
 	keepAll := map[string]map[string]struct{}{} // 入站 → 仍然有效的用户名
-	inEffect := map[string]bool{}                // 新用户表已经在运行中生效的入站
+	inEffect := map[string]bool{}               // 新用户表已经在运行中生效的入站
 	sessionsClosed := 0                         // 随换表关掉的整条会话数(被停用 / 换了凭据的用户)
 	var firstErr error
 	for _, inbound := range cfg.Inbounds {
@@ -1314,7 +1387,21 @@ func (r *Runner) RecentConns(limit int) []hub.RecentConn {
 	list := box.ConnTracker().Recent(limit)
 	out := make([]hub.RecentConn, 0, len(list))
 	for _, c := range list {
-		out = append(out, hub.RecentConn{IP: c.IP, User: c.User, Line: c.Inbound, Protocol: c.Protocol, Count: c.Count, Ts: c.Last})
+		out = append(out, hub.RecentConn{IP: c.IP, User: c.User, Line: c.Inbound, Protocol: c.Protocol, Count: c.Count, Ts: c.Last, Rejected: c.Rejected})
+	}
+	return out
+}
+
+// RecentFails 本机"到了但没过握手 / 认证"的来源(见 core/protocol/arrival),概览诊断卡与副机报告用。
+func (r *Runner) RecentFails(limit int) []hub.RecentConn {
+	box := r.core.GetInstance()
+	if box == nil {
+		return nil
+	}
+	list := box.ConnTracker().Failures(limit)
+	out := make([]hub.RecentConn, 0, len(list))
+	for _, c := range list {
+		out = append(out, hub.RecentConn{IP: c.IP, Line: c.Inbound, Protocol: c.Protocol, Count: c.Count, Ts: c.Last, Failed: c.Failed, Detail: c.Detail})
 	}
 	return out
 }
@@ -1388,7 +1475,7 @@ func (r *Runner) readLimits() (map[string]core.UserLimitSpec, map[string]core.Gr
 		// 空切片会被 SetGroups 清空代理池,反而把一次短暂的数据库抖动变成限速绕过 —— 所以整体报错
 		return nil, nil, fmt.Errorf("读取代理限速策略: %w", err)
 	}
-	// 规则限速:生效中的状态叠加到用户自己的限速上(只升不降 / 覆盖,多条取最严);
+	// 规则限速:生效中的状态叠加到用户自己的限速上(不超过用户自己的限速 / 覆盖,多条取最严);
 	// 到期的不算,主机失联时副机也能按到期时间自行放开
 	var states []model.LimitState
 	if err := r.db.Find(&states).Error; err != nil {
@@ -1555,6 +1642,19 @@ func (r *Runner) Stop() {
 	}
 }
 
+// stopFlushed 计划内重启前停数据面:上一轮统计之后的流量(最多 10 秒)先记账,停下来之后再收一次停的途中最后那点,
+// 不随进程丢掉。变为副机(原主机让位、被接任)时记进新换的账本;接任 / 被设为主机时记进旧库的账本,换库时并进新库。
+func (r *Runner) stopFlushed() {
+	if r.jobs != nil && !r.jobs.FlushStats() {
+		logger.Warning("重启前统计落库失败,上一轮统计之后的这段流量会丢")
+	}
+	box := r.core.GetInstance()
+	r.Stop()
+	if box != nil && r.jobs != nil {
+		r.jobs.FlushStatsBox(box)
+	}
+}
+
 // 数据面看护:没在跑就隔一会儿再拉一次。退避从 coreWatchMin 起翻倍,最长 coreWatchMax。
 var (
 	coreWatchTick = 10 * time.Second
@@ -1604,6 +1704,43 @@ func (r *Runner) coreWatchLoop(stop <-chan struct{}) {
 	}
 }
 
+// clusterWatchEvery 多久比对一次集群屏蔽的输入(render.ClusterSig)。
+const clusterWatchEvery = time.Minute
+
+// clusterWatchLoop 「允许访问内网」关着时,私网屏蔽里带着集群里别的服务器的管理端口(render 的 cluster.go)。
+// 这些输入不随线路变:加了 / 删了副机、副机换了公网 IP、主机改了面板端口,副机这边快照只换了 nodes 表、走的是用户热更新,
+// 主机那边是副机报告改了 nodes 表,都不会重新渲染路由规则。这里每分钟比对一次摘要,变了就全量重载
+// (渲染结果和当前生效的一样时 ReloadAll 不重启数据面,所以只有规则真变了才会断一次连接)。
+// 启动时 Run 已按当时的库渲染过,第一轮只记下摘要。
+func (r *Runner) clusterWatchLoop(stop <-chan struct{}) {
+	t := time.NewTicker(clusterWatchEvery)
+	defer t.Stop()
+	last := render.ClusterSig(r.db)
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			sig := render.ClusterSig(r.db)
+			if sig == last {
+				continue
+			}
+			if render.AllowPrivate(r.db) && strings.HasPrefix(last, "true") {
+				last = sig // 屏蔽一直关着:集群怎么变都不进配置,不必重载
+				continue
+			}
+			if !r.core.IsRunning() || r.stopping.Load() {
+				continue // 数据面没在跑:拉起时会按最新的库渲染,这里先不记,跑起来后再比
+			}
+			if err := r.ReloadAll(); err != nil {
+				logger.Warning("集群服务器有变化,重新渲染私网屏蔽失败(下一轮再试): ", err)
+				continue
+			}
+			last = sig
+		}
+	}
+}
+
 // publicIPMissLimit 某个地址族连续几轮没测到才把它从记录里去掉:偶尔一轮测不通不该让订阅地址跟着变
 // (双栈机器被换成 v6、选了 IPv6 的节点被打回 IPv4)。
 const publicIPMissLimit = 3
@@ -1644,6 +1781,16 @@ func ipv6OnlyChanged(old, pub string) bool {
 	return v6only(old) != v6only(pub)
 }
 
+// publicIPReloadNeeded 探测到的公网地址变了要不要重新渲染数据面配置:
+//   - 有没有 IPv4 变了:纯 IPv6 机器的直连线路要把公共 DNS 换成 IPv6 地址(render.v6DNSRules);
+//   - 「允许访问内网」关着时,私网屏蔽里带着本机公网地址(render.ownPublicCIDRs),IPv4 / IPv6 任何一个变了都要换上新地址。
+func publicIPReloadNeeded(old, pub, old6, pub6 string, allowPrivate bool) bool {
+	if ipv6OnlyChanged(old, pub) {
+		return true
+	}
+	return !allowPrivate && (old != pub || old6 != pub6)
+}
+
 // syncLocalNodeIPs 本机服务器记录也同步探测值(服务器列表显示用)。
 // 0.6.15 之前建的库里 public_ip6 这一列是 NULL,NULL != 'x' 在 SQL 里不成立,得先当成空串比。
 func syncLocalNodeIPs(db *gorm.DB, pub, pub6 string) {
@@ -1666,12 +1813,6 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 		if pub != old {
 			r.setSetting("publicIp", pub)
 			logger.Info("本机公网 IP: ", pub)
-			// 有没有 IPv4 变了:纯 IPv6 机器的直连线路要把公共 DNS 换成 IPv6 地址(render.v6DNSRules),重新渲染
-			if ipv6OnlyChanged(old, pub) && r.core.IsRunning() {
-				if err := r.ReloadAll(); err != nil {
-					logger.Warning("本机有无 IPv4 变了,重新渲染配置失败: ", err)
-				}
-			}
 		}
 		if pub6 != old6 {
 			r.setSetting("publicIp6", pub6)
@@ -1682,6 +1823,11 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 			}
 		}
 		syncLocalNodeIPs(r.db, pub, pub6)
+		if publicIPReloadNeeded(old, pub, old6, pub6, render.AllowPrivate(r.db)) && r.core.IsRunning() {
+			if err := r.ReloadAll(); err != nil {
+				logger.Warning("本机公网地址变了,重新渲染配置失败: ", err)
+			}
+		}
 	}
 	probe()
 	t := time.NewTicker(time.Hour)
@@ -1703,6 +1849,51 @@ func (r *Runner) localRatio() float64 {
 		return 1
 	}
 	return n.Ratio
+}
+
+// PanelURL 本机面板的对外地址(面板域名或公网 IP + 端口 + 路径),主机容灾的通知、设为主机后的新地址、副机配对显示用。
+func (r *Runner) PanelURL() string {
+	return r.serviceURL("webCertFile", "webKeyFile", "webPort", 2053, "webPath", "/app/")
+}
+
+// ResellerURL 本机代理面板的对外地址;没开代理面板为空。
+func (r *Runner) ResellerURL() string {
+	if strings.EqualFold(r.setting("resellerEnabled"), "false") {
+		return ""
+	}
+	if r.setting("resellerCertFile") == "" && r.setting("resellerKeyFile") == "" {
+		return r.serviceURL("webCertFile", "webKeyFile", "resellerPort", 2054, "resellerPath", "/dl/")
+	}
+	return r.serviceURL("resellerCertFile", "resellerKeyFile", "resellerPort", 2054, "resellerPath", "/dl/")
+}
+
+func (r *Runner) serviceURL(certKey, keyKey, portKey string, defPort int, pathKey, defPath string) string {
+	scheme := "http"
+	if r.setting(certKey) != "" && r.setting(keyKey) != "" {
+		scheme = "https"
+	}
+	host := strings.TrimSpace(r.setting("webDomain"))
+	if host == "" {
+		host = strings.TrimSpace(r.setting("publicIp"))
+	}
+	if host == "" {
+		host = "<本机IP>"
+	}
+	port := defPort
+	if n, err := strconv.Atoi(strings.TrimSpace(r.setting(portKey))); err == nil && n > 0 && n < 65536 {
+		port = n
+	}
+	p := strings.TrimSpace(r.setting(pathKey))
+	if p == "" {
+		p = defPath
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	return fmt.Sprintf("%s://%s%s", scheme, model.URLHost(scheme, host, port), p)
 }
 
 // PublicHost 返回对外地址:订阅域名 → 面板域名 → 本机公网 IP。
@@ -1766,6 +1957,12 @@ func Run(dbPath string) error {
 		logger.Info("已从备份还原数据库与证书")
 	}
 	restored := applied || err != nil // 出错时库也可能已经换成备份里的了
+	// 接任为主机 / 被设为主机:换上组好的新库(当前库留作 <库>.pre-promote-<时间>)
+	if promoted, err := ha.ApplyPending(dbPath); err != nil {
+		logger.Error("换上接任用的新库失败(仍用原来的库启动): ", err)
+	} else if promoted {
+		logger.Info("已换上接任用的新库,本机以主机身份启动")
+	}
 	r, err := New(dbPath)
 	if err != nil {
 		return err
@@ -1773,13 +1970,31 @@ func Run(dbPath string) error {
 	if restored {
 		r.ensureLedgerEpoch(true) // 还原回来的库里是旧账本的纪元
 	}
+	// 容灾的纪元下限与换机围栏:还原旧备份、重置设置不能让纪元回退;主机的库搬到别的机器上运行时以更高纪元围栏
+	// (在跑主机任务、启动自检之前判定;围栏在 StartupCheck 里执行)
+	if b := r.ha.Boot(restored); b.Fence {
+		logger.Warning("主机容灾:", b.Reason, ",启动时以纪元 ", b.To, " 围栏(原纪元 ", b.From, ")")
+	}
 	// core 启动失败(如证书未就绪)不阻塞面板与订阅:
 	// 面板必须先可用,操作者才能在面板里解决问题。
 	if err := r.Start(); err != nil {
 		logger.Error("数据面启动失败(面板与订阅继续运行): ", err)
 	}
 	if err := r.subSrv.Start(); err != nil {
-		return fmt.Errorf("启动订阅服务: %w", err)
+		// 刚接任 / 刚被设为主机:迁来的订阅端口在本机被别的程序占着(检查只看得到本机的线路与服务端口),改回本机原来的端口,
+		// 并在成为主机的通知里说清订阅地址变了 —— 绝不因为这个让新主机起不来
+		port, ok := r.ha.SubPortFallback()
+		if !ok {
+			return fmt.Errorf("启动订阅服务: %w", err)
+		}
+		from := r.settingIntOr("subPort", 2056)
+		logger.Warning("迁来的订阅端口 ", from, " 绑不上(", err, "),改回本机原来的订阅端口 ", port)
+		if e := r.ha.NoteSubPortFallback(from, port, err); e != nil {
+			return fmt.Errorf("启动订阅服务: %w", err)
+		}
+		if err := r.subSrv.Start(); err != nil {
+			return fmt.Errorf("启动订阅服务: %w", err)
+		}
 	}
 	if startPanel != nil {
 		if err := startPanel(r); err != nil {
@@ -1788,6 +2003,13 @@ func Run(dbPath string) error {
 	}
 	logger.Info("m-ui 数据面已启动")
 
+	// 容灾启动自检:进过纪元的主机在跑主机任务之前先问一圈副机,过半已跟随更高纪元(本机失联期间别的机器接任了)
+	// 就直接变为副机(随后重启),不先跑一轮主机任务
+	if r.ha.StartupCheck() {
+		logger.Warning("主机已由别的服务器接任,本机变为副机,稍后自动重启")
+	}
+	r.ha.Start()
+	defer r.ha.Stop()
 	r.jobs.Start()
 	defer r.jobs.Stop()
 	r.monitor.Start()
@@ -1805,7 +2027,7 @@ func Run(dbPath string) error {
 	}{
 		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"线路上游", r.relayLoop}, {"运行统计", r.pingLoop}, {"定时备份", r.backupLoop},
 		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop}, {"凭据撤销重试", r.secureReloadLoop}, {"用户热更新重试", r.userReloadLoop},
-		{"数据面看护", r.coreWatchLoop},
+		{"数据面看护", r.coreWatchLoop}, {"集群屏蔽跟进", r.clusterWatchLoop},
 	} {
 		go keepRunning(l.name, l.fn, stopCheckpoint)
 	}
@@ -1835,6 +2057,17 @@ func Run(dbPath string) error {
 // 取消时先热更新撤下共享凭据,再断开该用户的连接——否则借用者已经建立的连接还能接着用。
 func (r *Runner) newSubServer() *sub.Server {
 	s := sub.NewServer(r.db)
+	s.TLS = &r.tls
+	s.WriteGate = func() (func(), bool, string) { // 设为主机冻结写操作时订阅页也不能改共享状态(容灾服务在 New 里随后建好)
+		if r.ha == nil {
+			return func() {}, true, ""
+		}
+		done, ok := r.ha.BeginWrite()
+		if !ok {
+			return done, false, r.ha.FrozenText()
+		}
+		return done, true, ""
+	}
 	s.OnShareChange = func(name string, kick bool) {
 		go func() {
 			if err := r.ReloadUsers(); err != nil {

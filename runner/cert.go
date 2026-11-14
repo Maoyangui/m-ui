@@ -28,10 +28,17 @@ type certState struct {
 	lastTime int64
 	txt      []acme.TXTRecord   // 手动 DNS:正在等用户加的记录
 	cancel   context.CancelFunc // 取消正在进行的签发
+	// renewWaiting 自动续期撞上了正在进行的签发:这次让开,那边一结束就补跑一轮续期检查(见 finishIssue)
+	renewWaiting bool
+	kick         chan struct{}      // 让续期检查马上补跑一轮(容量 1,见 kickRenew)
+	acmeHook     func(*acme.Config) // 测试用:把签发指向假 CA / 假 Cloudflare
 }
 
 // errIssueCancelled 用户取消了这次签发。
 var errIssueCancelled = errors.New("已取消")
+
+// errIssueBusy 已经有一个签发在跑:同一时间只跑一个(手动 DNS 要等半小时,签发日志与进度也只有一份)。
+var errIssueBusy = errors.New("已有签发任务在进行")
 
 // CancelIssue 取消正在进行的签发:手动 DNS 填错了域名时,不用干等半小时。返回有没有东西可取消。
 func (r *Runner) CancelIssue() bool {
@@ -133,7 +140,11 @@ type IssueRequest struct {
 	Domain, Method     string
 	Staging, AutoRenew bool
 	Targets            CertTargets
-	directoryURL       string // 测试用
+	// Renew 续库里已有的这张(自动续期、证书库的「续期」按钮):按这张自己的设置签,不改签发表单的全局默认(acmeDomain 等)
+	Renew bool
+	// Auto 定时续期发起的:成败的通知由续期检查发(失败按退避去重,见 notifyRenewResult),这里不再每次都发
+	Auto         bool
+	directoryURL string // 测试用
 }
 
 // IssueCert 发起一次签发(异步),进度经 CertStatus 查询。
@@ -145,11 +156,17 @@ func (r *Runner) IssueCert(req IssueRequest) error {
 	return nil
 }
 
-func (r *Runner) startIssue() error {
+func (r *Runner) startIssue() error { return r.startIssueAuto(false) }
+
+// startIssueAuto auto = 自动续期要签:撞上别的签发时记下来,那边一结束就补跑一轮续期检查(不用等下一个钟头)。
+func (r *Runner) startIssueAuto(auto bool) error {
 	r.cert.mu.Lock()
 	defer r.cert.mu.Unlock()
 	if r.cert.running {
-		return errors.New("已有签发任务在进行")
+		if auto {
+			r.cert.renewWaiting = true
+		}
+		return errIssueBusy
 	}
 	r.cert.running, r.cert.log, r.cert.lastErr, r.cert.txt = true, nil, "", nil
 	return nil
@@ -157,6 +174,7 @@ func (r *Runner) startIssue() error {
 
 func (r *Runner) finishIssue(req IssueRequest) error {
 	err := r.issueCert(req)
+	r.noteRenewResult(req, err) // 结果先写回证书行(重启后照样在),再放开"签发中"
 	r.cert.mu.Lock()
 	r.cert.running, r.cert.txt = false, nil
 	r.cert.lastTime = time.Now().Unix()
@@ -165,7 +183,12 @@ func (r *Runner) finishIssue(req IssueRequest) error {
 	} else {
 		r.cert.lastOK = time.Now().Unix()
 	}
+	waiting := r.cert.renewWaiting
+	r.cert.renewWaiting = false
 	r.cert.mu.Unlock()
+	if waiting {
+		r.kickRenew()
+	}
 	return err
 }
 
@@ -194,6 +217,18 @@ func (r *Runner) issueCert(req IssueRequest) error {
 		CertPath: certFile, KeyPath: keyFile, AccountKey: r.setting("acmeAccountKey"), Logf: r.cert.logf,
 		OnTXT: r.cert.setTXT, DirectoryURL: req.directoryURL,
 	}
+	if r.cert.acmeHook != nil {
+		r.cert.acmeHook(&cfg)
+	}
+	// 本机能查出来的问题先查掉,查出来就不去找 CA:80 端口被线路占着、Cloudflare Token 看不到这个域名……
+	// 每次失败的验证都算进 CA 的限额(同一账户同一域名每小时 5 次),以前这些要走完一遍流程才报错
+	if err := r.issuePrecheck(cfg); err != nil {
+		r.cert.logf("失败: %v", err)
+		if !req.Auto {
+			r.notifier.Event("tgOnCert", "🔴 <b>证书签发失败</b>:"+notify.Esc(domain)+"\n"+notify.Esc(err.Error()))
+		}
+		return err
+	}
 	wait := 8 * time.Minute
 	if req.Method == acme.MethodManual {
 		wait = 30 * time.Minute // 要等人去 DNS 服务商加记录
@@ -218,7 +253,9 @@ func (r *Runner) issueCert(req IssueRequest) error {
 	}
 	if err != nil {
 		r.cert.logf("失败: %v", err)
-		r.notifier.Event("tgOnCert", "🔴 <b>证书签发失败</b>:"+notify.Esc(domain)+"\n"+notify.Esc(err.Error()))
+		if !req.Auto {
+			r.notifier.Event("tgOnCert", "🔴 <b>证书签发失败</b>:"+notify.Esc(domain)+"\n"+notify.Esc(err.Error()))
+		}
 		return err
 	}
 	// 证书写好之后才占锁:手动 DNS 要等半小时,这期间证书页别的操作(换证书、删证书)不能跟着卡住
@@ -228,14 +265,42 @@ func (r *Runner) issueCert(req IssueRequest) error {
 		Method: req.Method, AutoRenew: req.AutoRenew && req.Method != acme.MethodManual, Staging: req.Staging}); err != nil {
 		return fmt.Errorf("证书已写入 %s,记进证书库失败: %w", certFile, err)
 	}
-	values := map[string]string{"acmeDomain": domain}
+	values := map[string]string{}
+	if !req.Renew { // 续期不改签发表单的默认值:以前续一张证书就把表单里的域名换成了它
+		values["acmeDomain"] = domain
+	}
 	if req.Targets.Lines {
 		values["certSource"] = "acme"
 	}
 	if err := r.afterCertChange(certFile, keyFile, domain, req.Targets, values); err != nil {
 		return err
 	}
-	r.notifier.Event("tgOnCert", fmt.Sprintf("🟢 <b>证书已签发</b>:%s\n到期 %s", notify.Esc(domain), res.NotAfter.Format("2006-01-02")))
+	if !req.Auto {
+		r.notifier.Event("tgOnCert", fmt.Sprintf("🟢 <b>证书已签发</b>:%s\n到期 %s", notify.Esc(domain), res.NotAfter.Format("2006-01-02")))
+	}
+	return nil
+}
+
+// issuePrecheck 签发前在本机先查一遍:HTTP 验证要临时占 80 端口,被线路或别的程序占着就点名;
+// Cloudflare 验证先确认 Token 看得到这个域名所在的区域(换过 Token 的,以前要等 CA 那边下了单才报错)。
+func (r *Runner) issuePrecheck(cfg acme.Config) error {
+	switch cfg.Method {
+	case acme.MethodHTTP:
+		if acme.IsWildcard(cfg.Domain) {
+			return nil // 泛域名不能走 HTTP 验证,acme.Issue 会直接拒绝
+		}
+		return r.port80Problem()
+	case acme.MethodCloudflare:
+		if strings.TrimSpace(cfg.CFToken) == "" {
+			return nil // acme.Issue 会说要填 Token
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cf := &acme.Cloudflare{Token: cfg.CFToken, BaseURL: cfg.CFBaseURL}
+		if _, _, err := cf.ZoneFor(ctx, acme.BaseDomain(cfg.Domain)); err != nil {
+			return fmt.Errorf("Cloudflare 预检失败: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -388,9 +453,23 @@ func (r *Runner) autoCertHosts() []string {
 	return out
 }
 
+// ErrShadowsAutoRenew 要添加的外部证书和库里一张面板签发、开着自动续期的证书同名:换过去之后那张就不再自动续期,
+// 要用户确认(UseExternalCertForce)。以前一声不吭就换了,自动续期从此关掉(审计 I2)。
+var ErrShadowsAutoRenew = errors.New("同名证书开着自动续期")
+
 // UseExternalCert 使用服务器上已有的证书(如 certbot / nginx / 商业证书):只记录路径,不复制文件,
 // 证书续期后覆盖原文件即可,面板与订阅会自动换用(线路入站在下次重载时生效)。
+// 库里同名的证书是面板签发、开着自动续期的,先拒绝(ErrShadowsAutoRenew),确认后用 UseExternalCertForce。
 func (r *Runner) UseExternalCert(certFile, keyFile string, targets CertTargets) error {
+	return r.useExternalCert(certFile, keyFile, targets, false)
+}
+
+// UseExternalCertForce 同 UseExternalCert,同名证书开着自动续期也照样换(用户确认过):那张的自动续期随之关掉。
+func (r *Runner) UseExternalCertForce(certFile, keyFile string, targets CertTargets) error {
+	return r.useExternalCert(certFile, keyFile, targets, true)
+}
+
+func (r *Runner) useExternalCert(certFile, keyFile string, targets CertTargets, force bool) error {
 	r.certOpMu.Lock()
 	defer r.certOpMu.Unlock()
 	certFile, keyFile = strings.TrimSpace(certFile), strings.TrimSpace(keyFile)
@@ -412,10 +491,18 @@ func (r *Runner) UseExternalCert(certFile, keyFile string, targets CertTargets) 
 	if info.SelfSigned { // 用户自己的自签文件:不能和面板生成的那张抢 self-signed 这个名字
 		name = strings.ToLower(strings.TrimSuffix(filepath.Base(certFile), filepath.Ext(certFile)))
 	}
+	var cur model.Cert
+	shadow := r.db.Where("name = ?", name).First(&cur).Error == nil && cur.Source == "acme" && cur.AutoRenew
+	if shadow && !force {
+		return fmt.Errorf("%w:证书库里的 %s 是面板签发的,开着自动续期;换成服务器上的这张,它就不再自动续期", ErrShadowsAutoRenew, name)
+	}
 	if err := r.saveCertRow(model.Cert{Name: name, Source: "external", CertFile: certFile, KeyFile: keyFile}); err != nil {
 		return err
 	}
 	r.cert.logf("已添加服务器上的证书 %s(%s,剩余 %d 天)", certFile, info.Subject, info.DaysLeft)
+	if shadow {
+		r.cert.logf("%s 原来是面板签发、自动续期的,换成服务器上的这张后不再自动续期", name)
+	}
 	values := map[string]string{}
 	if targets.Lines {
 		values["certSource"] = "external"
@@ -433,18 +520,4 @@ func (r *Runner) RestartSub() error {
 	time.Sleep(200 * time.Millisecond)
 	r.subSrv = r.newSubServer()
 	return r.subSrv.Start()
-}
-
-// certLoop 每 12 小时查一次证书库,到期前 30 天的自动续期(只续自己签发的,服务器上已有的证书和自签不管)。
-func (r *Runner) certLoop(stop <-chan struct{}) {
-	t := time.NewTicker(12 * time.Hour)
-	defer t.Stop()
-	for {
-		select {
-		case <-t.C:
-			r.renewDue()
-		case <-stop:
-			return
-		}
-	}
 }

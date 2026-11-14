@@ -2,6 +2,7 @@ name: donors
 
 # 功德箱的"后台":把留名和 USDT 到账对上,结果写进 donors 分支,各面板和文档站读那份 donors.json。
 # 没有服务器:留名走 ntfy.sh,到账查 TronGrid,都是免费公开接口。细节见 deploy/donors/settle.mjs。
+# GitHub 的定时任务只是尽力而为:这里写的每 10 分钟,实际常常几个小时才跑一次,settle.mjs 不依赖运行频率。
 on:
   schedule:
     - cron: "*/10 * * * *"
@@ -9,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: read # 查上一次运行是什么时候
 
 concurrency:
   group: donors
@@ -17,7 +19,7 @@ concurrency:
 jobs:
   settle:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
@@ -27,13 +29,50 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node deploy/donors/settle.mjs donors-data
+      - name: 上一次运行太久就报警
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 只看 GitHub 有没有按时跑:被最后一步标成失败的那些(数据源太久没读到、手动记账写错)也照常算完、提交了,算跑过;
+          # 取消、跳过的不算。对账那一步本身失败的运行也是红的,GitHub 会发通知,不靠这里
+          last=$(gh api "repos/${{ github.repository }}/actions/workflows/donors.yml/runs?status=completed&per_page=30" --jq '[.workflow_runs[] | select(.conclusion == "success" or .conclusion == "failure")][0].created_at // empty')
+          [ -n "$last" ] || exit 0
+          gap=$(( $(date -u +%s) - $(date -u -d "$last" +%s) ))
+          if [ "$gap" -gt 21600 ]; then
+            msg="上一次运行在 $((gap / 3600)) 小时前($last;GitHub 推迟了定时任务):面板数和功德箱都会晚更新;隔超过 12 小时的话,这期间有一部分留名会丢(ntfy 只缓存 12 小时)。"
+            echo "::warning::$msg"
+            echo "**注意**:$msg" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: 对账并提交
         env:
           GITHUB_TOKEN: ${{ github.token }}
-      - name: 有变化才提交
-        working-directory: donors-data
         run: |
-          git add -A
-          git diff --cached --quiet && exit 0
-          git -c user.name=Maoyangui -c user.email=324171816+Maoyangui@users.noreply.github.com commit -q -m "更新功德箱"
-          git push
+          # 推送失败(GitHub 偶发 500,或刚好有人手动推过):取最新的 donors 分支重算一遍再推,最多 3 次。
+          # settle.mjs 可以重复跑,不要手工合并 state.json。
+          for try in 1 2 3; do
+            node deploy/donors/settle.mjs donors-data
+            git -C donors-data add -A
+            if git -C donors-data diff --cached --quiet; then
+              echo "没有变化"
+              exit 0
+            fi
+            git -C donors-data -c user.name=Maoyangui -c user.email=324171816+Maoyangui@users.noreply.github.com commit -q -m "更新功德箱"
+            if git -C donors-data push -q origin HEAD:donors; then
+              exit 0
+            fi
+            echo "::warning::第 $try 次推送失败"
+            if [ "$try" -lt 3 ]; then
+              sleep $((try * 15))
+              # 取不到就退回本轮开始时的那份重算:远端没变时照样推得上去,变了下一次推送会被拒,再来一轮
+              git -C donors-data fetch -q --depth=1 origin +refs/heads/donors:refs/remotes/origin/donors || echo "::warning::取最新的 donors 分支失败"
+              git -C donors-data reset -q --hard refs/remotes/origin/donors
+            fi
+          done
+          echo "::error::推送 3 次都失败,这一轮的结果没有保存"
+          exit 1
+      - name: 数据源太久没读到、手动记账写错时让这次运行失败
+        # 放在提交之后:算出来的状态已经保存,这一步只把问题写进摘要、把运行标成失败(GitHub 会发通知)。
+        # 只写警告的话没人会去翻运行记录:一直读不到的数据源(接口改了、被限流、ping 文件没了)会让留名和到账无声地丢,
+        # 手动记账写错时榜单一直停在上次。
+        run: node deploy/donors/settle.mjs --check donors-data

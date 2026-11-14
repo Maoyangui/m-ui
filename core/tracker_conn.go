@@ -38,6 +38,14 @@ type ConnTracker struct {
 	// 副机每次上报也扫一遍;在这里记一笔既准又便宜
 	recent    map[string]*RecentConn
 	recentSeq uint64 // 单调递增,同一秒内多条也能分出先后
+
+	// fails "到了但没过握手 / 认证"的来源(见 core/protocol/arrival),和上面分开存:独立上限、新来源限频,
+	// 扫描刷不掉正常记录;单独一把锁,扫描再多也不和连接跟踪抢锁
+	failMu     sync.Mutex
+	fails      map[string]*RecentConn
+	failSeq    uint64
+	failTokens float64   // 新来源的令牌桶
+	failAt     time.Time // 上次补令牌的时间
 }
 
 // RecentConn 一条"源 IP × 线路"的最近连接记录。
@@ -48,21 +56,100 @@ type RecentConn struct {
 	Protocol string
 	Count    int
 	Last     int64
-	seq      uint64
+	// Rejected 最近一次是被拒的:RejectDevice / RejectPool;放行的为空。同一来源下一次放行就清掉。
+	Rejected string
+	// Failed 只在"到了但没过握手 / 认证"那份里有:arrival.TLS / arrival.Auth;Detail 是失败原因原文(截短)
+	Failed string
+	Detail string
+	seq    uint64
 }
 
 const recentCap = 300
+
+// "到了但没过握手 / 认证":最多记这么多个来源;新来源按令牌桶限频(桶 failBurst 个,每 failRefill 补一个),
+// 已在表里的来源再来只累加次数、不占令牌 —— 扫描换着 IP 来也只能挤进有限几条,用户自己反复重试的那条一直在
+const (
+	failCap    = 100
+	failBurst  = 20
+	failRefill = 3 * time.Second
+)
 
 func NewConnTracker(limiter *Limiter) *ConnTracker {
 	return &ConnTracker{
 		connections: make(map[string]*ConnectionInfo),
 		limiter:     limiter,
 		recent:      make(map[string]*RecentConn),
+		fails:       make(map[string]*RecentConn),
+		failTokens:  failBurst,
 	}
 }
 
-// noteRecent 记一次入站连接;超过上限时丢掉最久没动的那条。
-func (c *ConnTracker) noteRecent(ip, user, inbound, proto string) {
+// NoteFailure 记一次"到了但没过握手 / 认证"(实现 arrival.Recorder,入站在 TLS 握手失败、协议认证失败处调)。
+// 只记,不影响任何放行判定;热路径上只有一次查表,满了才扫一遍挑最旧的(新来源有限频,扫不了几次)。
+func (c *ConnTracker) NoteFailure(ip, inbound, proto, reason, detail string) {
+	if ip == "" || inbound == "" {
+		return
+	}
+	now := time.Now()
+	key := ip + "|" + inbound
+	c.failMu.Lock()
+	defer c.failMu.Unlock()
+	r := c.fails[key]
+	if r == nil {
+		if !c.failTokenLocked(now) {
+			return
+		}
+		if len(c.fails) >= failCap {
+			var oldest string
+			var oldestSeq uint64
+			for k, v := range c.fails {
+				if oldest == "" || v.seq < oldestSeq {
+					oldest, oldestSeq = k, v.seq
+				}
+			}
+			delete(c.fails, oldest)
+		}
+		r = &RecentConn{IP: ip, Inbound: inbound, Protocol: proto}
+		c.fails[key] = r
+	}
+	c.failSeq++
+	r.seq = c.failSeq
+	r.Count++
+	r.Last = now.Unix()
+	r.Failed, r.Detail = reason, detail
+}
+
+// failTokenLocked 新来源取一个令牌;调用方持 failMu。
+func (c *ConnTracker) failTokenLocked(now time.Time) bool {
+	if !c.failAt.IsZero() {
+		c.failTokens = min(failBurst, c.failTokens+now.Sub(c.failAt).Seconds()/failRefill.Seconds())
+	}
+	c.failAt = now
+	if c.failTokens < 1 {
+		return false
+	}
+	c.failTokens--
+	return true
+}
+
+// Failures "到了但没过握手 / 认证"的来源,最近的在前,最多 limit 条。
+func (c *ConnTracker) Failures(limit int) []RecentConn {
+	c.failMu.Lock()
+	out := make([]RecentConn, 0, len(c.fails))
+	for _, r := range c.fails {
+		out = append(out, *r)
+	}
+	c.failMu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].seq > out[j].seq })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// noteRecent 记一次入站。超过上限时丢掉最久没动的那条。rejected 非空表示这次被设备数 / 设备池拒了:拒绝发生在握手认证之后,
+// 不记的话面板上看起来和"包没到服务器"一模一样,用户只会去查防火墙(v6 双栈设备被算两台就是这样藏住的)。
+func (c *ConnTracker) noteRecent(ip, user, inbound, proto, rejected string) {
 	if ip == "" || inbound == "" {
 		return
 	}
@@ -89,6 +176,7 @@ func (c *ConnTracker) noteRecent(ip, user, inbound, proto string) {
 	r.seq = c.recentSeq
 	r.Count++
 	r.Last = now
+	r.Rejected = rejected
 	if user != "" {
 		r.User = user
 	}
@@ -140,8 +228,11 @@ func (c *ConnTracker) generateConnectionID() string {
 func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) net.Conn {
 	ip := metadata.Source.Addr.String()
 	owner := model.Owner(metadata.User)
-	if c.limiter != nil && !c.limiter.AllowConn(owner, ip) {
-		return rejectedConn{conn}
+	if c.limiter != nil {
+		if ok, why := c.limiter.AllowConnWhy(owner, ip); !ok {
+			c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType, why)
+			return rejectedConn{conn}
+		}
 	}
 	connID := c.generateConnectionID()
 	connInfo := &ConnectionInfo{
@@ -155,7 +246,7 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 
 	c.trackConnection(connID, connInfo)
 	if owner != "" || metadata.User == "" { // 内部用户(线路作上游)不进"最近入站连接"
-		c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType)
+		c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType, "")
 	}
 
 	wrapped := c.createWrappedConn(conn, connID)
@@ -168,9 +259,12 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.PacketConn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) network.PacketConn {
 	ip := metadata.Source.Addr.String()
 	owner := model.Owner(metadata.User)
-	if c.limiter != nil && !c.limiter.AllowConn(owner, ip) {
-		conn.Close()
-		return conn
+	if c.limiter != nil {
+		if ok, why := c.limiter.AllowConnWhy(owner, ip); !ok {
+			c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType, why)
+			conn.Close()
+			return conn
+		}
 	}
 	connID := c.generateConnectionID()
 	connInfo := &ConnectionInfo{
@@ -183,7 +277,7 @@ func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.P
 	}
 
 	c.trackConnection(connID, connInfo)
-	c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType)
+	c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType, "")
 
 	wrapped := c.createWrappedPacketConn(conn, connID)
 	if c.limiter != nil {

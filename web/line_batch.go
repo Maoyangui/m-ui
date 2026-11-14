@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	"github.com/Maoyangui/m-ui/database/model"
-	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/sub"
 
 	"gorm.io/gorm"
@@ -56,6 +55,14 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 			lines[i].Enabled = req.Action == "enable"
 		}
 		cols = []string{"enabled"}
+		// 启用前复核端口:删服务器时失去全部服务器的线路会被停用并改成"全部服务器"(detachLinesFromNode),
+		// 直接启用就可能落到本机面板端口上,或和别的服务器上的同端口线路撞
+		if req.Action == "enable" {
+			if err := s.checkBatchPorts(lines); err != nil {
+				badRequest(w, err)
+				return
+			}
+		}
 	case "upstream":
 		if req.UpstreamId == nil {
 			badRequest(w, errors.New("缺少 upstreamId"))
@@ -108,17 +115,22 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var nodeCert render.NodeCert
-	if s.run != nil { // 事务里不能再走连接池,先取好;测试里没有数据面
-		nodeCert = s.run.NodeCert()
-	}
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	var widened *scopeWidened
+	err := s.commitValidated(func(tx *gorm.DB) error { // 干跑通过才提交,干跑时不占写锁(见 commitValidated)
+		widened = &scopeWidened{}
 		for _, l := range lines {
 			if err := tx.Model(&model.Line{}).Where("id = ?", l.Id).Select(cols).Updates(l).Error; err != nil {
 				return err
 			}
+			if req.Action == "nodes" { // 和单条修改一样整理指向已撤服务器的收窄(见 fixLineScopesTx)
+				w, err := fixLineScopesTx(tx, l.Id, deployNodeIDs(l.NodeIds))
+				if err != nil {
+					return err
+				}
+				widened.merge(w)
+			}
 		}
-		return validateFullConfig(tx, nodeCert)
+		return nil
 	})
 	if err != nil {
 		badRequest(w, err)
@@ -129,9 +141,15 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 		names = append(names, l.Name)
 	}
 	s.audit(r, "line", "batch:"+req.Action, names)
+	resp := map[string]interface{}{"affected": len(lines)}
+	if !widened.empty() {
+		widened.Users, widened.Resellers, widened.Plans = dedupSorted(widened.Users), dedupSorted(widened.Resellers), dedupSorted(widened.Plans)
+		s.audit(r, "line", "scope:widen", map[string]interface{}{"lines": names, "widened": widened})
+		resp["scopeWidened"] = widened
+	}
 	s.reloadAll("批量设置线路 " + req.Action + " ×" + strconv.Itoa(len(lines)))
 	s.syncRelays()
-	writeJSON(w, http.StatusOK, map[string]interface{}{"affected": len(lines)})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // checkBatchPorts 改完部署范围后,同端口的线路在任何一台服务器上都不能有两条。
@@ -146,6 +164,10 @@ func (s *Server) checkBatchPorts(batch []model.Line) error {
 	var others []model.Line
 	s.db.Select("id, name, port, node_ids").Find(&others)
 	for i, a := range batch {
+		// 改完范围后落到本机的线路,端口不能和本机面板 / 订阅 / 代理面板相同(I3:validateLine 只对本机线路查这一项)
+		if err := s.checkServicePorts(a); err != nil {
+			return fmt.Errorf("线路 %q: %w", a.Name, err)
+		}
 		for _, o := range others {
 			if o.Port != a.Port || inBatch[o.Id] {
 				continue

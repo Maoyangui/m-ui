@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,6 +71,8 @@ func Open(dbPath string) (*gorm.DB, error) {
 	// 套餐从"全局唯一名"改成"按归属唯一",老库里那个唯一索引要去掉
 	db.Exec("UPDATE plans SET reseller_id = 0 WHERE reseller_id IS NULL")
 	db.Exec("DROP INDEX IF EXISTS idx_plans_name")
+	// 参考价是后加的列(NOT NULL DEFAULT 0,老套餐本来就是 0);防一手别的工具改过库留下 NULL,折算时 NULL 会被当成没填
+	db.Exec("UPDATE plans SET price = 0 WHERE price IS NULL")
 	// 停用原因是后加的列:老库里已停用的用户按当时的状态推断一次(幂等:有原因的行不再动)。
 	// 超量记 quota、到期记 expired、所属代理额度已用尽的记 quota(旧版是把他名下用户整体停掉的),其余当手动。
 	db.Exec("UPDATE users SET disabled_reason = '' WHERE disabled_reason IS NULL")
@@ -103,6 +106,14 @@ func restrictFiles(dbPath string) {
 	}
 }
 
+// ReadTx 在只读事务里执行 fn:几条查询看到同一份一致的数据,而且不拿写锁。
+// 连接串里的 _txlock=immediate 让普通事务一开头就抢写锁(BEGIN IMMEDIATE),只读的事务也一样:
+// 别的事务在写时它得排队,排满 busy_timeout 就报 database is locked。只读事务走普通 BEGIN,WAL 下读不挡写、写不挡读。
+// fn 里只许读:在这种事务里写,升级写锁时会直接报 SQLITE_BUSY,不排队。
+func ReadTx(db *gorm.DB, fn func(tx *gorm.DB) error) error {
+	return db.Transaction(fn, &sql.TxOptions{ReadOnly: true})
+}
+
 // DBHandle 是测试里携带 *gorm.DB 的小包装。
 type DBHandle struct{ DB *gorm.DB }
 
@@ -110,6 +121,14 @@ type DBHandle struct{ DB *gorm.DB }
 func OpenReadOnly(dbPath string) (*gorm.DB, error) {
 	dsn := "file:" + dbPath + "?mode=ro"
 	return gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Discard})
+}
+
+// OpenNoMigrate 打开一个既有库做几行修补(还原备份时改写证书路径),不建表、不迁移:表结构迁移留给启动时的 Open。用完 Close。
+func OpenNoMigrate(dbPath string) (*gorm.DB, error) {
+	if _, err := os.Stat(dbPath); err != nil {
+		return nil, err
+	}
+	return gorm.Open(sqlite.Open(dbPath+"?_pragma=busy_timeout(10000)"), &gorm.Config{Logger: logger.Discard})
 }
 
 // Checkpoint 把 WAL 中的改动全部并回主库文件并截断 WAL。

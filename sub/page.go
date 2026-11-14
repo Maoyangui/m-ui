@@ -26,30 +26,39 @@ import (
 //go:embed page.html
 var pageFS embed.FS
 
-var pageTmpl = template.Must(template.ParseFS(pageFS, "page.html"))
+// 公告与联系方式经 linkify 输出(转义 + 只放行白名单协议的链接),是页面上唯一不走模板自动转义的用户内容
+var pageTmpl = template.Must(template.New("page.html").Funcs(template.FuncMap{"linkify": linkify}).ParseFS(pageFS, "page.html"))
 
 // 已知代理客户端的 UA 片段:命中即认为是客户端在拉订阅,返回原始内容。
-var clientUATokens = []string{
-	"clash", "mihomo", "stash", "shadowrocket", "sing-box", "singbox", "sfi/", "sfa/", "sfm/",
-	"hiddify", "v2ray", "xray", "nekobox", "nekoray", "surge", "quantumult", "loon", "karing",
-	"husi", "flclash", "sagernet", "matsuri", "pharos", "kitsunebi", "streisand", "v2box",
-	"hysteria", "tuic", "curl/", "wget/", "go-http-client", "okhttp", "python-requests",
+// 与 format.go 里按格式分的几组合在一起,加上命令行工具;新增客户端只改 format.go 那几组。
+var clientUATokens = concatTokens(linkUATokens, singBoxUATokens, clashUATokens, []string{
+	"flclash", "godusevpn", "hysteria", "tuic", "curl/", "wget/", "go-http-client", "okhttp", "python-requests",
+})
+
+// inAppBrowserTokens iOS 上的 App 内置浏览器(WKWebView)默认 UA 不带 Safari:微信、QQ、钉钉、飞书、支付宝、微博……
+var inAppBrowserTokens = []string{"applewebkit", "micromessenger", "qq/", "dingtalk", "lark/", "alipay", "weibo"}
+
+func concatTokens(lists ...[]string) []string {
+	var out []string
+	for _, l := range lists {
+		out = append(out, l...)
+	}
+	return out
 }
 
 // WantsPage 判断请求来自浏览器(应返回订阅页)还是代理客户端(应返回原始订阅)。
 // ?format=page 强制出页面;其它 format 强制出原始订阅。
 func WantsPage(r *http.Request) bool {
 	if f := r.URL.Query().Get("format"); f != "" {
-		return f == "page"
+		nf, _ := NormalizeFormat(f)
+		return nf == "page"
 	}
 	ua := strings.ToLower(r.UserAgent())
-	for _, tok := range clientUATokens {
-		if strings.Contains(ua, tok) {
-			return false
-		}
+	if containsAny(ua, clientUATokens) {
+		return false
 	}
 	return strings.Contains(ua, "mozilla") &&
-		(strings.Contains(ua, "chrome") || strings.Contains(ua, "safari") || strings.Contains(ua, "firefox") || strings.Contains(ua, "edg"))
+		(containsAny(ua, []string{"chrome", "safari", "firefox", "edg"}) || containsAny(ua, inAppBrowserTokens))
 }
 
 // publicBase 以用户实际访问到的 scheme/host 组装订阅地址,反代/换域名都不用改设置。
@@ -77,7 +86,9 @@ type pageLine struct {
 
 type pageData struct {
 	Lang                    string
-	Icon                    template.URL // 标签图标(内联 SVG data URI)
+	Icon                    template.URL // 标签图标与页头 logo:内置的是内联 SVG data URI,自定义的是 ./<地址>/logo?v=<摘要>
+	IconType                string       // 标签图标的类型(link rel=icon 的 type)
+	CustomLogo              bool         // 页头是上传的 logo(不是内置的):深色模式下给它垫一块浅色底,透明底的深色 logo 才看得见
 	Title, Notice, Support  string
 	Name                    string
 	StatusText, StatusKind  string // active / expired / exhausted / disabled;ok / danger
@@ -104,6 +115,7 @@ type pageData struct {
 	Lines                   []pageLine
 	Year                    int
 	Brand                   bool // 页脚 "Powered by m-ui":设置可关;代理的落地页不显示
+	AutoFormat              bool // 通用地址按客户端给格式(设置 subAutoFormat);关着时提示改用 Clash / sing-box 地址
 	TZOffset                int  // 面板时区相对 UTC 的分钟数,用量图的时间标签按它显示
 	// Shared:这是共享地址的落地页。只给借用者看得着的:临时共享标识、选购、公告、一键导入、订阅地址、节点;
 	// 本人的用量 / 到期 / 用量图 / 共享管理一概不出,状态卡也只说原因不带数字。
@@ -162,7 +174,7 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 	_, off := time.Now().In(loc).Zone()
 
 	d := pageData{
-		Lang: pageLang(r), Icon: template.URL(brand.DataURI), Title: title, Notice: notice, Support: support, Name: user.Name,
+		Lang: pageLang(r), Icon: template.URL(brand.DataURI), IconType: builtinIconType, Title: title, Notice: notice, Support: support, Name: user.Name,
 		UsedText: fmtBytesHuman(used), Unlimited: user.Volume == 0, UpdateHours: opt.UpdateHours,
 		SubLink: base, SubClash: clashURL, SubJSON: base + "?format=json", QRClash: template.URL(base + "/qr?format=clash"), QRLink: template.URL(base + "/qr?format=link"), QRJSON: template.URL(base + "/qr?format=json"),
 		ClientsURL: template.URL(base + "?clients=1"),
@@ -196,10 +208,12 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 
 	enc := url.QueryEscape
 	imp := SubTitle(user, opt) // 一键导入按订阅标题命名,与响应头一致
-	// 一键导入靠 godusevpn:// 深链,只有注册了协议的 Windows 与安卓(含电视)能接;Linux 版在自己的面板里粘地址
-	god, godHint := "佛跳墙", "Windows · Android · 电视"
+	// 一键导入靠 godusevpn:// 深链,只有登记了这个协议的版本能接:Windows(安装包写注册表,程序每次启动补一遍)、
+	// macOS(.app 的 Info.plist 登记 CFBundleURLTypes,系统把地址交给已装好的程序)、安卓与电视(AndroidManifest);
+	// Linux 版没登记,在它自己的面板里粘地址
+	god, godHint := "佛跳墙", "Windows · macOS · Android · 电视"
 	if d.Lang != "zh" {
-		god, godHint = "Fotiaoqiang", "Windows · Android · TV"
+		god, godHint = "Fotiaoqiang", "Windows · macOS · Android · TV"
 	}
 	d.Imports = []importLink{
 		// 自家客户端排第一:它自己会给地址补 ?format=json,所以传不带 format 的通用地址
@@ -255,12 +269,15 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key 
 		opt.Share = false // 借用者不能管理共享
 	}
 	data := buildPageData(r, subPath, key, user, lines, opt, title, notice, support)
+	data.Icon, data.IconType = s.pageIcon(rs, key)     // 代理的用户先用代理的 logo,再用主面板的
+	data.CustomLogo = data.IconType != builtinIconType // 上传的只会是 PNG / JPEG / GIF,内置的是 SVG
 	data.NoChart = strings.EqualFold(s.setting("nodeMode"), "true")
 	var ratioNodes int64
 	s.db.Model(&model.Node{}).Where("enabled = ? AND ratio > 0 AND ratio != 1", true).Count(&ratioNodes)
 	data.RatioNote = ratioNodes > 0
 	data.Shared = shared
 	data.Brand = rs == nil && !strings.EqualFold(s.setting("subPageBrand"), "false") // 代理的落地页尊重代理品牌
+	data.AutoFormat = autoFormatOn(s.setting("subAutoFormat"))
 	data.BuyURL = s.buyURL(rs)
 	if st := stateOf(user, rs, time.Now().Unix()); st != data.StatusText { // 代理被停用 / 到期也算停用
 		data.StatusText, data.StatusKind, data.Unavailable = st, "danger", true

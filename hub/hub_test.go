@@ -169,6 +169,9 @@ func TestBuildPushSnapshotRaisesRestoredSequenceToClockFloor(t *testing.T) {
 
 func TestApplyCountersCursor(t *testing.T) {
 	db := openDB(t, "hub.db").DB
+	for id, name := range map[uint]string{2: "台湾", 3: "日本", 4: "贵"} {
+		db.Create(&model.Node{Id: id, Name: name, Enabled: true})
+	}
 	db.Create(&model.User{Name: "bob", Enabled: true})
 	c := []model.AgentCounter{{UserName: "bob", Up: 100, Down: 200}}
 	if n, err := ApplyCounters(db, 2, "台湾", "", c, 1000, 60, 1); err != nil || n != 1 {
@@ -190,17 +193,25 @@ func TestApplyCountersCursor(t *testing.T) {
 	if n, _ := ApplyCounters(db, 2, "台湾", "", c, 1120, 60, 1); n != 0 {
 		t.Fatal("无增量不应计入")
 	}
-	// 回绕(副机重装):计数器变小 → 游标归零,全额计入
+	// 同一个用户的计数变小(副机断电丢了最近几笔、虚机快照回滚):账本回退,游标对齐、这一次不计。
+	// 以前一律当回绕从 0 重认 —— 回退一点点就把整段历史再记一遍
 	c[0].Up, c[0].Down = 5, 7
 	ApplyCounters(db, 2, "台湾", "", c, 1180, 60, 1)
 	db.First(&u)
-	if u.Up != 155 || u.Down != 267 {
-		t.Fatalf("回绕后应重认: %+v", u)
+	if u.Up != 150 || u.Down != 260 {
+		t.Fatalf("账本回退不该重认: %+v", u)
 	}
 	var cur model.TrafficCursor
 	db.Where("node_id = 2").First(&cur)
-	if cur.Up != 5 || cur.Down != 7 {
-		t.Fatalf("游标应跟随: %+v", cur)
+	if cur.Up != 5 || cur.Down != 7 || cur.UserId != u.Id {
+		t.Fatalf("游标应对齐到回退后的计数并记下用户: %+v", cur)
+	}
+	// 对齐之后照常按增量
+	c[0].Up, c[0].Down = 10, 17
+	ApplyCounters(db, 2, "台湾", "", c, 1200, 60, 1)
+	db.First(&u)
+	if u.Up != 155 || u.Down != 270 {
+		t.Fatalf("回退之后应从对齐的游标接着计: %+v", u)
 	}
 	var st []model.Stats
 	db.Where("resource = ? AND tag = ?", "node", "台湾").Find(&st)
@@ -210,13 +221,13 @@ func TestApplyCountersCursor(t *testing.T) {
 	// 不同副机独立游标
 	ApplyCounters(db, 3, "日本", "", []model.AgentCounter{{UserName: "bob", Up: 1, Down: 1}}, 1240, 60, 1)
 	db.First(&u)
-	if u.Up != 156 || u.Down != 268 {
+	if u.Up != 156 || u.Down != 271 {
 		t.Fatalf("多副机应各自计入: %+v", u)
 	}
 	// 倍率:2 倍服务器的 100/200 增量计为 200/400
 	ApplyCounters(db, 4, "贵", "", []model.AgentCounter{{UserName: "bob", Up: 100, Down: 200}}, 1300, 60, 2)
 	db.First(&u)
-	if u.Up != 356 || u.Down != 668 {
+	if u.Up != 356 || u.Down != 671 {
 		t.Fatalf("倍率应按 2 倍计入: %+v", u)
 	}
 	var cur4 model.TrafficCursor

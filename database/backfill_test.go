@@ -32,14 +32,14 @@ func TestBackfillUserPlans(t *testing.T) {
 		}
 		return u.Id
 	}
-	byLog := mk("按记录", 0, 7, 0)          // 额度已被改过,对不上任何套餐,但操作记录里有
-	renamed := mk("被顶替", 0, 100, 3)        // 额度对得上月付,但操作记录说最后套的是年付,以记录为准
-	byLimit := mk("按额度", 0, 100, 3)        // 只有月付对得上
-	twin := mk("对不准", 0, 50, 0)            // 两个套餐都对得上,猜不准
-	none := mk("没有对得上的", 0, 1, 0)         // 一个都对不上
-	unlimited := mk("不限量", 0, 0, 0)        // 什么限制都没有的套餐不认
-	rsUser := mk("代理的用户", 9, 100, 3)      // 只看同一归属的套餐
-	bound := mk("已归入", 0, 200, 0)          // 已经有归属的不动
+	byLog := mk("按记录", 0, 7, 0)      // 额度已被改过,对不上任何套餐,但操作记录里有
+	renamed := mk("被顶替", 0, 100, 3)  // 额度对得上月付,但操作记录说最后套的是年付,以记录为准
+	byLimit := mk("按额度", 0, 100, 3)  // 只有月付对得上
+	twin := mk("对不准", 0, 50, 0)      // 两个套餐都对得上,猜不准
+	none := mk("没有对得上的", 0, 1, 0)    // 一个都对不上
+	unlimited := mk("不限量", 0, 0, 0)  // 什么限制都没有的套餐不认
+	rsUser := mk("代理的用户", 9, 100, 3) // 只看同一归属的套餐
+	bound := mk("已归入", 0, 200, 0)    // 已经有归属的不动
 	db.Model(&model.User{}).Where("id = ?", bound).Update("plan_id", twinA.Id)
 	for _, c := range []model.Change{
 		{Key: "user", Action: "plan:renew:月付", Obj: []byte(`"按记录"`)},

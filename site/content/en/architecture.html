@@ -24,7 +24,7 @@
   </ol>
 
   <h2 id="request">A subscription request</h2>
-  <p><code>GET /sub/&lt;key&gt;</code>: the key is matched as a user name, a random subscription token, or a temporary share token (which serves the same user with a second credential set). Disabled users, expired resellers and unknown keys get 404 — a short explanation page for browsers, a plain 404 for clients. For a live user, a browser gets the landing page; a client gets universal links, Clash YAML or a sing-box config depending on <code>?format=</code>. Nodes are the user's assigned lines × the servers each line is deployed on, plus external nodes and subscriptions.</p>
+  <p><code>GET /sub/&lt;key&gt;</code>: the key is matched as a user name, a random subscription token, or a temporary share token (which serves the same user with a second credential set). With the subscription page on (the default; the master and each reseller have a switch), a browser gets the landing page for a key that matches (the reason is shown at the top when the user is disabled, expired or out of traffic; a share token gets a trimmed page without the owner's usage and expiry); a client gets universal links, Clash YAML or a sing-box config depending on <code>?format=</code> (picked from the User-Agent when it is absent), or a 404 while the user (or their reseller) is disabled, expired or out of traffic. A key that matches nobody gets a short "invalid subscription link" page in browsers and a plain 404 for clients. With the page switched off, browsers are treated like clients: the raw subscription, or a plain 404 when the user is blocked or the key matches nobody. Nodes are the user's assigned lines × the servers each line is deployed on, plus external nodes and subscriptions.</p>
 
   <h2 id="sync">Master and nodes</h2>
   <p>Every 5 seconds the master snapshots lines (with routing rules), upstreams, users, credentials, resellers, active limit-rule states and synced settings, hashes them into a revision, pushes to all nodes concurrently and pulls each node's report (traffic since a cursor, online IPs, public IPv4 / IPv6, upstream health). Each server probes its own public addresses and renders its own config, so an IPv6-only node handles DNS for its own situation. Nodes never judge quota; users the master disables simply disappear from the next snapshot. Details on the <a href="{{base}}multi-server/">multi-server page</a>.</p>
@@ -52,7 +52,7 @@
     <tr><td>10 min</td><td>WAL checkpoint so the live database is always safe to copy</td></tr>
     <tr><td>10 min (configurable)</td><td>Upstream probes, down / recovered alerts</td></tr>
     <tr><td>30 min (configurable)</td><td>Master refreshes external subscriptions</td></tr>
-    <tr><td>90 min (configurable)</td><td>Master runs the mainland reachability check (IPv4 only for now)</td></tr>
+    <tr><td>90 min (configurable)</td><td>Master runs the mainland reachability check (over IPv4; servers with IPv6 lines also get an IPv6 inbound check from probes abroad in the same round)</td></tr>
     <tr><td>1 h</td><td>Probe public IPv4 / IPv6; expiry and usage warnings; prune series and logs by retention, fold minute samples older than 48 h into hourly buckets</td></tr>
     <tr><td>6 h</td><td>Version check against GitHub Releases (check only; through local WARP when GitHub is unreachable directly)</td></tr>
     <tr><td>12 h</td><td>Certificate renewal check (sing-box swaps the renewed certificate itself, no restart)</td></tr>

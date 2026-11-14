@@ -1,6 +1,9 @@
 package reach
 
-import "math"
+import (
+	"math"
+	"strings"
+)
 
 // 判定结果。
 const (
@@ -12,6 +15,10 @@ const (
 	VerdictAbroadDown  = "abroadDown"  // 香港也连不上:服务器、端口或安全组的问题,不是墙
 	VerdictNoProbes    = "noProbes"    // 这次没有可用的大陆测点
 	VerdictError       = "error"       // 检测没做成(接口出错、额度用完、没有可测的地址)
+
+	// VerdictNoPort 没有可测的 IPv4 入口:这台的线路在订阅里都走 IPv6;或走 IPv4 的只有 UDP 线路、借来的面板 API 端口
+	// 连香港也连不上(多半只对主机放行)。灰色、不告警;和"没测成"不同,算作结论,会盖掉以前测出的"被墙"
+	VerdictNoPort = "noPort"
 )
 
 // IsBlocked 是否属于"被墙"一类。
@@ -29,6 +36,7 @@ const (
 
 // ProbeResult 一个测点的结果。
 type ProbeResult struct {
+	Country string  `json:"country,omitempty"` // 只有 IPv6 入站检测填(境外测点,各国都有);大陆检测按运营商分组,不填
 	City    string  `json:"city"`
 	ASN     int     `json:"asn"`
 	Network string  `json:"network"`
@@ -72,7 +80,13 @@ type Result struct {
 	ICMPError    string     `json:"icmpError,omitempty"` // 该补测 ping 却没做成(额度、接口出错):这次分不清 IP 还是端口
 	Rechecked    bool       `json:"rechecked,omitempty"` // 定时巡检发现异常后隔一会儿又测了一遍
 	Error        string     `json:"error,omitempty"`
+	Note         string     `json:"note,omitempty"` // 外部节点检测的提示代码,逗号分隔(见 verdictExt)
 	Measurements []string   `json:"measurements,omitempty"`
+	// TCPv6Only 这台的 TCP 线路在订阅里都走 IPv6:IPv4 这项不拿它们的端口去测(测出"通"也不是用户连的那条路),
+	// 改测订阅 / API 端口
+	TCPv6Only bool `json:"tcpV6Only,omitempty"`
+	// V6 同一轮做的 IPv6 入站检测(这台订阅里有走 IPv6 的线路时才有,见 v6.go)
+	V6 *V6Result `json:"v6,omitempty"`
 	// Attempt 只出现在给面板的结果里:最近一次没测成(额度用完、接口出错),上面显示的是再上一次测成的结果
 	Attempt *Attempt `json:"attempt,omitempty"`
 }
@@ -184,6 +198,70 @@ func verdict(gs map[string]*Group, icmp *ICMPCheck, icmpOnly bool) string {
 		return VerdictPartial
 	}
 	return VerdictOK
+}
+
+// 外部节点检测结果里的提示代码(面板翻译成文字)。
+const (
+	NoteUDPPing     = "udpPing"     // UDP 协议:测点没法连 UDP 端口,只验证了地址 ping 得通
+	NoteHKDown      = "hkDown"      // 大陆通、香港不通:国内中转入口常见(只放行大陆),不影响大陆用户
+	NoteCarrierDown = "carrierDown" // 大陆过半通,但有一家运营商整家不通
+	NoteBothDown    = "bothDown"    // 大陆、香港都不通:节点或端口的问题,或入口只放行特定来源
+)
+
+// verdictExt 外部节点的判定。服务器巡检的 verdict 以"香港能不能连"为前提(香港不通就是机器自己的问题),
+// 外部节点不一样:国内中转入口常常只放行大陆 IP,大陆三网都通、香港不通是正常的,以前被判成"境外也不通"。
+//   - 大陆过半测点通 → ok(香港不通只作提示;有运营商整家不通也提示);
+//   - 大陆有通的但不到一半 → partial;
+//   - 大陆全不通、香港通(或没有香港测点)→ 疑似被墙(连端口时再 ping 一次分 IP / 端口);
+//   - 两边都不通 → abroadDown(面板上写"都不可达",说明可能的原因)。
+//
+// icmpOnly:只做了 ping(UDP 协议),提示里注明。
+func verdictExt(gs map[string]*Group, icmp *ICMPCheck, icmpOnly bool) (string, string) {
+	var notes []string
+	if icmpOnly {
+		notes = append(notes, NoteUDPPing)
+	}
+	note := func(more ...string) string { return strings.Join(append(notes, more...), ",") }
+	measured, down, cnOK, cnTotal := 0, 0, 0, 0
+	for _, k := range carrierGroups {
+		g := gs[k]
+		if g.State == StateNone {
+			continue
+		}
+		measured++
+		cnOK += g.OK
+		cnTotal += g.Total
+		if g.State == StateDown {
+			down++
+		}
+	}
+	if measured == 0 {
+		return VerdictNoProbes, note()
+	}
+	hk := gs[GroupAbroad]
+	switch {
+	case cnOK*2 >= cnTotal:
+		var more []string
+		if down > 0 {
+			more = append(more, NoteCarrierDown)
+		}
+		if hk.Total > 0 && hk.OK == 0 {
+			more = append(more, NoteHKDown)
+		}
+		return VerdictOK, note(more...)
+	case cnOK > 0 || measured < 2: // 只有一家有测点时,它不通也说不上"大陆都不通"
+		return VerdictPartial, note()
+	case hk.OK > 0 || hk.Total == 0:
+		switch {
+		case icmpOnly:
+		case icmp != nil && icmp.CNOK > 0:
+			return VerdictPortBlocked, note()
+		case icmp != nil && icmp.CNTotal > 0 && icmp.HKOK > 0:
+			return VerdictIPBlocked, note()
+		}
+		return VerdictBlocked, note()
+	}
+	return VerdictAbroadDown, note(NoteBothDown)
 }
 
 // orderedGroups 按界面顺序排好:移动、电信、联通、香港。

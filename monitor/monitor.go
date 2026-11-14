@@ -45,6 +45,15 @@ type Deps struct {
 	SelfName     func() string // 本机在服务器列表里的名字,告警文案里点名是哪台
 	SelfNodeId   func() uint
 	Alerting     func() bool // 只有主机发告警:副机没有通知配置,也不该重复发
+	// CertSummary 日报里的证书一行(主机汇总各服务器);nil = 不报
+	CertSummary func() CertSummary
+}
+
+// CertSummary 各服务器正用着的证书:30 天内到期的、自动续期在失败的、要手动续期的手动 DNS 证书。
+type CertSummary struct {
+	Expiring int
+	Failing  int
+	Manual   int
 }
 
 // NodeHealth 某台服务器上某条上游的巡检结果(主机汇总各机结果时用)。
@@ -416,7 +425,7 @@ func (m *Monitor) DailyReport() string {
 		Where("resource = ? AND date_time > ?", "user", since).Group("tag").Order("traffic DESC").Limit(5).Scan(&tops)
 
 	var disabled int64
-	m.d.DB.Model(&model.Change{}).Where("actor = ? AND date_time > ?", "DepleteJob", since).Count(&disabled)
+	m.d.DB.Model(&model.Change{}).Where("actor = ? AND date_time > ?", model.ActorDepleteJob, since).Count(&disabled)
 
 	// 按 服务器 × 上游 计,和概览、告警同一口径:以前只数主机本机,主机不部署线路时这一行永远不出现,副机上的故障看不到(审计 MB18)
 	m.mu.Lock()
@@ -440,6 +449,11 @@ func (m *Monitor) DailyReport() string {
 	fmt.Fprintf(&b, "流量(24h):↑ %s  ↓ %s\n", human(up), human(down))
 	if okN+badN > 0 {
 		fmt.Fprintf(&b, "上游巡检:%d 正常 / %d 故障\n", okN, badN)
+	}
+	if m.d.CertSummary != nil {
+		if c := m.d.CertSummary(); c.Expiring+c.Failing+c.Manual > 0 {
+			fmt.Fprintf(&b, "证书:30 天内到期 %d 张,自动续期失败 %d 张,要手动续期 %d 张\n", c.Expiring, c.Failing, c.Manual)
+		}
 	}
 	if len(tops) > 0 {
 		b.WriteString("流量 Top:\n")

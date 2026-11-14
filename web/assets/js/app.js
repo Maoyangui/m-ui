@@ -3,7 +3,8 @@ import { get, post, setUnauthorizedHandler, LONG } from './api.js';
 import { t, setLang, getLang, langs } from './i18n.js';
 import { trErr } from './errmsg.js';
 import { ICONS } from './icons.js';
-import { toast, confirm, closeModal, closeDrawer, drawerOpen, esc, setTimezone } from './ui.js';
+import { toast, confirm, closeModal, closeDrawer, drawerOpen, esc, setTimezone, fmtDay } from './ui.js';
+import { sortCerts, certSig, sortReach, reachSig, reachHard } from './issues.js';
 import * as dashboard from './pages/dashboard.js';
 import * as lines from './pages/lines.js';
 import * as upstreams from './pages/upstreams.js';
@@ -20,10 +21,13 @@ import * as ops from './pages/ops.js';
 import * as logs from './pages/logs.js';
 import * as settings from './pages/settings.js';
 import * as admin from './pages/admin.js';
+import { haNotices } from './ha.js';
 
 export const state = {
   status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [], exts: [], rules: [], limitStates: [],
   onlines: { users: [], lines: [], upstreams: [], connCounts: {} },
+  at: {},  // 各类数据最近一次取成功的时间(毫秒):概况据此判断"面板状态没取到"
+  err: {}, // 各类数据最近一次失败的错误(成功后清掉)
 };
 
 const pages = { dashboard, lines, upstreams, exts, users, plans, rules: rulesPage, resellers, account, nodes, cert, backup, ops, logs, admin, settings };
@@ -56,22 +60,24 @@ export async function ensure(...what) {
 function resetState() {
   loaded.clear();
   Object.assign(state, { status: {}, settings: {}, lines: [], upstreams: [], users: [], plans: [], nodes: [], exts: [], rules: [], limitStates: [],
-    onlines: { users: [], lines: [], upstreams: [], connCounts: {} } });
+    onlines: { users: [], lines: [], upstreams: [], connCounts: {} }, at: {}, err: {} });
 }
 export async function load(...what) {
   const all = what.length === 0;
   const jobs = [];
-  if (all || what.includes('status')) jobs.push(get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); reloadNotice(); reachNotice(); }));
-  if (all || what.includes('settings')) jobs.push(get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
-  if (all || what.includes('lines')) jobs.push(get('lines').then(l => { state.lines = l; }));
-  if (!isReseller() && (all || what.includes('upstreams'))) jobs.push(get('upstreams').then(u => { state.upstreams = u; }));
-  if (all || what.includes('users')) jobs.push(get('users').then(u => { state.users = u; }));
+  // 每类数据各记各的成败时间:概况上"面板状态没取到 · 某时的数据"靠它
+  const job = (key, p) => jobs.push(p.then(() => { state.at[key] = Date.now(); delete state.err[key]; }, e => { state.err[key] = e; throw e; }));
+  if (all || what.includes('status')) job('status', get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); restoreNotice(); reloadNotice(); reachNotice(); certNotice(); haNotices(s); }));
+  if (all || what.includes('settings')) job('settings', get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
+  if (all || what.includes('lines')) job('lines', get('lines').then(l => { state.lines = l; }));
+  if (!isReseller() && (all || what.includes('upstreams'))) job('upstreams', get('upstreams').then(u => { state.upstreams = u; }));
+  if (all || what.includes('users')) job('users', get('users').then(u => { state.users = u; }));
   // 生效中的规则限速:用户列表据此打"限速中"标记(主面板才有;副机 / 代理拿不到就保持空)
   if (!isReseller() && (all || what.includes('users'))) jobs.push(get('limitstates').then(l => { state.limitStates = l || []; }).catch(() => {}));
-  if (all || what.includes('plans')) jobs.push(get('plans').then(p => { state.plans = p || []; }));
+  if (all || what.includes('plans')) job('plans', get('plans').then(p => { state.plans = p || []; }));
   if (!isReseller() && (all || what.includes('nodes'))) jobs.push(get('nodes').then(n => { state.nodes = (n && n.nodes) || []; }).catch(() => { state.nodes = []; }));
   if (!isReseller() && (all || what.includes('exts'))) jobs.push(get('exts').then(x => { state.exts = x || []; }).catch(() => { state.exts = []; }));
-  if (all || what.includes('onlines')) jobs.push(get('onlines').then(o => { state.onlines = o; }));
+  if (all || what.includes('onlines')) job('onlines', get('onlines').then(o => { state.onlines = o; }));
   await Promise.all(jobs);
   (all ? ALL_DATA : what).forEach(k => loaded.add(k));
 }
@@ -93,6 +99,7 @@ const PAGE_DATA = {
 let needTotp = false; // 服务端要求过两步验证码后,登录框一直显示验证码栏
 function showLogin() {
   document.getElementById('app').hidden = true;
+  document.documentElement.lang = getLang() === 'zh' ? 'zh-CN' : 'en';
   const l = document.getElementById('login');
   l.hidden = false;
   document.getElementById('login-title').textContent = t('login.title');
@@ -101,10 +108,13 @@ function showLogin() {
   document.getElementById('login-submit').textContent = t('login.submit');
   document.getElementById('login-code-label').textContent = t('login.code');
   supportLink(document.getElementById('login-support'));
+  helpLink(document.getElementById('login-help'), 'login');
   document.getElementById('login-code-wrap').hidden = !needTotp;
   setTimeout(() => document.getElementById('lg-user').focus(), 50);
 }
-setUnauthorizedHandler(showLogin);
+// 401 时回到登录页。代理面板的 401 带 scope: 'reseller'(web/reseller_panel.go):还没登录、没有 status 时,
+// 登录页靠它认出这是代理面板,「帮助说明」打开代理视图
+setUnauthorizedHandler(d => { if (d && d.scope) panelScope = d.scope; showLogin(); });
 
 document.getElementById('login-form').addEventListener('submit', async ev => {
   ev.preventDefault();
@@ -154,14 +164,42 @@ function supportLink(a) {
   a.href = 'support?lang=' + getLang();
 }
 
+// "帮助说明"按钮:新标签页打开内嵌的帮助页(help/zh.html、help/en.html,跟面板同一个语言),并定位到当前页面对应的章节。
+// 代理面板带上 view=reseller:帮助页只留代理用得上的章节。帮助页和面板其它前端文件一样只在面板路径下提供,用相对地址,
+// 改了面板路径也照样打开。键是页面名(login 是登录页),值是帮助页里的章节 id(两种语言一致,web/help_test.go 会核对)。
+const HELP_ANCHOR = {
+  login: 'first-login', dashboard: 'start', lines: 'lines', upstreams: 'upstreams', exts: 'exts', users: 'users', resellers: 'resellers',
+  plans: 'plans', rules: 'rules', nodes: 'nodes', cert: 'cert', backup: 'backup', ops: 'ops', logs: 'logs',
+  admin: 'security', settings: 'settings',
+};
+const HELP_ANCHOR_RESELLER = { login: 'rs-login', dashboard: 'rs-start', users: 'users', plans: 'plans', account: 'rs-account' };
+const HELP_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.8"/><path d="M12 17.2h.01"/></svg>';
+// panelScope 记住这是哪个面板:登录后取 status.scope;没登录时取接口 401 带回来的(见 setUnauthorizedHandler)。
+// 退出登录回到登录页时 status 已经不作数,也还认得出是代理面板
+let panelScope = '';
+function helpLink(a, page) {
+  if (!a) return;
+  if ((state.status || {}).scope) panelScope = state.status.scope;
+  const rs = panelScope === 'reseller';
+  const anchor = (rs ? HELP_ANCHOR_RESELLER : HELP_ANCHOR)[page] || '';
+  a.href = `help/${getLang() === 'zh' ? 'zh' : 'en'}.html${rs ? '?view=reseller' : ''}${anchor ? '#' + anchor : ''}`;
+  if (a.dataset.lang !== getLang()) { // 文字只在换语言时重画
+    a.dataset.lang = getLang();
+    a.innerHTML = `${HELP_ICON}<span class="help-label">${esc(t('help.btn'))}</span>`;
+    a.title = t('help.btn');
+  }
+}
+
 // ---- 壳:导航、角色、主题、语言 ----
 function renderChrome() {
+  document.documentElement.lang = getLang() === 'zh' ? 'zh-CN' : 'en'; // 换成英文时页面语言跟着换(读屏、表头折行规则看它)
   document.getElementById('nav').innerHTML = navFor().map(p =>
     `<a href="#/${p}" data-page="${p}"><span class="ic">${ICONS[p] || ''}</span>${t('nav.' + p)}</a>`).join('');
   reachNotice(); // 导航重画后补上"服务器"的红点
   document.getElementById('modal-cancel').textContent = t('common.cancel');
   document.getElementById('btn-logout').textContent = t('common.logout');
   supportLink(document.getElementById('btn-support'));
+  helpLink(document.getElementById('btn-help'), current || pageName());
   const sel = document.getElementById('lang-select');
   sel.innerHTML = Object.entries(langs).map(([k, v]) => `<option value="${k}" ${k === getLang() ? 'selected' : ''}>${v}</option>`).join('');
   renderRole();
@@ -171,9 +209,11 @@ function renderRole() {
   const b = document.getElementById('role-badge');
   if (s.scope === 'reseller') {
     b.textContent = s.reseller || t('rs.role');
+    b.title = s.reseller || '';
     b.className = 'badge warn';
   } else {
     b.textContent = s.role === 'node' ? t('role.node') : t('role.master');
+    b.title = '';
     b.className = 'badge ' + (s.role === 'node' ? 'node' : 'primary');
   }
   document.getElementById('sidebar-version').textContent = s.version ? 'v' + s.version : '';
@@ -215,7 +255,11 @@ async function refreshUpdateBadge() {
   }
 }
 
-document.getElementById('update-dot').addEventListener('click', async () => {
+// updateInfo 版本检查的结果(没查过 / 查不到为 null);promptUpdate 和点版本号旁的箭头一样
+export const updateInfo = () => updateState;
+export function promptUpdate() { return doUpdate(); }
+document.getElementById('update-dot').addEventListener('click', () => doUpdate());
+async function doUpdate() {
   if (!updateState) return;
   const ok = await confirm(
     [t('update.confirm', { from: 'v' + updateState.current, to: updateState.latest }), t('update.note')].join(String.fromCharCode(10)),
@@ -234,7 +278,7 @@ document.getElementById('update-dot').addEventListener('click', async () => {
   toast(t('update.restarting'), 'ok');
   if (res && res.watch === false) toast(t('update.noWatch'), 'err');
   waitForPanel();
-});
+}
 
 // 上次一键更新回滚过:在页面顶部明说,管理员点"知道了"才清掉(状态文件在数据目录里,重启也不会忘)
 function upgradeNotice() {
@@ -256,11 +300,39 @@ function upgradeNotice() {
   });
 }
 
+// 上次从备份还原时,数据目录外的证书放进了数据目录(备份那一刻的副本,没有谁续)、或者还缺 / 没写成证书文件:在页面顶部明说,
+// 管理员点"知道了"才清掉。面板上传的还原在重启时应用,这些以前只写进启动日志(结果文件在数据目录里,重启也不会忘)
+function restoreNotice() {
+  const n = !isReseller() && state.status && state.status.restore;
+  let bar = document.getElementById('restore-bar');
+  if (!n) { if (bar) bar.remove(); return; }
+  if (bar) return;
+  const main = document.querySelector('.main'), page = document.getElementById('page');
+  if (!main || !page) return;
+  const sep = t('reach.sep'), parts = [];
+  if ((n.copies || []).length) {
+    const list = n.copies.map(c => t('alert.restoreCopy', { name: (c.names || [])[0] || c.from, date: fmtDay(c.notAfter) })).join(sep);
+    parts.push(t('alert.restoreCopies', { list }));
+  }
+  if ((n.missing || []).length) parts.push(t('alert.restoreMissing', { list: n.missing.join(sep) }));
+  if ((n.failed || []).length) parts.push(t('alert.restoreFailed', { list: n.failed.join(sep) }));
+  bar = document.createElement('div');
+  bar.id = 'restore-bar';
+  bar.className = 'alert-bar warn';
+  bar.innerHTML = `<span><b>${esc(t('alert.restoreTitle'))}</b> ${esc(parts.join(' '))}</span><div class="row"><a href="#/cert" class="btn sm">${esc(t('alert.certView'))}</a><button class="btn sm ghost" id="restore-ack">${esc(t('update.ack'))}</button></div>`;
+  main.insertBefore(bar, page);
+  bar.querySelector('#restore-ack').addEventListener('click', async () => {
+    await post('backup/restore-ack').catch(() => {});
+    if (state.status) delete state.status.restore;
+    bar.remove();
+  });
+}
+
 // 最近一次数据面重载失败:保存早已返回"成功",线上其实还是旧配置。常驻在页面顶部,直到下一次重载成功。
 function reloadNotice() {
   const rl = state.status && state.status.reload;
   let bar = document.getElementById('reload-bar');
-  if (!rl || rl.ok || isReseller()) { if (bar) bar.remove(); return; }
+  if (!rl || !rl.at || rl.ok || isReseller() || onDash()) { if (bar) bar.remove(); return; }
   const text = t('alert.reloadFailed', { op: trErr(rl.op || ''), err: trErr(rl.error || '') });
   if (bar && bar.dataset.err === text) return;
   const main = document.querySelector('.main'), page = document.getElementById('page');
@@ -281,6 +353,47 @@ function reloadNotice() {
   });
 }
 
+// 证书要处理:自动续期在失败、正用着又快到期 / 过期 / 文件读不出来的(主机连副机的一起;副机一般没配通知,
+// 它的证书出了问题以前只有主机面板上锁图标后的天数能看出来)。顶部常驻一条,可以按当前这组情况关掉,情况变了再出现。
+function certNotice() {
+  const list = (!isReseller() && state.status && state.status.certAlerts) || [];
+  let bar = document.getElementById('cert-bar');
+  const sig = certSig(list);
+  let dismissed = '';
+  try { dismissed = localStorage.getItem('m-ui.certDismissed') || ''; } catch {}
+  if (!list.length || dismissed === sig || onDash()) { if (bar) bar.remove(); return; }
+  const what = a => {
+    if (a.trouble === 'failing') return t('alert.certFailing');
+    // 面板 / 订阅 / 代理面板读不出这张证书,正用临时自签证书顶着(换机还原后最常见):说清楚是谁在顶
+    if (a.trouble === 'missing' && a.fallback) return t('alert.certFallback', { svc: a.fallback.split(',').map(x => t('alert.svc.' + x)).join(t('reach.sep')) });
+    if (a.trouble === 'missing') return t('alert.certMissing');
+    const left = Math.floor((a.notAfter - Date.now() / 1000) / 86400);
+    if (left < 0) return t('alert.certExpired');
+    if (a.restored) return t('alert.certRestored', { n: left }); // 换机还原放进来的副本:没有谁续它
+    return t(a.method === 'manual' ? 'alert.certManual' : 'alert.certLeft', { n: left });
+  };
+  // 最要紧的在前(续期失败 → 文件读不出 → 已过期 → 快到期),只列 3 张,其余写「等 N 张」
+  const shown = sortCerts(list).slice(0, 3).map(a => (a.node ? a.node + ' · ' : '') + a.name + ' ' + what(a)).join(t('reach.sep'));
+  const text = t('alert.certs', { list: shown + (list.length > 3 ? t('alert.certMore', { n: list.length, more: list.length - 3 }) : '') });
+  if (bar && bar.dataset.sig === sig && bar.dataset.text === text) return;
+  const main = document.querySelector('.main'), page = document.getElementById('page');
+  if (!main || !page) return;
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'cert-bar';
+    main.insertBefore(bar, page);
+  }
+  bar.className = 'alert-bar' + (list.some(a => a.trouble !== 'expiring') ? '' : ' warn');
+  bar.dataset.sig = sig;
+  bar.dataset.text = text;
+  const where = list.some(a => !a.nodeId) ? 'cert' : 'nodes?f=bad'; // 本机的去证书页,只有副机的去服务器页(只看异常)
+  bar.innerHTML = `<span title="${esc(text)}"><b>${esc(text)}</b></span><div class="row"><a href="#/${where}" class="btn sm">${esc(t('alert.certView'))}</a><button class="btn sm ghost" id="cert-dismiss">${esc(t('reach.dismiss'))}</button></div>`;
+  bar.querySelector('#cert-dismiss').addEventListener('click', () => {
+    try { localStorage.setItem('m-ui.certDismissed', sig); } catch {}
+    bar.remove();
+  });
+}
+
 // 大陆连通异常(被墙 / 部分运营商不通):导航"服务器"上亮红点,顶部常驻一条提示。
 // 提示可以点"知道了"按当前这组情况关掉;又有别的服务器出事、或同一台换了结论,再出现。
 function reachNotice() {
@@ -288,11 +401,12 @@ function reachNotice() {
   const nav = document.querySelector('#nav a[data-page="nodes"]');
   if (nav) nav.classList.toggle('has-alert', bad.length > 0);
   let bar = document.getElementById('reach-bar-top');
-  const sig = bad.map(r => r.nodeId + ':' + r.verdict).join(',');
+  const sig = reachSig(bad);
   let dismissed = '';
   try { dismissed = localStorage.getItem('m-ui.reachDismissed') || ''; } catch {}
-  if (!bad.length || dismissed === sig) { if (bar) bar.remove(); return; }
-  const list = bad.map(r => `${r.name} ${t('reach.v.' + r.verdict)}`).join(t('reach.sep'));
+  if (!bad.length || dismissed === sig || onDash()) { if (bar) bar.remove(); return; }
+  // 不通的在前,只列 3 台,其余写「等 N 台」(40 台出事时以前能把手机首屏占满)
+  const list = sortReach(bad).slice(0, 3).map(r => `${r.name} ${t('reach.v.' + r.verdict)}`).join(t('reach.sep')) + (bad.length > 3 ? t('reach.more', { n: bad.length, more: bad.length - 3 }) : '');
   const text = t('reach.alert', { list });
   if (bar && bar.dataset.sig === sig && bar.dataset.text === text) return;
   const main = document.querySelector('.main'), page = document.getElementById('page');
@@ -302,11 +416,11 @@ function reachNotice() {
     bar.id = 'reach-bar-top';
     main.insertBefore(bar, page);
   }
-  const blocked = bad.some(r => r.verdict !== 'partial');
+  const blocked = reachHard(bad).length > 0;
   bar.className = 'alert-bar' + (blocked ? '' : ' warn');
   bar.dataset.sig = sig;
   bar.dataset.text = text;
-  bar.innerHTML = `<span><b>${esc(text)}</b></span><div class="row"><a href="#/nodes" class="btn sm">${esc(t('reach.view'))}</a><button class="btn sm ghost" id="reach-dismiss">${esc(t('reach.dismiss'))}</button></div>`;
+  bar.innerHTML = `<span title="${esc(text)}"><b>${esc(text)}</b></span><div class="row"><a href="#/nodes?f=bad" class="btn sm">${esc(t('reach.view'))}</a><button class="btn sm ghost" id="reach-dismiss">${esc(t('reach.dismiss'))}</button></div>`;
   bar.querySelector('#reach-dismiss').addEventListener('click', () => {
     try { localStorage.setItem('m-ui.reachDismissed', sig); } catch {}
     bar.remove();
@@ -362,6 +476,14 @@ document.getElementById('drawer-close').addEventListener('click', closeDrawer);
 document.addEventListener('keydown', e => {
   // Esc 关闭弹窗/抽屉;Ctrl/⌘+Enter 提交弹窗;"/" 聚焦当前页搜索框
   if (e.key === 'Escape') {
+    // 弹窗里的搜索框(线路选择器、勾选列表、用户选择器)有字时,Esc 只清空它,不关掉整个弹窗、丢掉没保存的修改
+    const a = document.activeElement;
+    if (a && !modal.hidden && modal.contains(a) && a.matches('input[type=search]') && a.value) {
+      e.preventDefault();
+      a.value = '';
+      a.dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
     if (drawerOpen() && document.getElementById('drawer').classList.contains('over')) closeDrawer(); // 盖在弹窗上的抽屉先关
     else if (!modal.hidden) cancelModal();
     else if (drawerOpen()) closeDrawer();
@@ -383,8 +505,20 @@ document.addEventListener('click', e => {
 });
 
 // ---- 路由 ----
+// 概况等页面的"查看全部"链接带筛选参数(#/users?f=online、#/nodes?f=bad):目标页 render 时读一次写进自己的模块变量,
+// 再用 takeHashParams 把参数从地址栏去掉,之后手动改的筛选不会被地址覆盖。
+export const hashParams = () => new URLSearchParams(location.hash.split('?')[1] || '');
+export function takeHashParams(page) {
+  const p = hashParams();
+  if ([...p.keys()].length) history.replaceState(null, '', '#/' + page);
+  return p;
+}
+// 列表类页面随窗口放宽(最宽 2400px),表单类保持 1600px
+const FLUID = new Set(['dashboard', 'lines', 'upstreams', 'exts', 'users', 'plans', 'resellers', 'rules', 'nodes', 'logs', 'settings']);
+// 概况页自己有「需要处理」卡:同一份数据的重载失败、证书、大陆连通三条顶部提示条在概况页不再叠在上面
+const onDash = () => current === 'dashboard';
 function pageName() {
-  const h = location.hash.replace(/^#\/?/, '').split('/')[0];
+  const h = location.hash.replace(/^#\/?/, '').split(/[/?]/)[0];
   // 代理会话下,主面板专属页面一律回概览(那些接口本来也是 403,别让界面误导人)
   if (!pages[h] || !navFor().includes(h)) return 'dashboard';
   return h;
@@ -421,6 +555,7 @@ async function route(force = false) {
   current = name;
   routing = true;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.page === name));
+  helpLink(document.getElementById('btn-help'), name);
   const page = pages[name];
   document.getElementById('page-title').textContent = page.title();
   const sub = document.getElementById('page-subtitle');
@@ -428,13 +563,17 @@ async function route(force = false) {
   document.getElementById('topbar-right').innerHTML = '';
   closeDrawer();
   const el = document.getElementById('page');
+  el.dataset.layout = FLUID.has(name) ? 'fluid' : '';
+  el.dataset.page = name;
+  reloadNotice(); certNotice(); reachNotice(); // 进出概况页时三条提示条跟着收起 / 回来
   el.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
   const prev = renderQueue;
   renderQueue = (async () => {
     await prev.catch(() => {});
     if (gen !== routeGen) return; // 排队期间又换页了,这一次直接不画
     try {
-      await ensure(...(PAGE_DATA[name] || []));
+      // 能自己显示"没取到"的页面(概况,导出 tickOnError):预取失败照样画,哪块没取到哪块写明,不整页换成报错卡
+      await ensure(...(PAGE_DATA[name] || [])).catch(e => { if (e.status === 401 || !page.tickOnError) throw e; });
       if (gen !== routeGen) return;
       await page.render(el);
     } catch (e) {
@@ -465,10 +604,12 @@ export async function refreshNow() {
   refreshing = true;
   const gen = routeGen;
   try {
-    await load('status', 'onlines');
+    let failed = false;
+    try { await load('status', 'onlines'); } catch { failed = true; }
     if (gen !== routeGen) return false; // 拉数据期间换了页,这一轮的结果不该画到新页面上
     const page = pages[current];
-    if (page && page.tick) await page.tick();
+    // 没取到时,只有自己能显示"没取到"的页面(概况,导出 tickOnError)照样画这一轮
+    if (page && page.tick && (!failed || page.tickOnError)) await page.tick();
   } catch {}
   finally { refreshing = false; }
   return true;
@@ -485,6 +626,13 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) bump
     if (!document.getElementById('app').hidden && !document.hidden) refreshNow();
     refreshLoop();
   }, Date.now() < fastUntil ? REFRESH_FAST : REFRESH_SLOW);
+})();
+
+// 顶栏高度(窄屏下标题会折行)写进 --topbar-h:吸附的批量条、表格限高滚动区都按它算
+(() => {
+  const bar = document.querySelector('.topbar');
+  if (!bar || typeof ResizeObserver === 'undefined') return;
+  new ResizeObserver(() => { if (bar.offsetHeight) document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px'); }).observe(bar);
 })();
 
 // ---- 启动 ----

@@ -13,11 +13,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
@@ -115,6 +117,51 @@ func TestInsecureNodePinsCertificate(t *testing.T) {
 	}
 	if n := load(); n.CertFP != "" {
 		t.Fatalf("正常校验的副机不该记指纹,得 %q", n.CertFP)
+	}
+	h.CloseIdleConnections()
+}
+
+// 副机的证书文件读不出来、面板正用临时自签证书顶着:主机连它时说清楚是这个原因 —— 勾了"跳过证书校验"的按指纹比对不上,
+// 以前只说"指纹变了、重签了就重置指纹";没勾的校验不过,以前只有 x509 的"签发者不认识"。记住的指纹照旧不动。
+func TestNodeOnTempCertExplained(t *testing.T) {
+	db := openDB(t, "tempcert.db").DB
+	realCert := selfSigned(t, "node")
+	gone := filepath.Join(t.TempDir(), "gone.pem")
+	tc, err := certutil.NewReloaderOrTemp(gone, gone, "127.0.0.1").GetCertificate(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normal, onTemp := tlsNode(t, realCert), tlsNode(t, *tc)
+	db.Create(&model.Node{Name: "az", ApiUrl: normal.URL, Token: "tok", Insecure: true})
+	h := New(Deps{DB: db})
+	load := func() model.Node {
+		var n model.Node
+		if err := db.First(&n, 1).Error; err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if _, err := h.Ping(load()); err != nil {
+		t.Fatalf("首次连接应成功: %v", err)
+	}
+
+	db.Model(&model.Node{}).Where("id = ?", 1).Update("api_url", onTemp.URL)
+	_, err = h.Ping(load())
+	if err == nil || !strings.Contains(err.Error(), "正用临时自签证书顶着") || !strings.Contains(err.Error(), "打开副机面板看顶部提示") || strings.Contains(err.Error(), "要是你重签了证书") {
+		t.Fatalf("应说清副机在用临时证书: %v", err)
+	}
+	if n := load(); n.CertFP != fingerprint(realCert) {
+		t.Fatalf("记住的指纹不该被改: %q", n.CertFP)
+	}
+
+	db.Model(&model.Node{}).Where("id = ?", 1).Update("insecure", false)
+	if _, err := h.Ping(load()); err == nil || !strings.Contains(err.Error(), "正用临时自签证书顶着,校验不过") {
+		t.Fatalf("正常校验的副机也要说清是临时证书: %v", err)
+	}
+	// 普通的自签证书校验不过:照旧是原来的报错,不扯临时证书
+	db.Model(&model.Node{}).Where("id = ?", 1).Update("api_url", normal.URL)
+	if _, err := h.Ping(load()); err == nil || strings.Contains(err.Error(), "临时") {
+		t.Fatalf("普通自签证书的报错不该提临时证书: %v", err)
 	}
 	h.CloseIdleConnections()
 }

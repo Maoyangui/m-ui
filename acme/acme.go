@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -241,6 +242,15 @@ func loadOrCreateAccountKey(pemStr string) (*ecdsa.PrivateKey, string, error) {
 	return k, string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: b})), nil
 }
 
+// ErrPort80Busy HTTP 验证绑不上 80 端口(被线路、nginx 等占着,或者没有权限):用 errors.Is 认。
+var ErrPort80Busy = errors.New("80 端口被占用")
+
+// port80Busy 包住绑定 80 端口的原始错误,文案不变,errors.Is(err, ErrPort80Busy) 认得出来。
+type port80Busy struct{ error }
+
+func (port80Busy) Is(target error) bool { return target == ErrPort80Busy }
+func (e port80Busy) Unwrap() error      { return e.error }
+
 // serveHTTP01 在 :80 临时提供验证文件。
 func serveHTTP01(client *acme.Client, chal *acme.Challenge, logf func(string, ...interface{})) (func(), error) {
 	resp, err := client.HTTP01ChallengeResponse(chal.Token)
@@ -250,7 +260,7 @@ func serveHTTP01(client *acme.Client, chal *acme.Challenge, logf func(string, ..
 	path := client.HTTP01ChallengePath(chal.Token)
 	ln, err := net.Listen("tcp", ":80")
 	if err != nil {
-		return nil, fmt.Errorf("监听 80 端口失败(http-01 需要 80 端口空闲且公网可达): %w", err)
+		return nil, fmt.Errorf("监听 80 端口失败(http-01 需要 80 端口空闲且公网可达): %w", port80Busy{err})
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
@@ -481,11 +491,48 @@ type CertInfo struct {
 	DNSNames   []string  `json:"dnsNames"`
 	IPs        []string  `json:"ips"`
 	Issuer     string    `json:"issuer"`
+	IssuerOrg  []string  `json:"issuerOrg,omitempty"` // 签发者的组织(Let's Encrypt 签的是 "Let's Encrypt")
 	NotBefore  time.Time `json:"notBefore"`
 	NotAfter   time.Time `json:"notAfter"`
 	DaysLeft   int       `json:"daysLeft"`
 	SelfSigned bool      `json:"selfSigned"`
 	Error      string    `json:"error,omitempty"`
+}
+
+// Lifetime 证书的有效期(签发到到期);读不出来为 0。
+func (c CertInfo) Lifetime() time.Duration {
+	if !c.Exists || !c.NotAfter.After(c.NotBefore) {
+		return 0
+	}
+	return c.NotAfter.Sub(c.NotBefore)
+}
+
+// leIntermediate Let's Encrypt 中间证书的 CN:R10–R14、E5–E9,以及之后 YR1、YE1 这一代(老的 R3 / E1 也是这个样子)。
+var leIntermediate = regexp.MustCompile(`^(?:R|E|YR|YE)\d{1,2}$`)
+
+// IsLetsEncrypt 是不是 Let's Encrypt 签的:看签发者的组织;只看得到 CN 时认它的中间证书命名
+// (现在的中间证书 CN 是 R11、E6、YE1 这类名字,不含 "Encrypt";测试环境的带 (STAGING) 前缀)。
+func (c CertInfo) IsLetsEncrypt() bool {
+	for _, o := range c.IssuerOrg {
+		if strings.Contains(strings.ToLower(o), "let's encrypt") {
+			return true
+		}
+	}
+	cn := strings.TrimSpace(c.Issuer)
+	return strings.Contains(strings.ToLower(cn), "encrypt") || strings.HasPrefix(cn, "(STAGING)") || leIntermediate.MatchString(cn)
+}
+
+// IsStaging 是不是 Let's Encrypt 测试环境签的(不受信任):签发者带 (STAGING) 前缀。
+func (c CertInfo) IsStaging() bool {
+	if strings.HasPrefix(strings.TrimSpace(c.Issuer), "(STAGING)") {
+		return true
+	}
+	for _, o := range c.IssuerOrg {
+		if strings.HasPrefix(strings.TrimSpace(o), "(STAGING)") {
+			return true
+		}
+	}
+	return false
 }
 
 // Info 读取证书文件的基本信息。
@@ -510,7 +557,7 @@ func Info(certPath string) CertInfo {
 		return ci
 	}
 	ci.Exists = true
-	ci.Subject, ci.DNSNames, ci.Issuer = c.Subject.CommonName, c.DNSNames, c.Issuer.CommonName
+	ci.Subject, ci.DNSNames, ci.Issuer, ci.IssuerOrg = c.Subject.CommonName, c.DNSNames, c.Issuer.CommonName, c.Issuer.Organization
 	for _, ip := range c.IPAddresses {
 		ci.IPs = append(ci.IPs, ip.String())
 	}

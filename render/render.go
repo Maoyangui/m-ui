@@ -29,7 +29,7 @@ type NodeCert struct {
 
 // TLSConfig 是 Line.Tls 的结构。mode 为空时按协议取默认。
 type TLSConfig struct {
-	Mode        string `json:"mode"` // cert | reality | none
+	Mode        string `json:"mode"`           // cert | reality | none
 	Cert        string `json:"cert,omitempty"` // cert 模式下单独选的证书(证书库里的名字);空 = 服务器的默认证书
 	Fingerprint string `json:"fingerprint,omitempty"`
 	Reality     struct {
@@ -61,6 +61,9 @@ var Protocols = map[string]struct {
 	"http":        {TLSDefault: "cert", CredKey: "http"},
 	"mixed":       {TLSDefault: "none", CredKey: "socks"},
 }
+
+// UDPOnly 只监听 UDP 的协议(QUIC):不占同号的 TCP 端口(比如 HTTP 验证要用的 TCP 80)。
+func UDPOnly(protocol string) bool { return protocol == "hysteria2" || protocol == "tuic" }
 
 // ParseTLS 解析线路的 TLS 配置并补默认模式。
 func ParseTLS(line model.Line) TLSConfig {
@@ -183,7 +186,7 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 	}
 	pureV6 := PureIPv6(db)
 	if !AllowPrivate(db) {
-		// 用户经代理不该摸到这台机器自己(面板、WARP 的 socks 口、副机接口)、内网,以及云厂商的元数据地址
+		// 用户经代理不该摸到这台机器自己(面板、WARP 的 socks 口、副机接口;回环地址与本机公网地址都算)、内网,以及云厂商的元数据地址
 		// 169.254.169.254(AWS 上拿到实例凭证只要一个 GET)。域名要先解析成 IP,"localhost"或指向 127.0.0.1 的
 		// 自定义域名才拦得住;但 resolve 解析失败会直接拒绝连接,所以只对走直连出口的线路做——它们本来就要
 		// 在本机解析域名,没有新增失败点;经上游(WARP / 远端代理)出去的线路,私网指的是上游那头的网络,
@@ -204,6 +207,13 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 		}
 		rules = append(rules, splitResolve...)
 		rules = append(rules, json.RawMessage(`{"ip_is_private":true,"action":"reject"}`))
+		// 这台服务器自己的公网地址同样不让经代理碰(全部端口,理由见 ownPublicCIDRs);地址变了 runner 会重新渲染
+		if own := ownPublicCIDRs(db); len(own) > 0 {
+			rule, _ := json.Marshal(map[string]interface{}{"ip_cidr": own, "action": "reject"})
+			rules = append(rules, rule)
+		}
+		// 集群里别的服务器的管理端口(面板、副机接口、订阅、代理面板),理由与端口取法见 cluster.go
+		rules = append(rules, clusterBlockRules(db)...)
 	}
 	var defaults []json.RawMessage // 纯 IPv6 时各线路的默认出口规则挪到最后(见下)
 	for _, line := range lines {
@@ -384,7 +394,7 @@ func inboundBase(line model.Line, cert NodeCert) (map[string]interface{}, error)
 	}
 	inbound["type"] = line.Protocol
 	inbound["tag"] = line.Name
-	inbound["listen"] = "::"
+	inbound["listen"] = listenAddr()
 	inbound["listen_port"] = line.Port
 
 	tlsConf := ParseTLS(line)

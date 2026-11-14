@@ -10,7 +10,6 @@ import (
 	"embed"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
@@ -28,6 +28,7 @@ import (
 	"github.com/Maoyangui/m-ui/ops"
 	"github.com/Maoyangui/m-ui/runner"
 	"github.com/Maoyangui/m-ui/totp"
+	"github.com/Maoyangui/m-ui/util/slowreq"
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -57,6 +58,7 @@ type session struct {
 
 // Server 是面板 HTTP 服务。
 type Server struct {
+	credID   atomic.Uint64 // 凭据缓存的编号(见 credPrefix)
 	run      *runner.Runner
 	db       *gorm.DB
 	httpSrv  *http.Server
@@ -74,16 +76,33 @@ type Server struct {
 	agentApplyMu   sync.Mutex // 快照落库、重载和确认必须作为同一轮串行完成
 	sessions       map[string]session
 	loginFails     map[string][]int64 // ip → 最近失败时间
+	apiFails       map[string][]int64 // 外部 API 鉴权失败:ip → 最近失败时间(主面板令牌与代理令牌共用,见 body_limit.go)
 	ops            *ops.Runner
 
 	totpPending    string          // 两步验证:已生成、待认证器验证一次后才生效的密钥
 	totpPendingRS  map[uint]string // 同上,按代理
 	lastTotpStep   int64           // 最近一次登录成功用掉的时间步,同一验证码不能再用(防重放)
 	lastTotpStepRS map[uint]int64  // 同上,按代理
+
+	onRulesNow func() // 测试用:数"立刻重判限速规则"被触发了几次(测试里没有数据面)
+
+	// 概况「需要处理」的计数(见 attention.go):60 秒缓存
+	attnMu sync.Mutex
+	attnAt time.Time
+	attn   attentionView
+	// 副机:主机最近一次带令牌请求本机的时间(unix 秒),概况据此提示"主机多久没联系本机"
+	hubSeenAt atomic.Int64
+	startedAt int64 // 进程启动时间:副机重启后主机一直没来联系时,概况按它算「多久没联系」
+	// 副机:最近一次没应用成主机推来的配置(见 dash_extras.go)
+	applyRes applyState
+	// 代理名下用户 → 代理名,60 秒缓存(概况的在线名单链接用)
+	ownersMu sync.Mutex
+	owners   map[string]string
+	ownersAt time.Time
 }
 
 func NewServer(run *runner.Runner) *Server {
-	return &Server{run: run, db: run.DB(), sessions: map[string]session{},
+	return &Server{run: run, db: run.DB(), sessions: map[string]session{}, startedAt: time.Now().Unix(),
 		totpPendingRS: map[uint]string{}, lastTotpStepRS: map[uint]int64{}, ops: ops.NewRunner()}
 }
 
@@ -178,6 +197,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"users/", s.auth(s.masterOnly(s.handleUserItem)))
 	mux.HandleFunc(api+"users/import", s.auth(s.masterOnly(s.handleUsersImport)))
 	mux.HandleFunc(api+"settings", s.auth(s.handleSettings))
+	mux.HandleFunc(api+"sub-logo", s.auth(s.masterOnly(s.handleSubLogo))) // 落地页 logo:副机只读,随主机同步
 	mux.HandleFunc(api+"sub-templates", s.auth(s.masterOnly(s.handleSubTemplates)))
 	mux.HandleFunc(api+"sublogs", s.auth(s.handleSubLogs))
 	mux.HandleFunc(api+"password", s.auth(s.handlePassword))
@@ -213,6 +233,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"reach", s.auth(s.handleReach))        // 大陆连通检测:状态与结果
 	mux.HandleFunc(api+"reach/run", s.auth(s.handleReachRun)) // 手动检测(一台或全部)
 	mux.HandleFunc(api+"agent/", s.handleAgent)               // 内部按动作分别做令牌/会话鉴权
+	mux.HandleFunc(api+"ha", s.auth(s.handleHA))              // 主机容灾与设为主机:设置与状态
+	mux.HandleFunc(api+"ha/", s.handleHASub)                  // 内部按动作分别做会话 / HMAC(副机之间)鉴权
 	mux.HandleFunc(base+"logo.svg", brand.ServeLogo)
 	mux.HandleFunc(base+"support", s.handleSupport)
 	mux.HandleFunc(base+"support/qr", s.handleSupportQR)
@@ -269,17 +291,13 @@ func (s *Server) Start() error {
 	scheme := "http"
 	certFile, keyFile := s.setting("webCertFile"), s.setting("webKeyFile")
 	if certFile != "" && keyFile != "" {
-		rl, err := certutil.NewReloader(certFile, keyFile)
-		if err != nil {
-			ln.Close()
-			return fmt.Errorf("加载面板证书: %w", err)
-		}
-		ln = tls.NewListener(ln, rl.TLSConfig()) // 证书文件更新后自动换用,续期无需重启
+		ln = tls.NewListener(ln, s.tlsFor("panel", "面板", certFile, keyFile)) // 证书文件更新后自动换用,续期无需重启
 		scheme = "https"
 	}
 
 	s.listener = ln
-	s.httpSrv = &http.Server{Handler: outer, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	slow := &slowreq.Logger{Name: "面板", Shape: panelRouteShape} // 处理超过 3 秒记一条(同一路由每分钟最多一条)
+	s.httpSrv = &http.Server{Handler: slow.Wrap(outer), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		if err := s.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			logger.Warning("面板服务退出: ", err)
@@ -295,9 +313,41 @@ func (s *Server) Start() error {
 	return nil
 }
 
+// tlsFor 面板 / 代理面板的证书。读不出来(换机还原后文件不在、私钥配不上……)不能让整个进程起不来:
+// 先用临时自签证书顶着,照样走 HTTPS(降成 http,会话 Cookie 和已经发出去的地址全乱),页面顶部提示;
+// 文件放回原处几秒内自动换上,在证书页换一张也行。
+func (s *Server) tlsFor(service, label, certFile, keyFile string) *tls.Config {
+	rl := s.tlsWatch().Reloader(service, certFile, keyFile, s.setting("webDomain"), s.setting("publicIp"), s.setting("publicIp6"))
+	if err := rl.Temp(); err != nil {
+		logger.Error(label, "证书读不出来(", err, "):", label, "先用临时自签证书顶着,仍走 HTTPS,浏览器会提示证书不受信任。",
+			"到证书页换一张证书,或把文件放回 ", certFile, "(放回后几秒内自动换上)")
+	}
+	s.watchTLS(service, rl)
+	return rl.TLSConfig()
+}
+
+// watchTLS 把面板 / 代理面板现在用的证书加载器登记到 runner(nil = 没走 HTTPS 或已停),证书提示据此列出顶着临时证书的服务。
+func (s *Server) watchTLS(service string, rl *certutil.Reloader) {
+	s.tlsWatch().Set(service, rl)
+}
+
+// tlsWatch runner 的证书加载器登记处:临时证书存在数据目录里、重启沿用。没有 runner 时为 nil(临时证书只在内存里、不登记)。
+func (s *Server) tlsWatch() *certutil.Watch {
+	if s.run == nil {
+		return nil
+	}
+	return s.run.TLSWatch()
+}
+
 // assetCache 给内嵌前端加上按内容哈希生成的 ETag,并要求浏览器每次校验(no-cache)。
 // 内嵌文件没有修改时间,浏览器会按启发式长期缓存 ES 模块,升级后就会看到旧界面;
 // 这里用整套资源的哈希做 ETag:未升级时全部 304,升级后立即拿到新文件。
+// panelRouteShape 慢请求日志里面板 / 代理面板请求的路由形状:处理完以后路径已改写到 innerBase 之下,去掉前缀
+// (对外路径本身是秘密,从不写进日志),数字 id 与令牌之类打码,如 /api/lines/:id。
+func panelRouteShape(r *http.Request) string {
+	return slowreq.RouteShape(r.URL.Path, innerBase)
+}
+
 func assetCache(fsys fs.FS, next http.Handler) http.Handler {
 	h := sha256.New()
 	fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
@@ -373,11 +423,8 @@ func (s *Server) reapSessions() {
 				delete(s.sessions, token)
 			}
 		}
-		for ip, fails := range s.loginFails { // 扫描器会留下大量 IP,过期的清掉
-			if len(fails) == 0 || now.Unix()-fails[len(fails)-1] > 600 {
-				delete(s.loginFails, ip)
-			}
-		}
+		reapFails(s.loginFails, now.Unix()) // 扫描器会留下大量 IP,过期的清掉
+		reapFails(s.apiFails, now.Unix())
 		s.mu.Unlock()
 		s.db.Where("exp < ?", now.Unix()).Delete(&model.Session{})
 	}
@@ -440,6 +487,19 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 			return
 		}
+		if !isPanelUpload(r) {
+			limitJSONBody(w, r, panelBodyLimit)
+		}
+		// 正在设为主机:写操作暂停(主机容灾自己的接口另外处理:要看进度、要能放弃);没冻结的写登记在途,
+		// 设为主机置冻结后等它们做完才导出
+		if !strings.HasPrefix(r.URL.Path, innerBase+"api/ha") {
+			done, ok, msg := s.haWrite(r)
+			if !ok {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})
+				return
+			}
+			defer done()
+		}
 		next(w, r)
 	}
 }
@@ -453,7 +513,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "跨站请求被拒绝"})
 		return
 	}
-	if s.loginBlocked(peerIP(r)) {
+	if s.loginBlocked(s.sourceIP(r)) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return
 	}
@@ -470,14 +530,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		dummyPasswordCheck(req.Password)
 		time.Sleep(300 * time.Millisecond)
 		logger.Warning("面板登录失败,来源 ", clientIP(r))
-		s.noteLoginFailure(peerIP(r))
+		s.noteLoginFailure(s.sourceIP(r))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
 		return
 	}
 	if !checkPassword(req.Password, admin.Password) {
 		time.Sleep(300 * time.Millisecond)
 		logger.Warning("面板登录失败,来源 ", clientIP(r))
-		s.noteLoginFailure(peerIP(r))
+		s.noteLoginFailure(s.sourceIP(r))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "用户名或密码错误"})
 		return
 	}
@@ -497,7 +557,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		if !ok || replay {
 			time.Sleep(300 * time.Millisecond)
 			logger.Warning("面板两步验证失败,来源 ", clientIP(r))
-			s.noteLoginFailure(peerIP(r))
+			s.noteLoginFailure(s.sourceIP(r))
 			writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "两步验证码错误", "totp": true})
 			return
 		}
@@ -549,25 +609,9 @@ func dummyPasswordCheck(plain string) {
 // loginBlocked 该 IP(IPv6 为所在 /64)是否处于冷却期:10 分钟内失败 10 次就先挡 5 分钟,
 // 否则空密码首登、弱口令都能被慢速爆破(每次失败只 sleep 300ms)。
 func (s *Server) loginBlocked(ip string) bool {
-	ip = loginKey(ip)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fails, ok := s.loginFails[ip]
-	if !ok {
-		return false // 没失败过的来源不建条目,扫描器换着地址来也不会把这张表撑大
-	}
-	now := time.Now().Unix()
-	var recent []int64
-	for _, ts := range fails {
-		if now-ts < 600 {
-			recent = append(recent, ts)
-		}
-	}
-	s.loginFails[ip] = recent
-	if len(recent) < 10 {
-		return false
-	}
-	return now-recent[len(recent)-1] < 300
+	return failBlocked(s.loginFails, loginKey(ip), time.Now().Unix())
 }
 
 // noteLoginFailure 记录某 IP 的失败次数,10 分钟内达到 5 次告警一次。
@@ -577,16 +621,7 @@ func (s *Server) noteLoginFailure(ip string) {
 	if s.loginFails == nil {
 		s.loginFails = map[string][]int64{}
 	}
-	now := time.Now().Unix()
-	recent := s.loginFails[ip][:0]
-	for _, ts := range s.loginFails[ip] {
-		if now-ts < 600 {
-			recent = append(recent, ts)
-		}
-	}
-	recent = append(recent, now)
-	s.loginFails[ip] = recent
-	n := len(recent)
+	n := failNote(s.loginFails, ip, time.Now().Unix())
 	s.mu.Unlock()
 	if n == 5 {
 		s.run.Notifier().Event("tgOnLogin", "⚠️ <b>面板登录连续失败</b>\nIP:"+notify.Esc(ip)+" 10 分钟内失败 5 次")
@@ -631,10 +666,18 @@ func clientIP(r *http.Request) string {
 	return peer
 }
 
+// writeJSON 先编码再写:编码失败(结果里混进了 ±Inf 之类)时返回 500 和原因,不能吞掉 —— 以前先写了状态码再编码,
+// 失败了调用方拿到 200 空响应,正式执行的套餐操作其实已经落库。输出与 json.Encoder 逐字节相同(含结尾换行)。
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		logger.Warning("生成响应失败: ", err)
+		status = http.StatusInternalServerError
+		b, _ = json.Marshal(map[string]string{"error": "生成响应失败: " + err.Error()})
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(append(b, '\n'))
 }
 
 func badRequest(w http.ResponseWriter, err error) {

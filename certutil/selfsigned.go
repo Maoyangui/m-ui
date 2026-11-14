@@ -25,20 +25,40 @@ func GenerateSelfSigned(hosts []string, certPath, keyPath string, validDays int)
 	if len(hosts) == 0 {
 		return errors.New("至少需要一个域名或 IP")
 	}
+	certPEM, keyPEM, err := selfSignedPEM(hosts, validDays, "m-ui self-signed")
+	if err != nil {
+		return err
+	}
+	for _, p := range []string{certPath, keyPath} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			return err
+		}
+	}
+	if err := os.WriteFile(certPath, certPEM, 0o644); err != nil {
+		return fmt.Errorf("写入证书: %w", err)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+		return fmt.Errorf("写入私钥: %w", err)
+	}
+	return nil
+}
+
+// selfSignedPEM 生成一张自签 ECDSA P-256 证书(hosts 里第一个作 CN,IP 进 IP SAN,其余进 DNS SAN),返回 PEM。
+func selfSignedPEM(hosts []string, validDays int, org string) ([]byte, []byte, error) {
 	if validDays <= 0 {
 		validDays = 365
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	tmpl := x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: hosts[0], Organization: []string{"m-ui self-signed"}},
+		Subject:               pkix.Name{CommonName: hosts[0], Organization: []string{org}},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(time.Duration(validDays) * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
@@ -54,24 +74,13 @@ func GenerateSelfSigned(hosts []string, certPath, keyPath string, validDays int)
 	}
 	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	keyDER, err := x509.MarshalECPrivateKey(key)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	for _, p := range []string{certPath, keyPath} {
-		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
-			return err
-		}
-	}
-	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
-		return fmt.Errorf("写入证书: %w", err)
-	}
-	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
-		return fmt.Errorf("写入私钥: %w", err)
-	}
-	return nil
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), nil
 }
 
 // Expiry 读取 PEM 证书的到期时间(证书页展示与续期判断用)。

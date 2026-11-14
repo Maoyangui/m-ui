@@ -95,7 +95,7 @@ a { color: var(--primary); }
 .addr code { font-family: var(--mono); font-size: .82rem; line-height: 1.5; word-break: break-all; flex: 1; min-width: 0; }
 .verify { margin: .45rem 0 0; font-size: .78rem; color: var(--muted); }
 .verify b { color: var(--text); font-family: var(--mono); font-weight: 600; }
-.qr { width: 84px; height: 84px; border: 1px solid var(--border); border-radius: 12px; background: #fff; padding: 7px; flex: none; }
+.qr { width: 84px; height: 84px; border: 1px solid var(--border); border-radius: 10px; background: #fff; padding: 5px; flex: none; }
 
 /* 运行中的面板数:版本号旁边一个小标 */
 .chip.stat { padding: .12rem .55rem; font-size: .75rem; font-weight: 400; gap: .3rem; }
@@ -176,7 +176,7 @@ input.fld { flex: 1; }
     <div>
       <h1>{{if eq .Lang "zh"}}建议与支持{{else}}Feedback &amp; Support{{end}}
         <span class="chip"><code>v{{.Version}}</code><button data-copy="m-ui v{{.Version}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button></span>
-        {{if .Online}}<span class="chip stat" id="devs" hidden title="{{if eq .Lang "zh"}}过去 24 小时运行过 m-ui 面板的设备数,按天统计{{else}}Devices that ran an m-ui panel in the last 24 hours, counted daily{{end}}"><i></i><span>{{if eq .Lang "zh"}}<b></b> 台设备在运行{{else}}<b></b> devices running{{end}}</span></span>{{end}}</h1>
+        {{if .Online}}<span class="chip stat" id="devs" hidden title="{{if eq .Lang "zh"}}过去 24 小时运行过 m-ui 面板的设备数{{else}}Devices that ran an m-ui panel in the past 24 hours{{end}}"><i></i><span>{{if eq .Lang "zh"}}<b></b> 台设备在运行{{else}}<b></b> devices running{{end}}</span></span>{{end}}</h1>
       <p>{{if eq .Lang "zh"}}一个人维护的开源项目,你的反馈决定它下一步做什么。{{else}}An open-source project maintained by one person — your feedback decides what comes next.{{end}}</p>
     </div>
   </header>
@@ -284,6 +284,16 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
   var $ = function (id) { return document.getElementById(id); };
   var TOP = 10, rows = [], open = false;
   var num = function (v) { return Number(v).toLocaleString('en-US', { maximumFractionDigits: 2 }); };
+  // 服务器时间与浏览器时间之差(秒)。倒计时按服务器的钟走:电脑时区设错又把钟调"对"时,Date.now() 会差几个小时
+  var skew = 0;
+  var serverNow = function () { return Date.now() / 1000 + skew; };
+  var learnSkew = function (now) { if (typeof now === 'number' && now > 0) skew = now - Date.now() / 1000; };
+  // "统计于 N 小时前":两个时间都是服务器给的,不看浏览器的钟
+  function counted(sec) {
+    var h = Math.floor(Math.max(0, sec) / 3600);
+    if (ZH) return h < 1 ? ',统计于不到 1 小时前' : ',统计于 ' + h + ' 小时前';
+    return h < 1 ? ', counted less than an hour ago' : ', counted ' + h + (h === 1 ? ' hour ago' : ' hours ago');
+  }
   function drawBoard() {
     var list = $('board-list'); list.textContent = '';
     (open ? rows : rows.slice(0, TOP)).forEach(function (d, i) {
@@ -305,38 +315,84 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
       $('board-sum').textContent = ZH ? rows.length + ' 人 · 累计 ' + sum + ' USDT' : rows.length + (rows.length === 1 ? ' supporter' : ' supporters') + ' · ' + sum + ' USDT';
       $('board').hidden = false; drawBoard();
     }
-    if (d.devices > 0) { $('devs').querySelector('b').textContent = num(d.devices); $('devs').hidden = false; }
+    if (d.devices > 0) {
+      var devs = $('devs');
+      devs.querySelector('b').textContent = num(d.devices);
+      if (d.devicesAt > 0 && d.now > 0) devs.title += counted(d.now - d.devicesAt);
+      devs.hidden = false;
+    }
   }).catch(function () {});
 
   // 留名后这页关了也能接着等:记在浏览器里,60 分钟后作废
-  var KEY = 'm-ui-pledge', timer = null, poll = null;
+  var KEY = 'm-ui-pledge', timer = null, poll = null, giveUp = null, session = 0;
+  // 到期时最近一次核对比 STALE 旧(毫秒,按这台电脑的钟)就先再核对一次:正常 20 秒一次,标签页被冻结、后台节流或电脑睡眠后
+  // 回来,手上的结果可能是一个小时前的。一次核对最多等 WAIT:过了还没回来就当它丢了(到期时就是"不知道"),它的结果也不再算
+  var STALE = 30000, WAIT = 15000;
   var ERR = { name_empty: ZH ? '请填名字' : 'Enter a name', name_long: ZH ? '名字最多 24 个字' : 'Names can be 24 characters at most', name_bad: ZH ? '名字只能用文字、数字和空格,不能带链接' : 'Names can only use letters, digits and spaces, no links', amount: ZH ? '金额需在 1 到 100000 之间' : 'The amount must be between 1 and 100000', rate: ZH ? '提交太频繁,稍后再试' : 'Too many tries, try again later', send: ZH ? '暂时无法留名,稍后再试' : "Can't sign right now, try again later", origin: ZH ? '请从面板页面提交' : 'Please submit from the panel page', bad: ZH ? '提交有误,请重试' : 'Invalid request, please retry' };
   var load = function () { try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; } };
   var save = function (p) { try { if (p) localStorage.setItem(KEY, JSON.stringify(p)); else localStorage.removeItem(KEY); } catch (e) {} };
-  function stop() { clearInterval(timer); clearInterval(poll); timer = poll = null; }
+  function stop() { clearInterval(timer); clearInterval(poll); clearTimeout(giveUp); timer = poll = giveUp = null; }
   var HINT = $('p-hint').textContent;
   function hint(msg, err) { var h = $('p-hint'); h.textContent = msg || HINT; h.classList.toggle('err', !!err); }
-  function idle(msg) { stop(); save(null); $('pledge').hidden = false; $('p-hint').hidden = false; hint(msg); $('p-wait').hidden = true; }
+  function idle(msg) { session++; stop(); save(null); $('pledge').hidden = false; $('p-hint').hidden = false; hint(msg); $('p-wait').hidden = true; }
   function waiting(p) {
+    stop();
+    var me = ++session; // 这一次等待:取消、到账或下了结论之后,还在路上的核对结果作废
+    if (typeof p.skew === 'number' && isFinite(p.skew)) skew = p.skew;
+    // 最近一次核对:true = 面板查到了链上记录(没有就是真没到);其它 = 面板暂时查不了,不能断言没到账
+    // cur = 还在路上的那次核对(发出的时间 at),sentAt = 最近一次发出的时间,after = 等它回来再做的事
+    var known = null, cur = null, sentAt = 0, after = [], last = false;
+    var waitingFor = function () { var age = cur ? Date.now() - cur.at : -1; return age >= 0 && age < WAIT; };
     $('pledge').hidden = true; $('p-hint').hidden = true; $('p-done').hidden = true; $('p-wait').hidden = false;
     $('p-pay').textContent = p.amount;
     $('p-copy').setAttribute('data-copy', p.amount);
-    var tick = function () {
-      var left = p.expiresAt - Math.floor(Date.now() / 1000);
-      if (left <= 0) { idle(ZH ? '超过 60 分钟未到账,可重新留名。' : 'Not received within 60 minutes. You can sign again.'); return; }
-      $('p-left').textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
-    };
-    var check = function () {
+    var check = function (then) {
+      if (typeof then === 'function') after.push(then);
+      if (waitingFor()) return; // 上一次刚发出还没回来:等它,不叠着查
+      var c = cur = { at: Date.now() };
+      sentAt = c.at;
       fetch('support/pledge-check?amount=' + encodeURIComponent(p.amount) + '&since=' + p.at).then(function (r) { return r.json(); }).then(function (d) {
+        if (me !== session || cur !== c) return; // 取消了,或者等太久已经另查了:这次的结果不算
+        if (Date.now() - c.at < WAIT) learnSkew(d.now); // 冻结前发出、回来才处理的响应带的是旧的服务器时间,拿它算钟差倒计时会往回跳
+        known = d.known === true;
         if (!d.arrived) return;
         idle();
         $('pledge').hidden = true; $('p-hint').hidden = true;
         var done = $('p-done'); done.hidden = false;
-        done.textContent = ZH ? '✓ 收到了,谢谢 ' + p.name + '!约 1 小时内上榜。' : "✓ Received, thank you " + p.name + "! You'll appear within about an hour.";
-      }).catch(function () {});
+        // 上榜靠 GitHub 的定时任务对账,常常晚几个小时,两次运行隔太久时留名还可能丢:不承诺几小时内上榜,超过一天的来找我手动记上
+        done.textContent = ZH ? '✓ 收到了,谢谢 ' + p.name + '!通常几小时内上榜;超过一天还没上榜,请在 Telegram 联系我。'
+          : '✓ Received, thank you ' + p.name + "! You'll usually appear on the list within a few hours. If you're not on it after a day, message me on Telegram.";
+      }).catch(function () { if (me === session && cur === c) known = false; }).then(function () {
+        if (cur !== c) return;
+        cur = null;
+        var fns = after; after = [];
+        fns.forEach(function (f) { f(); });
+      });
     };
-    tick(); check();
-    timer = setInterval(tick, 1000); poll = setInterval(check, 20000);
+    var verdict = function () {
+      idle(known === true ? (ZH ? '超过 60 分钟未到账,可重新留名。' : 'Not received within 60 minutes. You can sign again.')
+        : (ZH ? '暂时无法确认是否到账。若已转账,通常几小时内上榜;超过一天还没上榜,请在 Telegram 联系我。'
+          : "We couldn't confirm whether it arrived. If you sent it, you'll usually appear on the list within a few hours. If you're not on it after a day, message me on Telegram."));
+    };
+    // 到期后下结论:刚发出的那次核对还在路上就等它回来;最近一次核对比 STALE 旧(或还没核对过)就先再核对一次,
+    // 不拿冻结前的结果断言"没到账"。最后这次最多等 WAIT,等不到就是"不知道"
+    var conclude = function () {
+      if (me !== session) return;
+      if (waitingFor()) { after.push(conclude); return; }
+      var age = Date.now() - sentAt;
+      if (!last && (cur || !sentAt || age > STALE || age < 0)) { last = true; known = null; check(conclude); return; }
+      verdict();
+    };
+    var tick = function () {
+      var left = Math.floor(p.expiresAt - serverNow());
+      if (left > 0) { $('p-left').textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0'); return; }
+      $('p-left').textContent = '0:00';
+      stop(); // 不再倒计时、不再定时核对
+      giveUp = setTimeout(function () { if (me === session) { known = null; verdict(); } }, WAIT);
+      conclude();
+    };
+    timer = setInterval(tick, 1000); poll = setInterval(function () { check(); }, 20000);
+    check(); tick();
   }
   $('pledge').addEventListener('submit', function (e) {
     e.preventDefault();
@@ -347,13 +403,15 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
       .then(function (x) {
         btn.disabled = false;
         if (!x.ok) { hint(ERR[x.d.code] || ERR.bad, true); return; }
+        learnSkew(x.d.now); x.d.skew = skew; // 记下这台电脑的钟差多少,关了页面再打开也按服务器时间算
         save(x.d); waiting(x.d);
       }).catch(function () { btn.disabled = false; hint(ERR.send, true); });
   });
   ['p-name', 'p-amt'].forEach(function (id) { $(id).addEventListener('input', function () { hint(); }); });
   $('p-cancel').addEventListener('click', function () { idle(); });
   var cur = load();
-  if (cur && cur.expiresAt > Date.now() / 1000) waiting(cur); else save(null);
+  if (cur && typeof cur.skew === 'number' && isFinite(cur.skew)) skew = cur.skew; // 留名时记下的钟差:按服务器时间判断过没过期
+  if (cur && cur.expiresAt > serverNow()) waiting(cur); else save(null);
 })();
 {{end}}document.querySelectorAll('[data-copy]').forEach(function (b) {
   var label = b.textContent;

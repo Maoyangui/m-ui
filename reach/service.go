@@ -1,5 +1,6 @@
 // Package reach 大陆连通性检测:借 Globalping 公共测试网络,从大陆移动、电信、联通的家庭宽带测点
 // 去连每台服务器,同时用香港测点作对照,判断服务器的 IP 或端口是不是被墙了。
+// 订阅里有走 IPv6 的线路的服务器,同一轮再从境外有 IPv6 的测点测一次 IPv6 入站(见 v6.go)。
 //
 // 只在主机上运行:测点在大陆,请求由哪台机器发起都一样,各台副机的地址主机都知道。
 // 服务器地址会发给 Globalping(设置页写明了),机房测点一律不算(用户要求)。
@@ -16,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
@@ -26,14 +28,14 @@ import (
 )
 
 const (
-	DefaultMinutes = 90   // 默认每 90 分钟巡检一轮(用户定的)
-	MinMinutes     = 30   // 免登录每小时约 250 个测点次,再密就不够几台服务器用了
-	MaxMinutes     = 1440 // 一天一次
-	perCarrier     = 4    // 每家运营商取几个测点
-	keepHistory    = 24   // 界面上每台显示最近几次
-	keepRows       = 48   // 库里每台留几条
-	probeListTTL   = 6 * time.Hour
-	parallelChecks = 3
+	DefaultMinutes  = 90   // 默认每 90 分钟巡检一轮(用户定的)
+	MinMinutes      = 30   // 免登录每小时约 250 个测点次,再密就不够几台服务器用了
+	MaxMinutes      = 1440 // 一天一次
+	perCarrier      = 4    // 每家运营商取几个测点
+	keepHistory     = 24   // 界面上每台显示最近几次
+	keepRows        = 48   // 库里每台留几条
+	probeListTTL    = 6 * time.Hour
+	parallelChecks  = 3
 	anonymousHourly = 250 // Globalping 免登录每小时的测点次
 )
 
@@ -49,6 +51,14 @@ type Target struct {
 	PortFrom string // line / sub / api
 	PortLine string // PortFrom = line 时的线路名
 	Err      string // 测不了的原因(没有地址等)
+	Ext      bool   // 外部节点:按外部节点那一套下结论(verdictExt),不进历史、不告警
+	// TCPv6Only 这台的 TCP 线路都走 IPv6:Port 是订阅 / API 端口(不拿 IPv6 线路的端口测 IPv4 地址)
+	TCPv6Only bool
+	// NoPort 不测大陆那项的原因(这台的线路在订阅里都不走 IPv4):不发请求,结论记为 VerdictNoPort
+	NoPort string
+	// V6 这台订阅里有走 IPv6 的线路时,同一轮顺带测的 IPv6 入站(见 v6.go);nil = 不测。
+	// Err 不为空(比如订阅里这台默认给 IPv6、大陆检测不测)时 V6 照样测
+	V6 *V6Target
 }
 
 type Deps struct {
@@ -95,18 +105,24 @@ type Service struct {
 	d Deps
 	c *client
 
-	mu        sync.Mutex
-	busy      bool
-	running   map[uint]bool
-	latest    map[uint]Result // 最近一次(可能没测成)
-	good      map[uint]Result // 最近一次测成的
-	history   map[uint][]Point
-	alerted   map[uint]string // 已经告过警的状态类别,防止同一件事反复发
-	lastRun   int64           // 最近一次全部服务器都测过的时间(定时与手动都算)
-	lastErr   string
-	perCheck  int
-	probeList []probe
-	probeAt   time.Time
+	mu      sync.Mutex
+	busy    bool
+	extBusy bool // 外部节点的大陆连通检测在跑(和服务器检测共用测点额度,互斥)
+	running map[uint]bool
+	latest  map[uint]Result    // 最近一次(可能没测成)
+	good    map[uint]Result    // 最近一次测成的
+	goodV6  map[uint]*V6Result // 最近一次测成的 IPv6 入站(和大陆那项各算各的:一项没测成不抹掉另一项)
+	history map[uint][]Point
+	alerted map[uint]string // 已经告过警的状态类别,防止同一件事反复发
+	lastRun int64           // 最近一次全部服务器都测过的时间(定时与手动都算;不管测没测成)
+	lastErr string          // 最近一轮取测点列表的错误
+	lastOk  int64           // 最近一次有服务器测成的时间(lastRun 每轮都往前走,额度用尽时也一样,看不出检测其实停摆了)
+	// 最近一轮全量巡检:要发请求测的台数、其中没测成的台数、第一条没测成的原因(额度用尽、令牌无效、接口出错)
+	roundTried, roundFailed int
+	roundErr                string
+	perCheck                int
+	probeList               []probe
+	probeAt                 time.Time
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -132,7 +148,8 @@ func New(d Deps) *Service {
 	if d.FirstDelay == 0 {
 		d.FirstDelay = 2 * time.Minute
 	}
-	s := &Service{d: d, running: map[uint]bool{}, latest: map[uint]Result{}, good: map[uint]Result{}, history: map[uint][]Point{}, alerted: map[uint]string{}, perCheck: 3*perCarrier + 3}
+	s := &Service{d: d, running: map[uint]bool{}, latest: map[uint]Result{}, good: map[uint]Result{}, goodV6: map[uint]*V6Result{},
+		history: map[uint][]Point{}, alerted: map[uint]string{}, perCheck: 3*perCarrier + 3}
 	s.c = &client{base: d.API, http: d.HTTP, ua: d.UA, now: d.Now, token: func() string { return d.Setting("reachToken") }}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.load()
@@ -178,6 +195,12 @@ func (s *Service) load() {
 			s.latest[r.NodeId] = res
 			if measured(res.Verdict) {
 				s.good[r.NodeId] = res
+				if r.At > s.lastOk {
+					s.lastOk = r.At
+				}
+			}
+			if v6Measured(res.V6) {
+				s.goodV6[r.NodeId] = res.V6
 			}
 			if c := class(res.Verdict); c != "" {
 				s.alerted[r.NodeId] = c
@@ -283,7 +306,7 @@ func (s *Service) Run(ids []uint) error {
 func (s *Service) begin(ids []uint) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.busy {
+	if s.busy || s.extBusy {
 		return ErrBusy
 	}
 	s.busy = true
@@ -337,6 +360,37 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 	}
 	s.mu.Unlock()
 
+	// 额度先保大陆检测(带告警的主功能):IPv6 入站只用大陆检测剩下的。一台做完大陆检测时,剩下的额度扣掉还没做完的
+	// 那几台大陆检测要用的,不够这一次 IPv6 入站,就先让出并发名额,等这一轮的大陆检测全做完再用剩下的额度测
+	// measures 大陆那项要发请求;mainlandLeft 还没做完大陆检测的服务器
+	measures := func(t Target) bool { return err == nil && t.NoPort == "" && t.Err == "" && t.Host != "" }
+	var mainlandLeft atomic.Int64
+	var mainlandWG sync.WaitGroup
+	mainlandDone := make(chan struct{})
+	for _, t := range targets {
+		if measures(t) {
+			mainlandLeft.Add(1)
+			mainlandWG.Add(1)
+		}
+	}
+	go func() { mainlandWG.Wait(); close(mainlandDone) }()
+	// 放行一次 IPv6 入站时先记下它要用的测点次,测完再去掉:几台同时做完大陆检测时,不会一起看到同一份余量、一起放行
+	var v6Mu sync.Mutex
+	v6Reserved := 0
+	admitV6 := func() bool {
+		v6Mu.Lock()
+		defer v6Mu.Unlock()
+		if !s.v6Room(int(mainlandLeft.Load()), cost, v6Reserved) {
+			return false
+		}
+		v6Reserved += v6Cost()
+		return true
+	}
+	releaseV6 := func() { v6Mu.Lock(); v6Reserved -= v6Cost(); v6Mu.Unlock() }
+
+	// 这一轮要发请求测的台数与没测成的台数:全量巡检结束时记下,概况据此发现"检测在跑、但一台都没测成"
+	var roundMu sync.Mutex
+	tried, failed, firstErr := 0, 0, ""
 	sem := make(chan struct{}, parallelChecks)
 	var wg sync.WaitGroup
 	for _, t := range targets {
@@ -346,6 +400,13 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
+			mainlandFinished := sync.OnceFunc(func() {
+				if measures(t) {
+					mainlandLeft.Add(-1)
+					mainlandWG.Done()
+				}
+			})
+			defer mainlandFinished() // 中途出了异常也要放行等着的 IPv6 入站
 			defer func() {
 				if v := recover(); v != nil {
 					logger.Warning("大陆连通检测异常: ", t.Name, " ", v, " | ", string(debug.Stack()))
@@ -355,9 +416,12 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 				s.mu.Unlock()
 			}()
 			var res Result
-			if err != nil {
+			switch {
+			case t.NoPort != "":
+				res = s.noPort(t, auto)
+			case err != nil:
 				res = s.failed(t, auto, err.Error())
-			} else {
+			default:
 				res = s.check(ctx, t, locs, cost, auto)
 			}
 			if auto && s.needsRecheck(res) {
@@ -371,13 +435,50 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 				case <-ctx.Done():
 				}
 			}
+			mainlandFinished()
+			// IPv6 入站和大陆检测是两回事:大陆那项没测成(额度、没有大陆测点、订阅里这台给的是 IPv6)也照测
+			if t.V6 != nil && ctx.Err() == nil {
+				reserved := admitV6()
+				if !reserved {
+					<-sem
+					select {
+					case <-mainlandDone:
+					case <-ctx.Done():
+					}
+					sem <- struct{}{}
+				}
+				func() {
+					if reserved {
+						defer releaseV6()
+					}
+					if ctx.Err() == nil {
+						res.V6 = s.checkV6(ctx, t.V6)
+					}
+				}()
+			}
 			if ctx.Err() != nil && res.Verdict == VerdictError {
 				return // 面板正在退出:别把"被取消"记成一次失败
+			}
+			if measures(t) {
+				roundMu.Lock()
+				tried++
+				if !measured(res.Verdict) {
+					failed++
+					if firstErr == "" {
+						firstErr = res.Error
+					}
+				}
+				roundMu.Unlock()
 			}
 			s.store(res)
 		}()
 	}
 	wg.Wait()
+	if full && ctx.Err() == nil {
+		s.mu.Lock()
+		s.roundTried, s.roundFailed, s.roundErr = tried, failed, firstErr
+		s.mu.Unlock()
+	}
 }
 
 // CanCheck 现在的额度够不够测 n 个目标:不够就直接说清楚,别一个个失败。
@@ -395,9 +496,56 @@ func (s *Service) CanCheck(n int) error {
 	return nil
 }
 
-// CheckHost 测一个任意地址(外部节点用):和服务器同一套判定,不进历史、不告警。
-func (s *Service) CheckHost(ctx context.Context, name, host string, port int) Result {
-	t := Target{Name: name, Host: host, Port: port}
+// CanCheckExt 外部节点检测的额度够不够:除了这次的 n 个,定时巡检开着时还要给下一轮服务器巡检留出额度,
+// 别让手动测外部节点把巡检挤到"额度用完"、漏报被墙。
+func (s *Service) CanCheckExt(n int) error {
+	auto := s.Auto()
+	s.mu.Lock()
+	cost, reserve := s.perCheck, 0
+	if auto {
+		for _, r := range s.latest {
+			if r.Verdict != VerdictNoPort || len(r.Measurements) > 0 { // 不测大陆那项的不占
+				reserve += cost
+			}
+			if r.V6 != nil && r.V6.Port > 0 { // 上一轮测过 IPv6 入站的,下一轮也要测
+				reserve += v6Cost()
+			}
+		}
+	}
+	s.mu.Unlock()
+	q := s.c.Quota()
+	if q.At > 0 && s.d.Now().Unix() < q.ResetAt && q.Remaining < cost*n+reserve {
+		return fmt.Errorf("Globalping 额度不够:这次要约 %d 个测点次,还要给服务器的定时巡检留 %d 个,剩 %d 个。少选几个,或者在设置里填 Globalping Token 提高额度", cost*n, reserve, q.Remaining)
+	}
+	return s.CanCheck(n)
+}
+
+// BeginExt 外部节点的大陆连通检测开始。和服务器检测互斥(共用一份测点额度),外部节点的检测同时也只跑一个;
+// 返回的函数在检测结束时调用。
+func (s *Service) BeginExt() (func(), error) {
+	if s.d.IsNode() {
+		return nil, errors.New("副服务器不做大陆连通检测,请在主机的服务器页操作")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.busy || s.extBusy {
+		return nil, ErrBusy
+	}
+	s.extBusy = true
+	return func() {
+		s.mu.Lock()
+		s.extBusy = false
+		s.mu.Unlock()
+	}, nil
+}
+
+// CheckExt 测一个外部节点:不进历史、不告警,按 verdictExt 下结论。
+// UDP 协议(hysteria、hysteria2、tuic 等)测点没法连 UDP 端口,只 ping 服务器地址(结果里注明);以前当 TCP 端口去连,必然全失败。
+func (s *Service) CheckExt(ctx context.Context, name, host string, port int, udp bool) Result {
+	t := Target{Name: name, Host: host, Port: port, Ext: true}
+	if udp {
+		t.Port = 0
+	}
 	locs, cost, err := s.locations(ctx)
 	if err != nil {
 		return s.failed(t, false, err.Error())
@@ -443,13 +591,33 @@ func (s *Service) locations(ctx context.Context) ([]location, int, error) {
 	return locs, cost, nil
 }
 
+// noPort 不测大陆那项(这台的线路在订阅里都不走 IPv4):不发请求,结论记为 noPort。
+func (s *Service) noPort(t Target, auto bool) Result {
+	return Result{NodeId: t.NodeId, Name: t.Name, Target: t.Host, At: s.d.Now().Unix(), Auto: auto,
+		Verdict: VerdictNoPort, Error: t.NoPort, Groups: orderedGroups(summarize(nil))}
+}
+
+// v6Room 现在测一次 IPv6 入站,会不会挤掉这一轮还没做完的大陆检测(每台约 cost 个测点次):
+// 额度已知、没到恢复时间,且剩下的扣掉 pending 台大陆检测要用的、已放行还没测完的 IPv6 入站(reserved)后
+// 不够 v6Cost 时返回 false。
+func (s *Service) v6Room(pending, cost, reserved int) bool {
+	q := s.c.Quota()
+	if q.At == 0 || s.d.Now().Unix() >= q.ResetAt {
+		return true
+	}
+	return q.Remaining-pending*cost-reserved >= v6Cost()
+}
+
 func (s *Service) failed(t Target, auto bool, msg string) Result {
-	return Result{NodeId: t.NodeId, Name: t.Name, Target: t.Host, Port: t.Port, PortFrom: t.PortFrom, PortLine: t.PortLine,
+	return Result{NodeId: t.NodeId, Name: t.Name, Target: t.Host, Port: t.Port, PortFrom: t.PortFrom, PortLine: t.PortLine, TCPv6Only: t.TCPv6Only,
 		At: s.d.Now().Unix(), Auto: auto, Verdict: VerdictError, Error: msg, Groups: orderedGroups(summarize(nil))}
 }
 
 // check 测一台:先从大陆三网 + 香港连端口;大陆全不通时再用同一批测点 ping 一次,分清 IP 被墙还是端口被封。
 func (s *Service) check(ctx context.Context, t Target, locs []location, cost int, auto bool) Result {
+	if t.NoPort != "" {
+		return s.noPort(t, auto)
+	}
 	if t.Err != "" {
 		return s.failed(t, auto, t.Err)
 	}
@@ -459,7 +627,7 @@ func (s *Service) check(ctx context.Context, t Target, locs []location, cost int
 	if q := s.c.Quota(); q.At > 0 && q.Remaining < cost && s.d.Now().Unix() < q.ResetAt {
 		return s.failed(t, auto, (&QuotaError{Wait: time.Unix(q.ResetAt, 0).Sub(s.d.Now())}).Error())
 	}
-	res := Result{NodeId: t.NodeId, Name: t.Name, Target: t.Host, Port: t.Port, PortFrom: t.PortFrom, PortLine: t.PortLine, At: s.d.Now().Unix(), Auto: auto}
+	res := Result{NodeId: t.NodeId, Name: t.Name, Target: t.Host, Port: t.Port, PortFrom: t.PortFrom, PortLine: t.PortLine, TCPv6Only: t.TCPv6Only, At: s.d.Now().Unix(), Auto: auto}
 	opts := pingOptions{Packets: 3}
 	if t.Port > 0 {
 		opts.Protocol, opts.Port = "TCP", t.Port
@@ -486,7 +654,16 @@ func (s *Service) check(ctx context.Context, t Target, locs []location, cost int
 			res.ICMPError = err.Error()
 		}
 	}
-	res.Verdict = verdict(gs, icmp, t.Port == 0)
+	if t.Ext {
+		res.Verdict, res.Note = verdictExt(gs, icmp, t.Port == 0)
+	} else {
+		res.Verdict = verdict(gs, icmp, t.Port == 0)
+	}
+	if res.Verdict == VerdictAbroadDown && t.PortFrom == "api" {
+		// 借来的面板 API 端口连香港也连不上:多半只对主机放行(FAQ 就这么建议),不是这台出了问题;
+		// 这台走 IPv4 的线路又没有 TCP 端口可测,只能说测不了,不报红色的"境外也不通"
+		res.Verdict, res.Error = VerdictNoPort, "面板 API 端口连香港测点也连不上(多半只对主机放行),这台走 IPv4 的线路又没有 TCP 端口可测"
+	}
 	res.Groups = orderedGroups(gs)
 	res.ICMP = icmp
 	return res
@@ -523,6 +700,12 @@ func (s *Service) store(res Result) {
 	s.latest[res.NodeId] = res
 	if measured(res.Verdict) {
 		s.good[res.NodeId] = res
+		if res.At > s.lastOk {
+			s.lastOk = res.At
+		}
+	}
+	if v6Measured(res.V6) {
+		s.goodV6[res.NodeId] = res.V6
 	}
 	s.history[res.NodeId] = appendPoint(s.history[res.NodeId], Point{At: res.At, Verdict: res.Verdict, Auto: res.Auto})
 	prevAlert := s.alerted[res.NodeId]
@@ -539,7 +722,7 @@ func (s *Service) store(res Result) {
 		}
 		s.d.DB.Exec("DELETE FROM reach_checks WHERE node_id = ? AND id NOT IN (SELECT id FROM reach_checks WHERE node_id = ? ORDER BY id DESC LIMIT ?)", res.NodeId, res.NodeId, keepRows)
 	}
-	logger.Info("大陆连通检测 ", res.Name, " ", res.Target, ": ", res.Verdict, summaryLine(res))
+	logger.Info("大陆连通检测 ", res.Name, " ", res.Target, ": ", res.Verdict, summaryLine(res), v6Summary(res.V6))
 
 	// 只有定时巡检发告警;手动检测的结果你已经在页面上看到了,但同样更新基线,之后不重复告同一件事
 	if !res.Auto || c == "" || c == prevAlert || s.d.Notify == nil {
@@ -567,6 +750,7 @@ func (s *Service) forgetMissing(targets []Target) {
 		if !keep[id] {
 			delete(s.latest, id)
 			delete(s.good, id)
+			delete(s.goodV6, id)
 			delete(s.alerted, id)
 		}
 	}
@@ -587,6 +771,7 @@ func (s *Service) Forget(id uint) {
 	defer s.mu.Unlock()
 	delete(s.latest, id)
 	delete(s.good, id)
+	delete(s.goodV6, id)
 	delete(s.history, id)
 	delete(s.alerted, id)
 }
@@ -619,11 +804,33 @@ func (s *Service) View() View {
 			r = g
 			r.Attempt = &Attempt{At: last.At, Verdict: last.Verdict, Error: last.Error}
 		}
+		r.V6 = s.viewV6Locked(id, last.V6)
 		v.Results = append(v.Results, r)
 		v.History[id] = append([]Point(nil), s.history[id]...)
 	}
 	sort.Slice(v.Results, func(i, j int) bool { return v.Results[i].NodeId < v.Results[j].NodeId })
 	return v
+}
+
+// State 检测器自己的状况(概况用来发现"检测停摆了":额度用尽、接口出错、很久没测成):是否自动、间隔、
+// 最近一次全部测完的时间(不管测没测成)、最近一次有服务器测成的时间、最近一轮全量巡检测了几台 / 几台没测成及原因、取测点列表的错误。
+// 只读内存,不碰测点。
+type State struct {
+	Auto    bool   `json:"auto"`
+	Minutes int    `json:"minutes"`
+	LastRun int64  `json:"lastRun"`
+	LastOk  int64  `json:"lastOk"`
+	Tried   int    `json:"tried"`
+	Failed  int    `json:"failed"`
+	FailErr string `json:"failErr,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (s *Service) State() State {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return State{Auto: s.Auto(), Minutes: s.Minutes(), LastRun: s.lastRun, LastOk: s.lastOk,
+		Tried: s.roundTried, Failed: s.roundFailed, FailErr: s.roundErr, Error: s.lastErr}
 }
 
 // Bad 当前有异常的服务器(概览页顶部提示用)。
@@ -634,6 +841,31 @@ func (s *Service) Bad() []Result {
 	for _, r := range s.good { // 没测成的那次不能把"被墙"的提示抹掉
 		if IsBlocked(r.Verdict) || r.Verdict == VerdictPartial {
 			out = append(out, Result{NodeId: r.NodeId, Name: r.Name, Target: r.Target, Verdict: r.Verdict, At: r.At, Groups: r.Groups})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].NodeId < out[j].NodeId })
+	return out
+}
+
+// V6BadItem 概况"需要处理"里的一台 IPv6 入站不通的服务器。
+type V6BadItem struct {
+	NodeId uint   `json:"nodeId"`
+	Name   string `json:"name"`
+	Target string `json:"target"`
+	Port   int    `json:"port"`
+	At     int64  `json:"at"`
+}
+
+// V6Bad IPv6 入站不通的服务器(概况页"需要处理"用,只读内存)。和服务器页显示的是同一份(最近一次;没测成、没有测点时
+// 用上一次测成的),只算 down,unsure / udp / none / error 不算;这台不再有走 IPv6 的线路时就不算了。
+// 不并进 Bad():那边的结论、提示条的忽略签名都按大陆那项来。没有时是空数组,主机上这个键始终存在。
+func (s *Service) V6Bad() []V6BadItem {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []V6BadItem{}
+	for id, last := range s.latest {
+		if v := s.viewV6Locked(id, last.V6); v != nil && v.State == V6Down {
+			out = append(out, V6BadItem{NodeId: id, Name: last.Name, Target: v.Target, Port: v.Port, At: v.At})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].NodeId < out[j].NodeId })
