@@ -1167,6 +1167,21 @@
     </ul></div>
   </section>
 
+  <section class="sec" id="api-keys">
+    <h3>Multiple keys, permissions and the source IP allowlist</h3>
+    <ol class="steps">
+      <li>The token above is the <b>default key</b>: it can do everything and keeps working after the upgrade. While the external API is on, the card also has <b data-k="api.keys">Extra keys</b>: click <b data-k="api.keyAdd">New key</b>, give it a name (say "Shop" or "Telegram bot") and tick only the permissions it needs.</li>
+      <li>Seven permissions: <b data-k="api.perm.users.read">View users</b>, <b data-k="api.perm.users.create">Create users</b>, <b data-k="api.perm.users.update">Change users</b> (edit fields, enable / disable, reset usage, kick, reset the subscription link), <b data-k="api.perm.users.delete">Delete users</b>, <b data-k="api.perm.billing">Renew &amp; change plans</b>, <b data-k="api.perm.plans.read">View plans</b> and <b data-k="api.perm.panel.read">Panel info</b> (overview, servers, lines, online users). Calling something a key is not allowed to do returns 403 naming the missing permission.</li>
+      <li>Each key can be <b data-k="common.edit">edited</b>, <b data-k="api.keyRotate">regenerated</b> (the old token stops working at once) or <b data-k="common.delete">deleted</b> on its own; the list shows when and from which IP it was last used. With the master switch off, no key works.</li>
+      <li><b data-k="api.ip">Source IP allowlist</b>: off by default. When on, only the listed IPs or ranges can call the API (default and extra keys alike), one per line; the page shows your current source IP and <b data-k="api.ipAddMe">Add it</b> puts it on the list.<span data-scope="admin"> The main panel and every reseller have their own list.</span></li>
+    </ol>
+    <div class="tip"><b>Suggested</b>Give your shop one key with View users + Create users + Renew &amp; change plans + View plans, and your Telegram bot a read-only key with View users + Panel info; if the shop server has a fixed IP, turn the allowlist on too.</div>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>Behind a reverse proxy (Nginx, Caddy …), first fill in Trusted reverse proxies under <b data-k="nav.settings">Settings</b> → Panel, otherwise every request seems to come from the proxy itself.</li>
+      <li>Extra keys only work on the master; with master failover on, they keep working after a standby takes over.</li>
+    </ul></div>
+  </section>
+
   <section class="sec" id="api-calls">
     <h3>Common calls</h3>
     <p class="lede">Paths go after the base URL; <code>{name}</code> can be the username or the user id.</p>

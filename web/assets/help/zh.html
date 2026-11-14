@@ -1167,6 +1167,21 @@
     </ul></div>
   </section>
 
+  <section class="sec" id="api-keys">
+    <h3>多把密钥、权限与来源 IP 白名单</h3>
+    <ol class="steps">
+      <li>上面那一把是 <b>默认密钥</b>,全部权限,升级以后照旧可用。开着外部 API 时卡片里还有 <b data-k="api.keys">附加密钥</b>:点 <b data-k="api.keyAdd">新建密钥</b>,起个名字(比如「商城」「TG 机器人」),只勾它需要的权限。</li>
+      <li>七项权限:<b data-k="api.perm.users.read">查看用户</b>、<b data-k="api.perm.users.create">创建用户</b>、<b data-k="api.perm.users.update">修改用户</b>(改字段、启停、清零用量、踢线、重置订阅链接)、<b data-k="api.perm.users.delete">删除用户</b>、<b data-k="api.perm.billing">续费与换套餐</b>、<b data-k="api.perm.plans.read">查看套餐</b>、<b data-k="api.perm.panel.read">面板信息</b>(概况、服务器、线路、在线用户)。没勾的接口调了返回 403,并写明缺哪项。</li>
+      <li>每把可以单独 <b data-k="common.edit">编辑</b>、<b data-k="api.keyRotate">重新生成</b>(旧令牌立刻失效)、<b data-k="common.delete">删除</b>,列表里能看到最近一次是什么时候、从哪个 IP 用的。总开关关着时所有密钥都不能用。</li>
+      <li><b data-k="api.ip">来源 IP 白名单</b>:默认关闭;打开后只有名单里的 IP 或网段能调用(默认密钥和附加密钥都算),一行一个,页面上会显示你当前的来源 IP,点 <b data-k="api.ipAddMe">加进名单</b> 就行。<span data-scope="admin">主面板和每个代理各有一份,互不影响。</span></li>
+    </ol>
+    <div class="tip"><b>推荐</b>商城用一把「查看用户 + 创建用户 + 续费与换套餐 + 查看套餐」,Telegram 机器人用一把只读的「查看用户 + 面板信息」;商城服务器 IP 固定的话顺手打开白名单。</div>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>面板挂在反向代理(Nginx、Caddy 等)后面时,先在 <b data-k="nav.settings">设置</b> → 面板 填「受信任的反向代理」,白名单才认得出真实来源;不然所有请求的来源都是反代自己。</li>
+      <li>附加密钥只在主服务器上生效;开了主机容灾的,备用接任以后照常可用。</li>
+    </ul></div>
+  </section>
+
   <section class="sec" id="api-calls">
     <h3>常用接口</h3>
     <p class="lede">路径都接在接口前缀后面;<code>{name}</code> 可以是用户名,也可以是用户 id。</p>

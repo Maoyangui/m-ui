@@ -57,7 +57,7 @@ Good for personal use, small teams, or anyone who needs one place to manage user
 | Observability | Traffic charts (stacked bars, 1h / 6h / 24h / 7d / 30d), top users, online users and IPs, recent inbound connections for troubleshooting, audit log and subscription access log (each with its own auto-clean retention) |
 | Security | bcrypt passwords, CSRF protection, login cooldown after repeated failures from the same peer, two-factor authentication (TOTP), external API tokens; reseller and admin sessions are strictly separated |
 | Updates | The panel finds new releases by itself and flags them next to the version in the sidebar; one click verifies the SHA256, swaps the binary and restarts — database, certificates and settings are untouched |
-| Integration | External API for creating users, renewing N periods, changing plans, enabling / disabling and fetching subscription URLs; plan operations support dry runs and idempotency keys so retries never add time twice, see [docs/API.md](docs/API.md) |
+| Integration | External API for creating users, renewing N periods, changing plans, enabling / disabling and fetching subscription URLs; plan operations support dry runs and idempotency keys so retries never add time twice; multiple keys with their own permissions and an optional source IP allowlist; panel overview, servers, lines and online users for bots, see [docs/API.md](docs/API.md) |
 
 <table>
 <tr>

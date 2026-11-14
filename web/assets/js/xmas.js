@@ -26,13 +26,13 @@ const CSS = `
 
 .xmas-show { position: fixed; inset: 0; z-index: 9999; overflow: hidden; cursor: pointer; color: #fff;
   background: radial-gradient(120% 90% at 50% 15%, #13254d 0%, #0a1430 45%, #04070f 100%);
-  opacity: 0; animation: xs-in 1.1s ease forwards; }
-/* 浮现:背景和雪先淡入,树和字从略低处带一点模糊缓缓上浮、变清晰;隐退:内容微微上移、缩小、变模糊淡去,背景随后淡出 */
-.xmas-stage { opacity: 0; transform: translateY(3.5vh) scale(.97); filter: blur(10px); animation: xs-emerge 1.6s cubic-bezier(.2,.75,.2,1) .25s forwards; }
-@keyframes xs-emerge { to { opacity: 1; transform: none; filter: blur(0); } }
-.xmas-show.out { animation: xs-out 1.2s ease .2s both; }
-.xmas-show.out .xmas-stage { animation: xs-recede 1.1s cubic-bezier(.4,0,.6,1) forwards; }
-@keyframes xs-recede { from { opacity: 1; transform: none; filter: blur(0); } to { opacity: 0; transform: translateY(-2.5vh) scale(.96); filter: blur(10px); } }
+  opacity: 0; animation: xs-in .9s ease forwards; }
+/* 整体出场 = 浮现:整个画面淡入,内容只轻轻上移一点(不加模糊,里面逐项出场的动画照常看得清);整体消失 = 隐退:内容上移变淡,画面随后淡出 */
+.xmas-stage { animation: xs-lift 1s cubic-bezier(.2,.7,.2,1) both; }
+@keyframes xs-lift { from { transform: translateY(14px); } to { transform: none; } }
+.xmas-show.out { animation: xs-out 1.1s ease .15s both; }
+.xmas-show.out .xmas-stage { animation: xs-recede .9s cubic-bezier(.4,0,.6,1) forwards; }
+@keyframes xs-recede { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-16px) scale(.985); } }
 .xmas-show.out .xmas-x, .xmas-show.out .xmas-hint { opacity: 0; transition: opacity .4s ease; }
 @keyframes xs-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes xs-out { from { opacity: 1; } to { opacity: 0; } }
@@ -301,7 +301,7 @@ export function playXmas(origin) {
     if (closed) return;
     closed = true;
     box.classList.add('out');
-    setTimeout(() => { cancelAnimationFrame(raf); window.removeEventListener('resize', size); document.removeEventListener('keydown', esc); box.remove(); }, 1450);
+    setTimeout(() => { cancelAnimationFrame(raf); window.removeEventListener('resize', size); document.removeEventListener('keydown', esc); box.remove(); }, 1350);
   };
   box.addEventListener('click', close); // 点空白处、点 ×、按 Esc 都能关
   box.querySelector('.xmas-x').addEventListener('click', e => { e.stopPropagation(); close(); });
