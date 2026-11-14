@@ -353,15 +353,14 @@ const setMute = (v) => { try { localStorage.setItem(MUTE_KEY, v ? '1' : '0'); } 
 const SPEAKER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10Z"/><path class="w" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg>';
 const MUTED = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10Z"/><path d="m16 9 5 6M21 9l-5 6"/></svg>';
 
-// mountXmasEgg 在 target(顶栏按钮区)最前面放彩蛋;不在活动期内什么都不放。title 是悬停提示。
-export function mountXmasEgg(target, title = 'Merry Xmas!') {
+// mountXmasEgg 在 target(顶栏按钮区)最前面放彩蛋;不在活动期内什么都不放。面板里不介绍它:没有悬停提示,点了才出现。
+export function mountXmasEgg(target) {
   if (!target || !xmasActive() || target.querySelector('.xmas-egg')) return;
   injectCSS();
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'xmas-egg';
-  b.title = title;
-  b.setAttribute('aria-label', title);
+  b.setAttribute('aria-label', 'Merry Xmas'); // 不加悬停提示:面板里不介绍彩蛋,点了才知道
   b.innerHTML = MINI;
   b.addEventListener('click', () => playXmas(b));
   target.prepend(b);
@@ -389,8 +388,7 @@ export function playXmas(origin) {
     </div>
     <canvas class="xm-front"></canvas>
     <button type="button" class="xmas-mute" aria-label="${zh ? '声音' : 'Sound'}" title="${zh ? '声音开 / 关' : 'Sound on / off'}">${muted ? MUTED : SPEAKER}</button>
-    <button type="button" class="xmas-x" aria-label="${zh ? '关闭' : 'Close'}" title="${zh ? '关闭' : 'Close'}">×</button>
-    <div class="xmas-hint">${zh ? '会自动消失,也可以点 × 或按 Esc 关掉' : 'Closes by itself — or click × / press Esc'}</div>`;
+    <button type="button" class="xmas-x" aria-label="${zh ? '关闭' : 'Close'}" title="${zh ? '关闭' : 'Close'}">×</button>`;
   document.body.appendChild(box);
   let audio = muted ? null : jingle();
   const muteBtn = box.querySelector('.xmas-mute');

@@ -201,7 +201,7 @@ function renderChrome() {
   document.getElementById('btn-logout').textContent = t('common.logout');
   supportLink(document.getElementById('btn-support'));
   helpLink(document.getElementById('btn-help'), current || pageName());
-  mountXmasEgg(document.getElementById('xmas-slot'), t('xmas.title')); // 限时圣诞彩蛋(到 12-31),见 xmas.js
+  mountXmasEgg(document.getElementById('xmas-slot')); // 限时圣诞彩蛋(到 12-31),见 xmas.js
   const sel = document.getElementById('lang-select');
   sel.innerHTML = Object.entries(langs).map(([k, v]) => `<option value="${k}" ${k === getLang() ? 'selected' : ''}>${v}</option>`).join('');
   renderRole();
