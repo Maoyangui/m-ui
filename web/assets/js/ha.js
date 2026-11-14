@@ -619,7 +619,8 @@ export function noticeHTML(n) {
       const take = n.how === 'takeover' || n.reason === 'takenOver';
       let s = `<b>${esc(t(take ? 'ha.n.tookOver' : 'ha.n.became', { name: n.name || '' }))}</b>`;
       if (take) s += ' ' + esc(t('ha.n.tookOverData'));
-      return s + (dns ? ' ' + dns : '') + reseller + warn;
+      const api = n.api && n.url ? ' ' + esc(t('ha.n.apiMoved', { url: n.url })) : ''; // 外部 API 挂在面板地址上,对接方要改地址
+      return s + (dns ? ' ' + dns : '') + reseller + api + warn;
     }
     case 'formerBack': return `<b>${esc(t('ha.n.formerBack', { name: n.name || '' }))}</b>`;
     case 'demoted': {

@@ -44,6 +44,7 @@ type Notice struct {
 	Changes  []DnsChange `json:"changes,omitempty"`  // 改过 / 改回的 DNS 记录(原值 → 新值)
 	Items    []PlanItem  `json:"items,omitempty"`    // 带代码的告警(界面按代码翻译)
 	Reseller string      `json:"reseller,omitempty"` // 新的代理面板地址
+	API      bool        `json:"api,omitempty"`      // 开着外部 API:它挂在面板地址上,对接的商城、机器人要改用新面板地址
 	Count    int         `json:"count,omitempty"`    // 同类合并的条数(界面用)
 }
 
@@ -133,6 +134,7 @@ func (s *Service) afterBecame() {
 	if !strings.EqualFold(s.setting("resellerEnabled"), "false") {
 		n.Reseller = s.resellerURL()
 	}
+	n.API = s.setting("apiEnabled") == "true"
 	s.addNotice(n)
 	s.notify(s.becameText(b, ip))
 	logger.Info("容灾:本机已成为主机(", b.How, "),纪元 ", b.Epoch)
@@ -153,6 +155,9 @@ func (s *Service) becameText(b Became, ip string) string {
 	}
 	if u := s.resellerURL(); u != "" && !strings.EqualFold(s.setting("resellerEnabled"), "false") {
 		fmt.Fprintf(&sb, "代理面板:%s\n", notify.Esc(u))
+	}
+	if u := s.panelURL(); u != "" && s.setting("apiEnabled") == "true" { // 外部 API 挂在面板地址上:换主机后对接方要改地址
+		fmt.Fprintf(&sb, "外部 API 跟着面板地址变了:对接的商城、Telegram 机器人等要改用 %sapi/v1/…\n", notify.Esc(u))
 	}
 	if b.How == HowTakeover {
 		fmt.Fprintf(&sb, "数据截至 %s;之后在原主机上做的改动没带过来,副机线路上的流量已自动补回。\n",

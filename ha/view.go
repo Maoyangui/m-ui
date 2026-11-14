@@ -321,14 +321,21 @@ func (s *Service) readiness(c Config, infos []StandbyInfo) []Check {
 		} else {
 			add("subDomain", "ok", nil, "host", h)
 		}
-		if !c.DnsTokenSet {
+		kind := c.DnsProvider // 界面按语言翻译服务商的名字(ha.dnsProv.<kind>)
+		if kind == "" {
+			kind = dnsapi.Cloudflare
+		}
+		checked, herr, noMatch := s.dnsHealthView() // 定期自检的结果(见 dnshealth.go)
+		switch {
+		case !c.DnsTokenSet:
 			add("takeSubDns", "bad", nil)
-		} else {
-			kind := c.DnsProvider // 界面按语言翻译服务商的名字(ha.dnsProv.<kind>)
-			if kind == "" {
-				kind = dnsapi.Cloudflare
-			}
+		case checked && herr != "":
+			add("takeSubDnsErr", "bad", nil, "provider", kind, "err", herr)
+		default:
 			add("takeSubDns", "ok", splitNames(c.DnsNames), "provider", kind)
+			if checked && noMatch {
+				add("takeSubDnsMatch", "warn", nil, "host", s.subHost())
+			}
 		}
 		if cf := strings.TrimSpace(s.setting("subCertFile")); cf != "" {
 			if na, err := certFileNotAfter(cf); err != nil {

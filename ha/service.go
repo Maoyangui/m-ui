@@ -119,6 +119,7 @@ func (s *Service) loops() []struct {
 		{"原主机回来", 30 * time.Second, s.formerTick},
 		{"容灾杂项", 5 * time.Second, s.miscTick},
 		{"副本自检", time.Hour, s.selfCheckTick},
+		{"DNS 接口自检", 10 * time.Minute, s.dnsHealthTick},
 	}
 }
 
