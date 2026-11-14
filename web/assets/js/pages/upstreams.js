@@ -75,11 +75,12 @@ function resultHTML(id) {
   const one = servers.length === 1 && ((state.status && state.status.nodes) || 0) <= 1;
   const chips = servers.map(sv => {
     const who = one ? '' : `<span class="muted small">${esc(sv.name)}</span> `;
-    if (sv.state === 'ok') return who + badge(sv.delayMs + ' ms', 'ok') + (sv.method === 'tcp' ? ' ' + badge('TCP') : '') + (String(sv.method || '').startsWith('via:') ? ` <span class="muted small">${t('up.groupNow', { name: esc(sv.method.slice(4)) })}</span>` : '');
-    if (sv.state === 'fail') return who + badge(t('up.fault'), 'danger');
-    if (sv.state === 'stale') return who + badge(t('up.stale'), 'warn');
-    return who + badge(t('up.pending'));
+    if (sv.state === 'ok') return `<span class="nowrap">${who}${badge(sv.delayMs + ' ms', 'ok')}${sv.method === 'tcp' ? ' ' + badge('TCP') : ''}</span>`;
+    if (sv.state === 'fail') return `<span class="nowrap">${who}${badge(t('up.fault'), 'danger')}</span>`;
+    if (sv.state === 'stale') return `<span class="nowrap">${who}${badge(t('up.stale'), 'warn')}</span>`;
+    return `<span class="nowrap">${who}${badge(t('up.pending'))}</span>`;
   }).join(' <span class="muted">·</span> ');
+  const via = viaLine(servers);
   const bad = servers.filter(sv => sv.error); // 折叠时预览第一条真正带报错的,“数据过期”没有报错文字
   // 服务器多(>4 台)时一行放不下每台的延迟:折叠时写"n/m 台正常 · 中位延迟",故障 / 过期的服务器先列出来(多了折成 +N),展开看逐台
   const many = servers.length > 4;
@@ -92,8 +93,9 @@ function resultHTML(id) {
     detail = '<div class="sub-cell">' + servers.map(sv => {
       const st = (label[sv.state] || (() => t('up.pending')))(sv);
       const when = sv.checkedAt ? ` · ${t('up.checkedAt')} ${fmtTime(sv.checkedAt)}` : '';
+      const now = String(sv.method || '').startsWith('via:') ? ` · ${esc(t('up.groupNow', { name: sv.method.slice(4) }))}` : '';
       const err = sv.error ? ` · <span class="danger">${esc(trErr(sv.error)).slice(0, 160)}</span>` : '';
-      return `<div>${esc(sv.name)}${sv.isLocal ? ' <span class="muted">(' + t('node.local') + ')</span>' : ''} · ${esc(st)}${when}${err}</div>`;
+      return `<div>${esc(sv.name)}${sv.isLocal ? ' <span class="muted">(' + t('node.local') + ')</span>' : ''} · ${esc(st)}${now}${when}${err}</div>`;
     }).join('') + '</div>';
   } else if (bad.length) {
     detail = `<div class="sub-cell" title="${esc(trErr(bad[0].error))}">${esc(trErr(bad[0].error)).slice(0, 60)}</div>`;
@@ -105,9 +107,32 @@ function resultHTML(id) {
     const tags = trouble.sort((a, b) => (a.state === 'fail' ? 0 : 1) - (b.state === 'fail' ? 0 : 1))
       .map(sv => `<span class="badge ${sv.state === 'fail' ? 'danger' : 'warn'}" title="${esc(trErr(sv.error || ''))}">${esc(sv.name)} · ${esc(sv.state === 'fail' ? t('up.fault') : t('up.stale'))}</span>`);
     return `<div class="up-sum">${badge(t('up.okOf', { n: okd.length, m: servers.length }), okd.length === servers.length ? 'ok' : okd.length ? 'warn' : 'danger')}${median ? ` <span class="muted small">${esc(t('up.median', { ms: median }))}</span>` : ''}${more}</div>`
+      + via
       + (tags.length ? `<div class="sub-cell">${chipList(tags, { key: 'up-bad-' + id, max: 6 })}</div>` : '') + (bad.length ? `<div class="sub-cell" title="${esc(trErr(bad[0].error))}">${esc(trErr(bad[0].error)).slice(0, 60)}</div>` : '');
   }
-  return `<div class="row" style="gap:.35rem;align-items:center;flex-wrap:wrap">${chips}${more}</div>${detail}`;
+  return `<div class="row" style="gap:.35rem;align-items:center;flex-wrap:wrap">${chips}${more}</div>${expanded.has(id) ? '' : via}${detail}`;
+}
+
+// viaLine 上游组在各服务器上此刻走的成员,合成一行:都走同一条就只写一次「现在走 X」(以前每台后面各写一遍,
+// 三台就重复三遍、把这一格撑成好几行);各台不一样时按成员归并「现在走 X(2 台)· Y(1 台)」,哪几台放在悬停提示里。
+// 展开看逐台时每台那一行自己写着,这里不再重复。
+function viaLine(servers) {
+  const by = new Map();
+  servers.forEach(sv => {
+    const m = String(sv.method || '');
+    if (sv.state !== 'ok' || !m.startsWith('via:')) return;
+    const name = m.slice(4);
+    if (!by.has(name)) by.set(name, []);
+    by.get(name).push(sv.name);
+  });
+  if (!by.size) return '';
+  const groups = [...by].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  if (groups.length === 1) {
+    return `<div class="sub-cell muted" title="${esc(groups[0][1].join('、'))}">${esc(t('up.groupNow', { name: groups[0][0] }))}</div>`;
+  }
+  const shown = groups.slice(0, 3).map(([name, who]) => `<span title="${esc(who.join('、'))}">${esc(name)} ${esc(t('up.viaServers', { n: who.length }))}</span>`);
+  const rest = groups.length - shown.length;
+  return `<div class="sub-cell muted">${esc(t('up.groupNow', { name: '' }).trim())} ${shown.join(' · ')}${rest > 0 ? ` · +${rest}` : ''}</div>`;
 }
 
 // 线路上游:写明是哪条线路、哪台服务器
@@ -143,11 +168,14 @@ function renderRows() {
   if (!rows.length) { setHTML(body, `<tr><td colspan="6">${empty()}</td></tr>`); return; }
   setHTML(body, rows.map(u => {
     const o = parseOpts(u.options);
-    const srv = u.type === GROUP ? (o.outbounds || []).join(' · ') : o.server ? o.server + (o.server_port ? ':' + o.server_port : '') : '';
+    // 上游组的成员可能有一二十条:收成标签、超过 3 条折起来(+N 点开),不再拼成一长串把这一列撑宽
+    const srv = u.type === GROUP
+      ? chipList((o.outbounds || []).map(m => `<span class="chip">${esc(m)}</span>`), { key: 'up-mem-' + u.id, max: 3 })
+      : esc(o.server ? o.server + (o.server_port ? ':' + o.server_port : '') : '');
     return `<tr>
       <td class="primary-cell">${online.has(u.name) ? '<span class="dot on"></span>' : ''}${esc(u.name)}${u.fromLine ? `<div class="sub-cell">${esc(relayNames(u))}${u.relayProblem ? ` · <span class="danger">${esc(trErr(u.relayProblem))}</span>` : ''}</div>` : ''}</td>
       <td>${typeBadges(u)}</td>
-      <td class="num">${esc(srv)}</td>
+      <td class="num">${srv}</td>
       <td class="num c-p3">${usage[u.id] || 0}</td>
       <td id="up-res-${u.id}">${resultHTML(u.id)}</td>
       <td class="actions">
