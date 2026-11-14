@@ -340,6 +340,13 @@ func (s *Service) readiness(c Config, infos []StandbyInfo) []Check {
 			}
 		}
 	}
+	if cs := s.takeoverConflicts(c); len(cs) > 0 { // 线路占着副机接任后要用的端口(见 takeoverports.go)
+		names := make([]string, 0, len(cs))
+		for _, x := range cs {
+			names = append(names, x.String())
+		}
+		add("takeoverPorts", "warn", names)
+	}
 	tg := strings.EqualFold(s.setting("tgEnabled"), "true") && s.setting("tgToken") != "" && s.setting("tgChatId") != ""
 	if tg {
 		add("telegram", "ok", nil)

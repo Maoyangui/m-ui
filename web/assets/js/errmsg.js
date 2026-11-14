@@ -820,7 +820,11 @@ const EN = /*BEGIN*/{
 "有不止一台在当主机:指明让给哪一台": "More than one other server is acting as master: say which one to hand back to",
 "本机已经是副机": "This server is already a node",
 "没有别的服务器一直在当主机:不用让": "No other server has been acting as master: nothing to hand back",
-"那台的纪元比本机高:该让的是它,到它的面板上点「让回主机」": "That server has the higher epoch: it is the one that should hand back, click \"Hand back master\" on its panel"
+"那台的纪元比本机高:该让的是它,到它的面板上点「让回主机」": "That server has the higher epoch: it is the one that should hand back, click \"Hand back master\" on its panel",
+"这些线路占着副机接任后要用的端口(它的代理面板、或连订阅一起接管时迁过去的订阅),接任时会冲突:先给它们换个端口再开主机容灾 —— %s": "These lines use ports a node needs after taking over (its reseller panel, or the subscription port that moves over with \"Subscriptions too\"), which would clash at takeover: give them another port before turning on master failover — %s",
+"开着主机容灾、连订阅一起接管:端口 %d 是订阅端口,服务器「%s」接任后要用它提供订阅,换一个": "Master failover with subscriptions taken over: port %d is the subscription port, which server \"%s\" needs after taking over; pick another",
+"开着主机容灾:端口 %d 是服务器「%s」的代理面板端口,它接任后要用,换一个": "Master failover is on: port %d is the reseller panel port of server \"%s\", which it needs after taking over; pick another",
+"开着主机容灾、连订阅一起接管:订阅端口 %d 被副机上的线路占着(接任后那台要用它提供订阅),换一个或先改那些线路的端口 —— %s": "Master failover with subscriptions taken over: subscription port %d is used by lines on nodes (the node that takes over needs it to serve subscriptions); pick another or change those lines first — %s"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

@@ -284,7 +284,8 @@ export async function copy(text) {
 }
 
 // ---- 小部件 ----
-export const badge = (text, kind = '') => `<span class="badge ${kind}">${esc(text)}</span>`;
+// 很长的(服务器名、上游名不带空格时)在窄屏上会被省略号截断(见 style.css .badge),悬停看全文
+export const badge = (text, kind = '') => `<span class="badge ${kind}"${String(text).length > 24 ? ` title="${esc(text)}"` : ''}>${esc(text)}</span>`;
 export const dot = on => `<span class="dot ${on ? 'on' : ''}" title="${on ? t('common.online') : t('common.offline')}"></span>`;
 export function progress(used, total) {
   if (!total) return `<div class="progress"><div class="bar" style="width:0"></div></div>`;

@@ -315,7 +315,7 @@ details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; m
 }
 
 /* ===== 徽章与状态 ===== */
-.badge { display: inline-block; font-size: .72rem; padding: .12rem .5rem; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; vertical-align: middle; }
+.badge { display: inline-block; font-size: .72rem; padding: .12rem .5rem; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; vertical-align: middle; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .badge.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
 .badge.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .badge.danger { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
@@ -327,7 +327,7 @@ details.adv summary { cursor: pointer; color: var(--muted); font-size: .82rem; m
 .progress .bar { height: 100%; background: var(--primary); transition: width .3s; }
 .progress.warn .bar { background: var(--warn); }
 .progress.danger .bar { background: var(--danger); }
-.chips { display: flex; flex-wrap: wrap; gap: .3rem; }
+.chips { display: flex; flex-wrap: wrap; gap: .3rem; max-width: 100%; min-width: 0; } /* 不比所在的格子宽:里面很长的名字截断(见 .badge),不把整行撑出屏幕 */
 .chip { font-size: .76rem; padding: .15rem .5rem; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); }
 .empty { color: var(--muted); text-align: center; padding: 1.5rem; font-size: .85rem; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: .35rem 1rem; font-size: .85rem; }

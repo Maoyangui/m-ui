@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/ha"
 	"github.com/Maoyangui/m-ui/hop"
 	"github.com/Maoyangui/m-ui/render"
 	"gorm.io/gorm"
@@ -176,6 +177,17 @@ func (s *Server) forwardPortFree(line model.Line, f model.LineForward, via model
 	for _, p := range s.servicePortsOf(via) {
 		if p.Port == f.Port {
 			return fmt.Errorf("端口 %d 是服务器「%s」的%s端口,换一个", f.Port, via.Name, p.Label)
+		}
+	}
+	if h := s.haSvc(); h != nil && !via.IsLocal && render.ForwardNetwork(line) != "udp" { // 开着主机容灾:避开它接任后要用的端口
+		for _, p := range h.TakeoverPorts(via.Id) {
+			if p.Port != f.Port {
+				continue
+			}
+			if p.What == ha.TakeoverSub {
+				return fmt.Errorf("开着主机容灾、连订阅一起接管:端口 %d 是订阅端口,服务器「%s」接任后要用它提供订阅,换一个", f.Port, via.Name)
+			}
+			return fmt.Errorf("开着主机容灾:端口 %d 是服务器「%s」的代理面板端口,它接任后要用,换一个", f.Port, via.Name)
 		}
 	}
 	if render.LineOnNode(line, via.Id) && line.Port == f.Port {
