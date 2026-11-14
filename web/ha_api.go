@@ -176,6 +176,7 @@ func (s *Server) haSessionActions() map[string]haAction {
 		"set-master":     {http.MethodPost, s.haSetMaster},
 		"switch/abandon": {http.MethodPost, s.haAbandon},
 		"takeover":       {http.MethodPost, s.haTakeover},
+		"yield":          {http.MethodPost, s.haYield},
 		"repin":          {http.MethodPost, s.haRepin},
 		"notice":         {http.MethodPost, s.haNotice},
 		"dns-test":       {http.MethodPost, s.haDNSTest},
@@ -301,6 +302,28 @@ func (s *Server) haTakeover(w http.ResponseWriter, r *http.Request, h *ha.Servic
 		return
 	}
 	s.audit(r, "ha", "takeover", nil)
+	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+}
+
+// haYield 两台同时当主机时(见 ha/rival.go),纪元更高的这台把主机让回给另一台:本机变为副机、改过的 DNS 改回去。
+// 要再输一次管理员密码。
+func (s *Server) haYield(w http.ResponseWriter, r *http.Request, h *ha.Service) {
+	var body struct {
+		Id       uint   `json:"id"`
+		Password string `json:"password"`
+		Code     string `json:"code"`
+	}
+	if !decodeSmall(w, r, &body) {
+		return
+	}
+	if !s.reauth(w, r, body.Password, body.Code) {
+		return
+	}
+	if err := h.YieldTo(body.Id, "panel"); err != nil {
+		badRequest(w, err)
+		return
+	}
+	s.audit(r, "ha", "yield", map[string]interface{}{"to": body.Id})
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }
 

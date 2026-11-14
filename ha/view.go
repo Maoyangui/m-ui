@@ -21,6 +21,7 @@ type View struct {
 	Mode       string   `json:"mode"`
 	Frozen     int64    `json:"frozenUntil,omitempty"`
 	Notices    []Notice `json:"notices"`
+	Rivals     []Rival  `json:"rivals,omitempty"` // 另一台也一直在当主机(见 rival.go)
 	PanelURL   string   `json:"panelUrl,omitempty"`
 
 	// 主机
@@ -73,7 +74,7 @@ type Check struct {
 // View 当前状态。full 为真时主机侧附上就绪检查(设置页要,服务器列表不要)。
 func (s *Service) View(full bool) View {
 	v := View{Role: s.Role(), Epoch: s.Epoch(), SelfId: s.SelfId(), SelfName: s.selfName(), Version: s.d.Version, Mode: s.Mode(),
-		Notices: s.Notices(), PanelURL: s.panelURL(), StandbyIds: []uint{}, DNSAPIOverride: s.d.DNSAPI}
+		Notices: s.Notices(), PanelURL: s.panelURL(), StandbyIds: []uint{}, DNSAPIOverride: s.d.DNSAPI, Rivals: s.Rivals()}
 	v.MasterId, _ = s.masterId()
 	if f := s.freezeUntil(); f > s.now().Unix() && !s.IsNode() {
 		v.Frozen = f
@@ -418,11 +419,13 @@ type Summary struct {
 	CanTakeover  bool     `json:"canTakeover,omitempty"`
 	Why          string   `json:"why,omitempty"` // 主机失联而本机不能接任时的原因代码(界面按 ha.why.* 翻译)
 	Notices      []Notice `json:"notices"`
+	// Rivals 另一台也一直在当主机(两台同时当主机,见 rival.go):页面顶部、概况「需要处理」提示
+	Rivals []Rival `json:"rivals,omitempty"`
 }
 
 // Summary 当前小结。
 func (s *Service) Summary() Summary {
-	sm := Summary{Role: s.Role(), Epoch: s.Epoch(), Mode: s.Mode(), Notices: s.Notices()}
+	sm := Summary{Role: s.Role(), Epoch: s.Epoch(), Mode: s.Mode(), Notices: s.Notices(), Rivals: s.Rivals()}
 	if s.Frozen() {
 		sm.Frozen, sm.FrozenText = s.freezeUntil(), s.FrozenText()
 		sw := s.switchState()

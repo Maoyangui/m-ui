@@ -816,7 +816,11 @@ const EN = /*BEGIN*/{
 "阿里云: 找不到 %s 所属的域名": "Alibaba Cloud: can't find the domain that %s belongs to",
 "阿里云要填 AccessKey ID 和 AccessKey Secret": "Alibaba Cloud needs an AccessKey ID and an AccessKey Secret",
 "这台副机的版本太旧,不支持远程清理磁盘:先升级它,或登录它的面板在运维页清理": "This node is too old to clean its disk remotely: upgrade it first, or clean it from the Ops page of its own panel",
-"这台服务器已停用": "This server is disabled"
+"这台服务器已停用": "This server is disabled",
+"有不止一台在当主机:指明让给哪一台": "More than one other server is acting as master: say which one to hand back to",
+"本机已经是副机": "This server is already a node",
+"没有别的服务器一直在当主机:不用让": "No other server has been acting as master: nothing to hand back",
+"那台的纪元比本机高:该让的是它,到它的面板上点「让回主机」": "That server has the higher epoch: it is the one that should hand back, click \"Hand back master\" on its panel"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

@@ -20,7 +20,7 @@ import (
 // Cmd 命令行交给服务的一个请求。
 type Cmd struct {
 	Id         string `json:"id"`
-	Op         string `json:"op"` // status | takeover | set-master | pause | resume | reset
+	Op         string `json:"op"` // status | takeover | set-master | pause | resume | reset | yield
 	Target     string `json:"target,omitempty"`
 	Force      bool   `json:"force,omitempty"`
 	AllowPlain bool   `json:"allowPlain,omitempty"` // set-master:目标是明文 http 链接也继续(已确认风险)
@@ -114,6 +114,20 @@ func (s *Service) runCmd(c Cmd, res *CmdResult) error {
 			return err
 		}
 		res.Text = "已恢复接任"
+		return nil
+	case "yield":
+		var id uint
+		if c.Target != "" {
+			n, err := s.findNode(c.Target)
+			if err != nil {
+				return err
+			}
+			id = n.Id
+		}
+		if err := s.YieldTo(id, "cli"); err != nil {
+			return err
+		}
+		res.Text = "已把主机让回去,本机变为副机(本任期自动改过的 DNS 已改回);那台会以更高的纪元把本机收回去"
 		return nil
 	case "reset":
 		if !s.IsNode() && s.Epoch() > 0 && !c.Force {

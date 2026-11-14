@@ -443,6 +443,18 @@ registerActions({
   'ha.takeover': async () => { if (!view) await loadHA(); if (view) openTakeover(); }, // 顶部提示条上的按钮:别的页面没取过状态
   'ha.toSettings': () => { closeCard(false); try { sessionStorage.setItem('m-ui.scrollTo', 'ha-card'); } catch {} location.hash = '#/settings'; },
   'ha.repin': id => openRepin(Number(id)),
+  // 两台同时当主机时把主机让回给另一台(概况「需要处理」那一行的按钮)
+  'ha.yield': async id => {
+    let st = null;
+    try { st = await get('status'); } catch { /* 取不到就不写名字 */ }
+    const r = ((st && st.ha && st.ha.rivals) || []).find(x => x.id === Number(id)) || {};
+    const name = r.name || '#' + id;
+    askPassword(t('ha.yieldTitle', { name }), async (password, code) => {
+      await post('ha/yield', { id: Number(id), password, code }, SLOW);
+      toast(t('ha.yielded', { name }), 'ok');
+      setTimeout(() => location.reload(), 2500);
+    }, `<p>${esc(t('ha.yieldIntro', { name }))}</p>`);
+  },
   'ha.abandon': async (_, btn) => {
     const box = btn.closest('.ha-abandon');
     const errEl = box && box.querySelector('.ha-ab-err');

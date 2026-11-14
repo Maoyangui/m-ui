@@ -378,6 +378,14 @@ func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bo
 				}
 			}
 		}
+		// 设为主机把主机换回到当初失联过的那台(真机演练:A 失联 → B 接任 → A 回来变副机 → 对 A「设为主机」):
+		// 整库数据里「原主机 A 失联中」的记录说的就是本机,留着会一直显示本机失联,清掉
+		var former Former
+		if raw := txGet(KeyFormer); raw != "" && json.Unmarshal([]byte(raw), &former) == nil && former.Id == selfId {
+			if err := upsert(tx, map[string]string{KeyFormer: ""}); err != nil {
+				return err
+			}
+		}
 		for _, t := range []string{"sessions", "agent_counters"} {
 			if err := tx.Exec("DELETE FROM " + t).Error; err != nil {
 				return err

@@ -253,6 +253,13 @@ function haRows(ha) {
   const rank = ha.rank || nd.rank || 0;
   const sw = ha.switch || nd.switch || null;
   const c = [];
+  // 两台同时当主机(网络分区,见 ha/rival.go):两边都红色提示;纪元更高、该让的那边带「让回主机」
+  for (const r of (Array.isArray(ha.rivals) ? ha.rivals : [])) {
+    const name = r.name || '#' + r.id;
+    c.push({ sev: 'bad', title: t(r.higher ? 'dash.attn.ha.rivalHigher' : 'dash.attn.ha.rivalLower', { name, e: r.epoch }),
+      parts: [t(r.higher ? 'dash.attn.ha.rivalHigherHow' : 'dash.attn.ha.rivalLowerHow', { name })],
+      acts: r.canYield ? btn('ha.yield', r.id, t('ha.yield'), 'danger') : '' });
+  }
   if (ha.role === 'demoted') {
     const d = ha.demoted || {};
     c.push({ sev: 'bad', title: t('dash.attn.ha.demoted', { name: d.masterName || ha.masterName || '—' }),

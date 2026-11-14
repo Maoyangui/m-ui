@@ -135,6 +135,11 @@ func (s *Service) NoteReply(n model.Node, r hub.EpochReply) {
 	}
 	checking := c.checking
 	c.mu.Unlock()
+	if k == replyRival {
+		s.noteRival(n.Id, r.Epoch, now) // 两台同时当主机:持续一阵就提示、告警(见 rival.go)
+	} else if k != replyDown {
+		s.forgetRival(n.Id)
+	}
 	switch k {
 	case replyBogus:
 		s.alertBogus(n, r.Epoch)

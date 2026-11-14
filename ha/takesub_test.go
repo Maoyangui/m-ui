@@ -202,6 +202,8 @@ func TestSetMasterMovesSubscriptionByDefault(t *testing.T) {
 	if m.takeSub() {
 		t.Fatal("前提:默认只接管主机的工作")
 	}
+	// 主机当初接任时记下的「原主机失联中」说的正是这次的目标(换回原主机):到了目标上要清掉,不能显示它自己失联
+	m.set(map[string]string{KeyFormer: mustJSON(Former{Id: cl.ids[0], Name: "TW1", Since: time.Now().Unix()})})
 	if _, err := m.SetMaster(cl.ids[0], "admin", SetMasterOpts{}); err != nil {
 		t.Fatal(err)
 	}
@@ -216,6 +218,9 @@ func TestSetMasterMovesSubscriptionByDefault(t *testing.T) {
 	}
 	if get("subDomain") != "sub.example.com" || get("subPort") != "2096" || get("subPath") != "/s/" {
 		t.Fatalf("订阅设置换成原主机的: %s %s %s", get("subDomain"), get("subPort"), get("subPath"))
+	}
+	if get(KeyFormer) != "" {
+		t.Fatalf("换回原主机:「原主机失联中」说的是它自己,要清掉: %s", get(KeyFormer))
 	}
 	if !subCertUsable(get("subCertFile"), "sub.example.com", 15*24*time.Hour, time.Now()) {
 		t.Fatalf("订阅证书随整库数据带过来、用于订阅: %q", get("subCertFile"))

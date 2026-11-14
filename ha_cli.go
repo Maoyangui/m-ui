@@ -26,6 +26,7 @@ import (
 //	m-ui ha set-master <服务器> [--allow-plain]  在主机上把一台副机(名字或 id)设为主机;明文 http 链接要加 --allow-plain
 //	m-ui ha pause <分钟>            在主机上暂停接任(升级、维护前)
 //	m-ui ha resume                 恢复接任
+//	m-ui ha yield [服务器]         两台同时当主机时(见 ha/rival.go),把主机让回给另一台
 //	m-ui ha reset [--force]        清掉本机的主机容灾状态(把主机降回旧版本前在每台副机上执行;主机上要 --force)
 func runHA(args []string) {
 	fs := flag.NewFlagSet("ha", flag.ExitOnError)
@@ -82,6 +83,7 @@ func haUsage() {
 	fmt.Println("                                 在主机上把一台副机设为主机(名字或 id);它的链接是明文 http 时要加 --allow-plain")
 	fmt.Println("  m-ui ha pause <分钟>            在主机上暂停接任")
 	fmt.Println("  m-ui ha resume                 恢复接任")
+	fmt.Println("  m-ui ha yield [服务器]         两台同时当主机时,把主机让回给另一台(本机变为副机,改过的 DNS 改回去)")
 	fmt.Println("  m-ui ha reset [--force]        清掉本机的主机容灾状态(主机降回旧版本前在每台副机上执行;主机上要 --force)")
 }
 
@@ -141,6 +143,15 @@ func haCommand(db *gorm.DB, op string, args []string, f haFlags, ask func(string
 		return haSubmit(db, ha.Cmd{Op: "pause", Min: n}, 30*time.Second)
 	case "resume":
 		return haSubmit(db, ha.Cmd{Op: "resume"}, 30*time.Second)
+	case "yield":
+		target := ""
+		if len(args) == 1 {
+			target = args[0]
+		}
+		if !yes && ask("  把主机让回给另一台还在当主机的服务器:本机变为副机,本任期自动改过的 DNS 改回去。继续?[y/N] ") != "y" {
+			return fmt.Errorf("已取消")
+		}
+		return haSubmit(db, ha.Cmd{Op: "yield", Target: target}, 60*time.Second)
 	}
 	haUsage()
 	return fmt.Errorf("不认识的子命令 %q", op)
@@ -293,7 +304,16 @@ func haStatus(db *gorm.DB) error {
 		if v.Config != nil && v.Config.PauseUntil > time.Now().Unix() {
 			fmt.Printf("  接任暂停到 %s\n", time.Unix(v.Config.PauseUntil, 0).Format("2006-01-02 15:04:05"))
 		}
-		if v.Former != nil {
+		rivalOf := map[uint]bool{}
+		for _, r := range v.Rivals {
+			rivalOf[r.Id] = true
+			if r.CanYield {
+				fmt.Printf("  \033[31m%s 也在当主机(纪元 %d):多数副机还跟着它,两台同时当主机。要它继续当主机执行 m-ui ha yield;要本机当主机,让本机联系得上其它副机\033[0m\n", r.Name, r.Epoch)
+			} else {
+				fmt.Printf("  \033[31m%s 也在当主机(纪元 %d,比本机高):它联系不上多数副机。要本机继续当主机,在它上面执行 m-ui ha yield\033[0m\n", r.Name, r.Epoch)
+			}
+		}
+		if v.Former != nil && !rivalOf[v.Former.Id] {
 			fmt.Printf("  原主机 %s 失联中,回来后自动变为副机\n", v.Former.Name)
 		}
 	}
