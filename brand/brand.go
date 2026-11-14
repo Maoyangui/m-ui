@@ -30,6 +30,12 @@ const (
 // TelegramURL 点击即可打开对话。
 const TelegramURL = "https://t.me/" + Telegram
 
+// TelegramGroup 交流群(公开群的用户名,不含 @);TelegramGroupURL 点击即可打开群聊。
+const (
+	TelegramGroup    = "godusevpncn"
+	TelegramGroupURL = "https://t.me/" + TelegramGroup
+)
+
 // ServeLogo 输出 logo.svg,允许浏览器缓存一天。
 func ServeLogo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml")

@@ -24,7 +24,7 @@ func (s *Server) handleSupport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_ = supportTmpl.Execute(w, map[string]interface{}{
-		"Lang": lang, "Telegram": brand.Telegram, "TelegramURL": brand.TelegramURL,
+		"Lang": lang, "Telegram": brand.Telegram, "TelegramURL": brand.TelegramURL, "TelegramGroupURL": brand.TelegramGroupURL,
 		"Tron": brand.Tron, "TronHead": brand.Tron[:4], "TronTail": brand.Tron[len(brand.Tron)-4:],
 		"Repo": brand.Repo, "Site": brand.Site, "Version": Version, "Online": s.supportOnline(), // 版本号写在页面上,报问题时顺手就能带上
 	})

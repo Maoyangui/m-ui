@@ -51,7 +51,7 @@ const flush = async () => { for (let i = 0; i < 50; i++) await null; }; // 让 f
 // 打开一页:浏览器里已经记着一笔 T0 留的名(60 分钟后到期),这台电脑的钟和服务器一样准;页面在留名后 start 毫秒打开。
 // onCheck(url, reply) 决定每次 support/pledge-check 怎么回(返回 Promise;reply(body) 是带上服务器时间的正常响应)。
 async function openPage(lang, onCheck, { start = 500 } = {}) {
-  const html = render(TPL, { Lang: lang, Online: true, Version: '0.0.0', Telegram: 'tg', TelegramURL: '#', Tron: 'TDoUMF4nF244o5GZvBBwX5t9axvnSoP1Cm', TronHead: 'TDoU', TronTail: 'P1Cm', Repo: '#', Site: '#' });
+  const html = render(TPL, { Lang: lang, Online: true, Version: '0.0.0', Telegram: 'tg', TelegramURL: '#', TelegramGroupURL: 'https://t.me/godusevpncn', Tron: 'TDoUMF4nF244o5GZvBBwX5t9axvnSoP1Cm', TronHead: 'TDoU', TronTail: 'P1Cm', Repo: '#', Site: '#' });
   const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]).find(s => s.includes('support/pledge-check'));
   assert.ok(script, '找不到留名的脚本');
   const clock = { ms: T0 * 1000 + start };

@@ -64,11 +64,14 @@ a { color: var(--primary); }
 .lede { margin: 0 0 .6rem; color: var(--muted); font-size: .85rem; line-height: 1.5; }
 .lede b { color: var(--text); font-weight: 600; }
 
-/* 主要联系方式 */
-.contact { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 11px; padding: .55rem .75rem; }
-.contact .who { display: flex; align-items: center; gap: .55rem; min-width: 0; flex: 1; }
-.contact .who span { font-size: .72rem; color: var(--muted); display: block; letter-spacing: .04em; text-transform: uppercase; }
-.contact code { font-family: var(--mono); font-size: .95rem; word-break: break-all; }
+/* 联系方式:Telegram 与交流群各一行,紧凑;每行都能复制、直接打开 */
+.contacts { display: grid; gap: .35rem; }
+.contact { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 10px; padding: .32rem .4rem .32rem .65rem; }
+.contact .who { display: flex; align-items: center; gap: .45rem; min-width: 0; flex: 1; font-size: .86rem; }
+.contact .who svg { flex: none; color: var(--muted); }
+.contact .who .lbl { color: var(--muted); white-space: nowrap; }
+.contact code { font-family: var(--mono); font-size: .86rem; word-break: break-all; }
+.contact .btn { padding: .26rem .6rem; font-size: .8rem; border-radius: 8px; }
 .actions { display: flex; gap: .45rem; flex-wrap: wrap; }
 
 /* 按钮 */
@@ -157,8 +160,7 @@ input.fld { flex: 1; }
   .amt { flex: 1 1 0; }
   .pwait .grow { flex-basis: 100%; height: 0; }
   .rank { columns: 1; }
-  .contact .actions { width: 100%; }
-  .contact .actions .btn { flex: 1; justify-content: center; }
+  .contact { padding: .4rem .5rem .4rem .6rem; }
 }
 </style>
 </head>
@@ -187,18 +189,20 @@ input.fld { flex: 1; }
       <h2>{{if eq .Lang "zh"}}提建议 · 报问题{{else}}Suggestions &amp; bug reports{{end}}</h2>
     </header>
     <p class="lede">{{if eq .Lang "zh"}}想要的功能、遇到的问题(附上版本号最好),直接告诉我。也可以找我<b>采购 GCP / Azure / AWS 服务器</b>。{{else}}Feature ideas or anything broken (please include the version) — just tell me. I can also <b>source GCP / Azure / AWS servers</b> for you.{{end}}</p>
-    <div class="contact">
-      <div class="who">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted)"><path d="M21.5 4.3 2.9 11.2c-.9.3-.9 1.6 0 1.9l4.6 1.5 1.8 5.3c.3.8 1.3 1 1.9.4l2.6-2.5 4.7 3.5c.7.5 1.7.1 1.9-.7l3-14.9c.2-.9-.7-1.6-1.5-1.3Z"/><path d="m8 14.4 10.5-7.7L10 16"/></svg>
-        <div style="min-width:0">
-          <span>Telegram</span>
-          <code>@{{.Telegram}}</code>
+    <div class="contacts">
+      <div class="contact">
+        <div class="who"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.5 4.3 2.9 11.2c-.9.3-.9 1.6 0 1.9l4.6 1.5 1.8 5.3c.3.8 1.3 1 1.9.4l2.6-2.5 4.7 3.5c.7.5 1.7.1 1.9-.7l3-14.9c.2-.9-.7-1.6-1.5-1.3Z"/><path d="m8 14.4 10.5-7.7L10 16"/></svg><span class="lbl">Telegram:</span><code>@{{.Telegram}}</code></div>
+        <div class="actions">
+          <button class="btn" data-copy="@{{.Telegram}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
+          <a class="btn primary" href="{{.TelegramURL}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}打开{{else}}Open{{end}} <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg></a>
         </div>
       </div>
-      <div class="actions">
-        <button class="btn" data-copy="@{{.Telegram}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
-        <a class="btn primary" href="{{.TelegramURL}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}打开 Telegram{{else}}Open Telegram{{end}}
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg></a>
+      <div class="contact">
+        <div class="who"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14.2c2.5.3 4 1.9 4.5 4.8"/></svg><span class="lbl">{{if eq .Lang "zh"}}群聊:{{else}}Group:{{end}}</span><code>t.me/godusevpncn</code></div>
+        <div class="actions">
+          <button class="btn" data-copy="{{.TelegramGroupURL}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
+          <a class="btn primary" href="{{.TelegramGroupURL}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}打开{{else}}Open{{end}} <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg></a>
+        </div>
       </div>
     </div>
   </section>

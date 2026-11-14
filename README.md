@@ -552,7 +552,9 @@ brand/     logo 与联系方式
 
 ## 反馈与支持
 
-面板右上角"建议 / 支持"里有作者的 Telegram 与打赏地址;也欢迎提 Issue / PR。
+Telegram:[@yangweii](https://t.me/yangweii) · 群聊:[t.me/godusevpncn](https://t.me/godusevpncn)
+
+面板右上角"建议 / 支持"里也有这两个联系方式(可复制、可直接打开)和打赏地址;也欢迎提 Issue / PR。
 
 **功德箱**:在这一页填名字和金额留名,按给出的金额转 USDT(TRC20),60 分钟内到账就累计到这个名字上,所有面板都能看到排行。版本号旁边显示在线设备数。
 

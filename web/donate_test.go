@@ -220,7 +220,9 @@ func TestSupportPageRendersFully(t *testing.T) {
 		w := httptest.NewRecorder()
 		s.handleSupport(w, httptest.NewRequest("GET", "http://panel:2053/app/support?lang="+lang, nil))
 		page := w.Body.String()
-		for _, frag := range []string{want, "support/pledge-check", "var STALE = 30000", "querySelectorAll('[data-copy]')", "</script>\n</body>\n</html>"} {
+		// 联系方式两行:作者 Telegram 与交流群,都能复制、能直接打开(11-14 用户要求加群聊)
+		contacts := []string{`data-copy="@yangweii"`, `href="https://t.me/yangweii"`, `data-copy="https://t.me/godusevpncn"`, `href="https://t.me/godusevpncn"`}
+		for _, frag := range append([]string{want, "support/pledge-check", "var STALE = 30000", "querySelectorAll('[data-copy]')", "</script>\n</body>\n</html>"}, contacts...) {
 			if !strings.Contains(page, frag) {
 				t.Fatalf("%s: 页面里应有 %q,渲染没完成?(共 %d 字节)", lang, frag, len(page))
 			}
