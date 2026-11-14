@@ -326,6 +326,19 @@
     <div class="pit"><b>Common pitfall</b>Open the port in the security group / firewall; for UDP protocols (Hysteria2, TUIC) open UDP.</div>
   </section>
 
+  <section class="sec" id="line-detail">
+    <h3>Line traffic and who is online</h3>
+    <ol class="steps">
+      <li>On <b data-k="nav.lines">Lines</b>, click a line's name or <b data-k="common.details">Details</b>. The four boxes at the top show the line's total traffic for the chosen range, how many servers it runs on, and how many users and IPs are on it right now.</li>
+      <li>The <b data-k="line.d.traffic">Traffic</b> chart starts with <b data-k="line.d.allServers">All servers combined</b> and switches between 24h / 7d / 30d. Pick a server in the drop-down, or click its row under <b data-k="line.d.servers">Per server</b>, to see only that one; click the row again to go back to the total.</li>
+      <li><b data-k="line.d.online">Online users &amp; IPs</b> refreshes every 5 seconds and shows which server each person is on and from which IPs. With many people you can search; 40 are shown at a time, and a name takes you to Users.</li>
+    </ol>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>A node keeps its own line traffic, so it is fetched when you open the details. Servers that can't be reached, are disabled or run a version that is too old are marked in the list and left out of the total.</li>
+      <li>Line traffic is the bytes that actually went through each server; server traffic ratios aren't applied, so it need not add up to the users' usage.</li>
+    </ul></div>
+  </section>
+
   <section class="sec" id="protocols">
     <h3>Choosing a protocol</h3>
     <p class="lede">Not sure? Use Hysteria2 as the main line and add one TCP line (AnyTLS or VLESS + Reality) as a backup.</p>
@@ -1172,7 +1185,7 @@
     <ol class="steps">
       <li>The token above is the <b>default key</b>: it can do everything and keeps working after the upgrade. While the external API is on, the card also has <b data-k="api.keys">Extra keys</b>: click <b data-k="api.keyAdd">New key</b>, give it a name (say "Shop" or "Telegram bot") and tick only the permissions it needs.</li>
       <li>Seven permissions: <b data-k="api.perm.users.read">View users</b>, <b data-k="api.perm.users.create">Create users</b>, <b data-k="api.perm.users.update">Change users</b> (edit fields, enable / disable, reset usage, kick, reset the subscription link), <b data-k="api.perm.users.delete">Delete users</b>, <b data-k="api.perm.billing">Renew &amp; change plans</b>, <b data-k="api.perm.plans.read">View plans</b> and <b data-k="api.perm.panel.read">Panel info</b> (overview, servers, lines, online users). Calling something a key is not allowed to do returns 403 naming the missing permission.</li>
-      <li>Each key can be <b data-k="common.edit">edited</b>, <b data-k="api.keyRotate">regenerated</b> (the old token stops working at once) or <b data-k="common.delete">deleted</b> on its own; the list shows when and from which IP it was last used. With the master switch off, no key works.</li>
+      <li>Each key has its own <b data-k="common.edit">Edit</b>, <b data-k="api.keyRotate">Regenerate</b> (the old token stops working at once) and <b data-k="common.delete">Delete</b> buttons; the list shows when and from which IP it was last used. With the master switch off, no key works.</li>
       <li><b data-k="api.ip">Source IP allowlist</b>: off by default. When on, only the listed IPs or ranges can call the API (default and extra keys alike), one per line; the page shows your current source IP and <b data-k="api.ipAddMe">Add it</b> puts it on the list.<span data-scope="admin"> The main panel and every reseller have their own list.</span></li>
     </ol>
     <div class="tip"><b>Suggested</b>Give your shop one key with View users + Create users + Renew &amp; change plans + View plans, and your Telegram bot a read-only key with View users + Panel info; if the shop server has a fixed IP, turn the allowlist on too.</div>

@@ -324,6 +324,15 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 	if s.dispatchLineSubroute(w, r) {
 		return
 	}
+	if p := strings.TrimSuffix(r.URL.Path, "/"); strings.HasSuffix(p, "/detail") {
+		// 只认 /lines/{数字}/detail;/lines/detail 这种没有编号的按普通路径处理(切片前先确认编号段在)
+		if i := strings.LastIndex(p, "/lines/"); i >= 0 && i+len("/lines/") <= len(p)-len("/detail") {
+			if id, err := strconv.ParseUint(p[i+len("/lines/"):len(p)-len("/detail")], 10, 64); err == nil {
+				s.handleLineDetail(w, r, uint(id))
+				return
+			}
+		}
+	}
 	id, err := pathID(r, "/lines/")
 	if err != nil {
 		badRequest(w, err)

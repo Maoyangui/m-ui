@@ -2,7 +2,8 @@ import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, chipList, fieldBox } from '../ui.js';
+import { esc, toast, confirm, openModal, openDrawer, drawerOpen, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, setText, chipList, fieldBox, fmtBytes, tzOffsetMinutes } from '../ui.js';
+import { barChart, bucketFor } from '../chart.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 import { editRelayUpstream } from './upstreams.js';
 import { loadReach, reachLoaded, v6Of, v6LineBadge, v6ForLine } from '../reach.js';
@@ -82,7 +83,7 @@ function renderProtoSeg() {
   if (protoFilter && !used.includes(protoFilter)) protoFilter = '';
   setHTML('line-protos', used.length > 1 ? `<div class="seg sm">${['', ...used].map(pr => `<button data-act="line.proto" data-id="${esc(pr)}" class="${pr === protoFilter ? 'active' : ''}">${esc(pr || t('line.allProtocols'))}</button>`).join('')}</div>` : '');
 }
-export function tick() { renderRows(); }
+export function tick() { renderRows(); refreshLineDetail(); }
 const filtering = () => !!(query || nodeFilter || protoFilter);
 
 function tlsModeOf(l) {
@@ -137,7 +138,7 @@ function renderRows() {
     <tr draggable="${filtering() ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
       <td class="handle" title="拖动排序">⠿</td>
       <td><input type="checkbox" class="sel" data-change="line.sel" data-id="${l.id}" ${selected.has(l.id) ? 'checked' : ''}></td>
-      <td class="primary-cell">${dot(online.has(l.name))}${esc(l.name)}</td>
+      <td class="primary-cell">${dot(online.has(l.name))}<a href="#" data-act="line.detail" data-id="${l.id}">${esc(l.name)}</a></td>
       <td>${protoBadges(l)}</td>
       <td class="num">${l.port}</td>
       <td><span class="cell-clip" title="${esc(l.upstreamName)}">${esc(l.upstreamName)}</span>${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
@@ -145,6 +146,7 @@ function renderRows() {
       <td class="num c-p3">${l.userCount}</td>
       <td><label class="switch" title="${l.enabled ? t('common.enabled') : t('common.disabled')}"><input type="checkbox" data-change="line.toggle" data-id="${l.id}" ${l.enabled ? 'checked' : ''}><span></span></label></td>
       <td class="actions">
+        <button class="btn sm" data-act="line.detail" data-id="${l.id}">${t('common.details')}</button>
         <button class="btn sm" data-act="line.edit" data-id="${l.id}">${t('common.edit')}</button>
         <details class="menu"><summary class="btn sm">${t('common.more')} ▾</summary><div class="menu-list">
           <button data-act="line.clone" data-id="${l.id}">⧉ ${t('line.clone')}</button>
@@ -914,6 +916,148 @@ function masqOf(o) {
   return formIsNew ? 'https://www.bing.com' : '';
 }
 
+// ---- 线路详情:这条线路的总流量、各服务器上分开的流量、此刻在线的用户与 IP ----
+// 数据多时不撑破抽屉:服务器超过 8 台在限高区里滚动(手机上不套内滚动);在线用户一次显示 40 个、可搜、可再多显示;
+// 一个用户的 IP 超过 3 个折成 +N。抽屉开着时在线部分跟着 5 秒一轮刷新(只取在线,不向副机要流量)。
+let ld = null; // { id, hours, server(-1 = 合计), q, more, data, seq }
+let ldHours = 24;
+const LD_PAGE = 40;
+const ldRangeKey = h => 'dash.range.' + (h === 24 ? '24h' : h === 168 ? '7d' : '30d');
+const ldEtc = names => (names.length <= 3 ? names.join(t('reach.sep')) : t('dash.etc.nodes', { list: names.slice(0, 3).join(t('reach.sep')), n: names.length, more: names.length - 3 }));
+const ldAlive = () => !!ld && drawerOpen() && !!document.getElementById('ld-sum');
+// 在线列表按用户名自然排序(user2 在 user10 前面),同一个人再按服务器
+const ldColl = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const ldSort = list => (list || []).slice().sort((a, b) => ldColl.compare(a.user, b.user) || ldColl.compare(a.server || '', b.server || ''));
+const ldNarrow = () => matchMedia('(max-width: 700px)').matches;
+const LD_SRV_FOLD = 8; // 手机上服务器列表先露 8 台(电脑上是限高滚动区)
+const ldClip = (s, n = 24) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+
+async function showLineDetail(id) {
+  const l = state.lines.find(x => x.id === id);
+  if (!l) return;
+  ld = { id, hours: ldHours, server: -1, q: '', more: 0, data: null, seq: 0, allSrv: false };
+  openDrawer(`${esc(l.name)} ${badge(l.protocol, 'primary')} <span class="muted small num">:${l.port}</span>${l.enabled ? '' : ' ' + badge(t('common.disabled'), 'warn')}`, `
+    <div class="ld-sum" id="ld-sum"></div>
+    <section>
+      <div class="ld-head"><h3>${t('line.d.traffic')}</h3>
+        <select class="sm" id="ld-srv" hidden aria-label="${esc(t('nav.nodes'))}"></select>
+        <div class="seg sm" id="ld-range">${[24, 168, 720].map(h => `<button data-act="line.dRange" data-id="${h}" class="${h === ld.hours ? 'active' : ''}">${t(ldRangeKey(h))}</button>`).join('')}</div></div>
+      <div id="ld-chart"><div class="empty">${t('common.loading')}</div></div>
+      <p class="hint" id="ld-note" hidden></p>
+    </section>
+    <section id="ld-srv-sec" hidden><h3>${t('line.d.servers')} <span class="muted small" id="ld-srv-n"></span></h3><div id="ld-servers"></div></section>
+    <section>
+      <div class="ld-head"><h3>${t('line.d.online')} <span class="muted small" id="ld-on-n"></span></h3>
+        <input type="search" class="sm" id="ld-q" placeholder="${esc(t('line.d.search'))}" hidden></div>
+      <div id="ld-online"><span class="muted small">${t('common.loading')}</span></div>
+    </section>`, { wide: true });
+  document.getElementById('ld-srv').addEventListener('change', e => { if (ld) { ld.server = Number(e.target.value); renderLineDetail(); } });
+  document.getElementById('ld-q').addEventListener('input', debounce(e => { if (ld) { ld.q = e.target.value; ld.more = 0; renderLineOnline(); } }));
+  await loadLineDetail();
+}
+
+async function loadLineDetail() {
+  const cur = ld;
+  if (!cur) return;
+  const seq = ++cur.seq;
+  let d;
+  try { d = await get(`lines/${cur.id}/detail?hours=${cur.hours}&bucket=${bucketFor(cur.hours)}&tz=${tzOffsetMinutes()}`); }
+  catch (e) { if (ld === cur && seq === cur.seq) setHTML('ld-chart', `<div class="empty">${esc(e.message)}</div>`); return; }
+  if (ld !== cur || seq !== cur.seq || !ldAlive()) return; // 等数据期间换了范围、关了抽屉或打开了别的
+  d.onlines = ldSort(d.onlines);
+  cur.data = d;
+  if (cur.server !== -1 && !(d.servers || []).some(s => s.nodeId === cur.server && s.ok)) cur.server = -1;
+  renderLineDetail();
+}
+
+function renderLineDetail() {
+  if (!ldAlive() || !ld.data) return;
+  const d = ld.data, servers = d.servers || [], bad = servers.filter(s => !s.ok && !s.disabled), off = servers.filter(s => s.disabled);
+  const tot = d.total || {};
+  setHTML('ld-sum', `
+    <div class="ld-tile"><span class="lb">${esc(t('line.d.sumTotal', { range: t(ldRangeKey(ld.hours)) }))}</span><b class="num">${fmtBytes((tot.totalUp || 0) + (tot.totalDown || 0), 1)}</b><span class="muted small">↑ ${fmtBytes(tot.totalUp || 0, 1)} · ↓ ${fmtBytes(tot.totalDown || 0, 1)}</span></div>
+    <div class="ld-tile"><span class="lb">${esc(t('line.d.sumServers'))}</span><b class="num">${servers.length}</b>${bad.length ? `<span class="small warn-text">${esc(t('line.d.failedN', { n: bad.length }))}</span>` : off.length ? `<span class="muted small">${esc(t('line.d.offN', { n: off.length }))}</span>` : ''}</div>
+    <div class="ld-tile"><span class="lb">${esc(t('line.d.sumUsers'))}</span><b class="num" id="ld-sum-u">${d.onlineUsers || 0}</b></div>
+    <div class="ld-tile"><span class="lb">${esc(t('line.d.sumIPs'))}</span><b class="num" id="ld-sum-ip">${d.onlineIPs || 0}</b></div>`);
+  // 选看哪台:两台以上才有;没取到的那几台不能选
+  const sel = document.getElementById('ld-srv');
+  sel.hidden = servers.length < 2;
+  setHTML(sel, sel.hidden ? '' : `<option value="-1">${esc(t('line.d.allServers'))}</option>` +
+    servers.map(s => `<option value="${s.nodeId}" ${s.ok ? '' : 'disabled'}>${esc(s.name)}${s.ok ? '' : ' · ' + esc(t('line.d.notFetched'))}</option>`).join(''));
+  sel.value = String(ld.server);
+  const cur = ld.server === -1 ? null : servers.find(s => s.nodeId === ld.server);
+  const series = cur ? cur.series : tot;
+  barChart(document.getElementById('ld-chart'), (series && series.points) || [], { span: series && series.span, height: 170, upLabel: t('dash.up'), downLabel: t('dash.down'), totalLabel: cur ? esc(ldClip(cur.name)) : esc(t('dash.total')), peakLabel: t('dash.peak'), emptyText: t('dash.noTraffic') });
+  const notes = [];
+  if (!cur && servers.length === 1 && !servers[0].ok) notes.push(t('line.d.single', { name: servers[0].name, err: trErr(servers[0].error || '') }));
+  else if (!cur && bad.length) notes.push(t('line.d.partial', { names: ldEtc(bad.map(s => s.name)) }));
+  if ((state.nodes || []).some(n => n.ratio > 0 && n.ratio !== 1)) notes.push(t('line.d.raw'));
+  const note = document.getElementById('ld-note');
+  note.hidden = !notes.length;
+  note.innerHTML = notes.map(esc).join('<br>');
+  // 各服务器:一台一行(名字、占比条、合计、上下行、此刻在线),点一行只看那台,再点回到合计
+  const sec = document.getElementById('ld-srv-sec');
+  sec.hidden = servers.length < 2;
+  setText('ld-srv-n', t('line.d.serversN', { n: servers.length }));
+  if (!sec.hidden) {
+    const max = Math.max(1, ...servers.filter(s => s.ok).map(s => s.up + s.down));
+    const onN = s => `<span class="on-n" data-node="${s.nodeId}">${esc(t('line.d.onlineN', { n: s.online || 0 }))}</span>`;
+    const fold = ldNarrow() && !ld.allSrv && servers.length > LD_SRV_FOLD + 1;
+    const shownSrv = fold ? servers.slice(0, LD_SRV_FOLD) : servers;
+    setHTML('ld-servers', `<div class="ld-slist${servers.length > 8 ? ' capped' : ''}">${shownSrv.map(s => s.ok
+      ? `<button type="button" class="ld-srow${s.nodeId === ld.server ? ' on' : ''}" data-act="line.dServer" data-id="${s.nodeId}" title="${esc(s.name + ' · ' + t('line.d.pickTip'))}">
+          <span class="nm">${esc(s.name)}</span><span class="ld-bar"><span style="width:${Math.max(2, Math.round((s.up + s.down) / max * 100))}%"></span></span>
+          <span class="num val">${fmtBytes(s.up + s.down, 1)}</span><span class="muted small ud">↑ ${fmtBytes(s.up, 1)} · ↓ ${fmtBytes(s.down, 1)}</span>${onN(s)}</button>`
+      : `<div class="ld-srow bad${s.disabled ? ' off' : ''}"><span class="nm" title="${esc(s.name)}">${esc(s.name)}</span><span class="err" title="${esc(trErr(s.error || ''))}">${esc(trErr(s.error || ''))}</span>${onN(s)}</div>`).join('')}</div>` +
+      (fold ? `<div class="card-foot"><button class="btn sm ghost" data-act="line.dAllSrv">${esc(t('line.d.allSrv', { n: servers.length }))}</button></div>`
+        : ld.allSrv && ldNarrow() ? `<div class="card-foot"><button class="btn sm ghost" data-act="line.dAllSrv">${esc(t('common.less'))}</button></div>` : ''));
+  }
+  renderLineOnline();
+}
+
+function renderLineOnline() {
+  if (!ldAlive() || !ld.data) return;
+  const d = ld.data, all = d.onlines || [];
+  setText('ld-on-n', all.length ? t('line.d.onCount', { u: d.onlineUsers || 0, ip: d.onlineIPs || 0 }) : '');
+  const qBox = document.getElementById('ld-q');
+  if (qBox) qBox.hidden = all.length <= 8 && !ld.q;
+  if (!all.length) { setHTML('ld-online', `<p class="muted small">${esc(t('line.d.noOnline'))}</p>`); return; }
+  const list = ld.q ? all.filter(o => matches(ld.q, o.user, o.server, ...(o.ips || []))) : all;
+  if (!list.length) { setHTML('ld-online', empty(t('dash.online.noMatch'))); return; }
+  const multi = (d.servers || []).length > 1 || new Set(all.map(o => o.nodeId)).size > 1;
+  const n = LD_PAGE + ld.more, shown = list.slice(0, n);
+  const box = document.querySelector('#ld-online .ld-olist');
+  const keep = box ? box.scrollTop : 0;
+  const changed = setHTML('ld-online', `<div class="ld-olist${multi ? ' srv' : ''}${shown.length > 12 ? ' capped' : ''}">${shown.map(o => `<div class="ld-orow">
+      <a class="nm" href="#/users?q=${encodeURIComponent(o.user)}" title="${esc(o.user)}">${esc(o.user)}</a>
+      ${multi ? `<span class="srv" title="${esc(o.server)}">${esc(o.server)}</span>` : ''}
+      <span class="ips">${chipList((o.ips || []).map(ip => `<span class="chip mono" title="${esc(ip)}">${esc(ip)}</span>`), { key: `ldip-${ld.id}-${o.nodeId}-${o.user}`, max: 3 })}</span>
+    </div>`).join('')}</div>` +
+    (list.length > n || ld.more ? `<div class="card-foot">${list.length > n ? `<button class="btn sm ghost" data-act="line.dMore">${esc(t('line.d.more', { n: Math.min(LD_PAGE, list.length - n), left: list.length - n }))}</button>` : ''}${ld.more ? `<button class="btn sm ghost" data-act="line.dLess">${esc(t('common.less'))}</button>` : ''}</div>` : ''));
+  if (changed) { const b = document.querySelector('#ld-online .ld-olist'); if (b) b.scrollTop = keep; }
+}
+
+// 5 秒一轮:抽屉还开着、还是这条线路的详情,就只刷新在线用户与 IP
+let ldRefreshing = false;
+async function refreshLineDetail() {
+  if (!ld) return;
+  if (!ldAlive()) { ld = null; return; }
+  const cur = ld;
+  if (!cur.data || ldRefreshing) return;
+  ldRefreshing = true;
+  try {
+    const o = await get(`lines/${cur.id}/detail?part=online`);
+    if (ld !== cur || !ldAlive()) return;
+    const per = o.perNode || {};
+    Object.assign(cur.data, { onlines: ldSort(o.onlines), onlineUsers: o.onlineUsers || 0, onlineIPs: o.onlineIPs || 0 });
+    (cur.data.servers || []).forEach(s => { s.online = per[s.nodeId] || 0; });
+    setText('ld-sum-u', String(cur.data.onlineUsers));
+    setText('ld-sum-ip', String(cur.data.onlineIPs));
+    document.querySelectorAll('#ld-servers .on-n[data-node]').forEach(el => { el.textContent = t('line.d.onlineN', { n: per[el.dataset.node] || 0 }); });
+    renderLineOnline();
+  } catch {} finally { ldRefreshing = false; }
+}
+
 const realityText = r => r.ok ? t('line.reality.ok', { ms: r.ms }) : t('line.reality.bad.' + (r.error || 'connect'));
 
 registerActions({
@@ -954,6 +1098,18 @@ registerActions({
     batchDialog(action);
   },
   'line.preset': id => presetLine(id),
+  'line.detail': id => showLineDetail(Number(id)),
+  'line.dRange': id => {
+    if (!ld) return;
+    ld.hours = ldHours = Number(id) || 24;
+    document.querySelectorAll('#ld-range button').forEach(b => b.classList.toggle('active', Number(b.dataset.id) === ld.hours));
+    setHTML('ld-chart', `<div class="empty">${t('common.loading')}</div>`);
+    loadLineDetail();
+  },
+  'line.dServer': id => { if (!ld) return; ld.server = ld.server === Number(id) ? -1 : Number(id); renderLineDetail(); },
+  'line.dAllSrv': () => { if (!ld) return; ld.allSrv = !ld.allSrv; renderLineDetail(); },
+  'line.dMore': () => { if (!ld) return; ld.more += LD_PAGE; renderLineOnline(); },
+  'line.dLess': () => { if (!ld) return; ld.more = 0; renderLineOnline(); },
   'line.add': () => editLine(null),
   'line.edit': id => editLine(Number(id)),
   'line.clone': id => editLine(null, state.lines.find(x => x.id === Number(id))),

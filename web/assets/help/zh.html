@@ -326,6 +326,19 @@
     <div class="pit"><b>常见坑</b>端口要在安全组 / 防火墙放行,UDP 协议(Hysteria2、TUIC)记得放 UDP。</div>
   </section>
 
+  <section class="sec" id="line-detail">
+    <h3>线路的流量与在线</h3>
+    <ol class="steps">
+      <li>在 <b data-k="nav.lines">线路</b> 页点线路名或 <b data-k="common.details">详情</b>:上面四格是所选时段这条线路的流量合计、部署的服务器台数、此刻在线的用户数和 IP 数。</li>
+      <li><b data-k="line.d.traffic">流量</b> 图默认是 <b data-k="line.d.allServers">全部服务器合计</b>,可以切 24 小时 / 7 天 / 30 天;右上角下拉或点下面 <b data-k="line.d.servers">各服务器</b> 里的一行,只看那一台,再点一次回到合计。</li>
+      <li><b data-k="line.d.online">在线用户与 IP</b> 每 5 秒刷新,写明每个人在哪台服务器上、用哪些 IP 连着;人多时能搜,一次显示 40 个,点用户名去用户页。</li>
+    </ol>
+    <div class="pit"><b>常见坑</b><ul>
+      <li>副机的线路流量记在副机自己那里,打开详情时现取;联系不上、停用或版本太旧的服务器在表里标出来,不算进合计。</li>
+      <li>线路流量是服务器上实际走过的字节数,不乘服务器的流量倍率,所以和用户用量加起来不一定相等。</li>
+    </ul></div>
+  </section>
+
   <section class="sec" id="protocols">
     <h3>协议怎么选</h3>
     <p class="lede">拿不准就这样配:主力用 Hysteria2,再配一条 TCP 的(AnyTLS 或 VLESS + Reality)当备用。</p>

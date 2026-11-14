@@ -36,6 +36,7 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/stats"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -1916,6 +1917,13 @@ func (h *Hub) fetchReport(n model.Node) (Report, error) {
 	return rep, err
 }
 
+// LineStats 向副机要它本地一条线路的流量时序(线路详情用;老副机没有这个接口,回 404)。最多等 6 秒。
+func (h *Hub) LineStats(n model.Node, q url.Values) (stats.Result, error) {
+	var out stats.Result
+	err := h.requestTimeout(n, "GET", "line-stats?"+q.Encode(), nil, &out, 6*time.Second)
+	return out, err
+}
+
 // Ping 主动探测一台副机(面板"测试"按钮)。
 func (h *Hub) Ping(n model.Node) (map[string]interface{}, error) {
 	var out map[string]interface{}
@@ -2408,6 +2416,12 @@ type httpStatusError struct {
 }
 
 func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Status, e.Msg) }
+
+// IsNotFound 副机回了 404:它的版本还没有这个接口。
+func IsNotFound(err error) bool {
+	var he *httpStatusError
+	return errors.As(err, &he) && he.Status == http.StatusNotFound
+}
 
 func (h *Hub) request(n model.Node, method, path string, body interface{}, out interface{}) error {
 	return h.requestTimeout(n, method, path, body, out, 25*time.Second)

@@ -266,6 +266,34 @@ const recentConns = () => [
 // 「换机还原」的顶部提示只在地址带 ?restore 时演示(正常演示不挂一条警告)
 const showRestore = /[?&]restore\b/.test(location.search);
 
+// 线路详情:各服务器的流量按全站流量图的形状摊开(每条线路、每台服务器占比不同),在线的是上面那两位
+const lineIdsOf = l => { try { const v = typeof l.nodeIds === 'string' ? JSON.parse(l.nodeIds || '[]') : (l.nodeIds || []); return Array.isArray(v) ? v : []; } catch { return []; } };
+function lineDetail(l, q) {
+  const all = (S.nodes && S.nodes.nodes) || [];
+  const ids = lineIdsOf(l);
+  const nodes = all.filter(n => !ids.length || ids.includes(n.id));
+  const onl = S.onlines.lines.includes(l.name) ? Object.entries(online).filter(([u]) => S.onlines.users.includes(u)) : [];
+  const onlines = onl.map(([user, ips], i) => { const n = nodes[i % Math.max(1, nodes.length)] || { id: 1, name: '主机' }; return { user, nodeId: n.id, server: n.name, ips: [...ips].sort() }; });
+  onlines.sort((x, y) => (x.user < y.user ? -1 : x.user > y.user ? 1 : x.server < y.server ? -1 : x.server > y.server ? 1 : 0));
+  const perNode = {}; onlines.forEach(o => { perNode[o.nodeId] = (perNode[o.nodeId] || 0) + 1; });
+  const head = { onlines, onlineUsers: new Set(onlines.map(o => o.user)).size, onlineIPs: onlines.reduce((a, o) => a + o.ips.length, 0) };
+  if (q.get('part') === 'online') return { ...head, perNode };
+  const hours = Number(q.get('hours')) || 24;
+  const key = Object.keys(F).find(k => k.startsWith(`GET stats?resource=user&hours=${hours}&`)) || 'GET stats?resource=user&hours=24&bucket=3600';
+  const shape = clone(F[key] || { points: [], span: 3600 });
+  const lf = 0.25 + ((l.id * 37) % 60) / 100; // 每条线路占全站的一部分
+  const weights = [0.5, 0.3, 0.12, 0.08, 0.05];
+  const series = (w) => { const pts = (shape.points || []).map(p => ({ t: p.t, up: Math.round(p.up * lf * w), down: Math.round(p.down * lf * w) })); return { points: pts, span: shape.span, start: shape.start, end: shape.end, totalUp: pts.reduce((a, p) => a + p.up, 0), totalDown: pts.reduce((a, p) => a + p.down, 0) }; };
+  const servers = nodes.map((n, i) => n.enabled === false || (n.status && n.status.ok === false)
+    ? { nodeId: n.id, name: n.name, isLocal: !!n.isLocal, ok: false, disabled: n.enabled === false, error: n.enabled === false ? '服务器已停用' : '联系不上这台服务器', up: 0, down: 0, series: { points: [] }, online: perNode[n.id] || 0 }
+    : (() => { const sr = series(weights[i] || 0.04); return { nodeId: n.id, name: n.name, isLocal: !!n.isLocal, ok: true, up: sr.totalUp, down: sr.totalDown, series: sr, online: perNode[n.id] || 0 }; })())
+    .sort((a, b) => (b.up + b.down) - (a.up + a.down));
+  const okOnes = servers.filter(x => x.ok);
+  const total = okOnes.length ? { ...clone(okOnes[0].series), points: okOnes[0].series.points.map((p, i) => ({ t: p.t, up: okOnes.reduce((a, x) => a + ((x.series.points[i] || {}).up || 0), 0), down: okOnes.reduce((a, x) => a + ((x.series.points[i] || {}).down || 0), 0) })) } : { points: [], span: 3600 };
+  total.totalUp = (total.points || []).reduce((a, p) => a + p.up, 0); total.totalDown = (total.points || []).reduce((a, p) => a + p.down, 0);
+  return { line: { id: l.id, name: l.name, protocol: l.protocol, port: l.port, enabled: l.enabled }, total, servers, ...head };
+}
+
 function status() {
   const s = fx('GET status') || {};
   s.users = S.users.length; s.enabledUsers = S.users.filter(u => u.enabled).length; s.lines = S.lines.length; s.linesEnabled = S.lines.filter(l => l.enabled).length;
@@ -335,7 +363,7 @@ function route(method, path, query, body) {
     switch (seg[0]) {
       case 'status': return status();
       case 'settings': return clone(S.settings);
-      case 'lines': return clone(S.lines);
+      case 'lines': if (seg[2] === 'detail') return lineDetail(find(S.lines, id), new URLSearchParams(query)); return clone(S.lines);
       case 'upstreams': if (seg[1] === 'health') return fx('GET upstreams/health') || {}; return clone(S.upstreams);
       case 'users': if (seg[2] === 'plan-ops') return clone(S.planOps.filter(o => o.userId === id).slice(0, Number(new URLSearchParams(query).get('limit')) || 20));
         if (seg[2] === 'sub') { const u = find(S.users, id); return { link: subUrl(u), clash: subUrl(u) + '?format=clash', json: subUrl(u) + '?format=json' }; } return clone(S.users);

@@ -761,7 +761,11 @@ const EN = /*BEGIN*/{
 "已经有一把叫 %q 的密钥": "A key named %q already exists",
 "打开白名单前至少填一个来源 IP 或网段": "Add at least one source IP or range before turning the allowlist on",
 "代理的密钥看不了服务器": "Reseller keys cannot list servers",
-"这把密钥没有「%w」权限": "This key lacks the “%w” permission"
+"这把密钥没有「%w」权限": "This key lacks the “%w” permission",
+"服务器已停用": "The server is disabled",
+"联系不上这台服务器": "Cannot reach this server",
+"这台服务器的版本太旧,升级后才有按线路的流量": "This server is too old; upgrade it to see per-line traffic",
+"缺少线路名": "Missing line name"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

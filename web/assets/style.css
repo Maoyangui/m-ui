@@ -924,3 +924,50 @@ button.badge { cursor: pointer; font: inherit; font-size: .72rem; }
 /* 限时彩蛋的位置(见 js/xmas.js):空着不占位 */
 .xmas-slot { display: inline-flex; align-items: center; }
 .xmas-slot:empty { display: none; }
+
+/* 线路详情:四格概要、可选服务器的流量图、各服务器一行一台(多了限高滚动)、在线用户与 IP(分页 + 折叠) */
+.drawer-head h2 { min-width: 0; overflow-wrap: anywhere; }
+.ld-sum { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; margin-bottom: .95rem; }
+.ld-tile { display: flex; flex-direction: column; gap: .1rem; min-width: 0; padding: .5rem .65rem; background: var(--surface-2); border-radius: var(--radius-sm); }
+.ld-tile > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ld-tile .lb { font-size: .74rem; color: var(--muted); }
+.ld-tile b { font-size: 1.05rem; }
+.ld-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin-bottom: .4rem; }
+.drawer-body .ld-head h3 { margin: 0 auto 0 0; min-width: 0; }
+.ld-head select { width: auto; max-width: 14rem; }
+.ld-head input[type=search] { width: 14rem; max-width: 100%; }
+.ld-slist { display: flex; flex-direction: column; gap: .15rem; }
+.ld-slist.capped { max-height: 18rem; overflow-y: auto; }
+.ld-srow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(3rem, 18%) 5.4rem minmax(0, 11rem) 4.8rem; gap: .6rem; align-items: center; width: 100%; padding: .32rem .5rem; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; font: inherit; font-size: .84rem; color: inherit; text-align: left; }
+button.ld-srow { cursor: pointer; }
+button.ld-srow:hover { background: var(--surface-2); }
+.ld-srow.on { border-color: var(--primary); background: var(--primary-soft); }
+.ld-srow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ld-srow.bad .nm { color: var(--muted); font-weight: 400; }
+.ld-srow.off .err { color: var(--muted); }
+.ld-bar { display: block; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.ld-bar > span { display: block; height: 100%; background: var(--primary); border-radius: 4px; }
+.ld-srow .val { text-align: right; white-space: nowrap; }
+.ld-srow .ud { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ld-srow .on-n { text-align: right; white-space: nowrap; color: var(--muted); font-size: .78rem; }
+.ld-srow .err { grid-column: 2 / 5; color: var(--danger); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-olist { display: flex; flex-direction: column; }
+.ld-olist.capped { max-height: 24rem; overflow-y: auto; }
+.ld-orow { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr); gap: .25rem .7rem; align-items: start; padding: .32rem .2rem; border-bottom: 1px solid var(--border); font-size: .84rem; }
+.ld-olist.srv .ld-orow { grid-template-columns: minmax(0, 10rem) minmax(0, 8rem) minmax(0, 1fr); }
+.ld-orow .nm, .ld-orow .srv { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.55rem; }
+.ld-orow .srv { color: var(--muted); font-size: .78rem; }
+.ld-orow .ips { min-width: 0; }
+.ld-orow .ips .chip { font-size: .74rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 700px) {
+  .ld-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ld-srow { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .ld-srow .ld-bar, .ld-srow .ud { display: none; }
+  .ld-srow.bad { grid-template-columns: minmax(0, 1fr) auto; }
+  .ld-srow.bad .err { grid-column: 1 / -1; grid-row: 2; white-space: normal; }
+  .ld-slist.capped, .ld-olist.capped { max-height: none; overflow: visible; }
+  .ld-orow, .ld-olist.srv .ld-orow { grid-template-columns: minmax(0, 1fr) auto; }
+  .ld-orow .srv { max-width: 9rem; text-align: right; }
+  .ld-orow .ips { grid-column: 1 / -1; }
+  .ld-head select { max-width: 100%; }
+}
