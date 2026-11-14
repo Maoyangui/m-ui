@@ -748,13 +748,27 @@ const EN = /*BEGIN*/{
 "只能是 http:// 或 https:// 地址": "Must be an http:// or https:// address",
 "缺主机名": "The host name is missing",
 "地址里不能带用户名或密码": "The address cannot contain a user name or password",
-"地址里不能带查询参数": "The address cannot contain query parameters"
+"地址里不能带查询参数": "The address cannot contain query parameters",
+"不认识的权限 %q": "Unknown permission %q",
+"白名单里 %q 不是有效的 IP 或网段": "%q in the allowlist is not a valid IP or range",
+"白名单最多 200 项": "The allowlist can have at most 200 entries",
+"来源 IP 不在外部 API 的白名单里": "Your source IP is not on the external API allowlist",
+"密钥不存在": "Key not found",
+"附加密钥最多 50 把": "At most 50 extra keys",
+"请求格式不对": "Malformed request",
+"密钥名称不能为空,最多 40 个字": "The key name is required (up to 40 characters)",
+"至少勾一项权限": "Pick at least one permission",
+"已经有一把叫 %q 的密钥": "A key named %q already exists",
+"打开白名单前至少填一个来源 IP 或网段": "Add at least one source IP or range before turning the allowlist on",
+"代理的密钥看不了服务器": "Reseller keys cannot list servers",
+"这把密钥没有「%w」权限": "This key lacks the “%w” permission"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表
 const LABELS = /*LABELS*/{
 "面板": "Panel", "订阅": "Subscription", "代理面板": "Reseller panel", "证书": "Certificate", "私钥": "Private key",
-"启动": "Start", "全量重载": "Full reload", "热换出站": "Outbound hot swap", "热更新用户": "User hot update", "撤销凭据": "Credential revocation"
+"启动": "Start", "全量重载": "Full reload", "热换出站": "Outbound hot swap", "热更新用户": "User hot update", "撤销凭据": "Credential revocation",
+"查看用户": "View users", "创建用户": "Create users", "修改用户": "Change users", "删除用户": "Delete users", "续费与换套餐": "Renew & change plans", "查看套餐": "View plans", "面板信息": "Panel info"
 }/*END*/;
 
 const VERB = /%(?:\[(\d+)\])?[-+# 0-9.]*[dsvqwxf]/g;
