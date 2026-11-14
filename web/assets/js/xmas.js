@@ -1,7 +1,9 @@
-// 圣诞彩蛋(限时):顶栏右上角一棵小圣诞树(没有外框),点一下全屏放一段动画 ——
-// 夜空、月亮、光斑;三层雪(近处是会转的六角雪花);正中一棵大圣诞树逐层长出、金色彩带画上、彩球弹出、彩灯轮流闪、
-// 顶上的星星带光芒点亮;雪橇和驯鹿从月亮前飞过、拖一串金色星光;「Merry Xmas」金箔字逐字浮现,下面「guys」。
-// 约 9 秒后自动淡出,右上角 ×、点空白处、按 Esc 都能提前关。
+// 圣诞彩蛋(限时):顶栏右上角一棵小圣诞树(没有外框),点一下全屏放一段圣诞夜 —— 各样东西一样一样出场:
+// 夜空、星星、月亮、光斑;顶上一串彩灯从左到右点亮再轮流闪,两角冬青;雪地、远山松林、两间木屋(窗户亮起、烟囱冒烟)、路灯;
+// 正中大圣诞树逐层长出、彩带画上、彩球弹出、彩灯闪、星星带光芒点亮、树下礼物;旁边雪人一点点堆起来(雪球、礼帽、围巾、眉眼)再挥手;
+// 雪橇和驯鹿从月亮前飞过(领头的红鼻子发光),拖一串金色星光;三层雪;金色铃铛摇摆,「Merry Xmas」金箔字逐字浮现,
+// 「guys」写在展开的红丝带上,最后一行小字祝福。点开时浏览器自己合成一段《Jingle Bells》铃声(不加载任何外部文件),右上角可静音、记住选择。
+// 整体出场是浮现、消失是隐退;约 12 秒后自动隐退,右上角 ×、点空白处、按 Esc 都能提前关。
 // 到 12 月 31 日为止(按浏览器本地日期),过了自动不显示;以后每年 12 月也会出现。
 // 自带样式,不依赖 style.css:删掉这个文件和 app.js 里的引用就干净了。prefers-reduced-motion:不飘不飞,只淡入。
 
@@ -37,8 +39,56 @@ const CSS = `
 @keyframes xs-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes xs-out { from { opacity: 1; } to { opacity: 0; } }
 .xmas-show canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.xmas-stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.2vh; pointer-events: none; padding: 16px; }
-.xmas-tree { height: min(48vh, 64vw); width: auto; overflow: visible; filter: drop-shadow(0 18px 30px rgba(0,0,0,.45)); }
+.xmas-stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: space-between; pointer-events: none; padding: 14vh 16px 4.5vh; }
+.xm-row { display: flex; align-items: flex-end; justify-content: center; gap: 1.2vw; }
+.xmas-tree { height: min(46vh, 58vw); width: auto; overflow: visible; filter: drop-shadow(0 18px 30px rgba(0,0,0,.45)); }
+/* 顶部彩灯串:按顺序点亮,再各自闪 */
+.xm-lights { position: absolute; top: 0; left: 0; width: 100%; height: 13vh; pointer-events: none; overflow: visible; }
+.xm-lights .wire { stroke-dasharray: 2000; stroke-dashoffset: 2000; animation: xs-draw-long 1.2s ease-out .3s forwards; }
+@keyframes xs-draw-long { to { stroke-dashoffset: 0; } }
+.xm-lights .bulb { opacity: .18; animation: xs-bulb-on .35s ease forwards, xs-bulb-tw 1.6s ease-in-out infinite; }
+@keyframes xs-bulb-on { to { opacity: 1; } }
+@keyframes xs-bulb-tw { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.7) drop-shadow(0 0 6px currentColor); } }
+/* 冬青 */
+.xm-holly { position: absolute; top: 9vh; width: min(15vw, 120px); height: auto; pointer-events: none; opacity: 0; transform: scale(.4) rotate(-30deg);
+  animation: xs-holly .8s cubic-bezier(.2,1.6,.4,1) .7s forwards; }
+.xm-holly.l { left: 1.5vw; } .xm-holly.r { right: 1.5vw; transform: scale(.4) rotate(30deg) scaleX(-1); animation-name: xs-holly-r; }
+@keyframes xs-holly { to { opacity: 1; transform: rotate(-8deg); } }
+@keyframes xs-holly-r { to { opacity: 1; transform: rotate(8deg) scaleX(-1); } }
+/* 雪地、远山、木屋、路灯 */
+.xm-land { position: absolute; left: 0; bottom: 0; width: 100%; height: 30vh; pointer-events: none; }
+.xm-land .lay { opacity: 0; transform: translateY(24px); animation: xs-rise-soft 1s cubic-bezier(.2,.8,.3,1) forwards; }
+@keyframes xs-rise-soft { to { opacity: 1; transform: none; } }
+.xm-land .win { opacity: .15; animation: xs-on .5s ease forwards, xs-flick 3s ease-in-out infinite; }
+@keyframes xs-flick { 0%, 100% { opacity: .95; } 45% { opacity: .78; } 55% { opacity: 1; } }
+.xm-land .smoke circle { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; animation: xs-smoke 3.2s ease-out infinite; }
+@keyframes xs-smoke { 0% { opacity: 0; transform: translate(0, 0) scale(.6); } 20% { opacity: .55; } 100% { opacity: 0; transform: translate(14px, -46px) scale(1.9); } }
+.xm-land .lamp-glow { opacity: 0; animation: xs-on .6s ease forwards, xs-flick 4s ease-in-out infinite; }
+/* 雪人:雪球一个个落下堆起来,礼帽、围巾、眉眼依次出现,然后挥手 */
+.xm-snowman { height: min(20vh, 26vw); width: auto; overflow: visible; filter: drop-shadow(0 10px 18px rgba(0,0,0,.4)); margin-bottom: .3vh; }
+.xm-snowman .drop { opacity: 0; transform: translateY(-60px); animation: xs-drop .7s cubic-bezier(.3,1.5,.5,1) forwards; }
+@keyframes xs-drop { to { opacity: 1; transform: none; } }
+.xm-snowman .pop { opacity: 0; transform-box: fill-box; transform-origin: 50% 100%; transform: scale(0); animation: xs-pop2 .5s cubic-bezier(.2,1.9,.4,1) forwards; }
+@keyframes xs-pop2 { to { opacity: 1; transform: scale(1); } }
+.xm-snowman .arm-r { transform-box: fill-box; transform-origin: 0% 100%; animation: xs-pop2 .4s ease forwards, xs-wave 1s ease-in-out infinite alternate; }
+@keyframes xs-wave { from { transform: rotate(8deg); } to { transform: rotate(-22deg); } }
+.xm-snowman .scarf-tail { transform-box: fill-box; transform-origin: 50% 0%; animation: xs-pop2 .4s ease forwards, xs-flutter 1.4s ease-in-out infinite alternate; }
+@keyframes xs-flutter { from { transform: rotate(-6deg); } to { transform: rotate(10deg); } }
+/* 铃铛、红丝带、祝福语 */
+.xm-bells { width: clamp(52px, 8vw, 78px); height: auto; display: block; margin: 0 auto .4rem; opacity: 0; transform-origin: 50% 10%;
+  animation: xs-on .5s ease forwards, xs-swing 1.1s ease-in-out infinite alternate; }
+@keyframes xs-swing { from { transform: rotate(-14deg); } to { transform: rotate(14deg); } }
+.xm-ribbon { width: clamp(150px, 22vw, 230px); height: auto; display: block; margin: .35rem auto 0; opacity: 0; transform: scaleX(0); transform-origin: 50% 50%;
+  animation: xs-unfurl .8s cubic-bezier(.2,1.4,.4,1) forwards; }
+@keyframes xs-unfurl { to { opacity: 1; transform: scaleX(1); } }
+.xm-wish { margin-top: .7rem; font: 500 clamp(.85rem, 2.4vw, 1.05rem)/1.4 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: #ffe8b8;
+  letter-spacing: .08em; opacity: 0; transform: translateY(8px); animation: xs-rise-soft .9s ease forwards; text-shadow: 0 2px 10px rgba(0,0,0,.4); }
+.xmas-mute { position: absolute; top: 16px; right: 68px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.1);
+  color: #fff; display: grid; place-items: center; cursor: pointer; backdrop-filter: blur(6px); transition: background .2s ease; z-index: 2; padding: 0; }
+.xmas-mute:hover { background: rgba(255,255,255,.22); }
+.xmas-mute svg { width: 20px; height: 20px; }
+.xmas-show.out .xmas-mute { opacity: 0; transition: opacity .4s ease; }
+@media (max-width: 640px) { .xm-holly { top: 7vh; } .xm-snowman { height: 15vh; } }
 .xmas-tree .t { transform-box: fill-box; transform-origin: 50% 100%; transform: scale(.2, 0); opacity: 0; animation: xs-grow .9s cubic-bezier(.2,1.5,.4,1) forwards; }
 @keyframes xs-grow { to { transform: scale(1, 1); opacity: 1; } }
 .xmas-tree .g { stroke-dasharray: 220; stroke-dashoffset: 220; animation: xs-draw 1s ease-out forwards; }
@@ -74,9 +124,13 @@ const CSS = `
   color: #fff; font: 300 28px/1 system-ui, sans-serif; display: grid; place-items: center; cursor: pointer; backdrop-filter: blur(6px); transition: background .2s ease, transform .2s ease; z-index: 2; }
 .xmas-x:hover { background: rgba(255,255,255,.22); transform: rotate(90deg); }
 .xmas-x:focus-visible { outline: 2px solid #ffd36b; outline-offset: 2px; }
-.xmas-hint { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: rgba(255,255,255,.5); font: 500 .8rem system-ui, sans-serif; pointer-events: none; }
+.xmas-hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: .28rem .8rem; border-radius: 999px; background: rgba(8,14,30,.45); backdrop-filter: blur(4px);
+  color: rgba(255,255,255,.8); font: 500 .78rem system-ui, sans-serif; white-space: nowrap; pointer-events: none; }
 @media (max-height: 520px) { .xmas-tree { height: 40vh; } }
 @media (prefers-reduced-motion: reduce) {
+  .xm-lights .wire, .xm-lights .bulb, .xm-holly, .xm-land .lay, .xm-land .win, .xm-land .lamp-glow, .xm-snowman .drop, .xm-snowman .pop, .xm-snowman .arm-r, .xm-snowman .scarf-tail,
+  .xm-bells, .xm-ribbon, .xm-wish { animation: xs-on .6s ease forwards !important; transform: none !important; stroke-dashoffset: 0 !important; }
+  .xm-land .smoke { display: none; }
   .xmas-egg .xb-star, .xmas-egg .xb-l { animation: none; opacity: 1; }
   .xmas-tree .t, .xmas-tree .g, .xmas-tree .b, .xmas-tree .l, .xmas-tree .s, .xmas-tree .gift, .xmas-line span, .xmas-sub { animation: xs-on .6s ease forwards !important; transform: none !important; filter: none !important; stroke-dashoffset: 0 !important; }
   .xmas-tree .rays, .xmas-sub::after { animation: none !important; }
@@ -155,6 +209,150 @@ function bigTree() {
 </svg>`;
 }
 
+// 顶部彩灯串:两段下垂的电线,沿线挂 30 颗灯,从左到右依次点亮
+function lightsSVG() {
+  const segs = [[[-20, 18], [400, 118], [800, 30]], [[800, 30], [1200, 118], [1620, 18]]];
+  const q = (p0, p1, p2, t) => [(1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t * t * p2[0], (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t * t * p2[1]];
+  const cols = ['#ff4d4d', '#ffd54a', '#4dd187', '#4aa8ff', '#ff8ad0'];
+  let bulbs = '', i = 0;
+  for (const [a, b, c] of segs) {
+    for (let k = 1; k <= 15; k++) {
+      const t = k / 16, [x, y] = q(a, b, c, t), [x2, y2] = q(a, b, c, t + .01);
+      const ang = Math.atan2(y2 - y, x2 - x) * 180 / Math.PI;
+      const col = cols[i % cols.length];
+      bulbs += `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)}) rotate(${ang.toFixed(1)})"><g class="bulb" style="color:${col};animation-delay:${(0.5 + i * 0.045).toFixed(2)}s, ${(2.2 + (i % 7) * 0.23).toFixed(2)}s">
+        <rect x="-3" y="1" width="6" height="7" rx="1.5" fill="#2b3b52"/><ellipse cx="0" cy="17" rx="7" ry="11" fill="${col}"/><ellipse cx="-2.4" cy="13" rx="2" ry="4" fill="#fff" opacity=".55"/></g></g>`;
+      i++;
+    }
+  }
+  return `<svg class="xm-lights" viewBox="0 0 1600 150" preserveAspectRatio="xMidYMin slice" aria-hidden="true">
+    <path class="wire" d="M-20 18Q400 118 800 30Q1200 118 1620 18" fill="none" stroke="#24344c" stroke-width="3.5"/>${bulbs}</svg>`;
+}
+
+// 冬青:三片带刺的叶子和三颗红果
+function hollySVG(side) {
+  const leaf = 'M0 0c8-6 14-2 18-8 2 6 9 6 12 2 0 7 6 10 11 9-4 5-2 11 3 14-7 1-10 7-9 12-6-4-12-2-15 3-2-6-9-8-14-5 1-7-4-11-9-12 5-3 6-9 3-15Z';
+  return `<svg class="xm-holly ${side}" viewBox="0 0 120 110" aria-hidden="true">
+    <defs><linearGradient id="xmh-${side}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3fbf6b"/><stop offset="1" stop-color="#0f5a31"/></linearGradient>
+    <radialGradient id="xmhb-${side}" cx=".35" cy=".3" r=".75"><stop offset="0" stop-color="#ffb3b3"/><stop offset=".4" stop-color="#e81f2b"/><stop offset="1" stop-color="#7a0b12"/></radialGradient></defs>
+    <path d="${leaf}" transform="translate(10 18) rotate(-10)" fill="url(#xmh-${side})"/>
+    <path d="${leaf}" transform="translate(56 6) rotate(48)" fill="url(#xmh-${side})"/>
+    <path d="${leaf}" transform="translate(40 58) rotate(-62)" fill="url(#xmh-${side})"/>
+    <path d="M30 30 62 40M62 40 76 26M62 40 58 70" stroke="#0d4a28" stroke-width="1.6" fill="none" opacity=".5"/>
+    <circle cx="58" cy="44" r="8" fill="url(#xmhb-${side})"/><circle cx="71" cy="49" r="7" fill="url(#xmhb-${side})"/><circle cx="62" cy="57" r="7.5" fill="url(#xmhb-${side})"/>
+  </svg>`;
+}
+
+// 雪地:远山与松林、雪坡上两间木屋(窗户亮、烟囱冒烟)和一盏路灯、近处雪地。各层依次浮上来
+function landSVG() {
+  const pine = (x, y, h, c) => `<path d="M${x} ${y - h}l${h * .32} ${h * .45}h-${h * .12}l${h * .22} ${h * .32}h-${h * .14}l${h * .2} ${h * .23}h-${h * .96}l${h * .2}-${h * .23}h-${h * .14}l${h * .22}-${h * .32}h-${h * .12}Z" fill="${c}"/>`;
+  const cabin = (x, y, w, d) => `<g class="lay" style="animation-delay:${d}s">
+      <rect x="${x}" y="${y}" width="${w}" height="${w * .62}" fill="#5b3a25"/><rect x="${x}" y="${y}" width="${w}" height="${w * .62}" fill="url(#xml-wood)" opacity=".6"/>
+      <path d="M${x - 10} ${y + 2}L${x + w / 2} ${y - w * .45}L${x + w + 10} ${y + 2}Z" fill="#3a2a2a"/>
+      <path d="M${x - 12} ${y + 2}L${x + w / 2} ${y - w * .47}L${x + w + 12} ${y + 2}c-8 4-14-2-20 3-6-5-12 1-18-2-6 4-12-2-18 2Z" fill="#f4f8ff"/>
+      <rect x="${x + w * .68}" y="${y - w * .38}" width="${w * .12}" height="${w * .3}" fill="#4a3530"/><rect x="${x + w * .66}" y="${y - w * .4}" width="${w * .16}" height="5" rx="2" fill="#f4f8ff"/>
+      <g class="smoke">${[0, 1, 2].map(i => `<circle cx="${x + w * .74}" cy="${y - w * .44}" r="${5 + i}" fill="#dfe8f5" style="animation-delay:${(d + 1 + i * 1.05).toFixed(2)}s"/>`).join('')}</g>
+      <rect class="win" x="${x + w * .14}" y="${y + w * .16}" width="${w * .24}" height="${w * .2}" rx="2" fill="#ffd27a" filter="url(#xml-glow)" style="animation-delay:${(d + .7).toFixed(2)}s, ${(d + 1.4).toFixed(2)}s"/>
+      <rect x="${x + w * .56}" y="${y + w * .26}" width="${w * .2}" height="${w * .36}" rx="2" fill="#3a2418"/>
+    </g>`;
+  return `<svg class="xm-land" viewBox="0 0 1600 360" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+  <defs>
+    <linearGradient id="xml-far" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b4475"/><stop offset="1" stop-color="#162645"/></linearGradient>
+    <linearGradient id="xml-mid" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9f1fb"/><stop offset="1" stop-color="#b7c9e2"/></linearGradient>
+    <linearGradient id="xml-near" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#cfdcee"/></linearGradient>
+    <linearGradient id="xml-wood" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7a5236"/><stop offset="1" stop-color="#3d2617"/></linearGradient>
+    <radialGradient id="xml-lamp" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffe2a0" stop-opacity=".85"/><stop offset="1" stop-color="#ffe2a0" stop-opacity="0"/></radialGradient>
+    <filter id="xml-glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <g class="lay" style="animation-delay:.15s"><path d="M0 170C220 110 420 200 640 150S1060 90 1280 150 1520 170 1600 140V360H0Z" fill="url(#xml-far)"/>
+    <path d="M0 170C220 110 420 200 640 150S1060 90 1280 150 1520 170 1600 140" fill="none" stroke="#dfe9f7" stroke-width="3" opacity=".45"/>
+    ${[[90, 168, 38], [130, 160, 30], [600, 158, 34], [640, 150, 44], [690, 156, 30], [1180, 132, 40], [1225, 140, 32], [1500, 150, 36], [1540, 146, 28]].map(([x, y, h]) => pine(x, y, h, '#13223f')).join('')}</g>
+  <g class="lay" style="animation-delay:.35s"><path d="M0 250C250 205 520 265 820 232S1350 205 1600 236V360H0Z" fill="url(#xml-mid)"/>
+    ${[[1280, 226, 56], [1330, 230, 44], [1380, 222, 62], [1440, 230, 48], [60, 246, 50]].map(([x, y, h]) => pine(x, y, h, '#1d6b45')).join('')}</g>
+  ${cabin(170, 208, 92, .55)}${cabin(330, 218, 72, .7)}
+  <g class="lay" style="animation-delay:.85s"><rect x="498" y="150" width="6" height="80" fill="#2b3446"/><rect x="490" y="140" width="22" height="16" rx="3" fill="#2b3446"/>
+    <circle class="lamp-glow" cx="501" cy="150" r="42" fill="url(#xml-lamp)" style="animation-delay:1.3s, 2s"/><rect x="494" y="143" width="14" height="10" rx="2" fill="#ffe2a0"/></g>
+  <g class="lay" style="animation-delay:.25s"><path d="M0 300C380 280 760 318 1160 292 1380 280 1500 296 1600 292V360H0Z" fill="url(#xml-near)"/></g>
+</svg>`;
+}
+
+// 雪人:三个雪球、礼帽、红围巾、炭眼睛和扣子、胡萝卜鼻子、树枝手(右手挥)
+function snowmanSVG() {
+  const d = (s) => `style="animation-delay:${s}s"`;
+  return `<svg class="xm-snowman" viewBox="0 0 170 230" aria-hidden="true">
+  <defs><radialGradient id="xms-ball" cx=".38" cy=".32" r=".75"><stop offset="0" stop-color="#ffffff"/><stop offset=".7" stop-color="#e3ecf7"/><stop offset="1" stop-color="#b9c8dc"/></radialGradient></defs>
+  <ellipse cx="85" cy="222" rx="62" ry="7" fill="#000" opacity=".25"/>
+  <circle class="drop" cx="85" cy="176" r="46" fill="url(#xms-ball)" ${d(1.25)}/>
+  <circle class="drop" cx="85" cy="110" r="34" fill="url(#xms-ball)" ${d(1.45)}/>
+  <circle class="drop" cx="85" cy="58" r="26" fill="url(#xms-ball)" ${d(1.65)}/>
+  <g class="pop" ${d(2.05)}><circle cx="85" cy="98" r="3.4" fill="#2a2d36"/><circle cx="85" cy="112" r="3.4" fill="#2a2d36"/><circle cx="85" cy="126" r="3.4" fill="#2a2d36"/>
+    <circle cx="76" cy="53" r="3.2" fill="#2a2d36"/><circle cx="94" cy="53" r="3.2" fill="#2a2d36"/>
+    <path d="M85 60l24 5-24 4Z" fill="#ff8a2b"/><path d="M75 68q10 7 20 0" fill="none" stroke="#2a2d36" stroke-width="2.4" stroke-linecap="round" stroke-dasharray=".1 4.6"/></g>
+  <g class="pop" ${d(1.95)}><path d="M57 80q28 12 56 0v9q-28 12-56 0Z" fill="#e23b3b"/><path d="M64 84v9M74 87v9M96 87v9M106 84v9" stroke="#fff" stroke-width="3" opacity=".75"/></g>
+  <path class="scarf-tail" d="M98 86h12l-2 34h-11Z" fill="#e23b3b" ${d(2.0)}/>
+  <g class="pop" ${d(1.85)}><rect x="57" y="30" width="56" height="7" rx="3" fill="#1d1f27"/><rect x="65" y="2" width="40" height="31" rx="4" fill="#1d1f27"/>
+    <rect x="65" y="22" width="40" height="6" fill="#d63a3a"/><circle cx="98" cy="25" r="4" fill="#2a9d5c"/><circle cx="102" cy="22" r="2.6" fill="#e23b3b"/></g>
+  <g class="pop" ${d(2.2)}><path d="M53 104 18 84M30 91 22 76M30 91 14 92" stroke="#6b4428" stroke-width="3.4" fill="none" stroke-linecap="round"/></g>
+  <g class="arm-r" ${d(2.3)}><path d="M117 104 152 78M140 87 150 70M140 87 158 88" stroke="#6b4428" stroke-width="3.4" fill="none" stroke-linecap="round"/></g>
+</svg>`;
+}
+
+// 一对金色铃铛和红蝴蝶结
+const BELLS = `<svg class="xm-bells" viewBox="0 0 90 80" aria-hidden="true">
+  <defs><linearGradient id="xmbl" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff2c2"/><stop offset=".45" stop-color="#f1bf45"/><stop offset="1" stop-color="#a8741f"/></linearGradient></defs>
+  <path d="M26 46c0-14 6-24 16-26 10 2 16 12 16 26l4 6H22Z" fill="url(#xmbl)" transform="rotate(-18 42 40)"/><circle cx="34" cy="60" r="4" fill="#a8741f"/>
+  <path d="M34 46c0-14 6-24 16-26 10 2 16 12 16 26l4 6H30Z" fill="url(#xmbl)" transform="rotate(18 50 40)"/><circle cx="58" cy="60" r="4" fill="#a8741f"/>
+  <path d="M45 16c-10-12-24-8-20 2 3 7 14 4 20-2Zm0 0c10-12 24-8 20 2-3 7-14 4-20-2Z" fill="#e23b3b"/><circle cx="45" cy="16" r="4.5" fill="#c62828"/>
+  <path d="M45 18 38 34M45 18l7 16" stroke="#c62828" stroke-width="3" stroke-linecap="round"/>
+</svg>`;
+
+// 红丝带横幅,中间写字
+const ribbon = (text) => `<svg class="xm-ribbon" viewBox="0 0 260 64" aria-hidden="true">
+  <path d="M8 18h36v30H8l10-15Z" fill="#a51d1d"/><path d="M252 18h-36v30h36l-10-15Z" fill="#a51d1d"/>
+  <path d="M36 44l8 10V44ZM224 44l-8 10V44Z" fill="#6e1010"/>
+  <rect x="36" y="10" width="188" height="36" rx="3" fill="#e23b3b"/><rect x="36" y="13" width="188" height="3" fill="#ff7b7b" opacity=".5"/>
+  <text x="130" y="36" text-anchor="middle" font-family="Trebuchet MS, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="6" fill="#fff8e7">${text}</text>
+</svg>`;
+
+// 合成铃声:《Jingle Bells》副歌第一句(钟声音色:基频加两个泛音、快起慢落),雪橇飞过时加一串雪橇铃。不加载任何文件;
+// 浏览器只在点击之后才允许出声,而它本来就是点出来的。返回 AudioContext,关的时候 close 掉
+function jingle() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  let ac;
+  try { ac = new AC(); } catch { return null; }
+  const master = ac.createGain();
+  master.gain.value = 0.14;
+  master.connect(ac.destination);
+  const bell = (t, f, dur) => {
+    for (const [m, g] of [[1, .55], [2.76, .2], [5.4, .08]]) {
+      const o = ac.createOscillator(), e = ac.createGain();
+      o.type = 'sine'; o.frequency.value = f * m;
+      e.gain.setValueAtTime(0, t); e.gain.linearRampToValueAtTime(g, t + .008); e.gain.exponentialRampToValueAtTime(.0005, t + dur);
+      o.connect(e); e.connect(master); o.start(t); o.stop(t + dur + .05);
+    }
+  };
+  const N = { C5: 523.25, D5: 587.33, E5: 659.25, G5: 783.99 };
+  const seq = [['E5', 1], ['E5', 1], ['E5', 2], ['E5', 1], ['E5', 1], ['E5', 2], ['E5', 1], ['G5', 1], ['C5', 1.5], ['D5', .5], ['E5', 4]];
+  let t = ac.currentTime + .2;
+  const beat = .27;
+  for (const [n, len] of seq) { bell(t, N[n], Math.max(.6, len * beat * 2.4)); t += len * beat; }
+  // 雪橇铃:短促的带通噪声,一串
+  const buf = ac.createBuffer(1, Math.floor(ac.sampleRate * .07), ac.sampleRate), ch = buf.getChannelData(0);
+  for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / ch.length) ** 2;
+  for (let k = 0; k < 14; k++) {
+    const src = ac.createBufferSource(), bp = ac.createBiquadFilter(), g = ac.createGain();
+    src.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = 5200 + Math.random() * 3000; bp.Q.value = 9; g.gain.value = .35;
+    src.connect(bp); bp.connect(g); g.connect(master); src.start(ac.currentTime + 2.7 + k * .12 + Math.random() * .04);
+  }
+  return ac;
+}
+const MUTE_KEY = 'mui-xmas-mute';
+const getMute = () => { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } };
+const setMute = (v) => { try { localStorage.setItem(MUTE_KEY, v ? '1' : '0'); } catch {} };
+const SPEAKER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10Z"/><path class="w" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg>';
+const MUTED = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10Z"/><path d="m16 9 5 6M21 9l-5 6"/></svg>';
+
 // mountXmasEgg 在 target(顶栏按钮区)最前面放彩蛋;不在活动期内什么都不放。title 是悬停提示。
 export function mountXmasEgg(target, title = 'Merry Xmas!') {
   if (!target || !xmasActive() || target.querySelector('.xmas-egg')) return;
@@ -169,7 +367,7 @@ export function mountXmasEgg(target, title = 'Merry Xmas!') {
   target.prepend(b);
 }
 
-// playXmas 放一遍;origin 是星光炸开的位置(按钮)。约 9 秒后自动淡出,×、点空白处、Esc 都能提前关。
+// playXmas 放一遍;origin 是星光炸开的位置(按钮)。约 12 秒后自动隐退,×、点空白处、Esc 都能提前关;静音键切换铃声并记住。
 export function playXmas(origin) {
   injectCSS();
   if (document.querySelector('.xmas-show')) return;
@@ -180,12 +378,29 @@ export function playXmas(origin) {
   box.setAttribute('role', 'dialog');
   box.setAttribute('aria-label', 'Merry Xmas guys');
   const letters = [...'Merry Xmas'].map((c, i) => c === ' ' ? '<span class="sp"></span>' : `<span style="animation-delay:${(2.6 + i * 0.08).toFixed(2)}s, ${(3.6 + i * 0.08).toFixed(2)}s">${c}</span>`).join('');
-  box.innerHTML = `<canvas class="xm-back"></canvas>
-    <div class="xmas-stage">${bigTree()}<div class="xmas-title"><div class="xmas-line">${letters}</div><div class="xmas-sub" style="animation-delay:3.5s">guys</div></div></div>
+  const wish = zh ? '祝你线路畅通,节点常绿 🎄' : 'May your lines run fast and your nodes stay evergreen 🎄';
+  let muted = getMute();
+  box.innerHTML = `<canvas class="xm-back"></canvas>${landSVG()}${lightsSVG()}${hollySVG('l')}${hollySVG('r')}
+    <div class="xmas-stage">
+      <div class="xmas-title"><div style="animation-delay:3.2s, 3.7s" class="xm-bells-wrap">${BELLS.replace('class="xm-bells"', 'class="xm-bells" style="animation-delay:3.2s, 3.7s"')}</div>
+        <div class="xmas-line">${letters}</div>${ribbon('guys').replace('class="xm-ribbon"', 'class="xm-ribbon" style="animation-delay:3.75s"')}
+        <div class="xm-wish" style="animation-delay:4.5s">${wish}</div></div>
+      <div class="xm-row">${bigTree()}${snowmanSVG()}</div>
+    </div>
     <canvas class="xm-front"></canvas>
+    <button type="button" class="xmas-mute" aria-label="${zh ? '声音' : 'Sound'}" title="${zh ? '声音开 / 关' : 'Sound on / off'}">${muted ? MUTED : SPEAKER}</button>
     <button type="button" class="xmas-x" aria-label="${zh ? '关闭' : 'Close'}" title="${zh ? '关闭' : 'Close'}">×</button>
     <div class="xmas-hint">${zh ? '会自动消失,也可以点 × 或按 Esc 关掉' : 'Closes by itself — or click × / press Esc'}</div>`;
   document.body.appendChild(box);
+  let audio = muted ? null : jingle();
+  const muteBtn = box.querySelector('.xmas-mute');
+  muteBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    muted = !muted;
+    setMute(muted);
+    muteBtn.innerHTML = muted ? MUTED : SPEAKER;
+    if (muted && audio) { audio.close().catch(() => {}); audio = null; } else if (!muted && !audio) audio = jingle();
+  });
 
   const back = box.querySelector('.xm-back'), front = box.querySelector('.xm-front');
   const bx = back.getContext('2d'), fx = front.getContext('2d');
@@ -236,7 +451,7 @@ export function playXmas(origin) {
       c.beginPath(); c.moveTo(dx + 9, bob - 2); c.lineTo(dx + 15, bob - 9); c.lineTo(dx + 19, bob - 8); c.lineTo(dx + 13, bob - 1); c.fill();
       c.beginPath(); c.moveTo(dx + 15, bob - 9); c.lineTo(dx + 13, bob - 15); c.moveTo(dx + 16, bob - 10); c.lineTo(dx + 19, bob - 15); c.stroke();
       c.beginPath(); c.moveTo(dx - 7, bob + 3); c.lineTo(dx - 10, bob + 10); c.moveTo(dx + 6, bob + 3); c.lineTo(dx + 9, bob + 10); c.stroke();
-      if (i === 2) { c.fillStyle = '#ff4b4b'; c.beginPath(); c.arc(dx + 20, bob - 7.5, 1.8, 0, Math.PI * 2); c.fill(); c.fillStyle = 'rgba(255,244,222,.95)'; }
+      if (i === 2) { c.save(); c.shadowColor = '#ff3b3b'; c.shadowBlur = 14; c.fillStyle = '#ff4b4b'; c.beginPath(); c.arc(dx + 20, bob - 7.5, 2.6, 0, Math.PI * 2); c.fill(); c.restore(); }
     }
     c.beginPath(); c.moveTo(28, 0); c.lineTo(-2, -4); c.stroke(); // 缰绳
     c.beginPath(); c.moveTo(-40, -10); c.lineTo(-2, -10); c.quadraticCurveTo(4, -10, 4, -2); c.lineTo(-30, 2); c.quadraticCurveTo(-42, 2, -40, -10); c.fill(); // 车身
@@ -301,11 +516,12 @@ export function playXmas(origin) {
     if (closed) return;
     closed = true;
     box.classList.add('out');
+    if (audio) { const a = audio; audio = null; setTimeout(() => a.close().catch(() => {}), 900); }
     setTimeout(() => { cancelAnimationFrame(raf); window.removeEventListener('resize', size); document.removeEventListener('keydown', esc); box.remove(); }, 1350);
   };
   box.addEventListener('click', close); // 点空白处、点 ×、按 Esc 都能关
   box.querySelector('.xmas-x').addEventListener('click', e => { e.stopPropagation(); close(); });
   document.addEventListener('keydown', esc);
   setTimeout(() => box.querySelector('.xmas-x')?.focus({ preventScroll: true }), 60);
-  setTimeout(close, 9200);
+  setTimeout(close, 12500);
 }
