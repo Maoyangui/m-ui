@@ -34,10 +34,10 @@ Four things it does differently:
 
 - **A line is one thing** — inbound protocol + port → where it exits. No separate inbound / outbound / routing tables to keep in sync.
 - **Saving can't break you** — every save is dry-run through sing-box first, so a broken config never reaches the database. Users and upstreams are hot-swapped; only line changes restart the data plane, and if the new config passes validation yet still fails to start (say another process grabbed the port), m-ui rolls back to the last working one.
-- **One master, many nodes** — the master pushes lines and users to any number of nodes, collects their traffic and enforces quota centrally. Subscriptions list every line once per server, so clients pick the lowest-latency entry themselves.
+- **One master, many nodes, and a standby when the master dies** — the master pushes lines and users to any number of nodes, collects their traffic and enforces quota centrally. Subscriptions list every line once per server, so clients pick the lowest-latency entry themselves. With master failover on, a standby takes over with an encrypted copy of the data when the master goes down, and subscription addresses can stay the same.
 - **Ops without leaving the panel** — Let's Encrypt issuance and renewal, Cloudflare WARP, kernel tuning, backup / restore, a migration wizard, Telegram alerts, two-factor login and an external API.
 
-Good for personal use, small teams, or anyone who needs one place to manage users across several servers.
+The same panel runs a single server for yourself and a production service with dozens of servers, thousands of users and resellers: the master manages lines, users, plans and resellers (each reseller gets its own panel, quota and users) while nodes only run the data plane; quotas, expiry and device limits are enforced across every server; and the external API plugs straight into a shop or a Telegram bot.
 
 ## Features
 
