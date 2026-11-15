@@ -302,12 +302,30 @@ function lineDetail(l, q) {
   const perNode = {}; onlines.forEach(o => { perNode[o.nodeId] = (perNode[o.nodeId] || 0) + 1; });
   const head = { onlines, onlineUsers: new Set(onlines.map(o => o.user)).size, onlineIPs: onlines.reduce((a, o) => a + o.ips.length, 0) };
   if (q.get('part') === 'online') return { ...head, perNode };
+  // 流量序列按请求的时间范围与分桶现算(和真面板一样:分桶起点按浏览器时区对齐整点 / 整天,最后一格是正在走的这一格),
+  // 不再借用录制的全站数据 —— 那份只有 24 小时与 7 天(逐小时),30 天会退回 24 小时,时间也没对齐整点。
   const hours = Number(q.get('hours')) || 24;
-  const key = Object.keys(F).find(k => k.startsWith(`GET stats?resource=user&hours=${hours}&`)) || 'GET stats?resource=user&hours=24&bucket=3600';
-  const shape = clone(F[key] || { points: [], span: 3600 });
-  const lf = 0.25 + ((l.id * 37) % 60) / 100; // 每条线路占全站的一部分
+  const span = Number(q.get('bucket')) || (hours <= 24 ? 3600 : hours <= 168 ? 21600 : 86400);
+  const off = (Number(q.get('tz')) || 0) * 60;
+  const now = Math.floor(Date.now() / 1000);
+  const end = Math.floor((now + off) / span) * span - off;
+  const n = Math.max(1, Math.round(hours * 3600 / span));
+  const lf = 0.25 + ((l.id * 37) % 60) / 100; // 每条线路的量级不同
   const weights = [0.5, 0.3, 0.12, 0.08, 0.05];
-  const series = (w) => { const pts = (shape.points || []).map(p => ({ t: p.t, up: Math.round(p.up * lf * w), down: Math.round(p.down * lf * w) })); return { points: pts, span: shape.span, start: shape.start, end: shape.end, totalUp: pts.reduce((a, p) => a + p.up, 0), totalDown: pts.reduce((a, p) => a + p.down, 0) }; };
+  const noise = (a, b) => { const x = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return x - Math.floor(x); };
+  // 一小时的流量(字节):晚上高、凌晨低,按线路与小时有起伏;start 起的 [start, end) 按小时累加,当前这一格只算已经过去的部分
+  const hourBytes = (h, w) => { const loc = new Date((h * 3600 + off) * 1000).getUTCHours(); const day = 0.35 + 0.65 * Math.max(0, Math.sin((loc - 6) / 24 * 2 * Math.PI)) ** 1.4; return 160e6 * lf * w * day * (0.7 + 0.6 * noise(l.id * 7 + w * 1000, h)); };
+  const series = (w) => {
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const t = end - (n - i) * span, stop = Math.min(t + span, now);
+      let bytes = 0;
+      for (let s = t; s < stop; s += 3600) bytes += hourBytes(Math.floor(s / 3600), w) * Math.min(1, (stop - s) / 3600);
+      const upShare = 0.14 + 0.06 * noise(l.id, Math.floor(t / span));
+      pts.push({ t, up: Math.round(bytes * upShare), down: Math.round(bytes * (1 - upShare)) });
+    }
+    return { points: pts, span, start: end - n * span, end: now, totalUp: pts.reduce((a, p) => a + p.up, 0), totalDown: pts.reduce((a, p) => a + p.down, 0) };
+  };
   const servers = nodes.map((n, i) => n.enabled === false || (n.status && n.status.ok === false)
     ? { nodeId: n.id, name: n.name, isLocal: !!n.isLocal, ok: false, disabled: n.enabled === false, error: n.enabled === false ? '服务器已停用' : '联系不上这台服务器', up: 0, down: 0, series: { points: [] }, online: perNode[n.id] || 0 }
     : (() => { const sr = series(weights[i] || 0.04); return { nodeId: n.id, name: n.name, isLocal: !!n.isLocal, ok: true, up: sr.totalUp, down: sr.totalDown, series: sr, online: perNode[n.id] || 0 }; })())

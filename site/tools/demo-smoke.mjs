@@ -43,6 +43,16 @@ const host = hostname();
 if (host.length > 3 && raw.includes(host)) fail(`fixture 里出现了本机主机名 ${host}`); else pass('fixture 不含本机主机名');
 if (/(?:[0-9a-f]{1,4}:){4,7}[0-9a-f]{0,4}/i.test(fixturesOnly.replace(/2001:db8::10/g, ''))) fail('fixture 里有未抹掉的 IPv6'); else pass('fixture 不含真实 IPv6');
 if (!(fx.fixtures['GET users'] || []).some(u => u.name === 'demo-alice')) fail('fixture 里没有 demo-alice'); else pass('fixture 含演示用户');
+// 「建议 / 支持」页在面板里是 Go 模板,演示站要预先按中英渲染(build.mjs 的 buildDemoSupport);原样拷过去会把 {{…}} 露给访客
+for (const [lang, title] of [['zh', '建议与支持'], ['en', 'Feedback &amp; Support']]) {
+  const f = join(DIST, 'demo', `support.${lang}.html`);
+  const s = existsSync(f) ? readFileSync(f, 'utf8') : '';
+  if (!s) fail(`演示站没有 support.${lang}.html`);
+  else if (s.includes('{{')) fail(`support.${lang}.html 里还有模板语法`);
+  else if (!s.includes(`<title>${title}`)) fail(`support.${lang}.html 的标题不对`);
+  else pass(`支持页 ${lang} 已渲染(无模板语法)`);
+}
+if (!existsSync(join(DIST, 'demo', 'support-qr.png'))) fail('演示站没有打赏二维码 support-qr.png'); else pass('支持页二维码在');
 
 // ---- 2. 路径前缀与 GitHub Pages 一致:浏览器里拦下请求,从 site/dist 回填,不起本地服务 ----
 const origin = 'https://demo-smoke.invalid';

@@ -241,7 +241,65 @@ if (existsSync(demoSrc) && existsSync(demoFix)) {
   copyFileSync(join(REPO, 'brand', 'logo.svg'), join(DIST, 'demo', 'logo.svg')); // 面板里 logo.svg 由 Go 端从 brand/ 提供
   copyFileSync(join(ROOT, 'demo', 'demo.js'), join(DIST, 'demo', 'js', 'demo.js'));
   copyFileSync(demoFix, join(DIST, 'demo', 'js', 'fixtures.json'));
+  buildDemoSupport(join(demoSrc, 'support.html'));
 } else console.warn('没有 site/demo/fixtures.json,跳过 Live Demo');
+
+// 「建议 / 支持」页:面板里是 web/support.go 按语言渲染的 Go 模板,演示站是静态的 —— 原样拷过去会把 {{if eq .Lang "zh"}} 这些露出来。
+// 这里按中、英各渲染一份 support.zh.html / support.en.html(Online = false:功德箱、设备数要面板后端,演示里不放,也就不联网),
+// support.html 换成按 ?lang(没有就按浏览器语言)跳过去的小页;打赏二维码用 site/demo/support-qr.png(与 handleSupportQR 同参数生成)。
+function buildDemoSupport(src) {
+  const tpl = readFileSync(src, 'utf8');
+  const brand = readFileSync(join(REPO, 'brand', 'brand.go'), 'utf8');
+  const bc = name => { const m = brand.match(new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`)); if (!m) throw new Error('brand.go 里找不到 ' + name); return m[1]; };
+  const tron = bc('Tron');
+  const base = {
+    Telegram: bc('Telegram'), TelegramURL: 'https://t.me/' + bc('Telegram'), TelegramGroupURL: 'https://t.me/' + bc('TelegramGroup'),
+    Tron: tron, TronHead: tron.slice(0, 4), TronTail: tron.slice(-4), Repo: 'https://github.com/' + bc('RepoPath'), Site: bc('Site'),
+    Version: 'demo', Online: false,
+  };
+  const esc = v => String(v).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&#34;');
+  // 只认这页用到的几种写法:{{if eq .X "v"}} / {{if .X}} … {{else}} … {{end}}(可嵌套)、{{.X}};遇到别的就报错,别悄悄漏到页面上
+  const render = data => {
+    const toks = tpl.split(/(\{\{[^}]*\}\})/);
+    let i = 0;
+    const block = () => {
+      let out = '';
+      while (i < toks.length) {
+        const tk = toks[i];
+        if (!tk.startsWith('{{')) { out += tk; i++; continue; }
+        const body = tk.slice(2, -2).trim();
+        if (body === 'else' || body === 'end') return out;
+        i++;
+        let m;
+        if ((m = body.match(/^if eq \.(\w+) "([^"]*)"$/)) || (m = body.match(/^if \.(\w+)$/))) {
+          if (!(m[1] in data)) throw new Error(`support.html:没有变量 .${m[1]}`);
+          const ok = m[2] !== undefined ? String(data[m[1]]) === m[2] : !!data[m[1]];
+          const yes = block(); let no = '';
+          if (toks[i] && toks[i].slice(2, -2).trim() === 'else') { i++; no = block(); }
+          if (!toks[i] || toks[i].slice(2, -2).trim() !== 'end') throw new Error('support.html:if 没有配对的 end');
+          i++;
+          out += ok ? yes : no;
+        } else if ((m = body.match(/^\.(\w+)$/))) {
+          if (!(m[1] in data)) throw new Error(`support.html:没有变量 .${m[1]}`);
+          out += esc(data[m[1]]);
+        } else throw new Error('support.html:演示站不认识的模板写法 ' + tk);
+      }
+      return out;
+    };
+    const html = block();
+    if (i < toks.length) throw new Error('support.html:多出来的 ' + toks[i]);
+    return html;
+  };
+  for (const lang of ['zh', 'en']) {
+    const html = render({ ...base, Lang: lang }).replace('src="support/qr"', 'src="support-qr.png"');
+    if (/\{\{|\}\}/.test(html)) throw new Error('演示站支持页渲染后还有模板语法');
+    out(`demo/support.${lang}.html`, html);
+  }
+  copyFileSync(join(ROOT, 'demo', 'support-qr.png'), join(DIST, 'demo', 'support-qr.png'));
+  out('demo/support.html', `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>m-ui</title>
+<script>(function(){var l=new URLSearchParams(location.search).get('lang');if(l!=='zh'&&l!=='en'){l=/^zh/i.test(navigator.language||'')?'zh':'en';}location.replace('support.'+l+'.html'+location.hash);})();</script>
+</head><body><p><a href="support.zh.html">建议与支持</a> · <a href="support.en.html">Feedback &amp; Support</a></p></body></html>\n`);
+}
 
 // sitemap:每个 URL 带上语言替代;没有日期的页面用站点构建日
 const urls = pages.map(p => {
