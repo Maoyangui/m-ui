@@ -58,11 +58,13 @@ type session struct {
 
 // Server 是面板 HTTP 服务。
 type Server struct {
-	credID   atomic.Uint64 // 凭据缓存的编号(见 credPrefix)
-	run      *runner.Runner
-	db       *gorm.DB
-	httpSrv  *http.Server
-	listener net.Listener
+	credID atomic.Uint64 // 凭据缓存的编号(见 credPrefix)
+	// legacyAgentPort 面板跟着主机走以后,本机原来的面板端口上还在接 agent 请求(见 startLegacyAgent;0 = 没有)
+	legacyAgentPort atomic.Int64
+	run             *runner.Runner
+	db              *gorm.DB
+	httpSrv         *http.Server
+	listener        net.Listener
 	// 面板换监听(见 panel_switch.go):panelMu 串行化换的过程,panelCur 是现在的监听,panelPending 是排着还没换的新地址
 	panelMu      sync.Mutex
 	panelCur     panelListen
@@ -255,6 +257,7 @@ func (s *Server) Start() error {
 		http.NotFound(w, r)
 	})
 	// 对外前缀 → 内部前缀改写;对外前缀不是 innerBase 时,直接访问内部前缀视为不存在
+	agentAlias := s.agentAliasPrefix() // 启动时算一次(成为主机后第一次启动就定了),不在每个请求里查库
 	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secureHeaders(w)
 		pub := s.basePath()
@@ -265,6 +268,13 @@ func (s *Server) Start() error {
 		}
 		if pub == "/" { // 面板挂在根上:整段前缀就是 /,直接改写到内部前缀
 			r.URL.Path = innerBase + strings.TrimPrefix(r.URL.Path, "/")
+			r.URL.RawPath = ""
+			mux.ServeHTTP(w, r)
+			return
+		}
+		// 面板跟着主机走、端口没变只换了路径:原来路径上的 agent 请求照样接(别的服务器库里记的还是原来的地址)
+		if alias := agentAlias; alias != "" && strings.HasPrefix(r.URL.Path, alias) && !strings.HasPrefix(r.URL.Path, pub) {
+			r.URL.Path = innerBase + "api/agent/" + strings.TrimPrefix(r.URL.Path, alias)
 			r.URL.RawPath = ""
 			mux.ServeHTTP(w, r)
 			return
@@ -321,6 +331,7 @@ func (s *Server) Start() error {
 			return ""
 		})
 	}
+	s.startLegacyAgent(mux)
 	s.StartUpdateWatch()
 	if err := s.StartReseller(); err != nil {
 		if h := s.haSvc(); h != nil && h.ResellerFallback(err) { // 迁来的代理面板端口绑不上:改回本机原来的再试
@@ -713,4 +724,73 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 
 func badRequest(w http.ResponseWriter, err error) {
 	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+}
+
+// startLegacyAgent 面板跟着主机走了(见 ha/panelid.go):本机原来的面板端口上继续接 agent 请求(只接这一类,照常要令牌、
+// 对纪元)。原主机回来时、别的服务器库里记的还是这个地址:接不到就核实不了新主机还活着,原主机不会变为副机,
+// 成了两台同时当主机(真机演练里遇到)。
+func (s *Server) startLegacyAgent(mux *http.ServeMux) {
+	h := s.haSvc()
+	if h == nil {
+		return
+	}
+	pv := h.PrevPanelListen()
+	if pv == nil || pv.Port == s.settingInt("webPort", 2053) {
+		return // 端口没变:原来的路径在现在的面板上留了 agent 的别名(见 agentAliasPrefix)
+	}
+	listen := s.setting("webListen")
+	if listen == "" {
+		listen = "0.0.0.0"
+	}
+	addr := net.JoinHostPort(listen, strconv.Itoa(pv.Port))
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		logger.Warning("容灾:本机原来的面板地址 ", addr, " 上接 agent 请求没起来(", err, "):原主机回来时可能联系不上本机")
+		return
+	}
+	if pv.CertFile != "" && pv.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(pv.CertFile, pv.KeyFile)
+		if err != nil {
+			_ = ln.Close()
+			logger.Warning("容灾:本机原来的面板证书读不出来(", err, "),原来的面板地址上不接 agent 请求")
+			return
+		}
+		ln = tls.NewListener(ln, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
+	}
+	path := "/" + strings.Trim(pv.Path, "/") + "/"
+	if path == "//" {
+		path = innerBase
+	}
+	prefix := path + "api/agent/"
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secureHeaders(w)
+		if !strings.HasPrefix(r.URL.Path, prefix) {
+			http.NotFound(w, r)
+			return
+		}
+		r.URL.Path = innerBase + "api/agent/" + strings.TrimPrefix(r.URL.Path, prefix)
+		r.URL.RawPath = ""
+		mux.ServeHTTP(w, r)
+	})
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	go func() { _ = srv.Serve(ln) }()
+	s.legacyAgentPort.Store(int64(pv.Port))
+	logger.Info("容灾:面板换成了原主机的,本机原来的面板地址 ", addr, path, " 继续接副机 / 原主机的 agent 请求")
+}
+
+// agentAliasPrefix 面板跟着主机走、端口没变只换了路径时,原来路径下的 agent 前缀("/旧路径/api/agent/");没有为空。
+func (s *Server) agentAliasPrefix() string {
+	h := s.haSvc()
+	if h == nil {
+		return ""
+	}
+	pv := h.PrevPanelListen()
+	if pv == nil || pv.Port != s.settingInt("webPort", 2053) {
+		return ""
+	}
+	path := "/" + strings.Trim(pv.Path, "/") + "/"
+	if path == "//" || path == s.basePath() {
+		return ""
+	}
+	return path + "api/agent/"
 }

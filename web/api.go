@@ -1706,6 +1706,12 @@ func (s *Server) localServicePorts() []struct {
 			port  int
 		}{"代理面板", s.settingInt("resellerPort", 2054)})
 	}
+	if p := int(s.legacyAgentPort.Load()); p > 0 { // 面板跟着主机走以后,原来的面板端口还在接 agent 请求
+		out = append(out, struct {
+			label string
+			port  int
+		}{"面板(原来的)", p})
+	}
 	return out
 }
 

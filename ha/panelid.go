@@ -288,3 +288,27 @@ func errText(err error) string {
 	}
 	return shortErr(err.Error(), 200)
 }
+
+// PrevPanelAddr 本机换成原主机的面板以前,自己的面板地址(端口、路径、证书)。
+type PrevPanelAddr struct {
+	Port              int
+	Path              string
+	CertFile, KeyFile string
+}
+
+// PrevPanelListen 面板跟着主机走了:本机原来的面板地址(端口没变、只换了路径的,web 在现在的面板上给原来的路径留 agent 的别名)(继续在上面接 agent 请求 —— 原主机回来、
+// 别的服务器库里记的还是这个地址,接不到就核实不了新主机还活着,原主机就不会变为副机)。没换过为 nil。
+func (s *Service) PrevPanelListen() *PrevPanelAddr {
+	if s.IsNode() {
+		return nil
+	}
+	var b Became
+	if !s.getJSON(KeyBecame, &b) || !b.Identity.PanelKept || b.Identity.PrevPanel == nil {
+		return nil
+	}
+	pv := b.Identity.PrevPanel
+	if pv.Port <= 0 {
+		return nil
+	}
+	return &PrevPanelAddr{Port: pv.Port, Path: pv.Path, CertFile: pv.CertFile, KeyFile: pv.KeyFile}
+}
