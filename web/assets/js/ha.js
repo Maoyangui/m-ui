@@ -132,6 +132,14 @@ document.addEventListener('keydown', e => {
 
 const modeText = m => t('ha.mode.' + (m || 'off'));
 
+// histHTML 备用手里的历史数据(流量图、订阅日志、审计日志):截至何时;最近一次发失败的原因
+function histHTML(ack, held) {
+  const at = (ack && ack.asOf) || (held && held.at) || (held && held.createdAt);
+  let s = `<p class="muted small">${esc(at ? t('ha.card.histAt', { t: fmtTime(at) }) : t('ha.card.histNone'))}</p>`;
+  if (ack && ack.err) s += `<p class="warn-text small">${esc(t('ha.card.histErr', { t: fmtTime(ack.errAt), err: trErr(ack.err) }))}</p>`;
+  return s;
+}
+
 // standbyLine 备用的一句话:手里没有副本时不说「保存着」
 function standbyLine(info, rank) {
   const rep = info && info.replica;
@@ -210,6 +218,7 @@ export function cardHTML(n, r) {
     }
     const ack = info && info.ack;
     if (ack && ack.err) lines.push(`<p class="warn-text small">${esc(t('ha.card.ackErr', { t: fmtTime(ack.errAt), err: trErr(ack.err) }))}</p>`);
+    if (on && r.kind === 'standby') lines.push(histHTML(info && info.histAck, info && info.history));
     if (info && pubChanged && info.pinnedFp) lines.push(`<p class="muted small fp">${esc(t('ha.card.fpChanged', { old: info.pinnedFp, now: info.pubFp || '—' }))}</p>`);
     else if (info && (info.pinnedFp || info.pubFp)) lines.push(`<p class="muted small fp">${esc(t('ha.card.fp', { fp: info.pinnedFp || info.pubFp }))}</p>`);
     return head + lines.join('') + `<div class="actions">${setBtn}${pubChanged ? `<button class="btn sm" data-act="ha.repin" data-id="${n.id}">${t('ha.repin')}</button>` : ''}</div>${checking}`;
@@ -223,6 +232,7 @@ export function cardHTML(n, r) {
   if (!n.isLocal) return head + `<p>${r.kind === 'standby' ? esc(t('ha.card.standbyOther', { n: r.rank })) : t('ha.card.nodeOther')}</p>`;
   const rep = nv.replica && { asOf: nv.replica.asOf, verifiedAt: nv.replica.verifiedAt, err: nv.replica.verifyErr };
   const lines = [`<p>${esc(r.kind === 'standby' ? standbyLine({ replica: rep }, r.rank) : t('ha.card.nodeSelf'))}</p>`];
+  if (r.kind === 'standby' && rep) lines.push(histHTML(null, nv.history));
   // 只有服务端判定「该接任了」(确认模式到了确认时间、证据齐全)才给按钮;否则写原因
   if (nv.canTakeover) lines.push(`<div class="actions"><button class="btn sm danger" data-act="ha.takeover">${t('ha.takeover')}</button></div>`);
   else if (r.kind === 'standby' && nv.why && (nv.lost || nv.why === 'oldReplica')) lines.push(`<p class="why">${esc(whyText(nv.why))}</p>`);
@@ -619,7 +629,10 @@ export function noticeHTML(n) {
     case 'became': {
       const take = n.how === 'takeover' || n.reason === 'takenOver';
       let s = `<b>${esc(t(take ? 'ha.n.tookOver' : 'ha.n.became', { name: n.name || '' }))}</b>`;
-      if (take) s += ' ' + esc(t('ha.n.tookOverData'));
+      // 历史数据(流量图、订阅日志、较早的审计)带过来了说截至何时;没带过来的原因在告警里(老提示两样都没有,照旧说一句)
+      const histWarn = (n.items || []).some(it => /^history/.test(it.code || ''));
+      if (take && n.historyAt) s += ' ' + esc(t('ha.n.historyAt', { t: fmtTime(n.historyAt) }));
+      else if (take && !histWarn) s += ' ' + esc(t('ha.n.tookOverData'));
       const api = n.api && n.url ? ' ' + esc(t('ha.n.apiMoved', { url: n.url })) : ''; // 外部 API 挂在面板地址上,对接方要改地址
       return s + (dns ? ' ' + dns : '') + reseller + api + warn;
     }

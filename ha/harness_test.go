@@ -117,6 +117,9 @@ func (a *miniAgent) serve(w http.ResponseWriter, r *http.Request) {
 	case "ha/replica":
 		seq, err := a.svc.ReceiveReplica(r.Body)
 		reply(map[string]interface{}{"ok": "1", "seq": seq}, err)
+	case "ha/history":
+		seq, err := a.svc.ReceiveHistory(r.Body)
+		reply(map[string]interface{}{"ok": "1", "seq": seq}, err)
 	case "ha/drop", "ha/leave": // 正文要主机签名(真实接口同样经 DropSigned / LeaveSigned)
 		raw, err := io.ReadAll(r.Body)
 		if err != nil {

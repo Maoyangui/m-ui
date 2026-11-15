@@ -52,6 +52,17 @@ type HAReport struct {
 	SignFP       string `json:"signFp,omitempty"`       // 本机签名公钥指纹
 	// BusyPorts 备用自检:主机给的、它接任后要用的端口里,被别的程序占着的(老副机不报)
 	BusyPorts []BusyPort `json:"busyPorts,omitempty"`
+	// History 手里那份历史数据(流量时序、订阅日志、审计日志,见 ha/history.go);HistoryBytes 它占的磁盘
+	History      *HAHistory `json:"history,omitempty"`
+	HistoryBytes int64      `json:"historyBytes,omitempty"`
+}
+
+// HAHistory 备用手里那份历史数据。
+type HAHistory struct {
+	Epoch uint64 `json:"epoch"`
+	Seq   uint64 `json:"seq"`
+	At    int64  `json:"at"`   // 生成时间
+	Size  int64  `json:"size"` // 明文字节数
 }
 
 // BusyPort 一个被别的程序占着的端口。What:"sub" | "panel" | "reseller"(见 ha.TakeoverPort)。

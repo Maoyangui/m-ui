@@ -124,6 +124,8 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentHAState)(w, r)
 	case "ha/replica": // 备用:收下主机推来的加密副本
 		s.agentAuth(s.handleAgentHAReplica)(w, r)
+	case "ha/history": // 备用:收下主机推来的加密历史数据(流量时序、订阅日志、审计日志)
+		s.agentAuth(s.handleAgentHAHistory)(w, r)
 	case "ha/drop": // 不再是备用:删掉手里的副本
 		s.agentAuth(s.handleAgentHADrop)(w, r)
 	case "ha/leave": // 主机删除了本机:退出集群(纪元清零,副本与备用密钥删掉)
@@ -724,6 +726,29 @@ func (s *Server) handleAgentHAReplica(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	seq, err := h.ReceiveReplica(http.MaxBytesReader(w, r.Body, ha.MaxReplica+(1<<20)))
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "seq": seq})
+}
+
+// handleAgentHAHistory 备用收下主机推来的历史数据(同副本:只有一个写入方,写独立文件,不碰本机库)。
+func (s *Server) handleAgentHAHistory(w http.ResponseWriter, r *http.Request) {
+	if !haAgentLimiter.allow(peerIP(r)) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "请求太频繁"})
+		return
+	}
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	h := s.haSvc()
+	if h == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "本机容灾服务未初始化"})
+		return
+	}
+	seq, err := h.ReceiveHistory(http.MaxBytesReader(w, r.Body, ha.MaxHistory+(1<<20)))
 	if err != nil {
 		badRequest(w, err)
 		return

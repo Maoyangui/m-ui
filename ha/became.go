@@ -45,6 +45,8 @@ type Notice struct {
 	Items    []PlanItem  `json:"items,omitempty"`    // 带代码的告警(界面按代码翻译)
 	Reseller string      `json:"reseller,omitempty"` // 新的代理面板地址
 	API      bool        `json:"api,omitempty"`      // 开着外部 API:它挂在面板地址上,对接的商城、机器人要改用新面板地址
+	// HistoryAt 接任时带过来的历史数据(流量图、订阅日志、审计日志)截至何时;没带过来为 0(原因在 Items)
+	HistoryAt int64 `json:"historyAt,omitempty"`
 	Count    int         `json:"count,omitempty"`    // 同类合并的条数(界面用)
 }
 
@@ -136,6 +138,9 @@ func (s *Service) afterBecame() {
 		n.Reseller = s.resellerURL()
 	}
 	n.API = s.setting("apiEnabled") == "true" && !b.Identity.PanelKept // 面板跟过来了(地址不变)就不用提醒改地址
+	if b.History != nil {
+		n.HistoryAt = b.History.At
+	}
 	s.addNotice(n)
 	s.notify(s.becameText(b, ip))
 	logger.Info("容灾:本机已成为主机(", b.How, "),纪元 ", b.Epoch)
@@ -163,6 +168,9 @@ func (s *Service) becameText(b Became, ip string) string {
 	if b.How == HowTakeover {
 		fmt.Fprintf(&sb, "数据截至 %s;之后在原主机上做的改动没带过来,副机线路上的流量已自动补回。\n",
 			time.Unix(b.ReplicaAt, 0).In(s.loc()).Format("2006-01-02 15:04:05"))
+		if b.History != nil {
+			fmt.Fprintf(&sb, "流量图、订阅日志和较早的审计日志也带过来了(截至 %s)。\n", time.Unix(b.History.At, 0).In(s.loc()).Format("2006-01-02 15:04"))
+		}
 	}
 	sb.WriteString(s.dnsText(b, ip))
 	for _, it := range b.Identity.Warnings {

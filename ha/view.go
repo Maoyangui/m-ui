@@ -52,6 +52,7 @@ type NodeHA struct {
 	Standbys    []uint         `json:"standbys"`
 	PauseUntil  int64          `json:"pauseUntil,omitempty"`
 	Replica     *ReplicaInfo   `json:"replica,omitempty"`
+	History     *HistoryInfo   `json:"history,omitempty"` // 手里那份历史数据(流量时序、订阅日志、审计日志)
 	PubFP       string         `json:"pubFp,omitempty"`
 	CanTakeover bool           `json:"canTakeover"`
 	Why         string         `json:"why,omitempty"` // 不能接任的原因代码
@@ -132,6 +133,10 @@ func (s *Service) View(full bool) View {
 	}
 	if ri, ok := s.replicaInfo(); ok {
 		nv.Replica = &ri
+	}
+	if hi, ok := s.historyInfo(); ok {
+		hi.MasterPub = "" // 界面用不着
+		nv.History = &hi
 	}
 	if v.Epoch > 0 {
 		if k, err := s.standbyKey(); err == nil {
@@ -422,6 +427,10 @@ func (s *Service) Report() *hub.HAReport {
 				VerifiedAt: ri.VerifiedAt, Err: ri.VerifyErr}
 		}
 		rep.ReplicaBytes = s.replicaBytes()
+		if hi, ok := s.historyInfo(); ok {
+			rep.History = &hub.HAHistory{Epoch: hi.Epoch, Seq: hi.Seq, At: hi.CreatedAt, Size: hi.Size}
+		}
+		rep.HistoryBytes = s.historyBytes()
 		rep.Peers = s.eng.peerSummary()
 		rep.BusyPorts = s.busyPorts()
 	}

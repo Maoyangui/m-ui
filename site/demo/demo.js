@@ -332,6 +332,8 @@ function haStandbys() {
     const replica = rank ? { epoch: HA.epoch, seq: 412 + n.id, at: t0 - 75, size: 18 * 1048576 + n.id * 4096, asOf: t0 - 20, verifiedAt: t0 - 60 } : undefined;
     return { id: n.id, name: n.name, rank, eligible: true, version: 'demo', pubFp: fp, pinnedFp: fp, replica,
       ack: rank ? { seq: 412 + n.id, sentAt: t0 - 75, asOf: t0 - 20, size: replica.size } : undefined,
+      history: rank ? { epoch: HA.epoch, seq: 398 + n.id, at: t0 - 1260, size: 41 * 1048576 } : undefined,
+      histAck: rank ? { asOf: t0 - 1260, size: 41 * 1048576 } : undefined,
       leaseAgo: 3, diskFree: 24 * 1073741824, peers: { ok: 2, total: 2, at: t0 - 40 }, epoch: HA.epoch, webPort: 2053, resellerPort: 2054 };
   });
 }
@@ -352,7 +354,7 @@ function haView(full) {
       { code: 'telegram', level: 'ok' }, { code: 'peers', level: 'ok' },
       c.witness ? { code: 'witness', level: 'ok' } : { code: 'witness', level: c.mode === 'auto' && haNodes().length <= 2 ? 'bad' : 'info' },
     ] : [{ code: 'standbys', level: 'info' }, { code: 'replica', level: 'info' }];
-    if (!on) v.standbys = sb.map(x => ({ ...x, replica: undefined, ack: undefined }));
+    if (!on) v.standbys = sb.map(x => ({ ...x, replica: undefined, ack: undefined, history: undefined, histAck: undefined }));
   }
   return v;
 }

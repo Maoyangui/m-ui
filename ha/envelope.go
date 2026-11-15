@@ -44,6 +44,7 @@ const (
 const (
 	KindReplica = "replica" // 给备用的数据副本
 	KindBundle  = "bundle"  // 设为主机时推给目标机器的整库数据
+	KindHistory = "history" // 给备用的历史数据(流量时序、订阅日志、审计日志,见 history.go)
 )
 
 // EnvHeader 信封头部(签名覆盖它)。
@@ -59,7 +60,8 @@ type EnvHeader struct {
 	Size        int64  `json:"size"`  // 明文字节数
 	CtLen       int64  `json:"ctLen"` // 密文字节数
 	MaxChangeId uint64 `json:"maxChangeId,omitempty"`
-	Wrap        string `json:"wrap"`         // 包好的数据密钥(base64)
+	DBSize      int64  `json:"dbSize,omitempty"` // 历史数据:解开后的库多大(备用收下前据此算接任时磁盘够不够)
+	Wrap        string `json:"wrap"`             // 包好的数据密钥(base64)
 	To          string `json:"to,omitempty"` // 收件人公钥指纹
 	Nonce       string `json:"nonce,omitempty"`
 }

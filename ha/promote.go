@@ -51,6 +51,8 @@ type Became struct {
 	Notified    bool           `json:"notified,omitempty"`
 	Dns         []DnsChange    `json:"dns,omitempty"`
 	DnsErr      string         `json:"dnsErr,omitempty"`
+	// History 接任时并进新库的历史数据(流量时序、订阅日志、审计日志,见 history.go);没并进来为 nil,原因在 Identity.Warnings
+	History *HistoryNote `json:"history,omitempty"`
 }
 
 // Former 接任后的主机:失联的原主机(等它回来自动变为副机;那之前它那一行停用,订阅里不出现死节点)。
@@ -163,12 +165,18 @@ func (s *Service) Takeover(o TakeoverOpts) error {
 	if err != nil {
 		return fail(err)
 	}
+	// 历史数据(流量时序、订阅日志、审计日志):同一任主机的才用;用不了不挡接任,成为主机的提示里说一声
+	var replicaDB int64
+	if st, err := os.Stat(filepath.Join(dir, "replica.db")); err == nil {
+		replicaDB = st.Size()
+	}
+	hist, histWarn := s.openHistory(dir, env.Header, replicaDB)
 	b := Became{How: HowTakeover, Epoch: next, FormerId: meta.MasterId, FormerName: meta.MasterName, At: s.now().Unix(),
 		ReplicaAt: ri.AsOf, MaxChangeId: meta.MaxChangeId, By: o.By, FormerIP: meta.Identity.PublicIP, FormerIP6: meta.Identity.PublicIP6}
 	if b.ReplicaAt < meta.CreatedAt {
 		b.ReplicaAt = meta.CreatedAt
 	}
-	if err := s.buildPromote(dir, meta, b, false, promoteOpts{SignSeed: seed}); err != nil {
+	if err := s.buildPromote(dir, meta, b, false, promoteOpts{SignSeed: seed, History: hist, HistoryWarn: histWarn}); err != nil {
 		return fail(err)
 	}
 	// 新库已经落盘:这时才记"正在接任"(重启前不再接受别的接任 / 设为主机)
@@ -250,6 +258,9 @@ func (s *Service) replicaUsable(ri ReplicaInfo) error {
 // promoteOpts 组新库的选项。
 type promoteOpts struct {
 	SignSeed string // 新主机的签名密钥:候选人要票时、被设为主机时给出去的公钥对应的那把,新库里沿用它
+	// 接任:解开的历史数据(并进新库),或者用不了的原因(记进成为主机的告警)
+	History     *openedHistory
+	HistoryWarn *PlanItem
 }
 
 // promoteMeta <库>.promote.json:待换上的新库的说明(过期的不换)。
@@ -316,6 +327,21 @@ func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bo
 		database.Close(ndb)
 		clean()
 		return fmt.Errorf("数据里没有本机(服务器 #%d):这份数据不是本机所在集群的", selfId)
+	}
+	// 历史数据先并(接任):流量时序按桶累加,下面并本机还没上报的流量时照样累加上去
+	histWarn := o.HistoryWarn
+	var histNote *HistoryNote
+	if o.History != nil {
+		if note, err := importHistory(ndb, o.History.Path, meta.MaxChangeId); err != nil {
+			logger.Warning("容灾:历史数据没能并进新库(继续接任,流量图、订阅日志不带过去): ", err)
+			it := item(idwHistFail, "err", errText(err))
+			histWarn = &it
+		} else {
+			note.At = o.History.Meta.CreatedAt
+			histNote = &note
+			logger.Info("容灾:历史数据(截至 ", time.Unix(note.At, 0).Format("2006-01-02 15:04:05"), ")已并进新库:流量时序 ", note.Stats,
+				" 行、订阅日志 ", note.SubLogs, " 条、审计日志 ", note.Changes, " 条")
+		}
 	}
 	// 本机还没上报的流量并进去:按数据里本机的游标只计增量,不多算、不漏算(组库之后到重启前再记的,换库时再并一次)
 	if _, err := mergeOwnLedger(ndb, selfId, self, s.d.DB, s.now()); err != nil {
@@ -395,6 +421,10 @@ func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bo
 			}
 		}
 		b.Identity = res
+		if histWarn != nil {
+			b.Identity.Warnings = append(b.Identity.Warnings, *histWarn)
+		}
+		b.History = histNote
 		// 审计记进新库:旧库重启时就换下去了
 		actor, action := "ha:"+nonEmpty(b.By, "panel"), "takeover"
 		if b.How == HowSetMaster {

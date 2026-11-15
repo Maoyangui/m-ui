@@ -208,6 +208,14 @@ func identityWarnText(it PlanItem) string {
 		return "带过来的订阅证书不能用,正用 DNS 接口给 " + a["host"] + " 重新签一张,签好自动换上(几分钟,证书页能看进度)"
 	case idwSubCertTodo:
 		return "订阅证书不能用(没带过来、过期或快到期),又没法自动重签:到证书页给 " + a["host"] + " 签一张并用于订阅"
+	case idwHistNone:
+		return "本机还没收到过历史数据(当上备用后约一小时送到):流量图、订阅日志和 7 天以前的审计日志没带过来,用户的已用流量、到期时间不受影响"
+	case idwHistOther:
+		return "本机手里的历史数据(截至 " + a["t"] + ")不是原主机这一任的,没有用:流量图、订阅日志和 7 天以前的审计日志没带过来,用户的已用流量、到期时间不受影响"
+	case idwHistDisk:
+		return "磁盘不够把历史数据并进来(要约 " + a["need"] + " MB,只剩 " + a["free"] + " MB):流量图、订阅日志和 7 天以前的审计日志没带过来,用户的已用流量、到期时间不受影响"
+	case idwHistFail:
+		return "历史数据没能并进来(" + a["err"] + "):流量图、订阅日志和 7 天以前的审计日志没带过来,用户的已用流量、到期时间不受影响"
 	}
 	return a["text"]
 }

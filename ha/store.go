@@ -205,7 +205,7 @@ func (s *Service) ReceiveReplica(body io.Reader) (uint64, error) {
 	if err := ensureDir(s.Dir()); err != nil {
 		return 0, err
 	}
-	if free := s.diskFree(); free >= 0 && free < 64<<20 {
+	if free := standbyDiskFree(s); free >= 0 && free < 64<<20 {
 		return 0, fmt.Errorf("磁盘剩余空间不足(只剩 %d MB),不收副本", free>>20)
 	}
 	tmp := filepath.Join(s.Dir(), fileTmp)
@@ -247,12 +247,19 @@ func (s *Service) ReceiveReplica(body io.Reader) (uint64, error) {
 	if hadOld && old.MasterId == hd.MasterId && old.DBSize > 0 && old.Size > 0 {
 		dbHint = max(dbHint, scaleSize(old.DBSize, hd.Size, old.Size))
 	}
-	if free := s.diskFree(); free >= 0 {
+	if free := standbyDiskFree(s); free >= 0 {
 		var prevSize int64
 		if st, err := os.Stat(filepath.Join(s.Dir(), filePrev)); err == nil {
 			prevSize = st.Size()
 		}
-		if need := TakeoverNeed(hd.Size, dbHint); free+prevSize < need {
+		need := TakeoverNeed(hd.Size, dbHint)
+		if hb := s.historyBytes(); free+prevSize < need && hb > 0 && free+prevSize+hb >= need {
+			// 历史数据可有可无,副本不能少:先删历史数据腾地方(主机那边也按这个口径算磁盘,见 replicator.compute)
+			s.dropHistoryLocked()
+			logger.Warning("容灾:磁盘紧张,删掉手里的历史数据给新副本腾地方(接任时流量图、订阅日志不带过去)")
+			free += hb
+		}
+		if free+prevSize < need {
 			return fail(fmt.Errorf("磁盘剩余空间不够:接任时要约 %d MB,只剩 %d MB,不收副本", need>>20, (free+prevSize)>>20))
 		}
 	}
@@ -332,7 +339,7 @@ func dropStandbyFiles(dir string, withKey bool) error {
 }
 
 func dropStandbyFilesIn(dir string, withKey bool) (bool, error) {
-	names := []string{fileCur, filePrev, fileTmp, fileInfo, filePrevInfo}
+	names := []string{fileCur, filePrev, fileTmp, fileInfo, filePrevInfo, fileHist, fileHistTmp, fileHistInfo}
 	if withKey {
 		names = append(names, fileKey, fileKey+".w")
 	}

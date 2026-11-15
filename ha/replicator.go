@@ -94,6 +94,9 @@ type StandbyInfo struct {
 	ResellerPort int `json:"resellerPort,omitempty"`
 	// BusyPorts 它自检报上来的、接任后要用却被别的程序占着的端口(见 portcheck.go)
 	BusyPorts []hub.BusyPort `json:"busyPorts,omitempty"`
+	// History 它报的手里那份历史数据;HistAck 主机这边最近一次给它发历史数据的情况(见 history.go)
+	History *hub.HAHistory `json:"history,omitempty"`
+	HistAck *HistoryView   `json:"histAck,omitempty"`
 }
 
 // AckView 最近一次给这台发副本的结果。
@@ -148,6 +151,13 @@ type replicator struct {
 	// 停用 / 删除的副机删副本的重试
 	dropMu      sync.Mutex
 	dropRunning bool
+	// 历史数据(见 history.go)
+	hist        map[uint]*histAck
+	histGates   map[uint]chan struct{}
+	histRunning bool
+	histLast    time.Time
+	histCost    time.Duration
+	histSize    int64
 	// 备用侧:副本自检的限频
 	checkMu      sync.Mutex
 	lastCheck    time.Time
@@ -156,7 +166,8 @@ type replicator struct {
 
 func newReplicator(s *Service) *replicator {
 	return &replicator{s: s, kickc: make(chan struct{}, 1), acks: map[uint]*ack{}, gates: map[uint]chan struct{}{},
-		alerted: map[uint]string{}, dropAt: map[uint]time.Time{}, holdSince: map[uint]time.Time{}, started: s.now()}
+		alerted: map[uint]string{}, dropAt: map[uint]time.Time{}, holdSince: map[uint]time.Time{}, started: s.now(),
+		hist: map[uint]*histAck{}, histGates: map[uint]chan struct{}{}}
 }
 
 // scheduleCheck 备用收到新副本:排一次自检,返回还要等多久;已经排着一次就不再排(ok=false)。
@@ -242,6 +253,7 @@ func (r *replicator) Standbys() []StandbyInfo {
 		if a := r.acks[out[i].Id]; a != nil {
 			out[i].Ack = &AckView{Seq: a.seq, SentAt: a.sentAt, AsOf: a.asOf, Size: a.size, Err: a.err, ErrAt: a.errAt}
 		}
+		out[i].HistAck = r.historyViewLocked(out[i].Id)
 	}
 	return out
 }
@@ -311,6 +323,8 @@ func (r *replicator) compute(cfg Config) ([]StandbyInfo, []uint) {
 			ci.Replica, ci.LeaseAgo, ci.DiskFree, ci.Peers, ci.Epoch = st.HA.Replica, st.HA.LeaseAgo, st.HA.DiskFree, st.HA.Peers, st.HA.Epoch
 			ci.WebPort, ci.ResellerPort, replicaBytes = st.HA.WebPort, st.HA.ResellerPort, st.HA.ReplicaBytes
 			ci.BusyPorts = st.HA.BusyPorts
+			ci.History = st.HA.History
+			replicaBytes += st.HA.HistoryBytes // 历史数据可以让位(收副本时磁盘紧了先删它,见 store.go):也算回可用里
 		}
 		switch {
 		case st.HA == nil || st.HA.Pub == "":
@@ -552,6 +566,7 @@ func (r *replicator) tick() {
 	if r.due(cfg, changed) {
 		r.startRun(send, cfg)
 	}
+	r.historyTick(infos, send)
 }
 
 // startRun 在后台生成并发一份(同一时间只有一份在跑)。
@@ -1030,8 +1045,13 @@ func (r *replicator) noteAck(id uint, epoch, seq uint64, meta ReplicaMeta, size 
 	*a = ack{epoch: epoch, seq: seq, sum: meta.Sum, size: size, sentAt: r.s.now().Unix(), asOf: meta.CreatedAt}
 }
 
-// sendReplica 把一份信封推给一台备用。
+// sendReplica 把一份副本信封推给一台备用。
 func (s *Service) sendReplica(n model.Node, ctPath string, hdr EnvHeader, sum [32]byte, sign func([]byte) []byte) error {
+	return s.sendEnvelope(n, "ha/replica", ctPath, hdr, sum, sign)
+}
+
+// sendEnvelope 把一份信封(副本 / 历史数据)推给一台备用的 agent 接口 path,核对它确认的序号。
+func (s *Service) sendEnvelope(n model.Node, path, ctPath string, hdr EnvHeader, sum [32]byte, sign func([]byte) []byte) error {
 	total, err := EnvelopeSize(hdr, 64)
 	if err != nil {
 		return err
@@ -1056,7 +1076,7 @@ func (s *Service) sendReplica(n model.Node, ctPath string, hdr EnvHeader, sum [3
 	}
 	h := http.Header{}
 	h.Set("Content-Type", "application/octet-stream")
-	if err := s.d.Hub.Send(n, http.MethodPost, "ha/replica", pr, total, h, timeout, &out); err != nil {
+	if err := s.d.Hub.Send(n, http.MethodPost, path, pr, total, h, timeout, &out); err != nil {
 		return err
 	}
 	if out.Seq != hdr.Seq {

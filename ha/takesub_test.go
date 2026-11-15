@@ -135,7 +135,7 @@ func TestTakeoverSubscriptionScope(t *testing.T) {
 		if get("subPort") != "2087" || get("subPath") != "/own/" || get("subDomain") != "" || b.Identity.Taken || b.Identity.SubURLKept {
 			t.Fatalf("只接管主机的工作:订阅设置照旧: %s %s %q %+v", get("subPort"), get("subPath"), get("subDomain"), b.Identity)
 		}
-		if len(b.Identity.Warnings) != 1 || b.Identity.Warnings[0].Code != idwSubNotTaken || b.Identity.Warnings[0].Args["host"] != "sub.example.com" {
+		if ws := withoutHistory(b.Identity.Warnings); len(ws) != 1 || ws[0].Code != idwSubNotTaken || ws[0].Args["host"] != "sub.example.com" {
 			t.Fatalf("要说清订阅没接管、订阅地址还指向原主机: %+v", b.Identity.Warnings)
 		}
 	}

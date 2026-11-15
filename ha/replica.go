@@ -29,7 +29,8 @@ import (
 // 也不走 gorm 的 Create(default:true 的 bool 会把 false 写成 true)—— 按列原样复制每一行。
 //
 // 给备用的副本不带:会话(接任后所有人重新登录)、流量时序与订阅日志(大,每 5 分钟发一次不划算)、副机账本(主机上没有);
-// 审计日志只带最近 7 天。设为主机时推过去的是整库(只不带会话;账本是原主机交接途中另记的那本,见 ledger.go)。
+// 审计日志只带最近 7 天。流量时序、订阅日志和更早的审计日志另外低频发一份「历史数据」(见 history.go),接任时并进新库。
+// 设为主机时推过去的是整库(只不带会话;账本是原主机交接途中另记的那本,见 ledger.go)。
 // 设置只带全局的;主机身份(订阅地址、订阅证书、作为副机时怎么连)单独记在 meta.json 里,见 identity.go。
 
 // replicaSkip 给备用的副本不带内容的表(表结构照建,行不拷)。
@@ -89,6 +90,7 @@ type schemaObj struct {
 // copyOpts 一次表级拷贝的选项。
 type copyOpts struct {
 	skip      map[string]bool              // 只建表、不拷行
+	only      map[string]bool              // 非空:只建、只拷这几张表(历史数据,见 history.go)
 	settings  func(key, value string) bool // 返回 false = 这一行设置不拷(由调用方另行处理)
 	changeMin int64                        // 审计日志只拷这之后的(0 = 全拷)
 	changeMax int                          // 审计日志最多拷几条(0 = 不限)
@@ -110,16 +112,19 @@ func copyTables(src *gorm.DB, out *gorm.DB, o copyOpts, h hash.Hash) (map[string
 			ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END, name`).Scan(&objs).Error; err != nil {
 			return fmt.Errorf("读表结构: %w", err)
 		}
-		for _, o := range objs {
-			if _, err := outSQL.Exec(o.Sql); err != nil {
-				return fmt.Errorf("建 %s: %w", o.Name, err)
+		for _, ob := range objs {
+			if o.only != nil && !o.only[ob.TblName] {
+				continue
+			}
+			if _, err := outSQL.Exec(ob.Sql); err != nil {
+				return fmt.Errorf("建 %s: %w", ob.Name, err)
 			}
 		}
 		if err := tx.Raw("SELECT COALESCE(MAX(id), 0) FROM changes").Scan(&maxChange).Error; err != nil {
 			return err
 		}
 		for _, ob := range objs {
-			if ob.Type != "table" || o.skip[ob.Name] {
+			if ob.Type != "table" || o.skip[ob.Name] || (o.only != nil && !o.only[ob.Name]) {
 				continue
 			}
 			q := "SELECT * FROM " + quoteIdent(ob.Name) + " ORDER BY rowid"
@@ -144,6 +149,9 @@ func copyTables(src *gorm.DB, out *gorm.DB, o copyOpts, h hash.Hash) (map[string
 		}
 		if tx.Raw("SELECT name, seq FROM sqlite_sequence").Scan(&seqs).Error == nil {
 			for _, sq := range seqs {
+				if o.only != nil && !o.only[sq.Name] {
+					continue
+				}
 				if res, err := outSQL.Exec("UPDATE sqlite_sequence SET seq = ? WHERE name = ? AND seq < ?", sq.Seq, sq.Name, sq.Seq); err == nil {
 					if n, _ := res.RowsAffected(); n == 0 {
 						_, _ = outSQL.Exec("INSERT INTO sqlite_sequence (name, seq) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = ?)", sq.Name, sq.Seq, sq.Name)
