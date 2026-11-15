@@ -16,8 +16,8 @@ import (
 // 把收到的字节原样转给出口服务器上的这条线路(override 到出口的地址 + 线路端口),不解密、不认用户。
 // 外部中转(Via = 0)只进订阅,不在这里渲染。
 //
-// 路由:这些入站的规则排在所有规则最前面 —— 不嗅探、不劫持 DNS,也不受私网屏蔽、集群地址屏蔽影响
-// (要转去的正是集群里的另一台,手填的转到地址也可能是内网)。目标固定,不能被当成开放代理用。
+// 路由:这些入站的规则排在所有规则最前面 —— 不嗅探、不劫持 DNS,也不受私网屏蔽影响
+// (手填的转到地址可能是内网)。目标固定,不能被当成开放代理用。
 
 // ForwardNetwork 中转转哪种流量:hysteria2 / tuic 和走 QUIC 传输的只有 UDP;shadowsocks 两种都转("" = TCP + UDP);其余只转 TCP。
 func ForwardNetwork(line model.Line) string {
@@ -145,8 +145,8 @@ func localPorts(db *gorm.DB, lines []model.Line) map[int]bool {
 	return taken
 }
 
-// ForwardSig 本机中转入站的摘要(tag、端口、转到哪里、转哪种流量)。runner 定期比对:出口服务器换了 IP、
-// 停用 / 启用了,变了就重新渲染(和集群地址屏蔽的 ClusterSig 一起看,私网屏蔽关着也照样看这一项)。
+// ForwardSig 本机中转入站的摘要(tag、端口、转到哪里、转哪种流量)。runner 每分钟比对:出口服务器换了 IP、
+// 停用 / 启用了,变了就重新渲染(这些只改 nodes 表,走的是用户热更新,不会重新渲染入站)。
 func ForwardSig(db *gorm.DB) string {
 	var all []model.Line
 	db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&all)

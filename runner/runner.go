@@ -1716,40 +1716,34 @@ func (r *Runner) coreWatchLoop(stop <-chan struct{}) {
 	}
 }
 
-// clusterWatchEvery 多久比对一次集群屏蔽的输入(render.ClusterSig)。
-const clusterWatchEvery = time.Minute
+// forwardWatchEvery 多久比对一次本机中转入口的输入(render.ForwardSig)。
+const forwardWatchEvery = time.Minute
 
-// clusterWatchLoop 「允许访问内网」关着时,私网屏蔽里带着集群里别的服务器的管理端口(render 的 cluster.go)。
-// 这些输入不随线路变:加了 / 删了副机、副机换了公网 IP、主机改了面板端口,副机这边快照只换了 nodes 表、走的是用户热更新,
-// 主机那边是副机报告改了 nodes 表,都不会重新渲染路由规则。这里每分钟比对一次摘要,变了就全量重载
-// (渲染结果和当前生效的一样时 ReloadAll 不重启数据面,所以只有规则真变了才会断一次连接)。
+// forwardWatchLoop 本机中转入口转到哪里(出口服务器的公网 IP、停用 / 启用)不随线路变:副机这边快照只换了 nodes 表、
+// 走的是用户热更新,主机那边是副机报告改了 nodes 表,都不会重新渲染入站。这里每分钟比对一次摘要,变了就全量重载
+// (渲染结果和当前生效的一样时 ReloadAll 不重启数据面,所以只有中转真变了才会断一次连接)。
 // 启动时 Run 已按当时的库渲染过,第一轮只记下摘要。
-func (r *Runner) clusterWatchLoop(stop <-chan struct{}) {
-	t := time.NewTicker(clusterWatchEvery)
+func (r *Runner) forwardWatchLoop(stop <-chan struct{}) {
+	t := time.NewTicker(forwardWatchEvery)
 	defer t.Stop()
-	// 中转入口转到的地址(出口服务器换 IP、停用)另算一份:私网屏蔽关着时集群变化不进配置,中转却照样要跟着变
-	last, lastFwd := render.ClusterSig(r.db), render.ForwardSig(r.db)
+	last := render.ForwardSig(r.db)
 	for {
 		select {
 		case <-stop:
 			return
 		case <-t.C:
-			sig, fwd := render.ClusterSig(r.db), render.ForwardSig(r.db)
-			if sig == last && fwd == lastFwd {
-				continue
-			}
-			if fwd == lastFwd && render.AllowPrivate(r.db) && strings.HasPrefix(last, "true") {
-				last = sig // 屏蔽一直关着:集群怎么变都不进配置,不必重载
+			fwd := render.ForwardSig(r.db)
+			if fwd == last {
 				continue
 			}
 			if !r.core.IsRunning() || r.stopping.Load() {
 				continue // 数据面没在跑:拉起时会按最新的库渲染,这里先不记,跑起来后再比
 			}
 			if err := r.ReloadAll(); err != nil {
-				logger.Warning("集群服务器有变化,重新渲染私网屏蔽 / 中转入口失败(下一轮再试): ", err)
+				logger.Warning("中转入口要转到的地址有变化,重新渲染失败(下一轮再试): ", err)
 				continue
 			}
-			last, lastFwd = sig, fwd
+			last = fwd
 		}
 	}
 }
@@ -1794,16 +1788,6 @@ func ipv6OnlyChanged(old, pub string) bool {
 	return v6only(old) != v6only(pub)
 }
 
-// publicIPReloadNeeded 探测到的公网地址变了要不要重新渲染数据面配置:
-//   - 有没有 IPv4 变了:纯 IPv6 机器的直连线路要把公共 DNS 换成 IPv6 地址(render.v6DNSRules);
-//   - 「允许访问内网」关着时,私网屏蔽里带着本机公网地址(render.ownPublicCIDRs),IPv4 / IPv6 任何一个变了都要换上新地址。
-func publicIPReloadNeeded(old, pub, old6, pub6 string, allowPrivate bool) bool {
-	if ipv6OnlyChanged(old, pub) {
-		return true
-	}
-	return !allowPrivate && (old != pub || old6 != pub6)
-}
-
 // syncLocalNodeIPs 本机服务器记录也同步探测值(服务器列表显示用)。
 // 0.6.15 之前建的库里 public_ip6 这一列是 NULL,NULL != 'x' 在 SQL 里不成立,得先当成空串比。
 func syncLocalNodeIPs(db *gorm.DB, pub, pub6 string) {
@@ -1836,9 +1820,10 @@ func (r *Runner) publicIPLoop(stop <-chan struct{}) {
 			}
 		}
 		syncLocalNodeIPs(r.db, pub, pub6)
-		if publicIPReloadNeeded(old, pub, old6, pub6, render.AllowPrivate(r.db)) && r.core.IsRunning() {
+		// 有没有 IPv4 变了:纯 IPv6 机器的直连线路要把公共 DNS 换成 IPv6 地址(render.v6DNSRules),重新渲染
+		if ipv6OnlyChanged(old, pub) && r.core.IsRunning() {
 			if err := r.ReloadAll(); err != nil {
-				logger.Warning("本机公网地址变了,重新渲染配置失败: ", err)
+				logger.Warning("本机有无 IPv4 变了,重新渲染配置失败: ", err)
 			}
 		}
 	}
@@ -2044,7 +2029,7 @@ func Run(dbPath string) error {
 	}{
 		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"线路上游", r.relayLoop}, {"运行统计", r.pingLoop}, {"定时备份", r.backupLoop},
 		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop}, {"凭据撤销重试", r.secureReloadLoop}, {"用户热更新重试", r.userReloadLoop},
-		{"数据面看护", r.coreWatchLoop}, {"集群屏蔽跟进", r.clusterWatchLoop}, {"磁盘巡检", r.diskLoop},
+		{"数据面看护", r.coreWatchLoop}, {"中转入口跟进", r.forwardWatchLoop}, {"磁盘巡检", r.diskLoop},
 	} {
 		go keepRunning(l.name, l.fn, stopCheckpoint)
 	}

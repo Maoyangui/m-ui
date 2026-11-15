@@ -10,7 +10,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
-// 主机在快照里带上自己的面板 / 订阅 / 代理面板端口:副机的私网屏蔽据此拦用户经副机代理去碰主机的管理端口。
+// 主机在快照里带上自己的面板 / 订阅 / 代理面板端口:副机库里主机那一行因此有端口,接任后新主机给原主机建线路时按它避让。
 // 主机改了这些端口要整份重推(修订号变);副机上报的端口变了不重推(只给主机建线路避让用)。
 func TestSnapshotCarriesMasterServicePorts(t *testing.T) {
 	master, err := database.Open(filepath.Join(t.TempDir(), "m.db"))

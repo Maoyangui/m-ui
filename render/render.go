@@ -196,7 +196,7 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 	}
 	pureV6 := PureIPv6(db)
 	if !AllowPrivate(db) {
-		// 用户经代理不该摸到这台机器自己(面板、WARP 的 socks 口、副机接口;回环地址与本机公网地址都算)、内网,以及云厂商的元数据地址
+		// 用户经代理不该摸到这台机器只听回环的服务(WARP 的 socks 口等)、内网,以及云厂商的元数据地址
 		// 169.254.169.254(AWS 上拿到实例凭证只要一个 GET)。域名要先解析成 IP,"localhost"或指向 127.0.0.1 的
 		// 自定义域名才拦得住;但 resolve 解析失败会直接拒绝连接,所以只对走直连出口的线路做——它们本来就要
 		// 在本机解析域名,没有新增失败点;经上游(WARP / 远端代理)出去的线路,私网指的是上游那头的网络,
@@ -217,13 +217,10 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 		}
 		rules = append(rules, splitResolve...)
 		rules = append(rules, json.RawMessage(`{"ip_is_private":true,"action":"reject"}`))
-		// 这台服务器自己的公网地址同样不让经代理碰(全部端口,理由见 ownPublicCIDRs);地址变了 runner 会重新渲染
-		if own := ownPublicCIDRs(db); len(own) > 0 {
-			rule, _ := json.Marshal(map[string]interface{}{"ip_cidr": own, "action": "reject"})
-			rules = append(rules, rule)
-		}
-		// 集群里别的服务器的管理端口(面板、副机接口、订阅、代理面板),理由与端口取法见 cluster.go
-		rules = append(rules, clusterBlockRules(db)...)
+		// 本机和集群里别的服务器的公网地址不拦(用户 11-15 定,回到 0.7.16 的范围):开发途中加过「本机公网地址全端口」
+		// 「集群里别的服务器的面板 / 订阅 / 代理面板 / 副机接口端口」两条,防的是按来源 IP 放行被经代理绕过,却让经代理开面板、
+		// 走代理的商城 / 机器人调外部 API(和面板同一个端口)、连着代理刷新订阅、登代理面板一律失败 —— 客户端在全局 / 规则模式下
+		// 会把这些地址送进代理,不会自己改走直连。面板、外部 API、订阅、副机接口本来就靠密码、两步验证、令牌鉴权。
 	}
 	var defaults []json.RawMessage // 纯 IPv6 时各线路的默认出口规则挪到最后(见下)
 	for _, line := range lines {

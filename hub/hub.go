@@ -142,8 +142,8 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 	for _, k := range SyncedSettings {
 		s.Settings[k] = setting(k)
 	}
-	// 主机自己那一行带上自己的面板 / 订阅 / 代理面板端口:副机的私网屏蔽据此拦用户经副机代理去碰主机的管理端口
-	// (见 render 的 cluster.go)。主机自己的库里这一行不存端口(没人给主机上报),只在快照里填
+	// 主机自己那一行带上自己的面板 / 订阅 / 代理面板端口:副机库里主机那一行因此有端口,接任后新主机给原主机
+	// (回来变成副机)建线路、中转入口时按它避让。主机自己的库里这一行不存端口(没人给主机上报),只在快照里填
 	for i := range s.Nodes {
 		if s.Nodes[i].IsLocal {
 			s.Nodes[i].ServicePorts, _ = json.Marshal(masterServicePorts(setting))
@@ -233,8 +233,8 @@ func revisionOf(s Snapshot) string {
 	copy(nodes, s.Nodes)
 	for i := range nodes {
 		if !nodes[i].IsLocal {
-			// 副机上报的端口变了不必整份重推(主机建线路时避让用,副机的集群屏蔽等下一次推送再换);
-			// 主机自己的端口(BuildSnapshot 填的)计入:管理员改了面板 / 订阅端口,副机的屏蔽要跟着换
+			// 副机上报的端口变了不必整份重推(主机建线路时避让用,等下一次推送再换);
+			// 主机自己的端口(BuildSnapshot 填的)计入:管理员改了面板 / 订阅端口,副机库里主机那一行要跟着换
 			nodes[i].ServicePorts = nil
 		}
 		nodes[i].IsLocal = false

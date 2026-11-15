@@ -1,10 +1,7 @@
 package render
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
-	"net"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,8 +38,6 @@ func TestForwardInbounds(t *testing.T) {
 	}
 	db.Model(&model.Node{}).Where("id = ?", off.Id).Update("enabled", false)
 	db.Create(&model.Setting{Key: "allowPrivate", Value: "false"}) // 私网屏蔽开着:中转规则得排在它前面
-	defer func(old func(context.Context, string) ([]net.IP, error)) { lookupIP = old }(lookupIP)
-	lookupIP = func(context.Context, string) ([]net.IP, error) { return nil, errors.New("不解析") }
 
 	priv, pub, err := creds.RealityKeypair()
 	if err != nil {
