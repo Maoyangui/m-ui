@@ -1994,18 +1994,22 @@ func Run(dbPath string) error {
 		logger.Error("数据面启动失败(面板与订阅继续运行): ", err)
 	}
 	if err := r.subSrv.Start(); err != nil {
-		// 刚接任 / 刚被设为主机:迁来的订阅端口在本机被别的程序占着(检查只看得到本机的线路与服务端口),改回本机原来的端口,
-		// 并在成为主机的通知里说清订阅地址变了 —— 绝不因为这个让新主机起不来
-		port, ok := r.ha.SubPortFallback()
-		if !ok {
-			return fmt.Errorf("启动订阅服务: %w", err)
+		// 刚接任 / 刚被设为主机:迁来的订阅端口在本机被别的程序占着(检查只看得到本机的线路与服务端口),先改回本机原来的端口;
+		// 还不行(原来的也被占着,或端口本来就没变)就挑一个空闲端口顶上。成为主机的通知里说清订阅地址变了 —— 绝不因此让新主机起不来
+		if port, ok := r.ha.SubPortFallback(); ok {
+			from := r.settingIntOr("subPort", 2056)
+			logger.Warning("迁来的订阅端口 ", from, " 绑不上(", err, "),改回本机原来的订阅端口 ", port)
+			if e := r.ha.NoteSubPortFallback(from, port, err); e == nil {
+				err = r.subSrv.Start()
+			}
 		}
-		from := r.settingIntOr("subPort", 2056)
-		logger.Warning("迁来的订阅端口 ", from, " 绑不上(", err, "),改回本机原来的订阅端口 ", port)
-		if e := r.ha.NoteSubPortFallback(from, port, err); e != nil {
-			return fmt.Errorf("启动订阅服务: %w", err)
+		if err != nil && r.ha.JustBecame() {
+			from := r.settingIntOr("subPort", 2056)
+			if to := r.FreePortNear(from); to > 0 && r.ha.FreePortFallback("sub", from, to, err) {
+				err = r.subSrv.Start()
+			}
 		}
-		if err := r.subSrv.Start(); err != nil {
+		if err != nil {
 			return fmt.Errorf("启动订阅服务: %w", err)
 		}
 	}

@@ -26,30 +26,31 @@ import (
 // 只在变了时推(另每 10 分钟重推一次),副机只在修订变了时写一行本机设置。
 // 线上传的是 SignedState:正文由主机的签名密钥签过,副机只认本纪元钉住的那把公钥(见 ReceiveState)。
 type State struct {
-	Epoch       uint64       `json:"epoch"`
-	MasterId    uint         `json:"masterId"`
-	MasterName  string       `json:"masterName"`
-	MasterPub   string       `json:"masterPub"`
-	Instance    string       `json:"inst"`               // 主机的实例号:副机回 409 时报给别人(同一份库是不是在另一台机器上当主机)
-	BecameAt    int64        `json:"becameAt,omitempty"` // 主机在这个纪元当上主机的时间
-	Self        uint         `json:"self"`               // 接收方在服务器表里的 id
-	Mode        string       `json:"mode"`
-	Standbys    []uint       `json:"standbys"`    // 备用,按接任顺序
-	ClusterSize int          `json:"clusterSize"` // 启用的服务器总数(含主机)
-	ConfirmMin  int          `json:"confirmMin"`
-	AutoMin     int          `json:"autoMin"`
-	RankStepMin int          `json:"rankStepMin"`
-	ReplicaMin  int          `json:"replicaMin"`
-	PauseUntil  int64        `json:"pauseUntil,omitempty"` // 这之前备用不得接任(手动暂停、升级与重启前、设为主机进行中)
-	Witness     bool         `json:"witness"`
-	Probe       *Probe       `json:"probe,omitempty"`      // 见证测哪里:主机的公网 IP 与端口
-	ClusterKey  string       `json:"clusterKey,omitempty"` // 副机之间互相确认的 HMAC 密钥
-	Former      *FormerMark  `json:"former,omitempty"`     // 失联的原主机与接任所用数据的最大审计 id(它回来时副机据此报"失联期间多收的改动")
-	Handover    *Grant       `json:"handover,omitempty"`   // 交接标记:纪元 Epoch 的主机是 To(设为主机、收回、围栏)
-	Revoke      uint64       `json:"revoke,omitempty"`     // 撤销:副机清掉纪元不超过它的交接标记
-	Notify      string       `json:"notify,omitempty"`     // 只发备用:用备用公钥密封的通知设置
-	Replica     *ReplicaMark `json:"replica,omitempty"`    // 只发备用:主机确认它手里的副本到什么时候为止仍是最新的
-	Rev         string       `json:"rev"`
+	Epoch       uint64         `json:"epoch"`
+	MasterId    uint           `json:"masterId"`
+	MasterName  string         `json:"masterName"`
+	MasterPub   string         `json:"masterPub"`
+	Instance    string         `json:"inst"`               // 主机的实例号:副机回 409 时报给别人(同一份库是不是在另一台机器上当主机)
+	BecameAt    int64          `json:"becameAt,omitempty"` // 主机在这个纪元当上主机的时间
+	Self        uint           `json:"self"`               // 接收方在服务器表里的 id
+	Mode        string         `json:"mode"`
+	Standbys    []uint         `json:"standbys"`    // 备用,按接任顺序
+	ClusterSize int            `json:"clusterSize"` // 启用的服务器总数(含主机)
+	ConfirmMin  int            `json:"confirmMin"`
+	AutoMin     int            `json:"autoMin"`
+	RankStepMin int            `json:"rankStepMin"`
+	ReplicaMin  int            `json:"replicaMin"`
+	PauseUntil  int64          `json:"pauseUntil,omitempty"` // 这之前备用不得接任(手动暂停、升级与重启前、设为主机进行中)
+	Witness     bool           `json:"witness"`
+	Probe       *Probe         `json:"probe,omitempty"`      // 见证测哪里:主机的公网 IP 与端口
+	ClusterKey  string         `json:"clusterKey,omitempty"` // 副机之间互相确认的 HMAC 密钥
+	Former      *FormerMark    `json:"former,omitempty"`     // 失联的原主机与接任所用数据的最大审计 id(它回来时副机据此报"失联期间多收的改动")
+	Handover    *Grant         `json:"handover,omitempty"`   // 交接标记:纪元 Epoch 的主机是 To(设为主机、收回、围栏)
+	Revoke      uint64         `json:"revoke,omitempty"`     // 撤销:副机清掉纪元不超过它的交接标记
+	Notify      string         `json:"notify,omitempty"`     // 只发备用:用备用公钥密封的通知设置
+	Replica     *ReplicaMark   `json:"replica,omitempty"`    // 只发备用:主机确认它手里的副本到什么时候为止仍是最新的
+	Ports       []TakeoverPort `json:"ports,omitempty"`      // 只发备用:它接任后要用的端口,让它提前自检有没有被别的程序占着(见 portcheck.go)
+	Rev         string         `json:"rev"`
 }
 
 // StateV 线上容灾状态的版本:副机只收这个版本、签过名的。
@@ -372,6 +373,7 @@ func (s *Service) stateFor(n model.Node, trusted bool) ([]byte, string) {
 			st.Notify, plainSig = s.notifyBlock(pub)
 		}
 		st.Replica = s.rep.markFor(n.Id)
+		st.Ports = s.TakeoverPorts(n.Id)
 	}
 	st.Rev = stateRev(st, plainSig)
 	body, _ := json.Marshal(st)

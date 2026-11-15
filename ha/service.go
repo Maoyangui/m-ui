@@ -122,6 +122,7 @@ func (s *Service) loops() []struct {
 		{"容灾杂项", 5 * time.Second, s.miscTick},
 		{"副本自检", time.Hour, s.selfCheckTick},
 		{"DNS 接口自检", 10 * time.Minute, s.dnsHealthTick},
+		{"接任端口自检", time.Minute, s.portCheckTick},
 	}
 }
 

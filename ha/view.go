@@ -353,6 +353,9 @@ func (s *Service) readiness(c Config, infos []StandbyInfo) []Check {
 			}
 		}
 	}
+	if busy := busyList(infos); len(busy) > 0 { // 备用自检:接任后要用的端口被别的程序占着(见 portcheck.go)
+		add("standbyPortBusy", "warn", busy)
+	}
 	if cs := s.takeoverConflicts(c); len(cs) > 0 { // 线路占着副机接任后要用的端口(见 takeoverports.go)
 		names := make([]string, 0, len(cs))
 		for _, x := range cs {
@@ -420,6 +423,7 @@ func (s *Service) Report() *hub.HAReport {
 		}
 		rep.ReplicaBytes = s.replicaBytes()
 		rep.Peers = s.eng.peerSummary()
+		rep.BusyPorts = s.busyPorts()
 	}
 	return rep
 }

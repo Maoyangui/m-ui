@@ -50,6 +50,14 @@ type HAReport struct {
 	ResellerURL  string `json:"resellerUrl,omitempty"`  // 当主机后的代理面板地址
 	ReplicaBytes int64  `json:"replicaBytes,omitempty"` // 手里两代副本文件占的磁盘
 	SignFP       string `json:"signFp,omitempty"`       // 本机签名公钥指纹
+	// BusyPorts 备用自检:主机给的、它接任后要用的端口里,被别的程序占着的(老副机不报)
+	BusyPorts []BusyPort `json:"busyPorts,omitempty"`
+}
+
+// BusyPort 一个被别的程序占着的端口。What:"sub" | "panel" | "reseller"(见 ha.TakeoverPort)。
+type BusyPort struct {
+	Port int    `json:"port"`
+	What string `json:"what"`
 }
 
 // HAReplica 备用手里那份副本。

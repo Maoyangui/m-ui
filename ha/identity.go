@@ -184,6 +184,10 @@ func identityWarnText(it PlanItem) string {
 		return "订阅证书 " + a["name"] + " 靠 Cloudflare 续期,而本机已经有自己的签证书令牌(没换成原主机的):确认这个令牌能管 " + a["name"] + " 所在的区域,否则续期会失败"
 	case idwSubPortBind:
 		return "订阅端口 " + a["port"] + " 在本机绑不上(" + a["err"] + "),订阅改回本机原来的端口 " + a["own"] + ":用户的订阅地址会变"
+	case idwPortAuto:
+		svc := map[string]string{"sub": "订阅", "panel": "面板", "reseller": "代理面板"}[a["svc"]]
+		return "迁来的" + svc + "端口 " + a["port"] + " 和本机原来的端口都被别的程序占着(" + a["err"] + ")," + svc + "临时改用空闲端口 " + a["to"] +
+			":地址变了,云服务器的防火墙 / 安全组要放行 " + a["to"] + ";把占着的程序停掉后可在设置里改回"
 	case idwPanelPortClash:
 		return "迁来的面板端口 " + a["port"] + " 在本机被" + clashWhat(a["what"]) + "占着,面板留本机原来的(端口 " + a["own"] + "):面板和外部 API 的地址会变"
 	case idwResellerPortClash:

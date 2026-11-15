@@ -291,6 +291,14 @@ func (s *Server) Start() error {
 			pl = s.wantPanelListen()
 			ln, err = s.openPanelListener(pl)
 		}
+		// 本机原来的面板端口也被占着:挑一个空闲端口顶上(只在刚成为主机的那次启动),通知里写清新地址
+		if h := s.haSvc(); err != nil && h != nil && h.JustBecame() {
+			from := s.settingInt("webPort", 2053)
+			if to := s.run.FreePortNear(from); to > 0 && h.FreePortFallback("panel", from, to, err) {
+				pl = s.wantPanelListen()
+				ln, err = s.openPanelListener(pl)
+			}
+		}
 		if err != nil {
 			return err
 		}
@@ -317,6 +325,12 @@ func (s *Server) Start() error {
 	if err := s.StartReseller(); err != nil {
 		if h := s.haSvc(); h != nil && h.ResellerFallback(err) { // 迁来的代理面板端口绑不上:改回本机原来的再试
 			err = s.StartReseller()
+		}
+		if h := s.haSvc(); err != nil && h != nil && h.JustBecame() { // 还不行:挑一个空闲端口
+			from := s.settingInt("resellerPort", 2054)
+			if to := s.run.FreePortNear(from); to > 0 && h.FreePortFallback("reseller", from, to, err) {
+				err = s.StartReseller()
+			}
 		}
 		if err != nil {
 			logger.Warning("代理面板启动失败: ", err)

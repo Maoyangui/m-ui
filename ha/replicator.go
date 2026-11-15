@@ -92,6 +92,8 @@ type StandbyInfo struct {
 	// 它当主机后会用的端口(就绪检查看会不会和本机订阅端口撞;老副机不报为 0)
 	WebPort      int `json:"webPort,omitempty"`
 	ResellerPort int `json:"resellerPort,omitempty"`
+	// BusyPorts 它自检报上来的、接任后要用却被别的程序占着的端口(见 portcheck.go)
+	BusyPorts []hub.BusyPort `json:"busyPorts,omitempty"`
 }
 
 // AckView 最近一次给这台发副本的结果。
@@ -308,6 +310,7 @@ func (r *replicator) compute(cfg Config) ([]StandbyInfo, []uint) {
 		if st.HA != nil {
 			ci.Replica, ci.LeaseAgo, ci.DiskFree, ci.Peers, ci.Epoch = st.HA.Replica, st.HA.LeaseAgo, st.HA.DiskFree, st.HA.Peers, st.HA.Epoch
 			ci.WebPort, ci.ResellerPort, replicaBytes = st.HA.WebPort, st.HA.ResellerPort, st.HA.ReplicaBytes
+			ci.BusyPorts = st.HA.BusyPorts
 		}
 		switch {
 		case st.HA == nil || st.HA.Pub == "":
@@ -541,6 +544,7 @@ func (r *replicator) tick() {
 	infos, ids := r.compute(cfg)
 	changed := r.setList(infos, ids, true)
 	r.dropOthers(infos, ids)
+	s.alertBusyPorts(infos) // 备用自检报上来的被占端口:告一次(见 portcheck.go)
 	send := sendable(infos, ids)
 	if len(send) == 0 {
 		return

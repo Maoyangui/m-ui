@@ -33,6 +33,7 @@ type coreState struct {
 	formerPlain  uint               // 已经提示过"原主机回来了但地址是明文 http"的那一台
 	rivalSince   map[uint]time.Time // 各台从什么时候起一直回话说自己是主机(两台同时当主机,见 rival.go)
 	rivalAlerted map[string]bool    // 已经告过"两台同时当主机"的 (那台, 纪元)
+	busyAlerted  map[string]bool    // 已经告过"备用上端口被占"的 (那台, 那组端口)
 
 	// 备用侧
 	takeoverErrAt int64 // 最近一次接任失败的时间(同伴据此不再给本机让行)
@@ -45,7 +46,7 @@ func (s *Service) core() *coreState {
 		return c.(*coreState)
 	}
 	c, _ := cores.LoadOrStore(s, &coreState{reclaimed: map[string]bool{}, downSince: map[uint]time.Time{}, staleSince: map[uint]time.Time{},
-		bogus: map[uint]bool{}, unknownAlert: map[string]bool{}, rivalSince: map[uint]time.Time{}, rivalAlerted: map[string]bool{}})
+		bogus: map[uint]bool{}, unknownAlert: map[string]bool{}, rivalSince: map[uint]time.Time{}, rivalAlerted: map[string]bool{}, busyAlerted: map[string]bool{}})
 	return c.(*coreState)
 }
 
