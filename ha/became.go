@@ -47,7 +47,7 @@ type Notice struct {
 	API      bool        `json:"api,omitempty"`      // 开着外部 API:它挂在面板地址上,对接的商城、机器人要改用新面板地址
 	// HistoryAt 接任时带过来的历史数据(流量图、订阅日志、审计日志)截至何时;没带过来为 0(原因在 Items)
 	HistoryAt int64 `json:"historyAt,omitempty"`
-	Count    int         `json:"count,omitempty"`    // 同类合并的条数(界面用)
+	Count     int   `json:"count,omitempty"` // 同类合并的条数(界面用)
 }
 
 func randID() string {

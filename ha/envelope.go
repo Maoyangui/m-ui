@@ -62,7 +62,7 @@ type EnvHeader struct {
 	MaxChangeId uint64 `json:"maxChangeId,omitempty"`
 	DBSize      int64  `json:"dbSize,omitempty"` // 历史数据:解开后的库多大(备用收下前据此算接任时磁盘够不够)
 	Wrap        string `json:"wrap"`             // 包好的数据密钥(base64)
-	To          string `json:"to,omitempty"` // 收件人公钥指纹
+	To          string `json:"to,omitempty"`     // 收件人公钥指纹
 	Nonce       string `json:"nonce,omitempty"`
 }
 
