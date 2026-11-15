@@ -206,6 +206,7 @@ type SetMasterPlan struct {
 	Ok         bool       `json:"ok"`
 	// 契约 A0 新增
 	NewReseller string `json:"newReseller,omitempty"` // 目标的代理面板地址(换主机后代理们用它)
+	PanelKept   bool   `json:"panelKept,omitempty"`   // 面板(连同外部 API)跟过去,地址不变(见 panelid.go)
 	PlainAck    bool   `json:"plainAck,omitempty"`    // 目标是明文 http:要管理员勾选确认(AllowPlain)才能做
 	FreezeMin   int    `json:"freezeMin,omitempty"`   // 写操作最长暂停多少分钟
 }
@@ -396,6 +397,28 @@ func (s *Service) SetMasterPlan(id uint) (SetMasterPlan, error) {
 	}
 	if resellerOn && rep != nil {
 		p.NewReseller = rep.ResellerURL
+	}
+	// 面板用域名:面板(连同外部 API)和代理面板跟着主机走,地址不变(见 panelid.go,和 applyPanelIdentity 同一个规则);
+	// 目标上端口撞了就留它自己的,提前说
+	if ph := strings.TrimSpace(s.setting("webDomain")); ph != "" && !isIPHost(ph) {
+		subAfter := subPort
+		if !p.SubKept {
+			subAfter = tp.sub
+		}
+		panelPort := s.settingInt("webPort", 2053, 1, 65535)
+		if what := portTakenOnTarget(panelPort, map[string]int{"sub": subAfter, "warp": tp.warp}, lines, id); what != "" && panelPort != tp.web {
+			warn("panelPortClash", "port", strconv.Itoa(panelPort), "what", what, "own", strconv.Itoa(tp.web))
+		} else {
+			p.NewPanel, p.PanelKept = s.panelURL(), true
+			if resellerOn {
+				rp := s.settingInt("resellerPort", 2054, 1, 65535)
+				if what := portTakenOnTarget(rp, map[string]int{"sub": subAfter, "warp": tp.warp, "panel": panelPort}, lines, id); what != "" && rp != tp.reseller {
+					warn("resellerPortClash", "port", strconv.Itoa(rp), "what", what, "own", strconv.Itoa(tp.reseller))
+				} else if u := s.resellerURL(); u != "" {
+					p.NewReseller = u
+				}
+			}
+		}
 	}
 	// 版本旧的副机:照常同步,只是不认纪元
 	var old []string
@@ -1228,4 +1251,19 @@ func SetSwitchCommitWait(d time.Duration) (restore func()) {
 	old := switchCommitWait
 	switchCommitWait = d
 	return func() { switchCommitWait = old }
+}
+
+// portTakenOnTarget 端口 port 在目标上被谁占着:服务(others 里的,0 不算)或部署在它上面的 TCP 线路名;都没有返回空。
+func portTakenOnTarget(port int, others map[string]int, lines []model.Line, target uint) string {
+	for what, q := range others {
+		if q > 0 && q == port {
+			return what
+		}
+	}
+	for _, l := range lines {
+		if l.Port == port && !render.UDPOnly(l.Protocol) && render.LineOnNode(l, target) {
+			return l.Name
+		}
+	}
+	return ""
 }

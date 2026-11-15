@@ -152,10 +152,14 @@ func (s *Service) SaveConfig(in ConfigInput) error {
 		if !containsName(splitNames(names), host) {
 			names = strings.TrimPrefix(names+","+strings.ToLower(host), ",")
 		}
+		// 面板用域名:面板(连同外部 API、代理面板)也跟过去,面板域名也要改解析(见 panelid.go)
+		if ph := strings.TrimSpace(s.setting("webDomain")); ph != "" && !isIPHost(ph) && !containsName(splitNames(names), ph) {
+			names = strings.TrimPrefix(names+","+strings.ToLower(ph), ",")
+		}
 	}
 	// 副机接任后要用的端口(它的代理面板端口;连订阅一起接管时还有本机的订阅端口)被线路占着:先换端口再开(见 takeoverports.go)
 	if cs := s.takeoverConflicts(c); len(cs) > 0 {
-		return fmt.Errorf("这些线路占着副机接任后要用的端口(它的代理面板、或连订阅一起接管时迁过去的订阅),接任时会冲突:先给它们换个端口再开主机容灾 —— %s", conflictList(cs))
+		return fmt.Errorf("这些线路占着副机接任后要用的端口(它的代理面板;连订阅一起接管时还有迁过去的订阅、面板),接任时会冲突:先给它们换个端口再开主机容灾 —— %s", conflictList(cs))
 	}
 	values := map[string]string{
 		KeyMode: c.Mode, KeyStandbys: strconv.Itoa(c.Standbys),

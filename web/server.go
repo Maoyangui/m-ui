@@ -285,7 +285,15 @@ func (s *Server) Start() error {
 	pl := s.wantPanelListen()
 	ln, err := s.openPanelListener(pl) // 证书文件更新后自动换用,续期无需重启
 	if err != nil {
-		return err
+		// 刚接任 / 被设为主机:迁来的面板端口在本机被别的程序占着 —— 改回本机原来的面板再试一次,
+		// 绝不能因此让新主机起不来(见 ha/panelid.go)
+		if h := s.haSvc(); h != nil && h.PanelFallback(err) {
+			pl = s.wantPanelListen()
+			ln, err = s.openPanelListener(pl)
+		}
+		if err != nil {
+			return err
+		}
 	}
 	scheme := "http"
 	if pl.cert != "" {
@@ -307,7 +315,12 @@ func (s *Server) Start() error {
 	}
 	s.StartUpdateWatch()
 	if err := s.StartReseller(); err != nil {
-		logger.Warning("代理面板启动失败: ", err)
+		if h := s.haSvc(); h != nil && h.ResellerFallback(err) { // 迁来的代理面板端口绑不上:改回本机原来的再试
+			err = s.StartReseller()
+		}
+		if err != nil {
+			logger.Warning("代理面板启动失败: ", err)
+		}
 	}
 	go s.reapSessions()
 	go s.tgBotLoop()

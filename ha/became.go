@@ -121,6 +121,7 @@ func (s *Service) afterBecame() {
 	if b.Identity.Taken || s.takeSub() {
 		out = s.becameDNS(&b, ip) // 改好的记录、出错的原因写进 b
 		s.ensureSubCert(&b)
+		s.ensurePanelCert(&b)
 	}
 	_ = s.set(map[string]string{KeyBecame: mustJSON(b)})
 	items := b.Identity.Warnings
@@ -272,7 +273,11 @@ func (s *Service) ensureSubCert(b *Became) {
 		b.Identity.Warnings = append(b.Identity.Warnings, item(idwSubCertTodo, "host", host))
 		return
 	}
-	if err := s.d.IssueSubCert(host); err != nil {
+	issue := s.d.IssueSubCert
+	if p := b.Identity; p.PanelKept && p.PanelHTTPS && strings.EqualFold(p.PanelHost, host) && s.d.IssuePanelCert != nil {
+		issue = func(d string) error { return s.d.IssuePanelCert(d, true) } // 面板也是这个域名:签一张两处都用
+	}
+	if err := issue(host); err != nil {
 		logger.Warning("容灾:给订阅域名重签证书没能开始: ", err)
 		b.Identity.Warnings = append(b.Identity.Warnings, item(idwSubCertTodo, "host", host))
 		return
@@ -305,4 +310,33 @@ func subCertUsable(path, host string, min time.Duration, now time.Time) bool {
 		return c.VerifyHostname(host) == nil && c.NotAfter.Sub(now) > min
 	}
 	return false
+}
+
+// ensurePanelCert 面板跟着主机走了(见 panelid.go)、原主机的面板走 https:新主机上的面板证书不能用(没带过来、过期、半个月内到期、
+// 不含面板域名)时经容灾的 DNS 接口给面板域名签一张、用于面板(面板在进程里换监听,不重启)。面板和订阅是同一个域名、
+// 订阅证书也要重签时,ensureSubCert 已经签了一张两处都用的,这里不重复签。
+func (s *Service) ensurePanelCert(b *Became) {
+	id := &b.Identity
+	host := strings.TrimSpace(id.PanelHost)
+	if !id.PanelKept || !id.PanelHTTPS || host == "" || isIPHost(host) {
+		return
+	}
+	if subCertUsable(s.setting("webCertFile"), host, 15*24*time.Hour, s.now()) {
+		return
+	}
+	for _, w := range id.Warnings {
+		if w.Code == idwSubCertNew && strings.EqualFold(w.Args["host"], host) {
+			return // 同一个域名的订阅证书已经在重签(签好两处都用,见 ensureSubCert)
+		}
+	}
+	if s.d.IssuePanelCert == nil || strings.TrimSpace(s.setting(KeyDnsToken)) == "" {
+		id.Warnings = append(id.Warnings, item(idwPanelCertTodo, "host", host))
+		return
+	}
+	if err := s.d.IssuePanelCert(host, false); err != nil {
+		logger.Warning("容灾:给面板域名重签证书没能开始: ", err)
+		id.Warnings = append(id.Warnings, item(idwPanelCertTodo, "host", host))
+		return
+	}
+	id.Warnings = append(id.Warnings, item(idwPanelCertNew, "host", host))
 }

@@ -347,6 +347,9 @@ func (s *Service) buildPromote(dir string, meta ReplicaMeta, b Became, staged bo
 			if res, err = applyIdentity(tx, meta.Identity, selfId, dir, s.DataDir()); err != nil {
 				return err
 			}
+			if err := applyPanelIdentity(tx, meta.Identity, selfId, dir, s.DataDir(), &res); err != nil {
+				return err
+			}
 		} else { // 订阅设置(域名、端口、路径、证书)用本机自己的,订阅地址仍指向原主机
 			res = identityResult{SubHost: meta.Identity.SubHost}
 			if h := meta.Identity.SubHost; h != "" {

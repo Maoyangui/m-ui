@@ -20,6 +20,7 @@ import (
 const (
 	TakeoverReseller = "reseller" // 它接任后的代理面板
 	TakeoverSub      = "sub"      // 连订阅一起接管时迁过去的订阅
+	TakeoverPanel    = "panel"    // 连订阅一起接管、面板用域名时迁过去的面板(外部 API 挂在上面)
 )
 
 // TakeoverPort 一台副机接任后要用的一个端口。
@@ -46,8 +47,14 @@ func (s *Service) takeoverPortsWith(c Config, id uint) []TakeoverPort {
 	}
 	if c.TakeSub {
 		out = append(out, TakeoverPort{Port: s.settingInt("subPort", 2056, 1, 65535), What: TakeoverSub})
+		if h := strings.TrimSpace(s.setting("webDomain")); h != "" && !isIPHost(h) { // 面板也跟过去(见 panelid.go)
+			out = append(out, TakeoverPort{Port: s.settingInt("webPort", 2053, 1, 65535), What: TakeoverPanel})
+			if !strings.EqualFold(strings.TrimSpace(s.setting("resellerEnabled")), "false") {
+				out = append(out, TakeoverPort{Port: s.settingInt("resellerPort", 2054, 1, 65535), What: TakeoverReseller})
+			}
+		}
 	}
-	return out
+	return dedupPorts(out)
 }
 
 // PortConflict 一条线路在一台副机上占着那台接任后要用的端口。
@@ -139,3 +146,16 @@ func (s *Service) SubPortConflicts(port int) []PortConflict {
 
 // ConflictList 冲突的前几条拼成一句(给 web 包报错用)。
 func ConflictList(cs []PortConflict) string { return conflictList(cs) }
+
+// dedupPorts 同一个端口只留一条(副机自己的代理面板端口和主机的一样时)。
+func dedupPorts(ps []TakeoverPort) []TakeoverPort {
+	seen := map[int]bool{}
+	out := ps[:0]
+	for _, p := range ps {
+		if !seen[p.Port] {
+			seen[p.Port] = true
+			out = append(out, p)
+		}
+	}
+	return out
+}

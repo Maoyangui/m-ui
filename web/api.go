@@ -2061,6 +2061,9 @@ func (s *Server) checkTakeoverPorts(line model.Line) error {
 			if line.Port != p.Port {
 				continue
 			}
+			if p.What == ha.TakeoverPanel {
+				return fmt.Errorf("开着主机容灾、连订阅一起接管:端口 %d 是主机的面板端口,服务器「%s」接任后要用它提供面板和外部 API,换一个", line.Port, n.Name)
+			}
 			if p.What == ha.TakeoverSub {
 				return fmt.Errorf("开着主机容灾、连订阅一起接管:端口 %d 是订阅端口,服务器「%s」接任后要用它提供订阅,换一个", line.Port, n.Name)
 			}

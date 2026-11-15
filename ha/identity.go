@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/logger"
 
 	"gorm.io/gorm"
 )
@@ -38,6 +39,8 @@ type Identity struct {
 	PublicIP    string       `json:"publicIp,omitempty"`
 	PublicIP6   string       `json:"publicIp6,omitempty"`
 	PanelURL    string       `json:"panelUrl,omitempty"`
+	// Panel 面板身份:连订阅一起接管(或设为主机)、面板用域名时随主机走,面板、外部 API、代理面板的地址不变(见 panelid.go)
+	Panel *PanelIdentity `json:"panel,omitempty"`
 }
 
 // CarriedCert 随主机身份带过去的证书:证书库里的那一行 + zip 里的文件名。
@@ -64,8 +67,21 @@ func (s *Service) subHost() string {
 // isIPHost 主机名是不是 IP(订阅地址用的是 IP 时,换主机后订阅地址一定会变)。
 func isIPHost(h string) bool { return net.ParseIP(strings.Trim(h, "[]")) != nil }
 
-// captureIdentity 记下本机(主机)的身份,订阅证书文件写进 zip。full:设为主机的整库数据(订阅总是一起迁过去,证书也带上)。
+// captureIdentity 记下本机(主机)的身份:订阅(见 captureSubIdentity)和面板(见 panelid.go)。full:设为主机的整库数据
+// (订阅、面板总是一起迁过去,证书也带上);否则证书(含私钥)只在选了连订阅一起接管时才带。
 func (s *Service) captureIdentity(zw *zip.Writer, full bool) (Identity, error) {
+	id, err := s.captureSubIdentity(zw, full)
+	if err != nil {
+		return id, err
+	}
+	if err := s.capturePanel(zw, &id, full || s.takeSub()); err != nil {
+		logger.Warning("容灾:面板证书没能带进副本(继续): ", err)
+	}
+	return id, nil
+}
+
+// captureSubIdentity 订阅那部分身份,订阅证书文件写进 zip。
+func (s *Service) captureSubIdentity(zw *zip.Writer, full bool) (Identity, error) {
 	id := Identity{MasterId: s.SelfId(), MasterName: s.selfName(), SubHost: s.subHost(),
 		SubPort: s.settingInt("subPort", 2056, 1, 65535), SubPath: s.setting("subPath"),
 		Self: s.selfLink(), PublicIP: s.setting("publicIp"), PublicIP6: s.setting("publicIp6"), PanelURL: s.panelURL()}
@@ -114,6 +130,13 @@ type identityResult struct {
 	PrevSubPort int        `json:"prevSubPort,omitempty"` // 新主机自己原来的订阅端口(迁来的端口启动时绑不上,改回用它)
 	SubHTTPS    bool       `json:"subHttps,omitempty"`    // 接管了订阅、原主机的订阅走 https:新主机要有能用的订阅证书
 	Taken       bool       `json:"taken,omitempty"`       // 接管了订阅(开着「接任时也接管订阅」)
+	// 面板身份(见 panelid.go)
+	PanelKept    bool       `json:"panelKept,omitempty"` // 面板换成了原主机的(域名、端口、路径):面板、外部 API 地址不变
+	PanelHost    string     `json:"panelHost,omitempty"`
+	PanelHTTPS   bool       `json:"panelHttps,omitempty"`
+	ResellerKept bool       `json:"resellerKept,omitempty"` // 代理面板也换成了原主机的
+	PrevPanel    *panelPrev `json:"prevPanel,omitempty"`    // 本机原来的面板(迁来的端口启动时绑不上就改回)
+	PrevReseller *panelPrev `json:"prevReseller,omitempty"`
 }
 
 // 身份告警的代码(界面 ha.idw.*)。
@@ -161,6 +184,20 @@ func identityWarnText(it PlanItem) string {
 		return "订阅证书 " + a["name"] + " 靠 Cloudflare 续期,而本机已经有自己的签证书令牌(没换成原主机的):确认这个令牌能管 " + a["name"] + " 所在的区域,否则续期会失败"
 	case idwSubPortBind:
 		return "订阅端口 " + a["port"] + " 在本机绑不上(" + a["err"] + "),订阅改回本机原来的端口 " + a["own"] + ":用户的订阅地址会变"
+	case idwPanelPortClash:
+		return "迁来的面板端口 " + a["port"] + " 在本机被" + clashWhat(a["what"]) + "占着,面板留本机原来的(端口 " + a["own"] + "):面板和外部 API 的地址会变"
+	case idwResellerPortClash:
+		return "迁来的代理面板端口 " + a["port"] + " 在本机被" + clashWhat(a["what"]) + "占着,代理面板留本机原来的(端口 " + a["own"] + "):代理面板的地址会变"
+	case idwPanelPortBind:
+		return "迁来的面板端口 " + a["port"] + " 在本机绑不上(" + a["err"] + "),面板改回本机原来的端口 " + a["own"] + ":面板和外部 API 的地址会变"
+	case idwResellerPortBind:
+		return "迁来的代理面板端口 " + a["port"] + " 在本机绑不上(" + a["err"] + "),代理面板改回本机原来的端口 " + a["own"]
+	case idwPanelCertNew:
+		return "带过来的面板证书不能用,正用 DNS 接口给 " + a["host"] + " 重新签一张,签好自动换上(面板在进程里换,不重启)"
+	case idwPanelCertTodo:
+		return "面板证书不能用(没带过来、过期或不含面板域名),又没法自动重签:到证书页给 " + a["host"] + " 签一张并用于面板"
+	case idwPanelCertFail:
+		return "面板证书没能装上(" + a["err"] + "),面板先用本机原来的证书"
 	case idwSubNotTaken:
 		return "没有接管订阅(容灾设置里没选「连订阅一起接管」):用户的订阅地址还指向原主机 " + a["host"] + ",它回来之前刷新订阅会失败;已连上的线路照常可用"
 	case idwSubCertNew:
@@ -430,4 +467,17 @@ func (s *Service) NoteSubPortFallback(from, to int, cause error) error {
 	}
 	b.Identity.Warnings = append(b.Identity.Warnings, item(idwSubPortBind, "port", strconv.Itoa(from), "own", strconv.Itoa(to), "err", msg))
 	return s.set(map[string]string{"subPort": strconv.Itoa(to), KeyBecame: mustJSON(b)})
+}
+
+// clashWhat 端口被谁占着:服务(订阅 / WARP / 面板)或线路名。
+func clashWhat(w string) string {
+	switch w {
+	case "sub":
+		return "订阅"
+	case "warp":
+		return "WARP"
+	case "panel":
+		return "面板"
+	}
+	return "线路「" + w + "」"
 }

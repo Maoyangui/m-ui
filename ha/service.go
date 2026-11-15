@@ -46,7 +46,9 @@ type Deps struct {
 	DNSAPI string
 	// IssueSubCert 用容灾的 DNS 接口给订阅域名签一张证书并用于订阅(异步,runner 实现;nil = 不会签)
 	IssueSubCert func(domain string) error
-	Now          func() time.Time
+	// IssuePanelCert 同上,给面板域名签、用于面板(alsoSub:面板和订阅是同一个域名,一张证书两处都用);nil = 不会签
+	IssuePanelCert func(domain string, alsoSub bool) error
+	Now            func() time.Time
 }
 
 // Service 一台机器上的容灾服务。主机侧:推容灾状态、推副本、判断要不要变为副机、设为主机;

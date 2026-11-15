@@ -289,6 +289,10 @@ func New(dbPath string) (*Runner, error) {
 		IssueSubCert: func(domain string) error {
 			return r.IssueCert(IssueRequest{Domain: domain, Method: MethodHADNS, AutoRenew: true, Renew: true, Targets: CertTargets{Sub: true, keepWeb: true}})
 		},
+		// 面板跟着主机走了、面板证书不能用:给面板域名签一张用于面板(alsoSub:订阅同一个域名,一起用)
+		IssuePanelCert: func(domain string, alsoSub bool) error {
+			return r.IssueCert(IssueRequest{Domain: domain, Method: MethodHADNS, AutoRenew: true, Renew: true, Targets: CertTargets{Panel: true, Sub: alsoSub, keepWeb: true}})
+		},
 	})
 	r.hub = hub.New(hub.Deps{
 		DB: db, Setting: r.setting, IsNode: r.IsNode, Version: Version,

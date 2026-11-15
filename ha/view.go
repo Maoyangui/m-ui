@@ -321,6 +321,12 @@ func (s *Service) readiness(c Config, infos []StandbyInfo) []Check {
 		} else {
 			add("subDomain", "ok", nil, "host", h)
 		}
+		// 面板用域名:面板(连同外部 API、代理面板)也跟过去,地址不变;用 IP 跟不过去(见 panelid.go)
+		if ph := strings.TrimSpace(s.setting("webDomain")); ph != "" && !isIPHost(ph) {
+			add("panelFollow", "ok", nil, "url", s.panelURL())
+		} else {
+			add("panelFollow", "warn", nil)
+		}
 		kind := c.DnsProvider // 界面按语言翻译服务商的名字(ha.dnsProv.<kind>)
 		if kind == "" {
 			kind = dnsapi.Cloudflare

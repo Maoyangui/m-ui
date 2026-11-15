@@ -284,7 +284,7 @@
     <p class="lede">在 <b data-k="ha.title">主机容灾</b> 设置的 <b data-k="ha.set.scope">接任时接管什么</b> 里二选一。默认 <b data-k="ha.scope.master">只接管主机的工作</b>。</p>
     <ul>
       <li><b data-k="ha.scope.master">只接管主机的工作</b>:推配置给副机、并流量、到期 / 超量停用、Telegram 机器人、外部 API 换到新主机;新主机的订阅设置照旧是它自己的,DNS 不动。用户的订阅地址仍指向原主机:原主机失联期间刷新订阅会失败(已连上的线路照常可用),它回来变成副机后照样提供订阅。订阅证书(含私钥)也不随副本带到备用。</li>
-      <li><b data-k="ha.scope.sub">连订阅一起接管</b>:新主机还换上原主机的订阅域名、端口、路径和证书,经 DNS 接口把订阅域名改指到新主机,用户的订阅地址不变。要订阅地址用域名,并填好 <b data-k="ha.set.dnsProvider">DNS 服务商</b> 的接口;没满足时保存会直接说缺什么。</li>
+      <li><b data-k="ha.scope.sub">连订阅一起接管</b>:新主机还换上原主机的订阅域名、端口、路径和证书,经 DNS 接口把订阅域名改指到新主机,用户的订阅地址不变。要订阅地址用域名,并填好 <b data-k="ha.set.dnsProvider">DNS 服务商</b> 的接口;没满足时保存会直接说缺什么。面板用域名时,面板和代理面板的地址(外部 API 挂在面板上)也一起跟过去:新主机换上原主机面板的域名、端口、路径、证书和受信任的反向代理,面板域名也改指过来,对接外部 API 的商城、机器人和代理们都不用改;API 密钥、权限、白名单本来就在数据副本里。面板用 IP 时跟不过去,就绪检查会提醒给面板配域名。</li>
       <li><b data-k="ha.setMaster">设为主机</b>(计划内换主机)不受这个选项影响:订阅总是一起迁过去,订阅证书随整库数据带过去;配了 DNS 接口、订阅域名在名单里就自动改解析,否则确认框里写着该指向哪个 IP。</li>
       <li>DNS 服务商可选 <b data-k="ha.dnsProv.cloudflare">Cloudflare</b>(API 令牌,见 <a href="#cf-token">Cloudflare API 令牌怎么创建</a>)、<b data-k="ha.dnsProv.aliyun">阿里云云解析</b>(只授权 AliyunDNSFullAccess 的 RAM 用户的 AccessKey)、<b data-k="ha.dnsProv.dnspod">腾讯云 DNSPod</b>(只授权 QcloudDNSPodFullAccess 的子用户 API 密钥)。凭据单独存、不回显。点 <b data-k="ha.set.dnsTest">测试 DNS 接口与记录</b> 看哪些记录会被改;凭据不对、域名不在这个账号下时这里直接写出错误。</li>
       <li>订阅证书:订阅走 https 时,备用随加密副本带着主机的订阅证书;接任时它用不了(没带过来、过期、半个月内到期、不含订阅域名),新主机会用同一个 DNS 接口给订阅域名重签一张(DNS 验证不用等解析指过来),签好自动用于订阅、订阅服务原地重启,以后的续期也走这个接口。就绪检查里能看到订阅证书还剩几天。</li>

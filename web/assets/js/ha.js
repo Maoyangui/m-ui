@@ -33,6 +33,7 @@ function argsOf(it) {
   const a = { ...(it.args || {}) };
   if ((it.names || []).length) a.names = joinNames(it.names);
   if (a.svc) a.svc = t('ha.svc.' + a.svc);
+  if (a.what) a.what = ['sub', 'warp', 'panel', 'reseller'].includes(a.what) ? t('ha.svc.' + a.what) : t('ha.svc.line', { name: a.what }); // 端口被谁占着
   if (a.provider) a.provider = t('ha.dnsProv.' + a.provider);
   if (a.err) a.err = trErr(a.err);
   return a;
