@@ -45,7 +45,7 @@ export async function render(el) {
       <span id="line-protos"></span>
       <span class="muted small" id="line-count"></span>
       <span class="grow"></span>
-      <details class="menu"><summary class="btn">${t('line.quick')} ▾</summary><div class="menu-list">
+      <details class="menu"><summary class="btn">${t('line.quick')}</summary><div class="menu-list">
         ${PRESETS.map(p => `<button data-act="line.preset" data-id="${p.id}"><b>${esc(p.label)}</b><span class="muted small" style="display:block">${esc(p.hint)}</span></button>`).join('')}
       </div></details>
       <button class="btn primary" data-act="line.add">${t('line.add')}</button>
@@ -137,7 +137,7 @@ function renderRows() {
   };
   setHTML(body, rows.map(l => `
     <tr draggable="${filtering() ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
-      <td class="handle" title="拖动排序">⠿</td>
+      <td class="handle" title="${esc(t('line.dragSort'))}"><i class="i i-grip"></i></td>
       <td><input type="checkbox" class="sel" data-change="line.sel" data-id="${l.id}" ${selected.has(l.id) ? 'checked' : ''}></td>
       <td class="primary-cell">${dot(online.has(l.name))}<a href="#" data-act="line.detail" data-id="${l.id}">${esc(l.name)}</a>${fwBadge(l)}</td>
       <td>${protoBadges(l)}</td>
@@ -149,9 +149,9 @@ function renderRows() {
       <td class="actions">
         <button class="btn sm" data-act="line.detail" data-id="${l.id}">${t('common.details')}</button>
         <button class="btn sm" data-act="line.edit" data-id="${l.id}">${t('common.edit')}</button>
-        <details class="menu"><summary class="btn sm">${t('common.more')} ▾</summary><div class="menu-list">
-          <button data-act="line.clone" data-id="${l.id}">⧉ ${t('line.clone')}</button>
-          <button data-act="line.asUpstream" data-id="${l.id}">⇢ ${t('up.addFromLine')}</button>
+        <details class="menu"><summary class="btn sm">${t('common.more')}</summary><div class="menu-list">
+          <button data-act="line.clone" data-id="${l.id}">${t('line.clone')}</button>
+          <button data-act="line.asUpstream" data-id="${l.id}">${t('up.addFromLine')}</button>
           <hr><button class="danger" data-act="line.del" data-id="${l.id}">${t('common.delete')}</button>
         </div></details>
       </td>
@@ -726,7 +726,7 @@ function fwItemHTML(f, i) {
       <span class="fw-dest-wrap"><button type="button" class="fw-dest" title="${esc(t('line.fw.targetHelp'))}"></button><span class="fw-paren" hidden>(</span><input class="fw-target" value="${esc(f.target || '')}" spellcheck="false" autocomplete="off" title="${esc(t('line.fw.targetHelp'))}" ${f.target ? '' : 'hidden'}><span class="fw-dest-port"></span></span>
       <span class="fw-tail">
         <label class="fw-pause" title="${esc(t('line.fw.offHelp'))}"><input type="checkbox" class="fw-off" ${f.off ? 'checked' : ''}> ${esc(t('line.fw.off'))}</label>
-        <button type="button" class="btn sm ghost danger fw-del" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}">✕</button>
+        <button type="button" class="btn sm ghost icon danger fw-del" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}"><i class="i i-x"></i></button>
       </span>
     </div>
     <div class="fw-result">
@@ -930,7 +930,7 @@ function rrRowHTML(r, i, n) {
     <span class="rr-ops">
       <button type="button" class="btn sm ghost" data-rr="up" title="${esc(t('line.rr.up'))}" aria-label="${esc(t('line.rr.up'))}" ${i === 0 ? 'disabled' : ''}>↑</button>
       <button type="button" class="btn sm ghost" data-rr="down" title="${esc(t('line.rr.down'))}" aria-label="${esc(t('line.rr.down'))}" ${i === n - 1 ? 'disabled' : ''}>↓</button>
-      <button type="button" class="btn sm ghost danger" data-rr="del" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}">✕</button>
+      <button type="button" class="btn sm ghost icon danger" data-rr="del" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}"><i class="i i-x"></i></button>
     </span>
     <div class="rr-err" hidden></div>
   </div>`;

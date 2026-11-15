@@ -1,7 +1,8 @@
 import { state, load } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, registerActions, field, check, badge, fv, fchk, copy, urlHost, charCount, bindCharCounts, PAGE_TEXT_MAX } from '../ui.js';
+import { esc, toast, confirm, registerActions, badge, fv, fchk, copy, urlHost, charCount, bindCharCounts, PAGE_TEXT_MAX } from '../ui.js';
+import { ICONS } from '../icons.js';
 import { followPanel } from '../panelmove.js';
 import { logoBlock, bindLogo } from '../logo.js';
 import { renderHASettings } from '../ha.js';
@@ -118,28 +119,25 @@ export async function render(el) {
   const isNode = isNodeRole();
   // 重启按钮放在页头右侧,任何时候都看得到
   // 文字包一层:手机宽度下只留 ↻,给页面标题和右上角的帮助、支持按钮让地方(见 style.css .tb-label)
-  document.getElementById('topbar-right').innerHTML = `<button class="btn danger sm" data-act="set.restart" title="${esc(t('set.restartHint'))}" aria-label="${esc(t('set.restart'))}">↻ <span class="tb-label">${t('set.restart')}</span></button>`;
-  // 大屏上分组卡片排成多栏(瀑布流),不再把一张卡拉得很宽很长
-  el.innerHTML = `<div class="masonry">
-    <section class="card">
-      <div class="card-head"><h2>${t('set.role')}</h2>${badge(isNode ? t('role.node') : t('role.master'), isNode ? 'node' : 'primary')}</div>
-      <label class="field check"><input type="checkbox" id="set-nodeMode" ${isNode ? 'checked' : ''}><span>${t('set.roleSwitch')}</span></label>
-      <p class="hint" id="role-hint">${isNode ? t('set.roleNode') : t('set.roleMaster')}</p>
-      <div class="row" style="margin-top:.7rem"><button class="btn primary" data-act="set.saveRole">${t('common.save')}</button></div>
+  document.getElementById('topbar-right').innerHTML = `<button class="btn danger sm" data-act="set.restart" title="${esc(t('set.restartHint'))}" aria-label="${esc(t('set.restart'))}">${ICONS.restart}<span class="tb-label">${t('set.restart')}</span></button>`;
+  // 版式:左边一列分区导航(跟着滚动高亮,点了跳过去),右边一列分区卡片;卡片里一项设置一行。
+  // 以前是两栏瀑布流里再套两栏表单,说明文字长短不一,输入框上下对不齐
+  el.innerHTML = `<div class="settings">
+    <nav class="set-nav" id="set-nav" aria-label="${esc(t('set.title'))}"></nav>
+    <div class="set-main">
+    <section class="card set-sec" id="sec-role" data-nav="${esc(t('set.role'))}">
+      <div class="card-head"><h2>${t('set.role')} ${badge(isNode ? t('role.node') : t('role.master'), isNode ? 'node' : 'primary')}</h2><button class="btn primary sm" data-act="set.saveRole">${t('common.save')}</button></div>
+      <div class="set-rows">
+        <div class="set-row bool"><div class="set-info"><label class="set-label" for="set-nodeMode">${t('set.roleSwitch')}</label><p class="set-help" id="role-hint">${isNode ? t('set.roleNode') : t('set.roleMaster')}</p></div>
+          <div class="set-ctl"><label class="switch"><input type="checkbox" id="set-nodeMode" ${isNode ? 'checked' : ''}><span></span></label></div></div>
+      </div>
     </section>
     ${groups().filter(g => !(g.masterOnly && isNode)).map(g => `
-      <section class="card">
+      <section class="card set-sec" id="sec-${g.id}" data-nav="${esc(g.title)}">
         <div class="card-head"><h2>${esc(g.title)}${g.restart ? ` <span class="badge warn" title="${t('set.restartHint')}">${t('set.needRestart')}</span>` : ''}</h2><div class="row">${g.test ? `<button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button>` : ''}<button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div></div>
-        <div class="form-grid">${g.fields.map(([k, label, type, help, options]) =>
-          type === 'bool' || type === 'boolOn'
-            ? check('set-' + k, label, boolSetting(s[k], k === 'subPageEnabled' || type === 'boolOn'), help)
-            : type === 'textarea' || type === 'code'
-              ? `<div class="full">${field(label, `<textarea id="set-${k}" ${type === 'code' ? 'class="code-area" spellcheck="false" autocomplete="off"' : ''}>${esc(s[k] ?? '')}</textarea>${textMax[k] ? charCount('set-' + k, textMax[k]) : ''}`, help)}</div>`
-              : type === 'select'
-                ? field(label, `<select id="set-${k}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(s[k] ?? '') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`, help)
-                : field(label, `<input id="set-${k}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">${textMax[k] ? charCount('set-' + k, textMax[k]) : ''}`, help)).join('')}</div>${g.extra || ''}
+        <div class="set-rows">${g.fields.map(f => rowHTML(s, f)).join('')}</div>${g.extra || ''}
       </section>`).join('')}
-    <section class="card">
+    <section class="card set-sec" id="sec-about" data-nav="${esc(t('set.about'))}">
       <div class="card-head"><h2>${t('set.about')}</h2><a href="#/admin" class="btn sm">${t('nav.admin')} →</a></div>
       <dl class="kv">
         <dt>${t('set.version')}</dt><dd class="mono">${esc(state.status.version || '')}</dd>
@@ -149,23 +147,71 @@ export async function render(el) {
         <dt>License</dt><dd>GPL-3.0 · <a href="${esc(state.status.repo || '#')}" target="_blank" rel="noopener">GitHub</a></dd>
       </dl>
       <p class="hint">${t('set.restartNote')}</p>
-    </section></div>`;
+    </section></div></div>`;
   document.getElementById('set-nodeMode').addEventListener('change', e => {
     document.getElementById('role-hint').textContent = e.target.checked ? t('set.roleNode') : t('set.roleMaster');
   });
   bindLogo('set-logo', 'sub-logo');
   bindCharCounts(el);
-  if (isNode) renderPairing();
+  if (isNode) renderPairing().then(buildNav);
   // 主机容灾:紧跟在角色卡片后面(服务器页角色卡片里的「去设置」跳到这里)
   const haCard = document.createElement('section');
-  haCard.className = 'card';
+  haCard.className = 'card set-sec';
   haCard.id = 'ha-card';
+  haCard.dataset.nav = t('ha.title');
   document.querySelector('section.card').after(haCard);
+  buildNav();
   renderHASettings(haCard).then(() => {
+    buildNav(); // 取不到容灾状态时这张卡会被拿掉,导航跟着少一项
     let to = '';
     try { to = sessionStorage.getItem('m-ui.scrollTo') || ''; sessionStorage.removeItem('m-ui.scrollTo'); } catch {}
     if (to === 'ha-card') haCard.scrollIntoView({ block: 'start' });
   });
+}
+
+// 一项设置一行:左边名称 + 说明,右边控件(开关靠右);长文本框(公告、模板)名称在上、框在下占满。
+// 控件的 id 仍是 set-<键>,保存逻辑不用跟着变
+function rowHTML(s, [k, label, type, help, options]) {
+  const id = 'set-' + k;
+  const info = `<div class="set-info"><label class="set-label" for="${id}">${esc(label)}</label>${help ? `<p class="set-help">${esc(help)}</p>` : ''}</div>`;
+  if (type === 'bool' || type === 'boolOn') {
+    const on = boolSetting(s[k], k === 'subPageEnabled' || type === 'boolOn');
+    return `<div class="set-row bool">${info}<div class="set-ctl"><label class="switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></label></div></div>`;
+  }
+  if (type === 'textarea' || type === 'code') {
+    return `<div class="set-row stack">${info}<div class="set-ctl"><textarea id="${id}" ${type === 'code' ? 'class="code-area" spellcheck="false" autocomplete="off"' : ''}>${esc(s[k] ?? '')}</textarea>${textMax[k] ? charCount(id, textMax[k]) : ''}</div></div>`;
+  }
+  const ctl = type === 'select'
+    ? `<select id="${id}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(s[k] ?? '') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`
+    : `<input id="${id}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">${textMax[k] ? charCount(id, textMax[k]) : ''}`;
+  return `<div class="set-row">${info}<div class="set-ctl">${ctl}</div></div>`;
+}
+
+// 左侧分区导航:按页面上现有的分区卡片生成(容灾、配对信息是后插进来的,插完再调一次)。
+// 点了平滑滚过去;滚动时哪张卡在视口上部,哪一项高亮
+let navSpy = null;
+function buildNav() {
+  const nav = document.getElementById('set-nav');
+  if (!nav) return;
+  const secs = [...document.querySelectorAll('.set-main > section.card')].filter(s => s.id && s.dataset.nav);
+  nav.innerHTML = secs.map(s => `<a href="#/settings" data-sec="${esc(s.id)}">${esc(s.dataset.nav)}</a>`).join('');
+  nav.onclick = e => {
+    const a = e.target.closest('a[data-sec]');
+    if (!a) return;
+    e.preventDefault();
+    document.getElementById(a.dataset.sec)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
+  if (navSpy) navSpy.disconnect();
+  if (typeof IntersectionObserver === 'undefined') return;
+  const mark = id => nav.querySelectorAll('a').forEach(a => a.classList.toggle('active', a.dataset.sec === id));
+  const seen = new Set();
+  navSpy = new IntersectionObserver(es => {
+    es.forEach(en => (en.isIntersecting ? seen.add(en.target.id) : seen.delete(en.target.id)));
+    const first = secs.find(s => seen.has(s.id));
+    if (first) mark(first.id);
+  }, { rootMargin: '-15% 0px -55% 0px' });
+  secs.forEach(s => navSpy.observe(s));
+  if (secs[0]) mark(secs[0].id);
 }
 
 // 副机:展示配对信息(API 地址 + 令牌),复制到主机的"服务器"页即可接入
@@ -174,7 +220,9 @@ async function renderPairing() {
   if (!info) return;
   const role = document.querySelector('section.card');
   const card = document.createElement('section');
-  card.className = 'card';
+  card.className = 'card set-sec';
+  card.id = 'sec-pairing';
+  card.dataset.nav = t('set.pairing');
   card.innerHTML = `
     <div class="card-head"><h2>${t('set.pairing')}</h2><button class="btn sm" data-act="set.rotateToken">${t('set.rotateToken')}</button></div>
     <p class="hint">${t('set.pairingHelp')}</p>

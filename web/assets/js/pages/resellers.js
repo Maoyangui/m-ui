@@ -91,7 +91,7 @@ function renderRows() {
     <td class="actions">
       <button class="btn sm" data-act="rs.detail" data-id="${r.id}">${t('common.details')}</button>
       <button class="btn sm" data-act="rs.edit" data-id="${r.id}">${t('common.edit')}</button>
-      <details class="menu"><summary class="btn sm">${t('common.more')} ▾</summary><div class="menu-list">
+      <details class="menu"><summary class="btn sm">${t('common.more')}</summary><div class="menu-list">
         <button data-act="rs.passwd" data-id="${r.id}">${t('rs.passwd')}</button>
         <button data-act="rs.reset" data-id="${r.id}">${t('rs.reset')}</button>
         <hr><button class="danger" data-act="rs.del" data-id="${r.id}">${t('common.delete')}</button>

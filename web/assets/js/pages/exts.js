@@ -50,7 +50,7 @@ const DYNAMIC = /\d+(\.\d+)?\s*(GB|MB|TB|KB|G|M|T|天|日|小时|%|倍|x)|\d{4}[
 
 export async function render(el) {
   el.innerHTML = `
-    <div class="toolbar"><span class="muted small">${t('ext.help')}</span><span class="grow"></span><button class="btn primary" data-act="ext.add">${t('ext.add')}</button></div>
+    <div class="toolbar intro"><p class="page-hint">${t('ext.help')}</p><button class="btn primary" data-act="ext.add">${t('ext.add')}</button></div>
     <div class="table-wrap"><table class="grid ext-table">
       <thead><tr><th>${t('common.name')}</th><th>${t('common.type')}</th><th>${t('ext.value')}</th><th>${t('ext.nodes')}</th><th>${t('ext.lastFetch')}</th><th>${t('ext.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
       <tbody id="exts-body"></tbody>
@@ -103,7 +103,7 @@ function rowHTML(x) {
       + (x.lastFetch ? `<div class="sub-cell muted">${t('ext.lastOk', { t: fmtRelative(x.lastFetch) })}</div>` : '')
     : (x.lastFetch ? fmtRelative(x.lastFetch) : '—');
   return `<tr>
-    <td class="primary-cell"><div class="ext-name"><button class="btn sm ext-toggle" data-act="ext.toggle" data-id="${x.id}" title="${on ? t('ext.collapse') : t('ext.expand')}">${on ? '▾' : '▸'}</button><span>${esc(x.name)}</span></div>${x.prefix ? `<div class="sub-cell">${t('ext.prefix')}: ${esc(x.prefix)}</div>` : ''}${x.remark ? `<div class="sub-cell">${esc(x.remark)}</div>` : ''}</td>
+    <td class="primary-cell"><div class="ext-name"><button class="btn sm ghost icon ext-toggle" data-act="ext.toggle" data-id="${x.id}" title="${on ? t('ext.collapse') : t('ext.expand')}" aria-expanded="${on}"><i class="i i-chev${on ? ' open' : ''}"></i></button><span>${esc(x.name)}</span></div>${x.prefix ? `<div class="sub-cell">${t('ext.prefix')}: ${esc(x.prefix)}</div>` : ''}${x.remark ? `<div class="sub-cell">${esc(x.remark)}</div>` : ''}</td>
     <td>${badge(x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink'), x.type === 'sub' ? 'primary' : '')}</td>
     <td class="mono small ext-url" title="${esc(x.value)}">${esc(x.value.length > 60 ? x.value.slice(0, 60) + '…' : x.value)}</td>
     <td class="num">${count}</td>
@@ -154,7 +154,7 @@ function panelHTML(id, c) {
   const stale = c.stale ? `<span class="muted small" title="${esc(t('ext.staleHelp'))}">${t('ext.staleN', { n: c.stale })} <a href="#" data-act="ext.cleanStale" data-id="${id}">${t('ext.cleanStale')}</a></span>` : '';
   const servers = c.servers || [], view = viewOf(c), f = filt[id] || 'all';
   const cols = new Set(colIds(c));
-  const colMenu = view === 'grid' && servers.length > 1 ? `<details class="menu ext-cols" data-keep-open><summary class="btn sm">${t('ext.cols')} ▾</summary><div class="menu-list">
+  const colMenu = view === 'grid' && servers.length > 1 ? `<details class="menu ext-cols" data-keep-open><summary class="btn sm">${t('ext.cols')}</summary><div class="menu-list">
       <div class="row" style="padding:.2rem .4rem"><button type="button" class="btn xs" data-act="ext.colsAll" data-id="${id}">${t('cl.all')}</button><button type="button" class="btn xs" data-act="ext.colsNone" data-id="${id}">${t('cl.none')}</button></div>
       ${servers.map(x => `<label><input type="checkbox" data-change="ext.col" data-id="${id}" data-sid="${x.id}" ${cols.has(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}
     </div></details>` : '';
@@ -165,15 +165,15 @@ function panelHTML(id, c) {
       ${colMenu}
       <span class="muted small" id="ext-count-${id}"></span>${stale}<span class="grow"></span>
       <div class="ext-row2">
+        <button class="btn sm" data-act="ext.testSel" data-id="${id}">${t('ext.testSel')}</button>
+        <button class="btn sm" data-act="ext.reachSel" data-id="${id}" title="${esc(t('ext.reachHelp'))}">${t('ext.reachSel')}</button>
         <button class="btn sm" data-act="ext.hideSel" data-id="${id}" title="${esc(t('ext.hideHelp'))}">${t('ext.hideSel')}</button>
         <button class="btn sm" data-act="ext.showSel" data-id="${id}">${t('ext.showSel')}</button>
-        <span class="grow"></span>
-        <button class="btn sm" data-act="ext.testAll" data-id="${id}" title="${esc(t('ext.testAllHelp'))}">${t('ext.testAll')}</button>
-        <label class="small muted"><input type="checkbox" data-change="ext.inclHidden" data-id="${id}" ${inclHidden[id] ? 'checked' : ''}> ${t('ext.inclHidden')}</label>
-        <button class="btn sm" data-act="ext.testSel" data-id="${id}">${t('ext.testSel')}</button>
-        <button class="btn sm danger" data-act="ext.testStop" data-id="${id}" id="ext-stop-${id}" ${jobs[id] && jobs[id].job ? '' : 'hidden'}>${t('ext.testStop')}</button>
-        <button class="btn sm" data-act="ext.reachSel" data-id="${id}" title="${esc(t('ext.reachHelp'))}">${t('ext.reachSel')}</button>
         <button class="btn sm primary" data-act="ext.addUp" data-id="${id}">${t('ext.addUp')}</button>
+        <span class="grow"></span>
+        <label class="ext-incl"><input type="checkbox" data-change="ext.inclHidden" data-id="${id}" ${inclHidden[id] ? 'checked' : ''}> ${t('ext.inclHidden')}</label>
+        <button class="btn sm" data-act="ext.testAll" data-id="${id}" title="${esc(t('ext.testAllHelp'))}">${t('ext.testAll')}</button>
+        <button class="btn sm danger" data-act="ext.testStop" data-id="${id}" id="ext-stop-${id}" ${jobs[id] && jobs[id].job ? '' : 'hidden'}>${t('ext.testStop')}</button>
       </div>
     </div>
     <div class="table-wrap fill ext-wrap" id="ext-wrap-${id}" style="--fill-reserve:9rem"></div>
@@ -208,7 +208,7 @@ function renderTable(id) {
   w.innerHTML = `<table class="grid ext-grid"><thead><tr>
       <th><input type="checkbox" data-change="ext.pickAll" data-id="${id}" title="${t('common.all')}"></th>
       ${sortTh('name', t('common.name'))}<th>${t('common.type')}</th><th>${t('ext.server')}</th>
-      ${view === 'sum' ? sortTh('delay', t('ext.delay')) : cols.map(x => `<th class="num srv" title="${esc(x.name)}">${esc(x.name)}</th>`).join('')}<th>${t('ext.reachCol')}</th><th></th></tr></thead>
+      ${view === 'sum' ? sortTh('delay', t('ext.delay')) : cols.map(x => `<th class="num srv" title="${esc(x.name)}">${esc(x.name)}</th>`).join('')}<th>${t('ext.reachCol')}</th><th class="ext-out" title="${esc(t('ext.output'))}">${t('ext.outCol')}</th></tr></thead>
       <tbody id="ext-nodes-${id}"></tbody></table>`;
   renderSubBody(id);
 }
@@ -307,18 +307,19 @@ function renderSubBody(id) {
   const res = results[id] || {}, rch = reaches[id] || {};
   tb.innerHTML = list.length ? list.map(n => {
     const k = esc(n.key);
+    // 名称一格:名字 + 悬停才出现的改名按钮;「输出到订阅」的开关单独一列排在最右,整列对齐(以前跟在名字后面,名字长短不一就参差)
     return `<tr class="${n.hidden ? 'ext-hidden' : ''}">
     <td><input type="checkbox" data-change="ext.pick" data-id="${id}" data-key="${k}" ${sel.has(n.key) ? 'checked' : ''}></td>
-    <td class="primary-cell"><a href="#" data-act="ext.detail" data-id="${id}" data-key="${k}" data-idx="${n.index}">${esc(n.rename || n.name)}</a>
-      <button class="btn xs ghost" data-act="ext.rename" data-id="${id}" data-key="${k}" data-idx="${n.index}" title="${t('ext.rename')}">✎</button>
-      <label class="switch sm" title="${n.keyword ? t('ext.hiddenByKeyword') : t('ext.output')}"><input type="checkbox" data-change="ext.toggleNode" data-id="${id}" data-key="${k}" data-idx="${n.index}" ${n.hidden ? '' : 'checked'} ${n.keyword ? 'disabled' : ''}><span></span></label>
+    <td class="primary-cell"><div class="ext-node"><a href="#" data-act="ext.detail" data-id="${id}" data-key="${k}" data-idx="${n.index}">${esc(n.rename || n.name)}</a>
+      <button class="btn xs ghost ext-rename" data-act="ext.rename" data-id="${id}" data-key="${k}" data-idx="${n.index}" title="${t('ext.rename')}" aria-label="${t('ext.rename')}"><i class="i i-pencil"></i></button>
+      ${n.upstream ? '' : `<span class="badge warn" title="${esc(trErr(n.reason || ''))}">${t('ext.noUpstream')}</span>`}</div>
       ${n.rename ? `<div class="sub-cell">${t('ext.renamedFrom', { name: esc(n.name) })}</div>` : ''}
       ${n.keyword ? `<div class="sub-cell">${t('ext.hiddenByKeyword')}</div>` : ''}</td>
     <td>${badge(esc(n.type))}</td>
     <td class="mono small">${esc(hostPort(n.server, n.port))}</td>
     ${view === 'sum' ? `<td data-sum="${id}-${k}">${sumHTML(id, n, c)}</td>` : cols.map(x => `<td class="num srv" data-cell="${id}-${k}-${x.id}">${cellHTML(res[n.key] && res[n.key][x.id])}</td>`).join('')}
     <td data-reach="${id}-${k}">${reachHTML(rch[n.key])}</td>
-    <td>${n.upstream ? '' : `<span class="badge warn" title="${esc(trErr(n.reason || ''))}">${t('ext.noUpstream')}</span>`}</td></tr>`;
+    <td class="ext-out"><label class="switch sm" title="${n.keyword ? t('ext.hiddenByKeyword') : t('ext.output')}"><input type="checkbox" data-change="ext.toggleNode" data-id="${id}" data-key="${k}" data-idx="${n.index}" ${n.hidden ? '' : 'checked'} ${n.keyword ? 'disabled' : ''}><span></span></label></td></tr>`;
   }).join('')
     : `<tr><td colspan="${6 + (view === 'sum' ? 1 : cols.length)}">${empty(t('ext.noNodes'))}</td></tr>`;
   const more = document.getElementById('ext-more-' + id);

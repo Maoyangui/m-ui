@@ -34,16 +34,16 @@
     <div class="brand"><img class="logo" src="logo.svg" alt=""><span class="brand-name">m-ui</span><span id="role-badge" class="badge"></span></div>
     <nav id="nav"></nav>
     <div class="sidebar-foot">
-      <button class="btn ghost sm" id="btn-theme" title="主题">◐</button>
-      <select id="lang-select" class="sm" title="Language"></select>
-      <button class="btn ghost sm" id="btn-logout"></button>
+      <select id="lang-select" class="sm" title="Language" aria-label="Language"></select>
+      <button class="btn ghost sm icon" id="btn-theme" type="button" aria-label="theme"></button>
+      <button class="btn ghost sm icon" id="btn-logout" type="button"></button>
     </div>
     <div class="sidebar-version"><span id="sidebar-version"></span><button class="update-dot" id="update-dot" hidden></button></div>
   </aside>
 
   <div class="main">
     <header class="topbar">
-      <button id="btn-menu" class="btn ghost icon" aria-label="menu">☰</button>
+      <button id="btn-menu" class="btn ghost icon" type="button" aria-label="menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
       <div class="topbar-title"><h1 id="page-title"></h1><p id="page-subtitle" class="subtitle"></p></div>
       <div id="topbar-right"></div>
       <span id="xmas-slot" class="xmas-slot"></span>
@@ -56,7 +56,7 @@
 
 <!-- 抽屉 -->
 <div id="drawer" class="drawer" hidden>
-  <div class="drawer-head"><h2 id="drawer-title"></h2><button class="btn ghost icon" id="drawer-close" aria-label="close">✕</button></div>
+  <div class="drawer-head"><h2 id="drawer-title"></h2><button class="btn ghost icon" id="drawer-close" type="button" aria-label="close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
   <div id="drawer-body" class="drawer-body"></div>
 </div>
 

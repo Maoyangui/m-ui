@@ -104,7 +104,7 @@ function quickStart() {
     // 必做的在前,可选的带「可选」
     const list = todo.slice().sort((a, b) => a.opt - b.opt);
     return `<section class="card quickstart span-all">
-      <div class="card-head"><h2>${esc(t('qs.title'))} <span class="h-count">${esc(t('qs.progress', { done: items.length - todo.length, total: items.length }))}</span></h2><button class="btn ghost sm" data-act="dash.hideQs" title="${esc(t('qs.hide'))}">✕</button></div>
+      <div class="card-head"><h2>${esc(t('qs.title'))} <span class="h-count">${esc(t('qs.progress', { done: items.length - todo.length, total: items.length }))}</span></h2><button class="btn ghost sm icon" data-act="dash.hideQs" title="${esc(t('qs.hide'))}" aria-label="${esc(t('qs.hide'))}"><i class="i i-x"></i></button></div>
       <p class="hint">${esc(t('qs.help'))}</p>
       <ol class="qs-list">${list.map(i => `<li><span class="qs-mark">○</span><a href="#/${i.page}">${esc(i.text)}</a>${i.opt ? `<span class="badge">${esc(t('qs.optional'))}</span>` : ''}</li>`).join('')}</ol>
     </section>`;
@@ -113,11 +113,11 @@ function quickStart() {
   const star = s.repo && ls('m-ui.starDismissed') !== '1';
   if (!opt.length && !star) return '';
   return `<section class="card qs-done span-all" id="star-card">
-    <span>✓ <b>${esc(t('qs.doneTitle'))}</b>${opt.length ? ` <span class="muted small">${esc(t('qs.alsoCan'))}</span>` : ''}</span>
+    <span class="qs-ok"><i class="i i-check"></i> <b>${esc(t('qs.doneTitle'))}</b>${opt.length ? ` <span class="muted small">${esc(t('qs.alsoCan'))}</span>` : ''}</span>
     ${opt.length ? `<span class="qs-opt">${opt.slice(0, 3).map(i => `<a class="chip" href="#/${i.page}" title="${esc(i.text)}">${esc(i.text.split(/[((::]/)[0].trim())}</a>`).join('')}${opt.length > 3 ? `<span class="muted small">${esc(t('qs.moreN', { n: opt.length, more: opt.length - 3 }))}</span>` : ''}</span>` : ''}
     <span class="grow"></span>
-    ${star ? `<a class="btn primary sm" href="${esc(s.repo)}" target="_blank" rel="noopener" data-act="dash.starGo" title="${esc(t('star.text'))}">★ ${esc(t('star.btn'))}</a>` : ''}
-    <button class="btn ghost sm" data-act="dash.doneHide" title="${esc(t('star.dismiss'))}">✕</button>
+    ${star ? `<a class="btn primary sm" href="${esc(s.repo)}" target="_blank" rel="noopener" data-act="dash.starGo" title="${esc(t('star.text'))}"><i class="i i-star"></i>${esc(t('star.btn'))}</a>` : ''}
+    <button class="btn ghost sm icon" data-act="dash.doneHide" title="${esc(t('star.dismiss'))}" aria-label="${esc(t('star.dismiss'))}"><i class="i i-x"></i></button>
   </section>`;
 }
 
@@ -151,7 +151,7 @@ export async function render(el) {
       `<div class="card-foot"><a href="#/logs?tab=audit">${esc(t('dash.audit.viewAll'))}</a></div>`)}
     ${card('dash-core', '', `<h2>${esc(many ? t('dash.coreLocal') : t('dash.core'))}</h2><button class="btn sm" data-act="dash.reload">${esc(t('dash.reload'))}</button>`, `<dl class="kv" id="dash-core"></dl>`)}
     <section class="card dash-log-card ${logOpen ? '' : 'collapsed'}" id="dash-log-card">
-      <div class="card-head"><h2><button class="link-btn" data-act="dash.logToggle" aria-expanded="${logOpen}">${logOpen ? '▾' : '▸'} ${esc(t('dash.coreLog'))}</button></h2>
+      <div class="card-head"><h2><button class="link-btn" data-act="dash.logToggle" aria-expanded="${logOpen}"><i class="i i-chev${logOpen ? ' open' : ''}"></i> ${esc(t('dash.coreLog'))}</button></h2>
         <select class="sm" id="dash-loglevel" data-change="dash.loglevel" style="width:auto">${['debug', 'info', 'warning', 'error'].map(l => `<option ${l === logLevel ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <pre class="log" id="dash-log"></pre>
       <div class="card-foot"><a href="#/logs?tab=core">${esc(t('dash.logAll'))}</a></div>
@@ -429,9 +429,9 @@ function renderAttn() {
   const cap = narrow() && !attnAll ? 4 : items.length;
   let html = !items.length && pending ? `<p class="muted small">${esc(t('dash.attn.checking'))}</p>` : '';
   if (items.length) html += `<ul class="attn">${items.slice(0, cap).map(attnRow).join('')}</ul>`;
-  if (items.length > cap) html += `<div class="card-foot"><button class="btn sm ghost" data-act="dash.attnAll">${esc(t('dash.moreN', { n: items.length - cap }))} ▾</button></div>`;
+  if (items.length > cap) html += `<div class="card-foot"><button class="btn sm ghost" data-act="dash.attnAll">${esc(t('dash.moreN', { n: items.length - cap }))} <i class="i i-chev open"></i></button></div>`;
   if (ignored.length) {
-    html += `<div class="attn-ignored"><button class="link-btn muted small" data-act="dash.attnIgnored" aria-expanded="${attnIgnoredOpen}">${esc(t('dash.attn.ignored', { n: ignored.length }))} ${attnIgnoredOpen ? '▾' : '▸'}</button>`
+    html += `<div class="attn-ignored"><button class="link-btn muted small" data-act="dash.attnIgnored" aria-expanded="${attnIgnoredOpen}">${esc(t('dash.attn.ignored', { n: ignored.length }))} <i class="i i-chev${attnIgnoredOpen ? ' open' : ''}"></i></button>`
       + (attnIgnoredOpen ? `<ul class="attn" style="margin-top:.35rem">${ignored.map(r => attnRow({ ...r, sev: 'info', acts: btn('dash.undismiss', r.kind, t('dash.attn.restore'), 'ghost') })).join('')}</ul>` : '') + '</div>';
   }
   setHTML(box, html);
@@ -738,7 +738,7 @@ async function renderLog() {
 
 // ---- 代理面板:需要处理 + 6 张统计卡 + 当前在线 + 即将到期 / 流量快用完两张名单 ----
 function renderReseller(el) {
-  el.innerHTML = `<div class="dash-grid">
+  el.innerHTML = `<div class="dash-grid rs">
     <section class="card span-all attn-card" id="dash-attn-card"><div class="card-head"><h2>${esc(t('dash.attn.title'))} <span class="h-count" id="dash-attn-n"></span></h2></div><div id="dash-attn"></div></section>
     <div class="stats span-all" id="dash-stats"></div>
     ${card('dash-online', 'span-2', `<h2>${esc(t('dash.onlineList'))} <span class="h-count" id="dash-online-n"></span></h2><input type="search" class="sm dash-q" id="dash-online-q" placeholder="${esc(t('dash.online.search'))}" value="${esc(onlineQ)}" hidden>`, `<div id="dash-online"></div>`)}
@@ -843,7 +843,7 @@ registerActions({
     if (!c) return;
     c.classList.toggle('collapsed', !logOpen);
     const b = c.querySelector('.link-btn');
-    b.textContent = (logOpen ? '▾ ' : '▸ ') + t('dash.coreLog');
+    b.innerHTML = `<i class="i i-chev${logOpen ? ' open' : ''}"></i> ${esc(t('dash.coreLog'))}`;
     b.setAttribute('aria-expanded', String(logOpen));
     if (logOpen) await guard('dash-log', renderLog);
   },

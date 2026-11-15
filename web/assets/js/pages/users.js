@@ -193,7 +193,7 @@ function renderRows() {
   const vis = visibleRows(), total = vis.length;
   const rows = pageRows();
   document.getElementById('user-count').textContent = `${total} / ${state.users.length}`;
-  setHTML('user-only', only ? `<span class="chip">${esc(t('user.filter.only', { what: only === 'expiring' ? t('user.filter.expiring', { d: expiringDays() }) : t('user.filter.quota', { p: quotaPct() }) }))} <button type="button" class="btn xs ghost" data-act="user.clearOnly" title="${esc(t('user.filter.clear'))}">✕</button></span>` : '');
+  setHTML('user-only', only ? `<span class="chip">${esc(t('user.filter.only', { what: only === 'expiring' ? t('user.filter.expiring', { d: expiringDays() }) : t('user.filter.quota', { p: quotaPct() }) }))} <button type="button" class="btn xs ghost" data-act="user.clearOnly" title="${esc(t('user.filter.clear'))}" aria-label="${esc(t('user.filter.clear'))}"><i class="i i-x"></i></button></span>` : '');
   const bar = document.getElementById('batch-bar');
   bar.hidden = selected.size === 0;
   document.getElementById('batch-count').textContent = t('user.selected', { n: selected.size });
@@ -224,7 +224,7 @@ function renderRows() {
       <td class="actions">
         <button class="btn sm" data-act="user.detail" data-id="${u.id}">${t('common.details')}</button>
         <button class="btn sm" data-act="user.edit" data-id="${u.id}">${t('common.edit')}</button>
-        <details class="menu"><summary class="btn sm">${t('common.more')} ▾</summary><div class="menu-list">
+        <details class="menu"><summary class="btn sm">${t('common.more')}</summary><div class="menu-list">
           <button data-act="user.copy" data-id="${u.id}" data-fmt="clash">${t('user.subClash')}</button>
           <button data-act="user.copy" data-id="${u.id}" data-fmt="link">${t('user.subLink')}</button>
           <button data-act="user.copy" data-id="${u.id}" data-fmt="json">${t('user.subJson')}</button>

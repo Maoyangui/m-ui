@@ -182,7 +182,7 @@ function actionsCell(n) {
   ].filter(Boolean);
   return `<button class="btn sm" data-act="node.test" data-id="${n.id}">${t('common.test')}</button>
         <button class="btn sm" data-act="node.edit" data-id="${n.id}">${t('common.edit')}</button>
-        ${more.length ? `<details class="menu"><summary class="btn sm">${t('common.more')} ▾</summary><div class="menu-list">${more.join('').replace(/^<hr>/, '')}</div></details>` : ''}`;
+        ${more.length ? `<details class="menu"><summary class="btn sm">${t('common.more')}</summary><div class="menu-list">${more.join('').replace(/^<hr>/, '')}</div></details>` : ''}`;
 }
 
 // 「只看异常」的口径(和概况「需要处理」同一份,见 issues.js):离线、数据面停止、重载失败、下线通知未送达、记账失败、

@@ -86,7 +86,7 @@ function resultHTML(id) {
   const many = servers.length > 4;
   // 展开只在有话可说时才给:全部正常的话,折叠这一行已经把每台的延迟写全了,再点开只是重复一遍。
   const worth = many || servers.some(sv => sv.state !== 'ok' || sv.error);
-  const more = worth ? `<button class="btn xs ghost" data-act="up.expand" data-id="${id}" title="${t('up.detail')}">${expanded.has(id) ? '▴' : '▾'}</button>` : '';
+  const more = worth ? `<button class="btn xs ghost" data-act="up.expand" data-id="${id}" title="${t('up.detail')}" aria-expanded="${expanded.has(id)}"><i class="i i-chev${expanded.has(id) ? ' open' : ''}"></i></button>` : '';
   let detail = '';
   if (worth && expanded.has(id)) {
     const label = { ok: sv => sv.delayMs + ' ms', fail: () => t('up.fault'), stale: () => t('up.stale') };

@@ -32,12 +32,19 @@ export const state = {
 };
 
 const pages = { dashboard, lines, upstreams, exts, users, plans, rules: rulesPage, resellers, account, nodes, cert, backup, ops, logs, admin, settings };
-const masterNav = ['dashboard', 'lines', 'upstreams', 'exts', 'users', 'resellers', 'plans', 'rules', 'nodes',
-  'cert', 'backup', 'ops', 'logs', 'admin', 'settings'];
+// 侧栏分三组:网络(流量怎么进、怎么出)、运营(卖给谁、怎么计费)、系统(这台面板自己)。概览单独在最上面
+const NAV_GROUPS = [
+  { items: ['dashboard'] },
+  { key: 'network', items: ['lines', 'upstreams', 'exts', 'nodes'] },
+  { key: 'business', items: ['users', 'resellers', 'plans', 'rules'] },
+  { key: 'system', items: ['cert', 'backup', 'ops', 'logs', 'admin', 'settings'] },
+];
+const masterNav = NAV_GROUPS.flatMap(g => g.items);
 // 代理面板:同一套前端,只留下代理用得上的几页
 const resellerNav = ['dashboard', 'users', 'plans', 'account'];
 export const isReseller = () => (state.status || {}).scope === 'reseller';
 const navFor = () => (isReseller() ? resellerNav : masterNav);
+const navGroups = () => (isReseller() ? [{ items: resellerNav }] : NAV_GROUPS);
 let current = null;
 // routeGen 每换一次页面加一。渲染是异步的,中途换页时旧的那次渲染必须整个作废:
 // 它既不该再往页面里写内容,它抛的错也不该显示出来(那正是"点了 A 却看到报错/看到 B"的来源)。
@@ -111,7 +118,16 @@ function showLogin() {
   supportLink(document.getElementById('login-support'));
   helpLink(document.getElementById('login-help'), 'login');
   document.getElementById('login-code-wrap').hidden = !needTotp;
-  setTimeout(() => document.getElementById('lg-user').focus(), 50);
+  setTimeout(focusLogin, 50);
+}
+// 登录页该把光标放在哪:账号没填 → 账号;填了账号没填密码 → 密码;账号密码都有、正在等两步验证码 → 验证码。
+// 登录页已经开着时(去别的 App 看验证码再切回来,期间任何一次 401 都会再走到 showLogin)同样按这个顺序,
+// 不会把光标从验证码框拉回账号框。
+function focusLogin() {
+  const u = document.getElementById('lg-user'), p = document.getElementById('lg-pass'), c = document.getElementById('lg-code');
+  const target = !u.value ? u : (!p.value ? p : (needTotp ? c : p));
+  if (document.activeElement === target) return;
+  target.focus();
 }
 // 401 时回到登录页。代理面板的 401 带 scope: 'reseller'(web/reseller_panel.go):还没登录、没有 status 时,
 // 登录页靠它认出这是代理面板,「帮助说明」打开代理视图
@@ -161,7 +177,8 @@ async function enterApp() {
 
 // "建议 / 支持"按钮:新标签页打开,带上当前语言
 function supportLink(a) {
-  a.textContent = '✦ ' + t('support.btn');
+  a.innerHTML = `${ICONS.support || ''}<span class="support-label">${esc(t('support.btn'))}</span>`;
+  a.title = t('support.btn');
   a.href = 'support?lang=' + getLang();
 }
 
@@ -194,11 +211,17 @@ function helpLink(a, page) {
 // ---- 壳:导航、角色、主题、语言 ----
 function renderChrome() {
   document.documentElement.lang = getLang() === 'zh' ? 'zh-CN' : 'en'; // 换成英文时页面语言跟着换(读屏、表头折行规则看它)
-  document.getElementById('nav').innerHTML = navFor().map(p =>
-    `<a href="#/${p}" data-page="${p}"><span class="ic">${ICONS[p] || ''}</span>${t('nav.' + p)}</a>`).join('');
+  document.getElementById('nav').innerHTML = navGroups().map(g =>
+    (g.key ? `<div class="nav-group">${esc(t('nav.group.' + g.key))}</div>` : '') + g.items.map(p =>
+      `<a href="#/${p}" data-page="${p}"><span class="ic">${ICONS[p] || ''}</span><span class="nav-label">${t('nav.' + p)}</span></a>`).join('')).join('');
+  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.page === current)); // 换语言重画后当前页的高亮还在
   reachNotice(); // 导航重画后补上"服务器"的红点
   document.getElementById('modal-cancel').textContent = t('common.cancel');
-  document.getElementById('btn-logout').textContent = t('common.logout');
+  const out = document.getElementById('btn-logout');
+  out.innerHTML = ICONS.logout || '';
+  out.title = t('common.logout');
+  out.setAttribute('aria-label', t('common.logout'));
+  applyTheme(localStorage.getItem('m-ui-theme') || 'auto'); // 主题按钮的悬停提示跟着语言换
   supportLink(document.getElementById('btn-support'));
   helpLink(document.getElementById('btn-help'), current || pageName());
   mountXmasEgg(document.getElementById('xmas-slot')); // 限时圣诞彩蛋(到 12-31),见 xmas.js
@@ -459,7 +482,9 @@ function applyTheme(mode) {
   if (mode === 'auto') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = mode;
   localStorage.setItem('m-ui-theme', mode);
-  document.getElementById('btn-theme').textContent = { auto: '◐', light: '☀', dark: '☾' }[mode];
+  const b = document.getElementById('btn-theme');
+  b.innerHTML = ICONS[{ auto: 'themeAuto', light: 'themeLight', dark: 'themeDark' }[mode]] || '';
+  b.title = t('common.theme') + ' · ' + t('theme.' + mode);
 }
 applyTheme(localStorage.getItem('m-ui-theme') || 'auto');
 
@@ -603,6 +628,9 @@ let refreshing = false;
 let fastUntil = 0;
 export async function refreshNow() {
   if (refreshing || routing) return false; // 页面正在渲染时不插队,免得往还没画好的 DOM 上写
+  // 停在登录页时不刷新:没登录,请求只会换回一个 401,又把登录页重画一遍、把光标从验证码框拉回账号框
+  // (切去别的 App 看两步验证码再切回来,visibilitychange 就会走到这里)
+  if (document.getElementById('app').hidden) return false;
   refreshing = true;
   const gen = routeGen;
   try {

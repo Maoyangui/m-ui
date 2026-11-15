@@ -125,7 +125,7 @@ export function linePicker(host, { items, selected }) {
     return `<div class="lp-line" data-line="${g.id}">
       <label title="${esc(g.name)}"><input type="checkbox" class="lp-lcb" data-line="${g.id}" ${on && on === list.length ? 'checked' : ''} ${on && on < list.length ? 'data-ind="1"' : ''}> <span class="lp-name">${esc(g.name)}</span></label>
       <span class="lp-n">${many ? esc(t('lp.nOf', { n: pickedAll, m: g.items.length })) : one ? `<span class="muted small">${esc(one.nodeName || '—')}${one.local ? ` (${esc(t('node.local'))})` : ''}</span>` : ''}${whole ? ' ' + `<span class="badge primary" title="${esc(t('lp.wholeLineHelp'))}">${esc(t('lp.wholeLine'))}</span>` : ''}</span>
-      ${many && !byServer && g.items.length > CHIP_OPEN_MAX ? `<button type="button" class="lp-x" data-lp-x="${g.id}" aria-expanded="${open}" title="${esc(t(open ? 'common.less' : 'common.more'))}">${open ? '▴' : '▾'}</button>` : '<span></span>'}
+      ${many && !byServer && g.items.length > CHIP_OPEN_MAX ? `<button type="button" class="lp-x" data-lp-x="${g.id}" aria-expanded="${open}" title="${esc(t(open ? 'common.less' : 'common.more'))}"><i class="i i-chev${open ? ' open' : ''}"></i></button>` : '<span></span>'}
       ${many && open ? `<div class="lp-nodes">${list.map(chip).join('')}</div>` : ''}
     </div>`;
   };
