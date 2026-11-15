@@ -135,7 +135,7 @@ func (s *Service) afterBecame() {
 	if !strings.EqualFold(s.setting("resellerEnabled"), "false") {
 		n.Reseller = s.resellerURL()
 	}
-	n.API = s.setting("apiEnabled") == "true"
+	n.API = s.setting("apiEnabled") == "true" && !b.Identity.PanelKept // 面板跟过来了(地址不变)就不用提醒改地址
 	s.addNotice(n)
 	s.notify(s.becameText(b, ip))
 	logger.Info("容灾:本机已成为主机(", b.How, "),纪元 ", b.Epoch)
@@ -157,7 +157,7 @@ func (s *Service) becameText(b Became, ip string) string {
 	if u := s.resellerURL(); u != "" && !strings.EqualFold(s.setting("resellerEnabled"), "false") {
 		fmt.Fprintf(&sb, "代理面板:%s\n", notify.Esc(u))
 	}
-	if u := s.panelURL(); u != "" && s.setting("apiEnabled") == "true" { // 外部 API 挂在面板地址上:换主机后对接方要改地址
+	if u := s.panelURL(); u != "" && s.setting("apiEnabled") == "true" && !b.Identity.PanelKept { // 外部 API 挂在面板地址上:面板没跟过来时对接方要改地址
 		fmt.Fprintf(&sb, "外部 API 跟着面板地址变了:对接的商城、Telegram 机器人等要改用 %sapi/v1/…\n", notify.Esc(u))
 	}
 	if b.How == HowTakeover {

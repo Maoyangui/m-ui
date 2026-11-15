@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -173,4 +174,15 @@ func TestPanelCertAfterTakeover(t *testing.T) {
 		t.Fatal("面板证书能用:不签")
 	}
 	_ = time.Now
+}
+
+// 面板跟过来了(面板、外部 API 地址不变):成为主机的通知不再提醒对接方改地址;没跟过来才提醒。
+func TestBecameAPINoticeOnlyWhenPanelMoved(t *testing.T) {
+	s := testService(t, false, map[string]string{"apiEnabled": "true"})
+	s.d.PanelURL = func() string { return "https://panel.example.com:2053/app/" }
+	kept := s.becameText(Became{How: HowTakeover, FormerName: "A", Identity: identityResult{PanelKept: true}}, "198.51.100.2")
+	moved := s.becameText(Became{How: HowTakeover, FormerName: "A"}, "198.51.100.2")
+	if strings.Contains(kept, "外部 API") || !strings.Contains(moved, "外部 API") {
+		t.Fatalf("面板跟过来了不提醒,没跟过来才提醒:\n%s\n---\n%s", kept, moved)
+	}
 }
