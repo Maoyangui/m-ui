@@ -47,6 +47,25 @@ for (const n of S.nodes.nodes || []) if (n.status) n.status.uptime = (n.status.u
     n.status.disk = k === 2 ? { path: '/etc/m-ui', total: 9.6 * G, used: 8.8 * G, free: 0.8 * G, logs: 4.1 * G, cache: 0.3 * G, swap: 4 * G, opsAgent: true, at }
       : { path: '/etc/m-ui', total: 40 * G, used: (9 + 4 * k) * G, free: (31 - 4 * k) * G, logs: 0.4 * G, cache: 0.2 * G, swap: 2 * G, at }; } }
 
+// 外部 API 的附加密钥与来源 IP 白名单(主面板 admin、代理面板 self 各一套;只在本页内存里)
+const API_PERMS = ['users.read', 'users.create', 'users.update', 'users.delete', 'billing', 'plans.read', 'panel.read'];
+S.apiKeys = {
+  admin: [{ id: 1, resellerId: 0, name: 'telegram-bot', token: 'demo-telegrambot0key0for0the0demo0only', perms: 'users.read,panel.read', permList: ['users.read', 'panel.read'], enabled: true, createdAt: Math.floor(Date.now() / 1000) - 86400 * 9, lastUsedAt: Math.floor(Date.now() / 1000) - 420, lastUsedIp: '198.51.100.23' }],
+  self: [],
+};
+S.apiIp = { admin: { enabled: false, list: '', you: '203.0.113.5' }, self: { enabled: false, list: '', you: '203.0.113.5' } };
+function demoApiKeys(scope, method, id, sub, body) {
+  const list = S.apiKeys[scope];
+  const view = k => ({ ...k, permList: API_PERMS.filter(p => k.perms.split(',').includes(p)) });
+  const fill = (k, b) => { if (b) { if (b.name != null) k.name = String(b.name).trim() || k.name; if (Array.isArray(b.perms)) k.perms = API_PERMS.filter(p => b.perms.includes(p)).join(','); if (b.enabled != null) k.enabled = !!b.enabled; } return k; };
+  if (!id && method === 'POST') { const k = fill({ id: nextId(list), resellerId: 0, name: 'key', token: 'demo-' + rnd(32), perms: 'users.read', enabled: true, createdAt: Math.floor(Date.now() / 1000), lastUsedAt: 0, lastUsedIp: '' }, body); list.push(k); return view(k); }
+  const k = list.find(x => String(x.id) === String(id));
+  if (!k) return { error: 'not found' };
+  if (method === 'DELETE') { list.splice(list.indexOf(k), 1); return ok(); }
+  if (sub === 'rotate') { k.token = 'demo-' + rnd(32); return view(k); }
+  return view(fill(k, body));
+}
+
 const nextId = list => list.reduce((m, x) => Math.max(m, x.id || 0), 0) + 1;
 // 外部订阅展开:节点明细 / 逐台测速 / 大陆连通 / 隐藏改名 / 添加为上游(GET 与 POST 都走这里)。
 // 和真面板一样按节点指纹(key)认节点;隐藏 / 改名只收增量,带版本号。
@@ -427,6 +446,14 @@ function route(method, path, query, body) {
         if (t === 'shortid') return { shortId: rnd(8) };
         if (t === 'password') return { password: rnd(Number(new URLSearchParams(query).get('len')) || 16) };
         return { privateKey: 'demo-private-key-' + rnd(24), publicKey: 'demo-public-key-' + rnd(24) }; }
+      case 'admin': case 'self':
+        if (seg[1] === 'api' && seg[2] === 'keys') return { keys: S.apiKeys[seg[0]].map(k => demoApiKeys(seg[0], 'GET', k.id)), perms: API_PERMS };
+        if (seg[1] === 'api' && seg[2] === 'ip') return clone(S.apiIp[seg[0]]);
+        if (seg[0] === 'admin' && seg[1] === 'info') { // 演示里外部 API 开着:看得到默认令牌、附加密钥与权限、白名单
+          const i = listByPrefix(path) ?? {};
+          return { ...i, apiEnabled: true, apiToken: i.apiToken || 'demo-defaulttoken0for0the0demo0only' };
+        }
+        return listByPrefix(path) ?? {};
       default: return listByPrefix(path) ?? {};
     }
   }
@@ -559,8 +586,12 @@ function route(method, path, query, body) {
       return ok(); }
     case 'ops': if (seg[1] === 'warp-check') return { exit: 'on', ip: '104.28.0.1', loc: 'US', colo: 'LAX' }; return ok();
     case 'agent': if (seg[1] === 'rotate') return { token: 'demo-' + rnd(32) }; return ok();
-    case 'admin': if (seg[1] === 'api' && seg[2] === 'rotate') return { token: 'demo-' + rnd(32) }; if (seg[1] === 'totp' && seg[2] === 'setup') return { secret: 'DEMOSECRET', url: 'otpauth://totp/m-ui:admin?secret=DEMOSECRET', qr: '' }; return ok();
-    case 'self': return ok();
+    case 'admin': case 'self':
+      if (seg[1] === 'api' && seg[2] === 'keys') return demoApiKeys(seg[0], method, seg[3], seg[4], body);
+      if (seg[1] === 'api' && seg[2] === 'ip') { S.apiIp[seg[0]] = { ...S.apiIp[seg[0]], enabled: !!(body && body.enabled), list: String((body && body.list) || '').split(/[\s,;，]+/).filter(Boolean).join(', ') }; return clone(S.apiIp[seg[0]]); }
+      if (seg[0] === 'admin' && seg[1] === 'api' && seg[2] === 'rotate') return { token: 'demo-' + rnd(32) };
+      if (seg[0] === 'admin' && seg[1] === 'totp' && seg[2] === 'setup') return { secret: 'DEMOSECRET', url: 'otpauth://totp/m-ui:admin?secret=DEMOSECRET', qr: '' };
+      return ok();
     case 'reload': case 'password': case 'notify': return ok();
     default: return ok();
   }

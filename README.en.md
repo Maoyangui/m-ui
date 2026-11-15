@@ -431,12 +431,14 @@ m-ui render -db <db>                         print and validate the sing-box con
 m-ui ha status                               master failover: role, epoch, standbys, whether the master is lost, this server's key fingerprint (root, as below)
 m-ui ha takeover [--force]                   take over as master on a standby; --force skips the confirmation and the evidence
 m-ui ha set-master <server name or id> [--allow-plain]  on the master, set a node as master (waits and prints the new panel URL; an http link needs --allow-plain)
+m-ui ha abandon [--force]                    on the master, abandon a Set as master with an unknown result and resume writes; --force: also after the freeze deadline when unreachable nodes are gone for good
+m-ui ha yield [server]                       when two servers both act as master, hand master back to the other one (this one becomes a node and reverts the DNS it changed)
 m-ui ha pause <minutes> / m-ui ha resume     on the master, pause / resume takeovers (before upgrades, maintenance)
 m-ui ha reset [--force]                      clear this server's failover records (epoch, followed master, replicas) so another master can add it; needs --force on a master
 m-ui version
 ```
 
-`m-ui ha` hands the action to the running service (through the database); when the service is not running, `status` only shows what the database records. On a master, `takeover --force` means "reclaim nodes that followed another master, with an epoch above the highest one known"; use it only when two masters are deadlocked. When a Set as master ends with an unknown result, the command prints the reason and the latest deadline. Use `ha reset` before handing a node to a 0.7.16 or older master or moving it to another cluster; on a master it forgets that it was master, so it needs --force.
+`m-ui ha` hands the action to the running service (through the database); when the service is not running, `status` only shows what the database records. On a master, `takeover --force` means "reclaim nodes that followed another master, with an epoch above the highest one known"; use it only when two masters are deadlocked. When a Set as master ends with an unknown result, the command prints the reason and the latest deadline; if after the deadline writes stay paused because unreachable nodes (gone for good) cannot confirm, use `ha abandon --force`. Use `ha reset` before handing a node to a 0.7.16 or older master or moving it to another cluster; on a master it forgets that it was master, so it needs --force.
 
 Without `-db` the path comes from the systemd unit (default `/etc/m-ui/m-ui.db`); if the database does not exist the command fails instead of silently creating an empty one and backing up or resetting that.
 
