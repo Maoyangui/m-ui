@@ -753,6 +753,8 @@ const EN = /*BEGIN*/{
 "目标已经以新纪元当了主机": "The target is already master with the new epoch",
 "只有 %d 台副机确认收到撤销,要 %d 台": "Only %d nodes confirmed the revocation; %d are needed",
 "只有 %d 台副机确认收到撤销(要 %d 台):为免目标其实已经接手、两台主机同时收写,先不隔离,写操作保持暂停,稍后自动再试": "Only %d nodes confirmed the revocation (%d needed): in case the target did take over, which would leave two masters taking writes, it is not fenced off yet; writes stay paused and it retries automatically",
+"冻结截止(%s)之前不能强制放弃:没收到撤销的副机手里的交接标记那时还有效,目标起来它们会跟它;到截止时间再执行": "Cannot force-abandon before the freeze deadline (%s): nodes that missed the revocation hold a handover mark that stays valid until then, and they would follow the target if it comes up; run it again after the deadline",
+"本机是副机:放弃设为主机要在发起它的主机上执行": "This server is a node: abandon a set-master on the master that started it",
 "本机的角色或纪元在隔离途中变了": "This server's role or epoch changed while fencing",
 "这个请求要主机签名(主机和本机的版本不一致时先把两边升级到同一版本)": "This request must be signed by the master (if the master and this server run different versions, upgrade both to the same version first)",
 "本机还没记下当前主机的签名公钥,无法确认这个请求来自主机:等主机推来容灾状态后它会自动重试": "This server has not recorded the current master's signing key yet, so it cannot confirm the request came from the master; the master retries automatically after it pushes the failover state",

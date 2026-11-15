@@ -24,6 +24,8 @@ import (
 //	m-ui ha takeover [--force]     本机(备用)接任为主机;--force:主机看起来没失联、或没开主机容灾也接任;
 //	                               在主机上加 --force:以高于已知全部纪元的新纪元把副机收回来
 //	m-ui ha set-master <服务器> [--allow-plain]  在主机上把一台副机(名字或 id)设为主机;明文 http 链接要加 --allow-plain
+//	m-ui ha abandon [--force]      在主机上放弃结果不明的设为主机(以更高的纪元隔离目标、恢复写操作);
+//	                               --force:冻结截止之后,确认收到撤销的副机凑不够(连不上的已永久下线)也放弃
 //	m-ui ha pause <分钟>            在主机上暂停接任(升级、维护前)
 //	m-ui ha resume                 恢复接任
 //	m-ui ha yield [服务器]         两台同时当主机时(见 ha/rival.go),把主机让回给另一台
@@ -31,7 +33,7 @@ import (
 func runHA(args []string) {
 	fs := flag.NewFlagSet("ha", flag.ExitOnError)
 	dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径")
-	force := fs.Bool("force", false, "takeover:不管主机最近有没有联系、有没有开主机容灾;reset:在主机上也重置")
+	force := fs.Bool("force", false, "takeover:不管主机最近有没有联系、有没有开主机容灾;abandon:确认收到撤销的副机不够也放弃;reset:在主机上也重置")
 	allowPlain := fs.Bool("allow-plain", false, "set-master:目标是明文 http 链接也继续(链接上的主动中间人能拿到并改写整库)")
 	yes := fs.Bool("y", false, "不再问确认")
 	if len(args) == 0 {
@@ -81,6 +83,8 @@ func haUsage() {
 	fmt.Println("  m-ui ha takeover [--force]     本机(备用)接任为主机;在主机上加 --force:以更高的纪元把副机收回来")
 	fmt.Println("  m-ui ha set-master <服务器> [--allow-plain]")
 	fmt.Println("                                 在主机上把一台副机设为主机(名字或 id);它的链接是明文 http 时要加 --allow-plain")
+	fmt.Println("  m-ui ha abandon [--force]      在主机上放弃结果不明的设为主机,恢复写操作;--force:冻结截止后,")
+	fmt.Println("                                 连不上的副机已永久下线、确认收到撤销的凑不够时也放弃")
 	fmt.Println("  m-ui ha pause <分钟>            在主机上暂停接任")
 	fmt.Println("  m-ui ha resume                 恢复接任")
 	fmt.Println("  m-ui ha yield [服务器]         两台同时当主机时,把主机让回给另一台(本机变为副机,改过的 DNS 改回去)")
@@ -130,6 +134,16 @@ func haCommand(db *gorm.DB, op string, args []string, f haFlags, ask func(string
 			return err
 		}
 		return haWaitSwitch(db)
+	case "abandon":
+		if force && !yes {
+			fmt.Println(colorRed + "  --force:确认收到撤销的副机不够也放弃。只在连不上的副机已经永久下线时用;目标若其实已经接手,它那段时间收的改动不会生效。" + colorReset)
+			if ask("  确定要强制放弃,输入 abandon: ") != "abandon" {
+				return fmt.Errorf("已取消")
+			}
+		} else if !yes && ask("  放弃结果不明的设为主机:以更高的纪元隔离目标,本机继续当主机、恢复写操作。继续?[y/N] ") != "y" {
+			return fmt.Errorf("已取消")
+		}
+		return haSubmit(db, ha.Cmd{Op: "abandon", Force: force}, 90*time.Second)
 	case "reset":
 		return haReset(db, f, ask)
 	case "pause":

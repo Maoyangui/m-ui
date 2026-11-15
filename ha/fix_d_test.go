@@ -187,6 +187,87 @@ func TestFenceNeedsAcks(t *testing.T) {
 	}
 }
 
+// 连不上的那台副机已经永久下线(审计 11-12 中危):截止后也凑不够过半,写操作原来会一直暂停,停用 / 删除那台副机
+// 本身也是写操作做不了。命令行 m-ui ha abandon --force 在冻结截止之后强制隔离目标、恢复写;截止前拒绝(交接标记还有效)。
+// 那台副机之后回来,跟的是隔离后更高纪元的本机。
+func TestForceAbandonAfterDeadline(t *testing.T) {
+	shortCommitWait(t)
+	cl := readyCluster(t, 2)
+	m := cl.m
+	L := m.Epoch()
+	cl.agents[0].mu.Lock()
+	cl.agents[0].dieAfterHandover = true
+	cl.agents[0].mu.Unlock()
+	if _, err := m.SetMaster(cl.ids[0], "admin", SetMasterOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	st := waitSwitchDone(t, m)
+	if st.Stage != StageUnknown {
+		t.Fatalf("前提:结果不明: %+v", st)
+	}
+	cl.agents[1].setDown(true)
+	var res CmdResult
+	if err := m.runCmd(Cmd{Op: "abandon", Force: true}, &res); err == nil || !strings.Contains(err.Error(), "冻结截止") {
+		t.Fatalf("截止前不能强制放弃: %v", err)
+	}
+	if got := m.Switch(); got.Stage != StageUnknown || m.Epoch() != L || !m.Frozen() {
+		t.Fatalf("截止前拒绝时什么都不动: %+v", got)
+	}
+	cl.clk.add(time.Duration(st.FreezeUntil-cl.clk.now().Unix()+1) * time.Second)
+	if err := m.runCmd(Cmd{Op: "abandon"}, &res); err == nil || !strings.Contains(err.Error(), "确认收到撤销") {
+		t.Fatalf("不加 --force:截止后凑不够过半照旧不隔离: %v", err)
+	}
+	if !m.Frozen() {
+		t.Fatal("没隔离之前写操作保持暂停")
+	}
+	if n := countNotes(cl.notes, "m-ui ha abandon --force"); n != 1 {
+		t.Fatalf("暂不隔离的通知里写出强制放弃的命令: %d %v", n, *cl.notes)
+	}
+	res = CmdResult{}
+	if err := m.runCmd(Cmd{Op: "abandon", Force: true}, &res); err != nil {
+		t.Fatalf("截止后强制放弃: %v", err)
+	}
+	if got := m.Switch(); got.Stage != StageFenced || m.Epoch() != L+2 || m.Frozen() || !strings.Contains(res.Text, "已放弃") {
+		t.Fatalf("强制放弃 = 隔离目标、解冻: %+v epoch=%d text=%q", got, m.Epoch(), res.Text)
+	}
+	done, ok := m.BeginWrite()
+	if !ok {
+		t.Fatal("强制放弃之后收写")
+	}
+	done()
+	if countNotes(cl.notes, "强制") != 1 {
+		t.Fatalf("通知写明是强制放弃: %v", *cl.notes)
+	}
+	var rows []model.Change
+	m.d.DB.Where("key = ? AND action = ?", "ha", "set-master-fenced").Find(&rows)
+	forced := 0
+	for _, c := range rows {
+		var o map[string]interface{}
+		if json.Unmarshal(c.Obj, &o) == nil && o["force"] == true && o["by"] == "cli" {
+			forced++
+		}
+	}
+	if forced != 1 {
+		t.Fatalf("强制放弃进操作审计、带 force: %d 条 %v", forced, rows)
+	}
+	// 下线的那台回来、收到本机的下一份状态(hub 每轮变了就推;这里直接推,不等它连不上之后的退避):
+	// 交接标记已在截止时作废,跟隔离后的本机(更高纪元);目标以原来的新纪元起来会被它拒
+	cl.agents[1].setDown(false)
+	// 它从冻结截止之前一直连不上:对本机的租约早已过期(副机在这个测试里用真实时钟,拨过去)
+	cl.cands[1].d.Now = func() time.Time { return time.Now().Add(LeaseExpire + time.Minute) }
+	var back model.Node
+	m.d.DB.First(&back, cl.ids[1])
+	if err := m.pushState(back, 10*time.Second); err != nil {
+		t.Fatalf("回来的副机收下状态: %v", err)
+	}
+	if e := cl.cands[1].Epoch(); e != m.Epoch() {
+		t.Fatalf("回来的副机跟隔离后的本机: 副机纪元 %d,本机 %d", e, m.Epoch())
+	}
+	if rej := cl.cands[1].CheckAgent(hdr(st.Epoch, cl.ids[0]), "ha/state"); rej == nil || rej.Code != CodeStale {
+		t.Fatalf("目标以纪元 %d 起来要被回来的副机拒: %+v", st.Epoch, rej)
+	}
+}
+
 // 提交请求发出之后、结论出来之前写闸一直关着:冻结时间到了也不自己打开(当场追问可能越过截止;重启时也一样)。
 func TestCommitKeepsWriteGateClosed(t *testing.T) {
 	shortCommitWait(t)

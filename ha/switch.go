@@ -924,7 +924,16 @@ func (s *Service) switchTargetUp(target uint, epoch uint64) bool {
 }
 
 // AbandonSwitch 管理员放弃结果不明的设为主机:以更高的纪元隔离目标,然后恢复写操作。
-func (s *Service) AbandonSwitch(actor string) error {
+func (s *Service) AbandonSwitch(actor string) error { return s.abandonSwitch(actor, false) }
+
+// ForceAbandonSwitch 命令行 m-ui ha abandon --force:冻结截止之后,确认收到撤销的副机凑不够过半也隔离目标、恢复写操作。
+// 给连不上的副机已经永久下线时用 —— 否则写操作一直暂停,停用 / 删除那台副机本身也是写操作,做不了。
+// 截止之前不行:没收到撤销的副机手里的交接标记那时还有效,目标起来它们会跟它,两边各管一部分。
+// 截止之后交接标记都已作废:目标若其实接手了,它的纪元低于隔离后的纪元,副机回来只认本机,目标被拒后自动变为副机
+// (两台同时自称主机时 rival.go 在两边提示)。
+func (s *Service) ForceAbandonSwitch(actor string) error { return s.abandonSwitch(actor, true) }
+
+func (s *Service) abandonSwitch(actor string, force bool) error {
 	w := s.sw
 	w.unkMu.Lock()
 	defer w.unkMu.Unlock()
@@ -932,7 +941,11 @@ func (s *Service) AbandonSwitch(actor string) error {
 	if st.Stage != StageUnknown || w.isRunning() {
 		return errors.New("没有结果不明的设为主机可以放弃")
 	}
-	return w.fence(st, actor)
+	if force && s.now().Unix() < st.FreezeUntil {
+		return fmt.Errorf("冻结截止(%s)之前不能强制放弃:没收到撤销的副机手里的交接标记那时还有效,目标起来它们会跟它;到截止时间再执行",
+			time.Unix(st.FreezeUntil, 0).Format("2006-01-02 15:04:05"))
+	}
+	return w.fence(st, actor, force)
 }
 
 // fence 以更高纪元隔离目标(FenceAbandon:撤销交接标记、给本机发自交接、本机纪元再升),成功后解冻。
@@ -940,8 +953,9 @@ func (s *Service) AbandonSwitch(actor string) error {
 // 目标自己说已是主机、或有副机正被它以新纪元推着,就按换主机完成收尾(冻结期间没收写,不丢数据),不隔离。
 // 撤销要有足够的副机确认收到才升纪元、解冻:冻结截止前(管理员放弃)要目标以外的每一台都确认 —— 没收到撤销的副机手里
 // 的交接标记到截止前一直有效,目标那时起来它们会跟它;截止后交接标记都已作废,要目标以外的副机连同本机过半。
-// 不够就保持冻结、记下原因,下一轮再试(结果不明时不能恢复写)。
-func (w *switcher) fence(st SwitchState, actor string) error {
+// 不够就保持冻结、记下原因,下一轮再试(结果不明时不能恢复写)。force:管理员确认连不上的副机已经永久下线
+// (只在冻结截止之后,见 ForceAbandonSwitch),不看确认台数;当场问目标、看副机有没有跟它照旧。
+func (w *switcher) fence(st SwitchState, actor string, force bool) error {
 	s := w.s
 	var tn model.Node
 	if s.d.Hub != nil && s.d.DB.Where("id = ?", st.Target).Limit(1).Find(&tn).Error == nil && tn.Id != 0 {
@@ -969,6 +983,9 @@ func (w *switcher) fence(st SwitchState, actor string) error {
 	need := (voters + 1) / 2
 	if s.now().Unix() < st.FreezeUntil {
 		need = voters
+	}
+	if force {
+		need = 0
 	}
 	if got < need {
 		return w.fenceBlocked(st, got, need)
@@ -1015,11 +1032,15 @@ func (w *switcher) fence(st SwitchState, actor string) error {
 	s.stopSelfLedger()
 	s.invalidate()
 	by := nonEmpty(actor, "timeout")
+	how := ""
+	if force {
+		how = "(强制,确认收到撤销的副机不够)"
+	}
 	s.addNotice(Notice{Kind: "switchFailed", Reason: "fenced", Name: st.TargetName, N: int64(e)})
-	s.audit("ha", "set-master-fenced", map[string]interface{}{"target": st.TargetName, "epoch": e, "by": by})
-	logger.Warning("容灾:设为主机结果不明,已以纪元 ", e, " 隔离目标 ", st.TargetName, "(", by, "),写操作恢复")
-	s.notify(fmt.Sprintf("🟠 <b>设为主机结果不明,已放弃</b>:本机以纪元 %d 继续当主机,写操作已恢复。\n「%s」若之后以纪元 %d 起来,会被副机拒绝并自动变为副机,它那份数据不会生效。",
-		e, notify.Esc(st.TargetName), st.Epoch))
+	s.audit("ha", "set-master-fenced", map[string]interface{}{"target": st.TargetName, "epoch": e, "by": by, "force": force})
+	logger.Warning("容灾:设为主机结果不明,已以纪元 ", e, " 隔离目标 ", st.TargetName, "(", by, how, "),写操作恢复")
+	s.notify(fmt.Sprintf("🟠 <b>设为主机结果不明,已放弃%s</b>:本机以纪元 %d 继续当主机,写操作已恢复。\n「%s」若之后以纪元 %d 起来,会被副机拒绝并自动变为副机,它那份数据不会生效。",
+		how, e, notify.Esc(st.TargetName), st.Epoch))
 	return nil
 }
 
@@ -1051,7 +1072,7 @@ func (w *switcher) fenceBlocked(st SwitchState, got, need int) error {
 	}
 	logger.Warning("容灾:", err)
 	if first {
-		s.notify(fmt.Sprintf("🟠 <b>设为主机结果不明,暂不隔离</b>:「%s」%s。连不上的副机恢复后会自动完成;冻结截止前放弃要目标以外的副机全部确认,截止后过半即可。",
+		s.notify(fmt.Sprintf("🟠 <b>设为主机结果不明,暂不隔离</b>:「%s」%s。连不上的副机恢复后会自动完成;冻结截止前放弃要目标以外的副机全部确认,截止后过半即可。连不上的副机已经永久下线、截止后仍凑不够时,在本机执行 m-ui ha abandon --force。",
 			notify.Esc(st.TargetName), notify.Esc(err.Error())))
 	}
 	return err
@@ -1124,7 +1145,7 @@ func (w *switcher) tickUnknown() {
 		recent := !w.lastFence.IsZero() && time.Since(w.lastFence) < 30*time.Second
 		w.mu.Unlock()
 		if !recent {
-			_ = w.fence(st, "")
+			_ = w.fence(st, "", false)
 		}
 		return
 	}

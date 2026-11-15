@@ -20,7 +20,7 @@ import (
 // Cmd 命令行交给服务的一个请求。
 type Cmd struct {
 	Id         string `json:"id"`
-	Op         string `json:"op"` // status | takeover | set-master | pause | resume | reset | yield
+	Op         string `json:"op"` // status | takeover | set-master | abandon | pause | resume | reset | yield
 	Target     string `json:"target,omitempty"`
 	Force      bool   `json:"force,omitempty"`
 	AllowPlain bool   `json:"allowPlain,omitempty"` // set-master:目标是明文 http 链接也继续(已确认风险)
@@ -102,6 +102,30 @@ func (s *Service) runCmd(c Cmd, res *CmdResult) error {
 		b, _ := json.Marshal(st)
 		res.Data = b
 		res.Text = "已开始把主机换到 " + n.Name
+		return nil
+	case "abandon":
+		if s.IsNode() {
+			return errors.New("本机是副机:放弃设为主机要在发起它的主机上执行")
+		}
+		var err error
+		if c.Force {
+			err = s.ForceAbandonSwitch("cli")
+		} else {
+			err = s.AbandonSwitch("cli")
+		}
+		if err != nil {
+			return err
+		}
+		switch st := s.switchState(); st.Stage {
+		case StageFenced:
+			res.Text = fmt.Sprintf("已放弃:本机以纪元 %d 继续当主机,写操作已恢复;「%s」若之后起来,会被副机拒绝并自动变为副机", st.FenceEpoch, st.TargetName)
+		case StageDone:
+			res.Text = "「" + st.TargetName + "」其实已经接手:按换主机完成收尾,本机马上变为副机"
+		case StageFailed:
+			res.Text = "「" + st.TargetName + "」确认没有接手:设为主机没做成,写操作已恢复"
+		default:
+			return errors.New(nonEmpty(st.Err, "还没放弃成,稍后再试"))
+		}
 		return nil
 	case "pause":
 		if err := s.Pause(c.Min); err != nil {
