@@ -1217,12 +1217,20 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
 /* 需要处理:标题下面一行小标签,不是卡片 —— 每项一个小圆角条:圆点、一句话、涉及的名字、动作。没有要处理的这一行整个不出现。
    前两版都被用户否了(2026-11-17):最早每一项是一个带底色和边框的大框(卡片里又套框);改成细线分隔的列表后仍然是
    一整条通栏卡片 ——「现在还是很重 不要这种大横幅」。所以不要容器、不要通栏:事情少就是一行里的一两个小条。 */
-.attn-strip { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .4rem .8rem; min-width: 0; padding: 0 .1rem; }
+.attn-strip { min-width: 0; padding: 0 .1rem; }
 .attn-strip:has(> #dash-attn:empty) { display: none; }
-.attn-label { flex: none; line-height: 1.85rem; font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); white-space: nowrap; }
-.attn-label .h-count { margin-left: .2rem; }
-.attn-strip.ok .attn-label { display: none; }
-.attn-strip > #dash-attn { flex: 1 1 18rem; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; }
+/* 前面原来有「需要处理 2 项」几个字(用户 11-17:「这个其实是不需要的」):小条自己带着圆点和「去处理」,不用再报一遍标题 */
+.attn-strip > #dash-attn { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; }
+/* 一行放不下时(dashboard.js 的 fitAttn 量出来的):等宽的几列,能排几列排几列;每条里动作靠右,
+   名字那一段先让位(放不下省略,悬停看全),那句话最后才省略。不让小条自己折行:长短不一地叠着,比整齐的几列难看 */
+.attn-strip > #dash-attn.cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(0, var(--attn-w, 100%))); justify-content: start; align-items: stretch; }
+#dash-attn.cols .attn li { display: flex; max-width: none; }
+#dash-attn.cols .attn .what { flex: 1 1 0; min-width: 0; overflow: hidden; }
+#dash-attn.cols .attn .ttl { flex-shrink: 0; } /* 列宽是按「那句话放得全」算出来的:让位的只有名字 */
+#dash-attn.cols.tight .attn .ttl { flex-shrink: 1; } /* 窄到连一句话都放不下(列宽已经是整行):那句话也只好省略 */
+#dash-attn.cols .attn .names { flex: 0 1 auto; }
+#dash-attn.cols .attn .acts { margin-left: auto; }
+#dash-attn.cols > .card-foot, #dash-attn.cols > .attn-ignored { grid-column: 1 / -1; }
 .attn { display: contents; list-style: none; margin: 0; padding: 0; }
 .attn li { display: inline-flex; align-items: center; gap: .45rem; min-width: 0; max-width: 100%; min-height: 1.85rem; padding: .1rem .8rem .1rem .7rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: var(--fs-xs); }
 .attn li.info { border-style: dashed; background: transparent; }
@@ -1248,10 +1256,9 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
 .attn-ok { color: var(--ok); font-size: .85rem; font-weight: 500; }
 
 @media (max-width: 700px) {
-  /* 手机:「需要处理」几个字自己一行;下面每项占一整行、只一行 —— 圆点、一句话、名字(放不下省略)、动作靠右。
+  /* 手机:每项占一整行、只一行 —— 圆点、一句话、名字(放不下省略)、动作靠右。
      试过让小条按内容宽度排、放不下在条里折行:标题挤在左边一窄列,条里折成两行,参差不齐(用户 11-17:「移动端的提醒排版差劲」) */
-  .attn-label { flex-basis: 100%; line-height: 1.4; }
-  .attn-strip > #dash-attn { flex-basis: 100%; gap: .35rem; }
+  .attn-strip > #dash-attn { gap: .35rem; }
   .attn li { display: flex; width: 100%; border-radius: .7rem; padding: .25rem .7rem .25rem .65rem; }
   .attn .what { flex: 1 1 0; overflow: hidden; }
   .attn .names { flex: 1 1 0; max-width: none; }

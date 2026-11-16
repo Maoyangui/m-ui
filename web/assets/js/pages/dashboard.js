@@ -140,7 +140,7 @@ export async function render(el) {
   const allScope = many ? t('dash.scope.all') : node ? t('dash.scope.local') : '';
   el.innerHTML = `<div class="dash-grid">
     ${quickStart()}
-    <section class="span-all attn-strip" id="dash-attn-card"><span class="attn-label">${esc(t('dash.attn.title'))}<span class="h-count" id="dash-attn-n"></span></span><div id="dash-attn"></div></section>
+    <section class="span-all attn-strip" id="dash-attn-card" aria-label="${esc(t('dash.attn.title'))}"><div id="dash-attn"></div></section>
     <div class="stats span-all" id="dash-stats"></div>
     ${card('dash-chart', 'span-2', `<h2>${esc(t('dash.traffic'))}${scopeTag(allScope)}</h2>
       <div class="seg" id="dash-range">${[1, 6, 24, 168].map(h => `<button data-act="dash.range" data-id="${h}" class="${h === range ? 'active' : ''}">${esc(t('dash.range.' + (h === 168 ? '7d' : h + 'h')))}</button>`).join('')}</div>`, `<div id="dash-chart">${loading()}</div>`)}
@@ -423,15 +423,64 @@ function attnRow(r) {
   return `<li class="${r.sev}"><span class="sev"></span><span class="what"><span class="ttl" title="${esc(plain.replace(/&amp;/g, '&'))}"><b>${esc(r.title)}</b>${parts.length ? ` <span class="parts">${parts.join(' · ')}</span>` : ''}</span>${r.names ? `<span class="names" title="${esc(r.names)}">${esc(r.names)}</span>` : ''}</span><span class="acts">${r.acts || ''}${r.go ? `<a class="go" href="${r.go}">${esc(r.goText || t('dash.attn.go'))}</a>` : ''}</span></li>`;
 }
 
+// fitAttn 顶部那几个小条怎么排。一行放得下:挨着排,各按自己的内容宽。放不下:排成等宽的几列,能排几列排几列 ——
+// 每条里「涉及的名字」那一段可以省略(悬停看全),所以列宽只要装得下圆点、那句话和「去处理」就行,不必按最长那一条来;
+// 列也不比最长那一条更宽(不把小条拉成横幅)。不让它们自己折行:折出来长短不一、第二行还缩在第一条下面,看着乱
+// (用户 11-17 两张截图:约 740 宽时两条叠着参差不齐;五条在 760 宽排成一竖排、右边空着一半 ——「这种情况貌似可以两条一行的」)。
+// 手机上每条占一整行,由样式表管,这里不动。
+let attnRO = null, attnEl = null, attnW = 0;
+function fitAttn() {
+  const box = document.getElementById('dash-attn');
+  if (!box) return;
+  box.classList.remove('cols', 'tight');
+  box.style.removeProperty('--attn-w');
+  const list = box.querySelector('ul.attn');
+  if (!list || narrow()) return;
+  const lis = [...list.children];
+  if (lis.length < 2) return;
+  // 先按「挨着排」量(此刻没有 cols,量到的就是内容宽):每条完整要多宽;名字那段只留开头一点(keep,够看出是哪一个)时要多宽
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 14, keep = 2 * rem;
+  const full = [], need = [];
+  for (const li of lis) {
+    const w = li.getBoundingClientRect().width, names = li.querySelector('.names');
+    const nw = names ? names.getBoundingClientRect().width : 0;
+    full.push(w);
+    need.push(w - Math.max(0, nw - keep));
+  }
+  // 宽度往小里取 1px:clientWidth 是四舍五入过的,实际要是少零点几个像素,刚好排满的两列就会掉成一列
+  const avail = Math.floor(box.getBoundingClientRect().width) - 1, gap = parseFloat(getComputedStyle(box).columnGap) || 8;
+  const extra = [...box.children].filter(c => c !== list).reduce((a, c) => a + c.getBoundingClientRect().width + gap, 0); // 「已忽略 N 项」那个小字也在这一行
+  if (full.reduce((a, w) => a + w, 0) + gap * (lis.length - 1) + extra <= avail + 0.5) return;
+  const widest = Math.max(...full), must = Math.min(Math.max(...need), avail);
+  const cols = Math.min(lis.length, Math.max(1, Math.floor((avail + gap) / (must + gap))));
+  const colW = Math.min(widest, (avail - gap * (cols - 1)) / cols);
+  box.style.setProperty('--attn-w', Math.floor(colW) + 'px');
+  box.classList.add('cols');
+  box.classList.toggle('tight', Math.max(...need) > avail);
+}
+// 宽度变了(拖窗口、收起侧栏)重排;只看宽度:重排会改变高度,不能因为高度变了又排一遍
+// 每次画完都叫一声:页面重画过(换页再回来)那一行是个新元素,要换着盯
+function watchAttn() {
+  const el = document.getElementById('dash-attn-card');
+  if (el === attnEl) return;
+  if (attnRO) { attnRO.disconnect(); attnRO = null; }
+  attnEl = el;
+  if (!el || typeof ResizeObserver === 'undefined') return;
+  attnW = Math.round(el.clientWidth);
+  attnRO = new ResizeObserver(() => {
+    if (!el.isConnected) { attnRO.disconnect(); attnRO = null; attnEl = null; return; }
+    const w = Math.round(el.clientWidth);
+    if (w === attnW) return;
+    attnW = w;
+    fitAttn();
+  });
+  attnRO.observe(el);
+}
+
 function renderAttn() {
   const box = document.getElementById('dash-attn');
   if (!box) return;
   const { items, ignored } = attnItems();
-  const serious = items.filter(i => i.sev !== 'info');
-  const pending = (!isNode() && !nodesData && !nodesErr) || (!health && !healthErr) || (!conns && !connsErr);
-  const ok = !serious.length && !pending;
-  document.getElementById('dash-attn-card')?.classList.toggle('ok', ok);
-  setHTML('dash-attn-n', serious.length ? esc(t('dash.attn.count', { n: serious.length })) : '');
   const cap = narrow() && !attnAll ? 4 : items.length;
   // 还在取数、暂时没有要处理的:什么都不画(这一行整个不出现),不闪一下「正在检查」
   let html = '';
@@ -441,7 +490,8 @@ function renderAttn() {
     html += `<div class="attn-ignored"><button class="link-btn muted small" data-act="dash.attnIgnored" aria-expanded="${attnIgnoredOpen}">${esc(t('dash.attn.ignored', { n: ignored.length }))} <i class="i i-chev${attnIgnoredOpen ? ' open' : ''}"></i></button>`
       + (attnIgnoredOpen ? `<ul class="attn" style="margin-top:.35rem">${ignored.map(r => attnRow({ ...r, sev: 'info', acts: btn('dash.undismiss', r.kind, t('dash.attn.restore'), 'ghost') })).join('')}</ul>` : '') + '</div>';
   }
-  setHTML(box, html);
+  if (setHTML(box, html)) fitAttn();
+  watchAttn();
 }
 
 // ---- 统计条:固定 6 张,每张一行数值一行说明,放不下省略号、全文在 title;有去处的卡就是链接 ----
@@ -743,7 +793,7 @@ async function renderLog() {
 // ---- 代理面板:需要处理 + 6 张统计卡 + 当前在线 + 即将到期 / 流量快用完两张名单 ----
 function renderReseller(el) {
   el.innerHTML = `<div class="dash-grid rs">
-    <section class="span-all attn-strip" id="dash-attn-card"><span class="attn-label">${esc(t('dash.attn.title'))}<span class="h-count" id="dash-attn-n"></span></span><div id="dash-attn"></div></section>
+    <section class="span-all attn-strip" id="dash-attn-card" aria-label="${esc(t('dash.attn.title'))}"><div id="dash-attn"></div></section>
     <div class="stats span-all" id="dash-stats"></div>
     ${card('dash-online', 'span-2', `<h2>${esc(t('dash.onlineList'))} <span class="h-count" id="dash-online-n"></span></h2><input type="search" class="sm dash-q" id="dash-online-q" placeholder="${esc(t('dash.online.search'))}" value="${esc(onlineQ)}" hidden>`, `<div id="dash-online"></div>`)}
     ${card('dash-expiring', '', `<h2>${esc(t('dash.rs.expiringList'))} <span class="h-count" id="dash-expiring-n"></span></h2>`, `<div id="dash-expiring">${loading()}</div>`)}
@@ -800,9 +850,8 @@ function renderResellerAttn() {
   const sat = statusStaleAt();
   if (sat) items.push({ sev: 'warn', title: t('dash.attn.statusStale', { time: fmtTime(Math.floor(sat / 1000)) }), names: errText(state.err && state.err.status), acts: btn('dash.retry', 'status', t('dash.retry')) });
   items.sort((a, b) => SEV[a.sev] - SEV[b.sev]);
-  document.getElementById('dash-attn-card')?.classList.toggle('ok', !items.length);
-  setHTML('dash-attn-n', items.length ? esc(t('dash.attn.count', { n: items.length })) : '');
-  setHTML(box, items.length ? `<ul class="attn">${items.map(attnRow).join('')}</ul>` : '');
+  if (setHTML(box, items.length ? `<ul class="attn">${items.map(attnRow).join('')}</ul>` : '')) fitAttn();
+  watchAttn();
   document.getElementById('dash-stats')?.classList.toggle('stale', !!(sat && Date.now() - sat > 15000));
 }
 function renderResellerLists() {
