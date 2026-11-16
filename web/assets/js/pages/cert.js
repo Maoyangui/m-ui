@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, fmtDay, fmtDate, fmtRelative, toast, confirm, registerActions, badge, field, check, copy, fv, fchk, cfTokenLink } from '../ui.js';
+import { esc, fmtDay, fmtDate, fmtRelative, toast, confirm, registerActions, badge, field, switchRow, openModal, copy, fv, fchk, cfTokenLink } from '../ui.js';
 import { followPanel } from '../panelmove.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 import { subDefaultOn, subSchemeChange } from '../subtls.js';
@@ -18,6 +18,8 @@ const USES = { lines: 'cert.useLines', panel: 'cert.usePanel', sub: 'cert.useSub
 // 签发日志是后端写的中文;英文界面按错误文案同一张表翻译,行首的时间不动
 const logText = st => (st.log || []).map(l => { const m = /^(\d\d:\d\d:\d\d )([\s\S]*)$/.exec(l); return m ? m[1] + trErr(m[2]) : trErr(l); }).join('\n');
 
+// 版式:证书页回答两个问题 —— 现在哪里用着哪张(三格:线路默认 / 面板 / 订阅,各带到期和「更换」),库里有哪些证书(一张表)。
+// 「添加证书」是偶尔才做的事,收进弹框(以前常驻半个页面,左边三行、右边一长条表单,左下一大块空着)。
 export async function render(el) {
   data = await get('cert');
   const s = data.settings, st = data.status;
@@ -26,34 +28,24 @@ export async function render(el) {
   el.innerHTML = `
     <div id="c-txt"></div>
     ${notifyHint()}
-    <div class="grid-2">
-      <section class="card">
-        <div class="card-head"><h2>${t('cert.inUse')}</h2>${st.running ? badge(t('cert.running'), 'primary') : (st.lastOk ? badge(t('cert.lastOk') + ' ' + fmtRelative(st.lastOk), 'ok') : '')}</div>
-        <div class="cert-uses">${['lines', 'panel', 'sub'].map(useRow).join('')}</div>
-        ${panelChanged ? `<div class="hint warn-text row" style="margin-top:.6rem;justify-content:space-between;flex-wrap:wrap"><span>${t('cert.panelRestart')}</span><button class="btn sm" data-act="cert.restart">${t('cert.restartBtn')}</button></div>` : ''}
-        <p class="hint" style="margin-top:.6rem">${t('cert.usesHelp')}</p>
-      </section>
-
-      <section class="card">
-        <div class="card-head"><h2>${t('cert.add')}</h2></div>
-        <div class="seg" id="c-source">${[['acme', t('cert.srcAcme')], ['selfsign', t('cert.srcSelf')], ['external', t('cert.srcExternal')]]
-          .map(([k, label]) => `<button data-act="cert.source" data-id="${k}" class="${k === source ? 'active' : ''}">${label}</button>`).join('')}</div>
-        <div id="c-form" style="margin-top:.8rem"></div>
-      </section>
-    </div>
     <section class="card">
-      <div class="card-head"><h2>${t('cert.store')}</h2><span class="muted small">${t('cert.storeCount', { n: certs().length })}</span></div>
-      ${certs().length ? `<div class="table-wrap"><table class="grid">
+      <div class="card-head"><h2>${t('cert.inUse')}</h2>${st.running ? badge(t('cert.running'), 'primary') : (st.lastOk ? badge(t('cert.lastOk') + ' ' + fmtRelative(st.lastOk), 'ok') : '')}</div>
+      <div class="cu-grid">${['lines', 'panel', 'sub'].map(useTile).join('')}</div>
+      ${panelChanged ? `<div class="hint warn-text row" style="margin-top:.7rem;justify-content:space-between;flex-wrap:wrap"><span>${t('cert.panelRestart')}</span><button class="btn sm" data-act="cert.restart">${t('cert.restartBtn')}</button></div>` : ''}
+      <p class="hint">${t('cert.usesHelp')}</p>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>${t('cert.store')}<span class="h-count">${certs().length || ''}</span></h2><button class="btn primary sm" data-act="cert.add" ${st.running ? 'disabled' : ''}>${t('cert.add')}</button></div>
+      ${certs().length ? `<div class="table-wrap"><table class="grid" data-fit="cards:760">
         <thead><tr><th>${t('cert.subject')}</th><th class="c-p2">${t('cert.issuer')}</th><th>${t('cert.validity')}</th><th>${t('cert.renewCol')}</th><th>${t('cert.usedBy')}</th><th></th></tr></thead>
         <tbody>${certs().map(storeRow).join('')}</tbody>
-      </table></div>` : `<p class="muted">${t('cert.none')}</p>`}
+      </table></div>` : `<div class="api-empty"><p>${esc(t('cert.storeEmpty'))}</p><button class="btn primary sm" data-act="cert.add">${t('cert.add')}</button></div>`}
     </section>
     <details class="card cert-log" ${st.running || st.lastError ? 'open' : ''}>
       <summary><h2>${t('cert.log')}</h2>${st.lastError ? badge(t('cert.lastFailed'), 'danger') : ''}</summary>
       <pre class="log" id="c-log">${esc(logText(st) || t('common.empty'))}</pre>
       ${st.lastError ? `<p class="hint" style="color:var(--danger)">${esc(trErr(st.lastError))}</p>` : ''}
     </details>`;
-  renderForm();
   renderTxt(st.txt);
   if (st.running) startPoll();
 }
@@ -67,18 +59,24 @@ function notifyHint() {
   return `<div class="hint warn-text row" style="margin-bottom:.8rem;justify-content:space-between;flex-wrap:wrap"><span>${esc(t('cert.notifyOff'))}</span><a class="btn sm" href="#/settings">${esc(t('cert.notifySet'))}</a></div>`;
 }
 
-// 「正在使用」的一行:线路默认 / 面板 / 订阅各选各的,点「更换」开抽屉
-function useRow(target) {
+// 「正在使用」的一格:线路默认 / 面板 / 订阅各选各的。上面是用途,中间是哪张证书和到期,右上角「更换」开抽屉
+function useTile(target) {
   const c = certOf(target);
   const path = target === 'panel' ? data.panelCert : target === 'sub' ? data.subCert : data.certPath;
-  let cur;
-  if (c) cur = `<b>${esc(certLabel(c.name))}</b> ${certBadge(c.info, c)}<div class="sub-cell">${esc(sourceText(c))}${c.info.exists ? ' · ' + fmtDay(new Date(c.info.notAfter).getTime() / 1000) : ''}</div>`;
-  else if (path && (target !== 'lines' || data.info.exists)) cur = `<span class="mono small">${esc(path)}</span><div class="sub-cell">${t('cert.notInStore')}</div>`;
-  else cur = `<span class="muted">${t(target === 'lines' ? 'cert.none' : 'cert.noHttps')}</span>`;
-  return `<div class="cert-use">
-    <span class="cert-use-label">${t(USES[target])}</span>
-    <div class="cert-use-cur">${cur}</div>
-    <button class="btn sm" data-act="cert.pick" data-id="${target}" ${certs().length ? '' : 'disabled'}>${t('cert.change')}</button>
+  let cur, tone = '';
+  if (c) {
+    cur = `<b class="cu-name" title="${esc(certLabel(c.name))}">${esc(certLabel(c.name))}</b>
+      <span class="cu-meta">${certBadge(c.info, c)}<span class="muted small">${esc(sourceText(c))}${c.info.exists ? ' · ' + fmtDay(new Date(c.info.notAfter).getTime() / 1000) : ''}</span></span>`;
+    if (!c.info.exists || c.info.daysLeft < 0) tone = ' bad'; else if (c.info.daysLeft <= 14) tone = ' warn';
+  } else if (path && (target !== 'lines' || data.info.exists)) {
+    cur = `<b class="cu-name mono small" title="${esc(path)}">${esc(path)}</b><span class="cu-meta"><span class="muted small">${t('cert.notInStore')}</span></span>`;
+  } else {
+    cur = `<b class="cu-name off">${t(target === 'lines' ? 'cert.none' : 'cert.noHttps')}</b><span class="cu-meta"><span class="muted small">${t(target === 'lines' ? 'cert.noneHint' : 'cert.noHttpsHint')}</span></span>`;
+    if (target === 'lines') tone = ' warn';
+  }
+  return `<div class="cu-tile${tone}">
+    <div class="cu-top"><span class="lb">${t(USES[target])}</span><button class="btn sm" data-act="cert.pick" data-id="${target}" ${certs().length ? '' : 'disabled'}>${t('cert.change')}</button></div>
+    ${cur}
   </div>`;
 }
 
@@ -145,43 +143,58 @@ function sourceBadge(c) {
   return '';
 }
 
-// 添加之后顶替哪些用途;没勾的不动
-function targetChecks() {
+// 添加之后顶替哪些用途:三个开关各一格(没开的不动)
+function targetSwitches() {
   const hasReal = data.info.exists && !data.info.selfSigned;
   const self = source === 'selfsign';
-  return `<h3 class="sub-title">${t('cert.applyTo')}</h3>
-    <div class="form-grid">
-      ${check('c-lines', t('cert.forLines'), !hasReal, t('cert.forLinesHelp'))}
-      ${check('c-panel', t('cert.applyPanel'), !self && !data.panelCert, t('cert.applyPanelHelp'))}
-      ${check('c-sub', t('cert.applySub'), subDefaultOn(data, self), data.subCert || !(data.subUsers > 0) ? t('cert.applySubHelp') : t('cert.applySubWarn', { n: data.subUsers }))}
+  return `<h3 class="form-sec">${t('cert.applyTo')}</h3>
+    <div class="ct-uses">
+      ${switchRow('c-lines', t('cert.forLines'), !hasReal, t('cert.forLinesHelp'))}
+      ${switchRow('c-panel', t('cert.applyPanel'), !self && !data.panelCert, t('cert.applyPanelHelp'))}
+      ${switchRow('c-sub', t('cert.applySub'), subDefaultOn(data, self), data.subCert || !(data.subUsers > 0) ? t('cert.applySubHelp') : t('cert.applySubWarn', { n: data.subUsers }))}
     </div>`;
 }
 
-// 三种来源各自的表单;共用下方的"添加后用于"勾选
+const SAVE_TEXT = { acme: 'cert.issueBtn', selfsign: 'cert.selfsign', external: 'cert.useExternal' };
+// 「添加证书」弹框:最上面选来源(有域名自动签发 / 无域名自签 / 服务器上已有的),下面是这种来源要填的,最后是「添加后用于」。
+// 订阅地址会跟着变、同名证书会被顶替这两种要再确认的情况:第一次点主按钮时在弹框里说明,再点一次才做(不另弹一个确认框把填好的表单盖掉)
+let armed = '';
+function addDialog() {
+  armed = '';
+  openModal(t('cert.add'), `<div class="ct-form">
+      <div class="seg" id="c-source">${[['acme', t('cert.srcAcme')], ['selfsign', t('cert.srcSelf')], ['external', t('cert.srcExternal')]]
+    .map(([k, label]) => `<button type="button" data-act="cert.source" data-id="${k}" class="${k === source ? 'active' : ''}">${label}</button>`).join('')}</div>
+      <div id="c-form"></div>
+    </div>`, submitAdd, { wide: true, saveText: t(SAVE_TEXT[source]) });
+  renderForm();
+}
+
+// 三种来源各自的表单;共用下方的「添加后用于」
 function renderForm() {
   const box = document.getElementById('c-form');
   if (!box) return;
-  const s = data.settings, st = data.status;
+  const s = data.settings;
+  const save = document.getElementById('modal-save');
+  if (save) save.textContent = t(SAVE_TEXT[source]);
+  armed = '';
   if (source === 'acme') {
     const method = ['http', 'cloudflare', 'manual'].includes(s.acmeMethod) ? s.acmeMethod : 'http';
     box.innerHTML = `
-      <div class="form-grid">
-        ${field(t('set.webDomain'), `<input id="c-domain" value="${esc(s.acmeDomain || s.webDomain || '')}" placeholder="hk.example.com / *.example.com">`, t('cert.domainHelp'))}
-        ${field(t('cert.email'), `<input id="c-email" value="${esc(s.acmeEmail || '')}" placeholder="admin@example.com">`, t('cert.emailHelp'))}
+      <div class="form-grid cols-2">
+        <div class="full">${field(t('set.webDomain'), `<input id="c-domain" value="${esc(s.acmeDomain || s.webDomain || '')}" placeholder="hk.example.com / *.example.com">`, t('cert.domainHelp'))}</div>
         ${field(t('cert.method'), `<select id="c-method" data-change="cert.method">
           <option value="http" ${method === 'http' ? 'selected' : ''}>${t('cert.methodHttp')}</option>
           <option value="cloudflare" ${method === 'cloudflare' ? 'selected' : ''}>${t('cert.methodCf')}</option>
           <option value="manual" ${method === 'manual' ? 'selected' : ''}>${t('cert.methodManual')}</option></select>`, t('cert.methodHelp'))}
-        <div id="c-cf-wrap" ${method !== 'cloudflare' ? 'hidden' : ''}>${field(t('cert.cfToken'), `<input id="c-cftoken" type="password" placeholder="${s.hasCfToken ? t('cert.cfTokenKeep') : ''}">${cfTokenLink()}`, t('cert.cfTokenHelp'))}</div>
-        <div id="c-renew-wrap">${check('c-renew', t('cert.autoRenew'), s.acmeAutoRenew, t('cert.autoRenewHelp'))}<p class="hint danger-text" id="c-renew-manual" ${method === 'manual' ? '' : 'hidden'}>${esc(t('cert.manualNoRenew'))}</p></div>
-        ${check('c-staging', t('cert.staging'), s.acmeStaging, t('cert.stagingHelp'))}
+        ${field(t('cert.email'), `<input id="c-email" value="${esc(s.acmeEmail || '')}" placeholder="admin@example.com">`, t('cert.emailHelp'))}
+        <div class="full" id="c-cf-wrap" ${method !== 'cloudflare' ? 'hidden' : ''}>${field(t('cert.cfToken'), `<input id="c-cftoken" type="password" placeholder="${s.hasCfToken ? t('cert.cfTokenKeep') : ''}">${cfTokenLink()}`, t('cert.cfTokenHelp'))}</div>
       </div>
-      ${targetChecks()}
-      <div class="row" style="margin-top:.8rem;flex-wrap:wrap">
-        <button class="btn" data-act="cert.precheck">${t('cert.precheck')}</button>
-        <button class="btn primary" data-act="cert.issue" ${st.running ? 'disabled' : ''}>${t('cert.issueBtn')}</button>
+      <div class="ct-check"><button type="button" class="btn sm" data-act="cert.precheck">${t('cert.precheck')}</button><div id="c-precheck"></div></div>
+      <div class="ct-opts">
+        <div id="c-renew-wrap">${switchRow('c-renew', t('cert.autoRenew'), s.acmeAutoRenew, t('cert.autoRenewHelp'))}<p class="hint danger-text" id="c-renew-manual" ${method === 'manual' ? '' : 'hidden'}>${esc(t('cert.manualNoRenew'))}</p></div>
+        ${switchRow('c-staging', t('cert.staging'), s.acmeStaging, t('cert.stagingHelp'))}
       </div>
-      <div id="c-precheck" style="margin-top:.6rem"></div>`;
+      ${targetSwitches()}`;
     document.getElementById('c-domain').addEventListener('input', syncWildcard);
     syncWildcard();
     syncMethod();
@@ -190,22 +203,64 @@ function renderForm() {
     const auto = [state.settings.publicIp, s.webDomain].filter(Boolean).join(', ');
     box.innerHTML = `
       <p class="hint">${t('cert.selfHelp')}</p>
-      <div class="form-grid" style="margin-top:.6rem">
-        <div class="full">${field(t('cert.hosts'), `<input id="ss-hosts" value="" placeholder="${esc(auto || '1.2.3.4')}">`, t('cert.hostsHelp'))}</div>
-      </div>
-      ${targetChecks()}
-      <div class="row" style="margin-top:.8rem"><button class="btn primary" data-act="cert.selfsign">${t('cert.selfsign')}</button></div>`;
+      ${field(t('cert.hosts'), `<input id="ss-hosts" value="" placeholder="${esc(auto || '1.2.3.4')}">`, t('cert.hostsHelp'))}
+      ${targetSwitches()}`;
   } else {
     box.innerHTML = `
       <p class="hint">${t('cert.externalHelp')}</p>
-      <div class="form-grid" style="margin-top:.6rem">
-        <div class="full">${field(t('cert.certPath'), `<input id="ex-cert" value="" placeholder="/etc/letsencrypt/live/example.com/fullchain.pem">`)}</div>
-        <div class="full">${field(t('cert.keyPath'), `<input id="ex-key" value="" placeholder="/etc/letsencrypt/live/example.com/privkey.pem">`, t('cert.pathHelp'))}</div>
+      <div class="form-grid cols-2">
+        ${field(t('cert.certPath'), `<input id="ex-cert" value="" placeholder="/etc/letsencrypt/live/example.com/fullchain.pem">`)}
+        ${field(t('cert.keyPath'), `<input id="ex-key" value="" placeholder="/etc/letsencrypt/live/example.com/privkey.pem">`, t('cert.pathHelp'))}
       </div>
-      ${targetChecks()}
-      <div class="row" style="margin-top:.8rem"><button class="btn primary" data-act="cert.external">${t('cert.useExternal')}</button></div>`;
+      ${targetSwitches()}`;
   }
 }
+
+// 要再确认一次的事:第一次点时把话写在弹框的提示行里(抛出去由 openModal 显示),同一句话再点一次才放行
+function confirmOnce(msg) {
+  if (!msg || armed === msg) return;
+  armed = msg;
+  throw new Error(msg + ' ' + t('cert.againToConfirm'));
+}
+
+// 弹框的主按钮:按来源签发 / 生成自签 / 登记已有证书
+async function submitAdd() {
+  const use = targets();
+  const subWarn = subSchemeText(use.applySub); // 订阅 http ↔ https 一换,所有用户的订阅地址都会变
+  if (source === 'acme') {
+    const method = fv('c-method');
+    const body = { domain: fv('c-domain').trim(), email: fv('c-email').trim(), method, cfToken: fv('c-cftoken'),
+      staging: fchk('c-staging'), autoRenew: method !== 'manual' && fchk('c-renew'), ...use };
+    if (!body.domain) throw new Error(t('cert.needDomain'));
+    confirmOnce(subWarn);
+    const res = await post('cert/issue', body);
+    toast(t(res && res.reason === 'manual' ? 'cert.startedManual' : 'cert.started'), 'ok');
+    startPoll();
+    await reload(); // 页面上显示「签发中」,日志跟着滚
+    return;
+  }
+  if (source === 'selfsign') {
+    confirmOnce(subWarn);
+    await post('cert/selfsign', { hosts: fv('ss-hosts').trim(), ...use }); // 留空 = 后端自动用本机公网 IP
+    toast(t('cert.done'), 'ok');
+    await reload();
+    return;
+  }
+  const body = { certFile: fv('ex-cert').trim(), keyFile: fv('ex-key').trim(), ...use };
+  if (!body.certFile || !body.keyFile) throw new Error(t('cert.needPaths'));
+  confirmOnce(subWarn);
+  try { await post('cert/external', { ...body, force: forceShadow === body.certFile }); }
+  catch (e) {
+    // 同名证书是面板签发、开着自动续期的:换过去那张就不再自动续期,说明白、再点一次才换
+    if (e.status !== 409) throw e;
+    forceShadow = body.certFile;
+    throw new Error(t('cert.shadowConfirm', { msg: e.message }) + ' ' + t('cert.againToConfirm'));
+  }
+  forceShadow = '';
+  toast(t('cert.externalOk'), 'ok');
+  await reload();
+}
+let forceShadow = '';
 
 // 泛域名只能走 DNS 验证:HTTP 选项灰掉,已选 HTTP 的自动换走,说明换成泛域名那句
 function syncWildcard() {
@@ -303,8 +358,6 @@ const subSchemeText = next => {
   const ch = subSchemeChange(data, next);
   return ch ? t('cert.subSchemeConfirm', { n: ch.n, from: ch.from, to: ch.to }) : '';
 };
-// 添加证书(自签 / 已有证书)勾了「用于订阅 HTTPS」且订阅地址会变:先确认一次
-const confirmSubScheme = async () => { const w = subSchemeText(fchk('c-sub')); return !w || confirm(w, { danger: true }); };
 
 registerActions({
   'cert.source': id => {
@@ -387,46 +440,5 @@ registerActions({
     } catch (e) { box.innerHTML = `<span class="small" style="color:var(--danger)">${esc(e.message)}</span>`; }
     finally { btn.disabled = false; }
   },
-  'cert.issue': async (_, btn) => {
-    const method = fv('c-method');
-    const body = {
-      domain: fv('c-domain').trim(), email: fv('c-email').trim(), method, cfToken: fv('c-cftoken'),
-      staging: fchk('c-staging'), autoRenew: method !== 'manual' && fchk('c-renew'), ...targets(),
-    };
-    if (!body.domain) { toast(t('cert.needDomain'), 'err'); return; }
-    const subWarn = subSchemeText(body.applySub); // 签发确认框里一并写明:所有用户的订阅地址会变
-    if (!await confirm(t('cert.issueConfirm', { domain: body.domain }) + (subWarn ? ' ' + subWarn : ''), subWarn ? { danger: true } : {})) return;
-    btn.disabled = true;
-    try {
-      const res = await post('cert/issue', body);
-      toast(t(res && res.reason === 'manual' ? 'cert.startedManual' : 'cert.started'), 'ok');
-      startPoll();
-    } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
-  },
-  'cert.selfsign': async (_, btn) => {
-    const hosts = fv('ss-hosts').trim(); // 留空 = 后端自动用本机公网 IP
-    if (!await confirmSubScheme()) return;
-    btn.disabled = true;
-    try {
-      await post('cert/selfsign', { hosts, ...targets() });
-      toast(t('cert.done'), 'ok');
-      await reload();
-    } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
-  },
-  'cert.external': async (_, btn) => {
-    const body = { certFile: fv('ex-cert').trim(), keyFile: fv('ex-key').trim(), ...targets() };
-    if (!body.certFile || !body.keyFile) { toast(t('cert.needPaths'), 'err'); return; }
-    if (!await confirmSubScheme()) return;
-    btn.disabled = true;
-    try {
-      try { await post('cert/external', body); }
-      catch (e) {
-        // 同名证书是面板签发、开着自动续期的:换过去那张就不再自动续期,先问一句
-        if (e.status !== 409 || !await confirm(t('cert.shadowConfirm', { msg: e.message }), { danger: true })) throw e;
-        await post('cert/external', { ...body, force: true });
-      }
-      toast(t('cert.externalOk'), 'ok');
-      await reload();
-    } catch (e) { if (e.status !== 409) toast(e.message, 'err'); btn.disabled = false; }
-  },
+  'cert.add': () => addDialog(),
 });

@@ -30,7 +30,7 @@
   /* 字号:正文 14px,说明 13px,小字 12px */
   --fs-xs: 12px; --fs-sm: 13px; --fs-base: 14px; --fs-md: 15px; --fs-lg: 17px; --fs-xl: 20px; --fs-2xl: 24px;
   --ctl-h: 34px; --ctl-h-sm: 28px;
-  --sidebar-w: 216px;
+  --sidebar-w: 204px;
   /* 内容区最宽:列表页随窗口放宽(fluid),表单类页面保持 1600 */
   --page-max: 1600px; --page-max-fluid: 2400px; --topbar-h: 3.75rem;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
@@ -135,11 +135,13 @@ b, strong { font-weight: 600; }
 .brand { display: flex; align-items: center; gap: .55rem; height: var(--topbar-h); min-height: 3.75rem; padding: 0 .5rem; margin: 0 -.75rem .5rem; padding-left: 1.25rem; padding-right: 1rem; border-bottom: 1px solid var(--divider); font-weight: 700; font-size: 1.05rem; letter-spacing: -.02em; }
 .brand-name { flex: 1; white-space: nowrap; }
 #role-badge { max-width: 7.5rem; overflow: hidden; text-overflow: ellipsis; }
-#nav { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; overflow-y: auto; margin: 0 -.25rem; padding: 0 .25rem .5rem; scrollbar-width: thin; }
-.nav-group { padding: .95rem .65rem .35rem; font-size: var(--fs-xs); font-weight: 500; color: var(--faint); letter-spacing: .02em; text-transform: uppercase; user-select: none; }
-#nav a { display: flex; align-items: center; gap: .65rem; height: 34px; padding: 0 .65rem; border-radius: var(--radius-sm); color: var(--text-2); font-weight: 500; font-size: var(--fs-base); transition: background .12s, color .12s; }
-#nav a .ic { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--faint); flex: none; transition: color .12s; }
-#nav a .ic svg { width: 17px; height: 17px; }
+/* 栏目排得紧一点(每项 30 高、13.5 的字、分组标题上下留白收小):十五六个栏目在 768 高的屏上不用滚,后面再加栏目也放得下。
+   手机上仍是 42 高(见下面的窄屏规则),手指好点 */
+#nav { display: flex; flex-direction: column; gap: 1px; flex: 1; min-height: 0; overflow-y: auto; margin: 0 -.25rem; padding: 0 .25rem .5rem; scrollbar-width: thin; }
+.nav-group { padding: .7rem .6rem .25rem; font-size: 11.5px; font-weight: 500; color: var(--faint); letter-spacing: .02em; text-transform: uppercase; user-select: none; }
+#nav a { display: flex; align-items: center; gap: .6rem; height: 30px; padding: 0 .6rem; border-radius: var(--radius-sm); color: var(--text-2); font-weight: 500; font-size: 13.5px; transition: background .12s, color .12s; }
+#nav a .ic { width: 17px; height: 17px; display: inline-flex; align-items: center; justify-content: center; color: var(--faint); flex: none; transition: color .12s; }
+#nav a .ic svg { width: 16px; height: 16px; }
 #nav a:hover { background: var(--surface-3); color: var(--text); }
 #nav a:hover .ic { color: var(--muted); }
 #nav a.active { background: var(--nav-active); color: var(--text); font-weight: 600; }
@@ -238,43 +240,71 @@ table.grid.tight { min-width: 0; table-layout: fixed; }
 .star-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .star-card .hint { margin: .15rem 0 0; }
 .pager select { width: auto; height: var(--ctl-h-sm); padding: 0 1.6rem 0 .5rem; font-size: var(--fs-sm); }
-/* 服务器表:窄列给定宽度,余下宽度留给名称/地址/状态三列 */
+/* 服务器表,三种排法(门槛写在表上的 data-fit,见 pages/nodes.js):
+   宽:一行八列。连通 / 同步 / 数据面 / 在线 / 操作给定宽度,余下的平分给名称、地址、状态三列(定宽布局,内容再长也不撑表);
+   中(.rows2):放不下一行时每台排成两行 —— 上面 名称 / 地址 / 状态 / 操作,下面 大陆连通 / 数据面(各带一个小列名);
+   窄(.cards):每台一张卡片。
+   以前名称、状态两列是「剩多少算多少」,窗口不到 1300 宽就被挤成一字一行、徽标压到旁边一列上 */
 .grid.nodes .c-reach { width: 10.5rem; }
 .grid.nodes .c-sync { width: 7.5rem; }
 .grid.nodes .c-core { width: 12rem; }
 .grid.nodes .c-online { width: 3.5rem; }
-.grid.nodes .c-act { width: 10.5rem; }
-:lang(en) .grid.nodes .c-act { width: 11.5rem; }
-/* 窗口窄时先隐藏在线、同步两列(.c-p3),名称 / 地址 / 状态三列不会被挤成一字一行,也就不用整表横向滚动 */
+.grid.nodes .c-act { width: 11.25rem; }
+:lang(en) .grid.nodes .c-act { width: 11.75rem; }
 table.grid.nodes { min-width: 0; }
-/* ===== 窄屏表格:列表的每一行排成一张卡片 =====
-   名称当标题(勾选框在它左边),其余每格一行:左边列名(app.js 按表头补到 data-label)、右边内容;没有列名的(操作按钮)靠右。
-   拖动排序的把手在手机上用不了,藏掉;键值表、接口文档、连接列表不在此列 */
+.grid.nodes .node-name { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.grid.nodes td.primary-cell { min-width: 0; }
+table.grid.nodes.rows2, table.grid.nodes.rows2 tbody { display: block; }
+table.grid.nodes.rows2 thead { display: none; }
+table.grid.nodes.rows2 tr { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1.1fr) auto; gap: .5rem 1rem; align-items: start; padding: .7rem .9rem; border-bottom: 1px solid var(--divider); }
+table.grid.nodes.rows2 tr:last-child { border-bottom: none; }
+table.grid.nodes.rows2 td { display: block; width: auto; min-width: 0; padding: 0; border: none; }
+table.grid.nodes.rows2 td.c-p3 { display: none; }
+table.grid.nodes.rows2 td.c-reach { grid-column: 1 / 3; grid-row: 2; }
+table.grid.nodes.rows2 td.c-core { grid-column: 3 / 5; grid-row: 2; }
+table.grid.nodes.rows2 td.c-reach::before, table.grid.nodes.rows2 td.c-core::before { content: attr(data-label); display: block; margin-bottom: .2rem; font-size: var(--fs-xs); color: var(--faint); }
+table.grid.nodes.rows2 td.actions { justify-self: end; }
+table.grid.nodes.rows2 tr.grp-row, table.grid.nodes.rows2 tr:has(> td[data-span]) { display: block; padding: 0; }
+table.grid.nodes.rows2 tr.grp-row > td { padding: .4rem .9rem; }
+table.grid.nodes.rows2 td[data-span] { padding: .6rem .9rem; }
+/* ===== 表格按「自己能用的宽度」排版 =====
+   不按窗口宽度:侧栏占不占地方、表格在页面里还是在抽屉 / 弹框里,能用的宽度差得很远(窗口 1000 宽、带侧栏时表格只有 740)。
+   app.js 的 fitTables 量出每张表所在容器的宽度,按表上 data-fit 写的各档门槛给 <table> 加 class:
+     .no-p3 / .no-p2  先藏 c-p3 列,再藏 c-p2 列(表头与单元格同名 class)
+     .rows2           (服务器表)每台排成两行
+     .cards           每行排成一张卡片;容器够宽时卡片并排几列
+   键值表、连接列表不在此列(各有自己的窄屏排法)。 */
+.grid.no-p3 .c-p3, .grid.no-p2 .c-p2 { display: none; }
+
+/* 卡片:名称当标题(勾选框在它左边),其余每格一行 —— 左边列名(app.js 按表头补到 data-label)、右边内容;没有列名的(操作按钮)靠右。
+   拖动排序的把手用不上,藏掉 */
+.table-wrap:has(> table.grid.cards) { overflow: visible; max-height: none; background: transparent; border: none; box-shadow: none; }
+table.grid.cards { display: block; min-width: 0; }
+table.grid.cards thead { display: none; }
+table.grid.cards tbody { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19.5rem), 1fr)); gap: .7rem; align-items: stretch; }
+table.grid.cards tr { display: flex; flex-wrap: wrap; align-items: center; align-content: flex-start; min-width: 0; padding: .35rem 1rem .5rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-xs); }
+table.grid.cards tbody tr:hover { background: var(--surface); }
+table.grid.cards tr.selected { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-ring); }
+table.grid.cards td { display: block; flex: 1 1 100%; width: auto; min-width: 0; padding: .5rem 0; border: none; border-top: 1px solid var(--divider); text-align: right; word-break: break-word; }
+table.grid.cards td::after { content: ''; display: table; clear: both; }
+table.grid.cards td[data-label]::before { content: attr(data-label); float: left; font-family: var(--font); margin-right: .8rem; font-size: var(--fs-sm); line-height: 1.7; color: var(--muted); text-align: left; }
+table.grid.cards td.handle { display: none; }
+table.grid.cards td:has(> input[type=checkbox]:only-child) { order: -2; flex: 0 0 auto; padding-right: .65rem; border-top: none; }
+table.grid.cards td:has(> input[type=checkbox]:only-child)::before { display: none; }
+table.grid.cards td.primary-cell { order: -1; flex: 1 1 calc(100% - 2.6rem); padding: .55rem 0; border-top: none; text-align: left; font-size: var(--fs-md); font-weight: 600; }
+table.grid.cards td.primary-cell::before { display: none; }
+table.grid.cards td.actions { width: auto; margin-top: auto; padding-top: .6rem; }
+table.grid.cards td.actions .btn, table.grid.cards td.actions details.menu > summary.btn { border-color: var(--border-strong); background: var(--surface); }
+table.grid.cards .ellip { display: inline-block; max-width: 100%; vertical-align: bottom; }
+table.grid.cards .sub-cell.ellip { display: block; }
+table.grid.cards .cell-clip { display: inline; max-width: none; white-space: normal; overflow: visible; } /* 卡片里不截断:触屏点不出 title,上游名等要能看全 */
+/* 占满一整行的:分段行(组名,一行小标题,不是卡片)、「没有数据」那一行 */
+table.grid.cards tr.grp-row, table.grid.cards tr:has(> td[data-span]) { grid-column: 1 / -1; }
+table.grid.cards tr.grp-row { margin: .35rem 0 -.2rem; padding: 0 .15rem; background: transparent; border: none; box-shadow: none; }
+table.grid.cards tr.grp-row > td { padding: 0; background: transparent; border: none; text-align: left; }
+table.grid.cards td[data-span] { text-align: center; border-top: none; }
+
 @media (max-width: 700px) {
-  .table-wrap:has(> table.grid:not(.kv):not(.api-doc):not(.conns)) { overflow: visible; background: transparent; border: none; box-shadow: none; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) { display: block; min-width: 0; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) thead { display: none; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) tbody { display: block; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) tr { display: flex; flex-wrap: wrap; align-items: center; margin-bottom: .7rem; padding: .35rem 1rem .5rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-xs); }
-  table.grid:not(.kv):not(.api-doc):not(.conns) tbody tr:hover { background: var(--surface); }
-  table.grid:not(.kv):not(.api-doc):not(.conns) tr.selected { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-ring); }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td { display: block; flex: 1 1 100%; min-width: 0; padding: .5rem 0; border: none; border-top: 1px solid var(--divider); text-align: right; word-break: break-word; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td::after { content: ''; display: table; clear: both; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td[data-label]::before { content: attr(data-label); float: left; font-family: var(--font); margin-right: .8rem; font-size: var(--fs-sm); line-height: 1.7; color: var(--muted); text-align: left; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td.handle { display: none; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td:has(> input[type=checkbox]:only-child) { order: -2; flex: 0 0 auto; padding-right: .65rem; border-top: none; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td:has(> input[type=checkbox]:only-child)::before { display: none; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td.primary-cell { order: -1; flex: 1 1 calc(100% - 2.6rem); padding: .55rem 0; border-top: none; text-align: left; font-size: var(--fs-md); font-weight: 600; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td.primary-cell::before { display: none; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td[data-span] { text-align: center; border-top: none; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td.actions { width: auto; padding-top: .6rem; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) td.actions .btn, table.grid:not(.kv):not(.api-doc):not(.conns) td.actions details.menu > summary.btn { border-color: var(--border-strong); background: var(--surface); }
-  table.grid.tight td { word-break: break-word; }
-  table.grid .ellip { display: inline-block; max-width: 100%; vertical-align: bottom; }
-  table.grid .sub-cell.ellip { display: block; }
-  /* 分段行在手机上不是卡片:一行小标题 */
-  table.grid:not(.kv):not(.api-doc):not(.conns) tr.grp-row { margin: .9rem 0 .45rem; padding: 0 .15rem; background: transparent; border: none; box-shadow: none; }
-  table.grid:not(.kv):not(.api-doc):not(.conns) tr.grp-row > td { padding: 0; background: transparent; border: none; text-align: left; }
   .subtitle { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   /* 工具栏:占位的空白不再至少 12rem(会把按钮一个个挤到新行);开头的说明文字(修订号、提示)独占一行,按钮在下面靠右排在一起 */
   .toolbar .grow { min-width: 0; }
@@ -491,11 +521,35 @@ details.cert-log > summary::-webkit-details-marker { display: none; }
 details.cert-log > summary::after { content: "▾"; margin-left: auto; color: var(--muted); font-size: .8rem; }
 details.cert-log[open] > summary { margin-bottom: .5rem; }
 details.cert-log[open] > summary::after { content: "▴"; }
-.cert-uses { display: flex; flex-direction: column; }
-.cert-use { display: flex; align-items: center; gap: .6rem; padding: .42rem 0; border-bottom: 1px solid var(--border); }
-.cert-use:last-child { border-bottom: none; }
-.cert-use-label { flex: 0 0 5rem; color: var(--muted); font-size: .85rem; }
-.cert-use-cur { flex: 1; min-width: 0; word-break: break-word; }
+/* 证书页「正在使用」:线路默认 / 面板 / 订阅三格并排(窄了各占一行),每格上面是用途和「更换」,下面是哪张证书、还剩几天 */
+.cu-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6rem; }
+.cu-tile { display: flex; flex-direction: column; gap: .2rem; min-width: 0; padding: .55rem .75rem .7rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.cu-tile.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.cu-tile.bad { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
+.cu-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; min-height: var(--ctl-h-sm); }
+.cu-top .lb { font-size: var(--fs-xs); font-weight: 500; color: var(--muted); }
+.cu-name { display: block; font-size: var(--fs-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cu-name.off { color: var(--muted); font-weight: 500; }
+.cu-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .3rem .5rem; min-height: 22px; }
+.cu-grid + .hint { margin-top: .7rem; }
+@media (max-width: 760px) { .cu-grid { grid-template-columns: minmax(0, 1fr); } }
+/* 「添加证书」弹框:来源三选一 → 这种来源要填的 → 选项(开关行,两格并排)→ 添加后用于(三格并排) */
+.ct-form { display: flex; flex-direction: column; gap: .9rem; }
+.ct-form #c-source { align-self: flex-start; }
+#c-form { display: flex; flex-direction: column; gap: .85rem; }
+#c-form > .hint { margin: 0; }
+#c-form .form-sec { margin: .35rem 0 -.25rem; padding-top: 0; border-top: none; font-size: var(--fs-base); color: var(--text); }
+.ct-check { display: flex; align-items: flex-start; gap: .8rem; flex-wrap: wrap; }
+.ct-check #c-precheck { flex: 1 1 18rem; min-width: 0; }
+.ct-check #c-precheck:empty { display: none; }
+.ct-check #c-precheck .hint { margin-top: .4rem; }
+.ct-opts, .ct-uses { display: grid; gap: .5rem; align-items: stretch; }
+.ct-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ct-uses { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ct-opts .sw-row, .ct-uses .sw-row { align-items: flex-start; height: 100%; }
+.ct-opts #c-renew-wrap .hint { margin-top: .35rem; }
+@media (max-width: 760px) { .ct-opts, .ct-uses { grid-template-columns: minmax(0, 1fr); } }
+.switch input:disabled + span { opacity: .45; cursor: not-allowed; }
 .cert-pick-btn { width: 100%; justify-content: space-between; text-align: left; }
 .drawer-head { display: flex; align-items: center; gap: .6rem; min-height: var(--topbar-h); padding: .6rem 1.1rem .6rem 1.35rem; border-bottom: 1px solid var(--border); }
 .drawer-head h2 { flex: 1; font-size: var(--fs-lg); }
@@ -733,7 +787,6 @@ details.howto > summary { cursor: pointer; width: fit-content; color: var(--text
 details.howto > summary:hover { color: var(--text); }
 details.howto > p { margin-top: .45rem; line-height: 1.65; max-width: 62rem; }
 .node-name { font-weight: 600; }
-.grid.nodes .c-addr { width: 11rem; }
 /* 页面开头的一段说明 + 右边的主按钮:说明自己折行,按钮不被挤到下一行 */
 .toolbar.intro { align-items: flex-start; flex-wrap: nowrap; gap: 1.25rem; margin-bottom: 1rem; }
 .page-hint { flex: 1; min-width: 0; max-width: 64rem; color: var(--muted); font-size: var(--fs-sm); line-height: 1.65; }
@@ -811,6 +864,9 @@ button.reach-cell:focus-visible { outline: 2px solid var(--primary); outline-off
 /* ===== 主机容灾:服务器列表的角色标签与小卡片、设为主机的确认框与进度、设置页 ===== */
 button.role-chip { display: inline-flex; align-items: center; gap: .22rem; font: inherit; font-size: .72rem; line-height: 1.35; padding: .12rem .42rem .12rem .55rem; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); cursor: pointer; white-space: nowrap; vertical-align: middle; margin-right: .25rem; }
 button.role-chip .caret { width: .8em; height: .8em; opacity: .7; }
+/* 角色写得长(英文「Master · this server」)而格子窄时:省略,不伸到旁边一列上 */
+button.role-chip { max-width: 100%; }
+button.role-chip .rt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.role-chip:hover { filter: brightness(.96); }
 button.role-chip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 button.role-chip[aria-expanded="true"] { box-shadow: 0 0 0 2px var(--primary-soft); }
@@ -885,18 +941,12 @@ button.role-chip.k-lost { background: var(--danger-soft); color: var(--danger); 
    概况页上失联、写操作暂停这两条由「需要处理」那一行代替 */
 .main:has(> #page[data-page="dashboard"]) > .alert-bar:is([data-ha="ha-lost"], [data-ha="ha-frozen"]) { display: none; }
 
-/* 长表:宽屏时表格自带限高滚动区,表头吸在区域顶部,横向滚动条始终在视口里;手机仍是卡片 + 页面滚动 */
-@media (min-width: 701px) {
-  .table-wrap.fill { overflow: auto; max-height: max(18rem, calc(100vh - var(--topbar-h) - var(--fill-reserve, 7.5rem))); max-height: max(18rem, calc(100dvh - var(--topbar-h) - var(--fill-reserve, 7.5rem))); }
-}
-/* 列优先级:窗口不够宽时先藏 c-p3,再藏 c-p2(表头与单元格同名 class) */
-@media (min-width: 701px) and (max-width: 1239px) { .grid .c-p3 { display: none; } }
-@media (min-width: 701px) and (max-width: 1099px) { .grid .c-p2 { display: none; } }
+/* 长表:表格自带限高滚动区,表头吸在区域顶部,横向滚动条始终在视口里;排成卡片 / 两行一台时不要内滚区,跟着页面滚 */
+.table-wrap.fill { overflow: auto; max-height: max(18rem, calc(100vh - var(--topbar-h) - var(--fill-reserve, 7.5rem))); max-height: max(18rem, calc(100dvh - var(--topbar-h) - var(--fill-reserve, 7.5rem))); }
+.table-wrap.fill:has(> table.grid.cards), .table-wrap.fill:has(> table.grid.rows2) { overflow: visible; max-height: none; }
 /* 单元格里很长的一段(上游名):一行省略,全文在 title */
 .cell-clip { display: inline-block; max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-@media (min-width: 701px) and (max-width: 1239px) { .cell-clip { max-width: 6.5rem; } }
-/* 手机卡片里不截断:触屏点不出 title,上游名等要能看全 */
-@media (max-width: 700px) { .cell-clip { display: inline; max-width: none; white-space: normal; overflow: visible; } }
+.grid.no-p3 .cell-clip { max-width: 6.5rem; }
 .pc-err { color: var(--danger); font-size: .85rem; padding: .5rem 0; }
 label.switch.sm { width: 28px; height: 16px; vertical-align: middle; }
 label.switch.sm span::before { width: 12px; height: 12px; }
@@ -1321,7 +1371,7 @@ button.ld-srow:hover { background: var(--surface-2); }
 .lines-grid td.primary-cell { white-space: nowrap; }
 .lines-grid td.primary-cell > a { max-width: 18em; }
 .ln-proto { display: inline-flex; align-items: center; gap: .4rem; white-space: nowrap; }
-@media (max-width: 700px) { .lines-grid td.primary-cell { white-space: normal; } }
+.lines-grid.cards td.primary-cell { white-space: normal; }
 
 /* 表单栅格里占两栏的格子 */
 .form-grid > .span-2 { grid-column: span 2; }
@@ -1401,13 +1451,17 @@ details.menu .menu-list:has(button > b + span) { min-width: 17rem; }
 .ln-srv-head .grow { flex: 1; }
 .ln-srv-q { width: 13rem; max-width: 100%; }
 .ln-srv .node-list { display: block; max-height: min(38vh, 19.5rem); overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); padding: .3rem .35rem; }
-.node-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr)); gap: 0 .35rem; }
-.ln-srv .node-row { padding: .15rem .45rem; min-height: 34px; border-radius: var(--radius-xs); }
-.ln-srv .node-row:hover { background: var(--surface-3); }
+.node-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr)); gap: .35rem; }
+/* 一台服务器一个有边框的小方块:勾上的整块着色,它的 IP 版本下拉在方块里面 —— 一眼看得出这个下拉是哪一台的
+   (以前名字和下拉分在格子两头、之间没有边界,几列并排时下拉离隔壁那台的勾选框反而更近) */
+.ln-srv .node-row { padding: .2rem .4rem .2rem .6rem; min-height: 36px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); transition: border-color .12s, background .12s; }
+.ln-srv .node-row:hover { border-color: var(--border-strong); }
+.ln-srv .node-row:has(.node-cb:checked) { border-color: color-mix(in srgb, var(--primary) 40%, var(--border)); background: var(--primary-soft); }
+.ln-srv .node-row:has(.node-cb:disabled) label { cursor: default; }
 .ln-srv .node-row label { display: flex; align-items: center; gap: .5rem; flex: 1 1 auto; min-width: 0; cursor: pointer; font-size: var(--fs-sm); }
 .ln-srv .node-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ln-srv .node-row label > .small { flex: none; }
-.ln-srv .node-row select.node-fam { flex: none; width: auto; max-width: 8.2rem; }
+.ln-srv .node-row select.node-fam { flex: none; width: auto; max-width: 8.2rem; height: 26px; min-height: 26px; padding-top: 0; padding-bottom: 0; font-size: var(--fs-xs); border-color: color-mix(in srgb, var(--primary) 30%, var(--border-strong)); box-shadow: none; }
 .node-grp + .node-grp { margin-top: .3rem; padding-top: .3rem; border-top: 1px solid var(--divider); }
 .node-grp-h { display: flex; align-items: center; gap: .5rem; width: fit-content; padding: .3rem .45rem; font-size: var(--fs-sm); cursor: pointer; }
 .node-grp-h b { font-weight: 600; }
@@ -1669,3 +1723,17 @@ pre.doc-ex { max-height: none; }
 @media (max-width: 640px) { .acct-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); } .acct-sum > :first-child { grid-column: 1 / -1; } }
 .acct-sw { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; margin: .85rem 0 1rem; }
 @media (max-width: 760px) { .acct-sw { grid-template-columns: 1fr; } }
+
+/* ---- 新增 / 编辑服务器 ----
+   三段:叫什么、归哪组、流量怎么算(一行四格)→ 怎么连上它的面板(地址、令牌并排,证书校验一个开关行)→ 订阅里给用户哪个地址 */
+.nd-form .form-sec { margin: 1.3rem 0 .7rem; padding-top: 0; border-top: none; font-size: var(--fs-base); color: var(--text); }
+.nd-top { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1.1fr) minmax(0, .8fr); gap: .8rem 1rem; align-items: start; }
+.nd-link { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem 1rem; align-items: start; }
+.nd-link > .sw-row { grid-column: 1 / -1; }
+.nd-link .hint { margin-top: .35rem; }
+.nd-addr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }
+.nd-addr select { width: auto; }
+.nd-enabled { margin-top: 1rem; }
+@media (max-width: 900px) { .nd-top { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .nd-link { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) { .nd-top, .nd-addr { grid-template-columns: minmax(0, 1fr); } .nd-addr select { width: 100%; } }

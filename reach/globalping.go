@@ -198,11 +198,16 @@ func (c *client) do(ctx context.Context, method, path string, body, out interfac
 	if resp.StatusCode/100 != 2 {
 		var e struct {
 			Error struct {
+				Type    string            `json:"type"`
 				Message string            `json:"message"`
 				Params  map[string]string `json:"params"`
 			} `json:"error"`
 		}
 		_ = json.Unmarshal(data, &e)
+		// 选点条件下现在一个合适的测点都没有(比如大陆家宽里此刻没有带 IPv6 的):不是出错,调用方换一批测点
+		if resp.StatusCode == http.StatusUnprocessableEntity && e.Error.Type == "no_probes_found" {
+			return errNoProbes
+		}
 		if msg := e.Error.Params["target"]; msg != "" {
 			// 最常见的是地址不是公网地址(内网、保留段):说人话
 			if strings.Contains(msg, "private") {
@@ -238,6 +243,9 @@ func (c *client) probes(ctx context.Context) ([]probe, error) {
 }
 
 // measure 发起一次测量并等它结束。poll 是两次查询之间的间隔。
+// errNoProbes 建测量时 Globalping 回 422 no_probes_found:按给的选点条件,现在没有可用的测点。
+var errNoProbes = errors.New("这次没有符合条件的测点")
+
 func (c *client) measure(ctx context.Context, req measureRequest, poll time.Duration) (*measurement, error) {
 	var created struct {
 		Id          string `json:"id"`

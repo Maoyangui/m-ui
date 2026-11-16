@@ -21,6 +21,33 @@ const clone = v => JSON.parse(JSON.stringify(v));
 const fx = k => clone(F[k] ?? null);
 // 上游测试结果:上游组写明现在走哪一条
 const demoUpResult = u => ({ name: 'Demo', isLocal: true, state: 'ok', delayMs: 40 + Math.floor(Math.random() * 80), method: u.type === 'urltest' ? 'via:' + ((u.options && u.options.outbounds) || [''])[0] : '' });
+// 演示里的故障要跟着操作走:处理掉了,提醒就得消失(以前巡检结果是导出时的一份死数据 ——
+// 在上游页测出来是通的、甚至把那条上游删了,概况的「需要处理」还报它故障)。
+// demoUpTest 测一条上游并把结果记进巡检结果:一开始就不通的(S.upBroken)一直不通,直到在演示里编辑保存过(算修好了)或删掉
+function demoUpTest(u) {
+  const h = (S.health.results || []).find(r => r.id === u.id);
+  const servers = h && (h.servers || []).length ? h.servers : [{ nodeId: 1, name: 'Tokyo', isLocal: true }];
+  const via = u.type === 'urltest' ? 'via:' + ((u.options && u.options.outbounds) || [''])[0] : '';
+  const out = servers.map(s => (S.upBroken.has(u.id)
+    ? { ...s, state: 'fail', delayMs: 0, error: s.error || 'Head "http://www.gstatic.com/generate_204": EOF', checkedAt: now() }
+    : { ...s, state: 'ok', delayMs: 40 + Math.floor(Math.random() * 80), method: via || s.method || 'urltest', error: '', checkedAt: now() }));
+  if (h) h.servers = out; else (S.health.results = S.health.results || []).push({ id: u.id, name: u.name, unused: false, servers: out });
+  return clone(out);
+}
+// 巡检结果只留还在的上游,名字跟着改名走
+function demoHealth() {
+  S.health.results = (S.health.results || []).filter(r => S.upstreams.some(u => u.id === r.id));
+  for (const r of S.health.results) r.name = S.upstreams.find(u => u.id === r.id).name;
+  return clone(S.health);
+}
+// 「端口被占」跟着线路走:那个中转入口改了端口、暂停或删了,线路停了或删了,服务器上这一条就没有了
+function demoSyncBlocked() {
+  for (const n of S.nodes.nodes || []) {
+    const st = n.status;
+    if (!st || !Array.isArray(st.blocked)) continue;
+    st.blocked = st.blocked.filter(b => S.lines.some(l => l.enabled !== false && (l.forwards || []).some(f => f.via === n.id && Number(f.port) === Number(b.port) && !f.off)));
+  }
+}
 
 // 内存状态:从 fixture 复制一份,增删改都落在这里
 const S = {
@@ -33,7 +60,11 @@ const S = {
   exts: fx('GET exts') || [],
   resellers: fx('GET resellers') || [],
   onlines: fx('GET onlines') || { users: [], lines: [], upstreams: [], connCounts: {} },
+  // 上游巡检结果:从导出的那一份起步,之后跟着演示里的操作变(见 demoUpTest / demoHealth)
+  health: fx('GET upstreams/health') || { intervalMinutes: 10, lastRun: 0, results: [] },
 };
+// 导出时就不通的上游:在演示里编辑保存过(算修好了)或删掉之前,测试和巡检一直报不通
+S.upBroken = new Set((S.health.results || []).filter(r => (r.servers || []).length && r.servers.every(s => s.state === 'fail')).map(r => r.id));
 // 让演示像在跑:两个用户在线,各带文档保留段里的 IP
 const online = { 'demo-alice': ['203.0.113.5', '198.51.100.7'], 'demo-bob': ['192.0.2.44'] };
 for (const u of S.users) if (online[u.name]) { u.onlineIps = online[u.name]; u.onlineAt = Math.floor(Date.now() / 1000) - 60; }
@@ -284,8 +315,10 @@ S.reach = { auto: true, minutes: 90, nextRun: now() + 50 * 60, running: false, r
   { nodeId: 1, name: 'Tokyo', target: '192.0.2.10', port: 24443, portFrom: 'sub', at: now() - 40 * 60, auto: true, verdict: 'ok', groups: cnGroups(52) },
   { nodeId: 2, name: 'Singapore', target: '198.51.100.10', port: 28443, portFrom: 'line', portLine: 'Singapore-AnyTLS', at: now() - 40 * 60, auto: true, verdict: 'ok', groups: cnGroups(68) },
   { nodeId: 3, name: 'Frankfurt', target: '203.0.113.30', port: 24433, portFrom: 'line', portLine: 'Frankfurt-Reality', at: now() - 40 * 60, auto: true, verdict: 'ok', groups: cnGroups(160),
-    v6: { state: 'ok', target: '2001:db8:7::30', port: 24433, portLine: 'Frankfurt-Reality', ok: 4, total: 4, at: now() - 40 * 60,
-      probes: [probe('Amsterdam', 'Example Net', 64500, 9, 'NL'), probe('Paris', 'Example Net', 64501, 14, 'FR'), probe('New York', 'Example Net', 64502, 82, 'US'), probe('Tokyo', 'Example Net', 64503, 230, 'JP')] } },
+    // IPv6 入站:先用大陆有 IPv6 的家宽测点(这里连上了,所以没再问境外测点)
+    v6: { state: 'ok', scope: 'cn', target: '2001:db8:7::30', port: 24433, portLine: 'Frankfurt-Reality', ok: 4, total: 4, cnOk: 4, cnTotal: 4, at: now() - 40 * 60,
+      probes: [{ ...probe('Wuhan', 'CHINA UNICOM China169 Backbone', 4837, 182, 'CN'), group: 'cu' }, { ...probe('Guilin', 'China Telecom', 4134, 171, 'CN'), group: 'ct' },
+        { ...probe('Ningbo', 'China Mobile Communications', 56041, 165, 'CN'), group: 'cm' }, { ...probe('Guangzhou', 'China Mobile Communications Group', 9808, 176, 'CN'), group: 'cm' }] } },
 ] };
 for (const r of S.reach.results) S.reach.history[r.nodeId] = Array.from({ length: 8 }, (_, i) => ({ at: r.at - (8 - i) * 90 * 60, verdict: 'ok', auto: true }));
 // 概览「最近入站连接」:通过握手与认证的、被设备数上限拒的,以及到了但没过握手 / 认证的(都用文档保留地址)
@@ -436,7 +469,7 @@ function route(method, path, query, body) {
       case 'status': return status();
       case 'settings': return clone(S.settings);
       case 'lines': if (seg[2] === 'detail') return lineDetail(find(S.lines, id), new URLSearchParams(query)); return clone(S.lines);
-      case 'upstreams': if (seg[1] === 'health') return fx('GET upstreams/health') || {}; return clone(S.upstreams);
+      case 'upstreams': if (seg[1] === 'health') return demoHealth(); return clone(S.upstreams);
       case 'users': if (seg[2] === 'plan-ops') return clone(S.planOps.filter(o => o.userId === id).slice(0, Number(new URLSearchParams(query).get('limit')) || 20));
         if (seg[2] === 'sub') { const u = find(S.users, id); return { link: subUrl(u), clash: subUrl(u) + '?format=clash', json: subUrl(u) + '?format=json' }; } return clone(S.users);
       case 'plans': return S.plans.map(planView);
@@ -528,19 +561,20 @@ function route(method, path, query, body) {
       if (seg[1] === 'sort') { const ids = body || []; ids.forEach((lid, i) => { const l = S.lines.find(x => x.id === lid); if (l) l.sort = i + 1; }); S.lines.sort((a, b) => (a.sort || 0) - (b.sort || 0)); return ok(); }
       if (method === 'POST' && !seg[1]) { const l = { id: nextId(S.lines), enabled: true, sort: S.lines.length + 1, userCount: 0, ...body }; l.upstreamName = (S.upstreams.find(x => x.id === l.upstreamId) || {}).name || 'direct'; if (body.assignAll) { l.userCount = S.users.length; S.users.forEach(u => { u.lineIds = [...(u.lineIds || []), l.id]; }); } S.lines.push(l); return clone(l); }
       const l = find(S.lines, id);
-      if (seg[2] === 'toggle') { l.enabled = !l.enabled; return ok(); }
-      if (method === 'DELETE') { S.lines = S.lines.filter(x => x.id !== id); S.users.forEach(u => { u.lineIds = (u.lineIds || []).filter(x => x !== id); }); return ok(); }
-      if (method === 'PUT') { Object.assign(l, body, { id }); l.upstreamName = (S.upstreams.find(x => x.id === l.upstreamId) || {}).name || 'direct'; return clone(l); }
+      if (seg[2] === 'toggle') { l.enabled = !l.enabled; demoSyncBlocked(); return ok(); }
+      if (method === 'DELETE') { S.lines = S.lines.filter(x => x.id !== id); S.users.forEach(u => { u.lineIds = (u.lineIds || []).filter(x => x !== id); }); demoSyncBlocked(); return ok(); }
+      if (method === 'PUT') { Object.assign(l, body, { id }); l.upstreamName = (S.upstreams.find(x => x.id === l.upstreamId) || {}).name || 'direct'; demoSyncBlocked(); return clone(l); }
       return ok();
     }
     case 'upstreams': {
-      if (seg[1] === 'test') return S.upstreams.map(u => ({ id: u.id, servers: [demoUpResult(u)] }));
+      if (seg[1] === 'test') return S.upstreams.map(u => ({ id: u.id, servers: demoUpTest(u) }));
+      if (seg[1] === 'health') { S.upstreams.forEach(demoUpTest); S.health.lastRun = now(); return ok(); } // 立即巡检
       if (seg[1] === 'parse') return { name: 'Parsed upstream', type: 'shadowsocks', options: { server: '203.0.113.20', server_port: 8388, method: 'aes-256-gcm', password: 'demo' } };
       if (method === 'POST' && !seg[1]) { const u = { id: nextId(S.upstreams), sort: S.upstreams.length + 1, ...body }; S.upstreams.push(u); return clone(u); }
       const u = find(S.upstreams, id);
-      if (seg[2] === 'test') return { id, servers: [demoUpResult(u)] };
-      if (method === 'DELETE') { S.upstreams = S.upstreams.filter(x => x.id !== id); return ok(); }
-      if (method === 'PUT') { Object.assign(u, body, { id }); return clone(u); }
+      if (seg[2] === 'test') return { id, servers: demoUpTest(u) };
+      if (method === 'DELETE') { S.upstreams = S.upstreams.filter(x => x.id !== id); S.upBroken.delete(id); return ok(); }
+      if (method === 'PUT') { Object.assign(u, body, { id }); S.upBroken.delete(id); demoUpTest(u); return clone(u); } // 改过就算修好了,顺手复查一次
       return ok();
     }
     case 'nodes': {

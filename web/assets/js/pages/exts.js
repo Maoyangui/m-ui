@@ -71,7 +71,7 @@ const DYNAMIC = /\d+(\.\d+)?\s*(GB|MB|TB|KB|G|M|T|天|日|小时|%|倍|x)|\d{4}[
 export async function render(el) {
   el.innerHTML = `
     <div class="toolbar intro"><p class="page-hint">${t('ext.help')}</p><button class="btn primary" data-act="ext.add">${t('ext.add')}</button></div>
-    <div class="table-wrap"><table class="grid ext-table">
+    <div class="table-wrap"><table class="grid ext-table" data-fit="cards:800">
       <thead><tr><th>${t('common.name')}</th><th>${t('common.type')}</th><th>${t('ext.value')}</th><th>${t('ext.nodes')}</th><th>${t('ext.lastFetch')}</th><th>${t('ext.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
       <tbody id="exts-body"></tbody>
     </table></div>`;

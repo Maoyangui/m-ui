@@ -778,6 +778,7 @@ const EN = /*BEGIN*/{
 "允许的来源最多 200 项": "A key can allow at most 200 sources",
 "来源 IP 不在这把密钥允许的范围里": "Your source IP is not allowed for this key",
 "密钥不存在": "Key not found",
+"这次没有符合条件的测点": "No matching probe is available right now",
 "密钥最多 50 把": "At most 50 keys",
 "请求格式不对": "Malformed request",
 "密钥名称不能为空,最多 40 个字": "The key name is required (up to 40 characters)",

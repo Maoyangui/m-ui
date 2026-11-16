@@ -36,7 +36,8 @@ const (
 
 // ProbeResult 一个测点的结果。
 type ProbeResult struct {
-	Country string  `json:"country,omitempty"` // 只有 IPv6 入站检测填(境外测点,各国都有);大陆检测按运营商分组,不填
+	Country string  `json:"country,omitempty"` // 只有 IPv6 入站检测填(大陆和境外的测点都有);大陆检测按运营商分组,不填
+	Group   string  `json:"group,omitempty"`   // IPv6 入站检测里大陆测点属于哪家运营商(cm / ct / cu;不是三家的为空)
 	City    string  `json:"city"`
 	ASN     int     `json:"asn"`
 	Network string  `json:"network"`

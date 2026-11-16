@@ -21,7 +21,7 @@ export async function render(el) {
       <label class="small muted" style="display:inline-flex;align-items:center;gap:.3rem" title="${esc(t('rs.onlyAttnHelp'))}"><input type="checkbox" id="rs-attn" ${onlyAttn ? 'checked' : ''}> ${t('rs.onlyAttn')}</label>
       <span class="muted small" id="rs-count"></span>
       <span class="grow"></span><button class="btn primary" data-act="rs.add">${t('rs.add')}</button></div>
-    <div class="table-wrap"><table class="grid">
+    <div class="table-wrap"><table class="grid" data-fit="cards:780">
       <thead><tr><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('rs.users')}</th><th>${t('rs.used')}</th>
         <th>${t('rs.online')}</th><th class="c-p3">${t('rs.speed')}</th><th>${t('user.expiry')}</th><th></th></tr></thead>
       <tbody id="rs-body"></tbody>

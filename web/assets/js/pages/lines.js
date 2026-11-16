@@ -80,8 +80,8 @@ export async function render(el) {
       ${nodes.length > 1 ? `<button class="btn sm" data-act="line.batch" data-id="nodes">${t('line.batch.nodes')}</button>` : ''}
       <button class="btn sm ghost" data-act="line.clearSel">${t('line.batch.clear')}</button>
     </div>
-    <div class="table-wrap fill"><table class="grid lines-grid">
-      <thead><tr><th></th><th style="width:1.5rem"><input type="checkbox" id="line-sel-all"></th><th>${t('common.name')}</th><th>${t('line.protocol')}</th><th>${t('common.port')}</th><th>${t('line.upstream')}</th><th>${t('nav.nodes')}</th><th class="c-p3">${t('line.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
+    <div class="table-wrap fill"><table class="grid lines-grid" data-fit="p3:1180 p2:1020 cards:900">
+      <thead><tr><th></th><th style="width:1.5rem"><input type="checkbox" id="line-sel-all"></th><th>${t('common.name')}</th><th>${t('line.protocol')}</th><th>${t('common.port')}</th><th class="c-p2">${t('line.upstream')}</th><th>${t('nav.nodes')}</th><th class="c-p3">${t('line.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
       <tbody id="lines-body"></tbody>
     </table></div>`;
   document.getElementById('line-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
@@ -186,7 +186,7 @@ function renderRows() {
       <td class="primary-cell">${dot(online.has(l.name))}<a href="#" data-act="line.detail" data-id="${l.id}" title="${esc(l.name)}">${esc(l.name)}</a>${blockedBadge(l)}</td>
       <td>${protoCell(l)}</td>
       <td class="num">${l.port}</td>
-      <td>${l.upstreamId ? `<span class="cell-clip" title="${esc(l.upstreamName)}">${esc(l.upstreamName)}</span>` : `<span class="muted">${esc(t('line.directShort'))}</span>`}${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
+      <td class="c-p2">${l.upstreamId ? `<span class="cell-clip" title="${esc(l.upstreamName)}">${esc(l.upstreamName)}</span>` : `<span class="muted">${esc(t('line.directShort'))}</span>`}${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
       <td>${serversCell(l)}${fwBadge(l)}</td>
       <td class="num c-p3">${l.userCount}</td>
       <td><label class="switch" title="${l.enabled ? t('common.enabled') : t('common.disabled')}"><input type="checkbox" data-change="line.toggle" data-id="${l.id}" ${l.enabled ? 'checked' : ''}><span></span></label></td>

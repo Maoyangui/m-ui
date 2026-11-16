@@ -274,6 +274,38 @@ if (await page.locator('#restore-bar').count()) {
   if (await page.locator('#restore-bar').count()) fail('还原提示「知道了」点了没消失'); else pass('还原提示「知道了」生效');
 } else fail('?restore=1 时没有还原提示条');
 
+// 故障处理掉以后,提醒要跟着消失(演示里的故障状态跟着操作走;以前巡检结果是一份死数据,修好了、删掉了还在报)
+await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(1000);
+const attnOf = () => page.locator('#dash-attn-card').innerText().catch(() => '');
+const attn0 = await attnOf();
+if (/Frankfurt-exit/.test(attn0)) pass('概况「需要处理」列出故障的上游'); else fail(`概况没有列出故障的上游:${attn0.slice(0, 160)}`);
+const stillBad = await page.evaluate(async () => {
+  const api = await import('./js/api.js');
+  await api.post('upstreams/test');
+  const h = await api.get('upstreams/health');
+  return ((h.results || []).find(r => r.name === 'Frankfurt-exit') || { servers: [{}] }).servers.every(s => s.state === 'fail');
+});
+if (stillBad) pass('没修的上游再测一遍还是不通(不会一测就自己变好)'); else fail('没修的上游一测就变通了');
+await page.evaluate(async () => {
+  const api = await import('./js/api.js');
+  const u = (await api.get('upstreams')).find(x => x.name === 'Frankfurt-exit');
+  await api.put('upstreams/' + u.id, u); // 编辑保存 = 修好了
+});
+await page.goto(`${DEMO}#/upstreams`); await page.waitForTimeout(500);
+await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(1200);
+const attn1 = await attnOf();
+if (!/Frankfurt-exit/.test(attn1)) pass('上游修好(编辑保存)后,概况不再报它故障'); else fail(`上游修好后概况还在报:${attn1.slice(0, 160)}`);
+// 中转入口换个端口:那台服务器上的「端口被占」跟着消失
+const blockedOf = () => page.evaluate(async () => ((await (await import('./js/api.js')).get('nodes')).nodes.find(n => n.id === 2).status.blocked || []).length);
+const b0 = await blockedOf();
+await page.evaluate(async () => {
+  const api = await import('./js/api.js');
+  const l = (await api.get('lines')).find(x => x.id === 1);
+  await api.put('lines/1', { ...l, forwards: (l.forwards || []).map(f => (f.via === 2 ? { ...f, port: 30011 } : f)) });
+});
+const b1 = await blockedOf();
+if (b0 === 1 && b1 === 0) pass('中转入口换了端口,「端口被占」跟着消失'); else fail(`「端口被占」没有跟着线路变:改前 ${b0} 条、改后 ${b1} 条`);
+
 // 请求审计
 const external = requests.filter(u => !u.startsWith(origin));
 const apiCalls = requests.filter(u => /\/api\//.test(u));

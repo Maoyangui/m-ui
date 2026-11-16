@@ -551,9 +551,37 @@ function pageName() {
   if (!pages[h] || !navFor().includes(h)) return 'dashboard';
   return h;
 }
-// 窄屏下列表表格按卡片排(见 style.css「窄屏表格」):每格补上它那一列的表头,卡片里当字段名显示。
-// 各页面照常渲染表格,这里统一补,不用每页自己写。只改属性、不动节点,不会反过来触发自己。
+// ---- 表格按「自己能用的宽度」排版 ----
+// 列表表格放不下时不是横向滚动、也不是把列挤成一字一行,而是先藏次要的列,再放不下就每行排成一张卡片
+// (见 style.css「表格按自己能用的宽度排版」)。按表格所在容器的宽度算,不按窗口宽度:
+// 侧栏占不占地方、表格在页面里还是在抽屉 / 弹框里,能用的宽度差得很远。
+// 各页面照常渲染表格,要调门槛的在 <table> 上写 data-fit,这里统一量、统一加 class:
+//   data-fit="cards:840 p2:960 p3:1160"   容器不到 1160 藏 c-p3 列,不到 960 再藏 c-p2 列,不到 840 排成卡片
+//   rows:930                              (服务器表)不到 930 每台排成两行
+// 没写的档用默认值:卡片 700(抽屉 / 弹框里的表 480,它们本来就按窄容器设计),p2 960,p3 1180。
 const CARD_SKIP = '.kv, .api-doc, .conns'; // 键值表、接口文档、连接列表保持原样
+const FIT_DEFAULT = { p2: 960, p3: 1180, rows: 0 };
+function fitTables() {
+  document.querySelectorAll('table.grid').forEach(tb => {
+    if (tb.matches(CARD_SKIP)) return;
+    const box = tb.parentElement;
+    // 量边框外沿:排成卡片后外框没有边线了,量内宽的话两种排法差 2 像素,正好卡在门槛上会来回跳
+    const w = box ? box.getBoundingClientRect().width : 0;
+    if (!w) return; // 还没排进页面(藏着的页签、收起的折叠块):等它露出来再量
+    const fit = { ...FIT_DEFAULT, cards: tb.closest('#page') ? 700 : 480 };
+    for (const m of (tb.dataset.fit || '').matchAll(/([a-z0-9]+):(\d+)/g)) fit[m[1]] = Number(m[2]);
+    const cards = w < fit.cards, rows = !cards && w < fit.rows;
+    tb.classList.toggle('cards', cards);
+    tb.classList.toggle('rows2', rows);
+    tb.classList.toggle('no-p3', !cards && w < fit.p3);
+    tb.classList.toggle('no-p2', !cards && w < fit.p2);
+    // 跨整行的格子(组名一行、「没有数据」一行)写的是全部列数。藏掉几列以后还按原数跨,表格就多出几列空的:
+    // 定宽布局的表会把宽度分给这些空列,右边空出一截、前面几列被挤窄(服务器页就是这样被挤成一字一行的)。按现在露着的列数改
+    const cols = [...tb.querySelectorAll(':scope > thead th')].filter(th => getComputedStyle(th).display !== 'none').length;
+    if (cols) tb.querySelectorAll(':scope > tbody > tr > td[colspan]').forEach(td => { if (td.colSpan > 1 && td.colSpan !== cols) td.colSpan = cols; });
+  });
+}
+// 排成卡片时每格前面要有列名:每格补上它那一列的表头(只改属性、不动节点,不会反过来触发自己)。
 function labelTables() {
   document.querySelectorAll('table.grid').forEach(tb => {
     if (tb.matches(CARD_SKIP)) return;
@@ -568,13 +596,17 @@ function labelTables() {
       }
     });
   });
+  fitTables();
 }
 let labelQueued = false;
-new MutationObserver(() => {
+const queueTables = () => {
   if (labelQueued) return;
   labelQueued = true;
   requestAnimationFrame(() => { labelQueued = false; labelTables(); });
-}).observe(document.body, { childList: true, subtree: true });
+};
+new MutationObserver(queueTables).observe(document.body, { childList: true, subtree: true });
+// 窗口宽度变了(含侧栏收起 / 展开的那个断点)重新量;抽屉 / 弹框打开是节点变化,上面已经管了
+window.addEventListener('resize', queueTables);
 
 // 页面有没保存的改动(页面模块导出 leaveGuard,返回要问的那句话)时,换页前先问;不走就把地址改回去、页面原样留着。
 let skipRoute = false, guarding = false;

@@ -847,25 +847,26 @@ func (s *Service) Bad() []Result {
 	return out
 }
 
-// V6BadItem 概况"需要处理"里的一台 IPv6 入站不通的服务器。
+// V6BadItem 概况"需要处理"里的一台 IPv6 入站不通的服务器。State:down = 入站没放行;cndown = 境外测点能连、大陆测点连不上。
 type V6BadItem struct {
 	NodeId uint   `json:"nodeId"`
 	Name   string `json:"name"`
 	Target string `json:"target"`
 	Port   int    `json:"port"`
 	At     int64  `json:"at"`
+	State  string `json:"state"`
 }
 
 // V6Bad IPv6 入站不通的服务器(概况页"需要处理"用,只读内存)。和服务器页显示的是同一份(最近一次;没测成、没有测点时
-// 用上一次测成的),只算 down,unsure / udp / none / error 不算;这台不再有走 IPv6 的线路时就不算了。
+// 用上一次测成的),算 down(入站没放行)和 cndown(境外通、大陆不通),unsure / udp / none / error 不算;这台不再有走 IPv6 的线路时就不算了。
 // 不并进 Bad():那边的结论、提示条的忽略签名都按大陆那项来。没有时是空数组,主机上这个键始终存在。
 func (s *Service) V6Bad() []V6BadItem {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []V6BadItem{}
 	for id, last := range s.latest {
-		if v := s.viewV6Locked(id, last.V6); v != nil && v.State == V6Down {
-			out = append(out, V6BadItem{NodeId: id, Name: last.Name, Target: v.Target, Port: v.Port, At: v.At})
+		if v := s.viewV6Locked(id, last.V6); v != nil && (v.State == V6Down || v.State == V6CNDown) {
+			out = append(out, V6BadItem{NodeId: id, Name: last.Name, Target: v.Target, Port: v.Port, At: v.At, State: v.State})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].NodeId < out[j].NodeId })

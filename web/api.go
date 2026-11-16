@@ -868,6 +868,7 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 				s.reloadUsers("线路上游 " + up.Name) // 专用用户换地方了
 			}
 			s.reloadUpstreams("修改上游 " + up.Name)
+			s.recheckUpstreamSoon(up.Id)
 		}
 		up.RelayCreds = nil
 		writeJSON(w, http.StatusOK, up)

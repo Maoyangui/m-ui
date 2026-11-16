@@ -178,13 +178,17 @@ type fakeAPI struct {
 	icmpOK    map[string]bool
 	remaining int
 	token     string
-	// IPv6 入站检测(目标是 IPv6 地址):境外测点连不连得上、派几个测点
-	v6OK     bool
-	v6Probes int
+	// IPv6 入站检测(目标是 IPv6 地址)。大陆那一步:派几个大陆测点、连不连得上(v6CNProbes 为 0 = 这次没有大陆的 IPv6 测点,接口拒收);
+	// 境外那一步:派几个境外测点、连不连得上(v6Probes 为 0 时给一份空结果;v6NoProbes422 为真则和真接口一样拒收)
+	v6CNOK        bool
+	v6CNProbes    int
+	v6OK          bool
+	v6Probes      int
+	v6NoProbes422 bool
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
-	f := &fakeAPI{bodies: map[string]map[string]interface{}{}, remaining: 250, v6OK: true, v6Probes: 4,
+	f := &fakeAPI{bodies: map[string]map[string]interface{}{}, remaining: 250, v6OK: true, v6Probes: 4, v6CNOK: true, v6CNProbes: 4,
 		tcpOK: map[string]bool{"cm": true, "ct": true, "cu": true, "hk": true}, icmpOK: map[string]bool{"cm": true, "ct": true, "cu": true, "hk": true}}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.srv.Close)
@@ -218,14 +222,32 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		f.requests = append(f.requests, req)
 		// 按这次要的测点数扣额度(和 Globalping 一样):选点条件的 limit 加起来;复用上一次的测点按 8 个算
 		charge := 8
+		var locs []location
 		if b, err := json.Marshal(req.Locs); err == nil {
-			var locs []location
 			if json.Unmarshal(b, &locs) == nil && len(locs) > 0 {
 				charge = 0
 				for _, l := range locs {
 					charge += l.Limit
 				}
 			}
+		}
+		// IPv6 地址:Globalping 只派支持 IPv6 的测点。选点条件里有大陆的是大陆那一步,否则是境外(欧洲、北美)那一步;
+		// 按条件一个带 IPv6 的测点都没有时直接拒收(422 no_probes_found),不扣额度
+		v6 := strings.Contains(req.Target, ":")
+		v6CN := false
+		for _, l := range locs {
+			if l.Country == "CN" {
+				v6CN = true
+			}
+		}
+		v6N, v6OK := f.v6Probes, f.v6OK
+		if v6CN {
+			v6N, v6OK = f.v6CNProbes, f.v6CNOK
+		}
+		if v6 && v6N == 0 && (v6CN || f.v6NoProbes422) {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"error":{"type":"no_probes_found","message":"No matching IPv6 probes available."}}`))
+			return
 		}
 		if f.remaining < charge {
 			w.Header().Set("X-RateLimit-Reset", "1200")
@@ -239,10 +261,15 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-RateLimit-Reset", "1800")
 		f.seq++
 		id := fmt.Sprintf("m%d", f.seq)
-		if strings.Contains(req.Target, ":") { // IPv6 地址:Globalping 只派支持 IPv6 的测点(这里是欧洲、北美的)
+		if v6 {
 			var rs []fakeResult
-			for i := 0; i < f.v6Probes; i++ {
-				rs = append(rs, fakeResult{country: []string{"DE", "US"}[i%2], city: "X", asn: 3320, network: "Some ISP", ok: f.v6OK})
+			for i := 0; i < v6N; i++ {
+				if v6CN { // 移动、电信、联通轮着来
+					c := [][2]interface{}{{9808, "China Mobile Communications Group"}, {4134, "Chinanet Backbone"}, {4837, "CHINA UNICOM China169 Backbone"}}[i%3]
+					rs = append(rs, fakeResult{country: "CN", city: "X", asn: c[0].(int), network: c[1].(string), ok: v6OK})
+				} else {
+					rs = append(rs, fakeResult{country: []string{"DE", "US"}[i%2], city: "X", asn: 3320, network: "Some ISP", ok: v6OK})
+				}
 			}
 			f.bodies[id] = fakeBody(id, rs)
 			w.WriteHeader(http.StatusAccepted)

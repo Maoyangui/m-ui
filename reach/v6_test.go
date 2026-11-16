@@ -12,7 +12,14 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
-// 测试里不请求真实 Globalping:全部打到 reach_test.go 的假接口(目标是 IPv6 地址时它派欧洲、北美的测点)。
+// 测试里不请求真实 Globalping:全部打到 reach_test.go 的假接口(目标是 IPv6 地址时,选点条件里有大陆的派大陆测点,否则派欧洲、北美的)。
+
+// setV6 假接口这一轮 IPv6 入站怎么答:大陆派几个测点、通不通;境外派几个、通不通。
+func (h *harness) setV6(cnProbes int, cnOK bool, probes int, ok bool) {
+	h.api.mu.Lock()
+	h.api.v6CNProbes, h.api.v6CNOK, h.api.v6Probes, h.api.v6OK = cnProbes, cnOK, probes, ok
+	h.api.mu.Unlock()
+}
 
 func (f *fakeAPI) reqs() []measureRequest {
 	f.mu.Lock()
@@ -30,8 +37,8 @@ func v6Reqs(f *fakeAPI) []measureRequest {
 	return out
 }
 
-// 订阅里有走 IPv6 的线路:同一轮连 IPv6 地址的那条 TCP 线路端口,只用境外测点(不选大陆、不传 ipVersion),
-// 结论记进结果、存库,重启后还在。
+// 订阅里有走 IPv6 的线路:同一轮连 IPv6 地址的那条 TCP 线路端口,先用大陆的家宽测点(不传 ipVersion);
+// 大陆测点连上了就不再问境外测点。结论记进结果、存库,重启后还在。
 func TestV6CheckRequestShapeAndOK(t *testing.T) {
 	h := newHarness(t)
 	h.targets[0].V6 = &V6Target{Host: "2001:db8::7", Port: 8443, PortLine: "tj6", UDPLines: []string{"hy6"}}
@@ -41,23 +48,23 @@ func TestV6CheckRequestShapeAndOK(t *testing.T) {
 		t.Fatalf("大陆那项不受影响: %+v", r)
 	}
 	v := r.V6
-	if v == nil || v.State != V6OK || v.OK != 4 || v.Total != 4 || v.Port != 8443 || v.PortLine != "tj6" || len(v.UDPLines) != 1 || v.Measurement == "" {
+	if v == nil || v.State != V6OK || v.Scope != V6ScopeCN || v.OK != 4 || v.Total != 4 || v.CnOK != 4 || v.CnTotal != 4 || v.Port != 8443 || v.PortLine != "tj6" || len(v.UDPLines) != 1 || v.Measurement == "" {
 		t.Fatalf("IPv6 入站结果 = %+v", v)
 	}
-	if len(v.Probes) != 4 || v.Probes[0].Country == "" {
-		t.Fatalf("测点明细要带国家: %+v", v.Probes)
+	if len(v.Probes) != 4 || v.Probes[0].Country != "CN" || v.Probes[0].Group != GroupMobile || v.Probes[1].Group != GroupTelecom || v.Probes[2].Group != GroupUnicom {
+		t.Fatalf("测点明细要带国家,大陆测点还要认出运营商: %+v", v.Probes)
 	}
 	qs := v6Reqs(h.api)
 	if len(qs) != 1 || len(h.api.reqs()) != 2 {
-		t.Fatalf("应当正好多一次 IPv6 请求: %+v", h.api.reqs())
+		t.Fatalf("大陆测点连上了:应当正好多一次 IPv6 请求,不再问境外测点: %+v", h.api.reqs())
 	}
 	q := qs[0]
 	if q.Type != "ping" || q.Target != "2001:db8::7" || q.Options.Protocol != "TCP" || q.Options.Port != 8443 {
 		t.Fatalf("请求 = %+v", q)
 	}
 	b, _ := json.Marshal(q)
-	if strings.Contains(string(b), `"CN"`) || strings.Contains(string(b), "ipVersion") || !strings.Contains(string(b), `"continent":"EU"`) || !strings.Contains(string(b), `"continent":"NA"`) {
-		t.Fatalf("选点不对(要境外、不传 ipVersion): %s", b)
+	if !strings.Contains(string(b), `"country":"CN"`) || !strings.Contains(string(b), eyeballTag) || strings.Contains(string(b), "ipVersion") || strings.Contains(string(b), "continent") {
+		t.Fatalf("选点不对(先用大陆的家宽测点、不传 ipVersion): %s", b)
 	}
 	// 存进库里,重启后能看到
 	var row model.ReachCheck
@@ -68,35 +75,92 @@ func TestV6CheckRequestShapeAndOK(t *testing.T) {
 	s2 := New(Deps{DB: h.svc.d.DB, IsNode: func() bool { return false }, Setting: func(string) string { return "" },
 		Targets: func(context.Context) []Target { return nil }, API: h.api.srv.URL, FirstDelay: time.Hour})
 	defer s2.Stop()
-	if v := s2.View().Results; len(v) != 1 || v[0].V6 == nil || v[0].V6.State != V6OK {
+	if v := s2.View().Results; len(v) != 1 || v[0].V6 == nil || v[0].V6.State != V6OK || v[0].V6.Scope != V6ScopeCN {
 		t.Fatalf("重启后没恢复 IPv6 入站结果: %+v", v)
 	}
 }
 
-// 境外测点都连不上 → 不通(安全组没放 ::/0 / ip6tables);只有一个测点测到且不通 → 下不了结论;没有测点 → none。
+// 先大陆、后境外:
+//   - 大陆测点连上 → 通(不问境外);
+//   - 大陆测点都连不上 → 问境外:境外通 = 大陆方向不通(cndown),境外也不通 = 入站没放行(down);
+//   - 没有大陆的 IPv6 测点 → 只靠境外测点下结论,结论注明是境外测点(scope abroad);
+//   - 测到的太少 → 下不了结论;一个测点都没有 → none。
 func TestV6CheckVerdicts(t *testing.T) {
 	cases := []struct {
-		name   string
-		ok     bool
-		probes int
-		want   string
+		name            string
+		cnProbes        int
+		cnOK            bool
+		probes          int
+		ok              bool
+		want, wantScope string
+		wantReqs        int // 发了几次 IPv6 请求(被拒收的那次「没有大陆测点」也算一次)
 	}{
-		{"全不通", false, 4, V6Down},
-		{"两个也够下结论", false, 2, V6Down},
-		{"只有一个测点", false, 1, V6Unsure},
-		{"一个通就算通", true, 1, V6OK},
-		{"没有测点", false, 0, V6None},
+		{"大陆通", 4, true, 4, true, V6OK, V6ScopeCN, 1},
+		{"大陆一个测点通就算通", 1, true, 4, false, V6OK, V6ScopeCN, 1},
+		{"大陆不通、境外通", 4, false, 4, true, V6CNDown, V6ScopeBoth, 2},
+		{"大陆两个测点不通、境外一个通", 2, false, 1, true, V6CNDown, V6ScopeBoth, 2},
+		{"大陆只有一个测点不通、境外通:说不准", 1, false, 4, true, V6Unsure, V6ScopeBoth, 2},
+		{"大陆、境外都不通", 4, false, 4, false, V6Down, V6ScopeBoth, 2},
+		{"大陆一个不通、境外一个不通:合起来两个", 1, false, 1, false, V6Down, V6ScopeBoth, 2},
+		{"大陆两个不通、境外没有测点", 2, false, 0, false, V6Down, V6ScopeBoth, 2},
+		{"大陆一个不通、境外没有测点", 1, false, 0, false, V6Unsure, V6ScopeBoth, 2},
+		{"没有大陆测点、境外通", 0, false, 4, true, V6OK, V6ScopeAbroad, 2},
+		{"没有大陆测点、境外一个通", 0, false, 1, true, V6OK, V6ScopeAbroad, 2},
+		{"没有大陆测点、境外全不通", 0, false, 4, false, V6Down, V6ScopeAbroad, 2},
+		{"没有大陆测点、境外两个不通也够下结论", 0, false, 2, false, V6Down, V6ScopeAbroad, 2},
+		{"没有大陆测点、境外只有一个不通", 0, false, 1, false, V6Unsure, V6ScopeAbroad, 2},
+		{"哪里都没有测点", 0, false, 0, false, V6None, V6ScopeAbroad, 2},
 	}
 	for _, c := range cases {
 		h := newHarness(t)
-		h.api.mu.Lock()
-		h.api.v6OK, h.api.v6Probes = c.ok, c.probes
-		h.api.mu.Unlock()
+		h.setV6(c.cnProbes, c.cnOK, c.probes, c.ok)
 		h.targets[0].V6 = &V6Target{Host: "2001:db8::7", Port: 443, PortLine: "tj6"}
 		h.runManual(t)
-		if v := latest(t, h, 1).V6; v == nil || v.State != c.want {
-			t.Errorf("%s: 结论 = %+v,应为 %s", c.name, v, c.want)
+		v := latest(t, h, 1).V6
+		if v == nil || v.State != c.want || v.Scope != c.wantScope {
+			t.Errorf("%s: 结论 = %+v,应为 %s / %s", c.name, v, c.want, c.wantScope)
+			continue
 		}
+		if n := len(v6Reqs(h.api)); n != c.wantReqs {
+			t.Errorf("%s: 发了 %d 次 IPv6 请求,应为 %d", c.name, n, c.wantReqs)
+		}
+		if v.CnTotal != c.cnProbes || (c.cnOK && v.CnOK != c.cnProbes) {
+			t.Errorf("%s: 大陆那一步的个数不对: %+v", c.name, v)
+		}
+	}
+	// 境外那一步和真接口一样直接拒收(没有测点)时,结论一样
+	h := newHarness(t)
+	h.setV6(0, false, 0, false)
+	h.api.mu.Lock()
+	h.api.v6NoProbes422 = true
+	h.api.mu.Unlock()
+	h.targets[0].V6 = &V6Target{Host: "2001:db8::7", Port: 443, PortLine: "tj6"}
+	h.runManual(t)
+	if v := latest(t, h, 1).V6; v == nil || v.State != V6None || v.Error != "" {
+		t.Errorf("两步都被拒收(没有测点): %+v", v)
+	}
+}
+
+// 大陆测点都连不上、该问境外测点时额度不够了:不发第二次请求,结论仍是不通,但注明没能问境外测点
+// (分不清是入站没放行还是大陆方向不通)。
+func TestV6AbroadSkippedForQuota(t *testing.T) {
+	h := newHarness(t)
+	h.setV6(4, false, 4, true)
+	h.targets = []Target{{NodeId: 1, Name: "纯v6", Err: "订阅里这台用的是 IPv6 地址,大陆连通检测暂只支持 IPv4",
+		V6: &V6Target{Host: "2001:db8::9", Port: 443, PortLine: "anytls"}}}
+	h.svc.c.mu.Lock()
+	h.svc.c.quota = Quota{Limit: 250, Remaining: v6Cost() + v6AbroadCost() - 1, At: h.now.Unix(), ResetAt: h.now.Unix() + 1800}
+	h.svc.c.mu.Unlock()
+	h.api.mu.Lock()
+	h.api.remaining = v6Cost() + v6AbroadCost() - 1
+	h.api.mu.Unlock()
+	h.runManual(t)
+	v := latest(t, h, 1).V6
+	if v == nil || v.State != V6Down || v.Scope != V6ScopeBoth || !strings.Contains(v.AbroadSkip, "额度") || v.CnTotal != 4 || v.Total != 4 {
+		t.Fatalf("境外那一步没额度:应是不通并注明没问成境外测点: %+v", v)
+	}
+	if n := len(v6Reqs(h.api)); n != 1 {
+		t.Fatalf("额度不够时不该发境外那一次: %d", n)
 	}
 }
 
@@ -210,23 +274,19 @@ func TestCanCheckExtReservesV6(t *testing.T) {
 	}
 }
 
-// 这次没有可用的 IPv6 测点(测点中途掉线、被判超时,结果里一个都没测到):和没测成一样,不盖掉上一次的结论,
+// 这次没有可用的 IPv6 测点(大陆、境外都没有:测点中途掉线、被判超时,结果里一个都没测到):和没测成一样,不盖掉上一次的结论,
 // 面板上照旧显示上一次的"不通"并注明最近这次的情况;概况的 v6Bad 也照旧算它。
 func TestV6NoneKeepsLastMeasured(t *testing.T) {
 	h := newHarness(t)
 	h.targets[0].V6 = &V6Target{Host: "2001:db8::7", Port: 8443, PortLine: "tj6"}
-	h.api.mu.Lock()
-	h.api.v6OK = false
-	h.api.mu.Unlock()
+	h.setV6(4, false, 4, false)
 	h.runManual(t)
 	first := latest(t, h, 1).V6
 	if first == nil || first.State != V6Down {
 		t.Fatalf("第一次应测出不通: %+v", first)
 	}
 	h.advance(time.Minute)
-	h.api.mu.Lock()
-	h.api.v6Probes = 0
-	h.api.mu.Unlock()
+	h.setV6(0, false, 0, false)
 	h.runManual(t)
 	v := latest(t, h, 1).V6
 	if v == nil || v.State != V6Down || v.At != first.At || v.Attempt == nil || v.Attempt.Verdict != V6None {
@@ -238,17 +298,15 @@ func TestV6NoneKeepsLastMeasured(t *testing.T) {
 	// 从来没测成过、这次又没有测点:就显示"无可用测点"
 	h2 := newHarness(t)
 	h2.targets[0].V6 = &V6Target{Host: "2001:db8::7", Port: 8443, PortLine: "tj6"}
-	h2.api.mu.Lock()
-	h2.api.v6Probes = 0
-	h2.api.mu.Unlock()
+	h2.setV6(0, false, 0, false)
 	h2.runManual(t)
 	if v := latest(t, h2, 1).V6; v == nil || v.State != V6None || v.Attempt != nil {
 		t.Fatalf("没有可比的上一次时如实显示: %+v", v)
 	}
 }
 
-// 概况"需要处理"用的 v6Bad:只算 down(unsure / udp / none / error 不算),和服务器页显示的是同一份;
-// 这台不再有走 IPv6 的线路就不算了;没有时是空数组。
+// 概况"需要处理"用的 v6Bad:算 down(入站没放行)和 cndown(境外通、大陆不通),unsure / udp / none / error 不算,
+// 和服务器页显示的是同一份;这台不再有走 IPv6 的线路就不算了;没有时是空数组。
 func TestV6Bad(t *testing.T) {
 	h := newHarness(t)
 	if b, _ := json.Marshal(h.svc.V6Bad()); string(b) != "[]" {
@@ -259,22 +317,27 @@ func TestV6Bad(t *testing.T) {
 		{NodeId: 2, Name: "只有UDP", Host: "203.0.113.8", Port: 443, PortFrom: "line", V6: &V6Target{Host: "2001:db8::2", UDPLines: []string{"hy6"}}},
 		{NodeId: 3, Name: "内网", Host: "203.0.113.9", Port: 443, PortFrom: "line", V6: &V6Target{Host: "fd00::3", Port: 443, Err: "不是公网地址"}},
 	}
-	h.api.mu.Lock()
-	h.api.v6OK = false
-	h.api.mu.Unlock()
+	h.setV6(4, false, 4, false)
 	h.runManual(t)
 	bad := h.svc.V6Bad()
-	if len(bad) != 1 || bad[0].NodeId != 1 || bad[0].Name != "不通" || bad[0].Target != "2001:db8::1" || bad[0].Port != 8443 || bad[0].At == 0 {
+	if len(bad) != 1 || bad[0].NodeId != 1 || bad[0].Name != "不通" || bad[0].Target != "2001:db8::1" || bad[0].Port != 8443 || bad[0].At == 0 || bad[0].State != V6Down {
 		t.Fatalf("只算 down 的那台: %+v", bad)
 	}
 	b, _ := json.Marshal(bad[0])
-	for _, k := range []string{`"nodeId":1`, `"name":"不通"`, `"target":"2001:db8::1"`, `"port":8443`, `"at":`} {
+	for _, k := range []string{`"nodeId":1`, `"name":"不通"`, `"target":"2001:db8::1"`, `"port":8443`, `"at":`, `"state":"down"`} {
 		if !strings.Contains(string(b), k) {
 			t.Fatalf("字段 %s: %s", k, b)
 		}
 	}
 	if len(h.svc.Bad()) != 0 {
 		t.Fatalf("不并进 reachBad: %+v", h.svc.Bad())
+	}
+	// 境外通、大陆不通:也算,状态写明是 cndown(概况上和「入站没放行」分开说)
+	h.setV6(4, false, 4, true)
+	h.advance(time.Minute)
+	h.runManual(t)
+	if bad := h.svc.V6Bad(); len(bad) != 1 || bad[0].State != V6CNDown {
+		t.Fatalf("大陆方向不通也要算: %+v", bad)
 	}
 	// 线路改回 IPv4:这台不再有 IPv6 入站,概况上也不再算
 	h.targets[0].V6 = nil

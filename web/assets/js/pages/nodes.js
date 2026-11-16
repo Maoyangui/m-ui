@@ -2,7 +2,7 @@ import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, setHTML, matches, debounce, diskBrief, diskHogs } from '../ui.js';
+import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, fieldBox, switchRow, empty, fv, fchk, setHTML, matches, debounce, diskBrief, diskHogs } from '../ui.js';
 import { loadReach, reachCell, reachToolbar, refreshDetail, setNodes, setReachListener, reach, isBad, v6Of } from '../reach.js';
 import { nodeIssues, trackUnsynced, diskLevel, diskPct } from '../issues.js';
 import { loadHA, roleChip, haMenuItems, setHARefresh } from '../ha.js';
@@ -39,7 +39,7 @@ export async function render(el) {
       ${isNodeView() ? '' : `<button class="btn primary" data-act="node.add">${t('node.add')}</button>`}
     </div>
     <div id="decom-gone"></div>
-    <div class="table-wrap fill"><table class="grid tight nodes">
+    <div class="table-wrap fill"><table class="grid tight nodes" data-fit="p3:1120 rows:940 cards:620">
       <thead><tr><th>${t('nav.nodes')}</th><th class="c-addr">${t('node.address')}</th><th>${t('common.status')}</th><th class="c-reach" title="${esc(t('reach.colHint'))}">${t('reach.col')}</th><th class="c-sync c-p3">${t('node.sync')}</th><th class="c-core">${t('node.core')}</th><th class="c-online c-p3">${t('node.online')}</th><th class="c-act"></th></tr></thead>
       <tbody id="nodes-body"></tbody>
     </table></div>
@@ -245,7 +245,7 @@ function nodeBad(n) {
   const r = ((reach && reach.results) || []).find(x => x.nodeId === n.id);
   if (r && isBad(r.verdict)) return true;
   const v6 = v6Of(n.id);
-  if (v6 && v6.state === 'down') return true;
+  if (v6 && (v6.state === 'down' || v6.state === 'cndown')) return true;
   if ((state.status.certAlerts || []).some(a => (a.nodeId || 0) === (n.isLocal ? 0 : n.id))) return true;
   return certFailBadge(n) !== '';
 }
@@ -317,22 +317,36 @@ function renderRows() {
   renderGroups();
 }
 
+// 新增 / 编辑服务器。从上到下三段,每段回答一件事:
+//   这台叫什么、归哪一组、流量怎么算 → 怎么连上它的面板(副机才有)→ 订阅里给用户哪个地址
+// 两个开关(跳过证书校验、启用)各占一整行、带一句说明,跟着它管的那一段:不再是表单末尾两个并排的小勾选框
 function editNode(id) {
   const n = id ? data.nodes.find(x => x.id === id) : { enabled: true, insecure: true };
+  const byDomain = subByDomain();
+  const famHelp = t('node.addrFamHelp') + (id ? ' ' + detectedText(n) : '') + (byDomain ? ' ' + t('node.addrDnsHelp') : '');
+  const link = n.isLocal ? '' : `
+    <h3 class="form-sec">${t('node.sec.link')}</h3>
+    <div class="nd-link">
+      <div>${field(t('node.apiUrl'), `<input id="f-api" value="${esc(n.apiUrl || '')}" placeholder="https://tw.example.com:2053/app/">`, t('node.apiUrlHelp'))}<p class="hint warn-text" id="f-api-plain" ${isPlain(n.apiUrl) ? '' : 'hidden'}>${esc(t('node.plainHelp'))}</p></div>
+      ${field(t('node.token'), `<input id="f-token" type="password" autocomplete="off" placeholder="${n.hasToken ? t('node.tokenKeep') : ''}">`, t('node.tokenHelp'))}
+      ${switchRow('f-insecure', t('node.insecure'), n.insecure !== false, t('node.insecureHelp'))}
+    </div>`;
   openModal(id ? t('node.edit') : t('node.add'), `
-    <div class="form-grid">
-      ${field(t('common.name'), `<input id="f-name" value="${esc(n.name || '')}" placeholder="台湾">`, t('node.nameHelp'))}
-      ${field(t('node.domain'), `<input id="f-domain" value="${esc(n.domain || '')}" placeholder="tw.example.com">`, t('node.domainHelp') + (subByDomain() ? ' ' + t('node.domainDnsHelp') : ''))}
-      ${field(t('node.addr'), `<input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(autoAddr(n).ip || t('node.addrAuto'))}">`, t('node.addrHelp') + (subByDomain() ? ' ' + t('node.addrDnsHelp') : ''))}
-      ${field(t('node.family'), `<select id="f-family"><option value="">${t('node.familyV4')}</option><option value="v6" ${n.addrFamily === 'v6' ? 'selected' : ''}>IPv6</option></select>`, t('node.familyHelp') + (id ? ' ' + detectedText(n) : '') + (subByDomain() ? ' ' + t('node.familyDnsHelp') : ''))}
-      ${field(t('node.ratio'), `<input id="f-ratio" type="number" min="0" max="100" step="0.1" value="${n.ratio || 1}">`, t('node.ratioHelp'))}
-      ${field(t('node.group'), `<input id="f-group" list="f-group-list" maxlength="24" value="${esc(n.group || '')}" placeholder="${esc(t('node.groupPh'))}"><datalist id="f-group-list">${groupsOf().filter(g => g.name).map(g => `<option value="${esc(g.name)}">`).join('')}</datalist>`, t('node.groupHelp'))}
-      ${field(t('common.sort'), `<input id="f-sort" type="number" value="${n.sort || 0}">`)}
-      ${n.isLocal ? '' : `
-      <div class="full">${field(t('node.apiUrl'), `<input id="f-api" value="${esc(n.apiUrl || '')}" placeholder="https://tw.example.com:2053/app/">`, t('node.apiUrlHelp'))}<p class="hint warn-text" id="f-api-plain" ${isPlain(n.apiUrl) ? '' : 'hidden'}>${esc(t('node.plainHelp'))}</p></div>
-      <div class="full">${field(t('node.token'), `<input id="f-token" type="password" placeholder="${n.hasToken ? t('node.tokenKeep') : ''}">`, t('node.tokenHelp'))}</div>
-      ${check('f-insecure', t('node.insecure'), n.insecure !== false, t('node.insecureHelp'))}
-      ${check('f-enabled', t('common.enabled'), n.enabled !== false, t('node.enabledHelp'))}`}
+    <div class="nd-form">
+      <div class="nd-top">
+        ${field(t('common.name'), `<input id="f-name" value="${esc(n.name || '')}" placeholder="台湾">`, t('node.nameHelp'))}
+        ${field(t('node.group'), `<input id="f-group" list="f-group-list" maxlength="24" value="${esc(n.group || '')}" placeholder="${esc(t('node.groupPh'))}"><datalist id="f-group-list">${groupsOf().filter(g => g.name).map(g => `<option value="${esc(g.name)}">`).join('')}</datalist>`, t('node.groupShort'))}
+        ${field(t('node.ratio'), `<input id="f-ratio" type="number" min="0" max="100" step="0.1" value="${n.ratio || 1}">`, t('node.ratioShort'))}
+        ${field(t('common.sort'), `<input id="f-sort" type="number" value="${n.sort || 0}">`)}
+      </div>
+      ${link}
+      <h3 class="form-sec">${t('node.sec.addr')}</h3>
+      <div class="form-grid cols-2">
+        ${field(t('node.domain'), `<input id="f-domain" value="${esc(n.domain || '')}" placeholder="tw.example.com">`, t('node.domainHelp') + (byDomain ? ' ' + t('node.domainDnsHelp') : ''))}
+        ${fieldBox(t('node.addr'), `<div class="nd-addr"><input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(autoAddr(n).ip || t('node.addrAuto'))}">
+          <select id="f-family" title="${esc(t('node.familyHelp') + (byDomain ? ' ' + t('node.familyDnsHelp') : ''))}"><option value="">${t('node.famAuto4')}</option><option value="v6" ${n.addrFamily === 'v6' ? 'selected' : ''}>${t('node.famAuto6')}</option></select></div>`, famHelp)}
+      </div>
+      ${n.isLocal ? '' : `<div class="nd-enabled">${switchRow('f-enabled', t('common.enabled'), n.enabled !== false, t('node.enabledHelp'))}</div>`}
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), domain: fv('f-domain').trim(), sort: Number(fv('f-sort')) || 0,

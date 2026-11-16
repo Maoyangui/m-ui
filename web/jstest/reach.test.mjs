@@ -21,12 +21,14 @@ stub('errmsg.js', `export const trErr = (m) => m;`);
 stub('ui.js', `export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 export const fmtRelative = () => 'rel'; export const fmtTime = () => 'time'; export const toast = () => {};
 export const openDrawer = (title, html) => { globalThis.__drawer = html; }; export const drawerOpen = () => false; export const setHTML = () => {};
-export const registerActions = (a) => { globalThis.__actions = a; };`);
+export const registerActions = (a) => { globalThis.__actions = a; };
+export const badge = (text, kind = '') => '<span class="badge ' + kind + '">' + text + '</span>';`);
 globalThis.document = { getElementById: () => null };
 const reach = await import(pathToFileURL(path.join(dir, 'reach.js')).href);
 
 // 服务器 1:双栈,走 IPv6 的有 trojan tj6(8443,被测的那条)、vless vl6(9443)、hysteria2 hy6(8444)
-const ok = { target: '2001:db8::1', state: 'ok', port: 8443, portLine: 'tj6', udpLines: ['hy6'], at: 1, ok: 4, total: 4 };
+// scope 'cn':大陆测点连上的才算绿色的"通"(只有境外测点说通的单独显示成「境外通」,不上色)
+const ok = { target: '2001:db8::1', state: 'ok', scope: 'cn', port: 8443, portLine: 'tj6', udpLines: ['hy6'], at: 1, ok: 4, total: 4, cnOk: 4, cnTotal: 4 };
 const tj6 = { name: 'tj6', protocol: 'trojan', port: 8443 };
 const vl6 = { name: 'vl6', protocol: 'vless', port: 9443 };
 const hy6 = { name: 'hy6', protocol: 'hysteria2', port: 8444 };

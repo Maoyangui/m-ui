@@ -49,7 +49,7 @@ export async function render(el) {
         <button data-act="up.addGroup"><b>${esc(t('up.addGroup'))}</b><span class="muted small" style="display:block">${esc(t('up.menu.groupHelp'))}</span></button>
       </div></details>
     </div>
-    <div class="table-wrap fill"><table class="grid">
+    <div class="table-wrap fill"><table class="grid" data-fit="p3:980 cards:820">
       <thead><tr><th>${t('common.name')}</th><th>${t('common.type')}</th><th>${t('common.server')}</th><th class="c-p3">${t('up.linesUsing')}</th><th>${t('up.latency')}</th><th></th></tr></thead>
       <tbody id="up-body"></tbody>
     </table></div>`;

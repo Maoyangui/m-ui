@@ -176,6 +176,34 @@ func (s *Server) upstreamHealthRows() []upRow {
 	return rows
 }
 
+// recheckUpstreamSoon 上游改过以后隔一会儿自动复查一次:改好了的,概况「需要处理」和上游页的故障标记随即消失,
+// 不用等下一轮定时巡检(默认十分钟一轮),也不用人再去点一次「测试」。
+// 等十秒是让本机重载完、新配置推到各副机(副机还没收到就测,测的是旧配置,结果和不复查一样,下一轮巡检再更正);
+// 同一条上游短时间内连改几次,只查最后一次。
+func (s *Server) recheckUpstreamSoon(id uint) {
+	if s.run == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.upRecheck == nil {
+		s.upRecheck = map[uint]*time.Timer{}
+	}
+	if t := s.upRecheck[id]; t != nil {
+		t.Stop()
+	}
+	s.upRecheck[id] = time.AfterFunc(10*time.Second, func() {
+		s.mu.Lock()
+		delete(s.upRecheck, id)
+		s.mu.Unlock()
+		var up model.Upstream
+		if s.db.First(&up, id).Error != nil {
+			return // 这十秒里被删了
+		}
+		s.testUpstreamEverywhere(up)
+	})
+}
+
 // testUpstreamEverywhere 面板"测试"按钮:派发到每台真正用这条上游的服务器上实测。
 // 没有任何服务器用它时,退回在本机测一次(至少给个参考值)。
 func (s *Server) testUpstreamEverywhere(up model.Upstream) []upServer {

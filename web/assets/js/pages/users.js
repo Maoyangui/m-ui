@@ -101,7 +101,7 @@ export async function render(el) {
       <span class="grow"></span>
       <button class="btn sm ghost" data-act="user.clearSel">${t('common.cancel')}</button>
     </div>
-    <div class="table-wrap fill" style="--fill-reserve:10rem"><table class="grid">
+    <div class="table-wrap fill" style="--fill-reserve:10rem"><table class="grid" id="users-table" data-fit="p3:1060 p2:980 cards:840">
       <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sel-all"></th>${th('name', t('common.name'))}${th('status', t('common.status'))}${th('usage', t('user.usage'))}${th('expiry', t('user.expiry'))}${th('devices', t('user.devices'), 'c-p2')}<th class="c-p3">${t('user.speed')}</th><th></th></tr></thead>
       <tbody id="users-body"></tbody>
     </table></div>
@@ -202,7 +202,9 @@ function renderRows() {
   const allBtn = document.getElementById('sel-all-filtered');
   if (allBtn) {
     const pageAll = rows.length > 0 && rows.every(u => selected.has(u.id));
-    const mobile = typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches;
+    // 排成卡片时没有表头(见 app.js 的 fitTables);第一次画时还没量过,先按手机宽度猜
+    const tb = document.getElementById('users-table');
+    const mobile = (tb && String(tb.className || '').includes('cards')) || (typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches);
     allBtn.hidden = !((pageAll || mobile) && total > rows.length && vis.some(u => !selected.has(u.id)));
     allBtn.textContent = t('user.selAllFiltered', { n: total });
   }

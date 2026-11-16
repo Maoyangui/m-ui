@@ -73,7 +73,7 @@
       <li><b>建用户</b>:<b data-k="nav.users">用户</b> 页 → <b data-k="user.add">新增用户</b>,填用户名和额度,勾上 <b data-k="user.f.lines">可用线路</b>,保存。</li>
       <li><b>发订阅</b>:点用户名打开详情,<b data-k="user.subscription">订阅</b> 下面有两个地址,把不带 <code>?format=</code> 的那个(通用地址)发给用户:用浏览器打开是他自己的落地页,能一键导入客户端;客户端来拉时按类型给格式(见 <a href="#users-sub">订阅地址、二维码与临时共享</a>)。</li>
     </ol>
-    <div class="tip"><b>没有域名也能用</b>自签证书 + 服务器 IP 就行:订阅会自动告诉客户端"允许不安全证书",客户端不用另外设置。以后有了域名签正式证书时注意:已经有用户时证书页默认不勾 <b data-k="cert.applySub">用于订阅 HTTPS</b>;勾了的话所有用户的订阅地址都会变成 <code>https://域名…</code>,旧地址立即失效,每个客户端都要重新导入,签发前会再提示一次。不勾就保持原地址,用户刷新一次订阅即可。</div>
+    <div class="tip"><b>没有域名也能用</b>自签证书 + 服务器 IP 就行:订阅会自动告诉客户端"允许不安全证书",客户端不用另外设置。以后有了域名签正式证书时注意:已经有用户时添加证书的弹框里 <b data-k="cert.applySub">用于订阅 HTTPS</b> 默认关着;打开的话所有用户的订阅地址都会变成 <code>https://域名…</code>,旧地址立即失效,每个客户端都要重新导入,点签发时会再提示一次(同一句话再点一次才开始)。不开就保持原地址,用户刷新一次订阅即可。</div>
     <div class="pit"><b>常见坑</b>线路的端口要在云服务器安全组和系统防火墙里放行:Hysteria2、TUIC 走 UDP,其它大多走 TCP。没放行是"连不上"最常见的原因。</div>
   </section>
 
@@ -126,13 +126,13 @@
       <li>在副机服务器上同样安装 m-ui,登录副机面板(先把默认密码改掉)。</li>
       <li>副机 <b data-k="nav.settings">设置</b> → <b data-k="set.role">角色</b>:打开 <b data-k="set.roleSwitch">作为副服务器运行</b>,在弹出的确认里点确认(这个开关拨了当场生效,不用另外保存)。</li>
       <li>副机 <b data-k="nav.settings">设置</b> → <b data-k="set.pairing">配对信息</b>:复制 <b data-k="node.apiUrl">API 地址</b> 和 <b data-k="node.token">配对令牌</b>。</li>
-      <li>主机 <b data-k="nav.nodes">服务器</b> 页 → <b data-k="node.add">新增服务器</b>:填 <b data-k="common.name">名称</b>(会成为订阅里节点名的后缀,如"香港")、API 地址和配对令牌。副机面板用自签证书或 IP 访问时勾 <b data-k="node.insecure">跳过证书校验</b>。</li>
+      <li>主机 <b data-k="nav.nodes">服务器</b> 页 → <b data-k="node.add">新增服务器</b>:填 <b data-k="common.name">名称</b>(会成为订阅里节点名的后缀,如"香港")、API 地址和配对令牌(在 <b data-k="node.sec.link">怎么连上这台副机</b> 一段)。副机面板用自签证书或 IP 访问时把下面的 <b data-k="node.insecure">跳过证书校验</b> 开关打开。</li>
       <li>保存后几秒,这一行显示 <b data-k="node.synced">已同步</b> 就好了。</li>
     </ol>
     <div class="pit"><b>常见坑</b><ul>
       <li>API 地址是 <code>http://</code> 时,令牌和全部用户凭据都是明文传输,列表里会标 <b data-k="node.plain">明文</b>。建议给副机面板开 HTTPS(自签就行),或者让副机面板端口只对主机 IP 放行。</li>
       <li>副机的证书在副机自己的 <b data-k="nav.cert">证书</b> 页签发,各自续期。</li>
-      <li>副机面板改成 HTTPS 后(副机证书页勾了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后生效),要到主机 <b data-k="nav.nodes">服务器</b> 页编辑这一行,把 <b data-k="node.apiUrl">API 地址</b> 换成副机 <b data-k="set.pairing">配对信息</b> 里新的 <code>https://</code> 地址(自签证书或用 IP 访问的勾 <b data-k="node.insecure">跳过证书校验</b>),不然这台会显示离线。在副机上签正式证书时这一项默认勾着,不打算改 API 地址就取消它。</li>
+      <li>副机面板改成 HTTPS 后(副机证书页添加证书时开了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后生效),要到主机 <b data-k="nav.nodes">服务器</b> 页编辑这一行,把 <b data-k="node.apiUrl">API 地址</b> 换成副机 <b data-k="set.pairing">配对信息</b> 里新的 <code>https://</code> 地址(自签证书或用 IP 访问的打开 <b data-k="node.insecure">跳过证书校验</b>),不然这台会显示离线。在副机上签正式证书时这一项默认开着,不打算改 API 地址就把它关掉。</li>
       <li>副机面板里线路、用户、套餐这些页面是只读的,改动都在主机上做。</li>
       <li>主副机版本要一致:列表里标 <b data-k="node.versionMismatch">版本与主机不同</b> 时,把副机升级到同一版本。用到较新的功能后,版本不够的副机会整份拒收同步、继续按旧配置服务:按规则分流要 v0.6.14 及以上,线路作上游、上游组、外部节点的排除关键词要 v0.7.16 及以上,外部节点的隐藏和改名要 v0.7.17 及以上。</li>
     </ul></div>
@@ -143,11 +143,11 @@
     <p class="lede">订阅里的节点地址默认用每台服务器自动探测到的公网 IP,域名只作 SNI,免得客户端 DNS 被污染连不上。</p>
     <ul>
       <li>编辑服务器 → <b data-k="node.addr">连接地址(可填 IP)</b>:留空就用探测到的公网 IP;想用固定的 IP 或域名就手填。</li>
-      <li><b data-k="node.family">自动地址用</b>:双栈服务器默认给 IPv4,可以改成 IPv6;选的那个没探测到就用另一个。手填了连接地址就不看这一项。</li>
+      <li>连接地址右边的下拉:连接地址留空时用探测到的哪个 —— 默认 <b data-k="node.famAuto4">留空用 IPv4</b>,双栈服务器可以改成 <b data-k="node.famAuto6">留空用 IPv6</b>;选的那个没探测到就用另一个。手填了连接地址就不看这一项。</li>
       <li>双栈服务器在线路表单里还能按线路单独选 <b data-k="line.ipVersion">IP 版本</b>。</li>
       <li>想让订阅里写域名而不是 IP:<b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> → <b data-k="set.subServerAddr">订阅里的节点地址</b> 选 <b data-k="set.addrDomain">域名</b>。选之前先给每台服务器填好 <b data-k="node.domain">域名 / IP</b>(本机留空就用面板域名):这个模式下 <b data-k="node.addr">连接地址(可填 IP)</b> 不生效,没填域名的服务器不会出现在订阅里。</li>
     </ul>
-    <div class="tip"><b>IPv6 入站检测</b>订阅里这台有走 IPv6 的线路时(<b data-k="node.family">自动地址用</b> 选了 IPv6,或者有线路的 <b data-k="line.ipVersion">IP 版本</b> 选了 IPv6),主机在大陆连通检测的同一轮里,从境外有 IPv6 的测点连它订阅里的 IPv6 地址和第一条走 IPv6 的 TCP 线路的端口(每台约多用 4 个测点次),结果是 <b data-k="nav.nodes">服务器</b> 页 <b data-k="reach.col">大陆连通</b> 一列里的 v6 小格,点格子看明细。显示不通,多半是安全组没放行 <code>::/0</code> 或者本机防火墙拦了 IPv6。每台只测一个端口,别的端口要各自放行;UDP 线路(hysteria2、tuic)测不了,只能在服务器上抓包确认。</div>
+    <div class="tip"><b>IPv6 入站检测</b>订阅里这台有走 IPv6 的线路时(服务器的连接地址旁边选了 <b data-k="node.famAuto6">留空用 IPv6</b>,或者有线路的 <b data-k="line.ipVersion">IP 版本</b> 选了 IPv6),主机在大陆连通检测的同一轮里连它订阅里的 IPv6 地址和第一条走 IPv6 的 TCP 线路的端口:先用大陆有 IPv6 的家宽测点(每台约多用 4 个测点次);大陆测点都连不上、或这次没有大陆的 IPv6 测点时,再用境外测点(约 4 个)分清原因。结果是 <b data-k="nav.nodes">服务器</b> 页 <b data-k="reach.col">大陆连通</b> 一列里的 v6 小格,点格子看明细:<b>v6 ✓</b> 大陆测点连得上;<b data-k="reach.v6.chip.cndown">大陆✕</b> 境外能连、大陆连不上(这个 IPv6 被墙,或运营商的 IPv6 到不了,换回 IPv4 或换一个 IPv6 地址);<b>v6 ✕</b> 大陆和境外都连不上,多半是安全组没放行 <code>::/0</code> 或者本机防火墙拦了 IPv6;<b data-k="reach.v6.chip.okAbroad">境外✓</b> 这次没有大陆的 IPv6 测点,只知道境外能连。每台只测一个端口,别的端口要各自放行;UDP 线路(hysteria2、tuic)测不了,只能在服务器上抓包确认。</div>
     <div class="pit"><b>IPv6 常见坑</b><ul>
       <li>云服务器的 IPv6 要在安全组里给 <code>::/0</code> 单独放行(TCP、UDP 分开加);系统里的 ip6tables / ufw 也要放行,只清空 iptables 不会放开 IPv6。</li>
       <li>WARP、NAT 这类只能出站的 IPv6 不能给用户连。</li>
@@ -186,7 +186,7 @@
       <li>删除服务器:只部署在它上面的线路会被停用,只用它的用户 / 代理会失去那条线路;操作后会列出受影响的线路和人。</li>
       <li>标 <b data-k="node.decomPending">下线通知未送达</b>:那台还没收到停止服务的通知,主机会一直重试。要立刻停掉,就 SSH 到那台机器上执行 <code>systemctl disable --now m-ui</code>(停掉并取消开机自启),或者用 <code>m-ui</code> 菜单 14 卸载。只关掉副机模式停不了服务:它会变成一台独立的主机,按最后一份配置继续给所有人用。</li>
       <li>离线原因:<b data-k="node.errTimeout">连接超时</b>、<b data-k="node.errRefused">连接被拒绝</b>(端口没放行或面板没在运行)、<b data-k="node.errDns">域名解析失败</b>、<b data-k="node.errCert">证书不受信任</b>(勾上跳过证书校验)、<b data-k="node.errToken">令牌不匹配</b>(重新复制配对令牌)、<b data-k="node.errFp">证书指纹变了</b>(确实重签过副机证书,就在那一行的 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>)。</li>
-      <li>换一台副机:新副机装好后,在 <b data-k="nav.nodes">服务器</b> 页编辑原来那一行,换成新的 API 地址和令牌,主机会自动重新推送。域名和 API 地址不变(域名已经解析到新机器)的,只把令牌换成新机器的就行:主机当它是一台新机器,不再复用连着旧机器的连接,推送、拉报告、设备数合并立刻都走新机器;勾了 <b data-k="node.insecure">跳过证书校验</b> 的,记住的旧指纹随令牌一起作废,新机器第一次连上时重新记住,不用再点 <b data-k="node.resetCert">重置指纹</b>。</li>
+      <li>换一台副机:新副机装好后,在 <b data-k="nav.nodes">服务器</b> 页编辑原来那一行,换成新的 API 地址和令牌,主机会自动重新推送。域名和 API 地址不变(域名已经解析到新机器)的,只把令牌换成新机器的就行:主机当它是一台新机器,不再复用连着旧机器的连接,推送、拉报告、设备数合并立刻都走新机器;开着 <b data-k="node.insecure">跳过证书校验</b> 的,记住的旧指纹随令牌一起作废,新机器第一次连上时重新记住,不用再点 <b data-k="node.resetCert">重置指纹</b>。</li>
     </ul>
   </section>
 </section>
@@ -570,7 +570,7 @@
 
   <section class="sec" id="cert-add">
     <h3>添加证书</h3>
-    <p class="lede"><b data-k="nav.cert">证书</b> 页 → <b data-k="cert.add">添加证书</b>,按有没有域名选 <b data-k="cert.source">证书来源</b>。</p>
+    <p class="lede"><b data-k="nav.cert">证书</b> 页 → 证书库右上角的 <b data-k="cert.add">添加证书</b>,在弹出的框里按有没有域名选来源(最上面三选一)。</p>
     <ul>
       <li><b data-k="cert.srcAcme">有域名(自动签发)</b>:先到域名服务商把 A 记录解析到服务器 IP。填域名,选 <b data-k="cert.method">验证方式</b>:
         <ul>
@@ -582,7 +582,7 @@
       <li><b data-k="cert.srcSelf">无域名(自签)</b>:点 <b data-k="cert.selfsign">生成自签证书</b>;<b data-k="cert.hosts">证书包含的地址(留空自动)</b> 留空就用本机公网 IP。订阅里每个节点会自动带"允许不安全",客户端不用设置;面板和订阅建议保持 HTTP。</li>
       <li><b data-k="cert.srcExternal">已有证书</b>:服务器上已经有 certbot、宝塔、nginx 或商业证书时,填 <b data-k="cert.certPath">证书文件(fullchain)</b> 和 <b data-k="cert.keyPath">私钥文件</b> 的路径,点 <b data-k="cert.useExternal">使用该证书</b>。</li>
     </ul>
-    <div class="tip"><b>选用途</b>在 <b data-k="cert.applyTo">添加后用于</b> 里勾:<b data-k="cert.forLines">设为线路默认证书</b>、<b data-k="cert.applyPanel">用于面板 HTTPS</b>、<b data-k="cert.applySub">用于订阅 HTTPS</b>;没勾的用途不受影响。默认勾选:还没有正式证书时勾着 <b data-k="cert.forLines">设为线路默认证书</b>;添加的不是自签证书、而面板还没用 HTTPS 时勾着 <b data-k="cert.applyPanel">用于面板 HTTPS</b>;订阅还没用 HTTPS 且一个用户都还没有时勾着 <b data-k="cert.applySub">用于订阅 HTTPS</b>,已有用户时默认不勾。勾了 <b data-k="cert.applySub">用于订阅 HTTPS</b>,所有用户的订阅地址都会从 <code>http://</code> 变成 <code>https://</code>,旧地址立即失效,客户端要重新导入(添加前、在 <b data-k="cert.inUse">正在使用</b> 里换订阅证书时、在设置页「订阅」里直接填上或清空证书路径时都会再提示一次);勾了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后面板也换成 <code>https://</code>。</div>
+    <div class="tip"><b>选用途</b>弹框最下面 <b data-k="cert.applyTo">添加后用于</b> 有三个开关:<b data-k="cert.forLines">设为线路默认证书</b>、<b data-k="cert.applyPanel">用于面板 HTTPS</b>、<b data-k="cert.applySub">用于订阅 HTTPS</b>;没开的用途不受影响。默认:还没有正式证书时开着 <b data-k="cert.forLines">设为线路默认证书</b>;添加的不是自签证书、而面板还没用 HTTPS 时开着 <b data-k="cert.applyPanel">用于面板 HTTPS</b>;订阅还没用 HTTPS 且一个用户都还没有时开着 <b data-k="cert.applySub">用于订阅 HTTPS</b>,已有用户时默认关着。开了 <b data-k="cert.applySub">用于订阅 HTTPS</b>,所有用户的订阅地址都会从 <code>http://</code> 变成 <code>https://</code>,旧地址立即失效,客户端要重新导入(添加时、在 <b data-k="cert.inUse">正在使用</b> 里换订阅证书时、在设置页「订阅」里直接填上或清空证书路径时都会再提示一次);开了 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,重启后面板也换成 <code>https://</code>。</div>
   </section>
 
   <section class="sec" id="cf-token">
@@ -636,7 +636,7 @@
     <ul>
       <li>证书按名字跨服务器匹配:线路选了某张证书,没有这张的服务器用它自己的默认证书;线路的证书选择框里能看到哪台有、还剩几天。</li>
       <li>副机一般不配通知:它的续期失败、快到期由主机代发提醒,主机的服务器页也会标出 <b data-k="node.certFail">证书续期失败</b>。</li>
-      <li>在副机上签正式证书时 <b data-k="cert.applyPanel">用于面板 HTTPS</b> 默认勾着;勾了的话,副机重启后主机要改用 <code>https://</code> 的 API 地址(见 <a href="#nodes-add">接入一台副机</a>),不打算改就取消这一项。</li>
+      <li>在副机上签正式证书时 <b data-k="cert.applyPanel">用于面板 HTTPS</b> 默认开着;开着的话,副机重启后主机要改用 <code>https://</code> 的 API 地址(见 <a href="#nodes-add">接入一台副机</a>),不打算改就把这一项关掉。</li>
     </ul>
   </section>
 </section>
@@ -1018,7 +1018,7 @@
       <li>整机迁移(线路、上游、用户、设置都带过来):在新服务器上安装时加参数,<code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --import /path/to/旧面板.db</code>。入站端口、用户凭据、面板路径和订阅路径都保留;下面几项要自己对上,客户端才不用改:
         <ul>
           <li>证书:面板和订阅都沿用旧面板的面板证书路径,证书文件不会跟着数据库过来。旧面板开了 HTTPS 的,先把证书和私钥拷到新机同样的路径再装;拷来的文件在新机上没人续期,域名解析到新机后到 <b data-k="nav.cert">证书</b> 页重新签发一张换上。</li>
-          <li>旧面板的订阅单独配了证书的(订阅域名和面板域名不同时通常如此),导入后订阅用的是面板那张,客户端更新时会报证书不匹配:把订阅那张也拷过来,装好后到 <b data-k="nav.cert">证书</b> 页 <b data-k="cert.add">添加证书</b> → <b data-k="cert.srcExternal">已有证书</b>,在 <b data-k="cert.applyTo">添加后用于</b> 里只勾 <b data-k="cert.applySub">用于订阅 HTTPS</b>。旧面板的订阅是 http、面板却是 https 的,导入后订阅也成了 https:在 <b data-k="cert.inUse">正在使用</b> 里点 <b data-k="cert.useSub">订阅</b> 旁边的 <b data-k="cert.change">更换</b>,选 <b data-k="cert.noHttps">不用 HTTPS</b>。</li>
+          <li>旧面板的订阅单独配了证书的(订阅域名和面板域名不同时通常如此),导入后订阅用的是面板那张,客户端更新时会报证书不匹配:把订阅那张也拷过来,装好后到 <b data-k="nav.cert">证书</b> 页 <b data-k="cert.add">添加证书</b> → <b data-k="cert.srcExternal">已有证书</b>,在 <b data-k="cert.applyTo">添加后用于</b> 里只开 <b data-k="cert.applySub">用于订阅 HTTPS</b>。旧面板的订阅是 http、面板却是 https 的,导入后订阅也成了 https:在 <b data-k="cert.inUse">正在使用</b> 里点 <b data-k="cert.useSub">订阅</b> 旁边的 <b data-k="cert.change">更换</b>,选 <b data-k="cert.noHttps">不用 HTTPS</b>。</li>
           <li>订阅端口会改成 2056:旧面板的订阅不在 2056 端口的,装好后用 <code>m-ui</code> 菜单 6 改回原来的。</li>
           <li>单独的订阅域名不会带过来:用 <code>m-ui set -db /etc/m-ui/m-ui.db subDomain=域名</code> 补上。</li>
           <li>订阅地址用的是域名的,把它解析到新机;用的是旧机 IP 的,换机后地址会变,要把新地址发给用户。</li>
@@ -1296,7 +1296,7 @@
     <h3>面板地址与端口</h3>
     <ul>
       <li>把默认的端口和路径改掉:<b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.port">端口</b> / <b data-k="set.path">路径</b>。只打开 <code>IP:端口/</code> 永远是 404,别人扫到端口也看不出这是面板。</li>
-      <li>面板走 HTTPS:证书页添加证书时勾 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,几秒后自动换上,浏览器跳到 https 地址(副机要重启才生效)。</li>
+      <li>面板走 HTTPS:证书页添加证书时打开 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,几秒后自动换上,浏览器跳到 https 地址(副机要重启才生效)。</li>
       <li>防火墙只放必要的端口;副机的面板端口只对主机 IP 放行(换了主机记得把新主机的 IP 加进去)。这只防得住外面的人,防不住经代理连进来的用户,见下一节。</li>
       <li>登录保护:同一来源 10 分钟内输错 10 次,先挡 5 分钟;连续输错 5 次可以发 Telegram 提醒(<b data-k="set.tgOnLogin">面板登录 / 连续登录失败</b>)。外部 API 令牌错 10 次同样暂停这个来源 5 分钟(和登录分开计数)。</li>
       <li>面板、代理面板或外部 API 挂在反向代理(Nginx、Caddy 等)后面时,在 <b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.trustedProxies">受信任的反向代理</b> 填反代的地址(同机反代填 <code>127.0.0.1, ::1</code>)。不填的话所有请求的来源都是反代自己,一个人连错 10 次就把所有人(管理员、代理、商城、机器人)一起挡 5 分钟。填了以后,只有来自名单里地址的请求才按 <code>X-Forwarded-For</code>(从右往左第一个不在名单里的地址)或 <code>X-Real-IP</code> 认来源;反代要自己追加或覆盖这个头(Nginx:<code>proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;</code>,Caddy 默认就会)。没用反代就留空。</li>
@@ -1348,7 +1348,7 @@
       <dt>提示设备数超限 / 有的设备连不上?</dt>
       <dd>同时在线的设备(按来源 IP 算,所有服务器合计)到了上限,新设备会被拒绝。等别的设备下线约 1 分钟,或者调高设备数。手机切换 WiFi 和流量会换 IP,短时间内可能算两台。</dd>
       <dt data-scope="admin">IPv6 的节点不通?</dt>
-      <dd data-scope="admin">多半是云安全组没给 <code>::/0</code> 放行(TCP、UDP 分开加),或者系统的 ip6tables / ufw 拦着;再确认用户自己的网络有 IPv6。WARP、NAT 之类只能出站的 IPv6 不能给用户连。服务器页的 IPv6 入站检测能直接告诉你通不通(见 <a href="#nodes-addr">连接地址与 IPv4 / IPv6</a>)。</dd>
+      <dd data-scope="admin">多半是云安全组没给 <code>::/0</code> 放行(TCP、UDP 分开加),或者系统的 ip6tables / ufw 拦着;再确认用户自己的网络有 IPv6。WARP、NAT 之类只能出站的 IPv6 不能给用户连。服务器页的 IPv6 入站检测能直接告诉你:是入站没放行(大陆、境外的测点都连不上),还是入站放行了但大陆方向不通(境外能连、大陆连不上)(见 <a href="#nodes-addr">连接地址与 IPv4 / IPv6</a>)。</dd>
       <dt data-scope="admin">某个地区突然全连不上?</dt>
       <dd data-scope="admin">到 <b data-k="nav.nodes">服务器</b> 页点 <b data-k="reach.checkAll">检测大陆连通</b>:<b data-k="reach.v.ipBlocked">IP 被墙</b> 要换 IP,<b data-k="reach.v.portBlocked">端口被封</b> 换个端口就行。</dd>
     </dl>
@@ -1364,7 +1364,7 @@
       <dt>改了端口、监听地址、证书,页面没跳过去?</dt>
       <dd>主面板保存后一两秒就在原地换好监听,浏览器等新地址能连上就跳过去。一直跳不过去,多半是防火墙(安全组)没放行新端口、证书不受信任,或者域名还没指向这台,页面上会给出新地址可以直接点。副机的面板端口、证书改了不会自动换(主机连它用的就是这个地址):先到主机服务器页改好 API 地址,再在副机设置页页头点 <b data-k="set.restart">重启 m-ui</b>,或菜单 2。改路径保存就生效。</dd>
       <dt>副机显示离线?</dt>
-      <dd>看服务器页写的原因,对照 <a href="#nodes-off">离线排查</a>。用自签证书的副机要勾 <b data-k="node.insecure">跳过证书校验</b>;重签过副机证书要在 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>。</dd>
+      <dd>看服务器页写的原因,对照 <a href="#nodes-off">离线排查</a>。用自签证书的副机要打开 <b data-k="node.insecure">跳过证书校验</b>;重签过副机证书要在 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>。</dd>
       <dt>证书续期失败?</dt>
       <dd>看证书库 <b data-k="cert.renewCol">自动续期</b> 一列的原因:HTTP 验证要 80 端口空闲;手动 DNS 的证书不能自动续;域名多了指向别处的 AAAA 记录也会失败。见 <a href="#cert-renew">自动续期</a>。</dd>
       <dt>WARP 启用失败?</dt>
@@ -1395,7 +1395,7 @@
       <li><b>VLESS / VMess 的多路复用(Mux)与 XUDP:</b>客户端开了 Mux,或用 XUDP 转发 UDP 时,一条外层连接只认证一次,里面再开多少条流都不再看用户表;服务端碰到就接受,线路上没有开关能拦。停用、删除用户、重置订阅链接或踢线时只断得了里面正在跑的流,外层连接还活着,客户端断开重连之前仍能在里面开新流。要立刻彻底断开,停用这条线路再启用(会全量重载),或重启 m-ui。Hysteria2、TUIC、AnyTLS 没有这个问题:停用和踢线会关掉整条会话。</li>
       <li><b>跨服务器的设备数约有 5 秒的判定窗口:</b>各台服务器的在线 IP 由主机每 5 秒汇总一轮再下发,同一个用户在这几秒里同时从几台服务器连进来,合计可能超过上限。超出后不会把已经连上的设备踢掉(设备满了只拒新设备,已连接的不动),等多出来的设备空闲约 1 分钟下线后才回到上限以内。</li>
       <li><b>全量重载时 Hysteria2 不发关闭通知:</b>新建 / 删除线路、改端口或协议这类改动要全量重载数据面,正在连着的 Hysteria2 客户端收不到连接关闭的通知,要等约 30 秒的空闲超时才发现断了并重连,这段时间里像是卡住。只改用户、限速、上游时是热更新,不受影响。</li>
-      <li><b>大陆连通检测只测 IPv4:</b>大陆的家庭宽带测点大多没有 IPv6,用它们测 IPv6 会把正常的服务器误判成被墙,所以只测 IPv4;IPv6 入站另从境外测点测一项(只看端口通不通,不判断墙)。见 <a href="#reach">大陆连通检测</a>。</li>
+      <li><b>大陆连通检测(按运营商分组、会告警的那一项)只测 IPv4:</b>大陆有 IPv6 的家宽测点不多,凑不齐三家运营商各几个,所以分运营商的结论只对 IPv4 下。IPv6 另有「IPv6 入站」一项:先用大陆有 IPv6 的测点,连不上再用境外测点分清是入站没放行还是大陆方向不通;这次没有大陆的 IPv6 测点时只用境外测点,并写明大陆方向没测到。见 <a href="#reach">大陆连通检测</a>。</li>
     </ul>
   </section>
 </section>

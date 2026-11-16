@@ -2,7 +2,7 @@
 import { get, post } from './api.js';
 import { t } from './i18n.js';
 import { trErr } from './errmsg.js';
-import { esc, fmtRelative, fmtTime, toast, openDrawer, drawerOpen, setHTML, registerActions } from './ui.js';
+import { esc, fmtRelative, fmtTime, toast, openDrawer, drawerOpen, setHTML, registerActions, badge } from './ui.js';
 
 export let reach = null;            // 最近一次 GET reach 的结果;副机上是 { node: true }
 let detailId = 0;                   // 抽屉里正在看的服务器
@@ -28,33 +28,45 @@ const resultOf = id => ((reach && reach.results) || []).find(r => r.nodeId === i
 const runningFor = id => !!(reach && reach.running && (reach.runningIds || []).includes(id));
 
 // ---- IPv6 入站(同一轮里的另一项,见后端 reach/v6.go)----
-// 结论 → 颜色:通绿、不通红、其余(只有 UDP 线路、测点不够、没测成)灰
-const V6TONE = { ok: 'ok', down: 'danger', unsure: '', udp: '', none: '', error: '' };
-const V6CHIP = { ok: 'ok', down: 'down' };
+// 先用大陆的测点;大陆测点连不上再问境外测点,分清是入站没放行还是大陆方向不通;这次没有大陆的 IPv6 测点才只用境外的。
+// 结论 → 颜色:通绿;不通、大陆不通红;只有境外测点说通的(大陆没测到)不上色;其余(只有 UDP 线路、测点不够、没测成)灰
+const V6TONE = { ok: 'ok', okAbroad: '', cndown: 'danger', down: 'danger', unsure: '', udp: '', none: '', error: '' };
+const V6CHIP = { ok: 'ok', cndown: 'down', down: 'down' };
+// 旧版存下来的结果没有 scope:那时只用境外测点
+const v6Abroad = v => v.scope !== 'cn' && v.scope !== 'both';
+// 细分后的结论:通但只是境外测点说的,单独算一种(okAbroad)
+const v6Kind = v => (v.state === 'ok' && v6Abroad(v) ? 'okAbroad' : v.state || 'error');
 // 这台服务器最近一次 IPv6 入站检测(线路页也用);没有 = 这台订阅里没有走 IPv6 的线路,或还没测过
 export const v6Of = id => { const r = resultOf(id); return r && r.v6 ? r.v6 : null; };
-export const v6Label = v => t('reach.v6.s.' + (v.state || 'error'));
+export const v6Label = v => t('reach.v6.s.' + v6Kind(v));
 const v6Addr = v => (v.port ? `[${v.target}]:${v.port}` : v.target);
 // 一句话说明这次的结论(悬停提示、详情抽屉、线路表单共用)
 export function v6Explain(v) {
   if (!v) return '';
   const udp = (v.udpLines || []).join(t('reach.sep'));
   if (v.state === 'udp') return t('reach.v6.x.udp', { lines: udp });
-  let s = v.state === 'error' ? t('reach.v6.x.error', { err: trErr(v.error || '') }) : t('reach.v6.x.' + v.state, { addr: v6Addr(v) });
+  const addr = v6Addr(v);
+  let s;
+  if (v.state === 'error') s = t('reach.v6.x.error', { err: trErr(v.error || '') });
+  else if (v.state === 'ok') s = t(v6Abroad(v) ? 'reach.v6.x.okAbroad' : 'reach.v6.x.ok', { addr });
+  else if (v.state === 'cndown') s = t('reach.v6.x.cndown', { addr, n: v.cnTotal || 0 });
+  else if (v.state === 'down') s = v.abroadSkip ? t('reach.v6.x.downCnOnly', { addr, err: trErr(v.abroadSkip) }) : t(v6Abroad(v) ? 'reach.v6.x.downAbroad' : 'reach.v6.x.down', { addr });
+  else s = t('reach.v6.x.' + v.state, { addr });
   if (v.port && v.portLine) s += ' ' + t('reach.v6.portOf', { name: v.portLine, port: v.port });
   if (udp && v.state !== 'udp') s += ' ' + t('reach.v6.udpAlso', { lines: udp });
   if (v.attempt) s += ' ' + (v.attempt.verdict === 'none' ? t('reach.v6.attemptNone', { t: fmtTime(v.attempt.at) }) : t('reach.v6.attempt', { t: fmtTime(v.attempt.at), err: trErr(v.attempt.error || '') }));
   return s;
 }
-// 服务器列表里那一格的小标签
+// 服务器列表里那一格的小标签:大陆通 ✓、入站没放行 ✕;「境外通 / 大陆不通」写出来,不能只给一个勾或叉
 function v6Chip(v) {
-  const val = v.state === 'ok' ? '✓' : v.state === 'down' ? '✕' : v.state === 'udp' ? 'UDP' : '?';
-  return `<span class="rc ${V6CHIP[v.state] || ''}" title="${esc(t('reach.v6.title') + ':' + v6Label(v) + ' · ' + v6Explain(v))}">v6<b>${esc(val)}</b></span>`;
+  const kind = v6Kind(v);
+  const val = kind === 'ok' ? '✓' : kind === 'down' ? '✕' : kind === 'okAbroad' || kind === 'cndown' ? t('reach.v6.chip.' + kind) : kind === 'udp' ? 'UDP' : '?';
+  return `<span class="rc ${V6CHIP[v.state] && kind !== 'okAbroad' ? V6CHIP[v.state] : ''}" title="${esc(t('reach.v6.title') + ':' + v6Label(v) + ' · ' + v6Explain(v))}">v6<b>${esc(val)}</b></span>`;
 }
 // 服务器这一份结论的徽章(服务器级)
 export function v6Badge(v) {
   if (!v) return '';
-  return `<span class="badge ${V6TONE[v.state] || ''}" title="${esc(v6Explain(v) + ' · ' + fmtTime(v.at))}">${esc(t('reach.v6.short', { s: v6Label(v) }))}</span>`;
+  return `<span class="badge ${V6TONE[v6Kind(v)] || ''}" title="${esc(v6Explain(v) + ' · ' + fmtTime(v.at))}">${esc(t('reach.v6.short', { s: v6Label(v) }))}</span>`;
 }
 
 // ---- 一条线路在某台服务器上的 IPv6 入站结论(线路页、线路表单)----
@@ -168,12 +180,18 @@ function groupBlock(g) {
     </div>`;
 }
 
-// 详情抽屉里的"IPv6 入站"一节
+// 详情抽屉里的"IPv6 入站"一节:结论、大陆 / 境外各连上几个、每个测点(大陆的写明运营商)
 function v6Block(v) {
-  const probes = (v.probes || []).map(p => `<li><span class="ellip">${esc([p.country, p.city].filter(Boolean).join(' · ') || '?')} · ${esc(p.network || '')} <span class="muted">AS${p.asn}</span></span>
+  const where = p => (p.country === 'CN' && p.group ? t('reach.g.' + p.group) + ' · ' : '') + ([p.country, p.city].filter(Boolean).join(' · ') || '?');
+  const probes = (v.probes || []).map(p => `<li><span class="ellip">${esc(where(p))} · ${esc(p.network || '')} <span class="muted">AS${p.asn}</span></span>
       <span class="${p.offline ? 'muted' : p.ok ? 'ok-text' : 'danger-text'}">${p.offline ? t('reach.offline') : p.ok ? (p.avgMs ? Math.round(p.avgMs) + ' ms' : '✓') : t('reach.fail')}</span></li>`).join('');
+  // 两头都问过的分开写(大陆 0/4 · 境外 4/4);只问了一头的写一个数
+  const abTotal = (v.total || 0) - (v.cnTotal || 0), abOk = (v.ok || 0) - (v.cnOk || 0);
+  const counts = v.scope === 'both'
+    ? `${badge(t('reach.v6.cnOf', { ok: v.cnOk || 0, total: v.cnTotal || 0 }))} ${abTotal ? badge(t('reach.v6.abOf', { ok: abOk, total: abTotal })) : ''}`
+    : v.total ? badge(t(v.scope === 'cn' ? 'reach.v6.cnOf' : 'reach.v6.abOf', { ok: v.ok, total: v.total })) : '';
   return `<section><h3>${t('reach.v6.title')}</h3>
-    <div class="reach-hero ${V6TONE[v.state] || ''}"><div class="v">${esc(v6Label(v))}${v.total ? ` <span class="badge">${esc(t('reach.okOf', { ok: v.ok, total: v.total }))}</span>` : ''}</div><p>${esc(v6Explain(v))}</p></div>
+    <div class="reach-hero ${V6TONE[v6Kind(v)] || ''}"><div class="v">${esc(v6Label(v))} ${counts}</div><p>${esc(v6Explain(v))}</p></div>
     <dl class="kv reach-meta"><dt>${t('reach.target')}</dt><dd class="mono">${esc(v6Addr(v))}</dd><dt>${t('reach.at')}</dt><dd>${fmtTime(v.at)}</dd></dl>
     ${probes ? `<details><summary>${t('reach.probes', { n: (v.probes || []).length })}</summary><ul class="reach-probes">${probes}</ul></details>` : ''}
     <p class="hint">${t('reach.v6.note')}</p></section>`;

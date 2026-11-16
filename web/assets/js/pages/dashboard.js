@@ -341,8 +341,12 @@ function attnItems() {
     else add(5, hard ? 'bad' : 'warn', { ...row, acts: btn('dash.dismiss', 'reach', t('reach.dismiss'), 'ghost', sig) });
   }
   // 6 IPv6 入站(字段存在才有)
-  if (!node && Array.isArray(s.v6Bad) && s.v6Bad.length) add(6, 'warn', { title: t('dash.attn.v6', { n: s.v6Bad.length }), parts: [esc(t('dash.attn.v6.hint'))],
-    names: etc(s.v6Bad.map(x => `${x.name} ${x.port ? hostPort(x.target, x.port) : x.target || ''}`.trim()), 'nodes'), go: '#/nodes?f=bad' });
+  if (!node && Array.isArray(s.v6Bad) && s.v6Bad.length) {
+    // 两种不通分开说:入站没放行(去放行 ::/0)和「境外通、大陆不通」(换地址或换回 IPv4),处理办法不一样
+    const cn = s.v6Bad.filter(x => x.state === 'cndown').length, closed = s.v6Bad.length - cn;
+    add(6, 'warn', { title: t('dash.attn.v6', { n: s.v6Bad.length }), parts: [closed && esc(t('dash.attn.v6.closed', { n: closed })), cn && esc(t('dash.attn.v6.cndown', { n: cn }))].filter(Boolean),
+      names: etc(s.v6Bad.map(x => `${x.name} ${x.port ? hostPort(x.target, x.port) : x.target || ''}`.trim()), 'nodes'), go: '#/nodes?f=bad' });
+  }
   // 7 上游
   const hs = healthSummary(health);
   if (hs && hs.bad.length) add(7, 'bad', { title: t('dash.attn.upstreams', { n: hs.bad.length }), parts: [!hs.single && esc(t('dash.attn.up.servers', { n: hs.servers.size }))],
