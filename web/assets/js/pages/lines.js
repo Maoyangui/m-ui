@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, openDrawer, drawerOpen, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, setText, chipList, fieldBox, fmtBytes, tzOffsetMinutes } from '../ui.js';
+import { esc, toast, confirm, openModal, openDrawer, drawerOpen, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, setText, chipList, fieldBox, fmtBytes, tzOffsetMinutes, switchRow } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
 import { serverOfIP } from '../relayip.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
@@ -37,16 +37,38 @@ const OPT_KEYS = {
 };
 const parseJ = o => { try { return typeof o === 'string' ? JSON.parse(o) : (o || {}); } catch { return {}; } };
 
+// 协议的显示名:列表、筛选、详情、编辑框的下拉都用它(库里存的是小写的协议 id)
+const PROTO_LABEL = { vless: 'VLESS', vmess: 'VMess', trojan: 'Trojan', hysteria2: 'Hysteria2', tuic: 'TUIC', anytls: 'AnyTLS', shadowsocks: 'Shadowsocks', socks: 'SOCKS5', http: 'HTTP', mixed: 'Mixed' };
+const protoName = p => PROTO_LABEL[p] || p;
+// 服务器按分组排:[{name, nodes}],没分组的排最后(name = '');一台都没分组时只有这一段
+function nodeGroups(nodes) {
+  const by = new Map();
+  for (const n of nodes || []) {
+    const g = String(n.group || '').trim();
+    if (!by.has(g)) by.set(g, []);
+    by.get(g).push(n);
+  }
+  const out = [...by].filter(([g]) => g).map(([name, list]) => ({ name, nodes: list }));
+  if (by.has('')) out.push({ name: '', nodes: by.get('') });
+  return out;
+}
+const hasGroups = nodes => (nodes || []).some(n => String(n.group || '').trim());
+
 export async function render(el) {
+  const nodes = state.nodes || [];
+  const opt = n => `<option value="${n.id}" ${n.id === nodeFilter ? 'selected' : ''}>${esc(n.name)}</option>`;
+  const nodeOpts = hasGroups(nodes)
+    ? nodeGroups(nodes).map(g => `<optgroup label="${esc(g.name || t('node.ungrouped'))}">${g.nodes.map(opt).join('')}</optgroup>`).join('')
+    : nodes.map(opt).join('');
   el.innerHTML = `
     <div class="toolbar">
       <input type="search" id="line-q" placeholder="${t('common.search')}…" value="${esc(query)}">
-      ${(state.nodes || []).length > 1 ? `<select class="sm" id="line-node" style="width:auto;max-width:14rem" aria-label="${esc(t('nav.nodes'))}"><option value="0">${esc(t('line.allNodes'))}</option>${state.nodes.map(n => `<option value="${n.id}" ${n.id === nodeFilter ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select>` : ''}
+      ${nodes.length > 1 ? `<select class="sm" id="line-node" style="width:auto;max-width:14rem" aria-label="${esc(t('nav.nodes'))}"><option value="0">${esc(t('line.allNodes'))}</option>${nodeOpts}</select>` : ''}
       <span id="line-protos"></span>
       <span class="muted small" id="line-count"></span>
       <span class="grow"></span>
       <details class="menu"><summary class="btn">${t('line.quick')}</summary><div class="menu-list">
-        ${PRESETS.map(p => `<button data-act="line.preset" data-id="${p.id}"><b>${esc(p.label)}</b><span class="muted small" style="display:block">${esc(p.hint)}</span></button>`).join('')}
+        ${PRESETS.map(p => `<button data-act="line.preset" data-id="${p.id}"><b>${esc(p.label)}</b><span class="muted small" style="display:block">${esc(t(p.hint))}</span></button>`).join('')}
       </div></details>
       <button class="btn primary" data-act="line.add">${t('line.add')}</button>
     </div>
@@ -55,10 +77,10 @@ export async function render(el) {
       <button class="btn sm" data-act="line.batch" data-id="enable">${t('line.batch.enable')}</button>
       <button class="btn sm" data-act="line.batch" data-id="disable">${t('line.batch.disable')}</button>
       <button class="btn sm" data-act="line.batch" data-id="upstream">${t('line.batch.upstream')}</button>
-      ${(state.nodes || []).length > 1 ? `<button class="btn sm" data-act="line.batch" data-id="nodes">${t('line.batch.nodes')}</button>` : ''}
+      ${nodes.length > 1 ? `<button class="btn sm" data-act="line.batch" data-id="nodes">${t('line.batch.nodes')}</button>` : ''}
       <button class="btn sm ghost" data-act="line.clearSel">${t('line.batch.clear')}</button>
     </div>
-    <div class="table-wrap fill"><table class="grid">
+    <div class="table-wrap fill"><table class="grid lines-grid">
       <thead><tr><th></th><th style="width:1.5rem"><input type="checkbox" id="line-sel-all"></th><th>${t('common.name')}</th><th>${t('line.protocol')}</th><th>${t('common.port')}</th><th>${t('line.upstream')}</th><th>${t('nav.nodes')}</th><th class="c-p3">${t('line.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
       <tbody id="lines-body"></tbody>
     </table></div>`;
@@ -82,7 +104,7 @@ function visibleRows() {
 function renderProtoSeg() {
   const used = [...new Set(state.lines.map(l => l.protocol))];
   if (protoFilter && !used.includes(protoFilter)) protoFilter = '';
-  setHTML('line-protos', used.length > 1 ? `<div class="seg sm">${['', ...used].map(pr => `<button data-act="line.proto" data-id="${esc(pr)}" class="${pr === protoFilter ? 'active' : ''}">${esc(pr || t('line.allProtocols'))}</button>`).join('')}</div>` : '');
+  setHTML('line-protos', used.length > 1 ? `<div class="seg sm">${['', ...used].map(pr => `<button data-act="line.proto" data-id="${esc(pr)}" class="${pr === protoFilter ? 'active' : ''}">${esc(pr ? protoName(pr) : t('line.allProtocols'))}</button>`).join('')}</div>` : '');
 }
 export function tick() { renderRows(); refreshLineDetail(); }
 const filtering = () => !!(query || nodeFilter || protoFilter);
@@ -91,14 +113,35 @@ function tlsModeOf(l) {
   const tls = parseJ(l.tls);
   return tls.mode || (PROTOCOLS[l.protocol] || {}).tlsDefault || 'none';
 }
-function protoBadges(l) {
-  const mode = tlsModeOf(l);
-  const tr = parseJ(l.transport);
-  let h = badge(l.protocol, 'primary');
-  if (!(PROTOCOLS[l.protocol] || {}).noTls) h += ' ' + badge(mode === 'reality' ? 'Reality' : mode === 'cert' ? 'TLS' : 'plain', mode === 'reality' ? 'ok' : mode === 'cert' ? '' : 'warn');
-  if (mode === 'cert' && parseJ(l.tls).cert) h += ' ' + badge(certLabel(parseJ(l.tls).cert));
-  if (tr.type && tr.type !== 'tcp') h += ' ' + badge(tr.type);
-  return h;
+// 协议一格:协议名一枚,后面小字写加密方式和传输;没加密的标黄;用了哪张证书放在悬停提示里
+function protoCell(l) {
+  const mode = tlsModeOf(l), tls = parseJ(l.tls), tr = parseJ(l.transport);
+  const bits = [];
+  let plain = false;
+  if (!(PROTOCOLS[l.protocol] || {}).noTls) {
+    if (mode === 'reality') bits.push('Reality');
+    else if (mode === 'cert') bits.push('TLS');
+    else plain = true;
+  }
+  if (tr.type && tr.type !== 'tcp') bits.push(tr.type);
+  const tip = mode === 'cert' && tls.cert ? `${t('line.cert')}: ${certLabel(tls.cert)}` : '';
+  return `<span class="ln-proto"${tip ? ` title="${esc(tip)}"` : ''}>${badge(protoName(l.protocol), 'primary')}${bits.length ? `<span class="muted small">${esc(bits.join(' · '))}</span>` : ''}${plain ? `<span class="small warn-text">${esc(t('line.plain'))}</span>` : ''}</span>`;
+}
+
+// 一台服务器上因为端口被别的程序占着而没开的入站(本机看 status,副机看它上报的)
+const blockedOn = n => (n ? (n.isLocal ? (state.status || {}).blocked : (n.status || {}).blocked) : null) || [];
+// 这条线路没开成的入站(线路自己的,或它的中转入口):[{ node, b }]
+function blockedOf(l) {
+  const mine = b => b && (b.tag === l.name || String(b.tag || '').startsWith(l.name + ' ⇄'));
+  const out = [];
+  for (const n of state.nodes || []) for (const b of blockedOn(n)) if (mine(b)) out.push({ node: n, b });
+  return out;
+}
+function blockedBadge(l) {
+  const list = blockedOf(l);
+  if (!list.length) return '';
+  const tip = list.map(({ node, b }) => t('line.blockedItem', { server: node.name, port: b.port, net: (b.net || 'tcp').toUpperCase(), by: b.by ? t('node.blockedBy', { by: b.by }) : '' })).join('\n') + '\n' + t('line.blockedHelp');
+  return ` <span class="badge danger" title="${esc(tip)}">${esc(t('line.blocked'))}</span>`;
 }
 
 function renderRows() {
@@ -118,32 +161,33 @@ function renderRows() {
     setHTML(body, `<tr><td colspan="10">${state.lines.length ? empty() : `<div class="empty-guide"><p>${t('line.emptyFirst')}</p><button class="btn primary" data-act="line.add">${t('line.emptyFirstBtn')}</button></div>`}</td></tr>`);
     return;
   }
-  const nodeIdsOf = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
+  const nodes = state.nodes || [];
   const serversCell = l => {
-    const ids = nodeIdsOf(l), fam = familyOf(l);
+    const ids = lineNodeIds(l), fam = familyOf(l);
     // 走 IPv6 的服务器后面跟这条线路自己的 IPv6 入站结论(按它的端口和传输层,见 reach.js v6ForLine)
     const tag = (id, inAll) => {
-      const n = (state.nodes || []).find(x => x.id === id);
+      const n = nodes.find(x => x.id === id);
       const v6 = !!n && lineUsesV6(l, n);
       // "全部服务器"里因为默认走 IPv6 才列出来的那台,名字后面注明 IPv6(不然还没测过时看不出为什么列它)
       const fl = fam[id] ? ' · ' + famName(fam[id]) : inAll && v6 ? ' · IPv6' : '';
       return badge((n ? n.name : '#' + id) + fl, 'primary') + (v6 ? ' ' + v6LineBadge(v6Of(id), l) : '');
     };
-    if (!ids.length) { // 全部服务器:把单独选了 IP 版本的、以及这条线路在上面走 IPv6 的(默认给 IPv6 的服务器)列出来
+    if (!ids.length) { // 全部服务器:写「全部 N 台」,再把单独选了 IP 版本的、以及这条线路在上面走 IPv6 的列出来
       const shown = allServersShown(l);
-      return `<span class="muted">${t('line.allServers')}</span>${shown.length ? ' ' + shown.map(id => tag(id, true)).join(' ') : ''}`;
+      if (nodes.length < 2) return shown.length ? shown.map(id => tag(id, true)).join(' ') : `<span class="muted">${esc(nodes[0] ? nodes[0].name : t('line.allServers'))}</span>`;
+      return `<span class="muted">${esc(t('line.allN', { n: nodes.length }))}</span>${shown.length ? ' ' + shown.map(id => tag(id, true)).join(' ') : ''}`;
     }
-    return chipList(ids.map(id => tag(id, false)), { key: 'ln-' + l.id, max: 3 }); // 服务器多时只露前 3 个,其余折成 +N(展开状态 5 秒刷新不丢)
+    return chipList(ids.map(id => tag(id, false)), { key: 'ln-' + l.id, max: 2 }); // 服务器多时只露前 2 个,其余折成 +N(展开状态 5 秒刷新不丢)
   };
   setHTML(body, rows.map(l => `
     <tr draggable="${filtering() ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
       <td class="handle" title="${esc(t('line.dragSort'))}"><i class="i i-grip"></i></td>
       <td><input type="checkbox" class="sel" data-change="line.sel" data-id="${l.id}" ${selected.has(l.id) ? 'checked' : ''}></td>
-      <td class="primary-cell">${dot(online.has(l.name))}<a href="#" data-act="line.detail" data-id="${l.id}">${esc(l.name)}</a>${fwBadge(l)}</td>
-      <td>${protoBadges(l)}</td>
+      <td class="primary-cell">${dot(online.has(l.name))}<a href="#" data-act="line.detail" data-id="${l.id}" title="${esc(l.name)}">${esc(l.name)}</a>${blockedBadge(l)}</td>
+      <td>${protoCell(l)}</td>
       <td class="num">${l.port}</td>
-      <td><span class="cell-clip" title="${esc(l.upstreamName)}">${esc(l.upstreamName)}</span>${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
-      <td>${serversCell(l)}</td>
+      <td>${l.upstreamId ? `<span class="cell-clip" title="${esc(l.upstreamName)}">${esc(l.upstreamName)}</span>` : `<span class="muted">${esc(t('line.directShort'))}</span>`}${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
+      <td>${serversCell(l)}${fwBadge(l)}</td>
       <td class="num c-p3">${l.userCount}</td>
       <td><label class="switch" title="${l.enabled ? t('common.enabled') : t('common.disabled')}"><input type="checkbox" data-change="line.toggle" data-id="${l.id}" ${l.enabled ? 'checked' : ''}><span></span></label></td>
       <td class="actions">
@@ -271,19 +315,90 @@ const famSelect = (n, cur) => {
     <option value="v6" ${cur === 'v6' ? 'selected' : ''}>IPv6</option>
   </select>`;
 };
-// 部署到哪些服务器;双栈的那行多一个小下拉。只有一台服务器时不用勾选,是双栈才露出下拉
-function serversField(l) {
+// 表单里这条线路部署到哪几台:{ all, ids }。选了「全部服务器」、或只有一台服务器(没有勾选框)= 全部
+function formScope() {
+  const nodes = state.nodes || [];
+  const picked = [...document.querySelectorAll('.node-cb')].filter(c => c.checked).map(c => Number(c.value));
+  const el = document.getElementById('f-scope');
+  const all = el ? el.value === 'all' : !picked.length; // 没有范围开关的地方(只有一台服务器、测试桩):全不勾 = 全部
+  return { all, ids: all ? nodes.map(n => n.id) : picked };
+}
+// 部署到哪些服务器。上面一排选「指定服务器 / 全部服务器」:指定 = 只在勾的这几台上开(新建线路默认这个、一台不勾,
+// 以前默认全勾,每次都要一台台取消);全部 = 现有的都开,以后新加的服务器也自动开(存成空)。
+// 服务器有分组时按组列,组名前的勾选框整组勾;双栈的那行多一个 IP 版本小下拉。只有一台服务器时不用选,是双栈才露出下拉。
+function serversField(l, isNew) {
   const nodes = state.nodes || [];
   const fam = familyOf(l);
   // 订阅给域名时"默认跟服务器页的设置走"不成立(服务器的"自动地址用"不起作用),换成域名模式的说明,不接在后面自相矛盾
   if (nodes.length < 2) {
-    return nodes.length && isDualStack(nodes[0]) ? `<div class="full">${field(t('line.ipVersion'), famSelect(nodes[0], fam[nodes[0].id]), subByDomain() ? t('line.famPick') + ' ' + t('line.famDnsHelp') : t('line.ipVersionHelp'))}</div>` : '';
+    return nodes.length && isDualStack(nodes[0]) ? `<div class="ln-one-fam">${field(t('line.ipVersion'), famSelect(nodes[0], fam[nodes[0].id]), subByDomain() ? t('line.famPick') + ' ' + t('line.famDnsHelp') : t('line.ipVersionHelp'))}</div>` : '';
   }
-  const ids = (() => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } })();
-  const anyDual = nodes.some(isDualStack);
-  const rows = nodes.map(n => `<div class="node-row"><label><input type="checkbox" class="node-cb" value="${n.id}" ${!ids.length || ids.includes(n.id) ? 'checked' : ''}> ${esc(n.name)}${n.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>${isDualStack(n) ? famSelect(n, fam[n.id]) : ''}</div>`).join('');
-  const famHelp = subByDomain() ? t('line.famPickMulti') + ' ' + t('line.famDnsHelp') : t('line.famHelp');
-  return `<div class="full">${fieldBox(t('line.servers'), `<div class="check-list node-list">${rows}</div>`, t('line.serversHelp') + (anyDual ? ' ' + famHelp : ''))}</div>`;
+  const ids = lineNodeIds(l);
+  const all = !isNew && !ids.length;
+  // 一台服务器一格,多列排开:几十台也只是几行,不会把表单拉得很长;再多就在框里滚动、用搜索找。
+  // 双栈服务器的 IP 版本下拉只在勾上之后才出现在它旁边(见 syncFamily)
+  const cell = n => `<div class="node-row"><label title="${esc(n.name)}"><input type="checkbox" class="node-cb" value="${n.id}" ${all || ids.includes(n.id) ? 'checked' : ''} ${all ? 'disabled' : ''}> <span class="nm">${esc(n.name)}</span>${n.isLocal ? ` <span class="muted small">${t('node.local')}</span>` : ''}${n.enabled === false ? ` <span class="muted small">${t('common.disabled')}</span>` : ''}</label>${isDualStack(n) ? famSelect(n, fam[n.id]) : ''}</div>`;
+  const body = hasGroups(nodes)
+    ? nodeGroups(nodes).map(g => `<div class="node-grp"><label class="node-grp-h"><input type="checkbox" class="node-gcb"> <b>${esc(g.name || t('node.ungrouped'))}</b><span class="muted small node-gn"></span></label><div class="node-cells">${g.nodes.map(cell).join('')}</div></div>`).join('')
+    : `<div class="node-cells">${nodes.map(cell).join('')}</div>`;
+  return `<h3 class="form-sec">${t('line.servers')}</h3>
+  <div class="ln-srv">
+    <div class="ln-srv-head">
+      <div class="seg sm" id="f-scope-seg"><button type="button" data-scope="pick" class="${all ? '' : 'active'}">${esc(t('line.scope.pick'))}</button><button type="button" data-scope="all" class="${all ? 'active' : ''}">${esc(t('line.scope.all'))}</button></div>
+      <input type="hidden" id="f-scope" value="${all ? 'all' : 'pick'}">
+      ${nodes.length > 8 ? `<input type="search" class="sm ln-srv-q" id="f-srv-q" placeholder="${esc(t('line.srvSearch'))}" aria-label="${esc(t('line.srvSearch'))}">` : ''}
+      <span class="grow"></span>
+      <span class="muted small" id="f-srv-n"></span>
+    </div>
+    <div class="node-list" id="f-srv-list">${body}</div>
+    <p class="hint" id="f-scope-help"></p>
+  </div>`;
+}
+// 服务器选择器的联动:切范围、整组勾、搜索、右上角的已选台数
+function bindServers() {
+  const seg = document.getElementById('f-scope-seg');
+  if (!seg) return;
+  const scope = document.getElementById('f-scope'), list = document.getElementById('f-srv-list');
+  const cbs = () => [...list.querySelectorAll('.node-cb')];
+  const anyDual = (state.nodes || []).some(isDualStack);
+  const sync = () => {
+    const all = scope.value === 'all';
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.scope === scope.value));
+    cbs().forEach(c => { c.disabled = all; if (all) c.checked = true; });
+    list.querySelectorAll('.node-grp').forEach(grp => {
+      const mine = [...grp.querySelectorAll('.node-cb')], n = mine.filter(c => c.checked).length;
+      const g = grp.querySelector('.node-gcb'), lab = grp.querySelector('.node-gn');
+      g.disabled = all;
+      g.checked = n > 0 && n === mine.length;
+      g.indeterminate = n > 0 && n < mine.length;
+      lab.textContent = `${n} / ${mine.length}`;
+    });
+    const n = cbs().filter(c => c.checked).length;
+    setText('f-srv-n', all ? t('line.scope.allN', { n: cbs().length }) : t('line.scope.pickedN', { n, total: cbs().length }));
+    const famHelp = !anyDual ? '' : ' ' + (subByDomain() ? t('line.famPickMulti') + ' ' + t('line.famDnsHelp') : t('line.famHelp'));
+    setText('f-scope-help', t(all ? 'line.scope.allHelp' : 'line.scope.pickHelp') + famHelp);
+    syncFamily();
+    fwUpdateAll();
+  };
+  seg.addEventListener('click', e => {
+    const b = e.target.closest('[data-scope]');
+    if (!b || b.dataset.scope === scope.value) return;
+    scope.value = b.dataset.scope; // 从「全部」切回「指定」:勾选保持全勾,去掉不要的那几台就行
+    sync();
+  });
+  list.addEventListener('change', e => {
+    const el = e.target;
+    if (el.classList.contains('node-gcb')) el.closest('.node-grp').querySelectorAll('.node-row:not([hidden]) .node-cb').forEach(c => { c.checked = el.checked; });
+    if (el.classList.contains('node-gcb') || el.classList.contains('node-cb')) sync();
+    else if (el.classList.contains('node-fam')) syncV6Tips();
+  });
+  const q = document.getElementById('f-srv-q');
+  if (q) q.addEventListener('input', () => {
+    const s = q.value.trim().toLowerCase();
+    list.querySelectorAll('.node-row').forEach(r => { r.hidden = !!s && !r.textContent.toLowerCase().includes(s); });
+    list.querySelectorAll('.node-grp').forEach(g => { g.hidden = ![...g.querySelectorAll('.node-row')].some(r => !r.hidden); });
+  });
+  sync();
 }
 // 给前端测试用(web/jstest/lines.test.mjs)
 export { serverFamily, lineUsesV6, formV6Servers, formLine, allServersShown, v6TipsOpen, v6Norm };
@@ -303,10 +418,9 @@ function formLine() {
 function formV6Servers() {
   const nodes = state.nodes || [];
   const l = formLine();
-  const cbs = [...document.querySelectorAll('.node-cb')];
-  const picked = cbs.filter(c => c.checked).map(c => Number(c.value));
+  const { ids } = formScope();
   const famSel = id => { const s = document.querySelector(`.node-fam[data-node="${id}"]`); return s && !s.disabled ? s.value : ''; };
-  return nodes.filter(n => !picked.length || picked.includes(n.id)).filter(n => lineUsesV6(l, n, famSel(n.id)));
+  return nodes.filter(n => ids.includes(n.id)).filter(n => lineUsesV6(l, n, famSel(n.id)));
 }
 // 自检要点要不要直接展开:这条线路的端口测出不通;UDP 线路(测不了,只能照着要点抓包)也展开
 function v6TipsOpen(l, servers) {
@@ -330,13 +444,13 @@ function syncV6Tips() {
     <p class="hint">${esc(t('line.v6Status'))} ${status}</p>
     <ol class="hint">${[1, 2, 3, 4, 5, 6].map(i => `<li>${esc(t('line.v6Tip' + i))}</li>`).join('')}</ol></details>`;
 }
-// 没部署到的服务器,下拉没有意义
+// 没勾的服务器,IP 版本下拉没有意义
 function syncFamily() {
   const cbs = [...document.querySelectorAll('.node-cb')];
-  const any = cbs.some(c => c.checked);
   document.querySelectorAll('.node-fam').forEach(s => {
     const cb = cbs.find(c => c.value === s.dataset.node);
-    s.disabled = !!cb && any && !cb.checked;
+    s.disabled = !!cb && !cb.checked;
+    s.hidden = s.disabled; // 勾上那台之后才出现在它旁边
   });
   syncV6Tips();
 }
@@ -344,35 +458,62 @@ function syncFamily() {
 // ---- 表单 ----
 const sel = (id, opts, cur, labels = {}) => `<select id="${id}">${opts.map(x => `<option value="${x}" ${cur === x ? 'selected' : ''}>${esc(labels[x] || x)}</option>`).join('')}</select>`;
 
-function tlsSection(protocol, tls) {
+// 加密方式与传输:一排按钮选「证书 / Reality / 不加密」,下面一行只出现这种方式要填的东西(证书或握手目标、客户端指纹、传输方式);
+// Reality 的密钥没有就自动生成、收在「密钥」里。Shadowsocks 没有 TLS:这里是它必填的加密算法和密码
+function dynSection(protocol, tls, tr, o) {
   const spec = PROTOCOLS[protocol] || {};
-  if (spec.noTls) return '';
+  if (spec.noTls) {
+    if (protocol !== 'shadowsocks') return '';
+    return `<h3 class="form-sec">${t('line.tlsMode')}</h3><div class="form-grid cols-4">
+      ${field(t('line.method'), sel('f-method', SS_METHODS, o.method || 'aes-256-gcm'))}
+      <div class="span-2">${field(t('line.password'), `<div class="row"><input id="f-sspw" value="${esc(o.password || '')}" spellcheck="false"><button type="button" class="btn" data-act="line.genSsPw">${t('line.gen')}</button></div>`)}</div>
+    </div>`;
+  }
   const mode = tls.mode || spec.tlsDefault;
   const modes = spec.tlsRequired ? ['cert', 'reality'] : ['cert', 'reality', 'none'];
   const r = tls.reality || {};
-  return `<h3>${t('line.tls')}</h3><div class="form-grid">
-    ${field(t('line.tlsMode'), sel('f-tlsmode', modes, mode, { cert: t('line.tls.cert'), reality: t('line.tls.reality'), none: t('line.tls.none') }), t('line.tlsHelp.' + mode))}
-    ${field(t('line.fp'), sel('f-fp', ['', ...FPS], tls.fingerprint || '', { '': '默认' }))}
-    <div id="f-cert-wrap" class="full" ${mode === 'cert' ? '' : 'hidden'}>${field(t('line.cert'), `<div class="row"><input type="hidden" id="f-cert" value="${esc(tls.cert || '')}"><button type="button" class="btn cert-pick-btn" data-act="line.pickCert" id="f-cert-btn">${esc(tls.cert ? certLabel(tls.cert) : t('line.certDefault'))} ▾</button></div>`, t('line.certHelp'))}</div>
-    <div id="f-reality" class="form-grid full" ${mode === 'reality' ? '' : 'hidden'}>
-      ${field(t('line.reality.server'), `<div class="row"><input id="f-hs" value="${esc(r.handshake_server || 'www.microsoft.com')}"><button type="button" class="btn sm" data-act="line.realityCheck">${t('line.reality.check')}</button><button type="button" class="btn sm" data-act="line.realityPick">${t('line.reality.pick')}</button></div><div id="f-hs-res" class="hint" hidden></div>`, t('line.reality.serverHelp'))}
-      ${field(t('line.reality.port'), `<input id="f-hsport" type="number" value="${r.handshake_port || 443}">`)}
-      <div class="full">${field(t('line.reality.private'), `<div class="row"><input id="f-priv" value="${esc(r.private_key || '')}"><button type="button" class="btn" data-act="line.genReality">${t('line.reality.gen')}</button></div>`)}</div>
-      <div class="full">${field(t('line.reality.public'), `<input id="f-pub" value="${esc(r.public_key || '')}" readonly>`)}</div>
-      <div class="full">${field(t('line.reality.shortIds'), `<div class="row"><input id="f-sids" value="${esc((r.short_ids || []).join(','))}"><button type="button" class="btn" data-act="line.genShortId">${t('line.gen')}</button></div>`)}</div>
-    </div>
-  </div>`;
-}
-
-function transportSection(protocol, tr) {
-  if (!(PROTOCOLS[protocol] || {}).transport) return '';
   const type = tr.type || 'tcp';
   const host = tr.headers && tr.headers.Host ? (Array.isArray(tr.headers.Host) ? tr.headers.Host[0] : tr.headers.Host) : (Array.isArray(tr.host) ? tr.host.join(',') : (tr.host || ''));
-  return `<h3>${t('line.transport')}</h3><div class="form-grid">
-    ${field(t('line.transport.type'), sel('f-trtype', ['tcp', 'ws', 'grpc', 'httpupgrade', 'http'], type, { tcp: t('line.transport.tcp') }), t('line.transportHelp'))}
-    <div id="f-tr-fields" class="form-grid full">${transportFields(type, tr, host)}</div>
-  </div>`;
+  const trFields = spec.transport ? transportFields(type, tr, host) : '';
+  const trTypes = ['tcp', 'ws', 'grpc', 'httpupgrade', 'http'];
+  return `<h3 class="form-sec">${t('line.tlsMode')}</h3>
+    <div class="ln-tls"><div class="seg" id="f-tlsseg">${modes.map(m => `<button type="button" data-tls="${m}" class="${m === mode ? 'active' : ''}">${esc(t('line.tls.' + m))}</button>`).join('')}</div><span class="hint" id="f-tls-help">${esc(t('line.tlsHelp.' + mode))}</span></div>
+    <input type="hidden" id="f-tlsmode" value="${esc(mode)}">
+    <div class="form-grid cols-4 ln-dyn">
+      <div id="f-cert-wrap" class="span-2" ${mode === 'cert' ? '' : 'hidden'}>${fieldBox(t('line.cert'), `<input type="hidden" id="f-cert" value="${esc(tls.cert || '')}"><button type="button" class="btn cert-pick-btn" data-act="line.pickCert" id="f-cert-btn" title="${esc(t('line.certHelp'))}"><span id="f-cert-label">${esc(tls.cert ? certLabel(tls.cert) : t('line.certDefault'))}</span><i class="i i-chev"></i></button>`)}</div>
+      <div class="span-2 ln-reality" ${mode === 'reality' ? '' : 'hidden'}>${fieldBox(t('line.reality.server'), `<div class="row ln-hs"><input id="f-hs" value="${esc(r.handshake_server || 'www.microsoft.com')}" spellcheck="false" autocomplete="off" title="${esc(t('line.reality.serverHelp'))}"><input id="f-hsport" type="number" min="1" max="65535" value="${r.handshake_port || 443}" aria-label="${esc(t('line.reality.port'))}" title="${esc(t('line.reality.port'))}"><button type="button" class="btn" data-act="line.realityCheck">${t('line.reality.check')}</button><button type="button" class="btn" data-act="line.realityPick">${t('line.reality.pick')}</button></div><div id="f-hs-res" class="hint" hidden></div>`)}</div>
+      <div id="f-fp-wrap" ${mode === 'none' ? 'hidden' : ''}>${field(t('line.fp'), sel('f-fp', ['', ...FPS], tls.fingerprint || '', { '': t('common.default') }))}</div>
+      ${spec.transport ? field(t('line.transport.type'), `<select id="f-trtype" title="${esc(t('line.transportHelp'))}">${trTypes.map(x => `<option value="${x}" ${type === x ? 'selected' : ''}>${esc(x === 'tcp' ? t('line.transport.tcp') : x)}</option>`).join('')}</select>`) : ''}
+      ${spec.transport ? `<div id="f-tr-fields" class="form-grid cols-2 span-2" ${trFields ? '' : 'hidden'}>${trFields}</div>` : ''}
+      <details class="adv full ln-reality" ${mode === 'reality' ? '' : 'hidden'}><summary>${esc(t('line.reality.keys'))}</summary><div class="form-grid cols-4">
+        <div class="span-2">${field(t('line.reality.private'), `<div class="row"><input id="f-priv" value="${esc(r.private_key || '')}" spellcheck="false" autocomplete="off"><button type="button" class="btn" data-act="line.genReality">${t('line.reality.gen')}</button></div>`)}</div>
+        <div class="span-2">${field(t('line.reality.public'), `<input id="f-pub" value="${esc(r.public_key || '')}" readonly>`)}</div>
+        <div class="span-2">${field(t('line.reality.shortIds'), `<div class="row"><input id="f-sids" value="${esc((r.short_ids || []).join(','))}" spellcheck="false" autocomplete="off"><button type="button" class="btn" data-act="line.genShortId">${t('line.gen')}</button></div>`)}</div>
+      </div></details>
+    </div>`;
 }
+// 切加密方式:只露出这种方式的栏;切到 Reality 还没有密钥就现生成一对
+function setTlsMode(mode) {
+  document.getElementById('f-tlsmode').value = mode;
+  document.querySelectorAll('#f-tlsseg button').forEach(b => b.classList.toggle('active', b.dataset.tls === mode));
+  document.querySelectorAll('#f-dyn .ln-reality').forEach(el => { el.hidden = mode !== 'reality'; });
+  document.getElementById('f-cert-wrap').hidden = mode !== 'cert';
+  document.getElementById('f-fp-wrap').hidden = mode === 'none';
+  setText('f-tls-help', t('line.tlsHelp.' + mode));
+  if (mode === 'reality' && !fv('f-priv').trim()) genReality().catch(e => toast(e.message, 'err'));
+}
+async function genReality() {
+  const k = await get('keygen?type=reality');
+  if (!document.getElementById('f-priv')) return; // 等结果的时候表单关了、或换了协议
+  document.getElementById('f-priv').value = k.privateKey || k.private_key || '';
+  document.getElementById('f-pub').value = k.publicKey || k.public_key || '';
+  if (!fv('f-sids').trim()) {
+    const s = await get('keygen?type=shortid');
+    if (document.getElementById('f-sids')) document.getElementById('f-sids').value = s.shortId || s.short_id || '';
+  }
+}
+
+// 传输方式选了 ws / grpc 之类才有要填的东西(TCP 没有)
 function transportFields(type, tr, host) {
   switch (type) {
     case 'ws': case 'httpupgrade': case 'http':
@@ -383,24 +524,22 @@ function transportFields(type, tr, host) {
   return '';
 }
 
-function protoSection(protocol, o) {
+// 协议自己的可选参数,收在「更多设置」里(Shadowsocks 的算法和密码是必填,在上面的加密方式里)
+function advProto(protocol, o) {
   let h = '';
   switch (protocol) {
-    case 'vless': h = check('f-vision', t('line.vision'), o.vision !== false); break;
+    case 'vless': h = `<div class="full">${check('f-vision', t('line.vision'), o.vision !== false)}</div>`; break;
     case 'hysteria2':
-      h = field(t('line.upMbps'), `<input id="f-up" type="number" value="${o.up_mbps || 0}">`) +
-        field(t('line.downMbps'), `<input id="f-down" type="number" value="${o.down_mbps || 0}">`) +
-        field(t('line.obfs'), `<input id="f-obfs" value="${esc((o.obfs && o.obfs.password) || '')}">`) +
+      h = `<div class="full">${field(t('line.hop'), `<input id="f-hop" value="${esc(o.port_hopping || '')}" placeholder="20000-30000">`, t('line.hopHelp'))}</div>` +
         `<div class="full">${field(t('line.masq'), `<input id="f-masq" value="${esc(masqOf(o))}" placeholder="https://www.bing.com">`, t('line.masqHelp'))}</div>` +
-        `<div class="full">${field(t('line.hop'), `<input id="f-hop" value="${esc(o.port_hopping || '')}" placeholder="20000-30000">`, t('line.hopHelp'))}</div>`; break;
+        field(t('line.upMbps'), `<input id="f-up" type="number" min="0" value="${o.up_mbps || 0}">`) +
+        field(t('line.downMbps'), `<input id="f-down" type="number" min="0" value="${o.down_mbps || 0}">`) +
+        `<div class="full">${field(t('line.obfs'), `<input id="f-obfs" value="${esc((o.obfs && o.obfs.password) || '')}">`)}</div>`; break;
     case 'tuic': h = field(t('line.cc'), sel('f-cc', ['cubic', 'bbr', 'new_reno'], o.congestion_control || 'cubic')); break;
-    case 'shadowsocks':
-      h = field(t('line.method'), sel('f-method', SS_METHODS, o.method || 'aes-256-gcm')) +
-        field(t('line.password'), `<div class="row"><input id="f-sspw" value="${esc(o.password || '')}"><button type="button" class="btn" data-act="line.genSsPw">${t('line.gen')}</button></div>`); break;
     case 'anytls':
-      h = `<div class="full">${field(t('line.padding'), `<textarea id="f-padding">${esc((o.padding_scheme || []).join('\n'))}</textarea>`)}</div>`; break;
+      h = `<div class="full">${field(t('line.padding'), `<textarea id="f-padding" spellcheck="false">${esc((o.padding_scheme || []).join('\n'))}</textarea>`)}</div>`; break;
   }
-  return h ? `<h3>${t('line.proto')}</h3><div class="form-grid">${h}</div>` : '';
+  return h ? `<div class="form-grid cols-2 ln-adv-proto">${h}</div>` : '';
 }
 
 function extraOf(protocol, o) {
@@ -410,41 +549,72 @@ function extraOf(protocol, o) {
   return Object.keys(extra).length ? JSON.stringify(extra, null, 2) : '';
 }
 
+// 「更多设置」那一行右边:已经设了哪几样;一样都没设时写这里面有什么(端口跳跃这类功能收起来了也找得到)
+function advSummary() {
+  const el = document.getElementById('f-adv-sum');
+  if (!el) return;
+  const p = fv('f-protocol'), set = [];
+  const has = id => { const x = document.getElementById(id); const v = x ? String(x.value || '').trim() : ''; return v !== '' && v !== '0'; };
+  if (p === 'hysteria2') {
+    if (has('f-hop')) set.push(t('line.hop'));
+    if (has('f-masq')) set.push(t('line.masq'));
+    if (has('f-up') || has('f-down')) set.push(t('line.adv.bw'));
+    if (has('f-obfs')) set.push(t('line.adv.obfs'));
+  }
+  if (p === 'anytls' && has('f-padding')) set.push('padding');
+  if (has('f-extra')) set.push(t('line.adv.extra'));
+  if (has('f-addrs')) set.push(t('line.adv.addrs'));
+  el.textContent = set.length ? set.join(' · ') : t(p === 'hysteria2' ? 'line.adv.hasHy2' : 'line.adv.has');
+  el.classList.toggle('on', set.length > 0);
+}
+
 function renderDynamic(l) {
   const protocol = fv('f-protocol');
   const o = parseJ(l.options), tls = parseJ(l.tls), tr = parseJ(l.transport);
-  document.getElementById('f-dyn').innerHTML = tlsSection(protocol, tls) + transportSection(protocol, tr) + protoSection(protocol, o);
+  document.getElementById('f-dyn').innerHTML = dynSection(protocol, tls, tr, o);
+  document.getElementById('f-adv-proto').innerHTML = advProto(protocol, o);
   document.getElementById('f-extra').value = extraOf(protocol, o);
-  const tm = document.getElementById('f-tlsmode');
-  if (tm) tm.addEventListener('change', e => {
-    document.getElementById('f-reality').hidden = e.target.value !== 'reality';
-    document.getElementById('f-cert-wrap').hidden = e.target.value !== 'cert';
-    const help = tm.closest('.field').querySelector('.help');
-    if (help) help.textContent = t('line.tlsHelp.' + e.target.value);
-  });
+  const seg = document.getElementById('f-tlsseg');
+  if (seg) seg.addEventListener('click', e => { const b = e.target.closest('[data-tls]'); if (b && b.dataset.tls !== fv('f-tlsmode')) setTlsMode(b.dataset.tls); });
   const tt = document.getElementById('f-trtype');
-  if (tt) tt.addEventListener('change', e => { document.getElementById('f-tr-fields').innerHTML = transportFields(e.target.value, {}, ''); });
+  if (tt) tt.addEventListener('change', e => {
+    const box = document.getElementById('f-tr-fields'), h = transportFields(e.target.value, {}, '');
+    box.innerHTML = h;
+    box.hidden = !h;
+  });
+  // 新建线路默认就是 Reality:密钥现生成,不用人去点「生成密钥对」
+  if (document.getElementById('f-priv') && fv('f-tlsmode') === 'reality' && !fv('f-priv').trim()) genReality().catch(e => toast(e.message, 'err'));
+  advSummary();
+}
+
+// 展开某个收起的分区再报错:错在收起来的地方时,人得看得见是哪一栏
+function failIn(accId, msg) {
+  const a = document.getElementById(accId);
+  if (a) a.open = true;
+  throw new Error(msg);
 }
 
 function readForm(id) {
   const protocol = fv('f-protocol');
   const spec = PROTOCOLS[protocol] || {};
+  // 部署到哪些服务器:「全部服务器」存空(以后新加的也算);「指定服务器」至少勾一台
+  const sc = formScope();
+  if (document.getElementById('f-scope') && !sc.all && !sc.ids.length) throw new Error(t('line.scope.none'));
   const body = {
     name: fv('f-name').trim(), protocol, port: Number(fv('f-port')),
     upstreamId: Number(fv('f-upstream')), enabled: fchk('f-enabled'),
     routeRules: rrRead(),
     forwards: fwRead(),
   };
-  // 部署到哪些服务器:全不勾或全勾 = 全部(存空)
-  const nodeCbs = [...document.querySelectorAll('.node-cb')];
-  const picked = nodeCbs.filter(c => c.checked).map(c => Number(c.value));
-  body.nodeIds = (picked.length && picked.length < nodeCbs.length) ? picked : [];
+  body.nodeIds = sc.all ? [] : sc.ids;
   body.nodeFamily = {};
   document.querySelectorAll('.node-fam').forEach(s => { if (s.value && !s.disabled) body.nodeFamily[s.dataset.node] = s.value; });
+  const nodeOpts = fwOnlyOpts(body.forwards);
+  if (nodeOpts) body.nodeOpts = nodeOpts; // 没动过就不带:后端沿用库里的
   // TLS
   if (!spec.noTls) {
     const tls = { mode: fv('f-tlsmode') };
-    if (fv('f-fp')) tls.fingerprint = fv('f-fp');
+    if (tls.mode !== 'none' && fv('f-fp')) tls.fingerprint = fv('f-fp');
     if (tls.mode === 'cert' && fv('f-cert')) tls.cert = fv('f-cert');
     if (tls.mode === 'reality') {
       if (!fv('f-priv').trim()) throw new Error(t('line.reality.private') + ' ' + t('line.reality.gen'));
@@ -475,7 +645,9 @@ function readForm(id) {
     } else body.transport = {};
   }
   // 协议参数
-  const o = JSON.parse(fv('f-extra').trim() || '{}');
+  let o;
+  try { o = JSON.parse(fv('f-extra').trim() || '{}'); } catch { failIn('f-adv-acc', t('line.extraBad')); }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) failIn('f-adv-acc', t('line.extraBad'));
   switch (protocol) {
     case 'vless': o.vision = fchk('f-vision'); break;
     case 'hysteria2':
@@ -485,7 +657,7 @@ function readForm(id) {
       if (fv('f-hop').trim()) o.port_hopping = fv('f-hop').trim(); else delete o.port_hopping;
       { // 伪装站点:别人探测这个端口时看到的是这个网站,不是一个报错的代理
         const m = fv('f-masq').trim();
-        if (m && !/^https?:\/\/[^\s/]+/i.test(m)) throw new Error(t('line.masqBad'));
+        if (m && !/^https?:\/\/[^\s/]+/i.test(m)) failIn('f-adv-acc', t('line.masqBad'));
         if (m) o.masquerade = { type: 'proxy', url: m, rewrite_host: true }; else delete o.masquerade;
       }
       break;
@@ -506,12 +678,12 @@ function readForm(id) {
 
 // 一键预设:常用协议组合,随机挑一个未占用端口,Reality 自动生成密钥
 const PRESETS = [
-  { id: 'hy2', label: 'Hysteria2', hint: 'UDP · 抗丢包 · 需证书', protocol: 'hysteria2', tls: { mode: 'cert' } },
-  { id: 'anytls', label: 'AnyTLS', hint: 'TCP · 流量特征弱 · 需证书', protocol: 'anytls', tls: { mode: 'cert' } },
-  { id: 'reality', label: 'VLESS + Reality', hint: 'TCP · 无需证书/域名 · Vision', protocol: 'vless', tls: { mode: 'reality' }, options: { vision: true } },
-  { id: 'trojan', label: 'Trojan', hint: 'TCP · 需证书', protocol: 'trojan', tls: { mode: 'cert' } },
-  { id: 'ss2022', label: 'Shadowsocks 2022', hint: 'TCP/UDP · 无 TLS · 兼容性最好', protocol: 'shadowsocks', tls: { mode: 'none' }, options: { method: '2022-blake3-aes-128-gcm' } },
-  { id: 'vmess-ws', label: 'VMess + WS', hint: 'TCP · 可套 CDN', protocol: 'vmess', tls: { mode: 'none' }, transport: { type: 'ws', path: '/ws' } },
+  { id: 'hy2', label: 'Hysteria2', hint: 'line.preset.hy2', protocol: 'hysteria2', tls: { mode: 'cert' } },
+  { id: 'anytls', label: 'AnyTLS', hint: 'line.preset.anytls', protocol: 'anytls', tls: { mode: 'cert' } },
+  { id: 'reality', label: 'VLESS + Reality', hint: 'line.preset.reality', protocol: 'vless', tls: { mode: 'reality' }, options: { vision: true } },
+  { id: 'trojan', label: 'Trojan', hint: 'line.preset.trojan', protocol: 'trojan', tls: { mode: 'cert' } },
+  { id: 'ss2022', label: 'Shadowsocks 2022', hint: 'line.preset.ss2022', protocol: 'shadowsocks', tls: { mode: 'none' }, options: { method: '2022-blake3-aes-128-gcm' } },
+  { id: 'vmess-ws', label: 'VMess + WS', hint: 'line.preset.vmessWs', protocol: 'vmess', tls: { mode: 'none' }, transport: { type: 'ws', path: '/ws' } },
 ];
 // 新线路的默认端口:优先问服务端(它避开面板/订阅/代理面板端口,并真的试着监听一次);
 // 拿不到就在本地挑一个没被其它线路用的五位端口。填好后仍然可以改。
@@ -544,69 +716,62 @@ async function presetLine(pid) {
   editLine(null, null, l);
 }
 
+// 编辑框的版式:通栏、从上到下 —— 基本信息一行(名称、协议、端口、上游)→ 加密方式 → 部署到服务器(多列网格)→ 启用 →
+// 三个可展开的分区(中转入口、分流规则、更多设置):不用的就是收着的一行,行尾写着现在的状态。
+// 不分左右两栏:服务器多少、加密方式要填的东西多少都不一定,两栏总有一边空着。
 async function editLine(id, cloneFrom, preset) {
   await load('nodes').catch(() => {}); // 服务器列表可能刚在别的页面改过,"部署到服务器"要用最新的
   const src = cloneFrom || (id ? state.lines.find(x => x.id === id) : null);
   const l = src ? { ...src } : (preset || { protocol: 'vless', enabled: true, options: {}, upstreamId: 0 });
   formIsNew = !id && !cloneFrom;
-  if (cloneFrom) { l.name = t('line.cloneOf', { name: src.name }); l.port = ''; l.forwards = null; }
+  if (cloneFrom) { l.name = t('line.cloneOf', { name: src.name }); l.port = ''; l.forwards = null; l.nodeOpts = null; }
   if (!l.port) l.port = await suggestPort(); // 新建/克隆:给个可用端口做默认值,可改
-  const rrInit = rrOf(l);
-  openModal(id ? t('line.edit') : t('line.add'), `
-    <h3>${t('line.basic')}</h3>
-    <div class="form-grid">
-      ${field(t('common.name'), `<input id="f-name" value="${esc(l.name || '')}">`, t('line.nameHelp'))}
-      ${field(t('line.protocol'), sel('f-protocol', Object.keys(PROTOCOLS), l.protocol))}
-      ${field(t('common.port'), `<input id="f-port" type="number" min="1" max="65535" value="${l.port || ''}">`, t('line.portHelp'))}
-      ${field(t('line.upstream'), `<select id="f-upstream"><option value="0">${t('line.direct')}</option>${state.upstreams.map(u => `<option value="${u.id}" ${l.upstreamId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`, t('line.upstreamHelp'))}
-      <div class="full rr-box">
-        <div class="rr-top">
-          ${check('f-rr-on', t('line.rr.on'), rrInit.length > 0, t('line.rr.help'))}
-          <div class="rr-lookup" id="f-rr-lookup" ${rrInit.length ? '' : 'hidden'}>
-            <input id="f-rr-apps" placeholder="${esc(t('line.rr.appPh'))}" aria-label="${esc(t('line.rr.appPh'))}" autocomplete="off" spellcheck="false">
-            <button type="button" class="btn sm" id="f-rr-apps-go">${esc(t('line.rr.lookup'))}</button>
-          </div>
-        </div>
-        <p class="rr-lookup-msg" id="f-rr-apps-msg" hidden></p>
-        <div id="f-rr" ${rrInit.length ? '' : 'hidden'}>
-          <div class="rr-row rr-head" aria-hidden="true"><span>#</span><span>${esc(t('line.rr.type'))}</span><span>${esc(t('line.rr.values'))}</span><span>${esc(t('line.rr.to'))}</span><span></span></div>
-          <div id="f-rr-list"></div>
-          <div class="rr-row rr-rest"><span class="rr-no">—</span><span class="rr-rest-label">${esc(t('line.rr.rest'))}</span><span class="muted small">${esc(t('line.rr.restHint'))}</span><span class="rr-rest-to" id="f-rr-rest"></span><span></span></div>
-          <button type="button" class="rr-add" id="f-rr-add">${esc(t('line.rr.add'))}</button>
-          <p class="hint">${esc(t('line.rr.hint'))}</p>
-        </div>
-      </div>
-      ${check('f-enabled', t('common.enabled'), l.enabled !== false)}
-      ${id ? '' : check('f-assign', t('line.assignAll'), true, t('line.assignAllHelp'))}
-      ${serversField(l)}
-      <div class="full" id="f-v6tips" hidden></div>
-      ${fwSection()}
+  const rrInit = rrOf(l), fwInit = fwOf(l);
+  const multi = (state.nodes || []).length > 1;
+  const acc = (key, title, body, open) => `<details class="acc" id="f-${key}-acc" ${open ? 'open' : ''}>
+      <summary><span class="acc-t">${esc(title)}</span><span class="acc-s" id="f-${key}-sum"></span><i class="i i-chev"></i></summary>
+      <div class="acc-b">${body}</div></details>`;
+  const adv = `
+    <div id="f-adv-proto"></div>
+    <div class="form-grid cols-2">
+      ${field(t('line.advanced'), `<textarea id="f-extra" spellcheck="false"></textarea>`)}
+      ${field(t('line.addrs'), `<textarea id="f-addrs" spellcheck="false" placeholder='[{"server":"1.2.3.4","server_port":443,"remark":"-备用"}]'>${esc(l.addrs ? (typeof l.addrs === 'string' ? l.addrs : JSON.stringify(l.addrs, null, 2)) : '')}</textarea>`, t('line.addrsHelp'))}
+    </div>`;
+  openModal(id ? t('line.edit') : t('line.add'), `<div class="ln-form">
+    <div class="form-grid ln-head">
+      ${field(t('common.name'), `<input id="f-name" value="${esc(l.name || '')}" placeholder="${esc(t('line.namePh'))}">`)}
+      ${field(t('line.protocol'), sel('f-protocol', Object.keys(PROTOCOLS), l.protocol, PROTO_LABEL))}
+      ${field(t('common.port'), `<input id="f-port" type="number" min="1" max="65535" value="${l.port || ''}" title="${esc(t('line.portHelp'))}">`)}
+      ${field(t('line.upstream'), `<select id="f-upstream"><option value="0">${esc(t('line.direct'))}</option>${state.upstreams.map(u => `<option value="${u.id}" ${l.upstreamId === u.id ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`)}
     </div>
     <div id="f-dyn"></div>
-    <details class="adv"><summary>${t('line.advanced')}</summary><textarea id="f-extra"></textarea></details>
-    <details class="adv" style="margin-top:.5rem"><summary>${t('line.addrs')}</summary>
-      <textarea id="f-addrs" placeholder='[{"server":"1.2.3.4","server_port":443,"remark":"-备用"}]'>${esc(l.addrs ? (typeof l.addrs === 'string' ? l.addrs : JSON.stringify(l.addrs, null, 2)) : '')}</textarea>
-      <p class="hint">${t('line.addrsHelp')}</p></details>`, async () => {
+    ${serversField(l, formIsNew)}
+    <div id="f-v6tips" hidden></div>
+    <div class="ln-flags">${switchRow('f-enabled', t('common.enabled'), l.enabled !== false, t('line.enabledHelp'))}${id ? '' : switchRow('f-assign', t('line.assignAll'), true, t('line.assignAllHelp'))}</div>
+    <div class="acc-list">${acc('fw', t('line.fw.on'), fwSection(), fwInit.length > 0)}${acc('rr', t('line.rr.on'), rrSection(), rrInit.length > 0)}${acc('adv', t('line.adv.title'), adv, false)}</div>
+  </div>`, async () => {
     const body = readForm(id);
     const addrs = fv('f-addrs').trim();
-    if (addrs) body.addrs = JSON.parse(addrs);
+    if (addrs) {
+      try { body.addrs = JSON.parse(addrs); } catch { failIn('f-adv-acc', t('line.addrsBad')); }
+    }
     if (!id) body.assignAll = fchk('f-assign');
     const saved = id ? await put('lines/' + id, body) : await post('lines', body);
     await load('lines', 'status', 'users');
     renderRows();
     toast(id ? t('line.updated') : t('line.created'), 'ok');
     scopeWidenedNotice(saved && saved.scopeWidened);
-  }, { size: 'xl' });
+    if (id && ldAlive() && ld.id === id) showLineDetail(id); // 从详情里点的编辑:保存后详情跟着刷新
+  }, multi ? { size: 'xl' } : { wide: true });
   renderDynamic(l);
+  bindServers();
   rrBind(rrInit);
-  fwBind(fwOf(l), id);
-  document.getElementById('f-protocol').addEventListener('change', () => { renderDynamic({ options: {}, tls: {}, transport: {} }); syncV6Tips(); });
-  ['f-name', 'f-port'].forEach(id => document.getElementById(id).addEventListener('input', debounce(syncV6Tips, 400)));
-  document.querySelectorAll('.node-cb').forEach(c => c.addEventListener('change', () => { syncFamily(); fwUpdateAll(); }));
-  ['f-name', 'f-port'].forEach(id => document.getElementById(id).addEventListener('input', fwUpdateAll)); // 节点名预览、转到的端口跟着变
-  document.getElementById('f-protocol').addEventListener('change', fwUpdateAll); // 转 TCP 还是 UDP 跟着协议变
-  document.querySelectorAll('.node-fam').forEach(c => c.addEventListener('change', syncV6Tips));
-  document.getElementById('f-addrs').addEventListener('input', debounce(syncV6Tips, 400));
+  fwBind(fwInit, id, l);
+  const v6Later = debounce(syncV6Tips, 400);
+  document.getElementById('f-protocol').addEventListener('change', () => { renderDynamic({ options: {}, tls: {}, transport: {} }); syncV6Tips(); fwUpdateAll(); }); // 转 TCP 还是 UDP 跟着协议变
+  ['f-name', 'f-port'].forEach(k => document.getElementById(k).addEventListener('input', () => { fwUpdateAll(); v6Later(); })); // 节点名预览、转到的端口跟着变
+  document.getElementById('f-addrs').addEventListener('input', v6Later);
+  document.getElementById('f-adv-acc').addEventListener('input', debounce(advSummary, 200));
   syncFamily();
   if (!reachLoaded()) loadReach().then(syncV6Tips); // 新开页面直接点"添加"时还没拿过检测结果
 }
@@ -623,19 +788,15 @@ function fwOf(l) { const v = parseJ(l.forwards); return Array.isArray(v) ? v : [
 const fwNode = id => (state.nodes || []).find(n => n.id === id);
 const fwNodeName = id => (fwNode(id) || {}).name || '#' + id;
 // 按表单当前勾的服务器:这条线路部署在哪几台(全不勾 = 全部)
-function fwDeployed() {
-  const nodes = state.nodes || [];
-  const picked = [...document.querySelectorAll('.node-cb')].filter(c => c.checked).map(c => Number(c.value));
-  return picked.length ? picked : nodes.map(n => n.id);
-}
+function fwDeployed() { return formScope().ids; }
 const fwOnNode = (l, id) => { const ids = lineNodeIds(l); return !ids.length || ids.includes(id); };
 
-// 列表里线路名后面的小标记:有几个中转入口(暂停的不算),悬停看明细
+// 列表「服务器」一格末尾的小标记:有几个中转入口(暂停的不算),悬停看明细
 function fwBadge(l) {
   const fs = fwOf(l).filter(f => !f.off);
   if (!fs.length) return '';
   const tip = fs.map(f => `${f.via ? fwNodeName(f.via) : f.host}:${f.port} → ${fwNodeName(f.to)}${f.name ? ' (' + f.name + ')' : ''}`).join('\n');
-  return ` <span class="badge fw-badge" title="${esc(t('line.fw.title') + '\n' + tip)}">⇄ ${fs.length}</span>`;
+  return ` <span class="badge fw-badge" title="${esc(t('line.fw.title') + '\n' + tip)}">${esc(t('line.fw.badge', { n: fs.length }))}</span>`;
 }
 
 // 转哪种流量(和后端 render.ForwardNetwork 一致;界面上选不出 QUIC 传输,只看协议)
@@ -687,30 +848,29 @@ function fwFreePort(via, row) {
   const cands = [own];
   for (let p = 30001; p <= 30300; p++) cands.push(p);
   for (let p = 40001; p <= 40300; p++) cands.push(p);
-  return cands.find(p => p >= 1 && p <= 65535 && !fwPortProblem(via, p, row)) || '';
+  return cands.find(p => p >= 1 && p <= 65535 && !fwBusy.has(via + ':' + p) && !fwPortProblem(via, p, row)) || '';
 }
 
-// 展开后最上面一张小图:用户 → 中转 → 出口 → 网站,一眼看懂这是干什么的
+// 分区最上面一张小图:用户 → 中转 → 出口 → 网站,一眼看懂这是干什么的
 function fwSection() {
   const node = (k, cls = '') => `<span class="fw-flow-node${cls}">${esc(t(k))}</span>`;
-  const arrow = '<span class="fw-flow-arrow">→</span>';
-  return `<div class="full fw-box">
-    ${check('f-fw-on', t('line.fw.on'), false, t('line.fw.onHelp'))}
-    <div id="f-fw" hidden>
-      <div class="fw-flow" aria-hidden="true">${node('line.fw.dUser')}${arrow}${node('line.fw.dRelay', ' relay')}${arrow}${node('line.fw.dExit', ' exit')}${arrow}${node('line.fw.dSite')}</div>
-      <p class="hint fw-flow-note">${esc(t('line.fw.dNote'))}</p>
-      <div id="f-fw-list"></div>
-      <button type="button" class="rr-add" id="f-fw-add">${esc(t('line.fw.add'))}</button>
-      <p class="hint fw-foot">${esc(t('line.fw.foot'))}</p>
-    </div>
+  const arrow = '<i class="i i-arrow fw-flow-arrow"></i>';
+  return `<div class="fw-box">
+    <div class="fw-flow" aria-hidden="true">${node('line.fw.dUser')}${arrow}${node('line.fw.dRelay', ' relay')}${arrow}${node('line.fw.dExit', ' exit')}${arrow}${node('line.fw.dSite')}</div>
+    <p class="hint acc-lead">${esc(t('line.fw.lead'))}</p>
+    <div id="f-fw-list"></div>
+    <button type="button" class="rr-add" id="f-fw-add">${esc(t('line.fw.add'))}</button>
+    <label class="field check fw-only" id="f-fw-only-wrap" hidden><input type="checkbox" id="f-fw-only"><span>${esc(t('line.fw.only'))}</span><span class="help">${esc(t('line.fw.onlyHelp'))}</span></label>
+    <p class="hint fw-foot" id="f-fw-foot" hidden>${esc(t('line.fw.foot'))}</p>
   </div>`;
 }
 
-// 一条中转入口的骨架;地址、节点名、要做的事、问题由 fwUpdate 按当前表单填
+// 一条中转入口的骨架;地址、节点名、要做的事、问题由 fwUpdate 按当前表单填。
+// 「谁来转」:面板来转(在那台服务器上自动开转发)/ 这台上已有转发(realm、gost 之类已经占着这个端口,面板不去碰,只把入口写进订阅)
 function fwItemHTML(f, i) {
   const nodes = state.nodes || [];
   const ext = !f.via;
-  return `<div class="fw-item${f.off ? ' paused' : ''}" data-auto="${f.auto ? 1 : 0}" data-to="${Number(f.to) || 0}">
+  return `<div class="fw-item${f.off ? ' paused' : ''}" data-fid="${Number(f.id) || 0}" data-auto="${f.auto ? 1 : 0}" data-to="${Number(f.to) || 0}">
     <div class="fw-path">
       <span class="fw-no">${i + 1}</span>
       <span class="fw-lab">${esc(t('line.fw.in'))}</span>
@@ -720,11 +880,12 @@ function fwItemHTML(f, i) {
       </span>
       <span class="fw-lab">${esc(t('line.fw.portOf'))}</span>
       <input class="fw-port" type="number" min="1" max="65535" value="${f.port || ''}" placeholder="${esc(t('line.fw.portPh'))}" aria-label="${esc(t('line.fw.portPh'))}">
-      <span class="fw-arrow" aria-hidden="true">→</span>
+      <i class="i i-arrow fw-arrow" aria-hidden="true"></i>
       <span class="fw-lab">${esc(t('line.fw.out'))}</span>
       <span class="fw-exit"></span>
-      <span class="fw-dest-wrap"><button type="button" class="fw-dest" title="${esc(t('line.fw.targetHelp'))}"></button><span class="fw-paren" hidden>(</span><input class="fw-target" value="${esc(f.target || '')}" spellcheck="false" autocomplete="off" title="${esc(t('line.fw.targetHelp'))}" ${f.target ? '' : 'hidden'}><span class="fw-dest-port"></span></span>
+      <span class="fw-dest-wrap"><button type="button" class="fw-dest" title="${esc(t('line.fw.targetHelp'))}"></button><span class="fw-paren" hidden>(</span><input class="fw-target" value="${esc(f.target || '')}" spellcheck="false" autocomplete="off" title="${esc(t('line.fw.targetHelp'))}" ${f.target && !f.manual ? '' : 'hidden'}><span class="fw-dest-port"></span></span>
       <span class="fw-tail">
+        <select class="sm fw-mode" aria-label="${esc(t('line.fw.mode'))}" title="${esc(t('line.fw.modeHelp'))}" ${ext ? 'hidden' : ''}><option value="auto">${esc(t('line.fw.modeAuto'))}</option><option value="manual" ${f.manual ? 'selected' : ''}>${esc(t('line.fw.modeManual'))}</option></select>
         <label class="fw-pause" title="${esc(t('line.fw.offHelp'))}"><input type="checkbox" class="fw-off" ${f.off ? 'checked' : ''}> ${esc(t('line.fw.off'))}</label>
         <button type="button" class="btn sm ghost icon danger fw-del" title="${esc(t('common.delete'))}" aria-label="${esc(t('common.delete'))}"><i class="i i-x"></i></button>
       </span>
@@ -737,13 +898,40 @@ function fwItemHTML(f, i) {
   </div>`;
 }
 
+// 现问中转服务器:这个端口现在有没有被别的程序占着(结果记在这一行上,回来后重画这一行的提示)。
+// 面板来转的:被占 = 开不出来,给出路(那就是我做的转发 → 改成「已有转发」/ 换一个端口);
+// 已有转发的:没人在听 = 提醒确认转发已经启动。问不到(副机离线、老版本)不下结论。
+const fwBusy = new Set(); // 「服务器 id:端口」:问出来被别的程序占着的,自动挑端口时绕开
+function fwProbe(row) {
+  const v = row.querySelector('.fw-via').value, port = Number(row.querySelector('.fw-port').value) || 0;
+  if (v === 'ext' || !(port >= 1 && port <= 65535)) { row.__probe = null; return; }
+  const net = fwNet() === 'both' ? '' : fwNet();
+  const key = `${v}:${port}:${net}`;
+  if (row.__probe && row.__probe.key === key) return;
+  row.__probe = { key, state: 'pending', by: '' };
+  clearTimeout(row.__probeTimer);
+  row.__probeTimer = setTimeout(async () => {
+    let r = null;
+    try { r = await post(`nodes/${v}/port-check`, { port, net }); } catch { r = null; }
+    if (!row.isConnected || !row.__probe || row.__probe.key !== key) return;
+    row.__probe.state = !r || !r.asked ? 'unknown' : r.free ? 'free' : r.self ? 'self' : 'busy';
+    row.__probe.by = (r && r.by) || '';
+    if (row.__probe.state === 'busy') fwBusy.add(`${v}:${port}`);
+    fwUpdate(row);
+  }, 600);
+}
+
 // 按表单当前的线路名、端口、协议、部署范围,把一条中转入口的显示和检查做一遍;返回问题(红的)
 function fwUpdate(row) {
-  const viaSel = row.querySelector('.fw-via');
+  const viaSel = row.querySelector('.fw-via'), modeSel = row.querySelector('.fw-mode');
   const ext = viaSel.value === 'ext', via = ext ? 0 : Number(viaSel.value) || 0;
+  const manual = !ext && modeSel.value === 'manual';
+  const fixedDest = ext || manual; // 转到哪里不归面板管:只是告诉你该转到哪
   const host = row.querySelector('.fw-host'), target = row.querySelector('.fw-target'), dest = row.querySelector('.fw-dest');
   host.hidden = !ext;
-  row.classList.toggle('paused', row.querySelector('.fw-off').checked);
+  modeSel.hidden = ext;
+  const paused = row.querySelector('.fw-off').checked;
+  row.classList.toggle('paused', paused);
   // 出口:部署在几台就能选几台(不能是中转自己);只有一台就是那台
   const deployed = fwDeployed().filter(id => ext || id !== via);
   const cell = row.querySelector('.fw-exit');
@@ -755,15 +943,15 @@ function fwUpdate(row) {
     ? `<select class="fw-to" aria-label="${esc(t('line.fw.out'))}">${to ? '' : `<option value="0">${esc(t('line.fw.toPick'))}</option>`}${deployed.map(id => `<option value="${id}" ${id === to ? 'selected' : ''}>${esc(fwNodeName(id))}</option>`).join('')}</select>`
     : (to ? `<b class="fw-exit-name" title="${esc(fwNodeName(to))}">${esc(fwNodeName(to))}</b>` : `<span class="muted">${esc(t('line.fw.noExit'))}</span>`);
   if (cell.__html !== want) { cell.innerHTML = want; cell.__html = want; }
-  // 转到的地址(放在括号里):集群中转可点开改(内网地址);外部中转只是告诉你该转到哪
+  // 转到的地址(放在括号里):面板来转的可点开改(内网地址);别的两种只是告诉你该转到哪
   const linePort = Number(fv('f-port')) || 0;
   const addr = to ? fwExitAddr(to, via) : '';
   const shown = addr.includes(':') ? '[' + addr + ']' : addr;
-  // 平时整段「(地址:端口) ✎」是一个按钮;点开后换成「( [地址输入框] :端口)」
-  if (ext) target.hidden = true;
-  const editing = !ext && !target.hidden;
-  dest.textContent = to ? '(' + shown + ':' + (linePort || '?') + ')' + (ext ? '' : ' ✎') : '';
-  dest.disabled = ext;
+  // 平时整段「(地址:端口)」是一个按钮(能改的后面带一支笔);点开后换成「( [地址输入框] :端口)」
+  if (fixedDest) target.hidden = true;
+  const editing = !fixedDest && !target.hidden;
+  dest.innerHTML = to ? esc('(' + shown + ':' + (linePort || '?') + ')') + (fixedDest ? '' : ' <i class="i i-pencil"></i>') : '';
+  dest.disabled = fixedDest;
   dest.hidden = editing || !to;
   target.placeholder = addr;
   row.querySelector('.fw-paren').hidden = !editing;
@@ -780,9 +968,11 @@ function fwUpdate(row) {
   row.querySelector('.fw-name').placeholder = ext ? (host.value.trim() || t('line.fw.relayName')) : fwNodeName(via);
   // 要做的事
   const net = t('line.fw.net.' + fwNet());
+  const destText = (addr.includes(':') ? '[' + addr + ']' : addr) + ':' + (linePort || '?');
   row.querySelector('.fw-todo').textContent = !to ? '' : ext
-    ? t('line.fw.todoExt', { port: port || '?', net, dest: (addr.includes(':') ? '[' + addr + ']' : addr) + ':' + (linePort || '?') })
-    : t('line.fw.todoVia', { via: fwNodeName(via), port: port || '?', net });
+    ? t('line.fw.todoExt', { port: port || '?', net, dest: destText })
+    : manual ? t('line.fw.todoManual', { via: fwNodeName(via), port: port || '?', net, dest: destText })
+      : t('line.fw.todoVia', { via: fwNodeName(via), port: port || '?', net });
   // 问题:红的保存时拦下,黄的只提示
   let bad = '', warn = '';
   if (!to) bad = t('line.fw.e.to');
@@ -792,24 +982,60 @@ function fwUpdate(row) {
   if (!bad && !ext && fwNode(via) && fwNode(via).enabled === false) warn = t('line.fw.offNode');
   else if (!bad && !ext && fwNode(via) && (fwNode(via).status || {}).versionMismatch) warn = t('line.fw.old');
   const note = row.querySelector('.fw-note');
-  note.textContent = bad || warn;
-  note.hidden = !(bad || warn);
+  // 端口占用:没有别的问题、没暂停时才去问那台服务器
+  let probeHTML = '', probeOk = false;
+  if (!bad && !warn && !ext && !paused) {
+    fwProbe(row);
+    const pr = row.__probe;
+    const who = pr && pr.by ? t('line.fw.busyBy', { by: pr.by }) : '';
+    if (pr && pr.state === 'busy' && !manual) {
+      probeHTML = esc(t('line.fw.busy', { port, via: fwNodeName(via), who })) +
+        ` <button type="button" class="link" data-fw-fix="manual">${esc(t('line.fw.fixManual'))}</button> <button type="button" class="link" data-fw-fix="port">${esc(t('line.fw.fixPort'))}</button>`;
+    } else if (pr && pr.state === 'free' && manual) {
+      probeHTML = esc(t('line.fw.idle', { port, via: fwNodeName(via) }));
+    } else if (pr && pr.state === 'busy' && manual) {
+      probeHTML = esc(t('line.fw.listening', { port, via: fwNodeName(via), who }));
+      probeOk = true;
+    }
+  }
+  if (bad || warn) note.textContent = bad || warn; else note.innerHTML = probeHTML;
+  note.hidden = !(bad || warn || probeHTML);
   note.classList.toggle('bad', !!bad);
+  note.classList.toggle('ok', !bad && !warn && probeOk);
   return bad;
 }
-const fwUpdateAll = () => document.querySelectorAll('#f-fw-list .fw-item').forEach(fwUpdate);
+const fwUpdateAll = () => { document.querySelectorAll('#f-fw-list .fw-item').forEach(fwUpdate); fwSummary(); };
+
+// 分区那一行右边的状态,以及有入口时才出现的「只给中转入口」和说明
+function fwSummary() {
+  const rows = [...document.querySelectorAll('#f-fw-list .fw-item')];
+  const off = rows.filter(r => r.querySelector('.fw-off').checked).length;
+  const el = document.getElementById('f-fw-sum');
+  if (el) {
+    el.textContent = !rows.length ? t('line.acc.off') : off ? t('line.fw.countOff', { n: rows.length, off }) : t('line.fw.count', { n: rows.length });
+    el.classList.toggle('on', rows.length > off);
+  }
+  const only = document.getElementById('f-fw-only-wrap'), foot = document.getElementById('f-fw-foot');
+  if (only) only.hidden = !rows.length;
+  if (foot) foot.hidden = !rows.length;
+}
 
 function fwCollect(withMeta) {
   return [...document.querySelectorAll('#f-fw-list .fw-item')].map(row => {
     const v = row.querySelector('.fw-via').value, ext = v === 'ext';
     const f = { port: Number(row.querySelector('.fw-port').value) || 0, to: Number(row.dataset.to) || 0 };
+    const fid = Number(row.dataset.fid) || 0;
+    if (fid) f.id = fid; // 入口的编号:节点设置、用户不要哪个节点都按它认,不能丢
     const name = row.querySelector('.fw-name').value.trim();
     if (name) f.name = name;
     if (ext) f.host = row.querySelector('.fw-host').value.trim();
     else {
       f.via = Number(v) || 0;
-      const target = row.querySelector('.fw-target');
-      if (!target.hidden && target.value.trim()) f.target = target.value.trim();
+      if (row.querySelector('.fw-mode').value === 'manual') f.manual = true;
+      else {
+        const target = row.querySelector('.fw-target');
+        if (!target.hidden && target.value.trim()) f.target = target.value.trim();
+      }
     }
     if (row.querySelector('.fw-off').checked) f.off = true;
     if (withMeta && row.dataset.auto === '1') f.auto = true;
@@ -817,15 +1043,32 @@ function fwCollect(withMeta) {
   });
 }
 
-// 保存时读:没勾 = 清掉;有红的问题就拦下,说清是第几个
+// 保存时读:有红的问题就拦下,说清是第几个(分区收着的话先展开)
 function fwRead() {
-  if (!fchk('f-fw-on')) return [];
   const rows = [...document.querySelectorAll('#f-fw-list .fw-item')];
   rows.forEach((row, i) => {
     const bad = fwUpdate(row);
-    if (bad) throw new Error(t('line.fw.e.at', { n: i + 1, msg: bad }));
+    if (bad) failIn('f-fw-acc', t('line.fw.e.at', { n: i + 1, msg: bad }));
   });
   return fwCollect();
+}
+
+// 「订阅里只给中转入口」:写进线路的节点设置(Line.NodeOpts)—— 有生效中转入口的出口服务器,它的直连节点不输出。
+// 只动这条线路的出口服务器那几个键;开关没碰过且是关着的 = 不带这个字段(返回 null,后端沿用库里的,
+// 以后在别处按节点单独关的不会被这里冲掉)。
+let fwOpts0 = {}, fwExits0 = [], fwOnlyDirty = false;
+function fwOnlyOpts(forwards) {
+  const cb = document.getElementById('f-fw-only');
+  if (!cb || (!cb.checked && !fwOnlyDirty)) return null;
+  const cur = JSON.parse(JSON.stringify(fwOpts0 || {}));
+  const active = new Set((forwards || []).filter(f => !f.off).map(f => Number(f.to)));
+  const touched = new Set([...fwExits0, ...(forwards || []).map(f => Number(f.to))].filter(Boolean));
+  for (const id of touched) {
+    const k = 's' + id, o = { ...(cur[k] || {}) };
+    if (cb.checked && active.has(id)) o.hidden = true; else delete o.hidden;
+    if (Object.keys(o).length) cur[k] = o; else delete cur[k];
+  }
+  return JSON.stringify(cur) === JSON.stringify(fwOpts0 || {}) ? null : cur;
 }
 
 function fwRender(list) {
@@ -845,25 +1088,33 @@ function fwAdd() {
   const f = { via, to: deployed.filter(id => id !== via).length === 1 ? deployed.find(id => id !== via) : 0, auto: !!via };
   fwRender([...fwCollect(true), f]);
   const rows = document.querySelectorAll('#f-fw-list .fw-item'), row = rows[rows.length - 1];
-  if (via) { row.querySelector('.fw-port').value = fwFreePort(via, row); fwUpdate(row); }
+  if (via) { row.querySelector('.fw-port').value = fwFreePort(via, row); fwUpdateAll(); }
   (row.querySelector(via ? '.fw-port' : '.fw-host') || row).focus();
 }
 
-function fwBind(initial, editId) {
+function fwBind(initial, editId, l) {
   fwEditId = editId || 0;
-  const on = document.getElementById('f-fw-on'), box = document.getElementById('f-fw'), list = document.getElementById('f-fw-list');
-  on.checked = initial.length > 0;
-  box.hidden = !on.checked;
+  const opts = parseJ(l && l.nodeOpts);
+  fwOpts0 = opts && typeof opts === 'object' && !Array.isArray(opts) ? opts : {};
+  fwExits0 = initial.map(f => Number(f.to)).filter(Boolean);
+  fwOnlyDirty = false;
+  fwBusy.clear();
+  const list = document.getElementById('f-fw-list'), only = document.getElementById('f-fw-only');
   fwRender(initial);
-  on.addEventListener('change', () => {
-    box.hidden = !on.checked;
-    if (on.checked && !list.children.length) fwAdd(); // 勾上就给一条,直接填
-  });
+  // 开关的初始状态:每个有生效入口的出口服务器,直连节点都已经关了输出
+  const active = [...new Set(initial.filter(f => !f.off).map(f => Number(f.to)))];
+  only.checked = active.length > 0 && active.every(id => (fwOpts0['s' + id] || {}).hidden);
+  only.addEventListener('change', () => { fwOnlyDirty = true; });
   document.getElementById('f-fw-add').addEventListener('click', fwAdd);
   list.addEventListener('click', e => {
     const row = e.target.closest('.fw-item');
     if (!row) return;
-    if (e.target.closest('.fw-del')) {
+    const fix = e.target.closest('[data-fw-fix]');
+    if (fix) { // 端口被占时给的两条出路
+      if (fix.dataset.fwFix === 'manual') row.querySelector('.fw-mode').value = 'manual';
+      else { row.querySelector('.fw-port').value = fwFreePort(Number(row.querySelector('.fw-via').value), row); row.dataset.auto = '1'; }
+      fwUpdateAll();
+    } else if (e.target.closest('.fw-del')) {
       row.remove();
       document.querySelectorAll('#f-fw-list .fw-no').forEach((x, i) => { x.textContent = i + 1; });
       fwUpdateAll();
@@ -1048,11 +1299,32 @@ function rrFit(ta) {
   ta.style.height = Math.min(ta.scrollHeight + 2, 180) + 'px';
 }
 
+// 分流规则分区的正文:查应用域名的一行 + 规则表(一条都没有时只剩「添加规则」)
+function rrSection() {
+  return `<div class="rr-box">
+    <p class="hint acc-lead">${esc(t('line.rr.help'))}</p>
+    <div class="rr-lookup" id="f-rr-lookup">
+      <input id="f-rr-apps" placeholder="${esc(t('line.rr.appPh'))}" aria-label="${esc(t('line.rr.appPh'))}" autocomplete="off" spellcheck="false">
+      <button type="button" class="btn" id="f-rr-apps-go">${esc(t('line.rr.lookup'))}</button>
+    </div>
+    <p class="rr-lookup-msg" id="f-rr-apps-msg" hidden></p>
+    <div id="f-rr">
+      <div class="rr-row rr-head" aria-hidden="true"><span>#</span><span>${esc(t('line.rr.type'))}</span><span>${esc(t('line.rr.values'))}</span><span>${esc(t('line.rr.to'))}</span><span></span></div>
+      <div id="f-rr-list"></div>
+      <div class="rr-row rr-rest"><span class="rr-no">—</span><span class="rr-rest-label">${esc(t('line.rr.rest'))}</span><span class="muted small">${esc(t('line.rr.restHint'))}</span><span class="rr-rest-to" id="f-rr-rest"></span><span></span></div>
+      <button type="button" class="rr-add" id="f-rr-add">${esc(t('line.rr.add'))}</button>
+      <p class="hint rr-hint">${esc(t('line.rr.hint'))}</p>
+    </div>
+  </div>`;
+}
+
 function rrRender(rules, focusLast) {
   const list = document.getElementById('f-rr-list');
-  list.innerHTML = rules.length
-    ? rules.map((r, i) => rrRowHTML(r, i, rules.length)).join('')
-    : `<p class="rr-empty">${esc(t('line.rr.none'))}</p>`;
+  list.innerHTML = rules.map((r, i) => rrRowHTML(r, i, rules.length)).join('');
+  // 一条规则都没有:表头、「其余流量」和说明都不用出现
+  document.querySelectorAll('#f-rr > .rr-head, #f-rr > .rr-rest, #f-rr > .rr-hint').forEach(el => { el.hidden = !rules.length; });
+  const sum = document.getElementById('f-rr-sum');
+  if (sum) { sum.textContent = rules.length ? t('line.rr.count', { n: rules.length }) : t('line.acc.off'); sum.classList.toggle('on', rules.length > 0); }
   list.querySelectorAll('.rr-row').forEach(rrRowCheck);
   list.querySelectorAll('.rr-values').forEach(rrFit);
   if (focusLast) list.querySelector('.rr-row:last-child .rr-values')?.focus();
@@ -1065,17 +1337,12 @@ function rrRest() {
 }
 
 function rrBind(initial) {
-  const on = document.getElementById('f-rr-on'), box = document.getElementById('f-rr'), list = document.getElementById('f-rr-list');
+  const list = document.getElementById('f-rr-list');
   rrRender(initial);
   rrRest();
   document.getElementById('f-upstream').addEventListener('change', rrRest);
-  on.addEventListener('change', () => {
-    box.hidden = !on.checked;
-    document.getElementById('f-rr-lookup').hidden = !on.checked;
-    if (!on.checked) document.getElementById('f-rr-apps-msg').hidden = true;
-    if (on.checked && !rrCollect().length) rrRender([RR_NEW()], true); // 勾上就给一条空规则,直接填
-    else if (on.checked) list.querySelectorAll('.rr-values').forEach(rrFit); // 藏着时量不出高度,显示出来再量
-  });
+  // 分区收着时量不出输入框的高度:展开的时候再量一次
+  document.getElementById('f-rr-acc').addEventListener('toggle', e => { if (e.target.open) list.querySelectorAll('.rr-values').forEach(rrFit); });
   document.getElementById('f-rr-add').addEventListener('click', () => rrRender([...rrCollect(true), RR_NEW()], true));
   // 查应用的域名:按钮或回车;点相近的名字把没找到的那个换成它再查
   const apps = document.getElementById('f-rr-apps');
@@ -1110,15 +1377,14 @@ function rrBind(initial) {
   list.addEventListener('input', debounce(e => { const row = e.target.closest('.rr-row'); if (row) rrRowCheck(row); }, 300));
 }
 
-// 保存时用:没勾 = 不分流(存空);勾了就每条都要有内容、内容要合规
+// 保存时用:一条规则都没有 = 不分流(存空);有就每条都要有内容、内容要合规(分区收着的话先展开)
 function rrRead() {
-  if (!fchk('f-rr-on')) return [];
   const rows = [...document.querySelectorAll('#f-rr-list .rr-row')];
   const rules = rrCollect();
   rules.forEach((r, i) => {
-    if (!r.values.length) throw new Error(t('line.rr.emptyRule', { n: i + 1 }));
+    if (!r.values.length) failIn('f-rr-acc', t('line.rr.emptyRule', { n: i + 1 }));
     const bad = rrRowCheck(rows[i]);
-    if (bad) throw new Error(t('line.rr.errAt', { n: i + 1, msg: bad }));
+    if (bad) failIn('f-rr-acc', t('line.rr.errAt', { n: i + 1, msg: bad }));
   });
   return rules;
 }
@@ -1151,15 +1417,25 @@ function batchDialog(action) {
       () => runBatch('upstream', { upstreamId: Number(fv('b-upstream')) }));
     return;
   }
-  openModal(t('line.batchNodes', { n }), `<div class="form-grid"><div class="full">${fieldBox(t('line.servers'), `<div class="check-list">${(state.nodes || []).map(nd => `<label><input type="checkbox" class="b-node-cb" value="${nd.id}"> ${esc(nd.name)}${nd.isLocal ? ` <span class="muted small">(${t('node.local')})</span>` : ''}</label>`).join('')}</div>`, t('line.batchNodesHelp'))}</div></div>`,
-    () => runBatch('nodes', { nodeIds: [...document.querySelectorAll('.b-node-cb:checked')].map(c => Number(c.value)) }));
+  // 和线路编辑框同一个说法:要么勾出几台,要么「全部服务器」(以后新加的也算)
+  openModal(t('line.batchNodes', { n }), `
+    ${check('b-all', t('line.scope.all'), false, t('line.scope.allHelp'))}
+    <div class="check-list b-nodes">${(state.nodes || []).map(nd => `<label><input type="checkbox" class="b-node-cb" value="${nd.id}"> ${esc(nd.name)}${nd.isLocal ? ` <span class="muted small">${t('node.local')}</span>` : ''}${nd.group ? ` <span class="muted small">${esc(nd.group)}</span>` : ''}</label>`).join('')}</div>`,
+    () => {
+      const all = fchk('b-all');
+      const ids = [...document.querySelectorAll('.b-node-cb:checked')].map(c => Number(c.value));
+      if (!all && !ids.length) throw new Error(t('line.scope.none'));
+      return runBatch('nodes', { nodeIds: all ? [] : ids });
+    });
+  document.getElementById('b-all').addEventListener('change', e => {
+    document.querySelectorAll('.b-node-cb').forEach(c => { c.disabled = e.target.checked; if (e.target.checked) c.checked = true; });
+  });
 }
 
 // 选这条线路的证书:列出各服务器证书库的并集,每张证书标出哪台有、哪台没有(没有的那台用自己的默认证书)
 function pickLineCert() {
   const parse = v => { try { return Array.isArray(v) ? v : (v ? JSON.parse(v) : []); } catch { return []; } };
-  const checks = [...document.querySelectorAll('.node-cb')];
-  const picked = checks.filter(c => c.checked).map(c => Number(c.value));
+  const picked = formScope().ids; // 还一台都没勾(新线路)时按全部服务器列,不然证书列表是空的
   const servers = (state.nodes || []).filter(n => !picked.length || picked.includes(n.id));
   const byName = new Map();
   for (const n of servers) {
@@ -1202,7 +1478,7 @@ function pickLineCert() {
   if (opts.length === 1) opts[0].sub = esc(t('line.certNoneYet'));
   openCertDrawer(t('line.certPick'), opts, value => {
     document.getElementById('f-cert').value = value;
-    document.getElementById('f-cert-btn').textContent = (value ? certLabel(value) : t('line.certDefault')) + ' ▾';
+    setText('f-cert-label', value ? certLabel(value) : t('line.certDefault'));
     return true;
   });
 }
@@ -1236,7 +1512,12 @@ async function showLineDetail(id) {
   const l = state.lines.find(x => x.id === id);
   if (!l) return;
   ld = { id, hours: ldHours, server: -1, q: '', more: 0, data: null, seq: 0, allSrv: false };
-  openDrawer(`${esc(l.name)} ${badge(l.protocol, 'primary')} <span class="muted small num">:${l.port}</span>${l.enabled ? '' : ' ' + badge(t('common.disabled'), 'warn')}`, `
+  openDrawer(`${esc(l.name)} ${badge(protoName(l.protocol), 'primary')} <span class="muted small num">:${l.port}</span>${l.enabled ? '' : ' ' + badge(t('common.disabled'), 'warn')}`, `
+    <div class="ud-acts">
+      <button class="btn sm" data-act="line.edit" data-id="${l.id}"><i class="i i-pencil"></i>${t('common.edit')}</button>
+      <button class="btn sm" data-act="line.clone" data-id="${l.id}"><i class="i i-copy"></i>${t('line.clone')}</button>
+      <button class="btn sm" data-act="line.asUpstream" data-id="${l.id}">${t('up.addFromLine')}</button>
+    </div>
     <div class="ld-sum" id="ld-sum"></div>
     ${fwDetail(l)}
     <section>
@@ -1338,12 +1619,36 @@ function renderLineOnline() {
   if (changed) { const b = document.querySelector('#ld-online .ld-olist'); if (b) b.scrollTop = keep; }
 }
 
-// 线路详情顶上的中转入口:一个一枚,多了折叠
+// 一个中转入口现在的状态:暂停 / 别处的中转 / 已有转发 / 生效;开不出来的写原因(端口被占、那台离线或停用、版本太旧)
+function fwState(l, f) {
+  if (f.off) return { kind: '', text: t('line.fw.off') };
+  if (!f.via) return { kind: '', text: t('line.fw.st.ext') };
+  const n = fwNode(f.via);
+  if (!n) return { kind: 'danger', text: t('line.fw.st.gone') };
+  if (n.enabled === false) return { kind: 'warn', text: t('line.fw.st.offNode') };
+  if (f.manual) return { kind: '', text: t('line.fw.modeManual') };
+  const b = blockedOn(n).find(x => x.tag === `${l.name} ⇄${f.port}`);
+  if (b) return { kind: 'danger', text: t('line.fw.st.busy') + (b.by ? t('line.fw.busyBy', { by: b.by }) : '') };
+  if (!n.isLocal && !(n.status || {}).ok) return { kind: 'warn', text: t('line.fw.st.offline') };
+  if ((n.status || {}).versionMismatch) return { kind: 'warn', text: t('line.fw.st.old') };
+  return { kind: 'ok', text: t('line.fw.st.ok') };
+}
+// 线路详情里的中转入口:一条一行 —— 用户连哪里、转给哪台、现在的状态
 function fwDetail(l) {
   const fs = fwOf(l);
   if (!fs.length) return '';
-  const chips = fs.map(f => `<span class="chip${f.off ? ' off' : ''}" title="${esc((f.name ? f.name + ' · ' : '') + (f.via ? t('line.fw.viaServer') : t('line.fw.ext')))}">⇄ ${esc(f.via ? fwNodeName(f.via) : f.host)}:${f.port} → ${esc(fwNodeName(f.to))}${f.off ? ' · ' + esc(t('line.fw.off')) : ''}</span>`);
-  return `<div class="ld-fw"><span class="muted small">${esc(t('line.fw.title'))}</span>${chipList(chips, { key: 'ldfw-' + l.id, max: 4 })}</div>`;
+  const opts = parseJ(l.nodeOpts);
+  const rows = fs.map(f => {
+    const st = fwState(l, f);
+    const hidden = f.id && opts && opts['f' + f.id] && opts['f' + f.id].hidden;
+    return `<div class="ld-fwrow${f.off ? ' off' : ''}">
+      <span class="from mono" title="${esc(f.name || '')}">${esc(f.via ? fwNodeName(f.via) : f.host)}:${f.port}</span>
+      <i class="i i-arrow"></i>
+      <span class="to">${esc(fwNodeName(f.to))}</span>
+      <span class="st">${hidden ? badge(t('line.fw.st.hidden')) + ' ' : ''}${st.kind ? badge(st.text, st.kind) : `<span class="muted small">${esc(st.text)}</span>`}</span>
+    </div>`;
+  }).join('');
+  return `<section class="ld-fw"><h3>${esc(t('line.fw.title'))} <span class="muted small">${fs.length}</span></h3><div class="ld-fwlist">${rows}</div></section>`;
 }
 
 // 5 秒一轮:抽屉还开着、还是这条线路的详情,就只刷新在线用户与 IP
@@ -1435,12 +1740,7 @@ registerActions({
     catch (e) { toast(e.message, 'err'); input.checked = !input.checked; }
     finally { input.disabled = false; }
   },
-  'line.genReality': async () => {
-    const k = await get('keygen?type=reality');
-    document.getElementById('f-priv').value = k.privateKey;
-    document.getElementById('f-pub').value = k.publicKey;
-    if (!fv('f-sids').trim()) document.getElementById('f-sids').value = (await get('keygen?type=shortid')).shortId;
-  },
+  'line.genReality': () => genReality(),
   'line.genShortId': async () => {
     const cur = fv('f-sids').trim();
     const s = (await get('keygen?type=shortid')).shortId;

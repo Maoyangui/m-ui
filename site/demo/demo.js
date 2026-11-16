@@ -544,6 +544,8 @@ function route(method, path, query, body) {
       }
       const n = find(list, id);
       if (seg[2] === 'test') return { ok: true, version: 'demo', hostname: 'demo', coreRunning: true };
+      // 编辑中转入口时现问端口:演示里新加坡那台的 30001 被 realm 占着(和它上报的「端口被占」是同一件事)
+      if (seg[2] === 'port-check') return id === 2 && Number((body || {}).port) === 30001 ? { asked: true, free: false, self: false, by: 'realm' } : { asked: true, free: true, self: false, by: '' };
       if (seg[2] === 'push') return ok();
       if (seg[2] === 'disk-clean') return demoDiskClean(id, true);
       if (method === 'DELETE') { S.nodes.nodes = list.filter(x => x.id !== id); return ok({ disabledLines: [] }); }
@@ -634,7 +636,7 @@ setQrUrl((id, fmt) => (data.qr || {})[`${id}:${fmt}`] || 'data:image/gif;base64,
 
 // 写操作在本页内存里"成功"后提示一句:面板自己的提示(已保存、已续费……)后面接上"演示模式,刷新即恢复";
 // 面板这次没弹提示就单独弹一条。只算真正改东西的请求:测速、预览、解析、生成密钥这类不算。
-const READONLY_POST = /^(login|logout|upstreams\/(parse|test|\d+\/test)|exts\/\d+\/(preview|nodes\/(test|reach))|nodes\/\d+\/test|reality-check|route-apps|cert\/precheck|backup\/inspect|ops\/warp-check|keygen)/;
+const READONLY_POST = /^(login|logout|upstreams\/(parse|test|\d+\/test)|exts\/\d+\/(preview|nodes\/(test|reach))|nodes\/\d+\/(test|port-check)|reality-check|route-apps|cert\/precheck|backup\/inspect|ops\/warp-check|keygen)/;
 let noteWanted = 0, noteTimer = 0;
 const noteText = () => ((localStorage.getItem('m-ui-lang') || navigator.language || 'en').startsWith('zh') ? '演示模式,刷新即恢复' : 'Demo mode: resets on refresh');
 function demoNote() {

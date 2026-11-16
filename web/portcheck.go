@@ -49,23 +49,50 @@ func (s *Server) handleAgentPortCheck(w http.ResponseWriter, r *http.Request) {
 // portBusyOn 端口 port(network: tcp / udp / 空 = 两种)在服务器 n 上是不是被别的程序占着;by 是占着它的程序名(查得到的话)。
 // 本机直接探;副机问它自己,问不到一律当没占(不拦保存)。占着它的是那台自己的 m-ui(运行中的数据面)不算。
 func (s *Server) portBusyOn(n model.Node, port int, network string) (by string, busy bool) {
-	var res model.PortProbeResult
-	if n.IsLocal {
-		res = portprobe.Probe(model.PortProbe{Port: port, Net: network})
-	} else {
-		if s.run == nil || s.run.Hub() == nil || !n.Enabled {
-			return "", false
-		}
-		got, err := s.run.Hub().PortCheck(n, []model.PortProbe{{Port: port, Net: network}}, 4*time.Second)
-		if err != nil || len(got) != 1 {
-			return "", false
-		}
-		res = got[0]
-	}
-	if res.Free || res.Self {
+	res, asked := s.probePortOn(n, port, network)
+	if !asked || res.Free || res.Self {
 		return "", false
 	}
 	return res.By, true
+}
+
+// probePortOn 让服务器 n 自己探一次端口。asked = false 是没问到(副机离线 / 停用 / 老版本没有这个接口 / 超时)。
+func (s *Server) probePortOn(n model.Node, port int, network string) (res model.PortProbeResult, asked bool) {
+	if n.IsLocal {
+		return portprobe.Probe(model.PortProbe{Port: port, Net: network}), true
+	}
+	if s.run == nil || s.run.Hub() == nil || !n.Enabled {
+		return res, false
+	}
+	got, err := s.run.Hub().PortCheck(n, []model.PortProbe{{Port: port, Net: network}}, 4*time.Second)
+	if err != nil || len(got) != 1 {
+		return res, false
+	}
+	return got[0], true
+}
+
+// handleNodePortCheck POST nodes/{id}/port-check {port, net}:编辑中转入口时现问这台服务器这个端口空不空
+// (net: tcp / udp / 空 = 两种都要)。返回 {asked, free, self, by}:asked = false 是没问到,界面不下结论;
+// self = 占着它的是那台自己的 m-ui(这个入口本来就开着);by = 占着它的别的程序名(查得到的话,比如 realm)。
+func (s *Server) handleNodePortCheck(w http.ResponseWriter, r *http.Request, n model.Node) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	var req model.PortProbe
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+		return
+	}
+	if req.Port < 1 || req.Port > 65535 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "端口需在 1-65535 之间"})
+		return
+	}
+	if req.Net != "tcp" && req.Net != "udp" {
+		req.Net = ""
+	}
+	res, asked := s.probePortOn(n, req.Port, req.Net)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"asked": asked, "free": !asked || res.Free, "self": res.Self, "by": res.By})
 }
 
 // busyWho 报错里写占用端口的程序:"(realm)";不知道是谁就不写。

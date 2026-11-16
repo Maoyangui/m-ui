@@ -1333,3 +1333,98 @@ button.ld-srow:hover { background: var(--surface-2); }
 .i-arrow { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E"); }
 .i-grip { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'%3E%3Ccircle cx='9' cy='6' r='1.6'/%3E%3Ccircle cx='15' cy='6' r='1.6'/%3E%3Ccircle cx='9' cy='12' r='1.6'/%3E%3Ccircle cx='15' cy='12' r='1.6'/%3E%3Ccircle cx='9' cy='18' r='1.6'/%3E%3Ccircle cx='15' cy='18' r='1.6'/%3E%3C/svg%3E"); }
 .i-warn { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 4 21 19.5H3L12 4Z'/%3E%3Cpath d='M12 10v4.5M12 17h.01'/%3E%3C/svg%3E"); }
+
+/* ================= 线路页与线路编辑框 ================= */
+.lines-grid td.primary-cell { white-space: nowrap; }
+.lines-grid td.primary-cell > a { max-width: 18em; }
+.ln-proto { display: inline-flex; align-items: center; gap: .4rem; white-space: nowrap; }
+@media (max-width: 700px) { .lines-grid td.primary-cell { white-space: normal; } }
+
+/* 表单栅格里占两栏的格子 */
+.form-grid > .span-2 { grid-column: span 2; }
+@media (max-width: 700px) { .form-grid > .span-2 { grid-column: auto; } }
+
+/* 线路编辑框:通栏、从上到下(不分左右两栏:服务器多少、加密方式要填多少都不一定,两栏总有一边空着)。
+   基本信息一行四栏,窄了两栏、手机一栏 */
+.ln-form .form-sec { margin: 1.3rem 0 .7rem; padding-top: 0; border-top: none; font-size: var(--fs-base); color: var(--text); }
+.ln-head { grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, .8fr) minmax(0, 1.7fr); }
+.form-grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 900px) { .ln-head, .form-grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .ln-head, .form-grid.cols-4 { grid-template-columns: minmax(0, 1fr); } }
+/* 「启用」「分配给全部现有用户」:带一句说明的开关行,和下面几行可展开的分区同一个样子,连成一组 */
+.ln-flags { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: .5rem; margin-top: 1.15rem; }
+.ln-flags .sw-row { background: var(--surface); padding: .5rem .85rem; cursor: pointer; }
+.ln-flags .sw-row:hover { background: var(--surface-2); }
+.ln-flags .sw-row b { font-weight: 600; }
+.ln-form .acc-list { margin-top: .5rem; }
+.ln-tls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; margin-bottom: .85rem; }
+.ln-tls .hint { margin: 0; flex: 1 1 14rem; }
+.ln-hs { flex-wrap: wrap; }
+.ln-hs > input:first-child { flex: 1 1 12rem; min-width: 0; }
+.ln-hs > input[type=number] { flex: 0 0 5.2rem; }
+.ln-adv-proto { margin-bottom: .9rem; }
+.ln-one-fam { margin-top: 1rem; max-width: 24rem; }
+.cert-pick-btn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cert-pick-btn .i { flex: none; color: var(--muted); }
+
+/* 部署到服务器:一台一格、多列排开(几十台也只是几行),再多在框里滚动;有分组时按组分段,组名前的勾选框整组勾 */
+.ln-srv-head { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .6rem; margin-bottom: .55rem; }
+.ln-srv-head .grow { flex: 1; }
+.ln-srv-q { width: 13rem; max-width: 100%; }
+.ln-srv .node-list { display: block; max-height: min(38vh, 19.5rem); overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); padding: .3rem .35rem; }
+.node-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr)); gap: 0 .35rem; }
+.ln-srv .node-row { padding: .15rem .45rem; min-height: 34px; border-radius: var(--radius-xs); }
+.ln-srv .node-row:hover { background: var(--surface-3); }
+.ln-srv .node-row label { display: flex; align-items: center; gap: .5rem; flex: 1 1 auto; min-width: 0; cursor: pointer; font-size: var(--fs-sm); }
+.ln-srv .node-row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ln-srv .node-row label > .small { flex: none; }
+.ln-srv .node-row select.node-fam { flex: none; width: auto; max-width: 8.2rem; }
+.node-grp + .node-grp { margin-top: .3rem; padding-top: .3rem; border-top: 1px solid var(--divider); }
+.node-grp-h { display: flex; align-items: center; gap: .5rem; width: fit-content; padding: .3rem .45rem; font-size: var(--fs-sm); cursor: pointer; }
+.node-grp-h b { font-weight: 600; }
+.node-grp-h .node-gn { font-variant-numeric: tabular-nums; }
+.ln-srv > .hint { margin-top: .5rem; }
+.b-nodes { margin-top: .8rem; }
+
+/* 可展开的分区:收着时是一行(标题 + 现在的状态),展开后内容在下面。不常用的设置放这里:不占版面,也找得到 */
+.acc-list { display: flex; flex-direction: column; gap: .5rem; margin-top: 1.15rem; }
+details.acc { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+details.acc > summary { display: flex; align-items: center; gap: .75rem; padding: .62rem .85rem; cursor: pointer; list-style: none; user-select: none; border-radius: var(--radius-sm); }
+details.acc > summary::-webkit-details-marker { display: none; }
+details.acc > summary:hover { background: var(--surface-2); }
+details.acc[open] > summary { border-bottom: 1px solid var(--divider); border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.acc-t { font-weight: 600; font-size: var(--fs-base); white-space: nowrap; }
+.acc-s { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); color: var(--faint); }
+.acc-s.on { color: var(--primary-text); font-weight: 500; }
+details.acc > summary .i-chev { flex: none; color: var(--muted); transition: transform .15s; }
+details.acc[open] > summary .i-chev { transform: rotate(90deg); }
+.acc-b { padding: .85rem .85rem .95rem; }
+.acc-lead { margin: 0 0 .7rem; }
+
+/* 小的展开项(密钥、高级参数):默认的三角换成和别处一致的折线箭头 */
+details.adv > summary, details.ha-adv > summary { list-style: none; display: inline-flex; align-items: center; gap: .35rem; }
+details.adv > summary::-webkit-details-marker, details.ha-adv > summary::-webkit-details-marker { display: none; }
+details.adv > summary::before, details.ha-adv > summary::before { content: ''; flex: none; width: 12px; height: 12px; background: currentColor; -webkit-mask: var(--chev) center / 12px no-repeat; mask: var(--chev) center / 12px no-repeat; transform: rotate(-90deg); transition: transform .15s; }
+details.adv[open] > summary::before, details.ha-adv[open] > summary::before { transform: none; }
+
+/* 中转入口:一个入口一张小卡 */
+.fw-item, .fw-item:first-child { padding: .7rem .8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); gap: .45rem; }
+.fw-item + .fw-item { margin-top: .5rem; }
+.fw-arrow, .fw-flow-arrow { flex: none; color: var(--muted); }
+select.fw-mode { width: auto; max-width: 11.5rem; }
+.fw-note.ok { color: var(--ok-text); }
+.fw-note button.link { border: 0; background: none; padding: 0 .1rem; margin-left: .35rem; font: inherit; color: var(--primary-text); text-decoration: underline; cursor: pointer; }
+.fw-only { margin-top: .9rem; }
+.fw-dest .i { width: 12px; height: 12px; vertical-align: -1px; }
+#f-fw-add { margin-top: .55rem; }
+.rr-box > .rr-lookup { max-width: 36rem; margin-bottom: .65rem; }
+
+/* 线路详情里的中转入口:一条一行 */
+section.ld-fw { display: block; margin: 0 0 1.2rem; }
+.ld-fwlist { display: flex; flex-direction: column; }
+.ld-fwrow { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: .6rem; align-items: center; padding: .42rem .1rem; border-bottom: 1px solid var(--divider); font-size: var(--fs-sm); }
+.ld-fwrow:last-child { border-bottom: none; }
+.ld-fwrow .from, .ld-fwrow .to { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-fwrow .i { color: var(--muted); }
+.ld-fwrow.off .from, .ld-fwrow.off .to { opacity: .55; }
+.ld-fwrow .st { justify-self: end; white-space: nowrap; }

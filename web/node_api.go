@@ -214,6 +214,8 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		case "disk-clean": // 清理磁盘(本机就地做,副机经 agent 转过去)
 			s.nodeDiskClean(w, r, node)
+		case "port-check": // 编辑中转入口时现问这台:这个端口空不空
+			s.handleNodePortCheck(w, r, node)
 		case "resetcert":
 			if r.Method != http.MethodPost {
 				writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})

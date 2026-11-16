@@ -373,6 +373,15 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 				line.Forwards = cur.Forwards
 			}
 		}
+		// 节点设置(哪个节点不输出到订阅等):请求里没带就沿用库里的。无论带没带都按新的部署范围、中转入口规整后写回 ——
+		// 入口删了、服务器撤了,它们的键跟着清掉(入口编号以后可能被新入口用上,不能留着旧设置)
+		if _, ok := keys["nodeOpts"]; !ok {
+			var cur model.Line
+			if s.db.Select("node_opts").First(&cur, id).Error == nil {
+				line.NodeOpts = cur.NodeOpts
+			}
+		}
+		cols = append(cols, "node_opts")
 		line.Id = id
 		if err := s.validateLine(&line); err != nil {
 			badRequest(w, err)
@@ -390,7 +399,11 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			// 部署服务器收窄了:指向已撤服务器的分配 / 授权 / 套餐范围一并整理(只剩已撤的改回全部并点名)
 			var err error
 			widened, err = fixLineScopesTx(tx, id, deployNodeIDs(line.NodeIds))
-			return err
+			if err != nil {
+				return err
+			}
+			// 用户「不要哪个节点」的记录:节点已经不在(入口删了、服务器撤了)的清掉
+			return pruneLineHidesTx(tx, id, s.lineNodeKeys(line))
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -418,7 +431,7 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			if err := tx.Delete(&model.Line{}, id).Error; err != nil {
 				return err
 			}
-			for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.ResellerLine{}, &model.ResellerLineNode{}} {
+			for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserLineHide{}, &model.ResellerLine{}, &model.ResellerLineNode{}} {
 				if err := tx.Where("line_id = ?", id).Delete(t).Error; err != nil {
 					return err
 				}
@@ -672,7 +685,10 @@ func (s *Server) validateLine(line *model.Line) error {
 			old = &cur
 		}
 	}
-	return s.normForwards(line, old)
+	if err := s.normForwards(line, old); err != nil {
+		return err
+	}
+	return s.normNodeOpts(line)
 }
 
 // handleLineSort 批量保存拖拽后的顺序。

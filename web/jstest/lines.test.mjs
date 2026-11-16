@@ -23,7 +23,7 @@ stub('ui.js', `export const esc = (s) => String(s ?? ''); export const toast = (
 export const openModal = () => {}; export const registerActions = () => {}; export const badge = (s) => String(s); export const dot = () => '';
 export const field = () => ''; export const fieldBox = () => ''; export const check = () => ''; export const empty = () => ''; export const fv = (id) => (globalThis.__fv || {})[id] ?? '';
 export const fchk = () => true; export const matches = () => true; export const debounce = (f) => f; export const setHTML = () => {};
-export const chipList = (a) => a.join('');
+export const chipList = (a) => a.join(''); export const switchRow = () => '';
 export const openDrawer = () => {}; export const hostPort = (h, p) => h + ':' + p; export const drawerOpen = () => false; export const setText = () => {}; export const fmtBytes = (n) => String(n); export const tzOffsetMinutes = () => 0;`);
 stub('chart.js', `export const barChart = () => {}; export const bucketFor = () => 3600;`);
 stub('relayip.js', `export const serverOfIP = () => '';`);

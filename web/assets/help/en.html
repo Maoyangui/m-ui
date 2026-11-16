@@ -324,10 +324,10 @@
     <ol class="steps">
       <li>On the <b data-k="nav.lines">Lines</b> page, click <b data-k="line.quick">Quick add</b> at the top right and pick a preset: <b data-lit="js/pages/lines.js">Hysteria2</b>, <b data-lit="js/pages/lines.js">AnyTLS</b>, <b data-lit="js/pages/lines.js">VLESS + Reality</b>, <b data-lit="js/pages/lines.js">Trojan</b>, <b data-lit="js/pages/lines.js">Shadowsocks 2022</b> or <b data-lit="js/pages/lines.js">VMess + WS</b>.</li>
       <li>The form is filled in; check the <b data-k="common.name">Name</b> (the node name shown in subscriptions) and the <b data-k="common.port">Port</b>, then save.</li>
-      <li>To configure everything yourself, click <b data-k="line.add">Add line</b>: choose the <b data-k="line.protocol">Protocol</b> and a port; the <b data-k="line.upstream">Upstream</b> defaults to <b data-k="line.direct">direct</b> (straight out of this server).</li>
+      <li>To configure everything yourself, click <b data-k="line.add">Add line</b>: choose the <b data-k="line.protocol">Protocol</b> and a port; the <b data-k="line.upstream">Upstream</b> defaults to <b data-k="line.direct">Direct (exit from the server itself)</b> (straight out of this server).</li>
     </ol>
     <ul>
-      <li>New lines have <b data-k="line.assignAll" class="wrap">Assign to all existing users (not resellers' users)</b> ticked. If you untick it, the line only shows up in subscriptions after you tick it for each user.</li>
+      <li>New lines have <b data-k="line.assignAll" class="wrap">Assign to all existing users</b> switched on (users under resellers are not included). If you switch it off, the line only shows up in subscriptions after you tick it in users or plans.</li>
       <li>A free five-digit port is filled in for you and can be changed; a clash with the panel or subscription ports, or with another program on the server, is rejected when you save.</li>
       <li>Before saving, the whole configuration is test-run by the core; if it fails nothing changes and running lines are untouched. Changing a line restarts the data plane briefly, and online users reconnect by themselves.</li>
     </ul>
@@ -351,11 +351,13 @@
     <h3>Relay entries: letting users come in through another machine</h3>
     <p>Use this when users' direct connection to this server is slow or blocked (say, routes from mainland China to an overseas machine, or an IP that got blocked): they first connect to a machine with a better route (another of your servers, or a relay you bought), which passes the traffic on to this one as is. The data goes "user → relay → exit (this line's server) → website". The relay only moves data and can't decrypt it. Leave it off if you don't need it.</p>
     <ol class="steps">
-      <li>Edit the line and tick <b data-k="line.fw.on">Relay entries</b> (off by default); unticking and saving clears them.</li>
+      <li>Edit the line, expand <b data-k="line.fw.on">Relay entries</b> near the bottom and add an entry; delete every entry and save to stop using relays.</li>
       <li>Each entry reads as a sentence: <b data-k="line.fw.in">Users connect to</b> which relay, which <b data-k="line.fw.portOf">port</b>, <b data-k="line.fw.out">forwarded to</b> which exit (the address and line port it forwards to are in brackets). Pick another of your servers as the relay and it does the forwarding automatically; a free port on it is filled in, trying the line's own port first.</li>
       <li>For your own realm / iptables forwarder or a relay you bought, choose <b data-k="line.fw.ext">A relay elsewhere (enter address)</b> and enter its address and port (pasting "address:port" splits them); the line below says what traffic on which port to forward where.</li>
       <li>The second line shows the <b data-k="line.fw.nodeName">Node</b> name in subscriptions on the left (you can edit the relay part) and what to do on the right (which port to open in which firewall). Port clashes on the relay server (its panel / subscription, lines running there, other relays) turn red at once and block saving.</li>
-      <li>If the two servers share a private network, click the address in brackets to use a private one; tick <b data-k="line.fw.off">Paused</b> to keep an entry without using it. In the line list, "⇄ N" after a line's name counts its relay entries; the line details list them at the top.</li>
+      <li>If the two servers share a private network, click the address in brackets to use a private one; tick <b data-k="line.fw.off">Paused</b> to keep an entry without using it. In the line list, the relay badge in the Servers column counts the entries; the line details list each one with its current state (active, port busy, relay server offline…).</li>
+      <li>If that port on the relay server is already used by another program (your own realm or gost, for example), the panel asks that server while you type and tells you. If it is the forwarder you set up for this line, set <b data-k="line.fw.mode">Forwarded by</b> to <b data-k="line.fw.modeManual">Already forwarded here</b>: the panel leaves the port alone and only adds the entry to subscriptions. Otherwise pick another port.</li>
+      <li>Subscriptions list both the direct node and the relay nodes by default and the client picks the faster one. To list only the relays, tick <b data-k="line.fw.only" class="wrap">List only the relay entries in subscriptions, not the exit server's direct node</b>.</li>
     </ol>
     <div class="tip"><b>How this differs from using a line as an upstream</b>That one decrypts on the relay and runs the protocol there too; a relay entry only moves bytes, saves half the encryption work and also carries UDP protocols such as hysteria2 and TUIC.</div>
     <div class="pit"><b>Common pitfalls</b><ul>
@@ -386,10 +388,10 @@
 
   <section class="sec" id="tls">
     <h3>TLS: node certificate, Reality or none</h3>
-    <p class="lede"><b data-k="line.tlsMode">TLS mode</b> decides how the node encrypts and disguises itself; Hysteria2, TUIC and AnyTLS always need TLS.</p>
+    <p class="lede"><b data-k="line.tlsMode">Encryption</b> decides how the node encrypts and disguises itself; Hysteria2, TUIC and AnyTLS always need TLS.</p>
     <ul>
-      <li><b data-k="line.tls.cert">Node certificate</b>: uses a certificate on the server and clients verify the domain. Each server's default certificate is used unless you pick one for this line under <b data-k="line.cert">Certificate</b>.</li>
-      <li><b data-k="line.tls.reality">Reality</b>: no certificate; it imitates the TLS of the site in <b data-k="line.reality.server">Handshake target (masquerade domain)</b>. <b data-k="line.reality.check">Check</b> tests whether that site works; <b data-k="line.reality.pick">Suggest</b> tests a list of popular sites and ranks them by latency, one click fills one in. Next to <b data-k="line.reality.private">Private key</b> click <b data-k="line.reality.gen">Generate keypair</b>; next to Short ID click <b data-k="line.gen">Generate</b>.</li>
+      <li><b data-k="line.tls.cert">Certificate (TLS)</b>: uses a certificate on the server and clients verify the domain. Each server's default certificate is used unless you pick one for this line under <b data-k="line.cert">Certificate</b>.</li>
+      <li><b data-k="line.tls.reality">Reality</b>: no certificate; it imitates the TLS of the site in <b data-k="line.reality.server">Handshake target (masquerade domain)</b>. <b data-k="line.reality.check">Check</b> tests whether that site works; <b data-k="line.reality.pick">Suggest</b> tests a list of popular sites and ranks them by latency, one click fills one in. The keys and short ID are generated for you when you choose Reality and are tucked into the row below; to replace them, expand it and click <b data-k="line.reality.gen">Generate keypair</b> next to <b data-k="line.reality.private">Private key</b>, or <b data-k="line.gen">Generate</b> next to Short ID.</li>
       <li><b data-k="line.tls.none">None</b>: plain text, only for CDN origins or internal networks.</li>
       <li>Leave <b data-k="line.fp">Client fingerprint</b> at the default unless you know you need another.</li>
     </ul>
@@ -425,7 +427,7 @@
     <h3>Which servers run a line</h3>
     <p class="lede">With several servers, a line can run on only some of them.</p>
     <ul>
-      <li><b data-k="line.servers">Deploy on servers</b>: all ticked (the default) means every server, including servers added later (none ticked counts as all too); tick only some to run the line just there, and subscriptions only list those entries. When you take a server off the line, users, reseller grants and plans that picked that server on this line drop it; those that had picked only removed servers switch to all of the line's servers (named in a dialog after saving), so nobody silently loses the line.</li>
+      <li><b data-k="line.servers">Deploy on servers</b>: <b data-k="line.scope.pick">Selected servers</b> runs the line only on the servers you tick (the default for a new line, with nothing pre-ticked), and subscriptions only list those entries; if servers are grouped, the box before a group name ticks the whole group. <b data-k="line.scope.all">All servers</b> runs it on every server, including ones you add later. When you take a server off the line, users, reseller grants and plans that picked that server on this line drop it; those that had picked only removed servers switch to all of the line's servers (named in a dialog after saving), so nobody silently loses the line.</li>
       <li>Dual-stack servers get an extra drop-down in their row, so the line can use IPv4 or IPv6 on that server (the default follows the Servers page).</li>
       <li>A line on several servers has several "entries"; when assigning lines to users, plans or resellers you can tick just the entry on one server.</li>
     </ul>
@@ -435,7 +437,7 @@
     <h3>Rule-based routing</h3>
     <p class="lede">Within one line, send chosen sites out through another exit (streaming through an unlocking server, say) or block them.</p>
     <ol class="steps">
-      <li>Edit the line and tick <b data-k="line.rr.on">Rule-based routing</b>.</li>
+      <li>Edit the line and expand <b data-k="line.rr.on">Routing rules</b> near the bottom.</li>
       <li>Click <b data-k="line.rr.add">+ Add rule</b>: choose the <b data-k="line.rr.type">Match</b> type (<b data-k="line.rr.t.domain_suffix">Domain suffix</b>, <b data-k="line.rr.t.domain">Full domain</b>, <b data-k="line.rr.t.domain_keyword">Domain keyword</b>, <b data-k="line.rr.t.ip_cidr">IP range</b>, <b data-k="line.rr.t.port">Port</b>), enter the values (separate several with commas or new lines) and choose the <b data-k="line.rr.to">Egress</b>: direct, an upstream, or <b data-k="line.rr.reject">Block</b>.</li>
       <li>To add by app: type app names (such as douyin, netflix, openai) in the box next to it and click <b data-k="line.rr.lookup">Look up</b>; rules are added for you and you pick the egress in each.</li>
       <li>Save.</li>
@@ -443,7 +445,7 @@
     <ul>
       <li>Rules are checked top to bottom and the first match wins; anything unmatched uses the line's own <b data-k="line.upstream">Upstream</b>.</li>
       <li>An app often uses several domains, so add them together; very short keywords (like ai) catch unrelated sites; traffic to a domain may not match an IP range, so prefer domain rules.</li>
-      <li>Untick <b data-k="line.rr.on">Rule-based routing</b> and save to remove all rules.</li>
+      <li>Delete every rule under <b data-k="line.rr.on">Routing rules</b> and save to stop routing by rules.</li>
     </ul>
   </section>
 

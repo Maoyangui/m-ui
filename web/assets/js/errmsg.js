@@ -791,6 +791,7 @@ const EN = /*BEGIN*/{
 "这台服务器的版本太旧,升级后才有按线路的流量": "This server is too old; upgrade it to see per-line traffic",
 "缺少线路名": "Missing line name",
 "中转入口的格式不对: %w": "The relay entries are malformed: %w",
+"节点设置的格式不对: %w": "The per-node settings are malformed: %w",
 "一条线路最多 %d 个中转入口": "A line can have at most %d relay entries",
 "第 %d 个中转入口的名字太长(最多 40 个字)": "The name of relay entry %d is too long (40 characters at most)",
 "第 %d 个中转入口的端口需在 1-65535 之间": "The port of relay entry %d must be between 1 and 65535",

@@ -171,12 +171,88 @@ func (s *Server) normForwards(line *model.Line, old *model.Line) error {
 			}
 		}
 	}
-	model.AssignForwardIds(fs) // 新加的入口补编号(节点设置、用户不要哪些节点按编号认它)
+	// 新加的入口补编号(节点设置、用户不要哪些节点按编号认它)。编号从库里原来用过的最大值往上取:
+	// 这一次保存里「删掉 2 号、再加一个」时新入口不能又叫 2 号,否则会把 2 号留下的节点设置和用户的选择接过去
+	floor := 0
+	if old != nil {
+		for _, f := range model.ParseForwards(old.Forwards) {
+			if f.Id > floor {
+				floor = f.Id
+			}
+		}
+	}
+	model.AssignForwardIds(fs, floor)
 	b, err := json.Marshal(fs)
 	if err != nil {
 		return err
 	}
 	line.Forwards = b
+	return nil
+}
+
+// lineNodeKeys 这条线路现在有哪些节点(键见 model.DirectKey / model.ForwardKey):部署到的每台服务器一个直连节点,每个中转入口一个。
+func (s *Server) lineNodeKeys(line model.Line) map[string]bool {
+	var nodes []model.Node
+	s.db.Select("id").Find(&nodes)
+	keys := map[string]bool{}
+	for _, n := range nodes {
+		if render.LineOnNode(line, n.Id) {
+			keys[model.DirectKey(n.Id)] = true
+		}
+	}
+	for _, f := range model.ParseForwards(line.Forwards) {
+		if f.Id > 0 {
+			keys[model.ForwardKey(f.Id)] = true
+		}
+	}
+	return keys
+}
+
+// normNodeOpts 规整线路的节点设置(Line.NodeOpts):只留这条线路现有节点的键,什么都没设的键去掉;全空就存空。
+// 要在 normForwards 之后调(入口编号已经补齐)。
+func (s *Server) normNodeOpts(line *model.Line) error {
+	raw := bytes.TrimSpace(line.NodeOpts)
+	if len(raw) == 0 || string(raw) == "null" || string(raw) == "{}" {
+		line.NodeOpts = nil
+		return nil
+	}
+	var in map[string]model.NodeOpt
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return fmt.Errorf("节点设置的格式不对: %w", err)
+	}
+	valid := s.lineNodeKeys(*line)
+	out := map[string]model.NodeOpt{}
+	for k, v := range in {
+		if valid[k] && v != (model.NodeOpt{}) {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		line.NodeOpts = nil
+		return nil
+	}
+	b, err := json.Marshal(out) // 键按字典序输出:同样的设置总是同样的字节(快照比对靠它)
+	if err != nil {
+		return err
+	}
+	line.NodeOpts = b
+	return nil
+}
+
+// pruneLineHidesTx 清掉用户在这条线路上「不要」的、但已经不存在的节点(valid = 现有节点的键)。
+func pruneLineHidesTx(tx *gorm.DB, lineID uint, valid map[string]bool) error {
+	var rows []model.UserLineHide
+	if err := tx.Where("line_id = ?", lineID).Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if valid[r.Key] {
+			continue
+		}
+		if err := tx.Where("user_id = ? AND line_id = ? AND node_key = ?", r.UserId, lineID, r.Key).Delete(&model.UserLineHide{}).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

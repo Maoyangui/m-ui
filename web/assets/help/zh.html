@@ -324,10 +324,10 @@
     <ol class="steps">
       <li><b data-k="nav.lines">线路</b> 页右上角点 <b data-k="line.quick">快速添加</b>,选一个预设:<b data-lit="js/pages/lines.js">Hysteria2</b>、<b data-lit="js/pages/lines.js">AnyTLS</b>、<b data-lit="js/pages/lines.js">VLESS + Reality</b>、<b data-lit="js/pages/lines.js">Trojan</b>、<b data-lit="js/pages/lines.js">Shadowsocks 2022</b>、<b data-lit="js/pages/lines.js">VMess + WS</b>。</li>
       <li>表单已经填好,看一眼 <b data-k="common.name">名称</b>(订阅里显示的节点名)和 <b data-k="common.port">端口</b>,保存。</li>
-      <li>想自己配就点 <b data-k="line.add">新增线路</b>:选 <b data-k="line.protocol">协议</b>、填端口;<b data-k="line.upstream">上游</b> 默认是 <b data-k="line.direct">direct(本机直出)</b>。</li>
+      <li>想自己配就点 <b data-k="line.add">新增线路</b>:选 <b data-k="line.protocol">协议</b>、填端口;<b data-k="line.upstream">上游</b> 默认是 <b data-k="line.direct">直连(从服务器直接出去)</b>。</li>
     </ol>
     <ul>
-      <li>新建时默认勾着 <b data-k="line.assignAll" class="wrap">分配给全部现有用户(不含代理名下)</b>;不勾的话,要到用户里逐个勾上,新线路才会出现在他们的订阅里。</li>
+      <li>新建时 <b data-k="line.assignAll" class="wrap">分配给全部现有用户</b> 默认开着(不含代理名下的用户);关掉的话,要到用户或套餐里勾上,新线路才会出现在他们的订阅里。</li>
       <li>端口会自动填一个空闲的五位数端口,可以改;和面板、订阅端口或本机其它程序撞了,保存时会直接报错。</li>
       <li>保存前整份配置先交给内核试跑,过不了就不生效,也不影响正在用的线路。改线路会让数据面重启一下,在线用户会自动重连。</li>
     </ul>
@@ -351,11 +351,13 @@
     <h3>中转入口:让用户经另一台机器连进来</h3>
     <p>用户直连这台服务器慢、或者连不上(比如大陆连海外机器绕路、IP 被墙)时用:让他们先连一台线路更好的机器 —— 你的另一台服务器,或者买的中转 —— 由它把流量原样转给这台。数据走向是「用户 → 中转 → 出口(这条线路的服务器)→ 网站」。中转只搬数据、不解密,看不到内容。用不上就别开。</p>
     <ol class="steps">
-      <li>编辑线路,勾上 <b data-k="line.fw.on">中转入口</b>(默认不勾);取消勾选再保存会清掉。</li>
+      <li>编辑线路,展开下面的 <b data-k="line.fw.on">中转入口</b>,点「添加中转入口」;把入口删光再保存就是不用中转。</li>
       <li>每一条是一句话:<b data-k="line.fw.in">用户连</b> 哪台中转 <b data-k="line.fw.portOf">的端口</b> 多少 → <b data-k="line.fw.out">转给</b> 哪台出口(括号里是转到的地址和线路端口)。选你的另一台服务器当中转,转发它会自动做;端口自动挑一个那台空着的(先试线路自己的端口)。</li>
       <li>用自己跑的 realm / iptables 或买的中转:选 <b data-k="line.fw.ext">别处的中转(填地址)</b>,填它的地址和端口(粘贴「地址:端口」会自动拆开);下面一行写着要在中转上把什么流量、哪个端口转到哪里。</li>
       <li>第二行左边是 <b data-k="line.fw.nodeName">订阅节点</b> 的名字(中转那一段可以改),右边是要做的事(在哪台的防火墙放行哪个端口)。端口撞了(那台的面板 / 订阅、部署在那台的线路、别的中转)当场标红,保存不了。</li>
-      <li>两台内网互通时,点括号里的地址改成内网地址;不想用了先勾 <b data-k="line.fw.off">暂停</b>。线路列表里线路名后面的「⇄ N」是有几个中转入口,线路详情的顶上逐个列出。</li>
+      <li>两台内网互通时,点括号里的地址改成内网地址;不想用了先勾 <b data-k="line.fw.off">暂停</b>。线路列表「服务器」一格里的「中转 N」是有几个中转入口,线路详情里逐个列出它们现在的状态(生效、端口被占、中转服务器离线……)。</li>
+      <li>中转服务器上那个端口已经被别的程序占着(比如你自己装的 realm、gost):填端口时面板会现问那台服务器并提示。如果那正是你给这条线路做的转发,把 <b data-k="line.fw.mode">谁来转</b> 改成 <b data-k="line.fw.modeManual">这台上已有转发</b> —— 面板不去占这个端口,只把入口写进订阅;不是的话换一个端口。</li>
+      <li>订阅里默认直连节点和中转节点都给,客户端自己测速挑快的。只想给中转的,勾 <b data-k="line.fw.only" class="wrap">订阅里只给中转入口,不给出口服务器的直连节点</b>。</li>
     </ol>
     <div class="tip"><b>和「把线路加为上游」的区别</b>那种是在中转机上解密再转,中转机也要跑这个协议;中转入口只搬字节,少一半加解密,hysteria2、TUIC 这类 UDP 协议也能转。</div>
     <div class="pit"><b>常见坑</b><ul>
@@ -386,11 +388,11 @@
 
   <section class="sec" id="tls">
     <h3>TLS:节点证书、Reality、无</h3>
-    <p class="lede"><b data-k="line.tlsMode">TLS 模式</b> 决定节点怎么加密和伪装;Hysteria2、TUIC、AnyTLS 必须用 TLS。</p>
+    <p class="lede"><b data-k="line.tlsMode">加密方式</b> 决定节点怎么加密和伪装;Hysteria2、TUIC、AnyTLS 必须用 TLS。</p>
     <ul>
-      <li><b data-k="line.tls.cert">节点证书</b>:用本机证书,客户端按域名校验。默认用每台服务器证书页设的默认证书,也可以在 <b data-k="line.cert">证书</b> 里给这条线路单独选一张。</li>
-      <li><b data-k="line.tls.reality">Reality</b>:不用证书,伪装成 <b data-k="line.reality.server">握手目标(伪装域名)</b> 那个网站的 TLS。点 <b data-k="line.reality.check">检测</b> 看能不能用,点 <b data-k="line.reality.pick">帮我挑</b> 自动测一批常见大站、按延迟列出,点一下就填入。<b data-k="line.reality.private">私钥</b> 旁边点 <b data-k="line.reality.gen">生成密钥对</b>,Short ID 旁边点 <b data-k="line.gen">生成</b>。</li>
-      <li><b data-k="line.tls.none">无</b>:明文,只用于 CDN 回源或内网。</li>
+      <li><b data-k="line.tls.cert">证书(TLS)</b>:用本机证书,客户端按域名校验。默认用每台服务器证书页设的默认证书,也可以在 <b data-k="line.cert">证书</b> 里给这条线路单独选一张。</li>
+      <li><b data-k="line.tls.reality">Reality</b>:不用证书,伪装成 <b data-k="line.reality.server">握手目标(伪装域名)</b> 那个网站的 TLS。点 <b data-k="line.reality.check">检测</b> 看能不能用,点 <b data-k="line.reality.pick">帮我挑</b> 自动测一批常见大站、按延迟列出,点一下就填入。密钥和 Short ID 选到 Reality 时自动生成好了,收在下面那一行里;要换就展开,在 <b data-k="line.reality.private">私钥</b> 旁边点 <b data-k="line.reality.gen">生成密钥对</b>,Short ID 旁边点 <b data-k="line.gen">生成</b>。</li>
+      <li><b data-k="line.tls.none">不加密</b>:明文,只用于 CDN 回源或内网。</li>
       <li><b data-k="line.fp">客户端指纹</b> 一般保持默认。</li>
     </ul>
     <div class="pit"><b>常见坑</b><ul>
@@ -425,7 +427,7 @@
     <h3>部署到哪些服务器</h3>
     <p class="lede">有多台服务器时,一条线路可以只在其中几台上开。</p>
     <ul>
-      <li><b data-k="line.servers">部署到服务器</b>:默认全部勾着 = 全部服务器,以后新加的服务器也会自动开这条线路(全都不勾也按全部算);只勾其中几台,才是只在这几台上开,订阅也只出这些入口。从部署里去掉某台服务器时,用户、代理授权、套餐在这条线路上选了那台的,一并去掉那台;只选了被去掉的服务器的,改回这条线路的全部服务器(保存后弹窗点名),不会悄悄没了这条线路。</li>
+      <li><b data-k="line.servers">部署到服务器</b>:选 <b data-k="line.scope.pick">指定服务器</b> 就只在勾上的几台上开(新建线路默认这个,一台都不预先勾),订阅也只出这些入口;服务器分了组的,组名前的勾选框整组勾。选 <b data-k="line.scope.all">全部服务器</b> 则现有的每台都开,以后新加的服务器也自动开。从部署里去掉某台服务器时,用户、代理授权、套餐在这条线路上选了那台的,一并去掉那台;只选了被去掉的服务器的,改回这条线路的全部服务器(保存后弹窗点名),不会悄悄没了这条线路。</li>
       <li>双栈服务器那一行多一个下拉,可以让这条线路在那台单独用 IPv4 或 IPv6(默认跟服务器页的设置)。</li>
       <li>一条线路部署在几台服务器上就是几个"入口";给用户、套餐、代理分配线路时,可以只勾其中某台服务器上的入口。</li>
     </ul>
@@ -435,7 +437,7 @@
     <h3>按规则分流</h3>
     <p class="lede">同一条线路里,让指定的网站走别的出口(比如流媒体走解锁机),或者直接拦掉。</p>
     <ol class="steps">
-      <li>编辑线路,勾 <b data-k="line.rr.on">按规则分流</b>。</li>
+      <li>编辑线路,展开下面的 <b data-k="line.rr.on">分流规则</b>。</li>
       <li>点 <b data-k="line.rr.add">+ 添加规则</b>:选 <b data-k="line.rr.type">匹配方式</b>(<b data-k="line.rr.t.domain_suffix">域名后缀</b>、<b data-k="line.rr.t.domain">完整域名</b>、<b data-k="line.rr.t.domain_keyword">域名关键字</b>、<b data-k="line.rr.t.ip_cidr">IP 段</b>、<b data-k="line.rr.t.port">端口</b>),填匹配内容(多个用逗号或换行隔开),选 <b data-k="line.rr.to">出口</b>:direct、某个上游,或者 <b data-k="line.rr.reject">拦截</b>。</li>
       <li>想按应用加:在旁边的输入框填应用名(如 抖音、netflix、openai),点 <b data-k="line.rr.lookup">查域名</b>,规则自动加好,出口在规则里选。</li>
       <li>保存。</li>
@@ -443,7 +445,7 @@
     <ul>
       <li>从上往下,第一条命中的生效;都没命中的走线路自己的 <b data-k="line.upstream">上游</b>。</li>
       <li>一个 App 常常要好几个域名,要一起加;关键字太短(比如 ai)会误伤别的网站;按域名访问的流量不一定能按 IP 段匹配上,优先用域名规则。</li>
-      <li>取消勾选 <b data-k="line.rr.on">按规则分流</b> 再保存,会清掉全部规则。</li>
+      <li>把 <b data-k="line.rr.on">分流规则</b> 里的规则都删掉再保存,就不再分流。</li>
     </ul>
   </section>
 

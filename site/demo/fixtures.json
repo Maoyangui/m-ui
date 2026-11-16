@@ -112,6 +112,21 @@
             ],
             "to": 1
           }
+        ],
+        "forwards": [
+          {
+            "id": 1,
+            "via": 2,
+            "port": 30001,
+            "to": 1
+          },
+          {
+            "id": 2,
+            "name": "CN2",
+            "host": "relay.example.net",
+            "port": 443,
+            "to": 1
+          }
         ]
       },
       {

@@ -56,9 +56,15 @@ func ParseNodeOpts(raw json.RawMessage) map[string]NodeOpt {
 }
 
 // AssignForwardIds 给还没有编号的中转入口补上编号(比现有最大的大 1 起);有补的返回 true。
-// 编号重复的(手改 JSON、复制粘贴)后一个按没有编号处理。
-func AssignForwardIds(fs []LineForward) bool {
+// 编号重复的(手改 JSON、复制粘贴)后一个按没有编号处理。floor(可选)= 以前用过的最大编号:新编号从它往上取,
+// 删掉的入口的编号不会马上被新入口用上。
+func AssignForwardIds(fs []LineForward, floor ...int) bool {
 	max, seen, changed := 0, map[int]bool{}, false
+	for _, f := range floor {
+		if f > max {
+			max = f
+		}
+	}
 	for i := range fs {
 		if fs[i].Id > 0 && !seen[fs[i].Id] {
 			seen[fs[i].Id] = true
