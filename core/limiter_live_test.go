@@ -116,7 +116,7 @@ func TestIdleDeviceResumeRechecksDeviceLimit(t *testing.T) {
 	if !l.AllowConn("alice", "new") {
 		t.Fatal("旧设备息屏后,新设备应放行")
 	}
-	if l.keepaliveFor("alice", "old")() {
+	if l.keepaliveFor("alice", "old", "")() {
 		t.Fatal("息屏设备恢复流量时应重新执行设备上限")
 	}
 }

@@ -1151,6 +1151,16 @@ const zh = {
   'audit.v.follow': '跟随外部节点', 'audit.v.unfollow': '不再跟随外部节点',
   'up.followTitle': '跟随外部节点', 'up.followLast': '最近一次:', 'up.unfollowed': '已不再跟随', 'up.fn.followedLong': '{when}全部测不通,已跟着订阅改:{detail}',
   'up.why': '原因:{msg}',
+  'nav.subnodes': '节点', 'sn.title': '节点', 'sn.subtitle': '订阅里的每个节点:线路在一台服务器上的直连,或它的一个中转入口。逐个设倍率、限速和容量。', 'sn.col.node': '节点', 'sn.col.addr': '入口地址', 'sn.col.ratio': '倍率', 'sn.col.speed': '限速',
+  'sn.col.cap': '容量', 'sn.col.output': '输出到订阅', 'sn.relay': '中转', 'sn.to': '→ {name}', 'sn.follow': '跟随服务器', 'sn.unlimited': '不限', 'sn.speedBoth': '共 {a} · 每人 {b} Mbps', 'sn.speedTotal': '共 {a} Mbps',
+  'sn.speedUser': '每人 {b} Mbps', 'sn.capN': '{n} 人', 'sn.filter.all': '全部', 'sn.filter.own': '单独设置的', 'sn.filter.off': '没输出的', 'sn.count': '{n} 个节点', 'sn.lineOff': '线路已停用', 'sn.serverOff': '服务器已停用',
+  'sn.paused': '已暂停', 'sn.edit': '设置', 'sn.editTitle': '节点设置', 'sn.ratio': '倍率', 'sn.ratioPh': '跟随服务器(现在 ×{r})', 'sn.ratioHelp': '留空就跟随所在服务器的倍率。填了只对走这个节点的流量生效,同一台服务器上别的线路不受影响。', 'sn.cap': '用户容量',
+  'sn.capHelp': '同时在线的用户数上限。满了拒绝新用户,已经在线的不受影响。', 'sn.speed': '节点限速(Mbps)', 'sn.speedHelp': '走这个节点的所有用户合计。', 'sn.userSpeed': '每用户限速(Mbps)', 'sn.userSpeedHelp': '每个用户在这个节点上的最高速率;和用户自己的限速同时生效,取更严的。',
+  'sn.output': '输出到订阅', 'sn.outputHelp': '关掉后这个节点不再出现在任何人的订阅里,入站照开。', 'sn.reset': '恢复默认', 'sn.saved': '已保存', 'sn.outOn': '已输出到订阅', 'sn.outOff': '已不再输出到订阅', 'sn.srcSummary': '出口认不出这个入口时',
+  'sn.src': '出口看到的来源 IP', 'sn.srcHelp': '倍率、限速和容量是在出口服务器上按连接的来源 IP 认入口的。中转经内网连出口、进出不是同一个 IP 时,把出口实际看到的 IP 填在这里,逗号分隔。', 'sn.srcKnown': '面板已经认得:{list}。', 'sn.srcNone': '这个入口的地址是域名,面板认不出来,不填就按直连算。',
+  'sn.empty': '还没有线路。建一条线路,这里就会列出它的节点。', 'sn.goLines': '去建线路', 'sn.err.ratio': '倍率要在 0–100 之间(留空 = 跟随服务器)', 'sn.err.int': '限速和容量要填不小于 0 的整数', 'audit.v.node': '改节点设置',
+  'sn.count1': '1 个节点',
+  'dash.attn.rej.node': '节点容量已满 {n}', 'dash.rejectedNode': '节点的用户容量已满被拒', 'dash.rejectedNodeHelp': '这次连接通过了认证,但它走的这个节点同时在线的用户数已到「节点」页设的容量,所以被拒;等有人下线 1 分钟后即可连上,或调高这个节点的容量。',
 };
 
 const en = {
@@ -2362,6 +2372,25 @@ const en = {
   'up.followTitle': 'Following an external node', 'up.followLast': 'Last time:', 'up.unfollowed': 'No longer following',
   'up.fn.followedLong': 'went down everywhere {when} and was updated from the subscription: {detail}',
   'up.why': 'Reason: {msg}',
+  'nav.subnodes': 'Nodes', 'sn.title': 'Nodes',
+  'sn.subtitle': 'Every node in a subscription: a line served directly by one server, or one of its relay entries. Set ratio, speed limits and capacity per node.', 'sn.col.node': 'Node',
+  'sn.col.addr': 'Entry address', 'sn.col.ratio': 'Ratio', 'sn.col.speed': 'Speed limit', 'sn.col.cap': 'Capacity', 'sn.col.output': 'In subscriptions', 'sn.relay': 'Relay', 'sn.to': '→ {name}',
+  'sn.follow': 'follows server', 'sn.unlimited': 'Unlimited', 'sn.speedBoth': '{a} Mbps total · {b} per user', 'sn.speedTotal': '{a} Mbps total', 'sn.speedUser': '{b} Mbps per user',
+  'sn.capN': '{n} users', 'sn.filter.all': 'All', 'sn.filter.own': 'Customised', 'sn.filter.off': 'Not in subscriptions', 'sn.count': '{n} nodes', 'sn.lineOff': 'Line disabled',
+  'sn.serverOff': 'server disabled', 'sn.paused': 'paused', 'sn.edit': 'Settings', 'sn.editTitle': 'Node settings', 'sn.ratio': 'Ratio', 'sn.ratioPh': 'Follow the server (×{r} now)',
+  'sn.ratioHelp': 'Leave empty to follow the server\'s ratio. A value applies only to traffic through this node; other lines on the same server are unaffected.', 'sn.cap': 'User capacity',
+  'sn.capHelp': 'Maximum users online at once. When full, new users are refused; those already online are unaffected.', 'sn.speed': 'Node speed limit (Mbps)',
+  'sn.speedHelp': 'Shared by everyone using this node.', 'sn.userSpeed': 'Per-user speed limit (Mbps)',
+  'sn.userSpeedHelp': 'Each user\'s top speed on this node; applies together with the user\'s own limit, whichever is stricter.', 'sn.output': 'Include in subscriptions',
+  'sn.outputHelp': 'When off, this node no longer appears in anyone\'s subscription; the inbound stays open.', 'sn.reset': 'Reset to defaults', 'sn.saved': 'Saved',
+  'sn.outOn': 'Now included in subscriptions', 'sn.outOff': 'No longer included in subscriptions', 'sn.srcSummary': 'If the exit cannot recognise this entry', 'sn.src': 'Source IPs seen by the exit',
+  'sn.srcHelp': 'Ratio, limits and capacity are applied on the exit server, which recognises the entry by the source IP of the connection. If the relay reaches the exit over a private network or leaves from a different IP, list the IPs the exit actually sees, separated by commas.',
+  'sn.srcKnown': 'Already known to the panel: {list}.', 'sn.srcNone': 'This entry\'s address is a domain the panel cannot map; without this it is treated as direct.',
+  'sn.empty': 'No lines yet. Create a line and its nodes will be listed here.', 'sn.goLines': 'Create a line', 'sn.err.ratio': 'The ratio must be between 0 and 100 (empty = follow the server)',
+  'sn.err.int': 'Speed limits and capacity must be whole numbers, 0 or more', 'audit.v.node': 'changed node settings',
+  'sn.count1': '1 node',
+  'dash.attn.rej.node': 'node full {n}', 'dash.rejectedNode': 'Refused: node at capacity',
+  'dash.rejectedNodeHelp': 'This connection passed authentication, but the node it came through already has as many users online as the capacity set on the Nodes page, so it was refused. It can connect a minute after someone goes offline, or raise the node\'s capacity.',
 };
 
 const dicts = { zh, en };

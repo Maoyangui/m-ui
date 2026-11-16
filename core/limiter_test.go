@@ -67,7 +67,7 @@ func TestTrafficKeepsDeviceOnline(t *testing.T) {
 	l.mu.Unlock()
 
 	// 流量回调刷新活跃时间
-	l.keepaliveFor("alice", "1.1.1.1")()
+	l.keepaliveFor("alice", "1.1.1.1", "")()
 
 	// 名额仍被占用,新设备应被拒
 	if l.AllowConn("alice", "2.2.2.2") {

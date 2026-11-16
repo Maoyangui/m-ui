@@ -664,6 +664,21 @@ function route(method, path, query, body) {
       if (method === 'POST' && !seg[1]) { const l = { id: nextId(S.lines), enabled: true, sort: S.lines.length + 1, userCount: 0, ...body }; l.upstreamName = (S.upstreams.find(x => x.id === l.upstreamId) || {}).name || 'direct'; if (body.assignAll) { l.userCount = S.users.length; S.users.forEach(u => { u.lineIds = [...(u.lineIds || []), l.id]; }); } S.lines.push(l); return clone(l); }
       const l = find(S.lines, id);
       if (seg[2] === 'toggle') { l.enabled = !l.enabled; demoSyncBlocked(); return ok(); }
+      if (seg[2] === 'node' && method === 'PUT') { // 节点页:整份替换一个节点的设置;带 src 的顺手改那个入口的来源 IP
+        const parse = v => { try { return typeof v === 'string' ? JSON.parse(v) : (v || null); } catch { return null; } };
+        const opts = parse(l.nodeOpts) || {}, o = body.opt || {};
+        const kept = {};
+        if (o.hidden) kept.hidden = true;
+        for (const k of ['ratio', 'speed', 'userSpeed', 'cap']) if (o[k] > 0) kept[k] = o[k];
+        if (Object.keys(kept).length) opts[body.key] = kept; else delete opts[body.key];
+        l.nodeOpts = Object.keys(opts).length ? opts : null;
+        if (body.src !== undefined && String(body.key).startsWith('f')) {
+          const fs = parse(l.forwards) || [];
+          fs.forEach(f => { if ('f' + f.id === body.key) { if (body.src) f.src = body.src; else delete f.src; } });
+          l.forwards = fs;
+        }
+        return clone(l);
+      }
       if (method === 'DELETE') { S.lines = S.lines.filter(x => x.id !== id); S.users.forEach(u => { u.lineIds = (u.lineIds || []).filter(x => x !== id); }); demoSyncBlocked(); return ok(); }
       if (method === 'PUT') { Object.assign(l, body, { id }); l.upstreamName = (S.upstreams.find(x => x.id === l.upstreamId) || {}).name || 'direct'; demoSyncBlocked(); return clone(l); }
       return ok();

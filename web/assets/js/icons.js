@@ -7,6 +7,8 @@ export const ICONS = {
   dashboard: svg('<path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/>'),
   // 线路:入口 → 出口的两条通道
   lines: svg('<path d="M3 8h11l-2.5-2.5M3 8l2.5 2.5"/><path d="M21 16H10l2.5 2.5M21 16l-2.5-2.5"/>'),
+  // 节点:一条线路分出去的几个入口(订阅里一个一个的节点)
+  subnodes: svg('<circle cx="6" cy="12" r="2.3"/><circle cx="18" cy="6" r="2.3"/><circle cx="18" cy="18" r="2.3"/><path d="M8.1 11l7.8-4"/><path d="M8.1 13l7.8 4"/>'),
   // 上游:数据从本机流向外部落地
   upstreams: svg('<path d="M12 20V7"/><path d="M8 11l4-4 4 4"/><path d="M5 20h14"/>'),
   // 外部节点:一段外链

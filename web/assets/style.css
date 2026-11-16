@@ -1814,6 +1814,35 @@ table.grid.cards .hdetail.in-card { clear: both; margin-top: .5rem; padding: .2r
 .hdetail.in-card.grp .hrow { grid-template-columns: 8px minmax(3rem, 1fr) 3.6rem fit-content(48%); }
 .hdetail.in-card.grp .hwhen { display: none; }
 
+/* ================= 节点页(pages/subnodes.js)=================
+   一张表按线路分组,一行一个节点。倍率一格要一眼分得出「跟随服务器」(淡色,后面跟着这四个字)和单独设的(主色、加粗);
+   没设的限速、容量是更淡的「不限」。输出开关摆在行里。停用的线路 / 服务器、暂停的入口整行变淡。 */
+.sn-node { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.sn-node > .pname { min-width: 0; }
+.sn-node > .badge { flex: none; }
+.sn-to { flex: none; font-weight: 400; color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
+.sn-own { color: var(--primary-text); font-weight: 600; }
+.sn-follow { color: var(--text-2); white-space: nowrap; }
+.sn-follow > span { color: var(--muted); font-size: var(--fs-xs); }
+.sn-table .faint { color: var(--faint); }
+.sn-table td.sn-out { width: 1%; white-space: nowrap; }
+.sn-table .switch { vertical-align: middle; }
+tr.sn-idle > td:not(.actions):not(.sn-out) { opacity: .6; }
+.sn-table tr.grp-row > td > .muted:last-child { float: right; font-weight: 400; }
+table.grid.cards.sn-table tr.grp-row > td > .muted:last-child { float: none; margin-left: .6rem; }
+/* 入口地址:够宽时是单独一列;那一列藏起来(窄窗口、卡片)时写在名字下面一行,不至于看不到 */
+.sn-addr { display: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.grid.no-p3 .sn-addr, table.grid.cards .sn-addr { display: block; }
+/* 卡片排法:地址已经在名字下面;没设的限速、容量(都是「不限」)不占行,一张卡只留有内容的 */
+table.grid.cards.sn-table td.c-p3, table.grid.cards.sn-table td.sn-def { display: none; }
+.sn-who { margin: 0 0 1rem; font-size: var(--fs-md); }
+.sn-extra { display: grid; gap: .85rem; margin-top: 1.15rem; }
+.sn-extra > details.adv { margin: 0; }
+.sn-extra > details.adv > summary { margin-bottom: 0; }
+.sn-extra > details.adv[open] > summary { margin-bottom: .6rem; }
+button.sn-reset { color: var(--muted); }
+.node-readonly .sn-table td.actions, .node-readonly .sn-table .switch { pointer-events: none; opacity: .5; }
+
 /* ---- 管理员页 / 代理「账号」页 ----
    账号与两步验证各一张小卡片并排:看一眼就知道现在是谁、上次从哪登录、两步验证开没开,改动都在弹框里做。 */
 .adm-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1rem; }

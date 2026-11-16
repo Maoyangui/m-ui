@@ -459,6 +459,17 @@
       <li>行末 <b data-k="common.more">更多</b> 里有 <b data-k="line.clone">克隆</b>(会重新挑一个端口)、<b data-k="up.addFromLine">把线路加为上游</b>(见 <a href="#up-chain">线路作上游</a>)和删除。</li>
     </ul>
   </section>
+
+  <section class="sec" id="subnodes">
+    <h3>节点:逐个设倍率、限速和容量</h3>
+    <p class="lede">订阅里的每个节点 —— 一条线路在一台服务器上的直连,或它的一个中转入口 —— 都列在 <b data-k="nav.subnodes">节点</b> 页,可以单独设置。</p>
+    <ul>
+      <li><b data-k="sn.col.ratio">倍率</b>:没设的写着 <b data-k="sn.follow">跟随服务器</b>,用的是所在服务器的倍率(中转入口跟出口那台);单独设了就只对走这个节点的流量生效,同一台服务器上别的线路照旧。订阅里节点名后面的「x2」是这个节点实际生效的倍率。</li>
+      <li><b data-k="sn.speed">节点限速(Mbps)</b> 是走这个节点的所有用户合计;<b data-k="sn.userSpeed">每用户限速(Mbps)</b> 和用户自己的限速同时生效,取更严的;<b data-k="sn.cap">用户容量</b> 满了只拒新用户,已经在线的不受影响。</li>
+      <li><b data-k="sn.col.output">输出到订阅</b> 的开关点了就存:关掉后这个节点不再出现在任何人的订阅里,入站照开。</li>
+      <li>中转入口是在出口服务器上按连接的来源 IP 认的。集群里的中转、地址是 IP 的中转面板自己认得出;经内网连出口、进出不是同一个 IP、地址是域名的,在 <b data-k="sn.edit">设置</b> 里展开 <b data-k="sn.srcSummary">出口认不出这个入口时</b> 把来源 IP 补上,不填就按直连算。</li>
+    </ul>
+  </section>
 </section>
 
 <section class="chap" id="upstreams" data-scope="admin">

@@ -55,6 +55,10 @@ type Limiter struct {
 	groups     map[string]groupLimit
 	gentries   map[string]*groupEntry
 	grejects   map[string]int64 // 设备池满被拒的次数(GroupState 取走即清零)
+
+	// 节点层(见 limiter_nodes.go):节点自己的限速与用户容量
+	nodeTab atomic.Pointer[NodeTable]
+	nstates map[string]*nodeState // 节点键 → 状态(桶位、在线用户);受 mu 保护
 }
 
 // SetExternalIPs 全量替换"其他机器上在线的 IP"(跨机设备数并集判定)。
@@ -246,6 +250,7 @@ func NewLimiter() *Limiter {
 		groups:     map[string]groupLimit{},
 		gentries:   map[string]*groupEntry{},
 		grejects:   map[string]int64{},
+		nstates:    map[string]*nodeState{},
 	}
 }
 
@@ -509,12 +514,23 @@ func (l *Limiter) ActiveIPsAll() map[string][]string {
 }
 
 // touch 刷新某用户某 IP 的活跃时间(有流量经过时调用)。
-func (l *Limiter) touch(user, ip string, now int64) bool {
+func (l *Limiter) touch(user, ip string, now int64) bool { return l.touchNode(user, ip, "", now) }
+
+// touchNode 同 touch,顺带记下这个用户在节点 key 上还在线(节点的用户容量按它数;key 为空 = 这条连接走的节点什么都没设)。
+func (l *Limiter) touchNode(user, ip, key string, now int64) bool {
 	if user == "" || ip == "" {
 		return true
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	ok := l.touchLocked(user, ip, now)
+	if ok && key != "" {
+		l.nodeTouchLocked(key, user, now)
+	}
+	return ok
+}
+
+func (l *Limiter) touchLocked(user, ip string, now int64) bool {
 	if l.deviceRejectedLocked(user, ip, now) {
 		return false
 	}
@@ -577,35 +593,15 @@ func (l *Limiter) groupEntryLocked(g string) *groupEntry {
 // wrapConn 给一条连接挂上用户与所属代理池的桶位,并在有流量时刷新该设备的在线状态。
 // 每条认证过的连接都包装:现在不限速的用户,之后被规则限速时这条连接也要立刻变慢。
 func (l *Limiter) wrapConn(conn net.Conn, user, ip string) net.Conn {
-	if user == "" {
-		return conn
-	}
-	l.mu.Lock()
-	e := l.entryLocked(user)
-	var g *groupEntry
-	if name := l.userGroup[user]; name != "" {
-		g = l.groupEntryLocked(name)
-	}
-	l.mu.Unlock()
-	return &limitedConn{Conn: conn, limiter: l, name: user, user: e, group: g, keepalive: l.keepaliveFor(user, ip)}
+	return l.wrapConnNode(conn, user, ip, NodeSpec{})
 }
 
 func (l *Limiter) wrapPacketConn(conn N.PacketConn, user, ip string) N.PacketConn {
-	if user == "" {
-		return conn
-	}
-	l.mu.Lock()
-	e := l.entryLocked(user)
-	var g *groupEntry
-	if name := l.userGroup[user]; name != "" {
-		g = l.groupEntryLocked(name)
-	}
-	l.mu.Unlock()
-	return &limitedPacketConn{PacketConn: conn, limiter: l, name: user, user: e, group: g, keepalive: l.keepaliveFor(user, ip)}
+	return l.wrapPacketConnNode(conn, user, ip, NodeSpec{})
 }
 
-// keepaliveFor 返回一个"该设备刚有流量"的回调,按秒节流以免每次读写都抢锁。
-func (l *Limiter) keepaliveFor(user, ip string) func() bool {
+// keepaliveFor 返回一个"该设备刚有流量"的回调,按秒节流以免每次读写都抢锁。nodeKey 是这条连接走的节点(空 = 没单独设的节点)。
+func (l *Limiter) keepaliveFor(user, ip, nodeKey string) func() bool {
 	var last, generation atomic.Int64
 	return func() bool {
 		now := time.Now().Unix()
@@ -613,7 +609,7 @@ func (l *Limiter) keepaliveFor(user, ip string) func() bool {
 		if now == last.Load() && gen == generation.Load() {
 			return true
 		}
-		if !l.touch(user, ip, now) {
+		if !l.touchNode(user, ip, nodeKey, now) {
 			return false
 		}
 		generation.Store(gen)
@@ -656,6 +652,8 @@ type limitedConn struct {
 	name      string
 	user      *userEntry  // 用户桶位
 	group     *groupEntry // 建连时的代理池桶位(不在池里为 nil);运行期以 currentGroup 为准
+	node      *userEntry  // 这条连接走的节点的总限速桶位(节点什么都没设为 nil)
+	nodeUser  *userEntry  // 这个用户在这个节点上的桶位(同上)
 	keepalive func() bool
 	gen       atomic.Uint64              // 上次解析代理池时的策略代数
 	groupNow  atomic.Pointer[groupEntry] // 按代数缓存的当前代理池
@@ -703,6 +701,10 @@ func (c *limitedConn) Read(p []byte) (int, error) {
 	if g := c.currentGroup(); g != nil {
 		throttle(g.up.Load(), n)
 	}
+	if c.node != nil {
+		throttle(c.nodeUser.up.Load(), n)
+		throttle(c.node.up.Load(), n)
+	}
 	return n, err
 }
 
@@ -715,6 +717,10 @@ func (c *limitedConn) Write(p []byte) (int, error) {
 	throttle(c.user.down.Load(), len(p))
 	if g := c.currentGroup(); g != nil {
 		throttle(g.down.Load(), len(p))
+	}
+	if c.node != nil {
+		throttle(c.nodeUser.down.Load(), len(p))
+		throttle(c.node.down.Load(), len(p))
 	}
 	if c.denied.Load() {
 		return 0, errDeviceRecheck
@@ -730,6 +736,8 @@ type limitedPacketConn struct {
 	name      string
 	user      *userEntry
 	group     *groupEntry
+	node      *userEntry // 节点层的两个桶位,见 limitedConn
+	nodeUser  *userEntry
 	keepalive func() bool
 	gen       atomic.Uint64
 	groupNow  atomic.Pointer[groupEntry]
@@ -764,6 +772,10 @@ func (c *limitedPacketConn) ReadPacket(b *buf.Buffer) (M.Socksaddr, error) {
 		if g := c.currentGroup(); g != nil {
 			throttle(g.up.Load(), b.Len())
 		}
+		if c.node != nil {
+			throttle(c.nodeUser.up.Load(), b.Len())
+			throttle(c.node.up.Load(), b.Len())
+		}
 		return dest, nil
 	}
 }
@@ -777,6 +789,10 @@ func (c *limitedPacketConn) WritePacket(b *buf.Buffer, dest M.Socksaddr) error {
 	throttle(c.user.down.Load(), b.Len())
 	if g := c.currentGroup(); g != nil {
 		throttle(g.down.Load(), b.Len())
+	}
+	if c.node != nil {
+		throttle(c.nodeUser.down.Load(), b.Len())
+		throttle(c.node.down.Load(), b.Len())
 	}
 	return c.PacketConn.WritePacket(b, dest)
 }

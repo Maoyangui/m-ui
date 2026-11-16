@@ -56,7 +56,7 @@ type RecentConn struct {
 	Protocol string
 	Count    int
 	Last     int64
-	// Rejected 最近一次是被拒的:RejectDevice / RejectPool;放行的为空。同一来源下一次放行就清掉。
+	// Rejected 最近一次是被拒的:RejectDevice / RejectPool / RejectNode;放行的为空。同一来源下一次放行就清掉。
 	Rejected string
 	// Failed 只在"到了但没过握手 / 认证"那份里有:arrival.TLS / arrival.Auth;Detail 是失败原因原文(截短)
 	Failed string
@@ -228,8 +228,10 @@ func (c *ConnTracker) generateConnectionID() string {
 func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) net.Conn {
 	ip := metadata.Source.Addr.String()
 	owner := model.Owner(metadata.User)
+	var node NodeSpec // 这条连接走的节点单独设的限速 / 容量(没设是空的)
 	if c.limiter != nil {
-		if ok, why := c.limiter.AllowConnWhy(owner, ip); !ok {
+		node = c.limiter.NodeFor(metadata.Inbound, metadata.Source.Addr)
+		if ok, why := c.limiter.AllowConnNode(owner, ip, node); !ok {
 			c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType, why)
 			return rejectedConn{conn}
 		}
@@ -251,7 +253,7 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 
 	wrapped := c.createWrappedConn(conn, connID)
 	if c.limiter != nil {
-		return c.limiter.wrapConn(wrapped, owner, ip)
+		return c.limiter.wrapConnNode(wrapped, owner, ip, node)
 	}
 	return wrapped
 }
@@ -259,8 +261,10 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.PacketConn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) network.PacketConn {
 	ip := metadata.Source.Addr.String()
 	owner := model.Owner(metadata.User)
+	var node NodeSpec
 	if c.limiter != nil {
-		if ok, why := c.limiter.AllowConnWhy(owner, ip); !ok {
+		node = c.limiter.NodeFor(metadata.Inbound, metadata.Source.Addr)
+		if ok, why := c.limiter.AllowConnNode(owner, ip, node); !ok {
 			c.noteRecent(ip, owner, metadata.Inbound, metadata.InboundType, why)
 			conn.Close()
 			return conn
@@ -281,7 +285,7 @@ func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.P
 
 	wrapped := c.createWrappedPacketConn(conn, connID)
 	if c.limiter != nil {
-		return c.limiter.wrapPacketConn(wrapped, owner, ip)
+		return c.limiter.wrapPacketConnNode(wrapped, owner, ip, node)
 	}
 	return wrapped
 }

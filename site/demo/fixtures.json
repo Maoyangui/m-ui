@@ -127,7 +127,13 @@
             "port": 443,
             "to": 1
           }
-        ]
+        ],
+        "nodeOpts": {
+          "f2": {
+            "ratio": 3,
+            "cap": 50
+          }
+        }
       },
       {
         "id": 2,
@@ -189,7 +195,14 @@
         "enabled": true,
         "sort": 4,
         "upstreamName": "Frankfurt-exit",
-        "userCount": 5
+        "userCount": 5,
+        "nodeOpts": {
+          "s2": {
+            "ratio": 1.5,
+            "speed": 200,
+            "userSpeed": 50
+          }
+        }
       },
       {
         "id": 5,
@@ -206,7 +219,12 @@
         "enabled": true,
         "sort": 5,
         "upstreamName": "direct",
-        "userCount": 3
+        "userCount": 3,
+        "nodeOpts": {
+          "s3": {
+            "hidden": true
+          }
+        }
       }
     ],
     "GET upstreams": [

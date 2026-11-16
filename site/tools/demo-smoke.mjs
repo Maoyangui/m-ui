@@ -336,6 +336,26 @@ const rowsOpen = await page.locator('#up-sub-2 .hrow').count();
 const rowH = await page.locator('#up-sub-2 .hrow').evaluateAll(els => Math.max(0, ...els.map(e => e.getBoundingClientRect().height)));
 if (dots === 3 && rowsOpen === 3 && rowH > 0 && rowH < 34) pass('上游页:三台在用就是三个点,点这一行在下面展开,每台一行');
 else fail(`上游页的点 / 展开行数不对:${dots} 个点、${rowsOpen} 行、最高的一行 ${Math.round(rowH)}px`);
+// 节点页:每条线路的直连和中转入口各一行;倍率一格分得出跟随服务器和单独设的;行里的开关点了就存;设置弹框改倍率
+await page.goto(`${DEMO}#/subnodes`); await page.waitForTimeout(900);
+const sn0 = await page.evaluate(() => ({
+  rows: document.querySelectorAll('#sn-body tr:not(.grp-row)').length, groups: document.querySelectorAll('#sn-body tr.grp-row').length,
+  own: document.querySelectorAll('#sn-body .sn-own').length, follow: document.querySelectorAll('#sn-body .sn-follow').length,
+  relay: document.querySelectorAll('#sn-body .sn-node .badge').length, off: document.querySelectorAll('#sn-body .switch input:not(:checked)').length,
+}));
+if (sn0.rows >= 5 && sn0.groups >= 3 && sn0.own >= 1 && sn0.follow >= 1 && sn0.rows === sn0.own + sn0.follow) pass(`节点页:${sn0.rows} 个节点按 ${sn0.groups} 条线路分组,单独设倍率的 ${sn0.own} 个、跟随服务器的 ${sn0.follow} 个`);
+else fail(`节点页的行不对:${JSON.stringify(sn0)}`);
+await page.locator('#sn-body .switch input:checked').first().evaluate(el => el.click()); await page.waitForTimeout(500);
+const snOff = await page.locator('#sn-body .switch input:not(:checked)').count();
+if (snOff === sn0.off + 1) pass('节点页:行里的「输出到订阅」开关点了就存'); else fail(`节点页的开关没存上:关着的 ${sn0.off} → ${snOff}`);
+await page.locator('#sn-body [data-act="sn.edit"]').first().click(); await page.waitForTimeout(500);
+await page.locator('#sn-ratio').fill('2.5'); await page.locator('#sn-cap').fill('40');
+await page.locator('#modal-save').click(); await page.waitForTimeout(700);
+const sn1 = await page.evaluate(() => { const tr = document.querySelector('#sn-body tr:not(.grp-row)'); return { open: !document.getElementById('modal').hidden, text: tr ? tr.innerText.replace(/\s+/g, ' ') : '' }; });
+if (!sn1.open && /×2\.5/.test(sn1.text) && /40/.test(sn1.text)) pass('节点页:设置弹框里改倍率和容量,保存后行里跟着变'); else fail(`节点页保存后不对:${JSON.stringify(sn1)}`);
+await page.locator('#sn-only [data-id="own"]').click(); await page.waitForTimeout(300);
+const snOwn = await page.evaluate(() => ({ rows: document.querySelectorAll('#sn-body tr:not(.grp-row)').length, follow: document.querySelectorAll('#sn-body .sn-follow').length }));
+if (snOwn.rows >= 2 && snOwn.rows < sn0.rows) pass(`节点页:「单独设置的」只留下设过的 ${snOwn.rows} 个`); else fail(`节点页筛选不对:${JSON.stringify(snOwn)}`);
 // 概况「24 小时流量」那一格点开是流量明细:三栏排行,换范围后还在
 await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(900);
 await page.locator('[data-act="dash.traffic"]').first().click(); await page.waitForTimeout(700);

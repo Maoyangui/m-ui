@@ -90,11 +90,13 @@ type Runner struct {
 	// 上一次成功读到并应用的限速 / 设备数策略。数据库抖动时沿用它,后台重试,绝不为此停机。
 	lastSpecs     map[string]core.UserLimitSpec
 	lastGroups    map[string]core.GroupLimitSpec
-	lastNodes     core.NodeTable // 上一次算出来的节点表(见 nodes.go);和 lastSpecs 一样由 applyLimitsMu 保护
 	limitsPending atomic.Bool // applyLimits 读库失败,等 secureReloadLoop 重试
 	applyLimitsMu sync.Mutex  // applyLimits 串行:ApplyLimits() / RulesNow() 不持 r.mu 就会调它,lastSpecs 不能裸着被并发读写
 	mu            sync.Mutex  // 串行化重载,避免并发改动互相打断
 	stopping      atomic.Bool // 进程在停 / 在重启:看护循环不再拉起数据面
+
+	// lastNodes 上一次算出来的节点表(见 nodes.go);和 lastSpecs 一样由 applyLimitsMu 保护
+	lastNodes core.NodeTable
 
 	rules *rules.Engine // 限速规则判定器(只在主机跑)
 
@@ -1498,6 +1500,7 @@ func (r *Runner) applyLimits() error {
 			box.Limiter().ReconcileDevices()
 		}
 		box.StatsTracker().SetNodes(r.lastNodes)
+		box.Limiter().SetNodes(r.lastNodes)
 		return err
 	}
 	r.lastSpecs, r.lastGroups = specs, groups
@@ -1512,6 +1515,7 @@ func (r *Runner) applyLimits() error {
 		r.lastNodes = nodes
 	}
 	box.StatsTracker().SetNodes(nodes)
+	box.Limiter().SetNodes(nodes) // 节点的限速 / 容量(core/limiter_nodes.go)
 	// 重新算一遍"并集超限时哪些设备不再接受新登记"。它**不会**断开任何已连接的设备:
 	// 你定过的语义是"池满只拒新设备,已连接的不动",0.6.10 曾按 IP 字典序踢掉在线设备,一个连了
 	// 几小时、完全合规的付费用户会因为 IP 排得靠后被断网。

@@ -395,9 +395,10 @@ function attnItems() {
   // 13 最近 10 分钟被拒的连接(灰色提示;按来源计,不是次数)
   const rj = (conns || []).filter(c => c.rejected && !c.failed && c.ts > now() - 600);
   if (rj.length) {
-    const dev = rj.filter(c => c.rejected !== 'pool').length;
+    // 被拒的原因三种:用户设备数超限、代理的设备池满、节点的用户容量满
+    const pool = rj.filter(c => c.rejected === 'pool').length, node = rj.filter(c => c.rejected === 'node').length, dev = rj.length - pool - node;
     add(13, 'info', { title: t('dash.attn.rejected', { n: rj.length }),
-      parts: [dev && esc(t('dash.attn.rej.device', { n: dev })), rj.length - dev && esc(t('dash.attn.rej.pool', { n: rj.length - dev }))],
+      parts: [dev && esc(t('dash.attn.rej.device', { n: dev })), pool && esc(t('dash.attn.rej.pool', { n: pool })), node && esc(t('dash.attn.rej.node', { n: node }))],
       names: etc([...new Set(rj.map(c => c.user).filter(Boolean))], 'users'), acts: btn('dash.showRejected', '', t('dash.attn.showRejected'), 'ghost') });
   }
   // 14 面板状态过期(status 超过 15 秒没取到)
@@ -690,7 +691,8 @@ function renderConns() {
   const pick = shownConns(list, n, n);
   const shown = failed ? pick.fails : pick.rows;
   const srv = all.some(c => c.server);
-  const rejB = c => c.rejected ? ` <span class="badge danger" title="${esc(t(c.rejected === 'pool' ? 'dash.rejectedPool' : 'dash.rejectedDevice') + ':' + t('dash.rejectedHelp'))}">${esc(t('dash.conn.rejected'))}</span>` : '';
+  const rejWhy = c => (c.rejected === 'node' ? t('dash.rejectedNode') + ':' + t('dash.rejectedNodeHelp') : t(c.rejected === 'pool' ? 'dash.rejectedPool' : 'dash.rejectedDevice') + ':' + t('dash.rejectedHelp'));
+  const rejB = c => c.rejected ? ` <span class="badge danger" title="${esc(rejWhy(c))}">${esc(t('dash.conn.rejected'))}</span>` : '';
   const why = c => `<span class="badge warn" title="${esc(t('dash.fail.' + c.failed + '.help') + (c.detail ? '\n' + c.detail : ''))}">${esc(t('dash.fail.' + c.failed))}</span>`;
   const wrap = el.querySelector('.conns-wrap');
   const keep = wrap ? wrap.scrollTop : 0;

@@ -459,6 +459,17 @@
       <li><b data-k="common.more">More</b> at the end of a row has <b data-k="line.clone">Clone</b> (a new port is picked), <b data-k="up.addFromLine">Add a line as upstream</b> (see <a href="#up-chain">Lines as upstreams</a>) and delete.</li>
     </ul>
   </section>
+
+  <section class="sec" id="subnodes">
+    <h3>Nodes: ratio, speed limits and capacity per node</h3>
+    <p class="lede">Every node in a subscription — a line served directly by one server, or one of its relay entries — is listed on the <b data-k="nav.subnodes">Nodes</b> page and can be tuned on its own.</p>
+    <ul>
+      <li><b data-k="sn.col.ratio">Ratio</b>: a node that says <b data-k="sn.follow">follows server</b> uses the ratio of the server it runs on (a relay entry follows the exit server). A value of its own applies only to traffic through that node; other lines on the same server are unaffected. The “x2” after a node name in subscriptions is the ratio actually in effect for that node.</li>
+      <li><b data-k="sn.speed">Node speed limit (Mbps)</b> is shared by everyone using the node; <b data-k="sn.userSpeed">Per-user speed limit (Mbps)</b> applies together with the user's own limit, whichever is stricter; when <b data-k="sn.cap">User capacity</b> is reached only new users are refused, those already online are unaffected.</li>
+      <li>The <b data-k="sn.col.output">In subscriptions</b> switch saves as soon as you flip it: when off, the node no longer appears in anyone's subscription while the inbound stays open.</li>
+      <li>Relay entries are recognised on the exit server by the source IP of the connection. Relays inside the cluster and relays whose address is an IP are recognised automatically; if the relay reaches the exit over a private network, leaves from a different IP or is addressed by a domain, open <b data-k="sn.edit">Settings</b>, expand <b data-k="sn.srcSummary">If the exit cannot recognise this entry</b> and list the source IPs — otherwise its traffic is treated as direct.</li>
+    </ul>
+  </section>
 </section>
 
 <section class="chap" id="upstreams" data-scope="admin">
