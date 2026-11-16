@@ -176,7 +176,7 @@ func inputBlocks(out string) (opened bool, why string) {
 		if !strings.HasPrefix(line, "-A INPUT") {
 			continue
 		}
-		mine := strings.Contains(line, "m-ui") || strings.Contains(line, "-j "+chainName)
+		mine := strings.Contains(line, "m-ui") || strings.Contains(line, "-j "+chainName) || strings.Contains(line, "-j "+allowChain)
 		if first && strings.Contains(line, openComment) && strings.HasSuffix(line, "-j ACCEPT") {
 			opened = true
 		}
