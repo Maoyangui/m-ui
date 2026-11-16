@@ -499,7 +499,7 @@
     <h3>Lines as upstreams (chaining)</h3>
     <p class="lede">Forward an entry line's traffic into another of your own lines, for example in through a domestic relay and out through an overseas server.</p>
     <ul>
-      <li>On the <b data-k="nav.upstreams">Upstreams</b> page click <b data-k="up.addFromLine">Add a line as upstream</b> (or the same item under <b data-k="common.more">More</b> at the end of a line's row), then choose the line and <b data-k="up.fromNode">Use its entry on server</b>.</li>
+      <li>On the <b data-k="nav.upstreams">Upstreams</b> page click <b data-k="up.add">Add upstream</b> and choose <b data-k="up.addFromLine">Add a line as upstream</b> from the menu (or the same item under <b data-k="common.more">More</b> at the end of a line's row), then choose the line and <b data-k="up.fromNode">Use its entry on server</b>.</li>
       <li>Its settings follow the line automatically, even if the line changes port or protocol; it uses dedicated credentials, takes nothing from users' quotas, and traffic is counted once.</li>
       <li>Loops, deleted lines and deleted entry servers are blocked or flagged. Nodes need v0.7.16 or later.</li>
     </ul>
@@ -509,7 +509,7 @@
     <h3>Upstream groups (automatic failover)</h3>
     <p class="lede">Group several upstreams to always use the fastest one that works and switch automatically when it fails.</p>
     <ul>
-      <li><b data-k="nav.upstreams">Upstreams</b> page → <b data-k="up.addGroup">Add upstream group</b>, pick at least two <b data-k="up.groupMembers">Members</b>, then choose the group as a line's upstream.</li>
+      <li><b data-k="nav.upstreams">Upstreams</b> page → <b data-k="up.add">Add upstream</b> → <b data-k="up.addGroup">Add upstream group</b>, pick at least two <b data-k="up.groupMembers">Members</b>, then choose the group as a line's upstream.</li>
       <li>Members are tested every 30 seconds; the current one is kept unless it is more than 300 ms slower than the fastest, to avoid flapping. On a switch old connections are closed so apps reconnect at once.</li>
       <li>The Upstreams page shows which member each server is using now.</li>
       <li>Nodes need v0.7.16 or later: as soon as an upstream group exists (even before any line uses it), older nodes refuse the whole sync.</li>
@@ -715,7 +715,7 @@
     <p class="lede">A plan is a template of limits that new accounts, renewals and batch actions can apply directly.</p>
     <ol class="steps">
       <li><b data-k="nav.plans">Plans</b> page → <b data-k="plan.add">Add plan</b>: a <b data-k="common.name">Name</b> (such as 100G/month), <b data-k="plan.desc">Description</b>, <b data-k="plan.quota">Quota</b> (GB), <b data-k="plan.days">Duration (days)</b>, devices and speed limits.</li>
-      <li>Tick <b data-k="user.f.autoReset">Periodic traffic reset</b> for monthly resets, and <b data-k="plan.firstUse">Start the clock at first connection</b> for gift cards.</li>
+      <li>Switch on <b data-k="user.f.autoReset">Periodic traffic reset</b> for monthly resets (the number of days is on the same row), and <b data-k="plan.firstUse">Start the clock at first connection</b> for gift cards.</li>
       <li><b data-k="plan.lines">Lines</b>: applying the plan replaces the user's lines with these; empty = keep the user's lines.</li>
       <li data-scope="admin"><b data-k="plan.rules">Rate-limit rules</b>: ticked rules apply to every user of the plan, current and future.</li>
       <li><b data-k="plan.price">Reference price (optional)</b>: only used by "prorate" when changing plans and never shown to users; give two plans the same price to swap them at equal value.</li>

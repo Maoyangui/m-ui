@@ -23,7 +23,7 @@ export async function render(el) {
       <span class="grow"></span><button class="btn primary" data-act="rs.add">${t('rs.add')}</button></div>
     <div class="table-wrap"><table class="grid">
       <thead><tr><th>${t('common.name')}</th><th>${t('common.status')}</th><th>${t('rs.users')}</th><th>${t('rs.used')}</th>
-        <th>${t('rs.devices')}</th><th class="c-p3">${t('rs.speed')}</th><th>${t('user.expiry')}</th><th class="c-p2">${t('rs.online')}</th><th></th></tr></thead>
+        <th>${t('rs.online')}</th><th class="c-p3">${t('rs.speed')}</th><th>${t('user.expiry')}</th><th></th></tr></thead>
       <tbody id="rs-body"></tbody>
     </table></div>
     <p class="hint">${esc(t('rs.panelHint', { url: panelURL() }))}</p>`;
@@ -77,7 +77,7 @@ function renderRows() {
   const rows = list.filter(r => matches(query, r.name, r.remark) && (!onlyAttn || needsAttn(r)));
   const cnt = document.getElementById('rs-count');
   if (cnt) cnt.textContent = `${rows.length} / ${list.length}`;
-  if (!rows.length) { body.innerHTML = `<tr><td colspan="9">${empty(list.length ? undefined : t('rs.empty'))}</td></tr>`; return; }
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="8">${empty(list.length ? undefined : t('rs.empty'))}</td></tr>`; return; }
   body.innerHTML = rows.map(r => `<tr>
     <td class="primary-cell"><a href="#" data-act="rs.detail" data-id="${r.id}">${esc(r.name)}</a>
       ${r.remark ? `<div class="sub-cell">${esc(r.remark)}</div>` : ''}</td>
@@ -87,7 +87,6 @@ function renderRows() {
     <td class="num">${r.online} / ${r.deviceLimit || '∞'}${r.poolRejects ? ' <span class="badge warn" title="' + esc(t('rs.poolFull', { n: r.poolRejects })) + '">!</span>' : ''}</td>
     <td class="num c-p3">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'}/${r.speedDown || '∞'} M` : '∞'}</td>
     <td class="${expired(r) ? 'danger' : ''}">${r.expiry ? fmtDay(r.expiry) : `<span class="muted small">${t('user.never')}</span>`}</td>
-    <td class="num c-p2">${r.online}</td>
     <td class="actions">
       <button class="btn sm" data-act="rs.detail" data-id="${r.id}">${t('common.details')}</button>
       <button class="btn sm" data-act="rs.edit" data-id="${r.id}">${t('common.edit')}</button>
@@ -100,26 +99,48 @@ function renderRows() {
 }
 
 // ---- 详情:名下用户 + 订阅地址 + 在线设备与线路 ----
+// 版式和用户详情一样:最上面一排操作 → 四格概要(已用 / 用户数 / 设备池 / 到期)→ 账号资料 → 可用线路 → 名下用户。
+// 以前是一张从上到下的两列表,最常看的额度、设备池和别的资料混在一起
 async function showDetail(id) {
   const r = list.find(x => x.id === id);
   if (!r) return;
   const users = await get(`resellers/${id}/users`).catch(() => []);
-  openDrawer(`${esc(r.name)} ${statusBadge(r)}`, `
+  const tile = (lb, v, sub = '', cls = '') => `<div class="ld-tile${cls ? ' ' + cls : ''}"><span class="lb">${esc(lb)}</span><b>${v}</b>${sub ? `<span class="sub">${sub}</span>` : ''}</div>`;
+  const left = r.expiry ? Math.ceil((r.expiry * 1000 - Date.now()) / 86400000) : null;
+  const url = panelURL();
+  const speed = (r.speedUp || r.speedDown) ? `${r.speedUp || '∞'} / ${r.speedDown || '∞'} Mbps` : t('common.unlimited');
+  const nLines = (r.lineIds || []).length;
+  openDrawer(`${esc(r.name)} ${statusBadge(r)}${r.totpEnabled ? ' ' + badge('2FA', 'primary') : ''}${claimBadge(r)}`, `
+    <div class="ud-acts">
+      <button class="btn sm" data-act="rs.edit" data-id="${r.id}"><i class="i i-pencil"></i>${t('common.edit')}</button>
+      <button class="btn sm" data-act="rs.passwd" data-id="${r.id}">${t('rs.passwd')}</button>
+      <span class="grow"></span>
+      <details class="menu"><summary class="btn sm">${t('common.more')}</summary><div class="menu-list">
+        <button data-act="rs.reset" data-id="${r.id}">${t('rs.reset')}</button>
+        <hr><button class="danger" data-act="rs.del" data-id="${r.id}">${t('common.delete')}</button>
+      </div></details>
+    </div>
+    <div class="ld-sum">
+      ${tile(t('rs.used'), fmtBytes(r.used, 1), `/ ${r.volume ? fmtBytes(r.volume, 0) : t('common.unlimited')}${progress(r.used, r.volume)}`)}
+      ${tile(t('rs.users'), `${r.users}<span class="of"> / ${r.userLimit || '∞'}</span>`)}
+      ${tile(t('rs.pool'), `${r.online}<span class="of"> / ${r.deviceLimit || '∞'}</span>`, esc(r.poolRejects ? t('rs.poolFull', { n: r.poolRejects }) : `${t('rs.allocated')} ${r.devices}`), r.poolRejects ? 'warn' : '')}
+      ${tile(t('user.expiry'), r.expiry ? fmtDay(r.expiry) : esc(t('user.never')),
+        left == null ? '' : left <= 0 ? esc(t('user.expired')) : esc(t('user.daysLeft', { n: left })), left != null && left <= 3 ? 'bad' : left != null && left <= 7 ? 'warn' : '')}
+    </div>
     <section>
-      <h3>${t('rs.quota')}</h3>
-      <dl class="kv">
-        <dt>${t('rs.used')}</dt><dd>${fmtBytes(r.used)} / ${r.volume ? fmtBytes(r.volume) : t('common.unlimited')}${progress(r.used, r.volume)}</dd>
-        <dt>${t('rs.pool')}</dt><dd class="num">${r.online} / ${r.deviceLimit || '∞'} <span class="muted small">${t('rs.allocated')} ${r.devices}</span>${r.poolRejects ? `<div class="muted small" style="color:var(--warn)">${esc(t('rs.poolFull', { n: r.poolRejects }))}</div>` : ''}</dd>
-        <dt>${t('rs.speed')}</dt><dd class="num">${(r.speedUp || r.speedDown) ? `${r.speedUp || '∞'} / ${r.speedDown || '∞'} Mbps` : t('common.unlimited')}</dd>
-        <dt>${t('user.expiry')}</dt><dd>${r.expiry ? fmtDay(r.expiry) : t('user.never')}</dd>
-        <dt>${t('rs.online')}</dt><dd class="num">${r.online}</dd>
-        <dt>${t('rs.users')}</dt><dd class="num">${r.users} / ${r.userLimit || '∞'}</dd>
-        <dt>${t('rs.lines')} <span class="muted small">${(r.lineIds || []).length}</span></dt>
-        <dd class="rs-lines">${refChips(r.lineRefs || (r.lineIds || []).map(id => ({ lineId: id })), state.lines, state.nodes || [], { key: 'rs-lines-' + r.id, max: 20 }) || `<span class="muted small">${t('common.none')}</span>`}</dd>
+      <h3>${t('rs.d.account')}</h3>
+      <div class="ud-url"><span class="lb">${esc(t('rs.d.panel'))}</span><code title="${esc(url)}">${esc(url)}</code><button class="btn sm" data-act="rs.copy" data-id="${esc(url)}">${t('common.copy')}</button></div>
+      <dl class="kv ud-kv">
+        <dt>${t('rs.speed')}</dt><dd class="num">${esc(speed)}</dd>
         <dt>${t('rs.lastLogin')}</dt><dd class="mono small">${esc(r.lastLogins || '—')}</dd>
+        ${r.remark ? `<dt>${t('user.f.remark')}</dt><dd>${esc(r.remark)}</dd>` : ''}
       </dl>
     </section>
-    <section><h3>${t('rs.users')} <span class="badge">${users.length}</span></h3>
+    <section>
+      <h3>${t('rs.lines')} <span class="muted small">${nLines}</span></h3>
+      <div class="rs-lines">${refChips(r.lineRefs || (r.lineIds || []).map(lid => ({ lineId: lid })), state.lines, state.nodes || [], { key: 'rs-lines-' + r.id, max: 20 }) || `<span class="muted small">${t('common.none')}</span>`}</div>
+    </section>
+    <section><h3>${t('rs.users')} <span class="muted small">${users.length}</span></h3>
       ${users.length ? `<div class="rs-users">${users.map(u => userRow(u)).join('')}</div>`
         : `<p class="muted small">${t('rs.noUsers')}</p>`}
     </section>`, { wide: true });

@@ -499,7 +499,7 @@
     <h3>线路作上游(链式代理)</h3>
     <p class="lede">让入口线路的流量再转到你自己的另一条线路出去,比如国内中转机进、海外机出。</p>
     <ul>
-      <li><b data-k="nav.upstreams">上游</b> 页点 <b data-k="up.addFromLine">把线路加为上游</b>(或在线路行末的 <b data-k="common.more">更多</b> 里点),选线路和 <b data-k="up.fromNode">用它在哪台服务器上的入口</b>。</li>
+      <li><b data-k="nav.upstreams">上游</b> 页点 <b data-k="up.add">新增上游</b>,在菜单里选 <b data-k="up.addFromLine">把线路加为上游</b>(或在线路行末的 <b data-k="common.more">更多</b> 里点),选线路和 <b data-k="up.fromNode">用它在哪台服务器上的入口</b>。</li>
       <li>参数跟着线路自动走,线路改端口、换协议都不用管;用的是专用凭据,不占用户配额,流量只算一次。</li>
       <li>成环、线路被删、入口服务器被删都会被拦下或标出来。副机要 v0.7.16 及以上。</li>
     </ul>
@@ -509,7 +509,7 @@
     <h3>上游组(自动切换)</h3>
     <p class="lede">几条上游组成一组,自动用最快且能通的那条,挂了自动换。</p>
     <ul>
-      <li><b data-k="nav.upstreams">上游</b> 页 → <b data-k="up.addGroup">新增上游组</b>,<b data-k="up.groupMembers">成员</b> 至少选两条;线路的上游选这个组。</li>
+      <li><b data-k="nav.upstreams">上游</b> 页 → <b data-k="up.add">新增上游</b> → <b data-k="up.addGroup">新增上游组</b>,<b data-k="up.groupMembers">成员</b> 至少选两条;线路的上游选这个组。</li>
       <li>每 30 秒测一次;现在用的这条只要不比最快的慢 300 毫秒以上就不换,免得来回切。切换时断开旧连接,让应用马上重连。</li>
       <li>上游页会写明每台服务器现在走的是哪一条。</li>
       <li>副机要 v0.7.16 及以上:只要建了上游组(哪怕还没有线路在用),版本更低的副机就会整份拒收同步。</li>
@@ -715,7 +715,7 @@
     <p class="lede">套餐是额度的模板,建号、续费、批量操作都能直接套用。</p>
     <ol class="steps">
       <li><b data-k="nav.plans">套餐</b> 页 → <b data-k="plan.add">新增套餐</b>:填 <b data-k="common.name">名称</b>(如 100G/月)、<b data-k="plan.desc">说明</b>、<b data-k="plan.quota">流量</b>(GB)、<b data-k="plan.days">时长(天)</b>、设备数和上下行限速。</li>
-      <li>按月清零的勾 <b data-k="user.f.autoReset">周期重置流量</b>;发卡、礼品卡勾 <b data-k="plan.firstUse">从首次连接开始计时</b>。</li>
+      <li>按月清零的打开 <b data-k="user.f.autoReset">周期重置流量</b>(每几天清一次就在那一行里填);发卡、礼品卡打开 <b data-k="plan.firstUse">从首次连接开始计时</b>。</li>
       <li><b data-k="plan.lines">线路</b>:套用时把用户的线路换成这些;留空 = 套用时不改动用户已有的线路。</li>
       <li data-scope="admin"><b data-k="plan.rules">限速规则</b>:勾上的规则对这个套餐的用户(现有的和以后套用的)都生效。</li>
       <li><b data-k="plan.price">参考价(可选)</b>:只在换套餐用"按价值折算"时用,不给用户看;两个套餐填同样的价就是同价互换。</li>

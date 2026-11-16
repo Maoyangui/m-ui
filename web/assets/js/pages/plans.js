@@ -3,7 +3,7 @@ import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { lineItems, keysFromRefs, linePicker } from '../linepicker.js';
 import { showUsersOfPlan } from './users.js';
-import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, fieldBox } from '../ui.js';
+import { esc, toast, confirm, openModal, registerActions, badge, field, empty, fv, fchk, switchRow } from '../ui.js';
 
 export const title = () => t('plan.title');
 export const subtitle = () => t('plan.subtitle');
@@ -62,22 +62,38 @@ export async function editPlan(id) {
   try { nodesBy = typeof p.lineNodes === 'string' ? JSON.parse(p.lineNodes || '{}') : (p.lineNodes || {}); } catch { nodesBy = {}; }
   const refs = ids.map(id => ({ lineId: id, nodeIds: nodesBy[String(id)] || [] }));
   let picker = null;
-  openModal(id ? t('plan.edit') : t('plan.add'), `
-    <div class="form-grid">
+  // 版式:通栏从上到下 —— 名称与说明一行;「额度与限速」六个数一行(0 = 不限只说一遍,不在每栏下面各写一行);
+  // 两个开关各是一行带说明的开关(周期重置的天数就在那一行里);然后是线路、限速规则。
+  // 以前所有栏挤在一个四列格子里,每栏下面的小字长短不一,勾选框和输入框混排,上下对不齐
+  const ruleRow = r => `<label class="${r.enabled ? '' : 'muted'}"><input type="checkbox" class="plan-rule" value="${r.id}" ${r.allUsers ? 'checked disabled' : ((p.ruleIds || []).includes(r.id) ? 'checked' : '')}> ${esc(r.name)} <span class="muted small">${esc(ruleCond(r))} · ${r.upMbps || '—'}/${r.downMbps || '—'} M${r.enabled ? '' : ' · ' + t('common.disabled')}${r.allUsers ? ' · ' + t('plan.ruleAll') : ''}</span></label>`;
+  openModal(id ? t('plan.edit') : t('plan.add'), `<div class="pl-form">
+    <div class="form-grid pl-head">
       ${field(t('common.name'), `<input id="f-name" value="${esc(p.name || '')}" placeholder="${t('plan.namePh')}">`)}
       ${field(t('plan.desc'), `<input id="f-desc" value="${esc(p.desc || '')}">`)}
-      ${field(t('plan.quota') + ' GB', `<input id="f-vol" type="number" min="0" step="any" value="${p.volumeGb || 0}">`, t('plan.zeroUnlimited'))}
-      ${field(t('plan.days'), `<input id="f-days" type="number" min="0" value="${p.days || 0}">`, t('plan.zeroUnlimited'))}
-      ${field(t('user.f.device'), `<input id="f-device" type="number" min="0" value="${p.deviceLimit || 0}">`)}
-      ${field(t('user.f.up'), `<input id="f-up" type="number" min="0" value="${p.speedUp || 0}">`)}
-      ${field(t('user.f.down'), `<input id="f-down" type="number" min="0" value="${p.speedDown || 0}">`)}
-      ${field(t('user.f.resetDays'), `<input id="f-resetdays" type="number" min="1" value="${p.resetDays || 30}">`)}
-      ${check('f-autoreset', t('user.f.autoReset'), !!p.autoReset, t('plan.autoResetHelp'))}
-      ${check('f-firstuse', t('plan.firstUse'), !!p.firstUse, t('plan.firstUseHelp'))}
-      ${field(t('plan.price'), `<input id="f-price" type="number" min="0" step="any" value="${p.price || 0}">`, t('plan.priceHelp'))}
-      <div class="full">${fieldBox(t('plan.lines'), `<div id="f-lines"></div>`, t('plan.linesHelp'))}</div>
-      ${isReseller() ? '' : `<div class="full">${fieldBox(t('plan.rules'), rules.length ? `<div class="check-list one-col">${rules.map(r => `<label class="${r.enabled ? '' : 'muted'}"><input type="checkbox" class="plan-rule" value="${r.id}" ${r.allUsers ? 'checked disabled' : ((p.ruleIds || []).includes(r.id) ? 'checked' : '')}> ${esc(r.name)} <span class="muted small">${esc(ruleCond(r))} · ${r.upMbps || '—'}/${r.downMbps || '—'} M${r.enabled ? '' : ' · ' + t('common.disabled')}${r.allUsers ? ' · ' + t('plan.ruleAll') : ''}</span></label>`).join('')}</div>` : `<span class="muted small">${t('plan.rulesNone')}</span>`, t('plan.rulesHelp'))}</div>`}
-    </div>`, async () => {
+    </div>
+    <h3 class="form-sec">${t('user.tab.quota')}</h3>
+    <div class="form-grid pl-nums">
+      ${field(t('plan.quota') + ' GB', `<input id="f-vol" type="number" min="0" step="any" value="${p.volumeGb || 0}">`)}
+      ${field(t('plan.days'), `<input id="f-days" type="number" min="0" value="${p.days || 0}">`)}
+      ${field(t('plan.f.device'), `<input id="f-device" type="number" min="0" value="${p.deviceLimit || 0}">`)}
+      ${field(t('plan.f.up'), `<input id="f-up" type="number" min="0" value="${p.speedUp || 0}">`)}
+      ${field(t('plan.f.down'), `<input id="f-down" type="number" min="0" value="${p.speedDown || 0}">`)}
+      ${field(t('plan.price'), `<input id="f-price" type="number" min="0" step="any" value="${p.price || 0}" title="${esc(t('plan.priceHelp'))}">`)}
+    </div>
+    <p class="hint">${esc(t('plan.numsHelp'))}</p>
+    <div class="pl-opts">
+      <div class="sw-row"><div><b>${esc(t('user.f.autoReset'))}</b><small>${esc(t('plan.autoResetHelp'))}</small></div>
+        <span class="pl-every">${esc(t('plan.everyA'))}<input id="f-resetdays" type="number" min="1" value="${p.resetDays || 30}" aria-label="${esc(t('user.f.resetDays'))}">${esc(t('plan.everyB'))}</span>
+        <label class="switch"><input type="checkbox" id="f-autoreset" ${p.autoReset ? 'checked' : ''}><span></span></label></div>
+      ${switchRow('f-firstuse', t('plan.firstUse'), !!p.firstUse, t('plan.firstUseHelp'))}
+    </div>
+    <h3 class="form-sec">${t('plan.lines')}</h3>
+    <div id="f-lines"></div>
+    <p class="hint">${esc(t('plan.linesHelp'))}</p>
+    ${isReseller() ? '' : `<h3 class="form-sec">${t('plan.rules')}</h3>
+      ${rules.length ? `<div class="check-list one-col">${rules.map(ruleRow).join('')}</div>` : `<p class="muted small">${t('plan.rulesNone')}</p>`}
+      <p class="hint">${esc(t('plan.rulesHelp'))}</p>`}
+  </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), desc: fv('f-desc'), volumeGb: Number(fv('f-vol')), days: Number(fv('f-days')),
       deviceLimit: Number(fv('f-device')), speedUp: Number(fv('f-up')), speedDown: Number(fv('f-down')),
@@ -96,6 +112,11 @@ export async function editPlan(id) {
     renderRows();
     toast(id ? t('plan.updated') : t('plan.created'), 'ok');
   }, { size: 'xl' });
+  // 周期重置没开时,天数那一格是灰的
+  const ar = document.getElementById('f-autoreset'), rd = document.getElementById('f-resetdays');
+  const syncReset = () => { rd.disabled = !ar.checked; };
+  ar.addEventListener('change', syncReset);
+  syncReset();
   const nodes = (Array.isArray(state.nodes) && state.nodes.length) ? state.nodes : (Array.isArray(state.status.nodes) ? state.status.nodes : []);
   const items = lineItems(state.lines, nodes, state.status.scope === 'reseller' ? (state.status.grants || []) : null);
   picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refs, items) });

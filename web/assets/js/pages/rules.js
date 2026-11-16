@@ -4,7 +4,7 @@ import { state } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { userPicker, targetText } from '../userpicker.js';
-import { esc, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, fmtTime, fmtRelative, fieldBox } from '../ui.js';
+import { esc, toast, confirm, openModal, openDrawer, registerActions, badge, field, empty, fv, fchk, fmtTime, fmtRelative, fieldBox, switchRow } from '../ui.js';
 
 export const title = () => t('rule.title');
 export const subtitle = () => t('rule.subtitle');
@@ -12,7 +12,7 @@ let resellers = [], plans = [];
 
 export async function render(el) {
   el.innerHTML = `
-    <div class="toolbar"><span class="muted small">${t('rule.hint')}</span><span class="grow"></span><button class="btn primary" data-act="rule.add">${t('rule.add')}</button></div>
+    <div class="toolbar intro"><p class="page-hint">${t('rule.hint')}</p><button class="btn primary" data-act="rule.add">${t('rule.add')}</button></div>
     <div class="table-wrap"><table class="grid">
       <thead><tr><th>${t('common.name')}</th><th>${t('rule.kind')}</th><th>${t('rule.cond')}</th><th>${t('rule.limit')}</th><th>${t('rule.targets')}</th><th>${t('rule.active')}</th><th>${t('common.status')}</th><th></th></tr></thead>
       <tbody id="rules-body"></tbody>
@@ -50,9 +50,8 @@ function renderRows() {
       <td class="num">${limitText(r)}</td>
       <td>${esc(targetText(r, resellers, plans))}<div class="sub-cell">${t('rule.targetCount', { n: r.targetCount })}</div></td>
       <td class="num">${r.activeCount ? `<button class="btn sm" data-act="rule.states" data-id="${r.id}">${badge(r.activeCount, 'warn')} ${t('rule.viewActive')}</button>` : '<span class="muted">0</span>'}</td>
-      <td>${r.enabled ? badge(t('common.enabled'), 'ok') : badge(t('common.disabled'))}</td>
+      <td><label class="switch" title="${r.enabled ? t('common.enabled') : t('common.disabled')}"><input type="checkbox" data-change="rule.toggle" data-id="${r.id}" ${r.enabled ? 'checked' : ''}><span></span></label></td>
       <td class="actions">
-        <button class="btn sm" data-act="rule.toggle" data-id="${r.id}">${r.enabled ? t('rule.disable') : t('rule.enable')}</button>
         <button class="btn sm" data-act="rule.edit" data-id="${r.id}">${t('common.edit')}</button>
         <button class="btn sm danger" data-act="rule.del" data-id="${r.id}">${t('common.delete')}</button>
       </td></tr>`).join('');
@@ -63,32 +62,46 @@ function editRule(id) {
   let kind = r.kind || 'schedule';
   let picker = null;
   const days = new Set(String(r.days || '').split(',').filter(Boolean).map(Number));
-  openModal(id ? t('rule.edit') : t('rule.add'), `
-    <div class="form-grid">
-      <div class="full"><div class="seg" id="f-kind">${['schedule', 'burst'].map(k => `<button type="button" data-kind="${k}" class="${k === kind ? 'active' : ''}">${t('rule.kind.' + k)}</button>`).join('')}</div>
-        <p class="hint" id="f-kind-help"></p></div>
+  // 版式:最上面一行选类型(右边是「启用」开关),下面按一句话的顺序分三段 —— 什么时候限、限到多少、对谁生效。
+  // 星期是七个可点的小块(不是七个勾选框排一排);每段的说明只写一遍,放在那一段下面
+  openModal(id ? t('rule.edit') : t('rule.add'), `<div class="rl-form">
+    <div class="rl-top">
+      <div class="seg" id="f-kind">${['schedule', 'burst'].map(k => `<button type="button" data-kind="${k}" class="${k === kind ? 'active' : ''}">${t('rule.kind.' + k)}</button>`).join('')}</div>
+      <span class="hint" id="f-kind-help"></span>
+      <label class="rl-on"><span>${t('common.enabled')}</span><span class="switch"><input type="checkbox" id="f-enabled" ${r.enabled !== false ? 'checked' : ''}><span></span></span></label>
+    </div>
+    <div class="form-grid cols-2">
       ${field(t('common.name'), `<input id="f-name" value="${esc(r.name || '')}" placeholder="${t('rule.namePh')}">`)}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(r.remark || '')}">`)}
-      <div class="full" id="sec-schedule">
-        <div class="form-grid">
-          <div class="full">${fieldBox(t('rule.days'), `<div class="row" style="flex-wrap:wrap;gap:.6rem">${[1, 2, 3, 4, 5, 6, 7].map(d => `<label style="display:inline-flex;align-items:center;gap:.25rem"><input type="checkbox" class="f-day" value="${d}" ${!days.size || days.has(d) ? 'checked' : ''}> ${t('rule.day.' + d)}</label>`).join('')}</div>`, t('rule.daysHelp'))}</div>
-          ${field(t('rule.start'), `<input id="f-start" type="time" value="${esc(r.start || '19:00')}">`)}
-          ${field(t('rule.end'), `<input id="f-end" type="time" value="${esc(r.end || '23:00')}">`, t('rule.timeHelp'))}
-        </div>
+    </div>
+    <h3 class="form-sec">${t('rule.sec.when')}</h3>
+    <div id="sec-schedule">
+      <div class="rl-when">
+        ${fieldBox(t('rule.days'), `<div class="day-pills">${[1, 2, 3, 4, 5, 6, 7].map(d => `<label class="day-pill"><input type="checkbox" class="f-day" value="${d}" ${!days.size || days.has(d) ? 'checked' : ''}><span>${t('rule.day.' + d)}</span></label>`).join('')}</div>`)}
+        ${field(t('rule.start'), `<input id="f-start" type="time" value="${esc(r.start || '19:00')}">`)}
+        ${field(t('rule.end'), `<input id="f-end" type="time" value="${esc(r.end || '23:00')}">`)}
       </div>
-      <div class="full" id="sec-burst">
-        <div class="form-grid">
-          ${field(t('rule.windowMin'), `<input id="f-window" type="number" min="1" max="1440" value="${r.windowMin || 10}">`)}
-          ${field(t('rule.thresholdGb'), `<input id="f-threshold" type="number" min="0.01" step="0.1" value="${r.thresholdGb || 1}">`)}
-          ${field(t('rule.penaltyMin'), `<input id="f-penalty" type="number" min="1" max="10080" value="${r.penaltyMin || 20}">`, t('rule.burstHelp'))}
-        </div>
+      <p class="hint">${esc(t('rule.daysHelp'))};${esc(t('rule.timeHelp'))}</p>
+    </div>
+    <div id="sec-burst">
+      <div class="form-grid cols-3">
+        ${field(t('rule.windowMin'), `<input id="f-window" type="number" min="1" max="1440" value="${r.windowMin || 10}">`)}
+        ${field(t('rule.thresholdGb'), `<input id="f-threshold" type="number" min="0.01" step="0.1" value="${r.thresholdGb || 1}">`)}
+        ${field(t('rule.penaltyMin'), `<input id="f-penalty" type="number" min="1" max="10080" value="${r.penaltyMin || 20}">`)}
       </div>
-      ${field(t('rule.up'), `<input id="f-up" type="number" min="0" value="${r.upMbps || 0}">`, t('rule.limitHelp'))}
-      ${field(t('rule.down'), `<input id="f-down" type="number" min="0" value="${r.downMbps || 0}">`, t('rule.limitHelp'))}
-      ${check('f-tighten', t('rule.tightenOnly'), r.tightenOnly !== false, t('rule.tightenOnlyHelp'))}
-      ${check('f-enabled', t('common.enabled'), r.enabled !== false)}
-      <div class="full">${fieldBox(t('rule.targets'), `<div id="f-targets"></div>`, t('rule.targetsHelp'))}</div>
-    </div>`, async () => {
+      <p class="hint">${esc(t('rule.burstHelp'))}</p>
+    </div>
+    <h3 class="form-sec">${t('rule.sec.limit')}</h3>
+    <div class="rl-limit">
+      ${field(t('rule.up'), `<input id="f-up" type="number" min="0" value="${r.upMbps || 0}">`)}
+      ${field(t('rule.down'), `<input id="f-down" type="number" min="0" value="${r.downMbps || 0}">`)}
+      ${switchRow('f-tighten', t('rule.tightenOnly'), r.tightenOnly !== false, t('rule.tightenOnlyHelp'))}
+    </div>
+    <p class="hint">${esc(t('rule.limitHelp'))}</p>
+    <h3 class="form-sec">${t('rule.sec.who')}</h3>
+    <div id="f-targets"></div>
+    <p class="hint">${esc(t('rule.targetsHelp'))}</p>
+  </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), kind, enabled: fchk('f-enabled'), tightenOnly: fchk('f-tighten'),
       upMbps: Number(fv('f-up')), downMbps: Number(fv('f-down')),
@@ -132,14 +145,18 @@ registerActions({
   'rule.add': () => editRule(null),
   'rule.edit': id => editRule(Number(id)),
   'rule.states': id => showStates(Number(id)),
-  'rule.toggle': async id => {
+  'rule.toggle': async (id, input) => {
     const r = state.rules.find(x => x.id === Number(id));
     if (!r) return;
+    if (input) input.disabled = true;
     try {
       await put('rules/' + id, { ...r, enabled: !r.enabled });
       await refresh();
       toast(t(r.enabled ? 'rule.disabledOk' : 'rule.enabledOk'), 'ok');
-    } catch (e) { toast(e.message, 'err'); }
+    } catch (e) {
+      toast(e.message, 'err');
+      if (input) { input.checked = !!r.enabled; input.disabled = false; } // 没改成:开关拨回去
+    }
   },
   'rule.del': async id => {
     const r = state.rules.find(x => x.id === Number(id));

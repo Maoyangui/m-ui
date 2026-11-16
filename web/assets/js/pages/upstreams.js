@@ -43,9 +43,11 @@ export async function render(el) {
       <span class="muted small" id="up-count"></span>
       <span class="grow"></span>
       <button class="btn" id="btn-test-all" data-act="up.testAll">${t('common.testAll')}</button>
-      <button class="btn" data-act="up.addGroup">${t('up.addGroup')}</button>
-      <button class="btn" data-act="up.addLine">${t('up.addFromLine')}</button>
-      <button class="btn primary" data-act="up.add">${t('up.add')}</button>
+      <details class="menu"><summary class="btn primary">${t('up.add')}</summary><div class="menu-list">
+        <button data-act="up.add"><b>${esc(t('up.menu.manual'))}</b><span class="muted small" style="display:block">${esc(t('up.menu.manualHelp'))}</span></button>
+        <button data-act="up.addLine"><b>${esc(t('up.addFromLine'))}</b><span class="muted small" style="display:block">${esc(t('up.menu.lineHelp'))}</span></button>
+        <button data-act="up.addGroup"><b>${esc(t('up.addGroup'))}</b><span class="muted small" style="display:block">${esc(t('up.menu.groupHelp'))}</span></button>
+      </div></details>
     </div>
     <div class="table-wrap fill"><table class="grid">
       <thead><tr><th>${t('common.name')}</th><th>${t('common.type')}</th><th>${t('common.server')}</th><th class="c-p3">${t('up.linesUsing')}</th><th>${t('up.latency')}</th><th></th></tr></thead>
