@@ -1512,3 +1512,73 @@ body:has(.savebar:not([hidden])) .toast { bottom: 5.4rem; }
   .sb-row { grid-template-columns: minmax(0, 1fr) auto; }
   .sb-diff { grid-column: 1 / -1; grid-row: 2; }
 }
+
+/* ================= 套餐页:一个套餐一张卡 =================
+   套餐就那么几个,是拿来卖、拿来套用的"商品":名字 → 流量和时长两个大数 → 几项属性 → 几个人在用。不是十列的表格 */
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(20.5rem, 1fr)); gap: 1rem; align-items: stretch; }
+.plan-card { display: flex; flex-direction: column; min-width: 0; padding: 1.15rem 1.2rem 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); transition: box-shadow .15s, border-color .15s; }
+.plan-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+.pc-name { min-width: 0; }
+.pc-name b { display: block; font-size: var(--fs-lg); font-weight: 650; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-name span { display: block; margin-top: .15rem; font-size: var(--fs-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-main { display: grid; grid-template-columns: 1fr 1fr; margin: 1rem 0; border: 1px solid var(--divider); border-radius: var(--radius-md); background: var(--surface-2); }
+.pc-main > div { min-width: 0; padding: .8rem .95rem; }
+.pc-main > div + div { border-left: 1px solid var(--divider); }
+.pc-main b { display: block; font-size: 1.65rem; line-height: 1.15; font-weight: 700; letter-spacing: -.015em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pc-main b small { margin-left: .28rem; font-size: var(--fs-sm); font-weight: 500; letter-spacing: 0; color: var(--muted); }
+.pc-main span { display: block; margin-top: .25rem; font-size: var(--fs-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-attrs { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .5rem 1rem; margin: 0 0 1rem; font-size: var(--fs-sm); }
+.pc-attrs dt { color: var(--muted); white-space: nowrap; }
+.pc-attrs dd { margin: 0; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-card > footer { display: flex; align-items: center; gap: .35rem; margin-top: auto; padding-top: .8rem; border-top: 1px solid var(--divider); font-size: var(--fs-sm); }
+.plan-card > footer .grow { flex: 1; }
+.plan-empty { grid-column: 1 / -1; padding: 3rem 1rem; background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius); }
+
+/* ================= 规则页:一条规则一张横卡,读起来是一句话 ================= */
+.i-clock { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.5'/%3E%3Cpath d='M12 7.5V12l3 2'/%3E%3C/svg%3E"); }
+.i-bolt { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13 3 5 13.5h6L10 21l8-10.5h-6L13 3Z'/%3E%3C/svg%3E"); }
+.rule-list { display: grid; gap: .7rem; }
+.rule-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 1rem 1.1rem; align-items: center; padding: 1rem 1.15rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.rule-card.off { background: var(--surface-2); box-shadow: none; }
+.rule-card.off .rc-main, .rule-card.off .rc-ic { opacity: .55; }
+.rc-ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); font-size: 19px; }
+.rc-ic.burst { background: var(--warn-soft); color: var(--warn-text); }
+.rc-main { min-width: 0; }
+.rc-title { display: flex; align-items: center; flex-wrap: wrap; gap: .3rem .55rem; }
+.rc-title b { font-size: var(--fs-md); font-weight: 600; }
+.rc-sentence { display: flex; align-items: center; flex-wrap: wrap; gap: .3rem .6rem; margin: .4rem 0 .35rem; font-size: var(--fs-base); line-height: 1.5; color: var(--text); }
+.rc-sentence > .i { color: var(--faint); }
+.rc-sentence b { font-weight: 650; font-variant-numeric: tabular-nums; }
+.rc-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem 1rem; font-size: var(--fs-sm); color: var(--muted); }
+.rc-meta b { font-weight: 500; color: var(--text-2); }
+.rc-active { border: 0; background: none; padding: 0; font: inherit; color: var(--warn-text); font-weight: 500; cursor: pointer; }
+.rc-active:hover { text-decoration: underline; }
+.rc-acts { display: flex; align-items: center; gap: .35rem; }
+.rc-acts .switch { margin-right: .5rem; }
+@media (max-width: 700px) {
+  .rule-card { grid-template-columns: auto minmax(0, 1fr); }
+  .rc-acts { grid-column: 1 / -1; justify-content: flex-end; padding-top: .7rem; border-top: 1px solid var(--divider); }
+  .rc-acts .switch { margin-right: auto; }
+}
+
+/* ================= 上游页:健康状态一格 =================
+   每台服务器一个状态点(绿 = 通,红 = 不通,黄 = 数据过期,灰 = 还没测),后面一句结论;逐台明细点开看 */
+.hsum { display: flex; align-items: center; flex-wrap: wrap; gap: .3rem .55rem; min-height: 24px; }
+.hdots { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; max-width: 13rem; }
+.hd { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); }
+.hd.ok { background: var(--ok); }
+.hd.bad { background: var(--danger); }
+.hd.warn { background: var(--warn); }
+.hd.busy { background: var(--primary); animation: hd-pulse 1s ease-in-out infinite; }
+@keyframes hd-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .hd.busy { animation: none; } }
+.hsum > b { font-size: var(--fs-sm); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hsum > b.ok { color: var(--ok-text); }
+.hsum > b.bad { color: var(--danger-text); }
+.hsum > b.warn { color: var(--warn-text); }
+.herr { max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hdetail { display: grid; gap: .3rem; margin-top: .5rem; padding: .55rem .7rem; background: var(--surface-2); border: 1px solid var(--divider); border-radius: var(--radius-sm); font-size: var(--fs-xs); }
+.hrow { display: grid; grid-template-columns: auto minmax(4rem, 9rem) 4.6rem minmax(0, 1fr); gap: .1rem .6rem; align-items: center; }
+.hrow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hrow b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.hrow .err { grid-column: 2 / -1; color: var(--danger-text); overflow-wrap: anywhere; line-height: 1.45; }

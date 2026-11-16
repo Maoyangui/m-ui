@@ -69,51 +69,42 @@ export async function render(el) {
 // 上游通不通只在真正跑这条线路的机器上量才算数,所以这里显示的是各机各自的结果。
 function resultHTML(id) {
   const r = results[id];
-  if (!r) return badge(t('up.untested'));
-  if (r.testing) return badge(t('up.testing'));
-  if (r.unused) return `${badge(t('up.unused'))}<div class="sub-cell muted">${t('up.unusedHint')}</div>`;
+  const idle = (label, cls = '') => `<div class="hsum"><span class="hdots"><i class="hd${cls}"></i></span><span class="muted">${esc(label)}</span></div>`;
+  if (!r) return idle(t('up.untested'));
+  if (r.testing) return idle(t('up.testing'), ' busy');
+  if (r.unused) return idle(t('up.unused')) + `<div class="sub-cell muted">${t('up.unusedHint')}</div>`;
   const servers = r.servers || [];
-  if (!servers.length) return badge(t('up.untested'));
-  // 只有一台服务器的面板才省掉名字;多台时哪怕只有一台在测(线路只部署在它上面),也要写明是哪台测的
-  const one = servers.length === 1 && ((state.status && state.status.nodes) || 0) <= 1;
-  const chips = servers.map(sv => {
-    const who = one ? '' : `<span class="muted small">${esc(sv.name)}</span> `;
-    if (sv.state === 'ok') return `<span class="nowrap">${who}${badge(sv.delayMs + ' ms', 'ok')}${sv.method === 'tcp' ? ' ' + badge('TCP') : ''}</span>`;
-    if (sv.state === 'fail') return `<span class="nowrap">${who}${badge(t('up.fault'), 'danger')}</span>`;
-    if (sv.state === 'stale') return `<span class="nowrap">${who}${badge(t('up.stale'), 'warn')}</span>`;
-    return `<span class="nowrap">${who}${badge(t('up.pending'))}</span>`;
-  }).join(' <span class="muted">·</span> ');
+  if (!servers.length) return idle(t('up.untested'));
+  // 这一格要回答的是「通不通、多快」:每台服务器一个状态点(悬停看是哪台、多少毫秒或什么错),后面跟一句结论;
+  // 要看逐台明细点右边的箭头。以前是「服务器名 + 故障」的标签一个接一个排开,三台就占满一格
+  const stateText = sv => (sv.state === 'ok' ? sv.delayMs + ' ms' : sv.state === 'fail' ? t('up.fault') : sv.state === 'stale' ? t('up.stale') : t('up.pending'));
+  const cls = sv => (sv.state === 'ok' ? ' ok' : sv.state === 'fail' ? ' bad' : sv.state === 'stale' ? ' warn' : '');
+  const dots = servers.slice(0, 16).map(sv => `<i class="hd${cls(sv)}" title="${esc(sv.name + ' · ' + stateText(sv) + (sv.error ? ' · ' + trErr(sv.error) : ''))}"></i>`).join('')
+    + (servers.length > 16 ? `<span class="muted small">+${servers.length - 16}</span>` : '');
+  const ok = servers.filter(sv => sv.state === 'ok'), fail = servers.filter(sv => sv.state === 'fail'), stale = servers.filter(sv => sv.state === 'stale');
+  const delays = ok.map(sv => sv.delayMs).sort((a, b) => a - b);
+  let kind = '', text = t('up.pending');
+  if (ok.length === servers.length) { kind = 'ok'; text = delays.length === 1 || delays[0] === delays[delays.length - 1] ? delays[0] + ' ms' : t('up.h.allOk', { a: delays[0], b: delays[delays.length - 1] }); }
+  else if (!ok.length && fail.length) { kind = 'bad'; text = servers.length === 1 ? t('up.fault') : t('up.h.allFail', { n: servers.length }); }
+  else if (fail.length || stale.length) { kind = fail.length ? 'warn' : 'warn'; text = t('up.okOf', { n: ok.length, m: servers.length }) + (delays.length ? ' · ' + delays[0] + ' ms' : ''); }
+  const tcp = ok.length && ok.every(sv => sv.method === 'tcp') ? ' ' + badge('TCP') : '';
   const via = viaLine(servers);
-  const bad = servers.filter(sv => sv.error); // 折叠时预览第一条真正带报错的,“数据过期”没有报错文字
-  // 服务器多(>4 台)时一行放不下每台的延迟:折叠时写"n/m 台正常 · 中位延迟",故障 / 过期的服务器先列出来(多了折成 +N),展开看逐台
-  const many = servers.length > 4;
-  // 展开只在有话可说时才给:全部正常的话,折叠这一行已经把每台的延迟写全了,再点开只是重复一遍。
-  const worth = many || servers.some(sv => sv.state !== 'ok' || sv.error);
-  const more = worth ? `<button class="btn xs ghost" data-act="up.expand" data-id="${id}" title="${t('up.detail')}" aria-expanded="${expanded.has(id)}"><i class="i i-chev${expanded.has(id) ? ' open' : ''}"></i></button>` : '';
+  const bad = servers.filter(sv => sv.error); // 折叠时预览第一条真正带报错的,"数据过期"没有报错文字
+  // 展开只在有话可说时才给:只有一台且正常的话,这一行已经说完了
+  const worth = servers.length > 1 || servers.some(sv => sv.state !== 'ok' || sv.error);
+  const open = expanded.has(id);
+  const more = worth ? `<button class="btn xs ghost" data-act="up.expand" data-id="${id}" title="${t('up.detail')}" aria-expanded="${open}"><i class="i i-chev${open ? ' open' : ''}"></i></button>` : '';
   let detail = '';
-  if (worth && expanded.has(id)) {
-    const label = { ok: sv => sv.delayMs + ' ms', fail: () => t('up.fault'), stale: () => t('up.stale') };
-    detail = '<div class="sub-cell">' + servers.map(sv => {
-      const st = (label[sv.state] || (() => t('up.pending')))(sv);
-      const when = sv.checkedAt ? ` · ${t('up.checkedAt')} ${fmtTime(sv.checkedAt)}` : '';
-      const now = String(sv.method || '').startsWith('via:') ? ` · ${esc(t('up.groupNow', { name: sv.method.slice(4) }))}` : '';
-      const err = sv.error ? ` · <span class="danger">${esc(trErr(sv.error)).slice(0, 160)}</span>` : '';
-      return `<div>${esc(sv.name)}${sv.isLocal ? ' <span class="muted">(' + t('node.local') + ')</span>' : ''} · ${esc(st)}${now}${when}${err}</div>`;
+  if (worth && open) {
+    detail = '<div class="hdetail">' + servers.map(sv => {
+      const now = String(sv.method || '').startsWith('via:') ? esc(t('up.groupNow', { name: sv.method.slice(4) })) : '';
+      const when = sv.checkedAt ? `${t('up.checkedAt')} ${fmtTime(sv.checkedAt)}` : '';
+      return `<div class="hrow"><i class="hd${cls(sv)}"></i><span class="nm" title="${esc(sv.name)}">${esc(sv.name)}${sv.isLocal ? ` <span class="muted">${t('node.local')}</span>` : ''}</span><b>${esc(stateText(sv))}</b><span class="muted">${[now, esc(when)].filter(Boolean).join(' · ')}</span>${sv.error ? `<span class="err">${esc(trErr(sv.error)).slice(0, 200)}</span>` : ''}</div>`;
     }).join('') + '</div>';
   } else if (bad.length) {
-    detail = `<div class="sub-cell" title="${esc(trErr(bad[0].error))}">${esc(trErr(bad[0].error)).slice(0, 60)}</div>`;
+    detail = `<div class="sub-cell herr" title="${esc(trErr(bad[0].error))}">${esc(trErr(bad[0].error)).slice(0, 70)}</div>`;
   }
-  if (many && !expanded.has(id)) {
-    const okd = servers.filter(sv => sv.state === 'ok').map(sv => sv.delayMs).sort((a, b) => a - b);
-    const median = okd.length ? okd[Math.floor((okd.length - 1) / 2)] : 0;
-    const trouble = servers.filter(sv => sv.state === 'fail' || sv.state === 'stale');
-    const tags = trouble.sort((a, b) => (a.state === 'fail' ? 0 : 1) - (b.state === 'fail' ? 0 : 1))
-      .map(sv => `<span class="badge ${sv.state === 'fail' ? 'danger' : 'warn'}" title="${esc(trErr(sv.error || ''))}">${esc(sv.name)} · ${esc(sv.state === 'fail' ? t('up.fault') : t('up.stale'))}</span>`);
-    return `<div class="up-sum">${badge(t('up.okOf', { n: okd.length, m: servers.length }), okd.length === servers.length ? 'ok' : okd.length ? 'warn' : 'danger')}${median ? ` <span class="muted small">${esc(t('up.median', { ms: median }))}</span>` : ''}${more}</div>`
-      + via
-      + (tags.length ? `<div class="sub-cell">${chipList(tags, { key: 'up-bad-' + id, max: 6 })}</div>` : '') + (bad.length ? `<div class="sub-cell" title="${esc(trErr(bad[0].error))}">${esc(trErr(bad[0].error)).slice(0, 60)}</div>` : '');
-  }
-  return `<div class="row" style="gap:.35rem;align-items:center;flex-wrap:wrap">${chips}${more}</div>${expanded.has(id) ? '' : via}${detail}`;
+  return `<div class="hsum"><span class="hdots">${dots}</span><b class="${kind}">${esc(text)}</b>${tcp}${more}</div>${open ? '' : via}${detail}`;
 }
 
 // viaLine 上游组在各服务器上此刻走的成员,合成一行:都走同一条就只写一次「现在走 X」(以前每台后面各写一遍,

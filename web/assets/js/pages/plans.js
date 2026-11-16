@@ -8,45 +8,62 @@ import { esc, toast, confirm, openModal, registerActions, badge, field, empty, f
 export const title = () => t('plan.title');
 export const subtitle = () => t('plan.subtitle');
 
+// 套餐页:一个套餐一张卡。套餐就那么几个,是拿来卖、拿来套用的"商品",不是一行行的记录 ——
+// 以前是一张十列的表,大半格子是「∞」「不改动」,一眼看不出每个套餐到底给多少。
+// 卡片上:名字和说明 → 流量、时长两个大数 → 设备 / 限速 / 重置 / 线路 / 规则几项 → 几个人在用、编辑、删除。
 export async function render(el) {
   el.innerHTML = `
-    <div class="toolbar"><span class="grow"></span><button class="btn primary" data-act="plan.add">${t('plan.add')}</button></div>
-    <div class="table-wrap"><table class="grid">
-      <thead><tr><th>${t('common.name')}</th><th>${t('plan.quota')}</th><th>${t('plan.days')}</th><th>${t('user.devices')}</th><th class="c-p2">${t('user.speed')}</th><th class="c-p3">${t('plan.reset')}</th><th>${t('plan.lines')}</th><th>${t('plan.users')}</th>${isReseller() ? '' : `<th class="c-p3">${t('plan.rules')}</th>`}<th></th></tr></thead>
-      <tbody id="plans-body"></tbody>
-    </table></div>`;
+    <div class="toolbar"><span class="muted small" id="plans-count"></span><span class="grow"></span><button class="btn primary" data-act="plan.add"><i class="i i-plus"></i>${t('plan.add')}</button></div>
+    <div class="plan-grid" id="plans-body"></div>`;
   if (!isReseller()) rules = await get('rules').catch(() => []) || [];
   renderRows();
 }
 
 let rules = []; // 主面板的限速规则(套餐可以选跟哪几条)
 
-const ruleChips = p => {
-  const list = (p.ruleIds || []).map(id => rules.find(r => r.id === id)).filter(Boolean);
-  return list.length ? list.map(r => badge(r.name, r.enabled ? 'primary' : '')).join(' ') : '<span class="muted">—</span>';
-};
+const ruleChips = p => (p.ruleIds || []).map(id => rules.find(r => r.id === id)).filter(Boolean).map(r => badge(r.name, r.enabled ? 'primary' : '')).join(' ');
+const planLineIds = p => (Array.isArray(p.lineIds) ? p.lineIds : (p.lineIds ? JSON.parse(p.lineIds) : []));
+
+function planCard(p) {
+  const ids = planLineIds(p);
+  const names = ids.map(id => (state.lines.find(l => l.id === id) || {}).name).filter(Boolean);
+  const big = (n, unit) => (n ? `${n}<small>${esc(unit)}</small>` : esc(t('common.unlimited')));
+  const speed = (p.speedUp || p.speedDown) ? `↑ ${p.speedUp || '∞'} · ↓ ${p.speedDown || '∞'} Mbps` : t('common.unlimited');
+  const row = (k, v) => `<dt>${esc(k)}</dt><dd>${v}</dd>`;
+  const chips = ruleChips(p);
+  return `<article class="plan-card">
+    <header><div class="pc-name"><b title="${esc(p.name)}">${esc(p.name)}</b>${p.desc ? `<span title="${esc(p.desc)}">${esc(p.desc)}</span>` : ''}</div></header>
+    <div class="pc-main">
+      <div><b>${big(p.volumeGb, 'GB')}</b><span>${esc(t('plan.quota'))}</span></div>
+      <div><b>${big(p.days, t('common.day'))}</b><span>${esc(t('plan.c.days'))}${p.days && p.firstUse ? ' · ' + esc(t('plan.firstUseShort')) : ''}</span></div>
+    </div>
+    <dl class="pc-attrs">
+      ${row(t('plan.f.device'), p.deviceLimit ? esc(t('plan.c.devN', { n: p.deviceLimit })) : esc(t('common.unlimited')))}
+      ${row(t('user.speed'), esc(speed))}
+      ${row(t('plan.c.reset'), esc(p.autoReset ? t('plan.c.resetN', { n: p.resetDays }) : t('plan.c.noReset')))}
+      ${row(t('plan.lines'), names.length ? `<span title="${esc(names.join('\n'))}">${esc(names.slice(0, 2).join('、'))}${names.length > 2 ? ` <span class="muted">+${names.length - 2}</span>` : ''}</span>` : `<span class="muted">${esc(t('plan.keepLines'))}</span>`)}
+      ${isReseller() || !chips ? '' : row(t('plan.rules'), chips)}
+      ${p.price > 0 ? row(t('plan.c.price'), esc(String(p.price))) : ''}
+    </dl>
+    <footer>
+      ${p.userCount ? `<a href="#" data-act="plan.users" data-id="${p.id}">${esc(t('plan.c.usersN', { n: p.userCount }))}</a>` : `<span class="muted">${esc(t('plan.c.noUsers'))}</span>`}
+      <span class="grow"></span>
+      <button class="btn sm" data-act="plan.edit" data-id="${p.id}">${t('common.edit')}</button>
+      <button class="btn sm danger" data-act="plan.del" data-id="${p.id}">${t('common.delete')}</button>
+    </footer>
+  </article>`;
+}
 
 function renderRows() {
   const body = document.getElementById('plans-body');
   if (!body) return;
-  if (!state.plans.length) { body.innerHTML = `<tr><td colspan="9">${empty(t('plan.empty'))}</td></tr>`; return; }
-  body.innerHTML = state.plans.map(p => {
-    const lines = Array.isArray(p.lineIds) ? p.lineIds.length : (p.lineIds ? JSON.parse(p.lineIds).length : 0);
-    return `<tr>
-      <td class="primary-cell">${esc(p.name)}${p.desc ? `<div class="sub-cell">${esc(p.desc)}</div>` : ''}${p.price > 0 ? `<div class="sub-cell">${esc(t('plan.priceShort', { n: p.price }))}</div>` : ''}</td>
-      <td class="num">${p.volumeGb ? p.volumeGb + ' GB' : t('common.unlimited')}</td>
-      <td class="num">${p.days ? p.days + ' ' + t('common.day') : t('common.unlimited')}${p.days && p.firstUse ? `<div class="sub-cell">${t('plan.firstUseShort')}</div>` : ''}</td>
-      <td class="num">${p.deviceLimit || '∞'}</td>
-      <td class="num c-p2">${(p.speedUp || p.speedDown) ? `${p.speedUp || '∞'}/${p.speedDown || '∞'} M` : '∞'}</td>
-      <td class="c-p3">${p.autoReset ? badge(p.resetDays + ' ' + t('common.day'), 'primary') : badge(t('common.no'))}</td>
-      <td class="num">${lines || t('plan.keepLines')}</td>
-      <td class="num">${p.userCount ? `<a href="#" data-act="plan.users" data-id="${p.id}">${p.userCount}</a>` : '<span class="muted">0</span>'}</td>
-      ${isReseller() ? '' : `<td class="c-p3">${ruleChips(p)}</td>`}
-      <td class="actions">
-        <button class="btn sm" data-act="plan.edit" data-id="${p.id}">${t('common.edit')}</button>
-        <button class="btn sm danger" data-act="plan.del" data-id="${p.id}">${t('common.delete')}</button>
-      </td></tr>`;
-  }).join('');
+  const cnt = document.getElementById('plans-count');
+  if (cnt) cnt.textContent = state.plans.length ? t('plan.c.count', { n: state.plans.length }) : '';
+  if (!state.plans.length) {
+    body.innerHTML = `<div class="empty-guide plan-empty"><p>${esc(t('plan.empty'))}</p><button class="btn primary" data-act="plan.add">${t('plan.add')}</button></div>`;
+    return;
+  }
+  body.innerHTML = state.plans.map(planCard).join('');
 }
 
 // 规则的条件写成一句话,勾选的时候看得出是什么规则

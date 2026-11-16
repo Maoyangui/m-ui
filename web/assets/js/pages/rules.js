@@ -10,13 +10,12 @@ export const title = () => t('rule.title');
 export const subtitle = () => t('rule.subtitle');
 let resellers = [], plans = [];
 
+// 规则页:一条规则一张横卡,读起来是一句话 ——「什么时候 → 限到多少」,下面一行写对谁、现在覆盖几人、有几人正被限着;右边开关和操作。
+// 以前是八列的表格:条件、限速、目标各占一格,要横着把几格拼起来才知道这条规则在干什么。
 export async function render(el) {
   el.innerHTML = `
-    <div class="toolbar intro"><p class="page-hint">${t('rule.hint')}</p><button class="btn primary" data-act="rule.add">${t('rule.add')}</button></div>
-    <div class="table-wrap"><table class="grid">
-      <thead><tr><th>${t('common.name')}</th><th>${t('rule.kind')}</th><th>${t('rule.cond')}</th><th>${t('rule.limit')}</th><th>${t('rule.targets')}</th><th>${t('rule.active')}</th><th>${t('common.status')}</th><th></th></tr></thead>
-      <tbody id="rules-body"></tbody>
-    </table></div>`;
+    <div class="toolbar intro"><p class="page-hint">${t('rule.hint')}</p><button class="btn primary" data-act="rule.add"><i class="i i-plus"></i>${t('rule.add')}</button></div>
+    <div class="rule-list" id="rules-body"></div>`;
   await refresh();
 }
 
@@ -29,32 +28,54 @@ async function refresh() {
 }
 export async function tick() { await refresh(); }
 
+// 星期写成人话:每天;连着三天以上写「周一至周五」;零散的几天才一个个列
 const daysText = days => {
-  const list = String(days || '').split(',').filter(Boolean);
+  const list = String(days || '').split(',').filter(Boolean).map(Number).sort((a, b) => a - b);
   if (!list.length || list.length === 7) return t('rule.everyDay');
+  const run = list.every((d, i) => i === 0 || d === list[i - 1] + 1);
+  if (run && list.length >= 3) return t('rule.weekRange', { a: t('rule.day.' + list[0]), b: t('rule.day.' + list[list.length - 1]) });
   return t('rule.weekPrefix') + list.map(d => t('rule.day.' + d)).join('、');
 };
 const condText = r => r.kind === 'burst'
   ? t('rule.condBurst', { win: r.windowMin, gb: r.thresholdGb, pen: r.penaltyMin })
   : `${daysText(r.days)} ${r.start} – ${r.end}`;
-const limitText = r => `${r.upMbps || '—'} / ${r.downMbps || '—'} M${r.tightenOnly ? ` <span class="muted small">· ${t('rule.tightenOnlyShort')}</span>` : ''}`;
+// 限到多少,写成半句话;两个方向都没填(都不改)的写一个横线
+function limitText(r) {
+  const up = Number(r.upMbps) || 0, down = Number(r.downMbps) || 0;
+  if (up && down) return t('rule.s.both', { up: `<b>${up}</b>`, down: `<b>${down}</b>` });
+  if (down) return t('rule.s.down', { n: `<b>${down}</b>` });
+  if (up) return t('rule.s.up', { n: `<b>${up}</b>` });
+  return '—';
+}
+
+function ruleCard(r) {
+  const burst = r.kind === 'burst';
+  const when = burst ? t('rule.s.burstWhen', { win: r.windowMin, gb: r.thresholdGb }) : `${daysText(r.days)} ${r.start} – ${r.end}`;
+  return `<article class="rule-card${r.enabled ? '' : ' off'}">
+    <span class="rc-ic${burst ? ' burst' : ''}" title="${esc(t('rule.kind.' + r.kind))}"><i class="i ${burst ? 'i-bolt' : 'i-clock'}"></i></span>
+    <div class="rc-main">
+      <div class="rc-title"><b>${esc(r.name)}</b>${badge(t('rule.kind.' + r.kind), burst ? 'warn' : 'primary')}${r.remark ? `<span class="muted small">${esc(r.remark)}</span>` : ''}</div>
+      <p class="rc-sentence"><span>${esc(when)}</span><i class="i i-arrow"></i><span>${limitText(r)}${burst ? esc(t('rule.s.burstFor', { pen: r.penaltyMin })) : ''}</span>${r.tightenOnly ? `<span class="muted small">${esc(t('rule.tightenOnlyShort'))}</span>` : ''}</p>
+      <div class="rc-meta"><span>${esc(t('rule.s.to'))} <b>${esc(targetText(r, resellers, plans))}</b></span><span>${esc(t('rule.targetCount', { n: r.targetCount }))}</span>${r.activeCount ? `<button class="link rc-active" data-act="rule.states" data-id="${r.id}">${esc(t('rule.s.activeN', { n: r.activeCount }))}</button>` : ''}</div>
+    </div>
+    <div class="rc-acts">
+      <label class="switch" title="${r.enabled ? t('common.enabled') : t('common.disabled')}"><input type="checkbox" data-change="rule.toggle" data-id="${r.id}" ${r.enabled ? 'checked' : ''}><span></span></label>
+      <button class="btn sm" data-act="rule.edit" data-id="${r.id}">${t('common.edit')}</button>
+      <button class="btn sm danger" data-act="rule.del" data-id="${r.id}">${t('common.delete')}</button>
+    </div>
+  </article>`;
+}
 
 function renderRows() {
   const body = document.getElementById('rules-body');
   if (!body) return;
-  if (!state.rules.length) { body.innerHTML = `<tr><td colspan="8">${empty(t('rule.empty'))}</td></tr>`; return; }
-  body.innerHTML = state.rules.map(r => `<tr class="${r.enabled ? '' : 'muted'}">
-      <td class="primary-cell">${esc(r.name)}${r.remark ? `<div class="sub-cell">${esc(r.remark)}</div>` : ''}</td>
-      <td>${badge(t('rule.kind.' + r.kind), r.kind === 'burst' ? 'warn' : 'primary')}</td>
-      <td>${esc(condText(r))}</td>
-      <td class="num">${limitText(r)}</td>
-      <td>${esc(targetText(r, resellers, plans))}<div class="sub-cell">${t('rule.targetCount', { n: r.targetCount })}</div></td>
-      <td class="num">${r.activeCount ? `<button class="btn sm" data-act="rule.states" data-id="${r.id}">${badge(r.activeCount, 'warn')} ${t('rule.viewActive')}</button>` : '<span class="muted">0</span>'}</td>
-      <td><label class="switch" title="${r.enabled ? t('common.enabled') : t('common.disabled')}"><input type="checkbox" data-change="rule.toggle" data-id="${r.id}" ${r.enabled ? 'checked' : ''}><span></span></label></td>
-      <td class="actions">
-        <button class="btn sm" data-act="rule.edit" data-id="${r.id}">${t('common.edit')}</button>
-        <button class="btn sm danger" data-act="rule.del" data-id="${r.id}">${t('common.delete')}</button>
-      </td></tr>`).join('');
+  if (!state.rules.length) {
+    body.innerHTML = `<div class="empty-guide plan-empty"><p>${esc(t('rule.empty'))}</p><button class="btn primary" data-act="rule.add">${t('rule.add')}</button></div>`;
+    return;
+  }
+  // 5 秒一轮刷新:内容没变就不动 DOM(开关正拨到一半、鼠标正悬在按钮上的时候整块重画会闪)
+  const html = state.rules.map(ruleCard).join('');
+  if (body.__html !== html) { body.innerHTML = html; body.__html = html; }
 }
 
 function editRule(id) {
