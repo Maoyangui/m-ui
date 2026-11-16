@@ -202,7 +202,7 @@ function panelHTML(id, c) {
         <button class="btn sm danger" data-act="ext.testStop" data-id="${id}" id="ext-stop-${id}" ${jobs[id] && jobs[id].job ? '' : 'hidden'}>${t('ext.testStop')}</button>
       </div>
     </div>
-    <div class="table-wrap fill ext-wrap" id="ext-wrap-${id}" style="--fill-reserve:9rem"></div>
+    <div class="table-wrap fill ext-wrap" id="ext-wrap-${id}" style="--fill-reserve:5rem"></div>
     <div class="ext-more" id="ext-more-${id}" hidden></div>
     <p class="hint small muted">${t('ext.testHint')}</p>`;
 }

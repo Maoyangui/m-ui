@@ -356,6 +356,29 @@ if (!sn1.open && /×2\.5/.test(sn1.text) && /40/.test(sn1.text)) pass('节点页
 await page.locator('#sn-only [data-id="own"]').click(); await page.waitForTimeout(300);
 const snOwn = await page.evaluate(() => ({ rows: document.querySelectorAll('#sn-body tr:not(.grp-row)').length, follow: document.querySelectorAll('#sn-body .sn-follow').length }));
 if (snOwn.rows >= 2 && snOwn.rows < sn0.rows) pass(`节点页:「单独设置的」只留下设过的 ${snOwn.rows} 个`); else fail(`节点页筛选不对:${JSON.stringify(snOwn)}`);
+// 节点页的筛选(线路 / 服务器 / 类型)和勾选批量:筛出一台服务器上的节点 → 全选 → 批量设倍率 → 这些行都变
+await page.locator('#sn-only [data-id="all"]').click(); await page.waitForTimeout(200);
+await page.locator('#sn-f-server').selectOption({ index: 2 }); await page.waitForTimeout(300);
+const snSrv = await page.locator('#sn-body tr:not(.grp-row)').count();
+await page.locator('#sn-f-kind').selectOption('relay'); await page.waitForTimeout(300);
+const snRelay = await page.evaluate(() => ({ rows: document.querySelectorAll('#sn-body tr:not(.grp-row)').length, badges: document.querySelectorAll('#sn-body .sn-node .badge').length }));
+if (snSrv >= 1 && snSrv < sn0.rows && snRelay.rows === snRelay.badges) pass(`节点页:按服务器筛出 ${snSrv} 个,再按类型只留中转的 ${snRelay.rows} 个`);
+else fail(`节点页按服务器 / 类型筛选不对:服务器 ${snSrv} 个,中转 ${JSON.stringify(snRelay)}`);
+await page.locator('#sn-f-kind').selectOption(''); await page.waitForTimeout(300);
+await page.locator('#sn-sel-all').click(); await page.waitForTimeout(300);
+const snBar = await page.evaluate(() => ({ shown: !document.getElementById('sn-batch-bar').hidden, text: document.getElementById('sn-batch-count').textContent, checked: document.querySelectorAll('#sn-body tr:not(.grp-row) input.sel:checked').length }));
+await page.locator('[data-act="sn.batch"][data-id="ratio"]').click(); await page.waitForTimeout(400);
+await page.locator('#sn-b-ratio').fill('4'); await page.locator('#modal-save').click(); await page.waitForTimeout(700);
+const snAfter = await page.evaluate(() => ({ rows: document.querySelectorAll('#sn-body tr:not(.grp-row)').length, x4: [...document.querySelectorAll('#sn-body .sn-own')].filter(b => b.textContent.trim() === '×4').length }));
+if (snBar.shown && snBar.checked === snSrv && snAfter.x4 === snSrv) pass(`节点页:筛选后全选 ${snSrv} 个,批量设倍率,这些行都变成 ×4`);
+else fail(`节点页批量设倍率不对:${JSON.stringify({ snBar, snAfter, snSrv })}`);
+await page.locator('[data-act="sn.batch"][data-id="off"]').click(); await page.waitForTimeout(600);
+const snOffAll = await page.locator('#sn-body .switch input:checked').count();
+await page.locator('[data-act="sn.clearSel"]').click(); await page.waitForTimeout(300);
+const snCleared = await page.evaluate(() => document.getElementById('sn-batch-bar').hidden);
+await page.locator('[data-act="sn.clearFilter"]').click(); await page.waitForTimeout(400);
+const snAll = await page.locator('#sn-body tr:not(.grp-row)').count();
+if (snOffAll === 0 && snCleared && snAll === sn0.rows) pass('节点页:批量「不输出」、取消选择、清除筛选都生效'); else fail(`节点页批量 / 清除不对:${JSON.stringify({ snOffAll, snCleared, snAll })}`);
 // 概况「24 小时流量」那一格点开是流量明细:三栏排行,换范围后还在
 await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(900);
 await page.locator('[data-act="dash.traffic"]').first().click(); await page.waitForTimeout(700);

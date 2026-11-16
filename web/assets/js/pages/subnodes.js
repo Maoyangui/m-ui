@@ -4,22 +4,38 @@
 // 版式:一张表,按线路分组,一行一个节点。平时只是看:倍率一格写着现在实际生效的倍率和它是「跟随服务器」还是单独设的,
 // 一眼分得出;没设的限速、容量都是淡色的「不限」。常用的「输出到订阅」开关直接摆在行里,点了就存;
 // 其余几项点「设置」在弹框里改(不在表里摆一排输入框:十几个节点就是几十个框,看着累,也容易改错行)。
+//
+// 线路一多光靠搜索找不过来(用户 11-17:「节点页能否增加一些必要筛选」):工具栏可以按线路、按服务器、按类型(直连 / 中转)筛,
+// 再加「单独设置的 / 没输出的」。要一次改很多个就勾选(用户同一天:「节点这个要支持勾选批量操作」):行首勾一个、
+// 分组行勾整条线路、表头勾现在列出的全部 —— 先筛再全选,就是「某台服务器上的全部节点」这类批量。
 import { state } from '../app.js';
-import { put } from '../api.js';
+import { get, put } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, openModal, registerActions, badge, field, empty, fv, fchk, matches, debounce, setHTML, switchRow } from '../ui.js';
+import { esc, toast, confirm, openModal, registerActions, badge, field, empty, fv, fchk, matches, debounce, setHTML, switchRow } from '../ui.js';
 
 export const title = () => t('sn.title');
 export const subtitle = () => t('sn.subtitle');
 
 let query = '';
 let only = 'all'; // all / own(单独设置过的)/ off(没输出到订阅的)
+let fLine = 0;    // 只看这条线路(0 = 全部)
+let fServer = 0;  // 只看和这台服务器有关的:它上面的直连,经它中转的、转到它的入口(0 = 全部)
+let fKind = '';   // direct / relay('' = 全部)
+const selected = new Set(); // 勾选的节点:"线路 id:节点键"
+let online = {};            // 各节点此刻在线的用户数,键同上(GET lines/nodes/online;主机汇总本机和各副机报来的)
+
+async function loadOnline() {
+  try { online = (await get('lines/nodes/online')).online || {}; } catch { /* 拿不到就先不显示人数,不为它报错 */ }
+}
+// 定时刷新(app.js 每几秒调一次):只更新在线人数
+export async function tick() { await loadOnline(); renderRows(); }
 
 const parseJ = v => { try { return typeof v === 'string' ? JSON.parse(v) : (v || null); } catch { return null; } };
 const servers = () => state.nodes || [];
 const hostOf = n => (n ? (n.domain || n.addr || n.publicIp || n.publicIp6 || '') : '');
 const fmtRatio = r => String(Math.round(r * 10000) / 10000);
 const isOwn = o => !!o && (o.ratio > 0 || o.speed > 0 || o.userSpeed > 0 || o.cap > 0);
+const idOf = (l, nd) => `${l.id}:${nd.key}`;
 
 // nodesOf 一条线路的全部节点:部署到的每台服务器一个直连,每个中转入口一个(和后端 lineNodeKeys 同一口径)。
 export function nodesOf(l) {
@@ -43,20 +59,57 @@ export function nodesOf(l) {
 }
 // 没单独设倍率时跟的是哪台服务器的倍率:直连是所在的那台,中转入口是出口那台(流量在出口上记)
 const serverRatio = nd => (nd.exit && nd.exit.ratio > 0 ? nd.exit.ratio : 1);
+const onServer = (nd, id) => (nd.exit && nd.exit.id === id) || (nd.via && nd.via.id === id);
+const filtered = () => !!(query.trim() || only !== 'all' || fLine || fServer || fKind);
+
+// visible 现在列出来的:每条线路 { 线路, 它的全部节点, 其中过了搜索和筛选的 }
+function visible() {
+  return state.lines.filter(l => !fLine || l.id === fLine).map(l => {
+    const all = nodesOf(l);
+    const list = all.filter(nd => matches(query, l.name, nd.name, nd.host, nd.exit && nd.exit.name)
+      && (only === 'all' || (only === 'own' ? isOwn(nd.opt) : !!nd.opt.hidden))
+      && (!fServer || onServer(nd, fServer)) && (!fKind || nd.kind === fKind));
+    return { l, all, list };
+  });
+}
 
 export async function render(el) {
+  // 筛选记着的线路 / 服务器已经删了:回到「全部」
+  if (fLine && !state.lines.some(l => l.id === fLine)) fLine = 0;
+  if (fServer && !servers().some(n => n.id === fServer)) fServer = 0;
+  const hasRelay = state.lines.some(l => (parseJ(l.forwards) || []).some(f => f.id));
+  if (!hasRelay) fKind = '';
+  const opt = (v, label, cur) => `<option value="${v}" ${String(cur) === String(v) ? 'selected' : ''}>${esc(label)}</option>`;
   el.innerHTML = `
-    <div class="toolbar">
+    <div class="toolbar sn-bar">
       <input type="search" id="sn-q" placeholder="${t('common.search')}…" value="${esc(query)}">
+      ${state.lines.length > 1 ? `<select class="sm" id="sn-f-line" data-change="sn.filter" data-id="line" aria-label="${esc(t('nav.lines'))}">${opt(0, t('sn.f.allLines'), fLine)}${state.lines.map(l => opt(l.id, l.name, fLine)).join('')}</select>` : ''}
+      ${servers().length > 1 ? `<select class="sm" id="sn-f-server" data-change="sn.filter" data-id="server" aria-label="${esc(t('nav.nodes'))}">${opt(0, t('sn.f.allServers'), fServer)}${servers().map(n => opt(n.id, n.name, fServer)).join('')}</select>` : ''}
+      ${hasRelay ? `<select class="sm" id="sn-f-kind" data-change="sn.filter" data-id="kind" aria-label="${esc(t('sn.f.kind'))}">${opt('', t('sn.f.allKinds'), fKind)}${opt('direct', t('sn.direct'), fKind)}${opt('relay', t('sn.relay'), fKind)}</select>` : ''}
       <div class="seg" id="sn-only">${['all', 'own', 'off'].map(k => `<button type="button" data-act="sn.only" data-id="${k}" class="${only === k ? 'active' : ''}">${t('sn.filter.' + k)}</button>`).join('')}</div>
       <span class="muted small" id="sn-count"></span>
+      <button type="button" class="btn sm ghost" id="sn-clear" data-act="sn.clearFilter" hidden>${t('sn.f.clear')}</button>
     </div>
-    <div class="table-wrap fill"><table class="grid sn-table" data-fit="p3:940 p2:800 cards:700">
-      <thead><tr><th>${t('sn.col.node')}</th><th class="c-p3">${t('sn.col.addr')}</th><th>${t('sn.col.ratio')}</th><th class="c-p2">${t('sn.col.speed')}</th><th class="c-p2">${t('sn.col.cap')}</th><th>${t('sn.col.output')}</th><th></th></tr></thead>
+    <div class="toolbar batch-bar" id="sn-batch-bar" hidden>
+      <span class="badge primary" id="sn-batch-count"></span>
+      <button class="btn sm" data-act="sn.batch" data-id="on">${t('sn.batch.on')}</button>
+      <button class="btn sm" data-act="sn.batch" data-id="off">${t('sn.batch.off')}</button>
+      <button class="btn sm" data-act="sn.batch" data-id="ratio">${t('sn.batch.ratio')}</button>
+      <button class="btn sm" data-act="sn.batch" data-id="limits">${t('sn.batch.limits')}</button>
+      <button class="btn sm" data-act="sn.batch" data-id="reset">${t('sn.reset')}</button>
+      <button class="btn sm ghost" data-act="sn.clearSel">${t('line.batch.clear')}</button>
+    </div>
+    <div class="table-wrap fill"><table class="grid sn-table" data-fit="p3:980 p2:830 cards:700">
+      <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sn-sel-all" aria-label="${esc(t('sn.selAll'))}"></th><th>${t('sn.col.node')}</th><th class="c-p3">${t('sn.col.addr')}</th><th>${t('sn.col.ratio')}</th><th class="c-p2">${t('sn.col.speed')}</th><th class="c-p2">${t('sn.col.cap')}</th><th>${t('sn.col.output')}</th><th></th></tr></thead>
       <tbody id="sn-body"></tbody>
     </table></div>`;
   document.getElementById('sn-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
+  document.getElementById('sn-sel-all').addEventListener('change', e => {
+    for (const g of visible()) for (const nd of g.list) e.target.checked ? selected.add(idOf(g.l, nd)) : selected.delete(idOf(g.l, nd));
+    renderRows();
+  });
   renderRows();
+  loadOnline().then(renderRows); // 不等它:表先出来,人数回来再补上
 }
 
 function speedText(o) {
@@ -67,7 +120,7 @@ function speedText(o) {
 }
 
 function rowHTML(l, nd) {
-  const o = nd.opt, id = `${l.id}:${nd.key}`;
+  const o = nd.opt, id = idOf(l, nd);
   const where = nd.kind === 'relay'
     ? `${badge(t('sn.relay'), 'primary')}<span class="pname" title="${esc(nd.name)}">${esc(nd.name)}</span><span class="sn-to">${esc(t('sn.to', { name: nd.exit ? nd.exit.name : '?' }))}</span>`
     : `<span class="pname" title="${esc(nd.name)}">${esc(nd.name)}</span>`;
@@ -75,13 +128,19 @@ function rowHTML(l, nd) {
     ? `<b class="sn-own">×${esc(fmtRatio(o.ratio))}</b>`
     : `<span class="sn-follow">×${esc(fmtRatio(serverRatio(nd)))}<span> · ${esc(t('sn.follow'))}</span></span>`;
   const speed = speedText(o), unl = `<span class="faint">${esc(t('sn.unlimited'))}</span>`;
-  const addr = nd.host ? `${esc(nd.host)}:${nd.port}` : `:${nd.port}`;
-  return `<tr class="${nd.idle || l.enabled === false ? 'sn-idle' : ''}">
+  const addr = nd.host ? `${nd.host}:${nd.port}` : `:${nd.port}`;
+  // 在线 / 容量:几个人在线、上限多少(没设是淡色的「不限」);到上限了变色
+  const n = online[id] || 0;
+  const cap = o.cap > 0
+    ? `<span class="sn-cap${n >= o.cap ? ' full' : ''}"><b>${n}</b> / ${o.cap}</span>`
+    : `<span class="sn-cap">${n > 0 ? `<b>${n}</b>` : `<span class="faint">0</span>`}<span class="faint"> / ${esc(t('sn.unlimited'))}</span></span>`;
+  return `<tr class="${nd.idle || l.enabled === false ? 'sn-idle' : ''}${selected.has(id) ? ' selected' : ''}">
+    <td><input type="checkbox" class="sel" data-change="sn.sel" data-id="${id}" ${selected.has(id) ? 'checked' : ''} aria-label="${esc(nd.name)}"></td>
     <td class="primary-cell"><div class="sn-node">${where}${nd.idle ? ` <span class="muted small">${esc(nd.idle)}</span>` : ''}</div><div class="sub-cell sn-addr" title="${esc(addr)}">${esc(addr)}</div></td>
     <td class="num c-p3"><span class="ellip" title="${esc(addr)}">${esc(addr)}</span></td>
     <td class="num">${ratio}</td>
     <td class="num c-p2${speed ? '' : ' sn-def'}">${speed ? esc(speed) : unl}</td>
-    <td class="num c-p2${o.cap > 0 ? '' : ' sn-def'}">${o.cap > 0 ? esc(t('sn.capN', { n: o.cap })) : unl}</td>
+    <td class="num c-p2${o.cap > 0 || n > 0 ? '' : ' sn-def'}">${cap}</td>
     <td class="sn-out"><label class="switch" title="${esc(t('sn.outputHelp'))}"><input type="checkbox" data-change="sn.output" data-id="${id}" ${o.hidden ? '' : 'checked'} aria-label="${esc(t('sn.col.output'))}"><span></span></label></td>
     <td class="actions"><button class="btn sm" data-act="sn.edit" data-id="${id}">${t('sn.edit')}</button></td>
   </tr>`;
@@ -90,20 +149,27 @@ function rowHTML(l, nd) {
 function renderRows() {
   const body = document.getElementById('sn-body');
   if (!body) return;
-  let total = 0, shown = 0;
-  const html = state.lines.map(l => {
-    const all = nodesOf(l);
-    total += all.length;
-    const list = all.filter(nd => matches(query, l.name, nd.name, nd.host, nd.exit && nd.exit.name)
-      && (only === 'all' || (only === 'own' ? isOwn(nd.opt) : !!nd.opt.hidden)));
+  const groups = visible();
+  // 已经不在的节点(线路删了、部署范围或入口改了)不再算选中
+  const alive = new Set(state.lines.flatMap(l => nodesOf(l).map(nd => idOf(l, nd))));
+  for (const id of [...selected]) if (!alive.has(id)) selected.delete(id);
+  let shown = 0;
+  const html = groups.map(({ l, all, list }) => {
     if (!list.length) return '';
     shown += list.length;
-    return `<tr class="grp-row"><td colspan="7">${esc(l.name)} <span class="muted">${esc(String(l.protocol || '').toUpperCase())} · ${l.port}</span>${l.enabled === false ? ` ${badge(t('sn.lineOff'))}` : ''}<span class="muted">${esc(all.length === 1 ? t('sn.count1') : t('sn.count', { n: all.length }))}</span></td></tr>`
+    const allOn = list.every(nd => selected.has(idOf(l, nd)));
+    return `<tr class="grp-row"><td colspan="8"><div class="sn-grow"><label class="sn-grp"><input type="checkbox" class="sel" data-change="sn.selLine" data-id="${l.id}" ${allOn ? 'checked' : ''} aria-label="${esc(t('sn.selLine', { name: l.name }))}"><b>${esc(l.name)}</b></label><span class="muted">${esc(String(l.protocol || '').toUpperCase())} · ${l.port}</span>${l.enabled === false ? badge(t('sn.lineOff')) : ''}<span class="muted sn-gcount">${esc(list.length < all.length ? t('sn.countOf', { a: list.length, b: all.length }) : all.length === 1 ? t('sn.count1') : t('sn.count', { n: all.length }))}</span></div></td></tr>`
       + list.map(nd => rowHTML(l, nd)).join('');
   }).join('');
-  document.getElementById('sn-count').textContent = total ? `${shown} / ${total}` : '';
-  if (!state.lines.length) { setHTML(body, `<tr><td colspan="7"><div class="empty-guide"><p>${esc(t('sn.empty'))}</p><a class="btn primary" href="#/lines">${esc(t('sn.goLines'))}</a></div></td></tr>`); return; }
-  setHTML(body, html || `<tr><td colspan="7">${empty()}</td></tr>`);
+  document.getElementById('sn-count').textContent = alive.size ? `${shown} / ${alive.size}` : '';
+  const clear = document.getElementById('sn-clear');
+  if (clear) clear.hidden = !filtered();
+  const bar = document.getElementById('sn-batch-bar');
+  if (bar) { bar.hidden = selected.size === 0; document.getElementById('sn-batch-count').textContent = t('sn.selected', { n: selected.size }); }
+  const selAll = document.getElementById('sn-sel-all');
+  if (selAll) selAll.checked = shown > 0 && groups.every(g => g.list.every(nd => selected.has(idOf(g.l, nd))));
+  if (!state.lines.length) { setHTML(body, `<tr><td colspan="8"><div class="empty-guide"><p>${esc(t('sn.empty'))}</p><a class="btn primary" href="#/lines">${esc(t('sn.goLines'))}</a></div></td></tr>`); return; }
+  setHTML(body, html || `<tr><td colspan="8">${empty()}</td></tr>`);
 }
 
 function find(id) {
@@ -113,14 +179,27 @@ function find(id) {
   return { l, nd };
 }
 
-// 存一个节点的设置:后端整份替换这个节点的设置,回来的是整条线路,换进 state 里
+// 后端回来的是整条线路:把节点设置和中转入口换进 state 里
+function adopt(line) {
+  const i = state.lines.findIndex(x => x.id === line.id);
+  if (i >= 0) state.lines[i] = { ...state.lines[i], nodeOpts: line.nodeOpts || null, forwards: line.forwards || null };
+}
+
+// 存一个节点的设置:后端整份替换这个节点的设置
 async function saveNode(l, key, opt, src) {
   const body = { key, opt };
   if (src !== undefined) body.src = src;
-  const line = await put(`lines/${l.id}/node`, body);
-  const i = state.lines.findIndex(x => x.id === l.id);
-  if (i >= 0) state.lines[i] = { ...state.lines[i], nodeOpts: line.nodeOpts || null, forwards: line.forwards || null };
+  adopt(await put(`lines/${l.id}/node`, body));
   renderRows();
+}
+
+// 批量:勾选的节点改同样的几项(set 里没有的项不动),一次请求、后端一笔事务
+async function saveBatch(set) {
+  const items = [...selected].map(id => { const [line, key] = id.split(':'); return { line: Number(line), key }; });
+  const res = await put('lines/nodes', { items, set });
+  (res.lines || []).forEach(adopt);
+  renderRows();
+  toast(t('sn.batch.done', { n: items.length }), 'ok');
 }
 
 const cleanOpt = o => {
@@ -129,21 +208,22 @@ const cleanOpt = o => {
   for (const k of ['ratio', 'speed', 'userSpeed', 'cap']) if (o[k] > 0) out[k] = o[k];
   return out;
 };
+const numInput = (eid, v, ph, attrs) => `<input id="${eid}" type="number" inputmode="decimal" min="0" ${attrs} value="${v > 0 ? esc(String(v)) : ''}" placeholder="${esc(ph)}">`;
+const readNum = eid => { const s = fv(eid).trim(); return s === '' ? 0 : Number(s); };
 
 function editNode(id) {
   const { l, nd } = find(id);
   if (!l || !nd) return;
   const o = nd.opt;
-  const num = (eid, v, ph, attrs) => `<input id="${eid}" type="number" inputmode="decimal" min="0" ${attrs} value="${v > 0 ? esc(String(v)) : ''}" placeholder="${esc(ph)}">`;
   const known = nd.kind === 'relay' ? (nd.via ? [nd.via.publicIp, nd.via.publicIp6, nd.via.addr] : [nd.fwd.host]).filter(x => x && /^[0-9a-f:.]+$/i.test(x)) : [];
   const who = nd.kind === 'relay' ? `${nd.name} ${t('sn.to', { name: nd.exit ? nd.exit.name : '?' })}` : nd.name;
   openModal(t('sn.editTitle'), `
     <p class="sn-who"><b>${esc(l.name)}</b><span class="muted"> · ${esc(who)}</span>${nd.kind === 'relay' ? ' ' + badge(t('sn.relay'), 'primary') : ''}</p>
     <div class="form-grid">
-      ${field(t('sn.ratio'), num('sn-ratio', o.ratio, t('sn.ratioPh', { r: fmtRatio(serverRatio(nd)) }), 'max="100" step="0.1"'), t('sn.ratioHelp'))}
-      ${field(t('sn.cap'), num('sn-cap', o.cap, t('sn.unlimited'), 'max="1000000" step="1"'), t('sn.capHelp'))}
-      ${field(t('sn.speed'), num('sn-speed', o.speed, t('sn.unlimited'), 'max="100000" step="1"'), t('sn.speedHelp'))}
-      ${field(t('sn.userSpeed'), num('sn-uspeed', o.userSpeed, t('sn.unlimited'), 'max="100000" step="1"'), t('sn.userSpeedHelp'))}
+      ${field(t('sn.ratio'), numInput('sn-ratio', o.ratio, t('sn.ratioPh', { r: fmtRatio(serverRatio(nd)) }), 'max="100" step="0.1"'), t('sn.ratioHelp'))}
+      ${field(t('sn.cap'), numInput('sn-cap', o.cap, t('sn.unlimited'), 'max="1000000" step="1"'), t('sn.capHelp'))}
+      ${field(t('sn.speed'), numInput('sn-speed', o.speed, t('sn.unlimited'), 'max="100000" step="1"'), t('sn.speedHelp'))}
+      ${field(t('sn.userSpeed'), numInput('sn-uspeed', o.userSpeed, t('sn.unlimited'), 'max="100000" step="1"'), t('sn.userSpeedHelp'))}
     </div>
     <div class="sn-extra">
       ${switchRow('sn-out', t('sn.output'), !o.hidden, t('sn.outputHelp'))}
@@ -154,8 +234,7 @@ function editNode(id) {
       <div><button type="button" class="btn sm sn-reset" data-act="sn.reset">${esc(t('sn.reset'))}</button></div>
     </div>`,
   async () => {
-    const f = eid => { const s = fv(eid).trim(); return s === '' ? 0 : Number(s); };
-    const next = { hidden: !fchk('sn-out'), ratio: f('sn-ratio'), speed: f('sn-speed'), userSpeed: f('sn-uspeed'), cap: f('sn-cap') };
+    const next = { hidden: !fchk('sn-out'), ratio: readNum('sn-ratio'), speed: readNum('sn-speed'), userSpeed: readNum('sn-uspeed'), cap: readNum('sn-cap') };
     if (!(next.ratio >= 0 && next.ratio <= 100)) throw new Error(t('sn.err.ratio'));
     for (const k of ['speed', 'userSpeed', 'cap']) if (!(Number.isInteger(next[k]) && next[k] >= 0)) throw new Error(t('sn.err.int'));
     const srcEl = document.getElementById('sn-src');
@@ -165,8 +244,60 @@ function editNode(id) {
   });
 }
 
+// 批量设倍率:一个框。留空 = 这些节点都改回跟随服务器
+function batchRatio() {
+  openModal(t('sn.batch.ratioTitle'), `
+    <p class="sn-who">${esc(t('sn.selected', { n: selected.size }))}</p>
+    ${field(t('sn.ratio'), numInput('sn-b-ratio', 0, t('sn.batch.ratioPh'), 'max="100" step="0.1"'), t('sn.batch.ratioHelp'))}`,
+  async () => {
+    const r = readNum('sn-b-ratio');
+    if (!(r >= 0 && r <= 100)) throw new Error(t('sn.err.ratio'));
+    await saveBatch({ ratio: r });
+  });
+}
+
+// 批量设限速 / 容量:三项各自选「不改 / 设为 / 不限」—— 留空在这里有歧义(是不动还是清掉),所以让人明说
+function batchLimits() {
+  const row = (key, label, max) => `<div class="sn-brow"><span class="label">${esc(label)}</span>
+      <select id="sn-b-${key}-mode" data-change="sn.bmode" data-id="${key}" aria-label="${esc(label)}"><option value="keep">${esc(t('sn.keep'))}</option><option value="set">${esc(t('sn.setTo'))}</option><option value="clear">${esc(t('sn.unlimited'))}</option></select>
+      <input id="sn-b-${key}" type="number" inputmode="numeric" min="1" max="${max}" step="1" disabled aria-label="${esc(label)}"></div>`;
+  openModal(t('sn.batch.limitsTitle'), `
+    <p class="sn-who">${esc(t('sn.selected', { n: selected.size }))}</p>
+    <div class="sn-brows">
+      ${row('speed', t('sn.speed'), 100000)}
+      ${row('userSpeed', t('sn.userSpeed'), 100000)}
+      ${row('cap', t('sn.cap'), 1000000)}
+    </div>
+    <p class="hint">${esc(t('sn.batch.limitsHelp'))}</p>`,
+  async () => {
+    const set = {};
+    for (const key of ['speed', 'userSpeed', 'cap']) {
+      const mode = fv(`sn-b-${key}-mode`);
+      if (mode === 'clear') set[key] = 0;
+      if (mode === 'set') {
+        const v = readNum(`sn-b-${key}`);
+        if (!(Number.isInteger(v) && v >= 1)) throw new Error(t('sn.err.batchInt'));
+        set[key] = v;
+      }
+    }
+    if (!Object.keys(set).length) throw new Error(t('sn.batch.none'));
+    await saveBatch(set);
+  });
+}
+
 registerActions({
   'sn.only': id => { only = id; document.querySelectorAll('#sn-only button').forEach(b => b.classList.toggle('active', b.dataset.id === only)); renderRows(); },
+  'sn.filter': (what, el) => {
+    if (what === 'line') fLine = Number(el.value) || 0;
+    else if (what === 'server') fServer = Number(el.value) || 0;
+    else fKind = el.value;
+    renderRows();
+  },
+  'sn.clearFilter': () => {
+    query = ''; only = 'all'; fLine = 0; fServer = 0; fKind = '';
+    const page = document.getElementById('page');
+    if (page) render(page);
+  },
   'sn.edit': id => editNode(id),
   'sn.reset': () => {
     for (const eid of ['sn-ratio', 'sn-cap', 'sn-speed', 'sn-uspeed']) { const el = document.getElementById(eid); if (el) el.value = ''; }
@@ -187,5 +318,28 @@ registerActions({
       el.disabled = false;
       toast(e.message, 'err');
     }
+  },
+  'sn.sel': (id, cb) => { cb.checked ? selected.add(id) : selected.delete(id); renderRows(); },
+  // 分组行的勾选框:这条线路现在列出来的节点全选 / 全不选
+  'sn.selLine': (id, cb) => {
+    const g = visible().find(x => x.l.id === Number(id));
+    if (g) for (const nd of g.list) cb.checked ? selected.add(idOf(g.l, nd)) : selected.delete(idOf(g.l, nd));
+    renderRows();
+  },
+  'sn.clearSel': () => { selected.clear(); renderRows(); },
+  'sn.bmode': (key, sel) => {
+    const input = document.getElementById('sn-b-' + key);
+    if (!input) return;
+    input.disabled = sel.value !== 'set';
+    if (input.disabled) input.value = ''; else input.focus();
+  },
+  'sn.batch': async what => {
+    if (!selected.size) return;
+    try {
+      if (what === 'on' || what === 'off') await saveBatch({ hidden: what === 'off' });
+      else if (what === 'ratio') batchRatio();
+      else if (what === 'limits') batchLimits();
+      else if (what === 'reset' && await confirm(t('sn.batch.resetConfirm', { n: selected.size }))) await saveBatch({ hidden: false, ratio: 0, speed: 0, userSpeed: 0, cap: 0 });
+    } catch (e) { toast(e.message, 'err'); }
   },
 });

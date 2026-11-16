@@ -27,7 +27,7 @@ let onlineQ = '', connF = 'ok', connAll = false, connQ = '', auditScope = 'human
 // 手机(≤700px)上不做内滚区(和页面滚动抢手势):在线名单、最近连接在原地一批批展开,这里记展开到第几批
 let onlineMore = 0, connMore = 0;
 const MOBILE_STEP = { online: 36, conns: 20 };
-let logOpen = null; // localStorage m-ui.dashLog;没存过时手机默认折起
+
 // ---- 各数据源的缓存与错误(进页面时清空,不沿用上一次登录的)----
 let nodesData = null, nodesErr = null, health = null, healthErr = null, conns = null, connsErr = null;
 let dayFromChart = null, day = null, dayErr = null; // 24 小时合计:图在 24 小时档时直接用图的,否则单独取
@@ -135,12 +135,12 @@ export async function render(el) {
   ticks = 0;
   unsyncedSince.clear(); // 和其它缓存一样进页面时清空:离开时正好未同步的副机,回来不能立刻跳过 30 秒门槛报出来
   if (isReseller()) return renderReseller(el);
-  if (logOpen === null) { const v = ls('m-ui.dashLog'); logOpen = v === null ? !narrow() : v === '1'; }
+
   const node = isNode(), many = multi();
   const allScope = many ? t('dash.scope.all') : node ? t('dash.scope.local') : '';
   el.innerHTML = `<div class="dash-grid">
     ${quickStart()}
-    <section class="card span-all attn-card" id="dash-attn-card"><div class="card-head"><h2>${esc(t('dash.attn.title'))} <span class="h-count" id="dash-attn-n"></span></h2></div><div id="dash-attn">${loading()}</div></section>
+    <section class="span-all attn-strip" id="dash-attn-card"><span class="attn-label">${esc(t('dash.attn.title'))}<span class="h-count" id="dash-attn-n"></span></span><div id="dash-attn"></div></section>
     <div class="stats span-all" id="dash-stats"></div>
     ${card('dash-chart', 'span-2', `<h2>${esc(t('dash.traffic'))}${scopeTag(allScope)}</h2>
       <div class="seg" id="dash-range">${[1, 6, 24, 168].map(h => `<button data-act="dash.range" data-id="${h}" class="${h === range ? 'active' : ''}">${esc(t('dash.range.' + (h === 168 ? '7d' : h + 'h')))}</button>`).join('')}</div>`, `<div id="dash-chart">${loading()}</div>`)}
@@ -149,14 +149,13 @@ export async function render(el) {
     ${card('dash-conns', 'span-2', `<h2>${esc(t('dash.recentConns'))} <span class="help-tip" id="dash-conns-help" title="${esc(t('dash.recentConnsHelp'))}">?</span></h2><span id="dash-conn-seg"></span><input type="search" class="sm dash-q" id="dash-conn-q" placeholder="${esc(t('dash.conn.search'))}" value="${esc(connQ)}" hidden><button class="btn sm" data-act="dash.connsRefresh">${esc(t('common.refresh'))}</button>`, `<div id="dash-conns">${loading()}</div>`)}
     ${card('dash-top', '', `<h2>${esc(t('dash.topUsers'))}${scopeTag(allScope)}</h2>
       <div class="seg" id="dash-toprange">${[24, 168, 720].map(h => `<button data-act="dash.toprange" data-id="${h}" class="${h === topHours ? 'active' : ''}">${esc(t('dash.range.' + (h === 24 ? '24h' : h === 168 ? '7d' : '30d')))}</button>`).join('')}</div>`, `<div id="dash-top">${loading()}</div>`)}
-    ${card('dash-audit', '', `<h2>${esc(t('dash.recentAudit'))}</h2><div class="seg sm" id="dash-audit-seg">${[['human', t('dash.audit.human')], ['all', t('common.all')]].map(([k, v]) => `<button data-act="dash.auditScope" data-id="${k}" class="${k === auditScope ? 'active' : ''}">${esc(v)}</button>`).join('')}</div>`, `<div id="dash-audit">${loading()}</div>`,
-      `<div class="card-foot"><a href="#/logs?tab=audit">${esc(t('dash.audit.viewAll'))}</a></div>`)}
+    ${card('dash-audit', '', `<h2>${esc(t('dash.recentAudit'))}<a class="h-link" href="#/logs?tab=audit">${esc(t('dash.audit.viewAll'))}</a></h2><div class="seg sm" id="dash-audit-seg">${[['human', t('dash.audit.human')], ['all', t('common.all')]].map(([k, v]) => `<button data-act="dash.auditScope" data-id="${k}" class="${k === auditScope ? 'active' : ''}">${esc(v)}</button>`).join('')}</div>`, `<div id="dash-audit">${loading()}</div>`,
+      '')}
     ${card('dash-core', '', `<h2>${esc(many ? t('dash.coreLocal') : t('dash.core'))}</h2><button class="btn sm" data-act="dash.reload">${esc(t('dash.reload'))}</button>`, `<dl class="kv" id="dash-core"></dl>`)}
-    <section class="card dash-log-card ${logOpen ? '' : 'collapsed'}" id="dash-log-card">
-      <div class="card-head"><h2><button class="link-btn" data-act="dash.logToggle" aria-expanded="${logOpen}"><i class="i i-chev${logOpen ? ' open' : ''}"></i> ${esc(t('dash.coreLog'))}</button></h2>
-        <select class="sm" id="dash-loglevel" data-change="dash.loglevel" style="width:auto">${['debug', 'info', 'warning', 'error'].map(l => `<option ${l === logLevel ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-      <pre class="log" id="dash-log"></pre>
-      <div class="card-foot"><a href="#/logs?tab=core">${esc(t('dash.logAll'))}</a></div>
+    <section class="card dash-log-card" id="dash-log-card">
+      <div class="card-head"><h2>${esc(t('dash.coreLog'))}<a class="h-link" href="#/logs?tab=core">${esc(t('dash.logAll'))}</a></h2>
+        <select class="sm" id="dash-loglevel" data-change="dash.loglevel" style="width:auto" aria-label="${esc(t('dash.coreLog'))}">${['debug', 'info', 'warning', 'error'].map(l => `<option ${l === logLevel ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="dash-logbox"><pre class="log" id="dash-log"></pre></div>
     </section>
   </div>`;
   document.getElementById('dash-online-q').addEventListener('input', e => { onlineQ = e.target.value.trim(); renderOnline(); });
@@ -167,7 +166,7 @@ export async function render(el) {
   // 每块各自成败:Promise.allSettled,一块失败不会把整页换成报错卡
   const jobs = [guard('dash-chart', renderChart), guard('dash-audit', renderAudit), guard('dash-top', renderTop),
     guard('dash-health', fetchHealth), guard('dash-conns', fetchConns), fetchNodes().catch(() => {})];
-  if (logOpen) jobs.push(guard('dash-log', renderLog));
+  jobs.push(guard('dash-log', renderLog));
   if (range !== 24) jobs.push(fetchDay());
   await Promise.allSettled(jobs);
   renderStats(); renderAttn();
@@ -181,7 +180,7 @@ export async function tick() {
   const jobs = [];
   if (ticks % (isNode() ? 12 : 3) === 0) jobs.push(fetchNodes().catch(() => {}));
   if (ticks % 2 === 0) jobs.push(guard('dash-conns', fetchConns));
-  if (logOpen) jobs.push(guard('dash-log', renderLog)); // 折起时不拉
+  jobs.push(guard('dash-log', renderLog));
   if (ticks % 3 === 0) jobs.push(guard('dash-health', fetchHealth), guard('dash-audit', renderAudit));
   if (ticks % 12 === 0) { jobs.push(guard('dash-chart', renderChart), guard('dash-top', renderTop)); if (range !== 24) jobs.push(fetchDay()); }
   await Promise.allSettled(jobs);
@@ -432,9 +431,10 @@ function renderAttn() {
   const pending = (!isNode() && !nodesData && !nodesErr) || (!health && !healthErr) || (!conns && !connsErr);
   const ok = !serious.length && !pending;
   document.getElementById('dash-attn-card')?.classList.toggle('ok', ok);
-  setHTML('dash-attn-n', serious.length ? esc(t('dash.attn.count', { n: serious.length })) : ok ? `<span class="attn-ok">${esc(t('dash.attn.ok'))}</span>` : '');
+  setHTML('dash-attn-n', serious.length ? esc(t('dash.attn.count', { n: serious.length })) : '');
   const cap = narrow() && !attnAll ? 4 : items.length;
-  let html = !items.length && pending ? `<p class="muted small">${esc(t('dash.attn.checking'))}</p>` : '';
+  // 还在取数、暂时没有要处理的:什么都不画(这一行整个不出现),不闪一下「正在检查」
+  let html = '';
   if (items.length) html += `<ul class="attn">${items.slice(0, cap).map(attnRow).join('')}</ul>`;
   if (items.length > cap) html += `<div class="card-foot"><button class="btn sm ghost" data-act="dash.attnAll">${esc(t('dash.moreN', { n: items.length - cap }))} <i class="i i-chev open"></i></button></div>`;
   if (ignored.length) {
@@ -724,7 +724,7 @@ async function renderAudit() {
   const runs = [];
   for (const r of list) { const p = runs[runs.length - 1]; if (p && p.actor === r.actor && p.key === r.key && p.action === r.action) p.n++; else runs.push({ ...r, n: 1 }); }
   if (!runs.length) { setHTML(el, empty(human ? t('dash.audit.noHuman') : undefined)); return; }
-  setHTML(el, `<ul class="audit-list">${runs.slice(0, 8).map(r => {
+  setHTML(el, `<ul class="audit-list">${runs.slice(0, 10).map(r => { // 「全部记录」挪到标题旁边后,底下那一行的地方多列两条
     const obj = auditText(r.obj), act = auditLine(r);
     return `<li><span class="when mono" title="${esc(fmtDate(r.dateTime))}">${esc(fmtRelative(r.dateTime))}</span><span class="what" title="${esc(`${r.actor} ${act}${r.n > 1 ? ' ×' + r.n : ''} ${auditText(r.obj, { max: 0 })}`)}"><b>${esc(r.actor)}</b> ${esc(act)}${r.n > 1 ? ` <span class="badge">×${r.n}</span>` : ''} <span class="muted">${esc(obj)}</span></span></li>`;
   }).join('')}</ul>`);
@@ -743,7 +743,7 @@ async function renderLog() {
 // ---- 代理面板:需要处理 + 6 张统计卡 + 当前在线 + 即将到期 / 流量快用完两张名单 ----
 function renderReseller(el) {
   el.innerHTML = `<div class="dash-grid rs">
-    <section class="card span-all attn-card" id="dash-attn-card"><div class="card-head"><h2>${esc(t('dash.attn.title'))} <span class="h-count" id="dash-attn-n"></span></h2></div><div id="dash-attn"></div></section>
+    <section class="span-all attn-strip" id="dash-attn-card"><span class="attn-label">${esc(t('dash.attn.title'))}<span class="h-count" id="dash-attn-n"></span></span><div id="dash-attn"></div></section>
     <div class="stats span-all" id="dash-stats"></div>
     ${card('dash-online', 'span-2', `<h2>${esc(t('dash.onlineList'))} <span class="h-count" id="dash-online-n"></span></h2><input type="search" class="sm dash-q" id="dash-online-q" placeholder="${esc(t('dash.online.search'))}" value="${esc(onlineQ)}" hidden>`, `<div id="dash-online"></div>`)}
     ${card('dash-expiring', '', `<h2>${esc(t('dash.rs.expiringList'))} <span class="h-count" id="dash-expiring-n"></span></h2>`, `<div id="dash-expiring">${loading()}</div>`)}
@@ -801,7 +801,7 @@ function renderResellerAttn() {
   if (sat) items.push({ sev: 'warn', title: t('dash.attn.statusStale', { time: fmtTime(Math.floor(sat / 1000)) }), names: errText(state.err && state.err.status), acts: btn('dash.retry', 'status', t('dash.retry')) });
   items.sort((a, b) => SEV[a.sev] - SEV[b.sev]);
   document.getElementById('dash-attn-card')?.classList.toggle('ok', !items.length);
-  setHTML('dash-attn-n', items.length ? esc(t('dash.attn.count', { n: items.length })) : `<span class="attn-ok">${esc(t('dash.attn.ok'))}</span>`);
+  setHTML('dash-attn-n', items.length ? esc(t('dash.attn.count', { n: items.length })) : '');
   setHTML(box, items.length ? `<ul class="attn">${items.map(attnRow).join('')}</ul>` : '');
   document.getElementById('dash-stats')?.classList.toggle('stale', !!(sat && Date.now() - sat > 15000));
 }
@@ -840,17 +840,7 @@ registerActions({
     finally { b.disabled = false; }
   },
   'dash.loglevel': async (_, sel) => { logLevel = sel.value; await guard('dash-log', renderLog); },
-  'dash.logToggle': async () => {
-    logOpen = !logOpen;
-    lsSet('m-ui.dashLog', logOpen ? '1' : '0');
-    const c = document.getElementById('dash-log-card');
-    if (!c) return;
-    c.classList.toggle('collapsed', !logOpen);
-    const b = c.querySelector('.link-btn');
-    b.innerHTML = `<i class="i i-chev${logOpen ? ' open' : ''}"></i> ${esc(t('dash.coreLog'))}`;
-    b.setAttribute('aria-expanded', String(logOpen));
-    if (logOpen) await guard('dash-log', renderLog);
-  },
+
   'dash.connsRefresh': () => guard('dash-conns', fetchConns).then(renderAttn),
   'dash.attnAll': () => { attnAll = true; renderAttn(); },
   'dash.attnIgnored': () => { attnIgnoredOpen = !attnIgnoredOpen; renderAttn(); },

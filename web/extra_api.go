@@ -631,6 +631,14 @@ func (s *Server) subPath() string {
 
 // dispatchLineSubroute 处理 /lines/{id}/toggle 和 /lines/{id}/node(见 line_node_api.go)。返回 true 表示已处理。
 func (s *Server) dispatchLineSubroute(w http.ResponseWriter, r *http.Request) bool {
+	if strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/lines/nodes/online") {
+		s.handleLineNodesOnline(w, r)
+		return true
+	}
+	if strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/lines/nodes") {
+		s.handleLineNodesBatch(w, r)
+		return true
+	}
 	if id, ok := lineNodeRoute(r.URL.Path); ok {
 		s.handleLineNode(w, r, id)
 		return true

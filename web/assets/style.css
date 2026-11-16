@@ -1074,7 +1074,9 @@ button.role-chip.k-lost { background: var(--danger-soft); color: var(--danger); 
    概况页上失联、写操作暂停这两条由「需要处理」那一行代替 */
 .main:has(> #page[data-page="dashboard"]) > .alert-bar:is([data-ha="ha-lost"], [data-ha="ha-frozen"]) { display: none; }
 
-/* 长表:表格自带限高滚动区,表头吸在区域顶部,横向滚动条始终在视口里;排成卡片 / 两行一台时不要内滚区,跟着页面滚 */
+/* 长表:表格自带限高滚动区,表头吸在区域顶部,横向滚动条始终在视口里;排成卡片 / 两行一台时不要内滚区,跟着页面滚。
+   这里的高度只是页面刚画出来那一瞬间的估值:app.js 的 fitFill 随后按量出来的位置把框正好撑到窗口底(整页就不用再滚,
+   只留表格里一条滚动条),窗口太矮时改成不限高、跟着整页滚。嵌在别处的(外部节点展开的面板)仍按这里的估值限高。 */
 .table-wrap.fill { overflow: auto; max-height: max(18rem, calc(100vh - var(--topbar-h) - var(--fill-reserve, 7.5rem))); max-height: max(18rem, calc(100dvh - var(--topbar-h) - var(--fill-reserve, 7.5rem))); }
 .table-wrap.fill:has(> table.grid.cards), .table-wrap.fill:has(> table.grid.rows2) { overflow: visible; max-height: none; }
 /* 单元格里很长的一段(上游名):一行省略,全文在 title */
@@ -1178,8 +1180,7 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
   .dash-grid > #dash-conns-card { grid-column: span 3; }
   .dash-grid > .dash-log-card { grid-column: 1 / -1; }
 }
-/* 折起的核心日志不跟着同行的卡片拉高 */
-.dash-grid > .dash-log-card.collapsed { align-self: start; }
+
 .dash-grid .card-head h2 { min-width: 0; }
 /* 手机上标题按自己的宽度排,放不下时把右边的分段按钮 / 刷新换到下一行,不再把标题挤成一字一行 */
 @media (max-width: 700px) { .dash-grid .card-head h2 { flex: 1 1 auto; } }
@@ -1213,29 +1214,48 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
 .dash-q { width: 11rem; max-width: 100%; }
 .seg.sm button { height: calc(var(--ctl-h-sm) - 6px); padding: 0 .55rem; font-size: var(--fs-xs); }
 
-/* 需要处理:每类一行,按严重程度排;桌面按宽度排成 2 / 3 / 4 列 */
-.attn { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem .8rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 30rem), 1fr)); }
-.attn li { display: flex; align-items: flex-start; gap: .65rem; padding: .6rem .8rem; border-radius: var(--radius-md); background: var(--surface-2); border: 1px solid var(--divider); min-width: 0; }
-.attn .sev { flex: none; width: .55rem; height: .55rem; margin-top: .42rem; border-radius: 50%; background: var(--muted); }
-.attn li.bad .sev { background: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
-.attn li.warn .sev { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
-.attn li.info { background: transparent; border: 1px dashed var(--border); }
-.attn .what { flex: 1; min-width: 0; font-size: .85rem; }
-.attn .ttl { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.attn .parts { color: var(--muted); font-size: .8rem; }
+/* 需要处理:标题下面一行小标签,不是卡片 —— 每项一个小圆角条:圆点、一句话、涉及的名字、动作。没有要处理的这一行整个不出现。
+   前两版都被用户否了(2026-11-17):最早每一项是一个带底色和边框的大框(卡片里又套框);改成细线分隔的列表后仍然是
+   一整条通栏卡片 ——「现在还是很重 不要这种大横幅」。所以不要容器、不要通栏:事情少就是一行里的一两个小条。 */
+.attn-strip { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .4rem .8rem; min-width: 0; padding: 0 .1rem; }
+.attn-strip:has(> #dash-attn:empty) { display: none; }
+.attn-label { flex: none; line-height: 1.85rem; font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); white-space: nowrap; }
+.attn-label .h-count { margin-left: .2rem; }
+.attn-strip.ok .attn-label { display: none; }
+.attn-strip > #dash-attn { flex: 1 1 18rem; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .5rem; }
+.attn { display: contents; list-style: none; margin: 0; padding: 0; }
+.attn li { display: inline-flex; align-items: center; gap: .45rem; min-width: 0; max-width: 100%; min-height: 1.85rem; padding: .1rem .8rem .1rem .7rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: var(--fs-xs); }
+.attn li.info { border-style: dashed; background: transparent; }
+.attn .sev { flex: none; width: .42rem; height: .42rem; border-radius: 50%; background: var(--faint); }
+.attn li.bad .sev { background: var(--danger); }
+.attn li.warn .sev { background: var(--warn); }
+.attn .what { min-width: 0; display: flex; align-items: baseline; gap: .45rem; }
+.attn .ttl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attn .ttl b { font-weight: 600; color: var(--text); }
+.attn li.info .ttl b { font-weight: 500; color: var(--text-2); }
+.attn .parts { color: var(--muted); }
 .attn .parts a { color: var(--primary-text); }
-.attn .names { display: block; color: var(--muted); font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.attn .acts { flex: none; display: flex; gap: .4rem; align-items: center; font-size: .8rem; white-space: nowrap; }
+.attn .names { flex: 0 1 auto; min-width: 0; max-width: 14rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attn .names::before { content: '· '; color: var(--faint); }
+.attn .acts { flex: none; display: flex; gap: .55rem; align-items: center; white-space: nowrap; padding-left: .1rem; }
+.attn .acts a { font-weight: 500; }
+.attn .acts .btn { height: auto; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; font-size: inherit; font-weight: 500; color: var(--primary-text); }
+.attn .acts .btn:hover { background: none; text-decoration: underline; }
+.attn .acts .btn.ghost { color: var(--muted); }
+.attn-ignored { display: contents; }
+.attn-ignored > .link-btn { line-height: 1.85rem; }
+#dash-attn > .card-foot { margin: 0; }
 .attn-ok { color: var(--ok); font-size: .85rem; font-weight: 500; }
-.attn-card.ok { padding-top: .5rem; padding-bottom: .5rem; }
-.attn-card.ok .card-head { margin-bottom: 0; }
-.attn-card.ok .attn { margin-top: .45rem; }
-.attn-ignored { margin-top: .45rem; }
+
 @media (max-width: 700px) {
-  .attn li { padding: .35rem .5rem; gap: .45rem; flex-wrap: wrap; }
-  .attn .acts { font-size: .76rem; margin-left: 1rem; }
-  .attn .parts { font-size: .74rem; }
-  .attn .ttl { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  /* 手机:「需要处理」几个字自己一行;下面每项占一整行、只一行 —— 圆点、一句话、名字(放不下省略)、动作靠右。
+     试过让小条按内容宽度排、放不下在条里折行:标题挤在左边一窄列,条里折成两行,参差不齐(用户 11-17:「移动端的提醒排版差劲」) */
+  .attn-label { flex-basis: 100%; line-height: 1.4; }
+  .attn-strip > #dash-attn { flex-basis: 100%; gap: .35rem; }
+  .attn li { display: flex; width: 100%; border-radius: .7rem; padding: .25rem .7rem .25rem .65rem; }
+  .attn .what { flex: 1 1 0; overflow: hidden; }
+  .attn .names { flex: 1 1 0; max-width: none; }
+  .attn .acts { margin-left: auto; }
 }
 
 /* 快速开始做完:和 Star 合成一行 */
@@ -1289,9 +1309,15 @@ table.grid.conns tr.rej td { background: color-mix(in srgb, var(--danger-soft) 4
 .kv dd.ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 button.badge { cursor: pointer; font: inherit; font-size: .72rem; }
 
-/* 核心日志:可折起(手机默认折起,折起时不轮询) */
-.dash-log-card.collapsed pre.log, .dash-log-card.collapsed .card-foot, .dash-log-card.collapsed #dash-loglevel { display: none; }
-.dash-log-card.collapsed .card-head { margin-bottom: 0; }
+/* 核心日志:一直开着,和同一排的卡片(本机 · 数据面)一样高,日志在卡片里面滚。
+   日志框自己不撑高度(绝对定位铺满一个弹性的格子,格子最少 11rem):同排有别的卡片就跟它一样高,自己占一整排时就是十来行。
+   以前可以折起、展开后是固定 320px 高:比旁边的卡片长出一截 —— 用户 11-17:「没必要收起 展开后的长度也偏长 可以跟左边的数据面卡片一样的长度 并且日志里有滑条」 */
+/* 卡片标题旁边的小链接(「全部记录 →」「完整日志 →」):以前在卡片最下面单独占一行,挪上来以后那一行的地方给内容用
+   (用户 11-17:「可以在各自的卡片标题旁边 这样…可以显示的稍微多一点点数据」) */
+.card-head h2 > .h-link { margin-left: .7rem; font-size: var(--fs-xs); font-weight: 500; white-space: nowrap; }
+.dash-log-card { display: flex; flex-direction: column; }
+.dash-logbox { position: relative; flex: 1 1 auto; min-height: 11rem; }
+.dash-logbox > pre.log { position: absolute; inset: 0; max-height: none; }
 
 /* 设置页:左边一列分区导航(吸在顶栏下面,跟着滚动高亮),右边一列分区卡片;卡片里一项设置一行 —— 左名称与说明,右控件,开关靠右 */
 .settings { display: grid; grid-template-columns: 11.5rem minmax(0, 58rem); gap: 0 2rem; align-items: start; }
@@ -1825,16 +1851,33 @@ table.grid.cards .hdetail.in-card { clear: both; margin-top: .5rem; padding: .2r
 .sn-follow { color: var(--text-2); white-space: nowrap; }
 .sn-follow > span { color: var(--muted); font-size: var(--fs-xs); }
 .sn-table .faint { color: var(--faint); }
+/* 在线 / 容量:在线人数是实数,容量没设时后面跟一个淡色的「不限」;到了容量上限变成警示色 */
+.sn-cap b { font-weight: 600; }
+.sn-cap.full { color: var(--warn-text); }
 .sn-table td.sn-out { width: 1%; white-space: nowrap; }
 .sn-table .switch { vertical-align: middle; }
 tr.sn-idle > td:not(.actions):not(.sn-out) { opacity: .6; }
-.sn-table tr.grp-row > td > .muted:last-child { float: right; font-weight: 400; }
-table.grid.cards.sn-table tr.grp-row > td > .muted:last-child { float: none; margin-left: .6rem; }
+/* 分组行(一条线路):勾选框 + 线路名 + 协议 · 端口,节点数靠右;同一行里的东西垂直居中对齐 */
+.sn-grow { display: flex; align-items: center; gap: .55rem; min-width: 0; }
+.sn-table tr.grp-row .sn-grow > .muted { font-weight: 400; margin-left: 0; white-space: nowrap; }
+.sn-table tr.grp-row .sn-grow > .sn-gcount { margin-left: auto; }
+.sn-grp > b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sn-grp { min-width: 0; }
 /* 入口地址:够宽时是单独一列;那一列藏起来(窄窗口、卡片)时写在名字下面一行,不至于看不到 */
 .sn-addr { display: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .grid.no-p3 .sn-addr, table.grid.cards .sn-addr { display: block; }
 /* 卡片排法:地址已经在名字下面;没设的限速、容量(都是「不限」)不占行,一张卡只留有内容的 */
 table.grid.cards.sn-table td.c-p3, table.grid.cards.sn-table td.sn-def { display: none; }
+/* 节点页的工具栏:搜索 + 三个下拉(线路 / 服务器 / 类型)+ 一组状态筛选;下拉不抢地方,放不下整组折到下一行 */
+.sn-bar > select.sm { width: auto; max-width: 11rem; }
+.sn-grp { display: inline-flex; align-items: center; gap: .6rem; cursor: pointer; }
+.sn-grp > input { margin: 0; }
+/* 批量设限速 / 容量:一行一项 —— 名字、「不改 / 设为 / 不限」、数值 */
+.sn-brows { display: grid; gap: .6rem; }
+.sn-brow { display: grid; grid-template-columns: minmax(0, 1fr) 7rem 8rem; gap: .6rem; align-items: center; }
+.sn-brow > .label { font-size: var(--fs-sm); color: var(--text-2); font-weight: 500; }
+.sn-brow > input:disabled { background: var(--surface-2); }
+@media (max-width: 520px) { .sn-brow { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .sn-brow > .label { grid-column: 1 / -1; } }
 .sn-who { margin: 0 0 1rem; font-size: var(--fs-md); }
 .sn-extra { display: grid; gap: .85rem; margin-top: 1.15rem; }
 .sn-extra > details.adv { margin: 0; }

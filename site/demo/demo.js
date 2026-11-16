@@ -560,7 +560,10 @@ function route(method, path, query, body) {
     switch (seg[0]) {
       case 'status': return status();
       case 'settings': return clone(S.settings);
-      case 'lines': if (seg[2] === 'detail') return lineDetail(find(S.lines, id), new URLSearchParams(query)); return clone(S.lines);
+      case 'lines':
+        if (seg[1] === 'nodes' && seg[2] === 'online') return { online: { '1:s1': 1, '1:f2': 2, '2:s2': 1, '4:s1': 1, '4:s2': 3 } }; // 节点页「在线 / 容量」
+        if (seg[2] === 'detail') return lineDetail(find(S.lines, id), new URLSearchParams(query));
+        return clone(S.lines);
       case 'upstreams': if (seg[1] === 'health') return demoHealth(); return clone(S.upstreams);
       case 'users': if (seg[2] === 'plan-ops') return clone(S.planOps.filter(o => o.userId === id).slice(0, Number(new URLSearchParams(query).get('limit')) || 20));
         if (seg[2] === 'sub') { const u = find(S.users, id); return { link: subUrl(u), clash: subUrl(u) + '?format=clash', json: subUrl(u) + '?format=json' }; } return clone(S.users);
@@ -662,6 +665,22 @@ function route(method, path, query, body) {
     case 'lines': {
       if (seg[1] === 'sort') { const ids = body || []; ids.forEach((lid, i) => { const l = S.lines.find(x => x.id === lid); if (l) l.sort = i + 1; }); S.lines.sort((a, b) => (a.sort || 0) - (b.sort || 0)); return ok(); }
       if (method === 'POST' && !seg[1]) { const l = { id: nextId(S.lines), enabled: true, sort: S.lines.length + 1, userCount: 0, ...body }; l.upstreamName = (S.upstreams.find(x => x.id === l.upstreamId) || {}).name || 'direct'; if (body.assignAll) { l.userCount = S.users.length; S.users.forEach(u => { u.lineIds = [...(u.lineIds || []), l.id]; }); } S.lines.push(l); return clone(l); }
+      if (seg[1] === 'nodes' && method === 'PUT') { // 节点页的批量操作:勾选的节点改同样的几项(set 里没有的项不动)
+        const parse = v => { try { return typeof v === 'string' ? JSON.parse(v) : (v || null); } catch { return null; } };
+        const touched = new Map();
+        for (const it of (body.items || [])) {
+          const ln = S.lines.find(x => x.id === it.line);
+          if (!ln) continue;
+          const opts = parse(ln.nodeOpts) || {}, o = { ...(opts[it.key] || {}), ...(body.set || {}) };
+          const kept = {};
+          if (o.hidden) kept.hidden = true;
+          for (const k of ['ratio', 'speed', 'userSpeed', 'cap']) if (o[k] > 0) kept[k] = o[k];
+          if (Object.keys(kept).length) opts[it.key] = kept; else delete opts[it.key];
+          ln.nodeOpts = Object.keys(opts).length ? opts : null;
+          touched.set(ln.id, ln);
+        }
+        return { lines: clone([...touched.values()]), changed: (body.items || []).length };
+      }
       const l = find(S.lines, id);
       if (seg[2] === 'toggle') { l.enabled = !l.enabled; demoSyncBlocked(); return ok(); }
       if (seg[2] === 'node' && method === 'PUT') { // 节点页:整份替换一个节点的设置;带 src 的顺手改那个入口的来源 IP

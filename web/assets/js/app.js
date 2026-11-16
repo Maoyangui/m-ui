@@ -583,6 +583,29 @@ function fitTables() {
     if (cols) tb.querySelectorAll(':scope > tbody > tr > td[colspan]').forEach(td => { if (td.colSpan > 1 && td.colSpan !== cols) td.colSpan = cols; });
   });
 }
+// ---- 长表的高度:尽量只留一条滚动条 ----
+// 带 .fill 的表格框自己限高、在里面滚(表头吸在框顶)。限高原先是按「窗口高 − 顶栏 − 估的一段」算的(见 style.css),估小了
+// (演示条、批量条、工具栏折行)框就伸到窗口外面去:表格里一条滚动条、整页又一条 —— 用户 11-17 截图:「尽量避免双滑条」。
+// 现在量出来:框的上沿在哪、框下面到页面底还有多少,把框正好撑到窗口底 —— 整页不用滚,只剩表格里那一条。
+// 窗口太矮、留给表格的不到几行时反过来:表格不限高,跟着整页滚(也只有一条)。两种情况内容都看得全,不截断。
+// 嵌在别的东西里面的(外部节点展开的面板、抽屉 / 弹框里的表)不归这里管:它上下都还有内容,整页本来就要滚,
+// 它自己很长时还是得有一条 —— 用户也说了「确实容不下的情况可以出现双滑条」,那里只在 CSS 里把高度上限放宽。
+const FILL_MIN = 240; // 留给表格框的高度不到这么多(约五行)就不在里面滚了
+function fitFill() {
+  const page = document.getElementById('page');
+  if (!page) return;
+  const vh = window.innerHeight;
+  page.querySelectorAll('.table-wrap.fill').forEach(wrap => {
+    if (wrap.closest('td') || !wrap.offsetParent) return;
+    const tb = wrap.querySelector(':scope > table.grid');
+    if (tb && (tb.classList.contains('cards') || tb.classList.contains('rows2'))) { wrap.style.maxHeight = ''; return; } // 卡片 / 两行一台:样式里本来就不限高
+    const wr = wrap.getBoundingClientRect(), pr = page.getBoundingClientRect();
+    // 框上沿在整页里的位置 + 框下面还有的内容(后面的兄弟、页面的下内边距):这两段和框自己多高无关
+    const room = vh - (wr.top + window.scrollY) - Math.max(0, pr.bottom - wr.bottom);
+    const want = room >= FILL_MIN ? Math.floor(room) + 'px' : 'none';
+    if (wrap.style.maxHeight !== want) wrap.style.maxHeight = want;
+  });
+}
 // 排成卡片时每格前面要有列名:每格补上它那一列的表头(只改属性、不动节点,不会反过来触发自己)。
 function labelTables() {
   document.querySelectorAll('table.grid').forEach(tb => {
@@ -599,6 +622,7 @@ function labelTables() {
     });
   });
   fitTables();
+  fitFill();
 }
 let labelQueued = false;
 const queueTables = () => {
@@ -609,6 +633,13 @@ const queueTables = () => {
 new MutationObserver(queueTables).observe(document.body, { childList: true, subtree: true });
 // 窗口宽度变了(含侧栏收起 / 展开的那个断点)重新量;抽屉 / 弹框打开是节点变化,上面已经管了
 window.addEventListener('resize', queueTables);
+// 页面内容的高度变了但没有增删节点的(折叠块展开、批量条露出来、图片加载完):表格框的高度要跟着重算
+document.addEventListener('toggle', queueTables, true);
+if (typeof ResizeObserver === 'function') {
+  const ro = new ResizeObserver(queueTables);
+  const watch = () => { const p = document.getElementById('page'); if (p) ro.observe(p); else requestAnimationFrame(watch); };
+  watch();
+}
 
 // 页面有没保存的改动(页面模块导出 leaveGuard,返回要问的那句话)时,换页前先问;不走就把地址改回去、页面原样留着。
 let skipRoute = false, guarding = false;
