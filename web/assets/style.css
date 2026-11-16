@@ -641,6 +641,41 @@ pre.log .warn { color: #e3b341; } pre.log .error { color: #ff7b72; } pre.log .de
 .tabs button:hover { color: var(--text); }
 .tabs button.active { color: var(--text); border-color: var(--primary); }
 .ua { color: var(--muted); font-size: var(--fs-xs); max-width: 26rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 日志页:三张表 / 一屏日志各有一条工具条;核心日志上面多一条「存下来的设置」 */
+.lg-bar { align-items: center; }
+.lg-bar input[type=search] { max-width: 16rem; }
+.lg-opt { display: inline-flex; align-items: center; gap: .4rem; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+.lg-opt select { width: auto; }
+.lg-sw { display: inline-flex; align-items: center; gap: .5rem; font-size: var(--fs-sm); cursor: pointer; white-space: nowrap; }
+.lg-core-set { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem 1.2rem; margin-bottom: .8rem; padding: .6rem .85rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.lg-core-set .lg-note { flex: 1 1 18rem; min-width: 0; line-height: 1.5; }
+pre.log.lg-core { max-height: calc(100vh - 21rem); min-height: 16rem; }
+.lg-time { white-space: nowrap; }
+.lg-cl { max-width: 22rem; }
+.lg-client { font-weight: 500; }
+.lg-client.raw, .lg-ua { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; font-weight: 400; color: var(--muted); font-size: var(--fs-xs); }
+.lg-obj { color: var(--text-2); font-size: var(--fs-xs); max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.grid.cards .lg-obj, table.grid.cards .lg-cl { max-width: none; white-space: normal; overflow-wrap: anywhere; }
+/* 日志表在窄屏上不拆成「一格一行」的卡片(一条日志要占六行,一屏只看得到两三条):每条压成两三行,连成一个列表 */
+table.grid.cards.lg-rows tbody { display: block; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+table.grid.cards.lg-rows tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .15rem .75rem; align-items: baseline; padding: .6rem .85rem; border: 0; border-top: 1px solid var(--divider); border-radius: 0; box-shadow: none; }
+table.grid.cards.lg-rows tr:first-child { border-top: 0; }
+table.grid.cards.lg-rows td { display: block; flex: none; min-width: 0; padding: 0; border: 0; text-align: left; }
+table.grid.cards.lg-rows td::before, table.grid.cards.lg-rows td::after { content: none; display: none; }
+table.grid.cards.lg-sub td:nth-child(2) { grid-area: 1 / 1; font-weight: 600; }
+table.grid.cards.lg-sub td:nth-child(6) { grid-area: 1 / 2; justify-self: end; }
+table.grid.cards.lg-sub td:nth-child(4) { grid-area: 2 / 1; }
+table.grid.cards.lg-sub td:nth-child(5) { grid-area: 2 / 2; justify-self: end; color: var(--text-2); font-size: var(--fs-sm); }
+table.grid.cards.lg-sub td:nth-child(3) { grid-area: 3 / 1; color: var(--muted); font-size: var(--fs-xs); }
+table.grid.cards.lg-sub td:nth-child(1) { grid-area: 3 / 2; justify-self: end; color: var(--muted); font-size: var(--fs-xs); }
+table.grid.cards.lg-audit tr { grid-template-columns: auto minmax(0, 1fr) auto; }
+table.grid.cards.lg-audit td:nth-child(2) { grid-area: 1 / 1 / 2 / 3; font-weight: 600; }
+table.grid.cards.lg-audit td:nth-child(1) { grid-area: 1 / 3; justify-self: end; color: var(--muted); font-size: var(--fs-xs); }
+table.grid.cards.lg-audit td:nth-child(3) { grid-area: 2 / 1; color: var(--muted); }
+table.grid.cards.lg-audit td:nth-child(4) { grid-area: 2 / 2 / 3 / 4; }
+table.grid.cards.lg-audit td:nth-child(5) { grid-area: 3 / 1 / 4 / 4; }
+table.grid.cards.lg-audit td:nth-child(5):empty { display: none; }
+table.grid.cards.lg-rows td[colspan] { grid-area: 1 / 1 / 2 / -1; justify-self: stretch; color: inherit; font-size: inherit; font-weight: 400; }
 
 .grid tbody tr.selected { background: var(--primary-soft); }
 .batch-bar { background: var(--surface); border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border)); border-radius: var(--radius-md); padding: .5rem .75rem; position: sticky; top: calc(var(--topbar-h) + .5rem); z-index: 4; box-shadow: var(--shadow-md); }

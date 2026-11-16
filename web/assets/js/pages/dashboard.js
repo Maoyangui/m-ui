@@ -14,6 +14,7 @@ import { NODE_CODES, summarizeNodes, trackUnsynced, worstCode, healthSummary, so
 import { expiringDays, quotaPct } from './users.js';
 import { shownConns } from '../fair.js';
 import { openTraffic } from '../traffic.js';
+import { auditAction, auditObject, JOB_ACTORS } from '../audit.js';
 
 export const title = () => t('nav.dashboard');
 // status / onlines 没取到时 app.js 照样调 tick:好在「需要处理」里写明"面板状态没取到"
@@ -708,17 +709,8 @@ function renderConns() {
 }
 
 // ---- 最近操作:默认只看人工操作(定时任务批量写的 ResetJob / DepleteJob / RuleJob 不刷屏),连续相同的合成一行 ×N ----
-function auditAction(r) {
-  const b = r.key === 'user' && /^batch:plan:(renew|extend|bind)(?::(.*))?$/.exec(r.action || '');
-  if (b) return b[1] === 'bind' ? t('dash.audit.batchBind') : `${t('dash.audit.batch', { op: t('pc.op.' + b[1]) })} · ${b[2] || ''}`;
-  if (r.key === 'user' && r.action === 'plan:bind') return t('dash.audit.bind'); // 只改所属套餐(也可能是移出套餐),额度和到期不动
-  const m = r.key === 'user' && /^plan:(renew|extend|replace|stack|prorate):(.*)$/.exec(r.action || '');
-  if (!m) return `${r.key}.${r.action}`;
-  if (m[1] === 'renew' || m[1] === 'extend') return `${t('pc.op.' + m[1])} · ${m[2]}`;
-  return `${t('dash.audit.planChange', { mode: t('pc.mode.' + m[1]) })} → ${m[2]}`;
-}
-// 定时任务写审计的执行者名(和后端 model.JobActors 同一份):按名单排除,不按「以 Job 结尾」,名字以 job 结尾的人不会被藏掉
-const JOB_ACTORS = ['ResetJob', 'DepleteJob', 'RuleJob'];
+// 对象和动作怎么译见 audit.js(和日志页的「操作审计」同一套说法);这里写成「对象 · 动作」
+const auditLine = r => `${auditObject(r.key)} · ${auditAction(r)}`;
 async function renderAudit() {
   const el = document.getElementById('dash-audit');
   if (!el) return;
@@ -729,7 +721,7 @@ async function renderAudit() {
   for (const r of list) { const p = runs[runs.length - 1]; if (p && p.actor === r.actor && p.key === r.key && p.action === r.action) p.n++; else runs.push({ ...r, n: 1 }); }
   if (!runs.length) { setHTML(el, empty(human ? t('dash.audit.noHuman') : undefined)); return; }
   setHTML(el, `<ul class="audit-list">${runs.slice(0, 8).map(r => {
-    const obj = auditText(r.obj), act = auditAction(r);
+    const obj = auditText(r.obj), act = auditLine(r);
     return `<li><span class="when mono" title="${esc(fmtDate(r.dateTime))}">${esc(fmtRelative(r.dateTime))}</span><span class="what" title="${esc(`${r.actor} ${act}${r.n > 1 ? ' ×' + r.n : ''} ${auditText(r.obj, { max: 0 })}`)}"><b>${esc(r.actor)}</b> ${esc(act)}${r.n > 1 ? ` <span class="badge">×${r.n}</span>` : ''} <span class="muted">${esc(obj)}</span></span></li>`;
   }).join('')}</ul>`);
 }

@@ -1126,10 +1126,10 @@
     <h3>日志</h3>
     <p class="lede"><b data-k="nav.logs">日志</b> 页有三类:<b data-k="logs.sub">订阅访问</b>、<b data-k="logs.core">核心日志</b>、<b data-k="logs.audit">操作审计</b>。</p>
     <ul>
-      <li><b data-k="logs.sub">订阅访问</b>:谁、从哪个 IP、用什么客户端拉了订阅。</li>
-      <li><b data-k="logs.core">核心日志</b>:数据面和面板的运行日志。面板里这份只存在内存里(最多约 1 万条,重启就清);同样的内容也会写进系统日志(<code>journalctl -u m-ui</code> 能看到),<b data-k="logs.clear">清空</b> 只清面板里这一份,系统日志的占用和保留天数在 <b data-k="nav.ops">运维</b> 页限制。<b data-k="logs.enabled">记录日志</b> 可以关掉省资源。</li>
-      <li><b data-k="logs.coreLevel">数据面级别</b>:默认 warn,只记警告和错误;排障时临时调到 info 或 debug,改了立即生效,查完记得改回 warn(info 一小时就几万行,会拖慢磁盘)。</li>
-      <li><b data-k="logs.audit">操作审计</b>:谁在什么时候做了什么(面板、外部 API、Telegram 机器人的操作都在)。</li>
+      <li><b data-k="logs.sub">订阅访问</b>:谁、从哪个 IP、用什么客户端拉了订阅。<b data-k="logs.client">客户端</b> 一列认得出的写成名字和版本(Clash Verge、Shadowrocket、佛跳墙……),悬停看完整的 User-Agent;<b data-k="logs.result">结果</b> 一列:<b data-k="logs.r.ok">成功</b>、<b data-k="logs.r.none">没找到</b>(这个人没有可用的线路,或者要的格式拿不到)、<b data-k="logs.r.error">出错</b>、<b data-k="logs.r.miss">地址不对</b>(订阅地址里的令牌对不上任何用户;同一个 IP 的合成一行并写明次数,次数很多说明有人在扫地址)。可以按用户名搜,点 <b data-k="logs.onlyFail">只看失败</b> 只留没成功的。</li>
+      <li><b data-k="logs.core">核心日志</b>:数据面和面板的运行日志。面板里这份只存在内存里(最多约 1 万条,重启就清);同样的内容也会写进系统日志(<code>journalctl -u m-ui</code> 能看到),<b data-k="logs.clear">清空</b> 只清面板里这一份,系统日志的占用和保留天数在 <b data-k="nav.ops">运维</b> 页限制。<b data-k="logs.enabled">记录日志</b> 可以关掉省资源。日志上面那一条里可以按关键字筛(用户名、IP、线路名……只影响眼前这一屏)、选只看哪个级别以上的,打开 <b data-k="logs.live">自动刷新</b> 就一直盯着最新的。</li>
+      <li><b data-k="logs.coreLevel">记录级别</b>:默认 warn,只记警告和错误;排障时临时调到 info 或 debug,改了立即生效,查完记得改回 warn(info 一小时就几万行,会拖慢磁盘)。</li>
+      <li><b data-k="logs.audit">操作审计</b>:谁在什么时候做了什么(面板、外部 API、Telegram 机器人的操作都在,定时任务自动做的标着 <b data-k="logs.job">定时任务</b>)。点 <b data-k="logs.onlyHuman">只看人工操作</b> 去掉定时任务那些,旁边的下拉框只看某一类对象(用户、线路、证书……)。</li>
       <li>订阅访问和操作审计可以设 <b data-k="logs.keep">自动清理</b>(保留 1 天、1 周、1 个月或不清理);每类都能 <b data-k="logs.clear">清空</b>。</li>
     </ul>
   </section>
@@ -1142,7 +1142,7 @@
       <li>被设备数上限或代理设备池拒绝的连接也会列出来:整行标红、带 <b data-k="dash.conn.rejected">被拒</b> 徽章,鼠标停在徽章上看是 <b data-k="dash.rejectedDevice">设备数超限被拒</b> 还是 <b data-k="dash.rejectedPool">代理设备池已满被拒</b>。</li>
       <li>默认列最近 10 条,点「显示全部」在卡片里展开(可以按 IP、用户、线路筛选);上方的筛选切换连接、被拒和握手失败。</li>
       <li>包到了、却没过握手或认证的来源(证书、SNI、REALITY 公钥 / short_id、密码 / UUID 不对)在「握手失败」筛选里,分 <b data-k="dash.fail.tls">TLS 握手失败</b> 和 <b data-k="dash.fail.auth">认证失败</b>,写明原因;hysteria2、tuic 只记认证失败。版本较旧的副机不上报这一项,卡片里写明是哪几台。</li>
-      <li>列表里没有某个 IP,多半是包没到服务器(安全组、防火墙、客户端网络)。要确认包到没到:TCP 线路可以到日志页把 <b data-k="logs.coreLevel">数据面级别</b> 临时调到 info,看有没有 <code>inbound connection from</code>。Hysteria2、TUIC 这类 UDP 线路只有握手和认证都成功后才记这一行(证书、SNI 不对时哪里都不记,密码不对的只在「握手失败」里),看不到不代表包没到,要在服务器上抓包确认,比如 <code>tcpdump -ni any udp port 端口</code>。</li>
+      <li>列表里没有某个 IP,多半是包没到服务器(安全组、防火墙、客户端网络)。要确认包到没到:TCP 线路可以到日志页把 <b data-k="logs.coreLevel">记录级别</b> 临时调到 info,看有没有 <code>inbound connection from</code>。Hysteria2、TUIC 这类 UDP 线路只有握手和认证都成功后才记这一行(证书、SNI 不对时哪里都不记,密码不对的只在「握手失败」里),看不到不代表包没到,要在服务器上抓包确认,比如 <code>tcpdump -ni any udp port 端口</code>。</li>
     </ul>
   </section>
 

@@ -115,6 +115,7 @@ const S = {
   // 上游巡检结果:从导出的那一份起步,之后跟着演示里的操作变(见 demoUpTest / demoHealth)
   health: fx('GET upstreams/health') || { intervalMinutes: 10, lastRun: 0, results: [] },
 };
+S.logsCleared = {}; // 日志页点过「清空」的那几类
 // 导出时就不通的上游:在演示里编辑保存过(算修好了)或删掉之前,测试和巡检一直报不通
 S.upBroken = new Set((S.health.results || []).filter(r => (r.servers || []).length && r.servers.every(s => s.state === 'fail')).map(r => r.id));
 // 让演示像在跑:两个用户在线,各带文档保留段里的 IP
@@ -432,6 +433,40 @@ function lineDetail(l, q) {
   return { line: { id: l.id, name: l.name, protocol: l.protocol, port: l.port, enabled: l.enabled }, total, servers, ...head };
 }
 
+// 日志页的演示数据:导出的那份只有两条订阅访问和一串「新建用户」,看不出这一页能干什么。
+// 这里按现在的用户现编一份:各种客户端、共享地址、没找到、出错、还有一行「地址不对 ×N」(同一个 IP 的 404 合成一行);IP 都用文档保留段。
+function demoSubLogs(query) {
+  if (S.logsCleared.sub) return [];
+  const users = S.users.map(u => u.name), u = i => users[i % Math.max(1, users.length)] || 'demo';
+  const rows = [
+    [40, u(0), '203.0.113.5', 'clash-verge/v2.4.2', 'clash', 200], [95, u(1), '192.0.2.44', 'Shadowrocket/2.2.60 (iPhone; iOS 18.5)', 'link', 200],
+    [180, u(0), '198.51.100.7', 'godusevpn/0.8.0 (Windows)', 'json', 200], [320, u(2), '203.0.113.61', 'SFA/1.12.4 (Build 512; sing-box 1.12.4; language zh_CN)', 'json', 200],
+    [610, u(3), '198.51.100.23', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', 'page', 200],
+    [1250, '-', '203.0.113.199', '404 ×37(4 分钟内,最近 /sub/3f9a…c21)', 'miss', 404],
+    [1900, u(1), '192.0.2.44', 'Stash/3.1.0 Clash/1.19.0', 'clash', 200], [2600, u(4), '198.51.100.88', 'ClashMetaForAndroid/2.11.12.Meta', 'clash-share', 200],
+    [3900, u(2), '203.0.113.61', 'v2rayNG/1.10.2', 'link', 404], [5200, u(3), '198.51.100.23', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1', 'page', 200],
+    [7400, u(0), '203.0.113.5', 'clash-verge/v2.4.2', 'clash', 200], [9100, u(1), '192.0.2.44', 'Loon/3.2.9 CFNetwork/3826.500.131 Darwin/24.5.0', 'link', 200],
+    [12800, u(4), '198.51.100.88', 'mihomo/1.19.34', 'clash', 500], [16500, u(2), '203.0.113.61', 'curl/8.9.1', 'link', 200],
+  ].map(([ago, user, ip, ua, format, status], i, all) => ({ id: all.length - i, ts: now() - ago, user, ip, ua, format, status }));
+  const want = new URLSearchParams(query).get('user');
+  return want ? rows.filter(r => r.user === want) : rows;
+}
+function demoAudit(query) {
+  if (S.logsCleared.audit) return [];
+  const q = new URLSearchParams(query), names = S.users.map(x => x.name), line = (S.lines[0] || {}).name || 'Tokyo-HY2';
+  const rows = [
+    [120, 'admin', 'user', 'plan:renew:Pro - monthly', names[0]], [900, 'admin', 'user', 'batch:disable', names.slice(2, 4)],
+    [2400, 'RuleJob', 'rule', 'apply', `${names[0]} ← Burst penalty(30 GB / 1h,5 / 5 Mbps)`], [4100, 'admin', 'line', 'update', line],
+    [7300, 'demo-reseller', 'user', 'create', 'rs-user-01'], [9800, 'admin', 'upstream', 'health-check', 0],
+    [15200, 'admin', 'cert', 'renew', 'panel.example.com'], [18800, 'DepleteJob', 'user', 'disable:quota', names[3]], [22000, 'ResetJob', 'user', 'reset', names[1]],
+    [30500, 'admin', 'backup', 'create', 'm-ui-demo.zip'], [41000, 'admin', 'settings', 'update', ['backupHour', 'backupKeep']],
+    [52000, 'admin', 'ops', 'run:tune-all', ''], [66000, 'admin', 'node', 'group-rename', { from: 'Asia', to: 'APAC' }],
+    [80000, 'api:shop', 'user', 'plan:extend:Basic', names[3]], [93000, 'admin', 'admin', 'totp:enable', ''],
+  ].map(([ago, actor, key, action, obj], i, all) => ({ id: all.length - i + 100, dateTime: now() - ago, actor, key, action, obj }));
+  const jobs = ['ResetJob', 'DepleteJob', 'RuleJob'];
+  return rows.filter(r => (!q.get('key') || r.key === q.get('key')) && (q.get('actor') !== 'human' || !jobs.includes(r.actor))).slice(0, Number(q.get('limit')) || 300);
+}
+
 function status() {
   const s = fx('GET status') || {};
   s.users = S.users.length; s.enabledUsers = S.users.filter(u => u.enabled).length; s.lines = S.lines.length; s.linesEnabled = S.lines.filter(l => l.enabled).length;
@@ -556,6 +591,9 @@ function route(method, path, query, body) {
         const k = tag ? `GET stats?resource=user&tag=${tag}&hours=${hours}&bucket=${bucket}` : `GET stats?resource=user&hours=${hours}&bucket=${bucket}`;
         return fx(k) ?? listByPrefix('stats') ?? []; }
       case 'backup': if (seg[1] === 'list') return clone(demoBackupList()); return listByPrefix(path) ?? {};
+      case 'sublogs': return demoSubLogs(query);
+      case 'audit': { const lim = Number(new URLSearchParams(query).get('limit')) || 0; return lim && lim <= 40 ? (S.logsCleared.audit ? [] : listByPrefix(path) ?? []) : demoAudit(query); } // 概况「最近操作」沿用导出的那份,日志页用现编的
+      case 'logs': return S.logsCleared.core ? [] : listByPrefix(path) ?? [];
       case 'keygen': { const t = new URLSearchParams(query).get('type');
         if (t === 'uuid') return { uuid: crypto.randomUUID() };
         if (t === 'port') return { port: 10000 + Math.floor(Math.random() * 55000) };
@@ -577,6 +615,11 @@ function route(method, path, query, body) {
     case 'login': return { username: 'admin' };
     case 'logout': return ok();
     case 'settings': Object.assign(S.settings, body || {}); return ok({ note: 'Demo mode' });
+    case 'logs': // 清空某一类日志;改「记录日志」开关和记录级别
+      if (method === 'DELETE') { S.logsCleared[new URLSearchParams(query).get('kind') || 'core'] = true; return ok(); }
+      if (body && body.enabled !== undefined) S.settings.logEnabled = String(body.enabled);
+      if (body && body.level) S.settings.coreLogLevel = body.level;
+      return ok();
     case 'sub-logo': if (method === 'DELETE') { S.logo = null; return { set: false }; } S.logo = logoOf(body && body.data); return clone(S.logo);
     case 'users': {
       if (seg[1] === 'batch') { const { ids = [], action, days = 0 } = body || {}; let n = 0;
