@@ -651,14 +651,9 @@ svg.chart.bars g.bar.hot .hit { fill: var(--surface-3); }
 svg.chart.bars .grid { stroke: var(--chart-grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
 svg.chart.bars .ylab, svg.chart.bars .xlab { fill: var(--faint); font-size: 11px; font-family: var(--font); font-variant-numeric: tabular-nums; }
 
-/* 管理员页:2FA 与外部 API */
-.totp-setup { display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; margin-top: .6rem; }
-.totp-setup img.qr { width: 150px; height: 150px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; padding: 6px; }
-.totp-side { flex: 1; min-width: 260px; }
-.totp-side .label { font-size: .8rem; color: var(--muted); margin-bottom: .3rem; }
+/* 小标题(证书页「用在哪」)与代码块 */
 .sub-title { font-size: .9rem; margin: 1rem 0 .4rem; }
 pre.code { white-space: pre-wrap; word-break: break-all; }
-table.api-doc td.mono { font-family: var(--mono); font-size: .78rem; white-space: nowrap; }
 
 /* 副机只读:由主机下发的页面隐藏增删改入口 */
 .alert-bar.info { border-color: color-mix(in srgb, var(--primary) 28%, transparent); background: var(--primary-soft); color: var(--primary-text); margin: 0 0 1rem; }
@@ -812,7 +807,6 @@ button.reach-cell:focus-visible { outline: 2px solid var(--primary); outline-off
 .plan-ops { list-style: none; margin: 0; padding: 0; font-size: .8rem; }
 .plan-ops li { padding: .35rem 0; border-bottom: 1px dashed var(--border); line-height: 1.5; }
 .plan-ops li:last-child { border-bottom: none; }
-details.api-list { margin-top: .6rem; }
 @media (max-width: 700px) { .pc-cols { grid-template-columns: 1fr; } }
 /* ===== 主机容灾:服务器列表的角色标签与小卡片、设为主机的确认框与进度、设置页 ===== */
 button.role-chip { display: inline-flex; align-items: center; gap: .22rem; font: inherit; font-size: .72rem; line-height: 1.35; padding: .12rem .42rem .12rem .55rem; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); cursor: pointer; white-space: nowrap; vertical-align: middle; margin-right: .25rem; }
@@ -1151,17 +1145,6 @@ button.badge { cursor: pointer; font: inherit; font-size: .72rem; }
   .set-ctl input[type=number] { max-width: none; }
 }
 .stat .s:empty::before { content: "\00a0"; }
-
-/* 外部 API 附加密钥:权限两列勾选(手机一列),每项一行名称一行说明 */
-.perm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .35rem .8rem; margin-top: .6rem; }
-.perm-item { display: flex; gap: .45rem; align-items: flex-start; padding: .4rem .5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
-.perm-item input { margin-top: .15rem; flex: none; }
-.perm-item span { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
-.perm-item b { font-weight: 600; font-size: .85rem; }
-.perm-item small { font-size: .74rem; line-height: 1.35; }
-.api-keys td { vertical-align: middle; }
-#apiip-list { width: 100%; font-family: var(--mono); font-size: .82rem; }
-@media (max-width: 700px) { .perm-grid { grid-template-columns: 1fr; } }
 
 /* 限时彩蛋的位置(见 js/xmas.js):空着不占位 */
 .xmas-slot { display: inline-flex; align-items: center; }
@@ -1582,3 +1565,107 @@ body:has(.savebar:not([hidden])) .toast { bottom: 5.4rem; }
 .hrow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hrow b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .hrow .err { grid-column: 2 / -1; color: var(--danger-text); overflow-wrap: anywhere; line-height: 1.45; }
+
+/* ---- 管理员页 / 代理「账号」页 ----
+   账号与两步验证各一张小卡片并排:看一眼就知道现在是谁、上次从哪登录、两步验证开没开,改动都在弹框里做。 */
+.adm-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+.adm-top > .card { margin: 0; display: flex; flex-direction: column; }
+@media (max-width: 860px) { .adm-top { grid-template-columns: 1fr; } }
+.card-acts { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: auto; padding-top: .95rem; }
+.card-acts.end { justify-content: flex-end; margin-top: 1.1rem; padding-top: 0; }
+.adm-who { display: flex; align-items: center; gap: .8rem; min-width: 0; }
+.adm-who > div { min-width: 0; }
+.adm-ava { width: 44px; height: 44px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); font-size: 21px; }
+.adm-who b { display: block; font-size: var(--fs-lg); line-height: 1.35; overflow-wrap: anywhere; }
+.adm-who .sep { margin: 0 .4em; color: var(--faint); }
+.i-user { --i: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='8.4' r='3.7'/%3E%3Cpath d='M4.8 19.6c1-3.4 3.8-5.3 7.2-5.3s6.2 1.9 7.2 5.3'/%3E%3C/svg%3E"); }
+
+/* 两步验证的设置弹框:左边二维码,右边两步(扫码 / 填验证码) */
+.totp-setup { display: flex; gap: 1.3rem; align-items: flex-start; }
+.totp-setup img.qr { width: 156px; height: 156px; margin: 0; flex: none; }
+.totp-steps { list-style: none; counter-reset: step; margin: 0; padding: 0; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1.05rem; }
+.totp-steps li { counter-increment: step; position: relative; padding-left: 2.15rem; display: flex; flex-direction: column; gap: .3rem; }
+.totp-steps li::before { content: counter(step); position: absolute; left: 0; top: -.08rem; width: 1.5rem; height: 1.5rem; border-radius: 50%; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary-text); font-size: var(--fs-xs); font-weight: 600; }
+.totp-steps .sub-box { margin: .15rem 0 0; }
+.totp-code { max-width: 10.5rem; margin-top: .15rem; font-family: var(--mono); font-size: 1.15rem; letter-spacing: .32em; text-align: center; }
+@media (max-width: 560px) { .totp-setup { flex-direction: column; align-items: center; } .totp-steps { width: 100%; } }
+
+/* 外部 API 卡片:接口地址一行、密钥一张表 */
+.api-off { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; margin-top: .85rem; }
+.api-url { display: flex; align-items: center; gap: .5rem; min-width: 0; margin-top: .9rem; padding: .4rem .45rem .4rem .8rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.api-url .lbl { flex: none; font-size: var(--fs-xs); font-weight: 500; color: var(--muted); }
+.api-url code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.api-url .btn { flex: none; }
+/* 窄屏:地址自己占一行、完整折行显示,两个按钮落到下一行靠右 */
+@media (max-width: 560px) {
+  .api-url { flex-wrap: wrap; justify-content: flex-end; padding: .55rem .6rem; }
+  .api-url code { flex: 1 1 calc(100% - 5rem); white-space: normal; word-break: break-all; }
+}
+.api-keys-head { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin: 1.25rem 0 .6rem; min-height: var(--ctl-h-sm); }
+.api-keys-head h3 { margin: 0; font-size: var(--fs-base); }
+.api-keys-head .n { margin-left: .45rem; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+.api-empty { padding: 1.6rem 1rem; text-align: center; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); }
+.api-empty p { margin: 0 0 .8rem; color: var(--muted); font-size: var(--fs-sm); }
+table.api-keys td { vertical-align: middle; }
+table.api-keys tr.off td:not(.actions) { opacity: .5; }
+table.api-keys td.actions { white-space: nowrap; }
+table.api-keys td.actions .switch { margin-right: .4rem; }
+.key-tok { display: inline-flex; align-items: center; gap: .2rem; white-space: nowrap; }
+.key-tok code, .key-ip { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.key-ipn { border-bottom: 1px dotted var(--border-strong); cursor: help; }
+.chip.all { background: var(--primary-soft); border-color: transparent; color: var(--primary-text); }
+
+/* 新建 / 编辑一把密钥:名称 → 密钥 → 权限(两列勾选,勾上的整格着色)→ 允许的来源 */
+.ak-form { display: flex; flex-direction: column; gap: .85rem; }
+.ak-sec { display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; margin: .3rem 0 -.3rem; font-size: var(--fs-sm); }
+.ak-sec b { font-weight: 600; color: var(--text-2); }
+.ak-quick { display: inline-flex; gap: .95rem; }
+.ak-quick .link-btn { color: var(--primary-text); font-size: var(--fs-xs); }
+.ak-quick .link-btn:hover { text-decoration: underline; }
+.ak-tok { margin: 0; }
+.perm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem .6rem; }
+.perm-item { display: flex; gap: .5rem; align-items: flex-start; padding: .45rem .6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; transition: border-color .12s, background .12s; }
+.perm-item:hover { border-color: var(--border-strong); }
+.perm-item:has(input:checked) { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); background: var(--primary-soft); }
+.perm-item input { margin-top: .18rem; flex: none; }
+.perm-item span { display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+.perm-item b { font-weight: 600; font-size: var(--fs-sm); }
+.perm-item small { font-size: var(--fs-xs); line-height: 1.4; }
+@media (max-width: 700px) { .perm-grid { grid-template-columns: 1fr; } }
+#ak-from { align-self: flex-start; }
+#ak-ipbox { display: flex; flex-direction: column; gap: .45rem; }
+#ak-ipbox[hidden] { display: none; }
+#ak-ips { width: 100%; min-height: 4.6rem; font-family: var(--mono); font-size: 12.5px; }
+.ak-you { display: flex; align-items: center; gap: .4rem; font-size: var(--fs-sm); color: var(--muted); }
+#ak-ipbox .hint { margin: 0; }
+
+/* 接口文档(右侧抽屉):每个接口两行 —— 方法 + 路径 + 需要的权限,下面一行说明 */
+.doc-how .kv { margin-top: .75rem; align-items: center; }
+.doc-how .sub-box { margin: 0; }
+.doc-how > .hint { margin-top: 0; }
+.ep-list { display: flex; flex-direction: column; }
+.ep { display: grid; grid-template-columns: 5.2rem minmax(0, 1fr) auto; gap: .15rem .8rem; align-items: baseline; padding: .55rem 0; border-top: 1px solid var(--divider); }
+.ep:first-child { border-top: none; padding-top: .1rem; }
+.ep:last-child { padding-bottom: 0; }
+.ep-m { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+.ep-m.get { color: var(--ok-text); }
+.ep-m.post { color: var(--primary-text); }
+.ep-m.put { color: var(--warn-text); }
+.ep-m.del { color: var(--danger-text); }
+.ep-p { font-family: var(--mono); font-size: 12.5px; color: var(--text); overflow-wrap: anywhere; }
+.ep-d { grid-column: 2 / -1; font-size: var(--fs-sm); color: var(--muted); line-height: 1.55; }
+.ep-perm { justify-self: end; padding: 0 .4rem; border: 1px solid var(--border); border-radius: var(--radius-xs); font-size: var(--fs-xs); line-height: 1.6; color: var(--muted); white-space: nowrap; }
+@media (max-width: 560px) { .ep { grid-template-columns: 4.6rem minmax(0, 1fr); } .ep-perm { grid-column: 2; order: 3; justify-self: start; margin-top: .15rem; } .ep-d { grid-column: 2; } }
+.doc-note { margin: 0 0 1.1rem; }
+.doc-ex-head { display: flex; align-items: center; gap: .5rem; margin-bottom: .55rem; }
+.doc-ex-head h3 { flex: 1; margin: 0; }
+.doc-ex-head select { width: auto; max-width: 12rem; }
+pre.doc-ex { max-height: none; }
+
+/* 代理「账号」页:我的额度五格(比详情抽屉里的四格多一格限速);订阅页的两个开关并排 */
+.acct-sum { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 0; }
+/* 五格排不满一行时,第一格(已用流量,带进度条)占两格:3 列时 2+1 / 3,2 列时整行 / 2 / 2,不留空位 */
+@media (max-width: 1100px) { .acct-sum { grid-template-columns: repeat(3, minmax(0, 1fr)); } .acct-sum > :first-child { grid-column: span 2; } }
+@media (max-width: 640px) { .acct-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); } .acct-sum > :first-child { grid-column: 1 / -1; } }
+.acct-sw { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; margin: .85rem 0 1rem; }
+@media (max-width: 760px) { .acct-sw { grid-template-columns: 1fr; } }

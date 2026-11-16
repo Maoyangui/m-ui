@@ -54,7 +54,7 @@
     <ol class="steps">
       <li>Open <code>http://SERVER-IP:2053/app/</code> (use the port and path printed at the end of the installation).</li>
       <li>Sign in with the default account <code>admin</code> / <code>admin</code>.</li>
-      <li>A red bar at the top warns about the default password. Click <b data-k="alert.changeNow">Change now</b>; on the <b data-k="nav.admin">Admin</b> page, under <b data-k="adm.account">Login account</b>, fill in <b data-k="set.oldPass">Current password</b> and <b data-k="set.newPass">New password</b>, click <b data-k="set.updateAdmin">Update account</b>, then sign in again with the new password.</li>
+      <li>A red bar at the top warns about the default password. Click <b data-k="alert.changeNow">Change now</b>; on the <b data-k="nav.admin">Admin</b> page, click <b data-k="adm.accountEdit">Change username / password</b> on the <b data-k="adm.account">Login account</b> card, fill in <b data-k="set.oldPass">Current password</b> and <b data-k="set.newPass">New password</b> in the dialog (you can change the username at the same time), click <b data-k="set.updateAdmin">Update account</b>, then sign in again with the new password.</li>
     </ol>
     <div class="pit"><b>Common pitfalls</b><ul>
       <li>Opening just <code>http://SERVER-IP:2053/</code> gives a 404 on purpose: the panel path is not revealed to port scanners. Always include the full path.</li>
@@ -854,11 +854,11 @@
     <h3>Account page</h3>
     <p class="lede">The reseller panel's <b data-k="nav.account">Account</b> page holds your sign-in security, your quota, and the subscription page your users see.</p>
     <ul>
-      <li><b data-k="acct.quota">My quota</b>: traffic used, the device pool (online / limit, and the total handed out to users), bandwidth, expiry and number of users. When the device pool is full it also says how many new devices were refused recently.</li>
-      <li><b data-k="acct.password">Password</b>: change your password.</li>
+      <li><b data-k="acct.quota">My quota</b>: a row of five tiles: traffic used, number of users, the device pool (online / limit, with the total handed out to users underneath), bandwidth and expiry; a tile changes colour when it is nearly used up or about to expire. When the device pool is full its tile says how many new devices were refused recently.</li>
+      <li><b data-k="acct.password">Password</b>: click <b data-k="acct.passEdit">Change password</b>.</li>
       <li><b data-k="adm.totp">Two-factor authentication (2FA)</b>: see <a href="#sec-account">Account and two-factor authentication</a>.</li>
       <li><b data-k="set.subPage">Subscription page</b>: the texts your users see: <b data-k="set.subTitle">Profile title</b> (the subscription name shown in apps), <b data-k="set.subPageTitle">Page title</b>, <b data-k="set.subPageSupport">Footer contact</b>, <b data-k="set.subPageBuyURL">Purchase / renew link</b> and <b data-k="set.subPageNotice">Notice (multi-line)</b>; empty fields use the main panel's. You can also turn off the page or temporary sharing for your users.</li>
-      <li><b data-k="set.subPageLogo">Landing page logo</b>: upload your own logo, which applies at once; without one, the main panel's is used.</li>
+      <li><b data-k="set.subPageLogo">Landing page logo</b>: upload your own logo, which applies at once; without one, the main panel's is used. After changing the other fields, click <b data-k="acct.pageSave">Save subscription page</b> at the bottom of the card.</li>
       <li><b data-k="acct.api">External API</b>: for your own shop or bot (see <a href="#api">External API</a>).</li>
     </ul>
   </section>
@@ -1206,35 +1206,37 @@
 <div class="part" data-title="More and help">
 <section class="chap" id="api">
   <h2>External API</h2>
-  <p class="lede">For shops, billing systems and bots: with one token they can create users, renew, change plans, enable or disable users and fetch subscription links, without signing in to the panel.</p>
+  <p class="lede">For shops, billing systems and bots: with a key they can create users, renew, change plans, enable or disable users and fetch subscription links, without signing in to the panel.</p>
 
   <section class="sec" id="api-on">
-    <h3>Turning it on</h3>
+    <h3>Turning it on and getting a key</h3>
     <ol class="steps">
-      <li data-scope="admin"><b data-k="nav.admin">Admin</b> page → <b data-k="adm.api">External API</b>: turn on the switch at the top right of the card (hovering it shows <b data-k="adm.apiToggle">Enable / disable the external API</b>), then copy the <b data-k="adm.apiBase">Base URL</b> and the <b data-k="adm.apiToken">Token</b>.</li>
-      <li data-scope="reseller"><b data-k="nav.account">Account</b> page → <b data-k="acct.api">External API</b>: turn on the switch at the top right of the card (hovering it shows <b data-k="acct.apiEnable">Enable external API</b>), then copy the <b data-k="acct.apiBase">Base URL</b> and the <b data-k="acct.apiToken">Token</b>.</li>
-      <li>Send the token with every request: the header <code>Authorization: Bearer TOKEN</code> (or <code>X-API-Key: TOKEN</code>), with JSON request bodies.</li>
-      <li>Once it is on, <b data-k="adm.apiEndpoints">Endpoints</b> (what each call does) and an <b data-k="adm.apiExample">Example (curl)</b> with your base URL and token filled in appear below the token, ready to copy; while it is off the endpoint list is folded away but can still be read.</li>
+      <li data-scope="admin"><b data-k="nav.admin">Admin</b> page → <b data-k="adm.api">External API</b>: turn on the switch at the top right of the card (hovering it shows <b data-k="adm.apiToggle">Enable / disable the external API</b>). The first time, a <b data-k="api.keyDefault">Default key</b> is created automatically.</li>
+      <li data-scope="reseller"><b data-k="nav.account">Account</b> page → <b data-k="acct.api">External API</b>: turn on the switch at the top right of the card. The first time, a <b data-k="api.keyDefault">Default key</b> is created automatically.</li>
+      <li>Copy the <b data-k="adm.apiBase">Base URL</b>, then in the <b data-k="api.keys">Keys</b> list below click <b data-k="common.copy">Copy</b> next to a key to get it.</li>
+      <li>Send the key with every request: the header <code>Authorization: Bearer KEY</code> (or <code>X-API-Key: KEY</code>), with JSON request bodies.</li>
+      <li>Click <b data-k="adm.apiDocsBtn">API reference</b>: a panel slides in from the right with every endpoint (and the permission each one needs) and an <b data-k="adm.apiExample">Example (curl)</b>. The examples already contain your base URL, and you can choose which key to fill in at the top right, so the whole block can be copied and run. The reference can be read even while the external API is off.</li>
     </ol>
     <div class="pit"><b>Common pitfalls</b><ul>
-      <li>The token carries all of your panel permissions: keep it in server-side code only, never in a web page or an app. If it leaks, click <b data-k="adm.apiRotate">Regenerate</b> and the old token stops working at once.</li>
+      <li>Keep keys in server-side code only, never in a web page or an app. If one leaks, use <b data-k="common.more">More</b> → <b data-k="api.keyRotate">Regenerate</b> in the list and the old one stops working at once.</li>
       <li data-scope="admin">Call the API on the master only; write calls on a node are refused.</li>
-      <li data-scope="reseller">A reseller token only reaches your own users, your own plans and the lines you were allowed; it stops working as soon as you are disabled, expire or have your password reset.</li>
+      <li data-scope="reseller">A reseller key only reaches your own users, your own plans and the lines you were allowed. Keys stop working as soon as you are disabled or expire; when the site owner resets your password every key is revoked and new ones have to be created.</li>
     </ul></div>
   </section>
 
   <section class="sec" id="api-keys">
-    <h3>Multiple keys, permissions and the source IP allowlist</h3>
+    <h3>Multiple keys: permissions and allowed sources per key</h3>
     <ol class="steps">
-      <li>The token above is the <b>default key</b>: it can do everything and keeps working after the upgrade. While the external API is on, the card also has <b data-k="api.keys">Extra keys</b>: click <b data-k="api.keyAdd">New key</b>, give it a name (say "Shop" or "Telegram bot") and tick only the permissions it needs.</li>
-      <li>Seven permissions: <b data-k="api.perm.users.read">View users</b>, <b data-k="api.perm.users.create">Create users</b>, <b data-k="api.perm.users.update">Change users</b> (edit fields, enable / disable, reset usage, kick, reset the subscription link), <b data-k="api.perm.users.delete">Delete users</b>, <b data-k="api.perm.billing">Renew &amp; change plans</b>, <b data-k="api.perm.plans.read">View plans</b> and <b data-k="api.perm.panel.read">Panel info</b> (overview, servers, lines, online users). Calling something a key is not allowed to do returns 403 naming the missing permission.</li>
-      <li>Each key has its own <b data-k="common.edit">Edit</b>, <b data-k="api.keyRotate">Regenerate</b> (the old token stops working at once) and <b data-k="common.delete">Delete</b> buttons; the list shows when and from which IP it was last used. With the master switch off, no key works.</li>
-      <li><b data-k="api.ip">Source IP allowlist</b>: off by default. When on, only the listed IPs or ranges can call the API (default and extra keys alike), one per line; the page shows your current source IP and <b data-k="api.ipAddMe">Add it</b> puts it on the list.<span data-scope="admin"> The main panel and every reseller have their own list.</span></li>
+      <li>All keys live in one table, the <b data-k="api.keyDefault">Default key</b> included, and it can be edited like any other. Click <b data-k="api.keyAdd">New key</b>, give it a name (say "Shop" or "Telegram bot") and tick only the permissions it needs.</li>
+      <li>Seven permissions: <b data-k="api.perm.users.read">View users</b>, <b data-k="api.perm.users.create">Create users</b>, <b data-k="api.perm.users.update">Change users</b> (edit fields, enable / disable, reset usage, kick, reset the subscription link), <b data-k="api.perm.users.delete">Delete users</b>, <b data-k="api.perm.billing">Renew &amp; change plans</b>, <b data-k="api.perm.plans.read">View plans</b> and <b data-k="api.perm.panel.read">Panel info</b> (overview, servers, lines, online users). Calling something a key is not allowed to do returns 403 naming the missing permission. The dialog has two shortcuts, <b data-k="api.pickAll">All</b> and <b data-k="api.pickRead">Read-only</b>.</li>
+      <li><b data-k="api.from">Allowed sources</b>: set per key, <b data-k="api.fromAny">Any</b> by default. Choose <b data-k="api.fromOnly">Only listed IPs</b> and enter one IP or range per line (IPv4 or IPv6); any other source using this key gets a 403. The dialog shows your current IP, and <b data-k="api.ipAddMe">Add it</b> puts it on the list.</li>
+      <li>The switch at the end of each row disables or enables that one key; <b data-k="common.edit">Edit</b> changes its name, permissions and sources; <b data-k="common.more">More</b> has <b data-k="api.keyRotate">Regenerate</b> (the old key stops working at once) and <b data-k="common.delete">Delete</b>. The list shows when and from which IP each key was last used. With the master switch off, no key works.</li>
     </ol>
-    <div class="tip"><b>Suggested</b>Give your shop one key with View users + Create users + Renew &amp; change plans + View plans, and your Telegram bot a read-only key with View users + Panel info; if the shop server has a fixed IP, turn the allowlist on too.</div>
+    <div class="tip"><b>Suggested</b>Give your shop one key with View users + Create users + Renew &amp; change plans + View plans, and your Telegram bot a read-only key with View users + Panel info; if the shop server has a fixed IP, restrict that key to it as well.</div>
     <div class="pit"><b>Common pitfalls</b><ul>
       <li>Behind a reverse proxy (Nginx, Caddy …), first fill in Trusted reverse proxies under <b data-k="nav.settings">Settings</b> → Panel, otherwise every request seems to come from the proxy itself.</li>
-      <li>Extra keys only work on the master; with master failover on, they keep working after a standby takes over.</li>
+      <li>Upgrading from an older version: the old token is now the <b data-k="api.keyDefault">Default key</b>, so integrations keep working unchanged; the old panel-wide source IP allowlist is copied onto every existing key, and from then on each key is edited on its own.</li>
+      <li>Keys only work on the master; with master failover on, they keep working after a standby takes over.</li>
     </ul></div>
   </section>
 
@@ -1269,7 +1271,7 @@
       <li>Preview: <code>"dryRun": true</code> only calculates and returns before / after, which a shop can use for quotes.</li>
       <li>No duplicates (idempotency): send a <code>requestId</code> (or the <code>Idempotency-Key</code> header, such as your order number) and retries with the same id run only once, so time is never added twice.</li>
       <li>Downgrade confirmation: if a plan change would put the user over quota at once or bring the expiry forward, the API answers 409 with the full preview; call again with <code>"force": true</code> to go ahead.</li>
-      <li>Calls marked <b data-k="adm.apiIdem">idempotent</b> and <b data-k="adm.apiDry">dry run</b> in the panel's endpoint list support these.</li>
+      <li>Calls marked <b data-k="adm.apiIdem">idempotent</b> and <b data-k="adm.apiDry">dry run</b> in the panel's <b data-k="adm.apiDocsBtn">API reference</b> support these.</li>
       <li>Renewals and plan changes are explicit sales: users disabled by hand are enabled as well, so do not renew someone you want to keep disabled.</li>
     </ul>
   </section>
@@ -1282,9 +1284,9 @@
   <section class="sec" id="sec-account">
     <h3>Account and two-factor authentication</h3>
     <ul>
-      <li data-scope="admin">Change the password or username: <b data-k="adm.account">Login account</b> on the <b data-k="nav.admin">Admin</b> page.</li>
-      <li data-scope="reseller">Change the password: <b data-k="acct.password">Password</b> on the <b data-k="nav.account">Account</b> page.</li>
-      <li><b data-k="adm.totp">Two-factor authentication (2FA)</b>: click <b data-k="adm.totpGen">Generate secret</b>, scan the QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password…), enter the 6-digit code it shows and click <b data-k="adm.totpVerify">Verify &amp; enable</b>. From then on signing in needs the password plus a code.</li>
+      <li data-scope="admin">Change the password or username: click <b data-k="adm.accountEdit">Change username / password</b> on the <b data-k="adm.account">Login account</b> card of the <b data-k="nav.admin">Admin</b> page. The card also shows when and from which IP you last signed in.</li>
+      <li data-scope="reseller">Change the password: click <b data-k="acct.passEdit">Change password</b> on the <b data-k="acct.password">Password</b> card of the <b data-k="nav.account">Account</b> page.</li>
+      <li><b data-k="adm.totp">Two-factor authentication (2FA)</b>: click <b data-k="adm.totpStart">Enable 2FA</b>, scan the QR code in the dialog with an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password…), enter the 6-digit code it shows and click <b data-k="adm.totpVerify">Verify &amp; enable</b>. From then on signing in needs the password plus a code. Closing the dialog halfway is fine: click <b data-k="adm.totpResume">Continue</b> on the card to scan the same code again.</li>
       <li data-scope="admin">Lost your phone? SSH in and run <code>m-ui</code>: option 13 turns two-factor authentication off; resetting the password with option 5 turns it off too.</li>
       <li data-scope="reseller">Lost your phone or password? Ask the site owner to reset your password on the main panel (two-factor authentication is cleared with it).</li>
     </ul>
@@ -1308,7 +1310,7 @@
       <li>The panel port is not covered: users can still open <code>SERVER-PUBLIC-IP:PANEL-PORT</code> through the proxy; on the many VPSes whose public IP sits on the network card, that traffic goes through the server's loopback, so firewall IP allow-lists do not stop it. Do not rely on allow-lists alone to protect a panel: change the default port and path, use a strong password and turn on two-factor authentication.</li>
       <li><b data-k="set.blockBT">Block BitTorrent</b>: refuses BitTorrent through the proxy so your VPS does not attract copyright complaints.</li>
       <li>Give nodes HTTPS API URLs; otherwise tokens and user credentials are synced in plain text.</li>
-      <li>Backup zips contain user credentials and private keys, and the external API token equals admin rights: keep all of them safe.</li>
+      <li>Backup zips contain user credentials and private keys, and an external API key with every permission equals admin rights: keep all of them safe.</li>
     </ul>
   </section>
 

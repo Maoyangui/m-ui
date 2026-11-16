@@ -54,7 +54,7 @@
     <ol class="steps">
       <li>打开 <code>http://服务器IP:2053/app/</code>(端口和路径以安装结束时打印的为准)。</li>
       <li>用默认账号 <code>admin</code> / <code>admin</code> 登录。</li>
-      <li>顶部红条提示还是默认密码:点 <b data-k="alert.changeNow">立即修改</b>,在 <b data-k="nav.admin">管理员</b> 页的 <b data-k="adm.account">登录账号</b> 里填 <b data-k="set.oldPass">原密码</b> 和 <b data-k="set.newPass">新密码</b>,点 <b data-k="set.updateAdmin">更新账号</b>,然后用新密码重新登录。</li>
+      <li>顶部红条提示还是默认密码:点 <b data-k="alert.changeNow">立即修改</b>,到 <b data-k="nav.admin">管理员</b> 页的 <b data-k="adm.account">登录账号</b> 卡片点 <b data-k="adm.accountEdit">修改用户名 / 密码</b>,在弹出的框里填 <b data-k="set.oldPass">原密码</b> 和 <b data-k="set.newPass">新密码</b>(用户名可以顺便改),点 <b data-k="set.updateAdmin">更新账号</b>,然后用新密码重新登录。</li>
     </ol>
     <div class="pit"><b>常见坑</b><ul>
       <li>只打开 <code>http://服务器IP:2053/</code> 会是 404,这是故意的:不把面板路径告诉扫端口的人。地址要带上完整路径。</li>
@@ -854,11 +854,11 @@
     <h3>账号页</h3>
     <p class="lede">代理面板的 <b data-k="nav.account">账号</b> 页管登录安全、额度,以及你的用户看到的订阅页。</p>
     <ul>
-      <li><b data-k="acct.quota">我的额度</b>:已用流量、设备池(在线 / 上限,以及已分配给用户的总数)、带宽、到期、用户数。设备池满时这里会写最近拒绝了几台新设备。</li>
-      <li><b data-k="acct.password">登录密码</b>:改密码。</li>
+      <li><b data-k="acct.quota">我的额度</b>:一排五格 —— 已用流量、用户数、设备池(在线 / 上限,下面是已分配给用户的总数)、带宽、到期;快用完、快到期的那一格会变色。设备池满时那一格会写最近拒绝了几台新设备。</li>
+      <li><b data-k="acct.password">登录密码</b>:点 <b data-k="acct.passEdit">修改密码</b>。</li>
       <li><b data-k="adm.totp">两步验证(2FA)</b>:见 <a href="#sec-account">账号与两步验证</a>。</li>
       <li><b data-k="set.subPage">订阅页</b>:你名下用户看到的订阅页文案:<b data-k="set.subTitle">订阅标题(Profile-Title)</b>(客户端里显示的名字)、<b data-k="set.subPageTitle">页面标题</b>、<b data-k="set.subPageSupport">页脚联系方式</b>、<b data-k="set.subPageBuyURL">选购 / 续费链接</b>、<b data-k="set.subPageNotice">公告(支持换行)</b>;留空就用主面板的。也能单独关掉订阅页或临时共享。</li>
-      <li><b data-k="set.subPageLogo">落地页 logo</b>:上传你自己的 logo,上传即生效;没设时用主面板的。</li>
+      <li><b data-k="set.subPageLogo">落地页 logo</b>:上传你自己的 logo,上传即生效;没设时用主面板的。其余几项改完点卡片底部的 <b data-k="acct.pageSave">保存订阅页设置</b>。</li>
       <li><b data-k="acct.api">外部 API</b>:给你自己的商城、机器人用(见 <a href="#api">外部 API</a>)。</li>
     </ul>
   </section>
@@ -1206,41 +1206,43 @@
 <div class="part" data-title="进阶与帮助">
 <section class="chap" id="api">
   <h2>外部 API</h2>
-  <p class="lede">给商城、计费系统、机器人用:凭一个令牌就能建号、续费、换套餐、启停、取订阅地址,不用登录面板。</p>
+  <p class="lede">给商城、计费系统、机器人用:凭一把密钥就能建号、续费、换套餐、启停、取订阅地址,不用登录面板。</p>
 
   <section class="sec" id="api-on">
-    <h3>开启与令牌</h3>
+    <h3>开启与密钥</h3>
     <ol class="steps">
-      <li data-scope="admin"><b data-k="nav.admin">管理员</b> 页 → <b data-k="adm.api">外部 API</b>:打开卡片右上角的开关(鼠标停上去写着 <b data-k="adm.apiToggle">开启 / 关闭外部 API</b>),复制 <b data-k="adm.apiBase">接口前缀</b> 和 <b data-k="adm.apiToken">令牌</b>。</li>
-      <li data-scope="reseller"><b data-k="nav.account">账号</b> 页 → <b data-k="acct.api">外部 API</b>:打开卡片右上角的开关(鼠标停上去写着 <b data-k="acct.apiEnable">开启外部 API</b>),复制 <b data-k="acct.apiBase">接口前缀</b> 和 <b data-k="acct.apiToken">令牌</b>。</li>
-      <li>每个请求带上令牌:请求头 <code>Authorization: Bearer 令牌</code>(或 <code>X-API-Key: 令牌</code>),请求体用 JSON。</li>
-      <li>开启后令牌下面有 <b data-k="adm.apiEndpoints">接口一览</b>(每个接口的说明)和 <b data-k="adm.apiExample">示例(curl)</b>(已经填好你的接口前缀和令牌),可以直接照抄;没开时接口一览折叠着,也能先看。</li>
+      <li data-scope="admin"><b data-k="nav.admin">管理员</b> 页 → <b data-k="adm.api">外部 API</b>:打开卡片右上角的开关(鼠标停上去写着 <b data-k="adm.apiToggle">开启 / 关闭外部 API</b>)。第一次打开会自动生成一把 <b data-k="api.keyDefault">默认密钥</b>。</li>
+      <li data-scope="reseller"><b data-k="nav.account">账号</b> 页 → <b data-k="acct.api">外部 API</b>:打开卡片右上角的开关。第一次打开会自动生成一把 <b data-k="api.keyDefault">默认密钥</b>。</li>
+      <li>复制 <b data-k="adm.apiBase">接口地址</b>,再在下面 <b data-k="api.keys">密钥</b> 列表里点那一把后面的 <b data-k="common.copy">复制</b> 拿到密钥。</li>
+      <li>每个请求带上密钥:请求头 <code>Authorization: Bearer 密钥</code>(或 <code>X-API-Key: 密钥</code>),请求体用 JSON。</li>
+      <li>点 <b data-k="adm.apiDocsBtn">接口文档</b>,右侧会滑出全部接口(每个接口需要哪项权限也写着)和 <b data-k="adm.apiExample">示例(curl)</b>;示例里已经填好你的接口地址,右上角可以选填哪一把密钥,整段复制就能跑。没开外部 API 时也能先看文档。</li>
     </ol>
     <div class="pit"><b>常见坑</b><ul>
-      <li>令牌等于你在面板里的全部权限,只放在服务端程序里,不要写进网页或客户端。泄露了就点 <b data-k="adm.apiRotate">重新生成</b>,旧令牌立刻失效。</li>
+      <li>密钥只放在服务端程序里,不要写进网页或客户端。泄露了就在列表里点 <b data-k="common.more">更多</b> → <b data-k="api.keyRotate">重新生成</b>,旧的立刻失效。</li>
       <li data-scope="admin">接口只在主服务器上调用;副机上的写操作会被拒绝。</li>
-      <li data-scope="reseller">代理的令牌只能动你名下的用户、你自己的套餐和站长授权给你的线路;代理被停用、到期或被重置密码后,令牌立刻失效。</li>
+      <li data-scope="reseller">代理的密钥只能动你名下的用户、你自己的套餐和站长授权给你的线路;代理被停用、到期后密钥立刻不能用,被站长重置密码后全部密钥作废,要重新生成。</li>
     </ul></div>
   </section>
 
   <section class="sec" id="api-keys">
-    <h3>多把密钥、权限与来源 IP 白名单</h3>
+    <h3>多把密钥:各自的权限与允许的来源</h3>
     <ol class="steps">
-      <li>上面那一把是 <b>默认密钥</b>,全部权限,升级以后照旧可用。开着外部 API 时卡片里还有 <b data-k="api.keys">附加密钥</b>:点 <b data-k="api.keyAdd">新建密钥</b>,起个名字(比如「商城」「TG 机器人」),只勾它需要的权限。</li>
-      <li>七项权限:<b data-k="api.perm.users.read">查看用户</b>、<b data-k="api.perm.users.create">创建用户</b>、<b data-k="api.perm.users.update">修改用户</b>(改字段、启停、清零用量、踢线、重置订阅链接)、<b data-k="api.perm.users.delete">删除用户</b>、<b data-k="api.perm.billing">续费与换套餐</b>、<b data-k="api.perm.plans.read">查看套餐</b>、<b data-k="api.perm.panel.read">面板信息</b>(概况、服务器、线路、在线用户)。没勾的接口调了返回 403,并写明缺哪项。</li>
-      <li>每把可以单独 <b data-k="common.edit">编辑</b>、<b data-k="api.keyRotate">重新生成</b>(旧令牌立刻失效)、<b data-k="common.delete">删除</b>,列表里能看到最近一次是什么时候、从哪个 IP 用的。总开关关着时所有密钥都不能用。</li>
-      <li><b data-k="api.ip">来源 IP 白名单</b>:默认关闭;打开后只有名单里的 IP 或网段能调用(默认密钥和附加密钥都算),一行一个,页面上会显示你当前的来源 IP,点 <b data-k="api.ipAddMe">加进名单</b> 就行。<span data-scope="admin">主面板和每个代理各有一份,互不影响。</span></li>
+      <li>所有密钥在一张表里,<b data-k="api.keyDefault">默认密钥</b> 也在其中,和别的一样能改。点 <b data-k="api.keyAdd">新建密钥</b>,起个名字(比如「商城」「TG 机器人」),只勾它需要的权限。</li>
+      <li>七项权限:<b data-k="api.perm.users.read">查看用户</b>、<b data-k="api.perm.users.create">创建用户</b>、<b data-k="api.perm.users.update">修改用户</b>(改字段、启停、清零用量、踢线、重置订阅链接)、<b data-k="api.perm.users.delete">删除用户</b>、<b data-k="api.perm.billing">续费与换套餐</b>、<b data-k="api.perm.plans.read">查看套餐</b>、<b data-k="api.perm.panel.read">面板信息</b>(概况、服务器、线路、在线用户)。没勾的接口调了返回 403,并写明缺哪项。编辑框里有 <b data-k="api.pickAll">全选</b> 和 <b data-k="api.pickRead">只读</b> 两个快捷选法。</li>
+      <li><b data-k="api.from">允许的来源</b>:每把密钥单独设,默认 <b data-k="api.fromAny">不限</b>;选 <b data-k="api.fromOnly">只允许指定的 IP</b> 后一行填一个 IP 或网段(IPv4 / IPv6 都行),名单外的来源用这把密钥一律 403。编辑框里会显示你当前的 IP,点 <b data-k="api.ipAddMe">加进去</b> 就行。</li>
+      <li>每一行右边的开关可以单独停用 / 启用这一把;<b data-k="common.edit">编辑</b> 里改名字、权限和来源;<b data-k="common.more">更多</b> 里有 <b data-k="api.keyRotate">重新生成</b>(旧的立刻失效)和 <b data-k="common.delete">删除</b>。列表里能看到每把最近一次是什么时候、从哪个 IP 用的。总开关关着时所有密钥都不能用。</li>
     </ol>
-    <div class="tip"><b>推荐</b>商城用一把「查看用户 + 创建用户 + 续费与换套餐 + 查看套餐」,Telegram 机器人用一把只读的「查看用户 + 面板信息」;商城服务器 IP 固定的话顺手打开白名单。</div>
+    <div class="tip"><b>推荐</b>商城用一把「查看用户 + 创建用户 + 续费与换套餐 + 查看套餐」,Telegram 机器人用一把只读的「查看用户 + 面板信息」;商城服务器 IP 固定的话,顺手把那一把限成只允许它的 IP。</div>
     <div class="pit"><b>常见坑</b><ul>
-      <li>面板挂在反向代理(Nginx、Caddy 等)后面时,先在 <b data-k="nav.settings">设置</b> → 面板 填「受信任的反向代理」,白名单才认得出真实来源;不然所有请求的来源都是反代自己。</li>
-      <li>附加密钥只在主服务器上生效;开了主机容灾的,备用接任以后照常可用。</li>
+      <li>面板挂在反向代理(Nginx、Caddy 等)后面时,先在 <b data-k="nav.settings">设置</b> → 面板 填「受信任的反向代理」,来源限制才认得出真实来源;不然所有请求的来源都是反代自己。</li>
+      <li>从旧版升级上来:原来那一把令牌就是现在的 <b data-k="api.keyDefault">默认密钥</b>,不用改对接程序;原来「整个面板一份」的来源 IP 白名单会自动抄到每把已有的密钥上,之后各改各的。</li>
+      <li>密钥只在主服务器上生效;开了主机容灾的,备用接任以后照常可用。</li>
     </ul></div>
   </section>
 
   <section class="sec" id="api-calls">
     <h3>常用接口</h3>
-    <p class="lede">路径都接在接口前缀后面;<code>{name}</code> 可以是用户名,也可以是用户 id。</p>
+    <p class="lede">路径都接在接口地址后面;<code>{name}</code> 可以是用户名,也可以是用户 id。</p>
     <div class="tbl"><table>
       <thead><tr><th>接口</th><th>做什么</th></tr></thead>
       <tbody>
@@ -1269,7 +1271,7 @@
       <li>预览:请求里带 <code>"dryRun": true</code> 只计算不执行,返回变更前后的对比,商城可以拿来报价。</li>
       <li>防重复(幂等):带 <code>requestId</code>(或请求头 <code>Idempotency-Key</code>,比如用订单号),同一个编号重试只执行一次,不会重复加时。</li>
       <li>降级确认:换套餐会让用户马上超量、或到期提前时,接口返回 409 和完整预览,确认后带 <code>"force": true</code> 再调一次才执行。</li>
-      <li>面板的接口一览里标着 <b data-k="adm.apiIdem">幂等</b>、<b data-k="adm.apiDry">可预览</b> 的接口支持这些。</li>
+      <li>面板的 <b data-k="adm.apiDocsBtn">接口文档</b> 里标着 <b data-k="adm.apiIdem">幂等</b>、<b data-k="adm.apiDry">可预览</b> 的接口支持这些。</li>
       <li>续费、换套餐是明确的开通动作:被手动停用的用户也会被启用,要先停掉的人别拿去续费。</li>
     </ul>
   </section>
@@ -1282,9 +1284,9 @@
   <section class="sec" id="sec-account">
     <h3>账号与两步验证</h3>
     <ul>
-      <li data-scope="admin">改密码、改用户名:<b data-k="nav.admin">管理员</b> 页的 <b data-k="adm.account">登录账号</b>。</li>
-      <li data-scope="reseller">改密码:<b data-k="nav.account">账号</b> 页的 <b data-k="acct.password">登录密码</b>。</li>
-      <li><b data-k="adm.totp">两步验证(2FA)</b>:点 <b data-k="adm.totpGen">生成密钥</b>,用认证器 App(Google Authenticator、Microsoft Authenticator、Authy、1Password 等)扫二维码,填 App 上的 6 位码,点 <b data-k="adm.totpVerify">验证并开启</b>。开启后登录要密码 + 6 位码。</li>
+      <li data-scope="admin">改密码、改用户名:<b data-k="nav.admin">管理员</b> 页的 <b data-k="adm.account">登录账号</b> 卡片点 <b data-k="adm.accountEdit">修改用户名 / 密码</b>。卡片上还写着上次登录的时间和来源 IP。</li>
+      <li data-scope="reseller">改密码:<b data-k="nav.account">账号</b> 页的 <b data-k="acct.password">登录密码</b> 卡片点 <b data-k="acct.passEdit">修改密码</b>。</li>
+      <li><b data-k="adm.totp">两步验证(2FA)</b>:点 <b data-k="adm.totpStart">开启两步验证</b>,用认证器 App(Google Authenticator、Microsoft Authenticator、Authy、1Password 等)扫弹框里的二维码,填 App 上的 6 位码,点 <b data-k="adm.totpVerify">验证并开启</b>。开启后登录要密码 + 6 位码。弹框中途关掉也不要紧,卡片上点 <b data-k="adm.totpResume">继续</b> 接着扫同一个码。</li>
       <li data-scope="admin">手机丢了进不去:SSH 执行 <code>m-ui</code>,菜单 13 关闭两步验证;菜单 5 重置密码也会一起关掉。</li>
       <li data-scope="reseller">手机丢了或忘了密码:找站长在主面板重置密码(两步验证会一起清掉)。</li>
     </ul>
@@ -1308,7 +1310,7 @@
       <li>面板端口不在此列:用户经代理照样能打开 <code>服务器公网IP:面板端口</code>;公网 IP 直接绑在网卡上的 VPS(很常见)上,这类流量走本机回环,防火墙的 IP 白名单拦不住。所以别只靠白名单保护面板:改掉默认的端口和路径,用强密码,打开两步验证。</li>
       <li><b data-k="set.blockBT">屏蔽 BT 下载</b>:拒绝经代理的 BT 连接,免得 VPS 招来版权投诉。</li>
       <li>副机的 API 地址用 HTTPS,否则同步时令牌和用户凭据走明文。</li>
-      <li>备份 zip 里有用户凭据和证书私钥;外部 API 令牌等于管理员权限:都要妥善保管。</li>
+      <li>备份 zip 里有用户凭据和证书私钥;外部 API 的密钥勾了全部权限时等于管理员权限:都要妥善保管。</li>
     </ul>
   </section>
 

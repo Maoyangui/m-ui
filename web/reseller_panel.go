@@ -367,22 +367,12 @@ func (s *Server) handleResellerSelfSub(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(r.URL.Path, "/logo"):
 		// 自己名下用户落地页的 logo:归属取当前会话的代理,不收任何 id 参数,碰不到主面板和别的代理的
 		s.handlePageLogo(w, r, rs.Id, func(action string) { s.auditAs(rs.Name, "reseller", action, rs.Name) })
-	case strings.Contains(r.URL.Path, "/self/api/keys") || strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/self/api/ip"):
-		// 附加密钥与来源 IP 白名单:只动当前会话这个代理名下的(见 api_keys.go)
+	case strings.Contains(r.URL.Path, "/self/api/keys"):
+		// 外部 API 的密钥:只动当前会话这个代理名下的(见 api_keys.go)
 		sub := r.URL.Path[strings.Index(r.URL.Path, "/self/api/")+len("/self/api/"):]
 		s.handleAPIKeys(w, r, rs.Id, sub, func(a string, obj interface{}) { s.auditAs(rs.Name, "reseller", a, obj) })
-	case strings.HasSuffix(r.URL.Path, "/api/rotate"):
-		// 重新生成令牌:旧令牌立即失效
-		if r.Method != http.MethodPost {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
-			return
-		}
-		tok := randomAPIToken()
-		s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Update("api_token", tok)
-		s.auditAs(rs.Name, "reseller", "api-rotate", rs.Name)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": rs.ApiEnabled, "token": tok})
 	case strings.HasSuffix(r.URL.Path, "/api"):
-		// 代理自己的外部 API:开关 + 令牌(首次开启自动生成)
+		// 代理自己的外部 API 的总开关(首次开启自动生成一把默认密钥);密钥本身在 …/self/api/keys
 		switch r.Method {
 		case http.MethodGet:
 			writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": rs.ApiEnabled, "token": rs.ApiToken})
@@ -394,13 +384,16 @@ func (s *Server) handleResellerSelfSub(w http.ResponseWriter, r *http.Request) {
 				badRequest(w, err)
 				return
 			}
-			tok := rs.ApiToken
-			if p.Enabled && tok == "" {
-				tok = randomAPIToken()
+			if p.Enabled {
+				// 第一次打开、一把密钥都没有:生成默认密钥,开了就能用
+				if err := s.ensureFirstKey(rs.Id); err != nil {
+					badRequest(w, err)
+					return
+				}
 			}
-			s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{"api_enabled": p.Enabled, "api_token": tok})
+			s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Update("api_enabled", p.Enabled)
 			s.auditAs(rs.Name, "reseller", "api-"+map[bool]string{true: "on", false: "off"}[p.Enabled], rs.Name)
-			writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": p.Enabled, "token": tok})
+			writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": p.Enabled, "token": s.defaultToken(rs.Id)})
 		default:
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		}

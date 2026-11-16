@@ -57,7 +57,7 @@ The same panel runs a single server for yourself and a production service with d
 | Observability | Traffic charts (stacked bars, 1h / 6h / 24h / 7d / 30d), top users, online users and IPs, line details (total and per-server traffic, who is on the line right now and from which IPs), recent inbound connections for troubleshooting, audit log and subscription access log (each with its own auto-clean retention) |
 | Security | bcrypt passwords, CSRF protection, login cooldown after repeated failures from the same peer, two-factor authentication (TOTP), external API tokens; reseller and admin sessions are strictly separated |
 | Updates | The panel finds new releases by itself and flags them next to the version in the sidebar; one click verifies the SHA256, swaps the binary and restarts — database, certificates and settings are untouched |
-| Integration | External API for creating users, renewing N periods, changing plans, enabling / disabling and fetching subscription URLs; plan operations support dry runs and idempotency keys so retries never add time twice; multiple keys with their own permissions and an optional source IP allowlist; panel overview, servers, lines and online users for bots, see [docs/API.md](docs/API.md) |
+| Integration | External API for creating users, renewing N periods, changing plans, enabling / disabling and fetching subscription URLs; plan operations support dry runs and idempotency keys so retries never add time twice; multiple keys, each with its own permissions and allowed source IPs; panel overview, servers, lines and online users for bots, see [docs/API.md](docs/API.md) |
 
 <table>
 <tr>
@@ -402,7 +402,7 @@ Subscription access log, core log (data plane + panel) and audit log. Logging ca
 
 - Change username / password.
 - **Two-factor authentication**: generate a secret and scan it, or paste an existing secret; enter one code to enable. Works with Google / Microsoft Authenticator, Authy, 1Password and more. Lost your phone? Run `m-ui` over SSH and pick "disable 2FA"; resetting the password also clears it.
-- **External API**: flip the switch to get a token, then a shop / billing system / bot can create users, renew (several periods at once; a request without any plan field renews the current plan), change plans (replace / stack / prorate), enable / disable, kick and fetch subscription URLs; plan operations can be previewed with `dryRun`, and a `requestId` (or `Idempotency-Key` header) makes retries safe. Resellers can enable their own under My account, scoped to their users. The admin page and My account show the same endpoint list with curl examples (collapsed while the API is off); full reference in [docs/API.md](docs/API.md).
+- **External API**: flip the switch to get a key, then a shop / billing system / bot can create users, renew (several periods at once; a request without any plan field renews the current plan), change plans (replace / stack / prorate), enable / disable, kick and fetch subscription URLs; plan operations can be previewed with `dryRun`, and a `requestId` (or `Idempotency-Key` header) makes retries safe. Resellers can enable their own on their Account page, scoped to their users. You can create several keys, each with its own permissions and allowed source IPs. The admin page and the reseller's Account page open the same API reference with curl examples; full reference in [docs/API.md](docs/API.md).
 
 ### Settings
 

@@ -1,135 +1,87 @@
-// 管理员:登录账号、两步验证(TOTP)、外部 API 开关与令牌。
+// 管理员:谁能进这个面板、怎么进 —— 登录账号、两步验证,以及给外部程序用的 API 密钥。
+// 账号和两步验证各一张小卡片并排(看一眼就知道现在是谁、上次从哪登录、两步验证开没开),改动都在弹框里做;
+// 外部 API 占一整行:总开关、接口地址、密钥列表,接口文档在右侧抽屉里。
 import { state } from '../app.js';
-import { get, post } from '../api.js';
+import { get, post, totpQrUrl } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, registerActions, field, fv, copy, badge, openModal } from '../ui.js';
-import { apiTable, apiExample } from '../apidoc.js';
-import { mountApiKeys } from '../apikeys.js';
+import { esc, toast, registerActions, field, fv, openModal, badge } from '../ui.js';
+import { mountApiCard } from '../apikeys.js';
+import { mountTotp } from '../totp.js';
 
 export const title = () => t('adm.title');
 export const subtitle = () => t('adm.subtitle');
 
 let info = {};
 
+// 上次登录记的是「时间 IP」一串:拆开分别写
+function lastLogin() {
+  const s = String(info.lastLogins || '').trim();
+  if (!s) return esc(t('adm.neverLogin'));
+  const i = s.lastIndexOf(' ');
+  return i > 0 ? `${esc(s.slice(0, i))}<span class="sep">·</span>${esc(s.slice(i + 1))}` : esc(s);
+}
+
+// 还在用安装时的默认密码:卡片上标出来,按钮变成醒目的「立即修改」
+function accountCard() {
+  const weak = !!(state.status || {}).defaultPassword;
+  return `<div class="card-head"><h2>${t('adm.account')}</h2>${weak ? badge(t('adm.defaultPw'), 'warn') : ''}</div>
+    <div class="adm-who"><span class="adm-ava"><i class="i i-user"></i></span>
+      <div><b>${esc(info.username || '')}</b><span class="muted small">${t('adm.lastLogin')} ${lastLogin()}</span></div></div>
+    ${weak ? `<p class="hint warn">${esc(t('alert.defaultPw'))}</p>` : ''}
+    <div class="card-acts"><button class="btn sm${weak ? ' primary' : ''}" data-act="adm.editAccount">${t(weak ? 'alert.changeNow' : 'adm.accountEdit')}</button></div>`;
+}
+
+function editAccount() {
+  openModal(t('adm.accountEdit'), `<div class="form-grid">
+      <div class="full">${field(t('set.newUser'), `<input id="pw-user" autocomplete="username" placeholder="${esc(info.username || '')}">`)}</div>
+      ${field(t('set.oldPass'), `<input id="pw-old" type="password" autocomplete="current-password">`)}
+      ${field(t('set.newPass'), `<input id="pw-new" type="password" autocomplete="new-password">`)}
+    </div>
+    <p class="hint">${esc(t('adm.accountEditHelp'))}</p>`, async () => {
+    await post('password', { username: fv('pw-user'), oldPassword: fv('pw-old'), newPassword: fv('pw-new') });
+    toast(t('set.adminUpdated'), 'ok');
+    setTimeout(() => post('logout').then(() => location.reload()), 1200);
+  }, { saveText: t('set.updateAdmin') });
+  const old = document.getElementById('pw-old');
+  if (old) setTimeout(() => old.focus(), 60); // 多数人只改密码:焦点放在原密码上,用户名那格留空就是不改
+}
+
 export async function render(el) {
   info = await get('admin/info');
   el.innerHTML = `
-    <section class="card">
-      <div class="card-head"><h2>${t('adm.account')}</h2><span class="muted small">${t('adm.lastLogin')}: ${esc(info.lastLogins || '—')}</span></div>
-      <div class="form-grid">
-        ${field(t('set.newUser'), `<input id="pw-user" autocomplete="username" placeholder="${esc(info.username || '')}">`)}
-        ${field(t('set.oldPass'), `<input id="pw-old" type="password" autocomplete="current-password">`)}
-        ${field(t('set.newPass'), `<input id="pw-new" type="password" autocomplete="new-password">`)}
-      </div>
-      <div class="row" style="margin-top:.7rem"><button class="btn primary" data-act="adm.password">${t('set.updateAdmin')}</button></div>
-    </section>
-    <section class="card" id="adm-totp">${totpCard()}</section>
-    <section class="card" id="adm-api">${apiCard()}</section>`;
-  if (info.apiEnabled) mountApiKeys('admin/api');
-  const sw = document.getElementById('adm-api-on');
-  if (sw) sw.addEventListener('change', async e => {
-    try { await post('admin/api', { enabled: e.target.checked }); toast(t('adm.apiSaved'), 'ok'); await refresh(); }
-    catch (err) { toast(err.message, 'err'); e.target.checked = !e.target.checked; }
-  });
-  const code = document.getElementById('totp-code');
-  if (code) {
-    code.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); document.querySelector('[data-act="adm.totpEnable"]').click(); } });
-    setTimeout(() => code.focus(), 50);
+    <div class="adm-top">
+      <section class="card" id="adm-acct">${accountCard()}</section>
+      <section class="card" id="adm-totp"></section>
+    </div>
+    <section class="card" id="adm-api"></section>`;
+  await Promise.all([
+    mountTotp({
+      el: 'adm-totp',
+      manual: true,
+      initial: { enabled: !!info.totpEnabled, pending: info.totpPending ? info.totpPending.secret : '' },
+      state: async () => { info = await get('admin/info'); return { enabled: !!info.totpEnabled, pending: info.totpPending ? info.totpPending.secret : '' }; },
+      qr: () => totpQrUrl('admin'),
+      begin: secret => post('admin/totp/setup', secret ? { secret } : {}),
+      enable: code => post('admin/totp/enable', { code }),
+      cancel: () => post('admin/totp/cancel'),
+      disable: (password, code) => post('admin/totp/disable', { password, code }),
+    }),
+    mountApiCard({
+      el: 'adm-api',
+      prefix: 'admin/api',
+      url: info.apiBase || '',
+      enabled: !!info.apiEnabled,
+      repo: (state.status || {}).repo || '',
+      toggle: on => post('admin/api', { enabled: on }),
+    }),
+  ]);
+  // 从顶部「还是默认密码」那条提示点过来的(#/admin?pw):直接弹出修改框,地址里的 ?pw 去掉(刷新不再弹)
+  if (/[?&]pw\b/.test(location.hash)) {
+    history.replaceState(null, '', location.pathname + location.search + '#/admin');
+    editAccount();
   }
-}
-
-const refresh = () => render(document.getElementById('page'));
-
-function totpCard() {
-  const head = b => `<div class="card-head"><h2>${t('adm.totp')}</h2>${b}</div>`;
-  if (info.totpEnabled) {
-    return `${head(badge(t('adm.totpOn'), 'ok'))}
-      <p class="hint">${t('adm.totpOnHelp')}</p>
-      <div class="row" style="margin-top:.7rem"><button class="btn danger sm" data-act="adm.totpDisable">${t('adm.totpDisable')}</button></div>`;
-  }
-  const p = info.totpPending;
-  if (p) {
-    return `${head(badge(t('adm.totpPending'), 'warn'))}
-      <p class="hint">${t('adm.totpScanHelp')}</p>
-      <div class="totp-setup">
-        <img class="qr" src="./api/admin/totp/qr?_=${Date.now()}" alt="QR">
-        <div class="totp-side">
-          <div class="label">${t('adm.totpSecret')}</div>
-          <div class="sub-box"><code>${esc(p.secret)}</code><button class="btn sm" data-act="adm.copy" data-id="${esc(p.secret)}">${t('common.copy')}</button></div>
-          <div class="row" style="align-items:flex-end;gap:.6rem;margin-top:.5rem;flex-wrap:wrap">
-            ${field(t('adm.totpCode'), `<input id="totp-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="max-width:9rem;font-family:var(--mono);letter-spacing:.15em">`)}
-            <button class="btn primary" data-act="adm.totpEnable">${t('adm.totpVerify')}</button>
-            <button class="btn ghost" data-act="adm.totpCancel">${t('common.cancel')}</button>
-          </div>
-        </div>
-      </div>`;
-  }
-  return `${head(badge(t('adm.totpOff')))}
-    <p class="hint">${t('adm.totpHelp')}</p>
-    <div class="row" style="margin-top:.7rem"><button class="btn primary sm" data-act="adm.totpGen">${t('adm.totpGen')}</button><button class="btn sm" data-act="adm.totpManual">${t('adm.totpManual')}</button></div>`;
-}
-
-// 外部 API:开关、前缀与令牌只在开启后显示;接口一览一直在(没开时折起来),先看清能做什么再决定开不开
-function apiCard() {
-  const on = !!info.apiEnabled;
-  const base = info.apiBase || '';
-  const docs = `<p class="hint">${t('adm.apiDocs')} <a href="${esc((state.status.repo || '') + '/blob/main/docs/API.md')}" target="_blank" rel="noopener">docs/API.md</a></p>`;
-  return `<div class="card-head"><h2>${t('adm.api')}</h2><div class="row" style="align-items:center;gap:.5rem">${badge(on ? t('common.enabled') : t('common.disabled'), on ? 'ok' : '')}<label class="switch" title="${esc(t('adm.apiToggle'))}"><input type="checkbox" id="adm-api-on" ${on ? 'checked' : ''}><span></span></label></div></div>
-    <p class="hint">${t('adm.apiHelp')}</p>
-    ${on ? `
-    <dl class="kv" style="margin-top:.8rem">
-      <dt>${t('adm.apiBase')}</dt><dd><div class="sub-box"><code>${esc(base)}</code><button class="btn sm" data-act="adm.copy" data-id="${esc(base)}">${t('common.copy')}</button></div></dd>
-      <dt>${t('adm.apiToken')}</dt><dd><div class="sub-box"><code>${esc(info.apiToken || '')}</code><button class="btn sm" data-act="adm.copy" data-id="${esc(info.apiToken || '')}">${t('common.copy')}</button><button class="btn sm danger" data-act="adm.apiRotate">${t('adm.apiRotate')}</button></div></dd>
-    </dl>
-    <div id="api-keys" class="api-keys-box"></div>
-    <h3 class="sub-title">${t('adm.apiEndpoints')}</h3>
-    ${apiTable()}
-    <h3 class="sub-title">${t('adm.apiExample')}</h3>
-    <pre class="log code">${esc(apiExample(base, info.apiToken || ''))}</pre>
-    ${docs}` : `
-    <details class="adv api-list"><summary>${t('adm.apiEndpointsOff')}</summary>${apiTable()}${docs}</details>`}`;
 }
 
 registerActions({
-  'adm.password': async () => {
-    try {
-      await post('password', { username: fv('pw-user'), oldPassword: fv('pw-old'), newPassword: fv('pw-new') });
-      toast(t('set.adminUpdated'), 'ok');
-      setTimeout(() => post('logout').then(() => location.reload()), 1200);
-    } catch (e) { toast(e.message, 'err'); }
-  },
-  'adm.copy': id => copy(id),
-  'adm.totpGen': async () => {
-    try { await post('admin/totp/setup', {}); await refresh(); }
-    catch (e) { toast(e.message, 'err'); }
-  },
-  'adm.totpManual': () => {
-    openModal(t('adm.totpManualTitle'), field(t('adm.totpSecret'), `<input id="totp-manual" autocomplete="off" spellcheck="false" placeholder="JBSW Y3DP EHPK 3PXP …">`, t('adm.totpManualHelp')), async () => {
-      await post('admin/totp/setup', { secret: fv('totp-manual') });
-      await refresh();
-    });
-  },
-  'adm.totpEnable': async (_, btn) => {
-    btn.disabled = true;
-    try { await post('admin/totp/enable', { code: fv('totp-code') }); toast(t('adm.totpEnabled'), 'ok'); await refresh(); }
-    catch (e) { toast(e.message, 'err'); btn.disabled = false; }
-  },
-  'adm.totpCancel': async () => { await post('admin/totp/cancel').catch(() => {}); await refresh(); },
-  'adm.totpDisable': () => {
-    openModal(t('adm.totpDisableTitle'), `
-      <p class="hint">${t('adm.totpDisableHelp')}</p>
-      <div class="form-grid">
-        ${field(t('adm.password'), `<input id="totp-pw" type="password" autocomplete="current-password">`)}
-        ${field(t('adm.totpCode'), `<input id="totp-dcode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">`)}
-      </div>`, async () => {
-      await post('admin/totp/disable', { password: fv('totp-pw'), code: fv('totp-dcode') });
-      toast(t('adm.totpDisabled'), 'ok');
-      await refresh();
-    }, { saveText: t('adm.totpDisable'), danger: true });
-  },
-  'adm.apiRotate': async () => {
-    if (!await confirm(t('adm.apiRotateConfirm'), { danger: true })) return;
-    try { await post('admin/api/rotate'); toast(t('adm.apiRotated'), 'ok'); await refresh(); }
-    catch (e) { toast(e.message, 'err'); }
-  },
+  'adm.editAccount': () => editAccount(),
 });

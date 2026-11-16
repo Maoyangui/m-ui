@@ -17,6 +17,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
+	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/stats"
 
@@ -24,15 +25,18 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// ---- 外部 API:多把密钥、按密钥分权限、来源 IP 白名单 ----
+// ---- 外部 API:多把密钥,每把单独的权限与来源 IP ----
 //
-// 原来每个面板(主面板、每个代理)只有一把令牌,能做全部操作。商城只要建号续费、Telegram 机器人只要查看,
-// 给谁都是整把钥匙。现在:
-//   - 原来那一把仍然有效,界面上叫「默认密钥」,全部权限(升级后对接程序不用改,回退到旧版也照样能用);
-//   - 另外可以生成多把附加密钥(model.ApiKey),各自起名、各自勾权限、可单独停用 / 重新生成 / 删除,
-//     列表里看得到每把最近一次是什么时候、从哪个 IP 用的;
-//   - 来源 IP 白名单:主面板与每个代理各一份,默认关;打开后只有名单里的 IP / 网段能调用(对这个面板的全部密钥生效)。
-//     来源按 sourceIP 认:挂在反向代理后面时先在 设置 → 面板 填「受信任的反向代理」。
+// 每个面板(主面板、每个代理)一张密钥列表(model.ApiKey):每把单独起名、勾权限、限来源 IP,可单独停用 / 重新生成 / 删除,
+// 列表里看得到每把最近一次是什么时候、从哪个 IP 用的。
+//
+// 升级前就有的那一把(主面板设置里的 apiToken、代理的 ApiToken)是列表里的「默认密钥」那一行(IsDefault),和别的一样能改:
+//   - 它的令牌还存在原处,认它也只看原处 —— 回退到旧版照样能用;旧版里重新生成、清空了,这边跟着作数;
+//   - 名字、权限、启停、来源 IP 存在它那一行里(行里的 Token 是随机占位串,不拿来认人);
+//   - 这一行在第一次用到时建(adoptDefaultKey):全部权限、启用,来源限制照旧版「整个面板一份」的那份白名单。
+//     旧版建的其它密钥在启动时各抄一份(database 包的 backfillApiKeyIPs)—— 升级前后放行的来源一样。
+//
+// 来源按 sourceIP 认:挂在反向代理后面时先在 设置 → 面板 填「受信任的反向代理」。
 // 外部 API 总开关(apiEnabled / 代理的 ApiEnabled)关着时,所有密钥都不能用。
 
 // 权限名。接口与权限的对应见 apiPermFor。
@@ -123,9 +127,9 @@ func apiPermFor(method string, parts []string) string {
 	return ""
 }
 
-// ---- 来源 IP 白名单 ----
+// ---- 来源 IP ----
 
-// parseIPList 解析白名单:逗号、空格、换行分隔的 IP 或网段;返回规范化后的写法(逗号分隔)。
+// parseIPList 解析一把密钥允许的来源:逗号、空格、换行分隔的 IP 或网段;返回规范化后的写法(逗号分隔)。
 func parseIPList(v string) ([]*net.IPNet, string, error) {
 	var nets []*net.IPNet
 	var norm []string
@@ -137,13 +141,13 @@ func parseIPList(v string) ([]*net.IPNet, string, error) {
 		if strings.Contains(f, "/") {
 			_, c, err := net.ParseCIDR(f)
 			if err != nil {
-				return nil, "", fmt.Errorf("白名单里 %q 不是有效的 IP 或网段", f)
+				return nil, "", fmt.Errorf("%q 不是有效的 IP 或网段", f)
 			}
 			n = c
 		} else {
 			ip := net.ParseIP(strings.Trim(f, "[]"))
 			if ip == nil {
-				return nil, "", fmt.Errorf("白名单里 %q 不是有效的 IP 或网段", f)
+				return nil, "", fmt.Errorf("%q 不是有效的 IP 或网段", f)
 			}
 			bits := 128
 			if ip4 := ip.To4(); ip4 != nil {
@@ -163,7 +167,7 @@ func parseIPList(v string) ([]*net.IPNet, string, error) {
 		norm = append(norm, s)
 	}
 	if len(norm) > 200 {
-		return nil, "", errors.New("白名单最多 200 项")
+		return nil, "", errors.New("允许的来源最多 200 项")
 	}
 	return nets, strings.Join(norm, ", "), nil
 }
@@ -181,32 +185,129 @@ func ipAllowed(src, list string) bool {
 	return ipInNets(ip, nets)
 }
 
-// apiIPCheck 主面板(rid 0)或代理 rid 的白名单:没开放行;开了只放名单里的来源。
-func (s *Server) apiIPCheck(r *http.Request, rid uint) bool {
-	on, list := s.setting("apiIpAllow") == "true", s.setting("apiIpList")
-	if rid > 0 {
-		var rs model.Reseller
-		if s.db.Select("id, api_ip_allow, api_ip_list").First(&rs, rid).Error != nil {
-			return false
-		}
-		on, list = rs.ApiIpAllow, rs.ApiIpList
-	}
-	return !on || ipAllowed(s.sourceIP(r), list)
+// fromAllowed 这把密钥放不放行这个来源:没限来源的都放,限了的只放名单里的。
+func (sc apiScope) fromAllowed(src string) bool {
+	return !sc.ipAllow || ipAllowed(src, sc.ipList)
 }
 
 func writeIPDenied(w http.ResponseWriter) {
-	writeJSON(w, http.StatusForbidden, map[string]string{"error": "来源 IP 不在外部 API 的白名单里"})
+	writeJSON(w, http.StatusForbidden, map[string]string{"error": "来源 IP 不在这把密钥允许的范围里"})
+}
+
+// ---- 默认密钥 ----
+
+// keyMu 建默认密钥那一行、动它的令牌时串行:并发的第一次调用不能各建一行。
+var keyMu sync.Mutex
+
+// allPerms 全部权限的存法。
+func allPerms() string { return strings.Join(apiPerms, ",") }
+
+// defaultToken 这个面板默认密钥的令牌(rid 0 = 主面板设置里的 apiToken,>0 = 那个代理的 ApiToken);空 = 没有默认密钥。
+func (s *Server) defaultToken(rid uint) string {
+	if rid == 0 {
+		return s.setting("apiToken")
+	}
+	var rs model.Reseller
+	s.db.Select("id, api_token").First(&rs, rid)
+	return rs.ApiToken
+}
+
+// setDefaultToken 写默认密钥的令牌("" = 没有了)。
+func (s *Server) setDefaultToken(rid uint, tok string) error {
+	if rid == 0 {
+		return s.putSettings(map[string]string{"apiToken": tok})
+	}
+	return s.db.Model(&model.Reseller{}).Where("id = ?", rid).Update("api_token", tok).Error
+}
+
+// legacyIPList 旧版「整个面板一份」的来源 IP 白名单(开没开、名单)。新版按把存,这一份只在建默认密钥那一行时抄一次
+// (别的密钥在启动时抄);留着不删:回退到旧版时它照旧生效。
+func (s *Server) legacyIPList(rid uint) (bool, string) {
+	if rid == 0 {
+		return s.setting("apiIpAllow") == "true", s.setting("apiIpList")
+	}
+	var rs model.Reseller
+	s.db.Select("id, api_ip_allow, api_ip_list").First(&rs, rid)
+	return rs.ApiIpAllow, rs.ApiIpList
+}
+
+// defaultKey 这个面板的默认密钥(tok 是它的令牌,空 = 没有)。密钥表里还没有它那一行就建(见 adoptDefaultKey)。
+// 返回的 Token 是真正的令牌,不是行里的占位串。
+func (s *Server) defaultKey(rid uint, tok string) (model.ApiKey, bool) {
+	var k model.ApiKey
+	if tok == "" {
+		return k, false
+	}
+	if s.db.Where("reseller_id = ? AND is_default = ?", rid, true).Order("id asc").First(&k).Error != nil {
+		var err error
+		if k, err = s.adoptDefaultKey(rid); err != nil {
+			// 记录建不出来(库写不进)也不能把对接程序挡在外面:按升级前的样子认 —— 全部权限,来源仍按旧版那份白名单
+			logger.Warning("建默认密钥的记录失败:", err)
+			on, list := s.legacyIPList(rid)
+			k = model.ApiKey{ResellerId: rid, Perms: allPerms(), Enabled: true, IsDefault: true, IpAllow: on, IpList: list}
+		}
+	}
+	k.Token = tok
+	return k, true
+}
+
+// adoptDefaultKey 给升级前就有的那一把建它在密钥表里的一行:全部权限、启用,来源限制照旧版那份白名单
+// (旧版是整个面板一份、对全部密钥生效;别的密钥在启动时已经各抄了一份,见 database 包的 backfillApiKeyIPs)。
+func (s *Server) adoptDefaultKey(rid uint) (model.ApiKey, error) {
+	keyMu.Lock()
+	defer keyMu.Unlock()
+	var k model.ApiKey
+	if s.db.Where("reseller_id = ? AND is_default = ?", rid, true).Order("id asc").First(&k).Error == nil {
+		return k, nil
+	}
+	on, list := s.legacyIPList(rid)
+	k = model.ApiKey{ResellerId: rid, Token: newAPIKeyToken(), Perms: allPerms(), Enabled: true, IsDefault: true,
+		CreatedAt: time.Now().Unix(), IpAllow: on, IpList: list}
+	return k, s.db.Create(&k).Error
+}
+
+// ensureFirstKey 打开外部 API 时这个面板一把密钥都没有:生成默认密钥(全部权限、不限来源),开了就能用。
+// 已经有密钥(哪怕删了默认那把、只剩别的)就不动。
+func (s *Server) ensureFirstKey(rid uint) error {
+	keyMu.Lock()
+	defer keyMu.Unlock()
+	if s.defaultToken(rid) != "" {
+		return nil
+	}
+	var n int64
+	s.db.Model(&model.ApiKey{}).Where("reseller_id = ? AND COALESCE(is_default, 0) = 0", rid).Count(&n)
+	if n > 0 {
+		return nil
+	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 以前那把默认密钥留下的记录(名字、权限、来源限制)不带到新的这一把上
+		if err := tx.Where("reseller_id = ? AND is_default = ?", rid, true).Delete(&model.ApiKey{}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&model.ApiKey{ResellerId: rid, Token: newAPIKeyToken(), Perms: allPerms(), Enabled: true, IsDefault: true,
+			CreatedAt: time.Now().Unix()}).Error
+	})
+	if err != nil {
+		return err
+	}
+	return s.setDefaultToken(rid, newAPIKeyToken())
+}
+
+// dropKeys 删掉一个面板的全部密钥记录(代理被删、主面板重置了他的密码);默认密钥的令牌由调用方清。
+func dropKeys(tx *gorm.DB, rid uint) error {
+	return tx.Where("reseller_id = ?", rid).Delete(&model.ApiKey{}).Error
 }
 
 // ---- 鉴权 ----
 
-// apiKeyByToken 按令牌找附加密钥(rid 0 = 主面板的,>0 = 代理的;代理入口不认主面板的,反之亦然)。
+// apiKeyByToken 按令牌找密钥(reseller 为假 = 主面板的,为真 = 代理的;代理入口不认主面板的,反之亦然)。
+// 默认密钥不走这里:它的令牌不在这张表里(见 defaultKey)。
 func (s *Server) apiKeyByToken(tok string, reseller bool) (model.ApiKey, bool) {
 	var k model.ApiKey
 	if tok == "" {
 		return k, false
 	}
-	q := s.db.Where("token = ?", tok)
+	q := s.db.Where("token = ? AND COALESCE(is_default, 0) = 0", tok)
 	if reseller {
 		q = q.Where("reseller_id > 0")
 	} else {
@@ -218,65 +319,93 @@ func (s *Server) apiKeyByToken(tok string, reseller bool) (model.ApiKey, bool) {
 	return k, true
 }
 
-// keyUse 记附加密钥最近一次使用(同一把一分钟最多写一次库,别让高频调用变成高频写)。
-var keyUse = struct {
-	sync.Mutex
-	at map[uint]int64
-}{at: map[uint]int64{}}
-
+// noteKeyUse 记密钥最近一次使用(同一把一分钟最多写一次库,别让高频调用变成高频写)。
 func (s *Server) noteKeyUse(id uint, ip string) {
 	now := time.Now().Unix()
-	keyUse.Lock()
-	last := keyUse.at[id]
+	s.mu.Lock()
+	if s.keyUsedAt == nil {
+		s.keyUsedAt = map[uint]int64{}
+	}
+	last := s.keyUsedAt[id]
 	if now-last < 60 {
-		keyUse.Unlock()
+		s.mu.Unlock()
 		return
 	}
-	keyUse.at[id] = now
-	keyUse.Unlock()
+	s.keyUsedAt[id] = now
+	s.mu.Unlock()
 	s.db.Model(&model.ApiKey{}).Where("id = ?", id).Updates(map[string]interface{}{"last_used_at": now, "last_used_ip": ip})
 }
 
-// adminAPIAuth 主面板入口:默认密钥(设置 apiToken)或主面板的附加密钥。known 同 publicAuth:对得上某把密钥(只是关着)的不算猜令牌。
-func (s *Server) adminAPIAuth(r *http.Request) (sc apiScope, ok, known bool) {
-	if ok, known := s.publicAuth(r); known {
-		return apiScope{actor: "api"}, ok, true
+// keyScope 一把密钥的作用域。审计里的操作者:默认密钥没起名时和以前一样是 api / api:代理名,起了名的带上名字。
+func keyScope(k model.ApiKey, rsName string) apiScope {
+	actor := "api"
+	switch {
+	case rsName != "" && k.Name != "":
+		actor = "api:" + rsName + "/" + k.Name
+	case rsName != "":
+		actor = "api:" + rsName
+	case k.Name != "":
+		actor = "api:" + k.Name
 	}
-	k, found := s.apiKeyByToken(apiToken(r), false)
+	return apiScope{rid: k.ResellerId, actor: actor, perms: permSet(k.Perms), keyId: k.Id, ipAllow: k.IpAllow, ipList: k.IpList}
+}
+
+// adminAPIAuth 主面板入口:主面板的默认密钥或它名下的其它密钥。known:令牌对得上某把密钥(只是停用了,或总开关关着)——
+// 这种失败不算猜令牌、不计入限流:关掉外部 API 后对接程序照常调用,不该把同一出口 IP 上别人的调用一起挡掉。
+func (s *Server) adminAPIAuth(r *http.Request) (sc apiScope, ok, known bool) {
+	tok := apiToken(r)
+	if tok == "" {
+		return sc, false, false
+	}
+	var k model.ApiKey
+	found := false
+	if def := s.setting("apiToken"); def != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(def)) == 1 {
+		k, found = s.defaultKey(0, def)
+	} else {
+		k, found = s.apiKeyByToken(tok, false)
+	}
 	if !found {
 		return sc, false, false
 	}
 	if !k.Enabled || s.setting("apiEnabled") != "true" {
 		return sc, false, true
 	}
-	return apiScope{actor: "api:" + k.Name, perms: permSet(k.Perms), keyId: k.Id}, true, true
+	return keyScope(k, ""), true, true
 }
 
-// resellerAPIAuth 代理入口:代理的默认密钥(ApiToken)或这个代理的附加密钥;代理停用、到期、关了外部 API 时都不行。
+// resellerAPIAuth 代理入口:令牌是哪个代理的密钥,就只操作那个代理名下的东西;代理停用、到期、关了外部 API 时都不行
+// (这几种和停用的密钥一样算 known,不计入限流)。
 func (s *Server) resellerAPIAuth(r *http.Request) (rs model.Reseller, sc apiScope, ok, known bool) {
 	tok := apiToken(r)
-	if rs, ok, known := s.resellerAPIToken(tok); known {
-		return rs, apiScope{rid: rs.Id, actor: "api:" + rs.Name}, ok, true
-	}
-	k, found := s.apiKeyByToken(tok, true)
-	if !found {
+	if tok == "" {
 		return rs, sc, false, false
 	}
-	if s.db.First(&rs, k.ResellerId).Error != nil {
-		return rs, sc, false, true
+	var k model.ApiKey
+	if s.db.Where("api_token = ? AND api_token <> ''", tok).Order("api_enabled DESC").First(&rs).Error == nil &&
+		subtle.ConstantTimeCompare([]byte(tok), []byte(rs.ApiToken)) == 1 {
+		k, _ = s.defaultKey(rs.Id, rs.ApiToken)
+	} else {
+		rs = model.Reseller{}
+		var found bool
+		if k, found = s.apiKeyByToken(tok, true); !found {
+			return rs, sc, false, false
+		}
+		if s.db.First(&rs, k.ResellerId).Error != nil {
+			return rs, sc, false, true
+		}
 	}
 	if !k.Enabled || !rs.ApiEnabled || !rs.Enabled || (rs.Expiry > 0 && rs.Expiry < time.Now().Unix()) {
 		return rs, sc, false, true
 	}
-	return rs, apiScope{rid: rs.Id, actor: "api:" + rs.Name + "/" + k.Name, perms: permSet(k.Perms), keyId: k.Id}, true, true
+	return rs, keyScope(k, rs.Name), true, true
 }
 
-// allowed 这次调用的密钥有没有这个权限(默认密钥 perms 为 nil = 全部)。
+// allowed 这次调用的密钥有没有这个权限(perms 为 nil = 不按密钥限,Telegram 机器人这类面板自己的调用)。
 func (sc apiScope) allowed(perm string) bool {
 	return perm == "" || sc.perms == nil || sc.perms[perm]
 }
 
-// ---- 管理附加密钥(主面板「管理员」页与代理「我的账号」页共用) ----
+// ---- 管理密钥(主面板「管理员」页与代理「我的账号」页共用) ----
 
 type apiKeyView struct {
 	model.ApiKey
@@ -293,14 +422,38 @@ func viewKey(k model.ApiKey) apiKeyView {
 	return out
 }
 
-// handleAPIKeys 分发 …/api/keys[/id[/rotate]] 与 …/api/ip。rid 0 = 主面板,>0 = 代理自己。
-// sub 是 "keys"、"keys/3"、"keys/3/rotate" 或 "ip";audit 记审计。
+// listKeys 这个面板的全部密钥:默认密钥排第一,其余按建的先后。
+func (s *Server) listKeys(rid uint) []apiKeyView {
+	out := []apiKeyView{}
+	if def, ok := s.defaultKey(rid, s.defaultToken(rid)); ok {
+		out = append(out, viewKey(def))
+	}
+	var keys []model.ApiKey
+	s.db.Where("reseller_id = ? AND COALESCE(is_default, 0) = 0", rid).Order("id asc").Find(&keys)
+	for _, k := range keys {
+		out = append(out, viewKey(k))
+	}
+	return out
+}
+
+// keyByID 这个面板里的一把密钥(默认密钥的 Token 换成真正的令牌;它的令牌已经没了的那种残留记录当不存在)。
+func (s *Server) keyByID(rid uint, id uint64) (model.ApiKey, bool) {
+	var k model.ApiKey
+	if id == 0 || s.db.Where("id = ? AND reseller_id = ?", id, rid).First(&k).Error != nil {
+		return k, false
+	}
+	if k.IsDefault {
+		if k.Token = s.defaultToken(rid); k.Token == "" {
+			return k, false
+		}
+	}
+	return k, true
+}
+
+// handleAPIKeys 分发 …/api/keys[/id[/rotate]]。rid 0 = 主面板,>0 = 代理自己。
+// sub 是 "keys"、"keys/3" 或 "keys/3/rotate";audit 记审计。
 func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request, rid uint, sub string, audit func(action string, obj interface{})) {
 	parts := strings.Split(strings.Trim(sub, "/"), "/")
-	if parts[0] == "ip" {
-		s.handleAPIIP(w, r, rid, audit)
-		return
-	}
 	if parts[0] != "keys" || len(parts) > 3 {
 		http.NotFound(w, r)
 		return
@@ -308,13 +461,8 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request, rid uint,
 	if len(parts) == 1 {
 		switch r.Method {
 		case http.MethodGet:
-			var keys []model.ApiKey
-			s.db.Where("reseller_id = ?", rid).Order("id asc").Find(&keys)
-			out := make([]apiKeyView, 0, len(keys))
-			for _, k := range keys {
-				out = append(out, viewKey(k))
-			}
-			writeJSON(w, http.StatusOK, map[string]interface{}{"keys": out, "perms": apiPerms})
+			// you:面板看到的这次访问的来源 IP,填「允许的来源」时可以一键加进去
+			writeJSON(w, http.StatusOK, map[string]interface{}{"keys": s.listKeys(rid), "perms": apiPerms, "you": s.sourceIP(r)})
 		case http.MethodPost:
 			k, err := s.readKeyBody(r, model.ApiKey{ResellerId: rid, Enabled: true})
 			if err != nil {
@@ -324,7 +472,7 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request, rid uint,
 			var n int64
 			s.db.Model(&model.ApiKey{}).Where("reseller_id = ?", rid).Count(&n)
 			if n >= 50 {
-				badRequest(w, errors.New("附加密钥最多 50 把"))
+				badRequest(w, errors.New("密钥最多 50 把"))
 				return
 			}
 			k.Token, k.CreatedAt = newAPIKeyToken(), time.Now().Unix()
@@ -333,8 +481,8 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request, rid uint,
 				return
 			}
 			// gorm 对 bool 零值走列默认值:建的时候要关着就补一笔(这张表没设默认值,这里只是保险)
-			s.db.Model(&model.ApiKey{}).Where("id = ?", k.Id).Update("enabled", k.Enabled)
-			audit("api-key:create", map[string]interface{}{"id": k.Id, "name": k.Name, "perms": k.Perms})
+			s.db.Model(&model.ApiKey{}).Where("id = ?", k.Id).Updates(map[string]interface{}{"enabled": k.Enabled, "ip_allow": k.IpAllow})
+			audit("api-key:create", map[string]interface{}{"id": k.Id, "name": k.Name, "perms": k.Perms, "ipAllow": k.IpAllow, "ipList": k.IpList})
 			writeJSON(w, http.StatusOK, viewKey(k))
 		default:
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
@@ -342,8 +490,8 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request, rid uint,
 		return
 	}
 	id, _ := strconv.ParseUint(parts[1], 10, 64)
-	var k model.ApiKey
-	if id == 0 || s.db.Where("id = ? AND reseller_id = ?", id, rid).First(&k).Error != nil {
+	k, ok := s.keyByID(rid, id)
+	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "密钥不存在"})
 		return
 	}
@@ -352,11 +500,18 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request, rid uint,
 			http.NotFound(w, r)
 			return
 		}
-		k.Token = newAPIKeyToken()
-		if err := s.db.Model(&model.ApiKey{}).Where("id = ?", k.Id).Update("token", k.Token).Error; err != nil {
+		tok := newAPIKeyToken()
+		var err error
+		if k.IsDefault {
+			err = s.setDefaultToken(rid, tok)
+		} else {
+			err = s.db.Model(&model.ApiKey{}).Where("id = ?", k.Id).Update("token", tok).Error
+		}
+		if err != nil {
 			badRequest(w, err)
 			return
 		}
+		k.Token = tok
 		audit("api-key:rotate", map[string]interface{}{"id": k.Id, "name": k.Name})
 		writeJSON(w, http.StatusOK, viewKey(k))
 		return
@@ -368,11 +523,25 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request, rid uint,
 			badRequest(w, err)
 			return
 		}
-		s.db.Model(&model.ApiKey{}).Where("id = ?", k.Id).Updates(map[string]interface{}{"name": nk.Name, "perms": nk.Perms, "enabled": nk.Enabled})
-		audit("api-key:update", map[string]interface{}{"id": k.Id, "name": nk.Name, "perms": nk.Perms, "enabled": nk.Enabled})
+		if err := s.db.Model(&model.ApiKey{}).Where("id = ?", k.Id).Updates(map[string]interface{}{
+			"name": nk.Name, "perms": nk.Perms, "enabled": nk.Enabled, "ip_allow": nk.IpAllow, "ip_list": nk.IpList}).Error; err != nil {
+			badRequest(w, err)
+			return
+		}
+		audit("api-key:update", map[string]interface{}{"id": k.Id, "name": nk.Name, "perms": nk.Perms, "enabled": nk.Enabled, "ipAllow": nk.IpAllow, "ipList": nk.IpList})
 		writeJSON(w, http.StatusOK, viewKey(nk))
 	case http.MethodDelete:
-		s.db.Delete(&model.ApiKey{}, k.Id)
+		// 默认密钥:先让令牌失效,再删它的记录(反过来的话中途失败会留下一把认得出、却没有记录可管的令牌)
+		if k.IsDefault {
+			if err := s.setDefaultToken(rid, ""); err != nil {
+				badRequest(w, err)
+				return
+			}
+		}
+		if err := s.db.Delete(&model.ApiKey{}, k.Id).Error; err != nil {
+			badRequest(w, err)
+			return
+		}
 		audit("api-key:delete", map[string]interface{}{"id": k.Id, "name": k.Name})
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 	default:
@@ -380,12 +549,15 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request, rid uint,
 	}
 }
 
-// readKeyBody 读 {name, perms, enabled};名字必填、同一面板内不重名,至少一项权限。
+// readKeyBody 读 {name, perms, enabled, ipAllow, ipList}(没给的字段保持原样)。
+// 名字必填、同一面板内不重名(默认密钥可以不起名,界面上就叫「默认密钥」);至少一项权限;限来源时名单不能空(空名单等于谁都挡)。
 func (s *Server) readKeyBody(r *http.Request, base model.ApiKey) (model.ApiKey, error) {
 	var p struct {
 		Name    *string  `json:"name"`
 		Perms   []string `json:"perms"`
 		Enabled *bool    `json:"enabled"`
+		IpAllow *bool    `json:"ipAllow"`
+		IpList  *string  `json:"ipList"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		return base, errors.New("请求格式不对")
@@ -394,7 +566,7 @@ func (s *Server) readKeyBody(r *http.Request, base model.ApiKey) (model.ApiKey, 
 	if p.Name != nil {
 		k.Name = strings.TrimSpace(*p.Name)
 	}
-	if k.Name == "" || len([]rune(k.Name)) > 40 {
+	if (k.Name == "" && !k.IsDefault) || len([]rune(k.Name)) > 40 {
 		return base, errors.New("密钥名称不能为空,最多 40 个字")
 	}
 	if p.Perms != nil {
@@ -410,68 +582,34 @@ func (s *Server) readKeyBody(r *http.Request, base model.ApiKey) (model.ApiKey, 
 	if p.Enabled != nil {
 		k.Enabled = *p.Enabled
 	}
-	var dup int64
-	s.db.Model(&model.ApiKey{}).Where("reseller_id = ? AND name = ? AND id <> ?", k.ResellerId, k.Name, k.Id).Count(&dup)
-	if dup > 0 {
-		return base, fmt.Errorf("已经有一把叫 %q 的密钥", k.Name)
+	if p.IpAllow != nil {
+		k.IpAllow = *p.IpAllow
+	}
+	if p.IpList != nil {
+		_, norm, err := parseIPList(*p.IpList)
+		if err != nil {
+			return base, err
+		}
+		k.IpList = norm
+	}
+	if k.IpAllow && k.IpList == "" {
+		return base, errors.New("限定来源时至少填一个 IP 或网段")
+	}
+	if k.Name != "" {
+		var dup int64
+		s.db.Model(&model.ApiKey{}).Where("reseller_id = ? AND name = ? AND id <> ?", k.ResellerId, k.Name, k.Id).Count(&dup)
+		if dup > 0 {
+			return base, fmt.Errorf("已经有一把叫 %q 的密钥", k.Name)
+		}
 	}
 	return k, nil
 }
 
-// newAPIKeyToken 附加密钥的令牌:32 字节随机数的十六进制(和默认密钥同样长)。
+// newAPIKeyToken 密钥的令牌:32 字节随机数的十六进制。
 func newAPIKeyToken() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-// handleAPIIP GET / PUT 白名单 {enabled, list}。打开时名单不能空(空名单等于谁都挡)。
-func (s *Server) handleAPIIP(w http.ResponseWriter, r *http.Request, rid uint, audit func(action string, obj interface{})) {
-	get := func() (bool, string) {
-		if rid == 0 {
-			return s.setting("apiIpAllow") == "true", s.setting("apiIpList")
-		}
-		var rs model.Reseller
-		s.db.Select("id, api_ip_allow, api_ip_list").First(&rs, rid)
-		return rs.ApiIpAllow, rs.ApiIpList
-	}
-	switch r.Method {
-	case http.MethodGet:
-		on, list := get()
-		writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": on, "list": list, "you": s.sourceIP(r)})
-	case http.MethodPut, http.MethodPost:
-		var p struct {
-			Enabled bool   `json:"enabled"`
-			List    string `json:"list"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-			badRequest(w, errors.New("请求格式不对"))
-			return
-		}
-		_, norm, err := parseIPList(p.List)
-		if err != nil {
-			badRequest(w, err)
-			return
-		}
-		if p.Enabled && norm == "" {
-			badRequest(w, errors.New("打开白名单前至少填一个来源 IP 或网段"))
-			return
-		}
-		if rid == 0 {
-			// 两项一起写(一笔事务):不会出现「开关开了、名单还是旧的」的中间状态
-			if err := s.putSettings(map[string]string{"apiIpList": norm, "apiIpAllow": map[bool]string{true: "true", false: "false"}[p.Enabled]}); err != nil {
-				badRequest(w, err)
-				return
-			}
-		} else if err := s.db.Model(&model.Reseller{}).Where("id = ?", rid).Updates(map[string]interface{}{"api_ip_allow": p.Enabled, "api_ip_list": norm}).Error; err != nil {
-			badRequest(w, err)
-			return
-		}
-		audit("api-ip", map[string]interface{}{"enabled": p.Enabled, "list": norm})
-		writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": p.Enabled, "list": norm, "you": s.sourceIP(r)})
-	default:
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
-	}
 }
 
 // ---- 面板信息接口(权限 panel.read):给 Telegram 机器人、商城后台看面板状态 ----
@@ -754,7 +892,8 @@ func (s *Server) putSettings(kv map[string]string) error {
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		for k, v := range kv {
-			if err := tx.Clauses(clause.OnConflict{UpdateAll: true}).Create(&model.Setting{Key: k, Value: v}).Error; err != nil {
+			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "key"}}, DoUpdates: clause.AssignmentColumns([]string{"value"})}).
+				Create(&model.Setting{Key: k, Value: v}).Error; err != nil {
 				return err
 			}
 		}

@@ -229,8 +229,8 @@ type Reseller struct {
 	// 代理自己的外部 API:在代理面板"我的账号"里开启并取令牌,接口与主面板的 v1 相同,作用域限定为该代理名下
 	ApiEnabled bool   `json:"apiEnabled"`
 	ApiToken   string `json:"-" gorm:"index"`
-	// ApiIpAllow / ApiIpList 代理外部 API 的来源 IP 白名单:打开后只有名单里的 IP / 网段能调用(这个代理名下的全部密钥)。
-	// 不进快照(副机不提供代理的外部 API),由「我的账号」页单独读写。
+	// ApiIpAllow / ApiIpList 旧版里代理外部 API 的来源 IP 白名单(这个代理名下的全部密钥共用一份)。
+	// 现在来源限制按密钥存(ApiKey.IpAllow / IpList),这两列只在升级后第一次用到时抄过去一次,留着是为了回退到旧版时照旧生效。
 	ApiIpAllow bool   `json:"-"`
 	ApiIpList  string `json:"-"`
 	// Depleted 流量额度已用尽:主机每分钟判定并写入,随快照下发副机。为真时名下用户不下发数据面、订阅返回 404,
@@ -651,9 +651,11 @@ func All() []interface{} {
 	}
 }
 
-// ApiKey 外部 API 的附加密钥:主面板(ResellerId 0)或某个代理名下可以各建多把,每把单独起名、单独勾权限。
-// 原来那一把令牌(设置 apiToken / 代理的 ApiToken)照旧可用,界面上叫「默认密钥」,全部权限 —— 升级不用改对接程序,
-// 回退到旧版本也照样能用。附加密钥只在主机上生效(不进快照);主机容灾的副本带着这张表,接任后照常可用。
+// ApiKey 外部 API 的密钥:主面板(ResellerId 0)或某个代理名下各一张列表,每把单独起名、勾权限、限来源 IP。
+// 密钥只在主机上生效(不进快照);主机容灾的副本带着这张表,接任后照常可用。
+//
+// 升级前就有的那一把令牌(设置 apiToken / 代理的 ApiToken)是其中 IsDefault 的一行:令牌仍存在原处、认它也只看原处
+// (升级不用改对接程序,回退到旧版本也照样能用),这一行只存它的名字、权限、启停与来源限制,Token 是随机占位串。
 type ApiKey struct {
 	Id         uint   `json:"id" gorm:"primaryKey"`
 	ResellerId uint   `json:"resellerId" gorm:"index"`
@@ -664,4 +666,8 @@ type ApiKey struct {
 	CreatedAt  int64  `json:"createdAt"`
 	LastUsedAt int64  `json:"lastUsedAt"`
 	LastUsedIP string `json:"lastUsedIp"`
+	IsDefault  bool   `json:"isDefault"`
+	// IpAllow 限不限来源;IpList 允许的来源 IP / 网段(逗号分隔,见 web 包的 parseIPList)。
+	IpAllow bool   `json:"ipAllow"`
+	IpList  string `json:"ipList"`
 }

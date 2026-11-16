@@ -252,7 +252,8 @@ function renderRole() {
       bar.className = 'alert-bar';
       document.querySelector('.main').insertBefore(bar, document.getElementById('page'));
     }
-    bar.innerHTML = `<span>${t('alert.defaultPw')}</span><a href="#/admin" class="btn sm">${t('alert.changeNow')}</a>`;
+    // ?pw:到了管理员页直接弹出修改框(见 pages/admin.js),少点一下
+    bar.innerHTML = `<span>${t('alert.defaultPw')}</span><a href="#/admin?pw" class="btn sm">${t('alert.changeNow')}</a>`;
   } else if (bar) bar.remove();
 }
 

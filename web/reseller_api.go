@@ -148,6 +148,10 @@ func (s *Server) handleResellerItem(w http.ResponseWriter, r *http.Request) {
 			if err := tx.Delete(&model.Reseller{}, id).Error; err != nil {
 				return err
 			}
+			// 他的外部 API 密钥
+			if err := dropKeys(tx, id); err != nil {
+				return err
+			}
 			// 他的落地页 logo;顺带清掉以前留下的没主的行(删代理与他上传 logo 并发时可能有过)
 			return tx.Where("reseller_id > 0 AND reseller_id NOT IN (SELECT id FROM resellers)").Delete(&model.PageLogo{}).Error
 		})
@@ -215,14 +219,21 @@ func (s *Server) dispatchResellerSubroute(w http.ResponseWriter, r *http.Request
 		s.reloadUsers("重置代理流量 " + rs.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		return true
-	case "passwd": // 清空密码、2FA 与外部 API 令牌:代理下次登录时重新设置(API 重新打开时发新令牌)
+	case "passwd": // 清空密码、2FA 与外部 API 的全部密钥:代理下次登录时重新设置(API 重新打开时发新密钥)
 		if r.Method != http.MethodPost {
 			break
 		}
-		if err := s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{
-			"password": "", "totp_secret": "", "totp_enabled": false, "api_enabled": false, "api_token": "",
-			"claim_before": time.Now().Unix() + 24*3600, // 重开 24 小时认领窗口
-		}).Error; err != nil {
+		// 密钥一把不留:默认那把清令牌,其余的连记录删掉 —— 盗号的人在面板里抄走的任何一把都随之作废
+		// (以前只清默认那把,别的几把在代理重新打开外部 API 后又能用了)
+		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.Reseller{}).Where("id = ?", rs.Id).Updates(map[string]interface{}{
+				"password": "", "totp_secret": "", "totp_enabled": false, "api_enabled": false, "api_token": "",
+				"claim_before": time.Now().Unix() + 24*3600, // 重开 24 小时认领窗口
+			}).Error; err != nil {
+				return err
+			}
+			return dropKeys(tx, rs.Id)
+		}); err != nil {
 			badRequest(w, err)
 			return true
 		}

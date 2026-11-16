@@ -74,7 +74,8 @@ func TestResellerLoginRejectsCrossSite(t *testing.T) {
 	}
 }
 
-// 主面板重置代理密码时一并关掉外部 API、清空令牌:盗号者手里的旧令牌随之作废。
+// 主面板重置代理密码时一并关掉外部 API、收回他的全部密钥:盗号者手里的任何一把都随之作废
+// (以前只清默认那一把,别的几把在代理重新打开外部 API 后又能用了)。
 func TestResellerPasswordResetRevokesAPIToken(t *testing.T) {
 	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
 	if err != nil {
@@ -84,8 +85,17 @@ func TestResellerPasswordResetRevokesAPIToken(t *testing.T) {
 	s := &Server{db: db, sessions: map[string]session{}, totpPendingRS: map[uint]string{}}
 	rs := model.Reseller{Name: "dl", Enabled: true, ApiEnabled: true, ApiToken: "old-token"}
 	db.Create(&rs)
-	if _, ok := s.resellerByAPIToken("old-token"); !ok {
-		t.Fatal("前提:旧令牌可用")
+	db.Create(&model.ApiKey{ResellerId: rs.Id, Name: "机器人", Token: "extra-token", Perms: permUsersRead, Enabled: true})
+	call := func(tok string) int {
+		r := httptest.NewRequest("GET", "http://rs.example:2054/dl/api/v1/ping", nil)
+		r.RemoteAddr = "203.0.113.5:4000"
+		r.Header.Set("Authorization", "Bearer "+tok)
+		w := httptest.NewRecorder()
+		s.handleResellerPublicAPI(w, r)
+		return w.Code
+	}
+	if call("old-token") != 200 || call("extra-token") != 200 {
+		t.Fatal("前提:两把密钥都可用")
 	}
 	r := httptest.NewRequest("POST", "/app/api/resellers/"+strconv.FormatUint(uint64(rs.Id), 10)+"/passwd", nil)
 	w := httptest.NewRecorder()
@@ -94,7 +104,21 @@ func TestResellerPasswordResetRevokesAPIToken(t *testing.T) {
 	}
 	var got model.Reseller
 	db.First(&got, rs.Id)
-	if _, ok := s.resellerByAPIToken("old-token"); ok || got.ApiEnabled || got.ApiToken != "" {
-		t.Fatalf("重置后旧 API 令牌应失效: %+v", got)
+	var left int64
+	db.Model(&model.ApiKey{}).Where("reseller_id = ?", rs.Id).Count(&left)
+	if got.ApiEnabled || got.ApiToken != "" || left != 0 {
+		t.Fatalf("重置后外部 API 应关掉、密钥一把不留: %+v,还剩 %d 行", got, left)
+	}
+	// 代理重新设好密码、再打开外部 API:发一把新的默认密钥,以前的两把仍然无效
+	if err := s.ensureFirstKey(rs.Id); err != nil {
+		t.Fatal(err)
+	}
+	db.Model(&model.Reseller{}).Where("id = ?", rs.Id).Update("api_enabled", true)
+	db.First(&got, rs.Id)
+	if got.ApiToken == "" || got.ApiToken == "old-token" || call(got.ApiToken) != 200 {
+		t.Fatalf("重新打开后应有一把新的默认密钥: %q", got.ApiToken)
+	}
+	if call("old-token") != 401 || call("extra-token") != 401 {
+		t.Fatal("重置前的密钥在重新打开外部 API 后不该又能用")
 	}
 }

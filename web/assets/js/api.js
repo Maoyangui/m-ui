@@ -71,3 +71,5 @@ export async function upload(path, file, extra = {}) {
 
 // 二进制资源(二维码)直接返回 URL,由 <img> 加载
 export const qrUrl = (userId, format) => qrUrlFn ? qrUrlFn(userId, format) : `${BASE}users/${userId}/qr?format=${format}&_=${Date.now()}`;
+// 两步验证设置时的二维码(scope:主面板 'admin',代理面板 'self');演示站同样走 setQrUrl 换成现成的图
+export const totpQrUrl = scope => qrUrlFn ? qrUrlFn('totp', scope) : `${BASE}${scope}/totp/qr?_=${Date.now()}`;

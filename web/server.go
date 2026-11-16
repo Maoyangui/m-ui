@@ -84,6 +84,7 @@ type Server struct {
 	sessions       map[string]session
 	loginFails     map[string][]int64 // ip → 最近失败时间
 	apiFails       map[string][]int64 // 外部 API 鉴权失败:ip → 最近失败时间(主面板令牌与代理令牌共用,见 body_limit.go)
+	keyUsedAt      map[uint]int64     // 外部 API 密钥 id → 上次把「最近使用」写进库的时间(见 noteKeyUse)
 	ops            *ops.Runner
 
 	totpPending    string          // 两步验证:已生成、待认证器验证一次后才生效的密钥

@@ -1,72 +1,76 @@
-// 代理面板:我的账号(改密码 / 两步验证)与订阅页设置。
+// 代理面板「账号」:我的额度一排概要 → 登录密码 + 两步验证并排 → 外部 API(密钥)→ 我的订阅页。
+// 额度是来这一页最常看的,放最上面、做成一格一个数;密码和两步验证平时不动,各一张小卡片,改动在弹框里做。
 import { state, load } from '../app.js';
-import { get, post, put, del } from '../api.js';
+import { get, post, put, del, totpQrUrl } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, openModal, registerActions, badge, field, check, fv, fchk, fmtBytes, fmtDay, progress, setHTML, charCount, bindCharCounts, PAGE_TEXT_MAX } from '../ui.js';
-import { apiTable, apiExample } from '../apidoc.js';
-import { mountApiKeys } from '../apikeys.js';
+import { esc, toast, openModal, registerActions, field, switchRow, fv, fchk, fmtBytes, fmtDay, progress, charCount, bindCharCounts, PAGE_TEXT_MAX } from '../ui.js';
+import { mountApiCard } from '../apikeys.js';
+import { mountTotp } from '../totp.js';
 import { logoBlock, bindLogo } from '../logo.js';
 
 export const title = () => t('acct.title');
 export const subtitle = () => t('acct.subtitle');
 
 let me = {};
-let pendingSecret = '';
-let api = { enabled: false, token: '' };
+let pendingSecret = ''; // 两步验证生成了、还没验证的密钥(代理面板这边只在页面里记着)
 
-// 代理自己的外部 API:开关 + 令牌;接口前缀就是当前面板地址下的 api/v1/。接口一览和主面板同一份(作用域只限自己名下),没开时折起来
-function apiBase() { return location.origin + location.pathname.replace(/[^/]*$/, '') + 'api/v1/'; }
-function apiCard() {
-  const on = !!api.enabled;
-  const docs = `<p class="hint">${t('acct.apiDocs')} <a href="${esc((state.status.repo || 'https://github.com/Maoyangui/m-ui') + '/blob/main/docs/API.md')}" target="_blank" rel="noopener">docs/API.md</a></p>`;
-  return `<div class="card-head"><h2>${t('acct.api')}</h2><div class="row" style="align-items:center;gap:.5rem">${badge(on ? t('common.enabled') : t('common.disabled'), on ? 'ok' : '')}<label class="switch" title="${esc(t('acct.apiEnable'))}"><input type="checkbox" id="acct-api-on" ${on ? 'checked' : ''}><span></span></label></div></div>
-    <p class="hint">${t('acct.apiHelp')}</p>
-    ${on ? `<dl class="kv">
-      <dt>${t('acct.apiBase')}</dt><dd><div class="sub-box"><code>${esc(apiBase())}</code><button class="btn sm" data-act="acct.copy" data-id="${esc(apiBase())}">${t('common.copy')}</button></div></dd>
-      <dt>${t('acct.apiToken')}</dt><dd><div class="sub-box"><code>${esc(api.token || '')}</code><button class="btn sm" data-act="acct.copy" data-id="${esc(api.token || '')}">${t('common.copy')}</button><button class="btn sm danger" data-act="acct.apiRotate">${t('acct.apiRotate')}</button></div></dd>
-    </dl>
-    <div id="api-keys" class="api-keys-box"></div>
-    <h3 class="sub-title">${t('adm.apiEndpoints')}</h3>
-    ${apiTable(true)}
-    <h3 class="sub-title">${t('adm.apiExample')}</h3>
-    <pre class="log code">${esc(apiExample(apiBase(), api.token || '', true))}</pre>
-    ${docs}` : `<details class="adv api-list"><summary>${t('adm.apiEndpointsOff')}</summary>${apiTable(true)}${docs}</details>`}`;
+// 代理的外部 API 地址就是当前面板地址下的 api/v1
+const apiBase = () => location.origin + location.pathname.replace(/[^/]*$/, '') + 'api/v1';
+
+function lastLogin() {
+  const s = String(me.lastLogins || '').trim();
+  if (!s) return esc(t('adm.neverLogin'));
+  const i = s.lastIndexOf(' ');
+  return i > 0 ? `${esc(s.slice(0, i))}<span class="sep">·</span>${esc(s.slice(i + 1))}` : esc(s);
+}
+
+// 我的额度:流量、用户数、设备、限速、到期各一格;快到头的那一格变色
+function quotaTiles() {
+  const tile = (lb, v, sub = '', cls = '') => `<div class="ld-tile${cls ? ' ' + cls : ''}"><span class="lb">${esc(lb)}</span><b>${v}</b>${sub ? `<span class="sub">${sub}</span>` : ''}</div>`;
+  const left = me.expiry ? Math.ceil((me.expiry * 1000 - Date.now()) / 86400000) : null;
+  const pct = me.volume ? me.used / me.volume : 0;
+  const speed = (me.speedUp || me.speedDown) ? `${me.speedUp || '∞'}<span class="of"> / ${me.speedDown || '∞'} Mbps</span>` : esc(t('common.unlimited'));
+  return `<div class="ld-sum acct-sum">
+    ${tile(t('rs.used'), fmtBytes(me.used || 0, 1), `/ ${me.volume ? fmtBytes(me.volume, 0) : esc(t('common.unlimited'))}${progress(me.used, me.volume)}`, pct >= 1 ? 'bad' : pct >= 0.9 ? 'warn' : '')}
+    ${tile(t('rs.users'), `${me.users || 0}<span class="of"> / ${me.userLimit || '∞'}</span>`, '', me.userLimit && me.users >= me.userLimit ? 'warn' : '')}
+    ${tile(t('rs.pool'), `${me.online || 0}<span class="of"> / ${me.deviceLimit || '∞'}</span>`, esc(me.poolRejects ? t('rs.poolFull', { n: me.poolRejects }) : `${t('rs.allocated')} ${me.devices || 0}`), me.poolRejects ? 'warn' : '')}
+    ${tile(t('rs.speed'), speed, (me.speedUp || me.speedDown) ? esc(t('acct.speedSub')) : '')}
+    ${tile(t('user.expiry'), me.expiry ? fmtDay(me.expiry) : esc(t('user.never')),
+    left == null ? '' : left <= 0 ? esc(t('user.expired')) : esc(t('user.daysLeft', { n: left })), left != null && left <= 3 ? 'bad' : left != null && left <= 7 ? 'warn' : '')}
+  </div>`;
+}
+
+function passCard() {
+  return `<div class="card-head"><h2>${t('acct.password')}</h2></div>
+    <div class="adm-who"><span class="adm-ava"><i class="i i-user"></i></span>
+      <div><b>${esc(me.name || '')}</b><span class="muted small">${t('rs.lastLogin')} ${lastLogin()}</span></div></div>
+    <div class="card-acts"><button class="btn sm" data-act="acct.editPass">${t('acct.passEdit')}</button></div>`;
 }
 
 export async function render(el) {
   me = await get('self');
-  api = await get('self/api').catch(() => ({ enabled: false, token: '' }));
+  const api = await get('self/api').catch(() => ({ enabled: false }));
   el.innerHTML = `
     <section class="card">
-      <div class="card-head"><h2>${t('acct.quota')}</h2><span class="muted small">${t('rs.lastLogin')}: ${esc(me.lastLogins || '—')}</span></div>
-      <dl class="kv">
-        <dt>${t('rs.used')}</dt><dd>${fmtBytes(me.used)} / ${me.volume ? fmtBytes(me.volume) : t('common.unlimited')}${progress(me.used, me.volume)}</dd>
-        <dt>${t('rs.pool')}</dt><dd class="num">${me.online} / ${me.deviceLimit || '∞'} <span class="muted small">${t('rs.allocated')} ${me.devices}</span>${me.poolRejects ? `<div class="muted small" style="color:var(--warn)">${esc(t('rs.poolFull', { n: me.poolRejects }))}</div>` : ''}</dd>
-        <dt>${t('rs.speed')}</dt><dd class="num">${(me.speedUp || me.speedDown) ? `${me.speedUp || '∞'} / ${me.speedDown || '∞'} Mbps` : t('common.unlimited')}</dd>
-        <dt>${t('user.expiry')}</dt><dd>${me.expiry ? fmtDay(me.expiry) : t('user.never')}</dd>
-        <dt>${t('rs.online')}</dt><dd class="num">${me.online}</dd>
-        <dt>${t('rs.users')}</dt><dd class="num">${me.users} / ${me.userLimit || '∞'}</dd>
-      </dl>
+      <div class="card-head"><h2>${t('acct.quota')}</h2></div>
+      ${quotaTiles()}
     </section>
 
-    <section class="card">
-      <div class="card-head"><h2>${t('acct.password')}</h2></div>
-      <div class="form-grid">
-        ${field(t('set.oldPass'), `<input id="pw-old" type="password" autocomplete="current-password">`)}
-        ${field(t('set.newPass'), `<input id="pw-new" type="password" autocomplete="new-password">`)}
+    <div class="adm-top">
+      <section class="card" id="acct-pass">${passCard()}</section>
+      <section class="card" id="acct-totp"></section>
+    </div>
+
+    <section class="card" id="acct-api"></section>
+
+    <section class="card acct-page">
+      <div class="card-head"><h2>${t('set.subPage')}</h2></div>
+      <p class="hint">${esc(t('acct.pageLead'))}</p>
+      <div class="acct-sw">
+        ${switchRow('sp-enabled', t('set.subPageEnabled'), me.pageEnabled !== false, t('acct.pageHelp'))}
+        ${switchRow('sp-share', t('set.subShare'), me.shareOn !== false, t('acct.shareHelp'))}
       </div>
-      <div class="row" style="margin-top:.7rem"><button class="btn primary" data-act="acct.passwd">${t('common.save')}</button></div>
-    </section>
-
-    <section class="card" id="acct-totp">${totpCard()}</section>
-
-    <section class="card" id="acct-api">${apiCard()}</section>
-
-    <section class="card">
-      <div class="card-head"><h2>${t('set.subPage')}</h2><button class="btn primary sm" data-act="acct.savePage">${t('common.save')}</button></div>
-      <div class="form-grid">
-        ${check('sp-enabled', t('set.subPageEnabled'), me.pageEnabled !== false, t('acct.pageHelp'))}
-        ${check('sp-share', t('set.subShare'), me.shareOn !== false, t('acct.shareHelp'))}
+      <div class="form-grid cols-2">
         ${field(t('set.subTitle'), `<input id="sp-profile" value="${esc(me.profileTitle || '')}" placeholder="${esc(t('acct.inherit'))}">`, t('acct.profileHelp'))}
         ${field(t('set.subPageTitle'), `<input id="sp-title" value="${esc(me.pageTitle || '')}" placeholder="${esc(t('acct.inherit'))}">`)}
         ${field(t('set.subPageSupport'), `<input id="sp-support" value="${esc(me.pageSupport || '')}" placeholder="${esc(t('acct.inherit'))}">${charCount('sp-support', PAGE_TEXT_MAX.support)}`, t('set.subPageSupportHelp'))}
@@ -74,52 +78,32 @@ export async function render(el) {
         <div class="full">${field(t('set.subPageNotice'), `<textarea id="sp-notice" placeholder="${esc(t('acct.inherit'))}">${esc(me.pageNotice || '')}</textarea>${charCount('sp-notice', PAGE_TEXT_MAX.notice)}`, t('set.subPageNoticeHelp'))}</div>
       </div>
       ${logoBlock('sp-logo')}
+      <div class="card-acts end"><button class="btn primary" data-act="acct.savePage">${t('acct.pageSave')}</button></div>
     </section>`;
-  bindApiSwitch();
   bindLogo('sp-logo', 'self/logo', { inherit: true }); // 没设时名下用户看到的是主面板的
   bindCharCounts(el);
-}
-
-// 开关的事件:卡片每次重绘后都要重新挂;开着时把附加密钥与白名单挂进卡片
-function bindApiSwitch() {
-  if (api.enabled) mountApiKeys('self/api');
-  const sw = document.getElementById('acct-api-on');
-  if (sw) sw.addEventListener('change', async e => {
-    try { api = await put('self/api', { enabled: e.target.checked }); toast(t('acct.apiSaved'), 'ok'); setHTML('acct-api', apiCard()); bindApiSwitch(); }
-    catch (err) { toast(err.message, 'err'); e.target.checked = !e.target.checked; }
-  });
-}
-
-function totpCard() {
-  const head = b => `<div class="card-head"><h2>${t('adm.totp')}</h2>${b}</div>`;
-  if (me.totpEnabled) {
-    return `${head(badge(t('adm.totpOn'), 'ok'))}
-      <p class="hint">${t('adm.totpOnHelp')}</p>
-      <div class="row" style="margin-top:.7rem"><button class="btn danger sm" data-act="acct.totpOff">${t('adm.totpDisable')}</button></div>`;
-  }
-  if (pendingSecret) {
-    return `${head(badge(t('adm.totpPending'), 'warn'))}
-      <p class="hint">${t('adm.totpScanHelp')}</p>
-      <div class="totp-setup">
-        <img class="qr" src="./api/self/totp/qr?_=${Date.now()}" alt="QR">
-        <div class="totp-side">
-          <div class="label">${t('adm.totpSecret')}</div>
-          <div class="sub-box"><code>${esc(pendingSecret)}</code></div>
-          ${field(t('adm.totpCode'), `<input id="totp-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="max-width:9rem;font-family:var(--mono);letter-spacing:.15em">`)}
-          <div class="row"><button class="btn primary" data-act="acct.totpOn">${t('adm.totpVerify')}</button>
-          <button class="btn ghost" data-act="acct.totpCancel">${t('common.cancel')}</button></div>
-        </div>
-      </div>`;
-  }
-  return `${head(badge(t('adm.totpOff')))}
-    <p class="hint">${t('adm.totpHelp')}</p>
-    <div class="row" style="margin-top:.7rem"><button class="btn primary sm" data-act="acct.totpGen">${t('adm.totpGen')}</button></div>`;
-}
-
-async function refresh() {
-  me = await get('self');
-  const el = document.getElementById('acct-totp');
-  if (el) el.innerHTML = totpCard();
+  await Promise.all([
+    mountTotp({
+      el: 'acct-totp',
+      manual: false,
+      initial: { enabled: !!me.totpEnabled, pending: pendingSecret },
+      state: async () => { me = await get('self'); return { enabled: !!me.totpEnabled, pending: pendingSecret }; },
+      qr: () => totpQrUrl('self'),
+      begin: async () => { pendingSecret = (await get('self/totp')).secret || ''; },
+      enable: async code => { await post('self/totp', { code }); pendingSecret = ''; },
+      cancel: async () => { pendingSecret = ''; },
+      disable: (password, code) => del('self/totp', { body: JSON.stringify({ password, code }) }),
+    }),
+    mountApiCard({
+      el: 'acct-api',
+      prefix: 'self/api',
+      url: apiBase(),
+      enabled: !!api.enabled,
+      reseller: true,
+      repo: (state.status || {}).repo || '',
+      toggle: on => put('self/api', { enabled: on }),
+    }),
+  ]);
 }
 
 // 首次登录:必须先设密码才能用面板
@@ -139,16 +123,6 @@ export function forceSetPassword() {
 }
 
 registerActions({
-  'acct.copy': (_, btn) => {
-    const v = btn.dataset.id || '';
-    if (navigator.clipboard) navigator.clipboard.writeText(v).then(() => toast(t('common.copied'), 'ok'));
-    else { const a = document.createElement('textarea'); a.value = v; document.body.appendChild(a); a.select(); document.execCommand('copy'); a.remove(); toast(t('common.copied'), 'ok'); }
-  },
-  'acct.apiRotate': async () => {
-    if (!await confirm(t('acct.apiRotateConfirm'), { danger: true })) return;
-    try { api = await post('self/api/rotate'); toast(t('acct.apiRotated'), 'ok'); setHTML('acct-api', apiCard()); bindApiSwitch(); }
-    catch (e) { toast(e.message, 'err'); }
-  },
   'acct.first': async () => {
     const err = document.getElementById('first-err');
     try {
@@ -156,36 +130,17 @@ registerActions({
       location.reload();
     } catch (e) { err.hidden = false; err.textContent = e.message; }
   },
-  'acct.passwd': async () => {
-    try {
+  'acct.editPass': () => {
+    openModal(t('acct.passEdit'), `<div class="form-grid">
+        ${field(t('set.oldPass'), `<input id="pw-old" type="password" autocomplete="current-password">`)}
+        ${field(t('set.newPass'), `<input id="pw-new" type="password" autocomplete="new-password">`)}
+      </div>`, async () => {
       await post('self/password', { old: fv('pw-old'), new: fv('pw-new') });
       toast(t('set.passChanged'), 'ok');
-      document.getElementById('pw-old').value = '';
-      document.getElementById('pw-new').value = '';
-    } catch (e) { toast(e.message, 'err'); }
+    });
   },
-  'acct.totpGen': async () => {
-    try { const r = await get('self/totp'); pendingSecret = r.secret; setHTML('acct-totp', totpCard()); }
-    catch (e) { toast(e.message, 'err'); }
-  },
-  'acct.totpCancel': () => { pendingSecret = ''; setHTML('acct-totp', totpCard()); },
-  'acct.totpOn': async () => {
-    try { await post('self/totp', { code: fv('totp-code') }); pendingSecret = ''; await refresh(); toast(t('adm.totpEnabled'), 'ok'); }
-    catch (e) { toast(e.message, 'err'); }
-  },
-  'acct.totpOff': () => {
-    openModal(t('adm.totpDisableTitle'), `
-      <p class="hint">${t('adm.totpDisableHelp')}</p>
-      <div class="form-grid">
-        ${field(t('adm.password'), `<input id="totp-pw" type="password" autocomplete="current-password">`)}
-        ${field(t('adm.totpCode'), `<input id="totp-dcode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">`)}
-      </div>`, async () => {
-      await del('self/totp', { body: JSON.stringify({ password: fv('totp-pw'), code: fv('totp-dcode') }) });
-      await refresh();
-      toast(t('adm.totpDisabled'), 'ok');
-    }, { saveText: t('adm.totpDisable'), danger: true });
-  },
-  'acct.savePage': async () => {
+  'acct.savePage': async (_, btn) => {
+    if (btn) btn.disabled = true;
     try {
       await put('self', {
         pageEnabled: fchk('sp-enabled'), shareOn: fchk('sp-share'),
@@ -195,5 +150,6 @@ registerActions({
       await load('status');
       toast(t('set.saved'), 'ok');
     } catch (e) { toast(e.message, 'err'); }
+    finally { if (btn) btn.disabled = false; }
   },
 });

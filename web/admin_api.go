@@ -1,8 +1,6 @@
 package web
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -67,14 +65,8 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 		post(func() { s.totpDisable(w, r) })
 	case "api":
 		post(func() { s.apiToggle(w, r) })
-	case "api/rotate":
-		post(func() {
-			tok := s.newAPIToken()
-			s.audit(r, "admin", "api:rotate", nil)
-			writeJSON(w, http.StatusOK, map[string]string{"token": tok})
-		})
 	default:
-		if strings.HasPrefix(action, "api/keys") || action == "api/ip" {
+		if strings.HasPrefix(action, "api/keys") {
 			s.handleAPIKeys(w, r, 0, strings.TrimPrefix(action, "api/"), func(a string, obj interface{}) { s.audit(r, "admin", a, obj) })
 			return
 		}
@@ -223,14 +215,6 @@ func (s *Server) totpDisable(w http.ResponseWriter, r *http.Request) {
 
 // ---- 外部 API 开关 ----
 
-func (s *Server) newAPIToken() string {
-	b := make([]byte, 32)
-	rand.Read(b)
-	tok := hex.EncodeToString(b)
-	s.run.SetSetting("apiToken", tok)
-	return tok
-}
-
 func (s *Server) apiToggle(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Enabled bool `json:"enabled"`
@@ -239,15 +223,17 @@ func (s *Server) apiToggle(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	tok := s.setting("apiToken")
-	if req.Enabled && tok == "" {
-		tok = s.newAPIToken()
-	}
 	if req.Enabled {
-		s.run.SetSetting("apiEnabled", "true")
-	} else {
-		s.run.SetSetting("apiEnabled", "false")
+		// 第一次打开、一把密钥都没有:生成默认密钥,开了就能用
+		if err := s.ensureFirstKey(0); err != nil {
+			badRequest(w, err)
+			return
+		}
+	}
+	if err := s.putSettings(map[string]string{"apiEnabled": map[bool]string{true: "true", false: "false"}[req.Enabled]}); err != nil {
+		badRequest(w, err)
+		return
 	}
 	s.audit(r, "admin", "api:"+map[bool]string{true: "enable", false: "disable"}[req.Enabled], nil)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": req.Enabled, "token": tok})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"enabled": req.Enabled, "token": s.setting("apiToken")})
 }

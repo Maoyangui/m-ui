@@ -47,18 +47,29 @@ for (const n of S.nodes.nodes || []) if (n.status) n.status.uptime = (n.status.u
     n.status.disk = k === 2 ? { path: '/etc/m-ui', total: 9.6 * G, used: 8.8 * G, free: 0.8 * G, logs: 4.1 * G, cache: 0.3 * G, swap: 4 * G, opsAgent: true, at }
       : { path: '/etc/m-ui', total: 40 * G, used: (9 + 4 * k) * G, free: (31 - 4 * k) * G, logs: 0.4 * G, cache: 0.2 * G, swap: 2 * G, at }; } }
 
-// 外部 API 的附加密钥与来源 IP 白名单(主面板 admin、代理面板 self 各一套;只在本页内存里)
+// 外部 API 的密钥(主面板 admin、代理面板 self 各一套;只在本页内存里)。第一把是默认密钥,和别的在同一张表里
 const API_PERMS = ['users.read', 'users.create', 'users.update', 'users.delete', 'billing', 'plans.read', 'panel.read'];
-S.apiKeys = {
-  admin: [{ id: 1, resellerId: 0, name: 'telegram-bot', token: 'demo-telegrambot0key0for0the0demo0only', perms: 'users.read,panel.read', permList: ['users.read', 'panel.read'], enabled: true, createdAt: Math.floor(Date.now() / 1000) - 86400 * 9, lastUsedAt: Math.floor(Date.now() / 1000) - 420, lastUsedIp: '198.51.100.23' }],
-  self: [],
-};
-S.apiIp = { admin: { enabled: false, list: '', you: '203.0.113.5' }, self: { enabled: false, list: '', you: '203.0.113.5' } };
+{ const at = Math.floor(Date.now() / 1000);
+  S.apiKeys = {
+    admin: [
+      { id: 1, resellerId: 0, name: '', isDefault: true, token: 'demo-defaulttoken0for0the0demo0only', perms: API_PERMS.join(','), enabled: true, ipAllow: false, ipList: '', createdAt: at - 86400 * 40, lastUsedAt: at - 95, lastUsedIp: '203.0.113.80' },
+      { id: 2, resellerId: 0, name: 'telegram-bot', isDefault: false, token: 'demo-telegrambot0key0for0the0demo0only', perms: 'users.read,panel.read', enabled: true, ipAllow: true, ipList: '198.51.100.23, 198.51.100.24', createdAt: at - 86400 * 9, lastUsedAt: at - 420, lastUsedIp: '198.51.100.23' },
+    ],
+    self: [],
+  }; }
 function demoApiKeys(scope, method, id, sub, body) {
   const list = S.apiKeys[scope];
   const view = k => ({ ...k, permList: API_PERMS.filter(p => k.perms.split(',').includes(p)) });
-  const fill = (k, b) => { if (b) { if (b.name != null) k.name = String(b.name).trim() || k.name; if (Array.isArray(b.perms)) k.perms = API_PERMS.filter(p => b.perms.includes(p)).join(','); if (b.enabled != null) k.enabled = !!b.enabled; } return k; };
-  if (!id && method === 'POST') { const k = fill({ id: nextId(list), resellerId: 0, name: 'key', token: 'demo-' + rnd(32), perms: 'users.read', enabled: true, createdAt: Math.floor(Date.now() / 1000), lastUsedAt: 0, lastUsedIp: '' }, body); list.push(k); return view(k); }
+  const fill = (k, b) => {
+    if (!b) return k;
+    if (b.name != null) k.name = String(b.name).trim() || (k.isDefault ? '' : k.name);
+    if (Array.isArray(b.perms)) k.perms = API_PERMS.filter(p => b.perms.includes(p)).join(',');
+    if (b.enabled != null) k.enabled = !!b.enabled;
+    if (b.ipAllow != null) k.ipAllow = !!b.ipAllow;
+    if (b.ipList != null) k.ipList = String(b.ipList).split(/[\s,;，]+/).filter(Boolean).join(', ');
+    return k;
+  };
+  if (!id && method === 'POST') { const k = fill({ id: nextId(list), resellerId: 0, name: 'key', isDefault: false, token: 'demo-' + rnd(32), perms: 'users.read', enabled: true, ipAllow: false, ipList: '', createdAt: Math.floor(Date.now() / 1000), lastUsedAt: 0, lastUsedIp: '' }, body); list.push(k); return view(k); }
   const k = list.find(x => String(x.id) === String(id));
   if (!k) return { error: 'not found' };
   if (method === 'DELETE') { list.splice(list.indexOf(k), 1); return ok(); }
@@ -465,11 +476,10 @@ function route(method, path, query, body) {
         if (t === 'password') return { password: rnd(Number(new URLSearchParams(query).get('len')) || 16) };
         return { privateKey: 'demo-private-key-' + rnd(24), publicKey: 'demo-public-key-' + rnd(24) }; }
       case 'admin': case 'self':
-        if (seg[1] === 'api' && seg[2] === 'keys') return { keys: S.apiKeys[seg[0]].map(k => demoApiKeys(seg[0], 'GET', k.id)), perms: API_PERMS };
-        if (seg[1] === 'api' && seg[2] === 'ip') return clone(S.apiIp[seg[0]]);
-        if (seg[0] === 'admin' && seg[1] === 'info') { // 演示里外部 API 开着:看得到默认令牌、附加密钥与权限、白名单
+        if (seg[1] === 'api' && seg[2] === 'keys') return { keys: S.apiKeys[seg[0]].map(k => demoApiKeys(seg[0], 'GET', k.id)), perms: API_PERMS, you: '203.0.113.5' };
+        if (seg[0] === 'admin' && seg[1] === 'info') { // 演示里外部 API 开着:看得到密钥列表(默认密钥和一把只读、限了来源的);两步验证可以走一遍开启流程
           const i = listByPrefix(path) ?? {};
-          return { ...i, apiEnabled: true, apiToken: i.apiToken || 'demo-defaulttoken0for0the0demo0only' };
+          return { ...i, apiEnabled: S.apiOn !== false, totpEnabled: !!S.totpOn, totpPending: S.totpPending ? { secret: S.totpPending } : undefined };
         }
         return listByPrefix(path) ?? {};
       default: return listByPrefix(path) ?? {};
@@ -614,9 +624,13 @@ function route(method, path, query, body) {
     case 'agent': if (seg[1] === 'rotate') return { token: 'demo-' + rnd(32) }; return ok();
     case 'admin': case 'self':
       if (seg[1] === 'api' && seg[2] === 'keys') return demoApiKeys(seg[0], method, seg[3], seg[4], body);
-      if (seg[1] === 'api' && seg[2] === 'ip') { S.apiIp[seg[0]] = { ...S.apiIp[seg[0]], enabled: !!(body && body.enabled), list: String((body && body.list) || '').split(/[\s,;，]+/).filter(Boolean).join(', ') }; return clone(S.apiIp[seg[0]]); }
-      if (seg[0] === 'admin' && seg[1] === 'api' && seg[2] === 'rotate') return { token: 'demo-' + rnd(32) };
-      if (seg[0] === 'admin' && seg[1] === 'totp' && seg[2] === 'setup') return { secret: 'DEMOSECRET', url: 'otpauth://totp/m-ui:admin?secret=DEMOSECRET', qr: '' };
+      if (seg[0] === 'admin' && seg[1] === 'api' && !seg[2]) { S.apiOn = !!(body && body.enabled); return { enabled: S.apiOn }; }
+      if (seg[0] === 'admin' && seg[1] === 'totp') {
+        if (seg[2] === 'setup') { S.totpPending = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP'; return { secret: S.totpPending }; }
+        if (seg[2] === 'cancel') { S.totpPending = ''; return ok(); }
+        if (seg[2] === 'enable') { if (!/^\d{6}$/.test(String((body && body.code) || ''))) throw demoErr(400, '验证码不正确,请确认认证器已添加此密钥且手机时间准确'); S.totpOn = true; S.totpPending = ''; return ok(); }
+        if (seg[2] === 'disable') { S.totpOn = false; return ok(); }
+      }
       return ok();
     case 'reload': case 'password': case 'notify': return ok();
     default: return ok();
@@ -632,7 +646,8 @@ setTransport(async (rawPath, opts = {}) => {
   if (method !== 'GET' && !(body && body.dryRun) && !READONLY_POST.test(path)) demoNote();
   return res;
 });
-setQrUrl((id, fmt) => (data.qr || {})[`${id}:${fmt}`] || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
+// 两步验证的二维码(id 为 'totp')演示里没有真的:拿一张现成的订阅二维码顶上,样子对就行
+setQrUrl((id, fmt) => (data.qr || {})[`${id}:${fmt}`] || (id === 'totp' && Object.values(data.qr || {})[0]) || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
 
 // 写操作在本页内存里"成功"后提示一句:面板自己的提示(已保存、已续费……)后面接上"演示模式,刷新即恢复";
 // 面板这次没弹提示就单独弹一条。只算真正改东西的请求:测速、预览、解析、生成密钥这类不算。

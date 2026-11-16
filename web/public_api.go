@@ -1,7 +1,6 @@
 package web
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,8 +43,8 @@ import (
 //	GET    /api/v1/lines                    线路与在线人数
 //	GET    /api/v1/onlines                  在线用户、设备数与所在线路
 //
-// 密钥与权限:默认密钥(原来那一把)全部权限;附加密钥按勾的权限(见 api_keys.go 的 apiPermFor),
-// 没有权限返回 403。来源 IP 白名单打开后,名单外的来源返回 403。
+// 密钥与权限:每把密钥按它勾的权限放行(见 api_keys.go 的 apiPermFor),没有权限返回 403;
+// 限了来源 IP 的密钥,名单外的来源返回 403。升级前就有的那一把是「默认密钥」,默认全部权限、不限来源。
 //
 // 套餐操作支持幂等:requestId 或请求头 Idempotency-Key,同一作用域同一个键只执行一次(见 plan_change.go)。
 
@@ -58,24 +57,16 @@ func apiToken(r *http.Request) string {
 	return got
 }
 
-// publicAuth 主面板入口的鉴权。known:令牌与主面板令牌对得上(哪怕开关关着),
-// 这种失败不算猜令牌,不计入限流 —— 关掉外部 API 后对接程序照常调用,不该把同一出口 IP 上别人的调用一起挡掉。
-func (s *Server) publicAuth(r *http.Request) (ok, known bool) {
-	want := s.setting("apiToken")
-	got := apiToken(r)
-	if want == "" || got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-		return false, false
-	}
-	return s.setting("apiEnabled") == "true", true
-}
-
-// apiScope 一次调用的作用域:主面板令牌 rid=0 看全部;代理令牌只看自己名下。
+// apiScope 一次调用的作用域:主面板的密钥 rid=0 看全部;代理的密钥只看自己名下。
 type apiScope struct {
 	rid   uint
-	actor string // 审计里的操作者:api / api:代理名 / api:密钥名
-	// perms 附加密钥的权限(见 api_keys.go);nil = 默认密钥,全部权限
+	actor string // 审计里的操作者:api / api:代理名 / api:密钥名 / api:代理名/密钥名
+	// perms 这把密钥的权限(见 api_keys.go);nil = 不按密钥限(面板自己的调用,比如 Telegram 机器人)
 	perms map[string]bool
-	keyId uint // 附加密钥的 id(记最近使用);默认密钥为 0
+	keyId uint // 密钥在表里的 id(记最近使用)
+	// 这把密钥限不限来源、允许哪些来源(见 fromAllowed)
+	ipAllow bool
+	ipList  string
 }
 
 func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +83,7 @@ func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
-	if !s.apiIPCheck(r, 0) { // 白名单挡下的不算猜令牌,不计入失败限流
+	if !sc.fromAllowed(s.sourceIP(r)) { // 密钥对、只是来源不在它允许的范围里:不算猜令牌,不计入失败限流
 		writeIPDenied(w)
 		return
 	}
@@ -105,27 +96,6 @@ func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 	s.publicAPI(w, r, sc)
 }
 
-// resellerByAPIToken 按令牌找到开启了外部 API 的代理;停用、到期的代理视同令牌错误。
-func (s *Server) resellerByAPIToken(tok string) (model.Reseller, bool) {
-	rs, ok, _ := s.resellerAPIToken(tok)
-	return rs, ok
-}
-
-// resellerAPIToken 同上,另外报告令牌是否对得上某个代理(known):对得上、只是代理关了外部 API、
-// 已停用或已到期的,调用方照常拒绝,但不算猜令牌、不计入限流。
-func (s *Server) resellerAPIToken(tok string) (rs model.Reseller, ok, known bool) {
-	if tok == "" || s.db.Where("api_token = ? AND api_token <> ''", tok).Order("api_enabled DESC").First(&rs).Error != nil {
-		return rs, false, false
-	}
-	if subtle.ConstantTimeCompare([]byte(tok), []byte(rs.ApiToken)) != 1 {
-		return rs, false, false
-	}
-	if !rs.ApiEnabled || !rs.Enabled || (rs.Expiry > 0 && rs.Expiry < time.Now().Unix()) {
-		return rs, false, true
-	}
-	return rs, true, true
-}
-
 // handleResellerPublicAPI 代理面板上的 /api/v1/:令牌属于哪个代理,就只操作那个代理名下的东西。
 func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -133,7 +103,7 @@ func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "失败次数过多,请 5 分钟后再试"})
 		return
 	}
-	rs, sc, ok, known := s.resellerAPIAuth(r)
+	_, sc, ok, known := s.resellerAPIAuth(r)
 	if !ok {
 		if !known {
 			s.noteAPIAuthFailure(r, "代理")
@@ -141,7 +111,7 @@ func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
-	if !s.apiIPCheck(r, rs.Id) {
+	if !sc.fromAllowed(s.sourceIP(r)) {
 		writeIPDenied(w)
 		return
 	}

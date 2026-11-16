@@ -86,6 +86,7 @@ func Open(dbPath string) (*gorm.DB, error) {
 	db.Exec("UPDATE users SET disabled_reason = 'manual' WHERE enabled = 0 AND disabled_reason = ''")
 	backfillUserPlans(db)
 	backfillForwardIds(db)
+	backfillApiKeyIPs(db)
 	return db, nil
 }
 

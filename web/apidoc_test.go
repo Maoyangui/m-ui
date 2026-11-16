@@ -15,7 +15,8 @@ import (
 // 提前一次续多期要用 extend(保留本期用量);默认的 renew 会截断当前周期,多给流量。
 func checkRenewExamples(t *testing.T, js string) {
 	t.Helper()
-	ms := regexp.MustCompile(`-d '(\{[^']*\})' \$\{base\}/users/\$\{user\}/(?:renew|plan)\b`).FindAllStringSubmatch(js, -1)
+	// 示例的写法:第一行是 curl … "$API/users/${user}/renew" …,请求体在下一行的 -d '…' 里
+	ms := regexp.MustCompile(`/users/\$\{user\}/(?:renew|plan)"[^\n]*\n[^\n]*-d '(\{[^']*\})'`).FindAllStringSubmatch(js, -1)
 	if len(ms) == 0 {
 		t.Fatal("apidoc.js 里找不到续费的 curl 示例,正则需要更新")
 	}
@@ -70,6 +71,20 @@ func TestAPIDocMatchesDocsAndRoutes(t *testing.T) {
 	}
 
 	checkRenewExamples(t, string(js))
+
+	// 文档里每个接口标的「需要的权限」要和后端按密钥放行的那张表(apiPermFor)一致:标错了,人照着文档给密钥勾权限就会 403
+	perms := regexp.MustCompile(`\{ m: '([^']+)', p: '([^']+)', k: '[^']+', g: '[a-z]+', perm: '([^']*)'`).FindAllStringSubmatch(string(js), -1)
+	if len(perms) != len(fromJS) {
+		t.Fatalf("apidoc.js 里有 %d 个接口,其中只有 %d 个按「m, p, k, g, perm」的顺序写了权限", len(fromJS), len(perms))
+	}
+	for _, m := range perms {
+		parts := strings.Split(strings.TrimPrefix(strings.ReplaceAll(m[2], "{name|id}", "a"), "/"), "/")
+		for _, method := range strings.Split(m[1], "/") {
+			if got := apiPermFor(strings.TrimSpace(method), parts); got != m[3] {
+				t.Errorf("apidoc.js 里 %s %s 标的权限是 %q,后端要的是 %q", method, m[2], m[3], got)
+			}
+		}
+	}
 
 	// 每个接口都能路由到处理函数:用一个真实存在的用户,只看是不是「接口不存在」/ 方法不允许
 	e := newPCEnv(t)

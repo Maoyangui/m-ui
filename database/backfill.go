@@ -9,6 +9,27 @@ import (
 	"gorm.io/gorm"
 )
 
+// backfillApiKeyIPs 外部 API 的来源 IP 白名单从「整个面板一份」改成按密钥存(0.7.18)。旧版建的密钥行里这几列是 NULL
+// (那时还没有这几列):把它所在面板旧的那一份抄给它,升级前后放行的来源一样。新版写的行这几列从来不是 NULL,不会再被动;
+// 回退到旧版期间新建的密钥,再升上来时同样在这里补上。每次启动都看一遍(没有 NULL 的行就什么都不做)。
+// 旧的那一份(设置 apiIpAllow / apiIpList、代理的 api_ip_allow / api_ip_list)留着不删:回退到旧版时照旧生效。
+func backfillApiKeyIPs(db *gorm.DB) {
+	var n int64
+	if db.Raw("SELECT COUNT(*) FROM api_keys WHERE ip_list IS NULL OR ip_allow IS NULL OR is_default IS NULL").Scan(&n); n == 0 {
+		return
+	}
+	var on, list string
+	db.Raw("SELECT value FROM settings WHERE key = ?", "apiIpAllow").Scan(&on)
+	db.Raw("SELECT value FROM settings WHERE key = ?", "apiIpList").Scan(&list)
+	db.Exec("UPDATE api_keys SET ip_allow = ?, ip_list = ? WHERE ip_list IS NULL AND COALESCE(reseller_id, 0) = 0", on == "true", list)
+	db.Exec(`UPDATE api_keys SET
+		ip_allow = COALESCE((SELECT r.api_ip_allow FROM resellers r WHERE r.id = api_keys.reseller_id), 0),
+		ip_list = COALESCE((SELECT r.api_ip_list FROM resellers r WHERE r.id = api_keys.reseller_id), '')
+		WHERE ip_list IS NULL AND reseller_id > 0`)
+	db.Exec("UPDATE api_keys SET ip_allow = 0 WHERE ip_allow IS NULL")
+	db.Exec("UPDATE api_keys SET is_default = 0 WHERE is_default IS NULL")
+}
+
 // backfillForwardIds 给还没有编号的中转入口补上编号(0.7.17 建的入口没有):节点设置、用户不要哪些节点按编号认入口。
 // 每次启动都看一遍(只读有中转入口的线路,几条而已);副机的线路表由主机的快照整表替换,主机补过就都有了。
 func backfillForwardIds(db *gorm.DB) {
