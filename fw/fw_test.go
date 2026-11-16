@@ -109,13 +109,15 @@ func rule(id uint, kind, proto, ports, sources string) Rule {
 }
 
 func TestRuleCheck(t *testing.T) {
-	ok := []Rule{rule(1, KindDeny, "", "", "203.0.113.9"), rule(2, KindDeny, "tcp", "22", "203.0.113.0/24"), rule(3, KindOnly, "", "2053", "198.51.100.7")}
+	ok := []Rule{rule(1, KindDeny, "", "", "203.0.113.9"), rule(2, KindDeny, "tcp", "22", "203.0.113.0/24"), rule(3, KindOnly, "", "2053", "198.51.100.7"),
+		rule(9, KindAllow, "tcp", "80,443", ""), rule(0, KindTrust, "udp", "443", "198.51.100.1")}
 	for _, r := range ok {
 		if err := r.Check(); err != nil {
 			t.Errorf("规则 %d 不该报错: %v", r.ID, err)
 		}
 	}
-	bad := []Rule{rule(4, KindDeny, "", "22", ""), rule(5, KindOnly, "", "", "198.51.100.7"), rule(6, KindOnly, "", "22", ""), rule(7, "allow", "", "22", "198.51.100.7"), rule(8, KindDeny, "icmp", "", "203.0.113.9")}
+	bad := []Rule{rule(4, KindDeny, "", "22", ""), rule(5, KindOnly, "", "", "198.51.100.7"), rule(6, KindOnly, "", "22", ""), rule(7, KindAllow, "", "22", "198.51.100.7"), rule(8, KindDeny, "icmp", "", "203.0.113.9"),
+		rule(10, KindAllow, "", "", ""), rule(11, KindTrust, "", "443", "198.51.100.1"), rule(12, "nope", "", "22", "198.51.100.7")}
 	for _, r := range bad {
 		if err := r.Check(); err == nil {
 			t.Errorf("规则 %d 应该报错", r.ID)
@@ -133,8 +135,16 @@ func TestNFTScript(t *testing.T) {
 		rule(1, KindDeny, "", "", "203.0.113.9,2001:db8:bad::1"),
 		rule(2, KindDeny, "tcp", "22,8000-9000", "203.0.113.0/24"),
 		rule(4, KindDeny, "udp", "", "192.0.2.1"),
+		rule(5, KindAllow, "tcp", "8080", ""),
+		rule(0, KindTrust, "tcp", "443,2053", "198.51.100.1,2001:db8:c::1"),
+		rule(0, KindTrust, "udp", "443", "198.51.100.1,2001:db8:c::1"),
 	})
+	if strings.Contains(s, "8080") {
+		t.Errorf("放行端口的规则不该进 m-ui 自己这张表:\n%s", s)
+	}
 	for _, want := range []string{
+		`ip saddr { 198.51.100.1 } tcp dport { 443, 2053 } accept comment "cluster"`,
+		`ip6 saddr { 2001:db8:c::1 } udp dport { 443 } accept comment "cluster"`,
 		"table inet m_ui\ndelete table inet m_ui\ntable inet m_ui {",
 		"elements = { 203.0.113.9 }", "elements = { 2001:db8:bad::1 }",
 		"type filter hook input priority -10; policy accept;",
@@ -150,8 +160,8 @@ func TestNFTScript(t *testing.T) {
 			t.Errorf("脚本里缺少 %q:\n%s", want, s)
 		}
 	}
-	// 顺序:回环 → 整台拉黑 → 带端口的拉黑 → 只允许(先放行名单,再拒绝其余)
-	order := []string{`iifname "lo" accept`, "ip saddr @ban4 drop", `comment "rule 2"`, `comment "rule 4"`, "ip saddr { 198.51.100.7 } accept", `th dport { 2053 } drop`}
+	// 顺序:回环 → 集群里的服务器 → 整台拉黑 → 带端口的拉黑 → 只允许(先放行名单,再拒绝其余)
+	order := []string{`iifname "lo" accept`, `accept comment "cluster"`, "ip saddr @ban4 drop", `comment "rule 2"`, `comment "rule 4"`, "ip saddr { 198.51.100.7 } accept", `th dport { 2053 } drop`}
 	last := -1
 	for _, o := range order {
 		i := strings.Index(s, o)
@@ -159,6 +169,10 @@ func TestNFTScript(t *testing.T) {
 			t.Fatalf("规则顺序不对,%q 排到了前面:\n%s", o, s)
 		}
 		last = i
+	}
+	// 没有要拦的(只有放行端口、只有集群放行):表也不建
+	if s := NFTScript([]Rule{rule(5, KindAllow, "tcp", "8080", ""), rule(0, KindTrust, "tcp", "443", "198.51.100.1")}); s != "table inet m_ui\ndelete table inet m_ui\n" {
+		t.Fatalf("没有要拦的规则时不该建表:\n%s", s)
 	}
 }
 
@@ -187,6 +201,11 @@ func TestIPTablesScript(t *testing.T) {
 	v6 := IPTablesScript(rules, true)
 	if !strings.Contains(v6, "-A M-UI-IN -s 2001:db8:bad::1 -j DROP") || !strings.Contains(v6, "-A M-UI-IN -s 2001:db8::/32 -p tcp -m multiport --dports 2053 -j RETURN") || strings.Contains(v6, "203.0.113") {
 		t.Errorf("v6 脚本不对:\n%s", v6)
+	}
+	// 集群里的服务器:排在回环后面、所有拉黑前面;放行端口的规则不进这条链
+	tr := IPTablesScript(append([]Rule{rule(0, KindTrust, "tcp", "443,2053", "198.51.100.1,2001:db8:c::1"), rule(5, KindAllow, "tcp", "8080", "")}, rules...), false)
+	if !strings.Contains(tr, "-A M-UI-IN -i lo -j RETURN\n-A M-UI-IN -s 198.51.100.1 -p tcp -m multiport --dports 443,2053 -j RETURN\n-A M-UI-IN -s 203.0.113.9 -j DROP") || strings.Contains(tr, "8080") {
+		t.Errorf("集群放行的位置不对,或放行端口进了链:\n%s", tr)
 	}
 	// 只允许的端口,这一族没有允许的来源:照样全拒(v6 的允许名单为空 = v6 谁也进不来)
 	only4 := IPTablesScript([]Rule{rule(9, KindOnly, "tcp", "22", "198.51.100.7")}, true)
@@ -281,8 +300,6 @@ func TestApply(t *testing.T) {
 	// nft 用不了(内核没有 nf_tables):退到 iptables 自建链,并把跳转补到 INPUT 第一条
 	f = newFake("nft", "iptables", "iptables-restore", "ip6tables", "ip6tables-restore")
 	f.fail["nft list tables"] = "Operation not supported"
-	f.fail["iptables -C INPUT"] = "No chain/target/match by that name"
-	f.fail["ip6tables -C INPUT"] = "No chain/target/match by that name"
 	if err := Apply(f, rules); err != nil {
 		t.Fatal(err)
 	}
@@ -291,21 +308,42 @@ func TestApply(t *testing.T) {
 			t.Errorf("没有执行 %q: %v", want, f.calls)
 		}
 	}
-	// 已经挂着跳转:不重复加
+	// 已经挂着跳转、就在第一条:不重复加
 	f = newFake("iptables", "iptables-restore")
+	f.out["iptables -S INPUT"] = "-P INPUT ACCEPT\n-A INPUT -j M-UI-IN\n-A INPUT -j REJECT --reject-with icmp-host-prohibited\n"
 	if err := Apply(f, rules); err != nil {
 		t.Fatal(err)
 	}
-	if f.called("iptables -I INPUT") {
-		t.Fatalf("跳转已在,不该再插: %v", f.calls)
+	if f.called("iptables -I INPUT") || f.called("iptables -D INPUT") {
+		t.Fatalf("跳转已在第一条,不该再动: %v", f.calls)
 	}
-	// 一条规则都没有:把自己的链撤掉
+	// 挂着,但前面被插了放行(「放开」的那条、放行端口的链):挪回第一条 —— 先插新的,再按行号删旧的
 	f = newFake("iptables", "iptables-restore")
-	if err := Apply(f, nil); err != nil {
+	f.out["iptables -S INPUT"] = "-P INPUT ACCEPT\n-A INPUT -m comment --comment m-ui-open -j ACCEPT\n-A INPUT -j M-UI-ALLOW\n-A INPUT -j M-UI-IN\n-A INPUT -j REJECT --reject-with icmp-host-prohibited\n"
+	if err := Apply(f, rules); err != nil {
 		t.Fatal(err)
 	}
-	if !f.called("iptables -D INPUT -j M-UI-IN") || !f.called("iptables -X M-UI-IN") || f.called("iptables-restore") {
-		t.Fatalf("撤链不对: %v", f.calls)
+	ins, del := -1, -1
+	for i, c := range f.calls {
+		if c == "iptables -I INPUT 1 -j M-UI-IN" {
+			ins = i
+		}
+		if c == "iptables -D INPUT 4" {
+			del = i
+		}
+	}
+	if ins < 0 || del < ins {
+		t.Fatalf("应该先在第一条插入、再删掉原来在第 3 条(插入后是第 4 条)的那条: %v", f.calls)
+	}
+	// 一条规则都没有 / 只剩放行端口的:把自己的链撤掉
+	for _, rs := range [][]Rule{nil, {rule(5, KindAllow, "tcp", "8080", "")}} {
+		f = newFake("iptables", "iptables-restore")
+		if err := Apply(f, rs); err != nil {
+			t.Fatal(err)
+		}
+		if !f.called("iptables -D INPUT -j M-UI-IN") || !f.called("iptables -X M-UI-IN") || f.called("iptables-restore") {
+			t.Fatalf("撤链不对: %v", f.calls)
+		}
 	}
 	// 两样都没有
 	if err := Apply(newFake(), rules); err == nil {

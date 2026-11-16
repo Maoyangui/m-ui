@@ -3,6 +3,7 @@ package runner
 import (
 	"errors"
 	"github.com/Maoyangui/m-ui/notify"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/tz"
 	"io"
 	"os"
@@ -212,7 +213,7 @@ func (r *Runner) ScheduleRestart(delay time.Duration) {
 		r.restartFn(delay)
 		return
 	}
-	go func() {
+	safe.Go("runner.ScheduleRestart", func() {
 		if r.ha != nil {
 			r.ha.PauseForRestart() // 主机计划内重启:先让备用暂停几分钟,别把这一两分钟当成失联
 		}
@@ -225,5 +226,5 @@ func (r *Runner) ScheduleRestart(delay time.Duration) {
 		database.Checkpoint(r.db)
 		database.Close(r.db)
 		restartProcess()
-	}()
+	})
 }

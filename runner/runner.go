@@ -26,6 +26,7 @@ import (
 	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/guard"
 	"github.com/Maoyangui/m-ui/ha"
 	"github.com/Maoyangui/m-ui/hop"
 	"github.com/Maoyangui/m-ui/hub"
@@ -36,6 +37,7 @@ import (
 	"github.com/Maoyangui/m-ui/reach"
 	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/rules"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/sub"
 	"github.com/Maoyangui/m-ui/tz"
 
@@ -97,6 +99,10 @@ type Runner struct {
 
 	// lastNodes 上一次算出来的节点表(见 nodes.go);和 lastSpecs 一样由 applyLimitsMu 保护
 	lastNodes core.NodeTable
+
+	// 防火墙(见 fw.go):面板规则的对账状态、应用层黑名单
+	fw    fwSvc
+	guard *guard.Guard
 
 	rules *rules.Engine // 限速规则判定器(只在主机跑)
 
@@ -205,11 +211,11 @@ func (r *Runner) checkGroup(group model.Upstream) (bool, int, string, string) {
 	var wg sync.WaitGroup
 	for i, m := range members {
 		wg.Add(1)
-		go func(i int, m model.Upstream) {
+		safe.Go2("runner.checkGroup", i, m, func(i int, m model.Upstream) {
 			defer wg.Done()
 			ok, ms, _, e := r.CheckUpstream(m)
 			out[i] = res{ok, ms, m.Name + ": " + e}
-		}(i, m)
+		})
 	}
 	wg.Wait()
 	best, last := 0, "没有可用的成员"
@@ -246,6 +252,7 @@ func New(dbPath string) (*Runner, error) {
 		logger.Info("已为 ", n, " 个用户补全新协议凭据")
 	}
 	r := &Runner{db: db, core: core.NewCore(), dbPath: dbPath}
+	r.initGuard() // 应用层黑名单:面板、订阅、外部 API 的监听起来之前就要有
 	r.cert.kick = make(chan struct{}, 1)
 	r.tls.OnTemp = r.noticeTempCert
 	r.tls.TempDir = tempCertDir(r.DataDir())
@@ -2080,6 +2087,7 @@ func Run(dbPath string) error {
 		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"线路上游", r.relayLoop}, {"运行统计", r.pingLoop}, {"定时备份", r.backupLoop},
 		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop}, {"凭据撤销重试", r.secureReloadLoop}, {"用户热更新重试", r.userReloadLoop},
 		{"数据面看护", r.coreWatchLoop}, {"中转入口跟进", r.forwardWatchLoop}, {"被占端口重试", r.blockedRetryLoop}, {"磁盘巡检", r.diskLoop},
+		{"防火墙对账", r.fwLoop}, // 开机先对一次账(面板规则、放开时加的那条),之后每 30 秒看一次
 	} {
 		go keepRunning(l.name, l.fn, stopCheckpoint)
 	}
@@ -2110,6 +2118,9 @@ func Run(dbPath string) error {
 func (r *Runner) newSubServer() *sub.Server {
 	s := sub.NewServer(r.db)
 	s.TLS = &r.tls
+	if r.guard != nil {
+		s.Guard = r.guard
+	}
 	s.WriteGate = func() (func(), bool, string) { // 设为主机冻结写操作时订阅页也不能改共享状态(容灾服务在 New 里随后建好)
 		if r.ha == nil {
 			return func() {}, true, ""
@@ -2121,7 +2132,7 @@ func (r *Runner) newSubServer() *sub.Server {
 		return done, true, ""
 	}
 	s.OnShareChange = func(name string, kick bool) {
-		go func() {
+		safe.Go("runner.newSubServer", func() {
 			if err := r.ReloadUsers(); err != nil {
 				logger.Warning("临时共享热更新失败: ", err)
 				return
@@ -2133,7 +2144,7 @@ func (r *Runner) newSubServer() *sub.Server {
 			// 只断借用者(名字#share)的连接:取消共享时 ReloadUsers 已把这份凭据撤下并按用户表断掉不在表里的连接,
 			// 重新生成时旧凭据的连接还挂着,这里补一刀;本人自己的连接从头到尾不动
 			logger.Info("用户 ", name, " 的旧共享凭据已作废,断开 ", r.KickShare(name), " 条共享连接")
-		}()
+		})
 	}
 	return s
 }

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // reloadEvery 握手时最多隔这么久看一次证书文件;正用临时证书顶着时也按这个间隔重试原来的文件(测试里调短)。
@@ -301,7 +302,7 @@ func (w *Watch) Set(service string, r *Reloader) {
 	w.mu.Unlock()
 	if on != nil {
 		if tc, ok := r.tempInfo(service); ok {
-			go on(tc)
+			safe.Go1("certutil.OnTemp", tc, on)
 		}
 	}
 }

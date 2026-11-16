@@ -10,6 +10,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // ---- 流量明细:这段时间的流量分给了谁 ----
@@ -178,7 +179,7 @@ func (s *Server) handleStatsBreakdown(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			wg.Add(1)
-			go func(n model.Node) {
+			safe.Go1("web.handleStatsBreakdown", n, func(n model.Node) {
 				defer wg.Done()
 				got, err := h.LineTotalsOn(n, hours)
 				mu.Lock()
@@ -193,7 +194,7 @@ func (s *Server) handleStatsBreakdown(w http.ResponseWriter, r *http.Request) {
 					}
 					addLine(l.Name, l.Up, l.Down, n.Ratio)
 				}
-			}(n)
+			})
 		}
 		wg.Wait()
 	}

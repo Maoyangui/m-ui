@@ -14,6 +14,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/stats"
 
 	"github.com/skip2/go-qrcode"
@@ -539,14 +540,14 @@ func (s *Server) dispatchUserSubroute(w http.ResponseWriter, r *http.Request) bo
 			return true
 		}
 		s.audit(r, "user", "unshare", u.Name)
-		go func() { // 先撤下共享凭据再断线,借用者已拉走的节点立刻失效
+		safe.Go("web.dispatchUserSubroute", func() { // 先撤下共享凭据再断线,借用者已拉走的节点立刻失效
 			if err := s.run.ReloadUsers(); err != nil {
 				logger.Warning("撤下共享凭据失败: ", err)
 				return
 			}
 			// 只断借用者:本人的连接与会话不动(以前调的是 KickUser,会把本人一起踢掉)
 			logger.Info("已收回 ", u.Name, " 的临时共享,断开 ", s.run.KickShare(u.Name), " 条连接")
-		}()
+		})
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		return true
 	case "sub":

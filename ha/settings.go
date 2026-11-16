@@ -34,6 +34,9 @@ var localKeys = setOf(
 	"nodeMode", "nodeToken", "agentLedgerEpoch", "agentLedgerFresh", "userReloadPending", "secureReloadPending", "subRestartPending",
 	// 运维参数
 	"warpPort", "logEnabled", "coreLogLevel", "backupDir", "statsPingAt",
+	// 防火墙里各台各自的:「放开系统防火墙」的记录(哪种防火墙、做了什么、备份在哪,撤销时照着还原)、
+	// m-ui 在系统防火墙里加过哪些放行、命令行暂停面板规则、主机实际连过来的地址
+	"fwOpened", "fwAllowed", "fwPaused", "fwPeers",
 	// 容灾的本机状态
 	KeyEpoch, KeyRole, KeyMasterId, KeyMasterPub, KeySignKey, KeyVote, KeyGrant, KeyState, KeyNotify, KeyPeerKey,
 	KeyDemoted, KeyBecame, KeyFreezeUntil, KeySwitch, KeyIncoming, KeyReplicaSeq, KeyStandbyList,
@@ -59,6 +62,8 @@ var globalKeys = setOf(
 	"statsBucketSeconds", "trafficAge", "subLogAge", "auditAge",
 	"resellerEnabled", "backupHour", "backupKeep", "backupTelegram",
 	"totpEnabled", "totpSecret", "apiEnabled", "apiToken", "apiIpAllow", "apiIpList", "adminDefault", "sessionMaxAge",
+	// 防火墙:自动拉黑(默认关)、系统防火墙开着时自动放行 m-ui 的端口(默认开,随快照发给副机)
+	"fwAutoBan", "fwAutoAllow",
 	// 容灾的全局设置
 	KeyMode, KeyStandbys, KeyReplicaMinutes, KeyConfirmMinutes, KeyAutoMinutes, KeyRankStepMinutes,
 	KeyWitness, KeyClusterKey, KeyPauseUntil, KeyDnsToken, KeyDnsNames, KeyAllowPlain, KeyTakeSub, KeyDnsProvider,

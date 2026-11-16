@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 type Notifier struct {
@@ -58,20 +59,20 @@ func (n *Notifier) Event(toggleKey, text string) {
 		return
 	}
 	if u := strings.TrimSpace(n.setting("webhookUrl")); u != "" {
-		go func() {
+		safe.Go("notify.Event", func() {
 			if err := n.postWebhook(u, eventName(toggleKey), text); err != nil {
 				logger.Warning("Webhook 发送失败: ", err)
 			}
-		}()
+		})
 	}
 	if !n.Enabled() {
 		return
 	}
-	go func() {
+	safe.Go("notify.Event", func() {
 		if err := n.Send(text); err != nil {
 			logger.Warning("Telegram 通知发送失败: ", err)
 		}
-	}()
+	})
 }
 
 // Once 同一 key 在 ttl 内只放行一次(去重节流)。

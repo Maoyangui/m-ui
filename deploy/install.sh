@@ -2,12 +2,19 @@
 # m-ui 安装/升级脚本(Linux amd64/arm64,systemd)
 #
 #   bash install.sh [latest | vX.Y.Z | 二进制/压缩包路径 | 下载 URL] [--db /etc/m-ui/m-ui.db] [--restore backup.zip] [--import 旧面板.db]
+#                   [--open-firewall | --keep-firewall]
 #   bash install.sh --dry-run              只打印会做什么(装到哪、写哪些文件、默认端口),不改任何东西
 #   bash install.sh --uninstall [--purge]  停止并删除服务与程序;不带 --purge 时保留 /etc/m-ui(数据库、证书、备份)
 #
 #   不带来源参数 = 从 GitHub Releases 安装最新版(自动识别 amd64 / arm64)。
 #
 # 幂等:重复执行即升级二进制并重启;数据库与证书不动。
+#
+# 系统防火墙(只在首次安装时):这台机器上要是有系统自带的防火墙在拦入站(ufw、firewalld、Oracle 等镜像带的 iptables 规则),
+# 云厂商控制台放行了端口、外面照样连不上。装完会问一句要不要放开它 —— 直接回车或 y 放开,n 保留;
+# 没有终端可问(cloud-init、CI)按放开算。--open-firewall / MUI_OPEN_FIREWALL=1 不问直接放开,
+# --keep-firewall / MUI_KEEP_FIREWALL=1 不问、保留(m-ui 用到的端口会自动在它那里放行)。
+# 放开是可逆的:改之前的规则备份在数据目录的 fw-backup-<时间>/,m-ui firewall undo 或面板「防火墙」页随时恢复。升级不问、不动。
 # 升级带回滚(与面板里的一键更新同一套语义):旧程序留作 m-ui.prev,先用旧程序做一份升级前备份;
 # 新版本 90 秒内没把面板服务起来就换回旧程序,旧程序也起不来再还原那份备份。回滚结果写进
 # <数据目录>/upgrade-status.json,面板会在页面顶部提示。
@@ -22,8 +29,13 @@ IMPORT=""
 DRY=0
 UNINSTALL=0
 PURGE=0
+FW="ask" # 系统防火墙:ask 问一句 / open 不问直接放开 / keep 不问、保留
+[ "${MUI_OPEN_FIREWALL:-}" = "1" ] && FW="open"
+[ "${MUI_KEEP_FIREWALL:-}" = "1" ] && FW="keep"
 while [ $# -gt 0 ]; do
   case "$1" in
+    --open-firewall) FW="open"; shift;;
+    --keep-firewall) FW="keep"; shift;;
     --db) DB="$2"; shift 2;;
     --restore) RESTORE="$2"; shift 2;;
     --import) IMPORT="$2"; shift 2;;
@@ -140,7 +152,16 @@ if [ "$DRY" = 1 ]; then
     echo "  这是升级:旧程序留作 $BIN.prev,先做升级前备份到 $DATA_DIR/backups/pre-upgrade-*.zip(只留最近两份);"
     echo "          新版本 90 秒内起不来就自动换回旧程序,仍起不来再还原那份备份,结果写 $DATA_DIR/upgrade-status.json"
   fi
-  echo "  不会碰:系统里已有的 sing-box / xray 等程序与它们的配置、防火墙规则、其它服务"
+  if [ ! -f "$DB" ]; then
+    case "$FW" in
+      open) echo "  系统防火墙:要是有 ufw / firewalld / 镜像自带的 iptables 规则在拦入站,直接放开(可逆,先备份;m-ui firewall undo 恢复)";;
+      keep) echo "  系统防火墙:保留不动;m-ui 用到的端口会自动在它那里放行";;
+      *) echo "  系统防火墙:要是有 ufw / firewalld / 镜像自带的 iptables 规则在拦入站,装完会问一句要不要放开(回车 / y = 放开,n = 保留;没有终端可问时按放开算)";;
+    esac
+  else
+    echo "  系统防火墙:升级不问、不动"
+  fi
+  echo "  不会碰:系统里已有的 sing-box / xray 等程序与它们的配置、其它服务"
   [ -n "$RESTORE" ] && echo "  还原备份:$RESTORE → $DB"
   [ -n "$IMPORT" ] && echo "  导入旧面板库:$IMPORT → $DB"
   exit 0
@@ -237,11 +258,57 @@ systemctl daemon-reload
 systemctl enable --now m-ui
 [ -n "$HEALTH_URL" ] || HEALTH_URL="$(panel_url "$BIN")"
 
+# ---- 系统防火墙(只在首次安装时问;升级不动)----
+# 判断和动手都交给程序自己(m-ui firewall …):和面板「防火墙」页的「放开系统防火墙」是同一个动作,记在同一个地方,哪边都能撤销。
+FW_NOTE=""
+firewall_step() {
+  local kind ans="" tries=0
+  kind="$("$BIN" firewall detect 2>/dev/null | head -1 || true)"
+  [ -n "$kind" ] || return 0 # 没有在拦入站的系统防火墙
+  if [ "$FW" = "ask" ]; then
+    if { : </dev/tty; } 2>/dev/null; then
+      echo
+      echo "这台机器的系统防火墙($kind)开着:没在它那里放行的端口,从外面连不上 —— 云厂商控制台放行了也一样。"
+      echo "放开它吗?放开是可逆的(先备份,m-ui firewall undo 或面板「防火墙」页随时恢复);真要挡端口,请在云厂商的安全组里设。"
+      echo "  回车 / y = 放开        n = 保留(m-ui 用到的端口会自动在它那里放行)"
+      while :; do
+        printf "[Y/n]: "
+        ans=""
+        read -r -t 120 ans </dev/tty || { echo; echo "(没有回答,按默认:放开)"; ans="y"; }
+        case "$ans" in
+          ""|y|Y|yes|YES|Yes) FW="open"; break;;
+          n|N|no|NO|No) FW="keep"; break;;
+        esac
+        tries=$((tries + 1))
+        [ "$tries" -lt 3 ] || { echo "(没看懂,按默认:放开)"; FW="open"; break; }
+        echo "请输入 y 或 n(直接回车 = y)"
+      done
+    else
+      FW="open" # 没有终端可问(cloud-init、CI、管道里跑):按默认
+    fi
+  fi
+  if [ "$FW" = "keep" ]; then
+    FW_NOTE="  系统防火墙($kind)保留着:m-ui 用到的端口会自动在它那里放行;以后想放开:m-ui firewall open,或面板「防火墙」页"
+    return 0
+  fi
+  if "$BIN" firewall open -db "$DB"; then
+    if [ -z "$("$BIN" firewall detect 2>/dev/null | head -1 || true)" ]; then
+      FW_NOTE="  系统防火墙($kind)已放开;恢复:m-ui firewall undo,或面板「防火墙」页"
+    else
+      FW_NOTE="  系统防火墙($kind)还在拦入站(见上面的说明):请自己在它那里放行 m-ui 用到的端口"
+    fi
+  else
+    FW_NOTE="  系统防火墙($kind)没能放开(见上面的报错);装好后可以再试:m-ui firewall open"
+  fi
+}
+
 if healthy 90; then
   rm -f "$PREV"
+  if [ "$FRESH" = 1 ]; then firewall_step || true; fi
   echo
   echo "=================== m-ui 安装完成 ==================="
   "$BIN" info -db "$DB"
+  [ -z "$FW_NOTE" ] || echo "$FW_NOTE"
   if [ "$FRESH" = 1 ] && [ -z "$RESTORE" ] && [ -z "$IMPORT" ]; then
     echo "  首次安装默认账号: admin / admin  ——  请登录后立即在"管理员"页修改密码"
   elif [ -n "$IMPORT" ]; then

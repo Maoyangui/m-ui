@@ -18,6 +18,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/ext"
 	"github.com/Maoyangui/m-ui/reach"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // ---- 外部订阅展开:节点明细、逐台服务器测速、大陆连通、添加为上游、隐藏与改名 ----
@@ -473,14 +474,14 @@ func (s *Server) startExtReach(e model.ExtNode, targets []ext.NodeInfo) (string,
 	}
 	extReachJobs.m[id] = job
 	extReachJobs.Unlock()
-	go func() {
+	safe.Go("web.startExtReach", func() {
 		defer release()
 		sem := make(chan struct{}, 3)
 		var wg sync.WaitGroup
 		for _, n := range targets {
 			wg.Add(1)
 			sem <- struct{}{}
-			go func(n ext.NodeInfo) {
+			safe.Go1("web.startExtReach", n, func(n ext.NodeInfo) {
 				defer wg.Done()
 				defer func() { <-sem }()
 				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -491,10 +492,10 @@ func (s *Server) startExtReach(e model.ExtNode, targets []ext.NodeInfo) (string,
 				job.finished++
 				job.done = job.finished >= job.total
 				job.mu.Unlock()
-			}(n)
+			})
 		}
 		wg.Wait()
-	}()
+	})
 	return id, nil
 }
 
@@ -587,19 +588,19 @@ func (s *Server) startExtTestWith(e model.ExtNode, it ext.Items, infos []ext.Nod
 		cancel()
 		return id, nil
 	}
-	go func() { // 停止或超过总时限:没测的格子记下原因,任务结束
+	safe.Go("web.startExtTestWith", func() { // 停止或超过总时限:没测的格子记下原因,任务结束
 		<-ctx.Done()
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			job.stop(errExtTestTimeout)
 		} else {
 			job.stop(errExtTestStopped)
 		}
-	}()
+	})
 	for _, n := range nodes {
 		if !n.IsLocal && offline[n.Id] {
 			continue
 		}
-		go func(n model.Node) {
+		safe.Go1("web.startExtTestWith", n, func(n model.Node) {
 			sem := make(chan struct{}, extTestParallel)
 			var wg sync.WaitGroup
 			defer wg.Wait()
@@ -613,13 +614,13 @@ func (s *Server) startExtTestWith(e model.ExtNode, it ext.Items, infos []ext.Nod
 					return
 				}
 				wg.Add(1)
-				go func(tg extTarget) {
+				safe.Go1("web.startExtTestWith", tg, func(tg extTarget) {
 					defer wg.Done()
 					defer func() { <-sem }()
 					job.set(tg.key, n.Id, s.extTestOn(ctx, n, tg.up))
-				}(tg)
+				})
 			}
-		}(n)
+		})
 	}
 	return id, nil
 }
@@ -647,10 +648,10 @@ func (s *Server) extTestOn(ctx context.Context, n model.Node, up model.Upstream)
 			err error
 		}
 		ch := make(chan result, 1)
-		go func() {
+		safe.Go("web.extTestOn", func() {
 			h, err := s.run.Hub().TestOutboundOn(n, up)
 			ch <- result{healthResult{h.OK, h.DelayMs, h.Method, h.Error}, err}
-		}()
+		})
 		select {
 		case <-ctx.Done(): // 停止了:在途的请求自己超时结束,结果不再记
 			c.State, c.Error = cellCancelled, errExtTestStopped.Error()

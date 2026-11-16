@@ -128,7 +128,7 @@ func (s *Server) StartReseller() error {
 	}
 	s.rListener = ln
 	slow := &slowreq.Logger{Name: "代理面板", Shape: panelRouteShape}
-	s.rSrv = &http.Server{Handler: slow.Wrap(handler), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	s.rSrv = &http.Server{Handler: s.guardWrap(slow.Wrap(handler)), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	go func() {
 		if err := s.rSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			logger.Warning("代理面板退出: ", err)
@@ -265,6 +265,7 @@ func (s *Server) handleResellerLogin(w http.ResponseWriter, r *http.Request) {
 	})
 	s.db.Model(&model.Reseller{}).Where("id = ?", rs.Id).
 		Update("last_logins", time.Now().In(s.panelLocation()).Format("2006-01-02 15:04:05")+" "+ip) // 按面板时区显示,不用服务器本地时间
+	s.guardOf().LoginOK(peer)
 	logger.Info("代理登录成功: ", rs.Name, " 来自 ", ip)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"username": rs.Name, "mustSetPassword": first})
 }

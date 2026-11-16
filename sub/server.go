@@ -20,6 +20,7 @@ import (
 	"github.com/Maoyangui/m-ui/ext"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/util/slowreq"
 
 	"gorm.io/gorm"
@@ -30,6 +31,13 @@ type Server struct {
 	db       *gorm.DB
 	httpSrv  *http.Server
 	listener net.Listener
+	// Guard 应用层黑名单(可为 nil,见 guard 包):名单里的来源直接断开连接;SubMiss / SubOK 是给自动拉黑计数用的
+	// (自动拉黑默认关着:关着时这两个什么都不做)。
+	Guard interface {
+		Blocked(ip string) bool
+		SubMiss(ip, token string)
+		SubOK(ip string)
+	}
 	// OnShareChange 生成/取消临时共享后调用:热更新数据面用户;
 	// kick 为真表示有旧凭据被作废(取消,或在已有共享上重新生成),需要断开该用户现有连接。
 	OnShareChange func(user string, kick bool)
@@ -187,17 +195,17 @@ func (s *Server) housekeeping() {
 	defer t.Stop()
 	logs := time.NewTicker(logFlushEvery)
 	defer logs.Stop()
+	// 每一轮各自兜住:订阅服务和数据面在同一个进程里,落日志这种杂活出错不能把进程带走
 	for {
 		select {
 		case <-t.C:
-			s.flushMisses()
+			safe.Do("订阅日志落库", s.flushMisses)
 		case <-logs.C:
-			s.flushLogs()
+			safe.Do("订阅日志落库", s.flushLogs)
 		case <-s.logKicks():
-			s.flushLogs()
+			safe.Do("订阅日志落库", s.flushLogs)
 		case <-s.stop:
-			s.flushMisses()
-			s.flushLogs()
+			safe.Do("订阅日志落库", func() { s.flushMisses(); s.flushLogs() })
 			return
 		}
 	}
@@ -430,7 +438,7 @@ func (s *Server) Start() error {
 	slow := &slowreq.Logger{Name: "订阅", Shape: func(r *http.Request) string { return subRouteShape(r.URL.Path, s.currentPath()) }}
 	s.httpSrv = &http.Server{Handler: slow.Wrap(mux), ReadHeaderTimeout: 10 * time.Second}
 	s.stop = make(chan struct{})
-	go s.housekeeping()
+	safe.Go("sub.housekeeping", s.housekeeping)
 	s.startGodusevpnRefresh() // 落地页里佛跳墙的下载链接始终指向最新发布
 	go func() {
 		if err := s.httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -502,6 +510,17 @@ func (s *Server) handle() http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
+		if peer, _, _ := net.SplitHostPort(r.RemoteAddr); s.Guard != nil && s.Guard.Blocked(peer) {
+			// 黑名单里的来源:不回任何内容,直接断开(接不过来连接的,比如 HTTP/2,回 403)
+			if hj, ok := w.(http.Hijacker); ok {
+				if c, _, err := hj.Hijack(); err == nil {
+					_ = c.Close()
+					return
+				}
+			}
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
 		if peer, _, _ := net.SplitHostPort(r.RemoteAddr); !s.allow(peer) {
 			w.Header().Set("Retry-After", "10")
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
@@ -529,6 +548,9 @@ func (s *Server) handle() http.HandlerFunc {
 				if !s.shareEnabled() || s.db.Where("share_token = ?", name).First(&user).Error != nil {
 					if peer, _, _ := net.SplitHostPort(r.RemoteAddr); peer != "" {
 						s.noteMiss(peer, name) // 按 IP 聚合,扫描器刷不爆日志表
+						if s.Guard != nil {
+							s.Guard.SubMiss(peer, name) // 换着地址猜的才会被拉黑;同一个旧地址反复刷新只算一个
+						}
 					}
 					s.serveNotFound(w, r, name) // 地址对不上任何人:浏览器给"订阅地址无效"页,客户端纯 404
 					return
@@ -801,6 +823,11 @@ func clientIP(r *http.Request) string {
 
 // log 记录订阅访问,供面板按用户汇总(替代 nginx 日志 + 汇总脚本)。
 func (s *Server) log(r *http.Request, user string, shared bool, status int) {
+	if status == http.StatusOK && s.Guard != nil {
+		if peer, _, _ := net.SplitHostPort(r.RemoteAddr); peer != "" {
+			s.Guard.SubOK(peer) // 成功拉到过订阅的来源多半是真用户的出口:自动拉黑对它放宽
+		}
+	}
 	ip := clientIP(r)
 	format := r.URL.Query().Get("format")
 	if format == "" {

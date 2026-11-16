@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/selfupdate"
 )
 
@@ -73,13 +74,13 @@ func (s *Server) githubHint(err error) error {
 // StartUpdateWatch 启动时查一次,之后每 6 小时查一次。
 func (s *Server) StartUpdateWatch() {
 	selfupdate.SetFallbackPort(s.warpPort) // 直连 GitHub 不通(纯 IPv6 机器)时经本机 WARP 再试
-	go func() {
+	safe.Go("web.StartUpdateWatch", func() {
 		time.Sleep(20 * time.Second) // 让面板先起来,别和启动抢网络
 		for {
-			s.checkUpdate(true)
+			safe.Do("检查新版本", func() { s.checkUpdate(true) }) // 每一轮各自兜住:这次出错,六小时后照常再查
 			time.Sleep(6 * time.Hour)
 		}
-	}()
+	})
 }
 
 // upgradeStatusPath 是上一次升级的结果文件(回滚过才有意义)。

@@ -117,12 +117,24 @@ func (c *StatsTracker) loadOrCreateCounter(obj *map[string]Counter, name string)
 	return counter
 }
 
-func (c *StatsTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) net.Conn {
+func (c *StatsTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) (out net.Conn) {
+	defer func() { // 见 tracker_guard.go:记流量出意外,这一条不记,连接照常
+		if v := recover(); v != nil {
+			trackerRecovered("流量统计 tcp", v)
+			out = conn
+		}
+	}()
 	readCounter, writeCounter := c.countersFor(metadata, matchOutbound.Tag())
 	return bufio.NewInt64CounterConn(conn, readCounter, writeCounter)
 }
 
-func (c *StatsTracker) RoutedPacketConnection(ctx context.Context, conn network.PacketConn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) network.PacketConn {
+func (c *StatsTracker) RoutedPacketConnection(ctx context.Context, conn network.PacketConn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) (out network.PacketConn) {
+	defer func() { // 见 tracker_guard.go
+		if v := recover(); v != nil {
+			trackerRecovered("流量统计 udp", v)
+			out = conn
+		}
+	}()
 	readCounter, writeCounter := c.countersFor(metadata, matchOutbound.Tag())
 	return bufio.NewInt64CounterPacketConn(conn, readCounter, nil, writeCounter, nil)
 }

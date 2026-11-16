@@ -11,6 +11,7 @@ import (
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // 原主机回来后自动变为副机,以及主机侧对各副机回复的全部判定(设计 2.1)。
@@ -822,10 +823,10 @@ func (s *Service) StartupCheck() bool {
 	var wg sync.WaitGroup
 	for _, n := range nodes {
 		wg.Add(1)
-		go func(n model.Node) {
+		safe.Go1("ha.StartupCheck", n, func(n model.Node) {
 			defer wg.Done()
 			_ = s.d.Hub.Send(n, "GET", "ping", nil, 0, nil, timeout, nil) // 结果经 NoteReply 记下
-		}(n)
+		})
 	}
 	wg.Wait()
 	c.mu.Lock()

@@ -327,6 +327,7 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var disabled, revokedUsers, revokedResellers, prunedFwd []string
+		removedFw := 0
 		err = s.db.Transaction(func(tx *gorm.DB) error { // 服务器和引用它的一切一起删
 			disabled = s.detachLinesFromNodeTx(tx, id) // 只部署在这台机器上的线路会被停用,不留悬空引用
 			var err error
@@ -334,6 +335,10 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			if err := tx.Delete(&model.Node{}, id).Error; err != nil {
+				return err
+			}
+			// 防火墙规则里点了它名的:去掉这一台;只管它一台的规则整条删(不留成「全部服务器」)
+			if removedFw, err = pruneFwRulesTx(tx, id); err != nil {
 				return err
 			}
 			// 用户 / 代理在某条线路上只收窄到这台机器的:收窄行一清就退回"该线路的全部服务器",范围静默扩大到
@@ -365,7 +370,8 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		if len(disabled) > 0 || len(prunedFwd) > 0 {
 			s.reloadAll("删除服务器 " + node.Name)
 		}
-		resp := map[string]interface{}{"ok": "1", "disabledLines": disabled, "revokedUsers": revokedUsers, "revokedResellers": revokedResellers, "prunedForwards": prunedFwd}
+		s.fwKick() // 规则的范围可能变了:本机马上对一次账(副机随快照)
+		resp := map[string]interface{}{"ok": "1", "disabledLines": disabled, "revokedUsers": revokedUsers, "revokedResellers": revokedResellers, "prunedForwards": prunedFwd, "removedFwRules": removedFw}
 		if e := s.decommission(node, before); e != "" {
 			resp["decommissionError"] = e
 		}

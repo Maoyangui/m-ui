@@ -20,6 +20,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // State 主机发给副机的容灾状态(POST agent/ha/state)。很小,不进快照、不动修订号:
@@ -459,14 +460,14 @@ func (s *Service) pushAll(nodes []model.Node, timeout time.Duration) int {
 	ok := 0
 	for _, n := range nodes {
 		wg.Add(1)
-		go func(n model.Node) {
+		safe.Go1("ha.pushAll", n, func(n model.Node) {
 			defer wg.Done()
 			if err := s.pushState(n, timeout); err == nil {
 				mu.Lock()
 				ok++
 				mu.Unlock()
 			}
-		}(n)
+		})
 	}
 	wg.Wait()
 	return ok

@@ -20,6 +20,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // 副机之间互相确认主机是否失联、投票(设计 4.5)。
@@ -319,7 +320,7 @@ func (s *Service) collectPeers(ctx context.Context) map[uint]peerObs {
 	var wg sync.WaitGroup
 	for _, p := range ps {
 		wg.Add(1)
-		go func(p peer) {
+		safe.Go1("ha.collectPeers", p, func(p peer) {
 			defer wg.Done()
 			c, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
@@ -332,7 +333,7 @@ func (s *Service) collectPeers(ctx context.Context) map[uint]peerObs {
 			mu.Lock()
 			out[p.node.Id] = o
 			mu.Unlock()
-		}(p)
+		})
 	}
 	wg.Wait()
 	return out
@@ -354,7 +355,7 @@ func (s *Service) requestVotes(ctx context.Context, epoch uint64) (int, error) {
 	var wg sync.WaitGroup
 	for _, p := range s.peers() {
 		wg.Add(1)
-		go func(p peer) {
+		safe.Go1("ha.requestVotes", p, func(p peer) {
 			defer wg.Done()
 			c, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
@@ -372,7 +373,7 @@ func (s *Service) requestVotes(ctx context.Context, epoch uint64) (int, error) {
 				granted++
 				mu.Unlock()
 			}
-		}(p)
+		})
 	}
 	wg.Wait()
 	return granted, nil

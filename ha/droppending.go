@@ -8,6 +8,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // 停用 / 删除副机时让它删掉手里的副本(删除时再让它离开集群:清纪元、删备用密钥)。那台当时多半连不上,
@@ -59,7 +60,7 @@ func (s *Service) QueueDrop(n model.Node, leave bool) {
 	m[n.Id] = t
 	s.saveDropTasks(m)
 	s.rep.dropMu.Unlock()
-	go s.rep.runDrops()
+	safe.Go("ha.runDrops", s.rep.runDrops)
 }
 
 // retryDrops 副本循环里:有到点的就在后台重试(同一时间只有一轮)。
@@ -67,7 +68,7 @@ func (r *replicator) retryDrops() {
 	if r.s.setting(KeyDropPending) == "" {
 		return
 	}
-	go r.runDrops()
+	safe.Go("ha.runDrops", r.runDrops)
 }
 
 func (r *replicator) runDrops() {

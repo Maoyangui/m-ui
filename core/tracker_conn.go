@@ -225,7 +225,17 @@ func (c *ConnTracker) generateConnectionID() string {
 
 // 连接记录里的 User 是数据面里的原名(临时共享的凭据叫 "名字#share"),用于按配置里的用户表断连;
 // 对外的记账(设备数、限速、在线 IP、连接数、踢下线)一律按 model.Owner 归到本人。
-func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) net.Conn {
+func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) (out net.Conn) {
+	connID := ""
+	defer func() { // 见 tracker_guard.go:这里出意外不能带走整个进程,这一条原样放行
+		if v := recover(); v != nil {
+			trackerRecovered("连接登记 tcp", v)
+			if connID != "" {
+				c.untrackConnection(connID)
+			}
+			out = conn
+		}
+	}()
 	ip := metadata.Source.Addr.String()
 	owner := model.Owner(metadata.User)
 	var node NodeSpec // 这条连接走的节点单独设的限速 / 容量(没设是空的)
@@ -236,7 +246,7 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 			return rejectedConn{conn}
 		}
 	}
-	connID := c.generateConnectionID()
+	connID = c.generateConnectionID()
 	connInfo := &ConnectionInfo{
 		ID:       connID,
 		Conn:     conn,
@@ -258,7 +268,17 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 	return wrapped
 }
 
-func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.PacketConn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) network.PacketConn {
+func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.PacketConn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) (out network.PacketConn) {
+	connID := ""
+	defer func() { // 见 tracker_guard.go
+		if v := recover(); v != nil {
+			trackerRecovered("连接登记 udp", v)
+			if connID != "" {
+				c.untrackConnection(connID)
+			}
+			out = conn
+		}
+	}()
 	ip := metadata.Source.Addr.String()
 	owner := model.Owner(metadata.User)
 	var node NodeSpec
@@ -270,7 +290,7 @@ func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.P
 			return conn
 		}
 	}
-	connID := c.generateConnectionID()
+	connID = c.generateConnectionID()
 	connInfo := &ConnectionInfo{
 		ID:         connID,
 		PacketConn: conn,

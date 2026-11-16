@@ -13,6 +13,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 
 	"github.com/shirou/gopsutil/v4/disk"
 )
@@ -479,7 +480,7 @@ func (s *Service) selfCheckSoon() {
 		}
 	}
 	if wait <= 0 {
-		go run()
+		safe.Go("ha.selfCheck", run)
 		return
 	}
 	time.AfterFunc(wait, run)

@@ -236,6 +236,7 @@ func runMenu() {
 		fmt.Println("  13. 关闭两步验证(2FA,手机丢失时用)")
 		fmt.Println("  14. 卸载 m-ui")
 		fmt.Println("  15. 主机容灾 / 设为主机")
+		fmt.Println("  16. 防火墙(放开系统防火墙 / 暂停面板规则 / 解封 IP)")
 		fmt.Println("   0. 退出")
 		choice := ask(colorBold + "  请输入数字: " + colorReset)
 		switch choice {
@@ -420,6 +421,8 @@ func runMenu() {
 			return
 		case "15":
 			haMenu(dbPath, ask)
+		case "16":
+			fwMenu(dbPath, ask)
 		default:
 			fmt.Println("  无效选项")
 		}

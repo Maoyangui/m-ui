@@ -23,6 +23,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
+	"github.com/Maoyangui/m-ui/safe"
 
 	"gorm.io/gorm"
 )
@@ -236,7 +237,7 @@ func class(v string) string {
 // Start 启动定时巡检。副机上照样起循环,但每一轮都先看自己是不是主机。
 func (s *Service) Start() {
 	s.wg.Add(1)
-	go func() {
+	safe.Go("reach.Start", func() {
 		defer s.wg.Done()
 		select { // 刚启动时公网 IP、副机状态都还没就绪,稍等再测
 		case <-time.After(s.d.FirstDelay):
@@ -253,7 +254,7 @@ func (s *Service) Start() {
 				return
 			}
 		}
-	}()
+	})
 }
 
 func (s *Service) Stop() {
@@ -397,7 +398,7 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 		t := t
 		wg.Add(1)
 		sem <- struct{}{}
-		go func() {
+		safe.Go("reach.runAll", func() {
 			defer wg.Done()
 			defer func() { <-sem }()
 			mainlandFinished := sync.OnceFunc(func() {
@@ -471,7 +472,7 @@ func (s *Service) runAll(ctx context.Context, ids []uint, auto bool) {
 				roundMu.Unlock()
 			}
 			s.store(res)
-		}()
+		})
 	}
 	wg.Wait()
 	if full && ctx.Err() == nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/dnsapi"
 	"github.com/Maoyangui/m-ui/notify"
+	"github.com/Maoyangui/m-ui/safe"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -157,7 +158,7 @@ func (r *Runner) IssueCert(req IssueRequest) error {
 	if err := r.startIssue(); err != nil {
 		return err
 	}
-	go r.finishIssue(req)
+	safe.Go1("runner.finishIssue", req, func(req IssueRequest) { _ = r.finishIssue(req) })
 	return nil
 }
 

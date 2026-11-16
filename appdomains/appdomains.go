@@ -24,6 +24,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // Result 一个应用名的查询结果。
@@ -175,12 +177,12 @@ func (c *Client) Lookup(ctx context.Context, names []string) []Result {
 	var wg sync.WaitGroup
 	for i, q := range qs {
 		wg.Add(1)
-		go func(i int, q string) {
+		safe.Go2("appdomains.Lookup", i, q, func(i int, q string) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			out[i] = c.lookupOne(ctx, q)
-		}(i, q)
+		})
 	}
 	wg.Wait()
 	return out
@@ -251,10 +253,10 @@ func (c *Client) searchUmbrellas(ctx context.Context, name string, out *acc) []s
 	for i, u := range umbrellas {
 		parts[i] = newAcc()
 		wg.Add(1)
-		go func(a *acc, u string) {
+		safe.Go2("appdomains.searchUmbrellas", parts[i], u, func(a *acc, u string) {
 			defer wg.Done()
 			c.resolve(ctx, u, map[string]bool{}, 0, a, wordFilter(name))
-		}(parts[i], u)
+		})
 	}
 	wg.Wait()
 	var from []string

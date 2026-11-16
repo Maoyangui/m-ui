@@ -642,7 +642,13 @@ const (
 )
 
 // JobActors 全部定时任务执行者名(新加任务时一并加进来)。
-var JobActors = []string{ActorResetJob, ActorDepleteJob, ActorRuleJob}
+var JobActors = []string{ActorResetJob, ActorDepleteJob, ActorRuleJob, ActorFollowJob, ActorGuardJob}
+
+// 另两个自动执行者:外部节点上游跟随(web/upstream_follow.go)、防火墙自动拉黑(guard 包)。
+const (
+	ActorFollowJob = "FollowJob"
+	ActorGuardJob  = "GuardJob"
+)
 
 // All 供 AutoMigrate 使用。
 // ReachCheck 一次大陆连通检测(每台服务器只留最近几十条)。Detail 是完整结果的 JSON,界面展开明细时用。

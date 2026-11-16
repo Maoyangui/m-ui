@@ -36,6 +36,7 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/stats"
 
 	"gorm.io/gorm"
@@ -48,6 +49,7 @@ var SyncedSettings = []string{
 	"upstreamTestUrl", "upstreamCheckMinutes", "upstreamCheckFailThreshold",
 	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subSingboxExt", "subAutoFormat", "blockBT", "supportOnline", "subUpdates",
 	"subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice", "subShareEnabled", "subPageBuyURL", "subPageBrand",
+	"fwAutoAllow", // 系统防火墙开着时自动放行 m-ui 用到的端口:每台自己做,开关跟主机走
 }
 
 // MinNodeVersion 副机至少要这个版本才能正确应用当前快照(快照里新增了它必须理解的字段时抬高它)。
@@ -129,6 +131,10 @@ type Snapshot struct {
 	// 旧版副机不认识这个字段,照常应用、显示内置 logo,所以不抬版本门槛;它升级后第一份快照会整份应用一次
 	// (副机记着"哪一版程序应用了哪一份",见 web 的 agentAppliedKey),logo 随之落库。
 	Logos []model.PageLogo `json:"logos"`
+	// FwRules 面板防火墙的规则(整张表,启用没启用、到没到期都发:哪条该在自己身上生效由每台自己按 NodeIds、Expiry 判断,
+	// 主机离线时副机上的规则照样到期)。副机整表替换。旧版主机不发(解码为 nil):副机不动自己的规则表。
+	// 旧版副机不认识这个字段,照常应用其余的,只是规则到不了它身上(防火墙页按它不上报状态标出来)。
+	FwRules []model.FwRule `json:"fwRules"`
 }
 
 // BuildSnapshot 从主机数据库构造快照并计算修订号(只含会影响副机行为的字段)。
@@ -223,6 +229,10 @@ func readSnapshot(db *gorm.DB, s *Snapshot) error {
 	s.Logos = []model.PageLogo{} // 一张都没有也发空表(不是 nil):副机据此删掉主机已经删了的 logo
 	// 只发主面板与现存代理的:删代理时他的 logo 一起删,万一留下没主的行也不往副机推(没有落地页会用它)
 	if err := db.Where("reseller_id = 0 OR reseller_id IN (SELECT id FROM resellers)").Order("reseller_id asc").Find(&s.Logos).Error; err != nil {
+		return err
+	}
+	s.FwRules = []model.FwRule{} // 一条都没有也发空表(不是 nil):副机据此清掉主机已经删了的规则
+	if err := db.Order("id asc").Find(&s.FwRules).Error; err != nil {
 		return err
 	}
 	return db.Order("id asc").Find(&s.LimitStates).Error
@@ -596,6 +606,17 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 				return err
 			}
 		}
+		// 面板防火墙的规则整表替换(旧版主机不发 = nil:不动本机的)。落到内核是 runner 的事(应用完快照后会催它对一次账)
+		if snap.FwRules != nil {
+			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.FwRule{}).Error; err != nil {
+				return err
+			}
+			if len(snap.FwRules) > 0 {
+				if err := tx.CreateInBatches(&snap.FwRules, snapshotBatch).Error; err != nil {
+					return err
+				}
+			}
+		}
 		if err := disableIDs(tx, &model.User{}, offUsers); err != nil {
 			return err
 		}
@@ -735,6 +756,8 @@ type Report struct {
 	HA *HAReport `json:"ha,omitempty"`
 	// Disk 数据目录所在盘的占用(老副机不报):主机按它在服务器页、概况、Telegram 提醒快满了
 	Disk *model.DiskStat `json:"disk,omitempty"`
+	// Fw 这台的防火墙状况(系统防火墙是哪种、拦不拦、面板规则落了几条;老副机不报):防火墙页按它显示
+	Fw *model.FwState `json:"fw,omitempty"`
 }
 
 // saveNodeCerts 记下副机报上来的证书清单:线路编辑框与订阅的 SNI 用它。老版本副机不报(nil)就不动;
@@ -879,6 +902,8 @@ type NodeStatus struct {
 	HA *HAReport `json:"ha,omitempty"`
 	// Disk 副机最近一份报告里的磁盘占用(老副机不报为空)
 	Disk *model.DiskStat `json:"disk,omitempty"`
+	// Fw 副机最近一份报告里的防火墙状况(老副机不报为空:它那里面板规则落不下去)
+	Fw *model.FwState `json:"fw,omitempty"`
 	// Blocked 这台上因为端口被别的程序占着没开的入站(中转入口 / 线路);空 = 没有
 	Blocked         []model.BlockedInbound `json:"blocked,omitempty"`
 	diskAlerted     string                 // 已经为磁盘发过哪一级的告警(model.DiskWarn / DiskBad;恢复后清空)
@@ -1044,7 +1069,7 @@ func New(d Deps) *Hub {
 
 func (h *Hub) Start() {
 	h.wg.Add(1)
-	go func() {
+	safe.Go("hub.Start", func() {
 		defer h.wg.Done()
 		t := time.NewTicker(5 * time.Second)
 		defer t.Stop()
@@ -1063,7 +1088,7 @@ func (h *Hub) Start() {
 				return
 			}
 		}
-	}()
+	})
 }
 
 func (h *Hub) Stop() {
@@ -1219,12 +1244,12 @@ func (h *Hub) tick() {
 			continue // 上一轮对它的请求还没回来
 		}
 		h.rounds.Add(1)
-		go func(n model.Node) {
+		safe.Go1("hub.tick", n, func(n model.Node) {
 			defer h.rounds.Done()
 			if r := h.syncGated(n); r != nil {
 				h.enqueueResult(r)
 			}
-		}(n)
+		})
 	}
 	h.forgetNodes(live)
 	h.retryDecommissions()
@@ -1267,7 +1292,7 @@ func (h *Hub) enqueueResult(r *nodeResult) {
 	h.merging = true
 	h.mergeMu.Unlock()
 	if start {
-		go h.mergeLoop()
+		safe.Go("hub.mergeLoop", h.mergeLoop)
 	}
 }
 
@@ -1750,7 +1775,7 @@ func (h *Hub) distributeIPs(nodes []model.Node) {
 			}
 		}
 		h.rounds.Add(1)
-		go func(n model.Node, ext map[string][]string) {
+		safe.Go2("hub.distributeIPs", n, ext, func(n model.Node, ext map[string][]string) {
 			defer h.rounds.Done()
 			defer func() {
 				h.mu.Lock()
@@ -1767,7 +1792,7 @@ func (h *Hub) distributeIPs(nodes []model.Node) {
 			if !strings.EqualFold(ack.OK, "1") && !strings.EqualFold(ack.OK, "true") {
 				logger.Warning("副机 ", n.Name, " 未确认外部设备租约")
 			}
-		}(n, ext)
+		})
 	}
 }
 
@@ -1806,6 +1831,7 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 		st.Version, st.Hostname, st.CoreRunning, st.Uptime, st.Revision, st.CertDays = rep.Version, rep.Hostname, rep.CoreRunning, rep.Uptime, rep.Revision, rep.CertDays
 		st.LedgerFails, st.applyGzip, st.HA, st.Disk = rep.LedgerFails, rep.ApplyGzip, rep.HA, rep.Disk
 		st.Blocked = rep.Blocked
+		st.Fw = rep.Fw
 		h.saveNodeCerts(n, rep.Certs)
 		h.saveNodeServicePorts(n, rep.ServicePorts)
 		// hubRevision 在副机 ApplySnapshot 的事务里就写了,数据面有没有真的应用成功要看 ReloadPending。
@@ -2119,7 +2145,7 @@ func (h *Hub) SyncNow() error {
 	errs := make(chan error, len(nodes))
 	for _, n := range nodes {
 		wg.Add(1)
-		go func(n model.Node) {
+		safe.Go1("hub.SyncNow", n, func(n model.Node) {
 			defer wg.Done()
 			if n.ApiUrl == "" || n.Token == "" {
 				errs <- fmt.Errorf("副机 %s 未配置 API 地址或令牌", n.Name)
@@ -2128,7 +2154,7 @@ func (h *Hub) SyncNow() error {
 			if err := h.pushLatest(n); err != nil && !errors.Is(err, ErrNodeDisabled) { // 中途被停用的不再算它
 				errs <- fmt.Errorf("副机 %s: %w", n.Name, err)
 			}
-		}(n)
+		})
 	}
 	wg.Wait()
 	close(errs)
@@ -2222,7 +2248,7 @@ func (h *Hub) kickRemote(name string) KickResult {
 			continue
 		}
 		wg.Add(1)
-		go func(i int, n model.Node) {
+		safe.Go2("hub.kickRemote", i, n, func(i int, n model.Node) {
 			defer wg.Done()
 			var out struct {
 				Closed   int `json:"closed"`
@@ -2240,7 +2266,7 @@ func (h *Hub) kickRemote(name string) KickResult {
 				return
 			}
 			results[i].Closed, results[i].Sessions = out.Closed, out.Sessions
-		}(i, n)
+		})
 	}
 	wg.Wait()
 	res := KickResult{Servers: results}
@@ -2835,6 +2861,21 @@ func diskHogs(d *model.DiskStat) string {
 		return "\n占地方的:" + h
 	}
 	return ""
+}
+
+// Fw 让副机做一件防火墙的事(op:state 现在就核对一次 / open 放开系统防火墙 / undo 撤销放开 / allow 放行 m-ui 用到的端口),
+// 返回它做完之后的状况和它用到的端口。老版本副机没有这个接口:404(IsNotFound)。
+func (h *Hub) Fw(n model.Node, op string) (FwReply, error) {
+	var out FwReply
+	err := h.requestTimeout(n, "POST", "fw", map[string]string{"op": op}, &out, 40*time.Second)
+	return out, err
+}
+
+// FwReply 副机对 agent/fw 的回复。
+type FwReply struct {
+	State model.FwState `json:"state"`
+	Ports []string      `json:"ports"`           // 这台上 m-ui 要对外开的端口("443/tcp")
+	Error string        `json:"error,omitempty"` // 这次动作没成的原因(状态照样返回)
 }
 
 // DiskClean 让副机清理磁盘(start)或问进度,返回副机的原样回复(见 web 的 diskCleanState)。老版本副机没有这个接口:404(IsNotFound)。

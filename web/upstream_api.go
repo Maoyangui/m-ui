@@ -12,6 +12,7 @@ import (
 	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/upstream"
 )
 
@@ -144,12 +145,12 @@ func (s *Server) handleUpstreamTestAll(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	for i, up := range ups {
 		wg.Add(1)
-		go func(i int, up model.Upstream) {
+		safe.Go2("web.handleUpstreamTestAll", i, up, func(i int, up model.Upstream) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			results[i] = upRow{Id: up.Id, Name: up.Name, Servers: s.testUpstreamEverywhere(up)}
-		}(i, up)
+		})
 	}
 	wg.Wait()
 	sort.Slice(results, func(a, b int) bool { return results[a].Id < results[b].Id })

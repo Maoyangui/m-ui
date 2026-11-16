@@ -118,7 +118,7 @@ func TestGroupRules(t *testing.T) {
 	}
 	// 组被线路用着,不能删
 	code, body = call("DELETE", fmt.Sprintf("upstreams/%d", g.Id), "")
-	mustFail(code, body, "仍被 1 条线路使用")
+	mustFail(code, body, "还有 1 条线路在用,不能删除:l。") // 拦下并点名是哪条线路
 
 	// 巡检按「谁在用」:用组就算用它的成员
 	users, _ := s.upstreamUsers()

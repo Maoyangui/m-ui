@@ -20,6 +20,7 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/selfupdate"
 )
 
@@ -518,7 +519,7 @@ func (s *Service) SetMaster(id uint, actor string, o SetMasterOpts) (SwitchState
 	s.sw.running = true
 	s.sw.mu.Unlock()
 	logger.Warning("容灾:开始把主机换到 ", plan.TargetName, "(", actor, " 发起)")
-	go func() {
+	safe.Go("ha.SetMaster", func() {
 		defer s.promoteMu.Unlock()
 		defer func() {
 			s.sw.mu.Lock()
@@ -526,7 +527,7 @@ func (s *Service) SetMaster(id uint, actor string, o SetMasterOpts) (SwitchState
 			s.sw.mu.Unlock()
 		}()
 		s.sw.run(st)
-	}()
+	})
 	return st, nil
 }
 

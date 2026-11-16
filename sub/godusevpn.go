@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/selfupdate"
 )
 
@@ -86,21 +87,23 @@ func fetchGodusevpnVersion(ctx context.Context, base string) (string, error) {
 
 // startGodusevpnRefresh 起一个后台协程定期刷新;服务启动时调一次,stop 关闭时退出。
 func (s *Server) startGodusevpnRefresh() {
-	go func() {
+	safe.Go("sub.startGodusevpnRefresh", func() {
 		t := time.NewTicker(godRefreshEvery)
 		defer t.Stop()
 		for {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			v, err := fetchGodusevpnVersion(ctx, "https://github.com")
-			cancel()
-			if err == nil && v != "" {
-				setGodusevpnVersion(v)
-			}
+			safe.Do("佛跳墙版本刷新", func() { // 每一轮各自兜住:这一轮出错,下一轮照常
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				v, err := fetchGodusevpnVersion(ctx, "https://github.com")
+				cancel()
+				if err == nil && v != "" {
+					setGodusevpnVersion(v)
+				}
+			})
 			select {
 			case <-t.C:
 			case <-s.stop:
 				return
 			}
 		}
-	}()
+	})
 }

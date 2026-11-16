@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // Reality 的握手目标选得不好就连不上、或者很容易被看出来:它要支持 TLS 1.3、H2、X25519,离这台服务器要近。
@@ -101,10 +103,10 @@ func (s *Server) handleRealityCheck(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	for i, host := range realityCandidates {
 		wg.Add(1)
-		go func(i int, host string) {
+		safe.Go2("web.handleRealityCheck", i, host, func(i int, host string) {
 			defer wg.Done()
 			results[i] = checkRealityTarget(ctx, host, 443)
-		}(i, host)
+		})
 	}
 	wg.Wait()
 	sort.SliceStable(results, func(a, b int) bool {

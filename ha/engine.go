@@ -12,6 +12,7 @@ import (
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // 备用侧的失联判定(设计 4.4–4.6、5.2–5.3),每 10 秒一次。
@@ -76,7 +77,7 @@ func (e *engine) contact() {
 		close(p.stop)
 	}
 	if recovering && p != nil {
-		go e.s.standbyNotify("🟢 <b>主机已恢复联系</b>,取消接任。")
+		safe.Go1("ha.standbyNotify", "🟢 <b>主机已恢复联系</b>,取消接任。", e.s.standbyNotify)
 	}
 }
 
@@ -179,7 +180,7 @@ func (e *engine) block(reason string) {
 		why = reason
 	}
 	logger.Warning("容灾:之前的接任确认作废(", why, ")")
-	go e.s.standbyNotify("⚪ 之前发出的接任确认已作废:" + why + ",先不接任。之后还需要接任会再发新的确认码。")
+	safe.Go1("ha.standbyNotify", "⚪ 之前发出的接任确认已作废:"+why+",先不接任。之后还需要接任会再发新的确认码。", e.s.standbyNotify)
 }
 
 // verdict 现在能不能手动接任到纪元 next:有给 next 的确认提示,而且判定还新鲜。不能的给原因代码。
@@ -228,7 +229,7 @@ func (e *engine) alertOnce(key, text string) {
 	e.mu.Unlock()
 	if !done {
 		logger.Warning("容灾:", strings.ReplaceAll(strings.ReplaceAll(text, "<b>", ""), "</b>", ""))
-		go e.s.standbyNotify(text)
+		safe.Go1("ha.standbyNotify", text, e.s.standbyNotify)
 	}
 }
 
@@ -451,8 +452,8 @@ func (e *engine) askConfirm(st State, lease time.Duration, peers map[uint]peerOb
 	fmt.Fprintf(&sb, "\n回复 <code>/takeover %s</code>(或「接任 %s」)由「%s」接任为主机(数据截至 %s,纪元 %d),也可以在 %s 的面板上点「接任为主机」。主机恢复后自动取消。",
 		p.code, p.code, notify.Esc(s.selfName()), time.Unix(ri.AsOf, 0).In(s.loc()).Format("01-02 15:04:05"), next, notify.Esc(s.selfName()))
 	logger.Warning("容灾:主机失联 ", int(lease.Minutes()), " 分钟,等确认接任")
-	go s.standbyNotify(sb.String())
-	go e.pollConfirm(p)
+	safe.Go1("ha.standbyNotify", sb.String(), s.standbyNotify)
+	safe.Go1("ha.pollConfirm", p, e.pollConfirm)
 }
 
 // tgPollGap 队列里有消息(不确认任何消息,所以它们会一直在)时两次查看之间隔多久。
@@ -514,12 +515,12 @@ func (e *engine) pollConfirm(p *prompt) {
 				continue
 			}
 			if s.LeaseAgo() < SuspectAfter {
-				go s.standbyNotify("主机已恢复联系,不接任。")
+				safe.Go1("ha.standbyNotify", "主机已恢复联系,不接任。", s.standbyNotify)
 				return
 			}
 			logger.Warning("容灾:Telegram 上确认了接任")
 			if err := s.Takeover(TakeoverOpts{By: "telegram", Expect: p.epoch}); err != nil {
-				go s.standbyNotify("🔴 接任没做成:" + notify.Esc(err.Error()))
+				safe.Go1("ha.standbyNotify", "🔴 接任没做成:"+notify.Esc(err.Error()), s.standbyNotify)
 			}
 			return
 		}
@@ -538,8 +539,8 @@ func (e *engine) tgConflictStop() {
 	e.mu.Unlock()
 	logger.Warning("容灾:Telegram 显示另一个程序正在用这个机器人收消息,停止在 Telegram 上等确认")
 	if first {
-		go s.standbyNotify("ℹ️ Telegram 显示另一个程序正在用这个机器人收消息:主机的机器人可能还在运行,主机也许还活着。" +
-			"这次不在 Telegram 上等确认了:核实主机确实不在后,在本机面板上点「接任为主机」或执行 m-ui ha takeover。")
+		safe.Go1("ha.standbyNotify", "ℹ️ Telegram 显示另一个程序正在用这个机器人收消息:主机的机器人可能还在运行,主机也许还活着。"+
+			"这次不在 Telegram 上等确认了:核实主机确实不在后,在本机面板上点「接任为主机」或执行 m-ui ha takeover。", s.standbyNotify)
 	}
 }
 

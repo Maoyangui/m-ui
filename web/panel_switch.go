@@ -12,6 +12,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // 面板改了监听(端口、监听地址、证书 / 开关 HTTPS)后,在进程里换监听:不重启 m-ui,数据面、订阅、代理面板都不动,
@@ -70,7 +71,7 @@ func (s *Server) openPanelListener(pl panelListen) (net.Listener, error) {
 
 // servePanel 在 ln 上开一份面板 HTTP 服务(处理器同一个)。调用方持有 panelMu。
 func (s *Server) servePanel(ln net.Listener, pl panelListen) {
-	srv := &http.Server{Handler: s.panelHandler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
+	srv := &http.Server{Handler: s.guardWrap(s.panelHandler), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute}
 	s.httpSrv, s.listener, s.panelCur = srv, ln, pl
 	go func() {
 		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -102,12 +103,12 @@ func (s *Server) relistenPanel() error {
 			return fmt.Errorf("面板没能在 %s 上监听,还在原地址: %w", want.addr, err)
 		}
 		s.servePanel(ln, want)
-		go retire()
+		safe.Go("web.retirePanel", retire)
 		logger.Info("面板已改到 ", want.addr, map[bool]string{true: "(HTTPS)", false: ""}[want.cert != ""])
 		return nil
 	}
 	// 同一地址:Shutdown 先关监听再等旧连接收尾,原地址一空出来就起新的
-	go retire()
+	safe.Go("web.retirePanel", retire)
 	var ln net.Listener
 	var err error
 	for i := 0; i < 60; i++ {

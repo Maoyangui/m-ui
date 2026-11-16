@@ -14,6 +14,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // Telegram 机器人:手机上查用户、续期、重置流量、启停、要一份备份,不用开面板。
@@ -46,7 +47,9 @@ func (s *Server) tgBotOn() bool {
 func (s *Server) tgBotLoop() {
 	st := &tgBotState{}
 	for {
-		if wait := s.tgBotRound(st, 50); wait > 0 {
+		wait := 30 * time.Second // 这一轮要是出了意外(已兜住),歇半分钟再来,不空转
+		safe.Do("Telegram 机器人", func() { wait = s.tgBotRound(st, 50) })
+		if wait > 0 {
 			time.Sleep(wait)
 		}
 	}

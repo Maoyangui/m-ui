@@ -9,6 +9,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/util/portprobe"
 )
 
@@ -137,14 +138,14 @@ func (s *Server) linePortBusyRemote(line *model.Line) error {
 			continue // 端口没变、原来就部署在这台:占着它的正是那台运行中的数据面
 		}
 		wg.Add(1)
-		go func(n model.Node) {
+		safe.Go1("web.linePortBusyRemote", n, func(n model.Node) {
 			defer wg.Done()
 			if by, busy := s.portBusyOn(n, line.Port, network); busy {
 				mu.Lock()
 				hits = append(hits, hit{n.Name, by})
 				mu.Unlock()
 			}
-		}(n)
+		})
 	}
 	wg.Wait()
 	if len(hits) == 0 {

@@ -3,12 +3,12 @@
 import { t } from './i18n.js';
 
 // 定时任务写审计的执行者名(和后端 model.JobActors 同一份):按名单排除,不按「以 Job 结尾」,名字以 job 结尾的人不会被藏掉
-export const JOB_ACTORS = ['ResetJob', 'DepleteJob', 'RuleJob'];
+export const JOB_ACTORS = ['ResetJob', 'DepleteJob', 'RuleJob', 'FollowJob', 'GuardJob'];
 
 const has = k => { const v = t(k); return v && v !== k ? v : ''; };
 // 对象:多数就是导航里那一页的名字
 const OBJ_NAV = { user: 'nav.users', line: 'nav.lines', upstream: 'nav.upstreams', node: 'nav.nodes', plan: 'nav.plans', rule: 'nav.rules', reseller: 'nav.resellers',
-  settings: 'nav.settings', backup: 'nav.backup', cert: 'nav.cert', ext: 'nav.exts', ops: 'nav.ops', admin: 'nav.admin', logs: 'nav.logs' };
+  settings: 'nav.settings', backup: 'nav.backup', cert: 'nav.cert', ext: 'nav.exts', ops: 'nav.ops', admin: 'nav.admin', logs: 'nav.logs', fw: 'nav.fw' };
 export function auditObject(key) {
   return OBJ_NAV[key] ? t(OBJ_NAV[key]) : has('audit.o.' + key) || String(key || '');
 }

@@ -49,6 +49,8 @@ func usage() {
 		{"set -db <m-ui.db> key=value ...", "写入设置(如 webPort=3053 nodeMode=true)"},
 		{"render -db <m-ui.db>", "打印并校验 sing-box 配置"},
 		{"ha status|takeover|set-master|pause|resume", "主机容灾与设为主机(要 root,见 m-ui ha)"},
+		{"firewall status|open|undo|pause|resume", "本机防火墙:放开系统防火墙、暂停面板规则(要 root)"},
+		{"unban <IP|网段> | --all", "把来源移出黑名单(要 root)"},
 		{"version", "显示版本"},
 	}
 	for _, r := range rows {
@@ -250,6 +252,10 @@ func main() {
 		}
 	case "ha":
 		runHA(os.Args[2:])
+	case "firewall", "fw":
+		runFirewall(os.Args[2:])
+	case "unban":
+		runUnban(os.Args[2:])
 	case "pause-takeover": // 安装 / 升级脚本重启服务前调用:主机开着容灾时暂停接任(不缩短已有的暂停)
 		fs := flag.NewFlagSet("pause-takeover", flag.ExitOnError)
 		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径")

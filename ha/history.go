@@ -19,6 +19,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 
 	"gorm.io/gorm"
 )
@@ -205,14 +206,14 @@ func (r *replicator) historyTick(infos []StandbyInfo, ids []uint) {
 		return
 	}
 	r.histRunning = true
-	go func() {
+	safe.Go("ha.historyTick", func() {
 		defer func() {
 			r.mu.Lock()
 			r.histRunning = false
 			r.mu.Unlock()
 		}()
 		r.runHistory(due)
-	}()
+	})
 }
 
 // historyDueLocked ids 里这一轮该给历史数据的(调用方持有 r.mu):先收下了这一任的副本;发失败的隔 30 分钟再试;
@@ -384,7 +385,7 @@ func (r *replicator) runHistory(ids []uint) error {
 			continue // 上一份还没送完
 		}
 		wg.Add(1)
-		go func(i int, n model.Node, hdr EnvHeader) {
+		safe.Go3("ha.runHistory", i, n, hdr, func(i int, n model.Node, hdr EnvHeader) {
 			defer wg.Done()
 			defer func() { <-gate }()
 			err := s.sendEnvelope(n, "ha/history", ctPath, hdr, sum, sign)
@@ -393,7 +394,7 @@ func (r *replicator) runHistory(ids []uint) error {
 			if err != nil {
 				logger.Warning("容灾:给备用 ", n.Name, " 发历史数据失败: ", err)
 			}
-		}(i, n, hdr)
+		})
 	}
 	wg.Wait()
 	return errors.Join(errs...)

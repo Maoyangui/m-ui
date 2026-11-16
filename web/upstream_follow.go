@@ -13,6 +13,7 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/safe"
 
 	"gorm.io/gorm"
 )
@@ -183,7 +184,7 @@ func (s *Server) followLoop() {
 	t := time.NewTicker(followEvery)
 	defer t.Stop()
 	for range t.C {
-		s.followTick(time.Now())
+		safe.Do("上游跟随", func() { s.followTick(time.Now()) }) // 外部订阅的内容不归我们管:解析、比对里出什么意外都只影响这一轮
 	}
 }
 

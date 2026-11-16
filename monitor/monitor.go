@@ -4,6 +4,7 @@ package monitor
 
 import (
 	"fmt"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/tz"
 	"runtime/debug"
 	"sort"
@@ -118,7 +119,7 @@ func (m *Monitor) Stop() {
 
 func (m *Monitor) loop(every time.Duration, fn func()) {
 	m.wg.Add(1)
-	go func() {
+	safe.Go("monitor.loop", func() {
 		defer m.wg.Done()
 		t := time.NewTicker(every)
 		defer t.Stop()
@@ -137,7 +138,7 @@ func (m *Monitor) loop(every time.Duration, fn func()) {
 				return
 			}
 		}
-	}()
+	})
 }
 
 // ---- 上游巡检 ----
@@ -194,13 +195,13 @@ func (m *Monitor) RunUpstreamCheck() []string {
 	sem := make(chan struct{}, 12)
 	for i, up := range ups {
 		wg.Add(1)
-		go func(i int, up model.Upstream) {
+		safe.Go2("monitor.RunUpstreamCheck", i, up, func(i int, up model.Upstream) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			ok, ms, meth, e := m.d.Check(up)
 			out[i] = res{up, ok, ms, meth, e}
-		}(i, up)
+		})
 	}
 	wg.Wait()
 

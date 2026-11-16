@@ -82,8 +82,10 @@ func Open(r Runner, backupRoot string, now time.Time) (Opened, error) {
 }
 
 func insertOpen(r Runner, bin string) error {
-	_, err := r.Run("", bin, "-I", "INPUT", "1", "-m", "comment", "--comment", openComment, "-j", "ACCEPT")
-	return err
+	if _, err := r.Run("", bin, "-I", "INPUT", "1", "-m", "comment", "--comment", openComment, "-j", "ACCEPT"); err != nil {
+		return err
+	}
+	return pinFirst(r, bin, false) // 面板规则落在 iptables 里的机器:拉黑要排在这条全放行前面
 }
 
 // EnsureOpen 开机后、以及定时对账时调:放开时加的那条全放行要是不在了(重启后规则从发行版的存档里恢复,没有它),补回去。
@@ -177,47 +179,168 @@ type PortProto struct {
 	Proto string // tcp | udp
 }
 
-// AllowPorts 用户留着系统防火墙时,把 m-ui 用到的端口在它那里放行。只加放行,不删别人的规则。
+// String "443/tcp"、"20000-30000/udp"。
+func (p PortProto) String() string { return p.Port.String() + "/" + p.Proto }
+
+// Allowed 系统防火墙里由 m-ui 加进去的放行。记下来是为了以后只收回自己加的:
+// 加之前那里就已经放行的端口是用户自己的,不记、也永远不删。
+type Allowed struct {
+	Frontend string   `json:"frontend"` // 记的是哪种系统防火墙里的;换了一种,旧记录作废
+	Ports    []string `json:"ports"`    // "443/tcp"、"20000-30000/udp"
+}
+
+// SyncAllow 用户留着系统防火墙时,让它里面「m-ui 放行的端口」正好是 want:缺的加上;以前加过、现在用不着的收回
+// (只收 had 里记着是 m-ui 加的)。返回新的记录,下次当 had 传进来。不改默认策略,不碰别人的规则。
 //
-//	ufw        → ufw allow 端口/协议(重复加没有副作用)
-//	firewalld  → firewall-cmd --add-port(当下生效)+ --permanent --add-port(重启后还在)
-//	iptables   → m-ui 自己的一条链 M-UI-ALLOW,整链重建后挂在 INPUT 第一条
-//	原生 nft   → 不自动改,返回说明
-//	没有防火墙 → 什么都不做
-func AllowPorts(r Runner, ports []PortProto) error {
-	st := Detect(r)
+//	ufw        → ufw allow 端口/协议 comment m-ui;收回用 ufw delete allow
+//	firewalld  → firewall-cmd --add-port / --remove-port,当下生效一遍、--permanent 一遍
+//	iptables   → m-ui 自己的一条链 M-UI-ALLOW,整链重建;一个端口都不要了就把链撤掉
+//	原生 nft   → 不自动改,有要放行的端口时返回说明
+//	没在拦     → 什么都不做(没有系统防火墙、或已经放开),记录原样返回
+func SyncAllow(r Runner, st Status, want []PortProto, had Allowed) (Allowed, error) {
 	if !st.Blocking {
-		return nil
+		return had, nil
 	}
-	ports = normPorts(ports)
+	want = normPorts(want)
+	if had.Frontend != st.Frontend {
+		had = Allowed{}
+	}
+	mine := map[string]bool{}
+	for _, p := range had.Ports {
+		mine[p] = true
+	}
+	wanted := map[string]bool{}
+	for _, p := range want {
+		wanted[p.String()] = true
+	}
+	now := Allowed{Frontend: st.Frontend}
+	var first error
+	keep := func(err error) {
+		if err != nil && first == nil {
+			first = err
+		}
+	}
+	// add / drop 各种系统防火墙自己的加法和收回法;has 这个端口那里现在放行着没有
+	var has func(p string) bool
+	var add, drop func(p string) error
 	switch st.Frontend {
 	case FrontUFW:
-		for _, p := range ports {
-			if _, err := r.Run("", "ufw", "allow", strings.ReplaceAll(p.Port.String(), "-", ":")+"/"+p.Proto, "comment", "m-ui"); err != nil {
-				return err
-			}
-		}
+		exists := ufwAllowed(r)
+		ufwSpec := func(p string) string { return strings.Replace(p, "-", ":", 1) }
+		has = func(p string) bool { return exists[p] }
+		add = func(p string) error { _, err := r.Run("", "ufw", "allow", ufwSpec(p), "comment", "m-ui"); return err }
+		drop = func(p string) error { _, err := r.Run("", "ufw", "delete", "allow", ufwSpec(p)); return err }
 	case FrontFirewalld:
-		for _, p := range ports {
-			arg := "--add-port=" + p.Port.String() + "/" + p.Proto
-			if _, err := r.Run("", "firewall-cmd", arg); err != nil {
+		has = func(p string) bool {
+			out, err := r.Run("", "firewall-cmd", "--query-port="+p)
+			return err == nil && strings.TrimSpace(out) == "yes"
+		}
+		add = func(p string) error {
+			if _, err := r.Run("", "firewall-cmd", "--add-port="+p); err != nil {
 				return err
 			}
-			if _, err := r.Run("", "firewall-cmd", "--permanent", arg); err != nil {
-				return err
+			_, err := r.Run("", "firewall-cmd", "--permanent", "--add-port="+p)
+			return err
+		}
+		drop = func(p string) error {
+			_, err := r.Run("", "firewall-cmd", "--remove-port="+p)
+			if _, err2 := r.Run("", "firewall-cmd", "--permanent", "--remove-port="+p); err == nil {
+				err = err2
 			}
+			return err
 		}
 	case FrontIPTables:
-		return allowIPTables(r, ports)
+		if err := allowIPTables(r, want); err != nil {
+			return had, err
+		}
+		for _, p := range want {
+			now.Ports = append(now.Ports, p.String())
+		}
+		return now, nil
 	case FrontNFTables:
-		return fmt.Errorf("这台用的是原生 nftables 规则,面板不自动改它:请自己在规则里放行这些端口")
+		if len(want) > 0 {
+			return had, fmt.Errorf("这台用的是原生 nftables 规则,面板不自动改它:请自己在规则里放行这些端口")
+		}
+		return now, nil
+	default:
+		return had, nil
 	}
-	return nil
+	for _, p := range want {
+		k := p.String()
+		switch {
+		case has(k):
+			if mine[k] { // 上次加的还在:接着记;不是 m-ui 加的(用户自己早就放行了)不记
+				now.Ports = append(now.Ports, k)
+			}
+		default:
+			if err := add(k); err != nil {
+				keep(err)
+				continue
+			}
+			now.Ports = append(now.Ports, k)
+		}
+	}
+	for _, k := range had.Ports {
+		if wanted[k] {
+			continue
+		}
+		if has(k) {
+			if err := drop(k); err != nil {
+				keep(err)
+				now.Ports = append(now.Ports, k) // 没收回成:接着记,下次再试
+			}
+		}
+	}
+	sort.Strings(now.Ports)
+	return now, first
+}
+
+// ufwAllowed 读 `ufw show added`:现在有哪些「对所有人放行某个端口」的规则("443/tcp"、"20000-30000/udp")。
+// 只认最简单的那种写法(ufw allow 端口[/协议]);没写协议的两种协议都算。带来源、带网卡的不算:那不是对所有人放行。
+func ufwAllowed(r Runner) map[string]bool {
+	out, err := r.Run("", "ufw", "show", "added")
+	got := map[string]bool{}
+	if err != nil {
+		return got
+	}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 || f[0] != "ufw" || f[1] != "allow" || (len(f) > 3 && f[3] != "comment") {
+			continue
+		}
+		spec, proto, _ := strings.Cut(f[2], "/")
+		ports, err := ParsePorts(spec)
+		if err != nil || len(ports) == 0 {
+			continue // 应用名(OpenSSH)之类:不是端口
+		}
+		for _, pr := range []string{"tcp", "udp"} {
+			if proto != "" && proto != pr {
+				continue
+			}
+			for _, p := range ports {
+				got[p.String()+"/"+pr] = true
+			}
+		}
+	}
+	return got
 }
 
 const allowChain = "M-UI-ALLOW"
 
 func allowIPTables(r Runner, ports []PortProto) error {
+	if len(ports) == 0 { // 一个端口都不要放行了:把自己的链撤掉(本来就没有的不算错)
+		for _, bin := range []string{"iptables", "ip6tables"} {
+			if !r.Has(bin) {
+				continue
+			}
+			if _, err := r.Run("", bin, "-C", "INPUT", "-j", allowChain); err == nil {
+				_, _ = r.Run("", bin, "-D", "INPUT", "-j", allowChain)
+				_, _ = r.Run("", bin, "-F", allowChain)
+				_, _ = r.Run("", bin, "-X", allowChain)
+			}
+		}
+		return nil
+	}
 	by := map[string][]PortRange{}
 	for _, p := range ports {
 		by[p.Proto] = append(by[p.Proto], p.Port)
@@ -242,6 +365,9 @@ func allowIPTables(r Runner, ports []PortProto) error {
 		}
 		if _, err := r.Run("", bin, "-C", "INPUT", "-j", allowChain); err != nil {
 			if _, err := r.Run("", bin, "-I", "INPUT", "1", "-j", allowChain); err != nil {
+				return err
+			}
+			if err := pinFirst(r, bin, false); err != nil { // 面板规则落在 iptables 里的机器:拉黑要排在放行前面
 				return err
 			}
 		}

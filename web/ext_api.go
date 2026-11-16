@@ -9,6 +9,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/ext"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/upstream"
 
 	"gorm.io/gorm"
@@ -60,7 +61,7 @@ func (s *Server) handleExts(w http.ResponseWriter, r *http.Request) {
 		}
 		s.audit(r, "ext", "create", e.Name)
 		if e.Type == "sub" {
-			go s.run.RefreshExt(e.Id)
+			safe.Go1("web.RefreshExt", e.Id, func(id uint) { _, _ = s.run.RefreshExt(id) })
 		}
 		e.Cache = ""
 		writeJSON(w, http.StatusOK, e)
@@ -175,7 +176,7 @@ func (s *Server) handleExtItem(w http.ResponseWriter, r *http.Request) {
 		}
 		s.audit(r, "ext", "update", p.Name)
 		if p.Type == "sub" && (p.Value != e.Value || e.Cache == "") {
-			go s.run.RefreshExt(id)
+			safe.Go1("web.RefreshExt", id, func(id uint) { _, _ = s.run.RefreshExt(id) })
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	case http.MethodDelete:

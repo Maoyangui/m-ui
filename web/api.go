@@ -26,6 +26,7 @@ import (
 	"github.com/Maoyangui/m-ui/ops"
 	"github.com/Maoyangui/m-ui/reach"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/sub"
 	"github.com/Maoyangui/m-ui/tz"
 
@@ -1334,6 +1335,7 @@ var panelSettings = setOf(
 	"upstreamCheckMinutes", "upstreamCheckFailThreshold", "reachAuto", "reachMinutes", "reachToken",
 	"certFile", "keyFile", "upstreamTestUrl", "statsBucketSeconds", "trafficAge", "allowPrivate",
 	"nodeMode", "backupHour", "backupKeep", "backupTelegram", "subLogAge", "auditAge",
+	"fwAutoBan", "fwAutoAllow",
 )
 
 // hiddenSettings 不发给浏览器的密钥:前端用不到,各自的页面走专门接口(管理员页、配对信息、证书页)。
@@ -2047,38 +2049,38 @@ func (s *Server) reloadAll(reason string) {
 	if s.run == nil { // 测试里没有数据面
 		return
 	}
-	go func() {
+	safe.Go("web.reloadAll", func() {
 		if err := s.run.ReloadAll(); err != nil {
 			logger.Warning(reason, " 后重载数据面失败: ", err)
 			return
 		}
 		logger.Info(reason, ",数据面已重载")
-	}()
+	})
 }
 
 // reloadUsers 用户变更走热更新,不断开其他用户连接。
 // reloadUpstreams 上游变化:只热换出站,不重启数据面(失败时 runner 自动回退全量重载)。
 func (s *Server) reloadUpstreams(reason string) {
-	go func() {
+	safe.Go("web.reloadUpstreams", func() {
 		if err := s.run.ReloadUpstreams(); err != nil {
 			logger.Warning(reason, " 后更新上游失败: ", err)
 			return
 		}
 		logger.Info(reason, ",上游已更新")
-	}()
+	})
 }
 
 func (s *Server) reloadUsers(reason string) {
 	if s.run == nil { // 测试里没有数据面
 		return
 	}
-	go func() {
+	safe.Go("web.reloadUsers", func() {
 		if err := s.run.ReloadUsers(); err != nil {
 			logger.Warning(reason, " 后热更新用户失败: ", err)
 			return
 		}
 		logger.Info(reason, ",用户已热更新")
-	}()
+	})
 }
 
 // checkTakeoverPorts 开着主机容灾:线路部署到的副机上,端口不能占它接任后要用的(它自己的代理面板端口,

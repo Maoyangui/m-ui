@@ -81,6 +81,11 @@ func (s *Server) agentAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		// 配对令牌只有主机手里有:带对令牌、纪元判定也过了的请求才是当前主机来的(已被接任的旧主机带旧纪元来,上面就 409 了)。副机概况据此显示"主机多久没联系本机"
 		s.hubSeenAt.Store(time.Now().Unix())
+		if s.run != nil { // 主机实际是从哪个地址连过来的:面板的防火墙规则永远不挡它(见 runner.FwNotePeer)
+			if peer, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+				s.run.FwNotePeer(peer)
+			}
+		}
 		next(w, r)
 	}
 }
@@ -114,6 +119,8 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentDiskClean)(w, r)
 	case "port-check": // 主机保存线路 / 中转入口前问:这些端口在本机现在能不能监听
 		s.agentAuth(s.handleAgentPortCheck)(w, r)
+	case "fw": // 主机的防火墙页让本机核对状态 / 放开系统防火墙 / 撤销 / 放行端口
+		s.agentAuth(s.handleAgentFw)(w, r)
 	case "line-stats": // 主机的线路详情要本机这条线路的流量时序
 		s.agentAuth(s.handleAgentLineStats)(w, r)
 	case "line-totals": // 主机的流量明细要本机各线路这段时间的流量合计
@@ -286,6 +293,9 @@ func (s *Server) handleAgentApply(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		badRequest(w, err)
 		return
+	}
+	if snap.FwRules != nil && s.run != nil {
+		s.run.FwKick() // 面板防火墙的规则跟着快照换过了:马上对一次账,不等下一个 30 秒
 	}
 	// ================= D. 本机账本只增不删:主机已经不认识的用户(或者同名的已经换了人),它的计数器没人再回收,清掉 =================
 	// 主机那边的游标还留着,记着是谁的那本;同名用户以后再建,新账本记着新主人,主机按主人认出来从 0 计。
@@ -510,6 +520,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		Counters:     ledger.Counters,
 		ServicePorts: s.reportServicePorts(),
 		Blocked:      s.run.BlockedInbounds(), // 端口被本机别的程序占着没开的入站:主机在服务器页、概况里点名
+		Fw:           s.reportFw(),            // 防火墙状况(缓存的那份,不为报告去跑系统命令)
 		KickPending:  strings.TrimSpace(s.setting(agentKickPendingKey)) != "",
 		ApplyGzip:    true, // 本机收得了 gzip 压缩的快照
 		LedgerFails:  s.run.LedgerFailures(),

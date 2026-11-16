@@ -17,6 +17,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/brand"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // 功德箱:"建议与支持"页上留名 + 转 USDT,到账后所有面板都能看到累计排行。
@@ -168,10 +169,10 @@ func fetchDonorBoards(ctx context.Context, urls []string, got func(donorBoard)) 
 	}
 	ch := make(chan result, len(urls))
 	for _, u := range urls {
-		go func() {
+		safe.Go("web.fetchDonorBoards", func() {
 			b, ok := fetchDonorURL(ctx, u)
 			ch <- result{b, ok}
-		}()
+		})
 	}
 	gotAny := false
 	for range urls {
@@ -221,7 +222,7 @@ func (s *Server) donorSnapshot() donorBoard {
 	st.mu.Lock()
 	if st.fetching == nil && !now.Before(st.next) {
 		st.fetching = make(chan struct{})
-		go st.refreshDonors(donorsURLs, st.fetching)
+		safe.Go2("web.refreshDonors", donorsURLs, st.fetching, st.refreshDonors)
 	}
 	wait := st.fetching
 	if !st.got.IsZero() && now.Sub(st.got) <= donorsWaitAge {

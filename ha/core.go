@@ -5,6 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // coreState 纪元与接任核心在内存里的运行时状态。Service 的结构体定义在 service.go,这些字段另挂在这里,
@@ -67,7 +69,8 @@ func (s *Service) RevokeGrants(epoch uint64) {
 	}
 	c.mu.Unlock()
 	s.invalidate()
-	go s.pushAll(s.remoteNodes(), 15*time.Second)
+	nodes := s.remoteNodes() // 这一刻的名单(和原来 go s.pushAll(s.remoteNodes(), …) 的取值时机一样)
+	safe.Go("ha.pushAll", func() { s.pushAll(nodes, 15*time.Second) })
 }
 
 // lastTakeoverErr 本机最近一次接任失败的时间(unix 秒;同伴状态里带上,排在后面的备用据此不再等本机)。

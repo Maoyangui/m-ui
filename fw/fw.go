@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -37,9 +38,22 @@ type Runner interface {
 // Exec 真的去执行(每条命令最多等 20 秒:防火墙命令卡住不能把面板拖死)。
 type Exec struct{}
 
-func (Exec) Has(name string) bool { _, err := exec.LookPath(name); return err == nil }
+// inTest 这个进程是 go test 编出来的测试程序(xxx.test)。测试里一律不碰真系统:哪个包的测试顺路走到了这里、
+// 又正好是以 root 跑的,也不会把跑测试那台机器的防火墙改掉(一条「只允许」落到 22 端口,人就连不上了)。
+var inTest = strings.HasSuffix(os.Args[0], ".test") || strings.HasSuffix(os.Args[0], ".test.exe")
+
+func (Exec) Has(name string) bool {
+	if inTest {
+		return false
+	}
+	_, err := exec.LookPath(name)
+	return err == nil
+}
 
 func (Exec) Run(stdin, name string, args ...string) (string, error) {
+	if inTest {
+		return "", fmt.Errorf("%s: not executed inside a test binary", name)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -280,10 +294,16 @@ func ParseSources(s string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
-// 规则的两种做法。
+// 规则的三种做法。
 const (
-	KindDeny = "deny" // 这些来源进不来(不填端口 = 整台机器都不让进)
-	KindOnly = "only" // 这些端口只让这些来源进,别人一律拒绝
+	KindAllow = "allow" // 这些端口在系统防火墙里放行(系统防火墙没在拦的机器上用不着;不进 m-ui 自己那张表,见 SyncAllow)
+	KindDeny  = "deny"  // 这些来源进不来(不填端口 = 整台机器都不让进)
+	KindOnly  = "only"  // 这些端口只让这些来源进,别人一律拒绝
+
+	// KindTrust 不是面板上能建的规则:集群里别的服务器在 m-ui 自己用的端口上永远不受上面两种规则影响
+	// (主机和副机之间的同步、中转入口到出口,都走这些端口;拉黑了一个网段、后来新加的服务器正好在里面,同步也不能断)。
+	// 由 runner 按当时的服务器名单和端口现拼,排在所有规则前面。
+	KindTrust = "trust"
 )
 
 // Rule 一条已经解析好的面板规则。
@@ -298,16 +318,27 @@ type Rule struct {
 // Check 规则本身说不说得通。
 func (r Rule) Check() error {
 	switch r.Kind {
+	case KindAllow:
+		if len(r.Ports) == 0 {
+			return fmt.Errorf("「放行端口」的规则要填端口")
+		}
+		if len(r.Sources) > 0 {
+			return fmt.Errorf("「放行端口」是对所有人放行,不填来源;要限制来源,另加一条「端口只给指定来源」")
+		}
+	case KindTrust:
+		if len(r.Ports) == 0 || len(r.Sources) == 0 || (r.Proto != "tcp" && r.Proto != "udp") {
+			return fmt.Errorf("trust rule needs a protocol, ports and sources")
+		}
 	case KindDeny:
 		if len(r.Sources) == 0 {
-			return fmt.Errorf("拉黑规则要填来源 IP 或网段")
+			return fmt.Errorf("「拉黑来源」的规则要填来源 IP 或网段")
 		}
 	case KindOnly:
 		if len(r.Ports) == 0 {
-			return fmt.Errorf("「只允许这些来源」的规则要填端口")
+			return fmt.Errorf("「端口只给指定来源」的规则要填端口")
 		}
 		if len(r.Sources) == 0 {
-			return fmt.Errorf("「只允许这些来源」的规则要填允许的来源")
+			return fmt.Errorf("「端口只给指定来源」的规则要填允许的来源")
 		}
 	default:
 		return fmt.Errorf("不认识的规则种类 %q", r.Kind)
@@ -348,13 +379,36 @@ func l4(proto string) string {
 	return "meta l4proto { tcp, udp } th dport "
 }
 
+// Effective 这些规则里有没有要落进 m-ui 自己那张表的(拉黑、只允许)。放行端口不进这张表;
+// 只剩下「集群服务器放行」那种的也不算:没有东西要拦,表就不必建。
+func Effective(rules []Rule) bool {
+	for _, r := range rules {
+		if r.Kind == KindDeny || r.Kind == KindOnly {
+			return true
+		}
+	}
+	return false
+}
+
 // NFTScript 把规则写成一份 nft 脚本:整张表先删后建,`nft -f` 一次事务换上去。
-// 顺序固定:回环永远放行 → 整台拉黑的来源 → 带端口的拉黑 →「只允许」的端口(先放行名单里的,再拒绝其余)。
+// 顺序固定:回环永远放行 → 集群里的服务器在 m-ui 的端口上放行 → 整台拉黑的来源 → 带端口的拉黑 →「只允许」的端口(先放行名单里的,再拒绝其余)。
 // 所以同一个来源既在黑名单里、又在某个端口的允许名单里时,以拉黑为准。
 func NFTScript(rules []Rule) string {
-	var ban4, ban6, body []string
+	var ban4, ban6, body, trust []string
 	sorted := append([]Rule(nil), rules...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+	for _, r := range sorted {
+		if r.Kind != KindTrust {
+			continue
+		}
+		v4, v6 := split46(r.Sources)
+		if len(v4) > 0 {
+			trust = append(trust, fmt.Sprintf("ip saddr { %s } %s%s accept comment \"cluster\"", strings.Join(v4, ", "), l4(r.Proto), portSet(r.Ports)))
+		}
+		if len(v6) > 0 {
+			trust = append(trust, fmt.Sprintf("ip6 saddr { %s } %s%s accept comment \"cluster\"", strings.Join(v6, ", "), l4(r.Proto), portSet(r.Ports)))
+		}
+	}
 	for _, r := range sorted {
 		if r.Kind != KindDeny || len(r.Ports) > 0 || r.Proto != "" {
 			continue
@@ -408,6 +462,9 @@ func NFTScript(rules []Rule) string {
 		fmt.Fprintf(&b, "\tset ban6 {\n\t\ttype ipv6_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { %s }\n\t}\n", strings.Join(ban6, ", "))
 	}
 	b.WriteString("\tchain input {\n\t\ttype filter hook input priority -10; policy accept;\n\t\tiifname \"lo\" accept\n")
+	for _, line := range trust {
+		b.WriteString("\t\t" + line + "\n")
+	}
 	if len(ban4) > 0 {
 		b.WriteString("\t\tip saddr @ban4 drop\n")
 	}
@@ -462,6 +519,16 @@ func IPTablesScript(rules []Rule, v6 bool) string {
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	lines := []string{"-A " + chainName + " -i lo -j RETURN"}
 	for _, r := range sorted {
+		if r.Kind != KindTrust {
+			continue
+		}
+		for _, mp := range multiport(r.Ports) {
+			for _, s := range pick(r.Sources) {
+				lines = append(lines, fmt.Sprintf("-A %s -s %s -p %s -m multiport --dports %s -j RETURN", chainName, s, r.Proto, strings.Join(mp, ",")))
+			}
+		}
+	}
+	for _, r := range sorted {
 		if r.Kind != KindDeny {
 			continue
 		}
@@ -498,12 +565,15 @@ func IPTablesScript(rules []Rule, v6 bool) string {
 }
 
 // Apply 把规则落到内核。nft 整表替换;没有 nft 用 iptables 自建链。engine 为空(两样都没有)时报错。
-// 没有任何规则时把自己的表 / 链撤掉,不留空壳。
+// 没有要拦的规则时把自己的表 / 链撤掉,不留空壳。
 func Apply(r Runner, rules []Rule) error {
 	for _, x := range rules {
 		if err := x.Check(); err != nil {
 			return fmt.Errorf("规则 #%d:%w", x.ID, err)
 		}
+	}
+	if !Effective(rules) {
+		rules = nil
 	}
 	switch engine(r) {
 	case EngineNFT:
@@ -536,11 +606,42 @@ func applyIPTables(r Runner, rules []Rule) error {
 		if _, err := r.Run(IPTablesScript(rules, v6), bin+"-restore", "--noflush"); err != nil {
 			return err
 		}
-		if _, err := r.Run("", bin, "-C", "INPUT", "-j", chainName); err != nil {
-			if _, err := r.Run("", bin, "-I", "INPUT", "1", "-j", chainName); err != nil {
-				return err
-			}
+		if err := pinFirst(r, bin, true); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// pinFirst 让 INPUT 的第一条是跳到 M-UI-IN 的那条。iptables 里 ACCEPT 是终局:它前面要是有放行
+// (「放开系统防火墙」插的那条全放行、放行端口的 M-UI-ALLOW、别的工具后来插到最前面的),拉黑和「只允许」就全被绕过去了。
+// 不在第一条就先在最前面插一条新的、再按行号删掉旧的:中间没有「规则不生效」的空档。
+// create = false:INPUT 里本来没有这条跳转(这台没有面板规则,或者规则落在 nft 里)时不加。
+func pinFirst(r Runner, bin string, create bool) error {
+	out, err := r.Run("", bin, "-S", "INPUT")
+	if err != nil {
+		return err
+	}
+	jump := "-A INPUT -j " + chainName
+	n, at := 0, 0
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "-A INPUT") {
+			continue
+		}
+		n++
+		if line == jump && at == 0 {
+			at = n
+		}
+	}
+	if at == 1 || (at == 0 && !create) {
+		return nil
+	}
+	if _, err := r.Run("", bin, "-I", "INPUT", "1", "-j", chainName); err != nil {
+		return err
+	}
+	if at > 1 {
+		_, _ = r.Run("", bin, "-D", "INPUT", strconv.Itoa(at+1))
 	}
 	return nil
 }

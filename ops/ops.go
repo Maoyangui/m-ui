@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // ---- 系统信息 ----
@@ -458,19 +460,19 @@ func (r *Runner) Start(name string, p Params, done func(ok bool, err error)) err
 	r.cancel = cancel
 	r.mu.Unlock()
 
-	go func() {
+	safe.Go("ops.Start", func() {
 		defer cancel()
 		r.appendLog(fmt.Sprintf("[%s] 开始 %s", time.Now().Format("15:04:05"), name))
 		cmd := newTaskCmd(ctx, script)
 		pr, pw := io.Pipe()
 		cmd.Stdout, cmd.Stderr = pw, pw
-		go func() {
+		safe.Go("ops.Start", func() {
 			sc := bufio.NewScanner(pr)
 			sc.Buffer(make([]byte, 64*1024), 1024*1024)
 			for sc.Scan() {
 				r.appendLog(sc.Text())
 			}
-		}()
+		})
 		err := cmd.Run()
 		pw.Close()
 		time.Sleep(50 * time.Millisecond)
@@ -490,7 +492,7 @@ func (r *Runner) Start(name string, p Params, done func(ok bool, err error)) err
 		if done != nil {
 			done(err == nil, err)
 		}
-	}()
+	})
 	return nil
 }
 

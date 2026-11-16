@@ -286,7 +286,7 @@ func (g *Guard) LoginFail(ip string) {
 	}
 	g.mu.Unlock()
 	if n >= loginLimit {
-		g.ban(k, model.BanLogin, fmt.Sprintf("10 分钟内登录失败 %d 次", n))
+		g.ban(k, model.BanLogin, n, fmt.Sprintf("10 分钟内登录失败 %d 次", n))
 	}
 }
 
@@ -336,12 +336,12 @@ func (g *Guard) miss(kind, ip, token string, limit int, evidence string) {
 	}
 	g.mu.Unlock()
 	if n >= limit {
-		g.ban(k, kind, fmt.Sprintf(evidence, n))
+		g.ban(k, kind, n, fmt.Sprintf(evidence, n))
 	}
 }
 
 // ban 自动拉黑一个来源:临时的;24 小时内第三次起封一天。已经在名单里的(手动加的永久条目)不动。
-func (g *Guard) ban(k netip.Prefix, reason, evidence string) {
+func (g *Guard) ban(k netip.Prefix, reason string, count int, evidence string) {
 	if g.db == nil {
 		return
 	}
@@ -362,7 +362,7 @@ func (g *Guard) ban(k netip.Prefix, reason, evidence string) {
 		b = model.FwBan{Ip: ip, Auto: true, FirstAt: now}
 	}
 	b.Hits++
-	b.Reason, b.Evidence, b.LastAt = reason, evidence, now
+	b.Reason, b.Evidence, b.Count, b.LastAt = reason, evidence, count, now
 	b.Expiry = now + banFor
 	if b.Hits >= repeatAfter {
 		b.Expiry = now + repeatFor
@@ -397,7 +397,7 @@ func (g *Guard) Add(ipOrNet, note string, seconds int64) (model.FwBan, error) {
 	if g.db.Where("ip = ?", ip).First(&b).Error != nil {
 		b = model.FwBan{Ip: ip, FirstAt: now}
 	}
-	b.Auto, b.Reason, b.Evidence, b.LastAt, b.Expiry = false, model.BanManual, strings.TrimSpace(note), now, 0
+	b.Auto, b.Reason, b.Evidence, b.Count, b.LastAt, b.Expiry = false, model.BanManual, strings.TrimSpace(note), 0, now, 0
 	if seconds > 0 {
 		b.Expiry = now + seconds
 	}

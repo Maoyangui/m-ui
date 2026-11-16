@@ -12,6 +12,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/stats"
 )
 
@@ -125,7 +126,7 @@ func (s *Server) handleLineDetail(w http.ResponseWriter, r *http.Request, id uin
 		i := len(servers)
 		servers = append(servers, ls)
 		wg.Add(1)
-		go func(n model.Node, i int) {
+		safe.Go2("web.handleLineDetail", n, i, func(n model.Node, i int) {
 			defer wg.Done()
 			res, err := s.run.Hub().LineStats(n, url.Values{"tag": {line.Name}, "hours": {strconv.Itoa(hours)}, "bucket": {strconv.Itoa(bucket)}, "tz": {q.Get("tz")}})
 			mu.Lock()
@@ -139,7 +140,7 @@ func (s *Server) handleLineDetail(w http.ResponseWriter, r *http.Request, id uin
 				return
 			}
 			servers[i].OK, servers[i].Series, servers[i].Up, servers[i].Down = true, res, res.TotalUp, res.TotalDown
-		}(n, i)
+		})
 	}
 	wg.Wait()
 

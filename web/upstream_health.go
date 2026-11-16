@@ -12,6 +12,7 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/monitor"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/safe"
 
 	"gorm.io/gorm"
 )
@@ -262,7 +263,7 @@ func (s *Server) testUpstreamEverywhere(up model.Upstream) []upServer {
 	sem := make(chan struct{}, 8)
 	for i, n := range targets {
 		wg.Add(1)
-		go func(i int, n model.Node) {
+		safe.Go2("web.testUpstreamEverywhere", i, n, func(i int, n model.Node) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -290,7 +291,7 @@ func (s *Server) testUpstreamEverywhere(up model.Upstream) []upServer {
 				}
 			}
 			out[i] = sv
-		}(i, n)
+		})
 	}
 	wg.Wait()
 	sort.Slice(out, func(a, b int) bool { return out[a].NodeId < out[b].NodeId })
@@ -309,12 +310,12 @@ func (s *Server) handleUpstreamHealth(w http.ResponseWriter, r *http.Request) {
 			var wg sync.WaitGroup
 			for _, n := range nodes {
 				wg.Add(1)
-				go func(n model.Node) {
+				safe.Go1("web.handleUpstreamHealth", n, func(n model.Node) {
 					defer wg.Done()
 					if err := h.CheckUpstreamsOn(n); err != nil {
 						logger.Warning("副机 ", n.Name, " 立即巡检失败: ", err)
 					}
-				}(n)
+				})
 			}
 			wg.Wait()
 		}

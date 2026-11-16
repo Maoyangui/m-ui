@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Maoyangui/m-ui/safe"
+
 	"golang.org/x/crypto/acme"
 )
 
@@ -707,8 +709,8 @@ func publicIP(ctx context.Context) string {
 func PublicIPs(ctx context.Context) (v4, v6 string) {
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); v4 = probePublicIP(ctx, "tcp4") }()
-	go func() { defer wg.Done(); v6 = probePublicIP(ctx, "tcp6") }()
+	safe.Go("acme.PublicIPs", func() { defer wg.Done(); v4 = probePublicIP(ctx, "tcp4") })
+	safe.Go("acme.PublicIPs", func() { defer wg.Done(); v6 = probePublicIP(ctx, "tcp6") })
 	wg.Wait()
 	return v4, v6
 }

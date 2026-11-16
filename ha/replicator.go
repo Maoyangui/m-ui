@@ -17,6 +17,7 @@ import (
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/selfupdate"
 )
 
@@ -578,14 +579,14 @@ func (r *replicator) startRun(ids []uint, cfg Config) {
 	}
 	r.running = true
 	r.mu.Unlock()
-	go func() {
+	safe.Go("ha.startRun", func() {
 		defer func() {
 			r.mu.Lock()
 			r.running = false
 			r.mu.Unlock()
 		}()
 		r.run(ids, cfg)
-	}()
+	})
 }
 
 // justBecame 本机刚成为这个纪元的主机(这次启动之前不久)。
@@ -735,7 +736,7 @@ func (r *replicator) dropOthers(infos []StandbyInfo, ids []uint) {
 		if r.s.d.DB.Where("id = ?", c.Id).Limit(1).Find(&n).Error != nil || n.Id == 0 {
 			continue
 		}
-		go r.s.DropOn(n)
+		safe.Go1("ha.DropOn", n, r.s.DropOn)
 	}
 }
 
@@ -973,7 +974,7 @@ func (r *replicator) encryptAndSend(dir, zipPath string, size int64, meta Replic
 			continue // 上一份还没送完:这一轮跳过它
 		}
 		wg.Add(1)
-		go func(i int, n model.Node, hdr EnvHeader) {
+		safe.Go3("ha.encryptAndSend", i, n, hdr, func(i int, n model.Node, hdr EnvHeader) {
 			defer wg.Done()
 			defer func() { <-gate }()
 			// 先把最新的容灾状态推过去:名单刚变时备用还不知道自己是备用,hub 下一轮才会推
@@ -991,7 +992,7 @@ func (r *replicator) encryptAndSend(dir, zipPath string, size int64, meta Replic
 				delete(r.alerted, failKey(n.Id))
 				r.mu.Unlock()
 			}
-		}(i, n, hdr)
+		})
 	}
 	wg.Wait()
 	return errors.Join(errs...)
@@ -1062,9 +1063,9 @@ func (s *Service) sendEnvelope(n model.Node, path, ctPath string, hdr EnvHeader,
 	}
 	defer ct.Close()
 	pr, pw := io.Pipe()
-	go func() {
+	safe.Go("ha.sendEnvelope", func() {
 		pw.CloseWithError(WriteEnvelopeCT(pw, hdr, ct, sum, sign))
-	}()
+	})
 	defer pr.Close()
 	timeout := 30*time.Second + time.Duration(total>>20)*2*time.Second
 	if timeout > 10*time.Minute {

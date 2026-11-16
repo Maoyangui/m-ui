@@ -5,6 +5,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // 重置订阅链接:订阅地址换成一串新的随机令牌(不管设置里是否用用户名作地址),
@@ -50,11 +51,11 @@ func (s *Server) rotateUser(u model.User) (model.User, error) {
 	closed, sessions := s.run.KickUserLocal(u.Name)
 	logger.Info("已重置 ", u.Name, " 的订阅链接与凭据,本机断开 ", closed, " 条连接、", sessions, " 条会话")
 	if h := s.run.Hub(); h != nil {
-		go func() {
+		safe.Go("web.rotateUser", func() {
 			if err := h.SyncNow(); err != nil {
 				logger.Warning("重置 ", u.Name, " 后向副机同步未全部确认(同步循环会继续重推): ", err)
 			}
-		}()
+		})
 	}
 	return u, nil
 }

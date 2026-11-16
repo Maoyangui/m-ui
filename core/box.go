@@ -522,12 +522,14 @@ func (s *Box) PreStart() error {
 	err := s.preStart()
 	if err != nil {
 		// TODO: remove catch error
+		// 预启动没成、收尾时又 panic:以前在这里重新抛出去 —— 干跑校验一份有问题的配置(保存线路前的检查)就可能把
+		// 整个进程带走。和下面 Start 一样只打出来:配置有问题由返回的 err 说,进程不为它倒下
 		defer func() {
 			v := recover()
 			if v != nil {
 				println(err.Error())
 				debug.PrintStack()
-				panic("panic on early close: " + fmt.Sprint(v))
+				println("panic on early close: " + fmt.Sprint(v))
 			}
 		}()
 		s.Close()

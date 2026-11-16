@@ -23,10 +23,12 @@ import (
 	"github.com/Maoyangui/m-ui/brand"
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/guard"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
 	"github.com/Maoyangui/m-ui/ops"
 	"github.com/Maoyangui/m-ui/runner"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/totp"
 	"github.com/Maoyangui/m-ui/util/slowreq"
 
@@ -112,8 +114,47 @@ type Server struct {
 }
 
 func NewServer(run *runner.Runner) *Server {
-	return &Server{run: run, db: run.DB(), sessions: map[string]session{}, startedAt: time.Now().Unix(),
+	s := &Server{run: run, db: run.DB(), sessions: map[string]session{}, startedAt: time.Now().Unix(),
 		totpPendingRS: map[uint]string{}, lastTotpStepRS: map[uint]int64{}, ops: ops.NewRunner()}
+	if g := run.Guard(); g != nil {
+		g.OnBan(s.onAutoBan) // 自动拉黑了一个来源:记审计、发通知
+	}
+	return s
+}
+
+// guardOf 应用层黑名单(测试里没有数据面时为 nil;它的方法对 nil 都安全)。
+func (s *Server) guardOf() *guard.Guard {
+	if s.run == nil {
+		return nil
+	}
+	return s.run.Guard()
+}
+
+// guardWrap 面板、代理面板的最外层:黑名单里的来源不回任何内容,直接断开连接(接不过来连接的,比如 HTTP/2,回 403)。
+// 集群里服务器的地址进不了黑名单(自动的豁免、手动的拒绝),主机和副机之间的同步不受影响。
+func (s *Server) guardWrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if g := s.guardOf(); g != nil && g.Blocked(s.sourceIP(r)) {
+			if hj, ok := w.(http.Hijacker); ok {
+				if c, _, err := hj.Hijack(); err == nil {
+					_ = c.Close()
+					return
+				}
+			}
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// onAutoBan 自动拉黑了一个来源:记一条审计(执行者 GuardJob),发一条通知(和登录告警同一个开关)。
+func (s *Server) onAutoBan(b model.FwBan) {
+	s.auditAs(model.ActorGuardJob, "fw", "ban:auto", map[string]interface{}{"ip": b.Ip, "reason": b.Reason, "evidence": b.Evidence, "hits": b.Hits, "until": b.Expiry})
+	if s.run != nil {
+		mins := (b.Expiry - time.Now().Unix() + 59) / 60
+		s.run.Notifier().Event("tgOnLogin", "🚫 <b>自动拉黑</b>\nIP:"+notify.Esc(b.Ip)+"\n"+notify.Esc(b.Evidence)+"\n"+strconv.FormatInt(mins, 10)+" 分钟后自动解除;面板「防火墙」里可以提前移出。")
+	}
 }
 
 // actor 返回当前请求的登录用户名(审计用);未登录为空。
@@ -225,6 +266,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"resellers/", s.auth(s.masterOnly(s.handleResellerItem)))
 	mux.HandleFunc(api+"plans", s.auth(s.masterOnly(s.handlePlans)))
 	mux.HandleFunc(api+"plans/", s.auth(s.masterOnly(s.handlePlanItem)))
+	mux.HandleFunc(api+"fw", s.auth(s.masterOnly(s.handleFw)))
+	mux.HandleFunc(api+"fw/", s.auth(s.masterOnly(s.handleFw)))
 	mux.HandleFunc(api+"rules", s.auth(s.masterOnly(s.handleRules)))
 	mux.HandleFunc(api+"rules/", s.auth(s.masterOnly(s.handleRuleItem)))
 	mux.HandleFunc(api+"limitstates", s.auth(s.masterOnly(s.handleLimitStates)))
@@ -351,6 +394,7 @@ func (s *Server) Start() error {
 			logger.Warning("代理面板启动失败: ", err)
 		}
 	}
+	// 三个常驻的后台循环:每一轮各自兜住 panic(见 safe 包)—— 面板和数据面在同一个进程里,这里出错不能让用户断线
 	go s.reapSessions()
 	go s.followLoop()
 	go s.tgBotLoop()
@@ -463,17 +507,21 @@ func (s *Server) reapSessions() {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for range t.C {
-		now := time.Now()
-		s.mu.Lock()
-		for token, sess := range s.sessions {
-			if now.After(sess.exp) {
-				delete(s.sessions, token)
-			}
-		}
-		reapFails(s.loginFails, now.Unix()) // 扫描器会留下大量 IP,过期的清掉
-		reapFails(s.apiFails, now.Unix())
-		s.mu.Unlock()
-		s.db.Where("exp < ?", now.Unix()).Delete(&model.Session{})
+		safe.Do("会话清理", func() {
+			now := time.Now()
+			func() {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				for token, sess := range s.sessions {
+					if now.After(sess.exp) {
+						delete(s.sessions, token)
+					}
+				}
+				reapFails(s.loginFails, now.Unix()) // 扫描器会留下大量 IP,过期的清掉
+				reapFails(s.apiFails, now.Unix())
+			}()
+			s.db.Where("exp < ?", now.Unix()).Delete(&model.Session{})
+		})
 	}
 }
 
@@ -619,6 +667,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 	stamp := time.Now().In(s.panelLocation()).Format("2006-01-02 15:04:05") + " " + clientIP(r)
 	s.db.Model(&model.Admin{}).Where("id = ?", admin.Id).Update("last_logins", stamp)
+	s.guardOf().LoginOK(s.sourceIP(r)) // 登录成功过的来源 24 小时内不自动拉黑(自己人输错几次不该被关在门外)
 	logger.Info("面板登录成功: ", admin.Username, " 来自 ", clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]string{"username": admin.Username})
 }
@@ -663,6 +712,7 @@ func (s *Server) loginBlocked(ip string) bool {
 
 // noteLoginFailure 记录某 IP 的失败次数,10 分钟内达到 5 次告警一次。
 func (s *Server) noteLoginFailure(ip string) {
+	s.guardOf().LoginFail(ip) // 自动拉黑的计数(默认关着:关着时什么都不做)
 	ip = loginKey(ip)
 	s.mu.Lock()
 	if s.loginFails == nil {
