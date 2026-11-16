@@ -734,7 +734,7 @@
     <p class="lede">Tick several users and a batch bar appears at the top (the header checkbox ticks the current page only).</p>
     <ul>
       <li><b data-k="user.batch.enable">Enable</b>, <b data-k="user.batch.disable">Disable</b>, <b data-k="user.batch.extend">Extend</b>, <b data-k="user.batch.plan">Apply plan</b>, <b data-k="user.batch.reset">Reset traffic</b>, <b data-k="user.batch.delete">Delete</b>.</li>
-      <li data-scope="admin"><b data-k="user.bulk">Bulk create</b>: creates <b data-k="user.bulkCount">Count</b> users at once from a <b data-k="user.bulkPrefix">Username prefix</b>; for <b data-k="user.bulkMode">Naming</b> choose <b data-k="user.bulkRandom">prefix + 8 random chars</b> or <b data-k="user.bulkSeq" class="wrap">prefix + sequence (001…, random subscription URL)</b>. Afterwards every new user's link is listed and can be copied in one go. These are Clash links (ending in <code>?format=clash</code>); for users who do not use Clash, remove the <code>?format=clash</code> at the end to get the universal link.</li>
+      <li data-scope="admin"><b data-k="user.bulk">Bulk create</b> (in the <b data-k="common.more">More</b> menu at the top right of the list, together with <b data-k="user.import">Import from old panel</b> and <b data-k="user.batch.export">Export CSV</b>): creates <b data-k="user.bulkCount">Count</b> users at once from a <b data-k="user.bulkPrefix">Username prefix</b>; for <b data-k="user.bulkMode">Naming</b> choose <b data-k="user.bulkRandom">prefix + 8 random chars</b> or <b data-k="user.bulkSeq" class="wrap">prefix + sequence (001…, random subscription URL)</b>. Afterwards every new user's link is listed and can be copied in one go. These are Clash links (ending in <code>?format=clash</code>); for users who do not use Clash, remove the <code>?format=clash</code> at the end to get the universal link.</li>
       <li data-scope="admin"><b data-k="user.batch.export">Export CSV</b>: exports the user list; its subscription column holds Clash links too.</li>
     </ul>
   </section>
@@ -756,7 +756,7 @@
     <h3>Import users from an old panel</h3>
     <p class="lede">Use this when your lines are already set up in m-ui and you only want to bring the old users over.</p>
     <ul>
-      <li>On the <b data-k="nav.users">Users</b> page click <b data-k="user.import">Import from old panel</b>, upload the old panel's .db file and click <b data-k="user.importGo">Import</b>.</li>
+      <li>On the <b data-k="nav.users">Users</b> page open <b data-k="common.more">More</b> at the top right and click <b data-k="user.import">Import from old panel</b>, upload the old panel's .db file and click <b data-k="user.importGo">Import</b>.</li>
       <li>Users with the same name are overwritten with the old database's usage, quota, expiry, status and periodic reset, plus a non-empty remark and description; the rest are created with the old panel's credentials. You can tick <b data-k="user.importAssign">Give newly created users every existing line</b>.</li>
       <li>Importing only users keeps m-ui's own lines, inbound ports, subscription port and path: users must import their new m-ui subscription link, so send it to everyone before you turn the old panel off.</li>
       <li>To move lines, upstreams and settings too, see <a href="#bk-import">Moving from an old panel</a>.</li>

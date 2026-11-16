@@ -409,12 +409,12 @@ const zh = {
   'line.quick': '快速添加',
   'line.masq': '伪装站点', 'line.masqHelp': '别人探测这个端口时看到的是这个网站,不是一个报错的代理。留空 = 不伪装。', 'line.masqBad': '伪装站点要是完整的网址,如 https://www.bing.com', 'line.hop': '端口跳跃范围', 'line.hopHelp': '如 20000-30000:服务器把这段 UDP 端口都转到本线路端口,客户端在范围内随机换端口,规避运营商对单端口 UDP 的限速/封锁。需在防火墙/安全组放行该 UDP 范围;留空关闭',
   'nav.exts': '外部节点', 'ext.title': '外部节点', 'ext.subtitle': '把别处的节点并进你的订阅:单条分享链接,或整个外部订阅(机场/中转)。分配给用户后,他的订阅里本站节点之后就会出现这些节点。',
-  'ext.help': '外部订阅由主机定时抓取(设置里可改间隔),副机自动同步;支持 base64 / 明文链接列表、clash YAML 与 sing-box JSON。抓取时先以 Clash Meta 身份要全量列表,内容里没有节点才换通用身份;抓取失败时保留上次成功的内容。', 'ext.add': '新增外部节点', 'ext.edit': '编辑外部节点',
+  'ext.help': '外部订阅由主机定时抓取(间隔在设置里改),副机自动同步;抓取失败时保留上次成功的内容。支持 base64 / 明文链接列表、Clash YAML 和 sing-box JSON。', 'ext.add': '新增外部节点', 'ext.edit': '编辑外部节点',
   'ext.typeSub': '外部订阅', 'ext.typeLink': '分享链接', 'ext.typeHelp': '外部订阅 = 一个 URL,内容定期抓取;分享链接 = 单条 vless/vmess/trojan/hy2/tuic/ss/anytls 链接',
   'ext.value': '链接 / 订阅地址', 'ext.valueHelp': '订阅地址以 http(s):// 开头;分享链接以协议名开头', 'ext.prefix': '节点名前缀', 'ext.prefixHelp': '加在每个外部节点名前,便于用户区分,如 "[中转] "',
   'ext.nodes': '节点数', 'ext.lastFetch': '最近抓取', 'ext.users': '分配用户', 'ext.failed': '抓取失败', 'ext.refresh': '刷新', 'ext.preview': '预览', 'ext.previewHelp': '解析到 {links} 条链接、{clash} 个 clash 节点:',
   'ext.namePh': '如 机场A', 'ext.empty': '还没有外部节点。新增后在用户编辑里勾选即可并入其订阅', 'ext.created': '已创建', 'ext.updated': '已更新', 'ext.deleted': '已删除',
-'ext.expand': '展开节点', 'ext.collapse': '收起', 'ext.search': '搜索节点(名称 / 协议 / 服务器)', 'ext.count': '{n} 个节点', 'ext.selected': '已选 {n}',
+'ext.expand': '展开节点', 'ext.collapse': '收起', 'ext.search': '搜索节点(名称 / 协议 / 服务器)', 'ext.count': '{n} 个节点', 
 'ext.testAll': '测速全部', 'ext.testSel': '测速选中', 'ext.addUp': '添加为上游', 'ext.server': '服务器', 'ext.noUpstream': '不能测速 / 作上游', 'ext.noNodes': '没有匹配的节点',
 'ext.testHint': '从每台启用的服务器出发真连一次、测延迟(代表它作为上游时的可用性,不代表大陆用户直连的体验;大陆直连看「测大陆连通」)。每台同时测几个,结果一格一格出来;✗ = 连不通,「不支持」= 协议或参数转不成本站出站、没法测,鼠标放上去看原因。',
 'ext.testStarted': '开始测速:{n} 个节点 × {s} 台服务器', 'ext.testDone': '测速完成:{ok} 通 · {bad} 不通', 'ext.testRunning': '这条订阅已有测速在进行', 'ext.pickFirst': '先勾选节点',
@@ -1144,6 +1144,7 @@ const zh = {
   'audit.v.totp.disable': '关闭两步验证', 'audit.v.api': '外部 API', 'audit.v.plan': '套用套餐',
   'audit.v.apply': '开始限速', 'audit.v.lift': '解除限速', 'audit.v.depleted': '额度用尽', 'audit.v.restored': '额度恢复', 'audit.v.expired': '到期', 'audit.v.disable.quota': '超量停用', 'audit.v.disable.expired': '到期停用',
   'audit.v.cf-api-override': '改用备用 DNS 接口地址',
+  'user.menu.bulk': '一次生成一批账号(名字加序号),生成完给出订阅地址清单', 'user.menu.import': '把旧面板导出的用户搬过来,订阅地址可以保持不变', 'user.menu.export': '现在筛选出来的用户,连同订阅地址存成表格',
 };
 
 const en = {
@@ -1564,12 +1565,12 @@ const en = {
   'line.quick': 'Quick add',
   'line.masq': 'Masquerade site', 'line.masqHelp': 'Anyone probing this port sees this website instead of a failing proxy. Empty = no masquerade.', 'line.masqBad': 'The masquerade site must be a full URL, e.g. https://www.bing.com', 'line.hop': 'Port hopping range', 'line.hopHelp': 'e.g. 20000-30000: the server redirects that whole UDP range to this line\'s port and clients hop between ports, sidestepping per-port UDP throttling/blocking. Open the UDP range in your firewall / security group; empty = off',
   'nav.exts': 'External nodes', 'ext.title': 'External nodes', 'ext.subtitle': 'Merge nodes from elsewhere into your subscriptions: a single share link, or a whole external subscription (provider / relay). Once assigned, they appear after this site\'s nodes in the user\'s subscription.',
-  'ext.help': 'External subscriptions are fetched periodically by the hub (interval in settings) and synced to nodes; base64 / plain link lists, clash YAML and sing-box JSON are supported. Fetching first identifies as Clash Meta to get the full list and switches to a generic client only when that content has no nodes; when a fetch fails the last good content is kept.', 'ext.add': 'Add external node', 'ext.edit': 'Edit external node',
+  'ext.help': 'External subscriptions are fetched by the master on a schedule (interval in Settings) and synced to nodes; when a fetch fails the last good content is kept. Base64 or plain link lists, Clash YAML and sing-box JSON are supported.', 'ext.add': 'Add external node', 'ext.edit': 'Edit external node',
   'ext.typeSub': 'Subscription', 'ext.typeLink': 'Share link', 'ext.typeHelp': 'External subscription = a URL fetched periodically; share link = one vless/vmess/trojan/hy2/tuic/ss/anytls link',
   'ext.value': 'Link / subscription URL', 'ext.valueHelp': 'Subscription URLs start with http(s)://; share links start with the protocol name', 'ext.prefix': 'Name prefix', 'ext.prefixHelp': 'Prepended to every external node name, e.g. "[relay] "',
   'ext.nodes': 'Nodes', 'ext.lastFetch': 'Last fetch', 'ext.users': 'Users', 'ext.failed': 'fetch failed', 'ext.refresh': 'Refresh', 'ext.preview': 'Preview', 'ext.previewHelp': 'Parsed {links} links and {clash} clash proxies:',
   'ext.namePh': 'e.g. Provider A', 'ext.empty': 'No external nodes yet. Add one, then tick it in a user\'s edit form to merge it into their subscription', 'ext.created': 'Created', 'ext.updated': 'Updated', 'ext.deleted': 'Deleted',
-'ext.expand': 'Show nodes', 'ext.collapse': 'Collapse', 'ext.search': 'Search nodes (name / protocol / server)', 'ext.count': '{n} nodes', 'ext.selected': '{n} selected',
+'ext.expand': 'Show nodes', 'ext.collapse': 'Collapse', 'ext.search': 'Search nodes (name / protocol / server)', 'ext.count': '{n} nodes', 
 'ext.testAll': 'Test all', 'ext.testSel': 'Test selected', 'ext.addUp': 'Add as upstreams', 'ext.server': 'Server', 'ext.noUpstream': 'Not testable / usable as upstream', 'ext.noNodes': 'No matching nodes',
 'ext.testHint': 'Every enabled server connects for real and measures the delay (this shows whether it works as an upstream from your servers, not how it feels to users connecting directly from China; use Test from China for that). Several nodes are tested at once per server and results appear cell by cell; ✗ = unreachable, Unsupported = the protocol or a parameter cannot be converted, so it cannot be tested. Hover a cell for the reason.',
 'ext.testStarted': 'Testing {n} nodes × {s} servers', 'ext.testDone': 'Done: {ok} ok · {bad} failed', 'ext.testRunning': 'A test is already running for this subscription', 'ext.pickFirst': 'Select nodes first',
@@ -2340,6 +2341,9 @@ const en = {
   'audit.v.api': 'external API', 'audit.v.plan': 'plan applied',
   'audit.v.apply': 'limit applied', 'audit.v.lift': 'limit lifted', 'audit.v.depleted': 'quota used up', 'audit.v.restored': 'quota restored', 'audit.v.expired': 'expired',
   'audit.v.disable.quota': 'disabled: over quota', 'audit.v.disable.expired': 'disabled: expired', 'audit.v.cf-api-override': 'DNS API address overridden',
+  'user.menu.bulk': 'Create a batch of accounts at once (name plus a number) and get the list of subscription links',
+  'user.menu.import': 'Bring over users exported from your old panel; subscription links can stay the same',
+  'user.menu.export': 'Save the users currently listed, with their subscription links, as a spreadsheet',
 };
 
 const dicts = { zh, en };

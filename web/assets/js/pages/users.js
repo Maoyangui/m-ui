@@ -84,9 +84,11 @@ export async function render(el) {
       <span id="user-only"></span>
       <span class="muted small" id="user-count"></span>
       <span class="grow"></span>
-      ${isReseller() ? '' : `<button class="btn" data-act="user.import">${t('user.import')}</button>
-      <button class="btn" data-act="user.export">${t('user.batch.export')}</button>
-      <button class="btn" data-act="user.bulk">${t('user.bulk')}</button>`}
+      ${isReseller() ? '' : `<details class="menu"><summary class="btn">${t('common.more')}</summary><div class="menu-list">
+        <button data-act="user.bulk"><b>${esc(t('user.bulk'))}</b><span class="muted small" style="display:block">${esc(t('user.menu.bulk'))}</span></button>
+        <button data-act="user.import"><b>${esc(t('user.import'))}</b><span class="muted small" style="display:block">${esc(t('user.menu.import'))}</span></button>
+        <button data-act="user.export"><b>${esc(t('user.batch.export'))}</b><span class="muted small" style="display:block">${esc(t('user.menu.export'))}</span></button>
+      </div></details>`}
       <button class="btn primary" data-act="user.add">${t('user.add')}</button>
     </div>
     <div class="toolbar batch-bar" id="batch-bar" hidden>

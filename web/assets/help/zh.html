@@ -734,7 +734,7 @@
     <p class="lede">勾选多个用户后,顶部出现批量操作条(表头的全选只勾当前这一页)。</p>
     <ul>
       <li><b data-k="user.batch.enable">启用</b>、<b data-k="user.batch.disable">停用</b>、<b data-k="user.batch.extend">延期</b>、<b data-k="user.batch.plan">套用套餐</b>、<b data-k="user.batch.reset">重置流量</b>、<b data-k="user.batch.delete">删除</b>。</li>
-      <li data-scope="admin"><b data-k="user.bulk">批量生成</b>:按 <b data-k="user.bulkPrefix">用户名前缀</b> 一次建 <b data-k="user.bulkCount">数量</b> 个,<b data-k="user.bulkMode">命名方式</b> 选 <b data-k="user.bulkRandom">前缀 + 随机 8 位</b> 或 <b data-k="user.bulkSeq" class="wrap">前缀 + 序号(001…,订阅地址用随机串)</b>;生成后列出每个人的订阅地址,可以整段复制。这里给的是 Clash 地址(带 <code>?format=clash</code>),发给不用 Clash 的用户时,去掉末尾的 <code>?format=clash</code> 就是通用地址。</li>
+      <li data-scope="admin"><b data-k="user.bulk">批量生成</b>(在列表右上角的 <b data-k="common.more">更多</b> 菜单里,<b data-k="user.import">从旧面板导入</b> 和 <b data-k="user.batch.export">导出 CSV</b> 也在这里):按 <b data-k="user.bulkPrefix">用户名前缀</b> 一次建 <b data-k="user.bulkCount">数量</b> 个,<b data-k="user.bulkMode">命名方式</b> 选 <b data-k="user.bulkRandom">前缀 + 随机 8 位</b> 或 <b data-k="user.bulkSeq" class="wrap">前缀 + 序号(001…,订阅地址用随机串)</b>;生成后列出每个人的订阅地址,可以整段复制。这里给的是 Clash 地址(带 <code>?format=clash</code>),发给不用 Clash 的用户时,去掉末尾的 <code>?format=clash</code> 就是通用地址。</li>
       <li data-scope="admin"><b data-k="user.batch.export">导出 CSV</b>:导出用户列表,订阅那一列也是 Clash 地址。</li>
     </ul>
   </section>
@@ -756,7 +756,7 @@
     <h3>从旧面板导入用户</h3>
     <p class="lede">线路已经在 m-ui 上建好、只想把老用户搬过来时用。</p>
     <ul>
-      <li><b data-k="nav.users">用户</b> 页点 <b data-k="user.import">从旧面板导入</b>,上传旧面板的 .db 文件,点 <b data-k="user.importGo">开始导入</b>。</li>
+      <li><b data-k="nav.users">用户</b> 页右上角 <b data-k="common.more">更多</b> → <b data-k="user.import">从旧面板导入</b>,上传旧面板的 .db 文件,点 <b data-k="user.importGo">开始导入</b>。</li>
       <li>同名用户会被旧库的值覆盖用量、配额、到期、启停、周期重置,以及旧库里不空的备注和说明;其余的新建,沿用旧面板的用户凭据。可以勾 <b data-k="user.importAssign">给新建的用户分配全部现有线路</b>。</li>
       <li>只导入用户时,线路、入站端口、订阅端口和路径都还是 m-ui 自己的:用户要用 m-ui 的新订阅地址重新导入,停掉旧面板之前先把新地址发给大家。</li>
       <li>连线路、上游、设置一起搬,见 <a href="#bk-import">从旧面板迁移</a>。</li>

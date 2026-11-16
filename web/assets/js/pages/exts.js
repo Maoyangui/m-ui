@@ -190,11 +190,12 @@ function panelHTML(id, c) {
       ${colMenu}
       <span class="muted small" id="ext-count-${id}"></span>${stale}<span class="grow"></span>
       <div class="ext-row2">
-        <button class="btn sm" data-act="ext.testSel" data-id="${id}">${t('ext.testSel')}</button>
-        <button class="btn sm" data-act="ext.reachSel" data-id="${id}" title="${esc(t('ext.reachHelp'))}">${t('ext.reachSel')}</button>
-        <button class="btn sm" data-act="ext.hideSel" data-id="${id}" title="${esc(t('ext.hideHelp'))}">${t('ext.hideSel')}</button>
-        <button class="btn sm" data-act="ext.showSel" data-id="${id}">${t('ext.showSel')}</button>
-        <button class="btn sm primary" data-act="ext.addUp" data-id="${id}">${t('ext.addUp')}</button>
+        <span class="badge primary" id="ext-seln-${id}" hidden></span>
+        <button class="btn sm" data-act="ext.testSel" data-id="${id}" data-needs-sel disabled>${t('ext.testSel')}</button>
+        <button class="btn sm" data-act="ext.reachSel" data-id="${id}" title="${esc(t('ext.reachHelp'))}" data-needs-sel disabled>${t('ext.reachSel')}</button>
+        <button class="btn sm" data-act="ext.hideSel" data-id="${id}" title="${esc(t('ext.hideHelp'))}" data-needs-sel disabled>${t('ext.hideSel')}</button>
+        <button class="btn sm" data-act="ext.showSel" data-id="${id}" data-needs-sel disabled>${t('ext.showSel')}</button>
+        <button class="btn sm primary" data-act="ext.addUp" data-id="${id}" data-needs-sel disabled>${t('ext.addUp')}</button>
         <span class="grow"></span>
         <label class="ext-incl"><input type="checkbox" data-change="ext.inclHidden" data-id="${id}" ${inclHidden[id] ? 'checked' : ''}> ${t('ext.inclHidden')}</label>
         <button class="btn sm" data-act="ext.testAll" data-id="${id}" title="${esc(t('ext.testAllHelp'))}">${t('ext.testAll')}</button>
@@ -366,11 +367,16 @@ function updateCount(id) {
   const cnt = document.getElementById('ext-count-' + id), c = cache[id];
   if (!cnt || !c) return;
   const sel = picked[id];
+  // 「选中」那几个按钮没勾节点时是灰的(以前一直亮着,点了才弹「先勾选节点」);勾了几个写在最前面
+  const n = sel ? sel.size : 0, bar = cnt.closest ? cnt.closest('.ext-tools') : null;
+  if (bar) bar.querySelectorAll('[data-needs-sel]').forEach(b => { b.disabled = !n; });
+  const chip = document.getElementById('ext-seln-' + id);
+  if (chip) { chip.hidden = !n; chip.textContent = t('user.selected', { n }); }
   const out = (c.nodes || []).filter(n => !n.hidden).length;
   const shown = (filt[id] || 'all') !== 'all' || (query[id] || '').trim() ? visible(id, c).length : -1;
   cnt.textContent = t('ext.countOut', { n: (c.nodes || []).length, out })
     + (shown >= 0 ? ' · ' + t('ext.shown', { n: shown }) : '')
-    + (sel && sel.size ? ' · ' + t('ext.selected', { n: sel.size }) : '')
+
     + (c.fetchedAt ? ' · ' + t('ext.lastFetch') + ' ' + fmtRelative(c.fetchedAt) : '');
 }
 
