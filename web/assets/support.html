@@ -7,162 +7,195 @@
 <title>{{if eq .Lang "zh"}}建议与支持 · m-ui{{else}}Feedback &amp; Support · m-ui{{end}}</title>
 <link rel="icon" href="logo.svg" type="image/svg+xml">
 <style>
+/* 这一页自带样式、不引面板的 style.css(演示站、打不开面板时也要能单独显示);颜色、圆角、阴影和面板用同一组数值。
+   版式:顶上一行标题与版本;第一排两张等高的卡(找我 / 打赏地址),第二排通栏是文档与 GitHub 的几个去处,第三排通栏是功德箱(左边留名、右边名单)。
+   同一排的卡等高,不会一边长一边短;窄了叠成一栏。 */
 :root {
-  --bg: #f5f7fb; --surface: #fff; --surface-2: #f8fafc; --text: #1a1f2e; --muted: #6b7280;
-  --border: #e5e7eb; --border-soft: #eef1f6; --primary: #2563eb; --primary-soft: #eaf0ff;
-  --ok: #16a34a; --accent: #6a44f2; --err: #dc2626;
+  --bg: #f6f7f9; --surface: #fff; --surface-2: #f8f9fb; --surface-3: #f1f3f6;
+  --text: #111827; --text-2: #374151; --muted: #6b7280; --faint: #9ca3af;
+  --border: #e6e8ec; --border-strong: #d4d8de; --divider: #eef0f3;
+  --primary: #2563eb; --primary-hover: #1d4ed8; --primary-soft: #eef4ff; --primary-text: #1d4ed8; --primary-ring: rgba(37, 99, 235, .18);
+  --ok: #059669; --ok-soft: #e8f7f0; --accent: #7c3aed; --accent-soft: #f3edff; --err: #dc2626;
   --gold: #a16207; --gold-bg: #fef3c7; --silver: #475569; --silver-bg: #e8edf3; --bronze: #9a3412; --bronze-bg: #fbe7da;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 8px 24px rgba(15, 23, 42, .06);
-  --r: 14px;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 1px 3px rgba(16, 24, 40, .04);
+  --shadow-md: 0 4px 6px -2px rgba(16, 24, 40, .05), 0 12px 24px -6px rgba(16, 24, 40, .1);
+  --glow: rgba(37, 99, 235, .09);
+  --r: 12px; --r-sm: 8px;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-  --bg: #0f1218; --surface: #171b24; --surface-2: #1d222c; --text: #e6e8ee; --muted: #9aa3b2;
-  --border: #262c38; --border-soft: #222835; --primary: #5b8cff; --primary-soft: #18233c; --accent: #8f7bff;
-  --err: #f87171; --gold: #facc15; --gold-bg: #3a3010; --silver: #cbd5e1; --silver-bg: #2a3240; --bronze: #fdba74; --bronze-bg: #3b2414;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .28);
+  --bg: #0d1015; --surface: #151920; --surface-2: #191e26; --surface-3: #1e242d;
+  --text: #e8eaef; --text-2: #c3c8d2; --muted: #8b93a3; --faint: #5e6676;
+  --border: #232832; --border-strong: #303744; --divider: #1d222b;
+  --primary: #3b82f6; --primary-hover: #60a5fa; --primary-soft: rgba(59, 130, 246, .14); --primary-text: #8ab4fb; --primary-ring: rgba(59, 130, 246, .3);
+  --ok: #10b981; --ok-soft: rgba(16, 185, 129, .14); --accent: #a78bfa; --accent-soft: rgba(167, 139, 250, .14); --err: #f87171;
+  --gold: #facc15; --gold-bg: #3a3010; --silver: #cbd5e1; --silver-bg: #2a3240; --bronze: #fdba74; --bronze-bg: #3b2414;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35); --shadow-md: 0 12px 28px -6px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .04);
+  --glow: rgba(59, 130, 246, .12);
 } }
 :root[data-theme="dark"] {
-  --bg: #0f1218; --surface: #171b24; --surface-2: #1d222c; --text: #e6e8ee; --muted: #9aa3b2;
-  --border: #262c38; --border-soft: #222835; --primary: #5b8cff; --primary-soft: #18233c; --accent: #8f7bff;
-  --err: #f87171; --gold: #facc15; --gold-bg: #3a3010; --silver: #cbd5e1; --silver-bg: #2a3240; --bronze: #fdba74; --bronze-bg: #3b2414;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .28);
+  --bg: #0d1015; --surface: #151920; --surface-2: #191e26; --surface-3: #1e242d;
+  --text: #e8eaef; --text-2: #c3c8d2; --muted: #8b93a3; --faint: #5e6676;
+  --border: #232832; --border-strong: #303744; --divider: #1d222b;
+  --primary: #3b82f6; --primary-hover: #60a5fa; --primary-soft: rgba(59, 130, 246, .14); --primary-text: #8ab4fb; --primary-ring: rgba(59, 130, 246, .3);
+  --ok: #10b981; --ok-soft: rgba(16, 185, 129, .14); --accent: #a78bfa; --accent-soft: rgba(167, 139, 250, .14); --err: #f87171;
+  --gold: #facc15; --gold-bg: #3a3010; --silver: #cbd5e1; --silver-bg: #2a3240; --bronze: #fdba74; --bronze-bg: #3b2414;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35); --shadow-md: 0 12px 28px -6px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .04);
+  --glow: rgba(59, 130, 246, .12);
 }
-html { font-size: 15px; }
+html { font-size: 15px; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; -webkit-font-smoothing: antialiased; }
+body { margin: 0; min-height: 100vh; background: var(--bg) radial-gradient(60rem 22rem at 50% -8rem, var(--glow), transparent 70%) no-repeat; color: var(--text); font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 svg { flex: none; }
-a { color: var(--primary); }
-:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 8px; }
+a { color: var(--primary-text); }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--r-sm); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
-.wrap { max-width: 600px; margin: 0 auto; padding: .8rem 1rem 1.2rem; }
+.wrap { max-width: 62rem; margin: 0 auto; padding: 1rem 1.25rem 2.5rem; }
 
-/* 顶栏 */
-.top { display: flex; align-items: center; gap: .5rem; margin-bottom: 1rem; font-size: .85rem; }
-.top a { color: var(--muted); text-decoration: none; display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .5rem; margin: -.3rem -.5rem; border-radius: 8px; transition: .12s; }
-.top a:hover { color: var(--text); background: var(--surface); }
+/* 顶栏:返回面板 / 换语言 */
+.top { display: flex; align-items: center; gap: .5rem; margin-bottom: 1.75rem; font-size: 13px; }
+.top a { display: inline-flex; align-items: center; gap: .35rem; height: 30px; padding: 0 .65rem; margin: 0 -.65rem; border-radius: var(--r-sm); color: var(--muted); font-weight: 500; text-decoration: none; transition: .12s; }
+.top a:hover { color: var(--text); background: var(--surface-3); }
 .top .grow { flex: 1; }
 
-/* 头部 */
-.hero { display: flex; align-items: flex-start; gap: .85rem; margin-bottom: 1rem; }
-.hero > img { width: 40px; height: 40px; margin-top: .1rem; }
-.hero h1 { margin: 0; font-size: 1.3rem; line-height: 1.3; letter-spacing: -.01em; display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; }
-.hero p { margin: .2rem 0 0; color: var(--muted); font-size: .88rem; }
-.chip { display: inline-flex; align-items: center; gap: .35rem; padding: .12rem .25rem .12rem .5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; font-size: .78rem; color: var(--muted); }
-.chip code { font-family: var(--mono); color: var(--primary); font-size: .78rem; }
-.chip button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: .75rem; cursor: pointer; padding: .1rem .45rem; border-radius: 999px; transition: .12s; }
-.chip button:hover { background: var(--primary-soft); color: var(--primary); }
+/* 头部:徽标、标题、一句话;右边是版本和在跑的设备数 */
+.hero { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.6rem; }
+.hero > img { width: 48px; height: 48px; }
+.hero-t { flex: 1; min-width: 0; }
+.hero h1 { margin: 0; font-size: 1.6rem; line-height: 1.25; font-weight: 700; letter-spacing: -.015em; }
+.hero p { margin: .25rem 0 0; color: var(--muted); font-size: 14px; }
+.hero-meta { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .4rem; }
+.chip { display: inline-flex; align-items: center; gap: .35rem; height: 28px; padding: 0 .2rem 0 .65rem; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; box-shadow: var(--shadow); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.chip code { font-family: var(--mono); color: var(--text); font-size: 12px; font-weight: 600; }
+.chip button { height: 22px; padding: 0 .55rem; border: 0; border-radius: 999px; background: var(--surface-3); color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; transition: .12s; }
+.chip button:hover { background: var(--primary-soft); color: var(--primary-text); }
+.chip button.done { background: var(--ok-soft); color: var(--ok); }
+/* 运行中的面板数:版本号旁边一个小标 */
+.chip.stat { padding: 0 .7rem; }
+.chip.stat b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.chip.stat i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); display: inline-block; }
+
+/* 卡片排成两列的网格:同一排等高;.full 的卡占一整排 */
+.cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.cols > .card { min-width: 0; }
+.cols > .card.full { grid-column: 1 / -1; }
 
 /* 卡片 */
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: .75rem .9rem; box-shadow: var(--shadow); margin-bottom: .6rem; }
-.card > header { display: flex; align-items: center; gap: .6rem; margin-bottom: .35rem; }
-.card h2 { margin: 0; font-size: 1.02rem; font-weight: 600; letter-spacing: -.005em; }
-.ic { width: 28px; height: 28px; border-radius: 9px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
-.ic.warm { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
-.lede { margin: 0 0 .6rem; color: var(--muted); font-size: .85rem; line-height: 1.5; }
-.lede b { color: var(--text); font-weight: 600; }
-
-/* 联系方式:Telegram 与交流群各一行,紧凑;每行都能复制、直接打开 */
-.contacts { display: grid; gap: .35rem; }
-.contact { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 10px; padding: .32rem .4rem .32rem .65rem; }
-.contact .who { display: flex; align-items: center; gap: .45rem; min-width: 0; flex: 1; font-size: .86rem; }
-.contact .who svg { flex: none; color: var(--muted); }
-.contact .who .lbl { color: var(--muted); white-space: nowrap; }
-.contact code { font-family: var(--mono); font-size: .86rem; word-break: break-all; }
-.contact .btn { padding: .26rem .6rem; font-size: .8rem; border-radius: 8px; }
-.actions { display: flex; gap: .45rem; flex-wrap: wrap; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 1.1rem 1.15rem 1.15rem; box-shadow: var(--shadow); }
+.card > header { display: flex; align-items: center; gap: .65rem; margin-bottom: .4rem; }
+.card h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.ic { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
+.ic.warm { background: var(--accent-soft); color: var(--accent); }
+.lede { margin: 0 0 .9rem; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.lede b { display: inline-block; color: var(--text-2); font-weight: 600; }
 
 /* 按钮 */
-.btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 9px; padding: .44rem .8rem; font: inherit; font-size: .85rem; cursor: pointer; text-decoration: none; white-space: nowrap; display: inline-flex; align-items: center; gap: .35rem; transition: .12s; }
-.btn:hover { border-color: var(--primary); color: var(--primary); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; height: 32px; padding: 0 .8rem; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; font-weight: 500; white-space: nowrap; text-decoration: none; cursor: pointer; box-shadow: 0 1px 2px rgba(16, 24, 40, .05); transition: .12s; }
+.btn:hover { background: var(--surface-2); border-color: var(--faint); }
 .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
-.btn.primary:hover { filter: brightness(1.08); color: #fff; }
+.btn.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); color: #fff; }
 .btn.done { border-color: var(--ok); color: var(--ok); }
-.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); padding-inline: .5rem; }
-.btn.ghost:hover { color: var(--primary); background: var(--primary-soft); }
+.btn.ghost { border-color: transparent; background: transparent; box-shadow: none; color: var(--muted); padding-inline: .55rem; }
+.btn.ghost:hover { color: var(--text); background: var(--surface-3); }
+.btn:disabled { opacity: .6; cursor: default; }
 
-/* 链接磁贴 */
-.tiles { display: flex; flex-wrap: wrap; gap: .45rem; }
-.tile { display: inline-flex; align-items: center; gap: .4rem; padding: .42rem .7rem; border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface-2); color: inherit; text-decoration: none; font-size: .85rem; transition: .12s; cursor: pointer; font-family: inherit; }
-.tile:hover { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
-.tile svg { color: var(--muted); }
-.tile:hover svg { color: var(--primary); }
+/* 联系方式:一种一行 —— 图标、名字和账号、复制 / 打开 */
+.rows { display: grid; gap: .5rem; }
+.row { display: flex; align-items: center; gap: .75rem; padding: .6rem .65rem .6rem .7rem; background: var(--surface-2); border: 1px solid var(--divider); border-radius: 10px; }
+.row-ic { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--primary-soft); color: var(--primary); }
+.row-t { flex: 1; min-width: 0; display: grid; line-height: 1.35; }
+.row-t b { font-size: 13px; font-weight: 600; }
+.row-t code { font-family: var(--mono); font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .acts { display: flex; gap: .4rem; }
 
-/* 打赏 */
-.pay { display: flex; gap: .9rem; align-items: center; }
-.pay .col { flex: 1; min-width: 0; }
-.pay .label { font-size: .71rem; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; margin-bottom: .3rem; }
-.addr { display: flex; align-items: center; gap: .55rem; background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 11px; padding: .5rem .7rem; }
-.addr code { font-family: var(--mono); font-size: .82rem; line-height: 1.5; word-break: break-all; flex: 1; min-width: 0; }
-.verify { margin: .45rem 0 0; font-size: .78rem; color: var(--muted); }
-.verify b { color: var(--text); font-family: var(--mono); font-weight: 600; }
-.qr { width: 84px; height: 84px; border: 1px solid var(--border); border-radius: 10px; background: #fff; padding: 5px; flex: none; }
+/* 文档与 GitHub:一格一个去处,名字下面一句说明 */
+.links { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .6rem; }
+.link { display: flex; flex-direction: column; align-items: flex-start; gap: .5rem; min-width: 0; padding: .8rem .85rem .85rem; border: 1px solid var(--divider); border-radius: 10px; background: var(--surface-2); color: inherit; font: inherit; text-align: left; text-decoration: none; cursor: pointer; transition: .12s; }
+.link:hover { border-color: var(--primary); background: var(--primary-soft); }
+.link > svg { color: var(--muted); }
+.link:hover > svg { color: var(--primary); }
+.link-t { flex: 1; min-width: 0; display: grid; line-height: 1.35; }
+.link-t b { font-size: 13px; font-weight: 600; }
+.link-t small { font-size: 12px; color: var(--muted); line-height: 1.45; }
+.link.done { align-items: center; justify-content: center; border-color: var(--ok); color: var(--ok); font-size: 13px; font-weight: 500; }
 
-/* 运行中的面板数:版本号旁边一个小标 */
-.chip.stat { padding: .12rem .55rem; font-size: .75rem; font-weight: 400; gap: .3rem; }
-.chip.stat b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
-.chip.stat i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block; }
+/* 打赏:二维码在左,地址在右 */
+.pay { display: flex; gap: 1rem; align-items: center; }
+.qr { width: 104px; height: 104px; border: 1px solid var(--border); border-radius: 10px; background: #fff; padding: 6px; flex: none; }
+.pay-t { flex: 1; min-width: 0; }
+.pay .label { margin-bottom: .35rem; font-size: 11.5px; font-weight: 600; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+.addr { display: flex; align-items: center; gap: .6rem; padding: .5rem .5rem .5rem .7rem; background: var(--surface-2); border: 1px solid var(--divider); border-radius: 10px; }
+.addr code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; word-break: break-all; }
+.verify { margin: .45rem 0 0; font-size: 12px; color: var(--muted); }
+.verify b { color: var(--text-2); font-family: var(--mono); font-weight: 600; }
 
-/* 留名 */
-.sign { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--border-soft); }
-.pledge { display: flex; gap: .45rem; }
-.fld { height: 2.3rem; min-width: 0; padding: 0 .7rem; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); font: inherit; font-size: .86rem; transition: border-color .12s, box-shadow .12s; }
-.fld:hover { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
-.fld:focus, .fld:focus-within { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+/* 功德箱那张卡:左边留名,右边名单(还没有人上榜时只有留名) */
+.wall { display: flex; flex-wrap: wrap; gap: 1.1rem 2.25rem; align-items: flex-start; margin-top: .55rem; }
+.sign { flex: 1 1 19rem; min-width: 0; }
+#board { flex: 1.5 1 22rem; min-width: 0; }
+.pledge { display: flex; gap: .5rem; }
+.fld { height: 34px; min-width: 0; padding: 0 .7rem; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; transition: border-color .12s, box-shadow .12s; }
+.fld:hover { border-color: var(--faint); }
+.fld:focus, .fld:focus-within { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-ring); }
 input.fld { flex: 1; }
-.amt { flex: 0 0 9.5rem; display: flex; align-items: center; gap: .4rem; cursor: text; }
+.amt { flex: 0 0 8.5rem; display: flex; align-items: center; gap: .4rem; cursor: text; }
 .amt input { flex: 1; width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; -moz-appearance: textfield; appearance: textfield; }
 .amt input:focus { outline: none; }
 .amt input::-webkit-outer-spin-button, .amt input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.amt span { flex: none; color: var(--muted); font-size: .76rem; }
+.amt span { flex: none; color: var(--muted); font-size: 12px; }
 /* 手机上点输入框页面会被放大:iOS 对字号不到 16px 的输入控件一聚焦就放大整页 */
 @media (max-width: 700px), (pointer: coarse) and (max-width: 1024px) { input.fld, .fld input, .amt input { font-size: 16px; } }
-.fld::placeholder, .amt input::placeholder { color: var(--muted); opacity: .85; }
-.pledge .btn { flex: none; height: 2.3rem; padding: 0 1.05rem; }
-.btn:disabled { opacity: .6; cursor: default; }
-.phint { margin: .4rem 0 0; font-size: .78rem; color: var(--muted); }
+.fld::placeholder, .amt input::placeholder { color: var(--faint); }
+.pledge .btn { flex: none; height: 34px; padding: 0 1.05rem; }
+.phint { margin: .5rem 0 0; font-size: 12px; color: var(--muted); }
 .phint.err { color: var(--err); }
-.pwait { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; min-height: 2.3rem; font-size: .88rem; }
-.pwait b { font-family: var(--mono); font-size: 1.08rem; font-weight: 600; color: var(--primary); }
+.pwait { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; min-height: 34px; font-size: 13.5px; }
+.pwait b { font-family: var(--mono); font-size: 1.1rem; font-weight: 600; color: var(--primary-text); }
 .pwait .grow { flex: 1; }
-.pwait .left { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; }
-.pwait .btn { padding: .22rem .6rem; font-size: .78rem; }
+.pwait .left { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.pwait .btn { height: 28px; padding: 0 .6rem; font-size: 12px; }
 .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
-.pdone { margin: 0; font-size: .88rem; color: var(--ok); }
+.pdone { margin: 0; font-size: 13.5px; color: var(--ok); }
 
-/* 功德箱 */
-.sum { margin-left: auto; color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.rank { list-style: none; margin: .25rem 0 0; padding: 0; columns: 2; column-gap: 1.8rem; font-size: .88rem; }
-.rank li { display: flex; align-items: center; gap: .5rem; padding: .2rem 0; break-inside: avoid; }
-.rank .no { flex: none; width: 1.35rem; height: 1.35rem; display: grid; place-items: center; border-radius: 50%; color: var(--muted); font-size: .72rem; font-variant-numeric: tabular-nums; }
-.rank li:nth-child(1) .no { background: var(--gold-bg); color: var(--gold); font-weight: 600; }
-.rank li:nth-child(2) .no { background: var(--silver-bg); color: var(--silver); font-weight: 600; }
-.rank li:nth-child(3) .no { background: var(--bronze-bg); color: var(--bronze); font-weight: 600; }
+/* 功德箱:名次、名字、金额;前三名的名次带金银铜底色 */
+.sum { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rank { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 2.25rem; font-size: 13.5px; }
+.rank li { display: flex; align-items: center; gap: .6rem; padding: .3rem .1rem; break-inside: avoid; }
+.rank .no { flex: none; width: 1.5rem; height: 1.5rem; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.rank li:nth-child(1) .no { background: var(--gold-bg); color: var(--gold); font-weight: 700; }
+.rank li:nth-child(2) .no { background: var(--silver-bg); color: var(--silver); font-weight: 700; }
+.rank li:nth-child(3) .no { background: var(--bronze-bg); color: var(--bronze); font-weight: 700; }
 .rank .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rank .amt { flex: none; display: block; color: var(--muted); font-size: .84rem; font-variant-numeric: tabular-nums; cursor: default; }
-.more { display: block; margin: .3rem auto 0; padding: .15rem .5rem; border: 0; border-radius: 7px; background: none; color: var(--primary); font: inherit; font-size: .8rem; cursor: pointer; }
+.rank li:nth-child(-n+3) .nm { font-weight: 600; }
+.rank .amt { flex: none; display: block; color: var(--text-2); font-size: 13px; font-variant-numeric: tabular-nums; cursor: default; }
+.more { display: block; margin: .5rem 0 0 auto; height: 28px; padding: 0 .7rem; border: 0; border-radius: var(--r-sm); background: none; color: var(--primary-text); font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer; }
 .more:hover { background: var(--primary-soft); }
 
-.foot { text-align: center; color: var(--muted); font-size: .8rem; margin-top: 1.1rem; }
-.foot a { text-decoration: none; }
-.foot a:hover { text-decoration: underline; }
-
+@media (max-width: 860px) {
+  .cols { grid-template-columns: minmax(0, 1fr); }
+  .wrap { max-width: 38rem; }
+  .links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .link { flex-direction: row; align-items: center; gap: .65rem; padding: .6rem .7rem; }
+}
 @media (max-width: 560px) {
-  .wrap { padding: 1rem .95rem 2.2rem; }
-  .card { padding: 1.05rem 1rem; }
-  .tiles { grid-template-columns: 1fr; }
-  .pay { flex-direction: column; align-items: center; }
-  .pay .col { width: 100%; }
+  .wrap { padding: .8rem .95rem 2.2rem; }
+  .top { margin-bottom: 1.1rem; }
+  .hero { flex-wrap: wrap; gap: .8rem; margin-bottom: 1.1rem; }
+  .hero > img { width: 40px; height: 40px; }
+  .hero h1 { font-size: 1.35rem; }
+  .hero-meta { flex-basis: 100%; justify-content: flex-start; }
+  .card { padding: 1rem; }
+  .rank { columns: 1; }
+  .pay { flex-direction: column; align-items: stretch; }
+  .qr { align-self: center; width: 132px; height: 132px; }
   .pledge { flex-wrap: wrap; }
   input.fld { flex: 1 1 100%; }
   .amt { flex: 1 1 0; }
   .pwait .grow { flex-basis: 100%; height: 0; }
-  .rank { columns: 1; }
-  .contact { padding: .4rem .5rem .4rem .6rem; }
 }
 </style>
 </head>
@@ -177,100 +210,110 @@ input.fld { flex: 1; }
 
   <header class="hero">
     <img src="logo.svg" alt="">
-    <div>
-      <h1>{{if eq .Lang "zh"}}建议与支持{{else}}Feedback &amp; Support{{end}}
-        <span class="chip"><code>v{{.Version}}</code><button data-copy="m-ui v{{.Version}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button></span>
-        {{if .Online}}<span class="chip stat" id="devs" hidden title="{{if eq .Lang "zh"}}过去 24 小时运行过 m-ui 面板的设备数{{else}}Devices that ran an m-ui panel in the past 24 hours{{end}}"><i></i><span>{{if eq .Lang "zh"}}<b></b> 台设备在运行{{else}}<b></b> devices running{{end}}</span></span>{{end}}</h1>
+    <div class="hero-t">
+      <h1>{{if eq .Lang "zh"}}建议与支持{{else}}Feedback &amp; Support{{end}}</h1>
       <p>{{if eq .Lang "zh"}}一个人维护的开源项目,你的反馈决定它下一步做什么。{{else}}An open-source project maintained by one person — your feedback decides what comes next.{{end}}</p>
+    </div>
+    <div class="hero-meta">
+      <span class="chip"><code>v{{.Version}}</code><button data-copy="m-ui v{{.Version}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button></span>
+      {{if .Online}}<span class="chip stat" id="devs" hidden title="{{if eq .Lang "zh"}}过去 24 小时运行过 m-ui 面板的设备数{{else}}Devices that ran an m-ui panel in the past 24 hours{{end}}"><i></i><span>{{if eq .Lang "zh"}}<b></b> 台设备在运行{{else}}<b></b> devices running{{end}}</span></span>{{end}}
     </div>
   </header>
 
-  <section class="card">
-    <header>
-      <span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H9l-5 4Z"/></svg></span>
-      <h2>{{if eq .Lang "zh"}}提建议 · 报问题{{else}}Suggestions &amp; bug reports{{end}}</h2>
-    </header>
-    <p class="lede">{{if eq .Lang "zh"}}想要的功能、遇到的问题(附上版本号最好),直接告诉我。也可以找我<b>采购 GCP / Azure / AWS 服务器</b>。{{else}}Feature ideas or anything broken (please include the version) — just tell me. I can also <b>source GCP / Azure / AWS servers</b> for you.{{end}}</p>
-    <div class="contacts">
-      <div class="contact">
-        <div class="who"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.5 4.3 2.9 11.2c-.9.3-.9 1.6 0 1.9l4.6 1.5 1.8 5.3c.3.8 1.3 1 1.9.4l2.6-2.5 4.7 3.5c.7.5 1.7.1 1.9-.7l3-14.9c.2-.9-.7-1.6-1.5-1.3Z"/><path d="m8 14.4 10.5-7.7L10 16"/></svg><span class="lbl">Telegram:</span><code>@{{.Telegram}}</code></div>
-        <div class="actions">
-          <button class="btn" data-copy="@{{.Telegram}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
-          <a class="btn primary" href="{{.TelegramURL}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}打开{{else}}Open{{end}} <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg></a>
+  <div class="cols">
+      <section class="card">
+        <header>
+          <span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H9l-5 4Z"/></svg></span>
+          <h2>{{if eq .Lang "zh"}}提建议 · 报问题{{else}}Suggestions &amp; bug reports{{end}}</h2>
+        </header>
+        <p class="lede">{{if eq .Lang "zh"}}想要的功能、遇到的问题(附上版本号最好),直接告诉我。也可以找我<b>采购 GCP / Azure / AWS 服务器</b>。{{else}}Feature ideas or anything broken (please include the version) — just tell me. I can also <b>source GCP / Azure / AWS servers</b> for you.{{end}}</p>
+        <div class="rows">
+          <div class="row">
+            <span class="row-ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.5 4.3 2.9 11.2c-.9.3-.9 1.6 0 1.9l4.6 1.5 1.8 5.3c.3.8 1.3 1 1.9.4l2.6-2.5 4.7 3.5c.7.5 1.7.1 1.9-.7l3-14.9c.2-.9-.7-1.6-1.5-1.3Z"/><path d="m8 14.4 10.5-7.7L10 16"/></svg></span>
+            <div class="row-t"><b>Telegram</b><code>@{{.Telegram}}</code></div>
+            <div class="acts">
+              <button class="btn" data-copy="@{{.Telegram}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
+              <a class="btn primary" href="{{.TelegramURL}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}打开{{else}}Open{{end}} <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg></a>
+            </div>
+          </div>
+          <div class="row">
+            <span class="row-ic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14.2c2.5.3 4 1.9 4.5 4.8"/></svg></span>
+            <div class="row-t"><b>{{if eq .Lang "zh"}}交流群{{else}}Group chat{{end}}</b><code>t.me/godusevpncn</code></div>
+            <div class="acts">
+              <button class="btn" data-copy="{{.TelegramGroupURL}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
+              <a class="btn primary" href="{{.TelegramGroupURL}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}打开{{else}}Open{{end}} <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg></a>
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="contact">
-        <div class="who"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.2 3-5 6-5s5.4 1.8 6 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14.2c2.5.3 4 1.9 4.5 4.8"/></svg><span class="lbl">{{if eq .Lang "zh"}}群聊:{{else}}Group:{{end}}</span><code>t.me/godusevpncn</code></div>
-        <div class="actions">
-          <button class="btn" data-copy="{{.TelegramGroupURL}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
-          <a class="btn primary" href="{{.TelegramGroupURL}}" target="_blank" rel="noopener">{{if eq .Lang "zh"}}打开{{else}}Open{{end}} <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg></a>
-        </div>
-      </div>
-    </div>
-  </section>
+      </section>
 
-  <section class="card">
-    <header>
-      <span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h6v16H6a2 2 0 0 0-2 2Z"/><path d="M20 6a2 2 0 0 0-2-2h-6v16h6a2 2 0 0 1 2 2Z"/></svg></span>
-      <h2>{{if eq .Lang "zh"}}文档与 GitHub{{else}}Docs &amp; GitHub{{end}}</h2>
-    </header>
-    <p class="lede">{{if eq .Lang "zh"}}怎么用看文档,确定是 Bug 提 Issue,拿不准的去 Discussions。{{else}}How-to in the docs, confirmed bugs in Issues, anything unsure in Discussions.{{end}}</p>
-    <div class="tiles">
-      <a class="tile" href="{{.Site}}" target="_blank" rel="noopener"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h11v18H6a2 2 0 0 0-2 2Z"/><path d="M8 8h6"/><path d="M8 12h4"/></svg>{{if eq .Lang "zh"}}文档{{else}}Docs{{end}}</a>
-      <a class="tile" href="{{.Repo}}/issues/new/choose" target="_blank" rel="noopener"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>{{if eq .Lang "zh"}}报告 Bug{{else}}Report a bug{{end}}</a>
-      <a class="tile" href="{{.Repo}}/discussions" target="_blank" rel="noopener"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10h8"/><path d="M8 14h5"/><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4Z"/></svg>{{if eq .Lang "zh"}}提问 / 讨论{{else}}Discussions{{end}}</a>
-      <a class="tile" href="{{.Repo}}" target="_blank" rel="noopener"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3.5 2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8-4.2-4.1 5.9-.9Z"/></svg>{{if eq .Lang "zh"}}点个 Star{{else}}Star{{end}}</a>
-      <button class="tile" data-share="{{.Site}}" data-share-title="m-ui · sing-box panel by Maoyangui"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></svg>{{if eq .Lang "zh"}}分享{{else}}Share{{end}}</button>
-    </div>
-  </section>
-
-  <section class="card">
-    <header>
-      <span class="ic warm"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-9.2A3.8 3.8 0 0 1 12 8a3.8 3.8 0 0 1 7 2.8c0 4.8-7 9.2-7 9.2Z"/></svg></span>
-      <h2>{{if eq .Lang "zh"}}支持这个项目{{else}}Support the project{{end}}</h2>
-    </header>
-    <p class="lede">{{if eq .Lang "zh"}}免费开源,没有付费功能。帮你省了时间的话,请我喝杯咖啡。{{else}}Free and open source, no paid tier. If it saved you time, buy me a coffee.{{end}}</p>
-    <div class="pay">
-      <div class="col">
-        <div class="label">TRON · TRX / USDT (TRC20)</div>
-        <div class="addr">
-          <code>{{.Tron}}</code>
-          <button class="btn" data-copy="{{.Tron}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
+      <section class="card">
+        <header>
+          <span class="ic warm"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20s-7-4.4-7-9.2A3.8 3.8 0 0 1 12 8a3.8 3.8 0 0 1 7 2.8c0 4.8-7 9.2-7 9.2Z"/></svg></span>
+          <h2>{{if eq .Lang "zh"}}支持这个项目{{else}}Support the project{{end}}</h2>
+        </header>
+        <p class="lede">{{if eq .Lang "zh"}}免费开源,没有付费功能。帮你省了时间的话,请我喝杯咖啡。{{else}}Free and open source, no paid tier. If it saved you time, buy me a coffee.{{end}}</p>
+        <div class="pay">
+          <img class="qr" src="support/qr" alt="{{if eq .Lang "zh"}}打赏地址二维码{{else}}Donation address QR code{{end}}">
+          <div class="pay-t">
+            <div class="label">TRON · TRX / USDT (TRC20)</div>
+            <div class="addr">
+              <code>{{.Tron}}</code>
+              <button class="btn" data-copy="{{.Tron}}">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
+            </div>
+            <p class="verify">{{if eq .Lang "zh"}}转账前核对首尾:<b>{{.TronHead}} … {{.TronTail}}</b>{{else}}Check the ends before sending: <b>{{.TronHead}} … {{.TronTail}}</b>{{end}}</p>
+          </div>
         </div>
-        <p class="verify">{{if eq .Lang "zh"}}转账前核对首尾:<b>{{.TronHead}} … {{.TronTail}}</b>{{else}}Check the ends before sending: <b>{{.TronHead}} … {{.TronTail}}</b>{{end}}</p>
-      </div>
-      <img class="qr" src="support/qr" alt="{{if eq .Lang "zh"}}打赏地址二维码{{else}}Donation address QR code{{end}}">
-    </div>
-    {{if .Online}}<div class="sign">
-      <form class="pledge" id="pledge" autocomplete="off" novalidate>
-        <input class="fld" id="p-name" maxlength="24" placeholder="{{if eq .Lang "zh"}}你的名字{{else}}Your name{{end}}" aria-label="{{if eq .Lang "zh"}}名字{{else}}Name{{end}}">
-        <label class="fld amt"><input id="p-amt" type="number" inputmode="decimal" min="1" step="any" placeholder="{{if eq .Lang "zh"}}金额{{else}}Amount{{end}}" aria-label="{{if eq .Lang "zh"}}金额{{else}}Amount{{end}}"><span>USDT</span></label>
-        <button class="btn primary" type="submit">{{if eq .Lang "zh"}}留名{{else}}Add my name{{end}}</button>
-      </form>
-      <p class="phint" id="p-hint">{{if eq .Lang "zh"}}留名后按提示金额转账,60 分钟内到账即上功德箱。{{else}}After signing, send the amount shown. If it arrives within 60 minutes, you're on the list.{{end}}</p>
-      <div id="p-wait" hidden>
-        <div class="pwait">
-          <span>{{if eq .Lang "zh"}}请转{{else}}Send{{end}}</span> <b id="p-pay"></b> <span>USDT</span>
-          <button class="btn" type="button" id="p-copy" data-copy="">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
-          <span class="grow"></span>
-          <span class="left"><i class="pulse"></i>{{if eq .Lang "zh"}}等待到账{{else}}Waiting{{end}} <span id="p-left"></span></span>
-          <button class="btn ghost" type="button" id="p-cancel">{{if eq .Lang "zh"}}取消{{else}}Cancel{{end}}</button>
-        </div>
-        <p class="phint">{{if eq .Lang "zh"}}零头用来对上你的名字,到账金额要完全一致,手续费另算。{{else}}The extra digits identify your transfer. The amount received must match exactly, with fees on top.{{end}}</p>
-      </div>
-      <p class="pdone" id="p-done" hidden></p>
-    </div>{{end}}
-  </section>
+      </section>
 
-  {{if .Online}}<section class="card" id="board" hidden>
-    <header>
-      <span class="ic warm"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.5 12.9 17 22l-5-3-5 3 1.5-9.1"/></svg></span>
-      <h2>{{if eq .Lang "zh"}}功德箱{{else}}Supporters{{end}}</h2>
-      <span class="sum" id="board-sum"></span>
-    </header>
-    <ol class="rank" id="board-list"></ol>
-    <button class="more" id="board-more" type="button" hidden></button>
-  </section>{{end}}
+      <section class="card full">
+        <header>
+          <span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a2 2 0 0 1 2-2h6v16H6a2 2 0 0 0-2 2Z"/><path d="M20 6a2 2 0 0 0-2-2h-6v16h6a2 2 0 0 1 2 2Z"/></svg></span>
+          <h2>{{if eq .Lang "zh"}}文档与 GitHub{{else}}Docs &amp; GitHub{{end}}</h2>
+        </header>
+        <p class="lede">{{if eq .Lang "zh"}}怎么用看文档,确定是 Bug 提 Issue,拿不准的去 Discussions。{{else}}How-to in the docs, confirmed bugs in Issues, anything unsure in Discussions.{{end}}</p>
+        <div class="links">
+          <a class="link" href="{{.Site}}" target="_blank" rel="noopener"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h11v18H6a2 2 0 0 0-2 2Z"/><path d="M8 8h6"/><path d="M8 12h4"/></svg><span class="link-t"><b>{{if eq .Lang "zh"}}文档{{else}}Docs{{end}}</b><small>{{if eq .Lang "zh"}}安装、每个功能怎么用{{else}}Install and how each feature works{{end}}</small></span></a>
+          <a class="link" href="{{.Repo}}/issues/new/choose" target="_blank" rel="noopener"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg><span class="link-t"><b>{{if eq .Lang "zh"}}报告 Bug{{else}}Report a bug{{end}}</b><small>{{if eq .Lang "zh"}}确定是程序的问题{{else}}When you are sure it is a bug{{end}}</small></span></a>
+          <a class="link" href="{{.Repo}}/discussions" target="_blank" rel="noopener"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10h8"/><path d="M8 14h5"/><path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4Z"/></svg><span class="link-t"><b>{{if eq .Lang "zh"}}提问 / 讨论{{else}}Discussions{{end}}</b><small>{{if eq .Lang "zh"}}拿不准的、想聊想法的{{else}}Questions and ideas{{end}}</small></span></a>
+          <a class="link" href="{{.Repo}}" target="_blank" rel="noopener"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3.5 2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8-4.2-4.1 5.9-.9Z"/></svg><span class="link-t"><b>{{if eq .Lang "zh"}}点个 Star{{else}}Star{{end}}</b><small>{{if eq .Lang "zh"}}让更多人看到它{{else}}Help others find it{{end}}</small></span></a>
+          <button class="link" data-share="{{.Site}}" data-share-title="m-ui · sing-box panel by Maoyangui"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4"/><path d="m15.4 6.5-6.8 4"/></svg><span class="link-t"><b>{{if eq .Lang "zh"}}分享{{else}}Share{{end}}</b><small>{{if eq .Lang "zh"}}把 m-ui 介绍给朋友{{else}}Tell a friend about m-ui{{end}}</small></span></button>
+        </div>
+      </section>
+
+      {{if .Online}}<section class="card full">
+        <header>
+          <span class="ic warm"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.5 12.9 17 22l-5-3-5 3 1.5-9.1"/></svg></span>
+          <h2>{{if eq .Lang "zh"}}功德箱{{else}}Supporters{{end}}</h2>
+          <span class="sum" id="board-sum"></span>
+        </header>
+        <div class="wall">
+          <div class="sign">
+          <form class="pledge" id="pledge" autocomplete="off" novalidate>
+            <input class="fld" id="p-name" maxlength="24" placeholder="{{if eq .Lang "zh"}}你的名字{{else}}Your name{{end}}" aria-label="{{if eq .Lang "zh"}}名字{{else}}Name{{end}}">
+            <label class="fld amt"><input id="p-amt" type="number" inputmode="decimal" min="1" step="any" placeholder="{{if eq .Lang "zh"}}金额{{else}}Amount{{end}}" aria-label="{{if eq .Lang "zh"}}金额{{else}}Amount{{end}}"><span>USDT</span></label>
+            <button class="btn primary" type="submit">{{if eq .Lang "zh"}}留名{{else}}Add my name{{end}}</button>
+          </form>
+          <p class="phint" id="p-hint">{{if eq .Lang "zh"}}留名后按提示金额转账,60 分钟内到账即上功德箱。{{else}}After signing, send the amount shown. If it arrives within 60 minutes, you're on the list.{{end}}</p>
+          <div id="p-wait" hidden>
+            <div class="pwait">
+              <span>{{if eq .Lang "zh"}}请转{{else}}Send{{end}}</span> <b id="p-pay"></b> <span>USDT</span>
+              <button class="btn" type="button" id="p-copy" data-copy="">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
+              <span class="grow"></span>
+              <span class="left"><i class="pulse"></i>{{if eq .Lang "zh"}}等待到账{{else}}Waiting{{end}} <span id="p-left"></span></span>
+              <button class="btn ghost" type="button" id="p-cancel">{{if eq .Lang "zh"}}取消{{else}}Cancel{{end}}</button>
+            </div>
+            <p class="phint">{{if eq .Lang "zh"}}零头用来对上你的名字,到账金额要完全一致,手续费另算。{{else}}The extra digits identify your transfer. The amount received must match exactly, with fees on top.{{end}}</p>
+          </div>
+          <p class="pdone" id="p-done" hidden></p>
+        </div>
+          <div id="board" hidden>
+            <ol class="rank" id="board-list"></ol>
+            <button class="more" id="board-more" type="button" hidden></button>
+          </div>
+        </div>
+      </section>{{end}}
+  </div>
 
 </div>
 <script>
