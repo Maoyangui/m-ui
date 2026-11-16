@@ -136,8 +136,42 @@ func (s *Server) validateNode(p *nodePayload) error {
 	return nil
 }
 
+// handleNodeGroup POST nodes/group {from, to}:把分组 from 里的服务器全部改到分组 to(改组名;to 为空 = 解散这个组)。
+// 分组只是面板上的归类,不动修订号、不推送。
+func (s *Server) handleNodeGroup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	var p struct{ From, To string }
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+		badRequest(w, err)
+		return
+	}
+	p.From, p.To = strings.TrimSpace(p.From), strings.TrimSpace(p.To)
+	if p.From == "" {
+		badRequest(w, errors.New("没说要改哪个分组"))
+		return
+	}
+	if utf8.RuneCountInString(p.To) > 24 {
+		badRequest(w, errors.New("分组名太长(最多 24 个字)"))
+		return
+	}
+	res := s.db.Model(&model.Node{}).Where("grp = ?", p.From).Update("grp", p.To)
+	if res.Error != nil {
+		badRequest(w, res.Error)
+		return
+	}
+	s.audit(r, "node", "group-rename", map[string]string{"from": p.From, "to": p.To})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": "1", "changed": res.RowsAffected})
+}
+
 func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 	rest := strings.Split(strings.TrimPrefix(r.URL.Path, innerBase+"api/nodes/"), "/")
+	if len(rest) == 1 && rest[0] == "group" {
+		s.handleNodeGroup(w, r)
+		return
+	}
 	id64, err := strconv.ParseUint(rest[0], 10, 64)
 	if err != nil {
 		badRequest(w, errors.New("id 无效"))

@@ -809,6 +809,7 @@ const EN = /*BEGIN*/{
 "端口 %d 在服务器「%s」上已被别的程序占用%s:换一个端口,或先在那台上停掉占用它的程序": "Port %d on server \"%s\" is already used by another program%s: pick another port, or stop that program on the server first",
 
 "分组名太长(最多 24 个字)": "Group name is too long (24 characters at most)",
+"没说要改哪个分组": "No group given to rename",
 "端口 %d 是服务器「%s」的%s端口,换一个": "Port %d is the %[3]s port of server \"%[2]s\"; pick another",
 "这条线路自己在「%s」上就用着端口 %d,换一个": "This line itself already uses port %[2]d on \"%[1]s\"; pick another",
 "端口 %d 在「%s」上已被线路「%s」用着,换一个": "Port %d on \"%s\" is used by line \"%s\"; pick another",

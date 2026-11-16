@@ -475,7 +475,7 @@
           "status": null,
           "publicIp6": "",
           "addrFamily": "",
-          "group": "亚洲"
+          "group": "自营直连"
         },
         {
           "id": 2,
@@ -516,7 +516,7 @@
           },
           "publicIp6": "2001:db8:5::10",
           "addrFamily": "",
-          "group": "亚洲"
+          "group": "自营直连"
         },
         {
           "id": 3,
@@ -548,7 +548,7 @@
           },
           "publicIp6": "2001:db8:7::30",
           "addrFamily": "v6",
-          "group": "欧洲"
+          "group": "合作机房"
         }
       ],
       "revision": "7790aa6896c6cf2b",

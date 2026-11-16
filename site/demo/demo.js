@@ -536,6 +536,12 @@ function route(method, path, query, body) {
     case 'nodes': {
       const list = S.nodes.nodes;
       if (method === 'POST' && !seg[1]) { const n = { id: nextId(list), enabled: true, isLocal: false, status: { ok: true, version: 'demo', synced: true, coreRunning: true, uptime: 60, onlineUsers: 0, lastPush: now(), lastSeen: now() }, ...body }; delete n.token; n.hasToken = true; list.push(n); return clone(n); }
+      if (method === 'POST' && seg[1] === 'group') { // 改组名:整组一起改
+        const from = String((body || {}).from || '').trim(), to = String((body || {}).to || '').trim();
+        let changed = 0;
+        for (const x of list) if ((x.group || '').trim() === from) { x.group = to; changed++; }
+        return ok({ changed });
+      }
       const n = find(list, id);
       if (seg[2] === 'test') return { ok: true, version: 'demo', hostname: 'demo', coreRunning: true };
       if (seg[2] === 'push') return ok();

@@ -307,7 +307,9 @@ function renderRows() {
   if (groupF === null && hasGroups()) {
     html = groupsOf().map(g => {
       const list = rows.filter(n => (n.group || '').trim() === g.name);
-      return list.length ? `<tr class="grp-row"><td colspan="8">${esc(g.name || t('node.ungrouped'))} <span class="muted">${list.length}</span></td></tr>` + list.map(row).join('') : '';
+      // 组名后面一支笔:改组名(整组一起改;名字是自己起的,不是预设的地区)。未分组没有名字可改
+      const rename = g.name && !isNodeView() ? ` <button class="btn xs ghost grp-rename" data-act="node.groupRename" data-id="${esc(g.name)}" title="${esc(t('node.groupRename'))}" aria-label="${esc(t('node.groupRename'))}"><i class="i i-pencil"></i></button>` : '';
+      return list.length ? `<tr class="grp-row"><td colspan="8">${esc(g.name || t('node.ungrouped'))} <span class="muted">${list.length}</span>${rename}</td></tr>` + list.map(row).join('') : '';
     }).join('');
   } else html = rows.map(row).join('');
   // 每 5 秒刷新一次:内容没变就不动 DOM(整表重画会让鼠标下的按钮、提示闪一下)
@@ -360,6 +362,16 @@ const isPlain = url => /^http:\/\//i.test(String(url || '').trim());
 
 registerActions({
   'node.group': id => { groupF = id === '*' ? null : id; renderRows(); },
+  'node.groupRename': from => {
+    openModal(t('node.groupRename'), `<div class="form-grid">${field(t('node.groupNew'), `<input id="f-gname" maxlength="24" value="${esc(from)}">`, t('node.groupRenameHelp', { n: data.nodes.filter(n => (n.group || '').trim() === from).length }))}</div>`, async () => {
+      const to = fv('f-gname').trim();
+      if (to !== from) await post('nodes/group', { from, to });
+      if (groupF === from) groupF = to || null;
+      await load('nodes');
+      toast(t('set.saved'), 'ok');
+      render(document.getElementById('page'));
+    });
+  },
   'node.add': () => editNode(null),
   'node.edit': id => editNode(Number(id)),
   'node.test': async (id, btn) => {

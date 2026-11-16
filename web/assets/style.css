@@ -697,6 +697,9 @@ tr:hover > td .ext-rename, .ext-rename:focus-visible { opacity: 1; }
 .grid tbody tr.grp-row > td { padding: .4rem .75rem; background: var(--surface-2); color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .02em; border-bottom: 1px solid var(--divider); }
 .grid tbody tr.grp-row:hover { background: transparent; }
 .grid tbody tr.grp-row .muted { font-weight: 400; margin-left: .25rem; }
+.grp-rename { margin-left: .2rem; opacity: 0; transition: opacity .12s; }
+tr.grp-row:hover .grp-rename, .grp-rename:focus-visible { opacity: 1; }
+@media (hover: none) { .grp-rename { opacity: 1; } }
 /* 分段按钮里的计数 */
 .seg-n { margin-left: .15rem; font-weight: 400; color: var(--faint); font-variant-numeric: tabular-nums; }
 .seg button.active .seg-n { color: var(--muted); }
@@ -761,9 +764,13 @@ button.reach-cell:focus-visible { outline: 2px solid var(--primary); outline-off
 @media (max-width: 700px) { .reach-sum { display: none; } }
 
 /* 手机:字和控件留大一点,手指好点 */
+/* 手机上点输入框页面会被放大:iOS 对字号不到 16px 的输入控件一聚焦就放大整页。小号输入框(.sm、表格里的、各处自己定了字号的)
+   也都提到 16px,所以这里用 !important 压过它们;按触屏 + 窄屏判断,平板横屏和桌面不受影响 */
+@media (max-width: 700px), (pointer: coarse) and (max-width: 1024px) {
+  input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]), select, textarea { font-size: 16px !important; }
+}
 @media (max-width: 700px) {
   :root { --ctl-h: 40px; --ctl-h-sm: 32px; }
-  input, select, textarea { font-size: 16px; }
   input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
   #nav a { height: 42px; }
 }

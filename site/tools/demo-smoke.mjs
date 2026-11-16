@@ -216,7 +216,8 @@ if (await fileInput.count()) {
 
 await page.goto(`${DEMO}#/nodes`); await page.waitForTimeout(1000);
 if (await page.locator('#page .rc', { hasText: 'v6' }).count()) pass('服务器页显示 IPv6 入站检测'); else fail('服务器页没有 IPv6 入站检测');
-await page.locator('[data-act="reach.detail"]').last().evaluate(b => b.click()).catch(() => {});
+// 按服务器名找那一行(服务器按分组分段后,行的先后不固定)
+await page.locator('#nodes-body tr', { hasText: 'Frankfurt' }).locator('[data-act="reach.detail"]').first().evaluate(b => b.click()).catch(() => {});
 await page.waitForTimeout(700);
 if (/2001:db8:7::30/.test(await page.locator('#drawer-body').innerText().catch(() => ''))) pass('大陆连通详情里有 IPv6 入站一节'); else fail('大陆连通详情没有 IPv6 入站');
 await page.keyboard.press('Escape');

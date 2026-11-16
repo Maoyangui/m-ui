@@ -117,6 +117,8 @@ input.fld { flex: 1; }
 .amt input:focus { outline: none; }
 .amt input::-webkit-outer-spin-button, .amt input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .amt span { flex: none; color: var(--muted); font-size: .76rem; }
+/* 手机上点输入框页面会被放大:iOS 对字号不到 16px 的输入控件一聚焦就放大整页 */
+@media (max-width: 700px), (pointer: coarse) and (max-width: 1024px) { input.fld, .fld input, .amt input { font-size: 16px; } }
 .fld::placeholder, .amt input::placeholder { color: var(--muted); opacity: .85; }
 .pledge .btn { flex: none; height: 2.3rem; padding: 0 1.05rem; }
 .btn:disabled { opacity: .6; cursor: default; }
