@@ -181,6 +181,7 @@ func (s *Server) handleExtItem(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		s.db.Delete(&model.ExtNode{}, id)
 		s.db.Where("ext_id = ?", id).Delete(&model.UserExt{})
+		s.db.Where("ext_id = ?", id).Delete(&model.UpstreamSource{}) // 从它加来的上游还在,只是不再有订阅可跟
 		s.audit(r, "ext", "delete", e.Name)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 	default:

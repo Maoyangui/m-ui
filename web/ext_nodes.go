@@ -802,9 +802,14 @@ func (s *Server) addUpstreamsFromExt(r *http.Request, e model.ExtNode, it ext.It
 			fail(err.Error())
 			continue
 		}
+		node := it.Nodes[idx]
 		create := func(tx *gorm.DB) error {
 			up.Id = 0 // 可能要写第二遍:每遍都从同样的输入写起
-			return tx.Create(&up).Error
+			if err := tx.Create(&up).Error; err != nil {
+				return err
+			}
+			// 记下是从哪个节点加来的:以后全部测不通时去订阅里找它的新配置
+			return tx.Create(&model.UpstreamSource{UpstreamId: up.Id, ExtId: e.Id, Key: node.Key, Name: node.Name}).Error
 		}
 		if s.run == nil {
 			err = s.db.Transaction(create)

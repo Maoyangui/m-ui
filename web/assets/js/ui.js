@@ -168,7 +168,8 @@ export function openDrawer(title, html, opts = {}) {
   closeMenus();
   const d = document.getElementById('drawer');
   d.classList.toggle('over', !!opts.over); // 从弹窗里打开的:盖在弹窗上面
-  d.classList.toggle('wide', !!opts.wide); // 内容宽的(用户详情的流量图、各服务器延迟表)用宽抽屉
+  d.classList.toggle('wide', !!opts.wide); // 详情(用户 / 代理 / 线路:有流量图、几格概要)比默认的宽一点
+  d.classList.toggle('xl', opts.size === 'xl'); // 接口文档这种左右都是长内容的才用最宽的
   document.getElementById('drawer-title').innerHTML = title;
   document.getElementById('drawer-body').innerHTML = html;
   d.hidden = false;

@@ -79,7 +79,7 @@ const zh = {
   'logs.coreMemHelp': '运行日志只存在内存里(最多 1 万条,重启即清),所以没有按天清理这一项。',
   'node.pushedAt': '配置最后推送', 'node.neverPushed': '本次启动后未推送过(配置没有变化)',
   'up.checkedAt': '检查于',
-  'up.unused': '未使用', 'up.unusedHint': '没有启用的线路用它,不做巡检', 'up.pending': '待测', 'up.stale': '数据过期', 'up.detail': '展开看各台服务器测出的延迟',
+  'up.unused': '未使用', 'up.unusedHint': '没有启用的线路用它,不做巡检', 'up.pending': '待测', 'up.stale': '数据过期', 'up.detail': '展开看各台服务器测出的结果',
   'up.groupNow': '现在走 {name}', 'up.addGroup': '新增上游组', 'up.group': '上游组', 'up.groupMembers': '成员', 'up.groupHelp': '每 30 秒测一次,用延迟最低的那条能通的,挂了自动换。至少选两条。', 'up.groupNeedTwo': '上游组至少要选两条上游', 'up.created': '上游已创建', 'up.updated': '上游已更新', 'up.deleted': '上游已删除',
   'up.parsed': '已解析为 {type},请核对后保存', 'up.testDone': '测试完成:全部正常',
   'up.testDoneBad': '测试完成:{n} 个上游故障', 'up.inUse': '该上游仍被 {n} 条线路使用,无法删除',
@@ -1145,6 +1145,12 @@ const zh = {
   'audit.v.apply': '开始限速', 'audit.v.lift': '解除限速', 'audit.v.depleted': '额度用尽', 'audit.v.restored': '额度恢复', 'audit.v.expired': '到期', 'audit.v.disable.quota': '超量停用', 'audit.v.disable.expired': '到期停用',
   'audit.v.cf-api-override': '改用备用 DNS 接口地址',
   'user.menu.bulk': '一次生成一批账号(名字加序号),生成完给出订阅地址清单', 'user.menu.import': '把旧面板导出的用户搬过来,订阅地址可以保持不变', 'user.menu.export': '现在筛选出来的用户,连同订阅地址存成表格',
+  'up.follow': '来自外部订阅「{ext}」的 {node}', 'up.followHelp': '这条上游通着的时候不会被动。只有它在所有用它的服务器上都连续测不通,面板才去订阅里找这个节点的新配置(换了端口、参数)并跟着改;找不到唯一对得上的就不改,等你来看。', 'up.unfollow': '不再跟随',
+  'up.unfollowConfirm': '让上游「{name}」不再跟随外部订阅?以后它测不通也不会自动改,要你自己改。', 'up.fn.followed': '{when}已跟着订阅改过', 'up.fn.params': '地址没变,换了连接参数', 'up.fn.unchanged': '全部测不通,但订阅里这个节点没变',
+  'up.fn.gone': '全部测不通,订阅里找不到对应的节点', 'up.fn.ambiguous': '全部测不通,订阅里对得上的不止一个,没自动改', 'up.fn.fetch': '全部测不通,订阅也没抓下来,稍后再试', 'up.fn.invalid': '全部测不通,订阅里的新配置用不了',
+  'audit.v.follow': '跟随外部节点', 'audit.v.unfollow': '不再跟随外部节点',
+  'up.followTitle': '跟随外部节点', 'up.followLast': '最近一次:', 'up.unfollowed': '已不再跟随', 'up.fn.followedLong': '{when}全部测不通,已跟着订阅改:{detail}',
+  'up.why': '原因:{msg}',
 };
 
 const en = {
@@ -1227,7 +1233,7 @@ const en = {
   'logs.coreMemHelp': 'Runtime logs live in memory only (10,000 lines at most, cleared on restart), so there is no retention setting.',
   'node.pushedAt': 'Config last pushed', 'node.neverPushed': 'Not pushed since start (config unchanged)',
   'up.checkedAt': 'checked',
-  'up.unused': 'Unused', 'up.unusedHint': 'No enabled line uses it, so it is not checked', 'up.pending': 'Pending', 'up.stale': 'Stale', 'up.detail': 'Show the latency each server measured',
+  'up.unused': 'Unused', 'up.unusedHint': 'No enabled line uses it, so it is not checked', 'up.pending': 'Pending', 'up.stale': 'Stale', 'up.detail': 'Show what each server measured',
   'up.groupNow': 'now via {name}', 'up.addGroup': 'Add upstream group', 'up.group': 'Group', 'up.groupMembers': 'Members', 'up.groupHelp': 'Tested every 30 seconds: traffic uses the fastest member that works and switches automatically when it fails. Pick at least two.', 'up.groupNeedTwo': 'A group needs at least two upstreams', 'up.created': 'Upstream created', 'up.updated': 'Upstream updated', 'up.deleted': 'Upstream deleted',
   'up.parsed': 'Parsed as {type}; review and save', 'up.testDone': 'All upstreams healthy',
   'up.testDoneBad': '{n} upstream(s) down', 'up.inUse': 'Still used by {n} line(s)',
@@ -2344,6 +2350,18 @@ const en = {
   'user.menu.bulk': 'Create a batch of accounts at once (name plus a number) and get the list of subscription links',
   'user.menu.import': 'Bring over users exported from your old panel; subscription links can stay the same',
   'user.menu.export': 'Save the users currently listed, with their subscription links, as a spreadsheet',
+  'up.follow': 'From the external subscription “{ext}”: {node}',
+  'up.followHelp': 'Nothing is changed while this upstream works. Only when it keeps failing on every server that uses it does the panel look up this node\'s new settings (port, parameters) in the subscription and apply them; if there is no single clear match, nothing is changed and it is left for you.',
+  'up.unfollow': 'Stop following', 'up.unfollowConfirm': 'Stop “{name}” from following the external subscription? It will no longer be updated automatically when it goes down.',
+  'up.fn.followed': 'Updated from the subscription {when}', 'up.fn.params': 'same address, new connection parameters',
+  'up.fn.unchanged': 'Down everywhere, but unchanged in the subscription',
+  'up.fn.gone': 'Down everywhere; no matching node in the subscription',
+  'up.fn.ambiguous': 'Down everywhere; several nodes match, nothing changed',
+  'up.fn.fetch': 'Down everywhere; the subscription could not be fetched, retrying later',
+  'up.fn.invalid': 'Down everywhere; the new settings cannot be used', 'audit.v.follow': 'followed external node', 'audit.v.unfollow': 'stopped following',
+  'up.followTitle': 'Following an external node', 'up.followLast': 'Last time:', 'up.unfollowed': 'No longer following',
+  'up.fn.followedLong': 'went down everywhere {when} and was updated from the subscription: {detail}',
+  'up.why': 'Reason: {msg}',
 };
 
 const dicts = { zh, en };

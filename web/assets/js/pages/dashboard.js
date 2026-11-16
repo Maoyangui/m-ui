@@ -635,7 +635,9 @@ function renderHealth() {
   const badges = `<div class="row wrap" style="margin:.35rem 0 .5rem">${badge(t('dash.health.okN', { n: hs.ok }), 'ok')}${hs.bad.length ? badge(t('dash.health.badN', { n: hs.bad.length }) + (hs.single ? '' : ' · ' + t('dash.health.servers', { n: hs.servers.size })), 'danger') : ''}${hs.pending ? badge(t('dash.health.pendN', { n: hs.pending })) : ''}</div>`;
   if (!hs.bad.length) { setHTML(el, meta + badges + `<p class="attn-ok">${esc(t('dash.health.allOk'))}</p>`); return; }
   const max = narrow() ? 3 : 5;
-  const row = b => `<li><a class="nm" href="#/upstreams?f=bad" title="${esc(b.name)}">✗ ${esc(b.name)}</a>${hs.single ? '<span></span>' : `<span class="badge danger" title="${esc(etc(b.fails, 'nodes', 20))}">${esc(t('dash.health.ratio', { bad: b.fails.length, total: b.total }))}</span>`}<span class="err" title="${esc(trErr(b.err))}">${esc(trErr(b.err))}</span></li>`;
+  // 没测通的原因不列出来(上游页同一个做法:它只是「这次没测通」的技术细节),鼠标停在这一行上看
+  const why = b => (b.err ? '\n' + t('up.why', { msg: trErr(b.err) }) : '');
+  const row = b => `<li title="${esc(b.name + why(b))}"><a class="nm" href="#/upstreams?f=bad" title="${esc(b.name + why(b))}">✗ ${esc(b.name)}</a>${hs.single ? '<span></span>' : `<span class="badge danger" title="${esc(etc(b.fails, 'nodes', 20))}">${esc(t('dash.health.ratio', { bad: b.fails.length, total: b.total }))}</span>`}</li>`;
   setHTML(el, meta + badges + `<ul class="up-bad">${hs.bad.slice(0, max).map(row).join('')}</ul>` +
     (hs.bad.length > max ? `<div class="card-foot"><a href="#/upstreams?f=bad">${esc(t('dash.health.more', { n: hs.bad.length - max }))} · ${esc(t('dash.viewAll'))}</a></div>` : ''));
 }

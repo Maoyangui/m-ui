@@ -31,6 +31,7 @@ type upServer struct {
 	Method    string `json:"method,omitempty"`
 	Error     string `json:"error,omitempty"`
 	CheckedAt int64  `json:"checkedAt,omitempty"`
+	Fails     int    `json:"fails,omitempty"` // 这台上连续失败了几次(「全部测不通才跟随外部节点」要看它)
 }
 
 // upRow 一条上游一行:哪些服务器在用它、各自什么状态。
@@ -167,7 +168,7 @@ func (s *Server) upstreamHealthRows() []upRow {
 			case h.OK:
 				sv.State, sv.DelayMs, sv.Method, sv.CheckedAt = "ok", h.DelayMs, h.Method, h.CheckedAt
 			default:
-				sv.State, sv.Method, sv.Error, sv.CheckedAt = "fail", h.Method, h.Error, h.CheckedAt
+				sv.State, sv.Method, sv.Error, sv.CheckedAt, sv.Fails = "fail", h.Method, h.Error, h.CheckedAt, h.Fails
 			}
 			row.Servers = append(row.Servers, sv)
 		}

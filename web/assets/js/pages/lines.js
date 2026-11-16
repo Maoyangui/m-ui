@@ -1557,7 +1557,7 @@ function renderLineDetail() {
   const d = ld.data, servers = d.servers || [], bad = servers.filter(s => !s.ok && !s.disabled), off = servers.filter(s => s.disabled);
   const tot = d.total || {};
   setHTML('ld-sum', `
-    <div class="ld-tile"><span class="lb">${esc(t('line.d.sumTotal', { range: t(ldRangeKey(ld.hours)) }))}</span><b class="num">${fmtBytes((tot.totalUp || 0) + (tot.totalDown || 0), 1)}</b><span class="muted small">↑ ${fmtBytes(tot.totalUp || 0, 1)} · ↓ ${fmtBytes(tot.totalDown || 0, 1)}</span></div>
+    <div class="ld-tile"><span class="lb">${esc(t('line.d.sumTotal', { range: t(ldRangeKey(ld.hours)) }))}</span><b class="num">${fmtBytes((tot.totalUp || 0) + (tot.totalDown || 0), 1)}</b></div>
     <div class="ld-tile"><span class="lb">${esc(t('line.d.sumServers'))}</span><b class="num">${servers.length}</b>${bad.length ? `<span class="small warn-text">${esc(t('line.d.failedN', { n: bad.length }))}</span>` : off.length ? `<span class="muted small">${esc(t('line.d.offN', { n: off.length }))}</span>` : ''}</div>
     <div class="ld-tile"><span class="lb">${esc(t('line.d.sumUsers'))}</span><b class="num" id="ld-sum-u">${d.onlineUsers || 0}</b></div>
     <div class="ld-tile"><span class="lb">${esc(t('line.d.sumIPs'))}</span><b class="num" id="ld-sum-ip">${d.onlineIPs || 0}</b></div>`);

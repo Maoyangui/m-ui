@@ -731,11 +731,13 @@ func (s *Server) handleUpstreams(w http.ResponseWriter, r *http.Request) {
 		// 线路上游:带上现在连不上的原因(线路停用了、服务器下线了),别等用户断网才发现
 		type row struct {
 			model.Upstream
-			RelayProblem string `json:"relayProblem,omitempty"`
+			RelayProblem string        `json:"relayProblem,omitempty"`
+			Source       *upSourceView `json:"source,omitempty"` // 从哪个外部节点加来的(全部测不通时会跟着订阅改,见 upstream_follow.go)
 		}
+		srcs := s.upstreamSources()
 		out := make([]row, 0, len(ups))
 		for _, u := range ups {
-			rr := row{Upstream: u}
+			rr := row{Upstream: u, Source: srcs[u.Id]}
 			if u.FromLine > 0 {
 				rr.RelayProblem = sub.RelayProblem(s.db, u)
 			}
@@ -861,6 +863,10 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		// 手动改过类型或参数:这条上游不再是订阅里那个节点的样子了,不再跟随(只改名不算)
+		if !sameOutbound(cur.Type, cur.Options, up.Type, up.Options) {
+			s.db.Delete(&model.UpstreamSource{}, "upstream_id = ?", id)
+		}
 		s.audit(r, "upstream", "update", up.Name)
 		if oldName != "" && oldName != up.Name {
 			// 出站标签就是上游名:路由规则指着旧名字,只换出站会让用它的线路找不到出口,必须整体重载
@@ -890,6 +896,7 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		s.db.Delete(&model.UpstreamSource{}, "upstream_id = ?", id)
 		s.audit(r, "upstream", "delete", id)
 		s.reloadUsers("删除上游") // 线路上游的专用用户要从目标线路撤下
 		s.reloadUpstreams("删除上游")

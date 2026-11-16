@@ -2,9 +2,9 @@ import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del, SLOW, LONG } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtTime, chipList, fieldBox } from '../ui.js';
+import { esc, toast, confirm, openModal, closeModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtDate, fmtRelative, chipList, fieldBox } from '../ui.js';
 import { upstreamBad } from '../issues.js';
-// 展开查看细节的上游 id:一行只显示各服务器的延迟,点开才看检查时间、方式与完整报错
+// 展开着逐台明细的上游 id(数字):平时一格只有状态点和一句结论,点开才逐台列出来(见 detailHTML)
 const expanded = new Set();
 
 export const title = () => t('up.title');
@@ -67,46 +67,84 @@ export async function render(el) {
 
 // resultHTML 延迟列:一条上游一行,里面按服务器并排 —— "专线倍率 128ms · 高带宽 96ms"。
 // 上游通不通只在真正跑这条线路的机器上量才算数,所以这里显示的是各机各自的结果。
+const stateText = sv => (sv.state === 'ok' ? sv.delayMs + ' ms' : sv.state === 'fail' ? t('up.fault') : sv.state === 'stale' ? t('up.stale') : t('up.pending'));
+const stateCls = sv => (sv.state === 'ok' ? ' ok' : sv.state === 'fail' ? ' bad' : sv.state === 'stale' ? ' warn' : '');
 function resultHTML(id) {
+  id = Number(id);
   const r = results[id];
   const idle = (label, cls = '') => `<div class="hsum"><span class="hdots"><i class="hd${cls}"></i></span><span class="muted">${esc(label)}</span></div>`;
+  const inCard = detailHTML(id, 'in-card'); // 卡片排法时明细画在卡片里;表格排法时这一份藏着,看的是下面那条通栏
   if (!r) return idle(t('up.untested'));
-  if (r.testing) return idle(t('up.testing'), ' busy');
+  if (r.testing) return idle(t('up.testing'), ' busy') + inCard;
   if (r.unused) return idle(t('up.unused')) + `<div class="sub-cell muted">${t('up.unusedHint')}</div>`;
   const servers = r.servers || [];
   if (!servers.length) return idle(t('up.untested'));
   // 这一格要回答的是「通不通、多快」:在用它的服务器每台一个状态点(绿 = 通、红 = 不通;悬停看是哪台、多少毫秒或什么错),
   // 后面跟一句结论;只有一台时把服务器名直接写在后面(是哪台测出来的要一眼看到,不能只放在悬停提示里)。
-  // 点这一行任何地方(点、字、箭头都行)展开,逐台列出「哪台服务器 · 延迟 · 什么时候查的」;一台也能点开,不用记哪种能点哪种不能。
+  // 点这一行任何地方(点、字、箭头都行)展开逐台的结果(见 detailHTML);一台也能点开,不用记哪种能点哪种不能。
   // 以前是「服务器名 + 故障」的标签一个接一个排开,三台就占满一格
-  const stateText = sv => (sv.state === 'ok' ? sv.delayMs + ' ms' : sv.state === 'fail' ? t('up.fault') : sv.state === 'stale' ? t('up.stale') : t('up.pending'));
-  const cls = sv => (sv.state === 'ok' ? ' ok' : sv.state === 'fail' ? ' bad' : sv.state === 'stale' ? ' warn' : '');
-  const dots = servers.slice(0, 16).map(sv => `<i class="hd${cls(sv)}" title="${esc(sv.name + ' · ' + stateText(sv) + (sv.error ? ' · ' + trErr(sv.error) : ''))}"></i>`).join('')
+  const dots = servers.slice(0, 16).map(sv => `<i class="hd${stateCls(sv)}" title="${esc(sv.name + ' · ' + stateText(sv) + (sv.error ? ' · ' + trErr(sv.error) : ''))}"></i>`).join('')
     + (servers.length > 16 ? `<span class="muted small">+${servers.length - 16}</span>` : '');
   const ok = servers.filter(sv => sv.state === 'ok'), fail = servers.filter(sv => sv.state === 'fail'), stale = servers.filter(sv => sv.state === 'stale');
   const delays = ok.map(sv => sv.delayMs).sort((a, b) => a - b);
   let kind = '', text = t('up.pending');
   if (ok.length === servers.length) { kind = 'ok'; text = delays.length === 1 || delays[0] === delays[delays.length - 1] ? delays[0] + ' ms' : t('up.h.allOk', { a: delays[0], b: delays[delays.length - 1] }); }
   else if (!ok.length && fail.length) { kind = 'bad'; text = servers.length === 1 ? t('up.fault') : t('up.h.allFail', { n: servers.length }); }
-  else if (fail.length || stale.length) { kind = fail.length ? 'warn' : 'warn'; text = t('up.okOf', { n: ok.length, m: servers.length }) + (delays.length ? ' · ' + delays[0] + ' ms' : ''); }
+  else if (fail.length || stale.length) { kind = 'warn'; text = t('up.okOf', { n: ok.length, m: servers.length }) + (delays.length ? ' · ' + delays[0] + ' ms' : ''); }
   const tcp = ok.length && ok.every(sv => sv.method === 'tcp') ? ' ' + badge('TCP') : '';
   const via = viaLine(servers);
-  const bad = servers.filter(sv => sv.error); // 折叠时预览第一条真正带报错的,"数据过期"没有报错文字
   const open = expanded.has(id);
   const one = servers.length === 1 ? `<span class="hname" title="${esc(t('up.testedOn', { name: servers[0].name }))}">${esc(servers[0].name)}${servers[0].isLocal ? ` <span class="muted">${t('node.local')}</span>` : ''}</span>` : '';
-  const inner = `<span class="hdots">${dots}</span><b class="${kind}">${esc(text)}</b>${one}${tcp}`;
-  const sum = `<button type="button" class="hsum hbtn" data-act="up.expand" data-id="${id}" title="${t('up.detail')}" aria-expanded="${open}">${inner}<i class="i i-chev${open ? ' open' : ''}"></i></button>`;
-  let detail = '';
-  if (open) {
-    detail = '<div class="hdetail">' + servers.map(sv => {
-      const now = String(sv.method || '').startsWith('via:') ? esc(t('up.groupNow', { name: sv.method.slice(4) })) : '';
-      const when = sv.checkedAt ? `${t('up.checkedAt')} ${fmtTime(sv.checkedAt)}` : '';
-      return `<div class="hrow"><i class="hd${cls(sv)}"></i><span class="nm" title="${esc(sv.name)}">${esc(sv.name)}${sv.isLocal ? ` <span class="muted">${t('node.local')}</span>` : ''}</span><b>${esc(stateText(sv))}</b><span class="muted">${[now, esc(when)].filter(Boolean).join(' · ')}</span>${sv.error ? `<span class="err">${esc(trErr(sv.error)).slice(0, 200)}</span>` : ''}</div>`;
-    }).join('') + '</div>';
-  } else if (bad.length) {
-    detail = `<div class="sub-cell herr" title="${esc(trErr(bad[0].error))}">${esc(trErr(bad[0].error)).slice(0, 70)}</div>`;
-  }
-  return `${sum}${open ? '' : via}${detail}`;
+  // 结论、服务器名和箭头包在一起不拆开:点多了要折行时,整句一起到下一行,不会剩一个箭头孤零零掉下去
+  const inner = `<span class="hdots">${dots}</span><span class="hconc"><b class="${kind}">${esc(text)}</b>${one}${tcp}<i class="i i-chev${open ? ' open' : ''}"></i></span>`;
+  // 没测通的原因不在页面上占地方(它只是「这次没测通」的技术细节):鼠标停在结论上看 —— 每台一行「服务器 · 原因」。
+  // 以前折叠时结论下面还挂一行报错预览、展开后每台再列一遍;用户:「这不就是测试 ping 失败吗,至于非要明显列出吗」
+  const bad = servers.filter(sv => sv.error);
+  const tip = t('up.detail') + (bad.length ? '\n' + bad.slice(0, 8).map(sv => sv.name + ' · ' + trErr(sv.error).slice(0, 160)).join('\n') : '');
+  const sum = `<button type="button" class="hsum hbtn" data-act="up.expand" data-id="${id}" title="${esc(tip)}" aria-expanded="${open}">${inner}</button>`;
+  // 从外部节点加来的:最近一次尝试跟随的结论,一句话放在这一格里(它解释的正是这一格的状态)
+  const up = state.upstreams.find(x => x.id === id), fn = up ? followNote(up.source) : null;
+  const follow = fn ? `<div class="sub-cell up-note${fn.cls}" title="${esc(fn.tip || '')}">${esc(fn.text)}</div>` : '';
+  // 上游组那句「现在走 X」:展开后每台那一行自己写着(→ 成员),这一句不再重复
+  return `${sum}${open ? '' : via}${inCard}${follow}`;
+}
+
+// detailHTML 展开后的逐台明细:每台服务器固定一行 ——「● 服务器名  结果  多久前查的」,上游组再多一格「→ 现在走的成员」。
+// 四格各有固定的位置(名字一格最宽 10rem,放不下省略号;结果、时间两格定宽),所以多台上下排时结果对得齐;
+// 结果紧跟在名字后面(试过把结果推到这一栏最右边:并排几栏时它离下一台的圆点比离自己的名字还近,看着像是下一台的)。
+// 三台以内在表格排法里总是并排成一行,用不着对齐,各格按内容收紧(.few)。
+// 不管窗口多宽、有几台,一台永远只占一行。
+// 放在哪由排法决定,不放在「状态」那一格里撑(同一段 HTML 画两处,CSS 按排法只露一处):
+//   表格排法 → 这一行下面的一条通栏(tr.up-sub,跨满整张表;够宽就并排几栏,三台一行排完,十几台也只占三四行);
+//   卡片排法 → 这张卡片自己里面(where = 'in-card',状态那一格下面)。
+// 以前明细画在「状态」那一格里。那一列多宽取决于窗口多宽、别的列占多少,880–1000 宽时只剩两百多像素:
+// 先是「检查于 11/17 02:20:00」被挤成一个字一行;改成按格宽分行后又成了每台三四行(名字、时间、报错各占一行)。
+// 用户三次截图指出 —— 根子是不该去赌那一格的宽度。
+// 故障原因不列出来:鼠标停在那一行上看(title,连同检查时间);触屏没有悬停,点一下那一行(它能拿到焦点)才在下面露出来,
+// 用的是 CSS :focus,不用记状态。什么时候查的写成「3 分钟前」:要知道的只是结果新不新。
+function detailHTML(id, where = '') {
+  const r = results[id];
+  const servers = (r && !r.unused && r.servers) || [];
+  if (!expanded.has(id) || !servers.length) return '';
+  const viaOf = sv => (String(sv.method || '').startsWith('via:') ? t('up.groupNow', { name: sv.method.slice(4) }) : '');
+  const grp = servers.some(viaOf);
+  // 名字那一格给多宽:按这条上游里最长的名字估(汉字按一个字宽、其余按 0.62 个字宽,再多留一个字),最多 12.5 个字宽(= 10rem)。
+  // 名字都短的时候结果就紧挨着名字,不会因为统一留 10rem 而隔出一大段空;估大了无非空一点,估不小(留了余量,真放不下还有省略号兜底)
+  const nameEm = s => [...s].reduce((w, ch) => w + (/[⺀-鿿가-힯豈-﫿＀-￯]/.test(ch) ? 1 : 0.62), 0);
+  const hname = Math.min(12.5, Math.ceil(Math.max(...servers.map(sv => nameEm(sv.name + (sv.isLocal ? ' ' + t('node.local') : '')))) + 1));
+  const rows = servers.map(sv => {
+    const via = viaOf(sv), why = sv.error ? trErr(sv.error).slice(0, 300) : '', c = stateCls(sv).trim();
+    const at = sv.checkedAt ? t('up.checkedAt') + ' ' + fmtDate(sv.checkedAt) : '';
+    const name = `<span class="nm"${why ? '' : ` title="${esc(sv.name)}"`}>${esc(sv.name)}${sv.isLocal ? ` <span class="muted">${t('node.local')}</span>` : ''}</span>`;
+    // 每一格都画(没有内容就空着):各行的格数一样,位置才对得上
+    const when = `<span class="hwhen"${why || !at ? '' : ` title="${esc(at)}"`}>${sv.checkedAt ? esc(fmtRelative(sv.checkedAt)) : ''}</span>`;
+    const viaCell = grp ? `<span class="hvia"${via ? ` title="${esc(via)}"` : ''}>${via ? '→ ' + esc(sv.method.slice(4)) : ''}</span>` : '';
+    const row = `<div class="hrow"><i class="hd${stateCls(sv)}"></i>${name}<b${c ? ` class="${c}"` : ''}>${esc(stateText(sv))}</b>${viaCell}${when}</div>`;
+    return why
+      ? `<div class="hitem why" tabindex="0" title="${esc(t('up.why', { msg: why }) + (at ? '\n' + at : ''))}">${row}<div class="hwhy">${esc(why)}</div></div>`
+      : `<div class="hitem">${row}</div>`;
+  }).join('');
+  return `<div class="hdetail${where ? ' ' + where : ''}${grp ? ' grp' : ''}${servers.length <= 3 ? ' few' : ''}${r.testing ? ' busy' : ''}" style="--hname:${hname}em">${rows}</div>`;
 }
 
 // viaLine 上游组在各服务器上此刻走的成员,合成一行:都走同一条就只写一次「现在走 X」(以前每台后面各写一遍,
@@ -170,6 +208,39 @@ function upstreamLines() {
   return by;
 }
 
+// 从外部节点加来的上游,界面上分三处,每处只放一行(试过把来源、结论、按钮全堆在名字下面:名称列窄,折成五行,一行顶别人三行高):
+//   名字下面:一行很短的来源「↻ 订阅名 · 节点名」,放不下就省略号;点它开一个小框看详情;
+//   状态那一列:最近一次尝试跟随的结论,一句话(跟着改过 / 订阅里没变 / 找不到对应节点),细节放悬停提示和小框里;
+//   小框里:完整的说明、上一次的结论和改了什么、「不再跟随」按钮。
+// 「没变」「没抓下来」这类结论只在一天内显示,「跟着改过」显示一周:过了这段时间就只是历史,不占地方。
+const followAge = at => (at ? Date.now() / 1000 - at : Infinity);
+function followNote(s, long = false) {
+  if (!s || !s.note) return null;
+  if (s.note === 'followed') {
+    if (!long && followAge(s.followedAt) >= 7 * 86400) return null;
+    const detail = s.detail || t('up.fn.params');
+    return { cls: ' ok', text: long ? t('up.fn.followedLong', { when: fmtRelative(s.followedAt), detail }) : t('up.fn.followed', { when: fmtRelative(s.followedAt) }), tip: detail };
+  }
+  if (!['unchanged', 'gone', 'ambiguous', 'fetch', 'invalid'].includes(s.note)) return null;
+  if (!long && followAge(s.triedAt) >= 86400) return null;
+  const tip = s.detail ? trErr(s.detail) : '';
+  return { cls: s.note === 'unchanged' ? '' : ' warn', text: t('up.fn.' + s.note) + (long ? ' · ' + fmtRelative(s.triedAt) + (tip ? ' · ' + tip : '') : ''), tip };
+}
+function sourceHTML(u) {
+  const s = u.source;
+  if (!s) return '';
+  const label = `${s.extName || '#' + s.extId} · ${s.node}`;
+  return `<button type="button" class="up-srcline" data-act="up.followInfo" data-id="${u.id}" title="${esc(t('up.follow', { ext: s.extName || '#' + s.extId, node: s.node }))}"><i class="i i-refresh"></i><span>${esc(label)}</span></button>`;
+}
+function followInfo(u) {
+  const s = u.source, n = followNote(s, true);
+  openModal(t('up.followTitle'), `<p><b>${esc(t('up.follow', { ext: s.extName || '#' + s.extId, node: s.node }))}</b></p>
+    <p class="hint">${esc(t('up.followHelp'))}</p>
+    ${n ? `<p class="up-note${n.cls}">${esc(t('up.followLast'))} ${esc(n.text)}</p>` : ''}
+    <div class="row" style="margin-top:.9rem"><button type="button" class="btn sm danger" data-act="up.unfollow" data-id="${u.id}">${esc(t('up.unfollow'))}</button></div>`,
+  null, { cancelText: t('common.close') });
+}
+
 function renderRows() {
   const body = document.getElementById('up-body');
   if (!body) return;
@@ -184,8 +255,10 @@ function renderRows() {
     const srv = u.type === GROUP
       ? chipList((o.outbounds || []).map(m => `<span class="chip">${esc(m)}</span>`), { key: 'up-mem-' + u.id, max: 3 })
       : esc(o.server ? o.server + (o.server_port ? ':' + o.server_port : '') : '');
-    return `<tr>
-      <td class="primary-cell">${online.has(u.name) ? '<span class="dot on"></span>' : ''}<span class="pname" title="${esc(u.name)}">${esc(u.name)}</span>${u.fromLine ? `<div class="sub-cell">${esc(relayNames(u))}${u.relayProblem ? ` · <span class="danger">${esc(trErr(u.relayProblem))}</span>` : ''}</div>` : ''}</td>
+    // 展开着的:下面跟一条通栏(tr.up-sub)放逐台明细;卡片排法时这条通栏藏着,明细在卡片里(resultHTML 里那一份)
+    const sub = detailHTML(u.id);
+    return `<tr${sub ? ' class="up-open"' : ''}>
+      <td class="primary-cell">${online.has(u.name) ? '<span class="dot on"></span>' : ''}<span class="pname" title="${esc(u.name)}">${esc(u.name)}</span>${u.fromLine ? `<div class="sub-cell">${esc(relayNames(u))}${u.relayProblem ? ` · <span class="danger">${esc(trErr(u.relayProblem))}</span>` : ''}</div>` : ''}${sourceHTML(u)}</td>
       <td>${typeBadges(u)}</td>
       <td class="num">${srv}</td>
       <td class="num c-p3"${using.has(u.id) ? ` title="${esc([...using.get(u.id)].join('、'))}"` : ''}>${using.has(u.id) ? using.get(u.id).size : 0}</td>
@@ -194,13 +267,20 @@ function renderRows() {
         <button class="btn sm" data-act="up.test" data-id="${u.id}">${t('common.test')}</button>
         <button class="btn sm" data-act="up.edit" data-id="${u.id}">${t('common.edit')}</button>
         <button class="btn sm danger" data-act="up.del" data-id="${u.id}">${t('common.delete')}</button>
-      </td></tr>`;
+      </td></tr>${sub ? `<tr class="up-sub" id="up-sub-${u.id}"><td colspan="6">${sub}</td></tr>` : ''}`;
   }).join(''));
 }
 
 function setResult(id, r) {
+  id = Number(id);
+  // 重测展开着的那一条:明细先留着上一次的结果(变淡),测完再换 —— 不然通栏一收一放,下面的行跟着跳一下
+  const prev = results[id];
+  if (r && r.testing && prev && !prev.unused && prev.servers && prev.servers.length) r = { ...r, servers: prev.servers };
   results[id] = r;
-  setHTML('up-res-' + id, resultHTML(id));
+  // 展开着的带着下面那条通栏(另一行),整表重画;其余的只换这一格
+  if (expanded.has(id) || document.getElementById('up-sub-' + id)) { renderRows(); return; }
+  const body = document.getElementById('up-body');
+  if (setHTML('up-res-' + id, resultHTML(id)) && body) body.__muiHTML = null; // 这一格单独换过了:整表下次重画不能再拿旧的那份比对
 }
 
 // ---- 表单片段 ----
@@ -462,7 +542,22 @@ registerActions({
     try { await del('upstreams/' + id); await load('upstreams', 'status'); renderRows(); toast(t('up.deleted'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
-  'up.expand': id => { const n = Number(id); expanded.has(n) ? expanded.delete(n) : expanded.add(n); setResult(n, results[n]); },
+  'up.followInfo': id => { const u = state.upstreams.find(x => x.id === Number(id)); if (u && u.source) followInfo(u); },
+  'up.unfollow': async id => {
+    const u = state.upstreams.find(x => x.id === Number(id));
+    if (!u || !await confirm(t('up.unfollowConfirm', { name: u.name }), { okText: t('up.unfollow') })) return;
+    try { await del(`upstreams/${id}/source`); closeModal(); await load('upstreams'); renderRows(); toast(t('up.unfollowed'), 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  },
+  'up.expand': (id, _el, e) => {
+    const n = Number(id);
+    expanded.has(n) ? expanded.delete(n) : expanded.add(n);
+    renderRows();
+    // 整表重画后原来那个按钮换成了新的。用键盘按出来的(click 事件的 detail 是 0)把焦点还给新按钮,接着按回车能收起;
+    // 鼠标点的不用还 —— 还了反倒在按钮外面留一圈焦点框
+    const b = e && e.detail === 0 ? document.querySelector(`#up-res-${n} button.hbtn`) : null;
+    if (b) b.focus({ preventScroll: true });
+  },
   'up.test': async id => {
     setResult(id, { testing: true });
     try { setResult(id, await post(`upstreams/${id}/test`, undefined, SLOW)); }

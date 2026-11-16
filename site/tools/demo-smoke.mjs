@@ -286,6 +286,18 @@ const stillBad = await page.evaluate(async () => {
   return ((h.results || []).find(r => r.name === 'Frankfurt-exit') || { servers: [{}] }).servers.every(s => s.state === 'fail');
 });
 if (stillBad) pass('没修的上游再测一遍还是不通(不会一测就自己变好)'); else fail('没修的上游一测就变通了');
+// 没测通的原因不列在页面上:在悬停提示里(结论和那一行各有),点一下那一行才在下面露出来
+await page.goto(`${DEMO}#/upstreams`); await page.waitForTimeout(900);
+await page.locator('#up-res-1 .hbtn').click(); await page.waitForTimeout(300);
+const why = await page.evaluate(() => {
+  const sub = document.getElementById('up-sub-1'), sum = document.querySelector('#up-res-1 .hbtn'), item = sub && sub.querySelector('.hitem.why'), hw = item && item.querySelector('.hwhy');
+  const shown = el => !!el && getComputedStyle(el).display !== 'none';
+  const before = shown(hw), listed = /generate_204/.test(document.getElementById('up-body').innerText);
+  if (item) item.focus();
+  return { rows: sub ? sub.querySelectorAll('.hrow').length : 0, tipSum: !!sum && /generate_204/.test(sum.title), tipRow: !!item && /generate_204/.test(item.title), before, listed, after: shown(hw) };
+});
+if (why.rows >= 1 && why.tipSum && why.tipRow && !why.before && !why.listed && why.after) pass('上游页:故障原因在悬停提示里,平时不列出来,点那一行才露出来');
+else fail(`上游页的故障原因不对:${JSON.stringify(why)}`);
 await page.evaluate(async () => {
   const api = await import('./js/api.js');
   const u = (await api.get('upstreams')).find(x => x.name === 'Frankfurt-exit');
@@ -319,8 +331,11 @@ await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(400);
 await page.goto(`${DEMO}#/upstreams`); await page.waitForTimeout(900);
 const dots = await page.locator('#up-res-2 .hdots .hd').count();
 await page.locator('#up-res-2 .hbtn').click(); await page.waitForTimeout(300);
-const rowsOpen = await page.locator('#up-res-2 .hdetail .hrow').count();
-if (dots === 3 && rowsOpen === 3) pass('上游页:三台在用就是三个点,点这一行展开逐台的延迟'); else fail(`上游页的点 / 展开行数不对:${dots} 个点、${rowsOpen} 行`);
+// 展开的明细是该行下面的一条通栏(表格排法),每台服务器正好一行
+const rowsOpen = await page.locator('#up-sub-2 .hrow').count();
+const rowH = await page.locator('#up-sub-2 .hrow').evaluateAll(els => Math.max(0, ...els.map(e => e.getBoundingClientRect().height)));
+if (dots === 3 && rowsOpen === 3 && rowH > 0 && rowH < 34) pass('上游页:三台在用就是三个点,点这一行在下面展开,每台一行');
+else fail(`上游页的点 / 展开行数不对:${dots} 个点、${rowsOpen} 行、最高的一行 ${Math.round(rowH)}px`);
 // 概况「24 小时流量」那一格点开是流量明细:三栏排行,换范围后还在
 await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(900);
 await page.locator('[data-act="dash.traffic"]').first().click(); await page.waitForTimeout(700);

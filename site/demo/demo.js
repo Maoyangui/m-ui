@@ -299,6 +299,11 @@ const tlsOf = l => { try { return typeof l.tls === 'string' ? JSON.parse(l.tls |
 for (const l of S.lines) if (l.name === 'Tokyo-HY2' && tlsOf(l).mode === 'cert') l.tls = JSON.stringify({ ...tlsOf(l), cert: '*.example.net' });
 // 外部订阅(导出实例没有):关键词已排除带"官网"的,展开能隐藏、改名、测大陆连通
 if (!S.exts.length) S.exts.push({ id: 1, name: 'Demo Sub', type: 'sub', value: 'https://sub.example.net/demo', prefix: '', enabled: true, sort: 1, remark: '', lastFetch: now() - 600, lastError: '', nodeCount: 6, nodeTotal: 7, exclude: '官网' });
+// 演示「上游跟随外部节点」:LA-streaming 当作是从外部订阅里加来的,两小时前全部测不通、已经跟着订阅换过一次端口
+{
+  const la = S.upstreams.find(u => u.name === 'LA-streaming'), e0 = (S.exts || [])[0];
+  if (la && e0) la.source = { extId: e0.id, extName: e0.name, node: 'US-1', note: 'followed', detail: '203.0.113.40:8000 → 203.0.113.40:8388', triedAt: Math.floor(Date.now() / 1000) - 7200, followedAt: Math.floor(Date.now() / 1000) - 7200 };
+}
 const ruleView = r => ({ ...r, targetCount: r.allUsers ? S.users.filter(u => u.enabled).length : new Set([...(r.userIds || []), ...S.users.filter(u => (r.resellerIds || []).includes(u.resellerId) || (r.planIds || []).includes(u.planId)).map(u => u.id)]).size, activeCount: S.limitStates.filter(s => s.ruleId === r.id).length });
 
 // 换套餐 / 续 N 期的演示版:和面板同一套规则的简化(不处理首次连接计时),只改内存;套餐记录也记在内存里
@@ -671,6 +676,8 @@ function route(method, path, query, body) {
       const u = find(S.upstreams, id);
       if (seg[2] === 'test') return { id, servers: demoUpTest(u) };
       if (method === 'DELETE') { S.upstreams = S.upstreams.filter(x => x.id !== id); S.upBroken.delete(id); return ok(); }
+      if (seg[2] === 'source' && method === 'DELETE') { delete u.source; return ok(); } // 不再跟随
+      if (method === 'PUT' && u.source && JSON.stringify(body.options) !== JSON.stringify(u.options)) delete u.source; // 手动改过参数就不再跟随
       if (method === 'PUT') { Object.assign(u, body, { id }); S.upBroken.delete(id); demoUpTest(u); return clone(u); } // 改过就算修好了,顺手复查一次
       return ok();
     }

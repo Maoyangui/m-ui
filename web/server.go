@@ -86,6 +86,7 @@ type Server struct {
 	apiFails       map[string][]int64   // 外部 API 鉴权失败:ip → 最近失败时间(主面板令牌与代理令牌共用,见 body_limit.go)
 	keyUsedAt      map[uint]int64       // 外部 API 密钥 id → 上次把「最近使用」写进库的时间(见 noteKeyUse)
 	upRecheck      map[uint]*time.Timer // 上游 id → 改过之后排着的那次自动复查(见 recheckUpstreamSoon)
+	extRefreshFn   func(id uint) error  // 测试里替换「重新抓一遍外部订阅」;nil = 真去抓(见 refreshExtNow)
 	ops            *ops.Runner
 
 	totpPending    string          // 两步验证:已生成、待认证器验证一次后才生效的密钥
@@ -351,6 +352,7 @@ func (s *Server) Start() error {
 		}
 	}
 	go s.reapSessions()
+	go s.followLoop()
 	go s.tgBotLoop()
 	return nil
 }

@@ -1095,9 +1095,11 @@ label.switch.sm input:checked + span::before { transform: translateX(12px); }
 @media (min-width: 701px) { .chips.fold.open { max-height: 18rem; overflow-y: auto; align-content: flex-start; } }
 td .chips { display: inline-flex; vertical-align: middle; }
 
-/* 抽屉:默认 32rem,宽的 46rem;大屏再放宽 */
-.drawer.wide { --drawer-w: 46rem; }
-@media (min-width: 1800px) { .drawer { --drawer-w: 34rem; } .drawer.wide { --drawer-w: 56rem; } }
+/* 抽屉三档:默认 34rem;详情(用户 / 代理 / 线路)37rem;接口文档 46rem(大屏 56rem)。
+   详情以前也是 46rem:在一千二三宽的窗口里占掉大半屏,里面的内容其实用不了这么宽,摊得又散又空 —— 用户看了说太宽、不好看。 */
+.drawer.wide { --drawer-w: 37rem; }
+.drawer.xl { --drawer-w: 46rem; }
+@media (min-width: 1800px) { .drawer.xl { --drawer-w: 56rem; } }
 
 /* 长勾选列表:筛选 / 全选 / 全不选 / 计数 */
 .cl-tools { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; margin-bottom: .35rem; }
@@ -1249,10 +1251,9 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
 
 /* 上游巡检:一条上游一行 */
 .up-bad { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
-.up-bad li { display: grid; grid-template-columns: minmax(0, max-content) auto minmax(0, 1fr); gap: .5rem; align-items: center; font-size: .84rem; }
+.up-bad li { display: grid; grid-template-columns: minmax(0, max-content) auto; justify-content: start; gap: .5rem; align-items: center; font-size: .84rem; }
 .up-bad .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--danger); }
-.up-bad .err { color: var(--muted); font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 700px) { .up-bad li { grid-template-columns: minmax(0, 1fr) auto; } .up-bad .err { grid-column: 1 / -1; } }
+
 
 /* 最近入站连接:定宽列,展开全部时限高滚动、表头吸顶;窄屏两行紧凑排 */
 table.grid.conns col.c-ip { width: 30%; } table.grid.conns col.c-user { width: 20%; } table.grid.conns col.c-line { width: 26%; }
@@ -1733,6 +1734,18 @@ body:has(.savebar:not([hidden])) .toast { bottom: 5.4rem; }
 
 /* ================= 上游页:健康状态一格 =================
    每台服务器一个状态点(绿 = 通,红 = 不通,黄 = 数据过期,灰 = 还没测),后面一句结论;逐台明细点开看 */
+/* 上游名字下面的来源一行(来自哪个外部订阅,一行、放不下省略号,点开看详情)和状态格里那句跟随的结论 */
+.up-srcline { display: flex; align-items: center; gap: .3rem; max-width: 100%; margin-top: 2px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-xs); font-weight: 400; color: var(--muted); cursor: pointer; text-align: left; }
+.up-srcline > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-srcline > .i { flex: none; font-size: 11px; }
+.up-srcline:hover { color: var(--primary-text); }
+.up-srcline:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 3px; }
+.up-note { color: var(--muted); }
+.up-note.ok { color: var(--ok-text); }
+.up-note.warn { color: var(--warn-text); }
+.sub-cell.up-note { max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#modal-body p.up-note { margin: .75rem 0 0; line-height: 1.6; }
+table.grid.cards .sub-cell.up-note { white-space: normal; }
 .hsum { display: flex; align-items: center; flex-wrap: wrap; gap: .3rem .55rem; min-height: 24px; }
 .hdots { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; max-width: 13rem; }
 .hd { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); }
@@ -1742,26 +1755,64 @@ body:has(.savebar:not([hidden])) .toast { bottom: 5.4rem; }
 .hd.busy { background: var(--primary); animation: hd-pulse 1s ease-in-out infinite; }
 @keyframes hd-pulse { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .hd.busy { animation: none; } }
-.hsum > b { font-size: var(--fs-sm); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hsum b { font-size: var(--fs-sm); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 结论 + 服务器名 + 箭头是一个整体:状态点多、要折行时整句一起下去(以前箭头是单独一项,会一个人掉到下一行) */
+.hconc { display: inline-flex; align-items: center; gap: .55rem; min-width: 0; max-width: 100%; white-space: nowrap; }
 /* 有明细可看的:整行是一个按钮,点、字、箭头点哪里都展开 */
 button.hbtn { margin: -2px -6px; padding: 2px 6px; border: 0; border-radius: var(--radius-xs); background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 button.hbtn:hover { background: var(--surface-3); }
 button.hbtn:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
-button.hbtn > .i { color: var(--muted); font-size: 13px; }
-.hname { font-size: var(--fs-xs); color: var(--text-2); max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hsum > b.ok { color: var(--ok-text); }
-.hsum > b.bad { color: var(--danger-text); }
-.hsum > b.warn { color: var(--warn-text); }
-.herr { max-width: 30rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hdetail { display: grid; gap: .3rem; margin-top: .5rem; padding: .55rem .7rem; background: var(--surface-2); border: 1px solid var(--divider); border-radius: var(--radius-sm); font-size: var(--fs-xs); }
-.hrow { display: grid; grid-template-columns: auto minmax(4rem, 9rem) 4.6rem minmax(0, 1fr); gap: .1rem .6rem; align-items: center; }
-.hrow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hrow b { font-weight: 600; font-variant-numeric: tabular-nums; }
-.hrow .err { grid-column: 2 / -1; color: var(--danger-text); overflow-wrap: anywhere; line-height: 1.45; }
-/* 卡片(窄屏)里:那一格的值是靠右排的,明细得自己靠左;一行放不下四栏,检查时间另起一行 */
-.hdetail { text-align: left; }
-table.grid.cards .hrow { grid-template-columns: auto minmax(0, 1fr) auto; }
-table.grid.cards .hrow > .muted { grid-column: 2 / -1; }
+button.hbtn .i { flex: none; color: var(--muted); font-size: 13px; }
+.hname { min-width: 0; font-size: var(--fs-xs); color: var(--text-2); max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hsum b.ok { color: var(--ok-text); }
+.hsum b.bad { color: var(--danger-text); }
+.hsum b.warn { color: var(--warn-text); }
+/* 展开的逐台明细:每台服务器固定一行 —— ● 服务器名  结果  多久前查的(上游组再多一格「→ 现在走的成员」)。
+   被压缩的只有名字(省略号),别的都不折行:不管窗口多宽、有几台,一台永远只占一行。
+   放在哪由排法决定(pages/upstreams.js 的 detailHTML 同一段 HTML 画两处,这里只露一处),不放在「状态」那一格里撑:
+     表格排法:这一行下面的一条通栏(tr.up-sub,跨满整张表)。每栏至少 16.5rem,够宽就并排几栏 —— 三台一行排完,十几台也只占三四行;
+     卡片排法:卡片自己里面、状态那一格下面(卡片至少 19.5rem 宽,够排一行)。
+   以前明细画在「状态」那一格里。那一列多宽取决于窗口多宽、别的列占多少,880–1000 宽时只剩两百多像素:
+   先是「检查于 11/17 02:20:00」被挤成一个字一行;改成按格宽分行后又成了每台三四行(名字、时间、报错各占一行)。
+   用户三次截图指出 —— 根子是不该去赌那一格的宽度,所以现在的排法跟那一列多宽没有关系。
+   一行里四格各有固定位置(名字那一格按这条上游里最长的名字估,最宽 10rem,见 detailHTML 的 --hname;结果 3.6rem 靠右;时间 4.5rem):
+   多台上下排时结果对得齐,结果也紧挨着名字。
+   三台以内(.few)在表格排法里总是并排成一行,用不着对齐,各格按内容收紧。
+   故障原因不列出来(用户:「这不就是测试 ping 失败吗,至于非要明显列出吗」):鼠标停在那一行上看;
+   触屏没有悬停,点一下那一行(它能拿到焦点)才在下面露出来。 */
+.hdetail { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--hcol, 16.5rem)), 1fr)); gap: 0 1.75rem; font-size: var(--fs-xs); text-align: left; }
+.hdetail.grp { --hcol: 26rem; } /* 上游组多一格,一栏要宽一点 */
+.hdetail.busy { opacity: .5; }
+.hitem { min-width: 0; border-radius: var(--radius-xs); }
+.hitem.why { cursor: help; }
+.hitem:focus { outline: none; }
+.hitem:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.hrow { display: grid; grid-template-columns: 8px minmax(0, var(--hname, 10rem)) 3.6rem 4.5rem; justify-content: start; align-items: center; column-gap: .6rem; min-height: 1.75rem; white-space: nowrap; }
+.hdetail.grp .hrow { grid-template-columns: 8px minmax(0, var(--hname, 10rem)) 3.6rem minmax(0, 9rem) 4.5rem; }
+.hrow > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hrow > .hd { overflow: visible; }
+.hrow .nm { color: var(--text); }
+.hrow b { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.hrow b.bad { color: var(--danger-text); }
+.hrow b.warn { color: var(--warn-text); }
+.hrow .hvia, .hrow .hwhen { color: var(--muted); }
+.hwhy { display: none; margin: 0 0 .4rem calc(8px + .6rem); color: var(--danger-text); line-height: 1.5; white-space: normal; overflow-wrap: anywhere; cursor: text; }
+.hitem:focus > .hwhy, .hitem:focus-within > .hwhy { display: block; }
+/* 表格排法:通栏,和上面那一行连成一块(中间不画分隔线) */
+tr.up-open > td { border-bottom-color: transparent; }
+tr.up-sub > td { padding: .2rem .75rem .45rem; background: var(--surface-2); }
+table.grid:not(.cards) .hdetail.in-card { display: none; }
+.hdetail.few:not(.in-card) .hrow { grid-template-columns: 8px fit-content(10rem) auto auto; }
+.hdetail.few.grp:not(.in-card) { --hcol: 22rem; }
+.hdetail.few.grp:not(.in-card) .hrow { grid-template-columns: 8px fit-content(10rem) auto fit-content(11rem) auto; }
+/* 卡片排法:明细在卡片里,通栏藏掉。卡片窄:名字占剩下的地方,结果和时间靠右对齐;
+   上游组的那一格「→ 成员」比「多久前」要紧,时间让给它 */
+table.grid.cards tr.up-sub { display: none; }
+table.grid.cards .hdetail.in-card { clear: both; margin-top: .5rem; padding: .2rem .7rem; background: var(--surface-2); border: 1px solid var(--divider); border-radius: var(--radius-sm); }
+.hdetail.in-card .hrow { grid-template-columns: 8px minmax(0, 1fr) 3.6rem 4.5rem; justify-content: stretch; }
+.hdetail.in-card .hwhen { text-align: right; }
+.hdetail.in-card.grp .hrow { grid-template-columns: 8px minmax(3rem, 1fr) 3.6rem fit-content(48%); }
+.hdetail.in-card.grp .hwhen { display: none; }
 
 /* ---- 管理员页 / 代理「账号」页 ----
    账号与两步验证各一张小卡片并排:看一眼就知道现在是谁、上次从哪登录、两步验证开没开,改动都在弹框里做。 */

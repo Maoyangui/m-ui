@@ -51,6 +51,30 @@ func (s *Server) dispatchUpstreamSubroute(w http.ResponseWriter, r *http.Request
 	case strings.HasSuffix(path, "/upstreams/health"):
 		s.handleUpstreamHealth(w, r)
 		return true
+	case strings.HasSuffix(path, "/source"): // DELETE /upstreams/{id}/source:解除跟随(这条上游以后不再跟着外部节点改)
+		trimmed := strings.TrimSuffix(path, "/source")
+		idx := strings.LastIndex(trimmed, "/upstreams/")
+		if idx < 0 {
+			return false
+		}
+		id, err := strconv.ParseUint(trimmed[idx+len("/upstreams/"):], 10, 64)
+		if err != nil {
+			badRequest(w, fmt.Errorf("上游 id 无效"))
+			return true
+		}
+		if r.Method != http.MethodDelete {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+			return true
+		}
+		var up model.Upstream
+		if s.db.First(&up, uint(id)).Error != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "上游不存在"})
+			return true
+		}
+		s.db.Delete(&model.UpstreamSource{}, "upstream_id = ?", up.Id)
+		s.audit(r, "upstream", "unfollow", up.Name)
+		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
+		return true
 	case strings.HasSuffix(path, "/test"):
 		trimmed := strings.TrimSuffix(path, "/test")
 		idx := strings.LastIndex(trimmed, "/upstreams/")

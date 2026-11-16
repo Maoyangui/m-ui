@@ -118,7 +118,7 @@ export function openApiDocs(opts) {
   ctx = { base: '', reseller: false, keys: [], repo: '', ...opts };
   const first = ctx.keys.find(k => k.enabled) || ctx.keys[0];
   pick = first ? first.id : 0;
-  openDrawer(esc(t('adm.apiDocsTitle')), docsHTML(), { wide: true });
+  openDrawer(esc(t('adm.apiDocsTitle')), docsHTML(), { size: 'xl' });
 }
 
 registerActions({
