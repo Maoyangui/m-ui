@@ -2,7 +2,12 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
+	"net/netip"
 	"strconv"
+	"strings"
+	"unicode"
 )
 
 // LineForward 线路的一个中转入口:客户端连中转的这个地址和端口,中转把收到的加密数据原样转给出口服务器上的这条线路,
@@ -27,14 +32,85 @@ type LineForward struct {
 	To     uint   `json:"to"`               // 转给哪台服务器上的这条线路(必须在线路的部署范围里)
 	Target string `json:"target,omitempty"` // 面板转发时转到的地址;空 = 出口服务器的公网 IP(内网互通的可以填内网地址)
 	Off    bool   `json:"off,omitempty"`    // 暂停:不渲染、不进订阅,设置留着
+	// Src 出口服务器看到的、这个入口转过来的连接的来源 IP(逗号分隔,最多 8 个,只填 IP)。只用来在出口上认
+	// 「这条连接是从哪个入口进来的」(节点单独设的倍率 / 限速 / 容量,见 NodeOpt)。面板自己认得出的不用填:
+	// 集群里的中转用它的公网 IP 和连接地址,别处的中转用填的地址(是 IP 时)。中转经内网连出口、进出不是同一个 IP、
+	// 地址是域名的才需要填;认不出来的连接按直连算。
+	Src string `json:"src,omitempty"`
+}
+
+// MaxForwardSrc 一个中转入口最多手填几个来源 IP。
+const MaxForwardSrc = 8
+
+// NormForwardSrc 规整手填的来源 IP:逗号 / 空白 / 顿号分隔,去重,IPv4 映射的 IPv6 还原成 IPv4,输出逗号分隔。
+func NormForwardSrc(s string) (string, error) {
+	fields := strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == '，' || r == '、' || r == ';' || unicode.IsSpace(r) })
+	out := make([]string, 0, len(fields))
+	seen := map[string]bool{}
+	for _, f := range fields {
+		a, err := netip.ParseAddr(BareHost(f))
+		if err != nil {
+			return "", fmt.Errorf("%q 不是 IP 地址", f)
+		}
+		v := a.Unmap().WithZone("").String()
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	if len(out) > MaxForwardSrc {
+		return "", fmt.Errorf("最多填 %d 个", MaxForwardSrc)
+	}
+	return strings.Join(out, ","), nil
 }
 
 // 订阅里的「节点」:一条线路在一台服务器上的直连入口,或这条线路的一个中转入口。
 // 每个节点可以单独设置(Line.NodeOpts,键见 DirectKey / ForwardKey);用户还可以单独不要某几个节点(UserLineHide)。
 
-// NodeOpt 一个节点自己的设置;没设的项跟随默认。
+// NodeOpt 一个节点自己的设置;没设的项(0)跟随默认。
 type NodeOpt struct {
 	Hidden bool `json:"hidden,omitempty"` // 不输出到任何人的订阅(入站照开:只是不发给用户)
+	// Ratio 这个节点自己的流量倍率:设了就盖过所在服务器的倍率(只管走这个节点的流量,同一台上别的线路照旧按服务器的);
+	// 0 = 没单独设,跟随服务器。中转入口没单独设时跟随出口那台服务器(流量是在出口上记的)。
+	Ratio float64 `json:"ratio,omitempty"`
+	// Speed 这个节点的总限速(Mbps,走这个节点的所有用户合计);UserSpeed 每个用户在这个节点上的最高速率(Mbps,
+	// 和用户自己的限速同时生效,取更严的);Cap 同时在线的用户数上限(满了拒新用户,已在线的不踢)。0 都是不限。
+	Speed     int `json:"speed,omitempty"`
+	UserSpeed int `json:"userSpeed,omitempty"`
+	Cap       int `json:"cap,omitempty"`
+}
+
+// 节点设置各项的上限(和服务器倍率、用户限速的上限一致)。
+const (
+	NodeRatioMax = 100
+	NodeSpeedMax = 100000
+	NodeCapMax   = 1000000
+)
+
+// Check 节点设置的取值范围;倍率最多留四位小数(再多没有意义,还会让同一个倍率因为写法不同被当成两个)。
+func (o *NodeOpt) Check() error {
+	if o.Ratio < 0 || o.Ratio > NodeRatioMax {
+		return fmt.Errorf("节点倍率要在 0–%d 之间(0 = 跟随服务器)", NodeRatioMax)
+	}
+	o.Ratio = math.Round(o.Ratio*10000) / 10000
+	if o.Speed < 0 || o.Speed > NodeSpeedMax || o.UserSpeed < 0 || o.UserSpeed > NodeSpeedMax {
+		return fmt.Errorf("节点限速要在 0–%d Mbps 之间(0 = 不限)", NodeSpeedMax)
+	}
+	if o.Cap < 0 || o.Cap > NodeCapMax {
+		return fmt.Errorf("节点的用户容量要在 0–%d 之间(0 = 不限)", NodeCapMax)
+	}
+	return nil
+}
+
+// NodeRatio 节点实际生效的倍率:自己设了用自己的,没设用所在服务器的(serverRatio ≤ 0 当 1)。
+func NodeRatio(o NodeOpt, serverRatio float64) float64 {
+	if o.Ratio > 0 {
+		return o.Ratio
+	}
+	if serverRatio <= 0 {
+		return 1
+	}
+	return serverRatio
 }
 
 // DirectKey 线路在服务器 nodeId 上的直连节点的键。

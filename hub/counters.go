@@ -336,9 +336,17 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 			if dUp <= 0 && dDown <= 0 {
 				continue
 			}
-			if ratio != 1 {
-				dUp, dDown = int64(float64(dUp)*ratio), int64(float64(dDown)*ratio)
+			// 附带的四个数(走了单独设倍率的节点的那部分,见 model.AgentCounter)跟着上面定下的结论走:
+			// 这一份是从 0 计的,附带数也从 0;是按增量的,附带数也按增量;对齐不计的走不到这里。
+			// 不在上面每个分支里各写一遍:只看结果 —— 「从 0」和「按增量」同时成立时游标的计数是 0,附带数的游标也是 0,两种算法结果一样。
+			var oUp, oDown, xUp, xDown int64
+			switch {
+			case dUp == c.Up && dDown == c.Down:
+				oUp, oDown, xUp, xDown = c.OUp, c.ODown, c.XUp, c.XDown
+			case hasOld && dUp == c.Up-old.Up && dDown == c.Down-old.Down:
+				oUp, oDown, xUp, xDown = c.OUp-old.OUp, c.ODown-old.ODown, c.XUp-old.XUp, c.XDown-old.XDown
 			}
+			dUp, dDown = chargeOf(dUp, oUp, xUp, ratio), chargeOf(dDown, oDown, xDown, ratio)
 			res.Merged++
 			nodeUp += maxInt64(dUp, 0)
 			nodeDown += maxInt64(dDown, 0)
@@ -386,6 +394,29 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 		return MergeResult{}, err // 整块回滚了,这一块什么都没记
 	}
 	return res, nil
+}
+
+// chargeOf 一段流量(d,原始字节)该计多少:其中走了单独设倍率节点的那部分(o,原始字节)按节点自己的倍率,
+// x 是副机已经乘好的结果;其余的按这台服务器的倍率。副机不报 o / x(老版本、没有节点单独设倍率)时就是 d × 服务器倍率。
+// o、x 不合理(负的、比 d 还大:副机降级过、账本行被别的版本改过)时往保守的一边取,不让它把这一段算成负数。
+func chargeOf(d, o, x int64, ratio float64) int64 {
+	if d <= 0 {
+		return d
+	}
+	if o < 0 {
+		o = 0
+	}
+	if o > d {
+		o = d
+	}
+	if o == 0 || x < 0 {
+		x = 0
+	}
+	rest := d - o
+	if ratio != 1 {
+		rest = int64(float64(rest) * ratio)
+	}
+	return rest + x
 }
 
 // alignCursors 新的一本账只建基线:游标对齐到报上来的计数,这一份不计增量。和记下纪元在同一笔事务里 ——
@@ -488,7 +519,8 @@ func SweepOrphanLedgers(db *gorm.DB) error {
 //     副机回滚到老版本又升回来、报出原来的代号,是同一本,不能当成重开再计一遍;
 //   - 主机上没有这个用户:记"当时没有这个人"。
 func cursorFor(nodeId uint, c model.AgentCounter, u model.User, exists bool, old model.TrafficCursor, hasOld, keepMark bool) model.TrafficCursor {
-	cur := model.TrafficCursor{NodeId: nodeId, UserName: c.UserName, Up: c.Up, Down: c.Down, StampUp: c.Up, StampDown: c.Down}
+	cur := model.TrafficCursor{NodeId: nodeId, UserName: c.UserName, Up: c.Up, Down: c.Down, StampUp: c.Up, StampDown: c.Down,
+		OUp: c.OUp, ODown: c.ODown, XUp: c.XUp, XDown: c.XDown}
 	switch {
 	case ownedLedger(c):
 		cur.UserId, cur.UserCreatedAt, cur.LedgerId = c.UserId, c.UserCreatedAt, c.LedgerId
@@ -677,7 +709,8 @@ func upsertCursors(tx *gorm.DB, rows []model.TrafficCursor) error {
 	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "node_id"}, {Name: "user_name"}},
 		DoUpdates: clause.AssignmentColumns([]string{"up", "down", "user_id", "user_created_at", "ledger_id",
-			"prev_ledger_id", "prev_ledger_id2", "prev_ledger_id3", "prev_ledger_id4", "stamp_up", "stamp_down", "cleared", "cleared_at"}),
+			"prev_ledger_id", "prev_ledger_id2", "prev_ledger_id3", "prev_ledger_id4", "stamp_up", "stamp_down", "cleared", "cleared_at",
+			"o_up", "o_down", "x_up", "x_down"}),
 	}).CreateInBatches(&rows, counterChunk).Error
 }
 

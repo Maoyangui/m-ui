@@ -63,6 +63,10 @@ func AddAgentCounters(tx *gorm.DB, rows []AgentCounter, batch int) error {
 		DoUpdates: clause.Assignments(map[string]interface{}{
 			"up":              gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.up + excluded.up ELSE excluded.up END"),
 			"down":            gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.down + excluded.down ELSE excluded.down END"),
+			"o_up":            gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.o_up + excluded.o_up ELSE excluded.o_up END"),
+			"o_down":          gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.o_down + excluded.o_down ELSE excluded.o_down END"),
+			"x_up":            gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.x_up + excluded.x_up ELSE excluded.x_up END"),
+			"x_down":          gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.x_down + excluded.x_down ELSE excluded.x_down END"),
 			"user_id":         gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.user_id ELSE excluded.user_id END"),
 			"user_created_at": gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.user_created_at ELSE excluded.user_created_at END"),
 			"ledger_id":       gorm.Expr("CASE WHEN " + sameAgentLedger + " THEN agent_counters.ledger_id ELSE excluded.ledger_id END"),

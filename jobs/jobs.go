@@ -267,7 +267,9 @@ func (s *Scheduler) runStatsForBox(box *core.Box) (ok bool) {
 }
 
 // userBytes 一个用户这一轮的上下行字节。
-type userBytes struct{ up, down int64 }
+// userBytes 一个用户这一轮的原始字节;o* 是其中走了「单独设倍率的节点」的那部分(原始字节,已含在 up / down 里),
+// x* 是这部分按各自节点的倍率乘好的字节。计费 = (up − oUp) × 服务器倍率 + xUp。
+type userBytes struct{ up, down, oUp, oDown, xUp, xDown int64 }
 
 // statsBatch 记账、时序每条 INSERT 的行数。SQLite 一条语句最多 32766 个变量:时序一行 5 个变量,
 // 以前一轮的行一条 INSERT 写完,10 秒内三千多个双向有流量的用户就超限、整笔失败;失败的这批还留在内存里,
@@ -312,6 +314,24 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 				t.up += st.Traffic
 			} else {
 				t.down += st.Traffic
+			}
+		case core.StatUserX:
+			// 走了单独设倍率的节点的那部分:数据面只记在这一行里(不在 "user" 行里重复),这里并回这个用户的总数,另记 o / x
+			name, r, valid := core.SplitUserX(st.Tag)
+			if !valid {
+				continue
+			}
+			t, ok := userTraffic[name]
+			if !ok {
+				t = &userBytes{}
+				userTraffic[name] = t
+				online.Users = append(online.Users, name)
+			}
+			x := int64(float64(st.Traffic) * r)
+			if st.Direction {
+				t.up, t.oUp, t.xUp = t.up+st.Traffic, t.oUp+st.Traffic, t.xUp+x
+			} else {
+				t.down, t.oDown, t.xDown = t.down+st.Traffic, t.oDown+st.Traffic, t.xDown+x
 			}
 		}
 	}
@@ -377,7 +397,7 @@ func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]
 		rows := make([]model.AgentCounter, 0, len(names))
 		for _, name := range names {
 			t := traffic[name]
-			rows = append(rows, model.AgentCounter{UserName: name, Up: t.up, Down: t.down})
+			rows = append(rows, model.AgentCounter{UserName: name, Up: t.up, Down: t.down, OUp: t.oUp, ODown: t.oDown, XUp: t.xUp, XDown: t.xDown})
 		}
 		return rows
 	}
@@ -399,11 +419,12 @@ func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]
 		for _, name := range names {
 			t := traffic[name]
 			update := map[string]interface{}{"online_at": now}
-			if t.up > 0 {
-				update["up"] = gorm.Expr("up + ?", scale(t.up))
+			// 走了单独设倍率节点的那部分按节点自己的倍率(x 已经乘好),其余按本机的倍率
+			if v := scale(t.up-t.oUp) + t.xUp; v > 0 {
+				update["up"] = gorm.Expr("up + ?", v)
 			}
-			if t.down > 0 {
-				update["down"] = gorm.Expr("down + ?", scale(t.down))
+			if v := scale(t.down-t.oDown) + t.xDown; v > 0 {
+				update["down"] = gorm.Expr("down + ?", v)
 			}
 			if t.up > 0 || t.down > 0 {
 				model.StartOnFirstUse(update, now)
@@ -435,14 +456,40 @@ func (s *Scheduler) writeSeries(isNode bool, names []string, stats []model.Stats
 		// 复制一份再按倍率改写:stats 已经原样交给 ConsumeStats 扣过计数器,就地改会把缩放后的值扣进去 ——
 		// 本机倍率不是 1 时计数器就漂了(倍率 2:多扣一倍、计数器变负、用户隔一轮从在线名单消失;倍率 0.5:余量下一轮重记)
 		rows := make([]model.Stats, 0, len(stats))
+		type userDir struct {
+			name string
+			up   bool
+		}
+		userAt := map[userDir]int{} // 同一个用户、同一方向只留一行:普通的和走了单独倍率节点的合在一起
 		for _, row := range stats {
+			ratio := 0.0 // 走了单独设倍率节点的那一行自带倍率
+			if row.Resource == core.StatUserX {
+				name, r, valid := core.SplitUserX(row.Tag)
+				if !valid {
+					continue
+				}
+				row.Resource, row.Tag, ratio = "user", name, r
+			}
 			if row.Resource == "user" && !alive[row.Tag] {
 				continue
 			}
 			row.Id = 0
 			row.DateTime = bucket
 			if !isNode && row.Resource == "user" {
-				row.Traffic = scale(row.Traffic) // 用户维度按倍率记(与用量一致);线路/上游维度保持真实流量
+				// 用户维度按倍率记(与用量一致);线路/上游维度保持真实流量
+				if ratio > 0 {
+					row.Traffic = int64(float64(row.Traffic) * ratio)
+				} else {
+					row.Traffic = scale(row.Traffic)
+				}
+			}
+			if row.Resource == "user" {
+				k := userDir{row.Tag, row.Direction}
+				if i, ok := userAt[k]; ok {
+					rows[i].Traffic += row.Traffic
+					continue
+				}
+				userAt[k] = len(rows)
 			}
 			rows = append(rows, row)
 		}

@@ -25,6 +25,9 @@ type StatsTracker struct {
 	inbounds  map[string]Counter
 	outbounds map[string]Counter
 	users     map[string]Counter
+	// userx 走了「单独设倍率的节点」的用户流量,键见 UserXTag(用户名 + 倍率)。这部分不进 users:每个字节只在一个计数器里
+	userx map[string]Counter
+	nodes atomic.Pointer[NodeTable]
 }
 
 func NewStatsTracker() *StatsTracker {
@@ -32,6 +35,7 @@ func NewStatsTracker() *StatsTracker {
 		inbounds:  make(map[string]Counter),
 		outbounds: make(map[string]Counter),
 		users:     make(map[string]Counter),
+		userx:     make(map[string]Counter),
 	}
 }
 
@@ -41,6 +45,45 @@ func (c *StatsTracker) Reset() {
 	c.inbounds = make(map[string]Counter)
 	c.outbounds = make(map[string]Counter)
 	c.users = make(map[string]Counter)
+	c.userx = make(map[string]Counter)
+}
+
+// SetNodes 换上新的节点表(渲染配置时算好的);nil / 空 = 没有节点单独设倍率。只影响之后新建的连接。
+func (c *StatsTracker) SetNodes(t NodeTable) {
+	if len(t) == 0 {
+		c.nodes.Store(nil)
+		return
+	}
+	c.nodes.Store(&t)
+}
+
+// userCounterKey 这条连接的用户流量记到哪:走的节点单独设了倍率 → (true, UserXTag);否则 (false, 用户名)。
+func (c *StatsTracker) userCounterKey(user string, metadata adapter.InboundContext) (bool, string) {
+	if user == "" {
+		return false, ""
+	}
+	if t := c.nodes.Load(); t != nil {
+		if spec := t.Lookup(metadata.Inbound, metadata.Source.Addr); spec.Ratio > 0 {
+			return true, UserXTag(user, spec.Ratio)
+		}
+	}
+	return false, user
+}
+
+func (c *StatsTracker) countersFor(metadata adapter.InboundContext, outbound string) ([]*atomic.Int64, []*atomic.Int64) {
+	x, key := c.userCounterKey(model.Owner(metadata.User), metadata) // 借用者的流量记到本人
+	readCounter, writeCounter := c.getReadCounters(metadata.Inbound, outbound, "")
+	if key == "" {
+		return readCounter, writeCounter
+	}
+	c.access.Lock()
+	defer c.access.Unlock()
+	m := &c.users
+	if x {
+		m = &c.userx
+	}
+	ct := c.loadOrCreateCounter(m, key)
+	return append(readCounter, ct.read), append(writeCounter, ct.write)
 }
 
 func (c *StatsTracker) getReadCounters(inbound string, outbound string, user string) ([]*atomic.Int64, []*atomic.Int64) {
@@ -75,12 +118,12 @@ func (c *StatsTracker) loadOrCreateCounter(obj *map[string]Counter, name string)
 }
 
 func (c *StatsTracker) RoutedConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) net.Conn {
-	readCounter, writeCounter := c.getReadCounters(metadata.Inbound, matchOutbound.Tag(), model.Owner(metadata.User)) // 借用者的流量记到本人
+	readCounter, writeCounter := c.countersFor(metadata, matchOutbound.Tag())
 	return bufio.NewInt64CounterConn(conn, readCounter, writeCounter)
 }
 
 func (c *StatsTracker) RoutedPacketConnection(ctx context.Context, conn network.PacketConn, metadata adapter.InboundContext, matchedRule adapter.Rule, matchOutbound adapter.Outbound) network.PacketConn {
-	readCounter, writeCounter := c.getReadCounters(metadata.Inbound, matchOutbound.Tag(), model.Owner(metadata.User)) // 借用者的流量记到本人
+	readCounter, writeCounter := c.countersFor(metadata, matchOutbound.Tag())
 	return bufio.NewInt64CounterPacketConn(conn, readCounter, nil, writeCounter, nil)
 }
 
@@ -111,6 +154,9 @@ func (c *StatsTracker) GetStats() *[]model.Stats {
 	for user, counter := range c.users {
 		appendStat("user", user, counter.write.Swap(0), counter.read.Swap(0))
 	}
+	for key, counter := range c.userx {
+		appendStat(StatUserX, key, counter.write.Swap(0), counter.read.Swap(0))
+	}
 	return &s
 }
 
@@ -139,6 +185,9 @@ func (c *StatsTracker) SnapshotStats() *[]model.Stats {
 	for user, counter := range c.users {
 		appendStat("user", user, counter.write.Load(), counter.read.Load())
 	}
+	for key, counter := range c.userx {
+		appendStat(StatUserX, key, counter.write.Load(), counter.read.Load())
+	}
 	return &s
 }
 
@@ -159,6 +208,8 @@ func (c *StatsTracker) ConsumeStats(stats []model.Stats) {
 			counters = &c.outbounds
 		case "user":
 			counters = &c.users
+		case StatUserX:
+			counters = &c.userx
 		default:
 			continue
 		}
@@ -192,6 +243,8 @@ func (c *StatsTracker) RestoreStats(stats []model.Stats) {
 			counters = &c.outbounds
 		case "user":
 			counters = &c.users
+		case StatUserX:
+			counters = &c.userx
 		default:
 			continue
 		}

@@ -113,6 +113,11 @@ func (s *Server) normForwards(line *model.Line, old *model.Line) error {
 		if f.Port < 1 || f.Port > 65535 {
 			return fmt.Errorf("第 %d 个中转入口的端口需在 1-65535 之间", no)
 		}
+		src, err := model.NormForwardSrc(f.Src)
+		if err != nil {
+			return fmt.Errorf("第 %d 个中转入口的来源 IP 不对: %w", no, err)
+		}
+		f.Src = src
 		if f.To == 0 {
 			if len(deployed) != 1 {
 				return fmt.Errorf("第 %d 个中转入口没选转给哪台服务器", no)
@@ -223,7 +228,13 @@ func (s *Server) normNodeOpts(line *model.Line) error {
 	valid := s.lineNodeKeys(*line)
 	out := map[string]model.NodeOpt{}
 	for k, v := range in {
-		if valid[k] && v != (model.NodeOpt{}) {
+		if !valid[k] {
+			continue
+		}
+		if err := v.Check(); err != nil {
+			return err
+		}
+		if v != (model.NodeOpt{}) {
 			out[k] = v
 		}
 	}

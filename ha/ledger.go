@@ -83,8 +83,10 @@ func installFormerLedger(tx *gorm.DB, formerId uint, ledger string) error {
 		return upsert(tx, map[string]string{hub.LedgerEpochSetting(formerId): hub.LedgerAwaitFresh})
 	}
 	if err := tx.Exec(`INSERT INTO traffic_cursors (node_id, user_name, up, down, user_id, user_created_at, ledger_id,
-		prev_ledger_id, prev_ledger_id2, prev_ledger_id3, prev_ledger_id4, stamp_up, stamp_down, cleared, cleared_at)
-		SELECT ?, user_name, up, down, user_id, user_created_at, ledger_id, 0, 0, 0, 0, up, down, 0, 0 FROM agent_counters`, formerId).Error; err != nil {
+		prev_ledger_id, prev_ledger_id2, prev_ledger_id3, prev_ledger_id4, stamp_up, stamp_down, cleared, cleared_at,
+		o_up, o_down, x_up, x_down)
+		SELECT ?, user_name, up, down, user_id, user_created_at, ledger_id, 0, 0, 0, 0, up, down, 0, 0,
+		o_up, o_down, x_up, x_down FROM agent_counters`, formerId).Error; err != nil {
 		return err
 	}
 	return upsert(tx, map[string]string{hub.LedgerEpochSetting(formerId): ledger})

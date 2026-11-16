@@ -563,6 +563,11 @@ type TrafficCursor struct {
 	StampDown     int64  `json:"stampDown" gorm:"default:0;not null"`
 	Cleared       bool   `json:"cleared" gorm:"default:false;not null"`
 	ClearedAt     int64  `json:"clearedAt" gorm:"default:0;not null"`
+	// 账本里「走了单独设倍率的节点」那四个附带数(见 AgentCounter)上次并到哪了;和 Up / Down 一起对齐
+	OUp   int64 `json:"oUp" gorm:"default:0;not null"`
+	ODown int64 `json:"oDown" gorm:"default:0;not null"`
+	XUp   int64 `json:"xUp" gorm:"default:0;not null"`
+	XDown int64 `json:"xDown" gorm:"default:0;not null"`
 }
 
 // AgentCounter 副机端:本机每用户只增不减的流量账本(不直接写 User 表,避免与主端下发冲突)。
@@ -571,6 +576,10 @@ type TrafficCursor struct {
 // id 为 0、建号时间为 OwnerAbsent = 记账时本机已经没有这个用户。
 // LedgerId 这本账的代号:新开一本(插入新行、换了主人换一本)时随机取一个,同一本累加时不变。账本被整本清掉后
 // 同一个主人从 0 重开(改名后再改回)主人还是那个人,靠代号认出是另一本。0 = 没有代号(升级前的账本),主机只看主人。
+//
+// OUp / ODown / XUp / XDown 是「走了单独设倍率的节点」(NodeOpt.Ratio)的那部分流量:O = 这部分的原始字节(已经含在 Up / Down 里),
+// X = 这部分按各自节点的倍率乘好的字节。主机并账:计费 = (Up 的增量 − O 的增量) × 服务器倍率 + X 的增量(见 hub.chargeOf)。
+// 和 Up / Down 是同一本账:一起累加、换一本时一起从头。没有节点单独设倍率时一直是 0;老版本不报(= 0),算法退化成全按服务器倍率。
 type AgentCounter struct {
 	UserName      string `json:"userName" gorm:"primaryKey"`
 	Up            int64  `json:"up"`
@@ -578,6 +587,10 @@ type AgentCounter struct {
 	UserId        uint   `json:"userId,omitempty" gorm:"default:0;not null"`
 	UserCreatedAt int64  `json:"userCreatedAt,omitempty" gorm:"default:0;not null"`
 	LedgerId      int64  `json:"ledgerId,omitempty" gorm:"default:0;not null"`
+	OUp           int64  `json:"oUp,omitempty" gorm:"default:0;not null"`
+	ODown         int64  `json:"oDown,omitempty" gorm:"default:0;not null"`
+	XUp           int64  `json:"xUp,omitempty" gorm:"default:0;not null"`
+	XDown         int64  `json:"xDown,omitempty" gorm:"default:0;not null"`
 }
 
 // NodeDecommission 停用 / 删除副机时还没送到的下线推送(一份空用户表):主机每轮重试,直到那台确认。

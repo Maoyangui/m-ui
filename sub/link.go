@@ -114,6 +114,18 @@ type addr struct {
 	relay    bool // 中转入口:中转只转这一个端口,端口跳跃不带
 	node     uint // 直连地址落在哪台服务器上;0 = 不属于任何一台(自定义地址没指定服务器)
 	fwd      int  // 中转入口的编号(LineForward.Id);直连为 0
+	// autoRatio 节点名的后缀是面板自己拼的(末尾按 srvRatio 带着「 x倍率」):节点单独设了倍率时把这一截换成节点的。
+	// 自定义地址的备注是用户写的,不动。srvRatio = 拼后缀时用的服务器倍率。
+	autoRatio bool
+	srvRatio  float64
+}
+
+// ratioSuffix 节点名末尾的倍率标记;1 倍(或没设)不标。
+func ratioSuffix(r float64) string {
+	if r > 0 && r != 1 {
+		return " x" + strconv.FormatFloat(r, 'f', -1, 64)
+	}
+	return ""
 }
 
 // key 这个地址是线路的哪个节点(model.DirectKey / ForwardKey);自定义地址没指定服务器的没有键(不能单独关)。
@@ -138,8 +150,13 @@ func subAddrs(line model.Line, entries []Entry, allowed map[uint]bool, hide map[
 	}
 	kept := all[:0:0]
 	for _, a := range all {
-		if k := a.key(); k != "" && (opts[k].Hidden || hide[k]) {
+		k := a.key()
+		if k != "" && (opts[k].Hidden || hide[k]) {
 			continue
+		}
+		// 节点单独设了倍率:节点名末尾标的是它实际生效的倍率,不是服务器的
+		if o := opts[k]; k != "" && o.Ratio > 0 && a.autoRatio {
+			a.remark = strings.TrimSuffix(a.remark, ratioSuffix(a.srvRatio)) + ratioSuffix(o.Ratio)
 		}
 		kept = append(kept, a)
 	}
@@ -192,6 +209,7 @@ func forwardAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 			ratio = " x" + strconv.FormatFloat(exit.Ratio, 'f', -1, 64)
 		}
 		a.remark = strings.TrimSuffix(exit.Suffix, ratio) + "-" + name + ratio
+		a.autoRatio, a.srvRatio = true, exit.Ratio
 		out = append(out, a)
 	}
 	return out
@@ -252,7 +270,7 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 				host = e.IP6
 			}
 		}
-		out = append(out, certAddr(addr{server: host, port: line.Port, sni: e.SNI, remark: e.Suffix, insecure: e.Insecure, node: e.NodeId}, line, e))
+		out = append(out, certAddr(addr{server: host, port: line.Port, sni: e.SNI, remark: e.Suffix, insecure: e.Insecure, node: e.NodeId, autoRatio: true, srvRatio: e.Ratio}, line, e))
 	}
 	return out
 }
