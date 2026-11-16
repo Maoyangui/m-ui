@@ -243,6 +243,10 @@ document.addEventListener('change', e => {
   if (fn) fn(el.dataset.id, el, e);
 });
 
+// switchRow 表单里的一行开关:左边名称和一句说明,右边开关。比光秃秃一个勾选框清楚,点整行都能切换。
+export const switchRow = (id, label, checked, help = '') =>
+  `<label class="sw-row"><div><b>${esc(label)}</b>${help ? `<small>${esc(help)}</small>` : ''}</div><span class="switch"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><span></span></span></label>`;
+
 // ---- 下拉菜单:表格容器有 overflow 会裁掉菜单,展开时改为 fixed 定位到 summary 下方 ----
 let menuOpenedAt = 0;
 // 「更多」按钮被表格容器裁掉一半时,点它会先把容器滚一下,这次 scroll 事件比 toggle 晚一帧到、却比 toggle 里记的打开时间早:

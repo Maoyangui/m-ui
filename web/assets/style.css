@@ -525,6 +525,29 @@ details.cert-log[open] > summary::after { content: "▴"; }
 .modal-box h3 { margin: 1.1rem 0 .5rem; }
 .modal-box h2 + h3 { margin-top: 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: .5rem; margin: 0; padding: .8rem 1.35rem; border-top: 1px solid var(--border); background: var(--surface-2); flex: none; }
+/* 表单固定两栏(弹窗里一行四栏、每栏下面一段小字说明,读起来很累);手机上一栏 */
+.form-grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.form-grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 700px) { .form-grid.cols-2, .form-grid.cols-3 { grid-template-columns: minmax(0, 1fr); } }
+/* 编辑框一页两栏:左边是按小标题分段的字段,右边整列给线路这类占地方的选择器;一屏看全。窄了上下排 */
+.edit-2pane { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 0 1.75rem; align-items: start; }
+.edit-2pane > .pane { min-width: 0; }
+.edit-2pane > .pane + .pane { padding-left: 1.75rem; border-left: 1px solid var(--divider); min-height: 100%; }
+.edit-2pane .form-sec { margin: 1.1rem 0 .75rem; padding-top: 0; border-top: none; font-size: var(--fs-base); color: var(--text); }
+.edit-2pane .pane > .form-sec:first-child { margin-top: 0; }
+.edit-2pane .lp-body { max-height: min(48vh, 26rem); }
+@media (max-width: 900px) {
+  .edit-2pane { grid-template-columns: minmax(0, 1fr); }
+  .edit-2pane > .pane + .pane { padding-left: 0; border-left: none; margin-top: 1.1rem; padding-top: 1.1rem; border-top: 1px solid var(--divider); }
+}
+/* 表单里的一行开关:左边名称和说明,右边开关(和设置页同一个样子) */
+.sw-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .7rem .85rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.sw-row > div { min-width: 0; }
+.sw-row b { display: block; font-weight: 500; }
+.sw-row small { display: block; margin-top: .1rem; font-size: var(--fs-xs); color: var(--muted); line-height: 1.5; }
+/* 表单里的分段小标题 */
+.form-sec { grid-column: 1 / -1; margin: .5rem 0 -.15rem; padding-top: .9rem; border-top: 1px solid var(--divider); font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); }
+.form-sec:first-child { margin-top: 0; padding-top: 0; border-top: none; }
 /* 危险操作的确认按钮:实心红,和旁边的「取消」一眼分得开 */
 .modal-actions .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; box-shadow: 0 1px 2px rgba(16, 24, 40, .1), inset 0 1px 0 rgba(255, 255, 255, .12); }
 .modal-actions .btn.danger:hover { background: color-mix(in srgb, var(--danger) 88%, #000); border-color: color-mix(in srgb, var(--danger) 88%, #000); }
@@ -692,6 +715,9 @@ tr.ext-sub > td { padding: .25rem 1rem 1.1rem; background: var(--surface-2); }
 tr:hover > td .ext-rename, .ext-rename:focus-visible { opacity: 1; }
 @media (hover: none) { .ext-rename { opacity: 1; } }
 .ext-grid .ext-out { width: 1%; white-space: nowrap; text-align: right; }
+/* 一台服务器一列:定宽,名字长了省略(全名在悬停提示里)。列数由脚本按面板宽度定(shownCols),表格本身不设最小宽度、不出横向滚动条 */
+table.grid.ext-grid { min-width: 0; }
+.ext-grid th.srv, .ext-grid td.srv { width: 5.75rem; max-width: 5.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ext-incl { display: inline-flex; align-items: center; gap: .4rem; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; cursor: pointer; }
 /* 表格里的分段行(服务器按分组):一行小标题,不参与悬停高亮 */
 .grid tbody tr.grp-row > td { padding: .4rem .75rem; background: var(--surface-2); color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .02em; border-bottom: 1px solid var(--divider); }
@@ -1188,6 +1214,22 @@ button.ld-srow:hover { background: var(--surface-2); }
   .ld-head select { max-width: 100%; }
 }
 
+/* 用户详情:顶上一排操作、四格概要(沿用线路详情的 .ld-sum)、订阅地址与二维码并排 */
+.ud-acts { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; margin-bottom: 1rem; }
+.ud-acts .grow { flex: 1; }
+.ld-tile .sub { font-size: var(--fs-xs); color: var(--muted); white-space: normal; }
+.ld-tile .sub .progress { margin-top: .35rem; min-width: 0; }
+.ld-tile .of { font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+.ld-tile.warn .sub { color: var(--warn-text); } .ld-tile.bad .sub { color: var(--danger-text); }
+.ud-sub { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .9rem; align-items: start; }
+.ud-sub .qr { margin: 0; width: 124px; height: 124px; }
+.ud-urls { display: flex; flex-direction: column; gap: .45rem; min-width: 0; }
+.ud-url { display: flex; align-items: center; gap: .55rem; min-width: 0; padding: .35rem .4rem .35rem .7rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.ud-url .lb { flex: none; min-width: 3.2em; font-size: var(--fs-xs); font-weight: 500; color: var(--muted); }
+.ud-url code { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ud-url .btn { flex: none; }
+.ud-kv { grid-template-columns: max-content minmax(0, 1fr); }
+@media (max-width: 700px) { .ud-sub { grid-template-columns: minmax(0, 1fr); } .ud-sub .qr { justify-self: start; } }
 /* 线路的中转入口(勾选才展开):一条一块 —— 第一行「入口 中转:端口 → 出口 地址:端口  暂停 删除」,第二行订阅节点名与要做的事 */
 .fw-box { container-type: inline-size; }
 #f-fw { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .2rem .75rem .6rem; margin-top: .5rem; background: var(--surface-2); }

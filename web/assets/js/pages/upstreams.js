@@ -10,13 +10,14 @@ const expanded = new Set();
 export const title = () => t('up.title');
 export const subtitle = () => t('up.subtitle');
 
-const TYPES = { vless: 'VLESS', vmess: 'VMess', trojan: 'Trojan', tuic: 'TUIC', hysteria2: 'Hysteria2', shadowsocks: 'Shadowsocks', socks: 'SOCKS5' };
+const TYPES = { vless: 'VLESS', vmess: 'VMess', trojan: 'Trojan', anytls: 'AnyTLS', tuic: 'TUIC', hysteria2: 'Hysteria2', shadowsocks: 'Shadowsocks', socks: 'SOCKS5' };
 const SS_METHODS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-ietf-poly1305', '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305', 'none'];
 const FPS = ['', 'chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random'];
 const FORM_KEYS = {
   vless: ['server', 'server_port', 'uuid', 'flow', 'tls', 'transport'],
   vmess: ['server', 'server_port', 'uuid', 'alter_id', 'security', 'tls', 'transport'],
   trojan: ['server', 'server_port', 'password', 'tls', 'transport'],
+  anytls: ['server', 'server_port', 'password', 'tls'],
   tuic: ['server', 'server_port', 'uuid', 'password', 'congestion_control', 'udp_relay_mode', 'zero_rtt_handshake', 'udp_over_stream', 'tls'],
   hysteria2: ['server', 'server_port', 'password', 'tls', 'up_mbps', 'down_mbps', 'obfs'],
   shadowsocks: ['server', 'server_port', 'method', 'password'],
@@ -271,6 +272,9 @@ function fieldsHTML(type, o) {
     case 'trojan': return common +
       field(t('up.f.password'), `<input id="f-password" value="${esc(o.password || '')}">`) +
       tlsClientFields(o, { required: true }) + transportFields(o);
+    case 'anytls': return common +
+      field(t('up.f.password'), `<input id="f-password" value="${esc(o.password || '')}">`) +
+      tlsClientFields(o, { required: true });
     case 'tuic': return common +
       field(t('up.f.uuid'), `<input id="f-uuid" value="${esc(o.uuid || '')}">`) +
       field(t('up.f.password'), `<input id="f-password" value="${esc(o.password || '')}">`) +
@@ -308,6 +312,8 @@ function readFields(type) {
       setTLS(); setTr(); break;
     case 'trojan':
       o.password = fv('f-password'); setTLS({ required: true }); setTr(); break;
+    case 'anytls':
+      o.password = fv('f-password'); setTLS({ required: true }); break;
     case 'tuic':
       Object.assign(o, { uuid: fv('f-uuid').trim(), password: fv('f-password'), congestion_control: fv('f-cc') });
       if (fv('f-relay')) o.udp_relay_mode = fv('f-relay');
@@ -409,7 +415,7 @@ function editUpstream(id) {
   const o = parseOpts(u.options);
   openModal(id ? t('up.edit') : t('up.add'), `
     <div class="form-grid">
-      ${id ? '' : `<div class="full">${field(t('up.import'), `<div class="row"><input id="f-link" placeholder="${t('up.importPh')}"><button type="button" class="btn" data-act="up.parse">${t('up.parse')}</button></div>`)}</div>`}
+      ${id ? '' : `<div class="full">${fieldBox(t('up.import'), `<div class="row"><input id="f-link" placeholder="${t('up.importPh')}"><button type="button" class="btn" data-act="up.parse">${t('up.parse')}</button></div>`, t('up.importHelp'))}</div>`}
       ${field(t('common.name'), `<input id="f-name" value="${esc(u.name || '')}">`)}
       ${field(t('common.type'), sel('f-type', Object.keys(TYPES), u.type, TYPES))}
       <div id="f-fields" class="form-grid full"></div>

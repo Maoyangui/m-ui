@@ -690,11 +690,11 @@
 
   <section class="sec" id="users-renew">
     <h3>续费、延期与换套餐</h3>
-    <p class="lede">列表的 <b data-k="common.more">更多</b> 菜单(或用户详情)里,<b data-k="user.renewMenu">续费…</b> 和 <b data-k="user.changeMenu">换套餐…</b> 管续费、升级、降级。</p>
+    <p class="lede">列表的 <b data-k="common.more">更多</b> 菜单(或用户详情)里,<b data-k="user.renewMenu">续费</b> 和 <b data-k="user.changeMenu">换套餐</b> 管续费、升级、降级。</p>
     <ul>
-      <li><b data-k="user.renewMenu">续费…</b>:先 <b data-k="plan.pick">选择套餐</b>(默认是他现在的套餐),再选方式:<b data-k="plan.renew">续费(清零流量并顺延)</b>、<b data-k="plan.extend">延期(保留已用流量)</b>,或 <b data-k="plan.bind" class="wrap">只归入这个套餐(流量与到期都不动)</b>。<b data-k="pc.periods">期数</b> 是一次续几期(1–120),月付套餐按季、按年卖就填 3、12;单个用户时,下面会实时显示到期和配额会变成多少。用套餐续费、延期是明确的开通动作,会把 <b data-k="user.reason.manual">手动</b> 停用的人也一并启用(对话框里会先提示;选 <b data-k="plan.bind" class="wrap">只归入这个套餐(流量与到期都不动)</b> 不改启停)。</li>
+      <li><b data-k="user.renewMenu">续费</b>:先 <b data-k="plan.pick">选择套餐</b>(默认是他现在的套餐),再选方式:<b data-k="plan.renew">续费(清零流量并顺延)</b>、<b data-k="plan.extend">延期(保留已用流量)</b>,或 <b data-k="plan.bind" class="wrap">只归入这个套餐(流量与到期都不动)</b>。<b data-k="pc.periods">期数</b> 是一次续几期(1–120),月付套餐按季、按年卖就填 3、12;单个用户时,下面会实时显示到期和配额会变成多少。用套餐续费、延期是明确的开通动作,会把 <b data-k="user.reason.manual">手动</b> 停用的人也一并启用(对话框里会先提示;选 <b data-k="plan.bind" class="wrap">只归入这个套餐(流量与到期都不动)</b> 不改启停)。</li>
       <li><b data-k="user.extend">延长 30 天</b>:有到期日的用户一键加 30 天(还没开始计时的"首次连接后 N 天"加到 N 上);因到期停用的会恢复,手动停用的仍停着。</li>
-      <li><b data-k="user.changeMenu">换套餐…</b>:<b data-k="pc.target">换成</b> 选新套餐,<b data-k="pc.mode">方式</b> 三选一:
+      <li><b data-k="user.changeMenu">换套餐</b>:<b data-k="pc.target">换成</b> 选新套餐,<b data-k="pc.mode">方式</b> 三选一:
         <ul>
           <li><b data-k="pc.mode.replace">立即替换</b>:新套餐从现在开始算 N 期,旧订阅剩下的时间和流量作废。</li>
           <li><b data-k="pc.mode.stack">叠加</b>:保留旧订阅剩下的时间(和一次性流量),再加 N 期;按周期重置的套餐,流量是每期额度,不叠加。已经过期的旧订阅不结转;新套餐不限期或不限量时,原来有限的到期或配额照旧保留。</li>
@@ -702,7 +702,7 @@
         </ul></li>
       <li><b data-k="pc.usage">本周期用量</b>:<b data-k="pc.usage.auto">自动</b>(立即替换和折算清零,叠加保留)、<b data-k="pc.usage.keep">保留(接着算)</b>、<b data-k="pc.usage.reset">清零(从新周期开始)</b>。</li>
       <li>对话框下方实时预览 <b data-k="pc.before">变更前</b> 和 <b data-k="pc.after">变更后</b>,标出 <b data-k="pc.dir.upgrade">升级</b> 还是 <b data-k="pc.dir.downgrade">降级</b>。到期提前、马上超量这类会让用户吃亏的影响标红,要勾 <b data-k="pc.force" class="wrap">我已确认上面标红的影响,仍然执行</b> 才能 <b data-k="pc.confirm">确认换套餐</b>。</li>
-      <li>只选一个用户时,<b data-k="user.renewMenu">续费…</b> 和 <b data-k="user.changeMenu">换套餐…</b> 的对话框每次打开都带一个防重复的编号:双击、网络重试都只会执行一次。勾了多个用户再批量 <b data-k="user.batch.plan">套用套餐</b> 时没有这层保护:中途报错,已经续上的人不会撤回;重试前先看列表里的到期日(或者详情里的 <b data-k="pc.history">套餐记录</b>),把已经续上的人去掉再选。</li>
+      <li>只选一个用户时,<b data-k="user.renewMenu">续费</b> 和 <b data-k="user.changeMenu">换套餐</b> 的对话框每次打开都带一个防重复的编号:双击、网络重试都只会执行一次。勾了多个用户再批量 <b data-k="user.batch.plan">套用套餐</b> 时没有这层保护:中途报错,已经续上的人不会撤回;重试前先看列表里的到期日(或者详情里的 <b data-k="pc.history">套餐记录</b>),把已经续上的人去掉再选。</li>
       <li>详情里的 <b data-k="pc.history">套餐记录</b> 能看到最近的续费和换套餐。</li>
     </ul>
     <div class="tip"><b>接商城</b>续费、换套餐也能用外部 API 做,而且可以先预览再执行(见 <a href="#api">外部 API</a>)。</div>
@@ -740,7 +740,7 @@
     <p class="lede">列表的状态一列写明为什么停用,也就决定了怎么恢复。</p>
     <ul>
       <li><b data-k="user.reason.quota">超量</b>、<b data-k="user.reason.expired">到期</b>:续费、重置流量或延长到期后自动恢复。</li>
-      <li><b data-k="user.reason.manual">手动</b>:手动停用的不会因为重置流量、延长到期或周期重置而自动恢复。但用套餐续费或延期(<b data-k="user.renewMenu">续费…</b>、批量 <b data-k="user.batch.plan">套用套餐</b>)和 <b data-k="user.changeMenu">换套餐…</b> 是明确的开通动作,会把他一并启用:续费、批量套用套餐和换套餐的对话框里会先提示里面有手动停用的人、做完会被启用,批量时列出是谁,不想启用的先取消勾选。外部 API 的续费、换套餐也一样会启用。</li>
+      <li><b data-k="user.reason.manual">手动</b>:手动停用的不会因为重置流量、延长到期或周期重置而自动恢复。但用套餐续费或延期(<b data-k="user.renewMenu">续费</b>、批量 <b data-k="user.batch.plan">套用套餐</b>)和 <b data-k="user.changeMenu">换套餐</b> 是明确的开通动作,会把他一并启用:续费、批量套用套餐和换套餐的对话框里会先提示里面有手动停用的人、做完会被启用,批量时列出是谁,不想启用的先取消勾选。外部 API 的续费、换套餐也一样会启用。</li>
       <li data-scope="admin"><b data-k="user.limited">限速中</b>:正被规则临时限速(见 <a href="#rules">规则</a>)。</li>
       <li><b data-k="user.kick">踢下线</b>:断开这个用户在所有服务器上的连接(hysteria2、TUIC、AnyTLS 整条会话一起关)。没停用的话客户端会马上重连,想彻底断就先停用。</li>
       <li>列表上方可以按 <b data-k="user.filter.all">全部</b>、<b data-k="user.filter.online">在线</b>、<b data-k="user.filter.enabled">启用</b>、<b data-k="user.filter.disabled">停用</b>、<b data-k="user.filter.expired">已过期</b>、<b data-k="user.filter.over">超量</b> 筛选,也可以只看某个套餐。在当前页全选后(手机上勾任意一个后),批量条上可以一键选中全部筛选结果,一起操作;这一下会换掉之前勾的人,只留当前的筛选结果。换筛选、换搜索之前勾的人会一直留着,批量操作时其中有当前列表里看不到的,会先问一句再处理。</li>

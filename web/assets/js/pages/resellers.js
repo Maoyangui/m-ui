@@ -2,7 +2,7 @@ import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { lineItems, keysFromRefs, linePicker, refChips } from '../linepicker.js';
-import { urlHost, gbValue, gbBytes, esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy, matches, debounce, fieldBox } from '../ui.js';
+import { urlHost, gbValue, gbBytes, esc, fmtBytes, fmtDay, toast, confirm, openModal, openDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, copy, matches, debounce, fieldBox, switchRow } from '../ui.js';
 
 export const title = () => t('rs.title');
 export const subtitle = () => t('rs.subtitle');
@@ -147,18 +147,24 @@ function userRow(u) {
 function editReseller(id) {
   const r = id ? list.find(x => x.id === id) : { enabled: true, volume: 0, deviceLimit: 0, userLimit: 0, lineIds: [] };
   let picker = null;
-  openModal(id ? t('rs.edit') : t('rs.add'), `
-    <div class="form-grid">
+  // 一页两栏:左边「基本」和「额度」,右边整列是能分给自己用户的线路(和用户编辑框同一个版式)
+  const basic = `<div class="form-grid cols-2">
       ${field(t('common.name'), `<input id="f-name" value="${esc(r.name || '')}" placeholder="${t('rs.namePh')}">`, t('rs.nameHelp'))}
+      ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(r.remark || '')}">`)}
+      ${field(t('rs.expiry'), `<input id="f-expiry" type="date" value="${r.expiry ? new Date(r.expiry * 1000).toISOString().slice(0, 10) : ''}">`, t('rs.expiryHelp'))}
+      <div class="full">${switchRow('f-enabled', t('common.enabled'), r.enabled !== false, t('rs.enabledHelp'))}</div>
+    </div>`;
+  const quota = `<div class="form-grid cols-2">
       ${field(t('rs.volumeGb'), `<input id="f-vol" type="number" min="0" step="any" value="${gbValue(r.volume)}">`, t('plan.zeroUnlimited'))}
       ${field(t('rs.userLimit'), `<input id="f-users" type="number" min="0" value="${r.userLimit || 0}">`, t('rs.userLimitHelp'))}
-      ${field(t('rs.deviceLimit'), `<input id="f-device" type="number" min="0" value="${r.deviceLimit || 0}">`, t('rs.deviceHelp'))}
-      ${field(t('rs.expiry'), `<input id="f-expiry" type="date" value="${r.expiry ? new Date(r.expiry * 1000).toISOString().slice(0, 10) : ''}">`, t('rs.expiryHelp'))}
-      ${field(t('rs.speedUp'), `<input id="f-up" type="number" min="0" value="${r.speedUp || 0}">`, t('rs.speedHelp'))}
-      ${field(t('rs.speedDown'), `<input id="f-down" type="number" min="0" value="${r.speedDown || 0}">`, t('rs.speedHelp'))}
-      ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(r.remark || '')}">`)}
-      ${check('f-enabled', t('common.enabled'), r.enabled !== false)}
-      <div class="full">${fieldBox(t('rs.lines'), `<div id="f-lines"></div>`, t('rs.linesHelp'))}</div>
+      <div class="full">${field(t('rs.deviceLimit'), `<input id="f-device" type="number" min="0" value="${r.deviceLimit || 0}">`, t('rs.deviceHelp'))}</div>
+      ${field(t('rs.speedUp'), `<input id="f-up" type="number" min="0" value="${r.speedUp || 0}">`)}
+      ${field(t('rs.speedDown'), `<input id="f-down" type="number" min="0" value="${r.speedDown || 0}">`)}
+      <p class="hint full" style="margin-top:-.4rem">${esc(t('rs.speedHelp'))}</p>
+    </div>`;
+  openModal(id ? t('rs.edit') : t('rs.add'), `<div class="edit-2pane">
+      <div class="pane"><h3 class="form-sec">${esc(t('user.tab.basic'))}</h3>${basic}<h3 class="form-sec">${esc(t('rs.tab.quota'))}</h3>${quota}</div>
+      <div class="pane"><h3 class="form-sec">${esc(t('rs.lines'))}</h3><div id="f-lines"></div><p class="hint">${esc(t('rs.linesHelp'))}</p></div>
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), enabled: fchk('f-enabled'),

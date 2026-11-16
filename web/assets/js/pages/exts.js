@@ -45,6 +45,26 @@ function colIds(c) {
   return out.length ? out : all;
 }
 
+// 逐台视图一台服务器一列。服务器一多,表格就比页面宽、只能横着滑(列被截掉一半,体验很差)——
+// 按面板现在的宽度算放得下几列:放不下的折成最后一列「其余 N 台」(几台通,点开看逐台明细);
+// 连两列都放不下(窄窗口)就按汇总视图画。任何宽度都不出横向滚动条。
+const FIXED_W = 620, COL_W = 92; // 勾选 + 名称 + 类型 + 服务器 + 大陆 + 输出 这几列大约占的宽度;一台服务器一列的宽度
+const restCols = {};             // 订阅 id → 折进「其余」那一列的服务器(测速结果回来时更新那一格要用)
+function shownCols(id, c) {
+  const view = viewOf(c);
+  if (view !== 'grid') { restCols[id] = []; return { view, cols: [], rest: [] }; }
+  const picked = (c.servers || []).filter(x => colIds(c).includes(x.id));
+  const wrap = document.getElementById('ext-wrap-' + id);
+  const room = Math.floor((((wrap && wrap.clientWidth) || 1280) - FIXED_W) / COL_W);
+  let out;
+  if (picked.length <= room) out = { view, cols: picked, rest: [] };
+  else if (room < 2) out = { view: 'sum', cols: [], rest: [] };
+  else out = { view, cols: picked.slice(0, room - 1), rest: picked.slice(room - 1) };
+  restCols[id] = out.rest;
+  return out;
+}
+const colSig = (id, c) => { const s = shownCols(id, c); return s.view + ':' + s.cols.map(x => x.id).join(',') + '+' + s.rest.length; };
+
 // 名字里带会变的数字(剩余流量、天数、到期日、倍率):这类信息节点每次刷新都改名
 const DYNAMIC = /\d+(\.\d+)?\s*(GB|MB|TB|KB|G|M|T|天|日|小时|%|倍|x)|\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}/i;
 
@@ -144,6 +164,11 @@ async function fillPanel(id) {
   again.innerHTML = panelHTML(id, cache[id]);
   renderTable(id);
   const w = document.getElementById('ext-wrap-' + id);
+  // 面板宽度变了(拖窗口、收起侧栏):放得下的列数可能变,重画表头和各行
+  if (w && typeof ResizeObserver !== 'undefined') {
+    let last = colSig(id, cache[id]);
+    new ResizeObserver(() => { const c = cache[id]; if (!c) return; const now = colSig(id, c); if (now !== last) { last = now; renderTable(id); } }).observe(w);
+  }
   if (w && keepTop[id]) w.scrollTop = keepTop[id];
   if (focusNext === id) { focusNext = 0; if (again.scrollIntoView) again.scrollIntoView({ block: 'start' }); }
 }
@@ -202,13 +227,12 @@ function redrawPanels() {
 function renderTable(id) {
   const w = document.getElementById('ext-wrap-' + id), c = cache[id];
   if (!w || !c) return;
-  const view = viewOf(c), so = sorts[id];
-  const cols = view === 'grid' ? (c.servers || []).filter(x => colIds(c).includes(x.id)) : [];
+  const { view, cols, rest } = shownCols(id, c), so = sorts[id];
   const sortTh = (k, label, cls = '') => `<th class="sortable ${cls} ${so && so.k === k ? 'sorted' : ''}" data-act="ext.sort" data-id="${id}" data-k="${k}">${label}${so && so.k === k ? (so.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
   w.innerHTML = `<table class="grid ext-grid"><thead><tr>
       <th><input type="checkbox" data-change="ext.pickAll" data-id="${id}" title="${t('common.all')}"></th>
       ${sortTh('name', t('common.name'))}<th>${t('common.type')}</th><th>${t('ext.server')}</th>
-      ${view === 'sum' ? sortTh('delay', t('ext.delay')) : cols.map(x => `<th class="num srv" title="${esc(x.name)}">${esc(x.name)}</th>`).join('')}<th>${t('ext.reachCol')}</th><th class="ext-out" title="${esc(t('ext.output'))}">${t('ext.outCol')}</th></tr></thead>
+      ${view === 'sum' ? sortTh('delay', t('ext.delay')) : cols.map(x => `<th class="num srv" title="${esc(x.name)}">${esc(x.name)}</th>`).join('') + (rest.length ? `<th class="num srv" title="${esc(rest.map(x => x.name).join('\n'))}">${esc(t('ext.restN', { n: rest.length }))}</th>` : '')}<th>${t('ext.reachCol')}</th><th class="ext-out" title="${esc(t('ext.output'))}">${t('ext.outCol')}</th></tr></thead>
       <tbody id="ext-nodes-${id}"></tbody></table>`;
   renderSubBody(id);
 }
@@ -267,6 +291,15 @@ function sumHTML(id, n, c) {
   return `<button type="button" class="link ext-sum" data-act="ext.detail" data-id="${id}" data-key="${esc(n.key)}" data-idx="${n.index}" title="${esc(t('ext.perServer'))}">${top}${sub}</button>`;
 }
 
+// 「其余 N 台」那一格:折起来的那几台里几台通(都没测过是「—」),点开看逐台明细
+function restHTML(id, n, rest) {
+  const s = sumOf((results[id] || {})[n.key], rest);
+  if (!s.tested) return '<span class="muted">—</span>';
+  if (s.pending) return `<span class="muted">… ${s.tested - s.pending}/${s.tested}</span>`;
+  if (!s.done) return `<span class="muted">${t('ext.cellUnsupported')}</span>`;
+  return `<button type="button" class="link ext-sum" data-act="ext.detail" data-id="${id}" data-key="${esc(n.key)}" data-idx="${n.index}" title="${esc(t('ext.perServer'))}"><span class="badge ${s.ok === s.done ? 'ok' : s.ok ? 'warn' : 'danger'}">${s.ok}/${s.done}</span></button>`;
+}
+
 // 大陆连通那一格:判定 + 三网通的个数与提示放在悬停说明里
 const reachHTML = r => {
   if (!r) return '<span class="muted">—</span>';
@@ -302,8 +335,7 @@ function renderSubBody(id) {
   const all = visible(id, c), servers = c.servers || [];
   const lim = limits[id] || PAGE;
   const list = all.slice(0, lim);
-  const view = viewOf(c);
-  const cols = view === 'grid' ? servers.filter(x => colIds(c).includes(x.id)) : [];
+  const { view, cols, rest } = shownCols(id, c);
   const res = results[id] || {}, rch = reaches[id] || {};
   tb.innerHTML = list.length ? list.map(n => {
     const k = esc(n.key);
@@ -317,11 +349,11 @@ function renderSubBody(id) {
       ${n.keyword ? `<div class="sub-cell">${t('ext.hiddenByKeyword')}</div>` : ''}</td>
     <td>${badge(esc(n.type))}</td>
     <td class="mono small">${esc(hostPort(n.server, n.port))}</td>
-    ${view === 'sum' ? `<td data-sum="${id}-${k}">${sumHTML(id, n, c)}</td>` : cols.map(x => `<td class="num srv" data-cell="${id}-${k}-${x.id}">${cellHTML(res[n.key] && res[n.key][x.id])}</td>`).join('')}
+    ${view === 'sum' ? `<td data-sum="${id}-${k}">${sumHTML(id, n, c)}</td>` : cols.map(x => `<td class="num srv" data-cell="${id}-${k}-${x.id}">${cellHTML(res[n.key] && res[n.key][x.id])}</td>`).join('') + (rest.length ? `<td class="num srv" data-rest="${id}-${k}">${restHTML(id, n, rest)}</td>` : '')}
     <td data-reach="${id}-${k}">${reachHTML(rch[n.key])}</td>
     <td class="ext-out"><label class="switch sm" title="${n.keyword ? t('ext.hiddenByKeyword') : t('ext.output')}"><input type="checkbox" data-change="ext.toggleNode" data-id="${id}" data-key="${k}" data-idx="${n.index}" ${n.hidden ? '' : 'checked'} ${n.keyword ? 'disabled' : ''}><span></span></label></td></tr>`;
   }).join('')
-    : `<tr><td colspan="${6 + (view === 'sum' ? 1 : cols.length)}">${empty(t('ext.noNodes'))}</td></tr>`;
+    : `<tr><td colspan="${6 + (view === 'sum' ? 1 : cols.length + (rest.length ? 1 : 0))}">${empty(t('ext.noNodes'))}</td></tr>`;
   const more = document.getElementById('ext-more-' + id);
   if (more) {
     more.hidden = all.length <= lim;
@@ -443,6 +475,7 @@ function applyResults(id, rs) {
     }
     const n = c && (c.nodes || []).find(x => x.key === key);
     if (n) document.querySelectorAll(`[data-sum="${id}-${key}"]`).forEach(td => { td.innerHTML = sumHTML(id, n, c); });
+    if (n && (restCols[id] || []).length) document.querySelectorAll(`[data-rest="${id}-${key}"]`).forEach(td => { td.innerHTML = restHTML(id, n, restCols[id]); });
   }
 }
 function tally(rs) {

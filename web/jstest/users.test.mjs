@@ -51,6 +51,7 @@ export const copy = async (s) => { (globalThis.__copied ||= []).push(s); };
 export const setHTML = (t, h) => { const e = typeof t === 'string' ? el(t) : t; if (e) e.innerHTML = h; };
 export const setText = (t, s) => { const e = typeof t === 'string' ? el(t) : t; if (e) e.textContent = s; };
 export const tzOffsetMinutes = () => 0;
+export const switchRow = () => '';
 // 长名单折叠成 +N:用例只看内容,原样拼起来
 export const chipList = (items) => '<span class="chips">' + (items || []).join('') + '</span>';`);
 after(() => fs.rmSync(dir, { recursive: true, force: true }));

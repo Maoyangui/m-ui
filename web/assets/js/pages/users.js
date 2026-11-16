@@ -20,7 +20,7 @@ const pickerNodes = () => (Array.isArray(state.nodes) && state.nodes.length) ? s
 const pickerItems = () => lineItems(state.lines, pickerNodes(), isReseller() ? (state.status.grants || []) : null);
 const refsOf = u => u.lineRefs || (u.lineIds || []).map(id => ({ lineId: id }));
 let picker = null;
-import { tzOffsetMinutes } from '../ui.js';
+import { tzOffsetMinutes, switchRow } from '../ui.js';
 
 export const title = () => t('user.title');
 export const subtitle = () => t('user.subtitle');
@@ -256,46 +256,63 @@ async function showDetail(id) {
   drawerUser = id;
   const links = await get(`users/${id}/sub`);
   const used = (u.up || 0) + (u.down || 0);
+  // 版式:最上面一排操作(常用的三个露着,其余收进「更多」)→ 四格概要(用量 / 到期 / 设备 / 限速)→ 订阅地址和二维码并排 →
+  // 在线设备、流量图 → 其它资料、线路、套餐记录。以前是订阅、用量、一排七个按钮一路往下堆,最常看的几样要滚半屏
+  const left = u.expiry ? daysLeft(u.expiry) : null;
+  const ips = u.onlineIps || [];
+  const subRow = (label, url, extra = '') => `<div class="ud-url"><span class="lb">${esc(label)}</span><code title="${esc(url)}">${esc(url)}</code><button class="btn sm" data-act="user.copyText" data-id="${esc(url)}">${t('common.copy')}</button>${extra}</div>`;
+  const tile = (lb, v, sub = '', cls = '') => `<div class="ld-tile${cls ? ' ' + cls : ''}"><span class="lb">${esc(lb)}</span><b>${v}</b>${sub ? `<span class="sub">${sub}</span>` : ''}</div>`;
   openDrawer(`${esc(u.name)} ${statusBadge(u)}`, `
+    <div class="ud-acts">
+      <button class="btn sm primary" data-act="user.renew" data-id="${id}">${t('user.renewMenu')}</button>
+      ${state.plans.length ? `<button class="btn sm" data-act="user.change" data-id="${id}">${t('user.changeMenu')}</button>` : ''}
+      <button class="btn sm" data-act="user.edit" data-id="${id}">${t('common.edit')}</button>
+      <span class="grow"></span>
+      <details class="menu"><summary class="btn sm">${t('common.more')}</summary><div class="menu-list">
+        ${u.expiry ? `<button data-act="user.extend" data-id="${id}">${t('user.extend')}</button>` : ''}
+        <button data-act="user.reset" data-id="${id}">${t('user.reset')}</button>
+        <button data-act="user.kick" data-id="${id}">${t('user.kick')}</button>
+        <button data-act="user.rotate" data-id="${id}">${t('user.rotate')}</button>
+      </div></details>
+    </div>
+    <div class="ld-sum">
+      ${tile(t('user.usage'), fmtBytes(used, 1), `/ ${u.volume ? fmtBytes(u.volume, 0) : t('common.unlimited')}${progress(used, u.volume)}`)}
+      ${tile(t('user.expiry'), u.activateDays ? esc(t('user.activateIn', { n: u.activateDays })) : u.expiry ? fmtDay(u.expiry) : esc(t('user.never')),
+        left == null ? '' : left <= 0 ? esc(t('user.expired')) : esc(t('user.daysLeft', { n: left })), left != null && left <= 3 ? 'bad' : left != null && left <= 7 ? 'warn' : '')}
+      ${tile(t('user.d.devices'), `${deviceCount(ips)}<span class="of"> / ${u.deviceLimit || '∞'}</span>`, u.onlineAt ? esc(t('user.lastOnline') + ' ' + fmtRelative(u.onlineAt)) : '')}
+      ${tile(t('user.speed'), esc(speedText(u.speedUp, u.speedDown)), (u.speedUp || u.speedDown) ? esc(t('user.d.speedSub')) : '')}
+    </div>
     <section>
       <h3>${t('user.subscription')}</h3>
-      <div class="sub-box"><code>${esc(links.clash)}</code><button class="btn sm" data-act="user.copyText" data-id="${esc(links.clash)}">${t('common.copy')}</button></div>
-      <div class="sub-box"><code>${esc(links.link)}</code><button class="btn sm" data-act="user.copyText" data-id="${esc(links.link)}">${t('common.copy')}</button></div>
-      ${links.share ? `<div class="sub-box">${badge(t('user.share'), 'warn')}<code>${esc(links.share)}</code><button class="btn sm" data-act="user.copyText" data-id="${esc(links.share)}">${t('common.copy')}</button><button class="btn sm danger" data-act="user.unshare" data-id="${id}">${t('user.unshare')}</button></div>` : ''}
-      <img class="qr" src="${qrUrl(id, 'clash')}" alt="QR" title="${t('user.subClash')}">
-    </section>
-    <section>
-      <h3>${t('user.usage')}</h3>
-      <dl class="kv">
-        <dt>${t('user.usage')}</dt><dd>${fmtBytes(used)} / ${u.volume ? fmtBytes(u.volume) : t('common.unlimited')}${progress(used, u.volume)}</dd>
-        <dt>${t('dash.up')} / ${t('dash.down')}</dt><dd class="num">${fmtBytes(u.up)} / ${fmtBytes(u.down)}</dd>
-        <dt>${t('user.total')}</dt><dd class="num">${fmtBytes((u.totalUp || 0) + (u.totalDown || 0) + used)}</dd>
-        <dt>${t('user.expiry')}</dt><dd>${u.activateDays ? t('user.activateIn', { n: u.activateDays }) : u.expiry ? fmtDay(u.expiry) : t('user.never')}</dd>
-        ${planNameOf(u) ? `<dt>${t('user.plan')}</dt><dd>${esc(planNameOf(u))}</dd>` : ''}
-        <dt>${t('user.lastOnline')}</dt><dd>${u.onlineAt ? fmtRelative(u.onlineAt) : '—'}</dd>
-        <dt>${t('user.f.autoReset')}</dt><dd>${u.autoReset ? `${u.resetDays} ${t('common.day')} · ${fmtDay(u.nextReset)}` : t('common.no')}</dd>
-      </dl>
-      ${ruleLimitsHTML(u)}
-      <div class="row" style="margin-top:.6rem;flex-wrap:wrap">
-        <button class="btn sm primary" data-act="user.renew" data-id="${id}">${t('user.renewMenu')}</button>
-        ${state.plans.length ? `<button class="btn sm" data-act="user.change" data-id="${id}">${t('user.changeMenu')}</button>` : ''}
-        ${u.expiry ? `<button class="btn sm" data-act="user.extend" data-id="${id}">${t('user.extend')}</button>` : ''}
-        <button class="btn sm" data-act="user.reset" data-id="${id}">${t('user.reset')}</button>
-        <button class="btn sm" data-act="user.kick" data-id="${id}">${t('user.kick')}</button>
-        <button class="btn sm" data-act="user.rotate" data-id="${id}">${t('user.rotate')}</button>
-        <button class="btn sm" data-act="user.edit" data-id="${id}">${t('common.edit')}</button>
+      <div class="ud-sub">
+        <div class="ud-urls">
+          ${subRow(t('user.d.link'), links.link)}
+          ${subRow('Clash', links.clash)}
+          ${links.share ? subRow(t('user.share'), links.share, `<button class="btn sm danger" data-act="user.unshare" data-id="${id}">${t('user.unshare')}</button>`) : ''}
+        </div>
+        <img class="qr" src="${qrUrl(id, 'clash')}" alt="QR" title="${t('user.subClash')}">
       </div>
     </section>
-    <section><h3>${t('pc.history')}</h3><div id="ud-planops"><span class="muted small">${t('common.loading')}</span></div></section>
-    <section><h3>${t('user.onlineIps')}</h3><div id="ud-ips"></div></section>
+    <section><h3>${t('user.onlineIps')}</h3><div id="ud-ips"></div>${ruleLimitsHTML(u)}</section>
     <section>
-      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:.4rem"><h3 style="margin:0">${t('user.trafficChart')}</h3>
-        <div class="seg">${[24, 168, 720].map(h => `<button data-act="user.chartRange" data-id="${h}" class="${h === drawerRange ? 'active' : ''}">${t('dash.range.' + (h === 24 ? '24h' : h === 168 ? '7d' : '30d'))}</button>`).join('')}</div></div>
+      <div class="ld-head"><h3>${t('user.trafficChart')}</h3>
+        <div class="seg sm">${[24, 168, 720].map(h => `<button data-act="user.chartRange" data-id="${h}" class="${h === drawerRange ? 'active' : ''}">${t('dash.range.' + (h === 24 ? '24h' : h === 168 ? '7d' : '30d'))}</button>`).join('')}</div></div>
       <div id="ud-chart"></div>
       ${state.status && state.status.role === 'node' ? `<p class="hint">${t('user.chartNode')}</p>` : ((state.nodes || []).some(n => n.ratio > 0 && n.ratio !== 1) ? `<p class="hint">${t('user.chartRatio')}</p>` : '')}
     </section>
+    <section>
+      <h3>${t('user.d.info')}</h3>
+      <dl class="kv ud-kv">
+        ${planNameOf(u) ? `<dt>${t('user.plan')}</dt><dd>${esc(planNameOf(u))}</dd>` : ''}
+        ${u.remark ? `<dt>${t('user.f.remark')}</dt><dd>${esc(u.remark)}</dd>` : ''}
+        <dt>${t('dash.up')} / ${t('dash.down')}</dt><dd class="num">${fmtBytes(u.up)} / ${fmtBytes(u.down)}</dd>
+        <dt>${t('user.total')}</dt><dd class="num">${fmtBytes((u.totalUp || 0) + (u.totalDown || 0) + used)}</dd>
+        <dt>${t('user.f.autoReset')}</dt><dd>${u.autoReset ? `${u.resetDays} ${t('common.day')} · ${fmtDay(u.nextReset)}` : t('common.no')}</dd>
+      </dl>
+    </section>
     <section><h3>${t('user.lines')}</h3>${refChips(refsOf(u), state.lines, pickerNodes(), { key: 'ud-lines-' + u.id, max: 20 }) || `<span class="muted small">${t('common.none')}</span>`}
-      ${(u.extIds || []).length ? `<h3 style="margin-top:.6rem">${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span></span>` : ''; }).join('')}</div>` : ''}</section>`, { wide: true });
+      ${(u.extIds || []).length ? `<h3>${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span></span>` : ''; }).join('')}</div>` : ''}</section>
+    <section><h3>${t('pc.history')}</h3><div id="ud-planops"><span class="muted small">${t('common.loading')}</span></div></section>`, { wide: true });
   refreshDrawerLive();
   loadPlanOps(id);
   await renderUserChart(u.name, drawerRange);
@@ -353,11 +370,15 @@ function fillFromPlan(planId) {
 function editUser(id) {
   const u = id ? state.users.find(x => x.id === id) : { enabled: true, lineIds: [], resetDays: 30 };
   const expiryVal = u.expiry ? new Date(u.expiry * 1000).toISOString().slice(0, 10) : '';
-  openModal(id ? t('user.edit') : t('user.add'), `
-    <div class="form-grid">
+  // 一页两栏:左边是「基本」和「额度与限速」(各有小标题,两列排),右边整列是线路。一屏看全,不用切换。
+  // 以前所有栏一屏四列铺开、线路又挤在最下面;试过分三个页签,这点内容分页反而要多点几次、看不到全貌
+  const basic = `<div class="form-grid cols-2">
       ${field(nameLabel(), `<input id="f-name" value="${esc(u.name || '')}">`, nameHelp())}
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(u.remark || '')}">`)}
       ${state.plans.length ? `<div class="full">${field(t('user.plan'), `<div class="row">${planSelect('f-plan', u.planId || 0)}<button type="button" class="btn" data-act="user.fillPlan">${t('user.fromPlan')}</button></div>`, t('user.planHelp'))}</div>` : ''}
+      <div class="full">${switchRow('f-enabled', t('user.f.enabled'), u.enabled !== false, t('user.f.enabledHelp'))}</div>
+    </div>`;
+  const quota = `<div class="form-grid cols-2">
       ${field(t('user.f.volume'), `<input id="f-volume" type="number" min="0" step="any" value="${gbValue(u.volume)}">`)}
       ${field(t('user.f.expiry'), `<input id="f-expiry" type="date" value="${expiryVal}">`)}
       ${field(t('user.f.activate'), `<input id="f-activate" type="number" min="0" value="${u.activateDays || 0}">`, t('user.f.activateHelp'))}
@@ -365,13 +386,16 @@ function editUser(id) {
       ${field(t('user.f.up'), `<input id="f-up" type="number" min="0" value="${u.speedUp || 0}">`)}
       ${field(t('user.f.down'), `<input id="f-down" type="number" min="0" value="${u.speedDown || 0}">`, t('user.f.speedHelp'))}
       ${field(t('user.f.resetDays'), `<input id="f-resetdays" type="number" min="1" value="${u.resetDays || 30}">`)}
-      ${check('f-enabled', t('user.f.enabled'), u.enabled !== false)}
-      ${check('f-autoreset', t('user.f.autoReset'), !!u.autoReset)}
-      <div class="full">${fieldBox(t('user.f.lines'), `<div id="f-lines"></div>`, t('lp.help'))}</div>
-      ${(state.exts || []).length ? `<div class="full">${fieldBox(t('user.f.exts'), `
-        <div class="check-list">
+      <label class="field check" style="align-self:end;min-height:var(--ctl-h)"><input type="checkbox" id="f-autoreset" ${u.autoReset ? 'checked' : ''}><span>${esc(t('user.f.autoReset'))}</span></label>
+    </div>`;
+  const linesTab = `<div id="f-lines"></div><p class="hint">${esc(t('lp.help'))}</p>
+      ${(state.exts || []).length ? `<h3 class="form-sec">${esc(t('user.f.exts'))}</h3>
+        <div class="check-list one-col">
           ${(state.exts || []).map(x => `<label><input type="checkbox" class="ext-cb" value="${x.id}" ${(u.extIds || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name)} <span class="muted small">${x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink')} · ${x.nodeCount || 0}</span></label>`).join('')}
-        </div>`, t('user.f.extsHelp'))}</div>` : ''}
+        </div><p class="hint">${esc(t('user.f.extsHelp'))}</p>` : ''}`;
+  openModal(id ? t('user.edit') : t('user.add'), `<div class="edit-2pane">
+      <div class="pane"><h3 class="form-sec">${esc(t('user.tab.basic'))}</h3>${basic}<h3 class="form-sec">${esc(t('user.tab.quota'))}</h3>${quota}</div>
+      <div class="pane"><h3 class="form-sec">${esc(t('user.tab.lines'))}</h3>${linesTab}</div>
     </div>`, async () => {
     const expiry = fv('f-expiry');
     const activateDays = Math.max(0, Number(fv('f-activate')) || 0);
