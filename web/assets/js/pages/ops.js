@@ -1,9 +1,10 @@
 // 运维页:只管「这台服务器自己」。三层:
 //   1. 最上面一排小卡(和概览同一种):主机、已运行、内存、Swap、磁盘 —— 一眼看这台机器好不好;用量各带一条细进度条,磁盘紧了变色。
-//   2. 系统优化 —— 一张表,一行一项,列对齐:项目(前面一个圆点:绿勾 = 做过了,空心 = 没做)、现在的值、参数、执行。
+//   2. Cloudflare WARP 和任务输出两张等高的卡并排(用户看过后定的:这两样要在系统优化的上面):WARP 只列现在用得上的信息和按钮
+//      (没装只有「安装」,装了没启用是「启用」「卸载」,启用着才有「检测出口」「添加为上游」「停用」),端口就写在 SOCKS5 那一行里改;
+//      任务输出没跑过任务时只是一行字,跑起来实时显示。
+//   3. 系统优化 —— 一张表,一行一项,列对齐:项目(前面一个圆点:绿勾 = 做过了,空心 = 没做)、现在的值、参数、执行。
 //      表头右边是「一键优化」(做前四项)。内核参数那一大段文本平时不摊开,点「修改参数」在弹框里改。
-//   3. Cloudflare WARP 和任务输出两张等高的卡并排:WARP 只列现在用得上的信息和按钮(没装只有「安装」,装了没启用是「启用」「卸载」,
-//      启用着才有「检测出口」「添加为上游」「停用」),端口就写在 SOCKS5 那一行里改;任务输出没跑过任务时只是一行字,跑起来实时显示。
 // 排版上走过的弯路:① 最早是六个大小不一的灰色方块(三个并排的小方块 + 三个通栏的),内核参数的大文本框一直摊在页面上;
 // ② 改成通栏清单后每一行左边是说明、右边隔着大半屏才是输入框和按钮,右侧参差不齐,上面三个用量方块又宽又空 —— 用户看了说「排版不够好」。
 import { get, post, SLOW } from '../api.js';
@@ -119,7 +120,7 @@ export async function render(el, fresh = false) {
 
   el.innerHTML = `
     ${!linux ? `<div class="alert-bar warn ops-warn"><span>${esc(t('ops.linuxOnly'))}</span></div>` : (!i.root ? `<div class="alert-bar warn ops-warn"><span>${esc(t('ops.rootOnly'))}</span></div>` : '')}
-    ${stats}${tuneCard}<div class="ops-pair">${warpCard}${outCard}</div>`;
+    ${stats}<div class="ops-pair">${warpCard}${outCard}</div>${tuneCard}`;
   const lg = document.getElementById('ops-log');
   if (lg) lg.scrollTop = lg.scrollHeight;
   if (st.running) startPoll();

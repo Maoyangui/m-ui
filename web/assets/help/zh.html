@@ -967,8 +967,8 @@
   <section class="sec" id="bk-now">
     <h3>备份</h3>
     <ul>
-      <li><b data-k="nav.backup">备份</b> 页最上面一张卡的右上角:<b data-k="bk.dlNow">下载备份</b> 直接存到你的电脑上,<b data-k="bk.saveLocal">保存到服务器</b> 存进备份目录(出现在下面的 <b data-k="bk.local">服务器上的备份</b> 列表里,可以再下载、还原、删除)。卡里两格是最近一次备份的时间和大小、备份存在哪。</li>
-      <li>旁边的 <b data-k="bk.schedule">定时备份</b> 卡默认没有开:打开 <b data-k="bk.sched.on">每天自动备份</b>,选 <b data-k="bk.sched.hour">备份时间</b>(按面板时区,见 <b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.timezone">时区</b>)和 <b data-k="bk.keep">保留份数</b>(默认 7;升级前自动留的备份另算,只留最近两份);还可以打开 <b data-k="bk.telegram">同时推送到 Telegram</b>(先配好 Telegram 通知)。这四项改了当场保存,不用另点保存。定时备份失败时这张卡用红字写明原因,概览的「需要处理」也会提醒。</li>
+      <li><b data-k="nav.backup">备份</b> 页下面的 <b data-k="bk.card">备份</b> 卡列出这台服务器上存着的备份,每一行可以下载、还原、删除;卡的右上角 <b data-k="bk.dlNow">下载备份</b> 现做一份直接存到你的电脑上,<b data-k="bk.saveLocal">保存到服务器</b> 现做一份存进备份目录(目录和总大小写在表格下面)。</li>
+      <li>页面最上面左边的 <b data-k="bk.schedule">定时备份</b> 卡默认没有开:打开标题右边的开关,在「每天 … 自动备份,保留最近 … 份」那句话里选几点做(按面板时区,见 <b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.timezone">时区</b>)、留几份(默认 7;升级前自动留的备份另算,只留最近两份);还可以打开 <b data-k="bk.telegram">同时推送到 Telegram</b>(先配好 Telegram 通知)。这几项改了当场保存,不用另点保存。定时备份失败时这张卡用红字写明原因,概览的「需要处理」也会提醒。</li>
       <li>命令行:<code>m-ui backup -db /etc/m-ui/m-ui.db -out 备份.zip</code>,或者 <code>m-ui</code> 菜单 9。</li>
     </ul>
     <div class="pit"><b>常见坑</b>备份里有全部用户凭据和证书私钥,不要发到公开的地方。</div>
@@ -977,7 +977,7 @@
   <section class="sec" id="bk-restore">
     <h3>还原</h3>
     <ol class="steps">
-      <li><b data-k="nav.backup">备份</b> 页 → <b data-k="bk.restore">还原</b> → <b data-k="bk.pick">选择备份文件…</b>(zip 或 .db);服务器上已有的备份,在列表里那一行点 <b data-k="bk.restoreBtn">还原</b>。两种都先给你看这份备份里有什么(来源、用户、线路、上游、证书各多少),确认了才动。</li>
+      <li><b data-k="nav.backup">备份</b> 页最上面右边的 <b data-k="bk.restore">还原</b> 卡:点 <b data-k="bk.pick">选择备份文件…</b>(zip 或 .db),或者把文件拖进那个虚线框;服务器上已有的备份,在下面列表里那一行点 <b data-k="bk.restoreBtn">还原</b>。两种都先给你看这份备份里有什么(来源、用户、线路、上游、证书各多少),确认了才动。</li>
       <li>确认后 m-ui 自动重启,替换数据库和证书。设置和证书库里引用的数据目录外的证书文件(比如 <b data-k="cert.srcExternal">已有证书</b>、从旧面板导入的证书路径)不往原路径写:这台机器原路径上的证书能接着用(现在有效、包含备份里那张的全部域名、和私钥配得上,而且不比备份里的旧或者还剩两周以上)就接着用它;不能用才把备份里那份放进 <code>/etc/m-ui/cert/restored/</code>,并把设置和证书库改指过去。还原结果在页面顶部提示一次。面板、订阅和代理面板的证书文件万一还是缺了,先用临时自签证书启动(仍走 HTTPS)并告警,不会起不来。</li>
       <li>原来的库保留为 <code>.bak-*</code> 文件,只留最近两份:连着还原几次,最早那份会被删掉。拿不准该用哪份备份时,先点 <b data-k="bk.dlNow">下载备份</b> 把当前的库下载下来再试。</li>
     </ol>

@@ -1,9 +1,9 @@
 // 备份页。从上到下三段,每段通栏或两张等高的卡并排,不嵌套方块:
-//   1. 「备份」—— 这一页的主体就是服务器上现有的备份这张表;右上角两个按钮(存一份到服务器、下载一份),表下面一行小字写存在哪、一共多大。
-//      (以前这张表在页面最底下,和「立即备份」隔着整个换机向导。)
-//   2. 「定时备份」和「还原」两张卡并排、一样高:
+//   1. 「定时备份」和「还原」两张卡并排、一样高,放在最上面(用户看过后定的:这两样要在备份表的上面):
 //      定时备份 —— 标题右边是总开关,下面是一句话「每天 [04:00] 自动备份,保留最近 [7] 份」和「同时推送到 Telegram」的开关,改了当场保存;
-//      还原 —— 一句话说明后果,一个「选择备份文件」按钮(选完先看里面有什么,确认了才动)。
+//      还原 —— 一句话说明后果,一个可点、可把文件拖进来的虚线框(选完先看里面有什么,确认了才动)。
+//   2. 「备份」—— 服务器上现有的备份这张表;右上角两个按钮(存一份到服务器、下载一份),表下面一行小字写存在哪、一共多大。
+//      (以前这张表在页面最底下,和「立即备份」隔着整个换机向导。)
 //   3. 「换到新服务器」—— 平时用不到,收成一行,点开是四步(带序号的竖排步骤)。
 // 排版上走过两次弯路,记在这里免得再走:① 把定时备份的四项收进弹框 —— 「同时推送到 Telegram」从页面上消失,要点「设置」才找得到,常用的开关不该藏;
 // ② 备份、定时备份左右并排 —— 两张卡高矮不齐,右边窄栏里每项的说明挤成两三行,再加两个又大又空的灰色方块,整页又重又乱。
@@ -100,6 +100,14 @@ function draw(el = document.getElementById('page')) {
   const open = !!el.querySelector('details.bk-mig[open]'); // 重画时(存了一份、删了一份)换机步骤开着就别收起来
   setHTML(el, `
     ${data.restorePending ? `<div class="alert-bar warn bk-pending"><span>${esc(t('bk.pending'))}</span><button class="btn sm" data-act="bk.restart">${t('bk.restartNow')}</button></div>` : ''}
+    <div class="bk-pair">
+      <section class="card bk-auto" id="bk-auto">${autoHTML()}</section>
+      <section class="card bk-restore">
+        <div class="card-head"><h2>${t('bk.restore')}</h2></div>
+        <p class="hint">${esc(t('bk.restoreHelp'))}</p>
+        <label class="bk-drop" tabindex="0" role="button"><input type="file" id="bk-file" accept=".zip,.db" hidden><b>${esc(t('bk.pick'))}</b><span>${esc(t('bk.dropHint'))}</span></label>
+      </section>
+    </div>
     <section class="card bk-main">
       <div class="card-head"><h2>${t('bk.card')}<span class="h-count">${data.files.length || ''}</span></h2>
         <div class="head-acts">
@@ -110,14 +118,6 @@ function draw(el = document.getElementById('page')) {
       <p class="hint">${esc(t('bk.nowHelp'))}</p>
       ${listHTML()}
     </section>
-    <div class="bk-pair">
-      <section class="card bk-auto" id="bk-auto">${autoHTML()}</section>
-      <section class="card bk-restore">
-        <div class="card-head"><h2>${t('bk.restore')}</h2></div>
-        <p class="hint">${esc(t('bk.restoreHelp'))}</p>
-        <label class="bk-drop" tabindex="0" role="button"><input type="file" id="bk-file" accept=".zip,.db" hidden><b>${esc(t('bk.pick'))}</b><span>${esc(t('bk.dropHint'))}</span></label>
-      </section>
-    </div>
     <details class="card bk-mig"${open ? ' open' : ''}>
       <summary><div><h2>${t('mig.title')}</h2><p class="hint">${esc(t('mig.sum'))}</p></div><i class="i i-chev"></i></summary>
       <p class="hint">${esc(t('mig.help'))}</p>
