@@ -13,4 +13,12 @@ type UpstreamSource struct {
 	FollowedAt int64  `json:"followedAt"` // 最近一次真的跟着改了的时间
 	Note       string `json:"note"`       // 最近一次的结论,见 web 的 follow* 常量
 	Detail     string `json:"detail"`     // 结论的补充(跟着改了什么:旧地址 → 新地址)
+	// Stop 停止跟随的原因;空 = 跟随着。停下只是不再自动换配置:上游现在的配置原样留着,来源也还记着,随时能重新打开。
+	Stop string `json:"stop"`
 }
+
+// 停止跟随的两种来由(UpstreamSource.Stop)。
+const (
+	FollowStopUser   = "user"   // 管理员在上游页关掉的
+	FollowStopEdited = "edited" // 手动改过这条上游的类型或参数:它不再是订阅里那个节点的样子了
+)

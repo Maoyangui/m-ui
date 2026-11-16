@@ -709,9 +709,22 @@ function route(method, path, query, body) {
       if (method === 'POST' && !seg[1]) { const u = { id: nextId(S.upstreams), sort: S.upstreams.length + 1, ...body }; S.upstreams.push(u); return clone(u); }
       const u = find(S.upstreams, id);
       if (seg[2] === 'test') return { id, servers: demoUpTest(u) };
-      if (method === 'DELETE') { S.upstreams = S.upstreams.filter(x => x.id !== id); S.upBroken.delete(id); return ok(); }
-      if (seg[2] === 'source' && method === 'DELETE') { delete u.source; return ok(); } // 不再跟随
-      if (method === 'PUT' && u.source && JSON.stringify(body.options) !== JSON.stringify(u.options)) delete u.source; // 手动改过参数就不再跟随
+      if (seg[2] === 'source') { // 跟随是个开关:停下只是不再自动换,来源留着,能再打开(DELETE 是老写法,等于停下)
+        if (!u.source) throw demoErr(400, '这条上游不是从外部节点加来的,没有可以跟随的订阅');
+        if (method === 'PUT' && body && body.follow === true) { delete u.source.stop; u.source.note = ''; u.source.detail = ''; u.source.triedAt = 0; }
+        else u.source.stop = 'user';
+        return ok();
+      }
+      if (method === 'DELETE') {
+        // 和后端同一口径:还有线路在用(当出站的、分流规则指过来的)不让删,并点名是哪些;是某个上游组的成员也不让删
+        const rulesOf = l => { let v = l.routeRules; if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = []; } } return Array.isArray(v) ? v : []; };
+        const using = S.lines.filter(l => l.upstreamId === id || rulesOf(l).some(r => Number(r.to) === id)).map(l => l.name);
+        if (using.length) throw demoErr(400, `这条上游还有 ${using.length} 条线路在用,不能删除:${using.slice(0, 8).join(', ')}${using.length > 8 ? ' …' : ''}。先把这些线路的出站(或指向它的分流规则)换成别的`);
+        const grp = S.upstreams.find(g => g.type === 'urltest' && g.id !== id && ((typeof g.options === 'string' ? JSON.parse(g.options || '{}') : g.options || {}).outbounds || []).includes(u.name));
+        if (grp) throw demoErr(400, `这条上游在上游组「${grp.name}」里,先从组里去掉`);
+        S.upstreams = S.upstreams.filter(x => x.id !== id); S.upBroken.delete(id); return ok();
+      }
+      if (method === 'PUT' && u.source && !u.source.stop && JSON.stringify(body.options) !== JSON.stringify(u.options)) u.source.stop = 'edited'; // 手动改过参数就停止跟随(来源留着)
       if (method === 'PUT') { Object.assign(u, body, { id }); S.upBroken.delete(id); demoUpTest(u); return clone(u); } // 改过就算修好了,顺手复查一次
       return ok();
     }

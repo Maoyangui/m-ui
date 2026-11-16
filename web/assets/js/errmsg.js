@@ -487,7 +487,6 @@ const EN = /*BEGIN*/{
 "证书设置已保存，数据面重载失败: %w": "Certificate settings saved, but reloading the data plane failed: %w",
 "证书设置已保存，重启订阅服务失败: %w": "Certificate settings saved, but restarting the subscription service failed: %w",
 "证书输出路径为空": "Certificate output path is empty",
-"该上游仍被 %d 条线路使用(含分流规则),无法删除": "This upstream is still used by %d lines (including routing rules); can't delete it",
 "「%s」不是 IP 或 IP 段(例:1.2.3.4、91.108.4.0/22)": "\"%s\" is not an IP or IP range (e.g. 1.2.3.4, 91.108.4.0/22)",
 "「%s」不是域名:只填域名本身,比如 netflix.com": "\"%s\" is not a domain: enter just the domain, e.g. netflix.com",
 "「%s」不是端口或端口区间(例:443、8000-9000)": "\"%s\" is not a port or port range (e.g. 443, 8000-9000)",
@@ -869,7 +868,9 @@ const EN = /*BEGIN*/{
 "开着主机容灾、连订阅一起接管:端口 %d 是订阅端口,服务器「%s」接任后要用它提供订阅,换一个": "Master failover with subscriptions taken over: port %d is the subscription port, which server \"%s\" needs after taking over; pick another",
 "开着主机容灾:端口 %d 是服务器「%s」的代理面板端口,它接任后要用,换一个": "Master failover is on: port %d is the reseller panel port of server \"%s\", which it needs after taking over; pick another",
 "开着主机容灾、连订阅一起接管:订阅端口 %d 被副机上的线路占着(接任后那台要用它提供订阅),换一个或先改那些线路的端口 —— %s": "Master failover with subscriptions taken over: subscription port %d is used by lines on nodes (the node that takes over needs it to serve subscriptions); pick another or change those lines first — %s",
-"开着主机容灾、连订阅一起接管:端口 %d 是主机的面板端口,服务器「%s」接任后要用它提供面板和外部 API,换一个": "Master failover with subscriptions taken over: port %d is the master's panel port, which server \"%s\" needs after taking over to serve the panel and the external API; pick another"
+"开着主机容灾、连订阅一起接管:端口 %d 是主机的面板端口,服务器「%s」接任后要用它提供面板和外部 API,换一个": "Master failover with subscriptions taken over: port %d is the master's panel port, which server \"%s\" needs after taking over to serve the panel and the external API; pick another",
+"这条上游还有 %d 条线路在用,不能删除:%s。先把这些线路的出站(或指向它的分流规则)换成别的": "%d line(s) still use this upstream, so it cannot be deleted: %s. Switch those lines to another outbound (or change the route rules that point to it) first",
+"这条上游不是从外部节点加来的,没有可以跟随的订阅": "This upstream was not added from an external node, so there is no subscription to follow"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

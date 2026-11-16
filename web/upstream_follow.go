@@ -209,6 +209,9 @@ func (s *Server) followTick(now time.Time) {
 			s.db.Delete(&model.UpstreamSource{}, "upstream_id = ?", src.UpstreamId)
 			continue
 		}
+		if src.Stop != "" { // 停止跟随了:来源留着,不动上游
+			continue
+		}
 		if !allFailing(row, threshold) {
 			continue
 		}
@@ -265,6 +268,21 @@ func (s *Server) followOne(src model.UpstreamSource, now int64) {
 	it, cands, idx := candsOf(e)
 	curServer, curPort := endpointOf(up.Options)
 	i, verdict := pickSuccessor(src, up.Type, curServer, cands)
+	if verdict == followUnchanged {
+		// 订阅里那个节点一字没变。可上游现在的配置不一定就是它:手动改过参数(于是停了跟随)、之后又把跟随打开的,
+		// 两边已经不一样 —— 这时该做的正是把订阅里的那份换回来;一样才是真的「没变,不动」
+		for k, c := range cands {
+			if c.Key != src.Key {
+				continue
+			}
+			if typ, opts, err := ext.Outbound(it.Nodes[idx[k]]); err == nil {
+				if b, _ := json.Marshal(opts); !sameOutbound(up.Type, up.Options, typ, b) {
+					i, verdict = k, ""
+				}
+			}
+			break
+		}
+	}
 	if verdict != "" {
 		mark(verdict, "")
 		return
@@ -360,6 +378,7 @@ type upSourceView struct {
 	Detail     string `json:"detail,omitempty"`
 	TriedAt    int64  `json:"triedAt,omitempty"`
 	FollowedAt int64  `json:"followedAt,omitempty"`
+	Stop       string `json:"stop,omitempty"` // 停止跟随的原因(user / edited);空 = 跟随着
 }
 
 // upstreamSources 全部上游的来源(上游 id → 来源)。
@@ -377,7 +396,7 @@ func (s *Server) upstreamSources() map[uint]*upSourceView {
 		names[e.Id] = e.Name
 	}
 	for _, x := range srcs {
-		out[x.UpstreamId] = &upSourceView{ExtId: x.ExtId, ExtName: names[x.ExtId], Node: x.Name, Note: x.Note, Detail: x.Detail, TriedAt: x.TriedAt, FollowedAt: x.FollowedAt}
+		out[x.UpstreamId] = &upSourceView{ExtId: x.ExtId, ExtName: names[x.ExtId], Node: x.Name, Note: x.Note, Detail: x.Detail, TriedAt: x.TriedAt, FollowedAt: x.FollowedAt, Stop: x.Stop}
 	}
 	return out
 }

@@ -307,6 +307,28 @@ await page.goto(`${DEMO}#/upstreams`); await page.waitForTimeout(500);
 await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(1200);
 const attn1 = await attnOf();
 if (!/Frankfurt-exit/.test(attn1)) pass('上游修好(编辑保存)后,概况不再报它故障'); else fail(`上游修好后概况还在报:${attn1.slice(0, 160)}`);
+// 还有线路在用的上游删不掉(演示站和后端同一口径),报错里点名是哪些线路;「跟随」是个开关:停下不删来源、上游也还在,能再打开
+const guard = await page.evaluate(async () => {
+  const api = await import('./js/api.js');
+  const ups = await api.get('upstreams');
+  const fra = ups.find(x => x.name === 'Frankfurt-exit'), la = ups.find(x => x.name === 'LA-streaming');
+  let delErr = '';
+  try { await api.del('upstreams/' + fra.id); } catch (e) { delErr = e.message; }
+  const still = (await api.get('upstreams')).some(x => x.id === fra.id);
+  await api.put(`upstreams/${la.id}/source`, { follow: false });
+  const off = (await api.get('upstreams')).find(x => x.id === la.id);
+  await api.put(`upstreams/${la.id}/source`, { follow: true });
+  const on = (await api.get('upstreams')).find(x => x.id === la.id);
+  return { delErr, still, offStop: off && off.source ? off.source.stop : 'gone', onStop: on && on.source ? on.source.stop || '' : 'gone' };
+});
+if (guard.still && /Tokyo-HY2/.test(guard.delErr) && /Global-SS2022/.test(guard.delErr) && guard.offStop === 'user' && guard.onStop === '') pass('在用的上游删不掉并点名线路;停止跟随后上游和来源都还在,能再打开');
+else fail(`上游的删除拦截 / 跟随开关不对:${JSON.stringify(guard)}`);
+await page.goto(`${DEMO}#/upstreams`); await page.waitForTimeout(700);
+await page.locator('#up-body [data-act="up.del"]').first().click(); await page.waitForTimeout(300);
+const inUse = await page.evaluate(() => ({ title: document.getElementById('modal-title').textContent, rows: document.querySelectorAll('#modal-body .up-inuse li').length, danger: document.getElementById('modal-save').classList.contains('danger') }));
+if (/Frankfurt-exit/.test(inUse.title) && inUse.rows === 2 && !inUse.danger) pass('上游页:点删除先列出在用它的线路,不给删除按钮');
+else fail(`点删除在用的上游,弹出来的不对:${JSON.stringify(inUse)}`);
+await page.keyboard.press('Escape'); await page.waitForTimeout(200);
 // 中转入口换个端口:那台服务器上的「端口被占」跟着消失
 const blockedOf = () => page.evaluate(async () => ((await (await import('./js/api.js')).get('nodes')).nodes.find(n => n.id === 2).status.blocked || []).length);
 const b0 = await blockedOf();

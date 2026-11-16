@@ -215,7 +215,7 @@ function upstreamLines() {
 // 「没变」「没抓下来」这类结论只在一天内显示,「跟着改过」显示一周:过了这段时间就只是历史,不占地方。
 const followAge = at => (at ? Date.now() / 1000 - at : Infinity);
 function followNote(s, long = false) {
-  if (!s || !s.note) return null;
+  if (!s || !s.note || s.stop) return null; // 停止跟随的不再挂以前的结论:那是停下之前的事
   if (s.note === 'followed') {
     if (!long && followAge(s.followedAt) >= 7 * 86400) return null;
     const detail = s.detail || t('up.fn.params');
@@ -226,19 +226,49 @@ function followNote(s, long = false) {
   const tip = s.detail ? trErr(s.detail) : '';
   return { cls: s.note === 'unchanged' ? '' : ' warn', text: t('up.fn.' + s.note) + (long ? ' · ' + fmtRelative(s.triedAt) + (tip ? ' · ' + tip : '') : ''), tip };
 }
+// 名字下面那一行来源:跟随着是「↻ 订阅名 · 节点名」;停了跟随的去掉转圈的图标、写明「已停止跟随」,一眼分得出。两种都能点开。
 function sourceHTML(u) {
   const s = u.source;
   if (!s) return '';
-  const label = `${s.extName || '#' + s.extId} · ${s.node}`;
-  return `<button type="button" class="up-srcline" data-act="up.followInfo" data-id="${u.id}" title="${esc(t('up.follow', { ext: s.extName || '#' + s.extId, node: s.node }))}"><i class="i i-refresh"></i><span>${esc(label)}</span></button>`;
+  const ext = s.extName || '#' + s.extId;
+  const tip = t('up.follow', { ext, node: s.node });
+  if (s.stop) return `<button type="button" class="up-srcline off" data-act="up.followInfo" data-id="${u.id}" title="${esc(t('up.followStopped') + ' · ' + tip)}"><span>${esc(t('up.followStopped') + ' · ' + ext)}</span></button>`;
+  return `<button type="button" class="up-srcline" data-act="up.followInfo" data-id="${u.id}" title="${esc(tip)}"><i class="i i-refresh"></i><span>${esc(ext + ' · ' + s.node)}</span></button>`;
 }
+// 跟随是一个开关(用户 11-17:「点击了不在跟随 可以保留现在上游信息 只是不在跟随订阅自动跟随新配置 并且可以重新打开跟随」):
+// 关掉不是把来源删掉 —— 上游现在的配置原样留着,只是不再自动换,随时能再打开。点了就存,不用再点保存。
 function followInfo(u) {
   const s = u.source, n = followNote(s, true);
+  const state2 = s.stop === 'edited' ? `<p class="hint warn">${esc(t('up.follow.stopEdited'))}</p>`
+    : s.stop ? `<p class="hint">${esc(t('up.follow.stopUser'))}</p>`
+    : n ? `<p class="up-note${n.cls}">${esc(t('up.followLast'))} ${esc(n.text)}</p>` : '';
   openModal(t('up.followTitle'), `<p><b>${esc(t('up.follow', { ext: s.extName || '#' + s.extId, node: s.node }))}</b></p>
-    <p class="hint">${esc(t('up.followHelp'))}</p>
-    ${n ? `<p class="up-note${n.cls}">${esc(t('up.followLast'))} ${esc(n.text)}</p>` : ''}
-    <div class="row" style="margin-top:.9rem"><button type="button" class="btn sm danger" data-act="up.unfollow" data-id="${u.id}">${esc(t('up.unfollow'))}</button></div>`,
+    <label class="sw-row up-follow-sw"><div><b>${esc(t('up.followSwitch'))}</b><small>${esc(t('up.followHelp'))}</small></div>
+      <span class="switch"><input type="checkbox" id="up-follow" data-change="up.followSet" data-id="${u.id}" ${s.stop ? '' : 'checked'}><span></span></span></label>
+    ${state2}`,
   null, { cancelText: t('common.close') });
+}
+
+// upstreamUsage 这条上游现在被谁用着(删之前给人看):直接把它当出站的线路、分流规则指向它的线路、把它当成员的上游组。
+// 和后端删上游时的拦截同一口径(lineNamesUsingUpstream + groupsWith):这里先说清楚,不让人点了「删除」才吃一个报错。
+function upstreamUsage(u) {
+  const lines = [];
+  state.lines.forEach(l => {
+    let rr = l.routeRules;
+    if (typeof rr === 'string') { try { rr = JSON.parse(rr); } catch { rr = []; } }
+    const out = l.upstreamId === u.id, rule = (Array.isArray(rr) ? rr : []).some(r => Number(r.to) === u.id);
+    if (out || rule) lines.push({ name: l.name, out, rule, off: l.enabled === false });
+  });
+  const groups = state.upstreams.filter(g => g.type === GROUP && g.id !== u.id && (parseOpts(g.options).outbounds || []).includes(u.name)).map(g => g.name);
+  return { lines, groups };
+}
+function inUseDialog(u, use) {
+  const row = l => `<li><span class="nm" title="${esc(l.name)}">${esc(l.name)}</span>${l.off ? `<span class="muted small">${esc(t('common.disabled'))}</span>` : ''}<span class="grow"></span>${l.out ? badge(t('up.inUse.out'), 'primary') : ''}${l.rule ? badge(t('up.inUse.rule')) : ''}</li>`;
+  const html = (use.lines.length ? `<p class="confirm-text">${esc(t('up.inUse.lines', { n: use.lines.length }))}</p><ul class="up-inuse">${use.lines.map(row).join('')}</ul>` : '')
+    + (use.groups.length ? `<p class="confirm-text">${esc(t('up.inUse.groups', { g: use.groups.join(t('up.inUse.sep')) }))}</p>` : '');
+  // 有线路在用:主按钮带去线路页;只是在上游组里:就在这一页处理,不用按钮
+  openModal(t('up.inUse.title', { name: u.name }), html, use.lines.length ? async () => { location.hash = '#/lines'; } : null,
+    { saveText: t('up.inUse.go'), cancelText: t('common.close') });
 }
 
 function renderRows() {
@@ -538,16 +568,25 @@ registerActions({
   'up.edit': id => editUpstream(Number(id)),
   'up.del': async id => {
     const u = state.upstreams.find(x => x.id === Number(id));
+    if (!u) return;
+    const use = upstreamUsage(u);
+    if (use.lines.length || use.groups.length) { inUseDialog(u, use); return; } // 还在用:不让删,列出是谁在用(后端同样会拦)
     if (!await confirm(t('common.deleteConfirm', { name: u.name }), { danger: true, okText: t('common.delete') })) return;
     try { await del('upstreams/' + id); await load('upstreams', 'status'); renderRows(); toast(t('up.deleted'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
   'up.followInfo': id => { const u = state.upstreams.find(x => x.id === Number(id)); if (u && u.source) followInfo(u); },
-  'up.unfollow': async id => {
-    const u = state.upstreams.find(x => x.id === Number(id));
-    if (!u || !await confirm(t('up.unfollowConfirm', { name: u.name }), { okText: t('up.unfollow') })) return;
-    try { await del(`upstreams/${id}/source`); closeModal(); await load('upstreams'); renderRows(); toast(t('up.unfollowed'), 'ok'); }
-    catch (e) { toast(e.message, 'err'); }
+  'up.followSet': async (id, el) => {
+    const on = el.checked;
+    el.disabled = true;
+    try {
+      await put(`upstreams/${id}/source`, { follow: on });
+      await load('upstreams');
+      renderRows();
+      toast(t(on ? 'up.followOn' : 'up.followOff'), 'ok');
+      const u = state.upstreams.find(x => x.id === Number(id));
+      if (u && u.source && !document.getElementById('modal').hidden && document.getElementById('up-follow')) followInfo(u); // 框还开着:换成新的状态说明
+    } catch (e) { el.checked = !on; el.disabled = false; toast(e.message, 'err'); }
   },
   'up.expand': (id, _el, e) => {
     const n = Number(id);

@@ -863,9 +863,10 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		// 手动改过类型或参数:这条上游不再是订阅里那个节点的样子了,不再跟随(只改名不算)
+		// 手动改过类型或参数:这条上游不再是订阅里那个节点的样子了,停止跟随(只改名不算)。
+		// 来源还记着,只是停下:想让它以后再跟着订阅走,在上游页把跟随重新打开
 		if !sameOutbound(cur.Type, cur.Options, up.Type, up.Options) {
-			s.db.Delete(&model.UpstreamSource{}, "upstream_id = ?", id)
+			s.db.Model(&model.UpstreamSource{}).Where("upstream_id = ? AND stop = ?", id, "").Update("stop", model.FollowStopEdited)
 		}
 		s.audit(r, "upstream", "update", up.Name)
 		if oldName != "" && oldName != up.Name {
@@ -881,8 +882,8 @@ func (s *Server) handleUpstreamItem(w http.ResponseWriter, r *http.Request) {
 		up.RelayCreds = nil
 		writeJSON(w, http.StatusOK, up)
 	case http.MethodDelete:
-		if inUse := linesUsingUpstream(s.db, id); inUse > 0 {
-			badRequest(w, fmt.Errorf("该上游仍被 %d 条线路使用(含分流规则),无法删除", inUse))
+		if using := lineNamesUsingUpstream(s.db, id); len(using) > 0 {
+			badRequest(w, fmt.Errorf("这条上游还有 %d 条线路在用,不能删除:%s。先把这些线路的出站(或指向它的分流规则)换成别的", len(using), nameList(using, 8)))
 			return
 		}
 		var delUp model.Upstream

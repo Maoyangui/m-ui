@@ -1772,6 +1772,18 @@ body:has(.savebar:not([hidden])) .toast { bottom: 5.4rem; }
 .up-srcline > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .up-srcline > .i { flex: none; font-size: 11px; }
 .up-srcline:hover { color: var(--primary-text); }
+.up-srcline.off { color: var(--faint); }
+.up-srcline.off:hover { color: var(--primary-text); }
+/* 「跟随外部节点」小框里的开关行:说明比较长,不加边框 */
+#modal-body .up-follow-sw { margin: .9rem 0 0; }
+/* 删上游被拦下时列出在用它的线路:一条一行,名字在左(长了省略),用法的小标签在右 */
+.up-inuse { list-style: none; margin: .7rem 0 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); max-height: 15.5rem; overflow: auto; }
+.up-inuse li { display: flex; align-items: center; gap: .4rem; min-height: 2.2rem; padding: .25rem .7rem; font-size: var(--fs-sm); }
+.up-inuse li + li { border-top: 1px solid var(--border); }
+.up-inuse .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.up-inuse .grow { flex: 1; }
+.up-inuse .badge { flex: none; }
+.up-inuse + .confirm-text { margin-top: .8rem; }
 .up-srcline:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 3px; }
 .up-note { color: var(--muted); }
 .up-note.ok { color: var(--ok-text); }

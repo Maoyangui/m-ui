@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,19 +44,30 @@ type upRow struct {
 }
 
 // linesUsingUpstream 用到这条上游的线路数(含停用的):自己选的上游是它,或者分流规则指向它。删上游前据此拦下。
-func linesUsingUpstream(db *gorm.DB, id uint) int {
+func linesUsingUpstream(db *gorm.DB, id uint) int { return len(lineNamesUsingUpstream(db, id)) }
+
+// lineNamesUsingUpstream 哪些线路在用这条上游(口径同上),返回线路名,按线路的排列顺序。删上游被拦下时点名给人看。
+func lineNamesUsingUpstream(db *gorm.DB, id uint) []string {
 	var lines []model.Line
-	db.Select("id, upstream_id, route_rules").Find(&lines)
-	n := 0
+	db.Select("id, name, upstream_id, route_rules").Order("sort asc, id asc").Find(&lines)
+	var names []string
 	for _, l := range lines {
 		for _, u := range render.LineUpstreams(l) {
 			if u == id {
-				n++
+				names = append(names, l.Name)
 				break
 			}
 		}
 	}
-	return n
+	return names
+}
+
+// nameList 报错里列名字:最多列 max 个,多出来的用 … 收尾(条数另外写在句子里)。
+func nameList(names []string, max int) string {
+	if len(names) > max {
+		return strings.Join(names[:max], ", ") + " …"
+	}
+	return strings.Join(names, ", ")
 }
 
 // upstreamUsers 每条上游被哪些服务器用到:启用的线路 ∩ 部署到该服务器 ∩ 指定了这条上游(含分流规则指向的)。

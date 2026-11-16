@@ -64,7 +64,8 @@ func TestUpstreamRefsIncludeRouteRules(t *testing.T) {
 	r := httptest.NewRequest("DELETE", "http://x/app/api/upstreams/2", nil)
 	w := httptest.NewRecorder()
 	s.handleUpstreamItem(w, r)
-	if w.Code != 400 || !strings.Contains(w.Body.String(), "仍被 1 条线路使用") {
+	// 拦下,并点名是哪条线路在用
+	if w.Code != 400 || !strings.Contains(w.Body.String(), "还有 1 条线路在用") || !strings.Contains(w.Body.String(), ":a。") {
 		t.Fatalf("被分流规则引用的上游不能删: %d %s", w.Code, w.Body.String())
 	}
 	var n int64

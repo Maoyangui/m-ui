@@ -62,7 +62,20 @@ func (s *Server) dispatchUpstreamSubroute(w http.ResponseWriter, r *http.Request
 			badRequest(w, fmt.Errorf("上游 id 无效"))
 			return true
 		}
-		if r.Method != http.MethodDelete {
+		// PUT {follow: true|false}:打开 / 停止跟随。DELETE 是老写法,等于停止跟随(来源不删:以后还能再打开)
+		follow := false
+		switch r.Method {
+		case http.MethodDelete:
+		case http.MethodPut:
+			var p struct {
+				Follow *bool `json:"follow"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&p); err != nil || p.Follow == nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式错误"})
+				return true
+			}
+			follow = *p.Follow
+		default:
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 			return true
 		}
@@ -71,8 +84,20 @@ func (s *Server) dispatchUpstreamSubroute(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "上游不存在"})
 			return true
 		}
-		s.db.Delete(&model.UpstreamSource{}, "upstream_id = ?", up.Id)
-		s.audit(r, "upstream", "unfollow", up.Name)
+		var src model.UpstreamSource
+		if s.db.First(&src, "upstream_id = ?", up.Id).Error != nil {
+			badRequest(w, fmt.Errorf("这条上游不是从外部节点加来的,没有可以跟随的订阅"))
+			return true
+		}
+		upd := map[string]interface{}{"stop": model.FollowStopUser}
+		if follow {
+			// 重新打开:上次尝试的时间清掉(不必等半小时的间隔),结论也清掉(那是停下之前的事)
+			upd = map[string]interface{}{"stop": "", "tried_at": 0, "note": "", "detail": ""}
+		}
+		if (src.Stop == "") != follow {
+			s.db.Model(&model.UpstreamSource{}).Where("upstream_id = ?", up.Id).Updates(upd)
+			s.audit(r, "upstream", map[bool]string{true: "follow:on", false: "follow:off"}[follow], up.Name)
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		return true
 	case strings.HasSuffix(path, "/test"):

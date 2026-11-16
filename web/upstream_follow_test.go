@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -215,9 +216,82 @@ func TestUpstreamFollow(t *testing.T) {
 	if code := put("hk-exit-2", changed); code != 200 {
 		t.Fatalf("改参数失败: %d", code)
 	}
+	stopOf := func() string {
+		t.Helper()
+		var x model.UpstreamSource
+		if err := db.First(&x, "upstream_id = ?", upID).Error; err != nil {
+			t.Fatalf("来源记录不该被删掉: %v", err)
+		}
+		return x.Stop
+	}
+	if got := stopOf(); got != model.FollowStopEdited {
+		t.Fatalf("手动改过参数应该停止跟随(来源留着): stop = %q", got)
+	}
+
+	// 7. 跟随是个开关:停着的可以重新打开,打开的可以再停;来源一直留着
+	source := func(method, body string) int {
+		rec := httptest.NewRecorder()
+		s.handleUpstreamItem(rec, httptest.NewRequest(method, "http://x/app/api/upstreams/"+strconv.Itoa(int(upID))+"/source", strings.NewReader(body)))
+		return rec.Code
+	}
+	if code := source("PUT", `{"follow":true}`); code != 200 || stopOf() != "" {
+		t.Fatalf("重新打开跟随: %d,stop = %q", code, stopOf())
+	}
+	var reopened model.UpstreamSource
+	db.First(&reopened, "upstream_id = ?", upID)
+	if reopened.TriedAt != 0 || reopened.Note != "" || reopened.FollowedAt == 0 {
+		t.Fatalf("重新打开时上次尝试的时间和结论应清掉、跟随过的时间留着: %+v", reopened)
+	}
+	// 8. 订阅里那个节点没变(还是 8443),上游却被手动改成了 9443:重新打开跟随后,它再全部测不通,就换回订阅里的那份
+	db.Model(&model.ExtNode{}).Where("id = ?", e.Id).Updates(map[string]interface{}{"type": "link", "value": link(8443)})
+	s.extRefreshFn = func(uint) error { return nil }
+	s.followOne(reopened, now.Unix()+20000)
+	if _, port := endpoint(); port != 8443 {
+		t.Fatalf("手动改过、又重新打开跟随的,应换回订阅里的配置: 端口 %d", port)
+	}
+	db.First(&reopened, "upstream_id = ?", upID)
+	if reopened.Note != followOK {
+		t.Fatalf("换回订阅的配置应记成跟随了: %q", reopened.Note)
+	}
+	// 9. 关掉:现在的配置原样留着,来源也留着;跟随的那一轮跳过它(不会被「补记来源」重新认领,也不会被改)
+	if code := source("PUT", `{"follow":false}`); code != 200 || stopOf() != model.FollowStopUser {
+		t.Fatalf("停止跟随: %d,stop = %q", code, stopOf())
+	}
+	db.Model(&model.ExtNode{}).Where("id = ?", e.Id).Update("value", link(10443))
+	s.followTick(now.Add(48 * time.Hour))
+	if _, port := endpoint(); port != 8443 || stopOf() != model.FollowStopUser {
+		t.Fatalf("停止跟随后不该再动上游: 端口 %d,stop = %q", port, stopOf())
+	}
 	db.Model(&model.UpstreamSource{}).Where("upstream_id = ?", upID).Count(&n)
-	if n != 0 {
-		t.Fatal("手动改过参数应该不再跟随")
+	if n != 1 {
+		t.Fatalf("来源记录应该只有原来那一条: %d", n)
+	}
+	// 老写法 DELETE:等于停止跟随,不删来源
+	_ = source("PUT", `{"follow":true}`)
+	if code := source("DELETE", ``); code != 200 || stopOf() != model.FollowStopUser {
+		t.Fatalf("DELETE 应等于停止跟随: %d,stop = %q", code, stopOf())
+	}
+	// 写法不对的、不是从外部节点加来的上游
+	for _, bad := range []string{`{}`, `{`, `{"follow":"yes"}`} {
+		if code := source("PUT", bad); code != 400 {
+			t.Fatalf("%s 应 400: %d", bad, code)
+		}
+	}
+	if code := source("POST", `{"follow":true}`); code != 405 {
+		t.Fatalf("POST 应 405: %d", code)
+	}
+	plain := model.Upstream{Name: "plain", Type: "socks", Options: json.RawMessage(`{"server":"127.0.0.1","server_port":40000}`)}
+	db.Create(&plain)
+	rec = httptest.NewRecorder()
+	s.handleUpstreamItem(rec, httptest.NewRequest("PUT", "http://x/app/api/upstreams/"+strconv.Itoa(int(plain.Id))+"/source", strings.NewReader(`{"follow":true}`)))
+	if rec.Code != 400 {
+		t.Fatalf("不是从外部节点加来的上游没有可跟随的: %d", rec.Code)
+	}
+	// 列表里带着停没停
+	rec = httptest.NewRecorder()
+	s.handleUpstreams(rec, httptest.NewRequest("GET", "http://x/app/api/upstreams", nil))
+	if !strings.Contains(rec.Body.String(), `"stop":"user"`) {
+		t.Fatalf("上游列表里应带着停止跟随的状态: %s", rec.Body.String())
 	}
 }
 
