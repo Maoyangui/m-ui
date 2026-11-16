@@ -43,7 +43,8 @@ func BuildClashFull(user model.User, lines []model.Line, entries []Entry, templa
 }
 
 // BuildClashFor 同 BuildClashFull,但按 lineNodes(线路 → 允许的服务器,缺省 = 全部)过滤入口。
-func BuildClashFor(user model.User, lines []model.Line, entries []Entry, template, notice string, external []ExtItem, lineNodes map[uint]map[uint]bool) (string, error) {
+func BuildClashFor(user model.User, lines []model.Line, entries []Entry, template, notice string, external []ExtItem, lineNodes map[uint]map[uint]bool, hides ...LineHides) (string, error) {
+	hide := hidesOf(hides)
 	base := template
 	if base == "" {
 		base = basicClashConfig
@@ -92,7 +93,7 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 	var groupAt []int // 线路组在 topNames 里的位置:组名等本站节点都定完名再起,先占个位
 	for _, line := range lines {
 		var names []string
-		for _, a := range subAddrs(line, entries, lineNodes[line.Id]) {
+		for _, a := range subAddrs(line, entries, lineNodes[line.Id], hide[line.Id]) {
 			for _, p := range lineToClashProxies(line, user, a) {
 				if a.insecure {
 					applyInsecure(p)

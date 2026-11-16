@@ -688,7 +688,7 @@ function renderConns() {
     <thead><tr><th>IP</th><th>${esc(failed ? t('dash.failWhy') : t('logs.user'))}</th><th>${esc(t('nav.lines'))}</th>${srv ? `<th>${esc(t('common.server'))}</th>` : ''}<th class="num">${esc(t('dash.connCount'))}</th><th>${esc(t('dash.connLast'))}</th></tr></thead>
     <tbody>${shown.length ? shown.map(c => `<tr class="${c.rejected ? 'rej' : ''}">
       <td class="ip"><div class="ipc"><span class="ipv mono" title="${esc(c.ip)}">${esc(c.ip)}</span>${rejB(c)}</div></td>
-      <td class="user" title="${esc(failed ? '' : c.user || '')}">${failed ? why(c) : c.user ? esc(c.user) : '<span class="muted">—</span>'}</td>
+      <td class="user" title="${esc(failed ? '' : c.user || '')}">${failed ? why(c) + (c.user ? ` <span class="muted" title="${esc(t('dash.fail.userGuess'))}">${esc(c.user)}</span>` : '') : c.user ? esc(c.user) : '<span class="muted">—</span>'}</td>
       <td class="line" title="${esc(c.line)} · ${esc(c.protocol || '')}">${esc(c.line)} <span class="muted small">${esc(c.protocol || '')}</span></td>
       ${srv ? `<td class="srv" title="${esc(c.server || '')}">${esc(c.server || '')}</td>` : ''}
       <td class="num cnt">×${c.count}</td>

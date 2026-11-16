@@ -52,7 +52,8 @@ type Scheduler struct {
 	d       Deps
 	mu      sync.Mutex
 	statsMu sync.Mutex // 串行化统计取数,也保护重载前的显式冲刷
-	onlines Onlines
+	// 用户 / 线路 / 上游最近一次有流量的时间(unix 秒):在线名单按 OnlineWindow 取
+	seenUsers, seenLines, seenUps map[string]int64
 	stop    chan struct{}
 	wg      sync.WaitGroup
 	// deadResellers 上一轮判定为"不可用"(停用 / 到期 / 额度用尽)的代理集合。到期是时间自然到的,没人保存过任何东西,
@@ -199,21 +200,45 @@ func (s *Scheduler) loop(name string, every time.Duration, fn func()) {
 	}()
 }
 
-// Onlines 返回最近周期的在线对象。
+// OnlineWindow 最近多久有过流量算「在线」。只看最近一个统计周期(10 秒)的话,手机这类断断续续走流量的设备
+// 会在名单里不停地进进出出,在线人数跟着乱跳;给一个窗口,显示才稳。只用于显示(在线名单、线路 / 上游的在线灯),
+// 设备数限制看的是 Limiter 里的在线 IP,不看这里。
+const OnlineWindow = 120 * time.Second
+
+// Onlines 返回在线对象:最近 OnlineWindow 内有过流量的用户、线路、上游。
 func (s *Scheduler) Onlines() Onlines {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	o := s.onlines
-	if o.Users == nil {
-		o.Users = []string{}
+	cutoff := time.Now().Add(-OnlineWindow).Unix()
+	pick := func(m map[string]int64) []string {
+		out := make([]string, 0, len(m))
+		for k, at := range m {
+			if at < cutoff {
+				delete(m, k)
+				continue
+			}
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
 	}
-	if o.Lines == nil {
-		o.Lines = []string{}
+	return Onlines{Users: pick(s.seenUsers), Lines: pick(s.seenLines), Upstreams: pick(s.seenUps)}
+}
+
+// noteOnline 这一轮有流量的用户、线路、上游记上时间。调用方持有 s.mu。
+func (s *Scheduler) noteOnline(o Onlines, now int64) {
+	if s.seenUsers == nil {
+		s.seenUsers, s.seenLines, s.seenUps = map[string]int64{}, map[string]int64{}, map[string]int64{}
 	}
-	if o.Upstreams == nil {
-		o.Upstreams = []string{}
+	for _, u := range o.Users {
+		s.seenUsers[u] = now
 	}
-	return o
+	for _, l := range o.Lines {
+		s.seenLines[l] = now
+	}
+	for _, u := range o.Upstreams {
+		s.seenUps[u] = now
+	}
 }
 
 func (s *Scheduler) settingInt(key string, def int64) int64 {
@@ -291,7 +316,7 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 		}
 	}
 	s.mu.Lock()
-	s.onlines = online
+	s.noteOnline(online, now)
 	s.mu.Unlock()
 
 	if len(*stats) == 0 {

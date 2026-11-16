@@ -85,6 +85,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]interface{}{
 		"role":          s.role(),
 		"coreRunning":   s.run.CoreRunning(),
+		"blocked":       s.run.BlockedInbounds(), // 本机上端口被别的程序占着、因此没开的入站(没有为 null)
 		"uptime":        s.run.Uptime(),
 		"lines":         lineCount,
 		"upstreams":     upstreamCount,
@@ -544,6 +545,10 @@ func (s *Server) validateLine(line *model.Line) error {
 	//  不部署在本机的线路也不测——本机数据面可能正用着这个端口跑另一条线路)
 	if s.portChanged(line) && render.LineOnNode(*line, s.localNodeID()) && !portBindable(line.Port) {
 		return fmt.Errorf("端口 %d 已被本机其它程序占用,换一个", line.Port)
+	}
+	// 部署范围里的副机上新占用的端口:让那几台自己试着监听一次(问不到不拦)
+	if err := s.linePortBusyRemote(line); err != nil {
+		return err
 	}
 	if len(line.Options) == 0 || strings.TrimSpace(string(line.Options)) == "null" { // null 同上,见 validateUpstream
 		line.Options = json.RawMessage("{}")

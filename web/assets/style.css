@@ -240,12 +240,11 @@ table.grid.tight { min-width: 0; table-layout: fixed; }
 .pager select { width: auto; height: var(--ctl-h-sm); padding: 0 1.6rem 0 .5rem; font-size: var(--fs-sm); }
 /* 服务器表:窄列给定宽度,余下宽度留给名称/地址/状态三列 */
 .grid.nodes .c-reach { width: 10.5rem; }
-.grid.nodes .c-sync, .grid.nodes .c-core { width: 7.5rem; }
+.grid.nodes .c-sync { width: 7.5rem; }
+.grid.nodes .c-core { width: 12rem; }
 .grid.nodes .c-online { width: 3.5rem; }
-.grid.nodes .c-act { width: 11.5rem; }
-/* 英文按钮更宽、副机多一颗"重置证书"时一行放不下:折到第二行,不顶出表格 */
-.grid.nodes td.actions { white-space: normal; }
-.grid.nodes td.actions .btn { margin-block: .1rem; }
+.grid.nodes .c-act { width: 10.5rem; }
+:lang(en) .grid.nodes .c-act { width: 11.5rem; }
 /* 窗口窄时先隐藏在线、同步两列(.c-p3),名称 / 地址 / 状态三列不会被挤成一字一行,也就不用整表横向滚动 */
 table.grid.nodes { min-width: 0; }
 /* ===== 窄屏表格:列表的每一行排成一张卡片 =====
@@ -272,6 +271,10 @@ table.grid.nodes { min-width: 0; }
   table.grid:not(.kv):not(.api-doc):not(.conns) td.actions .btn, table.grid:not(.kv):not(.api-doc):not(.conns) td.actions details.menu > summary.btn { border-color: var(--border-strong); background: var(--surface); }
   table.grid.tight td { word-break: break-word; }
   table.grid .ellip { display: inline-block; max-width: 100%; vertical-align: bottom; }
+  table.grid .sub-cell.ellip { display: block; }
+  /* 分段行在手机上不是卡片:一行小标题 */
+  table.grid:not(.kv):not(.api-doc):not(.conns) tr.grp-row { margin: .9rem 0 .45rem; padding: 0 .15rem; background: transparent; border: none; box-shadow: none; }
+  table.grid:not(.kv):not(.api-doc):not(.conns) tr.grp-row > td { padding: 0; background: transparent; border: none; text-align: left; }
   .subtitle { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   /* 工具栏:占位的空白不再至少 12rem(会把按钮一个个挤到新行);开头的说明文字(修订号、提示)独占一行,按钮在下面靠右排在一起 */
   .toolbar .grow { min-width: 0; }
@@ -690,6 +693,23 @@ tr:hover > td .ext-rename, .ext-rename:focus-visible { opacity: 1; }
 @media (hover: none) { .ext-rename { opacity: 1; } }
 .ext-grid .ext-out { width: 1%; white-space: nowrap; text-align: right; }
 .ext-incl { display: inline-flex; align-items: center; gap: .4rem; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; cursor: pointer; }
+/* 表格里的分段行(服务器按分组):一行小标题,不参与悬停高亮 */
+.grid tbody tr.grp-row > td { padding: .4rem .75rem; background: var(--surface-2); color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .02em; border-bottom: 1px solid var(--divider); }
+.grid tbody tr.grp-row:hover { background: transparent; }
+.grid tbody tr.grp-row .muted { font-weight: 400; margin-left: .25rem; }
+/* 分段按钮里的计数 */
+.seg-n { margin-left: .15rem; font-weight: 400; color: var(--faint); font-variant-numeric: tabular-nums; }
+.seg button.active .seg-n { color: var(--muted); }
+/* 工具栏里的一个勾选项 */
+.check-inline { display: inline-flex; align-items: center; gap: .4rem; font-size: var(--fs-sm); color: var(--text-2); white-space: nowrap; cursor: pointer; }
+/* 页面底部:不常看的说明(折着)和配置修订号这类 */
+.page-foot { display: flex; align-items: flex-start; gap: 1rem; margin-top: .85rem; flex-wrap: wrap; }
+details.howto { flex: 1 1 24rem; min-width: 0; font-size: var(--fs-sm); color: var(--muted); }
+details.howto > summary { cursor: pointer; width: fit-content; color: var(--text-2); user-select: none; }
+details.howto > summary:hover { color: var(--text); }
+details.howto > p { margin-top: .45rem; line-height: 1.65; max-width: 62rem; }
+.node-name { font-weight: 600; }
+.grid.nodes .c-addr { width: 11rem; }
 /* 页面开头的一段说明 + 右边的主按钮:说明自己折行,按钮不被挤到下一行 */
 .toolbar.intro { align-items: flex-start; flex-wrap: nowrap; gap: 1.25rem; margin-bottom: 1rem; }
 .page-hint { flex: 1; min-width: 0; max-width: 64rem; color: var(--muted); font-size: var(--fs-sm); line-height: 1.65; }
@@ -763,7 +783,7 @@ details.api-list { margin-top: .6rem; }
 @media (max-width: 700px) { .pc-cols { grid-template-columns: 1fr; } }
 /* ===== 主机容灾:服务器列表的角色标签与小卡片、设为主机的确认框与进度、设置页 ===== */
 button.role-chip { display: inline-flex; align-items: center; gap: .22rem; font: inherit; font-size: .72rem; line-height: 1.35; padding: .12rem .42rem .12rem .55rem; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); cursor: pointer; white-space: nowrap; vertical-align: middle; margin-right: .25rem; }
-button.role-chip .caret { font-size: .6rem; opacity: .75; }
+button.role-chip .caret { width: .8em; height: .8em; opacity: .7; }
 button.role-chip:hover { filter: brightness(.96); }
 button.role-chip:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 button.role-chip[aria-expanded="true"] { box-shadow: 0 0 0 2px var(--primary-soft); }

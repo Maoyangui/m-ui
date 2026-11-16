@@ -65,6 +65,8 @@ type Line struct {
 	RouteRules json.RawMessage `json:"routeRules,omitempty"`
 	// Forwards 中转入口 []LineForward(见 forward.go):客户端经中转连到这条线路;空 = 没有。
 	Forwards json.RawMessage `json:"forwards,omitempty"`
+	// NodeOpts 各个节点(这条线路在每台服务器上的直连、每个中转入口)自己的设置 {"s<服务器 id>" | "f<入口 id>": NodeOpt};空 = 都按默认。
+	NodeOpts json.RawMessage `json:"nodeOpts,omitempty"`
 	Enabled  bool            `json:"enabled" gorm:"default:true"`
 	Sort     int             `json:"sort"`
 }
@@ -137,6 +139,8 @@ type Node struct {
 	AddrFamily string `json:"addrFamily"`
 	// Ratio 流量倍率:经该服务器的流量按倍率计入用户用量(2 = 双倍扣量);0/1 = 原样。
 	Ratio float64 `json:"ratio" gorm:"default:1"`
+	// Group 分组名(香港 / 美国 / 专线……,随便起):服务器页按它分段、筛选,线路和用户的服务器选择器里可以整组勾。空 = 未分组。只是归类,不影响同步和订阅。
+	Group string `json:"group,omitempty" gorm:"column:grp"`
 	// CertFP 勾了"跳过证书校验"时记住的副机证书 SHA-256 指纹(首次连接写入),之后指纹变了就拒绝连接;空 = 还没记。
 	CertFP string `json:"certFp,omitempty"`
 	// Certs 这台服务器证书库的清单 []CertBrief(本机由 runner 写入,副机随报告上报)。线路编辑框与订阅的 SNI 用它。
@@ -427,6 +431,14 @@ type UserLineNode struct {
 	NodeId uint `json:"nodeId" gorm:"primaryKey;autoIncrement:false"`
 }
 
+// UserLineHide 用户不要这条线路的哪个节点(Key 见 DirectKey / ForwardKey):只影响订阅里发不发,不影响能不能连 ——
+// 直连和经中转进来的是同一个入站、同一份凭据,数据面分不开。没有行 = 这条线路上他能用的节点都发。
+type UserLineHide struct {
+	UserId uint   `json:"userId" gorm:"primaryKey;autoIncrement:false"`
+	LineId uint   `json:"lineId" gorm:"primaryKey;autoIncrement:false"`
+	Key    string `json:"key" gorm:"primaryKey;column:node_key"`
+}
+
 // ResellerLineNode 代理的线路授权同样可以按服务器收窄。
 type ResellerLineNode struct {
 	ResellerId uint `json:"resellerId" gorm:"primaryKey;autoIncrement:false"`
@@ -632,7 +644,7 @@ type ReachCheck struct {
 
 func All() []interface{} {
 	return []interface{}{
-		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &Plan{}, &ExtNode{}, &UserExt{},
+		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &UserLineHide{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
 		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{}, &PageLogo{}, &ApiKey{},

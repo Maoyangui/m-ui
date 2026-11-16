@@ -602,6 +602,7 @@ func (s *Server) handle() http.HandlerFunc {
 		opt.BuyURL = s.buyURL(rs) // 代理填了用代理的,否则用主面板的;随订阅发出去给客户端做续费入口
 		opt.External = s.externalFor(user.Id)
 		opt.LineNodes = lineNodesOf(scopes)
+		opt.LineHides = lineHidesOf(s.db, user.Id)
 		opt.Share = s.shareSelfService() && (rs == nil || rs.ShareOn)
 		if rs != nil { // 代理填了标题就用代理的,客户端里显示的就是他的品牌
 			opt.ProfileTitle = pick(rs.ProfileTitle, pick(rs.PageTitle, opt.ProfileTitle))
@@ -710,6 +711,23 @@ func keepLines(lines []model.Line, links []model.UserLine) []model.Line {
 		if has[l.Id] {
 			out = append(out, l)
 		}
+	}
+	return out
+}
+
+// lineHidesOf 用户在各线路上不要的节点(user_line_hides);一行都没有返回 nil。
+func lineHidesOf(db *gorm.DB, userId uint) LineHides {
+	var rows []model.UserLineHide
+	db.Where("user_id = ?", userId).Find(&rows)
+	if len(rows) == 0 {
+		return nil
+	}
+	out := LineHides{}
+	for _, r := range rows {
+		if out[r.LineId] == nil {
+			out[r.LineId] = map[string]bool{}
+		}
+		out[r.LineId][r.Key] = true
 	}
 	return out
 }

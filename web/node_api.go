@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
@@ -113,6 +114,10 @@ func (s *Server) validateNode(p *nodePayload) error {
 		return errors.New("连接地址只填 IP 或域名,不带端口、http:// 和空格")
 	}
 	p.AddrFamily = model.NormAddrFamily(p.AddrFamily)
+	p.Group = strings.TrimSpace(p.Group)
+	if utf8.RuneCountInString(p.Group) > 24 {
+		return errors.New("分组名太长(最多 24 个字)")
+	}
 	if p.Ratio < 0 || p.Ratio > 100 {
 		return errors.New("倍率需在 0–100 之间(1 = 原样)")
 	}
@@ -206,7 +211,7 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		}
 		updates := map[string]interface{}{
 			"name": p.Name, "domain": p.Domain, "api_url": p.ApiUrl, "insecure": p.Insecure, "enabled": p.Enabled, "sort": p.Sort,
-			"addr": p.Addr, "addr_family": p.AddrFamily, "ratio": p.Ratio,
+			"addr": p.Addr, "addr_family": p.AddrFamily, "ratio": p.Ratio, "grp": p.Group,
 		}
 		if p.ApiUrl != node.ApiUrl || p.Insecure != node.Insecure {
 			updates["cert_fp"] = "" // 地址或校验方式变了,记住的证书指纹作废,下次连接重新记

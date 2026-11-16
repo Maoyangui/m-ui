@@ -114,6 +114,7 @@ type Snapshot struct {
 	Users         []model.User         `json:"users"`
 	UserLines     []model.UserLine     `json:"userLines"`
 	UserLineNodes []model.UserLineNode `json:"userLineNodes,omitempty"` // 用户在某线路上收窄到的服务器;没有 = 全部
+	UserLineHides []model.UserLineHide `json:"userLineHides,omitempty"` // 用户不要的节点(只影响订阅里发不发;老副机不认,照发)
 	Exts          []model.ExtNode      `json:"exts"`
 	UserExts      []model.UserExt      `json:"userExts"`
 	Resellers     []model.Reseller     `json:"resellers"`   // 副机据此给代理用户出对应的订阅页文案(不含密码/2FA)
@@ -203,6 +204,9 @@ func readSnapshot(db *gorm.DB, s *Snapshot) error {
 		return err
 	}
 	s.UserLines, s.UserLineNodes = links, scopes
+	if err := db.Order("user_id asc, line_id asc, node_key asc").Find(&s.UserLineHides).Error; err != nil {
+		return err
+	}
 	s.ResellerLines, s.ResellerLineNodes = []model.ResellerLine{}, []model.ResellerLineNode{}
 	if err := db.Order("reseller_id asc, line_id asc").Find(&s.ResellerLines).Error; err != nil {
 		return err
@@ -238,6 +242,7 @@ func revisionOf(s Snapshot) string {
 			nodes[i].ServicePorts = nil
 		}
 		nodes[i].IsLocal = false
+		nodes[i].Group = "" // 分组只是面板上的归类:改个组名不必给所有副机推一遍
 		nodes[i].Certs = certsForRevision(nodes[i].Certs)
 	}
 	s.Nodes = nodes
@@ -307,6 +312,7 @@ func sameLines(a, b []model.Line) bool {
 			out[i].Transport = normJSON(out[i].Transport)
 			out[i].RouteRules = normJSON(out[i].RouteRules)
 			out[i].Forwards = normJSON(out[i].Forwards)
+			out[i].NodeOpts = normJSON(out[i].NodeOpts)
 		}
 		return out
 	}
@@ -492,7 +498,7 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		if !legacySequence && snap.Sequence < seq {
 			return fmt.Errorf("拒绝过期快照:序号 %d 低于已接收的 %d", snap.Sequence, seq)
 		}
-		for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserExt{}, &model.User{}, &model.Line{}, &model.Upstream{}, &model.Node{}, &model.ExtNode{}, &model.Reseller{}, &model.LimitState{}} {
+		for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserLineHide{}, &model.UserExt{}, &model.User{}, &model.Line{}, &model.Upstream{}, &model.Node{}, &model.ExtNode{}, &model.Reseller{}, &model.LimitState{}} {
 			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(t).Error; err != nil {
 				return err
 			}
@@ -537,6 +543,11 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 		}
 		if len(snap.UserLineNodes) > 0 {
 			if err := tx.CreateInBatches(&snap.UserLineNodes, snapshotBatch).Error; err != nil {
+				return err
+			}
+		}
+		if len(snap.UserLineHides) > 0 {
+			if err := tx.CreateInBatches(&snap.UserLineHides, snapshotBatch).Error; err != nil {
 				return err
 			}
 		}
@@ -684,6 +695,8 @@ type RecentConn struct {
 	// Failed 只在"到了但没过握手 / 认证"那份里有:tls(TLS / REALITY 握手没过)/ auth(协议认证没过);Detail 是原因原文
 	Failed string `json:"failed,omitempty"`
 	Detail string `json:"detail,omitempty"`
+	// UserGuess 只在 Failed 那份里有:握手 / 认证没过认不出身份,User 是按来源 IP 对上的(同一个 IP 上现在在线、或刚连成功过的用户)
+	UserGuess bool `json:"userGuess,omitempty"`
 }
 
 // Report 是副机上报的状态。
@@ -712,6 +725,7 @@ type Report struct {
 	LedgerFresh     bool                           `json:"ledgerFresh,omitempty"`  // 这本账是纪元开始时清空重开的(见 LedgerFreshKey)
 	LedgerKept      bool                           `json:"ledgerKept,omitempty"`   // 本版起的副机:应用快照不整本清账(同 agent/apply 确认里的 ledgerKept);老副机不报
 	ServicePorts    []model.ServicePort            `json:"servicePorts,omitempty"` // 副机自己监听的面板 / 订阅端口(老副机不报)
+	Blocked         []model.BlockedInbound         `json:"blocked,omitempty"`      // 端口被那台机器上别的程序占着、因此没开的入站(老副机不报)
 	// 以下几项老副机都不报(零值),主机按老办法处理
 	Sequence    uint64 `json:"sequence,omitempty"`    // 副机库里那份快照的推送序号
 	KickPending bool   `json:"kickPending,omitempty"` // 还有旧凭据上的连接没踢完(下次应用时接着踢)
@@ -864,7 +878,9 @@ type NodeStatus struct {
 	// HA 副机最近一份报告里的容灾信息(备用公钥、副本、租约……;没开容灾为空)
 	HA *HAReport `json:"ha,omitempty"`
 	// Disk 副机最近一份报告里的磁盘占用(老副机不报为空)
-	Disk            *model.DiskStat `json:"disk,omitempty"`
+	Disk *model.DiskStat `json:"disk,omitempty"`
+	// Blocked 这台上因为端口被别的程序占着没开的入站(中转入口 / 线路);空 = 没有
+	Blocked         []model.BlockedInbound `json:"blocked,omitempty"`
 	diskAlerted     string          // 已经为磁盘发过哪一级的告警(model.DiskWarn / DiskBad;恢复后清空)
 	applyGzip       bool            // 副机报过收得了 gzip 压缩的快照
 	alerted         bool
@@ -969,6 +985,11 @@ type Hub struct {
 	remoteAt map[uint]int64
 	// remoteLines 副机上报的 用户 → 源 IP → 线路名;nodeNames 用于在面板里给线路加服务器后缀
 	remoteLines map[uint]map[string]map[string][]string
+	// remoteOnline 副机上报的「现在有人在用的线路名」:主机自己不跑线路时,线路页的在线灯全靠它
+	remoteOnline map[uint][]string
+	// seenUsers 各副机报上来在线(有在线 IP)的用户最近一次出现的时间:在线名单按 onlineWindow 取,
+	// 不只看最新一份报告 —— 设备安静一分钟就从名单里掉出去、下一次走流量又回来,在线人数会乱跳
+	seenUsers map[string]int64
 	nodeNames   map[uint]string
 	revision    string
 	stop        chan struct{}
@@ -1014,7 +1035,7 @@ const clientTimeout = 6 * time.Minute
 func New(d Deps) *Hub {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{}, remoteAt: map[uint]int64{},
-		remoteLines: map[uint]map[string]map[string][]string{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
+		remoteLines: map[uint]map[string]map[string][]string{}, remoteOnline: map[uint][]string{}, seenUsers: map[string]int64{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
 		upHealth: map[uint][]UpstreamHealth{}, kicking: map[string]*kickCall{}, gates: map[uint]chan struct{}{}, ipsBusy: map[uint]bool{},
 		ctx: ctx, cancel: cancel,
 		clients: map[uint]*nodeClient{}, idents: map[uint]string{}, pushFail: map[uint]*pushFailure{},
@@ -1349,6 +1370,12 @@ func (h *Hub) applyResult(r *nodeResult) {
 	h.remote[r.n.Id] = r.rep.Onlines
 	h.remoteAt[r.n.Id] = time.Now().Unix()
 	h.remoteLines[r.n.Id] = r.rep.OnlineLinesByIP
+	h.remoteOnline[r.n.Id] = r.rep.OnlineLines
+	for u, ips := range r.rep.Onlines {
+		if len(ips) > 0 {
+			h.seenUsers[u] = h.remoteAt[r.n.Id]
+		}
+	}
 	h.nodeNames[r.n.Id] = r.n.Name
 	h.upHealth[r.n.Id] = r.rep.Upstreams // 这一轮没有结果就清空:副机改了线路、不再用任何上游时不该留着旧数据
 	h.mu.Unlock()
@@ -1570,6 +1597,7 @@ func (h *Hub) forgetNodes(live map[uint]bool) {
 		delete(h.pushed, id)
 		delete(h.pushFail, id)
 		delete(h.remoteLines, id)
+		delete(h.remoteOnline, id)
 		delete(h.nodeNames, id)
 		delete(h.upHealth, id)
 		delete(h.haPushed, id)
@@ -1616,6 +1644,7 @@ func (h *Hub) noteIdentity(n model.Node) {
 	delete(h.remote, n.Id)
 	delete(h.remoteAt, n.Id)
 	delete(h.remoteLines, n.Id)
+	delete(h.remoteOnline, n.Id)
 	delete(h.upHealth, n.Id)
 	delete(h.noGzip, n.Id)
 	delete(h.haPushed, n.Id) // 容灾状态也按新机器重推
@@ -1776,6 +1805,7 @@ func (h *Hub) setStatus(n model.Node, ok bool, errStr string, rep *Report) {
 	if rep != nil {
 		st.Version, st.Hostname, st.CoreRunning, st.Uptime, st.Revision, st.CertDays = rep.Version, rep.Hostname, rep.CoreRunning, rep.Uptime, rep.Revision, rep.CertDays
 		st.LedgerFails, st.applyGzip, st.HA, st.Disk = rep.LedgerFails, rep.ApplyGzip, rep.HA, rep.Disk
+		st.Blocked = rep.Blocked
 		h.saveNodeCerts(n, rep.Certs)
 		h.saveNodeServicePorts(n, rep.ServicePorts)
 		// hubRevision 在副机 ApplySnapshot 的事务里就写了,数据面有没有真的应用成功要看 ReloadPending。
@@ -1955,6 +1985,7 @@ func (h *Hub) PushNow(n model.Node) error {
 // (TestEveryProtocolConstructsWithoutUsers 钉着这样的配置内核照样起得来)。
 func withoutUsers(s Snapshot) Snapshot {
 	s.Users, s.UserLines, s.UserLineNodes, s.UserExts, s.LimitStates = []model.User{}, []model.UserLine{}, []model.UserLineNode{}, []model.UserExt{}, []model.LimitState{}
+	s.UserLineHides = nil
 	s.Revision = revisionOf(s)
 	return s
 }
@@ -2415,6 +2446,37 @@ func (h *Hub) RemoteOnlineUsers() []string {
 		for u, ips := range m {
 			if len(ips) > 0 {
 				set[u] = true
+			}
+		}
+	}
+	// 最近 onlineWindow 内在任一台副机上在线过的也算(只用于显示;设备数并集仍只看各台最新的在线 IP)
+	for u, at := range h.seenUsers {
+		if now-at > onlineWindow {
+			delete(h.seenUsers, u)
+			continue
+		}
+		set[u] = true
+	}
+	return keys(set)
+}
+
+// onlineWindow 用户多久没在任何副机上出现才从在线名单里拿掉(秒),和 jobs.OnlineWindow 同一个口径。
+const onlineWindow = 120
+
+// RemoteOnlineLines 各台在线副机上现在有人在用的线路名(并集)。主机自己不部署线路(只分发订阅)时,
+// 本机的在线线路永远是空的,线路页的在线灯、概况的「有连接的线路」要把副机的算进来。
+func (h *Hub) RemoteOnlineLines() []string {
+	now := time.Now().Unix()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	set := map[string]bool{}
+	for id, lines := range h.remoteOnline {
+		if !h.freshLocked(id, now) {
+			continue
+		}
+		for _, l := range lines {
+			if l != "" {
+				set[l] = true
 			}
 		}
 	}

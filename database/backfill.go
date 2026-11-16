@@ -9,6 +9,24 @@ import (
 	"gorm.io/gorm"
 )
 
+// backfillForwardIds 给还没有编号的中转入口补上编号(0.7.17 建的入口没有):节点设置、用户不要哪些节点按编号认入口。
+// 每次启动都看一遍(只读有中转入口的线路,几条而已);副机的线路表由主机的快照整表替换,主机补过就都有了。
+func backfillForwardIds(db *gorm.DB) {
+	var lines []model.Line
+	if db.Select("id, forwards").Where("forwards IS NOT NULL AND forwards <> ''").Find(&lines).Error != nil {
+		return
+	}
+	for _, l := range lines {
+		fs := model.ParseForwards(l.Forwards)
+		if len(fs) == 0 || !model.AssignForwardIds(fs) {
+			continue
+		}
+		if b, err := json.Marshal(fs); err == nil {
+			db.Model(&model.Line{}).Where("id = ?", l.Id).Update("forwards", b)
+		}
+	}
+}
+
 // planBackfillKey 老用户归入套餐只做一次。
 const planBackfillKey = "planBackfillDone"
 

@@ -33,6 +33,8 @@ type Options struct {
 	Share bool
 	// LineNodes 用户在各线路上被收窄到的服务器(线路 id → 服务器 id 集合);没写的线路 = 全部服务器。
 	LineNodes map[uint]map[uint]bool
+	// LineHides 用户在各线路上不要的节点(见 model.UserLineHide);没写的线路 = 都要。
+	LineHides LineHides
 	// BuyURL 「选购 / 续费」地址,已按 buyURL(rs) 解析过(代理填了用代理的,否则用主面板的)。
 	// 非空时随订阅发一个 Profile-Web-Page-Url 头,客户端就能在订阅卡片上摆一个续费入口。
 	BuyURL string
@@ -60,7 +62,7 @@ func BuildLinkSub(user model.User, lines []model.Line, opt Options) Result {
 	if opt.ShowNotice {
 		out = append(out, noticeLinkURI(user))
 	}
-	out = append(out, GenerateLinksFor(user, lines, opt.Entries, opt.LineNodes)...)
+	out = append(out, GenerateLinksFor(user, lines, opt.Entries, opt.LineNodes, opt.LineHides)...)
 	for _, e := range opt.External {
 		out = append(out, e.Links...)
 	}
@@ -81,7 +83,7 @@ func BuildClashSub(user model.User, lines []model.Line, opt Options) (Result, er
 	if opt.LegacyClash {
 		lines, external = legacyClashOnly(lines, external)
 	}
-	body, err := BuildClashFor(user, lines, opt.Entries, opt.ClashTmpl, notice, external, opt.LineNodes)
+	body, err := BuildClashFor(user, lines, opt.Entries, opt.ClashTmpl, notice, external, opt.LineNodes, opt.LineHides)
 	if err != nil {
 		return Result{}, err
 	}

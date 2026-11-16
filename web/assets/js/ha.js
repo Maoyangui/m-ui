@@ -75,7 +75,7 @@ export function roleChip(n, data) {
   rows = (data && data.nodes) || rows;
   const r = roleOf(n, data && data.masterId);
   if (!r) return '';
-  return `<button type="button" class="role-chip ${chipTone(r)}" data-act="ha.card" data-id="${n.id}" aria-haspopup="dialog" aria-expanded="${popId === n.id ? 'true' : 'false'}" title="${esc(t('ha.chipHint'))}">${esc(chipText(r))}<span class="caret" aria-hidden="true">▾</span></button>`;
+  return `<button type="button" class="role-chip ${chipTone(r)}" data-act="ha.card" data-id="${n.id}" aria-haspopup="dialog" aria-expanded="${popId === n.id ? 'true' : 'false'}" title="${esc(t('ha.chipHint'))}">${esc(chipText(r))}<i class="i i-chev open caret" aria-hidden="true"></i></button>`;
 }
 
 // haMenuItems 服务器行「更多」菜单里容灾的项:设为主机…(第二入口:窄屏下状态栏被藏起来时也能用)。只在主机上、对副机有。

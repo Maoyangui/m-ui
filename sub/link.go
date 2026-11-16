@@ -112,12 +112,38 @@ type addr struct {
 	remark   string
 	insecure bool
 	relay    bool // 中转入口:中转只转这一个端口,端口跳跃不带
+	node     uint // 直连地址落在哪台服务器上;0 = 不属于任何一台(自定义地址没指定服务器)
+	fwd      int  // 中转入口的编号(LineForward.Id);直连为 0
+}
+
+// key 这个地址是线路的哪个节点(model.DirectKey / ForwardKey);自定义地址没指定服务器的没有键(不能单独关)。
+func (a addr) key() string {
+	switch {
+	case a.relay && a.fwd != 0:
+		return model.ForwardKey(a.fwd)
+	case !a.relay && a.node != 0:
+		return model.DirectKey(a.node)
+	}
+	return ""
 }
 
 // subAddrs 订阅里这条线路的全部地址:各服务器(或自定义地址)之后,接着这条线路的中转入口。
+// 线路上关了输出的节点(Line.NodeOpts 的 hidden)、这个用户不要的节点(hide,见 model.UserLineHide)不给。
 // 「线路作上游」(relay.go)只要出口本身的地址,用 resolveAddrs,不走这里。
-func subAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []addr {
-	return append(resolveAddrs(line, entries, allowed), forwardAddrs(line, entries, allowed)...)
+func subAddrs(line model.Line, entries []Entry, allowed map[uint]bool, hide map[string]bool) []addr {
+	all := append(resolveAddrs(line, entries, allowed), forwardAddrs(line, entries, allowed)...)
+	opts := model.ParseNodeOpts(line.NodeOpts)
+	if len(opts) == 0 && len(hide) == 0 {
+		return all
+	}
+	kept := all[:0:0]
+	for _, a := range all {
+		if k := a.key(); k != "" && (opts[k].Hidden || hide[k]) {
+			continue
+		}
+		kept = append(kept, a)
+	}
+	return kept
 }
 
 // forwardAddrs 线路的中转入口(model.LineForward)展开成订阅地址:地址是中转(集群中转用那台的连接地址,外部中转用填的地址),
@@ -160,7 +186,7 @@ func forwardAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 		if name == "" {
 			name = host
 		}
-		a := certAddr(addr{server: host, port: f.Port, sni: exit.SNI, insecure: exit.Insecure, relay: true}, line, exit)
+		a := certAddr(addr{server: host, port: f.Port, sni: exit.SNI, insecure: exit.Insecure, relay: true, fwd: f.Id}, line, exit)
 		ratio := ""
 		if exit.Ratio > 0 && exit.Ratio != 1 {
 			ratio = " x" + strconv.FormatFloat(exit.Ratio, 'f', -1, 64)
@@ -202,7 +228,7 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 			}
 			// 保存时已规整(web.normLineAddrs);老数据里把 IPv6 写成 [v6] 的,这里再去一次方括号,
 			// 不然拼出 [[v6]]:端口,sing-box 订阅里这个节点直接解析失败
-			out = append(out, addr{server: model.BareHost(c.Server), port: port, sni: c.SNI, remark: c.Remark, insecure: insecure})
+			out = append(out, addr{server: model.BareHost(c.Server), port: port, sni: c.SNI, remark: c.Remark, insecure: insecure, node: c.NodeId})
 		}
 		return out
 	}
@@ -226,7 +252,7 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 				host = e.IP6
 			}
 		}
-		out = append(out, certAddr(addr{server: host, port: line.Port, sni: e.SNI, remark: e.Suffix, insecure: e.Insecure}, line, e))
+		out = append(out, certAddr(addr{server: host, port: line.Port, sni: e.SNI, remark: e.Suffix, insecure: e.Insecure, node: e.NodeId}, line, e))
 	}
 	return out
 }
@@ -248,11 +274,23 @@ func GenerateLinks(user model.User, lines []model.Line, entries []Entry) []strin
 	return GenerateLinksFor(user, lines, entries, nil)
 }
 
-// GenerateLinksFor 同 GenerateLinks,但按 lineNodes(线路 → 允许的服务器,缺省 = 全部)过滤入口。
-func GenerateLinksFor(user model.User, lines []model.Line, entries []Entry, lineNodes map[uint]map[uint]bool) []string {
+// LineHides 用户在各线路上不要的节点(线路 id → 节点键集合,见 model.UserLineHide);没写的线路 = 都要。
+type LineHides map[uint]map[string]bool
+
+// hidesOf 可选参数里取 LineHides(没给为 nil)。
+func hidesOf(h []LineHides) LineHides {
+	if len(h) > 0 {
+		return h[0]
+	}
+	return nil
+}
+
+// GenerateLinksFor 同 GenerateLinks,但按 lineNodes(线路 → 允许的服务器,缺省 = 全部)过滤入口;hides 可选,是用户不要的节点。
+func GenerateLinksFor(user model.User, lines []model.Line, entries []Entry, lineNodes map[uint]map[uint]bool, hides ...LineHides) []string {
 	var links []string
+	hide := hidesOf(hides)
 	for _, line := range lines {
-		for _, a := range subAddrs(line, entries, lineNodes[line.Id]) {
+		for _, a := range subAddrs(line, entries, lineNodes[line.Id], hide[line.Id]) {
 			links = append(links, lineToURIs(line, user, a, line.Name+a.remark)...)
 		}
 	}

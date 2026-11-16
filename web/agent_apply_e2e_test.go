@@ -187,6 +187,8 @@ func TestAgentApplyEndToEnd(t *testing.T) {
 	}
 
 	// ---- 3. 内核起不来的配置:新线路的端口被本测试占着 ----
+	// (现在新入站端口被占只摘掉那一个、照常应用,见 TestAgentApplyReportsBlockedInbound;这里关掉它,钉住"整份起不来"的流程)
+	run.SetBusySkip(false)
 	busy, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatal(err)

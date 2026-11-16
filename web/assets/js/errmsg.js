@@ -805,7 +805,10 @@ const EN = /*BEGIN*/{
 "第 %d 个中转入口的转到地址 %q 不对:只填 IP 或域名,不带端口(端口就是线路的端口)": "Relay entry %d: the forward-to address %q is invalid; enter only an IP or a domain, without a port (the port is the line's port)",
 "第 %d 个中转入口和前面的一个在「%s」上用了同一个端口 %d": "Relay entry %d and an earlier one use the same port on \"%s\": %d",
 "第 %d 个中转入口:%w": "Relay entry %d: %w",
-"第 %d 个中转入口:端口 %d 已被本机其它程序占用,换一个": "Relay entry %d: port %d is taken by another program on this server; pick another",
+"第 %d 个中转入口:端口 %d 在「%s」上已被别的程序占用%s。换一个端口;如果那正是你给这条线路做的转发,把这个入口改成「这台上已有转发」,面板就不去占这个端口": "Relay entry %d: port %d on \"%s\" is already used by another program%s. Pick another port; if that program is the forwarder you set up for this line, switch this entry to \"already forwarded on this server\" and the panel will leave the port alone",
+"端口 %d 在服务器「%s」上已被别的程序占用%s:换一个端口,或先在那台上停掉占用它的程序": "Port %d on server \"%s\" is already used by another program%s: pick another port, or stop that program on the server first",
+
+"分组名太长(最多 24 个字)": "Group name is too long (24 characters at most)",
 "端口 %d 是服务器「%s」的%s端口,换一个": "Port %d is the %[3]s port of server \"%[2]s\"; pick another",
 "这条线路自己在「%s」上就用着端口 %d,换一个": "This line itself already uses port %[2]d on \"%[1]s\"; pick another",
 "端口 %d 在「%s」上已被线路「%s」用着,换一个": "Port %d on \"%s\" is used by line \"%s\"; pick another",

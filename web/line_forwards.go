@@ -97,7 +97,7 @@ func (s *Server) normForwards(line *model.Line, old *model.Line) error {
 	had := map[string]bool{} // 原来就有的「中转服务器:端口」:端口没变的不再试监听(占着它的正是本机运行中的数据面)
 	if old != nil {
 		for _, f := range model.ParseForwards(old.Forwards) {
-			if f.Via != 0 {
+			if f.Managed() { // 原来是「已有转发」的不算:那时面板没占这个端口
 				had[fmt.Sprintf("%d:%d", f.Via, f.Port)] = true
 			}
 		}
@@ -126,8 +126,8 @@ func (s *Server) normForwards(line *model.Line, old *model.Line) error {
 		if !render.LineOnNode(*line, f.To) {
 			return fmt.Errorf("第 %d 个中转入口转给「%s」,但这条线路没部署在那台", no, exit.Name)
 		}
-		if f.Via == 0 { // 外部中转:只进订阅
-			f.Host, f.Target = model.BareHost(f.Host), ""
+		if f.Via == 0 { // 别处的中转:只进订阅
+			f.Host, f.Target, f.Manual = model.BareHost(f.Host), "", false
 			if f.Host == "" {
 				return fmt.Errorf("第 %d 个中转入口没填中转地址", no)
 			}
@@ -149,6 +149,9 @@ func (s *Server) normForwards(line *model.Line, old *model.Line) error {
 			return fmt.Errorf("第 %d 个中转入口的中转服务器和出口是同一台「%s」", no, via.Name)
 		}
 		f.Host, f.Target = "", model.BareHost(f.Target)
+		if f.Manual {
+			f.Target = "" // 那台上已有的转发转到哪里是那边配的,这里不存
+		}
 		if f.Target != "" && !model.ValidAddr(f.Target) {
 			return fmt.Errorf("第 %d 个中转入口的转到地址 %q 不对:只填 IP 或域名,不带端口(端口就是线路的端口)", no, f.Target)
 		}
@@ -160,10 +163,15 @@ func (s *Server) normForwards(line *model.Line, old *model.Line) error {
 		if err := s.forwardPortFree(*line, *f, via, refs); err != nil {
 			return fmt.Errorf("第 %d 个中转入口:%w", no, err)
 		}
-		if via.IsLocal && !had[key] && !portBindable(f.Port) {
-			return fmt.Errorf("第 %d 个中转入口:端口 %d 已被本机其它程序占用,换一个", no, f.Port)
+		// 面板来转的、新占用的端口:让那台服务器自己试着监听一次(本机直接试,副机经 agent/port-check;问不到不拦)。
+		// 「已有转发」的不试 —— 占着端口的正是那个转发
+		if f.Managed() && !had[key] {
+			if by, busy := s.portBusyOn(via, f.Port, render.ForwardNetwork(*line)); busy {
+				return fmt.Errorf("第 %d 个中转入口:端口 %d 在「%s」上已被别的程序占用%s。换一个端口;如果那正是你给这条线路做的转发,把这个入口改成「这台上已有转发」,面板就不去占这个端口", no, f.Port, via.Name, busyWho(by))
+			}
 		}
 	}
+	model.AssignForwardIds(fs) // 新加的入口补编号(节点设置、用户不要哪些节点按编号认它)
 	b, err := json.Marshal(fs)
 	if err != nil {
 		return err

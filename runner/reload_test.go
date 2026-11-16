@@ -103,7 +103,7 @@ func TestReloadRollsBackWhenStartFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close(db)
-	r := &Runner{db: db, core: core.NewCore(), dbPath: filepath.Join(dir, "x.db")}
+	r := &Runner{db: db, core: core.NewCore(), dbPath: filepath.Join(dir, "x.db"), noBusySkip: true} // 这里要的是"整份起不来、回滚"的路径
 
 	// 先起一份能用的配置(只有出站,不占端口)
 	good := []byte(`{"log":{"disabled":true},"outbounds":[{"type":"direct","tag":"direct"}]}`)

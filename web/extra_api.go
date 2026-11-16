@@ -94,7 +94,9 @@ func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 	o := s.run.Onlines()
 	users := mergeIPs(o.Users, s.run.Hub().RemoteOnlineUsers())
 	counts := s.run.ConnCounts()
-	lines, ups := o.Lines, o.Upstreams
+	// 线路和上游的在线灯:本机的加上各台副机的(主机自己不跑线路时,只看本机永远是灰的)
+	lines := mergeIPs(o.Lines, s.run.Hub().RemoteOnlineLines())
+	ups := mergeIPs(o.Upstreams, s.upstreamsOfLines(lines))
 	if rid := scope(r); rid > 0 { // 代理只看自己的用户、授权给自己的线路;上游是主面板的布局,一概不给
 		mine := s.resellerUserNames(rid)
 		users = filterNames(users, mine)
@@ -113,6 +115,17 @@ func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 		out["owners"] = s.onlineOwners(users)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// upstreamsOfLines 这些线路默认走的上游的名字(直连的不算)。副机不单独上报「哪条上游有人在用」:
+// 线路在线,它的上游就算在用(分流规则里另外指的上游不算,宁可少亮不乱亮)。
+func (s *Server) upstreamsOfLines(lines []string) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	var names []string
+	s.db.Model(&model.Upstream{}).Where("id IN (?)", s.db.Model(&model.Line{}).Select("upstream_id").Where("name IN ? AND upstream_id > 0", lines)).Pluck("name", &names)
+	return names
 }
 
 // onlineDevices 在线用户 → 设备数(本机与副机的源 IP 合并,IPv4 一个地址一台、IPv6 按 /64 算,和设备数限制同一口径)。
@@ -261,9 +274,49 @@ func (s *Server) handleRecentConns(w http.ResponseWriter, r *http.Request) {
 	}
 	out := fairMerge(s.recentConns(100), remote, self, multi, 100)
 	if withFails {
-		out = append(out, fairMerge(s.recentFails(50), remoteFails, self, multi, 50)...)
+		fails := fairMerge(s.recentFails(50), remoteFails, self, multi, 50)
+		guessFailUsers(fails, out, s.onlineIPsAll())
+		out = append(out, fails...)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// guessFailUsers 握手 / 认证没过的来源认不出是谁,但 IP 往往就是某个用户的设备(换了订阅没更新、时间不对、网络抖了一下):
+// 同一个 IP 上现在在线的、或刚连成功过的用户只有一个时,把名字带上(UserGuess = true,界面上注明是按 IP 对的)。
+// 对上不止一个人(同一个出口 IP 后面有几个用户)就不猜。
+func guessFailUsers(fails, ok []recentConn, online map[string][]string) {
+	if len(fails) == 0 {
+		return
+	}
+	byIP := map[string]string{} // IP → 用户名;"" = 不止一个
+	note := func(ip, user string) {
+		if ip == "" || user == "" {
+			return
+		}
+		user = strings.TrimSuffix(user, model.ShareSuffix)
+		if cur, seen := byIP[ip]; seen && cur != user {
+			byIP[ip] = ""
+			return
+		}
+		byIP[ip] = user
+	}
+	for u, ips := range online {
+		for _, ip := range ips {
+			note(ip, u)
+		}
+	}
+	for _, c := range ok {
+		if c.Failed == "" {
+			note(c.IP, c.User)
+		}
+	}
+	for i := range fails {
+		if fails[i].User == "" {
+			if u := byIP[fails[i].IP]; u != "" {
+				fails[i].User, fails[i].UserGuess = u, true
+			}
+		}
+	}
 }
 
 // fairMerge 本机的记录标上服务器 id(多服务器时还有名字),和副机的(hub 已标好)合在一起,每条按来源 IP 标地址族;

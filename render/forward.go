@@ -12,9 +12,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// 中转入口(线路的 Forwards,见 model.LineForward):Via 是本机的,本机开一个 sing-box 自带的 direct 入站,
+// 中转入口(线路的 Forwards,见 model.LineForward):Via 是本机、由面板来转的,本机开一个 sing-box 自带的 direct 入站,
 // 把收到的字节原样转给出口服务器上的这条线路(override 到出口的地址 + 线路端口),不解密、不认用户。
-// 外部中转(Via = 0)只进订阅,不在这里渲染。
+// 别处的中转(Via = 0)和「这台上已有转发」(Manual)只进订阅,不在这里渲染。
 //
 // 路由:这些入站的规则排在所有规则最前面 —— 不嗅探、不劫持 DNS,也不受私网屏蔽影响
 // (手填的转到地址可能是内网)。目标固定,不能被当成开放代理用。
@@ -42,6 +42,19 @@ func ForwardNetwork(line model.Line) string {
 // 「最近入站连接」里一眼看得出是哪条线路的中转。
 func ForwardTag(line model.Line, f model.LineForward) string {
 	return line.Name + " ⇄" + strconv.Itoa(f.Port)
+}
+
+// forwardMark 中转入站 tag 里线路名和端口之间的记号。
+const forwardMark = " ⇄"
+
+// IsForwardTag 这个入站 tag 是不是中转入口的(ForwardTag 生成的样子)。线路名里不会有这个记号后面紧跟纯数字结尾的写法就认定是。
+func IsForwardTag(tag string) bool {
+	i := strings.LastIndex(tag, forwardMark)
+	if i <= 0 {
+		return false
+	}
+	p, err := strconv.Atoi(tag[i+len(forwardMark):])
+	return err == nil && p >= 1 && p <= 65535
 }
 
 // ForwardTarget 集群中转转到出口服务器的哪个地址:手填的优先;否则出口探测到的公网 IP —— 中转有 IPv4(或两种都不知道)
@@ -83,7 +96,7 @@ func forwardInbounds(db *gorm.DB, self uint, all []model.Line, taken map[int]boo
 	tags := map[string]bool{}
 	for _, l := range all {
 		for _, f := range model.ParseForwards(l.Forwards) {
-			if f.Off || f.Via != self || f.To == self || f.Port < 1 || f.Port > 65535 {
+			if f.Off || f.Manual || f.Via != self || f.To == self || f.Port < 1 || f.Port > 65535 {
 				continue
 			}
 			if nodes == nil {

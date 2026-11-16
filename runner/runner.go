@@ -82,6 +82,11 @@ type Runner struct {
 	lastFailedRaw []byte
 	lastFailedAt  time.Time
 	lastFailedErr error
+	// 端口被本机别的程序占着、因此没开的入站(tag → 入站);数据面照常服务其余入站,见 blocked.go。
+	blocked   map[string]blockedInbound
+	blockedMu sync.Mutex
+	// noBusySkip 只给测试用:关掉「摘掉端口被占的新入站」,让它们照旧走整份回滚 + 冷却(那几条回归测试拿占端口来造启动失败)
+	noBusySkip bool
 	// 上一次成功读到并应用的限速 / 设备数策略。数据库抖动时沿用它,后台重试,绝不为此停机。
 	lastSpecs     map[string]core.UserLimitSpec
 	lastGroups    map[string]core.GroupLimitSpec
@@ -555,8 +560,14 @@ func (r *Runner) Start() (err error) {
 		}
 		r.lastSpecs, r.lastGroups = specs, groups
 	}
+	raw = r.dropBlocked(raw)
 	if err := r.core.Start(raw); err != nil {
-		return fmt.Errorf("启动 sing-box: %w", err)
+		// 有入站的端口被本机别的程序占着:摘掉那一个再起,不让一个端口拖住整台机器的数据面
+		running, err2 := r.startSkippingBusy(raw, err, nil)
+		if running == nil {
+			return fmt.Errorf("启动 sing-box: %w", err2)
+		}
+		raw = running
 	}
 	r.restorePendingStats()
 	r.applied, _ = outboundsOf(raw)
@@ -1077,6 +1088,7 @@ func (r *Runner) markLimitsRetry(err error) {
 }
 
 func (r *Runner) reloadAllLockedWithForce(raw []byte, force bool) error {
+	raw = r.dropBlocked(raw) // 端口被占、已经摘掉的入站不算"变了"(见 blocked.go)
 	if !force && r.core.IsRunning() && r.appliedRaw != nil && bytes.Equal(r.appliedRaw, raw) {
 		if err := r.applyLimits(); err != nil {
 			r.markLimitsRetry(err)
@@ -1096,6 +1108,21 @@ func (r *Runner) reloadAllLockedWithForce(raw []byte, force bool) error {
 			return nil
 		} else {
 			logger.Warning("用户热更新失败,改为重启数据面: ", err)
+		}
+	}
+	// 只多了几个入站、别的都没变(之前端口被占摘掉的,现在端口空出来了):热加上,不重启数据面
+	if !force && !r.noBusySkip && r.core.IsRunning() && r.appliedRaw != nil {
+		if added := addedInbounds(r.appliedRaw, raw); len(added) > 0 {
+			if running, err := r.hotAddInbounds(raw, added); err == nil {
+				if uerr := r.reloadUsersLocked(running); uerr != nil {
+					logger.Warning("补开入站后热更新用户表有入站没更新到: ", uerr)
+				}
+				r.appliedRaw = running
+				r.applyPortHopping()
+				return nil
+			} else {
+				logger.Warning("补开入站失败,改为重启数据面: ", err)
+			}
 		}
 	}
 	// 同一份刚刚起不来、已经回滚过的配置,冷却期内不再拆正在服务的数据面。
@@ -1133,7 +1160,15 @@ func (r *Runner) reloadAllLockedWithForce(raw []byte, force bool) error {
 			r.pendingStats = append(r.pendingStats, *oldBox.StatsTracker().SnapshotStats()...)
 		}
 	}
-	if err := r.core.Start(raw); err != nil {
+	err := r.core.Start(raw)
+	if err != nil {
+		// 有入站的端口被本机别的程序占着(典型:中转入口的端口上已经跑着 realm):只摘掉那一个再起。
+		// 起来了就照常往下走(摘掉的记在名单里上报、每分钟重试);别的错误还是回滚到上一份
+		if running, _ := r.startSkippingBusy(raw, err, prev); running != nil {
+			raw, err = running, nil
+		}
+	}
+	if err != nil {
 		r.applied, r.appliedRaw = nil, nil
 		r.noteFailedConfig(raw, err)
 		if prev != nil {
@@ -2029,7 +2064,7 @@ func Run(dbPath string) error {
 	}{
 		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"线路上游", r.relayLoop}, {"运行统计", r.pingLoop}, {"定时备份", r.backupLoop},
 		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop}, {"凭据撤销重试", r.secureReloadLoop}, {"用户热更新重试", r.userReloadLoop},
-		{"数据面看护", r.coreWatchLoop}, {"中转入口跟进", r.forwardWatchLoop}, {"磁盘巡检", r.diskLoop},
+		{"数据面看护", r.coreWatchLoop}, {"中转入口跟进", r.forwardWatchLoop}, {"被占端口重试", r.blockedRetryLoop}, {"磁盘巡检", r.diskLoop},
 	} {
 		go keepRunning(l.name, l.fn, stopCheckpoint)
 	}

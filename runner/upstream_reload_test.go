@@ -69,7 +69,8 @@ func TestRollbackAfterUpstreamHotUpdateUsesCurrentUpstream(t *testing.T) {
 		t.Fatalf("热更新后运行中的配置记录应是新上游(端口 2),实际 %d", p)
 	}
 
-	// 再加一条线路,端口被别的程序占着:整份配置起不来,回滚
+	// 再加一条线路,端口被别的程序占着:整份配置起不来,回滚(关掉「摘掉新入站」,这里要测的是回滚到哪一份)
+	r.noBusySkip = true
 	busy, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)
@@ -211,6 +212,7 @@ func TestUserChangeAfterFailedPortChangeRollback(t *testing.T) {
 	}
 
 	// 之后哪怕再有一次起不来要回滚,回到的也是停用后的用户表,alice 不能被请回来
+	r.noBusySkip = true // 新线路的端口被占现在只摘掉那一条;这里要的是整份回滚
 	busy2, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
 		t.Fatal(err)

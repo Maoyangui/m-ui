@@ -12,6 +12,7 @@ export const subtitle = () => t('node.subtitle');
 let data = { nodes: [], revision: '', role: 'master', masterId: 0, appliedAt: '' };
 const isNodeView = () => data.role === 'node';
 let query = '', onlyBad = false;
+let groupF = null; // 按分组筛选:null = 全部,'' = 未分组,其余是组名
 const unsyncedSince = new Map(); // 服务器名 → 第一次看到"未同步"的时间(一次保存后副机会有几秒未同步,不到 30 秒不算异常)
 const MANY = 10; // 服务器超过这么多才给搜索框和「只看异常」(从概况点进来时不论多少台都给)
 
@@ -25,22 +26,29 @@ export async function render(el) {
   [data] = await Promise.all([get('nodes'), loadReach(), loadHA()]);
   trackUnsynced(unsyncedSince, data.nodes);
   const tools = data.nodes.length > MANY || onlyBad;
+  if (groupF && !groupsOf().some(g => g.name === groupF)) groupF = null; // 那个组已经没有服务器了
+  // 工具栏:搜索 / 分组 / 只看异常在左,检测与新增在右。接入步骤、配置修订号这类不常看的放到表格下面
   el.innerHTML = `
     <div class="toolbar">
-      <span class="muted small">${t('node.revision')} <code>${esc(data.revision || '—')}</code></span>
-      ${tools ? `<input type="search" id="node-q" class="sm" style="max-width:13rem" placeholder="${t('common.search')}…" value="${esc(query)}">
-      <label class="small muted" style="display:inline-flex;align-items:center;gap:.3rem" title="${esc(t('node.onlyBadHelp'))}"><input type="checkbox" id="node-onlybad" ${onlyBad ? 'checked' : ''}> ${t('node.onlyBad')}</label>
+      ${tools ? `<input type="search" id="node-q" placeholder="${t('common.search')}…" value="${esc(query)}">` : ''}
+      <span id="node-groups"></span>
+      ${tools ? `<label class="check-inline" title="${esc(t('node.onlyBadHelp'))}"><input type="checkbox" id="node-onlybad" ${onlyBad ? 'checked' : ''}> ${t('node.onlyBad')}</label>
       <span class="muted small" id="node-count"></span>` : ''}
       <span class="grow"></span>
       <span class="row" id="reach-bar"></span>
       ${isNodeView() ? '' : `<button class="btn primary" data-act="node.add">${t('node.add')}</button>`}
     </div>
-    <p class="hint" style="margin-bottom:.8rem">${isNodeView() ? t('node.nodeView') : t('node.howto')}</p>
     <div id="decom-gone"></div>
     <div class="table-wrap fill"><table class="grid tight nodes">
-      <thead><tr><th>${t('common.name')}</th><th>${t('node.domain')}</th><th>${t('common.status')}</th><th class="c-reach" title="${esc(t('reach.colHint'))}">${t('reach.col')}</th><th class="c-sync c-p3">${t('node.sync')}</th><th class="c-core">${t('node.core')}</th><th class="c-online c-p3">${t('node.online')}</th><th class="c-act"></th></tr></thead>
+      <thead><tr><th>${t('nav.nodes')}</th><th class="c-addr">${t('node.address')}</th><th>${t('common.status')}</th><th class="c-reach" title="${esc(t('reach.colHint'))}">${t('reach.col')}</th><th class="c-sync c-p3">${t('node.sync')}</th><th class="c-core">${t('node.core')}</th><th class="c-online c-p3">${t('node.online')}</th><th class="c-act"></th></tr></thead>
       <tbody id="nodes-body"></tbody>
-    </table></div>`;
+    </table></div>
+    <div class="page-foot">
+      <details class="howto"><summary>${esc(t(isNodeView() ? 'node.nodeViewTitle' : 'node.howtoTitle'))}</summary><p>${isNodeView() ? t('node.nodeView') : t('node.howto')}</p></details>
+      <span class="grow"></span>
+      <span class="muted small">${t('node.revision')} <code>${esc(data.revision || '—')}</code></span>
+    </div>`;
+  renderGroups();
   const q = document.getElementById('node-q');
   if (q) q.addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
   const ob = document.getElementById('node-onlybad');
@@ -60,6 +68,19 @@ export async function tick() {
   refreshDetail();
 }
 
+// 分组:有服务器填了分组才出现一排筛选(全部 / 各组 / 未分组),表格里也按组分段
+function groupsOf() {
+  const by = new Map();
+  for (const n of data.nodes) { const g = (n.group || '').trim(); by.set(g, (by.get(g) || 0) + 1); }
+  return [...by.entries()].map(([name, n]) => ({ name, n })).sort((a, b) => (a.name === '') - (b.name === '') || a.name.localeCompare(b.name));
+}
+const hasGroups = () => data.nodes.some(n => (n.group || '').trim());
+function renderGroups() {
+  const gs = groupsOf();
+  setHTML('node-groups', hasGroups() ? `<div class="seg">${[{ key: null, label: t('common.all'), n: data.nodes.length }, ...gs.map(g => ({ key: g.name, label: g.name || t('node.ungrouped'), n: g.n }))]
+    .map(g => `<button data-act="node.group" data-id="${g.key === null ? '*' : esc(g.key)}" class="${g.key === groupF ? 'active' : ''}">${esc(g.label)} <span class="seg-n">${g.n}</span></button>`).join('')}</div>` : '');
+}
+
 // 已经删掉、但还没收到下线通知的服务器:列表里没有它们那一行了,单独提示(主机一直在重试)
 function renderDecomGone() {
   const gone = data.decommissions || [];
@@ -71,12 +92,13 @@ function renderDecomGone() {
 const decomBadge = n => n.decommission
   ? ` <span title="${esc(t('node.decomPendingHelp', { n: n.decommission.attempts || 0, err: trErr(n.decommission.lastError || '—') }))}">${badge(t('node.decomPending'), 'warn')}</span>` : '';
 
-// 副机自己报的记账失败、主机发现的账本回退(24 小时内):在线也要看得见
+// 副机自己报的记账失败(要处理,红的);主机发现并已经自动对齐的账本回退(不用处理,中性的,留一小时让人知道发生过)
+const LEDGER_NOTE_SECS = 3600;
 function ledgerBadges(s) {
   let out = '';
   if (s.ledgerFails) out += ` <span title="${esc(t('node.ledgerFailsHelp', { n: s.ledgerFails }))}">${badge(t('node.ledgerFails', { n: s.ledgerFails }), 'danger')}</span>`;
-  if (s.ledgerRegressAt && Date.now() / 1000 - s.ledgerRegressAt < 86400) {
-    out += ` <span title="${esc(t('node.ledgerRegressHelp', { n: s.ledgerRegressUsers || 0, time: fmtRelative(s.ledgerRegressAt) }))}">${badge(t('node.ledgerRegress'), 'warn')}</span>`;
+  if (s.ledgerRegressAt && Date.now() / 1000 - s.ledgerRegressAt < LEDGER_NOTE_SECS) {
+    out += ` <span title="${esc(t('node.ledgerRegressHelp', { n: s.ledgerRegressUsers || 0, time: fmtRelative(s.ledgerRegressAt) }))}">${badge(t('node.ledgerRegress'))}</span>`;
   }
   return out;
 }
@@ -98,8 +120,14 @@ function statusCell(n) {
   if (!n.enabled) return chip + badge(t('common.disabled')) + decomBadge(n);
   const s = n.status;
   if (!s) return chip + badge(t('node.pending'), 'warn');
-  // 在线但有话要说(配置推不下去、数据面没应用成功、记账出问题):这台机器并没有离线,但管理员必须看见
-  if (s.ok) return `${chip}${badge(t('common.online'), 'ok')}${s.version ? ` <span class="muted small">v${esc(s.version)}</span>` : ''}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.noConnFails ? ` <span title="${esc(t('node.noConnFailsHelp'))}">${badge(t('node.noConnFails'))}</span>` : ''}${ledgerBadges(s)}${s.error ? `<div class="sub-cell ellip warn-text" title="${esc(trErr(s.error))}">${esc(shortErr(s.error))}</div>` : (s.hostname ? `<div class="sub-cell ellip" title="${esc(s.hostname)}">${esc(s.hostname)}</div>` : '')}`;
+  // 在线但有话要说(配置推不下去、数据面没应用成功、记账出问题):这台机器并没有离线,但管理员必须看见。
+  // 第二行小字:有话要说就写原因(黄),否则是版本号 + 主机名
+  if (s.ok) {
+    const meta = [s.version ? 'v' + s.version : '', s.hostname || ''].filter(Boolean).join(' · ');
+    return `${chip}${badge(t('common.online'), 'ok')}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.noConnFails ? ` <span title="${esc(t('node.noConnFailsHelp'))}">${badge(t('node.noConnFails'))}</span>` : ''}${ledgerBadges(s)}${s.error
+      ? `<div class="sub-cell ellip warn-text" title="${esc(trErr(s.error))}">${esc(shortErr(s.error))}</div>`
+      : (meta ? `<div class="sub-cell ellip" title="${esc(meta)}">${esc(meta)}</div>` : '')}`;
+  }
   return `${chip}${badge(t('common.offline'), 'danger')}<div class="sub-cell ellip" title="${esc(trErr(s.error || ''))}">${esc(shortErr(s.error))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
 }
 
@@ -145,29 +173,49 @@ function certFailBadge(n) {
   const why = bad.map(c => `${c.name}: ${trErr(c.renewErr)}`).join('\n');
   return ` <span class="badge danger" title="${esc(why)}">${t('node.certFail')}</span>`;
 }
-// 锁后面的天数(正用着的证书里最少的):剩 14 天以内变黄、7 天以内变红
-const certDaysCell = d => ` <span class="small ${d <= 7 ? 'danger-text' : d <= 14 ? 'warn-text' : 'muted'}" title="${t('cert.daysLeft')}">🔒 ${d}d</span>`;
+// 证书剩余天数(正用着的证书里最少的):剩 14 天以内变黄、7 天以内变红
+const certDaysText = d => `<span class="${d <= 7 ? 'danger-text' : d <= 14 ? 'warn-text' : ''}" title="${t('cert.daysLeft')}">${esc(t('node.certLeft', { n: d }))}</span>`;
 
-// 磁盘快满 / 满了:状态一栏加一个小标记,悬停看明细;不到告警线不占地方
-function diskBadge(d) {
+// 磁盘快满 / 满了:数据面那一格的小字里加一段,悬停看明细;不到告警线不占地方
+function diskText(d) {
   const lv = diskLevel(d);
   if (!lv) return '';
   const tip = [diskBrief(d), diskHogs(d)].filter(Boolean).join('\n');
-  return ` <span class="small ${lv === 'bad' ? 'danger-text' : 'warn-text'}" title="${esc(tip)}">💾 ${diskPct(d)}%</span>`;
+  return `<span class="${lv === 'bad' ? 'danger-text' : 'warn-text'}" title="${esc(tip)}">${esc(t('node.diskUsed', { n: diskPct(d) }))}</span>`;
 }
 
+// 端口被这台机器上别的程序占着、因此没开的入站(中转入口 / 新线路):红色徽标,悬停看是哪个、被谁占着
+function blockedBadge(list) {
+  if (!list || !list.length) return '';
+  const tip = list.map(b => t('node.blockedItem', {
+    what: t(/ ⇄\d+$/.test(b.tag) ? 'node.blockedFw' : 'node.blockedLine'), tag: b.tag, port: b.port, net: (b.net || 'tcp').toUpperCase(),
+    by: b.by ? t('node.blockedBy', { by: b.by }) : '',
+  })).join('\n') + '\n' + t('node.blockedHelp');
+  return ` <span class="badge danger" title="${esc(tip)}">${esc(t('node.blocked', { n: list.length }))}</span>`;
+}
+
+// 运行了多久,只写最大的那个单位(小字里放不下「71天 19小时 14分」)
+function upShort(sec) {
+  const s = Number(sec) || 0;
+  if (s >= 86400) return t('node.upD', { n: Math.floor(s / 86400) });
+  if (s >= 3600) return t('node.upH', { n: Math.floor(s / 3600) });
+  return t('node.upM', { n: Math.max(1, Math.floor(s / 60)) });
+}
+
+// 数据面一格:第一行状态徽标(+ 要处理的问题),第二行小字是运行时长、证书剩余天数、磁盘
 function coreCell(n) {
+  const sub = parts => { const p = parts.filter(Boolean); return p.length ? `<div class="sub-cell">${p.join(' · ')}</div>` : ''; };
   if (n.isLocal) {
     const rl = state.status.reload || {};
     return badge(state.status.coreRunning ? t('dash.running') : t('dash.stopped'), state.status.coreRunning ? 'ok' : 'danger')
-      + reloadBadge(rl.at && !rl.ok ? `${trErr(rl.op)}: ${trErr(rl.error)}` : '') + certFailBadge(n) + diskBadge(state.status.disk);
+      + reloadBadge(rl.at && !rl.ok ? `${trErr(rl.op)}: ${trErr(rl.error)}` : '') + certFailBadge(n) + blockedBadge(state.status.blocked)
+      + sub([diskText(state.status.disk)]);
   }
   const s = n.status || {};
   if (!s.ok) return '—';
   return badge(s.coreRunning ? t('dash.running') : t('dash.stopped'), s.coreRunning ? 'ok' : 'danger')
-    + (s.uptime ? ` <span class="muted small">${fmtDuration(s.uptime)}</span>` : '')
-    + (s.certDays !== undefined ? certDaysCell(s.certDays) : '')
-    + reloadBadge(s.reloadError) + certFailBadge(n) + diskBadge(s.disk);
+    + reloadBadge(s.reloadError) + certFailBadge(n) + blockedBadge(s.blocked)
+    + sub([s.uptime ? `<span title="${esc(fmtDuration(s.uptime))}">${esc(upShort(s.uptime))}</span>` : '', s.certDays !== undefined ? certDaysText(s.certDays) : '', diskText(s.disk)]);
 }
 
 function actionsCell(n) {
@@ -193,7 +241,7 @@ function nodeBad(n) {
     const rl = state.status.reload || {};
     if ((rl.at && !rl.ok) || !state.status.coreRunning) return true;
   }
-  if (n.status && n.status.ledgerRegressAt && Date.now() / 1000 - n.status.ledgerRegressAt < 86400) return true; // 和这一行的「账本回退」徽章一致
+
   const r = ((reach && reach.results) || []).find(x => x.nodeId === n.id);
   if (r && isBad(r.verdict)) return true;
   const v6 = v6Of(n.id);
@@ -202,7 +250,8 @@ function nodeBad(n) {
   return certFailBadge(n) !== '';
 }
 function visibleNodes() {
-  return data.nodes.filter(n => matches(query, n.name, n.domain, n.addr, n.publicIp, n.publicIp6) && (!onlyBad || nodeBad(n)));
+  return data.nodes.filter(n => matches(query, n.name, n.domain, n.addr, n.publicIp, n.publicIp6, n.group)
+    && (groupF === null || (n.group || '').trim() === groupF) && (!onlyBad || nodeBad(n)));
 }
 
 // 探测到的 IPv4 / IPv6(publicIp 有 IPv4 时是 IPv4,老版本副机在纯 IPv6 机器上报的是 v6)
@@ -219,17 +268,17 @@ function autoAddr(n, fam = n.addrFamily) {
 }
 const detectedText = n => { const d = detected(n); return t('node.detected', { v4: d.v4 || t('node.none'), v6: d.v6 || t('node.none') }); };
 
-// 服务器列表里域名下面那行地址:手填的标"手动";自动的标出 IPv6、或选了 IPv6 却没有 IPv6
+// 地址一格:订阅里用的那个地址;手填的标"手动",自动的标出 IPv6、或选了 IPv6 却没有 IPv6(小字)。悬停看探测到的两个地址
 function addrCell(n) {
   const auto = autoAddr(n);
   const addr = n.addr || auto.ip;
-  if (!addr) return '';
+  if (!addr) return '<span class="muted">—</span>';
   const tag = n.addr ? t('node.addrManual')
     : n.addrFamily === 'v6' && auto.fam === 'v4' ? t('node.v6Fallback')
     : auto.fam === 'v6' ? 'IPv6' : '';
   // IPv4 不从中间折;IPv6 太长时只在冒号后折行
   const ip = addr.includes(':') ? esc(addr).replace(/:/g, ':<wbr>') : `<span class="nowrap">${esc(addr)}</span>`;
-  return `<div class="sub-cell mono" title="${esc(detectedText(n))}">${ip}${tag ? ` <span class="nowrap">· ${esc(tag)}</span>` : ''}</div>`;
+  return `<span class="mono" title="${esc(detectedText(n))}">${ip}</span>${tag ? `<div class="sub-cell">${esc(tag)}</div>` : ''}`;
 }
 
 function renderRows() {
@@ -239,20 +288,31 @@ function renderRows() {
   const cnt = document.getElementById('node-count');
   if (cnt) cnt.textContent = `${rows.length} / ${data.nodes.length}`;
   if (!rows.length) { setHTML(body, `<tr><td colspan="8">${empty(onlyBad && data.nodes.length ? t('node.noBad') : undefined)}</td></tr>`); return; }
-  // 每 5 秒刷新一次:内容没变就不动 DOM(整表重画会让鼠标下的按钮、提示闪一下)
-  setHTML(body, rows.map(n => {
+  // 名称一格:名字 + 倍率,下面一行小字是域名(每行都写一遍 API 地址太吵:它在编辑框里,悬停名字也看得到)
+  const row = n => {
     const s = n.status || {};
     const domain = n.domain || (n.isLocal ? state.settings.webDomain || '' : '');
     return `<tr>
-      <td class="primary-cell">${esc(n.name)}${n.ratio && n.ratio !== 1 ? ' ' + badge('x' + n.ratio, 'warn') : ''}${n.apiUrl && !isNodeView() ? `${isPlain(n.apiUrl) ? ` <span title="${esc(t('node.plainHelp'))}">${badge(t('node.plain'), 'warn')}</span>` : ''}<div class="sub-cell mono ellip" title="${esc(n.apiUrl)}">${esc(n.apiUrl)}</div>` : ''}</td>
-      <td class="mono"><span class="ellip" title="${esc(domain)}">${esc(domain || '—')}</span>${addrCell(n)}</td>
+      <td class="primary-cell"><span class="node-name" title="${esc(n.apiUrl && !isNodeView() ? n.apiUrl : n.name)}">${esc(n.name)}</span>${n.ratio && n.ratio !== 1 ? ' ' + badge('×' + n.ratio) : ''}${n.apiUrl && !isNodeView() && isPlain(n.apiUrl) ? ` <span title="${esc(t('node.plainHelp'))}">${badge(t('node.plain'), 'warn')}</span>` : ''}${domain ? `<div class="sub-cell ellip" title="${esc(domain)}">${esc(domain)}</div>` : ''}</td>
+      <td class="c-addr">${addrCell(n)}</td>
       <td>${statusCell(n)}</td>
       <td class="reach-td c-reach">${reachCell(n, isNodeView())}</td>
       <td class="c-sync c-p3">${syncCell(n)}</td>
       <td class="c-core">${coreCell(n)}</td>
       <td class="num c-online c-p3">${n.isLocal ? (state.status.onlineUsers ?? '—') : (s.ok ? s.onlineUsers : '—')}</td>
       <td class="actions c-act">${actionsCell(n)}</td></tr>`;
-  }).join(''));
+  };
+  // 看全部、又有分组时按组分段(组名一行,下面是这一组的服务器);筛了某一组、或没人填分组就平铺
+  let html;
+  if (groupF === null && hasGroups()) {
+    html = groupsOf().map(g => {
+      const list = rows.filter(n => (n.group || '').trim() === g.name);
+      return list.length ? `<tr class="grp-row"><td colspan="8">${esc(g.name || t('node.ungrouped'))} <span class="muted">${list.length}</span></td></tr>` + list.map(row).join('') : '';
+    }).join('');
+  } else html = rows.map(row).join('');
+  // 每 5 秒刷新一次:内容没变就不动 DOM(整表重画会让鼠标下的按钮、提示闪一下)
+  setHTML(body, html);
+  renderGroups();
 }
 
 function editNode(id) {
@@ -264,6 +324,7 @@ function editNode(id) {
       ${field(t('node.addr'), `<input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(autoAddr(n).ip || t('node.addrAuto'))}">`, t('node.addrHelp') + (subByDomain() ? ' ' + t('node.addrDnsHelp') : ''))}
       ${field(t('node.family'), `<select id="f-family"><option value="">${t('node.familyV4')}</option><option value="v6" ${n.addrFamily === 'v6' ? 'selected' : ''}>IPv6</option></select>`, t('node.familyHelp') + (id ? ' ' + detectedText(n) : '') + (subByDomain() ? ' ' + t('node.familyDnsHelp') : ''))}
       ${field(t('node.ratio'), `<input id="f-ratio" type="number" min="0" max="100" step="0.1" value="${n.ratio || 1}">`, t('node.ratioHelp'))}
+      ${field(t('node.group'), `<input id="f-group" list="f-group-list" maxlength="24" value="${esc(n.group || '')}" placeholder="${esc(t('node.groupPh'))}"><datalist id="f-group-list">${groupsOf().filter(g => g.name).map(g => `<option value="${esc(g.name)}">`).join('')}</datalist>`, t('node.groupHelp'))}
       ${field(t('common.sort'), `<input id="f-sort" type="number" value="${n.sort || 0}">`)}
       ${n.isLocal ? '' : `
       <div class="full">${field(t('node.apiUrl'), `<input id="f-api" value="${esc(n.apiUrl || '')}" placeholder="https://tw.example.com:2053/app/">`, t('node.apiUrlHelp'))}<p class="hint warn-text" id="f-api-plain" ${isPlain(n.apiUrl) ? '' : 'hidden'}>${esc(t('node.plainHelp'))}</p></div>
@@ -273,7 +334,7 @@ function editNode(id) {
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), domain: fv('f-domain').trim(), sort: Number(fv('f-sort')) || 0,
-      addr: fv('f-addr').trim(), addrFamily: fv('f-family'), ratio: Number(fv('f-ratio')) || 1,
+      addr: fv('f-addr').trim(), addrFamily: fv('f-family'), ratio: Number(fv('f-ratio')) || 1, group: fv('f-group').trim(),
       apiUrl: n.isLocal ? '' : fv('f-api').trim(), token: n.isLocal ? '' : fv('f-token'),
       insecure: n.isLocal ? false : fchk('f-insecure'), enabled: n.isLocal ? true : fchk('f-enabled'),
     };
@@ -298,6 +359,7 @@ const notice = (title, msg) => setTimeout(() => confirm(msg, { title, okText: t(
 const isPlain = url => /^http:\/\//i.test(String(url || '').trim());
 
 registerActions({
+  'node.group': id => { groupF = id === '*' ? null : id; renderRows(); },
   'node.add': () => editNode(null),
   'node.edit': id => editNode(Number(id)),
   'node.test': async (id, btn) => {

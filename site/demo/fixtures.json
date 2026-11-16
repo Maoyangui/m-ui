@@ -224,7 +224,10 @@
         "name": "Auto-exit",
         "type": "urltest",
         "options": {
-          "outbounds": ["Frankfurt-exit", "LA-streaming"],
+          "outbounds": [
+            "Frankfurt-exit",
+            "LA-streaming"
+          ],
           "url": "http://www.gstatic.com/generate_204",
           "interval": "30s",
           "tolerance": 300,
@@ -471,7 +474,8 @@
           "hasToken": false,
           "status": null,
           "publicIp6": "",
-          "addrFamily": ""
+          "addrFamily": "",
+          "group": "亚洲"
         },
         {
           "id": 2,
@@ -499,10 +503,20 @@
             "revision": "7790aa6896c6cf2b",
             "synced": true,
             "onlineUsers": 0,
-            "certDays": 3649
+            "certDays": 3649,
+            "blocked": [
+              {
+                "tag": "Tokyo-HY2 ⇄30001",
+                "port": 30001,
+                "net": "udp",
+                "by": "realm",
+                "since": 1794791879
+              }
+            ]
           },
           "publicIp6": "2001:db8:5::10",
-          "addrFamily": ""
+          "addrFamily": "",
+          "group": "亚洲"
         },
         {
           "id": 3,
@@ -533,7 +547,8 @@
             "certDays": 3649
           },
           "publicIp6": "2001:db8:7::30",
-          "addrFamily": "v6"
+          "addrFamily": "v6",
+          "group": "欧洲"
         }
       ],
       "revision": "7790aa6896c6cf2b",

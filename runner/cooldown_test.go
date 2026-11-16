@@ -26,7 +26,7 @@ func TestFailedConfigCooldownKeepsDataPlane(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close(db)
-	r := &Runner{db: db, core: core.NewCore(), dbPath: filepath.Join(dir, "x.db")}
+	r := &Runner{db: db, core: core.NewCore(), dbPath: filepath.Join(dir, "x.db"), noBusySkip: true} // 这里要的是"整份起不来"的路径
 	defer r.core.Stop()
 
 	goodPort := freePort(t)

@@ -112,6 +112,8 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentKick)(w, r)
 	case "disk-clean": // 主机服务器页让本机清理磁盘 / 问进度
 		s.agentAuth(s.handleAgentDiskClean)(w, r)
+	case "port-check": // 主机保存线路 / 中转入口前问:这些端口在本机现在能不能监听
+		s.agentAuth(s.handleAgentPortCheck)(w, r)
 	case "line-stats": // 主机的线路详情要本机这条线路的流量时序
 		s.agentAuth(s.handleAgentLineStats)(w, r)
 	case "upstream-test": // 主机让本机立刻测一条上游(面板的"测试"按钮派发过来)
@@ -505,6 +507,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		LedgerKept:   true, // 应用快照不整本清账:主机等确认超时、看报告确认时据此知道不用打清账标记
 		Counters:     ledger.Counters,
 		ServicePorts: s.reportServicePorts(),
+		Blocked:      s.run.BlockedInbounds(), // 端口被本机别的程序占着没开的入站:主机在服务器页、概况里点名
 		KickPending:  strings.TrimSpace(s.setting(agentKickPendingKey)) != "",
 		ApplyGzip:    true, // 本机收得了 gzip 压缩的快照
 		LedgerFails:  s.run.LedgerFailures(),
