@@ -96,6 +96,7 @@
       <li>左下角:主题切换(◐ 跟随系统、☀ 浅色、☾ 深色)、语言、<b data-k="common.logout">退出登录</b>。版本号旁出现箭头表示有新版本,点它就能更新(见 <a href="#update">更新</a>)。</li>
       <li>右上角:<b data-k="help.btn">帮助说明</b>(就是本页)和 <b data-k="support.btn">建议 / 支持</b>(联系作者、反馈问题)。</li>
       <li><b data-k="dash.attn.title">需要处理</b>:数据面重载失败、服务器离线或没同步、证书要处理、大陆连通异常、上游故障、用户快到期或流量将尽、定时备份失败等,每类一行,按轻重排,点行尾的链接去处理;一切正常时只剩一行「✓」。证书和大陆连通可以点 <b data-k="reach.dismiss">知道了</b>,情况有变化会再出现。</li>
+      <li><b data-k="dash.trafficToday">24 小时流量</b> 那一格可以点:打开 <b data-k="dash.bd.title">流量明细</b>,选 24 小时、7 天或 30 天,看这段时间的流量是哪些用户用的、走了哪些线路、落在哪些服务器上(三栏是同一个合计的三种分法,都按服务器倍率计)。线路那一栏要临时向各副机问,离线或版本旧的副机问不到,它们的流量记在 <b data-k="dash.bd.unassigned">没归到线路</b> 里并写明是哪几台。</li>
       <li>顶部提醒条:在概览以外的页面,默认密码没改、证书要处理、大陆连通异常、数据面重载失败等会在页面顶部提醒,按提示处理。</li>
       <li>副服务器的面板里,线路、用户这些页面是只读的,要到主机面板改。</li>
       <li>快捷键:<kbd>/</kbd> 跳到当前页的搜索框,<kbd>Esc</kbd> 关闭弹窗,<kbd>Ctrl</kbd> + <kbd>Enter</kbd> 提交弹窗。手机上点左上角 ☰ 打开导航。</li>
@@ -488,7 +489,7 @@
       <li>在线路的上游里选 warp。</li>
     </ol>
     <div class="pit"><b>常见坑</b><ul>
-      <li>WARP 的本地端口(<b data-k="ops.warpPort">SOCKS5 端口</b>)默认 40000,被占用会启用失败;改了端口要重新启用。</li>
+      <li>WARP 的本地端口(<b data-k="ops.warpPort">SOCKS5 端口</b>)默认 40000,被占用会启用失败;端口就在卡片里 <b data-k="ops.warpPort">SOCKS5 端口</b> 那一行改,改完点 <b data-k="ops.warpReenable">重新启用</b>。</li>
       <li>一键安装只支持 Ubuntu / Debian;其它系统要自己装 cloudflare-warp(代理模式),让它的 SOCKS5 监听同一个端口。运维任务只在 Linux 上、m-ui 以 root 运行时能用。</li>
       <li>安装时本机 DNS 解析不了软件源(有的云厂商自带的 DNS 偶尔会这样),任务会临时改用公共 DNS(1.1.1.1 / 8.8.8.8,只有 IPv6 的机器用 2606:4700:4700::1111 / 2001:4860:4860::8888;不是 systemd-resolved 的系统改为临时写 /etc/hosts),装完自动恢复,输出里会写明;一个域名都解析不了就停下并说明是哪个域名。本机 DNS 正常、只是某个第三方源已废弃(域名已不存在)时只提示一句,照常安装,不改 DNS。apt 被系统自动更新占着时会等最多 5 分钟,并写明是哪个进程。安装到一半取消时,正在解包/配置的软件包会先装完,不会弄坏软件包数据库。</li>
       <li>有多台服务器时,warp 上游指向的是每台服务器自己的 <code>127.0.0.1:端口</code>:用 warp 的线路部署在哪几台,就要在哪几台的 <b data-k="nav.ops">运维</b> 页都安装并启用 WARP(端口和主机一样);做不到就把这条线路只部署到装了 WARP 的服务器。</li>
@@ -521,7 +522,8 @@
     <p class="lede">面板定时测试上游,出故障和恢复时可以发 Telegram。</p>
     <ul>
       <li>每台服务器只测自己线路用到的上游;没有线路用的标 <b data-k="up.unused">未使用</b>,不测也不告警。</li>
-      <li>状态列可能显示 <b data-k="up.fault">故障</b>、<b data-k="up.pending">待测</b>、<b data-k="up.stale">数据过期</b>;点行末箭头看每台服务器的检查详情和报错。</li>
+      <li><b data-k="up.latency">状态 / 延迟</b> 一列:在用这条上游的服务器每台一个点 —— 绿色通、红色不通、黄色是 <b data-k="up.stale">数据过期</b>(那台副机联系不上)、灰色是 <b data-k="up.pending">待测</b>;两台在用就是两个点。点这一行(点、字、箭头都行)展开,逐台看是哪台服务器测的、延迟多少、什么时候查的,不通的带报错;只有一台时服务器名直接写在延迟后面。</li>
+      <li>改了上游,或者线路新用上一条上游、新部署到一台服务器,十来秒后会自动补测一次,不用等下一轮巡检。</li>
       <li><b data-k="nav.settings">设置</b> → <b data-k="set.monitor">上游巡检</b>:<b data-k="set.checkMinutes">巡检间隔(分钟)</b>(0 = 关闭)、<b data-k="set.checkThreshold">连续失败几次判定故障</b>。</li>
       <li>概览页的 <b data-k="dash.health">上游巡检</b> 卡片可以点 <b data-k="dash.healthRun">立即巡检</b>。</li>
     </ul>
@@ -741,6 +743,7 @@
     <h3>停用原因与踢线</h3>
     <p class="lede">列表的状态一列写明为什么停用,也就决定了怎么恢复。</p>
     <ul>
+      <li>停用、启用一个人:行末 <b data-k="common.more">更多</b> 菜单(用户详情右上角的 <b data-k="common.more">更多</b> 里也有)。启用着的这一项是 <b data-k="user.batch.disable">停用</b>,停用着的是 <b data-k="user.batch.enable">启用</b>,点一下就换;停用后他的连接立刻断开、订阅拿不到节点。到期、超量被停的人手动启用后,系统下一轮检查还会再停掉他,要恢复使用得续费或重置流量。一次停用 / 启用很多人用列表上方的批量操作。</li>
       <li><b data-k="user.reason.quota">超量</b>、<b data-k="user.reason.expired">到期</b>:续费、重置流量或延长到期后自动恢复。</li>
       <li><b data-k="user.reason.manual">手动</b>:手动停用的不会因为重置流量、延长到期或周期重置而自动恢复。但用套餐续费或延期(<b data-k="user.renewMenu">续费</b>、批量 <b data-k="user.batch.plan">套用套餐</b>)和 <b data-k="user.changeMenu">换套餐</b> 是明确的开通动作,会把他一并启用:续费、批量套用套餐和换套餐的对话框里会先提示里面有手动停用的人、做完会被启用,批量时列出是谁,不想启用的先取消勾选。外部 API 的续费、换套餐也一样会启用。</li>
       <li data-scope="admin"><b data-k="user.limited">限速中</b>:正被规则临时限速(见 <a href="#rules">规则</a>)。</li>
@@ -964,8 +967,8 @@
   <section class="sec" id="bk-now">
     <h3>备份</h3>
     <ul>
-      <li><b data-k="nav.backup">备份</b> 页 → <b data-k="bk.now">立即备份</b>:<b data-k="bk.download">下载</b> 到本地,或者 <b data-k="bk.saveLocal">保存到服务器</b>(在 <b data-k="bk.local">服务器上的备份</b> 列表里)。</li>
-      <li><b data-k="bk.schedule">定时备份</b>:<b data-k="bk.hour">每天几点(-1 关闭)</b>(按面板时区,见 <b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.timezone">时区</b>)、<b data-k="bk.keep">保留份数</b>;可以勾 <b data-k="bk.telegram">同时推送到 Telegram</b>(先配好 Telegram 通知)。</li>
+      <li><b data-k="nav.backup">备份</b> 页最上面一张卡的右上角:<b data-k="bk.dlNow">下载备份</b> 直接存到你的电脑上,<b data-k="bk.saveLocal">保存到服务器</b> 存进备份目录(出现在下面的 <b data-k="bk.local">服务器上的备份</b> 列表里,可以再下载、还原、删除)。卡里两格是最近一次备份的时间和大小、备份存在哪。</li>
+      <li>旁边的 <b data-k="bk.schedule">定时备份</b> 卡默认没有开:打开 <b data-k="bk.sched.on">每天自动备份</b>,选 <b data-k="bk.sched.hour">备份时间</b>(按面板时区,见 <b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.timezone">时区</b>)和 <b data-k="bk.keep">保留份数</b>(默认 7;升级前自动留的备份另算,只留最近两份);还可以打开 <b data-k="bk.telegram">同时推送到 Telegram</b>(先配好 Telegram 通知)。这四项改了当场保存,不用另点保存。定时备份失败时这张卡用红字写明原因,概览的「需要处理」也会提醒。</li>
       <li>命令行:<code>m-ui backup -db /etc/m-ui/m-ui.db -out 备份.zip</code>,或者 <code>m-ui</code> 菜单 9。</li>
     </ul>
     <div class="pit"><b>常见坑</b>备份里有全部用户凭据和证书私钥,不要发到公开的地方。</div>
@@ -974,9 +977,9 @@
   <section class="sec" id="bk-restore">
     <h3>还原</h3>
     <ol class="steps">
-      <li><b data-k="nav.backup">备份</b> 页 → <b data-k="bk.restore">还原</b>:选备份文件(zip 或 .db),点 <b data-k="bk.restoreBtn">还原</b>。</li>
+      <li><b data-k="nav.backup">备份</b> 页 → <b data-k="bk.restore">还原</b> → <b data-k="bk.pick">选择备份文件…</b>(zip 或 .db);服务器上已有的备份,在列表里那一行点 <b data-k="bk.restoreBtn">还原</b>。两种都先给你看这份备份里有什么(来源、用户、线路、上游、证书各多少),确认了才动。</li>
       <li>确认后 m-ui 自动重启,替换数据库和证书。设置和证书库里引用的数据目录外的证书文件(比如 <b data-k="cert.srcExternal">已有证书</b>、从旧面板导入的证书路径)不往原路径写:这台机器原路径上的证书能接着用(现在有效、包含备份里那张的全部域名、和私钥配得上,而且不比备份里的旧或者还剩两周以上)就接着用它;不能用才把备份里那份放进 <code>/etc/m-ui/cert/restored/</code>,并把设置和证书库改指过去。还原结果在页面顶部提示一次。面板、订阅和代理面板的证书文件万一还是缺了,先用临时自签证书启动(仍走 HTTPS)并告警,不会起不来。</li>
-      <li>原来的库保留为 <code>.bak-*</code> 文件,只留最近两份:连着还原几次,最早那份会被删掉。拿不准该用哪份备份时,先点 <b data-k="bk.now">立即备份</b> 把当前的库下载下来再试。</li>
+      <li>原来的库保留为 <code>.bak-*</code> 文件,只留最近两份:连着还原几次,最早那份会被删掉。拿不准该用哪份备份时,先点 <b data-k="bk.dlNow">下载备份</b> 把当前的库下载下来再试。</li>
     </ol>
     <ul>
       <li>新机器可以在安装时一步装好并还原(命令见下面的 <a href="#bk-migrate">换服务器</a>)。</li>
@@ -991,7 +994,7 @@
 
   <section class="sec" id="bk-migrate">
     <h3>换服务器</h3>
-    <p class="lede"><b data-k="nav.backup">备份</b> 页的 <b data-k="mig.title">换机向导</b> 用备份分四步把整个面板搬到新服务器。订阅用的是域名时,端口、凭据、订阅地址都不变,把域名解析改到新机,用户就跟过来了。</p>
+    <p class="lede"><b data-k="nav.backup">备份</b> 页最下面的 <b data-k="mig.title">换到新服务器</b>(点一下展开)用备份分四步把整个面板搬到新服务器。订阅用的是域名时,端口、凭据、订阅地址都不变,把域名解析改到新机,用户就跟过来了。</p>
     <div class="tip"><b>旧主机还在运行时,优先用「设为主机」</b>新机装好 m-ui、像副机一样接入(见 <a href="#nodes-add">接入一台副机</a>),同步上以后在 <b data-k="nav.nodes">服务器</b> 页对它点 <b data-k="ha.setMaster">设为主机</b>:数据一次交接过去,不用备份、还原,旧主机自动变为副机(见 <a href="#ha-switch">设为主机</a>)。下面的四步留给旧主机已经不在、只能靠备份的时候。还原后启动,就等于把主机换到这台:旧主机之后若又被启动,会自动变为副机,不要了就在旧机上执行 <code>systemctl disable --now m-ui</code>(见 <a href="#ha-restore">备份、还原与换机</a>)。</div>
     <ol class="steps">
       <li>把备份 zip 传到新机,执行 <code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --restore /root/m-ui-20261111-030000.zip</code>(换成你的文件路径;amd64、arm64 都是这一条,脚本先装最新版再还原,证书一起还原)。向导里也有这条命令。</li>
@@ -1096,7 +1099,9 @@
     <h3>系统优化</h3>
     <p class="lede"><b data-k="nav.ops">运维</b> 页的 <b data-k="ops.tune">系统优化</b>:swap、文件句柄上限、时间同步、内核参数和 BBR,一般 VPS 用默认值就行。</p>
     <ul>
-      <li>点 <b data-k="ops.t.tune-all">一键优化</b> 全做一遍,也可以逐项改参数后点 <b data-k="common.run">执行</b>;任务输出实时显示在 <b data-k="ops.log">任务输出</b> 里。</li>
+      <li>页面最上面一排小卡是这台服务器现在的状况:主机名、已运行多久、内存、Swap 和磁盘用了多少。</li>
+      <li><b data-k="ops.tune">系统优化</b> 是一张表,一行一项:前面打绿勾的是做过了的,<b data-k="ops.col.now">现在</b> 一列是当前的值,<b data-k="ops.col.param">参数</b> 一列可以改。点 <b data-k="ops.t.tune-all">一键优化</b> 把前四项全做一遍,也可以逐项改参数后点那一行的 <b data-k="common.run">执行</b>;任务输出实时显示在 <b data-k="ops.log">任务输出</b> 里。</li>
+      <li>内核参数点 <b data-k="ops.sysctlEdit">修改参数</b> 在弹框里改(一行一项「名字=值」):确定只是记下这份,回到页面点那一行的 <b data-k="common.run">执行</b> 才写进系统。</li>
       <li>同一页还能限制系统日志(journald)的占用和保留天数:它装的是整台机器所有服务的日志,限制它不影响面板。</li>
       <li>建 swap 时磁盘不够会按余量减小(给系统留 2G、不超过盘的四分之一),不够 512MB 就不建:小盘上建大 swap 会把盘占满。</li>
       <li>WARP 也在这一页(见 <a href="#warp">WARP</a>)。运维任务只在 Linux 上、m-ui 以 root 运行时可用。</li>

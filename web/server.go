@@ -215,6 +215,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"update/ack", s.auth(s.handleUpdateAck))
 	mux.HandleFunc(api+"stats", s.auth(s.handleStats))
 	mux.HandleFunc(api+"stats/top", s.auth(s.handleStatsTop))
+	mux.HandleFunc(api+"stats/breakdown", s.auth(s.handleStatsBreakdown))
 	mux.HandleFunc(api+"onlines", s.auth(s.handleOnlines))
 	mux.HandleFunc(api+"logs", s.auth(s.handleLogs))
 	mux.HandleFunc(api+"audit", s.auth(s.handleAudit))

@@ -90,7 +90,7 @@ function storeRow(c) {
   if (c.forReseller) uses.push(badge(t('cert.useReseller'), 'primary'));
   if ((c.lineNames || []).length) uses.push(`<span class="badge" title="${esc(c.lineNames.join('、'))}">${t('cert.nLines', { n: c.lineNames.length })}</span>`);
   return `<tr>
-    <td class="primary-cell">${esc(certLabel(c.name))}${domains.length && !(domains.length === 1 && domains[0] === c.name) ? `<div class="sub-cell">${domains.map(esc).join(', ')}</div>` : ''}</td>
+    <td class="primary-cell"><span class="pname" title="${esc(certLabel(c.name))}">${esc(certLabel(c.name))}</span>${domains.length && !(domains.length === 1 && domains[0] === c.name) ? `<div class="sub-cell">${domains.map(esc).join(', ')}</div>` : ''}</td>
     <td class="c-p2">${sourceBadge(c)}<div class="sub-cell">${esc(i.issuer || '')}</div></td>
     <td>${i.exists ? `${fmtDay(new Date(i.notAfter).getTime() / 1000)} ${certBadge(i, c)}` : `<span class="danger small">${esc(trErr(i.error || t('cert.none')))}</span>`}</td>
     <td>${renewCell(c)}</td>

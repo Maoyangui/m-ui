@@ -116,6 +116,8 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		s.agentAuth(s.handleAgentPortCheck)(w, r)
 	case "line-stats": // 主机的线路详情要本机这条线路的流量时序
 		s.agentAuth(s.handleAgentLineStats)(w, r)
+	case "line-totals": // 主机的流量明细要本机各线路这段时间的流量合计
+		s.agentAuth(s.handleAgentLineTotals)(w, r)
 	case "upstream-test": // 主机让本机立刻测一条上游(面板的"测试"按钮派发过来)
 		s.agentAuth(s.handleAgentUpstreamTest)(w, r)
 	case "upstream-check": // 主机让本机立刻跑一轮巡检(概览的「立即巡检」派发过来),返回本机全部结果

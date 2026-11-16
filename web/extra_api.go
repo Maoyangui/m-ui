@@ -678,6 +678,11 @@ func (s *Server) dispatchLineSubroute(w http.ResponseWriter, r *http.Request) bo
 	}
 	s.audit(r, "line", action, line.Name)
 	s.reloadAll(action + " 线路 " + line.Name)
+	if !line.Enabled { // 刚启用:它用的上游在它那几台服务器上先补测一次
+		on := line
+		on.Enabled = true
+		s.recheckLineUpstreamsSoon(on)
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"enabled": !line.Enabled})
 	return true
 }

@@ -40,7 +40,7 @@ function keysTable() {
   return `<div class="table-wrap"><table class="grid api-keys"><thead><tr>
       <th>${t('api.keyName')}</th><th>${t('api.keyPerms')}</th><th>${t('api.from')}</th><th>${t('api.keyLastUsed')}</th><th>${t('api.keyToken')}</th><th></th></tr></thead><tbody>
     ${keys.map(k => `<tr class="${k.enabled ? '' : 'off'}">
-      <td class="primary-cell">${esc(nameOf(k))}</td>
+      <td class="primary-cell"><span class="pname" title="${esc(nameOf(k))}">${esc(nameOf(k))}</span></td>
       <td>${permsCell(k)}</td>
       <td>${fromCell(k)}</td>
       <td class="small">${k.lastUsedAt ? `${esc(fmtTime(k.lastUsedAt))}<div class="sub-cell muted">${esc(k.lastUsedIp || '')}</div>` : `<span class="muted">${esc(t('api.keyNever'))}</span>`}</td>

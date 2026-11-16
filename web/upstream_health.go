@@ -204,6 +204,26 @@ func (s *Server) recheckUpstreamSoon(id uint) {
 	})
 }
 
+// recheckLineUpstreamsSoon 线路存过以后,它用到的上游(自己选的、分流规则指向的;是上游组的连成员一起)也排一次复查。
+// 线路新用上一条上游、或者新部署到一台服务器,「这条上游 × 那台服务器」要等那台下一轮定时巡检(默认十分钟)才有结果,
+// 这之前上游页那一格里那台一直是灰色的「待测」;排一次复查,十来秒后各台的点就都有了颜色。
+func (s *Server) recheckLineUpstreamsSoon(l model.Line) {
+	ids := render.LineUpstreams(l)
+	if s.run == nil || len(ids) == 0 || !l.Enabled {
+		return
+	}
+	used := make(map[uint]bool, len(ids))
+	for _, id := range ids {
+		used[id] = true
+	}
+	var ups []model.Upstream
+	s.db.Select("id, name, type, options").Find(&ups)
+	render.ExpandGroups(used, ups)
+	for id := range used {
+		s.recheckUpstreamSoon(id)
+	}
+}
+
 // testUpstreamEverywhere 面板"测试"按钮:派发到每台真正用这条上游的服务器上实测。
 // 没有任何服务器用它时,退回在本机测一次(至少给个参考值)。
 func (s *Server) testUpstreamEverywhere(up model.Upstream) []upServer {

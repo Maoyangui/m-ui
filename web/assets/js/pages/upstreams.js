@@ -75,8 +75,10 @@ function resultHTML(id) {
   if (r.unused) return idle(t('up.unused')) + `<div class="sub-cell muted">${t('up.unusedHint')}</div>`;
   const servers = r.servers || [];
   if (!servers.length) return idle(t('up.untested'));
-  // 这一格要回答的是「通不通、多快」:每台服务器一个状态点(悬停看是哪台、多少毫秒或什么错),后面跟一句结论;
-  // 要看逐台明细点右边的箭头。以前是「服务器名 + 故障」的标签一个接一个排开,三台就占满一格
+  // 这一格要回答的是「通不通、多快」:在用它的服务器每台一个状态点(绿 = 通、红 = 不通;悬停看是哪台、多少毫秒或什么错),
+  // 后面跟一句结论;只有一台时把服务器名直接写在后面(是哪台测出来的要一眼看到,不能只放在悬停提示里)。
+  // 点这一行任何地方(点、字、箭头都行)展开,逐台列出「哪台服务器 · 延迟 · 什么时候查的」;一台也能点开,不用记哪种能点哪种不能。
+  // 以前是「服务器名 + 故障」的标签一个接一个排开,三台就占满一格
   const stateText = sv => (sv.state === 'ok' ? sv.delayMs + ' ms' : sv.state === 'fail' ? t('up.fault') : sv.state === 'stale' ? t('up.stale') : t('up.pending'));
   const cls = sv => (sv.state === 'ok' ? ' ok' : sv.state === 'fail' ? ' bad' : sv.state === 'stale' ? ' warn' : '');
   const dots = servers.slice(0, 16).map(sv => `<i class="hd${cls(sv)}" title="${esc(sv.name + ' · ' + stateText(sv) + (sv.error ? ' · ' + trErr(sv.error) : ''))}"></i>`).join('')
@@ -90,12 +92,12 @@ function resultHTML(id) {
   const tcp = ok.length && ok.every(sv => sv.method === 'tcp') ? ' ' + badge('TCP') : '';
   const via = viaLine(servers);
   const bad = servers.filter(sv => sv.error); // 折叠时预览第一条真正带报错的,"数据过期"没有报错文字
-  // 展开只在有话可说时才给:只有一台且正常的话,这一行已经说完了
-  const worth = servers.length > 1 || servers.some(sv => sv.state !== 'ok' || sv.error);
   const open = expanded.has(id);
-  const more = worth ? `<button class="btn xs ghost" data-act="up.expand" data-id="${id}" title="${t('up.detail')}" aria-expanded="${open}"><i class="i i-chev${open ? ' open' : ''}"></i></button>` : '';
+  const one = servers.length === 1 ? `<span class="hname" title="${esc(t('up.testedOn', { name: servers[0].name }))}">${esc(servers[0].name)}${servers[0].isLocal ? ` <span class="muted">${t('node.local')}</span>` : ''}</span>` : '';
+  const inner = `<span class="hdots">${dots}</span><b class="${kind}">${esc(text)}</b>${one}${tcp}`;
+  const sum = `<button type="button" class="hsum hbtn" data-act="up.expand" data-id="${id}" title="${t('up.detail')}" aria-expanded="${open}">${inner}<i class="i i-chev${open ? ' open' : ''}"></i></button>`;
   let detail = '';
-  if (worth && open) {
+  if (open) {
     detail = '<div class="hdetail">' + servers.map(sv => {
       const now = String(sv.method || '').startsWith('via:') ? esc(t('up.groupNow', { name: sv.method.slice(4) })) : '';
       const when = sv.checkedAt ? `${t('up.checkedAt')} ${fmtTime(sv.checkedAt)}` : '';
@@ -104,7 +106,7 @@ function resultHTML(id) {
   } else if (bad.length) {
     detail = `<div class="sub-cell herr" title="${esc(trErr(bad[0].error))}">${esc(trErr(bad[0].error)).slice(0, 70)}</div>`;
   }
-  return `<div class="hsum"><span class="hdots">${dots}</span><b class="${kind}">${esc(text)}</b>${tcp}${more}</div>${open ? '' : via}${detail}`;
+  return `${sum}${open ? '' : via}${detail}`;
 }
 
 // viaLine 上游组在各服务器上此刻走的成员,合成一行:都走同一条就只写一次「现在走 X」(以前每台后面各写一遍,
@@ -145,17 +147,33 @@ function typeBadges(u) {
   return h;
 }
 
+// upstreamLines 每条上游被哪些线路用到(上游 id → 线路名的集合):线路自己选的上游 + 分流规则指向的,
+// 和后端判断「有没有线路在用」同一口径(render.LineUpstreams)。以前只数自己选的:只被分流规则用到的上游这一列写 0,
+// 延迟那一格却有服务器在测,删的时候后端又说有线路在用。线路用上游组的,组的成员也算在用。
+function upstreamLines() {
+  const by = new Map();
+  const add = (id, name) => { if (!id) return; if (!by.has(id)) by.set(id, new Set()); by.get(id).add(name); };
+  state.lines.forEach(l => {
+    add(l.upstreamId, l.name);
+    let rr = l.routeRules;
+    if (typeof rr === 'string') { try { rr = JSON.parse(rr); } catch { rr = []; } }
+    (Array.isArray(rr) ? rr : []).forEach(r => { if (Number(r.to) > 0) add(Number(r.to), l.name); });
+  });
+  state.upstreams.filter(u => u.type === GROUP).forEach(g => {
+    const mine = by.get(g.id);
+    if (!mine) return;
+    (parseOpts(g.options).outbounds || []).forEach(name => {
+      const m = state.upstreams.find(x => x.name === name);
+      if (m) mine.forEach(ln => add(m.id, ln));
+    });
+  });
+  return by;
+}
+
 function renderRows() {
   const body = document.getElementById('up-body');
   if (!body) return;
-  const usage = {};
-  state.lines.forEach(l => { if (l.upstreamId) usage[l.upstreamId] = (usage[l.upstreamId] || 0) + 1; });
-  state.upstreams.filter(u => u.type === GROUP).forEach(g => { // 线路用组,组的成员也算在用
-    (parseOpts(g.options).outbounds || []).forEach(name => {
-      const m = state.upstreams.find(x => x.name === name);
-      if (m && usage[g.id]) usage[m.id] = (usage[m.id] || 0) + usage[g.id];
-    });
-  });
+  const using = upstreamLines();
   const online = new Set(state.onlines.upstreams || []);
   const rows = state.upstreams.filter(u => { const o = parseOpts(u.options); return matches(query, u.name, u.type, o.server) && (!onlyBad || upstreamBad(results[u.id])); });
   document.getElementById('up-count').textContent = `${rows.length} / ${state.upstreams.length}`;
@@ -167,10 +185,10 @@ function renderRows() {
       ? chipList((o.outbounds || []).map(m => `<span class="chip">${esc(m)}</span>`), { key: 'up-mem-' + u.id, max: 3 })
       : esc(o.server ? o.server + (o.server_port ? ':' + o.server_port : '') : '');
     return `<tr>
-      <td class="primary-cell">${online.has(u.name) ? '<span class="dot on"></span>' : ''}${esc(u.name)}${u.fromLine ? `<div class="sub-cell">${esc(relayNames(u))}${u.relayProblem ? ` · <span class="danger">${esc(trErr(u.relayProblem))}</span>` : ''}</div>` : ''}</td>
+      <td class="primary-cell">${online.has(u.name) ? '<span class="dot on"></span>' : ''}<span class="pname" title="${esc(u.name)}">${esc(u.name)}</span>${u.fromLine ? `<div class="sub-cell">${esc(relayNames(u))}${u.relayProblem ? ` · <span class="danger">${esc(trErr(u.relayProblem))}</span>` : ''}</div>` : ''}</td>
       <td>${typeBadges(u)}</td>
       <td class="num">${srv}</td>
-      <td class="num c-p3">${usage[u.id] || 0}</td>
+      <td class="num c-p3"${using.has(u.id) ? ` title="${esc([...using.get(u.id)].join('、'))}"` : ''}>${using.has(u.id) ? using.get(u.id).size : 0}</td>
       <td id="up-res-${u.id}">${resultHTML(u.id)}</td>
       <td class="actions">
         <button class="btn sm" data-act="up.test" data-id="${u.id}">${t('common.test')}</button>

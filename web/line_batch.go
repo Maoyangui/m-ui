@@ -149,6 +149,11 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 	}
 	s.reloadAll("批量设置线路 " + req.Action + " ×" + strconv.Itoa(len(lines)))
 	s.syncRelays()
+	if req.Action != "disable" { // 启用、换上游、换服务器都会多出要测的「上游 × 服务器」:先补测一次(见 recheckLineUpstreamsSoon)
+		for _, l := range lines {
+			s.recheckLineUpstreamsSoon(l)
+		}
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

@@ -236,7 +236,8 @@ function renderRows() {
           <button data-act="user.reset" data-id="${u.id}">${t('user.reset')}</button>
           <button data-act="user.kick" data-id="${u.id}">${t('user.kick')}</button>
           <button data-act="user.rotate" data-id="${u.id}">${t('user.rotate')}</button>
-          <hr><button class="danger" data-act="user.del" data-id="${u.id}">${t('common.delete')}</button>
+          <hr><button data-act="user.toggle" data-id="${u.id}">${t(u.enabled ? 'user.batch.disable' : 'user.batch.enable')}</button>
+          <button class="danger" data-act="user.del" data-id="${u.id}">${t('common.delete')}</button>
         </div></details>
       </td></tr>`;
   }).join(''));
@@ -275,6 +276,7 @@ async function showDetail(id) {
         <button data-act="user.reset" data-id="${id}">${t('user.reset')}</button>
         <button data-act="user.kick" data-id="${id}">${t('user.kick')}</button>
         <button data-act="user.rotate" data-id="${id}">${t('user.rotate')}</button>
+        <hr><button data-act="user.toggle" data-id="${id}">${t(u.enabled ? 'user.batch.disable' : 'user.batch.enable')}</button>
       </div></details>
     </div>
     <div class="ld-sum">
@@ -809,6 +811,21 @@ registerActions({
     // 走后端的延期:不限期的不动,到期被停的自动恢复,手动停用的仍停着(以前带 enabled:true 把手动停用的也启用了)
     try { await post('users/batch', { ids: [u.id], action: 'extend', days: 30 }); await load('users'); renderRows(); if (drawerUser === u.id) showDetail(u.id); toast(t('user.extended'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
+  },
+  // 「更多」里的停用 / 启用:启用着的显示「停用」,停用着的显示「启用」,点一下就换(和勾上一个人再点上面的批量停用 / 启用是同一个操作)。
+  // 到期、超量被停的人手动启用后,系统下一轮检查还会把他再停掉:启用成功的同时说明白,免得以为没生效
+  'user.toggle': async id => {
+    const u = state.users.find(x => x.id === Number(id));
+    if (!u) return;
+    const on = !u.enabled, name = u.name;
+    try {
+      await post('users/batch', { ids: [u.id], action: on ? 'enable' : 'disable' });
+      await load('users', 'status'); renderRows();
+      if (drawerUser === u.id) showDetail(u.id);
+      if (on && isExpired(u)) toast(t('user.enableStillExpired', { name }), 'warn');
+      else if (on && isOver(u)) toast(t('user.enableStillOver', { name }), 'warn');
+      else toast(t(on ? 'user.toggledOn' : 'user.toggledOff', { name }), 'ok');
+    } catch (e) { toast(e.message, 'err'); }
   },
   'user.reset': async id => {
     const u = state.users.find(x => x.id === Number(id));

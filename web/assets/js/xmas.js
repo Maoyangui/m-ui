@@ -1,5 +1,6 @@
 // 圣诞彩蛋(限时):顶栏右上角一棵小圣诞树(没有外框),点一下全屏放一段圣诞夜 —— 各样东西一样一样出场:
-// 夜空、星星、月亮、光斑;顶上一串彩灯从左到右点亮再轮流闪,两角冬青;雪地、远山松林、两间木屋(窗户亮起、烟囱冒烟)、路灯;
+// 没有夜空背景:星星、月亮、光斑和下面这些东西直接落在面板上面,面板只略微虚一点,一直看得见(以前是一整屏不透明的深蓝,把面板盖死了);
+// 顶上一串彩灯从左到右点亮再轮流闪,两角冬青;雪地、远山松林、两间木屋(窗户亮起、烟囱冒烟)、路灯;
 // 正中大圣诞树逐层长出、彩带画上、彩球弹出、彩灯闪、星星带光芒点亮、树下礼物;旁边雪人一点点堆起来(雪球、礼帽、围巾、眉眼)再挥手;
 // 雪橇和驯鹿从月亮前飞过(领头的红鼻子发光),拖一串金色星光;三层雪;金色铃铛摇摆,「Merry Xmas」金箔字逐字浮现,
 // 「guys」写在展开的红丝带上,最后一行小字祝福。点开时浏览器自己合成一段《Jingle Bells》铃声(不加载任何外部文件),右上角可静音、记住选择。
@@ -28,9 +29,18 @@ const CSS = `
 @keyframes xb-star { 0%, 100% { transform: scale(1) rotate(0); filter: drop-shadow(0 0 0 rgba(255,214,90,0)); } 50% { transform: scale(1.25) rotate(14deg); filter: drop-shadow(0 0 3px rgba(255,214,90,.95)); } }
 @keyframes xb-blink { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 
+/* 没有夜空:画面里的东西直接落在面板上,面板只蒙一层很薄的霜(略微虚化、略微压一点对比),一直看得见。
+   深色面板上这层霜偏暗,白雪、金字照原样;浅色面板上(.lite)偏亮,白色的东西各自加深一点才看得清 —— 见下面 .lite 的几条和画布里的 lite。
+   金字后面另垫一团柔光(.xmas-title::before),字不会和面板上的内容搅在一起。里面的东西和动画一样没动。 */
 .xmas-show { position: fixed; inset: 0; z-index: 9999; overflow: hidden; cursor: pointer; color: #fff;
-  background: radial-gradient(120% 90% at 50% 15%, #13254d 0%, #0a1430 45%, #04070f 100%);
+  --xm-veil: linear-gradient(180deg, rgba(5, 9, 22, .42) 0%, rgba(6, 10, 24, .26) 34%, rgba(6, 10, 24, .26) 70%, rgba(5, 9, 22, .4) 100%);
+  --xm-cloud: rgba(6, 10, 24, .66); --xm-cloud-2: rgba(6, 10, 24, .34);
+  background: var(--xm-veil);
+  -webkit-backdrop-filter: blur(3px) saturate(1.06); backdrop-filter: blur(3px) saturate(1.06);
   opacity: 0; animation: xs-in .9s ease forwards; }
+.xmas-show.lite {
+  --xm-veil: linear-gradient(180deg, rgba(232, 240, 253, .5) 0%, rgba(246, 249, 255, .3) 34%, rgba(246, 249, 255, .3) 70%, rgba(232, 240, 253, .44) 100%);
+  --xm-cloud: rgba(255, 253, 246, .9); --xm-cloud-2: rgba(255, 253, 246, .5); }
 /* 整体出场 = 浮现:整个画面淡入,内容只轻轻上移一点(不加模糊,里面逐项出场的动画照常看得清);整体消失 = 隐退:内容上移变淡,画面随后淡出 */
 .xmas-stage { animation: xs-lift 1s cubic-bezier(.2,.7,.2,1) both; }
 @keyframes xs-lift { from { transform: translateY(14px); } to { transform: none; } }
@@ -44,6 +54,9 @@ const CSS = `
 .xmas-stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: space-between; pointer-events: none; padding: 14vh 16px 4.5vh; }
 .xm-row { display: flex; align-items: flex-end; justify-content: center; gap: 1.2vw; }
 .xmas-tree { height: min(46vh, 58vw); width: auto; overflow: visible; filter: drop-shadow(0 18px 30px rgba(0,0,0,.45)); }
+.lite .xmas-tree { filter: drop-shadow(0 16px 26px rgba(28, 46, 88, .3)); }
+.lite .xmas-tree .rays rect { fill: #efb132; }
+.lite .xmas-tree #xmo-halo stop { stop-color: #ffc94a; }
 /* 顶部彩灯串:按顺序点亮,再各自闪 */
 .xm-lights { position: absolute; top: 0; left: 0; width: 100%; height: 13vh; pointer-events: none; overflow: visible; }
 .xm-lights .wire { stroke-dasharray: 2000; stroke-dashoffset: 2000; animation: xs-draw-long 1.2s ease-out .3s forwards; }
@@ -64,10 +77,12 @@ const CSS = `
 .xm-land .win { opacity: .15; animation: xs-on .5s ease forwards, xs-flick 3s ease-in-out infinite; }
 @keyframes xs-flick { 0%, 100% { opacity: .95; } 45% { opacity: .78; } 55% { opacity: 1; } }
 .xm-land .smoke circle { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; animation: xs-smoke 3.2s ease-out infinite; }
+.lite .xm-land .smoke circle { fill: #9fb0cb; }
 @keyframes xs-smoke { 0% { opacity: 0; transform: translate(0, 0) scale(.6); } 20% { opacity: .55; } 100% { opacity: 0; transform: translate(14px, -46px) scale(1.9); } }
 .xm-land .lamp-glow { opacity: 0; animation: xs-on .6s ease forwards, xs-flick 4s ease-in-out infinite; }
 /* 雪人:雪球一个个落下堆起来,礼帽、围巾、眉眼依次出现,然后挥手 */
 .xm-snowman { height: min(20vh, 26vw); width: auto; overflow: visible; filter: drop-shadow(0 10px 18px rgba(0,0,0,.4)); margin-bottom: .3vh; }
+.lite .xm-snowman { filter: drop-shadow(0 8px 16px rgba(28, 46, 88, .32)) drop-shadow(0 0 1px rgba(60, 86, 130, .55)); }
 .xm-snowman .drop { opacity: 0; transform: translateY(-60px); animation: xs-drop .7s cubic-bezier(.3,1.5,.5,1) forwards; }
 @keyframes xs-drop { to { opacity: 1; transform: none; } }
 .xm-snowman .pop { opacity: 0; transform-box: fill-box; transform-origin: 50% 100%; transform: scale(0); animation: xs-pop2 .5s cubic-bezier(.2,1.9,.4,1) forwards; }
@@ -85,9 +100,11 @@ const CSS = `
 @keyframes xs-unfurl { to { opacity: 1; transform: scaleX(1); } }
 .xm-wish { margin-top: .7rem; font: 500 clamp(.85rem, 2.4vw, 1.05rem)/1.4 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: #ffe8b8;
   letter-spacing: .08em; opacity: 0; transform: translateY(8px); animation: xs-rise-soft .9s ease forwards; text-shadow: 0 2px 10px rgba(0,0,0,.4); }
-.xmas-mute { position: absolute; top: 16px; right: 68px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.1);
-  color: #fff; display: grid; place-items: center; cursor: pointer; backdrop-filter: blur(6px); transition: background .2s ease; z-index: 2; padding: 0; }
-.xmas-mute:hover { background: rgba(255,255,255,.22); }
+.lite .xm-wish { color: #7a4a0c; text-shadow: 0 1px 0 rgba(255,255,255,.8), 0 0 12px rgba(255,255,255,.9); }
+/* 静音、关闭两个键:深色半透明的圆钮配白色图标,面板是浅是深都看得清(以前是白底白字,只在深蓝夜空上看得见) */
+.xmas-mute { position: absolute; top: 16px; right: 68px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(255,255,255,.3); background: rgba(16,24,46,.58);
+  color: #fff; display: grid; place-items: center; cursor: pointer; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); transition: background .2s ease; z-index: 2; padding: 0; }
+.xmas-mute:hover { background: rgba(16,24,46,.78); }
 .xmas-mute svg { width: 20px; height: 20px; }
 .xmas-show.out .xmas-mute { opacity: 0; transition: opacity .4s ease; }
 @media (max-width: 640px) { .xm-holly { top: 7vh; } .xm-snowman { height: 15vh; } }
@@ -107,9 +124,14 @@ const CSS = `
 @keyframes xs-spin { to { transform: rotate(360deg); } }
 .xmas-tree .gift { transform-box: fill-box; transform-origin: 50% 100%; transform: translateY(30px) scale(.6); opacity: 0; animation: xs-gift .7s cubic-bezier(.2,1.6,.4,1) forwards; }
 @keyframes xs-gift { to { transform: none; opacity: 1; } }
-.xmas-title { text-align: center; line-height: 1; }
+.xmas-title { text-align: center; line-height: 1; position: relative; }
+/* 金字后面的一团柔光:只把字后面那一块面板压下去(深色面板上压暗、浅色面板上提亮),跟着字一起浮现 */
+.xmas-title::before { content: ""; position: absolute; left: 50%; top: 52%; width: 168%; height: 150%; transform: translate(-50%, -50%); z-index: -1; pointer-events: none;
+  background: radial-gradient(closest-side, var(--xm-cloud) 0%, var(--xm-cloud-2) 52%, transparent 100%); opacity: 0; animation: xs-on 1.6s ease 2.2s forwards; }
 .xmas-line { font: italic 700 clamp(2.4rem, 8.5vw, 5.6rem)/1.02 Georgia, "Times New Roman", "Songti SC", serif; letter-spacing: .01em; white-space: nowrap;
   filter: drop-shadow(0 0 18px rgba(255, 200, 90, .35)); }
+.lite .xmas-line { filter: drop-shadow(0 1px 0 rgba(104, 66, 6, .5)) drop-shadow(0 8px 20px rgba(214, 150, 40, .3)); }
+.lite .xmas-line span { background-image: linear-gradient(100deg, #8a5a12 0%, #d9a63a 22%, #f7de92 34%, #e0ac38 46%, #a87420 62%, #e9c56a 80%, #8a5a12 100%); }
 .xmas-line span { display: inline-block; opacity: 0; transform: translateY(26px); filter: blur(8px);
   background: linear-gradient(100deg, #a8741f 0%, #f6d27a 22%, #fff8de 34%, #ffd36b 46%, #c9922e 62%, #ffe9a8 80%, #a8741f 100%); background-size: 260% 100%;
   -webkit-background-clip: text; background-clip: text; color: transparent;
@@ -122,9 +144,9 @@ const CSS = `
 .xmas-sub::after { content: ""; position: absolute; left: 0; right: .3em; bottom: 0; height: 5px; border-radius: 3px;
   background: repeating-linear-gradient(-45deg, #e23b3b 0 7px, #fff 7px 14px); background-size: 40px 100%; animation: xs-cane 1.2s linear infinite; }
 @keyframes xs-cane { to { background-position: 40px 0; } }
-.xmas-x { position: absolute; top: 16px; right: 16px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.1);
-  color: #fff; font: 300 28px/1 system-ui, sans-serif; display: grid; place-items: center; cursor: pointer; backdrop-filter: blur(6px); transition: background .2s ease, transform .2s ease; z-index: 2; }
-.xmas-x:hover { background: rgba(255,255,255,.22); transform: rotate(90deg); }
+.xmas-x { position: absolute; top: 16px; right: 16px; width: 42px; height: 42px; border-radius: 50%; border: 1px solid rgba(255,255,255,.3); background: rgba(16,24,46,.58);
+  color: #fff; font: 300 28px/1 system-ui, sans-serif; display: grid; place-items: center; cursor: pointer; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); transition: background .2s ease, transform .2s ease; z-index: 2; }
+.xmas-x:hover { background: rgba(16,24,46,.78); transform: rotate(90deg); }
 .xmas-x:focus-visible { outline: 2px solid #ffd36b; outline-offset: 2px; }
 .xmas-hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); padding: .28rem .8rem; border-radius: 999px; background: rgba(8,14,30,.45); backdrop-filter: blur(4px);
   color: rgba(255,255,255,.8); font: 500 .78rem system-ui, sans-serif; white-space: nowrap; pointer-events: none; }
@@ -348,6 +370,13 @@ const setMute = (v) => { try { localStorage.setItem(MUTE_KEY, v ? '1' : '0'); } 
 const SPEAKER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10Z"/><path class="w" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg>';
 const MUTED = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10Z"/><path d="m16 9 5 6M21 9l-5 6"/></svg>';
 
+// onLight 面板此刻是不是浅色(看页面背景有多亮;拿不到就按系统的深浅色偏好)
+function onLight() {
+  const m = (getComputedStyle(document.body).backgroundColor || '').match(/[\d.]+/g);
+  if (!m || m.length < 3 || (m.length > 3 && Number(m[3]) === 0)) return !(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255 > 0.55;
+}
+
 // mountXmasEgg 在 target(顶栏按钮区)最前面放彩蛋;不在活动期内什么都不放。面板里不介绍它:没有悬停提示,点了才出现。
 export function mountXmasEgg(target) {
   if (!target || !xmasActive() || target.querySelector('.xmas-egg')) return;
@@ -367,8 +396,9 @@ export function playXmas(origin) {
   if (document.querySelector('.xmas-show')) return;
   const reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const zh = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh');
+  const lite = onLight(); // 面板是浅色的:白雪、月亮、金字各自加深一点(没有夜空给它们垫底了)
   const box = document.createElement('div');
-  box.className = 'xmas-show';
+  box.className = 'xmas-show' + (lite ? ' lite' : '');
   box.setAttribute('role', 'dialog');
   box.setAttribute('aria-label', 'Merry Xmas guys');
   const letters = [...'Merry Xmas'].map((c, i) => c === ' ' ? '<span class="sp"></span>' : `<span style="animation-delay:${(2.6 + i * 0.08).toFixed(2)}s, ${(3.6 + i * 0.08).toFixed(2)}s">${c}</span>`).join('');
@@ -421,7 +451,7 @@ export function playXmas(origin) {
   // 按钮处炸开的星光与小彩球
   const o = origin && origin.getBoundingClientRect ? origin.getBoundingClientRect() : { left: W / 2, top: H / 2, width: 0, height: 0 };
   const ox = o.left + o.width / 2, oy = o.top + o.height / 2;
-  const COLORS = ['#ffd54a', '#ff5d5d', '#62d18c', '#62b6ff', '#fff6d0', '#ff9ad5'];
+  const COLORS = ['#ffd54a', '#ff5d5d', '#62d18c', '#62b6ff', lite ? '#f0b53a' : '#fff6d0', '#ff9ad5'];
   const burst = Array.from({ length: reduce ? 30 : 70 }, () => {
     const a = rnd(Math.PI * .1, Math.PI * .9), sp = rnd(3, 9);
     return { x: ox, y: oy, vx: -Math.cos(a) * sp * (Math.random() < .5 ? -1 : 1), vy: Math.sin(a) * sp * .6 + rnd(0, 2), r: rnd(1.6, 4), c: COLORS[Math.floor(rnd(0, COLORS.length))], life: 1, star: Math.random() < .55, rot: rnd(0, 6), vr: rnd(-.2, .2) };
@@ -437,8 +467,10 @@ export function playXmas(origin) {
     c.stroke(); c.restore();
   };
   const drawSleigh = (c, x, y) => {
-    c.save(); c.translate(x, y); c.fillStyle = 'rgba(255,244,222,.95)'; c.strokeStyle = 'rgba(255,244,222,.95)'; c.lineWidth = 1.4;
-    c.shadowColor = 'rgba(255,214,120,.85)'; c.shadowBlur = 10; // 发光的浅色剪影:在夜空里看得见,飞过月亮时也清楚
+    // 发光的剪影:深色面板上是浅色的(暗处看得见,飞过月亮时也清楚);浅色面板上换成深一些的暖棕,不然和面板一个颜色
+    const ink = lite ? 'rgba(104,62,22,.92)' : 'rgba(255,244,222,.95)';
+    c.save(); c.translate(x, y); c.fillStyle = ink; c.strokeStyle = ink; c.lineWidth = 1.4;
+    c.shadowColor = lite ? 'rgba(240,176,60,.9)' : 'rgba(255,214,120,.85)'; c.shadowBlur = 10;
     for (let i = 0; i < 3; i++) { // 驯鹿
       const dx = 40 + i * 30, bob = Math.sin((performance.now() / 160) + i) * 2;
       c.beginPath(); c.ellipse(dx, bob, 11, 5, 0, 0, Math.PI * 2); c.fill();
@@ -461,12 +493,19 @@ export function playXmas(origin) {
     const t = (now - t0) / 1000;
     // 背景层
     bx.clearRect(0, 0, W, H);
-    for (const s of stars) { s.p += .03 * s.v; bx.globalAlpha = .25 + .55 * Math.abs(Math.sin(s.p)); bx.fillStyle = '#fff'; bx.beginPath(); bx.arc(s.x, s.y, s.r, 0, 6.283); bx.fill(); }
+    // 星星:深色面板上是白的,浅色面板上是一粒粒金色的闪光
+    for (const s of stars) { s.p += .03 * s.v; bx.globalAlpha = .25 + .55 * Math.abs(Math.sin(s.p)); bx.fillStyle = lite ? '#dba02a' : '#fff'; bx.beginPath(); bx.arc(s.x, s.y, lite ? s.r * 1.15 : s.r, 0, 6.283); bx.fill(); }
+    // 月亮:浅色面板上光晕和月面都偏金一些、外沿描一圈,不然一轮淡黄的月亮落在白底上几乎看不见
     const mg = bx.createRadialGradient(moon.x, moon.y, moon.r * .2, moon.x, moon.y, moon.r * 3.2);
-    mg.addColorStop(0, 'rgba(255,248,220,.35)'); mg.addColorStop(1, 'rgba(255,248,220,0)');
+    mg.addColorStop(0, lite ? 'rgba(255,200,96,.46)' : 'rgba(255,248,220,.35)'); mg.addColorStop(1, lite ? 'rgba(255,200,96,0)' : 'rgba(255,248,220,0)');
     bx.globalAlpha = 1; bx.fillStyle = mg; bx.beginPath(); bx.arc(moon.x, moon.y, moon.r * 3.2, 0, 6.283); bx.fill();
-    bx.fillStyle = '#fff6da'; bx.beginPath(); bx.arc(moon.x, moon.y, moon.r, 0, 6.283); bx.fill();
-    bx.fillStyle = 'rgba(210,200,170,.35)'; bx.beginPath(); bx.arc(moon.x - moon.r * .3, moon.y - moon.r * .15, moon.r * .18, 0, 6.283); bx.arc(moon.x + moon.r * .25, moon.y + moon.r * .3, moon.r * .12, 0, 6.283); bx.fill();
+    if (lite) {
+      const face = bx.createRadialGradient(moon.x - moon.r * .3, moon.y - moon.r * .35, moon.r * .1, moon.x, moon.y, moon.r);
+      face.addColorStop(0, '#fffbe8'); face.addColorStop(.6, '#ffeaa6'); face.addColorStop(1, '#f6cf6c');
+      bx.fillStyle = face; bx.beginPath(); bx.arc(moon.x, moon.y, moon.r, 0, 6.283); bx.fill();
+      bx.strokeStyle = 'rgba(206,150,48,.55)'; bx.lineWidth = 1; bx.stroke();
+    } else { bx.fillStyle = '#fff6da'; bx.beginPath(); bx.arc(moon.x, moon.y, moon.r, 0, 6.283); bx.fill(); }
+    bx.fillStyle = lite ? 'rgba(196,146,54,.3)' : 'rgba(210,200,170,.35)'; bx.beginPath(); bx.arc(moon.x - moon.r * .3, moon.y - moon.r * .15, moon.r * .18, 0, 6.283); bx.arc(moon.x + moon.r * .25, moon.y + moon.r * .3, moon.r * .12, 0, 6.283); bx.fill();
     for (const b of bokeh) {
       b.x += b.vx; b.y += b.vy; if (b.y < -80) { b.y = H + 80; b.x = rnd(0, W); }
       const g = bx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r);
@@ -478,8 +517,10 @@ export function playXmas(origin) {
     for (const f of flakes) {
       f.y += f.vy; f.s += .015; f.rot += f.vr; f.x += Math.sin(f.s) * (f.layer + 1) * .35;
       if (f.y > H + 10) { f.y = -10; f.x = rnd(0, W); }
-      if (f.layer === 2) { fx.globalAlpha = .85; fx.strokeStyle = '#fff'; fx.lineWidth = 1.1; crystal(fx, f.x, f.y, f.r, f.rot); }
-      else { fx.globalAlpha = f.layer ? .8 : .45; fx.fillStyle = '#fff'; fx.beginPath(); fx.arc(f.x, f.y, f.r, 0, 6.283); fx.fill(); }
+      // 浅色面板上白雪看不见:雪片画成淡淡的冰蓝色(白底上、远山上、雪地上都看得出来)。
+      // 试过「白芯外面垫一圈蓝」:白芯和白底融在一起,只剩一个个小圆圈,像气泡不像雪
+      if (f.layer === 2) { fx.globalAlpha = lite ? .95 : .85; fx.strokeStyle = lite ? '#7fa2dc' : '#fff'; fx.lineWidth = lite ? 1.25 : 1.1; crystal(fx, f.x, f.y, f.r, f.rot); }
+      else { fx.globalAlpha = lite ? (f.layer ? .9 : .6) : (f.layer ? .8 : .45); fx.fillStyle = lite ? '#8aabdf' : '#fff'; fx.beginPath(); fx.arc(f.x, f.y, lite ? f.r + .25 : f.r, 0, 6.283); fx.fill(); }
     }
     const sl = sleighAt(t);
     if (sl) {
@@ -489,7 +530,7 @@ export function playXmas(origin) {
     for (const p of trail) {
       if (p.life <= 0) continue;
       p.life -= .012; p.y += p.vy;
-      fx.globalAlpha = Math.max(0, p.life); fx.fillStyle = '#ffd36b';
+      fx.globalAlpha = Math.max(0, p.life); fx.fillStyle = lite ? '#e6a520' : '#ffd36b';
       starPath(fx, p.x, p.y, p.r * 1.5, p.life * 3); fx.fill();
     }
     for (const p of burst) {

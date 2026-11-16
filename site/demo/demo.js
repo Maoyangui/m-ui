@@ -19,25 +19,77 @@ const shift = (v, k = '') => Array.isArray(v) ? v.map(x => shift(x)) : (v && typ
 for (const k of Object.keys(F)) F[k] = shift(F[k]);
 const clone = v => JSON.parse(JSON.stringify(v));
 const fx = k => clone(F[k] ?? null);
-// 上游测试结果:上游组写明现在走哪一条
-const demoUpResult = u => ({ name: 'Demo', isLocal: true, state: 'ok', delayMs: 40 + Math.floor(Math.random() * 80), method: u.type === 'urltest' ? 'via:' + ((u.options && u.options.outbounds) || [''])[0] : '' });
 // 演示里的故障要跟着操作走:处理掉了,提醒就得消失(以前巡检结果是导出时的一份死数据 ——
 // 在上游页测出来是通的、甚至把那条上游删了,概况的「需要处理」还报它故障)。
-// demoUpTest 测一条上游并把结果记进巡检结果:一开始就不通的(S.upBroken)一直不通,直到在演示里编辑保存过(算修好了)或删掉
-function demoUpTest(u) {
-  const h = (S.health.results || []).find(r => r.id === u.id);
-  const servers = h && (h.servers || []).length ? h.servers : [{ nodeId: 1, name: 'Tokyo', isLocal: true }];
+// 上游的结果是按服务器记的:哪台服务器上有启用的线路用着这条上游,就有哪台的一份(和真面板同一口径 ——
+// 线路自己选的上游、分流规则指向的、所在上游组的成员都算)。以前不管线路怎么改都只回「Tokyo」一台:
+// 把两台服务器上的线路都指到同一条上游,延迟那一格还是一个点,看着像「只测了一台」。
+function demoUpUsers(u) {
+  const ids = new Set([u.id]);
+  for (const g of S.upstreams) if (g.type === 'urltest' && ((g.options && g.options.outbounds) || []).includes(u.name)) ids.add(g.id);
+  const rules = l => { let v = l.routeRules; if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = []; } } return Array.isArray(v) ? v : []; };
+  const lines = S.lines.filter(l => l.enabled !== false && (ids.has(l.upstreamId) || rules(l).some(r => ids.has(Number(r.to)))));
+  return (S.nodes.nodes || []).filter(n => n.enabled !== false && lines.some(l => { const on = lineIdsOf(l); return !on.length || on.includes(n.id); }));
+}
+// 一台服务器上的一次结果:一开始就不通的(S.upBroken)一直不通,直到在演示里编辑保存过(算修好了)或删掉;
+// 通的话每台有自己稳定的延迟(各台离上游远近不同),每次再带一点抖动
+function demoUpOne(u, n, prev) {
+  const base = { nodeId: n.id, name: n.name, isLocal: !!n.isLocal, checkedAt: now() };
+  if (S.upBroken.has(u.id)) return { ...base, state: 'fail', delayMs: 0, method: 'urltest', error: (prev && prev.error) || 'Head "http://www.gstatic.com/generate_204": EOF' };
   const via = u.type === 'urltest' ? 'via:' + ((u.options && u.options.outbounds) || [''])[0] : '';
-  const out = servers.map(s => (S.upBroken.has(u.id)
-    ? { ...s, state: 'fail', delayMs: 0, error: s.error || 'Head "http://www.gstatic.com/generate_204": EOF', checkedAt: now() }
-    : { ...s, state: 'ok', delayMs: 40 + Math.floor(Math.random() * 80), method: via || s.method || 'urltest', error: '', checkedAt: now() }));
-  if (h) h.servers = out; else (S.health.results = S.health.results || []).push({ id: u.id, name: u.name, unused: false, servers: out });
+  return { ...base, state: 'ok', delayMs: 46 + ((u.id * 37 + n.id * 53) % 9) * 13 + Math.floor(Math.random() * 12), method: via || 'urltest', error: '' };
+}
+// demoUpTest 测一条上游(面板的「测试」):在每台用它的服务器上各测一次并记进巡检结果;没有服务器用它时在本机测一次给个参考值,不记
+function demoUpTest(u) {
+  const users = demoUpUsers(u);
+  const h = (S.health.results || []).find(r => r.id === u.id);
+  const prev = new Map(((h && h.servers) || []).map(s => [s.nodeId, s]));
+  const local = (S.nodes.nodes || []).find(n => n.isLocal) || { id: 1, name: 'Tokyo', isLocal: true };
+  const out = (users.length ? users : [local]).map(n => demoUpOne(u, n, prev.get(n.id)));
+  const row = { id: u.id, name: u.name, unused: !users.length, servers: users.length ? out : [] };
+  if (h) Object.assign(h, row); else (S.health.results = S.health.results || []).push(row);
   return clone(out);
 }
-// 巡检结果只留还在的上游,名字跟着改名走
+// 流量明细(概况点「流量」那一格):用户排行沿用流量排行那份数据,按范围放大;线路、服务器按固定的比例分同一个合计。
+// 30 天那一档假装有一台副机没问到,演示「没归到线路」那一行和下面的说明
+function demoBreakdown(hours, top) {
+  const k = hours >= 720 ? 21 : hours >= 168 ? 6.2 : 1;
+  const users = top.map(u => ({ name: u.name, up: Math.round(u.up * k), down: Math.round(u.down * k), owner: u.owner || '' }));
+  const total = users.reduce((a, u) => ({ up: a.up + u.up, down: a.down + u.down }), { up: 0, down: 0 });
+  const split = (names, weights) => names.map((name, i) => ({ name, up: Math.round(total.up * weights[i]), down: Math.round(total.down * weights[i]) }));
+  const nodes = (S.nodes.nodes || []).slice(0, 3);
+  const nodeW = [0.46, 0.33, 0.21];
+  const nodeRows = split(nodes.map(n => n.name), nodeW).map((x, i) => ({ ...x, local: !!nodes[i].isLocal }));
+  const lineNames = S.lines.map(l => l.name).slice(0, 5);
+  const lineW = [0.34, 0.27, 0.19, 0.12, 0.08].slice(0, lineNames.length);
+  const short = hours >= 720 && nodes[2] ? nodeW[2] : 0; // 没问到的那台占的份额,从各线路里按比例扣掉
+  const lines = split(lineNames, lineW.map(w => w * (1 - short)));
+  return { hours, total, users, userCount: users.length, nodes: nodeRows, lines, linesMissing: short ? [nodes[2].name] : [] };
+}
+// 备份:演示里备份目录从三份每天 04:00 的定时备份和一份升级前备份起步;存一份多一行、删一份少一行,定时备份的设置存在 S.settings 里
+// 文件名里的时间按面板时区写(和真面板一样),列表里的时间才对得上名字
+const demoClock = at => { const o = {}; for (const p of new Intl.DateTimeFormat('en-GB', { timeZone: S.settings.timezone || 'Asia/Shanghai', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(at * 1000))) o[p.type] = p.value; return o; };
+const demoBkName = at => { const c = demoClock(at); return `m-ui-${c.year}${c.month}${c.day}-${c.hour}${c.minute}${c.second}.zip`; };
+function demoBackupList() {
+  if (!S.backups) {
+    const c = demoClock(now());
+    const four = now() - ((Number(c.hour) - 4 + 24) % 24) * 3600 - Number(c.minute) * 60 - Number(c.second); // 面板时区里最近的一个 04:00
+    S.backups = [0, 1, 2].map(i => ({ name: demoBkName(four - i * 86400), size: 4318000 - i * 21500, time: four - i * 86400 }));
+    S.backups.push({ name: 'pre-upgrade-0.7.17-' + demoBkName(four - 6 * 86400 - 40000).slice(5), size: 4102000, time: four - 6 * 86400 - 40000 });
+    if (S.settings.backupHour === undefined || S.settings.backupHour === '') Object.assign(S.settings, { backupHour: '4', backupKeep: S.settings.backupKeep || '7' });
+  }
+  const tf = v => v === true || v === 'true';
+  return { files: S.backups, dir: '/etc/m-ui/backups', backupHour: S.settings.backupHour, backupKeep: S.settings.backupKeep, backupTelegram: tf(S.settings.backupTelegram), restorePending: false, lastErr: '', lastErrAt: 0, tgReady: tf(S.settings.tgEnabled) && !!S.settings.tgChatId };
+}
+// demoHealth 巡检结果:每条上游一行,行里是此刻用它的各台服务器(跟着线路的上游、分流规则、部署到的服务器变;名字跟着改名走)。
+// 新出现的「上游 × 服务器」当场补一个结果 —— 真面板是保存线路十秒后自动补测一次
 function demoHealth() {
-  S.health.results = (S.health.results || []).filter(r => S.upstreams.some(u => u.id === r.id));
-  for (const r of S.health.results) r.name = S.upstreams.find(u => u.id === r.id).name;
+  const old = new Map((S.health.results || []).map(r => [r.id, r]));
+  S.health.results = S.upstreams.map(u => {
+    const users = demoUpUsers(u);
+    const prev = new Map(((old.get(u.id) || {}).servers || []).map(s => [s.nodeId, s]));
+    return { id: u.id, name: u.name, unused: !users.length, servers: users.map(n => (prev.has(n.id) ? { ...prev.get(n.id), name: n.name, isLocal: !!n.isLocal } : demoUpOne(u, n))) };
+  });
   return clone(S.health);
 }
 // 「端口被占」跟着线路走:那个中转入口改了端口、暂停或删了,线路停了或删了,服务器上这一条就没有了
@@ -500,8 +552,10 @@ function route(method, path, query, body) {
       case 'sub-templates': return { clash: '# 只写想加的部分,节点和分组由面板填\nrules:\n  - DOMAIN-SUFFIX,example.org,DIRECT\n  - MATCH,Proxy\n', singbox: '{\n  "route": {\n    "rules": [{ "domain_suffix": ["example.org"], "outbound": "direct" }],\n    "final": "proxy"\n  }\n}\n' };
       case 'stats': { const q = new URLSearchParams(query); const tag = q.get('tag'); const hours = q.get('hours') || '24'; const bucket = q.get('bucket') || '3600';
         if (seg[1] === 'top') return listByPrefix('stats/top') || [];
+        if (seg[1] === 'breakdown') return demoBreakdown(Number(q.get('hours')) || 24, fx('GET stats/top?hours=24&limit=10') || []);
         const k = tag ? `GET stats?resource=user&tag=${tag}&hours=${hours}&bucket=${bucket}` : `GET stats?resource=user&hours=${hours}&bucket=${bucket}`;
         return fx(k) ?? listByPrefix('stats') ?? []; }
+      case 'backup': if (seg[1] === 'list') return clone(demoBackupList()); return listByPrefix(path) ?? {};
       case 'keygen': { const t = new URLSearchParams(query).get('type');
         if (t === 'uuid') return { uuid: crypto.randomUUID() };
         if (t === 'port') return { port: 10000 + Math.floor(Math.random() * 55000) };
@@ -644,7 +698,21 @@ function route(method, path, query, body) {
       if (seg[1] === 'notice') return ok();
       if (seg[1] === 'dns-test') return { records: [], error: zh ? '演示模式:不连 DNS 服务商' : 'Demo mode: the DNS provider is not contacted' };
       throw new ApiError(400, zh ? '演示模式:不会真的换主机或接任' : 'Demo mode: the master is not actually moved or taken over');
-    case 'backup': if (seg[1] === 'restore-ack') { S.restoreAcked = true; return ok(); } if (seg[1] === 'run') return { name: 'm-ui-demo-' + new Date().toISOString().slice(0, 10) + '.zip' }; if (seg[1] === 'inspect') return { users: S.users.length, lines: S.lines.length, note: 'Demo mode' }; return ok();
+    case 'backup': {
+      if (seg[1] === 'restore-ack') { S.restoreAcked = true; return ok(); }
+      const list = demoBackupList().files;
+      if (seg[1] === 'run') { // 存一份:列表多一行,超出保留份数的旧备份跟着删(升级前那份不算)
+        const f = { name: demoBkName(now()), size: 4300000 + Math.floor(Math.random() * 200000), time: now() };
+        list.unshift(f);
+        const keep = Number(S.settings.backupKeep) > 0 ? Number(S.settings.backupKeep) : 7;
+        const own = list.filter(x => x.name.startsWith('m-ui-'));
+        S.backups = list.filter(x => !x.name.startsWith('m-ui-') || own.indexOf(x) < keep);
+        return clone(f);
+      }
+      if (seg[1] === 'file' && method === 'DELETE') { const name = new URLSearchParams(query).get('name'); S.backups = list.filter(x => x.name !== name); return ok(); }
+      if (seg[1] === 'inspect') return { users: S.users.length, lines: S.lines.length, upstreams: S.upstreams.length, meta: { host: 'tokyo', version: 'demo', time: ((body && list.find(x => x.name === body.name)) || { time: now() }).time, certs: ['panel.example.com'] }, note: 'Demo mode' };
+      return ok();
+    }
     case 'cert':
       if (seg[1] === 'use') { const c = S.certs.find(x => x.name === body.name); S.certUse[body.target] = c ? c.certFile : ''; syncCertUse(); return ok(); }
       if (seg[1] === 'delete') { S.certs = S.certs.filter(x => x.name !== body.name); syncCertUse(); return ok(); }

@@ -13,6 +13,7 @@ import { diskHogs } from '../ui.js';
 import { NODE_CODES, summarizeNodes, trackUnsynced, worstCode, healthSummary, sortCerts, certSig, certCounts, certLeftDays, sortReach, reachSig, reachHard, reachStall } from '../issues.js';
 import { expiringDays, quotaPct } from './users.js';
 import { shownConns } from '../fair.js';
+import { openTraffic } from '../traffic.js';
 
 export const title = () => t('nav.dashboard');
 // status / onlines 没取到时 app.js 照样调 tick:好在「需要处理」里写明"面板状态没取到"
@@ -442,9 +443,11 @@ function renderAttn() {
 }
 
 // ---- 统计条:固定 6 张,每张一行数值一行说明,放不下省略号、全文在 title;有去处的卡就是链接 ----
-const stat = ({ k, v = '', s = '', kind = '', href = '', title = '', html = '' }) => {
-  const tag = href ? 'a' : 'div';
-  return `<${tag}${href ? ` href="${href}"` : ''} class="stat ${kind}"${title ? ` title="${esc(title)}"` : ''}><div class="k">${esc(k)}</div>${html || `<div class="v">${esc(v)}</div><div class="s">${esc(s) || '&nbsp;'}</div>`}</${tag}>`;
+// 一格数字。href:点了去别的页;act:点了在本页做一件事(打开明细弹框),右上角带一个小箭头表示能点开
+const stat = ({ k, v = '', s = '', kind = '', href = '', act = '', title = '', html = '' }) => {
+  const tag = href ? 'a' : act ? 'button' : 'div';
+  const attr = href ? ` href="${href}"` : act ? ` type="button" data-act="${act}"` : '';
+  return `<${tag}${attr} class="stat ${kind}"${title ? ` title="${esc(title)}"` : ''}><div class="k">${esc(k)}</div>${html || `<div class="v">${esc(v)}</div><div class="s">${esc(s) || '&nbsp;'}</div>`}${act ? '<i class="i i-chev stat-go" aria-hidden="true"></i>' : ''}</${tag}>`;
 };
 const pct = (a, b) => (b ? Math.round(a / b * 100) : 0);
 const meter = (k, p, txt) => `<div class="meter"><span>${esc(k)}</span><div class="progress ${p >= 90 ? 'danger' : p >= 80 ? 'warn' : ''}"><div class="bar" style="width:${Math.min(100, Math.max(0, p))}%"></div></div><span>${esc(txt)}</span></div>`;
@@ -472,8 +475,9 @@ function renderStats() {
     stat({ k: t('dash.onlineUsers') + local, v: t('dash.people', { n: s.onlineUsers ?? 0 }), href: '#/users?f=online',
       s: node ? t('dash.chip.conns', { n: conns }) : s.resellerUsers ? t('dash.online.sub', { total, rs: s.resellerUsers }) : t('dash.online.subAll', { total }),
       title: node ? '' : t('dash.online.title', { direct: s.users ?? 0, enabled: s.enabledUsers ?? 0, rs: s.resellerUsers ?? 0 }) }),
+    // 点开是流量明细(按用户 / 线路 / 服务器,见 traffic.js)
     stat({ k: t('dash.trafficToday') + local, v: d ? fmtBytes((d.up || 0) + (d.down || 0), 1) : '—', s: d ? `↑ ${fmtBytes(d.up || 0, 1)} ↓ ${fmtBytes(d.down || 0, 1)}` : (dayErr ? errText(dayErr) : ''),
-      title: many ? t('dash.scope.all') : '' }),
+      act: 'dash.traffic', title: t('dash.bd.open') }),
   ];
   if (node) cards.push(syncCard());
   else if (many) {
@@ -876,6 +880,7 @@ registerActions({
     await guard('dash-audit', renderAudit);
   },
   'dash.retry': async id => { await (retryFns[id] || (async () => {}))(); renderStats(); renderAttn(); },
+  'dash.traffic': () => openTraffic(24),
   'dash.toprange': async id => {
     topHours = Number(id);
     document.querySelectorAll('#dash-toprange button').forEach(b => b.classList.toggle('active', b.dataset.id === id));

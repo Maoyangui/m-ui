@@ -881,8 +881,8 @@ type NodeStatus struct {
 	Disk *model.DiskStat `json:"disk,omitempty"`
 	// Blocked 这台上因为端口被别的程序占着没开的入站(中转入口 / 线路);空 = 没有
 	Blocked         []model.BlockedInbound `json:"blocked,omitempty"`
-	diskAlerted     string          // 已经为磁盘发过哪一级的告警(model.DiskWarn / DiskBad;恢复后清空)
-	applyGzip       bool            // 副机报过收得了 gzip 压缩的快照
+	diskAlerted     string                 // 已经为磁盘发过哪一级的告警(model.DiskWarn / DiskBad;恢复后清空)
+	applyGzip       bool                   // 副机报过收得了 gzip 压缩的快照
 	alerted         bool
 	failSince       int64 // 这一轮连续失败从什么时候开始;0 = 正常
 	unsyncedSince   int64 // 在线但配置没同步上从什么时候开始;0 = 已同步或不在线
@@ -990,10 +990,10 @@ type Hub struct {
 	// seenUsers 各副机报上来在线(有在线 IP)的用户最近一次出现的时间:在线名单按 onlineWindow 取,
 	// 不只看最新一份报告 —— 设备安静一分钟就从名单里掉出去、下一次走流量又回来,在线人数会乱跳
 	seenUsers map[string]int64
-	nodeNames   map[uint]string
-	revision    string
-	stop        chan struct{}
-	wg          sync.WaitGroup
+	nodeNames map[uint]string
+	revision  string
+	stop      chan struct{}
+	wg        sync.WaitGroup
 	// clients 每台副机一个 HTTP 客户端(各自的连接池),按「这台副机现在是谁」区分(见 clientFor)
 	clients map[uint]*nodeClient
 	// idents 各副机上一轮的 API 地址 + 令牌:变了就当换了一台新机器(见 noteIdentity)
@@ -1963,6 +1963,21 @@ func (h *Hub) fetchReport(n model.Node) (Report, error) {
 func (h *Hub) LineStats(n model.Node, q url.Values) (stats.Result, error) {
 	var out stats.Result
 	err := h.requestTimeout(n, "GET", "line-stats?"+q.Encode(), nil, &out, 6*time.Second)
+	return out, err
+}
+
+// LineTotal 一条线路在一台服务器上一段时间里的真实流量(不乘倍率)。
+type LineTotal struct {
+	Name string `json:"name"`
+	Up   int64  `json:"up"`
+	Down int64  `json:"down"`
+}
+
+// LineTotalsOn 问一台副机:最近 hours 小时它上面每条线路各跑了多少流量(概况的流量明细用)。
+// 老版本副机没有这个接口,回 404(调用方当「没问到」处理)。最多等 6 秒。
+func (h *Hub) LineTotalsOn(n model.Node, hours int) ([]LineTotal, error) {
+	var out []LineTotal
+	err := h.requestTimeout(n, "GET", "line-totals?hours="+strconv.Itoa(hours), nil, &out, 6*time.Second)
 	return out, err
 }
 

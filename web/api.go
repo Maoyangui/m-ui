@@ -308,6 +308,7 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 		}
 		s.audit(r, "line", "create", line.Name)
 		s.reloadAll("新增线路 " + line.Name)
+		s.recheckLineUpstreamsSoon(line)
 		writeJSON(w, http.StatusOK, line)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
@@ -414,7 +415,8 @@ func (s *Server) handleLineItem(w http.ResponseWriter, r *http.Request) {
 			s.audit(r, "line", "scope:widen", map[string]interface{}{"line": line.Name, "widened": widened})
 		}
 		s.reloadAll("修改线路 " + line.Name)
-		s.syncRelays() // 端口、协议参数变了,用它当上游的跟着改
+		s.syncRelays()                   // 端口、协议参数变了,用它当上游的跟着改
+		s.recheckLineUpstreamsSoon(line) // 新用上的上游、新部署到的服务器:不等下一轮巡检,先补测一次
 		writeJSON(w, http.StatusOK, struct {
 			model.Line
 			ScopeWidened *scopeWidened `json:"scopeWidened,omitempty"`

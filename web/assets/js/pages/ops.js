@@ -1,6 +1,14 @@
+// 运维页:只管「这台服务器自己」。三层:
+//   1. 最上面一排小卡(和概览同一种):主机、已运行、内存、Swap、磁盘 —— 一眼看这台机器好不好;用量各带一条细进度条,磁盘紧了变色。
+//   2. 系统优化 —— 一张表,一行一项,列对齐:项目(前面一个圆点:绿勾 = 做过了,空心 = 没做)、现在的值、参数、执行。
+//      表头右边是「一键优化」(做前四项)。内核参数那一大段文本平时不摊开,点「修改参数」在弹框里改。
+//   3. Cloudflare WARP 和任务输出两张等高的卡并排:WARP 只列现在用得上的信息和按钮(没装只有「安装」,装了没启用是「启用」「卸载」,
+//      启用着才有「检测出口」「添加为上游」「停用」),端口就写在 SOCKS5 那一行里改;任务输出没跑过任务时只是一行字,跑起来实时显示。
+// 排版上走过的弯路:① 最早是六个大小不一的灰色方块(三个并排的小方块 + 三个通栏的),内核参数的大文本框一直摊在页面上;
+// ② 改成通栏清单后每一行左边是说明、右边隔着大半屏才是输入框和按钮,右侧参差不齐,上面三个用量方块又宽又空 —— 用户看了说「排版不够好」。
 import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, fmtBytes, fmtDuration, toast, confirm, registerActions, badge, field, fv, diskBrief, diskHogs } from '../ui.js';
+import { esc, fmtBytes, fmtDuration, toast, confirm, openModal, registerActions, badge, fv, diskBrief, diskHogs } from '../ui.js';
 import { diskLevel } from '../issues.js';
 
 // tx 有译文用译文,没有(中文界面留空的键)用后端原文
@@ -9,8 +17,15 @@ const tx = (k, fb) => { const v = t(k); return v && v !== k ? v : fb; };
 export const title = () => t('ops.title');
 export const subtitle = () => t('ops.subtitle');
 let data = null, pollTimer = null;
+let sysctlDraft = null; // 在弹框里改过、还没执行成功的内核参数(执行时用它;没改过用服务器存着的那份)
 
-const yes = (ok, onText, offText) => badge(ok ? (onText || t('common.yes')) : (offText || t('common.no')), ok ? 'ok' : 'warn');
+const TUNE_ALL = ['swap', 'limits', 'ntp', 'sysctl']; // 「一键优化」做的四项(和后端 tune-all 一致)
+// 小卡里的运行时间只写最大的两级(37 天 4 小时 / 5 小时 12 分),完整的放悬停提示
+const upShort = sec => {
+  sec = Number(sec) || 0;
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  return d ? `${d} ${t('time.d')} ${h} ${t('time.h')}` : h ? `${h} ${t('time.h')} ${m} ${t('time.m')}` : `${m} ${t('time.m')}`;
+};
 
 export async function render(el, fresh = false) {
   data = await get(fresh ? 'ops?fresh=1' : 'ops'); // 系统信息服务端缓存 30 秒;点刷新或任务跑完才重新采集
@@ -20,84 +35,93 @@ export async function render(el, fresh = false) {
   const task = n => { const b = data.tasks.find(x => x.name === n) || { name: n, title: n, desc: '' }; return { ...b, title: tx('ops.task.' + n + '.title', b.title), desc: tx('ops.task.' + n + '.desc', b.desc) }; };
   const dk = data.disk && data.disk.total ? data.disk : null, dlv = diskLevel(dk);
   const linux = i.linux;
-  const dis = linux && i.root ? '' : 'disabled';
-  el.innerHTML = `
-    ${!linux ? `<div class="card" style="border-color:var(--warn)">${t('ops.linuxOnly')}</div>` : (!i.root ? `<div class="card" style="border-color:var(--warn)">${t('ops.rootOnly')}</div>` : '')}
-    <div class="grid-2">
-      <section class="card">
-        <div class="card-head"><h2>${t('ops.system')}</h2><button class="btn sm" data-act="ops.refresh">${t('common.refresh')}</button></div>
-        <dl class="kv">
-          <dt>${t('ops.os')}</dt><dd>${esc(i.os)} <span class="muted small">${esc(i.kernel || '')} ${esc(i.arch)}</span></dd>
-          <dt>${t('ops.host')}</dt><dd class="mono">${esc(i.hostname)}</dd>
-          ${linux ? `
-          <dt>${t('ops.uptime')}</dt><dd>${fmtDuration(i.uptime)} <span class="muted small">load ${esc(i.load)}</span></dd>
-          <dt>${t('ops.mem')}</dt><dd>${fmtBytes(i.memTotal - i.memAvail, 1)} / ${fmtBytes(i.memTotal, 1)}</dd>
-          <dt>${t('ops.swap')}</dt><dd>${i.swapTotal ? `${fmtBytes(i.swapTotal - i.swapFree, 1)} / ${fmtBytes(i.swapTotal, 1)}` : badge(t('common.none'), 'warn')}</dd>
-          <dt>${t('ops.disk')}</dt><dd>${i.diskTotal ? `${fmtBytes(i.diskTotal - i.diskFree, 1)} / ${fmtBytes(i.diskTotal, 1)}` : '—'}</dd>
-          <dt>BBR</dt><dd>${yes(i.cc === 'bbr', 'bbr', esc(i.cc || '?'))} <span class="muted small">qdisc ${esc(i.qdisc || '?')}</span></dd>
-          <dt>${t('ops.nofile')}</dt><dd>${yes(i.nofile >= 65536, String(i.nofile), String(i.nofile))}</dd>
-          <dt>NTP</dt><dd>${yes(i.ntp === 'yes', t('ops.synced'), i.ntp === 'no' ? t('ops.unsynced') : '?')}</dd>` : ''}
-        </dl>
-      </section>
-      <section class="card">
-        <div class="card-head"><h2>Cloudflare WARP</h2>${w.listening ? (w.exit === 'on' || w.exit === 'plus' ? badge('warp=' + w.exit, 'ok') : badge(t('ops.warpNoExit'), 'warn')) : badge(t('ops.warpOff'), '')}</div>
-        <dl class="kv">
-          <dt>${t('ops.installed')}</dt><dd>${yes(w.installed)}${w.status ? ` <span class="muted small">${esc(w.status)}</span>` : ''}</dd>
-          <dt>${t('ops.services')}</dt><dd class="mono">warp-svc ${esc(w.service || '—')} · warp-socks5 ${esc(w.socks || '—')}</dd>
-          <dt>SOCKS5</dt><dd>${yes(w.listening, `127.0.0.1:${w.port}`, `127.0.0.1:${w.port}`)}</dd>
-          <dt>${t('ops.exit')}</dt><dd>${w.listening ? `<span class="mono">${esc(w.exitIp || '—')}</span> ${esc(w.exitLoc || '')} ${esc(w.exitColo || '')} <span class="muted small">${esc(w.exit)}</span>` : '—'}</dd>
-          <dt>${t('ops.upstream')}</dt><dd>${data.warpUpstream ? badge('warp', 'ok') : `<button class="btn sm" data-act="ops.warpUpstream">${t('ops.addUpstream')}</button>`}</dd>
-        </dl>
-        <div class="form-grid" style="margin-top:.6rem">${field(t('ops.warpPort'), `<input id="ops-port" type="number" min="1" max="65535" value="${data.warpPort}">`, t('ops.warpPortHelp'))}</div>
-        <div class="row" style="margin-top:.6rem;flex-wrap:wrap">
-          <button class="btn" data-act="ops.run" data-id="warp-install" ${dis}>${t('ops.t.warp-install')}</button>
-          <button class="btn primary" data-act="ops.run" data-id="warp-enable" ${dis}>${t('ops.t.warp-enable')}</button>
-          <button class="btn" data-act="ops.run" data-id="warp-disable" ${dis}>${t('ops.t.warp-disable')}</button>
-          <button class="btn" data-act="ops.warpCheck">${t('ops.checkExit')}</button>
-          <button class="btn danger" data-act="ops.run" data-id="warp-uninstall" ${dis}>${t('ops.t.warp-uninstall')}</button>
-        </div>
-      </section>
-    </div>
-    <section class="card">
-      <div class="card-head"><h2>${t('ops.tune')}</h2><button class="btn primary sm" data-act="ops.run" data-id="tune-all" ${dis}>${t('ops.t.tune-all')}</button></div>
-      <p class="hint" style="margin-bottom:.6rem">${t('ops.tuneHelp')}</p>
-      <div class="task-grid">
-        ${['swap', 'limits', 'ntp'].map(n => {
-          const tk = task(n);
-          const done = { swap: i.swapTotal > 0, limits: i.limits, ntp: i.ntp === 'yes' }[n];
-          const cur = { swap: i.swapTotal ? fmtBytes(i.swapTotal, 0) : '', limits: i.nofile ? `${t('ops.current')} ${i.nofile}` : '', ntp: '' }[n];
-          return `<div class="task"><div class="task-head"><b>${esc(tk.title)}</b>${linux ? yes(done, t('ops.done'), t('ops.todo')) : ''}</div><p class="hint">${esc(tk.desc)}${cur ? ` · ${esc(cur)}` : ''}</p>
-            <div class="row">
-              ${n === 'swap' ? `<input id="ops-swap" type="number" min="1" max="64" value="${p.swapGb}" style="width:5rem"> G` : ''}
-              ${n === 'limits' ? `<input id="ops-nofile" type="number" min="1024" max="4194304" step="1024" value="${p.noFile}" style="width:8rem">` : ''}
-              <button class="btn sm" data-act="ops.run" data-id="${n}" ${dis}>${t('common.run')}</button></div></div>`;
-        }).join('')}
-      </div>
-      <div class="task" style="margin-top:.75rem">
-        <div class="task-head"><b>${esc(task('sysctl').title)}</b>${linux ? yes(i.tuned && i.cc === 'bbr', t('ops.done'), t('ops.todo')) : ''}</div>
-        <p class="hint">${esc(task('sysctl').desc)}${linux ? ` · ${t('ops.current')} ${esc(i.cc || '?')} / ${esc(i.qdisc || '?')}` : ''}</p>
-        <textarea id="ops-sysctl" class="mono" style="min-height:11rem" spellcheck="false">${esc(p.sysctl)}</textarea>
-        <div class="row"><button class="btn sm ghost" data-act="ops.sysctlDefault">${t('ops.restoreDefault')}</button><span class="grow"></span><button class="btn sm" data-act="ops.run" data-id="sysctl" ${dis}>${t('common.run')}</button></div>
-      </div>
-      <div class="task" style="margin-top:.75rem">
-        <div class="task-head"><b>${esc(task('journal').title)}</b>${linux ? yes(jr.limited, t('ops.done'), t('ops.todo')) : ''}</div>
-        <p class="hint">${esc(task('journal').desc)}${jr.usedMb ? ` · ${t('ops.current')} ${jr.usedMb} MB` : ''}</p>
-        <div class="row">
-          <label class="muted small">${t('ops.journalMb')} <input id="ops-jmb" type="number" min="20" max="20480" step="10" value="${p.journalMb}" style="width:6rem"></label>
-          <label class="muted small">${t('ops.journalDays')} <input id="ops-jdays" type="number" min="1" max="3650" value="${p.journalDays}" style="width:5rem"></label>
-          <span class="grow"></span><button class="btn sm" data-act="ops.run" data-id="journal" ${dis}>${t('common.run')}</button></div>
-      </div>
-      <div class="task" style="margin-top:.75rem">
-        <div class="task-head"><b>${esc(task('disk-clean').title)}</b>${dk ? badge(diskBrief(dk), dlv === 'bad' ? 'danger' : dlv === 'warn' ? 'warn' : 'ok') : ''}</div>
-        <p class="hint">${esc(task('disk-clean').desc)}${dk && diskHogs(dk) ? ` · ${esc(diskHogs(dk))}` : ''}</p>
-        <div class="row">${dk && dk.opsAgent ? `<label class="field check check-wrap ops-agent"><input type="checkbox" id="ops-opsagent"><span>${esc(t('node.dc.opsAgent'))}</span></label>` : ''}
-          <span class="grow"></span><button class="btn sm" data-act="ops.run" data-id="disk-clean" ${dis}>${t('common.run')}</button></div>
-      </div>
-    </section>
-    <section class="card">
-      <div class="card-head"><h2>${t('ops.log')}</h2><div class="row">${st.running ? badge(t('ops.running', { task: st.current }), 'primary') + `<button class="btn sm danger" data-act="ops.cancel">${t('common.cancel')}</button>` : (st.last && st.last.name ? badge((st.last.ok ? '✓ ' : '✗ ') + st.last.name, st.last.ok ? 'ok' : 'danger') : '')}</div></div>
-      <pre class="log" id="ops-log">${esc((st.log || []).join('\n') || t('common.empty'))}</pre>
+  const dis = linux && i.root && !st.running ? '' : 'disabled'; // 不是 Linux、不是 root、或者已经有任务在跑:执行按钮都置灰
+  const runBtn = (n, cls = '', label = t('common.run')) => `<button type="button" class="btn sm${cls}" data-act="ops.run" data-id="${n}" ${dis}>${esc(label)}</button>`;
+
+  // ---- 1. 一排状态小卡 ----
+  const pct = (used, total) => (total ? Math.round(used * 100 / total) : 0);
+  const stat = (k, v, s, { tone = '', bar = null, extra = '' } = {}) => `<div class="stat${tone}"><div class="k">${esc(k)}</div>${extra}<div class="v">${v}</div><div class="s">${s}</div>
+      ${bar == null ? '' : `<div class="progress${bar >= 90 ? ' danger' : bar >= 80 ? ' warn' : ''}"><div class="bar" style="width:${Math.min(100, Math.max(0, bar))}%"></div></div>`}</div>`;
+  const usage = (k, used, total, tone = '') => stat(k, total ? pct(used, total) + '%' : esc(t('ops.noSwap')), total ? `${esc(fmtBytes(used, 1))} / ${esc(fmtBytes(total, 1))}` : '', { tone, bar: total ? pct(used, total) : 0 });
+  const stats = `<div class="stats ops-stats">
+      ${stat(t('ops.host'), `<span class="mono" title="${esc(i.hostname)}">${esc(i.hostname)}</span>`, esc(`${i.os} ${i.kernel || ''} ${i.arch}`.replace(/\s+/g, ' ').trim()),
+        { extra: `<button type="button" class="btn sm icon ghost ops-refresh" data-act="ops.refresh" title="${esc(t('common.refresh'))}" aria-label="${esc(t('common.refresh'))}"><i class="i i-refresh"></i></button>` })}
+      ${linux ? stat(t('ops.uptime'), `<span title="${esc(fmtDuration(i.uptime))}">${esc(upShort(i.uptime))}</span>`, 'load ' + esc(i.load)) : ''}
+      ${linux ? usage(t('ops.mem'), i.memTotal - i.memAvail, i.memTotal) : ''}
+      ${linux ? usage(t('ops.swap'), i.swapTotal - i.swapFree, i.swapTotal, i.swapTotal ? '' : ' warn') : ''}
+      ${linux ? usage(t('ops.disk'), i.diskTotal - i.diskFree, i.diskTotal, dlv === 'bad' ? ' bad' : dlv === 'warn' ? ' warn' : '') : ''}
+    </div>`;
+
+  // ---- 2. 系统优化:一张表,一行一项 ----
+  const done = { swap: i.swapTotal > 0, limits: !!i.limits, ntp: i.ntp === 'yes', sysctl: !!(i.tuned && i.cc === 'bbr'), journal: !!jr.limited };
+  const cur = {
+    swap: i.swapTotal ? fmtBytes(i.swapTotal, 0) : t('ops.noSwap'), limits: i.nofile ? String(i.nofile) : '—', ntp: i.ntp === 'yes' ? t('ops.synced') : i.ntp === 'no' ? t('ops.unsynced') : '—',
+    sysctl: `${i.cc || '?'} / ${i.qdisc || '?'}`, journal: jr.usedMb ? jr.usedMb + ' MB' : '—', 'disk-clean': dk ? diskBrief(dk) : '—',
+  };
+  // 一个带前后缀的小数字框:「上限 [200] MB」「[2] GB」
+  const numIn = (id, v, attrs, { pre = '', post = '', label = '' } = {}) => `<label class="ops-num">${pre ? `<span>${esc(pre)}</span>` : ''}<input id="${id}" type="number" inputmode="numeric" value="${esc(v)}" ${attrs}${label ? ` aria-label="${esc(label)}"` : ''}>${post ? `<span>${esc(post)}</span>` : ''}</label>`;
+  const row = (n, params) => {
+    const tk = task(n), isDisk = n === 'disk-clean';
+    const mark = !linux ? '<span class="ops-st"></span>'
+      : isDisk ? `<span class="ops-st info${dlv === 'bad' ? ' bad' : dlv === 'warn' ? ' warn' : ''}"></span>`
+        : `<span class="ops-st${done[n] ? ' ok' : ''}" title="${esc(t(done[n] ? 'ops.done' : 'ops.todo'))}">${done[n] ? '<i class="i i-check"></i>' : ''}</span>`;
+    return `<tr>
+      <td class="primary-cell"><div class="ops-name">${mark}<div><b>${esc(tk.title)}</b><div class="sub-cell">${esc(tk.desc)}</div></div></div></td>
+      <td class="ops-cur">${linux ? esc(cur[n]) : '—'}${isDisk && dk && diskHogs(dk) ? `<div class="sub-cell">${esc(diskHogs(dk))}</div>` : ''}</td>
+      <td><div class="ops-ctl">${params || '<span class="muted">—</span>'}</div></td>
+      <td class="actions">${runBtn(n)}</td></tr>`;
+  };
+  const doneN = TUNE_ALL.filter(n => done[n]).length + (done.journal ? 1 : 0);
+  const sysctlEdited = sysctlDraft != null && sysctlDraft !== p.sysctl;
+  const tuneCard = `<section class="card">
+      <div class="card-head"><h2>${t('ops.tune')}${linux ? `<span class="h-count">${esc(t('ops.tuneCount', { n: doneN, m: TUNE_ALL.length + 1 }))}</span>` : ''}</h2>
+        ${runBtn('tune-all', TUNE_ALL.every(n => done[n]) ? '' : ' primary', t('ops.t.tune-all'))}</div>
+      <p class="hint">${esc(t('ops.tuneHelp'))}</p>
+      <div class="table-wrap"><table class="grid ops-table" data-fit="cards:780">
+        <thead><tr><th>${t('ops.col.item')}</th><th>${t('ops.col.now')}</th><th>${t('ops.col.param')}</th><th></th></tr></thead>
+        <tbody>
+          ${row('swap', numIn('ops-swap', p.swapGb, 'min="1" max="64" class="w5"', { post: 'GB', label: task('swap').title }))}
+          ${row('limits', numIn('ops-nofile', p.noFile, 'min="1024" max="4194304" step="1024" class="w8"', { label: task('limits').title }))}
+          ${row('ntp', '')}
+          ${row('sysctl', `<button type="button" class="btn sm" data-act="ops.sysctlEdit">${esc(t('ops.sysctlEdit'))}</button>${sysctlEdited ? `<span class="warn-text small">${esc(t('ops.sysctlDirty'))}</span>` : ''}`)}
+          ${row('journal', numIn('ops-jmb', p.journalMb, 'min="20" max="20480" step="10" class="w5"', { pre: t('ops.j.limit'), post: 'MB' }) + numIn('ops-jdays', p.journalDays, 'min="1" max="3650" class="w5"', { pre: t('ops.j.keep'), post: t('ops.j.days') }))}
+          ${row('disk-clean', dk && dk.opsAgent ? `<label class="ops-chk"><input type="checkbox" id="ops-opsagent"><span>${esc(t('node.dc.opsAgent'))}</span></label>` : '')}
+        </tbody>
+      </table></div>
     </section>`;
+
+  // ---- 3. WARP:按现在的状态给信息和按钮 ----
+  const exitOk = w.exit === 'on' || w.exit === 'plus';
+  const wState = !w.installed ? badge(t('ops.warpNone'), '') : !w.listening ? badge(t('ops.warpOff'), 'warn') : exitOk ? badge(t('ops.warpOn') + ' · warp=' + w.exit, 'ok') : badge(t('ops.warpNoExit'), 'warn');
+  const rows = [];
+  if (w.listening) rows.push([t('ops.exit'), `<span class="mono">${esc(w.exitIp || '—')}</span> ${esc([w.exitLoc, w.exitColo].filter(Boolean).join(' '))}<button type="button" class="btn sm ops-inline" data-act="ops.warpCheck">${t('ops.checkExit')}</button>`]);
+  rows.push([t('ops.warpPort'), `<span class="ops-port"><span class="mono muted">127.0.0.1:</span><input id="ops-port" type="number" inputmode="numeric" min="1" max="65535" value="${esc(data.warpPort)}" aria-label="${esc(t('ops.warpPort'))}"></span><div class="sub-cell">${esc(t('ops.warpPortHelp'))}</div>`]);
+  if (w.installed) rows.push([t('ops.services'), `<span class="mono">warp-svc ${esc(w.service || '—')} · warp-socks5 ${esc(w.socks || '—')}</span>${w.status ? ` <span class="muted small">${esc(w.status)}</span>` : ''}`]);
+  if (w.listening) rows.push([t('ops.upstream'), data.warpUpstream ? `${badge('warp', 'ok')} <span class="muted small">${esc(t('ops.upstreamHas'))}</span>` : `<button type="button" class="btn sm" data-act="ops.warpUpstream">${t('ops.addUpstream')}</button>`]);
+  const wActs = !w.installed ? runBtn('warp-install', ' primary', task('warp-install').title)
+    : !w.listening ? runBtn('warp-enable', ' primary', t('ops.t.warp-enable')) + runBtn('warp-uninstall', ' danger end', t('ops.t.warp-uninstall'))
+    : runBtn('warp-enable', '', t('ops.warpReenable')) + runBtn('warp-disable', '', t('ops.t.warp-disable')) + runBtn('warp-uninstall', ' danger end', t('ops.t.warp-uninstall'));
+  const warpCard = `<section class="card ops-warp">
+      <div class="card-head"><h2>Cloudflare WARP</h2>${wState}</div>
+      <p class="hint">${esc(t('ops.warpIntro'))}</p>
+      <dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>
+      <div class="ops-warp-foot">${wActs}</div>
+    </section>`;
+
+  // ---- 4. 任务输出 ----
+  const log = (st.log || []).join('\n');
+  const outState = st.running ? badge(t('ops.running', { task: tx('ops.task.' + st.current + '.title', st.current) }), 'primary') + `<button type="button" class="btn sm danger" data-act="ops.cancel">${t('common.cancel')}</button>`
+    : (st.last && st.last.name ? badge((st.last.ok ? '✓ ' : '✗ ') + tx('ops.task.' + st.last.name + '.title', st.last.name), st.last.ok ? 'ok' : 'danger') : '');
+  const outCard = `<section class="card ops-out" id="ops-out">
+      <div class="card-head"><h2>${t('ops.log')}</h2><div class="head-acts">${outState}</div></div>
+      ${log || st.running ? `<pre class="log" id="ops-log">${esc(log)}</pre>` : `<div class="ops-idle">${esc(t('ops.logIdle'))}</div>`}
+    </section>`;
+
+  el.innerHTML = `
+    ${!linux ? `<div class="alert-bar warn ops-warn"><span>${esc(t('ops.linuxOnly'))}</span></div>` : (!i.root ? `<div class="alert-bar warn ops-warn"><span>${esc(t('ops.rootOnly'))}</span></div>` : '')}
+    ${stats}${tuneCard}<div class="ops-pair">${warpCard}${outCard}</div>`;
+  const lg = document.getElementById('ops-log');
+  if (lg) lg.scrollTop = lg.scrollHeight;
   if (st.running) startPoll();
 }
 
@@ -117,6 +141,7 @@ function startPoll() {
       if (!st.running) {
         stopPoll();
         toast(st.last && st.last.ok ? t('ops.taskDone') : t('ops.taskFailed'), st.last && st.last.ok ? 'ok' : 'err');
+        if (st.last && st.last.ok) sysctlDraft = null; // 跑成功了:参数已经存下,回到存着的那份
         if (location.hash.startsWith('#/ops')) render(document.getElementById('page'), true);
         return;
       }
@@ -136,17 +161,30 @@ registerActions({
     try {
       await post('ops/run', {
         task, port: Number(fv('ops-port')) || 0, swapGb: Number(fv('ops-swap')) || 0,
-        noFile: Number(fv('ops-nofile')) || 0, sysctl: (task === 'sysctl' || task === 'tune-all') ? fv('ops-sysctl') : '',
+        noFile: Number(fv('ops-nofile')) || 0, sysctl: (task === 'sysctl' || task === 'tune-all') ? (sysctlDraft != null ? sysctlDraft : (data.params || {}).sysctl || '') : '',
         journalMb: Number(fv('ops-jmb')) || 0, journalDays: Number(fv('ops-jdays')) || 0,
         opsAgent: task === 'disk-clean' && !!(document.getElementById('ops-opsagent') || {}).checked,
       });
       toast(t('ops.started'), 'ok');
       await render(document.getElementById('page'));
       startPoll();
+      const out = document.getElementById('ops-out'); // 输出在页面最下面:任务一开始就滚过去,不用自己找
+      if (out) out.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
   },
   'ops.cancel': async () => { await post('ops/cancel').catch(() => {}); },
-  'ops.sysctlDefault': () => { document.getElementById('ops-sysctl').value = data.params.defaultSysctl; },
+  // 内核参数在弹框里改:「确定」只是记下这份(表里标出「改过,还没执行」),点那一行的「执行」或「一键优化」才写进系统
+  'ops.sysctlEdit': () => {
+    const p = data.params || {};
+    openModal(t('ops.sysctlTitle'), `<p class="hint ops-sysctl-hint">${esc(t('ops.sysctlHelp'))}</p>
+      <textarea id="ops-sysctl" class="mono ops-sysctl" spellcheck="false" aria-label="${esc(t('ops.sysctlTitle'))}">${esc(sysctlDraft != null ? sysctlDraft : p.sysctl || '')}</textarea>
+      <div class="row"><button type="button" class="btn sm" data-act="ops.sysctlDefault">${t('ops.restoreDefault')}</button></div>`, async () => {
+      const v = fv('ops-sysctl');
+      sysctlDraft = v === (p.sysctl || '') ? null : v;
+      render(document.getElementById('page'));
+    }, { wide: true, okText: t('common.ok') });
+  },
+  'ops.sysctlDefault': () => { const ta = document.getElementById('ops-sysctl'); if (ta) ta.value = (data.params || {}).defaultSysctl || ''; },
   'ops.warpCheck': async (_, btn) => {
     btn.disabled = true;
     try { const r = await post('ops/warp-check', undefined, SLOW); toast(`warp=${r.exit} ${r.ip || ''} ${r.loc || ''} ${r.colo || ''}`, r.exit === 'on' || r.exit === 'plus' ? 'ok' : 'err'); }

@@ -305,11 +305,15 @@ func (s *Server) handleBackupSub(w http.ResponseWriter, r *http.Request) {
 	action := strings.TrimPrefix(r.URL.Path, innerBase+"api/backup/")
 	switch action {
 	case "list":
+		// lastErr:最近一次定时备份失败的原因(之后任何一次备份成功就清空);tgReady:Telegram 通知配好了没有(没配好,「同时发到 Telegram」开了也发不出去)
+		lastErr, lastErrAt := s.run.BackupError()
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"files": s.run.ListBackups(), "dir": s.run.BackupDir(),
 			"backupHour": s.setting("backupHour"), "backupKeep": s.setting("backupKeep"),
 			"backupTelegram": s.setting("backupTelegram") == "true",
 			"restorePending": s.run.RestorePending(),
+			"lastErr":        lastErr, "lastErrAt": lastErrAt,
+			"tgReady": strings.EqualFold(s.setting("tgEnabled"), "true") && strings.TrimSpace(s.setting("tgToken")) != "" && strings.TrimSpace(s.setting("tgChatId")) != "",
 		})
 	case "run":
 		if r.Method != http.MethodPost {

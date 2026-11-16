@@ -305,6 +305,47 @@ await page.evaluate(async () => {
 });
 const b1 = await blockedOf();
 if (b0 === 1 && b1 === 0) pass('中转入口换了端口,「端口被占」跟着消失'); else fail(`「端口被占」没有跟着线路变:改前 ${b0} 条、改后 ${b1} 条`);
+// 上游的结果按服务器记:又有两台服务器上的线路用了同一条上游,延迟那一格就多出两个点(以前不管线路怎么改都只有 Tokyo 一个点);点开逐台看
+const upServers = () => page.evaluate(async () => (((await (await import('./js/api.js')).get('upstreams/health')).results || []).find(r => r.name === 'LA-streaming') || { servers: [] }).servers.map(s => s.name));
+const us0 = await upServers();
+await page.evaluate(async () => {
+  const api = await import('./js/api.js');
+  const ls = await api.get('lines');
+  for (const id of [2, 3]) await api.put('lines/' + id, { ...ls.find(x => x.id === id), upstreamId: 2 });
+});
+const us1 = await upServers();
+if (us0.length === 1 && us1.length === 3) pass('上游的结果跟着线路部署到的服务器走(1 台 → 3 台)'); else fail(`上游的结果没有跟着线路变:改前 ${us0.join('/')},改后 ${us1.join('/')}`);
+await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(400);
+await page.goto(`${DEMO}#/upstreams`); await page.waitForTimeout(900);
+const dots = await page.locator('#up-res-2 .hdots .hd').count();
+await page.locator('#up-res-2 .hbtn').click(); await page.waitForTimeout(300);
+const rowsOpen = await page.locator('#up-res-2 .hdetail .hrow').count();
+if (dots === 3 && rowsOpen === 3) pass('上游页:三台在用就是三个点,点这一行展开逐台的延迟'); else fail(`上游页的点 / 展开行数不对:${dots} 个点、${rowsOpen} 行`);
+// 概况「24 小时流量」那一格点开是流量明细:三栏排行,换范围后还在
+await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(900);
+await page.locator('[data-act="dash.traffic"]').first().click(); await page.waitForTimeout(700);
+const tbCols = await page.locator('.tb-cols .tb-col').count(), tbRows = await page.locator('.tb-cols .tb-row').count();
+await page.locator('#tb-range [data-id="720"]').click(); await page.waitForTimeout(700);
+const tbCols30 = await page.locator('.tb-cols .tb-col').count();
+if (tbCols === 3 && tbRows >= 6 && tbCols30 === 3) pass('概况的流量一格点开是流量明细(用户 / 线路 / 服务器三栏,可换范围)'); else fail(`流量明细不对:${tbCols} 栏 ${tbRows} 行,30 天 ${tbCols30} 栏`);
+await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+// 用户行「更多」里的停用 / 启用:启用着的显示停用,点了状态变成停用、这一项变成启用
+await page.goto(`${DEMO}#/users`); await page.waitForTimeout(900);
+const row2 = '#users-table tbody tr:nth-child(2)';
+const menuLabel = async () => { await page.locator(`${row2} details.menu > summary`).click(); await page.waitForTimeout(200); return (await page.locator(`${row2} [data-act="user.toggle"]`).innerText()).trim(); };
+const lb0 = await menuLabel();
+await page.locator(`${row2} [data-act="user.toggle"]`).click(); await page.waitForTimeout(900);
+const st1 = (await page.locator(`${row2} td:nth-child(3)`).innerText()).trim();
+const lb1 = await menuLabel();
+await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+if (/停用|Disable/.test(lb0) && /停用|Disabled/.test(st1) && /启用|Enable/.test(lb1) && lb0 !== lb1) pass('用户「更多」里的停用 / 启用跟着状态换'); else fail(`用户的停用 / 启用不对:菜单 ${lb0} → 状态 ${st1} → 菜单 ${lb1}`);
+// 备份页:存一份到服务器,列表多一行;定时备份的四项都在页面上(开关、钟点、份数、推送到 Telegram)
+await page.goto(`${DEMO}#/backup`); await page.waitForTimeout(900);
+const bk0 = await page.locator('.bk-list tbody tr').count();
+await page.locator('[data-act="bk.run"]').click(); await page.waitForTimeout(900);
+const bk1 = await page.locator('.bk-list tbody tr').count();
+const schedCtl = await page.evaluate(() => ['bk-on', 'bk-hour', 'bk-keep', 'bk-tg'].filter(id => { const el = document.getElementById(id); return el && el.getClientRects().length > 0 || (el && el.closest('.switch') && el.closest('.switch').getClientRects().length > 0); }).length);
+if (bk0 >= 1 && bk1 === bk0 + 1 && schedCtl === 4) pass('备份页:存一份列表多一行,定时备份的四项都在页面上'); else fail(`备份页不对:${bk0} → ${bk1} 行,定时备份控件 ${schedCtl}/4`);
 
 // 请求审计
 const external = requests.filter(u => !u.startsWith(origin));
