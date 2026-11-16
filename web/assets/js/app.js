@@ -575,8 +575,26 @@ new MutationObserver(() => {
   requestAnimationFrame(() => { labelQueued = false; labelTables(); });
 }).observe(document.body, { childList: true, subtree: true });
 
+// 页面有没保存的改动(页面模块导出 leaveGuard,返回要问的那句话)时,换页前先问;不走就把地址改回去、页面原样留着。
+let skipRoute = false, guarding = false;
 async function route(force = false) {
+  if (skipRoute) { skipRoute = false; return; } // 刚把地址改回去的那一次:什么都不用做
   const name = pageName();
+  const from = pages[current];
+  if (!force && current && name !== current && from && from.leaveGuard) {
+    if (guarding) return;
+    const msg = from.leaveGuard();
+    if (msg) {
+      guarding = true;
+      const go = await confirm(msg, { okText: t('common.leave'), danger: true });
+      guarding = false;
+      if (!go) {
+        if (pageName() !== current) { skipRoute = true; location.hash = '#/' + current; }
+        return;
+      }
+      if (pageName() !== name) return route(force); // 等确认的时候地址又变了:按最新的来
+    }
+  }
   if (!force && current === name && pages[name].keepAlive) return;
   const gen = ++routeGen;
   current = name;

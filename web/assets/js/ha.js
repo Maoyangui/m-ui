@@ -496,7 +496,7 @@ registerActions({
     try { await post('ha/pause', { minutes: Number(min) }); await loadHA(); renderHASettings(); toast(t('set.saved'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
-  'ha.save': () => saveSettings(),
+  'ha.save': () => saveHASettings(),
   'ha.dnsTest': async (_, btn) => {
     btn.disabled = true;
     const out = document.getElementById('ha-dns-out');
@@ -689,7 +689,7 @@ export async function renderHASettings(container) {
   const ready = (v.ready || []).map(ch => `<li class="lv-${esc(ch.level)}"><span class="ic">${LEVEL_ICON[ch.level] || '·'}</span><span>${esc(readyText(ch))}</span></li>`).join('');
   const paused = c.pauseUntil > Date.now() / 1000;
   host.innerHTML = `
-    <div class="card-head"><h2>${t('ha.title')}</h2><button class="btn primary sm" data-act="ha.save">${t('common.save')}</button></div>
+    <div class="card-head"><h2>${t('ha.title')}</h2></div>
     <p class="hint">${t('ha.set.intro')}</p>
     ${override}
     <div class="ha-modes" role="radiogroup" aria-label="${esc(t('ha.title'))}">
@@ -788,7 +788,8 @@ export function dnsTestHTML(r) {
   return err + `<ul class="ha-check">${recs.map(x => `<li class="lv-${x.match ? 'ok' : 'info'}"><span class="ic">${x.match ? '✓' : '·'}</span><span>${esc(x.name)} ${esc(x.type)} ${esc(x.content)}${x.proxied ? ' (proxied)' : ''} — ${esc(x.match ? t('ha.dns.match') : t('ha.dns.skip'))}</span></li>`).join('')}</ul>`;
 }
 
-function saveSettings() {
+// 保存容灾设置(要输管理员密码确认)。设置页底部的保存条来调;onSaved 在存好、卡片重画之后调
+export function saveHASettings(onSaved) {
   const num = id => Number((document.getElementById(id) || {}).value) || 0;
   let dnsToken;
   try { dnsToken = dnsCred(); } catch (e) { toast(e.message, 'err'); return; } // 阿里云 / 腾讯云只填了一半
@@ -809,6 +810,7 @@ function saveSettings() {
     // 首次开启要进纪元、推状态给全部副机,可能要一会儿
     await post('ha', { ...body, password, code }, SLOW);
     toast(t('set.saved'), 'ok');
-    renderHASettings();
+    await renderHASettings();
+    if (onSaved) onSaved();
   });
 }

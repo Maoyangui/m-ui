@@ -124,7 +124,7 @@
     <p class="lede">Install m-ui on the node and enter its pairing details on the master.</p>
     <ol class="steps">
       <li>Install m-ui on the node server the same way and sign in to its panel (change the default password first).</li>
-      <li>On the node: <b data-k="nav.settings">Settings</b> → <b data-k="set.role">Role</b>, tick <b data-k="set.roleSwitch">Run as node (secondary server)</b> and click <b data-k="common.save">Save</b>.</li>
+      <li>On the node: <b data-k="nav.settings">Settings</b> → <b data-k="set.role">Role</b>, switch on <b data-k="set.roleSwitch">Run as node (secondary server)</b> and confirm in the dialog (this switch applies at once; there is nothing else to save).</li>
       <li>On the node: <b data-k="nav.settings">Settings</b> → <b data-k="set.pairing">Pairing</b>, copy the <b data-k="node.apiUrl">API URL</b> and the <b data-k="node.token">Pairing token</b>.</li>
       <li>On the master: <b data-k="nav.nodes">Servers</b> page → <b data-k="node.add">Add server</b>. Enter a <b data-k="common.name">Name</b> (it becomes the suffix of node names in subscriptions, such as "HK"), the API URL and the pairing token. If the node's panel uses a self-signed certificate or a bare IP, tick <b data-k="node.insecure">Skip certificate verification</b>.</li>
       <li>A few seconds after saving the row should show <b data-k="node.synced">synced</b>.</li>
@@ -1169,7 +1169,7 @@
 
 <section class="chap" id="settings" data-scope="admin">
   <h2>Settings at a glance</h2>
-  <p class="lede">The <b data-k="nav.settings">Settings</b> page saves group by group, each with its own <b data-k="common.save">Save</b>. Port, listen address and certificate changes take effect on save: the panel switches its listener in place and the browser follows to the new address, and the subscription service and reseller panel do the same, so <b data-k="set.restart">Restart m-ui</b> at the top is rarely needed (a node's panel port and certificate are the exception, see the Q&amp;A below).</p>
+  <p class="lede">On the <b data-k="nav.settings">Settings</b> page, changing anything (a switch or a text field alike) brings up a save bar at the bottom of the window: it says how many changes are pending, and clicking its left part lists each one as "before → after" with an <b data-k="set.sb.undo">Undo</b> per item. <b data-k="common.save">Save</b> applies them together and <b data-k="set.sb.discard">Discard</b> restores everything; leaving the page with unsaved changes asks first. Port, listen address and certificate changes take effect on save: the panel switches its listener in place and the browser follows to the new address, and the subscription service and reseller panel do the same, so <b data-k="set.restart">Restart m-ui</b> at the top is rarely needed (a node's panel port and certificate are the exception, see the Q&amp;A below).</p>
 
   <section class="sec" id="set-panel">
     <h3>Role and panel</h3>

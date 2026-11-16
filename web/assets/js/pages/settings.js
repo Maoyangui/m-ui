@@ -5,7 +5,7 @@ import { esc, toast, confirm, registerActions, badge, fv, fchk, copy, urlHost, c
 import { ICONS } from '../icons.js';
 import { followPanel } from '../panelmove.js';
 import { logoBlock, bindLogo } from '../logo.js';
-import { renderHASettings } from '../ha.js';
+import { renderHASettings, saveHASettings } from '../ha.js';
 import { subSettingsChange } from '../subtls.js';
 
 // boolSetting 开关类设置的显示:和后端同一个判法(model.NormBoolSetting),空值用默认。
@@ -121,12 +121,13 @@ export async function render(el) {
   // 文字包一层:手机宽度下只留 ↻,给页面标题和右上角的帮助、支持按钮让地方(见 style.css .tb-label)
   document.getElementById('topbar-right').innerHTML = `<button class="btn danger sm" data-act="set.restart" title="${esc(t('set.restartHint'))}" aria-label="${esc(t('set.restart'))}">${ICONS.restart}<span class="tb-label">${t('set.restart')}</span></button>`;
   // 版式:左边一列分区导航(跟着滚动高亮,点了跳过去),右边一列分区卡片;卡片里一项设置一行。
-  // 以前是两栏瀑布流里再套两栏表单,说明文字长短不一,输入框上下对不齐
+  // 保存:整页一个规则 —— 动了任何一项,窗口底部浮出保存条(见下面「未保存的改动」);分区里不再各有一个「保存」。
+  // 角色那个开关例外:拨了当场确认、当场生效(它要重载页面,不和别的设置混在一起存)
   el.innerHTML = `<div class="settings">
     <nav class="set-nav" id="set-nav" aria-label="${esc(t('set.title'))}"></nav>
     <div class="set-main">
     <section class="card set-sec" id="sec-role" data-nav="${esc(t('set.role'))}">
-      <div class="card-head"><h2>${t('set.role')} ${badge(isNode ? t('role.node') : t('role.master'), isNode ? 'node' : 'primary')}</h2><button class="btn primary sm" data-act="set.saveRole">${t('common.save')}</button></div>
+      <div class="card-head"><h2>${t('set.role')} ${badge(isNode ? t('role.node') : t('role.master'), isNode ? 'node' : 'primary')}</h2></div>
       <div class="set-rows">
         <div class="set-row bool"><div class="set-info"><label class="set-label" for="set-nodeMode">${t('set.roleSwitch')}</label><p class="set-help" id="role-hint">${isNode ? t('set.roleNode') : t('set.roleMaster')}</p></div>
           <div class="set-ctl"><label class="switch"><input type="checkbox" id="set-nodeMode" ${isNode ? 'checked' : ''}><span></span></label></div></div>
@@ -134,7 +135,7 @@ export async function render(el) {
     </section>
     ${groups().filter(g => !(g.masterOnly && isNode)).map(g => `
       <section class="card set-sec" id="sec-${g.id}" data-nav="${esc(g.title)}">
-        <div class="card-head"><h2>${esc(g.title)}${g.restart ? ` <span class="badge warn" title="${t('set.restartHint')}">${t('set.needRestart')}</span>` : ''}</h2><div class="row">${g.test ? `<button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button>` : ''}<button class="btn primary sm" data-act="set.save" data-id="${g.id}">${t('common.save')}</button></div></div>
+        <div class="card-head"><h2>${esc(g.title)}</h2>${g.test ? `<div class="row"><button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button></div>` : ''}</div>
         <div class="set-rows">${g.fields.map(f => rowHTML(s, f)).join('')}</div>${g.extra || ''}
       </section>`).join('')}
     <section class="card set-sec" id="sec-about" data-nav="${esc(t('set.about'))}">
@@ -147,12 +148,34 @@ export async function render(el) {
         <dt>License</dt><dd>GPL-3.0 · <a href="${esc(state.status.repo || '#')}" target="_blank" rel="noopener">GitHub</a></dd>
       </dl>
       <p class="hint">${t('set.restartNote')}</p>
-    </section></div></div>`;
-  document.getElementById('set-nodeMode').addEventListener('change', e => {
-    document.getElementById('role-hint').textContent = e.target.checked ? t('set.roleNode') : t('set.roleMaster');
+    </section>
+    <div class="savebar" id="set-bar" hidden></div></div></div>`;
+  // 角色开关:拨了就问、确认了就生效;取消或失败就拨回去
+  document.getElementById('set-nodeMode').addEventListener('change', async e => {
+    const sw = e.target, toNode = sw.checked;
+    if (!await confirm(toNode ? t('set.roleToNode') : t('set.roleToMaster'), { danger: true })) { sw.checked = !toNode; return; }
+    sw.disabled = true;
+    try {
+      const r = await post('settings', { nodeMode: String(toNode) });
+      await load('settings', 'status');
+      snapshot(); renderBar(); // 页面马上要重载:别让"有没保存的改动"拦一下
+      toast(r && r.note && toNode ? r.note : t('set.saved'), 'ok');
+      setTimeout(() => location.reload(), toNode ? 2500 : 0);
+    } catch (err) { toast(err.message, 'err'); sw.checked = !toNode; sw.disabled = false; }
   });
   bindLogo('set-logo', 'sub-logo');
   bindCharCounts(el);
+  // 未保存的改动:记下现在各项的值,之后任何一项动了就重算保存条
+  barOpen = false;
+  snapshot();
+  const main = el.querySelector('.set-main');
+  const onEdit = e => {
+    const el = e.target;
+    if (!el || el.id === 'set-nodeMode') return;
+    if ((el.id && el.id.startsWith('set-')) || (el.closest && el.closest('#ha-card'))) renderBar();
+  };
+  main.addEventListener('input', onEdit);
+  main.addEventListener('change', onEdit);
   if (isNode) renderPairing().then(buildNav);
   // 主机容灾:紧跟在角色卡片后面(服务器页角色卡片里的「去设置」跳到这里)
   const haCard = document.createElement('section');
@@ -163,10 +186,170 @@ export async function render(el) {
   buildNav();
   renderHASettings(haCard).then(() => {
     buildNav(); // 取不到容灾状态时这张卡会被拿掉,导航跟着少一项
+    haSnapshot(); // 容灾卡片画好了:记下它各项现在的值(之后的改动进保存条)
     let to = '';
     try { to = sessionStorage.getItem('m-ui.scrollTo') || ''; sessionStorage.removeItem('m-ui.scrollTo'); } catch {}
     if (to === 'ha-card') haCard.scrollIntoView({ block: 'start' });
   });
+}
+
+// ---- 未保存的改动:窗口底部的保存条 ----
+// 以前每个分区右上角各有一个「保存」:开关拨了不算数,还得回到分区顶上去点;分区一长,改完要往回滚。
+// 现在整页一个规则:动了任何一项(开关、输入框、下拉都一样),底部就浮出保存条 —— 几处改动、改了哪几项、放弃 / 保存;
+// 点左边那段向上展开清单,逐项写着「原来 → 现在」,可以单独撤销一项。普通设置只发改过的键,一次请求、要么都成要么都不成;
+// 「主机容灾」那张卡(ha.js 画的,保存要输管理员密码)也算在里面:点保存时先存普通设置,再走它自己的确认。
+let orig = {};      // 键 → 画出页面时控件上的值(开关是 'true' / 'false',文字是去掉首尾空白的)
+let barOpen = false;
+const SECRET = /token|secret/i; // 令牌、密钥类:清单里不显示内容
+const isBool = type => type === 'bool' || type === 'boolOn';
+const fieldList = () => groups().filter(g => !(g.masterOnly && isNodeRole()))
+  .flatMap(g => g.fields.map(([k, label, type, , options]) => ({ k, label, type, options, group: g.title, gid: g.id })));
+const ctlVal = f => { const el = document.getElementById('set-' + f.k); return !el ? undefined : isBool(f.type) ? String(el.checked) : el.value.trim(); };
+const dirtyFields = () => fieldList().filter(f => { const v = ctlVal(f); return v !== undefined && v !== orig[f.k]; });
+function snapshot() {
+  orig = {};
+  fieldList().forEach(f => { const v = ctlVal(f); if (v !== undefined) orig[f.k] = v; });
+}
+function setCtl(f, v) {
+  const el = document.getElementById('set-' + f.k);
+  if (!el) return;
+  if (isBool(f.type)) el.checked = v === 'true'; else el.value = v;
+  el.dispatchEvent(new Event('input', { bubbles: true })); // 字数统计跟着更新,保存条也跟着重算
+}
+const clip = v => (v.length > 40 ? v.slice(0, 38) + '…' : v);
+// 清单里一个值怎么写:开关写开 / 关,下拉写选项名,空的写默认值,令牌不显示内容,长文本只写字数
+function showVal(f, v) {
+  if (isBool(f.type)) return t(v === 'true' ? 'set.sb.on' : 'set.sb.off');
+  if (f.type === 'select') { const o = (f.options || []).find(x => x[0] === v); return o ? o[1] : v; }
+  if (v === '') return defaults[f.k] !== undefined ? t('set.sb.defaultV', { v: defaults[f.k] }) : t('set.sb.empty');
+  if (SECRET.test(f.k)) return '••••••';
+  if (f.type === 'textarea' || f.type === 'code') return t('set.sb.chars', { n: v.length });
+  return clip(v);
+}
+
+// 容灾卡片里的控件:不认识它的字段,就按页面上实际有的控件来 —— 单选组一项、别的控件一项,名字取旁边的标签。
+// 每次现找(选了别的 DNS 服务商,凭据那几栏会重画)
+function haFields() {
+  const card = document.getElementById('ha-card');
+  if (!card) return [];
+  const out = [], radios = new Set();
+  const text = el => (el ? el.textContent : '').trim();
+  card.querySelectorAll('input, select, textarea').forEach(el => {
+    if (el.type === 'radio') {
+      if (!el.name || radios.has(el.name)) return;
+      radios.add(el.name);
+      const group = () => [...card.querySelectorAll(`input[type="radio"][name="${el.name}"]`)];
+      out.push({ k: 'ha:' + el.name, blank: '', label: (el.closest('[role="radiogroup"]') || card).getAttribute('aria-label') || el.name,
+        get: () => (group().find(r => r.checked) || {}).value || '',
+        set: v => { const r = group().find(x => x.value === v); if (r) { r.checked = true; r.dispatchEvent(new Event('change', { bubbles: true })); } },
+        show: v => { const r = group().find(x => x.value === v); return r ? text(r.closest('label').querySelector('b')) || v : v || t('set.sb.empty'); } });
+      return;
+    }
+    if (!el.id || el.type === 'hidden' || el.type === 'search' || el.type === 'button') return;
+    const box = el.closest('.field');
+    const bool = el.type === 'checkbox', pick = el.tagName === 'SELECT';
+    const secret = el.type === 'password' || SECRET.test(el.id);
+    out.push({ k: 'ha:' + el.id, blank: bool ? 'false' : '',
+      label: text(box && (box.querySelector('.label') || box.querySelector(':scope > span:not(.help)'))) || el.id,
+      get: () => (bool ? String(el.checked) : el.value.trim()),
+      set: v => { if (bool) el.checked = v === 'true'; else el.value = v; el.dispatchEvent(new Event(bool || pick ? 'change' : 'input', { bubbles: true })); },
+      show: v => (bool ? t(v === 'true' ? 'set.sb.on' : 'set.sb.off')
+        : pick ? text([...el.options].find(o => o.value === v)) || v
+          : v === '' ? t('set.sb.empty') : secret ? '••••••' : clip(v)) });
+  });
+  return out;
+}
+let haOrig = new Map();
+const haWas = f => (haOrig.has(f.k) ? haOrig.get(f.k) : f.blank);
+const haDirty = () => haFields().filter(f => f.get() !== haWas(f));
+function haSnapshot() { haOrig = new Map(haFields().map(f => [f.k, f.get()])); }
+
+// 现在所有没保存的改动(普通设置 + 容灾),整理成清单要显示的样子
+function changes() {
+  const out = dirtyFields().map(f => ({ k: f.k, group: f.group, label: f.label, from: showVal(f, orig[f.k]), to: showVal(f, ctlVal(f)) }));
+  for (const f of haDirty()) out.push({ k: f.k, group: t('ha.title'), label: f.label, from: f.show(haWas(f)), to: f.show(f.get()) });
+  return out;
+}
+function undoOne(k) {
+  if (k.startsWith('ha:')) { const f = haFields().find(x => x.k === k); if (f) f.set(haWas(f)); return; }
+  const f = fieldList().find(x => x.k === k);
+  if (f) setCtl(f, orig[k]);
+}
+
+// 保存条:左边「几处改动」+ 最多两枚改动项的名字(其余折成 +N,放不下的整枚不显示),右边 放弃 / 保存。
+// 改得再多条本身也不变长;清单限高、在里面滚动
+function renderBar() {
+  const bar = document.getElementById('set-bar');
+  if (!bar) return;
+  const list = changes();
+  bar.hidden = !list.length;
+  if (!list.length) { barOpen = false; bar.innerHTML = ''; return; }
+  const keep = bar.querySelector('.sb-list') ? bar.querySelector('.sb-list').scrollTop : 0;
+  bar.innerHTML = `
+    <div class="sb-list" ${barOpen ? '' : 'hidden'}>${list.map(c => `<div class="sb-row">
+        <span class="sb-name" title="${esc(c.group + ' · ' + c.label)}"><small>${esc(c.group)}</small>${esc(c.label)}</span>
+        <span class="sb-diff"><s title="${esc(c.from)}">${esc(c.from)}</s><i class="i i-arrow"></i><b title="${esc(c.to)}">${esc(c.to)}</b></span>
+        <button type="button" class="btn sm ghost" data-act="set.undo" data-id="${esc(c.k)}">${t('set.sb.undo')}</button>
+      </div>`).join('')}</div>
+    <div class="sb-main">
+      <button type="button" class="sb-sum" data-act="set.barToggle" aria-expanded="${barOpen}" title="${esc(t('set.sb.toggle'))}">
+        <span class="sb-dot"></span><b>${esc(t('set.sb.n', { n: list.length }))}</b>
+        <span class="sb-chips">${list.slice(0, 2).map(c => `<span class="sb-chip">${esc(c.label)}</span>`).join('')}</span>${list.length > 2 ? `<span class="sb-chip sb-more">+${list.length - 2}</span>` : ''}
+        <i class="i i-chev"></i>
+      </button>
+      <button type="button" class="btn sm sb-discard" data-act="set.discard">${t('set.sb.discard')}</button>
+      <button type="button" class="btn primary sm" data-act="set.saveAll">${t('common.save')}</button>
+    </div>`;
+  const box = bar.querySelector('.sb-list');
+  if (box) box.scrollTop = keep;
+}
+// 换页前(路由会来问,见 app.js)和关标签页前:有没保存的改动就提醒一句
+export function leaveGuard() {
+  const n = changes().length;
+  return n ? t('set.sb.leave', { n }) : '';
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', e => {
+    if (document.getElementById('set-bar') && changes().length) { e.preventDefault(); e.returnValue = ''; }
+  });
+}
+
+async function saveAll() {
+  const list = dirtyFields();
+  // 容灾那张卡走它自己的保存(要输管理员密码);存好后它会重画,重新记一次它的起点
+  const saveHA = () => { if (haDirty().length) saveHASettings(() => { haSnapshot(); renderBar(); }); };
+  if (!list.length) { saveHA(); return; }
+  const body = {};
+  list.forEach(f => { body[f.k] = ctlVal(f); });
+  // 订阅证书 / 私钥路径一改,订阅可能在 http ↔ https 之间切换:所有用户手里的订阅地址都会变,和证书页一样先确认
+  if (('subCertFile' in body || 'subKeyFile' in body) && !await confirmSubScheme({ subCertFile: fv('set-subCertFile').trim(), subKeyFile: fv('set-subKeyFile').trim() })) return;
+  const norm = p => { p = (p || '/app/').trim(); if (!p.startsWith('/')) p = '/' + p; if (!p.endsWith('/')) p += '/'; return p; };
+  const pathChanged = 'webPath' in body && norm(body.webPath) !== norm(state.status.webPath);
+  const btn = document.querySelector('[data-act="set.saveAll"]');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await post('settings', body);
+    snapshot(); // 存下了:现在的值就是新的起点
+    barOpen = false;
+    renderBar();
+    if (r && r.panelSwitch) { toast(t('set.saved'), 'ok'); followPanel(r.panelSwitch); return; }
+    // 面板路径改动保存即生效:旧地址随即失效,直接跳到新地址(不能再用旧前缀请求接口)
+    if (pathChanged) {
+      const np = norm(body.webPath);
+      toast(t('set.pathChanged', { p: np }), 'ok');
+      setTimeout(() => { location.href = np + '#/settings'; }, 900);
+      return;
+    }
+    await load('settings', 'status');
+    toast(t('set.saved') + (r && r.note ? ' · ' + r.note : ''), 'ok');
+    // Clash 模板写了 ipv6: false:存下了,但有 IPv6 节点时订阅会改成 true,要让人知道
+    if (((r && r.hints) || []).includes('clashIPv6')) await confirm(t('set.clashIPv6Hint'), { title: t('set.saved'), okText: t('node.ack'), notice: true });
+    saveHA();
+  } catch (e) {
+    toast(e.message, 'err');
+    const b = document.querySelector('[data-act="set.saveAll"]');
+    if (b) b.disabled = false;
+  }
 }
 
 // 一项设置一行:左边名称 + 说明,右边控件(开关靠右);长文本框(公告、模板)名称在上、框在下占满。
@@ -247,45 +430,19 @@ async function confirmSubScheme(body) {
 }
 
 registerActions({
-  'set.save': async id => {
-    const g = groups().find(x => x.id === id);
-    const body = {};
-    g.fields.forEach(([k, , type]) => { body[k] = (type === 'bool' || type === 'boolOn') ? String(fchk('set-' + k)) : fv('set-' + k).trim(); });
-    // 面板路径改动保存即生效:旧地址随即失效,保存成功后直接跳到新地址(不能再用旧前缀请求接口)
-    // 订阅证书 / 私钥路径一改,订阅可能在 http ↔ https 之间切换:所有用户手里的订阅地址都会变,和证书页一样先确认
-    if (id === 'sub' && !await confirmSubScheme(body)) return;
-    const norm = p => { p = (p || '/app/').trim(); if (!p.startsWith('/')) p = '/' + p; if (!p.endsWith('/')) p += '/'; return p; };
-    if (id === 'panel' && norm(body.webPath) !== norm(state.status.webPath)) {
-      try {
-        const r = await post('settings', body);
-        if (r && r.panelSwitch) { followPanel(r.panelSwitch); return; }
-        const np = norm(body.webPath);
-        toast(t('set.pathChanged', { p: np }), 'ok');
-        setTimeout(() => { location.href = np + '#/settings'; }, 900);
-      } catch (e) { toast(e.message, 'err'); }
-      return;
-    }
-    try {
-      const r = await post('settings', body);
-      if (r && r.panelSwitch) { toast(t('set.saved'), 'ok'); followPanel(r.panelSwitch); return; }
-      await load('settings', 'status'); toast(t('set.saved') + (r.note ? ' · ' + r.note : ''), 'ok');
-      // Clash 模板写了 ipv6: false:存下了,但有 IPv6 节点时订阅会改成 true,要让人知道
-      if ((r.hints || []).includes('clashIPv6')) confirm(t('set.clashIPv6Hint'), { title: t('set.saved'), okText: t('node.ack'), notice: true });
-    }
-    catch (e) { toast(e.message, 'err'); }
-  },
+  'set.saveAll': () => saveAll(),
+  'set.barToggle': () => { barOpen = !barOpen; renderBar(); },
+  'set.undo': k => { undoOne(k); renderBar(); },
+  'set.discard': () => { changes().forEach(c => undoOne(c.k)); barOpen = false; renderBar(); },
   'set.tmplDefault': async id => {
     const box = document.getElementById(id === 'clash' ? 'set-subClashExt' : 'set-subSingboxExt');
     if (box.value.trim() && !await confirm(t('set.tmplOverwrite'))) return;
-    try { const r = await get('sub-templates'); box.value = r[id]; box.focus(); }
-    catch (e) { toast(e.message, 'err'); }
-  },
-  'set.saveRole': async () => {
-    const toNode = fchk('set-nodeMode');
-    const cur = String(state.settings.nodeMode).toLowerCase() === 'true';
-    if (toNode !== cur && !await confirm(toNode ? t('set.roleToNode') : t('set.roleToMaster'), { danger: true })) return;
-    try { const r = await post('settings', { nodeMode: String(toNode) }); await load('settings', 'status'); toast(r && r.note && toNode ? r.note : t('set.saved'), 'ok'); setTimeout(() => location.reload(), toNode ? 2500 : 0); }
-    catch (e) { toast(e.message, 'err'); }
+    try {
+      const r = await get('sub-templates');
+      box.value = r[id];
+      box.dispatchEvent(new Event('input', { bubbles: true })); // 算一处改动:要点保存才生效
+      box.focus();
+    } catch (e) { toast(e.message, 'err'); }
   },
   'set.restart': async () => {
     if (!await confirm(t('bk.restartConfirm'), { danger: true })) return;
@@ -305,6 +462,8 @@ registerActions({
     catch (e) { toast(e.message, 'err'); }
   },
   'set.notifyTest': async (_, btn) => {
+    // 测试用的是已经保存的设置:这一组有没保存的改动时先提醒,免得以为测的是刚填的
+    if (dirtyFields().some(f => f.gid === 'notify')) { toast(t('set.sb.saveFirst'), 'warn'); return; }
     btn.disabled = true;
     try { await post('notify/test'); toast(t('set.tgTestOk'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }

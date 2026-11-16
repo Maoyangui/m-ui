@@ -1428,3 +1428,41 @@ section.ld-fw { display: block; margin: 0 0 1.2rem; }
 .ld-fwrow .i { color: var(--muted); }
 .ld-fwrow.off .from, .ld-fwrow.off .to { opacity: .55; }
 .ld-fwrow .st { justify-self: end; white-space: nowrap; }
+
+/* ================= 设置页:底部的保存条 =================
+   有没保存的改动时粘在内容区底边(滚到哪都在);一条深色的胶囊:左边「几处改动 + 改了哪几项」,右边 放弃 / 保存。
+   点左边那段向上展开清单(原来 → 现在,可单独撤销)。颜色用提示条那一组(浅色主题是深底,深色主题是浅底),两种主题都醒目 */
+.savebar { position: sticky; bottom: 1rem; z-index: 30; width: min(46rem, 100%); margin: 1.1rem auto 0; color: var(--toast-text); filter: drop-shadow(0 10px 22px rgba(15, 23, 42, .24)); animation: sb-in .18s ease-out; }
+@keyframes sb-in { from { transform: translateY(10px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .savebar { animation: none; } }
+.sb-main { display: flex; align-items: center; gap: .45rem; padding: .4rem .45rem .4rem .35rem; background: var(--toast-bg); border-radius: 999px; }
+.sb-sum { display: flex; align-items: center; gap: .55rem; flex: 1 1 auto; min-width: 0; height: 34px; padding: 0 .65rem 0 .75rem; border: 0; border-radius: 999px; background: transparent; color: inherit; font: inherit; font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+.sb-sum:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.sb-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, .28); }
+.sb-sum b { flex: none; font-weight: 600; white-space: nowrap; }
+.sb-chips { display: flex; flex-wrap: wrap; gap: .3rem; min-width: 0; height: 1.5rem; overflow: hidden; align-items: center; } /* 放不下的标签折到下一行、整枚看不见,不会切掉半枚 */
+.sb-more { flex: none; }
+.sb-chip { flex: none; max-width: 9.5rem; padding: .08rem .5rem; border-radius: 999px; background: color-mix(in srgb, currentColor 14%, transparent); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-sum .i-chev { flex: none; margin-left: auto; opacity: .7; transform: rotate(-90deg); }
+.sb-sum[aria-expanded="true"] .i-chev { transform: rotate(90deg); }
+.savebar .sb-discard { flex: none; background: transparent; border-color: transparent; box-shadow: none; color: inherit; opacity: .85; border-radius: 999px; }
+.savebar .sb-discard:hover { background: color-mix(in srgb, currentColor 12%, transparent); opacity: 1; }
+.savebar .btn.primary { flex: none; height: 34px; padding: 0 1.15rem; border-radius: 999px; }
+.sb-list { margin: 0 .2rem .45rem; padding: .3rem; max-height: min(46vh, 22rem); overflow: auto; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); }
+.sb-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) auto; gap: .75rem; align-items: center; padding: .42rem .55rem; font-size: var(--fs-sm); }
+.sb-row + .sb-row { border-top: 1px solid var(--divider); }
+.sb-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.sb-name small { display: block; font-size: var(--fs-xs); font-weight: 400; color: var(--muted); }
+.sb-diff { display: flex; align-items: center; gap: .4rem; min-width: 0; }
+.sb-diff s, .sb-diff b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-diff s { color: var(--muted); text-decoration-color: var(--faint); }
+.sb-diff b { font-weight: 600; }
+.sb-diff .i { flex: none; color: var(--faint); }
+/* 保存条在的时候,提示条(同样在底部正中)往上让一让 */
+body:has(.savebar:not([hidden])) .toast { bottom: 5.4rem; }
+@media (max-width: 700px) {
+  .savebar { bottom: .6rem; }
+  .sb-chips, .sb-more { display: none; }
+  .sb-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .sb-diff { grid-column: 1 / -1; grid-row: 2; }
+}

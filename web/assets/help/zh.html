@@ -124,7 +124,7 @@
     <p class="lede">在副机上装好 m-ui,把它的配对信息填到主机就行。</p>
     <ol class="steps">
       <li>在副机服务器上同样安装 m-ui,登录副机面板(先把默认密码改掉)。</li>
-      <li>副机 <b data-k="nav.settings">设置</b> → <b data-k="set.role">角色</b>:勾 <b data-k="set.roleSwitch">作为副服务器运行</b>,点 <b data-k="common.save">保存</b>。</li>
+      <li>副机 <b data-k="nav.settings">设置</b> → <b data-k="set.role">角色</b>:打开 <b data-k="set.roleSwitch">作为副服务器运行</b>,在弹出的确认里点确认(这个开关拨了当场生效,不用另外保存)。</li>
       <li>副机 <b data-k="nav.settings">设置</b> → <b data-k="set.pairing">配对信息</b>:复制 <b data-k="node.apiUrl">API 地址</b> 和 <b data-k="node.token">配对令牌</b>。</li>
       <li>主机 <b data-k="nav.nodes">服务器</b> 页 → <b data-k="node.add">新增服务器</b>:填 <b data-k="common.name">名称</b>(会成为订阅里节点名的后缀,如"香港")、API 地址和配对令牌。副机面板用自签证书或 IP 访问时勾 <b data-k="node.insecure">跳过证书校验</b>。</li>
       <li>保存后几秒,这一行显示 <b data-k="node.synced">已同步</b> 就好了。</li>
@@ -1169,7 +1169,7 @@
 
 <section class="chap" id="settings" data-scope="admin">
   <h2>设置一览</h2>
-  <p class="lede"><b data-k="nav.settings">设置</b> 页按分组保存,每组右上角有自己的 <b data-k="common.save">保存</b>。端口、监听地址和证书改了保存就生效:面板在原地换好监听,浏览器自动跳到新地址,订阅、代理面板也一样;页头的 <b data-k="set.restart">重启 m-ui</b> 一般用不着(副机的面板端口、证书例外,见下面的问答)。</p>
+  <p class="lede"><b data-k="nav.settings">设置</b> 页改了任何一项(开关、输入框都一样),窗口底部会浮出保存条:写着有几处改动,点左边能展开清单,逐项看「原来 → 现在」、也可以单独 <b data-k="set.sb.undo">撤销</b> 某一项;点 <b data-k="common.save">保存</b> 一起生效,点 <b data-k="set.sb.discard">放弃</b> 全部还原。没保存就离开这一页会先问一句。端口、监听地址和证书改了保存就生效:面板在原地换好监听,浏览器自动跳到新地址,订阅、代理面板也一样;页头的 <b data-k="set.restart">重启 m-ui</b> 一般用不着(副机的面板端口、证书例外,见下面的问答)。</p>
 
   <section class="sec" id="set-panel">
     <h3>角色与面板</h3>

@@ -396,7 +396,7 @@ const zh = {
   'qs.domain': '设置域名(推荐:可签正式证书,客户端不再提示不安全)', 'qs.cert': '准备证书:有域名就签发,没有就一键自签', 'qs.certSelf': '证书已就绪(自签):客户端需允许不安全证书,有域名可换正式证书',
   'qs.lines': '创建线路(入口协议 + 端口 → 上游)', 'qs.users': '创建用户并分配线路,把订阅链接发给用户',
   'qs.upstreams': '添加上游落地(WARP / 中转节点)', 'qs.telegram': '配置 Telegram 通知', 'qs.nodes': '接入副服务器(多入口自动选路)', 'qs.plans': '创建套餐模板(建号/续费更快)',
-  'set.needRestart': '改动需重启', 'set.restartHint': '一般用不着:改端口、证书保存就生效。数据面卡住、或者想整个重来一遍时再用(在线用户会断开几秒)', 'set.restart': '重启 m-ui', 'set.panelUrl': '面板地址', 'set.subUrl': '订阅地址', 'set.userPh': '用户名',
+  'set.restartHint': '一般用不着:改端口、证书保存就生效。数据面卡住、或者想整个重来一遍时再用(在线用户会断开几秒)', 'set.restart': '重启 m-ui', 'set.panelUrl': '面板地址', 'set.subUrl': '订阅地址', 'set.userPh': '用户名',
   'mig.title': '换机向导', 'mig.badge': '一键迁移', 'mig.help': '换新服务器只需四步:新机装好并还原备份后,把域名解析切过去。订阅用的是域名时,端口、凭据、订阅地址全部不变,用户无需任何操作;订阅地址里是 IP 的,换机后地址会变,要把新地址发给用户。',
   'mig.s1': '① 在新机安装 m-ui 并还原备份', 'mig.s1h': '把上面下载的备份 zip 传到新机,用安装脚本一步完成安装 + 还原(证书会一起还原):',
   'mig.s2': '② 确认新机面板正常', 'mig.s2h': '用新机 IP 打开面板(端口与路径同旧机),概览显示线路已运行;若旧机有副服务器,新机会自动重新连接它们。',
@@ -1080,6 +1080,8 @@ const zh = {
   'line.fw.badge': '中转 {n}', 'line.fw.st.ext': '别处的中转', 'line.fw.st.gone': '中转服务器已删除', 'line.fw.st.offNode': '中转服务器已停用', 'line.fw.st.busy': '端口被占,没开', 'line.fw.st.offline': '中转服务器离线',
   'line.fw.st.old': '版本太旧,未生效', 'line.fw.st.ok': '生效', 'line.fw.st.hidden': '不输出', 'line.rr.count': '{n} 条规则',
   'line.enabledHelp': '关掉后不开端口、不进订阅,设置都留着。',
+  'set.sb.n': '{n} 处未保存的改动', 'set.sb.discard': '放弃', 'set.sb.undo': '撤销', 'set.sb.toggle': '看改了什么', 'set.sb.on': '开', 'set.sb.off': '关', 'set.sb.empty': '空', 'set.sb.defaultV': '默认({v})',
+  'set.sb.chars': '{n} 个字', 'set.sb.leave': '有 {n} 处改动还没保存,离开这一页就没了。', 'set.sb.saveFirst': '这一组有没保存的改动:先保存,再测试', 'common.leave': '离开',
 };
 
 const en = {
@@ -1487,7 +1489,7 @@ const en = {
   'qs.domain': 'Set a domain (recommended: real certificate, no insecure warnings in clients)', 'qs.cert': 'Get a certificate: issue one for your domain, or self-sign with one click', 'qs.certSelf': 'Certificate ready (self-signed): clients must allow insecure certs; switch to a real one once you have a domain',
   'qs.lines': 'Create lines (inbound protocol + port → upstream)', 'qs.users': 'Create users, assign lines, send them the subscription link',
   'qs.upstreams': 'Add upstreams (WARP / relay nodes)', 'qs.telegram': 'Configure Telegram notifications', 'qs.nodes': 'Attach node servers (multi-entry auto routing)', 'qs.plans': 'Create plan templates (faster onboarding/renewal)',
-  'set.needRestart': 'restart to apply', 'set.restartHint': 'Rarely needed: port and certificate changes take effect on save. Use it when the data plane is stuck or you want a full restart (online users drop for a few seconds)', 'set.restart': 'Restart m-ui', 'set.panelUrl': 'Panel URL', 'set.subUrl': 'Subscription URL', 'set.userPh': 'username',
+  'set.restartHint': 'Rarely needed: port and certificate changes take effect on save. Use it when the data plane is stuck or you want a full restart (online users drop for a few seconds)', 'set.restart': 'Restart m-ui', 'set.panelUrl': 'Panel URL', 'set.subUrl': 'Subscription URL', 'set.userPh': 'username',
   'mig.title': 'Migration wizard', 'mig.badge': 'one-step move', 'mig.help': 'Moving to a new server takes four steps: install and restore on the new machine, then point the domain at it. When subscriptions use a domain, ports, credentials and subscription URLs stay the same and users do nothing; a subscription URL with an IP in it changes, so send users the new one.',
   'mig.s1': '① Install m-ui on the new server and restore the backup', 'mig.s1h': 'Copy the backup zip downloaded above to the new server and let the install script install + restore in one go (certificates included):',
   'mig.s2': '② Verify the new panel', 'mig.s2h': 'Open the panel via the new IP (same port and path); the dashboard should show lines running. Secondary servers reconnect automatically.',
@@ -2181,6 +2183,9 @@ const en = {
   'line.fw.st.offNode': 'Relay server is disabled', 'line.fw.st.busy': 'Port busy, not open', 'line.fw.st.offline': 'Relay server offline', 'line.fw.st.old': 'Version too old, inactive',
   'line.fw.st.ok': 'Active', 'line.fw.st.hidden': 'Not listed', 'line.rr.count': '{n} rules',
   'line.enabledHelp': 'When off, the port is closed and the line leaves subscriptions; its settings are kept.',
+  'set.sb.n': '{n} unsaved changes', 'set.sb.discard': 'Discard', 'set.sb.undo': 'Undo', 'set.sb.toggle': 'Review the changes', 'set.sb.on': 'On', 'set.sb.off': 'Off', 'set.sb.empty': 'empty',
+  'set.sb.defaultV': 'default ({v})', 'set.sb.chars': '{n} characters', 'set.sb.leave': '{n} changes are not saved yet and will be lost if you leave this page.',
+  'set.sb.saveFirst': 'This section has unsaved changes: save first, then test', 'common.leave': 'Leave',
 };
 
 const dicts = { zh, en };

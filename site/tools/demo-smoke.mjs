@@ -239,6 +239,24 @@ const ready = await page.locator('#ha-card .ha-check li').count();
 const confirmSel = await page.locator('#ha-card input[name="ha-mode"][value="confirm"]').isChecked().catch(() => false);
 if (ready >= 5 && confirmSel && !/ha\.ready|\{[a-z]+\}|undefined/.test(haCard)) pass(`设置页主机容灾:默认「先确认再接任」,就绪检查 ${ready} 项`); else fail(`设置页主机容灾卡片不对(选中确认模式:${confirmSel},检查 ${ready} 项):${haCard.slice(0, 160)}`);
 
+// 设置页的保存条:改一项就在底部浮出来;清单里逐项列出(容灾卡片的改动也算),能单独撤销;保存后收起
+await page.locator('#set-subUpdates').fill('8');
+await page.waitForTimeout(300);
+const barTxt = await page.locator('#set-bar:not([hidden])').innerText().catch(() => '');
+if (/1/.test(barTxt)) pass('设置页改一项后底部浮出保存条'); else fail(`设置页改动后没有保存条:${barTxt.slice(0, 80)}`);
+await page.locator('#ha-card input[name="ha-mode"][value="auto"]').check().catch(() => {});
+await page.waitForTimeout(300);
+await page.locator('[data-act="set.barToggle"]').click().catch(() => {});
+await page.waitForTimeout(300);
+const barRows = await page.locator('#set-bar .sb-row').count();
+if (barRows === 2) pass('保存条清单列出两处改动(含主机容灾)'); else fail(`保存条清单行数不对:${barRows}`);
+await page.locator('#set-bar .sb-row [data-act="set.undo"]').last().click().catch(() => {}); // 撤销容灾那一项
+await page.waitForTimeout(300);
+if (await page.locator('#ha-card input[name="ha-mode"][value="confirm"]').isChecked().catch(() => false)) pass('保存条里单独撤销一项,控件跟着还原'); else fail('撤销后容灾模式没还原');
+await page.locator('[data-act="set.saveAll"]').click().catch(() => {});
+await page.waitForTimeout(1500);
+if (await page.locator('#set-bar[hidden]').count()) pass('保存后保存条收起'); else fail('保存后保存条还在');
+
 await page.goto(`${DEMO}#/cert`); await page.waitForTimeout(900);
 const renewCells = await page.locator('#page [data-act="cert.autorenew"]').count();
 if (renewCells) pass(`证书页显示自动续期状态(${renewCells} 个开关)`); else fail('证书页没有自动续期一列');
