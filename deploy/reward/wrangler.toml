@@ -17,8 +17,10 @@ binding = "DB"
 database_name = "m-ui-reward"
 database_id = "填 wrangler d1 create 给的 id"
 
-# 订阅站的订单库。登记服务只读它(代码里只有 SELECT,而且只碰 payments、两张收款地址表、solana_amount_reservations)。
-# database_id 抄订阅站自己的 wrangler 配置里的那个。
+# 订阅站的订单库。登记服务只读它:D1 的绑定本身没有「只读」这个选项,所以代码里给这个句柄套了一层,只放行单条 SELECT
+# (worker.mjs 的 readOnly;写、改表结构、一次带几条语句的在到库之前就被拒)。只碰 payments、两张收款地址表、
+# solana_amount_reservations;订单表不读,订单号、订单的哈希都不取。
+# database_id 抄订阅站自己的 wrangler 配置里的那个。真实的编号别提交进仓库:部署时另存一份配置,用 `wrangler deploy -c 那份配置`。
 [[d1_databases]]
 binding = "COMMERCE"
 database_name = "godusevpn-commerce"
@@ -27,4 +29,4 @@ database_id = "填订阅站订单库的 id"
 # 另外要用 `wrangler secret put` 设的:
 #   SALT        给来源 IP 做哈希的盐,随机的一长串(设了就别再换:换了之后「一处来源只认一个地址」要重新认)
 #   SOLANA_RPC  可选。Solana 节点的地址,可以写几个、逗号隔开;不设就用公共节点(够用,但偶尔会被限流)
-#   NAME_BLOCK  可选。不让上捐赠榜的字眼,逗号隔开;命中的那笔照样进奖池,只是按匿名记
+#   NAME_BLOCK  可选。不让上捐赠榜的字眼,逗号隔开;命中的那笔照样进奖池,只是名字不显示(记成「已隐藏」)

@@ -510,15 +510,15 @@ test('订单:只认订单库里「监听成功」的付款(两条链),按 40% �
 
 test('登记服务对订单库只有 SELECT(读源码逐处核对)', () => {
   const src = fs.readFileSync(path.join(here, 'worker.mjs'), 'utf8');
-  const uses = [...src.matchAll(/env\.COMMERCE\s*,\s*[`'"]\s*(\w+)/g)].map(m => m[1]);
+  const uses = [...src.matchAll(/commerce\(env\)\s*,\s*[`'"]\s*(\w+)/g)].map(m => m[1]);
   assert.ok(uses.length >= 5, '找到的调用太少,这条测试的写法该更新了');
   assert.deepEqual([...new Set(uses)], ['SELECT']);
-  // 除了带 SQL 的查询,只有一处提到订单库:给它套上计数的那一行(metered)
-  const others = [...src.matchAll(/^.*env\.COMMERCE(?!\s*,\s*[`'"]).*$/gm)].map(m => m[0].trim());
-  assert.equal(others.length, 1, others.join('\n'));
-  assert.match(others[0], /COMMERCE: wrap\(env\.COMMERCE\)/);
+  // 订单库的句柄只在两处被直接拿到,两处都先套上「只放行查询」的那一层:commerce(env)(所有查询都经它)和给定时任务计数的 metered
+  const others = [...src.matchAll(/^.*env\.COMMERCE.*$/gm)].map(m => m[0].trim()).filter(l => !l.startsWith('//'));
+  assert.equal(others.length, 2, others.join('\n'));
+  for (const l of others) assert.match(l, /readOnly\(env\.COMMERCE\)/, l);
   // 用到的表(子查询里的也算)
-  const sqls = [...src.matchAll(/env\.COMMERCE\s*,\s*([`'"])([\s\S]*?)\1/g)].map(m => m[2]);
+  const sqls = [...src.matchAll(/commerce\(env\)\s*,\s*([`'"])([\s\S]*?)\1/g)].map(m => m[2]);
   const tables = sqls.flatMap(s => [...s.matchAll(/\bFROM\s+(\w+)/g)].map(m => m[1]));
   assert.deepEqual([...new Set(tables)].sort(), ['payment_addresses', 'payments', 'solana_amount_reservations', 'solana_payment_addresses']);
   for (const s of sqls) assert.ok(!/\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|PRAGMA|ATTACH)\b/i.test(s), s);
@@ -544,6 +544,33 @@ test('订单号不出库:订单库里每笔付款都带着订单的标识,登记
   const dump = JSON.stringify(l) + JSON.stringify(x.db.prepare('SELECT * FROM deposits').all()) + JSON.stringify(x.db.prepare('SELECT * FROM kv').all());
   for (const m of marks) assert.ok(!dump.includes(m), '订单的标识出现在了登记服务这边');
   assert.ok(!/order_?hash|orderRef|order_?id/i.test(dump));
+});
+
+test('订单库的句柄只放行查询:写、改表结构、一次带几条语句的,连库都碰不到;句柄上也没有 run / batch / exec', async t => {
+  const x = setup(t), solA = x.solAddr();
+  x.payment({ tx: 'e'.repeat(64), address: x.tronAddr(), micros: 9_900_001, at: T0 - 100, from: tron() });
+  // 这里特意用一份「能写」的订单库句柄:只读是登记服务自己保证的,不靠库是只读方式打开的
+  const writable = d1(x.commerce, () => {});
+  const ro = W.readOnly(writable);
+  assert.equal(W.readOnly(ro), ro, '套过的不再套');
+  for (const sql of ["UPDATE payments SET status = 'x'", 'DELETE FROM payments', "INSERT INTO payment_addresses VALUES('a',1,0,0,0)", 'DROP TABLE payments',
+    'SELECT 1; DELETE FROM payments', 'PRAGMA writable_schema = 1', "  select tx_id from payments where 1 = 1; update payments set status = 'x'", 'WITH t AS (SELECT 1) DELETE FROM payments',
+    'SELECT * FROM payments WHERE tx_id IN (DELETE FROM payments RETURNING tx_id)', '']) {
+    assert.throws(() => ro.prepare(sql), /订单库只读/, sql);
+  }
+  assert.deepEqual([typeof ro.batch, typeof ro.exec, typeof ro.dump], ['undefined', 'undefined', 'undefined']);
+  const st = ro.prepare("SELECT COUNT(*) AS n FROM payments WHERE status = ?").bind('credited');
+  assert.deepEqual([typeof st.run, typeof st.raw], ['undefined', 'undefined'], '查询语句上也没有 run');
+  assert.equal((await st.first()).n, 1);
+  assert.equal((await ro.prepare('SELECT address FROM solana_payment_addresses').all()).results[0].address, solA);
+  // 整套流程用这份「能写」的句柄跑一轮:订单库一个字节都没变
+  const dump = () => JSON.stringify([x.commerce.prepare('SELECT * FROM payments ORDER BY tx_id').all(), x.commerce.prepare('SELECT * FROM solana_payment_addresses').all(), x.commerce.prepare('SELECT * FROM solana_amount_reservations').all()]);
+  const before = dump();
+  const env = { ...x.env, COMMERCE: writable };
+  await W.tick(env, T0);
+  await W.handleDonate(env, { name: '只读', amount: 5 }, '198.51.100.44', T0 + 10);
+  await W.tick(env, T0 + 120);
+  assert.equal(dump(), before);
 });
 
 // ================= 奖池:捐赠(只认留名的) =================

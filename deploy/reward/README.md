@@ -64,7 +64,12 @@
   只有时间落在某一笔登记期限里的交易才去看金额(一次请求问一批)。收款账户(USDT 的关联代币账户)的地址是本地算出来的,不用问链。
   订阅站只在有待付订单的时候才扫链,所以到没到账由登记服务自己看。
 
-登记服务对订单库**只读**:代码里只有 `SELECT`,而且只碰 `payments`、两张收款地址表、`solana_amount_reservations` 这四张表(测试里逐处核对,订单库在测试里以只读方式打开)。
+登记服务对订单库**只读**。Cloudflare D1 的绑定没有「只读」这个选项(绑上就能写),所以这件事由登记服务自己保证,有三层:
+- 代码里对订单库只有 `SELECT`,只碰 `payments`、两张收款地址表、`solana_amount_reservations` 这四张表(测试读源码逐处核对);
+- 拿到订单库的句柄时先套一层(`readOnly`):只有 `prepare`,只收单独一条 `SELECT`,没有 `run`、`batch`、`exec` ——
+  以后哪段代码想写订单库,语句到不了库(测试里拿一份能写的句柄跑整套流程,订单库一个字节不变);
+- 不读订单表。付款记录里只取链上交易号、收款地址、金额、时间和付款方地址;订单号、订单的哈希一概不取,
+  登记服务的库和公开账本里都没有(测试核对)。
 
 ## 公开账本
 
@@ -87,12 +92,13 @@
 
 ```bash
 cd deploy/reward
-wrangler d1 create m-ui-reward                                        # 记下它给的 database_id,填进 wrangler.toml 的 DB
-wrangler d1 execute m-ui-reward --remote --file schema.sql
-# 把订阅站订单库的 database_id 填进 wrangler.toml 的 COMMERCE(在订阅站自己的 wrangler 配置里)
-openssl rand -hex 32 | wrangler secret put SALT
-wrangler deploy
-curl https://reward.godusevpn.org/v1/health                           # 定时任务两分钟内跑过第一轮之后,这里能看到 at / errs
+wrangler d1 create m-ui-reward                                        # 记下它给的 database_id
+# 另存一份配置(别提交):把上面的 database_id 填进 DB,订阅站订单库的 database_id 填进 COMMERCE(在订阅站自己的 wrangler 配置里)
+wrangler d1 execute m-ui-reward --remote --file schema.sql -c 那份配置
+openssl rand -hex 32 | wrangler secret put SALT -c 那份配置
+wrangler deploy -c 那份配置
+curl https://reward.godusevpn.org/v1/health                           # 定时任务跑过第一轮之后,这里能看到 at / errs
+                                                                      # (新建的定时触发要等一阵才开始执行,Cloudflare 说最长一刻钟)
 curl -o ledger.json https://reward.godusevpn.org/v1/export && node check-ledger.mjs ledger.json
 ```
 

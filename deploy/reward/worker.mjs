@@ -26,7 +26,7 @@
 // 定时(每 2 分钟):同步订单、判作弊、入账积分、看链上的新转入对留名、重建账本。
 // 免费套餐一次调用最多 50 个子请求,定时任务按预算干活(见 metered),干不完的留给下一轮。
 //
-// 绑定:DB = 自己的库(schema.sql);COMMERCE = 订阅站的订单库(只 SELECT,而且只读这几张表:payments、
+// 绑定:DB = 自己的库(schema.sql);COMMERCE = 订阅站的订单库(只 SELECT —— 句柄在代码里套了一层只放行查询,见 readOnly;而且只读这几张表:payments、
 // 两张收款地址表、solana_amount_reservations);SALT = 给来源做哈希的盐;SOLANA_RPC = 自己的 Solana 节点(可选,可以写多个、逗号隔开,排在内置的公共节点前面)。
 //
 // 做不到的事说在前面:面板是开源自建的,累计值由面板自己报,改过的程序想报多少报多少 —— 签名只证明「是同一台面板报的」。
@@ -165,6 +165,23 @@ function shownName(env, name) {
 }
 
 // ---- 数据库(D1)----
+// 订单库只读。D1 的绑定没有「只读」这个选项(绑上就能写),所以在代码里套一层:拿到的句柄只有 prepare,而且只收单独一条 SELECT;
+// 没有 run、batch、exec、dump。以后哪段代码想改订单库,在这里就被拒了,语句到不了库。所有读订单库的地方都经 commerce(env) 拿句柄。
+const WRITES = /\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|ATTACH|DETACH|PRAGMA|VACUUM|REINDEX|TRUNCATE)\b/i;
+export function readOnly(db) {
+  if (!db || db.readOnly === true) return db;
+  return {
+    readOnly: true,
+    prepare(sql) {
+      const text = String(sql);
+      if (!/^\s*SELECT\b/i.test(text) || text.includes(';') || WRITES.test(text)) throw new Error('订单库只读,拒绝执行:' + text.slice(0, 60));
+      const mk = st => ({ bind: (...a) => mk(st.bind(...a)), all: () => st.all(), first: (...a) => st.first(...a) });
+      return mk(db.prepare(text));
+    },
+  };
+}
+const commerce = env => readOnly(env.COMMERCE);
+
 const q = (db, sql, ...args) => db.prepare(sql).bind(...args);
 const all = async (db, sql, ...args) => (await q(db, sql, ...args).all()).results || [];
 const one = (db, sql, ...args) => q(db, sql, ...args).first();
@@ -391,7 +408,7 @@ function metered(env, limit = BUDGET) {
     batch(list) { m.used++; return db.batch(list.map(s => s.raw || s)); },
   });
   const f = env.FETCH || fetch;
-  return { ...env, DB: wrap(env.DB), COMMERCE: wrap(env.COMMERCE), FETCH: (...a) => (m.used++, f(...a)), meter: m, room: n => m.limit - m.used >= n + RESERVE };
+  return { ...env, DB: wrap(env.DB), COMMERCE: wrap(readOnly(env.COMMERCE)), FETCH: (...a) => (m.used++, f(...a)), meter: m, room: n => m.limit - m.used >= n + RESERVE };
 }
 const roomFor = (env, n) => !env.room || env.room(n);
 const loadState = db => kvJSON(db, 'state', {});
@@ -406,7 +423,7 @@ export async function syncOrders(env, st, now) {
   if (now - Number(st.ordFull || 0) > 86400) { since = 0; st.ordFull = now; }
   // 只取这几样:链上交易号、收款地址、金额、时间、付款方地址(从链上事件里单拿这一项)。订单号、订单的哈希、套餐、订阅这些一概不读 ——
   // 订单号是订阅的使用凭证,这里不碰它,账本里自然也不会有。
-  const rows = await all(env.COMMERCE, `SELECT tx_id, address, amount_micros, block_timestamp,
+  const rows = await all(commerce(env), `SELECT tx_id, address, amount_micros, block_timestamp,
     CASE WHEN json_valid(event_json) THEN json_extract(event_json, '$.from') END AS payer, COALESCE(checked_at, created_at) AS at
     FROM payments WHERE status = 'credited' AND COALESCE(checked_at, created_at) >= ?`, Math.max(0, since - 3600_000));
   const stmts = [];
@@ -495,8 +512,8 @@ async function rpcBatch(env, st, now, method, paramsList) {
 export async function poolAddresses(env) {
   const out = [], seen = new Set();
   const add = (address, chain) => { if (address && !seen.has(address) && chainOf(address) === chain) { seen.add(address); out.push({ chain, address }); } };
-  for (const r of await all(env.COMMERCE, 'SELECT address FROM solana_payment_addresses WHERE enabled = 1 ORDER BY position, address')) add(r.address, 'solana');
-  for (const r of await all(env.COMMERCE, 'SELECT address FROM payment_addresses WHERE enabled = 1 ORDER BY position, address')) add(r.address, 'tron');
+  for (const r of await all(commerce(env), 'SELECT address FROM solana_payment_addresses WHERE enabled = 1 ORDER BY position, address')) add(r.address, 'solana');
+  for (const r of await all(commerce(env), 'SELECT address FROM payment_addresses WHERE enabled = 1 ORDER BY position, address')) add(r.address, 'tron');
   for (const r of await all(env.DB, 'SELECT DISTINCT address, chain FROM deposits ORDER BY chain, address')) add(r.address, r.chain);
   return out;
 }
@@ -651,7 +668,7 @@ export async function scanSolana(env, st, now) {
       const it = live.find(i => !i.used && i.address === x.owner && i.exact === m && i.created_at - CFG.intentGrace <= ts && ts <= i.expires_at + CFG.intentGrace);
       if (!it) { mark('skip'); continue; } // 对不上任何一笔登记:不是留名捐赠
       // 万一订阅站把同一笔认成了订单付款(留名的金额和订单金额不会相同,不该发生):按订单算,不重复记
-      if (await one(env.COMMERCE, "SELECT 1 AS x FROM payments WHERE tx_id = ? AND status = 'credited'", 'solana:' + x.sig)) { mark('order'); continue; }
+      if (await one(commerce(env), "SELECT 1 AS x FROM payments WHERE tx_id = ? AND status = 'credited'", 'solana:' + x.sig)) { mark('order'); continue; }
       it.used = true;
       stmts.push(q(db, "INSERT INTO deposits(tx, chain, address, ts, from_addr, micros, kind, name, seen_at) VALUES(?, 'solana', ?, ?, ?, ?, 'donation', ?, ?) ON CONFLICT(tx) DO NOTHING",
         x.sig, x.owner, ts, payer, m, shownName(env, it.name), now));
@@ -696,7 +713,7 @@ export async function handleDonate(env, body, ip, now) {
   // 还占着的金额:期限(含余量)还没过完的留名
   const taken = new Set((await all(db, "SELECT exact FROM intents WHERE address = ? AND status IN ('pending', 'expired', 'cancelled') AND expires_at + ? > ? AND exact > ? AND exact < ?",
     sol.address, 2 * CFG.intentGrace, now, m, m + 100000)).map(x => x.exact));
-  for (const r of await all(env.COMMERCE, 'SELECT amount_micros AS m FROM solana_amount_reservations WHERE address = ? AND amount_micros > ? AND amount_micros < ?', sol.address, m, m + 100000)) taken.add(Number(r.m));
+  for (const r of await all(commerce(env), 'SELECT amount_micros AS m FROM solana_amount_reservations WHERE address = ? AND amount_micros > ? AND amount_micros < ?', sol.address, m, m + 100000)) taken.add(Number(r.m));
   let exact = 0;
   const seed = crypto.getRandomValues(new Uint32Array(1))[0] % 99;
   for (let i = 0; i < 99 && !exact; i++) { const x = m + (1 + (seed + i) % 99) * 1000; if (!taken.has(x)) exact = x; }
