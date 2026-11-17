@@ -440,7 +440,8 @@ function syncV6Tips() {
   }).join(' · ');
   const was = box.querySelector('details');
   const open = (was && was.open) || v6TipsOpen(l, v6); // 改名字、端口时重画,别把用户点开的收起来
-  box.innerHTML = `<details class="adv v6-tips" ${open ? 'open' : ''}><summary>${esc(t('line.v6Tips'))}</summary>
+  // 最常见的一种「用不了」摆在外面:客户端自己的网络没有 IPv6(实测过:家用宽带、漫游流量卡常常没有,连上就是全断)
+  box.innerHTML = `<p class="hint v6-need">${esc(t('line.v6Need'))}</p><details class="adv v6-tips" ${open ? 'open' : ''}><summary>${esc(t('line.v6Tips'))}</summary>
     <p class="hint">${esc(t('line.v6Status'))} ${status}</p>
     <ol class="hint">${[1, 2, 3, 4, 5, 6].map(i => `<li>${esc(t('line.v6Tip' + i))}</li>`).join('')}</ol></details>`;
 }
@@ -517,7 +518,9 @@ async function genReality() {
 function transportFields(type, tr, host) {
   switch (type) {
     case 'ws': case 'httpupgrade': case 'http':
-      return field(t('line.transport.path'), `<input id="f-trpath" value="${esc(tr.path || '/')}">`) + field(t('line.transport.host'), `<input id="f-trhost" value="${esc(host || '')}" placeholder="cdn.example.com">`);
+      return field(t('line.transport.path'), `<input id="f-trpath" value="${esc(tr.path || '/')}">`) + field(t('line.transport.host'), `<input id="f-trhost" value="${esc(host || '')}" placeholder="cdn.example.com">`)
+        // 实测:Xray 26 的 HTTPUpgrade 客户端发的是真的 WebSocket 握手头,这边的服务端按规范拒绝,连不上;mihomo / sing-box 系正常
+        + (type === 'httpupgrade' ? `<p class="hint full tr-note">${esc(t('line.huXray'))}</p>` : '');
     case 'grpc':
       return field(t('line.transport.service'), `<input id="f-trsvc" value="${esc(tr.service_name || 'grpc')}">`);
   }
