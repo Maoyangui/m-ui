@@ -11,7 +11,6 @@ import { barChart, bucketFor } from '../chart.js';
 import { diskLevel, diskPct } from '../issues.js';
 import { diskHogs } from '../ui.js';
 import { NODE_CODES, summarizeNodes, trackUnsynced, worstCode, healthSummary, fwBad, sortCerts, certSig, certCounts, certLeftDays, sortReach, reachSig, reachHard, reachStall } from '../issues.js';
-import { expiringDays, quotaPct } from './users.js';
 import { shownConns } from '../fair.js';
 import { openTraffic } from '../traffic.js';
 import { auditAction, auditObject, JOB_ACTORS } from '../audit.js';
@@ -363,13 +362,10 @@ function attnItems() {
   if (node && !haOn && s.hubSeenAt && now() - s.hubSeenAt > 120) add(9, 'warn', { title: t('dash.attn.hubSilent', { dur: fmtDuration(now() - s.hubSeenAt) }), names: t('dash.attn.hubSilentHint') });
   // hubSeenAt 只在内存里:副机重启后主机一直没来联系时没有它,后端改给本次启动的时间
   else if (node && !haOn && !s.hubSeenAt && s.hubQuietSince && now() - s.hubQuietSince > 120) add(9, 'warn', { title: t('dash.attn.hubQuiet', { dur: fmtDuration(now() - s.hubQuietSince) }), names: t('dash.attn.hubSilentHint') });
-  // 10 / 11 / 12 用户、代理、备份(主面板;status.attention 存在才有)
+  // 11 / 12 代理、备份(主面板;status.attention 存在才有)
+  // 用户快到期 / 流量快用完不在这里:用户不续费,管理员没什么可处理的,列出来只会一直挂着消不掉。想看这些人,用户页筛「即将到期」。
   const at = (!node && s.attention) || null;
   if (at) {
-    const ne = at.usersExpiring || 0, nq = at.usersQuota || 0;
-    if (ne + nq > 0) add(10, 'warn', { title: t('dash.attn.users', { n: at.usersAttn ?? ne + nq }), // 同时满足两项的人只算一次(老后端没有去重数时按相加)
-      parts: [ne && `<a href="#/users?f=expiring">${esc(t('dash.attn.users.expiring', { d: at.expiringDays || expiringDays(), n: ne }))}</a>`,
-        nq && `<a href="#/users?f=quota">${esc(t('dash.attn.users.quota', { p: at.quotaPct || quotaPct(), n: nq }))}</a>`] });
     const rd = at.resellersDepleted || 0, rx = at.resellersExpiring || 0, rgone = at.resellersExpired || 0;
     if (rd + rx + rgone > 0) add(11, rd || rgone ? 'bad' : 'warn', { title: t('dash.attn.resellers', { n: at.resellersAttn ?? rd + rx + rgone }),
       parts: [rd && esc(t('dash.attn.rs.depleted', { n: rd })), rgone && esc(t('dash.attn.rs.justExpired', { n: rgone })), rx && esc(t('dash.attn.rs.expiring', { n: rx }))], go: '#/resellers?f=attn' });

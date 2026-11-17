@@ -51,50 +51,33 @@ func createUsers(t *testing.T, db *gorm.DB, list []model.User) {
 
 const gib = int64(1) << 30
 
-// 「需要处理」的用户计数:只算直属、启用的;快到期按 N 天(不含已过期),流量按已用 ≥ P%(只算限量的)。
-func TestAttentionUserCounts(t *testing.T) {
+// 用户快到期 / 流量快用完不算「需要处理」(用户不续费,管理员也没什么可处理的):有再多这样的用户,
+// 给概况的那份小结里也不带任何用户的计数。想看这些人,去用户页筛「即将到期」。
+func TestAttentionHasNoUserCounts(t *testing.T) {
 	s, db := newAttentionServer(t)
 	now := time.Now().Unix()
-	rs := model.Reseller{Name: "dl", Enabled: true}
-	db.Create(&rs)
-	day := int64(86400)
-	users := []model.User{
-		{Name: "exp-2d", Enabled: true, Expiry: now + 2*day},                             // 算
-		{Name: "exp-edge", Enabled: true, Expiry: now + 3*day - 60},                      // 算:还在 3 天内
-		{Name: "exp-5d", Enabled: true, Expiry: now + 5*day},                             // 不算:超过 3 天
-		{Name: "expired", Enabled: true, Expiry: now - day},                              // 不算:已过期的另有状态
-		{Name: "never", Enabled: true},                                                   // 不算:不限期
-		{Name: "off-exp", Enabled: false, Expiry: now + day},                             // 不算:停用的
-		{Name: "rs-exp", Enabled: true, Expiry: now + day, ResellerId: rs.Id},            // 不算:代理名下的
-		{Name: "q-80", Enabled: true, Volume: 100 * gib, Up: 30 * gib, Down: 50 * gib},   // 算:正好 80%
-		{Name: "q-79", Enabled: true, Volume: 100 * gib, Up: 29 * gib, Down: 50 * gib},   // 不算
-		{Name: "q-over", Enabled: true, Volume: 10 * gib, Up: 20 * gib},                  // 算:超量的也是快用完
-		{Name: "q-unlim", Enabled: true, Up: 500 * gib},                                  // 不算:不限量
-		{Name: "q-off", Enabled: false, Volume: 10 * gib, Up: 20 * gib},                  // 不算:停用的
-		{Name: "q-rs", Enabled: true, Volume: 10 * gib, Up: 20 * gib, ResellerId: rs.Id}, // 不算:代理名下的
+	createUsers(t, db, []model.User{
+		{Name: "exp-1d", Enabled: true, Expiry: now + 86400},
+		{Name: "q-95", Enabled: true, Volume: 100 * gib, Up: 95 * gib},
+		{Name: "both", Enabled: true, Expiry: now + 3600, Volume: 10 * gib, Up: 10 * gib},
+	})
+	raw, err := json.Marshal(s.computeAttention(time.Now()))
+	if err != nil {
+		t.Fatal(err)
 	}
-	createUsers(t, db, users)
-	v := s.computeAttention(time.Now())
-	if v.ExpiringDays != 3 || v.QuotaPct != 80 {
-		t.Fatalf("默认阈值应是 3 天 / 80%%: %+v", v)
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
 	}
-	if v.UsersExpiring != 2 {
-		t.Fatalf("快到期应只算直属、启用、3 天内未过期的 2 个,得到 %d", v.UsersExpiring)
+	for k := range m {
+		if strings.Contains(strings.ToLower(k), "user") || k == "expiringDays" || k == "quotaPct" {
+			t.Fatalf("小结里不该再有用户的计数: %s", raw)
+		}
 	}
-	if v.UsersQuota != 2 {
-		t.Fatalf("流量将尽应只算直属、启用、限量且 ≥80%% 的 2 个,得到 %d", v.UsersQuota)
-	}
-
-	// 阈值跟 Telegram 预警同一组设置;填 0 天时按 3 天
-	setSetting(t, s, "tgExpiringDays", "6")
-	setSetting(t, s, "tgQuotaPercent", "79")
-	v = s.computeAttention(time.Now())
-	if v.ExpiringDays != 6 || v.UsersExpiring != 3 || v.QuotaPct != 79 || v.UsersQuota != 3 {
-		t.Fatalf("改阈值后:6 天内 3 个、≥79%% 3 个,得到 %+v", v)
-	}
-	setSetting(t, s, "tgExpiringDays", "0")
-	if v = s.computeAttention(time.Now()); v.ExpiringDays != 3 {
-		t.Fatalf("填 0 天时应按 3 天: %d", v.ExpiringDays)
+	for _, k := range []string{"at", "resellersDepleted", "resellersExpiring", "resellersExpired", "resellersAttn", "backup"} {
+		if _, ok := m[k]; !ok {
+			t.Fatalf("小结里缺 %s: %s", k, raw)
+		}
 	}
 }
 
@@ -145,19 +128,19 @@ func TestAttentionBackupAuto(t *testing.T) {
 func TestAttentionCached(t *testing.T) {
 	s, db := newAttentionServer(t)
 	now := time.Now().Unix()
-	db.Create(&model.User{Name: "x", Enabled: true, Expiry: now + 86400})
-	if v := s.attention(); v.UsersExpiring != 1 {
-		t.Fatalf("第一次应算出 1 个: %d", v.UsersExpiring)
+	db.Create(&model.Reseller{Name: "x", Enabled: true, Expiry: now + 86400})
+	if v := s.attention(); v.ResellersExpiring != 1 {
+		t.Fatalf("第一次应算出 1 个: %d", v.ResellersExpiring)
 	}
-	db.Create(&model.User{Name: "y", Enabled: true, Expiry: now + 86400})
-	if v := s.attention(); v.UsersExpiring != 1 {
-		t.Fatalf("60 秒内应用缓存: %d", v.UsersExpiring)
+	db.Create(&model.Reseller{Name: "y", Enabled: true, Expiry: now + 86400})
+	if v := s.attention(); v.ResellersExpiring != 1 {
+		t.Fatalf("60 秒内应用缓存: %d", v.ResellersExpiring)
 	}
 	s.attnMu.Lock()
 	s.attnAt = time.Now().Add(-attentionTTL - time.Second)
 	s.attnMu.Unlock()
-	if v := s.attention(); v.UsersExpiring != 2 {
-		t.Fatalf("缓存过期后应重算出 2 个: %d", v.UsersExpiring)
+	if v := s.attention(); v.ResellersExpiring != 2 {
+		t.Fatalf("缓存过期后应重算出 2 个: %d", v.ResellersExpiring)
 	}
 }
 

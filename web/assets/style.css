@@ -191,6 +191,22 @@ main#page[data-layout="fluid"] { max-width: var(--page-max-fluid); }
 /* 工具栏里的分段按钮(线路页的协议筛选、用户页的状态筛选)放不下时自己折行,不把整页撑出横向滚动 */
 .toolbar .seg { flex-wrap: wrap; max-width: 100%; }
 .toolbar > .muted, .toolbar > .small { font-variant-numeric: tabular-nums; }
+/* 用户页的工具栏:放得下就一行;放不下时「筛选」那一组整组落到第二行,搜索和「新增用户」留在第一行 ——
+   不是哪个按钮挤不下就掉哪个(以前窄一点「新增用户」就自己掉到下一行的最左边)。按工具栏自己的宽度判断,不看窗口。 */
+.tb-users { container: tbu / inline-size; }
+.tb-users .tb-filters { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; min-width: 0; }
+.tb-users .tb-filters > .muted { font-variant-numeric: tabular-nums; }
+/* 搜索框的基准宽度取小的那个、再让它长到 17rem:换行是按基准宽度算的,基准取大了它不会先缩、而是直接把后面的按钮挤到下一行 */
+.tb-users #user-q { flex: 10 1 9rem; min-width: 9rem; max-width: 17rem; }
+@container tbu (max-width: 940px) {
+  .tb-users .tb-filters { order: 5; flex: 1 1 100%; }
+  .tb-users #user-q { flex: 10 1 9rem; max-width: 22rem; }
+}
+/* 英文的筛选按钮更长,早一点换成两行 */
+@container tbu (max-width: 1060px) {
+  :root:lang(en) .tb-users .tb-filters { order: 5; flex: 1 1 100%; }
+  :root:lang(en) .tb-users #user-q { flex: 10 1 9rem; max-width: 22rem; }
+}
 
 /* ===== 表格 ===== */
 .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-xs); overflow-x: auto; }

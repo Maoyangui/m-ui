@@ -56,17 +56,21 @@ export function quotaPct() {
 }
 const isExpiring = u => u.enabled && u.expiry > now() && u.expiry - now() <= expiringDays() * 86400;
 const isQuota = u => u.enabled && u.volume > 0 && (u.up + u.down) * 100 >= u.volume * quotaPct();
+// 筛选里的「即将到期」一类:现在还能正常用(启用、没过期、没超量),但 N 天内到期,或者流量已经用到 P% 以上 —— 快用完也算在这一类里。
+// 概况的「需要处理」不列这些人(用户不续费,管理员没什么可处理的),想看就来这里筛。
+const isSoon = u => !isExpired(u) && !isOver(u) && (isExpiring(u) || isQuota(u));
+const FILTERS = ['all', 'online', 'enabled', 'disabled', 'soon', 'expired', 'over'];
 const onlineSet = () => new Set((state.onlines && state.onlines.users) || []);
 const planSelect = (id, cur, allowNone = true) =>
   `<select id="${id}">${allowNone ? `<option value="0">${t('plan.none')}</option>` : ''}${state.plans.map(p => `<option value="${p.id}" ${cur === p.id ? 'selected' : ''}>${esc(p.name)} · ${p.volumeGb ? p.volumeGb + 'GB' : '∞'} / ${p.days ? p.days + t('common.day') : '∞'}</option>`).join('')}</select>`;
 
 export async function render(el) {
-  // 概况等页面的链接:#/users?f=online|expiring|quota、#/users?q=名字(恰好一个同名用户时直接打开详情)
+  // 概况等页面的链接:#/users?f=online|soon|expiring|quota…、#/users?q=名字(恰好一个同名用户时直接打开详情)
   const hp = takeHashParams('users');
   let openId = 0;
   if (hp.has('f') || hp.has('q')) {
     const f = hp.get('f') || '';
-    filter = ['online', 'enabled', 'disabled', 'expired', 'over'].includes(f) ? f : 'all';
+    filter = FILTERS.includes(f) ? f : 'all';
     only = f === 'expiring' || f === 'quota' ? f : '';
     planFilter = 0;
     query = hp.get('q') || '';
@@ -77,12 +81,12 @@ export async function render(el) {
   }
   if (planFilter && !state.plans.some(p => p.id === planFilter)) planFilter = 0; // 筛着的套餐删掉了:下拉显示「全部套餐」,列表也别再按它筛
   el.innerHTML = `
-    <div class="toolbar">
+    <div class="toolbar tb-users">
       <input type="search" id="user-q" placeholder="${t('common.search')}…" value="${esc(query)}">
-      <div class="seg" id="user-filter">${['all', 'online', 'enabled', 'disabled', 'expired', 'over'].map(f => `<button data-act="user.filter" data-id="${f}" class="${f === filter ? 'active' : ''}">${t('user.filter.' + f)}</button>`).join('')}</div>
+      <div class="tb-filters"><div class="seg" id="user-filter">${FILTERS.map(f => `<button data-act="user.filter" data-id="${f}" class="${f === filter ? 'active' : ''}"${f === 'soon' ? ` title="${esc(t('user.filter.soonHelp', { d: expiringDays(), p: quotaPct() }))}"` : ''}>${t('user.filter.' + f)}</button>`).join('')}</div>
       ${state.plans.length ? `<select class="sm" id="user-plan" style="width:auto;max-width:12rem" aria-label="${esc(t('user.plan'))}"><option value="0">${esc(t('user.allPlans'))}</option>${state.plans.map(pl => `<option value="${pl.id}" ${pl.id === planFilter ? 'selected' : ''}>${esc(pl.name)}</option>`).join('')}</select>` : ''}
       <span id="user-only"></span>
-      <span class="muted small" id="user-count"></span>
+      <span class="muted small" id="user-count"></span></div>
       <span class="grow"></span>
       ${isReseller() ? '' : `<details class="menu"><summary class="btn">${t('common.more')}</summary><div class="menu-list">
         <button data-act="user.bulk"><b>${esc(t('user.bulk'))}</b><span class="muted small" style="display:block">${esc(t('user.menu.bulk'))}</span></button>
@@ -150,7 +154,7 @@ function expiryCell(u) {
 function visibleRows() {
   let rows = state.users.filter(u => matches(query, u.name, u.remark, u.desc, planNameOf(u)));
   const on = filter === 'online' ? onlineSet() : null;
-  rows = rows.filter(u => ({ all: true, online: on && on.has(u.name), enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, expired: isExpired(u), over: isOver(u) })[filter]);
+  rows = rows.filter(u => ({ all: true, online: on && on.has(u.name), enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, soon: isSoon(u), expired: isExpired(u), over: isOver(u) })[filter]);
   if (planFilter) rows = rows.filter(u => u.planId === planFilter);
   if (only === 'expiring') rows = rows.filter(isExpiring);
   if (only === 'quota') rows = rows.filter(isQuota);

@@ -49,16 +49,10 @@ func TestUsersBatchManyIds(t *testing.T) {
 	}
 }
 
-// 「需要处理」标题的人数:同时快到期又流量将尽的人只算一次;同时额度用尽又快到期的代理只算一次。
+// 「需要处理」标题的个数:同时额度用尽又快到期的代理只算一次。
 func TestAttentionDedupCounts(t *testing.T) {
 	s, db := newAttentionServer(t)
 	now := time.Now().Unix()
-	createUsers(t, db, []model.User{
-		{Name: "both", Enabled: true, Expiry: now + 86400, Volume: 10 * gib, Up: 9 * gib},
-		{Name: "exp", Enabled: true, Expiry: now + 86400},
-		{Name: "quota", Enabled: true, Volume: 10 * gib, Up: 9 * gib},
-		{Name: "fine", Enabled: true, Expiry: now + 30*86400},
-	})
 	for _, r := range []model.Reseller{
 		{Name: "r-both", Enabled: true, Depleted: true, Expiry: now + 86400},
 		{Name: "r-dep", Enabled: true, Depleted: true},
@@ -68,9 +62,6 @@ func TestAttentionDedupCounts(t *testing.T) {
 		db.Create(&r)
 	}
 	v := s.computeAttention(time.Now())
-	if v.UsersExpiring != 2 || v.UsersQuota != 2 || v.UsersAttn != 3 {
-		t.Fatalf("用户分项 2 / 2,去重后 3: %+v", v)
-	}
 	if v.ResellersDepleted != 2 || v.ResellersExpiring != 1 || v.ResellersExpired != 1 || v.ResellersAttn != 3 {
 		t.Fatalf("代理分项 2 / 1 / 1,去重后 3: %+v", v)
 	}

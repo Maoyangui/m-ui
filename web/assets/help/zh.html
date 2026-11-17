@@ -95,7 +95,7 @@
       <li>左侧导航依次是:<b data-k="nav.dashboard">概览</b>、<b data-k="nav.lines">线路</b>、<b data-k="nav.upstreams">上游</b>、<b data-k="nav.exts">外部节点</b>、<b data-k="nav.users">用户</b>、<b data-k="nav.resellers">代理</b>、<b data-k="nav.plans">套餐</b>、<b data-k="nav.rules">规则</b>、<b data-k="nav.nodes">服务器</b>、<b data-k="nav.cert">证书</b>、<b data-k="nav.backup">备份</b>、<b data-k="nav.ops">运维</b>、<b data-k="nav.logs">日志</b>、<b data-k="nav.admin">管理员</b>、<b data-k="nav.settings">设置</b>。</li>
       <li>左下角:主题切换(◐ 跟随系统、☀ 浅色、☾ 深色)、语言、<b data-k="common.logout">退出登录</b>。版本号旁出现箭头表示有新版本,点它就能更新(见 <a href="#update">更新</a>)。</li>
       <li>右上角:<b data-k="help.btn">帮助说明</b>(就是本页)和 <b data-k="support.btn">建议 / 支持</b>(联系作者、反馈问题)。</li>
-      <li><b>顶部的提醒</b>:数据面重载失败、服务器离线或没同步、证书要处理、大陆连通异常、上游故障、用户快到期或流量将尽、定时备份失败等,每类一个小条排成一行,按轻重排,点小条里的链接去处理;没有要处理的事时这一行不出现。证书和大陆连通可以点 <b data-k="reach.dismiss">知道了</b>,情况有变化会再出现。</li>
+      <li><b>顶部的提醒</b>:数据面重载失败、服务器离线或没同步、证书要处理、大陆连通异常、上游故障、定时备份失败等,每类一个小条排成一行,按轻重排,点小条里的链接去处理;没有要处理的事时这一行不出现。证书和大陆连通可以点 <b data-k="reach.dismiss">知道了</b>,情况有变化会再出现。</li>
       <li><b data-k="dash.trafficToday">24 小时流量</b> 那一格可以点:打开 <b data-k="dash.bd.title">流量明细</b>,选 24 小时、7 天或 30 天,看这段时间的流量是哪些用户用的、走了哪些线路、落在哪些服务器上(三栏是同一个合计的三种分法,都按服务器倍率计)。线路那一栏要临时向各副机问,离线或版本旧的副机问不到,它们的流量记在 <b data-k="dash.bd.unassigned">没归到线路</b> 里并写明是哪几台。</li>
       <li>顶部提醒条:在概览以外的页面,默认密码没改、证书要处理、大陆连通异常、数据面重载失败等会在页面顶部提醒,按提示处理。</li>
       <li>副服务器的面板里,线路、用户这些页面是只读的,要到主机面板改。</li>
@@ -763,7 +763,7 @@
       <li><b data-k="user.reason.manual">手动</b>:手动停用的不会因为重置流量、延长到期或周期重置而自动恢复。但用套餐续费或延期(<b data-k="user.renewMenu">续费</b>、批量 <b data-k="user.batch.plan">套用套餐</b>)和 <b data-k="user.changeMenu">换套餐</b> 是明确的开通动作,会把他一并启用:续费、批量套用套餐和换套餐的对话框里会先提示里面有手动停用的人、做完会被启用,批量时列出是谁,不想启用的先取消勾选。外部 API 的续费、换套餐也一样会启用。</li>
       <li data-scope="admin"><b data-k="user.limited">限速中</b>:正被规则临时限速(见 <a href="#rules">规则</a>)。</li>
       <li><b data-k="user.kick">踢下线</b>:断开这个用户在所有服务器上的连接(hysteria2、TUIC、AnyTLS 整条会话一起关)。没停用的话客户端会马上重连,想彻底断就先停用。</li>
-      <li>列表上方可以按 <b data-k="user.filter.all">全部</b>、<b data-k="user.filter.online">在线</b>、<b data-k="user.filter.enabled">启用</b>、<b data-k="user.filter.disabled">停用</b>、<b data-k="user.filter.expired">已过期</b>、<b data-k="user.filter.over">超量</b> 筛选,也可以只看某个套餐。在当前页全选后(手机上勾任意一个后),批量条上可以一键选中全部筛选结果,一起操作;这一下会换掉之前勾的人,只留当前的筛选结果。换筛选、换搜索之前勾的人会一直留着,批量操作时其中有当前列表里看不到的,会先问一句再处理。</li>
+      <li>列表上方可以按 <b data-k="user.filter.all">全部</b>、<b data-k="user.filter.online">在线</b>、<b data-k="user.filter.enabled">启用</b>、<b data-k="user.filter.disabled">停用</b>、<b data-k="user.filter.soon">即将到期</b>、<b data-k="user.filter.expired">已过期</b>、<b data-k="user.filter.over">超量</b> 筛选,也可以只看某个套餐。<b data-k="user.filter.soon">即将到期</b> 是现在还能正常用、但几天内就要到期或者流量快用完的人(几天、百分之多少,跟通知里的 <b data-k="set.tgExpiringDays">到期前几天提醒</b>、<b data-k="set.tgQuotaPercent">用量达到百分比时提醒</b> 是同一组设置,没填就是 3 天 / 80%);概览不为这些人提醒 —— 用户不续费,管理员也没什么可处理的,想看就在这里筛。在当前页全选后(手机上勾任意一个后),批量条上可以一键选中全部筛选结果,一起操作;这一下会换掉之前勾的人,只留当前的筛选结果。换筛选、换搜索之前勾的人会一直留着,批量操作时其中有当前列表里看不到的,会先问一句再处理。</li>
     </ul>
   </section>
 
