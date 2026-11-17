@@ -55,8 +55,10 @@ CREATE TABLE IF NOT EXISTS events (
   reason TEXT NOT NULL DEFAULT ''
 );
 
--- 入账(只加不删):order = 订阅站认了的订单付款(从订单库读);donation = 链上看到的、不是订单付款的转入。
--- 捐赠对上了留名的带名字。tx 是链上的交易号,谁都能拿去查。
+-- 入账(只加不删):order = 订阅站里已发放的订单(从订单库读);donation = 链上看到的、对上了留名的转入。
+-- tx 是链上的交易号,谁都能拿去查;人工确认发放、又没对上链上那一笔的订单没有交易号,编号是 'manual:发放时间:金额'。
+-- void = 1 作废(监听到账后订单又取消了):留着给人看,不进合计。note = 'manual' 人工确认发放的订单。
+-- 老库升级:ALTER TABLE deposits ADD COLUMN void INTEGER NOT NULL DEFAULT 0; ALTER TABLE deposits ADD COLUMN note TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS deposits (
   tx TEXT PRIMARY KEY,
   chain TEXT NOT NULL,
@@ -66,7 +68,9 @@ CREATE TABLE IF NOT EXISTS deposits (
   micros INTEGER NOT NULL,
   kind TEXT NOT NULL,
   name TEXT NOT NULL DEFAULT '',
-  seen_at INTEGER NOT NULL
+  seen_at INTEGER NOT NULL,
+  void INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS deposits_ts ON deposits(ts);
 CREATE INDEX IF NOT EXISTS deposits_kind ON deposits(kind);

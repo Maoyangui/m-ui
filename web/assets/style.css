@@ -2466,6 +2466,12 @@ html.rw-lock { overflow: hidden; }
 .rw-tag.don { background: var(--rw-don-soft); color: var(--rw-don-t); }
 .rw-tag.me { background: var(--rw-inv); color: var(--rw-inv-t); font-weight: 650; }
 .rw-tag.bad { background: var(--rw-bad-soft); color: var(--rw-bad); }
+/* 少见的两种入账:人工确认发放的订单(一个不抢眼的小标),订单取消后作废的(整行淡下去、金额划掉、写「不计入」) */
+.rw-tag.man, .rw-tag.off { background: none; box-shadow: inset 0 0 0 1px var(--rw-line2); color: var(--rw-mute); font-weight: 500; cursor: help; }
+.rw-row.void .c-amt, .rw-row.void .c-from .rw-a { color: var(--rw-faint); text-decoration: line-through; }
+.rw-row.void .c-time, .rw-row.void .rw-tag.ord { opacity: .6; }
+.c-cnt b.none { color: var(--rw-faint); font-weight: 500; cursor: help; }
+.c-nofrom { color: var(--rw-faint); }
 .rw-pager { display: flex; align-items: center; gap: .5rem; padding: .75rem .5rem 0; color: var(--rw-mute); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .rw-pager .pg { min-width: 3.2rem; text-align: center; color: var(--rw-ink2); }
 /* 积分榜 */

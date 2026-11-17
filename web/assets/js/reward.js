@@ -264,12 +264,12 @@ function ledgerHTML() {
   const rate = Math.round(((st.pool || {}).orderRate || 0.4) * 100);
   return `<div class="rw-list rw-led${led.loading ? ' busy' : ''}">
 <div class="rw-row head"><span>${esc(t('rw.led.from'))}</span><span>${esc(t('rw.led.kind'))}</span><span>${esc(t('rw.led.time'))}</span><span class="r">${esc(t('rw.led.amount'))}</span><span class="r">${esc(t('rw.led.counted'))}</span></div>
-${d.items.map(x => `<div class="rw-row">
-<span class="c-from"><span class="rw-ci" title="${esc(CHAIN[x.chain] || x.chain)}">${chainIcon(x.chain)}</span><button class="rw-a mono" type="button" data-act="rw.copy" data-v="${esc(x.from)}" title="${esc(x.from + ' · ' + t('rw.clickCopy'))}">${esc(short(x.from, 6))}</button>${x.tx ? `<a class="rw-ib sm" href="${esc(txUrl(x.chain, x.tx))}" target="_blank" rel="noopener noreferrer" title="${esc(t('rw.led.tx'))}" aria-label="${esc(t('rw.led.tx'))}">${IC.out}</a>` : ''}</span>
-<span class="c-kind"><span class="rw-tag ${x.kind === 'donation' ? 'don' : 'ord'}">${esc(t(x.kind === 'donation' ? 'rw.led.donation' : 'rw.led.order'))}</span>${x.kind === 'donation' && x.name ? `<span class="c-name" title="${esc(x.name)}">${esc(x.name)}</span>` : ''}</span>
+${d.items.map(x => `<div class="rw-row${x.void ? ' void' : ''}">
+<span class="c-from"><span class="rw-ci" title="${esc(CHAIN[x.chain] || x.chain)}">${chainIcon(x.chain)}</span>${x.from ? `<button class="rw-a mono" type="button" data-act="rw.copy" data-v="${esc(x.from)}" title="${esc(x.from + ' · ' + t('rw.clickCopy'))}">${esc(short(x.from, 6))}</button>` : `<span class="c-nofrom">—</span>`}${x.tx ? `<a class="rw-ib sm" href="${esc(txUrl(x.chain, x.tx))}" target="_blank" rel="noopener noreferrer" title="${esc(t('rw.led.tx'))}" aria-label="${esc(t('rw.led.tx'))}">${IC.out}</a>` : ''}</span>
+<span class="c-kind"><span class="rw-tag ${x.kind === 'donation' ? 'don' : 'ord'}">${esc(t(x.kind === 'donation' ? 'rw.led.donation' : 'rw.led.order'))}</span>${x.kind === 'donation' && x.name ? `<span class="c-name" title="${esc(x.name)}">${esc(x.name)}</span>` : ''}${x.void ? `<span class="rw-tag off" title="${esc(t('rw.led.voidTip'))}">${esc(t('rw.led.void'))}</span>` : x.note === 'manual' ? `<span class="rw-tag man" title="${esc(t('rw.led.manualTip'))}">${esc(t('rw.led.manual'))}</span>` : ''}</span>
 <span class="c-time" title="${esc(timeOf(x.ts))}">${esc(dayOf(x.ts))}</span>
 <span class="c-amt r" data-k="${esc(t('rw.led.amount'))}">${usd(x.amount)}</span>
-<span class="c-cnt r"><b>+${usd(x.share)}</b>${x.kind === 'donation' ? '' : `<i>${rate}%</i><small>${usd(x.amount)} × ${rate}%</small>`}</span>
+<span class="c-cnt r">${x.void ? `<b class="none" title="${esc(t('rw.led.voidTip'))}">${esc(t('rw.led.notCounted'))}</b>` : `<b>+${usd(x.share)}</b>${x.kind === 'donation' ? '' : `<i>${rate}%</i><small>${usd(x.amount)} × ${rate}%</small>`}`}</span>
 </div>`).join('')}
 </div>${pagerHTML('rw.ledPage', led.page, d.total)}`;
 }

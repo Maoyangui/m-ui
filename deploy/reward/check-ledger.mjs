@@ -7,8 +7,9 @@
 //
 // 核对三件事:
 //   1. 写法:和面板收账本时查的一样(reward.Ledger.check)—— 面板不认的东西不往分支上放。
-//   2. 自洽:合计对得上逐笔(订单 × 比例 + 捐赠 = 奖池;积分合计 = 榜上各行之和),没有重复的交易号和地址。
-//   3. 只增不减:奖池、笔数不能比分支上的少,分支上已有的入账一笔都不能丢。登记服务的库要是被清空或者写乱了,在这里拦住。
+//   2. 自洽:合计对得上逐笔(订单 × 比例 + 捐赠 = 奖池;积分合计 = 榜上各行之和;作废的不进合计),没有重复的交易号和地址。
+//   3. 只增不减:分支上已有的入账一笔都不能丢;奖池、笔数不能比分支上的少 —— 唯一的例外是订单取消(退款):
+//      那一笔留在账本上标成作废,合计少掉的正好是它。登记服务的库要是被清空或者写乱了,在这里拦住。
 import fs from 'node:fs';
 import { chainOf, validSolana } from './worker.mjs';
 
@@ -40,13 +41,16 @@ export function checkLedger(l, now = Math.floor(Date.now() / 1000)) {
   l.deposits.forEach((x, i) => {
     const at = `第 ${i + 1} 笔入账`;
     if (!sums[x.kind]) return bad.push(`${at}的类型不对`);
-    need(typeof x.amount === 'number' && x.amount > 0 && typeof x.tx === 'string' && x.tx && x.tx.length <= 128 && len(x.from) <= 64 && len(x.name) <= 24 && Number.isInteger(x.ts) && x.ts > 0, `${at}写得不对`);
+    need(typeof x.amount === 'number' && x.amount > 0 && typeof x.tx === 'string' && x.tx.length <= 128 && len(x.from) <= 64 && len(x.name) <= 24 && Number.isInteger(x.ts) && x.ts > 0, `${at}写得不对`);
     need(['solana', 'tron'].includes(x.chain), `${at}的链不对`);
     need(x.kind === 'donation' || !x.name, `${at}是订单,不该有留名`);
     need(x.kind !== 'donation' || !!x.name, `${at}是捐赠却没有留名(只有留名捐赠计入奖池)`);
-    need(!seen.has(x.tx), `${at}的交易号重复了`);
-    seen.add(x.tx);
-    sums[x.kind].n++; sums[x.kind].v += x.amount;
+    // note = 'manual':人工确认发放的订单;只有它可以没有交易号(没对上链上那一笔的)。void = true:作废(订单取消了),不进合计
+    need(x.note === undefined || (x.note === 'manual' && x.kind === 'order'), `${at}的标记不对`);
+    need(x.void === undefined || (x.void === true && x.kind === 'order'), `${at}的作废标记不对`);
+    need(!!x.tx || x.note === 'manual', `${at}没有交易号(只有人工确认发放的订单可以没有)`);
+    if (x.tx) { need(!seen.has(x.tx), `${at}的交易号重复了`); seen.add(x.tx); }
+    if (!x.void) { sums[x.kind].n++; sums[x.kind].v += x.amount; }
   });
   need(near(p.orderShare, p.orderAmount * l.orderRate), `订单计入奖池的部分 ${p.orderShare} ≠ 订单合计 ${p.orderAmount} × ${l.orderRate}`);
   need(near(p.total, p.orderShare + p.donateAmount), `奖池 ${p.total} ≠ 订单计入的 ${p.orderShare} + 捐赠 ${p.donateAmount}`);
@@ -68,15 +72,23 @@ export function checkLedger(l, now = Math.floor(Date.now() / 1000)) {
 }
 
 // 和分支上现在的那份比:只增不减。返回问题的清单。
+// 例外只有一种:上一份里计入着的订单,这一份里标成了作废(订单取消 / 退款)—— 合计可以少,但少掉的不能超过这些作废的。
 export function checkGrowth(prev, next) {
   const bad = [];
   if (!prev || !prev.pool) return bad;
   const a = prev.pool, b = next.pool;
-  for (const k of ['total', 'orderCount', 'orderAmount', 'donateCount', 'donateAmount']) if (b[k] < a[k] - 0.011) bad.push(`${k} 比分支上的少了:${a[k]} → ${b[k]}`);
+  const key = x => x.tx || `manual:${x.ts}:${x.amount}`; // 没有交易号的(人工确认的订单)拿时间和金额认
+  const counted = new Map((prev.deposits || []).filter(x => !x.void).map(x => [key(x), x]));
+  const gone = (next.deposits || []).filter(x => x.void && x.kind === 'order' && counted.has(key(x)));
+  const goneAmt = gone.reduce((s, x) => s + x.amount, 0);
+  const allow = { total: goneAmt * next.orderRate, orderCount: gone.length, orderAmount: goneAmt, donateCount: 0, donateAmount: 0 };
+  for (const k of ['total', 'orderCount', 'orderAmount', 'donateCount', 'donateAmount']) {
+    if (b[k] < a[k] - allow[k] - 0.011 - gone.length * 0.006) bad.push(`${k} 比分支上的少了:${a[k]} → ${b[k]}${gone.length ? `(这一份里新作废了 ${gone.length} 笔订单,解释不了这么多)` : ''}`);
+  }
   if (next.deposits.length < MAX_ROWS) {
-    const have = new Set(next.deposits.map(x => x.tx));
-    const lost = prev.deposits.filter(x => !have.has(x.tx));
-    if (lost.length) bad.push(`分支上已有的入账丢了 ${lost.length} 笔,比如 ${lost[0].tx}`);
+    const have = new Set(next.deposits.map(key));
+    const lost = prev.deposits.filter(x => !have.has(key(x)));
+    if (lost.length) bad.push(`分支上已有的入账丢了 ${lost.length} 笔,比如 ${key(lost[0])}`);
   }
   return bad;
 }

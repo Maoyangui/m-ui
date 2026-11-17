@@ -159,8 +159,10 @@ type Deposit struct {
 	Chain  string  `json:"chain"`
 	Amount float64 `json:"amount"`
 	From   string  `json:"from"`
-	Tx     string  `json:"tx"`
+	Tx     string  `json:"tx"`             // 链上交易号;人工确认发放、又没对上链上那一笔的订单没有(空)
 	Name   string  `json:"name,omitempty"` // 捐赠的留名。只有留名捐赠计入奖池,所以捐赠一定带名字
+	Note   string  `json:"note,omitempty"` // manual = 人工确认发放的订单(付款金额和订单对不上,订阅站核对之后发放的;金额是实际到账的)
+	Void   bool    `json:"void,omitempty"` // 作废:监听到账之后订单又取消(退款)了。留在账本里给人看,不计入奖池
 }
 
 // BoardRow 积分榜上的一个地址。Excluded = 它名下的面板现在全都被剔除着(原因见 Rule / Reason)。
@@ -469,6 +471,12 @@ func (l *Ledger) check(now int64) error {
 		if d.Amount < 0 || len(d.From) > 64 || len(d.Tx) > 128 || len([]rune(d.Name)) > 24 {
 			return fmt.Errorf("账本第 %d 笔入账写得不对", i+1)
 		}
+		if (d.Note != "" && (d.Note != "manual" || d.Kind != "order")) || (d.Void && d.Kind != "order") {
+			return fmt.Errorf("账本第 %d 笔入账的标记不对", i+1)
+		}
+		if d.Tx == "" && d.Note != "manual" { // 只有人工确认的订单可以没有交易号
+			return fmt.Errorf("账本第 %d 笔入账没有交易号", i+1)
+		}
 	}
 	for i := range l.Board {
 		b := &l.Board[i]
@@ -494,8 +502,11 @@ func validChainAddr(chain, a string) bool {
 	return ValidSolana(a)
 }
 
-// Share 这笔入账计入奖池多少:订单按比例,捐赠全额。
+// Share 这笔入账计入奖池多少:订单按比例,捐赠全额;作废的不计入。
 func (l *Ledger) Share(d Deposit) float64 {
+	if d.Void {
+		return 0
+	}
 	if d.Kind == "donation" {
 		return d.Amount
 	}

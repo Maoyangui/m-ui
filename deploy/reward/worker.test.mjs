@@ -39,6 +39,7 @@ async function signed(panel, address, gb, ts) {
 }
 
 // ---- 一套环境 ----
+let orderSeq = 0;
 function setup(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-test-'));
   const file = path.join(dir, 'commerce.db');
@@ -67,9 +68,26 @@ function setup(t) {
     },
     solAddr(position = 0) { const a = sol(); commerce.prepare('INSERT INTO solana_payment_addresses VALUES(?,1,?,0,0)').run(a, position); chain.open(a); return a; },
     tronAddr(position = 0) { const a = tron(); commerce.prepare('INSERT INTO payment_addresses VALUES(?,1,?,0,0)').run(a, position); return a; },
-    payment({ tx, address, micros, at, from, status = 'credited', reason = null }) {
-      commerce.prepare('INSERT INTO payments(tx_id,address,amount_micros,block_timestamp,event_json,status,reason,checked_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)')
-        .run(tx, address, String(micros), at * 1000, JSON.stringify(from ? { from, to: address, value: String(micros) } : { network: 'SOLANA' }), status, reason, at * 1000 + 5000, at * 1000);
+    // 订单库里的一笔付款。监听到账的(credited)默认挂在一张已发放的订单上 —— 订阅站里真实的样子;返回那张订单的标识。
+    // order: false = 不挂订单;order: '…' = 用这个标识;orderStatus = 那张订单现在的状态。
+    payment({ tx, address, micros, at, from, status = 'credited', reason = null, order = status === 'credited', orderStatus = 'fulfilled' }) {
+      const hash = order ? (typeof order === 'string' ? order : x.order({ address, micros, created: at - 60, fulfilled: orderStatus === 'fulfilled' ? at + 60 : null, status: orderStatus })) : null;
+      if (typeof order === 'string') x.order({ hash, address, micros, created: at - 60, fulfilled: at + 60, status: orderStatus });
+      commerce.prepare('INSERT INTO payments(tx_id,address,amount_micros,block_timestamp,event_json,status,reason,order_hash,checked_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
+        .run(tx, address, String(micros), at * 1000, JSON.stringify(from ? { from, to: address, value: String(micros) } : { network: 'SOLANA' }), status, reason, hash, at * 1000 + 5000, at * 1000);
+      return hash;
+    },
+    // 订单库里的一张订单(sol = 它在 Solana 上的收款地址)
+    order({ hash = 'f'.repeat(54) + String(++orderSeq).padStart(10, '0'), address, micros, created, fulfilled = null, status = 'fulfilled', sol: solAddress }) {
+      commerce.prepare('INSERT INTO orders VALUES(?,?,?,?,?,?)').run(hash, micros, address, status, created * 1000, fulfilled === null ? null : fulfilled * 1000);
+      if (solAddress) commerce.prepare("INSERT INTO order_payment_options VALUES(?, 'SOLANA', ?, ?)").run(hash, solAddress, micros);
+      return hash;
+    },
+    // 订阅站里把一张订单永久删除(退款之后):订单没了,它的付款记录留着、不再挂着订单
+    dropOrder(hash) {
+      commerce.prepare('UPDATE payments SET order_hash = NULL WHERE order_hash = ?').run(hash);
+      commerce.prepare('DELETE FROM order_payment_options WHERE order_hash = ?').run(hash);
+      commerce.prepare('DELETE FROM orders WHERE order_hash = ?').run(hash);
     },
     reserve(address, micros) { commerce.prepare('INSERT INTO solana_amount_reservations VALUES(?,?,0)').run(address, micros); },
     async report(panel, address, gb, now, ip = '203.0.113.7') {
@@ -477,7 +495,7 @@ test('两台面板的流量曲线一模一样(同一份流量登记了两次):�
 });
 
 // ================= 奖池:订单 =================
-test('订单:只认订单库里「监听成功」的付款(两条链),按 40% 计入;只加不删;订单库一个字都不写', async t => {
+test('订单:计入的是订阅站里已发放、现在还在的订单(两条链),按 40%;没发放的、金额对不上没人认的不算;订单库一个字都不写', async t => {
   const x = setup(t), solA = x.solAddr(), tronA = x.tronAddr();
   const buyer = tron(), paid = x.chain.pay(solA, 19_990_013, T0 - 5000);
   x.payment({ tx: 'a'.repeat(64), address: tronA, micros: 9_991_237, at: T0 - 9000, from: buyer });
@@ -485,6 +503,8 @@ test('订单:只认订单库里「监听成功」的付款(两条链),按 40% �
   x.payment({ tx: 'b'.repeat(64), address: tronA, micros: 5_000_000, at: T0 - 4000, from: buyer, status: 'review', reason: 'UNMATCHED_AMOUNT' });
   x.payment({ tx: 'c'.repeat(64), address: tronA, micros: 9_991_555, at: T0 - 3000, from: buyer, status: 'observed' });
   x.payment({ tx: 'solana:' + sig(), address: solA, micros: 9_990_021, at: T0 - 2000, status: 'review', reason: 'LATE_PAYMENT' });
+  // 到账了、订单还没发放(开通那一步还在做):先不算
+  const slow = x.payment({ tx: 'e'.repeat(64), address: tronA, micros: 7_000_003, at: T0 - 1000, from: buyer, orderStatus: 'paid' });
 
   const l = await x.tick(T0);
   checkLedger(l, T0);
@@ -501,15 +521,89 @@ test('订单:只认订单库里「监听成功」的付款(两条链),按 40% �
   ]);
   assert.deepEqual(l.donate, { chain: 'solana', address: solA, min: 1, max: 100000 });
 
-  // 再跑不重复;订单库里那条记录没了(订单被永久删除),账本上照样留着:钱确实到过
-  await x.tick(T0 + 120);
-  x.commerce.prepare('DELETE FROM payments WHERE tx_id = ?').run('a'.repeat(64));
+  // 再跑不重复;那张订单发放了、又来了一笔新的:下一轮就都算上(不用等每小时那一遍)
+  const again = await x.tick(T0 + 120);
+  assert.equal(again.pool.orderCount, 2);
+  x.commerce.prepare("UPDATE orders SET status = 'fulfilled', fulfilled_at = ? WHERE order_hash = ?").run((T0 + 150) * 1000, slow);
   x.payment({ tx: 'd'.repeat(64), address: tronA, micros: 30_000_007, at: T0 + 200, from: buyer });
-  const l2 = await x.tick(T0 + 2 * DAY);
-  assert.equal(l2.pool.orderCount, 3);
-  assert.equal(l2.pool.orderAmount, 59.98);
-  assert.equal(l2.pool.total, 23.99);
-  assert.equal(x.commerce.prepare('SELECT COUNT(*) AS n FROM payments').get().n, 5);
+  const l2 = await x.tick(T0 + 240);
+  assert.equal(l2.pool.orderCount, 4);
+  assert.equal(l2.pool.orderAmount, 66.98);
+  assert.equal(l2.pool.total, 26.79);
+  assert.ok(l2.deposits.every(d => d.void === undefined && d.note === undefined), '正常的订单不带标记');
+  assert.equal(x.commerce.prepare('SELECT COUNT(*) AS n FROM payments').get().n, 7);
+});
+
+test('退款:监听到账之后订单取消了(订阅站里删掉了)→ 那一笔作废:留在账本上标出来,不再计入;最多晚一个小时', async t => {
+  const x = setup(t), tronA = x.tronAddr();
+  x.solAddr();
+  const buyer = tron();
+  x.payment({ tx: 'a'.repeat(64), address: tronA, micros: 18_004_446, at: T0 - 9000, from: buyer });
+  const gone = x.payment({ tx: 'b'.repeat(64), address: tronA, micros: 18_007_208, at: T0 - 8000, from: buyer });
+  let l = await x.tick(T0);
+  assert.deepEqual([l.pool.orderCount, l.pool.orderAmount, l.pool.orderShare, l.pool.total], [2, 36.01, 14.4, 14.4]);
+  // 退款:订阅站里把这张订单永久删除;付款记录还在,只是不再挂着订单
+  x.dropOrder(gone);
+  l = await x.tick(T0 + 120);
+  assert.equal(l.pool.orderCount, 2, '平时每一轮只看新变动的付款;作废要等每小时对全表的那一遍');
+  l = await x.tick(T0 + 3700);
+  assert.deepEqual([l.pool.orderCount, l.pool.orderAmount, l.pool.orderShare, l.pool.total], [1, 18, 7.2, 7.2]);
+  assert.deepEqual(l.deposits.map(d => [d.tx[0], d.amount, d.void]), [['b', 18.007208, true], ['a', 18.004446, undefined]], '作废的那一笔还在逐笔里,标着 void');
+  assert.equal(l.chains.find(c => c.chain === 'tron').received, 18, '收款地址名下的合计也不算它');
+  // 付款记录整条没了(订阅站清理过)也一样;再跑不变
+  x.commerce.prepare('DELETE FROM payments WHERE tx_id = ?').run('b'.repeat(64));
+  l = await x.tick(T0 + 7400);
+  assert.deepEqual([l.pool.orderCount, l.pool.total, l.deposits.length], [1, 7.2, 2]);
+  assert.equal(x.deposits().find(d => d.tx === 'b'.repeat(64)).void, 1);
+  // 那张订单要是又回来了(不该发生,但库是别人的):自动恢复
+  x.payment({ tx: 'b'.repeat(64), address: tronA, micros: 18_007_208, at: T0 - 8000, from: buyer });
+  l = await x.tick(T0 + 11100);
+  assert.deepEqual([l.pool.orderCount, l.pool.orderAmount, l.deposits.some(d => d.void)], [2, 36.01, false]);
+});
+
+test('人工确认发放的订单也算:对得上那笔「金额对不上」的付款就按实收记、带交易号;分不清是哪一笔的按订单金额记、不带交易号', async t => {
+  const x = setup(t), tronA = x.tronAddr(), solA = x.solAddr();
+  // 订单 88.005142:客人从交易所提币被扣了手续费,到账 87.305142(走的 Solana)。订阅站标成金额对不上,管理员核对后手动发放
+  const paid = x.chain.pay(solA, 87_305_142, T0 - 1700);
+  x.payment({ tx: 'solana:' + paid.signature, address: solA, micros: 87_305_142, at: T0 - 1700, status: 'review', reason: 'UNMATCHED_AMOUNT' });
+  x.order({ address: tronA, sol: solA, micros: 88_005_142, created: T0 - 1800, fulfilled: T0 - 100 });
+  // 同一时段、同一个地址上还有一笔 1 U 的零碎转账:差得太远,不是这张订单的
+  x.payment({ tx: 'solana:' + sig(), address: solA, micros: 1_000_000, at: T0 - 1600, status: 'review', reason: 'UNMATCHED_AMOUNT' });
+  // 另一张人工发放的订单:那段时间里有两笔对不上的付款,分不清是哪一笔 → 不硬配
+  x.payment({ tx: 'b'.repeat(64), address: tronA, micros: 18_000_000, at: T0 - 5000, from: tron(), status: 'review', reason: 'UNMATCHED_AMOUNT' });
+  x.payment({ tx: 'c'.repeat(64), address: tronA, micros: 18_001_208, at: T0 - 4900, from: tron(), status: 'review', reason: 'UNMATCHED_AMOUNT' });
+  x.order({ address: tronA, micros: 18_003_708, created: T0 - 5100, fulfilled: T0 - 4000 });
+  // 还没付款的订单不相干
+  x.order({ address: tronA, micros: 18_009_999, created: T0 - 900, status: 'pending' });
+
+  const l = await x.tick(T0);
+  checkLedger(l, T0);
+  assert.deepEqual([l.pool.orderCount, l.pool.orderAmount, l.pool.orderShare, l.pool.total], [2, 105.31, 42.12, 42.12]);
+  assert.deepEqual(l.deposits.map(d => [d.kind, d.chain, d.amount, d.tx, d.note, d.from]), [
+    ['order', 'solana', 87.305142, paid.signature, 'manual', paid.payer], // 实收的金额、链上那一笔的交易号
+    ['order', 'tron', 18.003708, '', 'manual', ''],                       // 分不清:订单的金额,没有交易号
+  ]);
+  // 每小时再对一遍:不重复、不变
+  const l2 = await x.tick(T0 + 3700);
+  assert.deepEqual([l2.pool.orderCount, l2.pool.total, l2.deposits.length], [2, 42.12, 2]);
+  // 人工发放的那张订单后来也退了:同样作废
+  x.commerce.prepare("DELETE FROM orders WHERE amount_micros = 18003708").run();
+  const l3 = await x.tick(T0 + 7400);
+  assert.deepEqual([l3.pool.orderCount, l3.pool.orderAmount, l3.deposits.filter(d => d.void).map(d => d.amount)], [1, 87.31, [18.003708]]);
+});
+
+test('给人工发放的订单找付款:只看下单到发放这段时间、打到它收款地址上的;一笔付款只配一张订单', () => {
+  const o = (amount, created, fulfilled, extra = {}) => ({ amount_micros: amount, address: 'T1', created_at: created * 1000, fulfilled_at: fulfilled * 1000, ...extra });
+  const p = (tx, amount, at, address = 'T1') => ({ tx_id: tx, address, amount_micros: String(amount), block_timestamp: at * 1000 });
+  const pick = (orders, review) => W.matchManual(orders, review).map(m => (m.p ? m.p.tx_id : null));
+  assert.deepEqual(pick([o(88_005_142, 1000, 2000)], [p('x', 87_305_142, 1100)]), ['x']);
+  assert.deepEqual(pick([o(88_005_142, 1000, 2000)], [p('x', 87_305_142, 800)]), [null], '下单之前的付款不是它的');
+  assert.deepEqual(pick([o(88_005_142, 1000, 2000)], [p('x', 87_305_142, 2200)]), [null], '发放之后才到的不是它的');
+  assert.deepEqual(pick([o(88_005_142, 1000, 2000)], [p('x', 87_305_142, 1100, 'T2')]), [null], '打到别的地址上的不是它的');
+  assert.deepEqual(pick([o(88_005_142, 1000, 2000, { sol_address: 'S1' })], [p('x', 87_305_142, 1100, 'S1')]), ['x'], '订单在 Solana 上的收款地址也算');
+  assert.deepEqual(pick([o(88_005_142, 1000, 2000)], [p('x', 60_000_000, 1100)]), [null], '金额差了两成以上');
+  assert.deepEqual(pick([o(18_000_001, 1000, 2000), o(18_000_002, 1000, 2000)], [p('x', 18_000_000, 1100)]), ['x', null], '一笔付款只配给一张订单(先发放的那张)');
+  assert.deepEqual(pick([o(18_000_001, 1000, 2000)], [p('x', 18_000_000, 1100), p('y', 17_900_000, 1200)]), [null], '候选不止一笔:不硬配');
 });
 
 test('登记服务对订单库只有 SELECT(读源码逐处核对)', () => {
@@ -521,23 +615,29 @@ test('登记服务对订单库只有 SELECT(读源码逐处核对)', () => {
   const others = [...src.matchAll(/^.*env\.COMMERCE.*$/gm)].map(m => m[0].trim()).filter(l => !l.startsWith('//'));
   assert.equal(others.length, 2, others.join('\n'));
   for (const l of others) assert.match(l, /readOnly\(env\.COMMERCE\)/, l);
-  // 用到的表(子查询里的也算)
-  const sqls = [...src.matchAll(/commerce\(env\)\s*,\s*([`'"])([\s\S]*?)\1/g)].map(m => m[2]);
+  // 用到的表(子查询里的也算;拼进语句里的那一段「订单还在且已发放」的条件先展开)
+  const validOrder = /const validOrder = "([^"]+)";/.exec(src)[1];
+  const sqls = [...src.matchAll(/commerce\(env\)\s*,\s*([`'"])([\s\S]*?)\1/g)].map(m => m[2].replace('${validOrder}', validOrder));
   const tables = sqls.flatMap(s => [...s.matchAll(/\bFROM\s+(\w+)/g)].map(m => m[1]));
-  assert.deepEqual([...new Set(tables)].sort(), ['payment_addresses', 'payments', 'solana_amount_reservations', 'solana_payment_addresses']);
+  assert.deepEqual([...new Set(tables)].sort(), ['order_payment_options', 'orders', 'payment_addresses', 'payments', 'solana_amount_reservations', 'solana_payment_addresses']);
   for (const s of sqls) assert.ok(!/\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|PRAGMA|ATTACH)\b/i.test(s), s);
-  // 订单号是订阅的使用凭证:登记服务不读订单表,不读付款记录里订单的那一列,也不整行整行地取
-  for (const s of sqls) assert.ok(!/\*/.test(s) && !/order/i.test(s.replace(/\bORDER\s+BY\b/gi, '')), '查询里不该出现订单的列或 SELECT *: ' + s);
-  assert.ok(!/order_hash|order_id|order_no|orderId|FROM\s+orders\b/i.test(src), '源码里不该提到订单号');
+  // 订单号是订阅的使用凭证。订单表只拿状态、金额、收款地址、时间;订单的标识(order_hash)只许出现在连接条件里,
+  // 任何一层 SELECT 取出来的列里都不许有它;订单号的密文、订阅的密文这些列一个字都不许提;不整行整行地取。
+  for (const s of sqls) {
+    assert.ok(!/\*/.test(s), '不该有 SELECT *: ' + s);
+    for (const m of s.matchAll(/\bSELECT\b([\s\S]*?)\bFROM\b/gi)) assert.ok(!/order_hash/i.test(m[1]), '取出来的列里不该有订单的标识: ' + s);
+    assert.ok(!/order_id|order_no|cipher|subscription|panel_|remark/i.test(s), '查询里不该出现订单号、密文这些列: ' + s);
+  }
+  assert.ok(!/order_id|order_no|orderId|_cipher/i.test(src), '源码里不该提到订单号和它的密文');
 });
 
 test('订单号不出库:订单库里每笔付款都带着订单的标识,登记服务的库和公开账本里一个字都没有它', async t => {
   const x = setup(t), solA = x.solAddr(), tronA = x.tronAddr();
   const marks = [], buyer = tron();
   const pay = (tx, address, micros, from, mark) => {
-    x.payment({ tx, address, micros, at: T0 - 3600, from });
-    // 给这笔付款挂上订单的标识(订单库里真实的样子:order_hash 一列;链上事件里就算带着别的字段也一样不该被带出来)
-    x.commerce.prepare('UPDATE payments SET order_hash = ?, event_json = json_set(event_json, ?, ?) WHERE tx_id = ?').run(mark, '$.orderRef', mark, tx);
+    // 这笔付款挂在一张订单上(订单库里真实的样子:付款和订单两边都带着 order_hash;链上事件里就算带着别的字段也一样不该被带出来)
+    x.payment({ tx, address, micros, at: T0 - 3600, from, order: mark });
+    x.commerce.prepare('UPDATE payments SET event_json = json_set(event_json, ?, ?) WHERE tx_id = ?').run('$.orderRef', mark, tx);
     marks.push(mark);
   };
   pay('solana:' + sig(), solA, 9_900_001, '', 'ORDERHASH0A1B2C3D4E5F60718293A4B5C6D7E8F9');

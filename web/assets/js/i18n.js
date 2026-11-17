@@ -1231,14 +1231,11 @@ const zh = {
   'rw.brd.sum': '{a} 个地址 · {n} 积分', 'rw.brd.public': '公开账本', 'rw.brd.addr': '地址', 'rw.brd.points': '积分', 'rw.brd.share': '占比', 'rw.brd.value': '约值 USDT', 'rw.brd.me': '我', 'rw.brd.panels': '{n} 台面板',
   'rw.brd.panelsHelp': '这个地址下登记了多台面板,积分合计', 'rw.brd.excluded': '已剔除', 'rw.brd.none': '还没有地址登记', 'rw.brd.noneQ': '没有找到这个地址', 'rw.rule.1.t': '只算线路上的真实流量',
   'rw.rule.1.d': '上行加下行,按原始字节算,不乘倍率;服务器上别的流量不算。有副机的,主机把各台的汇总到一起。', 'rw.rule.2.t': '每满 1 TB 得 1 积分', 'rw.rule.2.d': '不绑定地址只在本机累计,绑定后一并登记。每个地址每天最多入账 1 积分(当天要有面板在上报),多的顺延,不作废。',
-  'rw.rule.3.t': '奖池 = 订单的 {rate}% + 留名捐赠', 'rw.rule.3.d': '[[sub]] 每一笔监听到账的订单,{rate}% 进奖池;在「捐赠榜」里留名捐的,全额进奖池(没提交就直接往地址转的钱对不上号,不算)。每一笔都列在「奖池明细」里,也能在链上核对。', 'rw.rule.4.t': '{day} 按积分比例发放',
+  'rw.rule.3.t': '奖池 = 订单的 {rate}% + 留名捐赠', 'rw.rule.3.d': '[[sub]] 每一笔已发放的订单,{rate}% 进奖池(到账后又退款的不算);在「捐赠榜」里留名捐的,全额进奖池(没提交就直接往地址转的钱对不上号,不算)。每一笔都列在「奖池明细」里,也能在链上核对。', 'rw.rule.4.t': '{day} 按积分比例发放',
   'rw.rule.4.d': 'm-ui 一周年当天,按各地址的积分占全部已登记积分的比例,把奖池以 USDT 发到登记的 Solana 地址。每一笔发放的金额和交易号同样公开。', 'rw.rule.5.t': '公开账本,作弊由系统自动剔除', 'rw.rule.5.d': '地址和积分记在 m-ui 仓库的公开账本里,谁都能查。一处来源(一个公网 IP)只认一个地址;同一份流量登记两次、每天涨得一模一样的,系统按固定的规则自动剔除并写明原因,不靠人工,情况消失 14 天后自动恢复。判的是面板不是地址:别人冒用你的地址去作弊,影响不到你。',
   'rw.priv.title': '会上传什么', 'rw.priv.1': '没绑定地址:什么都不上传,只在本机累计。', 'rw.priv.2': '绑定之后:只上报这台面板的一个随机标识、你填的地址、累计流量(取整到 GB)和时间。', 'rw.priv.3': '不上传域名、用户、线路或任何用户数据;公开账本里只有地址、积分和名下的面板数。',
   'rw.priv.off': '不想参加可以随时关掉,本机照常累计,重新打开不丢。', 'rw.priv.offLink': '去设置里关闭',
   'rw.sub': 'godusevpn 节点订阅', 'rw.slogan': '跑流量,分奖池', 'rw.lead': '线路上每跑满 1 TB 真实流量得 1 积分;{day} 按积分比例把奖池发给大家(USDT)。', 'rw.mine.traffic': '真实流量', 'rw.mine.next': '下一个积分', 'rw.donate': '捐赠奖池',
-  
-  
-  
   'rw.tab.donate': '捐赠榜', 'rw.dn.title': '给奖池捐一笔', 'rw.dn.lead': '留个名字、填个数。提交后给你一个转账金额和 60 分钟的时间;这个金额在期限内到账,就计入奖池,并以这个名字记进捐赠榜。', 'rw.dn.name': '留名', 'rw.dn.namePh': '想显示的名字,最多 20 个字',
   'rw.dn.amount': '金额', 'rw.dn.amountPh': '最少 {min}', 'rw.dn.submit': '下一步', 'rw.dn.notes': '钱全额进奖池,到期按积分分给大家;留的名字会公开显示。只认在这里提交、并按给出的金额转来的 —— 没提交就直接往地址转的钱对不上号,不计入奖池。',
   'rw.dn.waitTitle': '等待到账', 'rw.dn.timerHelp': '这个金额要在这段时间内到账,这笔捐赠才成立',
@@ -1256,13 +1253,14 @@ const zh = {
   'rw.priv.4': '登记服务会看到这台服务器的公网 IP(连任何服务都一样)。它只留一个加盐的哈希,用来判断「一处来源只认一个地址」;不留 IP 本身,也不公开。',
   'rw.unit1': '积分',
   'user.filter.soon': '即将到期', 'user.filter.soonHelp': '{d} 天内到期,或流量已用到 {p}% 以上(只算现在还能正常使用的用户)',
-  'rw.pool.ordT': '订单金额的 {rate}%', 'rw.pool.ordD': '[[sub]] 监听到账的 {n} 笔订单,共 {v} USDT;其余 {rest}% 是节点运营成本', 'rw.pool.ordNone': '[[sub]] 还没有监听到账的订单;其余 {rest}% 是节点运营成本',
+  'rw.pool.ordT': '订单金额的 {rate}%', 'rw.pool.ordD': '[[sub]] 已发放的 {n} 笔订单,共 {v} USDT;其余 {rest}% 是节点运营成本', 'rw.pool.ordNone': '[[sub]] 还没有已发放的订单;其余 {rest}% 是节点运营成本',
   'rw.pool.donT': '留名捐赠(全额)', 'rw.pool.donD': '共 {n} 笔,名字都在「捐赠榜」里', 'rw.pool.donNone': '还没有人捐。在「捐赠榜」里留名捐的,全额进奖池',
   'rw.dn.late': '请在倒计时结束前转完。过了时间再按这个金额转,对不上号,不计入奖池 —— 来不及就重新提交一次。', 'rw.dn.cancelHelp': '还没转账时用。已经转了就不用点 —— 等它到账就行', 'rw.dn.off': '奖池的收款地址这会儿取不到,暂时不能捐。过一会儿再来。',
-  'lp.nOfNodes': '{n}/{m} 个节点', 'lp.wholeLineHelpNodes': '这条线路的节点全勾上了:以后这条线路加部署的服务器、加的中转入口,也自动可用', 'lp.relayTip': '中转入口「{name}」:经它连到 {exit}。不勾 = 这个人的订阅里不发这个节点',
   'line.reach.btn': '测大陆连通', 'line.reach.again': '重测大陆连通', 'line.reach.help': '从大陆移动、电信、联通的家庭宽带测点连这条线路在订阅里的每个地址和端口,香港测点作对照。约半分钟出结果,不记历史、不告警', 'line.reach.off': '这条线路停用着,没有在监听,启用后再测',
   'line.reach.progress': '检测中 {done}/{total}…', 'line.reach.udpNote': '这条线路走 UDP:测点连不了 UDP 端口,只 ping 了地址。能看出地址通不通,看不出端口有没有被封、QUIC 有没有被针对。',
   'line.reach.pingOk': 'ping 通',
+  'lp.nOfNodes': '{n}/{m} 个节点', 'lp.wholeLineHelpNodes': '这条线路的节点全勾上了:以后这条线路加部署的服务器、加的中转入口,也自动可用', 'lp.relayTip': '中转入口「{name}」:经它连到 {exit}。不勾 = 这个人的订阅里不发这个节点',
+  'rw.led.void': '已撤销', 'rw.led.voidTip': '这笔订单到账之后又取消了(已退款),留在这里备查,不计入奖池', 'rw.led.manual': '人工确认', 'rw.led.manualTip': '付款金额和订单对不上,订阅站核对到账之后人工确认的订单;金额按实际到账的算', 'rw.led.notCounted': '不计入',
 };
 
 const en = {
@@ -2604,8 +2602,6 @@ const en = {
   'rw.clickCopy': 'click to copy',
   'rw.tab.pool': 'Pool',
   'rw.tab.board': 'Leaderboard', 'rw.tab.rules': 'Rules', 'rw.pool.how': 'Where the pool comes from',
-  
-  
   'rw.led.title': 'Every deposit', 'rw.led.all': 'All', 'rw.led.order': 'Order', 'rw.led.donation': 'Donation',
   'rw.led.allChains': 'All chains', 'rw.led.time': 'Date', 'rw.led.kind': 'Type', 'rw.led.chain': 'Chain', 'rw.led.from': 'From', 'rw.led.amount': 'Amount', 'rw.led.counted': 'To pool',
   'rw.led.tx': 'View transaction', 'rw.led.none': 'No deposits yet', 'rw.led.noneFiltered': 'Nothing matches these filters', 'rw.count': '{n} total', 'rw.prev': 'Prev', 'rw.next': 'Next',
@@ -2615,7 +2611,7 @@ const en = {
   'rw.rule.1.d': 'Upload plus download in raw bytes, no multipliers; other traffic on the server doesn\'t count. A master adds up all its nodes.', 'rw.rule.2.t': '1 point per TB',
   'rw.rule.2.d': 'Without an address points only accumulate locally; once you add one they are all registered. Each address is credited at most 1 point a day, on days one of its panels reports; the rest carries over.',
   'rw.rule.3.t': 'Pool = {rate}% of orders + named donations',
-  'rw.rule.3.d': '{rate}% of every confirmed order of [[sub]] goes to the pool; donations made with a name under Donors count in full (money sent straight to the address can\'t be matched and doesn\'t count). Every deposit is listed under Pool and can be checked on chain.',
+  'rw.rule.3.d': '{rate}% of every fulfilled order of [[sub]] goes to the pool (orders refunded after payment don\'t count); donations made with a name under Donors count in full (money sent straight to the address can\'t be matched and doesn\'t count). Every deposit is listed under Pool and can be checked on chain.',
   'rw.rule.4.t': 'Paid out by points on {day}',
   'rw.rule.4.d': 'On m-ui\'s first anniversary the pool is sent in USDT to registered Solana addresses in proportion to their points. Every payout amount and transaction ID is published too.',
   'rw.rule.5.t': 'Public ledger; cheating is excluded automatically',
@@ -2627,11 +2623,6 @@ const en = {
   'rw.sub': 'godusevpn node subscriptions', 'rw.slogan': 'Run traffic, share the pool',
   'rw.lead': 'Every 1 TB of real traffic on your lines earns 1 point. On {day} the pool is paid out in USDT in proportion to points.', 'rw.mine.traffic': 'Real traffic', 'rw.mine.next': 'Next point',
   'rw.donate': 'Donate to the pool',
-  
-  
-  
-  
-  
   'rw.tab.donate': 'Donors', 'rw.dn.title': 'Donate to the pool',
   'rw.dn.lead': 'Leave a name and an amount. You get the exact amount to send and 60 minutes to send it; when it arrives in time, it counts toward the pool and is listed under that name.', 'rw.dn.name': 'Name',
   'rw.dn.namePh': 'Name to show, up to 20 characters', 'rw.dn.amount': 'Amount', 'rw.dn.amountPh': 'min {min}', 'rw.dn.submit': 'Next',
@@ -2660,10 +2651,8 @@ const en = {
   'rw.priv.4': 'The registry sees this server\'s public IP, like any service you connect to. It keeps only a salted hash of it for the one-source-one-address rule; it never stores the IP itself and never publishes it.',
   'rw.unit1': 'pt',
   'user.filter.soon': 'Ending soon', 'user.filter.soonHelp': 'Expiring within {d} {d|day|days}, or {p}%+ of data used (users who can still connect)',
-  'rw.pool.ordT': '{rate}% of order revenue', 'rw.pool.ordD': '{n} confirmed {n|order|orders} of [[sub]], {v} USDT in total; the other {rest}% runs the nodes',
-  'lp.nOfNodes': '{n}/{m} nodes', 'lp.wholeLineHelpNodes': 'Every node of this line is ticked: servers and relay entries added to this line later are included automatically',
-  'lp.relayTip': 'Relay entry "{name}": connects through it to {exit}. Unticked = this node is left out of the subscription',
-  'rw.pool.ordNone': 'No confirmed orders of [[sub]] yet; the other {rest}% runs the nodes', 'rw.pool.donT': 'Named donations (in full)',
+  'rw.pool.ordT': '{rate}% of order revenue', 'rw.pool.ordD': '{n} fulfilled {n|order|orders} of [[sub]], {v} USDT in total; the other {rest}% runs the nodes',
+  'rw.pool.ordNone': 'No fulfilled orders of [[sub]] yet; the other {rest}% runs the nodes', 'rw.pool.donT': 'Named donations (in full)',
   'rw.pool.donD': '{n} {n|donation|donations}; the names are under Donors', 'rw.pool.donNone': 'None yet. Donations made with a name under Donors count in full',
   'rw.dn.late': 'Send it before the timer runs out. A transfer of this amount made after that can\'t be matched and won\'t count toward the pool — if you run out of time, submit again.',
   'rw.dn.cancelHelp': 'Use this if you haven\'t sent anything. If you already have, just wait for it to arrive',
@@ -2673,6 +2662,12 @@ const en = {
   'line.reach.off': 'This line is disabled and not listening; enable it first', 'line.reach.progress': 'Testing {done}/{total}…',
   'line.reach.udpNote': 'This line uses UDP: probes can\'t connect to a UDP port, so only the address was pinged. It shows whether the address is reachable, not whether the port is blocked or QUIC is being interfered with.',
   'line.reach.pingOk': 'Ping OK',
+  'lp.nOfNodes': '{n}/{m} nodes', 'lp.wholeLineHelpNodes': 'Every node of this line is ticked: servers and relay entries added to this line later are included automatically',
+  'lp.relayTip': 'Relay entry "{name}": connects through it to {exit}. Unticked = this node is left out of the subscription',
+  'rw.led.void': 'Cancelled', 'rw.led.voidTip': 'This order was cancelled after it was paid (refunded). It stays listed for the record and does not count toward the pool',
+  'rw.led.manual': 'Confirmed by hand',
+  'rw.led.manualTip': 'The payment did not match the order amount; the store checked the transfer and confirmed the order by hand. The amount shown is what actually arrived',
+  'rw.led.notCounted': 'Not counted',
 };
 
 const dicts = { zh, en };

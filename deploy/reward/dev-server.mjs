@@ -36,22 +36,23 @@ commerce.prepare('INSERT INTO payment_addresses VALUES(?,1,0,0,0)').run(tronAddr
 chain.open(solAddr);
 const env = { DB: d1(db), COMMERCE: d1(openDB(commerceFile, { readOnly: true })), SALT: 'dev', SOLANA_RPC: 'http://rpc.test', TRON_API: 'http://tron.test', FETCH: chain.fetch };
 
-// 订阅站认了一笔订单。金额照订阅站的样子带一截零头(第 6 位小数不是 0)。
+// 订阅站认了一笔订单:一张已发放的订单 + 挂在它上面的一笔监听到账的付款。金额照订阅站的样子带一截零头(第 6 位小数不是 0)。
 function order(amount, where = 'solana') {
   let m = Math.round(amount * 1e6) + 1 + rnd(1)[0] * 37 % 9999;
   if (m % 10 === 0) m += 3;
-  const at = now();
+  const at = now(), hash = Buffer.from(rnd(32)).toString('hex');
+  commerce.prepare("INSERT INTO orders VALUES(?,?,?,'fulfilled',?,?)").run(hash, m, tronAddr, at * 1000 - 60000, at * 1000 + 60000);
   if (where === 'tron') {
     const tx = Buffer.from(rnd(32)).toString('hex');
-    commerce.prepare("INSERT INTO payments(tx_id,address,amount_micros,block_timestamp,event_json,status,checked_at,created_at) VALUES(?,?,?,?,?,'credited',?,?)")
-      .run(tx, tronAddr, String(m), at * 1000, JSON.stringify({ from: b58(Uint8Array.from([0x41, ...rnd(24)])), to: tronAddr, value: String(m) }), at * 1000, at * 1000);
+    commerce.prepare("INSERT INTO payments(tx_id,address,amount_micros,block_timestamp,event_json,status,order_hash,checked_at,created_at) VALUES(?,?,?,?,?,'credited',?,?,?)")
+      .run(tx, tronAddr, String(m), at * 1000, JSON.stringify({ from: b58(Uint8Array.from([0x41, ...rnd(24)])), to: tronAddr, value: String(m) }), hash, at * 1000, at * 1000);
     chain.tron.set(tronAddr, (chain.tron.get(tronAddr) || 0) + m);
     return { chain: 'tron', tx, amount: m / 1e6 };
   }
   commerce.prepare('INSERT OR IGNORE INTO solana_amount_reservations VALUES(?,?,?)').run(solAddr, m, at);
   const paid = chain.pay(solAddr, m, at);
-  commerce.prepare("INSERT INTO payments(tx_id,address,amount_micros,block_timestamp,event_json,status,checked_at,created_at) VALUES(?,?,?,?,?,'credited',?,?)")
-    .run('solana:' + paid.signature, solAddr, String(m), at * 1000, JSON.stringify({ network: 'SOLANA', signature: paid.signature }), at * 1000, at * 1000);
+  commerce.prepare("INSERT INTO payments(tx_id,address,amount_micros,block_timestamp,event_json,status,order_hash,checked_at,created_at) VALUES(?,?,?,?,?,'credited',?,?,?)")
+    .run('solana:' + paid.signature, solAddr, String(m), at * 1000, JSON.stringify({ network: 'SOLANA', signature: paid.signature }), hash, at * 1000, at * 1000);
   return { chain: 'solana', tx: paid.signature, amount: m / 1e6 };
 }
 const rows = sql => db.prepare(sql).all().map(r => ({ ...r }));

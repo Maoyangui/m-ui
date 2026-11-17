@@ -8,7 +8,8 @@
 //      条件消失 14 天后自动恢复。全程没有人工的步骤;每一次不计入 / 恢复 / 作废都记在公开账本里。
 //      判的是「面板」不是「地址」:谁都能把别人的地址绑到自己的面板上,要是按地址判,就能拿它去害人。
 //   4. 奖池:
-//      - 订单:只读订阅站的订单库,取「监听成功」的付款(payments.status = 'credited',两条链都算),按 40% 计入。
+//      - 订单:只读订阅站的订单库,取「已发放而且还在」的订单(监听到账的 + 人工确认发放的,两条链都算),按 40% 计入;
+//        监听到账后又取消(退款)的那一笔作废,留在账本上、不计入。
 //      - 捐赠:只认留名捐赠。先登记「留名 + 金额」,拿到一个带零头的确切金额,60 分钟内这个数转到奖池的 Solana 地址,
 //        就全额计入奖池并记上名字。没登记就直接转进来的、过了期限才到的,一律不计入 —— 这个地址上还有别的资金流动,
 //        只有对得上一笔登记的才能确定是给奖池的。到没到账由登记服务自己看链(订阅站只在有待付订单时才扫链)。
@@ -416,31 +417,78 @@ const roomFor = (env, n) => !env.room || env.room(n);
 const loadState = db => kvJSON(db, 'state', {});
 
 // ---- 奖池:订单(只读订单库)----
-// 订单库的 payments 表里 status = 'credited' 的,就是对上了订单、订阅站认了的付款(「监听成功」)。两条链都在这张表里;
-// Solana 的 tx_id 前面带 'solana:'。这种记录在订单库里不会再变,这边也只加不删。
+// 计入的是订阅站里「已发放」而且现在还在的订单:
+//   - 监听到账的:付款记录是 credited(对上了订单、订阅站认了),它挂着的那张订单还在、已发放 → 按到账的金额记,带链上交易号。
+//     两条链都在 payments 这张表里;Solana 的 tx_id 前面带 'solana:'。
+//   - 人工确认发放的:订单已发放,却没有监听到账的付款(付款金额和订单对不上,管理员核对后补发的)→ 标 manual。
+//     订单从下单到发放这段时间里,打到它收款地址上、被订阅站标成「金额对不上」的付款恰好只有一笔 → 按那一笔实收的金额记,带它的交易号;
+//     找不出唯一的一笔 → 按订单的金额记,没有交易号。
+//   - 监听到账之后订单没了(退款后删掉了)→ 那一笔作废(void):账本上留着、标出来,不计入奖池。订单回来了(不会,但万一)自动恢复。
+// 订单号是订阅的使用凭证:这里只拿订单的状态、金额、收款地址、时间;订单的标识只出现在连接条件里,从不取出来,账本里自然也不会有。
+// 平时每一轮只看最近变动的付款;作废退款的、认人工确认的要对全表,每小时做一遍(读的是订阅站的库,省着读)。
+const ORDER_FULL_EVERY = 3600;
+const validOrder = "EXISTS (SELECT 1 FROM orders o WHERE o.order_hash = p.order_hash AND o.status = 'fulfilled')";
+const manualKey = o => `manual:${Number(o.fulfilled_at) || 0}:${Number(o.amount_micros) || 0}`; // 没对上链上交易的人工确认:拿发放时间和金额当这一笔的编号(不含订单的任何标识)
+
+// matchManual 给人工确认发放的订单找它那一笔「金额对不上」的付款(review 是订阅站标成待核对的付款)。
+// 一笔付款只配给一张订单;候选不止一笔、或者一笔都没有的,不硬配(p = null)。
+export function matchManual(orders, review) {
+  const used = new Set(), out = [];
+  for (const o of orders) {
+    const lo = Number(o.created_at) - 120_000, hi = Number(o.fulfilled_at) + 120_000, amt = Number(o.amount_micros);
+    const c = review.filter(p => !used.has(p.tx_id) && (p.address === o.address || (o.sol_address && p.address === o.sol_address))
+      && Number(p.block_timestamp) >= lo && Number(p.block_timestamp) <= hi && Number(p.amount_micros) >= amt * 0.8 && Number(p.amount_micros) <= amt * 1.2);
+    if (c.length === 1) used.add(c[0].tx_id);
+    out.push({ o, p: c.length === 1 ? c[0] : null });
+  }
+  return out;
+}
+
 export async function syncOrders(env, st, now) {
   const db = env.DB;
-  // 平时只看最近变动的(按核对时间),每天全量过一遍
-  let since = Number(st.ordCur || 0);
-  if (now - Number(st.ordFull || 0) > 86400) { since = 0; st.ordFull = now; }
-  // 只取这几样:链上交易号、收款地址、金额、时间、付款方地址(从链上事件里单拿这一项)。订单号、订单的哈希、套餐、订阅这些一概不读 ——
-  // 订单号是订阅的使用凭证,这里不碰它,账本里自然也不会有。
-  const rows = await all(commerce(env), `SELECT tx_id, address, amount_micros, block_timestamp,
-    CASE WHEN json_valid(event_json) THEN json_extract(event_json, '$.from') END AS payer, COALESCE(checked_at, created_at) AS at
-    FROM payments WHERE status = 'credited' AND COALESCE(checked_at, created_at) >= ?`, Math.max(0, since - 3600_000));
-  const stmts = [];
+  const full = now - Number(st.ordFull || 0) >= ORDER_FULL_EVERY;
+  const since = full ? 0 : Number(st.ordCur || 0);
+  const rows = await all(commerce(env), `SELECT p.tx_id, p.address, p.amount_micros, p.block_timestamp,
+    CASE WHEN json_valid(p.event_json) THEN json_extract(p.event_json, '$.from') END AS payer, COALESCE(p.checked_at, p.created_at) AS at
+    FROM payments p WHERE p.status = 'credited' AND COALESCE(p.checked_at, p.created_at) >= ? AND ${validOrder}`, Math.max(0, since - 3600_000));
+  const stmts = [], valid = new Set();
   let top = since;
+  // 记一笔订单入账;已经有的(当成捐赠记过、作废过、标记不一样)改回来,没变的不动
+  const put = (tx, chain, address, ts, from, m, note) => {
+    valid.add(tx);
+    stmts.push(q(db, `INSERT INTO deposits(tx, chain, address, ts, from_addr, micros, kind, name, seen_at, void, note) VALUES(?,?,?,?,?,?,'order','',?,0,?)
+      ON CONFLICT(tx) DO UPDATE SET kind = 'order', name = '', void = 0, note = excluded.note, micros = excluded.micros
+      WHERE deposits.kind != 'order' OR deposits.void != 0 OR deposits.note != excluded.note OR deposits.micros != excluded.micros`, tx, chain, address, ts, from, m, now, note));
+  };
+  const payer = p => (typeof p.payer === 'string' && chainOf(p.payer) ? p.payer : ''); // 读不出付款方就空着
   for (const p of rows) {
     top = Math.max(top, Number(p.at) || 0);
     const tx = String(p.tx_id || '').replace(/^solana:/, ''), chain = chainOf(p.address), m = Number(p.amount_micros), ts = sec(p.block_timestamp);
     if (!tx || tx.length > 128 || !chain || !Number.isSafeInteger(m) || m <= 0 || !ts) continue;
-    const from = typeof p.payer === 'string' && chainOf(p.payer) ? p.payer : ''; // 读不出付款方就空着
-    stmts.push(q(db, `INSERT INTO deposits(tx, chain, address, ts, from_addr, micros, kind, name, seen_at) VALUES(?,?,?,?,?,?,'order','',?)
-      ON CONFLICT(tx) DO UPDATE SET kind = 'order', name = '' WHERE deposits.kind != 'order'`, tx, chain, p.address, ts, from, m, now));
+    put(tx, chain, p.address, ts, payer(p), m, '');
   }
-  const added = await batched(db, stmts); // 已经记过的订单不会再改动,所以这就是新记下的笔数
+  if (full) {
+    const manual = await all(commerce(env), `SELECT o.amount_micros, o.address, o.created_at, o.fulfilled_at,
+      (SELECT x.address FROM order_payment_options x WHERE x.order_hash = o.order_hash AND x.network = 'SOLANA') AS sol_address
+      FROM orders o WHERE o.status = 'fulfilled' AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.order_hash = o.order_hash AND p.status = 'credited')
+      ORDER BY o.fulfilled_at, o.created_at`);
+    const review = manual.length ? await all(commerce(env), `SELECT p.tx_id, p.address, p.amount_micros, p.block_timestamp,
+      CASE WHEN json_valid(p.event_json) THEN json_extract(p.event_json, '$.from') END AS payer FROM payments p WHERE p.status = 'review'`) : [];
+    for (const { o, p } of matchManual(manual, review)) {
+      if (p) {
+        const tx = String(p.tx_id || '').replace(/^solana:/, ''), chain = chainOf(p.address), m = Number(p.amount_micros), ts = sec(p.block_timestamp);
+        if (tx && tx.length <= 128 && chain && Number.isSafeInteger(m) && m > 0 && ts) { put(tx, chain, p.address, ts, payer(p), m, 'manual'); continue; }
+      }
+      const chain = chainOf(o.address), m = Number(o.amount_micros), ts = sec(o.fulfilled_at);
+      if (chain && Number.isSafeInteger(m) && m > 0 && ts) put(manualKey(o), chain, o.address, ts, '-', m, 'manual');
+    }
+    // 账本上记着、这一遍却不在「已发放且还在」里的订单入账:作废(留着,不计入)
+    for (const d of await all(db, "SELECT tx FROM deposits WHERE kind = 'order' AND void = 0")) if (!valid.has(d.tx)) stmts.push(q(db, 'UPDATE deposits SET void = 1 WHERE tx = ?', d.tx));
+    st.ordFull = now;
+  }
+  const changed = await batched(db, stmts); // 没变的那些语句不改动任何行,所以这就是这一轮新记下、改回来或作废的笔数
   st.ordCur = top;
-  return added;
+  return changed;
 }
 
 // ---- 奖池:捐赠(自己看链上)----
@@ -741,9 +789,10 @@ const intentView = (i, now) => ({
 export async function buildExport(env, now, st) {
   const db = env.DB;
   if (!st) st = await loadState(db);
+  // 作废的(void:监听到账后订单又取消了)留在逐笔里给人看,不进任何合计
   const sums = { order: { n: 0, m: 0 }, donation: { n: 0, m: 0 } };
-  for (const r of await all(db, 'SELECT kind, COUNT(*) AS n, COALESCE(SUM(micros), 0) AS m FROM deposits GROUP BY kind')) if (sums[r.kind]) sums[r.kind] = { n: r.n, m: r.m };
-  const got = new Map((await all(db, 'SELECT address, SUM(micros) AS m FROM deposits GROUP BY address')).map(r => [r.address, r.m]));
+  for (const r of await all(db, 'SELECT kind, COUNT(*) AS n, COALESCE(SUM(micros), 0) AS m FROM deposits WHERE void = 0 GROUP BY kind')) if (sums[r.kind]) sums[r.kind] = { n: r.n, m: r.m };
+  const got = new Map((await all(db, 'SELECT address, SUM(micros) AS m FROM deposits WHERE void = 0 GROUP BY address')).map(r => [r.address, r.m]));
   const share = Math.round(sums.order.m * CFG.orderRate);
   // 积分榜:有积分的,和名下的面板现在全都被剔除着的(写明原因)。还没挣到积分的地址不列(面板自己知道自己的情况)。
   // 「全都被剔除」才标出来:名下混进一台别人冒绑的作弊面板,不会让这个地址看起来像被判了(他自己的面板还在算)。
@@ -759,7 +808,7 @@ export async function buildExport(env, now, st) {
   const live = board.filter(b => !b.excluded && b.points > 0);
   const addrs = (st.pool && st.pool.list) || await poolAddresses(env);
   const sol = addrs.find(a => a.chain === 'solana');
-  const deps = await all(db, 'SELECT tx, chain, address, ts, from_addr, micros, kind, name FROM deposits ORDER BY ts DESC, tx LIMIT 5000');
+  const deps = await all(db, 'SELECT tx, chain, address, ts, from_addr, micros, kind, name, void, note FROM deposits ORDER BY ts DESC, tx LIMIT 5000');
   const events = await all(db, 'SELECT ts, address, panel, kind, rule, reason FROM events ORDER BY id DESC LIMIT 500');
   const ledger = {
     v: 1, updatedAt: now, payoutAt: CFG.payoutAt, orderRate: CFG.orderRate,
@@ -769,7 +818,9 @@ export async function buildExport(env, now, st) {
     },
     chains: addrs.map(a => ({ chain: a.chain, address: a.address, received: usd(got.get(a.address) || 0) })), // received = 计入奖池的那些入账的合计(订单按全额记)
     donate: { chain: 'solana', address: sol ? sol.address : '', min: CFG.donateMin / 1e6, max: CFG.donateMax / 1e6 },
-    deposits: deps.map(d => ({ ts: d.ts, kind: d.kind, chain: d.chain, address: d.address, amount: d.micros / 1e6, from: d.from_addr === '-' ? '' : d.from_addr, tx: d.tx, ...(d.name ? { name: d.name } : {}) })),
+    // tx:链上交易号;人工确认、又没对上链上那一笔的订单没有交易号(空)。note = 'manual' 人工确认发放的订单;void = true 作废、不计入
+    deposits: deps.map(d => ({ ts: d.ts, kind: d.kind, chain: d.chain, address: d.address, amount: d.micros / 1e6, from: d.from_addr === '-' ? '' : d.from_addr,
+      tx: d.tx.startsWith('manual:') ? '' : d.tx, ...(d.name ? { name: d.name } : {}), ...(d.note ? { note: d.note } : {}), ...(d.void ? { void: true } : {}) })),
     board, events,
   };
   await kvSet(db, 'export', JSON.stringify(ledger));
@@ -787,7 +838,7 @@ export async function tick(rawEnv, now) {
     try { await fn(); } catch (e) { errs[name] = String((e && e.message) || e).slice(0, 200); }
   };
   const due = (key, every) => { if (now - Number(st[key] || 0) < every) return false; st[key] = now; return true; };
-  await step('orders', 2, () => syncOrders(env, st, now));
+  await step('orders', 6, () => syncOrders(env, st, now));
   await step('judge', 6, () => judge(db, now, env));
   await step('credit', 2, () => creditPoints(db, now));
   if (due('payAt', 600)) await step('payers', 3, () => fillPayers(env, st, now));

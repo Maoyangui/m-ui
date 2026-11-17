@@ -106,3 +106,60 @@ test('发放:按积分比例,向下取到分;被剔除的不参加;发出去的�
   assert.deepEqual(big.rows.map(x => x.amount), [98765333.33, 98.76]);
   assert.ok(big.paid <= big.pool);
 });
+
+// ---- 人工确认发放的订单(note: manual)、订单取消后作废的入账(void) ----
+// 在好账本上加一笔人工确认的(没有交易号)和一笔作废的:合计只多算人工确认的那一笔
+const withMarks = () => edit(l => {
+  l.deposits.push({ ts: NOW - 500, kind: 'order', chain: 'tron', address: TRON, amount: 18.003708, from: '', tx: '', note: 'manual' });
+  l.deposits.push({ ts: NOW - 600, kind: 'order', chain: 'tron', address: TRON, amount: 18.007208, from: TRON, tx: 'b'.repeat(64), void: true });
+  l.pool.orderCount = 3; l.pool.orderAmount = 47.98; l.pool.orderShare = 19.19; l.pool.total = 30.19;
+});
+
+test('人工确认的订单可以没有交易号;作废的留在逐笔里、不进合计', () => {
+  assert.deepEqual(checkLedger(withMarks(), NOW), []);
+  const cases = [
+    [l => { l.deposits[2].tx = ''; }, /没有交易号/],                                  // 普通订单不能没有交易号
+    [l => { l.deposits[0].note = 'manual'; }, /标记不对/],                             // 捐赠不能标人工确认
+    [l => { l.deposits[4].note = 'whatever'; }, /标记不对/],
+    [l => { l.deposits[0].void = true; }, /作废标记不对/],                             // 捐赠没有作废这一说
+    [l => { l.deposits[5].void = 1; }, /作废标记不对/],
+    [l => { l.pool.orderCount = 4; }, /笔数对不上/],                                   // 把作废的也数进去了
+    [l => { l.pool.orderAmount = 65.99; l.pool.orderShare = 26.4; l.pool.total = 37.4; }, /金额对不上/],
+  ];
+  for (const [fn, why] of cases) {
+    const l = withMarks(); fn(l);
+    const problems = checkLedger(l, NOW);
+    assert.ok(problems.some(p => why.test(p)), `${fn} → ${JSON.stringify(problems)}`);
+  }
+  // 两笔没有交易号的人工确认不算「交易号重复」
+  const two = withMarks();
+  two.deposits.push({ ts: NOW - 700, kind: 'order', chain: 'tron', address: TRON, amount: 10, from: '', tx: '', note: 'manual' });
+  two.pool.orderCount = 4; two.pool.orderAmount = 57.98; two.pool.orderShare = 23.19; two.pool.total = 34.19;
+  assert.deepEqual(checkLedger(two, NOW), []);
+});
+
+test('只增不减的例外:订单取消后那一笔标成作废,合计正好少掉它;少得更多、或者把它整笔拿掉都不行', () => {
+  const prev = good();
+  // 9.991237 的那笔订单退款了
+  const refunded = edit(l => { l.deposits[3].void = true; l.pool.orderCount = 1; l.pool.orderAmount = 19.99; l.pool.orderShare = 8; l.pool.total = 19; });
+  assert.deepEqual(checkLedger(refunded, NOW), []);
+  assert.deepEqual(checkGrowth(prev, refunded), []);
+  assert.equal(verdict(refunded, prev, NOW).code, 0);
+  // 标了一笔作废,合计却少了两笔的钱
+  const tooMuch = edit(l => { l.deposits[3].void = true; l.pool.orderCount = 1; l.pool.orderAmount = 19.99; l.pool.orderShare = 8; l.pool.total = 9; l.pool.donateCount = 1; l.pool.donateAmount = 1; });
+  assert.ok(checkGrowth(prev, tooMuch).some(p => /比分支上的少了/.test(p)));
+  // 不标作废、直接拿掉
+  const removed = edit(l => { l.deposits.splice(3, 1); l.pool.orderCount = 1; l.pool.orderAmount = 19.99; l.pool.orderShare = 8; l.pool.total = 19; });
+  assert.ok(checkGrowth(prev, removed).some(p => /丢了 1 笔/.test(p)));
+  assert.ok(checkGrowth(prev, removed).some(p => /比分支上的少了/.test(p)));
+  // 上一份里就已经作废的,这一份不能再拿它解释新的减少
+  const prevVoid = refunded;
+  const again = edit(l => { l.deposits[3].void = true; l.pool.orderCount = 0; l.pool.orderAmount = 0; l.pool.orderShare = 0; l.pool.total = 11; l.deposits[2].void = undefined; });
+  assert.ok(checkGrowth(prevVoid, again).some(p => /比分支上的少了/.test(p)));
+  // 没有交易号的人工确认订单:两份之间拿时间和金额认,不会被当成丢了
+  const m1 = withMarks(), m2 = withMarks();
+  m2.updatedAt = NOW - 10;
+  assert.deepEqual(checkGrowth(m1, m2), []);
+  m2.deposits = m2.deposits.filter(d => d.note !== 'manual');
+  assert.ok(checkGrowth(m1, m2).some(p => /丢了 1 笔,比如 manual:/.test(p)));
+});

@@ -622,6 +622,9 @@ S.reward = (() => {
   const mk = (ts, kind, chain, amount, name) => ({ ts, kind, chain, amount, name: name || '', from: chain === 'tron' ? rwAddr(34, 'T') : rwAddr(44), tx: rwAddr(chain === 'tron' ? 64 : 88) });
   const amounts = [9.9, 29.9, 9.9, 59, 9.9, 29.9, 99, 9.9, 29.9, 9.9, 199, 29.9, 9.9, 59, 9.9, 29.9, 9.9, 99, 29.9, 9.9, 59, 9.9, 29.9];
   const ledger = amounts.map((a, i) => mk(t0 - Math.floor((i * 2.6 + rwRand() * 2) * day) - 3600, 'order', rwRand() < 0.62 ? 'solana' : 'tron', a));
+  // 两种少见的:一笔人工确认发放的订单(付款金额和订单对不上,核对到账之后确认的;按实收的算),一笔到账后又退款的(作废,不计入)
+  ledger[3].note = 'manual'; ledger[3].amount = 58.3;
+  ledger[6].void = true;
   // 捐赠:只有留名捐赠计入奖池(没登记就转进来的不算),所以每一笔都有名字,都在 Solana 上
   const gifts = [[2, 50, '老王'], [5, 20, 'night_owl'], [9, 100, '路过的面板党'], [12, 10, 'Tokyo 小鸡'], [15, 30, '老王'], [19, 66.66, 'k8s 练习生'], [23, 8.88, '半夜修机器的人'], [27, 20, 'night_owl'],
     [31, 200, 'M 记铁粉'], [36, 15, 'hy2 一把梭'], [41, 5, '隔壁机房'], [47, 88, '路过的面板党'], [52, 12.5, '夜班运维'], [29, 25, 'Tokyo 小鸡'], [8, 6, '一个路人'], [33, 40, '隔壁机房']];
@@ -644,7 +647,7 @@ function demoReward(method, seg, query, body) {
   const R = S.reward, q = new URLSearchParams(query || '');
   const now = () => Math.floor(Date.now() / 1000);
   const r2 = n => Math.round(n * 100) / 100;
-  const share = x => x.kind === 'donation' ? x.amount : r2(x.amount * R.rate);
+  const share = x => x.void ? 0 : x.kind === 'donation' ? x.amount : r2(x.amount * R.rate);
   const points = Math.floor(R.bytes / R.tb);
   const rows = () => { // 榜单:没被剔除的按积分排名;绑定了的把「我」放进去
     const list = R.board.map(x => ({ ...x }));
@@ -665,7 +668,7 @@ function demoReward(method, seg, query, body) {
     if (S.settings.rewardEnabled === 'false') return { enabled: false };
     settle();
     R.bytes += Math.round(2.4e9 + Math.random() * 1.6e9); // 演示:看着它一点点涨
-    const orders = R.ledger.filter(x => x.kind === 'order'), dons = R.ledger.filter(x => x.kind === 'donation');
+    const orders = R.ledger.filter(x => x.kind === 'order' && !x.void), dons = R.ledger.filter(x => x.kind === 'donation'); // 作废的订单不进合计
     const sum = a => r2(a.reduce((s, x) => s + x.amount, 0));
     const { ok } = rows();
     const total = r2(sum(orders) * R.rate + sum(dons));

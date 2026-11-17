@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS payments (
  event_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'observed', order_hash TEXT,
  confirmations INTEGER NOT NULL DEFAULT 0, reason TEXT, checked_at INTEGER, created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS orders (order_hash TEXT PRIMARY KEY, amount_micros INTEGER NOT NULL, address TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, fulfilled_at INTEGER);
+CREATE TABLE IF NOT EXISTS order_payment_options (order_hash TEXT NOT NULL, network TEXT NOT NULL, address TEXT NOT NULL, amount_micros INTEGER NOT NULL, PRIMARY KEY(order_hash, network));
 CREATE TABLE IF NOT EXISTS payment_addresses (address TEXT PRIMARY KEY, enabled INTEGER NOT NULL, position INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS solana_payment_addresses (address TEXT PRIMARY KEY, enabled INTEGER NOT NULL, position INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS solana_amount_reservations (address TEXT NOT NULL, amount_micros INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(address, amount_micros));

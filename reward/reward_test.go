@@ -106,16 +106,35 @@ func TestLedgerCheckAndShare(t *testing.T) {
 	if got := l.Share(l.Deposits[2]); got != 8 {
 		t.Fatalf("捐赠全额计入: %v", got)
 	}
+	// 人工确认发放的订单(可以没有交易号)、订单取消后作废的入账:认;作废的不计入
+	marked := goodLedger(now)
+	marked.Deposits = append(marked.Deposits,
+		Deposit{TS: now - 400, Kind: "order", Chain: "tron", Amount: 18.003708, Note: "manual"},
+		Deposit{TS: now - 500, Kind: "order", Chain: "solana", Amount: 87.305142, From: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", Tx: "sig9", Note: "manual"},
+		Deposit{TS: now - 600, Kind: "order", Chain: "tron", Amount: 18.007208, From: "TDoUMF4nF244o5GZvBBwX5t9axvnSoP1Cm", Tx: "tx7", Void: true})
+	if err := marked.check(now); err != nil {
+		t.Fatalf("带标记的账本应通过: %v", err)
+	}
+	if got := marked.Share(marked.Deposits[4]); got != 34.92 {
+		t.Fatalf("人工确认的订单照样按比例计入: %v", got)
+	}
+	if got := marked.Share(marked.Deposits[5]); got != 0 {
+		t.Fatalf("作废的不计入: %v", got)
+	}
 	for name, bad := range map[string]func(*Ledger){
-		"版本":   func(x *Ledger) { x.V = 2 },
-		"未来":   func(x *Ledger) { x.UpdatedAt = now + 86400 },
-		"比例":   func(x *Ledger) { x.OrderRate = 1.5 },
-		"链":    func(x *Ledger) { x.Chains[0].Chain = "eth" },
-		"收款地址": func(x *Ledger) { x.Chains[1].Address = "not-a-tron-address" },
-		"没留名":  func(x *Ledger) { x.Deposits[2].Name = "" },
-		"类型":   func(x *Ledger) { x.Deposits[0].Kind = "gift" },
-		"留名太长": func(x *Ledger) { x.Deposits[2].Name = strings.Repeat("字", 30) },
-		"榜单地址": func(x *Ledger) { x.Board[0].Address = "bad" },
+		"版本":    func(x *Ledger) { x.V = 2 },
+		"未来":    func(x *Ledger) { x.UpdatedAt = now + 86400 },
+		"比例":    func(x *Ledger) { x.OrderRate = 1.5 },
+		"链":     func(x *Ledger) { x.Chains[0].Chain = "eth" },
+		"收款地址":  func(x *Ledger) { x.Chains[1].Address = "not-a-tron-address" },
+		"没留名":   func(x *Ledger) { x.Deposits[2].Name = "" },
+		"类型":    func(x *Ledger) { x.Deposits[0].Kind = "gift" },
+		"留名太长":  func(x *Ledger) { x.Deposits[2].Name = strings.Repeat("字", 30) },
+		"没交易号":  func(x *Ledger) { x.Deposits[0].Tx = "" },
+		"标记":    func(x *Ledger) { x.Deposits[0].Note = "whatever" },
+		"捐赠标人工": func(x *Ledger) { x.Deposits[2].Note = "manual" },
+		"捐赠作废":  func(x *Ledger) { x.Deposits[2].Void = true },
+		"榜单地址":  func(x *Ledger) { x.Board[0].Address = "bad" },
 	} {
 		x := goodLedger(now)
 		bad(&x)

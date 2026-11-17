@@ -951,7 +951,9 @@ const EN = /*BEGIN*/{
 "没测成": "The test didn't complete",
 "线路「%s」的节点一个都没留:至少留一个,或者把这条线路整条去掉": "No node of line \"%s\" is left selected: keep at least one, or remove the whole line",
 "线路节点选择格式错误": "Invalid line node selection",
-"节点选择里有套餐没带的线路 #%w": "The node selection includes line #%w that the plan doesn't have"
+"节点选择里有套餐没带的线路 #%w": "The node selection includes line #%w that the plan doesn't have",
+"账本第 %d 笔入账的标记不对": "Deposit #%d in the ledger has a wrong mark",
+"账本第 %d 笔入账没有交易号": "Deposit #%d in the ledger has no transaction id"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表
