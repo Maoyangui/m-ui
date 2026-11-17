@@ -1336,11 +1336,13 @@ var panelSettings = setOf(
 	"upstreamCheckMinutes", "upstreamCheckFailThreshold", "reachAuto", "reachMinutes", "reachToken",
 	"certFile", "keyFile", "upstreamTestUrl", "statsBucketSeconds", "trafficAge", "allowPrivate",
 	"nodeMode", "backupHour", "backupKeep", "backupTelegram", "subLogAge", "auditAge",
-	"fwAutoBan", "fwAutoAllow",
+	"fwAutoBan", "fwAutoAllow", "rewardEnabled",
 )
 
 // hiddenSettings 不发给浏览器的密钥:前端用不到,各自的页面走专门接口(管理员页、配对信息、证书页)。
-var hiddenSettings = setOf("totpSecret", "apiToken", "nodeToken", "acmeAccountKey", "acmeCfToken")
+var hiddenSettings = setOf("totpSecret", "apiToken", "nodeToken", "acmeAccountKey", "acmeCfToken",
+	// 流量奖励的面板私钥和它的内部状态:活动页走专门接口(reward_api.go)
+	"rewardKey", "rewardLast", "rewardDonation", "rewardRemind", "rewardAddress", "rewardBoundAt")
 
 // maskedSettings 设置页上要显示"已填"的密钥:只发掩码,原样提交回来的掩码表示不改,清空表示删除。
 var maskedSettings = setOf("tgToken", "reachToken", "webhookSecret")

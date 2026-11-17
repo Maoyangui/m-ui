@@ -677,7 +677,8 @@ function demoReward(method, seg, query, body) {
   if (seg[1] === 'donate') {
     if (seg[2] === 'cancel' || seg[2] === 'clear') { R.intent = null; return summary(); }
     const name = String((body && body.name) || '').trim().replace(/\s+/g, ' '), amount = Number(body && body.amount);
-    if (!name || [...name].length > 20) throw demoErr(400, '留名要填,最多 20 个字');
+    if (!name) throw demoErr(400, '请填写留名');
+    if ([...name].length > 20) throw demoErr(400, '留名最多 20 个字');
     if (!(amount >= 1) || amount > 100000 || Math.round(amount * 100) !== amount * 100) throw demoErr(400, '金额要在 1 到 100000 之间,最多两位小数');
     R.intent = { id: 'demo-' + now(), name, amount, exact: amount, chain: 'solana', address: R.chains.solana, createdAt: now(), expiresAt: now() + 3600, status: 'pending' };
     return summary();

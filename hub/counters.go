@@ -248,6 +248,7 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 			return err
 		}
 		var nodeUp, nodeDown int64
+		var real int64 // 流量奖励:这一块里真实用户的原始字节(乘倍率之前;面板内部的用户不算,见 model.RewardCounter)
 		rows := make([]model.Stats, 0, 2*len(part)+2)
 		next := make([]model.TrafficCursor, 0, len(part))
 		for _, c := range part {
@@ -346,6 +347,9 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 			case hasOld && dUp == c.Up-old.Up && dDown == c.Down-old.Down:
 				oUp, oDown, xUp, xDown = c.OUp-old.OUp, c.ODown-old.ODown, c.XUp-old.XUp, c.XDown-old.XDown
 			}
+			if model.RewardCounted(c.UserName) {
+				real += maxInt64(dUp, 0) + maxInt64(dDown, 0)
+			}
 			dUp, dDown = chargeOf(dUp, oUp, xUp, ratio), chargeOf(dDown, oDown, xDown, ratio)
 			res.Merged++
 			nodeUp += maxInt64(dUp, 0)
@@ -387,6 +391,9 @@ func mergeChunk(db *gorm.DB, nodeId uint, part []model.AgentCounter, now, bucket
 			}).CreateInBatches(&rows, counterChunk).Error; err != nil {
 				return err
 			}
+		}
+		if err := model.AddRewardBytes(tx, real, now); err != nil {
+			return err
 		}
 		return upsertCursors(tx, next)
 	})

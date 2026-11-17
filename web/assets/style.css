@@ -2270,6 +2270,8 @@ html.rw-lock { overflow: hidden; }
 .rw-pool-v { display: flex; align-items: baseline; gap: .5rem; }
 .rw-pool-v b { font-size: 3.4rem; font-weight: 700; line-height: 1.08; letter-spacing: -.04em; font-variant-numeric: tabular-nums; background: var(--rw-num); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .rw-pool-v span { font-size: var(--fs-sm); font-weight: 650; color: var(--rw-gold-t); letter-spacing: .05em; }
+/* 还取不到奖池数据:一个淡淡的占位,不拿金色的大横杠吓人 */
+.rw-pool-v b.na { background: none; color: var(--rw-faint); font-size: 2rem; font-weight: 500; letter-spacing: 0; }
 .rw-chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
 .rw-chip { display: inline-flex; align-items: center; min-height: 24px; padding: .1rem .6rem; border-radius: 99px; background: var(--rw-soft); color: var(--rw-ink2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rw-chip.gold { background: var(--rw-gold-soft); color: var(--rw-gold-t); font-weight: 600; }

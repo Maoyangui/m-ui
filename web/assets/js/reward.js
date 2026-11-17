@@ -172,7 +172,7 @@ export function refreshReward() { load(); }
 // ---- 头部 ----
 function poolTopHTML() {
   const p = st.pool;
-  if (!p) return `<div class="rw-pool-k">${esc(t('rw.pool.total'))}</div><div class="rw-pool-v"><b>—</b></div><div class="rw-chips"><span class="rw-chip">${esc(t('rw.pool.none'))}</span></div>`;
+  if (!p) return `<div class="rw-pool-k">${esc(t('rw.pool.total'))}</div><div class="rw-pool-v"><b class="na">—</b></div><div class="rw-chips"><span class="rw-chip">${esc(t('rw.pool.none'))}</span></div>`;
   const per = p.points > 0 ? p.total / p.points : 0;
   return `<div class="rw-pool-k">${esc(t('rw.pool.total'))}${p.stale ? `<span class="rw-stale" title="${esc(t('rw.pool.stale', { at: timeOf(p.updatedAt) }))}">${IC.warn}</span>` : ''}</div>
 <div class="rw-pool-v"><b id="rw-pool-n" data-v="${Number(p.total) || 0}">${usd(p.total)}</b><span>USDT</span></div>
@@ -362,6 +362,7 @@ ${expired ? `<div class="rw-note">${IC.clock}<span>${esc(t('rw.dn.expired', { am
 </section>`;
 }
 function donateHTML() {
+  if (!st.pool) return `<div class="rw-empty">${esc(t('rw.pool.none'))}</div>`;
   return `<div id="rw-dn">${donateCardHTML()}</div>
 <div class="rw-led-head"><h3 class="rw-h">${esc(t('rw.dnr.title'))}</h3><span class="rw-hint" id="rw-dnr-sum">${donorsSum()}</span></div>
 <div id="rw-dnr">${donorRows()}</div>`;

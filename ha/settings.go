@@ -64,6 +64,9 @@ var globalKeys = setOf(
 	"totpEnabled", "totpSecret", "apiEnabled", "apiToken", "apiIpAllow", "apiIpList", "adminDefault", "sessionMaxAge",
 	// 防火墙:自动拉黑(默认关)、系统防火墙开着时自动放行 m-ui 的端口(默认开,随快照发给副机)
 	"fwAutoBan", "fwAutoAllow",
+	// 流量奖励:开关、登记的地址、面板身份(签上报用的私钥)、提醒收起时的积分数、最近一次上报的结果、正在等到账的那笔捐赠。
+	// 都跟着主机走:接任、换机之后还是同一个面板、同一个地址(累计值在 reward_counters 表里,副本同样带着)
+	"rewardEnabled", "rewardAddress", "rewardBoundAt", "rewardKey", "rewardRemind", "rewardLast", "rewardDonation",
 	// 容灾的全局设置
 	KeyMode, KeyStandbys, KeyReplicaMinutes, KeyConfirmMinutes, KeyAutoMinutes, KeyRankStepMinutes,
 	KeyWitness, KeyClusterKey, KeyPauseUntil, KeyDnsToken, KeyDnsNames, KeyAllowPlain, KeyTakeSub, KeyDnsProvider,

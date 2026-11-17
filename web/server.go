@@ -266,6 +266,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"resellers/", s.auth(s.masterOnly(s.handleResellerItem)))
 	mux.HandleFunc(api+"plans", s.auth(s.masterOnly(s.handlePlans)))
 	mux.HandleFunc(api+"plans/", s.auth(s.masterOnly(s.handlePlanItem)))
+	mux.HandleFunc(api+"reward", s.auth(s.handleReward)) // 流量奖励:副机上只回 {enabled:false}
+	mux.HandleFunc(api+"reward/", s.auth(s.handleReward))
 	mux.HandleFunc(api+"fw", s.auth(s.masterOnly(s.handleFw)))
 	mux.HandleFunc(api+"fw/", s.auth(s.masterOnly(s.handleFw)))
 	mux.HandleFunc(api+"rules", s.auth(s.masterOnly(s.handleRules)))

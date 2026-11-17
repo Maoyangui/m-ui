@@ -416,8 +416,12 @@ func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]
 		if strings.EqualFold(mode, "true") {
 			return model.AddAgentCounters(tx, raw(), statsBatch)
 		}
+		var real int64 // 流量奖励:这一轮本机上真实用户的原始字节(不乘倍率,面板内部的用户不算)
 		for _, name := range names {
 			t := traffic[name]
+			if model.RewardCounted(name) {
+				real += maxI64(t.up, 0) + maxI64(t.down, 0)
+			}
 			update := map[string]interface{}{"online_at": now}
 			// 走了单独设倍率节点的那部分按节点自己的倍率(x 已经乘好),其余按本机的倍率
 			if v := scale(t.up-t.oUp) + t.xUp; v > 0 {
@@ -433,8 +437,18 @@ func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]
 				return err
 			}
 		}
+		if err := model.AddRewardBytes(tx, real, now); err != nil {
+			return err
+		}
 		return model.AddSelfLedger(tx, raw(), statsBatch)
 	})
+}
+
+func maxI64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // writeSeries 流量时序:按桶累加,同一桶内多个周期合并为一行。

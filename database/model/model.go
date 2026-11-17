@@ -670,7 +670,7 @@ func All() []interface{} {
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
 		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{}, &PageLogo{}, &ApiKey{},
-		&FwRule{}, &FwBan{}, &FwAllow{}, &UpstreamSource{},
+		&FwRule{}, &FwBan{}, &FwAllow{}, &UpstreamSource{}, &RewardCounter{},
 	}
 }
 

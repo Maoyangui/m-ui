@@ -1253,6 +1253,7 @@ const zh = {
   'rw.dn.quick': '常用',
   'line.v6Need': '走 IPv6 的节点,要求客户端自己的网络也有 IPv6 —— 不少家用宽带和漫游流量卡没有,那样连上就是全断。拿不准就同时留一个 IPv4 的节点。', 'line.huXray': 'HTTPUpgrade:新版 Xray 内核的客户端(v2rayN、v2rayNG)连不上这种线路,mihomo、sing-box 系的客户端正常。要兼顾前者请用 WS。',
   'rw.hover.bind': '还没登记领取地址',
+  'audit.v.bind': '登记领取地址', 'audit.v.unbind': '取消登记', 'audit.v.donate': '提交留名捐赠',
 };
 
 const en = {
@@ -2645,6 +2646,7 @@ const en = {
   'line.v6Need': 'A node on IPv6 only works when the client\'s own network has IPv6 too. Many home connections and roaming SIMs don\'t, and then nothing loads once connected. When in doubt, keep an IPv4 node alongside.',
   'line.huXray': 'HTTPUpgrade: clients on recent Xray cores (v2rayN, v2rayNG) cannot connect to this kind of line; mihomo and sing-box based clients work. Use WS if you need both.',
   'rw.hover.bind': 'no payout address yet',
+  'audit.v.bind': 'registered a payout address', 'audit.v.unbind': 'removed the payout address', 'audit.v.donate': 'submitted a named donation',
 };
 
 const dicts = { zh, en };

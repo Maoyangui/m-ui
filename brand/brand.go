@@ -25,6 +25,11 @@ const (
 	DonateTopic = "m-ui-gongde-c7e2d14f"
 	// PingURL 统计运行中的面板数:每天下载一次这个空文件,GitHub 的下载计数涨多少就是多少台(见 runner/ping.go)
 	PingURL = Repo + "/releases/download/stats/ping"
+	// RewardAPI 流量奖励的登记服务(deploy/reward):登记了地址的面板向它上报累计流量、提交留名捐赠时也找它。
+	// 没登记地址的面板不碰它,只读本仓库 rewards 分支上的公开账本(见 runner/reward.go)。
+	RewardAPI = "https://reward.godusevpn.org/v1"
+	// SubscriptionURL godusevpn 节点订阅(流量奖励的奖池来自它的订单;活动页里写明并链过去)
+	SubscriptionURL = "https://godusevpn.org/subscription/"
 )
 
 // TelegramURL 点击即可打开对话。

@@ -101,8 +101,10 @@ type Runner struct {
 	lastNodes core.NodeTable
 
 	// 防火墙(见 fw.go):面板规则的对账状态、应用层黑名单
-	fw    fwSvc
-	guard *guard.Guard
+	fw fwSvc
+	// reward 流量奖励里有状态的部分(账本缓存、上报的触发),见 reward.go
+	reward rewardSvc
+	guard  *guard.Guard
 
 	rules *rules.Engine // 限速规则判定器(只在主机跑)
 
@@ -2087,7 +2089,8 @@ func Run(dbPath string) error {
 		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"线路上游", r.relayLoop}, {"运行统计", r.pingLoop}, {"定时备份", r.backupLoop},
 		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop}, {"凭据撤销重试", r.secureReloadLoop}, {"用户热更新重试", r.userReloadLoop},
 		{"数据面看护", r.coreWatchLoop}, {"中转入口跟进", r.forwardWatchLoop}, {"被占端口重试", r.blockedRetryLoop}, {"磁盘巡检", r.diskLoop},
-		{"防火墙对账", r.fwLoop}, // 开机先对一次账(面板规则、放开时加的那条),之后每 30 秒看一次
+		{"防火墙对账", r.fwLoop},      // 开机先对一次账(面板规则、放开时加的那条),之后每 30 秒看一次
+		{"流量奖励上报", r.rewardLoop}, // 登记了地址才报,每半小时一次
 	} {
 		go keepRunning(l.name, l.fn, stopCheckpoint)
 	}
