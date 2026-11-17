@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 
+	"net/netip"
+
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/render"
 )
@@ -37,15 +39,9 @@ type Entry struct {
 // 否则是这台的默认证书(换了默认证书而面板域名没变时,客户端带着旧 SNI 校验不过)。老版本副机没报证书清单,地址不动。
 // 不校验证书的不改 SNI:设置里强制了允许不安全时,SNI 是管理员自己定的。
 func certAddr(a addr, line model.Line, e Entry) addr {
-	tls := render.ParseTLS(line)
-	if tls.Mode != "cert" {
-		return a
-	}
-	b, ok := e.Certs[tls.Cert]
+	b, ok := lineCertOn(line, e)
 	if !ok {
-		if b, ok = defaultCertOf(e.Certs); !ok {
-			return a
-		}
+		return a
 	}
 	if !e.InsecureFixed {
 		a.insecure = b.SelfSigned
@@ -53,7 +49,67 @@ func certAddr(a addr, line model.Line, e Entry) addr {
 	if !a.insecure {
 		a.sni = certSNI(b, a.sni)
 	}
+	if b.SelfSigned {
+		a.pin = b.Sha256
+	}
 	return a
+}
+
+// lineCertOn 这条证书模式的线路在这台服务器上实际出示哪张证书:单独选了且这台有的用那张,否则是这台的线路默认证书。
+// 不是证书模式、或这台没报证书清单(老版本副机)的没有。
+func lineCertOn(line model.Line, e Entry) (model.CertBrief, bool) {
+	tls := render.ParseTLS(line)
+	if tls.Mode != "cert" {
+		return model.CertBrief{}, false
+	}
+	if b, ok := e.Certs[tls.Cert]; ok {
+		return b, true
+	}
+	return defaultCertOf(e.Certs)
+}
+
+// customCertAddr 自定义地址指了服务器的:「允许不安全」按那台上这条线路实际出示的证书判断,不再借第一台服务器的。
+// 以前线路单独选了正式证书、那台的默认证书是自签时,照样带着「允许不安全」;指到一台自签的副机上、
+// 而排第一的服务器是正式证书时又不带,客户端验不过。
+// SNI 不替管理员改,证书指纹也不带:自定义地址常常是 CDN、中转、端口映射,TLS 在哪儿终止只有管理员知道。
+// 所以正式证书只在「客户端会拿去校验的名字(填了 SNI 用 SNI,没填就是地址本身)证书盖得住」时才去掉「允许不安全」,
+// 盖不住的维持这台默认证书的判断(和以前单台服务器时一样)。
+func customCertAddr(a addr, line model.Line, e Entry) addr {
+	a.insecure = e.Insecure
+	b, ok := lineCertOn(line, e)
+	if !ok || e.InsecureFixed {
+		return a
+	}
+	if b.SelfSigned {
+		a.insecure = true
+		return a
+	}
+	name := a.sni
+	if name == "" {
+		name = a.server
+	}
+	for _, d := range b.Domains {
+		if domainCovers(d, name) {
+			a.insecure = false
+			break
+		}
+	}
+	return a
+}
+
+// pinFor 这个地址的链接要不要带证书指纹(pcs):自签证书、而且客户端连上的一定就是这台服务器自己的 TLS。
+// 走 WebSocket / gRPC / HTTPUpgrade 而地址又是域名的不带 —— 那可能是套了 CDN(CDN 出示的是它自己的证书,
+// 带了指纹反而对不上);地址是 IP,或是原始 TCP 上的 TLS(CDN 套不了)才带。
+func pinFor(line model.Line, a addr) string {
+	if a.pin == "" {
+		return ""
+	}
+	if typ, _ := transportOf(line)["type"].(string); typ != "" && typ != "tcp" {
+		if _, err := netip.ParseAddr(a.server); err != nil {
+			return ""
+		}
+	}
+	return a.pin
 }
 
 // defaultCertOf 这台服务器的线路默认证书。
@@ -112,8 +168,11 @@ type addr struct {
 	remark   string
 	insecure bool
 	relay    bool // 中转入口:中转只转这一个端口,端口跳跃不带
-	node     uint // 直连地址落在哪台服务器上;0 = 不属于任何一台(自定义地址没指定服务器)
-	fwd      int  // 中转入口的编号(LineForward.Id);直连为 0
+	// pin 自签证书的 SHA-256 指纹(十六进制):新版 Xray 内核删掉了「允许不安全」,这类客户端靠链接里的 pcs 校验这张证书。
+	// 这台没报(老版本副机)或不是自签的为空;自定义地址不带(见 customCertAddr)。
+	pin  string
+	node uint // 直连地址落在哪台服务器上;0 = 不属于任何一台(自定义地址没指定服务器)
+	fwd  int  // 中转入口的编号(LineForward.Id);直连为 0
 	// autoRatio 节点名的后缀是面板自己拼的(末尾按 srvRatio 带着「 x倍率」):节点单独设了倍率时把这一截换成节点的。
 	// 自定义地址的备注是用户写的,不动。srvRatio = 拼后缀时用的服务器倍率。
 	autoRatio bool
@@ -230,6 +289,12 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 	}
 	insecure := len(entries) > 0 && entries[0].Insecure
 	if len(custom) > 0 {
+		byNode := make(map[uint]Entry, len(entries))
+		for _, e := range entries {
+			if e.NodeId != 0 {
+				byNode[e.NodeId] = e
+			}
+		}
 		out := make([]addr, 0, len(custom))
 		for _, c := range custom {
 			if c.NodeId != 0 {
@@ -246,7 +311,11 @@ func resolveAddrs(line model.Line, entries []Entry, allowed map[uint]bool) []add
 			}
 			// 保存时已规整(web.normLineAddrs);老数据里把 IPv6 写成 [v6] 的,这里再去一次方括号,
 			// 不然拼出 [[v6]]:端口,sing-box 订阅里这个节点直接解析失败
-			out = append(out, addr{server: model.BareHost(c.Server), port: port, sni: c.SNI, remark: c.Remark, insecure: insecure, node: c.NodeId})
+			a := addr{server: model.BareHost(c.Server), port: port, sni: c.SNI, remark: c.Remark, insecure: insecure, node: c.NodeId}
+			if e, ok := byNode[c.NodeId]; ok {
+				a = customCertAddr(a, line, e)
+			}
+			out = append(out, a)
 		}
 		return out
 	}
@@ -560,6 +629,9 @@ func stringList(v interface{}) []string {
 func vlessURI(line model.Line, user model.User, a addr, remark string) string {
 	id, _ := userCred(user, "vless")["uuid"].(string)
 	q := append(transportQuery(line), tlsQuery(line, a)...)
+	if pin := pinFor(line, a); pin != "" {
+		q = append(q, "pcs="+pin)
+	}
 	if render.VisionEnabled(line) {
 		q = append(q, "flow=xtls-rprx-vision")
 	}
@@ -570,6 +642,9 @@ func vlessURI(line model.Line, user model.User, a addr, remark string) string {
 func trojanURI(line model.Line, user model.User, a addr, remark string) string {
 	password, _ := userCred(user, "trojan")["password"].(string)
 	q := append(transportQuery(line), tlsQuery(line, a)...)
+	if pin := pinFor(line, a); pin != "" {
+		q = append(q, "pcs="+pin)
+	}
 	return withFragment(fmt.Sprintf("trojan://%s@%s?%s", url.PathEscape(password), hostPort(a.server, a.port), strings.Join(q, "&")), remark)
 }
 
@@ -620,6 +695,13 @@ func vmessURI(line model.Line, user model.User, a addr, remark string) string {
 		obj["sni"] = a.sni
 		if c.Fingerprint != "" {
 			obj["fp"] = c.Fingerprint
+		}
+		// 自签证书:这种链接以前没地方写「允许不安全」,导入后要用户自己去点。v2rayN 系认 insecure 和 pcs(证书指纹)
+		if a.insecure {
+			obj["insecure"] = "1"
+		}
+		if pin := pinFor(line, a); pin != "" {
+			obj["pcs"] = pin
 		}
 	}
 	b, _ := json.Marshal(obj)

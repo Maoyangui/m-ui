@@ -293,7 +293,7 @@ func certsForRevision(raw json.RawMessage) json.RawMessage {
 		return raw
 	}
 	for i, b := range list {
-		list[i] = model.CertBrief{Name: b.Name, Domains: b.Domains, SelfSigned: b.SelfSigned, NotAfter: b.NotAfter, Default: b.Default}
+		list[i] = model.CertBrief{Name: b.Name, Domains: b.Domains, SelfSigned: b.SelfSigned, NotAfter: b.NotAfter, Default: b.Default, Sha256: b.Sha256}
 	}
 	out, err := json.Marshal(list)
 	if err != nil {

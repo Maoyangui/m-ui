@@ -22,6 +22,10 @@ import (
 	"sync"
 	"time"
 
+	"encoding/hex"
+
+	"crypto/sha256"
+
 	"github.com/Maoyangui/m-ui/safe"
 
 	"golang.org/x/crypto/acme"
@@ -538,7 +542,10 @@ type CertInfo struct {
 	NotAfter   time.Time `json:"notAfter"`
 	DaysLeft   int       `json:"daysLeft"`
 	SelfSigned bool      `json:"selfSigned"`
-	Error      string    `json:"error,omitempty"`
+	// SHA256 证书本身(DER)的 SHA-256,小写十六进制 —— 和浏览器证书查看器里的「SHA-256 指纹」是同一个值。
+	// 订阅给自签证书的线路带上它(链接的 pcs),见 sub.certAddr。
+	SHA256 string `json:"sha256,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // Lifetime 证书的有效期(签发到到期);读不出来为 0。
@@ -606,6 +613,8 @@ func Info(certPath string) CertInfo {
 	ci.NotBefore, ci.NotAfter = c.NotBefore, c.NotAfter
 	ci.DaysLeft = int(time.Until(c.NotAfter).Hours() / 24)
 	ci.SelfSigned = c.Issuer.String() == c.Subject.String()
+	sum := sha256.Sum256(c.Raw)
+	ci.SHA256 = hex.EncodeToString(sum[:])
 	return ci
 }
 

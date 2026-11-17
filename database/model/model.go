@@ -97,6 +97,9 @@ type CertBrief struct {
 	SelfSigned bool     `json:"selfSigned,omitempty"`
 	NotAfter   int64    `json:"notAfter"`
 	Default    bool     `json:"default,omitempty"` // 线路默认证书
+	// Sha256 证书的 SHA-256 指纹(小写十六进制),只给自签证书报:订阅靠它让不认「允许不安全」的客户端
+	// (新版 Xray 内核,链接参数 pcs)也能连。正式证书每次续期都变,不报。老版本副机没有这一项。
+	Sha256 string `json:"sha256,omitempty"`
 	// 以下是续期状态,老版本副机不报(全部可省):主机据此代副机告警,服务器页、线路选证书时标出续期失败。
 	// 不进快照修订号(见 hub.revisionOf):续期失败一次不该把整份配置重推给所有副机。
 	Source      string `json:"source,omitempty"`      // acme | selfsign | external

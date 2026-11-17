@@ -365,6 +365,9 @@ func (r *Runner) CertBriefs() []model.CertBrief {
 		if st.Renewable && c.RenewFails > 0 {
 			b.RenewErr, b.RenewFails, b.NextRenewAt = c.LastRenewErr, c.RenewFails, c.NextRenewAt
 		}
+		if info.SelfSigned {
+			b.Sha256 = info.SHA256
+		}
 		out = append(out, b)
 	}
 	return out
