@@ -43,6 +43,11 @@ const reduced = () => { try { return matchMedia('(prefers-reduced-motion: reduce
 // ---- 数字和地址怎么写 ----
 const nf = (n, d = 2) => Number(n || 0).toLocaleString(getLang() === 'zh' ? 'zh-CN' : 'en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 const usd = n => nf(n, 2);
+// 留名捐赠要转的确切金额:带零头(到第 3 位小数),一位都不能四舍五入掉;不加千分位,好让人照着敲、照着贴
+const exactAmt = v => { const s = Number(v || 0).toFixed(6).replace(/0+$/, ''); return s + '0'.repeat(Math.max(0, 2 - (s.length - 1 - s.indexOf('.')))); };
+// 被剔除的原因:登记服务给了规则代号、而且这一版认识它,就按界面的语言说;不然原样显示它写的那句
+const why = x => { const k = 'rw.why.' + ((x && x.rule) || '-'), s = t(k); return s !== k ? s : (x && x.reason) || ''; };
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
 const pts = n => Number(n || 0).toLocaleString('en-US');
 const short = (a, n = 4) => { a = String(a || ''); return a.length > n * 2 + 3 ? a.slice(0, n) + '…' + a.slice(-n) : a; };
 const p2 = x => String(x).padStart(2, '0');
@@ -214,7 +219,7 @@ function meHTML() {
 <span class="rw-me-s">${esc(t('rw.mine.left', { v: fmtBytes(left(), 1) }))}</span></div>
 ${addr}
 </div>
-${st.excluded ? `<div class="rw-note bad">${IC.warn}<span>${esc(t('rw.excluded.me', { reason: st.excluded.reason || '' }))}</span></div>` : ''}
+${st.excluded ? `<div class="rw-note bad">${IC.warn}<span>${esc(t('rw.excluded.me', { reason: why(st.excluded) }))}</span></div>` : ''}
 ${bindOpen ? `<div class="rw-bind">
 <label class="rw-k" for="rw-addr-in">${SOL()}${esc(t(st.address ? 'rw.addr.change' : 'rw.addr.bindTitle'))}</label>
 <div class="rw-bind-r"><input id="rw-addr-in" type="text" class="rw-in mono" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="44" placeholder="${esc(t('rw.addr.ph'))}"><button class="rw-btn ink" type="button" data-act="rw.bindSave"${bindBusy ? ' disabled' : ''}>${esc(t('rw.addr.save'))}</button><button class="rw-btn" type="button" data-act="rw.bindCancel">${esc(t('common.cancel'))}</button></div>
@@ -299,9 +304,9 @@ ${d.items.map(x => {
     return `<div class="rw-row${x.me ? ' me' : ''}${x.excluded ? ' out' : ''}">
 <span class="c-rank">${x.excluded ? '—' : medal(x.rank)}</span>
 <span class="c-addr"><button class="rw-a mono" type="button" data-act="rw.copy" data-v="${esc(x.address)}" title="${esc(x.address + ' · ' + t('rw.clickCopy'))}">${esc(short(x.address, 5))}</button>${x.me ? `<span class="rw-tag me">${esc(t('rw.brd.me'))}</span>` : ''}${x.panels > 1 ? `<span class="rw-tag" title="${esc(t('rw.brd.panelsHelp'))}">${esc(t('rw.brd.panels', { n: x.panels }))}</span>` : ''}${x.excluded ? `<span class="rw-tag bad">${esc(t('rw.brd.excluded'))}</span>` : ''}</span>
-<span class="c-pts r"><b>${pts(x.points)}</b><i>${esc(t('rw.unit'))}</i></span>
-<span class="c-share">${x.excluded ? `<span class="rw-why" title="${esc(x.reason || '')}">${esc(x.reason || t('rw.brd.excluded'))}</span>` : `<span class="rw-meter"><i style="width:${Math.max(2, x.points / top * 100).toFixed(1)}%"></i></span><em>${(share * 100).toFixed(share < 0.1 ? 2 : 1)}%</em>`}</span>
-<span class="c-val r">${x.excluded ? '—' : '≈ ' + usd(share * pool)}</span>
+<span class="c-pts r"><b>${pts(x.points)}</b><i>${esc(t(x.points === 1 ? 'rw.unit1' : 'rw.unit'))}</i></span>
+${x.excluded ? `<span class="c-why">${esc(cap(why(x)))}</span>` : `<span class="c-share"><span class="rw-meter"><i style="width:${Math.max(2, x.points / top * 100).toFixed(1)}%"></i></span><em>${(share * 100).toFixed(share < 0.1 ? 2 : 1)}%</em></span>
+<span class="c-val r">≈ ${usd(share * pool)}</span>`}
 </div>`;
   }).join('')}
 </div>${pagerHTML('rw.brdPage', brd.page, d.total)}`;
@@ -315,7 +320,7 @@ const mmss = s => `${p2(Math.floor(s / 60))}:${p2(s % 60)}`;
 function payBlock(c, amount) {
   return `<div class="rw-dn-pay">
 <div class="rw-dn-steps">
-${amount ? `<div class="rw-dn-step"><span class="rw-k"><i>1</i>${esc(t('rw.dn.s1'))}</span><div class="rw-dn-amt"><b>${usd(amount)}</b><span>USDT</span><button class="rw-btn sm" type="button" data-act="rw.copy" data-v="${esc(Number(amount).toFixed(2))}">${IC.copy}<span>${esc(t('rw.dn.copyAmt'))}</span></button></div></div>` : ''}
+${amount ? `<div class="rw-dn-step"><span class="rw-k"><i>1</i>${esc(t('rw.dn.s1'))}</span><div class="rw-dn-amt"><b>${exactAmt(amount)}</b><span>USDT</span><button class="rw-btn sm" type="button" data-act="rw.copy" data-v="${esc(exactAmt(amount))}">${IC.copy}<span>${esc(t('rw.dn.copyAmt'))}</span></button></div></div>` : ''}
 <div class="rw-dn-step"><span class="rw-k">${amount ? '<i>2</i>' : ''}${esc(t('rw.dn.s2'))}</span>
 <div class="rw-dn-addr"><span class="rw-chain-i">${SOL()}</span><code class="mono">${esc(c.address)}</code></div>
 <div class="rw-dn-btns"><button class="rw-btn sm" type="button" data-act="rw.copy" data-v="${esc(c.address)}">${IC.copy}<span>${esc(t('rw.dn.copyAddr'))}</span></button><a class="rw-btn sm" href="${esc(addrUrl('solana', c.address))}" target="_blank" rel="noopener noreferrer">${IC.out}<span>${esc(t('rw.onchain'))}</span></a></div></div>
@@ -330,14 +335,14 @@ function donateCardHTML() {
   const head = (title, right = '') => `<div class="rw-dn-h"><h3>${IC.heart}${esc(title)}</h3>${right}</div>`;
   if (d && d.status === 'pending') {
     return `<section class="rw-dn wait">${head(t('rw.dn.waitTitle'), `<span class="rw-dn-timer" title="${esc(t('rw.dn.timerHelp'))}">${IC.clock}<b id="rw-dn-t">${mmss(dnLeft())}</b></span>`)}
-<p class="rw-dn-lead">${esc(t('rw.dn.waitLead', { name: d.name, amount: usd(d.exact) }))}</p>
+<p class="rw-dn-lead">${esc(t('rw.dn.waitLead', { name: d.name, amount: exactAmt(d.exact) }))}</p>
 ${payBlock(c, d.exact)}
 <div class="rw-dn-foot"><span class="rw-dn-live"><i></i>${esc(t(st.pool.demo ? 'rw.dn.liveDemo' : 'rw.dn.live'))}</span><span class="rw-sp"></span><button class="rw-link" type="button" data-act="rw.dnCancel">${esc(t('rw.dn.cancel'))}</button></div>
 </section>`;
   }
   if (d && d.status === 'paid') {
     return `<section class="rw-dn done">${head(t('rw.dn.paidTitle'))}
-<p class="rw-dn-lead ok">${IC.ok}<span>${esc(t('rw.dn.paidLead', { name: d.name, amount: usd(d.exact) }))}</span></p>
+<p class="rw-dn-lead ok">${IC.ok}<span>${esc(t('rw.dn.paidLead', { name: d.name, amount: exactAmt(d.exact) }))}</span></p>
 <div class="rw-dn-foot"><button class="rw-btn ink" type="button" data-act="rw.dnAgain">${esc(t('rw.dn.again'))}</button></div>
 </section>`;
   }
@@ -350,7 +355,7 @@ ${payBlock(c, 0)}
   const expired = d && d.status === 'expired';
   return `<section class="rw-dn">${head(t('rw.dn.title'))}
 <p class="rw-dn-lead">${esc(t('rw.dn.lead'))}</p>
-${expired ? `<div class="rw-note">${IC.clock}<span>${esc(t('rw.dn.expired', { amount: usd(d.exact) }))}</span></div>` : ''}
+${expired ? `<div class="rw-note">${IC.clock}<span>${esc(t('rw.dn.expired', { amount: exactAmt(d.exact) }))}</span></div>` : ''}
 <div class="rw-dn-form">
 <label class="rw-f"><span class="rw-k">${esc(t('rw.dn.name'))}</span><input id="rw-dn-name" class="rw-in" type="text" maxlength="20" autocomplete="off" placeholder="${esc(t('rw.dn.namePh'))}" value="${esc(expired ? d.name : '')}"></label>
 <label class="rw-f amt"><span class="rw-k">${esc(t('rw.dn.amount'))}</span><span class="rw-amt"><input id="rw-dn-amt" class="rw-in" type="text" inputmode="decimal" autocomplete="off" placeholder="${esc(t('rw.dn.amountPh', { min }))}" value="${esc(expired ? String(d.amount) : '')}"><i>USDT</i></span></label>
@@ -400,7 +405,7 @@ function rulesHTML() {
 ${li(1, 'rw.rule.1')}${li(2, 'rw.rule.2')}${li(3, 'rw.rule.3', { rate })}${li(4, 'rw.rule.4', { day })}${li(5, 'rw.rule.5')}
 </ol>
 <div class="rw-priv"><h3 class="rw-h">${esc(t('rw.priv.title'))}</h3>
-<ul><li>${esc(t('rw.priv.1'))}</li><li>${esc(t('rw.priv.2'))}</li><li>${esc(t('rw.priv.3'))}</li></ul>
+<ul><li>${esc(t('rw.priv.1'))}</li><li>${esc(t('rw.priv.2'))}</li><li>${esc(t('rw.priv.3'))}</li><li>${esc(t('rw.priv.4'))}</li></ul>
 <p class="rw-hint">${esc(t('rw.priv.off'))} <a class="rw-link in" href="#/settings" data-act="rw.toSettings">${esc(t('rw.priv.offLink'))}</a></p></div>`;
 }
 const TABS = [['pool', 'rw.tab.pool'], ['board', 'rw.tab.board'], ['donate', 'rw.tab.donate'], ['rules', 'rw.tab.rules']];

@@ -587,8 +587,8 @@ S.reward = (() => {
   ledger.sort((a, b) => b.ts - a.ts);
   const board = [];
   for (let i = 0; i < 63; i++) board.push({ address: rwAddr(44), points: Math.max(1, Math.round(46 * Math.pow(0.9, i) + rwRand() * 2)), panels: rwRand() < 0.16 ? 2 + Math.floor(rwRand() * 3) : 1 });
-  board[7].excluded = true; board[7].reason = '流量增长长期贴着上限且过于规整,系统判定为伪造流量';
-  board[26].excluded = true; board[26].reason = '同一网段下成批登记,累计值超出带宽可能的上限';
+  board[7].excluded = true; board[7].rule = 'robot'; board[7].reason = '每天的流量增长一模一样,不像真实流量';
+  board[26].excluded = true; board[26].rule = 'same_src'; board[26].reason = '这处来源(公网 IP)上已经有别的地址在登记:一处来源只认先到的那个地址';
   return {
     tb: RW_TB, bytes: Math.round(3.618 * RW_TB), address: '', boundAt: 0, credited: 0, remind: 'tb', intent: null,
     payoutAt: Math.floor(new Date(2027, 8, 3, 0, 0, 0).getTime() / 1000), rate: 0.4,
@@ -680,7 +680,7 @@ function demoReward(method, seg, query, body) {
     if (!name) throw demoErr(400, '请填写留名');
     if ([...name].length > 20) throw demoErr(400, '留名最多 20 个字');
     if (!(amount >= 1) || amount > 100000 || Math.round(amount * 100) !== amount * 100) throw demoErr(400, '金额要在 1 到 100000 之间,最多两位小数');
-    R.intent = { id: 'demo-' + now(), name, amount, exact: amount, chain: 'solana', address: R.chains.solana, createdAt: now(), expiresAt: now() + 3600, status: 'pending' };
+    R.intent = { id: 'demo-' + now(), name, amount, exact: Math.round(amount * 1000 + 1 + Math.floor(Math.random() * 99)) / 1000, chain: 'solana', address: R.chains.solana, createdAt: now(), expiresAt: now() + 3600, status: 'pending' };
     return summary();
   }
   throw demoErr(404, '路径无效');

@@ -192,3 +192,43 @@ func TestClient(t *testing.T) {
 		t.Fatal("不是登记服务答复的错,状态码是 0")
 	}
 }
+
+// 登记服务的错带代号:认识的代号换成面板自己的说法(英文界面靠它有译文),不认识的原样显示登记服务写的那句话。
+func TestRegistryErrorCodes(t *testing.T) {
+	reply := ""
+	status := 400
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(reply))
+	}))
+	defer srv.Close()
+	c := &Client{API: srv.URL + "/v1"}
+	for _, tc := range []struct {
+		status int
+		reply  string
+		want   string
+	}{
+		{400, `{"error":"换地址还在冷却期,6 天后再试","code":"cooldown","days":6}`, "换领取地址有 7 天的冷却期,还要等 6 天"},
+		{400, `{"error":"x","code":"cooldown"}`, "换领取地址有 7 天的冷却期,还要等 1 天"},
+		{429, `{"error":"这处来源今天登记的面板太多了,明天再试","code":"busy_src"}`, "这台服务器所在的来源今天登记的面板太多了,明天再试"},
+		{400, `{"error":"签名不对","code":"sig"}`, "登记服务不认这次请求,请把面板升到最新版再试"},
+		{503, `{"error":"这个金额现在排不开,换个数再试","code":"no_slot"}`, "这个金额现在排不开,换个数再试"},
+		{400, `{"error":"以后才有的新规矩","code":"from_the_future"}`, "以后才有的新规矩"},
+		{400, `{"error":"没带代号的老写法"}`, "没带代号的老写法"},
+		{502, `<html>bad gateway</html>`, "登记服务答复 502"},
+	} {
+		status, reply = tc.status, tc.reply
+		_, err := c.Donate(context.Background(), "老王", 20)
+		if err == nil || err.Error() != tc.want || StatusOf(err) != tc.status {
+			t.Fatalf("%s → %v (状态 %d),想要 %q", tc.reply, err, StatusOf(err), tc.want)
+		}
+	}
+	// 被剔除的答复带规则代号
+	status, reply = 200, `{"gb":5,"credited":1,"excluded":{"rule":"same_src","reason":"这处来源上已经有别的地址在登记","at":123}}`
+	k, _ := NewKey()
+	priv, _ := ParseKey(k)
+	rep, err := c.Report(context.Background(), NewReport(priv, "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", TB, time.Now().Unix()))
+	if err != nil || rep.Excluded == nil || rep.Excluded.Rule != "same_src" || rep.Excluded.At != 123 {
+		t.Fatalf("被剔除的答复: %+v %v", rep, err)
+	}
+}

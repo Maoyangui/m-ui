@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -64,13 +65,31 @@ type rewardSvc struct {
 	got      time.Time     // 最近一次取到合法账本的时间
 	next     time.Time     // 什么时候可以再取
 	fetching chan struct{} // 正在取:这一轮结束时关闭
+	dropped  bool          // 手上那份明知是旧的(刚登记、积分变了):下一次要等新的取回来再答
 	kick     chan struct{} // 让上报马上跑一轮(登记、换地址之后)
 	intentAt time.Time     // 上次问留名捐赠的状态是什么时候
 	reportMu sync.Mutex    // 上报串行:手动触发和定时的别撞在一起
 }
 
+// 登记服务按「来源」认面板:一处来源(一个公网 IPv4 地址;没有 IPv4 的按 IPv6 /48)只认一个地址。
+// IPv4 地址比 IPv6 的稳定,所以能走 IPv4 就走 IPv4,实在连不上才走 IPv6 —— 免得同一台面板一会儿从这边报、一会儿从那边报。
+var rewardHTTP = &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
+	Proxy: http.ProxyFromEnvironment,
+	DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		d := &net.Dialer{Timeout: 4 * time.Second, KeepAlive: 30 * time.Second}
+		if c, err := d.DialContext(ctx, "tcp4", addr); err == nil {
+			return c, nil
+		}
+		return d.DialContext(ctx, "tcp6", addr)
+	},
+	ForceAttemptHTTP2:   true,
+	MaxIdleConns:        2,
+	IdleConnTimeout:     60 * time.Second,
+	TLSHandshakeTimeout: 5 * time.Second,
+}}
+
 func (r *Runner) rewardClient() *reward.Client {
-	return &reward.Client{API: RewardAPI, LedgerURLs: RewardLedgerURLs, HTTP: &http.Client{Timeout: 10 * time.Second}, UserAgent: "m-ui/" + Version}
+	return &reward.Client{API: RewardAPI, LedgerURLs: RewardLedgerURLs, HTTP: rewardHTTP, UserAgent: "m-ui/" + Version}
 }
 
 // RewardEnabled 流量奖励开着没有(默认开;副机上一律算关:只在主机上显示和累计)。
@@ -209,6 +228,8 @@ func (r *Runner) rewardReport(ctx context.Context) error {
 		return err
 	}
 	now := time.Now().Unix()
+	var prev reward.ReportReply
+	_ = json.Unmarshal([]byte(r.setting(reward.KeyLast)), &prev)
 	rep, err := r.rewardClient().Report(ctx, reward.NewReport(priv, address, model.RewardBytes(r.db), now))
 	if err != nil {
 		if st := reward.StatusOf(err); st >= 400 && st < 500 && st != http.StatusTooManyRequests {
@@ -220,6 +241,11 @@ func (r *Runner) rewardReport(ctx context.Context) error {
 	if b, err := json.Marshal(rep); err == nil {
 		_ = r.setSetting(reward.KeyLast, string(b))
 	}
+	// 积分变了、被剔除了或者恢复了:手上那份账本(十分钟一取)已经是旧的,丢掉,下次打开活动页取新的 ——
+	// 不然「我的积分」已经是新的,积分榜和合计却还停在旧的那份上。
+	if rep.Credited != prev.Credited || (rep.Excluded == nil) != (prev.Excluded == nil) {
+		r.rewardDropLedger()
+	}
 	if up := rep.GB << 30; up > model.RewardBytes(r.db) {
 		if err := model.RaiseRewardBytes(r.db, up, now); err != nil {
 			logger.Warning("流量奖励:按登记处的累计值往上接没成功: ", err)
@@ -227,6 +253,9 @@ func (r *Runner) rewardReport(ctx context.Context) error {
 	}
 	return nil
 }
+
+// RewardReportNow 现在就上报一次(平时由定时任务和登记动作触发;排查和测试时用)。
+func (r *Runner) RewardReportNow(ctx context.Context) error { return r.rewardReport(ctx) }
 
 // rewardLoop 登记了地址的面板定时上报。
 func (r *Runner) rewardLoop(stop <-chan struct{}) {
@@ -260,9 +289,11 @@ func (r *Runner) rewardLoop(stop <-chan struct{}) {
 
 // ---- 公开账本 ----
 
+// rewardDropLedger 手上那份账本明知是旧的了:下次要用时重新取,而且等它取回来(最多等 rewardLedgerWait)再答,不拿旧的顶。
 func (r *Runner) rewardDropLedger() {
 	r.reward.mu.Lock()
 	r.reward.next = time.Time{}
+	r.reward.dropped = true
 	r.reward.mu.Unlock()
 }
 
@@ -295,6 +326,7 @@ func (r *Runner) RewardLedger() (*reward.Ledger, bool) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			s.fetching = nil
+			s.dropped = false
 			if err != nil || l == nil {
 				logger.Debug("流量奖励:账本这一轮没取到: ", err)
 				return
@@ -307,8 +339,9 @@ func (r *Runner) RewardLedger() (*reward.Ledger, bool) {
 	}
 	wait := s.fetching
 	have := s.ledger
+	mustWait := have == nil || s.dropped
 	s.mu.Unlock()
-	if have == nil && wait != nil {
+	if mustWait && wait != nil {
 		select {
 		case <-wait:
 		case <-time.After(rewardLedgerWait):

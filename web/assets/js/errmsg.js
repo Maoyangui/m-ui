@@ -933,7 +933,17 @@ const EN = /*BEGIN*/{
 "请填写留名": "Enter a name",
 "留名里有不能用的字符": "The name contains characters that are not allowed",
 "留名最多 20 个字": "The name can be at most 20 characters",
-"留名不能是网址": "The name cannot be a web address"
+"留名不能是网址": "The name cannot be a web address",
+"登记服务不认这个地址:它不是 Solana 地址": "The registry rejected this address: it is not a Solana address",
+"这台服务器的时间和登记服务差得太多,请先校准服务器时间": "This server's clock is too far off from the registry's; fix the server time first",
+"登记服务不认这次请求,请把面板升到最新版再试": "The registry rejected this request; update the panel to the latest version and try again",
+"这台服务器所在的来源今天登记的面板太多了,明天再试": "Too many panels were registered from this server's source today; try again tomorrow",
+"换领取地址有 7 天的冷却期,还要等 %d 天": "The payout address can be changed once every 7 days; %d more day(s) to go",
+"提交得太勤了,过一会儿再试": "Too many requests; try again in a little while",
+"现在没有可用的奖池地址,请稍后再试": "No pool address is available right now; try again later",
+"这个金额现在排不开,换个数再试": "This amount can't be queued right now; try a different amount",
+"登记服务那边已经没有这一笔留名了": "The registry no longer has this named donation",
+"登记服务出错了,请稍后再试": "The registry ran into an error; try again later"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

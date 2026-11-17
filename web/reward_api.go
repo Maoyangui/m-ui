@@ -137,6 +137,7 @@ func (s *Server) handleReward(w http.ResponseWriter, r *http.Request) {
 			Points   int64  `json:"points"`
 			Panels   int    `json:"panels"`
 			Excluded bool   `json:"excluded,omitempty"`
+			Rule     string `json:"rule,omitempty"`
 			Reason   string `json:"reason,omitempty"`
 			Me       bool   `json:"me,omitempty"`
 		}
@@ -147,7 +148,7 @@ func (s *Server) handleReward(w http.ResponseWriter, r *http.Request) {
 			me := s.run.RewardState().Address
 			var ok, gone []row
 			for _, b := range l.Board {
-				x := row{Address: b.Address, Points: b.Points, Panels: b.Panels, Excluded: b.Excluded, Reason: b.Reason, Me: me != "" && b.Address == me}
+				x := row{Address: b.Address, Points: b.Points, Panels: b.Panels, Excluded: b.Excluded, Rule: b.Rule, Reason: b.Reason, Me: me != "" && b.Address == me}
 				if b.Excluded {
 					gone = append(gone, x)
 				} else if b.Points > 0 || x.Me {
@@ -310,7 +311,7 @@ func (s *Server) handleReward(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		s.audit(r, "reward", "donate", map[string]interface{}{"name": p.Name, "amount": p.Amount})
+		s.audit(r, "reward", "donate", strings.TrimSpace(p.Name)+" · "+strconv.FormatFloat(p.Amount, 'f', -1, 64)+" USDT")
 		writeJSON(w, http.StatusOK, s.rewardSummary())
 
 	case r.Method == http.MethodPost && (rest == "donate/cancel" || rest == "donate/clear"):
@@ -335,20 +336,17 @@ func (s *Server) rewardSummary() map[string]interface{} {
 		"credited": int64(0), "excluded": nil, "donation": st.Donation, "pool": nil,
 	}
 	l, stale := s.run.RewardLedger()
+	// 这台面板是不是被剔除着:只有登记服务对它的上报的答复说得准(账本上的是地址,一个地址下可以有好几台面板)。
 	credited, excluded := int64(0), st.Last.Excluded
 	if st.Address != "" {
 		credited = st.Last.Credited
-		if l != nil { // 账本里有这个地址:以较新的为准(上报的答复只在上报时更新,账本十分钟一取)
+		if l != nil { // 账本里有这个地址:积分以较新的为准(上报的答复只在上报时更新,账本十分钟一取)
 			for _, b := range l.Board {
 				if b.Address != st.Address {
 					continue
 				}
 				if l.UpdatedAt >= st.Last.At {
 					credited = b.Points
-					excluded = nil
-					if b.Excluded {
-						excluded = &reward.Excluded{Reason: b.Reason}
-					}
 				}
 				break
 			}

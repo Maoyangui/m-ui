@@ -127,18 +127,20 @@ func (r Report) Verify() bool {
 	return ed25519.Verify(ed25519.PublicKey(pub), []byte(Canonical(r.Pub, r.Address, r.GB, r.TS)), sig)
 }
 
-// Excluded 这个地址被系统剔除了(原因是登记服务写的,原样显示)。
+// Excluded 这台面板被系统剔除了:它的流量现在不计入积分。判的是面板不是地址 —— 别人把你的地址绑到他作弊的面板上,影响不到你。
+// Rule 是规则的代号(页面按它用界面的语言说明原因);Reason 是登记服务写的那句话(不认识的代号就原样显示它)。
 type Excluded struct {
+	Rule   string `json:"rule,omitempty"`
 	Reason string `json:"reason"`
 	At     int64  `json:"at"`
 }
 
 // ReportReply 登记服务对一次上报的答复。
 type ReportReply struct {
-	GB       int64     `json:"gb"`       // 登记处现在记着的累计值(GB);比本机大 = 本机是接任 / 还原回来的,按它往上接
-	Credited int64     `json:"credited"` // 这个地址已经入账的积分(每个地址每天最多入账 1 分)
-	Excluded *Excluded `json:"excluded,omitempty"`
-	At       int64     `json:"at"` // 答复的时间(本机记的)
+	GB       int64     `json:"gb"`                 // 登记处现在记着的累计值(GB);比本机大 = 本机是接任 / 还原回来的,按它往上接
+	Credited int64     `json:"credited"`           // 这个地址已经入账的积分(每个地址每天最多入账 1 分)
+	Excluded *Excluded `json:"excluded,omitempty"` // 这台面板现在被剔除着
+	At       int64     `json:"at"`                 // 答复的时间(本机记的)
 }
 
 // ---- 公开账本 ----
@@ -162,12 +164,13 @@ type Deposit struct {
 	Name   string  `json:"name,omitempty"` // 留名的捐赠
 }
 
-// BoardRow 积分榜上的一个地址。
+// BoardRow 积分榜上的一个地址。Excluded = 它名下的面板现在全都被剔除着(原因见 Rule / Reason)。
 type BoardRow struct {
 	Address  string `json:"address"`
 	Points   int64  `json:"points"`
 	Panels   int    `json:"panels"`
 	Excluded bool   `json:"excluded,omitempty"`
+	Rule     string `json:"rule,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 }
 
@@ -287,8 +290,13 @@ func (c *Client) call(ctx context.Context, method, path string, in, out interfac
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var e struct {
 			Error string `json:"error"`
+			Code  string `json:"code"`
+			Days  int64  `json:"days"`
 		}
 		_ = json.Unmarshal(raw, &e)
+		if known := registryError(e.Code, e.Days); known != nil {
+			e.Error = known.Error()
+		}
 		if e.Error == "" {
 			e.Error = fmt.Sprintf("登记服务答复 %d", resp.StatusCode)
 		}
@@ -299,6 +307,47 @@ func (c *Client) call(ctx context.Context, method, path string, in, out interfac
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
 		return fmt.Errorf("登记服务的答复看不懂: %w", err)
+	}
+	return nil
+}
+
+// registryError 登记服务的错带一个代号。认识的代号用面板自己的说法(英文界面靠它才有译文);
+// 不认识的(登记服务比面板新)返回 nil,原样显示登记服务写的那句话。
+func registryError(code string, days int64) error {
+	switch code {
+	case "address":
+		return errors.New("登记服务不认这个地址:它不是 Solana 地址")
+	case "clock":
+		return errors.New("这台服务器的时间和登记服务差得太多,请先校准服务器时间")
+	case "format", "sig":
+		return errors.New("登记服务不认这次请求,请把面板升到最新版再试")
+	case "busy_src":
+		return errors.New("这台服务器所在的来源今天登记的面板太多了,明天再试")
+	case "cooldown":
+		if days < 1 {
+			days = 1
+		}
+		return fmt.Errorf("换领取地址有 7 天的冷却期,还要等 %d 天", days)
+	case "name_empty":
+		return errors.New("请填写留名")
+	case "name_chars":
+		return errors.New("留名里有不能用的字符")
+	case "name_long":
+		return errors.New("留名最多 20 个字")
+	case "name_url":
+		return errors.New("留名不能是网址")
+	case "amount":
+		return errors.New("金额要在 1 到 100000 之间,最多两位小数")
+	case "busy":
+		return errors.New("提交得太勤了,过一会儿再试")
+	case "no_pool":
+		return errors.New("现在没有可用的奖池地址,请稍后再试")
+	case "no_slot":
+		return errors.New("这个金额现在排不开,换个数再试")
+	case "not_found":
+		return errors.New("登记服务那边已经没有这一笔留名了")
+	case "internal":
+		return errors.New("登记服务出错了,请稍后再试")
 	}
 	return nil
 }
@@ -421,7 +470,7 @@ func (l *Ledger) check(now int64) error {
 	}
 	for i := range l.Board {
 		b := &l.Board[i]
-		if !ValidSolana(b.Address) || b.Points < 0 || len([]rune(b.Reason)) > 200 {
+		if !ValidSolana(b.Address) || b.Points < 0 || len([]rune(b.Reason)) > 200 || len(b.Rule) > 32 {
 			return fmt.Errorf("账本积分榜第 %d 行写得不对", i+1)
 		}
 	}

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"context"
+
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/reward"
@@ -28,6 +30,7 @@ type fakeRegistry struct {
 	reject   string // 非空:上报一律按这个原因拒绝(400)
 	gbFloor  int64  // 登记处记着的累计值(GB);答复里取它和上报值里较大的
 	credited int64
+	excluded *reward.Excluded // 非空:答复里说这台面板被剔除了
 	intent   reward.Intent
 	exports  int // 向登记服务要账本的次数
 	raws     int // 读公开账本(GitHub 那份)的次数
@@ -59,7 +62,7 @@ func rwLedger(now int64) reward.Ledger {
 		a := strings.Repeat("1", 31) + string(alpha[i+1]) // 31 个 0 字节 + 1 个小字节:合法的 32 字节地址
 		row := reward.BoardRow{Address: a, Points: int64(20 - i), Panels: 1 + i%2}
 		if i == 4 {
-			row.Excluded, row.Reason = true, "同一网段下成批登记"
+			row.Excluded, row.Rule, row.Reason = true, "same_src", "这处来源上已经有别的地址在登记"
 		}
 		l.Board = append(l.Board, row)
 	}
@@ -92,7 +95,7 @@ func rewardTestServer(t *testing.T) (*Server, *runner.Runner, *fakeRegistry, fun
 		if reg.gbFloor > gb {
 			gb = reg.gbFloor
 		}
-		_ = json.NewEncoder(w).Encode(reward.ReportReply{GB: gb, Credited: reg.credited})
+		_ = json.NewEncoder(w).Encode(reward.ReportReply{GB: gb, Credited: reg.credited, Excluded: reg.excluded})
 	})
 	mux.HandleFunc("/v1/export", func(w http.ResponseWriter, r *http.Request) {
 		reg.mu.Lock()
@@ -317,7 +320,7 @@ func TestRewardListsAndDonation(t *testing.T) {
 	}
 	b2 := get("/board?page=2")
 	lastRow := b2.Items[len(b2.Items)-1]
-	if lastRow["excluded"] != true || lastRow["reason"] != "同一网段下成批登记" {
+	if lastRow["excluded"] != true || lastRow["rule"] != "same_src" || lastRow["reason"] != "这处来源上已经有别的地址在登记" {
 		t.Fatalf("被剔除的排在最后并写明原因: %v", lastRow)
 	}
 	if b = get("/board?q=7xkxt"); b.Total != 1 || b.Items[0]["address"] != rwAddrMe {
@@ -385,4 +388,62 @@ func mapStr(m map[string]json.RawMessage) string { return string(mustJSON(m)) }
 func mustJSON(v interface{}) []byte {
 	b, _ := json.Marshal(v)
 	return b
+}
+
+// 上报的答复里积分变了、或者这台面板被剔除了:手上的账本马上作废(不等十分钟),概况里带上剔除的规则代号和原因。
+// 判的是这台面板:账本的积分榜上这个地址没被标出来(它名下还有别的面板在算),概况照样以答复为准。
+func TestRewardReplyRefreshesLedgerAndCarriesExclusion(t *testing.T) {
+	_, run, reg, do := rewardTestServer(t)
+	_ = model.AddRewardBytes(run.DB(), 3*reward.TB, time.Now().Unix())
+	if code, m := do("POST", "/bind", `{"address":"`+rwAddrMe+`"}`); code != 200 || rwNum(t, m, "credited") != 2 {
+		t.Fatalf("登记: %d %v", code, mapStr(m))
+	}
+	count := func() int { reg.mu.Lock(); defer reg.mu.Unlock(); return reg.exports }
+	if _, m := do("GET", "", ""); string(m["excluded"]) != "null" {
+		t.Fatalf("没被剔除: %s", m["excluded"])
+	}
+	before := count()
+	if do("GET", "", ""); count() != before {
+		t.Fatal("账本还新着,不该再取")
+	}
+	// 答复没变:账本接着用
+	if err := run.RewardReportNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if do("GET", "", ""); count() != before {
+		t.Fatal("答复没变,账本不用重取")
+	}
+	// 入账了一分 → 账本重取
+	reg.mu.Lock()
+	reg.credited = 3
+	reg.mu.Unlock()
+	if err := run.RewardReportNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if do("GET", "", ""); count() != before+1 {
+		t.Fatalf("积分变了要重取账本: %d → %d", before, count())
+	}
+	// 被剔除 → 账本重取,概况里有规则代号和原因
+	reg.mu.Lock()
+	reg.excluded = &reward.Excluded{Rule: "same_src", Reason: "这处来源上已经有别的地址在登记", At: 123}
+	reg.mu.Unlock()
+	if err := run.RewardReportNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, m := do("GET", "", "")
+	var ex reward.Excluded
+	_ = json.Unmarshal(m["excluded"], &ex)
+	if ex.Rule != "same_src" || ex.Reason == "" || ex.At != 123 || count() != before+2 {
+		t.Fatalf("被剔除: %s (取账本 %d 次)", m["excluded"], count()-before)
+	}
+	// 恢复 → 概况里没有了
+	reg.mu.Lock()
+	reg.excluded = nil
+	reg.mu.Unlock()
+	if err := run.RewardReportNow(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, m = do("GET", "", ""); string(m["excluded"]) != "null" || count() != before+3 {
+		t.Fatalf("恢复之后: %s (取账本 %d 次)", m["excluded"], count()-before)
+	}
 }

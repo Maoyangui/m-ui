@@ -2444,7 +2444,8 @@ html.rw-lock { overflow: hidden; }
 .rw-row.me { background: var(--rw-gold-soft); border-radius: 10px; border-bottom-color: transparent; }
 .rw-row.me:hover { background: var(--rw-gold-soft); }
 .rw-row.out .rw-a, .rw-row.out .c-pts b { color: var(--rw-faint); text-decoration: line-through; }
-.rw-why { color: var(--rw-bad); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 被剔除的那一行:原因占「占比 + 约值」两栏,写不下就折行,不截断(触屏上没有悬停可看) */
+.rw-brd .c-why { grid-column: 4 / -1; color: var(--rw-bad); font-size: var(--fs-xs); line-height: 1.45; padding: .15rem 0; overflow-wrap: anywhere; }
 
 /* 捐赠 */
 .rw-dn { padding: 1.1rem 1.25rem 1.15rem; border: 1px solid var(--rw-line2); border-radius: 16px; background: var(--rw-bg); box-shadow: var(--rw-card); }
@@ -2560,6 +2561,7 @@ html.rw-lock { overflow: hidden; }
   .rw-brd .c-pts i { display: inline; }
   .rw-brd .c-share { grid-area: share; } .rw-brd .c-val { grid-area: val; font-size: var(--fs-xs); color: var(--rw-mute); }
   .rw-brd .c-share em { width: auto; }
+  .rw-brd .c-why { grid-area: share; grid-column: 2 / -1; padding: 0; }
   .rw-brd-head .rw-in { width: 100%; }
   .rw-dnr .rw-row { grid-template-columns: 1.7rem minmax(0, 1fr) auto; grid-template-areas: "rank name sum" "rank cnt time"; }
   .rw-dnr .c-rank { grid-area: rank; align-self: start; padding-top: .1rem; } .rw-dnr .c-dname { grid-area: name; } .rw-dnr .c-dsum { grid-area: sum; }

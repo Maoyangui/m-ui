@@ -73,6 +73,28 @@ test('t() 把同一个占位的每一处都换掉(同一句里一个占位可以
   assert.ok(multi > 0, '至少有一句用了重复的占位(否则这条测不到什么)');
 });
 
+// 英文的单复数:文案里写 {k|单数|复数},t() 按 vars[k] 是不是 1 来取(数字带千分位的也认)。中文用不着,原样。
+test('t() 的单复数写法 {k|one|other}', async () => {
+  Object.defineProperty(globalThis, 'localStorage', { value: { getItem: () => null, setItem() {} }, configurable: true, writable: true });
+  if (!globalThis.navigator) Object.defineProperty(globalThis, 'navigator', { value: { language: 'zh-CN' }, configurable: true });
+  fs.writeFileSync(path.join(dir, 'full.mjs'), text);
+  const { t, setLang } = await import(pathToFileURL(path.join(dir, 'full.mjs')).href);
+  setLang('en');
+  assert.equal(t('rw.pool.regChip', { n: '1', a: '1' }), '1 pt registered · 1 address');
+  assert.equal(t('rw.pool.regChip', { n: '1,234', a: '2' }), '1,234 pts registered · 2 addresses');
+  assert.equal(t('rw.pool.regChip', { n: 0, a: 0 }), '0 pts registered · 0 addresses');
+  assert.equal(t('rw.tip.tb', { n: 1 }), 'You have 1 point that is not registered yet. Add a Solana address to register it.');
+  assert.equal(t('rw.tip.tb', { n: 3 }), 'You have 3 points that are not registered yet. Add a Solana address to register them.');
+  setLang('zh');
+  assert.equal(t('rw.pool.regChip', { n: '1', a: '1' }), '已登记 1 积分 · 1 个地址');
+  // {k|…|…} 里的 k 得是这句话自己的占位:写错了名字就永远取复数,这里拦住
+  const bad = [];
+  for (const [name, d] of [['zh', zh], ['en', en]]) {
+    for (const [k, v] of Object.entries(d)) for (const m of String(v).matchAll(/\{(\w+)\|[^|{}]*\|[^{}]*\}/g)) if (!String(v).includes('{' + m[1] + '}')) bad.push(name + '.' + k);
+  }
+  assert.deepEqual(bad, []);
+});
+
 // 模板里直接插 ${t('…')}(没经过 esc)的文案进的是 innerHTML:里面的 "<字母" 会被当成标签吞掉(审查:英文概览的
 // "tcpdump -ni any port <port>"、"udp portrange <from>-<to>" 显示成 "port ,"、"portrange -")。
 // 这类键(含 ${t('前缀.' + …)} 拼出来的整组)中英两份都不能有;要写尖括号占位的文案,用的地方包 esc()。

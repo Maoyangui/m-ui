@@ -520,7 +520,7 @@ await page.locator('[data-act="rw.dnSubmit"]').click(); await page.waitForTimeou
 const rwDnErr = (await page.locator('#rw-dn-err').textContent() || '').trim();
 await page.fill('#rw-dn-name', 'smoke 测试'); await page.fill('#rw-dn-amt', '12.34'); await page.locator('[data-act="rw.dnSubmit"]').click(); await page.waitForTimeout(800);
 const rwWait = await page.evaluate(() => ({ timer: (document.getElementById('rw-dn-t') || {}).textContent || '', amt: (document.querySelector('.rw-dn-amt b') || {}).textContent || '', qr: ((document.querySelector('.rw-dn-qr img') || {}).src || '').slice(0, 14), board: document.querySelectorAll('#rw-dnr .rw-row:not(.head)').length }));
-if (rwDnErr && /^5\d:\d\d$/.test(rwWait.timer) && rwWait.amt === '12.34' && rwWait.qr === 'data:image/svg' && rwWait.board >= 5) pass(`留名捐赠:空着提交有提示;提交后给出金额 12.34、倒计时 ${rwWait.timer}、收款二维码;下面是捐赠榜`);
+if (rwDnErr && /^5\d:\d\d$/.test(rwWait.timer) && /^12\.\d{2,3}$/.test(rwWait.amt) && Number(rwWait.amt) > 12.34 && Number(rwWait.amt) < 12.44 && rwWait.qr === 'data:image/svg' && rwWait.board >= 5) pass(`留名捐赠:空着提交有提示;提交后给出带零头的金额 ${rwWait.amt}(填的是 12.34)、倒计时 ${rwWait.timer}、收款二维码;下面是捐赠榜`);
 else fail(`留名捐赠的等待状态不对:err=${rwDnErr} ${JSON.stringify(rwWait)}`);
 await page.waitForTimeout(31500); // 演示站 20 秒后模拟到账,活动页每 10 秒查一次
 const rwPaid = await page.evaluate(() => ({ done: !!document.querySelector('.rw-dn.done'), me: [...document.querySelectorAll('#rw-dnr .rw-row.me .c-dname b')].map(b => b.textContent).join() }));
