@@ -266,8 +266,10 @@ func (s *Service) ForgetNode(id uint) {
 	}
 }
 
-// ensureSubCert 接管了订阅、原主机的订阅走 https:新主机上的订阅证书不能用(没带过来、过期、半个月内到期、不含订阅域名)时,
-// 用容灾的 DNS 接口给订阅域名签一张(DNS 验证不用等解析指过来),签好自动用于订阅、订阅服务原地重启;续期也走这个接口。
+// ensureSubCert 接管了订阅、原主机的订阅走 https:随副本带过来的订阅证书能用(文件在、含订阅域名、离到期还有半个月以上)
+// 就直接用,不去重签。不能用(没带过来、过期、半个月内到期、不含订阅域名)时,用容灾的 DNS 接口给订阅域名签一张
+// (DNS 验证不用等解析指过来),签好自动用于订阅、订阅服务原地重启;续期也走这个接口。刚改完解析、TXT 记录还没生效
+// 之类的原因签不下来,runner 隔一会儿再试(见 runner 的 issueForTakeover),不是失败一次就停。
 // 签不了(没配接口、runner 没给钩子)就在通知里说清要手动处理。
 func (s *Service) ensureSubCert(b *Became) {
 	host := strings.TrimSpace(b.Identity.SubHost)
@@ -291,6 +293,11 @@ func (s *Service) ensureSubCert(b *Became) {
 		return
 	}
 	b.Identity.Warnings = append(b.Identity.Warnings, item(idwSubCertNew, "host", host))
+}
+
+// CertUsable 证书文件在、能解析、含这个域名、离到期还有 min 以上(runner 重试接任后的签发时用它判断还要不要再试)。
+func CertUsable(path, host string, min time.Duration, now time.Time) bool {
+	return subCertUsable(path, host, min, now)
 }
 
 // subCertUsable 证书文件在、能解析、含这个域名、离到期还有 min 以上。

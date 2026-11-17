@@ -309,13 +309,16 @@ func New(dbPath string) (*Runner, error) {
 		ResellerURL: r.ResellerURL,
 		Witness:     r.haWitness,
 		DNSAPI:      cfAPI,
-		// 接任后订阅证书不能用:经容灾的 DNS 接口给订阅域名签一张、用于订阅(按续期的口径签,不改证书页表单的默认域名)
+		// 接任后订阅证书不能用:经容灾的 DNS 接口给订阅域名签一张、用于订阅(按续期的口径签,不改证书页表单的默认域名)。
+		// 签不下来隔一会儿再试(刚改完解析、TXT 记录还没生效,或者正好有别的签发在跑),见 issueForTakeover
 		IssueSubCert: func(domain string) error {
-			return r.IssueCert(IssueRequest{Domain: domain, Method: MethodHADNS, AutoRenew: true, Renew: true, Targets: CertTargets{Sub: true, keepWeb: true}})
+			r.issueForTakeover(IssueRequest{Domain: domain, Method: MethodHADNS, AutoRenew: true, Renew: true, Targets: CertTargets{Sub: true, keepWeb: true}}, "subCertFile")
+			return nil
 		},
 		// 面板跟着主机走了、面板证书不能用:给面板域名签一张用于面板(alsoSub:订阅同一个域名,一起用)
 		IssuePanelCert: func(domain string, alsoSub bool) error {
-			return r.IssueCert(IssueRequest{Domain: domain, Method: MethodHADNS, AutoRenew: true, Renew: true, Targets: CertTargets{Panel: true, Sub: alsoSub, keepWeb: true}})
+			r.issueForTakeover(IssueRequest{Domain: domain, Method: MethodHADNS, AutoRenew: true, Renew: true, Targets: CertTargets{Panel: true, Sub: alsoSub, keepWeb: true}}, "webCertFile")
+			return nil
 		},
 	})
 	r.hub = hub.New(hub.Deps{

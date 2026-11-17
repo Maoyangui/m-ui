@@ -14,6 +14,8 @@ import (
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/dnsapi"
+	"github.com/Maoyangui/m-ui/ha"
+	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
 	"github.com/Maoyangui/m-ui/safe"
 	"gorm.io/gorm"
@@ -160,6 +162,52 @@ func (r *Runner) IssueCert(req IssueRequest) error {
 	}
 	safe.Go1("runner.finishIssue", req, func(req IssueRequest) { _ = r.finishIssue(req) })
 	return nil
+}
+
+// 接任后重签证书:第一次不成,隔这么久再试(共 1 + len 次,前后约两个半小时)。之后还不成就交给每小时一轮的自动续期和证书页的提醒。
+var takeoverIssueDelays = []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 20 * time.Minute, 40 * time.Minute, 70 * time.Minute}
+
+// issueForTakeover 接任(或设为主机)后给订阅 / 面板域名签证书,在后台跑:签不下来隔一会儿再试 ——
+// 刚改完解析、DNS 验证的 TXT 记录还没生效,或者正好有别的签发在跑,等一等多半就好了,不能失败一次就停。
+// certSetting 是签好后证书文件所在的那项设置(subCertFile / webCertFile):它指的证书已经能用了就不再试;
+// 本机不再是主机了也停。每次的结果照旧写在证书页(noteRenewResult)。
+func (r *Runner) issueForTakeover(req IssueRequest, certSetting string) {
+	usable := func() bool {
+		return ha.CertUsable(r.setting(certSetting), req.Domain, 15*24*time.Hour, time.Now())
+	}
+	safe.Go("runner.issueForTakeover", func() {
+		tries, err := retryIssue(func() error { return r.runIssue(req) }, usable, r.IsNode, takeoverIssueDelays, time.Sleep,
+			func(n int, err error, wait time.Duration) {
+				logger.Warning("容灾:给 ", req.Domain, " 签证书第 ", n, " 次没成(", err, "),", wait, " 后再试")
+			})
+		if err != nil {
+			logger.Warning("容灾:给 ", req.Domain, " 签证书试了 ", tries, " 次都没成,不再自动重试: ", err, "。到证书页看原因,处理后在那里重新签发")
+		}
+	})
+}
+
+// retryIssue 签到成功为止:run 失败后,证书已经能用了(usable)或者不该再试了(stop)就停,否则按 delays 依次等一会儿再来;
+// delays 用完还不成,返回最后一次的错。返回一共试了几次。note 在每次决定再等时叫一下(记日志)。
+func retryIssue(run func() error, usable, stop func() bool, delays []time.Duration, sleep func(time.Duration), note func(n int, err error, wait time.Duration)) (int, error) {
+	for i := 0; ; i++ {
+		err := run()
+		if err == nil || usable() {
+			return i + 1, nil
+		}
+		if i >= len(delays) || stop() {
+			return i + 1, err
+		}
+		if note != nil {
+			note(i+1, err, delays[i])
+		}
+		sleep(delays[i])
+		if stop() {
+			return i + 1, err
+		}
+		if usable() { // 等的这段时间里别的途径(手动签发、自动续期)已经把证书弄好了
+			return i + 1, nil
+		}
+	}
 }
 
 func (r *Runner) startIssue() error { return r.startIssueAuto(false) }
