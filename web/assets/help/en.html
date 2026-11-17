@@ -1403,6 +1403,7 @@
         <tr><td>Cloudflare API</td><td>Adding and removing TXT records when issuing or renewing with <b data-k="cert.methodCf">DNS (Cloudflare API)</b></td><td>Not contacted unless you use that validation</td></tr>
         <tr><td>Telegram</td><td>Sending notifications and running the Telegram bot</td><td>Not contacted unless enabled under <b data-k="nav.settings">Settings</b> → <b data-k="set.notify">Notifications</b></td></tr>
         <tr><td>GitHub, jsDelivr, ntfy.sh, TronGrid</td><td>Supporters list: reading the list when the <b data-k="support.btn">Feedback / Support</b> page is opened (at most hourly), adding a name and checking for the payment; online panel count: one download of an empty file from GitHub a day</td><td><b data-k="nav.settings">Settings</b> → <b data-k="set.panel">Panel</b> → untick <b data-k="set.supportOnline" class="wrap">Supporters list and online panel count</b></td></tr>
+        <tr><td>GitHub, jsDelivr, the registry (<code>reward.godusevpn.org</code>)</td><td>Traffic Rewards: reading the public ledger when its page is opened (at most every ten minutes); once a payout address is registered, reporting the traffic total to the registry every half hour; the registry is also contacted when you submit a named donation and while waiting for it to arrive. A panel with no address and no named donation only reads the ledger and never contacts the registry</td><td><b data-k="nav.settings">Settings</b> → <b data-k="set.reward">Traffic rewards</b> → turn off <b data-k="set.rewardEnabled" class="wrap">Take part in Traffic Rewards</b></td></tr>
         <tr><td>Globalping, the Cloudflare / Alibaba Cloud / Tencent Cloud DNSPod APIs</td><td>Master failover: overseas probes try the master when deciding whether it is lost; with subscriptions taken over too, the DNS interface points the subscription domain to the new master after a change and reissues its certificate when needed</td><td>Turn off <b data-k="ha.set.witness">Overseas probe witness</b>; with <b data-k="ha.scope.master">Master duties only</b> (the default) the DNS interface is never contacted</td></tr>
         <tr><td>Google (<code>www.gstatic.com</code>)</td><td>Upstream checks and tests: it is the default <b data-k="set.testUrl">Upstream test URL</b>. When lines on this server use upstreams (WARP, an exit server and so on), it is fetched through each upstream every 10 minutes; for lines that use an upstream group, the core also fetches it through every member every 30 seconds; clicking <b data-k="common.test">Test</b> on an upstream and external node speed tests fetch it too</td><td>Change the <b data-k="set.testUrl">Upstream test URL</b> to another address; setting <b data-k="set.checkMinutes">Interval (minutes)</b> to 0 only stops the scheduled checks, upstream groups keep testing</td></tr>
         <tr><td>Addresses you enter</td><td>Webhook, external subscriptions, the Telegram proxy</td><td>Leave them empty</td></tr>
@@ -1476,6 +1477,72 @@
   </section>
 </section>
 
+<section class="chap" id="reward" data-scope="admin">
+  <h2>Traffic Rewards</h2>
+  <p class="lede">Every 1 TB of real traffic on your lines earns 1 point. On m-ui's first anniversary (2027-09-03) the prize pool is paid out in USDT to registered Solana addresses in proportion to their points. The coin in the top bar is the way in.</p>
+
+  <section class="sec" id="reward-how">
+    <h3>How points are counted</h3>
+    <ul>
+      <li>Only real traffic on your lines counts: upload plus download in raw bytes, with no server multiplier; other traffic on the server doesn't count. With nodes, each node's traffic flows to the master along with usage and is added up there. After a failover, a move to another server or a restore, counting carries on from where it was, with nothing lost and nothing counted twice.</li>
+      <li>The coin in the top bar is the progress: it starts grey and fills with gold from the bottom as traffic grows. A full coin is 1 TB and 1 point; then it turns grey and starts again, and the number on its corner is the points you have.</li>
+      <li>Click the coin to open the page: the current pool, roughly what 1 point is worth and the time left until the payout at the top; below it <b data-k="rw.mine.k">My points</b>, real traffic and the progress to the next point.</li>
+      <li>Right after installation and each time another 1 TB is reached, a short reminder appears next to the coin on the Dashboard. <b data-k="rw.later">Later</b> hides it until the next 1 TB.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reward-bind">
+    <h3>Registering a payout address</h3>
+    <ul>
+      <li>Without an address the panel keeps counting but reports nothing, so no points are credited. On the page click <b data-k="rw.bind">Add Solana address</b>, enter the address and click <b data-k="rw.addr.save">Register</b>; everything counted so far is registered with it.</li>
+      <li>The payout goes to this address and can't be recovered if it's wrong. Use your own wallet's address, not an exchange deposit address.</li>
+      <li>To change it, click <b data-k="rw.addr.changeBtn">Change</b> next to the address. After a change you can't change again for 7 days; traffic and points from before stay with the old address, and only new traffic counts toward the new one.</li>
+      <li>Several panels can register the same address; their points are added together.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reward-credit">
+    <h3>Crediting</h3>
+    <ul>
+      <li>Once registered, the panel reports its total every half hour. Each address is credited at most 1 point a day, on days one of its panels reports. If you've earned more than has been credited, the rest carries over to later days and is never lost. The page shows credited and pending points separately.</li>
+      <li>Credited points are recorded in a public ledger in the m-ui repository: <b data-k="rw.brd.public">Public ledger</b> at the top right of <b data-k="rw.tab.board">Leaderboard</b>. You can look up any address there, and your own row is pinned to the top.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reward-pool">
+    <h3>The pool and donations</h3>
+    <ul>
+      <li>Pool = 40% of every confirmed order of godusevpn node subscriptions + donations to the pool (in full). <b data-k="rw.tab.pool">Pool</b> shows the sum, the addresses the money sits on, and every deposit with its amount, chain and sender, each of which opens in a block explorer.</li>
+      <li>To add to the pool, click <b data-k="rw.donate">Donate to the pool</b>, enter a name and an amount and click <b data-k="rw.dn.submit">Next</b>. You get an exact amount and a 60-minute timer; send exactly that amount, down to the last decimal, to the address shown (USDT on Solana). Once it arrives, the name appears under <b data-k="rw.tab.donate">Donors</b> and in the deposit list.</li>
+      <li>To stay anonymous, click <b data-k="rw.dn.goAnon">Rather stay anonymous? Send directly</b> and just send to the pool address. A transfer that arrives after the 60 minutes, or after you cancelled, still goes into the pool in full, as anonymous. Transfers under 1 USDT aren't recorded.</li>
+      <li>Tips to the project (the supporters list) are separate and don't go into the pool.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reward-fair">
+    <h3>Exclusion and restoring</h3>
+    <p class="lede">Cheating is detected automatically by fixed rules, with no manual step. Panels are judged, not addresses: if someone puts your address on their panel and cheats, it is their panel that gets excluded, and yours keeps counting.</p>
+    <ul>
+      <li>One source counts for one address. A source is the server's public IPv4 address (a server without IPv4 is identified by its IPv6 /48). The address that reported first from a source counts; panels that arrive later are excluded. On servers that share one outgoing address between customers (NAT servers), only the first address registered counts.</li>
+      <li>The same traffic can be registered only once: if two panels grow by the same amount every day for 7 days, the one registered later is excluded.</li>
+      <li>Traffic that grows by exactly the same amount every day for 14 days is excluded; real traffic differs from day to day.</li>
+      <li>While excluded, a panel's traffic earns no points, and the page states the reason. Once the cause has been gone for 14 days the panel is restored automatically; traffic from the excluded period is not credited afterwards. Points credited through faked traffic are voided.</li>
+      <li>If all panels under an address are excluded, the address is marked <b data-k="rw.brd.excluded">Excluded</b> on the leaderboard with the reason and takes no part in the payout while that lasts; after restoring it is back as before.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reward-privacy">
+    <h3>What is uploaded, and how to opt out</h3>
+    <ul>
+      <li>No address: nothing is uploaded. Opening the page only reads a public ledger (on GitHub), with no identifier.</li>
+      <li>With an address: only a random identifier for this panel, the address you entered, total traffic rounded to GB, and a timestamp. No domains, users, lines or user data.</li>
+      <li>The registry sees this server's public IP, like any service you connect to. It keeps only a salted hash of it for the one-source-one-address rule; it never stores the IP itself and never publishes it.</li>
+      <li>The public ledger shows only the address, its points and how many panels it has; the deposit list contains transactions that are public on chain anyway.</li>
+      <li>To opt out: <b data-k="nav.settings">Settings</b> → <b data-k="set.reward">Traffic rewards</b> → turn off <b data-k="set.rewardEnabled">Take part in Traffic Rewards</b>. The coin disappears and nothing is sent for it any more; counting continues locally, so nothing is lost if you turn it back on.</li>
+    </ul>
+  </section>
+</section>
+
 <section class="chap" id="support">
   <h2>Feedback, support and supporters</h2>
   <p class="lede"><b data-k="support.btn">Feedback / Support</b> at the top right of the panel: reach the author, report problems and support the project.</p>
@@ -1491,7 +1558,8 @@
     <ul>
       <li>Under "Support the project", enter your name and amount and click <b data-lit="support.html">Add my name</b>, then send exactly the amount shown in USDT (TRC20); if it arrives within 60 minutes it is credited to that name.</li>
       <li>The list is matched with payments by a scheduled job on GitHub, which GitHub often delays by hours, so a name usually appears in the <b data-lit="support.html">Supporters</b> list of every panel a few hours after the payment arrives; if it is still missing after a day, message the author on Telegram.</li>
-      <li>m-ui has no telemetry and collects no usage data. The supporters list and the online panel count (each panel downloads an empty file from GitHub once a day, and the download count says how many are running) are the only connections that serve none of the panel's features, and neither carries any identifier.</li>
+      <li>m-ui has no telemetry and collects no usage data. The supporters list and the online panel count (each panel downloads an empty file from GitHub once a day, and the download count says how many are running) serve none of the panel's features, and neither carries any identifier.</li>
+      <li data-scope="admin">Traffic Rewards is opt-in: a panel with no payout address only reads a public ledger, with no identifier. Reporting starts only after you register an address; see <a href="#reward-privacy">What is uploaded, and how to opt out</a>.</li>
       <li data-scope="admin">To stop these two: <b data-k="nav.settings">Settings</b> → <b data-k="set.panel">Panel</b> → untick <b data-k="set.supportOnline" class="wrap">Supporters list and online panel count</b>. That switch covers only these two; for its features the panel also contacts GitHub (update checks), Globalping (mainland reachability), Let's Encrypt, Telegram and others, listed with how to turn each off under <a href="#sec-net">Which outside services the panel contacts</a>.</li>
     </ul>
   </section>

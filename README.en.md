@@ -58,6 +58,7 @@ The same panel runs a single server for yourself and a production service with d
 | Security | bcrypt passwords, CSRF protection, login cooldown after repeated failures from the same peer, two-factor authentication (TOTP), external API tokens; reseller and admin sessions are strictly separated |
 | Updates | The panel finds new releases by itself and flags them next to the version in the sidebar; one click verifies the SHA256, swaps the binary and restarts — database, certificates and settings are untouched |
 | Integration | External API for creating users, renewing N periods, changing plans, enabling / disabling and fetching subscription URLs; plan operations support dry runs and idempotency keys so retries never add time twice; multiple keys, each with its own permissions and allowed source IPs; panel overview, servers, lines and online users for bots, see [docs/API.md](docs/API.md) |
+| Traffic Rewards | Every 1 TB of real traffic on your lines earns 1 point; on 2027-09-03 the prize pool is paid out in USDT in proportion to points. The pool is 40% of godusevpn node-subscription orders plus donations, with every deposit public and verifiable. Opt-in: nothing is reported unless you register a payout address, and it can be turned off in Settings. See [Traffic Rewards](#traffic-rewards) |
 
 <table>
 <tr>
@@ -415,6 +416,16 @@ Subscription access log, core log (data plane + panel) and audit log. Logging ca
 
 **With port 443** (HTTPS) or 80 (HTTP), addresses and subscription links leave the port out, e.g. `https://aa.com/app/` and `https://aa.com/sub/…`. The panel and the subscription server can't share a port, so only one of them can use 443.
 
+### Traffic Rewards
+
+The coin in the top bar: every 1 TB of real traffic on your lines (upload plus download in raw bytes, no multipliers; a master adds up its nodes) earns 1 point. On m-ui's first anniversary (**2027-09-03**) the prize pool is paid out in USDT to registered Solana addresses in proportion to their points.
+
+- **The pool** = 40% of every confirmed order of [godusevpn node subscriptions](https://godusevpn.org/subscription/) + donations to the pool (in full). The page lists every deposit with its amount, chain and sender, each verifiable in a block explorer. Donations can carry a name (send the exact amount shown within 60 minutes and the name goes on the donor board) or be sent directly, anonymously.
+- **Registering**: add a Solana address on the page. Without one the panel keeps counting but reports nothing; once you add it, everything counted so far is registered. Each address is credited at most 1 point a day, on days one of its panels reports; the rest carries over and is never lost.
+- **Public ledger**: addresses, points and every deposit are recorded in `ledger.json` on this repository's `rewards` branch for anyone to check. What each address will receive on payout day can be computed from that ledger with [`deploy/reward/payout.mjs`](deploy/reward/payout.mjs).
+- **Cheating is excluded automatically**, with no manual step: one source (one public IP) counts for one address; traffic registered twice or growing by exactly the same amount every day is excluded with the reason stated, and restored 14 days after the cause is gone. Panels are judged, not addresses, so someone abusing your address on their own panel can't hurt you. The rules, and what they cannot do, are in [deploy/reward/README.md](deploy/reward/README.md) (Chinese).
+- **Privacy**: a panel with no address reports nothing (it only reads the public ledger, with no identifier). With an address it reports only a random identifier for the panel, the address you entered, total traffic rounded to GB, and a timestamp. The registry keeps only a salted hash of the source IP (for the one-source-one-address rule), never the IP itself. To opt out, turn it off under **Settings → Traffic rewards**; counting continues locally, so nothing is lost if you turn it back on.
+
 ## Command line
 
 ```
@@ -559,7 +570,7 @@ The "Feedback / Support" button in the panel's top-right corner has both contact
 
 **Supporters list**: on that page, enter a name and an amount, then send the exact USDT (TRC20) amount shown. If it arrives within 60 minutes it is added to that name, and every panel shows the ranking. The number of online panels appears next to the version.
 
-**m-ui has no telemetry** and collects no usage data. The supporters list and the panel count are the only extra network activity, and they use free public services rather than a server of our own:
+**m-ui has no telemetry** and collects no usage data. The supporters list and the panel count are extra network activity that uses free public services rather than a server of our own; [Traffic Rewards](#traffic-rewards) is opt-in and reports nothing unless you register a payout address:
 
 - Signing goes through [ntfy.sh](https://ntfy.sh). It is sent only when you click the button and contains only the name and amount.
 - A scheduled GitHub Actions job (GitHub may delay it by several hours) matches signatures with arrivals from [TronGrid](https://www.trongrid.io) and writes the result to this repository's `donors` branch, so a name usually shows up a few hours after the transfer arrives. Panels read that list when the page is opened, at most once an hour.

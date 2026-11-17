@@ -53,7 +53,7 @@
   <details><summary>换机还原后证书怎么办?</summary><p>数据目录外的证书,新机原路径上有能用的同一张就接着用;没有就把备份里的副本放进 <code>/etc/m-ui/cert/restored/</code> 并改好设置,面板顶部会提示一次。这些副本没有 certbot 之类的工具再续,到证书页重新签发,或在新机装好原来的工具后重新添加。面板、订阅、代理面板的证书万一还是缺了,先用临时自签证书启动并告警,不会起不来;顶着临时证书期间客户端更新订阅会报证书错误,照提示把证书补上即可。</p></details>
   <details><summary>面板里有说明书吗?</summary><p>有。面板右上角「帮助说明」(在「建议 / 支持」左边)在新标签页打开内嵌的使用说明,定位到你当前所在页面的那一章,带目录和页内搜索;代理面板里打开的是代理视角的版本。说明书随程序一起发布,不用联网。</p></details>
   <details><summary>能从旧面板迁移吗?</summary><p>能 —— 导入器读兼容格式的旧面板数据库,保留端口、凭据、面板路径与订阅地址,既有客户端不用刷新就能继续连。安装时加 <code>--import /path/to/旧面板.db</code>,或者用 用户 → 从旧面板导入 只搬用户。</p></details>
-  <details><summary>m-ui 会上报什么吗?</summary><p>不会,m-ui 没有遥测,不收集任何使用数据。对外连接只有你自己配置的(ACME、Cloudflare、WARP、Telegram)、每 6 小时向 GitHub Releases 查一次新版本,以及功德箱和在线设备数:打开「建议与支持」页时读一份公开名单,每天从 GitHub 下载一次空文件计数,都不带标识。这两样在设置里一个开关就能关。此外还有几项功能本身要联网,都不带使用数据:大陆连通与 IPv6 入站检测会把服务器地址和端口发给 Globalping 公共测点(自动巡检默认开,可关),上游测速默认连 <code>www.gstatic.com</code>。完整清单见面板「帮助说明」里的「面板会连哪些外部地址」。</p></details>
+  <details><summary>m-ui 会上报什么吗?</summary><p>不会,m-ui 没有遥测,不收集任何使用数据。对外连接只有你自己配置的(ACME、Cloudflare、WARP、Telegram)、每 6 小时向 GitHub Releases 查一次新版本,以及功德箱和在线设备数:打开「建议与支持」页时读一份公开名单,每天从 GitHub 下载一次空文件计数,都不带标识。这两样在设置里一个开关就能关。此外还有几项功能本身要联网,都不带使用数据:大陆连通与 IPv6 入站检测会把服务器地址和端口发给 Globalping 公共测点(自动巡检默认开,可关),上游测速默认连 <code>www.gstatic.com</code>。完整清单见面板「帮助说明」里的「面板会连哪些外部地址」。流量奖励计划是自愿参加的:不登记领取地址,面板只读一份公开账本,什么都不上报;登记之后上报面板的一个随机标识、你填的地址和累计流量,设置里可以关。</p></details>
   <details><summary>去哪提问、报 Bug?</summary><p>提问和想法:<a href="{{github}}/discussions" rel="noopener">GitHub Discussions</a>。确定的 Bug:<a href="{{github}}/issues/new/choose" rel="noopener">用表单提 Issue</a>。日志里的令牌、UUID、订阅地址请先打码。</p></details>
 
   <script type="application/ld+json">
@@ -66,7 +66,7 @@
    {"@type":"Question","name":"m-ui 续费会启用手动停用的用户吗?","acceptedAnswer":{"@type":"Answer","text":"会。用套餐续费、延期、换套餐是明确的开通动作,手动停用的用户也会被启用,面板执行前会先提示;只归入套餐不动启停,延长 30 天只恢复因到期停用的。"}},
    {"@type":"Question","name":"m-ui 多服务器升级时先升主机还是副机?","acceptedAnswer":{"@type":"Answer","text":"先升副机,再升主机。主机用到新功能后,版本不够的副机会整份拒收同步、按旧配置继续服务,直到升级为止。"}},
    {"@type":"Question","name":"m-ui 能管理多台服务器吗?","acceptedAnswer":{"@type":"Answer","text":"能。一台主机每 5 秒把线路、用户、凭据推给任意多台副机,收回流量和在线 IP;配额与设备数统一判定。"}},
-   {"@type":"Question","name":"m-ui 会上报数据吗?","acceptedAnswer":{"@type":"Answer","text":"不会,m-ui 没有遥测,不收集任何使用数据。对外连接只有你自己配置的、每 6 小时查一次新版本,以及功德箱和在线设备数(读公开名单、每天下载一次空文件计数,不带标识),这两样在设置里一个开关就能关。"}}
+   {"@type":"Question","name":"m-ui 会上报数据吗?","acceptedAnswer":{"@type":"Answer","text":"不会,m-ui 没有遥测,不收集任何使用数据。对外连接只有你自己配置的、每 6 小时查一次新版本,以及功德箱和在线设备数(读公开名单、每天下载一次空文件计数,不带标识),这两样在设置里一个开关就能关。流量奖励计划是自愿参加的:不登记领取地址,面板只读一份公开账本,什么都不上报;登记之后上报面板的一个随机标识、你填的地址和累计流量,设置里可以关。"}}
   ]}
   </script>
 </article>

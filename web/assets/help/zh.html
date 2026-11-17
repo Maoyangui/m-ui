@@ -1403,6 +1403,7 @@
         <tr><td>Cloudflare API</td><td>用 <b data-k="cert.methodCf">DNS(Cloudflare API)</b> 签发、续期时加删 TXT 记录</td><td>不用这种验证方式就不连</td></tr>
         <tr><td>Telegram</td><td>发通知、跑 Telegram 机器人</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b> 不启用就不连</td></tr>
         <tr><td>GitHub、jsDelivr、ntfy.sh、TronGrid</td><td>功德箱:打开 <b data-k="support.btn">建议 / 支持</b> 页时读名单(最多一小时一次),点留名、核对到账时;在线设备数:每天从 GitHub 下载一次空文件</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → 关掉 <b data-k="set.supportOnline">功德箱与在线设备数</b></td></tr>
+        <tr><td>GitHub、jsDelivr、登记服务(<code>reward.godusevpn.org</code>)</td><td>流量奖励:打开活动页时读公开账本(最多十分钟一次);登记了领取地址之后,每半小时向登记服务上报一次累计流量;提交留名捐赠、等它到账时也连登记服务。没登记地址、也没提交过留名捐赠的面板只读账本,不连登记服务</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.reward">流量奖励</b> → 关掉 <b data-k="set.rewardEnabled">参加流量奖励计划</b></td></tr>
         <tr><td>Globalping、Cloudflare / 阿里云 / 腾讯云 DNSPod 的 API</td><td>主机容灾:判断主机是否失联时让境外测点连主机;选了连订阅一起接管时,主机变了以后经 DNS 接口改订阅域名的解析、必要时给订阅域名重签证书</td><td>关掉 <b data-k="ha.set.witness">境外测点见证</b>;选 <b data-k="ha.scope.master">只接管主机的工作</b>(默认)就不连 DNS 接口</td></tr>
         <tr><td>Google(<code>www.gstatic.com</code>)</td><td>上游巡检和测试:<b data-k="set.testUrl">上游测试地址</b> 默认就是它。本机有线路用了上游(WARP、落地机等)时,每 10 分钟经各条上游连一次;线路用了上游组的,内核还会每 30 秒经组里每条上游连一次;点上游的 <b data-k="common.test">测试</b>、外部节点测速时也连</td><td>把 <b data-k="set.testUrl">上游测试地址</b> 换成别的地址;<b data-k="set.checkMinutes">巡检间隔(分钟)</b> 填 0 只关掉定时巡检,上游组的测速照样跑</td></tr>
         <tr><td>你自己填的地址</td><td>Webhook、外部订阅、Telegram 代理</td><td>不填就不连</td></tr>
@@ -1476,6 +1477,72 @@
   </section>
 </section>
 
+<section class="chap" id="reward" data-scope="admin">
+  <h2>流量奖励计划</h2>
+  <p class="lede">线路上每跑满 1 TB 真实流量得 1 积分。到 m-ui 一周年(2027-09-03),奖池按各地址的积分比例,以 USDT 发到登记的 Solana 地址。入口是顶栏那枚硬币。</p>
+
+  <section class="sec" id="reward-how">
+    <h3>积分怎么算</h3>
+    <ul>
+      <li>只算线路上的真实流量:上行加下行的原始字节,不乘服务器倍率;服务器上别的流量不算。有副机的,各台的流量随用量汇到主机,在主机上累计;主机容灾接任、换机、还原备份之后接着原来的数往上累计,不断也不重。</li>
+      <li>顶栏的硬币就是进度:一开始是灰的,流量越多,金色从币底往上灌得越满;灌满 1 TB 得 1 积分,硬币回到灰色重新灌,角上的数字是已有的积分。</li>
+      <li>点硬币打开活动页:上面是当前奖池、1 积分大约值多少、离发放还有多久;中间一条是 <b data-k="rw.mine.k">我的积分</b>、真实流量和下一个积分的进度。</li>
+      <li>刚装好、以及每满 1 TB 时,概览页的硬币旁边会冒一句提醒;点 <b data-k="rw.later">以后再说</b> 收起,到下一个 1 TB 之前不再冒。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reward-bind">
+    <h3>登记领取地址</h3>
+    <ul>
+      <li>不登记也照常累计,只是不上报,也就没有积分入账。在活动页点 <b data-k="rw.bind">绑定 Solana 地址</b>,填地址,点 <b data-k="rw.addr.save">登记</b>;之前在本机累计的流量一并登记。</li>
+      <li>发放时就打到这个地址,填错无法追回。请填自己钱包的地址,不要填交易所的充值地址。</li>
+      <li>换地址点地址旁边的 <b data-k="rw.addr.changeBtn">更换</b>。换一次之后 7 天内不能再换;换之前的流量和积分留在原地址,之后新增的才算到新地址。</li>
+      <li>几台面板可以登记同一个地址,积分合在一起算。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reward-credit">
+    <h3>入账</h3>
+    <ul>
+      <li>登记之后面板每半小时上报一次累计流量。每个地址每天最多入账 1 积分,而且当天要有它名下的面板在上报;挣到的比入账的多,多出来的顺延到后面的日子,不作废。活动页上会分开写已入账几个、待入账几个。</li>
+      <li>入账的积分记在 m-ui 仓库的公开账本里:活动页 <b data-k="rw.tab.board">积分榜</b> 右上角的 <b data-k="rw.brd.public">公开账本</b> 就是它。榜上能按地址查,自己那一行钉在最上面。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reward-pool">
+    <h3>奖池与捐赠</h3>
+    <ul>
+      <li>奖池 = godusevpn 节点订阅每一笔监听到账的订单金额 × 40% + 给奖池的捐赠(全额)。<b data-k="rw.tab.pool">奖池明细</b> 里列着算式、钱在哪些地址上,以及逐笔入账:每一笔的金额、链、付款地址,都能点开到区块浏览器上核对。</li>
+      <li>想给奖池添一笔:点 <b data-k="rw.donate">捐赠奖池</b>,填留名和金额,点 <b data-k="rw.dn.submit">下一步</b>。页面给出一个带零头的金额和 60 分钟的倒计时,把这个数(小数一位都不能差)转到页面上的地址(Solana 链的 USDT),到账后名字自动出现在 <b data-k="rw.tab.donate">捐赠榜</b> 和逐笔入账里。</li>
+      <li>不想留名:点 <b data-k="rw.dn.goAnon">不想留名?直接转账</b>,直接往奖池地址转就行,按匿名计入。过了 60 分钟才到账的、取消之后才转的,钱照样全额进奖池,只是记为匿名。低于 1 USDT 的转入不记。</li>
+      <li>给项目的打赏(功德箱)是另一回事,不进奖池。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reward-fair">
+    <h3>剔除与恢复</h3>
+    <p class="lede">作弊由系统按固定的规则自动识别,没有人工环节。判的是面板,不是地址:别人把你的地址填到他的面板上去作弊,被剔除的是他那台,你自己的照常算。</p>
+    <ul>
+      <li>一处来源只认一个地址。来源指服务器的公网 IPv4 地址(没有 IPv4 的机器按 IPv6 的 /48 算)。同一处来源上先上报的那个地址算数,后到的面板会被剔除。几户人共用一个出口地址的机器(NAT 机)上,只有最先登记的那个地址算。</li>
+      <li>同一份流量只能登记一次:两台面板连续 7 天每天涨的流量都一样,后登记的那台剔除。</li>
+      <li>每天涨的流量一模一样、连续 14 天的,剔除:真流量每天都不一样。</li>
+      <li>被剔除期间,这台面板的流量不计入积分;活动页会写明原因。原因消失后连续 14 天没有再出现,自动恢复,剔除期间的流量不补记。靠造假入账的积分会作废。</li>
+      <li>一个地址名下的面板全都被剔除着,积分榜上这个地址会标上 <b data-k="rw.brd.excluded">已剔除</b> 并写明原因,这期间不参加分配;恢复之后照旧。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="reward-privacy">
+    <h3>会上传什么、怎么关</h3>
+    <ul>
+      <li>没登记地址:什么都不上传。打开活动页时面板只读一份公开账本(在 GitHub 上),不带任何标识。</li>
+      <li>登记之后:只上报这台面板的一个随机标识、你填的地址、累计流量(取整到 GB)和时间。不上传域名、用户、线路或任何用户数据。</li>
+      <li>登记服务会看到这台服务器的公网 IP(连任何服务都一样)。它只留一个加盐的哈希,用来判断「一处来源只认一个地址」;不留 IP 本身,也不公开。</li>
+      <li>公开账本里只有地址、积分和名下的面板数;逐笔入账里是链上本来就公开的交易。</li>
+      <li>不想参加:<b data-k="nav.settings">设置</b> → <b data-k="set.reward">流量奖励</b> → 关掉 <b data-k="set.rewardEnabled">参加流量奖励计划</b>。关掉后硬币不显示,也不再为它联网;本机照常累计,重新打开不丢。</li>
+    </ul>
+  </section>
+</section>
+
 <section class="chap" id="support">
   <h2>建议与支持 · 功德箱</h2>
   <p class="lede">面板右上角的 <b data-k="support.btn">建议 / 支持</b>:找作者、报问题、支持这个项目。</p>
@@ -1491,7 +1558,8 @@
     <ul>
       <li>在"支持这个项目"里填你的名字和金额,点 <b data-lit="support.html">留名</b>,再按页面给出的金额转 USDT(TRC20),60 分钟内到账就记到这个名字上。</li>
       <li>上榜靠 GitHub 上的定时任务对账,GitHub 常把定时任务推迟几个小时,所以到账后通常要几个小时才出现在所有面板的 <b data-lit="support.html">功德箱</b> 里;超过一天还没上榜,在 Telegram 联系作者。</li>
-      <li>m-ui 没有遥测,不收集使用数据。功德箱和在线设备数(每台面板每天从 GitHub 下载一次空文件,按下载次数算有多少台在运行)是仅有的两处和面板功能无关的联网,都不带任何标识。</li>
+      <li>m-ui 没有遥测,不收集使用数据。功德箱和在线设备数(每台面板每天从 GitHub 下载一次空文件,按下载次数算有多少台在运行)这两处联网和面板功能无关,都不带任何标识。</li>
+      <li data-scope="admin">流量奖励计划是自愿参加的:没登记领取地址的面板只读一份公开账本,不带任何标识;登记之后才上报,报什么见 <a href="#reward-privacy">会上传什么、怎么关</a>。</li>
       <li data-scope="admin">不想要这两处联网:<b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → 关掉 <b data-k="set.supportOnline">功德箱与在线设备数</b>。这个开关只管这两处;面板为各项功能还会连 GitHub(检查更新)、Globalping(大陆连通检测)、Let's Encrypt、Telegram 等,清单和各自怎么关见 <a href="#sec-net">面板会连哪些外部地址</a>。</li>
     </ul>
   </section>
