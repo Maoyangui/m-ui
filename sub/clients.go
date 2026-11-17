@@ -56,7 +56,8 @@ type clientApp struct {
 type clientTile struct {
 	Key        string // ios / android / windows / macos / linux
 	Icon       template.HTML
-	OS         string // 图标下方那行系统名
+	OS         string // 系统全名(一块里最上面那行小标题,也是分段的悬停提示)
+	Short      string // 上面那一排分段里的短名(一格放得下):iOS / Android / Windows / macOS / Linux
 	Apps       []clientApp
 	MirrorNote string // 这块里有镜像链接时,面板底部的一行说明
 }
@@ -173,7 +174,7 @@ func clientTiles(lang string) []clientTile {
 	const verge, cmfa, flclash, singbox, hiddify, v2rayn = "clash-verge-rev/clash-verge-rev", "MetaCubeX/ClashMetaForAndroid", "chen08209/FlClash", "SagerNet/sing-box", "hiddify/hiddify-app", "2dust/v2rayN"
 	tiles := []clientTile{
 		{
-			Key: "ios", Icon: template.HTML(iconApple), OS: "iOS / iPadOS / Apple TV",
+			Key: "ios", Icon: template.HTML(iconApple), OS: "iOS / iPadOS / Apple TV", Short: "iOS",
 			Apps: []clientApp{
 				{Name: "Nextin", Recommended: true, Format: fAny,
 					Desc: pick("Nextin 在中国大陆区 App Store 搜不到:把 App Store 切到非大陆区(如美区),或用非大陆 Apple ID 登录,再搜索安装。装好后回订阅页点「Nextin」或粘贴通用地址。",
@@ -190,7 +191,7 @@ func clientTiles(lang string) []clientTile {
 			},
 		},
 		{
-			Key: "android", Icon: template.HTML(iconAndro), OS: "Android / Android TV",
+			Key: "android", Icon: template.HTML(iconAndro), OS: "Android / Android TV", Short: "Android",
 			Apps: []clientApp{
 				{Name: god, Recommended: true, Format: fAny,
 					Desc: pick("自研客户端,内置 sing-box,手机与电视盒子通用。装好后回订阅页点「"+god+"」一键导入。不确定机型就装通用版。",
@@ -235,7 +236,7 @@ func clientTiles(lang string) []clientTile {
 			},
 		},
 		{
-			Key: "windows", Icon: template.HTML(iconWin), OS: "Windows",
+			Key: "windows", Icon: template.HTML(iconWin), OS: "Windows", Short: "Windows",
 			Apps: []clientApp{
 				{Name: god, Recommended: true, Format: fAny,
 					Desc: pick("自研客户端,内置 sing-box。安装包一路下一步(若提示「Windows 已保护你的电脑」,点「更多信息」→「仍要运行」),装好后回订阅页点「"+god+"」一键导入。精简系统用离线完整版。",
@@ -289,7 +290,7 @@ func clientTiles(lang string) []clientTile {
 			},
 		},
 		{
-			Key: "macos", Icon: template.HTML(iconMac), OS: "macOS",
+			Key: "macos", Icon: template.HTML(iconMac), OS: "macOS", Short: "macOS",
 			Apps: []clientApp{
 				{Name: god, Recommended: true, Format: fAny,
 					Desc: pick("自研客户端,内置 sing-box,macOS 13 及以上。下载对应芯片的包双击解开,照里面的「安装说明」双击「安装佛跳墙.command」,输一次开机密码就装好(第一次会被系统拦一次,说明里写了怎么放行);装好在启动台或聚焦搜索里打开「"+god+"」,再回订阅页点「"+god+"」一键导入。2020 年后的机型基本都是 Apple 芯片。",
@@ -334,7 +335,7 @@ func clientTiles(lang string) []clientTile {
 			},
 		},
 		{
-			Key: "linux", Icon: template.HTML(iconLinux), OS: "Linux",
+			Key: "linux", Icon: template.HTML(iconLinux), OS: "Linux", Short: "Linux",
 			Apps: []clientApp{
 				{Name: god, Recommended: true, Format: fAny,
 					Desc: pick("自研客户端,单一二进制,自带浏览器面板。解压后 sudo ./install.sh,终端会打印面板地址,在面板里粘贴通用地址。软路由(OpenWrt / iStoreOS)用 ipk 包。",

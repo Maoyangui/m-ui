@@ -8,23 +8,23 @@
 <title>{{.Title}} · {{if .Shared}}{{if eq .Lang "zh"}}临时共享{{else}}Shared link{{end}}{{else}}{{.Name}}{{end}}</title>
 <link rel="icon" href="{{.Icon}}" type="{{.IconType}}">
 <style>
-:root{--bg:#f4f6f9;--card:#fff;--text:#1a202c;--muted:#64748b;--border:#e2e8f0;--primary:#2563eb;--ok:#16a34a;--warn:#d97706;--danger:#dc2626;--soft:#eff6ff;--danger-soft:#fef2f2;--danger-bd:#fecaca;--shadow:0 1px 3px rgba(0,0,0,.05)}
-@media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--text:#e6e9ef;--muted:#8b95a5;--border:#2a313b;--primary:#3b82f6;--soft:#1e293b;--danger-soft:#2a1416;--danger-bd:#5b1f24;--shadow:0 1px 3px rgba(0,0,0,.3)}}
-html{font-size:15px}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-.wrap{max-width:540px;margin:0 auto;padding:1rem .9rem 2.2rem}
-.brand{display:flex;align-items:center;gap:.55rem;margin-bottom:.8rem}.logo{display:block;flex:none;height:28px;width:auto;max-width:min(160px,42vw);object-fit:contain}
+:root{--bg:#f4f6f9;--card:#fff;--text:#171c26;--muted:#667085;--faint:#98a2b3;--border:#e4e7ec;--line:#edf0f4;--primary:#2563eb;--ok:#16a34a;--warn:#d97706;--danger:#dc2626;--soft:#eff5ff;--soft-bd:#d6e4ff;--danger-soft:#fef2f2;--danger-bd:#fecaca;--shadow:0 1px 2px rgba(16,24,40,.04),0 2px 8px rgba(16,24,40,.04)}
+@media(prefers-color-scheme:dark){:root{--bg:#0d1014;--card:#151920;--text:#e7eaf0;--muted:#8d96a6;--faint:#667085;--border:#262c36;--line:#1e232c;--primary:#4c8dff;--soft:#15213a;--soft-bd:#22345c;--danger-soft:#2a1416;--danger-bd:#5b1f24;--shadow:0 1px 2px rgba(0,0,0,.35)}}
+html{font-size:15px}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+.wrap{max-width:560px;margin:0 auto;padding:1.1rem .9rem 2.4rem}
+.brand{display:flex;align-items:center;gap:.6rem;margin:0 .1rem .9rem}.logo{display:block;flex:none;height:28px;width:auto;max-width:min(160px,42vw);object-fit:contain}
 /* 上传的 logo 四周留一圈:深色模式下垫浅色底(透明底的深色 logo 在深色背景上看不见),浅色模式下只留空,两种模式里图本身一样大 */
 .logo.custom{height:32px;padding:2px 4px;border-radius:6px;max-width:min(168px,44vw)}
 @media(prefers-color-scheme:dark){.logo.custom{background:#f4f6f9}}
 /* 窄屏上宽幅 logo 加不带空格的长标题 / 用户名:文字这一栏可以收窄、长词可以断开,不把页头撑出屏幕 */
 .brand>div{min-width:0}
-.brand h1{margin:0;font-size:1.15rem}.brand .u{color:var(--muted);font-size:.85rem}.brand h1,.brand .u{overflow-wrap:anywhere;word-break:break-word}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:.85rem .95rem;margin-bottom:.7rem;box-shadow:var(--shadow)}
-h2{margin:0 0 .7rem;font-size:.95rem}
-.badge{display:inline-block;font-size:.72rem;padding:.15rem .55rem;border-radius:999px;background:var(--soft);color:var(--primary);vertical-align:middle}
-.badge.ok{background:#dcfce7;color:#15803d}.badge.danger{background:#fee2e2;color:#b91c1c}
-@media(prefers-color-scheme:dark){.badge.ok{background:#14532d;color:#86efac}.badge.danger{background:#7f1d1d;color:#fca5a5}}
-.cardhead{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-bottom:.7rem}.cardhead h2{margin:0}
+.brand h1{margin:0;font-size:1.12rem;font-weight:650;letter-spacing:-.01em}.brand .u{color:var(--muted);font-size:.82rem}.brand h1,.brand .u{overflow-wrap:anywhere;word-break:break-word}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:.95rem 1rem;margin-bottom:.7rem;box-shadow:var(--shadow)}
+h2{margin:0 0 .75rem;font-size:.93rem;font-weight:650}
+.badge{display:inline-block;font-size:.7rem;font-weight:600;line-height:1.55;padding:0 .5rem;border-radius:999px;background:var(--soft);color:var(--primary);vertical-align:middle}
+.badge.ok{background:#e7f6ec;color:#15803d}.badge.danger{background:#fee2e2;color:#b91c1c}
+@media(prefers-color-scheme:dark){.badge.ok{background:#14351f;color:#86efac}.badge.danger{background:#4a1a1d;color:#fca5a5}}
+.cardhead{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-bottom:.75rem}.cardhead h2{margin:0}
 /* 状态卡:到期 / 用尽 / 停用时放在最上面 */
 .state{border-color:var(--danger-bd);background:var(--danger-soft)}
 .state-row{display:flex;align-items:flex-start;gap:.8rem}
@@ -33,41 +33,79 @@ h2{margin:0 0 .7rem;font-size:.95rem}
 .state-text b{display:block;font-size:1rem}.state-text span{display:block;color:var(--muted);font-size:.86rem;margin-top:.15rem}
 .state .contact{margin-top:.8rem;font-size:.84rem;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
 /* 共享地址的落地页:说明这是借来的地址 + 选购自己的 */
-.sharedcard{border-color:var(--info-bd,#bfdbfe);background:var(--soft)}
-.sharedcard .mark{flex:none;width:40px;height:40px;border-radius:50%;background:var(--card);color:var(--primary);display:flex;align-items:center;justify-content:center;border:1px solid var(--info-bd,#bfdbfe)}
+.sharedcard{border-color:var(--soft-bd);background:var(--soft)}
+.sharedcard .mark{flex:none;width:40px;height:40px;border-radius:50%;background:var(--card);color:var(--primary);display:flex;align-items:center;justify-content:center;border:1px solid var(--soft-bd)}
 .sharedcard .mark svg{width:22px;height:22px}
-@media(prefers-color-scheme:dark){.sharedcard{--info-bd:#1e3a5f}}
 /* 选购 / 续费 */
 .buy{display:flex;align-items:center;justify-content:center;gap:.45rem;margin-top:.9rem;padding:.72rem 1rem;border-radius:11px;background:var(--primary);color:#fff;text-decoration:none;font-weight:600;font-size:.95rem;box-shadow:0 6px 18px rgba(37,99,235,.28);transition:transform .12s,filter .15s}
 .buy:hover{filter:brightness(1.07)}.buy:active{transform:translateY(1px)}.buy svg{width:18px;height:18px}
 .buylink{display:inline-flex;align-items:center;gap:.3rem;color:var(--primary);background:var(--soft);text-decoration:none;font-size:.8rem;font-weight:600;padding:.32rem .7rem;border-radius:999px;white-space:nowrap}.buylink:hover{filter:brightness(.96)}.buylink svg{width:14px;height:14px}
-.usage{display:flex;justify-content:space-between;align-items:baseline;font-size:.9rem}.usage b{font-size:1.2rem;font-weight:650}
-.bar{height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin:.4rem 0 .6rem}.bar i{display:block;height:100%;background:var(--primary)}
+/* 我的订阅:已用的数放大,下面一根进度条,再下面几个小格(到期 / 重置 / 自动更新) */
+.usage{display:flex;justify-content:space-between;align-items:flex-end;gap:.6rem}.usage b{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;line-height:1.15}
+.usage .of{color:var(--muted);font-size:.86rem;margin-left:.15rem}.usage .pct{color:var(--muted);font-size:.86rem;font-variant-numeric:tabular-nums;padding-bottom:.12rem}
+.bar{height:7px;background:var(--line);border-radius:999px;overflow:hidden;margin:.55rem 0 .85rem}.bar i{display:block;height:100%;border-radius:999px;background:var(--primary)}
 .bar.warn i{background:var(--warn)}.bar.danger i{background:var(--danger)}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:.3rem 1rem;font-size:.88rem}.kv dt{color:var(--muted)}.kv dd{margin:0}
-.notice{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--soft);border-radius:10px;padding:.75rem .9rem;font-size:.9rem}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(6.2rem,1fr));gap:.45rem;margin:0}
+.facts div{background:var(--bg);border-radius:10px;padding:.5rem .65rem;min-width:0}
+.facts dt{color:var(--muted);font-size:.74rem}.facts dd{margin:.1rem 0 0;font-size:.88rem;font-weight:600;overflow-wrap:anywhere}.facts dd .badge{margin-left:.15rem}
+/* 公告:一条浅色的横幅,不再套白卡片 */
+.ncard{background:var(--soft);border:1px solid var(--soft-bd);border-radius:14px;padding:.8rem .95rem;margin-bottom:.7rem}
+.ncard h2{display:flex;align-items:center;gap:.35rem;margin:0 0 .3rem;font-size:.8rem;color:var(--primary)}.ncard h2 svg{width:15px;height:15px}
+.notice{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.9rem}
 /* 公告与联系方式里的链接:只换颜色,字号跟随段落 */
 .notice a,.state .contact a{color:var(--primary);text-decoration:none}.notice a:hover,.state .contact a:hover{text-decoration:underline}
-.apps{display:grid;grid-template-columns:1fr 1fr;gap:.45rem}
-.app{display:block;text-decoration:none;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:.55rem .7rem;background:var(--card);transition:border-color .15s}
-.app:hover{border-color:var(--primary)}.app b{display:block;font-size:.92rem}.app span{display:block;color:var(--muted);font-size:.74rem;margin-top:.1rem}
-.link{display:flex;gap:.5rem;align-items:center;margin-top:.55rem}.link code{flex:1;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.76rem;word-break:break-all;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.5rem .6rem}
-button{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:8px;padding:.45rem .8rem;font:inherit;font-size:.82rem;cursor:pointer;white-space:nowrap}button:hover{border-color:var(--primary)}
-button.primary{background:var(--primary);border-color:var(--primary);color:#fff}button.primary:hover{filter:brightness(1.08)}
-button.danger{color:var(--danger)}button.danger:hover{border-color:var(--danger)}
-button.sm{padding:.34rem .7rem;font-size:.78rem}button[disabled]{opacity:.6;cursor:default}
-.hint{color:var(--muted);font-size:.8rem;margin:.5rem 0 0}
+/* 一键导入:两列的小卡,右边一个箭头;六张同一个样式 */
+.apps{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+@media(max-width:339px){.apps{grid-template-columns:1fr}}
+.app{display:flex;align-items:center;gap:.35rem;min-width:0;text-decoration:none;color:var(--text);border:1px solid var(--border);border-radius:12px;padding:.6rem .5rem .6rem .75rem;background:var(--card);transition:border-color .15s,transform .1s}
+.app:hover{border-color:var(--primary)}.app:active{transform:scale(.985)}
+.app .at{flex:1;min-width:0}.app b{display:block;font-size:.92rem;font-weight:650}.app .at span{display:block;color:var(--muted);font-size:.72rem;margin-top:.1rem;overflow-wrap:anywhere}
+.app .go{flex:none;width:16px;height:16px;color:var(--faint)}.app:hover .go{color:var(--primary)}
+
+/* 订阅地址:一行一条(名字、地址、复制、二维码);二维码点图标才弹,不再常驻三张大图 */
+.subs{display:flex;flex-direction:column;gap:.4rem}
+.sub{display:flex;align-items:center;gap:.1rem;min-height:42px;background:var(--bg);border-radius:10px;padding:.2rem .25rem .2rem .7rem}
+.sub .sl{flex:none;width:4.2rem;font-size:.78rem;font-weight:650}
+.sub code{flex:1;min-width:0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.74rem;line-height:1.4;color:var(--muted);word-break:break-all;padding:.3rem 0;-webkit-user-select:all;user-select:all}
+button{font:inherit;cursor:pointer}
+.btn{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:9px;padding:.42rem .8rem;font-size:.82rem;white-space:nowrap}.btn:hover{border-color:var(--primary)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}.btn.primary:hover{filter:brightness(1.08)}
+.btn.danger{color:var(--danger)}.btn.danger:hover{border-color:var(--danger)}
+.btn.sm{padding:.34rem .7rem;font-size:.78rem}.btn[disabled]{opacity:.6;cursor:default}
+/* 图标按钮(复制、二维码):34 像素见方,平时只有图标 */
+.ib{flex:none;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border:1px solid transparent;border-radius:9px;background:none;color:var(--muted)}
+.ib:hover,.ib[aria-expanded="true"]{color:var(--primary);border-color:var(--border);background:var(--card)}.ib svg{width:17px;height:17px;display:block}
+.ib:focus-visible,.ln>.line:focus-visible,.btn:focus-visible,.app:focus-visible,summary:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.hint{color:var(--muted);font-size:.8rem;margin:.6rem 0 0}
 .getapp{display:inline-flex;align-items:center;gap:.25rem;color:var(--muted);text-decoration:none;font-size:.78rem;white-space:nowrap}.getapp:hover{color:var(--primary)}.getapp svg{width:14px;height:14px}
-.share .cardhead{margin-bottom:0}.share .link{margin-top:.7rem}.share form{margin:0}
-.qrs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.8rem;justify-items:center;margin-top:.9rem}.qrs figure{margin:0;text-align:center;font-size:.78rem;color:var(--muted);width:100%;max-width:150px}.qrs img{width:100%;aspect-ratio:1/1;height:auto;border-radius:10px;border:1px solid var(--border);background:#fff;display:block;margin:0 auto .3rem}
-.lines{display:flex;flex-direction:column;gap:.35rem}.line{display:flex;justify-content:space-between;align-items:center;font-size:.88rem;padding:.45rem .6rem;border-radius:8px;background:var(--bg)}.line .tags{display:flex;gap:.3rem}
-.tag{font-size:.68rem;padding:.08rem .4rem;border-radius:5px;border:1px solid var(--border);color:var(--muted);text-transform:uppercase}
-/* 折叠卡(节点 / 用量) */
-details summary{display:flex;align-items:center;justify-content:space-between;cursor:pointer;list-style:none}details summary::-webkit-details-marker{display:none}details summary h2{margin:0}details .chev{font-size:.8rem;color:var(--muted);white-space:nowrap}details[open] .chev .o{display:none}details:not([open]) .chev .c{display:none}
-details .lines{margin-top:.6rem}
+.qrs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.7rem;justify-items:center;margin-top:.85rem}.qrs figure{margin:0;width:100%;max-width:138px;text-align:center;font-size:.76rem;color:var(--muted)}.qrs img{display:block;width:100%;aspect-ratio:1/1;height:auto;margin:0 auto .3rem;border-radius:10px;border:1px solid var(--border);background:#fff}
+.share .cardhead{margin-bottom:0}.share .sub{margin-top:.7rem}.share form{margin:0}
+/* 折叠卡(用量 / 节点):标题一行就是开关,右边一个箭头 */
+details>summary{display:flex;align-items:center;justify-content:space-between;gap:.6rem;cursor:pointer;list-style:none;border-radius:8px}details>summary::-webkit-details-marker{display:none}details>summary h2{margin:0}
+.chev{display:inline-flex;align-items:center;gap:.2rem;color:var(--muted);font-size:.8rem;white-space:nowrap}.chev svg{width:15px;height:15px;transition:transform .15s}
+details[open]>summary .chev svg{transform:rotate(180deg)}details[open]>summary .chev .o,details:not([open])>summary .chev .c{display:none}
+/* 节点:一条线路点一下就地展开,列出它在各台服务器上的节点;每个节点右边两个图标按钮(复制链接、二维码) */
+.lines{display:flex;flex-direction:column;gap:.35rem;margin-top:.7rem}
+.line{display:flex;justify-content:space-between;align-items:center;gap:.5rem;font-size:.88rem;padding:.5rem .65rem;border-radius:10px;background:var(--bg)}.line .tags{display:flex;gap:.3rem;flex:none}
+.tag{font-size:.66rem;padding:.06rem .38rem;border-radius:5px;border:1px solid var(--border);color:var(--muted);text-transform:uppercase}
+.ln{border-radius:10px;background:var(--bg)}
+.ln>.line{width:100%;border:0;background:none;text-align:left;color:var(--text)}
+.line .nm{flex:1;min-width:0;overflow-wrap:anywhere}
+.line .cnt{flex:none;color:var(--muted);font-size:.76rem;font-variant-numeric:tabular-nums}
+.line .cv{flex:none;width:14px;height:14px;color:var(--muted);transition:transform .15s}.ln.open .cv{transform:rotate(180deg)}
+.nds{padding:0 .3rem .3rem .65rem}
+.nd{display:flex;align-items:center;gap:.1rem;min-height:38px;padding-left:.7rem;border-top:1px solid var(--border);font-size:.84rem}
+.nd .nn{flex:1;min-width:0;overflow-wrap:anywhere;padding:.3rem .3rem .3rem 0}.nd .nn .tag{margin-left:.35rem;vertical-align:1px}
+.nd.msg{color:var(--muted);font-size:.8rem}
+/* 二维码的小浮层:贴着被点的图标弹出来,只有二维码和一行名字。图本身带白边,外面不再套白框;不压暗页面 */
+.qrp{position:fixed;z-index:30;width:236px;padding:6px 6px 5px;background:#fff;border:1px solid #e4e7ec;border-radius:14px;box-shadow:0 12px 32px rgba(16,24,40,.2),0 2px 6px rgba(16,24,40,.08);animation:qrin .12s ease-out}.qrp[hidden]{display:none}
+.qrp img{display:block;width:224px;height:224px;border-radius:9px;background:#f2f4f7}
+.qrp .qn{padding:3px 6px 0;font-size:.76rem;line-height:1.45;color:#667085;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes qrin{from{opacity:0;transform:translateY(4px) scale(.98)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.qrp{animation:none}}
 /* 用量图 */
 .ubody{margin-top:.8rem}
-.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:.7rem}.seg button{border:none;border-radius:0;background:transparent;color:var(--muted);padding:.3rem .7rem;font-size:.78rem}.seg button+button{border-left:1px solid var(--border)}.seg button.active{background:var(--primary);color:#fff}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:9px;overflow:hidden;margin-bottom:.7rem}.seg button{border:none;border-radius:0;background:transparent;color:var(--muted);padding:.3rem .7rem;font-size:.78rem}.seg button+button{border-left:1px solid var(--border)}.seg button.active{background:var(--primary);color:#fff}
 .chart-wrap{position:relative}
 .chart-summary{display:flex;flex-wrap:wrap;gap:.3rem .9rem;align-items:center;font-size:.84rem;margin:0 0 .45rem}.chart-summary .num{font-weight:650}.chart-summary .muted{color:var(--muted);font-size:.78rem}
 .chart-legend{margin-left:auto;display:flex;gap:.7rem;font-size:.76rem;color:var(--muted)}.lg::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:.3rem;vertical-align:-1px}.lg.up::before{background:var(--primary)}.lg.down::before{background:var(--ok)}
@@ -76,7 +114,7 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
 .chart-tip{position:absolute;pointer-events:none;background:var(--text);color:var(--bg);padding:.4rem .6rem;border-radius:6px;font-size:.76rem;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:nowrap;z-index:2}.chart-tip .tt{opacity:.7;margin-bottom:.15rem}
 .empty{color:var(--muted);font-size:.86rem;text-align:center;padding:1.4rem 0}
 .foot{text-align:center;color:var(--muted);font-size:.76rem;margin-top:1.4rem}.foot a.powered{color:inherit;text-decoration:none;opacity:.85}.foot a.powered:hover{text-decoration:underline}.foot a{color:var(--primary);text-decoration:none}.foot a:hover{text-decoration:underline}
-.toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:.5rem 1rem;border-radius:8px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none}.toast.show{opacity:1}
+.toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:.5rem 1rem;border-radius:999px;font-size:.85rem;opacity:0;transition:opacity .2s;pointer-events:none;z-index:40}.toast.show{opacity:1}
 </style>
 </head>
 <body>
@@ -106,39 +144,41 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
     {{if and .BuyURL (not .Unavailable)}}<a class="buy" href="{{.BuyURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>{{if eq .Lang "zh"}}选购自己的订阅{{else}}Get your own subscription{{end}}</a>{{end}}
   </div>{{else}}<div class="card">
     <div class="cardhead"><h2>{{if eq .Lang "zh"}}我的订阅{{else}}My subscription{{end}}
-      <span class="badge {{.StatusKind}}">{{if eq .Lang "zh"}}{{if eq .StatusText "active"}}正常{{else if eq .StatusText "expired"}}已到期{{else if eq .StatusText "exhausted"}}流量用尽{{else}}已停用{{end}}{{else}}{{.StatusText}}{{end}}</span></h2>
+      <span class="badge {{.StatusKind}}">{{if eq .Lang "zh"}}{{if eq .StatusText "active"}}正常{{else if eq .StatusText "expired"}}已到期{{else if eq .StatusText "exhausted"}}流量用尽{{else}}已停用{{end}}{{else}}{{if eq .StatusText "active"}}Active{{else if eq .StatusText "expired"}}Expired{{else if eq .StatusText "exhausted"}}Used up{{else}}Disabled{{end}}{{end}}</span></h2>
       {{if and .BuyURL (not .Unavailable)}}<a class="buylink" href="{{.BuyURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l-1 12H7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>{{if eq .Lang "zh"}}选购 / 续费{{else}}Purchase / renew{{end}}</a>{{end}}</div>
-    {{if .NoChart}}<p class="hint">{{if eq .Lang "zh"}}用量以主服务器为准,请到主服务器的订阅页查看。{{else}}Usage is tracked on the main server; check the subscription page there.{{end}}</p>{{else}}<div class="usage"><div><b>{{.UsedText}}</b> {{if .Unlimited}}<span style="color:var(--muted)">/ {{if eq .Lang "zh"}}不限{{else}}unlimited{{end}}</span>{{else}}<span style="color:var(--muted)">/ {{.TotalText}}</span>{{end}}</div>{{if not .Unlimited}}<div>{{.Percent}}%</div>{{end}}</div>
+    {{if .NoChart}}<p class="hint" style="margin:0 0 .8rem">{{if eq .Lang "zh"}}用量以主服务器为准,请到主服务器的订阅页查看。{{else}}Usage is tracked on the main server; check the subscription page there.{{end}}</p>{{else}}<div class="usage"><div><b>{{.UsedText}}</b> <span class="of">/ {{if .Unlimited}}{{if eq .Lang "zh"}}不限{{else}}unlimited{{end}}{{else}}{{.TotalText}}{{end}}</span></div>{{if not .Unlimited}}<div class="pct">{{.Percent}}%</div>{{end}}</div>
     <div class="bar {{if ge .Percent 100}}danger{{else if ge .Percent 80}}warn{{end}}"><i style="width:{{.Percent}}%"></i></div>{{end}}
-    <dl class="kv">
-      <dt>{{if eq .Lang "zh"}}到期{{else}}Expires{{end}}</dt><dd>{{if .HasExpiry}}{{.ExpiryText}}{{if .Expired}} <span class="badge danger">{{if eq .Lang "zh"}}已到期{{else}}expired{{end}}</span>{{else}} <span class="badge">{{if eq .Lang "zh"}}剩 {{.DaysLeft}} 天{{else}}{{.DaysLeft}} days left{{end}}</span>{{end}}{{else if .ActivateDays}}{{if eq .Lang "zh"}}首次连接后 {{.ActivateDays}} 天{{else}}{{.ActivateDays}} days after first connection{{end}}{{else}}{{if eq .Lang "zh"}}不限{{else}}never{{end}}{{end}}</dd>
-      {{if .ResetText}}<dt>{{if eq .Lang "zh"}}流量重置{{else}}Traffic resets{{end}}</dt><dd>{{.ResetText}}</dd>{{end}}
-      <dt>{{if eq .Lang "zh"}}自动更新{{else}}Auto update{{end}}</dt><dd>{{if eq .Lang "zh"}}每 {{.UpdateHours}} 小时{{else}}every {{.UpdateHours}} h{{end}}</dd>
+    <dl class="facts">
+      <div><dt>{{if eq .Lang "zh"}}到期{{else}}Expires{{end}}</dt><dd>{{if .HasExpiry}}{{.ExpiryText}}{{if .Expired}} <span class="badge danger">{{if eq .Lang "zh"}}已到期{{else}}expired{{end}}</span>{{else}} <span class="badge">{{if eq .Lang "zh"}}剩 {{.DaysLeft}} 天{{else}}{{.DaysLeft}} days left{{end}}</span>{{end}}{{else if .ActivateDays}}{{if eq .Lang "zh"}}首次连接后 {{.ActivateDays}} 天{{else}}{{.ActivateDays}} days after first connection{{end}}{{else}}{{if eq .Lang "zh"}}不限{{else}}never{{end}}{{end}}</dd></div>
+      {{if .ResetText}}<div><dt>{{if eq .Lang "zh"}}流量重置{{else}}Traffic resets{{end}}</dt><dd>{{.ResetText}}</dd></div>{{end}}
+      <div><dt>{{if eq .Lang "zh"}}自动更新{{else}}Auto update{{end}}</dt><dd>{{if eq .Lang "zh"}}每 {{.UpdateHours}} 小时{{else}}every {{.UpdateHours}} h{{end}}</dd></div>
     </dl>
   </div>{{end}}
 
-  {{if .Notice}}<div class="card"><h2>{{if eq .Lang "zh"}}公告{{else}}Notice{{end}}</h2><div class="notice">{{linkify .Notice}}</div></div>{{end}}
+  {{if .Notice}}<div class="ncard"><h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10v4a1 1 0 0 0 1 1h2l5 4V5L7 9H5a1 1 0 0 0-1 1z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M18.5 6.5a8 8 0 0 1 0 11"/></svg>{{if eq .Lang "zh"}}公告{{else}}Notice{{end}}</h2><div class="notice">{{linkify .Notice}}</div></div>{{end}}
 
   <div class="card">
     <div class="cardhead"><h2>{{if eq .Lang "zh"}}一键导入{{else}}Import into an app{{end}}</h2><a class="getapp" href="{{.ClientsURL}}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10"/><path d="M8.5 10.5 12 14l3.5-3.5"/><path d="M5 19h14"/></svg>{{if eq .Lang "zh"}}客户端下载{{else}}Get a client{{end}}</a></div>
-    <div class="apps">{{range .Imports}}<a class="app" href="{{.Href}}"><b>{{.Name}}</b><span>{{.Hint}}</span></a>{{end}}</div>
+    <div class="apps">{{range .Imports}}<a class="app" href="{{.Href}}"><span class="at"><b>{{.Name}}</b><span>{{.Hint}}</span></span><svg class="go" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></a>{{end}}</div>
     <p class="hint">{{if .AutoFormat}}{{if eq .Lang "zh"}}其它客户端:复制下方地址,在 App 里"添加订阅"粘贴即可。通用地址一般都能用,客户端来拉时会自动给对的格式;个别 App 不认再用对应的 Clash 或 sing-box 地址。{{else}}Other apps: copy a link below and paste it into the app's "add subscription". The universal link usually just works, since the right format is picked when the app fetches it; if an app refuses it, use the Clash or sing-box link.{{end}}{{else}}{{if eq .Lang "zh"}}其它客户端:复制下方地址,在 App 里"添加订阅"粘贴。通用地址只给分享链接(Shadowrocket、v2rayN、NekoBox、Hiddify 等用它);Clash 系请用 Clash 地址,sing-box 官方客户端请用 sing-box 地址。{{else}}Other apps: copy a link below and paste it into the app's "add subscription". The universal link only serves share links (for Shadowrocket, v2rayN, NekoBox, Hiddify…); Clash-family apps need the Clash link and official sing-box apps the sing-box link.{{end}}{{end}}</p>
   </div>
 
   <div class="card">
     <h2>{{if eq .Lang "zh"}}订阅地址{{else}}Subscription links{{end}}</h2>
-    <div class="link"><code id="l1">{{.SubClash}}</code><button onclick="cp('l1')">Clash</button></div>
-    <div class="link"><code id="l2">{{.SubLink}}</code><button onclick="cp('l2')">{{if eq .Lang "zh"}}通用{{else}}Links{{end}}</button></div>
-    <div class="link"><code id="l3">{{.SubJSON}}</code><button onclick="cp('l3')">sing-box</button></div>
+    <div class="subs">
+      <div class="sub"><span class="sl">Clash</span><code id="l1">{{.SubClash}}</code><button type="button" class="ib" onclick="cp('l1')" title="{{if eq .Lang "zh"}}复制 Clash 地址{{else}}Copy the Clash link{{end}}" aria-label="{{if eq .Lang "zh"}}复制 Clash 地址{{else}}Copy the Clash link{{end}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button></div>
+      <div class="sub"><span class="sl">{{if eq .Lang "zh"}}通用{{else}}Links{{end}}</span><code id="l2">{{.SubLink}}</code><button type="button" class="ib" onclick="cp('l2')" title="{{if eq .Lang "zh"}}复制通用地址{{else}}Copy the universal link{{end}}" aria-label="{{if eq .Lang "zh"}}复制通用地址{{else}}Copy the universal link{{end}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button></div>
+      <div class="sub"><span class="sl">sing-box</span><code id="l3">{{.SubJSON}}</code><button type="button" class="ib" onclick="cp('l3')" title="{{if eq .Lang "zh"}}复制 sing-box 地址{{else}}Copy the sing-box link{{end}}" aria-label="{{if eq .Lang "zh"}}复制 sing-box 地址{{else}}Copy the sing-box link{{end}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button></div>
+    </div>
     <div class="qrs">
-      <figure><img src="{{.QRClash}}" alt="QR"><figcaption>Clash</figcaption></figure>
-      <figure><img src="{{.QRLink}}" alt="QR"><figcaption>{{if eq .Lang "zh"}}通用链接{{else}}Links{{end}}</figcaption></figure>
-      <figure><img src="{{.QRJSON}}" alt="QR"><figcaption>sing-box</figcaption></figure>
+      <figure><img src="{{.QRClash}}" alt="QR" loading="lazy"><figcaption>Clash</figcaption></figure>
+      <figure><img src="{{.QRLink}}" alt="QR" loading="lazy"><figcaption>{{if eq .Lang "zh"}}通用链接{{else}}Links{{end}}</figcaption></figure>
+      <figure><img src="{{.QRJSON}}" alt="QR" loading="lazy"><figcaption>sing-box</figcaption></figure>
     </div>
   </div>
 
   {{if and (not .Shared) (not .NoChart)}}<div class="card"><details id="usage">
-    <summary><h2>{{if eq .Lang "zh"}}用量情况{{else}}Usage{{end}}</h2><span class="chev"><span class="o">{{if eq .Lang "zh"}}展开查看流量图{{else}}Show traffic chart{{end}} ▾</span><span class="c">{{if eq .Lang "zh"}}收起{{else}}Hide{{end}} ▴</span></span></summary>
+    <summary><h2>{{if eq .Lang "zh"}}用量情况{{else}}Usage{{end}}</h2><span class="chev"><span class="o">{{if eq .Lang "zh"}}流量图{{else}}Traffic chart{{end}}</span><span class="c">{{if eq .Lang "zh"}}收起{{else}}Hide{{end}}</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></span></summary>
     <div class="ubody">
       <div class="seg" id="u-seg"><button type="button" class="active" data-h="24">{{if eq .Lang "zh"}}24 小时{{else}}24 h{{end}}</button><button type="button" data-h="168">{{if eq .Lang "zh"}}7 天{{else}}7 days{{end}}</button><button type="button" data-h="720">{{if eq .Lang "zh"}}30 天{{else}}30 days{{end}}</button></div>
       <div id="u-chart"><div class="empty">{{if eq .Lang "zh"}}加载中…{{else}}Loading…{{end}}</div></div>
@@ -148,11 +188,11 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
 
   {{if .ShareOn}}<div class="card share" id="share">
     <div class="cardhead"><h2>{{if eq .Lang "zh"}}临时共享{{else}}Share temporarily{{end}}{{if .ShareURL}} <span class="badge ok">{{if eq .Lang "zh"}}已开启{{else}}on{{end}}</span>{{end}}</h2>
-      {{if .ShareURL}}<form method="post" action="?share=off"><button class="danger sm" data-busy="{{if eq .Lang "zh"}}取消中…{{else}}Stopping…{{end}}">{{if eq .Lang "zh"}}取消共享{{else}}Stop sharing{{end}}</button></form>
-      {{else}}<form method="post" action="?share=on"><button class="primary sm" data-busy="{{if eq .Lang "zh"}}生成中…{{else}}Creating…{{end}}">{{if eq .Lang "zh"}}生成链接{{else}}Create link{{end}}</button></form>{{end}}
+      {{if .ShareURL}}<form method="post" action="?share=off"><button class="btn danger sm" data-busy="{{if eq .Lang "zh"}}取消中…{{else}}Stopping…{{end}}">{{if eq .Lang "zh"}}取消共享{{else}}Stop sharing{{end}}</button></form>
+      {{else}}<form method="post" action="?share=on"><button class="btn primary sm" data-busy="{{if eq .Lang "zh"}}生成中…{{else}}Creating…{{end}}">{{if eq .Lang "zh"}}生成链接{{else}}Create link{{end}}</button></form>{{end}}
     </div>
     {{if .ShareURL}}
-    <div class="link"><code id="l4">{{.ShareURL}}</code><button onclick="cp('l4')">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button></div>
+    <div class="sub"><code id="l4">{{.ShareURL}}</code><button type="button" class="ib" onclick="cp('l4')" title="{{if eq .Lang "zh"}}复制共享地址{{else}}Copy the shared link{{end}}" aria-label="{{if eq .Lang "zh"}}复制共享地址{{else}}Copy the shared link{{end}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg></button><button type="button" class="ib" data-qs="{{.ShareURL}}/qr" data-qn="{{if eq .Lang "zh"}}临时共享的地址{{else}}Shared link{{end}}" aria-expanded="false" title="{{if eq .Lang "zh"}}共享地址的二维码{{else}}QR code of the shared link{{end}}" aria-label="{{if eq .Lang "zh"}}共享地址的二维码{{else}}QR code of the shared link{{end}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2v2h-2zM18 14h2M14 18h2M18 18h2v2"/></svg></button></div>
     <p class="hint">{{if eq .Lang "zh"}}把这个地址发给对方:用浏览器打开就是一键导入页(看不到你的用量和到期),也能直接粘贴到客户端。取消后立即失效;用量、设备数与到期仍算在你名下。{{else}}Send this link to them: opened in a browser it is a one-tap import page (your usage and expiry stay hidden), or it can be pasted straight into an app. It stops working the moment you cancel; traffic, devices and expiry still count against you.{{end}}</p>
     {{else}}
     <p class="hint">{{if eq .Lang "zh"}}生成一条临时地址给别人用:对方用浏览器打开即可一键导入,随时可取消。{{else}}Create a temporary link for someone else: they open it in a browser and import it in one tap. Cancel any time.{{end}}</p>
@@ -160,21 +200,25 @@ svg.chart{width:100%;height:auto;display:block}.chart .grid{stroke:var(--border)
   </div>{{end}}
 
   {{if .Lines}}<div class="card">
-    <details class="nodes"><summary><h2>{{if eq .Lang "zh"}}节点{{else}}Nodes{{end}} <span class="badge">{{len .Lines}}</span></h2><span class="chev"><span class="o">{{if eq .Lang "zh"}}展开{{else}}Show{{end}} ▾</span><span class="c">{{if eq .Lang "zh"}}收起{{else}}Hide{{end}} ▴</span></span></summary>
-    <div class="lines">{{range .Lines}}<div class="line"><span>{{.Name}}</span><span class="tags"><span class="tag">{{.Protocol}}</span>{{if .TLS}}<span class="tag">{{.TLS}}</span>{{end}}{{if .Transport}}<span class="tag">{{.Transport}}</span>{{end}}</span></div>{{end}}</div></details>
+    <details class="nodes"><summary><h2>{{if eq .Lang "zh"}}节点{{else}}Nodes{{end}} <span class="badge">{{len .Lines}}</span></h2><span class="chev"><span class="o">{{if eq .Lang "zh"}}展开{{else}}Show{{end}}</span><span class="c">{{if eq .Lang "zh"}}收起{{else}}Hide{{end}}</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></span></summary>
+    <div class="lines"{{if .NodesOpen}} id="nodes"{{end}}>{{range .Lines}}{{if and $.NodesOpen .Count}}<div class="ln" data-id="{{.ID}}"><button type="button" class="line" aria-expanded="false"><span class="nm">{{.Name}}</span><span class="tags"><span class="tag">{{.Protocol}}</span>{{if .TLS}}<span class="tag">{{.TLS}}</span>{{end}}{{if .Transport}}<span class="tag">{{.Transport}}</span>{{end}}</span><span class="cnt">{{.Count}}</span><svg class="cv" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button><div class="nds" hidden></div></div>{{else}}<div class="line"><span>{{.Name}}</span><span class="tags"><span class="tag">{{.Protocol}}</span>{{if .TLS}}<span class="tag">{{.TLS}}</span>{{end}}{{if .Transport}}<span class="tag">{{.Transport}}</span>{{end}}</span></div>{{end}}{{end}}</div>
+    {{if .NodesOpen}}<p class="hint">{{if eq .Lang "zh"}}点一条线路,展开它在各台服务器上的节点;右边的图标可以复制这个节点的链接、看它的二维码。{{else}}Tap a line to list its node on each server; the icons on the right copy that node's link or show its QR code.{{end}}</p>{{end}}</details>
   </div>{{end}}
 
   <div class="foot">{{if .Support}}{{linkify .Support}} · {{end}}© {{.Year}} {{if .Brand}}github-maoyangui · <a class="powered" href="https://maoyangui.github.io/m-ui/" rel="noopener" target="_blank">Powered by m-ui</a>{{else}}{{.Title}}{{end}}</div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="qrp" id="qrp" role="dialog" aria-labelledby="qrname" hidden><img id="qrimg" alt="QR" width="224" height="224"><div class="qn" id="qrname"></div></div>
 <script>
 var TZOFF={{.TZOffset}};
 var L={up:{{if eq .Lang "zh"}}'上行'{{else}}'Up'{{end}},down:{{if eq .Lang "zh"}}'下行'{{else}}'Down'{{end}},total:{{if eq .Lang "zh"}}'合计'{{else}}'Total'{{end}},peak:{{if eq .Lang "zh"}}'峰值'{{else}}'Peak'{{end}},empty:{{if eq .Lang "zh"}}'该时段没有流量'{{else}}'No traffic in this period'{{end}},loading:{{if eq .Lang "zh"}}'加载中…'{{else}}'Loading…'{{end}},fail:{{if eq .Lang "zh"}}'加载失败,请稍后再试'{{else}}'Could not load, try again later'{{end}},copied:{{if eq .Lang "zh"}}'已复制'{{else}}'Copied'{{end}}};
-function cp(id){var t=document.getElementById(id).textContent;var done=function(){var e=document.getElementById('toast');e.textContent=L.copied;e.classList.add('show');setTimeout(function(){e.classList.remove('show')},1500)};
-if(navigator.clipboard){navigator.clipboard.writeText(t).then(done)}else{var a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();done()}}
+function toast(m){var e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(function(){e.classList.remove('show')},1500)}
+function cpText(t){var done=function(){toast(L.copied)},old=function(){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();try{document.execCommand('copy');done()}catch(e){}a.remove()};
+if(navigator.clipboard&&window.isSecureContext!==false){navigator.clipboard.writeText(t).then(done,old)}else{old()}}
+function cp(id){cpText(document.getElementById(id).textContent)}
 /* 临时共享:POST 直接返回更新后的页面,只替换这张卡;按钮点下去立刻有反馈 */
 document.addEventListener('submit',function(e){var f=e.target,card=document.getElementById('share');
-if(!card||!card.contains(f))return;e.preventDefault();var b=f.querySelector('button');b.disabled=true;b.textContent=b.getAttribute('data-busy')||'…';
+if(!card||!card.contains(f))return;e.preventDefault();var b=f.querySelector('button');closeQR();b.disabled=true;b.textContent=b.getAttribute('data-busy')||'…';
 fetch(f.action,{method:'POST',credentials:'same-origin',headers:{'Accept':'text/html'}}).then(function(r){if(!r.ok)throw new Error(r.status);return r.text()}).then(function(h){
 var n=new DOMParser().parseFromString(h,'text/html').querySelector('#share');
 if(n){card.innerHTML=n.innerHTML}else{location.reload()}}).catch(function(){location.reload()})});
@@ -212,6 +256,38 @@ function loadUsage(h){uh=h;var box=document.getElementById('u-chart');var btns=d
 if(uloaded[h]){chart(box,uloaded[h].points,uloaded[h].span);return}
 box.innerHTML='<div class="empty">'+L.loading+'</div>';
 fetch(location.pathname+'?stats='+h+'&tz='+TZOFF,{credentials:'same-origin'}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()}).then(function(d){uloaded[h]=d;if(uh===h)chart(box,d.points,d.span)}).catch(function(){box.innerHTML='<div class="empty">'+L.fail+'</div>'})}
+/* 节点:点一条线路就地展开(第一次展开才去取它的节点),每个节点右边是「复制链接」「二维码」两个图标;二维码在小窗里 */
+var NL={load:{{if eq .Lang "zh"}}'加载中…'{{else}}'Loading…'{{end}},fail:{{if eq .Lang "zh"}}'没取到,再点一次线路名重试'{{else}}'Could not load. Tap the line again to retry'{{end}},none:{{if eq .Lang "zh"}}'这条线路现在没有可用的节点'{{else}}'This line has no node available right now'{{end}},copy:{{if eq .Lang "zh"}}'复制节点链接'{{else}}'Copy node link'{{end}},qr:{{if eq .Lang "zh"}}'节点二维码'{{else}}'Node QR code'{{end}},gone:{{if eq .Lang "zh"}}'二维码没取到,刷新页面再试'{{else}}'Could not load the QR code. Refresh and try again'{{end}}};
+var ICP='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
+var IQR='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2v2h-2zM18 14h2M14 18h2M18 18h2v2"/></svg>';
+var nodesEl=document.getElementById('nodes'),nodeData={};
+function esc(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function drawNodes(box,id){var list=nodeData[id]||[],h='',i;
+if(!list.length){box.innerHTML='<div class="nd msg">'+NL.none+'</div>';return}
+for(i=0;i<list.length;i++){var n=list[i];h+='<div class="nd"><span class="nn">'+esc(n.n)+(n.p?'<span class="tag">'+esc(n.p)+'</span>':'')+'</span><button type="button" class="ib" data-cp="'+i+'" title="'+NL.copy+'" aria-label="'+NL.copy+'">'+ICP+'</button><button type="button" class="ib" data-qr="'+i+'" aria-expanded="false" title="'+NL.qr+'" aria-label="'+NL.qr+'">'+IQR+'</button></div>'}
+box.innerHTML=h}
+function openLine(ln){var id=ln.getAttribute('data-id'),box=ln.querySelector('.nds'),btn=ln.querySelector('.line'),open=!ln.classList.contains('open');
+ln.classList.toggle('open',open);box.hidden=!open;btn.setAttribute('aria-expanded',open?'true':'false');
+if(!open||nodeData[id])return;
+box.innerHTML='<div class="nd msg">'+NL.load+'</div>';
+fetch(location.pathname+'?nodes='+encodeURIComponent(id),{credentials:'same-origin',headers:{'Accept':'application/json'}}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()}).then(function(d){nodeData[id]=d||[];drawNodes(box,id)}).catch(function(){box.innerHTML='<div class="nd msg">'+NL.fail+'</div>'})}
+/* 二维码小浮层:贴着被点的图标弹出(左边放不下就放到下面 / 上面),只有二维码和一行名字;再点一次、点别处、Esc、滚动页面都收起 */
+var qrp=document.getElementById('qrp'),qrFrom=null;
+function closeQR(){if(!qrp||qrp.hidden)return;qrp.hidden=true;document.getElementById('qrimg').removeAttribute('src');if(qrFrom)qrFrom.setAttribute('aria-expanded','false');qrFrom=null}
+function showQR(src,name,from){if(qrFrom===from){closeQR();return}closeQR();
+var img=document.getElementById('qrimg'),cap=document.getElementById('qrname');qrFrom=from;from.setAttribute('aria-expanded','true');cap.textContent=name;
+img.onerror=function(){cap.textContent=NL.gone};img.src=src;qrp.hidden=false;
+var r=from.getBoundingClientRect(),w=qrp.offsetWidth,h=qrp.offsetHeight,vw=document.documentElement.clientWidth,vh=window.innerHeight,left=r.left-w-8,top=r.top+r.height/2-h/2;
+if(left<8){left=Math.min(Math.max(8,r.right-w),vw-w-8);top=r.bottom+8;if(top+h>vh-8)top=r.top-h-8}
+qrp.style.left=Math.round(left)+'px';qrp.style.top=Math.round(Math.min(Math.max(8,top),vh-h-8))+'px'}
+document.addEventListener('click',function(e){var t=e.target,b=t.closest('[data-qs]');
+if(b){showQR(b.getAttribute('data-qs'),b.getAttribute('data-qn'),b);return}
+if(qrp&&!qrp.hidden&&!t.closest('#qrp')&&!t.closest('.ib[data-qr]'))closeQR()});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'||e.keyCode===27)closeQR()});
+window.addEventListener('scroll',closeQR,true);window.addEventListener('resize',closeQR);
+if(nodesEl){nodesEl.addEventListener('click',function(e){var t=e.target,b=t.closest('.ib'),ln=t.closest('.ln');if(!ln)return;
+if(b){var list=nodeData[ln.getAttribute('data-id')]||[],n=list[Number(b.getAttribute(b.hasAttribute('data-cp')?'data-cp':'data-qr'))];if(!n)return;if(b.hasAttribute('data-cp'))cpText(n.l);else showQR(location.pathname.replace(/\/+$/,'')+'/qr?node='+encodeURIComponent(n.k),n.n+(n.p?' · '+n.p:''),b);return}
+if(t.closest('.line'))openLine(ln)})}
 var usageEl=document.getElementById('usage');
 if(usageEl){usageEl.addEventListener('toggle',function(e){if(e.target.open&&!uloaded[uh])loadUsage(uh)});
 document.getElementById('u-seg').addEventListener('click',function(e){var b=e.target.closest('button');if(b)loadUsage(Number(b.getAttribute('data-h')))})}

@@ -8,39 +8,51 @@
 <title>{{if eq .Lang "zh"}}客户端下载{{else}}Get a client{{end}} · {{.Title}}</title>
 <link rel="icon" href="{{.Icon}}" type="{{.IconType}}">
 <style>
-:root{--bg:#f4f6f9;--card:#fff;--text:#1a202c;--muted:#64748b;--border:#e2e8f0;--primary:#2563eb;--soft:#eff6ff}
-@media(prefers-color-scheme:dark){:root{--bg:#0f1216;--card:#171b21;--text:#e6e9ef;--muted:#8b95a5;--border:#2a313b;--primary:#3b82f6;--soft:#1e293b}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-.wrap{max-width:560px;margin:0 auto;padding:1.25rem 1rem 3rem}
-.head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:1rem}
-.head h1{margin:0;font-size:1.15rem}
-.head a{color:var(--muted);text-decoration:none;font-size:.82rem}.head a:hover{color:var(--primary)}
-.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1.1rem 1.15rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}
-.tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem}
-@media(max-width:520px){.tiles{grid-template-columns:repeat(3,1fr)}}
-.tile{display:flex;flex-direction:column;align-items:center;gap:.4rem;padding:.85rem .3rem;border:1px solid var(--border);border-radius:12px;background:var(--card);color:var(--text);font:inherit;cursor:pointer;transition:border-color .15s,background .15s}
-.tile:hover{border-color:var(--primary)}
-.tile svg{width:26px;height:26px;display:block}
-.tile span{font-size:.7rem;line-height:1.25;text-align:center;color:var(--muted);word-break:keep-all}
-.tile[aria-expanded="true"]{border-color:var(--primary);background:var(--soft)}
-.tile[aria-expanded="true"] span{color:var(--primary)}
-.panel{margin-top:.9rem;padding-top:.9rem;border-top:1px dashed var(--border)}
-.panel h2{margin:0 0 .35rem;font-size:.95rem;display:flex;align-items:center;gap:.45rem;flex-wrap:wrap}
-.panel p{margin:0 0 .75rem;color:var(--muted);font-size:.86rem}
-.app+.app{margin-top:.9rem;padding-top:.8rem;border-top:1px solid var(--border)}
-.app:not(.rec) h2{font-size:.9rem}
-.app:not(.rec) p{font-size:.82rem;margin-bottom:.55rem}
-.badge{font-size:.66rem;font-weight:600;line-height:1;padding:.22rem .45rem;border-radius:999px;background:var(--soft);color:var(--primary);border:1px solid color-mix(in srgb,var(--primary) 35%,transparent)}
-.fmt{font-size:.68rem;font-weight:400;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:.14rem .4rem;margin-left:auto;white-space:nowrap}
-.dl.mirror small{font-size:.66rem;color:var(--primary);background:var(--soft);border-radius:5px;padding:.08rem .3rem;margin-left:.1rem}
-.mirror-note{margin:.8rem 0 0;font-size:.74rem;color:var(--muted);line-height:1.45}
-.dls{display:flex;flex-wrap:wrap;gap:.5rem}
-.dl{display:inline-flex;align-items:center;gap:.35rem;text-decoration:none;border:1px solid var(--border);border-radius:9px;padding:.42rem .7rem;font-size:.82rem;color:var(--text);background:var(--card);white-space:nowrap}
+/* 和订阅落地页(page.html)同一套颜色、圆角和字号 */
+:root{--bg:#f4f6f9;--card:#fff;--text:#171c26;--muted:#667085;--faint:#98a2b3;--border:#e4e7ec;--line:#edf0f4;--primary:#2563eb;--soft:#eff5ff;--soft-bd:#d6e4ff;--shadow:0 1px 2px rgba(16,24,40,.04),0 2px 8px rgba(16,24,40,.04)}
+@media(prefers-color-scheme:dark){:root{--bg:#0d1014;--card:#151920;--text:#e7eaf0;--muted:#8d96a6;--faint:#667085;--border:#262c36;--line:#1e232c;--primary:#4c8dff;--soft:#15213a;--soft-bd:#22345c;--shadow:0 1px 2px rgba(0,0,0,.35)}}
+html{font-size:15px}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+.wrap{max-width:560px;margin:0 auto;padding:1.1rem .9rem 2.4rem}
+/* 页头:左边 logo + 标题(下面一行小字是站点名),右边回订阅页 */
+.head{display:flex;align-items:center;justify-content:space-between;gap:.8rem;margin:0 .1rem .9rem}
+.brand{display:flex;align-items:center;gap:.6rem;min-width:0}.brand>div{min-width:0}
+.logo{display:block;flex:none;height:28px;width:auto;max-width:min(140px,36vw);object-fit:contain}
+.logo.custom{height:32px;padding:2px 4px;border-radius:6px}
+@media(prefers-color-scheme:dark){.logo.custom{background:#f4f6f9}}
+.head h1{margin:0;font-size:1.12rem;font-weight:650;letter-spacing:-.01em}.head .u{color:var(--muted);font-size:.82rem;overflow-wrap:anywhere}
+.back{flex:none;display:inline-flex;align-items:center;gap:.15rem;color:var(--muted);text-decoration:none;font-size:.8rem;white-space:nowrap;padding:.32rem .65rem .32rem .4rem;border:1px solid var(--border);border-radius:999px;background:var(--card)}
+.back:hover{color:var(--primary);border-color:var(--primary)}.back svg{width:15px;height:15px}
+/* 系统:一排五格的分段切换(图标 + 短名),选中的那格带底色 */
+.tiles{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.25rem;padding:.25rem;background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);margin-bottom:.7rem}
+.tile{display:flex;flex-direction:column;align-items:center;gap:.3rem;min-width:0;padding:.55rem .15rem .5rem;border:1px solid transparent;border-radius:10px;background:none;color:var(--muted);font:inherit;cursor:pointer;transition:background .15s,color .15s}
+.tile:hover{color:var(--text)}
+.tile svg{width:22px;height:22px;display:block}
+.tile span{font-size:.72rem;font-weight:600;line-height:1.2;white-space:nowrap}
+.tile[aria-expanded="true"]{background:var(--soft);border-color:var(--soft-bd);color:var(--primary)}
+.tile:focus-visible,.dl:focus-visible,.back:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+/* 一个系统一块:小标题(系统全名)下面每个客户端一张卡 */
+.os{margin:1rem .15rem .45rem;font-size:.78rem;font-weight:600;color:var(--muted)}
+.js .os.same{display:none}/* 分段上已经写着同一个名字(Windows / macOS / Linux):不重复 */
+.app{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:.9rem 1rem;margin-bottom:.6rem;box-shadow:var(--shadow)}
+.app.rec{border-color:var(--soft-bd);background:linear-gradient(180deg,var(--soft),var(--card) 70%)}
+.ah{display:flex;align-items:center;gap:.45rem;margin-bottom:.3rem}
+.ah h2{margin:0;font-size:.95rem;font-weight:650;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;min-width:0}
+.badge{font-size:.66rem;font-weight:600;line-height:1.5;padding:0 .45rem;border-radius:999px;background:var(--primary);color:#fff}
+.fmt{margin-left:auto;flex:none;font-size:.68rem;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:.1rem .4rem;white-space:nowrap;background:var(--card)}
+.app p{margin:0 0 .75rem;color:var(--muted);font-size:.84rem}
+/* 下载:首选包是一颗实心按钮,其余(别的架构、离线包、镜像、全部版本)是小一号的浅色按钮 */
+.dls{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center}
+.dl{display:inline-flex;align-items:center;gap:.3rem;text-decoration:none;border-radius:9px;padding:.36rem .65rem;font-size:.8rem;color:var(--text);background:var(--bg);border:1px solid transparent;white-space:nowrap;transition:border-color .15s}
 .dl:hover{border-color:var(--primary)}
-.dl.primary{background:var(--primary);border-color:var(--primary);color:#fff}.dl.primary:hover{filter:brightness(1.08)}
-.dl.muted{color:var(--muted);font-size:.78rem;padding:.42rem .6rem}
-.dl svg{width:13px;height:13px}
-.foot{text-align:center;color:var(--muted);font-size:.76rem;margin-top:1.2rem}
+.dl.primary{background:var(--primary);color:#fff;font-weight:600;font-size:.84rem;padding:.46rem .8rem;border-radius:10px}.dl.primary:hover{filter:brightness(1.07);border-color:transparent}
+.dl.primary svg{width:15px;height:15px}
+/* 推荐的那一款:首选包占一整行(手机上一眼就是它),别的客户端的首选包和其它入口排在一起 */
+.app.rec .dl.primary{flex:1 1 100%;justify-content:center;font-size:.88rem;padding:.58rem .9rem;box-shadow:0 4px 14px rgba(37,99,235,.22)}
+.dl.muted{color:var(--muted)}
+.dl.mirror small{font-size:.64rem;font-weight:600;color:var(--primary);background:var(--soft);border-radius:5px;padding:.04rem .3rem}
+@media(min-width:480px){.app.rec .dl.primary{flex:0 1 auto}}
+.mirror-note{margin:.2rem .15rem 0;font-size:.74rem;color:var(--muted);line-height:1.5}
+.foot{text-align:center;color:var(--muted);font-size:.76rem;margin-top:1.4rem}
 .panel[hidden]{display:block}/* 没有 JS 就全展开 */
 .js .panel[hidden]{display:none}
 </style>
@@ -48,43 +60,40 @@
 <body>
 <div class="wrap">
   <div class="head">
-    <h1>{{if eq .Lang "zh"}}客户端下载{{else}}Get a client{{end}}</h1>
-    <a href="{{.Back}}">{{if eq .Lang "zh"}}← 返回订阅页{{else}}← Back to subscription{{end}}</a>
+    <div class="brand">{{if .Icon}}<img class="logo{{if ne .IconType "image/svg+xml"}} custom{{end}}" src="{{.Icon}}" alt="">{{end}}<div><h1>{{if eq .Lang "zh"}}客户端下载{{else}}Get a client{{end}}</h1>{{if .Title}}<div class="u">{{.Title}}</div>{{end}}</div></div>
+    <a class="back" href="{{.Back}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>{{if eq .Lang "zh"}}返回订阅页{{else}}Back to subscription{{end}}</a>
   </div>
-  <div class="card">
-    <div class="tiles">
-      {{range .Tiles}}<button class="tile" type="button" data-key="{{.Key}}" aria-expanded="false" aria-controls="p-{{.Key}}">{{.Icon}}<span>{{.OS}}</span></button>{{end}}
-    </div>
-    {{range .Tiles}}
-    <div class="panel" id="p-{{.Key}}" data-key="{{.Key}}" hidden>
-      {{range .Apps}}
-      <section class="app{{if .Recommended}} rec{{end}}">
-        <h2>{{.Name}}{{if .Recommended}} <span class="badge">{{if eq $.Lang "zh"}}推荐{{else}}Recommended{{end}}</span>{{end}}<span class="fmt">{{.Format}}</span></h2>
-        <p>{{.Desc}}</p>
-        <div class="dls">
-          {{range .Links}}<a class="dl{{if .Primary}} primary{{end}}{{if .Muted}} muted{{end}}{{if .Mirror}} mirror{{end}}" href="{{.Href}}" target="_blank" rel="noopener noreferrer"{{if .Mirror}} title="{{$.MirrorHint}}"{{end}}>{{.Text}}{{if .Mirror}}<small>{{if eq $.Lang "zh"}}大陆可用{{else}}CN OK{{end}}</small>{{end}}</a>{{end}}
-        </div>
-      </section>
-      {{end}}
-      {{if .MirrorNote}}<p class="mirror-note">{{.MirrorNote}}</p>{{end}}
-    </div>
+  <div class="tiles">
+    {{range .Tiles}}<button class="tile" type="button" data-key="{{.Key}}" aria-expanded="false" aria-controls="p-{{.Key}}" title="{{.OS}}">{{.Icon}}<span>{{.Short}}</span></button>{{end}}
+  </div>
+  {{range .Tiles}}
+  <div class="panel" id="p-{{.Key}}" data-key="{{.Key}}" hidden>
+    <div class="os{{if eq .OS .Short}} same{{end}}">{{.OS}}</div>
+    {{range .Apps}}
+    <section class="app{{if .Recommended}} rec{{end}}">
+      <div class="ah"><h2>{{.Name}}{{if .Recommended}} <span class="badge">{{if eq $.Lang "zh"}}推荐{{else}}Recommended{{end}}</span>{{end}}</h2><span class="fmt">{{.Format}}</span></div>
+      <p>{{.Desc}}</p>
+      <div class="dls">
+        {{range .Links}}<a class="dl{{if .Primary}} primary{{end}}{{if .Muted}} muted{{end}}{{if .Mirror}} mirror{{end}}" href="{{.Href}}" target="_blank" rel="noopener noreferrer"{{if .Mirror}} title="{{$.MirrorHint}}"{{end}}>{{if .Primary}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7.5 11 12 15.5 16.5 11"/><path d="M5 19.5h14"/></svg>{{end}}{{.Text}}{{if .Mirror}}<small>{{if eq $.Lang "zh"}}大陆可用{{else}}CN OK{{end}}</small>{{end}}</a>{{end}}
+      </div>
+    </section>
     {{end}}
+    {{if .MirrorNote}}<p class="mirror-note">{{.MirrorNote}}</p>{{end}}
   </div>
+  {{end}}
   <p class="foot">{{if eq .Lang "zh"}}下载均来自各客户端官方发布页{{else}}All downloads come from each client&#39;s official release page{{end}} · {{.Year}}</p>
 </div>
 <script>
-// 没有 JS 时五块说明全部展开(照样能用);有 JS 就按系统自动展开一块,点图标切换。
+// 没有 JS 时五块说明全部展开(照样能用);有 JS 就按系统自动选中一块,点上面那一排切换。
 document.body.classList.add('js');
 var tiles = [].slice.call(document.querySelectorAll('.tile'));
 var panels = [].slice.call(document.querySelectorAll('.panel'));
 function show(key) {
-  panels.forEach(function (p) { p.hidden = p.dataset.key !== key; });
-  tiles.forEach(function (t) { t.setAttribute('aria-expanded', String(t.dataset.key === key)); });
+  panels.forEach(function (p) { p.hidden = p.getAttribute('data-key') !== key; });
+  tiles.forEach(function (t) { t.setAttribute('aria-expanded', String(t.getAttribute('data-key') === key)); });
 }
 tiles.forEach(function (t) {
-  t.addEventListener('click', function () {
-    show(t.getAttribute('aria-expanded') === 'true' ? '' : t.dataset.key);
-  });
+  t.addEventListener('click', function () { show(t.getAttribute('data-key')); });
 });
 var ua = navigator.userAgent;
 var guess = /iPhone|iPad|iPod/.test(ua) ? 'ios'

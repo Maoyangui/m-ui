@@ -2,8 +2,10 @@ package sub
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -81,7 +83,42 @@ type importLink struct {
 }
 
 type pageLine struct {
+	ID                             uint
 	Name, Protocol, TLS, Transport string
+	Count                          int // 订阅里这条线路给出几个节点(各台服务器 + 中转入口;关了输出的、这个人不要的不算)
+}
+
+// lineNode 落地页「节点」里点开一条线路后的一行:订阅里这条线路的一个节点。
+type lineNode struct {
+	Name string `json:"n"`           // 节点名,和客户端里看到的一样
+	Link string `json:"l"`           // 分享链接(复制的就是它)
+	Key  string `json:"k"`           // 取这个节点二维码用的键:链接的摘要 —— 链接里有凭据,不进地址栏
+	Kind string `json:"p,omitempty"` // 一个地址出两条链接的线路(mixed:socks + http)标出这一条是哪种
+}
+
+// nodeKey 一条分享链接的键(SHA-256 的前 8 字节,十六进制)。
+func nodeKey(link string) string {
+	sum := sha256.Sum256([]byte(link))
+	return hex.EncodeToString(sum[:8])
+}
+
+// lineNodes 订阅里这条线路的各个节点,顺序、名字、链接都和「通用」订阅里的一样(同一个 subAddrs / lineToURIs)。
+func lineNodes(user model.User, line model.Line, opt Options) []lineNode {
+	out := []lineNode{}
+	for _, a := range subAddrs(line, opt.Entries, opt.LineNodes[line.Id], opt.LineHides[line.Id]) {
+		name := line.Name + a.remark
+		uris := lineToURIs(line, user, a, name)
+		for _, u := range uris {
+			n := lineNode{Name: name, Link: u, Key: nodeKey(u)}
+			if len(uris) > 1 {
+				if i := strings.Index(u, "://"); i > 0 {
+					n.Kind = u[:i]
+				}
+			}
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 type pageData struct {
@@ -113,10 +150,13 @@ type pageData struct {
 	Imports                 []importLink
 	ClientsURL              template.URL // 客户端下载页(同一地址加 ?clients=1)
 	Lines                   []pageLine
-	Year                    int
-	Brand                   bool // 页脚 "Powered by m-ui":设置可关;代理的落地页不显示
-	AutoFormat              bool // 通用地址按客户端给格式(设置 subAutoFormat);关着时提示改用 Clash / sing-box 地址
-	TZOffset                int  // 面板时区相对 UTC 的分钟数,用量图的时间标签按它显示
+	// NodesOpen 节点那一栏里的线路可以点开(列出各台服务器上的节点,复制链接、看二维码):订阅能用时才行,
+	// 到期 / 用尽 / 停用的人客户端拉不到订阅,这里同样不给
+	NodesOpen  bool
+	Year       int
+	Brand      bool // 页脚 "Powered by m-ui":设置可关;代理的落地页不显示
+	AutoFormat bool // 通用地址按客户端给格式(设置 subAutoFormat);关着时提示改用 Clash / sing-box 地址
+	TZOffset   int  // 面板时区相对 UTC 的分钟数,用量图的时间标签按它显示
 	// Shared:这是共享地址的落地页。只给借用者看得着的:临时共享标识、选购、公告、一键导入、订阅地址、节点;
 	// 本人的用量 / 到期 / 用量图 / 共享管理一概不出,状态卡也只说原因不带数字。
 	Shared bool
@@ -208,12 +248,13 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 
 	enc := url.QueryEscape
 	imp := SubTitle(user, opt) // 一键导入按订阅标题命名,与响应头一致
-	// 一键导入靠 godusevpn:// 深链,只有登记了这个协议的版本能接:Windows(安装包写注册表,程序每次启动补一遍)、
-	// macOS(.app 的 Info.plist 登记 CFBundleURLTypes,系统把地址交给已装好的程序)、安卓与电视(AndroidManifest);
-	// Linux 版没登记,在它自己的面板里粘地址
-	god, godHint := "佛跳墙", "Windows · macOS · Android · 电视"
+	// 一键导入靠 godusevpn:// 深链:Windows(安装包写注册表,程序每次启动补一遍)、macOS(.app 的 Info.plist 登记
+	// CFBundleURLTypes)、安卓与电视(AndroidManifest)都登记了这个协议。小字写的是这款客户端有哪些平台的版本
+	// (产品方 2026-11-18 定:写 Linux、不单列电视 —— 电视版就是 Android 版);Linux 版目前没登记深链,
+	// 在 Linux 上点这一格唤不起客户端,要在它自己的面板里粘地址。
+	god, godHint := "佛跳墙", "Windows · macOS · Android · Linux"
 	if d.Lang != "zh" {
-		god, godHint = "Fotiaoqiang", "Windows · macOS · Android · TV"
+		god = "Fotiaoqiang"
 	}
 	d.Imports = []importLink{
 		// 自家客户端排第一:它自己会给地址补 ?format=json,所以传不带 format 的通用地址
@@ -226,7 +267,7 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 		{Name: "Hiddify", Hint: "Android · iOS · Desktop", Href: template.URL("hiddify://import/" + clashURL)},
 	}
 	for _, l := range lines {
-		pl := pageLine{Name: l.Name, Protocol: l.Protocol}
+		pl := pageLine{ID: l.Id, Name: l.Name, Protocol: l.Protocol, Count: len(lineNodes(user, l, opt))}
 		if mode := render.ParseTLS(l).Mode; mode != "none" {
 			pl.TLS = mode
 		}
@@ -282,6 +323,7 @@ func (s *Server) servePage(w http.ResponseWriter, r *http.Request, subPath, key 
 	if st := stateOf(user, rs, time.Now().Unix()); st != data.StatusText { // 代理被停用 / 到期也算停用
 		data.StatusText, data.StatusKind, data.Unavailable = st, "danger", true
 	}
+	data.NodesOpen = !data.Unavailable
 	var buf bytes.Buffer
 	if err := pageTmpl.Execute(&buf, data); err != nil {
 		http.Error(w, "page error: "+err.Error(), http.StatusInternalServerError)
@@ -318,6 +360,65 @@ func (s *Server) serveStats(w http.ResponseWriter, r *http.Request, user model.U
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	_ = json.NewEncoder(w).Encode(res)
+}
+
+// serveLineNodes 落地页「节点」里点开一条线路:GET <地址>?nodes=<线路 id>,返回它在订阅里的各个节点(名字 + 分享链接 + 二维码的键)。
+// 给的就是「通用」订阅里那几条链接,所以和订阅同一个门槛(调用方已经拦掉拉不到订阅的人);线路不在这个人的订阅里是 404。
+func (s *Server) serveLineNodes(w http.ResponseWriter, r *http.Request, user model.User, lines []model.Line, opt Options) {
+	id, err := strconv.ParseUint(r.URL.Query().Get("nodes"), 10, 32)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	for _, l := range lines {
+		if uint64(l.Id) != id {
+			continue
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_ = json.NewEncoder(w).Encode(lineNodes(user, l, opt))
+		return
+	}
+	http.NotFound(w, r)
+}
+
+// serveNodeQR 某一个节点的二维码(PNG):GET <地址>/qr?node=<键>。键是那条分享链接的摘要(见 nodeKey),
+// 在这个人此刻的订阅里找摘要对得上的那一条;找不到(线路改了、节点没了)是 404,页面上提示刷新。
+func (s *Server) serveNodeQR(w http.ResponseWriter, r *http.Request, user model.User, lines []model.Line, opt Options) {
+	key := r.URL.Query().Get("node")
+	if len(key) != 16 {
+		http.NotFound(w, r)
+		return
+	}
+	for _, l := range lines {
+		for _, n := range lineNodes(user, l, opt) {
+			if n.Key != key {
+				continue
+			}
+			png, err := encodeNodeQR(n.Link)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "image/png")
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			_, _ = w.Write(png)
+			return
+		}
+	}
+	http.NotFound(w, r)
+}
+
+// encodeNodeQR 一条分享链接的二维码(PNG,360 像素)。链接太长、中等纠错放不下时降一档。
+func encodeNodeQR(link string) ([]byte, error) {
+	png, err := qrcode.Encode(link, qrcode.Medium, 360)
+	if err != nil {
+		png, err = qrcode.Encode(link, qrcode.Low, 360)
+	}
+	return png, err
 }
 
 // serveQR 输出订阅地址二维码(PNG)。

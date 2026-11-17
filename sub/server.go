@@ -610,7 +610,7 @@ func (s *Server) handle() http.HandlerFunc {
 			s.handleShare(w, r, subPath, name, user, rs)
 			return
 		}
-		if wantQR {
+		if wantQR && !r.URL.Query().Has("node") { // 订阅地址的二维码;/qr?node= 是某个节点的,要先算出这个人的线路,在下面
 			s.serveQR(w, r, subPath, name)
 			return
 		}
@@ -638,6 +638,20 @@ func (s *Server) handle() http.HandlerFunc {
 			opt.Shared, opt.ShowNotice = true, false
 			opt.ProfileTitle = pick(opt.ProfileTitle, s.pageTitle(rs, opt))
 			lines = withoutNamedLogin(lines)
+		}
+		// 落地页「节点」里点开一条线路(?nodes=线路 id)、看某个节点的二维码(/qr?node=键):给的是订阅里那几条分享链接,
+		// 所以和客户端拉订阅同一个门槛 —— 停用 / 到期 / 用尽的人拿不到,落地页关着的也不给。不记订阅日志(不是拉订阅)。
+		if wantQR || r.URL.Query().Has("nodes") {
+			if blocked || !s.pageEnabled(rs) {
+				http.NotFound(w, r)
+				return
+			}
+			if wantQR {
+				s.serveNodeQR(w, r, user, lines, opt)
+			} else {
+				s.serveLineNodes(w, r, user, lines, opt)
+			}
+			return
 		}
 		// 浏览器打开订阅地址 → 订阅页(不论状态;到期 / 用尽 / 停用在页面顶部标出;共享地址是精简版);
 		// 客户端拉取 → 原始订阅,停用则 404
