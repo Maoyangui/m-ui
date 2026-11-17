@@ -9,7 +9,7 @@ import (
 )
 
 // 开着主机容灾时,副机接任后要用的端口不能给线路(用户 11-15):它自己的代理面板端口(副机平时不监听,接任后才起),
-// 选了连订阅一起接管时还有主机的订阅端口。开容灾、改设置时拦下已有的冲突并点名;只走 UDP 的线路不冲突;
+// 选了全量接管时还有主机的订阅端口。开容灾、改设置时拦下已有的冲突并点名;只走 UDP 的线路不冲突;
 // 中转入口开在副机上的端口也算;主机自己的面板端口不迁过去,不留。
 func TestTakeoverPortsReserved(t *testing.T) {
 	cl := readyCluster(t, 1)
@@ -46,7 +46,7 @@ func TestTakeoverPortsReserved(t *testing.T) {
 	if err := m.SaveConfig(in); err != nil {
 		t.Fatalf("没冲突了能开: %v", err)
 	}
-	// 连订阅一起接管:主机的订阅端口也留(副机上的线路、中转入口占着都不行)
+	// 全量接管:主机的订阅端口也留(副机上的线路、中转入口占着都不行)
 	m.set(map[string]string{"subDomain": "sub.example.com", "subPort": "2096", KeyDnsToken: "tok"})
 	fw, _ := json.Marshal([]model.LineForward{{Via: nodeId, Port: 2096, To: nodeId}})
 	relay := model.Line{Name: "RL", Protocol: "trojan", Port: 30443, Enabled: true, Forwards: fw}
@@ -61,7 +61,7 @@ func TestTakeoverPortsReserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	if ps := m.TakeoverPorts(nodeId); len(ps) != 2 || ps[1].Port != 2096 || ps[1].What != TakeoverSub {
-		t.Fatalf("连订阅一起接管:订阅端口也留: %+v", ps)
+		t.Fatalf("全量接管:订阅端口也留: %+v", ps)
 	}
 	m.d.DB.Create(&model.Line{Name: "SUB", Protocol: "vmess", Port: 8443, Enabled: true, NodeIds: nodes})
 	if cs := m.SubPortConflicts(8443); len(cs) != 1 || cs[0].Line != "SUB" {

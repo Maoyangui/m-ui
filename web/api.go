@@ -1735,14 +1735,14 @@ func (s *Server) validatePorts(in map[string]string) error {
 			}
 		}
 	}
-	// 开着主机容灾、连订阅一起接管:订阅端口随主机身份迁到接任的那台,副机上的线路占着它就起不来(见 ha/takeoverports.go)
+	// 开着主机容灾、全量接管:订阅端口随主机身份迁到接任的那台,副机上的线路占着它就起不来(见 ha/takeoverports.go)
 	if h := s.haSvc(); h != nil {
 		for _, key := range changed {
 			if key != "subPort" {
 				continue
 			}
 			if cs := h.SubPortConflicts(got[key]); len(cs) > 0 {
-				return fmt.Errorf("开着主机容灾、连订阅一起接管:订阅端口 %d 被副机上的线路占着(接任后那台要用它提供订阅),换一个或先改那些线路的端口 —— %s", got[key], ha.ConflictList(cs))
+				return fmt.Errorf("开着主机容灾、全量接管:订阅端口 %d 被副机上的线路占着(接任后那台要用它提供订阅),换一个或先改那些线路的端口 —— %s", got[key], ha.ConflictList(cs))
 			}
 		}
 	}
@@ -2123,7 +2123,7 @@ func (s *Server) reloadUsers(reason string) {
 }
 
 // checkTakeoverPorts 开着主机容灾:线路部署到的副机上,端口不能占它接任后要用的(它自己的代理面板端口,
-// 选了连订阅一起接管时还有主机的订阅端口),不然接任时那个服务起不来、订阅地址会变(见 ha/takeoverports.go)。
+// 选了全量接管时还有主机的订阅端口),不然接任时那个服务起不来、订阅地址会变(见 ha/takeoverports.go)。
 // 只走 UDP 的线路和这些 TCP 服务不冲突。
 func (s *Server) checkTakeoverPorts(line model.Line) error {
 	h := s.haSvc()
@@ -2141,10 +2141,10 @@ func (s *Server) checkTakeoverPorts(line model.Line) error {
 				continue
 			}
 			if p.What == ha.TakeoverPanel {
-				return fmt.Errorf("开着主机容灾、连订阅一起接管:端口 %d 是主机的面板端口,服务器「%s」接任后要用它提供面板和外部 API,换一个", line.Port, n.Name)
+				return fmt.Errorf("开着主机容灾、全量接管:端口 %d 是主机的面板端口,服务器「%s」接任后要用它提供面板和外部 API,换一个", line.Port, n.Name)
 			}
 			if p.What == ha.TakeoverSub {
-				return fmt.Errorf("开着主机容灾、连订阅一起接管:端口 %d 是订阅端口,服务器「%s」接任后要用它提供订阅,换一个", line.Port, n.Name)
+				return fmt.Errorf("开着主机容灾、全量接管:端口 %d 是订阅端口,服务器「%s」接任后要用它提供订阅,换一个", line.Port, n.Name)
 			}
 			return fmt.Errorf("开着主机容灾:端口 %d 是服务器「%s」的代理面板端口,它接任后要用,换一个", line.Port, n.Name)
 		}

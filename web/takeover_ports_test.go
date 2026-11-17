@@ -10,7 +10,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
-// 开着主机容灾、连订阅一起接管:订阅端口随主机身份迁到接任的那台,所以副机上的线路不能用它(保存线路时拦),
+// 开着主机容灾、全量接管:订阅端口随主机身份迁到接任的那台,所以副机上的线路不能用它(保存线路时拦),
 // 本机的订阅端口也不能改成副机上线路正用着的(设置页拦);只走 UDP 的线路不冲突;没开容灾时照旧。
 func TestTakeoverPortsBlockLinesAndSettings(t *testing.T) {
 	r := newLDRunner(t, "master.db", map[string]string{"haEpoch": "1", "haMode": "confirm", "haTakeSub": "true", "haDnsToken": "tok",

@@ -273,7 +273,7 @@
     <div class="pit"><b>常见坑</b><ul>
       <li>升级、维护前可以先暂停接任(设置页的暂停按钮,或主机上 <code>m-ui ha pause 分钟数</code>)。在面板里点升级、改端口这类会重启的操作,以及 <code>m-ui</code> 菜单里的升级(暂停 15 分钟)和重启(暂停 5 分钟),都会自动先暂停。</li>
       <li>没开 Telegram 通知时,确认模式只能到备用的面板上点接任。</li>
-      <li>订阅地址里是 IP 时,接任后用户要重新导入订阅。订阅最好用域名;想接任后订阅地址不变,在下面选 <b data-k="ha.scope.sub">连订阅一起接管</b>。</li>
+      <li>订阅地址里是 IP 时,接任后用户要重新导入订阅。订阅最好用域名;想接任后订阅地址不变,在下面选 <b data-k="ha.scope.sub">全量接管</b>。</li>
       <li>备用的数据副本比它现在的纪元旧(上一任新主机期间的改动不在里面)时不给接任按钮;真要接任用命令行 <code>m-ui ha takeover --force</code>,那些改动会丢。</li>
     </ul></div>
   </section>
@@ -301,11 +301,11 @@
   </section>
 
   <section class="sec" id="ha-dns">
-    <h3>接任时接管什么:只接管主机的工作,或连订阅一起接管</h3>
+    <h3>接任时接管什么:只接管主机的工作,或全量接管</h3>
     <p class="lede">在 <b data-k="ha.title">主机容灾</b> 设置的 <b data-k="ha.set.scope">接任时接管什么</b> 里二选一。默认 <b data-k="ha.scope.master">只接管主机的工作</b>。</p>
     <ul>
-      <li><b data-k="ha.scope.master">只接管主机的工作</b>:推配置给副机、并流量、到期 / 超量停用、Telegram 机器人、外部 API 换到新主机;新主机的订阅设置照旧是它自己的,DNS 不动。用户的订阅地址仍指向原主机:原主机失联期间刷新订阅会失败(已连上的线路照常可用),它回来变成副机后照样提供订阅。订阅证书(含私钥)也不随副本带到备用。</li>
-      <li><b data-k="ha.scope.sub">连订阅一起接管</b>:新主机还换上原主机的订阅域名、端口、路径和证书,经 DNS 接口把订阅域名改指到新主机,用户的订阅地址不变。要订阅地址用域名,并填好 <b data-k="ha.set.dnsProvider">DNS 服务商</b> 的接口;没满足时保存会直接说缺什么。面板用域名时,面板和代理面板的地址(外部 API 挂在面板上)也一起跟过去:新主机换上原主机面板的域名、端口、路径、证书和受信任的反向代理,面板域名也改指过来,对接外部 API 的商城、机器人和代理们都不用改;API 密钥、权限、白名单本来就在数据副本里。面板用 IP 时跟不过去,就绪检查会提醒给面板配域名。</li>
+      <li><b data-k="ha.scope.master">只接管主机的工作</b>:推配置给副机、并流量、到期 / 超量停用、Telegram 机器人换到新主机;外部 API 也只在新主机自己的面板地址上(原来的域名没有改指,对接的商城、机器人不改成它的地址就连不上,密钥不变);新主机的订阅设置照旧是它自己的,DNS 不动。用户的订阅地址仍指向原主机:原主机失联期间刷新订阅会失败(已连上的线路照常可用),它回来变成副机后照样提供订阅。订阅证书(含私钥)也不随副本带到备用。</li>
+      <li><b data-k="ha.scope.sub">全量接管</b>:订阅、面板、代理面板和外部 API 的地址全都跟到新主机。新主机换上原主机的订阅域名、端口、路径和证书,经 DNS 接口把订阅域名改指到新主机,用户的订阅地址不变。要订阅地址用域名,并填好 <b data-k="ha.set.dnsProvider">DNS 服务商</b> 的接口;没满足时保存会直接说缺什么。面板用域名时,面板和代理面板的地址(外部 API 挂在面板上)也一起跟过去:新主机换上原主机面板的域名、端口、路径、证书和受信任的反向代理,面板域名也改指过来,对接外部 API 的商城、机器人和代理们都不用改;API 密钥、权限、白名单本来就在数据副本里。面板用 IP 时跟不过去,就绪检查会提醒给面板配域名。</li>
       <li><b data-k="ha.setMaster">设为主机</b>(计划内换主机)不受这个选项影响:订阅总是一起迁过去,订阅证书随整库数据带过去;配了 DNS 接口、订阅域名在名单里就自动改解析,否则确认框里写着该指向哪个 IP。</li>
       <li>DNS 服务商可选 <b data-k="ha.dnsProv.cloudflare">Cloudflare</b>(API 令牌,见 <a href="#cf-token">Cloudflare API 令牌怎么创建</a>)、<b data-k="ha.dnsProv.aliyun">阿里云云解析</b>(只授权 AliyunDNSFullAccess 的 RAM 用户的 AccessKey)、<b data-k="ha.dnsProv.dnspod">腾讯云 DNSPod</b>(只授权 QcloudDNSPodFullAccess 的子用户 API 密钥)。凭据单独存、不回显。点 <b data-k="ha.set.dnsTest">测试 DNS 接口与记录</b> 看哪些记录会被改;凭据不对、域名不在这个账号下时这里直接写出错误。</li>
       <li>订阅证书:订阅走 https 时,备用随加密副本带着主机的订阅证书,接任时能用就直接用,不重签;用不了(没带过来、过期、半个月内到期、不含订阅域名),新主机会用同一个 DNS 接口给订阅域名重签一张(DNS 验证不用等解析指过来),签好自动用于订阅、订阅服务原地重启,以后的续期也走这个接口。刚改完解析、验证记录还没生效时可能一次签不下来:它会隔一会儿自己再试(1 分钟、2 分钟、5 分钟……前后约两个半小时),每次的结果在证书页看得到。就绪检查里能看到订阅证书还剩几天。</li>
@@ -314,7 +314,7 @@
     </ul>
     <div class="pit"><b>常见坑</b><ul>
       <li>开过容灾的集群(纪元 ≥ 1)不能在面板上把副机直接改成主机:别的副机只认带纪元的主机,会一律拒收。换主机用 <b data-k="ha.setMaster">设为主机</b>,主机没了等备用接任;确实要脱离集群,先在每台执行 <code>m-ui ha reset</code>。主机改成副机可以,会顺手清掉本机的容灾状态。</li>
-      <li>开着主机容灾时,副机接任后要用的端口不能给线路和中转入口:它自己的代理面板端口(副机平时不监听,接任后才起),选了 <b data-k="ha.scope.sub">连订阅一起接管</b> 时还有主机的订阅端口(随主机迁过去)。开容灾时已有占着的会被拦下并点名,保存线路、改订阅端口时也会拦;只走 UDP 的线路(hysteria2、tuic)不冲突。各台的面板端口是各自的,接任后不变,不用避开。</li>
+      <li>开着主机容灾时,副机接任后要用的端口不能给线路和中转入口:它自己的代理面板端口(副机平时不监听,接任后才起),选了 <b data-k="ha.scope.sub">全量接管</b> 时还有主机的订阅端口(随主机迁过去)。开容灾时已有占着的会被拦下并点名,保存线路、改订阅端口时也会拦;只走 UDP 的线路(hysteria2、tuic)不冲突。各台的面板端口是各自的,接任后不变,不用避开。</li>
       <li>端口被别的程序占着(m-ui 自己的线路会避开,但管不了别的程序):备用每 10 分钟试一下它接任后要用的端口,被占的在 <b data-k="ha.set.ready">就绪检查</b> 里列出、Telegram 提醒一次。真到接任时还被占:先退回新主机自己原来的端口(云防火墙一般已经放行),还不行才自动挑一个空闲端口顶上,绝不让新主机起不来;通知和 Telegram 里写清实际地址,并提醒在云防火墙 / 安全组放行新端口。</li>
       <li>两台同时当主机:备用接任后联系不上别的副机(比如副机的防火墙只放行原主机的 IP),原主机回来时多数副机还跟着它,两台就都当着主机,订阅和改动会分叉。两边概览顶部的提醒都会变红、Telegram 发一次;要原主机继续当主机,在新主机上点 <b data-k="ha.yield">让回主机</b>(或执行 <code>m-ui ha yield</code>),它变为副机、改过的 DNS 改回去;要新主机当主机,放开防火墙让它联系得上其它副机。就绪检查里的「备用和其它副机之间互通」事先就会提醒。</li>
       <li>设为主机结果不明(提交请求发出后目标没回话)时写操作保持暂停:冻结截止前本机每 10 秒问一次目标,截止后先看副机有没有跟它,没有就以更高的纪元隔离它、恢复写操作 —— 要目标以外的副机确认收到撤销(截止前全部,截止后过半)。连不上的副机已经永久下线、截止后仍凑不够时,在主机上执行 <code>m-ui ha abandon --force</code> 强制放弃;截止前不行,没收到撤销的副机手里的交接标记那时还有效。</li>
@@ -1428,7 +1428,7 @@
         <tr><td>Telegram</td><td>发通知、跑 Telegram 机器人</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b> 不启用就不连</td></tr>
         <tr><td>GitHub、jsDelivr、ntfy.sh、TronGrid</td><td>功德箱:打开 <b data-k="support.btn">建议 / 支持</b> 页时读名单(最多一小时一次),点留名、核对到账时;在线设备数:每天从 GitHub 下载一次空文件</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → 关掉 <b data-k="set.supportOnline">功德箱与在线设备数</b></td></tr>
         <tr><td>GitHub、jsDelivr、登记服务(<code>reward.godusevpn.org</code>)</td><td>流量奖励:打开活动页时读公开账本(最多十分钟一次);登记了领取地址之后,每半小时向登记服务上报一次累计流量;提交留名捐赠、等它到账时也连登记服务。没登记地址、也没提交过留名捐赠的面板只读账本,不连登记服务</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.reward">流量奖励</b> → 关掉 <b data-k="set.rewardEnabled">参加流量奖励计划</b></td></tr>
-        <tr><td>Globalping、Cloudflare / 阿里云 / 腾讯云 DNSPod 的 API</td><td>主机容灾:判断主机是否失联时让境外测点连主机;选了连订阅一起接管时,主机变了以后经 DNS 接口改订阅域名的解析、必要时给订阅域名重签证书</td><td>关掉 <b data-k="ha.set.witness">境外测点见证</b>;选 <b data-k="ha.scope.master">只接管主机的工作</b>(默认)就不连 DNS 接口</td></tr>
+        <tr><td>Globalping、Cloudflare / 阿里云 / 腾讯云 DNSPod 的 API</td><td>主机容灾:判断主机是否失联时让境外测点连主机;选了全量接管时,主机变了以后经 DNS 接口改订阅域名的解析、必要时给订阅域名重签证书</td><td>关掉 <b data-k="ha.set.witness">境外测点见证</b>;选 <b data-k="ha.scope.master">只接管主机的工作</b>(默认)就不连 DNS 接口</td></tr>
         <tr><td>Google(<code>www.gstatic.com</code>)</td><td>上游巡检和测试:<b data-k="set.testUrl">上游测试地址</b> 默认就是它。本机有线路用了上游(WARP、落地机等)时,每 10 分钟经各条上游连一次;线路用了上游组的,内核还会每 30 秒经组里每条上游连一次;点上游的 <b data-k="common.test">测试</b>、外部节点测速时也连</td><td>把 <b data-k="set.testUrl">上游测试地址</b> 换成别的地址;<b data-k="set.checkMinutes">巡检间隔(分钟)</b> 填 0 只关掉定时巡检,上游组的测速照样跑</td></tr>
         <tr><td>你自己填的地址</td><td>Webhook、外部订阅、Telegram 代理</td><td>不填就不连</td></tr>
         <tr><td>点了才连</td><td>更新、安装 WARP(Cloudflare 的软件源;本机 DNS 解析不了软件源时还会向 1.1.1.1、8.8.8.8 查解析)和 <b data-k="ops.checkExit">检测出口</b>、按规则分流里的 <b data-k="line.rr.lookup">查域名</b>(GitHub 上的 v2fly 域名列表)、Reality 的 <b data-k="line.reality.check">检测</b> 和 <b data-k="line.reality.pick">帮我挑</b>(连候选网站)、外部节点测速、证书页的 <b data-k="cert.precheck">预检 DNS / 端口</b> 和换机向导的 <b data-k="mig.check">检查解析</b>(向 Cloudflare、Google、阿里的公共 DNS 查解析,并测一次本机公网 IP)</td><td>不点就不连</td></tr>

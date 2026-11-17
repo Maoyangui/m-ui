@@ -10,7 +10,7 @@ import (
 	"github.com/Maoyangui/m-ui/notify"
 )
 
-// 「连订阅一起接管」靠的 DNS 接口定期自检:令牌被删、权限被改、域名挪到了别的账号,要在真接任之前就知道,
+// 「全量接管」靠的 DNS 接口定期自检:令牌被删、权限被改、域名挪到了别的账号,要在真接任之前就知道,
 // 不能等主机挂了、备用接任时才发现改不了解析、签不了证书。每 6 小时用存着的凭据只读地查一遍(和「测试 DNS 接口与记录」
 // 同一个查法);失效时就绪检查标红、Telegram 告一次,恢复了再说一声。订阅域名没有指向本机 IP 的 A / AAAA 记录
 // (开了 CDN 代理、用的 CNAME)时接任也改不了它,就绪检查提醒。
@@ -84,7 +84,7 @@ func (s *Service) dnsHealthTick() {
 	case alert:
 		logger.Warning("容灾:DNS 接口自检失败(", label, "):", msg)
 		s.notify("🔴 <b>主机容灾的 DNS 接口用不了了</b>(" + notify.Esc(label) + "):" + notify.Esc(shortErr(msg, 300)) +
-			"\n选了连订阅一起接管,接任时要靠它改解析、签订阅证书:到主机面板的主机容灾设置里重新填凭据,点「测试 DNS 接口与记录」核对")
+			"\n选了全量接管,接任时要靠它改解析、签订阅证书:到主机面板的主机容灾设置里重新填凭据,点「测试 DNS 接口与记录」核对")
 	case recovered && wasAlerted:
 		logger.Info("容灾:DNS 接口自检恢复(", label, ")")
 		s.notify("🟢 <b>主机容灾的 DNS 接口恢复了</b>(" + notify.Esc(label) + ")")

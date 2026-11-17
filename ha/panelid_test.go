@@ -12,7 +12,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 )
 
-// 面板跟着主机走(用户 11-15:接任后外部 API 不用重填):连订阅一起接管、面板用域名时,新主机换上原主机的面板、代理面板的
+// 面板跟着主机走(用户 11-15:接任后外部 API 不用重填):全量接管、面板用域名时,新主机换上原主机的面板、代理面板的
 // 域名、端口、路径、证书、受信任的反向代理,面板、外部 API、代理面板的地址不变;面板用 IP、或没接管订阅时不动。
 func TestPanelFollowsOnTakeover(t *testing.T) {
 	for _, tc := range []struct {

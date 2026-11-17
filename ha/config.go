@@ -157,9 +157,9 @@ func (s *Service) SaveConfig(in ConfigInput) error {
 			names = strings.TrimPrefix(names+","+strings.ToLower(ph), ",")
 		}
 	}
-	// 副机接任后要用的端口(它的代理面板端口;连订阅一起接管时还有本机的订阅端口)被线路占着:先换端口再开(见 takeoverports.go)
+	// 副机接任后要用的端口(它的代理面板端口;全量接管时还有本机的订阅端口)被线路占着:先换端口再开(见 takeoverports.go)
 	if cs := s.takeoverConflicts(c); len(cs) > 0 {
-		return fmt.Errorf("这些线路占着副机接任后要用的端口(它的代理面板;连订阅一起接管时还有迁过去的订阅、面板),接任时会冲突:先给它们换个端口再开主机容灾 —— %s", conflictList(cs))
+		return fmt.Errorf("这些线路占着副机接任后要用的端口(它的代理面板;全量接管时还有迁过去的订阅、面板),接任时会冲突:先给它们换个端口再开主机容灾 —— %s", conflictList(cs))
 	}
 	values := map[string]string{
 		KeyMode: c.Mode, KeyStandbys: strconv.Itoa(c.Standbys),

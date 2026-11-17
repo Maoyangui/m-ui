@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// 连订阅一起接管靠的 DNS 接口定期自检:凭据失效时就绪检查标红、Telegram 告一次(不重复),恢复了说一声;
+// 全量接管靠的 DNS 接口定期自检:凭据失效时就绪检查标红、Telegram 告一次(不重复),恢复了说一声;
 // 订阅域名没有指向本机 IP 的记录时提醒(接任时改不了它);没开接管订阅不查。
 func TestDNSHealthCheck(t *testing.T) {
 	cf := newFakeCF(t)

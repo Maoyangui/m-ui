@@ -726,7 +726,7 @@ export async function renderHASettings(container) {
 }
 
 // ---- 接任时接管什么 ----
-// 默认只接管主机的工作(推配置、并流量、到期停用、通知、外部 API……);选「连订阅一起接管」才出现 DNS 接口:
+// 默认只接管主机的工作(推配置、并流量、到期停用、通知、外部 API……);选「全量接管」才出现 DNS 接口:
 // 新主机换上原主机的订阅域名、端口、路径和证书,经 DNS 接口把订阅域名改指到新主机,用户的订阅地址不变。
 const DNS_KINDS = ['cloudflare', 'aliyun', 'dnspod'];
 function scopeHTML(c) {

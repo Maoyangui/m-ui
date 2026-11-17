@@ -39,7 +39,7 @@ type Identity struct {
 	PublicIP    string       `json:"publicIp,omitempty"`
 	PublicIP6   string       `json:"publicIp6,omitempty"`
 	PanelURL    string       `json:"panelUrl,omitempty"`
-	// Panel 面板身份:连订阅一起接管(或设为主机)、面板用域名时随主机走,面板、外部 API、代理面板的地址不变(见 panelid.go)
+	// Panel 面板身份:全量接管(或设为主机)、面板用域名时随主机走,面板、外部 API、代理面板的地址不变(见 panelid.go)
 	Panel *PanelIdentity `json:"panel,omitempty"`
 }
 
@@ -68,7 +68,7 @@ func (s *Service) subHost() string {
 func isIPHost(h string) bool { return net.ParseIP(strings.Trim(h, "[]")) != nil }
 
 // captureIdentity 记下本机(主机)的身份:订阅(见 captureSubIdentity)和面板(见 panelid.go)。full:设为主机的整库数据
-// (订阅、面板总是一起迁过去,证书也带上);否则证书(含私钥)只在选了连订阅一起接管时才带。
+// (订阅、面板总是一起迁过去,证书也带上);否则证书(含私钥)只在选了全量接管时才带。
 func (s *Service) captureIdentity(zw *zip.Writer, full bool) (Identity, error) {
 	id, err := s.captureSubIdentity(zw, full)
 	if err != nil {
@@ -148,7 +148,7 @@ const (
 	idwSubCertFail = "subCertFail" // 订阅证书没能装上:{err}
 	idwAcmeZone    = "acmeZone"    // 本机已有别的签证书令牌,订阅证书续期要它能管那个域名:{name}
 	idwSubPortBind = "subPortBind" // 启动时迁来的订阅端口绑不上,改回本机原来的:{port, own, err}
-	idwSubNotTaken = "subNotTaken" // 接任时没选「连订阅一起接管」:订阅地址还指向原主机:{host}
+	idwSubNotTaken = "subNotTaken" // 接任时没选「全量接管」:订阅地址还指向原主机:{host}
 	idwSubCertNew  = "subCertNew"  // 订阅证书不能用,正经 DNS 接口给订阅域名重签:{host}
 	idwSubCertTodo = "subCertTodo" // 订阅证书不能用、也没法自动重签,要手动处理:{host}
 )
@@ -203,7 +203,7 @@ func identityWarnText(it PlanItem) string {
 	case idwPanelCertFail:
 		return "面板证书没能装上(" + a["err"] + "),面板先用本机原来的证书"
 	case idwSubNotTaken:
-		return "没有接管订阅(容灾设置里没选「连订阅一起接管」):用户的订阅地址还指向原主机 " + a["host"] + ",它回来之前刷新订阅会失败;已连上的线路照常可用"
+		return "没有接管订阅(容灾设置里没选「全量接管」):用户的订阅地址还指向原主机 " + a["host"] + ",它回来之前刷新订阅会失败;已连上的线路照常可用"
 	case idwSubCertNew:
 		return "带过来的订阅证书不能用,正用 DNS 接口给 " + a["host"] + " 重新签一张,签好自动换上(几分钟,证书页能看进度)"
 	case idwSubCertTodo:

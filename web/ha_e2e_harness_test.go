@@ -298,7 +298,7 @@ func seedHAMaster(t *testing.T, m *haInst) {
 	alice := model.User{Name: "alice", Enabled: true, Credentials: generateCredentials("alice"), Up: 1000, Down: 2000}
 	db.Create(&alice)
 	db.Create(&model.User{Name: "bob", Enabled: true, Credentials: generateCredentials("bob")})
-	// 这几个端到端测的是连订阅一起接管(订阅域名、端口、路径随主机走);只接管主机工作的默认情况见 ha 包的 TestTakeoverSubscriptionScope
+	// 这几个端到端测的是全量接管(订阅域名、端口、路径随主机走);只接管主机工作的默认情况见 ha 包的 TestTakeoverSubscriptionScope
 	for k, v := range map[string]string{"subDomain": "sub.example.com", "subPort": "2096", "subPath": "/s/", "apiToken": "api-secret", "timezone": "Asia/Shanghai", "haTakeSub": "true"} {
 		db.Exec("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", k, v)
 	}
