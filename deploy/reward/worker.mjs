@@ -150,7 +150,9 @@ export function cleanName(s) {
   s = String(s ?? '').split(/\s+/).filter(Boolean).join(' ');
   if (!s) return { err: '请填写留名', code: 'name_empty' };
   const chars = [...s];
-  if (chars.some(c => { const n = c.codePointAt(0); return n < 0x20 || n === 0x7f || (n >= 0x80 && n < 0xa0) || n === 0x200b || n === 0x202e || n === 0xfeff; })) return { err: '留名里有不能用的字符', code: 'name_chars' };
+  // 不收:控制字符;看不见的(零宽空格、BOM);改文字方向的(能把榜上别的字排乱);U+FFFD(发来的不是 UTF-8,存下来就是一串乱码)
+  const bad = n => n < 0x20 || n === 0x7f || (n >= 0x80 && n < 0xa0) || n === 0x200b || n === 0x200e || n === 0x200f || (n >= 0x202a && n <= 0x202e) || (n >= 0x2066 && n <= 0x2069) || n === 0xfeff || n === 0xfffd || n === 0xfffe || n === 0xffff;
+  if (chars.some(c => bad(c.codePointAt(0)))) return { err: '留名里有不能用的字符', code: 'name_chars' };
   if (chars.length > 20) return { err: '留名最多 20 个字', code: 'name_long' };
   const low = s.toLowerCase();
   if (low.includes('://') || low.includes('www.')) return { err: '留名不能是网址', code: 'name_url' };

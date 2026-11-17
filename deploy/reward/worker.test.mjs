@@ -128,6 +128,10 @@ test('地址、来源、金额这些小工具', () => {
   assert.ok(W.cleanName('看 https://x.y').err && W.cleanName('WWW.x.y').err);
   assert.ok(W.cleanName('a‮b').err && W.cleanName('a\u0007b').err);
   assert.deepEqual(W.cleanName('🐱'.repeat(20)), { name: '🐱'.repeat(20) }, '按字数算,不按字节');
+  // 乱码(发来的不是 UTF-8)、改文字方向的不可见字符:不收;正常的各国文字、带连接符的表情照收
+  for (const n of [0xfffd, 0x202a, 0x202d, 0x2066, 0x2069, 0x200e, 0x200f]) assert.equal(W.cleanName('a' + String.fromCodePoint(n) + 'b').code, 'name_chars', n.toString(16));
+  assert.deepEqual(W.cleanName('a' + String.fromCodePoint(0xfeff) + 'b'), { name: 'a b' }, 'BOM 算空白,收成一个空格');
+  for (const ok of ['Ünïcödé', 'にほんご', '한국어', 'عربى', '👨‍👩‍👧', 'k8s 练习生']) assert.deepEqual(W.cleanName(ok), { name: ok });
 });
 
 test('上报的签名:改一个字都不认', async () => {
