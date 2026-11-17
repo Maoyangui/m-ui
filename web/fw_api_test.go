@@ -225,6 +225,14 @@ func TestFwRulesAPI(t *testing.T) {
 	if code, _ = do("POST", "/rules", `{"kind":"only","ports":"3306","sources":"198.51.100.7"}`); code != 200 {
 		t.Fatalf("别的端口不用拦: %d", code)
 	}
+	// 从本机回环来的请求(本机的反向代理、SSH 隧道):看不到操作的人真正的地址,回环也不受规则影响,不拦
+	w := httptest.NewRecorder()
+	lr := httptest.NewRequest("POST", "http://x/app/api/fw/rules", strings.NewReader(`{"kind":"only","ports":"22,2053","sources":"198.51.100.7"}`))
+	lr.RemoteAddr = "127.0.0.1:40000"
+	s.handleFw(w, lr)
+	if w.Code != 200 {
+		t.Fatalf("回环来的请求不该被防呆拦下: %d %s", w.Code, w.Body.String())
+	}
 
 	// 改:不带 seconds 不动到期时间;带 0 改成一直有效;换来源、换服务器范围
 	id2 := strconv.FormatUint(uint64(r2.Id), 10)

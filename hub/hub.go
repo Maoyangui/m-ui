@@ -2871,6 +2871,16 @@ func (h *Hub) Fw(n model.Node, op string) (FwReply, error) {
 	return out, err
 }
 
+// NoteFw 记下副机刚回来的防火墙状况(放开 / 撤销 / 现在核对,都是当场问它拿到的):
+// 不等它下一份报告。否则防火墙页点完「放开」,下一轮刷新读到的还是上一份报告里的旧状况,那一行会闪回去几秒。
+func (h *Hub) NoteFw(id uint, st model.FwState) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if cur, ok := h.status[id]; ok && cur != nil {
+		cur.Fw = &st
+	}
+}
+
 // FwReply 副机对 agent/fw 的回复。
 type FwReply struct {
 	State model.FwState `json:"state"`

@@ -262,7 +262,7 @@ systemctl enable --now m-ui
 # 判断和动手都交给程序自己(m-ui firewall …):和面板「防火墙」页的「放开系统防火墙」是同一个动作,记在同一个地方,哪边都能撤销。
 FW_NOTE=""
 firewall_step() {
-  local kind ans="" tries=0
+  local kind ans="" tries=0 wait=120
   kind="$("$BIN" firewall detect 2>/dev/null | head -1 || true)"
   [ -n "$kind" ] || return 0 # 没有在拦入站的系统防火墙
   if [ "$FW" = "ask" ]; then
@@ -271,10 +271,16 @@ firewall_step() {
       echo "这台机器的系统防火墙($kind)开着:没在它那里放行的端口,从外面连不上 —— 云厂商控制台放行了也一样。"
       echo "放开它吗?放开是可逆的(先备份,m-ui firewall undo 或面板「防火墙」页随时恢复);真要挡端口,请在云厂商的安全组里设。"
       echo "  回车 / y = 放开        n = 保留(m-ui 用到的端口会自动在它那里放行)"
+      # 经 sudo 跑、而且脚本或输出走的是管道(curl … | sudo bash、sudo bash install.sh | tee):新版 sudo 默认给命令另开一个终端,
+      # 这种情况下键盘输入传不进来,等也白等 —— 实测要干等满两分钟。只等 15 秒,并且把话说在前面
+      if [ -n "${SUDO_USER:-}" ] && { [ ! -t 0 ] || [ ! -t 1 ]; }; then
+        wait=15
+        echo "  (这次是经 sudo 的管道运行的,键盘输入可能传不进来:$wait 秒内没有回答就按放开算;想保留,装完执行 m-ui firewall undo 即可恢复)"
+      fi
       while :; do
         printf "[Y/n]: "
         ans=""
-        read -r -t 120 ans </dev/tty || { echo; echo "(没有回答,按默认:放开)"; ans="y"; }
+        read -r -t "$wait" ans </dev/tty || { echo; echo "(没有回答,按默认:放开)"; ans="y"; }
         case "$ans" in
           ""|y|Y|yes|YES|Yes) FW="open"; break;;
           n|N|no|NO|No) FW="keep"; break;;

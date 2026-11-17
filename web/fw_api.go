@@ -174,7 +174,11 @@ func (s *Server) fwToRule(p fwRulePayload, cur *model.FwRule, me string, now int
 			}
 		}
 	}
-	// 防呆二:别把自己挡在外面
+	// 防呆二:别把自己挡在外面。请求是从本机回环来的(本机上的反向代理、SSH 隧道)就不查:
+	// 看不到操作的人真正的地址,回环也永远不受规则影响 —— 实机上每条管到面板端口的规则都被它误拦过
+	if a, err := netip.ParseAddr(strings.TrimSpace(me)); err != nil || a.Unmap().IsLoopback() {
+		me = ""
+	}
 	if !p.Force && out.Enabled && me != "" {
 		switch out.Kind {
 		case fw.KindDeny:
@@ -664,6 +668,7 @@ func (s *Server) handleFwServer(w http.ResponseWriter, r *http.Request, n model.
 			return
 		}
 		rep = got
+		s.run.Hub().NoteFw(n.Id, rep.State)
 	}
 	if op != "state" {
 		s.audit(r, "fw", "server:"+op, map[string]interface{}{"name": n.Name, "error": rep.Error})
