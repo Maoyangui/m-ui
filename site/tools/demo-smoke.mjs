@@ -492,15 +492,21 @@ const rwTip2 = await page.evaluate(() => ({ tip: !!document.querySelector('.rw-t
 if (!rwTip2.tip && rwTip2.dot) pass('提醒气泡点别处就收起,金币上留一个小点'); else fail(`提醒气泡收起后不对:${JSON.stringify(rwTip2)}`);
 await page.locator('.rw-coin').click(); await page.waitForTimeout(1300);
 const rwOpen = await page.evaluate(() => ({ open: !!document.querySelector('#rw-ov:not([hidden]) .rw-sheet'), tabs: document.querySelectorAll('#rw-tabs button').length, pool: Number((document.getElementById('rw-pool-n') || { dataset: {} }).dataset.v) || 0,
-  rows: document.querySelectorAll('#rw-led .rw-row:not(.head)').length, eq: document.querySelectorAll('.rw-eq-c').length, kept: !!document.querySelector('.rw-note.ok'), tipGone: !document.querySelector('.rw-tip'),
-  sub: (document.querySelector('.rw-eq a.rw-link') || {}).href || '' }));
-if (rwOpen.open && rwOpen.tabs === 4 && rwOpen.pool > 0 && rwOpen.rows === 10 && rwOpen.eq === 4 && !rwOpen.kept && rwOpen.tipGone && rwOpen.sub === 'https://godusevpn.org/subscription/') pass('活动页:四页、奖池数字、算式四格、逐笔入账十条、节点订阅链接可点');
+  rows: document.querySelectorAll('#rw-led .rw-row:not(.head)').length, kept: !!document.querySelector('.rw-note.ok'), tipGone: !document.querySelector('.rw-tip'),
+  // 奖池从哪来:两路钱各一行 + 一行合计,两行加起来就是合计、也就是页头那个数(差一分钱以内算对:各自四舍五入过)
+  parts: [...document.querySelectorAll('.rw-src-row .rw-src-v')].map(e => Number(e.textContent.replace(/[^0-9.]/g, ''))), sum: Number(((document.querySelector('.rw-src-sum .rw-src-sv b') || {}).textContent || '').replace(/[^0-9.]/g, '')),
+  // 页面上不列收款地址,也没有「不留名直接转」的入口(只有留名捐赠计入奖池)
+  gone: !document.querySelector('.rw-chains, .rw-chain-row, .rw-eq, .rw-src-bar, [data-act="rw.dnAnon"]'),
+  sub: (document.querySelector('.rw-src a.rw-link') || {}).href || '' }));
+const rwSumOk = rwOpen.parts.length === 2 && rwOpen.parts.every(v => v > 0) && Math.abs(rwOpen.parts[0] + rwOpen.parts[1] - rwOpen.sum) < 0.011 && Math.abs(rwOpen.sum - rwOpen.pool) < 0.006;
+if (rwOpen.open && rwOpen.tabs === 4 && rwOpen.pool > 0 && rwOpen.rows === 10 && rwSumOk && rwOpen.gone && !rwOpen.kept && rwOpen.tipGone && rwOpen.sub === 'https://godusevpn.org/subscription/') pass('活动页:四页、奖池数字、「奖池从哪来」两行加起来等于合计、逐笔入账十条、节点订阅链接可点、不列收款地址');
 else fail(`活动页打开后不对:${JSON.stringify(rwOpen)}`);
 await page.locator('[data-act="rw.ledKind"][data-v="donation"]').click(); await page.waitForTimeout(500);
-const rwDon = await page.evaluate(() => { const r = [...document.querySelectorAll('#rw-led .rw-row:not(.head)')]; return { n: r.length, all: r.every(x => x.querySelector('.rw-tag.don')), named: r.filter(x => x.querySelector('.c-name:not(.anon)')).length }; });
+const rwDon = await page.evaluate(() => { const r = [...document.querySelectorAll('#rw-led .rw-row:not(.head)')]; return { n: r.length, all: r.every(x => x.querySelector('.rw-tag.don')), named: r.filter(x => (x.querySelector('.c-name') || { textContent: '' }).textContent.trim()).length }; });
 await page.locator('[data-act="rw.ledChain"][data-v="tron"]').click(); await page.waitForTimeout(500);
 const rwTron = await page.locator('#rw-led .rw-row:not(.head)').count();
-if (rwDon.n > 0 && rwDon.all && rwDon.named > 0 && rwTron === 1) pass(`入账明细:按「捐赠」筛出 ${rwDon.n} 条(${rwDon.named} 条带留名),再按 TRON 筛剩 1 条`); else fail(`入账明细的筛选不对:${JSON.stringify(rwDon)} tron=${rwTron}`);
+const rwTronEmpty = await page.locator('#rw-led .rw-empty').count();
+if (rwDon.n > 0 && rwDon.all && rwDon.named === rwDon.n && rwTron === 0 && rwTronEmpty === 1) pass(`入账明细:按「捐赠」筛出 ${rwDon.n} 条,每一条都带留名;再按 TRON 筛是空的(捐赠只在 Solana 上),说明白没有`); else fail(`入账明细的筛选不对:${JSON.stringify(rwDon)} tron=${rwTron} empty=${rwTronEmpty}`);
 await page.locator('#rw-tabs button[data-v="board"]').click(); await page.waitForTimeout(700);
 const rwBrd0 = await page.evaluate(() => ({ rows: document.querySelectorAll('#rw-brd .rw-row:not(.head)').length, av: document.querySelectorAll('.rw-av').length, first: (document.querySelector('#rw-brd .rw-a') || { dataset: {} }).dataset.v || '' }));
 await page.fill('#rw-q', rwBrd0.first.slice(0, 6)); await page.waitForTimeout(800);

@@ -579,11 +579,10 @@ S.reward = (() => {
   const mk = (ts, kind, chain, amount, name) => ({ ts, kind, chain, amount, name: name || '', from: chain === 'tron' ? rwAddr(34, 'T') : rwAddr(44), tx: rwAddr(chain === 'tron' ? 64 : 88) });
   const amounts = [9.9, 29.9, 9.9, 59, 9.9, 29.9, 99, 9.9, 29.9, 9.9, 199, 29.9, 9.9, 59, 9.9, 29.9, 9.9, 99, 29.9, 9.9, 59, 9.9, 29.9];
   const ledger = amounts.map((a, i) => mk(t0 - Math.floor((i * 2.6 + rwRand() * 2) * day) - 3600, 'order', rwRand() < 0.62 ? 'solana' : 'tron', a));
-  // 捐赠:留名的走 Solana(留名只认这条链),不留名的两条链都可能有
+  // 捐赠:只有留名捐赠计入奖池(没登记就转进来的不算),所以每一笔都有名字,都在 Solana 上
   const gifts = [[2, 50, '老王'], [5, 20, 'night_owl'], [9, 100, '路过的面板党'], [12, 10, 'Tokyo 小鸡'], [15, 30, '老王'], [19, 66.66, 'k8s 练习生'], [23, 8.88, '半夜修机器的人'], [27, 20, 'night_owl'],
-    [31, 200, 'M 记铁粉'], [36, 15, 'hy2 一把梭'], [41, 5, '隔壁机房'], [47, 88, '路过的面板党'], [52, 12.5, ''], [29, 25, ''], [8, 6, '']];
+    [31, 200, 'M 记铁粉'], [36, 15, 'hy2 一把梭'], [41, 5, '隔壁机房'], [47, 88, '路过的面板党'], [52, 12.5, '夜班运维'], [29, 25, 'Tokyo 小鸡'], [8, 6, '一个路人'], [33, 40, '隔壁机房']];
   for (const [d, a, name] of gifts) ledger.push(mk(t0 - d * day - 7200 - Math.floor(rwRand() * 30000), 'donation', 'solana', a, name));
-  ledger.push(mk(t0 - 33 * day - 5000, 'donation', 'tron', 40, ''));
   ledger.sort((a, b) => b.ts - a.ts);
   const board = [];
   for (let i = 0; i < 63; i++) board.push({ address: rwAddr(44), points: Math.max(1, Math.round(46 * Math.pow(0.9, i) + rwRand() * 2)), panels: rwRand() < 0.16 ? 2 + Math.floor(rwRand() * 3) : 1 });
@@ -592,7 +591,7 @@ S.reward = (() => {
   return {
     tb: RW_TB, bytes: Math.round(3.618 * RW_TB), address: '', boundAt: 0, credited: 0, remind: 'tb', intent: null,
     payoutAt: Math.floor(new Date(2027, 8, 3, 0, 0, 0).getTime() / 1000), rate: 0.4,
-    chains: { solana: 'DEMopoo1So1anaAddr0NotRea1xxxxxxxxxxxxxxxxxx', tron: 'TDEMopoo1TronAddr0NotRea1xxxxxxxx' },
+    poolAddr: 'DEMopoo1So1anaAddr0NotRea1xxxxxxxxxxxxxxxxxx', // 留名捐赠要转到的地址(演示用的假地址)
     ledger, board,
   };
 })();
@@ -630,8 +629,7 @@ function demoReward(method, seg, query, body) {
       remind: R.address ? '' : R.remind, excluded: null, donation: R.intent ? { ...R.intent } : null,
       pool: {
         total, orderRate: R.rate, orderCount: orders.length, orderAmount: sum(orders), orderShare: r2(sum(orders) * R.rate), donateCount: dons.length, donateAmount: sum(dons),
-        donateMin: 1, donateMax: 100000,
-        chains: ['solana', 'tron'].map(c => { const got = sum(R.ledger.filter(x => x.chain === c)); return { chain: c, address: R.chains[c], received: got, balance: got }; }),
+        donate: true, donateMin: 1, donateMax: 100000,
         points: ok.reduce((s, x) => s + x.points, 0), addresses: ok.length, payoutAt: R.payoutAt, updatedAt: now() - 240, stale: false,
         ledgerUrl: 'https://github.com/Maoyangui/m-ui/tree/rewards', demo: true,
       },
@@ -654,14 +652,11 @@ function demoReward(method, seg, query, body) {
     }
     if (seg[1] === 'donors') {
       const dons = R.ledger.filter(x => x.kind === 'donation'), by = new Map();
-      for (const x of dons.filter(d => d.name)) { const o = by.get(x.name) || { name: x.name, amount: 0, count: 0, lastAt: 0 }; o.amount = r2(o.amount + x.amount); o.count++; o.lastAt = Math.max(o.lastAt, x.ts); by.set(x.name, o); }
+      for (const x of dons) { const o = by.get(x.name) || { name: x.name, amount: 0, count: 0, lastAt: 0 }; o.amount = r2(o.amount + x.amount); o.count++; o.lastAt = Math.max(o.lastAt, x.ts); by.set(x.name, o); }
       const list = [...by.values()].sort((a, b) => b.amount - a.amount || b.lastAt - a.lastAt);
       const mine = R.intent && R.intent.status === 'paid' ? R.intent.name : '';
       list.forEach((x, i) => { x.rank = i + 1; if (x.name === mine) x.me = true; });
-      const anon = dons.filter(d => !d.name);
-      return { ...page(list), top: list.length ? list[0].amount : 1,
-        named: { donors: list.length, count: dons.length - anon.length, amount: r2(list.reduce((s, x) => s + x.amount, 0)) },
-        anon: { count: anon.length, amount: r2(anon.reduce((s, x) => s + x.amount, 0)) } };
+      return { ...page(list), top: list.length ? list[0].amount : 1, named: { donors: list.length, count: dons.length, amount: r2(list.reduce((s, x) => s + x.amount, 0)) } };
     }
     throw demoErr(404, '路径无效');
   }
@@ -680,7 +675,7 @@ function demoReward(method, seg, query, body) {
     if (!name) throw demoErr(400, '请填写留名');
     if ([...name].length > 20) throw demoErr(400, '留名最多 20 个字');
     if (!(amount >= 1) || amount > 100000 || Math.round(amount * 100) !== amount * 100) throw demoErr(400, '金额要在 1 到 100000 之间,最多两位小数');
-    R.intent = { id: 'demo-' + now(), name, amount, exact: Math.round(amount * 1000 + 1 + Math.floor(Math.random() * 99)) / 1000, chain: 'solana', address: R.chains.solana, createdAt: now(), expiresAt: now() + 3600, status: 'pending' };
+    R.intent = { id: 'demo-' + now(), name, amount, exact: Math.round(amount * 1000 + 1 + Math.floor(Math.random() * 99)) / 1000, chain: 'solana', address: R.poolAddr, createdAt: now(), expiresAt: now() + 3600, status: 'pending' };
     return summary();
   }
   throw demoErr(404, '路径无效');

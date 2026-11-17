@@ -39,7 +39,7 @@ type fakeRegistry struct {
 
 func rwLedger(now int64) reward.Ledger {
 	l := reward.Ledger{V: 1, UpdatedAt: now - 30, PayoutAt: now + 86400*200, OrderRate: 0.4,
-		Chains: []reward.Chain{{Chain: "solana", Address: rwAddrOther, Received: 120, Balance: 120}, {Chain: "tron", Address: "TDoUMF4nF244o5GZvBBwX5t9axvnSoP1Cm", Received: 30, Balance: 30}},
+		Chains: []reward.Chain{{Chain: "solana", Address: rwAddrOther, Received: 120}, {Chain: "tron", Address: "TDoUMF4nF244o5GZvBBwX5t9axvnSoP1Cm", Received: 30}},
 		Donate: reward.DonateInfo{Chain: "solana", Address: rwAddrOther, Min: 1, Max: 100000},
 	}
 	for i := 0; i < 12; i++ { // 12 笔订单:9 笔 Solana、3 笔 TRON
@@ -52,7 +52,7 @@ func rwLedger(now int64) reward.Ledger {
 	for i, d := range []struct {
 		name string
 		amt  float64
-	}{{"老王", 50}, {"night_owl", 20}, {"老王", 30}, {"", 6}} {
+	}{{"老王", 50}, {"night_owl", 20}, {"老王", 30}, {"小李", 6}} {
 		l.Deposits = append(l.Deposits, reward.Deposit{TS: now - int64(i+1)*5000, Kind: "donation", Chain: "solana", Amount: d.amt, From: rwAddrOther, Tx: "d" + string(rune('a'+i)), Name: d.name})
 	}
 	l.Pool = reward.PoolSum{Total: 153.52, OrderCount: 12, OrderAmount: 118.8, OrderShare: 47.52, DonateCount: 4, DonateAmount: 106, Points: 30, Addresses: 14}
@@ -186,13 +186,17 @@ func TestRewardSummaryAndBind(t *testing.T) {
 	var pool struct {
 		Total     float64
 		OrderRate float64
-		Chains    []reward.Chain
+		Donate    bool
 		Points    int64
 		LedgerURL string `json:"ledgerUrl"`
 	}
 	_ = json.Unmarshal(m["pool"], &pool)
-	if pool.Total != 153.52 || pool.OrderRate != 0.4 || len(pool.Chains) != 2 || pool.Points != 30 || !strings.HasSuffix(pool.LedgerURL, "/tree/rewards") {
+	if pool.Total != 153.52 || pool.OrderRate != 0.4 || !pool.Donate || pool.Points != 30 || !strings.HasSuffix(pool.LedgerURL, "/tree/rewards") {
 		t.Fatalf("奖池: %+v", pool)
+	}
+	// 概况里不带奖池的收款地址(页面不列地址;要捐的人留名之后才拿到)
+	if strings.Contains(string(m["pool"]), rwAddrOther) || strings.Contains(string(m["pool"]), "chains") {
+		t.Fatalf("概况里不该有收款地址: %s", m["pool"])
 	}
 	reg.mu.Lock()
 	if reg.exports != 0 || reg.raws != 1 || len(reg.reports) != 0 {
@@ -284,10 +288,6 @@ func TestRewardListsAndDonation(t *testing.T) {
 			Donors, Count int
 			Amount        float64
 		} `json:"named"`
-		Anon struct {
-			Count  int
-			Amount float64
-		} `json:"anon"`
 	}
 	get := func(path string) list {
 		t.Helper()
@@ -326,9 +326,9 @@ func TestRewardListsAndDonation(t *testing.T) {
 	if b = get("/board?q=7xkxt"); b.Total != 1 || b.Items[0]["address"] != rwAddrMe {
 		t.Fatalf("按地址查(不分大小写): %+v", b.Items)
 	}
-	// 捐赠榜:留名的按合计排(老王两笔 80),匿名的只给笔数和合计
+	// 捐赠榜:按合计排(老王两笔 80);只有留名捐赠计入奖池,榜上的合计就是奖池里捐赠的合计
 	d := get("/donors")
-	if d.Total != 2 || d.Items[0]["name"] != "老王" || d.Items[0]["amount"].(float64) != 80 || d.Items[0]["count"].(float64) != 2 || d.Named.Donors != 2 || d.Named.Count != 3 || d.Named.Amount != 100 || d.Anon.Count != 1 || d.Anon.Amount != 6 {
+	if d.Total != 3 || d.Items[0]["name"] != "老王" || d.Items[0]["amount"].(float64) != 80 || d.Items[0]["count"].(float64) != 2 || d.Items[2]["name"] != "小李" || d.Named.Donors != 3 || d.Named.Count != 4 || d.Named.Amount != 106 {
 		t.Fatalf("捐赠榜: %+v", d)
 	}
 	// 登记了地址的面板向登记服务要账本(比分支上的新)

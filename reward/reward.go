@@ -145,12 +145,11 @@ type ReportReply struct {
 
 // ---- 公开账本 ----
 
-// Chain 一条链上的收款地址和它的进出。
+// Chain 一条链上的收款地址,和计入奖池的那些入账的合计(订单按全额记)。
 type Chain struct {
 	Chain    string  `json:"chain"` // solana | tron
 	Address  string  `json:"address"`
 	Received float64 `json:"received"`
-	Balance  float64 `json:"balance"`
 }
 
 // Deposit 一笔入账。
@@ -161,7 +160,7 @@ type Deposit struct {
 	Amount float64 `json:"amount"`
 	From   string  `json:"from"`
 	Tx     string  `json:"tx"`
-	Name   string  `json:"name,omitempty"` // 留名的捐赠
+	Name   string  `json:"name,omitempty"` // 捐赠的留名。只有留名捐赠计入奖池,所以捐赠一定带名字
 }
 
 // BoardRow 积分榜上的一个地址。Excluded = 它名下的面板现在全都被剔除着(原因见 Rule / Reason)。
@@ -463,6 +462,9 @@ func (l *Ledger) check(now int64) error {
 		d := &l.Deposits[i]
 		if d.Kind != "order" && d.Kind != "donation" {
 			return fmt.Errorf("账本第 %d 笔入账的类型不对", i+1)
+		}
+		if d.Kind == "donation" && d.Name == "" {
+			return fmt.Errorf("账本第 %d 笔入账是捐赠却没有留名", i+1)
 		}
 		if d.Amount < 0 || len(d.From) > 64 || len(d.Tx) > 128 || len([]rune(d.Name)) > 24 {
 			return fmt.Errorf("账本第 %d 笔入账写得不对", i+1)

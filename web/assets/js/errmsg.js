@@ -943,7 +943,8 @@ const EN = /*BEGIN*/{
 "现在没有可用的奖池地址,请稍后再试": "No pool address is available right now; try again later",
 "这个金额现在排不开,换个数再试": "This amount can't be queued right now; try a different amount",
 "登记服务那边已经没有这一笔留名了": "The registry no longer has this named donation",
-"登记服务出错了,请稍后再试": "The registry ran into an error; try again later"
+"登记服务出错了,请稍后再试": "The registry ran into an error; try again later",
+"账本第 %d 笔入账是捐赠却没有留名": "Deposit #%d in the ledger is a donation without a name"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

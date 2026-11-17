@@ -83,7 +83,7 @@ func TestCleanName(t *testing.T) {
 func goodLedger(now int64) Ledger {
 	return Ledger{V: 1, UpdatedAt: now - 60, PayoutAt: now + 86400, OrderRate: 0.4,
 		Pool:   PoolSum{Total: 23.96, OrderCount: 2, OrderAmount: 39.9, OrderShare: 15.96, DonateCount: 1, DonateAmount: 8, Points: 3, Addresses: 2},
-		Chains: []Chain{{Chain: "solana", Address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", Received: 37.9, Balance: 37.9}, {Chain: "tron", Address: "TDoUMF4nF244o5GZvBBwX5t9axvnSoP1Cm", Received: 10, Balance: 10}},
+		Chains: []Chain{{Chain: "solana", Address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", Received: 37.9}, {Chain: "tron", Address: "TDoUMF4nF244o5GZvBBwX5t9axvnSoP1Cm", Received: 10}},
 		Donate: DonateInfo{Chain: "solana", Address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", Min: 1, Max: 100000},
 		Deposits: []Deposit{
 			{TS: now - 100, Kind: "order", Chain: "solana", Amount: 29.9, From: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", Tx: "sig1"},
@@ -112,6 +112,7 @@ func TestLedgerCheckAndShare(t *testing.T) {
 		"比例":   func(x *Ledger) { x.OrderRate = 1.5 },
 		"链":    func(x *Ledger) { x.Chains[0].Chain = "eth" },
 		"收款地址": func(x *Ledger) { x.Chains[1].Address = "not-a-tron-address" },
+		"没留名":  func(x *Ledger) { x.Deposits[2].Name = "" },
 		"类型":   func(x *Ledger) { x.Deposits[0].Kind = "gift" },
 		"留名太长": func(x *Ledger) { x.Deposits[2].Name = strings.Repeat("字", 30) },
 		"榜单地址": func(x *Ledger) { x.Board[0].Address = "bad" },

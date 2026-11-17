@@ -37,22 +37,22 @@ const rewardPageMax = 50
 const rewardLedgerPage = brand.Repo + "/tree/rewards"
 
 type rewardPool struct {
-	Total        float64        `json:"total"`
-	OrderRate    float64        `json:"orderRate"`
-	OrderCount   int            `json:"orderCount"`
-	OrderAmount  float64        `json:"orderAmount"`
-	OrderShare   float64        `json:"orderShare"`
-	DonateCount  int            `json:"donateCount"`
-	DonateAmount float64        `json:"donateAmount"`
-	DonateMin    float64        `json:"donateMin"`
-	DonateMax    float64        `json:"donateMax"`
-	Chains       []reward.Chain `json:"chains"`
-	Points       int64          `json:"points"`
-	Addresses    int            `json:"addresses"`
-	PayoutAt     int64          `json:"payoutAt"`
-	UpdatedAt    int64          `json:"updatedAt"`
-	Stale        bool           `json:"stale"`
-	LedgerURL    string         `json:"ledgerUrl"`
+	Total        float64 `json:"total"`
+	OrderRate    float64 `json:"orderRate"`
+	OrderCount   int     `json:"orderCount"`
+	OrderAmount  float64 `json:"orderAmount"`
+	OrderShare   float64 `json:"orderShare"`
+	DonateCount  int     `json:"donateCount"`
+	DonateAmount float64 `json:"donateAmount"`
+	Donate       bool    `json:"donate"` // 现在能不能捐(登记服务给了奖池地址)
+	DonateMin    float64 `json:"donateMin"`
+	DonateMax    float64 `json:"donateMax"`
+	Points       int64   `json:"points"`
+	Addresses    int     `json:"addresses"`
+	PayoutAt     int64   `json:"payoutAt"`
+	UpdatedAt    int64   `json:"updatedAt"`
+	Stale        bool    `json:"stale"`
+	LedgerURL    string  `json:"ledgerUrl"`
 }
 
 func (s *Server) handleReward(w http.ResponseWriter, r *http.Request) {
@@ -195,13 +195,13 @@ func (s *Server) handleReward(w http.ResponseWriter, r *http.Request) {
 			Me     bool    `json:"me,omitempty"`
 		}
 		type sum struct {
-			Donors int     `json:"donors,omitempty"`
+			Donors int     `json:"donors"`
 			Count  int     `json:"count"`
 			Amount float64 `json:"amount"`
 		}
 		l, _ := s.run.RewardLedger()
 		out := []row{}
-		var named, anon sum
+		var named sum
 		total, top := 0, 1.0
 		if l != nil {
 			mine := ""
@@ -211,12 +211,7 @@ func (s *Server) handleReward(w http.ResponseWriter, r *http.Request) {
 			by := map[string]*row{}
 			var list []*row
 			for _, d := range l.Deposits {
-				if d.Kind != "donation" {
-					continue
-				}
-				if d.Name == "" {
-					anon.Count++
-					anon.Amount += d.Amount
+				if d.Kind != "donation" || d.Name == "" { // 只有留名捐赠计入奖池(账本里的捐赠都带名字)
 					continue
 				}
 				x := by[d.Name]
@@ -243,7 +238,7 @@ func (s *Server) handleReward(w http.ResponseWriter, r *http.Request) {
 				x.Rank = i + 1
 				x.Amount = cents(x.Amount)
 			}
-			named.Donors, named.Amount, anon.Amount = len(list), cents(named.Amount), cents(anon.Amount)
+			named.Donors, named.Amount = len(list), cents(named.Amount)
 			if len(list) > 0 && list[0].Amount > 0 {
 				top = list[0].Amount
 			}
@@ -253,7 +248,7 @@ func (s *Server) handleReward(w http.ResponseWriter, r *http.Request) {
 				out = append(out, *x)
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"items": out, "total": total, "top": top, "named": named, "anon": anon})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"items": out, "total": total, "top": top, "named": named})
 
 	case r.Method == http.MethodGet && rest == "qr":
 		l, _ := s.run.RewardLedger()
@@ -362,14 +357,12 @@ func (s *Server) rewardSummary() map[string]interface{} {
 		out["excluded"] = excluded
 	}
 	if l != nil {
-		chains := l.Chains
-		if chains == nil {
-			chains = []reward.Chain{}
-		}
+		// 奖池的收款地址不在这里给:页面上不列地址(那上面还有订单付款和别的资金流动,列出来只会让人直接往里转)。
+		// 要捐的人先留名,拿到那一笔的金额和地址(reward/donate 的回复里)。
 		out["pool"] = rewardPool{
 			Total: l.Pool.Total, OrderRate: l.OrderRate, OrderCount: l.Pool.OrderCount, OrderAmount: l.Pool.OrderAmount, OrderShare: l.Pool.OrderShare,
-			DonateCount: l.Pool.DonateCount, DonateAmount: l.Pool.DonateAmount, DonateMin: l.Donate.Min, DonateMax: l.Donate.Max,
-			Chains: chains, Points: l.Pool.Points, Addresses: l.Pool.Addresses, PayoutAt: l.PayoutAt, UpdatedAt: l.UpdatedAt, Stale: stale,
+			DonateCount: l.Pool.DonateCount, DonateAmount: l.Pool.DonateAmount, Donate: l.Donate.Address != "", DonateMin: l.Donate.Min, DonateMax: l.Donate.Max,
+			Points: l.Pool.Points, Addresses: l.Pool.Addresses, PayoutAt: l.PayoutAt, UpdatedAt: l.UpdatedAt, Stale: stale,
 			LedgerURL: rewardLedgerPage,
 		}
 	}

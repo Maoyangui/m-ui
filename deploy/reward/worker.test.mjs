@@ -58,6 +58,9 @@ function setup(t) {
       const used = calls.n + chain.fetches - before;
       calls.max = Math.max(calls.max, used);
       assert.ok(used <= 50, `这一轮用了 ${used} 个子请求`);
+      // 哪一步出了错都要当场看见(除非这条测试就是在测出错:x.allowErrs)
+      const errs = JSON.parse(db.prepare("SELECT v FROM kv WHERE k = 'state'").get().v).tick.errs;
+      if (!x.allowErrs) assert.deepEqual(errs, {}, '定时任务有一步出错了');
       // 每一轮出的账本都要过提交前的那道核对:写法、自洽、比上一轮只增不减
       if (l) { assert.deepEqual(ledgerProblems(l, now), []); if (x.last) assert.deepEqual(checkGrowth(x.last, l), []); x.last = l; }
       return l;
@@ -478,7 +481,6 @@ test('订单:只认订单库里「监听成功」的付款(两条链),按 40% �
   x.payment({ tx: 'b'.repeat(64), address: tronA, micros: 5_000_000, at: T0 - 4000, from: buyer, status: 'review', reason: 'UNMATCHED_AMOUNT' });
   x.payment({ tx: 'c'.repeat(64), address: tronA, micros: 9_991_555, at: T0 - 3000, from: buyer, status: 'observed' });
   x.payment({ tx: 'solana:' + sig(), address: solA, micros: 9_990_021, at: T0 - 2000, status: 'review', reason: 'LATE_PAYMENT' });
-  x.chain.tron.set(tronA, 9_991_237 + 5_000_000);
 
   const l = await x.tick(T0);
   checkLedger(l, T0);
@@ -490,8 +492,8 @@ test('订单:只认订单库里「监听成功」的付款(两条链),按 40% �
     ['order', 'tron', 9.991237, 'a'.repeat(64), buyer],
   ]);
   assert.deepEqual(l.chains, [
-    { chain: 'solana', address: solA, received: 19.99, balance: 19.99 },
-    { chain: 'tron', address: tronA, received: 9.99, balance: 14.99 },
+    { chain: 'solana', address: solA, received: 19.99 },
+    { chain: 'tron', address: tronA, received: 9.99 },
   ]);
   assert.deepEqual(l.donate, { chain: 'solana', address: solA, min: 1, max: 100000 });
 
@@ -520,48 +522,79 @@ test('登记服务对订单库只有 SELECT(读源码逐处核对)', () => {
   const tables = sqls.flatMap(s => [...s.matchAll(/\bFROM\s+(\w+)/g)].map(m => m[1]));
   assert.deepEqual([...new Set(tables)].sort(), ['payment_addresses', 'payments', 'solana_amount_reservations', 'solana_payment_addresses']);
   for (const s of sqls) assert.ok(!/\b(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|PRAGMA|ATTACH)\b/i.test(s), s);
+  // 订单号是订阅的使用凭证:登记服务不读订单表,不读付款记录里订单的那一列,也不整行整行地取
+  for (const s of sqls) assert.ok(!/\*/.test(s) && !/order/i.test(s.replace(/\bORDER\s+BY\b/gi, '')), '查询里不该出现订单的列或 SELECT *: ' + s);
+  assert.ok(!/order_hash|order_id|order_no|orderId|FROM\s+orders\b/i.test(src), '源码里不该提到订单号');
 });
 
-// ================= 奖池:捐赠 =================
-test('捐赠:转进奖池地址的 USDT 不是订单付款就是捐赠,全额计入;零碎、转出、失败的、上线前的不记', async t => {
+test('订单号不出库:订单库里每笔付款都带着订单的标识,登记服务的库和公开账本里一个字都没有它', async t => {
+  const x = setup(t), solA = x.solAddr(), tronA = x.tronAddr();
+  const marks = [], buyer = tron();
+  const pay = (tx, address, micros, from, mark) => {
+    x.payment({ tx, address, micros, at: T0 - 3600, from });
+    // 给这笔付款挂上订单的标识(订单库里真实的样子:order_hash 一列;链上事件里就算带着别的字段也一样不该被带出来)
+    x.commerce.prepare('UPDATE payments SET order_hash = ?, event_json = json_set(event_json, ?, ?) WHERE tx_id = ?').run(mark, '$.orderRef', mark, tx);
+    marks.push(mark);
+  };
+  pay('solana:' + sig(), solA, 9_900_001, '', 'ORDERHASH0A1B2C3D4E5F60718293A4B5C6D7E8F9');
+  pay('d'.repeat(64), tronA, 29_900_002, buyer, 'ORDERHASH9F8E7D6C5B4A39281706F5E4D3C2B1A0');
+  const l = await x.tick(T0);
+  assert.equal(l.pool.orderCount, 2);
+  assert.deepEqual(l.deposits.map(d => d.from).sort(), ['', buyer].sort(), '付款方地址照常取到(只从链上事件里单拿这一项)');
+  const dump = JSON.stringify(l) + JSON.stringify(x.db.prepare('SELECT * FROM deposits').all()) + JSON.stringify(x.db.prepare('SELECT * FROM kv').all());
+  for (const m of marks) assert.ok(!dump.includes(m), '订单的标识出现在了登记服务这边');
+  assert.ok(!/order_?hash|orderRef|order_?id/i.test(dump));
+});
+
+// ================= 奖池:捐赠(只认留名的) =================
+const ZERO = { total: 0, orderCount: 0, orderAmount: 0, orderShare: 0, donateCount: 0, donateAmount: 0, points: 0, addresses: 0 };
+test('只有留名捐赠计入奖池:没登记就转进来的(不管多少)、转出的、失败的,一律不计、不列', async t => {
   const x = setup(t), solA = x.solAddr();
-  x.chain.pay(solA, U(50), T0 - 100);               // 登记服务上线之前的
-  await x.tick(T0);                           // 上线
-  const d1 = x.chain.pay(solA, U(25), T0 + 60);
-  x.chain.pay(solA, 999_999, T0 + 61);               // 不到 1 USDT
-  x.chain.pay(solA, -U(10), T0 + 62);                // 转出
+  await x.tick(T0);
+  x.chain.pay(solA, U(25), T0 + 60);                  // 没登记,直接转了 25
+  x.chain.pay(solA, 999_999, T0 + 61);
+  x.chain.pay(solA, -U(10), T0 + 62);                 // 转出
   x.chain.pay(solA, U(8), T0 + 63, { failed: true });
-  const d2 = x.chain.pay(solA, 3_141_592, T0 + 64);
-  const l = await x.tick(T0 + 120);
-  checkLedger(l, T0 + 120);
-  assert.deepEqual(l.deposits.map(d => [d.kind, d.amount, d.tx, d.from, d.name]), [
-    ['donation', 3.141592, d2.signature, d2.payer, undefined],
-    ['donation', 25, d1.signature, d1.payer, undefined],
-  ]);
-  assert.deepEqual(l.pool, { total: 28.14, orderCount: 0, orderAmount: 0, orderShare: 0, donateCount: 2, donateAmount: 28.14, points: 0, addresses: 0 });
+  x.chain.pay(solA, 3_141_592, T0 + 64);
+  let l = await x.tick(T0 + 700);
+  checkLedger(l, T0 + 700);
+  assert.deepEqual(l.pool, ZERO, '地址上别的资金流动不进奖池');
+  assert.deepEqual(l.deposits, []);
+  assert.deepEqual(x.chain.asked, [], '没有留名在等到账:一次链都不查');
+  assert.equal(x.db.prepare('SELECT COUNT(*) AS n FROM sigs').get().n, 0);
+
+  // 有人留名捐 10:只有金额正好是给他的那个数的那一笔算
+  const it = (await x.donate('老王', 10, T0 + 800)).body;
+  x.chain.pay(solA, U(10), T0 + 850);                 // 同一时间别人转了个整 10:不是留名的那个数,不算
+  const pay = x.chain.pay(solA, U(it.exact), T0 + 900);
+  x.chain.pay(solA, U(it.exact) + 1, T0 + 910);       // 差一点点也不算
+  l = await x.tick(T0 + 960);
+  checkLedger(l, T0 + 960);
+  assert.deepEqual(l.deposits.map(d => [d.kind, d.chain, d.amount, d.name, d.from, d.tx]), [['donation', 'solana', it.exact, '老王', pay.payer, pay.signature]]);
+  assert.deepEqual(l.pool, { ...ZERO, total: W.usd(U(it.exact)), donateCount: 1, donateAmount: W.usd(U(it.exact)) });
+  assert.deepEqual(l.chains, [{ chain: 'solana', address: solA, received: W.usd(U(it.exact)) }]);
   assert.equal(x.db.prepare("SELECT COUNT(*) AS n FROM sigs WHERE state = 'new'").get().n, 0);
-  const l3 = await x.tick(T0 + 240);
-  assert.equal(x.deposits().length, 2, '再跑不重复');
-  assert.deepEqual(l3.chains.map(c => [c.received, c.balance]), [[28.14, 69.14]], '有新入账的下一轮余额就跟上了(上线前那 50 和零碎的也在余额里,减掉转出的 10),不用等十分钟');
+  await x.tick(T0 + 1080);
+  assert.equal(x.deposits().length, 1, '再跑不重复');
 });
 
-test('捐赠和订单分得开:订单的付款(金额被订单占着、或订阅站已经认了)不会被当成捐赠', async t => {
+test('订单的付款不会被当成捐赠:订阅站认了才按订单算(40%),只记一笔', async t => {
   const x = setup(t), solA = x.solAddr();
   await x.tick(T0);
   // 一张订单的金额是 9.990123:客人付了,订阅站还没来得及认
   x.reserve(solA, 9_990_123);
   const pay = x.chain.pay(solA, 9_990_123, T0 + 60);
-  let l = await x.tick(T0 + 120);
-  assert.equal(l.pool.total, 0, '金额是订单占着的:不算捐赠,等订阅站认');
+  let l = await x.tick(T0 + 700);
+  assert.deepEqual(l.pool, ZERO, '没人认的转入不进奖池');
   // 订阅站认了
   x.payment({ tx: 'solana:' + pay.signature, address: solA, micros: 9_990_123, at: T0 + 60 });
-  l = await x.tick(T0 + 240);
-  assert.deepEqual(l.pool, { total: 4, orderCount: 1, orderAmount: 9.99, orderShare: 4, donateCount: 0, donateAmount: 0, points: 0, addresses: 0 });
-  // 订阅站先认、登记服务后看到:同样只记一笔订单
-  x.reserve(solA, 19_990_457);
-  const pay2 = x.chain.pay(solA, 19_990_457, T0 + 300);
-  x.payment({ tx: 'solana:' + pay2.signature, address: solA, micros: 19_990_457, at: T0 + 300 });
-  l = await x.tick(T0 + 360);
+  l = await x.tick(T0 + 820);
+  assert.deepEqual(l.pool, { ...ZERO, total: 4, orderCount: 1, orderAmount: 9.99, orderShare: 4 });
+  // 万一有一笔留名的金额和订阅站认的订单付款是同一笔交易:按订单算,不重复记成捐赠
+  const it = (await x.donate('碰巧', 12, T0 + 900)).body;
+  const same = x.chain.pay(solA, U(it.exact), T0 + 950);
+  x.payment({ tx: 'solana:' + same.signature, address: solA, micros: U(it.exact), at: T0 + 950 });
+  l = await x.tick(T0 + 1000);
   assert.equal(l.pool.orderCount, 2);
   assert.equal(l.pool.donateCount, 0);
   assert.equal(x.deposits().length, 2);
@@ -571,38 +604,146 @@ test('链上节点不通:这一轮看不了转入,积分照样入账、账本照
   const x = setup(t), solA = x.solAddr(), p = await newPanel(), a = sol();
   await x.tick(T0);
   await x.report(p, a, 1100, T0 + 30);
-  x.chain.pay(solA, U(5), T0 + 60);
-  x.chain.down = true;
+  const it = (await x.donate('断网时捐的', 5, T0 + 40)).body;
+  x.chain.pay(solA, U(it.exact), T0 + 60);
+  x.chain.down = true; x.allowErrs = true;
   const l = await x.tick(T0 + 120);
+  x.allowErrs = false;
   assert.equal(l.pool.donateCount, 0);
   assert.equal(l.pool.points, 1);
   const health = await (await worker.fetch(new Request('https://x/v1/health'), x.env)).json();
   assert.equal(health.at, T0 + 120);
   assert.match(health.errs.chain, /503/);
   x.chain.down = false;
-  assert.equal((await x.tick(T0 + 240)).pool.donateCount, 1);
+  const l2 = await x.tick(T0 + 240);
+  assert.deepEqual([l2.pool.donateCount, l2.deposits[0].name], [1, '断网时捐的']);
   const ok = await (await worker.fetch(new Request('https://x/v1/health'), x.env)).json();
   assert.deepEqual(ok.errs, {});
   assert.ok(ok.used > 0 && ok.used <= 50);
 });
 
-test('一下子涌进来几百笔转账(有人刷屏):分几轮看完,一笔不漏、一笔不重', async t => {
+test('有人拿零碎转账刷屏:混在几百笔里的那笔留名捐赠几轮之内就认出来,每一轮都不超预算', async t => {
   const x = setup(t), solA = x.solAddr();
   await x.tick(T0);
-  for (let i = 0; i < 330; i++) x.chain.pay(solA, i % 30 === 0 ? U(2) : 1000, T0 + 60 + i);
-  let now = T0 + 600;
-  for (let i = 0; i < 60; i++) { await x.tick(now); now += 120; }
-  assert.equal(x.db.prepare("SELECT COUNT(*) AS n FROM sigs").get().n, 330);
+  const it = (await x.donate('被淹没的好人', 20, T0 + 30)).body;
+  for (let i = 0; i < 160; i++) x.chain.pay(solA, 1000 + i, T0 + 60 + i);
+  const pay = x.chain.pay(solA, U(it.exact), T0 + 230);
+  for (let i = 0; i < 170; i++) x.chain.pay(solA, 5000 + i, T0 + 240 + i);
+  let now = T0 + 480, seenAt = 0;
+  for (let i = 1; i <= 14; i++) {
+    const l = await x.tick(now);
+    if (!seenAt && l.pool.donateCount === 1) seenAt = i;
+    now += 120;
+  }
+  assert.ok(seenAt > 0 && seenAt <= 8, `第 ${seenAt} 轮认出来(一轮 2 分钟)`);
+  assert.ok(x.db.prepare('SELECT COUNT(*) AS n FROM sigs').get().n <= 331);
   assert.equal(x.db.prepare("SELECT COUNT(*) AS n FROM sigs WHERE state = 'new'").get().n, 0);
-  assert.equal(x.deposits().length, 11);
-  assert.equal(x.deposits().reduce((s, d) => s + d.micros, 0), 11 * U(2));
+  assert.deepEqual(x.deposits().map(d => [d.name, d.micros, d.tx]), [['被淹没的好人', U(it.exact), pay.signature]]);
   const state = JSON.parse(x.db.prepare("SELECT v FROM kv WHERE k = 'state'").get().v);
-  assert.deepEqual(Object.values(state.cur).map(c => c.gaps), [[]], '缺口都补完了');
-  assert.ok(x.calls.max > 30 && x.calls.max <= 50, `最忙的一轮用了 ${x.calls.max} 个子请求:用足了预算,但没超`);
+  assert.deepEqual(Object.values(state.cur).map(c => c.gaps), [[]], '留名兑现之后没拉完的那些不用再拉');
+  const asked = x.chain.asked.length;
+  await x.tick(now); await x.tick(now + 120);
+  assert.equal(x.chain.asked.length, asked, '认出来之后就不再查链');
+  assert.ok(x.calls.max > 20 && x.calls.max <= 50, `最忙的一轮用了 ${x.calls.max} 个子请求`);
+});
+
+test('Solana 节点不认批量请求:退回一笔一笔问,照样认得出留名捐赠', async t => {
+  const x = setup(t), solA = x.solAddr();
+  x.chain.noBatch = true;
+  await x.tick(T0);
+  const it = (await x.donate('慢节点上的好人', 8, T0 + 30)).body;
+  for (let i = 0; i < 12; i++) x.chain.pay(solA, 2000 + i, T0 + 60 + i);
+  x.chain.pay(solA, U(it.exact), T0 + 100);
+  let l = null, now = T0 + 240;
+  for (let i = 0; i < 6 && !(l && l.pool.donateCount); i++) { l = await x.tick(now); now += 120; }
+  assert.deepEqual([l.pool.donateCount, l.deposits[0].name], [1, '慢节点上的好人']);
+});
+
+test('收款账户的地址是算出来的,不用问链:和链上实际的账户对得上', async () => {
+  // 三个公开的钱包地址和它们在链上的 USDT 收款账户(2026-11 从官方节点查到的)
+  assert.equal(await W.ataOf('FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiouN5'), 'VQkRW7jv4NVe5TJeSMTYMvWUzZUoHYeHZKa39MbYnMN');
+  assert.equal(await W.ataOf('9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'), 'TB5FCqbNsnuLQgEjUuPaT9qtVPTT4U1A8rvi7qzEj2M');
+  assert.equal(await W.ataOf('5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9'), 'CyBjGpte4Npi5zNkdtWumPxVW4kpMR8BuFSbA587xZES');
+  const base = new Uint8Array(32); base[0] = 0x58; for (let i = 1; i < 31; i++) base[i] = 0x66; base[31] = 0x66; // ed25519 的基点(y = 4/5)
+  assert.ok(W.onCurve(base));
+  const two = new Uint8Array(32); two[0] = 2; // y = 2 解不出 x
+  assert.ok(!W.onCurve(two));
+});
+
+test('查账的节点:自己配的排最前;被限速的歇一会儿、换下一个;不给这种查询的一天内不拿它问这个', async t => {
+  const x = setup(t), solA = x.solAddr();
+  const st = () => JSON.parse(x.db.prepare("SELECT v FROM kv WHERE k = 'state'").get().v);
+  assert.deepEqual(W.rpcList(x.env), ['http://rpc.test', 'https://api.mainnet-beta.solana.com', 'https://public.rpc.solanavibestation.com', 'https://solana-rpc.publicnode.com']);
+  assert.equal(W.rpcList({}).length, 3, '不配自己的节点也有内置的几个公共节点');
+  await x.tick(T0);
+  const a = (await x.donate('甲', 5, T0 + 10)).body;
+  x.chain.pay(solA, U(a.exact), T0 + 60);
+  // 自己的节点被限速;第一个公共节点不给查交易号(要令牌);再下一个正常
+  x.chain.rule = (host, method) => host === 'rpc.test' ? new Response('slow down', { status: 429 })
+    : host === 'api.mainnet-beta.solana.com' && method === 'getSignaturesForAddress' ? new Response('token required', { status: 403 }) : null;
+  let l = await x.tick(T0 + 120);
+  assert.equal(l.pool.donateCount, 1, '换到能用的节点,照样查到');
+  assert.deepEqual(x.chain.asked, [
+    'rpc.test getSignaturesForAddress', 'api.mainnet-beta.solana.com getSignaturesForAddress', 'public.rpc.solanavibestation.com getSignaturesForAddress',
+    'api.mainnet-beta.solana.com getTransaction', // 自己的节点在歇;官方节点只是不给查交易号,查单笔交易照样用它
+  ]);
+  let s = st().rpc;
+  assert.deepEqual([s['rpc.test'].fails, s['rpc.test'].until], [1, T0 + 120 + 60], '被限速:歇 1 分钟');
+  assert.ok(s['api.mainnet-beta.solana.com'].no.getSignaturesForAddress === T0 + 120 + 86400 && s['api.mainnet-beta.solana.com'].until === 0, '不给这种查询:记一天,不算它出错');
+
+  // 还在限速:再试一次又不行,歇的时间翻倍;已经知道不给查交易号的那个不再问
+  const b = (await x.donate('乙', 6, T0 + 200, '198.51.100.21')).body;
+  x.chain.pay(solA, U(b.exact), T0 + 230);
+  x.chain.asked.length = 0;
+  l = await x.tick(T0 + 240);
+  assert.equal(l.pool.donateCount, 2);
+  assert.deepEqual(x.chain.asked.slice(0, 2), ['rpc.test getSignaturesForAddress', 'public.rpc.solanavibestation.com getSignaturesForAddress']);
+  s = st().rpc;
+  assert.deepEqual([s['rpc.test'].fails, s['rpc.test'].until], [2, T0 + 240 + 120], '第二次:歇 2 分钟');
+
+  // 全都不行:这一轮查不了,错记在健康检查里;留名和钱都不丢,节点好了之后补上
+  const c = (await x.donate('丙', 7, T0 + 300, '198.51.100.22')).body;
+  x.chain.pay(solA, U(c.exact), T0 + 330);
+  x.chain.rule = () => new Response('busy', { status: 429 });
+  x.allowErrs = true;
+  l = await x.tick(T0 + 480);
+  assert.equal(l.pool.donateCount, 2);
+  assert.match(st().tick.errs.chain, /答复 429/);
+  l = await x.tick(T0 + 600);                 // 都在歇:只挑最快该醒的那个试一次,不是把每个都再敲一遍
+  x.allowErrs = false;
+  x.chain.rule = null;
+  for (let i = 0, now = T0 + 720; i < 20 && l.pool.donateCount < 3; i++, now += 120) l = await x.tick(now);
+  assert.deepEqual([l.pool.donateCount, l.deposits[0].name], [3, '丙'], '节点恢复后补上');
+  assert.equal(st().rpc['rpc.test'].fails, 0, '好了就清零');
+});
+
+test('查账很省:没人捐的时候一次不查;有人在等到账时一轮也就两三次', async t => {
+  const x = setup(t), solA = x.solAddr();
+  for (let i = 0; i < 30; i++) await x.tick(T0 + i * 120);
+  assert.deepEqual(x.chain.asked, [], '一小时没人捐:零次');
+  const it = (await x.donate('省着查', 9, T0 + 3700)).body;
+  for (let i = 0; i < 5; i++) await x.tick(T0 + 3720 + i * 120);
+  assert.ok(x.chain.asked.length === 5 && x.chain.asked.every(a => a.endsWith('getSignaturesForAddress')), '等到账的 10 分钟:每轮拉一次交易号,共 ' + x.chain.asked.length + ' 次');
+  x.chain.pay(solA, U(it.exact), T0 + 4400);
+  const l = await x.tick(T0 + 4440);
+  assert.equal(l.pool.donateCount, 1);
+  assert.equal(x.chain.asked.length, 7, '到账那一轮:拉一次交易号 + 看一笔交易');
+  for (let i = 0; i < 10; i++) await x.tick(T0 + 4560 + i * 120);
+  assert.equal(x.chain.asked.length, 7, '兑现之后又回到零');
+  // 没到账就过期的:期限(连余量)过后拉全一次,之后不再查
+  const it2 = (await x.donate('没转', 9, T0 + 6000, '198.51.100.30')).body;
+  x.chain.asked.length = 0;
+  let last = 0;
+  for (let now = T0 + 6060; now < T0 + 6000 + 3600 + 1800; now += 120) { await x.tick(now); if (x.chain.asked.length > last) last = x.chain.asked.length; }
+  const during = x.chain.asked.length;
+  for (let i = 0; i < 10; i++) await x.tick(T0 + 12000 + i * 120);
+  assert.equal(x.chain.asked.length, during, '过期并且查完之后不再查');
+  assert.ok(during <= 35, '一笔没到账的留名,从登记到过期一共查了 ' + during + ' 次');
+  assert.equal((await (await worker.fetch(new Request('https://x/v1/donate/' + it2.id), x.env)).json()).status, 'expired');
 });
 
 // ================= 留名捐赠 =================
-test('留名捐赠:登记后给一个带零头的确切金额,期限内这个数到账就记上名字', async t => {
+test('留名捐赠:登记后给一个带零头的确切金额,期限内这个数到账就计入奖池、记上名字', async t => {
   const x = setup(t), solA = x.solAddr();
   await x.tick(T0);
   const r = await x.donate('  老王的 猫 ', 10, T0 + 10);
@@ -616,35 +757,42 @@ test('留名捐赠:登记后给一个带零头的确切金额,期限内这个数
   assert.deepEqual([it.chain, it.address, it.status, it.expiresAt - it.createdAt], ['solana', solA, 'pending', 3600]);
   assert.match(it.id, /^[0-9a-f]{24}$/);
 
-  const get = async now => (await (await worker.fetch(new Request('https://x/v1/donate/' + it.id), x.env)).json());
+  const get = async () => (await (await worker.fetch(new Request('https://x/v1/donate/' + it.id), x.env)).json());
   assert.equal((await get()).status, 'pending');
   const pay = x.chain.pay(solA, U(it.exact), T0 + 900);
   const l = await x.tick(T0 + 960);
   assert.deepEqual(l.deposits.map(d => [d.kind, d.amount, d.name, d.from]), [['donation', it.exact, '老王的 猫', pay.payer]]);
-  assert.equal(x.db.prepare('SELECT status, tx FROM intents WHERE id = ?').get(it.id).status, 'paid');
-  assert.equal(x.db.prepare('SELECT tx FROM intents WHERE id = ?').get(it.id).tx, pay.signature);
-  // 同一个数再转一次:进奖池,但不再记这个名字
+  assert.deepEqual({ ...x.db.prepare('SELECT status, tx FROM intents WHERE id = ?').get(it.id) }, { status: 'paid', tx: pay.signature });
+  // 同一个数再转一次:那笔留名已经兑现过了,这一笔对不上任何登记,不计入
   x.chain.pay(solA, U(it.exact), T0 + 1000);
   const l2 = await x.tick(T0 + 1100);
-  assert.deepEqual(l2.deposits.map(d => d.name), [undefined, '老王的 猫']);
-  assert.equal(l2.pool.donateCount, 2);
+  assert.equal(l2.pool.donateCount, 1);
+  assert.equal(x.deposits().length, 1);
 });
 
-test('留名捐赠:过了期限才到账、或者取消了的,照样进奖池,只是匿名;登记服务晚看到不要紧,按链上的时间算', async t => {
+test('留名捐赠:过了期限才到账的不计入奖池;期限内转的,登记服务晚看到也照样算;点了取消却还是在期限内转了的,钱不能白转,照样算', async t => {
   const x = setup(t), solA = x.solAddr();
   await x.tick(T0);
   const late = (await x.donate('迟到的', 5, T0)).body, gone = (await x.donate('反悔的', 6, T0)).body, slow = (await x.donate('慢半拍', 7, T0)).body;
   const cancel = await worker.fetch(new Request(`https://x/v1/donate/${gone.id}/cancel`, { method: 'POST' }), x.env);
   assert.deepEqual(await cancel.json(), { ok: true });
   x.chain.pay(solA, U(late.exact), T0 + 3600 + 301);   // 期限 + 余量之外
-  x.chain.pay(solA, U(gone.exact), T0 + 600);
-  x.chain.pay(solA, U(slow.exact), T0 + 3500);         // 期限内转的
-  const l = await x.tick(T0 + 3 * 3600);        // 登记服务两小时后才看到(那时这几笔都已经标成过期)
-  const byAmount = new Map(l.deposits.map(d => [d.amount, d.name]));
-  assert.equal(byAmount.get(late.exact), undefined);
-  assert.equal(byAmount.get(gone.exact), undefined);
-  assert.equal(byAmount.get(slow.exact), '慢半拍');
-  assert.equal(l.pool.donateCount, 3);
+  const back = x.chain.pay(solA, U(gone.exact), T0 + 600); // 点了取消,却还是在期限内转了(或者是转完才点的取消)
+  const pay = x.chain.pay(solA, U(slow.exact), T0 + 3500); // 期限内转的
+  const st = async id => (await (await worker.fetch(new Request('https://x/v1/donate/' + id), x.env)).json()).status;
+  assert.equal(await st(gone.id), 'expired', '取消了的:面板上看是「没成」');
+  const l = await x.tick(T0 + 3 * 3600);                // 登记服务两小时后才看到(那时这几笔留名都已经标成过期)
+  assert.deepEqual(l.deposits.map(d => [d.amount, d.name, d.tx]), [[slow.exact, '慢半拍', pay.signature], [gone.exact, '反悔的', back.signature]]);
+  assert.equal(l.pool.donateCount, 2);
+  assert.deepEqual([await st(late.id), await st(gone.id), await st(slow.id)], ['expired', 'paid', 'paid']);
+  // 取消了的那个金额,期限过完之前不会再发给别人(不然同一个数对着两笔登记)
+  const y = setup(t), solB = y.solAddr();
+  await y.tick(T0);
+  const first = (await y.donate('先来的', 20, T0)).body;
+  await worker.fetch(new Request(`https://x/v1/donate/${first.id}/cancel`, { method: 'POST' }), y.env);
+  for (let k = 1; k <= 99; k++) { const m = U(20) + k * 1000; if (m !== U(first.exact)) y.reserve(solB, m); }
+  assert.equal((await y.donate('后到的', 20, T0 + 60, '198.51.100.77')).body.code, 'no_slot', '期限内:取消的那个数还占着');
+  assert.equal((await y.donate('后到的', 20, T0 + 3600 + 601, '198.51.100.77')).body.exact, first.exact, '期限(连两倍余量)过了才放出来');
 });
 
 test('留名捐赠:同一个数两个人同时填,拿到的确切金额不一样;避开订单占着的金额;排不开会说', async t => {
@@ -663,7 +811,7 @@ test('留名捐赠:同一个数两个人同时填,拿到的确切金额不一样
   assert.ok(seen.has(again.body.exact));
 });
 
-test('留名捐赠:填得不对的不收;提交太勤的拦一下;不让上榜的字眼按匿名记', async t => {
+test('留名捐赠:填得不对的不收;提交太勤的拦一下;不让上榜的字眼照样计入、名字不显示', async t => {
   const x = setup(t), solA = x.solAddr();
   await x.tick(T0);
   for (const [name, amount, why] of [['', 10, /留名/], ['好人', 0.5, /金额/], ['好人', 100001, /金额/], ['好人', 10.123, /两位小数/], ['好人', 'abc', /金额/], ['好人', -5, /金额/], ['http://a.b', 10, /网址/], ['x'.repeat(21), 10, /20 个字/]]) {
@@ -679,7 +827,8 @@ test('留名捐赠:填得不对的不收;提交太勤的拦一下;不让上榜�
   const it = (await x.donate('来看spam吧', 4, T0 + 40, '198.51.100.77')).body;
   x.chain.pay(solA, U(it.exact), T0 + 60);
   const l = await x.tick(T0 + 120);
-  assert.deepEqual(l.deposits.map(d => [d.amount, d.name]), [[it.exact, undefined]], '钱照样进奖池,名字不上榜');
+  assert.deepEqual(l.deposits.map(d => [d.amount, d.name]), [[it.exact, W.HIDDEN_NAME]], '钱照样进奖池,名字不上榜');
+  assert.equal(l.pool.donateCount, 1);
 });
 
 test('没有可用的奖池地址时:留名捐赠说明白,账本照样出', async t => {

@@ -2174,6 +2174,8 @@ table.grid.cards td.wall-def { display: none; }
    版式按活动页自己的宽度排(@container rw),不看窗口宽度:侧栏开着、浏览器窗格很窄时都一样。三档:宽(> 720)、中(≤ 720)、窄(≤ 540)。 */
 .rw-slot { position: relative; display: inline-flex; align-items: center; }
 .rw-slot:empty { display: none; }
+/* 金币右上角的积分数字是探出去的:和右边的圣诞树之间多留一点,别挨在一起 */
+.rw-slot:not(:empty) + .xmas-slot:not(:empty) { margin-left: .45rem; }
 .rw-coin { position: relative; width: 30px; height: 32px; padding: 0; margin: 0 .05rem; border: 0; background: none; cursor: pointer; flex: none; display: inline-grid; place-items: center; border-radius: 50%; transition: transform .22s cubic-bezier(.3, 1.5, .5, 1), filter .22s ease; }
 .rw-coin:hover { transform: translateY(-1.5px) rotate(-6deg) scale(1.07); filter: drop-shadow(0 3px 6px rgba(226, 144, 10, .38)); }
 .rw-coin:active { transform: scale(.94); }
@@ -2210,6 +2212,7 @@ html.rw-lock { overflow: hidden; }
   --rw-ink: #0f172a; --rw-ink2: #334155; --rw-mute: #64748b; --rw-faint: #94a3b8;
   --rw-line: #edf0f3; --rw-line2: #e2e6eb;
   --rw-gold-t: #b45309; --rw-gold-soft: #fff6df; --rw-gold-line: #f6dfa4;
+  --rw-don: #7c6cf2; --rw-don-t: #5b47d6; --rw-don-soft: #f1effe; /* 捐赠这一路钱的颜色(订单是金色):色条、小方块、逐笔入账里的小标 */
   --rw-num: linear-gradient(180deg, #f5a70c 0%, #d97a06 100%);
   --rw-ok: #059669; --rw-ok-soft: #ecfdf5; --rw-bad: #c2410c; --rw-bad-soft: #fff4ed;
   --rw-inv: #0f172a; --rw-inv-t: #ffffff;
@@ -2227,7 +2230,7 @@ html.rw-lock { overflow: hidden; }
     --rw-bg: #111318; --rw-soft: #171a21; --rw-soft2: #1d212a; --rw-hover: #161920;
     --rw-ink: #f1f3f7; --rw-ink2: #c5cad4; --rw-mute: #8e96a6; --rw-faint: #646c7b;
     --rw-line: #20242d; --rw-line2: #2b303b;
-    --rw-gold-t: #f5c563; --rw-gold-soft: rgba(245, 180, 60, .11); --rw-gold-line: rgba(245, 180, 60, .28);
+    --rw-gold-t: #f5c563; --rw-gold-soft: rgba(245, 180, 60, .11); --rw-gold-line: rgba(245, 180, 60, .28); --rw-don: #a394ff; --rw-don-t: #c5bbff; --rw-don-soft: rgba(140, 120, 255, .15);
     --rw-num: linear-gradient(180deg, #ffe08a 0%, #f2a71f 100%);
     --rw-ok: #4fd1a1; --rw-ok-soft: rgba(79, 209, 161, .1); --rw-bad: #f59a6b; --rw-bad-soft: rgba(245, 154, 107, .11);
     --rw-inv: #f1f3f7; --rw-inv-t: #111318;
@@ -2241,7 +2244,7 @@ html.rw-lock { overflow: hidden; }
   --rw-bg: #111318; --rw-soft: #171a21; --rw-soft2: #1d212a; --rw-hover: #161920;
   --rw-ink: #f1f3f7; --rw-ink2: #c5cad4; --rw-mute: #8e96a6; --rw-faint: #646c7b;
   --rw-line: #20242d; --rw-line2: #2b303b;
-  --rw-gold-t: #f5c563; --rw-gold-soft: rgba(245, 180, 60, .11); --rw-gold-line: rgba(245, 180, 60, .28);
+  --rw-gold-t: #f5c563; --rw-gold-soft: rgba(245, 180, 60, .11); --rw-gold-line: rgba(245, 180, 60, .28); --rw-don: #a394ff; --rw-don-t: #c5bbff; --rw-don-soft: rgba(140, 120, 255, .15);
   --rw-num: linear-gradient(180deg, #ffe08a 0%, #f2a71f 100%);
   --rw-ok: #4fd1a1; --rw-ok-soft: rgba(79, 209, 161, .1); --rw-bad: #f59a6b; --rw-bad-soft: rgba(245, 154, 107, .11);
   --rw-inv: #f1f3f7; --rw-inv-t: #111318;
@@ -2379,32 +2382,32 @@ html.rw-lock { overflow: hidden; }
 .rw-pane { min-height: 14rem; }
 .rw-empty { padding: 2.4rem 1rem; text-align: center; color: var(--rw-mute); font-size: var(--fs-sm); }
 
-/* 奖池明细:四格等宽,运算符写在每一格标题的最前面 —— 怎么换行都对得齐 */
-.rw-eq { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6rem; }
-.rw-eq-c { display: grid; gap: .12rem; align-content: start; min-width: 0; padding: .75rem .95rem .8rem; border-radius: 14px; background: var(--rw-soft); }
-.rw-eq-c .rw-k { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
-.rw-op { font-style: normal; margin-right: .4rem; color: var(--rw-ink2); font-weight: 650; font-variant-numeric: tabular-nums; }
-.rw-eq-c b { font-size: var(--fs-xl); font-weight: 700; letter-spacing: -.025em; font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.3; }
-.rw-s { color: var(--rw-mute); font-size: var(--fs-xs); line-height: 1.5; text-wrap: pretty; }
-.rw-s .rw-link.in { color: var(--rw-ink2); text-decoration-color: color-mix(in srgb, var(--rw-mute) 55%, transparent); }
-.rw-s .rw-link.in:hover { color: var(--rw-gold-t); }
-.rw-eq-c.sum { background: var(--rw-gold-soft); }
-.rw-eq-c.sum b { background: var(--rw-num); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.rw-eq-c.sum .rw-k, .rw-eq-c.sum .rw-op { color: var(--rw-gold-t); }
-/* 钱在哪 */
-.rw-chains { border: 1px solid var(--rw-line); border-radius: 14px; overflow: hidden; }
-.rw-chain-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 8rem 8rem; align-items: center; gap: .9rem; padding: .7rem 1rem; }
-.rw-chain-row + .rw-chain-row { border-top: 1px solid var(--rw-line); }
+/* 奖池从哪来:一张小清单。一路钱一行(小图标、叫什么、一句怎么算的,右边「+ 多少」),最后一行金色的合计带「= 当前奖池」。
+   一眼看下来就是「这两样加起来 = 当前奖池」;订单金、捐赠紫,和下面逐笔入账里的小标是同一套颜色。 */
+.rw-src { border: 1px solid var(--rw-line2); border-radius: 16px; overflow: hidden; }
+.rw-src-row, .rw-src-sum { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; column-gap: .9rem; align-items: center; padding: .9rem 1.15rem; }
+.rw-src-row + .rw-src-row { border-top: 1px solid var(--rw-line); }
+.rw-src-i { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; }
+.rw-src-i svg { width: 19px; height: 19px; }
+.rw-src-i.ord { background: var(--rw-gold-soft); color: var(--rw-gold-t); }
+.rw-src-i.don { background: var(--rw-don-soft); color: var(--rw-don-t); }
+.rw-src-t { display: grid; gap: .1rem; min-width: 0; }
+.rw-src-t b { font-size: var(--fs-base); font-weight: 600; color: var(--rw-ink); }
+.rw-src-t span { color: var(--rw-mute); font-size: var(--fs-xs); line-height: 1.6; text-wrap: pretty; }
+.rw-src-t .rw-link.in { color: var(--rw-ink2); text-decoration-color: color-mix(in srgb, var(--rw-mute) 55%, transparent); }
+.rw-src-t .rw-link.in:hover { color: var(--rw-gold-t); }
+.rw-src-v { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -.02em; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--rw-ink); }
+.rw-src-v i { margin-right: .3rem; font-style: normal; font-weight: 500; color: var(--rw-faint); }
+.rw-src-sum { padding-top: .85rem; padding-bottom: .85rem; background: var(--rw-gold-soft); border-top: 1px solid var(--rw-gold-line); }
+.rw-src-eq { font-size: var(--fs-xl); font-weight: 600; line-height: 1; text-align: center; color: var(--rw-gold-t); }
+.rw-src-st { font-size: var(--fs-base); font-weight: 650; color: var(--rw-gold-t); }
+.rw-src-sv { display: flex; align-items: baseline; gap: .35rem; white-space: nowrap; }
+.rw-src-sv b { font-size: var(--fs-xl); font-weight: 750; letter-spacing: -.025em; font-variant-numeric: tabular-nums; background: var(--rw-num); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.rw-src-sv i { font-style: normal; font-size: var(--fs-xs); font-weight: 650; color: var(--rw-gold-t); }
+/* 链的小圆标(逐笔入账、等到账的地址那一行) */
 .rw-chain-i, .rw-ci { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--rw-soft); }
 .rw-ci { width: 24px; height: 24px; }
 .rw-ci .rw-chain { width: 12px; height: 10px; } .rw-ci .rw-chain.trx { width: 11px; height: 11px; }
-.rw-chain-n { display: grid; gap: .05rem; min-width: 0; }
-.rw-chain-n b { font-size: var(--fs-sm); font-weight: 600; }
-.rw-chain-n > span { display: flex; align-items: center; gap: .1rem; color: var(--rw-mute); min-width: 0; }
-.rw-chain-n code { font-size: var(--fs-xs); margin-right: .2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.rw-chain-m { text-align: right; }
-.rw-chain-m span { display: block; color: var(--rw-mute); font-size: var(--fs-xs); white-space: nowrap; }
-.rw-chain-m b { font-size: var(--fs-md); font-weight: 650; font-variant-numeric: tabular-nums; }
 /* 入账明细 */
 .rw-led-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem .9rem; margin: 1.7rem 0 .5rem; }
 .rw-led-head .rw-h { margin: 0; }
@@ -2428,7 +2431,6 @@ html.rw-lock { overflow: hidden; }
 .c-from, .c-addr { display: flex; align-items: center; gap: .45rem; min-width: 0; }
 .c-kind { display: flex; align-items: center; gap: .45rem; min-width: 0; }
 .c-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--rw-ink); font-weight: 550; }
-.c-name.anon { color: var(--rw-faint); font-weight: 400; }
 .rw-a { padding: .1rem .3rem; margin: 0 -.3rem; border: 0; border-radius: 6px; background: none; color: var(--rw-ink); font-size: var(--fs-sm); cursor: copy; white-space: nowrap; }
 .rw-a:hover { background: var(--rw-soft2); }
 .c-amt { color: var(--rw-mute); white-space: nowrap; }
@@ -2437,7 +2439,8 @@ html.rw-lock { overflow: hidden; }
 .c-cnt b { font-weight: 650; color: var(--rw-ink); }
 .c-cnt i { font-style: normal; color: var(--rw-faint); font-size: 11px; }
 .rw-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 .45rem; border-radius: 6px; background: var(--rw-soft); color: var(--rw-ink2); font-size: 11px; font-weight: 550; white-space: nowrap; flex: none; }
-.rw-tag.don { background: var(--rw-gold-soft); color: var(--rw-gold-t); }
+.rw-tag.ord { background: var(--rw-gold-soft); color: var(--rw-gold-t); }
+.rw-tag.don { background: var(--rw-don-soft); color: var(--rw-don-t); }
 .rw-tag.me { background: var(--rw-inv); color: var(--rw-inv-t); font-weight: 650; }
 .rw-tag.bad { background: var(--rw-bad-soft); color: var(--rw-bad); }
 .rw-pager { display: flex; align-items: center; gap: .5rem; padding: .75rem .5rem 0; color: var(--rw-mute); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
@@ -2528,7 +2531,6 @@ html.rw-lock { overflow: hidden; }
   .rw-pool-v b { font-size: 2.9rem; }
   .rw-me-row { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "pts tfc addr" "grow grow grow"; row-gap: .95rem; }
   .rw-me-c.grow { padding-left: 0; border-left: 0; }
-  .rw-eq { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rw-led .rw-row { grid-template-columns: minmax(10rem, 1.2fr) minmax(5.5rem, 1fr) 5.6rem minmax(6.6rem, .8fr); }
   .rw-led .c-amt { display: none; }
   .rw-led .c-cnt i { display: none; }
@@ -2558,13 +2560,11 @@ html.rw-lock { overflow: hidden; }
   .rw-me-v em { white-space: normal; }
   .rw-bind-r { flex-wrap: wrap; } .rw-bind-r .rw-in { flex-basis: 100%; } .rw-bind-r .rw-btn { flex: 1; }
   .rw-tabs { gap: 1.25rem; }
-  .rw-eq { gap: .5rem; }
-  .rw-eq-c { padding: .65rem .75rem .7rem; }
-  .rw-eq-c b { font-size: var(--fs-lg); }
-  .rw-chain-row { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "ic name name" "rcv rcv bal"; row-gap: .55rem; padding: .7rem .85rem; }
-  .rw-chain-row > .rw-chain-i { grid-area: ic; } .rw-chain-row > .rw-chain-n { grid-area: name; }
-  .rw-chain-row > .rw-chain-m { display: flex; align-items: baseline; gap: .45rem; text-align: left; }
-  .rw-chain-row > .rw-chain-m:nth-of-type(2) { grid-area: rcv; } .rw-chain-row > .rw-chain-m:nth-of-type(3) { grid-area: bal; }
+  .rw-src-row, .rw-src-sum { grid-template-columns: 34px minmax(0, 1fr) auto; column-gap: .7rem; padding: .8rem .9rem; }
+  .rw-src-row { align-items: start; }
+  .rw-src-i { width: 34px; height: 34px; border-radius: 11px; }
+  .rw-src-v { font-size: var(--fs-md); padding-top: .05rem; }
+  .rw-src-sv b { font-size: var(--fs-lg); }
   .rw-led-head { margin-top: 1.4rem; }
   .rw-row { column-gap: .6rem; padding: .6rem .25rem; row-gap: .25rem; min-height: 0; }
   .rw-row.head { display: none; }

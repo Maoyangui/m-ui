@@ -1,7 +1,7 @@
 // 测试和本地试跑(dev-server.mjs)共用的替身:拿 Node 自带的 sqlite 充当 D1、订单库里用得到的那几张表、一条模拟的链。
 // 线上不用这个文件。
 import { DatabaseSync } from 'node:sqlite';
-import { USDT_MINT } from './worker.mjs';
+import { USDT_MINT, ataOf } from './worker.mjs';
 
 // ---- D1:只实现 worker.mjs 用到的那几个调用 ----
 // onCall:每发生一次调用(一条查询,或一整个 batch)叫一下,测试拿它数子请求。
@@ -53,7 +53,9 @@ export function newChain(gen) {
   const sigs = new Map();     // 装币的账户 → [{ signature, blockTime, err }](新的在前)
   const txs = new Map();
   const c = {
-    calls: [], fetches: 0, down: false, tron: new Map(),
+    calls: [], asked: [], fetches: 0, down: false, noBatch: false, tron: new Map(), // noBatch:装成不认批量请求的节点
+    // rule(host, method, isBatch):测试给某个节点定规矩 —— 返回一个 Response 就拿它当答复(限速、不给这种查询…),不返回就照常答
+    rule: null,
     open(owner) { const pubkey = gen.sol(); accounts.set(owner, [...(accounts.get(owner) || []), { pubkey, amount: 0 }]); sigs.set(pubkey, []); return pubkey; },
     // 往 owner 转进 m(负数 = 转出)。opts: { failed, payer, account }
     pay(owner, m, at, opts = {}) {
@@ -75,21 +77,39 @@ export function newChain(gen) {
         const a = String(url).split('/').pop();
         return Response.json({ data: [{ trc20: [{ TFakeOtherToken: '5' }, { [USDT_TRC20]: String(c.tron.get(a) || 0) }] }] });
       }
-      const { method, params } = JSON.parse(init.body);
-      c.calls.push(method);
       if (c.down) return new Response('down', { status: 503 });
+      const body = JSON.parse(init.body), host = new URL(url).host, isBatch = Array.isArray(body);
+      c.asked.push(host + ' ' + (isBatch ? 'batch:' + body[0].method : body.method));
+      const special = c.rule && c.rule(host, isBatch ? body[0].method : body.method, isBatch);
+      if (special) return special;
+      if (isBatch) { // 批量请求
+        if (c.noBatch) return Response.json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'batch requests are not supported' } });
+        const out = [];
+        for (const x of body) out.push({ jsonrpc: '2.0', id: x.id, result: await answer(x.method, x.params) });
+        return Response.json(out);
+      }
+      return Response.json({ jsonrpc: '2.0', id: 1, result: await answer(body.method, body.params) });
+    },
+  };
+  const ataCache = new Map(); // 收款账户 → 钱包地址
+  async function ownerOf(account) {
+    for (const owner of accounts.keys()) { if (!ataCache.has(owner)) ataCache.set(owner, await ataOf(owner)); if (ataCache.get(owner) === account) return owner; }
+    return '';
+  }
+  async function answer(method, params) {
+      c.calls.push(method);
       let result = null;
       if (method === 'getTokenAccountsByOwner') {
         result = { value: (accounts.get(params[0]) || []).map(a => ({ pubkey: a.pubkey, account: { data: { parsed: { info: { owner: params[0], mint: USDT_MINT, tokenAmount: { amount: String(a.amount), decimals: 6 } } } } } })) };
       } else if (method === 'getSignaturesForAddress') {
-        let list = sigs.get(params[0]) || [];
+        const owner = await ownerOf(params[0]); // 交易挂在钱包的收款账户(算出来的那个地址)名下
+        let list = (owner && sigs.get(accounts.get(owner)[0].pubkey)) || [];
         const { limit = 1000, until, before } = params[1] || {};
         if (before) { const i = list.findIndex(s => s.signature === before); list = i >= 0 ? list.slice(i + 1) : []; }
         if (until) { const i = list.findIndex(s => s.signature === until); if (i >= 0) list = list.slice(0, i); }
         result = list.slice(0, limit);
       } else if (method === 'getTransaction') result = txs.get(params[0]) || null;
-      return Response.json({ jsonrpc: '2.0', id: 1, result });
-    },
-  };
+      return result;
+  }
   return c;
 }

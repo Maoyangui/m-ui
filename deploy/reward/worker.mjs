@@ -9,9 +9,9 @@
 //      判的是「面板」不是「地址」:谁都能把别人的地址绑到自己的面板上,要是按地址判,就能拿它去害人。
 //   4. 奖池:
 //      - 订单:只读订阅站的订单库,取「监听成功」的付款(payments.status = 'credited',两条链都算),按 40% 计入。
-//      - 捐赠:自己盯着奖池的 Solana 地址。转进来的 USDT 只要不是订单的付款,就是捐赠,全额计入。
-//        (订阅站只在有待付订单时才扫链,所以捐赠不能指望从订单库里读到。)
-//      - 留名捐赠:先登记「留名 + 金额」,拿到一个带零头的确切金额,60 分钟内这个数到账,这笔捐赠就记上名字。
+//      - 捐赠:只认留名捐赠。先登记「留名 + 金额」,拿到一个带零头的确切金额,60 分钟内这个数转到奖池的 Solana 地址,
+//        就全额计入奖池并记上名字。没登记就直接转进来的、过了期限才到的,一律不计入 —— 这个地址上还有别的资金流动,
+//        只有对得上一笔登记的才能确定是给奖池的。到没到账由登记服务自己看链(订阅站只在有待付订单时才扫链)。
 //        订单的金额第 6 位小数一定不是 0(订阅站的规则),留名捐赠最多 3 位小数,两者永远不会相同。
 //
 // 对外的接口:
@@ -19,14 +19,15 @@
 //   GET  /v1/export              公开账本(仓库 rewards 分支上的 ledger.json 就是它,由 ledger-workflow.yml 定时提交)
 //   POST /v1/donate              {name, amount} → 要转的确切金额和期限
 //   GET  /v1/donate/<id>         这一笔到没到账
-//   POST /v1/donate/<id>/cancel  不捐了
+//   POST /v1/donate/<id>/cancel  不捐了(面板上这一笔就此收起。但钱要是真的在期限内按那个数转来了,照样计入、照样记名:
+//                                钱不能因为点了一下取消就白转;那个金额在期限过完之前也不会发给别人)
 //   GET  /v1/health              定时任务最近一次跑的情况
 //
-// 定时(每 2 分钟):同步订单、判作弊、入账积分、查余额、看链上的新转入、对留名、重建账本。
+// 定时(每 2 分钟):同步订单、判作弊、入账积分、看链上的新转入对留名、重建账本。
 // 免费套餐一次调用最多 50 个子请求,定时任务按预算干活(见 metered),干不完的留给下一轮。
 //
 // 绑定:DB = 自己的库(schema.sql);COMMERCE = 订阅站的订单库(只 SELECT,而且只读这几张表:payments、
-// 两张收款地址表、solana_amount_reservations);SALT = 给来源做哈希的盐;SOLANA_RPC = Solana 节点(可以写多个,逗号隔开)。
+// 两张收款地址表、solana_amount_reservations);SALT = 给来源做哈希的盐;SOLANA_RPC = 自己的 Solana 节点(可选,可以写多个、逗号隔开,排在内置的公共节点前面)。
 //
 // 做不到的事说在前面:面板是开源自建的,累计值由面板自己报,改过的程序想报多少报多少 —— 签名只证明「是同一台面板报的」。
 // 所以防的不是「数字造假」本身,而是让造假不划算。能保证的只有一条,但很硬:
@@ -52,7 +53,7 @@ export const CFG = {
   intentWindow: 3600,                                // 这么久之内到账才算
   intentGrace: 300,                                  // 链上时间和登记时间之间留的余量
   intentsPerIpHour: 6,
-  donateMin: 1_000_000, donateMax: 100_000_000_000,  // 1 – 100000 USDT(单位:百万分之一)。低于下限的转入不记(防有人拿零碎转账刷屏)
+  donateMin: 1_000_000, donateMax: 100_000_000_000,  // 留名捐赠的金额范围:1 – 100000 USDT(单位:百万分之一)
   // 自动识别作弊的门槛
   restoreAfter: 14 * 86400,                          // 不计入的面板连续这么久没有再命中任何规则:自动恢复
   activeWindow: 3 * 86400,                           // 「同时在用」= 这么久之内都上报过
@@ -69,8 +70,6 @@ export const RULES = {
 };
 
 export const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
-const USDT_TRC20 = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
-const DEFAULT_RPC = 'https://solana-rpc.publicnode.com,https://api.mainnet-beta.solana.com';
 
 // ---- 小工具 ----
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -157,11 +156,12 @@ export function cleanName(s) {
   if (low.includes('://') || low.includes('www.')) return { err: '留名不能是网址', code: 'name_url' };
   return { name: s };
 }
-// 不让上榜的字眼(NAME_BLOCK:逗号隔开,不分大小写):命中的这笔照样进奖池,只是按匿名记。
+// 不让上榜的字眼(NAME_BLOCK:逗号隔开,不分大小写):命中的这笔照样是留名捐赠、照样进奖池,只是名字不显示。
+export const HIDDEN_NAME = '已隐藏';
 function shownName(env, name) {
   const low = String(name || '').toLowerCase();
-  for (const w of String(env.NAME_BLOCK || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean)) if (low.includes(w)) return '';
-  return name || '';
+  for (const w of String(env.NAME_BLOCK || '').toLowerCase().split(',').map(x => x.trim()).filter(Boolean)) if (low.includes(w)) return HIDDEN_NAME;
+  return name || HIDDEN_NAME;
 }
 
 // ---- 数据库(D1)----
@@ -404,7 +404,10 @@ export async function syncOrders(env, st, now) {
   // 平时只看最近变动的(按核对时间),每天全量过一遍
   let since = Number(st.ordCur || 0);
   if (now - Number(st.ordFull || 0) > 86400) { since = 0; st.ordFull = now; }
-  const rows = await all(env.COMMERCE, `SELECT tx_id, address, amount_micros, block_timestamp, event_json, COALESCE(checked_at, created_at) AS at
+  // 只取这几样:链上交易号、收款地址、金额、时间、付款方地址(从链上事件里单拿这一项)。订单号、订单的哈希、套餐、订阅这些一概不读 ——
+  // 订单号是订阅的使用凭证,这里不碰它,账本里自然也不会有。
+  const rows = await all(env.COMMERCE, `SELECT tx_id, address, amount_micros, block_timestamp,
+    CASE WHEN json_valid(event_json) THEN json_extract(event_json, '$.from') END AS payer, COALESCE(checked_at, created_at) AS at
     FROM payments WHERE status = 'credited' AND COALESCE(checked_at, created_at) >= ?`, Math.max(0, since - 3600_000));
   const stmts = [];
   let top = since;
@@ -412,8 +415,7 @@ export async function syncOrders(env, st, now) {
     top = Math.max(top, Number(p.at) || 0);
     const tx = String(p.tx_id || '').replace(/^solana:/, ''), chain = chainOf(p.address), m = Number(p.amount_micros), ts = sec(p.block_timestamp);
     if (!tx || tx.length > 128 || !chain || !Number.isSafeInteger(m) || m <= 0 || !ts) continue;
-    let from = '';
-    try { const ev = JSON.parse(p.event_json || '{}'); if (typeof ev.from === 'string' && chainOf(ev.from)) from = ev.from; } catch { /* 读不出付款方就空着 */ }
+    const from = typeof p.payer === 'string' && chainOf(p.payer) ? p.payer : ''; // 读不出付款方就空着
     stmts.push(q(db, `INSERT INTO deposits(tx, chain, address, ts, from_addr, micros, kind, name, seen_at) VALUES(?,?,?,?,?,?,'order','',?)
       ON CONFLICT(tx) DO UPDATE SET kind = 'order', name = '' WHERE deposits.kind != 'order'`, tx, chain, p.address, ts, from, m, now));
   }
@@ -423,20 +425,73 @@ export async function syncOrders(env, st, now) {
 }
 
 // ---- 奖池:捐赠(自己看链上)----
-async function rpc(env, method, params) {
-  let last;
-  for (const url of String(env.SOLANA_RPC || DEFAULT_RPC).split(',').map(s => s.trim()).filter(Boolean)) {
-    try {
-      const r = await (env.FETCH || fetch)(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
-      if (!r.ok) throw new Error('Solana 节点答复 ' + r.status);
-      const j = await r.json();
-      if (j.error) throw new Error(j.error.message || 'Solana 节点报错');
-      return j.result;
-    } catch (e) { last = e; }
-  }
-  throw last || new Error('没有配置 Solana 节点');
+// 查账的原则:
+//   - 没有留名在等到账,就一次链都不查。有的时候,每一轮(2 分钟)最多问两三次:拉一页新交易号,把时间落在留名期限里的那几笔一次问清金额。
+//   - 节点:自己配的(SOLANA_RPC,逗号隔开,排在前面)+ 内置的几个公共节点。公共节点会限速、有的不给某些调用:
+//     出错 / 被限速的歇一会儿(1、2、4…分钟,最多半小时),不给某种调用的一天之内不拿那种调用问它,下一个顶上。
+//   - 不用「查某个地址名下有哪些账户」这类受限的查询:收款用的那个账户地址是算得出来的(见 ataOf)。
+const PUBLIC_RPC = ['https://api.mainnet-beta.solana.com', 'https://public.rpc.solanavibestation.com', 'https://solana-rpc.publicnode.com'];
+export function rpcList(env) {
+  const own = String(env.SOLANA_RPC || '').split(',').map(x => x.trim()).filter(Boolean);
+  return [...new Set([...own, ...PUBLIC_RPC])];
 }
-// 订阅站现在启用着的收款地址(两条链);另外,账上有过入账的老地址也列出来(钱可能还在上面)。
+const hostOf = url => { try { return new URL(url).host; } catch { return String(url); } };
+// 问一圈节点,直到有一个答上来。isBatch = 这是一个批量请求(body 是数组),答复也得是数组。
+async function rpcAsk(env, st, now, method, body, isBatch) {
+  st.rpc = st.rpc || {};
+  const state = url => { const h = hostOf(url); return st.rpc[h] || (st.rpc[h] = { until: 0, fails: 0, no: {} }); };
+  const barred = url => { const h = state(url); return (h.no[method] || 0) > now || (isBatch && (h.no.batch || 0) > now); };
+  const list = rpcList(env).filter(url => !barred(url));
+  let order = list.filter(url => state(url).until <= now);
+  if (!order.length) order = [...list].sort((a, b) => state(a).until - state(b).until).slice(0, 1); // 都在歇:挑最快该醒的那个试一次
+  let last = null;
+  for (const url of order.slice(0, 3)) {
+    if (!roomFor(env, 1)) break;
+    const h = state(url);
+    try {
+      const r = await (env.FETCH || fetch)(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (r.status === 401 || r.status === 403) { h.no[method] = now + 86400; throw new Error(`${hostOf(url)} 不给这种查询(${r.status})`); }
+      if (!r.ok) throw new Error(`${hostOf(url)} 答复 ${r.status}`);
+      const j = await r.json();
+      if (isBatch) {
+        if (!Array.isArray(j)) { h.no.batch = now + 86400; last = new Error(`${hostOf(url)} 不认批量请求`); continue; } // 不算它出错,换下一个
+        h.fails = 0; h.until = 0;
+        return j;
+      }
+      if (j && j.error) {
+        const code = j.error.code, msg = String(j.error.message || '');
+        if (code === -32601 || /not available|paid plan|personal token|not supported|not allowed|upgrade/i.test(msg)) { h.no[method] = now + 86400; throw new Error(`${hostOf(url)} 不给这种查询`); }
+        throw new Error(`${hostOf(url)}: ${msg.slice(0, 80) || code}`);
+      }
+      h.fails = 0; h.until = 0;
+      return j ? j.result : null;
+    } catch (e) {
+      last = e;
+      if (!((h.no[method] || 0) > now)) { h.fails = (h.fails || 0) + 1; h.until = now + Math.min(1800, 60 * 2 ** Math.min(h.fails - 1, 5)); }
+    }
+  }
+  throw last || new Error('没有可用的 Solana 节点');
+}
+const rpc = (env, st, now, method, params) => rpcAsk(env, st, now, method, { jsonrpc: '2.0', id: 1, method, params }, false);
+// 一次请求问好几件同样的事(JSON-RPC 的批量请求):只算一个子请求。返回和 calls 对齐的结果,没答上来的那几条是 undefined。
+// 没有节点认批量(或者都在限速)就退回一件一件问,问到预算用完为止。
+async function rpcBatch(env, st, now, method, paramsList) {
+  const out = new Array(paramsList.length).fill(undefined);
+  if (paramsList.length > 1) {
+    try {
+      const j = await rpcAsk(env, st, now, method, paramsList.map((params, i) => ({ jsonrpc: '2.0', id: i, method, params })), true);
+      for (const x of j) if (x && Number.isInteger(x.id) && x.id >= 0 && x.id < out.length && !x.error) out[x.id] = x.result;
+      return out;
+    } catch { /* 退回一件一件问 */ }
+  }
+  let failed = 0;
+  for (let i = 0; i < paramsList.length && roomFor(env, 2) && failed < 2; i++) {
+    try { out[i] = await rpc(env, st, now, method, paramsList[i]); } catch { failed++; }
+  }
+  return out;
+}
+
+// 订阅站现在启用着的收款地址(两条链);另外,账上有过入账的老地址也列出来。
 export async function poolAddresses(env) {
   const out = [], seen = new Set();
   const add = (address, chain) => { if (address && !seen.has(address) && chainOf(address) === chain) { seen.add(address); out.push({ chain, address }); } };
@@ -450,20 +505,51 @@ async function poolList(env, st, now) {
   if (!st.pool || now - st.pool.at >= 600) st.pool = { at: now, list: await poolAddresses(env) };
   return st.pool.list;
 }
-// 这个地址名下装 USDT 的账户(转账是转进这些账户,不是转进地址本身)。有的话记一小时,没有的话十分钟后再看。
-async function tokenAccounts(env, st, owner, now, force = false) {
-  st.ta = st.ta || {};
-  const cached = st.ta[owner];
-  if (cached && !force && now - cached.at < (cached.list.length ? 3600 : 600)) return cached;
-  const r = await rpc(env, 'getTokenAccountsByOwner', [owner, { mint: USDT_MINT }, { encoding: 'jsonParsed', commitment: 'finalized' }]);
-  const list = [], amounts = [];
-  for (const v of (r && r.value) || []) {
-    const info = v.account && v.account.data && v.account.data.parsed && v.account.data.parsed.info;
-    if (!info || info.owner !== owner || info.mint !== USDT_MINT || !validSolana(v.pubkey)) continue;
-    list.push(v.pubkey); amounts.push(Number(info.tokenAmount && info.tokenAmount.amount) || 0);
-  }
-  return (st.ta[owner] = { at: now, list: list.slice(0, 4), balance: amounts.reduce((s, x) => s + x, 0) });
+
+// 一个钱包地址收 USDT 用的那个账户(关联代币账户)的地址。转账是转进这个账户,交易也挂在它名下。
+// 它由 钱包地址 + 代币程序 + 币种 三样算出来:依次试 255、254… 这个尾数,取第一个「不在 ed25519 曲线上」的哈希。不用问链。
+const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', ATA_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+function b58decode(s) {
+  let n = 0n;
+  for (const ch of s) { const d = B58.indexOf(ch); if (d < 0) throw new Error('不是 base58'); n = n * 58n + BigInt(d); }
+  const out = new Uint8Array(32);
+  for (let i = 31; i >= 0; i--) { out[i] = Number(n & 255n); n >>= 8n; }
+  if (n > 0n) throw new Error('超过 32 字节');
+  return out;
 }
+function b58encode(bytes) {
+  let n = 0n;
+  for (const b of bytes) n = n * 256n + BigInt(b);
+  let s = '';
+  while (n > 0n) { s = B58[Number(n % 58n)] + s; n /= 58n; }
+  for (const b of bytes) { if (b !== 0) break; s = '1' + s; }
+  return s;
+}
+const P25519 = (1n << 255n) - 19n;
+const modpow = (b, e, m) => { let r = 1n; b %= m; while (e > 0n) { if (e & 1n) r = r * b % m; b = b * b % m; e >>= 1n; } return r; };
+const D25519 = (P25519 - 121665n) * modpow(121666n, P25519 - 2n, P25519) % P25519;
+// 这 32 字节是不是曲线上一个点的压缩写法:由 y 解 x² = (y² − 1) / (d·y² + 1),有解就是
+export function onCurve(bytes) {
+  let y = 0n;
+  for (let i = 31; i >= 0; i--) y = (y << 8n) | BigInt(i === 31 ? bytes[i] & 127 : bytes[i]);
+  y %= P25519;
+  const y2 = y * y % P25519, u = (y2 - 1n + P25519) % P25519, v = (D25519 * y2 + 1n) % P25519;
+  const x2 = u * modpow(v, P25519 - 2n, P25519) % P25519;
+  return x2 === 0n || modpow(x2, (P25519 - 1n) / 2n, P25519) === 1n;
+}
+export async function ataOf(owner, mint = USDT_MINT) {
+  const seeds = [b58decode(owner), b58decode(TOKEN_PROGRAM), b58decode(mint)], prog = b58decode(ATA_PROGRAM), tail = new TextEncoder().encode('ProgramDerivedAddress');
+  for (let bump = 255; bump >= 0; bump--) {
+    const data = new Uint8Array(32 * 3 + 1 + 32 + tail.length);
+    let o = 0;
+    for (const x of seeds) { data.set(x, o); o += 32; }
+    data[o++] = bump; data.set(prog, o); o += 32; data.set(tail, o);
+    const h = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+    if (!onCurve(h)) return b58encode(h);
+  }
+  throw new Error('算不出收款账户');
+}
+
 // 一笔交易里,owner 名下的 USDT 净增了多少、是谁转出的。
 export function usdtMoves(tx, owner) {
   const pre = new Map(), post = new Map(), who = new Map();
@@ -478,114 +564,120 @@ export function usdtMoves(tx, owner) {
   }
   return { got, payer: validSolana(payer) ? payer : '' };
 }
-// 把一个账户上新出现的交易记进 sigs:从新到旧一页一页拉。只要登记服务上线之后的(donFrom)。
-// 一轮里每一段只拉一页(省预算):没拉完的那一段记成缺口,下一轮接着拉。
+// 把一个账户上 from 之后的新交易记进 sigs:从新到旧一页一页拉,拉到上次拉到的地方、或者比 from 还早的交易为止。
+// 一轮里每一段只拉一页:没拉完的那一段记成缺口,下一轮接着。返回「拉全了没有」。
 const SIG_PAGE = 50;
-async function pullSignatures(env, st, owner, account, now) {
+async function pullSignatures(env, st, owner, account, now, from) {
   const db = env.DB;
   st.cur = st.cur || {};
   const cur = st.cur[account] || { head: '', gaps: [] };
   const stmts = [];
-  const page = async (until, before) => { // 返回 { head, rest }:rest 不为空 = 这一段还没拉完,下回从它往前拉
-    const rows = await rpc(env, 'getSignaturesForAddress', [account, { limit: SIG_PAGE, commitment: 'finalized', ...(until ? { until } : {}), ...(before ? { before } : {}) }]);
+  const page = async (until, before, since) => { // 返回 { head, rest }:rest 不为空 = 这一段还没拉完,下回从它往前拉
+    const rows = await rpc(env, st, now, 'getSignaturesForAddress', [account, { limit: SIG_PAGE, commitment: 'finalized', ...(until ? { until } : {}), ...(before ? { before } : {}) }]);
     if (!Array.isArray(rows) || !rows.length) return { head: '', rest: '' };
     let old = false;
     for (const r of rows) {
       if (typeof r.signature !== 'string' || r.signature.length > 128) continue;
-      if (r.blockTime != null && r.blockTime < st.donFrom) { old = true; continue; }
+      if (r.blockTime != null && r.blockTime < since) { old = true; continue; }
       if (r.err === null || r.err === undefined) stmts.push(q(db, "INSERT INTO sigs(sig, owner, ts, state, seen_at) VALUES(?,?,?,'new',?) ON CONFLICT(sig) DO NOTHING", r.signature, owner, r.blockTime || 0, now));
     }
     return { head: rows[0].signature, rest: old || rows.length < SIG_PAGE ? '' : rows[rows.length - 1].signature };
   };
   const gaps = [...(cur.gaps || [])];
-  if (roomFor(env, 2)) {
-    const top = await page(cur.head, '');
-    if (top.rest) gaps.push({ until: cur.head, before: top.rest });
-    if (top.head) cur.head = top.head;
+  let reached = false;
+  try {
+    if (roomFor(env, 2)) {
+      const top = await page(cur.head, '', from);
+      if (top.rest) gaps.push({ until: cur.head, before: top.rest, from });
+      if (top.head) cur.head = top.head;
+      reached = true;
+    }
+    if (gaps.length && roomFor(env, 2)) { // 最老的那个缺口往前补一页
+      const g = gaps.shift(), r = await page(g.until, g.before, g.from || from);
+      if (r.rest) gaps.unshift({ ...g, before: r.rest });
+    }
+  } finally { // 中途出错(节点不通):已经拉到的照样记下,缺口留着下回补
+    await batched(db, stmts);
+    st.cur[account] = { head: cur.head, gaps: gaps.slice(0, 20) };
   }
-  if (gaps.length && roomFor(env, 2)) { // 最老的那个缺口往前补一页
-    const g = gaps.shift(), r = await page(g.until, g.before);
-    if (r.rest) gaps.unshift({ until: g.until, before: r.rest });
-  }
-  await batched(db, stmts);
-  st.cur[account] = { head: cur.head, gaps: gaps.slice(0, 20) };
-  return stmts.length;
+  return reached && gaps.length === 0;
 }
-// 看链上的新转入:不是订单付款的,就是捐赠。
+// 看链上的新转入里有没有留名捐赠:金额正好是某一笔登记的确切金额、到账时间落在它的期限里,才算。
+// 对不上任何一笔登记的转入一律不管(不计入、不列出):这个地址上还有订单付款和别的资金流动。
+const TX_BATCH = 20, TX_PER_TICK = 60;
 export async function scanSolana(env, st, now) {
   const db = env.DB;
-  if (!st.donFrom) st.donFrom = now; // 上线这一刻起的转入才算捐赠
-  const owners = (await poolList(env, st, now)).filter(a => a.chain === 'solana').slice(0, 3).map(a => a.address);
-  for (const owner of owners) {
-    if (!roomFor(env, 3)) break;
-    const ta = await tokenAccounts(env, st, owner, now);
-    for (const account of ta.list) { if (!roomFor(env, 2)) break; await pullSignatures(env, st, owner, account, now); }
+  // 还没兑现的留名(在等到账的、刚过期的)。一笔留名「查完了」= 它的期限(连余量)过后,链上的交易又拉全过一次(scanOk)。
+  // 库里还有没看的交易时,把近两天的都带上:它们里面可能有哪一笔的钱。
+  const backlog = await one(db, "SELECT COUNT(*) AS n FROM sigs WHERE state = 'new'");
+  const horizon = backlog && backlog.n > 0 ? now - 2 * 86400 : Number(st.scanOk || 0) - CFG.intentGrace;
+  const live = await all(db, "SELECT id, name, address, exact, created_at, expires_at FROM intents WHERE status IN ('pending', 'expired', 'cancelled') AND expires_at >= ? ORDER BY created_at", horizon);
+  if (!live.length) { // 没有留名在等到账:没拉完的交易号也不用再拉了
+    for (const c of Object.values(st.cur || {})) if (c) c.gaps = [];
+    if (!(backlog && backlog.n > 0)) { st.scanOk = now; return 0; } // 一次链都不查
+  } else {
+    const from = Math.min(...live.map(i => i.created_at)) - CFG.intentGrace;
+    const owners = [...new Set(live.map(i => i.address))].slice(0, 3);
+    let complete = true;
+    for (const owner of owners) {
+      if (!roomFor(env, 3)) { complete = false; break; }
+      st.ata = st.ata || {};
+      const account = st.ata[owner] || (st.ata[owner] = await ataOf(owner));
+      complete = await pullSignatures(env, st, owner, account, now, from) && complete;
+    }
+    if (complete) st.scanOk = now;
   }
-  // 一笔一笔看(每笔要问一次链),预算用完就停,剩下的下一轮
   if (!roomFor(env, 5)) return 0;
-  const todo = await all(db, "SELECT sig, owner, ts FROM sigs WHERE state = 'new' ORDER BY ts, sig LIMIT 20");
+  // 时间落不进任何一笔留名期限的交易,肯定对不上:一条语句全划掉,不用去链上看
+  await run(db, `UPDATE sigs SET state = 'skip' WHERE state = 'new' AND ts > 0 AND NOT EXISTS (
+    SELECT 1 FROM intents i WHERE i.address = sigs.owner AND i.status IN ('pending', 'expired', 'cancelled') AND i.created_at - ? <= sigs.ts AND i.expires_at + ? >= sigs.ts)`, CFG.intentGrace, CFG.intentGrace);
+  // 剩下的要去链上看金额:一次请求问一批,预算用完就停,下一轮接着
+  const todo = await all(db, "SELECT sig, owner, ts FROM sigs WHERE state = 'new' ORDER BY ts, sig LIMIT ?", TX_PER_TICK);
+  const stmts = [];
   let found = 0;
-  for (const s of todo) {
-    if (!roomFor(env, 4)) break;
-    let tx = null;
-    try { tx = await rpc(env, 'getTransaction', [s.sig, { encoding: 'jsonParsed', commitment: 'finalized', maxSupportedTransactionVersion: 0 }]); } catch { /* 下一轮再问 */ }
-    if (!tx || !tx.meta) { await run(db, "UPDATE sigs SET tries = tries + 1, state = CASE WHEN tries >= 30 THEN 'gone' ELSE 'new' END WHERE sig = ?", s.sig); continue; }
-    const done = state => run(db, 'UPDATE sigs SET state = ? WHERE sig = ?', state, s.sig);
-    if (tx.meta.err) { await done('failed'); continue; }
-    const { got, payer } = usdtMoves(tx, s.owner);
-    const ts = Number(tx.blockTime) || s.ts || now;
-    if (got < BigInt(CFG.donateMin) || got > BigInt(Number.MAX_SAFE_INTEGER) || ts < st.donFrom) { await done('skip'); continue; } // 转出、零碎、上线前的
-    const m = Number(got);
-    // 订单的付款不是捐赠:订阅站已经认了的(syncOrders 会记);或者金额是某张订单占着的(它迟早由订阅站来认,认不了的也不算捐赠)
-    const o = await one(env.COMMERCE, `SELECT (SELECT 1 FROM payments WHERE tx_id = ? AND status = 'credited') AS paid,
-      (SELECT 1 FROM solana_amount_reservations WHERE address = ? AND amount_micros = ?) AS held`, 'solana:' + s.sig, s.owner, m);
-    if (o && (o.paid || o.held)) { await done('order'); continue; }
-    // 留名:金额正好是某一笔登记的确切金额,而且到账时间落在它的期限里
-    const it = await one(db, `SELECT id, name FROM intents WHERE address = ? AND exact = ? AND status IN ('pending', 'expired')
-      AND created_at - ? <= ? AND expires_at + ? >= ? ORDER BY created_at LIMIT 1`, s.owner, m, CFG.intentGrace, ts, CFG.intentGrace, ts);
-    const stmts = [
-      q(db, "INSERT INTO deposits(tx, chain, address, ts, from_addr, micros, kind, name, seen_at) VALUES(?, 'solana', ?, ?, ?, ?, 'donation', ?, ?) ON CONFLICT(tx) DO NOTHING",
-        s.sig, s.owner, ts, payer, m, it ? shownName(env, it.name) : '', now),
-      q(db, "UPDATE sigs SET state = 'donation' WHERE sig = ?", s.sig),
-    ];
-    if (it) stmts.push(q(db, "UPDATE intents SET status = 'paid', tx = ? WHERE id = ?", s.sig, it.id));
-    await db.batch(stmts);
-    found++;
+  for (let k = 0; k < todo.length && roomFor(env, 3); k += TX_BATCH) {
+    const part = todo.slice(k, k + TX_BATCH);
+    const txs = await rpcBatch(env, st, now, 'getTransaction', part.map(x => [x.sig, { encoding: 'jsonParsed', commitment: 'finalized', maxSupportedTransactionVersion: 0 }]));
+    for (let n = 0; n < part.length; n++) {
+      const x = part[n], tx = txs[n];
+      const mark = state => stmts.push(q(db, 'UPDATE sigs SET state = ? WHERE sig = ?', state, x.sig));
+      if (tx === undefined) continue; // 这一条没问到(节点不通、预算不够):原样留着,下一轮再问
+      if (!tx || !tx.meta) { stmts.push(q(db, "UPDATE sigs SET tries = tries + 1, state = CASE WHEN tries >= 30 THEN 'gone' ELSE 'new' END WHERE sig = ?", x.sig)); continue; }
+      if (tx.meta.err) { mark('failed'); continue; }
+      const { got, payer } = usdtMoves(tx, x.owner);
+      const ts = Number(tx.blockTime) || x.ts || now;
+      if (got <= 0n || got > BigInt(Number.MAX_SAFE_INTEGER)) { mark('skip'); continue; } // 转出的
+      const m = Number(got);
+      const it = live.find(i => !i.used && i.address === x.owner && i.exact === m && i.created_at - CFG.intentGrace <= ts && ts <= i.expires_at + CFG.intentGrace);
+      if (!it) { mark('skip'); continue; } // 对不上任何一笔登记:不是留名捐赠
+      // 万一订阅站把同一笔认成了订单付款(留名的金额和订单金额不会相同,不该发生):按订单算,不重复记
+      if (await one(env.COMMERCE, "SELECT 1 AS x FROM payments WHERE tx_id = ? AND status = 'credited'", 'solana:' + x.sig)) { mark('order'); continue; }
+      it.used = true;
+      stmts.push(q(db, "INSERT INTO deposits(tx, chain, address, ts, from_addr, micros, kind, name, seen_at) VALUES(?, 'solana', ?, ?, ?, ?, 'donation', ?, ?) ON CONFLICT(tx) DO NOTHING",
+        x.sig, x.owner, ts, payer, m, shownName(env, it.name), now));
+      mark('donation');
+      stmts.push(q(db, "UPDATE intents SET status = 'paid', tx = ? WHERE id = ?", x.sig, it.id));
+      found++;
+    }
   }
+  await batched(db, stmts);
   return found;
 }
-// Solana 的订单付款,订单库里没记付款方:去链上看这笔交易补上(一轮补一两笔;查不到的记成 '-',不再问)
-export async function fillPayers(env, limit = 2) {
+// Solana 的订单付款,订单库里没记付款方:去链上看这笔交易补上(十分钟补一两笔;查不到的记成 '-',不再问)
+export async function fillPayers(env, st, now, limit = 2) {
   const rows = await all(env.DB, "SELECT tx, address FROM deposits WHERE chain = 'solana' AND from_addr = '' ORDER BY ts DESC LIMIT ?", limit);
   for (const d of rows) {
     if (!roomFor(env, 2)) break;
     try {
-      const tx = await rpc(env, 'getTransaction', [d.tx, { encoding: 'jsonParsed', commitment: 'finalized', maxSupportedTransactionVersion: 0 }]);
+      const tx = await rpc(env, st, now, 'getTransaction', [d.tx, { encoding: 'jsonParsed', commitment: 'finalized', maxSupportedTransactionVersion: 0 }]);
       if (!tx) continue;
       await run(env.DB, 'UPDATE deposits SET from_addr = ? WHERE tx = ?', usdtMoves(tx, d.address).payer || '-', d.tx);
-    } catch { /* 这一轮没查到,下一轮再来 */ }
-  }
-}
-// 各收款地址现在的 USDT 余额(查不到就留着上一次的)
-export async function refreshBalances(env, st, now) {
-  st.balances = st.balances || {};
-  for (const a of await poolList(env, st, now)) {
-    if (!roomFor(env, 1)) break;
-    try {
-      if (a.chain === 'solana') st.balances[a.address] = (await tokenAccounts(env, st, a.address, now, true)).balance;
-      else {
-        const r = await (env.FETCH || fetch)(`${env.TRON_API || 'https://api.trongrid.io'}/v1/accounts/${a.address}`);
-        if (!r.ok) throw new Error('TronGrid ' + r.status);
-        const j = await r.json();
-        const row = ((j.data && j.data[0] && j.data[0].trc20) || []).find(x => x && x[USDT_TRC20] !== undefined);
-        st.balances[a.address] = row ? Number(row[USDT_TRC20]) || 0 : 0;
-      }
-    } catch { /* 留着上一次的 */ }
+    } catch { break; /* 节点不通:这一轮不再问,下一轮再来 */ }
   }
 }
 
 // ---- 留名捐赠 ----
-// 要转的确切金额 = 填的数 + 一点零头(0.001–0.099):同一时间填了一样数的两个人分得开。
+// 只有它计入奖池(没登记就转进来的不算)。要转的确切金额 = 填的数 + 一点零头(0.001–0.099):靠它认出是哪一笔,同一时间填了一样数的两个人也分得开。
 // 它最多 3 位小数,而订单金额的第 6 位小数一定不是 0,所以不会和任何订单的金额相同(另外还对一遍订单占用的金额,以防万一)。
 export async function handleDonate(env, body, ip, now) {
   const db = env.DB;
@@ -602,7 +694,7 @@ export async function handleDonate(env, body, ip, now) {
   const sol = ((st.pool && st.pool.list) || await poolAddresses(env)).find(a => a.chain === 'solana');
   if (!sol) return fail(503, '现在没有可用的奖池地址,请稍后再试', 'no_pool');
   // 还占着的金额:期限(含余量)还没过完的留名
-  const taken = new Set((await all(db, "SELECT exact FROM intents WHERE address = ? AND status IN ('pending', 'expired') AND expires_at + ? > ? AND exact > ? AND exact < ?",
+  const taken = new Set((await all(db, "SELECT exact FROM intents WHERE address = ? AND status IN ('pending', 'expired', 'cancelled') AND expires_at + ? > ? AND exact > ? AND exact < ?",
     sol.address, 2 * CFG.intentGrace, now, m, m + 100000)).map(x => x.exact));
   for (const r of await all(env.COMMERCE, 'SELECT amount_micros AS m FROM solana_amount_reservations WHERE address = ? AND amount_micros > ? AND amount_micros < ?', sol.address, m, m + 100000)) taken.add(Number(r.m));
   let exact = 0;
@@ -627,7 +719,6 @@ export async function buildExport(env, now, st) {
   for (const r of await all(db, 'SELECT kind, COUNT(*) AS n, COALESCE(SUM(micros), 0) AS m FROM deposits GROUP BY kind')) if (sums[r.kind]) sums[r.kind] = { n: r.n, m: r.m };
   const got = new Map((await all(db, 'SELECT address, SUM(micros) AS m FROM deposits GROUP BY address')).map(r => [r.address, r.m]));
   const share = Math.round(sums.order.m * CFG.orderRate);
-  const bal = st.balances || {};
   // 积分榜:有积分的,和名下的面板现在全都被剔除着的(写明原因)。还没挣到积分的地址不列(面板自己知道自己的情况)。
   // 「全都被剔除」才标出来:名下混进一台别人冒绑的作弊面板,不会让这个地址看起来像被判了(他自己的面板还在算)。
   // 被标出来的地址,剔除期间不参加分配:积分留着(恢复后照旧),但不算进合计。
@@ -650,7 +741,7 @@ export async function buildExport(env, now, st) {
       total: usd(share + sums.donation.m), orderCount: sums.order.n, orderAmount: usd(sums.order.m), orderShare: usd(share),
       donateCount: sums.donation.n, donateAmount: usd(sums.donation.m), points: live.reduce((s, b) => s + b.points, 0), addresses: live.length,
     },
-    chains: addrs.map(a => ({ chain: a.chain, address: a.address, received: usd(got.get(a.address) || 0), balance: usd(bal[a.address] || 0) })),
+    chains: addrs.map(a => ({ chain: a.chain, address: a.address, received: usd(got.get(a.address) || 0) })), // received = 计入奖池的那些入账的合计(订单按全额记)
     donate: { chain: 'solana', address: sol ? sol.address : '', min: CFG.donateMin / 1e6, max: CFG.donateMax / 1e6 },
     deposits: deps.map(d => ({ ts: d.ts, kind: d.kind, chain: d.chain, address: d.address, amount: d.micros / 1e6, from: d.from_addr === '-' ? '' : d.from_addr, tx: d.tx, ...(d.name ? { name: d.name } : {}) })),
     board, events,
@@ -670,17 +761,16 @@ export async function tick(rawEnv, now) {
     try { await fn(); } catch (e) { errs[name] = String((e && e.message) || e).slice(0, 200); }
   };
   const due = (key, every) => { if (now - Number(st[key] || 0) < every) return false; st[key] = now; return true; };
-  // 有新入账:余额马上重查(这一轮来得及就这一轮),不等十分钟
-  await step('orders', 2, async () => { if (await syncOrders(env, st, now) > 0) st.balAt = 0; });
+  await step('orders', 2, () => syncOrders(env, st, now));
   await step('judge', 6, () => judge(db, now, env));
   await step('credit', 2, () => creditPoints(db, now));
-  if (due('balAt', 600)) { await step('balances', 3, () => refreshBalances(env, st, now)); await step('payers', 3, () => fillPayers(env)); }
+  if (due('payAt', 600)) await step('payers', 3, () => fillPayers(env, st, now));
   if (due('gcAt', 86400)) await step('gc', 3, async () => {
     await run(db, 'DELETE FROM samples WHERE day < ?', dayOf(now) - CFG.sampleKeep);
     await run(db, "DELETE FROM intents WHERE status != 'paid' AND expires_at < ?", now - 7 * 86400);
     await run(db, "DELETE FROM sigs WHERE state != 'new' AND seen_at < ?", now - 30 * 86400);
   });
-  await step('chain', 3, async () => { if (await scanSolana(env, st, now) > 0) st.balAt = 0; });
+  await step('chain', 3, () => scanSolana(env, st, now));
   // 下面这几步用的是留出来的那部分预算
   let ledger = null;
   try { await run(db, "UPDATE intents SET status = 'expired' WHERE status = 'pending' AND expires_at < ?", now); } catch (e) { errs.intents = String((e && e.message) || e).slice(0, 200); }

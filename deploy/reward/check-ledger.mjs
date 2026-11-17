@@ -43,6 +43,7 @@ export function checkLedger(l, now = Math.floor(Date.now() / 1000)) {
     need(typeof x.amount === 'number' && x.amount > 0 && typeof x.tx === 'string' && x.tx && x.tx.length <= 128 && len(x.from) <= 64 && len(x.name) <= 24 && Number.isInteger(x.ts) && x.ts > 0, `${at}写得不对`);
     need(['solana', 'tron'].includes(x.chain), `${at}的链不对`);
     need(x.kind === 'donation' || !x.name, `${at}是订单,不该有留名`);
+    need(x.kind !== 'donation' || !!x.name, `${at}是捐赠却没有留名(只有留名捐赠计入奖池)`);
     need(!seen.has(x.tx), `${at}的交易号重复了`);
     seen.add(x.tx);
     sums[x.kind].n++; sums[x.kind].v += x.amount;

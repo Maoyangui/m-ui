@@ -9,11 +9,11 @@ const A1 = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU', A2 = '111111111111111
 const good = () => ({
   v: 1, updatedAt: NOW - 60, payoutAt: NOW + 86400 * 200, orderRate: 0.4,
   pool: { total: 22.99, orderCount: 2, orderAmount: 29.98, orderShare: 11.99, donateCount: 2, donateAmount: 11, points: 5, addresses: 2 },
-  chains: [{ chain: 'solana', address: SOL, received: 30.99, balance: 30.99 }, { chain: 'tron', address: TRON, received: 9.99, balance: 9.99 }],
+  chains: [{ chain: 'solana', address: SOL, received: 30.99 }, { chain: 'tron', address: TRON, received: 9.99 }],
   donate: { chain: 'solana', address: SOL, min: 1, max: 100000 },
   deposits: [
     { ts: NOW - 100, kind: 'donation', chain: 'solana', address: SOL, amount: 6.037, from: A1, tx: 'sig3', name: '老王' },
-    { ts: NOW - 200, kind: 'donation', chain: 'solana', address: SOL, amount: 4.963, from: '', tx: 'sig2' },
+    { ts: NOW - 200, kind: 'donation', chain: 'solana', address: SOL, amount: 4.963, from: '', tx: 'sig2', name: '小李' },
     { ts: NOW - 300, kind: 'order', chain: 'solana', address: SOL, amount: 19.990013, from: A1, tx: 'sig1' },
     { ts: NOW - 400, kind: 'order', chain: 'tron', address: TRON, amount: 9.991237, from: TRON, tx: 'a'.repeat(64) },
   ],
@@ -39,6 +39,7 @@ test('写坏的、自相矛盾的:说出哪里不对', () => {
     [l => { l.deposits[0].kind = 'gift'; }, /类型不对/],
     [l => { l.deposits[1].tx = 'sig3'; }, /交易号重复/],
     [l => { l.deposits[2].name = '不该有'; }, /订单,不该有留名/],
+    [l => { delete l.deposits[1].name; }, /捐赠却没有留名/],
     [l => { l.deposits[0].name = 'x'.repeat(30); }, /写得不对/],
     [l => { l.pool.total = 99; }, /奖池 99 ≠/],
     [l => { l.pool.orderShare = 20; l.pool.total = 31; }, /≠ 订单合计/],
@@ -59,7 +60,7 @@ test('写坏的、自相矛盾的:说出哪里不对', () => {
 
 test('只增不减:比分支上的少了、丢了已有的入账,不让提交', () => {
   const prev = good();
-  const more = edit(l => { l.deposits.unshift({ ts: NOW - 10, kind: 'donation', chain: 'solana', address: SOL, amount: 2, from: A2, tx: 'sig4' }); l.pool.donateCount = 3; l.pool.donateAmount = 13; l.pool.total = 24.99; });
+  const more = edit(l => { l.deposits.unshift({ ts: NOW - 10, kind: 'donation', chain: 'solana', address: SOL, amount: 2, from: A2, tx: 'sig4', name: '小张' }); l.pool.donateCount = 3; l.pool.donateAmount = 13; l.pool.total = 24.99; });
   assert.deepEqual(checkGrowth(prev, more), []);
   assert.equal(verdict(more, prev, NOW).code, 0);
 

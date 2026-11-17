@@ -5,10 +5,10 @@
 //   头部    一句话说清玩法;当前奖池(大数字)、1 积分约值多少、已登记多少;「捐赠奖池」入口和离发放日的倒计时;
 //           右边是那枚大金币 —— 就是我自己的进度。
 //   我的    一条:积分、真实流量、离下一个积分还差多少、登记的 Solana 地址(没登记就是登记入口)。
-//   四页    奖池明细 —— 这笔钱怎么算出来的(节点订阅订单的 40% + 捐赠)、钱在哪两个地址上;逐笔入账(数额、链、付款地址、留名),可筛;
+//   四页    奖池明细 —— 奖池从哪来:一条按来源分两段的色条 + 两行(订单的 40%、留名捐赠)+ 合计;逐笔入账(数额、链、付款地址、留名),可筛;
 //           积分榜   —— 已登记的地址和积分,每页十条 + 按地址查;被系统剔除的照样列着、写明原因;
-//           捐赠榜   —— 上面是捐赠:填「留名 + 金额」,给出要转的数和 60 分钟的期限,期限内这个数到账就以这个名字上榜;
-//                       不想留名可以直接转到奖池地址。下面是留名的人按合计排的榜;
+//           捐赠榜   —— 上面是捐赠:填「留名 + 金额」,给出要转的数和 60 分钟的期限,期限内这个数到账就计入奖池、以这个名字上榜。
+//                       只有这样捐的才计入奖池(没登记就往地址转的钱对不上号,不算),所以奖池地址只在这一步给出。下面是按合计排的榜;
 //           规则     —— 五条,外加「会上传什么」。
 //
 // 轻提醒:刚装好的面板第一次进来、以及没登记时每满 1 TB,金币下面冒一个小气泡(一句话 + 两个按钮),不是弹框,点「以后再说」就收起。
@@ -27,7 +27,7 @@ let tipHidden = false;    // 这一次提醒已经点过「以后再说」
 let isOpen = false;
 let tab = 'pool';
 let bindOpen = false, bindBusy = false, bindErr = '';
-let donBusy = false, donErr = '', donAnon = false; // 捐赠:提交中 / 表单的报错 / 正在看「不留名直接转账」
+let donBusy = false, donErr = ''; // 捐赠:提交中 / 表单的报错
 let lastFocus = null, lastPoints = -1;
 const led = { kind: '', chain: '', page: 1, data: null, loading: false };
 const brd = { q: '', page: 1, data: null, loading: false };
@@ -73,6 +73,7 @@ const IC = {
   x: sv('<path d="M6 6l12 12M18 6 6 18"/>'),
   heart: sv('<path d="M12 20s-7-4.3-7-9.5A4 4 0 0 1 12 8a4 4 0 0 1 7 2.5C19 15.7 12 20 12 20Z"/>'),
   clock: sv('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
+  bill: sv('<path d="M6.5 3.5h11v17l-2.75-1.8L12 20.5l-2.75-1.8L6.5 20.5v-17Z"/><path d="M9.5 8.5h5M9.5 12h5"/>'),
 };
 
 // ---- 金币 ----
@@ -229,26 +230,25 @@ ${bindOpen ? `<div class="rw-bind">
 }
 
 // ---- 奖池明细 ----
+// 奖池从哪来:像一张小清单 —— 一路钱一行(小图标、叫什么、一句怎么算的;右边是「+ 进了奖池多少」),
+// 最后一行金色的合计带「= 当前奖池」,就是页头那个数。只有三个数,加起来对得上,不用再看别的。
+// 两路钱的颜色(订单金、捐赠紫)和下面逐笔入账里的小标是同一套。
+function sourcesHTML(p) {
+  const rate = Math.round((p.orderRate || 0.4) * 100), rest = 100 - rate;
+  const row = (cls, icon, title, desc, v) => `<div class="rw-src-row"><span class="rw-src-i ${cls}">${icon}</span>
+<div class="rw-src-t"><b>${esc(title)}</b><span>${desc}</span></div>
+<b class="rw-src-v"><i>+</i>${usd(v)}</b></div>`;
+  return `<div class="rw-src">
+${row('ord', IC.bill, t('rw.pool.ordT', { rate }), withSub(p.orderCount > 0 ? t('rw.pool.ordD', { n: pts(p.orderCount), v: usd(p.orderAmount), rest }) : t('rw.pool.ordNone', { rest })), p.orderShare)}
+${row('don', IC.heart, t('rw.pool.donT'), esc(p.donateCount > 0 ? t('rw.pool.donD', { n: pts(p.donateCount) }) : t('rw.pool.donNone')), p.donateAmount)}
+<div class="rw-src-sum"><span class="rw-src-eq">=</span><b class="rw-src-st">${esc(t('rw.pool.total'))}</b><span class="rw-src-sv"><b>${usd(p.total)}</b><i>USDT</i></span></div>
+</div>`;
+}
 function poolHTML() {
   const p = st.pool;
   if (!p) return `<div class="rw-empty">${esc(t('rw.pool.none'))}</div>`;
-  const rate = Math.round((p.orderRate || 0.4) * 100);
-  const cell = (op, k, v, s, cls = '') => `<div class="rw-eq-c${cls}"><span class="rw-k">${op ? `<i class="rw-op">${op}</i>` : ''}${esc(k)}</span><b>${v}</b><span class="rw-s">${s}</span></div>`;
   return `<h3 class="rw-h">${esc(t('rw.pool.how'))}</h3>
-<div class="rw-eq">
-${cell('', t('rw.pool.orders', { n: pts(p.orderCount) }), usd(p.orderAmount), withSub(t('rw.pool.ordersSub')))}
-${cell('×&nbsp;' + rate + '%', t('rw.pool.share'), usd(p.orderShare), esc(t('rw.pool.shareSub', { rest: 100 - rate })))}
-${cell('+', t('rw.pool.donate', { n: pts(p.donateCount) }), usd(p.donateAmount), esc(t('rw.pool.donateSub')))}
-${cell('=', t('rw.pool.total'), usd(p.total), 'USDT', ' sum')}
-</div>
-
-<h3 class="rw-h">${esc(t('rw.pool.where'))}</h3>
-<div class="rw-chains">${(p.chains || []).map(c => `<div class="rw-chain-row">
-<span class="rw-chain-i">${chainIcon(c.chain)}</span>
-<div class="rw-chain-n"><b>${esc(CHAIN[c.chain] || c.chain)}</b><span><code class="mono" title="${esc(c.address)}">${esc(short(c.address, 6))}</code><button class="rw-ib sm" type="button" data-act="rw.copy" data-v="${esc(c.address)}" title="${esc(t('common.copy'))}" aria-label="${esc(t('common.copy'))}">${IC.copy}</button><a class="rw-ib sm" href="${esc(addrUrl(c.chain, c.address))}" target="_blank" rel="noopener noreferrer" title="${esc(t('rw.onchain'))}" aria-label="${esc(t('rw.onchain'))}">${IC.out}</a></span></div>
-<div class="rw-chain-m"><span>${esc(t('rw.pool.received'))}</span><b>${usd(c.received)}</b></div>
-<div class="rw-chain-m"><span>${esc(t('rw.pool.balance'))}</span><b>${usd(c.balance)}</b></div>
-</div>`).join('')}</div>
+${sourcesHTML(p)}
 
 <div class="rw-led-head"><h3 class="rw-h">${esc(t('rw.led.title'))}</h3>
 <div class="rw-filters">
@@ -266,7 +266,7 @@ function ledgerHTML() {
 <div class="rw-row head"><span>${esc(t('rw.led.from'))}</span><span>${esc(t('rw.led.kind'))}</span><span>${esc(t('rw.led.time'))}</span><span class="r">${esc(t('rw.led.amount'))}</span><span class="r">${esc(t('rw.led.counted'))}</span></div>
 ${d.items.map(x => `<div class="rw-row">
 <span class="c-from"><span class="rw-ci" title="${esc(CHAIN[x.chain] || x.chain)}">${chainIcon(x.chain)}</span><button class="rw-a mono" type="button" data-act="rw.copy" data-v="${esc(x.from)}" title="${esc(x.from + ' · ' + t('rw.clickCopy'))}">${esc(short(x.from, 6))}</button>${x.tx ? `<a class="rw-ib sm" href="${esc(txUrl(x.chain, x.tx))}" target="_blank" rel="noopener noreferrer" title="${esc(t('rw.led.tx'))}" aria-label="${esc(t('rw.led.tx'))}">${IC.out}</a>` : ''}</span>
-<span class="c-kind"><span class="rw-tag ${x.kind === 'donation' ? 'don' : 'ord'}">${esc(t(x.kind === 'donation' ? 'rw.led.donation' : 'rw.led.order'))}</span>${x.kind === 'donation' ? `<span class="c-name${x.name ? '' : ' anon'}" title="${esc(x.name || t('rw.dn.anon'))}">${esc(x.name || t('rw.dn.anon'))}</span>` : ''}</span>
+<span class="c-kind"><span class="rw-tag ${x.kind === 'donation' ? 'don' : 'ord'}">${esc(t(x.kind === 'donation' ? 'rw.led.donation' : 'rw.led.order'))}</span>${x.kind === 'donation' && x.name ? `<span class="c-name" title="${esc(x.name)}">${esc(x.name)}</span>` : ''}</span>
 <span class="c-time" title="${esc(timeOf(x.ts))}">${esc(dayOf(x.ts))}</span>
 <span class="c-amt r" data-k="${esc(t('rw.led.amount'))}">${usd(x.amount)}</span>
 <span class="c-cnt r"><b>+${usd(x.share)}</b>${x.kind === 'donation' ? '' : `<i>${rate}%</i><small>${usd(x.amount)} × ${rate}%</small>`}</span>
@@ -313,31 +313,29 @@ ${x.excluded ? `<span class="c-why">${esc(cap(why(x)))}</span>` : `<span class="
 }
 
 // ---- 捐赠 + 捐赠榜 ----
-const solPool = () => ((st.pool || {}).chains || []).find(x => x.chain === 'solana') || null;
 const dnLeft = () => { const d = st.donation; return d ? Math.max(0, Math.floor(d.expiresAt - Date.now() / 1000)) : 0; };
 const mmss = s => `${p2(Math.floor(s / 60))}:${p2(s % 60)}`;
-// 地址 + 二维码那一块(等到账时、不留名直接转时都用它)
-function payBlock(c, amount) {
+// 等到账时的那一块:① 要转的确切金额 ② 奖池地址(这一笔登记时给的那个)+ 二维码。奖池地址只在这里出现。
+function payBlock(d) {
   return `<div class="rw-dn-pay">
 <div class="rw-dn-steps">
-${amount ? `<div class="rw-dn-step"><span class="rw-k"><i>1</i>${esc(t('rw.dn.s1'))}</span><div class="rw-dn-amt"><b>${exactAmt(amount)}</b><span>USDT</span><button class="rw-btn sm" type="button" data-act="rw.copy" data-v="${esc(exactAmt(amount))}">${IC.copy}<span>${esc(t('rw.dn.copyAmt'))}</span></button></div></div>` : ''}
-<div class="rw-dn-step"><span class="rw-k">${amount ? '<i>2</i>' : ''}${esc(t('rw.dn.s2'))}</span>
-<div class="rw-dn-addr"><span class="rw-chain-i">${SOL()}</span><code class="mono">${esc(c.address)}</code></div>
-<div class="rw-dn-btns"><button class="rw-btn sm" type="button" data-act="rw.copy" data-v="${esc(c.address)}">${IC.copy}<span>${esc(t('rw.dn.copyAddr'))}</span></button><a class="rw-btn sm" href="${esc(addrUrl('solana', c.address))}" target="_blank" rel="noopener noreferrer">${IC.out}<span>${esc(t('rw.onchain'))}</span></a></div></div>
+<div class="rw-dn-step"><span class="rw-k"><i>1</i>${esc(t('rw.dn.s1'))}</span><div class="rw-dn-amt"><b>${exactAmt(d.exact)}</b><span>USDT</span><button class="rw-btn sm" type="button" data-act="rw.copy" data-v="${esc(exactAmt(d.exact))}">${IC.copy}<span>${esc(t('rw.dn.copyAmt'))}</span></button></div></div>
+<div class="rw-dn-step"><span class="rw-k"><i>2</i>${esc(t('rw.dn.s2'))}</span>
+<div class="rw-dn-addr"><span class="rw-chain-i">${SOL()}</span><code class="mono">${esc(d.address)}</code></div>
+<div class="rw-dn-btns"><button class="rw-btn sm" type="button" data-act="rw.copy" data-v="${esc(d.address)}">${IC.copy}<span>${esc(t('rw.dn.copyAddr'))}</span></button><a class="rw-btn sm" href="${esc(addrUrl('solana', d.address))}" target="_blank" rel="noopener noreferrer">${IC.out}<span>${esc(t('rw.onchain'))}</span></a></div></div>
 </div>
-<div class="rw-dn-qr"><img src="${esc(rewardQrUrl('solana', c.address))}" alt="${esc(t('rw.dn.qr'))}" width="120" height="120"><span>${esc(t('rw.dn.qr'))}</span></div>
+<div class="rw-dn-qr"><img src="${esc(rewardQrUrl('solana', d.address))}" alt="${esc(t('rw.dn.qr'))}" width="120" height="120"><span>${esc(t('rw.dn.qr'))}</span></div>
 </div>${st.pool.demo ? `<div class="rw-note bad">${IC.warn}<span>${esc(t('rw.dn.demo'))}</span></div>` : ''}`;
 }
 function donateCardHTML() {
-  const c = solPool();
-  if (!c) return '';
   const d = st.donation, min = (st.pool || {}).donateMin || 1;
   const head = (title, right = '') => `<div class="rw-dn-h"><h3>${IC.heart}${esc(title)}</h3>${right}</div>`;
-  if (d && d.status === 'pending') {
+  if (d && d.status === 'pending' && d.address) {
     return `<section class="rw-dn wait">${head(t('rw.dn.waitTitle'), `<span class="rw-dn-timer" title="${esc(t('rw.dn.timerHelp'))}">${IC.clock}<b id="rw-dn-t">${mmss(dnLeft())}</b></span>`)}
 <p class="rw-dn-lead">${esc(t('rw.dn.waitLead', { name: d.name, amount: exactAmt(d.exact) }))}</p>
-${payBlock(c, d.exact)}
-<div class="rw-dn-foot"><span class="rw-dn-live"><i></i>${esc(t(st.pool.demo ? 'rw.dn.liveDemo' : 'rw.dn.live'))}</span><span class="rw-sp"></span><button class="rw-link" type="button" data-act="rw.dnCancel">${esc(t('rw.dn.cancel'))}</button></div>
+${payBlock(d)}
+<p class="rw-hint rw-dn-late">${esc(t('rw.dn.late'))}</p>
+<div class="rw-dn-foot"><span class="rw-dn-live"><i></i>${esc(t(st.pool.demo ? 'rw.dn.liveDemo' : 'rw.dn.live'))}</span><span class="rw-sp"></span><button class="rw-link" type="button" data-act="rw.dnCancel" title="${esc(t('rw.dn.cancelHelp'))}">${esc(t('rw.dn.cancel'))}</button></div>
 </section>`;
   }
   if (d && d.status === 'paid') {
@@ -346,12 +344,7 @@ ${payBlock(c, d.exact)}
 <div class="rw-dn-foot"><button class="rw-btn ink" type="button" data-act="rw.dnAgain">${esc(t('rw.dn.again'))}</button></div>
 </section>`;
   }
-  if (donAnon) {
-    return `<section class="rw-dn">${head(t('rw.dn.anonTitle'), `<button class="rw-link" type="button" data-act="rw.dnAnon">${esc(t('rw.dn.backNamed'))}</button>`)}
-<p class="rw-dn-lead">${esc(t('rw.dn.anonLead'))}</p>
-${payBlock(c, 0)}
-</section>`;
-  }
+  if (!(st.pool || {}).donate) return `<section class="rw-dn">${head(t('rw.dn.title'))}<div class="rw-note">${IC.clock}<span>${esc(t('rw.dn.off'))}</span></div></section>`; // 登记服务这会儿给不出奖池地址
   const expired = d && d.status === 'expired';
   return `<section class="rw-dn">${head(t('rw.dn.title'))}
 <p class="rw-dn-lead">${esc(t('rw.dn.lead'))}</p>
@@ -363,7 +356,7 @@ ${expired ? `<div class="rw-note">${IC.clock}<span>${esc(t('rw.dn.expired', { am
 </div>
 <div class="rw-dn-quick"><span>${esc(t('rw.dn.quick'))}</span>${QUICK.map(v => `<button type="button" data-act="rw.dnQuick" data-v="${v}">${v}</button>`).join('')}</div>
 <div class="rw-bind-err" id="rw-dn-err">${esc(donErr)}</div>
-<p class="rw-hint">${esc(t('rw.dn.notes'))} <button class="rw-link in" type="button" data-act="rw.dnAnon">${esc(t('rw.dn.goAnon'))}</button></p>
+<p class="rw-hint">${esc(t('rw.dn.notes'))}</p>
 </section>`;
 }
 function donateHTML() {
@@ -375,8 +368,8 @@ function donateHTML() {
 function donorsSum() {
   const d = dnr.data;
   if (!d) return '';
-  const n = d.named || {}, a = d.anon || {};
-  return esc(t('rw.dnr.sum', { p: pts(n.donors), c: pts(n.count), v: usd(n.amount) }) + (a.count ? ' · ' + t('rw.dnr.anon', { c: pts(a.count), v: usd(a.amount) }) : ''));
+  const n = d.named || {};
+  return n.count ? esc(t('rw.dnr.sum', { p: pts(n.donors), c: pts(n.count), v: usd(n.amount) })) : '';
 }
 function donorRows() {
   const d = dnr.data;
@@ -534,7 +527,7 @@ function open(focusBind = false) {
   closeMenus();
   tipHidden = true; // 点开了就不用再冒气泡
   bindOpen = focusBind && !st.address;
-  bindErr = ''; donErr = ''; donAnon = false;
+  bindErr = ''; donErr = '';
   led.page = brd.page = dnr.page = 1; led.data = brd.data = dnr.data = null; brd.q = '';
   let ov = document.getElementById('rw-ov');
   if (!ov) {
@@ -625,10 +618,9 @@ registerActions({
   },
   'rw.bindCancel': () => { bindOpen = false; bindErr = ''; paint(); },
   'rw.bindSave': () => bindSave(),
-  'rw.toDonate': () => { tab = 'donate'; donAnon = false; paint(); ensureTab(); const tb = document.getElementById('rw-tabs'); if (tb) tb.scrollIntoView({ block: 'start', behavior: reduced() ? 'auto' : 'smooth' }); },
+  'rw.toDonate': () => { tab = 'donate'; paint(); ensureTab(); const tb = document.getElementById('rw-tabs'); if (tb) tb.scrollIntoView({ block: 'start', behavior: reduced() ? 'auto' : 'smooth' }); },
   'rw.dnSubmit': () => donateSubmit(),
   'rw.dnQuick': (_, el) => { const a = document.getElementById('rw-dn-amt'); if (a) { a.value = el.dataset.v; a.focus(); } },
-  'rw.dnAnon': () => { donAnon = !donAnon; donErr = ''; paint(); },
   'rw.dnCancel': async () => { try { st = await post('reward/donate/cancel', {}); } catch (e) { toast(trErr(e.message), 'err'); } paint(); },
   'rw.dnAgain': async () => { try { st = await post('reward/donate/clear', {}); } catch (e) { toast(trErr(e.message), 'err'); } donErr = ''; paint(); },
   'rw.later': async () => { tipHidden = true; renderSlot(); try { await post('reward/remind', { dismiss: true }); } catch { /* 下次满 1 TB 再提醒,这次没记上也无妨 */ } },
