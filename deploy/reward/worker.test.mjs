@@ -561,6 +561,36 @@ test('退款:监听到账之后订单取消了(订阅站里删掉了)→ 那一�
   assert.deepEqual([l.pool.orderCount, l.pool.orderAmount, l.deposits.some(d => d.void)], [2, 36.01, false]);
 });
 
+test('退款标记:订阅站后台把订单标成「已退款」(订单还在,状态是 refunded)→ 同样作废;人工确认发放的订单标了退款也一样', async t => {
+  const x = setup(t), tronA = x.tronAddr(), solA = x.solAddr();
+  const buyer = tron();
+  x.payment({ tx: 'a'.repeat(64), address: tronA, micros: 18_004_446, at: T0 - 9000, from: buyer });
+  const back = x.payment({ tx: 'b'.repeat(64), address: tronA, micros: 18_007_208, at: T0 - 8000, from: buyer });
+  const paid = x.chain.pay(solA, 87_305_142, T0 - 1700);
+  x.payment({ tx: 'solana:' + paid.signature, address: solA, micros: 87_305_142, at: T0 - 1700, status: 'review', reason: 'UNMATCHED_AMOUNT' });
+  const manual = x.order({ address: tronA, sol: solA, micros: 88_005_142, created: T0 - 1800, fulfilled: T0 - 100 });
+  let l = await x.tick(T0);
+  assert.deepEqual([l.pool.orderCount, l.pool.orderAmount, l.pool.total], [3, 123.32, 49.33]);
+  // 订阅站的「标记已退款」只改订单的状态:订单、付款记录、发放时间都原样留着
+  x.commerce.prepare("UPDATE orders SET status = 'refunded' WHERE order_hash = ?").run(back);
+  l = await x.tick(T0 + 120);
+  assert.equal(l.pool.orderCount, 3, '平时每一轮只看新变动的付款;作废要等每小时对全表的那一遍');
+  l = await x.tick(T0 + 3700);
+  checkLedger(l, T0 + 3700);
+  assert.deepEqual([l.pool.orderCount, l.pool.orderAmount, l.pool.total], [2, 105.31, 42.12]);
+  assert.deepEqual(l.deposits.filter(d => d.void).map(d => [d.tx[0], d.amount]), [['b', 18.007208]]);
+  assert.equal(x.commerce.prepare("SELECT status FROM payments WHERE tx_id = ?").get('b'.repeat(64)).status, 'credited', '付款记录没人动过');
+  // 人工确认发放的那张也退了
+  x.commerce.prepare("UPDATE orders SET status = 'refunded' WHERE order_hash = ?").run(manual);
+  l = await x.tick(T0 + 7400);
+  checkLedger(l, T0 + 7400);
+  assert.deepEqual([l.pool.orderCount, l.pool.orderAmount, l.pool.total], [1, 18, 7.2]);
+  assert.deepEqual(l.deposits.filter(d => d.void).map(d => [d.amount, d.note]).sort(), [[18.007208, undefined], [87.305142, 'manual']]);
+  // 再对一遍不变;作废的两笔都还留在逐笔里
+  l = await x.tick(T0 + 11100);
+  assert.deepEqual([l.pool.orderCount, l.pool.total, l.deposits.length], [1, 7.2, 3]);
+});
+
 test('人工确认发放的订单也算:对得上那笔「金额对不上」的付款就按实收记、带交易号;分不清是哪一笔的按订单金额记、不带交易号', async t => {
   const x = setup(t), tronA = x.tronAddr(), solA = x.solAddr();
   // 订单 88.005142:客人从交易所提币被扣了手续费,到账 87.305142(走的 Solana)。订阅站标成金额对不上,管理员核对后手动发放
