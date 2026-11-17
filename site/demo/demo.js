@@ -567,6 +567,125 @@ S.fw = {
   ],
   allow: [{ id: 1, ip: '198.51.100.0/24', note: 'office', createdAt: now() - 30 * DAY }],
 };
+// ---- 流量奖励(js/reward.js)的演示数据 ----
+// 地址全是演示用的:中间故意带着 base58 里没有的「0」,钱包一粘贴就会拒绝 —— 不会有人照着演示站把钱打到一个不存在的地址上。
+const RW_TB = 1099511627776;
+const RW_QR = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMyAzMyIgc2hhcGUtcmVuZGVyaW5nPSJjcmlzcEVkZ2VzIj48cGF0aCBmaWxsPSIjZmZmZmZmIiBkPSJNMCAwaDMzdjMzSDB6Ii8+PHBhdGggc3Ryb2tlPSIjMDAwMDAwIiBkPSJNMCAwLjVoN20zIDBoMW0yIDBoMm0xIDBoMm0xIDBoMm0yIDBoMW0yIDBoN00wIDEuNWgxbTUgMGgxbTMgMGgxbTIgMGgzbTEgMGgxbTIgMGgxbTEgMGgxbTEgMGgxbTEgMGgxbTUgMGgxTTAgMi41aDFtMSAwaDNtMSAwaDFtMSAwaDRtMSAwaDFtMSAwaDFtMSAwaDRtMiAwaDFtMiAwaDFtMSAwaDNtMSAwaDFNMCAzLjVoMW0xIDBoM20xIDBoMW0xIDBoMW01IDBoMW0xIDBoMW0yIDBoNm0xIDBoMW0xIDBoM20xIDBoMU0wIDQuNWgxbTEgMGgzbTEgMGgxbTEgMGgxbTIgMGgzbTEgMGgxbTIgMGgxbTIgMGgxbTIgMGgxbTEgMGgxbTEgMGgzbTEgMGgxTTAgNS41aDFtNSAwaDFtMSAwaDVtMiAwaDJtMyAwaDJtMiAwaDFtMSAwaDFtNSAwaDFNMCA2LjVoN20xIDBoMW0xIDBoMW0xIDBoMW0xIDBoMW0xIDBoMW0xIDBoMW0xIDBoMW0xIDBoMW0xIDBoMW0xIDBoN004IDcuNWgzbTEgMGgxbTIgMGgxbTIgMGgxbTIgMGgybTEgMGgxTTAgOC41aDFtMSAwaDVtMiAwaDFtMSAwaDZtNCAwaDRtMSAwaDVNMCA5LjVoMW0xIDBoMW0xIDBoMm0yIDBoMm0yIDBoMW0xIDBoMW0xIDBoMW0yIDBoM20xIDBoMW0xIDBoM20xIDBoNE0wIDEwLjVoMW0xIDBoMm0yIDBoNm0zIDBoMW0yIDBoMW0yIDBoMW00IDBoMW0xIDBoNE0wIDExLjVoMW0yIDBoM20xIDBoMW0zIDBoMm0xIDBoMm0zIDBoNG0xIDBoMW0zIDBoM00zIDEyLjVoNG0xIDBoMW0xIDBoMm02IDBoMm0xIDBoMW0zIDBoMW0yIDBoMW0xIDBoMW0xIDBoMU0wIDEzLjVoNG0xIDBoMW00IDBoMW0zIDBoM20zIDBoNG0xIDBoMk0wIDE0LjVoNW0xIDBoMW03IDBoMW0yIDBoM20xIDBoMW0yIDBoMW0yIDBoMW0yIDBoMk0wIDE1LjVoMm0xIDBoMm0yIDBoMW0xIDBoNG0zIDBoMW0xIDBoNW0xIDBoMm0xIDBoNE0wIDE2LjVoMW0xIDBoM20xIDBoM20xIDBoMm0xIDBoMm0xIDBoMm0xIDBoMW0yIDBoNG0xIDBoM20xIDBoMU0yIDE3LjVoNG00IDBoM20zIDBoM20xIDBoMW0yIDBoMW0xIDBoMW0zIDBoMW0xIDBoMk0wIDE4LjVoM20zIDBoMm0zIDBoMW0xIDBoM20xIDBoMW00IDBoMW0zIDBoMW0xIDBoNE0wIDE5LjVoMm0xIDBoMm0zIDBoMW0xIDBoMm0xIDBoM20xIDBoMm01IDBoMW0zIDBoM00wIDIwLjVoMm0xIDBoMm0xIDBoM20yIDBoM20yIDBoMW0zIDBoM20yIDBoMW0yIDBoMW0zIDBoMU0wIDIxLjVoMW0yIDBoM20zIDBoMm00IDBoMW0yIDBoMW0yIDBoMW0xIDBoMW0xIDBoMk0wIDIyLjVoMW0xIDBoMm0xIDBoM20yIDBoMW00IDBoMm0zIDBoM20xIDBoMW0yIDBoMW0yIDBoMk0wIDIzLjVoMW0xIDBoMW0xIDBoMW01IDBoM20xIDBoMm01IDBoMW0yIDBoN00wIDI0LjVoMW0zIDBoNG0xIDBoMm0yIDBoMW0xIDBoM20yIDBoMW0xIDBoOG0xIDBoMk04IDI1LjVoMW0yIDBoMW0xIDBoMW0yIDBoMW0xIDBoMm0xIDBoMW0xIDBoMm0zIDBoMm0xIDBoMk0wIDI2LjVoN20yIDBoMm0yIDBoMW0xIDBoMm0xIDBoMW0yIDBoMW0xIDBoMm0xIDBoMW0xIDBoMm0xIDBoMU0wIDI3LjVoMW01IDBoMW0xIDBoMW0xIDBoMW0xIDBoMW0yIDBoMW0zIDBoMW0xIDBoMm0xIDBoMW0zIDBoM00wIDI4LjVoMW0xIDBoM20xIDBoMW0xIDBoMW0xIDBoM20xIDBoMm0yIDBoMW0yIDBoMW0yIDBoNm0yIDBoMU0wIDI5LjVoMW0xIDBoM20xIDBoMW0xIDBoNG0zIDBoMm0zIDBoNG0xIDBoMW0xIDBoMm0zIDBoMU0wIDMwLjVoMW0xIDBoM20xIDBoMW0xIDBoNG0xIDBoMm0zIDBoMm0xIDBoM20yIDBoMW0zIDBoMU0wIDMxLjVoMW01IDBoMW00IDBoMW0yIDBoMW0xIDBoMW0yIDBoM20xIDBoMW0yIDBoMm0xIDBoMk0wIDMyLjVoN20xIDBoNW0zIDBoNW0xIDBoM20yIDBoMW0xIDBoMW0xIDBoMSIvPjwvc3ZnPgo=';
+const rwRand = (() => { let s = 20270903; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; })();
+const RW_B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const rwAddr = (n, head = '') => { let a = head; while (a.length < n) a += RW_B58[Math.floor(rwRand() * 58)]; const m = Math.floor(n / 2); return a.slice(0, m - 2) + '0DEM' + a.slice(m + 2); };
+S.reward = (() => {
+  const day = 86400, t0 = Math.floor(Date.now() / 1000);
+  const mk = (ts, kind, chain, amount, name) => ({ ts, kind, chain, amount, name: name || '', from: chain === 'tron' ? rwAddr(34, 'T') : rwAddr(44), tx: rwAddr(chain === 'tron' ? 64 : 88) });
+  const amounts = [9.9, 29.9, 9.9, 59, 9.9, 29.9, 99, 9.9, 29.9, 9.9, 199, 29.9, 9.9, 59, 9.9, 29.9, 9.9, 99, 29.9, 9.9, 59, 9.9, 29.9];
+  const ledger = amounts.map((a, i) => mk(t0 - Math.floor((i * 2.6 + rwRand() * 2) * day) - 3600, 'order', rwRand() < 0.62 ? 'solana' : 'tron', a));
+  // 捐赠:留名的走 Solana(留名只认这条链),不留名的两条链都可能有
+  const gifts = [[2, 50, '老王'], [5, 20, 'night_owl'], [9, 100, '路过的面板党'], [12, 10, 'Tokyo 小鸡'], [15, 30, '老王'], [19, 66.66, 'k8s 练习生'], [23, 8.88, '半夜修机器的人'], [27, 20, 'night_owl'],
+    [31, 200, 'M 记铁粉'], [36, 15, 'hy2 一把梭'], [41, 5, '隔壁机房'], [47, 88, '路过的面板党'], [52, 12.5, ''], [29, 25, ''], [8, 6, '']];
+  for (const [d, a, name] of gifts) ledger.push(mk(t0 - d * day - 7200 - Math.floor(rwRand() * 30000), 'donation', 'solana', a, name));
+  ledger.push(mk(t0 - 33 * day - 5000, 'donation', 'tron', 40, ''));
+  ledger.sort((a, b) => b.ts - a.ts);
+  const board = [];
+  for (let i = 0; i < 63; i++) board.push({ address: rwAddr(44), points: Math.max(1, Math.round(46 * Math.pow(0.9, i) + rwRand() * 2)), panels: rwRand() < 0.16 ? 2 + Math.floor(rwRand() * 3) : 1 });
+  board[7].excluded = true; board[7].reason = '流量增长长期贴着上限且过于规整,系统判定为伪造流量';
+  board[26].excluded = true; board[26].reason = '同一网段下成批登记,累计值超出带宽可能的上限';
+  return {
+    tb: RW_TB, bytes: Math.round(3.618 * RW_TB), address: '', boundAt: 0, credited: 0, remind: 'tb', intent: null,
+    payoutAt: Math.floor(new Date(2027, 8, 3, 0, 0, 0).getTime() / 1000), rate: 0.4,
+    chains: { solana: 'DEMopoo1So1anaAddr0NotRea1xxxxxxxxxxxxxxxxxx', tron: 'TDEMopoo1TronAddr0NotRea1xxxxxxxx' },
+    ledger, board,
+  };
+})();
+function demoReward(method, seg, query, body) {
+  const R = S.reward, q = new URLSearchParams(query || '');
+  const now = () => Math.floor(Date.now() / 1000);
+  const r2 = n => Math.round(n * 100) / 100;
+  const share = x => x.kind === 'donation' ? x.amount : r2(x.amount * R.rate);
+  const points = Math.floor(R.bytes / R.tb);
+  const rows = () => { // 榜单:没被剔除的按积分排名;绑定了的把「我」放进去
+    const list = R.board.map(x => ({ ...x }));
+    if (R.address) list.push({ address: R.address, points: R.credited, panels: 1, me: true });
+    const ok = list.filter(x => !x.excluded && x.points > 0).sort((a, b) => b.points - a.points);
+    ok.forEach((x, i) => { x.rank = i + 1; });
+    return { ok, out: list.filter(x => x.excluded) };
+  };
+  const settle = () => { // 留名的那一笔:20 秒后模拟到账;超过 60 分钟算过期
+    const it = R.intent;
+    if (!it || it.status !== 'pending') return;
+    if (now() - it.createdAt >= 20) {
+      it.status = 'paid'; it.paidAt = now();
+      R.ledger.unshift({ ts: now(), kind: 'donation', chain: 'solana', amount: it.exact, name: it.name, from: rwAddr(44), tx: rwAddr(88) });
+    } else if (now() > it.expiresAt) it.status = 'expired';
+  };
+  const summary = () => {
+    if (S.settings.rewardEnabled === 'false') return { enabled: false };
+    settle();
+    R.bytes += Math.round(2.4e9 + Math.random() * 1.6e9); // 演示:看着它一点点涨
+    const orders = R.ledger.filter(x => x.kind === 'order'), dons = R.ledger.filter(x => x.kind === 'donation');
+    const sum = a => r2(a.reduce((s, x) => s + x.amount, 0));
+    const { ok } = rows();
+    const total = r2(sum(orders) * R.rate + sum(dons));
+    return {
+      enabled: true, tb: R.tb, bytes: R.bytes, points: Math.floor(R.bytes / R.tb), address: R.address, boundAt: R.boundAt, credited: R.credited,
+      remind: R.address ? '' : R.remind, excluded: null, donation: R.intent ? { ...R.intent } : null,
+      pool: {
+        total, orderRate: R.rate, orderCount: orders.length, orderAmount: sum(orders), orderShare: r2(sum(orders) * R.rate), donateCount: dons.length, donateAmount: sum(dons),
+        donateMin: 1, donateMax: 100000,
+        chains: ['solana', 'tron'].map(c => { const got = sum(R.ledger.filter(x => x.chain === c)); return { chain: c, address: R.chains[c], received: got, balance: got }; }),
+        points: ok.reduce((s, x) => s + x.points, 0), addresses: ok.length, payoutAt: R.payoutAt, updatedAt: now() - 240, stale: false,
+        ledgerUrl: 'https://github.com/Maoyangui/m-ui/tree/rewards', demo: true,
+      },
+    };
+  };
+  const page = list => { const size = Math.min(50, Math.max(1, Number(q.get('size')) || 10)), p = Math.max(1, Number(q.get('page')) || 1); return { items: list.slice((p - 1) * size, p * size), total: list.length }; };
+  if (method === 'GET') {
+    if (!seg[1]) return summary();
+    settle();
+    if (seg[1] === 'ledger') {
+      const kind = q.get('kind') || '', chain = q.get('chain') || '';
+      return page(R.ledger.filter(x => (!kind || x.kind === kind) && (!chain || x.chain === chain)).map(x => ({ ...x, share: share(x) })));
+    }
+    if (seg[1] === 'board') {
+      const { ok, out } = rows(), k = (q.get('q') || '').trim().toLowerCase();
+      let list = [...ok, ...out];
+      if (k) list = list.filter(x => x.address.toLowerCase().includes(k));
+      else if (R.address) { const me = list.find(x => x.me); if (me && me.rank > 10) list = [me, ...list.filter(x => !x.me)]; } // 我不在第一页时,钉在最上面
+      return { ...page(list), top: ok.length ? ok[0].points : 1 };
+    }
+    if (seg[1] === 'donors') {
+      const dons = R.ledger.filter(x => x.kind === 'donation'), by = new Map();
+      for (const x of dons.filter(d => d.name)) { const o = by.get(x.name) || { name: x.name, amount: 0, count: 0, lastAt: 0 }; o.amount = r2(o.amount + x.amount); o.count++; o.lastAt = Math.max(o.lastAt, x.ts); by.set(x.name, o); }
+      const list = [...by.values()].sort((a, b) => b.amount - a.amount || b.lastAt - a.lastAt);
+      const mine = R.intent && R.intent.status === 'paid' ? R.intent.name : '';
+      list.forEach((x, i) => { x.rank = i + 1; if (x.name === mine) x.me = true; });
+      const anon = dons.filter(d => !d.name);
+      return { ...page(list), top: list.length ? list[0].amount : 1,
+        named: { donors: list.length, count: dons.length - anon.length, amount: r2(list.reduce((s, x) => s + x.amount, 0)) },
+        anon: { count: anon.length, amount: r2(anon.reduce((s, x) => s + x.amount, 0)) } };
+    }
+    throw demoErr(404, '路径无效');
+  }
+  if (seg[1] === 'bind') {
+    const a = String((body && body.address) || '').trim();
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) throw demoErr(400, '这不是 Solana 地址');
+    R.address = a; R.boundAt = now(); R.remind = '';
+    R.credited = Math.max(0, points - 1); // 演示:留 1 分「待入账」(每个地址每天最多入账 1 分)
+    return summary();
+  }
+  if (seg[1] === 'unbind') { R.address = ''; R.boundAt = 0; R.credited = 0; return summary(); }
+  if (seg[1] === 'remind') { R.remind = ''; return { ok: '1' }; }
+  if (seg[1] === 'donate') {
+    if (seg[2] === 'cancel' || seg[2] === 'clear') { R.intent = null; return summary(); }
+    const name = String((body && body.name) || '').trim().replace(/\s+/g, ' '), amount = Number(body && body.amount);
+    if (!name || [...name].length > 20) throw demoErr(400, '留名要填,最多 20 个字');
+    if (!(amount >= 1) || amount > 100000 || Math.round(amount * 100) !== amount * 100) throw demoErr(400, '金额要在 1 到 100000 之间,最多两位小数');
+    R.intent = { id: 'demo-' + now(), name, amount, exact: amount, chain: 'solana', address: R.chains.solana, createdAt: now(), expiresAt: now() + 3600, status: 'pending' };
+    return summary();
+  }
+  throw demoErr(404, '路径无效');
+}
+// ---- 流量奖励的演示数据:完 ----
+
 function demoFw(method, seg, body) {
   const W = S.fw;
   const arr = v => { try { const x = typeof v === 'string' ? JSON.parse(v || '[]') : (v || []); return Array.isArray(x) ? x : []; } catch { return []; } };
@@ -746,6 +865,7 @@ function route(method, path, query, body) {
       case 'rules': if (seg[2] === 'states') return clone(S.limitStates.filter(s => s.ruleId === id)); if (seg[1]) return ruleView(find(S.rules, id)); return S.rules.map(ruleView);
       case 'limitstates': return clone(S.limitStates);
       case 'fw': return demoFw('GET', seg, null);
+      case 'reward': return demoReward('GET', seg, query, null);
       case 'resellers': if (seg[2] === 'users') return S.users.filter(u => u.resellerId === id); return clone(S.resellers);
       case 'update': return { current: 'demo', latest: '', hasUpdate: false, canUpdate: false };
       case 'ops': { if (seg[1] === 'status') return fx('GET ops/status') || { running: false, log: [] }; const o = fx('GET ops') || { info: {}, status: {}, params: {} };
@@ -990,6 +1110,7 @@ function route(method, path, query, body) {
       return ok();
     }
     case 'fw': return demoFw(method, seg, body);
+    case 'reward': return demoReward(method, seg, query, body);
     case 'update': throw new ApiError(400, 'Demo mode: nothing to update here');
     case 'ha':
       if (!seg[1]) { // 保存设置
@@ -1066,7 +1187,7 @@ setTransport(async (rawPath, opts = {}) => {
   return res;
 });
 // 两步验证的二维码(id 为 'totp')演示里没有真的:拿一张现成的订阅二维码顶上,样子对就行
-setQrUrl((id, fmt) => (data.qr || {})[`${id}:${fmt}`] || (id === 'totp' && Object.values(data.qr || {})[0]) || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
+setQrUrl((id, fmt) => (id === 'reward' && RW_QR) || (data.qr || {})[`${id}:${fmt}`] || (id === 'totp' && Object.values(data.qr || {})[0]) || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
 
 // 写操作在本页内存里"成功"后提示一句:面板自己的提示(已保存、已续费……)后面接上"演示模式,刷新即恢复";
 // 面板这次没弹提示就单独弹一条。只算真正改东西的请求:测速、预览、解析、生成密钥这类不算。

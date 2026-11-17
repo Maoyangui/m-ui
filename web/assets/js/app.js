@@ -6,6 +6,7 @@ import { ICONS } from './icons.js';
 import { toast, confirm, closeModal, closeDrawer, drawerOpen, esc, setTimezone, fmtDay } from './ui.js';
 import { sortCerts, certSig, sortReach, reachSig, reachHard } from './issues.js';
 import { mountXmasEgg } from './xmas.js';
+import { mountReward } from './reward.js';
 import * as dashboard from './pages/dashboard.js';
 import * as lines from './pages/lines.js';
 import * as upstreams from './pages/upstreams.js';
@@ -228,6 +229,7 @@ function renderChrome() {
   applyTheme(localStorage.getItem('m-ui-theme') || 'auto'); // 主题按钮的悬停提示跟着语言换
   supportLink(document.getElementById('btn-support'));
   helpLink(document.getElementById('btn-help'), current || pageName());
+  mountReward(document.getElementById('reward-slot')); // 流量奖励的硬币(圣诞树左边),见 reward.js
   mountXmasEgg(document.getElementById('xmas-slot')); // 限时圣诞彩蛋(到 12-31),见 xmas.js
   const sel = document.getElementById('lang-select');
   sel.innerHTML = Object.entries(langs).map(([k, v]) => `<option value="${k}" ${k === getLang() ? 'selected' : ''}>${v}</option>`).join('');

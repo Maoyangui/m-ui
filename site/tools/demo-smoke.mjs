@@ -481,6 +481,69 @@ else fail(`防呆的确认框不对:${JSON.stringify(lockUi).slice(0, 200)}`);
 await page.keyboard.press('Escape'); await page.waitForTimeout(300);
 await page.keyboard.press('Escape'); await page.waitForTimeout(200);
 
+// 流量奖励:顶栏的金币、活动页四页、入账筛选、积分榜查地址、登记地址、留名捐赠(提交 → 等到账 → 到账上榜)、
+// 「godusevpn 节点订阅」的链接、去设置里关闭(精确到那一行)、设置里关掉后金币消失
+await page.goto(`${DEMO}#/dashboard`); await page.reload(); await page.waitForSelector('.rw-coin', { timeout: 15000 }); await page.waitForTimeout(600);
+const rwCoin = await page.evaluate(() => { const b = document.querySelector('.rw-coin'); return b ? { svg: !!b.querySelector('svg.rw-coin-svg'), ring: !!b.querySelector('.rw-ring'), n: (b.querySelector('.rw-n') || {}).textContent || '', tip: !!document.querySelector('.rw-tip') } : null; });
+if (rwCoin && rwCoin.svg && !rwCoin.ring && rwCoin.n === '3' && rwCoin.tip) pass('流量奖励:顶栏有金币(没有外圈)、角标 3 积分、没登记时在概览页冒提醒气泡'); else fail(`顶栏的金币不对:${JSON.stringify(rwCoin)}`);
+// 气泡不挡操作:点一下别处就收起,金币右下角留一个小点;换到别的页面也不再冒
+await page.mouse.click(400, 500); await page.waitForTimeout(300);
+const rwTip2 = await page.evaluate(() => ({ tip: !!document.querySelector('.rw-tip'), dot: !!document.querySelector('.rw-coin .rw-dot') }));
+if (!rwTip2.tip && rwTip2.dot) pass('提醒气泡点别处就收起,金币上留一个小点'); else fail(`提醒气泡收起后不对:${JSON.stringify(rwTip2)}`);
+await page.locator('.rw-coin').click(); await page.waitForTimeout(1300);
+const rwOpen = await page.evaluate(() => ({ open: !!document.querySelector('#rw-ov:not([hidden]) .rw-sheet'), tabs: document.querySelectorAll('#rw-tabs button').length, pool: Number((document.getElementById('rw-pool-n') || { dataset: {} }).dataset.v) || 0,
+  rows: document.querySelectorAll('#rw-led .rw-row:not(.head)').length, eq: document.querySelectorAll('.rw-eq-c').length, kept: !!document.querySelector('.rw-note.ok'), tipGone: !document.querySelector('.rw-tip'),
+  sub: (document.querySelector('.rw-eq a.rw-link') || {}).href || '' }));
+if (rwOpen.open && rwOpen.tabs === 4 && rwOpen.pool > 0 && rwOpen.rows === 10 && rwOpen.eq === 4 && !rwOpen.kept && rwOpen.tipGone && rwOpen.sub === 'https://godusevpn.org/subscription/') pass('活动页:四页、奖池数字、算式四格、逐笔入账十条、节点订阅链接可点');
+else fail(`活动页打开后不对:${JSON.stringify(rwOpen)}`);
+await page.locator('[data-act="rw.ledKind"][data-v="donation"]').click(); await page.waitForTimeout(500);
+const rwDon = await page.evaluate(() => { const r = [...document.querySelectorAll('#rw-led .rw-row:not(.head)')]; return { n: r.length, all: r.every(x => x.querySelector('.rw-tag.don')), named: r.filter(x => x.querySelector('.c-name:not(.anon)')).length }; });
+await page.locator('[data-act="rw.ledChain"][data-v="tron"]').click(); await page.waitForTimeout(500);
+const rwTron = await page.locator('#rw-led .rw-row:not(.head)').count();
+if (rwDon.n > 0 && rwDon.all && rwDon.named > 0 && rwTron === 1) pass(`入账明细:按「捐赠」筛出 ${rwDon.n} 条(${rwDon.named} 条带留名),再按 TRON 筛剩 1 条`); else fail(`入账明细的筛选不对:${JSON.stringify(rwDon)} tron=${rwTron}`);
+await page.locator('#rw-tabs button[data-v="board"]').click(); await page.waitForTimeout(700);
+const rwBrd0 = await page.evaluate(() => ({ rows: document.querySelectorAll('#rw-brd .rw-row:not(.head)').length, av: document.querySelectorAll('.rw-av').length, first: (document.querySelector('#rw-brd .rw-a') || { dataset: {} }).dataset.v || '' }));
+await page.fill('#rw-q', rwBrd0.first.slice(0, 6)); await page.waitForTimeout(800);
+const rwFound = await page.locator('#rw-brd .rw-row:not(.head)').count();
+if (rwBrd0.rows === 10 && rwBrd0.av === 0 && rwFound >= 1 && rwFound < 10) pass('积分榜:每页十条、地址前没有彩色圆点、按地址能查到'); else fail(`积分榜不对:${JSON.stringify(rwBrd0)} 查到 ${rwFound}`);
+// 登记地址:填错有提示,填对之后「我的」那条显示地址、积分榜里有「我」
+await page.locator('.rw-me [data-act="rw.bindNow"]').click(); await page.waitForTimeout(300);
+await page.fill('#rw-addr-in', 'not-an-address'); await page.locator('[data-act="rw.bindSave"]').click(); await page.waitForTimeout(300);
+const rwBindErr = (await page.locator('#rw-bind-err').textContent() || '').trim();
+await page.fill('#rw-addr-in', '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'); await page.locator('[data-act="rw.bindSave"]').click(); await page.waitForTimeout(900);
+await page.fill('#rw-q', ''); await page.waitForTimeout(800);
+const rwBound = await page.evaluate(() => ({ addr: (document.querySelector('.rw-addr-v code') || {}).textContent || '', me: document.querySelectorAll('#rw-brd .rw-row.me').length, cta: !!document.querySelector('.rw-me-c.cta') }));
+if (rwBindErr && /7xKXt/.test(rwBound.addr) && rwBound.me === 1 && !rwBound.cta) pass('登记地址:填错有提示;登记后显示地址,积分榜里「我」那一行钉在最上面'); else fail(`登记地址不对:err=${rwBindErr} ${JSON.stringify(rwBound)}`);
+// 留名捐赠
+await page.locator('[data-act="rw.toDonate"]').click(); await page.waitForTimeout(700);
+await page.locator('[data-act="rw.dnSubmit"]').click(); await page.waitForTimeout(200);
+const rwDnErr = (await page.locator('#rw-dn-err').textContent() || '').trim();
+await page.fill('#rw-dn-name', 'smoke 测试'); await page.fill('#rw-dn-amt', '12.34'); await page.locator('[data-act="rw.dnSubmit"]').click(); await page.waitForTimeout(800);
+const rwWait = await page.evaluate(() => ({ timer: (document.getElementById('rw-dn-t') || {}).textContent || '', amt: (document.querySelector('.rw-dn-amt b') || {}).textContent || '', qr: ((document.querySelector('.rw-dn-qr img') || {}).src || '').slice(0, 14), board: document.querySelectorAll('#rw-dnr .rw-row:not(.head)').length }));
+if (rwDnErr && /^5\d:\d\d$/.test(rwWait.timer) && rwWait.amt === '12.34' && rwWait.qr === 'data:image/svg' && rwWait.board >= 5) pass(`留名捐赠:空着提交有提示;提交后给出金额 12.34、倒计时 ${rwWait.timer}、收款二维码;下面是捐赠榜`);
+else fail(`留名捐赠的等待状态不对:err=${rwDnErr} ${JSON.stringify(rwWait)}`);
+await page.waitForTimeout(31500); // 演示站 20 秒后模拟到账,活动页每 10 秒查一次
+const rwPaid = await page.evaluate(() => ({ done: !!document.querySelector('.rw-dn.done'), me: [...document.querySelectorAll('#rw-dnr .rw-row.me .c-dname b')].map(b => b.textContent).join() }));
+if (rwPaid.done && rwPaid.me === 'smoke 测试') pass('留名捐赠:到账后显示「收到了」,捐赠榜里出现这个名字'); else fail(`留名捐赠到账后不对:${JSON.stringify(rwPaid)}`);
+await page.locator('#rw-tabs button[data-v="pool"]').click(); await page.waitForTimeout(500);
+await page.locator('[data-act="rw.ledKind"][data-v=""]').click(); await page.waitForTimeout(300);
+await page.locator('[data-act="rw.ledChain"][data-v=""]').click(); await page.waitForTimeout(700);
+const rwLedName = await page.evaluate(() => (document.querySelector('#rw-led .rw-row:not(.head) .c-name') || {}).textContent || '');
+if (rwLedName === 'smoke 测试') pass('逐笔入账:最新一条是刚才那笔捐赠,带着留名'); else fail(`逐笔入账里没看到留名:${rwLedName}`);
+// 规则页:去设置里关闭 → 设置页的那一行
+await page.locator('#rw-tabs button[data-v="rules"]').click(); await page.waitForTimeout(500);
+const rwRules = await page.locator('.rw-rules li').count();
+await page.locator('[data-act="rw.toSettings"]').click(); await page.waitForTimeout(1800);
+const rwSet = await page.evaluate(() => ({ hash: location.hash, focus: (document.activeElement || {}).id || '', inView: (() => { const el = document.getElementById('set-rewardEnabled'); if (!el) return false; const r = el.getBoundingClientRect(); return r.top > 0 && r.bottom < innerHeight; })(), ov: !!document.querySelector('#rw-ov:not([hidden])') }));
+if (rwRules === 5 && rwSet.hash === '#/settings' && rwSet.focus === 'set-rewardEnabled' && rwSet.inView && !rwSet.ov) pass('规则五条;「去设置里关闭」跳到设置页、正好停在「流量奖励」那个开关上'); else fail(`去设置里关闭不对:规则 ${rwRules} 条 ${JSON.stringify(rwSet)}`);
+await page.locator('label.switch:has(#set-rewardEnabled)').click(); await page.waitForTimeout(300);
+await page.locator('[data-act="set.saveAll"]').click(); await page.waitForTimeout(1200);
+const rwOff = await page.locator('.rw-coin').count();
+await page.locator('label.switch:has(#set-rewardEnabled)').click(); await page.waitForTimeout(300);
+await page.locator('[data-act="set.saveAll"]').click(); await page.waitForTimeout(1200);
+const rwOn = await page.locator('.rw-coin').count();
+if (rwOff === 0 && rwOn === 1) pass('设置里关掉流量奖励:金币消失;再打开:金币回来'); else fail(`设置里的开关不对:关 ${rwOff} 开 ${rwOn}`);
+
 // 请求审计
 const external = requests.filter(u => !u.startsWith(origin));
 const apiCalls = requests.filter(u => /\/api\//.test(u));
@@ -499,6 +562,16 @@ for (const route of ['dashboard', 'users', 'lines', 'nodes', 'cert', 'settings',
   const over = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (over > 1) fail(`手机宽度下 #/${route} 横向溢出 ${over}px`); else pass(`手机宽度 #/${route} 不溢出`);
 }
+// 活动页在手机宽度下:四页都不能横向溢出,关闭按钮不压着金币
+await m.goto(`${DEMO}#/dashboard`); await m.waitForTimeout(800);
+await m.locator('.rw-coin').click(); await m.waitForTimeout(1200);
+for (const tab of ['pool', 'board', 'donate', 'rules']) {
+  await m.locator(`#rw-tabs button[data-v="${tab}"]`).click(); await m.waitForTimeout(700);
+  const o = await m.evaluate(() => { const sc = document.getElementById('rw-scroll'); const bad = [...sc.querySelectorAll('*')].filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.right > innerWidth + 1 || r.left < -1); }).length; return { over: sc.scrollWidth - sc.clientWidth, bad }; });
+  if (o.over > 1 || o.bad) fail(`手机宽度下活动页「${tab}」横向溢出:${JSON.stringify(o)}`); else pass(`手机宽度 活动页「${tab}」不溢出`);
+}
+const mx = await m.evaluate(() => { const a = document.querySelector('.rw-x').getBoundingClientRect(), b = document.querySelector('.rw-art .rw-coin-svg').getBoundingClientRect(); return !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom); });
+if (mx) fail('手机宽度下活动页的关闭按钮压在金币上'); else pass('手机宽度 活动页的关闭按钮不压金币');
 
 await ctx.close();
 }

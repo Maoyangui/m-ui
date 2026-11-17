@@ -7,6 +7,7 @@ import { followPanel } from '../panelmove.js';
 import { logoBlock, bindLogo } from '../logo.js';
 import { renderHASettings, saveHASettings } from '../ha.js';
 import { subSettingsChange } from '../subtls.js';
+import { refreshReward } from '../reward.js';
 
 // boolSetting 开关类设置的显示:和后端同一个判法(model.NormBoolSetting),空值用默认。
 function boolSetting(v, def) {
@@ -105,6 +106,10 @@ const groups = () => [
     ['reachMinutes', t('set.reachMinutes'), 'number', t('set.reachMinutesHelp')],
     ['reachToken', t('set.reachToken'), 'text', t('set.reachTokenHelp')],
   ]},
+  // 流量奖励只在主机上算、只在主机上显示(副机的流量随用量汇到主机)
+  { id: 'reward', title: t('set.reward'), masterOnly: true, fields: [
+    ['rewardEnabled', t('set.rewardEnabled'), 'boolOn', t('set.rewardEnabledHelp')],
+  ]},
   { id: 'core', title: t('set.core'), fields: [
     ['certFile', t('set.certFile'), 'text', t('set.certHelp')], ['keyFile', t('set.key'), 'text'],
     ['upstreamTestUrl', t('set.testUrl'), 'text', t('set.testUrlHelp')],
@@ -190,7 +195,20 @@ export async function render(el) {
     let to = '';
     try { to = sessionStorage.getItem('m-ui.scrollTo') || ''; sessionStorage.removeItem('m-ui.scrollTo'); } catch {}
     if (to === 'ha-card') haCard.scrollIntoView({ block: 'start' });
+    else if (to.startsWith('set-')) focusRow(to);
   });
+}
+
+// 从别处跳到某一项设置(流量奖励活动页里的「去设置里关闭」):滚到那一行、闪一下,焦点落在它的开关上。
+// 等容灾那张卡画完才滚(它是后插进来的,先滚的话位置会被它顶走)
+function focusRow(id) {
+  const ctl = document.getElementById(id);
+  const row = ctl && ctl.closest('.set-row');
+  if (!row) return;
+  row.scrollIntoView({ block: 'center' });
+  row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+  try { ctl.focus({ preventScroll: true }); } catch { /* 有的控件不接焦点 */ }
+  setTimeout(() => row.classList.remove('flash'), 2800);
 }
 
 // ---- 未保存的改动:窗口底部的保存条 ----
@@ -342,6 +360,7 @@ async function saveAll() {
     }
     await load('settings', 'status');
     toast(t('set.saved') + (r && r.note ? ' · ' + r.note : ''), 'ok');
+    if ('rewardEnabled' in body) refreshReward(); // 顶栏的金币跟着开关走
     // Clash 模板写了 ipv6: false:存下了,但有 IPv6 节点时订阅会改成 true,要让人知道
     if (((r && r.hints) || []).includes('clashIPv6')) await confirm(t('set.clashIPv6Hint'), { title: t('set.saved'), okText: t('node.ack'), notice: true });
     saveHA();
