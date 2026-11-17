@@ -2083,6 +2083,7 @@ pre.doc-ex { max-height: none; }
 .nq-use-txt { flex: 1 1 15rem; min-width: 0; font-variant-numeric: tabular-nums; }
 .alert-bar.nq-alert { margin: 0 0 .9rem; }
 .grid .sub-cell.nq-note { white-space: normal; line-height: 1.45; max-width: 15rem; }
+.hint.conns-why { margin: 0 0 .55rem; }
 table.grid.rows2 .sub-cell.nq-note, table.grid.cards .sub-cell.nq-note { max-width: none; }
 .sw-row.nq-auto { margin-top: .9rem; }
 @media (max-width: 760px) { .nq-grid { grid-template-columns: minmax(0, 1fr); } }

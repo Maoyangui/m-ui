@@ -748,6 +748,8 @@ function renderConns() {
   const oldNote = old.length ? `<p class="hint warn-text small conns-old">${esc(t('dash.failsOldNodes', { names: etc(old, 'nodes', 5) }))}</p>` : '';
   if (!all.length) { setHTML(el, empty(t('dash.noConns')) + oldNote); return; }
   const failed = connF === 'failed';
+  // 「握手失败」这一页最上面一句话说清它通常是什么:不点那个问号也知道这不一定是故障(细的在问号的悬停里)
+  const failNote = failed ? `<p class="hint small conns-why">${esc(t('dash.failsWhy'))}</p>` : '';
   let list = connF === 'rejected' ? rej : failed ? fails : ok;
   if (!list.length) { setHTML(el, empty(connF === 'rejected' ? t('dash.conn.noRejected', { n: ok.length }) : failed ? t('dash.conn.noFailed') : t('dash.noConns')) + oldNote); return; }
   const mob = narrow();
@@ -765,7 +767,7 @@ function renderConns() {
   const why = c => `<span class="badge warn" title="${esc(t('dash.fail.' + c.failed + '.help') + (c.detail ? '\n' + c.detail : ''))}">${esc(t('dash.fail.' + c.failed))}</span>`;
   const wrap = el.querySelector('.conns-wrap');
   const keep = wrap ? wrap.scrollTop : 0;
-  const changed = setHTML(el, `<div class="table-wrap conns-wrap ${connAll && !mob ? 'capped' : ''}"><table class="grid conns${srv ? ' srv' : ''}">
+  const changed = setHTML(el, `${failNote}<div class="table-wrap conns-wrap ${connAll && !mob ? 'capped' : ''}"><table class="grid conns${srv ? ' srv' : ''}">
     <colgroup><col class="c-ip"><col class="c-user"><col class="c-line">${srv ? '<col class="c-srv">' : ''}<col class="c-cnt"><col class="c-last"></colgroup>
     <thead><tr><th>IP</th><th>${esc(failed ? t('dash.failWhy') : t('logs.user'))}</th><th>${esc(t('nav.lines'))}</th>${srv ? `<th>${esc(t('common.server'))}</th>` : ''}<th class="num">${esc(t('dash.connCount'))}</th><th>${esc(t('dash.connLast'))}</th></tr></thead>
     <tbody>${shown.length ? shown.map(c => `<tr class="${c.rejected ? 'rej' : ''}">

@@ -1276,6 +1276,7 @@ const zh = {
   'nq.menu': '流量额度与到期',
   'dash.attn.quota': '流量用完或到期的服务器 {n} 台', 'dash.attn.quota.off': '已自动停用 {n}', 'dash.attn.quota.hold': '已停止代理服务 {n}', 
   'dash.attn.quota.traffic': '流量用完的服务器 {n} 台', 'dash.attn.quota.expired': '已到期的服务器 {n} 台',
+  'dash.failsWhy': '握手失败不一定是故障:陌生 IP 多半是扫描和探测,不用管;你自己或用户的 IP 出现在这里,才说明客户端配置或这位用户的状态有问题。',
 };
 
 const en = {
@@ -2709,6 +2710,7 @@ const en = {
   'nq.menu': 'Quota & expiry',
   'dash.attn.quota': 'Servers out of quota or expired: {n}', 'dash.attn.quota.off': 'disabled automatically {n}', 'dash.attn.quota.hold': 'proxy service stopped {n}', 
   'dash.attn.quota.traffic': 'Servers out of quota: {n}', 'dash.attn.quota.expired': 'Expired servers: {n}',
+  'dash.failsWhy': 'A failed handshake is not necessarily a fault: unknown IPs are mostly scans and probes and can be ignored. It matters when your own or a user\'s IP shows up here: then the client configuration or that user\'s status is the problem.',
 };
 
 const dicts = { zh, en };

@@ -329,3 +329,23 @@ test('「知道了」:只收起已经看过的;新被拦下、恢复后再次被
   assert.deepEqual(I.quotaFresh([self], ack2), []);
   assert.deepEqual(I.quotaFresh([self], I.quotaAckPrune([], ack2)), [self]);
 });
+
+// 上游偶发失败一次不算故障(定时巡检连续失败 2 次起才算);手动测试、保存后的复查没有 fails,按那一次的结果算
+test('上游:只失败一次先不算故障,连续两次才进「需要处理」;没有 fails 的即时结果照旧', () => {
+  const sv = (state, fails) => ({ name: 'A', state, ...(fails === undefined ? {} : { fails }) });
+  assert.equal(I.upFailed(sv('fail', 1)), false);
+  assert.equal(I.upFailed(sv('fail', 2)), true);
+  assert.equal(I.upFailed(sv('fail', 5)), true);
+  assert.equal(I.upFailed(sv('fail')), true, '没有 fails:手动测出来不通就是不通');
+  assert.equal(I.upFailed(sv('fail', 0)), true);
+  assert.equal(I.upFailed(sv('ok', 0)), false);
+  assert.equal(I.upFailed(sv('stale', 3)), false);
+  assert.equal(I.upFailed(null), false);
+  assert.equal(I.upstreamBad({ id: 1, name: 'x', servers: [sv('fail', 1), sv('ok')] }), false);
+  assert.equal(I.upstreamBad({ id: 1, name: 'x', servers: [sv('fail', 1), sv('fail', 2)] }), true);
+  const once = I.healthSummary({ lastRun: 1, results: [{ id: 1, name: 'x', servers: [{ name: 'A', state: 'fail', fails: 1 }, { name: 'B', state: 'ok' }] }] });
+  assert.equal(once.bad.length, 0, '偶发的一次不进「需要处理」');
+  const twice = I.healthSummary({ lastRun: 1, results: [{ id: 1, name: 'x', servers: [{ name: 'A', state: 'fail', fails: 2, error: 'timeout' }, { name: 'B', state: 'ok' }] }] });
+  assert.deepEqual(twice.bad.map(b => [b.name, b.fails]), [['x', ['A']]]);
+  assert.equal(I.UP_FAIL_MIN, 2);
+});

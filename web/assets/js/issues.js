@@ -155,8 +155,13 @@ export function diskPct(d) {
 
 // ---- 上游巡检 ----
 
-// upstreamBad 一条上游在真正用它的服务器上有失败的(待测、数据过期不算故障)
-export const upstreamBad = r => !!r && !r.unused && (r.servers || []).some(x => x.state === 'fail');
+// 上游在一台服务器上连续失败到这么多次才算故障。定时巡检偶尔失败一次很常见(对端抖了一下、外部节点限了并发、
+// 正好撞上那一秒的丢包):只失败一次先不算 —— 不进「需要处理」、不进「只看故障」、统计格不变红,上游页那一格照样显示这次的结果。
+// 下一轮还不通才报。结果里没有 fails(手动点的「测试」「立即巡检」、保存后的复查)按这一次的结果算。
+export const UP_FAIL_MIN = 2;
+export const upFailed = x => !!x && x.state === 'fail' && !(x.fails > 0 && x.fails < UP_FAIL_MIN);
+// upstreamBad 一条上游在真正用它的服务器上有(连续)失败的(待测、数据过期、偶发的一次不算故障)
+export const upstreamBad = r => !!r && !r.unused && (r.servers || []).some(upFailed);
 
 // healthSummary 按上游分组(不是"上游 × 服务器"):
 // rows = 在用的上游;ok = 全部正常的条数;bad = [{name, id, fails:[服务器名], total, err}](坏的台数多的在前,同数按名字);
@@ -170,7 +175,7 @@ export function healthSummary(h) {
   for (const r of rows) {
     const list = r.servers || [];
     list.forEach(x => all.add(x.name));
-    const fails = list.filter(x => x.state === 'fail');
+    const fails = list.filter(upFailed);
     if (fails.length) {
       bad.push({ id: r.id, name: r.name, fails: fails.map(x => x.name), total: list.length, err: (fails.find(x => x.error) || {}).error || '' });
       fails.forEach(x => servers.add(x.name));
