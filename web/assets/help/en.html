@@ -1187,6 +1187,62 @@
   </section>
 </section>
 
+<section class="chap" id="fw" data-scope="admin">
+  <h2>Firewall</h2>
+  <p class="lede">Three things on one page: whether a server's own firewall is in the way, your own open / block rules, and the access blocklist for the panel and subscriptions.</p>
+
+  <section class="sec" id="fw-sys">
+    <h3>System firewall</h3>
+    <p class="lede">If a port is open in your cloud console but still unreachable, the server's own firewall is usually what blocks it: ufw, firewalld, or a set of iptables rules shipped with the image (Oracle's Ubuntu image has one).</p>
+    <ul>
+      <li>The first table on the <b data-k="nav.fw">Firewall</b> page has one row per server: which kind of system firewall it has, whether it is blocking, and whether the ports m-ui uses are allowed in it. Click the port count to see which ports that server uses (panel, subscription, every line, relay entries).</li>
+      <li>A blocking row has <b data-k="fw.act.open">Open up</b>: for ufw it turns ufw off, for firewalld it stops the service, for iptables it adds one accept-all rule at the top (the existing rules stay untouched). The rules as they were are backed up first in <code>fw-backup-time</code> inside the data directory, and <b data-k="fw.act.undo">Undo</b> puts everything back at any time. Once opened, block ports in your cloud provider's security group, or with the rules below.</li>
+      <li>You do not have to open it: <b data-k="fw.autoAllow">Auto-allow m-ui ports</b> is on by default, so on servers that keep their system firewall m-ui allows the ports it uses there and keeps them in step with your lines. It only adds and removes its own entries and leaves your rules alone. Turn the switch off and it takes back what it added, leaving those ports to you.</li>
+      <li>On a server with hand-written nftables rules the panel changes nothing: that row says <b data-k="fw.ports.manual">allow manually</b>, so allow the ports listed when you expand the row in your own rules.</li>
+      <li>The installer asks too: on a fresh install, when a system firewall is blocking, it asks whether to open it. Press Enter or <code>y</code> to open, <code>n</code> to keep it; with no terminal to ask (cloud-init, CI) it opens. Add <code>--keep-firewall</code> to the install command to keep it without asking, or <code>--open-firewall</code> to open it without asking. Upgrades neither ask nor change anything.</li>
+      <li>A node measures its own state and reports it to the master. A node whose version has no firewall support yet shows <b data-k="fw.sys.noReport">No report</b> until it is upgraded.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="fw-rules">
+    <h3>Rules</h3>
+    <p class="lede">Rules are created on the master, pushed to the servers you choose, and enforced by each server in its own kernel: if the master is briefly unreachable, the rules on a node keep working and still expire on time.</p>
+    <ul>
+      <li>Three kinds: <b data-k="fw.kind.allow">Open ports</b> opens these ports to everyone on servers whose system firewall is on (others do not need it); <b data-k="fw.kind.deny">Block sources</b> keeps these IPs or networks out, proxy traffic included, optionally only on certain ports; <b data-k="fw.kind.only">Limit ports to sources</b> lets only the listed sources reach these ports and refuses everyone else, for example SSH for your own IP only.</li>
+      <li><b data-k="fw.f.scope">Apply to</b> can be all servers (those added later included) or a few of them; <b data-k="fw.f.expiry">Duration</b> can be no expiry, or a number of hours or days after which the rule removes itself. The switch in each row saves at once: off means kept but not enforced.</li>
+      <li>Block and limit rules live in a table of m-ui's own that runs before the system firewall and does not change its rules. When a source is both blocked and on a port's allowed list, the block wins.</li>
+      <li>You cannot lock yourself out by accident: a block rule whose sources include the IP you are using, or a limit rule that covers the SSH or panel port without your current IP, is stopped at save time with an explanation, and only saved once you confirm.</li>
+      <li>Your own servers can always reach each other: syncing between master and nodes, and relay entries reaching their exits, use m-ui's own ports, and rules never block your servers on those ports. Your servers' addresses cannot be blocked either.</li>
+      <li>When a server is deleted, rules that applied only to it are deleted with it rather than turning into "all servers".</li>
+      <li>If rules could not be applied on a server (for example it has neither nft nor iptables), the reminders at the top of the dashboard and that server's row on the <b data-k="nav.nodes">Servers</b> page point it out.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="fw-lists">
+    <h3>Access lists and auto-block</h3>
+    <p class="lede">The blocklist only covers access to the panel, the reseller panel, subscriptions and the external API: a listed source is disconnected as soon as it connects. Proxy traffic is unaffected, because other legitimate users may share the same exit IP.</p>
+    <ul>
+      <li><b data-k="fw.autoBan">Auto-block</b> is off by default; you turn it on yourself. It then only targets sources that are plainly scanning: 10 failed logins, 8 different non-existent subscription addresses, or 10 different wrong API keys within 10 minutes mean a 1-hour block, and 24 hours from the third time in a day. Every block is temporary and lifts by itself.</li>
+      <li>What it will not hit: a source that logged in successfully is not blocked for 24 hours; a source that fetched a subscription successfully gets five times the threshold (a client that keeps refreshing one stale address counts as one); loopback and private addresses, your own servers and the allowlist are never blocked.</li>
+      <li>Each entry shows its reason and when it lifts. <b data-k="fw.ban.remove">Remove</b> lifts it at once; under <b data-k="common.more">More</b> you can <b data-k="fw.ban.toAllow">Move to allowlist</b> (never auto-blocked again) or <b data-k="fw.ban.promote">Block proxy traffic too</b>, which adds a "Block sources" rule for it, the only way to stop its proxy traffic as well.</li>
+      <li><b data-k="fw.ban.add">Block a source</b> takes one IP or network and a duration; the <b data-k="fw.tab.allow">Allowlist</b> is for sources like your office network or a monitoring probe.</li>
+      <li>Every auto-block is written to the audit log; with login alerts turned on, Telegram gets a message as well.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="fw-cli">
+    <h3>The way back in from the command line</h3>
+    <p class="lede">When the panel is unreachable (one of your own rules is in the way, or you were blocked), get in through the server's terminal or your cloud provider's console and use these commands. All of them need root.</p>
+    <ul>
+      <li><code>m-ui firewall status</code>: which system firewall this server has, whether it is blocking, whether it was opened, and how many panel rules and blocklist entries there are.</li>
+      <li><code>m-ui firewall pause</code>: pauses panel rules on this server (block and limit rules stop applying) with immediate effect; fix the offending rule in the panel, then <code>m-ui firewall resume</code>. While paused, the Firewall page shows <b data-k="fw.rules.paused">Paused</b> for this server.</li>
+      <li><code>m-ui firewall open</code> / <code>m-ui firewall undo</code>: open the system firewall or undo that, the same action as the two buttons in the panel; whichever side did it, the other can undo it.</li>
+      <li><code>m-ui unban 1.2.3.4</code> removes a source from the blocklist; <code>m-ui unban --all</code> clears it. It takes effect within 30 seconds.</li>
+      <li>The "Firewall" entry in the management menu (run <code>m-ui</code> on its own) does the same things.</li>
+    </ul>
+  </section>
+</section>
+
 <section class="chap" id="settings" data-scope="admin">
   <h2>Settings at a glance</h2>
   <p class="lede">On the <b data-k="nav.settings">Settings</b> page, changing anything (a switch or a text field alike) brings up a save bar at the bottom of the window: it says how many changes are pending, and clicking its left part lists each one as "before → after" with an <b data-k="set.sb.undo">Undo</b> per item. <b data-k="common.save">Save</b> applies them together and <b data-k="set.sb.discard">Discard</b> restores everything; leaving the page with unsaved changes asks first. Port, listen address and certificate changes take effect on save: the panel switches its listener in place and the browser follows to the new address, and the subscription service and reseller panel do the same, so <b data-k="set.restart">Restart m-ui</b> at the top is rarely needed (a node's panel port and certificate are the exception, see the Q&amp;A below).</p>

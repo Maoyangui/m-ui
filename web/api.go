@@ -87,6 +87,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"role":          s.role(),
 		"coreRunning":   s.run.CoreRunning(),
 		"blocked":       s.run.BlockedInbounds(), // 本机上端口被别的程序占着、因此没开的入站(没有为 null)
+		"fw":            s.reportFw(),            // 本机的防火墙状况(缓存的那份;刚启动还没量完为 null):规则没落成时概况、服务器页要提醒
 		"uptime":        s.run.Uptime(),
 		"lines":         lineCount,
 		"upstreams":     upstreamCount,

@@ -32,6 +32,13 @@ test('nodeIssues:离线时只报离线;在线时按严重程度列出各项;本�
   assert.deepEqual(I.nodeIssues(many).map(x => x.code), ['coreStopped', 'reloadErr', 'ledger', 'unsynced', 'version']);
   assert.deepEqual(I.nodeIssues(many).map(x => x.sev), ['bad', 'bad', 'bad', 'warn', 'warn']);
   assert.deepEqual(I.nodeIssues(on('c')), []);
+  // 防火墙:规则没落成 / 端口没放行成算一项(提醒级);这台没有 nft / iptables、又有规则管到它也算;命令行特意暂停的、老版本没报的不算
+  assert.deepEqual(I.nodeIssues(on('d', { fw: { engine: 'nft', rules: 2, error: 'nft: syntax error' } })), [{ code: 'fw', sev: 'warn' }]);
+  assert.deepEqual(I.nodeIssues(on('d', { fw: { engine: '', rules: 1 } })).map(x => x.code), ['fw']);
+  assert.deepEqual(I.nodeIssues(on('d', { fw: { engine: '', rules: 0 } })), []);
+  assert.deepEqual(I.nodeIssues(on('d', { fw: { engine: 'nft', rules: 2, error: 'x', paused: true } })), []);
+  assert.deepEqual(I.nodeIssues(on('d', { fw: { engine: 'nft', rules: 3 } })), []);
+  assert.equal(I.fwBad(undefined), false);
 });
 
 test('nodeIssues:离线也防抖:一轮同步失败、上次联系上不到 30 秒的先不算;从没联系上的直接算', () => {

@@ -550,6 +550,175 @@ function demoDiskClean(id, start) {
 }
 
 // 一条路由:method + 路径(去掉 ./api/ 与查询串),query 单独给
+// ---- 防火墙(演示):三台服务器三种状况 —— 本机没有系统防火墙、新加坡 ufw 开着(m-ui 的端口已自动放行)、法兰克福已放开(原来是镜像自带的 iptables 规则);
+// 三种规则各一条;黑名单里两条自动拉黑的、一条手动加的;白名单一条。校验和拦截照着后端做(同一句报错),改动只在内存里。
+S.fw = {
+  autoBan: true, autoAllow: true, myIp: '198.51.100.77',
+  sys: { 1: { frontend: 'none' }, 2: { frontend: 'ufw', blocking: true, detail: 'ufw active' }, 3: { frontend: 'none', opened: true, openedAt: now() - 3 * DAY, openedFrom: 'iptables' } },
+  rules: [
+    { id: 1, kind: 'only', proto: 'tcp', ports: '22', sources: '198.51.100.77/32,203.0.113.50/32', nodeIds: null, expiry: 0, note: 'SSH', origin: 'manual', enabled: true, createdAt: now() - 20 * DAY },
+    { id: 2, kind: 'allow', proto: 'tcp', ports: '80,443', sources: '', nodeIds: [2], expiry: 0, note: 'Web', origin: 'manual', enabled: true, createdAt: now() - 9 * DAY },
+    { id: 3, kind: 'deny', proto: '', ports: '', sources: '192.0.2.66/32', nodeIds: null, expiry: now() + 5 * 3600 + 900, note: '', origin: 'ban', enabled: true, createdAt: now() - 3600 },
+  ],
+  bans: [
+    { id: 1, ip: '192.0.2.66', reason: 'login', evidence: '10 分钟内登录失败 12 次', count: 12, hits: 1, firstAt: now() - 1100, lastAt: now() - 1080, expiry: now() + 2520, auto: true },
+    { id: 2, ip: '2001:db8:bad::/64', reason: 'sub', evidence: '10 分钟内试了 8 个不存在的订阅地址', count: 8, hits: 3, firstAt: now() - 20 * 3600, lastAt: now() - 2 * 3600, expiry: now() + 22 * 3600, auto: true },
+    { id: 3, ip: '203.0.113.0/28', reason: 'manual', evidence: 'competitor probes', count: 0, hits: 0, firstAt: now() - 3 * DAY, lastAt: now() - 3 * DAY, expiry: 0, auto: false },
+  ],
+  allow: [{ id: 1, ip: '198.51.100.0/24', note: 'office', createdAt: now() - 30 * DAY }],
+};
+function demoFw(method, seg, body) {
+  const W = S.fw;
+  const arr = v => { try { const x = typeof v === 'string' ? JSON.parse(v || '[]') : (v || []); return Array.isArray(x) ? x : []; } catch { return []; } };
+  const nodesNow = () => (S.nodes.nodes || []);
+  // 一台服务器上 m-ui 用到的端口:面板(本机还有订阅)、部署在它上面的线路、由它来转的中转入口
+  const portsOf = n => {
+    const out = [];
+    const add = (p, proto) => { const k = `${p}/${proto}`; if (!out.includes(k)) out.push(k); };
+    add(Number(S.settings.webPort) || 2053, 'tcp');
+    if (n.isLocal) add(Number(S.settings.subPort) || 2056, 'tcp');
+    for (const l of S.lines) {
+      if (l.enabled === false) continue;
+      const ids = arr(l.nodeIds);
+      if (!ids.length || ids.includes(n.id)) {
+        const udp = ['hysteria2', 'tuic'].includes(l.protocol), both = l.protocol === 'shadowsocks';
+        if (!udp) add(l.port, 'tcp');
+        if (udp || both) add(l.port, 'udp');
+      }
+      for (const f of arr(l.forwards)) if (!f.off && f.via === n.id && f.port) add(f.port, ['hysteria2', 'tuic'].includes(l.protocol) ? 'udp' : 'tcp');
+    }
+    return out.sort((a, b) => parseInt(a) - parseInt(b) || a.localeCompare(b));
+  };
+  const liveRules = n => W.rules.filter(r => r.enabled && !(r.expiry > 0 && r.expiry <= now()) && (!Array.isArray(r.nodeIds) || !r.nodeIds.length || r.nodeIds.includes(n.id)));
+  const stateOf = n => {
+    const sy = W.sys[n.id] || (W.sys[n.id] = { frontend: 'none' });
+    const ports = portsOf(n), rules = liveRules(n);
+    const st = { frontend: sy.frontend, blocking: !!sy.blocking, detail: sy.detail || '', engine: 'nft', rules: rules.length, ports: ports.length, at: now() - 40 };
+    if (sy.opened) Object.assign(st, { opened: true, openedAt: sy.openedAt, openedFrom: sy.openedFrom });
+    if (st.blocking) {
+      st.allow = W.autoAllow ? 'ok' : 'off';
+      st.allowed = (W.autoAllow ? ports.length : 0) + rules.filter(r => r.kind === 'allow').reduce((a, r) => a + r.ports.split(',').filter(Boolean).length * (r.proto ? 1 : 2), 0);
+    }
+    return { st, ports };
+  };
+  const view = () => {
+    W.rules = W.rules.filter(r => !(r.expiry > 0 && r.expiry <= now()));
+    W.bans = W.bans.filter(b => !(b.expiry > 0 && b.expiry <= now()));
+    const online = id => { const n = nodesNow().find(x => x.id === id); return !!n && (n.isLocal || !n.status || n.status.ok !== false); };
+    return clone({ autoBan: W.autoBan, autoAllow: W.autoAllow, myIp: W.myIp, banTotal: W.bans.length,
+      servers: nodesNow().map(n => { const { st, ports } = stateOf(n); return { id: n.id, name: n.name, isLocal: !!n.isLocal, enabled: n.enabled !== false, online: online(n.id), state: st, ports: n.isLocal ? ports : undefined }; }),
+      rules: [...W.rules].sort((a, b) => b.id - a.id), bans: [...W.bans].sort((a, b) => b.lastAt - a.lastAt), allow: [...W.allow].sort((a, b) => b.id - a.id) });
+  };
+  // 地址和网段:够演示用的解析(IPv4 精确算网段,IPv6 只比前缀的写法)
+  const v4 = s => { const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(s); return m && m.slice(1).every(x => Number(x) <= 255) ? m.slice(1).reduce((a, x) => a * 256 + Number(x), 0) : null; };
+  const parseSrc = text => String(text || '').split(/[\s,，、;]+/).filter(Boolean).map(part => {
+    const [a, bits] = part.split('/');
+    const n4 = v4(a);
+    if (n4 !== null) { const b = bits === undefined ? 32 : Number(bits); if (!(b >= 0 && b <= 32)) throw demoErr(400, `「${part}」不是 IP 或网段(例:1.2.3.4、203.0.113.0/24、2001:db8::/32)`); if (b === 0) throw demoErr(400, `「${part}」是全部地址,不能当来源写进规则`); const net = b === 32 ? n4 : Math.floor(n4 / 2 ** (32 - b)) * 2 ** (32 - b); return { v: 4, n: net, bits: b, text: [net >>> 24, (net >>> 16) & 255, (net >>> 8) & 255, net & 255].join('.') + '/' + b }; }
+    if (/^[0-9a-f:]+$/i.test(a) && a.includes(':')) { const b = bits === undefined ? 128 : Number(bits); if (!(b >= 0 && b <= 128)) throw demoErr(400, `「${part}」不是 IP 或网段(例:1.2.3.4、203.0.113.0/24、2001:db8::/32)`); if (b === 0) throw demoErr(400, `「${part}」是全部地址,不能当来源写进规则`); return { v: 6, a: a.toLowerCase(), bits: b, text: a.toLowerCase() + '/' + b }; }
+    throw demoErr(400, `「${part}」不是 IP 或网段(例:1.2.3.4、203.0.113.0/24、2001:db8::/32)`);
+  });
+  const covers = (srcs, ip) => { const n = v4(ip); return srcs.some(s => (s.v === 4 && n !== null ? Math.floor(n / 2 ** (32 - s.bits)) === Math.floor(s.n / 2 ** (32 - s.bits)) : s.v === 6 && n === null && String(ip).toLowerCase().startsWith(s.a.replace(/::$/, ':').replace(/:0*$/, ':')))); };
+  const parsePorts = text => String(text || '').split(/[\s,，、;]+/).filter(Boolean).map(part => {
+    const [a, b] = part.replace(':', '-').split('-'), lo = Number(a), hi = b === undefined ? lo : Number(b);
+    if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo < 1 || hi > 65535 || lo > hi) throw demoErr(400, `「${part}」不是端口或端口区间(例:443、8000-9000)`);
+    return [lo, hi];
+  }).sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  const lock = msg => { const e = demoErr(409, msg); e.data = { code: 'self_lockout' }; return e; };
+  const cluster = () => nodesNow().flatMap(n => [n.publicIp, n.publicIp6].filter(Boolean).map(ip => [ip, n.name]));
+  // 校验并规整一条规则(和后端 fwToRule 同一套顺序和报错)
+  const toRule = (p, cur) => {
+    const kind = String(p.kind || '').trim(), proto = String(p.proto || '').trim().toLowerCase();
+    const ports = parsePorts(p.ports), srcs = parseSrc(p.sources);
+    if (kind === 'allow') { if (!ports.length) throw demoErr(400, '「放行端口」的规则要填端口'); if (srcs.length) throw demoErr(400, '「放行端口」是对所有人放行,不填来源;要限制来源,另加一条「端口只给指定来源」'); }
+    else if (kind === 'deny') { if (!srcs.length) throw demoErr(400, '「拉黑来源」的规则要填来源 IP 或网段'); }
+    else if (kind === 'only') { if (!ports.length) throw demoErr(400, '「端口只给指定来源」的规则要填端口'); if (!srcs.length) throw demoErr(400, '「端口只给指定来源」的规则要填允许的来源'); }
+    else throw demoErr(400, `不认识的规则种类 "${kind}"`);
+    if (proto && proto !== 'tcp' && proto !== 'udp') throw demoErr(400, '协议只能是 tcp、udp 或留空(两种都算)');
+    const ids = (p.nodeIds || []).map(Number);
+    if (ids.some(i => !nodesNow().some(n => n.id === i))) throw demoErr(400, '选的服务器里有已经不在的,刷新后重选');
+    const note = String(p.note || '').trim();
+    if ([...note].length > 200) throw demoErr(400, '备注太长(最多 200 个字)');
+    const out = { ...(cur || { id: nextId(W.rules), origin: 'manual', enabled: true, createdAt: now(), expiry: 0 }), kind, proto,
+      ports: ports.map(([a, b]) => (a === b ? String(a) : a + '-' + b)).join(','), sources: srcs.map(s => s.text).join(','), nodeIds: ids.length ? [...ids].sort((a, b) => a - b) : null, note };
+    if (p.seconds !== undefined && p.seconds !== null) { if (p.seconds < 0 || p.seconds > 10 * 365 * 86400) throw demoErr(400, '有效期要在 0 到 10 年之间(0 = 一直有效)'); out.expiry = p.seconds ? now() + Number(p.seconds) : 0; }
+    if (p.enabled !== undefined && p.enabled !== null) out.enabled = !!p.enabled;
+    if (kind === 'deny') for (const [ip, name] of cluster()) if (covers(srcs, ip)) throw demoErr(400, `来源里有集群服务器「${name}」的地址 ${ip}:拉黑它会断开主机和这台之间的同步`);
+    if (!p.force && out.enabled) {
+      if (kind === 'deny' && covers(srcs, W.myIp)) throw lock(`来源里包含你现在用的 IP ${W.myIp}:保存后你自己也连不上这些服务器了`);
+      if (kind === 'only' && proto !== 'udp' && !covers(srcs, W.myIp)) {
+        const web = Number(S.settings.webPort) || 2053, hit = [22, web].filter((x, i, a) => a.indexOf(x) === i && ports.some(([lo, hi]) => x >= lo && x <= hi));
+        if (hit.length) throw lock(`这条规则管到了 SSH 或面板的端口(${hit.join(', ')}),允许的来源里却没有你现在用的 IP ${W.myIp}:保存后你自己会被挡在外面`);
+      }
+    }
+    return out;
+  };
+  const one = text => { const s = parseSrc(text); if (s.length !== 1) return null; return s[0]; };
+  const shown = s => (s.v === 4 && s.bits === 32 ? s.text.replace('/32', '') : s.v === 6 && s.bits === 128 ? s.text.replace('/128', '') : s.text);
+  const idx = Number(seg[2]);
+  if (!seg[1]) return view();
+  if (seg[1] === 'settings') {
+    if (method !== 'PUT') throw demoErr(405, '方法不允许');
+    if (body && typeof body.autoBan === 'boolean') W.autoBan = body.autoBan;
+    if (body && typeof body.autoAllow === 'boolean') W.autoAllow = body.autoAllow;
+    return view();
+  }
+  if (seg[1] === 'rules') {
+    if (!seg[2]) { W.rules.push(toRule(body || {}, null)); return view(); }
+    const cur = W.rules.find(r => r.id === idx);
+    if (!cur) throw demoErr(404, '这条规则已经不在了(可能刚到期)');
+    if (seg[3] === 'toggle') {
+      if (!cur.enabled) toRule({ ...cur, nodeIds: cur.nodeIds || [], enabled: true, seconds: undefined, force: !!(body && body.force) }, cur);
+      cur.enabled = !cur.enabled; return view();
+    }
+    if (method === 'DELETE') { W.rules = W.rules.filter(r => r.id !== idx); return view(); }
+    Object.assign(cur, toRule(body || {}, cur)); return view();
+  }
+  if (seg[1] === 'bans') {
+    if (!seg[2]) {
+      const s = one(body && body.ip);
+      if (!s) throw demoErr(400, '黑名单一次填一个 IP 或网段(例:1.2.3.4、203.0.113.0/24)');
+      if (s.v === 4 && (/^(10|127)\./.test(s.text) || /^192\.168\./.test(s.text) || /^172\.(1[6-9]|2\d|3[01])\./.test(s.text))) throw demoErr(400, `${s.text.split('/')[0]} 是回环或内网地址,不能加进黑名单`);
+      for (const [ip, name] of cluster()) if (covers([s], ip)) throw demoErr(400, `来源里有集群服务器「${name}」的地址 ${ip}:拉黑它会断开主机和这台之间的同步`);
+      if (!(body && body.force) && covers([s], W.myIp)) throw lock(`这里面包含你现在用的 IP ${W.myIp}:保存后你自己就打不开面板了`);
+      const ip = shown(s), old = W.bans.find(b => b.ip === ip);
+      const row = { id: old ? old.id : nextId(W.bans), ip, reason: 'manual', evidence: String((body && body.note) || '').trim(), count: 0, hits: old ? old.hits : 0, firstAt: old ? old.firstAt : now(), lastAt: now(), expiry: body && body.seconds > 0 ? now() + Number(body.seconds) : 0, auto: false };
+      W.bans = W.bans.filter(b => b.ip !== ip).concat(row); return view();
+    }
+    if (seg[2] === 'clear') { W.bans = body && body.onlyAuto ? W.bans.filter(b => !b.auto) : []; return view(); }
+    const b = W.bans.find(x => x.id === idx);
+    if (!b) throw demoErr(404, '这条已经不在黑名单里了(可能刚到期)');
+    if (seg[3] === 'promote') {
+      const r = toRule({ kind: 'deny', sources: b.ip, nodeIds: (body && body.nodeIds) || [], seconds: b.expiry > now() ? b.expiry - now() : 0, note: '', force: !!(body && body.force) }, null);
+      r.origin = 'ban'; W.rules.push(r); return view();
+    }
+    W.bans = W.bans.filter(x => x.id !== idx); return view();
+  }
+  if (seg[1] === 'allow') {
+    if (!seg[2]) {
+      const s = one(body && body.ip);
+      if (!s) throw demoErr(400, '白名单一次填一个 IP 或网段(例:1.2.3.4、203.0.113.0/24)');
+      const ip = shown(s), old = W.allow.find(a => a.ip === ip);
+      if (old) old.note = String((body && body.note) || '').trim(); else W.allow.push({ id: nextId(W.allow), ip, note: String((body && body.note) || '').trim(), createdAt: now() });
+      return view();
+    }
+    if (!W.allow.some(a => a.id === idx)) throw demoErr(404, '这条白名单已经不在了');
+    W.allow = W.allow.filter(a => a.id !== idx); return view();
+  }
+  if (seg[1] === 'servers' && seg[3]) {
+    const n = nodesNow().find(x => x.id === idx);
+    if (!n) throw demoErr(404, '服务器不存在');
+    const sy = W.sys[n.id] || (W.sys[n.id] = { frontend: 'none' });
+    if (seg[3] === 'open' && sy.blocking) Object.assign(sy, { opened: true, openedAt: now(), openedFrom: sy.frontend, blocking: false, frontend: 'none' });
+    else if (seg[3] === 'undo' && sy.opened) Object.assign(sy, { opened: false, blocking: true, frontend: sy.openedFrom || 'ufw', detail: (sy.openedFrom || 'ufw') + ' active' });
+    else if (!['state', 'open', 'undo'].includes(seg[3])) throw demoErr(404, '路径无效');
+    const { st, ports } = stateOf(n);
+    st.at = now();
+    return { id: n.id, state: st, ports, error: '' };
+  }
+  throw demoErr(404, '路径无效');
+}
+
 function route(method, path, query, body) {
   const seg = path.split('/');
   const id = Number(seg[1]);
@@ -576,6 +745,7 @@ function route(method, path, query, body) {
       case 'onlines': return clone(S.onlines);
       case 'rules': if (seg[2] === 'states') return clone(S.limitStates.filter(s => s.ruleId === id)); if (seg[1]) return ruleView(find(S.rules, id)); return S.rules.map(ruleView);
       case 'limitstates': return clone(S.limitStates);
+      case 'fw': return demoFw('GET', seg, null);
       case 'resellers': if (seg[2] === 'users') return S.users.filter(u => u.resellerId === id); return clone(S.resellers);
       case 'update': return { current: 'demo', latest: '', hasUpdate: false, canUpdate: false };
       case 'ops': { if (seg[1] === 'status') return fx('GET ops/status') || { running: false, log: [] }; const o = fx('GET ops') || { info: {}, status: {}, params: {} };
@@ -698,7 +868,12 @@ function route(method, path, query, body) {
         }
         return clone(l);
       }
-      if (method === 'DELETE') { S.lines = S.lines.filter(x => x.id !== id); S.users.forEach(u => { u.lineIds = (u.lineIds || []).filter(x => x !== id); }); demoSyncBlocked(); return ok(); }
+      if (method === 'DELETE') {
+        // 和后端同一口径:被「线路上游」用着的线路不让删(那条上游会悬空)
+        const relay = S.upstreams.find(u => Number(u.fromLine) === id);
+        if (relay) throw demoErr(400, `上游「${relay.name}」用着这条线路,先删掉或改掉它`);
+        S.lines = S.lines.filter(x => x.id !== id); S.users.forEach(u => { u.lineIds = (u.lineIds || []).filter(x => x !== id); }); demoSyncBlocked(); return ok();
+      }
       if (method === 'PUT') { Object.assign(l, body, { id }); l.upstreamName = (S.upstreams.find(x => x.id === l.upstreamId) || {}).name || 'direct'; demoSyncBlocked(); return clone(l); }
       return ok();
     }
@@ -743,7 +918,36 @@ function route(method, path, query, body) {
       if (seg[2] === 'port-check') return id === 2 && Number((body || {}).port) === 30001 ? { asked: true, free: false, self: false, by: 'realm' } : { asked: true, free: true, self: false, by: '' };
       if (seg[2] === 'push') return ok();
       if (seg[2] === 'disk-clean') return demoDiskClean(id, true);
-      if (method === 'DELETE') { S.nodes.nodes = list.filter(x => x.id !== id); return ok({ disabledLines: [] }); }
+      if (method === 'DELETE') {
+        // 和后端同一口径:本机删不得;被「线路上游」用着的删不得;删掉后引用它的东西一起收拾 ——
+        // 只部署在这台上的线路停用、经它中转或转给它的入口去掉、防火墙规则里只管它一台的整条删掉(不留成「全部服务器」)
+        if (n.isLocal) throw demoErr(400, '不能删除本机');
+        const relay = S.upstreams.find(u => Number(u.fromNode) === id);
+        if (relay) throw demoErr(400, `上游「${relay.name}」用着这台服务器上的线路,先删掉或改掉它`);
+        const arr = v => { try { const x = typeof v === 'string' ? JSON.parse(v || '[]') : (v || []); return Array.isArray(x) ? x : []; } catch { return []; } };
+        const disabledLines = [], prunedForwards = [];
+        for (const l of S.lines) {
+          const ids = arr(l.nodeIds);
+          if (ids.includes(id)) {
+            const kept = ids.filter(x => x !== id);
+            if (!kept.length) { l.enabled = false; disabledLines.push(l.name); }
+            l.nodeIds = typeof l.nodeIds === 'string' ? JSON.stringify(kept) : kept;
+          }
+          const fs = arr(l.forwards), left = fs.filter(f => f.via !== id && f.to !== id);
+          if (left.length !== fs.length) { prunedForwards.push(l.name); l.forwards = typeof l.forwards === 'string' ? JSON.stringify(left) : left; }
+        }
+        let removedFwRules = 0;
+        S.fw.rules = S.fw.rules.filter(r => {
+          if (!Array.isArray(r.nodeIds) || !r.nodeIds.includes(id)) return true;
+          r.nodeIds = r.nodeIds.filter(x => x !== id);
+          if (r.nodeIds.length) return true;
+          removedFwRules++; return false;
+        });
+        S.fw.servers = S.fw.servers.filter(x => x.id !== id);
+        S.nodes.nodes = list.filter(x => x.id !== id);
+        demoSyncBlocked();
+        return ok({ disabledLines, revokedUsers: [], revokedResellers: [], prunedForwards, removedFwRules });
+      }
       if (method === 'PUT') { const { token, ...rest } = body || {}; Object.assign(n, rest, { id }); return clone(n); }
       return ok();
     }
@@ -759,7 +963,12 @@ function route(method, path, query, body) {
       const r = find(S.resellers, id);
       if (seg[2] === 'passwd') return { password: rnd(12) };
       if (seg[2] === 'reset') return ok();
-      if (method === 'DELETE') { S.resellers = S.resellers.filter(x => x.id !== id); return ok(); }
+      if (method === 'DELETE') { // 和后端一样:代理名下的用户一起删
+        const mine = S.users.filter(u => Number(u.resellerId) === id).length;
+        S.users = S.users.filter(u => Number(u.resellerId) !== id);
+        S.resellers = S.resellers.filter(x => x.id !== id);
+        return { users: mine };
+      }
       if (method === 'PUT') { Object.assign(r, body, { id }); return clone(r); }
       return ok();
     }
@@ -769,7 +978,7 @@ function route(method, path, query, body) {
       if (seg[2] === 'refresh') return { clash: 7, links: 7, total: 7, out: e.nodeCount || 7, unchanged: true };
       if (seg[2] === 'preview') return { nodes: [] };
       if (seg[2] === 'nodes') return extNodes(id, seg, method, body);
-      if (method === 'DELETE') { S.exts = S.exts.filter(x => x.id !== id); return ok(); }
+      if (method === 'DELETE') { S.exts = S.exts.filter(x => x.id !== id); for (const u of S.upstreams) if (u.source && u.source.extId === id) delete u.source; return ok(); } // 从它加来的上游还在,只是没有订阅可跟了
       if (method === 'PUT') { Object.assign(e, body, { id }); return clone(e); }
       return ok();
     }
@@ -780,6 +989,7 @@ function route(method, path, query, body) {
       if (method === 'PUT') { Object.assign(r, body, { id }); if (!r.enabled) S.limitStates = S.limitStates.filter(s => s.ruleId !== id); return ruleView(r); }
       return ok();
     }
+    case 'fw': return demoFw(method, seg, body);
     case 'update': throw new ApiError(400, 'Demo mode: nothing to update here');
     case 'ha':
       if (!seg[1]) { // 保存设置
@@ -812,7 +1022,17 @@ function route(method, path, query, body) {
     }
     case 'cert':
       if (seg[1] === 'use') { const c = S.certs.find(x => x.name === body.name); S.certUse[body.target] = c ? c.certFile : ''; syncCertUse(); return ok(); }
-      if (seg[1] === 'delete') { S.certs = S.certs.filter(x => x.name !== body.name); syncCertUse(); return ok(); }
+      if (seg[1] === 'delete') {
+        // 和后端同一口径:还在用的证书不让删,报的是同一句话
+        const c = S.certs.find(x => x.name === body.name);
+        if (!c) throw demoErr(400, '证书库里没有这张证书');
+        if (c.certFile === S.certUse.lines) throw demoErr(400, '这张证书是线路默认证书,先换一张再删');
+        if (c.certFile === S.certUse.panel) throw demoErr(400, '面板 HTTPS 正在用这张证书,先换一张再删');
+        if (c.certFile === S.certUse.sub) throw demoErr(400, '订阅 HTTPS 正在用这张证书,先换一张再删');
+        const using = S.lines.filter(l => { const tl = tlsOf(l); return tl.mode === 'cert' && tl.cert === c.name; }).map(l => l.name);
+        if (using.length) throw demoErr(400, `线路「${using.join('、')}」单独选了这张证书,先改掉再删`);
+        S.certs = S.certs.filter(x => x.name !== body.name); syncCertUse(); return ok();
+      }
       if (seg[1] === 'renew') { const c = S.certs.find(x => x.name === body.name); if (c && c.renewable) { c.lastRenewOk = now(); c.renewFails = 0; c.lastRenewErr = ''; } return ok({ note: 'Demo mode' }); }
       if (seg[1] === 'autorenew') { const c = S.certs.find(x => x.name === body.name); if (c && c.source === 'acme' && c.method !== 'manual') { c.autoRenew = !!body.on; Object.assign(c, body.on ? renewOf(c.source, c.method, c.info.daysLeft, c.info.selfSigned) : { renewable: false, reason: 'disabled' }); } return ok(); }
       return ok({ note: 'Demo mode' });

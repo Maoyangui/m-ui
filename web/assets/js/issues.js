@@ -4,7 +4,7 @@
 // ---- 服务器 ----
 
 // 严重程度从高到低的顺序:「需要处理」的分项、名单都按它排
-export const NODE_CODES = ['offline', 'coreStopped', 'reloadErr', 'decom', 'ledger', 'diskFull', 'unsynced', 'disk', 'version'];
+export const NODE_CODES = ['offline', 'coreStopped', 'reloadErr', 'decom', 'ledger', 'diskFull', 'fw', 'unsynced', 'disk', 'version'];
 const RED = new Set(['offline', 'coreStopped', 'reloadErr', 'decom', 'ledger', 'diskFull']);
 export const nodeSev = code => (RED.has(code) ? 'bad' : 'warn');
 
@@ -12,6 +12,10 @@ export const nodeSev = code => (RED.has(code) ? 'bad' : 'warn');
 export const UNSYNCED_GRACE = 30;
 // 主机一轮同步失败就把那台标成离线(偶发超时):上次联系上的时间离现在不到这么久时先不算离线
 export const OFFLINE_GRACE = 30;
+
+// fwBad 一台服务器的防火墙状况(status.fw,老版本没有)算不算「有事」:面板规则没落下去、或者 m-ui 的端口在系统防火墙里没放行成。
+// 这类事不提醒就没人知道 —— 页面上看规则存着、开关开着,那台机器上其实没生效。命令行特意暂停的不算。
+export const fwBad = f => !!f && !f.paused && (!!f.error || (f.rules > 0 && !f.engine));
 
 // nodeIssues 一台服务器的问题:[{code, sev}]。只看远端服务器(本机的数据面与重载另有来源)。
 // 停用的服务器只看"下线通知未送达";离线时不再看其它项(状态是上一次的,不可信)。
@@ -38,6 +42,7 @@ export function nodeIssues(n, { unsyncedFor = Infinity, now = Date.now() / 1000 
   if (s.ledgerFails > 0) add('ledger');
   const dl = diskLevel(s.disk);
   if (dl) add(dl === 'bad' ? 'diskFull' : 'disk');
+  if (fwBad(s.fw)) add('fw');
   if (!s.synced && unsyncedFor >= UNSYNCED_GRACE) add('unsynced');
   if (s.versionMismatch) add('version');
   return sortIssues(out);

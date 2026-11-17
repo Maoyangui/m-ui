@@ -2059,3 +2059,94 @@ a.tb-name:hover { color: var(--primary-text); text-decoration: none; }
 .tb-key.up { margin-left: .5rem; background: color-mix(in srgb, var(--primary) 34%, var(--surface)); }
 .tb-legend .sep { margin: 0 .25rem; color: var(--faint); }
 @media (max-width: 980px) { .tb-cols { grid-template-columns: minmax(0, 1fr); gap: 1.2rem; } }
+
+/* ---- 防火墙页(pages/fw.js):三张通栏的卡,各一张表;开关在标题右边,展开的明细是行下面的一条通栏 ---- */
+.wall-page > .card:last-child { margin-bottom: 0; }
+.wall-page .card-head h2 { white-space: nowrap; } /* 窄屏上标题自己一行,开关和按钮折到下一行,不把标题挤成两行 */
+.wall-tools { display: flex; align-items: center; gap: .6rem; margin-left: auto; } /* 开关和按钮是一组:要折行一起折 */
+.wall-page table.grid th { white-space: nowrap; }
+.wall-page .card > .hint + .table-wrap { margin-top: .75rem; }
+.wall-sw { display: inline-flex; align-items: center; gap: .5rem; font-size: var(--fs-sm); color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.wall-pbtn { display: inline-flex; align-items: baseline; gap: .4rem; max-width: 100%; white-space: nowrap; font-size: inherit; }
+.wall-pbtn b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.wall-pbtn .i { align-self: center; font-size: 11px; color: var(--faint); }
+.wall-pbtn:hover b { color: var(--primary-text); }
+.wall-pbtn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 3px; }
+table.wall-srv td.actions { white-space: nowrap; }
+.wall-detail { display: grid; gap: .3rem; padding: .35rem 0 .2rem; font-size: var(--fs-xs); text-align: left; }
+.wall-dports { display: flex; align-items: baseline; flex-wrap: wrap; gap: .3rem .7rem; }
+.wall-dl { flex: none; color: var(--muted); }
+.wall-dports .chips { gap: .25rem; }
+.wall-dports .chip { min-height: 20px; padding: 0 .4rem; background: var(--surface); }
+.wall-dline { margin: 0; line-height: 1.6; color: var(--text-2); }
+.wall-dline.ok { color: var(--ok-text); }
+.wall-dline.warn { color: var(--warn-text); }
+.wall-dline.bad { color: var(--danger-text); }
+.wall-dmeta { margin: 0; color: var(--faint); }
+/* 卡片排法(窄屏):明细跟在这一张卡的下面,占一整行 */
+table.grid.cards tr.wall-sub { display: block; grid-column: 1 / -1; margin-top: -.35rem; padding: .3rem .9rem .5rem; background: var(--surface-2); }
+table.grid.cards tr.wall-sub > td { padding: 0; border: none; background: transparent; text-align: left; }
+
+/* 规则表:类型的小标签 + 备注在第一格;端口、来源各列前两样,多的收成 +N */
+.wall-kindcell { display: inline-flex; align-items: center; gap: .5rem; max-width: 100%; }
+.wall-kindcell .badge { flex: none; }
+.wall-note { min-width: 0; max-width: 15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); font-weight: 400; color: var(--muted); }
+.wall-fb { display: none; font-weight: 400; }
+.wall-fb > span { display: none; }
+.grid.no-p2 .wall-fb:has(.wall-fb-p2), .grid.no-p3 .wall-fb:has(.wall-fb-p3) { display: block; }
+.grid.no-p2 .wall-fb-p2, .grid.no-p3 .wall-fb-p3 { display: inline; }
+.grid.no-p2.no-p3 .wall-fb-p2 + .wall-fb-p3::before, .grid.no-p2 .wall-fb-p2 + .wall-fb-p3::before { content: ' · '; color: var(--faint); }
+.grid:not(.no-p2) .wall-fb-p2 + .wall-fb-p3::before { content: none; }
+.wall-quick[hidden] { display: none; }
+.wall-few { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 0 .25rem; max-width: 100%; }
+.wall-it { max-width: 13.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wall-sep { margin-left: -.2rem; color: var(--faint); }
+.wall-more { padding: 0 .35rem; border-radius: 999px; background: var(--surface-3); font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
+.wall-proto { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; color: var(--muted); }
+table.wall-rtable tr.is-off td:not(.actions):not(:has(.switch)) { opacity: .5; }
+table.wall-rtable td.actions, table.wall-btable td.actions, table.wall-atable td.actions { white-space: nowrap; }
+.wall-starter { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem .5rem; padding: .15rem 0 .1rem; font-size: var(--fs-sm); }
+.wall-none { margin: .2rem 0 .1rem; color: var(--muted); font-size: var(--fs-sm); }
+.wall-bar { margin: .7rem 0 .65rem; }
+.wall-bar .wall-q { width: 12rem; max-width: 100%; }
+/* 黑名单表:「原因」那一列吃掉剩下的宽度、放不下省略(悬停看全);时间和按钮各按内容宽、不折行 ——
+   英文里原因是一长句,不这样它会把后面几列挤成一个词一行、把「更多」挤出框外 */
+table.wall-btable td { white-space: nowrap; }
+table.wall-btable td.wall-whycell { width: 100%; max-width: 0; }
+.wall-why { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.grid.cards.wall-btable td { white-space: normal; }
+table.grid.cards.wall-btable td.wall-whycell { width: auto; max-width: none; }
+table.grid.cards .wall-why, table.grid.cards .wall-note, table.grid.cards .wall-it { max-width: 100%; white-space: normal; }
+/* 卡片排法:是默认值的那几行(全部服务器、一直有效)不占地方 */
+table.grid.cards td.wall-def { display: none; }
+
+/* 规则弹框:三种做法并排三张可点的小卡(手机上叠成三行),选中的那张描边 */
+.wall-kinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; margin-bottom: 1rem; }
+.wall-kind { position: relative; display: flex; flex-direction: column; gap: .3rem; padding: .6rem .7rem .65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; transition: border-color .12s, background .12s; }
+.wall-kind:hover { border-color: var(--border-strong); }
+.wall-kind.on { border-color: var(--primary); background: var(--primary-soft); box-shadow: 0 0 0 3px var(--primary-ring); }
+.wall-kind input { position: absolute; opacity: 0; pointer-events: none; }
+.wall-kind:has(input:focus-visible) { outline: 2px solid var(--primary); outline-offset: 2px; }
+.wall-kind-t { display: flex; align-items: center; gap: .4rem; min-width: 0; }
+.wall-kind-t b { font-size: var(--fs-sm); font-weight: 600; min-width: 0; }
+.wall-kind small { font-size: var(--fs-xs); line-height: 1.5; color: var(--muted); }
+.wall-form textarea { min-height: 4.6rem; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; resize: vertical; }
+.wall-quick { display: flex; flex-wrap: wrap; gap: .3rem; }
+.wall-quick .chip.more { min-height: 22px; }
+.wall-exp { flex-wrap: wrap; }
+.wall-exp select { flex: 1 1 9rem; min-width: 0; }
+.wall-hours { display: inline-flex; align-items: center; gap: .4rem; font-size: var(--fs-sm); color: var(--text-2); }
+.wall-hours input { width: 5.5rem; flex: none; }
+.wall-scope .node-list[hidden] { display: none; }
+.wall-scope > .hint { margin-top: 0; }
+.wall-scope > .hint:empty { display: none; }
+.wall-scope .ln-srv-head { margin-bottom: .45rem; }
+.wall-promote { margin-top: .9rem; }
+@media (max-width: 640px) {
+  .wall-kinds { grid-template-columns: minmax(0, 1fr); }
+  .wall-kind { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: .15rem .6rem; }
+  .wall-kind small { flex: 1 1 100%; }
+}
+/* 副机上只能看:开关不能点,按钮收起 */
+.node-readonly .wall-page .switch { pointer-events: none; opacity: .5; }
+.node-readonly .wall-page .card-head .btn, .node-readonly .wall-page td.actions, .node-readonly .wall-page .wall-bar .btn, .node-readonly .wall-page .wall-starter .btn { display: none !important; }

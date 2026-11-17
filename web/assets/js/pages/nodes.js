@@ -4,7 +4,7 @@ import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
 import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, fieldBox, switchRow, empty, fv, fchk, setHTML, matches, debounce, diskBrief, diskHogs } from '../ui.js';
 import { loadReach, reachCell, reachToolbar, refreshDetail, setNodes, setReachListener, reach, isBad, v6Of } from '../reach.js';
-import { nodeIssues, trackUnsynced, diskLevel, diskPct } from '../issues.js';
+import { nodeIssues, trackUnsynced, diskLevel, diskPct, fwBad } from '../issues.js';
 import { loadHA, roleChip, haMenuItems, setHARefresh } from '../ha.js';
 
 export const title = () => t('node.title');
@@ -203,18 +203,24 @@ function upShort(sec) {
 }
 
 // 数据面一格:第一行状态徽标(+ 要处理的问题),第二行小字是运行时长、证书剩余天数、磁盘
+// 防火墙那一页的事(规则没落下去、端口没放行成)在这一行也点一下:徽标带原因,点了去防火墙页
+function fwBadge(f) {
+  if (!fwBad(f)) return '';
+  return ` <a class="badge warn" href="#/fw" title="${esc(f.error ? trErr(f.error) : t('fw.d.rules.noengine'))}">${esc(t('node.fwBad'))}</a>`;
+}
+
 function coreCell(n) {
   const sub = parts => { const p = parts.filter(Boolean); return p.length ? `<div class="sub-cell">${p.join(' · ')}</div>` : ''; };
   if (n.isLocal) {
     const rl = state.status.reload || {};
     return badge(state.status.coreRunning ? t('dash.running') : t('dash.stopped'), state.status.coreRunning ? 'ok' : 'danger')
-      + reloadBadge(rl.at && !rl.ok ? `${trErr(rl.op)}: ${trErr(rl.error)}` : '') + certFailBadge(n) + blockedBadge(state.status.blocked)
+      + reloadBadge(rl.at && !rl.ok ? `${trErr(rl.op)}: ${trErr(rl.error)}` : '') + certFailBadge(n) + blockedBadge(state.status.blocked) + fwBadge(state.status.fw)
       + sub([diskText(state.status.disk)]);
   }
   const s = n.status || {};
   if (!s.ok) return '—';
   return badge(s.coreRunning ? t('dash.running') : t('dash.stopped'), s.coreRunning ? 'ok' : 'danger')
-    + reloadBadge(s.reloadError) + certFailBadge(n) + blockedBadge(s.blocked)
+    + reloadBadge(s.reloadError) + certFailBadge(n) + blockedBadge(s.blocked) + fwBadge(s.fw)
     + sub([s.uptime ? `<span title="${esc(fmtDuration(s.uptime))}">${esc(upShort(s.uptime))}</span>` : '', s.certDays !== undefined ? certDaysText(s.certDays) : '', diskText(s.disk)]);
 }
 
@@ -421,6 +427,7 @@ registerActions({
       if ((r.disabledLines || []).length) msgs.push(t('node.linesDisabled', { names: r.disabledLines.join(t('node.sep')) }));
       const revoked = [...(r.revokedUsers || []), ...(r.revokedResellers || [])];
       if (revoked.length) msgs.push(t('node.scopeRevoked', { names: revoked.join(t('node.sep')) }));
+      if (r.removedFwRules > 0) msgs.push(t('node.fwRulesRemoved', { n: r.removedFwRules }));
       if (r.decommissionError) msgs.push(t('node.decomFail', { name: n.name, err: trErr(r.decommissionError) }));
       if (msgs.length) notice(t(r.decommissionError ? 'node.decomFailTitle' : 'common.deleted'), msgs.join('\n'));
     } catch (e) { toast(e.message, 'err'); }

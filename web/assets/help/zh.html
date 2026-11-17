@@ -1187,6 +1187,62 @@
   </section>
 </section>
 
+<section class="chap" id="fw" data-scope="admin">
+  <h2>防火墙</h2>
+  <p class="lede">三件事在同一页:服务器自带的防火墙有没有挡住端口、自己定的放行 / 拉黑规则、面板和订阅的访问黑名单。</p>
+
+  <section class="sec" id="fw-sys">
+    <h3>系统防火墙</h3>
+    <p class="lede">云厂商控制台放行了端口、外面还是连不上,多半是服务器自带的防火墙在拦:ufw、firewalld,或者镜像里带的一份 iptables 规则(Oracle 的 Ubuntu 镜像就是)。</p>
+    <ul>
+      <li><b data-k="nav.fw">防火墙</b> 页第一张表一行一台服务器:它的系统防火墙是哪一种、在不在拦,m-ui 用到的端口在它那里放行了没有。点端口数展开,看这台用到哪些端口(面板、订阅、每条线路、中转入口)。</li>
+      <li>在拦的那一行有 <b data-k="fw.act.open">放开</b>:ufw 是停用它,firewalld 是停掉服务,iptables 是在最前面加一条全放行(原有规则一条不动)。改之前的规则先备份在数据目录的 <code>fw-backup-时间</code> 里,随时点 <b data-k="fw.act.undo">撤销放开</b> 恢复原样。放开以后真要挡端口,在云厂商的安全组里设,或者用下面的规则。</li>
+      <li>不想放开也行:<b data-k="fw.autoAllow">自动放行 m-ui 的端口</b> 默认开着,系统防火墙留着的服务器上,m-ui 会把自己用到的端口在它那里放行,线路增删跟着变;它只增减自己加的,你原来的规则不动。关掉这个开关,它把加过的收回,这些端口由你自己管。</li>
+      <li>自己手写 nftables 规则的服务器,面板不替你改:那一行会写 <b data-k="fw.ports.manual">要自己放行</b>,请在规则里放行展开后列出的端口。</li>
+      <li>安装时也会问:全新安装检测到系统防火墙在拦,会问一句要不要放开 —— 直接回车或 <code>y</code> 放开,<code>n</code> 保留;没有终端可问(cloud-init、CI)按放开算。安装命令后面加 <code>--keep-firewall</code> 不问、保留,加 <code>--open-firewall</code> 不问、直接放开。升级不问也不动。</li>
+      <li>副机的状况是它自己量了报给主机的;版本还没有防火墙功能的副机这一行写 <b data-k="fw.sys.noReport">没有上报</b>,升级后就有。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="fw-rules">
+    <h3>规则</h3>
+    <p class="lede">规则在主机上建,下发到选中的服务器,各台自己在系统内核里落实:主机暂时联系不上,副机上的规则照样生效、照样到期。</p>
+    <ul>
+      <li>三种做法:<b data-k="fw.kind.allow">放行端口</b> —— 系统防火墙开着的服务器上,把这些端口对所有人放行(没开着的用不着);<b data-k="fw.kind.deny">拉黑来源</b> —— 这些 IP 或网段连不进来,代理流量也一样,可以只挡几个端口;<b data-k="fw.kind.only">端口只给指定来源</b> —— 这些端口只让名单里的来源连,别人一律拒绝,比如 SSH 只给自己的 IP。</li>
+      <li><b data-k="fw.f.scope">应用到</b> 可以选全部服务器(以后新加的也算)或其中几台;<b data-k="fw.f.expiry">有效期</b> 可以选一直有效,或者几小时、几天后自动撤掉。行里的开关点了就存:关掉是留着不生效。</li>
+      <li>拉黑和「只给指定来源」落在 m-ui 自己的一张表里,排在系统防火墙前面,不改它原有的规则;同一个来源既被拉黑、又在某个端口的允许名单里时,以拉黑为准。</li>
+      <li>不会把你自己关在门外:来源里包含你现在用的 IP 的拉黑规则,或者管到了 SSH、面板端口却没把你现在的 IP 算进去的「只给指定来源」,保存时会先拦下说明后果,确认了才存。</li>
+      <li>集群里的服务器始终连得上彼此:主机和副机之间的同步、中转入口到出口,走的都是 m-ui 自己的端口,规则在这些端口上永远不挡集群里的服务器;集群里服务器的地址也不让拉黑。</li>
+      <li>删掉一台服务器时,只管它一台的规则会一起删掉,不会变成「全部服务器」。</li>
+      <li>哪台服务器上规则没落下去(比如那台没有 nft 也没有 iptables),概览顶部的提醒和 <b data-k="nav.nodes">服务器</b> 页那一行都会点出来。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="fw-lists">
+    <h3>黑白名单与自动拉黑</h3>
+    <p class="lede">黑名单只管面板、代理面板、订阅和外部 API 的访问:名单里的来源一连上就被断开。代理流量不受影响,因为同一个出口 IP 后面可能还有正常用户。</p>
+    <ul>
+      <li><b data-k="fw.autoBan">自动拉黑</b> 默认是关着的,要自己打开。打开后只针对明显在扫的来源:10 分钟内登录失败 10 次、试了 8 个不同的不存在的订阅地址、或者试了 10 个不同的错 API 密钥,拉黑 1 小时;一天内第 3 次起拉黑 24 小时。都是临时的,到点自动解除。</li>
+      <li>不会误伤的几类:登录成功过的来源 24 小时内不拉黑;成功拉到过订阅的来源门槛放宽到 5 倍(客户端还存着作废的旧订阅、反复刷新同一个地址只算一个);回环和内网地址、集群里的服务器、白名单里的来源永远不拉黑。</li>
+      <li>名单里每一条写着原因和多久后解除。<b data-k="fw.ban.remove">移出</b> 立刻解除;<b data-k="common.more">更多</b> 里可以 <b data-k="fw.ban.toAllow">移到白名单</b>(以后不再被自动拉黑),或者 <b data-k="fw.ban.promote">连代理一起挡</b> —— 给它加一条「拉黑来源」的规则,这才连代理流量也挡住。</li>
+      <li><b data-k="fw.ban.add">手动拉黑</b> 可以填一个 IP 或网段,选有效期;<b data-k="fw.tab.allow">白名单</b> 里放自己的办公网、监控探针这类来源。</li>
+      <li>自动拉黑了谁会记进操作审计;开着登录告警通知的话,Telegram 也会收到一条。</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="fw-cli">
+    <h3>命令行的退路</h3>
+    <p class="lede">面板打不开时(被自己的规则挡住、被拉黑),从服务器的终端或云厂商的控制台进去,用下面这些命令。都要 root。</p>
+    <ul>
+      <li><code>m-ui firewall status</code>:这台的系统防火墙是哪种、在不在拦、放开过没有,面板规则和黑名单各有几条。</li>
+      <li><code>m-ui firewall pause</code>:这台暂停面板规则(拉黑、只给指定来源都不再生效),立刻见效;到面板里把有问题的规则改掉后,<code>m-ui firewall resume</code> 恢复。暂停期间防火墙页这一台会写 <b data-k="fw.rules.paused">已暂停</b>。</li>
+      <li><code>m-ui firewall open</code> / <code>m-ui firewall undo</code>:放开系统防火墙 / 撤销,和面板上那两个按钮是同一个动作,哪边做的都能在另一边撤销。</li>
+      <li><code>m-ui unban 1.2.3.4</code>:把一个来源移出黑名单;<code>m-ui unban --all</code> 清空。30 秒内生效。</li>
+      <li>管理菜单(直接执行 <code>m-ui</code>)里的「防火墙」一项是同样的几件事。</li>
+    </ul>
+  </section>
+</section>
+
 <section class="chap" id="settings" data-scope="admin">
   <h2>设置一览</h2>
   <p class="lede"><b data-k="nav.settings">设置</b> 页改了任何一项(开关、输入框都一样),窗口底部会浮出保存条:写着有几处改动,点左边能展开清单,逐项看「原来 → 现在」、也可以单独 <b data-k="set.sb.undo">撤销</b> 某一项;点 <b data-k="common.save">保存</b> 一起生效,点 <b data-k="set.sb.discard">放弃</b> 全部还原。没保存就离开这一页会先问一句。端口、监听地址和证书改了保存就生效:面板在原地换好监听,浏览器自动跳到新地址,订阅、代理面板也一样;页头的 <b data-k="set.restart">重启 m-ui</b> 一般用不着(副机的面板端口、证书例外,见下面的问答)。</p>

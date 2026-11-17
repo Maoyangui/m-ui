@@ -100,7 +100,7 @@ await page.waitForTimeout(800);
 if (await page.locator('#demo-bar').count()) pass('演示提示条已显示'); else fail('没有演示提示条 #demo-bar');
 if (await page.locator('#login:not([hidden])').count()) fail('演示页显示了登录框'); else pass('不需要登录');
 
-const expect = { dashboard: /online|在线|users|用户/i, users: /demo-alice/, lines: /Tokyo-HY2/, nodes: /Frankfurt/, upstreams: /./, plans: /./, resellers: /./, exts: /./, settings: /./, cert: /./, ops: /./, backup: /./, logs: /./, admin: /./, account: /./ };
+const expect = { dashboard: /online|在线|users|用户/i, users: /demo-alice/, lines: /Tokyo-HY2/, nodes: /Frankfurt/, upstreams: /./, plans: /./, resellers: /./, exts: /./, settings: /./, cert: /./, ops: /./, fw: /ufw/, backup: /./, logs: /./, admin: /./, account: /./ };
 for (const [route, re] of Object.entries(expect)) {
   await page.goto(`${DEMO}#/${route}`);
   await page.waitForTimeout(700);
@@ -427,6 +427,60 @@ const bk1 = await page.locator('.bk-list tbody tr').count();
 const schedCtl = await page.evaluate(() => ['bk-on', 'bk-hour', 'bk-keep', 'bk-tg'].filter(id => { const el = document.getElementById(id); return el && el.getClientRects().length > 0 || (el && el.closest('.switch') && el.closest('.switch').getClientRects().length > 0); }).length);
 if (bk0 >= 1 && bk1 === bk0 + 1 && schedCtl === 4) pass('备份页:存一份列表多一行,定时备份的四项都在页面上'); else fail(`备份页不对:${bk0} → ${bk1} 行,定时备份控件 ${schedCtl}/4`);
 
+// 防火墙页:三台服务器各一行,点开看端口;规则的防呆(拉黑自己先拦下、确认了才存)、集群服务器不让拉黑;
+// 放开 / 撤销;黑名单一条可以移出、可以升成规则。演示站的校验照着后端做,报的是同一句话
+await page.goto(`${DEMO}#/fw`); await page.waitForTimeout(800);
+const fwRows = await page.locator('#wall-sys tbody tr:not(.wall-sub)').count();
+await page.locator('[data-act="fw.expand"][data-id="2"]').click(); await page.waitForTimeout(500);
+const fwChips = await page.locator('#wall-sys tr.wall-sub .chip').count();
+if (fwRows === 3 && fwChips >= 3) pass(`防火墙页:三台服务器,展开看到这台用到的 ${fwChips} 个端口`); else fail(`防火墙页的服务器表不对:${fwRows} 行,展开后 ${fwChips} 个端口`);
+const fwApi = await page.evaluate(async () => {
+  const api = await import('./js/api.js');
+  const out = {};
+  const tryIt = async fn => { try { await fn(); return 'ok'; } catch (e) { return (e.data && e.data.code) || String(e.status); } };
+  const me = (await api.get('fw')).myIp;
+  out.lock = await tryIt(() => api.post('fw/rules', { kind: 'deny', sources: me }));
+  out.forced = await tryIt(() => api.post('fw/rules', { kind: 'deny', sources: me, force: true }));
+  out.cluster = await tryIt(() => api.post('fw/rules', { kind: 'deny', sources: '198.51.100.10' }));
+  out.sshNoMe = await tryIt(() => api.post('fw/rules', { kind: 'only', proto: 'tcp', ports: '22', sources: '203.0.113.200' }));
+  out.allowSrc = await tryIt(() => api.post('fw/rules', { kind: 'allow', ports: '8080', sources: '203.0.113.200' }));
+  let v = await api.get('fw');
+  out.rules = v.rules.length;
+  const mine = v.rules.find(r => r.sources === me + '/32');
+  v = await api.del('fw/rules/' + mine.id);
+  out.afterDel = v.rules.length;
+  const sg = await api.post('fw/servers/2/open');
+  out.opened = sg.state.opened === true && sg.state.blocking === false;
+  const back = await api.post('fw/servers/2/undo');
+  out.undone = !back.state.opened && back.state.blocking === true && back.state.allow === 'ok';
+  v = await api.put('fw/settings', { autoAllow: false });
+  out.allowOff = v.servers.find(s => s.id === 2).state.allow;
+  await api.put('fw/settings', { autoAllow: true });
+  v = await api.post('fw/bans', { ip: '203.0.113.99', note: 'smoke', seconds: 3600 });
+  const b = v.bans.find(x => x.ip === '203.0.113.99');
+  v = await api.post(`fw/bans/${b.id}/promote`, { nodeIds: [1] });
+  out.promoted = v.rules.some(r => r.origin === 'ban' && r.sources === '203.0.113.99/32' && r.expiry > 0);
+  v = await api.del('fw/bans/' + b.id);
+  out.banGone = !v.bans.some(x => x.ip === '203.0.113.99');
+  out.delLocal = await tryIt(() => api.del('nodes/1'));
+  out.delCert = await tryIt(() => api.post('cert/delete', { name: 'panel.example.com' }));
+  return out;
+});
+if (fwApi.lock === 'self_lockout' && fwApi.forced === 'ok' && fwApi.cluster === '400' && fwApi.sshNoMe === 'self_lockout' && fwApi.allowSrc === '400'
+  && fwApi.afterDel === fwApi.rules - 1 && fwApi.opened && fwApi.undone && fwApi.allowOff === 'off' && fwApi.promoted && fwApi.banGone) pass('防火墙:拉黑自己先拦下、集群服务器不让拉黑、放开 / 撤销、关掉自动放行、黑名单升成规则');
+else fail(`防火墙的演示逻辑不对:${JSON.stringify(fwApi)}`);
+if (fwApi.delLocal === '400' && fwApi.delCert === '400') pass('演示站和后端一样:本机删不掉、正在用的证书删不掉'); else fail(`演示站的删除保护不对:${JSON.stringify({ delLocal: fwApi.delLocal, delCert: fwApi.delCert })}`);
+await page.goto(`${DEMO}#/fw`); await page.waitForTimeout(600);
+await page.locator('#wall-rules .card-head [data-act="fw.rule.add"]').click(); await page.waitForTimeout(300);
+await page.locator('.wall-kind input[value="only"]').check({ force: true }); await page.waitForTimeout(150);
+await page.fill('#wall-ports', '22'); await page.fill('#wall-src', '203.0.113.200');
+await page.locator('#modal-save').click(); await page.waitForTimeout(500);
+const lockUi = await page.evaluate(() => ({ title: document.getElementById('modal-title').textContent, danger: document.getElementById('modal-save').classList.contains('danger'), text: document.getElementById('modal-body').textContent }));
+if (lockUi.danger && /22/.test(lockUi.text) && /198\.51\.100\.77/.test(lockUi.text)) pass('防火墙:会把自己挡在外面的规则,保存时先说明后果、再确认一次');
+else fail(`防呆的确认框不对:${JSON.stringify(lockUi).slice(0, 200)}`);
+await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+
 // 请求审计
 const external = requests.filter(u => !u.startsWith(origin));
 const apiCalls = requests.filter(u => /\/api\//.test(u));
@@ -440,7 +494,7 @@ if (realErrors.length) fail(`浏览器报错:${realErrors.slice(0, 3).join(' | '
 // 手机宽度不横向滚动
 const m = await ctx.newPage();
 await m.setViewportSize({ width: 390, height: 844 });
-for (const route of ['dashboard', 'users', 'lines', 'nodes', 'cert', 'settings']) {
+for (const route of ['dashboard', 'users', 'lines', 'nodes', 'cert', 'settings', 'fw']) {
   await m.goto(`${DEMO}#/${route}`); await m.waitForTimeout(700);
   const over = await m.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (over > 1) fail(`手机宽度下 #/${route} 横向溢出 ${over}px`); else pass(`手机宽度 #/${route} 不溢出`);

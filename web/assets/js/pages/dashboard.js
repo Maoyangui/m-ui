@@ -10,7 +10,7 @@ import { esc, fmtBytes, fmtDuration, fmtRelative, fmtTime, fmtDate, fmtDay, tzOf
 import { barChart, bucketFor } from '../chart.js';
 import { diskLevel, diskPct } from '../issues.js';
 import { diskHogs } from '../ui.js';
-import { NODE_CODES, summarizeNodes, trackUnsynced, worstCode, healthSummary, sortCerts, certSig, certCounts, certLeftDays, sortReach, reachSig, reachHard, reachStall } from '../issues.js';
+import { NODE_CODES, summarizeNodes, trackUnsynced, worstCode, healthSummary, fwBad, sortCerts, certSig, certCounts, certLeftDays, sortReach, reachSig, reachHard, reachStall } from '../issues.js';
 import { expiringDays, quotaPct } from './users.js';
 import { shownConns } from '../fair.js';
 import { openTraffic } from '../traffic.js';
@@ -307,6 +307,8 @@ function attnItems() {
   // 1b 本机磁盘快满 / 满了(主机、副机自己的面板都看;副机的磁盘主机另在「服务器」那一项里报)
   const dl = diskLevel(s.disk);
   if (dl) add(1.5, dl, { title: t('dash.attn.disk.' + dl, { pct: diskPct(s.disk), free: fmtBytes(s.disk.free, 1) }), names: diskHogs(s.disk), go: '#/ops', goText: t('dash.attn.goOps') });
+  // 1c 本机的防火墙:面板规则没落下去、或者 m-ui 的端口在系统防火墙里没放行成(副机的在「服务器」那一项里报)
+  if (fwBad(s.fw)) add(1.6, 'warn', { title: t('dash.attn.fw'), names: s.fw.error ? trErr(s.fw.error) : t('fw.d.rules.noengine'), go: '#/fw' });
   // 2 主机容灾(字段存在才有)
   const ha = haRows(s.ha);
   if (ha) add(2, ha.sev, ha);

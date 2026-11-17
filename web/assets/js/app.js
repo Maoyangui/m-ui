@@ -20,6 +20,7 @@ import * as nodes from './pages/nodes.js';
 import * as cert from './pages/cert.js';
 import * as backup from './pages/backup.js';
 import * as ops from './pages/ops.js';
+import * as fw from './pages/fw.js';
 import * as logs from './pages/logs.js';
 import * as settings from './pages/settings.js';
 import * as admin from './pages/admin.js';
@@ -32,13 +33,13 @@ export const state = {
   err: {}, // 各类数据最近一次失败的错误(成功后清掉)
 };
 
-const pages = { dashboard, lines, subnodes, upstreams, exts, users, plans, rules: rulesPage, resellers, account, nodes, cert, backup, ops, logs, admin, settings };
+const pages = { dashboard, lines, subnodes, upstreams, exts, users, plans, rules: rulesPage, resellers, account, nodes, cert, backup, ops, fw, logs, admin, settings };
 // 侧栏分三组:网络(流量怎么进、怎么出)、运营(卖给谁、怎么计费)、系统(这台面板自己)。概览单独在最上面
 const NAV_GROUPS = [
   { items: ['dashboard'] },
   { key: 'network', items: ['lines', 'subnodes', 'upstreams', 'exts', 'nodes'] },
   { key: 'business', items: ['users', 'resellers', 'plans', 'rules'] },
-  { key: 'system', items: ['cert', 'backup', 'ops', 'logs', 'admin', 'settings'] },
+  { key: 'system', items: ['cert', 'backup', 'ops', 'fw', 'logs', 'admin', 'settings'] },
 ];
 const masterNav = NAV_GROUPS.flatMap(g => g.items);
 // 代理面板:同一套前端,只留下代理用得上的几页
@@ -103,6 +104,7 @@ const PAGE_DATA = {
   rules: ['users'],
   resellers: ['lines', 'nodes'],
   nodes: ['nodes'],
+  fw: ['nodes'],
 };
 
 // ---- 登录 ----
@@ -189,7 +191,7 @@ function supportLink(a) {
 // 改了面板路径也照样打开。键是页面名(login 是登录页),值是帮助页里的章节 id(两种语言一致,web/help_test.go 会核对)。
 const HELP_ANCHOR = {
   login: 'first-login', dashboard: 'start', lines: 'lines', subnodes: 'subnodes', upstreams: 'upstreams', exts: 'exts', users: 'users', resellers: 'resellers',
-  plans: 'plans', rules: 'rules', nodes: 'nodes', cert: 'cert', backup: 'backup', ops: 'ops', logs: 'logs',
+  plans: 'plans', rules: 'rules', nodes: 'nodes', cert: 'cert', backup: 'backup', ops: 'ops', fw: 'fw', logs: 'logs',
   admin: 'security', settings: 'settings',
 };
 const HELP_ANCHOR_RESELLER = { login: 'rs-login', dashboard: 'rs-start', users: 'users', plans: 'plans', account: 'rs-account' };
@@ -544,7 +546,7 @@ export function takeHashParams(page) {
   return p;
 }
 // 列表类页面随窗口放宽(最宽 2400px),表单类保持 1600px
-const FLUID = new Set(['dashboard', 'lines', 'subnodes', 'upstreams', 'exts', 'users', 'plans', 'resellers', 'rules', 'nodes', 'logs', 'settings']);
+const FLUID = new Set(['dashboard', 'lines', 'subnodes', 'upstreams', 'exts', 'users', 'plans', 'resellers', 'rules', 'nodes', 'logs', 'settings', 'fw']);
 // 概况页自己有「需要处理」卡:同一份数据的重载失败、证书、大陆连通三条顶部提示条在概况页不再叠在上面
 const onDash = () => current === 'dashboard';
 function pageName() {
@@ -696,7 +698,7 @@ async function route(force = false) {
   if (gen === routeGen) routing = false;
   if (gen !== routeGen) return;
   // 副机上线路/上游/用户/套餐/外部节点由主机下发:只读展示,隐藏增删改按钮
-  const readOnly = state.status.role === 'node' && ['lines', 'subnodes', 'upstreams', 'users', 'plans', 'exts', 'rules'].includes(name);
+  const readOnly = state.status.role === 'node' && ['lines', 'subnodes', 'upstreams', 'users', 'plans', 'exts', 'rules', 'fw'].includes(name);
   el.classList.toggle('node-readonly', readOnly);
   if (readOnly) el.insertAdjacentHTML('afterbegin', `<div class="alert-bar info">${t('app.nodeReadOnly')}</div>`);
   bumpRefresh(); // 换页后立刻取一次新数据:进来看到的不该是上次缓存的旧值

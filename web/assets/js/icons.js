@@ -28,6 +28,8 @@ export const ICONS = {
   backup: svg('<rect x="3" y="4.5" width="18" height="4" rx="1.2"/><path d="M5 8.5v9.3A1.7 1.7 0 0 0 6.7 19.5h10.6A1.7 1.7 0 0 0 19 17.8V8.5"/><path d="M10 12h4"/>'),
   // 运维:扳手
   ops: svg('<path d="M15.5 3.8a5 5 0 0 0-6 6.6L4 15.9a2.1 2.1 0 1 0 3 3l5.5-5.5a5 5 0 0 0 6.6-6l-2.9 2.9-2.6-.7-.7-2.6 2.6-3Z"/>'),
+  // 防火墙:一面砖墙
+  fw: svg('<rect x="3.5" y="4" width="17" height="16" rx="1.8"/><path d="M3.5 9.3h17"/><path d="M3.5 14.7h17"/><path d="M9 4v5.3"/><path d="M15 9.3v5.4"/><path d="M9 14.7V20"/>'),
   // 日志:文本行
   logs: svg('<path d="M4 6h16"/><path d="M4 10h16"/><path d="M4 14h11"/><path d="M4 18h7"/>'),
   // 管理员:带钥匙孔的盾
