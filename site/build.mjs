@@ -23,6 +23,9 @@ const GITHUB = 'https://github.com/Maoyangui/m-ui';
 const AUTHOR = { name: 'Maoyangui', url: 'https://github.com/Maoyangui' };
 // 搜索身份:仓库只叫 m-ui,但 "m-ui" 这个词被别的项目占满了,所以对外一律带上限定语
 const BRAND = { en: 'm-ui · sing-box panel by Maoyangui', zh: 'm-ui · Maoyangui 的 sing-box 面板' };
+// 页脚的赞助位(付费广告,标明「赞助商」,链接带 rel="sponsored")。只放中文页的页脚一处;面板和客户端里不放广告。
+// 换赞助商 / 到期撤下:改这里(留空字符串就不显示)和 README 里「赞助商」那一行。
+const SPONSOR = { zh: '\n    <p class="muted small sponsor">赞助商 · <a href="https://t.me/a88321" rel="sponsored noopener" target="_blank">TikTok 广告户 @a88321</a></p>', en: '' };
 const LANGS = { en: { prefix: '', hreflang: 'en', html: 'en' }, zh: { prefix: 'zh/', hreflang: 'zh-Hans', html: 'zh-CN' } };
 const TODAY = new Date().toISOString().slice(0, 10);
 const INCLUDE_FUTURE = process.env.INCLUDE_FUTURE === '1';
@@ -127,6 +130,7 @@ function render(p) {
     .replaceAll('{{switch_href}}', switchHref)
     .replaceAll('{{switch_label}}', tr.switch)
     .replaceAll('{{brand_line}}', esc(BRAND[p.lang]))
+    .replaceAll('{{sponsor}}', SPONSOR[p.lang] || '')
     .replaceAll('{{t_github}}', tr.github).replaceAll('{{t_install}}', tr.install).replaceAll('{{t_about}}', tr.about).replaceAll('{{t_articles}}', tr.articles).replaceAll('{{t_buy}}', tr.buy)
     .replaceAll('{{t_releases}}', tr.releases).replaceAll('{{t_discussions}}', tr.discussions).replaceAll('{{t_feed}}', tr.feed).replaceAll('{{t_license}}', tr.license)
     .replaceAll('{{home}}', BASE + pathOf(p.lang, 'index'))

@@ -24,6 +24,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/i
 
 **不想自己搭建?** 直接[选购节点](https://godusevpn.org/subscription/),装上客户端就能用。
 
+**赞助商** <sub>广告</sub> · TikTok 广告户:Telegram [@a88321](https://t.me/a88321)
+
 <p align="center"><img src="docs/screenshots/dashboard.png" alt="m-ui 概览:流量走势、数据面状态、在线用户与流量排行" width="960"></p>
 
 ## 这是什么
