@@ -694,7 +694,7 @@ export async function fillPayers(env, st, now, limit = 2) {
 }
 
 // ---- 留名捐赠 ----
-// 只有它计入奖池(没登记就转进来的不算)。要转的确切金额 = 填的数 + 一点零头(0.001–0.099):靠它认出是哪一笔,同一时间填了一样数的两个人也分得开。
+// 只有它计入奖池(没登记就转进来的不算)。要转的确切金额 = 填的数 + 一点零头(0.001–0.099,第三位小数不为 0):靠它认出是哪一笔,同一时间填了一样数的两个人也分得开。
 // 它最多 3 位小数,而订单金额的第 6 位小数一定不是 0,所以不会和任何订单的金额相同(另外还对一遍订单占用的金额,以防万一)。
 export async function handleDonate(env, body, ip, now) {
   const db = env.DB;
@@ -714,9 +714,16 @@ export async function handleDonate(env, body, ip, now) {
   const taken = new Set((await all(db, "SELECT exact FROM intents WHERE address = ? AND status IN ('pending', 'expired', 'cancelled') AND expires_at + ? > ? AND exact > ? AND exact < ?",
     sol.address, 2 * CFG.intentGrace, now, m, m + 100000)).map(x => x.exact));
   for (const r of await all(commerce(env), 'SELECT amount_micros AS m FROM solana_amount_reservations WHERE address = ? AND amount_micros > ? AND amount_micros < ?', sol.address, m, m + 100000)) taken.add(Number(r.m));
+  // 零头 0.001–0.099 里第三位小数不为 0 的那 90 个:整分的数(10.01、10.05…)太像一笔普通转账,
+  // 这个地址上别的资金流动更容易正好是它;带着第三位小数的才是「一看就是这一笔」。
   let exact = 0;
   const seed = crypto.getRandomValues(new Uint32Array(1))[0] % 99;
-  for (let i = 0; i < 99 && !exact; i++) { const x = m + (1 + (seed + i) % 99) * 1000; if (!taken.has(x)) exact = x; }
+  for (let i = 0; i < 99 && !exact; i++) {
+    const k = 1 + (seed + i) % 99;
+    if (k % 10 === 0) continue;
+    const x = m + k * 1000;
+    if (!taken.has(x)) exact = x;
+  }
   if (!exact) return fail(503, '这个金额现在排不开,换个数再试', 'no_slot');
   const it = { id: hex(crypto.getRandomValues(new Uint8Array(12))), name: c.name, micros: m, exact, address: sol.address, created_at: now, expires_at: now + CFG.intentWindow, status: 'pending' };
   await run(db, "INSERT INTO intents(id, name, micros, exact, address, created_at, expires_at, status, ip_hash) VALUES(?,?,?,?,?,?,?,'pending',?)", it.id, it.name, it.micros, it.exact, it.address, it.created_at, it.expires_at, ipHash);

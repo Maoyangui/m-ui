@@ -638,6 +638,8 @@ S.reward = (() => {
     ledger, board,
   };
 })();
+// 留名捐赠的零头:0.001–0.099 里第三位小数不为 0 的(整分的数太像普通转账),和登记服务同一条规则
+const rwTail = () => { for (;;) { const k = 1 + Math.floor(Math.random() * 99); if (k % 10) return k; } };
 function demoReward(method, seg, query, body) {
   const R = S.reward, q = new URLSearchParams(query || '');
   const now = () => Math.floor(Date.now() / 1000);
@@ -718,7 +720,7 @@ function demoReward(method, seg, query, body) {
     if (!name) throw demoErr(400, '请填写留名');
     if ([...name].length > 20) throw demoErr(400, '留名最多 20 个字');
     if (!(amount >= 1) || amount > 100000 || Math.round(amount * 100) !== amount * 100) throw demoErr(400, '金额要在 1 到 100000 之间,最多两位小数');
-    R.intent = { id: 'demo-' + now(), name, amount, exact: Math.round(amount * 1000 + 1 + Math.floor(Math.random() * 99)) / 1000, chain: 'solana', address: R.poolAddr, createdAt: now(), expiresAt: now() + 3600, status: 'pending' };
+    R.intent = { id: 'demo-' + now(), name, amount, exact: Math.round(amount * 1000 + rwTail()) / 1000, chain: 'solana', address: R.poolAddr, createdAt: now(), expiresAt: now() + 3600, status: 'pending' };
     return summary();
   }
   throw demoErr(404, '路径无效');

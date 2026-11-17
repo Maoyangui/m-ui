@@ -781,6 +781,13 @@ test('留名捐赠:登记后给一个带零头的确切金额,期限内这个数
   assert.ok(it.exact > 10 && it.exact < 10.1);
   assert.equal(U(it.exact) % 1000, 0, '最多 3 位小数');
   assert.notEqual(U(it.exact) % 10000, 0, '带零头');
+  // 零头的第三位小数一定不为 0:整分的数太像普通转账(以前有 9/99 的机会给出 10.01 这样的数)
+  for (let i = 0; i < 300; i++) {
+    const r = await x.donate('零头' + i, 7 + i, T0 + 10, `198.51.${100 + (i % 3)}.${i % 250}`);
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.notEqual(U(r.body.exact) % 10000, 0, '给出了整分的数 ' + r.body.exact);
+    assert.ok(U(r.body.exact) - U(7 + i) >= 1000 && U(r.body.exact) - U(7 + i) <= 99000);
+  }
   assert.deepEqual([it.chain, it.address, it.status, it.expiresAt - it.createdAt], ['solana', solA, 'pending', 3600]);
   assert.match(it.id, /^[0-9a-f]{24}$/);
 
