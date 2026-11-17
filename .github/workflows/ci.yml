@@ -40,7 +40,7 @@ jobs:
       # sing-box 起停实例时有上游库自己的竞态,会淹掉真正要看的报告;runner 其余用例照跑。
       # ha 在主机容灾分支合并后加进来。
       - name: Tests (race)
-        run: go test -race -tags with_utls ./core/... ./hub/... ./monitor/... ./reach/... ./web/... ./runner/... ./sub/... ./acme/... ./ext/...
+        run: go test -race -tags with_utls ./core/... ./hub/... ./monitor/... ./reach/... ./web/... ./runner/... ./sub/... ./acme/... ./ext/... ./reward/...
       - name: Build (linux amd64 / arm64)
         run: |
           for arch in amd64 arm64; do
@@ -48,6 +48,8 @@ jobs:
           done
       - name: Donors settle
         run: node --test deploy/donors/settle.test.mjs
+      - name: Reward registry (deploy/reward)
+        run: node --test deploy/reward/worker.test.mjs deploy/reward/check-ledger.test.mjs
       - name: Frontend (landing page logo upload)
         run: node --test web/jstest/logo.test.mjs
       - name: Frontend (external nodes page)
