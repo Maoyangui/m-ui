@@ -580,6 +580,10 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiSco
 	s.applySubTokenPolicy(&u) // 外部 API 建号也按设置来
 	disabled := !u.Enabled    // Create 之后 gorm 会把默认值 true 回填进结构体,先记下本意
 	refs = s.normalizeRefs(refs)
+	if err := s.checkRefHides(refs); err != nil {
+		badRequest(w, err)
+		return
+	}
 	err = s.db.Transaction(func(tx *gorm.DB) error { // 用户与分配一起落库:任一步失败整体回滚并报错
 		if err := tx.Create(&u).Error; err != nil {
 			return err
@@ -657,6 +661,10 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 	}
 	if refs != nil {
 		refs = s.normalizeRefs(refs)
+		if err := s.checkRefHides(refs); err != nil {
+			badRequest(w, err)
+			return
+		}
 	}
 	err = s.db.Transaction(func(tx *gorm.DB) error { // 用户字段与分配一个事务
 		if err := tx.Model(&model.User{}).Where("id = ?", u.Id).

@@ -77,7 +77,9 @@ export async function editPlan(id) {
   const ids = Array.isArray(p.lineIds) ? p.lineIds : (p.lineIds ? JSON.parse(p.lineIds) : []);
   let nodesBy = {};
   try { nodesBy = typeof p.lineNodes === 'string' ? JSON.parse(p.lineNodes || '{}') : (p.lineNodes || {}); } catch { nodesBy = {}; }
-  const refs = ids.map(id => ({ lineId: id, nodeIds: nodesBy[String(id)] || [] }));
+  let hidesBy = {};
+  try { hidesBy = typeof p.lineHides === 'string' ? JSON.parse(p.lineHides || '{}') : (p.lineHides || {}); } catch { hidesBy = {}; }
+  const refs = ids.map(id => ({ lineId: id, nodeIds: nodesBy[String(id)] || [], hide: hidesBy[String(id)] || [] }));
   let picker = null;
   // 版式:通栏从上到下 —— 名称与说明一行;「额度与限速」六个数一行(0 = 不限只说一遍,不在每栏下面各写一行);
   // 两个开关各是一行带说明的开关(周期重置的天数就在那一行里);然后是线路、限速规则。
@@ -123,6 +125,9 @@ export async function editPlan(id) {
     const nodes = {};
     picked.forEach(r => { if (r.nodeIds && r.nodeIds.length) nodes[String(r.lineId)] = r.nodeIds; });
     body.lineNodes = Object.keys(nodes).length ? nodes : null;
+    const hides = {}; // 线路里不要的节点(某台上的直连 / 某个中转入口):只影响订阅里发不发
+    picked.forEach(r => { if (r.hide && r.hide.length) hides[String(r.lineId)] = r.hide; });
+    body.lineHides = Object.keys(hides).length ? hides : null;
     if (id) await put('plans/' + id, body); else await post('plans', body);
     await load('plans');
     if (!isReseller()) rules = await get('rules').catch(() => rules) || [];
@@ -135,8 +140,8 @@ export async function editPlan(id) {
   ar.addEventListener('change', syncReset);
   syncReset();
   const nodes = (Array.isArray(state.nodes) && state.nodes.length) ? state.nodes : (Array.isArray(state.status.nodes) ? state.status.nodes : []);
-  const items = lineItems(state.lines, nodes, state.status.scope === 'reseller' ? (state.status.grants || []) : null);
-  picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refs, items) });
+  const items = lineItems(state.lines, nodes, state.status.scope === 'reseller' ? (state.status.grants || []) : null, { relay: true });
+  picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refs, items), keep: refs });
 }
 
 registerActions({

@@ -1,5 +1,7 @@
 // 线路 × 服务器选择器:一条线路部署在几台服务器上,对用户来说就是几个入口,按入口勾选。
 // 用户、套餐、代理授权三处共用;代理面板里只列授权范围内的入口。
+// 用户、套餐那两处(relay: true)再细一层:线路的中转入口也是一个个节点,和服务器并排着勾 ——
+// 「要哪些服务器」= 勾了直连的 ∪ 勾了的中转入口的出口;范围里没勾的节点写进 hide(订阅里不发)。代理授权只到服务器,不列中转。
 // 界面:搜索(线路名 / 服务器名)+ 服务器筛选(≤8 台是可换行的按钮,更多换成下拉)+ 只看已选 + 全选 / 清空可见;
 // 「全部服务器」时按线路分组:每条线路一个三态勾选框,后面是可点的服务器 chip(服务器多时折叠)。
 // 服务器再多也是纵向增长、能搜,不会横向溢出;勾选存在 Set 里,切换筛选不会丢。
@@ -15,10 +17,31 @@ function nodeIdsOf(line, nodes) {
   return nodes.filter(n => ids.includes(n.id)).map(n => n.id);
 }
 
+const parse = (v, empty) => { try { return typeof v === 'string' ? (v ? JSON.parse(v) : empty) : (v || empty); } catch { return empty; } };
+
+// relaysOf 一条线路现在会发进订阅的中转入口:[{id, name, to, via}](暂停着的、线路上关了输出的不列)。
+// 主面板拿到的是整条线路(forwards + nodeOpts),自己算;代理面板拿到的是后端算好的 relays(只有编号、名字、出口)。
+export function relaysOf(line, nodes) {
+  if (Array.isArray(line.relays)) return line.relays.map(f => ({ id: f.id, name: f.name || '', to: f.to, via: 0 }));
+  const fs = parse(line.forwards, []);
+  if (!Array.isArray(fs) || !fs.length) return [];
+  const opts = parse(line.nodeOpts, {});
+  const byNode = new Map((nodes || []).map(n => [n.id, n]));
+  return fs.filter(f => f && f.id > 0 && !f.off && !(opts['f' + f.id] || {}).hidden).map(f => {
+    const via = f.via ? byNode.get(f.via) : null;
+    return { id: f.id, name: f.name || (via ? via.name : '') || f.host || '#' + f.id, to: f.to, via: f.via || 0 };
+  });
+}
+
+// 节点键(和后端 model.DirectKey / ForwardKey 一样的写法):某台服务器上的直连 s<服务器 id>,某个中转入口 f<入口 id>
+const hideKeyOf = it => (it.relay ? 'f' + it.fid : 's' + it.nodeId);
+
 // lineItems 把线路展开成入口:[{key, lineId, nodeId, lineName, nodeName, local, narrowed}]
 // grants(可选)= 授权范围 [{lineId, nodeIds}]:只列授权过的入口(nodeIds 空 = 该线路全部)。
 // 授权收窄过的线路标 narrowed:这里看到的不是它的全部入口,勾满也只能按具体服务器写回。
-export function lineItems(lines, nodes, grants) {
+// relay: true 时每条线路后面再列它的中转入口(relay: true, fid = 入口编号, nodeId = 出口那台, nodeName = 入口的名字):
+// 出口不在这里列出的服务器里的不列(授权没给那台,本来也发不到)。
+export function lineItems(lines, nodes, grants, { relay = false } = {}) {
   nodes = nodes || [];
   const byNode = new Map(nodes.map(n => [n.id, n]));
   const allowed = grants ? new Map(grants.map(g => [g.lineId, g.nodeIds || []])) : null;
@@ -32,37 +55,56 @@ export function lineItems(lines, nodes, grants) {
       const n = byNode.get(nid);
       out.push({ key: `${l.id}:${nid}`, lineId: l.id, nodeId: nid, lineName: l.name, nodeName: n ? n.name : '', local: !!(n && n.isLocal), narrowed });
     }
+    if (!relay || !nodes.length) continue;
+    for (const f of relaysOf(l, nodes)) {
+      if (!ids.includes(f.to)) continue;
+      const exit = byNode.get(f.to);
+      out.push({ key: `${l.id}:f${f.id}`, lineId: l.id, nodeId: f.to, fid: f.id, relay: true, lineName: l.name, nodeName: f.name, exitName: exit ? exit.name : '', local: false, narrowed });
+    }
   }
   return out;
 }
 
-// keysFromRefs 把已有分配 [{lineId, nodeIds}] 换成勾选集合(nodeIds 空 = 该线路的全部入口)
+// keysFromRefs 把已有分配 [{lineId, nodeIds, hide}] 换成勾选集合(nodeIds 空 = 该线路的全部服务器;hide = 其中不要的节点)
 export function keysFromRefs(refs, items) {
   const keys = new Set();
   for (const r of refs || []) {
+    const hide = new Set(r.hide || []);
     for (const it of items) {
       if (it.lineId !== r.lineId) continue;
-      if (!r.nodeIds || !r.nodeIds.length || r.nodeIds.includes(it.nodeId)) keys.add(it.key);
+      if (r.nodeIds && r.nodeIds.length && !r.nodeIds.includes(it.nodeId)) continue;
+      if (!hide.has(hideKeyOf(it))) keys.add(it.key);
     }
   }
   return keys;
 }
 
-// refsFromKeys 把勾选集合收回成分配:一条线路的入口全勾 = 全部(以后新加的服务器自动包含);
+// refsFromKeys 把勾选集合收回成分配:一条线路的入口全勾 = 全部(以后新加的服务器、中转入口自动包含);
 // 授权收窄过的线路例外,勾满也只写具体服务器(代理看到的本来就只是一部分)。
-export function refsFromKeys(keys, items) {
+// 要哪些服务器 = 勾了直连的 ∪ 勾了的中转入口的出口;这个范围里没勾的节点进 hide。
+// keep(可选)= 原来的分配:这里没列出来的节点(比如代理面板拿不到的)原先「不要」的照样留着,不因为在这里存一次就变回都要。
+export function refsFromKeys(keys, items, keep) {
   const byLine = new Map();
   for (const it of items) {
-    if (!byLine.has(it.lineId)) byLine.set(it.lineId, { total: 0, picked: [], narrowed: false });
+    if (!byLine.has(it.lineId)) byLine.set(it.lineId, { servers: [], items: [], narrowed: false });
     const b = byLine.get(it.lineId);
-    b.total++;
+    b.items.push(it);
+    if (!it.relay) b.servers.push(it.nodeId);
     if (it.narrowed) b.narrowed = true;
-    if (keys.has(it.key)) b.picked.push(it.nodeId);
   }
+  const kept = new Map((keep || []).map(r => [r.lineId, r.hide || []]));
   const refs = [];
   for (const [lineId, b] of byLine) {
-    if (!b.picked.length) continue;
-    refs.push(!b.narrowed && b.picked.length === b.total ? { lineId } : { lineId, nodeIds: b.picked });
+    const picked = b.items.filter(it => keys.has(it.key));
+    if (!picked.length) continue;
+    const scope = b.servers.filter(id => picked.some(it => it.nodeId === id));
+    const known = new Set(b.items.map(hideKeyOf));
+    const hide = b.items.filter(it => scope.includes(it.nodeId) && !keys.has(it.key)).map(hideKeyOf)
+      .concat((kept.get(lineId) || []).filter(k => !known.has(k)));
+    const ref = { lineId };
+    if (b.narrowed || scope.length < b.servers.length) ref.nodeIds = scope;
+    if (hide.length) ref.hide = hide;
+    refs.push(ref);
   }
   return refs;
 }
@@ -70,20 +112,25 @@ export function refsFromKeys(keys, items) {
 const CHIP_OPEN_MAX = 6;  // 一条线路部署到的服务器不超过这么多:chip 直接摊开;再多折起来,点 ▾ 展开
 const TABS_MAX = 8;       // 服务器不超过这么多:筛选用可换行的按钮;再多换成下拉框
 
-// linePicker(host, {items, selected}) 渲染到 host(已存在的元素),返回 {keys, read(): refs, set(refs)}
-export function linePicker(host, { items, selected }) {
+// linePicker(host, {items, selected, keep}) 渲染到 host(已存在的元素),返回 {keys, read(): refs, set(refs)};keep 见 refsFromKeys
+export function linePicker(host, { items, selected, keep }) {
   const keys = selected || new Set();
   const nodeTabs = [];
   const seen = new Set();
-  for (const it of items) if (it.nodeId && !seen.has(it.nodeId)) { seen.add(it.nodeId); nodeTabs.push({ id: it.nodeId, name: it.nodeName, local: it.local }); }
+  for (const it of items) if (it.nodeId && !it.relay && !seen.has(it.nodeId)) { seen.add(it.nodeId); nodeTabs.push({ id: it.nodeId, name: it.nodeName, local: it.local }); }
   const multi = nodeTabs.length > 1;
   // 按线路分组(保持线路顺序)
   const groups = [], byLine = new Map();
   for (const it of items) {
     let g = byLine.get(it.lineId);
-    if (!g) { g = { id: it.lineId, name: it.lineName, items: [], narrowed: it.narrowed }; byLine.set(it.lineId, g); groups.push(g); }
+    if (!g) { g = { id: it.lineId, name: it.lineName, items: [], narrowed: it.narrowed, relay: false }; byLine.set(it.lineId, g); groups.push(g); }
     g.items.push(it);
+    if (it.relay) g.relay = true;
   }
+  const relayIc = '<span class="lp-ric" aria-hidden="true">⇄</span>';
+  // 一个入口叫什么:直连 = 服务器名;中转 = 入口的名字(前面一个中转的小图标)
+  const itemName = it => (it.relay ? relayIc + esc(it.nodeName || '—') : esc(it.nodeName || '—') + (it.local ? ` <span class="small">(${esc(t('node.local'))})</span>` : ''));
+  const itemTip = it => (it.relay ? t('lp.relayTip', { name: it.nodeName || '—', exit: it.exitName || '—' }) : '');
   let q = '', node = 0, onlySel = false;
   const expanded = new Set(); // 手动展开了 chip 的线路
   const lc = s => String(s || '').toLowerCase();
@@ -121,10 +168,10 @@ export function linePicker(host, { items, selected }) {
     const many = g.items.length > 1;
     const one = !many && g.items[0];
     const open = byServer || expanded.has(g.id) || g.items.length <= CHIP_OPEN_MAX;
-    const chip = it => `<button type="button" class="chip lp-chip ${keys.has(it.key) ? 'on' : ''}" data-key="${it.key}" aria-pressed="${keys.has(it.key)}">${esc(it.nodeName || '—')}${it.local ? ` <span class="small">(${esc(t('node.local'))})</span>` : ''}</button>`;
+    const chip = it => `<button type="button" class="chip lp-chip ${it.relay ? 'lp-relay ' : ''}${keys.has(it.key) ? 'on' : ''}" data-key="${it.key}" aria-pressed="${keys.has(it.key)}"${it.relay ? ` title="${esc(itemTip(it))}"` : ''}>${itemName(it)}</button>`;
     return `<div class="lp-line" data-line="${g.id}">
       <label title="${esc(g.name)}"><input type="checkbox" class="lp-lcb" data-line="${g.id}" ${on && on === list.length ? 'checked' : ''} ${on && on < list.length ? 'data-ind="1"' : ''}> <span class="lp-name">${esc(g.name)}</span></label>
-      <span class="lp-n">${many ? esc(t('lp.nOf', { n: pickedAll, m: g.items.length })) : one ? `<span class="muted small">${esc(one.nodeName || '—')}${one.local ? ` (${esc(t('node.local'))})` : ''}</span>` : ''}${whole ? ' ' + `<span class="badge primary" title="${esc(t('lp.wholeLineHelp'))}">${esc(t('lp.wholeLine'))}</span>` : ''}</span>
+      <span class="lp-n">${many ? esc(t(g.relay ? 'lp.nOfNodes' : 'lp.nOf', { n: pickedAll, m: g.items.length })) : one ? `<span class="muted small">${esc(one.nodeName || '—')}${one.local ? ` (${esc(t('node.local'))})` : ''}</span>` : ''}${whole ? ' ' + `<span class="badge primary" title="${esc(t(g.relay ? 'lp.wholeLineHelpNodes' : 'lp.wholeLineHelp'))}">${esc(t('lp.wholeLine'))}</span>` : ''}</span>
       ${many && !byServer && g.items.length > CHIP_OPEN_MAX ? `<button type="button" class="lp-x" data-lp-x="${g.id}" aria-expanded="${open}" title="${esc(t(open ? 'common.less' : 'common.more'))}"><i class="i i-chev${open ? ' open' : ''}"></i></button>` : '<span></span>'}
       ${many && open ? `<div class="lp-nodes">${list.map(chip).join('')}</div>` : ''}
     </div>`;
@@ -135,7 +182,7 @@ export function linePicker(host, { items, selected }) {
     if (flat()) {
       const rows = visibleItems();
       if (!rows.length) return `<p class="hint">${esc(t('lp.noMatch'))}</p>`;
-      return `<div class="check-list lp-list">${rows.map(it => `<label title="${esc(it.lineName)}"><input type="checkbox" class="lp-cb" data-key="${it.key}" ${keys.has(it.key) ? 'checked' : ''}> ${esc(it.lineName)}</label>`).join('')}</div>`;
+      return `<div class="check-list lp-list">${rows.map(it => `<label title="${esc(it.relay ? itemTip(it) : it.lineName)}"><input type="checkbox" class="lp-cb" data-key="${it.key}" ${keys.has(it.key) ? 'checked' : ''}> ${esc(it.lineName)}${it.relay ? ` <span class="lp-via">${relayIc}${esc(it.nodeName || '—')}</span>` : ''}</label>`).join('')}</div>`;
     }
     const html = groups.map(lineHTML).join('');
     return html || `<p class="hint">${esc(t('lp.noMatch'))}</p>`;
@@ -232,16 +279,24 @@ export function linePicker(host, { items, selected }) {
     }
   });
   render();
-  return { keys, read: () => refsFromKeys(keys, items), set: refs => { keys.clear(); keysFromRefs(refs, items).forEach(k => keys.add(k)); renderBody(); count(); } };
+  return { keys, read: () => refsFromKeys(keys, items, keep), set: refs => { keep = refs; keys.clear(); keysFromRefs(refs, items).forEach(k => keys.add(k)); renderBody(); count(); } };
 }
 
-// refGroups 把分配按线路聚合:[{name, full, servers:[服务器名], n, m}]。整条线路(或只有一台服务器)= full。
+// refGroups 把分配按线路聚合:[{name, full, servers:[服务器名], n, m, nodes}]。整条线路(或只有一台服务器)= full。
+// 线路有中转入口、或者分配里有不要的节点时按「节点」数(nodes: true):n / m 是勾了几个节点、一共几个,servers 里是勾了的节点名(中转的前面带 ⇄)。
 function refGroups(refs, lines, nodes) {
   nodes = nodes || [];
   const out = [];
   for (const r of refs || []) {
     const l = lines.find(x => x.id === r.lineId);
     if (!l) continue;
+    if (nodes.length && ((r.hide && r.hide.length) || relaysOf(l, nodes).length)) {
+      const items = lineItems([l], nodes, null, { relay: true });
+      const keys = keysFromRefs([r], items);
+      const picked = items.filter(it => keys.has(it.key));
+      out.push({ name: l.name, full: picked.length === items.length, servers: picked.map(it => (it.relay ? '⇄ ' : '') + (it.nodeName || '—')), n: picked.length, m: items.length, nodes: true });
+      continue;
+    }
     const all = nodes.length ? nodeIdsOf(l, nodes) : [];
     if (!r.nodeIds || !r.nodeIds.length || nodes.length < 2) { out.push({ name: l.name, full: true, servers: [], n: all.length, m: all.length }); continue; }
     // 只算线路现在还部署着的服务器:线路撤下某台后,用户分配里可能还留着那台的 id(改部署时后端不清),不能因此把部分分配算成整条
@@ -256,12 +311,12 @@ function refGroups(refs, lines, nodes) {
 // servers: true 时部分分配写出服务器名(按名字排序):换套餐预览靠字符串比较标出变化,同一线路换了同样台数的服务器也要看得出来
 export function refLabels(refs, lines, nodes, { servers = false } = {}) {
   return refGroups(refs, lines, nodes).map(g => (g.full ? g.name
-    : `${g.name} · ${servers ? [...g.servers].sort().join(t('reach.sep')) || t('lp.nOf', { n: g.n, m: g.m }) : t('lp.nOf', { n: g.n, m: g.m })}`));
+    : `${g.name} · ${servers ? [...g.servers].sort().join(t('reach.sep')) || t(g.nodes ? 'lp.nOfNodes' : 'lp.nOf', { n: g.n, m: g.m }) : t(g.nodes ? 'lp.nOfNodes' : 'lp.nOf', { n: g.n, m: g.m })}`));
 }
 
 // refChips 同上,做成 chip(服务器名放 title),多了折成「+N」;展开状态按 key 记住
 export function refChips(refs, lines, nodes, { key = '', max = 20 } = {}) {
   const list = refGroups(refs, lines, nodes);
   if (!list.length) return '';
-  return chipList(list.map(g => `<span class="chip"${g.servers.length ? ` title="${esc(g.servers.join(t('reach.sep')))}"` : ''}>${esc(g.full ? g.name : `${g.name} · ${t('lp.nOf', { n: g.n, m: g.m })}`)}</span>`), { key, max });
+  return chipList(list.map(g => `<span class="chip"${g.servers.length ? ` title="${esc(g.servers.join(t('reach.sep')))}"` : ''}>${esc(g.full ? g.name : `${g.name} · ${t(g.nodes ? 'lp.nOfNodes' : 'lp.nOf', { n: g.n, m: g.m })}`)}</span>`), { key, max });
 }

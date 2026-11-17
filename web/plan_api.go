@@ -271,6 +271,11 @@ func (s *Server) validatePlan(p *model.Plan) error {
 	if err := validatePlanRefs(p); err != nil {
 		return err
 	}
+	if refs := planRefs(*p); refs != nil { // 套餐里一条线路的节点不能一个都不留
+		if err := s.checkRefHides(s.normalizeRefs(refs)); err != nil {
+			return err
+		}
+	}
 	if p.ResellerId > 0 { // 代理的套餐只能用授权线路(含服务器范围)
 		if refs := planRefs(*p); refs != nil {
 			if err := s.checkRefsGranted(p.ResellerId, refs); err != nil {

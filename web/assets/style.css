@@ -1147,6 +1147,11 @@ td .chips { display: inline-flex; vertical-align: middle; }
 .lp-chip { font: inherit; font-size: .76rem; cursor: pointer; color: var(--muted); }
 .lp-chip.on { background: var(--primary-soft); color: var(--primary-text); border-color: transparent; }
 .lp-chip:disabled { cursor: default; opacity: .6; }
+/* 中转入口的 chip:虚线边、前面一个 ⇄,和服务器的分得开(勾上以后也留着虚线) */
+.lp-chip.lp-relay { border-style: dashed; }
+.lp-chip.lp-relay.on { border-color: color-mix(in srgb, var(--primary) 45%, transparent); }
+.lp-ric { margin-right: .28em; opacity: .7; font-size: .95em; }
+.lp-via { margin-left: .35em; color: var(--muted); font-size: .92em; white-space: nowrap; }
 .up-list-wrap > .check-list { max-height: min(55vh, 30rem); }
 
 /* 外部节点展开面板:自身不把外表撑宽(contain),子表限高滚动、表头吸顶、前两列吸左 */

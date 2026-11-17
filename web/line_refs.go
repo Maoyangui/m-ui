@@ -66,7 +66,7 @@ func (s *Server) normalizeRefsWith(refs []model.LineRef, strict bool) []model.Li
 		return nil
 	}
 	var lines []model.Line
-	s.db.Select("id, node_ids").Find(&lines)
+	s.db.Select("id, node_ids, forwards, node_opts").Find(&lines)
 	var nodes []model.Node
 	s.db.Select("id").Order("sort asc, id asc").Find(&nodes)
 	lineBy := map[uint]model.Line{}
@@ -74,8 +74,9 @@ func (s *Server) normalizeRefsWith(refs []model.LineRef, strict bool) []model.Li
 		lineBy[l.Id] = l
 	}
 	type acc struct {
-		all bool
-		set map[uint]bool
+		all  bool
+		set  map[uint]bool
+		hide map[string]bool
 	}
 	merged := map[uint]*acc{}
 	var order []uint
@@ -85,6 +86,14 @@ func (s *Server) normalizeRefsWith(refs []model.LineRef, strict bool) []model.Li
 			a = &acc{set: map[uint]bool{}}
 			merged[r.LineId] = a
 			order = append(order, r.LineId)
+		}
+		for _, k := range r.Hide {
+			if nodeKeyRe.MatchString(k) {
+				if a.hide == nil {
+					a.hide = map[string]bool{}
+				}
+				a.hide[k] = true
+			}
 		}
 		if len(r.NodeIds) == 0 {
 			a.all = true // 任一处写了"全部",整体就是全部
@@ -125,12 +134,28 @@ func (s *Server) normalizeRefsWith(refs []model.LineRef, strict bool) []model.Li
 				}
 			}
 		}
+		// 不要的节点:只留这条线路上真有、且在上面定下来的服务器范围里够得着的(别的写了也没有意义)
+		if len(a.hide) > 0 {
+			if line, ok := lineBy[lid]; ok {
+				valid, _ := refNodeKeys(line, nodes, ref.NodeIds)
+				for k := range a.hide {
+					if valid[k] {
+						ref.Hide = append(ref.Hide, k)
+					}
+				}
+			} else {
+				for k := range a.hide {
+					ref.Hide = append(ref.Hide, k)
+				}
+			}
+			sort.Strings(ref.Hide)
+		}
 		out = append(out, ref)
 	}
 	return out
 }
 
-// setUserLineRefs 落库用户的分配(两张表整体替换,一个事务)。
+// setUserLineRefs 落库用户的分配(三张表整体替换,一个事务)。
 func (s *Server) setUserLineRefs(userID uint, refs []model.LineRef) error {
 	refs = s.normalizeRefs(refs)
 	return s.db.Transaction(func(tx *gorm.DB) error { return writeUserLineRefs(tx, userID, refs) })
@@ -145,12 +170,20 @@ func writeUserLineRefs(tx *gorm.DB, userID uint, refs []model.LineRef) error {
 	if err := tx.Where("user_id = ?", userID).Delete(&model.UserLineNode{}).Error; err != nil {
 		return err
 	}
+	if err := tx.Where("user_id = ?", userID).Delete(&model.UserLineHide{}).Error; err != nil {
+		return err
+	}
 	for _, r := range refs {
 		if err := tx.Create(&model.UserLine{UserId: userID, LineId: r.LineId}).Error; err != nil {
 			return err
 		}
 		for _, n := range r.NodeIds {
 			if err := tx.Create(&model.UserLineNode{UserId: userID, LineId: r.LineId, NodeId: n}).Error; err != nil {
+				return err
+			}
+		}
+		for _, k := range r.Hide {
+			if err := tx.Create(&model.UserLineHide{UserId: userID, LineId: r.LineId, Key: k}).Error; err != nil {
 				return err
 			}
 		}
@@ -162,29 +195,35 @@ func writeUserLineRefs(tx *gorm.DB, userID uint, refs []model.LineRef) error {
 // 与数据面、订阅同一口径 —— 授权收回的线路不再显示,代理保存时也不会因它被判越权)。
 func (s *Server) userLineRefMap() map[uint][]model.LineRef {
 	links, scopes, _ := render.EffectiveLines(s.db, 0)
-	return lineRefsBy(links, scopes)
+	return lineRefsBy(links, scopes, userLineHides(s.db, 0))
 }
 
 // userLineRefs 单个用户生效的分配。
 func (s *Server) userLineRefs(userID uint) []model.LineRef {
 	links, scopes, _ := render.EffectiveLines(s.db, userID)
-	if out := lineRefsBy(links, scopes)[userID]; out != nil {
+	if out := lineRefsBy(links, scopes, userLineHides(s.db, userID))[userID]; out != nil {
 		return out
 	}
 	return []model.LineRef{}
 }
 
-// lineRefsBy 两张表的行 → 用户 → 分配。
-func lineRefsBy(links []model.UserLine, scopes []model.UserLineNode) map[uint][]model.LineRef {
+// lineRefsBy 三张表的行 → 用户 → 分配(hides = 不要的节点,只挂在还生效的线路上)。
+func lineRefsBy(links []model.UserLine, scopes []model.UserLineNode, hides []model.UserLineHide) map[uint][]model.LineRef {
 	type key struct{ u, l uint }
 	nodesBy := map[key][]uint{}
 	for _, sc := range scopes {
 		k := key{sc.UserId, sc.LineId}
 		nodesBy[k] = append(nodesBy[k], sc.NodeId)
 	}
+	hideBy := map[key][]string{}
+	for _, h := range hides {
+		k := key{h.UserId, h.LineId}
+		hideBy[k] = append(hideBy[k], h.Key)
+	}
 	out := map[uint][]model.LineRef{}
 	for _, l := range links {
-		out[l.UserId] = append(out[l.UserId], model.LineRef{LineId: l.LineId, NodeIds: nodesBy[key{l.UserId, l.LineId}]})
+		k := key{l.UserId, l.LineId}
+		out[l.UserId] = append(out[l.UserId], model.LineRef{LineId: l.LineId, NodeIds: nodesBy[k], Hide: hideBy[k]})
 	}
 	return out
 }
@@ -269,7 +308,7 @@ func (s *Server) checkRefsGranted(rid uint, refs []model.LineRef) error {
 	return nil
 }
 
-// planRefs 套餐指定的分配(LineIds + LineNodes);套餐不改线路时返回 nil。
+// planRefs 套餐指定的分配(LineIds + LineNodes + LineHides);套餐不改线路时返回 nil。
 func planRefs(p model.Plan) []model.LineRef {
 	var ids []uint
 	if len(p.LineIds) > 0 {
@@ -282,21 +321,25 @@ func planRefs(p model.Plan) []model.LineRef {
 	if len(p.LineNodes) > 0 {
 		_ = json.Unmarshal(p.LineNodes, &nodes)
 	}
+	hides := map[string][]string{}
+	if len(p.LineHides) > 0 {
+		_ = json.Unmarshal(p.LineHides, &hides)
+	}
 	out := make([]model.LineRef, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, model.LineRef{LineId: id, NodeIds: nodes[strconv.Itoa(int(id))]})
+		k := strconv.Itoa(int(id))
+		out = append(out, model.LineRef{LineId: id, NodeIds: nodes[k], Hide: hides[k]})
 	}
 	return out
 }
 
-// validatePlanRefs 套餐里的服务器范围只能写给套餐真的带的线路。
+// validatePlanRefs 套餐里的服务器范围、不要的节点只能写给套餐真的带的线路。
 func validatePlanRefs(p *model.Plan) error {
-	if len(p.LineNodes) == 0 {
-		return nil
+	if s := string(p.LineHides); s == "null" || s == "{}" {
+		p.LineHides = nil
 	}
-	nodes := map[string][]uint{}
-	if err := json.Unmarshal(p.LineNodes, &nodes); err != nil {
-		return errors.New("线路服务器范围格式错误")
+	if len(p.LineNodes) == 0 && len(p.LineHides) == 0 {
+		return nil
 	}
 	var ids []uint
 	if len(p.LineIds) > 0 {
@@ -306,29 +349,58 @@ func validatePlanRefs(p *model.Plan) error {
 	for _, id := range ids {
 		has[strconv.Itoa(int(id))] = true
 	}
-	for k := range nodes {
-		if !has[k] {
-			return errors.New("服务器范围里有套餐没带的线路 #" + k)
+	if len(p.LineNodes) > 0 {
+		nodes := map[string][]uint{}
+		if err := json.Unmarshal(p.LineNodes, &nodes); err != nil {
+			return errors.New("线路服务器范围格式错误")
+		}
+		for k := range nodes {
+			if !has[k] {
+				return errors.New("服务器范围里有套餐没带的线路 #" + k)
+			}
+		}
+	}
+	if len(p.LineHides) > 0 {
+		hides := map[string][]string{}
+		if err := json.Unmarshal(p.LineHides, &hides); err != nil {
+			return errors.New("线路节点选择格式错误")
+		}
+		for k, list := range hides {
+			if !has[k] {
+				return errors.New("节点选择里有套餐没带的线路 #" + k)
+			}
+			for _, key := range list {
+				if !nodeKeyRe.MatchString(key) {
+					return errors.New("线路节点选择格式错误")
+				}
+			}
 		}
 	}
 	return nil
 }
 
-// lineRefsJSON 把分配写回套餐的两个字段。
-func lineRefsJSON(refs []model.LineRef) (lineIds, lineNodes json.RawMessage) {
+// lineRefsJSON 把分配写回套餐的三个字段。
+func lineRefsJSON(refs []model.LineRef) (lineIds, lineNodes, lineHides json.RawMessage) {
 	if len(refs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	ids := refIDs(refs)
 	nodes := map[string][]uint{}
+	hides := map[string][]string{}
 	for _, r := range refs {
 		if len(r.NodeIds) > 0 {
 			nodes[strconv.Itoa(int(r.LineId))] = r.NodeIds
+		}
+		if len(r.Hide) > 0 {
+			hides[strconv.Itoa(int(r.LineId))] = r.Hide
 		}
 	}
 	lineIds, _ = json.Marshal(ids)
 	if len(nodes) > 0 {
 		lineNodes, _ = json.Marshal(nodes)
 	}
-	return lineIds, lineNodes
+	if len(hides) > 0 {
+		lineHides, _ = json.Marshal(hides)
+	}
+	return lineIds, lineNodes, lineHides
 }

@@ -225,6 +225,12 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 		}
 		q.Find(&lines)
 		if rid > 0 { // 代理只需要名字、协议与部署到的服务器(选择器按入口展开),服务端凭据一律不给
+			// Relays:这条线路现在发进订阅的中转入口(只给编号、名字、出口那台),代理给用户勾节点时用;地址、端口不给
+			type relay struct {
+				Id   int    `json:"id"`
+				Name string `json:"name"`
+				To   uint   `json:"to"`
+			}
 			type slim struct {
 				Id       uint            `json:"id"`
 				Name     string          `json:"name"`
@@ -232,10 +238,32 @@ func (s *Server) handleLines(w http.ResponseWriter, r *http.Request) {
 				Port     int             `json:"port"`
 				Enabled  bool            `json:"enabled"`
 				NodeIds  json.RawMessage `json:"nodeIds"`
+				Relays   []relay         `json:"relays"`
+			}
+			var nodes []model.Node
+			s.db.Select("id, name").Find(&nodes)
+			nodeName := make(map[uint]string, len(nodes))
+			for _, n := range nodes {
+				nodeName[n.Id] = n.Name
 			}
 			out := make([]slim, 0, len(lines))
 			for _, l := range lines {
-				out = append(out, slim{l.Id, l.Name, l.Protocol, l.Port, l.Enabled, l.NodeIds})
+				relays := []relay{}
+				opts := model.ParseNodeOpts(l.NodeOpts)
+				for _, f := range model.ParseForwards(l.Forwards) {
+					if f.Id <= 0 || f.Off || opts[model.ForwardKey(f.Id)].Hidden {
+						continue
+					}
+					name := strings.TrimSpace(f.Name)
+					if name == "" {
+						name = nodeName[f.Via] // 集群里的中转:那台的名字;别处的中转没起名字就只写编号(地址不给代理看)
+					}
+					if name == "" {
+						name = "#" + strconv.Itoa(f.Id)
+					}
+					relays = append(relays, relay{f.Id, name, f.To})
+				}
+				out = append(out, slim{l.Id, l.Name, l.Protocol, l.Port, l.Enabled, l.NodeIds, relays})
 			}
 			writeJSON(w, http.StatusOK, out)
 			return
@@ -1083,6 +1111,10 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			p.User.DisabledReason = model.DisabledManual // 建号时就停用 = 手动停用,重置 / 续期不会自动启用
 		}
 		refs = s.normalizeRefs(refs)
+		if err := s.checkRefHides(refs); err != nil {
+			badRequest(w, err)
+			return
+		}
 		err := s.db.Transaction(func(tx *gorm.DB) error { // 用户与分配一起落库:任一步失败整体回滚并报错
 			if err := tx.Create(&p.User).Error; err != nil {
 				return err
@@ -1168,6 +1200,10 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 		}
 		// 凭据与累计流量不经由表单覆盖;用户字段与分配一个事务
 		refs = s.normalizeRefs(refs)
+		if err := s.checkRefHides(refs); err != nil {
+			badRequest(w, err)
+			return
+		}
 		err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&model.User{}).Where("id = ?", id).Select(
 				"name", "enabled", "disabled_reason", "volume", "expiry", "auto_reset", "reset_days",
@@ -1248,7 +1284,7 @@ func (s *Server) deleteUser(u model.User, actor string) error {
 		if err := tx.Delete(&model.User{}, u.Id).Error; err != nil {
 			return err
 		}
-		for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserExt{}, &model.LimitState{}} {
+		for _, t := range []interface{}{&model.UserLine{}, &model.UserLineNode{}, &model.UserLineHide{}, &model.UserExt{}, &model.LimitState{}} {
 			if err := tx.Where("user_id = ?", u.Id).Delete(t).Error; err != nil {
 				return err
 			}

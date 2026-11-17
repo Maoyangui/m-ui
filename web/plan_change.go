@@ -785,7 +785,7 @@ func loadPlanOpInput(db *gorm.DB, uid uint) (planOpInput, error) {
 	if err != nil {
 		return in, err
 	}
-	in.fromRefs = lineRefsBy(links, scopes)[uid]
+	in.fromRefs = lineRefsBy(links, scopes, userLineHides(db, uid))[uid]
 	if in.user.ResellerId > 0 {
 		var rs model.Reseller
 		if db.First(&rs, in.user.ResellerId).Error == nil {
@@ -1429,6 +1429,10 @@ func (s *Server) apiUpdateUserPlan(w http.ResponseWriter, r *http.Request, u mod
 	}
 	if patch.refsGiven {
 		patch.refs = s.normalizeRefs(refs) // 给了空列表整理出来是 nil:不改线路,和以前一样
+		if err := s.checkRefHides(patch.refs); err != nil {
+			badRequest(w, err)
+			return
+		}
 	}
 	if req.ExtIds != nil && sc.rid == 0 {
 		patch.extIds = req.ExtIds

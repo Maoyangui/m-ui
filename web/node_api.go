@@ -352,6 +352,10 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 			}
+			// 用户「不要这台上的直连节点」的记录:这台没了,记录也没有意义了
+			if err := tx.Where("node_key = ?", model.DirectKey(id)).Delete(&model.UserLineHide{}).Error; err != nil {
+				return err
+			}
 			// 记下的账本纪元随游标一起删:那台机器以后再加回来,只建基线、不重算历史(见 hub.MergeCounters)
 			if err := tx.Where("key = ?", hub.LedgerEpochSetting(id)).Delete(&model.Setting{}).Error; err != nil {
 				return err
@@ -406,6 +410,10 @@ func revokeSoleNodeScopes(tx *gorm.DB, nodeID uint) (users, resellers []string, 
 	var uids []uint
 	for _, x := range ul {
 		if err = tx.Where("user_id = ? AND line_id = ?", x.UserId, x.LineId).Delete(&model.UserLine{}).Error; err != nil {
+			return
+		}
+		// 这条线路整条撤掉了,他在上面「不要哪些节点」也跟着清(留着的话以后重新分给他会莫名其妙少节点)
+		if err = tx.Where("user_id = ? AND line_id = ?", x.UserId, x.LineId).Delete(&model.UserLineHide{}).Error; err != nil {
 			return
 		}
 		uids = append(uids, x.UserId)

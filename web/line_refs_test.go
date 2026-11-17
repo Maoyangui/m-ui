@@ -101,7 +101,7 @@ func TestLineRefs(t *testing.T) {
 	if err := validatePlanRefs(&bad); err == nil {
 		t.Fatal("范围里出现套餐没带的线路应被拒")
 	}
-	ids, nodes := lineRefsJSON(pr)
+	ids, nodes, _ := lineRefsJSON(pr)
 	if string(ids) != "[1,2]" || string(nodes) != `{"2":[3]}` {
 		t.Fatalf("写回套餐字段不对: %s %s", ids, nodes)
 	}

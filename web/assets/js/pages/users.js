@@ -17,7 +17,8 @@ import { lineItems, keysFromRefs, linePicker, refLabels, refChips } from '../lin
 
 // 代理面板没有服务器页:服务器名与授权范围来自 status;主面板用 state.nodes
 const pickerNodes = () => (Array.isArray(state.nodes) && state.nodes.length) ? state.nodes : (Array.isArray(state.status.nodes) ? state.status.nodes : []);
-const pickerItems = () => lineItems(state.lines, pickerNodes(), isReseller() ? (state.status.grants || []) : null);
+// relay: true —— 线路的中转入口也一个个列出来,和服务器并排着勾(只影响订阅里发不发)
+const pickerItems = () => lineItems(state.lines, pickerNodes(), isReseller() ? (state.status.grants || []) : null, { relay: true });
 const refsOf = u => u.lineRefs || (u.lineIds || []).map(id => ({ lineId: id }));
 let picker = null;
 import { tzOffsetMinutes, switchRow } from '../ui.js';
@@ -430,7 +431,7 @@ function editUser(id) {
     if (created && created.id && state.users.length === 1) showDetail(created.id);
   }, { size: 'xl' });
   const items = pickerItems();
-  picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refsOf(u), items) });
+  picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refsOf(u), items), keep: refsOf(u) });
   // 新建时选了套餐就直接填好额度;编辑老用户时只是改归属,要填额度再点按钮
   if (!id) { const sel = document.getElementById('f-plan'); if (sel) sel.addEventListener('change', () => fillFromPlan(sel.value)); }
 }

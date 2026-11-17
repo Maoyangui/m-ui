@@ -290,6 +290,7 @@ type Plan struct {
 	FirstUse    bool            `json:"firstUse"`            // 有时长的套餐从首次连接开始计时,而不是从套用那一刻
 	LineIds     json.RawMessage `json:"lineIds,omitempty"`   // 空=不改动用户线路
 	LineNodes   json.RawMessage `json:"lineNodes,omitempty"` // 线路 → 服务器范围 {"3":[1,2]};没写的线路 = 全部服务器
+	LineHides   json.RawMessage `json:"lineHides,omitempty"` // 线路 → 不要的节点 {"3":["s2","f1"]}(键见 DirectKey / ForwardKey);没写的线路 = 都要
 	Desc        string          `json:"desc"`
 	Sort        int             `json:"sort"`
 	// Price 参考价:只用于换套餐时按剩余价值折算、预览里估值,不收钱,也不给终端用户看;0 = 没填(不能折算)。
@@ -450,9 +451,12 @@ type ResellerLineNode struct {
 }
 
 // LineRef 是接口里表达"线路 × 服务器"分配的方式:NodeIds 为空 = 该线路的全部服务器。
+// Hide = 这条线路里不要的节点(键见 DirectKey / ForwardKey:某台服务器上的直连、某个中转入口),空 = 够得着的节点都要
+// (以后新加的也要)。只影响订阅里发不发,见 UserLineHide。
 type LineRef struct {
-	LineId  uint   `json:"lineId"`
-	NodeIds []uint `json:"nodeIds,omitempty"`
+	LineId  uint     `json:"lineId"`
+	NodeIds []uint   `json:"nodeIds,omitempty"`
+	Hide    []string `json:"hide,omitempty"`
 }
 
 // Session 面板与代理面板的登录会话:以前只在内存里,每次更新 / 重启所有人都要重新登录。

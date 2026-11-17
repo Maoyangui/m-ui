@@ -948,7 +948,10 @@ const EN = /*BEGIN*/{
 "检测任务不存在或已过期": "This test no longer exists or has expired",
 "这条线路停用着,没有在监听,启用后再测": "This line is disabled and not listening; enable it first",
 "这条线路在订阅里没有可连的地址(没有部署到启用的服务器,或节点都关了输出)": "This line has no address in subscriptions (it isn't deployed to an enabled server, or all its nodes are hidden)",
-"没测成": "The test didn't complete"
+"没测成": "The test didn't complete",
+"线路「%s」的节点一个都没留:至少留一个,或者把这条线路整条去掉": "No node of line \"%s\" is left selected: keep at least one, or remove the whole line",
+"线路节点选择格式错误": "Invalid line node selection",
+"节点选择里有套餐没带的线路 #%w": "The node selection includes line #%w that the plan doesn't have"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表
