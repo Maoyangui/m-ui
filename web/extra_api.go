@@ -644,6 +644,10 @@ func (s *Server) dispatchLineSubroute(w http.ResponseWriter, r *http.Request) bo
 		s.handleLineNode(w, r, id)
 		return true
 	}
+	if id, job, ok := lineReachRoute(r.URL.Path); ok {
+		s.handleLineReach(w, r, id, job)
+		return true
+	}
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	if !strings.HasSuffix(path, "/toggle") {
 		return false

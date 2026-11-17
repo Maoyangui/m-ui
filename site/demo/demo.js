@@ -567,6 +567,49 @@ S.fw = {
   ],
   allow: [{ id: 1, ip: '198.51.100.0/24', note: 'office', createdAt: now() - 30 * DAY }],
 };
+// ---- 线路详情「测大陆连通」(js/pages/lines.js)的演示 ----
+// 和后端一样按订阅里的地址来:线路部署到的每台服务器一个(线路单独选了 IPv6 的用那台的 IPv6 地址),接着是中转入口。
+// 结果约 1.2 秒出一个:三台服务器都通(延迟和服务器页那份一致);UDP 的线路注明只 ping 了地址;别处的中转入口演示「大陆通、香港不通」。
+S.lineReach = {}; // 任务号 → { lineId, t0, items }
+function demoLineReach(l, method, job) {
+  if (job) {
+    const j = S.lineReach[job];
+    if (!j || j.lineId !== l.id) throw demoErr(404, '检测任务不存在或已过期');
+    const n = Math.min(j.items.length, Math.floor((Date.now() - j.t0) / 1200));
+    const items = j.items.map((it, i) => (it.state === 'skipped' || i < n ? it : { label: it.label, target: it.target, port: it.port, relay: it.relay, udp: it.udp, v6: it.v6, state: 'pending' }));
+    return { done: n >= j.items.length, total: items.length, finished: items.filter(x => x.state !== 'pending').length, items: clone(items) };
+  }
+  if (method !== 'POST') throw demoErr(405, '方法不允许');
+  if (l.enabled === false) throw demoErr(400, '这条线路停用着,没有在监听,启用后再测');
+  const parse = v => { try { return typeof v === 'string' ? JSON.parse(v) : (v || null); } catch { return null; } };
+  const nodes = S.nodes.nodes.filter(n => n.enabled !== false);
+  const ids = parse(l.nodeIds), fam = parse(l.nodeFamily) || {};
+  const on = nodes.filter(n => !Array.isArray(ids) || !ids.length || ids.includes(n.id));
+  const hostOf = n => (fam[n.id] === 'v6' && n.publicIp6 ? n.publicIp6 : (n.addr || n.publicIp || n.domain || ''));
+  const eps = on.map(n => ({ label: n.name, target: hostOf(n), port: l.port, nodeId: n.id }));
+  for (const fw of (parse(l.forwards) || [])) {
+    const exit = on.find(n => n.id === fw.to), via = fw.via ? nodes.find(n => n.id === fw.via) : null;
+    if (fw.off || !exit || (fw.via && !via)) continue;
+    eps.push({ label: exit.name + '-' + (fw.name || (via ? via.name : fw.host)), target: via ? hostOf(via) : fw.host, port: fw.port, relay: true, nodeId: via ? via.id : 0, ext: !via });
+  }
+  if (!eps.length) throw demoErr(400, '这条线路在订阅里没有可连的地址(没有部署到启用的服务器,或节点都关了输出)');
+  const udp = l.protocol === 'hysteria2' || l.protocol === 'tuic';
+  const base = { 1: 52, 2: 68, 3: 160 };
+  const light = gs => gs.map(g => ({ key: g.key, state: g.state, ok: g.ok, total: g.total, avgMs: g.avgMs }));
+  const items = eps.map(e => {
+    const it = { label: e.label, target: e.target, port: e.port, ...(e.relay ? { relay: true } : {}), ...(udp ? { udp: true } : {}), ...(e.target.includes(':') ? { v6: true } : {}), state: 'done' };
+    if (it.v6 && udp) return { ...it, state: 'skipped', skip: 'udp6' };
+    if (it.v6) return { ...it, v6r: { state: 'ok', scope: 'cn', target: e.target, port: e.port, ok: 4, total: 4, cnOk: 4, cnTotal: 4, at: now() } };
+    const gs = light(cnGroups(base[e.nodeId] || 34));
+    if (e.ext) { const hk = gs.find(g => g.key === 'hk'); hk.state = 'down'; hk.ok = 0; hk.avgMs = 0; } // 国内的中转入口常只放行大陆 IP
+    return { ...it, verdict: 'ok', note: [udp ? 'udpPing' : '', e.ext ? 'hkDown' : ''].filter(Boolean).join(','), groups: gs };
+  });
+  const id = 'demo-' + rnd(8);
+  S.lineReach[id] = { lineId: l.id, t0: Date.now(), items };
+  return { job: id, items: items.map(it => (it.state === 'skipped' ? it : { label: it.label, target: it.target, port: it.port, relay: it.relay, udp: it.udp, v6: it.v6, state: 'pending' })) };
+}
+// ---- 线路详情「测大陆连通」的演示:完 ----
+
 // ---- 流量奖励(js/reward.js)的演示数据 ----
 // 地址全是演示用的:中间故意带着 base58 里没有的「0」,钱包一粘贴就会拒绝 —— 不会有人照着演示站把钱打到一个不存在的地址上。
 const RW_TB = 1099511627776;
@@ -847,6 +890,7 @@ function route(method, path, query, body) {
       case 'lines':
         if (seg[1] === 'nodes' && seg[2] === 'online') return { online: { '1:s1': 1, '1:f2': 2, '2:s2': 1, '4:s1': 1, '4:s2': 3 } }; // 节点页「在线 / 容量」
         if (seg[2] === 'detail') return lineDetail(find(S.lines, id), new URLSearchParams(query));
+        if (seg[2] === 'reach') return demoLineReach(find(S.lines, id), 'GET', seg[3]); // 线路详情「测大陆连通」的进度
         return clone(S.lines);
       case 'upstreams': if (seg[1] === 'health') return demoHealth(); return clone(S.upstreams);
       case 'users': if (seg[2] === 'plan-ops') return clone(S.planOps.filter(o => o.userId === id).slice(0, Number(new URLSearchParams(query).get('limit')) || 20));
@@ -968,6 +1012,7 @@ function route(method, path, query, body) {
         return { lines: clone([...touched.values()]), changed: (body.items || []).length };
       }
       const l = find(S.lines, id);
+      if (seg[2] === 'reach') return demoLineReach(l, method, seg[3]);
       if (seg[2] === 'toggle') { l.enabled = !l.enabled; demoSyncBlocked(); return ok(); }
       if (seg[2] === 'node' && method === 'PUT') { // 节点页:整份替换一个节点的设置;带 src 的顺手改那个入口的来源 IP
         const parse = v => { try { return typeof v === 'string' ? JSON.parse(v) : (v || null); } catch { return null; } };

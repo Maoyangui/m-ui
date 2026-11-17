@@ -24,12 +24,15 @@ export const openModal = () => {}; export const registerActions = () => {}; expo
 export const field = () => ''; export const fieldBox = () => ''; export const check = () => ''; export const empty = () => ''; export const fv = (id) => (globalThis.__fv || {})[id] ?? '';
 export const fchk = () => true; export const matches = () => true; export const debounce = (f) => f; export const setHTML = () => {};
 export const chipList = (a) => a.join(''); export const switchRow = () => '';
-export const openDrawer = () => {}; export const hostPort = (h, p) => h + ':' + p; export const drawerOpen = () => false; export const setText = () => {}; export const fmtBytes = (n) => String(n); export const tzOffsetMinutes = () => 0;`);
+export const openDrawer = () => {}; export const hostPort = (h, p) => h + ':' + p; export const drawerOpen = () => false; export const setText = () => {}; export const fmtBytes = (n) => String(n); export const tzOffsetMinutes = () => 0; export const fmtTime = (ts) => 'T' + ts;`);
 stub('chart.js', `export const barChart = () => {}; export const bucketFor = () => 3600;`);
 stub('relayip.js', `export const serverOfIP = () => '';`);
 stub('certpicker.js', `export const openCertDrawer = () => {}; export const certLabel = (s) => s;`);
 stub('reach.js', `export const loadReach = async () => null; export const reachLoaded = () => true; export const v6Of = (id) => (globalThis.__v6 || {})[id] || null;
-export const v6LineBadge = () => ''; export const v6ForLine = (v, l) => ((l.protocol === 'hysteria2' || l.protocol === 'tuic') ? 'udpLine' : v ? v.state : null);`);
+export const v6LineBadge = () => ''; export const v6ForLine = (v, l) => ((l.protocol === 'hysteria2' || l.protocol === 'tuic') ? 'udpLine' : v ? v.state : null);
+export const groupChip = (g) => '[' + g.key + ':' + g.state + ']'; export const v6Chip = (v) => '[v6:' + v.state + ']'; export const v6Label = (v) => 'v6.' + v.state; export const v6Explain = (v) => 'why ' + v.state;
+export const v6Tone = (v) => (v.state === 'ok' ? 'ok' : v.state === 'cndown' ? 'danger' : ''); export const verdictLabel = (v) => 'reach.v.' + (v || 'none');
+export const verdictTone = (v) => ({ ok: 'ok', partial: 'warn', blocked: 'danger', portBlocked: 'danger', abroadDown: 'danger' })[v] || '';`);
 stub(path.join('pages', 'upstreams.js'), `export const editRelayUpstream = () => {};`);
 
 globalThis.__state = { settings: {}, nodes: [], lines: [] };
@@ -132,4 +135,36 @@ test('表单:按勾选的服务器与下拉算出哪些服务器走 IPv6(全不�
   globalThis.__fv = { 'f-addrs': '[{"server":"1.2.3.4"}]' };
   assert.deepEqual(lines.formV6Servers(), []);
   globalThis.__fv = {};
+});
+
+// 线路详情「测大陆连通」:一个地址一行的结论怎么写(t 在这里原样返回键名)
+test('测大陆连通的一行:还在测、测不了、IPv6、TCP、UDP 各写什么', () => {
+  const v = lines.lineReachVerdict;
+  const groups = [{ key: 'cm', state: 'ok', ok: 3, total: 3 }, { key: 'ct', state: 'down', ok: 0, total: 3 }, { key: 'cu', state: 'ok', ok: 2, total: 3 }, { key: 'hk', state: 'ok', ok: 2, total: 2 }];
+  // 还在测:只有一个转圈,没有结论
+  assert.deepEqual(v({ state: 'pending', target: '203.0.113.1', port: 443 }), { label: 'reach.running', tone: '', title: '', chips: '', wait: true });
+  // UDP 又走 IPv6:测点测不了,如实写「未测」并说怎么自己确认
+  const skip = v({ state: 'skipped', skip: 'udp6', udp: true, v6: true, target: '2001:db8::1', port: 4545 });
+  assert.deepEqual([skip.label, skip.tone, skip.title, skip.chips], ['reach.v6.s.udpLine', '', 'reach.v6.lineUdp', '']);
+  // IPv6 的地址:用 IPv6 入站那一套的结论和解释
+  const six = v({ state: 'done', v6: true, target: '2001:db8::1', port: 443, v6r: { state: 'cndown', scope: 'both' } });
+  assert.deepEqual([six.label, six.tone, six.title, six.chips], ['v6.cndown', 'danger', 'why cndown', '[v6:cndown]']);
+  assert.equal(v({ state: 'done', v6: true, target: '2001:db8::1', port: 443, error: 'x' }).label, 'v6.error', '没带结果的按没测成算');
+  // TCP:结论照服务器页的叫法;小标只有三家运营商,香港对照写在悬停里
+  const tcp = v({ state: 'done', verdict: 'partial', groups });
+  assert.deepEqual([tcp.label, tcp.tone, tcp.chips], ['reach.v.partial', 'warn', '[cm:ok][ct:down][cu:ok]']);
+  assert.match(tcp.title, /reach\.x\.partial/);
+  assert.match(tcp.title, /reach\.g\.hk/);
+  assert.equal(v({ state: 'done', verdict: 'ok', groups }).label, 'reach.v.ok');
+  // 大陆、香港都连不上:不写「境外也不通」(国内中转入口本来就可能只放行大陆),写「都不可达」,解释用提示里的那一句
+  const both = v({ state: 'done', verdict: 'abroadDown', note: 'bothDown', groups: [] });
+  assert.deepEqual([both.label, both.tone, both.title], ['ext.reachBothDown', 'danger', 'ext.reachNote.bothDown']);
+  // UDP 的线路只 ping 了地址:通的时候不写「正常」
+  const udp = v({ state: 'done', udp: true, verdict: 'ok', note: 'udpPing', groups });
+  assert.deepEqual([udp.label, udp.tone], ['line.reach.pingOk', 'ok']);
+  assert.match(udp.title, /ext\.reachNote\.udpPing/);
+  assert.equal(v({ state: 'done', udp: true, verdict: 'blocked', note: 'udpPing', groups }).label, 'reach.v.blocked', 'ping 都不通的照常写结论');
+  // 没测成:不画运营商的小标,原因在悬停里
+  const err = v({ state: 'done', verdict: 'error', error: '额度不够', groups });
+  assert.deepEqual([err.label, err.chips, err.title], ['reach.v.error', '', 'reach.x.error']);
 });

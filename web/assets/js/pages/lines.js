@@ -2,12 +2,12 @@ import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, openDrawer, drawerOpen, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, setText, chipList, fieldBox, fmtBytes, tzOffsetMinutes, switchRow } from '../ui.js';
+import { esc, toast, confirm, openModal, openDrawer, drawerOpen, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, setText, chipList, fieldBox, fmtBytes, tzOffsetMinutes, switchRow, fmtTime } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
 import { serverOfIP } from '../relayip.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 import { editRelayUpstream } from './upstreams.js';
-import { loadReach, reachLoaded, v6Of, v6LineBadge, v6ForLine } from '../reach.js';
+import { loadReach, reachLoaded, v6Of, v6LineBadge, v6ForLine, groupChip, v6Chip, v6Label, v6Explain, v6Tone, verdictLabel, verdictTone } from '../reach.js';
 
 const selected = new Set(); // 批量设置勾选的线路 id
 export const title = () => t('line.title');
@@ -1520,7 +1520,9 @@ async function showLineDetail(id) {
       <button class="btn sm" data-act="line.edit" data-id="${l.id}"><i class="i i-pencil"></i>${t('common.edit')}</button>
       <button class="btn sm" data-act="line.clone" data-id="${l.id}"><i class="i i-copy"></i>${t('line.clone')}</button>
       <button class="btn sm" data-act="line.asUpstream" data-id="${l.id}">${t('up.addFromLine')}</button>
+      ${canLineReach() ? `<button class="btn sm" id="ld-reach-btn" data-act="line.reach" data-id="${l.id}"${l.enabled ? ` title="${esc(t('line.reach.help'))}"` : ` disabled title="${esc(t('line.reach.off'))}"`}>${t('line.reach.btn')}</button>` : ''}
     </div>
+    <div class="ld-reach" id="ld-reach" hidden></div>
     <div class="ld-sum" id="ld-sum"></div>
     ${fwDetail(l)}
     <section>
@@ -1536,6 +1538,7 @@ async function showLineDetail(id) {
         <input type="search" class="sm" id="ld-q" placeholder="${esc(t('line.d.search'))}" hidden></div>
       <div id="ld-online"><span class="muted small">${t('common.loading')}</span></div>
     </section>`, { wide: true });
+  renderLineReach(id);
   document.getElementById('ld-srv').addEventListener('change', e => { if (ld) { ld.server = Number(e.target.value); renderLineDetail(); } });
   document.getElementById('ld-q').addEventListener('input', debounce(e => { if (ld) { ld.q = e.target.value; ld.more = 0; renderLineOnline(); } }));
   await loadLineDetail();
@@ -1620,6 +1623,98 @@ function renderLineOnline() {
     </div>`).join('')}</div>` +
     (list.length > n || ld.more ? `<div class="card-foot">${list.length > n ? `<button class="btn sm ghost" data-act="line.dMore">${esc(t('line.d.more', { n: Math.min(LD_PAGE, list.length - n), left: list.length - n }))}</button>` : ''}${ld.more ? `<button class="btn sm ghost" data-act="line.dLess">${esc(t('common.less'))}</button>` : ''}</div>` : ''));
   if (changed) { const b = document.querySelector('#ld-online .ld-olist'); if (b) b.scrollTop = keep; }
+}
+
+// ---- 线路详情:测大陆连通 ----
+// 点一下,主机从大陆三网的家宽测点连这条线路在订阅里给用户的每个地址(后端 web/line_reach.go;和服务器页的定时巡检是两回事:
+// 这里测的是这条线路自己的端口,不记历史、不告警)。结果要轻:一个地址一行 —— 圆点、名字、地址、三家运营商的小标
+// (和服务器页同一种)、结论;解释放在悬停里。抽屉关了再开,这条线路最近一次的结果还在(只留在这次打开的页面里)。
+const lineReach = new Map(); // 线路 id → { job, items, done, at, err, timer, fails }
+const canLineReach = () => (state.status || {}).role !== 'node' && (state.status || {}).scope !== 'reseller';
+const lrAddr = it => (String(it.target).includes(':') ? `[${it.target}]:${it.port}` : `${it.target}:${it.port}`);
+const LR_CARRIERS = ['cm', 'ct', 'cu'];
+// 一个地址的结论:文字、颜色、悬停里的解释、右边的小标
+export function lineReachVerdict(it) {
+  if (it.state === 'pending') return { label: t('reach.running'), tone: '', title: '', chips: '', wait: true };
+  if (it.state === 'skipped') return { label: t('reach.v6.s.udpLine'), tone: '', title: t('reach.v6.lineUdp', { port: it.port }), chips: '' };
+  if (it.v6) {
+    const v = it.v6r || { state: 'error', error: it.error || '', target: it.target, port: it.port };
+    return { label: v6Label(v), tone: v6Tone(v), title: v6Explain(v), chips: v6Chip(v) };
+  }
+  const notes = (it.note || '').split(',').filter(Boolean), gs = it.groups || [];
+  const down = gs.filter(g => LR_CARRIERS.includes(g.key) && g.state === 'down').map(g => t('reach.g.' + g.key));
+  const why = it.verdict === 'error' ? t('reach.x.error', { err: trErr(it.error || '') })
+    : it.verdict === 'partial' ? t('reach.x.partial', { down: down.join(t('reach.sep')) || t('reach.v.partial') })
+    : it.verdict === 'abroadDown' ? '' // 两边都不通:下面那条提示(bothDown)说得更准
+    : it.verdict ? t('reach.x.' + it.verdict) : '';
+  const none = ['error', 'noProbes'].includes(it.verdict); // 没测成 / 没有测点:没有分运营商的结果可说
+  const hk = none ? null : gs.find(g => g.key === 'hk');
+  const title = [why, ...notes.map(n => t('ext.reachNote.' + n)), hk && hk.total ? `${t('reach.g.hk')}(${t('reach.control')})${t('reach.okOf', { ok: hk.ok, total: hk.total })}` : ''].filter(Boolean).join(' ');
+  // UDP 的线路只 ping 了地址:通的时候不写「正常」(端口和 QUIC 并没有验证到),写「ping 通」
+  const label = it.verdict === 'abroadDown' ? t('ext.reachBothDown') : it.udp && it.verdict === 'ok' ? t('line.reach.pingOk') : verdictLabel(it.verdict);
+  return { label, tone: verdictTone(it.verdict), title, chips: none ? '' : gs.filter(g => LR_CARRIERS.includes(g.key)).map(groupChip).join('') };
+}
+function renderLineReach(id) {
+  const box = document.getElementById('ld-reach'), btn = document.getElementById('ld-reach-btn');
+  if (!box || !ld || ld.id !== id) return;
+  const r = lineReach.get(id);
+  if (btn) {
+    const busy = !!(r && !r.done && !r.err);
+    btn.disabled = busy || !(state.lines.find(x => x.id === id) || {}).enabled;
+    btn.innerHTML = busy ? `<span class="spin"></span> ${esc(t('reach.running'))}` : esc(t(r ? 'line.reach.again' : 'line.reach.btn'));
+  }
+  box.hidden = !r;
+  if (!r) { setHTML(box, ''); return; }
+  const items = r.items || [], fin = items.filter(x => x.state !== 'pending').length;
+  const head = r.err ? `<span class="danger-text">${esc(r.err)}</span>`
+    : r.done ? `<span>${esc(fmtTime(r.at))}</span>` : `<span>${esc(t('line.reach.progress', { done: fin, total: items.length }))}</span>`;
+  const rows = items.map(it => {
+    const v = lineReachVerdict(it), addr = lrAddr(it);
+    return `<div class="ld-rrow"><span class="dot ${v.tone}"></span><span class="nm" title="${esc(it.label)}">${esc(it.label)}</span><span class="ad mono" title="${esc(addr)}">${esc(addr)}</span>
+      <span class="cs">${v.chips}</span><span class="vd ${v.tone ? v.tone + '-text' : 'muted'}"${v.title ? ` title="${esc(v.title)}"` : ''}>${v.wait ? '<span class="spin"></span>' : esc(v.label)}</span></div>`;
+  }).join('');
+  // UDP 的线路只能 ping 地址:这一点不放在悬停里,明说一次
+  const udp = items.some(x => x.udp && x.state !== 'skipped');
+  setHTML(box, `<div class="ld-reach-h"><b>${esc(t('reach.col'))}</b>${head}</div>${rows ? `<div class="ld-rlist">${rows}</div>` : ''}${udp ? `<p class="hint">${esc(t('line.reach.udpNote'))}</p>` : ''}`);
+}
+async function startLineReach(id) {
+  const old = lineReach.get(id);
+  if (old && !old.done && !old.err) return;
+  const run = { items: (old && old.items) || [], done: false, at: 0, err: '', fails: 0 };
+  if (old) clearTimeout(old.timer);
+  lineReach.set(id, run);
+  run.items = run.items.map(x => (x.state === 'skipped' ? x : { ...x, state: 'pending' })); // 重测时上一次的行先留着,转成等待
+  renderLineReach(id);
+  let r;
+  try { r = await post(`lines/${id}/reach`, {}, SLOW); }
+  catch (e) {
+    if (lineReach.get(id) !== run) return;
+    // 没开始成(额度不够、别处正在测):说明原因;上一次测完的结果还留着
+    run.err = trErr(e.message); run.items = (old && old.done && old.items) || []; run.at = (old && old.at) || 0;
+    renderLineReach(id);
+    return;
+  }
+  if (lineReach.get(id) !== run) return;
+  run.job = r.job; run.items = r.items || [];
+  renderLineReach(id);
+  const started = Date.now();
+  const poll = async () => {
+    if (lineReach.get(id) !== run) return;
+    let st;
+    try { st = await get(`lines/${id}/reach/${run.job}`); run.fails = 0; }
+    catch (e) {
+      if (lineReach.get(id) !== run) return;
+      if (e.status === 404 || ++run.fails > 5) { run.err = trErr(e.message); renderLineReach(id); return; }
+      run.timer = setTimeout(poll, 2000 * 2 ** run.fails); // 出错退避重试,不是一错就停
+      return;
+    }
+    if (lineReach.get(id) !== run) return;
+    run.items = st.items || run.items;
+    if (st.done || Date.now() - started > 6 * 60 * 1000) { run.done = true; run.at = Math.floor(Date.now() / 1000); renderLineReach(id); return; }
+    renderLineReach(id);
+    run.timer = setTimeout(poll, 2000);
+  };
+  run.timer = setTimeout(poll, 1500);
 }
 
 // 一个中转入口现在的状态:暂停 / 别处的中转 / 已有转发 / 生效;开不出来的写原因(端口被占、那台离线或停用、版本太旧)
@@ -1716,6 +1811,7 @@ registerActions({
   },
   'line.preset': id => presetLine(id),
   'line.detail': id => showLineDetail(Number(id)),
+  'line.reach': id => startLineReach(Number(id)),
   'line.dRange': id => {
     if (!ld) return;
     ld.hours = ldHours = Number(id) || 24;

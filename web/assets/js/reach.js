@@ -58,7 +58,7 @@ export function v6Explain(v) {
   return s;
 }
 // 服务器列表里那一格的小标签:大陆通 ✓、入站没放行 ✕;「境外通 / 大陆不通」写出来,不能只给一个勾或叉
-function v6Chip(v) {
+export function v6Chip(v) {
   const kind = v6Kind(v);
   const val = kind === 'ok' ? '✓' : kind === 'down' ? '✕' : kind === 'okAbroad' || kind === 'cndown' ? t('reach.v6.chip.' + kind) : kind === 'udp' ? 'UDP' : '?';
   return `<span class="rc ${V6CHIP[v.state] && kind !== 'okAbroad' ? V6CHIP[v.state] : ''}" title="${esc(t('reach.v6.title') + ':' + v6Label(v) + ' · ' + v6Explain(v))}">v6<b>${esc(val)}</b></span>`;
@@ -103,7 +103,9 @@ export function v6LineBadge(v, l) {
   return v6Badge(v);
 }
 
-function groupChip(g) {
+export const verdictTone = v => TONE[v] || '';
+export const v6Tone = v => V6TONE[v6Kind(v)] || '';
+export function groupChip(g) {
   const label = t('reach.g.' + g.key + '.short');
   const title = `${t('reach.g.' + g.key)} ${g.total ? t('reach.okOf', { ok: g.ok, total: g.total }) : t('reach.noProbe')}${g.ok && g.avgMs ? ' · ' + Math.round(g.avgMs) + ' ms' : ''}`;
   const val = !g.total ? '–' : g.ok ? (g.avgMs ? Math.round(g.avgMs) : '✓') : '✕';

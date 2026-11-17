@@ -1259,6 +1259,9 @@ const zh = {
   'rw.pool.ordT': '订单金额的 {rate}%', 'rw.pool.ordD': '[[sub]] 监听到账的 {n} 笔订单,共 {v} USDT;其余 {rest}% 是节点运营成本', 'rw.pool.ordNone': '[[sub]] 还没有监听到账的订单;其余 {rest}% 是节点运营成本',
   'rw.pool.donT': '留名捐赠(全额)', 'rw.pool.donD': '共 {n} 笔,名字都在「捐赠榜」里', 'rw.pool.donNone': '还没有人捐。在「捐赠榜」里留名捐的,全额进奖池',
   'rw.dn.late': '请在倒计时结束前转完。过了时间再按这个金额转,对不上号,不计入奖池 —— 来不及就重新提交一次。', 'rw.dn.cancelHelp': '还没转账时用。已经转了就不用点 —— 等它到账就行', 'rw.dn.off': '奖池的收款地址这会儿取不到,暂时不能捐。过一会儿再来。',
+  'line.reach.btn': '测大陆连通', 'line.reach.again': '重测大陆连通', 'line.reach.help': '从大陆移动、电信、联通的家庭宽带测点连这条线路在订阅里的每个地址和端口,香港测点作对照。约半分钟出结果,不记历史、不告警', 'line.reach.off': '这条线路停用着,没有在监听,启用后再测',
+  'line.reach.progress': '检测中 {done}/{total}…', 'line.reach.udpNote': '这条线路走 UDP:测点连不了 UDP 端口,只 ping 了地址。能看出地址通不通,看不出端口有没有被封、QUIC 有没有被针对。',
+  'line.reach.pingOk': 'ping 通',
 };
 
 const en = {
@@ -2662,6 +2665,11 @@ const en = {
   'rw.dn.late': 'Send it before the timer runs out. A transfer of this amount made after that can\'t be matched and won\'t count toward the pool — if you run out of time, submit again.',
   'rw.dn.cancelHelp': 'Use this if you haven\'t sent anything. If you already have, just wait for it to arrive',
   'rw.dn.off': 'The pool address is unavailable right now, so donations are paused. Try again in a little while.',
+  'line.reach.btn': 'Test from mainland', 'line.reach.again': 'Test again',
+  'line.reach.help': 'Connects to each address and port this line has in subscriptions from China Mobile, Telecom and Unicom home-broadband probes, with Hong Kong as a control. Takes about half a minute; nothing is recorded and no alerts are sent',
+  'line.reach.off': 'This line is disabled and not listening; enable it first', 'line.reach.progress': 'Testing {done}/{total}…',
+  'line.reach.udpNote': 'This line uses UDP: probes can\'t connect to a UDP port, so only the address was pinged. It shows whether the address is reachable, not whether the port is blocked or QUIC is being interfered with.',
+  'line.reach.pingOk': 'Ping OK',
 };
 
 const dicts = { zh, en };

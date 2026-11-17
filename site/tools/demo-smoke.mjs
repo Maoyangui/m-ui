@@ -481,6 +481,33 @@ else fail(`防呆的确认框不对:${JSON.stringify(lockUi).slice(0, 200)}`);
 await page.keyboard.press('Escape'); await page.waitForTimeout(300);
 await page.keyboard.press('Escape'); await page.waitForTimeout(200);
 
+// 线路详情:测大陆连通(一个地址一行;TCP 的线路写「正常」,UDP 的线路只 ping 了地址、写明这一点)
+await page.goto(`${DEMO}#/lines`); await page.reload(); await page.waitForTimeout(900);
+const openLineDetail = name => page.evaluate(n => { const el = [...document.querySelectorAll('[data-act="line.detail"]')].find(e => (e.closest('tr, .card, li') || document.body).textContent.includes(n)); if (el) el.click(); return !!el; }, name);
+const lrState = () => page.evaluate(() => { const rows = [...document.querySelectorAll('#ld-reach .ld-rrow')]; const btn = document.getElementById('ld-reach-btn');
+  return { rows: rows.length, chips: rows.map(r => r.querySelectorAll('.rc').length), verdicts: rows.map(r => (r.querySelector('.vd') || {}).textContent || ''), spin: !!document.querySelector('#ld-reach .spin'),
+    addrs: rows.map(r => (r.querySelector('.ad') || {}).textContent || ''), note: !!document.querySelector('#ld-reach .hint'), btn: btn ? btn.textContent.trim() : '', busy: btn ? btn.disabled : true, head: (document.querySelector('#ld-reach .ld-reach-h') || {}).textContent || '' }; });
+if (await openLineDetail('Global-SS2022')) {
+  await page.waitForTimeout(900);
+  const before = await lrState();
+  await page.locator('#ld-reach-btn').click(); await page.waitForTimeout(400);
+  const during = await lrState();
+  await page.waitForTimeout(6200);
+  const done = await lrState();
+  if (before.rows === 0 && before.btn && !before.busy && during.busy && during.rows === 3 && during.spin
+    && done.rows === 3 && !done.spin && !done.busy && done.btn !== before.btn && done.chips.every(n => n === 3) && done.verdicts.every(v => v && v === done.verdicts[0]) && done.addrs.every(a => /:28388$/.test(a)) && !done.note && /\d\d:\d\d/.test(done.head))
+    pass(`线路详情「测大陆连通」:三台服务器各一行(地址带线路端口),逐个出结果,三家运营商的小标和结论「${done.verdicts[0]}」都在`);
+  else fail(`线路详情「测大陆连通」不对:${JSON.stringify({ before, during, done })}`);
+  await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+  await openLineDetail('Tokyo-HY2'); await page.waitForTimeout(900);
+  await page.locator('#ld-reach-btn').click(); await page.waitForTimeout(6600);
+  const udp = await lrState();
+  if (udp.rows === 3 && !udp.spin && udp.note && udp.verdicts.every(v => v && v !== done.verdicts[0]) && udp.addrs[1].endsWith(':30001') && udp.addrs[2] === 'relay.example.net:443')
+    pass(`线路详情「测大陆连通」:UDP 的线路写「${udp.verdicts[0]}」并说明只 ping 了地址;两个中转入口测的是入口自己的地址和端口`);
+  else fail(`UDP 线路的大陆连通结果不对:${JSON.stringify(udp)}`);
+  await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+} else fail('线路页没找到 Global-SS2022');
+
 // 流量奖励:顶栏的金币、活动页四页、入账筛选、积分榜查地址、登记地址、留名捐赠(提交 → 等到账 → 到账上榜)、
 // 「godusevpn 节点订阅」的链接、去设置里关闭(精确到那一行)、设置里关掉后金币消失
 await page.goto(`${DEMO}#/dashboard`); await page.reload(); await page.waitForSelector('.rw-coin', { timeout: 15000 }); await page.waitForTimeout(600);

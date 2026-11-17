@@ -554,6 +554,12 @@ func (s *Service) CheckExt(ctx context.Context, name, host string, port int, udp
 	return s.check(ctx, t, locs, cost, false)
 }
 
+// CheckV6 测一个 IPv6 地址的 TCP 端口(线路详情里测走 IPv6 的地址用):先大陆的 IPv6 测点,连不上或这次没有大陆测点时
+// 再问境外测点,和服务器页的 IPv6 入站检测是同一套(见 v6.go)。不进历史、不告警。
+func (s *Service) CheckV6(ctx context.Context, host string, port int) *V6Result {
+	return s.checkV6(ctx, &V6Target{Host: host, Port: port})
+}
+
 // locations 选好这一轮用的测点(列表缓存 6 小时),返回每台服务器一次测量要用的测点次数。
 func (s *Service) locations(ctx context.Context) ([]location, int, error) {
 	s.mu.Lock()

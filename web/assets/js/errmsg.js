@@ -944,7 +944,11 @@ const EN = /*BEGIN*/{
 "这个金额现在排不开,换个数再试": "This amount can't be queued right now; try a different amount",
 "登记服务那边已经没有这一笔留名了": "The registry no longer has this named donation",
 "登记服务出错了,请稍后再试": "The registry ran into an error; try again later",
-"账本第 %d 笔入账是捐赠却没有留名": "Deposit #%d in the ledger is a donation without a name"
+"账本第 %d 笔入账是捐赠却没有留名": "Deposit #%d in the ledger is a donation without a name",
+"检测任务不存在或已过期": "This test no longer exists or has expired",
+"这条线路停用着,没有在监听,启用后再测": "This line is disabled and not listening; enable it first",
+"这条线路在订阅里没有可连的地址(没有部署到启用的服务器,或节点都关了输出)": "This line has no address in subscriptions (it isn't deployed to an enabled server, or all its nodes are hidden)",
+"没测成": "The test didn't complete"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表
