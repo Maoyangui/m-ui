@@ -462,6 +462,19 @@ func ApplySnapshot(db *gorm.DB, snap Snapshot) (linesChanged, upstreamsChanged b
 			linesChanged = true
 		}
 	}
+	// 本机被停止服务 / 恢复服务(流量额度用完、到期,见 model.Node.Suspended):用户要全撤、经本机的中转入口要关(恢复时要开),
+	// 只热更新用户表动不到中转入口,按线路变了处理、全量重载。别的服务器的这个标记变了不用:本机的入站不因它变
+	if snap.SelfNodeId != 0 {
+		var was []bool
+		if err := db.Model(&model.Node{}).Where("id = ?", snap.SelfNodeId).Limit(1).Pluck("COALESCE(suspended, 0)", &was).Error; err != nil {
+			return false, false, err
+		}
+		for _, n := range snap.Nodes {
+			if n.Id == snap.SelfNodeId && n.Suspended != (len(was) == 1 && was[0]) {
+				linesChanged = true
+			}
+		}
+	}
 
 	// gorm 对带 default:true 的 bool 字段:Create 时零值 false 会写成默认 true,并把 true 回填进结构体。
 	// 所以要在插入之前记下被禁用的 id,插入后再显式写回 false,否则主机禁用的用户会在副机上"复活"。
@@ -758,6 +771,8 @@ type Report struct {
 	Disk *model.DiskStat `json:"disk,omitempty"`
 	// Fw 这台的防火墙状况(系统防火墙是哪种、拦不拦、面板规则落了几条;老副机不报):防火墙页按它显示
 	Fw *model.FwState `json:"fw,omitempty"`
+	// Total 这台数据面累计收发的字节(线路入站 + 中转入口,真实字节;老副机不报):主机按它算这台服务器的本期用量(见 model.NodeQuota)
+	Total *model.NodeTotal `json:"total,omitempty"`
 }
 
 // saveNodeCerts 记下副机报上来的证书清单:线路编辑框与订阅的 SNI 用它。老版本副机不报(nil)就不动;
@@ -1374,8 +1389,20 @@ func (h *Hub) applyResult(r *nodeResult) {
 			errStr = strings.TrimPrefix(errStr+";"+err.Error(), ";")
 		}
 	}
-	if mr.Merged > 0 && h.d.CountersMerged != nil {
-		h.d.CountersMerged() // 中途失败也可能已经并进去几块:照样判一次超量
+	// 这台数据面的累计并进它的本期用量(服务器的流量额度按它判;老副机不报就没有)
+	var quotaAdded int64
+	if r.rep.Total != nil {
+		if e := h.d.DB.Transaction(func(tx *gorm.DB) error {
+			var e error
+			quotaAdded, e = model.MergeNodeTotal(tx, r.n.Id, *r.rep.Total, time.Now().Unix())
+			return e
+		}); e != nil {
+			quotaAdded = 0
+			logger.Warning("并入副机 ", r.n.Name, " 的数据面累计失败: ", e)
+		}
+	}
+	if (mr.Merged > 0 || quotaAdded > 0) && h.d.CountersMerged != nil {
+		h.d.CountersMerged() // 中途失败也可能已经并进去几块:照样判一次超量(服务器的流量额度也在这一轮里判)
 	}
 	if mr.Regressed > 0 {
 		st := h.getStatus(r.n)

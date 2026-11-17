@@ -22,6 +22,8 @@ import (
 type nodePayload struct {
 	model.Node
 	Token string `json:"token"`
+	// Quota 流量额度与到期(见 node_quota.go):新增 / 编辑服务器时可以一起给,和服务器本身同一笔事务保存;不给就不动
+	Quota *nodeQuotaReq `json:"quota,omitempty"`
 }
 
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
@@ -42,10 +44,15 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 			HasToken     bool                    `json:"hasToken"`
 			Status       interface{}             `json:"status"`
 			Decommission *model.NodeDecommission `json:"decommission,omitempty"`
+			Quota        *nodeQuotaView          `json:"quota,omitempty"` // 流量额度、到期与本期用量(见 node_quota.go;副机上没有)
 		}
+		quotas := s.nodeQuotas()
 		out := make([]row, 0, len(nodes))
 		for _, n := range nodes {
 			rr := row{Node: n, HasToken: n.Token != ""}
+			if q, ok := quotas[n.Id]; ok {
+				rr.Quota = quotaView(q, n)
+			}
 			if st, ok := statuses[n.Id]; ok {
 				rr.Status = st
 			}
@@ -84,13 +91,34 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		n := p.Node
 		n.Id, n.IsLocal, n.Token = 0, false, strings.TrimSpace(p.Token)
 		n.PublicIP, n.PublicIP6 = "", "" // 探测值由服务器自己上报,不收客户端填的
-		if err := s.db.Create(&n).Error; err != nil {
+		n.Suspended = false              // 停止服务的标记只由额度判定写
+		if p.Quota != nil {              // 一起给了流量额度:先校验,不合适的整份不建
+			if _, err := s.quotaAfter(model.NodeQuota{}, 0, *p.Quota, time.Now().Unix()); err != nil {
+				badRequest(w, err)
+				return
+			}
+		}
+		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&n).Error; err != nil {
+				return err
+			}
+			if !p.Enabled { // gorm default:true 会吞掉 Create 时的 false
+				if err := tx.Model(&model.Node{}).Where("id = ?", n.Id).Update("enabled", false).Error; err != nil {
+					return err
+				}
+				n.Enabled = false
+			}
+			if p.Quota == nil {
+				return nil
+			}
+			q, err := s.quotaAfter(model.NodeQuota{}, n.Id, *p.Quota, time.Now().Unix())
+			if err != nil {
+				return err
+			}
+			return saveQuotaSettings(tx, q, true)
+		}); err != nil {
 			badRequest(w, err)
 			return
-		}
-		if !p.Enabled { // gorm default:true 会吞掉 Create 时的 false
-			s.db.Model(&model.Node{}).Where("id = ?", n.Id).Update("enabled", false)
-			n.Enabled = false
 		}
 		s.audit(r, "node", "create", n.Name)
 		writeJSON(w, http.StatusOK, n)
@@ -181,6 +209,10 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 	var node model.Node
 	if err := s.db.First(&node, id).Error; err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "服务器不存在"})
+		return
+	}
+	if len(rest) >= 2 && rest[1] == "quota" { // 流量额度与到期:nodes/{id}/quota[/reset]
+		s.handleNodeQuota(w, r, node, rest[2:])
 		return
 	}
 	if len(rest) == 2 {
@@ -275,9 +307,44 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		enabling := !node.IsLocal && !node.Enabled && p.Enabled
+		// 一起给了流量额度:先算出改完的样子(校验不过整份不存),和服务器同一笔事务写
+		var quotaNext *model.NodeQuota
+		quotaFresh := false
+		if p.Quota != nil {
+			s.quotaMu.Lock()
+			defer s.quotaMu.Unlock()
+			var q model.NodeQuota
+			if err := s.db.Where("node_id = ?", id).Limit(1).Find(&q).Error; err != nil {
+				badRequest(w, err)
+				return
+			}
+			quotaFresh = q.NodeId == 0
+			next, err := s.quotaAfter(q, id, *p.Quota, time.Now().Unix())
+			if err != nil {
+				badRequest(w, err)
+				return
+			}
+			quotaNext = &next
+		}
+		if enabling { // 流量用完 / 到期被自动停用着的:启用了下一分钟又会被停,直接说清楚该改什么
+			if err := s.quotaBlocksEnable(node, quotaNext); err != nil {
+				badRequest(w, err)
+				return
+			}
+		}
 		if err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&model.Node{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 				return err
+			}
+			if quotaNext != nil {
+				if err := saveQuotaSettings(tx, *quotaNext, quotaFresh); err != nil {
+					return err
+				}
+			}
+			if disabling || enabling { // 手动停用 / 启用:以后这台的启停归管理员,额度不再自动把它启用
+				if err := tx.Model(&model.NodeQuota{}).Where("node_id = ?", id).Update("auto_off", false).Error; err != nil {
+					return err
+				}
 			}
 			if enabling { // 重新启用:还没送到的下线通知作废,定时同步推回完整快照
 				return tx.Where("node_id = ?", id).Delete(&model.NodeDecommission{}).Error
@@ -308,6 +375,16 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 				resp["decommissionError"] = e
 			}
 			s.haForget(node, false)
+		}
+		if quotaNext != nil { // 额度改了:判一次(调高了、延了期的立刻恢复;调低到已用以下的立刻停),结果一起回给界面
+			s.audit(r, "node", "quota-set", p.Name)
+			s.quotaMu.Unlock()
+			s.NodeQuotaTick()
+			s.quotaMu.Lock() // 交还给上面的 defer
+			var after model.Node
+			if s.db.First(&after, id).Error == nil {
+				resp["enabled"], resp["suspended"] = after.Enabled, after.Suspended
+			}
 		}
 		writeJSON(w, http.StatusOK, resp)
 	case http.MethodDelete:
@@ -347,7 +424,7 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			// 剩下的收窄行(还收窄到别的机器)只去掉这一台;它和游标、连通检测记录一起清
-			for _, t := range []interface{}{&model.TrafficCursor{}, &model.UserLineNode{}, &model.ResellerLineNode{}, &model.ReachCheck{}} {
+			for _, t := range []interface{}{&model.TrafficCursor{}, &model.UserLineNode{}, &model.ResellerLineNode{}, &model.ReachCheck{}, &model.NodeQuota{}} {
 				if err := tx.Where("node_id = ?", id).Delete(t).Error; err != nil {
 					return err
 				}

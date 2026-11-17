@@ -38,6 +38,7 @@ type Deps struct {
 	LocalRatio  func() float64    // 本机流量倍率(可为 nil = 1);只在主机计费路径生效,副机账本保持原始值
 	Forget      func(key string)  // 清掉通知去重键(用量清零后要允许再次告警;可为 nil)
 	Rules       func()            // 主机:限速规则判定(时段 / 突发),每轮统计之后跑;可为 nil
+	NodeQuota   func()            // 主机:服务器流量额度的判定(用完 / 到期 / 重置,见 web/node_quota.go);并账后和每分钟各跑一次;可为 nil
 	ApplyLimits func()            // 重新下发限速(副机按到期时间解除规则限速后调用);可为 nil
 }
 
@@ -54,8 +55,8 @@ type Scheduler struct {
 	statsMu sync.Mutex // 串行化统计取数,也保护重载前的显式冲刷
 	// 用户 / 线路 / 上游最近一次有流量的时间(unix 秒):在线名单按 OnlineWindow 取
 	seenUsers, seenLines, seenUps map[string]int64
-	stop    chan struct{}
-	wg      sync.WaitGroup
+	stop                          chan struct{}
+	wg                            sync.WaitGroup
 	// deadResellers 上一轮判定为"不可用"(停用 / 到期 / 额度用尽)的代理集合。到期是时间自然到的,没人保存过任何东西,
 	// 数据面不会自己重载,所以每轮比对这个集合,变了就重载一次;deadInit 为假表示还没有上一轮
 	deadResellers map[uint]bool
@@ -291,12 +292,20 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 	userTraffic := map[string]*userBytes{}
 	var online Onlines
 	seenIn, seenOut := map[string]bool{}, map[string]bool{}
+	// 本机数据面这一轮收发的全部字节:各条线路的入站 + 经本机转的中转入口(中转不认用户,不在任何人的账本里)。
+	// 服务器的流量额度按它算(见 model.LocalTotal)
+	var inUp, inDown int64
 	for _, st := range *stats {
 		switch st.Resource {
 		case "inbound":
 			if !seenIn[st.Tag] {
 				seenIn[st.Tag] = true
 				online.Lines = append(online.Lines, st.Tag)
+			}
+			if st.Direction {
+				inUp += st.Traffic
+			} else {
+				inDown += st.Traffic
 			}
 		case "outbound":
 			if !seenOut[st.Tag] {
@@ -370,7 +379,7 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 	}
 	sort.Strings(names) // 固定顺序写:并发的写者按同一顺序拿行,也方便排查
 
-	if err := s.writeLedger(isNode, names, userTraffic, now, scale); err != nil {
+	if err := s.writeLedger(isNode, names, userTraffic, now, scale, inUp, inDown); err != nil {
 		n := s.ledgerFails.Add(1)
 		logger.Warning("流量记账失败(连续第 ", n, " 轮;这段流量留在内存里,下一轮再记): ", err)
 		return false
@@ -389,8 +398,11 @@ func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 
 // writeLedger 记账:副机写本机单调账本(批量 upsert,主机按游标回收);主机直接加到用户用量上,
 // 「设为主机」交接途中同一笔事务里另记一本原始字节的账(见 model.SelfLedgerKey)。
-func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]*userBytes, now int64, scale func(int64) int64) error {
-	if len(names) == 0 {
+//
+// inUp / inDown 是本机数据面这一轮的全部字节:和账本同一笔事务加到本机的累计上(model.LocalTotal);主机再把自己这台的
+// 累计并进它的本期用量(副机的由主机拉报告时并,见 hub)。同一笔事务:账本提交了才扣计数器,累计不会多记也不会漏记。
+func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]*userBytes, now int64, scale func(int64) int64, inUp, inDown int64) error {
+	if len(names) == 0 && inUp <= 0 && inDown <= 0 {
 		return nil
 	}
 	raw := func() []model.AgentCounter {
@@ -401,10 +413,17 @@ func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]
 		}
 		return rows
 	}
+	asNode := func(tx *gorm.DB) error {
+		if len(names) > 0 {
+			if err := model.AddAgentCounters(tx, raw(), statsBatch); err != nil {
+				return err
+			}
+		}
+		_, err := model.AddLocalTotal(tx, inUp, inDown, now)
+		return err
+	}
 	if isNode {
-		return s.d.DB.Transaction(func(tx *gorm.DB) error {
-			return model.AddAgentCounters(tx, raw(), statsBatch)
-		})
+		return s.d.DB.Transaction(asNode)
 	}
 	return s.d.DB.Transaction(func(tx *gorm.DB) error {
 		// 本机这一刻正好变为副机(原主机让位、失联后被接任:换角色和清空 / 交接账本在同一笔事务里):这一轮按副机记进账本,
@@ -414,7 +433,7 @@ func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]
 			return err
 		}
 		if strings.EqualFold(mode, "true") {
-			return model.AddAgentCounters(tx, raw(), statsBatch)
+			return asNode(tx)
 		}
 		var real int64 // 流量奖励:这一轮本机上真实用户的原始字节(不乘倍率,面板内部的用户不算)
 		for _, name := range names {
@@ -440,7 +459,35 @@ func (s *Scheduler) writeLedger(isNode bool, names []string, traffic map[string]
 		if err := model.AddRewardBytes(tx, real, now); err != nil {
 			return err
 		}
-		return model.AddSelfLedger(tx, raw(), statsBatch)
+		if err := model.AddSelfLedger(tx, raw(), statsBatch); err != nil {
+			return err
+		}
+		// 本机数据面的累计,并进主机自己这台服务器的本期用量(和副机的报告走同一个并法:只计增量)。
+		// 先拿加之前的数并一次:头一次见到这本账(刚升级、接任后是另一本)时,基线落在这一轮之前,这一轮的流量才计得进去 ——
+		// 只在加完之后并的话,头一轮整笔都成了基线(实机上升级后跑的第一段 25 MB 一个字节没记上)。平时这一步游标没变,不写库。
+		var self []uint
+		if err := tx.Model(&model.Node{}).Where("is_local = ?", true).Limit(1).Pluck("id", &self).Error; err != nil {
+			return err
+		}
+		if len(self) == 1 {
+			before, err := model.ReadLocalTotal(tx)
+			if err != nil {
+				return err
+			}
+			if _, err := model.MergeNodeTotal(tx, self[0], before, now); err != nil {
+				return err
+			}
+		}
+		total, err := model.AddLocalTotal(tx, inUp, inDown, now)
+		if err != nil {
+			return err
+		}
+		if len(self) == 1 {
+			if _, err := model.MergeNodeTotal(tx, self[0], total, now); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -579,6 +626,9 @@ func (s *Scheduler) runDeplete() {
 		s.expireLocal()
 		return
 	}
+	if s.d.NodeQuota != nil { // 到期、周期重置是时间自然到的,没有流量进来也要判
+		runSafely("服务器额度判定", s.d.NodeQuota)
+	}
 	s.depleteMu.Lock()
 	defer s.depleteMu.Unlock()
 	now := time.Now().Unix()
@@ -716,6 +766,10 @@ const depletedCond = "enabled = ? AND ((volume > 0 AND up + down >= volume) OR (
 func (s *Scheduler) depleteNow() {
 	if s.d.IsNode() {
 		return
+	}
+	// 服务器的流量额度:用量刚并进来,马上判一次(自己串行、自己记日志;放在用户的判定之前:它可能要停一台服务器)
+	if s.d.NodeQuota != nil {
+		runSafely("服务器额度判定", s.d.NodeQuota)
 	}
 	s.depleteMu.Lock()
 	defer s.depleteMu.Unlock()

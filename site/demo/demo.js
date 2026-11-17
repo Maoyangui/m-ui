@@ -190,6 +190,58 @@ for (const n of S.nodes.nodes || []) if (n.status) n.status.uptime = (n.status.u
     n.status.disk = k === 2 ? { path: '/etc/m-ui', total: 9.6 * G, used: 8.8 * G, free: 0.8 * G, logs: 4.1 * G, cache: 0.3 * G, swap: 4 * G, opsAgent: true, at }
       : { path: '/etc/m-ui', total: 40 * G, used: (9 + 4 * k) * G, free: (31 - 4 * k) * G, logs: 0.4 * G, cache: 0.2 * G, swap: 2 * G, at }; } }
 
+// 服务器的流量额度与到期(和后端 web/node_quota.go 同一口径,只在本页内存里):法兰克福那台是按量计费的,
+// 每月 1 日重置、本期用到八成多(用量条发黄);新加坡那台设了到期时间。改了额度当场判:用完 / 到期的按「自动停用」开关
+// 停用整台或只停代理服务,重置、加额度、续期后自己恢复。
+const demoQuotaNext = (mode, days, day, at = now()) => {
+  if (mode === 'days') return days > 0 ? at + days * 86400 : 0;
+  if (mode !== 'month' || day < 1 || day > 31) return 0;
+  const d = new Date(at * 1000);
+  const pick = (y, m) => { const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate(); return Date.UTC(y, m, Math.min(day, last)) / 1000 - 8 * 3600; }; // 面板时区(演示里是 UTC+8)的 0 点
+  let next = pick(d.getUTCFullYear(), d.getUTCMonth());
+  if (next <= at) next = pick(d.getUTCFullYear(), d.getUTCMonth() + 1);
+  return next;
+};
+const demoQuotaState = q => (q.expiry > 0 && now() >= q.expiry ? 'expired' : q.volume > 0 && q.used >= q.volume ? 'traffic' : '');
+// 判一次:状态变了记下时间;该停用的停用(记 autoOff)、该恢复的恢复;只停服务的打 suspended
+function demoQuotaJudge(n) {
+  const q = n.quota;
+  if (!q) return;
+  if (q.resetMode && q.nextReset > 0 && now() >= q.nextReset) { q.total += 0; q.used = q.up = q.down = 0; q.periodStart = now(); q.nextReset = demoQuotaNext(q.resetMode, q.resetDays, q.resetDay); }
+  const state = demoQuotaState(q);
+  if (state !== q.state) { q.state = state; q.stateAt = now(); }
+  const off = !!state && q.autoDisable && !n.isLocal;
+  if (off && n.enabled !== false) { n.enabled = false; q.autoOff = true; }
+  else if (!off && q.autoOff) { n.enabled = true; q.autoOff = false; }
+  n.suspended = !!state && !off;
+}
+function demoQuotaApply(n, p) {
+  const was = n.quota || {};
+  const q = { volume: 0, used: 0, up: 0, down: 0, total: 0, periodStart: now(), expiry: 0, resetMode: '', resetDays: 0, resetDay: 0, nextReset: 0, autoDisable: !n.isLocal, state: '', stateAt: 0, autoOff: false, tracked: true, ...was };
+  const pick = k => (p && p[k] !== undefined && p[k] !== null);
+  if (pick('volume')) q.volume = Number(p.volume);
+  if (pick('expiry')) q.expiry = Number(p.expiry);
+  if (pick('resetMode')) q.resetMode = String(p.resetMode || '').trim();
+  if (pick('resetDays')) q.resetDays = Number(p.resetDays);
+  if (pick('resetDay')) q.resetDay = Number(p.resetDay);
+  if (pick('autoDisable')) q.autoDisable = !!p.autoDisable && !n.isLocal;
+  if (!(q.volume >= 0) || q.volume > 2 ** 60) throw demoErr(400, '流量额度填 0(不限)或一个正数');
+  if (pick('expiry') && q.expiry > 0 && q.expiry <= now() && q.expiry !== (was.expiry || 0)) throw demoErr(400, '到期时间已经过了:填一个将来的时间,或者留空不设');
+  if (q.resetMode === '') { q.resetDays = 0; q.resetDay = 0; }
+  else if (q.resetMode === 'days') { if (!(q.resetDays >= 1 && q.resetDays <= 3650)) throw demoErr(400, '重置周期填 1–3650 天'); q.resetDay = 0; }
+  else if (q.resetMode === 'month') { if (!(q.resetDay >= 1 && q.resetDay <= 31)) throw demoErr(400, '每月重置的日子填 1–31'); q.resetDays = 0; }
+  else throw demoErr(400, '重置周期只能是不重置、按天数或每月');
+  const cycleChanged = q.resetMode !== (was.resetMode || '') || q.resetDays !== (was.resetDays || 0) || q.resetDay !== (was.resetDay || 0);
+  if (!q.resetMode) q.nextReset = 0;
+  else if (cycleChanged || !(q.nextReset > 0)) q.nextReset = demoQuotaNext(q.resetMode, q.resetDays, q.resetDay);
+  return q;
+}
+{ const G = 1073741824, at = Math.floor(Date.now() / 1000), fra = (S.nodes.nodes || []).find(n => n.name === 'Frankfurt'), sgp = (S.nodes.nodes || []).find(n => n.name === 'Singapore'); // now() 在后面才定义
+  const base = { used: 0, up: 0, down: 0, total: 0, periodStart: at - 17 * 86400, expiry: 0, resetMode: '', resetDays: 0, resetDay: 0, nextReset: 0, autoDisable: true, state: '', stateAt: 0, autoOff: false, tracked: true };
+  if (fra) fra.quota = { ...base, volume: 500 * G, used: 412.6 * G, up: 38.4 * G, down: 374.2 * G, total: 2318.9 * G, resetMode: 'month', resetDay: 1, nextReset: demoQuotaNext('month', 0, 1, at) };
+  if (sgp) sgp.quota = { ...base, volume: 0, used: 96.3 * G, up: 9.1 * G, down: 87.2 * G, total: 96.3 * G, periodStart: at - 40 * 86400, expiry: at + 23 * 86400 + 3600 };
+}
+
 // 外部 API 的密钥(主面板 admin、代理面板 self 各一套;只在本页内存里)。第一把是默认密钥,和别的在同一张表里
 const API_PERMS = ['users.read', 'users.create', 'users.update', 'users.delete', 'billing', 'plans.read', 'panel.read'];
 { const at = Math.floor(Date.now() / 1000);
@@ -960,7 +1012,10 @@ function route(method, path, query, body) {
       case 'users': if (seg[2] === 'plan-ops') return clone(S.planOps.filter(o => o.userId === id).slice(0, Number(new URLSearchParams(query).get('limit')) || 20));
         if (seg[2] === 'sub') { const u = find(S.users, id); return { link: subUrl(u), clash: subUrl(u) + '?format=clash', json: subUrl(u) + '?format=json' }; } return clone(S.users);
       case 'plans': return S.plans.map(planView);
-      case 'nodes': if (seg[2] === 'disk-clean') return demoDiskClean(id, false); return clone(S.nodes);
+      case 'nodes':
+        if (seg[2] === 'disk-clean') return demoDiskClean(id, false);
+        if (seg[2] === 'quota') { const n = (S.nodes.nodes || []).find(x => x.id === id); if (!n) throw demoErr(404, '服务器不存在'); return { quota: n.quota ? clone(n.quota) : null, enabled: n.enabled !== false, suspended: !!n.suspended }; }
+        return clone(S.nodes);
       // 主机容灾(见 haView;没有这一条时界面拿到 {},会把每台都标成「副机」)
       case 'ha': if (seg[1] === 'plan') return haDemoBlock(); if (seg[1]) return notFound();
         return haView(/(^|&)full=1(&|$)/.test(query));
@@ -1133,6 +1188,7 @@ function route(method, path, query, body) {
     }
     case 'nodes': {
       const list = S.nodes.nodes;
+      if (method === 'POST' && !seg[1] && body && body.quota) { const probe = demoQuotaApply({ isLocal: false }, body.quota); body = { ...body, quota: probe }; } // 一起给了流量额度:先校验,不合适的整份不建
       if (method === 'POST' && !seg[1]) { const n = { id: nextId(list), enabled: true, isLocal: false, status: { ok: true, version: 'demo', synced: true, coreRunning: true, uptime: 60, onlineUsers: 0, lastPush: now(), lastSeen: now() }, ...body }; delete n.token; n.hasToken = true; list.push(n); return clone(n); }
       if (method === 'POST' && seg[1] === 'group') { // 改组名:整组一起改
         const from = String((body || {}).from || '').trim(), to = String((body || {}).to || '').trim();
@@ -1146,6 +1202,13 @@ function route(method, path, query, body) {
       if (seg[2] === 'port-check') return id === 2 && Number((body || {}).port) === 30001 ? { asked: true, free: false, self: false, by: 'realm' } : { asked: true, free: true, self: false, by: '' };
       if (seg[2] === 'push') return ok();
       if (seg[2] === 'disk-clean') return demoDiskClean(id, true);
+      if (seg[2] === 'quota') { // 流量额度:单独改 / 重置本期用量
+        if (seg[3] === 'reset') {
+          if (n.quota) { const q = n.quota; q.used = q.up = q.down = 0; q.periodStart = now(); if (q.resetMode === 'days') q.nextReset = demoQuotaNext(q.resetMode, q.resetDays, q.resetDay); }
+        } else if (method === 'PUT') n.quota = demoQuotaApply(n, body || {});
+        demoQuotaJudge(n);
+        return { quota: n.quota ? clone(n.quota) : null, enabled: n.enabled !== false, suspended: !!n.suspended };
+      }
       if (method === 'DELETE') {
         // 和后端同一口径:本机删不得;被「线路上游」用着的删不得;删掉后引用它的东西一起收拾 ——
         // 只部署在这台上的线路停用、经它中转或转给它的入口去掉、防火墙规则里只管它一台的整条删掉(不留成「全部服务器」)
@@ -1176,7 +1239,22 @@ function route(method, path, query, body) {
         demoSyncBlocked();
         return ok({ disabledLines, revokedUsers: [], revokedResellers: [], prunedForwards, removedFwRules });
       }
-      if (method === 'PUT') { const { token, ...rest } = body || {}; Object.assign(n, rest, { id }); return clone(n); }
+      if (method === 'PUT') {
+        const { token, quota, suspended, ...rest } = body || {};
+        const next = quota ? demoQuotaApply(n, quota) : null; // 额度和服务器一起存:不合适的整份不存
+        // 被额度自动停用着的:手动启用了下一轮又会被停,直接说清楚该改什么(同一次保存里调高了额度、延了期的放行)
+        if (!n.isLocal && n.enabled === false && rest.enabled) {
+          const q = next || n.quota;
+          const st = q && q.autoDisable ? demoQuotaState(q) : '';
+          if (st === 'traffic') throw demoErr(400, '这台服务器本期流量已用完,按设置自动停用着:调高额度或重置用量后它会自动启用(关掉「用完或到期后自动停用」只是不停用整台,代理服务仍然停着)');
+          if (st === 'expired') throw demoErr(400, '这台服务器已到期,按设置自动停用着:延长到期时间后它会自动启用(关掉「用完或到期后自动停用」只是不停用整台,代理服务仍然停着)');
+        }
+        if (n.quota && rest.enabled !== undefined && (rest.enabled !== false) !== (n.enabled !== false)) n.quota.autoOff = false; // 手动启停:以后归管理员
+        Object.assign(n, rest, { id });
+        if (next) { next.autoOff = n.quota ? n.quota.autoOff : false; n.quota = next; }
+        demoQuotaJudge(n);
+        return { ...clone(n), ok: '1', enabled: n.enabled !== false, suspended: !!n.suspended };
+      }
       return ok();
     }
     case 'plans': {

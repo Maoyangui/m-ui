@@ -10,7 +10,7 @@ import { esc, fmtBytes, fmtDuration, fmtRelative, fmtTime, fmtDate, fmtDay, tzOf
 import { barChart, bucketFor } from '../chart.js';
 import { diskLevel, diskPct } from '../issues.js';
 import { diskHogs } from '../ui.js';
-import { NODE_CODES, summarizeNodes, trackUnsynced, worstCode, healthSummary, fwBad, sortCerts, certSig, certCounts, certLeftDays, sortReach, reachSig, reachHard, reachStall } from '../issues.js';
+import { NODE_CODES, summarizeNodes, trackUnsynced, worstCode, healthSummary, fwBad, sortCerts, certSig, certCounts, certLeftDays, sortReach, reachSig, reachHard, reachStall, quotaBlocked, quotaAckKeys, quotaFresh, quotaAckPrune } from '../issues.js';
 import { shownConns } from '../fair.js';
 import { openTraffic } from '../traffic.js';
 import { auditAction, auditObject, JOB_ACTORS } from '../audit.js';
@@ -40,6 +40,8 @@ const isNode = () => (state.status || {}).role === 'node';
 const multi = () => !isNode() && ((state.status || {}).nodes || 0) > 1;
 const enc = encodeURIComponent;
 const ls = k => { try { return localStorage.getItem(k); } catch { return null; } };
+// 可以点「知道了」的几类提醒各记在哪(只在这个浏览器里)
+const DISMISS_KEYS = { cert: 'm-ui.certDismissed', reach: 'm-ui.reachDismissed', quota: 'm-ui.quotaDismissed' };
 const lsSet = (k, v) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch {} };
 const errText = e => trErr(String((e && e.message) || e || ''));
 const now = () => Date.now() / 1000;
@@ -318,6 +320,25 @@ function attnItems() {
     add(3, sum.red ? 'bad' : 'warn', { title: t('dash.attn.nodes', { on: sum.online, total: sum.total }),
       parts: NODE_CODES.filter(c => sum.byCode[c].length).map(c => esc(t('dash.attn.node.' + c, { n: sum.byCode[c].length }))),
       names: etc(sum.byCode[worst] || [], 'nodes'), go: '#/nodes?f=bad' });
+  }
+  // 3b 被流量额度 / 到期停下来的服务器:不是故障,是自己设的规则到点生效,也没什么要处理的 —— 只提醒一次,
+  // 只有一个「知道了」:点了整条就消失(不带跳转,也不进「已忽略」那一栏),之后又有服务器被停、或者同一台恢复后
+  // 再次被停才重新出现(见 issues.js 的 quotaFresh)。黄色,不算进服务器那一项、也不让服务器那一格变红。
+  // 副机自己的面板上:本机被主机停了代理服务时同样提醒一次
+  const qb = quotaBlocked((nodesData && nodesData.nodes) || []);
+  if (nodesData && !nodesErr) { // 已经恢复的从「知道了」里划掉(服务器列表取到了才划:没取到时名单是空的,不能当成都恢复了)
+    const had = ls(DISMISS_KEYS.quota) || '', keep = quotaAckPrune(qb, had);
+    if (keep !== had) lsSet(DISMISS_KEYS.quota, keep || null);
+  }
+  if (qb.length) {
+    const off = qb.filter(x => x.mode === 'off').length;
+    // 都是同一个原因(都是流量用完,或都是到期)时标题直接说原因、后面只列名字;原因不一样才逐台写
+    const whys = new Set(qb.map(x => x.why)), one = whys.size === 1 && qb[0].why;
+    const row = { title: t(one ? 'dash.attn.quota.' + one : 'dash.attn.quota', { n: qb.length }),
+      parts: [off && t('dash.attn.quota.off', { n: off }), qb.length - off && t('dash.attn.quota.hold', { n: qb.length - off })].filter(Boolean).map(esc),
+      names: etc(qb.map(x => `${x.name}${!one && x.why ? ' ' + t('nq.why.' + x.why) : ''}`), 'nodes') };
+    // 这一条只有「知道了」一个动作:用和「去处理」一样的蓝色(证书、大陆连通那两条旁边还有跳转,它们的「知道了」是灰的)
+    if (quotaFresh(qb, ls(DISMISS_KEYS.quota)).length) add(3.5, 'warn', { ...row, acts: btn('dash.dismiss', 'quota', t('reach.dismiss'), '', quotaAckKeys(qb)) });
   }
   // 4 证书(可以「知道了」,和顶部提示条同一个签名)
   const ca = s.certAlerts || [];
@@ -897,10 +918,11 @@ registerActions({
   'dash.dismiss': (id, el) => {
     const sig = el && el.dataset ? el.dataset.sig : undefined;
     if (sig == null) return;
-    lsSet(id === 'cert' ? 'm-ui.certDismissed' : 'm-ui.reachDismissed', sig);
+    if (!DISMISS_KEYS[id]) return;
+    lsSet(DISMISS_KEYS[id], sig);
     renderAttn();
   },
-  'dash.undismiss': id => { lsSet(id === 'cert' ? 'm-ui.certDismissed' : 'm-ui.reachDismissed', null); renderAttn(); },
+  'dash.undismiss': id => { if (DISMISS_KEYS[id]) lsSet(DISMISS_KEYS[id], null); renderAttn(); },
   'dash.connF': id => { connF = id; connMore = 0; renderConns(); },
   'dash.connsMore': () => { connMore += MOBILE_STEP.conns; renderConns(); },
   'dash.connsLess': () => { connMore = 0; renderConns(); document.getElementById('dash-conns-card')?.scrollIntoView({ block: 'start' }); },

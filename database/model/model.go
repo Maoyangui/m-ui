@@ -150,7 +150,14 @@ type Node struct {
 	Certs json.RawMessage `json:"certs,omitempty"`
 	// ServicePorts 这台服务器自己监听的服务端口 []ServicePort(面板 / 订阅;副机随报告上报,主机建线路时按它避让)。空 = 未知(老版本副机)。
 	ServicePorts json.RawMessage `json:"servicePorts,omitempty"`
+	// Suspended 这台服务器的流量额度用完 / 已到期,而且没有(或不能)把它整台停用(见 NodeQuota):服务器照常同步,
+	// 但不再放行用户 —— 它渲染数据面时不下发任何用户、不开中转入口,订阅里也不发它的节点。主机每分钟判定并写入,随快照下发。
+	// 老版本副机不认这个字段(照旧放行):额度到了要拦住它,只能用「自动停用」。
+	Suspended bool `json:"suspended,omitempty"`
 }
+
+// Serving 这台服务器现在给不给用户用:启用着,而且没有因为额度 / 到期被停止服务。
+func (n Node) Serving() bool { return n.Enabled && !n.Suspended }
 
 // User 订阅用户。配额/流量为两台服务器聚合值,判定只在主端进行。
 type User struct {
@@ -649,7 +656,10 @@ const (
 )
 
 // JobActors 全部定时任务执行者名(新加任务时一并加进来)。
-var JobActors = []string{ActorResetJob, ActorDepleteJob, ActorRuleJob, ActorFollowJob, ActorGuardJob}
+var JobActors = []string{ActorResetJob, ActorDepleteJob, ActorRuleJob, ActorFollowJob, ActorGuardJob, ActorQuotaJob}
+
+// ActorQuotaJob 服务器流量额度的判定(用完 / 到期后停用或停止服务、重置或续期后恢复,见 web/node_quota.go)。
+const ActorQuotaJob = "QuotaJob"
 
 // 另两个自动执行者:外部节点上游跟随(web/upstream_follow.go)、防火墙自动拉黑(guard 包)。
 const (
@@ -675,6 +685,7 @@ func All() []interface{} {
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
 		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{}, &PageLogo{}, &ApiKey{},
 		&FwRule{}, &FwBan{}, &FwAllow{}, &UpstreamSource{}, &RewardCounter{},
+		&LocalTotal{}, &NodeQuota{},
 	}
 }
 

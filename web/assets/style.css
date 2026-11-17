@@ -2058,6 +2058,34 @@ pre.doc-ex { max-height: none; }
 .nd-addr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .45rem; }
 .nd-addr select { width: auto; }
 .nd-enabled { margin-top: 1rem; }
+/* 服务器的流量额度:名称一格里的用量条(可点,打开编辑框里的那一段),编辑框里的「流量额度与到期」 */
+.nq { display: flex; flex-wrap: wrap; align-items: center; gap: .1rem .7rem; max-width: 100%; margin-top: .3rem; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-xs); font-weight: 400; color: var(--muted); text-align: left; cursor: pointer; }
+.nq-meter { display: inline-flex; align-items: center; gap: .45rem; min-width: 0; max-width: 100%; }
+.nq-meter .nq-bar { flex: 0 1 56px; width: auto; min-width: 28px; } /* 列窄的时候先缩这根条,数字不折不截 */
+.nq:hover .nq-txt, .nq:hover .nq-exp { color: var(--text-2); }
+.nq:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 4px; }
+.nq-bar { flex: none; width: 56px; height: 4px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.nq-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--primary); }
+.nq.warn .nq-bar > i, .nq-bar.warn > i { background: var(--warn); }
+.nq.full .nq-bar > i, .nq-bar.full > i { background: var(--danger); }
+.nq-txt, .nq-exp { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.nq.full .nq-txt, .nq.full .nq-exp { color: var(--danger-text); }
+.nq.warn .nq-exp { color: var(--warn-text); }
+
+.nq-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 1fr); gap: .8rem 1rem; align-items: start; }
+.nq-cycle { display: flex; align-items: center; gap: .45rem; }
+.nq-cycle select { flex: 1 1 6.5rem; width: auto; min-width: 0; }
+.nq-cyc { display: inline-flex; flex: none; align-items: center; gap: .35rem; font-size: var(--fs-sm); color: var(--text-2); white-space: nowrap; }
+.nq-cyc[hidden] { display: none; }
+.nq-cyc input { width: 4.4rem; }
+.nq-use { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .8rem; margin: 0 0 .9rem; font-size: var(--fs-sm); }
+.nq-use .nq-bar { width: 150px; height: 6px; }
+.nq-use-txt { flex: 1 1 15rem; min-width: 0; font-variant-numeric: tabular-nums; }
+.alert-bar.nq-alert { margin: 0 0 .9rem; }
+.grid .sub-cell.nq-note { white-space: normal; line-height: 1.45; max-width: 15rem; }
+table.grid.rows2 .sub-cell.nq-note, table.grid.cards .sub-cell.nq-note { max-width: none; }
+.sw-row.nq-auto { margin-top: .9rem; }
+@media (max-width: 760px) { .nq-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) { .nd-top { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .nd-link { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 480px) { .nd-top, .nd-addr { grid-template-columns: minmax(0, 1fr); } .nd-addr select { width: 100%; } }
@@ -2451,7 +2479,7 @@ html.rw-lock { overflow: hidden; }
 .rw-brd .rw-row { grid-template-columns: 2rem minmax(10rem, 1.3fr) 5.4rem minmax(8rem, 1fr) 6.2rem; }
 .rw-dnr .rw-row { grid-template-columns: 2rem minmax(10rem, 1.6fr) 4.4rem 6.2rem minmax(7.4rem, .7fr); }
 .c-time { color: var(--rw-mute); white-space: nowrap; }
-.c-from, .c-addr { display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.c-from, .rw-row .c-addr { display: flex; align-items: center; gap: .45rem; min-width: 0; } /* 只管奖励榜单的行:服务器页的地址列也叫 c-addr,被排成 flex 就撑不满整行高(底下露一块) */
 .c-kind { display: flex; align-items: center; gap: .45rem; min-width: 0; }
 .c-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--rw-ink); font-weight: 550; }
 .rw-a { padding: .1rem .3rem; margin: 0 -.3rem; border: 0; border-radius: 6px; background: none; color: var(--rw-ink); font-size: var(--fs-sm); cursor: copy; white-space: nowrap; }

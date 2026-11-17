@@ -24,7 +24,7 @@ func TestDayMathStaysInteger(t *testing.T) {
 	db.Create(&model.User{Name: "due", Enabled: true, AutoReset: true, ResetDays: huge, NextReset: 1, Up: 5})
 	s := New(Deps{DB: db, IsNode: func() bool { return false }, ReloadUsers: func() error { return nil }})
 	now := time.Now().Unix()
-	if err := s.writeLedger(false, []string{"waiting"}, map[string]*userBytes{"waiting": {up: 1}}, now, func(n int64) int64 { return n }); err != nil {
+	if err := s.writeLedger(false, []string{"waiting"}, map[string]*userBytes{"waiting": {up: 1}}, now, func(n int64) int64 { return n }, 0, 0); err != nil {
 		t.Fatal(err)
 	}
 	s.runDeplete()

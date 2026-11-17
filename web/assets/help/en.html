@@ -165,6 +165,26 @@
     </ul>
   </section>
 
+  <section class="sec" id="nodes-quota">
+    <h3>Server traffic quota and expiry</h3>
+    <p class="lede">Give a metered or monthly-leased server a traffic quota and an expiry date: when either runs out the server stops by itself instead of running up more traffic.</p>
+    <ul>
+      <li>Where: on the <b data-k="nav.nodes">Servers</b> page open that row's <b data-k="common.more">More</b> → <b data-k="nq.menu">Quota &amp; expiry</b>, or click <b data-k="common.edit">Edit</b> and fill in the <b data-k="nq.sec">Traffic quota &amp; expiry</b> section. Once set, a usage bar appears under the server name; clicking it opens the same section.</li>
+      <li><b data-k="nq.vol">Traffic quota (GB)</b>: the real upload + download through this server (relayed traffic included), without the traffic ratio, the way a hosting bill counts it. <code>0</code> means unlimited.</li>
+      <li><b data-k="nq.cycle">Reset cycle</b>: <b data-k="nq.mode.month">Monthly</b> on a day of your choice (match the billing cycle), or <b data-k="nq.mode.days">Every N days</b>; usage is cleared at that point. You can also click <b data-k="nq.reset">Reset usage</b> at any time.</li>
+      <li><b data-k="nq.exp">Expiry date</b>: for example the end of the server lease; it takes effect once that day is over.</li>
+      <li><b data-k="nq.auto">Disable this server when the quota runs out or it expires</b> is on by default: the whole server is disabled, all connections are dropped and new ones refused, the master stops syncing to it and subscriptions no longer list its nodes. It is re-enabled on its own after the cycle resets, the quota is raised or the expiry is extended.</li>
+      <li>With the switch off the server stays enabled and only its proxy service stops (connections are dropped and refused all the same); the row shows <b data-k="nq.held">Service stopped</b>. Note that the master keeps pushing configuration to it and pulling its status, and that sync itself still uses a little traffic and bandwidth.</li>
+      <li>The master's own server cannot be disabled: when its quota runs out or it expires only the proxy service on it stops and the panel keeps running.</li>
+    </ul>
+    <div class="pit"><b>Common pitfalls</b><ul>
+      <li>Usage is counted from the moment the server runs 0.8.0 and covers proxied traffic only (panel sync, system updates and the like are not included), so it will not match the provider's figure exactly: leave some headroom.</li>
+      <li>A node reports its traffic only from 0.8.0 on; until it is upgraded its usage stays at 0 and the quota has no effect (the edit dialog says so). The expiry date works regardless.</li>
+      <li>Switching <b data-k="common.enabled">Enabled</b> back on for a server that its quota disabled is refused with the reason. To keep it running, raise the quota, enter <code>0</code> (unlimited), reset the usage or extend the expiry; turning the auto-disable switch off only keeps the server itself enabled, its proxy service stays stopped.</li>
+      <li>When a server is stopped the <b data-k="nav.dashboard">Dashboard</b> shows one reminder at the top; click <b data-k="reach.dismiss">Got it</b> to dismiss it. With Telegram notifications on, one message is sent when it stops and one when it resumes.</li>
+    </ul></div>
+  </section>
+
   <section class="sec" id="reach">
     <h3>Mainland reachability</h3>
     <p class="lede">Find out whether a server is blocked in mainland China: home-broadband probes of China Mobile, China Telecom and China Unicom connect to it, with Hong Kong probes as a control.</p>

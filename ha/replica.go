@@ -34,11 +34,12 @@ import (
 // 设置只带全局的;主机身份(订阅地址、订阅证书、作为副机时怎么连)单独记在 meta.json 里,见 identity.go。
 
 // replicaSkip 给备用的副本不带内容的表(表结构照建,行不拷)。
-var replicaSkip = map[string]bool{"sessions": true, "stats": true, "sub_logs": true, "agent_counters": true}
+// local_totals 是每台机器自己数据面的累计(见 model.LocalTotal):主机的那一行拷给备用就成了备用的累计,不带。
+var replicaSkip = map[string]bool{"sessions": true, "stats": true, "sub_logs": true, "agent_counters": true, "local_totals": true}
 
 // bundleSkip 设为主机时整库数据不带的表。账本要带:原主机交接途中另记的那本账此刻的计数(和用户用量同一时刻),
 // 目标组库时记成原主机的游标(见 installFormerLedger)。
-var bundleSkip = map[string]bool{"sessions": true}
+var bundleSkip = map[string]bool{"sessions": true, "local_totals": true}
 
 // 审计日志只带最近 7 天、最多 2 万条:接任后够看,也够做分叉比对。
 const (

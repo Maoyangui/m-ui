@@ -698,7 +698,8 @@ func (s *Server) apiOverview(w http.ResponseWriter, sc apiScope) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// apiServers GET /servers(只有主面板的密钥能看):每台服务器在不在线、版本、在线人数、上次联系时间。
+// apiServers GET /servers(只有主面板的密钥能看):每台服务器在不在线、版本、在线人数、上次联系时间,
+// 以及流量额度与到期(有记录的才带 quota;suspended = 用完或到期、只停了这台的代理服务)。
 func (s *Server) apiServers(w http.ResponseWriter, sc apiScope) {
 	if sc.rid > 0 {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "代理的密钥看不了服务器"})
@@ -707,9 +708,16 @@ func (s *Server) apiServers(w http.ResponseWriter, sc apiScope) {
 	var nodes []model.Node
 	s.db.Order("sort asc, id asc").Find(&nodes)
 	sts := s.hubStatuses()
+	quotas := s.nodeQuotas()
 	out := make([]map[string]interface{}, 0, len(nodes))
 	for _, n := range nodes {
 		v := map[string]interface{}{"id": n.Id, "name": n.Name, "enabled": n.Enabled, "ratio": n.Ratio, "isLocal": n.IsLocal}
+		if n.Suspended {
+			v["suspended"] = true
+		}
+		if q, ok := quotas[n.Id]; ok {
+			v["quota"] = quotaView(q, n)
+		}
 		if n.IsLocal {
 			v["online"], v["version"], v["coreRunning"] = true, Version, s.run != nil && s.run.CoreRunning()
 			v["onlineUsers"] = len(s.localOnlineUsers())

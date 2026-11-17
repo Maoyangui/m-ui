@@ -77,7 +77,12 @@ func Open(dbPath string) (*gorm.DB, error) {
 	// 超量记 quota、到期记 expired、所属代理额度已用尽的记 quota(旧版是把他名下用户整体停掉的),其余当手动。
 	db.Exec("UPDATE users SET disabled_reason = '' WHERE disabled_reason IS NULL")
 	db.Exec("UPDATE resellers SET depleted = 0 WHERE depleted IS NULL")
+	db.Exec("UPDATE nodes SET suspended = 0 WHERE suspended IS NULL") // 后加的列:订阅、渲染里按 suspended = 0 找服务器
 	now := time.Now().Unix()
+	// 本机数据面的累计(服务器流量额度按它计):一打开库就把那条记录建好,第一笔流量才不会被主机当成基线丢掉
+	if err := model.EnsureLocalTotal(db, now); err != nil {
+		return nil, err
+	}
 	db.Exec("UPDATE users SET disabled_reason = 'quota' WHERE enabled = 0 AND disabled_reason = '' AND volume > 0 AND up + down >= volume")
 	db.Exec("UPDATE users SET disabled_reason = 'expired' WHERE enabled = 0 AND disabled_reason = '' AND expiry > 0 AND expiry < ?", now)
 	db.Exec(`UPDATE users SET disabled_reason = 'quota' WHERE enabled = 0 AND disabled_reason = '' AND reseller_id IN (

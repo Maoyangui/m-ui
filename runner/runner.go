@@ -61,7 +61,9 @@ func SetPanelStarter(f func(*Runner) error) { startPanel = f }
 type Runner struct {
 	// panelSwitch 面板换监听的钩子(web 层登记,见 web/panel_switch.go):换了面板证书后叫它,delay 后在进程里换监听,
 	// 返回新地址(给证书日志);面板监听没变返回空。没登记(测试)为 nil。
-	panelSwitch  func(delay time.Duration) string
+	panelSwitch func(delay time.Duration) string
+	// nodeQuota 服务器流量额度的判定(web 层登记,见 web/node_quota.go):定时任务每分钟、并账之后各叫一次
+	nodeQuota    atomic.Pointer[func()]
 	db           *gorm.DB
 	core         *core.Core
 	subSrv       *sub.Server
@@ -277,6 +279,11 @@ func New(dbPath string) (*Runner, error) {
 		Forget:      r.notifier.Forget,
 		Rules:       r.RulesNow,
 		ApplyLimits: r.ApplyLimits,
+		NodeQuota: func() {
+			if fn := r.nodeQuota.Load(); fn != nil {
+				(*fn)()
+			}
+		},
 	})
 	r.monitor = monitor.New(monitor.Deps{
 		UsedUpstreams: r.usedUpstreams,
@@ -2151,6 +2158,9 @@ func (r *Runner) newSubServer() *sub.Server {
 	}
 	return s
 }
+
+// SetNodeQuotaHook web 层登记服务器流量额度的判定(见 Runner.nodeQuota)。
+func (r *Runner) SetNodeQuotaHook(fn func()) { r.nodeQuota.Store(&fn) }
 
 // SetPanelSwitchHook web 层登记面板换监听的钩子(见 Runner.panelSwitch)。
 func (r *Runner) SetPanelSwitchHook(fn func(delay time.Duration) string) { r.panelSwitch = fn }

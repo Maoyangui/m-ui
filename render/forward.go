@@ -88,7 +88,7 @@ type forwardIn struct {
 // (本机的线路、面板、订阅)。撞端口的、出口服务器不存在 / 停用 / 不再部署这条线路的、算不出转到哪里的都跳过 ——
 // 保存时已经拦过,这里是兜底:一个坏掉的中转不能让整台服务器的数据面起不来。
 func forwardInbounds(db *gorm.DB, self uint, all []model.Line, taken map[int]bool) []forwardIn {
-	if self == 0 {
+	if self == 0 || SelfHeld(db, self) { // 本机被停止服务(额度用完 / 到期):经本机的中转入口一个都不开
 		return nil
 	}
 	var nodes map[uint]model.Node
@@ -108,7 +108,7 @@ func forwardInbounds(db *gorm.DB, self uint, all []model.Line, taken map[int]boo
 				}
 			}
 			exit, ok := nodes[f.To]
-			if !ok || !exit.Enabled || !LineOnNode(l, f.To) {
+			if !ok || !exit.Serving() || !LineOnNode(l, f.To) { // 出口停用了、被停止服务了:转过去也没人接
 				continue
 			}
 			target := ForwardTarget(f, exit, nodes[self])
@@ -129,6 +129,18 @@ func forwardInbounds(db *gorm.DB, self uint, all []model.Line, taken map[int]boo
 		}
 	}
 	return out
+}
+
+// SelfHeld 本机(nodes 表里的 self)是不是被停止服务了:流量额度用完 / 已到期,又没有整台停用(见 model.Node.Suspended)。
+func SelfHeld(db *gorm.DB, self uint) bool {
+	if self == 0 {
+		return false
+	}
+	var held []bool
+	if err := db.Model(&model.Node{}).Where("id = ?", self).Limit(1).Pluck("COALESCE(suspended, 0)", &held).Error; err != nil {
+		return false
+	}
+	return len(held) == 1 && held[0]
 }
 
 // warnForwardOnce 同一个中转入口的问题只记一次日志(BuildConfig 每次热更新用户都会跑)。

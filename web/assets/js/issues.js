@@ -17,6 +17,41 @@ export const OFFLINE_GRACE = 30;
 // 这类事不提醒就没人知道 —— 页面上看规则存着、开关开着,那台机器上其实没生效。命令行特意暂停的不算。
 export const fwBad = f => !!f && !f.paused && (!!f.error || (f.rules > 0 && !f.engine));
 
+// ---- 服务器的流量额度 / 到期 ----
+
+// quotaBlocked 被流量额度或到期拦下的服务器(n.quota 是主机给的那份,见 web/node_quota.go):
+//   [{ id, name, why: 'traffic' | 'expired' | '', mode: 'off' | 'hold', at }]
+//   off  = 整台被自动停用(quota.autoOff);hold = 服务器还启用着,只停了它的代理服务(n.suspended:关了自动停用的,或主机自己那台)。
+// 这不是故障,是管理员自己设的规则到点生效,也没什么可「处理」的:不进 nodeIssues(「需要处理」里服务器那一项、
+// 服务器页的「只看异常」都不算它),概况里单独给一条提醒,点「知道了」就收起。快用完、快到期也不提前提醒。
+// 管理员手动停用的不算。副机自己的面板上没有额度那份数据,只知道自己被主机停了服务(why 为空)。
+export function quotaBlocked(nodes) {
+  const out = [];
+  for (const n of nodes || []) {
+    if (!n) continue;
+    const q = n.quota || {};
+    const off = !!q.state && !!q.autoOff && n.enabled === false;
+    if (!off && !n.suspended) continue;
+    out.push({ id: n.id, name: n.name, why: q.state || '', mode: off ? 'off' : 'hold', at: q.stateAt || 0 });
+  }
+  return out;
+}
+// 「知道了」记下的是名单里每一台的「服务器 : 原因 : 什么时候被拦下的」(quotaAckKeys)。quotaFresh 是名单里还没点过的:
+// 新被拦下的一台、同一台恢复之后又被拦下(时间变了)、原因变了(流量用完 → 到期)都算新的,提醒重新出现;
+// 有服务器恢复、名单变短不算 —— 不把已经知道的那几台再提醒一遍。
+const quotaKey = x => `${x.id}:${x.why}:${x.at}`;
+export const quotaAckKeys = list => (list || []).map(quotaKey).join(',');
+export function quotaFresh(list, acked) {
+  const seen = new Set(String(acked || '').split(',').filter(Boolean));
+  return (list || []).filter(x => !seen.has(quotaKey(x)));
+}
+// quotaAckPrune 记下的「知道了」里只留现在还被拦着的那几台:已经恢复的划掉 —— 以后它再被拦下是一件新的事,要重新提醒
+// (副机自己的面板上没有「什么时候被拦下」这个时间,不划掉的话第二次就再也不提醒了)。
+export function quotaAckPrune(list, acked) {
+  const seen = new Set(String(acked || '').split(',').filter(Boolean));
+  return (list || []).map(quotaKey).filter(k => seen.has(k)).join(',');
+}
+
 // nodeIssues 一台服务器的问题:[{code, sev}]。只看远端服务器(本机的数据面与重载另有来源)。
 // 停用的服务器只看"下线通知未送达";离线时不再看其它项(状态是上一次的,不可信)。
 // unsyncedFor:已经连续看到"未同步"多少秒(调用方记,见 trackUnsynced);不给时按已超过门槛算。

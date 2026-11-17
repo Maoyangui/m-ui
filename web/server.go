@@ -82,6 +82,7 @@ type Server struct {
 	// 单独 Count 后再 Create 在并发请求下会同时看到同一个余量，导致 UserLimit 被突破。
 	resellerUserMu sync.Mutex
 	rotateMu       sync.Mutex
+	quotaMu        sync.Mutex // 串行化服务器流量额度的判定与保存(见 node_quota.go)
 	agentApplyMu   sync.Mutex // 快照落库、重载和确认必须作为同一轮串行完成
 	sessions       map[string]session
 	loginFails     map[string][]int64   // ip → 最近失败时间
@@ -372,6 +373,9 @@ func (s *Server) Start() error {
 	s.servePanel(ln, pl)
 	s.panelMu.Unlock()
 	logger.Info("面板已启动 ", scheme, "://", pl.addr, s.basePath())
+	if s.run != nil {
+		s.run.SetNodeQuotaHook(s.NodeQuotaTick) // 服务器的流量额度:定时任务叫这里判
+	}
 	if s.run != nil { // 证书页 / 签发里换了面板证书:runner 叫这里在进程里换监听,不重启 m-ui
 		s.run.SetPanelSwitchHook(func(delay time.Duration) string {
 			if sw := s.planPanelSwitch(delay); sw != nil {

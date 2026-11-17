@@ -137,7 +137,7 @@ func relayEntryNodes(db *gorm.DB, upID uint) []model.Node {
 		return nil
 	}
 	var nodes []model.Node
-	db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&nodes)
+	db.Where("enabled = ? AND COALESCE(suspended, 0) = 0", true).Order("sort asc, id asc").Find(&nodes)
 	var out []model.Node
 	for _, n := range nodes {
 		for _, l := range users {

@@ -320,7 +320,9 @@ func CertIsSelfSigned(certFile, fallback string) bool {
 // 多入口时每条线路按入口各出一个节点并加 "-名称" 后缀;倍率不为 1 时再加 " x2" 之类标记。
 func EntriesFromNodes(db *gorm.DB, webDomain, localPublicIP, localPublicIP6 string, preferIP bool) []Entry {
 	var nodes []model.Node
-	db.Where("enabled = ?", true).Order("sort asc, id asc").Find(&nodes)
+	// 停用的、流量额度用完 / 到期被停止服务的(model.Node.Suspended)都不出节点:连上去也没人接。
+	// 经它的中转入口、转给它的中转入口按这张表找服务器,跟着一起不出(见 forwardAddrs)
+	db.Where("enabled = ? AND COALESCE(suspended, 0) = 0", true).Order("sort asc, id asc").Find(&nodes)
 	var out []Entry
 	for _, n := range nodes {
 		domain := strings.TrimSpace(n.Domain)

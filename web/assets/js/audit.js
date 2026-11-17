@@ -3,7 +3,7 @@
 import { t } from './i18n.js';
 
 // 定时任务写审计的执行者名(和后端 model.JobActors 同一份):按名单排除,不按「以 Job 结尾」,名字以 job 结尾的人不会被藏掉
-export const JOB_ACTORS = ['ResetJob', 'DepleteJob', 'RuleJob', 'FollowJob', 'GuardJob'];
+export const JOB_ACTORS = ['ResetJob', 'DepleteJob', 'RuleJob', 'FollowJob', 'GuardJob', 'QuotaJob'];
 
 const has = k => { const v = t(k); return v && v !== k ? v : ''; };
 // 对象:多数就是导航里那一页的名字

@@ -528,6 +528,10 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	if seq, err := strconv.ParseUint(s.setting("hubSnapshotSequence"), 10, 64); err == nil {
 		rep.Sequence = seq
 	}
+	// 本机数据面的累计(线路入站 + 中转入口):主机按它算这台服务器的本期用量。读不出来这一份就不带(主机下一份再并)
+	if total, err := model.ReadLocalTotal(s.db); err == nil && total.LedgerId != 0 {
+		rep.Total = &total
+	}
 	if h := s.haSvc(); h != nil {
 		rep.HA = h.Report() // 版本、磁盘、角色;进过纪元的还有备用公钥、手里的副本、租约
 	}

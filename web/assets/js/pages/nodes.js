@@ -2,7 +2,7 @@ import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, fmtRelative, fmtDuration, toast, confirm, openModal, registerActions, badge, field, fieldBox, switchRow, empty, fv, fchk, setHTML, matches, debounce, diskBrief, diskHogs } from '../ui.js';
+import { esc, fmtRelative, fmtDuration, fmtBytes, fmtDay, daysLeft, gbValue, gbBytes, toast, confirm, openModal, closeModal, registerActions, badge, field, fieldBox, switchRow, empty, fv, fchk, setHTML, matches, debounce, diskBrief, diskHogs } from '../ui.js';
 import { loadReach, reachCell, reachToolbar, refreshDetail, setNodes, setReachListener, reach, isBad, v6Of } from '../reach.js';
 import { nodeIssues, trackUnsynced, diskLevel, diskPct, fwBad } from '../issues.js';
 import { loadHA, roleChip, haMenuItems, setHARefresh } from '../ha.js';
@@ -108,24 +108,71 @@ const subByDomain = () => String((state.settings || {}).subServerAddr || '').toL
 
 function renderReachBar() { setHTML('reach-bar', reachToolbar(isNodeView())); }
 
+// ---- 流量额度与到期(后端 web/node_quota.go)----
+// 额度按这台服务器数据面的真实上下行算(含经它的中转,不乘倍率)。用完或到期:默认把这台停用(quota.autoOff),
+// 关了「自动停用」的、主机自己那台改成只停代理服务(n.suspended);重置、加额度、续期后自己恢复。
+const quotaSet = q => !!q && (q.volume > 0 || q.expiry > 0);
+const quotaPct = q => (q && q.volume > 0 ? Math.min(100, Math.floor(q.used * 100 / q.volume)) : null);
+// 额度写成整数 GB / TB 时不带小数(500 GB 不写成 500.00 GB)
+const volText = v => { const s = fmtBytes(v, 2); return s.replace(/\.00(?= )/, '').replace(/(\.\d)0(?= )/, '$1'); };
+// 用量:GB 及以下留一位小数,TB 以上留两位(1.46 TB 写成 1.5 TB 会像已经顶到 1.5 TB 的额度),都去掉尾零
+const useText = v => { const s = fmtBytes(v, 2); return (/ (TB|PB)$/.test(s) ? s : fmtBytes(v, 1)).replace(/\.0+(?= )/, '').replace(/(\.\d)0(?= )/, '$1'); };
+// 行里的「已用 / 额度」:两边单位一样时只写一次(412.6 / 500 GB),列窄也放得下;不一样的照常各写各的(812 MB / 500 GB)
+const pairText = (used, vol) => { const a = useText(used), b = volText(vol), ua = a.split(' ')[1], ub = b.split(' ')[1]; return `${ua === ub ? a.split(' ')[0] : a} / ${b}`; };
+// 恢复的条件一句话:到期的要续期;流量用完的看有没有周期重置
+const quotaThen = q => t(q.state === 'expired' ? 'nq.then.renew' : (q.resetMode && q.nextReset ? 'nq.then.reset' : 'nq.then.add'), { date: fmtDay(q.nextReset) });
+const quotaWhy = q => t(q.state === 'expired' ? 'nq.why.expired' : 'nq.why.traffic');
+// 状态一格里的小字:为什么被拦着、什么时候恢复
+function quotaNote(n) {
+  const q = n.quota;
+  // 不截断:什么时候恢复正是要看的那半句(状态一格窄,折成两行)
+  if (!q || !q.state) return n.suspended ? `<div class="sub-cell warn-text nq-note">${esc(t('nq.heldByMaster'))}</div>` : '';
+  return `<div class="sub-cell warn-text nq-note">${esc(quotaWhy(q))}${q.autoOff ? esc(t('nq.autoOffTail')) : ''} · ${esc(quotaThen(q))}</div>`;
+}
+const heldBadge = n => (n.suspended ? ' ' + badge(t('nq.held'), 'danger') : '');
+// 名称一格里的用量条:设了额度或到期时间才有;点它打开编辑框里的那一段
+function quotaLine(n) {
+  const q = n.quota;
+  if (!quotaSet(q)) return '';
+  let cls = '';
+  const parts = [], tip = [];
+  if (q.volume > 0) {
+    const pct = quotaPct(q);
+    cls = q.state === 'traffic' || pct >= 100 ? 'full' : pct >= 80 ? 'warn' : '';
+    parts.push(`<span class="nq-meter"><span class="nq-bar"><i style="width:${pct}%"></i></span><span class="nq-txt">${esc(pairText(q.used, q.volume))}</span></span>`);
+    tip.push(t('nq.tip.used', { used: useText(q.used), up: useText(q.up), down: useText(q.down), pct }));
+    if (q.resetMode && q.nextReset) tip.push(t('nq.nextAt', { date: fmtDay(q.nextReset) }));
+  }
+  if (q.expiry > 0) {
+    const d = daysLeft(q.expiry);
+    if (d <= 0) cls = 'full'; else if (d <= 7 && cls !== 'full') cls = 'warn';
+    parts.push(`<span class="nq-exp">${esc(d <= 0 ? t('nq.why.expired') : d <= 30 ? t('nq.expIn', { n: d }) : t('nq.expAt', { date: fmtDay(q.expiry) }))}</span>`);
+    tip.push(t('nq.expAt', { date: fmtDay(q.expiry) }));
+  }
+  if (q.volume > 0 && !q.tracked) tip.push(t('nq.notTracked'));
+  tip.push(t('nq.tip.open'));
+  return `<button type="button" class="nq ${cls}" data-act="node.quota" data-id="${n.id}" title="${esc(tip.join('\n'))}">${parts.join('')}</button>`;
+}
+
 // 副机视角:自己是"本机",主机那行标"主机 · 最近同步",其它副机标"主机管理";副机不探测别的机器。
 // 第一个标签是主机容灾里的角色(主机 · 本机 / 备用 N / 副机 / 原主机 · 失联),点开是小卡片(见 ha.js)
 function statusCell(n) {
   const chip = roleChip(n, data);
-  if (n.isLocal) return chip || badge(t('node.local'), 'primary');
+  if (n.isLocal) return (chip || badge(t('node.local'), 'primary')) + heldBadge(n) + (n.suspended ? quotaNote(n) : '');
   if (isNodeView()) {
     if (n.id === data.masterId) return `${chip || badge(t('role.master'), 'primary')}${data.appliedAt ? ` <span class="muted small">${t('node.lastSync')} ${fmtRelative(Number(data.appliedAt))}</span>` : ''}`;
     return chip || badge(t('node.byMaster'));
   }
-  if (!n.enabled) return chip + badge(t('common.disabled')) + decomBadge(n);
+  if (!n.enabled) return chip + badge(t('common.disabled')) + decomBadge(n) + (n.quota && n.quota.autoOff ? quotaNote(n) : '');
   const s = n.status;
   if (!s) return chip + badge(t('node.pending'), 'warn');
   // 在线但有话要说(配置推不下去、数据面没应用成功、记账出问题):这台机器并没有离线,但管理员必须看见。
   // 第二行小字:有话要说就写原因(黄),否则是版本号 + 主机名
   if (s.ok) {
     const meta = [s.version ? 'v' + s.version : '', s.hostname || ''].filter(Boolean).join(' · ');
-    return `${chip}${badge(t('common.online'), 'ok')}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.noConnFails ? ` <span title="${esc(t('node.noConnFailsHelp'))}">${badge(t('node.noConnFails'))}</span>` : ''}${ledgerBadges(s)}${s.error
+    return `${chip}${badge(t('common.online'), 'ok')}${heldBadge(n)}${s.versionMismatch ? ' ' + badge(t('node.versionMismatch'), 'warn') : ''}${s.noConnFails ? ` <span title="${esc(t('node.noConnFailsHelp'))}">${badge(t('node.noConnFails'))}</span>` : ''}${ledgerBadges(s)}${s.error
       ? `<div class="sub-cell ellip warn-text" title="${esc(trErr(s.error))}">${esc(shortErr(s.error))}</div>`
+      : n.suspended ? quotaNote(n)
       : (meta ? `<div class="sub-cell ellip" title="${esc(meta)}">${esc(meta)}</div>` : '')}`;
   }
   return `${chip}${badge(t('common.offline'), 'danger')}<div class="sub-cell ellip" title="${esc(trErr(s.error || ''))}">${esc(shortErr(s.error))}${s.lastSeen ? ` · ${t('node.lastSeen')} ${fmtRelative(s.lastSeen)}` : ''}</div>`;
@@ -228,6 +275,7 @@ function actionsCell(n) {
   if (isNodeView()) return '';
   // 更多菜单里的项:一项一个按钮;容灾等以后加的操作也往这里放
   const more = [
+    `<button data-act="node.quota" data-id="${n.id}">${t('nq.menu')}</button>`, // 没设过额度的服务器行里没有用量条,入口在这里(和编辑框里是同一段)
     n.isLocal || !n.enabled ? '' : `<button data-act="node.push" data-id="${n.id}">${t('node.push')}</button>`,
     n.isLocal || !n.certFp ? '' : `<button data-act="node.resetCert" data-id="${n.id}" title="${esc(n.certFp)}">${t('node.resetCert')}</button>`,
     n.isLocal || n.enabled ? `<button data-act="node.diskClean" data-id="${n.id}">${t('node.diskClean')}</button>` : '',
@@ -242,6 +290,7 @@ function actionsCell(n) {
 // 「只看异常」的口径(和概况「需要处理」同一份,见 issues.js):离线、数据面停止、重载失败、下线通知未送达、记账失败、
 // 未同步超过 30 秒、版本不一致;再加上大陆连通不通 / 部分不通、证书有问题、IPv6 入站不通(有检测结果时)
 function nodeBad(n) {
+  // 被流量额度 / 到期停下来的不算异常:那是自己设的规则到点生效(行里照样标着「已停止服务」「停用」和原因)
   if (!n.isLocal && nodeIssues(n, { unsyncedFor: trackUnsynced(unsyncedSince, data.nodes)(n.name), now: data.now || Date.now() / 1000 }).length) return true;
   if (n.isLocal) {
     const rl = state.status.reload || {};
@@ -299,7 +348,7 @@ function renderRows() {
     const s = n.status || {};
     const domain = n.domain || (n.isLocal ? state.settings.webDomain || '' : '');
     return `<tr>
-      <td class="primary-cell"><span class="node-name" title="${esc(n.apiUrl && !isNodeView() ? n.apiUrl : n.name)}">${esc(n.name)}</span>${n.ratio && n.ratio !== 1 ? ' ' + badge('×' + n.ratio) : ''}${n.apiUrl && !isNodeView() && isPlain(n.apiUrl) ? ` <span title="${esc(t('node.plainHelp'))}">${badge(t('node.plain'), 'warn')}</span>` : ''}${domain ? `<div class="sub-cell ellip" title="${esc(domain)}">${esc(domain)}</div>` : ''}</td>
+      <td class="primary-cell"><span class="node-name" title="${esc(n.apiUrl && !isNodeView() ? n.apiUrl : n.name)}">${esc(n.name)}</span>${n.ratio && n.ratio !== 1 ? ' ' + badge('×' + n.ratio) : ''}${n.apiUrl && !isNodeView() && isPlain(n.apiUrl) ? ` <span title="${esc(t('node.plainHelp'))}">${badge(t('node.plain'), 'warn')}</span>` : ''}${domain ? `<div class="sub-cell ellip" title="${esc(domain)}">${esc(domain)}</div>` : ''}${isNodeView() ? '' : quotaLine(n)}</td>
       <td class="c-addr">${addrCell(n)}</td>
       <td>${statusCell(n)}</td>
       <td class="reach-td c-reach">${reachCell(n, isNodeView())}</td>
@@ -323,10 +372,81 @@ function renderRows() {
   renderGroups();
 }
 
-// 新增 / 编辑服务器。从上到下三段,每段回答一件事:
-//   这台叫什么、归哪一组、流量怎么算 → 怎么连上它的面板(副机才有)→ 订阅里给用户哪个地址
-// 两个开关(跳过证书校验、启用)各占一整行、带一句说明,跟着它管的那一段:不再是表单末尾两个并排的小勾选框
-function editNode(id) {
+// 编辑框里「流量额度与到期」那一段。三项设置一排(总流量 / 重置周期 / 到期时间),下面是「用完或到期后自动停用」的开关 ——
+// 开和关各是什么后果写在开关底下,随开关换(关着时要提醒:同步本身还会消耗流量)。已经有用量的,段首一行用量条。
+// 正被拦着的(用完 / 到期),最上面一句话说清现在怎样、怎么恢复。
+const expiryDate = ts => (ts ? new Date(ts * 1000).toISOString().slice(0, 10) : '');
+// 「每月 [ ] 日」「每 [ ] 天」这类句子里嵌一个输入框:译文里用 {input} 占位
+const withInput = (key, input) => { const [a, b = ''] = t(key).split('{input}'); return `${a ? `<span>${esc(a)}</span>` : ''}${input}${b ? `<span>${esc(b)}</span>` : ''}`; };
+function quotaSection(n) {
+  const q = n.quota || {};
+  const mode = q.resetMode || '';
+  const alert = q.state ? `<div class="alert-bar nq-alert"><span>${esc(t(q.autoOff ? 'nq.alert.off' : 'nq.alert.hold', { why: quotaWhy(q) }))} ${esc(t(q.state === 'expired' ? 'nq.alert.renew' : (q.resetMode && q.nextReset ? 'nq.alert.reset' : 'nq.alert.add'), { date: fmtDay(q.nextReset) }))}</span></div>` : '';
+  const pct = quotaPct(q);
+  const usage = q.tracked || q.used > 0 ? `<div class="nq-use">
+      ${q.volume > 0 ? `<span class="nq-bar ${q.state === 'traffic' || pct >= 100 ? 'full' : pct >= 80 ? 'warn' : ''}"><i style="width:${pct}%"></i></span>` : ''}
+      <span class="nq-use-txt">${esc(q.volume > 0 ? t('nq.usedOf', { used: useText(q.used), total: volText(q.volume), pct }) : t('nq.used', { used: useText(q.used) }))}<span class="muted"> · ${esc(t('nq.updown', { up: useText(q.up), down: useText(q.down) }))}${q.periodStart ? ' · ' + esc(t('nq.since', { date: fmtDay(q.periodStart) })) : ''}</span></span>
+      ${n.id && q.used > 0 ? `<button type="button" class="btn sm" data-act="node.quotaReset" data-id="${n.id}">${esc(t('nq.reset'))}</button>` : ''}
+    </div>` : '';
+  const old = n.id && !n.isLocal && n.status && n.status.ok && !q.tracked && verLess(n.status.version, '0.8.0');
+  return `<h3 class="form-sec" id="nq-sec">${esc(t('nq.sec'))}</h3>
+    ${alert}${usage}
+    <div class="nq-grid">
+      ${field(t('nq.vol'), `<input id="f-qvol" type="number" min="0" step="any" value="${gbValue(q.volume)}">`, t('nq.volHelp'))}
+      ${fieldBox(t('nq.cycle'), `<div class="nq-cycle"><select id="f-qmode"><option value="">${esc(t('nq.mode.none'))}</option><option value="month" ${mode === 'month' ? 'selected' : ''}>${esc(t('nq.mode.month'))}</option><option value="days" ${mode === 'days' ? 'selected' : ''}>${esc(t('nq.mode.days'))}</option></select>
+        <span class="nq-cyc" data-mode="month">${withInput('nq.monthOn', `<input id="f-qday" type="number" min="1" max="31" value="${q.resetDay || 1}">`)}</span>
+        <span class="nq-cyc" data-mode="days">${withInput('nq.daysEvery', `<input id="f-qdays" type="number" min="1" max="3650" value="${q.resetDays || 30}">`)}</span></div>
+        <span class="help" id="f-qcycle-help"></span>`)}
+      ${field(t('nq.exp'), `<input id="f-qexp" type="date" value="${expiryDate(q.expiry)}">`, t('nq.expHelp'))}
+    </div>
+    ${old ? `<p class="hint warn-text">${esc(t('nq.notTracked'))}</p>` : ''}
+    ${n.isLocal ? `<p class="hint">${esc(t('nq.localHelp'))}</p>`
+    : `<label class="sw-row nq-auto"><div><b>${esc(t('nq.auto'))}</b><small id="f-qauto-help"></small></div><span class="switch"><input type="checkbox" id="f-qauto" ${q.autoDisable === false ? '' : 'checked'}><span></span></span></label>`}`;
+}
+// 版本号比大小(只比点分的数字;解析不出来的当不小于)
+function verLess(a, b) {
+  const pa = String(a || '').split('.').map(Number), pb = String(b).split('.').map(Number);
+  if (pa.some(x => !Number.isFinite(x))) return false;
+  for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0); }
+  return false;
+}
+// 表单里的额度设置(和后端 nodeQuotaReq 同一份字段);到期按那一天的 23:59:59 算(和用户的到期时间同一个算法)
+function readQuota(n) {
+  const mode = fv('f-qmode'), exp = fv('f-qexp');
+  const out = {
+    volume: gbBytes(fv('f-qvol') || 0), resetMode: mode,
+    resetDays: mode === 'days' ? Number(fv('f-qdays')) || 0 : 0, resetDay: mode === 'month' ? Number(fv('f-qday')) || 0 : 0,
+    expiry: exp ? Math.floor(new Date(exp + 'T23:59:59').getTime() / 1000) : 0,
+  };
+  if (!n.isLocal) out.autoDisable = fchk('f-qauto');
+  return out;
+}
+// 和原来的比:没动过就不带(不带就不改,也不多记一笔审计)。到期只比到天:原来存的就是那天的 23:59:59
+function quotaChanged(n, v) {
+  const q = n.quota || {};
+  return v.volume !== (q.volume || 0) || v.resetMode !== (q.resetMode || '') || v.resetDays !== (q.resetDays || 0) || v.resetDay !== (q.resetDay || 0)
+    || fv('f-qexp') !== expiryDate(q.expiry) || (!n.isLocal && v.autoDisable !== (q.autoDisable !== false));
+}
+function bindQuota(n) {
+  const q = n.quota || {};
+  const sync = () => {
+    const mode = fv('f-qmode');
+    document.querySelectorAll('.nq-cyc').forEach(el => { el.hidden = el.dataset.mode !== mode; });
+    const same = mode === (q.resetMode || '') && (mode !== 'days' || Number(fv('f-qdays')) === q.resetDays) && (mode !== 'month' || Number(fv('f-qday')) === q.resetDay);
+    document.getElementById('f-qcycle-help').textContent = !mode ? t('nq.cycleNone')
+      : same && q.nextReset ? t('nq.nextAt', { date: fmtDay(q.nextReset) }) : t(mode === 'month' ? 'nq.cycleMonth' : 'nq.cycleDays');
+    const auto = document.getElementById('f-qauto'), help = document.getElementById('f-qauto-help');
+    if (auto && help) { help.textContent = t(auto.checked ? 'nq.autoOn' : 'nq.autoOff'); help.classList.toggle('warn-text', !auto.checked); }
+  };
+  for (const id of ['f-qmode', 'f-qdays', 'f-qday', 'f-qauto']) { const el = document.getElementById(id); if (el) el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', sync); }
+  sync();
+}
+
+// 新增 / 编辑服务器。从上到下四段,每段回答一件事:
+//   这台叫什么、归哪一组、流量怎么算 → 怎么连上它的面板(副机才有)→ 订阅里给用户哪个地址 → 流量额度与到期
+// 开关(跳过证书校验、自动停用、启用)各占一整行、带一句说明,跟着它管的那一段:不再是表单末尾并排的小勾选框
+// focus = 'quota':从行里的用量条点进来,打开后滚到额度那一段
+function editNode(id, focus) {
   const n = id ? data.nodes.find(x => x.id === id) : { enabled: true, insecure: true };
   const byDomain = subByDomain();
   const famHelp = t('node.addrFamHelp') + (id ? ' ' + detectedText(n) : '') + (byDomain ? ' ' + t('node.addrDnsHelp') : '');
@@ -352,7 +472,8 @@ function editNode(id) {
         ${fieldBox(t('node.addr'), `<div class="nd-addr"><input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(autoAddr(n).ip || t('node.addrAuto'))}">
           <select id="f-family" title="${esc(t('node.familyHelp') + (byDomain ? ' ' + t('node.familyDnsHelp') : ''))}"><option value="">${t('node.famAuto4')}</option><option value="v6" ${n.addrFamily === 'v6' ? 'selected' : ''}>${t('node.famAuto6')}</option></select></div>`, famHelp)}
       </div>
-      ${n.isLocal ? '' : `<div class="nd-enabled">${switchRow('f-enabled', t('common.enabled'), n.enabled !== false, t('node.enabledHelp'))}</div>`}
+      ${quotaSection(n)}
+      ${n.isLocal ? '' : `<div class="nd-enabled">${switchRow('f-enabled', t('common.enabled'), n.enabled !== false, n.quota && n.quota.autoOff ? t('nq.enabledAutoOff') : t('node.enabledHelp'))}</div>`}
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), domain: fv('f-domain').trim(), sort: Number(fv('f-sort')) || 0,
@@ -360,12 +481,19 @@ function editNode(id) {
       apiUrl: n.isLocal ? '' : fv('f-api').trim(), token: n.isLocal ? '' : fv('f-token'),
       insecure: n.isLocal ? false : fchk('f-insecure'), enabled: n.isLocal ? true : fchk('f-enabled'),
     };
+    const quota = readQuota(n);
+    if (id ? quotaChanged(n, quota) : (quota.volume > 0 || quota.expiry > 0 || quota.resetMode)) body.quota = quota; // 额度和服务器一起存(同一笔);没动就不带
     const r = id ? await put('nodes/' + id, body, SLOW) : await post('nodes', body); // 停用时主机要先给它推空用户表
     await load('settings', 'nodes'); // 线路编辑器里的"部署到服务器"依赖 state.nodes
     toast(t('set.saved'), 'ok');
     render(document.getElementById('page'));
     if (r && r.decommissionError) notice(t('node.decomFailTitle'), t('node.decomFail', { name: body.name, err: trErr(r.decommissionError) }));
+    // 额度一改就判:调低到已用以下(或者已经到期)的,保存完这台已经按设置被拦下 —— 说一声,免得人以为还在用
+    else if (body.quota && r && (r.suspended || (body.enabled && r.enabled === false))) notice(t('nq.savedTitle'), t(r.suspended ? 'nq.savedHeld' : 'nq.savedOff', { name: body.name }));
   }, { wide: true });
+  bindQuota(n);
+  // 从用量条点进来:滚到额度那一段、光标落在总流量上。要排在弹窗自己「聚焦第一个输入框」之后(那一下会把内容滚回顶上)
+  if (focus === 'quota') setTimeout(() => { const sec = document.getElementById('nq-sec'), v = document.getElementById('f-qvol'); if (sec && v) { v.focus({ preventScroll: true }); sec.scrollIntoView({ block: 'start' }); } }, 90);
   const api = document.getElementById('f-api');
   if (api) api.addEventListener('input', () => { document.getElementById('f-api-plain').hidden = !isPlain(api.value); });
   // 换了地址族,连接地址框的灰字跟着换成会用的那个地址
@@ -394,6 +522,25 @@ registerActions({
   },
   'node.add': () => editNode(null),
   'node.edit': id => editNode(Number(id)),
+  'node.quota': id => editNode(Number(id), 'quota'),
+  // 重置用量:点第一下按钮变成「确认清零」,4 秒内再点才执行(不弹确认框 —— 确认框和编辑框是同一个弹窗,一弹就把填了一半的表单顶掉了)。
+  // 清完按新的数据把编辑框重新打开在这一段:看得到用量归零、这台恢复没有
+  'node.quotaReset': async (id, btn) => {
+    if (btn.dataset.armed !== '1') {
+      btn.dataset.armed = '1'; btn.textContent = t('nq.resetSure'); btn.classList.add('danger');
+      setTimeout(() => { if (btn.isConnected && btn.dataset.armed === '1' && !btn.disabled) { btn.dataset.armed = ''; btn.textContent = t('nq.reset'); btn.classList.remove('danger'); } }, 4000);
+      return;
+    }
+    btn.disabled = true;
+    try {
+      await post(`nodes/${id}/quota/reset`, undefined, SLOW);
+      closeModal();
+      await load('nodes');
+      await render(document.getElementById('page'));
+      toast(t('nq.resetDone'), 'ok');
+      editNode(Number(id), 'quota');
+    } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
+  },
   'node.test': async (id, btn) => {
     btn.disabled = true;
     try {

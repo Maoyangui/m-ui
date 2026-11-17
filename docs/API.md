@@ -475,7 +475,14 @@ X-API-Key: <令牌>
 
 ### GET /servers
 
-每台服务器(只有主面板的密钥能看):`{id, name, enabled, ratio, isLocal, online, version, coreRunning, onlineUsers, lastSeen[, error]}`。本机 `isLocal: true`,总是在线;副机 `online` 是主机最近一轮能不能联系上它。
+每台服务器(只有主面板的密钥能看):`{id, name, enabled, ratio, isLocal, online, version, coreRunning, onlineUsers, lastSeen[, error][, suspended][, quota]}`。本机 `isLocal: true`,总是在线;副机 `online` 是主机最近一轮能不能联系上它。
+
+流量额度与到期(v0.8.0 起;在面板的服务器页设置):
+
+- `quota`:这台服务器有额度记录时才有 —— `{volume, used, up, down, total, periodStart, expiry, resetMode, resetDays, resetDay, nextReset, autoDisable, state, stateAt, autoOff, tracked}`。
+  流量都是字节,按这台上真实的上行 + 下行算(含经它的中转),不乘倍率;`volume: 0` 是不限,`expiry: 0` 是没设到期。`resetMode` 是 `""`(不重置)/ `"days"`(每 `resetDays` 天)/ `"month"`(每月 `resetDay` 日),`nextReset` 是下次清零的时间。
+  `state` 为 `"traffic"`(本期流量用完)或 `"expired"`(已到期)时这台不再为任何人服务:`autoOff: true` 表示整台被自动停用(此时 `enabled: false`),否则只停了代理服务(`suspended: true`)。`tracked: false` 表示那台还没上报过流量(版本低于 0.8.0),用量一直是 0。
+- `suspended: true`:流量用完或到期,这台的代理服务停着(服务器本身还启用、还在同步)。
 
 ### GET /lines
 

@@ -265,3 +265,67 @@ test('磁盘:快满 / 满了算服务器的问题(和后端 model.DiskLevel 同�
   assert.deepEqual(sum.byCode.diskFull, ['d']);
   assert.deepEqual(sum.byCode.disk, ['e']);
 });
+
+// ---- 服务器的流量额度 / 到期(web/node_quota.go 给的 n.quota)----
+// 用完 / 到期被停不是故障:不进 nodeIssues,概况里单独一条提醒,点「知道了」收起
+const GB = 1073741824;
+const quota = (over = {}) => ({ volume: 500 * GB, used: 100 * GB, expiry: 0, state: '', stateAt: 0, autoOff: false, ...over });
+
+test('quotaBlocked:被额度拦下的才列(整台自动停用 / 只停了代理服务),手动停用的、没设的、快用完的都不列', () => {
+  const list = I.quotaBlocked([
+    { id: 1, name: 'Tokyo', isLocal: true, enabled: true, suspended: true, quota: quota({ used: 500 * GB, state: 'traffic', stateAt: 111 }) }, // 主机自己:只能停服务
+    { id: 2, name: 'Frankfurt', enabled: false, quota: quota({ used: 503 * GB, state: 'traffic', stateAt: 222, autoOff: true }) },            // 整台自动停用
+    { id: 3, name: 'Singapore', enabled: true, suspended: true, quota: quota({ expiry: 5, state: 'expired', stateAt: 333 }) },                // 关了自动停用:只停服务
+    { id: 4, name: 'Manual', enabled: false, quota: quota({ used: 600 * GB, state: 'traffic', stateAt: 444 }) },                              // 管理员自己停用的
+    { id: 5, name: 'Soon', enabled: true, quota: quota({ used: 499 * GB }) },                                                                 // 快用完:不提前提醒
+    { id: 6, name: 'Plain', enabled: true },
+    null,
+  ]);
+  assert.deepEqual(list, [
+    { id: 1, name: 'Tokyo', why: 'traffic', mode: 'hold', at: 111 },
+    { id: 2, name: 'Frankfurt', why: 'traffic', mode: 'off', at: 222 },
+    { id: 3, name: 'Singapore', why: 'expired', mode: 'hold', at: 333 },
+  ]);
+  // 副机自己的面板:没有额度数据,只知道被主机停了代理服务
+  assert.deepEqual(I.quotaBlocked([{ id: 9, name: 'self', isLocal: true, enabled: true, suspended: true }]), [{ id: 9, name: 'self', why: '', mode: 'hold', at: 0 }]);
+  assert.deepEqual(I.quotaBlocked(null), []);
+});
+
+test('被额度拦下的不算服务器的问题:nodeIssues / summarizeNodes 不变,「只看异常」「故障」里都没有它', () => {
+  const off = { id: 2, name: 'Frankfurt', enabled: false, quota: quota({ used: 503 * GB, state: 'traffic', autoOff: true }) };
+  const held = { ...on('Singapore'), id: 3, suspended: true, quota: quota({ used: 500 * GB, state: 'traffic' }) };
+  const local = { id: 1, name: 'Tokyo', isLocal: true, enabled: true, suspended: true, quota: quota({ used: 500 * GB, state: 'traffic' }) };
+  assert.deepEqual(I.nodeIssues(off), []);
+  assert.deepEqual(I.nodeIssues(held), []);
+  assert.deepEqual(I.nodeIssues(local), []);
+  const sum = I.summarizeNodes({ nodes: [local, off, held, on('Fine')] });
+  assert.equal(sum.red, 0);
+  assert.equal(sum.yellow, 0);
+  assert.equal(sum.total, 3, '启用的远端 2 台 + 本机;被自动停用的那台不在总数里');
+  assert.equal(sum.online, 3);
+  assert.ok(!I.NODE_CODES.includes('quota'));
+});
+
+test('「知道了」:只收起已经看过的;新被拦下、恢复后再次被拦下、原因变了才重新提醒;恢复的从记录里划掉', () => {
+  const a = { id: 2, name: 'Frankfurt', why: 'traffic', mode: 'off', at: 100 };
+  const b = { id: 3, name: 'Singapore', why: 'traffic', mode: 'hold', at: 200 };
+  assert.deepEqual(I.quotaFresh([a, b], null), [a, b], '没点过:都是新的');
+  const ack = I.quotaAckKeys([a, b]);
+  assert.equal(ack, '2:traffic:100,3:traffic:200');
+  assert.deepEqual(I.quotaFresh([a, b], ack), []);
+  assert.deepEqual(I.quotaFresh([b], ack), [], '有一台恢复了、名单变短:不重新提醒');
+  const c = { id: 4, name: 'Osaka', why: 'expired', mode: 'off', at: 300 };
+  assert.deepEqual(I.quotaFresh([a, b, c], ack), [c], '又多了一台');
+  assert.deepEqual(I.quotaFresh([{ ...a, at: 500 }, b], ack), [{ ...a, at: 500 }], '同一台恢复后再次被拦下');
+  assert.deepEqual(I.quotaFresh([{ ...a, why: 'expired' }, b], ack), [{ ...a, why: 'expired' }], '原因变了');
+  // 划掉已经恢复的:只留现在还被拦着的
+  assert.equal(I.quotaAckPrune([b], ack), '3:traffic:200');
+  assert.equal(I.quotaAckPrune([], ack), '');
+  assert.equal(I.quotaAckPrune([a, b, c], ack), ack);
+  assert.equal(I.quotaAckPrune([a], ''), '');
+  // 副机自己的面板(没有时间):恢复时记录被划掉,第二次被停照样提醒
+  const self = { id: 9, name: 'self', why: '', mode: 'hold', at: 0 };
+  const ack2 = I.quotaAckKeys([self]);
+  assert.deepEqual(I.quotaFresh([self], ack2), []);
+  assert.deepEqual(I.quotaFresh([self], I.quotaAckPrune([], ack2)), [self]);
+});

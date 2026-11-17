@@ -953,7 +953,17 @@ const EN = /*BEGIN*/{
 "线路节点选择格式错误": "Invalid line node selection",
 "节点选择里有套餐没带的线路 #%w": "The node selection includes line #%w that the plan doesn't have",
 "账本第 %d 笔入账的标记不对": "Deposit #%d in the ledger has a wrong mark",
-"账本第 %d 笔入账没有交易号": "Deposit #%d in the ledger has no transaction id"
+"账本第 %d 笔入账没有交易号": "Deposit #%d in the ledger has no transaction id",
+"流量额度填 0(不限)或一个正数": "The traffic quota must be 0 (unlimited) or a positive number",
+"到期时间不对": "Invalid expiry date",
+"到期时间已经过了:填一个将来的时间,或者留空不设": "That expiry date has already passed: pick a future date, or leave it empty for none",
+"重置周期填 1–3650 天": "The reset cycle must be 1–3650 days",
+"每月重置的日子填 1–31": "The monthly reset day must be 1–31",
+"重置周期只能是不重置、按天数或每月": "The reset cycle must be never, every N days or monthly",
+"下次重置的时间要在现在之后": "The next reset must be in the future",
+"下次重置的时间不能比一个周期还远": "The next reset cannot be further away than one cycle",
+"这台服务器本期流量已用完,按设置自动停用着:调高额度或重置用量后它会自动启用(关掉「用完或到期后自动停用」只是不停用整台,代理服务仍然停着)": "This server has used up its quota for this period and is disabled automatically as configured. It is re-enabled on its own once you raise the quota or reset the usage (turning off “Disable this server when the quota runs out or it expires” only keeps the server itself enabled; its proxy service stays stopped)",
+"这台服务器已到期,按设置自动停用着:延长到期时间后它会自动启用(关掉「用完或到期后自动停用」只是不停用整台,代理服务仍然停着)": "This server has expired and is disabled automatically as configured. It is re-enabled on its own once you extend the expiry (turning off “Disable this server when the quota runs out or it expires” only keeps the server itself enabled; its proxy service stays stopped)"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表
