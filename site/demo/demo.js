@@ -50,11 +50,70 @@ function demoUpTest(u) {
   if (h) Object.assign(h, row); else (S.health.results = S.health.results || []).push(row);
   return clone(out);
 }
-// 流量明细(概况点「流量」那一格):用户排行沿用流量排行那份数据,按范围放大;线路、服务器按固定的比例分同一个合计。
+// ---- 流量:概况「流量走势」、用户详情的流量图、流量排行、流量明细都从下面这一份现算,彼此对得上 ----
+// 以前用导出的时序:那是当时前端要的桶宽(1 小时按分钟、7 天 / 30 天按小时),而且只有导出前一天有量。前端后来把桶宽改成
+// 5 分钟 / 半小时 / 1 小时 / 6 小时 / 1 天,键对不上就退回「随便哪一份」—— 选了 7 天、30 天,画出来的还是最近一小时的分钟柱,
+// 横轴也跟着是分钟;排行的 7 天、30 天和 24 小时是同一组数。现在每个用户每小时的量现算(同一个小时每次算出来都一样):
+//   日均(导出的 24 小时排行里各人的量)× 一天里的起伏(晚上高、凌晨低)× 这一天的起伏(周末多一点)× 一点噪声,
+// 再按请求的范围和桶宽归到柱子里,对齐方式和后端 stats.Series 一样:日桶对齐到查看者时区的零点,小时级的桶对齐到当天内的
+// 整数倍(6 小时桶 → 0 / 6 / 12 / 18 点),更细的按 UTC 取整;最后一根是正在走的这一格。演示里新建的用户没有历史,图是空的。
+const demoNoise = (a, b) => { const x = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453; return x - Math.floor(x); };
+const DEMO_DIURNAL = (raw => { const s = raw.reduce((a, x) => a + x, 0); return raw.map(x => x * 24 / s); })(
+  [0.55, 0.38, 0.27, 0.2, 0.17, 0.18, 0.26, 0.42, 0.62, 0.78, 0.88, 0.95, 1.05, 1, 0.95, 0.98, 1.05, 1.15, 1.3, 1.5, 1.75, 1.85, 1.6, 1]); // 当地 0 点到 23 点,平均为 1
+const DEMO_DAILY = Object.fromEntries((F['GET stats/top?hours=24&limit=10'] || []).map((u, i) => {
+  const bytes = (u.up || 0) + (u.down || 0);
+  return [u.name, { bytes, upShare: (u.up || 0) / Math.max(1, bytes), seed: i + 1 }];
+}));
+// 排行、明细这些不带时区的请求按面板时区(设置里那个,图也是按它对齐的)算:和图上是同一段时间、同一个合计
+const demoTzMin = () => { const at = now(), c = demoClock(at); return Math.round((Date.UTC(+c.year, c.month - 1, +c.day, +c.hour, +c.minute, +c.second) / 1000 - at) / 60); };
+const demoBucket = hours => (hours <= 1 ? 300 : hours <= 6 ? 1800 : hours <= 24 ? 3600 : hours <= 168 ? 21600 : 86400); // 和前端 chart.js 的 bucketFor 一样
+const demoHours = v => { const h = Number(v) || 0; return h > 0 && h <= 24 * 90 ? h : 24; };
+// 一个用户在 [a, b) 这段时间里的 [上行, 下行] 字节。a、b 是秒;off 是时区的秒偏移(一天里的起伏按当地钟点);
+// fine:桶比一小时细(5 分钟、半小时)时每格各有一点起伏,不是把这一小时平摊
+function demoBytes(name, a, b, off, fine) {
+  const p = DEMO_DAILY[name];
+  if (!p || b <= a) return [0, 0];
+  let up = 0, down = 0;
+  for (let h = Math.floor(a / 3600); h * 3600 < b; h++) {
+    const from = Math.max(a, h * 3600), to = Math.min(b, (h + 1) * 3600);
+    const loc = h * 3600 + off, day = Math.floor(loc / 86400), wd = new Date(day * 86400000).getUTCDay();
+    const dayK = (wd === 0 || wd === 6 ? 1.2 : 0.94) * (0.7 + 0.6 * demoNoise(p.seed * 31, day));
+    const jitter = fine ? 0.55 + 0.9 * demoNoise(p.seed * 17, Math.floor(from / 300)) : 1;
+    const bytes = p.bytes / 24 * DEMO_DIURNAL[((Math.floor(loc / 3600) % 24) + 24) % 24] * dayK * (0.72 + 0.56 * demoNoise(p.seed * 7.3, h)) * jitter * (to - from) / 3600;
+    const share = Math.min(0.4, Math.max(0.04, p.upShare * (0.8 + 0.4 * demoNoise(p.seed * 3.1, h))));
+    up += bytes * share; down += bytes * (1 - share);
+  }
+  return [Math.round(up), Math.round(down)];
+}
+// 这些用户合起来的时序(和后端 stats.Result 同一个形状):起点按桶对齐,n = 起点到现在跨了几个桶
+function demoSeries(names, hours, span, tzMin) {
+  const off = tzMin * 60, end = now();
+  let start = end - hours * 3600;
+  if (span >= 86400) start = Math.floor((start + off) / 86400) * 86400 - off;
+  else if (span >= 3600) start -= (((start + off) % 86400) + 86400) % 86400 % span;
+  else start -= start % span;
+  const n = Math.floor((end - start) / span) + 1;
+  const points = [];
+  let totalUp = 0, totalDown = 0;
+  for (let i = 0; i < n; i++) {
+    const a = start + i * span, b = Math.min(a + span, end);
+    let up = 0, down = 0;
+    for (const name of names) { const [u, d] = demoBytes(name, a, b, off, span < 3600); up += u; down += d; }
+    points.push({ t: a, up, down });
+    totalUp += up; totalDown += down;
+  }
+  return { points, span, start, end, totalUp, totalDown };
+}
+// 流量排行:这段时间里各个用户的量(和图上同一段时间、同一份数),多的在前
+function demoTop(hours) {
+  const tz = demoTzMin();
+  return S.users.map(u => { const r = demoSeries([u.name], hours, demoBucket(hours), tz); return { name: u.name, up: r.totalUp, down: r.totalDown }; })
+    .filter(u => u.up + u.down > 0).sort((x, y) => (y.up + y.down) - (x.up + x.down));
+}
+// 流量明细(概况点「流量」那一格):用户排行就是流量排行那份;线路、服务器按固定的比例分同一个合计。
 // 30 天那一档假装有一台副机没问到,演示「没归到线路」那一行和下面的说明
-function demoBreakdown(hours, top) {
-  const k = hours >= 720 ? 21 : hours >= 168 ? 6.2 : 1;
-  const users = top.map(u => ({ name: u.name, up: Math.round(u.up * k), down: Math.round(u.down * k), owner: u.owner || '' }));
+function demoBreakdown(hours) {
+  const users = demoTop(hours).map(u => ({ ...u, owner: '' }));
   const total = users.reduce((a, u) => ({ up: a.up + u.up, down: a.down + u.down }), { up: 0, down: 0 });
   const split = (names, weights) => names.map((name, i) => ({ name, up: Math.round(total.up * weights[i]), down: Math.round(total.down * weights[i]) }));
   const nodes = (S.nodes.nodes || []).slice(0, 3);
@@ -928,11 +987,14 @@ function route(method, path, query, body) {
       case 'reach': return clone(S.reach);
       case 'conns': return recentConns();
       case 'sub-templates': return { clash: '# 只写想加的部分,节点和分组由面板填\nrules:\n  - DOMAIN-SUFFIX,example.org,DIRECT\n  - MATCH,Proxy\n', singbox: '{\n  "route": {\n    "rules": [{ "domain_suffix": ["example.org"], "outbound": "direct" }],\n    "final": "proxy"\n  }\n}\n' };
-      case 'stats': { const q = new URLSearchParams(query); const tag = q.get('tag'); const hours = q.get('hours') || '24'; const bucket = q.get('bucket') || '3600';
-        if (seg[1] === 'top') return listByPrefix('stats/top') || [];
-        if (seg[1] === 'breakdown') return demoBreakdown(Number(q.get('hours')) || 24, fx('GET stats/top?hours=24&limit=10') || []);
-        const k = tag ? `GET stats?resource=user&tag=${tag}&hours=${hours}&bucket=${bucket}` : `GET stats?resource=user&hours=${hours}&bucket=${bucket}`;
-        return fx(k) ?? listByPrefix('stats') ?? []; }
+      case 'stats': { // 流量图、排行、明细:按请求的范围现算(见 demoSeries)
+        const q = new URLSearchParams(query), hours = demoHours(q.get('hours'));
+        if (seg[1] === 'top') { const lim = Number(q.get('limit')) || 0; return demoTop(hours).slice(0, lim > 0 && lim <= 100 ? lim : 10); }
+        if (seg[1] === 'breakdown') return demoBreakdown(hours);
+        const tag = q.get('tag'), b = Number(q.get('bucket')) || 0, tz = q.get('tz');
+        const tzMin = tz !== null && tz !== '' && Math.abs(Number(tz)) <= 14 * 60 ? Number(tz) : demoTzMin();
+        // 桶宽不合适(没给、太细、超过 7 天)时真面板自己取 ≤240 个点;演示里退回这段范围该用的桶宽
+        return demoSeries(tag ? [tag] : S.users.map(u => u.name), hours, b >= 60 && b <= 7 * 86400 ? b : demoBucket(hours), tzMin); }
       case 'backup': if (seg[1] === 'list') return clone(demoBackupList()); return listByPrefix(path) ?? {};
       case 'sublogs': return demoSubLogs(query);
       case 'audit': { const lim = Number(new URLSearchParams(query).get('limit')) || 0; return lim && lim <= 40 ? (S.logsCleared.audit ? [] : listByPrefix(path) ?? []) : demoAudit(query); } // 概况「最近操作」沿用导出的那份,日志页用现编的

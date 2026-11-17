@@ -12,8 +12,9 @@ const json = p => { try { return JSON.parse(curl(p)); } catch { return null; } }
 
 const keys = ['status', 'settings', 'lines', 'upstreams', 'users', 'plans', 'nodes', 'exts', 'onlines', 'resellers', 'update', 'cert', 'ops', 'self',
   'audit?limit=8', 'audit?limit=40', 'audit?limit=40&actor=human', 'logs?count=40&level=info', 'upstreams/health', 'conns/recent', 'sublogs', 'cert/status', 'ops/status', 'backup/list', 'admin/info', 'agent/info',
-  'stats/top?hours=24&limit=10', 'stats/top?hours=168&limit=10', 'stats/top?hours=720&limit=10',
-  'stats?resource=user&hours=1&bucket=60', 'stats?resource=user&hours=6&bucket=300', 'stats?resource=user&hours=24&bucket=3600', 'stats?resource=user&hours=168&bucket=3600'];
+  // 流量只导 24 小时排行:演示站拿它当各人的日均,流量图、排行、明细都按请求的范围现算(site/demo/demo.js 的 demoSeries)。
+  // 以前把时序也导出来(每人 24 小时 / 7 天 / 30 天逐小时),四十多万字节里九成是它,而且桶宽跟不上前端、只有导出前一天有量
+  'stats/top?hours=24&limit=10'];
 const fixtures = {};
 for (const k of keys) fixtures['GET ' + k] = json(k);
 // 订阅日志里的 UA 是拍截图的无头浏览器 / curl,换成常见客户端的样子;IP 已是文档保留段
@@ -31,10 +32,7 @@ if (!(fixtures['GET conns/recent'] || []).length && users.length && (fixtures['G
     return c;
   });
 }
-for (const u of users) {
-  fixtures[`GET users/${u.id}/sub`] = json(`users/${u.id}/sub`);
-  for (const h of [24, 168, 720]) fixtures[`GET stats?resource=user&tag=${u.name}&hours=${h}&bucket=3600`] = json(`stats?resource=user&tag=${encodeURIComponent(u.name)}&hours=${h}&bucket=3600`);
-}
+for (const u of users) fixtures[`GET users/${u.id}/sub`] = json(`users/${u.id}/sub`);
 const qr = {};
 for (const u of users) for (const f of ['clash', 'link']) { const b = curl(`users/${u.id}/qr?format=${f}`, true); if (b && b.length > 100) qr[`${u.id}:${f}`] = 'data:image/png;base64,' + b.toString('base64'); }
 

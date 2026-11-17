@@ -409,6 +409,34 @@ await page.locator('#tb-range [data-id="720"]').click(); await page.waitForTimeo
 const tbCols30 = await page.locator('.tb-cols .tb-col').count();
 if (tbCols === 3 && tbRows >= 6 && tbCols30 === 3) pass('概况的流量一格点开是流量明细(用户 / 线路 / 服务器三栏,可换范围)'); else fail(`流量明细不对:${tbCols} 栏 ${tbRows} 行,30 天 ${tbCols30} 栏`);
 await page.keyboard.press('Escape'); await page.waitForTimeout(200);
+// 流量图跟着所选的范围走:概况「流量走势」选 7 天是 6 小时一根、横轴标日期,选 1 小时是 5 分钟一根、横轴标钟点(对齐到 5 分钟),
+// 24 小时是一小时一根;用户详情的流量图选 30 天是一天一根。以前演示数据的桶宽跟不上前端,选了 7 天、30 天画出来的还是
+// 最近一小时的分钟柱,横轴也是分钟
+const chartOf = sel => page.evaluate(s => {
+  const el = document.querySelector(s), c = el && el.__chart;
+  return c ? { n: c.points.length, span: c.opts.span, labs: [...el.querySelectorAll('text.xlab')].map(x => x.textContent), total: c.points.reduce((a, p) => a + p.up + p.down, 0) } : null;
+}, sel);
+const dayLab = /^\d{1,2}\/\d{1,2}$/, hmLab = /^\d\d:\d\d$/;
+const pick = async (sel, id) => { await page.locator(`${sel}[data-id="${id}"]`).click(); await page.waitForTimeout(700); };
+await pick('#dash-range button', 168); const ch7 = await chartOf('#dash-chart');
+await pick('#dash-range button', 1); const ch1 = await chartOf('#dash-chart');
+await pick('#dash-range button', 24); const ch24 = await chartOf('#dash-chart');
+
+if (ch7 && ch7.span === 21600 && ch7.n === 29 && ch7.labs.length >= 3 && ch7.labs.every(x => dayLab.test(x))
+  && ch1 && ch1.span === 300 && ch1.n === 13 && ch1.labs.length >= 3 && ch1.labs.every(x => hmLab.test(x) && Number(x.slice(3)) % 5 === 0)
+  && ch24 && ch24.span === 3600 && ch24.n === 25 && ch24.labs.every(x => /^\d\d:00$/.test(x)) && ch7.total > ch24.total * 3 && ch24.total > ch1.total * 5 && ch1.total > 0)
+  pass('概况的流量走势跟着范围走(7 天 = 6 小时一根、横轴是日期;24 小时 = 一小时一根;1 小时 = 5 分钟一根)');
+else fail(`概况的流量走势没跟着范围走:${JSON.stringify({ ch7, ch24, ch1 })}`);
+await page.goto(`${DEMO}#/users`); await page.waitForTimeout(700);
+await page.locator('[data-act="user.detail"]').first().click(); await page.waitForTimeout(900);
+const ud7 = await chartOf('#ud-chart');
+await pick('[data-act="user.chartRange"]', 720); const ud30 = await chartOf('#ud-chart');
+await pick('[data-act="user.chartRange"]', 24); const ud24 = await chartOf('#ud-chart');
+if (ud7 && ud7.span === 21600 && ud7.n === 29 && ud7.labs.every(x => dayLab.test(x)) && ud30 && ud30.span === 86400 && ud30.n === 31 && ud30.labs.length >= 3 && ud30.labs.every(x => dayLab.test(x))
+  && ud24 && ud24.span === 3600 && ud24.n === 25 && ud30.total > ud7.total * 2 && ud7.total > ud24.total * 3 && ud24.total > 0)
+  pass('用户详情的流量图跟着范围走(30 天 = 一天一根、7 天 = 6 小时一根、24 小时 = 一小时一根)');
+else fail(`用户详情的流量图没跟着范围走:${JSON.stringify({ ud7, ud30, ud24 })}`);
+await page.keyboard.press('Escape'); await page.waitForTimeout(300);
 // 用户行「更多」里的停用 / 启用:启用着的显示停用,点了状态变成停用、这一项变成启用
 await page.goto(`${DEMO}#/users`); await page.waitForTimeout(900);
 const row2 = '#users-table tbody tr:nth-child(2)';
