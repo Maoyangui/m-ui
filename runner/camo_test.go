@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	mrand "math/rand/v2"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -102,14 +103,20 @@ func TestCamoSourceFollowsSettings(t *testing.T) {
 	}
 }
 
+// freeTCP 测试用的端口挑在临时端口范围(Linux 默认 32768~60999)以外:系统给 ":0" 的端口就在这个范围里,
+// 测试里发出去的连接也从这个范围取本地端口,恰好取到同一个号时伪装站再监听就撞上 address already in use(CI 上遇到过)。
 func freeTCP(t *testing.T) int {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for i := 0; i < 500; i++ {
+		p := 20000 + mrand.IntN(12000)
+		ln, err := net.Listen("tcp", ":"+strconv.Itoa(p))
+		if err == nil {
+			ln.Close()
+			return p
+		}
 	}
-	defer ln.Close()
-	return ln.Addr().(*net.TCPAddr).Port
+	t.Fatal("找不到空闲端口")
+	return 0
 }
 
 func camoPortStates(r *Runner) map[int]CamoPortState {
@@ -142,7 +149,7 @@ func TestCamoPorts(t *testing.T) {
 	}
 	want(camoHTTP, true, "")
 	want(camoHTTPS, false, "nocert")
-	noFollow := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	noFollow := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{DisableKeepAlives: true}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	get := func(url, host string) (int, string, string) {
 		t.Helper()
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
@@ -170,7 +177,7 @@ func TestCamoPorts(t *testing.T) {
 	mustSet(t, r, "certFile", certFile, "keyFile", keyFile)
 	r.camoPortsSync()
 	want(camoHTTPS, true, "")
-	tc := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, ServerName: "localhost"}}}
+	tc := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{DisableKeepAlives: true, TLSClientConfig: &tls.Config{InsecureSkipVerify: true, ServerName: "localhost"}}}
 	resp, err := tc.Get(fmt.Sprintf("https://127.0.0.1:%d/", camoHTTPS))
 	if err != nil {
 		t.Fatal(err)
