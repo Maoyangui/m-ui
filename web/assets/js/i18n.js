@@ -2776,7 +2776,7 @@ const en = {
   'set.camoPortsHelp': 'People who simply open your domain in a browser see the site too. Only free ports are used: if a line, this server\'s panel or subscription, or another program holds the port, it stays off; 443 uses this server\'s certificates, picked by the requested domain; port 80 is released while a certificate is issued with HTTP validation. Each server decides for itself.',
   'camo.preview': 'This server\'s decoy site', 'camo.on': 'On', 'camo.off': 'Off', 'camo.autoPicked': 'picked automatically', 'camo.reseed': 'Restyle',
   'camo.reseedHelp': 'Only this server changes: every server has its own decoy site.', 'camo.reseeded': 'Restyled', 'camo.zoom': 'Enlarge', 'camo.previewTitle': 'Decoy site preview',
-  'camo.zoomHint': 'This is the home page; the site also has listing, detail and 404 pages. Links are inert in this preview.', 'camo.where': 'Where it shows once on',
+  'camo.zoomHint': 'This is the home page; the site also has listing, detail and 404 pages. Links are inert in this preview.', 'camo.where': 'Where it shows once turned on',
   'camo.w.others': 'VLESS-Reality already hands probes to a real website; other protocols (VLESS-TLS, VMess, Shadowsocks, TUIC and so on) have nowhere to answer with a page and are unaffected.',
   'camo.why.line': 'used by a line', 'camo.why.service': 'used by this server\'s panel or subscription',
   'camo.why.acme': 'released while a certificate is issued', 'camo.why.nocert': 'no usable certificate on this server', 'camo.why.busy': 'taken by another program',
