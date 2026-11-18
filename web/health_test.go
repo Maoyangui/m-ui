@@ -95,3 +95,42 @@ func TestHealthAllowsOwnListenAddress(t *testing.T) {
 		}
 	}
 }
+
+// 给 m-ui doctor(一键体检)看的那几项:角色、启动时间;副机报有没有主机接入过、主机最近一次联系;主机报副机台数(只数启用着的)。
+func TestHealthCarriesRoleForDoctor(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "m.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db, startedAt: 1700000000}
+	get := func() healthStatus {
+		t.Helper()
+		req := httptest.NewRequest("GET", "/app/api/health", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		rec := httptest.NewRecorder()
+		s.handleHealth(rec, req)
+		var st healthStatus
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &st) != nil {
+			t.Fatalf("健康接口: %d %s", rec.Code, rec.Body.String())
+		}
+		return st
+	}
+	db.Create(&model.Node{Name: "本机", IsLocal: true, Enabled: true})
+	db.Create(&model.Node{Name: "a", Enabled: true})
+	off := model.Node{Name: "b", Enabled: true}
+	db.Create(&off)
+	db.Model(&model.Node{}).Where("id = ?", off.Id).Update("enabled", false)
+	if st := get(); st.Role != "master" || st.StartedAt != 1700000000 || st.Nodes != 1 || st.NodesDown != 0 || st.Paired || st.HubSeenAt != 0 {
+		t.Fatalf("主机的状态不对: %+v", st)
+	}
+	db.Create(&model.Setting{Key: "nodeMode", Value: "true"})
+	if st := get(); st.Role != "node" || st.Paired || st.Nodes != 0 {
+		t.Fatalf("还没接入的副机: %+v", st)
+	}
+	db.Create(&model.Setting{Key: "hubRevision", Value: "r1"})
+	s.hubSeenAt.Store(1700000100)
+	if st := get(); st.Role != "node" || !st.Paired || st.HubSeenAt != 1700000100 {
+		t.Fatalf("接入过的副机: %+v", st)
+	}
+}

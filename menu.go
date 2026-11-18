@@ -27,16 +27,17 @@ import (
 )
 
 const (
-	unitPath   = "/etc/systemd/system/m-ui.service"
-	binPath    = "/usr/local/bin/m-ui"
-	repoAPI    = "https://api.github.com/repos/" + brand.RepoPath + "/releases/latest"
-	defaultDB  = "/etc/m-ui/m-ui.db"
-	colorReset = "\033[0m"
-	colorBold  = "\033[1m"
-	colorGreen = "\033[32m"
-	colorRed   = "\033[31m"
-	colorCyan  = "\033[36m"
-	colorGray  = "\033[90m"
+	unitPath    = "/etc/systemd/system/m-ui.service"
+	binPath     = "/usr/local/bin/m-ui"
+	repoAPI     = "https://api.github.com/repos/" + brand.RepoPath + "/releases/latest"
+	defaultDB   = "/etc/m-ui/m-ui.db"
+	colorReset  = "\033[0m"
+	colorBold   = "\033[1m"
+	colorGreen  = "\033[32m"
+	colorRed    = "\033[31m"
+	colorCyan   = "\033[36m"
+	colorYellow = "\033[33m"
+	colorGray   = "\033[90m"
 )
 
 var reExecDB = regexp.MustCompile(`-db\s+(\S+)`)
@@ -148,7 +149,27 @@ func panelInfo(dbPath string) (url string, user string, defaultPw bool, err erro
 		path += "/"
 	}
 	portNum, _ := strconv.Atoi(port)
-	return fmt.Sprintf("%s://%s%s", scheme, model.URLHost(scheme, host, portNum), path), "admin", s["adminDefault"] == "true", nil
+	return fmt.Sprintf("%s://%s%s", scheme, model.URLHost(scheme, host, portNum), path), adminName(dbPath), s["adminDefault"] == "true", nil
+}
+
+// adminName 库里现有管理员的用户名(可以在面板里改,不一定叫 admin);读不到按 admin。
+func adminName(dbPath string) string {
+	if _, err := os.Stat(dbPath); err != nil {
+		return "admin"
+	}
+	db, err := database.OpenReadOnly(dbPath)
+	if err != nil {
+		return "admin"
+	}
+	if sq, e := db.DB(); e == nil {
+		defer sq.Close()
+	}
+	var name string
+	db.Model(&model.Admin{}).Order("id asc").Limit(1).Pluck("username", &name)
+	if strings.TrimSpace(name) == "" {
+		return "admin"
+	}
+	return name
 }
 
 // infoHost 面板地址里的主机名:面板域名 → 公网 IP(不用订阅域名:订阅可能单独一个域名,换过主机后还是随主机身份迁来的)。
@@ -178,7 +199,7 @@ func printPanelInfo(dbPath string) {
 	if def {
 		fmt.Println(colorBold + "  密码:     " + colorReset + "admin  " + colorRed + "(默认密码,请登录后立即修改)" + colorReset)
 	} else {
-		fmt.Println(colorBold + "  密码:     " + colorReset + colorGray + "(已修改;忘记可用菜单 5 重置)" + colorReset)
+		fmt.Println(colorBold + "  密码:     " + colorReset + colorGray + "(已修改;忘了就用菜单里的「重置管理员密码」)" + colorReset)
 	}
 	s, _ := settingsOf(dbPath)
 	role := "主机"
@@ -208,55 +229,145 @@ func printPanelInfo(dbPath string) {
 	fmt.Println()
 }
 
+// menuRow 主菜单的一行:左边两个字的分组名(同组的后几行留空),右边是这一行的各项。
+type menuRow struct{ Group, Text string }
+
+// menuRows 主菜单。按「来这里是要干什么」分组,整张不超过 20 行:24 行的终端里一屏放得下,不用往回翻。
+// 这里的编号改了,帮助页和 README 不用跟着改 —— 那里写的是项目的名字和对应的命令(m-ui doctor / logs / restart …)。
+var menuRows = []menuRow{
+	{"排查", " 1. 面板地址 / 账号"},
+	{"", " 2. 一键体检(面板打不开、节点连不上,先跑这个)"},
+	{"", " 3. 日志"},
+	{"服务", " 4. 重启       5. 停止       6. 启动       7. 更新到最新版"},
+	{"登录", " 8. 重置管理员密码(同时关掉两步验证)"},
+	{"", " 9. 只关闭两步验证(手机丢了)"},
+	{"", "10. 防火墙与黑名单(把自己关在外面了 / 解封 IP)"},
+	{"设置", "11. 修改端口 / 路径 / 监听地址"},
+	{"", "12. 生成自签证书(没有域名时)"},
+	{"", "13. 重置全部设置(线路、用户、上游、服务器保留)"},
+	{"数据", "14. 立即备份          15. 还原备份"},
+	{"多台", "16. 主机 / 副机(切换角色、副机接入信息)"},
+	{"", "17. 主机容灾 / 设为主机"},
+	{"其它", "18. 卸载 m-ui         0. 退出"},
+}
+
+// statusLine m-ui status:一行说清这台现在的样子(脚本、巡检用;不带颜色)。
+func statusLine(dbPath string) string {
+	out := "m-ui v" + version + "  服务:" + serviceState()
+	s, err := settingsRO(dbPath)
+	if err != nil {
+		return out + "  数据库读不出来:" + dbPath
+	}
+	out += "  角色:" + map[bool]string{false: "主机", true: "副机"}[isTrue(s["nodeMode"])]
+	if u := quickPanelURL(s); u != "" {
+		out += "  面板:" + u
+	}
+	return out
+}
+
+// quickPanelURL 菜单顶上那一行面板地址:只用库里现成的(面板域名、记下的公网 IP),不为它去联网探测。
+func quickPanelURL(s map[string]string) string {
+	host := ""
+	for _, k := range []string{"webDomain", "publicIp"} {
+		if v := strings.TrimSpace(s[k]); v != "" {
+			host = v
+			break
+		}
+	}
+	if host == "" {
+		return ""
+	}
+	scheme := "http"
+	if s["webCertFile"] != "" && s["webKeyFile"] != "" {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s%s", scheme, model.URLHost(scheme, host, settingPort(s, "webPort", 2053)), menuNormPath(or(s["webPath"], "/app/")))
+}
+
+func printMenu(dbPath string) {
+	s, _ := settingsRO(dbPath)
+	head := colorBold + colorCyan + "  m-ui 管理菜单  " + colorReset + colorGray + "v" + version + colorReset + "   服务:" + stateColored()
+	if s != nil {
+		head += "   角色:" + map[bool]string{false: "主机", true: "副机"}[isTrue(s["nodeMode"])]
+	}
+	fmt.Println()
+	fmt.Println(head)
+	if u := quickPanelURL(s); u != "" {
+		fmt.Println(colorGray + "  面板:" + u + colorReset)
+	}
+	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
+		fmt.Println(colorYellow + "  现在不是 root:大部分操作做不了,请用 sudo m-ui" + colorReset)
+	}
+	if err := requireDB(dbPath); err != nil {
+		fmt.Println(colorRed + "  没有找到数据库 " + dbPath + ":m-ui 可能还没装好(重新运行安装脚本),或用 M_UI_DB=路径 m-ui 指定" + colorReset)
+	}
+	fmt.Println(colorGray + "  ──────────────────────────────────────────────────────────────" + colorReset)
+	for _, r := range menuRows {
+		g := "    "
+		if r.Group != "" {
+			g = colorCyan + r.Group + colorReset
+		}
+		fmt.Println("  " + g + "  " + r.Text)
+	}
+}
+
 // runMenu 交互式管理菜单(m-ui 不带参数时进入)。
+// 面板能做的事这里大多也有一份 —— 它是面板打不开、登录不上时的另一条路,所以每一项都得跟面板现在的规则一致。
 func runMenu() {
 	in := bufio.NewReader(os.Stdin)
+	eof := false
 	ask := func(prompt string) string {
 		fmt.Print(prompt)
-		line, _ := in.ReadString('\n')
+		line, err := in.ReadString('\n')
+		if err != nil && line == "" {
+			eof = true // 输入关了(管道读完、终端断开):别在菜单里空转
+		}
 		return strings.TrimSpace(line)
 	}
 	dbPath := menuDBPath()
-	for {
-		fmt.Println()
-		fmt.Println(colorBold + colorCyan + "  m-ui 管理菜单  " + colorReset + colorGray + "v" + version + "  服务状态: " + colorReset + stateColored())
-		fmt.Println(colorGray + "  ────────────────────────────────────────" + colorReset)
-		fmt.Println("   1. 查看面板地址 / 账号")
-		fmt.Println("   2. 重启 m-ui")
-		fmt.Println("   3. 停止 m-ui")
-		fmt.Println("   4. 启动 m-ui")
-		fmt.Println("   5. 重置管理员密码")
-		fmt.Println("   6. 修改面板端口 / 路径 / 订阅端口")
-		fmt.Println("   7. 重置全部设置(保留线路/用户/上游/服务器)")
-		fmt.Println("   8. 查看最近日志")
-		fmt.Println("   9. 立即备份(zip 到当前目录)")
-		fmt.Println("  10. 更新到最新版")
-		fmt.Println("  11. 生成自签证书(无域名时)")
-		fmt.Println("  12. 切换 主机 / 副机 角色")
-		fmt.Println("  13. 关闭两步验证(2FA,手机丢失时用)")
-		fmt.Println("  14. 卸载 m-ui")
-		fmt.Println("  15. 主机容灾 / 设为主机")
-		fmt.Println("  16. 防火墙(放开系统防火墙 / 暂停面板规则 / 解封 IP)")
-		fmt.Println("   0. 退出")
+	needDB := func() bool {
+		if err := requireDB(dbPath); err != nil {
+			fmt.Println(colorRed+"  ", err, colorReset)
+			return false
+		}
+		return true
+	}
+	for !eof {
+		printMenu(dbPath)
 		choice := ask(colorBold + "  请输入数字: " + colorReset)
-		switch choice {
-		case "0", "q", "":
+		switch strings.ToLower(choice) {
+		case "0", "q", "exit", "quit":
 			return
+		case "": // 手滑多按了一下回车:重画菜单,不退出
+			continue
 		case "1":
-			printPanelInfo(dbPath)
+			if needDB() {
+				printPanelInfo(dbPath)
+			}
 		case "2":
+			runDoctor(dbPath)
+		case "3":
+			menuLogs(ask)
+		case "4":
 			haPauseBefore(dbPath, 5, "重启前")
 			systemctl("restart", "m-ui")
 			time.Sleep(2 * time.Second)
 			fmt.Println("  状态:", stateColored())
-		case "3":
+		case "5":
 			systemctl("stop", "m-ui")
 			fmt.Println("  状态:", stateColored())
-		case "4":
+		case "6":
 			systemctl("start", "m-ui")
 			time.Sleep(2 * time.Second)
 			fmt.Println("  状态:", stateColored())
-		case "5":
+		case "7":
+			if err := selfUpdate(ask); err != nil {
+				fmt.Println(colorRed+"  更新失败:", err, colorReset)
+			}
+		case "8":
+			if !needDB() {
+				break
+			}
 			pw := ask("  新密码(回车 = 随机生成): ")
 			who, newPw, err := runner.ResetPassword(dbPath, "", pw) // 现有管理员,不管叫什么名字
 			if err != nil {
@@ -265,81 +376,25 @@ func runMenu() {
 			}
 			_ = runner.SetSettings(dbPath, map[string]string{"adminDefault": "false", "totpEnabled": "false", "totpSecret": ""})
 			fmt.Println(colorGreen+"  管理员 "+who+" 新密码: "+colorBold+newPw+colorReset, colorGray+"(运行中的面板立即生效;两步验证已一并关闭)"+colorReset)
-		case "6":
-			s, _ := settingsOf(dbPath)
-			kv := map[string]string{}
-			if v := ask(fmt.Sprintf("  面板端口 [当前 %s,回车不改]: ", or(s["webPort"], "2053"))); v != "" {
-				if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 65535 {
-					fmt.Println(colorRed + "  端口无效" + colorReset)
-					break
-				}
-				kv["webPort"] = v
-			}
-			if v := ask(fmt.Sprintf("  面板路径 [当前 %s,回车不改]: ", or(s["webPath"], "/app/"))); v != "" {
-				if !strings.HasPrefix(v, "/") {
-					v = "/" + v
-				}
-				if !strings.HasSuffix(v, "/") {
-					v += "/"
-				}
-				kv["webPath"] = v
-			}
-			if v := ask(fmt.Sprintf("  订阅端口 [当前 %s,回车不改]: ", or(s["subPort"], "2056"))); v != "" {
-				if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 65535 {
-					fmt.Println(colorRed + "  端口无效" + colorReset)
-					break
-				}
-				kv["subPort"] = v
-			}
-			if len(kv) == 0 {
-				fmt.Println("  未改动")
+		case "9":
+			if !needDB() {
 				break
 			}
-			if err := runner.SetSettings(dbPath, kv); err != nil {
-				fmt.Println(colorRed+"  写入失败:", err, colorReset)
-				break
-			}
-			fmt.Println(colorGreen + "  已写入,重启后生效" + colorReset)
-			if ask("  现在重启? [Y/n]: ") != "n" {
-				haPauseBefore(dbPath, 5, "重启前")
-				systemctl("restart", "m-ui")
-				time.Sleep(2 * time.Second)
-				printPanelInfo(dbPath)
-			}
-		case "7":
-			if ask(colorRed+"  将清空全部设置(端口/路径/证书/通知/角色等恢复默认;线路、用户、上游、服务器保留)。输入 yes 确认: "+colorReset) != "yes" {
-				fmt.Println("  已取消")
-				break
-			}
-			if err := resetSettings(dbPath); err != nil {
+			if err := runner.SetSettings(dbPath, map[string]string{"totpEnabled": "false", "totpSecret": ""}); err != nil {
 				fmt.Println(colorRed+"  失败:", err, colorReset)
 				break
 			}
-			fmt.Println(colorGreen + "  设置已重置(管理员密码保留)" + colorReset)
-			systemctl("restart", "m-ui")
-			time.Sleep(2 * time.Second)
-			printPanelInfo(dbPath)
-		case "8":
-			if runtime.GOOS == "linux" {
-				cmd := exec.Command("journalctl", "-u", "m-ui", "-n", "60", "--no-pager")
-				cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-				_ = cmd.Run()
-			} else {
-				fmt.Println("  非 Linux 无 journal")
+			fmt.Println(colorGreen + "  已关闭两步验证,现在只需密码即可登录(运行中的面板立即生效)" + colorReset)
+		case "10":
+			fwMenu(dbPath, ask)
+		case "11":
+			if needDB() {
+				menuPorts(dbPath, ask)
 			}
-		case "9":
-			out := "m-ui-" + time.Now().Format("20060102-150405") + ".zip"
-			if err := runBackup(dbPath, out); err != nil {
-				fmt.Println(colorRed+"  备份失败:", err, colorReset)
+		case "12":
+			if !needDB() {
 				break
 			}
-			abs, _ := filepath.Abs(out)
-			fmt.Println(colorGreen+"  备份已写入:", abs, colorReset)
-		case "10":
-			if err := selfUpdate(ask); err != nil {
-				fmt.Println(colorRed+"  更新失败:", err, colorReset)
-			}
-		case "11":
 			hosts := ask("  域名或 IP(逗号分隔,回车 = 自动用公网 IP): ")
 			if hosts == "" {
 				ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
@@ -357,74 +412,49 @@ func runMenu() {
 				break
 			}
 			_ = runner.SetSettings(dbPath, map[string]string{"certFile": crt, "keyFile": key, "certSource": "selfsign"})
-			fmt.Println(colorGreen+"  自签证书已生成并设为数据面证书:", crt, colorReset)
-			fmt.Println(colorGray + "  订阅会自动带 allow-insecure;重启后生效" + colorReset)
+			fmt.Println(colorGreen+"  自签证书已生成,并设为线路用的证书:", crt, colorReset)
+			fmt.Println(colorGray + "  订阅会自动带 allow-insecure;重启后生效。面板自己要走 HTTPS,到面板「证书」页给面板选证书。" + colorReset)
 			if ask("  现在重启? [Y/n]: ") != "n" {
 				haPauseBefore(dbPath, 5, "重启前")
 				systemctl("restart", "m-ui")
 			}
-		case "12":
-			s, _ := settingsOf(dbPath)
-			cur := strings.EqualFold(s["nodeMode"], "true")
-			target := "副机(由主机管理线路/用户)"
-			if cur {
-				target = "主机"
+		case "13":
+			if !needDB() {
+				break
 			}
-			if ask("  当前角色: "+map[bool]string{false: "主机", true: "副机"}[cur]+" → 切换为 "+target+"?输入 yes 确认: ") != "yes" {
+			if ask(colorRed+"  将清空全部设置(端口/路径/证书/通知/角色等恢复默认;线路、用户、上游、服务器保留)。输入 yes 确认: "+colorReset) != "yes" {
 				fmt.Println("  已取消")
 				break
 			}
-			if !cur { // 切成副机后本机的线路 / 用户 / 上游会被主机快照整表替换,先留一份备份
-				dir := filepath.Join(filepath.Dir(dbPath), "backups")
-				os.MkdirAll(dir, 0o750)
-				out := filepath.Join(dir, "before-node-"+time.Now().Format("20060102-150405")+".zip")
-				if err := runBackup(dbPath, out); err != nil {
-					fmt.Println(colorRed+"  切换前备份失败:", err, colorReset)
-				} else {
-					fmt.Println("  已备份到:", out)
-				}
-			}
-			// 换了角色就是换了集群:清掉本机的主机容灾状态(纪元、认的主机、交接标记、副本……),
-			// 不然新主机(或没开容灾的主机)发来的请求会一律被当成旧主机拒掉
-			if err := haResetLocal(dbPath); err != nil {
-				fmt.Println(colorRed+"  清掉本机的主机容灾状态失败:", err, colorReset)
-				break
-			}
-			_ = runner.SetSettings(dbPath, map[string]string{"nodeMode": strconv.FormatBool(!cur)})
-			fmt.Println(colorGreen + "  已切换,重启生效" + colorReset)
-			systemctl("restart", "m-ui")
-		case "13":
-			if err := runner.SetSettings(dbPath, map[string]string{"totpEnabled": "false", "totpSecret": ""}); err != nil {
+			if err := resetSettings(dbPath); err != nil {
 				fmt.Println(colorRed+"  失败:", err, colorReset)
 				break
 			}
-			fmt.Println(colorGreen + "  已关闭两步验证,现在只需密码即可登录(运行中的面板立即生效)" + colorReset)
+			fmt.Println(colorGreen + "  设置已重置(管理员密码保留)" + colorReset)
+			systemctl("restart", "m-ui")
+			time.Sleep(2 * time.Second)
+			printPanelInfo(dbPath)
 		case "14":
-			if ask(colorRed+"  将停止并删除 m-ui 程序与服务单元。输入 yes 确认: "+colorReset) != "yes" {
-				fmt.Println("  已取消")
-				break
+			if needDB() {
+				menuBackup(dbPath)
 			}
-			systemctl("disable", "--now", "m-ui")
-			_ = os.Remove(unitPath)
-			// 运维页写过的系统文件一并清掉:journald 上限、内核参数、服务的句柄上限 override
-			for _, p := range []string{"/etc/systemd/journald.conf.d/99-m-ui.conf", "/etc/sysctl.d/99-m-ui-tune.conf", "/etc/systemd/system/m-ui.service.d/override.conf"} {
-				_ = os.Remove(p)
-			}
-			_ = os.Remove("/etc/systemd/system/m-ui.service.d")
-			_ = exec.Command("systemctl", "daemon-reload").Run()
-			if ask("  同时删除数据目录 "+filepath.Dir(dbPath)+"(数据库/证书/备份)? [y/N]: ") == "y" {
-				_ = os.RemoveAll(filepath.Dir(dbPath))
-				fmt.Println("  数据目录已删除")
-			}
-			_ = os.Remove(binPath)
-			fmt.Println(colorGreen + "  m-ui 已卸载" + colorReset)
-			return
 		case "15":
-			haMenu(dbPath, ask)
+			menuRestore(dbPath, ask)
 		case "16":
-			fwMenu(dbPath, ask)
+			if needDB() {
+				menuRole(dbPath, ask)
+			}
+		case "17":
+			haMenu(dbPath, ask)
+		case "18":
+			if menuUninstall(dbPath, ask) {
+				return
+			}
 		default:
-			fmt.Println("  无效选项")
+			fmt.Println("  没有这一项:输入菜单里的数字(0 退出)")
+		}
+		if !eof {
+			ask(colorGray + "  按回车回到菜单 " + colorReset)
 		}
 	}
 }
@@ -615,7 +645,7 @@ func localPanelURL(dbPath string) string {
 // printInstallSummary 供安装脚本调用:m-ui info -db <db>
 func printInstallSummary(dbPath string) {
 	printPanelInfo(dbPath)
-	fmt.Println(colorGray + "  输入 m-ui 打开管理菜单(重启/更新/改密码/改端口/备份/卸载)" + colorReset)
+	fmt.Println(colorGray + "  输入 m-ui 打开管理菜单(查看地址 / 一键体检 / 重置密码 / 改端口 / 备份还原 / 更新);面板打不开先跑 m-ui doctor" + colorReset)
 	fmt.Println()
 }
 

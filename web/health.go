@@ -3,6 +3,7 @@ package web
 import (
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/render"
@@ -19,6 +20,13 @@ type healthStatus struct {
 	Lines    int                 `json:"lines"`    // 库里启用且部署在本机的线路数(期望的入站数)
 	Reload   runner.ReloadStatus `json:"reload"`   // 最近一次重载的结果
 	Version  string              `json:"version"`
+	// 下面几项给命令行的 m-ui doctor(一键体检)看:面板打不开时,在 SSH 里也能知道这台在干什么
+	Role      string `json:"role"`                // master / node
+	StartedAt int64  `json:"startedAt,omitempty"` // 本次启动的时间
+	Paired    bool   `json:"paired,omitempty"`    // 副机:已经有主机接入过(收到过快照)
+	HubSeenAt int64  `json:"hubSeenAt,omitempty"` // 副机:主机最近一次联系本机的时间(本次启动以来还没有 = 0)
+	Nodes     int    `json:"nodes,omitempty"`     // 主机:副机台数
+	NodesDown int    `json:"nodesDown,omitempty"` // 主机:此刻联系不上的副机台数
 }
 
 // expectedLines 启用且部署到本机的线路数。
@@ -36,9 +44,23 @@ func (s *Server) expectedLines() int {
 }
 
 func (s *Server) healthStatus() healthStatus {
-	st := healthStatus{Lines: s.expectedLines(), Version: Version}
+	st := healthStatus{Lines: s.expectedLines(), Version: Version, Role: "master", StartedAt: s.startedAt}
 	if s.run != nil {
 		st.Core, st.Inbounds, st.Reload = s.run.CoreRunning(), s.run.InboundCount(), s.run.ReloadStatus()
+	}
+	if strings.EqualFold(s.setting("nodeMode"), "true") {
+		st.Role, st.Paired, st.HubSeenAt = "node", s.setting("hubRevision") != "", s.hubSeenAt.Load()
+	} else {
+		// 只数库里启用着的副机:停用的、删掉的在同步器里可能还留着旧状态;还没问过的不算联系不上
+		var ids []uint
+		s.db.Model(&model.Node{}).Where("is_local = ? AND enabled = ?", false, true).Pluck("id", &ids)
+		sts := s.hubStatuses()
+		for _, id := range ids {
+			st.Nodes++
+			if n, seen := sts[id]; seen && !n.OK {
+				st.NodesDown++
+			}
+		}
 	}
 	// 没有线路的机器(纯管理主机、刚装好)数据面不跑也算健康;有线路就要求监听器都起来了
 	st.OK = st.Lines == 0 || (st.Core && st.Inbounds >= st.Lines)

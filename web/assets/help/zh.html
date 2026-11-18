@@ -59,7 +59,7 @@
     <div class="pit"><b>常见坑</b><ul>
       <li>只打开 <code>http://服务器IP:2053/</code> 会是 404,这是故意的:不把面板路径告诉扫端口的人。地址要带上完整路径。</li>
       <li>打不开:先看云服务器的安全组 / 防火墙有没有放行 2053/tcp。</li>
-      <li>忘了地址或密码:SSH 登录服务器执行 <code>m-ui</code>,菜单 1 查看面板地址,菜单 5 重置管理员密码。</li>
+      <li>忘了地址或密码:SSH 登录服务器执行 <code>m-ui</code>:菜单顶上那一行就是面板地址,选「重置管理员密码」换密码。面板打不开又不知道卡在哪,执行 <code>m-ui doctor</code>(一键体检)。</li>
     </ul></div>
   </section>
 
@@ -205,7 +205,7 @@
     <ul>
       <li>编辑服务器去掉 <b data-k="common.enabled">启用</b>:那台立刻停止为任何人服务,重新启用后恢复。</li>
       <li>删除服务器:只部署在它上面的线路会被停用,只用它的用户 / 代理会失去那条线路;操作后会列出受影响的线路和人。</li>
-      <li>标 <b data-k="node.decomPending">下线通知未送达</b>:那台还没收到停止服务的通知,主机会一直重试。要立刻停掉,就 SSH 到那台机器上执行 <code>systemctl disable --now m-ui</code>(停掉并取消开机自启),或者用 <code>m-ui</code> 菜单 14 卸载。只关掉副机模式停不了服务:它会变成一台独立的主机,按最后一份配置继续给所有人用。</li>
+      <li>标 <b data-k="node.decomPending">下线通知未送达</b>:那台还没收到停止服务的通知,主机会一直重试。要立刻停掉,就 SSH 到那台机器上执行 <code>systemctl disable --now m-ui</code>(停掉并取消开机自启),或者用 <code>m-ui</code> 菜单里的「卸载 m-ui」。只关掉副机模式停不了服务:它会变成一台独立的主机,按最后一份配置继续给所有人用。</li>
       <li>离线原因:<b data-k="node.errTimeout">连接超时</b>、<b data-k="node.errRefused">连接被拒绝</b>(端口没放行或面板没在运行)、<b data-k="node.errDns">域名解析失败</b>、<b data-k="node.errCert">证书不受信任</b>(勾上跳过证书校验)、<b data-k="node.errToken">令牌不匹配</b>(重新复制配对令牌)、<b data-k="node.errFp">证书指纹变了</b>(确实重签过副机证书,就在那一行的 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>)。</li>
       <li>换一台副机:新副机装好后,在 <b data-k="nav.nodes">服务器</b> 页编辑原来那一行,换成新的 API 地址和令牌,主机会自动重新推送。域名和 API 地址不变(域名已经解析到新机器)的,只把令牌换成新机器的就行:主机当它是一台新机器,不再复用连着旧机器的连接,推送、拉报告、设备数合并立刻都走新机器;开着 <b data-k="node.insecure">跳过证书校验</b> 的,记住的旧指纹随令牌一起作废,新机器第一次连上时重新记住,不用再点 <b data-k="node.resetCert">重置指纹</b>。</li>
     </ul>
@@ -324,7 +324,7 @@
 
   <section class="sec" id="ha-cli">
     <h3>命令行</h3>
-    <p class="lede">SSH 到服务器上用 <code>m-ui ha</code>(要 root);<code>m-ui</code> 菜单第 15 项也是主机容灾。</p>
+    <p class="lede">SSH 到服务器上用 <code>m-ui ha</code>(要 root);<code>m-ui</code> 菜单里的「主机容灾 / 设为主机」也是它。</p>
     <ul>
       <li><code>m-ui ha status</code>:本机角色、纪元、模式、备用、副本时间、本机公钥指纹;服务停着时也能看个大概。</li>
       <li><code>m-ui ha takeover</code>:在备用上接任为主机,证据不够时会被拒绝;加 <code>--force</code> 不等确认、不看证据直接接任,只在确认主机已经不在时用。在主机上加 <code>--force</code> 是以高于已知最高的纪元把跟过别的主机的副机收回来,只在两台主机僵持时用。</li>
@@ -1008,7 +1008,7 @@
     <ul>
       <li><b data-k="nav.backup">备份</b> 页下面的 <b data-k="bk.card">备份</b> 卡列出这台服务器上存着的备份,每一行可以下载、还原、删除;卡的右上角 <b data-k="bk.dlNow">下载备份</b> 现做一份直接存到你的电脑上,<b data-k="bk.saveLocal">保存到服务器</b> 现做一份存进备份目录(目录和总大小写在表格下面)。</li>
       <li>页面最上面左边的 <b data-k="bk.schedule">定时备份</b> 卡默认没有开:打开标题右边的开关,在「每天 … 自动备份,保留最近 … 份」那句话里选几点做(按面板时区,见 <b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.timezone">时区</b>)、留几份(默认 7;升级前自动留的备份另算,只留最近两份);还可以打开 <b data-k="bk.telegram">同时推送到 Telegram</b>(先配好 Telegram 通知)。这几项改了当场保存,不用另点保存。定时备份失败时这张卡用红字写明原因,概览的「需要处理」也会提醒。</li>
-      <li>命令行:<code>m-ui backup -db /etc/m-ui/m-ui.db -out 备份.zip</code>,或者 <code>m-ui</code> 菜单 9。</li>
+      <li>命令行:<code>m-ui backup -db /etc/m-ui/m-ui.db -out 备份.zip</code>,或者 <code>m-ui</code> 菜单里的「立即备份」(存进这台的备份目录,上面的列表里也看得到);「还原备份」在它旁边。</li>
     </ul>
     <div class="pit"><b>常见坑</b>备份里有全部用户凭据和证书私钥,不要发到公开的地方。</div>
   </section>
@@ -1039,7 +1039,7 @@
       <li>把备份 zip 传到新机,执行 <code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --restore /root/m-ui-20261111-030000.zip</code>(换成你的文件路径;amd64、arm64 都是这一条,脚本先装最新版再还原,证书一起还原)。向导里也有这条命令。</li>
       <li>用新机 IP 打开面板(端口和路径同旧机),确认线路在运行;有副机的话,新主机会自动重新连上它们。</li>
       <li>到 DNS 服务商把域名解析改到新机 IP,用向导里的 <b data-k="mig.check">检查解析</b> 看主流解析器是否都已生效。</li>
-      <li>新机上用户都正常后,在旧机上执行 <code>systemctl disable --now m-ui</code>(停掉并取消开机自启),或者用 <code>m-ui</code> 菜单 14 卸载。只 <code>systemctl stop</code> 不够:旧机和新机是同一份数据、同一套副机令牌和 Telegram 机器人,旧 VPS 一重启(比如服务商维护)它就会自己起来,拿过期的数据继续服务、给副机推送、发通知。</li>
+      <li>新机上用户都正常后,在旧机上执行 <code>systemctl disable --now m-ui</code>(停掉并取消开机自启),或者用 <code>m-ui</code> 菜单里的「卸载 m-ui」。只 <code>systemctl stop</code> 不够:旧机和新机是同一份数据、同一套副机令牌和 Telegram 机器人,旧 VPS 一重启(比如服务商维护)它就会自己起来,拿过期的数据继续服务、给副机推送、发通知。</li>
     </ol>
     <div class="pit"><b>常见坑</b><ul>
       <li>订阅地址里是 IP(没给订阅配域名)时,换机后订阅地址和主机上的节点地址都会变成新机的 IP,第 3 步也用不上。最好先给订阅配一个域名、把新地址发给用户一次再换机;只能换机后再把新地址发给所有用户的,旧机要一直开到大部分人换好,这期间照下面两条做。</li>
@@ -1061,7 +1061,7 @@
         <ul>
           <li>证书:面板和订阅都沿用旧面板的面板证书路径,证书文件不会跟着数据库过来。旧面板开了 HTTPS 的,先把证书和私钥拷到新机同样的路径再装;拷来的文件在新机上没人续期,域名解析到新机后到 <b data-k="nav.cert">证书</b> 页重新签发一张换上。</li>
           <li>旧面板的订阅单独配了证书的(订阅域名和面板域名不同时通常如此),导入后订阅用的是面板那张,客户端更新时会报证书不匹配:把订阅那张也拷过来,装好后到 <b data-k="nav.cert">证书</b> 页 <b data-k="cert.add">添加证书</b> → <b data-k="cert.srcExternal">已有证书</b>,在 <b data-k="cert.applyTo">添加后用于</b> 里只开 <b data-k="cert.applySub">用于订阅 HTTPS</b>。旧面板的订阅是 http、面板却是 https 的,导入后订阅也成了 https:在 <b data-k="cert.inUse">正在使用</b> 里点 <b data-k="cert.useSub">订阅</b> 旁边的 <b data-k="cert.change">更换</b>,选 <b data-k="cert.noHttps">不用 HTTPS</b>。</li>
-          <li>订阅端口会改成 2056:旧面板的订阅不在 2056 端口的,装好后用 <code>m-ui</code> 菜单 6 改回原来的。</li>
+          <li>订阅端口会改成 2056:旧面板的订阅不在 2056 端口的,装好后在 <code>m-ui</code> 菜单的「修改端口 / 路径 / 监听地址」里改回原来的。</li>
           <li>单独的订阅域名不会带过来:用 <code>m-ui set -db /etc/m-ui/m-ui.db subDomain=域名</code> 补上。</li>
           <li>订阅地址用的是域名的,把它解析到新机;用的是旧机 IP 的,换机后地址会变,要把新地址发给用户。</li>
         </ul></li>
@@ -1192,20 +1192,23 @@
       <li>点箭头 → <b data-k="update.now">立即更新</b>:校验下载的程序后替换并重启,十几秒后面板自动刷新;用户、线路、订阅地址和证书都不变,这台机器上的连接会断一下。</li>
       <li>新版本起不来会自动换回旧版本,页面顶部会说明;点 <b data-k="update.ack">知道了</b> 关掉提示。</li>
       <li>副机也是完整安装,在各自的面板里更新;主副机版本要保持一致。</li>
-      <li>也可以 SSH 执行 <code>m-ui</code> 选菜单 10。它和面板的更新箭头一样,直连 GitHub 不通时会自动经本机的 WARP 再试,所以纯 IPv6 机器(连不上 GitHub)装好 WARP 就能更新。重新执行一键安装脚本也能更新,但脚本不会自己走 WARP:纯 IPv6 机器要先执行 <code>export ALL_PROXY=socks5h://127.0.0.1:40000</code>(端口按 WARP 的设置),或者手动上传安装包。</li>
+      <li>也可以 SSH 执行 <code>m-ui update</code>(或进 <code>m-ui</code> 菜单选「更新到最新版」)。它和面板的更新箭头一样,直连 GitHub 不通时会自动经本机的 WARP 再试,所以纯 IPv6 机器(连不上 GitHub)装好 WARP 就能更新。重新执行一键安装脚本也能更新,但脚本不会自己走 WARP:纯 IPv6 机器要先执行 <code>export ALL_PROXY=socks5h://127.0.0.1:40000</code>(端口按 WARP 的设置),或者手动上传安装包。</li>
     </ul>
   </section>
 
   <section class="sec" id="cli">
     <h3>命令行与 SSH 菜单</h3>
-    <p class="lede">面板打不开、忘了密码时,在服务器上执行 <code>m-ui</code> 用数字菜单。</p>
+    <p class="lede">面板打不开、忘了密码时,在服务器上执行 <code>m-ui</code> 进管理菜单;不知道卡在哪,先执行 <code>m-ui doctor</code>。</p>
     <ul>
-      <li>菜单:1 查看面板地址 / 账号、2 重启、3 停止、4 启动、5 重置管理员密码、6 修改面板端口 / 路径 / 订阅端口、7 重置全部设置、8 查看最近日志、9 立即备份、10 更新到最新版、11 生成自签证书、12 切换主机 / 副机角色、13 关闭两步验证、14 卸载。</li>
+      <li>菜单按来意分了组:<b>排查</b>(面板地址 / 账号、一键体检、日志)、<b>服务</b>(重启、停止、启动、更新到最新版)、<b>登录</b>(重置管理员密码、只关闭两步验证、防火墙与黑名单)、<b>设置</b>(修改端口 / 路径 / 监听地址、生成自签证书、重置全部设置)、<b>数据</b>(立即备份、还原备份)、<b>多台</b>(主机 / 副机与副机接入信息、主机容灾 / 设为主机)、卸载。菜单顶上那一行写着服务状态、角色和面板地址。</li>
+      <li><code>m-ui doctor</code>(菜单里的「一键体检」):面板打不开、节点连不上时先跑它。逐项检查:服务在不在跑、有没有反复重启;面板 / 订阅 / 代理面板的端口是谁在监听(被别的程序占了会点名);面板在本机能不能打开、数据面有没有把线路都监听起来;这台和主机 / 副机多久没联系;证书还有几天到期;域名是不是解析到这台;系统防火墙和黑名单(你现在的 IP 被拉黑了会直接说);磁盘和系统时间。有问题的那一行下面写着怎么处理。只读,不改任何东西;输出里没有密码、令牌和订阅地址,可以整段贴给别人看。</li>
+      <li><code>m-ui status</code>:一行状态。<code>m-ui logs</code>:看日志(<code>-e</code> 只看报错,<code>-f</code> 实时跟随)。<code>m-ui restart</code> / <code>stop</code> / <code>start</code>。<code>m-ui update</code>:更新到最新版。</li>
+      <li>菜单里改端口和设置页是同一套校验(三个服务不能撞、不能占线路的端口、不能是别的程序占着的);「防火墙与黑名单」认得出你这次 SSH 是从哪个 IP 连进来的,被拉黑了直接回车就能移出;切成副机后会打印主机「服务器」页要填的 API 地址和令牌;卸载时把 m-ui 自己加的防火墙规则、替自己放行的端口一并收回。</li>
       <li><code>m-ui info</code>:打印面板地址、路径和账号状态。</li>
       <li><code>m-ui passwd</code>:重置管理员密码(同时关掉两步验证)。</li>
       <li><code>m-ui set -db /etc/m-ui/m-ui.db 键=值</code>:直接改设置,比如 <code>webPort=3053</code>。</li>
       <li><code>m-ui render</code>:打印并校验当前的 sing-box 配置。</li>
-      <li>菜单 15 和 <code>m-ui ha status</code> / <code>takeover</code> / <code>set-master</code> / <code>pause</code> / <code>resume</code> / <code>reset</code>:主机容灾与设为主机(见 <a href="#ha-cli">命令行</a>)。菜单里的升级、重启会先暂停接任。</li>
+      <li>菜单里的「主机容灾 / 设为主机」和 <code>m-ui ha status</code> / <code>takeover</code> / <code>set-master</code> / <code>pause</code> / <code>resume</code> / <code>reset</code>:主机容灾与设为主机(见 <a href="#ha-cli">命令行</a>)。菜单里的升级、重启会先暂停接任。</li>
       <li>数据在 <code>/etc/m-ui/</code>:<code>m-ui.db</code>(数据库)、<code>cert/</code>(证书)、<code>backups/</code>(定时备份)。</li>
     </ul>
   </section>
@@ -1390,7 +1393,7 @@
       <li data-scope="admin">改密码、改用户名:<b data-k="nav.admin">管理员</b> 页的 <b data-k="adm.account">登录账号</b> 卡片点 <b data-k="adm.accountEdit">修改用户名 / 密码</b>。卡片上还写着上次登录的时间和来源 IP。</li>
       <li data-scope="reseller">改密码:<b data-k="nav.account">账号</b> 页的 <b data-k="acct.password">登录密码</b> 卡片点 <b data-k="acct.passEdit">修改密码</b>。</li>
       <li><b data-k="adm.totp">两步验证(2FA)</b>:点 <b data-k="adm.totpStart">开启两步验证</b>,用认证器 App(Google Authenticator、Microsoft Authenticator、Authy、1Password 等)扫弹框里的二维码,填 App 上的 6 位码,点 <b data-k="adm.totpVerify">验证并开启</b>。开启后登录要密码 + 6 位码。弹框中途关掉也不要紧,卡片上点 <b data-k="adm.totpResume">继续</b> 接着扫同一个码。</li>
-      <li data-scope="admin">手机丢了进不去:SSH 执行 <code>m-ui</code>,菜单 13 关闭两步验证;菜单 5 重置密码也会一起关掉。</li>
+      <li data-scope="admin">手机丢了进不去:SSH 执行 <code>m-ui</code>,选「只关闭两步验证」;「重置管理员密码」也会一起关掉。</li>
       <li data-scope="reseller">手机丢了或忘了密码:找站长在主面板重置密码(两步验证会一起清掉)。</li>
     </ul>
   </section>
@@ -1462,11 +1465,13 @@
     <h3>面板与服务器</h3>
     <dl class="qa">
       <dt>打开 <code>IP:2053/</code> 是 404?</dt>
-      <dd>故意的:根路径不跳转,免得把面板路径告诉扫端口的人。打开完整地址,比如 <code>http://IP:2053/app/</code>。忘了路径就 SSH 执行 <code>m-ui</code> 选菜单 1。</dd>
+      <dd>故意的:根路径不跳转,免得把面板路径告诉扫端口的人。打开完整地址,比如 <code>http://IP:2053/app/</code>。忘了路径就 SSH 执行 <code>m-ui</code>:菜单顶上那一行就是完整的面板地址。</dd>
+      <dt>面板打不开、节点连不上,不知道卡在哪?</dt>
+      <dd>SSH 执行 <code>m-ui doctor</code>:它逐项检查服务、端口、证书、域名解析、防火墙和黑名单,有问题的那一行下面写着怎么处理(见 <a href="#cli">命令行与 SSH 菜单</a>)。都正常、外面还是连不上,多半是云厂商的安全组没放行端口。</dd>
       <dt>忘记密码 / 手机丢了进不去?</dt>
-      <dd>SSH 执行 <code>m-ui</code>:菜单 5 重置管理员密码(同时关闭两步验证),或者菜单 13 只关闭两步验证。</dd>
+      <dd>SSH 执行 <code>m-ui</code>:选「重置管理员密码」(同时关闭两步验证),或者「只关闭两步验证」。</dd>
       <dt>改了端口、监听地址、证书,页面没跳过去?</dt>
-      <dd>主面板保存后一两秒就在原地换好监听,浏览器等新地址能连上就跳过去。一直跳不过去,多半是防火墙(安全组)没放行新端口、证书不受信任,或者域名还没指向这台,页面上会给出新地址可以直接点。副机的面板端口、证书改了不会自动换(主机连它用的就是这个地址):先到主机服务器页改好 API 地址,再在副机设置页页头点 <b data-k="set.restart">重启 m-ui</b>,或菜单 2。改路径保存就生效。</dd>
+      <dd>主面板保存后一两秒就在原地换好监听,浏览器等新地址能连上就跳过去。一直跳不过去,多半是防火墙(安全组)没放行新端口、证书不受信任,或者域名还没指向这台,页面上会给出新地址可以直接点。副机的面板端口、证书改了不会自动换(主机连它用的就是这个地址):先到主机服务器页改好 API 地址,再在副机设置页页头点 <b data-k="set.restart">重启 m-ui</b>,或 SSH 执行 <code>m-ui restart</code>。改路径保存就生效。</dd>
       <dt>副机显示离线?</dt>
       <dd>看服务器页写的原因,对照 <a href="#nodes-off">离线排查</a>。用自签证书的副机要打开 <b data-k="node.insecure">跳过证书校验</b>;重签过副机证书要在 <b data-k="common.more">更多</b> 里点 <b data-k="node.resetCert">重置指纹</b>。</dd>
       <dt>证书续期失败?</dt>

@@ -34,13 +34,19 @@ var version = "0.1.1"
 func usage() {
 	fmt.Println("m-ui", version)
 	fmt.Println()
-	fmt.Println("不带参数运行 m-ui 进入管理菜单(重启 / 更新 / 查看地址账号 / 重置密码 / 备份 / 卸载)。")
+	fmt.Println("不带参数运行 m-ui 进入管理菜单(查看地址账号 / 一键体检 / 重置密码 / 改端口 / 备份还原 / 更新 / 卸载)。")
+	fmt.Println("面板打不开、节点连不上:先跑 m-ui doctor。")
 	fmt.Println()
 	fmt.Println("子命令:")
 	rows := [][2]string{
 		{"run [-db 路径]", "启动面板(主/副角色由设置 nodeMode 决定)"},
 		{"menu", "管理菜单(同不带参数)"},
 		{"info [-db 路径]", "打印面板地址与账号"},
+		{"doctor [-db 路径]", "一键体检:服务、端口、面板与数据面、证书、域名解析、防火墙、磁盘(只读;有问题时退出码 1)"},
+		{"status", "一行状态:服务、角色、版本、面板地址"},
+		{"logs [-n 行数] [-e] [-f]", "看日志:最近 N 行 / 只看报错(-e)/ 实时跟随(-f)"},
+		{"restart | stop | start", "重启 / 停止 / 启动服务(要 root)"},
+		{"update [--force]", "更新到最新版(同菜单里的更新:先备份,新版起不来自动回滚;--force = 已是最新也重装)"},
 		{"import -from <旧面板.db> [-to m-ui.db]", "从旧面板数据库迁移(兼容导入)"},
 		{"backup -db <m-ui.db> [-out zip]", "生成备份(含证书)"},
 		{"restore -db <m-ui.db> -from <zip|db>", "还原备份(服务停止时执行)"},
@@ -73,6 +79,54 @@ func main() {
 		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径")
 		fs.Parse(os.Args[2:])
 		printInstallSummary(*dbPath)
+	case "doctor":
+		fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径")
+		fs.Parse(os.Args[2:])
+		if runDoctor(*dbPath) > 0 {
+			os.Exit(1)
+		}
+	case "status":
+		fs := flag.NewFlagSet("status", flag.ExitOnError)
+		dbPath := fs.String("db", menuDBPath(), "m-ui 数据库路径")
+		fs.Parse(os.Args[2:])
+		fmt.Println(statusLine(*dbPath))
+	case "logs":
+		fs := flag.NewFlagSet("logs", flag.ExitOnError)
+		n := fs.Int("n", 80, "最近多少行")
+		errOnly := fs.Bool("e", false, "只看报错")
+		follow := fs.Bool("f", false, "实时跟随(Ctrl+C 停)")
+		fs.Parse(os.Args[2:])
+		showLogs(*n, *errOnly, *follow)
+	case "restart", "stop", "start":
+		if err := requireRootFor("m-ui " + os.Args[1]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if os.Args[1] == "restart" {
+			haPauseBefore(menuDBPath(), 5, "重启前")
+		}
+		systemctl(os.Args[1], "m-ui")
+		if os.Args[1] != "stop" {
+			time.Sleep(2 * time.Second)
+		}
+		fmt.Println("状态:", stateColored())
+	case "update":
+		fs := flag.NewFlagSet("update", flag.ExitOnError)
+		force := fs.Bool("force", false, "已经是最新版也重新安装")
+		fs.Parse(os.Args[2:])
+		if err := requireRootFor("m-ui update"); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		answer := "n" // 不在菜单里就没人可问:已是最新版时默认不重装
+		if *force {
+			answer = "y"
+		}
+		if err := selfUpdate(func(string) string { fmt.Println(); return answer }); err != nil {
+			fmt.Fprintln(os.Stderr, "更新失败:", err)
+			os.Exit(1)
+		}
 	case "version", "-v", "--version":
 		fmt.Println("m-ui", version)
 	case "health-url":

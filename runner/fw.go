@@ -576,6 +576,104 @@ func FwLocalStatus(dbPath string) (FwLocal, error) {
 	return out, err
 }
 
+// FwLocalPeek 只读地看本机防火墙(m-ui doctor 用):不建库、不迁移、不删到期的黑名单。
+// ip 不为空时顺便看它在不在黑名单里(命令行里拿 SSH 连进来的地址问:是不是把自己拉黑了)。
+func FwLocalPeek(dbPath, ip string) (out FwLocal, banned bool, err error) {
+	db, err := database.OpenReadOnly(dbPath)
+	if err != nil {
+		return out, false, err
+	}
+	if sq, e := db.DB(); e == nil {
+		defer sq.Close()
+	}
+	out, banned = fwPeekDB(db, fw.Exec{}, ip, time.Now().Unix())
+	return out, banned, nil
+}
+
+func fwPeekDB(db *gorm.DB, ex fw.Runner, ip string, now int64) (out FwLocal, banned bool) {
+	out.Status = fw.Detect(ex)
+	if o, was := fwOpenedOf(db); was {
+		out.Record, out.Opened = &o, true
+	}
+	out.Opened = out.Opened || out.Status.Opened
+	out.Paused = strings.EqualFold(fwSetting(db, fwPausedKey), "true")
+	db.Model(&model.FwRule{}).Where("enabled = ? AND (expiry = 0 OR expiry > ?)", true, now).Count(&out.Rules)
+	var bans []model.FwBan
+	db.Where("expiry = 0 OR expiry > ?", now).Find(&bans)
+	out.Bans = int64(len(bans))
+	if addr, e := netip.ParseAddr(strings.TrimSpace(ip)); e == nil {
+		addr = addr.Unmap()
+		for _, b := range bans {
+			if banCovers(b.Ip, addr) {
+				banned = true
+				break
+			}
+		}
+	}
+	return out, banned
+}
+
+// banCovers 黑名单里的一条(IP 或网段)盖不盖得住这个地址。
+func banCovers(entry string, addr netip.Addr) bool {
+	entry = strings.TrimSpace(entry)
+	if p, err := netip.ParsePrefix(entry); err == nil {
+		return p.Masked().Contains(addr)
+	}
+	if a, err := netip.ParseAddr(entry); err == nil {
+		return a.Unmap() == addr
+	}
+	return false
+}
+
+// FwTeardown 卸载时防火墙收尾做了什么。
+type FwTeardown struct {
+	Ports  []string // 从系统防火墙里收回的放行端口(m-ui 自己加的那些)
+	Opened bool     // 系统防火墙还处在「m-ui 放开过」的状态:这里不撤,卸载时单独问
+	Errs   []string // 没做成的(不挡卸载,如实说)
+}
+
+// FwLocalTeardown 卸载时的防火墙收尾。服务已经停了才调:不然 30 秒内又会被对账加回去。
+// 撤掉 m-ui 落在内核里的那张表 / 那条链(面板规则、黑名单),把它在系统防火墙(ufw / firewalld / iptables)里自动放行的端口收回来。
+// 「放开系统防火墙」不在这里撤销:那是装的时候选的,撤不撤由卸载时问。
+func FwLocalTeardown(dbPath string) (out FwTeardown, err error) {
+	err = fwLocalDo(dbPath, func(db *gorm.DB) error {
+		out = fwTeardownDB(db, fw.Exec{})
+		return nil
+	})
+	return out, err
+}
+
+func fwTeardownDB(db *gorm.DB, ex fw.Runner) (out FwTeardown) {
+	st := fw.Detect(ex)
+	if st.Engine != fw.EngineNone {
+		if e := fw.Apply(ex, nil); e != nil {
+			out.Errs = append(out.Errs, "撤掉面板的防火墙规则: "+e.Error())
+		}
+	}
+	if had := fwAllowedOf(db); len(had.Ports) > 0 {
+		got, e := fw.SyncAllow(ex, st, nil, had)
+		if e != nil {
+			out.Errs = append(out.Errs, "收回放行的端口: "+e.Error())
+		}
+		left := map[string]bool{}
+		for _, p := range got.Ports {
+			left[p] = true
+		}
+		for _, p := range had.Ports {
+			if !left[p] {
+				out.Ports = append(out.Ports, p)
+			}
+		}
+		if !sameAllowed(got, had) {
+			b, _ := json.Marshal(got)
+			_ = saveSettings(db, map[string]string{fwAllowedKey: string(b)})
+		}
+	}
+	_, was := fwOpenedOf(db)
+	out.Opened = was || st.Opened
+	return out
+}
+
 // FwLocalOpen 放开本机的系统防火墙(安装脚本、命令行菜单用)。did = 这一次真的动了系统。
 func FwLocalOpen(dbPath string) (o fw.Opened, did bool, err error) {
 	err = fwLocalDo(dbPath, func(db *gorm.DB) error {

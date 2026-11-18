@@ -202,7 +202,7 @@ The panel UI is available in Chinese and English (switch at the bottom of the si
 ### Upgrade
 
 ```bash
-m-ui            # menu item 10 "update to latest"
+m-ui update     # or pick "更新到最新版" (update to latest) in the m-ui menu
 ```
 
 or run the one-line installer again. Upgrades replace the binary and restart; database, certificates and backups are untouched.
@@ -211,7 +211,7 @@ With nodes, **upgrade the nodes first, then the master**: once the master uses a
 
 ### Uninstall
 
-`m-ui` menu item 14, optionally removing the `/etc/m-ui` data directory.
+The "卸载 m-ui" (uninstall) item of the `m-ui` menu, optionally removing the `/etc/m-ui` data directory. Firewall rules m-ui added and the ports it allowed for itself in the system firewall are removed too; if the installer opened the system firewall, you are asked whether to restore it.
 
 ## Quick start
 
@@ -429,7 +429,12 @@ The coin in the top bar: every 1 TB of real traffic on your lines (upload plus d
 ## Command line
 
 ```
-m-ui                                         numeric menu (below)
+m-ui                                         management menu (below)
+m-ui doctor                                  health check: run it first when the panel will not open or nodes will not connect (read-only; exit code 1 when something is wrong)
+m-ui status                                  one line: service, role, version, panel URL
+m-ui logs [-n lines] [-e] [-f]               logs: last N lines / errors only (-e) / follow (-f)
+m-ui restart | stop | start                  restart / stop / start the service
+m-ui update [--force]                        update to the latest release (backs up first; rolls back if the new version fails to start)
 m-ui run -db /etc/m-ui/m-ui.db               start (used by systemd)
 m-ui info -db <db>                           print panel URL, path and account status
 m-ui set -db <db> key=value ...              change settings, e.g. webPort=3053 nodeMode=true
@@ -448,6 +453,10 @@ m-ui ha pause <minutes> / m-ui ha resume     on the master, pause / resume takeo
 m-ui ha reset [--force]                      clear this server's failover records (epoch, followed master, replicas) so another master can add it; needs --force on a master
 m-ui version
 ```
+
+**The management menu** (`m-ui` without arguments) is the other way in when the panel will not open or you cannot log in. It is grouped by what you came for: troubleshooting (panel URL and account, health check, logs), service (restart / stop / start / update), login (reset the admin password, turn off 2FA, firewall and blocklist), settings (ports / path / listen address, self-signed certificate, reset all settings), data (back up now, restore a backup), multiple servers (master / node role and the node's join details, master failover) and uninstall. Port changes go through the same validation as the Settings page (the three services must not collide, must not take a line's port or one used by another program); backups land in the same folder the panel's Backup page lists; after switching to node it prints the API URL and token the master's Servers page asks for. The menu itself is in Chinese.
+
+**The health check** (`m-ui doctor`, also in the menu as "一键体检") goes through the machine step by step and says what to do next: whether the service is running or restart-looping; who is listening on the panel / subscription / reseller-panel ports (another program holding one is named); whether the panel answers locally and the data plane has every line listening; whether this is a master or a node and when the other side was last heard from; days left on each certificate; whether the panel and subscription domains resolve to this machine; the system firewall and the blocklist (it tells you if your current IP is blocked); disk space, clock sync and the result of the last update. The output contains no passwords, tokens or subscription links, so it can be pasted into an issue as is.
 
 `m-ui ha` hands the action to the running service (through the database); when the service is not running, `status` only shows what the database records. On a master, `takeover --force` means "reclaim nodes that followed another master, with an epoch above the highest one known"; use it only when two masters are deadlocked. When a Set as master ends with an unknown result, the command prints the reason and the latest deadline; if after the deadline writes stay paused because unreachable nodes (gone for good) cannot confirm, use `ha abandon --force`. Use `ha reset` before handing a node to a 0.7.16 or older master or moving it to another cluster; on a master it forgets that it was master, so it needs --force.
 
@@ -478,7 +487,7 @@ Inbound ports, user credentials, the panel path and the subscription path are pr
 
 - Certificates: the panel and subscriptions both keep using the old panel's panel-certificate paths, but the files do not come with the database. If the old panel used HTTPS, copy the certificate and key to the same paths on the new server before installing; nothing renews the copied files there, so once the domain points at the new server, issue a new certificate on the Certificate page and switch to it.
 - If the old panel had a separate certificate for subscriptions (usual when the subscription domain differs from the panel's), subscriptions now use the panel certificate and apps report a certificate mismatch when updating: copy that certificate over too, then after installing add it on the Certificate page as an "Existing certificate" with only "Use for subscription HTTPS" ticked under "Apply to". If the old panel served subscriptions over http while the panel used https, subscriptions are now https as well: in "In use", change Subscription to "No HTTPS".
-- The subscription port becomes 2056: if it was different, change it back with menu option 6 after installing.
+- The subscription port becomes 2056: if it was different, change it back with "修改端口 / 路径 / 监听地址" (ports / path / listen address) in the `m-ui` menu after installing.
 - A separate subscription domain is not carried over: add it with `m-ui set -db /etc/m-ui/m-ui.db subDomain=DOMAIN`.
 - If subscription links use a domain, point it at the new server; if they use the old server's IP, the links change after the move and users need the new ones.
 
@@ -507,7 +516,7 @@ These are current design limits, not faults; they may improve later.
 
 **Can I run without a domain?** Yes. Generate a self-signed cert with the IP; subscriptions carry "allow insecure". Issue a real cert later and users just refresh.
 
-**Changed the port / listen address and nothing happened?** Those need a restart (button in the Settings header, or menu item 2). Certificate renewal does not — not even for the data plane: sing-box watches the certificate files and swaps them without dropping connections. Ports are validated on save (1-65535, and the three services cannot share one), so a typo fails immediately instead of leaving the panel unable to start after the next restart.
+**Changed the port / listen address and nothing happened?** Those need a restart (button in the Settings header, or `m-ui restart` over SSH). Certificate renewal does not — not even for the data plane: sing-box watches the certificate files and swaps them without dropping connections. Ports are validated on save (1-65535, and the three services cannot share one), so a typo fails immediately instead of leaving the panel unable to start after the next restart.
 
 **How should paths be written?** `app`, `/app`, `app/`, `//app//` and values with stray spaces all normalize to `/app/`; use `/` to serve the panel at the root. A URL missing the trailing slash (`:2053/app`) redirects to the canonical one, and the subscription path behaves the same way.
 
@@ -517,7 +526,9 @@ These are current design limits, not faults; they may improve later.
 
 **Why is `:2053/` a 404?** The root path deliberately does not redirect to the panel: a redirect would hand the panel path to anyone scanning the port. Open the full panel URL directly.
 
-**Forgot the password or lost the 2FA phone.** Run `m-ui` over SSH: item 5 resets the password (and clears 2FA), item 13 only disables 2FA.
+**The panel will not open, or nodes will not connect.** Run `m-ui doctor` over SSH: it checks the service, ports, certificates, DNS, firewall and blocklist one by one, and every problem line is followed by what to do.
+
+**Forgot the password or lost the 2FA phone.** Run `m-ui` over SSH: "重置管理员密码" resets the password (and clears 2FA), "只关闭两步验证" only disables 2FA. Forgot the panel URL? It is on the top line of the menu and under "面板地址 / 账号".
 
 **Wrong subscription name in the client?** Set "Profile title" under Settings → Subscription (a reseller sets theirs on their own subscription-page card). Shadowrocket and Clash Verge name a profile when it is added and never rename it on refresh — re-add it, or use the one-tap import buttons on the landing page, which pass the title along.
 

@@ -264,6 +264,15 @@ func fwMenu(dbPath string, ask func(string) string) {
 		fmt.Println(colorRed+"  ", err, colorReset)
 		return
 	}
+	// 最常见的来意:自己的 IP 被拉黑了、面板打不开。认得出这次 SSH 是从哪连进来的,就直接说它在不在名单里
+	me := sshClientIP()
+	if me != "" {
+		if _, banned, err := runner.FwLocalPeek(dbPath, me); err == nil && banned {
+			fmt.Println(colorRed + "你现在的 IP " + me + " 在黑名单里:选 5、直接回车就能移出。" + colorReset)
+		} else if err == nil {
+			fmt.Println(colorGray + "你现在的 IP " + me + " 不在黑名单里。" + colorReset)
+		}
+	}
 	fmt.Println()
 	fmt.Println("   1. 放开系统防火墙(云控制台放行了、外面还是连不上时;可撤销)")
 	fmt.Println("   2. 撤销放开")
@@ -283,7 +292,15 @@ func fwMenu(dbPath string, ask func(string) string) {
 	case "4":
 		err = fwCommand(dbPath, "resume")
 	case "5":
-		if ip := ask("  要移出的 IP 或网段: "); ip != "" {
+		prompt := "  要移出的 IP 或网段: "
+		if me != "" {
+			prompt = "  要移出的 IP 或网段(回车 = 你现在的 IP " + me + "): "
+		}
+		ip := ask(prompt)
+		if ip == "" {
+			ip = me
+		}
+		if ip != "" {
 			err = unbanCommand(dbPath, ip, false)
 		}
 	case "6":

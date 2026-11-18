@@ -59,7 +59,7 @@
     <div class="pit"><b>Common pitfalls</b><ul>
       <li>Opening just <code>http://SERVER-IP:2053/</code> gives a 404 on purpose: the panel path is not revealed to port scanners. Always include the full path.</li>
       <li>The page does not load: check that the cloud security group / firewall allows 2053/tcp.</li>
-      <li>Forgot the address or password: SSH into the server and run <code>m-ui</code>; option 1 shows the panel address, option 5 resets the admin password.</li>
+      <li>Forgot the address or password: SSH into the server and run <code>m-ui</code>: the top line of the menu is the panel address, and "重置管理员密码" resets the admin password. If the panel will not open and you cannot tell why, run <code>m-ui doctor</code> (health check).</li>
     </ul></div>
   </section>
 
@@ -205,7 +205,7 @@
     <ul>
       <li>Edit a server and untick <b data-k="common.enabled">Enabled</b>: it immediately stops serving everyone; enable it again to resume.</li>
       <li>Deleting a server disables lines that were deployed only there, and users or resellers that only used it lose that line; the affected lines and people are listed afterwards.</li>
-      <li><b data-k="node.decomPending">shutdown notice pending</b>: that machine has not yet received the notice to stop serving; the master keeps retrying. To stop it at once, SSH in and run <code>systemctl disable --now m-ui</code> (stops it and keeps it from starting at boot), or uninstall with option 14 of the <code>m-ui</code> menu. Turning off node mode does not stop it: the machine becomes a standalone master and keeps serving everyone with its last configuration.</li>
+      <li><b data-k="node.decomPending">shutdown notice pending</b>: that machine has not yet received the notice to stop serving; the master keeps retrying. To stop it at once, SSH in and run <code>systemctl disable --now m-ui</code> (stops it and keeps it from starting at boot), or uninstall with "卸载 m-ui" in the <code>m-ui</code> menu. Turning off node mode does not stop it: the machine becomes a standalone master and keeps serving everyone with its last configuration.</li>
       <li>Offline reasons: <b data-k="node.errTimeout">connection timed out</b>, <b data-k="node.errRefused">connection refused</b> (port not open or panel not running), <b data-k="node.errDns">DNS lookup failed</b>, <b data-k="node.errCert">certificate not trusted</b> (tick skip certificate verification), <b data-k="node.errToken">token mismatch</b> (copy the pairing token again), <b data-k="node.errFp">Certificate fingerprint changed</b> (if you really re-issued the node's certificate, open <b data-k="common.more">More</b> on that row and click <b data-k="node.resetCert">Reset fingerprint</b>).</li>
       <li>Replacing a node: install the new one, then edit the old row on the <b data-k="nav.nodes">Servers</b> page with the new API URL and token; the master pushes everything again. If the domain and API URL stay the same (the domain already points at the new server), changing just the token is enough: the master treats it as a new server and drops connections still open to the old one, so pushes, reports and the cross-server device count all go to the new server right away. With <b data-k="node.insecure">Skip certificate verification</b> on, the remembered fingerprint is dropped together with the old token and learned again on the first contact with the new server, so there is no need to click <b data-k="node.resetCert">Reset fingerprint</b>.</li>
     </ul>
@@ -324,7 +324,7 @@
 
   <section class="sec" id="ha-cli">
     <h3>Command line</h3>
-    <p class="lede">Over SSH, use <code>m-ui ha</code> (root required); item 15 of the <code>m-ui</code> menu is master failover too.</p>
+    <p class="lede">Over SSH, use <code>m-ui ha</code> (root required); "主机容灾 / 设为主机" in the <code>m-ui</code> menu is master failover too.</p>
     <ul>
       <li><code>m-ui ha status</code>: this server's role, epoch, mode, standbys, replica time and key fingerprint; it gives a rough picture even with the service stopped.</li>
       <li><code>m-ui ha takeover</code>: take over as master on a standby; refused when the evidence is not enough. <code>--force</code> skips the confirmation and the evidence; use it only when you are sure the master is gone. On a master, <code>--force</code> reclaims nodes that followed another master, with an epoch above the highest one known; use it only when two masters are deadlocked.</li>
@@ -1008,7 +1008,7 @@
     <ul>
       <li>The <b data-k="bk.card">Backups</b> card lower on the <b data-k="nav.backup">Backup</b> page lists the backups stored on this server; each row can be downloaded, restored or deleted. At its top right, <b data-k="bk.dlNow">Download a backup</b> makes one and saves it straight to your computer, and <b data-k="bk.saveLocal">Save on server</b> makes one in the backup folder (the folder and total size are shown under the table).</li>
       <li>The <b data-k="bk.schedule">Scheduled backup</b> card at the top left of the page is off by default: turn on the switch next to its title, then in the sentence “Back up daily at … and keep the last …” pick the time (in the panel time zone, see <b data-k="nav.settings">Settings</b> → <b data-k="set.panel">Panel</b> → <b data-k="set.timezone">Time zone</b>) and how many to keep (7 by default; backups made before upgrades are separate and only the last two are kept); you can also turn on <b data-k="bk.telegram">Also push to Telegram</b> once Telegram notifications are set up. These settings are saved as soon as you change them. If a scheduled backup fails, the card shows the reason in red and the dashboard lists it under things that need attention.</li>
-      <li>Command line: <code>m-ui backup -db /etc/m-ui/m-ui.db -out backup.zip</code>, or option 9 in the <code>m-ui</code> menu.</li>
+      <li>Command line: <code>m-ui backup -db /etc/m-ui/m-ui.db -out backup.zip</code>, or "立即备份" (back up now) in the <code>m-ui</code> menu; it lands in this server's backup folder, so the list above shows it too. "还原备份" (restore) sits next to it.</li>
     </ul>
     <div class="pit"><b>Common pitfall</b>Backups contain every user's credentials and the certificates' private keys; never put them anywhere public.</div>
   </section>
@@ -1039,7 +1039,7 @@
       <li>Copy the backup zip to the new server and run <code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --restore /root/m-ui-20261111-030000.zip</code> (use your own file path; the same command works on amd64 and arm64, installs the latest version, then restores, certificates included). The wizard shows this command too.</li>
       <li>Open the panel with the new server's IP (same port and path as before) and check that the lines are running; nodes are reconnected automatically.</li>
       <li>Point your domain to the new IP at your DNS provider, and use <b data-k="mig.check">Check DNS</b> in step 3 to see whether the major resolvers have picked it up.</li>
-      <li>When users are fine on the new server, run <code>systemctl disable --now m-ui</code> on the old one (stops it and keeps it from starting at boot), or uninstall with option 14 of the <code>m-ui</code> menu. <code>systemctl stop</code> alone is not enough: both servers hold the same data, node tokens and Telegram bot, so when the old VPS reboots (provider maintenance, say) it starts again and keeps serving, pushing to nodes and notifying with stale data.</li>
+      <li>When users are fine on the new server, run <code>systemctl disable --now m-ui</code> on the old one (stops it and keeps it from starting at boot), or uninstall with "卸载 m-ui" in the <code>m-ui</code> menu. <code>systemctl stop</code> alone is not enough: both servers hold the same data, node tokens and Telegram bot, so when the old VPS reboots (provider maintenance, say) it starts again and keeps serving, pushing to nodes and notifying with stale data.</li>
     </ol>
     <div class="pit"><b>Common pitfalls</b><ul>
       <li>If the subscription link holds an IP (no domain for subscriptions), it changes to the new server's IP, and so do the master's node addresses; step 3 does not help then. Best give subscriptions a domain and send users the new link once before moving. If you can only send everyone the new link after moving, the old server has to keep running until most have switched; follow the next two items meanwhile.</li>
@@ -1061,7 +1061,7 @@
         <ul>
           <li>Certificates: the panel and subscriptions both keep using the old panel's panel-certificate paths, but the files do not come with the database. If the old panel used HTTPS, copy the certificate and key to the same paths on the new server before installing; nothing renews the copied files there, so once the domain points at the new server, issue a new certificate on the <b data-k="nav.cert">Certificate</b> page and switch to it.</li>
           <li>If the old panel had a separate certificate for subscriptions (usual when the subscription domain differs from the panel's), subscriptions now use the panel certificate and apps report a certificate mismatch when updating: copy that certificate over too, then after installing go to the <b data-k="nav.cert">Certificate</b> page → <b data-k="cert.add">Add a certificate</b> → <b data-k="cert.srcExternal">Existing certificate</b> and turn on only <b data-k="cert.applySub">Use for subscription HTTPS</b> under <b data-k="cert.applyTo">Apply to</b>. If the old panel served subscriptions over http while the panel used https, subscriptions are now https as well: in <b data-k="cert.inUse">In use</b>, click <b data-k="cert.change">Change</b> next to <b data-k="cert.useSub">Subscription</b> and choose <b data-k="cert.noHttps">No HTTPS</b>.</li>
-          <li>The subscription port becomes 2056: if the old panel served subscriptions on another port, change it back with option 6 of the <code>m-ui</code> menu after installing.</li>
+          <li>The subscription port becomes 2056: if the old panel served subscriptions on another port, change it back with "修改端口 / 路径 / 监听地址" (ports / path / listen address) in the <code>m-ui</code> menu after installing.</li>
           <li>A separate subscription domain is not carried over: add it with <code>m-ui set -db /etc/m-ui/m-ui.db subDomain=DOMAIN</code>.</li>
           <li>If subscription links use a domain, point it at the new server; if they use the old server's IP, the links change after the move and users need the new ones.</li>
         </ul></li>
@@ -1192,20 +1192,23 @@
       <li>Arrow → <b data-k="update.now">Update now</b>: the download is verified, the program replaced and restarted, and the panel reloads after a dozen seconds. Users, lines, subscription links and certificates stay as they are; connections on this machine drop for a moment.</li>
       <li>If the new version fails to start, the old one is put back automatically and a bar at the top explains it; <b data-k="update.ack">Got it</b> dismisses it.</li>
       <li>Nodes are full installations and update from their own panels; keep master and nodes on the same version.</li>
-      <li>You can also run <code>m-ui</code> over SSH and choose option 10. Like the arrow in the panel, it retries through the local WARP when GitHub cannot be reached directly, so IPv6-only servers (which cannot reach GitHub) update fine once WARP is installed. Running the one-line installer again also updates, but the script does not use WARP by itself: on an IPv6-only server first run <code>export ALL_PROXY=socks5h://127.0.0.1:40000</code> (use your WARP port), or upload the package by hand.</li>
+      <li>You can also run <code>m-ui update</code> over SSH (or choose "更新到最新版" in the <code>m-ui</code> menu). Like the arrow in the panel, it retries through the local WARP when GitHub cannot be reached directly, so IPv6-only servers (which cannot reach GitHub) update fine once WARP is installed. Running the one-line installer again also updates, but the script does not use WARP by itself: on an IPv6-only server first run <code>export ALL_PROXY=socks5h://127.0.0.1:40000</code> (use your WARP port), or upload the package by hand.</li>
     </ul>
   </section>
 
   <section class="sec" id="cli">
     <h3>Command line and SSH menu</h3>
-    <p class="lede">If the panel will not open or you forgot the password, run <code>m-ui</code> on the server for a numbered menu.</p>
+    <p class="lede">If the panel will not open or you forgot the password, run <code>m-ui</code> on the server for the management menu (in Chinese); if you cannot tell what is wrong, run <code>m-ui doctor</code> first.</p>
     <ul>
-      <li>Menu: 1 show panel address / account, 2 restart, 3 stop, 4 start, 5 reset the admin password, 6 change panel port / path / subscription port, 7 reset all settings, 8 recent logs, 9 back up now, 10 update to the latest version, 11 generate a self-signed certificate, 12 switch between master and node, 13 turn off two-factor authentication, 14 uninstall.</li>
+      <li>The menu is grouped by what you came for: <b>排查</b> troubleshooting (panel address / account, health check, logs), <b>服务</b> service (restart, stop, start, update to the latest version), <b>登录</b> login (reset the admin password, turn off two-factor authentication only, firewall and blocklist), <b>设置</b> settings (ports / path / listen address, self-signed certificate, reset all settings), <b>数据</b> data (back up now, restore a backup), <b>多台</b> multiple servers (master / node role and the node's join details, master failover / set as master), and uninstall. The top line shows the service state, the role and the panel address.</li>
+      <li><code>m-ui doctor</code> ("一键体检" in the menu): run it first when the panel will not open or nodes will not connect. It checks, one by one: whether the service is running or restart-looping; who is listening on the panel / subscription / reseller-panel ports (another program holding one is named); whether the panel answers locally and the data plane has every line listening; when this server last heard from its master or nodes; days left on each certificate; whether the domains resolve to this server; the system firewall and the blocklist (it tells you if your current IP is blocked); disk space and the system clock. Each problem line is followed by what to do. It is read-only, and the output has no passwords, tokens or subscription links, so it can be pasted to others as is.</li>
+      <li><code>m-ui status</code>: one line of state. <code>m-ui logs</code>: logs (<code>-e</code> errors only, <code>-f</code> follow). <code>m-ui restart</code> / <code>stop</code> / <code>start</code>. <code>m-ui update</code>: update to the latest version.</li>
+      <li>Changing ports in the menu goes through the same validation as the Settings page (the three services must not collide, must not take a line's port or one held by another program); the firewall item knows which IP this SSH session came from, so if it is blocked, pressing Enter removes it; after switching to node it prints the API address and token the master's Servers page asks for; uninstalling also removes the firewall rules m-ui added and the ports it allowed for itself.</li>
       <li><code>m-ui info</code>: prints the panel address, path and account status.</li>
       <li><code>m-ui passwd</code>: resets the admin password (and turns off two-factor authentication).</li>
       <li><code>m-ui set -db /etc/m-ui/m-ui.db key=value</code>: changes a setting directly, such as <code>webPort=3053</code>.</li>
       <li><code>m-ui render</code>: prints and validates the current sing-box configuration.</li>
-      <li>Option 15 and <code>m-ui ha status</code> / <code>takeover</code> / <code>set-master</code> / <code>pause</code> / <code>resume</code> / <code>reset</code>: Set as master and master failover (see <a href="#ha-cli">Command line</a>). Upgrading or restarting from the menu pauses takeovers first.</li>
+      <li>"主机容灾 / 设为主机" in the menu and <code>m-ui ha status</code> / <code>takeover</code> / <code>set-master</code> / <code>pause</code> / <code>resume</code> / <code>reset</code>: Set as master and master failover (see <a href="#ha-cli">Command line</a>). Upgrading or restarting from the menu pauses takeovers first.</li>
       <li>Data lives in <code>/etc/m-ui/</code>: <code>m-ui.db</code> (database), <code>cert/</code> (certificates), <code>backups/</code> (scheduled backups).</li>
     </ul>
   </section>
@@ -1390,7 +1393,7 @@
       <li data-scope="admin">Change the password or username: click <b data-k="adm.accountEdit">Change username / password</b> on the <b data-k="adm.account">Login account</b> card of the <b data-k="nav.admin">Admin</b> page. The card also shows when and from which IP you last signed in.</li>
       <li data-scope="reseller">Change the password: click <b data-k="acct.passEdit">Change password</b> on the <b data-k="acct.password">Password</b> card of the <b data-k="nav.account">Account</b> page.</li>
       <li><b data-k="adm.totp">Two-factor authentication (2FA)</b>: click <b data-k="adm.totpStart">Enable 2FA</b>, scan the QR code in the dialog with an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password…), enter the 6-digit code it shows and click <b data-k="adm.totpVerify">Verify &amp; enable</b>. From then on signing in needs the password plus a code. Closing the dialog halfway is fine: click <b data-k="adm.totpResume">Continue</b> on the card to scan the same code again.</li>
-      <li data-scope="admin">Lost your phone? SSH in and run <code>m-ui</code>: option 13 turns two-factor authentication off; resetting the password with option 5 turns it off too.</li>
+      <li data-scope="admin">Lost your phone? SSH in and run <code>m-ui</code>: "只关闭两步验证" turns two-factor authentication off; "重置管理员密码" (reset the password) turns it off too.</li>
       <li data-scope="reseller">Lost your phone or password? Ask the site owner to reset your password on the main panel (two-factor authentication is cleared with it).</li>
     </ul>
   </section>
@@ -1462,11 +1465,13 @@
     <h3>Panel and servers</h3>
     <dl class="qa">
       <dt>Opening <code>IP:2053/</code> shows 404?</dt>
-      <dd>On purpose: the root does not redirect, so the panel path is not given away to scanners. Open the full address, such as <code>http://IP:2053/app/</code>. Forgot the path? SSH in, run <code>m-ui</code> and choose option 1.</dd>
+      <dd>On purpose: the root does not redirect, so the panel path is not given away to scanners. Open the full address, such as <code>http://IP:2053/app/</code>. Forgot the path? SSH in and run <code>m-ui</code>: the top line of the menu is the full panel address.</dd>
+      <dt>The panel will not open or nodes will not connect, and you cannot tell why?</dt>
+      <dd>Run <code>m-ui doctor</code> over SSH: it checks the service, ports, certificates, DNS, firewall and blocklist one by one, and each problem line is followed by what to do (see <a href="#cli">Command line and SSH menu</a>). If everything is fine there and it still cannot be reached from outside, the cloud provider's security group is most likely not allowing the ports.</dd>
       <dt>Forgot the password / lost the 2FA phone?</dt>
-      <dd>SSH in and run <code>m-ui</code>: option 5 resets the admin password (and turns off 2FA), option 13 only turns off 2FA.</dd>
+      <dd>SSH in and run <code>m-ui</code>: "重置管理员密码" resets the admin password (and turns off 2FA), "只关闭两步验证" only turns off 2FA.</dd>
       <dt>Changed the port, listen address or certificate and the page didn't move?</dt>
-      <dd>The main panel switches its listener in place a second or two after you save, and the browser follows once the new address answers. If it never does, the firewall (security group) probably doesn't allow the new port, the certificate isn't trusted, or the domain doesn't point here yet; the page shows the new address so you can open it directly. A node's panel port and certificate don't switch on their own (the master reaches the node through that address): update the API URL on the master's Servers page first, then click <b data-k="set.restart">Restart m-ui</b> at the top of the node's Settings page, or use menu option 2. A new path applies on save.</dd>
+      <dd>The main panel switches its listener in place a second or two after you save, and the browser follows once the new address answers. If it never does, the firewall (security group) probably doesn't allow the new port, the certificate isn't trusted, or the domain doesn't point here yet; the page shows the new address so you can open it directly. A node's panel port and certificate don't switch on their own (the master reaches the node through that address): update the API URL on the master's Servers page first, then click <b data-k="set.restart">Restart m-ui</b> at the top of the node's Settings page, or run <code>m-ui restart</code> over SSH. A new path applies on save.</dd>
       <dt>A node shows offline?</dt>
       <dd>Read the reason on the Servers page and see <a href="#nodes-off">offline nodes</a>. Nodes with self-signed certificates need <b data-k="node.insecure">Skip certificate verification</b>; after re-issuing a node's certificate use <b data-k="common.more">More</b> → <b data-k="node.resetCert">Reset fingerprint</b>.</dd>
       <dt>Certificate renewal fails?</dt>
