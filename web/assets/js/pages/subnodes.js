@@ -1,7 +1,10 @@
 // 「节点」页:订阅里的每个节点 —— 一条线路在一台服务器上的直连,或这条线路的一个中转入口 —— 逐个设置
 // 倍率(盖过所在服务器的)、限速、用户容量,和要不要输出到订阅。存在线路的 nodeOpts 里(键 "s<服务器 id>" / "f<入口 id>")。
 //
-// 版式:一张表,按线路分组,一行一个节点。平时只是看:倍率一格写着现在实际生效的倍率和它是「跟随服务器」还是单独设的,
+// 版式:一张表,一条线路一行,默认收起(用户 11-18:「节点的现在是全部展开 可以按线路(可点击展开对应的线路查看设置所有服务器/中转的)」——
+// 生产上几十条线路、上百个节点,全展开时一屏只看得到一两条线路)。线路那一行的各列是它的汇总:几个节点(含几个中转)、跑在哪几台、
+// 倍率范围、几个限速、在线人数(几个已满)、输出了几个;点它展开,它的节点作为子行缩进列在下面。有搜索或筛选时命中的线路自动展开,
+// 只有一条线路时直接展开。节点行平时只是看:倍率一格写着现在实际生效的倍率和它是「跟随服务器」还是单独设的,
 // 一眼分得出;没设的限速、容量都是淡色的「不限」。常用的「输出到订阅」开关直接摆在行里,点了就存;
 // 其余几项点「设置」在弹框里改(不在表里摆一排输入框:十几个节点就是几十个框,看着累,也容易改错行)。
 //
@@ -22,6 +25,7 @@ let fLine = 0;    // 只看这条线路(0 = 全部)
 let fServer = 0;  // 只看和这台服务器有关的:它上面的直连,经它中转的、转到它的入口(0 = 全部)
 let fKind = '';   // direct / relay('' = 全部)
 const selected = new Set(); // 勾选的节点:"线路 id:节点键"
+const expanded = new Set(); // 展开着的线路 id(默认都收起)
 let online = {};            // 各节点此刻在线的用户数,键同上(GET lines/nodes/online;主机汇总本机和各副机报来的)
 
 async function loadOnline() {
@@ -100,13 +104,18 @@ export async function render(el) {
       <button class="btn sm ghost" data-act="sn.clearSel">${t('line.batch.clear')}</button>
     </div>
     <div class="table-wrap fill"><table class="grid sn-table" data-fit="p3:980 p2:830 cards:700">
-      <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sn-sel-all" aria-label="${esc(t('sn.selAll'))}"></th><th>${t('sn.col.node')}</th><th class="c-p3">${t('sn.col.addr')}</th><th>${t('sn.col.ratio')}</th><th class="c-p2">${t('sn.col.speed')}</th><th class="c-p2">${t('sn.col.cap')}</th><th>${t('sn.col.output')}</th><th></th></tr></thead>
+      <thead><tr><th style="width:1.5rem"><input type="checkbox" id="sn-sel-all" aria-label="${esc(t('sn.selAll'))}"></th><th>${t('sn.col.lineNode')}<button type="button" class="link-btn sn-fold" id="sn-fold" data-act="sn.foldAll" hidden></button></th><th class="c-p3">${t('sn.col.addr')}</th><th>${t('sn.col.ratio')}</th><th class="c-p2">${t('sn.col.speed')}</th><th class="c-p2">${t('sn.col.cap')}</th><th>${t('sn.col.output')}</th><th></th></tr></thead>
       <tbody id="sn-body"></tbody>
     </table></div>`;
   document.getElementById('sn-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
   document.getElementById('sn-sel-all').addEventListener('change', e => {
     for (const g of visible()) for (const nd of g.list) e.target.checked ? selected.add(idOf(g.l, nd)) : selected.delete(idOf(g.l, nd));
     renderRows();
+  });
+  // 点线路那一行的空白处也能展开 / 收起;行里的勾选框、按钮照常用,不归这里
+  document.getElementById('sn-body').addEventListener('click', e => {
+    const tr = e.target.closest('tr.sn-line');
+    if (tr && !e.target.closest('input, label, button, a, select')) toggleLine(Number(tr.dataset.line));
   });
   renderRows();
   loadOnline().then(renderRows); // 不等它:表先出来,人数回来再补上
@@ -119,7 +128,49 @@ function speedText(o) {
   return '';
 }
 
-function rowHTML(l, nd) {
+// 展开 / 收起一条线路
+function toggleLine(id) {
+  expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+  renderRows();
+}
+
+// lineFacts 卡片排法(手机)里线路卡的一行汇总:桌面上这些分在倍率、限速、在线、输出几列里,卡片里一格一行太占地方
+function lineFacts(lo, hi, onl, full, limited, outN, total) {
+  return [`×${fmtRatio(lo)}${hi > lo ? ` – ×${fmtRatio(hi)}` : ''}`, onl > 0 ? t('sn.onlineN', { n: onl }) : '', full ? t('sn.fullN', { n: full }) : '',
+    limited ? t('sn.limitedN', { n: limited }) : '', outN < total ? t('sn.outFact', { a: outN, b: total }) : '']
+    .filter(Boolean).map((x, i) => `<span>${i ? '· ' : ''}${esc(x)}</span>`).join(' ');
+}
+
+// lineRowHTML 线路那一行:各列是它现在列出来的这些节点的汇总;点一下展开 / 收起
+function lineRowHTML(l, all, list, open) {
+  const ids = list.map(nd => idOf(l, nd));
+  const nSel = ids.filter(id => selected.has(id)).length;
+  const relays = list.filter(nd => nd.kind === 'relay').length;
+  const count = list.length < all.length ? t('sn.countOf', { a: list.length, b: all.length }) : all.length === 1 ? t('sn.count1') : t('sn.count', { n: all.length });
+  const where = [...new Set(list.filter(nd => nd.kind === 'direct').map(nd => nd.name))].join(t('node.sep'));
+  const ratios = list.map(nd => (nd.opt.ratio > 0 ? nd.opt.ratio : serverRatio(nd)));
+  const lo = Math.min(...ratios), hi = Math.max(...ratios);
+  const limited = list.filter(nd => nd.opt.speed > 0 || nd.opt.userSpeed > 0).length;
+  const onl = ids.reduce((a, id) => a + (online[id] || 0), 0);
+  const full = list.filter((nd, i) => nd.opt.cap > 0 && (online[ids[i]] || 0) >= nd.opt.cap).length;
+  const outN = list.filter(nd => !nd.opt.hidden).length;
+  // 有单独设了倍率的节点:范围和节点行里单独设的一样用强调色
+  const ratio = `<span class="${list.some(nd => nd.opt.ratio > 0) ? 'sn-own' : 'sn-follow'}">×${esc(fmtRatio(lo))}${hi > lo ? ` – ×${esc(fmtRatio(hi))}` : ''}</span>`;
+  return `<tr class="sn-line${open ? ' open' : ''}${l.enabled === false ? ' sn-idle' : ''}" data-line="${l.id}">
+    <td><input type="checkbox" class="sel" data-change="sn.selLine" data-id="${l.id}" data-part="${nSel > 0 && nSel < ids.length ? 1 : 0}" ${nSel === ids.length ? 'checked' : ''} aria-label="${esc(t('sn.selLine', { name: l.name }))}"></td>
+    <td class="primary-cell"><div class="sn-lhead"><button type="button" class="sn-ltog" data-act="sn.toggle" data-id="${l.id}" aria-expanded="${open}" title="${esc(t(open ? 'sn.collapse' : 'sn.expand'))}"><i class="i i-chev" aria-hidden="true"></i><b>${esc(l.name)}</b></button>${l.enabled === false ? badge(t('sn.lineOff')) : ''}</div>
+      <div class="sub-cell sn-lsum">${[`${String(l.protocol || '').toUpperCase()} · ${l.port}`, count, relays ? (relays === 1 ? t('sn.relay1') : t('sn.relayN', { n: relays })) : ''].filter(Boolean).map((x, i) => `<span>${i ? '· ' : ''}${esc(x)}</span>`).join(' ')}</div>
+      <div class="sub-cell sn-lfacts">${lineFacts(lo, hi, onl, full, limited, outN, list.length)}</div></td>
+    <td class="c-p3"><span class="ellip sn-where" title="${esc(where)}">${esc(where)}</span></td>
+    <td class="num">${ratio}</td>
+    <td class="num c-p2">${limited ? esc(t('sn.limitedN', { n: limited })) : `<span class="faint">${esc(t('sn.unlimited'))}</span>`}</td>
+    <td class="num c-p2"><span class="sn-cap">${onl > 0 ? `<b>${onl}</b>` : '<span class="faint">0</span>'}${full ? ` <span class="sn-full">${esc(t('sn.fullN', { n: full }))}</span>` : ''}</span></td>
+    <td class="sn-out">${outN === list.length ? `<span class="faint">${esc(t('sn.outAll'))}</span>` : `<span class="sn-outn">${esc(t('sn.outOfN', { a: outN, b: list.length }))}</span>`}</td>
+    <td class="actions"></td>
+  </tr>`;
+}
+
+function rowHTML(l, nd, last) {
   const o = nd.opt, id = idOf(l, nd);
   const where = nd.kind === 'relay'
     ? `${badge(t('sn.relay'), 'primary')}<span class="pname" title="${esc(nd.name)}">${esc(nd.name)}</span><span class="sn-to">${esc(t('sn.to', { name: nd.exit ? nd.exit.name : '?' }))}</span>`
@@ -134,7 +185,7 @@ function rowHTML(l, nd) {
   const cap = o.cap > 0
     ? `<span class="sn-cap${n >= o.cap ? ' full' : ''}"><b>${n}</b> / ${o.cap}</span>`
     : `<span class="sn-cap">${n > 0 ? `<b>${n}</b>` : `<span class="faint">0</span>`}<span class="faint"> / ${esc(t('sn.unlimited'))}</span></span>`;
-  return `<tr class="${nd.idle || l.enabled === false ? 'sn-idle' : ''}${selected.has(id) ? ' selected' : ''}">
+  return `<tr class="sn-child${last ? ' last' : ''}${nd.idle || l.enabled === false ? ' sn-idle' : ''}${selected.has(id) ? ' selected' : ''}">
     <td><input type="checkbox" class="sel" data-change="sn.sel" data-id="${id}" ${selected.has(id) ? 'checked' : ''} aria-label="${esc(nd.name)}"></td>
     <td class="primary-cell"><div class="sn-node">${where}${nd.idle ? ` <span class="muted small">${esc(nd.idle)}</span>` : ''}</div><div class="sub-cell sn-addr" title="${esc(addr)}">${esc(addr)}</div></td>
     <td class="num c-p3"><span class="ellip" title="${esc(addr)}">${esc(addr)}</span></td>
@@ -153,14 +204,23 @@ function renderRows() {
   // 已经不在的节点(线路删了、部署范围或入口改了)不再算选中
   const alive = new Set(state.lines.flatMap(l => nodesOf(l).map(nd => idOf(l, nd))));
   for (const id of [...selected]) if (!alive.has(id)) selected.delete(id);
+  // 有搜索 / 筛选时命中的线路都展开(不然筛完还得一条条点开);只有一条线路时也不用收
+  const auto = filtered() || state.lines.length === 1;
   let shown = 0;
   const html = groups.map(({ l, all, list }) => {
     if (!list.length) return '';
     shown += list.length;
-    const allOn = list.every(nd => selected.has(idOf(l, nd)));
-    return `<tr class="grp-row"><td colspan="8"><div class="sn-grow"><label class="sn-grp"><input type="checkbox" class="sel" data-change="sn.selLine" data-id="${l.id}" ${allOn ? 'checked' : ''} aria-label="${esc(t('sn.selLine', { name: l.name }))}"><b>${esc(l.name)}</b></label><span class="muted">${esc(String(l.protocol || '').toUpperCase())} · ${l.port}</span>${l.enabled === false ? badge(t('sn.lineOff')) : ''}<span class="muted sn-gcount">${esc(list.length < all.length ? t('sn.countOf', { a: list.length, b: all.length }) : all.length === 1 ? t('sn.count1') : t('sn.count', { n: all.length }))}</span></div></td></tr>`
-      + list.map(nd => rowHTML(l, nd)).join('');
+    const open = auto || expanded.has(l.id);
+    return lineRowHTML(l, all, list, open) + (open ? list.map((nd, i) => rowHTML(l, nd, i === list.length - 1)).join('') : '');
   }).join('');
+  const fold = document.getElementById('sn-fold');
+  if (fold) {
+    const lines = groups.filter(g => g.list.length);
+    const allOpen = lines.length > 0 && lines.every(g => expanded.has(g.l.id));
+    fold.hidden = auto || lines.length < 2;
+    fold.dataset.id = allOpen ? 'collapse' : 'expand';
+    fold.textContent = t(allOpen ? 'sn.collapseAll' : 'sn.expandAll');
+  }
   document.getElementById('sn-count').textContent = alive.size ? `${shown} / ${alive.size}` : '';
   const clear = document.getElementById('sn-clear');
   if (clear) clear.hidden = !filtered();
@@ -170,6 +230,8 @@ function renderRows() {
   if (selAll) selAll.checked = shown > 0 && groups.every(g => g.list.every(nd => selected.has(idOf(g.l, nd))));
   if (!state.lines.length) { setHTML(body, `<tr><td colspan="8"><div class="empty-guide"><p>${esc(t('sn.empty'))}</p><a class="btn primary" href="#/lines">${esc(t('sn.goLines'))}</a></div></td></tr>`); return; }
   setHTML(body, html || `<tr><td colspan="8">${empty()}</td></tr>`);
+  // 线路里只勾了一部分节点:勾选框显示「半选」(indeterminate 只能用属性设)
+  body.querySelectorAll('input[data-change="sn.selLine"]').forEach(cb => { cb.indeterminate = cb.dataset.part === '1'; });
 }
 
 function find(id) {
@@ -299,6 +361,12 @@ registerActions({
     if (page) render(page);
   },
   'sn.edit': id => editNode(id),
+  'sn.toggle': id => toggleLine(Number(id)),
+  // 全部展开 / 全部收起(只管现在列出来的线路)
+  'sn.foldAll': what => {
+    for (const g of visible()) if (g.list.length) what === 'collapse' ? expanded.delete(g.l.id) : expanded.add(g.l.id);
+    renderRows();
+  },
   'sn.reset': () => {
     for (const eid of ['sn-ratio', 'sn-cap', 'sn-speed', 'sn-uspeed']) { const el = document.getElementById(eid); if (el) el.value = ''; }
     const out = document.getElementById('sn-out');

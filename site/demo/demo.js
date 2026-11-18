@@ -1004,7 +1004,7 @@ function route(method, path, query, body) {
       case 'status': return status();
       case 'settings': return clone(S.settings);
       case 'lines':
-        if (seg[1] === 'nodes' && seg[2] === 'online') return { online: { '1:s1': 1, '1:f2': 2, '2:s2': 1, '4:s1': 1, '4:s2': 3 } }; // 节点页「在线 / 容量」
+        if (seg[1] === 'nodes' && seg[2] === 'online') return { online: S.nodeOnline || { '1:s1': 1, '1:f2': 2, '2:s2': 1, '4:s1': 1, '4:s2': 3 } }; // 节点设置页「在线 / 容量」(截图用的场景可以换成自己的)
         if (seg[2] === 'detail') return lineDetail(find(S.lines, id), new URLSearchParams(query));
         if (seg[2] === 'reach') return demoLineReach(find(S.lines, id), 'GET', seg[3]); // 线路详情「测大陆连通」的进度
         return clone(S.lines);

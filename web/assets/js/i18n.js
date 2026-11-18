@@ -1150,7 +1150,7 @@ const zh = {
   'audit.v.follow': '跟随外部节点', 'audit.v.unfollow': '不再跟随外部节点',
   'up.followTitle': '跟随外部节点', 'up.followLast': '最近一次:', 'up.fn.followedLong': '{when}全部测不通,已跟着订阅改:{detail}',
   'up.why': '原因:{msg}',
-  'nav.subnodes': '节点', 'sn.title': '节点', 'sn.subtitle': '订阅里的每个节点:线路在一台服务器上的直连,或它的一个中转入口。逐个设倍率、限速和容量。', 'sn.col.node': '节点', 'sn.col.addr': '入口地址', 'sn.col.ratio': '倍率', 'sn.col.speed': '限速',
+  'nav.subnodes': '节点设置', 'sn.title': '节点设置', 'sn.subtitle': '订阅里的每个节点:线路在一台服务器上的直连,或它的一个中转入口。逐个设倍率、限速和容量。', 'sn.col.addr': '入口地址', 'sn.col.ratio': '倍率', 'sn.col.speed': '限速',
   'sn.col.cap': '在线 / 容量', 'sn.col.output': '输出到订阅', 'sn.relay': '中转', 'sn.to': '→ {name}', 'sn.follow': '跟随服务器', 'sn.unlimited': '不限', 'sn.speedBoth': '共 {a} · 每人 {b} Mbps', 'sn.speedTotal': '共 {a} Mbps',
   'sn.speedUser': '每人 {b} Mbps', 'sn.capN': '{n} 人', 'sn.filter.all': '全部', 'sn.filter.own': '单独设置的', 'sn.filter.off': '没输出的', 'sn.count': '{n} 个节点', 'sn.lineOff': '线路已停用', 'sn.serverOff': '服务器已停用',
   'sn.paused': '已暂停', 'sn.edit': '设置', 'sn.editTitle': '节点设置', 'sn.ratio': '倍率', 'sn.ratioPh': '跟随服务器(现在 ×{r})', 'sn.ratioHelp': '留空就跟随所在服务器的倍率。填了只对走这个节点的流量生效,同一台服务器上别的线路不受影响。', 'sn.cap': '用户容量',
@@ -1159,7 +1159,7 @@ const zh = {
   'sn.src': '出口看到的来源 IP', 'sn.srcHelp': '倍率、限速和容量是在出口服务器上按连接的来源 IP 认入口的。中转经内网连出口、进出不是同一个 IP 时,把出口实际看到的 IP 填在这里,逗号分隔。', 'sn.srcKnown': '面板已经认得:{list}。', 'sn.srcNone': '这个入口的地址是域名,面板认不出来,不填就按直连算。',
   'sn.empty': '还没有线路。建一条线路,这里就会列出它的节点。', 'sn.goLines': '去建线路', 'sn.err.ratio': '倍率要在 0–100 之间(留空 = 跟随服务器)', 'sn.err.int': '限速和容量要填不小于 0 的整数', 'audit.v.node': '改节点设置',
   'sn.count1': '1 个节点',
-  'dash.attn.rej.node': '节点容量已满 {n}', 'dash.rejectedNode': '节点的用户容量已满被拒', 'dash.rejectedNodeHelp': '这次连接通过了认证,但它走的这个节点同时在线的用户数已到「节点」页设的容量,所以被拒;等有人下线 1 分钟后即可连上,或调高这个节点的容量。',
+  'dash.attn.rej.node': '节点容量已满 {n}', 'dash.rejectedNode': '节点的用户容量已满被拒', 'dash.rejectedNodeHelp': '这次连接通过了认证,但它走的这个节点同时在线的用户数已到「节点设置」页设的容量,所以被拒;等有人下线 1 分钟后即可连上,或调高这个节点的容量。',
   'sn.selected': '已选 {n} 个节点', 'sn.selAll': '全选现在列出的节点', 'sn.selLine': '选中「{name}」的节点', 'sn.batch.on': '输出到订阅', 'sn.batch.off': '不输出', 'sn.batch.ratio': '设倍率', 'sn.batch.limits': '设限速 / 容量',
   'sn.batch.done': '已改 {n} 个节点', 'sn.batch.ratioTitle': '批量设倍率', 'sn.batch.ratioPh': '留空 = 跟随服务器', 'sn.batch.ratioHelp': '选中的节点都改成这个倍率;留空则都改回跟随各自的服务器。别的设置不动。', 'sn.batch.limitsTitle': '批量设限速 / 容量',
   'sn.batch.limitsHelp': '只有选了「设为」或「不限」的项会改,「不改」的项每个节点保持原样。', 'sn.batch.none': '三项都是「不改」,没有要改的', 'sn.batch.resetConfirm': '把选中的 {n} 个节点恢复默认?倍率改回跟随服务器,限速和容量改回不限,并重新输出到订阅。', 'sn.keep': '不改',
@@ -1281,6 +1281,9 @@ const zh = {
   'adm.ex.bot': '机器人:按用户发来的订阅地址认人 / 取 3 天内到期的用户发提醒',
   'node.decomPendingGone2': '这些已删除的服务器还没收到下线通知,主机在重试(在那之前它们仍按旧配置为所有用户服务;删除 7 天后还没送到就自动停止):', 'node.decomTries': '已试 {n} 次', 'node.decomForget': '不再通知', 'node.decomForgetTitle': '不再给「{name}」发下线通知?',
   'node.decomForgetBody': '只有确定那台机器已经停掉或销毁时才这样做。它要是还在运行,会继续按旧配置为所有用户服务(之后的停用、到期、超额在它上面都不生效),直到被重装或重新加回来。', 'node.decomForgotten': '已不再给「{name}」发下线通知',
+  'sn.col.lineNode': '线路 / 节点', 'sn.expand': '展开这条线路的节点', 'sn.collapse': '收起', 'sn.expandAll': '全部展开', 'sn.collapseAll': '全部收起', 'sn.relay1': '含 1 个中转', 'sn.relayN': '含 {n} 个中转',
+  'sn.limitedN': '{n} 个限速', 'sn.fullN': '{n} 个已满', 'sn.outAll': '全部', 'sn.outOfN': '{a} / {b} 个',
+  'sn.onlineN': '在线 {n}', 'sn.outFact': '输出 {a} / {b}',
 };
 
 const en = {
@@ -2490,8 +2493,8 @@ const en = {
   'up.followTitle': 'Following an external node', 'up.followLast': 'Last time:',
   'up.fn.followedLong': 'went down everywhere {when} and was updated from the subscription: {detail}',
   'up.why': 'Reason: {msg}',
-  'nav.subnodes': 'Nodes', 'sn.title': 'Nodes',
-  'sn.subtitle': 'Every node in a subscription: a line served directly by one server, or one of its relay entries. Set ratio, speed limits and capacity per node.', 'sn.col.node': 'Node',
+  'nav.subnodes': 'Node settings', 'sn.title': 'Node settings',
+  'sn.subtitle': 'Every node in a subscription: a line served directly by one server, or one of its relay entries. Set ratio, speed limits and capacity per node.', 
   'sn.col.addr': 'Entry address', 'sn.col.ratio': 'Ratio', 'sn.col.speed': 'Speed limit', 'sn.col.cap': 'Online / capacity', 'sn.col.output': 'In subscriptions', 'sn.relay': 'Relay', 'sn.to': '→ {name}',
   'sn.follow': 'follows server', 'sn.unlimited': 'Unlimited', 'sn.speedBoth': '{a} Mbps total · {b} per user', 'sn.speedTotal': '{a} Mbps total', 'sn.speedUser': '{b} Mbps per user',
   'sn.capN': '{n} users', 'sn.filter.all': 'All', 'sn.filter.own': 'Customised', 'sn.filter.off': 'Not in subscriptions', 'sn.count': '{n} nodes', 'sn.lineOff': 'Line disabled',
@@ -2508,7 +2511,7 @@ const en = {
   'sn.err.int': 'Speed limits and capacity must be whole numbers, 0 or more', 'audit.v.node': 'changed node settings',
   'sn.count1': '1 node',
   'dash.attn.rej.node': 'node full {n}', 'dash.rejectedNode': 'Refused: node at capacity',
-  'dash.rejectedNodeHelp': 'This connection passed authentication, but the node it came through already has as many users online as the capacity set on the Nodes page, so it was refused. It can connect a minute after someone goes offline, or raise the node\'s capacity.',
+  'dash.rejectedNodeHelp': 'This connection passed authentication, but the node it came through already has as many users online as the capacity set on the Node settings page, so it was refused. It can connect a minute after someone goes offline, or raise the node\\',
   'sn.selected': '{n} nodes selected', 'sn.selAll': 'Select all listed nodes', 'sn.selLine': 'Select the nodes of “{name}”', 'sn.batch.on': 'Include in subscriptions', 'sn.batch.off': 'Exclude',
   'sn.batch.ratio': 'Set ratio', 'sn.batch.limits': 'Set limits / capacity', 'sn.batch.done': '{n} nodes updated', 'sn.batch.ratioTitle': 'Set ratio for selected nodes',
   'sn.batch.ratioPh': 'Empty = follow the server', 'sn.batch.ratioHelp': 'Every selected node gets this ratio; leave empty to make them follow their servers again. Other settings are untouched.',
@@ -2721,6 +2724,9 @@ const en = {
   'node.decomTries': '{n} tries', 'node.decomForget': 'Stop notifying', 'node.decomForgetTitle': 'Stop sending the shutdown notice to “{name}”?',
   'node.decomForgetBody': 'Only do this if that machine is already stopped or destroyed. If it is still running, it keeps serving every user with its old config (later disables, expiries and quota limits do not apply there) until it is reinstalled or added back.',
   'node.decomForgotten': 'Stopped sending the shutdown notice to “{name}”',
+  'sn.col.lineNode': 'Line / node', 'sn.expand': 'Show the nodes of this line', 'sn.collapse': 'Hide the nodes', 'sn.expandAll': 'Expand all', 'sn.collapseAll': 'Collapse all',
+  'sn.relay1': 'incl. 1 relay', 'sn.relayN': 'incl. {n} relays', 'sn.limitedN': '{n} limited', 'sn.fullN': '{n} full', 'sn.outAll': 'All', 'sn.outOfN': '{a} of {b}',
+  'sn.onlineN': '{n} online', 'sn.outFact': '{a} of {b} in subscriptions',
 };
 
 const dicts = { zh, en };

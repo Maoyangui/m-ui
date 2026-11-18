@@ -483,9 +483,10 @@
   </section>
 
   <section class="sec" id="subnodes">
-    <h3>Nodes: ratio, speed limits and capacity per node</h3>
-    <p class="lede">Every node in a subscription — a line served directly by one server, or one of its relay entries — is listed on the <b data-k="nav.subnodes">Nodes</b> page and can be tuned on its own.</p>
+    <h3>Node settings: ratio, speed limits and capacity per node</h3>
+    <p class="lede">Every node in a subscription — a line served directly by one server, or one of its relay entries — is listed on the <b data-k="nav.subnodes">Node settings</b> page and can be tuned on its own.</p>
     <ul>
+      <li>Each line is one row and starts collapsed: its columns sum the line up (how many nodes, which servers, the ratio range, how many are speed-limited, users online, how many are in subscriptions). Click it to show its nodes. With a search or filter on, matching lines open by themselves; the toolbar has <b data-k="sn.expandAll">Expand all</b> / <b data-k="sn.collapseAll">Collapse all</b>.</li>
       <li><b data-k="sn.col.ratio">Ratio</b>: a node that says <b data-k="sn.follow">follows server</b> uses the ratio of the server it runs on (a relay entry follows the exit server). A value of its own applies only to traffic through that node; other lines on the same server are unaffected. The “x2” after a node name in subscriptions is the ratio actually in effect for that node.</li>
       <li><b data-k="sn.speed">Node speed limit (Mbps)</b> is shared by everyone using the node; <b data-k="sn.userSpeed">Per-user speed limit (Mbps)</b> applies together with the user's own limit, whichever is stricter; when <b data-k="sn.cap">User capacity</b> is reached only new users are refused, those already online are unaffected.</li>
       <li>The <b data-k="sn.col.output">In subscriptions</b> switch saves as soon as you flip it: when off, the node no longer appears in anyone's subscription while the inbound stays open.</li>

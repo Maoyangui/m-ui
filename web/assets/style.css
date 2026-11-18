@@ -1921,12 +1921,29 @@ table.grid.cards .hdetail.in-card { clear: both; margin-top: .5rem; padding: .2r
 .sn-table td.sn-out { width: 1%; white-space: nowrap; }
 .sn-table .switch { vertical-align: middle; }
 tr.sn-idle > td:not(.actions):not(.sn-out) { opacity: .6; }
-/* 分组行(一条线路):勾选框 + 线路名 + 协议 · 端口,节点数靠右;同一行里的东西垂直居中对齐 */
-.sn-grow { display: flex; align-items: center; gap: .55rem; min-width: 0; }
-.sn-table tr.grp-row .sn-grow > .muted { font-weight: 400; margin-left: 0; white-space: nowrap; }
-.sn-table tr.grp-row .sn-grow > .sn-gcount { margin-left: auto; }
-.sn-grp > b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sn-grp { min-width: 0; }
+/* 线路行(默认收起):箭头 + 线路名 + 协议 · 端口,下面一行是节点数;其余各列是这条线路的汇总。点开后底色和它的节点连成一块 */
+.sn-table tr.sn-line { cursor: pointer; }
+.sn-table tr.sn-line.open > td { background: var(--surface-3); }
+.sn-table td.num { white-space: nowrap; }
+.sn-lhead { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.sn-ltog { display: inline-flex; align-items: center; gap: .45rem; min-width: 0; padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.sn-ltog > .i-chev { width: 14px; height: 14px; color: var(--muted); }
+.sn-ltog:hover > .i-chev, .sn-ltog[aria-expanded="true"] > .i-chev { color: var(--text-2); }
+.sn-ltog[aria-expanded="true"] > .i-chev { transform: rotate(90deg); }
+.sn-ltog > b { min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sn-ltog:focus-visible { outline: 2px solid var(--primary-ring); outline-offset: 3px; border-radius: 4px; }
+.sn-lhead > .badge { flex: none; }
+.sn-lsum, .sn-lfacts { padding-left: calc(14px + .45rem); }
+/* 跑在哪几台:全部服务器时名字一长串,限个宽度省略掉(悬停看全),不然这一列把倍率、限速几列挤成竖排 */
+.sn-table .sn-where { display: block; max-width: min(20rem, 20vw); color: var(--text-2); }
+.sn-full, .sn-outn { color: var(--warn-text); font-weight: 500; }
+.sn-full { font-size: var(--fs-xs); }
+/* 节点行:缩进到线路名下面,和展开的线路行同一块底色;每条线路的最后一个节点下面一条实线,和下一条线路分开 */
+.sn-table tr.sn-child > td { background: var(--surface-2); }
+.sn-table tr.sn-child:hover > td { background: var(--surface-3); }
+.sn-table tr.sn-child.selected > td { background: var(--primary-soft); }
+.sn-table tr.sn-child > td.primary-cell { padding-left: calc(.75rem + 14px + .45rem + .9rem); }
+.sn-table tr.sn-child.last > td { border-bottom-color: var(--border); }
 /* 入口地址:够宽时是单独一列;那一列藏起来(窄窗口、卡片)时写在名字下面一行,不至于看不到 */
 .sn-addr { display: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .grid.no-p3 .sn-addr, table.grid.cards .sn-addr { display: block; }
@@ -1934,8 +1951,19 @@ tr.sn-idle > td:not(.actions):not(.sn-out) { opacity: .6; }
 table.grid.cards.sn-table td.c-p3, table.grid.cards.sn-table td.sn-def { display: none; }
 /* 节点页的工具栏:搜索 + 三个下拉(线路 / 服务器 / 类型)+ 一组状态筛选;下拉不抢地方,放不下整组折到下一行 */
 .sn-bar > select.sm { width: auto; max-width: 11rem; }
-.sn-grp { display: inline-flex; align-items: center; gap: .6rem; cursor: pointer; }
-.sn-grp > input { margin: 0; }
+/* 表头「线路 / 节点」后面的「全部展开 / 全部收起」:小号链接,不占工具栏 */
+.sn-table th .sn-fold { margin-left: .6rem; font-size: var(--fs-xs); font-weight: 500; color: var(--primary-text); letter-spacing: 0; }
+.sn-table th .sn-fold:hover { text-decoration: underline; }
+.sn-lsum > span, .sn-lfacts > span { white-space: nowrap; }
+/* 卡片排法(手机等):线路卡占满一行,只留名字、协议 · 端口 · 节点数和一行汇总(各汇总格不再一格一行);展开时整张卡上色,它的节点卡缩进一点跟在下面 */
+.sn-lfacts { display: none; }
+table.grid.cards.sn-table tr > td { background: transparent; }
+table.grid.cards.sn-table tr.sn-line { grid-column: 1 / -1; }
+table.grid.cards.sn-table tr.sn-line > td.num, table.grid.cards.sn-table tr.sn-line > td.sn-out, table.grid.cards.sn-table tr.sn-line > td.actions { display: none; }
+table.grid.cards.sn-table tr.sn-line .sn-lfacts { display: block; margin-top: .3rem; color: var(--text-2); }
+table.grid.cards.sn-table tr.sn-line.open { background: var(--surface-3); }
+table.grid.cards.sn-table tr.sn-child { margin-left: .9rem; }
+table.grid.cards.sn-table tr.sn-child > td.primary-cell { padding-left: 0; }
 /* 批量设限速 / 容量:一行一项 —— 名字、「不改 / 设为 / 不限」、数值 */
 .sn-brows { display: grid; gap: .6rem; }
 .sn-brow { display: grid; grid-template-columns: minmax(0, 1fr) 7rem 8rem; gap: .6rem; align-items: center; }
