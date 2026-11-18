@@ -9,6 +9,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/gofrs/uuid/v5"
 	"golang.org/x/crypto/curve25519"
@@ -73,6 +76,32 @@ func RealityKeypair() (privateKey, publicKey string, err error) {
 		return
 	}
 	return base64.RawURLEncoding.EncodeToString(priv), base64.RawURLEncoding.EncodeToString(pub), nil
+}
+
+// RealityPublicKey 由 Reality 私钥算出公钥,并把私钥规范成 base64 RawURL(sing-box / xray 用的写法)。
+// 私钥接受 base64url(带不带 = 都行)和标准 base64,解出来必须是 32 字节。
+// 线路保存时由它算公钥、不收前端传来的公钥:以前私钥能手改、公钥只读,改了私钥订阅里还是旧公钥,
+// 客户端全部握手失败(审计 E3)。
+func RealityPublicKey(privateKey string) (normPriv, publicKey string, err error) {
+	k := strings.TrimSpace(privateKey)
+	var raw []byte
+	for _, enc := range []*base64.Encoding{base64.RawURLEncoding, base64.URLEncoding, base64.RawStdEncoding, base64.StdEncoding} {
+		if b, e := enc.DecodeString(k); e == nil {
+			raw = b
+			break
+		}
+	}
+	if raw == nil {
+		return "", "", errors.New("不是 base64 编码")
+	}
+	if len(raw) != curve25519.ScalarSize {
+		return "", "", fmt.Errorf("长度是 %d 字节,应为 %d 字节", len(raw), curve25519.ScalarSize)
+	}
+	pub, err := curve25519.X25519(raw, curve25519.Basepoint)
+	if err != nil {
+		return "", "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), base64.RawURLEncoding.EncodeToString(pub), nil
 }
 
 // Generate 为新用户生成全部协议的凭据。

@@ -508,6 +508,7 @@ async function genReality() {
   if (!document.getElementById('f-priv')) return; // 等结果的时候表单关了、或换了协议
   document.getElementById('f-priv').value = k.privateKey || k.private_key || '';
   document.getElementById('f-pub').value = k.publicKey || k.public_key || '';
+  document.getElementById('f-priv').dispatchEvent(new Event('m-ui:keypair')); // 新的一对:以它为准(见 bindRealityPub)
   if (!fv('f-sids').trim()) {
     const s = await get('keygen?type=shortid');
     if (document.getElementById('f-sids')) document.getElementById('f-sids').value = s.shortId || s.short_id || '';
@@ -587,7 +588,23 @@ function renderDynamic(l) {
   });
   // 新建线路默认就是 Reality:密钥现生成,不用人去点「生成密钥对」
   if (document.getElementById('f-priv') && fv('f-tlsmode') === 'reality' && !fv('f-priv').trim()) genReality().catch(e => toast(e.message, 'err'));
+  bindRealityPub();
   advSummary();
+}
+
+// 手改私钥时公钥框跟着清空、写明「保存时按私钥算出」:公钥由后端按私钥算,框里留着旧公钥会让人以为还是那一对(审计 E3)。
+// 点「生成密钥对」(genReality)是一对一起填,不走这里。
+function bindRealityPub() {
+  const priv = document.getElementById('f-priv'), pub = document.getElementById('f-pub');
+  if (!priv || !pub || priv.dataset.pubBound) return;
+  priv.dataset.pubBound = '1';
+  let pair = { priv: priv.value.trim(), pub: pub.value };
+  priv.addEventListener('input', () => {
+    const changed = priv.value.trim() !== pair.priv;
+    pub.value = changed ? '' : pair.pub;
+    pub.placeholder = changed ? t('line.reality.pubAuto') : '';
+  });
+  priv.addEventListener('m-ui:keypair', () => { pair = { priv: priv.value.trim(), pub: pub.value }; pub.placeholder = ''; });
 }
 
 // 展开某个收起的分区再报错:错在收起来的地方时,人得看得见是哪一栏

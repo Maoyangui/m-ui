@@ -529,8 +529,24 @@ func (s *Server) validateLine(line *model.Line) error {
 			if r == nil {
 				r = map[string]interface{}{}
 			}
+			changed := false
 			if ids, _ := r["short_ids"].([]interface{}); len(ids) == 0 {
 				r["short_ids"] = []string{creds.ShortID()}
+				changed = true
+			}
+			// 公钥一律由私钥算出,不收前端传来的:以前私钥能手改、公钥只读,手改私钥后服务端用新私钥、
+			// 订阅里还是旧公钥,客户端全部握手失败(审计 E3)。私钥顺带规范成 base64 RawURL。
+			if pk, _ := r["private_key"].(string); strings.TrimSpace(pk) != "" {
+				norm, pub, err := creds.RealityPublicKey(pk)
+				if err != nil {
+					return fmt.Errorf("REALITY 私钥不对:%v。要 32 字节的 base64(和 xray x25519、sing-box generate reality-keypair 生成的一样);不确定就点「生成」", err)
+				}
+				if r["private_key"] != norm || r["public_key"] != pub {
+					r["private_key"], r["public_key"] = norm, pub
+					changed = true
+				}
+			}
+			if changed {
 				probe["reality"] = r
 				if b, err := json.Marshal(probe); err == nil {
 					line.Tls = b
