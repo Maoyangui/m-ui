@@ -338,8 +338,8 @@ func clientTiles(lang string) []clientTile {
 			Key: "linux", Icon: template.HTML(iconLinux), OS: "Linux", Short: "Linux",
 			Apps: []clientApp{
 				{Name: god, Recommended: true, Format: fAny,
-					Desc: pick("自研客户端,单一二进制,自带浏览器面板。解压后 sudo ./install.sh,终端会打印面板地址,在面板里粘贴通用地址。软路由(OpenWrt / iStoreOS)用 ipk 包。",
-						"Our own client: a single binary with its own browser panel. Unpack, run sudo ./install.sh, then paste the universal link into the panel address it prints. On OpenWrt / iStoreOS use the ipk."),
+					Desc: pick("自研客户端,单一二进制,自带浏览器面板。解压后 sudo ./install.sh,终端会打印面板地址。桌面系统装好后回到订阅页点「佛跳墙」就能一键导入(v0.8.0 起),也可以在面板里粘贴通用地址。软路由(OpenWrt / iStoreOS)用 ipk 包。",
+						"Our own client: a single binary with its own browser panel. Unpack and run sudo ./install.sh; it prints the panel address. On a desktop system, go back to the subscription page afterwards and tap the client's tile for a one-tap import (v0.8.0+), or paste the universal link into the panel. On OpenWrt / iStoreOS use the ipk."),
 					Links: []dl{
 						{Text: "tar.gz (amd64) v" + gv, Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-linux-amd64.tar.gz"), Primary: true},
 						{Text: "tar.gz (arm64)", Href: gh(godRepo, "v"+gv, "godusevpn-"+gv+"-linux-arm64.tar.gz")},

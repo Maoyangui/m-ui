@@ -250,8 +250,9 @@ func buildPageData(r *http.Request, subPath, key string, user model.User, lines 
 	imp := SubTitle(user, opt) // 一键导入按订阅标题命名,与响应头一致
 	// 一键导入靠 godusevpn:// 深链:Windows(安装包写注册表,程序每次启动补一遍)、macOS(.app 的 Info.plist 登记
 	// CFBundleURLTypes)、安卓与电视(AndroidManifest)都登记了这个协议。小字写的是这款客户端有哪些平台的版本
-	// (产品方 2026-11-18 定:写 Linux、不单列电视 —— 电视版就是 Android 版);Linux 版目前没登记深链,
-	// 在 Linux 上点这一格唤不起客户端,要在它自己的面板里粘地址。
+	// (产品方 2026-11-18 定:写 Linux、不单列电视 —— 电视版就是 Android 版)。Linux 版 0.8.0 起安装时向桌面登记
+	// x-scheme-handler/godusevpn:点了用浏览器打开它本机的面板、弹出填好的添加订阅框;没有桌面的软路由 / 服务器
+	// 上没人接这条链接,还是在它自己的面板里粘地址。
 	god, godHint := "佛跳墙", "Windows · macOS · Android · Linux"
 	if d.Lang != "zh" {
 		god = "Fotiaoqiang"
