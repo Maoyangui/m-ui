@@ -81,11 +81,14 @@ function renderGroups() {
     .map(g => `<button data-act="node.group" data-id="${g.key === null ? '*' : esc(g.key)}" class="${g.key === groupF ? 'active' : ''}">${esc(g.label)} <span class="seg-n">${g.n}</span></button>`).join('')}</div>` : '');
 }
 
-// 已经删掉、但还没收到下线通知的服务器:列表里没有它们那一行了,单独提示(主机一直在重试)
+// 已经删掉、但还没收到下线通知的服务器:列表里没有它们那一行了,单独提示(主机一直在重试,删除 7 天后还没送到就自动停止)。
+// 每台后面一个「不再通知」:管理员确认那台已经停掉 / 销毁时用,点了先说清后果(审计 A4)。
 function renderDecomGone() {
   const gone = data.decommissions || [];
   setHTML('decom-gone', gone.length && !isNodeView()
-    ? `<p class="hint warn-text" style="margin-bottom:.8rem">${esc(t('node.decomPendingGone', { names: gone.map(d => d.name).join(t('node.sep')) }))}</p>` : '');
+    ? `<p class="hint warn-text decom-gone">${esc(t('node.decomPendingGone2'))} ${gone.map(d =>
+      `<span class="decom-item"><b>${esc(d.name)}</b> <span class="muted" title="${esc(trErr(d.lastError || '—'))}">${esc(t('node.decomTries', { n: d.attempts || 0 }))}</span>` +
+      `<button type="button" class="link-btn" data-act="node.decomForget" data-id="${d.nodeId}">${esc(t('node.decomForget'))}</button></span>`).join(t('node.sep'))}</p>` : '');
 }
 
 // 停用的副机还没收到下线通知:它仍按旧配置为所有用户服务,得让管理员看见
@@ -563,6 +566,15 @@ registerActions({
     try { await post(`nodes/${id}/resetcert`); toast(t('node.resetCertDone'), 'ok'); data = await get('nodes'); renderRows(); }
     catch (e) { toast(e.message, 'err'); }
     finally { btn.disabled = false; }
+  },
+  'node.decomForget': async id => {
+    const g = (data.decommissions || []).find(x => x.nodeId === Number(id));
+    if (!g) return;
+    if (!await confirm(t('node.decomForgetBody'), { title: t('node.decomForgetTitle', { name: g.name }), danger: true, okText: t('node.decomForget') })) return;
+    try {
+      await del('nodes/decommission/' + id);
+      await load('nodes'); render(document.getElementById('page')); toast(t('node.decomForgotten', { name: g.name }), 'ok');
+    } catch (e) { toast(trErr(e.message), 'err'); }
   },
   'node.del': async id => {
     const n = data.nodes.find(x => x.id === Number(id));

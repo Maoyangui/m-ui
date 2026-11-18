@@ -200,6 +200,10 @@ func (s *Server) handleNodeItem(w http.ResponseWriter, r *http.Request) {
 		s.handleNodeGroup(w, r)
 		return
 	}
+	if len(rest) == 2 && rest[0] == "decommission" { // nodes/decommission/{id}:已删除的服务器,不再给它发下线通知
+		s.handleDecommissionForget(w, r, rest[1])
+		return
+	}
 	id64, err := strconv.ParseUint(rest[0], 10, 64)
 	if err != nil {
 		badRequest(w, errors.New("id 无效"))
@@ -568,4 +572,40 @@ func (s *Server) detachLinesFromNodeTx(db *gorm.DB, nodeID uint) []string {
 		db.Model(&model.Line{}).Where("id = ?", l.Id).Updates(upd)
 	}
 	return disabled
+}
+
+// handleDecommissionForget DELETE nodes/decommission/{id}:管理员确认那台已经停掉 / 销毁,它的下线通知不再重试,
+// 服务器页的提示随之消失(审计 A4:以前删掉的服务器回不了话,主机永远重试、提示永远不消失)。
+// 只对已经删掉的:停用着的那台还在列表里,重新启用就会作废,不能借这里把它的下线通知抹掉。
+func (s *Server) handleDecommissionForget(w http.ResponseWriter, r *http.Request, idStr string) {
+	if r.Method != http.MethodDelete {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
+		return
+	}
+	id64, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		badRequest(w, errors.New("id 无效"))
+		return
+	}
+	var n int64
+	s.db.Model(&model.Node{}).Where("id = ?", id64).Count(&n)
+	if n > 0 {
+		badRequest(w, errors.New("这台服务器还在列表里(停用着):重新启用它,下线通知会自己作废"))
+		return
+	}
+	var recs []model.NodeDecommission
+	s.db.Select("node_id, name").Where("node_id = ?", id64).Find(&recs)
+	if len(recs) == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "没有这台的下线通知(可能刚刚送到了)"})
+		return
+	}
+	// 在途的重推拿到闸后会发现记录没了、不再推(hub.retryDecommissions)
+	if err := s.db.Where("node_id = ?", id64).Delete(&model.NodeDecommission{}).Error; err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	name := recs[0].Name
+	logger.Warning("管理员确认副机 ", name, " 已经不在了:不再给它发下线通知")
+	s.audit(r, "node", "decommission-forget", name)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "name": name})
 }

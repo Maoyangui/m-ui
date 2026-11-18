@@ -1703,6 +1703,12 @@ details.adv[open] > summary::before, details.ha-adv[open] > summary::before { tr
 select.fw-mode { width: auto; max-width: 11.5rem; }
 .fw-note.ok { color: var(--ok-text); }
 .fw-note button.link { border: 0; background: none; padding: 0 .1rem; margin-left: .35rem; font: inherit; color: var(--primary-text); text-decoration: underline; cursor: pointer; }
+/* 服务器页:已删除、下线通知还没送到的服务器(每台:名字 · 已试几次 · 不再通知) */
+.decom-gone { margin-bottom: .8rem; }
+.decom-gone .decom-item { white-space: nowrap; }
+.decom-gone .decom-item .muted { margin-left: .2rem; }
+.decom-gone .link-btn { margin-left: .4rem; color: var(--primary-text); }
+.decom-gone .link-btn:hover { text-decoration: underline; }
 .fw-only { margin-top: .9rem; }
 .fw-dest .i { width: 12px; height: 12px; vertical-align: -1px; }
 #f-fw-add { margin-top: .55rem; }

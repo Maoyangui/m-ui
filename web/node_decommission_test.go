@@ -69,3 +69,38 @@ func TestNodeAPIDecommissionBookkeeping(t *testing.T) {
 		t.Fatalf("重新启用后还没送到的下线通知应作废,剩 %d 条", n)
 	}
 }
+
+// 审计 A4:已经删掉、回不了话的服务器,管理员可以「不再通知」;还在列表里(停用着)的不能这样抹掉。
+func TestNodeAPIDecommissionForget(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(db)
+	s := &Server{db: db}
+	db.Create(&model.Node{Name: "主机", IsLocal: true, Enabled: true, Sort: 1})
+	db.Create(&model.Node{Name: "停用的", ApiUrl: "http://b", Enabled: true, Sort: 2})
+	db.Model(&model.Node{}).Where("id = ?", 2).Update("enabled", false)
+	db.Create(&model.NodeDecommission{NodeId: 2, Name: "停用的", ApiUrl: "http://b", Revision: "r", CreatedAt: 1})
+	db.Create(&model.NodeDecommission{NodeId: 7, Name: "mwcloud", ApiUrl: "http://gone", Revision: "r", CreatedAt: 1}) // 7 已删
+	do := func(path string) int {
+		req := httptest.NewRequest("DELETE", "http://x/app/api/nodes/"+path, nil)
+		w := httptest.NewRecorder()
+		s.handleNodeItem(w, req)
+		return w.Code
+	}
+	count := func(id uint) int64 {
+		var n int64
+		db.Model(&model.NodeDecommission{}).Where("node_id = ?", id).Count(&n)
+		return n
+	}
+	if code := do("decommission/2"); code != 400 || count(2) != 1 {
+		t.Fatalf("停用着的服务器不能这样作废: %d 剩 %d", code, count(2))
+	}
+	if code := do("decommission/7"); code != 200 || count(7) != 0 {
+		t.Fatalf("已删除的应作废: %d 剩 %d", code, count(7))
+	}
+	if code := do("decommission/7"); code != 404 {
+		t.Fatalf("没有记录时应 404: %d", code)
+	}
+}
