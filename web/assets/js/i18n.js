@@ -1299,9 +1299,7 @@ const zh = {
   'set.camoT.blog': '个人博客', 'set.camoPorts': '也放在 80 / 443 端口', 'set.camoPortsHelp': '有人直接用浏览器打开你的域名时也看到这个站。只用空着的端口:线路、这台的面板 / 订阅或别的程序占着就不开;443 用这台证书库里的证书,按访问的域名挑;签证书走 HTTP 验证时临时让出 80。每台服务器各自判断。',
   'camo.preview': '这台服务器的伪装站', 'camo.on': '已开启', 'camo.off': '未开启', 'camo.autoPicked': '自动挑的', 'camo.reseed': '换一个样子', 'camo.reseedHelp': '只换这台:每台服务器的伪装站各是各的样子。', 'camo.reseeded': '已换成新的样子',
   'camo.zoom': '放大看', 'camo.previewTitle': '伪装站预览', 'camo.zoomHint': '这是首页;伪装站还有列表、详情和 404 页,预览里的链接点不动。', 'camo.where': '开启后在这些地方显示',
-  
-  
-  'camo.w.others': 'VLESS-Reality 本来就把探测转给真网站;其它协议(VLESS-TLS、VMess、Shadowsocks、TUIC 等)没有能回网页的地方,不受影响。', 
+  'camo.w.others': 'VLESS-Reality 本来就把探测转给真网站;其它协议(VLESS-TLS、VMess、Shadowsocks、TUIC 等)没有能回网页的地方,不受影响。',
   'camo.why.line': '线路在用', 'camo.why.service': '这台的面板 / 订阅在用', 'camo.why.acme': '正在签证书,临时让出', 'camo.why.nocert': '这台没有可用的证书',
   'camo.why.busy': '被别的程序占着', 'audit.v.camoReseed': '伪装站换了一个样子',
   'set.camoT.redirect': '跳转到我的网站', 'set.camoRedirect': '跳转到',
@@ -2523,7 +2521,7 @@ const en = {
   'up.fn.followedLong': 'went down everywhere {when} and was updated from the subscription: {detail}',
   'up.why': 'Reason: {msg}',
   'nav.subnodes': 'Node settings', 'sn.title': 'Node settings',
-  'sn.subtitle': 'Every node in a subscription: a line served directly by one server, or one of its relay entries. Set ratio, speed limits and capacity per node.', 
+  'sn.subtitle': 'Every node in a subscription: a line served directly by one server, or one of its relay entries. Set ratio, speed limits and capacity per node.',
   'sn.col.addr': 'Entry address', 'sn.col.ratio': 'Ratio', 'sn.col.speed': 'Speed limit', 'sn.col.cap': 'Online / capacity', 'sn.col.output': 'In subscriptions', 'sn.relay': 'Relay', 'sn.to': '→ {name}',
   'sn.follow': 'follows server', 'sn.unlimited': 'Unlimited', 'sn.speedBoth': '{a} Mbps total · {b} per user', 'sn.speedTotal': '{a} Mbps total', 'sn.speedUser': '{b} Mbps per user',
   'sn.capN': '{n} users', 'sn.filter.all': 'All', 'sn.filter.own': 'Customised', 'sn.filter.off': 'Not in subscriptions', 'sn.count': '{n} nodes', 'sn.lineOff': 'Line disabled',
@@ -2540,7 +2538,7 @@ const en = {
   'sn.err.int': 'Speed limits and capacity must be whole numbers, 0 or more', 'audit.v.node': 'changed node settings',
   'sn.count1': '1 node',
   'dash.attn.rej.node': 'node full {n}', 'dash.rejectedNode': 'Refused: node at capacity',
-  'dash.rejectedNodeHelp': 'This connection passed authentication, but the node it came through already has as many users online as the capacity set on the Node settings page, so it was refused. It can connect a minute after someone goes offline, or raise the node\\',
+  'dash.rejectedNodeHelp': 'This connection passed authentication, but the node it came through already has as many users online as the capacity set on the Node settings page, so it was refused. It can connect a minute after someone goes offline, or raise the node\'s capacity.',
   'sn.selected': '{n} nodes selected', 'sn.selAll': 'Select all listed nodes', 'sn.selLine': 'Select the nodes of “{name}”', 'sn.batch.on': 'Include in subscriptions', 'sn.batch.off': 'Exclude',
   'sn.batch.ratio': 'Set ratio', 'sn.batch.limits': 'Set limits / capacity', 'sn.batch.done': '{n} nodes updated', 'sn.batch.ratioTitle': 'Set ratio for selected nodes',
   'sn.batch.ratioPh': 'Empty = follow the server', 'sn.batch.ratioHelp': 'Every selected node gets this ratio; leave empty to make them follow their servers again. Other settings are untouched.',
@@ -2750,7 +2748,7 @@ const en = {
   'adm.ep.batch': 'Create a batch of users (1–100) with auto-generated names', 'adm.ep.lookup': 'Find the user behind a subscription link (for bots binding accounts; shared links are not accepted)',
   'adm.ex.bot': 'Bots: identify a user by the subscription link they send / list users expiring within 3 days for reminders',
   'node.decomPendingGone2': 'These deleted servers have not received the shutdown notice yet and the master keeps retrying (until then they still serve every user with their old config; retrying stops 7 days after deletion):',
-  'node.decomTries': '{n} tries', 'node.decomForget': 'Stop notifying', 'node.decomForgetTitle': 'Stop sending the shutdown notice to “{name}”?',
+  'node.decomTries': 'tries: {n}', 'node.decomForget': 'Stop notifying', 'node.decomForgetTitle': 'Stop sending the shutdown notice to “{name}”?',
   'node.decomForgetBody': 'Only do this if that machine is already stopped or destroyed. If it is still running, it keeps serving every user with its old config (later disables, expiries and quota limits do not apply there) until it is reinstalled or added back.',
   'node.decomForgotten': 'Stopped sending the shutdown notice to “{name}”',
   'sn.col.lineNode': 'Line / node', 'sn.expand': 'Show the nodes of this line', 'sn.collapse': 'Hide the nodes', 'sn.expandAll': 'Expand all', 'sn.collapseAll': 'Collapse all',
@@ -2778,10 +2776,6 @@ const en = {
   'camo.preview': 'This server\'s decoy site', 'camo.on': 'On', 'camo.off': 'Off', 'camo.autoPicked': 'picked automatically', 'camo.reseed': 'Restyle',
   'camo.reseedHelp': 'Only this server changes: every server has its own decoy site.', 'camo.reseeded': 'Restyled', 'camo.zoom': 'Enlarge', 'camo.previewTitle': 'Decoy site preview',
   'camo.zoomHint': 'This is the home page; the site also has listing, detail and 404 pages. Links are inert in this preview.', 'camo.where': 'Where it shows once on',
-  
-  
-  
-  
   'camo.w.others': 'VLESS-Reality already hands probes to a real website; other protocols (VLESS-TLS, VMess, Shadowsocks, TUIC and so on) have nowhere to answer with a page and are unaffected.',
   'camo.why.line': 'used by a line', 'camo.why.service': 'used by this server\'s panel or subscription',
   'camo.why.acme': 'released while a certificate is issued', 'camo.why.nocert': 'no usable certificate on this server', 'camo.why.busy': 'taken by another program',
@@ -2793,11 +2787,11 @@ const en = {
   'camo.k.ports': 'Ports',
   'camo.k.portsNote': 'Root and unknown paths; real subscription links and the panel path work as usual', 'camo.k.lines': 'Lines', 'camo.k.linesNote': 'Wrong password, or opened in a browser',
   'camo.k.web': '80 / 443', 'camo.p.panel': 'Panel {n}', 'camo.p.sub': 'Subscription {n}', 'camo.p.reseller': 'Reseller panel {n}', 'camo.l.anytls': 'AnyTLS × {n}', 'camo.l.trojan': 'Trojan × {n}',
-  'camo.l.hy2': 'Hysteria2 × {n}', 'camo.l.hy2Own': '{n} more Hysteria2 lines use their own masquerade site', 'camo.l.zero': 'None', 'camo.l.none': 'No AnyTLS, Trojan or Hysteria2 lines yet',
+  'camo.l.hy2': 'Hysteria2 × {n}', 'camo.l.hy2Own': 'Hysteria2 lines with their own masquerade site keep using it ({n})', 'camo.l.zero': 'None', 'camo.l.none': 'No AnyTLS, Trojan or Hysteria2 lines yet',
   'camo.s.on': '{port} serving', 'camo.s.onRd': '{port} redirecting', 'camo.s.on80s': '{port} → https', 'camo.s.no': '{port} off: {why}', 'camo.s.off': 'Off', 'camo.s.pending': 'Checking…',
-  'camo.ph.ready': '{n} cover photos, cropped and toned for this server', 'camo.ph.loading': 'Fetching cover photos ({have} of {n}); drawn illustrations until then',
-  'camo.ph.failed': 'Only {have} of {n} cover photos so far; drawn illustrations for the rest, will retry',
-  'camo.ph.failedAt': 'Only {have} of {n} cover photos so far; drawn illustrations for the rest, retrying at {time}', 'camo.open': 'Open in new tab',
+  'camo.ph.ready': 'Cover photos: {n}, cropped and toned for this server', 'camo.ph.loading': 'Fetching cover photos ({have} of {n}); drawn illustrations until then',
+  'camo.ph.failed': 'Cover photos: {have} of {n} so far; drawn illustrations for the rest, will retry',
+  'camo.ph.failedAt': 'Cover photos: {have} of {n} so far; drawn illustrations for the rest, retrying at {time}', 'camo.open': 'Open in new tab',
   'camo.openHint': 'Open the decoy this server is serving (root of the subscription port) to click through its pages',
 };
 
