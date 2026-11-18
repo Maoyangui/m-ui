@@ -987,7 +987,8 @@ const EN = /*BEGIN*/{
 "这台服务器还在列表里(停用着):重新启用它,下线通知会自己作废": "This server is still in the list (disabled): enable it again and its shutdown notice is dropped automatically",
 "长度是 %d 字节,应为 %d 字节": "it is %d bytes long; it must be %d bytes",
 "面板没能在 %s 上监听,还在原地址 %s(设置已改回): %w": "The panel could not listen on %s and is still on %s (the setting was reverted): %w",
-"面板没能换到新的监听设置,已按原样恢复(设置已改回): %w": "The panel could not switch to the new listen settings and was restored as before (the setting was reverted): %w"
+"面板没能换到新的监听设置,已按原样恢复(设置已改回): %w": "The panel could not switch to the new listen settings and was restored as before (the setting was reverted): %w",
+"保存设置失败,这次的修改一项都没存上: %w": "Saving the settings failed; none of these changes were saved: %w"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

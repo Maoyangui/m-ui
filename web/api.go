@@ -34,6 +34,7 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // randomBase64 生成 n 字节随机数据的 base64(shadowsocks 密码要求)。
@@ -1546,21 +1547,30 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				note = "已先备份到 " + bf.Name + "(本机现有线路 / 用户 / 上游会被主机下发的配置替换)"
 			}
 		}
-		for k, v := range in {
-			v = strings.TrimSpace(v)
-			if k == "nodeMode" && v != s.setting("nodeMode") {
-				roleChanged = true
+		if v, ok := in["nodeMode"]; ok && strings.TrimSpace(v) != s.setting("nodeMode") {
+			roleChanged = true
+		}
+		// 这次改的设置在一个事务里写,每一步都查错:有一项写不进(库被锁太久、磁盘满)就整笔不存、回错误,
+		// 不会只存了一部分还回「成功」(审计 L2)。事务里只用 tx。
+		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			for k, v := range in {
+				v = strings.TrimSpace(v)
+				if k == "webDomain" && v != oldDomain && v != "" {
+					// 本机服务器记录的域名跟着面板域名走(用户没单独改过时)
+					if err := tx.Model(&model.Node{}).Where("is_local = ? AND (domain = ? OR domain = '')", true, oldDomain).Update("domain", v).Error; err != nil {
+						return err
+					}
+				}
+				if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "key"}}, DoUpdates: clause.AssignmentColumns([]string{"value"})}).
+					Create(&model.Setting{Key: k, Value: v}).Error; err != nil {
+					return err
+				}
 			}
-			if k == "webDomain" && v != oldDomain && v != "" {
-				// 本机服务器记录的域名跟着面板域名走(用户没单独改过时)
-				s.db.Model(&model.Node{}).Where("is_local = ? AND (domain = ? OR domain = '')", true, oldDomain).Update("domain", v)
-			}
-			var existing model.Setting
-			if err := s.db.Where("key = ?", k).First(&existing).Error; err == nil {
-				s.db.Model(&model.Setting{}).Where("key = ?", k).Update("value", v)
-			} else {
-				s.db.Create(&model.Setting{Key: k, Value: v})
-			}
+			return nil
+		}); err != nil {
+			logger.Warning("保存设置失败,整笔没存: ", err)
+			badRequest(w, fmt.Errorf("保存设置失败,这次的修改一项都没存上: %w", err))
+			return
 		}
 		if roleChanged {
 			logger.Info("面板角色已切换为: ", s.role())
