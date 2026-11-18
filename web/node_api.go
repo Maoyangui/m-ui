@@ -587,16 +587,17 @@ func (s *Server) handleDecommissionForget(w http.ResponseWriter, r *http.Request
 		badRequest(w, errors.New("id 无效"))
 		return
 	}
-	var n int64
-	s.db.Model(&model.Node{}).Where("id = ?", id64).Count(&n)
-	if n > 0 {
-		badRequest(w, errors.New("这台服务器还在列表里(停用着):重新启用它,下线通知会自己作废"))
-		return
-	}
 	var recs []model.NodeDecommission
 	s.db.Select("node_id, name").Where("node_id = ?", id64).Find(&recs)
 	if len(recs) == 0 {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "没有这台的下线通知(可能刚刚送到了)"})
+		return
+	}
+	// 先看有没有通知、再看这台还在不在:启用着的服务器本来就没有下线通知,该回「没有」,别说它「停用着」
+	var n int64
+	s.db.Model(&model.Node{}).Where("id = ?", id64).Count(&n)
+	if n > 0 {
+		badRequest(w, errors.New("这台服务器还在列表里(停用着):重新启用它,下线通知会自己作废"))
 		return
 	}
 	// 在途的重推拿到闸后会发现记录没了、不再推(hub.retryDecommissions)

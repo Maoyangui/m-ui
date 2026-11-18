@@ -103,4 +103,8 @@ func TestNodeAPIDecommissionForget(t *testing.T) {
 	if code := do("decommission/7"); code != 404 {
 		t.Fatalf("没有记录时应 404: %d", code)
 	}
+	// 启用着的服务器本来就没有下线通知:回 404「没有」,不是 400「停用着」(实测发现文案不对)
+	if code := do("decommission/1"); code != 404 {
+		t.Fatalf("启用着、没有通知的服务器应 404: %d", code)
+	}
 }
