@@ -508,7 +508,7 @@ X-API-Key: <令牌>
 
 ```json
 {
-  "version": "0.7.17", "time": 1794600000, "coreRunning": true,
+  "version": "0.8.0", "time": 1794600000, "coreRunning": true,
   "users": {"total": 120, "enabled": 110, "online": 37, "depleted": 4, "expiringIn7Days": 9},
   "traffic": {"today": {"up": 0, "down": 0}, "month": {"up": 0, "down": 0}, "total": {"up": 0, "down": 0}},
   "lines": {"total": 12, "enabled": 11},

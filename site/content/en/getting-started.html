@@ -8,6 +8,7 @@
   <p>Any systemd Linux on amd64 or arm64 (Debian 11+ / Ubuntu 20.04+ recommended), as root:</p>
   <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
   <p>The script downloads the latest release, verifies it against the <code>SHA256SUMS</code> published with the same release, installs <code>/usr/local/bin/m-ui</code>, creates the systemd service and starts it. The database lives in <code>/etc/m-ui/m-ui.db</code>. Nothing else is installed — no Docker, no Node, no external database.</p>
+  <p>On a fresh install, if the server's own firewall (ufw, firewalld, or iptables rules shipped with the image) blocks incoming connections, the script asks once whether to open it: press Enter to open it (the old rules are backed up first; <code>m-ui firewall undo</code> restores them any time), or type n to keep it — m-ui then allows the ports it uses there automatically. <code>--keep-firewall</code> keeps it without asking, <code>--open-firewall</code> opens it without asking; with no terminal to ask (cloud-init and the like) it opens it. Your cloud provider's security group is not affected: allow the ports there as before. Upgrades neither ask nor change anything.</p>
   <p>Not sure yet? Append <code>--dry-run</code> to the same command: it prints what would be installed where, which files it writes and the default ports, and changes nothing.</p>
   <div class="note">Coming from a legacy panel? Run the installer with <code>--import /path/to/old.db</code> to bring lines, upstreams, users and settings across in one go — ports, credentials and the subscription path are kept, so existing clients keep connecting without a refresh. To move only users onto lines you already rebuilt, use <b>Users → Import from legacy panel</b>.</div>
 
@@ -54,7 +55,7 @@
 
   <h2 id="uninstall">Uninstall</h2>
   <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh) --uninstall</code></pre>
-  <p>Stops and removes the service and the binary; <code>/etc/m-ui</code> (database, certificates, backups) stays, so a later install picks everything up again. Add <code>--purge</code> to delete it too. The <code>m-ui</code> SSH menu's uninstall does the same and asks about the data directory. Nothing else is touched: m-ui never modifies an existing sing-box, Xray, Docker or nginx on the machine.</p>
+  <p>Stops and removes the service and the binary; <code>/etc/m-ui</code> (database, certificates, backups) stays, so a later install picks everything up again. Add <code>--purge</code> to delete it too. The <code>m-ui</code> SSH menu's uninstall does the same (and asks about the data directory); it also removes the firewall rules m-ui added and the ports it allowed for itself in the system firewall, and if the installer opened the system firewall it asks whether to restore it. Uninstalling with the script leaves those alone: to put the system firewall back as it was, run <code>m-ui firewall undo</code> before uninstalling. Nothing else is touched: m-ui never modifies an existing sing-box, Xray, Docker or nginx on the machine.</p>
 
 
   <p style="margin-top:2rem">Next: <a href="{{base}}multi-server/">add more servers</a> · <a href="{{base}}features/">see everything else the panel does</a> · <a href="{{base}}faq/">FAQ</a></p>
