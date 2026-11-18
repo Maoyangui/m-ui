@@ -91,9 +91,11 @@ func TestCamoMediaFile(t *testing.T) {
 	}
 }
 
+// waitMedia 等后台取图、处理结束。上限给到 2 分钟:CI 开着 -race 时,视频站 12 张照片按 4 种尺寸处理(含 JPEG 编解码)
+// 要十来秒,以前 10 秒的上限会误判(44369375776)。正常跑一两秒就完。
 func waitMedia(t *testing.T, r *Runner) {
 	t.Helper()
-	for i := 0; i < 400; i++ {
+	for i := 0; i < 4800; i++ {
 		r.camo.media.mu.Lock()
 		running := r.camo.media.running
 		r.camo.media.mu.Unlock()
