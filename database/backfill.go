@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// backfillApiKeyIPs 外部 API 的来源 IP 白名单从「整个面板一份」改成按密钥存(0.7.18)。旧版建的密钥行里这几列是 NULL
+// backfillApiKeyIPs 外部 API 的来源 IP 白名单从「整个面板一份」改成按密钥存(0.8.0)。旧版建的密钥行里这几列是 NULL
 // (那时还没有这几列):把它所在面板旧的那一份抄给它,升级前后放行的来源一样。新版写的行这几列从来不是 NULL,不会再被动;
 // 回退到旧版期间新建的密钥,再升上来时同样在这里补上。每次启动都看一遍(没有 NULL 的行就什么都不做)。
 // 旧的那一份(设置 apiIpAllow / apiIpList、代理的 api_ip_allow / api_ip_list)留着不删:回退到旧版时照旧生效。
