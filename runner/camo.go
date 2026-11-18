@@ -106,12 +106,14 @@ func (r *Runner) camoRefresh(now time.Time) (bool, http.Handler) {
 	c := &r.camo
 	c.mu.Lock()
 	c.at, c.on = now, on
-	var want []camo.PhotoReq
 	if on && (c.h == nil || c.key != key) {
 		c.h, c.key = camoBuild(tmpl, target, seed, now, photos), key
-		if site, ok := c.h.(*camo.Site); ok {
-			want = site.Wanted()
-		}
+	}
+	// 这一站还缺照片就交给取图的(没重新生成也交:上次没取全时,到了再试的时间要靠这里接着取;
+	// 正在取、还没到再试的时间,它自己不动)
+	var want []camo.PhotoReq
+	if site, ok := c.h.(*camo.Site); ok && on {
+		want = site.Wanted()
 	}
 	on, h := c.on, c.h
 	c.mu.Unlock()

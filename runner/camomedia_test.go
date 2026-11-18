@@ -156,4 +156,18 @@ func TestCamoMediaRun(t *testing.T) {
 	if running {
 		t.Fatal("没到再试的时间不该又去取")
 	}
+	// 到了再试的时间:伪装站再被访问(读设置)时接着取,不用等改设置、开设置页
+	r2.camo.media.mu.Lock()
+	r2.camo.media.retryAt = time.Now().Add(-time.Second)
+	r2.camo.media.src = []string{srv.URL + "/"}
+	r2.camo.media.mu.Unlock()
+	r2.camo.mu.Lock()
+	r2.camo.at = time.Time{} // 10 秒的缓存过了
+	r2.camo.mu.Unlock()
+	_ = r2.camoSource()
+	waitMedia(t, r2)
+	r2.CamoApply()
+	if s := r2.camoSource().(*camo.Site); len(s.Wanted()) != 0 {
+		t.Fatalf("到点以后应自己接着取完: 还缺 %d", len(s.Wanted()))
+	}
 }
