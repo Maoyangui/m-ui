@@ -2,6 +2,7 @@ package ha
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -217,5 +218,18 @@ func TestReplicaRotationKeepsCurPresent(t *testing.T) {
 	prev, _ := os.ReadFile(filepath.Join(c.Dir(), filePrev))
 	if !bytes.Equal(cur, r2) || !bytes.Equal(prev, r1) {
 		t.Fatal("cur 应是新的、prev 是上一份")
+	}
+	// 留旧的之后、新副本换上去之前出事(进程被杀、磁盘出错):cur 必须还在、还能用来接管。
+	// 以前先把 cur 改名成 prev,这时就只剩 prev,replicaInfo 说本机没有副本(审计 E2)
+	renameReplica = func(string, string) error { return errors.New("模拟:新副本换上去之前出事") }
+	defer func() { renameReplica = os.Rename }()
+	if _, err := c.ReceiveReplica(bytes.NewReader(replicaFor(t, m, c, 32))); err == nil {
+		t.Fatal("换不上去应报错")
+	}
+	if b, err := os.ReadFile(filepath.Join(c.Dir(), fileCur)); err != nil || !bytes.Equal(b, r2) {
+		t.Fatalf("换不上去时 cur 应原样还在: %v", err)
+	}
+	if ri, ok := c.replicaInfo(); !ok || ri.Seq != 31 {
+		t.Fatalf("换不上去时应仍用原来那份: ok=%v seq=%d", ok, ri.Seq)
 	}
 }

@@ -293,7 +293,7 @@ func (s *Service) ReceiveReplica(body io.Reader) (uint64, error) {
 			_ = writeFileAtomic(filepath.Join(s.Dir(), filePrevInfo), b)
 		}
 	}
-	if err := os.Rename(tmp, cur); err != nil {
+	if err := renameReplica(tmp, cur); err != nil {
 		return fail(err)
 	}
 	syncDir(s.Dir())
@@ -574,3 +574,6 @@ func scaleSize(a, b, c int64) int64 {
 	}
 	return int64(v)
 }
+
+// renameReplica 把收好的新副本换成 cur 的那一步。测试里换成会失败的,模拟「旧的已经留成 prev、新的还没换上去」时出事(审计 E2)。
+var renameReplica = os.Rename
