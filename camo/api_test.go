@@ -100,6 +100,11 @@ func TestVideoAPI(t *testing.T) {
 			strings.Contains(w.Body.String(), "secret-typed-by-someone") || !strings.Contains(w.Body.String(), s.Name()) {
 			t.Fatalf("没开脚本的提交应回带提示的登录页: %d %.300s", w.Code, w.Body)
 		}
+		// 没开脚本、空着提交:这一页上不会标出字段,提示直接写各字段的问题(自审 G2)
+		w = apiDo(t, s, http.MethodPost, loginAPI, "application/x-www-form-urlencoded", "")
+		if b := w.Body.String(); w.Code != 422 || !strings.Contains(b, "Enter a valid email address.") || !strings.Contains(b, "Enter your password.") || strings.Contains(b, "highlighted") {
+			t.Fatalf("没开脚本的空提交应写出各字段的提示: %d %.300s", w.Code, b)
+		}
 		if w := apiDo(t, s, http.MethodPost, loginAPI, js, `{"email":"`+strings.Repeat("a", 20<<10)+`"}`); w.Code != 413 {
 			t.Fatalf("请求体太大应 413: %d", w.Code)
 		}

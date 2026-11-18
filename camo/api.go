@@ -94,7 +94,18 @@ func (s *Site) serveAPI(w http.ResponseWriter, r *http.Request, p string) bool {
 		pause(r)
 	}
 	if !isJSON && rt.form != nil {
-		body := rt.form(rep.msg, rep.ok)
+		// 没开脚本的提交回的页面上不会标出哪个字段不对:格式没过时把各字段的提示直接写出来(「请检查标出来的字段」在这一页上对不上,自审 G2)
+		msg := rep.msg
+		if !rep.ok && len(rep.fields) > 0 {
+			var parts []string
+			for _, k := range sortedKeys(rep.fields) {
+				if f := rep.fields[k]; !strings.Contains(strings.Join(parts, " "), f) {
+					parts = append(parts, f)
+				}
+			}
+			msg = strings.Join(parts, " ")
+		}
+		body := rt.form(msg, rep.ok)
 		h := w.Header()
 		h.Set("Content-Type", htmlType)
 		h.Set("Cache-Control", "no-store")
