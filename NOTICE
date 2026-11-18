@@ -19,5 +19,7 @@ Third-party code and attributions (retained as required by their licenses):
   session/stream.go, session/client.go and session/session.go, to fix data
   races between closing a session and concurrent stream Read / Write /
   CreateStream (Stream.dieErr and Stream.dieHook become atomic pointers;
-  Session.buffering is cleared under connLock). All other files are unchanged.
+  Session.buffering is cleared under connLock); and service.go, whose fallback
+  now passes the authentication failure reason to the fallback handler through
+  the context (FallbackError). All other files are unchanged.
 - Go module dependencies are listed in go.mod with their respective licenses.

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
+	"github.com/Maoyangui/m-ui/camo"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/totp"
@@ -98,7 +99,7 @@ func (s *Server) StartReseller() error {
 			mux.ServeHTTP(w, r)
 			return
 		}
-		http.NotFound(w, r)
+		camo.ServeOr404(w, r) // 根目录、陌生路径:开着页面伪装就是伪装站(用户 N2)
 	})
 
 	listen := s.setting("resellerListen")

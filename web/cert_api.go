@@ -80,7 +80,11 @@ func (s *Server) handleCertSub(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
-		writeJSON(w, http.StatusOK, acme.Precheck(ctx, req.Domain))
+		res := acme.Precheck(ctx, req.Domain)
+		if strings.HasPrefix(res.Port80, "busy") && s.run != nil && s.run.CamoOn(80) {
+			res.Port80 = "free" // 占着 80 的是页面伪装:签证书走 HTTP 验证时它会先让出来(runner camoHold80)
+		}
+		writeJSON(w, http.StatusOK, res)
 	case "issue":
 		if r.Method != http.MethodPost {
 			break

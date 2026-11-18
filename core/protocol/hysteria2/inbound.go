@@ -30,6 +30,7 @@ import (
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/filemanager"
 
+	"github.com/Maoyangui/m-ui/camo"
 	"github.com/Maoyangui/m-ui/core/protocol/arrival"
 	"github.com/Maoyangui/m-ui/core/protocol/usersess"
 )
@@ -136,7 +137,8 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	inbound.set = usersess.SetFromContext(ctx)
 	inbound.arrivals = arrival.FromContext(ctx)
 	if masqueradeHandler == nil {
-		masqueradeHandler = http.NotFoundHandler() // 和 sing-quic 没配伪装站点时的默认一样
+		// 线路没填伪装站点:开着页面伪装就用全局的伪装站,没开回 404(和 sing-quic 没配伪装站点时的默认一样)—— 用户 N2
+		masqueradeHandler = http.HandlerFunc(camo.ServeOr404)
 	}
 	authWatch := &authFailWatch{next: masqueradeHandler, in: inbound, rxAmbiguous: options.IgnoreClientBandwidth && options.DownMbps > 0}
 	var udpTimeout time.Duration

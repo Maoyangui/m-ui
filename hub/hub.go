@@ -50,6 +50,8 @@ var SyncedSettings = []string{
 	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subSingboxExt", "subAutoFormat", "blockBT", "supportOnline", "subUpdates",
 	"subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice", "subShareEnabled", "subPageBuyURL", "subPageBrand",
 	"fwAutoAllow", // 系统防火墙开着时自动放行 m-ui 用到的端口:每台自己做,开关跟主机走
+	// 页面伪装:开关、样式、要不要也放在 80 / 443。各台按自己的种子生成伪装站、自己判断端口空不空
+	"camoEnabled", "camoTemplate", "camoPorts", "camoRedirect",
 }
 
 // MinNodeVersion 副机至少要这个版本才能正确应用当前快照(快照里新增了它必须理解的字段时抬高它)。

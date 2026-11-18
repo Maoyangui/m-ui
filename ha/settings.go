@@ -37,6 +37,8 @@ var localKeys = setOf(
 	// 防火墙里各台各自的:「放开系统防火墙」的记录(哪种防火墙、做了什么、备份在哪,撤销时照着还原)、
 	// m-ui 在系统防火墙里加过哪些放行、命令行暂停面板规则、主机实际连过来的地址
 	"fwOpened", "fwAllowed", "fwPaused", "fwPeers",
+	// 页面伪装的种子:每台各自生成,伪装站各不一样(所有面板长得一样的话伪装站本身就成了指纹)
+	"camoSeed",
 	// 容灾的本机状态
 	KeyEpoch, KeyRole, KeyMasterId, KeyMasterPub, KeySignKey, KeyVote, KeyGrant, KeyState, KeyNotify, KeyPeerKey,
 	KeyDemoted, KeyBecame, KeyFreezeUntil, KeySwitch, KeyIncoming, KeyReplicaSeq, KeyStandbyList,
@@ -67,6 +69,8 @@ var globalKeys = setOf(
 	// 流量奖励:开关、登记的地址、面板身份(签上报用的私钥)、提醒收起时的积分数、最近一次上报的结果、正在等到账的那笔捐赠。
 	// 都跟着主机走:接任、换机之后还是同一个面板、同一个地址(累计值在 reward_counters 表里,副本同样带着)
 	"rewardEnabled", "rewardAddress", "rewardBoundAt", "rewardKey", "rewardRemind", "rewardLast", "rewardDonation",
+	// 页面伪装:开关、样式、要不要也放在 80 / 443(随主机同步;种子是本机的)
+	"camoEnabled", "camoTemplate", "camoPorts", "camoRedirect",
 	// 容灾的全局设置
 	KeyMode, KeyStandbys, KeyReplicaMinutes, KeyConfirmMinutes, KeyAutoMinutes, KeyRankStepMinutes,
 	KeyWitness, KeyClusterKey, KeyPauseUntil, KeyDnsToken, KeyDnsNames, KeyAllowPlain, KeyTakeSub, KeyDnsProvider,

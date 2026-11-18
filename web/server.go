@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
+	"github.com/Maoyangui/m-ui/camo"
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/guard"
@@ -269,6 +270,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"plans/", s.auth(s.masterOnly(s.handlePlanItem)))
 	mux.HandleFunc(api+"reward", s.auth(s.handleReward)) // 流量奖励:副机上只回 {enabled:false}
 	mux.HandleFunc(api+"reward/", s.auth(s.handleReward))
+	mux.HandleFunc(api+"camo", s.auth(s.masterOnly(s.handleCamo))) // 页面伪装:预览、换一个样子、各入口与 80 / 443 的状况
 	mux.HandleFunc(api+"fw", s.auth(s.masterOnly(s.handleFw)))
 	mux.HandleFunc(api+"fw/", s.auth(s.masterOnly(s.handleFw)))
 	mux.HandleFunc(api+"rules", s.auth(s.masterOnly(s.handleRules)))
@@ -302,10 +304,8 @@ func (s *Server) Start() error {
 	mux.HandleFunc(api+"v1/", s.handlePublicAPI) // 外部 API:Bearer 令牌鉴权,与会话无关
 
 	// 根路径不跳到面板:跳转等于把面板路径告诉每一个扫到这个端口的人,面板路径这层保护就没了。
-	// 不认识的路径一律普通 404,对外看不出这个端口上跑的是什么。
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	})
+	// 不认识的路径一律普通 404,对外看不出这个端口上跑的是什么;开着页面伪装时换成伪装站(它自己清掉面板的安全头,用户 N2)。
+	mux.HandleFunc("/", camo.ServeOr404)
 	// 对外前缀 → 内部前缀改写;对外前缀不是 innerBase 时,直接访问内部前缀视为不存在
 	agentAlias := s.agentAliasPrefix() // 启动时算一次(成为主机后第一次启动就定了),不在每个请求里查库
 	outer := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -335,7 +335,7 @@ func (s *Server) Start() error {
 				r.URL.Path = innerBase + strings.TrimPrefix(r.URL.Path, pub)
 				r.URL.RawPath = ""
 			case strings.HasPrefix(r.URL.Path, innerBase):
-				http.NotFound(w, r)
+				camo.ServeOr404(w, r)
 				return
 			}
 		}

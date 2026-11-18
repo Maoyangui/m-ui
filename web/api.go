@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Maoyangui/m-ui/brand"
+	"github.com/Maoyangui/m-ui/camo"
 	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/ha"
@@ -26,6 +27,7 @@ import (
 	"github.com/Maoyangui/m-ui/ops"
 	"github.com/Maoyangui/m-ui/reach"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/runner"
 	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/sub"
 	"github.com/Maoyangui/m-ui/tz"
@@ -1392,13 +1394,15 @@ var panelSettings = setOf(
 	"upstreamCheckMinutes", "upstreamCheckFailThreshold", "reachAuto", "reachMinutes", "reachToken",
 	"certFile", "keyFile", "upstreamTestUrl", "statsBucketSeconds", "trafficAge", "allowPrivate",
 	"nodeMode", "backupHour", "backupKeep", "backupTelegram", "subLogAge", "auditAge",
-	"fwAutoBan", "fwAutoAllow", "rewardEnabled", "attnMute",
+	"fwAutoBan", "fwAutoAllow", "rewardEnabled", "attnMute", "camoEnabled", "camoTemplate", "camoPorts", "camoRedirect",
 )
 
 // hiddenSettings 不发给浏览器的密钥:前端用不到,各自的页面走专门接口(管理员页、配对信息、证书页)。
 var hiddenSettings = setOf("totpSecret", "apiToken", "nodeToken", "acmeAccountKey", "acmeCfToken",
 	// 流量奖励的面板私钥和它的内部状态:活动页走专门接口(reward_api.go)
-	"rewardKey", "rewardLast", "rewardDonation", "rewardRemind", "rewardAddress", "rewardBoundAt")
+	"rewardKey", "rewardLast", "rewardDonation", "rewardRemind", "rewardAddress", "rewardBoundAt",
+	// 页面伪装的种子:前端用不到(预览走 camo 接口)
+	"camoSeed")
 
 // maskedSettings 设置页上要显示"已填"的密钥:只发掩码,原样提交回来的掩码表示不改,清空表示删除。
 var maskedSettings = setOf("tgToken", "reachToken", "webhookSecret")
@@ -1510,6 +1514,29 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if v, ok := in["attnMute"]; ok { // 概览里关掉的提醒类别(用户 N14):只留认得出的写法,逗号分隔
 			in["attnMute"] = normAttnMute(v)
 		}
+		if v, ok := in["camoTemplate"]; ok { // 页面伪装的样式(用户 N2):空 = 自动(按本机种子挑),redirect = 跳转到管理员自己的网站
+			t, err := normCamoTemplate(v)
+			if err != nil {
+				badRequest(w, err)
+				return
+			}
+			in["camoTemplate"] = t
+		}
+		if v, ok := in["camoRedirect"]; ok { // 跳转的网址:存规整后的写法
+			in["camoRedirect"] = ""
+			if strings.TrimSpace(v) != "" {
+				_, norm, err := camo.ParseRedirect(v)
+				if err != nil {
+					badRequest(w, err)
+					return
+				}
+				in["camoRedirect"] = norm
+			}
+		}
+		if s.settingOr(in, "camoTemplate") == runner.CamoRedirectMode && strings.TrimSpace(s.settingOr(in, "camoRedirect")) == "" {
+			badRequest(w, errors.New("选了「跳转到我的网站」,要填跳转的网址"))
+			return
+		}
 		if v, ok := in["reachMinutes"]; ok && strings.TrimSpace(v) != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(v)); err != nil || n < reach.MinMinutes || n > reach.MaxMinutes {
 				badRequest(w, fmt.Errorf("大陆连通巡检间隔要在 %d 到 %d 分钟之间", reach.MinMinutes, reach.MaxMinutes))
@@ -1601,6 +1628,12 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			keys = append(keys, k)
 		}
 		s.audit(r, "settings", "update", keys)
+		for _, k := range keys {
+			if strings.HasPrefix(k, "camo") && s.run != nil {
+				s.run.CamoApply() // 页面伪装:下一条连接就按新设置,80 / 443 当场对账(不等缓存和半分钟一次的对账)
+				break
+			}
+		}
 		resp := map[string]interface{}{"ok": "1", "role": s.role()}
 		// 监听设置改了的当场生效,不用重启 m-ui:面板 1.5 秒后换监听(回复里带新地址,页面等它能连上就跳过去),
 		// 订阅服务与代理面板直接重启各自的监听
@@ -1818,8 +1851,12 @@ func (s *Server) validatePorts(in map[string]string) error {
 			}
 		}
 	}
-	// 端口有改动时,确认本机没有别的程序占着(没改的不测:占着它的就是自己)
+	// 端口有改动时,确认本机没有别的程序占着(没改的不测:占着它的就是自己)。
+	// 页面伪装占着 80 / 443 的话先让出来(两分钟内不再去占,保存成功后按「面板在用」不再占)
 	for _, key := range changed {
+		if s.run != nil {
+			s.run.CamoReleasePort(got[key])
+		}
 		if !portBindable(got[key]) {
 			return fmt.Errorf("%s端口 %d 已被本机其它程序占用,换一个", ports[key].label, got[key])
 		}

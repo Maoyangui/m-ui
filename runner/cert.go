@@ -284,6 +284,9 @@ func (r *Runner) issueCert(req IssueRequest) error {
 	if r.cert.acmeHook != nil {
 		r.cert.acmeHook(&cfg)
 	}
+	if req.Method == acme.MethodHTTP && !acme.IsWildcard(domain) {
+		defer r.camoHold80()() // 页面伪装占着 80 端口时先让出来,签完(成功、失败都算)再放回去(用户 N2)
+	}
 	// 本机能查出来的问题先查掉,查出来就不去找 CA:80 端口被线路占着、Cloudflare Token 看不到这个域名……
 	// 每次失败的验证都算进 CA 的限额(同一账户同一域名每小时 5 次),以前这些要走完一遍流程才报错
 	if err := r.issuePrecheck(cfg); err != nil {

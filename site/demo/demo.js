@@ -1365,12 +1365,52 @@ function route(method, path, query, body) {
   }
 }
 
+// 页面伪装(用户 N2):设置页的预览。样页是真面板按两个种子生成的首页(site/demo/camo.json,链接已拿掉;按需读,只有设置页用到),
+// 「换一个样子」在两个种子之间切换;入口按演示里的线路数(截图场景可以用 S.camoEntries 换成生产的量),
+// 80 / 443 开着时给一个已放上、一个被线路占着(S.camoPorts 可换)
+let CAMO = null, camoSeedIx = 0;
+async function demoCamo(method, query) {
+  if (method === 'POST') { camoSeedIx = 1 - camoSeedIx; return ok(); }
+  if (!CAMO) CAMO = await (await fetch('js/camo.json')).json();
+  const q = new URLSearchParams(query);
+  const want = q.has('template') ? q.get('template') : (S.settings.camoTemplate || '');
+  const on = k => String(S.settings[k] || '').toLowerCase() === 'true';
+  const parse = v => { if (typeof v !== 'string') return v; try { return JSON.parse(v); } catch { return null; } };
+  const ownMasq = l => { const o = parse(l.options) || {}; const m = o.masquerade; return !!(m && (typeof m === 'string' ? m.trim() : m.type)); };
+  const hasTransport = l => { const v = parse(l.transport); return !!(v && v.type && v.type !== 'tcp'); };
+  const lines = S.lines.filter(l => l.enabled !== false);
+  const count = f => lines.filter(f).length;
+  const entries = clone(S.camoEntries || {
+    panel: Number(S.settings.webPort) || 2053, sub: Number(S.settings.subPort) || 2056,
+    reseller: String(S.settings.resellerEnabled || '').toLowerCase() === 'false' ? 0 : Number(S.settings.resellerPort) || 2054,
+    anytls: count(l => l.protocol === 'anytls'), trojan: count(l => l.protocol === 'trojan' && !hasTransport(l)),
+    hy2: count(l => l.protocol === 'hysteria2' && !ownMasq(l)), hy2Own: count(l => l.protocol === 'hysteria2' && ownMasq(l)),
+  });
+  if (want === 'redirect') { // 跳转到管理员自己的网站:和后端一样只认 http(s) 网址
+    const raw = (q.has('redirect') ? q.get('redirect') : S.settings.camoRedirect || '').trim();
+    let target = '', error = '';
+    try { const u = new URL(raw.includes('://') ? raw : 'https://' + raw); if (!/^https?:$/.test(u.protocol) || !u.hostname) throw 0; u.hash = ''; target = u.href; }
+    catch { if (raw) error = '跳转的网址要以 http:// 或 https:// 开头,比如 https://www.example.com'; }
+    return { mode: 'redirect', target, error, host: S.settings.subDomain || S.settings.webDomain || 'tokyo.example.com',
+      ports: on('camoEnabled') && on('camoPorts') ? clone(S.camoPorts || [{ port: 80, on: true }, { port: 443, on: false, why: 'line' }]) : [],
+      entries };
+  }
+  const tmpl = want || (camoSeedIx ? 'video' : 'mirror'); // 自动:每个种子各挑一种
+  const page = (CAMO[tmpl] || CAMO.mirror)[camoSeedIx];
+  return {
+    mode: 'site', template: page.template, auto: !want, name: page.name, html: page.html,
+    host: S.settings.subDomain || S.settings.webDomain || 'tokyo.example.com',
+    ports: on('camoEnabled') && on('camoPorts') ? clone(S.camoPorts || [{ port: 80, on: true }, { port: 443, on: false, why: 'line' }]) : [],
+    entries,
+  };
+}
+
 setTransport(async (rawPath, opts = {}) => {
   const method = (opts.method || 'GET').toUpperCase();
   const [path, query = ''] = rawPath.split('?');
   let body = null; if (opts.body) { try { body = JSON.parse(opts.body); } catch { body = null; } }
   await new Promise(r => setTimeout(r, 40)); // 像一次真实请求
-  const res = route(method, path, query, body);
+  const res = path === 'camo' ? await demoCamo(method, query) : route(method, path, query, body);
   if (method !== 'GET' && !(body && body.dryRun) && !READONLY_POST.test(path)) demoNote();
   return res;
 });

@@ -489,6 +489,9 @@ func (r *Runner) fwPorts() []fw.PortProto {
 			add(p, p, "tcp")
 		}
 	}
+	for _, p := range r.camoFirewallPorts() { // 页面伪装占着 80 / 443 时(设置 camoPorts,用户 N2)
+		add(p, p, "tcp")
+	}
 	self := render.LocalNodeID(r.db)
 	var lines []model.Line
 	r.db.Where("enabled = ?", true).Find(&lines)

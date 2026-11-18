@@ -245,6 +245,7 @@ if (existsSync(demoSrc) && existsSync(demoFix)) {
   copyFileSync(join(REPO, 'brand', 'logo.svg'), join(DIST, 'demo', 'logo.svg')); // 面板里 logo.svg 由 Go 端从 brand/ 提供
   copyFileSync(join(ROOT, 'demo', 'demo.js'), join(DIST, 'demo', 'js', 'demo.js'));
   copyFileSync(demoFix, join(DIST, 'demo', 'js', 'fixtures.json'));
+  copyFileSync(join(ROOT, 'demo', 'camo.json'), join(DIST, 'demo', 'js', 'camo.json')); // 页面伪装的样页(设置页预览用,按需读)
   buildDemoSupport(join(demoSrc, 'support.html'));
 } else console.warn('没有 site/demo/fixtures.json,跳过 Live Demo');
 

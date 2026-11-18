@@ -991,7 +991,13 @@ const EN = /*BEGIN*/{
 "保存设置失败,这次的修改一项都没存上: %w": "Saving the settings failed; none of these changes were saved: %w",
 "订阅内容超过 4 MB:只读前 4 MB 会丢掉后面的节点,这份没有采用": "The subscription is larger than 4 MB; reading only the first 4 MB would drop the nodes after that, so it was not used",
 "源库 %s 不存在,请检查 -from 的路径": "The source database %s does not exist; check the -from path",
-"源库 %s 打不开: %w": "Cannot open the source database %s: %w"
+"源库 %s 打不开: %w": "Cannot open the source database %s: %w",
+"没换成: %w": "Restyling failed: %w",
+"伪装成什么只能是自动、下载镜像、软件下载、视频站、个人博客或跳转到我的网站": "Disguise as must be Automatic, Download mirror, Software downloads, Video site, Personal blog or Redirect to my website",
+"选了「跳转到我的网站」,要填跳转的网址": "\"Redirect to my website\" is selected: enter the address to redirect to",
+"跳转的网址要以 http:// 或 https:// 开头,比如 https://www.example.com": "The redirect address must start with http:// or https://, e.g. https://www.example.com",
+"跳转的网址里没有域名": "The redirect address has no domain",
+"跳转的网址里不能带用户名或密码": "The redirect address cannot contain a user name or password"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

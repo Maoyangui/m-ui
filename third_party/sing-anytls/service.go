@@ -1,3 +1,7 @@
+// Modified by m-ui (2026-11): fallback passes the reason the connection failed authentication to the fallback handler
+// through the context (FallbackError), so m-ui's page camouflage can log exactly what upstream would have logged.
+// Upstream: github.com/anytls/sing-anytls v0.0.11.
+
 package anytls
 
 import (
@@ -128,6 +132,14 @@ func (s *Service) fallback(ctx context.Context, conn net.Conn, source M.Socksadd
 	if s.fallbackHandler == nil {
 		return E.Extend(err, "fallback disabled")
 	}
-	s.fallbackHandler.NewConnectionEx(ctx, conn, source, M.Socksaddr{}, onClose)
+	s.fallbackHandler.NewConnectionEx(context.WithValue(ctx, fallbackErrKey{}, err), conn, source, M.Socksaddr{}, onClose)
 	return nil
+}
+
+type fallbackErrKey struct{}
+
+// FallbackError returns, inside a fallback handler, why the connection failed authentication (added by m-ui).
+func FallbackError(ctx context.Context) error {
+	err, _ := ctx.Value(fallbackErrKey{}).(error)
+	return err
 }

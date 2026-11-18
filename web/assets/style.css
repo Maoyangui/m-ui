@@ -1412,6 +1412,51 @@ button.badge { cursor: pointer; font: inherit; font-size: .72rem; }
   .set-rows > .set-row:not(.bool) { grid-template-columns: minmax(0, 1fr); gap: .55rem; align-content: start; }
 }
 .set-sec > .set-rows + .logo-field, .set-sec > .set-rows + .row { margin-top: .2rem; padding-top: .95rem; border-top: 1px solid var(--divider); }
+/* 页面伪装(用户 N2):这一节下面的预览 —— 左边一个缩小的浏览器窗口(按 1024 宽排版再整体缩小,点了放大看),
+   右边站名、换一个样子、开启后在哪些地方显示。卡片窄时上下排;并排时窗口和右边一栏一样高(露出的页面多一些,下面不留空) */
+.set-sec > .set-rows + .camo-box { margin-top: .2rem; padding-top: 1rem; border-top: 1px solid var(--divider); }
+.camo-head { display: flex; align-items: center; gap: .55rem; margin-bottom: .85rem; }
+.camo-head h3 { margin: 0; font-size: var(--fs-base); font-weight: 600; color: var(--text); }
+.camo-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.1rem 1.75rem; }
+@container (min-width: 42rem) { .camo-grid { grid-template-columns: minmax(0, min(34rem, 54%)) minmax(0, 1fr); } }
+.camo-win { position: relative; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; background: var(--surface); box-shadow: var(--shadow-xs); transition: border-color .15s, box-shadow .15s; }
+.camo-win:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); }
+.camo-hit { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: zoom-in; }
+.camo-hit:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.camo-bar { display: flex; flex: none; align-items: center; gap: .3rem; height: 1.85rem; padding: 0 .65rem; background: var(--surface-3); border-bottom: 1px solid var(--border); }
+.camo-bar > i { width: .5rem; height: .5rem; flex: none; border-radius: 50%; background: var(--border-strong); }
+.camo-url { flex: 0 1 18rem; min-width: 0; margin-left: .55rem; height: 1.2rem; line-height: 1.2rem; padding: 0 .7rem; border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.camo-shot { position: relative; display: block; flex: 1 0 auto; aspect-ratio: 16 / 10; overflow: hidden; background: #f7f8fa; }
+.camo-shot iframe { position: absolute; left: 0; top: 0; width: 1024px; height: 1400px; border: 0; background: #fff; transform-origin: 0 0; transform: scale(var(--camo-s, .35)); pointer-events: none; }
+.camo-name { font-size: var(--fs-md); font-weight: 650; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }
+.camo-kind { margin-top: .15rem; font-size: var(--fs-xs); color: var(--muted); }
+.camo-acts { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .75rem; }
+.camo-acts .i { margin-right: .3rem; }
+.camo-note { margin: .5rem 0 0; font-size: var(--fs-xs); line-height: 1.6; color: var(--faint); }
+.camo-wh { margin: 1.05rem 0 .5rem; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); letter-spacing: .02em; }
+.camo-where { display: grid; gap: .4rem; margin: 0; padding: 0; list-style: none; }
+.camo-where li { display: grid; grid-template-columns: .45rem minmax(0, 1fr); gap: .6rem; align-items: start; font-size: var(--fs-sm); line-height: 1.55; color: var(--text-2); }
+.camo-where .camo-dot { width: .45rem; height: .45rem; margin-top: .5em; border-radius: 50%; background: var(--ok); }
+.camo-where li.off { color: var(--muted); }
+.camo-where li.off .camo-dot { background: var(--border-strong); }
+.camo-where li.warn .camo-dot { background: var(--warn); }
+.camo-where li.wait .camo-dot { background: var(--primary); }
+.camo-where li[title] { cursor: help; }
+/* 跳转模式:窗口里画「有人打开 → 302 → 你的网站」 */
+.camo-rdbody { flex: 1 0 auto; display: grid; align-content: center; gap: .65rem; min-height: 13rem; padding: 1.4rem 1.3rem; background: var(--surface-2); }
+.camo-rdrow { display: grid; gap: .3rem; min-width: 0; }
+.camo-rdk { font-size: var(--fs-xs); color: var(--muted); }
+.camo-rdrow code { padding: .4rem .65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-family: var(--mono); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.camo-rdrow code.muted { color: var(--faint); }
+.camo-rdarrow { display: flex; align-items: center; gap: .4rem; padding-left: .7rem; color: var(--primary-text); font-size: var(--fs-xs); font-weight: 600; }
+.camo-rdarrow .i { transform: rotate(90deg); }
+.camo-target { font-family: var(--mono); overflow-wrap: anywhere; }
+.camo-kind.danger-text { color: var(--danger-text); }
+.set-row[hidden] { display: none; }
+.camo-zoom { border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+.camo-zoom .camo-url { flex-basis: 24rem; }
+.camo-zoom iframe { display: block; width: 100%; height: min(66vh, 44rem); height: min(66dvh, 44rem); border: 0; background: #fff; }
+.camo-zoom-hint { margin-top: .6rem; }
 /* 窄一点:导航横到上面,能左右滑;再窄(手机):一行里名称在上、控件在下,开关仍和名称同一行 */
 @media (max-width: 1080px) {
   .settings { grid-template-columns: minmax(0, 1fr); }

@@ -16,6 +16,8 @@ var BoolSettings = map[string]bool{
 	"fwAutoBan":     true, // 防火墙:自动拉黑(默认关)
 	"fwAutoAllow":   true, // 防火墙:系统防火墙开着时自动放行 m-ui 的端口(默认开)
 	"rewardEnabled": true, // 流量奖励(默认开):关了不显示金币、不为它联网,本机照常累计
+	"camoEnabled":   true, // 页面伪装(默认关,用户 N2)
+	"camoPorts":     true, // 页面伪装也放在空着的 80 / 443 上(默认关)
 }
 
 // NormBoolSetting 把开关类设置的写法规整成 "true" / "false";空值原样保留(表示用默认值)。ok=false 表示认不出。

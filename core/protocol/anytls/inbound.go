@@ -23,6 +23,7 @@ import (
 	anytls "github.com/anytls/sing-anytls"
 	"github.com/anytls/sing-anytls/padding"
 
+	"github.com/Maoyangui/m-ui/camo"
 	"github.com/Maoyangui/m-ui/core/protocol/arrival"
 	"github.com/Maoyangui/m-ui/core/protocol/usersess"
 )
@@ -70,9 +71,10 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 		Users: common.Map(options.Users, func(it option.AnyTLSUser) anytls.User {
 			return anytls.User(it)
 		}),
-		PaddingScheme: paddingScheme,
-		Handler:       (*inboundHandler)(inbound),
-		Logger:        logger,
+		PaddingScheme:   paddingScheme,
+		Handler:         (*inboundHandler)(inbound),
+		FallbackHandler: (*camoFallback)(inbound),
+		Logger:          logger,
 	})
 	if err != nil {
 		return nil, err
@@ -145,6 +147,43 @@ func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata ada
 		if !mark.Passed() { // 没进到路由:密码不对,或不是 anytls 客户端
 			arrival.Note(h.arrivals, metadata.Source, h.Tag(), h.Type(), arrival.Auth, err)
 		}
+	}
+}
+
+// camoFallback 认证没过的连接(密码不对,或者不是 AnyTLS 客户端 —— 比如用浏览器直接打开这个端口)(用户 N2):
+//   - 没开页面伪装:和以前没有回落处理时一模一样 —— 断开,日志和「最近入站连接」里记的都是 sing-anytls 原来的那句
+//     (FallbackError 取到的原因 + ": fallback disabled");
+//   - 开着:这条 TLS 连接连同已经读到的字节(sing-anytls 交来的是倒回开头的连接)交给伪装站按 HTTP/1.1 回应。
+//     先看头几个字节:像 HTTP 请求的(浏览器、扫描器)记成「回应了伪装站」;不像的多半是客户端填错了密码,照旧记原来的原因,
+//     排查用户连不上时不会被误导。
+type camoFallback Inbound
+
+var errCamoServed = E.New("not an AnyTLS client: answered with the camouflage site")
+
+func (h *camoFallback) NewConnectionEx(ctx context.Context, conn net.Conn, source M.Socksaddr, _ M.Socksaddr, onClose N.CloseHandlerFunc) {
+	cause := anytls.FallbackError(ctx)
+	if cause == nil {
+		cause = E.New("unknown user password")
+	}
+	site := camo.Handler()
+	if site == nil {
+		err := E.Extend(cause, "fallback disabled")
+		N.CloseOnHandshakeFailure(conn, onClose, err)
+		h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", source))
+		arrival.Note(h.arrivals, source, h.Tag(), h.Type(), arrival.Auth, err)
+		return
+	}
+	conn, isHTTP := camo.Sniff(conn)
+	if isHTTP {
+		h.logger.DebugContext(ctx, "process connection from ", source, ": answered with the camouflage site")
+		arrival.Note(h.arrivals, source, h.Tag(), h.Type(), arrival.Auth, errCamoServed)
+	} else {
+		h.logger.ErrorContext(ctx, E.Cause(cause, "process connection from ", source))
+		arrival.Note(h.arrivals, source, h.Tag(), h.Type(), arrival.Auth, cause)
+	}
+	camo.ServeConn(conn, site)
+	if onClose != nil {
+		onClose(nil)
 	}
 }
 

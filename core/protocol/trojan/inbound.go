@@ -21,6 +21,7 @@ import (
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
 
+	"github.com/Maoyangui/m-ui/camo"
 	"github.com/Maoyangui/m-ui/core/protocol/arrival"
 )
 
@@ -88,6 +89,10 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 			inbound.fallbackAddrTLSNextProto = fallbackAddrNextProto
 		}
 		fallbackHandler = adapter.NewUpstreamContextHandler(inbound.fallbackConnection, nil)
+	}
+	if fallbackHandler == nil && options.Transport == nil {
+		// 没配回落:认证没过的连接(密码不对,或用浏览器直接打开这个端口)开着页面伪装时交给伪装站,没开和以前一样断开(用户 N2)
+		fallbackHandler = adapter.NewUpstreamContextHandler(inbound.camoConnection, nil)
 	}
 	service := trojan.NewService[string](adapter.NewUpstreamContextHandler(inbound.newConnection, inbound.newPacketConnection), fallbackHandler, logger)
 	err := service.UpdateUsers(common.Map(options.Users, func(it option.TrojanUser) string {
@@ -220,6 +225,41 @@ func (h *Inbound) newPacketConnection(ctx context.Context, conn N.PacketConn, me
 	}
 	h.logger.InfoContext(ctx, "[", user, "] inbound packet connection to ", metadata.Destination)
 	h.router.RoutePacketConnectionEx(ctx, conn, metadata, onClose)
+}
+
+var errCamoServed = E.New("not a Trojan client: answered with the camouflage site")
+
+// camoConnection 认证没过、又没配回落的连接(用户 N2):
+//   - 没开页面伪装:和以前没配回落时一模一样 —— 断开,日志和「最近入站连接」里记的是 sing-box 原来那句
+//     "bad request: fallback disabled"(头 56 字节没读满时是 "bad request size: …");缓存里交来的正是读到的那段头,读一次就知道是哪种;
+//   - 开着:在这条连接上(连同已经读到的字节)回应伪装站。像 HTTP 请求的记成「回应了伪装站」,不像的照旧记 bad request。
+func (h *Inbound) camoConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
+	site := camo.Handler()
+	if site == nil {
+		var head [trojan.KeyLength + 1]byte
+		cause := E.New("bad request")
+		if n, _ := conn.Read(head[:]); n < trojan.KeyLength {
+			cause = E.New("bad request size")
+		}
+		err := E.Extend(cause, "fallback disabled")
+		N.CloseOnHandshakeFailure(conn, onClose, err)
+		h.logger.ErrorContext(ctx, E.Cause(err, "process connection from ", metadata.Source))
+		arrival.Note(h.arrivals, metadata.Source, h.Tag(), h.Type(), arrival.Auth, err)
+		return
+	}
+	conn, isHTTP := camo.Sniff(conn)
+	if isHTTP {
+		h.logger.DebugContext(ctx, "process connection from ", metadata.Source, ": answered with the camouflage site")
+		arrival.Note(h.arrivals, metadata.Source, h.Tag(), h.Type(), arrival.Auth, errCamoServed)
+	} else {
+		cause := E.New("bad request")
+		h.logger.ErrorContext(ctx, E.Cause(cause, "process connection from ", metadata.Source))
+		arrival.Note(h.arrivals, metadata.Source, h.Tag(), h.Type(), arrival.Auth, cause)
+	}
+	camo.ServeConn(conn, site)
+	if onClose != nil {
+		onClose(nil)
+	}
 }
 
 func (h *Inbound) fallbackConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {

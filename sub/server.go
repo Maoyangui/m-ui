@@ -15,6 +15,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/Maoyangui/m-ui/acme"
+	"github.com/Maoyangui/m-ui/camo"
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/ext"
@@ -522,7 +523,7 @@ func (s *Server) handle() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		subPath := s.currentPath()
 		if !strings.HasPrefix(r.URL.Path, subPath) {
-			http.NotFound(w, r)
+			camo.ServeOr404(w, r) // 根目录、陌生路径:开着页面伪装就是伪装站,没开是普通 404(用户 N2)
 			return
 		}
 		if peer, _, _ := net.SplitHostPort(r.RemoteAddr); s.Guard != nil && s.Guard.Blocked(peer) {
@@ -549,7 +550,7 @@ func (s *Server) handle() http.HandlerFunc {
 			name = strings.TrimSuffix(name, "/logo")
 		}
 		if name == "" || strings.Contains(name, "/") {
-			http.NotFound(w, r)
+			camo.ServeOr404(w, r)
 			return
 		}
 

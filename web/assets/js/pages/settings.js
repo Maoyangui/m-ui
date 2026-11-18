@@ -1,7 +1,7 @@
 import { state, load } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, registerActions, badge, fv, fchk, copy, urlHost, charCount, bindCharCounts, PAGE_TEXT_MAX } from '../ui.js';
+import { esc, toast, confirm, registerActions, badge, fv, fchk, copy, urlHost, charCount, bindCharCounts, PAGE_TEXT_MAX, openModal, debounce } from '../ui.js';
 import { ICONS } from '../icons.js';
 import { followPanel } from '../panelmove.js';
 import { logoBlock, bindLogo } from '../logo.js';
@@ -9,6 +9,7 @@ import { renderHASettings, saveHASettings } from '../ha.js';
 import { subSettingsChange } from '../subtls.js';
 import { refreshReward } from '../reward.js';
 import { ATTN_GROUPS, attnCatsFor, normMutes } from '../attnmute.js';
+import { trErr } from '../errmsg.js';
 
 // boolSetting 开关类设置的显示:和后端同一个判法(model.NormBoolSetting),空值用默认。
 function boolSetting(v, def) {
@@ -28,6 +29,9 @@ const defaults = {
   tgExpiringDays: 3, tgQuotaPercent: 80, tgDailyHour: 9, upstreamCheckMinutes: 10, upstreamCheckFailThreshold: 2, extRefreshMinutes: 30,
   upstreamTestUrl: 'http://www.gstatic.com/generate_204', statsBucketSeconds: 60, trafficAge: 30, reachMinutes: 90,
 };
+
+// 输入框里的示例(不是默认值:留空就是空,保存条里也写「空」)
+const placeholders = { camoRedirect: 'https://www.example.com' };
 
 // 有字数上限的文案:框下面显示当前字数与上限
 const textMax = { subPageNotice: PAGE_TEXT_MAX.notice, subPageSupport: PAGE_TEXT_MAX.support };
@@ -84,6 +88,14 @@ const groups = () => [
     ['subPageSupport', t('set.subPageSupport'), 'text', t('set.subPageSupportHelp')],
     ['subPageBuyURL', t('set.subPageBuyURL'), 'text', t('set.subPageBuyURLHelp')],
     ['subPageNotice', t('set.subPageNotice'), 'textarea', t('set.subPageNoticeHelp')],
+  ]},
+  // 页面伪装(用户 N2):陌生人顺着端口、域名找过来时看到的普通网站。只在主机上设,随主机同步;下面是这台的预览(见 renderCamo)
+  { id: 'camo', title: t('set.camo'), masterOnly: true, extra: '<div class="camo-box" id="camo-box" aria-live="polite"></div>', fields: [
+    ['camoEnabled', t('set.camoEnabled'), 'bool', t('set.camoEnabledHelp')],
+    ['camoTemplate', t('set.camoTemplate'), 'select', t('set.camoTemplateHelp'),
+      [['', t('set.camoT.auto')], ...CAMO_TEMPLATES.map(x => [x, t('set.camoT.' + x)]), ['redirect', t('set.camoT.redirect')]]],
+    ['camoRedirect', t('set.camoRedirect'), 'text', t('set.camoRedirectHelp')], // 只在选了「跳转到我的网站」时显示(camoMode)
+    ['camoPorts', t('set.camoPorts'), 'bool', t('set.camoPortsHelp')],
   ]},
   { id: 'notify', title: t('set.notify'), test: true, fields: [
     ['tgEnabled', t('set.tgEnabled'), 'bool', t('set.tgEnabledHelp')],
@@ -174,6 +186,13 @@ export async function render(el) {
   });
   bindLogo('set-logo', 'sub-logo');
   bindCharCounts(el);
+  // 页面伪装:换了样式马上按它预览(还没保存也一样);撤销这一项时 setCtl 发的是 input,下拉框本身选了也会发 input
+  const camoSel = document.getElementById('set-camoTemplate');
+  if (camoSel) camoSel.addEventListener('input', () => { camoMode(); renderCamo(); });
+  const camoUrl = document.getElementById('set-camoRedirect');
+  if (camoUrl) camoUrl.addEventListener('input', debounce(() => renderCamo(), 450));
+  camoMode();
+  renderCamo();
   el.querySelectorAll('.mutes').forEach(box => box.addEventListener('change', () => syncMutes(box)));
   // 未保存的改动:记下现在各项的值,之后任何一项动了就重算保存条
   barOpen = false;
@@ -237,6 +256,7 @@ function setCtl(f, v) {
   const el = document.getElementById('set-' + f.k);
   if (!el) return;
   if (isBool(f.type)) el.checked = v === 'true'; else el.value = v;
+  if (f.k === 'camoTemplate') camoMode(); // 撤销这一项时「跳转到」那一行跟着显示 / 收起
   if (f.type === 'mutes') { // 勾选框跟着隐藏的值走(撤销这一项时)
     const off = new Set(String(v || '').split(',').filter(Boolean));
     document.querySelectorAll(`.mutes[data-for="${el.id}"] input[data-mute]`).forEach(cb => { cb.checked = !off.has(cb.dataset.mute); });
@@ -381,6 +401,7 @@ async function saveAll() {
     }
     await load('settings', 'status');
     toast(t('set.saved') + (r && r.note ? ' · ' + r.note : ''), 'ok');
+    if (list.some(f => f.gid === 'camo')) renderCamo(); // 「已开启」和 80 / 443 的状况跟着存下的值走
     if ('rewardEnabled' in body) refreshReward(); // 顶栏的金币跟着开关走
     // Clash 模板写了 ipv6: false:存下了,但有 IPv6 节点时订阅会改成 true,要让人知道
     if (((r && r.hints) || []).includes('clashIPv6')) await confirm(t('set.clashIPv6Hint'), { title: t('set.saved'), okText: t('node.ack'), notice: true });
@@ -394,8 +415,9 @@ async function saveAll() {
 
 // 一项设置一行:左边名称 + 说明,右边控件(开关靠右);长文本框(公告、模板)名称在上、框在下占满。
 // 控件的 id 仍是 set-<键>,保存逻辑不用跟着变
-// 宽屏两列时也各占一整行的:功德箱 / 在线设备数和流量奖励这两个「要不要为它联网」的开关,一上一下放在一起(用户 N15)
-const WIDE = new Set(['supportOnline', 'rewardEnabled']);
+// 宽屏两列时也各占一整行的:功德箱 / 在线设备数和流量奖励这两个「要不要为它联网」的开关,一上一下放在一起(用户 N15);
+// 页面伪装的总开关说明长,占一整行,下面样式和 80 / 443 两项并排
+const WIDE = new Set(['supportOnline', 'rewardEnabled', 'camoEnabled']);
 
 function rowHTML(s, [k, label, type, help, options]) {
   const id = 'set-' + k;
@@ -419,7 +441,7 @@ function rowHTML(s, [k, label, type, help, options]) {
   }
   const ctl = type === 'select'
     ? `<select id="${id}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(s[k] ?? '') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`
-    : `<input id="${id}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(defaults[k] ?? '')}">${textMax[k] ? charCount(id, textMax[k]) : ''}`;
+    : `<input id="${id}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(placeholders[k] ?? defaults[k] ?? '')}">${textMax[k] ? charCount(id, textMax[k]) : ''}`;
   return `<div class="set-row">${info}<div class="set-ctl">${ctl}</div></div>`;
 }
 
@@ -448,6 +470,115 @@ function buildNav() {
   }, { rootMargin: '-15% 0px -55% 0px' });
   secs.forEach(s => navSpy.observe(s));
   if (secs[0]) mark(secs[0].id);
+}
+
+// ---- 页面伪装(用户 N2):这台伪装站的预览、换一个样子、开启后在哪些地方显示 ----
+// 预览按 1024 宽的桌面浏览器排版,再整体缩小放进框里(宽屏时框和右边一栏一样高,露出的页面多一些);
+// 框里的页面不能点(链接也在后端拿掉了),点框放大看。
+// 种子每台各自生成:这里看到的只是这台的样子,副机各是各的(设置随主机同步)。
+const CAMO_TEMPLATES = ['mirror', 'downloads', 'video', 'blog'];
+const CAMO_W = 1024;
+let camoSeq = 0, camoData = null, camoRO = null, camoTimer = 0;
+const camoSaved = k => boolSetting(state.settings[k], false);
+
+async function renderCamo() {
+  const box = document.getElementById('camo-box');
+  if (!box) return;
+  const seq = ++camoSeq;
+  clearTimeout(camoTimer);
+  const sel = document.getElementById('set-camoTemplate');
+  let d;
+  try { d = await get('camo?template=' + encodeURIComponent(sel ? sel.value : '') + '&redirect=' + encodeURIComponent(fv('set-camoRedirect').trim())); }
+  catch (e) { if (seq === camoSeq && box.isConnected) box.innerHTML = `<p class="hint danger-text">${esc(e.message)}</p>`; return; }
+  if (seq !== camoSeq || !box.isConnected) return;
+  camoData = d;
+  box.innerHTML = camoHTML(d);
+  fitCamo(box);
+  // 刚存下「也放在 80 / 443」:端口每半分钟对一次账,过一会儿再看一眼结果
+  if (camoSaved('camoEnabled') && camoSaved('camoPorts') && !(d.ports || []).length) camoTimer = setTimeout(renderCamo, 32000);
+}
+
+// 「跳转到」那一行只在选了「跳转到我的网站」时显示(存着的网址不动,换回伪装站时也还在)
+function camoMode() {
+  const sel = document.getElementById('set-camoTemplate');
+  const row = document.getElementById('set-camoRedirect')?.closest('.set-row');
+  if (row) row.hidden = !sel || sel.value !== 'redirect';
+}
+
+// 浏览器窗口的样子:三个圆点 + 地址栏(订阅域名、面板域名、公网 IP 里先有的那个;都没有写站名)
+const camoBar = d => `<span class="camo-bar" aria-hidden="true"><i></i><i></i><i></i><span class="camo-url">${esc(d.host || d.name)}</span></span>`;
+const camoFrame = (d, cls) => `<iframe class="${cls}" sandbox="" referrerpolicy="no-referrer" title="${esc(d.name)}" srcdoc="${esc(d.html)}"${cls === 'camo-thumb' ? ' tabindex="-1" aria-hidden="true"' : ''}></iframe>`;
+
+function camoHTML(d) {
+  const on = camoSaved('camoEnabled');
+  const e = d.entries || {};
+  const rows = [['ok', e.reseller ? t('camo.w.ports', { panel: e.panel, sub: e.sub, reseller: e.reseller }) : t('camo.w.portsNoRes', { panel: e.panel, sub: e.sub })]];
+  if (e.anytls) rows.push(['ok', t('camo.w.anytls', { n: e.anytls })]);
+  if (e.trojan) rows.push(['ok', t('camo.w.trojan', { n: e.trojan })]);
+  if (e.hy2) rows.push(['ok', t('camo.w.hy2', { n: e.hy2 })]);
+  if (!e.anytls && !e.trojan && !e.hy2) rows.push(['off', t('camo.w.noLines')]);
+  if (e.hy2Own) rows.push(['off', t('camo.w.hy2Own', { n: e.hy2Own })]);
+  rows.push(...camoPortRows(d));
+  const rd = d.mode === 'redirect';
+  const kind = rd ? '' : t('set.camoT.' + d.template) + (d.auto ? ' · ' + t('camo.autoPicked') : '');
+  // 跳转模式:左边画「有人打开 → 302 → 你的网站」,右边是网址和打开它的链接;伪装站模式:左边缩略图,右边站名和两个按钮
+  const left = rd
+    ? `<div class="camo-win camo-rd">${camoBar(d)}<div class="camo-rdbody">
+        <div class="camo-rdrow"><span class="camo-rdk">${esc(t('camo.rd.req'))}</span><code>${esc((d.host || '…') + '/…')}</code></div>
+        <div class="camo-rdarrow"><i class="i i-arrow"></i>302</div>
+        <div class="camo-rdrow"><span class="camo-rdk">${esc(t('camo.rd.to'))}</span><code class="${d.target ? '' : 'muted'}">${esc(d.target || t('camo.rd.none'))}</code></div>
+      </div></div>`
+    : `<div class="camo-win">${camoBar(d)}<span class="camo-shot">${camoFrame(d, 'camo-thumb')}</span>
+        <button type="button" class="camo-hit" data-act="set.camoZoom" title="${esc(t('camo.zoom'))}" aria-label="${esc(t('camo.zoom') + ' · ' + d.name)}"></button></div>`;
+  const top = rd
+    ? `<div class="camo-name">${esc(t('camo.rd.title'))}</div>
+        ${d.error ? `<div class="camo-kind danger-text">${esc(trErr(d.error))}</div>` : `<div class="camo-kind camo-target">${esc(d.target || t('camo.rd.none'))}</div>`}
+        ${d.target ? `<div class="camo-acts"><a class="btn sm" href="${esc(d.target)}" target="_blank" rel="noopener noreferrer">${esc(t('camo.rd.open'))} ↗</a></div>` : ''}
+        <p class="camo-note">${esc(t('camo.rd.note'))}</p>`
+    : `<div class="camo-name">${esc(d.name)}</div>
+        <div class="camo-kind">${esc(kind)}</div>
+        <div class="camo-acts">
+          <button type="button" class="btn sm" data-act="set.camoReseed"><i class="i i-refresh"></i>${esc(t('camo.reseed'))}</button>
+          <button type="button" class="btn sm" data-act="set.camoZoom">${esc(t('camo.zoom'))}</button>
+        </div>
+        <p class="camo-note">${esc(t('camo.reseedHelp'))}</p>`;
+  return `<div class="camo-head"><h3>${esc(t(rd ? 'camo.rd.head' : 'camo.preview'))}</h3>${badge(t(on ? 'camo.on' : 'camo.off'), on ? 'ok' : '')}</div>
+    <div class="camo-grid">
+      ${left}
+      <div class="camo-info">
+        ${top}
+        <h4 class="camo-wh">${esc(t('camo.where'))}</h4>
+        <ul class="camo-where">${rows.map(([k, s, tip]) => `<li class="${k}"${tip ? ` title="${esc(tip)}"` : ''}><span class="camo-dot"></span><span>${esc(s)}</span></li>`).join('')}</ul>
+        <p class="camo-note">${esc(t('camo.w.others'))}</p>
+      </div>
+    </div>`;
+}
+
+// 80 / 443 这一项:按存下的设置说;开着的话逐个端口写现在的状况,没开的写原因(别的程序占着时悬停看原文)
+function camoPortRows(d) {
+  if (!camoSaved('camoEnabled') || !camoSaved('camoPorts')) return [['off', t('camo.portsOff')]];
+  const ports = d.ports || [];
+  if (!ports.length) return [['wait', t('camo.portsPending')]];
+  const on443 = ports.some(p => p.on && p.port === 443);
+  return ports.map(p => (p.on
+    ? ['ok', t(d.mode === 'redirect' ? 'camo.port.onRd' : p.port === 80 && on443 ? 'camo.port.on80s' : 'camo.port.on', { port: p.port })]
+    : ['warn', t('camo.port.off', { port: p.port, why: t('camo.why.' + p.why) }), p.detail || '']));
+}
+
+// 缩略图跟着框的宽度缩放
+function fitCamo(box) {
+  const shot = box.querySelector('.camo-shot');
+  if (!shot) return;
+  const fit = () => shot.style.setProperty('--camo-s', String(shot.clientWidth / CAMO_W));
+  fit();
+  if (camoRO) camoRO.disconnect();
+  camoRO = null;
+  if (typeof ResizeObserver === 'undefined') return;
+  camoRO = new ResizeObserver(() => {
+    if (!shot.isConnected) { camoRO.disconnect(); camoRO = null; return; }
+    fit();
+  });
+  camoRO.observe(shot);
 }
 
 // 副机:展示配对信息(API 地址 + 令牌),复制到主机的"服务器"页即可接入
@@ -507,6 +638,17 @@ registerActions({
       try { await fetch('./api/status', { cache: 'no-store' }); location.reload(); } catch { setTimeout(poll, 2000); }
     };
     setTimeout(poll, 3000);
+  },
+  'set.camoReseed': async (_, btn) => {
+    btn.disabled = true;
+    try { await post('camo'); await renderCamo(); toast(t('camo.reseeded'), 'ok'); }
+    catch (e) { toast(e.message, 'err'); btn.disabled = false; }
+  },
+  'set.camoZoom': () => {
+    const d = camoData;
+    if (!d || d.mode === 'redirect') return;
+    openModal(t('camo.previewTitle') + ' · ' + d.name, `<div class="camo-zoom">${camoBar(d)}${camoFrame(d, 'camo-full')}</div><p class="hint camo-zoom-hint">${esc(t('camo.zoomHint'))}</p>`,
+      null, { size: 'xl', cancelText: t('common.close') });
   },
   'set.copyToken': () => copy(document.getElementById('pair-token').textContent),
   'set.rotateToken': async () => {

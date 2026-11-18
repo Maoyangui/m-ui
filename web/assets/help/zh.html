@@ -440,7 +440,7 @@
     <p class="lede">运营商对单个 UDP 端口限速时用端口跳跃;不想被人探测出是代理,用伪装站点。</p>
     <ul>
       <li><b data-k="line.hop">端口跳跃范围</b>:比如 <code>20000-30000</code>。服务器把这一段 UDP 端口都转到线路端口,客户端在范围内随机换端口。安全组 / 防火墙要放行这整段 UDP;留空就是不用。</li>
-      <li><b data-k="line.masq">伪装站点</b>:别人探测这个端口时看到的是这个网站,而不是一个报错的代理。要写完整网址,新线路默认 <code>https://www.bing.com</code>;留空 = 不伪装。</li>
+      <li><b data-k="line.masq">伪装站点</b>:别人探测这个端口时看到的是这个网站,而不是一个报错的代理。要写完整网址,新线路默认 <code>https://www.bing.com</code>;留空 = 开着 <a href="#sec-camo">页面伪装</a> 时用这台的伪装站,没开时不伪装。</li>
       <li><b data-k="line.upMbps">上行带宽 Mbps(0=不限)</b> / <b data-k="line.downMbps">下行带宽 Mbps(0=不限)</b>:一般留 0。</li>
       <li><b data-k="line.obfs" class="wrap">混淆密码(salamander,留空=不用)</b>:一般留空;填了的话订阅会自动带给客户端。</li>
     </ul>
@@ -1181,7 +1181,7 @@
       <li>记录的是通过了协议握手和认证的连接,带用户、线路、服务器、次数和最近时间。</li>
       <li>被设备数上限或代理设备池拒绝的连接也会列出来:整行标红、带 <b data-k="dash.conn.rejected">被拒</b> 徽章,鼠标停在徽章上看是 <b data-k="dash.rejectedDevice">设备数超限被拒</b> 还是 <b data-k="dash.rejectedPool">代理设备池已满被拒</b>。</li>
       <li>默认列最近 10 条,点「显示全部」在卡片里展开(可以按 IP、用户、线路筛选);上方的筛选切换连接、被拒和握手失败。</li>
-      <li>包到了、却没过握手或认证的来源(证书、SNI、REALITY 公钥 / short_id、密码 / UUID 不对)在「握手失败」筛选里,分 <b data-k="dash.fail.tls">TLS 握手失败</b> 和 <b data-k="dash.fail.auth">认证失败</b>,写明原因;hysteria2、tuic 只记认证失败。版本较旧的副机不上报这一项,卡片里写明是哪几台。</li>
+      <li>包到了、却没过握手或认证的来源(证书、SNI、REALITY 公钥 / short_id、密码 / UUID 不对)在「握手失败」筛选里,分 <b data-k="dash.fail.tls">TLS 握手失败</b> 和 <b data-k="dash.fail.auth">认证失败</b>,写明原因;hysteria2、tuic 只记认证失败。版本较旧的副机不上报这一项,卡片里写明是哪几台。开着 <a href="#sec-camo">页面伪装</a> 时,用浏览器打开 AnyTLS、Trojan 线路也记成认证失败,原因写着 <code>answered with the camouflage site</code>。</li>
       <li>列表里没有某个 IP,多半是包没到服务器(安全组、防火墙、客户端网络)。要确认包到没到:TCP 线路可以到日志页把 <b data-k="logs.coreLevel">记录级别</b> 临时调到 info,看有没有 <code>inbound connection from</code>。Hysteria2、TUIC 这类 UDP 线路只有握手和认证都成功后才记这一行(证书、SNI 不对时哪里都不记,密码不对的只在「握手失败」里),看不到不代表包没到,要在服务器上抓包确认,比如 <code>tcpdump -ni any udp port 端口</code>。</li>
     </ul>
   </section>
@@ -1290,6 +1290,7 @@
     <ul>
       <li><b data-k="set.sub">订阅</b>、<b data-k="set.subTmpl">订阅格式与模板</b>:见 <a href="#sub-settings">订阅设置</a>。</li>
       <li><b data-k="set.subPage">订阅页</b>:落地页的文案、选购链接、临时共享开关,见 <a href="#landing">落地页</a>。</li>
+      <li><b data-k="set.camo">页面伪装</b>:见 <a href="#sec-camo">页面伪装</a>。</li>
       <li><b data-k="set.reseller">代理面板</b>:<b data-k="set.resellerEnabled">启用代理面板</b>、监听地址、端口(默认 2054)、路径(默认 <code>/dl/</code>)、证书(留空和面板共用一张)。</li>
     </ul>
   </section>
@@ -1402,7 +1403,7 @@
   <section class="sec" id="sec-path" data-scope="admin">
     <h3>面板地址与端口</h3>
     <ul>
-      <li>把默认的端口和路径改掉:<b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.port">端口</b> / <b data-k="set.path">路径</b>。只打开 <code>IP:端口/</code> 永远是 404,别人扫到端口也看不出这是面板。</li>
+      <li>把默认的端口和路径改掉:<b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → <b data-k="set.port">端口</b> / <b data-k="set.path">路径</b>。只打开 <code>IP:端口/</code> 永远是 404(开着 <a href="#sec-camo">页面伪装</a> 时是一个普通网站),别人扫到端口也看不出这是面板。</li>
       <li>面板走 HTTPS:证书页添加证书时打开 <b data-k="cert.applyPanel">用于面板 HTTPS</b>,几秒后自动换上,浏览器跳到 https 地址(副机要重启才生效)。</li>
       <li>防火墙只放必要的端口;副机的面板端口只对主机 IP 放行(换了主机记得把新主机的 IP 加进去)。这只防得住外面的人,防不住经代理连进来的用户,见下一节。</li>
       <li>登录保护:同一来源 10 分钟内输错 10 次,先挡 5 分钟;连续输错 5 次可以发 Telegram 提醒(<b data-k="set.tgOnLogin">面板登录 / 连续登录失败</b>)。外部 API 令牌错 10 次同样暂停这个来源 5 分钟(和登录分开计数)。</li>
@@ -1421,6 +1422,21 @@
     </ul>
   </section>
 
+  <section class="sec" id="sec-camo" data-scope="admin">
+    <h3>页面伪装</h3>
+    <p class="lede">有人顺着 IP、端口或域名找上门时,让他看到一个普通网站(或者跳到你自己的网站),而不是 404 或连上就断。默认关,在 <b data-k="nav.settings">设置</b> → <b data-k="set.camo">页面伪装</b> 打开;只在主机上设,随主机同步到各台副机,存了马上生效。</p>
+    <ul>
+      <li>开启后显示伪装站的地方:订阅、面板、代理面板端口的根目录和对不上的路径;AnyTLS 线路密码不对、或用浏览器直接打开时;没配传输层的 Trojan 线路;没填 <b data-k="line.masq">伪装站点</b> 的 Hysteria2 线路(填了的照旧用它自己的)。正确的订阅地址、面板路径和真正的客户端都不受影响。</li>
+      <li>VLESS-Reality 本来就把探测转给真网站,不用管;其它协议(VLESS-TLS、VMess、Shadowsocks、TUIC 等)没有能回网页的地方,不受影响。</li>
+      <li><b data-k="set.camoTemplate">伪装成</b>:<b data-k="set.camoT.mirror">下载镜像</b>、<b data-k="set.camoT.downloads">软件下载</b>、<b data-k="set.camoT.video">视频站</b>、<b data-k="set.camoT.blog">个人博客</b> 四种是面板自己生成的网站,和大流量相称、不冒用任何真实品牌:视频有封面、文章有题图、软件有图标和界面图,目录、文件、下载页都点得开。站名、配色、图片、内容,连网页的骨架(类名、文件目录、版式)都按每台服务器自己的随机数生成,各台都不一样(所有面板长得一样的话,伪装站本身就成了特征);<b data-k="set.camoT.auto">自动</b> 时每台再随机挑一种。设置页有这台的预览,点它放大看;不满意就点 <b data-k="camo.reseed">换一个样子</b>(只换这台)。</li>
+      <li><b data-k="set.camoT.redirect">跳转到我的网站</b>:不用生成的网站,所有请求一律 302 跳到 <b data-k="set.camoRedirect">跳转到</b> 填的网址(只填网站时访问的路径原样带过去)。要填你自己的、和线路域名相关的网站,比如线路域名是 <code>node1.example.com</code> 就填 <code>https://www.example.com</code>,看起来就像主站的一台附属服务器;别填大公司的网站,一台小服务器跳到大公司官网本身就可疑。各台服务器都跳到同一个地方。</li>
+      <li><b data-k="set.camoPorts">也放在 80 / 443 端口</b>:有人直接用浏览器打开你的域名时也看到这个站;两个端口都放上时,80 和常见网站一样跳到 https。只用空着的端口:线路、这台的面板 / 订阅或别的程序占着就不开,设置页写明原因;443 用这台证书库里的证书,按访问的域名挑;签证书走 HTTP 验证时临时让出 80,签完放回去;系统防火墙开着自动放行时,这两个端口跟着放行。每台服务器各自判断。</li>
+      <li>伪装站连同图片在内存里生成,一个站几十 KB,不读磁盘、不连外网、不开新进程,没人来的时候不占资源;只有开着页面伪装才生成。</li>
+      <li>用浏览器打开 AnyTLS、Trojan 线路会记进 <a href="#recent-conns">最近入站连接</a> 的 <b data-k="dash.fail.auth">认证失败</b>,原因写着 <code>answered with the camouflage site</code>;客户端密码填错(发来的不是网页请求)照旧记原来的原因,排查用户连不上时不受影响。</li>
+      <li>它只对付主动探测,不改变流量本身的特征;副机要升到这一版,伪装站才在它上面生效。</li>
+    </ul>
+  </section>
+
   <section class="sec" id="sec-net" data-scope="admin">
     <h3>面板会连哪些外部地址</h3>
     <p class="lede">m-ui 没有遥测,不收集使用数据。除了你自己的服务器,面板只在下面这些情况主动连外部服务,各自怎么关也写在表里。</p>
@@ -1434,7 +1450,7 @@
         <tr><td>Cloudflare API</td><td>用 <b data-k="cert.methodCf">DNS(Cloudflare API)</b> 签发、续期时加删 TXT 记录</td><td>不用这种验证方式就不连</td></tr>
         <tr><td>Telegram</td><td>发通知、跑 Telegram 机器人</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.notify">通知</b> 不启用就不连</td></tr>
         <tr><td>GitHub、jsDelivr、ntfy.sh、TronGrid</td><td>功德箱:打开 <b data-k="support.btn">建议 / 支持</b> 页时读名单(最多一小时一次),点留名、核对到账时;在线设备数:每天从 GitHub 下载一次空文件</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → 关掉 <b data-k="set.supportOnline">功德箱与在线设备数</b></td></tr>
-        <tr><td>GitHub、jsDelivr、登记服务(<code>reward.godusevpn.org</code>)</td><td>流量奖励:打开活动页时读公开账本(最多十分钟一次);登记了领取地址之后,每半小时向登记服务上报一次累计流量;提交留名捐赠、等它到账时也连登记服务。没登记地址、也没提交过留名捐赠的面板只读账本,不连登记服务</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.reward">流量奖励</b> → 关掉 <b data-k="set.rewardEnabled">参加流量奖励计划</b></td></tr>
+        <tr><td>GitHub、jsDelivr、登记服务(<code>reward.godusevpn.org</code>)</td><td>流量奖励:打开活动页时读公开账本(最多十分钟一次);登记了领取地址之后,每半小时向登记服务上报一次累计流量;提交留名捐赠、等它到账时也连登记服务。没登记地址、也没提交过留名捐赠的面板只读账本,不连登记服务</td><td><b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → 关掉 <b data-k="set.rewardEnabled">参加流量奖励计划</b></td></tr>
         <tr><td>Globalping、Cloudflare / 阿里云 / 腾讯云 DNSPod 的 API</td><td>主机容灾:判断主机是否失联时让境外测点连主机;选了全量接管时,主机变了以后经 DNS 接口改订阅域名的解析、必要时给订阅域名重签证书</td><td>关掉 <b data-k="ha.set.witness">境外测点见证</b>;选 <b data-k="ha.scope.master">只接管主机的工作</b>(默认)就不连 DNS 接口</td></tr>
         <tr><td>Google(<code>www.gstatic.com</code>)</td><td>上游巡检和测试:<b data-k="set.testUrl">上游测试地址</b> 默认就是它。本机有线路用了上游(WARP、落地机等)时,每 10 分钟经各条上游连一次;线路用了上游组的,内核还会每 30 秒经组里每条上游连一次;点上游的 <b data-k="common.test">测试</b>、外部节点测速时也连</td><td>把 <b data-k="set.testUrl">上游测试地址</b> 换成别的地址;<b data-k="set.checkMinutes">巡检间隔(分钟)</b> 填 0 只关掉定时巡检,上游组的测速照样跑</td></tr>
         <tr><td>你自己填的地址</td><td>Webhook、外部订阅、Telegram 代理</td><td>不填就不连</td></tr>

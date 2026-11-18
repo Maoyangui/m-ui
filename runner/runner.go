@@ -21,6 +21,7 @@ import (
 	"github.com/Maoyangui/m-ui/acme"
 	"github.com/Maoyangui/m-ui/backup"
 	"github.com/Maoyangui/m-ui/brand"
+	"github.com/Maoyangui/m-ui/camo"
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/creds"
@@ -80,6 +81,7 @@ type Runner struct {
 	certOpMu     sync.Mutex        // 串行化签发、切换来源与套用目标
 	applied      map[string]string // 数据面当前生效的出站(tag → JSON),供上游热更新做差异
 	appliedRaw   []byte            // 数据面当前生效的完整配置,渲染结果相同则不重启
+	camo         camoState         // 页面伪装:伪装站的缓存、80 / 443 的监听(见 camo.go)
 	pendingStats []model.Stats     // 旧数据面关闭后暂时无法落库的流量,下次启动继续记账
 	// 上一份"校验能过、真正启动却失败"的配置。同一份(或只有用户表不同的一份)在冷却期内不再拆掉
 	// 正在服务的数据面去重试 —— 见 reloadAllLockedWithForce 里的说明。
@@ -1111,6 +1113,7 @@ func (r *Runner) markLimitsRetry(err error) {
 
 func (r *Runner) reloadAllLockedWithForce(raw []byte, force bool) error {
 	raw = r.dropBlocked(raw) // 端口被占、已经摘掉的入站不算"变了"(见 blocked.go)
+	r.camoPortsYield(raw)    // 新线路要用 80 / 443 时,页面伪装先把这两个端口让出来(见 camo.go)
 	if !force && r.core.IsRunning() && r.appliedRaw != nil && bytes.Equal(r.appliedRaw, raw) {
 		if err := r.applyLimits(); err != nil {
 			r.markLimitsRetry(err)
@@ -2042,6 +2045,8 @@ func Run(dbPath string) error {
 	if b := r.ha.Boot(restored); b.Fence {
 		logger.Warning("主机容灾:", b.Reason, ",启动时以纪元 ", b.To, " 围栏(原纪元 ", b.From, ")")
 	}
+	// 页面伪装的来源要在数据面起来之前设好:AnyTLS / Trojan / Hysteria2 入站从第一条连接起就按它回应伪装站(没开时它给 nil)
+	camo.SetSource(r.camoSource)
 	// core 启动失败(如证书未就绪)不阻塞面板与订阅:
 	// 面板必须先可用,操作者才能在面板里解决问题。
 	if err := r.Start(); err != nil {
@@ -2102,8 +2107,9 @@ func Run(dbPath string) error {
 		{"库检查点", r.checkpointLoop}, {"证书续期", r.certLoop}, {"线路上游", r.relayLoop}, {"运行统计", r.pingLoop}, {"定时备份", r.backupLoop},
 		{"公网 IP 探测", r.publicIPLoop}, {"外部订阅刷新", r.extLoop}, {"凭据撤销重试", r.secureReloadLoop}, {"用户热更新重试", r.userReloadLoop},
 		{"数据面看护", r.coreWatchLoop}, {"中转入口跟进", r.forwardWatchLoop}, {"被占端口重试", r.blockedRetryLoop}, {"磁盘巡检", r.diskLoop},
-		{"防火墙对账", r.fwLoop},      // 开机先对一次账(面板规则、放开时加的那条),之后每 30 秒看一次
-		{"流量奖励上报", r.rewardLoop}, // 登记了地址才报,每半小时一次
+		{"防火墙对账", r.fwLoop},         // 开机先对一次账(面板规则、放开时加的那条),之后每 30 秒看一次
+		{"流量奖励上报", r.rewardLoop},    // 登记了地址才报,每半小时一次
+		{"页面伪装端口", r.camoPortsLoop}, // 开着 camoPorts 时占上空着的 80 / 443,每 30 秒对一次账
 	} {
 		go keepRunning(l.name, l.fn, stopCheckpoint)
 	}
