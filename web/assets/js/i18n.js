@@ -1036,7 +1036,7 @@ const zh = {
   'dash.up.bad': '✗ {n} 条故障', 'dash.up.ok': '巡检正常 · {ago}',
   'dash.load': '本机负载', 'dash.disk': '磁盘', 'dash.load.title': '内存 {mem} · 磁盘剩余 {disk}',
   'dash.health.every': '每 {n} 分钟巡检', 'dash.health.okN': '{n} 条正常', 'dash.health.badN': '{n} 条故障', 'dash.health.servers': '涉及 {n} 台', 'dash.health.pendN': '{n} 条待测 / 过期',
-  'dash.health.allOk': '✓ 在用的上游全部正常', 'dash.health.unused': '没有在用的上游', 'dash.health.ratio': '{bad}/{total} 台', 'dash.health.more': '还有 {n} 条故障上游',
+  'dash.health.unused': '没有在用的上游', 'dash.health.ratio': '{bad}/{total} 台', 'dash.health.more': '还有 {n} 条故障上游',
   'dash.online.search': '搜索在线用户', 'dash.online.noMatch': '没有匹配的', 'dash.online.cap': '还有 {n} 人未显示,请搜索或到用户页查看',
   'dash.online.viewAll': '在用户页查看 →', 'dash.online.viewAllTitle': '用户页只列直属用户', 'dash.online.split': '直属 {a} · 代理名下 {b}',
   'dash.chip.conns': '本机 {n} 个连接', 'dash.chip.devices': '{n} 台设备',
@@ -1289,6 +1289,10 @@ const zh = {
   'attn.cat.disk': '磁盘快满', 'attn.cat.fw': '防火墙没生效', 'attn.cat.ha': '主机容灾', 'attn.cat.node': '和主机的同步(副机)', 'attn.cat.upstreams': '上游不通', 'attn.cat.reach': '大陆连通', 'attn.cat.v6': 'IPv6 入站',
   'attn.cat.checks': '巡检很久没跑', 'attn.cat.cert': '证书', 'attn.cat.resellers': '代理额度与到期', 'attn.cat.backup': '定时备份', 'attn.cat.rejected': '被拒的连接',
   'set.reward': '流量奖励',
+  'dash.health.allOkN': '在用的 {n} 条上游全部正常',
+  'dash.health.badTitle': '{n} 条上游不通', 'dash.health.restOk': '其余 {n} 条正常',
+  'dash.core.lines': '本机线路', 'dash.core.linesRun': '{n} 条在跑', 'dash.core.linesNone': '本机不跑线路', 'dash.core.blocked': '{n} 个端口被占', 'dash.core.certLeft': '剩 {n} 天', 'dash.core.certSelf': '自签',
+  'dash.core.certNone': '没有配置', 'dash.core.backup': '上次备份', 'dash.core.backupNever': '还没有', 'dash.core.backupManual': '没开定时备份', 'dash.core.hub': '主机上次联系',
 };
 
 const en = {
@@ -2336,7 +2340,7 @@ const en = {
   'dash.up.bad': '✗ {n} failing', 'dash.up.ok': 'All OK · {ago}',
   'dash.load': 'This server', 'dash.disk': 'Disk', 'dash.load.title': 'Memory {mem} · disk free {disk}',
   'dash.health.every': 'every {n} min', 'dash.health.okN': '{n} OK', 'dash.health.badN': '{n} failing', 'dash.health.servers': 'on {n} servers', 'dash.health.pendN': '{n} pending / stale',
-  'dash.health.allOk': '✓ All upstreams in use are healthy', 'dash.health.unused': 'No upstreams in use', 'dash.health.ratio': '{bad}/{total}', 'dash.health.more': '{n} more failing',
+  'dash.health.unused': 'No upstreams in use', 'dash.health.ratio': '{bad}/{total}', 'dash.health.more': '{n} more failing',
   'dash.online.search': 'Search online users', 'dash.online.noMatch': 'No matches', 'dash.online.cap': '{n} more not shown; search or open Users',
   'dash.online.viewAll': 'Open in Users →', 'dash.online.viewAllTitle': 'The Users page lists direct users only', 'dash.online.split': 'direct {a} · resellers {b}',
   'dash.chip.conns': '{n} connections here', 'dash.chip.devices': '{n} devices',
@@ -2740,6 +2744,11 @@ const en = {
   'attn.cat.reach': 'Mainland reachability', 'attn.cat.v6': 'IPv6 inbound', 'attn.cat.checks': 'Checks not running', 'attn.cat.cert': 'Certificates', 'attn.cat.resellers': 'Reseller quota and expiry',
   'attn.cat.backup': 'Scheduled backups', 'attn.cat.rejected': 'Refused connections',
   'set.reward': 'Traffic rewards',
+  'dash.health.allOkN': 'All upstreams in use are working ({n})',
+  'dash.health.badTitle': 'Upstreams down: {n}', 'dash.health.restOk': 'Others working: {n}',
+  'dash.core.lines': 'Lines here', 'dash.core.linesRun': '{n} running', 'dash.core.linesNone': 'No lines on this server', 'dash.core.blocked': 'Ports taken: {n}',
+  'dash.core.certLeft': 'Days left: {n}', 'dash.core.certSelf': 'Self-signed', 'dash.core.certNone': 'Not set', 'dash.core.backup': 'Last backup', 'dash.core.backupNever': 'None yet',
+  'dash.core.backupManual': 'no scheduled backups', 'dash.core.hub': 'Master last seen',
 };
 
 const dicts = { zh, en };

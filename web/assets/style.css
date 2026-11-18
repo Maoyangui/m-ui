@@ -1202,6 +1202,28 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
   .dash-grid > .dash-log-card { grid-column: 1 / -1; }
 }
 
+/* 流量走势跨两行时(3 列、4 列):图跟着卡片的高度走,不再固定高度、下面空一大块(用户 N1)。
+   图表区占满卡片剩下的高度,图本身绝对定位 —— 只跟着卡片变,不反过来把卡片撑高(dashboard.js 的 chartHeight 量它画图) */
+@container (min-width: 71rem) {
+  .dash-grid > #dash-chart-card { display: flex; flex-direction: column; }
+  .dash-grid > #dash-chart-card > #dash-chart { position: relative; flex: 1 1 auto; min-height: 16rem; }
+  .dash-grid > #dash-chart-card > #dash-chart > .chart-wrap { position: absolute; inset: 0; }
+}
+/* 上游巡检全部正常:卡片正中一个轻量的圆形对勾,下面一句话和上次巡检的时间(用户 N8) */
+#dash-health-card { display: flex; flex-direction: column; }
+#dash-health { flex: 1 1 auto; display: flex; flex-direction: column; }
+.hc-ok { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35rem; min-height: 8rem; padding: .5rem 0 .25rem; text-align: center; }
+.hc-ok > b { font-size: var(--fs-md); font-weight: 600; color: var(--text); }
+.hc-ok-ic { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: .3rem; border-radius: 50%; background: var(--ok-soft); color: var(--ok); }
+.hc-ok-ic > svg { width: 24px; height: 24px; }
+/* 故障不多时同一个版式:浅红的「!」,标题用危险色,下面一行一条不通的上游 */
+.hc-bad .hc-ok-ic { background: var(--danger-soft); color: var(--danger); }
+.hc-bad > b { color: var(--danger-text); }
+.hc-bad-list { display: flex; flex-direction: column; align-items: center; gap: .3rem; max-width: 100%; margin: .1rem 0 .15rem; }
+.hc-bad-nm { display: inline-flex; align-items: center; gap: .45rem; max-width: 100%; color: var(--text); font-size: var(--fs-sm); font-weight: 500; }
+.hc-bad-nm:hover { color: var(--primary-text); text-decoration: none; }
+.hc-bad-nm > .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-bad-nm > .badge { flex: none; }
 .dash-grid .card-head h2 { min-width: 0; }
 /* 手机上标题按自己的宽度排,放不下时把右边的分段按钮 / 刷新换到下一行,不再把标题挤成一字一行 */
 @media (max-width: 700px) { .dash-grid .card-head h2 { flex: 1 1 auto; } }

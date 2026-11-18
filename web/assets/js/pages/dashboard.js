@@ -619,24 +619,55 @@ function renderCore() {
     <dt>${esc(t('common.status'))}</dt><dd class="ell">${badge(s.coreRunning ? t('dash.running') : t('dash.stopped'), s.coreRunning ? 'ok' : 'danger')} <span class="muted small" title="${esc(t('dash.uptimeHelp'))}">${esc(t('dash.uptime'))} ${esc(fmtDuration(s.uptime))}${s.bootTime ? ' · ' + esc(t('dash.boot', { ago: fmtRelative(s.bootTime) })) : ''}</span></dd>
     <dt>${esc(t('set.role.current'))}</dt><dd>${roleBadge(s)}</dd>
     <dt>${esc(t('dash.lastReload'))}</dt><dd class="ell" title="${esc(rl.error ? trErr(rl.error) : '')}">${rl.at ? `${esc(fmtRelative(rl.at))} · ${esc(trErr(rl.op || ''))} ${rl.ok ? badge(t('dash.reloadOk'), 'ok') : badge(t('dash.reloadFail'), 'danger')}` : '—'}</dd>
+    ${coreExtras(s)}
     <dt>${esc(t('set.version'))}</dt><dd class="ell"><span class="mono" title="m-ui ${esc(s.version || '')} · sing-box ${esc(s.singBox || '—')}">m-ui ${esc(s.version || '')} · sing-box ${esc(s.singBox || '—')}</span>${upd}</dd>
     <dt>${esc(t('set.webDomain'))}</dt><dd class="ell" title="${esc(s.domain || '')}">${esc(s.domain || '—')}</dd>
     <dt>${esc(t('dash.dbSize'))}</dt><dd class="mono" title="goroutines ${esc(s.goroutines ?? '')}">${s.dbSize ? fmtBytes(s.dbSize, 1) : '—'}</dd>`);
 }
 
+// coreExtras「本机 · 数据面」卡多的三行(用户 N7:这张卡挨着「最近入站连接」被拉高,原来六行下面空一大块):
+// 本机跑着几条线路(有端口被别的程序占着就标出来)、数据面证书还剩几天、上次备份(副机:主机上次联系本机)。
+// 都是概况别处没有的;内存、CPU、在线人数在上面的统计条里,不重复
+function coreExtras(s) {
+  const n = s.coreLinesEnabled ?? s.linesLocalEnabled, blocked = (s.blocked || []).length;
+  const lines = n === undefined ? '—' : n > 0 ? esc(t('dash.core.linesRun', { n })) : `<span class="muted">${esc(t('dash.core.linesNone'))}</span>`;
+  const cert = !s.certExists ? `<span class="muted">${esc(t('dash.core.certNone'))}</span>`
+    : `${s.certDaysLeft < 14 ? `<span class="warn-text">${esc(t('dash.core.certLeft', { n: s.certDaysLeft }))}</span>` : esc(t('dash.core.certLeft', { n: s.certDaysLeft }))}${s.certSelfSigned ? ' ' + badge(t('dash.core.certSelf')) : ''}`;
+  const b = s.attention && s.attention.backup;
+  const last = isNode()
+    ? `<dt>${esc(t('dash.core.hub'))}</dt><dd>${s.hubSeenAt ? esc(fmtRelative(s.hubSeenAt)) : '—'}</dd>`
+    : b ? `<dt>${esc(t('dash.core.backup'))}</dt><dd>${b.lastAt ? esc(fmtRelative(b.lastAt)) : `<span class="muted">${esc(t('dash.core.backupNever'))}</span>`}${b.auto ? '' : ` <span class="muted small">· ${esc(t('dash.core.backupManual'))}</span>`}</dd>` : '';
+  return `<dt>${esc(t('dash.core.lines'))}</dt><dd>${lines}${blocked ? ' ' + badge(t('dash.core.blocked', { n: blocked }), 'warn') : ''}</dd>
+    <dt>${esc(t('nav.cert'))}</dt><dd>${cert}</dd>${last}`;
+}
+
 // ---- 流量走势:按容器像素宽出图,宽度变了用缓存重画(不重新请求)----
 let chartRO = null;
+// chartHeight 走势图的高度。宽屏时这张卡占两列、跨两行,高度由右边两行卡片(上游巡检、当前在线 / 流量排行、最近操作)定,
+// 图表区是 position: relative、图表绝对定位(不反过来撑高卡片,见 style.css):量出图表区还剩多高,图就画多高,
+// 不再是固定 210 像素、下面空一大块(用户 N1)。别的排法(一列、两列)照旧用 barChart 的默认高度。
+function chartHeight(el) {
+  if (getComputedStyle(el).position !== 'relative') return undefined;
+  const sum = el.querySelector('.chart-summary');
+  const free = el.clientHeight - (sum ? sum.offsetHeight + 10 : 34);
+  return Math.max(170, Math.floor(free));
+}
+function drawChart(el, points, opts) {
+  barChart(el, points, { ...opts, height: undefined });
+  const h = chartHeight(el); // 先按默认画一次,量得出汇总那一行有多高,再按剩下的高度重画
+  if (h && el.__chart) barChart(el, points, { ...opts, height: h });
+}
 function watchChart() {
   if (chartRO) { chartRO.disconnect(); chartRO = null; }
   const el = document.getElementById('dash-chart');
   if (!el || typeof ResizeObserver === 'undefined') return;
-  let w = Math.round(el.clientWidth);
+  let w = Math.round(el.clientWidth), hh = Math.round(el.clientHeight);
   chartRO = new ResizeObserver(() => {
     if (!el.isConnected) { chartRO.disconnect(); chartRO = null; return; }
-    const nw = Math.round(el.clientWidth);
-    if (!el.__chart || Math.abs(nw - w) < 24) return;
-    w = nw;
-    barChart(el, el.__chart.points, el.__chart.opts);
+    const nw = Math.round(el.clientWidth), nh = Math.round(el.clientHeight);
+    if (!el.__chart || (Math.abs(nw - w) < 24 && Math.abs(nh - hh) < 24)) return;
+    w = nw; hh = nh;
+    drawChart(el, el.__chart.points, el.__chart.opts);
   });
   chartRO.observe(el);
 }
@@ -647,7 +678,7 @@ async function renderChart() {
   const d = await get(`stats?resource=user&hours=${h}&bucket=${bucketFor(h)}&tz=${tzOffsetMinutes()}`);
   if (h !== range) return;
   if (h === 24) dayFromChart = { up: d.totalUp || 0, down: d.totalDown || 0 };
-  barChart(el, d.points || [], { span: d.span, upLabel: t('dash.up'), downLabel: t('dash.down'), totalLabel: t('dash.total'), peakLabel: t('dash.peak'), emptyText: t('dash.noTraffic') });
+  drawChart(el, d.points || [], { span: d.span, upLabel: t('dash.up'), downLabel: t('dash.down'), totalLabel: t('dash.total'), peakLabel: t('dash.peak'), emptyText: t('dash.noTraffic') });
   renderStats();
 }
 
@@ -706,10 +737,25 @@ function renderHealth() {
   const meta = `<p class="small muted">${esc(t('dash.healthLast'))} ${esc(fmtRelative(hs.lastRun))}${hs.interval ? ' · ' + esc(t('dash.health.every', { n: hs.interval })) : ''}</p>`;
   if (!hs.rows.length) { setHTML(el, meta + empty(t('dash.health.unused'))); return; }
   const badges = `<div class="row wrap" style="margin:.35rem 0 .5rem">${badge(t('dash.health.okN', { n: hs.ok }), 'ok')}${hs.bad.length ? badge(t('dash.health.badN', { n: hs.bad.length }) + (hs.single ? '' : ' · ' + t('dash.health.servers', { n: hs.servers.size })), 'danger') : ''}${hs.pending ? badge(t('dash.health.pendN', { n: hs.pending })) : ''}</div>`;
-  if (!hs.bad.length) { setHTML(el, meta + badges + `<p class="attn-ok">${esc(t('dash.health.allOk'))}</p>`); return; }
-  const max = narrow() ? 3 : 5;
+  // 全部正常:卡片正中一个轻量的圆形对勾,下面一句话和上次巡检的时间(用户 N8:卡片被旁边「当前在线」撑高时,不再是一行字下面一大块空白)
+  if (!hs.bad.length) {
+    setHTML(el, `<div class="hc-ok"><span class="hc-ok-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 12.5 3.6 3.6 7.4-8"/></svg></span>
+      <b>${esc(t('dash.health.allOkN', { n: hs.ok }))}</b>${hs.pending ? `<span class="small muted">${esc(t('dash.health.pendN', { n: hs.pending }))}</span>` : ''}
+      <span class="small muted">${esc(t('dash.healthLast'))} ${esc(fmtRelative(hs.lastRun))}${hs.interval ? ' · ' + esc(t('dash.health.every', { n: hs.interval })) : ''}</span></div>`);
+    return;
+  }
   // 没测通的原因不列出来(上游页同一个做法:它只是「这次没测通」的技术细节),鼠标停在这一行上看
   const why = b => (b.err ? '\n' + t('up.why', { msg: trErr(b.err) }) : '');
+  // 故障不多(≤ 3 条)时和「全部正常」同一个版式:正中一个浅红的圆形「!」,下面是几条不通、各是哪条,最后一行其余正常的和巡检时间。
+  // 一两条故障时不再是一行字下面一大块空白(用户 N8);多了才用下面的列表
+  if (hs.bad.length <= 3) {
+    const names = hs.bad.map(b => `<a class="hc-bad-nm" href="#/upstreams?f=bad" title="${esc(b.name + why(b))}"><span class="nm">${esc(b.name)}</span>${hs.single ? '' : `<span class="badge danger" title="${esc(etc(b.fails, 'nodes', 20))}">${esc(t('dash.health.ratio', { bad: b.fails.length, total: b.total }))}</span>`}</a>`).join('');
+    setHTML(el, `<div class="hc-ok hc-bad"><span class="hc-ok-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 7v6"/><path d="M12 17h.01"/></svg></span>
+      <b>${esc(t('dash.health.badTitle', { n: hs.bad.length }))}</b><div class="hc-bad-list">${names}</div>
+      <span class="small muted">${hs.ok ? esc(t('dash.health.restOk', { n: hs.ok })) + ' · ' : ''}${hs.pending ? esc(t('dash.health.pendN', { n: hs.pending })) + ' · ' : ''}${esc(t('dash.healthLast'))} ${esc(fmtRelative(hs.lastRun))}${hs.interval ? ' · ' + esc(t('dash.health.every', { n: hs.interval })) : ''}</span></div>`);
+    return;
+  }
+  const max = narrow() ? 3 : 5;
   const row = b => `<li title="${esc(b.name + why(b))}"><a class="nm" href="#/upstreams?f=bad" title="${esc(b.name + why(b))}">✗ ${esc(b.name)}</a>${hs.single ? '<span></span>' : `<span class="badge danger" title="${esc(etc(b.fails, 'nodes', 20))}">${esc(t('dash.health.ratio', { bad: b.fails.length, total: b.total }))}</span>`}</li>`;
   setHTML(el, meta + badges + `<ul class="up-bad">${hs.bad.slice(0, max).map(row).join('')}</ul>` +
     (hs.bad.length > max ? `<div class="card-foot"><a href="#/upstreams?f=bad">${esc(t('dash.health.more', { n: hs.bad.length - max }))} · ${esc(t('dash.viewAll'))}</a></div>` : ''));

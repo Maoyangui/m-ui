@@ -128,6 +128,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if n := s.run.RestoreNotice(); n != nil { // 上次还原放进数据目录的证书副本(没有谁续)、还缺的:页面顶部提示一次,点「知道了」才消
 		status["restore"] = n
 	}
+	// 本机部署了几条线路(两种角色都给):概况「本机 · 数据面」卡用(用户 N7);副机的「线路」卡也按它算
+	localLines, localLinesOn := s.localLineCounts()
+	status["coreLines"], status["coreLinesEnabled"] = localLines, localLinesOn
 	if !s.run.IsNode() {
 		status["reachBad"] = s.run.Reach().Bad() // 大陆连通异常的服务器:概览页顶部提示
 		// IPv6 入站不通的服务器(只算 down,和服务器页同一份;没有时是空数组,主机上这个键始终在):概况"需要处理"用,不并进 reachBad
@@ -147,7 +150,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			status["applyErr"], status["applyErrAt"] = msg, at
 		}
 		// 副机库里有主机下发的全部线路,本机只跑部署到自己的那些:概况的「线路」卡按本机算
-		status["linesLocal"], status["linesLocalEnabled"] = s.localLineCounts()
+		status["linesLocal"], status["linesLocalEnabled"] = localLines, localLinesOn
 	}
 	// 数据目录所在盘的总量与剩余(概况「本机负载」卡):一次 statfs;取不到(Windows 开发机)就不给
 	if d := s.run.DiskStat(); d != nil {

@@ -587,6 +587,8 @@ function status() {
   const s = fx('GET status') || {};
   s.users = S.users.length; s.enabledUsers = S.users.filter(u => u.enabled).length; s.lines = S.lines.length; s.linesEnabled = S.lines.filter(l => l.enabled).length;
   s.upstreams = S.upstreams.length; s.onlineUsers = S.onlines.users.length; s.version = 'demo'; s.repo = GITHUB; s.defaultPassword = false;
+  { const self = (S.nodes.nodes || []).find(n => n.isLocal), ids = l => (Array.isArray(l.nodeIds) ? l.nodeIds : []); // 「本机 · 数据面」卡的本机线路数
+    const mine = S.lines.filter(l => !ids(l).length || (self && ids(l).includes(self.id))); s.coreLines = mine.length; s.coreLinesEnabled = mine.filter(l => l.enabled !== false).length; }
   s.ha = { role: 'master', epoch: HA.epoch, mode: HA.config.mode, notices: [] };
   if (showRestore && !S.restoreAcked) s.restore = { at: now() - 300, copies: [{ from: '/etc/letsencrypt/live/panel.example.com/fullchain.pem', to: '/etc/m-ui/cert/restored/panel.example.com.crt', names: ['panel.example.com'], notAfter: now() + 61 * DAY }] };
   return s;
