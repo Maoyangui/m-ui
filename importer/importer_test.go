@@ -3,6 +3,7 @@ package importer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Maoyangui/m-ui/database"
@@ -114,8 +115,17 @@ func TestRunForceWithBadSourceKeepsTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	database.Close(db)
-	if err := Run(filepath.Join(dir, "写错的路径.db"), to, "", "", true); err == nil {
-		t.Fatal("源库打不开应报错")
+	// 路径写错:直接说源库不存在(以前 SQLite 报的是「out of memory (14)」)
+	if err := Run(filepath.Join(dir, "写错的路径.db"), to, "", "", true); err == nil || !strings.Contains(err.Error(), "不存在") {
+		t.Fatalf("源库不存在应明确报错,得 %v", err)
+	}
+	// 文件在、但不是数据库:同样报错,目标库不动
+	junk := filepath.Join(dir, "junk.db")
+	if err := os.WriteFile(junk, []byte("this is not a sqlite database, just some text that is long enough to have a header"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(junk, to, "", "", true); err == nil {
+		t.Fatal("源库不是数据库应报错")
 	}
 	db, err = database.Open(to)
 	if err != nil {
@@ -129,6 +139,9 @@ func TestRunForceWithBadSourceKeepsTarget(t *testing.T) {
 	}
 	if es, _ := filepath.Glob(to + ".importing-*"); len(es) > 0 {
 		t.Fatalf("不该留下临时库: %v", es)
+	}
+	if es, _ := filepath.Glob(to + ".before-import-*"); len(es) > 0 {
+		t.Fatalf("没导入成功不该把原库改名: %v", es)
 	}
 }
 

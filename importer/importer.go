@@ -68,6 +68,13 @@ func Run(from, to, orderFile, profileTitle string, force bool) error {
 
 	// 先只读打开源库:路径写错、打不开就到此为止,目标库一个字节都不动。
 	// (审计 E1:以前 -force 先删掉目标库再开源库,源路径一写错原库就没了。)
+	// 先看文件在不在:不在时 SQLite 只读打开报的是「unable to open database file: out of memory (14)」,让人摸不着头脑。
+	if _, err := os.Stat(from); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("源库 %s 不存在,请检查 -from 的路径", from)
+		}
+		return fmt.Errorf("源库 %s 打不开: %w", from, err)
+	}
 	src, err := database.OpenReadOnly(from)
 	if err != nil {
 		return fmt.Errorf("打开源库: %w", err)
