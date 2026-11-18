@@ -254,29 +254,60 @@ func (s *svgw) water(hz float64, p palette, sunX float64) {
 
 // ---- 场景 ----
 
-// coverKind 封面画什么:按视频 / 文章标题挑,没有的按种子随便挑一种风景
-var coverKind = map[string]string{
-	"Coastline at First Light": "sea:dawn", "City Lights Timelapse": "city:night", "Mountain Trail in 4K": "mountain:day",
-	"Studio Session": "studio", "Rainy Afternoon in the Old Town": "town:rain", "Harbor Walk at Dusk": "harbor:dusk",
-	"Night Train North": "train:night", "Forest Ambience": "forest:dawn", "Desert Road Trip": "desert:day", "Winter Lake": "lake:day",
-	"Market Morning": "market:dawn", "Rooftop Sunset": "city:dusk", "Behind the Scenes": "studio", "Workshop Recording": "studio",
-	"Island Hopping": "island:day", "Cloud Inversion": "clouds:dawn",
-	"Notes on long exposure at dusk": "sea:dusk", "A week of cycling the coast": "sea:day", "Rebuilding my home server": "rack",
-	"What I learned from a hundred rolls of film": "film", "Packing light for a month on the road": "desert:dusk",
-	"Small tools I use every day": "flatlay", "Printing photos again": "prints", "Walking the old railway line": "train:day",
-	"Keeping a notebook for ten years": "notebook", "Learning to repair my own bike": "bike",
-	"A quiet weekend in the mountains": "mountain:dusk", "Why I still burn photos to disc": "disc",
-}
-
-// cover 按标题画一张 w×h 的图
-func cover(g *gen, title string, w, h float64) []byte {
+// cover 画一张 w×h 的封面 / 题图。kind 是场景(海边、城市、山……),可以写成 "sea:dusk" 带上天色;tod 不空时用它
+func cover(g *gen, kind, tod string, w, h float64) []byte {
 	s := newSVG(g, w, h)
-	kind, tod, _ := strings.Cut(coverKind[title], ":")
+	if k, t, ok := strings.Cut(kind, ":"); ok {
+		kind = k
+		if tod == "" {
+			tod = t
+		}
+	}
 	if kind == "" {
 		kind, tod = g.pick([]string{"mountain", "sea", "forest", "lake"}), g.pick([]string{"dawn", "day", "dusk"})
 	}
 	s.scene(kind, tod)
 	return s.bytes()
+}
+
+// trafficChart 镜像首页「最近 30 天流量」的面积图(不带字);返回图和峰值、平均值(TB / 天)
+func trafficChart(g *gen, w, h float64) ([]byte, float64, float64) {
+	s := newSVG(g, w, h)
+	acc := g.accent()
+	n, base := 30, 1.2+1.6*g.r.Float64()
+	vals := make([]float64, n)
+	peak, sum := 0.0, 0.0
+	for i := range vals {
+		wk := 1.0
+		if i%7 == 5 || i%7 == 6 { // 周末多一点
+			wk = 1.18
+		}
+		v := base * wk * (0.82 + 0.36*g.r.Float64()) * (0.9 + 0.2*float64(i)/float64(n))
+		vals[i] = v
+		sum += v
+		if v > peak {
+			peak = v
+		}
+	}
+	top := peak * 1.15
+	x := func(i int) float64 { return 4 + (w-8)*float64(i)/float64(n-1) }
+	y := func(v float64) float64 { return h - 6 - (h-16)*v/top }
+	for k := 1; k <= 3; k++ { // 三条淡淡的横线
+		s.rect(0, h-6-(h-16)*float64(k)/4, w, 1, "#e9ecf1", "")
+	}
+	var line strings.Builder
+	for i, v := range vals {
+		cmd := "L"
+		if i == 0 {
+			cmd = "M"
+		}
+		fmt.Fprintf(&line, "%s%s %s", cmd, ff(x(i)), ff(y(v)))
+	}
+	area := fmt.Sprintf("%sL%s %sL%s %sZ", line.String(), ff(x(n-1)), ff(h-6), ff(x(0)), ff(h-6))
+	s.path(area, s.lin(0, 1, acc+"@0.28", acc+"@0.02"), "")
+	s.stroke(line.String(), acc, 2, ` stroke-linejoin="round"`)
+	s.circle(x(n-1), y(vals[n-1]), 3.5, acc, "")
+	return s.bytes(), peak, sum / float64(n)
 }
 
 func (s *svgw) scene(kind, tod string) {

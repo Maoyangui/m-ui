@@ -46,6 +46,8 @@ type Site struct {
 	css      string // 样式表的路径
 	icon     string // 站点图标的路径
 	logo     string // 顶栏站名前面那一小块(HTML)
+	head     string // <head> 里多加的(个人站的 RSS 链接)
+	foot     string // 页脚右边那一句
 	pages    map[string]page
 	notFound page
 	modTime  time.Time
@@ -343,6 +345,3 @@ func (c *doneConn) Close() error {
 	c.once.Do(func() { close(c.done) })
 	return err
 }
-
-// PageCount 测试 / 预览工具用:站里一共几个文件。
-func PageCount(s *Site) int { return len(s.pages) }

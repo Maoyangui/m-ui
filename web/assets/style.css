@@ -1433,15 +1433,36 @@ button.badge { cursor: pointer; font: inherit; font-size: .72rem; }
 .camo-acts { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .75rem; }
 .camo-acts .i { margin-right: .3rem; }
 .camo-note { margin: .5rem 0 0; font-size: var(--fs-xs); line-height: 1.6; color: var(--faint); }
-.camo-wh { margin: 1.05rem 0 .5rem; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); letter-spacing: .02em; }
-.camo-where { display: grid; gap: .4rem; margin: 0; padding: 0; list-style: none; }
-.camo-where li { display: grid; grid-template-columns: .45rem minmax(0, 1fr); gap: .6rem; align-items: start; font-size: var(--fs-sm); line-height: 1.55; color: var(--text-2); }
-.camo-where .camo-dot { width: .45rem; height: .45rem; margin-top: .5em; border-radius: 50%; background: var(--ok); }
-.camo-where li.off { color: var(--muted); }
-.camo-where li.off .camo-dot { background: var(--border-strong); }
-.camo-where li.warn .camo-dot { background: var(--warn); }
-.camo-where li.wait .camo-dot { background: var(--primary); }
-.camo-where li[title] { cursor: help; }
+.camo-wh { margin: 1.1rem 0 .55rem; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); letter-spacing: .02em; }
+/* 开启后显示的地方:左边一列小标题(端口 / 线路 / 80·443),右边一排小标签,下面一行小字 */
+.camo-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .55rem .9rem; margin: 0; }
+.camo-dl dt { padding-top: .2rem; font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
+.camo-dl dd { margin: 0; min-width: 0; }
+.camo-dl small { display: block; margin-top: .25rem; font-size: var(--fs-xs); line-height: 1.5; color: var(--faint); }
+.camo-tags { display: flex; flex-wrap: wrap; gap: .3rem; }
+.camo-tag { display: inline-flex; align-items: center; gap: .35rem; height: 1.45rem; padding: 0 .55rem; border-radius: 999px; background: var(--surface-3); color: var(--text-2); font-size: var(--fs-xs); font-weight: 500; white-space: nowrap; }
+.camo-tag::before { content: ""; width: .4rem; height: .4rem; border-radius: 50%; background: var(--ok); }
+.camo-tag.off { color: var(--muted); }
+.camo-tag.off::before { background: var(--border-strong); }
+.camo-tag.warn { background: var(--warn-soft); color: var(--warn-text); }
+.camo-tag.warn::before { background: var(--warn); }
+.camo-tag.wait::before { background: var(--primary); }
+.camo-tag[title] { cursor: help; }
+.camo-foot { margin: .9rem 0 0; padding-top: .75rem; border-top: 1px dashed var(--divider); font-size: var(--fs-xs); line-height: 1.6; color: var(--faint); }
+/* 「伪装成」的选择卡:图标 + 名字 + 一句说明;手机两列,卡片够宽三列,宽屏一排六张 */
+.camo-picks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; margin-top: .15rem; }
+@container (min-width: 34rem) { .camo-picks { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container (min-width: 72rem) { .camo-picks { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+.camo-pick { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: .65rem; row-gap: .05rem; align-items: center; padding: .7rem .8rem; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s; }
+.camo-pick:hover { border-color: var(--border-strong); }
+.camo-pick input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.camo-pick:focus-within { box-shadow: 0 0 0 3px var(--primary-ring); }
+.camo-pi { grid-row: 1 / 3; display: grid; place-items: center; width: 2.1rem; height: 2.1rem; border-radius: var(--radius-sm); background: var(--surface-3); color: var(--muted); transition: background .12s, color .12s; }
+.camo-pi svg { width: 1.15rem; height: 1.15rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.camo-pick b { min-width: 0; font-size: var(--fs-sm); font-weight: 600; line-height: 1.3; color: var(--text); overflow-wrap: anywhere; }
+.camo-pick small { min-width: 0; font-size: var(--fs-xs); line-height: 1.35; color: var(--muted); }
+.camo-pick.on { border-color: var(--primary); background: var(--primary-soft); box-shadow: inset 0 0 0 1px var(--primary); }
+.camo-pick.on .camo-pi { background: var(--primary); color: #fff; }
 /* 跳转模式:窗口里画「有人打开 → 302 → 你的网站」 */
 .camo-rdbody { flex: 1 0 auto; display: grid; align-content: center; gap: .65rem; min-height: 13rem; padding: 1.4rem 1.3rem; background: var(--surface-2); }
 .camo-rdrow { display: grid; gap: .3rem; min-width: 0; }

@@ -92,8 +92,7 @@ const groups = () => [
   // 页面伪装(用户 N2):陌生人顺着端口、域名找过来时看到的普通网站。只在主机上设,随主机同步;下面是这台的预览(见 renderCamo)
   { id: 'camo', title: t('set.camo'), masterOnly: true, extra: '<div class="camo-box" id="camo-box" aria-live="polite"></div>', fields: [
     ['camoEnabled', t('set.camoEnabled'), 'bool', t('set.camoEnabledHelp')],
-    ['camoTemplate', t('set.camoTemplate'), 'select', t('set.camoTemplateHelp'),
-      [['', t('set.camoT.auto')], ...CAMO_TEMPLATES.map(x => [x, t('set.camoT.' + x)]), ['redirect', t('set.camoT.redirect')]]],
+    ['camoTemplate', t('set.camoTemplate'), 'camoPick', t('set.camoTemplateHelp')], // 一排带图标的选择卡(camoPickHTML)
     ['camoRedirect', t('set.camoRedirect'), 'text', t('set.camoRedirectHelp')], // 只在选了「跳转到我的网站」时显示(camoMode)
     ['camoPorts', t('set.camoPorts'), 'bool', t('set.camoPortsHelp')],
   ]},
@@ -189,6 +188,15 @@ export async function render(el) {
   // 页面伪装:换了样式马上按它预览(还没保存也一样);撤销这一项时 setCtl 发的是 input,下拉框本身选了也会发 input
   const camoSel = document.getElementById('set-camoTemplate');
   if (camoSel) camoSel.addEventListener('input', () => { camoMode(); renderCamo(); });
+  // 选择卡点了:写回隐藏的那个值(保存条、预览都看它)
+  el.querySelectorAll('.camo-picks').forEach(box => box.addEventListener('change', e => {
+    const r = e.target.closest('input[type=radio]');
+    const input = document.getElementById(box.dataset.for);
+    if (!r || !input) return;
+    input.value = r.value;
+    syncCamoPick(box, r.value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }));
   const camoUrl = document.getElementById('set-camoRedirect');
   if (camoUrl) camoUrl.addEventListener('input', debounce(() => renderCamo(), 450));
   camoMode();
@@ -256,7 +264,11 @@ function setCtl(f, v) {
   const el = document.getElementById('set-' + f.k);
   if (!el) return;
   if (isBool(f.type)) el.checked = v === 'true'; else el.value = v;
-  if (f.k === 'camoTemplate') camoMode(); // 撤销这一项时「跳转到」那一行跟着显示 / 收起
+  if (f.type === 'camoPick') { // 撤销这一项时选择卡跟着回去,「跳转到」那一行跟着显示 / 收起
+    const box = document.querySelector(`.camo-picks[data-for="${el.id}"]`);
+    if (box) syncCamoPick(box, v);
+    camoMode();
+  }
   if (f.type === 'mutes') { // 勾选框跟着隐藏的值走(撤销这一项时)
     const off = new Set(String(v || '').split(',').filter(Boolean));
     document.querySelectorAll(`.mutes[data-for="${el.id}"] input[data-mute]`).forEach(cb => { cb.checked = !off.has(cb.dataset.mute); });
@@ -279,6 +291,7 @@ const clip = v => (v.length > 40 ? v.slice(0, 38) + '…' : v);
 function showVal(f, v) {
   if (isBool(f.type)) return t(v === 'true' ? 'set.sb.on' : 'set.sb.off');
   if (f.type === 'mutes') return v ? t('set.attnOff', { list: v.split(',').map(id => t('attn.cat.' + id)).join(t('node.sep')) }) : t('set.attnAllOn');
+  if (f.type === 'camoPick') return t('set.camoT.' + (v || 'auto'));
   if (f.type === 'select') { const o = (f.options || []).find(x => x[0] === v); return o ? o[1] : v; }
   if (v === '') return defaults[f.k] !== undefined ? t('set.sb.defaultV', { v: defaults[f.k] }) : t('set.sb.empty');
   if (SECRET.test(f.k)) return '••••••';
@@ -417,7 +430,7 @@ async function saveAll() {
 // 控件的 id 仍是 set-<键>,保存逻辑不用跟着变
 // 宽屏两列时也各占一整行的:功德箱 / 在线设备数和流量奖励这两个「要不要为它联网」的开关,一上一下放在一起(用户 N15);
 // 页面伪装的总开关说明长,占一整行,下面样式和 80 / 443 两项并排
-const WIDE = new Set(['supportOnline', 'rewardEnabled', 'camoEnabled']);
+const WIDE = new Set(['supportOnline', 'rewardEnabled', 'camoEnabled', 'camoRedirect', 'camoPorts']);
 
 function rowHTML(s, [k, label, type, help, options]) {
   const id = 'set-' + k;
@@ -426,6 +439,7 @@ function rowHTML(s, [k, label, type, help, options]) {
     const on = boolSetting(s[k], k === 'subPageEnabled' || type === 'boolOn');
     return `<div class="set-row bool${WIDE.has(k) ? ' wide' : ''}">${info}<div class="set-ctl"><label class="switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></label></div></div>`;
   }
+  if (type === 'camoPick') return camoPickHTML(id, info, label, String(s[k] ?? ''));
   if (type === 'mutes') { // 概况提醒:分三小块的一组勾选框(勾着 = 提醒),值存在隐藏的输入框里给保存条用
     const v = normMutes(s[k]), off = new Set(v.split(',').filter(Boolean));
     const cats = attnCatsFor(isNodeRole());
@@ -498,6 +512,28 @@ async function renderCamo() {
   if (camoSaved('camoEnabled') && camoSaved('camoPorts') && !(d.ports || []).length) camoTimer = setTimeout(renderCamo, 32000);
 }
 
+// 「伪装成」:六张选择卡(图标 + 名字 + 一句说明),值存在隐藏的输入框里(保存条、预览都看它)
+const CAMO_PICKS = ['', 'mirror', 'downloads', 'video', 'blog', 'redirect'];
+const CAMO_ICONS = {
+  '': '<path d="M3 7h3c3 0 4 2 6 5s3 5 6 5h3"/><path d="M3 17h3c1.4 0 2.4-.5 3.3-1.4M14.7 8.4C15.6 7.5 16.6 7 18 7h3"/><path d="M18 4l3 3-3 3M18 14l3 3-3 3"/>',
+  mirror: '<rect x="3" y="4" width="18" height="6.5" rx="1.6"/><rect x="3" y="13.5" width="18" height="6.5" rx="1.6"/><path d="M7 7.25h.01M7 16.75h.01M11 7.25h6M11 16.75h6"/>',
+  downloads: '<path d="M12 3.5v11.5M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 19.5h15"/>',
+  video: '<rect x="3" y="5" width="18" height="14" rx="2.6"/><path d="M10 9.3v5.4l4.6-2.7z"/>',
+  blog: '<path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5M9.5 12h6M9.5 15.5h6"/>',
+  redirect: '<path d="M14 4h6v6M20 4l-8.5 8.5"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
+};
+function camoPickHTML(id, info, label, v) {
+  const cur = CAMO_PICKS.includes(v) ? v : '';
+  const cards = CAMO_PICKS.map(val => `<label class="camo-pick${val === cur ? ' on' : ''}">
+      <input type="radio" name="${id}-pick" value="${val}" ${val === cur ? 'checked' : ''}>
+      <span class="camo-pi" aria-hidden="true"><svg viewBox="0 0 24 24">${CAMO_ICONS[val]}</svg></span>
+      <b>${esc(t('set.camoT.' + (val || 'auto')))}</b><small>${esc(t('set.camoD.' + (val || 'auto')))}</small></label>`).join('');
+  return `<div class="set-row stack">${info}<div class="set-ctl"><input type="hidden" id="${id}" value="${esc(v)}"><div class="camo-picks" role="radiogroup" aria-label="${esc(label)}" data-for="${id}">${cards}</div></div></div>`;
+}
+function syncCamoPick(box, v) {
+  box.querySelectorAll('input[type=radio]').forEach(r => { r.checked = r.value === v; r.closest('.camo-pick').classList.toggle('on', r.checked); });
+}
+
 // 「跳转到」那一行只在选了「跳转到我的网站」时显示(存着的网址不动,换回伪装站时也还在)
 function camoMode() {
   const sel = document.getElementById('set-camoTemplate');
@@ -509,16 +545,26 @@ function camoMode() {
 const camoBar = d => `<span class="camo-bar" aria-hidden="true"><i></i><i></i><i></i><span class="camo-url">${esc(d.host || d.name)}</span></span>`;
 const camoFrame = (d, cls) => `<iframe class="${cls}" sandbox="" referrerpolicy="no-referrer" title="${esc(d.name)}" srcdoc="${esc(d.html)}"${cls === 'camo-thumb' ? ' tabindex="-1" aria-hidden="true"' : ''}></iframe>`;
 
+// 「开启后在这些地方显示」:三行 —— 端口、线路、80 / 443;值用小标签,状况用颜色点
+function camoWhereHTML(d) {
+  const e = d.entries || {};
+  const tag = (s, k = 'ok', tip = '') => `<span class="camo-tag ${k}"${tip ? ` title="${esc(tip)}"` : ''}>${esc(s)}</span>`;
+  const ports = [tag(t('camo.p.panel', { n: e.panel })), tag(t('camo.p.sub', { n: e.sub }))];
+  if (e.reseller) ports.push(tag(t('camo.p.reseller', { n: e.reseller })));
+  const lines = [];
+  if (e.anytls) lines.push(tag(t('camo.l.anytls', { n: e.anytls })));
+  if (e.trojan) lines.push(tag(t('camo.l.trojan', { n: e.trojan })));
+  if (e.hy2) lines.push(tag(t('camo.l.hy2', { n: e.hy2 })));
+  const linesNote = lines.length ? t('camo.k.linesNote') + (e.hy2Own ? t('node.sep') + t('camo.l.hy2Own', { n: e.hy2Own }) : '') : t('camo.l.none');
+  if (!lines.length) lines.push(tag(t('camo.l.zero'), 'off'));
+  const web = camoPortRows(d).map(([k, s, tip]) => tag(s, k, tip));
+  const row = (k, vals, note) => `<dt>${esc(t(k))}</dt><dd><div class="camo-tags">${vals.join('')}</div>${note ? `<small>${esc(note)}</small>` : ''}</dd>`;
+  return `<h4 class="camo-wh">${esc(t('camo.where'))}</h4>
+    <dl class="camo-dl">${row('camo.k.ports', ports, t('camo.k.portsNote'))}${row('camo.k.lines', lines, linesNote)}${row('camo.k.web', web, '')}</dl>`;
+}
+
 function camoHTML(d) {
   const on = camoSaved('camoEnabled');
-  const e = d.entries || {};
-  const rows = [['ok', e.reseller ? t('camo.w.ports', { panel: e.panel, sub: e.sub, reseller: e.reseller }) : t('camo.w.portsNoRes', { panel: e.panel, sub: e.sub })]];
-  if (e.anytls) rows.push(['ok', t('camo.w.anytls', { n: e.anytls })]);
-  if (e.trojan) rows.push(['ok', t('camo.w.trojan', { n: e.trojan })]);
-  if (e.hy2) rows.push(['ok', t('camo.w.hy2', { n: e.hy2 })]);
-  if (!e.anytls && !e.trojan && !e.hy2) rows.push(['off', t('camo.w.noLines')]);
-  if (e.hy2Own) rows.push(['off', t('camo.w.hy2Own', { n: e.hy2Own })]);
-  rows.push(...camoPortRows(d));
   const rd = d.mode === 'redirect';
   const kind = rd ? '' : t('set.camoT.' + d.template) + (d.auto ? ' · ' + t('camo.autoPicked') : '');
   // 跳转模式:左边画「有人打开 → 302 → 你的网站」,右边是网址和打开它的链接;伪装站模式:左边缩略图,右边站名和两个按钮
@@ -547,22 +593,21 @@ function camoHTML(d) {
       ${left}
       <div class="camo-info">
         ${top}
-        <h4 class="camo-wh">${esc(t('camo.where'))}</h4>
-        <ul class="camo-where">${rows.map(([k, s, tip]) => `<li class="${k}"${tip ? ` title="${esc(tip)}"` : ''}><span class="camo-dot"></span><span>${esc(s)}</span></li>`).join('')}</ul>
-        <p class="camo-note">${esc(t('camo.w.others'))}</p>
+        ${camoWhereHTML(d)}
       </div>
-    </div>`;
+    </div>
+    <p class="camo-foot">${esc(t('camo.w.others'))}</p>`;
 }
 
 // 80 / 443 这一项:按存下的设置说;开着的话逐个端口写现在的状况,没开的写原因(别的程序占着时悬停看原文)
 function camoPortRows(d) {
-  if (!camoSaved('camoEnabled') || !camoSaved('camoPorts')) return [['off', t('camo.portsOff')]];
+  if (!camoSaved('camoEnabled') || !camoSaved('camoPorts')) return [['off', t('camo.s.off')]];
   const ports = d.ports || [];
-  if (!ports.length) return [['wait', t('camo.portsPending')]];
+  if (!ports.length) return [['wait', t('camo.s.pending')]];
   const on443 = ports.some(p => p.on && p.port === 443);
   return ports.map(p => (p.on
-    ? ['ok', t(d.mode === 'redirect' ? 'camo.port.onRd' : p.port === 80 && on443 ? 'camo.port.on80s' : 'camo.port.on', { port: p.port })]
-    : ['warn', t('camo.port.off', { port: p.port, why: t('camo.why.' + p.why) }), p.detail || '']));
+    ? ['ok', t(d.mode === 'redirect' ? 'camo.s.onRd' : p.port === 80 && on443 ? 'camo.s.on80s' : 'camo.s.on', { port: p.port })]
+    : ['warn', t('camo.s.no', { port: p.port, why: t('camo.why.' + p.why) }), p.detail || '']));
 }
 
 // 缩略图跟着框的宽度缩放

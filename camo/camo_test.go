@@ -94,6 +94,9 @@ func TestNoDeadLinksAndCleanImages(t *testing.T) {
 					continue
 				}
 				for _, m := range linkRe.FindAllStringSubmatch(string(pg.body), -1) {
+					if strings.HasPrefix(m[1], "#") { // 页内锚点(视频页「会员才能看」那一层)
+						continue
+					}
 					if !strings.HasPrefix(m[1], "/") {
 						t.Fatalf("%s/%d %s: 链接到站外 %s", tmpl, seed, p, m[1])
 					}
@@ -307,4 +310,48 @@ func TestServeConn(t *testing.T) {
 	if !strings.HasPrefix(line, "HTTP/1.1 400") {
 		t.Fatalf("不像 HTTP 的数据应按网站的样子回 400,实际 %q", line)
 	}
+}
+
+var paraRe = regexp.MustCompile(`<p>([^<]{40,})</p>`)
+
+// 文字按种子拼:不同服务器上的视频标题、文章段落大多不一样(写死的句子随便搜一句就能找出所有伪装站)。
+func TestTextVaries(t *testing.T) {
+	titles := map[string]bool{}
+	paraSites := map[string]int{}
+	for seed := uint64(1); seed <= 20; seed++ {
+		v := New("video", seed*0x9e3779b97f4a7c15, testNow)
+		for _, m := range regexp.MustCompile(`<title>([^<]+) - `).FindAllStringSubmatch(string(v.Home())+collectPages(v, "/watch/"), -1) {
+			titles[m[1]] = true
+		}
+		b := New("blog", seed*0x9e3779b97f4a7c15, testNow)
+		seen := map[string]bool{}
+		for _, m := range paraRe.FindAllStringSubmatch(collectPages(b, "/posts/"), -1) {
+			if !seen[m[1]] {
+				seen[m[1]] = true
+				paraSites[m[1]]++
+			}
+		}
+	}
+	if len(titles) < 100 {
+		t.Fatalf("20 个视频站只有 %d 个不同的标题", len(titles))
+	}
+	shared := 0
+	for _, n := range paraSites {
+		if n > 1 {
+			shared++
+		}
+	}
+	if len(paraSites) < 300 || shared*10 > len(paraSites) {
+		t.Fatalf("20 个博客:%d 个不同的段落,其中 %d 个在不止一个站里出现", len(paraSites), shared)
+	}
+}
+
+func collectPages(s *Site, prefix string) string {
+	var b strings.Builder
+	for p, pg := range s.pages {
+		if strings.HasPrefix(p, prefix) {
+			b.Write(pg.body)
+		}
+	}
+	return b.String()
 }

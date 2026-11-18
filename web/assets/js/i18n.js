@@ -1299,15 +1299,19 @@ const zh = {
   'set.camoT.blog': '个人博客', 'set.camoPorts': '也放在 80 / 443 端口', 'set.camoPortsHelp': '有人直接用浏览器打开你的域名时也看到这个站。只用空着的端口:线路、这台的面板 / 订阅或别的程序占着就不开;443 用这台证书库里的证书,按访问的域名挑;签证书走 HTTP 验证时临时让出 80。每台服务器各自判断。',
   'camo.preview': '这台服务器的伪装站', 'camo.on': '已开启', 'camo.off': '未开启', 'camo.autoPicked': '自动挑的', 'camo.reseed': '换一个样子', 'camo.reseedHelp': '只换这台:每台服务器的伪装站各是各的样子。', 'camo.reseeded': '已换成新的样子',
   'camo.zoom': '放大看', 'camo.previewTitle': '伪装站预览', 'camo.zoomHint': '这是首页;伪装站还有列表、详情和 404 页,预览里的链接点不动。', 'camo.where': '开启后在这些地方显示',
-  'camo.w.ports': '面板 {panel}、订阅 {sub}、代理面板 {reseller} 端口的根目录和对不上的路径', 'camo.w.portsNoRes': '面板 {panel}、订阅 {sub} 端口的根目录和对不上的路径', 'camo.w.anytls': 'AnyTLS 线路 {n} 条:密码不对,或用浏览器打开时',
-  'camo.w.trojan': 'Trojan 线路 {n} 条(没配传输层的)', 'camo.w.hy2': 'Hysteria2 线路 {n} 条(没填伪装站点的)', 'camo.w.hy2Own': '另有 Hysteria2 线路 {n} 条填了自己的伪装站点,照旧用它', 'camo.w.noLines': '现在没有 AnyTLS、Trojan、Hysteria2 线路',
-  'camo.w.others': 'VLESS-Reality 本来就把探测转给真网站;其它协议(VLESS-TLS、VMess、Shadowsocks、TUIC 等)没有能回网页的地方,不受影响。', 'camo.portsOff': '80 / 443 端口:没开', 'camo.portsPending': '80 / 443 端口:正在检查…',
-  'camo.port.on': '{port} 端口:已放上伪装站', 'camo.port.off': '{port} 端口没开:{why}', 'camo.why.line': '线路在用', 'camo.why.service': '这台的面板 / 订阅在用', 'camo.why.acme': '正在签证书,临时让出', 'camo.why.nocert': '这台没有可用的证书',
+  
+  
+  'camo.w.others': 'VLESS-Reality 本来就把探测转给真网站;其它协议(VLESS-TLS、VMess、Shadowsocks、TUIC 等)没有能回网页的地方,不受影响。', 
+  'camo.why.line': '线路在用', 'camo.why.service': '这台的面板 / 订阅在用', 'camo.why.acme': '正在签证书,临时让出', 'camo.why.nocert': '这台没有可用的证书',
   'camo.why.busy': '被别的程序占着', 'audit.v.camoReseed': '伪装站换了一个样子',
   'set.camoT.redirect': '跳转到我的网站', 'set.camoRedirect': '跳转到',
   'set.camoRedirectHelp': '填你自己的网站,比如线路域名是 node1.example.com 就填 https://www.example.com。别填大公司的网站:一台小服务器跳到大公司官网本身就可疑。只填网站时访问的路径原样带过去,填到具体页面时一律跳到那一页。', 'camo.rd.head': '伪装方式:跳转到我的网站',
   'camo.rd.title': '跳转到你的网站', 'camo.rd.none': '还没填跳转的网址', 'camo.rd.open': '打开这个网站', 'camo.rd.req': '有人打开', 'camo.rd.to': '跳到', 'camo.rd.note': '所有请求一律 302 跳过去、不带正文;各台服务器都跳到同一个地方。',
-  'camo.port.onRd': '{port} 端口:在跳转', 'camo.port.on80s': '{port} 端口:跳到 https 的伪装站',
+  'set.camoD.auto': '每台随机挑', 'set.camoD.mirror': '开源镜像目录', 'set.camoD.downloads': '软件下载页', 'set.camoD.video': '会员视频片库', 'set.camoD.blog': '文章与照片', 'set.camoD.redirect': '302 到你的站',
+  'camo.k.ports': '端口', 'camo.k.portsNote': '根目录和对不上的路径;正确的订阅地址、面板路径照常', 'camo.k.lines': '线路', 'camo.k.linesNote': '密码不对、或用浏览器打开时', 'camo.k.web': '80 / 443', 'camo.p.panel': '面板 {n}',
+  'camo.p.sub': '订阅 {n}', 'camo.p.reseller': '代理面板 {n}', 'camo.l.anytls': 'AnyTLS {n} 条', 'camo.l.trojan': 'Trojan {n} 条', 'camo.l.hy2': 'Hysteria2 {n} 条',
+  'camo.l.hy2Own': '另有 Hysteria2 {n} 条用自己的伪装站点', 'camo.l.zero': '没有', 'camo.l.none': '现在没有 AnyTLS、Trojan、Hysteria2 线路', 'camo.s.on': '{port} 已放上', 'camo.s.onRd': '{port} 在跳转',
+  'camo.s.on80s': '{port} 跳到 https', 'camo.s.no': '{port} 没开:{why}', 'camo.s.off': '没开', 'camo.s.pending': '正在检查…',
 };
 
 const en = {
@@ -2773,20 +2777,24 @@ const en = {
   'camo.preview': 'This server\'s decoy site', 'camo.on': 'On', 'camo.off': 'Off', 'camo.autoPicked': 'picked automatically', 'camo.reseed': 'Restyle',
   'camo.reseedHelp': 'Only this server changes: every server has its own decoy site.', 'camo.reseeded': 'Restyled', 'camo.zoom': 'Enlarge', 'camo.previewTitle': 'Decoy site preview',
   'camo.zoomHint': 'This is the home page; the site also has listing, detail and 404 pages. Links are inert in this preview.', 'camo.where': 'Where it shows once on',
-  'camo.w.ports': 'The root and unknown paths on the panel ({panel}), subscription ({sub}) and reseller panel ({reseller}) ports',
-  'camo.w.portsNoRes': 'The root and unknown paths on the panel ({panel}) and subscription ({sub}) ports', 'camo.w.anytls': 'AnyTLS lines ({n}): wrong password, or opened in a browser',
-  'camo.w.trojan': 'Trojan lines without a transport ({n})', 'camo.w.hy2': 'Hysteria2 lines without their own masquerade site ({n})',
-  'camo.w.hy2Own': '{n} more Hysteria2 lines keep their own masquerade site', 'camo.w.noLines': 'No AnyTLS, Trojan or Hysteria2 lines yet',
+  
+  
+  
+  
   'camo.w.others': 'VLESS-Reality already hands probes to a real website; other protocols (VLESS-TLS, VMess, Shadowsocks, TUIC and so on) have nowhere to answer with a page and are unaffected.',
-  'camo.portsOff': 'Ports 80 / 443: off', 'camo.portsPending': 'Ports 80 / 443: checking…', 'camo.port.on': 'Port {port}: serving the decoy site',
-  'camo.port.off': 'Port {port} is off: {why}', 'camo.why.line': 'used by a line', 'camo.why.service': 'used by this server\'s panel or subscription',
+  'camo.why.line': 'used by a line', 'camo.why.service': 'used by this server\'s panel or subscription',
   'camo.why.acme': 'released while a certificate is issued', 'camo.why.nocert': 'no usable certificate on this server', 'camo.why.busy': 'taken by another program',
   'audit.v.camoReseed': 'restyled the decoy site',
   'set.camoT.redirect': 'Redirect to my website', 'set.camoRedirect': 'Redirect to',
   'set.camoRedirectHelp': 'Use your own website: if the line\'s domain is node1.example.com, enter https://www.example.com. Don\'t use a big company\'s site: a small server redirecting to a big brand\'s homepage is suspicious in itself. With just the site, the requested path is carried over; with a specific page, everything goes to that page.',
   'camo.rd.head': 'Disguise: redirect to my website', 'camo.rd.title': 'Redirects to your website', 'camo.rd.none': 'No redirect address yet', 'camo.rd.open': 'Open this website',
   'camo.rd.req': 'Someone opens', 'camo.rd.to': 'Goes to', 'camo.rd.note': 'Every request gets a 302 with no body; every server redirects to the same place.',
-  'camo.port.onRd': 'Port {port}: redirecting', 'camo.port.on80s': 'Port {port}: redirects to the HTTPS decoy site',
+  'set.camoD.auto': 'Each server picks', 'set.camoD.mirror': 'Open-source mirror', 'set.camoD.downloads': 'App download page', 'set.camoD.video': 'Members\' videos',
+  'set.camoD.blog': 'Writing & photos', 'set.camoD.redirect': '302 to your site', 'camo.k.ports': 'Ports',
+  'camo.k.portsNote': 'Root and unknown paths; real subscription links and the panel path work as usual', 'camo.k.lines': 'Lines', 'camo.k.linesNote': 'Wrong password, or opened in a browser',
+  'camo.k.web': '80 / 443', 'camo.p.panel': 'Panel {n}', 'camo.p.sub': 'Subscription {n}', 'camo.p.reseller': 'Reseller panel {n}', 'camo.l.anytls': 'AnyTLS × {n}', 'camo.l.trojan': 'Trojan × {n}',
+  'camo.l.hy2': 'Hysteria2 × {n}', 'camo.l.hy2Own': '{n} more Hysteria2 lines use their own masquerade site', 'camo.l.zero': 'None', 'camo.l.none': 'No AnyTLS, Trojan or Hysteria2 lines yet',
+  'camo.s.on': '{port} serving', 'camo.s.onRd': '{port} redirecting', 'camo.s.on80s': '{port} → https', 'camo.s.no': '{port} off: {why}', 'camo.s.off': 'Off', 'camo.s.pending': 'Checking…',
 };
 
 const dicts = { zh, en };
