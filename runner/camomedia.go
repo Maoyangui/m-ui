@@ -70,6 +70,7 @@ type CamoPhotoStatus struct {
 	Loading bool   `json:"loading,omitempty"`
 	Error   string `json:"error,omitempty"`
 	Retry   int64  `json:"retry,omitempty"` // Unix 秒
+	Off     bool   `json:"off,omitempty"`   // 页面伪装没开:缺的照片不去取(开启后才取,见 CamoPreview)
 }
 
 // camoPhotoView 生成器取照片用(按种子;种子换了就一张都没有)

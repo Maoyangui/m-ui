@@ -507,16 +507,18 @@ async function renderCamo() {
   else if (camoSaved('camoEnabled') && camoSaved('camoPorts') && !(d.ports || []).length) camoTimer = setTimeout(renderCamo, 32000);
 }
 
-// 封面照片那一行(视频站、博客、部分软件下载页;没用照片的站不显示):处理好了 / 正在取 / 没取全(悬停看原因)
+// 封面照片那一行(视频站、博客、部分软件下载页;没用照片的站不显示):处理好了 / 正在取 / 没取全(悬停看原因)/
+// 页面伪装没开(off:没开时不为预览去连 GitHub,开启后才取 —— 自审 G3)
 function camoPhotoLine(p) {
   if (!p || !p.want) return '';
-  let k = 'ok', s = t('camo.ph.ready', { n: p.want });
+  let k = 'ok', s = t('camo.ph.ready', { n: p.want }), tip = '';
   if (p.have < p.want) {
     const at = p.retry ? new Date(p.retry * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-    if (p.error && !p.loading) { k = 'warn'; s = t(at ? 'camo.ph.failedAt' : 'camo.ph.failed', { have: p.have, n: p.want, time: at }); }
+    if (p.off) { k = 'off'; s = t('camo.ph.off', { n: p.want }); }
+    else if (p.error && !p.loading) { k = 'warn'; s = t(at ? 'camo.ph.failedAt' : 'camo.ph.failed', { have: p.have, n: p.want, time: at }); tip = p.error; }
     else { k = 'wait'; s = t('camo.ph.loading', { have: p.have, n: p.want }); }
   }
-  return `<div class="camo-ph ${k}"${p.error ? ` title="${esc(p.error)}"` : ''}>${esc(s)}</div>`;
+  return `<div class="camo-ph ${k}"${tip ? ` title="${esc(tip)}"` : ''}>${esc(s)}</div>`;
 }
 
 

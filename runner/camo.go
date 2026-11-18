@@ -149,13 +149,22 @@ func (r *Runner) CamoApply() {
 func settingOn(v string) bool { return strings.EqualFold(strings.TrimSpace(v), "true") }
 
 // CamoPreview 设置页的预览:按给的模板(空 = 自动)和本机种子生成的那个站(开关关着也给,方便先看再开),
-// 以及它的封面照片状况。预览用到的照片也算「用到」:没取过的在后台去取,设置页过一会儿再看就是照片了。
+// 以及它的封面照片状况。开着页面伪装时预览用到的照片也算「用到」:没取过的在后台去取,设置页过一会儿再看就是照片了。
+// 没开时不为预览去取(只是打开设置页,面板不该去连 GitHub —— 帮助页「面板会连哪些外部地址」写的是不开就不取;自审 G3):
+// 缺的照片先用画的插图,状况里标 Off,设置页写明开启后才取。
 func (r *Runner) CamoPreview(template string) (*camo.Site, *CamoPhotoStatus) {
 	seed := r.camoSeed()
 	photos, _ := r.camo.media.photos(seed)
 	site := camo.Build(strings.TrimSpace(template), seed, time.Now(), photos)
-	r.camoMediaWant(seed, site.Wanted())
-	return site, r.camoPhotoStatus(site)
+	on := settingOn(r.setting("camoEnabled"))
+	if on {
+		r.camoMediaWant(seed, site.Wanted())
+	}
+	st := r.camoPhotoStatus(site)
+	if st != nil && !on && st.Have < st.Want {
+		st.Off = true
+	}
+	return site, st
 }
 
 // CamoReseed 设置页的「换一个样子」:本机换一个新种子,伪装站马上按它重新生成(只换这台,别的服务器各是各的)。

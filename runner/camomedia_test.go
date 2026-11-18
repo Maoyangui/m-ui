@@ -173,3 +173,34 @@ func TestCamoMediaRun(t *testing.T) {
 		t.Fatalf("到点以后应自己接着取完: 还缺 %d", len(s.Wanted()))
 	}
 }
+
+// 没开页面伪装时,设置页的预览不去取照片(只是打开设置页,面板不该去连外网;自审 G3):状况标 Off、不算正在取;
+// 开了以后预览照常去取。
+func TestCamoPreviewOffNoFetch(t *testing.T) {
+	photo := testPhoto(t)
+	withManifest(t, photo)
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write(photo)
+	}))
+	defer srv.Close()
+
+	r := newCamoRunner(t)
+	r.camo.media.src = []string{srv.URL + "/"}
+	site, st := r.CamoPreview("video")
+	r.camo.media.mu.Lock()
+	running := r.camo.media.running
+	r.camo.media.mu.Unlock()
+	if len(site.Wanted()) == 0 || st == nil || !st.Off || st.Loading || st.Have != 0 || running || hits.Load() != 0 {
+		t.Fatalf("没开时预览不该去取: %+v running=%v hits=%d", st, running, hits.Load())
+	}
+	mustSet(t, r, "camoEnabled", "true")
+	if _, st := r.CamoPreview("video"); st == nil || st.Off {
+		t.Fatalf("开了以后不该再标 Off: %+v", st)
+	}
+	waitMedia(t, r)
+	if _, st := r.CamoPreview("video"); hits.Load() == 0 || st == nil || st.Have != st.Want || st.Off {
+		t.Fatalf("开了以后预览应去取: %+v hits=%d", st, hits.Load())
+	}
+}
