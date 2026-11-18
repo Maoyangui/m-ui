@@ -1,5 +1,5 @@
 // 应用入口:登录、壳布局、hash 路由、全局状态与定时刷新。
-import { get, post, setUnauthorizedHandler, LONG } from './api.js';
+import { get, post, setUnauthorizedHandler, LONG, abortPageLoads } from './api.js';
 import { t, setLang, getLang, langs } from './i18n.js';
 import { trErr } from './errmsg.js';
 import { ICONS } from './icons.js';
@@ -57,6 +57,8 @@ let routing = false;
 // 两次渲染重叠时,慢的那次会晚一步把内容写进 #page,把新页面顶掉,表现就是"点了 A 却显示 B"。
 // 让每次渲染排队等上一次结束,再判断自己是不是还当值,这样最后一次导航一定是赢家。
 // 请求本身有超时(见 api.js),渲染不会永远挂住,队列不会卡死。
+// 但排队不能变成干等:上一页还没画完就换页时,先把它还在路上的读取放弃掉(abortPageLoads),它马上结束、下一页立刻开始 ——
+// 以前上一页有个慢接口(防火墙、运维这类要问各台副机或跑系统命令的),这时点别的页面就一直「加载中」,最久拖到 30 秒超时。
 let renderQueue = Promise.resolve();
 
 // ---- 数据加载 ----
@@ -77,7 +79,8 @@ export async function load(...what) {
   const all = what.length === 0;
   const jobs = [];
   // 每类数据各记各的成败时间:概况上"面板状态没取到 · 某时的数据"靠它
-  const job = (key, p) => jobs.push(p.then(() => { state.at[key] = Date.now(); delete state.err[key]; }, e => { state.err[key] = e; throw e; }));
+  // 换页时被放弃的读取(e.aborted)不算「没取到」:不记进 state.err(概况会拿它报「某某没取到」),也不把空数据当成取到了
+  const job = (key, p) => jobs.push(p.then(() => { state.at[key] = Date.now(); delete state.err[key]; }, e => { if (!e || !e.aborted) state.err[key] = e; throw e; }));
   if (all || what.includes('status')) job('status', get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); restoreNotice(); reloadNotice(); reachNotice(); certNotice(); haNotices(s); }));
   if (all || what.includes('settings')) job('settings', get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
   if (all || what.includes('lines')) job('lines', get('lines').then(l => { state.lines = l; }));
@@ -86,8 +89,8 @@ export async function load(...what) {
   // 生效中的规则限速:用户列表据此打"限速中"标记(主面板才有;副机 / 代理拿不到就保持空)
   if (!isReseller() && (all || what.includes('users'))) jobs.push(get('limitstates').then(l => { state.limitStates = l || []; }).catch(() => {}));
   if (all || what.includes('plans')) job('plans', get('plans').then(p => { state.plans = p || []; }));
-  if (!isReseller() && (all || what.includes('nodes'))) jobs.push(get('nodes').then(n => { state.nodes = (n && n.nodes) || []; }).catch(() => { state.nodes = []; }));
-  if (!isReseller() && (all || what.includes('exts'))) jobs.push(get('exts').then(x => { state.exts = x || []; }).catch(() => { state.exts = []; }));
+  if (!isReseller() && (all || what.includes('nodes'))) jobs.push(get('nodes').then(n => { state.nodes = (n && n.nodes) || []; }).catch(e => { if (e && e.aborted) throw e; state.nodes = []; }));
+  if (!isReseller() && (all || what.includes('exts'))) jobs.push(get('exts').then(x => { state.exts = x || []; }).catch(e => { if (e && e.aborted) throw e; state.exts = []; }));
   if (all || what.includes('onlines')) job('onlines', get('onlines').then(o => { state.onlines = o; }));
   await Promise.all(jobs);
   (all ? ALL_DATA : what).forEach(k => loaded.add(k));
@@ -667,6 +670,7 @@ async function route(force = false) {
   }
   if (!force && current === name && pages[name].keepAlive) return;
   const gen = ++routeGen;
+  if (routing) abortPageLoads(); // 上一页还没画完:它没回来的读取不要了,别让这一页排在后面干等
   current = name;
   routing = true;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.page === name));
@@ -682,6 +686,7 @@ async function route(force = false) {
   el.dataset.page = name;
   reloadNotice(); certNotice(); reachNotice(); // 进出概况页时三条提示条跟着收起 / 回来
   el.innerHTML = `<div class="empty">${t('common.loading')}</div>`;
+  el.__muiHTML = null; // 页面区换成了占位:setHTML 记着的上一页作废(它自己也会按节点认出来,这里再明说一次)
   const prev = renderQueue;
   renderQueue = (async () => {
     await prev.catch(() => {});

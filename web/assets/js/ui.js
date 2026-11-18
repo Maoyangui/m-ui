@@ -77,6 +77,7 @@ export function daysLeft(expiry) { return Math.ceil((expiry - Date.now() / 1000)
 // ---- toast ----
 let toastTimer;
 export function toast(msg, kind = '') {
+  if (!msg) return; // 空话不弹(换页时被放弃的读取抛的错就是空的,见 api.js 的 abortPageLoads)
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'toast ' + kind;
@@ -195,12 +196,16 @@ export function registerActions(map) { Object.assign(actions, map); }
 export function setHTML(target, html) {
   const el = typeof target === 'string' ? document.getElementById(target) : target;
   if (!el) return false;
-  if (el.__muiHTML === html) return false;
+  // 上次就是这段 HTML、而且元素里现在还是上次画进去的那批节点,才跳过。只比字符串不够:别处直接换过 innerHTML
+  // (换页时路由把 #page 换成「加载中」)之后这里还记着旧页面,回到同一页、内容又没变,就一直停在「加载中」——
+  // 备份页第二次点进去必现,别的页面内容碰巧没变时也会,看着像点了没反应。
+  if (el.__muiHTML === html && el.__muiFirst === (el.firstChild ?? null)) return false;
   el.__muiHTML = html;
   // 5 秒一轮的重画会把打开着的「更多」菜单换成一个没打开的(运行时长、在线人数一变就整表重画):
   // 按菜单里第一个按钮的 data-act + data-id 认出是哪一个,重画后再打开(toggle 会重新定位)
   const menus = typeof el.querySelectorAll === 'function' ? [...el.querySelectorAll('details.menu[open]')].map(menuKey).filter(Boolean) : [];
   el.innerHTML = html;
+  el.__muiFirst = el.firstChild ?? null;
   for (const [act, id] of menus) {
     const b = [...el.querySelectorAll('details.menu .menu-list [data-act]')].find(x => x.dataset.act === act && (x.dataset.id || '') === id);
     const d = b && b.closest('details.menu');

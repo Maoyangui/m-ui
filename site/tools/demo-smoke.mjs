@@ -437,6 +437,24 @@ if (ud7 && ud7.span === 21600 && ud7.n === 29 && ud7.labs.every(x => dayLab.test
   pass('用户详情的流量图跟着范围走(30 天 = 一天一根、7 天 = 6 小时一根、24 小时 = 一小时一根)');
 else fail(`用户详情的流量图没跟着范围走:${JSON.stringify({ ud7, ud30, ud24 })}`);
 await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+// 每一页进第二次也要出得来。以前「内容没变就不重画」只比字符串:换页时页面区被换成「加载中」,回到内容没变的页面
+// (备份页必现)就一直停在「加载中」,看着像点了没反应
+{
+  const navs = await page.evaluate(() => [...document.querySelectorAll('#nav a[data-page]')].map(a => a.dataset.page));
+  const stuck = [];
+  for (let round = 0; round < 2; round++) {
+    for (const name of navs) {
+      await page.locator(`#nav a[data-page="${name}"]`).click();
+      let ok = false;
+      for (let i = 0; i < 40 && !ok; i++) {
+        await page.waitForTimeout(50);
+        ok = await page.evaluate(n => { const p = document.getElementById('page'), s = (p.innerText || '').trim(); return p.dataset.page === n && s.length > 0 && !/^(加载中|Loading)[.…]*$/.test(s); }, name);
+      }
+      if (!ok) stuck.push(`${name}(第 ${round + 1} 次)`);
+    }
+  }
+  if (navs.length >= 10 && !stuck.length) pass(`侧栏 ${navs.length} 页各进两次都出得来(没有停在「加载中」的)`); else fail(`这些页面点进去停在「加载中」:${stuck.join('、') || '侧栏没找到'}`);
+}
 // 用户行「更多」里的停用 / 启用:启用着的显示停用,点了状态变成停用、这一项变成启用
 await page.goto(`${DEMO}#/users`); await page.waitForTimeout(900);
 const row2 = '#users-table tbody tr:nth-child(2)';

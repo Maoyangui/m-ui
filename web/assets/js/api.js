@@ -19,28 +19,43 @@ const DEFAULT_TIMEOUT = 30000;
 // 不发任何网络请求。生产环境从不调用 setTransport,这段对它没有影响。
 let transport = null;
 export function setTransport(fn) { transport = fn; }
+
+// 换页时放弃上一页还在路上的读取。页面渲染是排队的(上一页没画完,下一页不开始,见 app.js 的 route):
+// 上一页有个接口慢(要问各台副机的、跑系统命令的,最久等到 30 秒超时),这时点下一页就一直「加载中」,看着像点了没反应。
+// 只放弃读取(GET):新增 / 修改 / 删除照常跑完;调用方传 keep: true 的也不放弃。
+// 被放弃的请求抛 ApiError,带 aborted = true、message 为空(接住它的地方就算拿去 toast 也不显示)。
+let pageCtl = new AbortController();
+export function abortPageLoads() { const old = pageCtl; pageCtl = new AbortController(); old.abort(); }
+const abortedError = () => { const e = new ApiError(0, ''); e.aborted = true; return e; };
 let qrUrlFn = null;
 export function setQrUrl(fn) { qrUrlFn = fn; }
 
 export async function api(path, opts = {}) {
   if (transport) return transport(path, opts);
-  const { timeout = DEFAULT_TIMEOUT, ...init } = opts;
-  const ctl = timeout > 0 ? new AbortController() : null;
-  const timer = ctl ? setTimeout(() => ctl.abort(), timeout) : null;
-  let res;
+  const { timeout = DEFAULT_TIMEOUT, keep, ...init } = opts;
+  const nav = !keep && (!init.method || init.method === 'GET') ? pageCtl.signal : null;
+  const ctl = timeout > 0 || nav ? new AbortController() : null;
+  const timer = timeout > 0 ? setTimeout(() => ctl.abort(), timeout) : null;
+  let left = false; // 换页了:这次读取不要了
+  const onNav = () => { left = true; ctl.abort(); };
+  if (nav) { if (nav.aborted) onNav(); else nav.addEventListener('abort', onNav, { once: true }); }
+  let res, data;
   try {
     res = await fetch(BASE + path, {
       headers: { 'Content-Type': 'application/json' },
       ...init,
       signal: ctl ? ctl.signal : undefined,
     });
+    data = await res.json().catch(() => ({})); // 读响应体时被放弃也算放弃:不能把读了一半的当成一个空对象交出去
   } catch (e) {
+    if (left) throw abortedError();
     if (e && e.name === 'AbortError') throw new ApiError(0, t('api.timeout'));
     throw e;
   } finally {
     if (timer) clearTimeout(timer);
+    if (nav) nav.removeEventListener('abort', onNav);
   }
-  const data = await res.json().catch(() => ({}));
+  if (left) throw abortedError();
   // 401 的响应体也交给登录页:代理面板的带 scope: 'reseller',还没登录也认得出是哪个面板
   if (res.status === 401) { onUnauthorized(data); const e = new ApiError(401, trErr(data.error || '未登录')); e.data = data; throw e; }
   // 其它错误也把响应体挂在 e.data 上:换套餐的 409 带着 code、warnings 与 preview,界面要读
