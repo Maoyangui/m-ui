@@ -92,7 +92,8 @@ const groups = () => [
   // 页面伪装(用户 N2):陌生人顺着端口、域名找过来时看到的普通网站。只在主机上设,随主机同步;下面是这台的预览(见 renderCamo)
   { id: 'camo', title: t('set.camo'), masterOnly: true, extra: '<div class="camo-box" id="camo-box" aria-live="polite"></div>', fields: [
     ['camoEnabled', t('set.camoEnabled'), 'bool', t('set.camoEnabledHelp')],
-    ['camoTemplate', t('set.camoTemplate'), 'camoPick', t('set.camoTemplateHelp')], // 一排带图标的选择卡(camoPickHTML)
+    ['camoTemplate', t('set.camoTemplate'), 'select', t('set.camoTemplateHelp'),
+      [['', t('set.camoT.auto')], ...CAMO_TEMPLATES.map(x => [x, t('set.camoT.' + x)]), ['redirect', t('set.camoT.redirect')]]],
     ['camoRedirect', t('set.camoRedirect'), 'text', t('set.camoRedirectHelp')], // 只在选了「跳转到我的网站」时显示(camoMode)
     ['camoPorts', t('set.camoPorts'), 'bool', t('set.camoPortsHelp')],
   ]},
@@ -188,15 +189,7 @@ export async function render(el) {
   // 页面伪装:换了样式马上按它预览(还没保存也一样);撤销这一项时 setCtl 发的是 input,下拉框本身选了也会发 input
   const camoSel = document.getElementById('set-camoTemplate');
   if (camoSel) camoSel.addEventListener('input', () => { camoMode(); renderCamo(); });
-  // 选择卡点了:写回隐藏的那个值(保存条、预览都看它)
-  el.querySelectorAll('.camo-picks').forEach(box => box.addEventListener('change', e => {
-    const r = e.target.closest('input[type=radio]');
-    const input = document.getElementById(box.dataset.for);
-    if (!r || !input) return;
-    input.value = r.value;
-    syncCamoPick(box, r.value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  }));
+
   const camoUrl = document.getElementById('set-camoRedirect');
   if (camoUrl) camoUrl.addEventListener('input', debounce(() => renderCamo(), 450));
   camoMode();
@@ -264,11 +257,7 @@ function setCtl(f, v) {
   const el = document.getElementById('set-' + f.k);
   if (!el) return;
   if (isBool(f.type)) el.checked = v === 'true'; else el.value = v;
-  if (f.type === 'camoPick') { // 撤销这一项时选择卡跟着回去,「跳转到」那一行跟着显示 / 收起
-    const box = document.querySelector(`.camo-picks[data-for="${el.id}"]`);
-    if (box) syncCamoPick(box, v);
-    camoMode();
-  }
+  if (f.k === 'camoTemplate') camoMode(); // 撤销这一项时「跳转到」那一行跟着显示 / 收起
   if (f.type === 'mutes') { // 勾选框跟着隐藏的值走(撤销这一项时)
     const off = new Set(String(v || '').split(',').filter(Boolean));
     document.querySelectorAll(`.mutes[data-for="${el.id}"] input[data-mute]`).forEach(cb => { cb.checked = !off.has(cb.dataset.mute); });
@@ -291,7 +280,7 @@ const clip = v => (v.length > 40 ? v.slice(0, 38) + '…' : v);
 function showVal(f, v) {
   if (isBool(f.type)) return t(v === 'true' ? 'set.sb.on' : 'set.sb.off');
   if (f.type === 'mutes') return v ? t('set.attnOff', { list: v.split(',').map(id => t('attn.cat.' + id)).join(t('node.sep')) }) : t('set.attnAllOn');
-  if (f.type === 'camoPick') return t('set.camoT.' + (v || 'auto'));
+
   if (f.type === 'select') { const o = (f.options || []).find(x => x[0] === v); return o ? o[1] : v; }
   if (v === '') return defaults[f.k] !== undefined ? t('set.sb.defaultV', { v: defaults[f.k] }) : t('set.sb.empty');
   if (SECRET.test(f.k)) return '••••••';
@@ -429,8 +418,8 @@ async function saveAll() {
 // 一项设置一行:左边名称 + 说明,右边控件(开关靠右);长文本框(公告、模板)名称在上、框在下占满。
 // 控件的 id 仍是 set-<键>,保存逻辑不用跟着变
 // 宽屏两列时也各占一整行的:功德箱 / 在线设备数和流量奖励这两个「要不要为它联网」的开关,一上一下放在一起(用户 N15);
-// 页面伪装的总开关说明长,占一整行,下面样式和 80 / 443 两项并排
-const WIDE = new Set(['supportOnline', 'rewardEnabled', 'camoEnabled', 'camoRedirect', 'camoPorts']);
+// 页面伪装的总开关说明长,占一整行;下面「伪装成」和 80 / 443 两项并排,选了跳转时网址那一行占整行、排在它们后面(见 style.css .camo-rd-row)
+const WIDE = new Set(['supportOnline', 'rewardEnabled', 'camoEnabled', 'camoRedirect']);
 
 function rowHTML(s, [k, label, type, help, options]) {
   const id = 'set-' + k;
@@ -439,7 +428,7 @@ function rowHTML(s, [k, label, type, help, options]) {
     const on = boolSetting(s[k], k === 'subPageEnabled' || type === 'boolOn');
     return `<div class="set-row bool${WIDE.has(k) ? ' wide' : ''}">${info}<div class="set-ctl"><label class="switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></label></div></div>`;
   }
-  if (type === 'camoPick') return camoPickHTML(id, info, label, String(s[k] ?? ''));
+
   if (type === 'mutes') { // 概况提醒:分三小块的一组勾选框(勾着 = 提醒),值存在隐藏的输入框里给保存条用
     const v = normMutes(s[k]), off = new Set(v.split(',').filter(Boolean));
     const cats = attnCatsFor(isNodeRole());
@@ -456,7 +445,7 @@ function rowHTML(s, [k, label, type, help, options]) {
   const ctl = type === 'select'
     ? `<select id="${id}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(s[k] ?? '') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`
     : `<input id="${id}" type="${type}" value="${esc(s[k] ?? '')}" placeholder="${esc(placeholders[k] ?? defaults[k] ?? '')}">${textMax[k] ? charCount(id, textMax[k]) : ''}`;
-  return `<div class="set-row">${info}<div class="set-ctl">${ctl}</div></div>`;
+  return `<div class="set-row${WIDE.has(k) ? ' wide' : ''}${k === 'camoRedirect' ? ' camo-rd-row' : ''}">${info}<div class="set-ctl">${ctl}</div></div>`;
 }
 
 // 左侧分区导航:按页面上现有的分区卡片生成(容灾、配对信息是后插进来的,插完再调一次)。
@@ -512,27 +501,6 @@ async function renderCamo() {
   if (camoSaved('camoEnabled') && camoSaved('camoPorts') && !(d.ports || []).length) camoTimer = setTimeout(renderCamo, 32000);
 }
 
-// 「伪装成」:六张选择卡(图标 + 名字 + 一句说明),值存在隐藏的输入框里(保存条、预览都看它)
-const CAMO_PICKS = ['', 'mirror', 'downloads', 'video', 'blog', 'redirect'];
-const CAMO_ICONS = {
-  '': '<path d="M3 7h3c3 0 4 2 6 5s3 5 6 5h3"/><path d="M3 17h3c1.4 0 2.4-.5 3.3-1.4M14.7 8.4C15.6 7.5 16.6 7 18 7h3"/><path d="M18 4l3 3-3 3M18 14l3 3-3 3"/>',
-  mirror: '<rect x="3" y="4" width="18" height="6.5" rx="1.6"/><rect x="3" y="13.5" width="18" height="6.5" rx="1.6"/><path d="M7 7.25h.01M7 16.75h.01M11 7.25h6M11 16.75h6"/>',
-  downloads: '<path d="M12 3.5v11.5M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 19.5h15"/>',
-  video: '<rect x="3" y="5" width="18" height="14" rx="2.6"/><path d="M10 9.3v5.4l4.6-2.7z"/>',
-  blog: '<path d="M6 3.5h8.5L19 8v12.5H6z"/><path d="M14 3.5V8h5M9.5 12h6M9.5 15.5h6"/>',
-  redirect: '<path d="M14 4h6v6M20 4l-8.5 8.5"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
-};
-function camoPickHTML(id, info, label, v) {
-  const cur = CAMO_PICKS.includes(v) ? v : '';
-  const cards = CAMO_PICKS.map(val => `<label class="camo-pick${val === cur ? ' on' : ''}">
-      <input type="radio" name="${id}-pick" value="${val}" ${val === cur ? 'checked' : ''}>
-      <span class="camo-pi" aria-hidden="true"><svg viewBox="0 0 24 24">${CAMO_ICONS[val]}</svg></span>
-      <b>${esc(t('set.camoT.' + (val || 'auto')))}</b><small>${esc(t('set.camoD.' + (val || 'auto')))}</small></label>`).join('');
-  return `<div class="set-row stack">${info}<div class="set-ctl"><input type="hidden" id="${id}" value="${esc(v)}"><div class="camo-picks" role="radiogroup" aria-label="${esc(label)}" data-for="${id}">${cards}</div></div></div>`;
-}
-function syncCamoPick(box, v) {
-  box.querySelectorAll('input[type=radio]').forEach(r => { r.checked = r.value === v; r.closest('.camo-pick').classList.toggle('on', r.checked); });
-}
 
 // 「跳转到」那一行只在选了「跳转到我的网站」时显示(存着的网址不动,换回伪装站时也还在)
 function camoMode() {

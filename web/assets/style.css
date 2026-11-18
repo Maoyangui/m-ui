@@ -1406,7 +1406,8 @@ button.badge { cursor: pointer; font: inherit; font-size: .72rem; }
 @media (min-width: 1500px) { .settings { grid-template-columns: 11.5rem minmax(0, 84rem); } }
 @container (min-width: 60rem) {
   .set-rows { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 3rem; }
-  .set-rows > .set-row:nth-child(2):not(.stack) { border-top: none; }
+  /* 第一行是两个半宽的格子时,第二个格子也是第一行,上面不画线;第一行占整行(比如页面伪装的总开关)时第二个格子在第二行,照常画线 */
+  .set-rows > .set-row:first-child:not(.stack):not(.wide) + .set-row:not(.stack):not(.wide) { border-top: none; }
   .set-rows > .set-row.stack, .set-rows > .set-row.wide { grid-column: 1 / -1; }
   /* 半宽的格子里:输入类的标题和说明放上面、输入框放下面(左右分时说明挤成五六行,输入框旁边空一大块);开关类照旧左右排 */
   .set-rows > .set-row:not(.bool) { grid-template-columns: minmax(0, 1fr); gap: .55rem; align-content: start; }
@@ -1449,20 +1450,9 @@ button.badge { cursor: pointer; font: inherit; font-size: .72rem; }
 .camo-tag.wait::before { background: var(--primary); }
 .camo-tag[title] { cursor: help; }
 .camo-foot { margin: .9rem 0 0; padding-top: .75rem; border-top: 1px dashed var(--divider); font-size: var(--fs-xs); line-height: 1.6; color: var(--faint); }
-/* 「伪装成」的选择卡:图标 + 名字 + 一句说明;手机两列,卡片够宽三列,宽屏一排六张 */
-.camo-picks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; margin-top: .15rem; }
-@container (min-width: 34rem) { .camo-picks { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@container (min-width: 72rem) { .camo-picks { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
-.camo-pick { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: .65rem; row-gap: .05rem; align-items: center; padding: .7rem .8rem; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); cursor: pointer; transition: border-color .12s, background .12s, box-shadow .12s; }
-.camo-pick:hover { border-color: var(--border-strong); }
-.camo-pick input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
-.camo-pick:focus-within { box-shadow: 0 0 0 3px var(--primary-ring); }
-.camo-pi { grid-row: 1 / 3; display: grid; place-items: center; width: 2.1rem; height: 2.1rem; border-radius: var(--radius-sm); background: var(--surface-3); color: var(--muted); transition: background .12s, color .12s; }
-.camo-pi svg { width: 1.15rem; height: 1.15rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.camo-pick b { min-width: 0; font-size: var(--fs-sm); font-weight: 600; line-height: 1.3; color: var(--text); overflow-wrap: anywhere; }
-.camo-pick small { min-width: 0; font-size: var(--fs-xs); line-height: 1.35; color: var(--muted); }
-.camo-pick.on { border-color: var(--primary); background: var(--primary-soft); box-shadow: inset 0 0 0 1px var(--primary); }
-.camo-pick.on .camo-pi { background: var(--primary); color: #fff; }
+/* 页面伪装:宽屏两列时「跳转到」那一行(占整行)排在「伪装成」「80 / 443」两项后面;一列时紧跟在「伪装成」下面 */
+@container (min-width: 60rem) { .set-rows > .set-row.camo-rd-row { order: 1; } }
+.set-row.camo-rd-row .set-ctl input { max-width: 42rem; }
 /* 跳转模式:窗口里画「有人打开 → 302 → 你的网站」 */
 .camo-rdbody { flex: 1 0 auto; display: grid; align-content: center; gap: .65rem; min-height: 13rem; padding: 1.4rem 1.3rem; background: var(--surface-2); }
 .camo-rdrow { display: grid; gap: .3rem; min-width: 0; }
