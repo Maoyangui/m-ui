@@ -196,7 +196,8 @@ func newSkin(g *gen) skin {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys) // map 的顺序每次不同:先排好,同一种子才生成同一套
-	style, pre := g.r.IntN(3), g.id(2)
+	// 前缀第一个字符必须是字母:CSS 类名不能以数字开头(以前用 g.id(2),约三成以数字开头,那一套样式规则整个失效 —— 自审 G1)
+	style, pre := g.r.IntN(3), string(rune('a'+g.r.IntN(26)))+g.id(1)
 	cls, used := map[string]string{}, map[string]bool{}
 	for _, k := range keys {
 		c := g.pick(clsWords[k])

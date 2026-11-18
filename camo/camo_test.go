@@ -115,6 +115,23 @@ func TestNoDeadLinksAndCleanImages(t *testing.T) {
 	}
 }
 
+// 类名都要是合法的 CSS 标识符(不能以数字、连字符加数字开头)。以前「前缀-词」那种写法的前缀约三成以数字开头,
+// 那一套样式规则整个失效、页面变成裸 HTML(自审 G1)。
+func TestSkinClassNames(t *testing.T) {
+	re := regexp.MustCompile(`^(?:[A-Za-z_]|-[A-Za-z_])[A-Za-z0-9_-]*$`)
+	for i := uint64(0); i < 2000; i++ {
+		g := newGen(i*0x9e3779b97f4a7c15+1, testNow)
+		for k, c := range g.sk.cls {
+			if !re.MatchString(c) {
+				t.Fatalf("第 %d 个种子的类名 %s = %q 不是合法的 CSS 标识符", i, k, c)
+			}
+		}
+		if !re.MatchString(g.sk.kf) {
+			t.Fatalf("关键帧名 %q 不合法", g.sk.kf)
+		}
+	}
+}
+
 // 回应:GET / HEAD 给页面(HEAD 不带正文),目录少了结尾斜杠 301,没有的路径站内 404,别的方法 405;
 // 进来之前别处加过的头(面板的安全头)一律清掉;ETag 对得上回 304。
 func TestServeHTTP(t *testing.T) {
