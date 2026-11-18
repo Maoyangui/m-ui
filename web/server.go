@@ -360,7 +360,11 @@ func (s *Server) Start() error {
 			}
 		}
 		if err != nil {
-			return err
+			// 面板绑不上(监听地址不在本机、端口被别的程序占着……):不能因此让整个进程退出 —— 数据面和订阅已经起来了,
+			// 退出就是所有线路一起停、systemd 反复重启(审计 A3)。面板先不开,后台每 15 秒按当时的设置再试。
+			logger.Error("面板没能在 ", pl.addr, " 上监听(", err, "),先不开面板,线路和订阅照常;每 15 秒重试。",
+				"可以用 m-ui set 改面板的监听设置(webListen / webPort)后重启,或用 m-ui doctor 查原因")
+			ln = nil
 		}
 	}
 	scheme := "http"
@@ -369,10 +373,14 @@ func (s *Server) Start() error {
 	}
 	slow := &slowreq.Logger{Name: "面板", Shape: panelRouteShape} // 处理超过 3 秒记一条(同一路由每分钟最多一条)
 	s.panelHandler = slow.Wrap(outer)
-	s.panelMu.Lock()
-	s.servePanel(ln, pl)
-	s.panelMu.Unlock()
-	logger.Info("面板已启动 ", scheme, "://", pl.addr, s.basePath())
+	if ln != nil {
+		s.panelMu.Lock()
+		s.servePanel(ln, pl)
+		s.panelMu.Unlock()
+		logger.Info("面板已启动 ", scheme, "://", pl.addr, s.basePath())
+	} else {
+		safe.Go("web.retryPanelListen", func() { s.retryPanelListen(15 * time.Second) })
+	}
 	if s.run != nil {
 		s.run.SetNodeQuotaHook(s.NodeQuotaTick) // 服务器的流量额度:定时任务叫这里判
 	}

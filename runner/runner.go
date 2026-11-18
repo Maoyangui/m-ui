@@ -2064,7 +2064,10 @@ func Run(dbPath string) error {
 			}
 		}
 		if err != nil {
-			return fmt.Errorf("启动订阅服务: %w", err)
+			// 订阅服务绑不上(监听地址不在本机、端口被别的程序占着……):不能因此让整个进程退出 —— 数据面已经起来了,
+			// 退出就是所有线路一起停、systemd 反复重启(审计 A3)。先不开订阅,后台每 15 秒按当时的设置再试。
+			logger.Error("订阅服务没能启动(", err, "),线路照常;每 15 秒重试。可以在面板设置里改订阅的监听设置,或用 m-ui doctor 查原因")
+			safe.Go("runner.retrySub", func() { r.retrySubStart(15 * time.Second) })
 		}
 	}
 	if startPanel != nil {
@@ -2174,4 +2177,22 @@ func (r *Runner) switchPanel(delay time.Duration) string {
 		return ""
 	}
 	return r.panelSwitch(delay)
+}
+
+// retrySubStart 开机时订阅服务没起来:每 every 按当时的设置重试一次,起来为止(管理员在面板里改了订阅的监听设置,
+// 保存时会直接重启订阅服务,这里看到已经在跑就收手)。
+func (r *Runner) retrySubStart(every time.Duration) {
+	for {
+		time.Sleep(every)
+		r.mu.Lock()
+		running := r.subSrv != nil && r.subSrv.Running()
+		r.mu.Unlock()
+		if running {
+			return
+		}
+		if err := r.RestartSub(); err == nil {
+			logger.Info("订阅服务已启动(之前绑不上)")
+			return
+		}
+	}
 }

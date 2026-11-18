@@ -13,6 +13,9 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/safe"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // 面板改了监听(端口、监听地址、证书 / 开关 HTTPS)后,在进程里换监听:不重启 m-ui,数据面、订阅、代理面板都不动,
@@ -94,20 +97,24 @@ func (s *Server) relistenPanel() error {
 		defer cancel()
 		_ = old.Shutdown(ctx)
 	}
-	if want.addr != cur.addr {
+	if want.addr != cur.addr && !samePort(want.addr, cur.addr) {
 		ln, err := s.openPanelListener(want)
 		if err != nil {
 			if cur.cert == "" {
 				s.watchTLS("panel", nil)
 			}
-			return fmt.Errorf("面板没能在 %s 上监听,还在原地址: %w", want.addr, err)
+			s.revertPanelListen(cur)
+			return fmt.Errorf("面板没能在 %s 上监听,还在原地址 %s(设置已改回): %w", want.addr, cur.addr, err)
 		}
 		s.servePanel(ln, want)
 		safe.Go("web.retirePanel", retire)
 		logger.Info("面板已改到 ", want.addr, map[bool]string{true: "(HTTPS)", false: ""}[want.cert != ""])
 		return nil
 	}
-	// 同一地址:Shutdown 先关监听再等旧连接收尾,原地址一空出来就起新的
+	// 同一端口(地址没变,或只换了监听地址):Shutdown 先关监听再等旧连接收尾,原端口一空出来就起新的。
+	// 只换地址也必须这样:Linux 上通配地址还在听时,同端口任何地址都绑不上(man 7 socket:"When the listening
+	// socket is bound to INADDR_ANY with a specific port then it is not possible to bind to this port for any local
+	// address")。以前按「地址变了」先起新的,0.0.0.0 → 127.0.0.1 必然失败、面板留在对外地址(审计 E4)。
 	safe.Go("web.retirePanel", retire)
 	var ln net.Listener
 	var err error
@@ -125,7 +132,8 @@ func (s *Server) relistenPanel() error {
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		return fmt.Errorf("面板没能换用新的证书设置,已按原样恢复: %w", err)
+		s.revertPanelListen(cur)
+		return fmt.Errorf("面板没能换到新的监听设置,已按原样恢复(设置已改回): %w", err)
 	}
 	s.servePanel(ln, want)
 	logger.Info("面板已在 ", want.addr, " 改用", map[bool]string{true: " HTTPS", false: " HTTP"}[want.cert != ""])
@@ -174,4 +182,86 @@ func (s *Server) panelHostHint() string {
 		return ip
 	}
 	return "<本机IP>"
+}
+
+// samePort 两个监听地址的端口相同。
+func samePort(a, b string) bool {
+	_, pa, ea := net.SplitHostPort(a)
+	_, pb, eb := net.SplitHostPort(b)
+	return ea == nil && eb == nil && pa == pb
+}
+
+// revertPanelListen 换监听没成功、面板还在 cur 上服务:把库里的面板监听设置改回 cur,
+// 让设置和实际一致 —— 不然面板这次照常,下次重启按库里那个绑不上的设置起,整个进程起不来(审计 A3)。
+func (s *Server) revertPanelListen(cur panelListen) {
+	host, port, err := net.SplitHostPort(cur.addr)
+	if err != nil || s.db == nil {
+		return
+	}
+	vals := map[string]string{"webListen": host, "webPort": port, "webCertFile": cur.cert, "webKeyFile": cur.key}
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		for k, v := range vals {
+			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "key"}}, DoUpdates: clause.AssignmentColumns([]string{"value"})}).
+				Create(&model.Setting{Key: k, Value: v}).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		logger.Warning("面板换监听没成功,把设置改回 ", cur.addr, " 也失败了(下次重启前请检查面板的监听设置): ", err)
+		return
+	}
+	logger.Warning("面板换监听没成功,设置已改回实际在用的 ", cur.addr)
+}
+
+// validateListenAddr 监听地址:留空 / 0.0.0.0 / :: 表示所有地址;填了具体地址,就要能在本机绑上(网卡上有它)。
+// 以前不校验:填了本机没有的地址(手误,或云服务器 NAT 过来的公网 IP),订阅当场断,
+// 面板下次重启绑不上、整个进程退出、所有线路跟着停(审计 A3)。
+func validateListenAddr(label, v string) error {
+	v = strings.TrimSpace(v)
+	if v == "" || v == "0.0.0.0" || v == "::" || v == "[::]" {
+		return nil
+	}
+	ln, err := net.Listen("tcp", net.JoinHostPort(strings.Trim(v, "[]"), "0"))
+	if err != nil {
+		return fmt.Errorf("%s的监听地址 %s 在本机绑不上(网卡上没有这个地址;云服务器的公网 IP 一般不在网卡上,要所有地址请留空或填 0.0.0.0): %v", label, v, err)
+	}
+	ln.Close()
+	return nil
+}
+
+// validateListens 保存设置前校验这次改了的监听地址(没改的不测:以前存下的值不能让无关的保存失败)。
+func (s *Server) validateListens(in map[string]string) error {
+	for _, k := range []struct{ key, label string }{{"webListen", "面板"}, {"subListen", "订阅"}, {"resellerListen", "代理面板"}} {
+		v, ok := in[k.key]
+		if !ok || strings.TrimSpace(v) == strings.TrimSpace(s.setting(k.key)) {
+			continue
+		}
+		if err := validateListenAddr(k.label, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// retryPanelListen 开机时面板没起来:每 every 按当时的设置重试一次,起来为止。
+func (s *Server) retryPanelListen(every time.Duration) {
+	for {
+		time.Sleep(every)
+		pl := s.wantPanelListen()
+		ln, err := s.openPanelListener(pl)
+		if err != nil {
+			continue
+		}
+		s.panelMu.Lock()
+		if s.httpSrv != nil { // 已经有别处起好了
+			s.panelMu.Unlock()
+			ln.Close()
+			return
+		}
+		s.servePanel(ln, pl)
+		s.panelMu.Unlock()
+		logger.Info("面板已在 ", pl.addr, " 上启动(之前绑不上)")
+		return
+	}
 }

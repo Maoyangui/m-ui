@@ -472,6 +472,19 @@ func (s *Server) storeCerts(skip string) []*certutil.Reloader {
 	return out
 }
 
+// Running 订阅服务起来了、还没停(开机时没起来,后台重试用它判断要不要接着试)。
+func (s *Server) Running() bool {
+	if s.httpSrv == nil || s.stop == nil {
+		return false
+	}
+	select {
+	case <-s.stop:
+		return false
+	default:
+		return true
+	}
+}
+
 func (s *Server) Stop() error {
 	if s.httpSrv == nil {
 		return nil

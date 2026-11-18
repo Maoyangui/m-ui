@@ -1441,6 +1441,10 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				in[k] = nv
 			}
 		}
+		if err := s.validateListens(in); err != nil { // 监听地址本机绑不上:同样会让订阅当场断、面板重启后起不来(审计 A3)
+			badRequest(w, err)
+			return
+		}
 		if err := s.validatePorts(in); err != nil { // 端口写错会导致重启后打不开,先拦下
 			badRequest(w, err)
 			return
@@ -1583,15 +1587,36 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				note = strings.TrimPrefix(note+";副机的面板端口、证书改了要重启 m-ui 才生效:先到主机服务器页把这台的 API 地址改成新地址,再重启", ";")
 			}
 		}
+		// 订阅 / 代理面板用新设置起不来:把这几项改回原来的、按原样起回去,不让服务就此停着
+		// (以前订阅就此停着,所有人的订阅当场断;库里留着起不来的设置,下次重启整个进程退出 —— 审计 A3)
+		revert := func(keys ...string) error {
+			back := map[string]string{}
+			for _, k := range keys {
+				back[k] = oldListen[k]
+			}
+			return s.run.SetSettings(back)
+		}
 		if s.run != nil && changed("subListen", "subPort", "subCertFile", "subKeyFile") { // 订阅路径每次请求现读,改了不用重启
 			if err := s.run.RestartSub(); err != nil {
-				note = strings.TrimPrefix(note+";订阅服务没能用新设置启动: "+err.Error(), ";")
+				msg := ";订阅服务没能用新设置启动(" + err.Error() + "),已改回原来的设置"
+				if rerr := revert("subListen", "subPort", "subCertFile", "subKeyFile"); rerr != nil {
+					msg = ";订阅服务没能用新设置启动(" + err.Error() + "),改回原设置也失败: " + rerr.Error()
+				} else if err2 := s.run.RestartSub(); err2 != nil {
+					msg += ",但按原设置也没起来: " + err2.Error()
+				}
+				note = strings.TrimPrefix(note+msg, ";")
 			}
 		}
 		if s.run != nil && changed("resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile") {
 			_ = s.StopReseller()
 			if err := s.StartReseller(); err != nil {
-				note = strings.TrimPrefix(note+";代理面板没能用新设置启动: "+err.Error(), ";")
+				msg := ";代理面板没能用新设置启动(" + err.Error() + "),已改回原来的设置"
+				if rerr := revert("resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile"); rerr != nil {
+					msg = ";代理面板没能用新设置启动(" + err.Error() + "),改回原设置也失败: " + rerr.Error()
+				} else if err2 := s.StartReseller(); err2 != nil {
+					msg += ",但按原设置也没起来: " + err2.Error()
+				}
+				note = strings.TrimPrefix(note+msg, ";")
 			}
 		}
 		if note != "" {
