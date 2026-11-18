@@ -63,8 +63,11 @@ func appMock(s *Site, g *gen, kind, product string) string {
 	switch kind {
 	case "Player":
 		k := g.pick(scenes)
+		// 进度条和两边的时间对得上(以前三样各自随机,会出现 3:10 / 58:00 却走了六成 —— 自审 G4)
+		total, pct := g.n(24*60, 58*60+59), g.n(18, 62)
+		cur := total * pct / 100
 		fmt.Fprintf(&body, `<div class="%s"><img src="%s" alt=""><div class="%s"><s></s><span>%d:%02d</span><i><b style="width:%d%%"></b></i><span>%d:%02d</span></div></div><div class="%s">Up next</div>`,
-			c("stage"), pic(0, k, g.pick([]string{"dusk", "night", "dawn"}), 800, 450, 200, 112), c("ctrl"), g.n(3, 19), g.n(0, 59), g.n(18, 62), g.n(24, 58), g.n(0, 59), c("lhead"))
+			c("stage"), pic(0, k, g.pick([]string{"dusk", "night", "dawn"}), 800, 450, 200, 112), c("ctrl"), cur/60, cur%60, pct, total/60, total%60, c("lhead"))
 		titles := map[string]bool{}
 		for i := 0; i < 3; i++ {
 			ti, kind2, tod, photo := s.videoPick(g, 101+i, titles)
@@ -90,7 +93,7 @@ func appMock(s *Site, g *gen, kind, product string) string {
 				c("track"), esc(name), c("ms"), c("ms"), waveSVG(g, c("wave"), hslHex(hue, 55, 52), hslHex(hue, 60, 94)))
 		}
 	case "Sync":
-		fmt.Fprintf(&body, `<div class="%s">Up to date · last synced %d min ago · %d.%d GB of %d GB used</div>`, c("lhead"), g.n(1, 9), g.n(12, 180), g.n(0, 9), []int{200, 500, 1000, 2000}[g.r.IntN(4)])
+		fmt.Fprintf(&body, `<div class="%s">Up to date · last synced %d min ago · %d.%d GB of %s used</div>`, c("lhead"), g.n(1, 9), g.n(12, 180), g.n(0, 9), []string{"200 GB", "500 GB", "1 TB", "2 TB"}[g.r.IntN(4)])
 		for _, n := range g.pickN(syncNames, 7) {
 			ico := c("ico")
 			size := "—"
