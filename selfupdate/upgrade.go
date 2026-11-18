@@ -160,23 +160,55 @@ func Stage(ctx context.Context, tag, binPath string, logf func(string, ...interf
 	return tmp, nil
 }
 
-// Swap 把正式程序挪到 prev、新程序挪到正式位置;第二步失败会把旧程序放回去。
-// 用 rename 而不是复制:正在运行的进程持有旧 inode,不受影响。
+// Swap 旧程序留一份到 prev,新程序一步改名换到正式位置。
+// 旧程序用硬链接留(做不了硬链接就复制一份):正式位置上的文件始终在,换新程序是一次原子改名,
+// 进程在任何两步之间被杀都不会出现「正式程序不在」(审计 L1:以前先把正式程序改名挪走、再把新的改名过来)。
+// 用 rename 而不是复制换新程序:正在运行的进程持有旧 inode,不受影响。
 func Swap(binPath, newPath, prevPath string) error {
+	if _, err := os.Stat(newPath); err != nil {
+		return fmt.Errorf("新程序不在: %w", err) // 先查清楚,别为一次注定失败的替换动了 prev
+	}
 	os.Remove(prevPath)
-	if err := os.Rename(binPath, prevPath); err != nil {
-		if !os.IsNotExist(err) { // 首次安装没有旧程序,直接落新的
-			return fmt.Errorf("暂存旧程序失败: %w", err)
+	if _, err := os.Stat(binPath); err == nil { // 首次安装没有旧程序,直接落新的
+		if err := os.Link(binPath, prevPath); err != nil {
+			if err := copyExecutable(binPath, prevPath); err != nil {
+				return fmt.Errorf("暂存旧程序失败: %w", err)
+			}
 		}
 	}
 	if err := os.Rename(newPath, binPath); err != nil {
-		if _, e := os.Stat(prevPath); e == nil {
-			os.Rename(prevPath, binPath)
-		}
 		os.Remove(newPath)
 		return fmt.Errorf("替换 %s 失败: %w", binPath, err)
 	}
 	return nil
+}
+
+// copyExecutable 复制一份可执行文件(保留权限位);文件系统不支持硬链接时 Swap 用它留旧程序。
+func copyExecutable(from, to string) error {
+	in, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	st, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(to, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, st.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		os.Remove(to)
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		out.Close()
+		os.Remove(to)
+		return err
+	}
+	return out.Close()
 }
 
 // Prune 只保留 dir 里前缀为 prefix 的最新 keep 个文件(按修改时间)。

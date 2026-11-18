@@ -32,6 +32,9 @@ func TestSwap(t *testing.T) {
 	if b, _ := os.ReadFile(bin); string(b) != "new" {
 		t.Fatalf("失败后正式程序应原样,实际 %q", b)
 	}
+	if b, _ := os.ReadFile(prev); string(b) != "old" { // 新程序不在时不该动已有的 .prev
+		t.Fatalf("失败后 .prev 应原样,实际 %q", b)
+	}
 	// 首次安装:没有旧程序也能落新的
 	os.Remove(bin)
 	os.Remove(prev)
