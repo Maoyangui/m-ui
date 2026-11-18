@@ -140,6 +140,12 @@ func (s *Service) replicaInfo() (ReplicaInfo, bool) {
 		return ri, false
 	}
 	if _, err := os.Stat(filepath.Join(s.Dir(), fileCur)); err != nil {
+		// cur 不在、prev 在:上一次换副本时在两步之间退出了(0.8.0 及以前先把 cur 改名成 prev、再把新的改名成 cur)。
+		// 这时 replica.json 还没换,记的正是现在躺在 prev 的那一份 —— 让它顶上,接管照样能做
+		// (openReplica 本来就会退回去用 prev;下一份副本到了会正常放进 cur)。以前直接说没有副本(审计 E2)。
+		if _, perr := os.Stat(filepath.Join(s.Dir(), filePrev)); perr == nil {
+			return ri, true
+		}
 		return ri, false
 	}
 	return ri, true
@@ -274,8 +280,13 @@ func (s *Service) ReceiveReplica(body io.Reader) (uint64, error) {
 	if _, err := os.Stat(cur); err == nil {
 		_ = os.Remove(prev)
 		_ = os.Remove(filepath.Join(s.Dir(), filePrevInfo))
-		if err := os.Rename(cur, prev); err != nil {
-			return fail(err)
+		// 上一份用硬链接留成 prev:cur 一直在,下面把新副本改名成 cur 是一次原子替换,进程在任何两步之间退出
+		// 都不会出现「只剩 prev」。以前先把 cur 改名成 prev 再换新的,两步之间退出,replicaInfo 只认 cur,
+		// 手动 / 强制 / 自动接管都说本机没有副本(审计 E2)。做不了硬链接的文件系统才退回改名。
+		if err := os.Link(cur, prev); err != nil {
+			if err := os.Rename(cur, prev); err != nil {
+				return fail(err)
+			}
 		}
 		if hadOld {
 			b, _ := json.MarshalIndent(old, "", "  ")
@@ -493,7 +504,11 @@ func (s *Service) selfCheck(ri ReplicaInfo) (int64, error) {
 	}
 	defer os.RemoveAll(dir)
 	s.storeMu.Lock() // 解密期间别让新的一份把 cur 换掉
-	meta, _, err := s.decryptReplica(filepath.Join(s.Dir(), fileCur), dir, s.replicaPubFor(fileCur))
+	name := fileCur
+	if _, err := os.Stat(filepath.Join(s.Dir(), fileCur)); err != nil {
+		name = filePrev // 只剩 prev 的现场:replicaInfo 让 prev 顶上了,自检也检它(审计 E2)
+	}
+	meta, _, err := s.decryptReplica(filepath.Join(s.Dir(), name), dir, s.replicaPubFor(name))
 	s.storeMu.Unlock()
 	if err != nil {
 		return 0, err

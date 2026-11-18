@@ -166,3 +166,56 @@ func TestStandbySelfCheckDetectsDamage(t *testing.T) {
 		t.Fatal("自检失败要记下原因")
 	}
 }
+
+// 审计 E2:0.8.0 换副本时在「cur 改名成 prev」和「新的改名成 cur」之间退出,只剩 prev。
+// 现在 replicaInfo 让 prev 顶上(replica.json 记的正是它),自检检 prev,解副本也能用 prev —— 接管不会说没有副本。
+func TestReplicaOnlyPrevLeftStillUsable(t *testing.T) {
+	m, c := standbyPair(t)
+	if _, err := c.ReceiveReplica(bytes.NewReader(replicaFor(t, m, c, 20))); err != nil {
+		t.Fatal(err)
+	}
+	// 摆出旧版本中途退出的现场:prev 是现在这份,cur 没了,replica.json 还是这份的信息
+	cur, prev := filepath.Join(c.Dir(), fileCur), filepath.Join(c.Dir(), filePrev)
+	os.Remove(prev)
+	if err := os.Rename(cur, prev); err != nil {
+		t.Fatal(err)
+	}
+	ri, ok := c.replicaInfo()
+	if !ok || ri.Seq != 20 {
+		t.Fatalf("只剩 prev 时应让它顶上: ok=%v seq=%d", ok, ri.Seq)
+	}
+	if err := c.SelfCheck(); err != nil {
+		t.Fatalf("自检应检 prev 并通过: %v", err)
+	}
+	if _, _, name, err := c.openReplica(t.TempDir()); err != nil || name != filePrev {
+		t.Fatalf("应能用 prev 解开: %s %v", name, err)
+	}
+	// 下一份到了:正常放进 cur
+	if _, err := c.ReceiveReplica(bytes.NewReader(replicaFor(t, m, c, 21))); err != nil {
+		t.Fatal(err)
+	}
+	if ri, ok := c.replicaInfo(); !ok || ri.Seq != 21 {
+		t.Fatalf("新的一份应成为 cur: %v %d", ok, ri.Seq)
+	}
+	if _, err := os.Stat(cur); err != nil {
+		t.Fatal("cur 应在")
+	}
+}
+
+// 正常换副本时 cur 一直在:prev 是上一份的硬链接(或改名),新副本原子替换 cur。
+func TestReplicaRotationKeepsCurPresent(t *testing.T) {
+	m, c := standbyPair(t)
+	r1 := replicaFor(t, m, c, 30)
+	if _, err := c.ReceiveReplica(bytes.NewReader(r1)); err != nil {
+		t.Fatal(err)
+	}
+	r2 := replicaFor(t, m, c, 31)
+	if _, err := c.ReceiveReplica(bytes.NewReader(r2)); err != nil {
+		t.Fatal(err)
+	}
+	cur, _ := os.ReadFile(filepath.Join(c.Dir(), fileCur))
+	prev, _ := os.ReadFile(filepath.Join(c.Dir(), filePrev))
+	if !bytes.Equal(cur, r2) || !bytes.Equal(prev, r1) {
+		t.Fatal("cur 应是新的、prev 是上一份")
+	}
+}
