@@ -27,6 +27,7 @@ import (
 	"crypto/sha256"
 
 	"github.com/Maoyangui/m-ui/safe"
+	"github.com/Maoyangui/m-ui/util/fsutil"
 
 	"golang.org/x/crypto/acme"
 )
@@ -513,19 +514,12 @@ func writeCert(certPath, keyPath string, der [][]byte, key *ecdsa.PrivateKey) er
 		return err
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb})
-	// 先写临时文件再改名,避免服务读到半截文件
-	if err := atomicWrite(certPath, certPEM, 0o644); err != nil {
-		return err
-	}
-	return atomicWrite(keyPath, keyPEM, 0o600)
-}
-
-func atomicWrite(path string, data []byte, mode os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, mode); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	// 证书和私钥一起换:两份都写好、落盘之后才改名,第二个改名失败就把第一个写回原样。
+	// 以前先后各写一个,写私钥时磁盘满就留下「新证书 + 旧私钥」,下次加载报 private key does not match(审计 L4)。
+	return fsutil.WriteFilesAtomic(
+		fsutil.File{Path: keyPath, Data: keyPEM, Mode: 0o600},
+		fsutil.File{Path: certPath, Data: certPEM, Mode: 0o644},
+	)
 }
 
 // ---- 证书信息 ----
