@@ -17,6 +17,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/util/fsutil"
 
 	"gorm.io/gorm"
 )
@@ -235,12 +236,20 @@ func ApplyPending(dbPath string) (bool, error) {
 	return true, nil
 }
 
-// pruneBaks 只保留最近 keep 份 <db>.bak-* 旧库。
+// pruneBaks 只保留最近 keep 份 <db>.bak-* 旧库;删的时候连同各自的 -wal / -shm 一起删。
+// (-wal / -shm 也匹配 .bak-*,不按主库分组的话会被当成单独的一份去数、去删,留下缺 WAL 的旧库。)
 func pruneBaks(dbPath string, keep int) {
 	matches, _ := filepath.Glob(dbPath + ".bak-*")
-	sort.Sort(sort.Reverse(sort.StringSlice(matches))) // 文件名带时间,倒序就是新的在前
-	for i := keep; i < len(matches); i++ {
-		os.Remove(matches[i])
+	var bases []string
+	for _, m := range matches {
+		if strings.HasSuffix(m, "-wal") || strings.HasSuffix(m, "-shm") {
+			continue
+		}
+		bases = append(bases, m)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(bases))) // 文件名带时间,倒序就是新的在前
+	for i := keep; i < len(bases); i++ {
+		fsutil.RemoveDB(bases[i])
 	}
 }
 
@@ -275,22 +284,26 @@ func Restore(dbPath, srcPath string) (Report, error) {
 	if err != nil {
 		return rep, err
 	}
-	bak := ""
-	if _, err := os.Stat(dbPath); err == nil {
-		bak = dbPath + ".bak-" + time.Now().Format("20060102-150405")
-		if err := os.Rename(dbPath, bak); err != nil {
-			return rep, fmt.Errorf("备份当前库: %w", err)
-		}
-		pruneBaks(dbPath, 2) // 每次还原都留一份旧库,只保留最近两份,别越积越多
-	}
-	for _, suffix := range []string{"-wal", "-shm"} {
-		os.Remove(dbPath + suffix)
-	}
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return rep, err
 	}
-	if err := os.WriteFile(dbPath, dbBytes, 0o600); err != nil {
-		return rep, err
+	// 新库先完整写到同目录的临时文件并落盘,再一步换上;原库连同 -wal / -shm 一起改名留作 .bak-时间。
+	// 写不下(磁盘满)就到此为止,原库原地不动。以前先把原库改名再写新库,写失败留下空库,下次启动被当成
+	// 全新安装(默认 admin/admin、用户和线路全空,审计 A1);原库的 -wal / -shm 还被直接删掉,进程被强杀过的话,
+	// 留下的旧库少了 WAL 里已提交的数据(审计 A2)。
+	tmp := dbPath + ".restoring"
+	fsutil.RemoveDB(tmp)
+	if err := fsutil.WriteFileAtomic(tmp, dbBytes, 0o600); err != nil {
+		fsutil.RemoveDB(tmp)
+		return rep, fmt.Errorf("写入备份里的数据库(当前库没动): %w", err)
+	}
+	bak, err := fsutil.SwapDB(dbPath, tmp, fsutil.FreeDBName(dbPath+".bak-"+time.Now().Format("20060102-150405")))
+	if err != nil {
+		fsutil.RemoveDB(tmp)
+		return rep, fmt.Errorf("%w(当前库没动)", err)
+	}
+	if bak != "" {
+		pruneBaks(dbPath, 2) // 每次还原都留一份旧库,只保留最近两份,别越积越多
 	}
 	rep.DB, rep.Bak = true, bak
 	// 走到这里数据库**已经**换成备份里的了。之后任何一个证书写失败,都不能再说"还原失败、继续用当前库":
