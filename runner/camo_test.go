@@ -103,20 +103,30 @@ func TestCamoSourceFollowsSettings(t *testing.T) {
 	}
 }
 
-// freeTCP 测试用的端口挑在临时端口范围(Linux 默认 32768~60999)以外:系统给 ":0" 的端口就在这个范围里,
+// freeTCP 挑 n 个互不相同的空闲端口。挑在临时端口范围(Linux 默认 32768~60999)以外:系统给 ":0" 的端口就在这个范围里,
 // 测试里发出去的连接也从这个范围取本地端口,恰好取到同一个号时伪装站再监听就撞上 address already in use(CI 上遇到过)。
-func freeTCP(t *testing.T) int {
+// 挑的时候先都占着,挑完一起放,不会挑出同一个号。
+func freeTCP(t *testing.T, n int) []int {
 	t.Helper()
-	for i := 0; i < 500; i++ {
+	var out []int
+	var lns []net.Listener
+	defer func() {
+		for _, ln := range lns {
+			ln.Close()
+		}
+	}()
+	for i := 0; i < 500 && len(out) < n; i++ {
 		p := 20000 + mrand.IntN(12000)
 		ln, err := net.Listen("tcp", ":"+strconv.Itoa(p))
 		if err == nil {
-			ln.Close()
-			return p
+			lns = append(lns, ln)
+			out = append(out, p)
 		}
 	}
-	t.Fatal("找不到空闲端口")
-	return 0
+	if len(out) < n {
+		t.Fatal("找不到空闲端口")
+	}
+	return out
 }
 
 func camoPortStates(r *Runner) map[int]CamoPortState {
@@ -133,7 +143,8 @@ func camoPortStates(r *Runner) map[int]CamoPortState {
 func TestCamoPorts(t *testing.T) {
 	r := newCamoRunner(t)
 	oldHTTP, oldHTTPS := camoHTTP, camoHTTPS
-	camoHTTP, camoHTTPS = freeTCP(t), freeTCP(t)
+	ports := freeTCP(t, 2)
+	camoHTTP, camoHTTPS = ports[0], ports[1]
 	t.Cleanup(func() { camoHTTP, camoHTTPS = oldHTTP, oldHTTPS })
 	camo.SetSource(r.camoSource)
 	t.Cleanup(func() { camo.SetSource(nil) })

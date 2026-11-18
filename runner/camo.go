@@ -56,6 +56,7 @@ const CamoRedirectMode = "redirect"
 // camoPort 80 / 443 上的一个监听。srv 为 nil 时 why 写着没开的原因。
 type camoPort struct {
 	srv *http.Server
+	ln  net.Listener // 让出端口时直接关它:srv.Close 赶在后台 Serve 起来之前调的话关不掉监听(见 closeCamoPort)
 	why string
 }
 
@@ -325,7 +326,7 @@ func (r *Runner) camoPortsSync() {
 		}
 		srv := &http.Server{Handler: r.camoPortHandler(port), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second,
 			IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, ErrorLog: log.New(io.Discard, "", 0)}
-		cp.srv, cp.why = srv, ""
+		cp.srv, cp.ln, cp.why = srv, ln, ""
 		go func() { _ = srv.Serve(ln) }()
 		logger.Info("页面伪装:", port, " 端口已放上伪装站")
 	}
@@ -397,13 +398,18 @@ func (r *Runner) camoPortsClose() {
 	}
 }
 
-// closeCamoPort 关掉这个端口上的监听;原来开着的返回 true。
+// closeCamoPort 关掉这个端口上的监听,返回时端口已经放开;原来开着的返回 true。
+// 监听要自己关:srv.Serve 在后台 goroutine 里起,srv.Close 赶在它登记监听之前调的话不管这个监听,端口要等那个 goroutine
+// 跑起来才放 —— 刚占上就要让给线路(重载数据面)时,线路会绑不上(压力测试里遇到)。
 func closeCamoPort(cp *camoPort) bool {
 	if cp.srv == nil {
 		return false
 	}
 	_ = cp.srv.Close()
-	cp.srv = nil
+	if cp.ln != nil {
+		_ = cp.ln.Close()
+	}
+	cp.srv, cp.ln = nil, nil
 	return true
 }
 
