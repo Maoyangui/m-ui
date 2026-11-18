@@ -1184,31 +1184,38 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
 
 /* ===================== 概况 ===================== */
 /* 栅格:最多 4 列,列数由容器宽度决定(不足 47rem 1 列、47rem 起 2 列、71rem 起 3 列、95rem 起 4 列);dense 回填换行留下的洞。
-   同一行的卡片拉成一样高;大卡片(流量走势、最近入站连接)占两列并跨两行,右边正好叠两张小卡,四边都对齐,不留参差的空白 */
+   同一行的卡片拉成一样高。大卡片(流量走势、最近入站连接)占两列,但都不跨行:跨两行时它的高度由旁边两张卡片定,
+   生产上在线 15 人、排行 10 个、操作 10 条,图下面就空出一大块(把图拉长又变形、太高)—— 用户 N1。
+   现在每一行放内容量相当的几张卡片,行高由它们自己定,数据多少都不留大块空白 */
 .dash-grid { container-type: inline-size; display: grid; gap: 1rem; align-items: stretch; grid-auto-flow: row dense;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, max(23rem, calc((100% - 3rem) / 4))), 1fr)); }
 .dash-grid > * { margin: 0; min-width: 0; }
 .dash-grid > .span-all { grid-column: 1 / -1; }
 @container (min-width: 47rem) { .dash-grid > .span-2 { grid-column: span 2; } }
-/* 3 列:流量走势 | 上游巡检 / 当前在线;最近入站连接 | 流量排行 / 最近操作;数据面 | 核心日志(两列)。代理面板:当前在线 | 快到期 / 快用完 */
+/* 2 列:流量走势(两列);上游巡检 | 当前在线;最近入站连接(两列);流量排行 | 最近操作;数据面 | 核心日志。
+   3 列:流量走势(两列)| 上游巡检;当前在线 | 最近入站连接(两列);流量排行 | 最近操作 | 数据面;核心日志整行。代理面板:当前在线 | 快到期 / 快用完 */
 @container (min-width: 71rem) and (max-width: 94.99rem) {
-  .dash-grid > :is(#dash-chart-card, #dash-conns-card), .dash-grid.rs > #dash-online-card { grid-row: span 2; }
-  .dash-grid > .dash-log-card { grid-column: span 2; }
-}
-/* 4 列:流量走势 | 上游巡检 当前在线 / 流量排行 最近操作;最近入站连接(三列)| 数据面;核心日志整行 */
-@container (min-width: 95rem) {
-  .dash-grid > #dash-chart-card { grid-row: span 2; }
-  .dash-grid > #dash-conns-card { grid-column: span 3; }
+  .dash-grid.rs > #dash-online-card { grid-row: span 2; }
   .dash-grid > .dash-log-card { grid-column: 1 / -1; }
 }
-
-/* 流量走势跨两行时(3 列、4 列):图跟着卡片的高度走,不再固定高度、下面空一大块(用户 N1)。
-   图表区占满卡片剩下的高度,图本身绝对定位 —— 只跟着卡片变,不反过来把卡片撑高(dashboard.js 的 chartHeight 量它画图) */
+/* 4 列:流量走势(两列)| 上游巡检 | 当前在线;最近入站连接(两列)| 流量排行 | 最近操作;数据面 | 核心日志(三列) */
+@container (min-width: 95rem) {
+  .dash-grid > .dash-log-card { grid-column: span 3; }
+}
+/* 3 列、4 列时流量走势和别的卡片同一行:当前在线人多(15 个长名字)时那一行比图高几十像素,图跟着补上这一截,
+   只在 210~320 像素之间变(dashboard.js 的 chartHeight),不会被拉得过高、也不会变形。图绝对定位,不反过来撑高这一行 */
 @container (min-width: 71rem) {
   .dash-grid > #dash-chart-card { display: flex; flex-direction: column; }
-  .dash-grid > #dash-chart-card > #dash-chart { position: relative; flex: 1 1 auto; min-height: 16rem; }
+  .dash-grid > #dash-chart-card > #dash-chart { position: relative; flex: 1 1 auto; min-height: 15.75rem; }
   .dash-grid > #dash-chart-card > #dash-chart > .chart-wrap { position: absolute; inset: 0; }
 }
+/* 最近操作:两列及以上时能放几条显示几条(dashboard.js 的 fitAudit),列表本身不撑高这一行;放不下的整条藏起来 */
+@container (min-width: 47rem) {
+  .dash-grid > #dash-audit-card { display: flex; flex-direction: column; }
+  .dash-grid > #dash-audit-card > #dash-audit { position: relative; flex: 1 1 auto; min-height: 9.5rem; overflow: hidden; }
+  .dash-grid > #dash-audit-card > #dash-audit > .audit-list { position: absolute; inset: 0 0 auto 0; }
+}
+.audit-list > li[hidden] { display: none; }
 /* 上游巡检全部正常:卡片正中一个轻量的圆形对勾,下面一句话和上次巡检的时间(用户 N8) */
 #dash-health-card { display: flex; flex-direction: column; }
 #dash-health { flex: 1 1 auto; display: flex; flex-direction: column; }
@@ -1326,9 +1333,10 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
 
 
 /* 最近入站连接:定宽列,展开全部时限高滚动、表头吸顶;窄屏两行紧凑排 */
-table.grid.conns col.c-ip { width: 30%; } table.grid.conns col.c-user { width: 20%; } table.grid.conns col.c-line { width: 26%; }
+/* 百分比列合计不超过约 74%:后面「次数」「最近」两列是固定宽(4.2rem + 6.5rem),这张卡宽屏时只占两列(约 700 像素),合计超了「最近」会被挤成「刚…」 */
+table.grid.conns col.c-ip { width: 28%; } table.grid.conns col.c-user { width: 20%; } table.grid.conns col.c-line { width: 25%; }
 table.grid.conns col.c-cnt { width: 4.2rem; } table.grid.conns col.c-last { width: 6.5rem; }
-table.grid.conns.srv col.c-ip { width: 26%; } table.grid.conns.srv col.c-user { width: 16%; } table.grid.conns.srv col.c-line { width: 22%; } table.grid.conns.srv col.c-srv { width: 16%; }
+table.grid.conns.srv col.c-ip { width: 24%; } table.grid.conns.srv col.c-user { width: 15%; } table.grid.conns.srv col.c-line { width: 20%; } table.grid.conns.srv col.c-srv { width: 15%; }
 table.grid.conns .ipc { display: flex; align-items: center; gap: .3rem; min-width: 0; }
 table.grid.conns .ipv { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 table.grid.conns .ipc .badge { flex: none; }

@@ -1042,11 +1042,11 @@ function route(method, path, query, body) {
       case 'cert': if (seg[1] === 'status') return fx('GET cert/status') || { running: false, log: [] }; { const c = fx('GET cert') || { settings: S.settings, status: {} }; const use = S.certs.find(x => x.certFile === S.certUse.lines); return { ...c, notifyConfigured: true, certs: clone(S.certs), certPath: S.certUse.lines, panelCert: S.certUse.panel, subCert: S.certUse.sub, panelTLS: !!S.certUse.panel, subTLS: !!S.certUse.sub, source: use ? use.source : '', info: use ? clone(use.info) : { exists: false } }; }
       case 'sub-logo': return clone(S.logo || { set: false });
       case 'reach': return clone(S.reach);
-      case 'conns': return recentConns();
+      case 'conns': return S.connsOverride || recentConns(); // S.connsOverride:截图场景按生产量级给
       case 'sub-templates': return { clash: '# 只写想加的部分,节点和分组由面板填\nrules:\n  - DOMAIN-SUFFIX,example.org,DIRECT\n  - MATCH,Proxy\n', singbox: '{\n  "route": {\n    "rules": [{ "domain_suffix": ["example.org"], "outbound": "direct" }],\n    "final": "proxy"\n  }\n}\n' };
       case 'stats': { // 流量图、排行、明细:按请求的范围现算(见 demoSeries)
         const q = new URLSearchParams(query), hours = demoHours(q.get('hours'));
-        if (seg[1] === 'top') { const lim = Number(q.get('limit')) || 0; return demoTop(hours).slice(0, lim > 0 && lim <= 100 ? lim : 10); }
+        if (seg[1] === 'top') { const lim = Number(q.get('limit')) || 0; return (S.topOverride || demoTop(hours)).slice(0, lim > 0 && lim <= 100 ? lim : 10); } // S.topOverride:截图场景按生产量级给
         if (seg[1] === 'breakdown') return demoBreakdown(hours);
         const tag = q.get('tag'), b = Number(q.get('bucket')) || 0, tz = q.get('tz');
         const tzMin = tz !== null && tz !== '' && Math.abs(Number(tz)) <= 14 * 60 ? Number(tz) : demoTzMin();
@@ -1054,7 +1054,7 @@ function route(method, path, query, body) {
         return demoSeries(tag ? [tag] : S.users.map(u => u.name), hours, b >= 60 && b <= 7 * 86400 ? b : demoBucket(hours), tzMin); }
       case 'backup': if (seg[1] === 'list') return clone(demoBackupList()); return listByPrefix(path) ?? {};
       case 'sublogs': return demoSubLogs(query);
-      case 'audit': { const lim = Number(new URLSearchParams(query).get('limit')) || 0; return lim && lim <= 40 ? (S.logsCleared.audit ? [] : listByPrefix(path) ?? []) : demoAudit(query); } // 概况「最近操作」沿用导出的那份,日志页用现编的
+      case 'audit': { const lim = Number(new URLSearchParams(query).get('limit')) || 0; return lim && lim <= 40 ? (S.logsCleared.audit ? [] : S.auditOverride || (listByPrefix(path) ?? [])) : demoAudit(query); } // S.auditOverride:截图场景 // 概况「最近操作」沿用导出的那份,日志页用现编的
       case 'logs': return S.logsCleared.core ? [] : listByPrefix(path) ?? [];
       case 'keygen': { const t = new URLSearchParams(query).get('type');
         if (t === 'uuid') return { uuid: crypto.randomUUID() };

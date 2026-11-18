@@ -164,6 +164,7 @@ export async function render(el) {
   document.getElementById('dash-conn-q').addEventListener('input', e => { connQ = e.target.value.trim(); renderConns(); });
   onChipToggle('dash-online', renderOnline);
   watchChart();
+  watchAudit();
   renderStats(); renderCore(); renderOnline(); renderAttn();
   // 每块各自成败:Promise.allSettled,一块失败不会把整页换成报错卡
   const jobs = [guard('dash-chart', renderChart), guard('dash-audit', renderAudit), guard('dash-top', renderTop),
@@ -643,19 +644,20 @@ function coreExtras(s) {
 
 // ---- 流量走势:按容器像素宽出图,宽度变了用缓存重画(不重新请求)----
 let chartRO = null;
-// chartHeight 走势图的高度。宽屏时这张卡占两列、跨两行,高度由右边两行卡片(上游巡检、当前在线 / 流量排行、最近操作)定,
-// 图表区是 position: relative、图表绝对定位(不反过来撑高卡片,见 style.css):量出图表区还剩多高,图就画多高,
-// 不再是固定 210 像素、下面空一大块(用户 N1)。别的排法(一列、两列)照旧用 barChart 的默认高度。
+// chartHeight 宽屏(3 列、4 列)时走势图和上游巡检、当前在线同一行,那一行的高度多半由「当前在线」定:
+// 图跟着补上多出来的那一截,但只在 210~320 像素之间(用户 N1:跨两行时图会被拉得很长;现在不跨行,最多补几十像素)。
+// 别的排法(一列、两列,图自己占一行)照旧用 barChart 的默认高度。图表区绝对定位(见 style.css),不会反过来把这一行撑高
+const CHART_MAX = 320;
 function chartHeight(el) {
   if (getComputedStyle(el).position !== 'relative') return undefined;
   const sum = el.querySelector('.chart-summary');
   const free = el.clientHeight - (sum ? sum.offsetHeight + 10 : 34);
-  return Math.max(170, Math.floor(free));
+  return Math.min(CHART_MAX, Math.max(210, Math.floor(free)));
 }
 function drawChart(el, points, opts) {
   barChart(el, points, { ...opts, height: undefined });
-  const h = chartHeight(el); // 先按默认画一次,量得出汇总那一行有多高,再按剩下的高度重画
-  if (h && el.__chart) barChart(el, points, { ...opts, height: h });
+  const h = chartHeight(el); // 先按默认画一次,量出汇总那一行多高,再按剩下的高度重画
+  if (h && h !== 210 && el.__chart) barChart(el, points, { ...opts, height: h });
 }
 function watchChart() {
   if (chartRO) { chartRO.disconnect(); chartRO = null; }
@@ -665,7 +667,7 @@ function watchChart() {
   chartRO = new ResizeObserver(() => {
     if (!el.isConnected) { chartRO.disconnect(); chartRO = null; return; }
     const nw = Math.round(el.clientWidth), nh = Math.round(el.clientHeight);
-    if (!el.__chart || (Math.abs(nw - w) < 24 && Math.abs(nh - hh) < 24)) return;
+    if (!el.__chart || (Math.abs(nw - w) < 24 && Math.abs(nh - hh) < 12)) return;
     w = nw; hh = nh;
     drawChart(el, el.__chart.points, el.__chart.opts);
   });
@@ -802,7 +804,7 @@ function renderConns() {
   let list = connF === 'rejected' ? rej : failed ? fails : ok;
   if (!list.length) { setHTML(el, empty(connF === 'rejected' ? t('dash.conn.noRejected', { n: ok.length }) : failed ? t('dash.conn.noFailed') : t('dash.noConns')) + oldNote); return; }
   const mob = narrow();
-  const base = mob ? 6 : 10;
+  const base = mob ? 6 : 8; // 宽屏时和流量排行(10 个)、最近操作同一行:8 条加「显示全部」和它们差不多高(用户 N1)
   const total = list.length;
   if (connAll && connQ) list = list.filter(c => matches(connQ, c.ip, c.user, c.line, c.server));
   // 桌面:「显示全部」在限高滚动区里展开;手机:原地每次多 20 条,不开内滚区。
@@ -844,10 +846,43 @@ async function renderAudit() {
   const runs = [];
   for (const r of list) { const p = runs[runs.length - 1]; if (p && p.actor === r.actor && p.key === r.key && p.action === r.action) p.n++; else runs.push({ ...r, n: 1 }); }
   if (!runs.length) { setHTML(el, empty(human ? t('dash.audit.noHuman') : undefined)); return; }
-  setHTML(el, `<ul class="audit-list">${runs.slice(0, 10).map(r => { // 「全部记录」挪到标题旁边后,底下那一行的地方多列两条
+  // 最多先列 20 条,能放几条显示几条(fitAudit):宽屏时这张卡和流量排行同一行,固定 10 条时下面空一大块(用户 N1)
+  setHTML(el, `<ul class="audit-list">${runs.slice(0, 20).map(r => {
     const obj = auditText(r.obj), act = auditLine(r);
     return `<li><span class="when mono" title="${esc(fmtDate(r.dateTime))}">${esc(fmtRelative(r.dateTime))}</span><span class="what" title="${esc(`${r.actor} ${act}${r.n > 1 ? ' ×' + r.n : ''} ${auditText(r.obj, { max: 0 })}`)}"><b>${esc(r.actor)}</b> ${esc(act)}${r.n > 1 ? ` <span class="badge">×${r.n}</span>` : ''} <span class="muted">${esc(obj)}</span></span></li>`;
   }).join('')}</ul>`);
+  fitAudit();
+}
+// fitAudit 最近操作能放几条显示几条:宽屏(两列及以上)时列表不撑高这一行(见 style.css),按这一行的实际高度把放不下的整条藏起来,
+// 不出现被截一半的行;至少 5 条。一列(手机)时照旧 10 条
+function fitAudit() {
+  const box = document.getElementById('dash-audit');
+  const items = box ? [...box.querySelectorAll('.audit-list > li')] : [];
+  if (!items.length) return;
+  if (getComputedStyle(box).position !== 'relative') { items.forEach((li, i) => { li.hidden = i >= 10; }); return; }
+  items.forEach(li => { li.hidden = false; });
+  const h = box.clientHeight;
+  let shown = 0;
+  for (const li of items) {
+    if (shown >= 5 && li.offsetTop + li.offsetHeight > h) break;
+    shown++;
+  }
+  items.forEach((li, i) => { li.hidden = i >= shown; });
+}
+let auditRO = null;
+function watchAudit() {
+  if (auditRO) { auditRO.disconnect(); auditRO = null; }
+  const box = document.getElementById('dash-audit');
+  if (!box || typeof ResizeObserver === 'undefined') return;
+  let hh = 0;
+  auditRO = new ResizeObserver(() => {
+    if (!box.isConnected) { auditRO.disconnect(); auditRO = null; return; }
+    const nh = Math.round(box.clientHeight);
+    if (Math.abs(nh - hh) < 4) return;
+    hh = nh;
+    fitAudit();
+  });
+  auditRO.observe(box);
 }
 
 async function renderLog() {
