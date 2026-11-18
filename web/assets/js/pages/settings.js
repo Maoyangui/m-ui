@@ -481,7 +481,7 @@ function buildNav() {
 // 种子每台各自生成:这里看到的只是这台的样子,副机各是各的(设置随主机同步)。
 const CAMO_TEMPLATES = ['mirror', 'downloads', 'video', 'blog'];
 const CAMO_W = 1024;
-let camoSeq = 0, camoData = null, camoRO = null, camoTimer = 0;
+let camoSeq = 0, camoData = null, camoRO = null, camoTimer = 0, camoPollFrom = 0;
 const camoSaved = k => boolSetting(state.settings[k], false);
 
 async function renderCamo() {
@@ -499,8 +499,11 @@ async function renderCamo() {
   fitCamo(box);
   // 封面照片正在后台取、处理:过两三秒再取一次预览(处理好就换成照片);
   // 刚存下「也放在 80 / 443」:端口每半分钟对一次账,过一会儿再看一眼结果
-  const ph = d.photos;
-  if (ph && ph.loading && ph.have < ph.want) camoTimer = setTimeout(renderCamo, 2500);
+  // 最多看一分钟(GitHub 很慢时不一直每 2.5 秒传一份预览;之后照片到了,下次打开设置页就是照片)
+  const ph = d.photos, loading = ph && ph.loading && ph.have < ph.want;
+  if (!loading) camoPollFrom = 0;
+  else if (!camoPollFrom) camoPollFrom = Date.now();
+  if (loading && Date.now() - camoPollFrom < 60000) camoTimer = setTimeout(renderCamo, 2500);
   else if (camoSaved('camoEnabled') && camoSaved('camoPorts') && !(d.ports || []).length) camoTimer = setTimeout(renderCamo, 32000);
 }
 
