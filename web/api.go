@@ -610,7 +610,7 @@ func (s *Server) validateLine(line *model.Line) error {
 	// 机器上可能还跑着别的项目:端口有变化时试着监听一次,占着就别让它进库
 	// (端口没改的编辑不测——那时占着它的正是本机运行中的数据面;
 	//  不部署在本机的线路也不测——本机数据面可能正用着这个端口跑另一条线路)
-	if s.portChanged(line) && render.LineOnNode(*line, s.localNodeID()) && !portBindable(line.Port) {
+	if s.portChanged(line) && render.LineOnNode(*line, s.localNodeID()) && !s.linePortBindable(line.Port) {
 		return fmt.Errorf("端口 %d 已被本机其它程序占用,换一个", line.Port)
 	}
 	// 部署范围里的副机上新占用的端口:让那几台自己试着监听一次(问不到不拦)

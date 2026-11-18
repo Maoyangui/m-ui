@@ -102,6 +102,21 @@ func (s *Server) freePort() (int, error) {
 	return 0, errors.New("没找到空闲端口,请手动填写")
 }
 
+// linePortBindable 本机能不能给线路用这个端口。页面伪装占着的 80 / 443 算空的:数据面重载前它会让出来
+// (runner camoPortsYield;用户 N2 实测:以前它占着 443 时,新建 443 的线路被当成「被别的程序占用」拒收,连只走 UDP 的
+// Hysteria2 也被拦)。伪装站只占 TCP,UDP 照样要试。
+func (s *Server) linePortBindable(port int) bool {
+	if s.run != nil && s.run.CamoOn(port) {
+		pc, err := net.ListenPacket("udp", ":"+strconv.Itoa(port))
+		if err != nil {
+			return false
+		}
+		pc.Close()
+		return true
+	}
+	return portBindable(port)
+}
+
 // portBindable TCP 与 UDP 都能监听才算空闲(hysteria2 / tuic 走 UDP)。
 func portBindable(port int) bool {
 	addr := ":" + strconv.Itoa(port)

@@ -86,6 +86,10 @@ func (s *Server) StartReseller() error {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secureHeaders(w)
 		if r.URL.Path == "/" && path != "/" {
+			if h := camo.Handler(); h != nil { // 开着页面伪装:根目录是伪装站,不再跳到代理面板 —— 跳转等于把代理面板路径告诉每个扫到端口的人(用户 N2)
+				h.ServeHTTP(w, r)
+				return
+			}
 			http.Redirect(w, r, path, http.StatusTemporaryRedirect)
 			return
 		}
