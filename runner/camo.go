@@ -48,6 +48,8 @@ type camoState struct {
 	loop      bool              // 对账循环已经起来了(只有这时设置页存了设置才当场对账;测试里没有循环,不去占端口)
 	stopped   bool
 	certs     camoCerts
+
+	media camoMedia // 图包里的照片(camomedia.go)
 }
 
 // CamoRedirectMode 设置 camoTemplate 的这个值表示「跳转到我的网站」(网址在 camoRedirect)。
@@ -86,30 +88,39 @@ func (r *Runner) camoSource() http.Handler {
 	return h
 }
 
-// camoRefresh 读设置;模板、跳转网址、种子或所在的那一周变了才重新生成(生成很快,内容只在内存里;没开时不生成)。
-// 读库、写种子都不在锁里。
+// camoRefresh 读设置;模板、跳转网址、种子、所在的那一周或处理好的照片变了才重新生成(生成很快,内容只在内存里;没开时不生成;
+// 照片在后台取、处理,见 camomedia.go)。读库、写种子都不在锁里。
 func (r *Runner) camoRefresh(now time.Time) (bool, http.Handler) {
 	on := settingOn(r.setting("camoEnabled"))
 	tmpl, target, seed := "", "", uint64(0)
+	var photos camo.Photos
+	gen := 0
 	if on {
 		tmpl, seed = strings.ToLower(strings.TrimSpace(r.setting("camoTemplate"))), r.camoSeed()
 		if tmpl == CamoRedirectMode {
 			target = strings.TrimSpace(r.setting("camoRedirect"))
 		}
+		photos, gen = r.camo.media.photos(seed)
 	}
-	key := fmt.Sprintf("%s|%s|%x|%d", tmpl, target, seed, camo.WeekOf(now).Unix())
+	key := fmt.Sprintf("%s|%s|%x|%d|%d", tmpl, target, seed, camo.WeekOf(now).Unix(), gen)
 	c := &r.camo
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.at, c.on = now, on
+	var want []camo.PhotoReq
 	if on && (c.h == nil || c.key != key) {
-		c.h, c.key = camoBuild(tmpl, target, seed, now), key
+		c.h, c.key = camoBuild(tmpl, target, seed, now, photos), key
+		if site, ok := c.h.(*camo.Site); ok {
+			want = site.Wanted()
+		}
 	}
-	return c.on, c.h
+	on, h := c.on, c.h
+	c.mu.Unlock()
+	r.camoMediaWant(seed, want)
+	return on, h
 }
 
 // camoBuild 跳转(网址不对时 —— 比如命令行改坏了 —— 退回自动挑的伪装站,并记一笔)或者伪装站
-func camoBuild(tmpl, target string, seed uint64, now time.Time) http.Handler {
+func camoBuild(tmpl, target string, seed uint64, now time.Time, photos camo.Photos) http.Handler {
 	if tmpl == CamoRedirectMode {
 		rd, _, err := camo.ParseRedirect(target)
 		if err == nil {
@@ -118,7 +129,7 @@ func camoBuild(tmpl, target string, seed uint64, now time.Time) http.Handler {
 		logger.Warning("页面伪装:跳转的网址不对(", target, "),先用自动挑的伪装站: ", err)
 		tmpl = ""
 	}
-	return camo.New(tmpl, seed, now)
+	return camo.Build(tmpl, seed, now, photos)
 }
 
 // CamoApply 设置页存了页面伪装的设置:下一条连接就按新设置回应(不等 10 秒的缓存),80 / 443 当场对一次账(不等半分钟)。
@@ -135,9 +146,14 @@ func (r *Runner) CamoApply() {
 
 func settingOn(v string) bool { return strings.EqualFold(strings.TrimSpace(v), "true") }
 
-// CamoPreview 设置页的预览:按给的模板(空 = 自动)和本机种子生成的那个站(开关关着也给,方便先看再开)。
-func (r *Runner) CamoPreview(template string) *camo.Site {
-	return camo.New(strings.TrimSpace(template), r.camoSeed(), time.Now())
+// CamoPreview 设置页的预览:按给的模板(空 = 自动)和本机种子生成的那个站(开关关着也给,方便先看再开),
+// 以及它的封面照片状况。预览用到的照片也算「用到」:没取过的在后台去取,设置页过一会儿再看就是照片了。
+func (r *Runner) CamoPreview(template string) (*camo.Site, *CamoPhotoStatus) {
+	seed := r.camoSeed()
+	photos, _ := r.camo.media.photos(seed)
+	site := camo.Build(strings.TrimSpace(template), seed, time.Now(), photos)
+	r.camoMediaWant(seed, site.Wanted())
+	return site, r.camoPhotoStatus(site)
 }
 
 // CamoReseed 设置页的「换一个样子」:本机换一个新种子,伪装站马上按它重新生成(只换这台,别的服务器各是各的)。

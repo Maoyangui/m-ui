@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -36,16 +37,18 @@ func normCamoTemplate(v string) (string, error) {
 
 // camoView GET camo 的返回。
 type camoView struct {
-	Mode     string                 `json:"mode"`               // site(伪装站)/ redirect(跳转)
-	Template string                 `json:"template,omitempty"` // 伪装站实际用的模板(自动时是按种子挑出来的那个)
-	Auto     bool                   `json:"auto,omitempty"`     // 是自动挑的
-	Name     string                 `json:"name,omitempty"`     // 站名
-	HTML     string                 `json:"html,omitempty"`     // 首页(样式表、图片内联,链接拿掉,只给预览看)
-	Target   string                 `json:"target,omitempty"`   // 跳转模式:跳到哪(规整后的写法);网址填错时为空、Error 写原因
-	Error    string                 `json:"error,omitempty"`
-	Host     string                 `json:"host"`  // 预览地址栏里写的域名:订阅域名、面板域名、公网 IP 里先有的那个
-	Ports    []runner.CamoPortState `json:"ports"` // 80 / 443 的状况(没开 camoPorts 时为空)
-	Entries  camoEntries            `json:"entries"`
+	Mode     string                  `json:"mode"`               // site(伪装站)/ redirect(跳转)
+	Template string                  `json:"template,omitempty"` // 伪装站实际用的模板(自动时是按种子挑出来的那个)
+	Auto     bool                    `json:"auto,omitempty"`     // 是自动挑的
+	Name     string                  `json:"name,omitempty"`     // 站名
+	HTML     string                  `json:"html,omitempty"`     // 首页(样式表、图片内联,链接拿掉,只给预览看)
+	Target   string                  `json:"target,omitempty"`   // 跳转模式:跳到哪(规整后的写法);网址填错时为空、Error 写原因
+	Error    string                  `json:"error,omitempty"`
+	Host     string                  `json:"host"`             // 预览地址栏里写的域名:订阅域名、面板域名、公网 IP 里先有的那个
+	Live     string                  `json:"live,omitempty"`   // 这台上正在回应的伪装站(订阅端口的根目录),设置页「在新标签页打开」用;没开时为空
+	Photos   *runner.CamoPhotoStatus `json:"photos,omitempty"` // 封面照片的状况(视频站、博客、部分软件下载页;别的为空)
+	Ports    []runner.CamoPortState  `json:"ports"`            // 80 / 443 的状况(没开 camoPorts 时为空)
+	Entries  camoEntries             `json:"entries"`
 }
 
 // camoEntries 开启后会回应伪装站的入口:这台的三个端口(根目录和对不上的路径),全部服务器上的几类线路(只算启用的)。
@@ -84,8 +87,11 @@ func (s *Server) handleCamo(w http.ResponseWriter, r *http.Request) {
 				v.Error = err.Error()
 			}
 		} else {
-			site := s.run.CamoPreview(t)
-			v.Template, v.Auto, v.Name, v.HTML = site.Template(), t == "", site.Name(), string(site.Preview())
+			site, photos := s.run.CamoPreview(t)
+			v.Template, v.Auto, v.Name, v.HTML, v.Photos = site.Template(), t == "", site.Name(), string(site.Preview()), photos
+		}
+		if strings.EqualFold(s.setting("camoEnabled"), "true") {
+			v.Live = s.camoLive()
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		writeJSON(w, http.StatusOK, v)
@@ -100,6 +106,22 @@ func (s *Server) handleCamo(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST")
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// camoLive 这台上正在回应的伪装站:订阅端口的根目录(订阅路径就是根目录时没有)
+func (s *Server) camoLive() string {
+	if s.subPath() == "/" {
+		return ""
+	}
+	scheme := "http"
+	if s.setting("subCertFile") != "" && s.setting("subKeyFile") != "" {
+		scheme = "https"
+	}
+	host := s.publicHost()
+	if host == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s://%s/", scheme, model.URLHost(scheme, host, s.settingInt("subPort", 2056)))
 }
 
 func (s *Server) camoHost() string {

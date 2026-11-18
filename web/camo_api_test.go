@@ -62,6 +62,25 @@ func TestCamoAPI(t *testing.T) {
 	if e := v.Entries; e.AnyTLS != 2 || e.Trojan != 1 || e.Hy2 != 1 || e.Hy2Own != 2 || e.Panel != 2053 || e.Sub != 2056 || e.Reseller != 2054 {
 		t.Fatalf("入口统计: %+v", e)
 	}
+	// 封面照片:测试里不去取(runner 在测试里不连外网),视频站用到的(种子随机,同一类不够时会重复,6~12 张)一张没有、也不算正在取;镜像站不用照片
+	if p := v.Photos; p == nil || p.Want < 6 || p.Want > 12 || p.Have != 0 || p.Loading {
+		t.Fatalf("视频站的封面照片: %+v", p)
+	}
+	if _, v := call(http.MethodGet, "?template=mirror"); v.Photos != nil {
+		t.Fatalf("镜像站不用照片: %+v", v.Photos)
+	}
+	// 「在新标签页打开」:没开时没有;开了是订阅端口的根目录
+	if v.Live != "" {
+		t.Fatalf("没开时没有正在回应的伪装站: %q", v.Live)
+	}
+	for k, val := range map[string]string{"camoEnabled": "true", "subDomain": "sub.example.com"} {
+		if err := s.db.Create(&model.Setting{Key: k, Value: val}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, v := call(http.MethodGet, "?template=video"); v.Live != "http://sub.example.com:2056/" {
+		t.Fatalf("开了应给订阅端口的根目录: %q", v.Live)
+	}
 	if _, v := call(http.MethodGet, ""); v.Mode != "site" || !v.Auto {
 		t.Fatalf("没存过样式时是自动: %+v", v)
 	}

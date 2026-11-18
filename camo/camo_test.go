@@ -107,7 +107,7 @@ func TestNoDeadLinksAndCleanImages(t *testing.T) {
 					}
 				}
 			}
-			want := map[string]int{"mirror": 1, "downloads": 3, "video": 13, "blog": 10}[tmpl]
+			want := map[string]int{"mirror": 1, "downloads": 2, "video": 13, "blog": 10}[tmpl] // 软件下载:图标 + 站点图标(界面截图是 HTML)
 			if imgs < want {
 				t.Fatalf("%s/%d: 只有 %d 张图,至少要 %d 张(视频要有封面、文章要有题图)", tmpl, seed, imgs, want)
 			}

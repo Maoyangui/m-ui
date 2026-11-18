@@ -2,9 +2,11 @@
 // 线路时,看到的是一个普通的网站(或者跳转到管理员自己的网站),而不是 404 或连上就断。
 //
 // 伪装站用内置模板(下载镜像、软件下载、视频站、个人站),每台服务器按自己的随机种子生成站名、配色、图片、内容,
-// 连类名、静态文件目录、版式都按种子换 —— 所有 m-ui 长得一样(哪怕只是骨架一样)的话,伪装站本身就成了指纹。
-// 内容(页面、样式表、按种子画的矢量图)在内存里生成一次,之后只是回应:不读磁盘、不连外网、不开新进程,没人来时不占资源。
-// 响应头只带普通静态站会带的几项,不带面板的安全头,也不冒充别的服务器软件。
+// 连类名、静态文件目录、版式、脚本里的接口路径都按种子换 —— 所有 m-ui 长得一样(哪怕只是骨架一样)的话,伪装站本身就成了指纹。
+// 内容(页面、样式表、脚本、按种子画的矢量图,有图包照片时是处理好的照片)在内存里生成一次,之后只是回应:
+// 回应时不读磁盘、不连外网、不开新进程,没人来时不占资源。照片由 runner 按需取下来、处理好再交进来(见 media.go)。
+// 视频站有登录 / 注册(要邀请码)/ 找回密码,几种站各有几个像真站的接口(api.go):只回固定内容,提交的东西不存不记。
+// 响应头只带普通站会带的几项,不带面板的安全头,也不冒充别的服务器软件。
 //
 // 局限(帮助页里写着):只对主动探测有用,不改变流量特征。
 package camo
@@ -22,6 +24,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,24 +46,40 @@ type page struct {
 type Site struct {
 	template string
 	name     string
+	desc     string // <meta name="description">
 	css      string // 样式表的路径
+	js       string // 脚本的路径(没有脚本的站为空)
 	icon     string // 站点图标的路径
 	logo     string // 顶栏站名前面那一小块(HTML)
 	head     string // <head> 里多加的(个人站的 RSS 链接)
+	cta      string // 顶栏最右边的按钮(视频站的「登录」)
 	foot     string // 页脚右边那一句
 	pages    map[string]page
 	notFound page
 	modTime  time.Time
+
+	photos Photos            // 处理好的照片(可以为 nil)
+	used   map[string]bool   // 这一站用到的照片(不管处理好没有)
+	wanted []PhotoReq        // 用到了、还没处理好的(这些位置先画插图)
+	small  map[string][]byte // 图片地址 → 设置页预览里内联的小图
+
+	api      map[string]*apiRoute // 假接口(api.go)
+	apiPre   string               // 接口前缀:以它开头、又没对上的路径回 JSON 的 404
+	errStyle int                  // 接口报错的写法(种子定)
 }
 
-// New 按模板和种子生成伪装站。template 不认识或为空时按种子挑;now 决定页面上的日期(按周,见 newGen)。
-func New(template string, seed uint64, now time.Time) *Site {
+// New 按模板和种子生成伪装站(只用画的插图)。template 不认识或为空时按种子挑;now 决定页面上的日期(按周,见 newGen)。
+func New(template string, seed uint64, now time.Time) *Site { return Build(template, seed, now, nil) }
+
+// Build 同 New,photos 里有处理好的照片的封面位就用照片(没有的照旧画插图,并记进 Wanted)。
+func Build(template string, seed uint64, now time.Time, photos Photos) *Site {
 	g := newGen(seed, now)
 	t := strings.ToLower(strings.TrimSpace(template))
 	if !known(t) {
 		t = Templates[seed%uint64(len(Templates))]
 	}
-	s := &Site{template: t, pages: map[string]page{}, modTime: g.modTime(), css: g.sk.css, icon: "/favicon.svg"}
+	s := &Site{template: t, pages: map[string]page{}, modTime: g.modTime(), css: g.sk.css, icon: "/favicon.svg",
+		photos: photos, used: map[string]bool{}, small: map[string][]byte{}, api: map[string]*apiRoute{}, errStyle: g.sk.errStyle}
 	s.add(s.css, "text/css; charset=utf-8", g.css())
 	s.add(s.icon, svgType, favicon(g, t == "blog"))
 	switch t {
@@ -95,7 +114,7 @@ func (s *Site) Name() string { return s.name }
 // Home 首页的 HTML。
 func (s *Site) Home() []byte { return s.pages["/"].body }
 
-// Size 整个站在内存里占多少字节(页面、样式表、图片加起来)。
+// Size 整个站在内存里占多少字节(页面、样式表、图片加起来,不算预览用的小图)。
 func (s *Site) Size() int {
 	n := len(s.notFound.body)
 	for _, p := range s.pages {
@@ -104,22 +123,43 @@ func (s *Site) Size() int {
 	return n
 }
 
-var srcRe = regexp.MustCompile(` src="(/[^"]+)"`)
+// Wanted 这一站用到、还没处理好的照片(每个尺寸一项;按出现顺序,可能有重复的名字)。
+func (s *Site) Wanted() []PhotoReq { return s.wanted }
 
-// Preview 设置页预览用的首页:样式表和图片直接内联进去(预览框是沙箱里的 srcdoc,去不了这个站取文件),
-// 链接拿掉(预览框里点了不会跳到面板自己的地址上去)。
+// PhotoNames 这一站用到的照片(去重、排好序;不管处理好没有)。
+func (s *Site) PhotoNames() []string {
+	out := make([]string, 0, len(s.used))
+	for n := range s.used {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+var (
+	srcRe    = regexp.MustCompile(` src="(/[^"]+)"`)
+	scriptRe = regexp.MustCompile(`<script\b[^>]*></script>`)
+)
+
+// Preview 设置页预览用的首页:样式表和图片直接内联进去(预览框是沙箱里的 srcdoc,去不了这个站取文件;
+// 照片换成小图,免得预览动辄几百 KB),脚本和链接拿掉(预览框里点了不会跳到面板自己的地址上去)。
 func (s *Site) Preview() []byte {
 	h := string(s.Home())
 	if css, ok := s.pages[s.css]; ok {
 		h = strings.Replace(h, `<link rel="stylesheet" href="`+s.css+`">`, "<style>"+string(css.body)+"</style>", 1)
 	}
 	h = srcRe.ReplaceAllStringFunc(h, func(m string) string {
-		p, ok := s.pages[srcRe.FindStringSubmatch(m)[1]]
+		path := srcRe.FindStringSubmatch(m)[1]
+		if b, ok := s.small[path]; ok {
+			return ` src="data:image/jpeg;base64,` + base64.StdEncoding.EncodeToString(b) + `"`
+		}
+		p, ok := s.pages[path]
 		if !ok || p.ctype != svgType {
 			return m
 		}
 		return ` src="data:image/svg+xml;base64,` + base64.StdEncoding.EncodeToString(p.body) + `"`
 	})
+	h = scriptRe.ReplaceAllString(h, "")
 	return []byte(strings.ReplaceAll(h, ` href="`, ` data-href="`))
 }
 
@@ -141,18 +181,22 @@ func clearHeaders(w http.ResponseWriter) {
 	}
 }
 
-// ServeHTTP 回应伪装站:GET / HEAD 按路径给页面(目录路径少了结尾斜杠就 301 补上),没有的给站内风格的 404,别的方法 405。
+// ServeHTTP 回应伪装站:先看是不是接口(api.go);GET / HEAD 按路径给页面(目录路径少了结尾斜杠就 301 补上),
+// 没有的给站内风格的 404,别的方法 405。
 func (s *Site) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	clearHeaders(w)
 	h := w.Header()
+	p := r.URL.Path
+	if p == "" {
+		p = "/"
+	}
+	if s.serveAPI(w, r, p) {
+		return
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		h.Set("Allow", "GET, HEAD")
 		s.write(w, r, http.StatusMethodNotAllowed, s.notFound, false)
 		return
-	}
-	p := r.URL.Path
-	if p == "" {
-		p = "/"
 	}
 	if pg, ok := s.pages[p]; ok {
 		s.write(w, r, http.StatusOK, pg, true)

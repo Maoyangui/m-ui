@@ -56,11 +56,12 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 
 | 包 | 职责 | 依赖方向 |
 |---|---|---|
-| `core` | 内嵌 sing-box:Box 生命周期、StatsTracker、ConnTracker、Limiter、入站用户热换、干跑校验、单个出入站增删 | 只依赖 sing-box |
+| `core` | 内嵌 sing-box:Box 生命周期、StatsTracker、ConnTracker、Limiter、入站用户热换、干跑校验、单个出入站增删;认证没过的 AnyTLS / Trojan / Hysteria2 连接交给页面伪装 | sing-box、model、camo(后两者不反向依赖 core) |
 | `render` | DB → sing-box JSON;协议特性表;TLS(cert/reality/none)与传输;上游 outbound | model |
-| `runner` | 编排:渲染→启动→**三级重载**;证书签发/续期;备份/重启;首启初始化;暴露给 web/hub 的能力 | core render sub jobs monitor hub notify acme backup |
+| `runner` | 编排:渲染→启动→**三级重载**;证书签发/续期;备份/重启;首启初始化;页面伪装的来源与 80 / 443 端口;暴露给 web/hub 的能力 | core render sub jobs monitor hub notify acme backup camo |
 | `web` | 会话认证、CSRF 守卫、REST API、审计、内嵌前端(零构建 ES modules)、agent 接口 | runner |
 | `sub` | 订阅生成(链接/clash)、落地页、订阅服务(独立端口直出 HTTPS) | render model acme |
+| `camo` | 页面伪装:按每台的种子在内存里生成伪装站(下载镜像 / 软件下载 / 视频站 / 个人博客,图片是生成的 SVG)或 302 跳转;认证没过的连接交给它回应 | — |
 | `jobs` | 10s 收账、10s 限速规则、1m 执法(重置/禁用/踢线,记下停用原因)、1h 清理(48h 前的分钟样本并成小时桶) | core model rules |
 | `rules` | 限速规则判定(时段按面板时区;突发按每规则 × 用户的滑动窗口,用量倒退即重开窗口)、生效状态的写入 / 到期 / 审计、叠加计算 | model |
 | `hub` | 主副机同步(§6) | model notify |
@@ -184,6 +185,14 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 - 限速改动对在线连接立刻生效:限速器里连接持有的是用户条目,桶原地改速率或置空,不用重连;每条认证过的连接都包装(以后被规则限速也要立刻变慢)。
 - 规则限速:主机每 10 秒判一轮;突发窗口只在内存(进程重启后从空开始,跨过重启那一刻的突发可能漏判一次);副机按到期时间自行解除,主机失联也不会一直限着;副机最低版本 0.6.0。
 - 尚未做:更多入站协议(Naive/ShadowTLS)、外部 API 的分页、代理面板自建规则(规则表已预留归属字段)。
+
+## 页面伪装(`camo` 包)
+
+- 设置:`camoEnabled` / `camoTemplate`(空 = 自动;mirror / downloads / video / blog / redirect)/ `camoPorts` / `camoRedirect` 随主机同步;种子 `camoSeed` 是本机设置,第一次用到时随机生成,不同步、不进容灾副本,所以各台的站不一样。`camo.Build(模板, 种子, 时间, 照片)` 在内存里生成整站(只用插图时一两百 KB,带照片的视频站一两 MB),`runner.camoSource` 缓存 10 秒,保存相关设置、「换一个样子」时 `CamoApply` 立刻作废。没开时 `camo.Handler()` 为 nil,各处照原来的路径走(404 / 断开),日志与入站记录和不开时一样。
+- 图包(`camo/media.go`、`camo/photo.go`、`runner/camomedia.go`):82 张照片放在仓库的 `camo-media` 分支,`camo.MediaFiles` 是编进程序的文件名 → sha256 清单。生成器按种子给每个封面位挑照片(`photoFor`,自己的哈希,不动主随机数;视频标题按照片的天色起),处理好了就用 JPEG,没有就画 SVG 并记进 `Wanted`。`camoRefresh` / `CamoPreview` 生成后把 `Wanted` 交给 `camoMediaWant`:后台取原图(raw.githubusercontent.com → jsDelivr,核对 sha256 后存进 `<数据目录>/camo-media/`)、按种子处理(`camo.Process`:放大取景、翻转、调色、按 74–86 的质量重新压缩,不带元数据),放进内存(最多 6 MB,超了丢最久没用的,种子换了全丢),批次号进缓存键,伪装站随之重新生成。没取全按 10 分钟 / 1 小时 / 6 小时退避;测试里不给地址就不去取。
+- 假后端(`camo/api.go`):视频站的登录 / 注册(要邀请码,一律 403)/ 找回密码 / 当前用户(401)/ 视频列表与详情 / 播放(401),软件下载的检查更新与订阅,博客的订阅,镜像站的同步状态。接口前缀、字段名写法、报错的框架样式、页面脚本里的名字都按种子换;请求体限 16 KB,登录注册慢一点(同时最多 16 个在等),不存、不记、不回显提交的内容,不发 Cookie(伪装站可能和面板、订阅同域名)。没开脚本的表单提交回带提示的同一页。
+- 出现的地方:订阅、面板、代理面板端口的根目录与陌生路径(`camo.ServeOr404`);hysteria2 线路没填伪装站点时把它当伪装站点;anytls 认证没过(`third_party/sing-anytls` 带出 `FallbackError`)、trojan 没配传输层时认证没过,连接交给 `camo.ServeConn` 回应。`camo.Sniff`(3 秒内看最先到的 8 个字节)只决定怎么记:像 HTTP 的记为「用伪装站回应了」,不像的照记原来的认证失败原因。
+- 80 / 443(`camoPorts`):每 30 秒、以及保存时对账一次(`camoPortsSync`),只占空着的端口 —— 正在跑的配置里线路的 TCP 端口、本机面板 / 订阅 / 代理面板的端口都不占,并记下原因给设置页显示。数据面重载前 `camoPortsYield` 先让出新配置要用的端口;面板 / 订阅改到 80 / 443 时 `CamoReleasePort` 先让、两分钟内不再占;HTTP-01 签证书时 `camoHold80` 临时让出 80。443 按 SNI 从本机证书库挑证书,443 也放上时 80 上的伪装站跳到 https(跳转模式照常 302 到你填的网址);占着的端口由系统防火墙放行(`camoFirewallPorts`)。
 
 ## 数据面日志与磁盘(v0.6.8)
 

@@ -1,7 +1,8 @@
 package camo
 
-// 伪装站里的图(用户 11-18:视频站等至少要有封面):视频封面、文章题图、头像、软件图标和界面示意。
-// 全是按种子现画的矢量图(SVG),一张几百字节到两三 KB,跟页面一起每周生成一次、放在内存里(开着页面伪装才生成),
+// 伪装站里的图(用户 11-18:视频站等至少要有封面):视频封面、文章题图、头像、软件图标、镜像站的流量图。
+// 全是按种子现画的矢量图(SVG),一张几百字节到两三 KB,跟页面一起每周生成一次、放在内存里(开着页面伪装才生成);
+// 有图包照片时封面、题图换成照片(media.go),这里画的是没有照片时的兜底。
 // 不读磁盘、不连外网、不带脚本和文字。构图(山的走势、楼的高低、星星和窗灯的位置、配色)按种子变,
 // 同一张图不会出现在两台服务器上。
 
@@ -719,69 +720,6 @@ func appIcon(g *gen, kind string) []byte {
 	default: // Draw
 		s.stroke("M19 45L41 23l5 5-22 22H19z", w, 4, ` stroke-linejoin="round"`)
 		s.stroke("M37 27l5 5", w, 4, "")
-	}
-	return s.bytes()
-}
-
-// appShot 软件界面示意(没有字,灰条代替文字):窗口、侧栏、工具栏,内容区按产品类别画 —— 照片、列表、播放器……
-func appShot(g *gen, kind string) []byte {
-	W, H := 960.0, 600.0
-	s := newSVG(g, W, H)
-	acc := hslHex(float64(g.hue), 62, 48)
-	soft := mix(acc, "#ffffff", .86)
-	bar := "#e3e6ec"
-	s.rect(0, 0, W, H, "#f4f5f8", "")
-	s.rect(0, 0, W, 40, "#eceef2", "")
-	for i := 0; i < 3; i++ {
-		s.circle(20+float64(i)*18, 20, 6, []string{"#ff5f57", "#febc2e", "#28c840"}[i], "")
-	}
-	s.rect(W/2-90, 15, 180, 10, "#d7dbe2", ` rx="5"`)
-	s.rect(0, 40, 210, H-40, "#eef0f4", "")
-	for i := 0; i < 8; i++ {
-		y := 70 + float64(i)*42
-		if i == 1 {
-			s.rect(12, y-12, 186, 34, soft, ` rx="8"`)
-		}
-		s.rect(26, y-2, 14, 14, mix(acc, "#9aa3b2", .55), ` rx="4"`)
-		s.rect(50, y+1, 70+60*g.r.Float64(), 9, bar, ` rx="4.5"`)
-	}
-	s.rect(234, 58, 200, 12, "#d9dde4", ` rx="6"`)
-	s.rect(W-150, 52, 126, 26, acc, ` rx="7"`)
-	x0, y0, cw, ch := 234.0, 96.0, W-258, H-120
-	switch kind {
-	case "Sync", "Notes", "Desk":
-		for i := 0; i < 9; i++ {
-			y := y0 + float64(i)*50
-			s.rect(x0, y, cw, 42, "#ffffff", ` rx="8"`)
-			s.rect(x0+14, y+11, 20, 20, mix(acc, "#ffffff", .3+.4*g.r.Float64()), ` rx="5"`)
-			s.rect(x0+46, y+13, 160+180*g.r.Float64(), 8, "#d3d8e0", ` rx="4"`)
-			s.rect(x0+46, y+26, 90+90*g.r.Float64(), 6, "#e6e9ee", ` rx="3"`)
-			if kind == "Sync" {
-				done := .3 + .7*g.r.Float64()
-				s.rect(x0+cw-190, y+18, 160, 6, "#e6e9ee", ` rx="3"`)
-				s.rect(x0+cw-190, y+18, 160*done, 6, acc, ` rx="3"`)
-			}
-		}
-	case "Player":
-		s.nested(x0, y0, cw, ch-64, 320, 180, func(n *svgw) {
-			n.scene(n.g.pick([]string{"sea", "city", "mountain"}), n.g.pick([]string{"dusk", "night", "dawn"}))
-		})
-		s.rect(x0, y0+ch-56, cw, 56, "#1d2027", "")
-		s.path(fmt.Sprintf("M%s %sv18l14-9z", ff(x0+20), ff(y0+ch-37)), "#ffffff", "")
-		s.rect(x0+52, y0+ch-30, cw-80, 5, "#4a4f5c", ` rx="2.5"`)
-		s.rect(x0+52, y0+ch-30, (cw-80)*(.2+.5*g.r.Float64()), 5, acc, ` rx="2.5"`)
-	default: // Studio / Capture / Draw:中间一张照片,下面一排缩略图
-		s.nested(x0, y0, cw, ch-92, 320, 180, func(n *svgw) {
-			n.scene(n.g.pick([]string{"mountain", "lake", "sea", "forest"}), n.g.pick([]string{"dawn", "day", "dusk"}))
-		})
-		for i := 0; i < 6; i++ {
-			s.nested(x0+float64(i)*(cw/6), y0+ch-82, cw/6-10, 76, 160, 110, func(n *svgw) {
-				n.scene(n.g.pick([]string{"mountain", "sea", "forest", "desert", "lake"}), n.g.pick([]string{"dawn", "day", "dusk"}))
-			})
-		}
-		if kind == "Draw" {
-			s.stroke(fmt.Sprintf("M%s %sq80 -90 170 -10t160 -30", ff(x0+120), ff(y0+260)), acc, 5, "")
-		}
 	}
 	return s.bytes()
 }

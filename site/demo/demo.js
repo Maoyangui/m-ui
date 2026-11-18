@@ -1365,7 +1365,7 @@ function route(method, path, query, body) {
   }
 }
 
-// 页面伪装(用户 N2):设置页的预览。样页是真面板按两个种子生成的首页(site/demo/camo.json,链接已拿掉;按需读,只有设置页用到),
+// 页面伪装(用户 N2):设置页的预览。样页是真面板按两个种子生成的首页(site/demo/camo.json,带图包照片的小图,链接、脚本已拿掉;按需读,只有设置页用到),
 // 「换一个样子」在两个种子之间切换;入口按演示里的线路数(截图场景可以用 S.camoEntries 换成生产的量),
 // 80 / 443 开着时给一个已放上、一个被线路占着(S.camoPorts 可换)
 let CAMO = null, camoSeedIx = 0;
@@ -1399,6 +1399,7 @@ async function demoCamo(method, query) {
   const page = (CAMO[tmpl] || CAMO.mirror)[camoSeedIx];
   return {
     mode: 'site', template: page.template, auto: !want, name: page.name, html: page.html,
+    photos: page.photos, // 封面照片:样页是带着照片生成的(真面板上是这台服务器取下图包、裁切调色后的)
     host: S.settings.subDomain || S.settings.webDomain || 'tokyo.example.com',
     ports: on('camoEnabled') && on('camoPorts') ? clone(S.camoPorts || [{ port: 80, on: true }, { port: 443, on: false, why: 'line' }]) : [],
     entries,

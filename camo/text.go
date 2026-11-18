@@ -38,44 +38,96 @@ func capFirst(s string) string {
 
 // ---- 视频 ----
 
-// videoPlaces 视频的地点和它的封面画什么
-var videoPlaces = []struct{ name, kind string }{
-	{"Coastline", "sea"}, {"Harbor", "harbor"}, {"Old Town", "town"}, {"City", "city"}, {"Mountain Trail", "mountain"},
-	{"Forest", "forest"}, {"Desert Road", "desert"}, {"Lake", "lake"}, {"Island", "island"}, {"Market", "market"},
-	{"Rooftop", "city"}, {"Night Train", "train"}, {"Valley", "mountain"}, {"Pine Woods", "forest"}, {"Fishing Village", "harbor"},
-	{"Canal", "town"}, {"Summit", "clouds"}, {"Bay", "sea"}, {"Old Railway", "train"}, {"Dunes", "desert"}, {"Frozen Lake", "lake"},
-	{"High Pass", "clouds"}, {"Lighthouse", "sea"}, {"Riverside", "lake"},
+// videoPlaces 视频的地点、封面画什么(图包的类别),和地点本身限定的天色(空 = 不限):
+// 冰湖只有白天那两张,「河边」是黄昏的河,「屋顶」是黄昏的屋顶,「夜车」「城市灯火」是夜里的……
+var videoPlaces = []struct{ name, kind, tod string }{
+	{"Coastline", "sea", ""}, {"Harbor", "harbor", ""}, {"Old Town", "town", ""}, {"City", "city", ""}, {"Mountain Trail", "mountain", "day"},
+	{"Forest", "forest", ""}, {"Desert Road", "desert", "day"}, {"Lake", "lake", "dawn"}, {"Island", "island", ""}, {"Market", "market", ""},
+	{"Rooftop", "city", "dusk"}, {"Night Train", "train", "night"}, {"Valley", "mountain", ""}, {"Pine Woods", "forest", ""}, {"Fishing Village", "harbor", ""},
+	{"Old Streets", "town", ""}, {"Summit", "clouds", ""}, {"Bay", "sea", ""}, {"Old Railway", "train", "day"}, {"Dunes", "desert", "dusk"},
+	{"Frozen Lake", "lake", "day"}, {"High Pass", "clouds", ""}, {"Headland", "sea", ""}, {"Riverside", "lake", "dusk"}, {"City Lights", "city", "night"},
 }
 
-// videoTimes 标题后半截:什么时候、什么样的片子;tod 决定封面的天色(空 = 随便)
+// videoTimes 标题后半截:按封面(照片)的天色挑;tod 为空的哪种天色都能用
 var videoTimes = []struct{ text, tod string }{
-	{"at First Light", "dawn"}, {"at Dawn", "dawn"}, {"in the Morning", "dawn"}, {"at Golden Hour", "dusk"}, {"at Dusk", "dusk"},
-	{"After Dark", "night"}, {"by Night", "night"}, {"Timelapse", ""}, {"Walk", ""}, {"in 4K", ""}, {"Ambience", ""}, {"Drive", "day"},
-	{"Sunset", "dusk"}, {"in Winter", "day"}, {"Slow Tour", ""}, {"in the Rain", "rain"}, {"on a Clear Day", "day"},
+	{"at First Light", "dawn"}, {"at Dawn", "dawn"}, {"in the Morning", "dawn"}, {"at Sunrise", "dawn"},
+	{"at Golden Hour", "dusk"}, {"at Dusk", "dusk"}, {"Sunset", "dusk"}, {"in the Evening", "dusk"},
+	{"After Dark", "night"}, {"by Night", "night"}, {"at Night", "night"},
+	{"on a Clear Day", "day"}, {"in the Sun", "day"}, {"Midday Walk", "day"},
+	{"in the Rain", "rain"}, {"on a Rainy Day", "rain"},
+	{"Timelapse", ""}, {"Walk", ""}, {"in 4K", ""}, {"Ambience", ""}, {"Slow Tour", ""},
 }
 
-var studioTitles = []string{"Studio Session", "Behind the Scenes", "Workshop Recording", "Live Rehearsal", "Session Tape", "Late Night Session", "Room Recording"}
+// studioTitles 棚内视频的标题,按图包里那张照片拍的是什么:录音棚、摄影 / 片场布光、手工作坊
+var studioTitles = map[string][]string{
+	"music": {"Studio Session", "Session Tape", "Room Recording", "Live Rehearsal", "Late Night Session"},
+	"set":   {"Behind the Scenes", "On Set", "Lighting Test", "Set Walkthrough"},
+	"shop":  {"Workshop Recording", "At the Bench", "Making Of", "Workshop Diary"},
+}
 
-// videoTitle 一个视频的标题和封面的样子(同一个站里不重样)
-func videoTitle(g *gen, used map[string]bool) (title, kind, tod string) {
+func studioKind(photo string) string {
+	switch {
+	case strings.HasPrefix(photo, "studio-any-03"), strings.HasPrefix(photo, "studio-any-04"):
+		return "set"
+	case strings.HasPrefix(photo, "studio-any-05"), strings.HasPrefix(photo, "studio-any-06"):
+		return "shop"
+	}
+	return "music"
+}
+
+// todOf 图包文件名里的天色(any 和取不到时返回空)
+func todOf(photo string) string {
+	parts := strings.Split(strings.TrimSuffix(photo, ".jpg"), "-")
+	if len(parts) == 3 && parts[1] != "any" {
+		return parts[1]
+	}
+	return ""
+}
+
+// videoPick 一个视频:先挑地方,再按地方挑封面照片,标题后半截按照片的天色起(标题和封面对得上);
+// 棚内视频的标题按照片拍的是什么起。同一个站里标题不重样。没有照片的类别照样按这个挑插图的天色。
+func (s *Site) videoPick(g *gen, slot int, titles map[string]bool) (title, kind, tod, photo string) {
 	for i := 0; ; i++ {
 		if g.r.IntN(6) == 0 {
-			title, kind, tod = g.pick(studioTitles), "studio", ""
+			kind, tod = "studio", ""
+			photo = photoFor(g.seed, slot, kind, "", s.used)
+			title = g.pick(studioTitles[studioKind(photo)])
 			if g.r.IntN(2) == 0 {
 				title += fmt.Sprintf(" No. %d", g.n(2, 24))
 			}
 		} else {
-			p, t := videoPlaces[g.r.IntN(len(videoPlaces))], videoTimes[g.r.IntN(len(videoTimes))]
-			title, kind, tod = p.name+" "+t.text, p.kind, t.tod
-			if tod == "" {
-				tod = g.pick([]string{"dawn", "day", "dusk", "night"})
+			p := videoPlaces[g.r.IntN(len(videoPlaces))]
+			kind, photo = p.kind, photoFor(g.seed, slot, p.kind, p.tod, s.used)
+			if tod = todOf(photo); tod == "" {
+				if tod = p.tod; tod == "" {
+					tod = g.pick([]string{"dawn", "day", "dusk"})
+				}
 			}
+			var opts []string
+			for _, t := range videoTimes {
+				if (t.tod == "" || t.tod == tod) && !sharesWord(p.name, t.text) {
+					opts = append(opts, t.text)
+				}
+			}
+			title = p.name + " " + g.pick(opts)
 		}
-		if !used[title] || i > 50 {
-			used[title] = true
-			return title, kind, tod
+		if !titles[title] || i > 50 {
+			titles[title] = true
+			return title, kind, tod, photo
 		}
 	}
+}
+
+// sharesWord 两段文字有没有同一个词(「Night Train」不配「by Night」)
+func sharesWord(a, b string) bool {
+	for _, w := range strings.Fields(strings.ToLower(a)) {
+		for _, v := range strings.Fields(strings.ToLower(b)) {
+			if len(w) > 3 && w == v {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func videoNote(g *gen) string {

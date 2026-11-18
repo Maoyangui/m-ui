@@ -1311,6 +1311,8 @@ const zh = {
   'camo.p.sub': '订阅 {n}', 'camo.p.reseller': '代理面板 {n}', 'camo.l.anytls': 'AnyTLS {n} 条', 'camo.l.trojan': 'Trojan {n} 条', 'camo.l.hy2': 'Hysteria2 {n} 条',
   'camo.l.hy2Own': '另有 Hysteria2 {n} 条用自己的伪装站点', 'camo.l.zero': '没有', 'camo.l.none': '现在没有 AnyTLS、Trojan、Hysteria2 线路', 'camo.s.on': '{port} 已放上', 'camo.s.onRd': '{port} 在跳转',
   'camo.s.on80s': '{port} 跳到 https', 'camo.s.no': '{port} 没开:{why}', 'camo.s.off': '没开', 'camo.s.pending': '正在检查…',
+  'camo.ph.ready': '封面照片 {n} 张,已按这台服务器裁切、调色', 'camo.ph.loading': '正在取封面照片({have} / {n}),取到之前先用画的插图', 'camo.ph.failed': '封面照片只取到 {have} / {n} 张,其余先用画的插图,过一会儿再试',
+  'camo.ph.failedAt': '封面照片只取到 {have} / {n} 张,其余先用画的插图,{time} 再试', 'camo.open': '在新标签页打开', 'camo.openHint': '打开这台服务器上正在回应的伪装站(订阅端口的根目录),能点进各页、试登录注册',
 };
 
 const en = {
@@ -2793,6 +2795,10 @@ const en = {
   'camo.k.web': '80 / 443', 'camo.p.panel': 'Panel {n}', 'camo.p.sub': 'Subscription {n}', 'camo.p.reseller': 'Reseller panel {n}', 'camo.l.anytls': 'AnyTLS × {n}', 'camo.l.trojan': 'Trojan × {n}',
   'camo.l.hy2': 'Hysteria2 × {n}', 'camo.l.hy2Own': '{n} more Hysteria2 lines use their own masquerade site', 'camo.l.zero': 'None', 'camo.l.none': 'No AnyTLS, Trojan or Hysteria2 lines yet',
   'camo.s.on': '{port} serving', 'camo.s.onRd': '{port} redirecting', 'camo.s.on80s': '{port} → https', 'camo.s.no': '{port} off: {why}', 'camo.s.off': 'Off', 'camo.s.pending': 'Checking…',
+  'camo.ph.ready': '{n} cover photos, cropped and toned for this server', 'camo.ph.loading': 'Fetching cover photos ({have} of {n}); drawn illustrations until then',
+  'camo.ph.failed': 'Only {have} of {n} cover photos so far; drawn illustrations for the rest, will retry',
+  'camo.ph.failedAt': 'Only {have} of {n} cover photos so far; drawn illustrations for the rest, retrying at {time}', 'camo.open': 'Open in new tab',
+  'camo.openHint': 'Open the decoy this server is serving (root of the subscription port) to click through its pages',
 };
 
 const dicts = { zh, en };

@@ -497,8 +497,23 @@ async function renderCamo() {
   camoData = d;
   box.innerHTML = camoHTML(d);
   fitCamo(box);
+  // 封面照片正在后台取、处理:过两三秒再取一次预览(处理好就换成照片);
   // 刚存下「也放在 80 / 443」:端口每半分钟对一次账,过一会儿再看一眼结果
-  if (camoSaved('camoEnabled') && camoSaved('camoPorts') && !(d.ports || []).length) camoTimer = setTimeout(renderCamo, 32000);
+  const ph = d.photos;
+  if (ph && ph.loading && ph.have < ph.want) camoTimer = setTimeout(renderCamo, 2500);
+  else if (camoSaved('camoEnabled') && camoSaved('camoPorts') && !(d.ports || []).length) camoTimer = setTimeout(renderCamo, 32000);
+}
+
+// 封面照片那一行(视频站、博客、部分软件下载页;没用照片的站不显示):处理好了 / 正在取 / 没取全(悬停看原因)
+function camoPhotoLine(p) {
+  if (!p || !p.want) return '';
+  let k = 'ok', s = t('camo.ph.ready', { n: p.want });
+  if (p.have < p.want) {
+    const at = p.retry ? new Date(p.retry * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    if (p.error && !p.loading) { k = 'warn'; s = t(at ? 'camo.ph.failedAt' : 'camo.ph.failed', { have: p.have, n: p.want, time: at }); }
+    else { k = 'wait'; s = t('camo.ph.loading', { have: p.have, n: p.want }); }
+  }
+  return `<div class="camo-ph ${k}"${p.error ? ` title="${esc(p.error)}"` : ''}>${esc(s)}</div>`;
 }
 
 
@@ -551,9 +566,11 @@ function camoHTML(d) {
         <p class="camo-note">${esc(t('camo.rd.note'))}</p>`
     : `<div class="camo-name">${esc(d.name)}</div>
         <div class="camo-kind">${esc(kind)}</div>
+        ${camoPhotoLine(d.photos)}
         <div class="camo-acts">
           <button type="button" class="btn sm" data-act="set.camoReseed"><i class="i i-refresh"></i>${esc(t('camo.reseed'))}</button>
           <button type="button" class="btn sm" data-act="set.camoZoom">${esc(t('camo.zoom'))}</button>
+          ${d.live ? `<a class="btn sm" href="${esc(d.live)}" target="_blank" rel="noopener noreferrer" title="${esc(t('camo.openHint'))}">${esc(t('camo.open'))} ↗</a>` : ''}
         </div>
         <p class="camo-note">${esc(t('camo.reseedHelp'))}</p>`;
   return `<div class="camo-head"><h3>${esc(t(rd ? 'camo.rd.head' : 'camo.preview'))}</h3>${badge(t(on ? 'camo.on' : 'camo.off'), on ? 'ok' : '')}</div>

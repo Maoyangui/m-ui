@@ -1434,6 +1434,12 @@ button.badge { cursor: pointer; font: inherit; font-size: .72rem; }
 .camo-acts { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .75rem; }
 .camo-acts .i { margin-right: .3rem; }
 .camo-note { margin: .5rem 0 0; font-size: var(--fs-xs); line-height: 1.6; color: var(--faint); }
+.camo-ph { display: flex; align-items: center; gap: .4rem; margin-top: .4rem; font-size: var(--fs-xs); color: var(--text-2); }
+.camo-ph::before { content: ""; flex: none; width: .4rem; height: .4rem; border-radius: 50%; background: var(--ok); }
+.camo-ph.wait::before { background: var(--primary); }
+.camo-ph.warn { color: var(--warn-text); }
+.camo-ph.warn::before { background: var(--warn); }
+.camo-ph[title] { cursor: help; }
 .camo-wh { margin: 1.1rem 0 .55rem; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); letter-spacing: .02em; }
 /* 开启后显示的地方:左边一列小标题(端口 / 线路 / 80·443),右边一排小标签,下面一行小字 */
 .camo-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .55rem .9rem; margin: 0; }
