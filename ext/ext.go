@@ -28,12 +28,20 @@ var fetchAgents = []fetchAgent{{"clash", "ClashMeta/1.18.0 (m-ui)"}, {"v2rayn", 
 // fetchAttemptTimeout 每个身份单独计时。以前两次请求共用调用方的 30 秒:第一次超时 25 秒后,第二次只剩 5 秒。
 var fetchAttemptTimeout = 25 * time.Second
 
+// maxBody 一份订阅最多收这么多字节。超过的整份不用:以前截到上限照样解析,截在节点列表中间时后面的节点悄悄丢了(审计 L3)。
+var maxBody int64 = 4 << 20
+
+// errTooBig 订阅内容超过 maxBody。
+var errTooBig = errors.New("订阅内容超过 4 MB:只读前 4 MB 会丢掉后面的节点,这份没有采用")
+
 // Fetch 抓取外部订阅,返回内容和这次用的身份。先以 Clash Meta 身份要,只有"HTTP 200 但解析不出节点"才换下一个身份。
 // prev 是上次抓取成功用的身份(缓存就是它给的;空 = 还没有缓存):
 //   - 这个身份出错(网络错误、4xx、5xx、超时)直接返回错误,调用方保留旧缓存。以前任何错误都换身份,
 //     机场在 Cloudflare / WAF 后面间歇 429 时,缓存在两种身份的内容之间来回翻,节点集合和名字都变,隐藏随之失配;
 //   - 别的身份出错不算数,接着试下一个(缓存本来就不是它给的);
-//   - 还没有缓存时任何错误都接着试下一个,都失败才报第一个错误。
+//   - 还没有缓存时任何错误都接着试下一个,都失败才报第一个错误;
+//   - 内容超过 4 MB(maxBody)和「解析不出节点」一样算这份内容用不了,接着试下一个(上次就是这个身份给的也换:
+//     它不是 429 那种时有时无的错误,不会来回翻);都没有能用的就明确报订阅太大(审计 L3)。
 //
 // 顺序固定先 Clash 身份:哪怕上次是通用身份给的,Clash 身份恢复了也换回节点更全的那份,不会因为一次维护页永远卡在少的那份上。
 // 都解析不出节点时把第一份 200 的原文交出去,让调用方报"没有可识别的节点"(同样保留旧缓存)。
@@ -45,8 +53,13 @@ func Fetch(ctx context.Context, rawURL, prev string) (body []byte, agent string,
 	var spareAgent string
 	spareNodes := false
 	var firstErr error
+	var tooBig error
 	for _, a := range fetchAgents {
 		b, err := fetchAs(ctx, rawURL, a.ua)
+		if errors.Is(err, errTooBig) {
+			tooBig = err
+			continue
+		}
 		if err != nil {
 			if a.id == prev {
 				return nil, "", err
@@ -65,8 +78,12 @@ func Fetch(ctx context.Context, rawURL, prev string) (body []byte, agent string,
 			spare, spareAgent, spareNodes = b, a.id, len(it.Nodes) > 0
 		}
 	}
-	if spare != nil {
+	// 交出没有 Clash 节点的那份:它带着别的节点,或者没有哪个身份的内容超限(超限时报「太大」比报「没有可识别的节点」清楚)
+	if spare != nil && (spareNodes || tooBig == nil) {
 		return spare, spareAgent, nil
+	}
+	if tooBig != nil {
+		return nil, "", tooBig
 	}
 	return nil, "", firstErr
 }
@@ -101,9 +118,12 @@ func fetchAs(ctx context.Context, rawURL, agent string) ([]byte, error) {
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1)) // 多读 1 字节:读满了就是超限
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(b)) > maxBody {
+		return nil, errTooBig
 	}
 	if len(strings.TrimSpace(string(b))) == 0 {
 		return nil, errors.New("订阅内容为空")

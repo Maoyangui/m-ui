@@ -2,6 +2,7 @@ package ext
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -126,6 +127,58 @@ func TestFetchDoesNotFlipOnTransientError(t *testing.T) {
 	clashStatus.Store(0)
 	if _, agent, err := Fetch(context.Background(), srv.URL, "v2rayn"); err != nil || agent != "clash" {
 		t.Fatalf("Clash 身份恢复后应换回: %v %s", err, agent)
+	}
+}
+
+// 审计 L3:超过上限的订阅以前截到上限照样解析,截在节点列表中间时后面的节点悄悄丢了,没有任何提示。
+// 现在超限的那份整份不用:换下一个身份(上次就是它给的也换);都没有能用的就明确报订阅太大。正好等于上限的照常用。
+func TestFetchRejectsOversizedBody(t *testing.T) {
+	var big strings.Builder
+	big.WriteString("proxies:\n")
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&big, "  - name: n%d\n    type: hysteria2\n    server: 1.2.3.4\n    port: %d\n    password: p\n    sni: x.example.com\n", i, 1000+i)
+	}
+	body := big.String()
+	// 上限落在第 21 个节点的 sni 值中间:截到这里仍是合法 YAML,能解析出前 21 个(0.8.0 就会这样用,丢掉后面 19 个)
+	cut := strings.Index(body, "name: n20\n")
+	cut += strings.Index(body[cut:], "sni: x.exa") + len("sni: x.exa")
+	old := maxBody
+	maxBody = int64(cut)
+	defer func() { maxBody = old }()
+	if n := len(Parse(body[:cut]).Clash()); n == 0 || n >= 40 {
+		t.Fatalf("测试数据不对:截到上限后应能解析出一部分节点,得 %d", n)
+	}
+	var clashBody, generic atomic.Value
+	clashBody.Store(body)
+	generic.Store(b64("hysteria2://p@1.2.3.4:443?sni=x.example.com#only"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.Header.Get("User-Agent"), "ClashMeta") {
+			fmt.Fprint(w, clashBody.Load().(string))
+			return
+		}
+		fmt.Fprint(w, generic.Load().(string))
+	}))
+	defer srv.Close()
+	for _, prev := range []string{"", "clash", "v2rayn", "?"} {
+		b, agent, err := Fetch(context.Background(), srv.URL, prev)
+		if err != nil || agent != "v2rayn" || len(Parse(string(b)).Nodes) != 1 {
+			t.Fatalf("prev=%q:超限的那份不该用,应换通用身份: %v %s", prev, err, agent)
+		}
+	}
+	// 通用身份给的也解析不出节点:报订阅太大,而不是「没有可识别的节点」
+	generic.Store("please use another client")
+	if _, _, err := Fetch(context.Background(), srv.URL, "clash"); !errors.Is(err, errTooBig) {
+		t.Fatalf("都用不了时应明确报订阅太大,得 %v", err)
+	}
+	// 通用身份给的有节点但进不了 Clash(本站不认识的链接):照旧交出这份,不因为另一份超限报错
+	generic.Store("unknownproto://abc@1.2.3.4:443#x")
+	if b, agent, err := Fetch(context.Background(), srv.URL, ""); err != nil || agent != "v2rayn" || len(Parse(string(b)).Nodes) != 1 {
+		t.Fatalf("另一份有节点时应交出它: %v %s", err, agent)
+	}
+	// 正好等于上限:照常用
+	clashBody.Store(body[:cut])
+	if b, agent, err := Fetch(context.Background(), srv.URL, "clash"); err != nil || agent != "clash" || len(b) != cut {
+		t.Fatalf("正好等于上限的应照常用: %v %s %d", err, agent, len(b))
 	}
 }
 
