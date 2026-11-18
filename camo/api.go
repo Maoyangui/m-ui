@@ -98,7 +98,7 @@ func (s *Site) serveAPI(w http.ResponseWriter, r *http.Request, p string) bool {
 		msg := rep.msg
 		if !rep.ok && len(rep.fields) > 0 {
 			var parts []string
-			for _, k := range sortedKeys(rep.fields) {
+			for _, k := range fieldOrder(rep.fields) {
 				if f := rep.fields[k]; !strings.Contains(strings.Join(parts, " "), f) {
 					parts = append(parts, f)
 				}
@@ -147,7 +147,7 @@ func (s *Site) errBody(code int, key, msg string, fields map[string]string) any 
 	case 1: // {"detail": …}:校验没过时是逐个字段的列表,别的是一句话
 		if code == http.StatusUnprocessableEntity && len(fields) > 0 {
 			var list []map[string]any
-			for _, k := range sortedKeys(fields) {
+			for _, k := range fieldOrder(fields) {
 				list = append(list, map[string]any{"loc": []string{"body", k}, "msg": fields[k], "type": "value_error"})
 			}
 			return map[string]any{"detail": list}
@@ -174,6 +174,27 @@ func sortedKeys(m map[string]string) []string {
 	}
 	for i := 1; i < len(out); i++ { // 字段只有两三个
 		for j := i; j > 0 && out[j] < out[j-1]; j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
+}
+
+// fieldOrder 报错里各字段的先后:按表单从上到下的顺序(邮箱、密码在前,邀请码之类在后),同一档按名字。
+// 没开脚本时那一句提示、FastAPI 那种逐字段的列表都这样排;以前只按名字排,注册页会先说邀请码、再说密码(自审第五遍 G9,实机看到的)。
+func fieldOrder(m map[string]string) []string {
+	out := sortedKeys(m)
+	rank := func(k string) int {
+		switch k {
+		case "email":
+			return 0
+		case "password":
+			return 1
+		}
+		return 2
+	}
+	for i := 1; i < len(out); i++ { // 插入排序是稳定的:同一档保持按名字的先后
+		for j := i; j > 0 && rank(out[j]) < rank(out[j-1]); j-- {
 			out[j], out[j-1] = out[j-1], out[j]
 		}
 	}

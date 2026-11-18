@@ -105,6 +105,13 @@ func TestVideoAPI(t *testing.T) {
 		if b := w.Body.String(); w.Code != 422 || !strings.Contains(b, "Enter a valid email address.") || !strings.Contains(b, "Enter your password.") || strings.Contains(b, "highlighted") {
 			t.Fatalf("没开脚本的空提交应写出各字段的提示: %d %.300s", w.Code, b)
 		}
+		// 注册页空着提交:几句提示按表单从上到下的顺序 —— 邮箱、密码、邀请码(自审第五遍 G9)
+		w = apiDo(t, s, http.MethodPost, regAPI, "application/x-www-form-urlencoded", "")
+		if b := w.Body.String(); w.Code != 422 || strings.Index(b, "Enter a valid email address.") < 0 ||
+			strings.Index(b, "Use at least 8 characters.") < strings.Index(b, "Enter a valid email address.") ||
+			strings.Index(b, "Enter your invite code.") < strings.Index(b, "Use at least 8 characters.") {
+			t.Fatalf("没开脚本时注册页的提示应按表单的先后: %d %.400s", w.Code, b)
+		}
 		if w := apiDo(t, s, http.MethodPost, loginAPI, js, `{"email":"`+strings.Repeat("a", 20<<10)+`"}`); w.Code != 413 {
 			t.Fatalf("请求体太大应 413: %d", w.Code)
 		}
@@ -137,6 +144,30 @@ func TestVideoAPI(t *testing.T) {
 	if len(styles) < 2 {
 		t.Fatalf("报错的写法应随种子变: %v", styles)
 	}
+}
+
+// 报错里各字段按表单从上到下的顺序(自审第五遍 G9):邮箱、密码在前,别的按名字;FastAPI 那种逐字段的列表也这样排。
+func TestFieldOrder(t *testing.T) {
+	if got := strings.Join(fieldOrder(map[string]string{"zz": "d", "invite_code": "c", "password": "b", "email": "a"}), ","); got != "email,password,invite_code,zz" {
+		t.Fatalf("顺序不对: %s", got)
+	}
+	for seed := uint64(1); seed < 200; seed++ {
+		s := New("video", seed, testNow)
+		if s.errStyle != 1 {
+			continue
+		}
+		lp := apiDo(t, s, http.MethodGet, find(t, `href="([^"]+)">Sign in</a></div></header>`, string(s.Home())), "", "").Body.String()
+		regPage := apiDo(t, s, http.MethodGet, find(t, `href="([^"]+)">Create an account</a>`, lp), "", "").Body.String()
+		regAPI := find(t, `<form method="post" action="([^"]+)"`, regPage)
+		invite := find(t, `name="(invite|invite_code|inviteCode|code)"`, regPage)
+		w := apiDo(t, s, http.MethodPost, regAPI, "application/json", `{}`)
+		var d struct{ Detail []struct{ Loc []string } }
+		if json.Unmarshal(w.Body.Bytes(), &d) != nil || len(d.Detail) != 3 || d.Detail[0].Loc[1] != "email" || d.Detail[1].Loc[1] != "password" || d.Detail[2].Loc[1] != invite {
+			t.Fatalf("FastAPI 那种逐字段列表应按表单的先后: %s", w.Body)
+		}
+		return
+	}
+	t.Fatal("200 个种子里没有一个用 FastAPI 写法的")
 }
 
 // 别的几种站的接口:软件下载的检查更新(版本、三个平台的文件,和页面一致)、邮件订阅(格式不对 422,其余 200;
