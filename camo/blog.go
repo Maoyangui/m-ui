@@ -38,9 +38,10 @@ func genBlog(s *Site, g *gen) {
 	}
 	var posts []post
 	day := g.n(2, 15)
+	pats := g.r.Perm(len(blogTitlePatterns)) // 标题句式一个站里不重样(都是「A few thoughts on …」开头一眼就是模板)
 	for i, ti := range g.r.Perm(len(blogTopics))[:8] {
 		tp := blogTopics[ti]
-		title := capFirst(fmt.Sprintf(g.pick(blogTitlePatterns), tp.text))
+		title := capFirst(fmt.Sprintf(blogTitlePatterns[pats[i%len(pats)]], tp.text))
 		at := g.base.Add(-time.Duration(day) * 24 * time.Hour)
 		p := post{title: title, slug: slugify(title), date: at.Format("Jan 2, 2006"), lead: blogLead(g, tp.text), kind: tp.kind, tags: tp.tags, at: at}
 		big, small := picSize{w: 960, h: 480}, picSize{w: 360, h: 240, pw: 120, ph: 80}

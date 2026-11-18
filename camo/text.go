@@ -154,7 +154,9 @@ var blogTopics = []struct {
 	{"sunrise above the clouds", "clouds:dawn", []string{"hiking", "photography"}}, {"slow mornings at the market", "market:dawn", []string{"food", "travel"}},
 }
 
-var blogTitlePatterns = []string{"Notes on %s", "What I learned from %s", "A few thoughts on %s", "Lessons from %s", "Revisiting %s", "Some notes on %s"}
+// blogTitlePatterns 文章标题的句式(一个站里不重样,见 genBlog);含直接用题目本身的那种,真人博客大多这样起
+var blogTitlePatterns = []string{"Notes on %s", "What I learned from %s", "A few thoughts on %s", "Lessons from %s", "Revisiting %s", "Some notes on %s",
+	"%s", "On %s", "%s, revisited", "Field notes: %s", "%s: what worked", "Things I got wrong about %s"}
 
 var blogLeads = []string{
 	"I have been {thinking about|meaning to try|putting off} %s for a while, and {this autumn|this spring|last month} I finally made time for it.",
