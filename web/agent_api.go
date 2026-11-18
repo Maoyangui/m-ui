@@ -556,6 +556,7 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	rep.OnlineLines = o.Lines
+	rep.OnlineUpstreams = o.Upstreams // 上游的在线灯按真实出站字节(用户 N5)
 	writeJSON(w, http.StatusOK, rep)
 }
 

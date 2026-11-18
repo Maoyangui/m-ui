@@ -745,6 +745,7 @@ type Report struct {
 	Onlines         map[string][]string            `json:"onlines"`                   // 用户 → 在线源 IP
 	OnlineLinesByIP map[string]map[string][]string `json:"onlineLinesByIp,omitempty"` // 用户 → 源 IP → 线路名
 	OnlineLines     []string                       `json:"onlineLines"`
+	OnlineUpstreams []string                       `json:"onlineUpstreams,omitempty"` // 本机最近有真实出站字节的上游(老副机不报)
 	CertDays        int                            `json:"certDays"`
 	Certs           []model.CertBrief              `json:"certs,omitempty"`        // 这台的证书库清单(老版本副机不报)
 	PublicIP        string                         `json:"publicIp"`               // 副机探测到的公网 IP,主机存入 nodes.public_ip 供订阅使用
@@ -1027,6 +1028,8 @@ type Hub struct {
 	remoteLines map[uint]map[string]map[string][]string
 	// remoteOnline 副机上报的「现在有人在用的线路名」:主机自己不跑线路时,线路页的在线灯全靠它
 	remoteOnline map[uint][]string
+	// remoteOnlineUps 副机上报的「最近有真实出站字节的上游名」:上游页的在线灯(老副机不报,为空)
+	remoteOnlineUps map[uint][]string
 	// seenUsers 各副机报上来在线(有在线 IP)的用户最近一次出现的时间:在线名单按 onlineWindow 取,
 	// 不只看最新一份报告 —— 设备安静一分钟就从名单里掉出去、下一次走流量又回来,在线人数会乱跳
 	seenUsers map[string]int64
@@ -1075,7 +1078,7 @@ const clientTimeout = 6 * time.Minute
 func New(d Deps) *Hub {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Hub{d: d, status: map[uint]*NodeStatus{}, pushed: map[uint]string{}, remote: map[uint]map[string][]string{}, remoteAt: map[uint]int64{},
-		remoteLines: map[uint]map[string]map[string][]string{}, remoteOnline: map[uint][]string{}, seenUsers: map[string]int64{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
+		remoteLines: map[uint]map[string]map[string][]string{}, remoteOnline: map[uint][]string{}, remoteOnlineUps: map[uint][]string{}, seenUsers: map[string]int64{}, nodeNames: map[uint]string{}, stop: make(chan struct{}), rejects: map[string][]rejectAt{},
 		upHealth: map[uint][]UpstreamHealth{}, kicking: map[string]*kickCall{}, gates: map[uint]chan struct{}{}, ipsBusy: map[uint]bool{},
 		ctx: ctx, cancel: cancel,
 		clients: map[uint]*nodeClient{}, idents: map[uint]string{}, pushFail: map[uint]*pushFailure{},
@@ -1423,6 +1426,7 @@ func (h *Hub) applyResult(r *nodeResult) {
 	h.remoteAt[r.n.Id] = time.Now().Unix()
 	h.remoteLines[r.n.Id] = r.rep.OnlineLinesByIP
 	h.remoteOnline[r.n.Id] = r.rep.OnlineLines
+	h.remoteOnlineUps[r.n.Id] = r.rep.OnlineUpstreams
 	for u, ips := range r.rep.Onlines {
 		if len(ips) > 0 {
 			h.seenUsers[u] = h.remoteAt[r.n.Id]
@@ -1650,6 +1654,7 @@ func (h *Hub) forgetNodes(live map[uint]bool) {
 		delete(h.pushFail, id)
 		delete(h.remoteLines, id)
 		delete(h.remoteOnline, id)
+		delete(h.remoteOnlineUps, id)
 		delete(h.nodeNames, id)
 		delete(h.upHealth, id)
 		delete(h.haPushed, id)
@@ -1697,6 +1702,7 @@ func (h *Hub) noteIdentity(n model.Node) {
 	delete(h.remoteAt, n.Id)
 	delete(h.remoteLines, n.Id)
 	delete(h.remoteOnline, n.Id)
+	delete(h.remoteOnlineUps, n.Id)
 	delete(h.upHealth, n.Id)
 	delete(h.noGzip, n.Id)
 	delete(h.haPushed, n.Id) // 容灾状态也按新机器重推
@@ -2545,6 +2551,26 @@ func (h *Hub) RemoteOnlineLines() []string {
 		for _, l := range lines {
 			if l != "" {
 				set[l] = true
+			}
+		}
+	}
+	return keys(set)
+}
+
+// RemoteOnlineUpstreams 各台在线副机上最近有真实出站字节的上游名(并集)。上游页的在线灯用它和本机的合起来:
+// 以前把在线线路的默认上游都算在用,流量按分流规则走了直连或别的上游时也亮(用户 N5)。
+func (h *Hub) RemoteOnlineUpstreams() []string {
+	now := time.Now().Unix()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	set := map[string]bool{}
+	for id, ups := range h.remoteOnlineUps {
+		if !h.freshLocked(id, now) {
+			continue
+		}
+		for _, u := range ups {
+			if u != "" {
+				set[u] = true
 			}
 		}
 	}

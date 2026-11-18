@@ -95,9 +95,13 @@ func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 	o := s.run.Onlines()
 	users := mergeIPs(o.Users, s.run.Hub().RemoteOnlineUsers())
 	counts := s.run.ConnCounts()
-	// 线路和上游的在线灯:本机的加上各台副机的(主机自己不跑线路时,只看本机永远是灰的)
-	lines := mergeIPs(o.Lines, s.run.Hub().RemoteOnlineLines())
-	ups := mergeIPs(o.Upstreams, s.upstreamsOfLines(lines))
+	// 线路和上游的在线灯:本机的加上各台副机的(主机自己不跑线路时,只看本机永远是灰的)。
+	// 线路:最近有真实流量、而且有用户连着才亮(用户 N4)。只看入站字节的话,REALITY / AnyTLS 把认证不过的探测
+	// 转给伪装站,这些字节也记在这条入站上 —— 灯亮着,点开却一个人都没有。「有用户连着」和线路详情的在线名单同一个来源。
+	lines := filterNames(mergeIPs(o.Lines, s.run.Hub().RemoteOnlineLines()), s.linesWithUsers())
+	// 上游:按真实出站字节,本机的加上各台副机报上来的(用户 N5)。以前把在线线路的默认上游都算在用,
+	// 流量按分流规则走了直连或别的上游时也亮。巡检测上游是直接在出站上拨号,不经路由,不算进这里。
+	ups := mergeIPs(o.Upstreams, s.run.Hub().RemoteOnlineUpstreams())
 	if rid := scope(r); rid > 0 { // 代理只看自己的用户、授权给自己的线路;上游是主面板的布局,一概不给
 		mine := s.resellerUserNames(rid)
 		users = filterNames(users, mine)
@@ -118,15 +122,37 @@ func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// upstreamsOfLines 这些线路默认走的上游的名字(直连的不算)。副机不单独上报「哪条上游有人在用」:
-// 线路在线,它的上游就算在用(分流规则里另外指的上游不算,宁可少亮不乱亮)。
-func (s *Server) upstreamsOfLines(lines []string) []string {
-	if len(lines) == 0 {
-		return nil
+// linesWithUsers 现在有用户连着的线路名:本机的「用户 → 源 IP → 线路」,加上还在服务器列表里的各台副机报上来的同一份
+// (和线路详情的在线名单同一个来源,见 collectLineOnlines)。
+func (s *Server) linesWithUsers() map[string]bool {
+	var ids []uint
+	s.db.Model(&model.Node{}).Pluck("id", &ids)
+	return linesWithUsersFrom(s.run.OnlineIPLines(), s.run.Hub().RemoteIPLinesRaw(), ids)
+}
+
+// linesWithUsersFrom 见 linesWithUsers;known 是还在列表里的服务器(已删的服务器留下的旧报告不算)。
+func linesWithUsersFrom(local map[string]map[string][]string, remote map[uint]map[string]map[string][]string, known []uint) map[string]bool {
+	out := map[string]bool{}
+	add := func(m map[string]map[string][]string) {
+		for _, ipLines := range m {
+			for _, lines := range ipLines {
+				for _, l := range lines {
+					out[l] = true
+				}
+			}
+		}
 	}
-	var names []string
-	s.db.Model(&model.Upstream{}).Where("id IN (?)", s.db.Model(&model.Line{}).Select("upstream_id").Where("name IN ? AND upstream_id > 0", lines)).Pluck("name", &names)
-	return names
+	add(local)
+	ok := make(map[uint]bool, len(known))
+	for _, id := range known {
+		ok[id] = true
+	}
+	for id, m := range remote {
+		if ok[id] {
+			add(m)
+		}
+	}
+	return out
 }
 
 // onlineDevices 在线用户 → 设备数(本机与副机的源 IP 合并,IPv4 一个地址一台、IPv6 按 /64 算,和设备数限制同一口径)。

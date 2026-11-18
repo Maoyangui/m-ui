@@ -2,7 +2,7 @@ import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del, SLOW, LONG } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, closeModal, registerActions, badge, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtDate, fmtRelative, chipList, fieldBox } from '../ui.js';
+import { esc, toast, confirm, openModal, closeModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtDate, fmtRelative, chipList, fieldBox } from '../ui.js';
 import { upstreamBad } from '../issues.js';
 // 展开着逐台明细的上游 id(数字):平时一格只有状态点和一句结论,点开才逐台列出来(见 detailHTML)
 const expanded = new Set();
@@ -288,7 +288,7 @@ function renderRows() {
     // 展开着的:下面跟一条通栏(tr.up-sub)放逐台明细;卡片排法时这条通栏藏着,明细在卡片里(resultHTML 里那一份)
     const sub = detailHTML(u.id);
     return `<tr${sub ? ' class="up-open"' : ''}>
-      <td class="primary-cell">${online.has(u.name) ? '<span class="dot on"></span>' : ''}<span class="pname" title="${esc(u.name)}">${esc(u.name)}</span>${u.fromLine ? `<div class="sub-cell">${esc(relayNames(u))}${u.relayProblem ? ` · <span class="danger">${esc(trErr(u.relayProblem))}</span>` : ''}</div>` : ''}${sourceHTML(u)}</td>
+      <td class="primary-cell">${dot(online.has(u.name))}<span class="pname" title="${esc(u.name)}">${esc(u.name)}</span>${u.fromLine ? `<div class="sub-cell">${esc(relayNames(u))}${u.relayProblem ? ` · <span class="danger">${esc(trErr(u.relayProblem))}</span>` : ''}</div>` : ''}${sourceHTML(u)}</td>
       <td>${typeBadges(u)}</td>
       <td class="num">${srv}</td>
       <td class="num c-p3"${using.has(u.id) ? ` title="${esc([...using.get(u.id)].join('、'))}"` : ''}>${using.has(u.id) ? using.get(u.id).size : 0}</td>
