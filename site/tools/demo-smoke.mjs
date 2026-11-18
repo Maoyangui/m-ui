@@ -358,48 +358,52 @@ const rowsOpen = await page.locator('#up-sub-2 .hrow').count();
 const rowH = await page.locator('#up-sub-2 .hrow').evaluateAll(els => Math.max(0, ...els.map(e => e.getBoundingClientRect().height)));
 if (dots === 3 && rowsOpen === 3 && rowH > 0 && rowH < 34) pass('上游页:三台在用就是三个点,点这一行在下面展开,每台一行');
 else fail(`上游页的点 / 展开行数不对:${dots} 个点、${rowsOpen} 行、最高的一行 ${Math.round(rowH)}px`);
-// 节点页:每条线路的直连和中转入口各一行;倍率一格分得出跟随服务器和单独设的;行里的开关点了就存;设置弹框改倍率
+// 节点设置页(用户 N6):默认按线路收起,每条线路一行汇总;「全部展开」后每条线路的直连和中转入口各一行(sn-child);
+// 倍率一格分得出跟随服务器和单独设的;行里的开关点了就存;设置弹框改倍率
 await page.goto(`${DEMO}#/subnodes`); await page.waitForTimeout(900);
+const snFold = await page.evaluate(() => ({ lines: document.querySelectorAll('#sn-body tr.sn-line').length, kids: document.querySelectorAll('#sn-body tr.sn-child').length }));
+if (snFold.lines >= 3 && snFold.kids === 0) pass(`节点设置页:默认按线路收起(${snFold.lines} 条线路)`); else fail(`节点设置页默认没收起:${JSON.stringify(snFold)}`);
+await page.locator('#sn-fold').click(); await page.waitForTimeout(400);
 const sn0 = await page.evaluate(() => ({
-  rows: document.querySelectorAll('#sn-body tr:not(.grp-row)').length, groups: document.querySelectorAll('#sn-body tr.grp-row').length,
-  own: document.querySelectorAll('#sn-body .sn-own').length, follow: document.querySelectorAll('#sn-body .sn-follow').length,
-  relay: document.querySelectorAll('#sn-body .sn-node .badge').length, off: document.querySelectorAll('#sn-body .switch input:not(:checked)').length,
+  rows: document.querySelectorAll('#sn-body tr.sn-child').length, groups: document.querySelectorAll('#sn-body tr.sn-line').length,
+  own: document.querySelectorAll('#sn-body tr.sn-child .sn-own').length, follow: document.querySelectorAll('#sn-body tr.sn-child .sn-follow').length,
+  off: document.querySelectorAll('#sn-body tr.sn-child .switch input:not(:checked)').length,
 }));
-if (sn0.rows >= 5 && sn0.groups >= 3 && sn0.own >= 1 && sn0.follow >= 1 && sn0.rows === sn0.own + sn0.follow) pass(`节点页:${sn0.rows} 个节点按 ${sn0.groups} 条线路分组,单独设倍率的 ${sn0.own} 个、跟随服务器的 ${sn0.follow} 个`);
-else fail(`节点页的行不对:${JSON.stringify(sn0)}`);
-await page.locator('#sn-body .switch input:checked').first().evaluate(el => el.click()); await page.waitForTimeout(500);
-const snOff = await page.locator('#sn-body .switch input:not(:checked)').count();
-if (snOff === sn0.off + 1) pass('节点页:行里的「输出到订阅」开关点了就存'); else fail(`节点页的开关没存上:关着的 ${sn0.off} → ${snOff}`);
-await page.locator('#sn-body [data-act="sn.edit"]').first().click(); await page.waitForTimeout(500);
+if (sn0.rows >= 5 && sn0.groups >= 3 && sn0.own >= 1 && sn0.follow >= 1 && sn0.rows === sn0.own + sn0.follow) pass(`节点设置页:全部展开后 ${sn0.rows} 个节点按 ${sn0.groups} 条线路分组,单独设倍率的 ${sn0.own} 个、跟随服务器的 ${sn0.follow} 个`);
+else fail(`节点设置页展开后的行不对:${JSON.stringify(sn0)}`);
+await page.locator('#sn-body tr.sn-child .switch input:checked').first().evaluate(el => el.click()); await page.waitForTimeout(500);
+const snOff = await page.locator('#sn-body tr.sn-child .switch input:not(:checked)').count();
+if (snOff === sn0.off + 1) pass('节点设置页:行里的「输出到订阅」开关点了就存'); else fail(`节点设置页的开关没存上:关着的 ${sn0.off} → ${snOff}`);
+await page.locator('#sn-body tr.sn-child [data-act="sn.edit"]').first().click(); await page.waitForTimeout(500);
 await page.locator('#sn-ratio').fill('2.5'); await page.locator('#sn-cap').fill('40');
 await page.locator('#modal-save').click(); await page.waitForTimeout(700);
-const sn1 = await page.evaluate(() => { const tr = document.querySelector('#sn-body tr:not(.grp-row)'); return { open: !document.getElementById('modal').hidden, text: tr ? tr.innerText.replace(/\s+/g, ' ') : '' }; });
-if (!sn1.open && /×2\.5/.test(sn1.text) && /40/.test(sn1.text)) pass('节点页:设置弹框里改倍率和容量,保存后行里跟着变'); else fail(`节点页保存后不对:${JSON.stringify(sn1)}`);
+const sn1 = await page.evaluate(() => { const tr = document.querySelector('#sn-body tr.sn-child'); return { open: !document.getElementById('modal').hidden, text: tr ? tr.innerText.replace(/\s+/g, ' ') : '' }; });
+if (!sn1.open && /×2\.5/.test(sn1.text) && /40/.test(sn1.text)) pass('节点设置页:设置弹框里改倍率和容量,保存后行里跟着变(展开状态保持)'); else fail(`节点设置页保存后不对:${JSON.stringify(sn1)}`);
 await page.locator('#sn-only [data-id="own"]').click(); await page.waitForTimeout(300);
-const snOwn = await page.evaluate(() => ({ rows: document.querySelectorAll('#sn-body tr:not(.grp-row)').length, follow: document.querySelectorAll('#sn-body .sn-follow').length }));
+const snOwn = await page.evaluate(() => ({ rows: document.querySelectorAll('#sn-body tr.sn-child').length, follow: document.querySelectorAll('#sn-body tr.sn-child .sn-follow').length }));
 if (snOwn.rows >= 2 && snOwn.rows < sn0.rows) pass(`节点页:「单独设置的」只留下设过的 ${snOwn.rows} 个`); else fail(`节点页筛选不对:${JSON.stringify(snOwn)}`);
 // 节点页的筛选(线路 / 服务器 / 类型)和勾选批量:筛出一台服务器上的节点 → 全选 → 批量设倍率 → 这些行都变
 await page.locator('#sn-only [data-id="all"]').click(); await page.waitForTimeout(200);
 await page.locator('#sn-f-server').selectOption({ index: 2 }); await page.waitForTimeout(300);
-const snSrv = await page.locator('#sn-body tr:not(.grp-row)').count();
+const snSrv = await page.locator('#sn-body tr.sn-child').count();
 await page.locator('#sn-f-kind').selectOption('relay'); await page.waitForTimeout(300);
-const snRelay = await page.evaluate(() => ({ rows: document.querySelectorAll('#sn-body tr:not(.grp-row)').length, badges: document.querySelectorAll('#sn-body .sn-node .badge').length }));
+const snRelay = await page.evaluate(() => ({ rows: document.querySelectorAll('#sn-body tr.sn-child').length, badges: document.querySelectorAll('#sn-body tr.sn-child .sn-node .badge').length }));
 if (snSrv >= 1 && snSrv < sn0.rows && snRelay.rows === snRelay.badges) pass(`节点页:按服务器筛出 ${snSrv} 个,再按类型只留中转的 ${snRelay.rows} 个`);
 else fail(`节点页按服务器 / 类型筛选不对:服务器 ${snSrv} 个,中转 ${JSON.stringify(snRelay)}`);
 await page.locator('#sn-f-kind').selectOption(''); await page.waitForTimeout(300);
 await page.locator('#sn-sel-all').click(); await page.waitForTimeout(300);
-const snBar = await page.evaluate(() => ({ shown: !document.getElementById('sn-batch-bar').hidden, text: document.getElementById('sn-batch-count').textContent, checked: document.querySelectorAll('#sn-body tr:not(.grp-row) input.sel:checked').length }));
+const snBar = await page.evaluate(() => ({ shown: !document.getElementById('sn-batch-bar').hidden, text: document.getElementById('sn-batch-count').textContent, checked: document.querySelectorAll('#sn-body tr.sn-child input.sel:checked').length }));
 await page.locator('[data-act="sn.batch"][data-id="ratio"]').click(); await page.waitForTimeout(400);
 await page.locator('#sn-b-ratio').fill('4'); await page.locator('#modal-save').click(); await page.waitForTimeout(700);
-const snAfter = await page.evaluate(() => ({ rows: document.querySelectorAll('#sn-body tr:not(.grp-row)').length, x4: [...document.querySelectorAll('#sn-body .sn-own')].filter(b => b.textContent.trim() === '×4').length }));
+const snAfter = await page.evaluate(() => ({ rows: document.querySelectorAll('#sn-body tr.sn-child').length, x4: [...document.querySelectorAll('#sn-body tr.sn-child .sn-own')].filter(b => b.textContent.trim() === '×4').length }));
 if (snBar.shown && snBar.checked === snSrv && snAfter.x4 === snSrv) pass(`节点页:筛选后全选 ${snSrv} 个,批量设倍率,这些行都变成 ×4`);
 else fail(`节点页批量设倍率不对:${JSON.stringify({ snBar, snAfter, snSrv })}`);
 await page.locator('[data-act="sn.batch"][data-id="off"]').click(); await page.waitForTimeout(600);
-const snOffAll = await page.locator('#sn-body .switch input:checked').count();
+const snOffAll = await page.locator('#sn-body tr.sn-child .switch input:checked').count();
 await page.locator('[data-act="sn.clearSel"]').click(); await page.waitForTimeout(300);
 const snCleared = await page.evaluate(() => document.getElementById('sn-batch-bar').hidden);
 await page.locator('[data-act="sn.clearFilter"]').click(); await page.waitForTimeout(400);
-const snAll = await page.locator('#sn-body tr:not(.grp-row)').count();
+const snAll = await page.locator('#sn-body tr.sn-child').count();
 if (snOffAll === 0 && snCleared && snAll === sn0.rows) pass('节点页:批量「不输出」、取消选择、清除筛选都生效'); else fail(`节点页批量 / 清除不对:${JSON.stringify({ snOffAll, snCleared, snAll })}`);
 // 概况「24 小时流量」那一格点开是流量明细:三栏排行,换范围后还在
 await page.goto(`${DEMO}#/dashboard`); await page.waitForTimeout(900);

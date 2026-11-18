@@ -2,7 +2,7 @@
 // 用户 11-18:「概览页的故障提醒 在设置单独加一个区域 可以设置勾选哪些不提醒 现在的很多提醒已经有反馈比较烦了」。
 // 关掉的只是概况(以及证书、大陆连通那两条顶部常驻提示)不再提,各自的页面照常显示;Telegram 通知另有自己的开关。
 // 面板自己的数据取不到 / 过期了的那几条不在这里:那时概况本身已经不可信,不能关。
-import { state } from './app.js';
+// 这个模块不 import 别的(设置由调用方传进来):前端测试的桩环境里纯模块用真的,提示条的判断测的才是真逻辑。
 
 // role:只在主机(master)或只在副机(node)上会出现的;没写的两边都有。group:设置页里分三小块
 export const ATTN_CATS = [
@@ -22,7 +22,7 @@ export function normMutes(v) {
   return ATTN_CATS.map(c => c.id).filter(id => set.has(id)).join(',');
 }
 
-// attnMuted 现在关掉的类别
-export function attnMuted() {
-  return new Set(normMutes((state.settings || {}).attnMute).split(',').filter(Boolean));
+// attnMuted 现在关掉的类别(settings 传 state.settings)
+export function attnMuted(settings) {
+  return new Set(normMutes((settings || {}).attnMute).split(',').filter(Boolean));
 }

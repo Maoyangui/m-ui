@@ -303,7 +303,7 @@ function haRows(ha) {
 function attnItems() {
   const s = state.status || {}, node = isNode(), items = [], ignored = [];
   // 设置里关掉的那几类(r.cat)不提;没标类别的(面板自己的数据取不到 / 过期)一律提,见 attnmute.js
-  const muted = attnMuted();
+  const muted = attnMuted(state.settings);
   const add = (no, sev, r) => { if (!(r.cat && muted.has(r.cat))) items.push({ no, sev, ...r, parts: (r.parts || []).filter(Boolean) }); };
   // 1 数据面重载失败
   const rl = s.reload;

@@ -393,7 +393,7 @@ function reloadNotice() {
 // 它的证书出了问题以前只有主机面板上锁图标后的天数能看出来)。顶部常驻一条,可以按当前这组情况关掉,情况变了再出现。
 function certNotice() {
   // 设置「概况提醒」里关掉了证书这一类:顶部这条也不再常驻(证书页照常显示)
-  const list = (!isReseller() && !attnMuted().has('cert') && state.status && state.status.certAlerts) || [];
+  const list = (!isReseller() && !attnMuted(state.settings).has('cert') && state.status && state.status.certAlerts) || [];
   let bar = document.getElementById('cert-bar');
   const sig = certSig(list);
   let dismissed = '';
@@ -434,7 +434,7 @@ function certNotice() {
 // 大陆连通异常(被墙 / 部分运营商不通):导航"服务器"上亮红点,顶部常驻一条提示。
 // 提示可以点"知道了"按当前这组情况关掉;又有别的服务器出事、或同一台换了结论,再出现。
 function reachNotice() {
-  const bad = (!isReseller() && !attnMuted().has('reach') && state.status && state.status.reachBad) || []; // 关掉了大陆连通这一类:红点和顶部这条都不再提
+  const bad = (!isReseller() && !attnMuted(state.settings).has('reach') && state.status && state.status.reachBad) || []; // 关掉了大陆连通这一类:红点和顶部这条都不再提
   const nav = document.querySelector('#nav a[data-page="nodes"]');
   if (nav) nav.classList.toggle('has-alert', bad.length > 0);
   let bar = document.getElementById('reach-bar-top');
