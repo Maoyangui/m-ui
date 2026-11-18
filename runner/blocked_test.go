@@ -3,10 +3,12 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Maoyangui/m-ui/core"
 	"github.com/Maoyangui/m-ui/database"
@@ -82,15 +84,20 @@ func TestBusyInboundSkippedAndRestored(t *testing.T) {
 	defer r.core.Stop()
 
 	goodPort := freePort(t)
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	// 被占的端口也用 freePort 挑(临时端口段之外),再由测试自己占住:后面要放开它、让数据面把入站补开在上面,
+	// 回滚时数据面还会重新监听它;这些空当里它不能被别的进程的出站连接拿去当本地端口。
+	busy := freePort(t)
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", busy))
 	if err != nil {
 		t.Fatal(err)
 	}
-	busy := ln.Addr().(*net.TCPAddr).Port
+	// 线路转发到测试自己起的回显服务。以前转到 127.0.0.1:9(没人听):数据面接下连接、转发失败,sing 对 TCP 连接
+	// SetLinger(0) 再关、回 RST;-race 下拨号那边慢一步,拿到的就是 connection reset by peer,其实入站在监听。
+	echo := echoServer(t)
 	cfg := func(fwPort int) []byte {
 		return []byte(fmt.Sprintf(`{"log":{"disabled":true},"inbounds":[{"type":"mixed","tag":"in","listen":"127.0.0.1","listen_port":%d,"users":[{"username":"a","password":"1"}]},`+
-			`{"type":"direct","tag":"线路 ⇄%d","listen":"127.0.0.1","listen_port":%d,"network":"tcp","override_address":"127.0.0.1","override_port":9}],`+
-			`"outbounds":[{"type":"direct","tag":"direct"}],"route":{"rules":[{"inbound":["线路 ⇄%d"],"action":"route","outbound":"direct"}]}}`, goodPort, fwPort, fwPort, fwPort))
+			`{"type":"direct","tag":"线路 ⇄%d","listen":"127.0.0.1","listen_port":%d,"network":"tcp","override_address":"127.0.0.1","override_port":%d}],`+
+			`"outbounds":[{"type":"direct","tag":"direct"}],"route":{"rules":[{"inbound":["线路 ⇄%d"],"action":"route","outbound":"direct"}]}}`, goodPort, fwPort, fwPort, echo, fwPort))
 	}
 	if err := r.reloadAllLocked(cfg(busy)); err != nil {
 		t.Fatalf("端口被占的入站应被摘掉、其余照常启动: %v", err)
@@ -134,10 +141,8 @@ func TestBusyInboundSkippedAndRestored(t *testing.T) {
 	if len(r.BlockedInbounds()) != 0 {
 		t.Fatalf("名单应空了: %+v", r.BlockedInbounds())
 	}
-	if c, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", busy)); err != nil {
-		t.Fatalf("补开的入站应在监听: %v", err)
-	} else {
-		c.Close()
+	if err := echoVia(busy); err != nil {
+		t.Fatalf("补开的入站应在监听、把连接转发出去: %v", err)
 	}
 
 	// 已有的入站改端口改到被占的端口:不摘(摘了这条就停了),照旧整份回滚,原来的端口继续服务
@@ -181,4 +186,49 @@ func TestBusyInboundSkippedAndRestored(t *testing.T) {
 	if len(r.BlockedInbounds()) != 0 {
 		t.Fatalf("改了端口,名单里那条该自己消失: %+v", r.BlockedInbounds())
 	}
+}
+
+// echoServer 起一个 TCP 回显服务(测试结束时关掉),返回端口。
+func echoServer(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				_, _ = io.Copy(c, c)
+			}()
+		}
+	}()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+// echoVia 连到本机 port 上的线路入站,发一段数据、等它经回显服务原样回来:入站在监听,而且真把连接转发出去了。
+func echoVia(port int) error {
+	c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 3*time.Second)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	msg := []byte("ping")
+	if _, err := c.Write(msg); err != nil {
+		return err
+	}
+	got := make([]byte, len(msg))
+	if _, err := io.ReadFull(c, got); err != nil {
+		return err
+	}
+	if string(got) != string(msg) {
+		return fmt.Errorf("回来的是 %q", got)
+	}
+	return nil
 }

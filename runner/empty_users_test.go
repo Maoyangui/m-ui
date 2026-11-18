@@ -79,6 +79,10 @@ func TestEmptySocksLineIsNotOpenProxy(t *testing.T) {
 	if err := r.ReloadAll(); err != nil {
 		t.Fatalf("数据面起不来: %v", err)
 	}
+	// 三个端口都是 freePort 刚探过空着的。有入站因为端口被占没开,下面的检查就无从谈起了,直接说清楚是哪个端口
+	if bl := r.BlockedInbounds(); len(bl) != 0 {
+		t.Fatalf("有线路的端口在数据面监听前被占了(端口刚探过是空的,多半是本机别的程序抢先占了): %+v", bl)
+	}
 
 	for name, port := range map[string]int{"零用户的 socks": empty, "零用户的 mixed": mixed} {
 		if c, m := socks5Greet(t, port, 0x00); m == 0x00 {
