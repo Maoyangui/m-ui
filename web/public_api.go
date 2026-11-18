@@ -1,10 +1,14 @@
 package web
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -175,6 +179,11 @@ func (s *Server) publicAPI(w http.ResponseWriter, r *http.Request, sc apiScope) 
 		default:
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 		}
+	// POST /users/lookup、POST /users/batch:单个用户的地址上没有 POST 这个方法,不会和叫 lookup / batch 的用户撞
+	case len(parts) == 2 && parts[0] == "users" && parts[1] == "lookup" && r.Method == http.MethodPost:
+		s.apiLookupUser(w, r, sc)
+	case len(parts) == 2 && parts[0] == "users" && parts[1] == "batch" && r.Method == http.MethodPost:
+		s.apiBatchCreate(w, r, sc)
 	case (len(parts) == 2 || len(parts) == 3) && parts[0] == "users":
 		u, ok := s.apiFindUser(parts[1], sc.rid)
 		if !ok {
@@ -339,20 +348,94 @@ func (s *Server) apiUserWith(u model.User, snap *apiSnapshot) apiUserView {
 		LineIds:     ids, LineRefs: refs, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}
 }
 
+// apiListUsers GET /users:按 id 升序。筛选:q(名字 / 备注)、enabled、state(active / expiring / expired / exhausted / disabled)、
+// days(state=expiring 时看几天内到期,默认 7)、planId、online;分页:limit(1–1000)、offset。
+// 响应头 X-Total-Count 是筛完、分页之前的总数(续费提醒、对账这类要翻页的机器人靠它知道翻没翻完)。
 func (s *Server) apiListUsers(w http.ResponseWriter, r *http.Request, sc apiScope) {
+	qs := r.URL.Query()
+	now := time.Now().Unix()
 	q := s.db.Order("id asc")
 	if sc.rid > 0 {
 		q = q.Where("reseller_id = ?", sc.rid)
 	}
-	if kw := strings.TrimSpace(r.URL.Query().Get("q")); kw != "" {
+	if kw := strings.TrimSpace(qs.Get("q")); kw != "" {
 		q = q.Where("(name LIKE ? OR remark LIKE ?)", "%"+kw+"%", "%"+kw+"%")
 	}
-	if v := r.URL.Query().Get("enabled"); v == "true" || v == "false" {
+	if v := qs.Get("enabled"); v == "true" || v == "false" {
 		q = q.Where("enabled = ?", v == "true")
+	}
+	switch state := strings.ToLower(strings.TrimSpace(qs.Get("state"))); state {
+	case "":
+	case "active": // 启用、没到期、没用完
+		q = q.Where("enabled = ? AND (expiry = 0 OR expiry >= ?) AND (volume = 0 OR up + down < volume)", true, now)
+	case "expiring": // 启用着、days 天内到期(还没到)
+		days := 7
+		if v := strings.TrimSpace(qs.Get("days")); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 || n > 3650 {
+				badRequest(w, errors.New("days 填 1–3650 的整数"))
+				return
+			}
+			days = n
+		}
+		q = q.Where("enabled = ? AND expiry >= ? AND expiry <= ?", true, now, now+int64(days)*86400)
+	case "expired":
+		q = q.Where("expiry > 0 AND expiry < ?", now)
+	case "exhausted":
+		q = q.Where("volume > 0 AND up + down >= volume")
+	case "disabled":
+		q = q.Where("enabled = ?", false)
+	default:
+		badRequest(w, errors.New("state 只能是 active、expiring、expired、exhausted、disabled"))
+		return
+	}
+	if v := strings.TrimSpace(qs.Get("planId")); v != "" {
+		id, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			badRequest(w, errors.New("planId 要是数字(0 = 没有套餐的)"))
+			return
+		}
+		q = q.Where("COALESCE(plan_id, 0) = ?", id)
+	}
+	limit, offset := 0, 0
+	if v := strings.TrimSpace(qs.Get("limit")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 1000 {
+			badRequest(w, errors.New("limit 填 1–1000 的整数"))
+			return
+		}
+		limit = n
+	}
+	if v := strings.TrimSpace(qs.Get("offset")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			badRequest(w, errors.New("offset 填不小于 0 的整数"))
+			return
+		}
+		offset = n
 	}
 	var users []model.User
 	q.Find(&users)
 	snap := s.apiSnapshot() // 整表算一次
+	// 在不在线要看数据面(本机 + 各副机的报告),库里筛不了:取出来再筛
+	if v := qs.Get("online"); v == "true" || v == "false" {
+		want := v == "true"
+		kept := users[:0]
+		for _, u := range users {
+			if (len(snap.localIPs[u.Name])+len(snap.remoteIPs[u.Name]) > 0) == want {
+				kept = append(kept, u)
+			}
+		}
+		users = kept
+	}
+	w.Header().Set("X-Total-Count", strconv.Itoa(len(users)))
+	if offset > len(users) {
+		offset = len(users)
+	}
+	users = users[offset:]
+	if limit > 0 && limit < len(users) {
+		users = users[:limit]
+	}
 	out := make([]apiUserView, 0, len(users))
 	for _, u := range users {
 		out = append(out, s.apiUserWith(u, snap))
@@ -362,27 +445,29 @@ func (s *Server) apiListUsers(w http.ResponseWriter, r *http.Request, sc apiScop
 
 // apiUserReq 创建/修改用户的请求体;指针字段缺省表示"不改动"。
 type apiUserReq struct {
-	Name         *string          `json:"name"`
-	Enabled      *bool            `json:"enabled"`
-	PlanId       *uint            `json:"planId"`
-	Plan         *string          `json:"plan"` // 套餐名,与 planId 二选一
-	Mode         string           `json:"mode"` // 套用套餐的方式:renew(默认,清零用量)| extend(保留用量)
-	VolumeGB     *float64         `json:"volumeGb"`
-	Volume       *int64           `json:"volume"`       // 字节,0=不限;与 volumeGb 二选一
-	Days         *int             `json:"days"`         // 创建:自现在起 N 天;修改:在原到期(未过期时)基础上再加 N 天
-	Expiry       *int64           `json:"expiry"`       // 到期时间戳(秒),0=不限;优先级高于 days
-	ActivateDays *int             `json:"activateDays"` // 首次连接后 N 天到期;填了就不看 expiry / days
-	DeviceLimit  *int             `json:"deviceLimit"`
-	SpeedUp      *int             `json:"speedUp"`
-	SpeedDown    *int             `json:"speedDown"`
-	AutoReset    *bool            `json:"autoReset"`
-	ResetDays    *int             `json:"resetDays"`
-	Remark       *string          `json:"remark"`
-	Desc         *string          `json:"desc"`
-	LineIds      *[]uint          `json:"lineIds"`
-	LineRefs     *[]model.LineRef `json:"lineRefs"` // 线路 × 服务器;给了它就以它为准
-	ExtIds       *[]uint          `json:"extIds"`
-	// RequestId 幂等键(也可以用请求头 Idempotency-Key):只有修改时同时带了套餐(等同一次续费)才认
+	Name         *string  `json:"name"`
+	Enabled      *bool    `json:"enabled"`
+	PlanId       *uint    `json:"planId"`
+	Plan         *string  `json:"plan"` // 套餐名,与 planId 二选一
+	Mode         string   `json:"mode"` // 套用套餐的方式:renew(默认,清零用量)| extend(保留用量)
+	VolumeGB     *float64 `json:"volumeGb"`
+	Volume       *int64   `json:"volume"`       // 字节,0=不限;与 volumeGb 二选一
+	Days         *int     `json:"days"`         // 创建:自现在起 N 天;修改:在原到期(未过期时)基础上再加 N 天
+	Expiry       *int64   `json:"expiry"`       // 到期时间戳(秒),0=不限;优先级高于 days
+	ActivateDays *int     `json:"activateDays"` // 首次连接后 N 天到期;填了就不看 expiry / days
+	DeviceLimit  *int     `json:"deviceLimit"`
+	SpeedUp      *int     `json:"speedUp"`
+	SpeedDown    *int     `json:"speedDown"`
+	AutoReset    *bool    `json:"autoReset"`
+	ResetDays    *int     `json:"resetDays"`
+	Remark       *string  `json:"remark"`
+	Desc         *string  `json:"desc"`
+	// Prefix 建号时没给 name:名字自动起成「前缀-8 位随机字符」(不给前缀用 u);批量建号同理
+	Prefix   *string          `json:"prefix,omitempty"`
+	LineIds  *[]uint          `json:"lineIds"`
+	LineRefs *[]model.LineRef `json:"lineRefs"` // 线路 × 服务器;给了它就以它为准
+	ExtIds   *[]uint          `json:"extIds"`
+	// RequestId 幂等键(也可以用请求头 Idempotency-Key):建号(POST /users)认;修改时同时带了套餐(等同一次续费)才认
 	RequestId string `json:"requestId"`
 }
 
@@ -522,34 +607,139 @@ func updateUserFields(u model.User, renew bool) map[string]interface{} {
 	return updates
 }
 
+// apiCreateUser POST /users。name 可以不给(自动起名,见 apiAutoName);带了幂等键(requestId / Idempotency-Key)时
+// 同一个键只建一次:重试返回当时建的那个用户(响应头 Idempotent-Replayed: true),同键不同内容返回 409。
 func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiScope) {
 	var req apiUserReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		badRequest(w, errors.New("请求体不是合法 JSON: "+err.Error()))
 		return
 	}
-	if req.Name == nil {
-		badRequest(w, errors.New("缺少 name"))
+	key, err := planRequestID(r, req.RequestId)
+	if err != nil {
+		writePlanErr(w, err)
 		return
 	}
-	now := time.Now().Unix()
-	u := model.User{Name: *req.Name, Enabled: true, CreatedAt: now}
-	if err := s.validateUser(&u); err != nil {
-		badRequest(w, err)
+	hash := ""
+	if key != "" {
+		canon := req
+		canon.RequestId = ""
+		hash = planHash("create", canon)
+		// 建过了:返回当时建的那个用户(重试安全)。并发的两次同键请求靠下面事务里的主键挡住其中一次
+		if u, found, err := s.apiCreateReplay(sc.rid, key, hash); err != nil {
+			writePlanErr(w, err)
+			return
+		} else if found {
+			w.Header().Set("Idempotent-Replayed", "true")
+			writeJSON(w, http.StatusOK, s.apiUser(u))
+			return
+		}
+	}
+	u, plan, err := s.apiCreateOne(req, sc, key, hash)
+	if err != nil {
+		if key != "" { // 撞了主键 = 同一个键的另一次请求刚建完:按重放回
+			if prev, found, e2 := s.apiCreateReplay(sc.rid, key, hash); e2 == nil && found {
+				w.Header().Set("Idempotent-Replayed", "true")
+				writeJSON(w, http.StatusOK, s.apiUser(prev))
+				return
+			}
+		}
+		writePlanErr(w, err)
 		return
+	}
+	action := "create"
+	if plan != nil {
+		action += ":plan:" + plan.Name
+	}
+	s.auditAs(sc.actor, "user", action, u.Name)
+	s.reloadUsers("外部 API 新增用户 " + u.Name)
+	writeJSON(w, http.StatusOK, s.apiUser(u))
+}
+
+// apiCreateReplay 这个幂等键是不是已经建过用户:建过且内容相同返回那个用户;内容不同、或者那个用户已经删了,返回 409。
+func (s *Server) apiCreateReplay(rid uint, key, hash string) (model.User, bool, error) {
+	var rec model.ApiCreate
+	if err := s.db.Where("reseller_id = ? AND request_id = ?", rid, key).Limit(1).Find(&rec).Error; err != nil {
+		return model.User{}, false, err
+	}
+	if rec.RequestId == "" {
+		return model.User{}, false, nil
+	}
+	if rec.ReqHash != hash {
+		return model.User{}, false, opErr(http.StatusConflict, "idempotency_conflict", errPlanIdemConflict)
+	}
+	var u model.User
+	if err := s.db.Where("id = ?", rec.UserId).Limit(1).Find(&u).Error; err != nil {
+		return model.User{}, false, err
+	}
+	if u.Id == 0 {
+		return model.User{}, false, opErr(http.StatusConflict, "idempotency_gone", errors.New("这个 requestId 建的用户已经删除:换一个 requestId 重新建"))
+	}
+	return u, true, nil
+}
+
+// apiNamePrefixRe 自动起名的前缀:字母数字开头,可带 . _ -,最长 24。
+var apiNamePrefixRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,23}$`)
+
+// apiAutoName 没给 name 时起一个:「前缀-8 位随机小写字母数字」,和现有用户不重名。
+func (s *Server) apiAutoName(prefix *string) (string, error) {
+	p := "u"
+	if prefix != nil && strings.TrimSpace(*prefix) != "" {
+		p = strings.TrimSpace(*prefix)
+		if !apiNamePrefixRe.MatchString(p) {
+			return "", errors.New("prefix 要以字母或数字开头,只能含字母、数字和 . _ -,最长 24 个字符")
+		}
+	}
+	const alphabet = "abcdefghijkmnpqrstuvwxyz23456789" // 去掉了容易看错的 l o 0 1
+	for try := 0; try < 8; try++ {
+		b := make([]byte, 8)
+		if _, err := rand.Read(b); err != nil {
+			return "", err
+		}
+		for i := range b {
+			b[i] = alphabet[int(b[i])%len(alphabet)]
+		}
+		name := p + "-" + string(b)
+		var n int64
+		if err := s.db.Model(&model.User{}).Where("name = ?", name).Count(&n).Error; err != nil {
+			return "", err
+		}
+		if n == 0 {
+			return name, nil
+		}
+	}
+	return "", errors.New("自动起名连续重名,请重试")
+}
+
+// apiCreateOne 建一个用户并落库(不写审计、不重载数据面、不回响应:单个建号和批量建号共用)。
+// key 非空时在同一笔事务里记下幂等键(主键相同的另一次请求会在这里失败、整体回滚)。
+func (s *Server) apiCreateOne(req apiUserReq, sc apiScope, key, hash string) (model.User, *model.Plan, error) {
+	name := ""
+	if req.Name != nil {
+		name = strings.TrimSpace(*req.Name)
+	}
+	if name == "" {
+		auto, err := s.apiAutoName(req.Prefix)
+		if err != nil {
+			return model.User{}, nil, err
+		}
+		name = auto
+	}
+	now := time.Now().Unix()
+	u := model.User{Name: name, Enabled: true, CreatedAt: now}
+	if err := s.validateUser(&u); err != nil {
+		return model.User{}, nil, err
 	}
 	plan, err := s.apiFindPlan(req, sc.rid)
 	if err != nil {
-		badRequest(w, err)
-		return
+		return model.User{}, nil, err
 	}
 	var refs []model.LineRef
 	if plan != nil {
 		refs = applyPlanRefs(&u, *plan, "new", now)
 	}
 	if err := applyReq(&u, req, now, true); err != nil {
-		badRequest(w, err)
-		return
+		return model.User{}, nil, err
 	}
 	switch {
 	case req.LineRefs != nil:
@@ -572,8 +762,7 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiSco
 		s.resellerUserMu.Lock()
 		defer s.resellerUserMu.Unlock()
 		if err := s.prepareResellerUser(sc.rid, &u, refs); err != nil {
-			badRequest(w, err)
-			return
+			return model.User{}, nil, err
 		}
 	}
 	u.Credentials = generateCredentials(u.Name)
@@ -581,12 +770,17 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiSco
 	disabled := !u.Enabled    // Create 之后 gorm 会把默认值 true 回填进结构体,先记下本意
 	refs = s.normalizeRefs(refs)
 	if err := s.checkRefHides(refs); err != nil {
-		badRequest(w, err)
-		return
+		return model.User{}, nil, err
 	}
 	err = s.db.Transaction(func(tx *gorm.DB) error { // 用户与分配一起落库:任一步失败整体回滚并报错
 		if err := tx.Create(&u).Error; err != nil {
 			return err
+		}
+		if key != "" {
+			if err := tx.Create(&model.ApiCreate{ResellerId: sc.rid, RequestId: key, ReqHash: hash, UserId: u.Id, CreatedAt: now}).Error; err != nil {
+				return err
+			}
+			tx.Where("created_at < ?", now-90*86400).Delete(&model.ApiCreate{}) // 顺手清掉三个月以前的
 		}
 		if err := ensureDisabled(tx, &u, disabled); err != nil {
 			return err
@@ -600,16 +794,143 @@ func (s *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, sc apiSco
 		return nil
 	})
 	if err != nil {
-		badRequest(w, err)
+		return model.User{}, nil, err
+	}
+	return u, plan, nil
+}
+
+// apiBatchCreate POST /users/batch {count, prefix, …和 POST /users 一样的字段(name 不认)}:一次建 count 个(1–100),
+// 名字自动起成「前缀-随机」。逐个建:中途有一个建不了(代理的用户数 / 额度到顶之类)就停,已经建好的照样返回。
+// 返回 {users: [用户对象…], requested, created[, error]};一个都没建成是 400。
+func (s *Server) apiBatchCreate(w http.ResponseWriter, r *http.Request, sc apiScope) {
+	var req struct {
+		apiUserReq
+		Count int `json:"count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w, errors.New("请求体不是合法 JSON: "+err.Error()))
+		return
+	}
+	if req.Count < 1 || req.Count > 100 {
+		badRequest(w, errors.New("count 填 1–100"))
+		return
+	}
+	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
+		badRequest(w, errors.New("批量建号的名字是自动起的:不要给 name,用 prefix 指定前缀"))
+		return
+	}
+	if req.RequestId != "" || strings.TrimSpace(r.Header.Get("Idempotency-Key")) != "" {
+		badRequest(w, errors.New("批量建号不认幂等键:要重试安全就逐个调 POST /users 并各带一个 requestId"))
+		return
+	}
+	req.Name = nil
+	users := make([]model.User, 0, req.Count)
+	var stop error
+	var plan *model.Plan
+	for i := 0; i < req.Count; i++ {
+		u, p, err := s.apiCreateOne(req.apiUserReq, sc, "", "")
+		if err != nil {
+			stop = err
+			break
+		}
+		users, plan = append(users, u), p
+	}
+	if len(users) == 0 {
+		writePlanErr(w, stop)
 		return
 	}
 	action := "create"
 	if plan != nil {
 		action += ":plan:" + plan.Name
 	}
-	s.auditAs(sc.actor, "user", action, u.Name)
-	s.reloadUsers("外部 API 新增用户 " + u.Name)
+	names := make([]string, len(users))
+	for i, u := range users {
+		names[i] = u.Name
+	}
+	s.auditAs(sc.actor, "user", action, strings.Join(names, ", "))
+	s.reloadUsers(fmt.Sprintf("外部 API 批量新增 %d 个用户", len(users)))
+	snap := s.apiSnapshot()
+	out := make([]apiUserView, 0, len(users))
+	for _, u := range users {
+		out = append(out, s.apiUserWith(u, snap))
+	}
+	res := map[string]interface{}{"users": out, "requested": req.Count, "created": len(users)}
+	if stop != nil {
+		res["error"] = stop.Error()
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+// apiLookupUser POST /users/lookup {"sub": "<订阅地址,或地址的最后一段>"}:按订阅地址找到是哪个用户(机器人让用户发订阅地址来绑定账号时用)。
+// 地址放在请求体里,不进网址和访问日志。只认用户自己的订阅地址(用户名或订阅令牌);临时共享的地址不认 ——
+// 拿着别人分享的地址不能把那个账号绑成自己的。代理的密钥只找得到自己名下的。
+func (s *Server) apiLookupUser(w http.ResponseWriter, r *http.Request, sc apiScope) {
+	var req struct {
+		Sub string `json:"sub"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&req); err != nil {
+		badRequest(w, errors.New("请求体不是合法 JSON: "+err.Error()))
+		return
+	}
+	key := subKeyFromAddress(req.Sub)
+	if key == "" {
+		badRequest(w, errors.New("缺少 sub(订阅地址,或地址的最后一段)"))
+		return
+	}
+	q := func() *gorm.DB {
+		if sc.rid > 0 {
+			return s.db.Where("reseller_id = ?", sc.rid)
+		}
+		return s.db
+	}
+	var u model.User
+	// 和订阅服务认地址的顺序一样:先按用户名(主面板的、没有单独订阅令牌的),再按订阅令牌
+	if err := q().Where("name = ? AND COALESCE(reseller_id, 0) = 0 AND COALESCE(sub_token, '') = ''", key).Limit(1).Find(&u).Error; err != nil {
+		badRequest(w, err)
+		return
+	}
+	if u.Id == 0 {
+		if err := q().Where("sub_token = ?", key).Limit(1).Find(&u).Error; err != nil {
+			badRequest(w, err)
+			return
+		}
+	}
+	if u.Id == 0 {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "没有这个订阅地址对应的用户"})
+		return
+	}
 	writeJSON(w, http.StatusOK, s.apiUser(u))
+}
+
+// subKeyFromAddress 从订阅地址里取出认人的那一段:整条地址取路径的最后一段(去掉 ?format= 之类的参数、/qr 这类尾巴);
+// 本来就只给了那一段的原样用。取不出来返回空。
+func subKeyFromAddress(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" || len(v) > 2048 {
+		return ""
+	}
+	if i := strings.IndexAny(v, "?#"); i >= 0 {
+		v = v[:i]
+	}
+	if i := strings.Index(v, "://"); i >= 0 {
+		v = v[i+3:]
+		j := strings.Index(v, "/")
+		if j < 0 {
+			return "" // 只有主机名,没有路径
+		}
+		v = v[j:]
+	}
+	v = strings.TrimRight(v, "/")
+	for _, tail := range []string{"/qr", "/logo"} {
+		v = strings.TrimSuffix(v, tail)
+	}
+	if i := strings.LastIndex(v, "/"); i >= 0 {
+		v = v[i+1:]
+	}
+	if u, err := url.PathUnescape(v); err == nil {
+		v = u
+	}
+	return strings.TrimSpace(v)
 }
 
 // apiUpdateUser PATCH / PUT /users/{name|id}:只改请求里给出的字段。同时带了 planId / plan 的等同一次续费,

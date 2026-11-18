@@ -1348,8 +1348,10 @@
       <tbody>
         <tr><td><code>GET /ping</code></td><td>连通性与版本</td></tr>
         <tr><td><code>GET /plans</code></td><td>套餐列表</td></tr>
-        <tr><td><code>GET /users</code></td><td>用户列表(<code>?q=</code> 搜索)</td></tr>
-        <tr><td><code>POST /users</code></td><td>建号,可以带 <code>plan</code> 直接套用套餐</td></tr>
+        <tr><td><code>GET /users</code></td><td>用户列表:<code>?q=</code> 搜索,<code>?state=expiring&amp;days=3</code> 取 3 天内到期的(还有 <code>expired</code> 已到期、<code>exhausted</code> 流量用完、<code>disabled</code> 停用),<code>?planId=</code>、<code>?online=true</code>,<code>?limit=</code> / <code>?offset=</code> 分页(总数在响应头 <code>X-Total-Count</code>)</td></tr>
+        <tr><td><code>POST /users</code></td><td>建号,可以带 <code>plan</code> 直接套用套餐。名字可以不给(自动起成「前缀-随机」,前缀用 <code>prefix</code> 指定);带 <code>requestId</code>(比如订单号)重试不会多建一个</td></tr>
+        <tr><td><code>POST /users/batch</code></td><td>一次建一批(<code>count</code> 1–100),名字自动起,做卡密、批量发号用</td></tr>
+        <tr><td><code>POST /users/lookup</code></td><td>按订阅地址找到是哪个用户(请求体 <code>{"sub": "订阅地址"}</code>):用户把自己的订阅地址发给机器人,机器人就知道他是谁。别人分享给他的临时共享地址不认</td></tr>
         <tr><td><code>GET /users/{name}</code></td><td>用户详情(含订阅地址、在线 IP)</td></tr>
         <tr><td><code>PATCH /users/{name}</code></td><td>改字段:到期、流量、设备数、线路……</td></tr>
         <tr><td><code>POST /users/{name}/enable</code> · <code>/disable</code></td><td>启用 / 停用</td></tr>
@@ -1360,6 +1362,7 @@
         <tr><td><code>GET /users/{name}/plan-ops</code></td><td>套餐记录,最新的在前</td></tr>
         <tr><td><code>GET /users/{name}/sub</code></td><td>订阅地址</td></tr>
         <tr><td><code>DELETE /users/{name}</code></td><td>删除用户</td></tr>
+        <tr><td><code>GET /overview</code></td><td>面板概况:用户数、在线、今天 / 本月 / 累计流量。代理的密钥另有 <code>reseller</code>:自己的额度还剩多少、此刻还能不能建号(<code>canCreate</code>),商城收款前先看一眼</td></tr>
       </tbody>
     </table></div>
   </section>
@@ -1369,7 +1372,7 @@
     <p class="lede">续费和换套餐会动用户的钱和时间,接口提供了三道保险。</p>
     <ul>
       <li>预览:请求里带 <code>"dryRun": true</code> 只计算不执行,返回变更前后的对比,商城可以拿来报价。</li>
-      <li>防重复(幂等):带 <code>requestId</code>(或请求头 <code>Idempotency-Key</code>,比如用订单号),同一个编号重试只执行一次,不会重复加时。</li>
+      <li>防重复(幂等):带 <code>requestId</code>(或请求头 <code>Idempotency-Key</code>,比如用订单号),同一个编号重试只执行一次,不会重复加时。建号也认:同一个编号只建一个用户,重试拿回的是第一次建的那个。</li>
       <li>降级确认:换套餐会让用户马上超量、或到期提前时,接口返回 409 和完整预览,确认后带 <code>"force": true</code> 再调一次才执行。</li>
       <li>面板的 <b data-k="adm.apiDocsBtn">接口文档</b> 里标着 <b data-k="adm.apiIdem">幂等</b>、<b data-k="adm.apiDry">可预览</b> 的接口支持这些。</li>
       <li>续费、换套餐是明确的开通动作:被手动停用的用户也会被启用,要先停掉的人别拿去续费。</li>

@@ -305,6 +305,17 @@ type Plan struct {
 	Price float64 `json:"price" gorm:"default:0;not null"`
 }
 
+// ApiCreate 外部 API 建号的幂等表(POST /users 带了 requestId / Idempotency-Key 的):同一个作用域里同一个键只建一次,
+// 重试返回当时建的那个用户。只在主机上用,不进快照;随容灾的数据副本走(接任后重试照样认得)。超过 90 天的随手清掉。
+type ApiCreate struct {
+	// ResellerId 发起方的作用域:0 = 主面板的密钥,否则是那个代理(和 PlanOp 同一个口径)
+	ResellerId uint   `json:"-" gorm:"primaryKey;autoIncrement:false"`
+	RequestId  string `json:"requestId" gorm:"primaryKey"`
+	ReqHash    string `json:"-"` // 规范化请求的 SHA-256:同键不同内容返回 409
+	UserId     uint   `json:"userId"`
+	CreatedAt  int64  `json:"createdAt"`
+}
+
 // PlanOp 一次套餐操作(续费 / 延期 / 换套餐)的记录:既是用户详情里的「套餐记录」,也是外部 API 的幂等表。
 // 只在主机上,不进快照。Before / After 是变更前后的套餐状态,重放时原样返回。
 type PlanOp struct {
@@ -683,7 +694,7 @@ func All() []interface{} {
 		&Setting{}, &Admin{}, &Upstream{}, &Line{}, &Node{}, &User{}, &UserLine{}, &UserLineNode{}, &UserLineHide{}, &Plan{}, &ExtNode{}, &UserExt{},
 		&Reseller{}, &ResellerLine{}, &ResellerLineNode{},
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
-		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{}, &PageLogo{}, &ApiKey{},
+		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{}, &ApiCreate{}, &PageLogo{}, &ApiKey{},
 		&FwRule{}, &FwBan{}, &FwAllow{}, &UpstreamSource{}, &RewardCounter{},
 		&LocalTotal{}, &NodeQuota{},
 	}

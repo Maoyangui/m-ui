@@ -107,6 +107,10 @@ func apiPermFor(method string, parts []string) string {
 			return permUsersRead
 		}
 		return permUsersCreate
+	case len(parts) == 2 && parts[0] == "users" && method == http.MethodPost && parts[1] == "lookup":
+		return permUsersRead // 按订阅地址找用户:是读,只是地址放在请求体里(不进网址和日志)
+	case len(parts) == 2 && parts[0] == "users" && method == http.MethodPost && parts[1] == "batch":
+		return permUsersCreate
 	case len(parts) == 2 && parts[0] == "users":
 		switch {
 		case read:
@@ -694,8 +698,41 @@ func (s *Server) apiOverview(w http.ResponseWriter, sc apiScope) {
 		var granted int64
 		s.db.Model(&model.ResellerLine{}).Where("reseller_id = ?", sc.rid).Count(&granted)
 		out["lines"] = map[string]int64{"total": granted}
+		var rs model.Reseller
+		if s.db.First(&rs, sc.rid).Error == nil {
+			out["reseller"] = resellerQuotaView(rs, total, resellerUsed(s.db, rs), now.Unix())
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// resellerQuotaView 代理的密钥在 /overview 里看到的自己的额度:商城收款之前先看还能不能建号、还剩多少。
+// canCreate 与建号时的校验(checkResellerUser)同一口径:启用着、没到期、用户数没到顶、流量没用尽。
+// usersLeft / volumeLeft 只在设了上限时才有(上限 0 = 不限)。
+func resellerQuotaView(rs model.Reseller, users, used, now int64) map[string]interface{} {
+	out := map[string]interface{}{
+		"name": rs.Name, "enabled": rs.Enabled, "expiry": rs.Expiry,
+		"userLimit": rs.UserLimit, "users": users,
+		"volume": rs.Volume, "used": used,
+		"deviceLimit": rs.DeviceLimit, "speedUp": rs.SpeedUp, "speedDown": rs.SpeedDown,
+	}
+	can := rs.Enabled && !(rs.Expiry > 0 && rs.Expiry < now)
+	if rs.UserLimit > 0 {
+		left := int64(rs.UserLimit) - users
+		if left <= 0 {
+			left, can = 0, false
+		}
+		out["usersLeft"] = left
+	}
+	if rs.Volume > 0 {
+		left := rs.Volume - used
+		if left <= 0 {
+			left, can = 0, false
+		}
+		out["volumeLeft"] = left
+	}
+	out["canCreate"] = can
+	return out
 }
 
 // apiServers GET /servers(只有主面板的密钥能看):每台服务器在不在线、版本、在线人数、上次联系时间,

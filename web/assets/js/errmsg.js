@@ -425,7 +425,6 @@ const EN = /*BEGIN*/{
 "线路服务器范围格式错误": "Invalid line server scope",
 "统计窗口要在 1 到 1440 分钟之间": "Window must be 1 to 1440 minutes",
 "缺少 id": "Missing id",
-"缺少 name": "Missing name",
 "缺少 nodeIds": "Missing nodeIds",
 "缺少 planId 或 plan": "Missing planId or plan",
 "用户没有所属套餐,请给 planId 或 plan": "The user has no current plan; give planId or plan",
@@ -963,7 +962,20 @@ const EN = /*BEGIN*/{
 "下次重置的时间要在现在之后": "The next reset must be in the future",
 "下次重置的时间不能比一个周期还远": "The next reset cannot be further away than one cycle",
 "这台服务器本期流量已用完,按设置自动停用着:调高额度或重置用量后它会自动启用(关掉「用完或到期后自动停用」只是不停用整台,代理服务仍然停着)": "This server has used up its quota for this period and is disabled automatically as configured. It is re-enabled on its own once you raise the quota or reset the usage (turning off “Disable this server when the quota runs out or it expires” only keeps the server itself enabled; its proxy service stays stopped)",
-"这台服务器已到期,按设置自动停用着:延长到期时间后它会自动启用(关掉「用完或到期后自动停用」只是不停用整台,代理服务仍然停着)": "This server has expired and is disabled automatically as configured. It is re-enabled on its own once you extend the expiry (turning off “Disable this server when the quota runs out or it expires” only keeps the server itself enabled; its proxy service stays stopped)"
+"这台服务器已到期,按设置自动停用着:延长到期时间后它会自动启用(关掉「用完或到期后自动停用」只是不停用整台,代理服务仍然停着)": "This server has expired and is disabled automatically as configured. It is re-enabled on its own once you extend the expiry (turning off “Disable this server when the quota runs out or it expires” only keeps the server itself enabled; its proxy service stays stopped)",
+"days 填 1–3650 的整数": "days must be an integer from 1 to 3650",
+"state 只能是 active、expiring、expired、exhausted、disabled": "state must be one of active, expiring, expired, exhausted, disabled",
+"planId 要是数字(0 = 没有套餐的)": "planId must be a number (0 = users without a plan)",
+"limit 填 1–1000 的整数": "limit must be an integer from 1 to 1000",
+"offset 填不小于 0 的整数": "offset must be an integer of 0 or more",
+"这个 requestId 建的用户已经删除:换一个 requestId 重新建": "The user created with this requestId has been deleted: use a new requestId to create again",
+"prefix 要以字母或数字开头,只能含字母、数字和 . _ -,最长 24 个字符": "prefix must start with a letter or digit, contain only letters, digits and . _ -, and be at most 24 characters",
+"自动起名连续重名,请重试": "Auto-generated names kept colliding, please retry",
+"count 填 1–100": "count must be from 1 to 100",
+"批量建号的名字是自动起的:不要给 name,用 prefix 指定前缀": "Batch creation names users automatically: do not send name, use prefix to set the prefix",
+"批量建号不认幂等键:要重试安全就逐个调 POST /users 并各带一个 requestId": "Batch creation does not take an idempotency key: for safe retries call POST /users one by one, each with its own requestId",
+"缺少 sub(订阅地址,或地址的最后一段)": "Missing sub (the subscription link, or its last path segment)",
+"没有这个订阅地址对应的用户": "No user matches this subscription link"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

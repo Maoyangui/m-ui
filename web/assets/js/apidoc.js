@@ -9,7 +9,9 @@ export const API_ENDPOINTS = [
   { m: 'GET', p: '/ping', k: 'adm.ep.ping', g: 'panel', perm: '' },
   { m: 'GET', p: '/plans', k: 'adm.ep.plans', g: 'plan', perm: 'plans.read' },
   { m: 'GET', p: '/users', k: 'adm.ep.users', g: 'user', perm: 'users.read' },
-  { m: 'POST', p: '/users', k: 'adm.ep.create', g: 'user', perm: 'users.create' },
+  { m: 'POST', p: '/users', k: 'adm.ep.create', g: 'user', perm: 'users.create', idem: true },
+  { m: 'POST', p: '/users/batch', k: 'adm.ep.batch', g: 'user', perm: 'users.create' },
+  { m: 'POST', p: '/users/lookup', k: 'adm.ep.lookup', g: 'user', perm: 'users.read' },
   { m: 'GET', p: '/users/{name|id}', k: 'adm.ep.get', g: 'user', perm: 'users.read' },
   { m: 'PATCH / PUT', p: '/users/{name|id}', k: 'adm.ep.update', g: 'user', perm: 'users.update' },
   { m: 'DELETE', p: '/users/{name|id}', k: 'adm.ep.delete', g: 'user', perm: 'users.delete' },
@@ -48,7 +50,7 @@ export function apiExample(base, token, reseller = false) {
     '',
     `# ${t('adm.ex.create')}`,
     `curl -X POST "$API/users" ${auth} ${json} \\`,
-    `  -d '{"name":"${user}","plan":"${plan}","remark":"${t('adm.ex.order')} #1001"}'`,
+    `  -H "Idempotency-Key: order-1001" -d '{"name":"${user}","plan":"${plan}","remark":"${t('adm.ex.order')} #1001"}'`,
     '',
     `# ${t('adm.ex.renew')}`,
     `curl -X POST "$API/users/${user}/renew" ${auth} ${json} \\`,
@@ -65,6 +67,11 @@ export function apiExample(base, token, reseller = false) {
     `curl -X POST "$API/users/${user}/rotate" ${auth}`,
     `curl "$API/users/${user}/plan-ops" ${auth}`,
     `curl "$API/users/${user}/sub" ${auth}`,
+    '',
+    `# ${t('adm.ex.bot')}`,
+    `curl -X POST "$API/users/lookup" ${auth} ${json} \\`,
+    `  -d '{"sub":"https://sub.example.com:2096/sub/..."}'`,
+    `curl "$API/users?state=expiring&days=3" ${auth}`,
   ].join('\n');
 }
 

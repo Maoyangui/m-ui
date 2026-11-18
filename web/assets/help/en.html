@@ -1348,8 +1348,10 @@
       <tbody>
         <tr><td><code>GET /ping</code></td><td>Connectivity and version</td></tr>
         <tr><td><code>GET /plans</code></td><td>List plans</td></tr>
-        <tr><td><code>GET /users</code></td><td>List users (<code>?q=</code> to search)</td></tr>
-        <tr><td><code>POST /users</code></td><td>Create a user; pass <code>plan</code> to apply a plan at once</td></tr>
+        <tr><td><code>GET /users</code></td><td>List users: <code>?q=</code> to search, <code>?state=expiring&amp;days=3</code> for those expiring within 3 days (also <code>expired</code>, <code>exhausted</code> for out of data, <code>disabled</code>), <code>?planId=</code>, <code>?online=true</code>, and <code>?limit=</code> / <code>?offset=</code> for paging (the total is in the <code>X-Total-Count</code> response header)</td></tr>
+        <tr><td><code>POST /users</code></td><td>Create a user; pass <code>plan</code> to apply a plan at once. The name is optional (auto-generated as "prefix-random", set the prefix with <code>prefix</code>); with a <code>requestId</code> (such as your order number) a retry never creates a second user</td></tr>
+        <tr><td><code>POST /users/batch</code></td><td>Create a batch at once (<code>count</code> 1–100) with auto-generated names, for vouchers and bulk issuing</td></tr>
+        <tr><td><code>POST /users/lookup</code></td><td>Find the user behind a subscription link (body <code>{"sub": "subscription link"}</code>): a user sends the bot their own link and the bot knows who they are. Temporary shared links from someone else are not accepted</td></tr>
         <tr><td><code>GET /users/{name}</code></td><td>User details (subscription links, online IPs)</td></tr>
         <tr><td><code>PATCH /users/{name}</code></td><td>Change fields: expiry, quota, devices, lines…</td></tr>
         <tr><td><code>POST /users/{name}/enable</code> · <code>/disable</code></td><td>Enable / disable</td></tr>
@@ -1360,6 +1362,7 @@
         <tr><td><code>GET /users/{name}/plan-ops</code></td><td>Plan history, newest first</td></tr>
         <tr><td><code>GET /users/{name}/sub</code></td><td>Subscription links</td></tr>
         <tr><td><code>DELETE /users/{name}</code></td><td>Delete the user</td></tr>
+        <tr><td><code>GET /overview</code></td><td>Panel overview: users, online, traffic today / this month / total. A reseller key also gets <code>reseller</code>: how much quota is left and whether a user can be created right now (<code>canCreate</code>), worth checking before a shop takes payment</td></tr>
       </tbody>
     </table></div>
   </section>
@@ -1369,7 +1372,7 @@
     <p class="lede">Renewals and plan changes touch users' money and time, so the API has three safety nets.</p>
     <ul>
       <li>Preview: <code>"dryRun": true</code> only calculates and returns before / after, which a shop can use for quotes.</li>
-      <li>No duplicates (idempotency): send a <code>requestId</code> (or the <code>Idempotency-Key</code> header, such as your order number) and retries with the same id run only once, so time is never added twice.</li>
+      <li>No duplicates (idempotency): send a <code>requestId</code> (or the <code>Idempotency-Key</code> header, such as your order number) and retries with the same id run only once, so time is never added twice. Creating users honours it too: one id creates one user, and a retry returns the user created the first time.</li>
       <li>Downgrade confirmation: if a plan change would put the user over quota at once or bring the expiry forward, the API answers 409 with the full preview; call again with <code>"force": true</code> to go ahead.</li>
       <li>Calls marked <b data-k="adm.apiIdem">idempotent</b> and <b data-k="adm.apiDry">dry run</b> in the panel's <b data-k="adm.apiDocsBtn">API reference</b> support these.</li>
       <li>Renewals and plan changes are explicit sales: users disabled by hand are enabled as well, so do not renew someone you want to keep disabled.</li>
