@@ -156,10 +156,23 @@ input.fld { flex: 1; }
 .pwait .grow { flex: 1; }
 .pwait .left { display: inline-flex; align-items: center; gap: .35rem; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .pwait .btn { height: 28px; padding: 0 .6rem; font-size: 12px; }
+.pw-r { display: inline-flex; align-items: center; gap: .45rem; white-space: nowrap; } /* 倒计时和「取消」一起换行,不留一个孤零零的「取消」 */
 .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
 .pdone { margin: 0; font-size: 13.5px; color: var(--ok); }
+/* 等待到账:左边收款地址的二维码,右边金额与倒计时、一行浅色的收款地址(轻量的复制)——不用再翻回上面那张卡(用户 N10) */
+.pwait-box { display: flex; gap: 1rem; align-items: flex-start; }
+.pwait-box .qr { width: 96px; height: 96px; padding: 5px; }
+.pwait-t { flex: 1; min-width: 0; }
+.paddr { margin-top: .45rem; font-size: 12px; color: var(--muted); }
+.paddr-v { display: flex; align-items: baseline; flex-wrap: wrap; gap: .1rem .6rem; margin-top: .1rem; }
+.paddr-v code { min-width: 0; font-family: var(--mono); font-size: 12px; color: var(--text-2); word-break: break-all; }
+/* 等待时左边要放二维码和整个地址:多分一些宽度,右边的名单照样放得下 */
+.sign:has(> #p-wait:not([hidden])) { flex: 1.4 1 24rem; }
+.copy-lite { flex: none; border: 0; background: none; padding: 0; font: inherit; font-size: 12px; font-weight: 500; color: var(--primary-text); cursor: pointer; }
+.copy-lite:hover { text-decoration: underline; }
+.copy-lite.done { color: var(--ok); text-decoration: none; }
 
 /* 功德箱:名次、名字、金额;前三名的名次带金银铜底色 */
 .sum { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -196,6 +209,8 @@ input.fld { flex: 1; }
   input.fld { flex: 1 1 100%; }
   .amt { flex: 1 1 0; }
   .pwait .grow { flex-basis: 100%; height: 0; }
+  .pwait-box { flex-direction: column; align-items: center; }
+  .pwait-t { width: 100%; }
 }
 </style>
 </head>
@@ -296,14 +311,20 @@ input.fld { flex: 1; }
           </form>
           <p class="phint" id="p-hint">{{if eq .Lang "zh"}}留名后按提示金额转账,60 分钟内到账即上功德箱。{{else}}After signing, send the amount shown. If it arrives within 60 minutes, you're on the list.{{end}}</p>
           <div id="p-wait" hidden>
-            <div class="pwait">
-              <span>{{if eq .Lang "zh"}}请转{{else}}Send{{end}}</span> <b id="p-pay"></b> <span>USDT</span>
-              <button class="btn" type="button" id="p-copy" data-copy="">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
-              <span class="grow"></span>
-              <span class="left"><i class="pulse"></i>{{if eq .Lang "zh"}}等待到账{{else}}Waiting{{end}} <span id="p-left"></span></span>
-              <button class="btn ghost" type="button" id="p-cancel">{{if eq .Lang "zh"}}取消{{else}}Cancel{{end}}</button>
+            <div class="pwait-box">
+              <img class="qr" src="support/qr" alt="{{if eq .Lang "zh"}}收款地址二维码{{else}}Address QR code{{end}}" loading="lazy">
+              <div class="pwait-t">
+                <div class="pwait">
+                  <span>{{if eq .Lang "zh"}}请转{{else}}Send{{end}}</span> <b id="p-pay"></b> <span>USDT</span>
+                  <button class="btn" type="button" id="p-copy" data-copy="">{{if eq .Lang "zh"}}复制{{else}}Copy{{end}}</button>
+                  <span class="grow"></span>
+                  <span class="pw-r"><span class="left"><i class="pulse"></i>{{if eq .Lang "zh"}}等待到账{{else}}Waiting{{end}} <span id="p-left"></span></span>
+                  <button class="btn ghost" type="button" id="p-cancel">{{if eq .Lang "zh"}}取消{{else}}Cancel{{end}}</button></span>
+                </div>
+                <div class="paddr">{{if eq .Lang "zh"}}收款地址(TRON · TRC20){{else}}Send to (TRON · TRC20){{end}}<span class="paddr-v"><code>{{.Tron}}</code><button class="copy-lite" type="button" data-copy="{{.Tron}}">{{if eq .Lang "zh"}}复制地址{{else}}Copy address{{end}}</button></span></div>
+                <p class="phint">{{if eq .Lang "zh"}}零头用来对上你的名字,到账金额要完全一致,手续费另算。{{else}}The extra digits identify your transfer. The amount received must match exactly, with fees on top.{{end}}</p>
+              </div>
             </div>
-            <p class="phint">{{if eq .Lang "zh"}}零头用来对上你的名字,到账金额要完全一致,手续费另算。{{else}}The extra digits identify your transfer. The amount received must match exactly, with fees on top.{{end}}</p>
           </div>
           <p class="pdone" id="p-done" hidden></p>
         </div>
