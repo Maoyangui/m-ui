@@ -101,3 +101,79 @@ func TestImportUsersOnlyKeepsDisabled(t *testing.T) {
 		t.Fatal("只搬用户时停用的用户也必须保持停用")
 	}
 }
+
+// 审计 E1:-force 时源路径写错(打不开),目标库必须原样不动 —— 以前是先删目标库再开源库,原库就此没了。
+func TestRunForceWithBadSourceKeepsTarget(t *testing.T) {
+	dir := t.TempDir()
+	to := filepath.Join(dir, "m-ui.db")
+	db, err := database.Open(to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.User{Name: "keepme", Enabled: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	database.Close(db)
+	if err := Run(filepath.Join(dir, "写错的路径.db"), to, "", "", true); err == nil {
+		t.Fatal("源库打不开应报错")
+	}
+	db, err = database.Open(to)
+	if err != nil {
+		t.Fatalf("原库应还在: %v", err)
+	}
+	defer database.Close(db)
+	var n int64
+	db.Model(&model.User{}).Where("name = ?", "keepme").Count(&n)
+	if n != 1 {
+		t.Fatal("原库里的用户不见了")
+	}
+	if es, _ := filepath.Glob(to + ".importing-*"); len(es) > 0 {
+		t.Fatalf("不该留下临时库: %v", es)
+	}
+}
+
+// -force 导入成功:新库换上,原库连同 -wal / -shm 改名留作备份(.before-import-时间)。
+func TestRunForceKeepsOldAsBackup(t *testing.T) {
+	dir := t.TempDir()
+	from := oldDB(t, dir)
+	to := filepath.Join(dir, "m-ui.db")
+	db, err := database.Open(to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Create(&model.User{Name: "previous", Enabled: true})
+	database.Close(db)
+	if err := Run(from, to, "", "", true); err != nil {
+		t.Fatalf("导入失败: %v", err)
+	}
+	baks, _ := filepath.Glob(to + ".before-import-*")
+	var main []string
+	for _, b := range baks {
+		if n := len(b); n > 4 && (b[n-4:] == "-wal" || b[n-4:] == "-shm") {
+			continue
+		}
+		main = append(main, b)
+	}
+	if len(main) != 1 {
+		t.Fatalf("应留下一份原库备份,得到 %v", baks)
+	}
+	old, err := database.Open(main[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int64
+	old.Model(&model.User{}).Where("name = ?", "previous").Count(&n)
+	database.Close(old)
+	if n != 1 {
+		t.Fatal("备份里应是原来的库")
+	}
+	nw, err := database.Open(to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close(nw)
+	nw.Model(&model.User{}).Where("name IN ?", []string{"alive", "paused"}).Count(&n)
+	if n != 2 {
+		t.Fatalf("新库应是导入的内容,得到 %d 个用户", n)
+	}
+}

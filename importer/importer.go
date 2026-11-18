@@ -22,6 +22,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/util/fsutil"
 
 	"gorm.io/gorm"
 )
@@ -61,15 +62,12 @@ func (r *Report) section(format string, a ...interface{}) {
 }
 
 func Run(from, to, orderFile, profileTitle string, force bool) error {
-	if _, err := os.Stat(to); err == nil {
-		if !force {
-			return fmt.Errorf("目标 %s 已存在,如需覆盖请加 -force", to)
-		}
-		for _, suffix := range []string{"", "-wal", "-shm"} {
-			os.Remove(to + suffix)
-		}
+	if _, err := os.Stat(to); err == nil && !force {
+		return fmt.Errorf("目标 %s 已存在,如需覆盖请加 -force", to)
 	}
 
+	// 先只读打开源库:路径写错、打不开就到此为止,目标库一个字节都不动。
+	// (审计 E1:以前 -force 先删掉目标库再开源库,源路径一写错原库就没了。)
 	src, err := database.OpenReadOnly(from)
 	if err != nil {
 		return fmt.Errorf("打开源库: %w", err)
@@ -79,17 +77,27 @@ func Run(from, to, orderFile, profileTitle string, force bool) error {
 			sqlDB.Close()
 		}
 	}()
-	dst, err := database.Open(to)
-	if err != nil {
-		return fmt.Errorf("创建目标库: %w", err)
-	}
-
-	report := &Report{}
 	orderRank, err := loadOrder(orderFile)
 	if err != nil {
 		return err
 	}
 
+	// 导入写进同目录的临时库;全部导完、核对过、关好之后才换上(原库连同 -wal / -shm 改名留作备份)。
+	// 中途任何一步失败,临时库删掉,原库原样不动。
+	tmp := fmt.Sprintf("%s.importing-%d", to, os.Getpid())
+	fsutil.RemoveDB(tmp)
+	dst, err := database.Open(tmp)
+	if err != nil {
+		fsutil.RemoveDB(tmp)
+		return fmt.Errorf("创建目标库: %w", err)
+	}
+	fail := func(err error) error {
+		_ = database.Close(dst)
+		fsutil.RemoveDB(tmp)
+		return err
+	}
+
+	report := &Report{}
 	err = dst.Transaction(func(tx *gorm.DB) error {
 		upstreamIdByTag, err := importUpstreams(src, tx, report)
 		if err != nil {
@@ -111,16 +119,25 @@ func Run(from, to, orderFile, profileTitle string, force bool) error {
 		return importLocalNode(src, tx, report)
 	})
 	if err != nil {
-		return err
+		return fail(err)
 	}
 
 	if err := verify(src, dst, report); err != nil {
-		return err
+		return fail(err)
 	}
 	// 检查点并关闭:确保数据全部落进 .db 文件本身,
 	// 使"复制单个文件 = 完整备份"这一前提成立。
 	if err := database.Close(dst); err != nil {
+		fsutil.RemoveDB(tmp)
 		return fmt.Errorf("收尾写入数据库: %w", err)
+	}
+	bak, err := fsutil.SwapDB(to, tmp, fsutil.FreeDBName(to+".before-import-"+time.Now().Format("20060102-150405")))
+	if err != nil {
+		fsutil.RemoveDB(tmp)
+		return err
+	}
+	if bak != "" {
+		report.section("原来的库已改名留作备份:%s(连同 -wal / -shm)。", bak)
 	}
 	return writeReport(to, report)
 }
