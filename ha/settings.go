@@ -71,6 +71,8 @@ var globalKeys = setOf(
 	"rewardEnabled", "rewardAddress", "rewardBoundAt", "rewardKey", "rewardRemind", "rewardLast", "rewardDonation",
 	// 页面伪装:开关、样式、要不要也放在 80 / 443(随主机同步;种子是本机的)
 	"camoEnabled", "camoTemplate", "camoPorts", "camoRedirect",
+	// 概览里关掉的提醒类别(用户 N14):管理员的偏好,接任后的新主机照旧
+	"attnMute",
 	// 容灾的全局设置
 	KeyMode, KeyStandbys, KeyReplicaMinutes, KeyConfirmMinutes, KeyAutoMinutes, KeyRankStepMinutes,
 	KeyWitness, KeyClusterKey, KeyPauseUntil, KeyDnsToken, KeyDnsNames, KeyAllowPlain, KeyTakeSub, KeyDnsProvider,
