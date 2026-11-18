@@ -39,7 +39,7 @@ func TestSettingsSaveIsAllOrNothing(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	body := `{"subProfileTitle":"new","subUpdates":"6","subPageTitle":"T","subPageBrand":"B","tgChatId":"42","timezone":"Asia/Tokyo"}`
+	body := `{"subProfileTitle":"new","subUpdates":"6","subPageTitle":"T","subPageBrand":"true","tgChatId":"42","timezone":"Asia/Tokyo"}`
 	post := func() (int, string) {
 		r := httptest.NewRequest("POST", "http://x/app/api/settings", strings.NewReader(body))
 		w := httptest.NewRecorder()
@@ -69,7 +69,7 @@ func TestSettingsSaveIsAllOrNothing(t *testing.T) {
 		t.Fatalf("故障排除后应能保存: %d %s", code, resp)
 	}
 	got := snapshot()
-	for k, v := range map[string]string{"subProfileTitle": "new", "subUpdates": "6", "subPageTitle": "T", "subPageBrand": "B", "tgChatId": "42", "timezone": "Asia/Tokyo"} {
+	for k, v := range map[string]string{"subProfileTitle": "new", "subUpdates": "6", "subPageTitle": "T", "subPageBrand": "true", "tgChatId": "42", "timezone": "Asia/Tokyo"} {
 		if got[k] != v {
 			t.Fatalf("%s 应为 %q,得 %q", k, v, got[k])
 		}
