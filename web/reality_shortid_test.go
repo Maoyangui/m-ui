@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/Maoyangui/m-ui/creds"
 	"github.com/Maoyangui/m-ui/database"
 	"github.com/Maoyangui/m-ui/database/model"
 )
@@ -18,9 +19,14 @@ func TestRealityLineGetsShortID(t *testing.T) {
 	}
 	defer database.Close(db)
 	s := &Server{db: db}
+	// 私钥要是真的(审计 E3 起保存时校验私钥、由它算公钥),以前这里写的 "k" / "p" 现在会被拒
+	priv, pub, err := creds.RealityKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	l := model.Line{Name: "r", Protocol: "vless", Port: 30443,
-		Tls: []byte(`{"mode":"reality","reality":{"private_key":"k","public_key":"p","handshake_server":"www.apple.com","handshake_port":443}}`)}
+		Tls: []byte(`{"mode":"reality","reality":{"private_key":"` + priv + `","public_key":"` + pub + `","handshake_server":"www.apple.com","handshake_port":443}}`)}
 	if err := s.validateLine(&l); err != nil {
 		t.Fatal(err)
 	}
@@ -34,20 +40,20 @@ func TestRealityLineGetsShortID(t *testing.T) {
 	if err := json.Unmarshal(l.Tls, &tls); err != nil {
 		t.Fatal(err)
 	}
-	if tls.Mode != "reality" || tls.Reality.PrivateKey != "k" {
+	if tls.Mode != "reality" || tls.Reality.PrivateKey != priv {
 		t.Fatalf("其它字段不该被动:%s", l.Tls)
 	}
 	if len(tls.Reality.ShortIDs) != 1 || !regexp.MustCompile(`^[0-9a-f]{2,16}$`).MatchString(tls.Reality.ShortIDs[0]) {
 		t.Fatalf("应补一个十六进制 short_id,得 %v", tls.Reality.ShortIDs)
 	}
 
-	// 已经填了的原样保留
-	kept := model.Line{Name: "r2", Protocol: "vless", Port: 30444,
-		Tls: []byte(`{"mode":"reality","reality":{"private_key":"k","short_ids":["abcd"]}}`)}
+	// 已经填了的(公钥也和私钥配对)原样保留
+	want := `{"mode":"reality","reality":{"private_key":"` + priv + `","public_key":"` + pub + `","short_ids":["abcd"]}}`
+	kept := model.Line{Name: "r2", Protocol: "vless", Port: 30444, Tls: []byte(want)}
 	if err := s.validateLine(&kept); err != nil {
 		t.Fatal(err)
 	}
-	if string(kept.Tls) != `{"mode":"reality","reality":{"private_key":"k","short_ids":["abcd"]}}` {
+	if string(kept.Tls) != want {
 		t.Fatalf("填了 short_id 的不该被改写:%s", kept.Tls)
 	}
 
