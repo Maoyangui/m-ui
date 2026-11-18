@@ -95,7 +95,7 @@
       <li>左侧导航依次是:<b data-k="nav.dashboard">概览</b>、<b data-k="nav.lines">线路</b>、<b data-k="nav.upstreams">上游</b>、<b data-k="nav.exts">外部节点</b>、<b data-k="nav.users">用户</b>、<b data-k="nav.resellers">代理</b>、<b data-k="nav.plans">套餐</b>、<b data-k="nav.rules">规则</b>、<b data-k="nav.nodes">服务器</b>、<b data-k="nav.cert">证书</b>、<b data-k="nav.backup">备份</b>、<b data-k="nav.ops">运维</b>、<b data-k="nav.logs">日志</b>、<b data-k="nav.admin">管理员</b>、<b data-k="nav.settings">设置</b>。</li>
       <li>左下角:主题切换(◐ 跟随系统、☀ 浅色、☾ 深色)、语言、<b data-k="common.logout">退出登录</b>。版本号旁出现箭头表示有新版本,点它就能更新(见 <a href="#update">更新</a>)。</li>
       <li>右上角:<b data-k="help.btn">帮助说明</b>(就是本页)和 <b data-k="support.btn">建议 / 支持</b>(联系作者、反馈问题)。</li>
-      <li><b>顶部的提醒</b>:数据面重载失败、服务器离线或没同步、证书要处理、大陆连通异常、上游故障、定时备份失败等,每类一个小条排成一行,按轻重排,点小条里的链接去处理;没有要处理的事时这一行不出现。证书和大陆连通可以点 <b data-k="reach.dismiss">知道了</b>,情况有变化会再出现。</li>
+      <li><b>顶部的提醒</b>:数据面重载失败、服务器离线或没同步、证书要处理、大陆连通异常、上游故障、定时备份失败等,每类一个小条排成一行,按轻重排,点小条里的链接去处理;没有要处理的事时这一行不出现。证书和大陆连通可以点 <b data-k="reach.dismiss">知道了</b>,情况有变化会再出现。嫌哪几类烦,在 <b data-k="nav.settings">设置</b> → <b data-k="set.attn">概览提醒</b> 去掉勾,它们就不再出现在概览(各自的页面照常显示)。</li>
       <li><b data-k="dash.trafficToday">24 小时流量</b> 那一格可以点:打开 <b data-k="dash.bd.title">流量明细</b>,选 24 小时、7 天或 30 天,看这段时间的流量是哪些用户用的、走了哪些线路、落在哪些服务器上(三栏是同一个合计的三种分法,都按服务器倍率计)。线路那一栏要临时向各副机问,离线或版本旧的副机问不到,它们的流量记在 <b data-k="dash.bd.unassigned">没归到线路</b> 里并写明是哪几台。</li>
       <li>顶部提醒条:在概览以外的页面,默认密码没改、证书要处理、大陆连通异常、数据面重载失败等会在页面顶部提醒,按提示处理。</li>
       <li>副服务器的面板里,线路、用户这些页面是只读的,要到主机面板改。</li>
@@ -1571,7 +1571,7 @@
       <li>登记之后:只上报这台面板的一个随机标识、你填的地址、累计流量(取整到 GB)和时间。不上传域名、用户、线路或任何用户数据。</li>
       <li>登记服务会看到这台服务器的公网 IP(连任何服务都一样)。它只留一个加盐的哈希,用来判断「一处来源只认一个地址」;不留 IP 本身,也不公开。</li>
       <li>公开账本里只有地址、积分和名下的面板数;逐笔入账里是链上本来就公开的交易。</li>
-      <li>不想参加:<b data-k="nav.settings">设置</b> → <b data-k="set.reward">流量奖励</b> → 关掉 <b data-k="set.rewardEnabled">参加流量奖励计划</b>。关掉后硬币不显示,也不再为它联网;本机照常累计,重新打开不丢。</li>
+      <li>不想参加:<b data-k="nav.settings">设置</b> → <b data-k="set.panel">面板</b> → 关掉 <b data-k="set.rewardEnabled">参加流量奖励计划</b>(就在 <b data-k="set.supportOnline">功德箱与在线设备数</b> 下面)。关掉后硬币不显示,也不再为它联网;本机照常累计,重新打开不丢。</li>
     </ul>
   </section>
 </section>

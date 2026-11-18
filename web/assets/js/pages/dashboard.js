@@ -14,6 +14,7 @@ import { NODE_CODES, summarizeNodes, trackUnsynced, worstCode, healthSummary, fw
 import { shownConns } from '../fair.js';
 import { openTraffic } from '../traffic.js';
 import { auditAction, auditObject, JOB_ACTORS } from '../audit.js';
+import { attnMuted } from '../attnmute.js';
 
 export const title = () => t('nav.dashboard');
 // status / onlines 没取到时 app.js 照样调 tick:好在「需要处理」里写明"面板状态没取到"
@@ -300,24 +301,26 @@ function haRows(ha) {
 
 function attnItems() {
   const s = state.status || {}, node = isNode(), items = [], ignored = [];
-  const add = (no, sev, r) => items.push({ no, sev, ...r, parts: (r.parts || []).filter(Boolean) });
+  // 设置里关掉的那几类(r.cat)不提;没标类别的(面板自己的数据取不到 / 过期)一律提,见 attnmute.js
+  const muted = attnMuted();
+  const add = (no, sev, r) => { if (!(r.cat && muted.has(r.cat))) items.push({ no, sev, ...r, parts: (r.parts || []).filter(Boolean) }); };
   // 1 数据面重载失败
   const rl = s.reload;
-  if (rl && rl.at && rl.ok === false) add(1, 'bad', { title: t('dash.attn.reload', { op: trErr(rl.op || '') }), names: trErr(rl.error || ''),
+  if (rl && rl.at && rl.ok === false) add(1, 'bad', { cat: 'reload', title: t('dash.attn.reload', { op: trErr(rl.op || '') }), names: trErr(rl.error || ''),
     acts: btn('dash.reload', '', t('alert.retryReload')), go: '#/logs?tab=core', goText: t('dash.attn.viewLog') });
   // 1b 本机磁盘快满 / 满了(主机、副机自己的面板都看;副机的磁盘主机另在「服务器」那一项里报)
   const dl = diskLevel(s.disk);
-  if (dl) add(1.5, dl, { title: t('dash.attn.disk.' + dl, { pct: diskPct(s.disk), free: fmtBytes(s.disk.free, 1) }), names: diskHogs(s.disk), go: '#/ops', goText: t('dash.attn.goOps') });
+  if (dl) add(1.5, dl, { cat: 'disk', title: t('dash.attn.disk.' + dl, { pct: diskPct(s.disk), free: fmtBytes(s.disk.free, 1) }), names: diskHogs(s.disk), go: '#/ops', goText: t('dash.attn.goOps') });
   // 1c 本机的防火墙:面板规则没落下去、或者 m-ui 的端口在系统防火墙里没放行成(副机的在「服务器」那一项里报)
-  if (fwBad(s.fw)) add(1.6, 'warn', { title: t('dash.attn.fw'), names: s.fw.error ? trErr(s.fw.error) : t('fw.d.rules.noengine'), go: '#/fw' });
+  if (fwBad(s.fw)) add(1.6, 'warn', { cat: 'fw', title: t('dash.attn.fw'), names: s.fw.error ? trErr(s.fw.error) : t('fw.d.rules.noengine'), go: '#/fw' });
   // 2 主机容灾(字段存在才有)
   const ha = haRows(s.ha);
-  if (ha) add(2, ha.sev, ha);
+  if (ha) add(2, ha.sev, { ...ha, cat: 'ha' });
   // 3 服务器(主面板;单服务器时只可能是下线通知没送到)
   const sum = nodesSum();
   if (sum && (sum.red || sum.yellow)) {
     const worst = worstCode(sum);
-    add(3, sum.red ? 'bad' : 'warn', { title: t('dash.attn.nodes', { on: sum.online, total: sum.total }),
+    add(3, sum.red ? 'bad' : 'warn', { cat: 'nodes', title: t('dash.attn.nodes', { on: sum.online, total: sum.total }),
       parts: NODE_CODES.filter(c => sum.byCode[c].length).map(c => esc(t('dash.attn.node.' + c, { n: sum.byCode[c].length }))),
       names: etc(sum.byCode[worst] || [], 'nodes'), go: '#/nodes?f=bad' });
   }
@@ -338,10 +341,10 @@ function attnItems() {
       parts: [off && t('dash.attn.quota.off', { n: off }), qb.length - off && t('dash.attn.quota.hold', { n: qb.length - off })].filter(Boolean).map(esc),
       names: etc(qb.map(x => `${x.name}${!one && x.why ? ' ' + t('nq.why.' + x.why) : ''}`), 'nodes') };
     // 这一条只有「知道了」一个动作:用和「去处理」一样的蓝色(证书、大陆连通那两条旁边还有跳转,它们的「知道了」是灰的)
-    if (quotaFresh(qb, ls(DISMISS_KEYS.quota)).length) add(3.5, 'warn', { ...row, acts: btn('dash.dismiss', 'quota', t('reach.dismiss'), '', quotaAckKeys(qb)) });
+    if (quotaFresh(qb, ls(DISMISS_KEYS.quota)).length) add(3.5, 'warn', { ...row, cat: 'quota', acts: btn('dash.dismiss', 'quota', t('reach.dismiss'), '', quotaAckKeys(qb)) });
   }
   // 4 证书(可以「知道了」,和顶部提示条同一个签名)
-  const ca = s.certAlerts || [];
+  const ca = muted.has('cert') ? [] : s.certAlerts || [];
   if (ca.length) {
     const n = certCounts(ca);
     const row = { title: t('dash.attn.certs', { n: ca.length }),
@@ -353,7 +356,7 @@ function attnItems() {
     else add(4, n.failing + n.missing + n.expired ? 'bad' : 'warn', { ...row, acts: btn('dash.dismiss', 'cert', t('reach.dismiss'), 'ghost', sig) });
   }
   // 5 大陆连通(主面板)
-  const rb = (!node && s.reachBad) || [];
+  const rb = (!node && !muted.has('reach') && s.reachBad) || [];
   if (rb.length) {
     const hard = reachHard(rb).length;
     const row = { title: t('dash.attn.reach', { n: rb.length }),
@@ -367,33 +370,33 @@ function attnItems() {
   if (!node && Array.isArray(s.v6Bad) && s.v6Bad.length) {
     // 两种不通分开说:入站没放行(去放行 ::/0)和「境外通、大陆不通」(换地址或换回 IPv4),处理办法不一样
     const cn = s.v6Bad.filter(x => x.state === 'cndown').length, closed = s.v6Bad.length - cn;
-    add(6, 'warn', { title: t('dash.attn.v6', { n: s.v6Bad.length }), parts: [closed && esc(t('dash.attn.v6.closed', { n: closed })), cn && esc(t('dash.attn.v6.cndown', { n: cn }))].filter(Boolean),
+    add(6, 'warn', { cat: 'v6', title: t('dash.attn.v6', { n: s.v6Bad.length }), parts: [closed && esc(t('dash.attn.v6.closed', { n: closed })), cn && esc(t('dash.attn.v6.cndown', { n: cn }))].filter(Boolean),
       names: etc(s.v6Bad.map(x => `${x.name} ${x.port ? hostPort(x.target, x.port) : x.target || ''}`.trim()), 'nodes'), go: '#/nodes?f=bad' });
   }
   // 7 上游
   const hs = healthSummary(health);
-  if (hs && hs.bad.length) add(7, 'bad', { title: t('dash.attn.upstreams', { n: hs.bad.length }), parts: [!hs.single && esc(t('dash.attn.up.servers', { n: hs.servers.size }))],
+  if (hs && hs.bad.length) add(7, 'bad', { cat: 'upstreams', title: t('dash.attn.upstreams', { n: hs.bad.length }), parts: [!hs.single && esc(t('dash.attn.up.servers', { n: hs.servers.size }))],
     names: etc(hs.bad.map(b => b.name), 'ups'), go: '#/upstreams?f=bad' });
   // 8 本机记账(副机;字段存在才有)
-  if (node && s.ledgerFails > 0) add(8, 'bad', { title: t('dash.attn.ledger', { n: s.ledgerFails }), names: t('node.ledgerFailsHelp', { n: s.ledgerFails }), go: '#/logs?tab=core', goText: t('dash.attn.viewLog') });
+  if (node && s.ledgerFails > 0) add(8, 'bad', { cat: 'node', title: t('dash.attn.ledger', { n: s.ledgerFails }), names: t('node.ledgerFailsHelp', { n: s.ledgerFails }), go: '#/logs?tab=core', goText: t('dash.attn.viewLog') });
   // 8b 主机推来的配置没应用成(版本太低被拒收、数据面应用失败):主机照样在联系本机,不提就会显示成正常
-  if (node && s.applyErr) add(8, 'bad', { title: t('dash.attn.applyErr', { time: fmtTime(s.applyErrAt) }), names: trErr(s.applyErr), go: '#/logs?tab=core', goText: t('dash.attn.viewLog') });
+  if (node && s.applyErr) add(8, 'bad', { cat: 'node', title: t('dash.attn.applyErr', { time: fmtTime(s.applyErrAt) }), names: trErr(s.applyErr), go: '#/logs?tab=core', goText: t('dash.attn.viewLog') });
   // 9 主机多久没联系本机(副机、没开容灾;字段存在才有)
   const haOn = s.ha && (s.ha.epoch > 0 || s.ha.node);
-  if (node && !haOn && s.hubSeenAt && now() - s.hubSeenAt > 120) add(9, 'warn', { title: t('dash.attn.hubSilent', { dur: fmtDuration(now() - s.hubSeenAt) }), names: t('dash.attn.hubSilentHint') });
+  if (node && !haOn && s.hubSeenAt && now() - s.hubSeenAt > 120) add(9, 'warn', { cat: 'node', title: t('dash.attn.hubSilent', { dur: fmtDuration(now() - s.hubSeenAt) }), names: t('dash.attn.hubSilentHint') });
   // hubSeenAt 只在内存里:副机重启后主机一直没来联系时没有它,后端改给本次启动的时间
-  else if (node && !haOn && !s.hubSeenAt && s.hubQuietSince && now() - s.hubQuietSince > 120) add(9, 'warn', { title: t('dash.attn.hubQuiet', { dur: fmtDuration(now() - s.hubQuietSince) }), names: t('dash.attn.hubSilentHint') });
+  else if (node && !haOn && !s.hubSeenAt && s.hubQuietSince && now() - s.hubQuietSince > 120) add(9, 'warn', { cat: 'node', title: t('dash.attn.hubQuiet', { dur: fmtDuration(now() - s.hubQuietSince) }), names: t('dash.attn.hubSilentHint') });
   // 11 / 12 代理、备份(主面板;status.attention 存在才有)
   // 用户快到期 / 流量快用完不在这里:用户不续费,管理员没什么可处理的,列出来只会一直挂着消不掉。想看这些人,用户页筛「即将到期」。
   const at = (!node && s.attention) || null;
   if (at) {
     const rd = at.resellersDepleted || 0, rx = at.resellersExpiring || 0, rgone = at.resellersExpired || 0;
-    if (rd + rx + rgone > 0) add(11, rd || rgone ? 'bad' : 'warn', { title: t('dash.attn.resellers', { n: at.resellersAttn ?? rd + rx + rgone }),
+    if (rd + rx + rgone > 0) add(11, rd || rgone ? 'bad' : 'warn', { cat: 'resellers', title: t('dash.attn.resellers', { n: at.resellersAttn ?? rd + rx + rgone }),
       parts: [rd && esc(t('dash.attn.rs.depleted', { n: rd })), rgone && esc(t('dash.attn.rs.justExpired', { n: rgone })), rx && esc(t('dash.attn.rs.expiring', { n: rx }))], go: '#/resellers?f=attn' });
     const b = at.backup;
     // 失败只在开着定时备份、且之后没有更新的备份文件时报(手动备份成功、关掉定时备份后都不再常驻)
     const bFail = b && b.lastErr && b.auto && !(b.lastAt > b.lastErrAt);
-    if (b && (bFail || (b.auto && b.lastAt && b.lastAt < now() - 48 * 3600))) add(12, 'warn', {
+    if (b && (bFail || (b.auto && b.lastAt && b.lastAt < now() - 48 * 3600))) add(12, 'warn', { cat: 'backup',
       title: bFail ? t('dash.attn.backupFailed') : t('dash.attn.backupStale', { ago: fmtRelative(b.lastAt) }),
       names: bFail ? trErr(b.lastErr) + (b.lastErrAt ? ' · ' + fmtTime(b.lastErrAt) : '') : '', go: '#/backup' });
   }
@@ -405,17 +408,17 @@ function attnItems() {
       : stall === 'failing' && rs.lastOk ? t('dash.attn.reachFailing', { ago: fmtRelative(rs.lastOk) })
       : stall === 'failing' ? t('dash.attn.reachFailNow') : t('dash.attn.reachNever');
     const why = rs.error || rs.failErr;
-    add(12, 'warn', { title, names: why ? trErr(why) : '', go: '#/nodes' });
+    add(12, 'warn', { cat: 'checks', title, names: why ? trErr(why) : '', go: '#/nodes' });
   }
   if (hs && hs.rows.length && hs.interval > 0 && now() - hs.lastRun > 3 * hs.interval * 60) {
-    add(12, 'warn', { title: t('dash.attn.healthStale', { ago: fmtRelative(hs.lastRun), n: hs.interval }), go: '#/upstreams' });
+    add(12, 'warn', { cat: 'checks', title: t('dash.attn.healthStale', { ago: fmtRelative(hs.lastRun), n: hs.interval }), go: '#/upstreams' });
   }
   // 13 最近 10 分钟被拒的连接(灰色提示;按来源计,不是次数)
   const rj = (conns || []).filter(c => c.rejected && !c.failed && c.ts > now() - 600);
   if (rj.length) {
     // 被拒的原因三种:用户设备数超限、代理的设备池满、节点的用户容量满
     const pool = rj.filter(c => c.rejected === 'pool').length, node = rj.filter(c => c.rejected === 'node').length, dev = rj.length - pool - node;
-    add(13, 'info', { title: t('dash.attn.rejected', { n: rj.length }),
+    add(13, 'info', { cat: 'rejected', title: t('dash.attn.rejected', { n: rj.length }),
       parts: [dev && esc(t('dash.attn.rej.device', { n: dev })), pool && esc(t('dash.attn.rej.pool', { n: pool })), node && esc(t('dash.attn.rej.node', { n: node }))],
       names: etc([...new Set(rj.map(c => c.user).filter(Boolean))], 'users'), acts: btn('dash.showRejected', '', t('dash.attn.showRejected'), 'ghost') });
   }

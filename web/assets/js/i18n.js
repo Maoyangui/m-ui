@@ -1244,7 +1244,7 @@ const zh = {
   'rw.dn.paidLead': '「{name}」捐赠的 {amount} USDT 已到账,记进了捐赠榜和奖池。', 'rw.dn.again': '再捐一笔', 'rw.dn.expired': '上一次没有在 60 分钟内等到 {amount} USDT,这笔捐赠没有成立。还想捐就重新提交、按新给的金额转 —— 现在再按旧金额转,对不上号,不计入奖池。', 'rw.dn.errName': '请填写留名',
   'rw.dn.errNameLong': '留名最多 20 个字', 'rw.dn.errAmount': '金额要是 {min} 到 {max} 之间的数,最多两位小数', 'rw.dn.demo': '这是演示站:上面是演示地址,不能收款,请不要向它转账。', 'rw.dnr.title': '捐赠榜',
   'rw.dnr.sum': '{p} 人 · {c} 笔 · {v} USDT', 'rw.dnr.none': '还没有人捐,来做第一个', 'rw.dnr.name': '留名', 'rw.dnr.count': '次数', 'rw.dnr.last': '最近一次',
-  'rw.dnr.total': '合计', 'rw.dnr.times': '{n} 笔', 'set.reward': '流量奖励', 'set.rewardEnabled': '参加流量奖励计划', 'set.rewardEnabledHelp': '顶栏的金币和它的活动页。关掉后不显示、也不为它联网;本机照常累计真实流量,重新打开不丢。',
+  'rw.dnr.total': '合计', 'rw.dnr.times': '{n} 笔', 'set.rewardEnabled': '参加流量奖励计划', 'set.rewardEnabledHelp': '顶栏的金币和它的活动页。关掉后不显示、也不为它联网;本机照常累计真实流量,重新打开不丢。',
   'rw.dn.quick': '常用',
   'line.v6Need': '走 IPv6 的节点,要求客户端自己的网络也有 IPv6 —— 不少家用宽带和漫游流量卡没有,那样连上就是全断。拿不准就同时留一个 IPv4 的节点。', 'line.huXray': 'HTTPUpgrade:新版 Xray 内核的客户端(v2rayN、v2rayNG)连不上这种线路,mihomo、sing-box 系的客户端正常。要兼顾前者请用 WS。',
   'rw.hover.bind': '还没登记领取地址',
@@ -1284,6 +1284,11 @@ const zh = {
   'sn.col.lineNode': '线路 / 节点', 'sn.expand': '展开这条线路的节点', 'sn.collapse': '收起', 'sn.expandAll': '全部展开', 'sn.collapseAll': '全部收起', 'sn.relay1': '含 1 个中转', 'sn.relayN': '含 {n} 个中转',
   'sn.limitedN': '{n} 个限速', 'sn.fullN': '{n} 个已满', 'sn.outAll': '全部', 'sn.outOfN': '{a} / {b} 个',
   'sn.onlineN': '在线 {n}', 'sn.outFact': '输出 {a} / {b}',
+  'set.attn': '概览提醒', 'set.attnMute': '在概览「需要处理」里提醒这些', 'set.attnMuteHelp': '去掉勾的那几类不再出现在概览里(证书、大陆连通那两条顶部提示也跟着不显示);各自的页面照常显示,Telegram 通知在上面单独设置。面板自己取不到数据时的提醒不能关。', 'set.attnOff': '不提醒:{list}',
+  'set.attnAllOn': '全部提醒', 'attn.g.server': '服务器与本机', 'attn.g.net': '网络与巡检', 'attn.g.other': '证书、代理与备份', 'attn.cat.nodes': '服务器故障', 'attn.cat.quota': '服务器因额度或到期停用', 'attn.cat.reload': '数据面重载失败',
+  'attn.cat.disk': '磁盘快满', 'attn.cat.fw': '防火墙没生效', 'attn.cat.ha': '主机容灾', 'attn.cat.node': '和主机的同步(副机)', 'attn.cat.upstreams': '上游不通', 'attn.cat.reach': '大陆连通', 'attn.cat.v6': 'IPv6 入站',
+  'attn.cat.checks': '巡检很久没跑', 'attn.cat.cert': '证书', 'attn.cat.resellers': '代理额度与到期', 'attn.cat.backup': '定时备份', 'attn.cat.rejected': '被拒的连接',
+  'set.reward': '流量奖励',
 };
 
 const en = {
@@ -2661,7 +2666,7 @@ const en = {
   'rw.dn.errName': 'Enter a name', 'rw.dn.errNameLong': 'The name can be at most 20 characters', 'rw.dn.errAmount': 'Enter an amount between {min} and {max} with at most two decimals',
   'rw.dn.demo': 'This is the demo: the address above is a placeholder and cannot receive funds. Do not send anything to it.', 'rw.dnr.title': 'Donor board',
   'rw.dnr.sum': '{p} {p|donor|donors} · {c} {c|donation|donations} · {v} USDT', 'rw.dnr.none': 'No donations yet. Be the first.', 'rw.dnr.name': 'Name',
-  'rw.dnr.count': 'Times', 'rw.dnr.last': 'Latest', 'rw.dnr.total': 'Total', 'rw.dnr.times': '{n}×', 'set.reward': 'Traffic rewards', 'set.rewardEnabled': 'Take part in Traffic Rewards',
+  'rw.dnr.count': 'Times', 'rw.dnr.last': 'Latest', 'rw.dnr.total': 'Total', 'rw.dnr.times': '{n}×', 'set.rewardEnabled': 'Take part in Traffic Rewards',
   'set.rewardEnabledHelp': 'The coin in the top bar and its page. When off it is hidden and nothing is sent for it; real traffic keeps being counted locally, so nothing is lost if you turn it back on.',
   'rw.dn.quick': 'Quick',
   'line.v6Need': 'A node on IPv6 only works when the client\'s own network has IPv6 too. Many home connections and roaming SIMs don\'t, and then nothing loads once connected. When in doubt, keep an IPv4 node alongside.',
@@ -2727,6 +2732,14 @@ const en = {
   'sn.col.lineNode': 'Line / node', 'sn.expand': 'Show the nodes of this line', 'sn.collapse': 'Hide the nodes', 'sn.expandAll': 'Expand all', 'sn.collapseAll': 'Collapse all',
   'sn.relay1': 'incl. 1 relay', 'sn.relayN': 'incl. {n} relays', 'sn.limitedN': '{n} limited', 'sn.fullN': '{n} full', 'sn.outAll': 'All', 'sn.outOfN': '{a} of {b}',
   'sn.onlineN': '{n} online', 'sn.outFact': '{a} of {b} in subscriptions',
+  'set.attn': 'Overview alerts', 'set.attnMute': 'Show these under “Needs attention” on the dashboard',
+  'set.attnMuteHelp': 'Unticked kinds no longer appear on the dashboard (nor in the certificate and mainland reachability bars at the top). Their own pages still show them, and Telegram notifications have their own switches above. Alerts about the panel failing to load its own data cannot be turned off.',
+  'set.attnOff': 'Off: {list}', 'set.attnAllOn': 'All on', 'attn.g.server': 'Servers and this panel', 'attn.g.net': 'Network and checks', 'attn.g.other': 'Certificates, resellers and backups',
+  'attn.cat.nodes': 'Server problems', 'attn.cat.quota': 'Servers stopped by quota or expiry', 'attn.cat.reload': 'Data plane reload failed', 'attn.cat.disk': 'Disk almost full',
+  'attn.cat.fw': 'Firewall not applied', 'attn.cat.ha': 'Master failover', 'attn.cat.node': 'Sync with the master (node)', 'attn.cat.upstreams': 'Upstreams down',
+  'attn.cat.reach': 'Mainland reachability', 'attn.cat.v6': 'IPv6 inbound', 'attn.cat.checks': 'Checks not running', 'attn.cat.cert': 'Certificates', 'attn.cat.resellers': 'Reseller quota and expiry',
+  'attn.cat.backup': 'Scheduled backups', 'attn.cat.rejected': 'Refused connections',
+  'set.reward': 'Traffic rewards',
 };
 
 const dicts = { zh, en };

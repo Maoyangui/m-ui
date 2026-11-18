@@ -8,6 +8,7 @@ import { logoBlock, bindLogo } from '../logo.js';
 import { renderHASettings, saveHASettings } from '../ha.js';
 import { subSettingsChange } from '../subtls.js';
 import { refreshReward } from '../reward.js';
+import { ATTN_GROUPS, attnCatsFor, normMutes } from '../attnmute.js';
 
 // boolSetting 开关类设置的显示:和后端同一个判法(model.NormBoolSetting),空值用默认。
 function boolSetting(v, def) {
@@ -49,6 +50,8 @@ const groups = () => [
     ['webCertFile', t('set.cert'), 'text', t('set.certManaged')], ['webKeyFile', t('set.key'), 'text'],
     ['trustedProxies', t('set.trustedProxies'), 'text', t('set.trustedProxiesHelp')],
     ['supportOnline', t('set.supportOnline'), 'boolOn', t('set.supportOnlineHelp')],
+    // 流量奖励和功德箱、在线设备数一样是「要不要为它联网」的开关,放在一起(用户 N15);只在主机上有(第 6 项 = 只给主机)
+    ['rewardEnabled', t('set.rewardEnabled'), 'boolOn', t('set.rewardEnabledHelp'), null, true],
   ]},
   { id: 'sub', title: t('set.sub'), fields: [
     ['subDomain', t('set.subDomain'), 'text', t('set.subDomainHelp')],
@@ -96,6 +99,10 @@ const groups = () => [
     ['tgOnCert', t('set.tgOnCert'), 'boolOn', t('set.tgOnCertHelp')],
     ['tgDaily', t('set.tgDaily'), 'boolOn'], ['tgDailyHour', t('set.tgDailyHour'), 'number'],
   ]},
+  // 概况「需要处理」里哪几类要提(用户 N14):一组勾选框,存成一个设置(关掉的类别)
+  { id: 'attn', title: t('set.attn'), fields: [
+    ['attnMute', t('set.attnMute'), 'mutes', t('set.attnMuteHelp')],
+  ]},
   { id: 'monitor', title: t('set.monitor'), fields: [
     ['upstreamCheckMinutes', t('set.checkMinutes'), 'number', t('set.checkMinutesHelp')],
     ['upstreamCheckFailThreshold', t('set.checkThreshold'), 'number', t('set.checkThresholdHelp')],
@@ -106,10 +113,7 @@ const groups = () => [
     ['reachMinutes', t('set.reachMinutes'), 'number', t('set.reachMinutesHelp')],
     ['reachToken', t('set.reachToken'), 'text', t('set.reachTokenHelp')],
   ]},
-  // 流量奖励只在主机上算、只在主机上显示(副机的流量随用量汇到主机)
-  { id: 'reward', title: t('set.reward'), masterOnly: true, fields: [
-    ['rewardEnabled', t('set.rewardEnabled'), 'boolOn', t('set.rewardEnabledHelp')],
-  ]},
+
   { id: 'core', title: t('set.core'), fields: [
     ['certFile', t('set.certFile'), 'text', t('set.certHelp')], ['keyFile', t('set.key'), 'text'],
     ['upstreamTestUrl', t('set.testUrl'), 'text', t('set.testUrlHelp')],
@@ -141,7 +145,7 @@ export async function render(el) {
     ${groups().filter(g => !(g.masterOnly && isNode)).map(g => `
       <section class="card set-sec" id="sec-${g.id}" data-nav="${esc(g.title)}">
         <div class="card-head"><h2>${esc(g.title)}</h2>${g.test ? `<div class="row"><button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button></div>` : ''}</div>
-        <div class="set-rows">${g.fields.map(f => rowHTML(s, f)).join('')}</div>${g.extra || ''}
+        <div class="set-rows">${g.fields.filter(f => !(f[5] && isNode)).map(f => rowHTML(s, f)).join('')}</div>${g.extra || ''}
       </section>`).join('')}
     <section class="card set-sec" id="sec-about" data-nav="${esc(t('set.about'))}">
       <div class="card-head"><h2>${t('set.about')}</h2><a href="#/admin" class="btn sm">${t('nav.admin')} →</a></div>
@@ -170,6 +174,7 @@ export async function render(el) {
   });
   bindLogo('set-logo', 'sub-logo');
   bindCharCounts(el);
+  el.querySelectorAll('.mutes').forEach(box => box.addEventListener('change', () => syncMutes(box)));
   // 未保存的改动:记下现在各项的值,之后任何一项动了就重算保存条
   barOpen = false;
   snapshot();
@@ -221,7 +226,7 @@ let barOpen = false;
 const SECRET = /token|secret/i; // 令牌、密钥类:清单里不显示内容
 const isBool = type => type === 'bool' || type === 'boolOn';
 const fieldList = () => groups().filter(g => !(g.masterOnly && isNodeRole()))
-  .flatMap(g => g.fields.map(([k, label, type, , options]) => ({ k, label, type, options, group: g.title, gid: g.id })));
+  .flatMap(g => g.fields.filter(f => !(f[5] && isNodeRole())).map(([k, label, type, , options]) => ({ k, label, type, options, group: g.title, gid: g.id })));
 const ctlVal = f => { const el = document.getElementById('set-' + f.k); return !el ? undefined : isBool(f.type) ? String(el.checked) : el.value.trim(); };
 const dirtyFields = () => fieldList().filter(f => { const v = ctlVal(f); return v !== undefined && v !== orig[f.k]; });
 function snapshot() {
@@ -232,12 +237,28 @@ function setCtl(f, v) {
   const el = document.getElementById('set-' + f.k);
   if (!el) return;
   if (isBool(f.type)) el.checked = v === 'true'; else el.value = v;
+  if (f.type === 'mutes') { // 勾选框跟着隐藏的值走(撤销这一项时)
+    const off = new Set(String(v || '').split(',').filter(Boolean));
+    document.querySelectorAll(`.mutes[data-for="${el.id}"] input[data-mute]`).forEach(cb => { cb.checked = !off.has(cb.dataset.mute); });
+  }
   el.dispatchEvent(new Event('input', { bubbles: true })); // 字数统计跟着更新,保存条也跟着重算
+}
+// syncMutes 概况提醒的勾选框动了:把关掉的类别写回隐藏的那个值(这个角色看不到的类别原样留着),保存条跟着重算
+function syncMutes(box) {
+  const input = document.getElementById(box.dataset.for);
+  if (!input) return;
+  const shown = [...box.querySelectorAll('input[data-mute]')];
+  const was = new Set(String(input.dataset.orig || '').split(',').filter(Boolean));
+  for (const cb of shown) was.delete(cb.dataset.mute);
+  for (const cb of shown) if (!cb.checked) was.add(cb.dataset.mute);
+  input.value = normMutes([...was].join(','));
+  input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 const clip = v => (v.length > 40 ? v.slice(0, 38) + '…' : v);
 // 清单里一个值怎么写:开关写开 / 关,下拉写选项名,空的写默认值,令牌不显示内容,长文本只写字数
 function showVal(f, v) {
   if (isBool(f.type)) return t(v === 'true' ? 'set.sb.on' : 'set.sb.off');
+  if (f.type === 'mutes') return v ? t('set.attnOff', { list: v.split(',').map(id => t('attn.cat.' + id)).join(t('node.sep')) }) : t('set.attnAllOn');
   if (f.type === 'select') { const o = (f.options || []).find(x => x[0] === v); return o ? o[1] : v; }
   if (v === '') return defaults[f.k] !== undefined ? t('set.sb.defaultV', { v: defaults[f.k] }) : t('set.sb.empty');
   if (SECRET.test(f.k)) return '••••••';
@@ -373,12 +394,25 @@ async function saveAll() {
 
 // 一项设置一行:左边名称 + 说明,右边控件(开关靠右);长文本框(公告、模板)名称在上、框在下占满。
 // 控件的 id 仍是 set-<键>,保存逻辑不用跟着变
+// 宽屏两列时也各占一整行的:功德箱 / 在线设备数和流量奖励这两个「要不要为它联网」的开关,一上一下放在一起(用户 N15)
+const WIDE = new Set(['supportOnline', 'rewardEnabled']);
+
 function rowHTML(s, [k, label, type, help, options]) {
   const id = 'set-' + k;
   const info = `<div class="set-info"><label class="set-label" for="${id}">${esc(label)}</label>${help ? `<p class="set-help">${esc(help)}</p>` : ''}</div>`;
   if (type === 'bool' || type === 'boolOn') {
     const on = boolSetting(s[k], k === 'subPageEnabled' || type === 'boolOn');
-    return `<div class="set-row bool">${info}<div class="set-ctl"><label class="switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></label></div></div>`;
+    return `<div class="set-row bool${WIDE.has(k) ? ' wide' : ''}">${info}<div class="set-ctl"><label class="switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></label></div></div>`;
+  }
+  if (type === 'mutes') { // 概况提醒:分三小块的一组勾选框(勾着 = 提醒),值存在隐藏的输入框里给保存条用
+    const v = normMutes(s[k]), off = new Set(v.split(',').filter(Boolean));
+    const cats = attnCatsFor(isNodeRole());
+    const blocks = ATTN_GROUPS.map(g => {
+      const list = cats.filter(c => c.group === g);
+      return list.length ? `<div class="mute-g"><div class="mute-h">${esc(t('attn.g.' + g))}</div>${list.map(c =>
+        `<label class="mute-cb"><input type="checkbox" data-mute="${c.id}" ${off.has(c.id) ? '' : 'checked'}><span>${esc(t('attn.cat.' + c.id))}</span></label>`).join('')}</div>` : '';
+    }).join('');
+    return `<div class="set-row stack">${info}<div class="set-ctl"><input type="hidden" id="${id}" value="${esc(v)}" data-orig="${esc(v)}"><div class="mutes" data-for="${id}">${blocks}</div></div></div>`;
   }
   if (type === 'textarea' || type === 'code') {
     return `<div class="set-row stack">${info}<div class="set-ctl"><textarea id="${id}" ${type === 'code' ? 'class="code-area" spellcheck="false" autocomplete="off"' : ''}>${esc(s[k] ?? '')}</textarea>${textMax[k] ? charCount(id, textMax[k]) : ''}</div></div>`;

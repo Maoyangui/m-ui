@@ -1389,7 +1389,7 @@ var panelSettings = setOf(
 	"upstreamCheckMinutes", "upstreamCheckFailThreshold", "reachAuto", "reachMinutes", "reachToken",
 	"certFile", "keyFile", "upstreamTestUrl", "statsBucketSeconds", "trafficAge", "allowPrivate",
 	"nodeMode", "backupHour", "backupKeep", "backupTelegram", "subLogAge", "auditAge",
-	"fwAutoBan", "fwAutoAllow", "rewardEnabled",
+	"fwAutoBan", "fwAutoAllow", "rewardEnabled", "attnMute",
 )
 
 // hiddenSettings 不发给浏览器的密钥:前端用不到,各自的页面走专门接口(管理员页、配对信息、证书页)。
@@ -1503,6 +1503,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			in["trustedProxies"] = norm
+		}
+		if v, ok := in["attnMute"]; ok { // 概览里关掉的提醒类别(用户 N14):只留认得出的写法,逗号分隔
+			in["attnMute"] = normAttnMute(v)
 		}
 		if v, ok := in["reachMinutes"]; ok && strings.TrimSpace(v) != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(v)); err != nil || n < reach.MinMinutes || n > reach.MaxMinutes {
@@ -1655,6 +1658,21 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "方法不允许"})
 	}
+}
+
+// normAttnMute 概览里关掉的提醒类别:类别名由前端定(web/assets/js/attnmute.js),这里只留小写字母和数字写的(有 v6)、去重,最多 40 个。
+func normAttnMute(v string) string {
+	seen := map[string]bool{}
+	var out []string
+	for _, x := range strings.Split(v, ",") {
+		x = strings.ToLower(strings.TrimSpace(x))
+		if x == "" || len(x) > 20 || seen[x] || len(out) >= 40 || strings.Trim(x, "abcdefghijklmnopqrstuvwxyz0123456789") != "" {
+			continue
+		}
+		seen[x] = true
+		out = append(out, x)
+	}
+	return strings.Join(out, ",")
 }
 
 // normSubDomain 订阅域名:空 = 用面板域名(再没有用公网 IP);否则只收一个具体的域名(不带 http://、端口、路径,不能是泛域名)。
