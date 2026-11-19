@@ -102,7 +102,9 @@ func Process(orig []byte, seed uint64, name string, w, h int) ([]byte, error) {
 			}
 			total += wt
 		}
-		hc.drop(int(y1))
+		// 丢到下一个输出行要用的第一行为止,和下一轮的起点用同一个算式。以前按 int(y1) 丢:y1 和下一轮的 y0 是两条
+		// 浮点式子,落在整数边上时可能差一行 —— 这边丢了、那边还要,get 就下标越界(审查 F-D1)
+		hc.drop(int(cy + float64(oy+1)*fy))
 		if total > 0 {
 			for i := range acc {
 				acc[i] /= total
@@ -198,6 +200,9 @@ type rowCache struct {
 }
 
 func (c *rowCache) get(sy int) []float32 {
+	if sy < c.first { // 要的是已经丢掉的行:给最早还留着的那一行,不越界(正常不会走到,见 Process 里 drop 的说明)
+		sy = c.first
+	}
 	for c.first+len(c.rows) <= sy {
 		var buf []float32
 		if n := len(c.free); n > 0 {

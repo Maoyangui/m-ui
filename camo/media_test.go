@@ -164,3 +164,36 @@ func TestBuildWithPhotos(t *testing.T) {
 		t.Fatal("镜像站不用照片")
 	}
 }
+
+// rowCache 被要一行已经丢掉的(审查 F-D1:以前按 int(y1) 丢行,和下一轮按 int(cy+(oy+1)*fy) 取行是两条浮点式子,
+// 落在整数边上时会差一行,get 就下标越界、整个进程崩):给最早还留着的那一行,不越界。
+func TestRowCacheGetAfterDrop(t *testing.T) {
+	c := &rowCache{w: 1, first: 5, fill: func(sy int, dst []float32) { dst[0] = float32(sy) }}
+	if got := c.get(7)[0]; got != 7 {
+		t.Fatalf("取第 7 行,得 %v", got)
+	}
+	c.drop(8) // 5、6、7 都丢了
+	if got := c.get(7)[0]; got != 8 {
+		t.Fatalf("要已经丢掉的第 7 行应给最早还留着的第 8 行,得 %v", got)
+	}
+	if got := c.get(9)[0]; got != 9 {
+		t.Fatalf("之后照常往下取,得 %v", got)
+	}
+}
+
+// 各种种子、各种尺寸都处理得出来(不 panic、尺寸对):伪装站用到的每个尺寸都过一遍,原图用图包的 1280×720。
+func TestProcessManySeeds(t *testing.T) {
+	orig := testJPEG(t, 1280, 720)
+	sizes := [][2]int{{480, 270}, {960, 540}, {1280, 560}, {192, 108}, {320, 140}, {960, 480}, {360, 240}, {240, 120}, {120, 80}, {800, 450}, {200, 112}, {288, 162}, {96, 54}}
+	for seed := uint64(1); seed <= 40; seed++ {
+		for _, sz := range sizes {
+			out, err := Process(orig, seed*0x9e3779b97f4a7c15, "sea-day-01.jpg", sz[0], sz[1])
+			if err != nil {
+				t.Fatalf("种子 %d %v: %v", seed, sz, err)
+			}
+			if cfg, err := jpeg.DecodeConfig(bytes.NewReader(out)); err != nil || cfg.Width != sz[0] || cfg.Height != sz[1] {
+				t.Fatalf("种子 %d %v: %+v %v", seed, sz, cfg, err)
+			}
+		}
+	}
+}
