@@ -43,3 +43,23 @@ func TestRetryDecommissionsGivesUpOnDeletedAfterAWeek(t *testing.T) {
 		t.Fatal("停用着的那台应一直重试")
 	}
 }
+
+// 服务器列表读不出来时(审查 F-C1):existingNodeIds 要把错误报出来,不能当成「一台都不在列表里」——
+// 那样停用着(还在列表里)的那台超过 7 天的下线通知会被当成已删除的作废掉。
+func TestExistingNodeIdsReportsReadError(t *testing.T) {
+	db, err := database.Open(filepath.Join(t.TempDir(), "x.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(Deps{DB: db, Setting: func(string) string { return "" }, IsNode: func() bool { return false }})
+	db.Create(&model.Node{Name: "停用的", ApiUrl: "http://192.0.2.1:9", Enabled: true, Sort: 1})
+	recs := []model.NodeDecommission{{NodeId: 1}, {NodeId: 7}}
+	got, err := h.existingNodeIds(recs)
+	if err != nil || !got[1] || got[7] {
+		t.Fatalf("读得出来时:在列表里的那台为真、删掉的为假: %v %v", got, err)
+	}
+	database.Close(db) // 库关了:查询必然出错
+	if _, err := h.existingNodeIds(recs); err == nil {
+		t.Fatal("读不出来时应报错,不能当成一台都不在")
+	}
+}

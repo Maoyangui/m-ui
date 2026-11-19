@@ -152,11 +152,16 @@ func (h *Hub) retryDecommissions() {
 		return
 	}
 	now := time.Now()
-	existing := h.existingNodeIds(recs)
+	// 服务器列表一时读不出来(库忙):这一轮不做「删除 7 天自动作废」的判断 —— 读不出来时哪台都像是已删除的,
+	// 会把停用着(还在列表里)的那台的下线通知也作废掉,它就再也收不到下线通知(审查 F-C1)
+	existing, existErr := h.existingNodeIds(recs)
+	if existErr != nil {
+		logger.Warning("读取服务器列表失败,这一轮不判断下线通知是否过期: ", existErr)
+	}
 	for _, rec := range recs {
 		// 已经删掉的那台,7 天都没送到:多半机器已经销毁 / 换了 IP,不再重试(服务器页的提示也随之消失)。
 		// 停用着的那台还在列表里,一直重试(重新启用会作废)。以前删掉的永远重试、提示永远不消失(审计 A4)。
-		if !existing[rec.NodeId] && rec.CreatedAt > 0 && now.Sub(time.Unix(rec.CreatedAt, 0)) > decommissionGiveUp {
+		if existErr == nil && !existing[rec.NodeId] && rec.CreatedAt > 0 && now.Sub(time.Unix(rec.CreatedAt, 0)) > decommissionGiveUp {
 			h.forgetDecommission(rec)
 			logger.Warning("已删除的副机 ", rec.Name, " 的下线通知 7 天都没送到,不再重试(那台机器要是还在运行,会继续按旧配置为所有用户服务)")
 			continue
@@ -198,18 +203,20 @@ func (h *Hub) retryDecommissions() {
 const decommissionGiveUp = 7 * 24 * time.Hour
 
 // existingNodeIds 这些下线通知对应的副机里,哪些还在服务器列表里(停用着)。
-func (h *Hub) existingNodeIds(recs []model.NodeDecommission) map[uint]bool {
+func (h *Hub) existingNodeIds(recs []model.NodeDecommission) (map[uint]bool, error) {
 	ids := make([]uint, 0, len(recs))
 	for _, r := range recs {
 		ids = append(ids, r.NodeId)
 	}
 	var have []uint
-	h.d.DB.Model(&model.Node{}).Where("id IN ?", ids).Pluck("id", &have)
+	if err := h.d.DB.Model(&model.Node{}).Where("id IN ?", ids).Pluck("id", &have).Error; err != nil {
+		return nil, err
+	}
 	out := make(map[uint]bool, len(have))
 	for _, id := range have {
 		out[id] = true
 	}
-	return out
+	return out, nil
 }
 
 // liveNodeAddrs 启用着的副机(只取 id 与 API 地址)。
