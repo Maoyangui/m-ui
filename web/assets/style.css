@@ -2012,9 +2012,9 @@ table.grid.cards .hdetail.in-card { clear: both; margin-top: .5rem; padding: .2r
    一张表按线路分组,一行一个节点。倍率一格要一眼分得出「跟随服务器」(淡色,后面跟着这四个字)和单独设的(主色、加粗);
    没设的限速、容量是更淡的「不限」。输出开关摆在行里。停用的线路 / 服务器、暂停的入口整行变淡。 */
 .sn-node { display: flex; align-items: center; gap: .45rem; min-width: 0; }
-.sn-node > .pname { min-width: 0; }
+.sn-node > .pname { min-width: 2.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* 挤的时候名字不折成两行(以前「CN2-GIA」会在连字符处折行);先缩后面的「→ 出口」 */
 .sn-node > .badge { flex: none; }
-.sn-to { flex: none; font-weight: 400; color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
+.sn-to { flex: 1 1 0; width: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 400; color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; } /* 宽度记 0、有地方才长出来:不然它不换行的整段宽度会把这一列撑宽,英文 1230 宽时表格比卡片宽、最后一列被截 */
 .sn-own { color: var(--primary-text); font-weight: 600; }
 .sn-follow { color: var(--text-2); white-space: nowrap; }
 .sn-follow > span { color: var(--muted); font-size: var(--fs-xs); }
@@ -2029,6 +2029,12 @@ tr.sn-idle > td:not(.actions):not(.sn-out) { opacity: .6; }
 .sn-table tr.sn-line { cursor: pointer; }
 .sn-table tr.sn-line.open > td { background: var(--surface-3); }
 .sn-table td.num { white-space: nowrap; }
+/* 各列先占好展开以后要用的宽度:不然点开一条线路(节点行的「×1 · 跟随服务器」「0 / 不限」、开关、「设置」按钮比线路行的汇总宽),
+   整张表的列会左右挪一下。线路行的汇总格子里放一个不占高度、看不见的占位(.sn-size,内容和节点行最宽的写法一样,跟着语言走);
+   「全部」那一格和开关一样宽,最后一格放一个看不见的「设置」按钮 */
+.sn-size { display: block; height: 0; overflow: hidden; visibility: hidden; white-space: nowrap; }
+.sn-table tr.sn-line td.sn-out > span { display: inline-block; min-width: 2.25rem; }
+.sn-table tr.sn-line .sn-size-btn { visibility: hidden; pointer-events: none; }
 .sn-lhead { display: flex; align-items: center; gap: .5rem; min-width: 0; }
 .sn-ltog { display: inline-flex; align-items: center; gap: .45rem; min-width: 0; padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .sn-ltog > .i-chev { width: 14px; height: 14px; color: var(--muted); }
@@ -2039,7 +2045,10 @@ tr.sn-idle > td:not(.actions):not(.sn-out) { opacity: .6; }
 .sn-lhead > .badge { flex: none; }
 .sn-lsum, .sn-lfacts { padding-left: calc(14px + .45rem); }
 /* 跑在哪几台:全部服务器时名字一长串,限个宽度省略掉(悬停看全),不然这一列把倍率、限速几列挤成竖排 */
-.sn-table .sn-where { display: block; max-width: min(20rem, 20vw); color: var(--text-2); }
+/* 入口地址这一列(线路行的汇总、节点行的地址)最宽 16.5vw:各列占好展开后的宽度以后,1230 宽时要给第一列留够「协议 · 端口 · 几个节点 · 含几个中转」一行的地方;
+   节点行的地址也按它封顶 —— 不封的话点开地址长的线路这一列会变宽,英文 1230 宽时整张表比卡片宽、「设置」按钮被截。截掉的全文在悬停提示里 */
+.sn-table .sn-where { display: block; max-width: min(20rem, 16.5vw); color: var(--text-2); }
+.sn-table td.c-p3 .ellip { max-width: min(20rem, 16.5vw); }
 .sn-full, .sn-outn { color: var(--warn-text); font-weight: 500; }
 .sn-full { font-size: var(--fs-xs); }
 /* 节点行:缩进到线路名下面,和展开的线路行同一块底色;每条线路的最后一个节点下面一条实线,和下一条线路分开 */

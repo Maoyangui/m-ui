@@ -1,7 +1,7 @@
 // 「节点」页:订阅里的每个节点 —— 一条线路在一台服务器上的直连,或这条线路的一个中转入口 —— 逐个设置
 // 倍率(盖过所在服务器的)、限速、用户容量,和要不要输出到订阅。存在线路的 nodeOpts 里(键 "s<服务器 id>" / "f<入口 id>")。
 //
-// 版式:一张表,一条线路一行,默认收起(用户 11-18:「节点的现在是全部展开 可以按线路(可点击展开对应的线路查看设置所有服务器/中转的)」——
+// 版式:一张表,一条线路一行,节点多时默认收起、不超过 12 个时默认全展开(见 ../snfold.js;用户 11-18:「节点的现在是全部展开 可以按线路(可点击展开对应的线路查看设置所有服务器/中转的)」——
 // 生产上几十条线路、上百个节点,全展开时一屏只看得到一两条线路)。线路那一行的各列是它的汇总:几个节点(含几个中转)、跑在哪几台、
 // 倍率范围、几个限速、在线人数(几个已满)、输出了几个;点它展开,它的节点作为子行缩进列在下面。有搜索或筛选时命中的线路自动展开,
 // 只有一条线路时直接展开。节点行平时只是看:倍率一格写着现在实际生效的倍率和它是「跟随服务器」还是单独设的,
@@ -11,6 +11,7 @@
 // 线路一多光靠搜索找不过来(用户 11-17:「节点页能否增加一些必要筛选」):工具栏可以按线路、按服务器、按类型(直连 / 中转)筛,
 // 再加「单独设置的 / 没输出的」。要一次改很多个就勾选(用户同一天:「节点这个要支持勾选批量操作」):行首勾一个、
 // 分组行勾整条线路、表头勾现在列出的全部 —— 先筛再全选,就是「某台服务器上的全部节点」这类批量。
+import { expandByDefault } from '../snfold.js';
 import { state } from '../app.js';
 import { get, put } from '../api.js';
 import { t } from '../i18n.js';
@@ -25,7 +26,8 @@ let fLine = 0;    // 只看这条线路(0 = 全部)
 let fServer = 0;  // 只看和这台服务器有关的:它上面的直连,经它中转的、转到它的入口(0 = 全部)
 let fKind = '';   // direct / relay('' = 全部)
 const selected = new Set(); // 勾选的节点:"线路 id:节点键"
-const expanded = new Set(); // 展开着的线路 id(默认都收起)
+const expanded = new Set(); // 展开着的线路 id(节点多时默认都收起,见 seedExpanded)
+let seeded = false;         // 默认的展开状态定过没有(进页面头一次有数据时定一次,之后跟着用户点的走)
 let online = {};            // 各节点此刻在线的用户数,键同上(GET lines/nodes/online;主机汇总本机和各副机报来的)
 
 async function loadOnline() {
@@ -162,11 +164,11 @@ function lineRowHTML(l, all, list, open) {
       <div class="sub-cell sn-lsum">${[`${String(l.protocol || '').toUpperCase()} · ${l.port}`, count, relays ? (relays === 1 ? t('sn.relay1') : t('sn.relayN', { n: relays })) : ''].filter(Boolean).map((x, i) => `<span>${i ? '· ' : ''}${esc(x)}</span>`).join(' ')}</div>
       <div class="sub-cell sn-lfacts">${lineFacts(lo, hi, onl, full, limited, outN, list.length)}</div></td>
     <td class="c-p3"><span class="ellip sn-where" title="${esc(where)}">${esc(where)}</span></td>
-    <td class="num">${ratio}</td>
+    <td class="num">${ratio}<span class="sn-size" aria-hidden="true"><span class="sn-follow">×1.5<span> · ${esc(t('sn.follow'))}</span></span></span></td>
     <td class="num c-p2">${limited ? esc(t('sn.limitedN', { n: limited })) : `<span class="faint">${esc(t('sn.unlimited'))}</span>`}</td>
-    <td class="num c-p2"><span class="sn-cap">${onl > 0 ? `<b>${onl}</b>` : '<span class="faint">0</span>'}${full ? ` <span class="sn-full">${esc(t('sn.fullN', { n: full }))}</span>` : ''}</span></td>
+    <td class="num c-p2"><span class="sn-cap">${onl > 0 ? `<b>${onl}</b>` : '<span class="faint">0</span>'}${full ? ` <span class="sn-full">${esc(t('sn.fullN', { n: full }))}</span>` : ''}</span><span class="sn-size" aria-hidden="true"><span class="sn-cap"><b>0</b> / ${esc(t('sn.unlimited'))}</span></span></td>
     <td class="sn-out">${outN === list.length ? `<span class="faint">${esc(t('sn.outAll'))}</span>` : `<span class="sn-outn">${esc(t('sn.outOfN', { a: outN, b: list.length }))}</span>`}</td>
-    <td class="actions"></td>
+    <td class="actions"><span class="btn sm sn-size-btn" aria-hidden="true">${t('sn.edit')}</span></td>
   </tr>`;
 }
 
@@ -197,9 +199,18 @@ function rowHTML(l, nd, last) {
   </tr>`;
 }
 
+// seedExpanded 头一次有数据时定默认:节点不多(一屏放得下)就全展开 —— 只有两三条线路的面板不用再一条条点开;
+// 多了才按线路收起(几十条线路、上百个节点全摊开找不到东西)。只定一次,之后展开 / 收起跟着用户点的走。
+function seedExpanded() {
+  if (seeded || !state.lines.length) return;
+  seeded = true;
+  if (expandByDefault(state.lines.map(l => nodesOf(l).length))) for (const l of state.lines) expanded.add(l.id);
+}
+
 function renderRows() {
   const body = document.getElementById('sn-body');
   if (!body) return;
+  seedExpanded();
   const groups = visible();
   // 已经不在的节点(线路删了、部署范围或入口改了)不再算选中
   const alive = new Set(state.lines.flatMap(l => nodesOf(l).map(nd => idOf(l, nd))));

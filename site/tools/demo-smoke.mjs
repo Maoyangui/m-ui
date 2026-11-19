@@ -358,11 +358,16 @@ const rowsOpen = await page.locator('#up-sub-2 .hrow').count();
 const rowH = await page.locator('#up-sub-2 .hrow').evaluateAll(els => Math.max(0, ...els.map(e => e.getBoundingClientRect().height)));
 if (dots === 3 && rowsOpen === 3 && rowH > 0 && rowH < 34) pass('上游页:三台在用就是三个点,点这一行在下面展开,每台一行');
 else fail(`上游页的点 / 展开行数不对:${dots} 个点、${rowsOpen} 行、最高的一行 ${Math.round(rowH)}px`);
-// 节点设置页(用户 N6):默认按线路收起,每条线路一行汇总;「全部展开」后每条线路的直连和中转入口各一行(sn-child);
-// 倍率一格分得出跟随服务器和单独设的;行里的开关点了就存;设置弹框改倍率
+// 节点设置页(用户 N6):每条线路一行汇总,下面是它的直连和中转入口各一行(sn-child)。节点多时默认按线路收起,
+// 节点不多(演示站 11 个,不超过 12 个)默认全展开(审查后调整:只有两三条线路的面板不用再一条条点开;门槛的单测在 web/jstest/snfold.test.mjs);
+// 「全部收起」「全部展开」都好使;倍率一格分得出跟随服务器和单独设的;行里的开关点了就存;设置弹框改倍率
 await page.goto(`${DEMO}#/subnodes`); await page.waitForTimeout(900);
-const snFold = await page.evaluate(() => ({ lines: document.querySelectorAll('#sn-body tr.sn-line').length, kids: document.querySelectorAll('#sn-body tr.sn-child').length }));
-if (snFold.lines >= 3 && snFold.kids === 0) pass(`节点设置页:默认按线路收起(${snFold.lines} 条线路)`); else fail(`节点设置页默认没收起:${JSON.stringify(snFold)}`);
+const snCount = () => page.evaluate(() => ({ lines: document.querySelectorAll('#sn-body tr.sn-line').length, kids: document.querySelectorAll('#sn-body tr.sn-child').length, open: document.querySelectorAll('#sn-body tr.sn-line.open').length }));
+const snOpen = await snCount();
+if (snOpen.lines >= 3 && snOpen.kids >= 5 && snOpen.kids <= 12 && snOpen.open === snOpen.lines) pass(`节点设置页:节点不多(${snOpen.kids} 个)时默认全展开(${snOpen.lines} 条线路)`); else fail(`节点设置页节点不多时默认没展开:${JSON.stringify(snOpen)}`);
+await page.locator('#sn-fold').click(); await page.waitForTimeout(400);
+const snFold = await snCount();
+if (snFold.lines === snOpen.lines && snFold.kids === 0 && snFold.open === 0) pass('节点设置页:点「全部收起」后每条线路只剩一行汇总'); else fail(`节点设置页「全部收起」没收起:${JSON.stringify(snFold)}`);
 await page.locator('#sn-fold').click(); await page.waitForTimeout(400);
 const sn0 = await page.evaluate(() => ({
   rows: document.querySelectorAll('#sn-body tr.sn-child').length, groups: document.querySelectorAll('#sn-body tr.sn-line').length,
