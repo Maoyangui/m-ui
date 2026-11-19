@@ -1533,7 +1533,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 				in["camoRedirect"] = norm
 			}
 		}
-		if s.settingOr(in, "camoTemplate") == runner.CamoRedirectMode && strings.TrimSpace(s.settingOr(in, "camoRedirect")) == "" {
+		// 只在这次改了这两项时才查:库里已经是「跳转 + 没有网址」(命令行改出来的,运行时会退回自动挑的伪装站)时,
+		// 不能让改时区之类无关的保存也被这一条拦下(审查 F-B2)
+		_, camoT := in["camoTemplate"]
+		_, camoR := in["camoRedirect"]
+		if (camoT || camoR) && s.settingOr(in, "camoTemplate") == runner.CamoRedirectMode && strings.TrimSpace(s.settingOr(in, "camoRedirect")) == "" {
 			badRequest(w, errors.New("选了「跳转到我的网站」,要填跳转的网址"))
 			return
 		}

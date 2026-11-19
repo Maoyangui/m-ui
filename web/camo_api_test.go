@@ -147,4 +147,13 @@ func TestCamoSettingsValidation(t *testing.T) {
 	if s.setting("camoEnabled") != "true" || s.setting("camoPorts") != "false" {
 		t.Fatal("页面伪装的开关要规整成 true / false")
 	}
+	// 库里已经是「跳转 + 没有网址」(命令行直接改的):改别的设置不受这一条拦(审查 F-B2);动这两项时照样要先把网址填上
+	db.Where("key IN ?", []string{"camoTemplate", "camoRedirect"}).Delete(&model.Setting{})
+	db.Create(&model.Setting{Key: "camoTemplate", Value: "redirect"})
+	if code := call(`{"timezone":"Asia/Tokyo"}`); code != 200 || s.setting("timezone") != "Asia/Tokyo" {
+		t.Fatalf("无关的保存不该被「要填跳转的网址」拦下: %d", code)
+	}
+	if code := call(`{"camoTemplate":"redirect","timezone":"Asia/Seoul"}`); code != 400 || s.setting("timezone") != "Asia/Tokyo" {
+		t.Fatalf("动到伪装方式时照样要有网址: %d", code)
+	}
 }
