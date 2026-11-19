@@ -293,6 +293,9 @@ func (r *Runner) camoPortsLoop(stop <-chan struct{}) {
 func (r *Runner) camoPortsSync() {
 	want := settingOn(r.setting("camoEnabled")) && settingOn(r.setting("camoPorts"))
 	used := linePortsTCP(r.appliedConfig())
+	for p := range r.blockedPortsTCP() { // 被摘掉的线路等着的端口也算线路要用的(见 blockedPortsTCP)
+		used[p] = true
+	}
 	svc := r.camoServicePorts()
 	var certs []camoCertFile
 	if want {
@@ -359,6 +362,21 @@ func (r *Runner) camoPortsSync() {
 		safe.Go("runner.camoPort", func() { _ = srv.Serve(ln) })
 		logger.Info("页面伪装:", port, " 端口已放上伪装站")
 	}
+}
+
+// blockedPortsTCP 因为端口被别的程序占着而被摘掉的入站(见 blocked.go)里,等着用 TCP 端口的那些。
+// 伪装站不能去占这些端口:那个程序一退出,「被占端口重试」就要把线路补回来;伪装站要是抢先占上,重试时看到端口还被占着
+// (占着的是自己也算被占),线路就一直补不回来 —— 重载也不行,被摘的入站不在要应用的配置里,轮不到伪装站让(审查 F-E1)。
+func (r *Runner) blockedPortsTCP() map[int]bool {
+	r.blockedMu.Lock()
+	defer r.blockedMu.Unlock()
+	out := map[int]bool{}
+	for _, b := range r.blocked {
+		if b.info.Net != "udp" && b.info.Port > 0 {
+			out[b.info.Port] = true
+		}
+	}
+	return out
 }
 
 // camoPortsYield 重载数据面之前调:新配置的线路要用 80 / 443(TCP)时,先把伪装站在这两个端口上的监听放掉,线路才绑得上;

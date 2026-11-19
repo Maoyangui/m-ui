@@ -15,6 +15,7 @@ import (
 
 	"github.com/Maoyangui/m-ui/camo"
 	"github.com/Maoyangui/m-ui/certutil"
+	"github.com/Maoyangui/m-ui/database/model"
 )
 
 func newCamoRunner(t *testing.T) *Runner {
@@ -337,5 +338,42 @@ func TestLimitListener(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("关掉监听以后 Accept 应马上返回")
+	}
+}
+
+// 端口被别的程序占着而被摘掉的线路(审查 F-E1):它等着的 TCP 端口,那个程序退出以后伪装站不去抢 ——
+// 抢了的话「被占端口重试」看到端口还被占着,线路就一直补不回来。只是 UDP 被占的(线路的 TCP 没问题)不拦。
+func TestCamoPortsLeaveBlockedLinePorts(t *testing.T) {
+	r := newCamoRunner(t)
+	oldHTTP, oldHTTPS := camoHTTP, camoHTTPS
+	ports := freeTCP(t, 2)
+	camoHTTP, camoHTTPS = ports[0], ports[1]
+	t.Cleanup(func() { camoHTTP, camoHTTPS = oldHTTP, oldHTTPS })
+	camo.SetSource(r.camoSource)
+	t.Cleanup(func() { camo.SetSource(nil) })
+	mustSet(t, r, "camoEnabled", "true", "camoPorts", "true", "camoTemplate", "blog")
+	r.CamoApply()
+
+	r.blockedMu.Lock()
+	r.blocked = map[string]blockedInbound{
+		"线路甲": {info: model.BlockedInbound{Tag: "线路甲", Port: camoHTTP, Net: "tcp"}},
+		"线路乙": {info: model.BlockedInbound{Tag: "线路乙", Port: camoHTTPS, Net: "udp"}},
+	}
+	r.blockedMu.Unlock()
+	r.camoPortsSync()
+	st := camoPortStates(r)
+	if s := st[camoHTTP]; s.On || s.Why != "line" {
+		t.Fatalf("被摘线路等着的 TCP 端口不该占: %+v", s)
+	}
+	if s := st[camoHTTPS]; s.Why == "line" {
+		t.Fatalf("只是 UDP 被占的线路不该拦住伪装站用这个 TCP 端口: %+v", s)
+	}
+
+	r.blockedMu.Lock()
+	r.blocked = nil
+	r.blockedMu.Unlock()
+	r.camoPortsSync()
+	if s := camoPortStates(r)[camoHTTP]; !s.On {
+		t.Fatalf("线路不再等这个端口以后,伪装站照常占上: %+v", s)
 	}
 }
