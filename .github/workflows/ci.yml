@@ -82,5 +82,16 @@ jobs:
         run: node --test web/jstest/menu.test.mjs
       - name: Frontend (dialog save flow keeps a dialog opened from inside it)
         run: node --test web/jstest/modal.test.mjs
+      - name: Frontend (page reads dropped on navigation, redraw after the router swapped the view)
+        run: node --test web/jstest/api.test.mjs
+      - name: Frontend (node settings page opens small setups by default)
+        run: node --test web/jstest/snfold.test.mjs
+      # 上面是一个文件一步(哪一块挂了一眼看得出)。新加的测试文件忘了在这里接一步的话它就永远不跑
+      # (api.test.mjs 从 v0.8.0 起就是这样),所以这一步核对:web/jstest 下每个测试文件都在本文件里有它的那一步。
+      - name: Frontend (every test file under web/jstest has its step above)
+        run: |
+          for f in web/jstest/*.test.mjs; do
+            grep -qF "node --test $f" .github/workflows/ci.yml || { echo "::error::$f is not run by this workflow"; exit 1; }
+          done
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run
