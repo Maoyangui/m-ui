@@ -90,7 +90,8 @@ func (s *Site) serveAPI(w http.ResponseWriter, r *http.Request, p string) bool {
 		return true
 	}
 	rep := rt.post(in)
-	if rt.slow {
+	// 慢一点只在「去查了账号」的时候(像算密码哈希):格式都没过的 422 真站是先校验、马上回的(审查,原观察 O4)
+	if rt.slow && rep.code != http.StatusUnprocessableEntity {
 		pause(r)
 	}
 	if !isJSON && rt.form != nil {
