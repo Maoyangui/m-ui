@@ -830,7 +830,7 @@ a.stat:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md);
 .top-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .top-bar { height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; }
 .top-bar div { height: 100%; background: var(--chart-down); border-radius: 999px; }
-.top-val { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.top-val { min-width: 4.4em; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--text-2); } /* 定宽:每行各是一个格子,数字宽窄不一(22.8 GB / 7.4 GB)时前面的进度条会错开几个像素 */
 @media (max-width: 700px) { .top-row { grid-template-columns: 1.6rem minmax(0, 1fr) auto; } .top-bar { display: none; } }
 
 /* 顶部常驻警示(默认密码等) */
