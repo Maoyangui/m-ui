@@ -2,6 +2,7 @@ package render
 
 import (
 	"encoding/json"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,15 +58,32 @@ func IsForwardTag(tag string) bool {
 	return err == nil && p >= 1 && p <= 65535
 }
 
-// ForwardTarget 集群中转转到出口服务器的哪个地址:手填的优先;否则出口探测到的公网 IP —— 中转有 IPv4(或两种都不知道)
-// 时先用出口的 IPv4,只有 IPv6 的中转先用出口的 IPv6;都没探测到用出口的连接地址、域名。空 = 算不出来。
-func ForwardTarget(f model.LineForward, exit, self model.Node) string {
+// ForwardTarget 集群中转转到出口服务器的哪个地址:手填的优先;否则是出口探测到的公网 IP,IPv4 还是 IPv6 这样定 ——
+//
+//  1. 这条线路在出口那台按哪个 IP 版本用(线路里单独选的;没选就看那台服务器在订阅里给的是不是 IPv6,见 usesIPv6):
+//     直连给的是 IPv6,中转也转到 IPv6。以前不看这两个设置:线路里给出口选了 IPv6,中转照样转到它的 IPv4。
+//  2. 上面没指定 IPv6、转的又只是 UDP(hysteria2 / tuic)时,中转机自己在订阅里按 IPv6 用的(连接地址是 IPv6,
+//     或「自动地址用 IPv6」)也先走 IPv6:这种机器的 IPv4 往往只是运营商 NAT 出来的出站地址,带不动 QUIC 的大 UDP 包
+//     —— 中转是原样转发,包长由客户端和出口两头定,中转改不了;TCP 两端会自己缩包,所以以前只有这两种协议的中转「连上没网」。
+//     转 TCP 的线路不动(本来就是通的,不去换它走的路)。
+//  3. 其余和以前一样:中转有 IPv4(或两种都不知道)先用出口的 IPv4,只有 IPv6 的中转用出口的 IPv6。
+//
+// 要走 IPv6 得两头都有(出口探测到了、中转也有或不知道),否则照第 3 条。都没探测到用出口的连接地址、域名。空 = 算不出来。
+// 界面上显示「会转到哪个地址」的 fwExitAddr(web/assets/js/pages/lines.js)是同一套挑法,改这里要一起改。
+func ForwardTarget(line model.Line, f model.LineForward, exit, self model.Node) string {
 	if t := model.BareHost(f.Target); t != "" {
 		return t
 	}
 	v4, v6 := model.FamilyIPs("", exit.PublicIP, exit.PublicIP6)
 	s4, s6 := model.FamilyIPs("", self.PublicIP, self.PublicIP6)
+	fam := model.ParseNodeFamily(line.NodeFamily)[exit.Id]
+	if fam == "" && usesIPv6(exit) { // 线路没单独选:跟出口那台服务器在订阅里给的地址走(手填了 IPv4 / 域名的连接地址时,「自动地址用 IPv6」不生效)
+		fam = "v6"
+	}
+	prefer6 := fam == "v6" || (fam == "" && ForwardNetwork(line) == "udp" && usesIPv6(self))
 	switch {
+	case prefer6 && v6 != "" && (s6 != "" || s4 == ""):
+		return v6
 	case v4 != "" && (s4 != "" || s6 == ""):
 		return v4
 	case v6 != "":
@@ -77,6 +95,15 @@ func ForwardTarget(f model.LineForward, exit, self model.Node) string {
 		return a
 	}
 	return strings.TrimSpace(exit.Domain)
+}
+
+// usesIPv6 这台服务器在订阅里是按 IPv6 给的:连接地址填的是 IPv6;没填的话是「自动地址用 IPv6」。
+func usesIPv6(n model.Node) bool {
+	if a := model.BareHost(n.Addr); a != "" {
+		ip := net.ParseIP(a)
+		return ip != nil && ip.To4() == nil
+	}
+	return model.NormAddrFamily(n.AddrFamily) == "v6"
 }
 
 type forwardIn struct {
@@ -111,7 +138,7 @@ func forwardInbounds(db *gorm.DB, self uint, all []model.Line, taken map[int]boo
 			if !ok || !exit.Serving() || !LineOnNode(l, f.To) { // 出口停用了、被停止服务了:转过去也没人接
 				continue
 			}
-			target := ForwardTarget(f, exit, nodes[self])
+			target := ForwardTarget(l, f, exit, nodes[self])
 			tag := ForwardTag(l, f)
 			if target == "" || taken[f.Port] || tags[tag] {
 				warnForwardOnce(tag, "线路「"+l.Name+"」经本机的中转入口(端口 "+strconv.Itoa(f.Port)+")没有开:端口被占用或算不出转到哪里")

@@ -390,7 +390,7 @@ function bindServers() {
     const el = e.target;
     if (el.classList.contains('node-gcb')) el.closest('.node-grp').querySelectorAll('.node-row:not([hidden]) .node-cb').forEach(c => { c.checked = el.checked; });
     if (el.classList.contains('node-gcb') || el.classList.contains('node-cb')) sync();
-    else if (el.classList.contains('node-fam')) syncV6Tips();
+    else if (el.classList.contains('node-fam')) { syncV6Tips(); fwUpdateAll(); } // 中转入口「转到哪个地址」跟着这里选的 IP 版本走
   });
   const q = document.getElementById('f-srv-q');
   if (q) q.addEventListener('input', () => {
@@ -824,11 +824,18 @@ function fwNet() {
   const p = fv('f-protocol');
   return p === 'hysteria2' || p === 'tuic' ? 'udp' : p === 'shadowsocks' ? 'both' : 'tcp';
 }
-// 出口服务器转到哪个地址(显示用,挑法和后端 render.ForwardTarget 一样:中转有 IPv4(或不知道)先用出口的 IPv4)
+// 出口服务器转到哪个地址(显示用,挑法和后端 render.ForwardTarget 一样,改那边要一起改):
+//   这条线路在出口那台选了 IPv6(上面「部署到服务器」里选的,没选跟那台服务器的设置)就转到它的 IPv6;
+//   没指定、转的只是 UDP、中转机自己在订阅里按 IPv6 用的,也先走 IPv6;其余中转有 IPv4(或不知道)先用出口的 IPv4。
 function fwExitAddr(exitId, viaId) {
   const e = fwNode(exitId) || {}, v = fwNode(viaId) || {};
   const four = x => (x && !String(x).includes(':') ? x : ''), six = x => (x && String(x).includes(':') ? x : '');
   const e4 = four(e.publicIp), e6 = six(e.publicIp6) || six(e.publicIp), s4 = four(v.publicIp), s6 = six(v.publicIp6) || six(v.publicIp);
+  // 这台在订阅里给的是不是 IPv6:连接地址填的是 IPv6;没填的话是「自动地址用 IPv6」(填了 IPv4 / 域名时那个设置不生效)
+  const usesV6 = n => { const a = String(n.addr || '').trim().replace(/^\[|\]$/g, ''); return a ? /^[0-9a-f:.]+$/i.test(a) && a.includes(':') : n.addrFamily === 'v6'; };
+  const sel = document.querySelector(`.node-fam[data-node="${exitId}"]`);
+  const fam = (sel && !sel.disabled && sel.value) || (usesV6(e) ? 'v6' : '');
+  if ((fam === 'v6' || (!fam && fwNet() === 'udp' && usesV6(v))) && e6 && (s6 || !s4)) return e6;
   if (e4 && (s4 || !s6)) return e4;
   return e6 || e4 || e.addr || e.domain || fwNodeName(exitId);
 }

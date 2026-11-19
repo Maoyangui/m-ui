@@ -191,20 +191,67 @@ func TestForwardNetworkAndTarget(t *testing.T) {
 		t.Fatalf("QUIC 传输应转 UDP,实际 %q", got)
 	}
 	exit := model.Node{PublicIP: "203.0.113.2", PublicIP6: "2001:db8::2", Addr: "198.51.100.9", Domain: "jp.example"}
-	if got := ForwardTarget(model.LineForward{}, exit, model.Node{PublicIP: "198.51.100.1"}); got != "203.0.113.2" {
+	tcp := model.Line{Protocol: "vless"}
+	if got := ForwardTarget(tcp, model.LineForward{}, exit, model.Node{PublicIP: "198.51.100.1"}); got != "203.0.113.2" {
 		t.Fatalf("有 IPv4 的中转用出口的 IPv4,实际 %q", got)
 	}
-	if got := ForwardTarget(model.LineForward{}, exit, model.Node{PublicIP6: "2001:db8::1"}); got != "2001:db8::2" {
+	if got := ForwardTarget(tcp, model.LineForward{}, exit, model.Node{PublicIP6: "2001:db8::1"}); got != "2001:db8::2" {
 		t.Fatalf("只有 IPv6 的中转用出口的 IPv6,实际 %q", got)
 	}
-	if got := ForwardTarget(model.LineForward{Target: "[fd00::2]"}, exit, model.Node{}); got != "fd00::2" {
+	if got := ForwardTarget(tcp, model.LineForward{Target: "[fd00::2]"}, exit, model.Node{}); got != "fd00::2" {
 		t.Fatalf("手填的转到地址优先(去方括号),实际 %q", got)
 	}
-	if got := ForwardTarget(model.LineForward{}, model.Node{Addr: "198.51.100.9", Domain: "jp.example"}, model.Node{}); got != "198.51.100.9" {
+	if got := ForwardTarget(tcp, model.LineForward{}, model.Node{Addr: "198.51.100.9", Domain: "jp.example"}, model.Node{}); got != "198.51.100.9" {
 		t.Fatalf("出口没探测到公网 IP 时用连接地址,实际 %q", got)
 	}
-	if got := ForwardTarget(model.LineForward{}, model.Node{Domain: "jp.example"}, model.Node{}); got != "jp.example" {
+	if got := ForwardTarget(tcp, model.LineForward{}, model.Node{Domain: "jp.example"}, model.Node{}); got != "jp.example" {
 		t.Fatalf("再没有就用域名,实际 %q", got)
+	}
+}
+
+// 转到出口的 IPv4 还是 IPv6(用户转来的反馈:纯 IPv6 的中转机 + 双栈的出口,HY2 经中转连上没网;线路里给出口选了 IPv6 也没用)。
+func TestForwardTargetFamily(t *testing.T) {
+	const e4, e6 = "203.0.113.2", "2001:db8::2"
+	exit := model.Node{Id: 3, PublicIP: e4, PublicIP6: e6}
+	dual := model.Node{Id: 2, PublicIP: "198.51.100.1", PublicIP6: "2001:db8::1"} // 中转两种地址都有(IPv4 可能只是 NAT 出来的出站地址)
+	fam := func(v string) json.RawMessage { return raw(map[string]string{"3": v}) }
+	cases := []struct {
+		name string
+		line model.Line
+		exit model.Node
+		via  model.Node
+		want string
+	}{
+		{"什么都没选:和以前一样走 IPv4", model.Line{Protocol: "hysteria2"}, exit, dual, e4},
+		{"线路在出口那台选了 IPv6:中转也转到 IPv6", model.Line{Protocol: "hysteria2", NodeFamily: fam("v6")}, exit, dual, e6},
+		{"TCP 的线路同样跟着线路的选择", model.Line{Protocol: "vless", NodeFamily: fam("v6")}, exit, dual, e6},
+		{"线路没选、出口那台的设置是 IPv6:跟服务器的设置", model.Line{Protocol: "trojan"}, model.Node{Id: 3, PublicIP: e4, PublicIP6: e6, AddrFamily: "v6"}, dual, e6},
+		{"出口那台手填了 IPv4 的连接地址:「自动地址用 IPv6」不生效,不算 IPv6", model.Line{Protocol: "trojan"}, model.Node{Id: 3, PublicIP: e4, PublicIP6: e6, Addr: "203.0.113.2", AddrFamily: "v6"}, dual, e4},
+		{"出口那台的连接地址填的是域名:不知道是哪一族,照旧", model.Line{Protocol: "trojan"}, model.Node{Id: 3, PublicIP: e4, PublicIP6: e6, Addr: "jp.example", AddrFamily: "v6"}, dual, e4},
+		{"出口那台的连接地址填的是 IPv6:转到探测到的 IPv6", model.Line{Protocol: "trojan"}, model.Node{Id: 3, PublicIP: e4, PublicIP6: e6, Addr: "2001:db8::2"}, dual, e6},
+		{"线路单独选了 IPv4:盖过服务器的 IPv6 设置", model.Line{Protocol: "trojan", NodeFamily: fam("v4")}, model.Node{Id: 3, PublicIP: e4, PublicIP6: e6, AddrFamily: "v6"}, dual, e4},
+		{"选了 IPv6 但中转没有 IPv6:退回 IPv4", model.Line{Protocol: "hysteria2", NodeFamily: fam("v6")}, exit, model.Node{Id: 2, PublicIP: "198.51.100.1"}, e4},
+		{"选了 IPv6 但出口没探测到 IPv6:退回 IPv4", model.Line{Protocol: "hysteria2", NodeFamily: fam("v6")}, model.Node{Id: 3, PublicIP: e4}, dual, e4},
+		{"选了 IPv4 但中转只有 IPv6:只能走 IPv6", model.Line{Protocol: "hysteria2", NodeFamily: fam("v4")}, exit, model.Node{Id: 2, PublicIP6: "2001:db8::1"}, e6},
+		{"中转机自动地址用 IPv6、转的是 UDP:先走 IPv6", model.Line{Protocol: "hysteria2"}, exit, model.Node{Id: 2, PublicIP: "198.51.100.1", PublicIP6: "2001:db8::1", AddrFamily: "v6"}, e6},
+		{"中转机的连接地址填的是 IPv6、转的是 UDP:先走 IPv6", model.Line{Protocol: "tuic"}, exit, model.Node{Id: 2, PublicIP: "198.51.100.1", PublicIP6: "2001:db8::1", Addr: "[2001:db8::1]"}, e6},
+		{"中转机的连接地址填的是 IPv4:不算按 IPv6 用", model.Line{Protocol: "hysteria2"}, exit, model.Node{Id: 2, PublicIP: "198.51.100.1", PublicIP6: "2001:db8::1", Addr: "198.51.100.1", AddrFamily: "v6"}, e4},
+		{"中转机按 IPv6 用、转的是 TCP:不动,照旧走 IPv4", model.Line{Protocol: "vless"}, exit, model.Node{Id: 2, PublicIP: "198.51.100.1", PublicIP6: "2001:db8::1", AddrFamily: "v6"}, e4},
+		{"中转机按 IPv6 用、转 TCP 和 UDP 的 shadowsocks:不动", model.Line{Protocol: "shadowsocks"}, exit, model.Node{Id: 2, PublicIP: "198.51.100.1", PublicIP6: "2001:db8::1", AddrFamily: "v6"}, e4},
+		{"中转机按 IPv6 用、线路在出口上单独选了 IPv4:听线路的", model.Line{Protocol: "hysteria2", NodeFamily: fam("v4")}, exit, model.Node{Id: 2, PublicIP: "198.51.100.1", PublicIP6: "2001:db8::1", AddrFamily: "v6"}, e4},
+		{"中转机按 IPv6 用但出口没有 IPv6:走 IPv4", model.Line{Protocol: "hysteria2"}, model.Node{Id: 3, PublicIP: e4}, model.Node{Id: 2, PublicIP: "198.51.100.1", PublicIP6: "2001:db8::1", AddrFamily: "v6"}, e4},
+		{"走 QUIC 传输的线路也算 UDP", model.Line{Protocol: "vless", Transport: raw(map[string]string{"type": "quic"})}, exit, model.Node{Id: 2, PublicIP: "198.51.100.1", PublicIP6: "2001:db8::1", AddrFamily: "v6"}, e6},
+		{"中转的地址一个都不知道(老版本副机):选了 IPv6 就走 IPv6", model.Line{Protocol: "hysteria2", NodeFamily: fam("v6")}, exit, model.Node{Id: 2}, e6},
+		{"别的服务器的选择不算数", model.Line{Protocol: "hysteria2", NodeFamily: raw(map[string]string{"9": "v6"})}, exit, dual, e4},
+	}
+	for _, c := range cases {
+		if got := ForwardTarget(c.line, model.LineForward{To: 3, Via: 2}, c.exit, c.via); got != c.want {
+			t.Errorf("%s:应转到 %s,实际 %s", c.name, c.want, got)
+		}
+	}
+	// 手填的转到地址不受这些影响
+	if got := ForwardTarget(model.Line{Protocol: "hysteria2", NodeFamily: fam("v6")}, model.LineForward{Target: "10.0.0.5"}, exit, dual); got != "10.0.0.5" {
+		t.Errorf("手填的转到地址优先,实际 %s", got)
 	}
 }
 
