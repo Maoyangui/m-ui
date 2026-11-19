@@ -1,0 +1,56 @@
+<!--meta {"title":"Relay entries: letting users connect through another machine, and why Hysteria2 through a relay can connect but carry no traffic","description":"When users reach an exit server slowly or not at all, m-ui's relay entries let them connect to another machine that forwards the encrypted bytes to the exit. How that differs from proxy chaining, whether a relay forwards to the exit's IPv4 or IPv6, why Hysteria2 / TUIC through a relay can connect yet have no internet and what to do, and how device limits treat relayed connections.","type":"article","date":"2026-11-20","discussionDate":"2026-11-24","discussion":true,"summary":"A relay moves bytes without decrypting, for TCP and UDP alike. Which exit address it forwards to, why UDP protocols can connect but carry nothing, and why relayed connections take no device slot."} -->
+<article class="doc">
+  <p class="meta">Guide · 2026-11-20</p>
+  <h1>Relay entries: letting users connect through another machine</h1>
+  <p class="lead">The exit server's route is fine; the leg from the user to it is not — a detour, packet loss, or an IP the user simply cannot reach. The usual answer is a machine in between that the user reaches well. In m-ui that is a <b>relay entry</b>. This guide covers how it works, and the one symptom that confuses people most.</p>
+
+  <h2>Two ways "through another machine"</h2>
+  <p>m-ui has two ways to pass traffic through one more server, and they are not the same thing:</p>
+  <ul>
+    <li><b>A line as an upstream (proxy chaining)</b>: the middle server runs a line of its own, <i>decrypts</i> the user's traffic and connects to the exit as a client. Two separate connections; the middle server runs the protocol, needs a certificate and pays for a second round of encryption.</li>
+    <li><b>A relay entry</b>: the middle server only <i>moves bytes</i>. There is still one encrypted connection between the user and the exit; the relay cannot see inside and does not need to understand the protocol. TCP and UDP both work, so Hysteria2 and TUIC do too.</li>
+  </ul>
+  <p>Most of the time the second is what you want: cheaper, simpler, half the crypto. The path is "user → relay → exit (this line's server) → website".</p>
+
+  <h2>Adding one</h2>
+  <p>Edit the line, open <b>Relay entries</b> and click "+ Add a relay entry". Each entry reads as a sentence: users connect to <b>which relay</b> on <b>which port</b> → forwarded to <b>which exit</b>.</p>
+  <ul>
+    <li><b>Another server of your cluster as the relay</b>: the panel sets up the forwarding on it and picks a free port there. That server's firewall (the cloud security group) must allow the port — UDP for Hysteria2 / TUIC, TCP and UDP for Shadowsocks, TCP for everything else.</li>
+    <li><b>"A relay elsewhere (enter address)"</b>: one you run yourself with realm or iptables, or one you rent. Enter its address and port; the page spells out which port and what traffic to forward where on the relay.</li>
+  </ul>
+  <p>After saving, each entry adds a node marked ⇄ to subscriptions, next to the direct node, and clients pick the faster one by latency. To send users through relays only, tick "List only the relay entries in subscriptions, not the exit server's direct node". Every relay node can have its own traffic ratio, speed limits and user capacity under <b>Node settings</b>.</p>
+
+  <h2>Which exit address it forwards to</h2>
+  <p>A cluster relay forwards to the exit's public IP by default. With a dual-stack exit, is that IPv4 or IPv6? From v0.8.1 the rule is:</p>
+  <ul>
+    <li>it follows the IP version this line uses on the exit — if you chose IPv6 for that server under "Deploy to" (or, with no choice there, the server's own setting says IPv6), the relay forwards to its IPv6 as well;</li>
+    <li>provided the relay itself has IPv6; otherwise it stays on IPv4;</li>
+    <li>for Hysteria2 and TUIC lines, a relay that is itself listed by IPv6 in subscriptions also prefers IPv6.</li>
+  </ul>
+  <p>To change it, click the address in parentheses and type another: the other IP version, or a private address when the two servers share a network.</p>
+
+  <h2>Hysteria2 / TUIC through a relay: connected, but no internet</h2>
+  <p>This is the most common report about relay entries: TCP lines (VLESS, Trojan, AnyTLS) work fine through the same relay, Hysteria2 connects but pages do not load, and connecting to the exit directly is fine.</p>
+  <p>The likely cause is that the relay-to-exit leg cannot carry large UDP packets. Hysteria2 and TUIC run on QUIC; QUIC packets may not be fragmented on the way, and their size is decided by the two ends — the client and the exit. A relay only moves bytes and cannot change that. If this leg is carrier-NAT IPv4 or tunnelled IPv6, larger UDP packets often do not make it — small ones do, which is why it looks "connected". TCP is unaffected because both TCP ends shrink their segments to fit the path.</p>
+  <p>What to do, in order:</p>
+  <ol>
+    <li>Click the address in parentheses and switch to the exit's <b>other IP version</b> (IPv4 to IPv6, or back). On a relay whose IPv4 egress is NATed while its IPv6 is native, switching to IPv6 usually fixes it at once.</li>
+    <li>If that does not help, use <b>the line as an upstream</b> for this line instead: there the relay decrypts and sends again, the two legs are separate connections and each negotiates its own packet size.</li>
+  </ol>
+  <p>There used to be a trap here: a line set to IPv6 on the exit was still forwarded to IPv4 by the relay. From v0.8.1 the relay follows the line's choice.</p>
+
+  <h2>How device limits see relays</h2>
+  <p>When a user comes in through a relay, the exit sees <i>the relay's address</i> as the source, not the user's device. Counting it as a device would refuse a one-device user who is connected directly and then also connects through the relay; and several users on one relay would all "come from the same IP".</p>
+  <p>So from v0.8.1 connections that arrive through a relay entry take no device slot, and none from a reseller's device pool; they are still listed among the online IPs, marked with the relay they came through. The flip side: the device limit cannot govern relayed connections — to cap how many people use a relay node, set its <b>User capacity</b> under Node settings.</p>
+  <p>For relays the exit cannot recognise (traffic arriving over a private network, a relay whose inbound and outbound IPs differ, an address entered as a domain), fill in <b>Source IPs seen by the exit</b> on that node; otherwise it is still counted as one device.</p>
+
+  <h2>Small print</h2>
+  <ul>
+    <li>Relay nodes do not do port hopping.</li>
+    <li>Traffic is billed to users at the <i>exit</i> server's ratio. If a server has a traffic allowance of its own, what it relays counts toward it as well — the relay and the exit each count the real bytes that pass through them.</li>
+    <li>If the port on the relay is already held by your own realm or gost, the panel asks that server when you enter the port and tells you. If that is exactly the forwarding you set up for this line, switch "who forwards" to the existing-forwarder option: the panel leaves the port alone and only writes the entry into subscriptions.</li>
+    <li>Deleting a server removes the relay entries that go through it or forward to it.</li>
+  </ul>
+
+  <p class="related">Related: <a href="{{base}}features/#lines">Features: lines and relay entries</a> · <a href="{{base}}articles/quotas-devices/">Quotas and device limits</a> · <a href="{{base}}hysteria2-panel/">Hysteria2 in m-ui</a> · <a href="{{base}}multi-server/">Multi-server</a></p>
+</article>

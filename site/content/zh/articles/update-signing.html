@@ -1,0 +1,42 @@
+<!--meta {"title":"只比 SHA256 不够:m-ui 的更新包为什么要签名、怎么验","description":"校验和只能发现下载坏了,发现不了下载被换。m-ui 从 v0.8.1 起给每个版本的校验清单加发布者的 Ed25519 签名:面板里的一键更新、命令行和安装脚本各在哪一步验、验不过会怎样、你自己怎么验一遍,以及它防不了什么。","type":"article","date":"2026-11-20","discussionDate":"2026-11-22","discussion":true,"summary":"能换掉安装包的人同样能换掉校验清单。v0.8.1 起清单带发布者的签名,更新器和安装脚本先验签再装 —— 流程、自己核对的办法和它的边界。"} -->
+<article class="doc">
+  <p class="meta">深入 · 2026-11-20</p>
+  <h1>只比 SHA256 不够:更新包为什么要签名</h1>
+  <p class="lead">一个会自己更新的面板,等于把「往服务器上装什么程序」这件事托付给了更新流程。v0.8.1 之前,m-ui 的更新做的是下载安装包、和同一个 Release 里的 <code>SHA256SUMS</code> 对一下。这能发现下载坏了,发现不了下载被换:换得掉安装包的人,同样换得掉那份清单。</p>
+
+  <h2>缺的是哪一环</h2>
+  <p>校验和回答的是「这个文件和那份清单对得上吗」,它不回答「那份清单是谁出的」。安装包和清单走的是同一条路:同一个域名、同一次下载、同一个可能被劫持的代理或镜像。要在这条路之外钉一个锚,只能是一样事先就在本机上、路上的人改不了的东西 —— 程序里内置的发布者公钥。</p>
+
+  <h2>签的是什么</h2>
+  <p>每个版本发布时,用发布者的私钥(Ed25519)给 <code>SHA256SUMS</code> 这个文件本身签名。清单里列着这一版所有安装包的 SHA256,所以签了清单,就等于给每个安装包都作了保。签名有两种写法,是同一把钥匙签的:</p>
+  <ul>
+    <li><code>SHA256SUMS.sig</code>:64 字节签名的 base64。面板里的更新器用它,安装脚本在只有 OpenSSL 时也用它。</li>
+    <li><code>SHA256SUMS.sshsig</code>:SSH 签名格式,用系统自带的 <code>ssh-keygen -Y verify</code> 就能验,不用装别的工具。</li>
+  </ul>
+
+  <h2>谁在哪一步验</h2>
+  <ul>
+    <li><b>面板里的一键更新、<code>m-ui update</code></b>:先取清单和签名,用内置的公钥验;验过了才去清单里查本架构安装包的 SHA256、下载、比对、替换程序、重启。哪一步对不上都到此为止:不装,正在跑的程序不动,页面上写明原因。</li>
+    <li><b>一键安装脚本</b>:装 v0.8.1 及以后的版本时,两个签名文件都要取得到,取不到就中止。系统里有 OpenSSH 8.1 以上用 <code>ssh-keygen</code> 验,否则用 OpenSSL 3;两样都没有的老系统会提示一句、只比 SHA256(进了面板以后的更新不受这个限制,程序自己会验)。</li>
+    <li><b>发布之前</b>:发版流程签完名,当场拿刚构建出来的程序和安装脚本各验一遍,再把清单改一个字节、确认验不过,才发布。打了标签却没有签名钥匙、或者自检不过,这一版不会发出去。</li>
+  </ul>
+
+  <h2>自己验一遍</h2>
+  <p>从 Release 页面把安装包、<code>SHA256SUMS</code>、<code>SHA256SUMS.sshsig</code> 下到同一个目录:</p>
+<pre><code>echo 'm-ui-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIApvcuQzwhE4aH+lWEisKYQnKMJRWsi1Z4idd3DFsCru' > allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I m-ui-release -n m-ui-release -s SHA256SUMS.sshsig < SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS</code></pre>
+  <p>第二行确认清单是发布者签的,第三行确认安装包和清单一致。两条都过才算数。嫌麻烦的话,安装脚本替你做第二行:<code>bash install.sh --verify-sums SHA256SUMS SHA256SUMS.sshsig SHA256SUMS.sig</code>;装着 m-ui 的机器上还有 <code>m-ui verify-release SHA256SUMS SHA256SUMS.sig</code>,用的是程序里内置的那把公钥。</p>
+
+  <h2>从老版本升上来</h2>
+  <p>不用做任何准备。v0.8.0 及更早的程序不会验签,它们照旧只取安装包和清单 —— 这两样在带签名的版本里一样都没变,所以能直接升到 v0.8.1。升上来以后,往后的每一次更新都先验签。也就是说,只有「从不会验签的版本跨过来」的那一次,和以前一样靠 HTTPS 和校验和。</p>
+
+  <h2>它防不了什么</h2>
+  <ul>
+    <li><b>发布流程本身被攻破。</b>签名证明的是「这份清单是握着私钥的人签的」。私钥泄露、或者发版流程被人控制,签名照样是「对的」。它防的是下载路上的调包和 Release 文件被人换掉。</li>
+    <li><b>你自己给的安装包。</b><code>bash install.sh ./m-ui-linux-amd64.tar.gz</code> 或给一个别的下载地址时,脚本不取清单、不验签 —— 来路由你负责,要核对就用上面的办法。</li>
+    <li><b>换钥匙。</b>程序里内置的公钥是一个列表,以后要换钥,新旧可以并存一段时间;但一个太老的版本只认得它出厂时带的那几把。</li>
+  </ul>
+
+  <p class="related">相关:<a href="{{base}}zh/getting-started/">快速上手</a> · <a href="{{base}}zh/faq/">常见问题</a> · <a href="{{base}}zh/articles/validation-rollback/">配置校验与回滚</a></p>
+</article>

@@ -1,0 +1,42 @@
+<!--meta {"title":"A checksum is not enough: why m-ui signs its updates, and how to verify one","description":"A checksum catches a broken download, not a swapped one. From v0.8.1 m-ui adds the publisher's Ed25519 signature to every release's checksum list: where the in-panel updater, the command line and the install script verify it, what happens when it fails, how to check a release yourself, and what a signature does not protect against.","type":"article","date":"2026-11-20","discussionDate":"2026-11-22","discussion":true,"summary":"Whoever can swap the package can swap the checksum list too. From v0.8.1 the list is signed and both the updater and the installer verify it before installing — the flow, how to check it yourself, and its limits."} -->
+<article class="doc">
+  <p class="meta">Deep dive · 2026-11-20</p>
+  <h1>A checksum is not enough: why updates are signed</h1>
+  <p class="lead">A panel that updates itself hands the question "which program gets installed on this server" to its update flow. Before v0.8.1, m-ui downloaded the package and compared it with <code>SHA256SUMS</code> from the same release. That catches a broken download. It does not catch a swapped one: whoever can replace the package can replace the list.</p>
+
+  <h2>The missing link</h2>
+  <p>A checksum answers "does this file match that list?". It does not answer "who wrote that list?". The package and the list travel the same road: the same domain, the same download, the same proxy or mirror that might be hijacked. An anchor outside that road has to be something that was already on the machine and that nobody on the road can change — the publisher's public key, built into the program.</p>
+
+  <h2>What gets signed</h2>
+  <p>On every release the publisher's private key (Ed25519) signs the <code>SHA256SUMS</code> file itself. The list holds the SHA256 of every package in the release, so signing the list vouches for each of them. The signature comes in two encodings, both made with the same key:</p>
+  <ul>
+    <li><code>SHA256SUMS.sig</code>: the 64-byte signature in base64. The in-panel updater uses it, and so does the install script when only OpenSSL is available.</li>
+    <li><code>SHA256SUMS.sshsig</code>: the SSH signature format, verifiable with the system's own <code>ssh-keygen -Y verify</code> — nothing extra to install.</li>
+  </ul>
+
+  <h2>Who verifies, and when</h2>
+  <ul>
+    <li><b>The one-click update in the panel, and <code>m-ui update</code></b>: fetch the list and its signature first and verify with the built-in key; only then look up this architecture's SHA256 in the list, download, compare, replace the program and restart. A mismatch at any step ends it there: nothing is installed, the running program is untouched, and the page says why.</li>
+    <li><b>The install script</b>: for v0.8.1 and later both signature files must be retrievable, otherwise it aborts. With OpenSSH 8.1 or newer it verifies through <code>ssh-keygen</code>, otherwise through OpenSSL 3; on old systems that have neither it says so and falls back to the SHA256 comparison (updates from inside the panel are unaffected — the program verifies by itself).</li>
+    <li><b>Before publishing</b>: after signing, the release workflow verifies the result with the freshly built binary and with the install script, then flips one byte of the list and confirms that verification fails — only then does it publish. A tag without the signing key, or a failed self-check, publishes nothing.</li>
+  </ul>
+
+  <h2>Verify one yourself</h2>
+  <p>Download the package, <code>SHA256SUMS</code> and <code>SHA256SUMS.sshsig</code> from the release page into one directory:</p>
+<pre><code>echo 'm-ui-release ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIApvcuQzwhE4aH+lWEisKYQnKMJRWsi1Z4idd3DFsCru' > allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I m-ui-release -n m-ui-release -s SHA256SUMS.sshsig < SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS</code></pre>
+  <p>The second line confirms the list was signed by the publisher; the third confirms the package matches the list. Both must pass. The install script can do the second line for you — <code>bash install.sh --verify-sums SHA256SUMS SHA256SUMS.sshsig SHA256SUMS.sig</code> — and on a machine that runs m-ui there is <code>m-ui verify-release SHA256SUMS SHA256SUMS.sig</code>, which uses the key built into the binary.</p>
+
+  <h2>Upgrading from an older version</h2>
+  <p>Nothing to prepare. v0.8.0 and earlier cannot verify signatures; they keep fetching just the package and the list — both unchanged in signed releases — so they upgrade straight to v0.8.1. From then on every update is verified first. In other words, only the one hop from a version that cannot verify relies on HTTPS and the checksum, exactly as before.</p>
+
+  <h2>What it does not protect against</h2>
+  <ul>
+    <li><b>A compromised release process.</b> A signature proves the list was signed by whoever holds the private key. If the key leaks, or someone controls the release workflow, the signature is still "valid". What it stops is a swap on the download path, or release files being replaced.</li>
+    <li><b>Packages you supply yourself.</b> With <code>bash install.sh ./m-ui-linux-amd64.tar.gz</code>, or any other download URL, the script fetches no list and checks no signature — the source is your responsibility; verify it as shown above.</li>
+    <li><b>Key rotation.</b> The built-in keys are a list, so old and new can coexist for a while when the key changes; a very old version, however, only knows the keys it shipped with.</li>
+  </ul>
+
+  <p class="related">Related: <a href="{{base}}getting-started/">Getting started</a> · <a href="{{base}}faq/">FAQ</a> · <a href="{{base}}articles/validation-rollback/">Config validation and rollback</a></p>
+</article>

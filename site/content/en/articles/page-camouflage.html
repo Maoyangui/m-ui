@@ -1,0 +1,43 @@
+<!--meta {"title":"Page camouflage: what m-ui shows when someone knocks on your server's ports","description":"Sooner or later someone opens your proxy server's ports in a browser. m-ui's page camouflage answers with an ordinary website on the subscription port, the panel port and several kinds of lines: how the four site types are generated, why no two servers look alike, why the video site asks you to log in, and what it cannot do.","type":"article","date":"2026-11-20","discussionDate":"2026-11-20","discussion":true,"summary":"An ordinary website instead of a 404 when someone opens your ports directly: four site types, different on every server, effective against active probing only — what it does and what it does not."} -->
+<article class="doc">
+  <p class="meta">Deep dive · 2026-11-20</p>
+  <h1>Page camouflage: what to show when someone knocks</h1>
+  <p class="lead">Sooner or later someone follows an IP and a port to your proxy server's door. By default they find a 404, a port that hangs up on them, or a protocol error — and to a scanner each of those is a clue. Page camouflage, new in v0.8.1, answers with an ordinary website instead. It is off by default; turning it on is your call.</p>
+
+  <h2>Where a stranger can look</h2>
+  <ul>
+    <li><b>The subscription, panel and reseller-panel ports</b>: the root and any path that matches nothing. That used to be a 404; with camouflage on it is a website. Correct subscription links and the panel path keep working as before.</li>
+    <li><b>AnyTLS lines</b>: a wrong password, or someone opening the port in a browser.</li>
+    <li><b>Trojan lines without a transport</b>, and <b>Hysteria2 lines without a masquerade site</b> of their own.</li>
+    <li><b>Idle ports 80 / 443</b> (optional): so that opening your domain in a browser shows the same site. Only ports nothing else uses — if a line, the panel or another program holds one it is left alone, with the reason shown. Port 443 picks a certificate from this server's store by the requested name, and port 80 steps aside while an HTTP-01 certificate challenge runs.</li>
+  </ul>
+  <p>VLESS + Reality is not on the list: it already hands probes to a real website. Protocols such as Shadowsocks and VMess have no place to answer with a web page, so nothing changes for them. Real clients that authenticate go through as always; the decoy only appears for requests that were going to fail anyway.</p>
+
+  <h2>What they get to see</h2>
+  <p>Four kinds of site: a <b>download mirror</b> (an open-source mirror directory), a <b>software download</b> page (the home page of a small tool), a <b>video site</b> (a members-only library) and a <b>personal blog</b>. With "Automatic", each server picks one at random. The settings page previews this server's site, and "Restyle" rerolls it.</p>
+  <p>Or skip the built-in sites and choose <b>redirect to my website</b>: every request gets a 302 to the address you enter. Use a site of your own that makes sense for the line's domain, not a big company's home page — a small server redirecting to a household name is suspicious in itself.</p>
+
+  <h2>Why no two servers look alike</h2>
+  <p>The easiest mistake for a decoy is to look identical on every server that runs the same panel. Then the decoy itself is the fingerprint: search for one sentence from the page and you get a list of everyone's servers.</p>
+  <p>So the site name, colours, images and every sentence a visitor reads — down to class names, the static-file directory, the layout and the API paths inside the scripts — are generated from each server's own random seed. Searching for a sentence from the page, or a piece of markup from its source, does not list every decoy; a test guards that property (sites generated from dozens of seeds are compared against each other and may not share runs of text or markup). Nodes have their own seeds, so servers within one cluster differ from each other too.</p>
+
+  <h2>Why the video site wants you to log in</h2>
+  <p>A real video site has to play videos; a decoy cannot. So it is "members only": covers, descriptions and categories are all there, playing requires a login, registration requires an invitation code, and no invitation code is ever accepted. To someone probing, that is one more closed site among thousands.</p>
+  <p>The login, sign-up and password-reset forms and the handful of APIs behind the pages return fixed messages. Nothing submitted is stored, logged or echoed back, and no cookie is set — a decoy should not turn into a place that collects what people type.</p>
+
+  <h2>Where the pictures come from</h2>
+  <p>The download mirror and some software pages use vector art drawn from the seed. Covers on the video site and the blog need photographs to look right: when a server uses them, it fetches the dozen or so it needs from the <code>camo-media</code> branch of this repository (two or three megabytes, once, kept in the data directory; jsDelivr when GitHub is unreachable), then crops, tints and recompresses them by its seed — the same original is not the same file on two servers. Until they arrive, or if they never do, drawn illustrations stand in.</p>
+  <p>Everything is generated once in memory and then simply served: no disk reads, no outbound requests, no new processes. With camouflage off, nothing is generated at all.</p>
+
+  <h2>What it cannot do</h2>
+  <ul>
+    <li><b>It only answers active probing.</b> It changes what a visitor sees at the door, not what your traffic looks like on the wire. Passive traffic analysis is out of its reach.</li>
+    <li><b>It comes from one public codebase.</b> Text and source differ per server, so searching for a sentence does not find them all; but the page structure and the shape of the stylesheets and scripts are the same set, and someone comparing servers against this code one by one may still recognise them.</li>
+    <li><b>Nodes need v0.8.1.</b> The setting lives on the master and travels with sync; nodes on older versions keep answering 404.</li>
+  </ul>
+
+  <h2>Turning it on</h2>
+  <p><b>Settings → Page camouflage</b>: switch it on, choose what to look like and whether to use 80 / 443, save. It takes effect immediately, without restarting the data plane. A Hysteria2 line with its own masquerade site keeps using that; only lines that leave it empty use the server's decoy.</p>
+
+  <p class="related">Related: <a href="{{base}}features/#camo">Features: page camouflage</a> · <a href="{{base}}hysteria2-panel/">Hysteria2 in m-ui</a> · <a href="{{base}}faq/">FAQ</a></p>
+</article>
