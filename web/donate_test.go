@@ -339,7 +339,7 @@ func TestSupportCheckRidesOutRateLimits(t *testing.T) {
 	if out := ask("7.011"); out["known"] != false || out["arrived"] != false {
 		t.Fatalf("手上的结果太旧:不知道: %v", out)
 	}
-	// 恢复了:马上回到 5 秒一次
+	// 恢复了:马上回到平时的间隔
 	limited.Store(false)
 	again()
 	if out := ask("7.011"); out["known"] != true || out["arrived"] != false || hits.Load() != 4 {
@@ -349,7 +349,7 @@ func TestSupportCheckRidesOutRateLimits(t *testing.T) {
 	wait, fails := time.Until(s.donors.tronNext), s.donors.tronFails
 	s.donors.mu.Unlock()
 	if wait > 6*time.Second || fails != 0 {
-		t.Fatalf("查成之后回到 5 秒一次、连错清零: %v %d", wait, fails)
+		t.Fatalf("查成之后回到平时的间隔、连错清零: %v %d", wait, fails)
 	}
 }
 

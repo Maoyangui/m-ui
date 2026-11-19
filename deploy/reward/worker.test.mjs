@@ -1060,8 +1060,8 @@ test('有人开着等待到账的页面:问这一笔时当场看一次链,付款
   const it = (await x.donate('急性子', 5, T0 + 10)).body;
   assert.equal((await x.ask(it.id, T0 + 12)).status, 'pending');
   assert.deepEqual(x.chain.asked, ['rpc.test getSignaturesForAddress'], '头一次问就看了一次链');
-  await x.ask(it.id, T0 + 13); await x.ask(it.id, T0 + 16);
-  assert.equal(x.chain.asked.length, 1, '5 秒内再问不重复查');
+  await x.ask(it.id, T0 + 13); await x.ask(it.id, T0 + 15);
+  assert.equal(x.chain.asked.length, 1, '4 秒内再问不重复查');
   const pay = x.chain.pay(solA, U(it.exact), T0 + 20);
   assert.equal((await x.ask(it.id, T0 + 17)).status, 'pending', '钱还没到');
   const got = await x.ask(it.id, T0 + 22);

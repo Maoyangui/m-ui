@@ -50,13 +50,15 @@ const (
 	// 金额带着随机零头,十分钟里正好有另一笔一模一样的,可以不计。
 	pledgeSkew = int64(600)
 	tronPage   = 200 // 向 TronGrid 一次要多少条(它一页最多这么多)
-	// 有人在等到账时,多久可以问一次 TronGrid:页面 5 秒问一次面板,付了款十几秒就能跳。TronGrid 不带密钥的限额是每秒 1 次
-	// (超了停 5 秒),这里留足余量;不管多少人在等、问的是哪一笔,大家共用这一次查询。
-	tronEvery = 5 * time.Second
+	// 有人在等到账时,多久可以问一次 TronGrid。页面 5 秒问一次面板,这里要比它短一点:两边一样长的话,页面来问时离上一次
+	// 查完常常还差几毫秒,轮空一次,实际成了 5 秒、10 秒交替着查(实机测出来的)。TronGrid 不带密钥的限额是每秒 1 次
+	// (超了停 5 秒),留足了余量;不管多少人在等、问的是哪一笔,大家共用这一次查询。
+	tronEvery = 4 * time.Second
 	// 这一次没查成(限速、超时)或者正在查:上一次查成的结果在这么久之内照样拿来答。免费接口偶尔限速一下是常事,
 	// 不该让页面一会儿「知道」一会儿「不知道」;超过这么久还没有新的结果,才老实说不知道。
 	tronGoodFor = 30 * time.Second
-	// 连着没查成:每次把间隔加倍(10、20、40 秒),最长这么久 —— 被限速时越敲越久。
+	// 连着没查成:从 tronBackoff 起每次把间隔加倍(10、20、40 秒),最长 tronBackoffMax —— 被限速时越敲越久。
+	tronBackoff     = 5 * time.Second
 	tronBackoffMax  = 60 * time.Second
 	donorsTTL       = time.Hour // 名单最多一小时取一次
 	donorsWaitAge   = 6 * time.Hour
@@ -471,7 +473,7 @@ func (s *Server) recentTransfers(ctx context.Context) (txs []tronTx, full, ok bo
 	if st.tronFails < 8 {
 		st.tronFails++
 	}
-	wait := tronEvery << uint(st.tronFails) // 10、20、40…
+	wait := tronBackoff << uint(st.tronFails) // 10、20、40…
 	if wait > tronBackoffMax {
 		wait = tronBackoffMax
 	}
