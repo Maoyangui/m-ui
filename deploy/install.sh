@@ -246,7 +246,8 @@ if [ -n "${SUMS:-}" ] && [ "${MUI_SKIP_VERIFY:-}" != "1" ]; then
       *) echo "提示:这台系统没有能验签名的工具(需要 OpenSSH 8.1+ 的 ssh-keygen,或 OpenSSL 3+),这次只做 SHA256 校验";;
     esac
   fi
-  WANT="$(grep " m-ui-linux-$ARCH.tar.gz$" "$VDIR/SHA256SUMS" | awk '{print $1}' || true)"
+  # 清单一行是「摘要  文件名」;文件名前带 * 的写法(sha256sum 的二进制标记)也认,和面板内更新一样
+  WANT="$(awk -v f="m-ui-linux-$ARCH.tar.gz" '{ n = $2; sub(/^\*/, "", n); if (NF == 2 && n == f) { print tolower($1); exit } }' "$VDIR/SHA256SUMS")"
   rm -rf "$VDIR"
   [ -n "$WANT" ] || { echo "这个版本的 SHA256SUMS 里没有 m-ui-linux-$ARCH.tar.gz,无法校验,已中止"; rm -f "$TMP"; exit 1; }
   GOT="$($SUM "$TMP" | awk '{print $1}')"
