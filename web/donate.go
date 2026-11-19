@@ -262,7 +262,9 @@ func (s *Server) donorSnapshot() donorBoard {
 
 var domainLike = regexp.MustCompile(`(?i)[a-z0-9-]+\.[a-z]{2,}`)
 
-// cleanDonorName 名字要显示在所有面板上:只收文字、数字、空格和少数标点,不能带链接。返回规整后的名字和错误代码。
+// cleanDonorName 名字要显示在所有面板上:只收文字、数字、空格和少数标点(. _ - · ' @),不能带链接。返回规整后的名字和错误代码。
+// @ 是 v0.8.1 放开的(留 Telegram 用户名用);带域名样子的照旧不收,所以邮箱地址填不了。
+// 更早版本的面板不认带 @ 的名字:它们的榜单上不显示那一行,别的行照常。
 func cleanDonorName(s string) (string, string) {
 	s = strings.Join(strings.Fields(s), " ")
 	if s == "" {
@@ -272,7 +274,7 @@ func cleanDonorName(s string) (string, string) {
 		return "", "name_long"
 	}
 	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || strings.ContainsRune(" ._-·'", r) {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || strings.ContainsRune(" ._-·'@", r) {
 			continue
 		}
 		return "", "name_bad"

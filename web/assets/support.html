@@ -402,7 +402,7 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
   var STALE = 30000, WAIT = 15000, POLL = 5000;
   // 面板连续这么久都说"查不了"(毫秒)才在页面上说明:查链的免费接口偶尔限速一下是常事,一两次不算异常
   var UNK_AFTER = 60000;
-  var ERR = { name_empty: ZH ? '请填名字' : 'Enter a name', name_long: ZH ? '名字最多 24 个字' : 'Names can be 24 characters at most', name_bad: ZH ? '名字只能用文字、数字和空格,不能带链接' : 'Names can only use letters, digits and spaces, no links', amount: ZH ? '金额需在 1 到 100000 之间' : 'The amount must be between 1 and 100000', rate: ZH ? '提交太频繁,稍后再试' : 'Too many tries, try again later', send: ZH ? '暂时无法留名,稍后再试' : "Can't sign right now, try again later", origin: ZH ? '请从面板页面提交' : 'Please submit from the panel page', bad: ZH ? '提交有误,请重试' : 'Invalid request, please retry' };
+  var ERR = { name_empty: ZH ? '请填名字' : 'Enter a name', name_long: ZH ? '名字最多 24 个字' : 'Names can be 24 characters at most', name_bad: ZH ? '名字可以用文字、数字、空格和 @ . _ - 这几种符号,不能带链接' : 'Names can use letters, digits, spaces and @ . _ - only, no links', amount: ZH ? '金额需在 1 到 100000 之间' : 'The amount must be between 1 and 100000', rate: ZH ? '提交太频繁,稍后再试' : 'Too many tries, try again later', send: ZH ? '暂时无法留名,稍后再试' : "Can't sign right now, try again later", origin: ZH ? '请从面板页面提交' : 'Please submit from the panel page', bad: ZH ? '提交有误,请重试' : 'Invalid request, please retry' };
   var load = function () { try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; } };
   var save = function (p) { try { if (p) localStorage.setItem(KEY, JSON.stringify(p)); else localStorage.removeItem(KEY); } catch (e) {} };
   function stop() { clearInterval(timer); clearInterval(poll); clearTimeout(giveUp); timer = poll = giveUp = null; }

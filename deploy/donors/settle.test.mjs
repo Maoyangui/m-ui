@@ -63,6 +63,9 @@ const quiet = { log() {}, warn() {} };
 test('名字规则和面板一致', () => {
   assert.equal(validName(' Larry  Wang '), 'Larry Wang');
   assert.equal(validName('张三'), '张三');
+  assert.equal(validName('村长tk广告户tg@a88321'), '村长tk广告户tg@a88321', '@ 用户名可以留');
+  assert.equal(validName('@someone'), '@someone');
+  for (const bad of ['me@example.com', 'tg@a.b.cn']) assert.equal(validName(bad), '', '带域名的照旧不收: ' + bad);
   for (const bad of ['', 'http://a.com', '加我 t.me', '<b>x</b>', 'a'.repeat(25), 12]) assert.equal(validName(bad), '', String(bad));
 });
 

@@ -23,17 +23,21 @@ import (
 
 func TestCleanDonorName(t *testing.T) {
 	for in, want := range map[string]string{
-		"Larry Wang":   "Larry Wang",
-		"  张  三 ":      "张 三",
-		"O'Brien-Jr.":  "O'Brien-Jr.",
-		"佛跳墙·用户_1":     "佛跳墙·用户_1",
-		"":             "",
-		"   ":          "",
-		"http://a.com": "",
-		"加我 t.me":      "",
-		"example.com":  "",
-		"<b>x</b>":     "",
-		"a\nb<script>": "",
+		"Larry Wang":       "Larry Wang",
+		"  张  三 ":          "张 三",
+		"O'Brien-Jr.":      "O'Brien-Jr.",
+		"佛跳墙·用户_1":         "佛跳墙·用户_1",
+		"村长tk广告户tg@a88321": "村长tk广告户tg@a88321", // @ 用户名可以留
+		"@someone":         "@someone",
+		"me@example.com":   "", // 邮箱带着域名,照旧不收
+		"tg@a.b.cn":        "",
+		"":                 "",
+		"   ":              "",
+		"http://a.com":     "",
+		"加我 t.me":          "",
+		"example.com":      "",
+		"<b>x</b>":         "",
+		"a\nb<script>":     "",
 		"名字太长太长太长太长太长太长太长太长太长太长太长太长太长": "",
 	} {
 		got, bad := cleanDonorName(in)

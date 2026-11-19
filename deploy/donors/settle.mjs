@@ -28,11 +28,12 @@ export const SOURCE_STALE = 6 * 3600; // 数据源这么久没读成功就报警
 const SOURCE_BEAT = 3000; // 一直读得到时 okAt 隔这么久才往前挪一次(和下载计数的点一样),不让每次运行都多一个提交
 
 // 和面板 web/donate.go 的 cleanDonorName 同一规则:名字显示在所有面板上,不能带链接。
+// @ 可以留(Telegram 用户名);带域名样子的照旧不收,所以邮箱地址不行。
 export function validName(s) {
   if (typeof s !== 'string') return '';
   const name = s.trim().split(/\s+/).join(' ');
   if (!name || [...name].length > 24) return '';
-  if (!/^[\p{L}\p{N}\p{M} ._\-·']+$/u.test(name)) return '';
+  if (!/^[\p{L}\p{N}\p{M} ._\-·'@]+$/u.test(name)) return '';
   if (/[a-z0-9-]+\.[a-z]{2,}/i.test(name)) return '';
   return name;
 }
