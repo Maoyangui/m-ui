@@ -56,6 +56,9 @@ export function newChain(gen) {
   const txs = new Map();
   const c = {
     calls: [], asked: [], fetches: 0, down: false, noBatch: false, tron: new Map(), // noBatch:装成不认批量请求的节点
+    // short:哪些节点只留近期的记录(主机名 → 留多少秒;要先把 now 设成当前时间)。这种节点上:比这更早的交易它不列出来、
+    // 也查不到;拿一个它已经不记得的交易号当 until / before 去问,它整个报「查不到这笔交易」(2026-11 两个公共节点就是这样)。
+    short: new Map(), now: 0, untilAsked: 0,
     // rule(host, method, isBatch):测试给某个节点定规矩 —— 返回一个 Response 就拿它当答复(限速、不给这种查询…),不返回就照常答
     rule: null,
     open(owner) { const pubkey = gen.sol(); accounts.set(owner, [...(accounts.get(owner) || []), { pubkey, amount: 0 }]); sigs.set(pubkey, []); return pubkey; },
@@ -87,10 +90,10 @@ export function newChain(gen) {
       if (isBatch) { // 批量请求
         if (c.noBatch) return Response.json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'batch requests are not supported' } });
         const out = [];
-        for (const x of body) out.push({ jsonrpc: '2.0', id: x.id, result: await answer(x.method, x.params) });
+        for (const x of body) out.push({ jsonrpc: '2.0', id: x.id, ...(await answer(x.method, x.params, host)) });
         return Response.json(out);
       }
-      return Response.json({ jsonrpc: '2.0', id: 1, result: await answer(body.method, body.params) });
+      return Response.json({ jsonrpc: '2.0', id: 1, ...(await answer(body.method, body.params, host)) });
     },
   };
   const ataCache = new Map(); // 收款账户 → 钱包地址
@@ -98,20 +101,29 @@ export function newChain(gen) {
     for (const owner of accounts.keys()) { if (!ataCache.has(owner)) ataCache.set(owner, await ataOf(owner)); if (ataCache.get(owner) === account) return owner; }
     return '';
   }
-  async function answer(method, params) {
+  async function answer(method, params, host) {
       c.calls.push(method);
       let result = null;
+      const floor = c.short.has(host) ? c.now - c.short.get(host) : -Infinity; // 这个节点最早还记得什么时候的交易
+      const forgot = sig => { const t = txs.get(sig); return !t || t.blockTime < floor; };
+      const notFound = sig => ({ error: { code: -32020, message: `Transaction ${sig} not found` } });
       if (method === 'getTokenAccountsByOwner') {
         result = { value: (accounts.get(params[0]) || []).map(a => ({ pubkey: a.pubkey, account: { data: { parsed: { info: { owner: params[0], mint: USDT_MINT, tokenAmount: { amount: String(a.amount), decimals: 6 } } } } } })) };
       } else if (method === 'getSignaturesForAddress') {
         const owner = await ownerOf(params[0]); // 交易挂在钱包的收款账户(算出来的那个地址)名下
         let list = (owner && sigs.get(accounts.get(owner)[0].pubkey)) || [];
         const { limit = 1000, until, before } = params[1] || {};
+        if (until) c.untilAsked++;
+        if (c.short.has(host)) {
+          if (until && forgot(until)) return notFound(until);
+          if (before && forgot(before)) return notFound(before);
+          list = list.filter(s => s.blockTime >= floor);
+        }
         if (before) { const i = list.findIndex(s => s.signature === before); list = i >= 0 ? list.slice(i + 1) : []; }
         if (until) { const i = list.findIndex(s => s.signature === until); if (i >= 0) list = list.slice(0, i); }
         result = list.slice(0, limit);
-      } else if (method === 'getTransaction') result = txs.get(params[0]) || null;
-      return result;
+      } else if (method === 'getTransaction') result = c.short.has(host) && forgot(params[0]) ? null : txs.get(params[0]) || null;
+      return { result };
   }
   return c;
 }

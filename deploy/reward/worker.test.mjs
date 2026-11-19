@@ -55,6 +55,7 @@ function setup(t) {
     // 跑一轮定时任务,顺便独立数一遍它用了多少个子请求:免费套餐一次调用最多 50 个
     async tick(now) {
       const before = calls.n + chain.fetches;
+      chain.now = now;
       const l = await W.tick(env, now);
       const used = calls.n + chain.fetches - before;
       calls.max = Math.max(calls.max, used);
@@ -876,6 +877,155 @@ test('查账的节点:自己配的排最前;被限速的歇一会儿、换下一
   for (let i = 0, now = T0 + 720; i < 20 && l.pool.donateCount < 3; i++, now += 120) l = await x.tick(now);
   assert.deepEqual([l.pool.donateCount, l.deposits[0].name], [3, '丙'], '节点恢复后补上');
   assert.equal(st().rpc['rpc.test'].fails, 0, '好了就清零');
+});
+
+test('只留近期记录的节点也查得成:请求里不带「上次看到哪一笔」;官方节点挡了一次只是歇一会儿(2026-11-19 的事故原样重演)', async t => {
+  const x = setup(t), solA = x.solAddr();
+  x.env.SOLANA_RPC = '';                                  // 线上当时没配自己的节点:只有三个公共节点
+  const st = () => JSON.parse(x.db.prepare("SELECT v FROM kv WHERE k = 'state'").get().v);
+  x.chain.short.set('public.rpc.solanavibestation.com', 9 * 3600).set('solana-rpc.publicnode.com', 25 * 3600);
+  // 两天前有人留名捐过一笔(那时官方节点答话):「上次看到哪一笔」就停在那一笔上
+  await x.tick(T0);
+  const old = (await x.donate('两天前', 3, T0 + 10)).body;
+  x.chain.pay(solA, U(old.exact), T0 + 60);
+  let l = await x.tick(T0 + 120);
+  assert.equal(l.pool.donateCount, 1);
+  assert.ok(Object.values(st().cur)[0].head, '记着上次看到哪一笔');
+  // 两天后又有人留名、转了账。这一轮官方节点把登记服务挡了(403),另外两个节点早就不记得两天前那一笔了
+  const D = T0 + 2 * DAY;
+  await x.tick(D);
+  const it = (await x.donate('无敌项目', 5, D + 10, '198.51.100.40')).body;
+  assert.equal(it.scanAt, D, '答复里带着上一次把链上看全的时间');
+  const pay = x.chain.pay(solA, U(it.exact), D + 80);
+  x.chain.rule = (host, method) => host === 'api.mainnet-beta.solana.com' && method === 'getSignaturesForAddress'
+    ? Response.json({ jsonrpc: '2.0', error: { code: 403, message: 'Access forbidden, contact your app developer or support@rpcpool.com.' }, id: 1 }, { status: 403 }) : null;
+  x.chain.asked.length = 0;
+  l = await x.tick(D + 120);
+  assert.deepEqual([l.pool.donateCount, l.deposits[0].name, l.deposits[0].tx], [2, '无敌项目', pay.signature], '到账后的头一轮就认出来');
+  assert.deepEqual(x.chain.asked, ['api.mainnet-beta.solana.com getSignaturesForAddress', 'public.rpc.solanavibestation.com getSignaturesForAddress', 'public.rpc.solanavibestation.com getTransaction']);
+  assert.equal(x.chain.untilAsked, 0, '问节点时从不带 until');
+  const s = st().rpc['api.mainnet-beta.solana.com'];
+  assert.deepEqual([s.no.getSignaturesForAddress || 0, s.fails, s.until], [0, 1, D + 120 + 60], '被挡了一次:歇 1 分钟,不是停用一天');
+  const got = await (await worker.fetch(new Request('https://x/v1/donate/' + it.id), x.env)).json();
+  assert.deepEqual([got.status, got.scanAt], ['paid', D + 120]);
+  // 明说不给这种查询的(要令牌)才记一天
+  x.chain.rule = (host, method) => host === 'api.mainnet-beta.solana.com' && method === 'getSignaturesForAddress' ? new Response('API key is required for this method', { status: 403 }) : null;
+  await x.donate('再来一个', 4, D + 400, '198.51.100.42');
+  await x.tick(D + 480);
+  assert.equal(st().rpc['api.mainnet-beta.solana.com'].no.getSignaturesForAddress, D + 480 + 86400);
+});
+
+test('查不了链的时间一长:只留近期记录的节点说「没有更多了」不当真,留名一直等着;接得上的节点答了才算查完', async t => {
+  const x = setup(t), solA = x.solAddr();
+  const st = () => JSON.parse(x.db.prepare("SELECT v FROM kv WHERE k = 'state'").get().v);
+  x.chain.short.set('public.rpc.solanavibestation.com', 2 * 3600).set('solana-rpc.publicnode.com', 2 * 3600);
+  x.chain.pay(solA, 1_234_567, T0 - DAY);                 // 这个地址上早先的一笔资金流动
+  await x.tick(T0);
+  const paid = (await x.donate('转了的', 5, T0 + 10)).body, idle = (await x.donate('没转的', 6, T0 + 10, '198.51.100.41')).body;
+  const pay = x.chain.pay(solA, U(paid.exact), T0 + 600); // 期限内转了
+  // 所有节点一连 5 个小时都不通
+  x.chain.down = true; x.allowErrs = true;
+  for (let now = T0 + 120; now < T0 + 5 * 3600; now += 1200) await x.tick(now);
+  x.chain.down = false; x.allowErrs = false;
+  // 通了,但答话的只有那两个只留 2 小时记录的节点:5 小时前到的那笔,它们已经不记得了
+  x.chain.rule = host => host === 'rpc.test' || host === 'api.mainnet-beta.solana.com' ? new Response('busy', { status: 429 }) : null;
+  const H5 = T0 + 5 * 3600;
+  let l = await x.tick(H5);
+  assert.equal(l.pool.donateCount, 0);
+  assert.equal(st().scanOk, T0, '没看全:不能当成查完了');
+  const status = async id => (await (await worker.fetch(new Request('https://x/v1/donate/' + id), x.env)).json());
+  assert.deepEqual([(await status(paid.id)).status, (await status(paid.id)).scanAt], ['expired', T0], '面板看得到查账卡在了什么时候');
+  x.chain.asked.length = 0;
+  await x.tick(H5 + 120); l = await x.tick(H5 + 240);
+  assert.equal(l.pool.donateCount, 0);
+  assert.ok(x.chain.asked.filter(a => a.endsWith('getSignaturesForAddress') && !a.startsWith('rpc.test') && !a.startsWith('api.mainnet')).length >= 2, '每一轮接着问');
+  assert.equal(st().scanOk, T0);
+  // 自己的节点好了(它记得全部):看到了登记之前的那笔老交易 = 看到头了。转了的那笔认出来;没转的那笔这才算查完,之后不再查链
+  x.chain.rule = null;
+  let now = H5 + 360;
+  for (let i = 0; i < 20 && !l.pool.donateCount; i++) l = await x.tick(now += 120); // 自己的节点前面连着不通,还要歇一阵才轮到它
+  assert.deepEqual([l.pool.donateCount, l.deposits[0].name, l.deposits[0].tx], [1, '转了的', pay.signature], '期限内转的,晚了 5 个小时才看到也照样算');
+  assert.equal(st().scanOk, now);
+  assert.deepEqual([(await status(paid.id)).status, (await status(idle.id)).status], ['paid', 'expired']);
+  x.chain.asked.length = 0;
+  await x.tick(now + 120); await x.tick(now + 240);
+  assert.deepEqual(x.chain.asked, [], '都查完了:不再查链');
+  assert.equal(x.chain.untilAsked, 0);
+});
+
+test('先答话的节点不记得那笔交易:换一个节点再问,记得的那个轮得上;查单笔交易答「没有」也一样', async t => {
+  const x = setup(t), solA = x.solAddr();
+  x.env.SOLANA_RPC = '';
+  const st = () => JSON.parse(x.db.prepare("SELECT v FROM kv WHERE k = 'state'").get().v);
+  // 官方节点一直挡着登记服务;一个节点只留 2 小时的记录,另一个留 25 小时
+  x.chain.short.set('public.rpc.solanavibestation.com', 2 * 3600).set('solana-rpc.publicnode.com', 25 * 3600);
+  x.chain.pay(solA, 7_654_321, T0 - 3600);                // 这个地址上早先的一笔资金流动
+  await x.tick(T0);
+  const it = (await x.donate('等了半天', 5, T0 + 10)).body;
+  const pay = x.chain.pay(solA, U(it.exact), T0 + 600);
+  x.chain.down = true; x.allowErrs = true;
+  for (let now = T0 + 120; now < T0 + 5 * 3600; now += 1200) await x.tick(now);
+  x.chain.down = false;
+  x.chain.rule = host => host === 'api.mainnet-beta.solana.com' ? Response.json({ jsonrpc: '2.0', error: { code: 403, message: 'Access forbidden' }, id: 1 }, { status: 403 }) : null;
+  let l = null, now = T0 + 5 * 3600 + 1800;               // 等前面连着不通攒下的「歇一会儿」都过去
+  x.chain.asked.length = 0;
+  l = await x.tick(now);
+  x.allowErrs = false;
+  assert.deepEqual([l.pool.donateCount, l.deposits[0] && l.deposits[0].name, l.deposits[0] && l.deposits[0].tx], [1, '等了半天', pay.signature], '问了\n' + x.chain.asked.join('\n'));
+  const sigAsks = x.chain.asked.filter(a => a.endsWith('getSignaturesForAddress')), txAsks = x.chain.asked.filter(a => a.endsWith('getTransaction'));
+  assert.deepEqual(sigAsks.slice(-2), ['public.rpc.solanavibestation.com getSignaturesForAddress', 'solana-rpc.publicnode.com getSignaturesForAddress'], '只留 2 小时的那个说没有 → 换下一个');
+  assert.deepEqual(txAsks.slice(-2), ['public.rpc.solanavibestation.com getTransaction', 'solana-rpc.publicnode.com getTransaction'], '查这笔交易也一样');
+  assert.equal(st().scanOk, now, '看到了登记之前的老交易:这一轮算看全');
+  assert.equal(x.db.prepare("SELECT COUNT(*) AS n FROM sigs WHERE state = 'new' OR state = 'gone'").get().n, 0);
+});
+
+test('问过的节点都说没有的交易:不急着认它没有,过一天还是没有才划掉;拉交易号出错也不耽误已经拉到的那些', async t => {
+  const x = setup(t), solA = x.solAddr();
+  const st = () => JSON.parse(x.db.prepare("SELECT v FROM kv WHERE k = 'state'").get().v);
+  await x.tick(T0);
+  const it = (await x.donate('慢慢来', 5, T0 + 10)).body;
+  const pay = x.chain.pay(solA, U(it.exact), T0 + 60);
+  // 交易号拉得到,但所有节点查这笔交易都答「没有」(都还没跟上)
+  x.chain.rule = (host, method) => method === 'getTransaction' ? Response.json({ jsonrpc: '2.0', id: 1, result: null }) : null;
+  let now = T0 + 120;
+  for (let i = 0; i < 40; i++, now += 120) await x.tick(now);
+  assert.deepEqual({ ...x.db.prepare('SELECT state FROM sigs WHERE sig = ?').get(pay.signature) }, { state: 'new' }, '一个多小时里问了 40 轮都没有:还留着');
+  // 这时节点跟上了,而拉交易号这一步正好出错:已经记下的那一笔照样认出来,错照样报
+  x.chain.rule = (host, method) => method === 'getSignaturesForAddress' ? new Response('busy', { status: 429 }) : null;
+  x.allowErrs = true;
+  let l = null;
+  for (let i = 0; i < 20 && !(l && l.pool.donateCount); i++, now += 120) l = await x.tick(now);
+  assert.deepEqual([l.pool.donateCount, l.deposits[0].name], [1, '慢慢来']);
+  assert.match(st().tick.errs.chain || '', /429/);
+  x.allowErrs = false; x.chain.rule = null;
+  // 真没有的那种(交易号在,交易永远查不到):过了一天才划掉,之后不再为它查链
+  const y = setup(t), solB = y.solAddr();
+  await y.tick(T0);
+  const it2 = (await y.donate('查不到的', 5, T0 + 10)).body;
+  const ghost = y.chain.pay(solB, U(it2.exact), T0 + 60);
+  y.chain.rule = (host, method) => method === 'getTransaction' ? Response.json({ jsonrpc: '2.0', id: 1, result: null }) : null;
+  for (let t2 = T0 + 120; t2 < T0 + DAY; t2 += 1800) await y.tick(t2);
+  assert.equal(y.db.prepare('SELECT state FROM sigs WHERE sig = ?').get(ghost.signature).state, 'new', '不到一天:留着');
+  for (let t2 = T0 + DAY + 200; t2 < T0 + DAY + 200 + 60 * 120; t2 += 120) await y.tick(t2);
+  assert.equal(y.db.prepare('SELECT state FROM sigs WHERE sig = ?').get(ghost.signature).state, 'gone');
+  y.chain.asked.length = 0;
+  for (let i = 0; i < 5; i++) await y.tick(T0 + 2 * DAY + i * 120);
+  assert.deepEqual(y.chain.asked, [], '划掉之后不再查');
+});
+
+test('近期之内,只留近期记录的节点答的就算数:没转账的留名到期后查一遍就收,不会一直查下去', async t => {
+  const x = setup(t);
+  x.solAddr();
+  x.env.SOLANA_RPC = '';
+  x.chain.short.set('api.mainnet-beta.solana.com', 4 * 3600).set('public.rpc.solanavibestation.com', 9 * 3600).set('solana-rpc.publicnode.com', 25 * 3600);
+  await x.tick(T0);
+  const it = (await x.donate('只是看看', 5, T0 + 10)).body;
+  for (let now = T0 + 120; now <= T0 + 3600 + 600; now += 120) await x.tick(now);
+  const asked = x.chain.asked.length;
+  assert.ok(asked >= 30 && asked <= 33, '等到账的一个多小时里每轮问一次,共 ' + asked + ' 次');
+  for (let i = 1; i <= 10; i++) await x.tick(T0 + 4200 + i * 120);
+  assert.equal(x.chain.asked.length, asked, '到期并且看全之后不再查');
+  assert.equal((await (await worker.fetch(new Request('https://x/v1/donate/' + it.id), x.env)).json()).status, 'expired');
 });
 
 test('查账很省:没人捐的时候一次不查;有人在等到账时一轮也就两三次', async t => {

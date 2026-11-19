@@ -19,7 +19,7 @@
 //   POST /v1/report              面板上报
 //   GET  /v1/export              公开账本(仓库 rewards 分支上的 ledger.json 就是它,由 ledger-workflow.yml 定时提交)
 //   POST /v1/donate              {name, amount} → 要转的确切金额和期限
-//   GET  /v1/donate/<id>         这一笔到没到账
+//   GET  /v1/donate/<id>         这一笔到没到账(scanAt = 登记服务上一次把链上看全的时间)
 //   POST /v1/donate/<id>/cancel  不捐了(面板上这一笔就此收起。但钱要是真的在期限内按那个数转来了,照样计入、照样记名:
 //                                钱不能因为点了一下取消就白转;那个金额在期限过完之前也不会发给别人)
 //   GET  /v1/health              定时任务最近一次跑的情况
@@ -495,7 +495,9 @@ export async function syncOrders(env, st, now) {
 // 查账的原则:
 //   - 没有留名在等到账,就一次链都不查。有的时候,每一轮(2 分钟)最多问两三次:拉一页新交易号,把时间落在留名期限里的那几笔一次问清金额。
 //   - 节点:自己配的(SOLANA_RPC,逗号隔开,排在前面)+ 内置的几个公共节点。公共节点会限速、有的不给某些调用:
-//     出错 / 被限速的歇一会儿(1、2、4…分钟,最多半小时),不给某种调用的一天之内不拿那种调用问它,下一个顶上。
+//     出错 / 被限速 / 被挡了一次的歇一会儿(1、2、4…分钟,最多半小时),明说不给某种调用的一天之内不拿那种调用问它,下一个顶上。
+//   - 公共节点大多只留最近几小时到一天的记录:问法不能指望它们记得老交易(见 pullSignatures),它们答的「没有更多了」
+//     也只在近期之内才当真(TRUST_RECENT)。
 //   - 不用「查某个地址名下有哪些账户」这类受限的查询:收款用的那个账户地址是算得出来的(见 ataOf)。
 const PUBLIC_RPC = ['https://api.mainnet-beta.solana.com', 'https://public.rpc.solanavibestation.com', 'https://solana-rpc.publicnode.com'];
 export function rpcList(env) {
@@ -503,21 +505,31 @@ export function rpcList(env) {
   return [...new Set([...own, ...PUBLIC_RPC])];
 }
 const hostOf = url => { try { return new URL(url).host; } catch { return String(url); } };
+// 答复里带着这些字眼:这个节点不给这种查询(要令牌、要付费的套餐),不是一时的事
+const NOT_OFFERED = /not available|paid plan|personal token|token required|api[ -]?key|not supported|not allowed|upgrade|subscription/i;
+const RATE_LIMITED = /rate.?limit|too many|slow down|exceeded|\b429\b/i; // 限速的话里常常也劝人升级套餐:那是一时的事,按限速算
 // 问一圈节点,直到有一个答上来。isBatch = 这是一个批量请求(body 是数组),答复也得是数组。
-async function rpcAsk(env, st, now, method, body, isBatch) {
+// opt.avoid:这几个节点(主机名)这次不问;答上来的是哪个节点记在 opt.host 里。
+async function rpcAsk(env, st, now, method, body, isBatch, opt = {}) {
   st.rpc = st.rpc || {};
   const state = url => { const h = hostOf(url); return st.rpc[h] || (st.rpc[h] = { until: 0, fails: 0, no: {} }); };
   const barred = url => { const h = state(url); return (h.no[method] || 0) > now || (isBatch && (h.no.batch || 0) > now); };
-  const list = rpcList(env).filter(url => !barred(url));
+  const list = rpcList(env).filter(url => !barred(url) && !(opt.avoid && opt.avoid.has(hostOf(url))));
   let order = list.filter(url => state(url).until <= now);
   if (!order.length) order = [...list].sort((a, b) => state(a).until - state(b).until).slice(0, 1); // 都在歇:挑最快该醒的那个试一次
-  let last = null;
+  let last = null, missing = false;
   for (const url of order.slice(0, 3)) {
     if (!roomFor(env, 1)) break;
     const h = state(url);
     try {
       const r = await (env.FETCH || fetch)(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (r.status === 401 || r.status === 403) { h.no[method] = now + 86400; throw new Error(`${hostOf(url)} 不给这种查询(${r.status})`); }
+      if (r.status === 401 || r.status === 403) {
+        // 两种情况要分开:这个节点不给这种查询(要令牌、要付费)→ 一天之内不拿它问这个;只是把这一次挡了(公共节点对云主机的
+        // 出口地址时不时这样,官方节点尤其)→ 和限速一样歇一会儿再试。以前不分,官方节点挡一次就被停用一整天。
+        const why = (await r.text().catch(() => '')).slice(0, 300);
+        if (r.status === 401 || (NOT_OFFERED.test(why) && !RATE_LIMITED.test(why))) { h.no[method] = now + 86400; throw new Error(`${hostOf(url)} 不给这种查询(${r.status})`); }
+        throw new Error(`${hostOf(url)} 答复 ${r.status}`);
+      }
       if (!r.ok) throw new Error(`${hostOf(url)} 答复 ${r.status}`);
       const j = await r.json();
       if (isBatch) {
@@ -527,19 +539,23 @@ async function rpcAsk(env, st, now, method, body, isBatch) {
       }
       if (j && j.error) {
         const code = j.error.code, msg = String(j.error.message || '');
-        if (code === -32601 || /not available|paid plan|personal token|not supported|not allowed|upgrade/i.test(msg)) { h.no[method] = now + 86400; throw new Error(`${hostOf(url)} 不给这种查询`); }
+        if (code === -32601 || (NOT_OFFERED.test(msg) && !RATE_LIMITED.test(msg))) { h.no[method] = now + 86400; throw new Error(`${hostOf(url)} 不给这种查询`); }
         throw new Error(`${hostOf(url)}: ${msg.slice(0, 80) || code}`);
       }
       h.fails = 0; h.until = 0;
+      opt.host = hostOf(url);
+      // 查一笔交易却答「没有」:只留近期记录的节点对老交易就是这样,不等于链上没有 —— 问下一个节点,都说没有才当没有
+      if (method === 'getTransaction' && !(j && j.result)) { missing = true; continue; }
       return j ? j.result : null;
     } catch (e) {
       last = e;
       if (!((h.no[method] || 0) > now)) { h.fails = (h.fails || 0) + 1; h.until = now + Math.min(1800, 60 * 2 ** Math.min(h.fails - 1, 5)); }
     }
   }
+  if (missing) return null;
   throw last || new Error('没有可用的 Solana 节点');
 }
-const rpc = (env, st, now, method, params) => rpcAsk(env, st, now, method, { jsonrpc: '2.0', id: 1, method, params }, false);
+const rpc = (env, st, now, method, params, opt) => rpcAsk(env, st, now, method, { jsonrpc: '2.0', id: 1, method, params }, false, opt);
 // 一次请求问好几件同样的事(JSON-RPC 的批量请求):只算一个子请求。返回和 calls 对齐的结果,没答上来的那几条是 undefined。
 // 没有节点认批量(或者都在限速)就退回一件一件问,问到预算用完为止。
 async function rpcBatch(env, st, now, method, paramsList) {
@@ -548,6 +564,12 @@ async function rpcBatch(env, st, now, method, paramsList) {
     try {
       const j = await rpcAsk(env, st, now, method, paramsList.map((params, i) => ({ jsonrpc: '2.0', id: i, method, params })), true);
       for (const x of j) if (x && Number.isInteger(x.id) && x.id >= 0 && x.id < out.length && !x.error) out[x.id] = x.result;
+      // 批量里答「没有」的那几笔交易:可能只是这个节点不记得了(见 rpcAsk),一笔一笔换着节点再问;问不动的留给下一轮
+      if (method === 'getTransaction') for (let i = 0; i < out.length; i++) {
+        if (out[i] !== null) continue;
+        if (!roomFor(env, 2)) { out[i] = undefined; continue; }
+        try { out[i] = await rpc(env, st, now, method, paramsList[i]); } catch { out[i] = undefined; }
+      }
       return out;
     } catch { /* 退回一件一件问 */ }
   }
@@ -631,43 +653,72 @@ export function usdtMoves(tx, owner) {
   }
   return { got, payer: validSolana(payer) ? payer : '' };
 }
-// 把一个账户上 from 之后的新交易记进 sigs:从新到旧一页一页拉,拉到上次拉到的地方、或者比 from 还早的交易为止。
-// 一轮里每一段只拉一页:没拉完的那一段记成缺口,下一轮接着。返回「拉全了没有」。
-const SIG_PAGE = 50;
+// 把一个账户上 from 之后的新交易记进 sigs:从新到旧一页一页拉,数到上次看到的那一笔、或者比 from 还早的交易为止。
+// 「数到哪为止」自己数,不让节点去截(请求里不带 until):只留近期记录的公共节点,碰到一个它已经不记得的交易号,不是照常
+// 给新交易,而是整个报「查不到这笔交易」。2026-11-19 一笔留名捐赠到了账却一直认不出来,就是两个这样的节点各报各的错、
+// 剩下那个又被停用着。
+// 一轮里每一段只拉一页:没拉完的那一段记成缺口,下一轮接着。
+// 返回「from 以来的交易是不是都看全了」。看全要有凭据,三样里占一样:
+//   - 接上了:这一页里碰到了上次看到的那一笔(cur.head),而且那一笔往回、from 以来的都确认看过(cur.floor <= from);
+//   - 看到头了:这一页里有比 from 更早的交易;
+//   - 两样都没有(这个账户以前没有交易,或者答话的节点只留着近期的记录):from 离现在不超过 TRUST_RECENT 就信它 ——
+//     公共节点留的记录都比这长(2026-11 量过:4 到 25 小时)。再久就不算看全:看到的交易照记,「看到哪了」原样不动,
+//     等一个接得上的节点来答(scanOk 不往前走,等到账的留名就一直留着)。
+const SIG_PAGE = 50, TRUST_RECENT = 3 * 3600;
 async function pullSignatures(env, st, owner, account, now, from) {
   const db = env.DB;
   st.cur = st.cur || {};
-  const cur = st.cur[account] || { head: '', gaps: [] };
+  const cur = { head: '', gaps: [], ...(st.cur[account] || {}) };
   const stmts = [];
-  const page = async (until, before, since) => { // 返回 { head, rest }:rest 不为空 = 这一段还没拉完,下回从它往前拉
-    const rows = await rpc(env, st, now, 'getSignaturesForAddress', [account, { limit: SIG_PAGE, commitment: 'finalized', ...(until ? { until } : {}), ...(before ? { before } : {}) }]);
-    if (!Array.isArray(rows) || !rows.length) return { head: '', rest: '' };
-    let old = false;
+  const sure = (met, since) => met || now - since <= TRUST_RECENT;
+  // 拉一页(before 往前的 SIG_PAGE 笔),数到 until 那一笔、或者比 since 早的交易为止。
+  // 返回 { head: 这一页最新的一笔, rest: 没数到头时下回从哪一笔接着往前拉, met: 碰到了 until 或者更早的交易 }
+  const page = async (until, before, since, avoid) => {
+    const opt = { avoid };
+    const rows = await rpc(env, st, now, 'getSignaturesForAddress', [account, { limit: SIG_PAGE, commitment: 'finalized', ...(before ? { before } : {}) }], opt);
+    if (!Array.isArray(rows) || !rows.length) return { head: '', rest: '', met: false, host: opt.host };
+    let met = false;
     for (const r of rows) {
-      if (typeof r.signature !== 'string' || r.signature.length > 128) continue;
-      if (r.blockTime != null && r.blockTime < since) { old = true; continue; }
+      if (!r || typeof r.signature !== 'string' || r.signature.length > 128) continue;
+      if (until && r.signature === until) { met = true; break; } // 再往后的上回都看过了
+      if (r.blockTime != null && r.blockTime < since) { met = true; continue; }
       if (r.err === null || r.err === undefined) stmts.push(q(db, "INSERT INTO sigs(sig, owner, ts, state, seen_at) VALUES(?,?,?,'new',?) ON CONFLICT(sig) DO NOTHING", r.signature, owner, r.blockTime || 0, now));
     }
-    return { head: rows[0].signature, rest: old || rows.length < SIG_PAGE ? '' : rows[rows.length - 1].signature };
+    const first = rows.find(r => r && typeof r.signature === 'string' && r.signature.length <= 128), last = rows[rows.length - 1];
+    return { head: first ? first.signature : '', rest: met || rows.length < SIG_PAGE || !last || typeof last.signature !== 'string' ? '' : last.signature, met, host: opt.host };
+  };
+  // 拉一页;没数到头、又超出了信得过的近期 —— 答话的可能正是一个只留近期记录的节点:这一轮换别的节点再问,最多再问两个。
+  // (不换的话,每一轮先醒着的总是它,它每次都「成功」地答一句没有,记得这笔交易的节点永远轮不上。)
+  const pageSure = async (until, before, since) => {
+    const avoid = new Set();
+    let p = await page(until, before, since, avoid);
+    for (let k = 0; k < 2 && !p.rest && !sure(p.met, since) && p.host && roomFor(env, 2); k++) {
+      avoid.add(p.host);
+      try { p = await page(until, before, since, avoid); } catch { break; }
+    }
+    return p;
   };
   const gaps = [...(cur.gaps || [])];
-  let reached = false;
+  let whole = false;
   try {
     if (roomFor(env, 2)) {
-      const top = await page(cur.head, '', from);
-      if (top.rest) gaps.push({ until: cur.head, before: top.rest, from });
-      if (top.head) cur.head = top.head;
-      reached = true;
+      const solid = cur.floor != null && cur.floor <= from;
+      const top = await pageSure(solid ? cur.head : '', '', from);
+      if (top.rest) gaps.push({ until: solid ? cur.head : '', before: top.rest, from }); // 这一页没数到头:剩下的那一段算缺口
+      whole = !!top.rest || sure(top.met, from);
+      if (whole) { if (top.head) cur.head = top.head; cur.floor = from; }
     }
     if (gaps.length && roomFor(env, 2)) { // 最老的那个缺口往前补一页
-      const g = gaps.shift(), r = await page(g.until, g.before, g.from || from);
+      const g = gaps.shift(), since = g.from || from, r = await pageSure(g.until, g.before, since);
       if (r.rest) gaps.unshift({ ...g, before: r.rest });
+      else if (!sure(r.met, since)) gaps.unshift(g); // 没数到头,答话的节点记录又可能不够长:缺口留着,下回再问
     }
   } finally { // 中途出错(节点不通):已经拉到的照样记下,缺口留着下回补
     await batched(db, stmts);
-    st.cur[account] = { head: cur.head, gaps: gaps.slice(0, 20) };
+    if (gaps.length > 20) delete cur.floor; // 缺口多得记不下:中间有一段要丢,「看到哪了」不再连续,下回从头数
+    st.cur[account] = { head: cur.head, gaps: gaps.slice(0, 20), ...(cur.floor != null ? { floor: cur.floor } : {}) };
   }
-  return reached && gaps.length === 0;
+  return whole && gaps.length === 0;
 }
 // 看链上的新转入里有没有留名捐赠:金额正好是某一笔登记的确切金额、到账时间落在它的期限里,才算。
 // 对不上任何一笔登记的转入一律不管(不计入、不列出):这个地址上还有订单付款和别的资金流动。
@@ -676,25 +727,27 @@ export async function scanSolana(env, st, now) {
   const db = env.DB;
   // 还没兑现的留名(在等到账的、刚过期的)。一笔留名「查完了」= 它的期限(连余量)过后,链上的交易又拉全过一次(scanOk)。
   // 库里还有没看的交易时,把近两天的都带上:它们里面可能有哪一笔的钱。
+  let pullErr = null;
   const backlog = await one(db, "SELECT COUNT(*) AS n FROM sigs WHERE state = 'new'");
   const horizon = backlog && backlog.n > 0 ? now - 2 * 86400 : Number(st.scanOk || 0) - CFG.intentGrace;
   const live = await all(db, "SELECT id, name, address, exact, created_at, expires_at FROM intents WHERE status IN ('pending', 'expired', 'cancelled') AND expires_at >= ? ORDER BY created_at", horizon);
   if (!live.length) { // 没有留名在等到账:没拉完的交易号也不用再拉了
-    for (const c of Object.values(st.cur || {})) if (c) c.gaps = [];
+    for (const c of Object.values(st.cur || {})) if (c && c.gaps && c.gaps.length) { c.gaps = []; delete c.floor; } // 中间留下没拉的一段:「看到哪了」不再连续
     if (!(backlog && backlog.n > 0)) { st.scanOk = now; return 0; } // 一次链都不查
   } else {
     const from = Math.min(...live.map(i => i.created_at)) - CFG.intentGrace;
     const owners = [...new Set(live.map(i => i.address))].slice(0, 3);
     let complete = true;
+    // 拉交易号中途出错(节点不通、缺口那一页没人答得上):这一轮不算看全,但已经拉到的那些照样往下看,错留到最后再报
     for (const owner of owners) {
       if (!roomFor(env, 3)) { complete = false; break; }
       st.ata = st.ata || {};
       const account = st.ata[owner] || (st.ata[owner] = await ataOf(owner));
-      complete = await pullSignatures(env, st, owner, account, now, from) && complete;
+      try { complete = await pullSignatures(env, st, owner, account, now, from) && complete; } catch (e) { complete = false; pullErr = e; break; }
     }
     if (complete) st.scanOk = now;
   }
-  if (!roomFor(env, 5)) return 0;
+  if (!roomFor(env, 5)) { if (pullErr) throw pullErr; return 0; }
   // 时间落不进任何一笔留名期限的交易,肯定对不上:一条语句全划掉,不用去链上看
   await run(db, `UPDATE sigs SET state = 'skip' WHERE state = 'new' AND ts > 0 AND NOT EXISTS (
     SELECT 1 FROM intents i WHERE i.address = sigs.owner AND i.status IN ('pending', 'expired', 'cancelled') AND i.created_at - ? <= sigs.ts AND i.expires_at + ? >= sigs.ts)`, CFG.intentGrace, CFG.intentGrace);
@@ -709,7 +762,8 @@ export async function scanSolana(env, st, now) {
       const x = part[n], tx = txs[n];
       const mark = state => stmts.push(q(db, 'UPDATE sigs SET state = ? WHERE sig = ?', state, x.sig));
       if (tx === undefined) continue; // 这一条没问到(节点不通、预算不够):原样留着,下一轮再问
-      if (!tx || !tx.meta) { stmts.push(q(db, "UPDATE sigs SET tries = tries + 1, state = CASE WHEN tries >= 30 THEN 'gone' ELSE 'new' END WHERE sig = ?", x.sig)); continue; }
+      // 问过的节点都说没有这笔交易:多半是答话的节点不记得(老交易)或者还没跟上,过一天、问过 30 轮还是没有才认它真没有
+      if (!tx || !tx.meta) { stmts.push(q(db, "UPDATE sigs SET tries = tries + 1, state = CASE WHEN tries >= 30 AND seen_at < ? THEN 'gone' ELSE 'new' END WHERE sig = ?", now - 86400, x.sig)); continue; }
       if (tx.meta.err) { mark('failed'); continue; }
       const { got, payer } = usdtMoves(tx, x.owner);
       const ts = Number(tx.blockTime) || x.ts || now;
@@ -728,6 +782,7 @@ export async function scanSolana(env, st, now) {
     }
   }
   await batched(db, stmts);
+  if (pullErr) throw pullErr;
   return found;
 }
 // Solana 的订单付款,订单库里没记付款方:去链上看这笔交易补上(十分钟补一两笔;查不到的记成 '-',不再问)
@@ -777,11 +832,14 @@ export async function handleDonate(env, body, ip, now) {
   if (!exact) return fail(503, '这个金额现在排不开,换个数再试', 'no_slot');
   const it = { id: hex(crypto.getRandomValues(new Uint8Array(12))), name: c.name, micros: m, exact, address: sol.address, created_at: now, expires_at: now + CFG.intentWindow, status: 'pending' };
   await run(db, "INSERT INTO intents(id, name, micros, exact, address, created_at, expires_at, status, ip_hash) VALUES(?,?,?,?,?,?,?,'pending',?)", it.id, it.name, it.micros, it.exact, it.address, it.created_at, it.expires_at, ipHash);
-  return json(intentView(it, now));
+  return json(intentView(it, now, st));
 }
-const intentView = (i, now) => ({
+// scanAt:登记服务上一次把链上的新交易看全是什么时候(没人等到账的时候每一轮都算看全)。面板拿它判断查账是不是卡住了:
+// 卡住的时候告诉等着的人「转过去的钱不会丢,查得到了自动补记」,而不是让人对着一个不动的页面猜。
+const intentView = (i, now, st) => ({
   id: i.id, name: i.name, amount: i.micros / 1e6, exact: i.exact / 1e6, chain: 'solana', address: i.address, createdAt: i.created_at, expiresAt: i.expires_at,
   status: i.status === 'paid' ? 'paid' : i.status === 'pending' && now <= i.expires_at ? 'pending' : 'expired',
+  scanAt: Number(st && st.scanOk) || 0,
 });
 
 // ---- 公开账本 ----
@@ -880,7 +938,7 @@ export default {
           return json({ ok: true });
         }
         if (req.method !== 'GET') return fail(405, '方法不对');
-        return json(intentView(it, now));
+        return json(intentView(it, now, await loadState(env.DB)));
       }
       return fail(404, '没有这个接口');
     } catch (e) {
