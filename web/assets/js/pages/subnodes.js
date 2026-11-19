@@ -161,7 +161,7 @@ function lineRowHTML(l, all, list, open) {
   return `<tr class="sn-line${open ? ' open' : ''}${l.enabled === false ? ' sn-idle' : ''}" data-line="${l.id}">
     <td><input type="checkbox" class="sel" data-change="sn.selLine" data-id="${l.id}" data-part="${nSel > 0 && nSel < ids.length ? 1 : 0}" ${nSel === ids.length ? 'checked' : ''} aria-label="${esc(t('sn.selLine', { name: l.name }))}"></td>
     <td class="primary-cell"><div class="sn-lhead"><button type="button" class="sn-ltog" data-act="sn.toggle" data-id="${l.id}" aria-expanded="${open}" title="${esc(t(open ? 'sn.collapse' : 'sn.expand'))}"><i class="i i-chev" aria-hidden="true"></i><b>${esc(l.name)}</b></button>${l.enabled === false ? badge(t('sn.lineOff')) : ''}</div>
-      <div class="sub-cell sn-lsum">${[`${String(l.protocol || '').toUpperCase()} · ${l.port}`, count, relays ? (relays === 1 ? t('sn.relay1') : t('sn.relayN', { n: relays })) : ''].filter(Boolean).map((x, i) => `<span>${i ? '· ' : ''}${esc(x)}</span>`).join(' ')}</div>
+      <div class="sub-cell sn-lsum">${[`${String(l.protocol || '').toUpperCase()} · ${l.port}`, count, relays ? (relays === 1 ? t('sn.relay1') : t('sn.relayN', { n: relays })) : ''].filter(Boolean).map((x, i, a) => `<span>${esc(x)}${i < a.length - 1 ? ' ·' : ''}</span>`).join(' ')}</div>
       <div class="sub-cell sn-lfacts">${lineFacts(lo, hi, onl, full, limited, outN, list.length)}</div></td>
     <td class="c-p3"><span class="ellip sn-where" title="${esc(where)}">${esc(where)}</span></td>
     <td class="num">${ratio}<span class="sn-size" aria-hidden="true"><span class="sn-follow">×1.5<span> · ${esc(t('sn.follow'))}</span></span></span></td>

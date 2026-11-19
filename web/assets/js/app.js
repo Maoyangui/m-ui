@@ -586,6 +586,13 @@ function fitTables() {
     tb.classList.toggle('rows2', rows);
     tb.classList.toggle('no-p3', !cards && w < fit.p3);
     tb.classList.toggle('no-p2', !cards && w < fit.p2);
+    // 门槛是按常见内容定的,量的是容器、不是内容:英文比中文宽,个别内容(同时设了两种限速的节点、很长的名字)也会把某一列撑宽,
+    // 这时按门槛排完表格还是比容器宽(节点设置页英文 1230 宽时「Settings」按钮被截掉一半)。真放不下的再往下藏一档:先 c-p3,再 c-p2。
+    // 每次都从门槛重新算起,结果只跟当时的宽度和内容有关,不会来回跳。
+    if (!cards) for (const cls of ['no-p3', 'no-p2']) {
+      if (tb.getBoundingClientRect().width <= box.clientWidth + 1) break;
+      tb.classList.add(cls);
+    }
     // 跨整行的格子(组名一行、「没有数据」一行)写的是全部列数。藏掉几列以后还按原数跨,表格就多出几列空的:
     // 定宽布局的表会把宽度分给这些空列,右边空出一截、前面几列被挤窄(服务器页就是这样被挤成一字一行的)。按现在露着的列数改
     const cols = [...tb.querySelectorAll(':scope > thead th')].filter(th => getComputedStyle(th).display !== 'none').length;
