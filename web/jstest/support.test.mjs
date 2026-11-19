@@ -133,6 +133,26 @@ const SOFT = { zh: /通常几小时内上榜;超过一天还没上榜,请在 Tel
 const HARD = { zh: /会在几小时内上榜/, en: /you'll appear on the list within/ };
 
 for (const lang of ['zh', 'en']) {
+  test(`[${lang}] 面板查不了链上到账:连着三次(一分钟)就在等待页上说明,查得到了说明就收起`, async () => {
+    let body = { known: false, arrived: false };
+    const pg = await openPage(lang, (url, reply) => reply(body));
+    assert.equal(pg.el('p-unk').hidden, true, '头一次查不了先不说');
+    await pg.advance(25e3);
+    assert.equal(pg.el('p-unk').hidden, true, '两次也先不说');
+    await pg.advance(20e3);
+    assert.equal(pg.el('p-unk').hidden, false, '连着三次:说明');
+    assert.equal(pg.el('p-wait').hidden, false, '还在等');
+    body = { known: true, arrived: false };
+    await pg.advance(20e3);
+    assert.equal(pg.el('p-unk').hidden, true, '查得到了:收起');
+    // 请求本身失败(面板不通)也算查不了
+    const pg2 = await openPage(lang, () => Promise.reject(new Error('offline')));
+    await pg2.advance(45e3);
+    assert.equal(pg2.el('p-unk').hidden, false);
+  });
+}
+
+for (const lang of ['zh', 'en']) {
   test(`[${lang}] 标签页冻结一个多小时后回来:先再核对一次,冻结期间到账了就说收到了,不拿冻结前的结果断言没到账`, async () => {
     let body = { known: true, arrived: false };
     const pg = await openPage(lang, (url, reply) => reply(body));

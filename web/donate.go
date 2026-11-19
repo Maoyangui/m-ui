@@ -43,9 +43,14 @@ var (
 )
 
 const (
-	usdtContract    = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
-	pledgeWindow    = int64(3600) // 留名后多久内到账才算(deploy/donors/settle.mjs 的 WINDOW)
-	donorsTTL       = time.Hour   // 名单最多一小时取一次
+	usdtContract = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"
+	pledgeWindow = int64(3600) // 留名后多久内到账才算(deploy/donors/settle.mjs 的 WINDOW)
+	// 页面上问「到了没有」时,到账的链上时间最多可以比留名时间早这么多:留名时间按这台面板的钟记,钟快了几分钟的机器上,
+	// 马上转出的那一笔会显得「在留名之前」,页面就一直说没到账(上榜不受影响:对账那边按 ntfy 收到留名的时间算)。
+	// 金额带着随机零头,十分钟里正好有另一笔一模一样的,可以不计。
+	pledgeSkew      = int64(600)
+	tronPage        = 200       // 向 TronGrid 一次要多少条(它一页最多这么多)
+	donorsTTL       = time.Hour // 名单最多一小时取一次
 	donorsWaitAge   = 6 * time.Hour
 	donorsWait      = 3 * time.Second  // 手上没有名单或比 donorsWaitAge 还旧时,打开页面最多等这么久拿新的
 	donorsBudget    = 12 * time.Second // 一轮最多取这么久
@@ -104,6 +109,7 @@ type donorState struct {
 	tron     []tronTx           // 最近两小时的到账
 	tronAt   time.Time
 	tronOK   bool // 最近一次查 TronGrid 成功了;正在查或查失败时为 false
+	tronFull bool // 最近一次查到的那一页是满的:更早的到账可能没列出来,没找到不能当成"没到账"
 }
 
 type tronTx struct{ micros, at int64 }
@@ -415,37 +421,38 @@ func usdtMicros(s string) (int64, bool) {
 }
 
 // recentTransfers 收款地址最近两小时收到的 USDT。不管多少人在等、问的是哪一笔,20 秒最多查一次:免费接口不能被这个公开页面打爆。
-// 第二个返回值是"知不知道":正在查、或者 20 秒内那次查失败了,都是不知道,不能当成"没到账"。
-func (s *Server) recentTransfers(ctx context.Context) ([]tronTx, bool) {
+// 最后一个返回值是"知不知道":正在查、或者 20 秒内那次查失败了,都是不知道,不能当成"没到账"。
+// full = 查到的那一页是满的(有人拿零碎转账刷屏):列出来的照样算数,但没找到的那一笔可能只是被挤到了下一页。
+func (s *Server) recentTransfers(ctx context.Context) (txs []tronTx, full, ok bool) {
 	st := &s.donors
 	st.mu.Lock()
 	if time.Since(st.tronAt) < 20*time.Second {
-		txs, ok := st.tron, st.tronOK
+		txs, full, ok = st.tron, st.tronFull, st.tronOK
 		st.mu.Unlock()
-		return txs, ok
+		return txs, full, ok
 	}
 	st.tronAt = time.Now() // 查失败也算一次,等下一轮再试
 	st.tronOK = false      // 查完之前,别人问到的都是"不知道"
 	st.mu.Unlock()
-	txs, ok := fetchTransfers(ctx)
+	txs, full, ok = fetchTransfers(ctx)
 	st.mu.Lock()
 	if ok {
-		st.tron = txs
+		st.tron, st.tronFull = txs, full
 	}
 	st.tronOK = ok
 	st.mu.Unlock()
-	return txs, ok
+	return txs, full, ok
 }
 
-func fetchTransfers(ctx context.Context) ([]tronTx, bool) {
-	u := fmt.Sprintf("%s/v1/accounts/%s/transactions/trc20?only_to=true&limit=200&contract_address=%s&min_timestamp=%d", tronURL, brand.Tron, usdtContract, (time.Now().Unix()-2*pledgeWindow)*1000)
+func fetchTransfers(ctx context.Context) (txs []tronTx, full, ok bool) {
+	u := fmt.Sprintf("%s/v1/accounts/%s/transactions/trc20?only_to=true&limit=%d&contract_address=%s&min_timestamp=%d", tronURL, brand.Tron, tronPage, usdtContract, (time.Now().Unix()-2*pledgeWindow-pledgeSkew)*1000)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, false
+		return nil, false, false
 	}
 	resp, err := donorHTTP.Do(req)
 	if err != nil {
-		return nil, false
+		return nil, false, false
 	}
 	defer resp.Body.Close()
 	var out struct {
@@ -457,9 +464,9 @@ func fetchTransfers(ctx context.Context) ([]tronTx, bool) {
 		} `json:"data"`
 	}
 	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&out) != nil {
-		return nil, false
+		return nil, false, false
 	}
-	txs := make([]tronTx, 0, len(out.Data))
+	txs = make([]tronTx, 0, len(out.Data))
 	for _, d := range out.Data {
 		if d.To != brand.Tron || d.Type != "Transfer" {
 			continue
@@ -468,7 +475,7 @@ func fetchTransfers(ctx context.Context) ([]tronTx, bool) {
 			txs = append(txs, tronTx{micros: v, at: d.Time / 1000})
 		}
 	}
-	return txs, true
+	return txs, len(out.Data) >= tronPage, true
 }
 
 // handleSupportCheck GET support/pledge-check?amount=10.037&since=<unix>:这笔到了没有。只查留名之后 60 分钟内的。
@@ -487,7 +494,7 @@ func (s *Server) handleSupportCheck(w http.ResponseWriter, r *http.Request) {
 	// 这次查询是大家共用的(20 秒一次):发起的那个人关了页面也别把它取消掉,不然别人这 20 秒都是"不知道"
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 	defer cancel()
-	txs, got := s.recentTransfers(ctx)
+	txs, full, got := s.recentTransfers(ctx)
 	now = time.Now().Unix() // 给页面的服务器时间在写响应前取:查 TronGrid 可能要好几秒,先取的话钟差会少算这段,倒计时会前后跳
 	if !got {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"known": false, "arrived": false, "now": now})
@@ -495,10 +502,11 @@ func (s *Server) handleSupportCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	arrived := false
 	for _, tx := range txs {
-		if tx.micros == want && tx.at >= since && tx.at <= since+pledgeWindow {
+		if tx.micros == want && tx.at >= since-pledgeSkew && tx.at <= since+pledgeWindow {
 			arrived = true
 			break
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"known": true, "arrived": arrived, "now": now})
+	// 那一页是满的又没找到:可能只是被挤到了下一页,算"不知道",页面不会据此说"没到账"
+	writeJSON(w, http.StatusOK, map[string]interface{}{"known": arrived || !full, "arrived": arrived, "now": now})
 }

@@ -272,6 +272,55 @@ func TestSupportCheck(t *testing.T) {
 	}
 }
 
+// 面板的钟快了几分钟:马上转出的那一笔,链上时间在"留名时间"之前几分钟,也要认;再早的不认。
+// TronGrid 那一页是满的(被零碎转账刷屏):列出来的照样认,没找到的只能说"不知道"。
+func TestSupportCheckSkewAndFlood(t *testing.T) {
+	now := time.Now().Unix()
+	since := now - 60
+	flood := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		row := func(at int64, value string) string {
+			return fmt.Sprintf(`{"block_timestamp":%d000,"to":"TDoUMF4nF244o5GZvBBwX5t9axvnSoP1Cm","type":"Transfer","value":"%s"}`, at, value)
+		}
+		rows := []string{row(since-260, "8012000"), row(since-700, "9013000")}
+		if flood {
+			for len(rows) < 200 {
+				rows = append(rows, row(now-10, "1"))
+			}
+		}
+		fmt.Fprintf(w, `{"data":[%s]}`, strings.Join(rows, ","))
+	}))
+	defer srv.Close()
+	old := tronURL
+	tronURL = srv.URL
+	defer func() { tronURL = old }()
+	ask := func(s *Server, amount string) map[string]interface{} {
+		w := httptest.NewRecorder()
+		s.handleSupportCheck(w, httptest.NewRequest("GET", "/x?amount="+amount+"&since="+itoa64(since), nil))
+		var out map[string]interface{}
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return out
+	}
+	s, _ := newTestServerForSupport(t, "")
+	if out := ask(s, "8.012"); out["arrived"] != true || out["known"] != true {
+		t.Fatalf("面板的钟快了 4 分多钟,马上转出的那一笔要认: %v", out)
+	}
+	if out := ask(s, "9.013"); out["arrived"] != false || out["known"] != true {
+		t.Fatalf("比留名早了十几分钟的不认: %v", out)
+	}
+	if out := ask(s, "7.011"); out["arrived"] != false || out["known"] != true {
+		t.Fatalf("没有的一笔,这一页没满:就是没到账: %v", out)
+	}
+	flood = true
+	s2, _ := newTestServerForSupport(t, "")
+	if out := ask(s2, "8.012"); out["arrived"] != true || out["known"] != true {
+		t.Fatalf("这一页满了,列出来的照样认: %v", out)
+	}
+	if out := ask(s2, "7.011"); out["arrived"] != false || out["known"] != false {
+		t.Fatalf("这一页满了又没找到:只能说不知道,不能说没到账: %v", out)
+	}
+}
+
 func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
 
 func newTestServerForSupport(t *testing.T, online string) (*Server, *gorm.DB) {

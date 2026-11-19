@@ -323,6 +323,7 @@ input.fld { flex: 1; }
                 </div>
                 <div class="paddr">{{if eq .Lang "zh"}}收款地址(TRON · TRC20){{else}}Send to (TRON · TRC20){{end}}<span class="paddr-v"><code>{{.Tron}}</code><button class="copy-lite" type="button" data-copy="{{.Tron}}">{{if eq .Lang "zh"}}复制地址{{else}}Copy address{{end}}</button></span></div>
                 <p class="phint">{{if eq .Lang "zh"}}零头用来对上你的名字,到账金额要完全一致,手续费另算。{{else}}The extra digits identify your transfer. The amount received must match exactly, with fees on top.{{end}}</p>
+                <p class="phint" id="p-unk" hidden>{{if eq .Lang "zh"}}这台面板暂时查不到链上的到账(多半是它连不上 TronGrid)。已经转了的不用守着这一页:到账后通常几小时内上榜。{{else}}This panel can't check the chain right now (it probably can't reach TronGrid). If you've already sent it, there's no need to wait on this page: you'll usually appear on the list within a few hours.{{end}}</p>
               </div>
             </div>
           </div>
@@ -411,7 +412,10 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
     if (typeof p.skew === 'number' && isFinite(p.skew)) skew = p.skew;
     // 最近一次核对:true = 面板查到了链上记录(没有就是真没到);其它 = 面板暂时查不了,不能断言没到账
     // cur = 还在路上的那次核对(发出的时间 at),sentAt = 最近一次发出的时间,after = 等它回来再做的事
-    var known = null, cur = null, sentAt = 0, after = [], last = false;
+    // unk = 面板连着几次说"查不了":到 3 次(一分钟)就在页面上说明,不让人对着倒计时干等到最后才知道
+    var known = null, cur = null, sentAt = 0, after = [], last = false, unk = 0;
+    var seen = function (ok) { known = ok; unk = ok ? 0 : unk + 1; $('p-unk').hidden = unk < 3; };
+    $('p-unk').hidden = true;
     var waitingFor = function () { var age = cur ? Date.now() - cur.at : -1; return age >= 0 && age < WAIT; };
     $('pledge').hidden = true; $('p-hint').hidden = true; $('p-done').hidden = true; $('p-wait').hidden = false;
     $('p-pay').textContent = p.amount;
@@ -424,7 +428,7 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
       fetch('support/pledge-check?amount=' + encodeURIComponent(p.amount) + '&since=' + p.at).then(function (r) { return r.json(); }).then(function (d) {
         if (me !== session || cur !== c) return; // 取消了,或者等太久已经另查了:这次的结果不算
         if (Date.now() - c.at < WAIT) learnSkew(d.now); // 冻结前发出、回来才处理的响应带的是旧的服务器时间,拿它算钟差倒计时会往回跳
-        known = d.known === true;
+        seen(d.known === true);
         if (!d.arrived) return;
         idle();
         $('pledge').hidden = true; $('p-hint').hidden = true;
@@ -432,7 +436,7 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
         // 上榜靠 GitHub 的定时任务对账,常常晚几个小时,两次运行隔太久时留名还可能丢:不承诺几小时内上榜,超过一天的来找我手动记上
         done.textContent = ZH ? '✓ 收到了,谢谢 ' + p.name + '!通常几小时内上榜;超过一天还没上榜,请在 Telegram 联系我。'
           : '✓ Received, thank you ' + p.name + "! You'll usually appear on the list within a few hours. If you're not on it after a day, message me on Telegram.";
-      }).catch(function () { if (me === session && cur === c) known = false; }).then(function () {
+      }).catch(function () { if (me === session && cur === c) seen(false); }).then(function () {
         if (cur !== c) return;
         cur = null;
         var fns = after; after = [];

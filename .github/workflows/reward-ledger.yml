@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  actions: write # 顺手带上功德箱对账的那个定时任务(最后一步)
 
 concurrency:
   group: reward-ledger
@@ -58,3 +59,18 @@ jobs:
           done
           echo "::error::推送 3 次都失败,这一轮的账本没有提交(下一轮会带上)"
           exit 1
+      - name: 顺手带上功德箱对账的定时任务(它有一阵没跑的话)
+        # GitHub 的定时任务只是尽力而为,实测常常隔 2–10 个小时才轮到一次。两个定时任务各排各的队:谁先轮到,就把另一个
+        # 也带起来(手动触发不用排队),两边的间隔都能短不少。对方 30 分钟内跑过(或者正在跑)就不带,不会互相带个没完。
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh api "repos/${{ github.repository }}/actions/workflows/donors.yml/runs?per_page=1" --jq '.workflow_runs[0].created_at // empty')
+          gap=999999
+          [ -z "$last" ] || gap=$(( $(date -u +%s) - $(date -u -d "$last" +%s) ))
+          if [ "$gap" -gt 1800 ]; then
+            gh workflow run donors.yml --ref main
+            echo "带上了 donors.yml(它上一次是 $((gap / 60)) 分钟前)"
+          fi
