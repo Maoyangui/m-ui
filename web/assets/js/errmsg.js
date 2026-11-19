@@ -988,6 +988,7 @@ const EN = /*BEGIN*/{
 "长度是 %d 字节,应为 %d 字节": "it is %d bytes long; it must be %d bytes",
 "面板没能在 %s 上监听,还在原地址 %s(设置已改回): %w": "The panel could not listen on %s and is still on %s (the setting was reverted): %w",
 "面板没能换到新的监听设置,已按原样恢复(设置已改回): %w": "The panel could not switch to the new listen settings and was restored as before (the setting was reverted): %w",
+"面板没能换到新的监听设置,原来的也没能起回去(设置已改回,后台每 15 秒重试): %w": "The panel could not switch to the new listen settings and could not be restored either (the setting was reverted; retrying every 15 seconds in the background): %w",
 "保存设置失败,这次的修改一项都没存上: %w": "Saving the settings failed; none of these changes were saved: %w",
 "订阅内容超过 4 MB:只读前 4 MB 会丢掉后面的节点,这份没有采用": "The subscription is larger than 4 MB; reading only the first 4 MB would drop the nodes after that, so it was not used",
 "源库 %s 不存在,请检查 -from 的路径": "The source database %s does not exist; check the -from path",

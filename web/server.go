@@ -379,7 +379,7 @@ func (s *Server) Start() error {
 		s.panelMu.Unlock()
 		logger.Info("面板已启动 ", scheme, "://", pl.addr, s.basePath())
 	} else {
-		safe.Go("web.retryPanelListen", func() { s.retryPanelListen(15 * time.Second) })
+		safe.Go("web.retryPanelListen", func() { s.retryPanelListen(panelRetryEvery) })
 	}
 	if s.run != nil {
 		s.run.SetNodeQuotaHook(s.NodeQuotaTick) // 服务器的流量额度:定时任务叫这里判

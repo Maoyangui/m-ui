@@ -125,14 +125,23 @@ func (s *Server) relistenPanel() error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	if err != nil {
+		restored := false
 		for i := 0; i < 60; i++ { // 按旧设置原样起回去
 			if back, e := s.openPanelListener(cur); e == nil {
 				s.servePanel(back, cur)
+				restored = true
 				break
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
 		s.revertPanelListen(cur)
+		if !restored {
+			// 新旧两种设置都没绑上(这几秒里端口被别的程序抢走了):面板现在没在听。和开机时绑不上一样转入后台重试,
+			// 不然要等到重启 m-ui 面板才回来(审查 F-B1,原观察 O8)
+			s.httpSrv, s.listener = nil, nil
+			safe.Go("web.retryPanelListen", func() { s.retryPanelListen(panelRetryEvery) })
+			return fmt.Errorf("面板没能换到新的监听设置,原来的也没能起回去(设置已改回,后台每 15 秒重试): %w", err)
+		}
 		return fmt.Errorf("面板没能换到新的监听设置,已按原样恢复(设置已改回): %w", err)
 	}
 	s.servePanel(ln, want)
@@ -244,7 +253,10 @@ func (s *Server) validateListens(in map[string]string) error {
 	return nil
 }
 
-// retryPanelListen 开机时面板没起来:每 every 按当时的设置重试一次,起来为止。
+// panelRetryEvery 面板没在听(开机时绑不上、换监听时新旧都没绑上)时隔多久按当时的设置再试一次(测试里调短)。
+var panelRetryEvery = 15 * time.Second
+
+// retryPanelListen 面板没起来:每 every 按当时的设置重试一次,起来为止。
 func (s *Server) retryPanelListen(every time.Duration) {
 	for {
 		time.Sleep(every)

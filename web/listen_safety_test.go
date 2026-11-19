@@ -159,3 +159,56 @@ func TestSettingsRejectUnbindableListen(t *testing.T) {
 		}
 	}
 }
+
+// 同一端口换监听,新旧两种设置都没绑上(审查 F-B1,原观察 O8):旧监听放开的那几秒里端口被别的程序抢走。
+// 以前面板就此停着,要重启 m-ui 才回来;现在设置改回、转入后台重试,端口一空出来面板自己回来。
+func TestPanelRelistenBothFailThenRetries(t *testing.T) {
+	old := panelRetryEvery
+	panelRetryEvery = 100 * time.Millisecond
+	defer func() { panelRetryEvery = old }()
+	s, set := panelTestServer(t)
+	port := freePort(t)
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	set("webListen", "127.0.0.1")
+	set("webPort", strconv.Itoa(port))
+	startPanel(t, s)
+	if !waitPanel(port) {
+		t.Fatal("前提:面板在 127.0.0.1 上")
+	}
+
+	// 「别的程序」:旧监听一放开就把端口抢走,收到信号才还回来
+	release, grabbed := make(chan struct{}), make(chan struct{})
+	go func() {
+		for {
+			if ln, err := net.Listen("tcp", addr); err == nil {
+				close(grabbed)
+				<-release
+				ln.Close()
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	set("webListen", "203.0.113.9") // 本机没有的地址(绕过保存时的校验):新设置必然绑不上
+	if err := s.relistenPanel(); err == nil {
+		t.Fatal("新旧都绑不上应报错")
+	}
+	select {
+	case <-grabbed:
+	default:
+		t.Fatal("前提:端口应已被抢走")
+	}
+	if got := s.setting("webListen"); got != "127.0.0.1" {
+		t.Fatalf("设置应改回 127.0.0.1,实际 %q", got)
+	}
+	close(release)
+	if !waitPanel(port) {
+		t.Fatal("端口空出来以后,面板应自己回到原地址")
+	}
+	s.panelMu.Lock()
+	got := s.listener.Addr().String()
+	s.panelMu.Unlock()
+	if got != addr {
+		t.Fatalf("应回到 %s,实际 %s", addr, got)
+	}
+}
