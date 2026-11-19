@@ -204,3 +204,41 @@ func TestCamoPreviewOffNoFetch(t *testing.T) {
 		t.Fatalf("开了以后预览应去取: %+v hits=%d", st, hits.Load())
 	}
 }
+
+// 处理照片时 panic(审查 F-D2):进程不能跟着崩 —— 面板和全部线路在同一个进程里,同一个种子、同一张图每次都会走到同一处。
+// 记下原因、放掉「正在取」、按没取全退避,照片的位置照旧是插图;之后处理恢复正常、到了再试的时间,照常取完。
+// (反向对照:把 camoMediaRun 开头的 recover 去掉,这个测试会让整个测试进程崩掉。)
+func TestCamoMediaRunSurvivesPanic(t *testing.T) {
+	photo := testPhoto(t)
+	withManifest(t, photo)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(photo) }))
+	defer srv.Close()
+	old := camoProcess
+	camoProcess = func([]byte, uint64, string, int, int) ([]byte, error) { panic("boom") }
+	defer func() { camoProcess = old }()
+
+	r := newCamoRunner(t)
+	r.camo.media.src = []string{srv.URL + "/"}
+	mustSet(t, r, "camoEnabled", "true", "camoTemplate", "video")
+	r.CamoApply()
+	if s := r.camoSource().(*camo.Site); len(s.Wanted()) == 0 {
+		t.Fatal("一开始还没有照片")
+	}
+	waitMedia(t, r)
+	site, st := r.CamoPreview("video")
+	if len(site.Wanted()) == 0 || st == nil || st.Have != 0 || st.Loading || !strings.Contains(st.Error, "boom") || st.Retry <= time.Now().Unix() {
+		t.Fatalf("处理出错时应记下原因、不算正在取、定下再试的时间,照片的位置还是插图: %+v", st)
+	}
+
+	camoProcess = old
+	r.camo.media.mu.Lock()
+	r.camo.media.retryAt = time.Now().Add(-time.Second)
+	r.camo.media.mu.Unlock()
+	r.CamoApply()
+	_ = r.camoSource()
+	waitMedia(t, r)
+	r.CamoApply()
+	if s := r.camoSource().(*camo.Site); len(s.Wanted()) != 0 {
+		t.Fatalf("处理恢复正常、到点以后应照常取完: 还缺 %d", len(s.Wanted()))
+	}
+}

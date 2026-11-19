@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	"github.com/Maoyangui/m-ui/brand"
 	"github.com/Maoyangui/m-ui/camo"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/util/fsutil"
 )
 
@@ -149,10 +151,36 @@ func (r *Runner) camoMediaWant(seed uint64, reqs []camo.PhotoReq) {
 	}
 	m.running = true
 	m.mu.Unlock()
-	go r.camoMediaRun(seed, src, append([]camo.PhotoReq(nil), reqs...))
+	want := append([]camo.PhotoReq(nil), reqs...)
+	safe.Go("runner.camoMedia", func() { r.camoMediaRun(seed, src, want) })
+}
+
+// camoProcess 把一张原图处理成要的尺寸(测试里换成会出错的,见 TestCamoMediaRunSurvivesPanic)
+var camoProcess = camo.Process
+
+// camoMediaBackoff 没取全(或处理出错)之后隔多久再试:10 分钟、1 小时,之后每 6 小时
+func camoMediaBackoff(fails int) time.Duration {
+	return []time.Duration{10 * time.Minute, time.Hour, 6 * time.Hour}[min(max(fails, 1), 3)-1]
 }
 
 func (r *Runner) camoMediaRun(seed uint64, src []string, reqs []camo.PhotoReq) {
+	// 取图、处理照片时万一 panic(解码、缩放里的越界之类):记下来、按没取全处理(退避后再试),照片的位置照旧用画的插图。
+	// 不能让它带走整个进程 —— 面板和全部线路跑在同一个进程里,而且同一个种子、同一张图每次都会走到同一处,
+	// 拉起来还会再崩(审查 F-D2;以前是直接 go 起的协程,没有兜)。running 也要放掉,不然以后再也不取。
+	defer func() {
+		v := recover()
+		if v == nil {
+			return
+		}
+		m := &r.camo.media
+		m.mu.Lock()
+		m.running = false
+		m.fails++
+		m.err = fmt.Sprint("processing the photos failed: ", v)
+		m.retryAt = time.Now().Add(camoMediaBackoff(m.fails))
+		m.mu.Unlock()
+		logger.Warning("页面伪装:处理图包照片时出错(已兜住,没有照片的位置先用画的插图,过一阵再试): ", v, " | ", string(debug.Stack()))
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	dir := filepath.Join(r.DataDir(), "camo-media")
@@ -179,7 +207,7 @@ func (r *Runner) camoMediaRun(seed uint64, src []string, reqs []camo.PhotoReq) {
 		if err == nil {
 			for _, k := range sizes[n] {
 				var b []byte
-				if b, err = camo.Process(orig, seed, n, k.w, k.h); err != nil {
+				if b, err = camoProcess(orig, seed, n, k.w, k.h); err != nil {
 					break
 				}
 				r.camo.media.put(seed, k, b)
@@ -196,7 +224,7 @@ func (r *Runner) camoMediaRun(seed uint64, src []string, reqs []camo.PhotoReq) {
 	if firstErr != nil {
 		m.fails++
 		m.err = firstErr.Error()
-		m.retryAt = time.Now().Add([]time.Duration{10 * time.Minute, time.Hour, 6 * time.Hour}[min(m.fails, 3)-1])
+		m.retryAt = time.Now().Add(camoMediaBackoff(m.fails))
 	} else {
 		m.fails, m.err, m.retryAt = 0, "", time.Time{}
 	}
