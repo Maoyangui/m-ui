@@ -136,7 +136,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 		defer cancel()
 		bin, _ := os.Executable()
-		logf := func(f string, a ...interface{}) { logger.Info("更新: ", f) }
+		logf := func(f string, a ...interface{}) { logger.Info("更新: ", fmt.Sprintf(f, a...)) } // 以前只打格式串,日志里是「下载 %s」
 
 		// 0. 主机容灾:升级重启那一两分钟别让备用当成主机失联(暂停 15 分钟,马上推给备用)
 		if h := s.haSvc(); h != nil {
