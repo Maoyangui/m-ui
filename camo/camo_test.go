@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/xml"
+	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -28,10 +31,10 @@ func TestNewTemplates(t *testing.T) {
 				t.Fatalf("%q/%d: 站名或模板不对: %q %q", tmpl, seed, s.Name(), s.Template())
 			}
 			home := string(s.Home())
-			if !strings.HasPrefix(home, "<!doctype html>") || !strings.Contains(home, s.Name()) || !strings.Contains(home, `<link rel="stylesheet" href="`+s.css+`">`) {
+			if !strings.HasPrefix(strings.ToLower(home), "<!doctype html>") || !strings.Contains(home, s.Name()) || !strings.Contains(home, `<link rel="stylesheet" href="`+s.css+`">`) {
 				t.Fatalf("%q/%d: 首页不完整: %.300s", tmpl, seed, home)
 			}
-			for _, p := range []string{"/robots.txt", "/favicon.svg", s.css} {
+			for _, p := range []string{"/robots.txt", s.icon, s.css} {
 				if _, ok := s.pages[p]; !ok {
 					t.Fatalf("%q/%d: 没有 %s", tmpl, seed, p)
 				}
@@ -52,16 +55,21 @@ func TestNewTemplates(t *testing.T) {
 	}
 }
 
-// 各台服务器的站各不一样:站名、样式表路径、类名都按种子变(骨架一样的话伪装站本身就成了指纹)。
+// 各台服务器的站各不一样:站名、首页标题、样式表路径、站点图标、类名都按种子变(骨架一样的话伪装站本身就成了指纹)。
+// 站名:四种站都要(原来只查镜像站、40 个里有 10 种就算过;词库小,实际 40 个里只有 31 种 —— 审查 F-H1)。
 func TestSitesDiffer(t *testing.T) {
-	names, css, cards := map[string]bool{}, map[string]bool{}, map[string]bool{}
-	for seed := uint64(1); seed <= 40; seed++ {
-		g := newGen(seed*0x9e3779b97f4a7c15, testNow)
-		s := New("mirror", seed*0x9e3779b97f4a7c15, testNow)
-		names[s.Name()], css[s.css], cards[g.c("card")] = true, true, true
-	}
-	if len(names) < 10 || len(css) < 38 || len(cards) < 6 {
-		t.Fatalf("40 个种子:站名 %d 种、样式表路径 %d 种、card 类名 %d 种:各台长得太像", len(names), len(css), len(cards))
+	for _, tmpl := range Templates {
+		names, titles, css, icons, cards := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
+		for seed := uint64(1); seed <= 40; seed++ {
+			g := newGen(seed*0x9e3779b97f4a7c15, testNow)
+			s := New(tmpl, seed*0x9e3779b97f4a7c15, testNow)
+			names[s.Name()], css[s.css], cards[g.c("card")] = true, true, true
+			titles[find(t, `<title>([^<]*)</title>`, string(s.Home()))] = true
+			icons[string(s.pages[s.icon].body)] = true
+		}
+		if len(names) < 34 || len(titles) < 34 || len(css) < 38 || len(icons) < 36 || len(cards) < 6 {
+			t.Fatalf("%s 40 个种子:站名 %d 种、首页标题 %d 种、样式表路径 %d 种、站点图标 %d 种、card 类名 %d 种:各台长得太像", tmpl, len(names), len(titles), len(css), len(icons), len(cards))
+		}
 	}
 }
 
@@ -136,6 +144,7 @@ func TestSkinClassNames(t *testing.T) {
 // 进来之前别处加过的头(面板的安全头)一律清掉;ETag 对得上回 304。
 func TestServeHTTP(t *testing.T) {
 	s := New("downloads", 99, testNow)
+	rel := newGen(99, testNow).sk.rel // 各版本那一页的地址(按种子)
 	do := func(method, path string, hdr map[string]string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, nil)
 		for k, v := range hdr {
@@ -164,10 +173,10 @@ func TestServeHTTP(t *testing.T) {
 	if w := do(http.MethodHead, "/", nil); w.Code != 200 || w.Body.Len() != 0 || w.Header().Get("Content-Length") == "" {
 		t.Fatalf("HEAD: %d %d %v", w.Code, w.Body.Len(), w.Header())
 	}
-	if w := do(http.MethodGet, "/releases", nil); w.Code != http.StatusMovedPermanently || w.Header().Get("Location") != "/releases/" {
-		t.Fatalf("目录少了斜杠应 301 到 /releases/: %d %v", w.Code, w.Header())
+	if w := do(http.MethodGet, strings.TrimSuffix(rel, "/"), nil); w.Code != http.StatusMovedPermanently || w.Header().Get("Location") != rel {
+		t.Fatalf("目录少了斜杠应 301 到 %s: %d %v", rel, w.Code, w.Header())
 	}
-	if w := do(http.MethodGet, "/wp-login.php", nil); w.Code != 404 || !strings.Contains(w.Body.String(), "Page not found") || !strings.Contains(w.Body.String(), s.Name()) {
+	if w := do(http.MethodGet, "/wp-login.php", nil); w.Code != 404 || !strings.Contains(w.Body.String(), "<b>404</b>") || !strings.Contains(w.Body.String(), s.Name()) {
 		t.Fatalf("没有的路径给站内风格的 404: %d %.120s", w.Code, w.Body.String())
 	}
 	if w := do(http.MethodPost, "/", nil); w.Code != http.StatusMethodNotAllowed || w.Header().Get("Allow") != "GET, HEAD" {
@@ -336,13 +345,14 @@ func TestTextVaries(t *testing.T) {
 	titles := map[string]bool{}
 	paraSites := map[string]int{}
 	for seed := uint64(1); seed <= 20; seed++ {
+		sk := newGen(seed*0x9e3779b97f4a7c15, testNow).sk // 视频页、文章的地址前缀按种子
 		v := New("video", seed*0x9e3779b97f4a7c15, testNow)
-		for _, m := range regexp.MustCompile(`<title>([^<]+) - `).FindAllStringSubmatch(string(v.Home())+collectPages(v, "/watch/"), -1) {
+		for _, m := range regexp.MustCompile(`<h1>([^<]+)</h1>`).FindAllStringSubmatch(collectPages(v, sk.watch), -1) {
 			titles[m[1]] = true
 		}
 		b := New("blog", seed*0x9e3779b97f4a7c15, testNow)
 		seen := map[string]bool{}
-		for _, m := range paraRe.FindAllStringSubmatch(collectPages(b, "/posts/"), -1) {
+		for _, m := range paraRe.FindAllStringSubmatch(collectPages(b, sk.posts), -1) {
 			if !seen[m[1]] {
 				seen[m[1]] = true
 				paraSites[m[1]]++
@@ -412,5 +422,154 @@ func TestAdmit(t *testing.T) {
 	admitted.mu.Unlock()
 	if n != 0 || m != 0 {
 		t.Fatalf("全放掉以后应归零: 总数 %d,来源 %d 个", n, m)
+	}
+}
+
+// 页面和接口的回应里没有 fmt 的报错记号。一句话有几种说法,有的用不上参数、有的序号写错,Sprintf 就会在页面上留下
+// %!(EXTRA …)、%!f(BADINDEX)(审查 F-H1 改写文字时出过:镜像站流量那一行写成了 %[2].1f)。
+// 空字符是表单页里放提示的记号(alertSlot),也不该留在回应里。提交接口各按空着提交回一次。
+func TestNoFormatLeftovers(t *testing.T) {
+	for i := uint64(1); i <= 150; i++ {
+		for _, tmpl := range Templates {
+			seed := i*0x9e3779b97f4a7c15 + uint64(len(tmpl))
+			s := New(tmpl, seed, testNow)
+			check := func(where string, body []byte) {
+				if j := bytes.Index(body, []byte("%!")); j >= 0 {
+					t.Fatalf("%s/%x %s: 有格式化残留: %q", tmpl, seed, where, body[max(0, j-60):min(len(body), j+60)])
+				}
+				if bytes.IndexByte(body, 0) >= 0 {
+					t.Fatalf("%s/%x %s: 有空字符", tmpl, seed, where)
+				}
+			}
+			for p, pg := range s.pages {
+				if !strings.HasPrefix(pg.ctype, "text/css") { // 样式表里有 50%!important 这种写法,不查
+					check(p, pg.body)
+				}
+			}
+			check("404 页", s.notFound.body)
+			for p, rt := range s.api {
+				check(p, rt.body)
+				if rt.post == nil {
+					continue
+				}
+				rep := rt.post(map[string]string{})
+				check(p+" 的提示", []byte(rep.msg))
+				for _, f := range rep.fields {
+					check(p+" 的字段提示", []byte(f))
+				}
+				if rt.form != nil {
+					check(p+" 没开脚本时回的页面", rt.form(rep.msg, rep.ok))
+				}
+			}
+		}
+	}
+}
+
+var (
+	bitTagRe   = regexp.MustCompile(`<[^>]+>`)
+	bitAttrRe  = regexp.MustCompile(` (?:placeholder|aria-label|alt|title|style)="([^"]+)"`)
+	bitSpaceRe = regexp.MustCompile(`\s+`)
+	closeRunRe = regexp.MustCompile(`(?:</[a-z0-9]+>\s*)+`)
+)
+
+// genericMarkup 到处都有的标记(常见图标库里 <svg> 的写法):算源码片段之前先拿掉
+var genericMarkup = []string{`viewBox="0 0 24 24" fill="none" stroke="currentColor"`, `fill="none" viewBox="0 0 24 24"`, `stroke-linecap="round" stroke-linejoin="round"`,
+	`xmlns="http://www.w3.org/2000/svg"`}
+
+// worthCounting 够长、值得算的文字:三个词以上,或者十四个字以上(「Sign in」「About」「Email」这类到处都有的短词不算)
+func worthCounting(t string) bool { return len(strings.Fields(t)) >= 3 || len([]rune(t)) >= 14 }
+
+// textBits 一页上给人看的文字(按标签切开)和几种属性(placeholder、aria-label、alt、title、内联样式)的值
+func textBits(page string) map[string]bool {
+	out := map[string]bool{}
+	for _, m := range bitAttrRe.FindAllStringSubmatch(page, -1) {
+		if v := html.UnescapeString(m[1]); worthCounting(v) {
+			out["@"+v] = true
+		}
+	}
+	for _, raw := range bitTagRe.Split(page, -1) {
+		if v := strings.TrimSpace(bitSpaceRe.ReplaceAllString(html.UnescapeString(raw), " ")); worthCounting(v) {
+			out[v] = true
+		}
+	}
+	return out
+}
+
+// 各台的伪装站不共用固定的文字和标记(审查 F-H1)。
+//
+// 所有 m-ui 的伪装站出自同一份公开的代码。页面上有一句话(或者源码里有一段标记)各台一字不差的话,拿它去搜
+// 整页源码的那类搜索引擎里搜一次,就能把所有开着页面伪装的服务器列出来 —— 伪装反而成了记号。原来视频站页脚、
+// 404 页、镜像站首页的四句话、下载页的订阅标题等各台完全一样(60 个种子里 100% 相同),内联样式、功能图标的路径也是。
+//
+// 每种模板 60 个种子:
+//   - 首页上任何一段文字(三个词以上或十四个字以上;连同 placeholder、aria-label、内联样式的值)最多一半的站有;
+//   - 全站任何一段文字最多六成的站有(镜像里真实存在的文件名除外);
+//   - 首页 <body> 的源码里任何 48 个字节的片段最多一半的站有(一串收尾的标签、常见图标库的固定写法不算)。
+//
+// 改文字、加模板时这条挂了:给那句话多写几种说法(text.go 的 say),或者把固定的标记改成按种子变,不要调高门槛。
+// 本机看实际数值:go run ./.devtmp/camodump -share 60(同一套算法)。
+func TestNoSharedBoilerplate(t *testing.T) {
+	const n, k = 60, 48
+	for _, tmpl := range Templates {
+		home, all, grams := map[string]int{}, map[string]int{}, map[string]int{}
+		for i := 0; i < n; i++ {
+			s := New(tmpl, uint64(0x9e3779b97f4a7c15)*uint64(i+1)^uint64(len(tmpl))<<40^0x1234567, testNow)
+			h := string(s.Home())
+			for b := range textBits(h) {
+				home[b]++
+			}
+			seen := map[string]bool{}
+			for _, pg := range s.pages {
+				if pg.ctype == htmlType {
+					for b := range textBits(string(pg.body)) {
+						seen[b] = true
+					}
+				}
+			}
+			for b := range seen {
+				all[b]++
+			}
+			body := h[strings.Index(h, "<body>"):]
+			for _, g := range genericMarkup {
+				body = strings.ReplaceAll(body, g, "\x01")
+			}
+			body = closeRunRe.ReplaceAllString(body, "\x02")
+			one := map[string]bool{}
+			for j := 0; j+k <= len(body); j++ {
+				one[body[j:j+k]] = true
+			}
+			for g := range one {
+				grams[g]++
+			}
+		}
+		over := func(m map[string]int, limit int, allow ...string) []string {
+			var out []string
+		next:
+			for b, c := range m {
+				if c <= limit {
+					continue
+				}
+				for _, a := range allow {
+					if b == a {
+						continue next
+					}
+				}
+				out = append(out, fmt.Sprintf("%d%% %q", c*100/n, b))
+			}
+			sort.Strings(out)
+			if len(out) > 12 {
+				out = out[:12]
+			}
+			return out
+		}
+		if bad := over(home, n/2); len(bad) > 0 {
+			t.Errorf("%s:首页上这些文字超过一半的站都有:\n  %s", tmpl, strings.Join(bad, "\n  "))
+		}
+		if bad := over(all, n*6/10, "SHA256SUMS.sig"); len(bad) > 0 {
+			t.Errorf("%s:全站这些文字超过六成的站都有:\n  %s", tmpl, strings.Join(bad, "\n  "))
+		}
+		if bad := over(grams, n/2); len(bad) > 0 {
+			t.Errorf("%s:首页源码里这些片段超过一半的站都有:\n  %s", tmpl, strings.Join(bad, "\n  "))
+		}
 	}
 }

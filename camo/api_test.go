@@ -34,6 +34,55 @@ func find(t *testing.T, re, page string) string {
 	return m[1]
 }
 
+// authLinks 视频站首页 → 登录页的地址、登录页的内容、注册页的地址、找回密码页的地址。
+// 页面上的字(「Sign in」「Create an account」……)各台不一样,按类名找:顶栏那个按钮、表单底下那一行里的链接、密码那一项标签里的链接。
+func authLinks(t *testing.T, s *Site, seed uint64) (login, loginPage, register, reset string) {
+	t.Helper()
+	g := newGen(seed, testNow)
+	q := regexp.QuoteMeta
+	login = find(t, `<a class="`+q(g.c("cta"))+`" href="([^"]+)">`, string(s.Home()))
+	w := apiDo(t, s, http.MethodGet, login, "", "")
+	if w.Code != 200 {
+		t.Fatalf("登录页 %s: %d", login, w.Code)
+	}
+	loginPage = w.Body.String()
+	register = find(t, `<p class="`+q(g.c("alt"))+`">[^<]*<a href="([^"]+)">`, loginPage)
+	reset = find(t, `<label class="`+q(g.c("field"))+`"><span>[^<]*<a href="([^"]+)">`, loginPage)
+	return
+}
+
+// fieldMsgs 校验没过的报错里各字段的提示(三种「框架」写法:fields、errors、detail 列表)
+func fieldMsgs(t *testing.T, body []byte) map[string]string {
+	t.Helper()
+	var m struct {
+		Fields map[string]string
+		Errors map[string]string
+		Detail []struct {
+			Loc []string
+			Msg string
+		}
+	}
+	_ = json.Unmarshal(body, &m) // detail 是字符串的写法这里解不出来,下面按没有处理
+	out := map[string]string{}
+	for k, v := range m.Fields {
+		out[k] = v
+	}
+	for k, v := range m.Errors {
+		out[k] = v
+	}
+	for _, d := range m.Detail {
+		if len(d.Loc) == 2 {
+			out[d.Loc[1]] = d.Msg
+		}
+	}
+	if len(out) == 0 {
+		t.Fatalf("报错里没有各字段的提示: %s", body)
+	}
+	return out
+}
+
+var alertRe = regexp.MustCompile(`role="alert">([^<]*)</div>`)
+
 // errText 报错里给人看的那一句(几种「框架」写法:message、detail 字符串、detail 列表的第一项)
 func errText(t *testing.T, body []byte) string {
 	t.Helper()
@@ -63,20 +112,16 @@ func TestVideoAPI(t *testing.T) {
 		s := New("video", seed, testNow)
 		styles[s.errStyle] = true
 		home := string(s.Home())
-		login := find(t, `href="([^"]+)">Sign in</a></div></header>`, home)
-		w := apiDo(t, s, http.MethodGet, login, "", "")
-		if w.Code != 200 {
-			t.Fatalf("登录页 %s: %d", login, w.Code)
-		}
-		lp := w.Body.String()
+		sk := newGen(seed, testNow).sk
+		_, lp, regLink, resetLink := authLinks(t, s, seed)
 		if !strings.Contains(lp, `role="alert" hidden`) {
 			t.Fatal("登录页的提示框平时是藏着的")
 		}
 		loginAPI := find(t, `<form method="post" action="([^"]+)"`, lp)
-		regPage := apiDo(t, s, http.MethodGet, find(t, `href="([^"]+)">Create an account</a>`, lp), "", "").Body.String()
+		regPage := apiDo(t, s, http.MethodGet, regLink, "", "").Body.String()
 		regAPI := find(t, `<form method="post" action="([^"]+)"`, regPage)
 		invite := find(t, `name="(invite|invite_code|inviteCode|code)"`, regPage)
-		resetPage := apiDo(t, s, http.MethodGet, find(t, `href="([^"]+)">Forgot password\?</a>`, lp), "", "").Body.String()
+		resetPage := apiDo(t, s, http.MethodGet, resetLink, "", "").Body.String()
 		resetAPI := find(t, `<form method="post" action="([^"]+)"`, resetPage)
 		const js = "application/json"
 		if w := apiDo(t, s, http.MethodPost, loginAPI, js, `{}`); w.Code != 422 || errText(t, w.Body.Bytes()) == "" {
@@ -85,7 +130,8 @@ func TestVideoAPI(t *testing.T) {
 		if w := apiDo(t, s, http.MethodPost, loginAPI, js, `{"email":"a@example.com","password":"x"}`); w.Code != 401 || !strings.Contains(strings.ToLower(errText(t, w.Body.Bytes())), "password") {
 			t.Fatalf("邮箱密码不对应 401: %d %s", w.Code, w.Body)
 		}
-		if w := apiDo(t, s, http.MethodPost, regAPI, js, `{"email":"a@example.com","password":"longenough1","`+invite+`":"ABCD-1234"}`); w.Code != 403 || !strings.Contains(strings.ToLower(errText(t, w.Body.Bytes())), "invite") {
+		// 邀请码的叫法各台不一样(invite code / invitation code / access code ……)
+		if w := apiDo(t, s, http.MethodPost, regAPI, js, `{"email":"a@example.com","password":"longenough1","`+invite+`":"ABCD-1234"}`); w.Code != 403 || !regexp.MustCompile(`invit|code`).MatchString(strings.ToLower(errText(t, w.Body.Bytes()))) {
 			t.Fatalf("邀请码应一律不对: %d %s", w.Code, w.Body)
 		}
 		if w := apiDo(t, s, http.MethodPost, regAPI, js, `{"email":"a@example.com","password":"short"}`); w.Code != 422 {
@@ -95,22 +141,30 @@ func TestVideoAPI(t *testing.T) {
 			t.Fatalf("找回密码应 202: %d %s", w.Code, w.Body)
 		}
 		form := url.Values{"email": {"a@example.com"}, "password": {"secret-typed-by-someone"}}.Encode()
-		w = apiDo(t, s, http.MethodPost, loginAPI, "application/x-www-form-urlencoded", form)
+		w := apiDo(t, s, http.MethodPost, loginAPI, "application/x-www-form-urlencoded", form)
 		if w.Code != 401 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") || !strings.Contains(w.Body.String(), `role="alert">`) ||
 			strings.Contains(w.Body.String(), "secret-typed-by-someone") || !strings.Contains(w.Body.String(), s.Name()) {
 			t.Fatalf("没开脚本的提交应回带提示的登录页: %d %.300s", w.Code, w.Body)
 		}
-		// 没开脚本、空着提交:这一页上不会标出字段,提示直接写各字段的问题(自审 G2)
-		w = apiDo(t, s, http.MethodPost, loginAPI, "application/x-www-form-urlencoded", "")
-		if b := w.Body.String(); w.Code != 422 || !strings.Contains(b, "Enter a valid email address.") || !strings.Contains(b, "Enter your password.") || strings.Contains(b, "highlighted") {
-			t.Fatalf("没开脚本的空提交应写出各字段的提示: %d %.300s", w.Code, b)
-		}
-		// 注册页空着提交:几句提示按表单从上到下的顺序 —— 邮箱、密码、邀请码(自审第五遍 G9)
-		w = apiDo(t, s, http.MethodPost, regAPI, "application/x-www-form-urlencoded", "")
-		if b := w.Body.String(); w.Code != 422 || strings.Index(b, "Enter a valid email address.") < 0 ||
-			strings.Index(b, "Use at least 8 characters.") < strings.Index(b, "Enter a valid email address.") ||
-			strings.Index(b, "Enter your invite code.") < strings.Index(b, "Use at least 8 characters.") {
-			t.Fatalf("没开脚本时注册页的提示应按表单的先后: %d %.400s", w.Code, b)
+		// 没开脚本、空着提交:这一页上不会标出字段,提示就是各字段的那几句(不是「请检查标出来的字段」那句笼统的,自审 G2),
+		// 按表单从上到下的顺序 —— 邮箱、密码、邀请码(自审第五遍 G9)。各字段的提示各台说法不一样,从 JSON 的回应里取。
+		for _, c := range []struct {
+			api  string
+			keys []string
+		}{{loginAPI, []string{"email", "password"}}, {regAPI, []string{"email", "password", invite}}} {
+			msgs := fieldMsgs(t, apiDo(t, s, http.MethodPost, c.api, js, `{}`).Body.Bytes())
+			var want []string
+			for _, k := range c.keys {
+				if msgs[k] == "" {
+					t.Fatalf("%s 空着提交应说 %s 这一项: %v", c.api, k, msgs)
+				}
+				want = append(want, msgs[k])
+			}
+			w = apiDo(t, s, http.MethodPost, c.api, "application/x-www-form-urlencoded", "")
+			m := alertRe.FindStringSubmatch(w.Body.String())
+			if w.Code != 422 || m == nil || m[1] != esc(strings.Join(want, " ")) {
+				t.Fatalf("没开脚本的空提交应按表单的先后写出各字段的提示 %q: %d %v", want, w.Code, m)
+			}
 		}
 		if w := apiDo(t, s, http.MethodPost, loginAPI, js, `{"email":"`+strings.Repeat("a", 20<<10)+`"}`); w.Code != 413 {
 			t.Fatalf("请求体太大应 413: %d", w.Code)
@@ -123,7 +177,7 @@ func TestVideoAPI(t *testing.T) {
 		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &list) != nil || len(list.Data) != 12 {
 			t.Fatalf("视频列表: %d %.200s", w.Code, w.Body)
 		}
-		id := find(t, `href="/watch/([a-z0-9]+)"`, home)
+		id := find(t, `href="`+regexp.QuoteMeta(sk.watch)+`([a-z0-9]+)"`, home)
 		if w := apiDo(t, s, http.MethodPost, s.apiPre+"videos/"+id+"/play", js, `{}`); w.Code != 401 {
 			t.Fatalf("播放应要先登录: %d", w.Code)
 		}
@@ -156,8 +210,8 @@ func TestFieldOrder(t *testing.T) {
 		if s.errStyle != 1 {
 			continue
 		}
-		lp := apiDo(t, s, http.MethodGet, find(t, `href="([^"]+)">Sign in</a></div></header>`, string(s.Home())), "", "").Body.String()
-		regPage := apiDo(t, s, http.MethodGet, find(t, `href="([^"]+)">Create an account</a>`, lp), "", "").Body.String()
+		_, _, regLink, _ := authLinks(t, s, seed)
+		regPage := apiDo(t, s, http.MethodGet, regLink, "", "").Body.String()
 		regAPI := find(t, `<form method="post" action="([^"]+)"`, regPage)
 		invite := find(t, `name="(invite|invite_code|inviteCode|code)"`, regPage)
 		w := apiDo(t, s, http.MethodPost, regAPI, "application/json", `{}`)
@@ -180,11 +234,15 @@ func TestOtherAPIs(t *testing.T) {
 			Version string
 			Files   []map[string]any
 		}
-		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &rel) != nil || len(rel.Files) != 3 || !strings.Contains(string(d.Home()), "Version "+rel.Version+" ") {
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &rel) != nil || len(rel.Files) != 3 || !strings.Contains(string(d.Home()), rel.Version) {
 			t.Fatalf("检查更新: %d %.300s", w.Code, w.Body)
 		}
+		g := newGen(seed, testNow)
 		for _, s := range []*Site{d, New("blog", seed, testNow)} {
-			api := s.apiPre + "subscribe"
+			api := s.apiPre + g.sk.subAPI
+			if !strings.Contains(string(s.Home()), `<form method="post" action="`+api+`"`) {
+				t.Fatalf("%s 首页的订阅表单应提交到 %s", s.template, api)
+			}
 			if w := apiDo(t, s, http.MethodPost, api, "application/json", `{"email":"nope"}`); w.Code != 422 {
 				t.Fatalf("%s 订阅:邮箱不对应 422: %d", s.template, w.Code)
 			}
@@ -195,13 +253,13 @@ func TestOtherAPIs(t *testing.T) {
 			if w.Code != 200 || !strings.Contains(w.Body.String(), `role="alert">`) {
 				t.Fatalf("%s 没开脚本的订阅: %d", s.template, w.Code)
 			}
-			if w := apiDo(t, s, http.MethodGet, "/subscribe/", "", ""); w.Code != 200 {
+			if w := apiDo(t, s, http.MethodGet, g.sk.subPage, "", ""); w.Code != 200 {
 				t.Fatalf("%s 订阅页: %d", s.template, w.Code)
 			}
 		}
 		m := New("mirror", seed, testNow)
 		home := string(m.Home())
-		w = apiDo(t, m, http.MethodGet, find(t, `Machine-readable status: <a href="([^"]+)"`, home), "", "")
+		w = apiDo(t, m, http.MethodGet, find(t, `<p class="`+regexp.QuoteMeta(g.c("muted")+" "+g.c("fine"))+`">[^<]*<a href="([^"]+)"`, home), "", "")
 		var st struct{ Projects []map[string]any }
 		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &st) != nil || len(st.Projects) != strings.Count(home, "<tr><td><a class=") {
 			t.Fatalf("同步状态: %d %d", w.Code, len(st.Projects))

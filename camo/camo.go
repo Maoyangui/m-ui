@@ -3,6 +3,8 @@
 //
 // 伪装站用内置模板(下载镜像、软件下载、视频站、个人站),每台服务器按自己的随机种子生成站名、配色、图片、内容,
 // 连类名、静态文件目录、版式、脚本里的接口路径都按种子换 —— 所有 m-ui 长得一样(哪怕只是骨架一样)的话,伪装站本身就成了指纹。
+// 页面上给人看的每一句话、源码里的标记写法也都按种子变:各台有一句话(或一段标记)一字不差,拿它去搜就能列出全部伪装站
+// (审查 F-H1;门槛见 TestNoSharedBoilerplate)。做不到的:页面结构、样式表和脚本的形状各台一样,对着这份代码逐台比仍可能认出来。
 // 内容(页面、样式表、脚本、按种子画的矢量图,有图包照片时是处理好的照片)在内存里生成一次,之后只是回应:
 // 回应时不读磁盘、不连外网、不开新进程,没人来时不占资源。照片由 runner 按需取下来、处理好再交进来(见 media.go)。
 // 视频站有登录 / 注册(要邀请码)/ 找回密码,几种站各有几个像真站的接口(api.go):只回固定内容,提交的东西不存不记。
@@ -67,6 +69,8 @@ type Site struct {
 	api      map[string]*apiRoute // 假接口(api.go)
 	apiPre   string               // 接口前缀:以它开头、又没对上的路径回 JSON 的 404
 	errStyle int                  // 接口报错的写法(种子定)
+	apiText  apiTexts             // 接口那几句通用的报错(种子定)
+	cache    string               // 页面的 Cache-Control(种子定)
 }
 
 // New 按模板和种子生成伪装站(只用画的插图)。template 不认识或为空时按种子挑;now 决定页面上的日期(按周,见 newGen)。
@@ -79,8 +83,9 @@ func Build(template string, seed uint64, now time.Time, photos Photos) *Site {
 	if !known(t) {
 		t = Templates[seed%uint64(len(Templates))]
 	}
-	s := &Site{template: t, pages: map[string]page{}, modTime: g.modTime(), css: g.sk.css, icon: "/favicon.svg",
-		photos: photos, used: map[string]bool{}, small: map[string][]byte{}, api: map[string]*apiRoute{}, errStyle: g.sk.errStyle}
+	s := &Site{template: t, pages: map[string]page{}, modTime: g.modTime(), css: g.sk.css, icon: g.sk.icon,
+		photos: photos, used: map[string]bool{}, small: map[string][]byte{}, api: map[string]*apiRoute{}, errStyle: g.sk.errStyle,
+		apiText: newAPITexts(g), cache: g.sk.cache}
 	s.add(s.css, "text/css; charset=utf-8", g.css())
 	s.add(s.icon, svgType, favicon(g, t == "blog"))
 	switch t {
@@ -93,7 +98,7 @@ func Build(template string, seed uint64, now time.Time, photos Photos) *Site {
 	default:
 		genBlog(s, g)
 	}
-	s.add("/robots.txt", textType, []byte("User-agent: *\nDisallow:\n"))
+	s.add("/robots.txt", textType, []byte(g.sk.robots))
 	return s
 }
 
@@ -220,7 +225,7 @@ func (s *Site) write(w http.ResponseWriter, r *http.Request, code int, pg page, 
 	if cache {
 		h.Set("Last-Modified", s.modTime.UTC().Format(http.TimeFormat))
 		h.Set("ETag", pg.etag)
-		h.Set("Cache-Control", "public, max-age=3600")
+		h.Set("Cache-Control", s.cache)
 		if r.Header.Get("If-None-Match") == pg.etag {
 			w.WriteHeader(http.StatusNotModified)
 			return

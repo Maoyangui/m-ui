@@ -67,12 +67,12 @@ func (s *Site) serveAPI(w http.ResponseWriter, r *http.Request, p string) bool {
 		if s.apiPre == "" || !strings.HasPrefix(p, s.apiPre) {
 			return false
 		}
-		s.writeAPI(w, r, http.StatusNotFound, s.errJSON(http.StatusNotFound, "not_found", "Not found.", nil))
+		s.writeAPI(w, r, http.StatusNotFound, s.errJSON(http.StatusNotFound, "not_found", s.apiText.notFound, nil))
 		return true
 	}
 	if !strings.Contains(", "+rt.allow+",", ", "+r.Method+",") {
 		w.Header().Set("Allow", rt.allow)
-		s.writeAPI(w, r, http.StatusMethodNotAllowed, s.errJSON(http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed.", nil))
+		s.writeAPI(w, r, http.StatusMethodNotAllowed, s.errJSON(http.StatusMethodNotAllowed, "method_not_allowed", s.apiText.method, nil))
 		return true
 	}
 	if rt.post == nil {
@@ -86,7 +86,7 @@ func (s *Site) serveAPI(w http.ResponseWriter, r *http.Request, p string) bool {
 		if errors.As(err, &tooBig) {
 			code = http.StatusRequestEntityTooLarge
 		}
-		s.writeAPI(w, r, code, s.errJSON(code, "bad_request", "The request body could not be read.", nil))
+		s.writeAPI(w, r, code, s.errJSON(code, "bad_request", s.apiText.badBody, nil))
 		return true
 	}
 	rep := rt.post(in)
@@ -279,8 +279,7 @@ func field(g *gen, name, label, typ, auto, hint, extra string) string {
 	if hint != "" {
 		h = `<small>` + esc(hint) + `</small>`
 	}
-	return fmt.Sprintf(`<label class="%s"><span>%s%s</span><input name="%s" type="%s" autocomplete="%s" required>%s</label>`,
-		g.c("field"), esc(label), extra, name, typ, auto, h)
+	return fmt.Sprintf(`<label class="%s"><span>%s%s</span>%s%s</label>`, g.c("field"), esc(label), extra, g.input(name, typ, auto, ""), h)
 }
 
 // ---- 脚本 ----
@@ -294,14 +293,15 @@ func jsNames(g *gen, n int) []string {
 
 // script 页面脚本:取接口的小函数,加上这个站要的几段(表单提交、查登录状态、点播放、按系统挑下载)
 type scriptParts struct {
-	forms   bool   // 表单用接口提交
-	me      string // 打开页面时查一次当前用户的接口(相对前缀)
-	play    bool   // 点播放时报给接口
-	os      bool   // 按访客的系统把对应的下载放到第一个
-	latest  string // 打开页面时查一次最新版本的接口(相对前缀)
-	formKey string // 表单上写接口地址的 data- 属性
-	playKey string // 播放按钮上写视频 id 的 data- 属性
-	osKey   string // 下载卡片上写系统的 data- 属性
+	forms   bool      // 表单用接口提交
+	me      string    // 打开页面时查一次当前用户的接口(相对前缀)
+	play    bool      // 点播放时报给接口
+	os      bool      // 按访客的系统把对应的下载放到第一个
+	osTok   [3]string // 三个系统在卡片属性里的写法:Windows、macOS、Linux
+	latest  string    // 打开页面时查一次最新版本的接口(相对前缀)
+	formKey string    // 表单上写接口地址的 data- 属性
+	playKey string    // 播放按钮上写视频 id 的 data- 属性
+	osKey   string    // 下载卡片上写系统的 data- 属性
 }
 
 func (s *Site) addScript(g *gen, p scriptParts) {
@@ -325,15 +325,21 @@ func (s *Site) addScript(g *gen, p scriptParts) {
 			b, Q, p.playKey, b, b, R, b, jsCamel(p.playKey))
 	}
 	if p.os {
-		fmt.Fprintf(&js, `const %s=navigator.userAgent,%s=/Mac/.test(%s)&&!/iPhone|iPad/.test(%s)?"mac":/Win/.test(%s)?"win":/Linux|X11/.test(%s)&&!/Android/.test(%s)?"linux":"";if(%s){const %s=%s('[data-%s="'+%s+'"]');%s&&(%s.classList.add(%q),%s.parentNode.prepend(%s))}`,
-			o, k, o, o, o, o, o, k, c, Q, p.osKey, k, c, c, g.c("on"), c, c)
+		fmt.Fprintf(&js, `const %s=navigator.userAgent,%s=/Mac/.test(%s)&&!/iPhone|iPad/.test(%s)?%q:/Win/.test(%s)?%q:/Linux|X11/.test(%s)&&!/Android/.test(%s)?%q:"";if(%s){const %s=%s('[data-%s="'+%s+'"]');%s&&(%s.classList.add(%q),%s.parentNode.prepend(%s))}`,
+			o, k, o, o, p.osTok[1], o, p.osTok[0], o, o, p.osTok[2], k, c, Q, p.osKey, k, c, c, g.c("on"), c, c)
 	}
 	if p.latest != "" {
 		fmt.Fprintf(&js, `%s(%q).catch(()=>{});`, R, p.latest)
 	}
 	js.WriteString(`})();`)
-	s.js = g.sk.dir + g.pick([]string{"app", "main", "index", "site", "bundle"}) + "." + g.id(8) + ".js"
-	s.add(s.js, jsType, []byte(js.String()))
+	// 脚本里兜底的三句话(接口没给提示、网络不通时用)各台不一样
+	out := strings.NewReplacer(
+		`"Done."`, strconv.Quote(g.pick([]string{"Done.", "Saved.", "OK", "Thanks!", "Success.", "All set."})),
+		`"Please check the form and try again."`, strconv.Quote(g.pick([]string{"Please check the form and try again.", "Something went wrong. Please try again.", "Please review the form.", "That didn't work. Try again.", "Check your details and retry.", "Unable to submit the form."})),
+		`"Network error. Please try again."`, strconv.Quote(g.pick([]string{"Network error. Please try again.", "Could not reach the server.", "Connection problem. Try again in a moment.", "Request failed. Please retry.", "You appear to be offline.", "Something went wrong on our side."})),
+	).Replace(js.String())
+	s.js = g.sk.dir + g.pick([]string{"app", "main", "index", "site", "bundle", "scripts", "chunk"}) + "." + g.id(8) + ".js"
+	s.add(s.js, jsType, []byte(out))
 }
 
 // jsCamel data- 属性名在 dataset 里的写法(连字符后面的字母大写)
@@ -347,19 +353,51 @@ func jsCamel(k string) string {
 	return strings.Join(parts, "")
 }
 
+// apiTexts 接口那几句通用的报错(没有这个接口、方法不对、请求体读不了、没登录):各台的说法不一样
+type apiTexts struct{ notFound, method, badBody, auth string }
+
+func newAPITexts(g *gen) apiTexts {
+	return apiTexts{
+		notFound: g.pick([]string{"Not found.", "Not Found", "Resource not found.", "The requested resource was not found.", "No such endpoint.", "Route not found"}),
+		method:   g.pick([]string{"Method not allowed.", "Method Not Allowed", "This method is not supported for this endpoint.", "Unsupported method."}),
+		badBody:  g.pick([]string{"The request body could not be read.", "Malformed request body.", "Invalid JSON payload.", "Bad request.", "Could not parse the request."}),
+		auth:     g.pick([]string{"Authentication required.", "Unauthorized", "You need to sign in first.", "Not authenticated.", "Missing or invalid session."}),
+	}
+}
+
+// subTexts 邮件订阅那几句(标题、说明、按钮、输入框的名字;一个站里各处一致)
+type subTexts struct{ title, note, button, label string }
+
 // subscribeAPI 邮件订阅(博客、软件下载页):邮箱格式不对 422,其余一律「去邮箱确认」
-func (s *Site) subscribeAPI(g *gen, path string, form func(msg string, ok bool) []byte) {
-	okMsg := g.pick([]string{"Thanks! Check your inbox to confirm your subscription.", "Almost done: we've sent you an email to confirm your subscription.", "Thanks for subscribing. Please confirm from the email we just sent."})
-	s.postAPI(path, false, func(in map[string]string) apiReply {
+func (s *Site) subscribeAPI(g *gen, form func(msg string, ok bool) []byte) {
+	okMsg := g.say("Thanks! Check your inbox to confirm your subscription.", "Almost done: we've sent you an email to confirm your subscription.", "Thanks for subscribing. Please confirm from the email we just sent.",
+		"You're nearly there. Click the link in the email we just sent.", "Got it. Look for a confirmation email in a minute or two.", "Thank you! One more step: confirm your address from your inbox.",
+		"Subscribed. Check your email to confirm.")
+	bad := g.say("Please enter a valid email address.", "Enter a valid email address.", "That doesn't look like an email address.", "Check the email address and try again.", "Invalid email address.", "We need a valid email address.")
+	s.postAPI(s.apiPre+g.sk.subAPI, false, func(in map[string]string) apiReply {
 		if !emailRe.MatchString(strings.TrimSpace(in["email"])) {
-			return apiReply{code: http.StatusUnprocessableEntity, err: "validation_failed", msg: "Please enter a valid email address.", fields: map[string]string{"email": "Please enter a valid email address."}}
+			return apiReply{code: http.StatusUnprocessableEntity, err: "validation_failed", msg: bad, fields: map[string]string{"email": bad}}
 		}
 		return apiReply{code: http.StatusOK, ok: true, msg: okMsg}
 	}, form)
 }
 
+// subscribeForm 订阅的那个表单(小表单和订阅页共用)
+func subscribeForm(g *gen, s *Site, st subTexts, alert string) string {
+	return fmt.Sprintf(`<form method="post" action="%s" data-%s="%s" novalidate>%s<div class="%s">%s<button type="submit">%s</button></div></form>`,
+		s.apiPre+g.sk.subAPI, g.sk.formKey, g.sk.subAPI, alert, g.c("srow"),
+		g.input("email", "email", "email", ` placeholder="`+esc(g.sk.mailPH)+`" aria-label="`+esc(st.label)+`"`), esc(st.button))
+}
+
 // subscribeBox 邮件订阅的小表单(博客文末、软件下载页)
-func subscribeBox(g *gen, s *Site, api, title, note string) string {
-	return fmt.Sprintf(`<div class="%s"><b>%s</b><p class="%s">%s</p><form method="post" action="%s" data-%s="%s" novalidate>%s<div class="%s"><input name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Email" required><button type="submit">Subscribe</button></div></form></div>`,
-		g.c("subs"), esc(title), g.c("muted"), esc(note), s.apiPre+api, g.sk.formKey, api, emptyAlert(g), g.c("srow"))
+func subscribeBox(g *gen, s *Site, st subTexts) string {
+	return fmt.Sprintf(`<div class="%s"><b>%s</b><p class="%s">%s</p>%s</div>`, g.c("subs"), esc(st.title), g.c("muted"), esc(st.note), subscribeForm(g, s, st, emptyAlert(g)))
+}
+
+// subscribePage 「订阅」这一页(地址按种子,见 skin.subPage;没开脚本时表单提交回到这一页,带上提示)。返回往里填提示的函数。
+func subscribePage(g *gen, s *Site, nav [][2]string, title string, st subTexts) func(string, bool) []byte {
+	page := layout(g, s, g.sk.subPage, g.title(title, s.name), nav, fmt.Sprintf(`<div class="%s"><h1>%s</h1><p class="%s">%s</p>%s</div>`,
+		g.c("narrow"), esc(title), g.c("sub"), esc(st.note), subscribeForm(g, s, st, alertSlot)))
+	s.add(g.sk.subPage, htmlType, []byte(strings.Replace(string(page), alertSlot, emptyAlert(g), 1)))
+	return s.formPage(g, page)
 }

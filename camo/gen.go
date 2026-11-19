@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"html"
 	"math/rand/v2"
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +17,7 @@ type gen struct {
 	base time.Time // 「最近更新」这类日期的基准:种子决定,不随当天日期变
 	sk   skin
 	seed uint64
+	bank []int // 这个站的文章用句库里的哪些句子(text.go 的 paraBank)
 }
 
 // newGen 日期的基准是 now 所在那一周的周一(UTC)再往前 0~2 天:页面上「最近同步」「发布于」这些日期一直是最近的,
@@ -69,8 +69,11 @@ func (g *gen) daysAgo(d int) string {
 	return g.base.Add(-time.Duration(d) * 24 * time.Hour).Format("2006-01-02")
 }
 func (g *gen) dateAgo(d int) string {
-	return g.base.Add(-time.Duration(d) * 24 * time.Hour).Format("Jan 2, 2006")
+	return g.date(g.base.Add(-time.Duration(d) * 24 * time.Hour))
 }
+
+// date 给人看的日期:写法按种子定(Jan 2, 2006 / 2 Jan 2006 / 2006-01-02 ……),一个站里前后一致
+func (g *gen) date(t time.Time) string { return t.Format(g.sk.dateFmt) }
 
 func (g *gen) accent() string     { return hslHex(float64(g.hue), 62, 44) }
 func (g *gen) accentSoft() string { return hslHex(float64(g.hue), 70, 95) }
@@ -105,8 +108,14 @@ func (g *gen) b64(n int) string {
 
 var esc = html.EscapeString
 
+// words 站名、产品名里用的词。原来只有 22 个:镜像站名一共 88 种、视频站名 88 种,几十台里就有重名的,
+// 站名本身也成了能枚举的特征(审查 F-H1)
 var words = []string{"Lumen", "Northgate", "Cedar", "Harbor", "Quarry", "Juniper", "Meridian", "Granite", "Kestrel", "Tidal",
-	"Copper", "Orchard", "Summit", "Vesper", "Alder", "Basalt", "Fernway", "Halcyon", "Larch", "Pinecrest", "Riverside", "Saltmarsh"}
+	"Copper", "Orchard", "Summit", "Vesper", "Alder", "Basalt", "Fernway", "Halcyon", "Larch", "Pinecrest", "Riverside", "Saltmarsh",
+	"Amber", "Birchwood", "Calico", "Dovetail", "Elm", "Foxglove", "Greyfield", "Heron", "Ironwood", "Jasper", "Kelp", "Linden",
+	"Marlow", "Nettle", "Oakridge", "Pebble", "Quill", "Rowan", "Sable", "Thistle", "Umber", "Verdant", "Willow", "Yarrow",
+	"Zephyr", "Aster", "Bramble", "Cobalt", "Drift", "Ember", "Flint", "Gable", "Hazel", "Indigo", "Keystone", "Lantern",
+	"Moss", "Northwind", "Opal", "Parcel"}
 
 // ---- 皮肤 ----
 
@@ -132,6 +141,46 @@ type skin struct {
 	imgName  string // 照片文件名的写法(词干、宽度)
 	errStyle int    // 接口报错的写法(几种常见框架的样子)
 	camel    bool   // 接口字段名用 camelCase(否则 snake_case)
+
+	// 下面几样原来各台都一样(审查 F-H1),现在按种子换
+	lang      string // <html lang>
+	sep       string // 页面标题里页名和站名之间的分隔
+	siteFirst bool   // 页面标题里站名在前
+	icon      string // 站点图标的路径
+	robots    string // robots.txt 的内容
+	copyFmt   string // 页脚版权那一句的写法(%[1]d 年份、%[2]s 站名)
+	mailPH    string // 邮箱输入框里的示例
+	dateFmt   string // 给人看的日期的写法
+	dot       string // 「时长 · 播放量」这类并列项之间的分隔
+	cache     string // 页面的 Cache-Control
+
+	// 页面骨架的写法。同一段标记各台一字不差的话,拿那段标记去搜和拿一句话去搜是一样的(搜索引擎收的是整页源码)
+	nl       string // 顶层几块之间的分隔(有的站源码压成一行,有的不压)
+	ind      string // <head> 里各行的缩进
+	doctype  string
+	charset  string
+	viewport string
+	iconTag  string // 站点图标那一行的写法(%s 是路径)
+	headOrd  int    // <head> 里标题、描述、样式表这几样的先后
+	og       int    // Open Graph 那几行:0 不带,1~3 几种常见的组合
+
+	// 各种站自己的地址(原来 /watch/、/posts/、/feed.xml、/subscribe/、/releases/ 各台都一样)
+	watch   string // 视频页的前缀
+	posts   string // 文章的前缀
+	feed    string // RSS 的地址
+	subPage string // 订阅页的地址
+	subAPI  string // 订阅接口(相对接口前缀)
+	rel     string // 各版本页的前缀
+	nextKey string // 登录后回到哪一页的参数名
+
+	imgStyle int    // <img> 的属性先后、带不带宽高
+	inStyle  int    // <input> 的属性先后
+	thumb    [2]int // 视频封面小图的尺寸
+	big      [2]int // 播放页大图
+	wide     [2]int // 首页精选
+	hero     [2]int // 博客题图
+	pthumb   [2]int // 博客列表里的小图
+	chart    [2]int // 镜像站流量图
 }
 
 var clsWords = map[string][]string{
@@ -181,6 +230,9 @@ var clsWords = map[string][]string{
 	"nlist": {"note-list", "notes-list", "list-pane", "index", "entries"}, "ntext": {"note-body", "doc", "page-body", "note-text", "editor-body"},
 	"dot": {"dot", "presence", "status-dot", "led", "indicator"}, "canvas": {"canvas", "art-board", "board", "paper", "drawing"},
 	"axis": {"axis", "x-axis", "ticks", "scale", "chart-labels"}, "det": {"details", "meta-grid", "specs", "facts-row", "video-info"},
+	// 审查 F-H1:原来写成内联样式的几处(内联样式的值各台一字不差,也能拿去搜)改成类
+	"meta": {"meta-line", "small", "sm", "info-line", "minor"}, "fine": {"fine", "footnote", "smallprint", "hint", "aside-note"},
+	"cap": {"chart-note", "legend", "under", "explain", "sub-caption"}, "avbig": {"avatar-lg", "portrait-lg", "face", "photo-me", "me-lg"},
 }
 
 var fonts = []string{
@@ -220,7 +272,75 @@ func newSkin(g *gen) skin {
 		api:     g.pick([]string{"/api/v1/", "/api/", "/api/v2/", "/v1/", "/_api/"}),
 		formKey: g.pick([]string{"api", "endpoint", "action", "submit-to", "post"}), playKey: g.pick([]string{"play", "video", "vid", "watch-id", "media"}),
 		osKey: g.pick([]string{"os", "platform", "target", "dl-os"}), imgName: g.pick([]string{"%s-%d.jpg", "%s_%dw.jpg", "%s.%d.jpg", "%s-%dw.jpg", "%s@%d.jpg"}),
-		errStyle: g.r.IntN(3), camel: g.r.IntN(2) == 0}
+		errStyle: g.r.IntN(3), camel: g.r.IntN(2) == 0,
+		lang: g.pick([]string{"en", "en", "en-US", "en-GB"}), sep: g.pick([]string{" - ", " | ", " · ", " — ", ": "}), siteFirst: g.r.IntN(3) == 0,
+		icon:    g.pick([]string{"/favicon.svg", "/icon.svg", dir + "favicon.svg", dir + "icon." + g.id(6) + ".svg", "/logo.svg"}),
+		robots:  g.pick([]string{"User-agent: *\nDisallow:\n", "User-agent: *\nAllow: /\n", "User-agent: *\nDisallow: /search\n", "# robots.txt\nUser-agent: *\nDisallow:\n", "User-agent: *\nCrawl-delay: 10\nDisallow:\n"}),
+		copyFmt: g.pick([]string{"© %[1]d %[2]s", "Copyright © %[1]d %[2]s", "%[2]s © %[1]d", "© %[1]d %[2]s. All rights reserved.", "© %[2]s, %[1]d"}),
+		mailPH:  g.pick([]string{"you@example.com", "name@example.com", "Email address", "Your email", "email@domain.com", "jane@example.org"}),
+		dateFmt: g.pick([]string{"Jan 2, 2006", "Jan 2, 2006", "2 Jan 2006", "January 2, 2006", "2006-01-02", "2 January 2006", "Jan 02, 2006"}),
+		dot:     g.pick([]string{" · ", " · ", " • ", " | ", " – ", ", "}),
+		cache:   g.pick([]string{"public, max-age=3600", "max-age=3600", "public, max-age=600", "max-age=1800", "public, max-age=7200", "max-age=14400", "public, max-age=86400", "no-cache"}),
+		nl:      g.pick([]string{"", "", "\n", "\n", "\r\n"}), ind: g.pick([]string{"", "", "  ", "    ", "\t"}),
+		doctype: g.pick([]string{"<!doctype html>", "<!DOCTYPE html>", "<!DOCTYPE html>"}), charset: g.pick([]string{`<meta charset="utf-8">`, `<meta charset="UTF-8">`, `<meta charset="utf-8">`}),
+		viewport: g.pick([]string{"width=device-width,initial-scale=1", "width=device-width, initial-scale=1", "width=device-width, initial-scale=1.0", "width=device-width, initial-scale=1, viewport-fit=cover"}),
+		iconTag:  g.pick([]string{`<link rel="icon" href="%s">`, `<link rel="icon" type="image/svg+xml" href="%s">`, `<link rel="shortcut icon" href="%s">`, `<link href="%s" rel="icon">`}),
+		headOrd:  g.r.IntN(4), og: g.r.IntN(4),
+		watch: g.pick([]string{"/watch/", "/v/", "/video/", "/videos/", "/play/", "/film/", "/w/"}), posts: g.pick([]string{"/posts/", "/blog/", "/writing/", "/notes/", "/p/", "/journal/", "/entries/"}),
+		feed: g.pick([]string{"/feed.xml", "/rss.xml", "/index.xml", "/feed/", "/rss/", "/posts.xml"}), subPage: g.pick([]string{"/subscribe/", "/newsletter/", "/updates/", "/email/", "/follow/", "/notify/"}),
+		subAPI: g.pick([]string{"subscribe", "newsletter", "subscribers", "newsletter/subscribe", "subscriptions", "notify"}), rel: g.pick([]string{"/releases/", "/release/", "/versions/", "/changelog/", "/history/", "/archive/"}),
+		nextKey:  g.pick([]string{"next", "return", "redirect", "r", "continue", "from", "back"}),
+		imgStyle: g.r.IntN(5), inStyle: g.r.IntN(4),
+		thumb:  [][2]int{{400, 225}, {426, 240}, {480, 270}, {512, 288}, {640, 360}}[g.r.IntN(5)],
+		big:    [][2]int{{854, 480}, {896, 504}, {960, 540}, {1024, 576}}[g.r.IntN(4)],
+		wide:   [][2]int{{1120, 490}, {1200, 525}, {1280, 560}, {1360, 595}}[g.r.IntN(4)],
+		hero:   [][2]int{{880, 440}, {900, 450}, {960, 480}, {1000, 500}, {1040, 520}}[g.r.IntN(5)],
+		pthumb: [][2]int{{300, 200}, {330, 220}, {360, 240}, {390, 260}, {420, 280}}[g.r.IntN(5)],
+		chart:  [][2]int{{900, 140}, {920, 160}, {960, 150}, {1000, 160}, {1040, 150}}[g.r.IntN(5)]}
+}
+
+// img 一张图片的标记。属性的先后、带不带宽高、懒加载怎么写按种子定:同一段
+// 「alt="" width="480" height="270" loading="lazy"」各台一字不差的话,和一句固定的话一样能拿去搜(审查 F-H1)。
+// 宽高写不写都行 —— 各处图片的大小都由样式表定(容器的比例、object-fit)。w 为 0 时不写宽高。
+func (g *gen) img(cls, src string, w, h int, lazy bool) string {
+	c, lz, dim := "", "", ""
+	if cls != "" {
+		c = ` class="` + cls + `"`
+	}
+	if lazy {
+		lz = ` loading="lazy"`
+	}
+	if w > 0 {
+		dim = fmt.Sprintf(` width="%d" height="%d"`, w, h)
+	}
+	src = ` src="` + src + `"`
+	switch g.sk.imgStyle {
+	case 0:
+		return "<img" + c + src + ` alt=""` + dim + lz + ">"
+	case 1:
+		return "<img" + c + lz + src + dim + ` alt="">`
+	case 2:
+		if lazy {
+			lz += ` decoding="async"`
+		}
+		return "<img" + c + src + dim + ` alt=""` + lz + ">"
+	case 3: // 不写宽高
+		return "<img" + c + ` alt=""` + src + lz + ">"
+	}
+	return "<img" + src + c + lz + ` alt=""` + dim + ">"
+}
+
+// input 表单的一个输入框(属性先后按种子);more 是另外要加的属性(placeholder、aria-label)
+func (g *gen) input(name, typ, auto, more string) string {
+	switch g.sk.inStyle {
+	case 0:
+		return fmt.Sprintf(`<input name="%s" type="%s" autocomplete="%s"%s required>`, name, typ, auto, more)
+	case 1:
+		return fmt.Sprintf(`<input type="%s" name="%s"%s autocomplete="%s" required>`, typ, name, more, auto)
+	case 2:
+		return fmt.Sprintf(`<input type="%s" name="%s" required autocomplete="%s"%s>`, typ, name, auto, more)
+	}
+	return fmt.Sprintf(`<input%s required autocomplete="%s" type="%s" name="%s">`, more, auto, typ, name)
 }
 
 // c 逻辑类名 → 这个种子下的实际类名
@@ -289,10 +409,12 @@ func (g *gen) css() []byte {
 	w(`.%s{display:inline-block;padding:8px 16px;border-radius:8px;background:%s;color:#fff;font-weight:600;font-size:14px}.%s:hover{text-decoration:none;filter:brightness(1.07)}`, c("btn"), acc, c("btn"))
 	w(`.%s{margin:8px 0 6px;border-radius:%dpx;overflow:hidden;border:1px solid #e5e8ee;box-shadow:0 22px 44px -22px rgba(20,30,50,.38)}`, c("shot"), k.rad+6)
 	w(`.%s{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:22px;margin:30px 0 8px}.%s p{margin:0;color:#5f6878;font-size:14px}`, c("feats"), c("feat"))
-	w(`.%s{width:38px;height:38px;border-radius:10px;background:%s;display:grid;place-items:center;margin-bottom:12px}.%s svg{width:20px;height:20px}`, c("ficon"), soft, c("ficon"))
+	w(`.%s{width:38px;height:38px;border-radius:10px;background:%s;color:%s;display:grid;place-items:center;margin-bottom:12px}.%s svg{width:20px;height:20px}`, c("ficon"), soft, acc, c("ficon"))
 	g.cssMore(w, acc, soft)
 	w(`@media(max-width:980px){.%s{grid-template-columns:1fr}.%s>a{grid-template-columns:150px minmax(0,1fr)}}`, c("watch"), c("up"))
+	w(`p .%s{overflow-wrap:anywhere}`, c("mono"))
 	w(`@media(max-width:640px){nav{gap:14px}h1{font-size:23px}.%s{display:none}.%s{grid-template-columns:1fr}.%s b{font-size:64px}`, c("hide"), c("post"), c("e404"))
+	w(`header .%s{height:auto;min-height:%dpx;flex-wrap:wrap;justify-content:space-between;row-gap:0}.%s{min-height:%dpx}nav{margin-left:0;min-height:40px;align-items:center;white-space:nowrap}`, c("wrap"), k.head, c("name"), k.head)
 	w(`.%s{aspect-ratio:4/3}.%s>div{left:18px;right:18px;bottom:18px}.%s h2{font-size:22px}.%s h2{font-size:21px}.%s .%s{padding:22px 18px}.%s{margin-left:auto;padding:5px 12px;font-size:13px}nav:has(+.%s){display:none}.%s{white-space:nowrap}`,
 		c("lead2"), c("lead2"), c("lead2"), c("top1"), c("auth"), c("card"), c("cta"), c("cta"), c("name"))
 	w(`.%s,.%s{grid-template-columns:1fr}.%s,.%s{display:none}.%s{min-height:0}.%s{grid-template-columns:repeat(2,minmax(0,1fr))}}`, c("wbody"), c("notes"), c("side"), c("nlist"), c("wbody"), c("det"))
@@ -339,6 +461,10 @@ func (g *gen) cssMore(w func(string, ...interface{}), acc, soft string) {
 	w(`.%s .%s{display:flex;flex-direction:column;align-items:flex-start}.%s .%s .%s{margin-top:auto}`, c("dl"), c("card"), c("dl"), c("card"), c("btn"))
 	w(`.%s{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0 0;padding:14px 18px;background:#fff;border:1px solid #e5e8ee;border-radius:%dpx}.%s span{font-size:14px}.%s b{display:block;margin:0 0 2px;color:#6b7383;font-size:12px;font-weight:600}`, c("det"), k.rad+4, c("det"), c("det"))
 	w(`.%s>span:first-child{display:grid;place-items:center;color:#fff;font-weight:700;font-size:17px}`, c("chan"))
+	// 原来写成内联样式的几处
+	w(`.%s{font-size:13px}p.%s{font-size:13px;margin:8px 2px}p.%s{margin:-6px 0 6px;font-size:13px}.%s h1{margin-top:18px}.%s .%s{margin:0 0 0 auto}`, c("meta"), c("fine"), c("cap"), c("watch"), c("chan"), c("chip"))
+	w(`.%s>div>a{font-weight:600;font-size:17px}.%s p{margin:6px 0 0;font-size:14px}.%s .%s{margin:4px 0 0}.%s{width:96px;height:96px;border-radius:50%%;margin-bottom:14px}`, c("post"), c("post"), c("author"), c("sub"), c("avbig"))
+	w(`.%s .%s{margin:0}.%s .%s .%s{font-size:13px;margin:2px 0 12px}`, c("head2"), c("sub"), c("dl"), c("card"), c("muted"))
 }
 
 // asset 放一个静态文件(图片),返回它的路径(文件名像打包工具出的带哈希的名字)
@@ -357,16 +483,51 @@ func layout(g *gen, s *Site, path, title string, nav [][2]string, body string) [
 			cur = n[0]
 		}
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s</title>`, esc(title))
+	// <head>:字符集总在最前,其余几样的先后、Open Graph 带不带、换不换行按种子定。
+	// 原来各台的 <head> 除了标题和路径一字不差,「og:type 那一行紧跟着站点图标那一行」这样的一段标记就能搜出全部伪装站(审查 F-H1)
+	k := g.sk
+	var meta []string
 	if s.desc != "" {
-		fmt.Fprintf(&b, `<meta name="description" content="%s"><meta property="og:site_name" content="%s"><meta property="og:title" content="%s"><meta property="og:type" content="website">`, esc(s.desc), esc(s.name), esc(title))
+		meta = append(meta, `<meta name="description" content="`+esc(s.desc)+`">`)
+		switch k.og {
+		case 1:
+			meta = append(meta, `<meta property="og:site_name" content="`+esc(s.name)+`">`, `<meta property="og:title" content="`+esc(title)+`">`, `<meta property="og:type" content="website">`)
+		case 2:
+			meta = append(meta, `<meta property="og:title" content="`+esc(title)+`">`, `<meta property="og:description" content="`+esc(s.desc)+`">`)
+		case 3:
+			meta = append(meta, `<meta property="og:type" content="website">`, `<meta property="og:title" content="`+esc(title)+`">`, `<meta name="twitter:card" content="summary">`)
+		}
 	}
-	fmt.Fprintf(&b, `<link rel="icon" href="%s"><link rel="stylesheet" href="%s">%s`, s.icon, s.css, s.head)
+	vp, tt := `<meta name="viewport" content="`+k.viewport+`">`, `<title>`+esc(title)+`</title>`
+	icon, css := fmt.Sprintf(k.iconTag, s.icon), `<link rel="stylesheet" href="`+s.css+`">`
+	var head []string
+	switch k.headOrd {
+	case 0:
+		head = append(append([]string{k.charset, vp, tt}, meta...), icon, css)
+	case 1:
+		head = append(append([]string{k.charset, tt, vp}, meta...), css, icon)
+	case 2:
+		head = append(append([]string{k.charset, vp}, meta...), tt, icon, css)
+	default:
+		head = append([]string{k.charset, vp, tt, css, icon}, meta...)
+	}
+	if s.head != "" {
+		head = append(head, s.head)
+	}
 	if s.js != "" {
-		fmt.Fprintf(&b, `<script src="%s" defer></script>`, s.js)
+		head = append(head, `<script src="`+s.js+`" defer></script>`)
 	}
-	fmt.Fprintf(&b, `</head><body><header><div class="%s"><a class="%s" href="/">%s%s</a><nav>`, c("wrap"), c("name"), s.logo, esc(s.name))
+	nl := k.nl
+	var b strings.Builder
+	b.WriteString(k.doctype + nl + `<html lang="` + k.lang + `">` + nl + `<head>` + nl)
+	for _, h := range head {
+		if nl != "" {
+			b.WriteString(k.ind)
+		}
+		b.WriteString(h + nl)
+	}
+	b.WriteString(`</head>` + nl + `<body>` + nl)
+	fmt.Fprintf(&b, `<header><div class="%s"><a class="%s" href="/">%s%s</a><nav>`, c("wrap"), c("name"), s.logo, esc(s.name))
 	for _, n := range nav {
 		if n[0] == cur {
 			fmt.Fprintf(&b, `<a class="%s" href="%s">%s</a>`, c("on"), n[0], esc(n[1]))
@@ -374,8 +535,8 @@ func layout(g *gen, s *Site, path, title string, nav [][2]string, body string) [
 			fmt.Fprintf(&b, `<a href="%s">%s</a>`, n[0], esc(n[1]))
 		}
 	}
-	fmt.Fprintf(&b, `</nav>%s</div></header><main class="%s">%s</main><footer><div class="%s"><span>© %d %s</span>%s</div></footer></body></html>`,
-		s.cta, c("wrap"), body, c("wrap"), g.base.Year(), esc(s.name), s.foot)
+	fmt.Fprintf(&b, `</nav>%s</div></header>%s<main class="%s">%s</main>%s<footer><div class="%s"><span>%s</span>%s</div></footer>%s</body>%s</html>%s`,
+		s.cta, nl, c("wrap"), body, nl, c("wrap"), esc(fmt.Sprintf(k.copyFmt, g.base.Year(), s.name)), s.foot, nl, nl, nl)
 	return []byte(b.String())
 }
 
@@ -441,310 +602,26 @@ func (s *Site) pictureOf(g *gen, slot int, name, kind, tod string, sizes ...picS
 	return out
 }
 
+// notFoundBody 404 页的正文。各台的说法不一样:原来四种站、每一台都是同一段话,扫描器对着随便一个不存在的路径
+// 拿到的就是它(审查 F-H1)。nfTitle 是这一页的标题(浏览器标签上的)。
 func notFoundBody(g *gen) string {
-	return `<div class="` + g.c("e404") + `"><b>404</b><h1>Page not found</h1><p class="` + g.c("sub") + `">The page you were looking for doesn't exist or has moved.</p><p><a href="/">Back to the home page</a></p></div>`
+	head := g.say("Page not found", "Not found", "This page doesn't exist", "Nothing here", "We can't find that page", "That page is gone", "No such page")
+	text := g.say("The page you were looking for doesn't exist or has moved.", "The link may be broken, or the page may have been {removed|taken down}.",
+		"There's nothing at this address. Check the URL and try again.", "Sorry, we couldn't find what you were looking for.",
+		"That address doesn't match anything on this site.", "It may have been moved or deleted, or the address was mistyped.",
+		"The page you requested could not be found on this server.")
+	back := g.say("Back to the home page", "Go to the home page", "Return home", "Start again from the home page", "Take me home", "Home page", "Go back home")
+	return `<div class="` + g.c("e404") + `"><b>404</b><h1>` + esc(head) + `</h1><p class="` + g.c("sub") + `">` + esc(text) + `</p><p><a href="/">` + esc(back) + `</a></p></div>`
+}
+
+// nfTitle 404 页的标题
+func nfTitle(g *gen, site string) string {
+	return g.title(g.pick([]string{"Not found", "Page not found", "404", "Error 404", "404 Not Found"}), site)
 }
 
 const htmlType = "text/html; charset=utf-8"
 const textType = "text/plain; charset=utf-8"
 const svgType = "image/svg+xml"
-
-// ---- 下载镜像 ----
-
-var mirrorProjects = [][2]string{
-	{"almalinux", "AlmaLinux OS"}, {"alpine", "Alpine Linux"}, {"archlinux", "Arch Linux packages and images"}, {"centos-stream", "CentOS Stream"},
-	{"debian", "Debian archive"}, {"debian-cd", "Debian installer images"}, {"fedora", "Fedora releases"}, {"freebsd", "FreeBSD releases"},
-	{"gentoo", "Gentoo distfiles"}, {"kali", "Kali Linux"}, {"linuxmint", "Linux Mint images"}, {"manjaro", "Manjaro packages"},
-	{"opensuse", "openSUSE distributions"}, {"openwrt", "OpenWrt firmware"}, {"raspberrypi", "Raspberry Pi OS images"}, {"rocky", "Rocky Linux"},
-	{"ubuntu", "Ubuntu archive"}, {"ubuntu-releases", "Ubuntu release images"},
-}
-
-var mirrorDirs = []string{"dists", "iso", "images", "pool", "releases", "snapshots", "updates"}
-
-// mirrorDirFiles 每个子目录里列出(也真能打开)的几个小文件
-func mirrorDirFiles(d string) []string {
-	switch d {
-	case "dists":
-		return []string{"InRelease", "Release", "Release.gpg"}
-	case "pool":
-		return []string{"README", "SHA256SUMS"}
-	}
-	return []string{"SHA256SUMS", "SHA256SUMS.sig"}
-}
-
-func genMirror(s *Site, g *gen) {
-	s.name = g.pick(words) + " " + g.pick([]string{"Mirror", "Open Mirror", "Software Mirror", "Mirrors"})
-	s.logo = `<span class="` + g.c("logo") + `"></span>`
-	every := g.pick([]string{"4", "6", "8", "12"})
-	s.foot = `<span>Synchronized every ` + every + ` hours from the official upstream servers</span>`
-	nav := [][2]string{{"/", "Projects"}, {"/about/", "About"}}
-	var names []string
-	desc := map[string]string{}
-	for _, p := range mirrorProjects {
-		names = append(names, p[0])
-		desc[p[0]] = p[1]
-	}
-	r, mono, dirc, filec := g.c("r"), g.c("mono"), g.c("dir"), g.c("file")
-	s.desc = s.name + ": open-source software mirror, synchronized with the official upstream servers every " + every + " hours."
-	everyN, _ := strconv.Atoi(every)
-	statusPath := g.pick([]string{"/status.json", "/api/status", "/mirrors.json", "/api/v1/status"})
-	if strings.HasPrefix(statusPath, "/api/") {
-		s.apiPre = statusPath[:strings.LastIndex(statusPath, "/")+1]
-	}
-	chosen := g.pickN(names, g.n(9, 14))
-	syncing := g.r.IntN(len(chosen)) // 有一个项目正在同步
-	var rows strings.Builder
-	var projects []map[string]any
-	total := 0
-	for i, name := range chosen {
-		gb := g.n(18, 2400)
-		total += gb
-		ago := g.n(8, everyN*60-12) // 分钟:同步间隔以内
-		status := fmt.Sprintf(`<span class="%s">Synced %dh ago</span>`, g.c("ok"), ago/60)
-		if ago < 60 {
-			status = fmt.Sprintf(`<span class="%s">Synced %d min ago</span>`, g.c("ok"), ago)
-		}
-		state := "synced"
-		if i == syncing {
-			status = fmt.Sprintf(`<span class="%s">Syncing</span>`, g.c("busy"))
-			state = "syncing"
-		}
-		projects = append(projects, map[string]any{"name": name, "status": state, g.jsonKey("last_sync"): g.base.Add(-time.Duration(ago) * time.Minute).UTC().Format(time.RFC3339),
-			g.jsonKey("size_bytes"): int64(gb) << 30, "path": "/" + name + "/"})
-		fmt.Fprintf(&rows, `<tr><td><a class="%s" href="/%s/">%s/</a></td><td class="%s %s">%s</td><td class="%s %s">%s</td><td class="%s">%s</td></tr>`,
-			dirc, name, name, g.c("hide"), g.c("muted"), esc(desc[name]), r, mono, size(gb), r, status)
-		ver := fmt.Sprintf("%d.%d", g.n(3, 42), g.n(0, 9))
-		var list strings.Builder
-		for _, d := range g.pickN(mirrorDirs, g.n(2, 4)) {
-			date := g.daysAgo(g.n(0, 9))
-			fmt.Fprintf(&list, `<tr><td><a class="%s" href="/%s/%s/">%s/</a></td><td class="%s %s">-</td><td class="%s %s">%s</td></tr>`, dirc, name, d, d, r, mono, r, mono, date)
-			var sub strings.Builder
-			for _, fn := range mirrorDirFiles(d) {
-				body, ctype := mirrorFile(g, name, desc[name], ver, d, fn)
-				p := "/" + name + "/" + d + "/" + fn
-				s.add(p, ctype, body)
-				fmt.Fprintf(&sub, `<tr><td><a class="%s" href="%s">%s</a></td><td class="%s %s">%s</td><td class="%s %s">%s</td></tr>`, filec, p, fn, r, mono, humanSize(len(body)), r, mono, date)
-			}
-			dp := "/" + name + "/" + d + "/"
-			s.add(dp, htmlType, layout(g, s, dp, "Index of "+dp+" - "+s.name, nav, indexBody(g, dp, "/"+name+"/", desc[name], sub.String())))
-		}
-		for _, fn := range []string{"README", "SHA256SUMS", "SHA256SUMS.sig"} {
-			body, ctype := mirrorFile(g, name, desc[name], ver, "", fn)
-			p := "/" + name + "/" + fn
-			s.add(p, ctype, body)
-			fmt.Fprintf(&list, `<tr><td><a class="%s" href="%s">%s</a></td><td class="%s %s">%s</td><td class="%s %s">%s</td></tr>`, filec, p, fn, r, mono, humanSize(len(body)), r, mono, g.daysAgo(g.n(1, 30)))
-		}
-		pp := "/" + name + "/"
-		s.add(pp, htmlType, layout(g, s, pp, "Index of "+pp+" - "+s.name, nav, indexBody(g, pp, "/", desc[name], list.String())))
-	}
-	chart, peak, avg := trafficChart(g, 960, 150)
-	chartImg := s.asset(g, "svg", svgType, chart)
-	var axis strings.Builder
-	for i := 0; i < 5; i++ {
-		d := 29 - (i*29+2)/4
-		label := g.base.Add(-time.Duration(d) * 24 * time.Hour).Format("Jan 2")
-		if d == 0 {
-			label = "Today"
-		}
-		fmt.Fprintf(&axis, `<span>%s</span>`, label)
-	}
-	s.getJSON(statusPath, http.StatusOK, map[string]any{"name": s.name, g.jsonKey("updated_at"): g.base.UTC().Format(time.RFC3339), g.jsonKey("sync_interval_hours"): everyN, "projects": projects})
-	stat := func(v, label string) string {
-		return fmt.Sprintf(`<div class="%s"><b>%s</b><span>%s</span></div>`, g.c("stat"), v, label)
-	}
-	body := fmt.Sprintf(`<h1>%s</h1><p class="%s">Open-source software mirror, synchronized with upstream every %s hours.</p>`+
-		`<div class="%s">%s%s%s%s</div>`+
-		`<div class="%s"><table><thead><tr><th>Project</th><th class="%s">Description</th><th class="%s">Size</th><th class="%s">Status</th></tr></thead><tbody>%s</tbody></table></div>`+
-		`<p class="%s" style="font-size:13px;margin:8px 2px 0">Machine-readable status: <a href="%s">%s</a></p>`+
-		`<h2>Traffic, last 30 days</h2><p class="%s" style="margin:-6px 0 6px;font-size:13px">Peak %.1f TB / day · average %.1f TB / day</p><div class="%s"><img src="%s" alt="" width="960" height="150"><div class="%s">%s</div></div>`,
-		esc(s.name), g.c("sub"), every, g.c("stats"),
-		stat(strconv.Itoa(len(chosen)), "projects"), stat(size(total), "total size"), stat(g.pick([]string{"10 Gbps", "20 Gbps", "25 Gbps"}), "uplink"), stat("IPv4 / IPv6", "HTTP and HTTPS"),
-		g.c("card"), g.c("hide"), r, r, rows.String(), g.c("muted"), statusPath, statusPath, g.c("muted"), peak, avg, g.c("chart"), chartImg, g.c("axis"), axis.String())
-	s.add("/", htmlType, layout(g, s, "/", s.name, nav, body))
-	s.add("/about/", htmlType, layout(g, s, "/about/", "About - "+s.name, nav,
-		`<h1>About this mirror</h1><p class="`+g.c("sub")+`">A public mirror for open-source projects.</p>`+mirrorAbout(g)))
-	s.setNotFound(layout(g, s, "", "Not found - "+s.name, nav, notFoundBody(g)))
-}
-
-// indexBody 目录页:面包屑、标题、文件列表
-func indexBody(g *gen, path, parent, desc, rows string) string {
-	var crumbs strings.Builder
-	crumbs.WriteString(`<a href="/">Projects</a>`)
-	acc := "/"
-	for _, part := range strings.Split(strings.Trim(path, "/"), "/") {
-		acc += part + "/"
-		if acc == path {
-			fmt.Fprintf(&crumbs, ` / %s`, esc(part))
-		} else {
-			fmt.Fprintf(&crumbs, ` / <a href="%s">%s</a>`, acc, esc(part))
-		}
-	}
-	return fmt.Sprintf(`<p class="%s">%s</p><h1>Index of %s</h1><p class="%s">%s</p><div class="%s"><table><thead><tr><th>Name</th><th class="%s">Size</th><th class="%s">Last modified</th></tr></thead><tbody><tr><td><a class="%s" href="%s">../</a></td><td></td><td></td></tr>%s</tbody></table></div>`,
-		g.c("crumbs"), crumbs.String(), esc(path), g.c("sub"), esc(desc), g.c("card"), g.c("r"), g.c("r"), g.c("dir"), parent, rows)
-}
-
-// mirrorFile 镜像里那几个小文件的内容:说明、校验和、签名、Release —— 和真镜像上的格式一样
-func mirrorFile(g *gen, proj, desc, ver, dir, name string) ([]byte, string) {
-	arch := []string{"amd64", "arm64"}
-	ext := map[string]string{"iso": "iso", "images": "img.xz", "releases": "tar.xz", "snapshots": "tar.zst", "updates": "tar.gz", "pool": "deb"}[dir]
-	if ext == "" {
-		ext = "iso"
-	}
-	sig := func() string {
-		var b strings.Builder
-		b.WriteString("-----BEGIN PGP SIGNATURE-----\n\n")
-		for i := 0; i < 5; i++ {
-			b.WriteString(g.b64(64) + "\n")
-		}
-		b.WriteString(g.b64(28) + "\n=" + g.b64(4) + "\n-----END PGP SIGNATURE-----\n")
-		return b.String()
-	}
-	switch name {
-	case "README":
-		return []byte(fmt.Sprintf("%s\n%s\n\nThis directory is synchronized from the official %s servers several times a day.\n"+
-			"Files are served exactly as published upstream. Please verify what you download with the\nchecksums and signatures that come with each release.\n\nLast sync: %s UTC\n",
-			desc, strings.Repeat("=", len(desc)), desc, g.daysAgo(g.n(0, 2)))), textType
-	case "SHA256SUMS":
-		var b strings.Builder
-		for _, a := range arch {
-			for _, kind := range []string{"", "-minimal"} {
-				fmt.Fprintf(&b, "%s  %s-%s%s-%s.%s\n", g.hex(64), proj, ver, kind, a, ext)
-			}
-		}
-		return []byte(b.String()), textType
-	case "SHA256SUMS.sig", "Release.gpg":
-		return []byte(sig()), "application/pgp-signature"
-	}
-	// Release / InRelease
-	var b strings.Builder
-	codename := strings.ToLower(g.pick(words))
-	fmt.Fprintf(&b, "Origin: %s\nLabel: %s\nSuite: stable\nCodename: %s\nDate: %s\nArchitectures: amd64 arm64\nComponents: main contrib\nDescription: %s %s\nSHA256:\n",
-		desc, desc, codename, g.base.Add(-time.Duration(g.n(1, 40))*time.Hour).Format(time.RFC1123), desc, ver)
-	for _, comp := range []string{"main", "contrib"} {
-		for _, a := range arch {
-			fmt.Fprintf(&b, " %s %8d %s/binary-%s/Packages\n %s %8d %s/binary-%s/Packages.xz\n", g.hex(64), g.n(200000, 9000000), comp, a, g.hex(64), g.n(40000, 1500000), comp, a)
-		}
-	}
-	if name == "InRelease" {
-		return []byte("-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\n" + b.String() + sig()), textType
-	}
-	return []byte(b.String()), textType
-}
-
-// ---- 软件下载 ----
-
-// featureIcons 功能介绍里的小图标(描边,跟着强调色),和 featureTexts 一一对应
-var featureIcons = []string{
-	`<path d="M3 12h4l3-8 4 16 3-8h4"/>`,
-	`<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M4 10h16M10 10v10"/>`,
-	`<path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/>`,
-	`<path d="M4 17l5-5 4 4 7-8"/><path d="M14 8h6v6"/>`,
-	`<circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/>`,
-	`<path d="M7 18a4 4 0 0 1-.4-8A6 6 0 0 1 18 8.5 4.5 4.5 0 0 1 17.5 18z"/>`,
-}
-
-func genDownloads(s *Site, g *gen) {
-	kind := g.pick([]string{"Studio", "Sync", "Desk", "Capture", "Notes", "Player", "Draw"})
-	product := g.pick(words) + " " + kind
-	s.name = product
-	maker := g.pick(words) + " Labs"
-	s.foot = `<span>Made by ` + esc(maker) + `</span>`
-	icon := s.asset(g, "svg", svgType, appIcon(g, kind))
-	s.apiPre = g.sk.api
-	s.desc = product + g.pick([]string{" for Windows, macOS and Linux. Free for personal use.", " is a small, fast app for Windows, macOS and Linux.", ": download the latest version for your computer."})
-	s.addScript(g, scriptParts{forms: true, os: true, latest: "releases/latest", formKey: g.sk.formKey, osKey: g.sk.osKey})
-	mock := appMock(s, g, kind, product)
-	s.logo = fmt.Sprintf(`<img class="%s" src="%s" alt="" width="26" height="26">`, g.c("logo"), icon)
-	nav := [][2]string{{"/", "Download"}, {"/releases/", "Releases"}, {"/about/", "About"}}
-	major, minor := g.n(2, 6), g.n(0, 9)
-	type rel struct {
-		ver, date string
-		at        time.Time
-	}
-	var rels []rel
-	day := g.n(3, 20)
-	for i := 0; i < 6; i++ {
-		at := g.base.Add(-time.Duration(day) * 24 * time.Hour)
-		rels = append(rels, rel{fmt.Sprintf("%d.%d.%d", major, minor, 6-i), at.Format("Jan 2, 2006"), at})
-		day += g.n(12, 40)
-	}
-	slug := strings.ToLower(strings.ReplaceAll(product, " ", "-"))
-	notes := []string{"Faster startup on large libraries", "Improved memory usage when syncing many files", "Fixed a crash when opening very large projects",
-		"Updated translations", "New keyboard shortcuts for common actions", "Better handling of slow network connections", "Smoother scrolling on high-refresh displays",
-		"Fixed export of files with long names", "Security and stability improvements"}
-	oses := [][2]string{{"win", "Windows"}, {"mac", "macOS"}, {"linux", "Linux"}}
-	type file struct {
-		name, size, sha, os, key string
-		mb                       int
-	}
-	files := func(ver string) []file {
-		var out []file
-		for _, o := range oses {
-			f := file{os: o[1], key: o[0], sha: g.hex(64)}
-			switch o[0] {
-			case "win":
-				f.name, f.mb = fmt.Sprintf("%s-%s-x64-setup.exe", slug, ver), g.n(90, 260)
-			case "mac":
-				f.name, f.mb = fmt.Sprintf("%s-%s-universal.dmg", slug, ver), g.n(110, 320)
-			default:
-				f.name, f.mb = fmt.Sprintf("%s-%s-x86_64.AppImage", slug, ver), g.n(95, 280)
-			}
-			f.size = mb(f.mb)
-			out = append(out, f)
-		}
-		return out
-	}
-	r, mono, sub := g.c("r"), g.c("mono"), g.c("sub")
-	var cards, relList strings.Builder
-	var latest []map[string]any
-	var history []map[string]any
-	jk := g.jsonKey
-	for i, rl := range rels {
-		fmt.Fprintf(&relList, `<tr><td><a href="/releases/%s/">%s %s</a></td><td class="%s %s">%s</td></tr>`, rl.ver, esc(product), rl.ver, r, g.c("muted"), rl.date)
-		var rows, changes strings.Builder
-		for _, f := range files(rl.ver) {
-			p := "/releases/" + rl.ver + "/" + f.name
-			fmt.Fprintf(&rows, `<tr><td><a class="%s" href="%s">%s</a></td><td class="%s">%s</td><td class="%s %s %s">%s…</td></tr>`, g.c("file"), p, esc(f.name), r, f.size, g.c("hide"), mono, g.c("muted"), f.sha[:16])
-			// 点了下载:一页「谢谢下载」(下载链接本身是给浏览器的,这里不放安装包)
-			s.add(p, htmlType, layout(g, s, p, "Downloading "+f.name, nav,
-				fmt.Sprintf(`<div class="%s"><img src="%s" alt="" width="64" height="64"><div><h1>Thanks for downloading %s</h1><p class="%s" style="margin:0">%s · version %s · %s</p></div></div><p>Your download should begin in a few seconds. If it doesn't, check your connection and <a href="/releases/%s/">start it again from the release page</a>.</p><p class="%s">SHA-256: <span class="%s">%s</span></p>`,
-					g.c("head2"), icon, esc(product), sub, f.os, rl.ver, f.size, rl.ver, g.c("muted"), mono, f.sha)))
-			if i == 0 {
-				fmt.Fprintf(&cards, `<div class="%s" data-%s="%s"><b>%s</b><div class="%s" style="font-size:13px;margin:2px 0 12px">%s · %s</div><a class="%s" href="%s">Download</a></div>`,
-					g.c("card"), g.sk.osKey, f.key, f.os, g.c("muted"), esc(f.name), f.size, g.c("btn"), p)
-				latest = append(latest, map[string]any{"platform": f.key, jk("file_name"): f.name, jk("size_bytes"): f.mb<<20 + g.n(0, 1<<20), "sha256": f.sha, "url": p})
-			}
-		}
-		history = append(history, map[string]any{"version": rl.ver, jk("released_at"): rl.at.UTC().Format(time.RFC3339), "url": "/releases/" + rl.ver + "/"})
-		for _, n := range g.pickN(notes, g.n(2, 4)) {
-			fmt.Fprintf(&changes, `<li>%s</li>`, esc(n))
-		}
-		rp := "/releases/" + rl.ver + "/"
-		s.add(rp, htmlType, layout(g, s, rp, product+" "+rl.ver, nav,
-			fmt.Sprintf(`<h1>%s %s</h1><p class="%s">Released %s</p><h2>What's new</h2><ul>%s</ul><h2>Files</h2><div class="%s"><table><thead><tr><th>File</th><th class="%s">Size</th><th class="%s">SHA-256</th></tr></thead><tbody>%s</tbody></table></div>`,
-				esc(product), rl.ver, sub, rl.date, changes.String(), g.c("card"), r, g.c("hide"), rows.String())))
-	}
-	var feats strings.Builder
-	for _, i := range g.r.Perm(len(featureTexts))[:3] {
-		fmt.Fprintf(&feats, `<div class="%s"><div class="%s"><svg viewBox="0 0 24 24" fill="none" stroke="%s" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">%s</svg></div><h3>%s</h3><p>%s</p></div>`,
-			g.c("feat"), g.c("ficon"), g.accent(), featureIcons[i], esc(g.alt(featureTexts[i][0])), esc(g.alt(featureTexts[i][1])))
-	}
-	subNote := g.pick([]string{"One email when a new version is out. No spam.", "Get the release notes by email when we ship an update.", "We'll email you when a new version is available, about once a month."})
-	subForm := subscribePage(g, s, nav, "subscribe", "Release notes by email", subNote)
-	s.subscribeAPI(g, s.apiPre+"subscribe", subForm)
-	s.getJSON(s.apiPre+"releases/latest", http.StatusOK, map[string]any{"name": product, "version": rels[0].ver, jk("released_at"): rels[0].at.UTC().Format(time.RFC3339), "files": latest})
-	s.getJSON(s.apiPre+"releases", http.StatusOK, map[string]any{"data": history})
-	s.add("/", htmlType, layout(g, s, "/", "Download "+product, nav,
-		fmt.Sprintf(`<div class="%s"><img src="%s" alt="" width="64" height="64"><div><h1>Download %s</h1><p class="%s" style="margin:0">Version %s · released %s · free for personal use</p></div></div>`+
-			`<div class="%s">%s</div>%s<div class="%s">%s</div>%s<h2>Release history</h2><div class="%s"><table><tbody>%s</tbody></table></div>`,
-			g.c("head2"), icon, esc(product), sub, rels[0].ver, rels[0].date, g.c("dl"), cards.String(), mock, g.c("feats"), feats.String(),
-			subscribeBox(g, s, "subscribe", "Release notes by email", subNote), g.c("card"), relList.String())))
-	s.add("/releases/", htmlType, layout(g, s, "/releases/", "Releases - "+product, nav,
-		fmt.Sprintf(`<h1>Releases</h1><p class="%s">All versions of %s.</p><div class="%s"><table><tbody>%s</tbody></table></div>`, sub, esc(product), g.c("card"), relList.String())))
-	s.add("/about/", htmlType, layout(g, s, "/about/", "About - "+product, nav,
-		fmt.Sprintf(`<h1>About %s</h1><p class="%s">Made by %s.</p>%s`, esc(product), sub, esc(maker), productAbout(g, esc(product)))))
-	s.setNotFound(layout(g, s, "", "Not found - "+product, nav, notFoundBody(g)))
-}
 
 // slugify 文章标题 → 地址里的那一段
 func slugify(t string) string {
@@ -780,11 +657,23 @@ func humanSize(n int) string {
 	return fmt.Sprintf("%.1fK", float64(n)/1024)
 }
 
-// favicon 站点图标:强调色的小方块(个人站是圆的)
+// favicon 站点图标:强调色的小方块(个人站是圆的),中间可能有一个小记号。
+// 圆角、深浅、记号都按种子变:原来只有「色相 × 方圆」七百多种,把这七百多个图标的哈希列出来就能按图标搜出全部伪装站(审查 F-H1)
 func favicon(g *gen, round bool) []byte {
-	rx := "8"
+	rx := g.n(5, 11)
 	if round {
-		rx = "16"
+		rx = 16
 	}
-	return []byte(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="%s" fill="%s"/></svg>`, rx, g.accent()))
+	fill := hslHex(float64(g.hue+g.n(-5, 5)), float64(g.n(52, 72)), float64(g.n(38, 50)))
+	mark := ""
+	switch g.r.IntN(5) {
+	case 0:
+		mark = fmt.Sprintf(`<circle cx="16" cy="16" r="%d" fill="#fff"%s/>`, g.n(4, 7), op(.8+.2*g.r.Float64()))
+	case 1:
+		a := g.n(9, 12)
+		mark = fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" rx="%d" fill="#fff"%s/>`, a, a, 32-2*a, 32-2*a, g.n(1, 3), op(.8+.2*g.r.Float64()))
+	case 2:
+		mark = fmt.Sprintf(`<path d="M%d %dL%d %d" stroke="#fff" stroke-width="%d" stroke-linecap="round"/>`, g.n(9, 12), g.n(20, 23), g.n(20, 23), g.n(9, 12), g.n(3, 5))
+	}
+	return []byte(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="%d" fill="%s"/>%s</svg>`, rx, fill, mark))
 }
