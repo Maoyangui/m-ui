@@ -13,7 +13,7 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 | 多服务器,只管一台;用户/出站/路由/流量/日期全同步 | Hub/Agent:主机推快照、回收账本、集中判定 |
 | 入站按延迟自适应;clash 为主,Shadowrocket 多 | 订阅按服务器展开节点 + 每线路 url-test 组,客户端选延迟低的入口 |
 | 定期换机,一键还原全部状态 | 单 zip 备份(库 + 证书),上传即整机还原自动重启;换机向导 |
-| 单用户同时在线设备数、上下行限速 | 数据面 Limiter:按源 IP 并发计数(IPv4 地址与 IPv6 /64 各自计数,跨机并集)+ 令牌桶 |
+| 单用户同时在线设备数、上下行限速 | 数据面 Limiter:按源 IP 并发计数(IPv4 地址与 IPv6 /64 各自计数,跨机并集;中转入口的来源不计)+ 令牌桶 |
 | 角色开关:关=主,开=副 | 设置 `nodeMode` 一个布尔 |
 | 从旧面板备份无缝迁移 | importer:端口/凭据/面板路径/订阅 URL 全保留 |
 
@@ -95,6 +95,7 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 - **升级内核必须核对**:`core/protocol/usersess` 的会话登记靠 sing-quic 的 `qtls.ServerConfig` 扩展点(`ListenWithOptions` / `ListenEarlyWithOptions` / `ConfigureHTTP3` 对 TLS 配置做类型断言)接管 QUIC 监听,`usersess/quic.go` 里复制了 sing-quic 默认路径的 Transport 参数(hy2 无混淆时的 StatelessResetKey、有混淆时关版本协商包、`SetSingleUse`)。升 sing-box / sing-quic / quic-go 时逐项对照上游 `qtls` 与 `hysteria2/service.go`、`tuic/service.go`,参数变了这里要跟着改;换表 / 踢线等被关的 QUIC 连接真正断开才返回,靠的是 quic-go 在事件循环断开全部流、发出 CONNECTION_CLOSE 之后才取消 `conn.Context()`,这个语义变了会话会在"已断开"之后还通一阵。`usersess` 的单测与 `M_UI_E2E=1` 的真实入站测试(`core/usersess_e2e_test.go`)都要过。另有两处靠 sing-quic 的行为认出"到了但认证没过"(见 `core/protocol/arrival`):hysteria2 密码不对时把认证请求(`POST https://hysteria/auth`)交给伪装站点 —— 入站在伪装站点外面包了一层认它;tuic 认证失败 / 超时用 `CloseWithError(0, "")` 关连接 —— 会话登记表在连接结束时认"从没开过流、本端关的"。升级后 `core/arrival_e2e_test.go` 要过。
 - **老连接的设备数**:limiter 对空闲后恢复的 IP 重新执行设备上限;副机上报超过 300 秒没刷新的在线 IP 不再计入并集(失联副机的名单不能拿来拒新设备、断老连接)。
 - **设备数跨机**:主机把"其他机器上在线的 IP"下发给每台机器的 Limiter;本机计数 = 本机活跃 IP ∪ 外部 IP,同一 IP 切换入口不占新名额。
+- **中转入口的来源不算设备**(v0.8.1):经中转入口进来的连接,出口看到的来源是中转机,不是用户的设备。runner 把线路里各中转入口的来源(集群中转机的公网 IP、入口上填的「出口看到的来源 IP」)交给 Limiter(`SetRelaySources`),这些来源不占用户的设备名额、不占代理的设备池(准入、空闲恢复、池满判断、跨机并集都跳过它们);面板和外部 API 报的在线设备数同一口径,在线 IP 里照常列出并标明是哪台中转。反过来设备数也管不到走中转的连接,要限人数用节点设置里的容量。
 - **失联**:>60s 拉不到报告告警一次,恢复再告警一次;副机离线期间主机照常工作,副机继续用最后一份配置服务用户(只是账本回收延后)。
 
 鉴权:`X-Agent-Token` 常量时间比对,非副机角色一律 403;传输建议 HTTPS(副机自签时主机可选跳过校验)。
@@ -202,3 +203,12 @@ m-ui 要解决的是一个人管两到三台入口服务器、几十到几百个
 - `core/log.go`:数据面日志进有界队列(8192 条),单独一个 goroutine 往外写;内核那头只入队,满了丢、丢了多少每分钟报一次。
 - 数据面默认级别 warn;日志页可调 warn / info / debug / error(设置 `coreLogLevel`),运行时生效不重启;关掉记录仍是 panic。
 - SQLite:WAL + `synchronous=NORMAL`(提交不再等 WAL fsync,断电最多丢最近几笔,库不会坏);定时检查点改 PASSIVE(不阻塞),TRUNCATE 只留给备份和停机。
+
+## 更新与更新包签名(`selfupdate` 包,v0.8.1 起验签)
+
+- **检查**:每 6 小时问一次 GitHub Releases 的最新版本,只查不装;直连不通时经本机 WARP。
+- **安装**(面板里的一键更新和 `m-ui update` 共用 `selfupdate.Stage`):取这个版本的 `SHA256SUMS` 和 `SHA256SUMS.sig` → 用内置的发布者公钥验签(Ed25519;`selfupdate/sign.go` 的 `releaseKeys` 是一个列表,换钥时新旧可以并存一段时间)→ 从清单里取本架构安装包的 SHA256 → 下载安装包并比对 → 解出程序、换上(旧程序留作 `m-ui.prev`)→ 重启。任何一步不过都不落新程序,运行中的那份不动;新版本 90 秒内没把面板服务起来就换回旧程序,结果写进数据目录的 `upgrade-status.json`,页面顶部提示。
+- **为什么要签名**:只比 `SHA256SUMS` 防不了下载被换 —— 换得掉安装包的人同样换得掉那份清单。签名把「这份清单是发布者出的」钉在程序内置的公钥上。
+- **发布**(`.github/workflows/release.yml`):构建后用仓库密钥 `RELEASE_SIGNING_KEY` 给 `SHA256SUMS` 签两种写法 —— `SHA256SUMS.sig`(64 字节签名的 base64,程序和 OpenSSL 用)和 `SHA256SUMS.sshsig`(SSH 签名格式,`ssh-keygen -Y verify` 用,命名空间 `m-ui-release`);当场用刚构建出来的程序(`m-ui verify-release`)和安装脚本(`install.sh --verify-sums`)各验一遍,并确认改过一个字节的清单验不过,才发布。打了标签却没有密钥、或自检不过,不发布。
+- **安装脚本**:v0.8.1 起的版本要求两个签名文件都取得到;系统里有 OpenSSH 8.1+ 用 `ssh-keygen`,否则用 OpenSSL 3+,两样都没有的老系统提示一句、只比 SHA256。本地文件和别的下载地址不验(用法见 README 的安装一节)。
+- **兼容**:不会验签的老版本照旧只取安装包和 `SHA256SUMS`,能直接升到带签名的版本。

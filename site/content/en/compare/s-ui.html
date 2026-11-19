@@ -20,7 +20,7 @@
     <tr><td>User limits</td><td>Quota with periodic reset, expiry, device limit (source IPs across all servers), speed limits</td><td>Traffic cap and expiration date; IP / device limit: <span class="unk">Unknown</span></td></tr>
     <tr><td>Resellers</td><td>Separate panel, budgets, own plans and landing copy</td><td><span class="unk">Unknown</span></td></tr>
     <tr><td>Certificates</td><td>Let's Encrypt HTTP-01 / Cloudflare DNS-01 in the panel, self-signed one-click</td><td><span class="unk">Unknown</span> (not in README)</td></tr>
-    <tr><td>Deployment</td><td>One static Go binary + SQLite, systemd; installer verifies SHA256</td><td>Install script or Docker (per README)</td></tr>
+    <tr><td>Deployment</td><td>One static Go binary + SQLite, systemd; installer and updater verify the publisher's signature, then SHA256</td><td>Install script or Docker (per README)</td></tr>
     <tr><td>Import from legacy panel DB</td><td>Yes, compatible legacy format; ports and credentials preserved</td><td>—</td></tr>
     <tr><td>License</td><td>GPL-3.0</td><td>GPL-3.0</td></tr>
   </table>

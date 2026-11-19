@@ -57,6 +57,7 @@ func usage() {
 		{"ha status|takeover|set-master|pause|resume", "主机容灾与设为主机(要 root,见 m-ui ha)"},
 		{"firewall status|open|undo|pause|resume", "本机防火墙:放开系统防火墙、暂停面板规则(要 root)"},
 		{"unban <IP|网段> | --all", "把来源移出黑名单(要 root)"},
+		{"verify-release <SHA256SUMS> <SHA256SUMS.sig>", "用内置的发布者公钥核对一份校验清单的签名"},
 		{"version", "显示版本"},
 	}
 	for _, r := range rows {

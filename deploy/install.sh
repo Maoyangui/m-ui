@@ -5,6 +5,8 @@
 #                   [--open-firewall | --keep-firewall]
 #   bash install.sh --dry-run              只打印会做什么(装到哪、写哪些文件、默认端口),不改任何东西
 #   bash install.sh --uninstall [--purge]  停止并删除服务与程序;不带 --purge 时保留 /etc/m-ui(数据库、证书、备份)
+#   bash install.sh --verify-sums <SHA256SUMS> [<SHA256SUMS.sshsig>] [<SHA256SUMS.sig>]
+#                                          只核对一份校验清单是不是发布者签的(核对自己下载的安装包时用),不安装任何东西
 #
 #   不带来源参数 = 从 GitHub Releases 安装最新版(自动识别 amd64 / arm64)。
 #

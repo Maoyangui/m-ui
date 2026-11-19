@@ -46,7 +46,7 @@ The same panel runs a single server for yourself and a production service with d
 | Lines | Hysteria2, AnyTLS, TUIC, Trojan, VLESS (Reality / Vision), VMess, Shadowsocks (incl. 2022), SOCKS, HTTP, Mixed; WS / gRPC / HTTPUpgrade / HTTP transports; Hysteria2 port hopping and masquerade site; one-click check of Reality handshake targets; per-server deployment; rule-based routing (send domains / IP ranges / ports to different exits); **relay entries** (reach a line through another server or an outside relay; encrypted traffic is passed through as is, UDP included, and subscriptions gain the nodes automatically) |
 | Node settings | Every node in a subscription (a line's direct entry on one server, or one of its relay entries) can have its own traffic ratio, total speed limit, per-user speed limit and online-user cap, or be left out of subscriptions; the page is grouped by line (collapsed by default when there are many nodes), each line row summarises its nodes and opens to show them; relay entries can also be ticked one by one in the user / plan line picker |
 | Upstreams | VLESS / VMess / Trojan / TUIC / Hysteria2 / Shadowsocks / SOCKS exits, import by pasting a share link; latency test, periodic health checks measured **on the servers that actually use the upstream**, failure / recovery alerts naming the server; one-click WARP; **a line can be an upstream** (chained proxy); **upstream groups** use the fastest member that works and switch automatically when it fails |
-| Users | Quota, expiry, periodic reset, concurrent device limit (by source IP: IPv4 addresses and IPv6 /64s counted separately, merged across servers), up / down speed limits; auto-disable and kick on overuse or expiry; bulk create, bulk actions, CSV export. Reseller-owned users stay in the reseller's panel and out of the main user list |
+| Users | Quota, expiry, periodic reset, concurrent device limit (by source IP: IPv4 addresses and IPv6 /64s counted separately, merged across servers; connections that arrive through a relay entry don't take a slot), up / down speed limits; auto-disable and kick on overuse or expiry; bulk create, bulk actions, CSV export. Reseller-owned users stay in the reseller's panel and out of the main user list |
 | Plans | Templates for quota / duration / devices / speed / lines; apply on create, renew (several periods at once) or extend; change plans by replacing, stacking or prorating at a reference price, previewed before you confirm; can bind speed-limit rules for current and future users of the plan |
 | Resellers | Give a reseller lines plus traffic / device / bandwidth budgets and an expiry; they create users and plans in their own panel (port 2054, path /dl). Usage rolls up to the reseller, and going over quota, expiring or being disabled cuts off all of their users at once |
 | Subscriptions | Universal link, Clash and sing-box formats, the right one picked per client from a single address; custom Clash / sing-box templates; external nodes can be hidden, renamed, excluded by keyword and tested from mainland China; landing page in the browser (usage, expiry, one-tap import, QR); users can hand out a temporary share link themselves; external nodes / external subscriptions merged in; `insecure` added automatically for self-signed certs |
@@ -91,7 +91,7 @@ One binary runs four things: the **panel** (admin UI and API), the **subscriptio
 
 > Ports and paths are all configurable; the values above are the defaults. The panel and the reseller panel are the same frontend — the session scope decides what you can see.
 >
-> Each line has a default upstream (direct, WARP or a relay); with routing rules on, chosen domains / IP ranges / ports can take another exit or be blocked. On an IPv6-only server, direct lines also redirect public DNS such as 1.1.1.1 and 8.8.8.8 to their IPv6 addresses. External services are all optional: GitHub (update check), the v2fly domain list (app domain lookup), Cloudflare / ipify (probing this server's public IPv4 and IPv6), Globalping (mainland reachability and the failover overseas witness), the Cloudflare API (certificates and failover automatic DNS, each with a token you provide) and Telegram (alerts); if one is unreachable only that feature is affected.
+> Each line has a default upstream (direct, WARP or a relay); with routing rules on, chosen domains / IP ranges / ports can take another exit or be blocked. On an IPv6-only server, direct lines also redirect public DNS such as 1.1.1.1 and 8.8.8.8 to their IPv6 addresses. External services are all optional: GitHub (update check and update downloads; the supporters list, the public reward ledger and the photos used by decoy sites also come from it, with jsDelivr as fallback), the v2fly domain list (app domain lookup), Cloudflare / ipify (probing this server's public IPv4 and IPv6), Globalping (mainland reachability and the failover overseas witness), DNS provider APIs (Cloudflare for certificates; failover can repoint DNS through Cloudflare, Alibaba Cloud DNS or Tencent DNSPod — each with credentials you provide), Telegram (alerts), ntfy.sh and TronGrid (the supporters wall: sending a name, checking arrivals) and the reward registry (reward.godusevpn.org, contacted only once you register a payout address); if one is unreachable only that feature is affected.
 
 ### What happens when you save
 
@@ -135,19 +135,17 @@ The master does the accounting and pushes config; a node only forwards. Nodes ne
 | 10s | Read traffic and live connections from the data plane, write per user / line / upstream stats | `jobs/` |
 | 10s | Evaluate limit rules (schedule / burst); active states ride the next snapshot to nodes | `rules/` `jobs/` |
 | 1m | Judge quota, expiry and periodic resets — disable and kick where needed; data-plane watchdog | `jobs/` `monitor/` |
+| 5m | With master failover on: the master sends each standby an encrypted replica (again within 30 s of a change), plus a history bundle about once an hour | `ha/` `runner/` |
 | 10m | WAL checkpoint, so the live .db is always safe to copy | `runner/` |
-| 10m (configurable) | Upstream probes: each server checks only the upstreams its lines use; down / recovered alerts | `monitor/` |
+| 10m (configurable) | Upstream probes: each server checks only the upstreams its lines use, results roll up to the master; down / recovered alerts | `monitor/` |
 | 30m (configurable) | Master refreshes external subscriptions; results ride the snapshot to nodes | `runner/` |
-| 90m (configurable) | Master runs the mainland reachability check (Globalping probes in mainland China over IPv4; servers with IPv6 lines also get an IPv6 inbound check in the same round: mainland probes with IPv6 first, then probes abroad to tell the cause apart if they cannot connect) | `reach/` |
-| 1h | Probe this server's public IPv4 / IPv6 (an address counts as gone only after 3 missed rounds); expiry and usage warnings; prune stats and logs by retention | `runner/` `monitor/` `jobs/` |
+| 30m | Panels that registered a reward payout address report their cumulative traffic once (others report nothing) | `runner/` `reward/` |
+| 90m (configurable) | Master runs the mainland reachability check (Globalping probes in mainland China over IPv4; servers with IPv6 lines also get an IPv6 inbound check in the same round: mainland probes that have IPv6 first, then probes abroad to tell the causes apart) | `reach/` |
+| 1h | Probe this server's public IPv4 / IPv6 (an address counts as gone only after 3 missed rounds); expiry and usage warnings; prune time series, the subscription access log and the audit log, each by its own retention, and fold minute samples older than 48 h into hourly buckets | `runner/` `monitor/` `jobs/` |
+| 3m after start, then 1h | Certificate renewal check: renews what is due (sing-box swaps the certificate itself afterwards, no restart), retries failures with backoff; daily reminders for certificates it cannot renew; the outcome is stored on each certificate and survives restarts | `runner/` |
 | 6h | Check whether a newer release exists (check only, never auto-install; through local WARP when GitHub is unreachable directly) | `selfupdate/` |
 | 24h | Download an empty file from GitHub once, to count online panels (no identifier, can be turned off) | `runner/` |
-| 3m after start, then 1h | Certificate renewal check: renews what is due, retries failures with backoff; daily reminders for certificates it cannot renew | `runner/` |
 | daily | Daily report; scheduled backup (at the configured hour) | `monitor/` `runner/` |
-| 1h | Prune time series, subscription access log and audit log, each by its own retention; fold minute samples older than 48 h into hourly buckets | `jobs/` |
-| per setting (10m default) | Probe upstreams — every server checks only what its own lines use, results roll up to the master | `monitor/` |
-| 3m after start, then 1h | Certificate renewal check (after renewal sing-box swaps the certificate itself, no restart; the outcome is stored on each certificate and survives restarts) | `runner/` |
-| daily | Daily report | `monitor/` |
 
 ### Code layout
 
@@ -155,13 +153,20 @@ The master does the accounting and pushes config; a node only forwards. Nodes ne
 |---|---|
 | `web/` | Panel and API, reseller panel and scoping, external API, embedded frontend (zero-build ES modules) |
 | `sub/` | The three subscription formats, landing page, client-download page, temporary sharing |
-| `render/` `core/` | Lines → sing-box config and its dry-run check; embedded data plane, traffic and connection tracking |
+| `render/` `core/` | Lines → sing-box config and its dry-run check; embedded data plane, traffic and connection tracking, speed and device limits |
 | `hub/` | Snapshot push, traffic reclaim, online aggregation between master and nodes |
 | `runner/` | Process orchestration, the three reload tiers and rollback, certificates, backups, external nodes |
 | `jobs/` `monitor/` | Stats, quota enforcement, cleanup, upstream probing and alerts |
 | `rules/` | Limit rules: schedule / burst evaluation, active states, overlay onto user limits |
+| `ha/` `dnsapi/` | Master failover and "set as master": epochs, votes, encrypted replicas, handover; repointing DNS through provider APIs after a takeover |
+| `reach/` | Mainland reachability and IPv6 inbound checks (Globalping) |
+| `fw/` `guard/` | Firewall: detecting, opening and restoring the system firewall, turning rules into kernel rules; allow / block lists for the panel, subscriptions and the external API |
+| `camo/` | Page camouflage: generating the four kinds of decoy site, photo processing |
+| `reward/` | The panel side of the traffic reward: panel identity and signed reports, ledger checks, the registry client |
+| `ext/` `upstream/` | Fetching and parsing external nodes / subscriptions; share links → upstreams |
+| `acme/` `ops/` `notify/` | Certificate issuance; WARP and system tuning; Telegram alerts |
 | `database/` | Models, SQLite open and migration |
-| `selfupdate/` `deploy/` | Version check and in-place update, install script |
+| `selfupdate/` `deploy/` | Version check, update signature verification and in-place update; the install script, plus the reward registry (`deploy/reward`) and the supporters-wall settlement (`deploy/donors`) |
 
 ## Installation
 
@@ -193,6 +198,8 @@ bash install.sh ./m-ui-linux-amd64.tar.gz           # local file (release tarbal
 bash install.sh https://.../m-ui-linux-arm64.tar.gz # any download URL
 ```
 
+When installing from GitHub Releases (no argument, or a version), the script first verifies the publisher's signature on the checksum list `SHA256SUMS` (every release from v0.8.1 on is signed; the public key is built into the script and the binary), then compares the package's SHA256 — any mismatch aborts and nothing is installed. A local file or another download URL gets neither check. To verify one yourself, download `SHA256SUMS`, `SHA256SUMS.sshsig` and `SHA256SUMS.sig` from the same release, run `bash install.sh --verify-sums SHA256SUMS SHA256SUMS.sshsig SHA256SUMS.sig` (is the list signed by the publisher?) and then `sha256sum -c --ignore-missing SHA256SUMS` (does the package match the list?).
+
 ### First login
 
 - Panel: `http://<server-ip>:2053/app/`
@@ -208,7 +215,7 @@ The panel UI is available in Chinese and English (switch at the bottom of the si
 m-ui update     # or pick "更新到最新版" (update to latest) in the m-ui menu
 ```
 
-or run the one-line installer again. Upgrades replace the binary and restart; database, certificates and backups are untouched.
+or run the one-line installer again. Upgrades replace the binary and restart; database, certificates and backups are untouched. From v0.8.1 on, update packages carry the publisher's signature: the one-click update in the panel, `m-ui update` and the install script all verify it first — an update that does not verify is not installed and the running binary is left alone. Upgrading from an older version needs no preparation.
 
 With nodes, **upgrade the nodes first, then the master**: once the master uses a newer feature, a node that is too old rejects the whole sync and keeps serving its last configuration until it is upgraded, and a failover standby older than the master keeps its place but gets no new data replicas. If the panel, reseller panel or external API sits behind a reverse proxy (Nginx, Caddy, ...): from v0.7.17 ten wrong external API tokens pause that source for 5 minutes (panel logins already had this), and without configuration every request comes from the proxy itself, so one caller getting it wrong locks everyone out; after upgrading, enter the proxy addresses in Settings → Panel → **Trusted reverse proxies** (`127.0.0.1, ::1` for a proxy on the same server; see [docs/API.md](docs/API.md)). After upgrading to v0.7.17 **master failover is off by default**; turn it on in the master's Settings → Master failover if you want it (see [Master failover and Set as master](#master-failover-and-set-as-master)); left off, nothing changes. Also from v0.7.17, sing-box subscriptions get a latency-tested group per line too, and external nodes with the same name as a line become "X 2", so users who had picked one in their client need to pick it again (see [External nodes](#external-nodes)).
 
@@ -235,6 +242,7 @@ No domain is fine: self-signed cert + IP, and every node in the subscription alr
 - One line = one entry port. Ports are identical on every server; the master renders and pushes the config to each node.
 - The **upstream** decides where traffic exits: direct, WARP, or any relay you added. Turn on **rule-based routing** to send chosen domains, IP ranges or ports to another exit (or block them); everything else uses this upstream. Type app names next to it (douyin, netflix, chatgpt…) and click "Look up": the server looks them up in a public domain list (v2fly) and adds one rule per app, labelled with the app name, whose domains you can edit and whose egress you pick.
 - **Deploy to**: all servers by default, or only selected ones, e.g. a line that exists only on one node.
+- **Relay entries**: when users reach this line's server slowly or not at all, let them connect to another machine first — another server in your cluster (the panel opens a forwarding port on it for you) or a relay you run or rent (enter its address and port). It forwards the encrypted bytes to the exit as they are, TCP and UDP alike, without decrypting. Add them under "Relay entries" in the line form; the subscription gains nodes marked ⇄. A cluster relay forwards to the exit's public IP by default; IPv4 or IPv6 follows the IP version this line uses on the exit (IPv4 when the relay has no IPv6; for hysteria2 / TUIC lines a relay that is itself listed by IPv6 also prefers IPv6), and you can enter another address (a private one when the two servers share a network). If hysteria2 / TUIC through a relay "connects but has no internet" while TCP lines are fine, the relay-to-exit leg most likely cannot carry large UDP packets (typical for carrier-NAT IPv4): switch the forward address to the exit's other IP version. Connections arriving through a relay show the relay as their source on the exit and don't take one of the user's device slots.
 - Hysteria2 accepts a **port-hopping range** (e.g. `20000-30000`): the server forwards that UDP range to the line port with nftables / iptables and clients hop between ports, which sidesteps per-port UDP throttling by ISPs.
 - Every save dry-runs the full sing-box config; a failing change is rejected instead of stored.
 
@@ -458,7 +466,7 @@ When someone follows an IP, port or domain to your server, they see an ordinary 
 
 The coin in the top bar: every 1 TB of real traffic on your lines (upload plus download in raw bytes, no multipliers; a master adds up its nodes) earns 1 point. On m-ui's first anniversary (**2027-09-03**) the prize pool is paid out in USDT to registered Solana addresses in proportion to their points.
 
-- **The pool** = 40% of every fulfilled order of [godusevpn node subscriptions](https://godusevpn.org/subscription/) + named donations (in full); orders refunded after payment don't count. The page lists every deposit with its amount, chain and sender, each verifiable in a block explorer. To donate, leave a name first: send the exact amount shown within 60 minutes and it counts toward the pool and goes on the donor board. Money sent straight to the address without that can't be matched and is not counted.
+- **The pool** = 40% of every fulfilled order of [godusevpn node subscriptions](https://godusevpn.org/subscription/) + named donations (in full); orders refunded after payment don't count. The page lists every deposit with its amount, chain and sender, each verifiable in a block explorer. To donate, leave a name first: send the exact amount shown within 60 minutes and it counts toward the pool and goes on the donor board. Money sent straight to the address without that can't be matched and is not counted. Arrival is judged by on-chain time: with the reward page open it usually shows up within a minute of sending, and if the registry cannot read the chain for a while nothing is lost — it is recorded as soon as the chain is readable again.
 - **Registering**: add a Solana address on the page. Without one the panel keeps counting but reports nothing; once you add it, everything counted so far is registered. Each address is credited at most 1 point a day, on days one of its panels reports; the rest carries over and is never lost.
 - **Public ledger**: addresses, points and every deposit are recorded in `ledger.json` on this repository's `rewards` branch for anyone to check. What each address will receive on payout day can be computed from that ledger with [`deploy/reward/payout.mjs`](deploy/reward/payout.mjs).
 - **Cheating is excluded automatically**, with no manual step: one source (one public IP) counts for one address; traffic registered twice or growing by exactly the same amount every day is excluded with the reason stated, and restored 14 days after the cause is gone. Panels are judged, not addresses, so someone abusing your address on their own panel can't hurt you. The rules, and what they cannot do, are in [deploy/reward/README.md](deploy/reward/README.md) (Chinese).
@@ -489,6 +497,10 @@ m-ui ha abandon [--force]                    on the master, abandon a Set as mas
 m-ui ha yield [server]                       when two servers both act as master, hand master back to the other one (this one becomes a node and reverts the DNS it changed)
 m-ui ha pause <minutes> / m-ui ha resume     on the master, pause / resume takeovers (before upgrades, maintenance)
 m-ui ha reset [--force]                      clear this server's failover records (epoch, followed master, replicas) so another master can add it; needs --force on a master
+m-ui firewall status | open | undo           this server's system firewall: show, open (backed up first), undo the opening (needs root)
+m-ui firewall pause | resume                 pause / resume the firewall rules pushed by the panel (when your own rule locked you out)
+m-ui unban <IP|CIDR> | --all                 remove a source from the block list
+m-ui verify-release <SHA256SUMS> <SHA256SUMS.sig>   check a checksum list's signature against the publisher key built into the binary
 m-ui version
 ```
 
@@ -500,17 +512,23 @@ m-ui version
 
 Without `-db` the path comes from the systemd unit (default `/etc/m-ui/m-ui.db`); if the database does not exist the command fails instead of silently creating an empty one and backing up or resetting that.
 
-Run `m-ui` without arguments for the menu (Chinese):
+Run `m-ui` without arguments for the menu (it is in Chinese; the numbers in the program are authoritative):
 
 ```
- 1. panel URL / account            8. recent logs
- 2. restart                        9. backup now
- 3. stop                          10. update to latest
- 4. start                         11. self-signed certificate
- 5. reset admin password          12. switch master / node role
- 6. change panel port / path      13. disable two-factor auth
- 7. reset all settings            14. uninstall
-                                  15. master failover / set as master
+Troubleshoot  1. panel URL / account
+              2. health check (panel won't open, nodes won't connect — start here)
+              3. logs
+Service       4. restart     5. stop     6. start     7. update to latest
+Login         8. reset admin password (also turns two-factor off)
+              9. turn two-factor off only (lost phone)
+             10. firewall and block list (locked yourself out / unban an IP)
+Settings     11. change ports / paths / listen addresses
+             12. self-signed certificate (no domain)
+             13. reset all settings (lines, users, upstreams and servers are kept)
+Data         14. back up now          15. restore a backup
+Servers      16. master / node (switch role, pairing info)
+             17. master failover / set as master
+Other        18. uninstall m-ui       0. quit
 ```
 
 ## Migrating from an old panel
@@ -548,7 +566,7 @@ These are current design limits, not faults; they may improve later.
 
 ## FAQ
 
-**Does it work on an IPv6-only server?** Yes: the panel, subscriptions and lines all listen on IPv6 and subscriptions give the IPv6 address (open IPv6 source `::/0` in your cloud firewall separately). Three things are limited: GitHub has no IPv6, so update checks and one-click updates need WARP installed on the Ops page first (updates then go through it automatically) or a manually uploaded package; the one-line installer is different — there is no panel yet to install WARP from, and both the script (raw.githubusercontent.com) and the package it downloads live on GitHub, so running it directly fails: download `install.sh` and the `m-ui-linux-amd64.tar.gz` (or arm64) for your architecture on a machine that can reach GitHub, copy them over and run `bash install.sh ./m-ui-linux-amd64.tar.gz` (a local file is not checked against GitHub; to verify, `sha256sum` it against `SHA256SUMS` from the same release yourself), or first give the system an IPv4-capable egress (such as NAT64 / DNS64) and then run it; the direct egress cannot reach IPv4-only sites, so use WARP as the line's upstream for full access (common remote DNS servers clients use, such as 1.1.1.1, 8.8.8.8, 9.9.9.9 and 223.5.5.5, are redirected to their IPv6 addresses on direct lines automatically, so name resolution keeps working); the mainland reachability check is IPv4-only (an IPv6-only server shows "No testable port" there: grey, no alert, with the reason in small print; the same goes when its lines use a relay or subscriptions give domains; only when its domain resolves to an IPv4 address is that address tested), with a separate IPv6 inbound check from probes abroad. Device limits count each address family separately: IPv4 addresses and IPv6 /64s must each stay within the limit (over IPv6 the devices of one home connection share a /64, just as they share the router's address over IPv4), the online count shows the larger of the two, and a dual-stack device never counts twice.
+**Does it work on an IPv6-only server?** Yes: the panel, subscriptions and lines all listen on IPv6 and subscriptions give the IPv6 address (open IPv6 source `::/0` in your cloud firewall separately). Three things are limited: GitHub has no IPv6, so update checks and one-click updates need WARP installed on the Ops page first (updates then go through it automatically) or a manually uploaded package; the one-line installer is different — there is no panel yet to install WARP from, and both the script (raw.githubusercontent.com) and the package it downloads live on GitHub, so running it directly fails: download `install.sh` and the `m-ui-linux-amd64.tar.gz` (or arm64) for your architecture on a machine that can reach GitHub, copy them over and run `bash install.sh ./m-ui-linux-amd64.tar.gz` (a local file is neither checksummed against GitHub nor signature-checked; to verify it, see `--verify-sums` under [Installation](#installation)), or first give the system an IPv4-capable egress (such as NAT64 / DNS64) and then run it; the direct egress cannot reach IPv4-only sites, so use WARP as the line's upstream for full access (common remote DNS servers clients use, such as 1.1.1.1, 8.8.8.8, 9.9.9.9 and 223.5.5.5, are redirected to their IPv6 addresses on direct lines automatically, so name resolution keeps working); the mainland reachability check is IPv4-only (an IPv6-only server shows "No testable port" there: grey, no alert, with the reason in small print; the same goes when its lines use a relay or subscriptions give domains; only when its domain resolves to an IPv4 address is that address tested), with a separate IPv6 inbound check from probes abroad. Device limits count each address family separately: IPv4 addresses and IPv6 /64s must each stay within the limit (over IPv6 the devices of one home connection share a /64, just as they share the router's address over IPv4), the online count shows the larger of the two, and a dual-stack device never counts twice.
 
 **Clients can't connect but the subscription refreshes fine.** Usually the client's local DNS resolves the domain wrongly. m-ui writes the server IP into subscriptions by default (domain only as SNI); ask users to refresh once. Look for the user's IP under "Recent inbound connections" on the dashboard: under the "Connections" filter, it connected; under the "Handshake failed" filter, the certificate, SNI, REALITY settings or password are wrong (or the user is disabled, expired or over quota). In neither does not prove packets never arrived: hysteria2 / tuic handshake failures (certificate, SNI, obfuscation password), connections to REALITY lines that close at once or are not TLS, TLS failures inside ws / grpc transports, shadowsocks / socks / http / mixed lines and older nodes are not recorded. Capturing packets on the server is the most reliable check (`tcpdump -ni any port <port>`, `udp port` for hysteria2 / tuic, plus `udp portrange <from>-<to>` for the hopping range when port hopping is on); for TCP lines you can also set the log level to info on the Logs page and look for `inbound connection from`.
 
@@ -622,6 +640,7 @@ The "Feedback / Support" button in the panel's top-right corner has both contact
 **m-ui has no telemetry** and collects no usage data. The supporters list and the panel count are extra network activity that uses free public services rather than a server of our own; [Traffic Rewards](#traffic-rewards) is opt-in and reports nothing unless you register a payout address:
 
 - Signing goes through [ntfy.sh](https://ntfy.sh). It is sent only when you click the button and contains only the name and amount.
+- While you wait after signing, the panel itself asks TronGrid (every 5 seconds while someone is waiting): the page says "received" about ten seconds after the transfer is on chain. Whether it arrived "within 60 minutes" is judged by the block time, regardless of when the settlement job below runs.
 - A scheduled GitHub Actions job (GitHub may delay it by several hours) matches signatures with arrivals from [TronGrid](https://www.trongrid.io) and writes the result to this repository's `donors` branch, so a name usually shows up a few hours after the transfer arrives. Panels read that list when the page is opened, at most once an hour.
 - Panel count: each panel downloads an empty file from GitHub once a day (if GitHub can't be reached, it tries again 1–2 hours later, at most 4 times a day), and the daily growth of GitHub's download counter is the number of panels. No identifier is sent.
 
