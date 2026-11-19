@@ -19,7 +19,7 @@
 //   POST /v1/report              面板上报
 //   GET  /v1/export              公开账本(仓库 rewards 分支上的 ledger.json 就是它,由 ledger-workflow.yml 定时提交)
 //   POST /v1/donate              {name, amount} → 要转的确切金额和期限
-//   GET  /v1/donate/<id>         这一笔到没到账(scanAt = 登记服务上一次把链上看全的时间)
+//   GET  /v1/donate/<id>         这一笔到没到账(scanAt = 登记服务上一次把链上看全的时间,now = 它答复时的钟)
 //   POST /v1/donate/<id>/cancel  不捐了(面板上这一笔就此收起。但钱要是真的在期限内按那个数转来了,照样计入、照样记名:
 //                                钱不能因为点了一下取消就白转;那个金额在期限过完之前也不会发给别人)
 //   GET  /v1/health              定时任务最近一次跑的情况
@@ -834,12 +834,14 @@ export async function handleDonate(env, body, ip, now) {
   await run(db, "INSERT INTO intents(id, name, micros, exact, address, created_at, expires_at, status, ip_hash) VALUES(?,?,?,?,?,?,?,'pending',?)", it.id, it.name, it.micros, it.exact, it.address, it.created_at, it.expires_at, ipHash);
   return json(intentView(it, now, st));
 }
-// scanAt:登记服务上一次把链上的新交易看全是什么时候(没人等到账的时候每一轮都算看全)。面板拿它判断查账是不是卡住了:
-// 卡住的时候告诉等着的人「转过去的钱不会丢,查得到了自动补记」,而不是让人对着一个不动的页面猜。
+// scanAt:登记服务上一次把链上的新交易看全是什么时候(没人等到账的时候每一轮都算看全);now:答复时这边的钟。
+// 面板拿它们判断两件事,都不依赖面板自己的钟:
+//   - 查账是不是卡住了(now - scanAt 很大):告诉等着的人「转过去的钱不会丢,查得到了自动补记」,而不是让人对着一个不动的页面猜;
+//   - 过了期限之后「没到账」算不算数:scanAt 过了 期限 + 余量 才算数,在那之前只是还没看到。
 const intentView = (i, now, st) => ({
   id: i.id, name: i.name, amount: i.micros / 1e6, exact: i.exact / 1e6, chain: 'solana', address: i.address, createdAt: i.created_at, expiresAt: i.expires_at,
   status: i.status === 'paid' ? 'paid' : i.status === 'pending' && now <= i.expires_at ? 'pending' : 'expired',
-  scanAt: Number(st && st.scanOk) || 0,
+  scanAt: Number(st && st.scanOk) || 0, now,
 });
 
 // ---- 公开账本 ----

@@ -68,7 +68,10 @@ type rewardSvc struct {
 	dropped  bool          // 手上那份明知是旧的(刚登记、积分变了):下一次要等新的取回来再答
 	kick     chan struct{} // 让上报马上跑一轮(登记、换地址之后)
 	intentAt time.Time     // 上次问留名捐赠的状态是什么时候
-	reportMu sync.Mutex    // 上报串行:手动触发和定时的别撞在一起
+	// 登记服务最近一次答复里的 scanAt / now,是哪一笔留名的(只放内存:等到账时几秒变一次,不值得写库)
+	intentId              string
+	intentScan, intentNow int64
+	reportMu              sync.Mutex // 上报串行:手动触发和定时的别撞在一起
 }
 
 // 登记服务按「来源」认面板:一处来源(一个公网 IPv4 地址;没有 IPv4 的按 IPv6 /48)只认一个地址。
@@ -115,9 +118,12 @@ func (r *Runner) RewardState() RewardState {
 	if raw := r.setting(reward.KeyDonation); raw != "" {
 		var it reward.Intent
 		if json.Unmarshal([]byte(raw), &it) == nil && it.Id != "" {
-			if it.Status == "pending" && time.Now().Unix() > it.ExpiresAt {
-				it.Status = "expired"
+			r.reward.mu.Lock()
+			if r.reward.intentId == it.Id && r.reward.intentNow >= it.Now {
+				it.ScanAt, it.Now = r.reward.intentScan, r.reward.intentNow
 			}
+			r.reward.mu.Unlock()
+			it.Status = it.Shown(time.Now().Unix()) // 过了期限:核对完了是 expired,还没核对完是 settling
 			st.Donation = &it
 		}
 	}
@@ -397,7 +403,7 @@ func (r *Runner) RewardDonate(name string, amount float64) error {
 // RewardDonateRefresh 等到账的那一笔问一下登记服务(问得不会比 rewardIntentPoll 更勤);到账了账本要重取。
 func (r *Runner) RewardDonateRefresh() {
 	st := r.RewardState()
-	if st.Donation == nil || st.Donation.Status != "pending" {
+	if st.Donation == nil || (st.Donation.Status != "pending" && st.Donation.Status != "settling") {
 		if st.Donation != nil && st.Donation.Status == "expired" {
 			_ = r.rewardSaveIntent(st.Donation) // 把「过期」落下来
 		}
@@ -415,16 +421,25 @@ func (r *Runner) RewardDonateRefresh() {
 	defer cancel()
 	got, err := r.rewardClient().DonateStatus(ctx, st.Donation.Id)
 	if err != nil {
+		if reward.StatusOf(err) == http.StatusNotFound && st.Donation.Status == "settling" {
+			it := *st.Donation // 登记服务已经不记得这一笔了(没到账的留名过期 7 天后清掉):没到账
+			it.Status, it.ScanAt = "expired", 0
+			_ = r.rewardSaveIntent(&it)
+		}
 		return
 	}
-	if got.Status == "paid" || got.Status == "expired" {
+	s.mu.Lock()
+	s.intentId, s.intentScan, s.intentNow = st.Donation.Id, got.ScanAt, got.Now
+	s.mu.Unlock()
+	// 登记服务说「没到账」,要等它把期限之后的链上情况看全了才算数(Resolve);在那之前接着问
+	if end := st.Donation.Resolve(got); end != "" {
 		it := *st.Donation
-		it.Status = got.Status
+		it.Status, it.ScanAt, it.Now = end, got.ScanAt, got.Now
 		if got.Exact > 0 {
 			it.Exact = got.Exact
 		}
 		_ = r.rewardSaveIntent(&it)
-		if got.Status == "paid" {
+		if end == "paid" {
 			r.rewardDropLedger()
 		}
 	}

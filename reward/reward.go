@@ -218,7 +218,42 @@ type Intent struct {
 	Address   string  `json:"address"`
 	CreatedAt int64   `json:"createdAt"`
 	ExpiresAt int64   `json:"expiresAt"`
-	Status    string  `json:"status"` // pending | paid | expired
+	Status    string  `json:"status"` // pending | paid | expired;面板显示时还有 settling(见 Shown)
+	// 登记服务上一次把链上的新交易看全是什么时候、它答复时自己的钟是几点(老的登记服务不给,都是 0)。
+	// 两个数相减就是查账落后了多久,不依赖面板的钟。
+	ScanAt int64 `json:"scanAt,omitempty"`
+	Now    int64 `json:"now,omitempty"`
+}
+
+// IntentGrace 期限过后登记服务还认的余量(和登记服务 CFG.intentGrace 一致)。
+const IntentGrace = 300
+
+// Final 过了期限之后,「没到账」是不是已经算数:登记服务把期限(连余量)之后的链上情况看全了才算。
+// 在那之前它只是还没看到 —— 期限内转出的,它查得到了照样补记。老的登记服务不给 ScanAt:照旧当它算数。
+func (i Intent) Final() bool { return i.ScanAt == 0 || i.ScanAt >= i.ExpiresAt+IntentGrace }
+
+// Shown 面板上这一笔现在该显示成什么。等到账的那一笔过了期限:登记服务核对完了是 expired,还没核对完是 settling
+// (正在核对:不说「没成立」,免得人以为钱白转了、或者又转一遍)。
+func (i Intent) Shown(now int64) string {
+	if i.Status != "pending" || now <= i.ExpiresAt {
+		return i.Status
+	}
+	if i.Final() {
+		return "expired"
+	}
+	return "settling"
+}
+
+// Resolve 登记服务对这一笔答了 got 之后的结论:"paid" 到账了;"expired" 没到账、而且已经算数;"" 还没有结论,接着问。
+func (i Intent) Resolve(got Intent) string {
+	if got.Status == "paid" {
+		return "paid"
+	}
+	i.ScanAt = got.ScanAt
+	if got.Status == "expired" && i.Final() {
+		return "expired"
+	}
+	return ""
 }
 
 // ---- 请求 ----

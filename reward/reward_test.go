@@ -252,3 +252,51 @@ func TestRegistryErrorCodes(t *testing.T) {
 		t.Fatalf("被剔除的答复: %+v %v", rep, err)
 	}
 }
+
+// 留名捐赠过了期限之后:登记服务把期限(连余量)之后的链上情况看全了,「没到账」才算数;在那之前是「正在核对」。
+func TestIntentSettle(t *testing.T) {
+	it := Intent{Id: "a", Status: "pending", ExpiresAt: 1000}
+	if got := it.Shown(1000); got != "pending" {
+		t.Fatalf("期限内: %s", got)
+	}
+	if got := it.Shown(1001); got != "expired" {
+		t.Fatalf("老的登记服务不给 ScanAt,过了期限照旧算没到账: %s", got)
+	}
+	for _, c := range []struct {
+		scan int64
+		want string
+	}{{900, "settling"}, {1000, "settling"}, {1000 + IntentGrace - 1, "settling"}, {1000 + IntentGrace, "expired"}, {5000, "expired"}} {
+		it.ScanAt = c.scan
+		if got := it.Shown(1001); got != c.want {
+			t.Fatalf("登记服务看全到 %d:要 %s,得 %s", c.scan, c.want, got)
+		}
+		if got := it.Shown(999); got != "pending" {
+			t.Fatalf("期限内不看 ScanAt: %s", got)
+		}
+	}
+	for _, st := range []string{"paid", "expired"} { // 已经有结论的不再变
+		if got := (Intent{Status: st, ExpiresAt: 1000, ScanAt: 900}).Shown(5000); got != st {
+			t.Fatalf("%s 变成了 %s", st, got)
+		}
+	}
+
+	it = Intent{Id: "a", Status: "pending", ExpiresAt: 1000, ScanAt: 900}
+	for _, c := range []struct {
+		name string
+		got  Intent
+		want string
+	}{
+		{"到账了", Intent{Status: "paid", ScanAt: 950}, "paid"},
+		{"它说没到账,但期限之后的链上情况还没看全", Intent{Status: "expired", ScanAt: 1100}, ""},
+		{"它说没到账,而且看全了", Intent{Status: "expired", ScanAt: 1000 + IntentGrace}, "expired"},
+		{"老的登记服务说没到账", Intent{Status: "expired"}, "expired"},
+		{"还在等", Intent{Status: "pending", ScanAt: 2000}, ""},
+	} {
+		if got := it.Resolve(c.got); got != c.want {
+			t.Fatalf("%s:要 %q,得 %q", c.name, c.want, got)
+		}
+	}
+	if it.ScanAt != 900 {
+		t.Fatal("Resolve 不该改动这一笔本身")
+	}
+}

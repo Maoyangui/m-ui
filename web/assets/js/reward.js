@@ -145,14 +145,15 @@ function renderSlot() {
   if (tip && !tipTimer) tipTimer = setTimeout(() => { tipTimer = 0; tipHidden = true; renderSlot(); }, 14000);
 }
 
-const pending = () => !!(st && st.donation && st.donation.status === 'pending');
+// 还在等结果的那一笔:等到账(pending),或者倒计时走完了、登记服务还没核对完(settling)
+const pending = () => !!(st && st.donation && (st.donation.status === 'pending' || st.donation.status === 'settling'));
 async function load() {
   const before = st && st.donation ? st.donation.status : '';
   try { st = await get('reward'); } catch { /* 取不到就保持上一次的样子:金币不该因为一次请求失败闪没 */ }
   renderSlot();
   if (isOpen) {
     const now = st && st.donation ? st.donation.status : '';
-    if (before === 'pending' && now === 'paid') { led.data = null; dnr.data = null; if (tab === 'pool') loadLedger(); if (tab === 'donate') loadDonors(); } // 刚到账:明细和捐赠榜都要重取
+    if ((before === 'pending' || before === 'settling') && now === 'paid') { led.data = null; dnr.data = null; if (tab === 'pool') loadLedger(); if (tab === 'donate') loadDonors(); } // 刚到账:明细和捐赠榜都要重取
     paint();
   }
   clearInterval(fastTimer); fastTimer = 0;
@@ -315,6 +316,11 @@ ${x.excluded ? `<span class="c-why">${esc(cap(why(x)))}</span>` : `<span class="
 // ---- 捐赠 + 捐赠榜 ----
 const dnLeft = () => { const d = st.donation; return d ? Math.max(0, Math.floor(d.expiresAt - Date.now() / 1000)) : 0; };
 const mmss = s => `${p2(Math.floor(s / 60))}:${p2(s % 60)}`;
+// 登记服务查账落后了多久(秒):它答复时的钟 − 它上一次把链上看全的时间。平时两分钟一轮,落后不超过两三分钟;
+// 超过 6 分钟就是查链的节点不通了 —— 这时要明说钱不会丢,不能让人对着一个不动的页面猜。
+const dnLag = () => { const d = st.donation; return d && d.scanAt > 0 && d.now > 0 ? Math.max(0, d.now - d.scanAt) : 0; };
+const dnStuck = () => dnLag() > 360;
+const stuckNote = () => dnStuck() ? `<div class="rw-note">${IC.clock}<span>${esc(t('rw.dn.stuck', { n: Math.round(dnLag() / 60) }))}</span></div>` : '';
 // 等到账时的那一块:① 要转的确切金额 ② 奖池地址(这一笔登记时给的那个)+ 二维码。奖池地址只在这里出现。
 function payBlock(d) {
   return `<div class="rw-dn-pay">
@@ -334,8 +340,16 @@ function donateCardHTML() {
     return `<section class="rw-dn wait">${head(t('rw.dn.waitTitle'), `<span class="rw-dn-timer" title="${esc(t('rw.dn.timerHelp'))}">${IC.clock}<b id="rw-dn-t">${mmss(dnLeft())}</b></span>`)}
 <p class="rw-dn-lead">${esc(t('rw.dn.waitLead', { name: d.name, amount: exactAmt(d.exact) }))}</p>
 ${payBlock(d)}
+${stuckNote()}
 <p class="rw-hint rw-dn-late">${esc(t('rw.dn.late'))}</p>
-<div class="rw-dn-foot"><span class="rw-dn-live"><i></i>${esc(t(st.pool.demo ? 'rw.dn.liveDemo' : 'rw.dn.live'))}</span><span class="rw-sp"></span><button class="rw-link" type="button" data-act="rw.dnCancel" title="${esc(t('rw.dn.cancelHelp'))}">${esc(t('rw.dn.cancel'))}</button></div>
+<div class="rw-dn-foot"><span class="rw-dn-live"><i></i>${esc(t(dnStuck() ? 'rw.dn.liveStuck' : st.pool.demo ? 'rw.dn.liveDemo' : 'rw.dn.live'))}</span><span class="rw-sp"></span><button class="rw-link" type="button" data-act="rw.dnCancel" title="${esc(t('rw.dn.cancelHelp'))}">${esc(t('rw.dn.cancel'))}</button></div>
+</section>`;
+  }
+  if (d && d.status === 'settling') { // 倒计时走完了,登记服务还没把这段时间的到账核对完:不说「没成立」
+    return `<section class="rw-dn wait">${head(t('rw.dn.settleTitle'))}
+<p class="rw-dn-lead">${esc(t('rw.dn.settleLead', { name: d.name, amount: exactAmt(d.exact) }))}</p>
+${stuckNote()}
+<div class="rw-dn-foot"><span class="rw-dn-live"><i></i>${esc(t(dnStuck() ? 'rw.dn.liveStuck' : 'rw.dn.settleLive'))}</span><span class="rw-sp"></span><button class="rw-link" type="button" data-act="rw.dnAgain" title="${esc(t('rw.dn.settleSkipHelp'))}">${esc(t('rw.dn.settleSkip'))}</button></div>
 </section>`;
   }
   if (d && d.status === 'paid') {

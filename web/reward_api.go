@@ -256,7 +256,15 @@ func (s *Server) handleReward(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		png, err := qrcode.Encode(l.Donate.Address, qrcode.Medium, 264)
+		// 图里不带二维码库默认的 4 格白边(和支持页的那张一样):页面上它本来就放在白底小框里,两层白叠起来是一大圈;
+		// 扫码要的静区由框的内边距给,见 style.css 的 .rw-dn-qr img。
+		q, err := qrcode.New(l.Donate.Address, qrcode.Medium)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		q.DisableBorder = true
+		png, err := q.PNG(264)
 		if err != nil {
 			badRequest(w, err)
 			return

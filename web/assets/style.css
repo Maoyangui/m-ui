@@ -2723,7 +2723,7 @@ html.rw-lock { overflow: hidden; }
 .rw-dn-addr code { min-width: 0; font-size: var(--fs-sm); line-height: 1.45; word-break: break-all; user-select: all; }
 .rw-dn-btns { display: flex; flex-wrap: wrap; gap: .4rem; }
 .rw-dn-qr { display: grid; justify-items: center; gap: .35rem; }
-.rw-dn-qr img { display: block; width: 120px; height: 120px; padding: 7px; border-radius: 12px; background: #fff; border: 1px solid var(--rw-line2); image-rendering: pixelated; }
+.rw-dn-qr img { display: block; width: 120px; height: 120px; padding: 6px; border-radius: 10px; background: #fff; border: 1px solid var(--rw-line2); image-rendering: pixelated; } /* 图本身不带白边:这 6px 就是扫码要的静区 */
 .rw-dn-qr span { color: var(--rw-mute); font-size: 11px; }
 .rw-dn-foot { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .9rem; margin-top: .95rem; }
 .rw-dn-live { display: inline-flex; align-items: center; gap: .45rem; color: var(--rw-mute); font-size: var(--fs-xs); }

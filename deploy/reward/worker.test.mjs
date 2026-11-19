@@ -895,7 +895,7 @@ test('只留近期记录的节点也查得成:请求里不带「上次看到哪�
   const D = T0 + 2 * DAY;
   await x.tick(D);
   const it = (await x.donate('无敌项目', 5, D + 10, '198.51.100.40')).body;
-  assert.equal(it.scanAt, D, '答复里带着上一次把链上看全的时间');
+  assert.deepEqual([it.scanAt, it.now], [D, D + 10], '答复里带着上一次把链上看全的时间,和这边的钟');
   const pay = x.chain.pay(solA, U(it.exact), D + 80);
   x.chain.rule = (host, method) => host === 'api.mainnet-beta.solana.com' && method === 'getSignaturesForAddress'
     ? Response.json({ jsonrpc: '2.0', error: { code: 403, message: 'Access forbidden, contact your app developer or support@rpcpool.com.' }, id: 1 }, { status: 403 }) : null;
