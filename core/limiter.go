@@ -3,7 +3,9 @@ package core
 import (
 	"context"
 	"net"
+	"net/netip"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,7 +22,8 @@ import (
 //
 // 用户层(per-user)
 //   - 限速:每用户一对令牌桶(上行/下行),该用户所有连接共享总带宽
-//   - 设备数:限制**同时在线**的源 IP 数量(IPv6 同一个 /64 算一个,见 model.IPKey)
+//   - 设备数:限制**同时在线**的源 IP 数量(IPv6 同一个 /64 算一个,见 model.IPKey)。
+//     中转入口的来源(中转机的地址,见 SetRelaySources)不是用户的设备:不计数、不因设备数被拒,用户层和组层都一样
 //
 // 组层(代理池):代理名下所有用户共用一个池
 //   - 带宽池:每组一对令牌桶,组内所有用户的所有连接再共享一次;每台服务器各一份(带宽是单机物理量)
@@ -44,8 +47,10 @@ type Limiter struct {
 	externalAt int64
 	// reconciledRejects 是本轮跨机并集实际超额的设备；外部租约过期时一并失效。
 	reconciledRejects map[string]map[string]bool
-	deviceGen         atomic.Uint64
-	idleWindow        time.Duration // 无流量多久判定该 IP 下线并释放名额
+	// relaySrc 全集群中转入口的来源地址(SetRelaySources 给的,不带 4in6 前缀和 zone 的写法)。
+	relaySrc   map[string]bool
+	deviceGen  atomic.Uint64
+	idleWindow time.Duration // 无流量多久判定该 IP 下线并释放名额
 	// gen 策略代数:SetLimits 每次加一。在线连接靠它判断"用户所属的代理池有没有变",没变就不抢锁。
 	gen atomic.Uint64
 
@@ -59,6 +64,56 @@ type Limiter struct {
 	// 节点层(见 limiter_nodes.go):节点自己的限速与用户容量
 	nodeTab atomic.Pointer[NodeTable]
 	nstates map[string]*nodeState // 节点键 → 状态(桶位、在线用户);受 mu 保护
+}
+
+// SetRelaySources 换上「中转入口的来源地址」名单(runner 按全部线路的中转入口算好,见 runner.relaySources)。
+//
+// 经中转入口进来的连接,出口看到的来源是中转机的地址。以前把它当成这个用户的又一台设备:限 1 台的人,本人直连在线时
+// (客户端后台给各节点测速就算)再经中转连会被拒,反过来先经中转再直连也被拒;同时 N 台设备走同一台中转又只算 1 个。
+// 现在这些来源不是设备(用户 11-20 定):不占设备名额(用户自己的、所属代理池的都不占),也不因设备数被拒;
+// 别的机器上报来的在线 IP 里的中转机地址同样不算。在线 IP 照常登记 —— 面板上看得到这个人经哪台中转连着。
+// 认不出来源的中转(经内网连出口、进出不是同一个 IP)要在入口上手填来源 IP,否则还是按一台设备算。
+func (l *Limiter) SetRelaySources(addrs []netip.Addr) {
+	set := make(map[string]bool, len(addrs))
+	for _, a := range addrs {
+		if a.IsValid() {
+			set[a.Unmap().WithZone("").String()] = true
+		}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(set) == len(l.relaySrc) {
+		same := true
+		for k := range set {
+			if !l.relaySrc[k] {
+				same = false
+				break
+			}
+		}
+		if same {
+			return
+		}
+	}
+	l.relaySrc = set
+	// 名单变了:「哪些设备不再接受新登记」按新名单重算,在线连接下一次有流量时重新过一遍
+	l.reconcileDevicesLocked(time.Now().Unix())
+	l.deviceGen.Add(1)
+}
+
+// relayLocked 这个来源是不是中转入口的来源(中转机的地址)。调用方须持锁。
+func (l *Limiter) relayLocked(ip string) bool {
+	if len(l.relaySrc) == 0 {
+		return false
+	}
+	if l.relaySrc[ip] {
+		return true
+	}
+	if strings.Contains(ip, "::ffff:") || strings.Contains(ip, "%") { // 4in6、带 zone 的写法:规整后再比
+		if a, err := netip.ParseAddr(ip); err == nil {
+			return l.relaySrc[a.Unmap().WithZone("").String()]
+		}
+	}
+	return false
 }
 
 // SetExternalIPs 全量替换"其他机器上在线的 IP"(跨机设备数并集判定)。
@@ -111,10 +166,16 @@ func (l *Limiter) reconcileDevicesLocked(now int64) map[string][]string {
 		set := map[string]bool{}
 		mine := map[string]bool{}
 		for ip := range l.ips[user] {
+			if l.relayLocked(ip) { // 中转机的地址不是设备
+				continue
+			}
 			set[model.IPKey(ip)] = true
 			mine[model.IPKey(ip)] = true
 		}
 		for ip := range l.externalLocked(user, now) {
+			if l.relayLocked(ip) {
+				continue
+			}
 			set[model.IPKey(ip)] = true
 		}
 		all[user], local[user] = set, mine
@@ -339,6 +400,9 @@ func (l *Limiter) GroupState() map[string]GroupState {
 		for _, u := range l.groupUsers[g] {
 			l.pruneLocked(u, now)
 			for ip := range l.ips[u] {
+				if l.relayLocked(ip) {
+					continue
+				}
 				set[model.IPKey(ip)] = true
 			}
 		}
@@ -395,6 +459,15 @@ func familyFull(seen map[string]bool, key string, limit int) bool {
 
 // admitLocked 判定并登记;放行返回 "",拒绝返回原因。调用方须持锁。
 func (l *Limiter) admitLocked(user, ip string, now int64) string {
+	if l.relayLocked(ip) {
+		// 中转入口的来源(中转机的地址):不是这个人的设备。照常登记在线,不占名额、不查上限(见 SetRelaySources)
+		l.pruneLocked(user, now)
+		if l.ips[user] == nil {
+			l.ips[user] = map[string]int64{}
+		}
+		l.ips[user][ip] = now
+		return ""
+	}
 	if l.deviceRejectedLocked(user, ip, now) {
 		return RejectDevice
 	}
@@ -411,13 +484,17 @@ func (l *Limiter) admitLocked(user, ip string, now int64) string {
 	}
 	ext := l.externalLocked(user, now)
 	key := model.IPKey(ip)
-	seen := make(map[string]bool, len(active)+len(ext)) // 按设备算(IPv6 同一个 /64 算一台,见 model.IPKey)
+	seen := make(map[string]bool, len(active)+len(ext)) // 按设备算(IPv6 同一个 /64 算一台,见 model.IPKey);中转机的地址不算
 	for a := range active {
-		seen[model.IPKey(a)] = true
+		if !l.relayLocked(a) {
+			seen[model.IPKey(a)] = true
+		}
 	}
 	onlineHere := seen[key]
 	for e := range ext {
-		seen[model.IPKey(e)] = true
+		if !l.relayLocked(e) {
+			seen[model.IPKey(e)] = true
+		}
 	}
 	if onlineHere { // 同一台设备换了个地址:不占新名额
 		active[ip] = now
@@ -443,10 +520,14 @@ func (l *Limiter) groupHasRoomLocked(g, ip string, now int64, limit int) bool {
 	for _, u := range l.groupUsers[g] {
 		l.pruneLocked(u, now)
 		for a := range l.ips[u] {
-			set[model.IPKey(a)] = true
+			if !l.relayLocked(a) {
+				set[model.IPKey(a)] = true
+			}
 		}
 		for e := range l.externalLocked(u, now) {
-			set[model.IPKey(e)] = true
+			if !l.relayLocked(e) {
+				set[model.IPKey(e)] = true
+			}
 		}
 	}
 	key := model.IPKey(ip)
@@ -531,6 +612,9 @@ func (l *Limiter) touchNode(user, ip, key string, now int64) bool {
 }
 
 func (l *Limiter) touchLocked(user, ip string, now int64) bool {
+	if l.relayLocked(ip) { // 中转机的地址:只刷新在线时间,不过设备数那一关
+		return l.admitLocked(user, ip, now) == ""
+	}
 	if l.deviceRejectedLocked(user, ip, now) {
 		return false
 	}

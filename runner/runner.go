@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -103,6 +104,8 @@ type Runner struct {
 
 	// lastNodes 上一次算出来的节点表(见 nodes.go);和 lastSpecs 一样由 applyLimitsMu 保护
 	lastNodes core.NodeTable
+	// lastRelay 上一次算出来的中转入口来源地址(见 nodes.go 的 relaySources);同样由 applyLimitsMu 保护
+	lastRelay []netip.Addr
 
 	// 防火墙(见 fw.go):面板规则的对账状态、应用层黑名单
 	fw fwSvc
@@ -1523,6 +1526,7 @@ func (r *Runner) applyLimits() error {
 		}
 		box.StatsTracker().SetNodes(r.lastNodes)
 		box.Limiter().SetNodes(r.lastNodes)
+		box.Limiter().SetRelaySources(r.lastRelay)
 		return err
 	}
 	r.lastSpecs, r.lastGroups = specs, groups
@@ -1538,6 +1542,14 @@ func (r *Runner) applyLimits() error {
 	}
 	box.StatsTracker().SetNodes(nodes)
 	box.Limiter().SetNodes(nodes) // 节点的限速 / 容量(core/limiter_nodes.go)
+	// 中转入口的来源地址:这些来源是中转机,不计入设备数。读不出来同样沿用上一份(装成空的会把中转机又算成设备)
+	relay, relayErr := r.readRelaySources()
+	if relayErr != nil {
+		relay = r.lastRelay
+	} else {
+		r.lastRelay = relay
+	}
+	box.Limiter().SetRelaySources(relay)
 	// 重新算一遍"并集超限时哪些设备不再接受新登记"。它**不会**断开任何已连接的设备:
 	// 你定过的语义是"池满只拒新设备,已连接的不动",0.6.10 曾按 IP 字典序踢掉在线设备,一个连了
 	// 几小时、完全合规的付费用户会因为 IP 排得靠后被断网。

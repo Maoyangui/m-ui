@@ -105,3 +105,41 @@ func TestNormForwardSrc(t *testing.T) {
 		}
 	}
 }
+
+// 全集群中转入口的来源地址(设备数不算这些):手填的来源、别处的中转填的地址、集群里当中转的那台的公网地址和连接地址;
+// 不分转到哪一台;停用的线路、暂停的入口不算;域名不算。
+func TestRelaySources(t *testing.T) {
+	nodes := []model.Node{
+		{Id: 1, PublicIP: "203.0.113.1"},
+		{Id: 2, PublicIP: "198.51.100.2", PublicIP6: "2001:db8:2::1", Addr: "relay.example.net"},
+		{Id: 3, PublicIP: "198.51.100.3", Addr: "[2001:db8:3::9]"},
+		{Id: 4, PublicIP: "198.51.100.4"},
+	}
+	fw := func(v interface{}) json.RawMessage { b, _ := json.Marshal(v); return b }
+	lines := []model.Line{
+		{Id: 1, Name: "A", Enabled: true, Forwards: fw([]model.LineForward{
+			{Id: 1, Via: 2, Port: 30001, To: 1},
+			{Id: 2, Via: 0, Host: "192.0.2.50", Port: 30002, To: 1, Src: "192.0.2.51, 192.0.2.52"},
+			{Id: 3, Via: 4, Port: 30003, To: 1, Off: true},                 // 暂停的
+			{Id: 4, Via: 0, Host: "relay.example.org", Port: 30004, To: 1}, // 域名:认不出来源
+		})},
+		{Id: 2, Name: "B", Enabled: true, Forwards: fw([]model.LineForward{{Id: 1, Via: 3, Port: 30005, To: 2}})},  // 转到别的机器的也算
+		{Id: 3, Name: "C", Enabled: false, Forwards: fw([]model.LineForward{{Id: 1, Via: 4, Port: 30006, To: 1}})}, // 停用的线路
+	}
+	got := map[string]bool{}
+	for _, a := range relaySources(lines, nodes) {
+		got[a.String()] = true
+	}
+	want := []string{"198.51.100.2", "2001:db8:2::1", "192.0.2.50", "192.0.2.51", "192.0.2.52", "198.51.100.3", "2001:db8:3::9"}
+	if len(got) != len(want) {
+		t.Fatalf("应有 %d 个来源,实际 %v", len(want), got)
+	}
+	for _, w := range want {
+		if !got[w] {
+			t.Fatalf("少了 %s: %v", w, got)
+		}
+	}
+	if got["198.51.100.4"] {
+		t.Fatalf("暂停的入口、停用的线路上的中转机不该算: %v", got)
+	}
+}

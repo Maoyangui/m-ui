@@ -103,6 +103,64 @@ func ForwardSources(f model.LineForward, nodes map[uint]model.Node) []netip.Addr
 	return out
 }
 
+// relaySources 全集群生效的中转入口的来源地址(每个入口见 ForwardSources),不分转到哪一台:数据面据此认出
+// 「这个来源是中转机,不是用户的设备」,不计入设备数(core.Limiter.SetRelaySources)。别的机器上报来的在线 IP 里也会有
+// 中转机的地址(那边的出口登记的),所以要的是全集群的,不只是转到本机的。停用的线路、暂停的入口不算。
+func relaySources(lines []model.Line, nodes []model.Node) []netip.Addr {
+	byId := make(map[uint]model.Node, len(nodes))
+	for _, n := range nodes {
+		byId[n.Id] = n
+	}
+	var out []netip.Addr
+	seen := map[netip.Addr]bool{}
+	for _, l := range lines {
+		if !l.Enabled {
+			continue
+		}
+		for _, f := range model.ParseForwards(l.Forwards) {
+			if f.Off {
+				continue
+			}
+			for _, a := range ForwardSources(f, byId) {
+				if !seen[a] {
+					seen[a] = true
+					out = append(out, a)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// readRelaySources 从库里算出全集群中转入口的来源地址。
+func (r *Runner) readRelaySources() ([]netip.Addr, error) {
+	var lines []model.Line
+	if err := r.db.Select("id, enabled, forwards").Where("enabled = ? AND forwards IS NOT NULL AND forwards <> ''", true).Find(&lines).Error; err != nil {
+		return nil, err
+	}
+	if len(lines) == 0 {
+		return nil, nil
+	}
+	var nodes []model.Node
+	if err := r.db.Select("id, public_ip, public_ip6, addr").Find(&nodes).Error; err != nil {
+		return nil, err
+	}
+	return relaySources(lines, nodes), nil
+}
+
+// RelayIPs 现在的中转入口来源地址(规整后的字符串);读不出来返回空的。面板上数「在线几台设备」时不算这些。
+func (r *Runner) RelayIPs() map[string]bool {
+	addrs, err := r.readRelaySources()
+	if err != nil || len(addrs) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(addrs))
+	for _, a := range addrs {
+		out[a.String()] = true
+	}
+	return out
+}
+
 // readNodeTable 从库里算出这台的节点表。
 func (r *Runner) readNodeTable() (core.NodeTable, error) {
 	var lines []model.Line

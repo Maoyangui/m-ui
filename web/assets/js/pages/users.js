@@ -12,7 +12,7 @@ function ruleLimitsHTML(u) {
   return `<h3 style="margin-top:.6rem">${t('user.ruleLimits')}</h3><div class="chips">${lim.map(s => `<span class="chip" title="${esc(s.reason || '')}">${esc(s.ruleName)} · ${s.upMbps || '—'}/${s.downMbps || '—'} M · ${s.until ? t('rule.remaining', { n: Math.max(0, Math.ceil((s.until - now) / 60)) }) : t('rule.untilWindowEnd')}</span>`).join('')}</div>`;
 }
 import { barChart, bucketFor } from '../chart.js';
-import { serverOfIP } from '../relayip.js';
+import { serverOfIP, relayIPs, deviceIPs } from '../relayip.js';
 import { lineItems, keysFromRefs, linePicker, refLabels, refChips } from '../linepicker.js';
 
 // 代理面板没有服务器页:服务器名与授权范围来自 status;主面板用 state.nodes
@@ -35,9 +35,10 @@ const PAGE_SIZES = [25, 50, 100];
 let page = 1, pageSize = 25;
 try { const v = Number(localStorage.getItem('m-ui-users-ps')); if (PAGE_SIZES.includes(v)) pageSize = v; } catch {}
 let lastPager = '';
+let relayNow = new Set(); // 中转机的地址(每次画列表、刷新详情时重算):数在线设备时不算它们
 const SORTS = {
   id: u => u.id, name: u => u.name.toLowerCase(), usage: u => (u.up || 0) + (u.down || 0),
-  expiry: u => u.expiry || Number.MAX_SAFE_INTEGER, devices: u => deviceCount(u.onlineIps), status: u => (u.enabled ? 0 : 1),
+  expiry: u => u.expiry || Number.MAX_SAFE_INTEGER, devices: u => deviceCount(deviceIPs(u.onlineIps, relayNow)), status: u => (u.enabled ? 0 : 1),
 };
 const th = (key, label, cls = '') => `<th class="sortable ${sortKey === key ? 'sorted' : ''} ${cls}" data-act="user.sort" data-id="${key}">${label}${sortKey === key ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
 
@@ -153,6 +154,7 @@ function expiryCell(u) {
   return `<span class="nowrap">${fmtDay(u.expiry)} ${b}</span>`;
 }
 function visibleRows() {
+  relayNow = relayIPs(); // 排序、画表都从这里过:按当时的线路和服务器重算一次
   let rows = state.users.filter(u => matches(query, u.name, u.remark, u.desc, planNameOf(u)));
   const on = filter === 'online' ? onlineSet() : null;
   rows = rows.filter(u => ({ all: true, online: on && on.has(u.name), enabled: u.enabled && !isExpired(u) && !isOver(u), disabled: !u.enabled, soon: isSoon(u), expired: isExpired(u), over: isOver(u) })[filter]);
@@ -221,14 +223,16 @@ function renderRows() {
   if (!rows.length) { setHTML(body, `<tr><td colspan="8">${state.users.length ? empty() : firstUserGuide()}</td></tr>`); return; }
   setHTML(body, rows.map(u => {
     const used = (u.up || 0) + (u.down || 0);
-    const ips = deviceCount(u.onlineIps);
+    const mine = deviceIPs(u.onlineIps, relayNow), ips = deviceCount(mine);
+    // 另有经中转入口进来的连接:不占设备名额,数字里不算,标一个 ⇄(悬停有说明)
+    const via = (u.onlineIps || []).length > mine.length ? ` <span class="muted" title="${esc(t('user.viaRelay'))}">⇄</span>` : '';
     return `<tr class="${selected.has(u.id) ? 'selected' : ''}">
       <td><input type="checkbox" class="sel" data-change="user.sel" data-id="${u.id}" ${selected.has(u.id) ? 'checked' : ''}></td>
       <td class="primary-cell">${dot(online.has(u.name))}<a href="#" data-act="user.detail" data-id="${u.id}">${esc(u.name)}</a>${planNameOf(u) ? ` ${badge(planNameOf(u))}` : ''}${u.remark ? `<div class="sub-cell">${esc(u.remark)}</div>` : ''}</td>
       <td>${statusBadge(u)}</td>
       <td><span class="num">${fmtBytes(used, 1)}</span> <span class="muted small">/ ${u.volume ? fmtBytes(u.volume, 0) : t('common.unlimited')}</span>${progress(used, u.volume)}</td>
       <td>${expiryCell(u)}</td>
-      <td class="num c-p2">${ips} / ${u.deviceLimit || '∞'}</td>
+      <td class="num c-p2">${ips}${via} / ${u.deviceLimit || '∞'}</td>
       <td class="num c-p3">${(u.speedUp || u.speedDown) ? `${u.speedUp || '∞'}/${u.speedDown || '∞'} M` : '∞'}</td>
       <td class="actions">
         <button class="btn sm" data-act="user.detail" data-id="${u.id}">${t('common.details')}</button>
@@ -290,7 +294,7 @@ async function showDetail(id) {
       ${tile(t('user.usage'), fmtBytes(used, 1), `/ ${u.volume ? fmtBytes(u.volume, 0) : t('common.unlimited')}${progress(used, u.volume)}`)}
       ${tile(t('user.expiry'), u.activateDays ? esc(t('user.activateIn', { n: u.activateDays })) : u.expiry ? fmtDay(u.expiry) : esc(t('user.never')),
         left == null ? '' : left <= 0 ? esc(t('user.expired')) : esc(t('user.daysLeft', { n: left })), left != null && left <= 3 ? 'bad' : left != null && left <= 7 ? 'warn' : '')}
-      ${tile(t('user.d.devices'), `${deviceCount(ips)}<span class="of"> / ${u.deviceLimit || '∞'}</span>`, u.onlineAt ? esc(t('user.lastOnline') + ' ' + fmtRelative(u.onlineAt)) : '')}
+      ${tile(t('user.d.devices'), `${deviceCount(deviceIPs(ips))}<span class="of"> / ${u.deviceLimit || '∞'}</span>`, u.onlineAt ? esc(t('user.lastOnline') + ' ' + fmtRelative(u.onlineAt)) : '')}
       ${tile(t('user.speed'), esc(speedText(u.speedUp, u.speedDown)), (u.speedUp || u.speedDown) ? esc(t('user.d.speedSub')) : '')}
     </div>
     <section>

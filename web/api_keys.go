@@ -811,6 +811,7 @@ func (s *Server) apiOnlines(w http.ResponseWriter, sc apiScope) {
 		return
 	}
 	ips := s.onlineIPsAll()
+	relay := s.relayIPs()
 	localName := s.localNodeName()
 	localLines, remoteLines := s.run.OnlineIPLines(), s.run.Hub().RemoteIPLinesAll()
 	sort.Strings(users)
@@ -827,7 +828,7 @@ func (s *Server) apiOnlines(w http.ResponseWriter, sc apiScope) {
 			lines = append(lines, l)
 		}
 		sort.Strings(lines)
-		out = append(out, map[string]interface{}{"user": u, "devices": model.DeviceCount(ips[u]), "lines": lines})
+		out = append(out, map[string]interface{}{"user": u, "devices": onlineDeviceCount(ips[u], relay), "lines": lines})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

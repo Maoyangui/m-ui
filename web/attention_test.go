@@ -279,7 +279,7 @@ func TestOnlineDevices(t *testing.T) {
 		"b": {},
 		"c": {"198.51.100.1"},
 	}
-	got := onlineDevices([]string{"a", "b", "c", "d"}, ips)
+	got := onlineDevices([]string{"a", "b", "c", "d"}, ips, nil)
 	if got["a"] != 3 || got["c"] != 1 {
 		t.Fatalf("a 是 3 个 v4、2 个 /64,应算 3 台;c 1 台: %v", got)
 	}
@@ -290,8 +290,25 @@ func TestOnlineDevices(t *testing.T) {
 		t.Fatalf("不在名单里的不该列: %v", got)
 	}
 	// 代理作用域:handler 先把名单过滤成名下用户,再算设备数
-	if got := onlineDevices([]string{"c"}, ips); len(got) != 1 || got["c"] != 1 {
+	if got := onlineDevices([]string{"c"}, ips, nil); len(got) != 1 || got["c"] != 1 {
 		t.Fatalf("只算传进来的用户: %v", got)
+	}
+	// 中转入口的来源(中转机的地址)不算设备:本人 1 台 + 经中转 → 1 台;只经中转在线 → 仍算在线(1);4in6 写法也认
+	relay := map[string]bool{"198.51.100.7": true, "2001:db8:7::1": true}
+	ips2 := map[string][]string{
+		"e": {"203.0.113.5", "198.51.100.7"},
+		"f": {"198.51.100.7", "2001:db8:7::1"},
+		"g": {"203.0.113.5", "203.0.113.6", "::ffff:198.51.100.7"},
+	}
+	got = onlineDevices([]string{"e", "f", "g"}, ips2, relay)
+	if got["e"] != 1 || got["f"] != 1 || got["g"] != 2 {
+		t.Fatalf("中转机的地址不该算设备(e=1、f=1、g=2): %v", got)
+	}
+	if n := len(deviceSources(ips2["f"], relay)); n != 0 {
+		t.Fatalf("只经中转在线的人不占任何设备名额,实际还剩 %d 个来源", n)
+	}
+	if n := onlineDeviceCount(nil, relay); n != 0 {
+		t.Fatalf("不在线的是 0,实际 %d", n)
 	}
 }
 

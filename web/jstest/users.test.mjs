@@ -29,7 +29,7 @@ export const upload = async () => ({});`);
 // 带参数的文案把参数拼在后面(k|名=值|…),用例能看出传了什么
 stub('i18n.js', `export const t = (k, p) => p && Object.keys(p).length ? k + '|' + Object.entries(p).map(([a, b]) => a + '=' + b).join('|') : k;`);
 stub('chart.js', `export const barChart = () => ''; export const bucketFor = () => 3600;`);
-stub('relayip.js', `export const serverOfIP = () => '';`);
+stub('relayip.js', `export const serverOfIP = () => ''; export const relayIPs = () => new Set(); export const deviceIPs = ips => ips || [];`);
 stub('linepicker.js', `export const lineItems = () => []; export const keysFromRefs = () => []; export const refLabels = () => [];
 export const linePicker = () => ({ read: () => [] }); export const refChips = () => '';`);
 stub('ui.js', `const el = (id) => document.getElementById(id);

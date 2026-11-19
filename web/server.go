@@ -62,6 +62,10 @@ type session struct {
 // Server 是面板 HTTP 服务。
 type Server struct {
 	credID atomic.Uint64 // 凭据缓存的编号(见 credPrefix)
+	// 中转入口来源地址的短缓存(见 relay_devices.go)
+	relayMu  sync.Mutex
+	relayAt  time.Time
+	relaySet map[string]bool
 	// legacyAgentPort 面板跟着主机走以后,本机原来的面板端口上还在接 agent 请求(见 startLegacyAgent;0 = 没有)
 	legacyAgentPort atomic.Int64
 	run             *runner.Runner

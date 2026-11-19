@@ -114,7 +114,7 @@ func (s *Server) handleOnlines(w http.ResponseWriter, r *http.Request) {
 	}
 	out := map[string]interface{}{
 		"users": users, "lines": lines, "upstreams": ups, "connCounts": counts,
-		"devices": onlineDevices(users, s.onlineIPsAll()),
+		"devices": onlineDevices(users, s.onlineIPsAll(), s.relayIPs()),
 	}
 	if scope(r) == 0 { // 主面板与副机面板:在线的代理名下用户 → 代理名(用户页只列直属用户,概况的链接据此指到代理;副机库里同样有代理和归属)
 		out["owners"] = s.onlineOwners(users)
@@ -157,10 +157,11 @@ func linesWithUsersFrom(local map[string]map[string][]string, remote map[uint]ma
 
 // onlineDevices 在线用户 → 设备数(本机与副机的源 IP 合并,IPv4 一个地址一台、IPv6 按 /64 算,和设备数限制同一口径)。
 // 概况按它给在线名单排序、标数字;只算传进来的这些用户(代理作用域已经只剩名下的)。
-func onlineDevices(users []string, ips map[string][]string) map[string]int {
+// 中转入口的来源(relay,中转机的地址)不算设备;只经中转在线的算 1(见 onlineDeviceCount)。
+func onlineDevices(users []string, ips map[string][]string, relay map[string]bool) map[string]int {
 	out := make(map[string]int, len(users))
 	for _, u := range users {
-		if n := model.DeviceCount(ips[u]); n > 0 {
+		if n := onlineDeviceCount(ips[u], relay); n > 0 {
 			out[u] = n
 		}
 	}
