@@ -272,6 +272,83 @@ func TestSupportCheck(t *testing.T) {
 	}
 }
 
+// TronGrid 偶尔限速一下:这一次没查成,半分钟内上一次查成的结果照样拿来答(页面不会忽然变成"不知道");
+// 连着没查成,间隔越拉越长(不在被限速的时候接着敲);上一次查成的太旧了才说"不知道"。
+func TestSupportCheckRidesOutRateLimits(t *testing.T) {
+	now := time.Now().Unix()
+	var limited atomic.Bool
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		if limited.Load() {
+			http.Error(w, `{"Error":"request rate exceeded the allowed_rps(1), and the query server is suspended for 5 s."}`, http.StatusTooManyRequests)
+			return
+		}
+		fmt.Fprintf(w, `{"data":[{"block_timestamp":%d000,"to":"TDoUMF4nF244o5GZvBBwX5t9axvnSoP1Cm","type":"Transfer","value":"10037000"}]}`, now-30)
+	}))
+	defer srv.Close()
+	old := tronURL
+	tronURL = srv.URL
+	defer func() { tronURL = old }()
+	s, _ := newTestServerForSupport(t, "")
+	ask := func(amount string) map[string]interface{} {
+		w := httptest.NewRecorder()
+		s.handleSupportCheck(w, httptest.NewRequest("GET", "/x?amount="+amount+"&since="+itoa64(now-60), nil))
+		var out map[string]interface{}
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return out
+	}
+	again := func() { // 把钟拨到"可以再查了"
+		s.donors.mu.Lock()
+		s.donors.tronNext = time.Time{}
+		s.donors.mu.Unlock()
+	}
+	if out := ask("7.011"); out["known"] != true || out["arrived"] != false || hits.Load() != 1 {
+		t.Fatalf("先查成一次: %v(查了 %d 次)", out, hits.Load())
+	}
+	limited.Store(true)
+	again()
+	if out := ask("7.011"); out["known"] != true || out["arrived"] != false || hits.Load() != 2 {
+		t.Fatalf("这一次被限速:上一次查成的还新,照样答「没到」而不是「不知道」: %v(查了 %d 次)", out, hits.Load())
+	}
+	if out := ask("10.037"); out["known"] != true || out["arrived"] != true || hits.Load() != 2 {
+		t.Fatalf("被限速之后不马上再敲,手上的结果照用: %v(查了 %d 次)", out, hits.Load())
+	}
+	s.donors.mu.Lock()
+	wait := time.Until(s.donors.tronNext)
+	s.donors.mu.Unlock()
+	if wait < 8*time.Second || wait > 11*time.Second {
+		t.Fatalf("没查成一次,下一次要隔 10 秒: %v", wait)
+	}
+	again()
+	ask("7.011")
+	s.donors.mu.Lock()
+	wait = time.Until(s.donors.tronNext)
+	s.donors.mu.Unlock()
+	if wait < 18*time.Second || wait > 21*time.Second || hits.Load() != 3 {
+		t.Fatalf("连着两次没查成,隔 20 秒: %v(查了 %d 次)", wait, hits.Load())
+	}
+	// 上一次查成的已经过了半分钟,这期间一直没查成:老实说不知道
+	s.donors.mu.Lock()
+	s.donors.tronGood = time.Now().Add(-tronGoodFor - time.Second)
+	s.donors.mu.Unlock()
+	if out := ask("7.011"); out["known"] != false || out["arrived"] != false {
+		t.Fatalf("手上的结果太旧:不知道: %v", out)
+	}
+	// 恢复了:马上回到 5 秒一次
+	limited.Store(false)
+	again()
+	if out := ask("7.011"); out["known"] != true || out["arrived"] != false || hits.Load() != 4 {
+		t.Fatalf("恢复之后: %v(查了 %d 次)", out, hits.Load())
+	}
+	s.donors.mu.Lock()
+	wait, fails := time.Until(s.donors.tronNext), s.donors.tronFails
+	s.donors.mu.Unlock()
+	if wait > 6*time.Second || fails != 0 {
+		t.Fatalf("查成之后回到 5 秒一次、连错清零: %v %d", wait, fails)
+	}
+}
+
 // 面板的钟快了几分钟:马上转出的那一笔,链上时间在"留名时间"之前几分钟,也要认;再早的不认。
 // TronGrid 那一页是满的(被零碎转账刷屏):列出来的照样认,没找到的只能说"不知道"。
 func TestSupportCheckSkewAndFlood(t *testing.T) {
@@ -689,7 +766,7 @@ func TestDonorDevicesHiddenWhenStale(t *testing.T) {
 	}
 }
 
-// TronGrid 查失败或正在查:这 20 秒内别人问到的都是 known:false("不知道"),不能说成 known:true/arrived:false。
+// TronGrid 查失败或正在查,手上又没有查成过的结果:别人问到的都是 known:false("不知道"),不能说成 known:true/arrived:false。
 func TestSupportCheckUnknownWhileFailingOrBusy(t *testing.T) {
 	now := time.Now().Unix()
 	var fail atomic.Bool
@@ -726,9 +803,9 @@ func TestSupportCheckUnknownWhileFailingOrBusy(t *testing.T) {
 		t.Fatalf("20 秒内只该查一次: %d", hits.Load())
 	}
 
-	// 过了 20 秒,这次 TronGrid 慢:查的过程中别人问到的也是"不知道"
+	// 过了一阵可以再查了,这次 TronGrid 慢:查的过程中别人问到的也是"不知道"(手上还没有查成过的结果)
 	s.donors.mu.Lock()
-	s.donors.tronAt = time.Time{}
+	s.donors.tronNext = time.Time{}
 	s.donors.mu.Unlock()
 	fail.Store(false)
 	first := make(chan map[string]interface{}, 1)

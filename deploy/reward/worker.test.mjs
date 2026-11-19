@@ -49,13 +49,15 @@ function setup(t) {
   const chain = newChain({ sol, sig });
   const calls = { n: 0, max: 0 };
   const env = { DB: d1(db, () => calls.n++), COMMERCE: d1(readonly, () => calls.n++), SALT: 'test-salt', SOLANA_RPC: 'http://rpc.test', TRON_API: 'http://tron.test', FETCH: chain.fetch };
+  env.NOW = () => x.clock; // 经 worker.fetch 走的请求用测试的钟(tick / donate / at 拨到哪就是哪)
   t.after(() => { db.close(); readonly.close(); commerce.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   const x = {
-    env, db, commerce, chain, calls,
+    env, db, commerce, chain, calls, clock: T0,
+    at(now) { x.clock = now; chain.now = now; return now; }, // 把钟拨到 now:这之后的交易对链来说还没发生
     // 跑一轮定时任务,顺便独立数一遍它用了多少个子请求:免费套餐一次调用最多 50 个
     async tick(now) {
       const before = calls.n + chain.fetches;
-      chain.now = now;
+      x.at(now);
       const l = await W.tick(env, now);
       const used = calls.n + chain.fetches - before;
       calls.max = Math.max(calls.max, used);
@@ -95,7 +97,16 @@ function setup(t) {
       const res = await W.handleReport(env, await signed(panel, address, gb, now), ip, now);
       return { status: res.status, body: await res.json() };
     },
-    async donate(name, amount, now, ip = '198.51.100.9') { const res = await W.handleDonate(env, { name, amount }, ip, now); return { status: res.status, body: await res.json() }; },
+    async donate(name, amount, now, ip = '198.51.100.9') { x.at(now); const res = await W.handleDonate(env, { name, amount }, ip, now); return { status: res.status, body: await res.json() }; },
+    // 面板问这一笔到没到账(GET /v1/donate/<id>);顺便数一遍这次请求用了多少个子请求
+    bg: [], // 请求交给后台接着做的事(ctx.waitUntil);测试里要等它们做完用 await Promise.all(x.bg)
+    async ask(id, now) {
+      x.at(now);
+      const before = calls.n + chain.fetches;
+      const body = await (await worker.fetch(new Request('https://x/v1/donate/' + id), env, { waitUntil: p => x.bg.push(p) })).json();
+      assert.ok(calls.n + chain.fetches - before <= 50, `这次请求用了 ${calls.n + chain.fetches - before} 个子请求`);
+      return body;
+    },
     addr: a => ({ ...db.prepare('SELECT * FROM addresses WHERE address = ?').get(a) }),
     panel: p => ({ ...db.prepare('SELECT * FROM panels WHERE pub = ?').get(p.pub) }),
     deposits: () => db.prepare('SELECT * FROM deposits ORDER BY ts, tx').all().map(r => ({ ...r })),
@@ -1028,6 +1039,97 @@ test('近期之内,只留近期记录的节点答的就算数:没转账的留名
   assert.equal((await (await worker.fetch(new Request('https://x/v1/donate/' + it.id), x.env)).json()).status, 'expired');
 });
 
+test('有人开着等待到账的页面:问这一笔时当场看一次链,付款后不用等两分钟一轮的定时任务;问得再勤查链也有间隔', async t => {
+  const x = setup(t), solA = x.solAddr();
+  const st = () => JSON.parse(x.db.prepare("SELECT v FROM kv WHERE k = 'state'").get().v);
+  await x.tick(T0);
+  const it = (await x.donate('急性子', 5, T0 + 10)).body;
+  assert.equal((await x.ask(it.id, T0 + 12)).status, 'pending');
+  assert.deepEqual(x.chain.asked, ['rpc.test getSignaturesForAddress'], '头一次问就看了一次链');
+  await x.ask(it.id, T0 + 13); await x.ask(it.id, T0 + 16);
+  assert.equal(x.chain.asked.length, 1, '5 秒内再问不重复查');
+  const pay = x.chain.pay(solA, U(it.exact), T0 + 20);
+  assert.equal((await x.ask(it.id, T0 + 17)).status, 'pending', '钱还没到');
+  const got = await x.ask(it.id, T0 + 22);
+  assert.deepEqual([got.status, got.scanAt, got.now], ['paid', T0 + 22, T0 + 22], '到账后下一次问就认出来,没等定时任务');
+  assert.deepEqual(x.deposits().map(d => [d.kind, d.name, d.micros, d.tx]), [['donation', '急性子', U(it.exact), pay.signature]]);
+  assert.deepEqual([st().tick.at, st().scanOk], [T0, T0 + 22], '定时任务记的那几项原样留着,只动查链这一块');
+  const n = x.chain.asked.length;
+  await x.ask(it.id, T0 + 40); await x.ask(it.id, T0 + 60);
+  assert.equal(x.chain.asked.length, n, '到账之后再问不查链');
+  const l = await x.tick(T0 + 120);
+  assert.deepEqual([l.pool.donateCount, l.deposits.length, l.deposits[0].name], [1, 1, '急性子'], '定时任务照常出账本,不重复记');
+
+  // 登记超过 10 分钟还没转的:间隔放宽到 15 秒;没有这一笔 / 已经查完的,问了也不查链
+  const slow = (await x.donate('慢性子', 6, T0 + 200, '198.51.100.50')).body;
+  x.chain.asked.length = 0;
+  await x.ask(slow.id, T0 + 900); await x.ask(slow.id, T0 + 906); await x.ask(slow.id, T0 + 912);
+  assert.equal(x.chain.asked.length, 1, '15 秒内只查一次');
+  await x.ask(slow.id, T0 + 916);
+  assert.equal(x.chain.asked.length, 2);
+  const none = await worker.fetch(new Request('https://x/v1/donate/' + 'ab'.repeat(12)), x.env);
+  assert.equal(none.status, 404);
+  for (let now = T0 + 960; now <= T0 + 200 + 3600 + 720; now += 120) await x.tick(now); // 一直没转:到期、查完
+  x.chain.asked.length = 0;
+  assert.equal((await x.ask(slow.id, T0 + 200 + 3600 + 800)).status, 'expired');
+  assert.deepEqual(x.chain.asked, [], '已经查完的留名,问了也不再查链');
+
+  // 节点被限速、都在歇:当场看链不去敲它们(问几次都不敲),等它们醒了再看;定时任务那边照常两分钟试一次
+  const z = setup(t), solC = z.solAddr();
+  await z.tick(T0);
+  const it3 = (await z.donate('限速', 5, T0 + 10)).body;
+  z.chain.pay(solC, U(it3.exact), T0 + 20);
+  z.chain.rule = () => new Response('slow down', { status: 429 });
+  assert.equal((await z.ask(it3.id, T0 + 30)).status, 'pending');
+  assert.equal(z.chain.asked.length, 3, '头一次:一次最多换着问三个节点,都被限速');
+  await z.ask(it3.id, T0 + 36);
+  const knocked = z.chain.asked.length;
+  assert.equal(knocked, 4, '第二次:剩下那个还没问过的节点,也被限速');
+  await z.ask(it3.id, T0 + 42); await z.ask(it3.id, T0 + 48); await z.ask(it3.id, T0 + 54);
+  assert.equal(z.chain.asked.length, knocked, '都在歇的时候再问也不敲');
+  z.chain.rule = null;
+  assert.equal((await z.ask(it3.id, T0 + 30 + 62)).status, 'paid', '歇够一分钟,节点好了:一问就认出来');
+
+  // 节点都不通:问的人照样拿到答复(还在等),节点的情况记下了
+  const y = setup(t), solB = y.solAddr();
+  await y.tick(T0);
+  const it2 = (await y.donate('断网', 5, T0 + 10)).body;
+  y.chain.pay(solB, U(it2.exact), T0 + 20);
+  y.chain.down = true;
+  const r = await y.ask(it2.id, T0 + 30);
+  assert.deepEqual([r.status, r.scanAt], ['pending', T0]);
+  y.chain.down = false;
+  assert.equal((await y.ask(it2.id, T0 + 100)).status, 'paid', '通了之后下一次问就补上');
+});
+
+test('节点答得慢、干脆不回话:问状态的人最多等一会儿就拿到答复,查链在后台接着做;不回话的节点到点掐掉、换下一个', async t => {
+  const waitMs = W.CFG.quickWaitMs, rpcMs = W.CFG.rpcTimeoutMs;
+  t.after(() => { W.CFG.quickWaitMs = waitMs; W.CFG.rpcTimeoutMs = rpcMs; });
+  const x = setup(t), solA = x.solAddr();
+  const st = () => JSON.parse(x.db.prepare("SELECT v FROM kv WHERE k = 'state'").get().v);
+  await x.tick(T0);
+  const it = (await x.donate('等不及', 5, T0 + 10)).body;
+  x.chain.pay(solA, U(it.exact), T0 + 20);
+  // 自己的节点要 300 毫秒才答,问的人只等 40 毫秒:先拿到「还在等」,后台看完之后下一次问就是到账
+  x.chain.slow.set('rpc.test', 300);
+  W.CFG.quickWaitMs = 40;
+  const t0 = Date.now();
+  assert.equal((await x.ask(it.id, T0 + 30)).status, 'pending');
+  assert.ok(Date.now() - t0 < 250, '没有等节点答完');
+  await Promise.all(x.bg);
+  assert.equal((await x.ask(it.id, T0 + 31)).status, 'paid', '后台已经看完:不用再查链就知道到账了');
+  // 不回话的节点:到点掐掉,换下一个
+  x.chain.slow.clear();
+  W.CFG.quickWaitMs = 3000; W.CFG.rpcTimeoutMs = 60;
+  const it2 = (await x.donate('换个节点', 6, T0 + 100, '198.51.100.60')).body;
+  x.chain.pay(solA, U(it2.exact), T0 + 110);
+  x.chain.hang.add('rpc.test');
+  x.chain.asked.length = 0;
+  assert.equal((await x.ask(it2.id, T0 + 120)).status, 'paid');
+  assert.deepEqual(x.chain.asked.slice(0, 2), ['rpc.test getSignaturesForAddress', 'api.mainnet-beta.solana.com getSignaturesForAddress']);
+  assert.deepEqual([st().rpc['rpc.test'].fails, st().rpc['rpc.test'].until], [1, T0 + 120 + 60], '不回话算出错:歇一会儿');
+});
+
 test('查账很省:没人捐的时候一次不查;有人在等到账时一轮也就两三次', async t => {
   const x = setup(t), solA = x.solAddr();
   for (let i = 0; i < 30; i++) await x.tick(T0 + i * 120);
@@ -1163,6 +1265,7 @@ test('没有可用的奖池地址时:留名捐赠说明白,账本照样出', asy
 test('接口:路由、请求格式、公开账本可跨域读', async t => {
   const x = setup(t), solA = x.solAddr(), p = await newPanel(), a = sol();
   const now = Math.floor(Date.now() / 1000);
+  x.at(now); // 这一条走的是真实时间
   const call = (method, p2, body, headers = {}) => worker.fetch(new Request('https://reward.test' + p2, { method, body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body), headers: { 'CF-Connecting-IP': '203.0.113.50', ...headers } }), x.env);
 
   let res = await call('POST', '/v1/report', await signed(p, a, 2048, now));

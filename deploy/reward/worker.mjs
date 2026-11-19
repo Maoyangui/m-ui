@@ -19,7 +19,9 @@
 //   POST /v1/report              面板上报
 //   GET  /v1/export              公开账本(仓库 rewards 分支上的 ledger.json 就是它,由 ledger-workflow.yml 定时提交)
 //   POST /v1/donate              {name, amount} → 要转的确切金额和期限
-//   GET  /v1/donate/<id>         这一笔到没到账(scanAt = 登记服务上一次把链上看全的时间,now = 它答复时的钟)
+//   GET  /v1/donate/<id>         这一笔到没到账(scanAt = 登记服务上一次把链上看全的时间,now = 它答复时的钟)。
+//                                这一笔还没结论时,问的这一下会当场看一次链(有间隔,见 quickScan):面板开着等待到账的页面
+//                                每隔几秒问一次,付款后一二十秒页面就能跳,不用等定时任务
 //   POST /v1/donate/<id>/cancel  不捐了(面板上这一笔就此收起。但钱要是真的在期限内按那个数转来了,照样计入、照样记名:
 //                                钱不能因为点了一下取消就白转;那个金额在期限过完之前也不会发给别人)
 //   GET  /v1/health              定时任务最近一次跑的情况
@@ -54,6 +56,11 @@ export const CFG = {
   intentWindow: 3600,                                // 这么久之内到账才算
   intentGrace: 300,                                  // 链上时间和登记时间之间留的余量
   intentsPerIpHour: 6,
+  // 有人开着等待到账的页面时当场看链(quickScan):全站最多隔这么久看一次。登记不满 quickFreshFor 的留名(刚拿到金额,多半正在转)
+  // 用短的间隔,之后用长的 —— 开着页面不转账的人不该让查链一直那么勤
+  quickGapFresh: 5, quickGapLater: 15, quickFreshFor: 600,
+  quickWaitMs: 3500,                                 // 当场看链最多让问的人等这么久;没看完先回话,后台接着看,下一次问就有结果
+  rpcTimeoutMs: 8000,                                // 问一个 Solana 节点最多等这么久:答不上来按出错算,换下一个
   donateMin: 1_000_000, donateMax: 100_000_000_000,  // 留名捐赠的金额范围:1 – 100000 USDT(单位:百万分之一)
   // 自动识别作弊的门槛
   restoreAfter: 14 * 86400,                          // 不计入的面板连续这么久没有再命中任何规则:自动恢复
@@ -516,13 +523,15 @@ async function rpcAsk(env, st, now, method, body, isBatch, opt = {}) {
   const barred = url => { const h = state(url); return (h.no[method] || 0) > now || (isBatch && (h.no.batch || 0) > now); };
   const list = rpcList(env).filter(url => !barred(url) && !(opt.avoid && opt.avoid.has(hostOf(url))));
   let order = list.filter(url => state(url).until <= now);
-  if (!order.length) order = [...list].sort((a, b) => state(a).until - state(b).until).slice(0, 1); // 都在歇:挑最快该醒的那个试一次
+  // 都在歇:挑最快该醒的那个试一次 —— 只有定时任务这么试。当场看链(quickScan,几秒一次)不试:被限速的节点越敲歇得越久
+  if (!order.length && !env.noProbe) order = [...list].sort((a, b) => state(a).until - state(b).until).slice(0, 1);
   let last = null, missing = false;
   for (const url of order.slice(0, 3)) {
     if (!roomFor(env, 1)) break;
     const h = state(url);
     try {
-      const r = await (env.FETCH || fetch)(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      // 带超时:公共节点偶尔半分钟都不回话(2026-11-20 演练时碰到过一次 29 秒),不能让它拖住整轮定时任务、或者拖住等着的人
+      const r = await (env.FETCH || fetch)(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(CFG.rpcTimeoutMs) });
       if (r.status === 401 || r.status === 403) {
         // 两种情况要分开:这个节点不给这种查询(要令牌、要付费)→ 一天之内不拿它问这个;只是把这一次挡了(公共节点对云主机的
         // 出口地址时不时这样,官方节点尤其)→ 和限速一样歇一会儿再试。以前不分,官方节点挡一次就被停用一整天。
@@ -844,6 +853,31 @@ const intentView = (i, now, st) => ({
   scanAt: Number(st && st.scanOk) || 0, now,
 });
 
+// ---- 有人开着等待到账的页面:当场看一眼链 ----
+// 定时任务两分钟才看一次链,付了款的人要对着「等待到账」等上一两分钟。面板开着那个页面时每隔几秒问一次这一笔的状态:
+// 问到一笔还没结论的留名,就当场看一次链(scanSolana,和定时任务是同一段代码),全站最多隔 gap 秒一次 ——
+// 再多的人同时在等、问得再勤,查链的次数也就这么多;没有人开着页面就还是只有定时任务在看。
+// 和定时任务撞在一起也不要紧:记交易号、记入账、改留名状态都是重复做不出错的写法;「看到哪了」和节点的情况谁后写谁算数,
+// 另一边顶多白查一次。返回写回去的那份状态;这次没轮到(间隔没到)返回 null。
+const QUICK_BUDGET = 36; // 一次请求最多 50 个子请求:这里留出问留名、读写状态的那几次
+export async function quickScan(rawEnv, now, gap = CFG.quickGapLater) {
+  const db = rawEnv.DB;
+  const last = Number(await kvGet(db, 'quickAt')) || 0;
+  if (now - last < gap && now >= last) return null;
+  await kvSet(db, 'quickAt', now); // 先占上:同时来的几个请求只有头一个去查
+  const env = { ...metered(rawEnv, QUICK_BUDGET), noProbe: true }, st = await loadState(db);
+  const t0 = Date.now();
+  try { await scanSolana(env, st, now); } catch { /* 节点不通:节点的情况照样记下,留名接着等 */ }
+  // 只把查链这一块写回去(重新读一份再合):定时任务刚写的订单进度、健康检查不能被这里的旧值盖掉
+  const cur = await loadState(db);
+  for (const k of ['cur', 'rpc', 'ata']) if (st[k]) cur[k] = st[k];
+  if (Number(st.scanOk || 0) > Number(cur.scanOk || 0)) cur.scanOk = st.scanOk;
+  await kvSet(db, 'state', JSON.stringify(cur));
+  const took = Math.floor((Date.now() - t0) / 1000);
+  if (took > 0) await kvSet(db, 'quickAt', now + took); // 这一次看了很久(节点慢):间隔从看完算起,不叠着看
+  return cur;
+}
+
 // ---- 公开账本 ----
 // st 是定时任务手上的那份状态(收款地址、余额都在里面);单独调用时自己读一份。
 export async function buildExport(env, now, st) {
@@ -917,9 +951,12 @@ export async function tick(rawEnv, now) {
   return ledger;
 }
 
+// 最多等 ms 毫秒:到点还没好就先给 undefined(那件事自己接着做)
+const within = (p, ms) => { let t; return Promise.race([p, new Promise(r => { t = setTimeout(r, ms); })]).finally(() => clearTimeout(t)); };
+
 export default {
-  async fetch(req, env) {
-    const url = new URL(req.url), now = Math.floor(Date.now() / 1000);
+  async fetch(req, env, ctx) {
+    const url = new URL(req.url), now = typeof env.NOW === 'function' ? env.NOW() : Math.floor(Date.now() / 1000); // env.NOW 只有测试里有
     const ip = req.headers.get('CF-Connecting-IP') || '';
     const path = url.pathname.replace(/\/+$/, '');
     try {
@@ -940,7 +977,17 @@ export default {
           return json({ ok: true });
         }
         if (req.method !== 'GET') return fail(405, '方法不对');
-        return json(intentView(it, now, await loadState(env.DB)));
+        let st = await loadState(env.DB), cur = it;
+        // 这一笔还没有结论(没到账,它的期限连余量也还没被看全过):有人正开着页面等 —— 当场看一眼链
+        if (it.status !== 'paid' && it.expires_at >= Number(st.scanOk || 0) - CFG.intentGrace) {
+          const gap = now - it.created_at < CFG.quickFreshFor ? CFG.quickGapFresh : CFG.quickGapLater;
+          // 节点慢的时候不让问的人干等:最多等 quickWaitMs,没看完先按手上的回话,后台接着看(下一次问就有结果)
+          const scan = quickScan(env, now, gap).catch(() => null);
+          if (ctx && ctx.waitUntil) ctx.waitUntil(scan);
+          const after = await within(scan, CFG.quickWaitMs);
+          if (after) { st = after; cur = await one(env.DB, 'SELECT * FROM intents WHERE id = ?', m[1]) || it; }
+        }
+        return json(intentView(cur, now, st));
       }
       return fail(404, '没有这个接口');
     } catch (e) {

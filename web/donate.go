@@ -48,8 +48,16 @@ const (
 	// 页面上问「到了没有」时,到账的链上时间最多可以比留名时间早这么多:留名时间按这台面板的钟记,钟快了几分钟的机器上,
 	// 马上转出的那一笔会显得「在留名之前」,页面就一直说没到账(上榜不受影响:对账那边按 ntfy 收到留名的时间算)。
 	// 金额带着随机零头,十分钟里正好有另一笔一模一样的,可以不计。
-	pledgeSkew      = int64(600)
-	tronPage        = 200       // 向 TronGrid 一次要多少条(它一页最多这么多)
+	pledgeSkew = int64(600)
+	tronPage   = 200 // 向 TronGrid 一次要多少条(它一页最多这么多)
+	// 有人在等到账时,多久可以问一次 TronGrid:页面 5 秒问一次面板,付了款十几秒就能跳。TronGrid 不带密钥的限额是每秒 1 次
+	// (超了停 5 秒),这里留足余量;不管多少人在等、问的是哪一笔,大家共用这一次查询。
+	tronEvery = 5 * time.Second
+	// 这一次没查成(限速、超时)或者正在查:上一次查成的结果在这么久之内照样拿来答。免费接口偶尔限速一下是常事,
+	// 不该让页面一会儿「知道」一会儿「不知道」;超过这么久还没有新的结果,才老实说不知道。
+	tronGoodFor = 30 * time.Second
+	// 连着没查成:每次把间隔加倍(10、20、40 秒),最长这么久 —— 被限速时越敲越久。
+	tronBackoffMax  = 60 * time.Second
 	donorsTTL       = time.Hour // 名单最多一小时取一次
 	donorsWaitAge   = 6 * time.Hour
 	donorsWait      = 3 * time.Second  // 手上没有名单或比 donorsWaitAge 还旧时,打开页面最多等这么久拿新的
@@ -99,17 +107,19 @@ func (b donorBoard) olderThan(cur donorBoard, now int64) bool {
 
 // donorState 这台面板手上的一份名单。
 type donorState struct {
-	mu       sync.Mutex
-	board    donorBoard
-	got      time.Time          // 最近一次取到合法名单的时间(零值 = 还没取到过)
-	next     time.Time          // 什么时候可以再取
-	fetching chan struct{}      // 正在取:拿到第一份合法的名单或这一轮结束时关闭
-	rate     map[string][]int64 // 留名限流:来源 → 最近几次的时间
-	total    []int64            // 这台面板最近一小时的留名
-	tron     []tronTx           // 最近两小时的到账
-	tronAt   time.Time
-	tronOK   bool // 最近一次查 TronGrid 成功了;正在查或查失败时为 false
-	tronFull bool // 最近一次查到的那一页是满的:更早的到账可能没列出来,没找到不能当成"没到账"
+	mu        sync.Mutex
+	board     donorBoard
+	got       time.Time          // 最近一次取到合法名单的时间(零值 = 还没取到过)
+	next      time.Time          // 什么时候可以再取
+	fetching  chan struct{}      // 正在取:拿到第一份合法的名单或这一轮结束时关闭
+	rate      map[string][]int64 // 留名限流:来源 → 最近几次的时间
+	total     []int64            // 这台面板最近一小时的留名
+	tron      []tronTx           // 最近一次查成的:收款地址最近两小时的到账
+	tronFull  bool               // 那一页是满的:更早的到账可能没列出来,没找到不能当成"没到账"
+	tronGood  time.Time          // 那一次是什么时候查成的(零值 = 还没查成过)
+	tronNext  time.Time          // 什么时候可以再问 TronGrid
+	tronBusy  bool               // 正在问
+	tronFails int                // 连着几次没查成
 }
 
 type tronTx struct{ micros, at int64 }
@@ -420,28 +430,51 @@ func usdtMicros(s string) (int64, bool) {
 	return w*1_000_000 + f, true
 }
 
-// recentTransfers 收款地址最近两小时收到的 USDT。不管多少人在等、问的是哪一笔,20 秒最多查一次:免费接口不能被这个公开页面打爆。
-// 最后一个返回值是"知不知道":正在查、或者 20 秒内那次查失败了,都是不知道,不能当成"没到账"。
+// recentTransfers 收款地址最近两小时收到的 USDT。不管多少人在等、问的是哪一笔,tronEvery 最多查一次:免费接口不能被这个公开页面打爆。
+// 最后一个返回值是"知不知道":手上没有够新的结果(tronGoodFor 之内查成过的)就是不知道,不能当成"没到账"。
+// 这一次没查成、或者别人正在查:够新的上一次结果照样拿来答 —— 偶尔一次限速不让页面变成"不知道"。
 // full = 查到的那一页是满的(有人拿零碎转账刷屏):列出来的照样算数,但没找到的那一笔可能只是被挤到了下一页。
 func (s *Server) recentTransfers(ctx context.Context) (txs []tronTx, full, ok bool) {
 	st := &s.donors
 	st.mu.Lock()
-	if time.Since(st.tronAt) < 20*time.Second {
-		txs, full, ok = st.tron, st.tronFull, st.tronOK
+	fresh := func() ([]tronTx, bool, bool) { // 手上那份还够不够新(要拿着锁)
+		if !st.tronGood.IsZero() && time.Since(st.tronGood) <= tronGoodFor {
+			return st.tron, st.tronFull, true
+		}
+		return nil, false, false
+	}
+	if st.tronBusy || time.Now().Before(st.tronNext) {
+		txs, full, ok = fresh()
 		st.mu.Unlock()
 		return txs, full, ok
 	}
-	st.tronAt = time.Now() // 查失败也算一次,等下一轮再试
-	st.tronOK = false      // 查完之前,别人问到的都是"不知道"
+	st.tronBusy = true
 	st.mu.Unlock()
-	txs, full, ok = fetchTransfers(ctx)
+	func() { // 查的过程中万一出了意外也要把「正在问」放掉,不然以后谁问都是不知道
+		defer func() {
+			if recover() != nil {
+				txs, full, ok = nil, false, false
+			}
+		}()
+		txs, full, ok = fetchTransfers(ctx)
+	}()
 	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.tronBusy = false
 	if ok {
-		st.tron, st.tronFull = txs, full
+		st.tron, st.tronFull, st.tronGood, st.tronFails = txs, full, time.Now(), 0
+		st.tronNext = time.Now().Add(tronEvery)
+		return txs, full, true
 	}
-	st.tronOK = ok
-	st.mu.Unlock()
-	return txs, full, ok
+	if st.tronFails < 8 {
+		st.tronFails++
+	}
+	wait := tronEvery << uint(st.tronFails) // 10、20、40…
+	if wait > tronBackoffMax {
+		wait = tronBackoffMax
+	}
+	st.tronNext = time.Now().Add(wait)
+	return fresh()
 }
 
 func fetchTransfers(ctx context.Context) (txs []tronTx, full, ok bool) {
@@ -491,7 +524,7 @@ func (s *Server) handleSupportCheck(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"code": "bad"})
 		return
 	}
-	// 这次查询是大家共用的(20 秒一次):发起的那个人关了页面也别把它取消掉,不然别人这 20 秒都是"不知道"
+	// 这次查询是大家共用的:发起的那个人关了页面也别把它取消掉,不然别人拿到的都是"不知道"
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 	defer cancel()
 	txs, full, got := s.recentTransfers(ctx)

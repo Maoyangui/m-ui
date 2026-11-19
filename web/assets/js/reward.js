@@ -157,7 +157,7 @@ async function load() {
     paint();
   }
   clearInterval(fastTimer); fastTimer = 0;
-  if (isOpen && pending()) fastTimer = setInterval(() => { if (!document.hidden) load(); }, 10000); // 等到账的时候查得勤一点
+  if (isOpen && pending()) fastTimer = setInterval(() => { if (!document.hidden) load(); }, 5000); // 等到账的时候查得勤一点
 }
 // 气泡开着时点了别处:收起(这一下点击照常落到它该去的地方)
 document.addEventListener('pointerdown', e => {
@@ -611,7 +611,7 @@ async function donateSubmit() {
   donBusy = false;
   paint();
   clearInterval(fastTimer); fastTimer = 0;
-  if (pending()) fastTimer = setInterval(() => { if (!document.hidden) load(); }, 10000);
+  if (pending()) fastTimer = setInterval(() => { if (!document.hidden) load(); }, 5000);
 }
 // 「去设置里关闭」:到设置页,滚到「流量奖励」那一行并闪一下(设置页自己接着做,见 settings.js)
 function toSettings() {

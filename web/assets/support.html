@@ -396,9 +396,12 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
 
   // 留名后这页关了也能接着等:记在浏览器里,60 分钟后作废
   var KEY = 'm-ui-pledge', timer = null, poll = null, giveUp = null, session = 0;
-  // 到期时最近一次核对比 STALE 旧(毫秒,按这台电脑的钟)就先再核对一次:正常 20 秒一次,标签页被冻结、后台节流或电脑睡眠后
+  // 每 POLL 毫秒问一次面板「到了没有」(面板那边同样的间隔去查链):付了款十几秒页面就跳。
+  // 到期时最近一次核对比 STALE 旧(毫秒,按这台电脑的钟)就先再核对一次:正常 5 秒一次,标签页被冻结、后台节流或电脑睡眠后
   // 回来,手上的结果可能是一个小时前的。一次核对最多等 WAIT:过了还没回来就当它丢了(到期时就是"不知道"),它的结果也不再算
-  var STALE = 30000, WAIT = 15000;
+  var STALE = 30000, WAIT = 15000, POLL = 5000;
+  // 面板连续这么久都说"查不了"(毫秒)才在页面上说明:查链的免费接口偶尔限速一下是常事,一两次不算异常
+  var UNK_AFTER = 60000;
   var ERR = { name_empty: ZH ? '请填名字' : 'Enter a name', name_long: ZH ? '名字最多 24 个字' : 'Names can be 24 characters at most', name_bad: ZH ? '名字只能用文字、数字和空格,不能带链接' : 'Names can only use letters, digits and spaces, no links', amount: ZH ? '金额需在 1 到 100000 之间' : 'The amount must be between 1 and 100000', rate: ZH ? '提交太频繁,稍后再试' : 'Too many tries, try again later', send: ZH ? '暂时无法留名,稍后再试' : "Can't sign right now, try again later", origin: ZH ? '请从面板页面提交' : 'Please submit from the panel page', bad: ZH ? '提交有误,请重试' : 'Invalid request, please retry' };
   var load = function () { try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; } };
   var save = function (p) { try { if (p) localStorage.setItem(KEY, JSON.stringify(p)); else localStorage.removeItem(KEY); } catch (e) {} };
@@ -412,9 +415,14 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
     if (typeof p.skew === 'number' && isFinite(p.skew)) skew = p.skew;
     // 最近一次核对:true = 面板查到了链上记录(没有就是真没到);其它 = 面板暂时查不了,不能断言没到账
     // cur = 还在路上的那次核对(发出的时间 at),sentAt = 最近一次发出的时间,after = 等它回来再做的事
-    // unk = 面板连着几次说"查不了":到 3 次(一分钟)就在页面上说明,不让人对着倒计时干等到最后才知道
-    var known = null, cur = null, sentAt = 0, after = [], last = false, unk = 0;
-    var seen = function (ok) { known = ok; unk = ok ? 0 : unk + 1; $('p-unk').hidden = unk < 3; };
+    // unkSince = 面板从什么时候起一直说"查不了"(0 = 现在查得了):连续 UNK_AFTER 才在页面上说明,
+    // 不让人对着倒计时干等到最后才知道,也不因为一两次限速就喊异常
+    var known = null, cur = null, sentAt = 0, after = [], last = false, unkSince = 0;
+    var seen = function (ok) {
+      known = ok;
+      if (ok) unkSince = 0; else if (!unkSince) unkSince = Date.now();
+      $('p-unk').hidden = !(unkSince && Date.now() - unkSince >= UNK_AFTER);
+    };
     $('p-unk').hidden = true;
     var waitingFor = function () { var age = cur ? Date.now() - cur.at : -1; return age >= 0 && age < WAIT; };
     $('pledge').hidden = true; $('p-hint').hidden = true; $('p-done').hidden = true; $('p-wait').hidden = false;
@@ -465,7 +473,7 @@ document.querySelectorAll('[data-share]').forEach(function (b) {
       giveUp = setTimeout(function () { if (me === session) { known = null; verdict(); } }, WAIT);
       conclude();
     };
-    timer = setInterval(tick, 1000); poll = setInterval(function () { check(); }, 20000);
+    timer = setInterval(tick, 1000); poll = setInterval(function () { check(); }, POLL);
     check(); tick();
   }
   $('pledge').addEventListener('submit', function (e) {

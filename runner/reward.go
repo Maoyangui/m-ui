@@ -56,7 +56,7 @@ const (
 	rewardLedgerWait  = 4 * time.Second  // 手上没有账本时,打开活动页最多等这么久
 	rewardStaleAfter  = 3 * time.Hour    // 账本比这还旧:页面上标出来「没取到最新的」
 	rewardNetBudget   = 12 * time.Second
-	rewardIntentPoll  = 8 * time.Second // 等到账时最多这么勤地问一次
+	rewardIntentPoll  = 4 * time.Second // 等到账时最多这么勤地问一次(登记服务被问到时会当场看链,付了款一二十秒页面就跳)
 )
 
 type rewardSvc struct {

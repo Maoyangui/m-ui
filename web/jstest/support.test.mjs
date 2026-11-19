@@ -133,22 +133,40 @@ const SOFT = { zh: /通常几小时内上榜;超过一天还没上榜,请在 Tel
 const HARD = { zh: /会在几小时内上榜/, en: /you'll appear on the list within/ };
 
 for (const lang of ['zh', 'en']) {
-  test(`[${lang}] 面板查不了链上到账:连着三次(一分钟)就在等待页上说明,查得到了说明就收起`, async () => {
-    let body = { known: false, arrived: false };
+  test(`[${lang}] 面板查不了链上到账:偶尔一两次不算(限速是常事),连续一分钟都查不了才在等待页上说明;查得到了说明就收起`, async () => {
+    let body = { known: true, arrived: false };
     const pg = await openPage(lang, (url, reply) => reply(body));
-    assert.equal(pg.el('p-unk').hidden, true, '头一次查不了先不说');
-    await pg.advance(25e3);
-    assert.equal(pg.el('p-unk').hidden, true, '两次也先不说');
+    assert.ok(pg.checks.length >= 1);
+    await pg.advance(30e3);
+    assert.ok(pg.checks.length >= 6, '每 5 秒问一次:' + pg.checks.length);
+    // 中间有两次没查成,随后又好了:不提示
+    body = { known: false, arrived: false };
+    await pg.advance(10e3);
+    body = { known: true, arrived: false };
+    await pg.advance(60e3);
+    assert.equal(pg.el('p-unk').hidden, true, '一两次查不了不算异常');
+    // 连续 50 秒查不了:还不提示;过了一分钟才提示
+    body = { known: false, arrived: false };
+    await pg.advance(50e3);
+    assert.equal(pg.el('p-unk').hidden, true);
     await pg.advance(20e3);
-    assert.equal(pg.el('p-unk').hidden, false, '连着三次:说明');
+    assert.equal(pg.el('p-unk').hidden, false, '连续一分钟都查不了:说明');
     assert.equal(pg.el('p-wait').hidden, false, '还在等');
     body = { known: true, arrived: false };
-    await pg.advance(20e3);
+    await pg.advance(6e3);
     assert.equal(pg.el('p-unk').hidden, true, '查得到了:收起');
     // 请求本身失败(面板不通)也算查不了
     const pg2 = await openPage(lang, () => Promise.reject(new Error('offline')));
-    await pg2.advance(45e3);
+    await pg2.advance(55e3);
+    assert.equal(pg2.el('p-unk').hidden, true);
+    await pg2.advance(15e3);
     assert.equal(pg2.el('p-unk').hidden, false);
+    // 付了款:下一次问(5 秒内)就跳
+    let n = 0;
+    const pg3 = await openPage(lang, (url, reply) => reply({ known: true, arrived: n++ >= 2 }));
+    await pg3.advance(11e3);
+    assert.equal(pg3.el('p-done').hidden, false, '第三次问(开页后 10 秒)到账了,当场跳');
+    assert.match(pg3.el('p-done').textContent, RECEIVED[lang]);
   });
 }
 

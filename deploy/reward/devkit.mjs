@@ -58,7 +58,10 @@ export function newChain(gen) {
     calls: [], asked: [], fetches: 0, down: false, noBatch: false, tron: new Map(), // noBatch:装成不认批量请求的节点
     // short:哪些节点只留近期的记录(主机名 → 留多少秒;要先把 now 设成当前时间)。这种节点上:比这更早的交易它不列出来、
     // 也查不到;拿一个它已经不记得的交易号当 until / before 去问,它整个报「查不到这笔交易」(2026-11 两个公共节点就是这样)。
+    // 设了 now 之后,比它晚的交易对谁都还不存在(测试里先把交易摆好、再把钟拨过去)
     short: new Map(), now: 0, untilAsked: 0,
+    // slow:哪些节点答得慢(主机名 → 毫秒);hang:哪些节点干脆不回话(只有请求被超时掐掉才结束)
+    slow: new Map(), hang: new Set(),
     // rule(host, method, isBatch):测试给某个节点定规矩 —— 返回一个 Response 就拿它当答复(限速、不给这种查询…),不返回就照常答
     rule: null,
     open(owner) { const pubkey = gen.sol(); accounts.set(owner, [...(accounts.get(owner) || []), { pubkey, amount: 0 }]); sigs.set(pubkey, []); return pubkey; },
@@ -87,6 +90,8 @@ export function newChain(gen) {
       c.asked.push(host + ' ' + (isBatch ? 'batch:' + body[0].method : body.method));
       const special = c.rule && c.rule(host, isBatch ? body[0].method : body.method, isBatch);
       if (special) return special;
+      if (c.hang.has(host)) return new Promise((_, reject) => { const sg = init.signal; if (sg) sg.addEventListener('abort', () => reject(sg.reason || new Error('aborted'))); });
+      if (c.slow.has(host)) await new Promise(r => setTimeout(r, c.slow.get(host)));
       if (isBatch) { // 批量请求
         if (c.noBatch) return Response.json({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'batch requests are not supported' } });
         const out = [];
@@ -105,7 +110,8 @@ export function newChain(gen) {
       c.calls.push(method);
       let result = null;
       const floor = c.short.has(host) ? c.now - c.short.get(host) : -Infinity; // 这个节点最早还记得什么时候的交易
-      const forgot = sig => { const t = txs.get(sig); return !t || t.blockTime < floor; };
+      const yet = t => c.now > 0 && t.blockTime > c.now; // 还没发生
+      const forgot = sig => { const t = txs.get(sig); return !t || t.blockTime < floor || yet(t); };
       const notFound = sig => ({ error: { code: -32020, message: `Transaction ${sig} not found` } });
       if (method === 'getTokenAccountsByOwner') {
         result = { value: (accounts.get(params[0]) || []).map(a => ({ pubkey: a.pubkey, account: { data: { parsed: { info: { owner: params[0], mint: USDT_MINT, tokenAmount: { amount: String(a.amount), decimals: 6 } } } } } })) };
@@ -114,6 +120,7 @@ export function newChain(gen) {
         let list = (owner && sigs.get(accounts.get(owner)[0].pubkey)) || [];
         const { limit = 1000, until, before } = params[1] || {};
         if (until) c.untilAsked++;
+        list = list.filter(s => !yet(s));
         if (c.short.has(host)) {
           if (until && forgot(until)) return notFound(until);
           if (before && forgot(before)) return notFound(before);
@@ -122,7 +129,7 @@ export function newChain(gen) {
         if (before) { const i = list.findIndex(s => s.signature === before); list = i >= 0 ? list.slice(i + 1) : []; }
         if (until) { const i = list.findIndex(s => s.signature === until); if (i >= 0) list = list.slice(0, i); }
         result = list.slice(0, limit);
-      } else if (method === 'getTransaction') result = c.short.has(host) && forgot(params[0]) ? null : txs.get(params[0]) || null;
+      } else if (method === 'getTransaction') { const t = txs.get(params[0]); result = !t || yet(t) || (c.short.has(host) && forgot(params[0])) ? null : t; }
       return { result };
   }
   return c;
