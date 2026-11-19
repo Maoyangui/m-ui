@@ -178,12 +178,8 @@ func download(ctx context.Context, url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 256<<20))
 }
 
-// sha256Of 从 SHA256SUMS 里取出某个文件的期望摘要。
-func sha256Of(ctx context.Context, url, asset string) (string, error) {
-	body, err := download(ctx, url)
-	if err != nil {
-		return "", err
-	}
+// sumOf 从 SHA256SUMS 的内容里取出某个文件的期望摘要。
+func sumOf(body []byte, asset string) (string, error) {
 	sc := bufio.NewScanner(strings.NewReader(string(body)))
 	for sc.Scan() {
 		f := strings.Fields(sc.Text())

@@ -1,0 +1,2 @@
+# 签名测试用的夹具:签名是对原始字节算的,不能让换行转换动它
+selfupdate/testdata/* -text

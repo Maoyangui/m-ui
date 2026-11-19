@@ -20,6 +20,57 @@
 # <数据目录>/upgrade-status.json,面板会在页面顶部提示。
 set -euo pipefail
 
+# ---- 更新包签名 ----
+# v0.8.1 起的 Release 里,校验清单 SHA256SUMS 带发布者的签名(同一把 Ed25519 钥匙签两种写法):
+#   SHA256SUMS.sshsig  SSH 签名格式,用 ssh-keygen -Y verify 验(OpenSSH 8.1 起有)
+#   SHA256SUMS.sig     64 字节签名的 base64,面板内更新用它;这里在没有新 ssh-keygen 时用 OpenSSL 3 验
+# 只比 SHA256SUMS 防不了被换:能换掉程序的人同样能换掉那份清单。公钥和面板内更新内置的是同一把(selfupdate/sign.go)。
+# 两种工具都没有的老系统验不了签名:提示一句,只做 SHA256 校验(面板内更新不受影响,它自己验)。
+RELEASE_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIApvcuQzwhE4aH+lWEisKYQnKMJRWsi1Z4idd3DFsCru"
+RELEASE_KEY_PEM="-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEACm9y5DPCEThof6VYSKwphCcowlFayLVniJ13cMWwKu4=
+-----END PUBLIC KEY-----"
+
+# signed_release <标签>:这个版本发布时带不带签名(v0.8.1 起都带)
+signed_release() {
+  local v="${1#v}"
+  [ "$(printf '%s\n' "0.8.1" "$v" | sort -V | head -n1)" = "0.8.1" ]
+}
+
+# verify_sums <SHA256SUMS 文件> [<.sshsig 文件>] [<.sig 文件>]
+#   返回 0 = 签名验过;1 = 验不过(不是发布者签的,或文件被动过);2 = 验不了(没给签名文件,或这台系统没有能验的工具)
+verify_sums() {
+  local sums="$1" sshsig="${2:-}" rawsig="${3:-}" tmp help=""
+  # ssh-keygen 有没有 -Y verify:看它的用法说明(先收进变量再比:它打印用法时退出码不是 0,开着 pipefail 直接接管道会被当成失败)
+  if [ -n "$sshsig" ] && [ -s "$sshsig" ] && command -v ssh-keygen >/dev/null 2>&1; then help="$(ssh-keygen -? 2>&1 || true)"; fi
+  if [[ "$help" == *"-Y verify"* ]]; then
+    tmp="$(mktemp)"
+    printf 'm-ui-release %s\n' "$RELEASE_KEY" > "$tmp"
+    if ssh-keygen -Y verify -f "$tmp" -I m-ui-release -n m-ui-release -s "$sshsig" < "$sums" >/dev/null 2>&1; then rm -f "$tmp"; return 0; fi
+    rm -f "$tmp"; return 1
+  fi
+  if [ -n "$rawsig" ] && [ -s "$rawsig" ] && command -v openssl >/dev/null 2>&1 && openssl version 2>/dev/null | grep -Eq '^OpenSSL ([3-9]|[1-9][0-9])\.'; then
+    tmp="$(mktemp -d)"
+    printf '%s\n' "$RELEASE_KEY_PEM" > "$tmp/pub.pem"
+    if base64 -d "$rawsig" > "$tmp/sig.bin" 2>/dev/null && openssl pkeyutl -verify -pubin -inkey "$tmp/pub.pem" -rawin -in "$sums" -sigfile "$tmp/sig.bin" >/dev/null 2>&1; then rm -rf "$tmp"; return 0; fi
+    rm -rf "$tmp"; return 1
+  fi
+  return 2
+}
+
+# bash install.sh --verify-sums <SHA256SUMS> [<SHA256SUMS.sshsig>] [<SHA256SUMS.sig>]
+#   只用上面这套办法验一下本地的文件(发版流程发布前自检、排查时用),不安装任何东西。退出码同 verify_sums。
+if [ "${1:-}" = "--verify-sums" ]; then
+  [ -n "${2:-}" ] && [ -f "$2" ] || { echo "用法: bash install.sh --verify-sums <SHA256SUMS> [<SHA256SUMS.sshsig>] [<SHA256SUMS.sig>]"; exit 2; }
+  rc=0; verify_sums "$2" "${3:-}" "${4:-}" || rc=$?
+  case "$rc" in
+    0) echo "签名校验通过";;
+    1) echo "签名校验失败:不是发布者签的,或文件被动过";;
+    *) echo "验不了:没给签名文件,或这台系统没有能验的工具(需要 OpenSSH 8.1+ 的 ssh-keygen,或 OpenSSL 3+)";;
+  esac
+  exit "$rc"
+fi
+
 REPO="${M_UI_REPO:-Maoyangui/m-ui}" # GitHub 仓库 owner/name;换仓库改这里或设环境变量 M_UI_REPO
 SRC=""
 if [ $# -gt 0 ] && [[ "$1" != --* ]]; then SRC="$1"; shift; fi
@@ -172,15 +223,32 @@ case "$SRC" in
   http://*|https://*) echo "下载 $SRC"; curl -fL --progress-bar "$SRC" -o "$TMP";;
   *) cp "$SRC" "$TMP";;
 esac
-# 官方 Release:用同一个 Release 里的 SHA256SUMS 校验,通不过就不装
-# (能拦住 SHA256SUMS 这个请求的人也能换掉二进制,所以取不到摘要同样中止;
+# 官方 Release:先验校验清单的签名(v0.8.1 起的版本),再用清单比 SHA256,通不过就不装
+# (能拦住 SHA256SUMS 这个请求的人也能换掉二进制,所以取不到摘要、取不到签名同样中止;
 #  确实需要绕过时显式 MUI_SKIP_VERIFY=1)
 if [ -n "${SUMS:-}" ] && [ "${MUI_SKIP_VERIFY:-}" != "1" ]; then
   if command -v sha256sum >/dev/null; then SUM="sha256sum"
   elif command -v shasum >/dev/null; then SUM="shasum -a 256"
   else echo "没有 sha256sum,无法校验下载内容,已中止(装 coreutils 后重试)"; rm -f "$TMP"; exit 1; fi
-  WANT="$(curl -fsSL "$SUMS" 2>/dev/null | grep " m-ui-linux-$ARCH.tar.gz$" | awk '{print $1}')"
-  [ -n "$WANT" ] || { echo "取不到这个版本的 SHA256SUMS,无法校验,已中止"; rm -f "$TMP"; exit 1; }
+  VDIR="$(mktemp -d)"
+  curl -fsSL "$SUMS" -o "$VDIR/SHA256SUMS" 2>/dev/null || { echo "取不到这个版本的 SHA256SUMS,无法校验,已中止"; rm -rf "$TMP" "$VDIR"; exit 1; }
+  if signed_release "${TAG:-}"; then
+    curl -fsSL "$SUMS.sshsig" -o "$VDIR/sshsig" 2>/dev/null || rm -f "$VDIR/sshsig"
+    curl -fsSL "$SUMS.sig" -o "$VDIR/sig" 2>/dev/null || rm -f "$VDIR/sig"
+    # 两种签名文件每个版本都发:缺哪一个都中止 —— 不然把这台系统验得了的那一种拿掉,就退成「验不了、只比 SHA256」了
+    if [ ! -s "$VDIR/sshsig" ] || [ ! -s "$VDIR/sig" ]; then
+      echo "取不到这个版本的签名(SHA256SUMS.sig / SHA256SUMS.sshsig),无法确认它是发布者发的,已中止"; rm -rf "$TMP" "$VDIR"; exit 1
+    fi
+    VRC=0; verify_sums "$VDIR/SHA256SUMS" "$VDIR/sshsig" "$VDIR/sig" || VRC=$?
+    case "$VRC" in
+      0) echo "签名校验通过";;
+      1) echo "签名校验失败:这个版本的校验清单不是发布者签的(或下载被动过),已中止"; rm -rf "$TMP" "$VDIR"; exit 1;;
+      *) echo "提示:这台系统没有能验签名的工具(需要 OpenSSH 8.1+ 的 ssh-keygen,或 OpenSSL 3+),这次只做 SHA256 校验";;
+    esac
+  fi
+  WANT="$(grep " m-ui-linux-$ARCH.tar.gz$" "$VDIR/SHA256SUMS" | awk '{print $1}' || true)"
+  rm -rf "$VDIR"
+  [ -n "$WANT" ] || { echo "这个版本的 SHA256SUMS 里没有 m-ui-linux-$ARCH.tar.gz,无法校验,已中止"; rm -f "$TMP"; exit 1; }
   GOT="$($SUM "$TMP" | awk '{print $1}')"
   [ "$WANT" = "$GOT" ] || { echo "校验失败:下载的文件与 Release 的 SHA256 不一致,已中止"; rm -f "$TMP"; exit 1; }
   echo "SHA256 校验通过"

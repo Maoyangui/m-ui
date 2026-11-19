@@ -7,7 +7,7 @@
   <h2 id="install">1. 安装</h2>
   <p>任何带 systemd 的 Linux,amd64 或 arm64(推荐 Debian 11+ / Ubuntu 20.04+),root 运行:</p>
   <pre><code>bash &lt;(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)</code></pre>
-  <p>脚本下载最新 Release,用同一个 Release 里的 <code>SHA256SUMS</code> 校验,装到 <code>/usr/local/bin/m-ui</code>,创建 systemd 服务并启动。数据库在 <code>/etc/m-ui/m-ui.db</code>。除此之外什么都不装 —— 没有 Docker、没有 Node、没有外部数据库。</p>
+  <p>脚本下载最新 Release,先验 <code>SHA256SUMS</code> 上发布者的签名(v0.8.1 起;系统要有 OpenSSH 8.1+ 或 OpenSSL 3+,没有就只做下一步并提示),再用它校验下载的文件,装到 <code>/usr/local/bin/m-ui</code>,创建 systemd 服务并启动。数据库在 <code>/etc/m-ui/m-ui.db</code>。除此之外什么都不装 —— 没有 Docker、没有 Node、没有外部数据库。</p>
   <p>全新安装时,如果服务器自带的防火墙(ufw、firewalld,或镜像里带的 iptables 规则)在拦入站,脚本会问一句要不要放开:直接回车就是放开(改之前先备份,之后随时 <code>m-ui firewall undo</code> 恢复),输入 n 保留 —— 保留的话 m-ui 会在它那里自动放行自己用到的端口。加 <code>--keep-firewall</code> 不问、保留,加 <code>--open-firewall</code> 不问、直接放开;没有终端可问时(cloud-init 之类)按放开算。云厂商控制台里的安全组不受影响,端口还是要在那里放行。升级不问也不动。</p>
   <p>还没想好?同一条命令后面加 <code>--dry-run</code>:打印会装到哪、写哪些文件、默认端口,什么都不改。</p>
   <div class="note">从旧面板过来?安装时加 <code>--import /path/to/旧面板.db</code>,线路、上游、用户、设置一次带过来 —— 端口、凭据、订阅路径都保留,既有客户端不用刷新订阅就能继续连。线路已经在 m-ui 上重建好、只想搬用户,用 <b>用户 → 从旧面板导入</b>。</div>

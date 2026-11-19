@@ -97,3 +97,5 @@ jobs:
           done
       - name: Installer syntax
         run: bash -n deploy/install.sh && bash deploy/install.sh --uninstall --dry-run
+      - name: Installer signature verification (ssh-keygen and OpenSSL paths, plus a real published signature)
+        run: bash deploy/install-verify-test.sh

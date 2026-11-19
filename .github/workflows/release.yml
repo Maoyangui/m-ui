@@ -86,6 +86,42 @@ jobs:
           go build -tags with_utls -ldflags "-X main.version=${{ steps.ver.outputs.v }}" -o /tmp/m-ui-host .
           /tmp/m-ui-host version
 
+      # 签名(任务单 S1):用发布者的 Ed25519 私钥给 SHA256SUMS 签名。面板内更新先验这个签名再比 SHA256,
+      # 所以打标签发版时缺钥匙、或者签出来的东西和程序内置的公钥对不上,都拒绝发布 ——
+      # 发出去一个验不过的版本,所有面板就再也更新不到它以及之后的版本了。
+      #   SHA256SUMS.sig     64 字节签名的 base64(面板内更新、m-ui verify-release 用;和佛跳墙同一种格式)
+      #   SHA256SUMS.sshsig  同一把钥匙的 SSH 签名格式(安装脚本用 ssh-keygen -Y verify 验)
+      # 手动触发(workflow_dispatch)不发布,但钥匙在的话同样签一遍、验一遍:发版前先手动跑一次,就知道钥匙放对没有。
+      - name: Sign checksums
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then echo "::error::缺少机密 RELEASE_SIGNING_KEY,拒绝发布"; exit 1; fi
+            echo "::warning::没有机密 RELEASE_SIGNING_KEY:这次只构建,不签名"
+            exit 0
+          fi
+          umask 077
+          key="$RUNNER_TEMP/release.key"
+          trap 'rm -f "$key" "$RUNNER_TEMP/sums" "$RUNNER_TEMP/sums.sig"' EXIT
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key"
+          go run ./tools/signsums "$key" SHA256SUMS > SHA256SUMS.sig
+          cp SHA256SUMS "$RUNNER_TEMP/sums"
+          ssh-keygen -Y sign -f "$key" -n m-ui-release "$RUNNER_TEMP/sums"
+          mv "$RUNNER_TEMP/sums.sig" SHA256SUMS.sshsig
+          chmod 644 SHA256SUMS.sig SHA256SUMS.sshsig
+          # 发布前自检:用刚构建的程序(内置公钥)验一遍,再用安装脚本的两种办法各验一遍
+          /tmp/m-ui-host verify-release SHA256SUMS SHA256SUMS.sig
+          bash deploy/install.sh --verify-sums SHA256SUMS SHA256SUMS.sshsig
+          bash deploy/install.sh --verify-sums SHA256SUMS "" SHA256SUMS.sig
+          # 反过来:清单改一个字节,三种办法都得验不过
+          printf 'x' | cat SHA256SUMS - > "$RUNNER_TEMP/bad"
+          if /tmp/m-ui-host verify-release "$RUNNER_TEMP/bad" SHA256SUMS.sig; then echo "::error::改过的清单居然验过了"; exit 1; fi
+          if bash deploy/install.sh --verify-sums "$RUNNER_TEMP/bad" SHA256SUMS.sshsig; then echo "::error::改过的清单居然验过了(ssh-keygen)"; exit 1; fi
+          if bash deploy/install.sh --verify-sums "$RUNNER_TEMP/bad" "" SHA256SUMS.sig; then echo "::error::改过的清单居然验过了(openssl)"; exit 1; fi
+          echo "签名与自检通过"
+
       - uses: actions/upload-artifact@v4
         if: "!startsWith(github.ref, 'refs/tags/')"
         with:
@@ -93,6 +129,8 @@ jobs:
           path: |
             m-ui-linux-*.tar.gz
             SHA256SUMS
+            SHA256SUMS.sig
+            SHA256SUMS.sshsig
 
       # 发布说明:自上一个标签以来的提交标题(中文)+ 安装 / 升级命令 + 文档与完整变更链接。
       # 两种语言的固定部分都在,改动列表取自提交标题,不需要人手写公告。
@@ -123,8 +161,8 @@ jobs:
             echo
             echo "## 校验 · Verify"
             echo
-            echo "\`SHA256SUMS\` 与压缩包在同一个 Release 里;安装脚本和面板内更新都会先校验再替换。"
-            echo "\`SHA256SUMS\` ships with the archives; the installer and in-panel updater verify before replacing the binary."
+            echo "\`SHA256SUMS\` 与压缩包在同一个 Release 里,并带发布者的签名(\`SHA256SUMS.sig\` / \`SHA256SUMS.sshsig\`);面板内更新先验签名、再比 SHA256,验不过就不装,安装脚本同样先校验再替换。"
+            echo "\`SHA256SUMS\` ships with the archives and is signed by the publisher (\`SHA256SUMS.sig\` / \`SHA256SUMS.sshsig\`); the in-panel updater checks the signature and then the SHA-256 before replacing the binary, and so does the installer."
             echo
             echo "## 链接 · Links"
             echo
@@ -144,6 +182,8 @@ jobs:
             m-ui-linux-amd64.tar.gz
             m-ui-linux-arm64.tar.gz
             SHA256SUMS
+            SHA256SUMS.sig
+            SHA256SUMS.sshsig
 
       # Release 之后自动在 Discussions → Announcements 发一条公告(版本、改动、升级方式、链接)。
       # 分类按名字现查,仓库里没有该分类就跳过,不让发布失败。

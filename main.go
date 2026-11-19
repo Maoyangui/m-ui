@@ -127,6 +127,23 @@ func main() {
 			fmt.Fprintln(os.Stderr, "更新失败:", err)
 			os.Exit(1)
 		}
+	case "verify-release": // m-ui verify-release <SHA256SUMS> <SHA256SUMS.sig>:用内置的发布者公钥核对校验清单的签名(发版流程发布前自检用)
+		if len(os.Args) != 4 {
+			fmt.Fprintln(os.Stderr, "用法: m-ui verify-release <SHA256SUMS> <SHA256SUMS.sig>")
+			os.Exit(2)
+		}
+		sums, err := os.ReadFile(os.Args[2])
+		if err == nil {
+			var sig []byte
+			if sig, err = os.ReadFile(os.Args[3]); err == nil {
+				err = selfupdate.VerifySums(sums, sig)
+			}
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "签名没有通过:", err)
+			os.Exit(1)
+		}
+		fmt.Println("签名校验通过")
 	case "version", "-v", "--version":
 		fmt.Println("m-ui", version)
 	case "health-url":

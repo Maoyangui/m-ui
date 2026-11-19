@@ -123,22 +123,41 @@ func LocalURL(tlsOn bool, listen string, port int, path string) string {
 	return scheme + "://" + net.JoinHostPort(LocalHost(listen), strconv.Itoa(port)) + path
 }
 
-// Stage 下载指定标签、校验 SHA256、解出二进制写到 <bin>.new 并确认它能执行;不动正式程序。
+// githubBase Release 文件的下载前缀;只有测试会换成本地的假服务器。
+var githubBase = "https://github.com/"
+
+// Stage 下载指定标签、验签名、校验 SHA256、解出二进制写到 <bin>.new 并确认它能执行;不动正式程序。
+//
+// 先取校验清单和它的签名(见 sign.go):清单得是发布者签的,验不过就不用下那个大文件了;
+// 清单可信以后,再下程序、比 SHA256。哪一步不过都中止,现在的程序照常运行。
 func Stage(ctx context.Context, tag, binPath string, logf func(string, ...interface{})) (string, error) {
 	if logf == nil {
 		logf = func(string, ...interface{}) {}
 	}
 	asset := "m-ui-linux-" + runtime.GOARCH + ".tar.gz"
-	base := "https://github.com/" + brand.RepoPath + "/releases/download/" + tag + "/"
+	base := githubBase + brand.RepoPath + "/releases/download/" + tag + "/"
+
+	sums, err := download(ctx, base+"SHA256SUMS")
+	if err != nil {
+		return "", fmt.Errorf("取不到这个版本的 SHA256SUMS,无法校验下载内容,已中止: %w", err)
+	}
+	sig, err := download(ctx, base+"SHA256SUMS.sig")
+	if err != nil {
+		return "", fmt.Errorf("取不到这个版本的签名(SHA256SUMS.sig),无法确认更新包是发布者发的,已中止: %w", err)
+	}
+	if err := VerifySums(sums, sig); err != nil {
+		return "", fmt.Errorf("更新包的签名没有通过,已中止,现在的程序没有动: %w", err)
+	}
+	logf("签名校验通过")
+	want, err := sumOf(sums, asset)
+	if err != nil {
+		return "", err
+	}
 
 	logf("下载 %s", base+asset)
 	body, err := download(ctx, base+asset)
 	if err != nil {
 		return "", err
-	}
-	want, err := sha256Of(ctx, base+"SHA256SUMS", asset)
-	if err != nil {
-		return "", fmt.Errorf("取不到这个版本的 SHA256SUMS,无法校验下载内容,已中止: %w", err)
 	}
 	if sum := sha256.Sum256(body); hex.EncodeToString(sum[:]) != want {
 		return "", fmt.Errorf("校验失败:下载的文件与 Release 的 SHA256 不一致,已中止")
