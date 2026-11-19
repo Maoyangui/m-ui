@@ -1043,6 +1043,17 @@ button.role-chip.k-lost { background: var(--danger-soft); color: var(--danger); 
 .ha-steps li.done { color: var(--ok); }
 .ha-steps li.cur { color: var(--text); font-weight: 500; }
 .ha-steps li.fail { color: var(--danger); }
+/* 主机容灾那张卡不走 set-rows(整块是说明 + 单选卡):宽屏(主栏放宽以后)卡片有一千多像素宽,说明文字一行近百个字、
+   「备用台数」的下拉框拉成通栏。和别的卡一样排成两栏:左边是接任方式、备用台数和什么算失联,右边是接任时接管什么(连同 DNS 接口),
+   下面的就绪检查分两列。不限宽、不留白(用户 N9:宽屏右边不要空着)。卡片本身是容器,只能按窗口宽度切(和主栏放宽同一个断点) */
+@media (min-width: 1500px) {
+  #ha-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 3rem; grid-auto-flow: row dense; align-items: start; }
+  #ha-card > * { grid-column: 1 / -1; min-width: 0; }
+  #ha-card > .ha-modes, #ha-card > .form-grid, #ha-card > .form-grid + p.hint { grid-column: 1; }
+  #ha-card > #ha-scope-slot { grid-column: 2; grid-row: span 3; }
+  #ha-card > #ha-scope-slot > .ha-sub:first-child { margin-top: .6rem; }
+  #ha-card .ha-check { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 3rem; }
+}
 .ha-modes { margin: .6rem 0 .8rem; }
 .ha-modes label { display: flex; gap: .6rem; align-items: flex-start; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .55rem .7rem; margin-bottom: .45rem; cursor: pointer; line-height: 1.5; }
 .ha-modes label.sel { border-color: var(--primary); background: var(--primary-soft); }
