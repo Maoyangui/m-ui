@@ -2755,7 +2755,7 @@ const en = {
   'sn.col.lineNode': 'Line / node', 'sn.expand': 'Show the nodes of this line', 'sn.collapse': 'Hide the nodes', 'sn.expandAll': 'Expand all', 'sn.collapseAll': 'Collapse all',
   'sn.relay1': 'incl. 1 relay', 'sn.relayN': 'incl. {n} relays', 'sn.limitedN': '{n} limited', 'sn.fullN': '{n} full', 'sn.outAll': 'All', 'sn.outOfN': '{a} of {b}',
   'sn.onlineN': '{n} online', 'sn.outFact': '{a} of {b} in subscriptions',
-  'set.attn': 'Overview alerts', 'set.attnMute': 'Show these under “Needs attention” on the dashboard',
+  'set.attn': 'Dashboard alerts', 'set.attnMute': 'Show these under “Needs attention” on the dashboard',
   'set.attnMuteHelp': 'Unticked kinds no longer appear on the dashboard (nor in the certificate and mainland reachability bars at the top). Their own pages still show them, and Telegram notifications have their own switches above. Alerts about the panel failing to load its own data cannot be turned off.',
   'set.attnOff': 'Off: {list}', 'set.attnAllOn': 'All on', 'attn.g.server': 'Servers and this panel', 'attn.g.net': 'Network and checks', 'attn.g.other': 'Certificates, resellers and backups',
   'attn.cat.nodes': 'Server problems', 'attn.cat.quota': 'Servers stopped by quota or expiry', 'attn.cat.reload': 'Data plane reload failed', 'attn.cat.disk': 'Disk almost full',
