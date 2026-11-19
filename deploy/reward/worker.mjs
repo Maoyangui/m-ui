@@ -542,7 +542,11 @@ async function rpcAsk(env, st, now, method, body, isBatch, opt = {}) {
       if (!r.ok) throw new Error(`${hostOf(url)} 答复 ${r.status}`);
       const j = await r.json();
       if (isBatch) {
-        if (!Array.isArray(j)) { h.no.batch = now + 86400; last = new Error(`${hostOf(url)} 不认批量请求`); continue; } // 不算它出错,换下一个
+        if (!Array.isArray(j)) {
+          const msg = String((j && j.error && j.error.message) || '');
+          if (RATE_LIMITED.test(msg)) throw new Error(`${hostOf(url)}: ${msg.slice(0, 80)}`); // 被限速时答的也不是数组:按限速算,别记成「不认批量请求」停它一天
+          h.no.batch = now + 86400; last = new Error(`${hostOf(url)} 不认批量请求`); continue; // 不算它出错,换下一个
+        }
         h.fails = 0; h.until = 0;
         return j;
       }

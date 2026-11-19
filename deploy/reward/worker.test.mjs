@@ -820,6 +820,20 @@ test('有人拿零碎转账刷屏:混在几百笔里的那笔留名捐赠几轮�
   assert.ok(x.calls.max > 20 && x.calls.max <= 50, `最忙的一轮用了 ${x.calls.max} 个子请求`);
 });
 
+test('批量请求被限速(答的不是数组,但说的是限速):歇一会儿,不记成「不认批量请求」', async t => {
+  const x = setup(t), solA = x.solAddr();
+  const st = () => JSON.parse(x.db.prepare("SELECT v FROM kv WHERE k = 'state'").get().v);
+  await x.tick(T0);
+  const it = (await x.donate('批量限速', 8, T0 + 30)).body;
+  for (let i = 0; i < 5; i++) x.chain.pay(solA, 3000 + i, T0 + 60 + i);
+  x.chain.pay(solA, U(it.exact), T0 + 100);
+  x.chain.rule = (host, method, isBatch) => isBatch && host === 'rpc.test' ? Response.json({ jsonrpc: '2.0', id: null, error: { code: -32005, message: 'Too many requests, slow down' } }) : null;
+  const l = await x.tick(T0 + 240);
+  assert.equal(l.pool.donateCount, 1, '换下一个节点,照样认出来');
+  const s = st().rpc['rpc.test'];
+  assert.deepEqual([s.no.batch || 0, s.fails, s.until], [0, 1, T0 + 240 + 60], '按限速算:歇 1 分钟,没有停用批量');
+});
+
 test('Solana 节点不认批量请求:退回一笔一笔问,照样认得出留名捐赠', async t => {
   const x = setup(t), solA = x.solAddr();
   x.chain.noBatch = true;
