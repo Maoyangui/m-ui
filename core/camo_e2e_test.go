@@ -144,23 +144,35 @@ func TestCamoFallbackE2E(t *testing.T) {
 		port    int
 		inbound string
 	}{{atPort, "at"}, {tjPort, "tj"}} {
+		// 一个完整的请求(不带 Connection: close),读到回应的开头,连接留着不关:这条一直占着这个来源唯一的名额。
+		// 要等到占得上为止,不能连一次就判:名额是服务端处理完上一条连接以后才放的,而上一条(前面那些 browser,
+		// 或上一轮循环最后那条)客户端读到结尾时,服务端可能还差一步没放 —— CI 上偶尔就卡在这里
+		// (「tj 第一条应拿到伪装站: "\x00…" EOF」:第二轮紧跟着第一轮最后那条浏览器连接)。
+		var hold *tls.Conn
+		for i := 0; hold == nil; i++ {
+			conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", fmt.Sprintf("127.0.0.1:%d", c.port),
+				&tls.Config{InsecureSkipVerify: true, ServerName: "localhost", NextProtos: []string{"http/1.1"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = conn.SetDeadline(time.Now().Add(8 * time.Second))
+			_, _ = conn.Write([]byte("GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: Mozilla/5.0\r\nAccept: text/html\r\n\r\n"))
+			head := make([]byte, 12)
+			if _, err := io.ReadFull(conn, head); err == nil && string(head) == "HTTP/1.1 200" {
+				hold = conn
+				break
+			} else if i >= 80 {
+				t.Fatalf("%s 名额空着时第一条应拿到伪装站: %q %v", c.inbound, head, err)
+			}
+			conn.Close()
+			time.Sleep(50 * time.Millisecond)
+		}
+		// 占上以后再记数:这时最近一条记录是这条连接自己的「回应了伪装站」(先记、后回应),下面等的是它之后新增的那一条
 		before := lastFail(c.inbound).Count
-		hold, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", fmt.Sprintf("127.0.0.1:%d", c.port),
-			&tls.Config{InsecureSkipVerify: true, ServerName: "localhost", NextProtos: []string{"http/1.1"}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		// 一个完整的请求(不带 Connection: close),读到回应的开头,连接留着不关:这条一直占着这个来源唯一的名额
-		_ = hold.SetDeadline(time.Now().Add(8 * time.Second))
-		_, _ = hold.Write([]byte("GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: Mozilla/5.0\r\nAccept: text/html\r\n\r\n"))
-		head := make([]byte, 12)
-		if _, err := io.ReadFull(hold, head); err != nil || string(head) != "HTTP/1.1 200" {
-			t.Fatalf("%s 第一条应拿到伪装站: %q %v", c.inbound, head, err)
-		}
 		if got := browser(c.port); got != "" {
 			t.Fatalf("%s 同一个来源超了上限应立刻断开,却回了 %.80q", c.inbound, got)
 		}
-		waitFail(c.inbound, before+2, "fallback disabled")
+		waitFail(c.inbound, before+1, "fallback disabled")
 		hold.Close()
 		back := false
 		for i := 0; i < 80 && !back; i++ { // 服务端发现那条连接关了才放名额
