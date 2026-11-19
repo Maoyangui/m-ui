@@ -137,6 +137,42 @@ func TestCamoFallbackE2E(t *testing.T) {
 		e2eMustEcho(t, func() (net.Conn, error) { return e2eSocksDial(good, echoAddr) }, out["type"].(string)+" 密码对的开着伪装照常通").Close()
 	}
 
+	// 同时交给伪装站的连接有上限(审查 F-G1):同一个来源超了的和没开时一样立刻断开、记原来的原因;占着的那条断了又能进
+	oldPer := camo.MaxConnsPerIP
+	camo.MaxConnsPerIP = 1
+	for _, c := range []struct {
+		port    int
+		inbound string
+	}{{atPort, "at"}, {tjPort, "tj"}} {
+		before := lastFail(c.inbound).Count
+		hold, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", fmt.Sprintf("127.0.0.1:%d", c.port),
+			&tls.Config{InsecureSkipVerify: true, ServerName: "localhost", NextProtos: []string{"http/1.1"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// 一个完整的请求(不带 Connection: close),读到回应的开头,连接留着不关:这条一直占着这个来源唯一的名额
+		_ = hold.SetDeadline(time.Now().Add(8 * time.Second))
+		_, _ = hold.Write([]byte("GET / HTTP/1.1\r\nHost: localhost\r\nUser-Agent: Mozilla/5.0\r\nAccept: text/html\r\n\r\n"))
+		head := make([]byte, 12)
+		if _, err := io.ReadFull(hold, head); err != nil || string(head) != "HTTP/1.1 200" {
+			t.Fatalf("%s 第一条应拿到伪装站: %q %v", c.inbound, head, err)
+		}
+		if got := browser(c.port); got != "" {
+			t.Fatalf("%s 同一个来源超了上限应立刻断开,却回了 %.80q", c.inbound, got)
+		}
+		waitFail(c.inbound, before+2, "fallback disabled")
+		hold.Close()
+		back := false
+		for i := 0; i < 80 && !back; i++ { // 服务端发现那条连接关了才放名额
+			time.Sleep(50 * time.Millisecond)
+			back = strings.HasPrefix(browser(c.port), "HTTP/1.1 200")
+		}
+		if !back {
+			t.Fatalf("%s 占着的那条断了以后,新的连接应又拿得到伪装站", c.inbound)
+		}
+	}
+	camo.MaxConnsPerIP = oldPer
+
 	// Hysteria2 没填伪装站点:HTTP/3 请求开着伪装时拿到伪装站,关掉是 404
 	h3 := &http3.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, ServerName: "localhost", NextProtos: []string{"h3"}}}
 	defer h3.Close()

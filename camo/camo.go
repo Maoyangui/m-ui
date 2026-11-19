@@ -22,6 +22,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"sort"
@@ -388,4 +389,63 @@ func (c *doneConn) Close() error {
 	err := c.Conn.Close()
 	c.once.Do(func() { close(c.done) })
 	return err
+}
+
+// ---- 线路上交给伪装站的连接:数量上限 ----
+
+// MaxConns / MaxConnsPerIP 线路上认证没过、交给伪装站回应的连接,同时最多这么多条 / 同一个来源最多这么多条。
+//
+// 这样的连接交给伪装站以后空闲 15 秒才断,一直发请求还能一直占着;没开页面伪装时是立刻断开。不设上限的话,
+// 一个来源就能在线路端口上挂几万条连接(每条几十 KB),把内存耗尽 —— 面板和全部线路在同一个进程里
+// (审查 F-G1,原观察 O11:实测每条约 41 KB)。超了的照没开页面伪装时那样立刻断开(见 Admit)。
+// 512 条约 20 MB;同一个来源 16 条够浏览器开页面用(浏览器对一个站最多同时开 6 条)。
+var (
+	MaxConns      = 512
+	MaxConnsPerIP = 16
+)
+
+var admitted = struct {
+	mu    sync.Mutex
+	total int
+	byIP  map[string]int
+}{byIP: map[string]int{}}
+
+// Admit 线路上一条认证没过的连接要交给伪装站之前先问一声:放得下,返回 release(这条连接回应完了调,多调无妨);
+// 放不下 ok 为 false,调用方照没开页面伪装时那样断开。ip 是来源地址(不带端口),IPv6 按 /64 算同一个来源。
+func Admit(ip string) (release func(), ok bool) {
+	key := sourceKey(ip)
+	a := &admitted
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.total >= MaxConns || a.byIP[key] >= MaxConnsPerIP {
+		return func() {}, false
+	}
+	a.total++
+	a.byIP[key]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			a.mu.Lock()
+			a.total--
+			if a.byIP[key]--; a.byIP[key] <= 0 {
+				delete(a.byIP, key)
+			}
+			a.mu.Unlock()
+		})
+	}, true
+}
+
+// sourceKey 来源地址归成计数用的键:IPv4 一个地址一个,IPv6 一个 /64 一个(一台机器手里通常就有一整个 /64)
+func sourceKey(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	a = a.Unmap().WithZone("")
+	if a.Is6() {
+		if p, err := a.Prefix(64); err == nil {
+			return p.String()
+		}
+	}
+	return a.String()
 }

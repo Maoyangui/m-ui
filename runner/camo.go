@@ -27,6 +27,7 @@ import (
 	"github.com/Maoyangui/m-ui/camo"
 	"github.com/Maoyangui/m-ui/certutil"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/safe"
 )
 
 // camoState 伪装站的缓存和两个端口的状况。
@@ -348,13 +349,14 @@ func (r *Runner) camoPortsSync() {
 			cp.why = "busy: " + err.Error()
 			continue
 		}
+		ln = newLimitListener(ln, camoPortMaxConns) // 同时在连的有上限(见 camoPortMaxConns)
 		if port == camoHTTPS {
 			ln = tls.NewListener(ln, &tls.Config{GetCertificate: c.certs.get, MinVersion: tls.VersionTLS12, NextProtos: []string{"http/1.1"}})
 		}
 		srv := &http.Server{Handler: r.camoPortHandler(port), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second,
 			IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10, ErrorLog: log.New(io.Discard, "", 0)}
 		cp.srv, cp.ln, cp.why = srv, ln, ""
-		go func() { _ = srv.Serve(ln) }()
+		safe.Go("runner.camoPort", func() { _ = srv.Serve(ln) })
 		logger.Info("页面伪装:", port, " 端口已放上伪装站")
 	}
 }
@@ -438,6 +440,53 @@ func closeCamoPort(cp *camoPort) bool {
 	}
 	cp.srv, cp.ln = nil, nil
 	return true
+}
+
+// camoPortMaxConns 80 / 443 上的伪装站同时最多接这么多条连接,再多的排在内核的队列里等(和常见网站服务器的连接数上限一个意思)。
+// 每条连接空闲 30 秒才断:不设上限的话,一个来源就能挂上几万条,把内存耗尽 —— 面板和全部线路在同一个进程里(审查 F-G1)。
+const camoPortMaxConns = 1024
+
+// limitListener 同时最多交出 n 条连接的监听器:满了就不再 Accept,有连接关了才接下一条。
+type limitListener struct {
+	net.Listener
+	sem  chan struct{}
+	done chan struct{}
+	once sync.Once
+}
+
+func newLimitListener(l net.Listener, n int) net.Listener {
+	return &limitListener{Listener: l, sem: make(chan struct{}, n), done: make(chan struct{})}
+}
+
+func (l *limitListener) Accept() (net.Conn, error) {
+	select {
+	case l.sem <- struct{}{}:
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+	c, err := l.Listener.Accept()
+	if err != nil {
+		<-l.sem
+		return nil, err
+	}
+	return &limitConn{Conn: c, release: func() { <-l.sem }}, nil
+}
+
+func (l *limitListener) Close() error {
+	l.once.Do(func() { close(l.done) })
+	return l.Listener.Close()
+}
+
+type limitConn struct {
+	net.Conn
+	once    sync.Once
+	release func()
+}
+
+func (c *limitConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(c.release)
+	return err
 }
 
 // camoPortHandler 80 / 443 上的处理:开着伪装就给伪装站(关了以后监听也随之放掉,这里只是保险)。

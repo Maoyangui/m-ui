@@ -235,6 +235,14 @@ var errCamoServed = E.New("not a Trojan client: answered with the camouflage sit
 //   - 开着:在这条连接上(连同已经读到的字节)回应伪装站。像 HTTP 请求的记成「回应了伪装站」,不像的照旧记 bad request。
 func (h *Inbound) camoConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	site := camo.Handler()
+	release := func() {}
+	if site != nil {
+		// 同时交给伪装站的连接有上限(总数、每个来源):超了的和没开页面伪装时一样立刻断开(见 camo.Admit)
+		var ok bool
+		if release, ok = camo.Admit(metadata.Source.AddrString()); !ok {
+			site = nil
+		}
+	}
 	if site == nil {
 		var head [trojan.KeyLength + 1]byte
 		cause := E.New("bad request")
@@ -247,6 +255,7 @@ func (h *Inbound) camoConnection(ctx context.Context, conn net.Conn, metadata ad
 		arrival.Note(h.arrivals, metadata.Source, h.Tag(), h.Type(), arrival.Auth, err)
 		return
 	}
+	defer release()
 	conn, isHTTP := camo.Sniff(conn)
 	if isHTTP {
 		h.logger.DebugContext(ctx, "process connection from ", metadata.Source, ": answered with the camouflage site")

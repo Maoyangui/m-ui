@@ -166,6 +166,14 @@ func (h *camoFallback) NewConnectionEx(ctx context.Context, conn net.Conn, sourc
 		cause = E.New("unknown user password")
 	}
 	site := camo.Handler()
+	release := func() {}
+	if site != nil {
+		// 同时交给伪装站的连接有上限(总数、每个来源):超了的和没开页面伪装时一样立刻断开,探测者挂不住成千上万条连接(见 camo.Admit)
+		var ok bool
+		if release, ok = camo.Admit(source.AddrString()); !ok {
+			site = nil
+		}
+	}
 	if site == nil {
 		err := E.Extend(cause, "fallback disabled")
 		N.CloseOnHandshakeFailure(conn, onClose, err)
@@ -173,6 +181,7 @@ func (h *camoFallback) NewConnectionEx(ctx context.Context, conn net.Conn, sourc
 		arrival.Note(h.arrivals, source, h.Tag(), h.Type(), arrival.Auth, err)
 		return
 	}
+	defer release()
 	conn, isHTTP := camo.Sniff(conn)
 	if isHTTP {
 		h.logger.DebugContext(ctx, "process connection from ", source, ": answered with the camouflage site")

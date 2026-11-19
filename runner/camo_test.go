@@ -281,3 +281,61 @@ func TestHTTPSURL(t *testing.T) {
 		}
 	}
 }
+
+// 80 / 443 上的伪装站同时在连的有上限(审查 F-G1):满了就不再接,有连接关了才接下一条;关掉监听时等着的 Accept 马上返回。
+func TestLimitListener(t *testing.T) {
+	base, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln := newLimitListener(base, 2)
+	accepted := make(chan net.Conn, 8)
+	go func() {
+		defer close(accepted)
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			accepted <- c
+		}
+	}()
+	var clients []net.Conn
+	for i := 0; i < 3; i++ {
+		c, err := net.Dial("tcp", base.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		clients = append(clients, c)
+	}
+	defer func() {
+		for _, c := range clients {
+			c.Close()
+		}
+	}()
+	a1, a2 := <-accepted, <-accepted
+	select {
+	case <-accepted:
+		t.Fatal("满了以后第三条不该接进来")
+	case <-time.After(300 * time.Millisecond):
+	}
+	a1.Close()
+	a1.Close() // 关两次只放一个名额
+	select {
+	case a3 := <-accepted:
+		a3.Close()
+	case <-time.After(3 * time.Second):
+		t.Fatal("放掉一条以后应接下一条")
+	}
+	a2.Close()
+	ln.Close()
+	select {
+	case c, ok := <-accepted:
+		if ok {
+			c.Close()
+			t.Fatal("关掉监听以后不该再接到连接")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("关掉监听以后 Accept 应马上返回")
+	}
+}

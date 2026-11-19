@@ -372,3 +372,45 @@ func collectPages(s *Site, prefix string) string {
 	}
 	return b.String()
 }
+
+// 线路上交给伪装站的连接有上限(审查 F-G1):同一个来源最多 MaxConnsPerIP 条,总共最多 MaxConns 条,放掉一条才能再进一条;
+// IPv6 同一个 /64 算一个来源;release 多调不多减,全放掉以后归零。
+func TestAdmit(t *testing.T) {
+	oldT, oldP := MaxConns, MaxConnsPerIP
+	MaxConns, MaxConnsPerIP = 5, 2
+	defer func() { MaxConns, MaxConnsPerIP = oldT, oldP }()
+	var rel []func()
+	take := func(ip string) bool {
+		r, ok := Admit(ip)
+		if ok {
+			rel = append(rel, r)
+		}
+		return ok
+	}
+	if !take("203.0.113.1") || !take("203.0.113.1") || take("203.0.113.1") {
+		t.Fatal("同一个来源第三条应放不下")
+	}
+	if !take("2001:db8:1:2::1") || !take("2001:db8:1:2:ffff::9") || take("2001:db8:1:2::3") {
+		t.Fatal("IPv6 同一个 /64 应算一个来源")
+	}
+	if !take("2001:db8:1:3::1") {
+		t.Fatal("别的 /64 是另一个来源")
+	}
+	if take("198.51.100.7") {
+		t.Fatal("总数满了应放不下")
+	}
+	rel[0]()
+	rel[0]() // 多调一次不多减
+	if !take("198.51.100.7") || take("198.51.100.8") {
+		t.Fatal("放掉一条只能再进一条")
+	}
+	for _, r := range rel {
+		r()
+	}
+	admitted.mu.Lock()
+	n, m := admitted.total, len(admitted.byIP)
+	admitted.mu.Unlock()
+	if n != 0 || m != 0 {
+		t.Fatalf("全放掉以后应归零: 总数 %d,来源 %d 个", n, m)
+	}
+}
