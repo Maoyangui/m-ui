@@ -503,7 +503,7 @@ func textBits(page string) map[string]bool {
 //
 // 每种模板 60 个种子:
 //   - 首页上任何一段文字(三个词以上或十四个字以上;连同 placeholder、aria-label、内联样式的值)最多一半的站有;
-//   - 全站任何一段文字最多六成的站有(镜像里真实存在的文件名除外);
+//   - 全站(连同 404 页)任何一段文字最多六成的站有(镜像里真实存在的文件名除外);
 //   - 首页 <body> 的源码里任何 48 个字节的片段最多一半的站有(一串收尾的标签、常见图标库的固定写法不算)。
 //
 // 改文字、加模板时这条挂了:给那句话多写几种说法(text.go 的 say),或者把固定的标记改成按种子变,不要调高门槛。
@@ -525,6 +525,9 @@ func TestNoSharedBoilerplate(t *testing.T) {
 						seen[b] = true
 					}
 				}
+			}
+			for b := range textBits(string(s.notFound.body)) { // 陌生路径回的那一页:随便探一个不存在的地址拿到的都是它
+				seen[b] = true
 			}
 			for b := range seen {
 				all[b]++
