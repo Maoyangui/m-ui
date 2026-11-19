@@ -38,9 +38,9 @@ jobs:
       # 本地 Windows 上跑不了(-race 需要 cgo),放在 CI 里每次都跑。
       # runner 里真把 sing-box 起起来的用例(group_reload_test.go)带 //go:build !race,在这一步跳过:
       # sing-box 起停实例时有上游库自己的竞态,会淹掉真正要看的报告;runner 其余用例照跑。
-      # ha 在主机容灾分支合并后加进来。
+      # ha 是主机容灾合并之后补进来的(原来这里写着「合并后加」,一直没加;它有专为并发写的用例 signkey_race_test.go)。
       - name: Tests (race)
-        run: go test -race -tags with_utls ./core/... ./hub/... ./monitor/... ./reach/... ./web/... ./runner/... ./sub/... ./acme/... ./ext/... ./reward/...
+        run: go test -race -tags with_utls ./core/... ./hub/... ./monitor/... ./reach/... ./web/... ./runner/... ./sub/... ./acme/... ./ext/... ./reward/... ./ha/...
       - name: Build (linux amd64 / arm64)
         run: |
           for arch in amd64 arm64; do
