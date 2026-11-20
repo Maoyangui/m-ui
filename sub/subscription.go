@@ -73,7 +73,7 @@ func BuildLinkSub(user model.User, lines []model.Line, opt Options) Result {
 	if opt.Encode {
 		body = base64.StdEncoding.EncodeToString([]byte(body))
 	}
-	return Result{Body: body, Headers: headers(user, opt, "text/plain; charset=utf-8")}
+	return Result{Body: body, Headers: headers(user, opt, "text/plain; charset=utf-8", ".txt")}
 }
 
 // BuildClashSub 生成 clash 订阅。
@@ -90,7 +90,7 @@ func BuildClashSub(user model.User, lines []model.Line, opt Options) (Result, er
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Body: body, Headers: headers(user, opt, "text/yaml; charset=utf-8")}, nil
+	return Result{Body: body, Headers: headers(user, opt, "text/yaml; charset=utf-8", ".yaml")}, nil
 }
 
 // headers 组装订阅响应头(流量信息 + 更新周期 + 标题)。
@@ -115,7 +115,7 @@ func SubTitle(user model.User, opt Options) string {
 	return title
 }
 
-func headers(user model.User, opt Options, contentType string) map[string]string {
+func headers(user model.User, opt Options, contentType, ext string) map[string]string {
 	title := SubTitle(user, opt)
 	userinfo, fallback := fmt.Sprintf("upload=%d; download=%d; total=%d; expire=%d", user.Up, user.Down, user.Volume, user.Expiry), user.Name
 	if opt.Shared { // 借用者看不到本人用量;到期时间留着,好知道节点什么时候停
@@ -126,7 +126,7 @@ func headers(user model.User, opt Options, contentType string) map[string]string
 		"Subscription-Userinfo":   userinfo,
 		"Profile-Update-Interval": fmt.Sprintf("%d", opt.UpdateHours),
 		"Profile-Title":           encodeTitle(title),
-		"Content-Disposition":     contentDisposition(title, fallback),
+		"Content-Disposition":     contentDisposition(title, fallback, ext),
 	}
 	// 「选购 / 续费」地址。Profile-Web-Page-Url 是 Clash 系客户端已有的约定头,
 	// 佛跳墙拿它在订阅卡片上摆续费按钮,别的客户端会显示成「订阅主页」。
@@ -156,18 +156,25 @@ func encodeTitle(title string) string {
 	return "base64:" + base64.StdEncoding.EncodeToString([]byte(title))
 }
 
-// contentDisposition 客户端(Shadowrocket、Clash Verge 等)拿这个头给订阅命名。
+// contentDisposition 客户端(Shadowrocket、Clash Verge 等)拿这个头给订阅命名,
+// 浏览器下载时拿它当文件名。文件名按订阅格式带后缀(.yaml/.json/.txt):
+// 不带后缀时浏览器存下来的文件没有扩展名,有的下载器还会自己编一个
+// 像 3.bin 这样的名字。客户端里订阅名会连后缀一起显示,这是有意为之。
 //
 // 关键:标题含中文时**只发 filename*,不要再给 ASCII 的 filename=**。
 // 有些客户端只认它遇到的第一个 filename=,会把那个回退名当订阅名
 // (于是显示成用户名或 "subscription"),UTF-8 那份直接被忽略。
-func contentDisposition(title, fallback string) string {
+func contentDisposition(title, fallback, ext string) string {
 	name := strings.TrimSpace(title)
 	if name == "" {
 		name = strings.TrimSpace(fallback)
 	}
 	if name == "" {
 		name = "subscription"
+	}
+	// 名字本身已带同后缀时不再追加,免得变成 ces.yaml.yaml。
+	if ext != "" && !strings.HasSuffix(name, ext) {
+		name += ext
 	}
 	if isASCII(name) {
 		return fmt.Sprintf("attachment;filename=%q", strings.Map(func(r rune) rune {
