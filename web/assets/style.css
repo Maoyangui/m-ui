@@ -227,6 +227,8 @@ table.grid td.primary-cell { min-width: 6.5em; }
 .grid td.handle { cursor: grab; color: var(--faint); user-select: none; width: 1.5rem; padding-right: 0; }
 .grid td.handle:hover { color: var(--muted); }
 .grid td.actions { white-space: nowrap; text-align: right; width: 1%; }
+table.grid:not(.cards):not(.rows2) > * > tr > :last-child { padding-right: var(--cell-end, 1.15rem); }
+@media (min-width: 1600px) { table.grid:not(.cards):not(.rows2) > * > tr > :last-child { --cell-end: 1.4rem; } }
 /* 行内操作:轻量按钮(无边框),悬停才有底色;主要信息不被一排边框按钮压住 */
 .grid td.actions .btn, .grid td.actions details.menu > summary.btn { margin-left: .1rem; border-color: transparent; background: transparent; box-shadow: none; color: var(--text-2); }
 .grid td.actions .btn:hover, .grid td.actions details.menu[open] > summary.btn { background: var(--surface-3); color: var(--text); }
@@ -265,8 +267,8 @@ table.grid.tight { min-width: 0; table-layout: fixed; }
 .grid.nodes .c-sync { width: 7.5rem; }
 .grid.nodes .c-core { width: 12rem; }
 .grid.nodes .c-online { width: 3.5rem; }
-.grid.nodes .c-act { width: 11.25rem; }
-:lang(en) .grid.nodes .c-act { width: 11.75rem; }
+.grid.nodes .c-act { width: calc(10.6rem + var(--cell-end, 1.15rem)); }
+:lang(en) .grid.nodes .c-act { width: calc(11.1rem + var(--cell-end, 1.15rem)); }
 table.grid.nodes { min-width: 0; }
 .grid.nodes .node-name { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .grid.nodes td.primary-cell { min-width: 0; }
