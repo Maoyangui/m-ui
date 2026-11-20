@@ -2906,7 +2906,8 @@ html.rw-lock { overflow: hidden; }
 .np-item.locked { cursor: default; }
 .np-item.locked:hover { background: transparent; }
 .np-item.locked input { cursor: default; }
-.np-lock { margin-left: auto; padding-left: .3rem; font-size: 11px; color: var(--faint); white-space: nowrap; }
+.np-lock { display: grid; place-items: center; flex: none; margin-left: auto; color: var(--faint); }
+.np-lock svg { width: 13px; height: 13px; }
 .np-foot { margin: .55rem .45rem 0; font-size: var(--fs-xs); line-height: 1.5; color: var(--muted); }
 @media (max-width: 560px) {
   .np-body, .np-g.np-top { grid-template-columns: repeat(2, minmax(0, 1fr)); }

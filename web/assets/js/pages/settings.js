@@ -321,7 +321,7 @@ function openNavPop(btn) {
   const item = id => {
     const locked = id === NAV_LOCKED;
     return `<label class="np-item${locked ? ' locked' : ''}"><input type="checkbox" data-page="${id}" ${locked || !hide.has(id) ? 'checked' : ''} ${locked ? 'disabled' : ''}>` +
-      `<span class="np-ic">${ICONS[id] || ''}</span><span class="np-t">${esc(t('nav.' + id))}</span>${locked ? `<span class="np-lock">${esc(t('set.uiNavLocked'))}</span>` : ''}</label>`;
+      `<span class="np-ic">${ICONS[id] || ''}</span><span class="np-t">${esc(t('nav.' + id))}</span>${locked ? `<span class="np-lock" title="${esc(t('set.uiNavLocked'))}" aria-label="${esc(t('set.uiNavLocked'))}">${ICONS.lock || ''}</span>` : ''}</label>`;
   };
   const groups = NAV_ORDER.map(g => `<div class="np-g${g.key ? '' : ' np-top'}">${g.key ? `<div class="np-h">${esc(t('nav.group.' + g.key))}</div>` : ''}${g.items.map(item).join('')}</div>`).join('');
   const pop = document.createElement('div');
@@ -348,9 +348,12 @@ function openNavPop(btn) {
     const hidden = [...pop.querySelectorAll('input[data-page]')].filter(cb => !cb.checked).map(cb => cb.dataset.page);
     saveUI('uiNavHidden', normNavHidden(hidden, NAV_ORDER.flatMap(g => g.items)), 400);
     syncUI();
+    allBtn.disabled = !hidden.length; // 一个都没藏时「全部显示」没有意义
   };
+  const allBtn = pop.querySelector('#np-all');
+  allBtn.disabled = !hide.size;
   pop.addEventListener('change', changed);
-  pop.querySelector('#np-all').addEventListener('click', () => { pop.querySelectorAll('input[data-page]').forEach(cb => { cb.checked = true; }); changed(); });
+  allBtn.addEventListener('click', () => { pop.querySelectorAll('input[data-page]').forEach(cb => { cb.checked = true; }); changed(); });
   const outside = e => { if (!pop.contains(e.target) && !btn.contains(e.target)) closeNavPop(); };
   const key = e => { if (e.key === 'Escape') { e.stopPropagation(); closeNavPop(true); } };
   const onScroll = e => { if (!pop.contains(e.target)) place(); };
