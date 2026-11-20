@@ -44,11 +44,11 @@ export const ICONS = {
   themeAuto: svg('<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17Z" fill="currentColor" stroke="none"/>'),
   themeLight: svg('<circle cx="12" cy="12" r="3.8"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>'),
   themeDark: svg('<path d="M20 14.2A8 8 0 0 1 9.8 4a8 8 0 1 0 10.2 10.2Z"/>'),
-  // 退出登录:门 + 向外的箭头
   // 锁(设置 → 界面:「设置」这一栏不能隐藏)
   lock: svg('<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>'),
   // 侧栏(设置 → 界面「选择栏目」)
   sidebar: svg('<rect x="3.5" y="4.5" width="17" height="15" rx="2.2"/><path d="M9.5 4.5v15"/><path d="M6 8.6h1.2M6 11.6h1.2M6 14.6h1.2"/>'),
+  // 退出登录:门 + 向外的箭头
   logout: svg('<path d="M10 4H6.5A1.5 1.5 0 0 0 5 5.5v13A1.5 1.5 0 0 0 6.5 20H10"/><path d="M15.5 8 19.5 12l-4 4"/><path d="M19.5 12H9.5"/>'),
   // 建议 / 支持:对话气泡里一颗心
   support: svg('<path d="M20 11.6a8 8 0 0 1-11.7 7.1L4 20l1.3-4.2A8 8 0 1 1 20 11.6Z"/><path d="M12 14.6s-2.9-1.7-2.9-3.6a1.6 1.6 0 0 1 2.9-.9 1.6 1.6 0 0 1 2.9.9c0 1.9-2.9 3.6-2.9 3.6Z"/>'),
