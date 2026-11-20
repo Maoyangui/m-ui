@@ -1,11 +1,15 @@
 {
- "updatedAt": 1795132290,
- "devices": 91,
- "devicesAt": 1795132290,
+ "updatedAt": 1795142135,
+ "devices": 86,
+ "devicesAt": 1795142135,
  "donors": [
   {
    "name": "赛博云",
    "total": 666
+  },
+  {
+   "name": "村长tk广告户tg@a88321",
+   "total": 88
   },
   {
    "name": "maomaocloud",
