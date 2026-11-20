@@ -412,7 +412,7 @@ export function playXmas(origin) {
   box.setAttribute('role', 'dialog');
   box.setAttribute('aria-label', 'Merry Xmas guys');
   const letters = [...'Merry Xmas'].map((c, i) => c === ' ' ? '<span class="sp"></span>' : `<span style="animation-delay:${(2.6 + i * 0.08).toFixed(2)}s, ${(3.6 + i * 0.08).toFixed(2)}s">${c}</span>`).join('');
-  const wish = zh ? '愿你平安喜乐,新年快乐 🎄' : 'Peace, joy and a happy new year 🎄';
+  const wish = zh ? '平安夜平安,圣诞节快乐 🎄' : 'Peace on Christmas Eve, joy on Christmas Day 🎄'; // 圣诞主题、和面板无关(用户 11-21)
   let muted = getMute();
   box.innerHTML = `<canvas class="xm-back"></canvas>${landSVG()}${lightsSVG()}${hollySVG('l')}${hollySVG('r')}
     <div class="xmas-stage">
