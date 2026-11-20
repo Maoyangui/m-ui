@@ -138,6 +138,10 @@ function place() {
   const r = open.getBoundingClientRect();
   if (!r.width || r.bottom < 0 || r.top > innerHeight) { hide(); return; } // 标题滚出去了 / 被藏了
   const vw = document.documentElement.clientWidth, vh = innerHeight, gap = 8, m = 8;
+  // 先放回最左边再量:浮层宽度随内容伸缩,在上一次靠右的位置量会被屏幕右边挤窄,按窄的宽度挪过去以后它又撑开,
+  // 右边就顶到了屏幕边上(手机宽度下看得出来,11-21 第五遍补测发现)。放在最左边量到的才是它真正的宽度
+  tip.style.left = m + 'px';
+  tip.style.top = '0px';
   const w = tip.offsetWidth, h = tip.offsetHeight;
   const cx = r.left + r.width / 2;
   let left = Math.round(Math.min(Math.max(m, cx - 22), vw - w - m));

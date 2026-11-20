@@ -2888,6 +2888,14 @@ html.rw-lock { overflow: hidden; }
 
 /* 设置 → 界面:两项都是左边名称和说明、右边控件 */
 .ui-ctl { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .45rem .75rem; }
+/* 开关行的「.set-row.bool .set-ctl { align-items: flex-end }」管的是竖排时靠右;这里控件是横排,它就成了「靠下」,「全部显示」比按钮低一截 —— 改回垂直居中 */
+.set-row.ui-row .set-ctl { align-items: center; }
+/* 手机宽度的详细模式:这两行右边的控件(「全部显示 + 选择栏目」、详细 / 简洁)比开关宽得多,和说明并排时说明被挤成很窄的一列、
+   五六行(11-21 第五遍补测发现),改成说明在上、控件在下靠左。简洁模式只剩标题,并排正好,不动 */
+@media (max-width: 560px) {
+  :root:not([data-concise]) .set-row.ui-row { grid-template-columns: minmax(0, 1fr); }
+  :root:not([data-concise]) .set-row.ui-row .set-ctl { justify-content: flex-start; }
+}
 .ui-nav-sum { font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
 .ui-nav-btn { gap: .4rem; }
 .ui-nav-btn svg { flex: none; width: 15px; height: 15px; }

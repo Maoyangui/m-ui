@@ -645,7 +645,7 @@ function buildNav() {
   nav.innerHTML = secs.map((s, i) => {
     const g = s.dataset.navg || '', prev = i ? secs[i - 1].dataset.navg || '' : '';
     const head = g && g !== prev ? `<div class="set-nav-g">${esc(t('set.g.' + g))}</div>` : !g && prev ? '<div class="set-nav-sep"></div>' : '';
-    return head + `<a href="#/settings" data-sec="${esc(s.id)}">${esc(s.dataset.nav)}</a>`;
+    return head + `<a href="#/settings" data-sec="${esc(s.id)}" title="${esc(s.dataset.nav)}">${esc(s.dataset.nav)}</a>`; // 英文长名字在窄导航里显示不全(省略号),鼠标移上去看全名
   }).join('');
   nav.onclick = e => {
     const a = e.target.closest('a[data-sec]');
