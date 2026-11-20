@@ -862,7 +862,7 @@ registerActions({
   'set.camoZoom': () => {
     const d = camoData;
     if (!d || d.mode === 'redirect') return;
-    openModal(t('camo.previewTitle') + ' · ' + d.name, `<div class="camo-zoom">${camoBar(d)}${camoFrame(d, 'camo-full')}</div><p class="hint camo-zoom-hint">${esc(t('camo.zoomHint'))}</p>`,
+    openModal(t('camo.previewTitle') + ' · ' + d.name, `<div class="camo-zoom">${camoBar(d)}${camoFrame(d, 'camo-full')}</div><p class="hint camo-zoom-hint xp">${esc(t('camo.zoomHint'))}</p>`,
       null, { size: 'xl', cancelText: t('common.close') });
   },
   'set.copyToken': () => copy(document.getElementById('pair-token').textContent),
