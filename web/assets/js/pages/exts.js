@@ -544,7 +544,7 @@ async function renameNode(id, key, idx) {
   catch (e) { toast(e.message, 'err'); return; }
   const n = findNode(c, key, idx);
   if (!n) { toast(t('ext.listChanged'), 'err'); fillPanel(id); return; }
-  openModal(t('ext.rename'), `<div class="form-grid"><div class="full">${field(t('ext.renameTo'), `<input id="f-rename" value="${esc(n.rename || n.name)}">`, keep(t('ext.renameHelp', { name: esc(n.name) })))}</div></div>`, async () => {
+  openModal(t('ext.rename'), `<div class="form-grid"><div class="full">${field(t('ext.renameTo'), `<input id="f-rename" value="${esc(n.rename || n.name)}">`, keep(t('ext.renameHelp', { name: n.name })))}</div></div>`, async () => {
     const to = fv('f-rename').trim();
     await savePrefs(id, { rename: [{ name: n.name, key: n.key, to: to === n.name ? '' : to }] });
     fillPanel(id);

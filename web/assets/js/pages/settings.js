@@ -514,14 +514,16 @@ function undoOne(k) {
 
 // 保存条:左边「几处改动」+ 最多两枚改动项的名字(其余折成 +N,放不下的整枚不显示),右边 放弃 / 保存。
 // 改得再多条本身也不变长;清单限高、在里面滚动
+// barHTML 保存条现在画着的内容。内容没变就不重画:改完输入框直接点「保存」时,按下鼠标那一下输入框失焦、触发 change 又走到这里,
+// 重画会把鼠标底下的「保存」换成新按钮,这一下点击就丢了,要点第二下才存(v0.8.1 起就这样,11-21 全量审查时发现)
+let barHTML = '';
 function renderBar() {
   const bar = document.getElementById('set-bar');
   if (!bar) return;
   const list = changes();
   bar.hidden = !list.length;
-  if (!list.length) { barOpen = false; bar.innerHTML = ''; return; }
-  const keep = bar.querySelector('.sb-list') ? bar.querySelector('.sb-list').scrollTop : 0;
-  bar.innerHTML = `
+  if (!list.length) { barOpen = false; bar.innerHTML = ''; barHTML = ''; return; }
+  const html = `
     <div class="sb-list" ${barOpen ? '' : 'hidden'}>${list.map(c => `<div class="sb-row">
         <span class="sb-name" title="${esc(c.group + ' · ' + c.label)}"><small>${esc(c.group)}</small>${esc(c.label)}</span>
         <span class="sb-diff"><s title="${esc(c.from)}">${esc(c.from)}</s><i class="i i-arrow"></i><b title="${esc(c.to)}">${esc(c.to)}</b></span>
@@ -536,6 +538,10 @@ function renderBar() {
       <button type="button" class="btn sm sb-discard" data-act="set.discard">${t('set.sb.discard')}</button>
       <button type="button" class="btn primary sm" data-act="set.saveAll">${t('common.save')}</button>
     </div>`;
+  if (html === barHTML && bar.firstElementChild) return; // 页面整个重画过的话保存条是新的、空的,照常画
+  barHTML = html;
+  const keep = bar.querySelector('.sb-list') ? bar.querySelector('.sb-list').scrollTop : 0;
+  bar.innerHTML = html;
   const box = bar.querySelector('.sb-list');
   if (box) box.scrollTop = keep;
 }
@@ -559,7 +565,9 @@ async function saveAll() {
   list.forEach(f => { body[f.k] = ctlVal(f); });
   // 订阅证书 / 私钥路径一改,订阅可能在 http ↔ https 之间切换:所有用户手里的订阅地址都会变,和证书页一样先确认
   if (('subCertFile' in body || 'subKeyFile' in body) && !await confirmSubScheme({ subCertFile: fv('set-subCertFile').trim(), subKeyFile: fv('set-subKeyFile').trim() })) return;
-  const norm = p => { p = (p || '/app/').trim(); if (!p.startsWith('/')) p = '/' + p; if (!p.endsWith('/')) p += '/'; return p; };
+  // 和后端 normalizePath(web/server.go)一样整理:去掉两头的空白和引号,空的算 /app/,连续的斜杠并成一个,补上首尾的斜杠。
+  // 原来没并斜杠:填「//abc」时后端实际是 /abc/,这里却跳到「//abc/」—— 浏览器把它当成另一台主机 abc 的地址
+  const norm = p => { p = String(p || '').trim().replace(/^["']+|["']+$/g, '').trim() || '/app/'; p = p.replace(/\/{2,}/g, '/'); if (!p.startsWith('/')) p = '/' + p; if (!p.endsWith('/')) p += '/'; return p; };
   const pathChanged = 'webPath' in body && norm(body.webPath) !== norm(state.status.webPath);
   const btn = document.querySelector('[data-act="set.saveAll"]');
   if (btn) btn.disabled = true;
@@ -573,7 +581,8 @@ async function saveAll() {
     if (pathChanged) {
       const np = norm(body.webPath);
       toast(t('set.pathChanged', { p: np }), 'ok');
-      setTimeout(() => { location.href = np + '#/settings'; }, 900);
+      // 前面写明本站地址:路径里再怎么写(比如带反斜杠),浏览器也只会在本站里跳
+      setTimeout(() => { location.href = location.origin + np + '#/settings'; }, 900);
       return;
     }
     await load('settings', 'status');
