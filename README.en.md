@@ -633,7 +633,9 @@ Releases: pushing a `v*` tag makes GitHub Actions run the tests, build amd64 / a
 
 Telegram: [@yangweii](https://t.me/yangweii) · Group chat: [t.me/godusevpncn](https://t.me/godusevpncn)
 
-The "Feedback / Support" button in the panel's top-right corner has both contacts (copy or open directly) and a donation address; issues and pull requests are welcome too.
+The "Feedback / Support" button in the panel's top-right corner has both contacts (copy or open directly) and a donation address; issues are welcome too.
+
+**Code contributions are welcome**: open a pull request, and once it passes review it ships with the next release.
 
 **Supporters list**: on that page, enter a name and an amount, then send the exact USDT (TRC20) amount shown. If it arrives within 60 minutes it is added to that name, and every panel shows the ranking. The number of online panels appears next to the version.
 
