@@ -1395,6 +1395,7 @@ var panelSettings = setOf(
 	"certFile", "keyFile", "upstreamTestUrl", "statsBucketSeconds", "trafficAge", "allowPrivate",
 	"nodeMode", "backupHour", "backupKeep", "backupTelegram", "subLogAge", "auditAge",
 	"fwAutoBan", "fwAutoAllow", "rewardEnabled", "attnMute", "camoEnabled", "camoTemplate", "camoPorts", "camoRedirect",
+	"uiConcise", "uiNavHidden",
 )
 
 // hiddenSettings 不发给浏览器的密钥:前端用不到,各自的页面走专门接口(管理员页、配对信息、证书页)。
@@ -1529,6 +1530,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if v, ok := in["attnMute"]; ok { // 概览里关掉的提醒类别(用户 N14):只留认得出的写法,逗号分隔
 			in["attnMute"] = normAttnMute(v)
+		}
+		if v, ok := in["uiNavHidden"]; ok { // 侧栏里隐藏的栏目(用户 11-21):写法同上;「设置」不能隐藏
+			in["uiNavHidden"] = normNavHidden(v)
 		}
 		if v, ok := in["camoTemplate"]; ok { // 页面伪装的样式(用户 N2):空 = 自动(按本机种子挑),redirect = 跳转到管理员自己的网站
 			t, err := normCamoTemplate(v)
@@ -1727,6 +1731,18 @@ func normAttnMute(v string) string {
 		}
 		seen[x] = true
 		out = append(out, x)
+	}
+	return strings.Join(out, ",")
+}
+
+// normNavHidden 侧栏里隐藏的栏目:页面名的写法同 normAttnMute(页面名由前端定),去掉「设置」—— 它不能隐藏,
+// 不然藏了就再也找不到改回来的地方(页面地址直接打开虽然还在,但没人记得)。
+func normNavHidden(v string) string {
+	var out []string
+	for _, x := range strings.Split(normAttnMute(v), ",") {
+		if x != "" && x != "settings" {
+			out = append(out, x)
+		}
 	}
 	return strings.Join(out, ",")
 }
