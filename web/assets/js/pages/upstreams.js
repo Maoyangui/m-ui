@@ -243,7 +243,7 @@ function followInfo(u) {
     : s.stop ? `<p class="hint">${esc(t('up.follow.stopUser'))}</p>`
     : n ? `<p class="up-note${n.cls}">${esc(t('up.followLast'))} ${esc(n.text)}</p>` : '';
   openModal(t('up.followTitle'), `<p><b>${esc(t('up.follow', { ext: s.extName || '#' + s.extId, node: s.node }))}</b></p>
-    <label class="sw-row up-follow-sw"><div><b>${esc(t('up.followSwitch'))}</b><small>${esc(t('up.followHelp'))}</small></div>
+    <label class="sw-row up-follow-sw"><div><b>${esc(t('up.followSwitch'))}</b><small class="xp">${esc(t('up.followHelp'))}</small></div>
       <span class="switch"><input type="checkbox" id="up-follow" data-change="up.followSet" data-id="${u.id}" ${s.stop ? '' : 'checked'}><span></span></span></label>
     ${state2}`,
   null, { cancelText: t('common.close') });

@@ -32,7 +32,7 @@ stub('chart.js', `export const barChart = () => ''; export const bucketFor = () 
 stub('relayip.js', `export const serverOfIP = () => ''; export const relayIPs = () => new Set(); export const deviceIPs = ips => ips || [];`);
 stub('linepicker.js', `export const lineItems = () => []; export const keysFromRefs = () => []; export const refLabels = () => [];
 export const linePicker = () => ({ read: () => [] }); export const refChips = () => '';`);
-stub('ui.js', `const el = (id) => document.getElementById(id);
+stub('ui.js', `export const keep = (s) => s; export const openSettingsAt = () => {}; const el = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 export const deviceCount = (a) => (a || []).length;
 export const gbValue = (b) => b / 1073741824; export const gbBytes = (g) => g * 1073741824;

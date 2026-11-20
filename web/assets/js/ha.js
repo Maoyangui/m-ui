@@ -4,7 +4,7 @@
 import { get, post, SLOW, LONG } from './api.js';
 import { t } from './i18n.js';
 import { trErr } from './errmsg.js';
-import { esc, fmtRelative, fmtTime, toast, openModal, closeModal, registerActions, field, modalGen, cfTokenLink } from './ui.js';
+import { openSettingsAt, esc, fmtRelative, fmtTime, toast, openModal, closeModal, registerActions, field, modalGen, cfTokenLink } from './ui.js';
 
 let view = null;
 let rows = [];
@@ -452,7 +452,7 @@ registerActions({
   'ha.card': (id, el) => openCard(id, el),
   'ha.setMaster': id => openSetMaster(id),
   'ha.takeover': async () => { if (!view) await loadHA(); if (view) openTakeover(); }, // 顶部提示条上的按钮:别的页面没取过状态
-  'ha.toSettings': () => { closeCard(false); try { sessionStorage.setItem('m-ui.scrollTo', 'ha-card'); } catch {} location.hash = '#/settings'; },
+  'ha.toSettings': () => { closeCard(false); openSettingsAt('ha-card'); },
   'ha.repin': id => openRepin(Number(id)),
   // 两台同时当主机时把主机让回给另一台(概况「需要处理」那一行的按钮)
   'ha.yield': async id => {
@@ -670,6 +670,14 @@ const LEVEL_ICON = { ok: '✓', warn: '!', bad: '✗', info: '·' };
 
 // readyText 就绪检查一条:键是 ha.ready.<代码>.<级别>,名单(names)按界面语言拼
 export const readyText = ch => fill('ha.ready.' + ch.code + '.' + ch.level, argsOf(ch));
+// readyDots 简洁模式下的就绪检查:一项一个圆点,点开看全文;后面一句计数(通过几项、要处理几项、几条提示)
+function readyDots(list) {
+  if (!list.length) return '';
+  const n = lv => list.filter(ch => ch.level === lv).length;
+  const fix = n('warn') + n('bad');
+  const sum = [t('ha.readySumOk', { n: n('ok') }), fix ? t('ha.readySumFix', { n: fix }) : '', n('info') ? t('ha.readySumInfo', { n: n('info') }) : ''].filter(Boolean).join(' · ');
+  return `<div class="ha-dots" role="list">${list.map(ch => `<button type="button" role="listitem" class="qh-dot ha-dot lv-${esc(ch.level)}" data-qh-text="${esc(readyText(ch))}" aria-label="${esc(readyText(ch))}"></button>`).join('')}<span class="ha-dots-sum${fix ? ' bad' : ''}">${esc(sum)}</span></div>`;
+}
 
 // renderHASettings 设置页里的「主机容灾」卡片(只在主机上;副机上说明一句到主机改,并显示本机的备用公钥指纹)。
 export async function renderHASettings(container) {
@@ -690,19 +698,19 @@ export async function renderHASettings(container) {
   const paused = c.pauseUntil > Date.now() / 1000;
   host.innerHTML = `
     <div class="card-head"><h2>${t('ha.title')}</h2></div>
-    <p class="hint">${t('ha.set.intro')}</p>
+    <p class="hint xp">${t('ha.set.intro')}</p>
     ${override}
     <div class="ha-modes" role="radiogroup" aria-label="${esc(t('ha.title'))}">
       ${MODES.map(m => `<label class="${(c.mode || 'off') === m ? 'sel' : ''}"><input type="radio" name="ha-mode" value="${m}" ${(c.mode || 'off') === m ? 'checked' : ''}>
-        <span><b>${esc(t('ha.mode.' + m))}</b>${m === 'confirm' ? ` <span class="badge ok">${t('ha.recommended')}</span>` : ''}<br><span class="muted small">${esc(t('ha.modeHelp.' + m, { c: c.confirmMinutes || 3, a: c.autoMinutes || 10 }))}</span></span></label>`).join('')}
+        <span><b>${esc(t('ha.mode.' + m))}</b>${m === 'confirm' ? ` <span class="badge ok">${t('ha.recommended')}</span>` : ''}<br><span class="muted small xp">${esc(t('ha.modeHelp.' + m, { c: c.confirmMinutes || 3, a: c.autoMinutes || 10 }))}</span></span></label>`).join('')}
     </div>
     <div class="form-grid">
       ${field(t('ha.set.standbys'), `<select id="ha-standbys">${[1, 2, 3].map(n => `<option value="${n}" ${(c.standbys || 2) === n ? 'selected' : ''}>${n}</option>`).join('')}</select>`, t('ha.set.standbysHelp'))}
     </div>
-    <p class="hint">${t('ha.set.lostRule')}</p>
+    <p class="hint xp">${t('ha.set.lostRule')}</p>
     <div id="ha-scope-slot"></div>
     <h4 class="ha-sub">${t('ha.set.ready')}</h4>
-    <ul class="ha-check">${ready}</ul>
+    <ul class="ha-check ha-ready">${ready}</ul>${readyDots(v.ready || [])}
     ${(v.dropPending || []).length ? `<p class="warn-text small">${esc(t('ha.set.dropPending', { names: joinNames(v.dropPending.map(d => d.name || '#' + d.id)) }))}</p>` : ''}
     <div class="row ha-pause">
       ${paused ? `<span class="warn-text small">${esc(t('ha.card.paused', { t: fmtTime(c.pauseUntil) }))}</span> <button class="btn sm" data-act="ha.pause" data-id="0">${t('ha.resume')}</button>`
@@ -714,8 +722,8 @@ export async function renderHASettings(container) {
         ${field(t('ha.set.autoMin'), `<input id="ha-autoMinutes" type="number" min="5" max="60" value="${c.autoMinutes || 10}">`, t('ha.set.autoMinHelp'))}
         ${field(t('ha.set.rankStep'), `<input id="ha-rankStepMinutes" type="number" min="1" max="10" value="${c.rankStepMinutes || 3}">`, t('ha.set.rankStepHelp'))}
         ${field(t('ha.set.replicaMin'), `<input id="ha-replicaMinutes" type="number" min="1" max="60" value="${c.replicaMinutes || 5}">`, t('ha.set.replicaMinHelp'))}
-        <label class="field check"><input type="checkbox" id="ha-witness" ${c.witness !== false ? 'checked' : ''}><span>${t('ha.set.witness')}</span><span class="help">${esc(t('ha.set.witnessHelp'))}</span></label>
-        <label class="field check"><input type="checkbox" id="ha-allowPlain" ${c.allowPlain ? 'checked' : ''}><span>${t('ha.set.allowPlain')}</span><span class="help">${esc(t('ha.set.allowPlainHelp'))}</span></label>
+        <label class="field check"><input type="checkbox" id="ha-witness" ${c.witness !== false ? 'checked' : ''}><span>${t('ha.set.witness')}</span><span class="help xp">${esc(t('ha.set.witnessHelp'))}</span></label>
+        <label class="field check"><input type="checkbox" id="ha-allowPlain" ${c.allowPlain ? 'checked' : ''}><span>${t('ha.set.allowPlain')}</span><span class="help xp">${esc(t('ha.set.allowPlainHelp'))}</span></label>
       </div>
     </details>`;
   host.querySelector('#ha-scope-slot').innerHTML = scopeHTML(c);
@@ -732,13 +740,13 @@ const DNS_KINDS = ['cloudflare', 'aliyun', 'dnspod'];
 function scopeHTML(c) {
   const sub = !!c.takeSub;
   const opt = (v, on, badgeHTML = '') => `<label class="${on ? 'sel' : ''}"><input type="radio" name="ha-scope" value="${v}" ${on ? 'checked' : ''}>
-    <span><b>${esc(t('ha.scope.' + v))}</b>${badgeHTML}<br><span class="muted small">${esc(t('ha.scope.' + v + 'Help'))}</span></span></label>`;
+    <span><b>${esc(t('ha.scope.' + v))}</b>${badgeHTML}<br><span class="muted small xp">${esc(t('ha.scope.' + v + 'Help'))}</span></span></label>`;
   return `<h4 class="ha-sub">${t('ha.set.scope')}</h4>
     <div class="ha-modes ha-scope" role="radiogroup" aria-label="${esc(t('ha.set.scope'))}">
       ${opt('master', !sub, ` <span class="badge">${esc(t('ha.scope.default'))}</span>`)}${opt('sub', sub)}
     </div>
     <div id="ha-dns-box" class="ha-dns-box" ${sub ? '' : 'hidden'}>
-      <p class="hint">${t('ha.set.dnsHelp')}</p>
+      <p class="hint xp">${t('ha.set.dnsHelp')}</p>
       <div class="form-grid">
         ${field(t('ha.set.dnsProvider'), `<select id="ha-dnsProvider">${DNS_KINDS.map(k => `<option value="${k}" ${(c.dnsProvider || 'cloudflare') === k ? 'selected' : ''}>${esc(t('ha.dnsProv.' + k))}</option>`).join('')}</select>`)}
         <div id="ha-dns-cred" class="full"></div>
@@ -757,7 +765,7 @@ function credHTML(kind, c) {
   return `<div class="form-grid">
     ${field(t('ha.set.dnsId.' + kind), `<input id="ha-dnsId" autocomplete="off" spellcheck="false" placeholder="${esc(keep)}">`)}
     ${field(t('ha.set.dnsSecret.' + kind), `<input id="ha-dnsSecret" type="password" autocomplete="off" placeholder="${esc(keep)}">`)}
-    <p class="hint full">${esc(t('ha.set.dnsKeyHelp.' + kind))}</p></div>`;
+    <p class="hint full xp">${esc(t('ha.set.dnsKeyHelp.' + kind))}</p></div>`;
 }
 function bindScope(host, c) {
   const box = host.querySelector('#ha-dns-box'), prov = host.querySelector('#ha-dnsProvider'), cred = host.querySelector('#ha-dns-cred');

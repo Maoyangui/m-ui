@@ -18,7 +18,7 @@
 import { get, post, rewardQrUrl } from './api.js';
 import { t, getLang } from './i18n.js';
 import { trErr } from './errmsg.js';
-import { esc, fmtBytes, toast, registerActions, copy, setHTML, debounce, closeMenus } from './ui.js';
+import { openSettingsAt, esc, fmtBytes, toast, registerActions, copy, setHTML, debounce, closeMenus } from './ui.js';
 
 let st = null;            // GET reward 的回复;null = 还没拿到
 let slot = null;          // 顶栏里的位置
@@ -616,9 +616,7 @@ async function donateSubmit() {
 // 「去设置里关闭」:到设置页,滚到「流量奖励」那一行并闪一下(设置页自己接着做,见 settings.js)
 function toSettings() {
   close();
-  try { sessionStorage.setItem('m-ui.scrollTo', 'set-rewardEnabled'); } catch { /* 存不了就只跳到设置页 */ }
-  if (location.hash.replace(/\?.*$/, '') === '#/settings') { location.hash = '#/dashboard'; setTimeout(() => { location.hash = '#/settings'; }, 0); } // 已经在设置页:重进一次才会走到那一行
-  else location.hash = '#/settings';
+  openSettingsAt('set-rewardEnabled'); // 已经在设置页时直接滚过去
 }
 
 registerActions({

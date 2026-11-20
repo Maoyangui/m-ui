@@ -124,7 +124,7 @@ export function logoBlock(prefix, { readonly = false } = {}) {
       </div>
       <input type="file" id="${prefix}-file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,.svg" data-change="logo.file" data-id="${prefix}" hidden>`}
     </div>
-    <span class="help">${esc(readonly ? t('set.logoNode') : t('set.logoHelp'))}</span>
+    <span class="help${readonly ? '' : ' xp'}">${esc(readonly ? t('set.logoNode') : t('set.logoHelp'))}</span>
   </div>`;
 }
 

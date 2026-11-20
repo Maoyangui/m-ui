@@ -16,14 +16,14 @@ let st = { enabled: false, pending: '' };
 function cardHTML() {
   const head = (text, kind) => `<div class="card-head"><h2>${t('adm.totp')}</h2>${badge(text, kind)}</div>`;
   if (st.enabled) {
-    return `${head(t('adm.totpOn'), 'ok')}<p class="hint">${esc(t('adm.totpOnHelp'))}</p>
+    return `${head(t('adm.totpOn'), 'ok')}<p class="hint xp">${esc(t('adm.totpOnHelp'))}</p>
       <div class="card-acts"><button class="btn sm danger" data-act="totp.disable">${t('adm.totpDisable')}</button></div>`;
   }
   if (st.pending) {
     return `${head(t('adm.totpPending'), 'warn')}<p class="hint">${esc(t('adm.totpPendingHelp'))}</p>
       <div class="card-acts"><button class="btn primary sm" data-act="totp.resume">${t('adm.totpResume')}</button><button class="btn sm ghost" data-act="totp.cancel">${t('adm.totpDrop')}</button></div>`;
   }
-  return `${head(t('adm.totpOff'), '')}<p class="hint">${esc(t('adm.totpHelp'))}</p>
+  return `${head(t('adm.totpOff'), '')}<p class="hint xp">${esc(t('adm.totpHelp'))}</p>
     <div class="card-acts"><button class="btn primary sm" data-act="totp.begin">${t('adm.totpStart')}</button>${o.manual ? `<button class="btn sm ghost" data-act="totp.manual">${t('adm.totpManual')}</button>` : ''}</div>`;
 }
 
@@ -75,7 +75,7 @@ registerActions({
     }, { saveText: t('adm.totpNext') });
   },
   'totp.disable': () => {
-    openModal(t('adm.totpDisableTitle'), `<p class="hint">${esc(t('adm.totpDisableHelp'))}</p>
+    openModal(t('adm.totpDisableTitle'), `<p class="hint xp">${esc(t('adm.totpDisableHelp'))}</p>
       <div class="form-grid">
         ${field(t('adm.password'), `<input id="totp-pw" type="password" autocomplete="current-password">`)}
         ${field(t('adm.totpCode'), `<input id="totp-dcode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">`)}

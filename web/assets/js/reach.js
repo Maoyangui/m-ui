@@ -147,7 +147,7 @@ export function reachToolbar(nodeView) {
   const auto = reach.auto
     ? t('reach.autoOn', { m: reach.minutes, next: reach.nextRun ? fmtTime(reach.nextRun) : '—' })
     : t('reach.autoOff');
-  return `<span class="muted small reach-sum" title="${esc(t('reach.autoHint'))}">${esc(auto)} · <a href="#/settings">${t('reach.settings')}</a></span>
+  return `<span class="muted small reach-sum" title="${esc(t('reach.autoHint'))}">${esc(auto)} · <a href="#/settings" data-act="go.setting" data-id="sec-reach">${t('reach.settings')}</a></span>
     <button class="btn" data-act="reach.all" ${reach.running ? 'disabled' : ''}>${reach.running ? `<span class="spin"></span> ${t('reach.running')}` : t('reach.checkAll')}</button>`;
 }
 
@@ -196,7 +196,7 @@ function v6Block(v) {
     <div class="reach-hero ${V6TONE[v6Kind(v)] || ''}"><div class="v">${esc(v6Label(v))} ${counts}</div><p>${esc(v6Explain(v))}</p></div>
     <dl class="kv reach-meta"><dt>${t('reach.target')}</dt><dd class="mono">${esc(v6Addr(v))}</dd><dt>${t('reach.at')}</dt><dd>${fmtTime(v.at)}</dd></dl>
     ${probes ? `<details><summary>${t('reach.probes', { n: (v.probes || []).length })}</summary><ul class="reach-probes">${probes}</ul></details>` : ''}
-    <p class="hint">${t('reach.v6.note')}</p></section>`;
+    <p class="hint xp">${t('reach.v6.note')}</p></section>`;
 }
 
 function historyStrip(id) {
@@ -226,7 +226,7 @@ function detailHTML(n) {
   return `${head}
     <div class="row" style="margin:.8rem 0 1rem"><button class="btn primary" data-act="reach.one" data-id="${n.id}" ${running || (reach && reach.running) ? 'disabled' : ''}>${running ? `<span class="spin"></span> ${t('reach.running')}` : t('reach.checkNow')}</button></div>
     ${groups}${icmp}${r && r.v6 ? v6Block(r.v6) : ''}${historyStrip(n.id)}
-    <section><p class="hint">${t('reach.note')}</p>${quota}${reach && reach.error ? `<p class="hint danger-text">${esc(trErr(reach.error))}</p>` : ''}</section>`;
+    <section><p class="hint xp">${t('reach.note')}</p>${quota}${reach && reach.error ? `<p class="hint danger-text">${esc(trErr(reach.error))}</p>` : ''}</section>`;
 }
 
 let nodesRef = () => [];

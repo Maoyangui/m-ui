@@ -313,7 +313,7 @@ async function showDetail(id) {
       <div class="ld-head"><h3>${t('user.trafficChart')}</h3>
         <div class="seg sm">${[24, 168, 720].map(h => `<button data-act="user.chartRange" data-id="${h}" class="${h === drawerRange ? 'active' : ''}">${t('dash.range.' + (h === 24 ? '24h' : h === 168 ? '7d' : '30d'))}</button>`).join('')}</div></div>
       <div id="ud-chart"></div>
-      ${state.status && state.status.role === 'node' ? `<p class="hint">${t('user.chartNode')}</p>` : ((state.nodes || []).some(n => n.ratio > 0 && n.ratio !== 1) ? `<p class="hint">${t('user.chartRatio')}</p>` : '')}
+      ${state.status && state.status.role === 'node' ? `<p class="hint xp">${t('user.chartNode')}</p>` : ((state.nodes || []).some(n => n.ratio > 0 && n.ratio !== 1) ? `<p class="hint xp">${t('user.chartRatio')}</p>` : '')}
     </section>
     <section>
       <h3>${t('user.d.info')}</h3>
@@ -403,11 +403,11 @@ function editUser(id) {
       ${field(t('user.f.resetDays'), `<input id="f-resetdays" type="number" min="1" value="${u.resetDays || 30}">`)}
       <label class="field check" style="align-self:end;min-height:var(--ctl-h)"><input type="checkbox" id="f-autoreset" ${u.autoReset ? 'checked' : ''}><span>${esc(t('user.f.autoReset'))}</span></label>
     </div>`;
-  const linesTab = `<div id="f-lines"></div><p class="hint">${esc(t('lp.help'))}</p>
+  const linesTab = `<div id="f-lines"></div><p class="hint xp">${esc(t('lp.help'))}</p>
       ${(state.exts || []).length ? `<h3 class="form-sec">${esc(t('user.f.exts'))}</h3>
         <div class="check-list one-col">
           ${(state.exts || []).map(x => `<label><input type="checkbox" class="ext-cb" value="${x.id}" ${(u.extIds || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name)} <span class="muted small">${x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink')} · ${x.nodeCount || 0}</span></label>`).join('')}
-        </div><p class="hint">${esc(t('user.f.extsHelp'))}</p>` : ''}`;
+        </div><p class="hint xp">${esc(t('user.f.extsHelp'))}</p>` : ''}`;
   openModal(id ? t('user.edit') : t('user.add'), `<div class="edit-2pane">
       <div class="pane"><h3 class="form-sec">${esc(t('user.tab.basic'))}</h3>${basic}<h3 class="form-sec">${esc(t('user.tab.quota'))}</h3>${quota}</div>
       <div class="pane"><h3 class="form-sec">${esc(t('user.tab.lines'))}</h3>${linesTab}</div>
@@ -621,7 +621,7 @@ function changeDialog(id) {
   openModal(t('pc.title') + ' · ' + u.name, `
     <div class="form-grid">
       <div class="full">${field(t('pc.target'), `<select id="pc-plan">${state.plans.map(p => `<option value="${p.id}" ${p.id === pick ? 'selected' : ''}>${esc(p.name)} · ${planBrief(p)}${p.price > 0 ? ' · ' + esc(t('plan.priceShort', { n: p.price })) : ''}${p.id === u.planId ? ' · ' + t('pc.current') : ''}</option>`).join('')}</select>`)}</div>
-      <div class="full"><div class="field"><span class="label">${t('pc.mode')}</span><div class="seg" id="pc-mode">${['replace', 'stack', 'prorate'].map(m => `<button type="button" data-mode="${m}">${t('pc.mode.' + m)}</button>`).join('')}</div><span class="help" id="pc-mode-help"></span></div></div>
+      <div class="full"><div class="field"><span class="label">${t('pc.mode')}</span><div class="seg" id="pc-mode">${['replace', 'stack', 'prorate'].map(m => `<button type="button" data-mode="${m}">${t('pc.mode.' + m)}</button>`).join('')}</div><span class="help xp" id="pc-mode-help"></span><span class="help warn-text" id="pc-mode-why" hidden></span></div></div>
       ${field(t('pc.periods'), `<input id="pc-periods" type="number" min="1" max="120" value="1">`, t('pc.periodsHelp'))}
       ${field(t('pc.usage'), `<select id="pc-usage">${['auto', 'keep', 'reset'].map(v => `<option value="${v}">${t('pc.usage.' + v)}</option>`).join('')}</select>`, t('pc.usageHelp'))}
       <div class="full">${field(t('pc.remark'), `<input id="pc-remark" maxlength="200" placeholder="${esc(t('pc.remarkPh'))}">`)}</div>
@@ -659,7 +659,11 @@ function changeDialog(id) {
       b.classList.toggle('active', b.dataset.mode === mode);
       if (b.dataset.mode === 'prorate') { b.disabled = !!why; b.title = why; }
     });
-    setText('pc-mode-help', t('pc.modeHelp.' + mode) + (why ? ' ' + t('pc.noProrate', { why }) : ''));
+    setText('pc-mode-help', t('pc.modeHelp.' + mode));
+    // 不能折算的原因单独一行、一直显示(简洁模式下方式说明收进「?」,原因不能跟着藏)
+    const whyEl = el('pc-mode-why');
+    whyEl.hidden = !why;
+    setText(whyEl, why ? t('pc.noProrate', { why }) : '');
     const per = el('pc-periods');
     per.min = mode === 'prorate' ? '0' : '1';
     if (mode !== 'prorate' && Number(per.value) < 1) per.value = '1';
@@ -772,7 +776,7 @@ registerActions({
   'user.export': () => { window.open('./api/users/export', '_blank'); },
   'user.import': () => {
     openModal(t('user.importTitle'), `
-      <p class="hint">${t('user.importHelp')}</p>
+      <p class="hint xp">${t('user.importHelp')}</p>
       <input type="file" id="imp-file" accept=".db,.sqlite,.sqlite3" style="margin:.6rem 0">
       ${check('imp-assign', t('user.importAssign'), true)}`, async () => {
       const f = document.getElementById('imp-file').files[0];

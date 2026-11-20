@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, fmtRelative, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, copy, matches, hostPort } from '../ui.js';
+import { keep, esc, fmtRelative, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, copy, matches, hostPort } from '../ui.js';
 
 // 外部节点的大陆连通:两边都不通对外部节点就是用不了(服务器巡检里那是"机器自己的问题",给黄色)
 const REACH_TONE = { ok: 'ok', partial: 'warn', blocked: 'danger', ipBlocked: 'danger', portBlocked: 'danger', abroadDown: 'danger', noProbes: '', error: '' };
@@ -70,7 +70,7 @@ const DYNAMIC = /\d+(\.\d+)?\s*(GB|MB|TB|KB|G|M|T|天|日|小时|%|倍|x)|\d{4}[
 
 export async function render(el) {
   el.innerHTML = `
-    <div class="toolbar intro"><p class="page-hint">${t('ext.help')}</p><button class="btn primary" data-act="ext.add">${t('ext.add')}</button></div>
+    <div class="toolbar intro"><p class="page-hint xp" data-qh-for="page-title">${t('ext.help')}</p><button class="btn primary" data-act="ext.add">${t('ext.add')}</button></div>
     <div class="table-wrap"><table class="grid ext-table" data-fit="cards:800">
       <thead><tr><th>${t('common.name')}</th><th>${t('common.type')}</th><th>${t('ext.value')}</th><th>${t('ext.nodes')}</th><th>${t('ext.lastFetch')}</th><th>${t('ext.users')}</th><th>${t('common.status')}</th><th></th></tr></thead>
       <tbody id="exts-body"></tbody>
@@ -204,7 +204,7 @@ function panelHTML(id, c) {
     </div>
     <div class="table-wrap fill ext-wrap" id="ext-wrap-${id}" style="--fill-reserve:5rem"></div>
     <div class="ext-more" id="ext-more-${id}" hidden></div>
-    <p class="hint small muted">${t('ext.testHint')}</p>`;
+    <p class="hint small muted xp">${t('ext.testHint')}</p>`;
 }
 
 // 视图、服务器列变了:所有展开的面板按新设置重画,子表滚动位置留着
@@ -544,7 +544,7 @@ async function renameNode(id, key, idx) {
   catch (e) { toast(e.message, 'err'); return; }
   const n = findNode(c, key, idx);
   if (!n) { toast(t('ext.listChanged'), 'err'); fillPanel(id); return; }
-  openModal(t('ext.rename'), `<div class="form-grid"><div class="full">${field(t('ext.renameTo'), `<input id="f-rename" value="${esc(n.rename || n.name)}">`, t('ext.renameHelp', { name: esc(n.name) }))}</div></div>`, async () => {
+  openModal(t('ext.rename'), `<div class="form-grid"><div class="full">${field(t('ext.renameTo'), `<input id="f-rename" value="${esc(n.rename || n.name)}">`, keep(t('ext.renameHelp', { name: esc(n.name) })))}</div></div>`, async () => {
     const to = fv('f-rename').trim();
     await savePrefs(id, { rename: [{ name: n.name, key: n.key, to: to === n.name ? '' : to }] });
     fillPanel(id);
@@ -598,7 +598,7 @@ async function addUpstreams(id) {
   const ext = (state.exts || []).find(x => x.id === id) || {};
   const list = [...sel].map(k => (c.nodes || []).find(n => n.key === k)).filter(Boolean);
   if (!list.length) { toast(t('ext.listChanged'), 'err'); fillPanel(id); return; }
-  const html = `<p class="hint">${t('ext.addUpHelp')}</p><div class="form-grid">` + list.map(n => n.upstream
+  const html = `<p class="hint xp">${t('ext.addUpHelp')}</p><div class="form-grid">` + list.map(n => n.upstream
     ? field(n.name, `<input id="ext-up-${esc(n.key)}" value="${esc((ext.name ? ext.name + '-' : '') + (n.rename || n.name))}">`)
     : field(n.name, `<span class="muted small" title="${esc(trErr(n.reason || ''))}">${t('ext.noUpstream')}</span>`)).join('') + '</div>';
   openModal(t('ext.addUp'), html, async () => {

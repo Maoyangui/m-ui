@@ -14,7 +14,7 @@ let resellers = [], plans = [];
 // 以前是八列的表格:条件、限速、目标各占一格,要横着把几格拼起来才知道这条规则在干什么。
 export async function render(el) {
   el.innerHTML = `
-    <div class="toolbar intro"><p class="page-hint">${t('rule.hint')}</p><button class="btn primary" data-act="rule.add"><i class="i i-plus"></i>${t('rule.add')}</button></div>
+    <div class="toolbar intro"><p class="page-hint xp" data-qh-for="page-title">${t('rule.hint')}</p><button class="btn primary" data-act="rule.add"><i class="i i-plus"></i>${t('rule.add')}</button></div>
     <div class="rule-list" id="rules-body"></div>`;
   await refresh();
 }
@@ -88,7 +88,7 @@ function editRule(id) {
   openModal(id ? t('rule.edit') : t('rule.add'), `<div class="rl-form">
     <div class="rl-top">
       <div class="seg" id="f-kind">${['schedule', 'burst'].map(k => `<button type="button" data-kind="${k}" class="${k === kind ? 'active' : ''}">${t('rule.kind.' + k)}</button>`).join('')}</div>
-      <span class="hint" id="f-kind-help"></span>
+      <span class="hint xp" id="f-kind-help"></span>
       <label class="rl-on"><span>${t('common.enabled')}</span><span class="switch"><input type="checkbox" id="f-enabled" ${r.enabled !== false ? 'checked' : ''}><span></span></span></label>
     </div>
     <div class="form-grid cols-2">
@@ -102,7 +102,7 @@ function editRule(id) {
         ${field(t('rule.start'), `<input id="f-start" type="time" value="${esc(r.start || '19:00')}">`)}
         ${field(t('rule.end'), `<input id="f-end" type="time" value="${esc(r.end || '23:00')}">`)}
       </div>
-      <p class="hint">${esc(t('rule.daysHelp'))};${esc(t('rule.timeHelp'))}</p>
+      <p class="hint xp">${esc(t('rule.daysHelp'))};${esc(t('rule.timeHelp'))}</p>
     </div>
     <div id="sec-burst">
       <div class="form-grid cols-3">
@@ -110,18 +110,18 @@ function editRule(id) {
         ${field(t('rule.thresholdGb'), `<input id="f-threshold" type="number" min="0.01" step="0.1" value="${r.thresholdGb || 1}">`)}
         ${field(t('rule.penaltyMin'), `<input id="f-penalty" type="number" min="1" max="10080" value="${r.penaltyMin || 20}">`)}
       </div>
-      <p class="hint">${esc(t('rule.burstHelp'))}</p>
+      <p class="hint xp">${esc(t('rule.burstHelp'))}</p>
     </div>
     <h3 class="form-sec">${t('rule.sec.limit')}</h3>
     <div class="rl-limit">
       ${field(t('rule.up'), `<input id="f-up" type="number" min="0" value="${r.upMbps || 0}">`)}
       ${field(t('rule.down'), `<input id="f-down" type="number" min="0" value="${r.downMbps || 0}">`)}
-      ${switchRow('f-tighten', t('rule.tightenOnly'), r.tightenOnly !== false, t('rule.tightenOnlyHelp'))}
+      <div class="rl-tight"><span class="label rl-tight-sp" aria-hidden="true">&nbsp;</span><label class="rl-sw"><span class="switch"><input type="checkbox" id="f-tighten" ${r.tightenOnly !== false ? 'checked' : ''}><span></span></span><span class="rl-sw-t" id="f-tighten-t">${esc(t('rule.tightenOnly'))}</span></label><span class="help xp" data-qh-for="f-tighten-t">${esc(t('rule.tightenOnlyHelp'))}</span></div>
     </div>
-    <p class="hint">${esc(t('rule.limitHelp'))}</p>
+    <p class="hint xp">${esc(t('rule.limitHelp'))}</p>
     <h3 class="form-sec">${t('rule.sec.who')}</h3>
     <div id="f-targets"></div>
-    <p class="hint">${esc(t('rule.targetsHelp'))}</p>
+    <p class="hint xp">${esc(t('rule.targetsHelp'))}</p>
   </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), kind, enabled: fchk('f-enabled'), tightenOnly: fchk('f-tighten'),

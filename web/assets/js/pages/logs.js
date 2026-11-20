@@ -188,9 +188,9 @@ async function renderTab() {
   } else if (tab === 'core') {
     el.innerHTML = `
       <div class="lg-core-set">
-        <label class="lg-sw" title="${esc(t('logs.enabledHelp'))}"><span class="switch"><input type="checkbox" id="logs-on" ${logOn() ? 'checked' : ''}><span></span></span><span>${t('logs.enabled')}</span></label>
+        <label class="lg-sw" title="${esc(t('logs.enabledHelp'))}"><span class="switch"><input type="checkbox" id="logs-on" ${logOn() ? 'checked' : ''}><span></span></span><span id="logs-on-t">${t('logs.enabled')}</span></label>
         <label class="lg-opt" title="${esc(t('logs.coreLevelHelp'))}">${t('logs.coreLevel')}<select class="sm" id="logs-core-level">${['warn', 'info', 'debug', 'error'].map(l => `<option ${l === coreLevel() ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-        <span class="muted small lg-note">${esc(logOn() ? t('logs.coreMemHelp') : t('logs.enabledHelp'))}</span>
+        <span class="muted small lg-note xp" data-qh-for="logs-on-t">${esc(logOn() ? t('logs.coreMemHelp') : t('logs.enabledHelp'))}</span>
       </div>
       <div class="toolbar lg-bar">
         <input type="search" id="logs-q" placeholder="${esc(t('logs.coreFilter'))}" value="${esc(coreQ)}">

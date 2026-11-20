@@ -53,10 +53,10 @@ function autoHTML() {
     ${fail}
     <div class="bk-auto-body${sc.on ? '' : ' off'}">
       <p class="bk-line">${line}</p>
-      <p class="hint">${esc(t('bk.sched.note', { tz: getTimezone() || 'Asia/Shanghai' }))}</p>
+      <p class="hint xp">${esc(t('bk.sched.note', { tz: getTimezone() || 'Asia/Shanghai' }))}</p>
     </div>
     <label class="bk-tg${sc.on ? '' : ' off'}"><span class="switch"><input type="checkbox" id="bk-tg" data-change="bk.sched" ${sc.tg ? 'checked' : ''}${dis}><span></span></span>
-      <span class="tx"><b>${esc(t('bk.telegram'))}</b><small${tgWarn ? ' class="warn-text"' : ''}>${esc(data.tgReady ? t('bk.telegramHelp') : t('bk.telegramNeed'))}</small></span></label>`;
+      <span class="tx"><b>${esc(t('bk.telegram'))}</b><small${tgWarn ? ' class="warn-text"' : data.tgReady ? ' class="xp"' : ''}>${esc(data.tgReady ? t('bk.telegramHelp') : t('bk.telegramNeed'))}</small></span></label>`;
 }
 
 function listHTML() {
@@ -80,18 +80,18 @@ function listHTML() {
 function migHTML() {
   const step = (n, head, body) => `<li><span class="n">${n}</span><div><b>${esc(head)}</b>${body}</div></li>`;
   return `<ol class="bk-steps">
-    ${step(1, t('mig.s1'), `<p class="hint">${esc(t('mig.s1h'))}</p>
+    ${step(1, t('mig.s1'), `<p class="hint xp">${esc(t('mig.s1h'))}</p>
       <div class="sub-box"><code>${esc(migCmd())}</code><button type="button" class="btn sm" data-act="bk.copyCmd">${t('common.copy')}</button></div>
-      <p class="hint">${esc(t('mig.cmdHelp'))}</p>`)}
-    ${step(2, t('mig.s2'), `<p class="hint">${esc(t('mig.s2h'))}</p>`)}
-    ${step(3, t('mig.s3'), `<p class="hint">${esc(t('mig.s3h'))}</p>
+      <p class="hint xp">${esc(t('mig.cmdHelp'))}</p>`)}
+    ${step(2, t('mig.s2'), `<p class="hint xp">${esc(t('mig.s2h'))}</p>`)}
+    ${step(3, t('mig.s3'), `<p class="hint xp">${esc(t('mig.s3h'))}</p>
       <div class="bk-dns">
         <input id="mig-domain" placeholder="${esc(state.settings.webDomain || 'hk.example.com')}" value="${esc(state.settings.webDomain || '')}" aria-label="${esc(t('mig.domain'))}">
         <input id="mig-ip" placeholder="${esc(t('mig.newIp'))}" aria-label="${esc(t('mig.newIp'))}">
         <button type="button" class="btn sm" data-act="bk.dnsCheck">${t('mig.check')}</button>
       </div>
       <div id="mig-result"></div>`)}
-    ${step(4, t('mig.s4'), `<p class="hint">${esc(t('mig.s4h'))}</p>`)}
+    ${step(4, t('mig.s4'), `<p class="hint xp">${esc(t('mig.s4h'))}</p>`)}
   </ol>`;
 }
 
@@ -104,7 +104,7 @@ function draw(el = document.getElementById('page')) {
       <section class="card bk-auto" id="bk-auto">${autoHTML()}</section>
       <section class="card bk-restore">
         <div class="card-head"><h2>${t('bk.restore')}</h2></div>
-        <p class="hint">${esc(t('bk.restoreHelp'))}</p>
+        <p class="hint xp">${esc(t('bk.restoreHelp'))}</p>
         <label class="bk-drop" tabindex="0" role="button"><input type="file" id="bk-file" accept=".zip,.db" hidden><b>${esc(t('bk.pick'))}</b><span>${esc(t('bk.dropHint'))}</span></label>
       </section>
     </div>
@@ -115,12 +115,12 @@ function draw(el = document.getElementById('page')) {
           <a class="btn primary sm" href="./api/backup" download>${t('bk.dlNow')}</a>
         </div>
       </div>
-      <p class="hint">${esc(t('bk.nowHelp'))}</p>
+      <p class="hint xp">${esc(t('bk.nowHelp'))}</p>
       ${listHTML()}
     </section>
     <details class="card bk-mig"${open ? ' open' : ''}>
-      <summary><div><h2>${t('mig.title')}</h2><p class="hint">${esc(t('mig.sum'))}</p></div><i class="i i-chev"></i></summary>
-      <p class="hint">${esc(t('mig.help'))}</p>
+      <summary><div><h2>${t('mig.title')}</h2><p class="hint xp">${esc(t('mig.sum'))}</p></div><i class="i i-chev"></i></summary>
+      <p class="hint xp">${esc(t('mig.help'))}</p>
       ${migHTML()}
     </details>`);
   const pick = el.querySelector('#bk-file');

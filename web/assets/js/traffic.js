@@ -77,7 +77,7 @@ function bodyHTML() {
     </div>
     <div class="tb-cols${data.nodes ? '' : ' one'}">${cols}</div>
     ${missing}
-    <p class="hint tb-legend"><span class="tb-key down"></span>${esc(t('dash.bd.down'))}<span class="tb-key up"></span>${esc(t('dash.bd.up'))}<span class="sep">·</span>${esc(t(data.nodes ? 'dash.bd.note' : 'dash.bd.noteLocal'))}</p>`;
+    <p class="hint tb-legend"><span class="tb-key down"></span>${esc(t('dash.bd.down'))}<span class="tb-key up"></span>${esc(t('dash.bd.up'))}<span class="xp tb-note"><span class="sep">·</span>${esc(t(data.nodes ? 'dash.bd.note' : 'dash.bd.noteLocal'))}</span></p>`;
 }
 
 const shell = () => `<div class="tb">

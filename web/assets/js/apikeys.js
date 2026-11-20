@@ -59,7 +59,7 @@ function keysTable() {
 function cardHTML() {
   const on = !!cfg.enabled;
   const head = `<div class="card-head"><h2>${t('adm.api')}</h2><label class="switch" title="${esc(t('adm.apiToggle'))}"><input type="checkbox" id="api-on" ${on ? 'checked' : ''}><span></span></label></div>
-    <p class="hint">${esc(t(cfg.reseller ? 'acct.apiHelp' : 'adm.apiHelp'))}</p>`;
+    <p class="hint xp">${esc(t(cfg.reseller ? 'acct.apiHelp' : 'adm.apiHelp'))}</p>`;
   // 没开时只留一句话和文档入口:先看清能做什么,再决定开不开
   if (!on) return `${head}<div class="api-off"><button class="btn sm" data-act="api.docs">${t('adm.apiDocsBtn')}</button><span class="muted small">${esc(t('api.offHint'))}</span></div>`;
   return `${head}
@@ -67,7 +67,7 @@ function cardHTML() {
       <button class="btn sm" data-act="api.copyUrl">${t('common.copy')}</button><button class="btn sm" data-act="api.docs">${t('adm.apiDocsBtn')}</button></div>
     <div class="api-keys-head"><h3>${t('api.keys')}${keys.length ? `<span class="n">${keys.length}</span>` : ''}</h3>${keys.length ? `<button class="btn primary sm" data-act="apikey.add">${t('api.keyAdd')}</button>` : ''}</div>
     ${keysTable()}
-    <p class="hint">${esc(t('api.keysHelp'))}</p>`;
+    <p class="hint xp">${esc(t('api.keysHelp'))}</p>`;
 }
 
 function draw() {
@@ -116,13 +116,13 @@ function keyForm(k) {
     ${k ? fieldBox(t('api.keyToken'), `<div class="sub-box ak-tok"><code>${esc(k.token)}</code><button type="button" class="btn sm" data-act="apikey.copy" data-id="${k.id}">${t('common.copy')}</button></div>`) : ''}
     <div class="ak-sec"><b>${t('api.keyPerms')}</b><span class="ak-quick"><button type="button" class="link-btn" data-act="apikey.pick" data-id="all">${t('api.pickAll')}</button><button type="button" class="link-btn" data-act="apikey.pick" data-id="read">${t('api.pickRead')}</button></span></div>
     <div class="perm-grid">${PERMS.map(p => `<label class="perm-item"><input type="checkbox" class="ak-perm" value="${p}" ${have.has(p) ? 'checked' : ''}>
-      <span><b>${esc(t('api.perm.' + p))}</b><small class="muted">${esc(t('api.permHelp.' + p))}</small></span></label>`).join('')}</div>
+      <span><b>${esc(t('api.perm.' + p))}</b><small class="muted xp">${esc(t('api.permHelp.' + p))}</small></span></label>`).join('')}</div>
     <div class="ak-sec"><b>${t('api.from')}</b></div>
     <div class="seg" id="ak-from"><button type="button" data-v="0" class="${restrict ? '' : 'active'}">${t('api.fromAny')}</button><button type="button" data-v="1" class="${restrict ? 'active' : ''}">${t('api.fromOnly')}</button></div>
     <div id="ak-ipbox" ${restrict ? '' : 'hidden'}>
       <textarea id="ak-ips" rows="3" spellcheck="false" placeholder="${esc(t('api.ipPlaceholder'))}">${esc(ips)}</textarea>
       ${you ? `<div class="ak-you"><span>${esc(t('api.ipYou', { ip: you }))}</span><button type="button" class="btn xs" data-act="apikey.addMe">${t('api.ipAddMe')}</button></div>` : ''}
-      <p class="hint">${esc(t('api.fromHelp'))}</p>
+      <p class="hint xp">${esc(t('api.fromHelp'))}</p>
     </div>
   </div>`;
 }

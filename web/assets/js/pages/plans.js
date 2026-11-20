@@ -99,19 +99,19 @@ export async function editPlan(id) {
       ${field(t('plan.f.down'), `<input id="f-down" type="number" min="0" value="${p.speedDown || 0}">`)}
       ${field(t('plan.price'), `<input id="f-price" type="number" min="0" step="any" value="${p.price || 0}" title="${esc(t('plan.priceHelp'))}">`)}
     </div>
-    <p class="hint">${esc(t('plan.numsHelp'))}</p>
+    <p class="hint xp">${esc(t('plan.numsHelp'))}</p>
     <div class="pl-opts">
-      <div class="sw-row"><div><b>${esc(t('user.f.autoReset'))}</b><small>${esc(t('plan.autoResetHelp'))}</small></div>
+      <div class="sw-row"><div><b>${esc(t('user.f.autoReset'))}</b><small class="xp">${esc(t('plan.autoResetHelp'))}</small></div>
         <span class="pl-every">${esc(t('plan.everyA'))}<input id="f-resetdays" type="number" min="1" value="${p.resetDays || 30}" aria-label="${esc(t('user.f.resetDays'))}">${esc(t('plan.everyB'))}</span>
         <label class="switch"><input type="checkbox" id="f-autoreset" ${p.autoReset ? 'checked' : ''}><span></span></label></div>
       ${switchRow('f-firstuse', t('plan.firstUse'), !!p.firstUse, t('plan.firstUseHelp'))}
     </div>
     <h3 class="form-sec">${t('plan.lines')}</h3>
     <div id="f-lines"></div>
-    <p class="hint">${esc(t('plan.linesHelp'))}</p>
+    <p class="hint xp">${esc(t('plan.linesHelp'))}</p>
     ${isReseller() ? '' : `<h3 class="form-sec">${t('plan.rules')}</h3>
       ${rules.length ? `<div class="check-list one-col">${rules.map(ruleRow).join('')}</div>` : `<p class="muted small">${t('plan.rulesNone')}</p>`}
-      <p class="hint">${esc(t('plan.rulesHelp'))}</p>`}
+      <p class="hint xp">${esc(t('plan.rulesHelp'))}</p>`}
   </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), desc: fv('f-desc'), volumeGb: Number(fv('f-vol')), days: Number(fv('f-days')),

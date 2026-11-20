@@ -3,11 +3,13 @@ import { get, post, setUnauthorizedHandler, LONG, abortPageLoads } from './api.j
 import { t, setLang, getLang, langs } from './i18n.js';
 import { trErr } from './errmsg.js';
 import { ICONS } from './icons.js';
-import { toast, confirm, closeModal, closeDrawer, drawerOpen, esc, setTimezone, fmtDay } from './ui.js';
+import { toast, confirm, closeModal, closeDrawer, drawerOpen, drawerSeq, esc, setTimezone, fmtDay, registerActions, openSettingsAt } from './ui.js';
 import { sortCerts, certSig, sortReach, reachSig, reachHard } from './issues.js';
 import { mountXmasEgg } from './xmas.js';
 import { mountReward } from './reward.js';
 import { attnMuted } from './attnmute.js';
+import { navHidden, visibleNav, isConcise, applyConcise } from './uiprefs.js';
+import { initQh, setQhLabel, inQh } from './qhelp.js';
 import * as dashboard from './pages/dashboard.js';
 import * as lines from './pages/lines.js';
 import * as upstreams from './pages/upstreams.js';
@@ -44,11 +46,16 @@ const NAV_GROUPS = [
   { key: 'system', items: ['cert', 'backup', 'ops', 'fw', 'logs', 'admin', 'settings'] },
 ];
 const masterNav = NAV_GROUPS.flatMap(g => g.items);
+export const NAV_ORDER = NAV_GROUPS; // 设置 → 界面「侧栏显示的栏目」按这个分组列
 // 代理面板:同一套前端,只留下代理用得上的几页
 const resellerNav = ['dashboard', 'users', 'plans', 'account'];
 export const isReseller = () => (state.status || {}).scope === 'reseller';
 const navFor = () => (isReseller() ? resellerNav : masterNav);
 const navGroups = () => (isReseller() ? [{ items: resellerNav }] : NAV_GROUPS);
+// 侧栏里藏起来的栏目(设置 → 界面,用户 11-21):只是不在侧栏里显示,页面本身照旧(地址直接打开、别处的链接都能到)。代理面板不管
+const hiddenNav = () => (isReseller() ? new Set() : navHidden(state.settings));
+// homePage 没指定页面(登录后、地址不认得)时去哪:概览;概览藏了就是侧栏里第一个露着的栏目
+const homePage = () => (isReseller() ? 'dashboard' : visibleNav(masterNav, state.settings)[0] || 'dashboard');
 let current = null;
 // routeGen 每换一次页面加一。渲染是异步的,中途换页时旧的那次渲染必须整个作废:
 // 它既不该再往页面里写内容,它抛的错也不该显示出来(那正是"点了 A 却看到报错/看到 B"的来源)。
@@ -83,7 +90,7 @@ export async function load(...what) {
   // 换页时被放弃的读取(e.aborted)不算「没取到」:不记进 state.err(概况会拿它报「某某没取到」),也不把空数据当成取到了
   const job = (key, p) => jobs.push(p.then(() => { state.at[key] = Date.now(); delete state.err[key]; }, e => { if (!e || !e.aborted) state.err[key] = e; throw e; }));
   if (all || what.includes('status')) job('status', get('status').then(s => { state.status = s; renderRole(); upgradeNotice(); restoreNotice(); reloadNotice(); reachNotice(); certNotice(); haNotices(s); }));
-  if (all || what.includes('settings')) job('settings', get('settings').then(s => { state.settings = s; setTimezone(s.timezone); }));
+  if (all || what.includes('settings')) job('settings', get('settings').then(s => { state.settings = s; setTimezone(s.timezone); applyUIPrefs(); }));
   if (all || what.includes('lines')) job('lines', get('lines').then(l => { state.lines = l; }));
   if (!isReseller() && (all || what.includes('upstreams'))) job('upstreams', get('upstreams').then(u => { state.upstreams = u; }));
   if (all || what.includes('users')) job('users', get('users').then(u => { state.users = u; }));
@@ -220,11 +227,9 @@ function helpLink(a, page) {
 // ---- 壳:导航、角色、主题、语言 ----
 function renderChrome() {
   document.documentElement.lang = getLang() === 'zh' ? 'zh-CN' : 'en'; // 换成英文时页面语言跟着换(读屏、表头折行规则看它)
-  document.getElementById('nav').innerHTML = navGroups().map(g =>
-    (g.key ? `<div class="nav-group">${esc(t('nav.group.' + g.key))}</div>` : '') + g.items.map(p =>
-      `<a href="#/${p}" data-page="${p}"><span class="ic">${ICONS[p] || ''}</span><span class="nav-label">${t('nav.' + p)}</span></a>`).join('')).join('');
-  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.page === current)); // 换语言重画后当前页的高亮还在
-  reachNotice(); // 导航重画后补上"服务器"的红点
+  navSig = '';
+  renderNav();
+  setQhLabel(t('qh.label'));
   document.getElementById('modal-cancel').textContent = t('common.cancel');
   const out = document.getElementById('btn-logout');
   out.innerHTML = ICONS.logout || '';
@@ -238,6 +243,27 @@ function renderChrome() {
   const sel = document.getElementById('lang-select');
   sel.innerHTML = Object.entries(langs).map(([k, v]) => `<option value="${k}" ${k === getLang() ? 'selected' : ''}>${v}</option>`).join('');
   renderRole();
+}
+// renderNav 画侧栏:藏起来的栏目不画,一组全藏了连组名一起不画。内容没变就不重画(设置每读一次都会走到这里)
+let navSig = '';
+function renderNav() {
+  const hide = hiddenNav();
+  const sig = getLang() + '|' + (isReseller() ? 'r' : 'm') + '|' + [...hide].join(',');
+  if (sig === navSig) return;
+  navSig = sig;
+  document.getElementById('nav').innerHTML = navGroups().map(g => {
+    const items = g.items.filter(p => !hide.has(p));
+    if (!items.length) return '';
+    return (g.key ? `<div class="nav-group">${esc(t('nav.group.' + g.key))}</div>` : '') + items.map(p =>
+      `<a href="#/${p}" data-page="${p}"><span class="ic">${ICONS[p] || ''}</span><span class="nav-label">${t('nav.' + p)}</span></a>`).join('');
+  }).join('');
+  document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('active', a.dataset.page === current)); // 换语言重画后当前页的高亮还在
+  reachNotice(); // 导航重画后补上"服务器"的红点
+}
+// applyUIPrefs 按现在的设置切简洁 / 详细、重画侧栏(设置读回来时、设置页里改了界面那两项时)
+export function applyUIPrefs() {
+  applyConcise(!isReseller() && isConcise(state.settings));
+  if (document.getElementById('nav').childElementCount || navSig) renderNav();
 }
 function renderRole() {
   const s = state.status || {};
@@ -512,6 +538,30 @@ const cancelModal = () => { closeModal(); modal.dispatchEvent(new Event('modal-c
 document.getElementById('modal-cancel').addEventListener('click', cancelModal);
 modal.addEventListener('click', e => { if (e.target === modal) cancelModal(); });
 document.getElementById('drawer-close').addEventListener('click', closeDrawer);
+// 点抽屉外面收起抽屉(用户 11-21:「现在支持点击弹窗外的其他区域也会收起」)。几种不算「点外面」:
+//   - 按下时抽屉还没开(就是打开它的那一下)、按下在抽屉里(在抽屉里选字拖到外面松手);
+//   - 从抽屉里点出来的弹窗开着(弹窗里怎么点都不收抽屉;盖在弹窗上的抽屉除外,点弹窗就是点它外面);
+//   - 「?」和它的说明浮层、提示条、页面或表格的滚动条;按下后拖了一段(在页面上选字);
+//   - 这一下又打开了一个抽屉(点了另一行的「详情」:换成那一行,不是收起)。
+let drawerDown = null;
+function outsideDrawer(e) {
+  const el = e.target;
+  if (!(el instanceof Element) || !drawerOpen()) return false;
+  const d = document.getElementById('drawer');
+  if (d.contains(el) || inQh(el) || el.closest('#toast')) return false;
+  if (!modal.hidden && !d.classList.contains('over')) return false;
+  if (el === document.documentElement || el === document.body) return false;
+  if (el.clientWidth > 0 && (e.offsetX > el.clientWidth || e.offsetY > el.clientHeight)) return false; // 按在滚动条上
+  return true;
+}
+document.addEventListener('pointerdown', e => { drawerDown = outsideDrawer(e) ? { x: e.clientX, y: e.clientY, seq: drawerSeq() } : null; }, true);
+document.addEventListener('click', e => {
+  const down = drawerDown;
+  drawerDown = null;
+  if (!down || !outsideDrawer(e) || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6) return;
+  // 等这一下的处理都跑完再看:点的是另一行的「详情」时抽屉已经换成那一行了,不收
+  setTimeout(() => { if (drawerSeq() === down.seq && drawerOpen()) closeDrawer(); }, 0);
+});
 document.addEventListener('keydown', e => {
   // Esc 关闭弹窗/抽屉;Ctrl/⌘+Enter 提交弹窗;"/" 聚焦当前页搜索框
   if (e.key === 'Escape') {
@@ -559,7 +609,7 @@ const onDash = () => current === 'dashboard';
 function pageName() {
   const h = location.hash.replace(/^#\/?/, '').split(/[/?]/)[0];
   // 代理会话下,主面板专属页面一律回概览(那些接口本来也是 403,别让界面误导人)
-  if (!pages[h] || !navFor().includes(h)) return 'dashboard';
+  if (!pages[h] || !navFor().includes(h)) return homePage();
   return h;
 }
 // ---- 表格按「自己能用的宽度」排版 ----
@@ -767,5 +817,9 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) bump
   new ResizeObserver(() => { if (bar.offsetHeight) document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px'); }).observe(bar);
 })();
 
+// 链接写 data-act="go.setting" data-id="分区或某一项":跳到设置页的那个位置(见 ui.js openSettingsAt)
+registerActions({ 'go.setting': id => openSettingsAt(id) });
+
 // ---- 启动 ----
+initQh();
 get('status').then(async s => { state.status = s; await enterApp(); upgradeNotice(); }).catch(showLogin);

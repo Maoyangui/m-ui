@@ -102,7 +102,7 @@ function docsHTML() {
     ? `<select id="apidoc-key" class="sm" data-change="apidoc.key" title="${esc(t('adm.apiExKey'))}">${ctx.keys.map(k => `<option value="${k.id}" ${k.id === pick ? 'selected' : ''}>${esc(keyName(k))}</option>`).join('')}</select>`
     : '';
   return `<section class="doc-how">
-      <p class="hint">${esc(t(ctx.reseller ? 'adm.apiHowRs' : 'adm.apiHow'))}</p>
+      <p class="hint xp">${esc(t(ctx.reseller ? 'adm.apiHowRs' : 'adm.apiHow'))}</p>
       <dl class="kv">
         <dt>${t('adm.apiBase')}</dt><dd><div class="sub-box"><code>${esc(ctx.base)}</code><button class="btn sm" data-act="apidoc.copy" data-id="${esc(ctx.base)}">${t('common.copy')}</button></div></dd>
         <dt>${t('adm.apiHeader')}</dt><dd><div class="sub-box"><code>Authorization: Bearer &lt;${esc(t('api.keyToken'))}&gt;</code></div></dd>
@@ -113,10 +113,10 @@ function docsHTML() {
     return list.length ? `<section><h3>${t('adm.g.' + g)}</h3><div class="ep-list">${list.map(endpoint).join('')}</div></section>` : '';
   }).join('')}
     <section>
-      <p class="hint doc-note">${esc(t('adm.apiIdemHelp'))}</p>
+      <p class="hint doc-note xp">${esc(t('adm.apiIdemHelp'))}</p>
       <div class="doc-ex-head"><h3>${t('adm.apiExample')}</h3>${sel}<button class="btn sm" data-act="apidoc.copyEx">${t('common.copy')}</button></div>
       <pre class="log code doc-ex" id="apidoc-ex">${esc(exampleText())}</pre>
-      <p class="hint">${t(ctx.reseller ? 'acct.apiDocs' : 'adm.apiDocs')} <a href="${esc(docs)}" target="_blank" rel="noopener">docs/API.md</a></p>
+      <p class="hint xp">${t(ctx.reseller ? 'acct.apiDocs' : 'adm.apiDocs')} <a href="${esc(docs)}" target="_blank" rel="noopener">docs/API.md</a></p>
     </section>`;
 }
 

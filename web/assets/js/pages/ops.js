@@ -77,7 +77,7 @@ export async function render(el, fresh = false) {
   const tuneCard = `<section class="card">
       <div class="card-head"><h2>${t('ops.tune')}${linux ? `<span class="h-count">${esc(t('ops.tuneCount', { n: doneN, m: TUNE_ALL.length + 1 }))}</span>` : ''}</h2>
         ${runBtn('tune-all', TUNE_ALL.every(n => done[n]) ? '' : ' primary', t('ops.t.tune-all'))}</div>
-      <p class="hint">${esc(t('ops.tuneHelp'))}</p>
+      <p class="hint xp">${esc(t('ops.tuneHelp'))}</p>
       <div class="table-wrap"><table class="grid ops-table" data-fit="cards:780">
         <thead><tr><th>${t('ops.col.item')}</th><th>${t('ops.col.now')}</th><th>${t('ops.col.param')}</th><th></th></tr></thead>
         <tbody>
@@ -104,7 +104,7 @@ export async function render(el, fresh = false) {
     : runBtn('warp-enable', '', t('ops.warpReenable')) + runBtn('warp-disable', '', t('ops.t.warp-disable')) + runBtn('warp-uninstall', ' danger end', t('ops.t.warp-uninstall'));
   const warpCard = `<section class="card ops-warp">
       <div class="card-head"><h2>Cloudflare WARP</h2>${wState}</div>
-      <p class="hint">${esc(t('ops.warpIntro'))}</p>
+      <p class="hint xp">${esc(t('ops.warpIntro'))}</p>
       <dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>
       <div class="ops-warp-foot">${wActs}</div>
     </section>`;
@@ -177,7 +177,7 @@ registerActions({
   // 内核参数在弹框里改:「确定」只是记下这份(表里标出「改过,还没执行」),点那一行的「执行」或「一键优化」才写进系统
   'ops.sysctlEdit': () => {
     const p = data.params || {};
-    openModal(t('ops.sysctlTitle'), `<p class="hint ops-sysctl-hint">${esc(t('ops.sysctlHelp'))}</p>
+    openModal(t('ops.sysctlTitle'), `<p class="hint ops-sysctl-hint xp">${esc(t('ops.sysctlHelp'))}</p>
       <textarea id="ops-sysctl" class="mono ops-sysctl" spellcheck="false" aria-label="${esc(t('ops.sysctlTitle'))}">${esc(sysctlDraft != null ? sysctlDraft : p.sysctl || '')}</textarea>
       <div class="row"><button type="button" class="btn sm" data-act="ops.sysctlDefault">${t('ops.restoreDefault')}</button></div>`, async () => {
       const v = fv('ops-sysctl');

@@ -18,7 +18,7 @@ stub('api.js', `export const get = async () => globalThis.__reach; export const 
 // t 把参数也写进去,好核对用的是哪句、填了什么
 stub('i18n.js', `export const t = (k, v) => v ? k + JSON.stringify(v) : k;`);
 stub('errmsg.js', `export const trErr = (m) => m;`);
-stub('ui.js', `export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+stub('ui.js', `export const keep = (s) => s; export const openSettingsAt = () => {}; export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 export const fmtRelative = () => 'rel'; export const fmtTime = () => 'time'; export const toast = () => {};
 export const openDrawer = (title, html) => { globalThis.__drawer = html; }; export const drawerOpen = () => false; export const setHTML = () => {};
 export const registerActions = (a) => { globalThis.__actions = a; };

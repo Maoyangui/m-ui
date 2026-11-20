@@ -65,7 +65,7 @@ export async function render(el) {
 
     <section class="card acct-page">
       <div class="card-head"><h2>${t('set.subPage')}</h2></div>
-      <p class="hint">${esc(t('acct.pageLead'))}</p>
+      <p class="hint xp">${esc(t('acct.pageLead'))}</p>
       <div class="acct-sw">
         ${switchRow('sp-enabled', t('set.subPageEnabled'), me.pageEnabled !== false, t('acct.pageHelp'))}
         ${switchRow('sp-share', t('set.subShare'), me.shareOn !== false, t('acct.shareHelp'))}

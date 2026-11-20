@@ -25,7 +25,7 @@ export const put = (...a) => globalThis.__api('PUT', ...a);
 export const del = (...a) => globalThis.__api('DELETE', ...a);`);
 stub('i18n.js', `export const t = (k) => k;`);
 stub('errmsg.js', `export const trErr = (m) => m;`);
-stub('ui.js', `export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+stub('ui.js', `export const keep = (s) => s; export const openSettingsAt = () => {}; export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 export const fmtRelative = () => 'x';
 export const toast = (m, k = '') => { globalThis.__toasts.push([k, m]); };
 export const confirm = async () => true;

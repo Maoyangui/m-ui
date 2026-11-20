@@ -2,7 +2,7 @@ import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, fmtRelative, fmtDuration, fmtBytes, fmtDay, daysLeft, gbValue, gbBytes, toast, confirm, openModal, closeModal, registerActions, badge, field, fieldBox, switchRow, empty, fv, fchk, setHTML, matches, debounce, diskBrief, diskHogs } from '../ui.js';
+import { keep, esc, fmtRelative, fmtDuration, fmtBytes, fmtDay, daysLeft, gbValue, gbBytes, toast, confirm, openModal, closeModal, registerActions, badge, field, fieldBox, switchRow, empty, fv, fchk, setHTML, matches, debounce, diskBrief, diskHogs } from '../ui.js';
 import { loadReach, reachCell, reachToolbar, refreshDetail, setNodes, setReachListener, reach, isBad, v6Of } from '../reach.js';
 import { nodeIssues, trackUnsynced, diskLevel, diskPct, fwBad } from '../issues.js';
 import { loadHA, roleChip, haMenuItems, setHARefresh } from '../ha.js';
@@ -399,12 +399,12 @@ function quotaSection(n) {
       ${fieldBox(t('nq.cycle'), `<div class="nq-cycle"><select id="f-qmode"><option value="">${esc(t('nq.mode.none'))}</option><option value="month" ${mode === 'month' ? 'selected' : ''}>${esc(t('nq.mode.month'))}</option><option value="days" ${mode === 'days' ? 'selected' : ''}>${esc(t('nq.mode.days'))}</option></select>
         <span class="nq-cyc" data-mode="month">${withInput('nq.monthOn', `<input id="f-qday" type="number" min="1" max="31" value="${q.resetDay || 1}">`)}</span>
         <span class="nq-cyc" data-mode="days">${withInput('nq.daysEvery', `<input id="f-qdays" type="number" min="1" max="3650" value="${q.resetDays || 30}">`)}</span></div>
-        <span class="help" id="f-qcycle-help"></span>`)}
+        <span class="help xp" id="f-qcycle-help"></span>`)}
       ${field(t('nq.exp'), `<input id="f-qexp" type="date" value="${expiryDate(q.expiry)}">`, t('nq.expHelp'))}
     </div>
     ${old ? `<p class="hint warn-text">${esc(t('nq.notTracked'))}</p>` : ''}
-    ${n.isLocal ? `<p class="hint">${esc(t('nq.localHelp'))}</p>`
-    : `<label class="sw-row nq-auto"><div><b>${esc(t('nq.auto'))}</b><small id="f-qauto-help"></small></div><span class="switch"><input type="checkbox" id="f-qauto" ${q.autoDisable === false ? '' : 'checked'}><span></span></span></label>`}`;
+    ${n.isLocal ? `<p class="hint xp">${esc(t('nq.localHelp'))}</p>`
+    : `<label class="sw-row nq-auto"><div><b>${esc(t('nq.auto'))}</b><small class="xp" id="f-qauto-help"></small></div><span class="switch"><input type="checkbox" id="f-qauto" ${q.autoDisable === false ? '' : 'checked'}><span></span></span></label>`}`;
 }
 // 版本号比大小(只比点分的数字;解析不出来的当不小于)
 function verLess(a, b) {
@@ -452,7 +452,7 @@ function bindQuota(n) {
 function editNode(id, focus) {
   const n = id ? data.nodes.find(x => x.id === id) : { enabled: true, insecure: true };
   const byDomain = subByDomain();
-  const famHelp = t('node.addrFamHelp') + (id ? ' ' + detectedText(n) : '') + (byDomain ? ' ' + t('node.addrDnsHelp') : '');
+  const famHelp = [t('node.addrFamHelp'), id ? keep(detectedText(n)) : '', byDomain ? keep(t('node.addrDnsHelp')) : '']; // 探测到的地址、订阅用域名时的提醒:一直显示
   const link = n.isLocal ? '' : `
     <h3 class="form-sec">${t('node.sec.link')}</h3>
     <div class="nd-link">
@@ -471,12 +471,12 @@ function editNode(id, focus) {
       ${link}
       <h3 class="form-sec">${t('node.sec.addr')}</h3>
       <div class="form-grid cols-2">
-        ${field(t('node.domain'), `<input id="f-domain" value="${esc(n.domain || '')}" placeholder="tw.example.com">`, t('node.domainHelp') + (byDomain ? ' ' + t('node.domainDnsHelp') : ''))}
+        ${field(t('node.domain'), `<input id="f-domain" value="${esc(n.domain || '')}" placeholder="tw.example.com">`, [t('node.domainHelp'), byDomain ? keep(t('node.domainDnsHelp')) : ''])}
         ${fieldBox(t('node.addr'), `<div class="nd-addr"><input id="f-addr" value="${esc(n.addr || '')}" placeholder="${esc(autoAddr(n).ip || t('node.addrAuto'))}">
           <select id="f-family" title="${esc(t('node.familyHelp') + (byDomain ? ' ' + t('node.familyDnsHelp') : ''))}"><option value="">${t('node.famAuto4')}</option><option value="v6" ${n.addrFamily === 'v6' ? 'selected' : ''}>${t('node.famAuto6')}</option></select></div>`, famHelp)}
       </div>
       ${quotaSection(n)}
-      ${n.isLocal ? '' : `<div class="nd-enabled">${switchRow('f-enabled', t('common.enabled'), n.enabled !== false, n.quota && n.quota.autoOff ? t('nq.enabledAutoOff') : t('node.enabledHelp'))}</div>`}
+      ${n.isLocal ? '' : `<div class="nd-enabled">${switchRow('f-enabled', t('common.enabled'), n.enabled !== false, n.quota && n.quota.autoOff ? keep(t('nq.enabledAutoOff')) : t('node.enabledHelp'))}</div>`}
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), domain: fv('f-domain').trim(), sort: Number(fv('f-sort')) || 0,
@@ -514,7 +514,7 @@ const isPlain = url => /^http:\/\//i.test(String(url || '').trim());
 registerActions({
   'node.group': id => { groupF = id === '*' ? null : id; renderRows(); },
   'node.groupRename': from => {
-    openModal(t('node.groupRename'), `<div class="form-grid">${field(t('node.groupNew'), `<input id="f-gname" maxlength="24" value="${esc(from)}">`, t('node.groupRenameHelp', { n: data.nodes.filter(n => (n.group || '').trim() === from).length }))}</div>`, async () => {
+    openModal(t('node.groupRename'), `<div class="form-grid">${field(t('node.groupNew'), `<input id="f-gname" maxlength="24" value="${esc(from)}">`, keep(t('node.groupRenameHelp', { n: data.nodes.filter(n => (n.group || '').trim() === from).length })))}</div>`, async () => {
       const to = fv('f-gname').trim();
       if (to !== from) await post('nodes/group', { from, to });
       if (groupF === from) groupF = to || null;

@@ -147,7 +147,7 @@ function sysHTML() {
   return `<div class="card-head"><h2>${esc(t('fw.sys.title'))}</h2>
       <div class="wall-tools"><label class="wall-sw" title="${esc(t('fw.autoAllow.tip'))}"><span>${esc(t('fw.autoAllow'))}</span><span class="switch"><input type="checkbox" data-change="fw.setting" data-id="autoAllow" ${data.autoAllow ? 'checked' : ''} ${ro ? 'disabled' : ''}><span></span></span></label>
       <button class="btn sm" data-act="fw.recheck" ${busy.size ? 'disabled' : ''}>${esc(t('fw.recheck'))}</button></div></div>
-    <p class="hint">${esc(t('fw.sys.hint'))}</p>
+    <p class="hint xp">${esc(t('fw.sys.hint'))}</p>
     <div class="table-wrap"><table class="grid wall-srv" data-fit="p2:640 cards:520">
       <thead><tr><th>${esc(t('fw.col.server'))}</th><th>${esc(t('fw.col.sys'))}</th><th>${esc(t('fw.col.ports'))}</th><th class="c-p2">${esc(t('fw.col.rules'))}</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
@@ -192,7 +192,7 @@ function rulesHTML() {
     : `<div class="wall-starter"><span class="muted">${esc(t('fw.rule.empty'))}</span>${readOnly() ? '' : ['ssh', 'deny', 'allow'].map(k => `<button class="btn sm" data-act="fw.rule.add" data-id="${k}">${esc(t('fw.starter.' + k))}</button>`).join('')}</div>`;
   return `<div class="card-head"><h2>${esc(t('fw.rule.title'))}${list.length ? `<span class="h-count">${list.length}</span>` : ''}</h2>
       <button class="btn sm primary" data-act="fw.rule.add">${esc(t('fw.rule.add'))}</button></div>
-    <p class="hint">${esc(t('fw.rule.hint'))}</p>${body}`;
+    <p class="hint xp">${esc(t('fw.rule.hint'))}</p>${body}`;
 }
 
 // ---- 3. 黑白名单 ----
@@ -240,7 +240,7 @@ function listsHTML() {
     : `<button class="btn sm" data-act="fw.allow.add">${esc(t('fw.allow.add'))}</button>`;
   return `<div class="card-head"><h2>${esc(t('fw.lists.title'))}</h2>
       <label class="wall-sw" title="${esc(t('fw.autoBan.tip'))}"><span>${esc(t('fw.autoBan'))}</span><span class="switch"><input type="checkbox" data-change="fw.setting" data-id="autoBan" ${data.autoBan ? 'checked' : ''} ${ro ? 'disabled' : ''}><span></span></span></label></div>
-    <p class="hint">${esc(t(tab === 'ban' ? 'fw.ban.hint' : 'fw.allow.hint'))}${tab === 'ban' ? ` <span title="${esc(t('fw.autoBan.rule'))}">${esc(t(data.autoBan ? 'fw.autoBan.on' : 'fw.autoBan.off'))}</span>` : ''}</p>
+    <p class="hint"><span class="xp">${esc(t(tab === 'ban' ? 'fw.ban.hint' : 'fw.allow.hint'))}</span>${tab === 'ban' ? ` <span title="${esc(t('fw.autoBan.rule'))}">${esc(t(data.autoBan ? 'fw.autoBan.on' : 'fw.autoBan.off'))}</span>` : ''}</p>
     <div class="toolbar wall-bar">${seg}<span class="grow"></span>${tools}</div>${body}`;
 }
 
@@ -286,7 +286,7 @@ function scopeField(ids) {
     <div class="ln-srv-head"><div class="seg sm" id="wall-scope-seg"><button type="button" data-scope="all" class="${all ? 'active' : ''}">${esc(t('fw.scope.all'))}</button><button type="button" data-scope="pick" class="${all ? '' : 'active'}">${esc(t('fw.scope.pick'))}</button></div>
       <input type="hidden" id="wall-scope" value="${all ? 'all' : 'pick'}"><span class="grow"></span><span class="muted small" id="wall-scope-n"></span></div>
     <div class="node-list" id="wall-scope-list" ${all ? 'hidden' : ''}>${body}</div>
-    <p class="hint" id="wall-scope-help"></p></div>`);
+    <p class="hint xp" id="wall-scope-help"></p></div>`);
 }
 function bindScope() {
   const seg = document.getElementById('wall-scope-seg');
@@ -334,7 +334,7 @@ function ruleDialog(r, seed = {}) {
   const cur = r || { kind: seed.kind || 'deny', proto: seed.proto || '', ports: seed.ports || '', sources: seed.sources || '', note: '', nodeIds: [] };
   const myIp = data.myIp || '';
   const kinds = ['allow', 'deny', 'only'].map(k => `<label class="wall-kind"><input type="radio" name="wall-kind" value="${k}" ${cur.kind === k ? 'checked' : ''}>
-      <span class="wall-kind-t">${badge(t('fw.kind.' + k + '.s'), KIND_BADGE[k])}<b>${esc(t('fw.kind.' + k))}</b></span><small>${esc(t('fw.kind.' + k + '.d'))}</small></label>`).join('');
+      <span class="wall-kind-t">${badge(t('fw.kind.' + k + '.s'), KIND_BADGE[k])}<b>${esc(t('fw.kind.' + k))}</b></span><small class="xp">${esc(t('fw.kind.' + k + '.d'))}</small></label>`).join('');
   const panelPort = Number(state.settings.webPort) || 2053;
   const html = `<div class="wall-kinds" role="radiogroup" aria-label="${esc(t('fw.f.kind'))}">${kinds}</div>
     <div class="form-grid cols-2 wall-form">
@@ -342,14 +342,14 @@ function ruleDialog(r, seed = {}) {
         <span class="label">${esc(t('fw.f.src'))}</span>
         <textarea id="wall-src" rows="3" spellcheck="false" placeholder="${esc(t('fw.f.srcPh'))}">${esc(listOf(cur.sources).map(bare).join('\n'))}</textarea>
         ${myIp ? `<span class="wall-quick"><button type="button" class="chip more" data-act="fw.quick" data-id="src:${esc(myIp)}">+ ${esc(t('fw.f.myip', { ip: myIp }))}</button></span>` : ''}
-        <span class="help" id="wall-src-help"></span>
+        <span class="help xp" id="wall-src-help"></span>
       </div>
       <div class="field" id="wall-f-ports">
         <span class="label">${esc(t('fw.f.ports'))}</span>
         <input id="wall-ports" spellcheck="false" autocomplete="off" value="${esc(listOf(cur.ports).join(', '))}">
         <span class="wall-quick" data-for="only"><button type="button" class="chip more" data-act="fw.quick" data-id="port:22">+ SSH 22</button><button type="button" class="chip more" data-act="fw.quick" data-id="port:${panelPort}">+ ${esc(t('fw.f.panelPort', { p: panelPort }))}</button></span>
         <span class="wall-quick" data-for="allow"><button type="button" class="chip more" data-act="fw.quick" data-id="port:80">+ 80</button><button type="button" class="chip more" data-act="fw.quick" data-id="port:443">+ 443</button></span>
-        <span class="help" id="wall-ports-help"></span>
+        <span class="help xp" id="wall-ports-help"></span>
       </div>
       ${field(t('fw.f.proto'), `<select id="wall-proto"><option value="" ${!cur.proto ? 'selected' : ''}>${esc(t('fw.proto.both'))}</option><option value="tcp" ${cur.proto === 'tcp' ? 'selected' : ''}>TCP</option><option value="udp" ${cur.proto === 'udp' ? 'selected' : ''}>UDP</option></select>`)}
       <div class="full">${scopeField(idsOf(cur.nodeIds))}</div>
@@ -399,7 +399,7 @@ function banDialog(seedIp = '') {
       <label class="field full"><span class="label">${esc(t('fw.f.ip'))}</span><input id="wall-ip" spellcheck="false" autocomplete="off" placeholder="${esc(t('fw.f.ipPh'))}" value="${esc(seedIp)}"></label>
       ${fieldBox(t('fw.f.expiry'), expirySelect('wall-bexp'))}
       ${field(t('fw.f.note'), `<input id="wall-bnote" maxlength="200">`)}
-    </div><p class="hint">${esc(t('fw.ban.help'))}</p>`, async () => {
+    </div><p class="hint xp">${esc(t('fw.ban.help'))}</p>`, async () => {
     const body = { ip: fv('wall-ip').trim(), note: fv('wall-bnote').trim(), seconds: readExpiry('wall-bexp') || 0 };
     const send = async force => {
       try { data = await post('fw/bans', { ...body, force }); }
@@ -417,7 +417,7 @@ function allowDialog(seedIp = '', seedNote = '') {
   openModal(t('fw.allow.new'), `<div class="form-grid">
       <label class="field full"><span class="label">${esc(t('fw.f.ip'))}</span><input id="wall-aip" spellcheck="false" autocomplete="off" placeholder="${esc(t('fw.f.ipPh'))}" value="${esc(seedIp)}"></label>
       <label class="field full"><span class="label">${esc(t('fw.f.note'))}</span><input id="wall-anote" maxlength="200" value="${esc(seedNote)}"></label>
-    </div><p class="hint">${esc(t('fw.allow.hint'))}</p>`, async () => {
+    </div><p class="hint xp">${esc(t('fw.allow.hint'))}</p>`, async () => {
     data = await post('fw/allow', { ip: fv('wall-aip').trim(), note: fv('wall-anote').trim() });
     tab = 'allow'; draw(); toast(t('fw.allow.added'), 'ok');
   });

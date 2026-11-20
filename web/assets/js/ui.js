@@ -165,8 +165,13 @@ export function confirm(message, opts = {}) {
 }
 
 // ---- 抽屉(右侧详情面板)----
+let drawerOpens = 0, drawerHide = 0;
+// drawerSeq 抽屉打开过几次(点抽屉外面收起时用:这一下要是又打开了一个,就不收)
+export const drawerSeq = () => drawerOpens;
 export function openDrawer(title, html, opts = {}) {
   closeMenus();
+  drawerOpens++;
+  clearTimeout(drawerHide); // 刚收起又打开:别让收起时排下的「藏起」把它藏掉
   const d = document.getElementById('drawer');
   d.classList.toggle('over', !!opts.over); // 从弹窗里打开的:盖在弹窗上面
   d.classList.toggle('wide', !!opts.wide); // 详情(用户 / 代理 / 线路:有流量图、几格概要)比默认的宽一点
@@ -180,9 +185,21 @@ export function openDrawer(title, html, opts = {}) {
 export function closeDrawer() {
   const d = document.getElementById('drawer');
   d.classList.remove('open');
-  setTimeout(() => { d.hidden = true; }, 200);
+  clearTimeout(drawerHide);
+  drawerHide = setTimeout(() => { d.hidden = true; }, 200);
 }
 export function drawerOpen() { return !document.getElementById('drawer').hidden; }
+
+// openSettingsAt 别处跳到设置页的某处:分区(sec-notify 等)、容灾卡(ha-card)、某一项(set-tgEnabled 等)。
+// 已经在设置页就直接滚过去(settings.js 听 mui:settings-goto);不在就记下来,设置页画完后滚(存不了就只到设置页顶上)
+export function openSettingsAt(id) {
+  if (location.hash.replace(/\?.*$/, '') === '#/settings' && document.getElementById('set-nav')) {
+    document.dispatchEvent(new CustomEvent('mui:settings-goto', { detail: id }));
+    return;
+  }
+  try { sessionStorage.setItem('m-ui.scrollTo', id); } catch { /* 存不了就只到设置页 */ }
+  location.hash = '#/settings';
+}
 
 // ---- 事件委托:data-act="name" data-id="..." ----
 const actions = {};
@@ -251,7 +268,7 @@ document.addEventListener('change', e => {
 
 // switchRow 表单里的一行开关:左边名称和一句说明,右边开关。比光秃秃一个勾选框清楚,点整行都能切换。
 export const switchRow = (id, label, checked, help = '') =>
-  `<label class="sw-row"><div><b>${esc(label)}</b>${help ? `<small>${esc(help)}</small>` : ''}</div><span class="switch"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><span></span></span></label>`;
+  `<label class="sw-row"><div><b>${esc(label)}</b>${(Array.isArray(help) ? help : [help]).map(h => helpPart(h, 'small', 'sw-help')).join('')}</div><span class="switch"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><span></span></span></label>`;
 
 // ---- 下拉菜单:表格容器有 overflow 会裁掉菜单,展开时改为 fixed 定位到 summary 下方 ----
 let menuOpenedAt = 0;
@@ -318,14 +335,19 @@ export function ipKey(ip) {
 }
 export const deviceCount = ips => new Set((ips || []).map(ipKey)).size;
 
+// 表单说明:默认是功能说明(class xp,简洁模式下收进标题旁的「?」,见 qhelp.js);警告、状态这类一直要看得到的用 keep(文字)
+export const keep = text => Object.assign(new String(text), { keep: true });
+// help 可以是几段的数组:[说明, keep(探测到的地址)],说明段收起、数据段照常显示
+const helpPart = (h, tag = 'span', cls = 'help') => (h ? `<${tag} class="${cls}${h.keep ? '' : ' xp'}">${esc(h)}</${tag}>` : '');
+const helpHTML = help => (Array.isArray(help) ? help.map(h => helpPart(h)).join('') : helpPart(help));
 export const field = (label, input, help = '') =>
-  `<label class="field"><span class="label">${esc(label)}</span>${input}${help ? `<span class="help">${esc(help)}</span>` : ''}</label>`;
+  `<label class="field"><span class="label">${esc(label)}</span>${input}${helpHTML(help)}</label>`;
 // fieldBox 同 field,但外层是 <div>:选择器、勾选列表、一排勾选框这类复合控件不能包在 <label> 里 ——
 // 点标签字、说明或空白处,浏览器会把点击转给里面第一个控件(规则目标被切成「全部用户」、第一台服务器被勾掉)
 export const fieldBox = (label, inner, help = '') =>
-  `<div class="field"><span class="label">${esc(label)}</span>${inner}${help ? `<span class="help">${esc(help)}</span>` : ''}</div>`;
+  `<div class="field"><span class="label">${esc(label)}</span>${inner}${helpHTML(help)}</div>`;
 export const check = (id, label, checked, help = '') =>
-  `<label class="field check"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><span>${esc(label)}</span>${help ? `<span class="help">${esc(help)}</span>` : ''}</label>`;
+  `<label class="field check"><input type="checkbox" id="${id}" ${checked ? 'checked' : ''}><span>${esc(label)}</span>${helpHTML(help)}</label>`;
 // 落地页公告、联系方式的字数上限(和后端 web/page_logo.go 的 maxPageNotice / maxPageSupport 一致)
 export const PAGE_TEXT_MAX = { notice: 4000, support: 300 };
 

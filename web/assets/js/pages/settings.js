@@ -1,4 +1,4 @@
-import { state, load } from '../app.js';
+import { state, load, applyUIPrefs, NAV_ORDER } from '../app.js';
 import { get, post } from '../api.js';
 import { t } from '../i18n.js';
 import { esc, toast, confirm, registerActions, badge, fv, fchk, copy, urlHost, charCount, bindCharCounts, PAGE_TEXT_MAX, openModal, debounce } from '../ui.js';
@@ -10,6 +10,7 @@ import { subSettingsChange } from '../subtls.js';
 import { refreshReward } from '../reward.js';
 import { ATTN_GROUPS, attnCatsFor, normMutes } from '../attnmute.js';
 import { trErr } from '../errmsg.js';
+import { navHidden, normNavHidden, isConcise, NAV_LOCKED } from '../uiprefs.js';
 
 // boolSetting 开关类设置的显示:和后端同一个判法(model.NormBoolSetting),空值用默认。
 function boolSetting(v, def) {
@@ -148,18 +149,7 @@ export async function render(el) {
   el.innerHTML = `<div class="settings">
     <nav class="set-nav" id="set-nav" aria-label="${esc(t('set.title'))}"></nav>
     <div class="set-main">
-    <section class="card set-sec" id="sec-role" data-nav="${esc(t('set.role'))}">
-      <div class="card-head"><h2>${t('set.role')} ${badge(isNode ? t('role.node') : t('role.master'), isNode ? 'node' : 'primary')}</h2></div>
-      <div class="set-rows">
-        <div class="set-row bool"><div class="set-info"><label class="set-label" for="set-nodeMode">${t('set.roleSwitch')}</label><p class="set-help" id="role-hint">${isNode ? t('set.roleNode') : t('set.roleMaster')}</p></div>
-          <div class="set-ctl"><label class="switch"><input type="checkbox" id="set-nodeMode" ${isNode ? 'checked' : ''}><span></span></label></div></div>
-      </div>
-    </section>
-    ${groups().filter(g => !(g.masterOnly && isNode)).map(g => `
-      <section class="card set-sec" id="sec-${g.id}" data-nav="${esc(g.title)}">
-        <div class="card-head"><h2>${esc(g.title)}</h2>${g.test ? `<div class="row"><button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button></div>` : ''}</div>
-        <div class="set-rows">${g.fields.filter(f => !(f[5] && isNode)).map(f => rowHTML(s, f)).join('')}</div>${g.extra || ''}
-      </section>`).join('')}
+    ${orderedCards(s, isNode)}
     <section class="card set-sec" id="sec-about" data-nav="${esc(t('set.about'))}">
       <div class="card-head"><h2>${t('set.about')}</h2><a href="#/admin" class="btn sm">${t('nav.admin')} →</a></div>
       <dl class="kv">
@@ -169,7 +159,7 @@ export async function render(el) {
         <dt>${t('set.subUrl')}</dt><dd class="mono">${esc((state.status.subTLS ? 'https' : 'http') + '://' + urlHost(state.status.subTLS ? 'https' : 'http', s.subDomain || s.webDomain || '<IP>', state.status.subPort || '') + (state.status.subPath || '/sub/') + '<' + t('set.userPh') + '>')}</dd>
         <dt>License</dt><dd>GPL-3.0 · <a href="${esc(state.status.repo || '#')}" target="_blank" rel="noopener">GitHub</a></dd>
       </dl>
-      <p class="hint">${t('set.restartNote')}</p>
+      <p class="hint xp">${t('set.restartNote')}</p>
     </section>
     <div class="savebar" id="set-bar" hidden></div></div></div>`;
   // 角色开关:拨了就问、确认了就生效;取消或失败就拨回去
@@ -185,6 +175,7 @@ export async function render(el) {
       setTimeout(() => location.reload(), toNode ? 2500 : 0);
     } catch (err) { toast(err.message, 'err'); sw.checked = !toNode; sw.disabled = false; }
   });
+  bindUI();
   bindLogo('set-logo', 'sub-logo');
   bindCharCounts(el);
   // 页面伪装:换了样式马上按它预览(还没保存也一样);撤销这一项时 setCtl 发的是 input,下拉框本身选了也会发 input
@@ -213,17 +204,193 @@ export async function render(el) {
   haCard.className = 'card set-sec';
   haCard.id = 'ha-card';
   haCard.dataset.nav = t('ha.title');
-  document.querySelector('section.card').after(haCard);
+  haCard.dataset.navg = 'multi';
+  document.getElementById('sec-role').after(haCard);
   buildNav();
   renderHASettings(haCard).then(() => {
     buildNav(); // 取不到容灾状态时这张卡会被拿掉,导航跟着少一项
     haSnapshot(); // 容灾卡片画好了:记下它各项现在的值(之后的改动进保存条)
     let to = '';
     try { to = sessionStorage.getItem('m-ui.scrollTo') || ''; sessionStorage.removeItem('m-ui.scrollTo'); } catch {}
-    if (to === 'ha-card') haCard.scrollIntoView({ block: 'start' });
-    else if (to.startsWith('set-')) focusRow(to);
+    goTo(to);
   });
 }
+
+// ---- 分区的排列(用户 11-21)----
+// 按用途分组,左侧导航加组名。「角色」在最上面(用户:「角色需要在最上面 这个是多服务器的关键功能」),容灾卡、副机的配对信息插在它后面
+const SET_GROUPS = [
+  ['multi', ['role']],
+  ['panel', ['panel', 'reseller', 'ui', 'notify', 'attn']],
+  ['sub', ['sub', 'subtmpl', 'subpage', 'camo']],
+  ['check', ['monitor', 'reach', 'core']],
+];
+function orderedCards(s, isNode) {
+  const defs = new Map(groups().filter(g => !(g.masterOnly && isNode)).map(g => [g.id, g]));
+  const listed = new Set(SET_GROUPS.flatMap(([, ids]) => ids));
+  const rest = [...defs.keys()].filter(id => !listed.has(id)); // 以后新加的分区忘了排:放在最后一组,不会丢
+  return SET_GROUPS.map(([gk, ids], i) => [...ids, ...(i === SET_GROUPS.length - 1 ? rest : [])].map(id =>
+    id === 'role' ? roleCard(isNode, gk) : id === 'ui' ? uiCard(gk) : defs.has(id) ? groupCard(s, defs.get(id), isNode, gk) : '').join('')).join('');
+}
+function roleCard(isNode, gk) {
+  return `<section class="card set-sec" id="sec-role" data-nav="${esc(t('set.role'))}" data-navg="${gk}">
+      <div class="card-head"><h2>${t('set.role')} ${badge(isNode ? t('role.node') : t('role.master'), isNode ? 'node' : 'primary')}</h2></div>
+      <div class="set-rows">
+        <div class="set-row bool"><div class="set-info"><label class="set-label" for="set-nodeMode">${t('set.roleSwitch')}</label><p class="set-help xp" id="role-hint">${isNode ? t('set.roleNode') : t('set.roleMaster')}</p></div>
+          <div class="set-ctl"><label class="switch"><input type="checkbox" id="set-nodeMode" ${isNode ? 'checked' : ''}><span></span></label></div></div>
+      </div>
+    </section>`;
+}
+function groupCard(s, g, isNode, gk) {
+  return `
+      <section class="card set-sec" id="sec-${g.id}" data-nav="${esc(g.title)}" data-navg="${gk}">
+        <div class="card-head"><h2>${esc(g.title)}</h2>${g.test ? `<div class="row"><button class="btn sm" data-act="set.notifyTest">${t('set.tgTest')}</button></div>` : ''}</div>
+        <div class="set-rows">${g.fields.filter(f => !(f[5] && isNode)).map(f => rowHTML(s, f)).join('')}</div>${g.extra || ''}
+      </section>`;
+}
+
+// ---- 界面(用户 11-21)----
+// 「有的用户可能有的栏目用不到，在设置里增加一个功能可隐藏栏目 点击轻量弹窗 可勾选隐藏左边的栏目（只是前端隐藏，设置不支持隐藏）」
+// 「跟这个栏目隐藏的设置在一个板块里 增加一个切换详细/简洁模式」
+// 两项都是即改即生效、即存:拨了马上看到效果(侧栏少了一项、说明收起来了),不用再去点底部的保存
+function uiCard(gk) {
+  const concise = isConcise(state.settings);
+  return `<section class="card set-sec" id="sec-ui" data-nav="${esc(t('set.ui'))}" data-navg="${gk}">
+      <div class="card-head"><h2>${t('set.ui')}</h2></div>
+      <div class="set-rows">
+        <div class="set-row bool ui-row"><div class="set-info"><span class="set-label" id="ui-nav-label">${t('set.uiNav')}</span><p class="set-help xp">${esc(t('set.uiNavHelp'))}</p></div>
+          <div class="set-ctl ui-ctl"><span class="ui-nav-sum" id="ui-nav-sum"></span><button class="btn sm ui-nav-btn" type="button" id="ui-nav-btn" aria-haspopup="dialog" aria-expanded="false" aria-describedby="ui-nav-sum">${ICONS.sidebar || ''}<span>${t('set.uiNavPick')}</span></button></div></div>
+        <div class="set-row bool ui-row"><div class="set-info"><span class="set-label" id="ui-mode-label">${t('set.uiMode')}</span><p class="set-help xp">${esc(t('set.uiModeHelp'))}</p></div>
+          <div class="set-ctl ui-ctl"><div class="seg" role="radiogroup" aria-labelledby="ui-mode-label" id="ui-mode">
+            <button type="button" role="radio" data-mode="full" class="${concise ? '' : 'active'}" aria-checked="${!concise}">${t('set.uiModeFull')}</button>
+            <button type="button" role="radio" data-mode="concise" class="${concise ? 'active' : ''}" aria-checked="${concise}">${t('set.uiModeConcise')}</button></div></div></div>
+      </div>
+    </section>`;
+}
+// 侧栏的栏目(和 app.js 的 NAV_GROUPS 同一份):浮层里按同样的分组列出来
+const navSum = () => {
+  const n = navHidden(state.settings).size;
+  return n ? t('set.uiNavSome', { n }) : t('set.uiNavAll');
+};
+let uiSaveTimer = 0, uiSaving = Promise.resolve();
+// saveUI 存界面的一项:先在本页生效(state.settings 改了、侧栏和简洁模式跟着变),再存;存失败就按服务器上的值改回来
+function saveUI(key, value, delay = 0) {
+  state.settings[key] = value;
+  applyUIPrefs();
+  clearTimeout(uiSaveTimer);
+  uiSaveTimer = setTimeout(() => {
+    uiSaving = uiSaving.then(() => post('settings', { [key]: state.settings[key] })).catch(async e => {
+      toast(trErr(e.message), 'err');
+      await load('settings').catch(() => {});
+      syncUI();
+    });
+  }, delay);
+}
+// syncUI 卡片上的状态跟着设置走(存失败改回来时、换语言重画后)
+function syncUI() {
+  const sum = document.getElementById('ui-nav-sum');
+  if (sum) sum.textContent = navSum();
+  const concise = isConcise(state.settings);
+  document.querySelectorAll('#ui-mode button').forEach(b => {
+    const on = (b.dataset.mode === 'concise') === concise;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-checked', String(on));
+  });
+  const pop = document.getElementById('ui-nav-pop');
+  if (pop) {
+    const hide = navHidden(state.settings);
+    pop.querySelectorAll('input[data-page]').forEach(cb => { cb.checked = cb.dataset.page === NAV_LOCKED || !hide.has(cb.dataset.page); });
+  }
+}
+function bindUI() {
+  syncUI();
+  const mode = document.getElementById('ui-mode');
+  if (mode) mode.addEventListener('click', e => {
+    const b = e.target.closest('button[data-mode]');
+    if (!b || b.classList.contains('active')) return;
+    saveUI('uiConcise', String(b.dataset.mode === 'concise'));
+    syncUI();
+  });
+  const btn = document.getElementById('ui-nav-btn');
+  if (btn) btn.addEventListener('click', () => (document.getElementById('ui-nav-pop') ? closeNavPop(true) : openNavPop(btn)));
+}
+// ---- 选栏目的浮层:挂在 body 上(不被卡片裁掉),贴着按钮;点外面、Esc、换页都收起 ----
+let popCleanup = null;
+function openNavPop(btn) {
+  closeNavPop();
+  const hide = navHidden(state.settings);
+  const item = id => {
+    const locked = id === NAV_LOCKED;
+    return `<label class="np-item${locked ? ' locked' : ''}"><input type="checkbox" data-page="${id}" ${locked || !hide.has(id) ? 'checked' : ''} ${locked ? 'disabled' : ''}>` +
+      `<span class="np-ic">${ICONS[id] || ''}</span><span class="np-t">${esc(t('nav.' + id))}</span>${locked ? `<span class="np-lock">${esc(t('set.uiNavLocked'))}</span>` : ''}</label>`;
+  };
+  const groups = NAV_ORDER.map(g => `<div class="np-g${g.key ? '' : ' np-top'}">${g.key ? `<div class="np-h">${esc(t('nav.group.' + g.key))}</div>` : ''}${g.items.map(item).join('')}</div>`).join('');
+  const pop = document.createElement('div');
+  pop.className = 'np-pop';
+  pop.id = 'ui-nav-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-labelledby', 'np-title');
+  pop.innerHTML = `<div class="np-head"><b id="np-title">${esc(t('set.uiNavPopTitle'))}</b><button type="button" class="btn ghost sm" id="np-all">${esc(t('set.uiNavShowAll'))}</button></div>
+    <div class="np-body">${groups}</div><p class="np-foot">${esc(t('set.uiNavPopNote'))}</p>`;
+  document.body.append(pop);
+  btn.setAttribute('aria-expanded', 'true');
+  const place = () => {
+    const r = btn.getBoundingClientRect();
+    if (!r.width) { closeNavPop(); return; }
+    const vw = document.documentElement.clientWidth, vh = innerHeight, m = 8;
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    const left = Math.min(Math.max(m, r.right - w), vw - w - m);
+    const below = r.bottom + 6 + h <= vh - m || r.top - 6 - h < m;
+    pop.style.left = Math.round(left) + 'px';
+    pop.style.top = Math.round(below ? Math.min(r.bottom + 6, vh - h - m) : r.top - 6 - h) + 'px';
+  };
+  place();
+  const changed = () => {
+    const hidden = [...pop.querySelectorAll('input[data-page]')].filter(cb => !cb.checked).map(cb => cb.dataset.page);
+    saveUI('uiNavHidden', normNavHidden(hidden, NAV_ORDER.flatMap(g => g.items)), 400);
+    syncUI();
+  };
+  pop.addEventListener('change', changed);
+  pop.querySelector('#np-all').addEventListener('click', () => { pop.querySelectorAll('input[data-page]').forEach(cb => { cb.checked = true; }); changed(); });
+  const outside = e => { if (!pop.contains(e.target) && !btn.contains(e.target)) closeNavPop(); };
+  const key = e => { if (e.key === 'Escape') { e.stopPropagation(); closeNavPop(true); } };
+  const onScroll = e => { if (!pop.contains(e.target)) place(); };
+  document.addEventListener('pointerdown', outside, true);
+  document.addEventListener('keydown', key, true);
+  document.addEventListener('scroll', onScroll, true);
+  window.addEventListener('resize', place);
+  window.addEventListener('hashchange', closeNavPop);
+  popCleanup = () => {
+    document.removeEventListener('pointerdown', outside, true);
+    document.removeEventListener('keydown', key, true);
+    document.removeEventListener('scroll', onScroll, true);
+    window.removeEventListener('resize', place);
+    window.removeEventListener('hashchange', closeNavPop);
+    btn.setAttribute('aria-expanded', 'false');
+    pop.remove();
+  };
+  const first = pop.querySelector('input:not(:disabled)');
+  if (first) first.focus({ preventScroll: true });
+}
+function closeNavPop(focusBtn = false) {
+  if (!popCleanup) return;
+  const f = popCleanup;
+  popCleanup = null;
+  f();
+  if (focusBtn === true) document.getElementById('ui-nav-btn')?.focus();
+}
+
+// goTo 跳到设置页的某处(别处的链接经 openSettingsAt 过来):某一项(set-xxx)滚到那一行、闪一下;分区(sec-xxx、ha-card)滚到卡片顶上、闪一下
+function goTo(to) {
+  if (!to) return;
+  if (to.startsWith('set-')) { focusRow(to); return; }
+  const sec = document.getElementById(to);
+  if (!sec || !sec.classList.contains('set-sec')) return;
+  sec.scrollIntoView({ block: 'start' });
+  sec.classList.remove('flash'); void sec.offsetWidth; sec.classList.add('flash');
+  setTimeout(() => sec.classList.remove('flash'), 2800);
+}
+// 已经在设置页时别处要跳过来(ui.js openSettingsAt):直接滚,不重画整页
+document.addEventListener('mui:settings-goto', e => { if (document.getElementById('set-nav')) goTo(e.detail); });
 
 // 从别处跳到某一项设置(流量奖励活动页里的「去设置里关闭」):滚到那一行、闪一下,焦点落在它的开关上。
 // 等容灾那张卡画完才滚(它是后插进来的,先滚的话位置会被它顶走)
@@ -426,7 +593,7 @@ const WIDE = new Set(['supportOnline', 'rewardEnabled', 'camoEnabled', 'camoRedi
 
 function rowHTML(s, [k, label, type, help, options]) {
   const id = 'set-' + k;
-  const info = `<div class="set-info"><label class="set-label" for="${id}">${esc(label)}</label>${help ? `<p class="set-help">${esc(help)}</p>` : ''}</div>`;
+  const info = `<div class="set-info"><label class="set-label" for="${id}">${esc(label)}</label>${help ? `<p class="set-help xp">${esc(help)}</p>` : ''}</div>`;
   if (type === 'bool' || type === 'boolOn') {
     const on = boolSetting(s[k], k === 'subPageEnabled' || type === 'boolOn');
     return `<div class="set-row bool${WIDE.has(k) ? ' wide' : ''}">${info}<div class="set-ctl"><label class="switch"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}><span></span></label></div></div>`;
@@ -458,7 +625,12 @@ function buildNav() {
   const nav = document.getElementById('set-nav');
   if (!nav) return;
   const secs = [...document.querySelectorAll('.set-main > section.card')].filter(s => s.id && s.dataset.nav);
-  nav.innerHTML = secs.map(s => `<a href="#/settings" data-sec="${esc(s.id)}">${esc(s.dataset.nav)}</a>`).join('');
+  // 组名:组变了就先写一行组名;没有组的(关于)前面画一条细线
+  nav.innerHTML = secs.map((s, i) => {
+    const g = s.dataset.navg || '', prev = i ? secs[i - 1].dataset.navg || '' : '';
+    const head = g && g !== prev ? `<div class="set-nav-g">${esc(t('set.g.' + g))}</div>` : !g && prev ? '<div class="set-nav-sep"></div>' : '';
+    return head + `<a href="#/settings" data-sec="${esc(s.id)}">${esc(s.dataset.nav)}</a>`;
+  }).join('');
   nav.onclick = e => {
     const a = e.target.closest('a[data-sec]');
     if (!a) return;
@@ -571,7 +743,7 @@ function camoHTML(d) {
     ? `<div class="camo-name">${esc(t('camo.rd.title'))}</div>
         ${d.error ? `<div class="camo-kind danger-text">${esc(trErr(d.error))}</div>` : `<div class="camo-kind camo-target">${esc(d.target || t('camo.rd.none'))}</div>`}
         ${d.target ? `<div class="camo-acts"><a class="btn sm" href="${esc(d.target)}" target="_blank" rel="noopener noreferrer">${esc(t('camo.rd.open'))} ↗</a></div>` : ''}
-        <p class="camo-note">${esc(t('camo.rd.note'))}</p>`
+        <p class="camo-note xp">${esc(t('camo.rd.note'))}</p>`
     : `<div class="camo-name">${esc(d.name)}</div>
         <div class="camo-kind">${esc(kind)}</div>
         ${camoPhotoLine(d.photos)}
@@ -580,7 +752,7 @@ function camoHTML(d) {
           <button type="button" class="btn sm" data-act="set.camoZoom">${esc(t('camo.zoom'))}</button>
           ${d.live ? `<a class="btn sm" href="${esc(d.live)}" target="_blank" rel="noopener noreferrer" title="${esc(t('camo.openHint'))}">${esc(t('camo.open'))} ↗</a>` : ''}
         </div>
-        <p class="camo-note">${esc(t('camo.reseedHelp'))}</p>`;
+        <p class="camo-note xp">${esc(t('camo.reseedHelp'))}</p>`;
   return `<div class="camo-head"><h3>${esc(t(rd ? 'camo.rd.head' : 'camo.preview'))}</h3>${badge(t(on ? 'camo.on' : 'camo.off'), on ? 'ok' : '')}</div>
     <div class="camo-grid">
       ${left}
@@ -623,14 +795,16 @@ function fitCamo(box) {
 async function renderPairing() {
   const info = await get('agent/info').catch(() => null);
   if (!info) return;
-  const role = document.querySelector('section.card');
+  const role = document.getElementById('sec-role');
+  if (!role) return;
   const card = document.createElement('section');
   card.className = 'card set-sec';
   card.id = 'sec-pairing';
   card.dataset.nav = t('set.pairing');
+  card.dataset.navg = 'multi';
   card.innerHTML = `
     <div class="card-head"><h2>${t('set.pairing')}</h2><button class="btn sm" data-act="set.rotateToken">${t('set.rotateToken')}</button></div>
-    <p class="hint">${t('set.pairingHelp')}</p>
+    <p class="hint xp">${t('set.pairingHelp')}</p>
     ${/^http:\/\//i.test(info.apiUrl || '') ? `<p class="hint warn-text">${t('set.pairingPlain')}</p>` : ''}
     <dl class="kv" style="margin-top:.5rem">
       <dt>${t('node.apiUrl')}</dt><dd class="mono">${esc(info.apiUrl)}</dd>

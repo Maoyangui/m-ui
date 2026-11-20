@@ -18,7 +18,7 @@ stub('api.js', `export const get = async () => ({});
 export const post = async () => ({});
 export const del = async () => ({});`);
 stub('i18n.js', `export const t = (k) => k;`);
-stub('ui.js', `export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+stub('ui.js', `export const keep = (s) => s; export const openSettingsAt = () => {}; export const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 export const toast = () => {};
 export const confirm = async () => true;
 export const registerActions = () => {};

@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, fmtDay, fmtDate, fmtRelative, toast, confirm, registerActions, badge, field, switchRow, openModal, copy, fv, fchk, cfTokenLink } from '../ui.js';
+import { keep, esc, fmtDay, fmtDate, fmtRelative, toast, confirm, registerActions, badge, field, switchRow, openModal, copy, fv, fchk, cfTokenLink } from '../ui.js';
 import { followPanel } from '../panelmove.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
 import { subDefaultOn, subSchemeChange } from '../subtls.js';
@@ -32,7 +32,7 @@ export async function render(el) {
       <div class="card-head"><h2>${t('cert.inUse')}</h2>${st.running ? badge(t('cert.running'), 'primary') : (st.lastOk ? badge(t('cert.lastOk') + ' ' + fmtRelative(st.lastOk), 'ok') : '')}</div>
       <div class="cu-grid">${['lines', 'panel', 'sub'].map(useTile).join('')}</div>
       ${panelChanged ? `<div class="hint warn-text row" style="margin-top:.7rem;justify-content:space-between;flex-wrap:wrap"><span>${t('cert.panelRestart')}</span><button class="btn sm" data-act="cert.restart">${t('cert.restartBtn')}</button></div>` : ''}
-      <p class="hint">${t('cert.usesHelp')}</p>
+      <p class="hint xp">${t('cert.usesHelp')}</p>
     </section>
     <section class="card">
       <div class="card-head"><h2>${t('cert.store')}<span class="h-count">${certs().length || ''}</span></h2><button class="btn primary sm" data-act="cert.add" ${st.running ? 'disabled' : ''}>${t('cert.add')}</button></div>
@@ -55,8 +55,8 @@ export function tick() {}
 // 本机没配通知:续期失败、快到期的提醒发不出去,要说出来(副机的由主机代发,主机要配好)
 function notifyHint() {
   if (data.notifyConfigured || !certs().length) return '';
-  if (data.nodeMode) return `<p class="hint">${esc(t('cert.notifyNode'))}</p>`;
-  return `<div class="hint warn-text row" style="margin-bottom:.8rem;justify-content:space-between;flex-wrap:wrap"><span>${esc(t('cert.notifyOff'))}</span><a class="btn sm" href="#/settings">${esc(t('cert.notifySet'))}</a></div>`;
+  if (data.nodeMode) return `<p class="hint xp">${esc(t('cert.notifyNode'))}</p>`;
+  return `<div class="hint warn-text row" style="margin-bottom:.8rem;justify-content:space-between;flex-wrap:wrap"><span>${esc(t('cert.notifyOff'))}</span><a class="btn sm" href="#/settings" data-act="go.setting" data-id="sec-notify">${esc(t('cert.notifySet'))}</a></div>`;
 }
 
 // 「正在使用」的一格:线路默认 / 面板 / 订阅各选各的。上面是用途,中间是哪张证书和到期,右上角「更换」开抽屉
@@ -151,7 +151,7 @@ function targetSwitches() {
     <div class="ct-uses">
       ${switchRow('c-lines', t('cert.forLines'), !hasReal, t('cert.forLinesHelp'))}
       ${switchRow('c-panel', t('cert.applyPanel'), !self && !data.panelCert, t('cert.applyPanelHelp'))}
-      ${switchRow('c-sub', t('cert.applySub'), subDefaultOn(data, self), data.subCert || !(data.subUsers > 0) ? t('cert.applySubHelp') : t('cert.applySubWarn', { n: data.subUsers }))}
+      ${switchRow('c-sub', t('cert.applySub'), subDefaultOn(data, self), data.subCert || !(data.subUsers > 0) ? t('cert.applySubHelp') : keep(t('cert.applySubWarn', { n: data.subUsers })))}
     </div>`;
 }
 
@@ -202,12 +202,12 @@ function renderForm() {
     // 无域名场景不该逼用户填东西:留空即用本机探测到的公网 IP,占位里先给他看是哪些
     const auto = [state.settings.publicIp, s.webDomain].filter(Boolean).join(', ');
     box.innerHTML = `
-      <p class="hint">${t('cert.selfHelp')}</p>
+      <p class="hint xp">${t('cert.selfHelp')}</p>
       ${field(t('cert.hosts'), `<input id="ss-hosts" value="" placeholder="${esc(auto || '1.2.3.4')}">`, t('cert.hostsHelp'))}
       ${targetSwitches()}`;
   } else {
     box.innerHTML = `
-      <p class="hint">${t('cert.externalHelp')}</p>
+      <p class="hint xp">${t('cert.externalHelp')}</p>
       <div class="form-grid cols-2">
         ${field(t('cert.certPath'), `<input id="ex-cert" value="" placeholder="/etc/letsencrypt/live/example.com/fullchain.pem">`)}
         ${field(t('cert.keyPath'), `<input id="ex-key" value="" placeholder="/etc/letsencrypt/live/example.com/privkey.pem">`, t('cert.pathHelp'))}

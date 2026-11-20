@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, openDrawer, drawerOpen, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, setText, chipList, fieldBox, fmtBytes, tzOffsetMinutes, switchRow, fmtTime } from '../ui.js';
+import { keep, esc, toast, confirm, openModal, openDrawer, drawerOpen, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, setText, chipList, fieldBox, fmtBytes, tzOffsetMinutes, switchRow, fmtTime } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
 import { serverOfIP } from '../relayip.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
@@ -331,7 +331,7 @@ function serversField(l, isNew) {
   const fam = familyOf(l);
   // 订阅给域名时"默认跟服务器页的设置走"不成立(服务器的"自动地址用"不起作用),换成域名模式的说明,不接在后面自相矛盾
   if (nodes.length < 2) {
-    return nodes.length && isDualStack(nodes[0]) ? `<div class="ln-one-fam">${field(t('line.ipVersion'), famSelect(nodes[0], fam[nodes[0].id]), subByDomain() ? t('line.famPick') + ' ' + t('line.famDnsHelp') : t('line.ipVersionHelp'))}</div>` : '';
+    return nodes.length && isDualStack(nodes[0]) ? `<div class="ln-one-fam">${field(t('line.ipVersion'), famSelect(nodes[0], fam[nodes[0].id]), subByDomain() ? [t('line.famPick'), keep(t('line.famDnsHelp'))] : t('line.ipVersionHelp'))}</div>` : '';
   }
   const ids = lineNodeIds(l);
   const all = !isNew && !ids.length;
@@ -351,7 +351,7 @@ function serversField(l, isNew) {
       <span class="muted small" id="f-srv-n"></span>
     </div>
     <div class="node-list" id="f-srv-list">${body}</div>
-    <p class="hint" id="f-scope-help"></p>
+    <p class="hint xp" id="f-scope-help"></p>
   </div>`;
 }
 // 服务器选择器的联动:切范围、整组勾、搜索、右上角的已选台数
@@ -478,7 +478,7 @@ function dynSection(protocol, tls, tr, o) {
   const trFields = spec.transport ? transportFields(type, tr, host) : '';
   const trTypes = ['tcp', 'ws', 'grpc', 'httpupgrade', 'http'];
   return `<h3 class="form-sec">${t('line.tlsMode')}</h3>
-    <div class="ln-tls"><div class="seg" id="f-tlsseg">${modes.map(m => `<button type="button" data-tls="${m}" class="${m === mode ? 'active' : ''}">${esc(t('line.tls.' + m))}</button>`).join('')}</div><span class="hint" id="f-tls-help">${esc(t('line.tlsHelp.' + mode))}</span></div>
+    <div class="ln-tls"><div class="seg" id="f-tlsseg">${modes.map(m => `<button type="button" data-tls="${m}" class="${m === mode ? 'active' : ''}">${esc(t('line.tls.' + m))}</button>`).join('')}</div><span class="hint xp" id="f-tls-help">${esc(t('line.tlsHelp.' + mode))}</span></div>
     <input type="hidden" id="f-tlsmode" value="${esc(mode)}">
     <div class="form-grid cols-4 ln-dyn">
       <div id="f-cert-wrap" class="span-2" ${mode === 'cert' ? '' : 'hidden'}>${fieldBox(t('line.cert'), `<input type="hidden" id="f-cert" value="${esc(tls.cert || '')}"><button type="button" class="btn cert-pick-btn" data-act="line.pickCert" id="f-cert-btn" title="${esc(t('line.certHelp'))}"><span id="f-cert-label">${esc(tls.cert ? certLabel(tls.cert) : t('line.certDefault'))}</span><i class="i i-chev"></i></button>`)}</div>
@@ -884,11 +884,11 @@ function fwSection() {
   const arrow = '<i class="i i-arrow fw-flow-arrow"></i>';
   return `<div class="fw-box">
     <div class="fw-flow" aria-hidden="true">${node('line.fw.dUser')}${arrow}${node('line.fw.dRelay', ' relay')}${arrow}${node('line.fw.dExit', ' exit')}${arrow}${node('line.fw.dSite')}</div>
-    <p class="hint acc-lead">${esc(t('line.fw.lead'))}</p>
+    <p class="hint acc-lead xp">${esc(t('line.fw.lead'))}</p>
     <div id="f-fw-list"></div>
     <button type="button" class="rr-add" id="f-fw-add">${esc(t('line.fw.add'))}</button>
-    <label class="field check fw-only" id="f-fw-only-wrap" hidden><input type="checkbox" id="f-fw-only"><span>${esc(t('line.fw.only'))}</span><span class="help">${esc(t('line.fw.onlyHelp'))}</span></label>
-    <p class="hint fw-foot" id="f-fw-foot" hidden>${esc(t('line.fw.foot'))}</p>
+    <label class="field check fw-only" id="f-fw-only-wrap" hidden><input type="checkbox" id="f-fw-only"><span>${esc(t('line.fw.only'))}</span><span class="help xp">${esc(t('line.fw.onlyHelp'))}</span></label>
+    <p class="hint fw-foot xp" id="f-fw-foot" hidden>${esc(t('line.fw.foot'))}</p>
   </div>`;
 }
 
@@ -1329,7 +1329,7 @@ function rrFit(ta) {
 // 分流规则分区的正文:查应用域名的一行 + 规则表(一条都没有时只剩「添加规则」)
 function rrSection() {
   return `<div class="rr-box">
-    <p class="hint acc-lead">${esc(t('line.rr.help'))}</p>
+    <p class="hint acc-lead xp">${esc(t('line.rr.help'))}</p>
     <div class="rr-lookup" id="f-rr-lookup">
       <input id="f-rr-apps" placeholder="${esc(t('line.rr.appPh'))}" aria-label="${esc(t('line.rr.appPh'))}" autocomplete="off" spellcheck="false">
       <button type="button" class="btn" id="f-rr-apps-go">${esc(t('line.rr.lookup'))}</button>
@@ -1340,7 +1340,7 @@ function rrSection() {
       <div id="f-rr-list"></div>
       <div class="rr-row rr-rest"><span class="rr-no">—</span><span class="rr-rest-label">${esc(t('line.rr.rest'))}</span><span class="muted small">${esc(t('line.rr.restHint'))}</span><span class="rr-rest-to" id="f-rr-rest"></span><span></span></div>
       <button type="button" class="rr-add" id="f-rr-add">${esc(t('line.rr.add'))}</button>
-      <p class="hint rr-hint">${esc(t('line.rr.hint'))}</p>
+      <p class="hint rr-hint xp">${esc(t('line.rr.hint'))}</p>
     </div>
   </div>`;
 }

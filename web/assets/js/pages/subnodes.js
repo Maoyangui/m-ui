@@ -15,7 +15,7 @@ import { expandByDefault } from '../snfold.js';
 import { state } from '../app.js';
 import { get, put } from '../api.js';
 import { t } from '../i18n.js';
-import { esc, toast, confirm, openModal, registerActions, badge, field, empty, fv, fchk, matches, debounce, setHTML, switchRow } from '../ui.js';
+import { keep, esc, toast, confirm, openModal, registerActions, badge, field, empty, fv, fchk, matches, debounce, setHTML, switchRow } from '../ui.js';
 
 export const title = () => t('sn.title');
 export const subtitle = () => t('sn.subtitle');
@@ -302,7 +302,7 @@ function editNode(id) {
       ${switchRow('sn-out', t('sn.output'), !o.hidden, t('sn.outputHelp'))}
       ${nd.kind === 'relay' ? `<details class="adv"${nd.fwd.src ? ' open' : ''}><summary>${esc(t('sn.srcSummary'))}</summary>
         ${field(t('sn.src'), `<input id="sn-src" value="${esc(nd.fwd.src || '')}" placeholder="192.0.2.10, 2001:db8::10" autocomplete="off" spellcheck="false">`,
-          t('sn.srcHelp') + (known.length ? ' ' + t('sn.srcKnown', { list: known.join('、') }) : ' ' + t('sn.srcNone')))}
+          [t('sn.srcHelp'), keep(known.length ? t('sn.srcKnown', { list: known.join('、') }) : t('sn.srcNone'))])}
       </details>` : ''}
       <div><button type="button" class="btn sm sn-reset" data-act="sn.reset">${esc(t('sn.reset'))}</button></div>
     </div>`,
@@ -341,7 +341,7 @@ function batchLimits() {
       ${row('userSpeed', t('sn.userSpeed'), 100000)}
       ${row('cap', t('sn.cap'), 1000000)}
     </div>
-    <p class="hint">${esc(t('sn.batch.limitsHelp'))}</p>`,
+    <p class="hint xp">${esc(t('sn.batch.limitsHelp'))}</p>`,
   async () => {
     const set = {};
     for (const key of ['speed', 'userSpeed', 'cap']) {

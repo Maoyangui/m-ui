@@ -181,11 +181,11 @@ function editReseller(id) {
       <div class="full">${field(t('rs.deviceLimit'), `<input id="f-device" type="number" min="0" value="${r.deviceLimit || 0}">`, t('rs.deviceHelp'))}</div>
       ${field(t('rs.speedUp'), `<input id="f-up" type="number" min="0" value="${r.speedUp || 0}">`)}
       ${field(t('rs.speedDown'), `<input id="f-down" type="number" min="0" value="${r.speedDown || 0}">`)}
-      <p class="hint full" style="margin-top:-.4rem">${esc(t('rs.speedHelp'))}</p>
+      <p class="hint full xp" style="margin-top:-.4rem">${esc(t('rs.speedHelp'))}</p>
     </div>`;
   openModal(id ? t('rs.edit') : t('rs.add'), `<div class="edit-2pane">
       <div class="pane"><h3 class="form-sec">${esc(t('user.tab.basic'))}</h3>${basic}<h3 class="form-sec">${esc(t('rs.tab.quota'))}</h3>${quota}</div>
-      <div class="pane"><h3 class="form-sec">${esc(t('rs.lines'))}</h3><div id="f-lines"></div><p class="hint">${esc(t('rs.linesHelp'))}</p></div>
+      <div class="pane"><h3 class="form-sec">${esc(t('rs.lines'))}</h3><div id="f-lines"></div><p class="hint xp">${esc(t('rs.linesHelp'))}</p></div>
     </div>`, async () => {
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), enabled: fchk('f-enabled'),

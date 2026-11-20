@@ -91,9 +91,9 @@ function qsItems() {
     { ok: !!s.certExists, page: 'cert', text: s.certExists && s.certSelfSigned ? t('qs.certSelf') : t('qs.cert'), opt: false },
     { ok: (s.lines || 0) > 0, page: 'lines', text: t('qs.lines'), opt: false },
     { ok: (s.users || 0) > 0, page: 'users', text: t('qs.users'), opt: false },
-    { ok: !!s.domain, page: 'settings', text: t('qs.domain'), opt: true },
+    { ok: !!s.domain, page: 'settings', at: 'set-webDomain', text: t('qs.domain'), opt: true },
     { ok: (s.upstreams || 0) > 0, page: 'upstreams', text: t('qs.upstreams'), opt: true },
-    { ok: !!s.tgEnabled, page: 'settings', text: t('qs.telegram'), opt: true },
+    { ok: !!s.tgEnabled, page: 'settings', at: 'set-tgEnabled', text: t('qs.telegram'), opt: true },
     { ok: (s.nodes || 0) > 1, page: 'nodes', text: t('qs.nodes'), opt: true },
     { ok: (s.plans || 0) > 0, page: 'plans', text: t('qs.plans'), opt: true },
   ];
@@ -109,8 +109,8 @@ function quickStart() {
     const list = todo.slice().sort((a, b) => a.opt - b.opt);
     return `<section class="card quickstart span-all">
       <div class="card-head"><h2>${esc(t('qs.title'))} <span class="h-count">${esc(t('qs.progress', { done: items.length - todo.length, total: items.length }))}</span></h2><button class="btn ghost sm icon" data-act="dash.hideQs" title="${esc(t('qs.hide'))}" aria-label="${esc(t('qs.hide'))}"><i class="i i-x"></i></button></div>
-      <p class="hint">${esc(t('qs.help'))}</p>
-      <ol class="qs-list">${list.map(i => `<li><span class="qs-mark">○</span><a href="#/${i.page}">${esc(i.text)}</a>${i.opt ? `<span class="badge">${esc(t('qs.optional'))}</span>` : ''}</li>`).join('')}</ol>
+      <p class="hint xp">${esc(t('qs.help'))}</p>
+      <ol class="qs-list">${list.map(i => `<li><span class="qs-mark">○</span><a href="#/${i.page}"${i.at ? ` data-act="go.setting" data-id="${i.at}"` : ''}>${esc(i.text)}</a>${i.opt ? `<span class="badge">${esc(t('qs.optional'))}</span>` : ''}</li>`).join('')}</ol>
     </section>`;
   }
   const opt = hidden ? [] : todo;
@@ -118,7 +118,7 @@ function quickStart() {
   if (!opt.length && !star) return '';
   return `<section class="card qs-done span-all" id="star-card">
     <span class="qs-ok"><i class="i i-check"></i> <b>${esc(t('qs.doneTitle'))}</b>${opt.length ? ` <span class="muted small">${esc(t('qs.alsoCan'))}</span>` : ''}</span>
-    ${opt.length ? `<span class="qs-opt">${opt.slice(0, 3).map(i => `<a class="chip" href="#/${i.page}" title="${esc(i.text)}">${esc(i.text.split(/[((::]/)[0].trim())}</a>`).join('')}${opt.length > 3 ? `<span class="muted small">${esc(t('qs.moreN', { n: opt.length, more: opt.length - 3 }))}</span>` : ''}</span>` : ''}
+    ${opt.length ? `<span class="qs-opt">${opt.slice(0, 3).map(i => `<a class="chip" href="#/${i.page}"${i.at ? ` data-act="go.setting" data-id="${i.at}"` : ''} title="${esc(i.text)}">${esc(i.text.split(/[((::]/)[0].trim())}</a>`).join('')}${opt.length > 3 ? `<span class="muted small">${esc(t('qs.moreN', { n: opt.length, more: opt.length - 3 }))}</span>` : ''}</span>` : ''}
     <span class="grow"></span>
     ${star ? `<a class="btn primary sm" href="${esc(s.repo)}" target="_blank" rel="noopener" data-act="dash.starGo" title="${esc(t('star.text'))}"><i class="i i-star"></i>${esc(t('star.btn'))}</a>` : ''}
     <button class="btn ghost sm icon" data-act="dash.doneHide" title="${esc(t('star.dismiss'))}" aria-label="${esc(t('star.dismiss'))}"><i class="i i-x"></i></button>
@@ -148,7 +148,7 @@ export async function render(el) {
       <div class="seg" id="dash-range">${[1, 6, 24, 168].map(h => `<button data-act="dash.range" data-id="${h}" class="${h === range ? 'active' : ''}">${esc(t('dash.range.' + (h === 168 ? '7d' : h + 'h')))}</button>`).join('')}</div>`, `<div id="dash-chart">${loading()}</div>`)}
     ${card('dash-health', '', `<h2>${esc(t('dash.health'))}${scopeTag(node ? t('dash.scope.local') : '')}</h2>${node ? '' : `<button class="btn sm" data-act="dash.healthRun">${esc(t('dash.healthRun'))}</button>`}`, `<div id="dash-health">${loading()}</div>`)}
     ${card('dash-online', '', `<h2>${esc(t('dash.onlineList'))}${scopeTag(node ? t('dash.scope.local') : '')} <span class="h-count" id="dash-online-n"></span></h2><input type="search" class="sm dash-q" id="dash-online-q" placeholder="${esc(t('dash.online.search'))}" value="${esc(onlineQ)}" hidden>`, `<div id="dash-online"></div>`)}
-    ${card('dash-conns', 'span-2', `<h2>${esc(t('dash.recentConns'))} <span class="help-tip" id="dash-conns-help" title="${esc(t('dash.recentConnsHelp'))}">?</span></h2><span id="dash-conn-seg"></span><input type="search" class="sm dash-q" id="dash-conn-q" placeholder="${esc(t('dash.conn.search'))}" value="${esc(connQ)}" hidden><button class="btn sm" data-act="dash.connsRefresh">${esc(t('common.refresh'))}</button>`, `<div id="dash-conns">${loading()}</div>`)}
+    ${card('dash-conns', 'span-2', `<h2>${esc(t('dash.recentConns'))}</h2><span class="xp xp-always" id="dash-conns-help">${esc(t('dash.recentConnsHelp'))}</span><span id="dash-conn-seg"></span><input type="search" class="sm dash-q" id="dash-conn-q" placeholder="${esc(t('dash.conn.search'))}" value="${esc(connQ)}" hidden><button class="btn sm" data-act="dash.connsRefresh">${esc(t('common.refresh'))}</button>`, `<div id="dash-conns">${loading()}</div>`)}
     ${card('dash-top', '', `<h2>${esc(t('dash.topUsers'))}${scopeTag(allScope)}</h2>
       <div class="seg" id="dash-toprange">${[24, 168, 720].map(h => `<button data-act="dash.toprange" data-id="${h}" class="${h === topHours ? 'active' : ''}">${esc(t('dash.range.' + (h === 24 ? '24h' : h === 168 ? '7d' : '30d')))}</button>`).join('')}</div>`, `<div id="dash-top">${loading()}</div>`)}
     ${card('dash-audit', '', `<h2>${esc(t('dash.recentAudit'))}<a class="h-link" href="#/logs?tab=audit">${esc(t('dash.audit.viewAll'))}</a></h2><div class="seg sm" id="dash-audit-seg">${[['human', t('dash.audit.human')], ['all', t('common.all')]].map(([k, v]) => `<button data-act="dash.auditScope" data-id="${k}" class="${k === auditScope ? 'active' : ''}">${esc(v)}</button>`).join('')}</div>`, `<div id="dash-audit">${loading()}</div>`,
@@ -800,7 +800,7 @@ function renderConns() {
   if (!all.length) { setHTML(el, empty(t('dash.noConns')) + oldNote); return; }
   const failed = connF === 'failed';
   // 「握手失败」这一页最上面一句话说清它通常是什么:不点那个问号也知道这不一定是故障(细的在问号的悬停里)
-  const failNote = failed ? `<p class="hint small conns-why">${esc(t('dash.failsWhy'))}</p>` : '';
+  const failNote = failed ? `<p class="hint small conns-why xp">${esc(t('dash.failsWhy'))}</p>` : '';
   let list = connF === 'rejected' ? rej : failed ? fails : ok;
   if (!list.length) { setHTML(el, empty(connF === 'rejected' ? t('dash.conn.noRejected', { n: ok.length }) : failed ? t('dash.conn.noFailed') : t('dash.noConns')) + oldNote); return; }
   const mob = narrow();

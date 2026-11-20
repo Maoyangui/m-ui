@@ -19,7 +19,7 @@ stub('app.js', `export const state = globalThis.__state; export async function l
 stub('api.js', `export const SLOW = {}; export const get = async () => ({}); export const post = get; export const put = get; export const del = get;`);
 stub('i18n.js', `export const t = (k) => k;`);
 stub('errmsg.js', `export const trErr = (m) => m;`);
-stub('ui.js', `export const esc = (s) => String(s ?? ''); export const toast = () => {}; export const confirm = async () => true;
+stub('ui.js', `export const keep = (s) => s; export const openSettingsAt = () => {}; export const esc = (s) => String(s ?? ''); export const toast = () => {}; export const confirm = async () => true;
 export const openModal = () => {}; export const registerActions = () => {}; export const badge = (s) => String(s); export const dot = () => '';
 export const field = () => ''; export const fieldBox = () => ''; export const check = () => ''; export const empty = () => ''; export const fv = (id) => (globalThis.__fv || {})[id] ?? '';
 export const fchk = () => true; export const matches = () => true; export const debounce = (f) => f; export const setHTML = () => {};

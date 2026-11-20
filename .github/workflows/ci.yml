@@ -88,6 +88,8 @@ jobs:
         run: node --test web/jstest/snfold.test.mjs
       - name: Frontend (relay sources are not counted as a user's devices)
         run: node --test web/jstest/relayip.test.mjs
+      - name: Frontend (interface settings, hidden sidebar sections and concise mode)
+        run: node --test web/jstest/uiprefs.test.mjs
       # 上面是一个文件一步(哪一块挂了一眼看得出)。新加的测试文件忘了在这里接一步的话它就永远不跑
       # (api.test.mjs 从 v0.8.0 起就是这样),所以这一步核对:web/jstest 下每个测试文件都在本文件里有它的那一步。
       - name: Frontend (every test file under web/jstest has its step above)
