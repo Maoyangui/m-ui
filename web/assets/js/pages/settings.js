@@ -260,9 +260,9 @@ function uiCard(gk) {
         <div class="set-row bool ui-row"><div class="set-info"><span class="set-label" id="ui-nav-label">${t('set.uiNav')}</span><p class="set-help xp">${esc(t('set.uiNavHelp'))}</p></div>
           <div class="set-ctl ui-ctl"><span class="ui-nav-sum" id="ui-nav-sum"></span><button class="btn sm ui-nav-btn" type="button" id="ui-nav-btn" aria-haspopup="dialog" aria-expanded="false" aria-describedby="ui-nav-sum">${ICONS.sidebar || ''}<span>${t('set.uiNavPick')}</span></button></div></div>
         <div class="set-row bool ui-row"><div class="set-info"><span class="set-label" id="ui-mode-label">${t('set.uiMode')}</span><p class="set-help xp">${esc(t('set.uiModeHelp'))}</p></div>
-          <div class="set-ctl ui-ctl"><div class="seg" role="radiogroup" aria-labelledby="ui-mode-label" id="ui-mode">
-            <button type="button" role="radio" data-mode="full" class="${concise ? '' : 'active'}" aria-checked="${!concise}">${t('set.uiModeFull')}</button>
-            <button type="button" role="radio" data-mode="concise" class="${concise ? 'active' : ''}" aria-checked="${concise}">${t('set.uiModeConcise')}</button></div></div></div>
+          <div class="set-ctl ui-ctl"><div class="seg" role="group" aria-labelledby="ui-mode-label" id="ui-mode">
+            <button type="button" data-mode="full" class="${concise ? '' : 'active'}" aria-pressed="${!concise}">${t('set.uiModeFull')}</button>
+            <button type="button" data-mode="concise" class="${concise ? 'active' : ''}" aria-pressed="${concise}">${t('set.uiModeConcise')}</button></div></div></div>
       </div>
     </section>`;
 }
@@ -271,14 +271,18 @@ const navSum = () => {
   const n = navHidden(state.settings).size;
   return n ? t('set.uiNavSome', { n }) : t('set.uiNavAll');
 };
-let uiSaveTimer = 0, uiSaving = Promise.resolve();
-// saveUI 存界面的一项:先在本页生效(state.settings 改了、侧栏和简洁模式跟着变),再存;存失败就按服务器上的值改回来
+let uiSaveTimer = 0, uiSaving = Promise.resolve(), uiPending = {};
+// saveUI 存界面的一项:先在本页生效(state.settings 改了、侧栏和简洁模式跟着变),再存;存失败就按服务器上的值改回来。
+// 还没发出去的几项攒在一起发:勾完栏目(等 0.4 秒再存)紧接着切简洁模式,两项都要存上,不能后一项把前一项的计时冲掉
 function saveUI(key, value, delay = 0) {
   state.settings[key] = value;
+  uiPending[key] = value;
   applyUIPrefs();
   clearTimeout(uiSaveTimer);
   uiSaveTimer = setTimeout(() => {
-    uiSaving = uiSaving.then(() => post('settings', { [key]: state.settings[key] })).catch(async e => {
+    const body = uiPending;
+    uiPending = {};
+    uiSaving = uiSaving.then(() => post('settings', body)).catch(async e => {
       toast(trErr(e.message), 'err');
       await load('settings').catch(() => {});
       syncUI();
@@ -293,7 +297,7 @@ function syncUI() {
   document.querySelectorAll('#ui-mode button').forEach(b => {
     const on = (b.dataset.mode === 'concise') === concise;
     b.classList.toggle('active', on);
-    b.setAttribute('aria-checked', String(on));
+    b.setAttribute('aria-pressed', String(on));
   });
   const pop = document.getElementById('ui-nav-pop');
   if (pop) {

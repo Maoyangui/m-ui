@@ -2776,7 +2776,7 @@ const en = {
   'set.uiModeHelp': 'Detailed: descriptions appear under each title. Concise: they fold into a "?" next to the title; hover to read it, click to pin it. Warnings, status and errors always show.',
   'qh.label': 'About this',
   'set.g.multi': 'Multi-server', 'set.g.panel': 'Panel & alerts', 'set.g.sub': 'Subscriptions', 'set.g.check': 'Checks & data plane',
-  'ha.readySumOk': '{n} ready', 'ha.readySumFix': '{n} to fix', 'ha.readySumInfo': '{n} notes',
+  'ha.readySumOk': '{n} ready', 'ha.readySumFix': '{n} to fix', 'ha.readySumInfo': '{n} {n|note|notes}',
   'set.attn': 'Dashboard alerts', 'set.attnMute': 'Show these under “Needs attention” on the dashboard',
   'set.attnMuteHelp': 'Unticked kinds no longer appear on the dashboard (nor in the certificate and mainland reachability bars at the top). Their own pages still show them, and Telegram notifications have their own switches above. Alerts about the panel failing to load its own data cannot be turned off.',
   'set.attnOff': 'Off: {list}', 'set.attnAllOn': 'All on', 'attn.g.server': 'Servers and this panel', 'attn.g.net': 'Network and checks', 'attn.g.other': 'Certificates, resellers and backups',

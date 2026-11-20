@@ -676,7 +676,7 @@ function readyDots(list) {
   const n = lv => list.filter(ch => ch.level === lv).length;
   const fix = n('warn') + n('bad');
   const sum = [t('ha.readySumOk', { n: n('ok') }), fix ? t('ha.readySumFix', { n: fix }) : '', n('info') ? t('ha.readySumInfo', { n: n('info') }) : ''].filter(Boolean).join(' · ');
-  return `<div class="ha-dots" role="list">${list.map(ch => `<button type="button" role="listitem" class="qh-dot ha-dot lv-${esc(ch.level)}" data-qh-text="${esc(readyText(ch))}" aria-label="${esc(readyText(ch))}"></button>`).join('')}<span class="ha-dots-sum${fix ? ' bad' : ''}">${esc(sum)}</span></div>`;
+  return `<div class="ha-dots">${list.map(ch => `<button type="button" class="qh-dot ha-dot lv-${esc(ch.level)}" data-qh-text="${esc(readyText(ch))}" aria-label="${esc(readyText(ch))}"></button>`).join('')}<span class="ha-dots-sum${fix ? ' bad' : ''}">${esc(sum)}</span></div>`;
 }
 
 // renderHASettings 设置页里的「主机容灾」卡片(只在主机上;副机上说明一句到主机改,并显示本机的备用公钥指纹)。
