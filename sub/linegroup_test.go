@@ -314,7 +314,7 @@ func TestClashLineGroupNameClash(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		body, err := BuildClashFor(user, c.lines, c.entries, c.tmpl, c.notice, c.external, nil)
+		body, err := BuildClashFor(user, c.lines, c.entries, c.tmpl, c.notice, c.external, nil, true)
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
@@ -339,7 +339,7 @@ func TestClashLineGroupKeepsNameOverExternal(t *testing.T) {
 		{"name": "hy", "type": "trojan", "server": "198.51.100.1", "port": 443, "password": "p", "sni": "x.example.com"},
 	}}}
 	for _, external := range [][]ExtItem{ext, nil} {
-		body, err := BuildClashFor(fullUser(), lines, twoServers, "", "", external, nil)
+		body, err := BuildClashFor(fullUser(), lines, twoServers, "", "", external, nil, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -383,7 +383,7 @@ func TestLineGroupNamesSameInClashAndSingBox(t *testing.T) {
 		{"普通", []model.Line{tj(1, "香港", 1001), tj(2, "日本", 1002)}, nil, []string{"香港", "日本"}},
 	}
 	for _, c := range cases {
-		body, err := BuildClashFor(user, c.lines, twoServers, "", "", c.external, nil)
+		body, err := BuildClashFor(user, c.lines, twoServers, "", "", c.external, nil, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -408,7 +408,7 @@ func TestClashTemplateLineGroup(t *testing.T) {
 	lines := []model.Line{{Id: 1, Name: "hy", Protocol: "trojan", Port: 1001, Tls: cert, Enabled: true}}
 	build := func(tmpl string) clashDoc {
 		t.Helper()
-		body, err := BuildClashFor(fullUser(), lines, twoServers, tmpl, "", nil, nil)
+		body, err := BuildClashFor(fullUser(), lines, twoServers, tmpl, "", nil, nil, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -499,7 +499,7 @@ func TestLineNameReservedWithoutGroup(t *testing.T) {
 	for _, c := range cases {
 		want := append(append([]string{}, c.own...), extNames...)
 
-		body, err := BuildClashFor(user, c.lines, c.entries, "", "", ext, c.lineNodes)
+		body, err := BuildClashFor(user, c.lines, c.entries, "", "", ext, c.lineNodes, true)
 		if err != nil {
 			t.Fatal(err)
 		}

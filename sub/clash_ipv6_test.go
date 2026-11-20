@@ -24,7 +24,7 @@ func TestClashTemplateIPv6FalseWithV6Nodes(t *testing.T) {
 		}
 		return root["ipv6"]
 	}
-	y, err := BuildClashFor(user, []model.Line{v6}, entries, tmpl, "", nil, nil)
+	y, err := BuildClashFor(user, []model.Line{v6}, entries, tmpl, "", nil, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,12 +33,12 @@ func TestClashTemplateIPv6FalseWithV6Nodes(t *testing.T) {
 	}
 	v4 := v6
 	v4.NodeFamily = nil
-	if y, _ = BuildClashFor(user, []model.Line{v4}, entries, tmpl, "", nil, nil); ipv6Of(y) != false {
+	if y, _ = BuildClashFor(user, []model.Line{v4}, entries, tmpl, "", nil, nil, true); ipv6Of(y) != false {
 		t.Fatalf("没有 IPv6 节点时照模板:\n%s", y)
 	}
 	// 外部节点里的 IPv6 地址同样算
 	ext := []ExtItem{{Name: "e", Clash: []map[string]interface{}{{"name": "ext6", "type": "ss", "server": "2001:db8::e", "port": 8388, "cipher": "aes-128-gcm", "password": "x"}}}}
-	if y, _ = BuildClashFor(user, []model.Line{v4}, entries, tmpl, "", ext, nil); ipv6Of(y) != true {
+	if y, _ = BuildClashFor(user, []model.Line{v4}, entries, tmpl, "", ext, nil, true); ipv6Of(y) != true {
 		t.Fatalf("外部节点是 IPv6 也要打开:\n%s", y)
 	}
 

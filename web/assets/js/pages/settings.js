@@ -70,6 +70,7 @@ const groups = () => [
   ]},
   { id: 'subtmpl', title: t('set.subTmpl'), masterOnly: true, extra: `<div class="row" style="margin-top:.6rem;flex-wrap:wrap"><button class="btn sm" data-act="set.tmplDefault" data-id="clash">${t('set.tmplFillClash')}</button><button class="btn sm" data-act="set.tmplDefault" data-id="singbox">${t('set.tmplFillSingbox')}</button></div>`, fields: [
     ['subAutoFormat', t('set.subAutoFormat'), 'boolOn', t('set.subAutoFormatHelp')],
+    ['subClashDefaultGroups', t('set.subClashDefaultGroups'), 'boolOn', t('set.subClashDefaultGroupsHelp')],
     ['subClashExt', t('set.subClashExt'), 'code', t('set.subClashExtHelp')],
     ['subSingboxExt', t('set.subSingboxExt'), 'code', t('set.subSingboxExtHelp')],
   ]},

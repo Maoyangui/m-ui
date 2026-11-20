@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/render"
 
 	"gopkg.in/yaml.v3"
@@ -37,13 +38,14 @@ func BuildClash(user model.User, lines []model.Line, entries []Entry, template, 
 }
 
 // BuildClashFull 生成一个用户的 clash 订阅 YAML,外部节点追加在本站节点之后并加入 Proxy/Auto 组。
-// notice 为可选的顶部提示节点名(如流量提示);为空则不注入。
+// notice 为可选的顶部提示节点名(如流量提示);为空则不注入。默认生成 Proxy/Auto(见 BuildClashFor)。
 func BuildClashFull(user model.User, lines []model.Line, entries []Entry, template, notice string, external []ExtItem) (string, error) {
-	return BuildClashFor(user, lines, entries, template, notice, external, nil)
+	return BuildClashFor(user, lines, entries, template, notice, external, nil, true)
 }
 
 // BuildClashFor 同 BuildClashFull,但按 lineNodes(线路 → 允许的服务器,缺省 = 全部)过滤入口。
-func BuildClashFor(user model.User, lines []model.Line, entries []Entry, template, notice string, external []ExtItem, lineNodes map[uint]map[uint]bool, hides ...LineHides) (string, error) {
+// genDefaultGroups 为 false 时不再强制生成 Proxy/Auto(设置 subClashDefaultGroups,见 defaultGroups)。
+func BuildClashFor(user model.User, lines []model.Line, entries []Entry, template, notice string, external []ExtItem, lineNodes map[uint]map[uint]bool, genDefaultGroups bool, hides ...LineHides) (string, error) {
 	hide := hidesOf(hides)
 	base := template
 	if base == "" {
@@ -179,9 +181,17 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 	}
 	selectList = append(selectList, "Auto")
 	selectList = append(selectList, topNames...)
-	groups := []interface{}{
-		map[string]interface{}{"name": "Proxy", "type": "select", "proxies": selectList},
-		map[string]interface{}{"name": "Auto", "type": "url-test", "url": "http://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50, "proxies": proxyNames},
+	// 开关(subClashDefaultGroups,默认开)关着时不再强制生成 Proxy/Auto:模板作者已经
+	// 自己写了策略组与规则,生成的两个组只会多余(有些客户端的全局模式下 hidden 也藏不住组,
+	// 模板里加 hidden 治标不治本)。但模板还引用着它们时,被引用的那个照旧生成并记一条警告,
+	// 免得订阅悬空、客户端整份拒收;Proxy 的选单里列着 Auto,生成 Proxy 时 Auto 也得跟着。
+	genProxy, genAuto := defaultGroups(genDefaultGroups, root, tmplGroups, proxies)
+	groups := []interface{}{} // 空 slice:一个组都不生成时订阅里写 proxy-groups: [],而不是 null
+	if genProxy {
+		groups = append(groups, map[string]interface{}{"name": "Proxy", "type": "select", "proxies": selectList})
+	}
+	if genAuto {
+		groups = append(groups, map[string]interface{}{"name": "Auto", "type": "url-test", "url": "http://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50, "proxies": proxyNames})
 	}
 	groups = append(groups, lineGroups...)
 	root["proxy-groups"] = mergeClashGroups(groups, root["proxy-groups"])
@@ -193,6 +203,71 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		return "", err
 	}
 	return string(out), nil
+}
+
+// defaultGroups 决定生成哪几个默认策略组。开关开着时 Proxy/Auto 都生成;
+// 关着时只生成模板里被引用到、且模板自己没定义的那个;一个都不用生成时两个都不出。
+func defaultGroups(gen bool, root map[string]interface{}, tmplGroups map[string][]string, proxies []interface{}) (proxy, auto bool) {
+	if gen {
+		return true, true
+	}
+	_, hasProxy := tmplGroups["Proxy"]
+	_, hasAuto := tmplGroups["Auto"]
+	refProxy, refAuto := clashRefs(root, tmplGroups, proxies)
+	proxy = refProxy && !hasProxy
+	auto = (refAuto && !hasAuto) || (proxy && !hasAuto)
+	if proxy || auto {
+		names := []string{}
+		if proxy {
+			names = append(names, "Proxy")
+		}
+		if auto {
+			names = append(names, "Auto")
+		}
+		logger.Warningf("Clash 订阅:默认 Proxy/Auto 策略组已关闭,但模板仍引用 %s,已生成被引用的组以免订阅悬空;请检查模板的规则、策略组与节点的 dialer-proxy", strings.Join(names, "、"))
+	}
+	return proxy, auto
+}
+
+// clashRefs 模板里有没有提到 Proxy / Auto:规则按逗号切字段比对(目标在第 2 或第 3 字段,
+// 嵌套规则的目标也在逗号后,逐字段比最稳;误伤只会多生成,不会悬空);策略组成员与节点的
+// dialer-proxy 直接比名字。模板没写 rules 时后面会补默认规则 MATCH,Proxy,按引用了 Proxy 算。
+func clashRefs(root map[string]interface{}, tmplGroups map[string][]string, proxies []interface{}) (proxy, auto bool) {
+	rules, ok := root["rules"].([]interface{})
+	if !ok {
+		return true, false // 没写规则:后面补默认规则 MATCH,Proxy
+	}
+	for _, r := range rules {
+		s, _ := r.(string)
+		for _, f := range strings.Split(s, ",") {
+			switch strings.TrimSpace(f) {
+			case "Proxy":
+				proxy = true
+			case "Auto":
+				auto = true
+			}
+		}
+	}
+	for _, members := range tmplGroups {
+		for _, m := range members {
+			switch m {
+			case "Proxy":
+				proxy = true
+			case "Auto":
+				auto = true
+			}
+		}
+	}
+	for _, p := range proxies {
+		m, _ := p.(map[string]interface{})
+		switch m["dialer-proxy"] {
+		case "Proxy":
+			proxy = true
+		case "Auto":
+			auto = true
+		}
+	}
+	return proxy, auto
 }
 
 // ClashTemplateDisablesIPv6 Clash 模板顶层写了 ipv6: false:订阅里有 IPv6 节点时生成的配置会把它改成 true,

@@ -52,7 +52,7 @@ var localPrefixes = []string{"hub", "ops", "acme"}
 var globalKeys = setOf(
 	"timezone", "allowPrivate", "blockBT", "supportOnline",
 	"upstreamTestUrl", "upstreamCheckMinutes", "upstreamCheckFailThreshold",
-	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subSingboxExt", "subAutoFormat", "subUpdates",
+	"subProfileTitle", "subEncode", "subShowNotice", "subClashExt", "subClashDefaultGroups", "subSingboxExt", "subAutoFormat", "subUpdates",
 	"subUseUserName", "subPageEnabled", "subPageTitle", "subPageSupport", "subPageNotice", "subShareEnabled",
 	"subPageBuyURL", "subPageBrand", "extRefreshMinutes",
 	// 决定订阅内容的三项(节点地址用域名还是 IP、带不带"允许不安全"、订阅口限速):换主机后用户拿到的订阅要和以前一样

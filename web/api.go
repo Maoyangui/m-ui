@@ -1386,7 +1386,7 @@ var panelSettings = setOf(
 	"webDomain", "timezone", "webListen", "webPort", "webPath", "webCertFile", "webKeyFile", "trustedProxies",
 	"subListen", "subPort", "subPath", "subCertFile", "subKeyFile", "subDomain", "subProfileTitle", "subUpdates",
 	"subUseUserName", "subEncode", "subShowNotice", "subInsecure", "subServerAddr", "extRefreshMinutes",
-	"subAutoFormat", "subClashExt", "subSingboxExt", "blockBT", "supportOnline", "tgBot", "webhookUrl", "webhookSecret",
+	"subAutoFormat", "subClashExt", "subClashDefaultGroups", "subSingboxExt", "blockBT", "supportOnline", "tgBot", "webhookUrl", "webhookSecret",
 	"resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile",
 	"subPageEnabled", "subShareEnabled", "subPageBrand", "subPageTitle", "subPageSupport", "subPageBuyURL", "subPageNotice",
 	"tgEnabled", "tgToken", "tgChatId", "tgProxy", "tgOnLogin", "tgOnUserDisabled", "tgOnUserExpiring", "tgExpiringDays",

@@ -141,7 +141,7 @@ func TestIPv6ServerInOutput(t *testing.T) {
 	if len(links) != 1 || !strings.Contains(links[0], "@[2001:db8::a]:443") {
 		t.Fatalf("分享链接: %v", links)
 	}
-	y, err := BuildClashFor(user, []model.Line{line}, entries, "", "", nil, nil)
+	y, err := BuildClashFor(user, []model.Line{line}, entries, "", "", nil, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestIPv6ServerInOutput(t *testing.T) {
 		t.Fatalf("Clash:\n%s", y)
 	}
 	line.NodeFamily = nil
-	y, err = BuildClashFor(user, []model.Line{line}, entries, "", "", nil, nil)
+	y, err = BuildClashFor(user, []model.Line{line}, entries, "", "", nil, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}

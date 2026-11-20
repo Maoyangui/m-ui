@@ -14,14 +14,17 @@ import (
 
 // Options 控制订阅输出(来自设置)。
 type Options struct {
-	ProfileTitle string  // Profile-Title 头
-	UpdateHours  int     // Profile-Update-Interval
-	Encode       bool    // link 订阅是否 base64
-	ShowNotice   bool    // 是否注入流量提示节点
-	ClashTmpl    string  // 自定义 clash 模板,空=内置
-	SingBoxTmpl  string  // 自定义 sing-box 模板,空=内置
-	LegacyClash  bool    // 客户端是老内核 Clash:它不认识的协议不发(见 format.go)
-	Entries      []Entry // 对外入口(单入口即一条)
+	ProfileTitle string // Profile-Title 头
+	UpdateHours  int    // Profile-Update-Interval
+	Encode       bool   // link 订阅是否 base64
+	ShowNotice   bool   // 是否注入流量提示节点
+	ClashTmpl    string // 自定义 clash 模板,空=内置
+	// ClashDefaultGroups Clash 订阅是否生成默认 Proxy/Auto 策略组(设置 subClashDefaultGroups,默认开)。
+	// 关掉后模板要自己写策略组与规则;模板还引用着它们时被引用的组仍会生成(见 defaultGroups)。
+	ClashDefaultGroups bool
+	SingBoxTmpl        string  // 自定义 sing-box 模板,空=内置
+	LegacyClash        bool    // 客户端是老内核 Clash:它不认识的协议不发(见 format.go)
+	Entries            []Entry // 对外入口(单入口即一条)
 	// Insecure 为 true 时链接带 insecure=1、clash 带 skip-cert-verify:
 	// 服务端用自签证书(纯 IP 无域名)时客户端必须允许不安全才能连上。
 	Insecure bool
@@ -83,7 +86,7 @@ func BuildClashSub(user model.User, lines []model.Line, opt Options) (Result, er
 	if opt.LegacyClash {
 		lines, external = legacyClashOnly(lines, external)
 	}
-	body, err := BuildClashFor(user, lines, opt.Entries, opt.ClashTmpl, notice, external, opt.LineNodes, opt.LineHides)
+	body, err := BuildClashFor(user, lines, opt.Entries, opt.ClashTmpl, notice, external, opt.LineNodes, opt.ClashDefaultGroups, opt.LineHides)
 	if err != nil {
 		return Result{}, err
 	}
