@@ -3,8 +3,8 @@
 // 顶上一串彩灯从左到右点亮再轮流闪,两角冬青;雪地、远山松林、两间木屋(窗户亮起、烟囱冒烟)、路灯;
 // 正中大圣诞树逐层长出、彩带画上、彩球弹出、彩灯闪、星星带光芒点亮、树下礼物;旁边雪人一点点堆起来(雪球、礼帽、围巾、眉眼)再挥手;
 // 雪橇和驯鹿从月亮前飞过(领头的红鼻子发光),拖一串金色星光;三层雪;金色铃铛摇摆,「Merry Xmas」金箔字逐字浮现,
-// 「guys」写在展开的红丝带上,最后一行小字祝福。点开时浏览器自己合成一段《Jingle Bells》铃声(不加载任何外部文件),右上角可静音、记住选择。
-// 整体出场是浮现、消失是隐退;约 12 秒后自动隐退,右上角 ×、点空白处、按 Esc 都能提前关。
+// 「guys」写在展开的红丝带上,最后一行小字祝福。点开时放一段圣诞音乐(xmas.mp3,按节奏裁到一个完整乐句、和画面一样长,点开彩蛋时才取),
+// 右上角可静音、记住选择。整体出场是浮现、消失是隐退;约 12 秒后自动隐退(音乐同时淡出),右上角 ×、点空白处、按 Esc 都能提前关。
 // 到 12 月 31 日为止(按浏览器本地日期),过了自动不显示;以后每年 12 月也会出现。
 // 自带样式,不依赖 style.css:删掉这个文件和 app.js 里的引用就干净了。
 // 系统设了「减少动态效果」(手机上很常见)也照样一样一样出场:这段是点了才放的,本来就是来看动画的,随时能关;
@@ -329,40 +329,47 @@ const ribbon = (text) => `<svg class="xm-ribbon" viewBox="0 0 260 64" aria-hidde
   <text x="130" y="36" text-anchor="middle" font-family="Trebuchet MS, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="6" fill="#fff8e7">${text}</text>
 </svg>`;
 
-// 合成铃声:《Jingle Bells》副歌第一句(钟声音色:基频加两个泛音、快起慢落),雪橇飞过时加一串雪橇铃。不加载任何文件;
-// 浏览器只在点击之后才允许出声,而它本来就是点出来的。返回 AudioContext,关的时候 close 掉
-function jingle() {
+// 音乐:xmas.mp3(用户 11-21 给的一段圣诞音乐)。原曲约 17 秒,比画面长;按节奏裁过:约 84.5 BPM、一小节约 2.84 秒,
+// 前四小节(到 11.58 秒)是一个完整乐句,文件只留到 12.59 秒,播放时从 11.6 秒淡出、12.45 秒静音 —— 在乐句结束、下一句重拍落下时收尾,
+// 和画面约 12.5 秒的隐退对齐(分析见 .tmp/work/tools/audio-analyze.mjs 的输出,记在 NEXT2_CHANGELOG)。只在点开彩蛋时才取 —— 鼠标移到小树上、小树得到焦点时就先取,
+// 点开时多半已经取好了;取过一次就留着(同一页面里再点不再取)。用 Web Audio 解码播放:开头淡入、关掉时淡出
+// (iOS 上 <audio> 的音量改不了,淡入淡出只能这样做);浏览器只在点击之后才允许出声,而它本来就是点出来的。
+// 返回 { close() };offset:从第几秒开始(中途打开声音时接着放)
+const MUSIC_VOL = 0.55, FADE_FROM = 11.6, FADE_TO = 12.45;
+let mp3 = null;
+const fetchMusic = () => (mp3 ||= fetch('xmas.mp3').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).catch(e => { mp3 = null; throw e; }));
+function music(offset = 0) {
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
   let ac;
   try { ac = new AC(); } catch { return null; }
   if (ac.state === 'suspended' && ac.resume) ac.resume().catch(() => {});
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
-  const master = ac.createGain();
-  master.gain.value = 0.14;
-  master.connect(ac.destination);
-  const bell = (t, f, dur) => {
-    for (const [m, g] of [[1, .55], [2.76, .2], [5.4, .08]]) {
-      const o = ac.createOscillator(), e = ac.createGain();
-      o.type = 'sine'; o.frequency.value = f * m;
-      e.gain.setValueAtTime(0, t); e.gain.linearRampToValueAtTime(g, t + .008); e.gain.exponentialRampToValueAtTime(.0005, t + dur);
-      o.connect(e); e.connect(master); o.start(t); o.stop(t + dur + .05);
-    }
+  const gain = ac.createGain();
+  gain.gain.value = 0;
+  gain.connect(ac.destination);
+  let done = false;
+  fetchMusic().then(buf => ac.decodeAudioData(buf.slice(0))).then(track => { // slice:解码会占用传进去的那份,缓存的那份要留着
+    if (done || offset >= FADE_TO - 0.3) return;
+    const node = ac.createBufferSource();
+    node.buffer = track;
+    node.connect(gain);
+    const t = ac.currentTime;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(MUSIC_VOL, t + (offset ? 0.6 : 0.25));
+    // 乐句结束处淡出(按曲子里的时间换算成从现在算起)
+    gain.gain.setValueAtTime(MUSIC_VOL, t + Math.max(0.6, FADE_FROM - offset));
+    gain.gain.linearRampToValueAtTime(0, t + Math.max(0.9, FADE_TO - offset));
+    node.start(t, offset);
+  }).catch(() => { /* 取不到、解码不了就没有声音,彩蛋照常 */ });
+  return {
+    close(fade = 0.8) {
+      if (done) return Promise.resolve();
+      done = true;
+      try { const t = ac.currentTime; gain.gain.cancelScheduledValues(t); gain.gain.setValueAtTime(gain.gain.value, t); gain.gain.linearRampToValueAtTime(0, t + fade); } catch {}
+      return new Promise(res => setTimeout(() => { ac.close().catch(() => {}).finally(res); try { if (navigator.audioSession) navigator.audioSession.type = 'auto'; } catch {} }, fade * 1000 + 80));
+    },
   };
-  const N = { C5: 523.25, D5: 587.33, E5: 659.25, G5: 783.99 };
-  const seq = [['E5', 1], ['E5', 1], ['E5', 2], ['E5', 1], ['E5', 1], ['E5', 2], ['E5', 1], ['G5', 1], ['C5', 1.5], ['D5', .5], ['E5', 4]];
-  let t = ac.currentTime + .2;
-  const beat = .27;
-  for (const [n, len] of seq) { bell(t, N[n], Math.max(.6, len * beat * 2.4)); t += len * beat; }
-  // 雪橇铃:短促的带通噪声,一串
-  const buf = ac.createBuffer(1, Math.floor(ac.sampleRate * .07), ac.sampleRate), ch = buf.getChannelData(0);
-  for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * (1 - i / ch.length) ** 2;
-  for (let k = 0; k < 14; k++) {
-    const src = ac.createBufferSource(), bp = ac.createBiquadFilter(), g = ac.createGain();
-    src.buffer = buf; bp.type = 'bandpass'; bp.frequency.value = 5200 + Math.random() * 3000; bp.Q.value = 9; g.gain.value = .35;
-    src.connect(bp); bp.connect(g); g.connect(master); src.start(ac.currentTime + 2.7 + k * .12 + Math.random() * .04);
-  }
-  return ac;
 }
 const MUTE_KEY = 'mui-xmas-mute';
 const getMute = () => { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch { return false; } };
@@ -387,10 +394,13 @@ export function mountXmasEgg(target) {
   b.setAttribute('aria-label', 'Merry Xmas'); // 不加悬停提示:面板里不介绍彩蛋,点了才知道
   b.innerHTML = MINI;
   b.addEventListener('click', () => playXmas(b));
+  const warm = () => { if (!getMute()) fetchMusic().catch(() => {}); };
+  b.addEventListener('pointerenter', warm, { once: true });
+  b.addEventListener('focus', warm, { once: true });
   target.prepend(b);
 }
 
-// playXmas 放一遍;origin 是星光炸开的位置(按钮)。约 12 秒后自动隐退,×、点空白处、Esc 都能提前关;静音键切换铃声并记住。
+// playXmas 放一遍;origin 是星光炸开的位置(按钮)。约 12 秒后自动隐退(音乐同时淡出),×、点空白处、Esc 都能提前关;静音键切换音乐并记住。
 export function playXmas(origin) {
   injectCSS();
   if (document.querySelector('.xmas-show')) return;
@@ -402,7 +412,7 @@ export function playXmas(origin) {
   box.setAttribute('role', 'dialog');
   box.setAttribute('aria-label', 'Merry Xmas guys');
   const letters = [...'Merry Xmas'].map((c, i) => c === ' ' ? '<span class="sp"></span>' : `<span style="animation-delay:${(2.6 + i * 0.08).toFixed(2)}s, ${(3.6 + i * 0.08).toFixed(2)}s">${c}</span>`).join('');
-  const wish = zh ? '祝你线路畅通,节点常绿 🎄' : 'May your lines run fast and your nodes stay evergreen 🎄';
+  const wish = zh ? '愿你平安喜乐,新年快乐 🎄' : 'Peace, joy and a happy new year 🎄';
   let muted = getMute();
   box.innerHTML = `<canvas class="xm-back"></canvas>${landSVG()}${lightsSVG()}${hollySVG('l')}${hollySVG('r')}
     <div class="xmas-stage">
@@ -415,14 +425,17 @@ export function playXmas(origin) {
     <button type="button" class="xmas-mute" aria-label="${zh ? '声音' : 'Sound'}" title="${zh ? '声音开 / 关' : 'Sound on / off'}">${muted ? MUTED : SPEAKER}</button>
     <button type="button" class="xmas-x" aria-label="${zh ? '关闭' : 'Close'}" title="${zh ? '关闭' : 'Close'}">×</button>`;
   document.body.appendChild(box);
-  let audio = muted ? null : jingle();
+  const opened = performance.now();
+  const sinceOpen = () => performance.now() - opened;
+  let audio = muted ? null : music();
   const muteBtn = box.querySelector('.xmas-mute');
   muteBtn.addEventListener('click', e => {
     e.stopPropagation();
     muted = !muted;
     setMute(muted);
     muteBtn.innerHTML = muted ? MUTED : SPEAKER;
-    if (muted && audio) { audio.close().catch(() => {}); audio = null; } else if (!muted && !audio) audio = jingle();
+    if (muted && audio) { audio.close(0.25); audio = null; }
+    else if (!muted && !audio) audio = music(sinceOpen() / 1000); // 打开声音:从现在的进度接着放
   });
 
   const back = box.querySelector('.xm-back'), front = box.querySelector('.xm-front');
@@ -551,7 +564,7 @@ export function playXmas(origin) {
     if (closed) return;
     closed = true;
     box.classList.add('out');
-    if (audio) { const a = audio; audio = null; setTimeout(() => { a.close().catch(() => {}); try { if (navigator.audioSession) navigator.audioSession.type = 'auto'; } catch {} }, 900); }
+    if (audio) { const a = audio; audio = null; a.close(0.8); } // 音乐淡出,和画面隐退一起
     setTimeout(() => { cancelAnimationFrame(raf); window.removeEventListener('resize', size); document.removeEventListener('keydown', esc); box.remove(); }, 1350);
   };
   box.addEventListener('click', close); // 点空白处、点 ×、按 Esc 都能关
