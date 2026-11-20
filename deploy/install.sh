@@ -348,6 +348,9 @@ firewall_step() {
         wait=15
         echo "  (这次是经 sudo 的管道运行的,键盘输入可能传不进来:$wait 秒内没有回答就按放开算;想保留,装完执行 m-ui firewall undo 即可恢复)"
       fi
+      # 先丢掉之前留在输入缓冲里的按键(粘贴命令时多带的换行、等着装完时按过的回车):不然下面一读就读到它,
+      # 而「直接回车 = 放开」,等于替人答了放开(用户 11-21 在 Oracle Ubuntu 24.04 上遇到过)。逐个字符读,0.2 秒内没有新的就停
+      while IFS= read -r -s -t 0.2 -n 1 _ </dev/tty 2>/dev/null; do :; done
       while :; do
         printf "[Y/n]: "
         ans=""
