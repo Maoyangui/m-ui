@@ -556,7 +556,7 @@ function demoSubLogs(query) {
   const users = S.users.map(u => u.name), u = i => users[i % Math.max(1, users.length)] || 'demo';
   const rows = [
     [40, u(0), '203.0.113.5', 'clash-verge/v2.4.2', 'clash', 200], [95, u(1), '192.0.2.44', 'Shadowrocket/2.2.60 (iPhone; iOS 18.5)', 'link', 200],
-    [180, u(0), '198.51.100.7', 'godusevpn/0.8.0 (Windows)', 'json', 200], [320, u(2), '203.0.113.61', 'SFA/1.12.4 (Build 512; sing-box 1.12.4; language zh_CN)', 'json', 200],
+    [180, u(0), '198.51.100.7', 'godusevpn/0.8.1 (Windows)', 'json', 200], [320, u(2), '203.0.113.61', 'SFA/1.12.4 (Build 512; sing-box 1.12.4; language zh_CN)', 'json', 200],
     [610, u(3), '198.51.100.23', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', 'page', 200],
     [1250, '-', '203.0.113.199', '404 ×37(4 分钟内,最近 /sub/3f9a…c21)', 'miss', 404],
     [1900, u(1), '192.0.2.44', 'Stash/3.1.0 Clash/1.19.0', 'clash', 200], [2600, u(4), '198.51.100.88', 'ClashMetaForAndroid/2.11.12.Meta', 'clash-share', 200],
