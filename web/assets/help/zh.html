@@ -1282,7 +1282,8 @@
   <section class="sec" id="set-panel">
     <h3>角色与面板</h3>
     <ul>
-      <li><b data-k="set.role">角色</b>:<b data-k="set.roleSwitch">作为副服务器运行</b>(见 <a href="#nodes-add">接入一台副机</a>)。</li>
+      <li><b data-k="set.role">角色</b>:<b data-k="set.roleSwitch">作为副服务器运行</b>(见 <a href="#nodes-add">接入一台副机</a>)。左边的分区导航按用途分了组:多服务器、面板与提醒、订阅与落地页、巡检与数据面。</li>
+      <li><b data-k="set.ui">界面</b>:<b data-k="set.uiNav">侧栏显示的栏目</b> —— 点 <b data-k="set.uiNavPick">选择栏目</b>,去掉勾的栏目不在左边显示(页面和功能都还在,地址直接打开照样能用;<b data-k="nav.settings">设置</b> 一直显示);<b data-k="set.uiMode">说明文字</b> —— <b data-k="set.uiModeFull">详细</b> 把功能说明写在标题下面,<b data-k="set.uiModeConcise">简洁</b> 把说明收进标题旁的「?」(鼠标移上去显示,点一下固定),警告、状态、出错照常显示。两项都是改了马上生效、不用点保存;只管这台面板,代理面板不受影响。</li>
       <li><b data-k="set.panel">面板</b>:<b data-k="set.webDomain">域名</b>(订阅与节点用的域名,也是 TLS 的 SNI)、<b data-k="set.timezone">时区</b>(面板里所有时间按它显示)、<b data-k="set.listen">监听地址</b>、<b data-k="set.port">端口</b>、<b data-k="set.path">路径</b>、<b data-k="set.cert">证书文件</b> / <b data-k="set.key">私钥文件</b>(一般在证书页勾选,自动写入)、<b data-k="set.trustedProxies">受信任的反向代理</b>(见<a href="#sec-path">面板地址与端口</a>)、<b data-k="set.supportOnline">功德箱与在线设备数</b>。</li>
       <li>改面板路径保存就生效,浏览器自动跳到新地址;改端口、监听地址、证书要重启。</li>
       <li>端口设成 443(HTTPS)或 80(HTTP)时,地址里不用写端口;面板和订阅不能用同一个端口。</li>
