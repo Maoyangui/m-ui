@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -47,7 +48,7 @@ const (
 	fwAllowedKey   = "fwAllowed"   // 本机系统防火墙里由 m-ui 加的放行(fw.Allowed 的 JSON)
 	fwAutoAllowKey = "fwAutoAllow" // 系统防火墙开着时自动放行 m-ui 用到的端口;只有明确设成 false 才不放
 	fwAutoBanKey   = "fwAutoBan"   // 自动拉黑;默认关,设成 true 才开
-	fwPausedKey    = "fwPaused"    // 本机暂停面板规则(命令行的退路);true = 这台不落拉黑、只允许这两种规则
+	fwPausedKey    = "fwPaused"    // 本机暂停面板规则(命令行的退路);true = 这台不落拉黑、只允许这两种规则;别的值都算没暂停(见 fwPausedValue)
 	fwPeersKey     = "fwPeers"     // 副机:主机最近是从哪些地址连过来的(JSON 数组,最多 4 个)
 	fwMaxPeers     = 4
 )
@@ -310,7 +311,8 @@ func (r *Runner) fwTick(force bool) model.FwState {
 	}
 	ports := r.fwPorts()
 	plan := r.fwPlanNow(now.Unix(), ports)
-	paused := strings.EqualFold(r.setting(fwPausedKey), "true")
+	pausedRaw := r.setting(fwPausedKey)
+	paused := strings.EqualFold(pausedRaw, "true")
 	if paused {
 		plan.rules = nil // 暂停:拉黑、只允许都不落(放行端口不受影响,那不会把人关在门外)
 	}
@@ -321,7 +323,8 @@ func (r *Runner) fwTick(force bool) model.FwState {
 	}
 	hash := fwHash(plan.rules)
 	// 「放开」的记录也算进去:命令行(m-ui firewall open / undo)改了它,下一轮就要重新看系统,不等 5 分钟
-	sig := hash + "|" + fmt.Sprint(want) + "|" + fmt.Sprint(paused, autoAllow, len(ports), plan.count, plan.bad) + "|" + fwSetting(r.db, fwOpenedKey)
+	// 暂停那一项把原值也算进去:命令行每恢复一次存的值都不一样(fwPausedValue),哪怕服务一轮都没赶上「暂停着」,恢复后的这一轮也会重建
+	sig := hash + "|" + fmt.Sprint(want) + "|" + fmt.Sprint(paused, autoAllow, len(ports), plan.count, plan.bad) + "|" + fwSetting(r.db, fwOpenedKey) + "|" + pausedRaw
 
 	r.fw.mu.Lock()
 	fresh := !force && sig == r.fw.sig && now.Sub(r.fw.checked) < fwRecheckEvery
@@ -697,10 +700,20 @@ func FwLocalUndo(dbPath string) (o fw.Opened, did bool, err error) {
 	return o, did, err
 }
 
+// fwPausedValue 设置 fwPaused 里存什么:暂停 = "true";恢复 = 一个每次都不一样的值(只要不是 true 就算没暂停)。
+// 恢复时不存空串:命令行暂停是当场把表撤掉的,要是紧接着就恢复、服务一轮都没赶上,存回空串的话服务看到的设置和撤表之前
+// 一模一样,以为规则还在,要等 fwRecheckEvery 那一次核对才补回去(实机测出来的)。存一个新值,对账的签名变了,下一轮必定重建。
+func fwPausedValue(on bool) string {
+	if on {
+		return "true"
+	}
+	return "resumed-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+}
+
 // FwLocalPause 暂停 / 恢复本机的面板规则。暂停时当场把 m-ui 自己那张表撤掉,不等服务的下一轮。
 func FwLocalPause(dbPath string, on bool) error {
 	return fwLocalDo(dbPath, func(db *gorm.DB) error {
-		if err := saveSettings(db, map[string]string{fwPausedKey: map[bool]string{true: "true", false: ""}[on]}); err != nil {
+		if err := saveSettings(db, map[string]string{fwPausedKey: fwPausedValue(on)}); err != nil {
 			return err
 		}
 		if on {

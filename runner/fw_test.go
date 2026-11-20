@@ -212,6 +212,29 @@ func TestFwTickRules(t *testing.T) {
 		t.Fatalf("恢复后规则应回来: %+v\n%s", st, f.lastScript())
 	}
 
+	// 命令行暂停后马上恢复,服务一轮都没赶上「暂停着」(m-ui firewall pause 是当场把表撤掉的):恢复后的这一轮要把规则补回去。
+	// 以前恢复存回空串,服务看到的设置和撤表之前一模一样,以为规则还在,要等 5 分钟一次的核对才补(实机测出来的)。
+	f.reset()
+	r.fwTick(false)
+	if len(f.with("")) != 0 {
+		t.Fatalf("规则没变不该跑系统命令: %v", f.with(""))
+	}
+	_ = saveSettings(r.db, map[string]string{fwPausedKey: fwPausedValue(true)})  // 命令行暂停(表被它当场撤掉)
+	_ = saveSettings(r.db, map[string]string{fwPausedKey: fwPausedValue(false)}) // 紧接着恢复
+	f.reset()
+	if st = r.fwTick(false); st.Paused || !strings.Contains(f.lastScript(), "203.0.113.9") {
+		t.Fatalf("暂停后马上恢复:这一轮应把规则补回去: %+v\n%s", st, f.lastScript())
+	}
+	// 恢复之后再没动过:又回到不碰系统
+	f.reset()
+	r.fwTick(false)
+	if len(f.with("")) != 0 {
+		t.Fatalf("恢复并重建之后不该每轮都跑系统命令: %v", f.with(""))
+	}
+	if a, b := fwPausedValue(false), fwPausedValue(false); a == "true" || a == "" || strings.EqualFold(a, "true") {
+		t.Fatalf("恢复时存的值不能是 true 或空: %q %q", a, b)
+	}
+
 	// 副机不删到期的规则(主机那份是底),但到期的不再生效
 	_ = r.setSetting("nodeMode", "true")
 	r.db.Create(&model.FwRule{Id: 30, Kind: fw.KindDeny, Sources: "203.0.113.230/32", Enabled: true, Expiry: now - 1})
