@@ -1,9 +1,11 @@
 package sub
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/logger"
@@ -185,7 +187,7 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 	// 自己写了策略组与规则,生成的两个组只会多余(有些客户端的全局模式下 hidden 也藏不住组,
 	// 模板里加 hidden 治标不治本)。但模板还引用着它们时,被引用的那个照旧生成并记一条警告,
 	// 免得订阅悬空、客户端整份拒收;Proxy 的选单里列着 Auto,生成 Proxy 时 Auto 也得跟着。
-	genProxy, genAuto := defaultGroups(genDefaultGroups, root, tmplGroups, proxies)
+	genProxy, genAuto, keepLine := defaultGroups(genDefaultGroups, base, root, tmplGroups, proxies, groupNames)
 	groups := []interface{}{} // 空 slice:一个组都不生成时订阅里写 proxy-groups: [],而不是 null
 	if genProxy {
 		groups = append(groups, map[string]interface{}{"name": "Proxy", "type": "select", "proxies": selectList})
@@ -193,7 +195,11 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 	if genAuto {
 		groups = append(groups, map[string]interface{}{"name": "Auto", "type": "url-test", "url": "http://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50, "proxies": proxyNames})
 	}
-	groups = append(groups, lineGroups...)
+	for i, g := range lineGroups { // 线路测速组:开关关着时只留被引用的(见 defaultGroups)
+		if keepLine[i] {
+			groups = append(groups, g)
+		}
+	}
 	root["proxy-groups"] = mergeClashGroups(groups, root["proxy-groups"])
 	if _, ok := root["rules"]; !ok { // 模板没写规则:Clash 没规则时全部直连,等于没走代理
 		root["rules"] = []string{"GEOIP,Private,DIRECT", "MATCH,Proxy"}
@@ -205,69 +211,145 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 	return string(out), nil
 }
 
-// defaultGroups 决定生成哪几个默认策略组。开关开着时 Proxy/Auto 都生成;
-// 关着时只生成模板里被引用到、且模板自己没定义的那个;一个都不用生成时两个都不出。
-func defaultGroups(gen bool, root map[string]interface{}, tmplGroups map[string][]string, proxies []interface{}) (proxy, auto bool) {
+// defaultGroups 决定生成哪些默认策略组(设置 subClashDefaultGroups)。开关开着时 Proxy、Auto 和各线路测速组都生成;
+// 关着时只生成模板里被引用到、且模板自己没定义的:Proxy 的选单里列着 Auto 和各线路组,生成 Proxy 时它们也得跟着。
+// 关着却还得生成 Proxy / Auto 的,记一条警告(同一份模板、同样的结果只记一次,免得每次拉订阅都刷一条)。
+// keepLine 与 lineNames(线路测速组的名字,和生成顺序一致)一一对应。
+func defaultGroups(gen bool, tmpl string, root map[string]interface{}, tmplGroups map[string][]string, proxies []interface{}, lineNames []string) (proxy, auto bool, keepLine []bool) {
+	keepLine = make([]bool, len(lineNames))
 	if gen {
-		return true, true
-	}
-	_, hasProxy := tmplGroups["Proxy"]
-	_, hasAuto := tmplGroups["Auto"]
-	refProxy, refAuto := clashRefs(root, tmplGroups, proxies)
-	proxy = refProxy && !hasProxy
-	auto = (refAuto && !hasAuto) || (proxy && !hasAuto)
-	if proxy || auto {
-		names := []string{}
-		if proxy {
-			names = append(names, "Proxy")
+		for i := range keepLine {
+			keepLine[i] = true
 		}
-		if auto {
-			names = append(names, "Auto")
-		}
-		logger.Warningf("Clash 订阅:默认 Proxy/Auto 策略组已关闭,但模板仍引用 %s,已生成被引用的组以免订阅悬空;请检查模板的规则、策略组与节点的 dialer-proxy", strings.Join(names, "、"))
+		return true, true, keepLine
 	}
-	return proxy, auto
+	refs := clashRefNames(root, proxies)
+	proxy, auto = missingDefaults(refs, tmplGroups)
+	for i, n := range lineNames {
+		keepLine[i] = proxy || refs[n]
+	}
+	var names []string
+	if proxy {
+		names = append(names, "Proxy")
+	}
+	if auto {
+		names = append(names, "Auto")
+	}
+	if len(names) > 0 && firstClashGroupsWarn(tmpl, names) {
+		logger.Warningf("Clash 订阅:默认 Proxy/Auto 策略组已关闭,但模板仍引用 %s,已生成被引用的组以免订阅悬空;要彻底去掉,把模板里用到它的地方(规则、策略组、DNS、节点的 dialer-proxy 等)换成自己的组", strings.Join(names, "、"))
+	}
+	return proxy, auto, keepLine
 }
 
-// clashRefs 模板里有没有提到 Proxy / Auto:规则按逗号切字段比对(目标在第 2 或第 3 字段,
-// 嵌套规则的目标也在逗号后,逐字段比最稳;误伤只会多生成,不会悬空);策略组成员与节点的
-// dialer-proxy 直接比名字。模板没写 rules 时后面会补默认规则 MATCH,Proxy,按引用了 Proxy 算。
-func clashRefs(root map[string]interface{}, tmplGroups map[string][]string, proxies []interface{}) (proxy, auto bool) {
-	rules, ok := root["rules"].([]interface{})
-	if !ok {
-		return true, false // 没写规则:后面补默认规则 MATCH,Proxy
+// missingDefaults 关着开关时还得生成的 Proxy / Auto:被引用、模板自己又没定义的;
+// 生成的 Proxy 的选单里列着 Auto,生成 Proxy 时 Auto 也得跟着。
+func missingDefaults(refs map[string]bool, tmplGroups map[string][]string) (proxy, auto bool) {
+	_, hasProxy := tmplGroups["Proxy"]
+	_, hasAuto := tmplGroups["Auto"]
+	proxy = refs["Proxy"] && !hasProxy
+	return proxy, (refs["Auto"] || proxy) && !hasAuto
+}
+
+// clashWarned 关着默认策略组却还得生成时已经记过警告的(模板 + 结果的摘要):同一份模板只记一次。
+// 模板只有管理员改设置时才变,这张表长不大。
+var clashWarned sync.Map
+
+// firstClashGroupsWarn 这份模板、这个结果是不是头一回遇到(是才记警告)。
+func firstClashGroupsWarn(tmpl string, names []string) bool {
+	_, seen := clashWarned.LoadOrStore(sha256.Sum256([]byte(tmpl+"\x00"+strings.Join(names, ","))), true)
+	return !seen
+}
+
+// clashRefNames 模板(连同已经并进来的节点)里用到的名字。mihomo 里能写策略组名的地方很多:规则(含 sub-rules)、
+// 策略组的成员、DNS 服务器的 #出站、入站 listeners 与 tunnels 的 proxy、proxy-providers / rule-providers 的 proxy
+// 与 override.dialer-proxy……不逐个认字段,把模板里每个字符串值都拿来比:整串、按逗号切开的每段(规则的目标在
+// 逗号后)、# 后面按 & 切开的每段(DNS 服务器的出站)。误伤只会多生成,不会悬空。
+// 节点只看 dialer-proxy(密码、地址之类不算)。模板没写 rules 键时后面会补默认规则 MATCH,Proxy,按引用了 Proxy 算。
+func clashRefNames(root map[string]interface{}, proxies []interface{}) map[string]bool {
+	refs := map[string]bool{}
+	add := func(s string) {
+		if s = strings.TrimSpace(s); s != "" {
+			refs[s] = true
+		}
 	}
-	for _, r := range rules {
-		s, _ := r.(string)
-		for _, f := range strings.Split(s, ",") {
-			switch strings.TrimSpace(f) {
-			case "Proxy":
-				proxy = true
-			case "Auto":
-				auto = true
+	var walk func(v interface{})
+	walk = func(v interface{}) {
+		switch x := v.(type) {
+		case string:
+			add(x)
+			for _, f := range strings.Split(x, ",") {
+				add(f)
+			}
+			if i := strings.Index(x, "#"); i >= 0 {
+				for _, f := range strings.Split(x[i+1:], "&") {
+					add(f)
+				}
+			}
+		case []interface{}:
+			for _, e := range x {
+				walk(e)
+			}
+		case map[string]interface{}:
+			for _, e := range x {
+				walk(e)
+			}
+		case map[interface{}]interface{}:
+			for _, e := range x {
+				walk(e)
 			}
 		}
 	}
-	for _, members := range tmplGroups {
-		for _, m := range members {
-			switch m {
-			case "Proxy":
-				proxy = true
-			case "Auto":
-				auto = true
-			}
+	for k, v := range root {
+		if k != "proxies" {
+			walk(v)
 		}
+	}
+	if _, ok := root["rules"]; !ok {
+		refs["Proxy"] = true // 没写规则:后面补默认规则 MATCH,Proxy
 	}
 	for _, p := range proxies {
 		m, _ := p.(map[string]interface{})
-		switch m["dialer-proxy"] {
-		case "Proxy":
-			proxy = true
-		case "Auto":
-			auto = true
+		if d, _ := m["dialer-proxy"].(string); d != "" {
+			refs[d] = true
 		}
 	}
-	return proxy, auto
+	return refs
+}
+
+// ClashTemplateNeedsDefaultGroups 关掉「自动生成默认策略组」时,这份模板(空 = 内置)还引用着、自己又没定义的 Proxy / Auto:
+// 订阅里仍会生成它们,设置页保存时据此提示一句。模板不是合法 YAML 时返回 nil(保存时另有校验)。
+// 外部节点的 dialer-proxy 这时还不知道,只看模板本身。
+func ClashTemplateNeedsDefaultGroups(tmpl string) []string {
+	base := tmpl
+	if strings.TrimSpace(base) == "" {
+		base = basicClashConfig
+	}
+	var root map[string]interface{}
+	if err := yaml.Unmarshal([]byte(base), &root); err != nil {
+		return nil
+	}
+	if root == nil {
+		root = map[string]interface{}{}
+	}
+	tmplGroups := map[string][]string{}
+	if own, ok := root["proxy-groups"].([]interface{}); ok {
+		for _, g := range own {
+			m, _ := g.(map[string]interface{})
+			if n, _ := m["name"].(string); n != "" {
+				tmplGroups[n] = stringList(m["proxies"])
+			}
+		}
+	}
+	own, _ := root["proxies"].([]interface{})
+	proxy, auto := missingDefaults(clashRefNames(root, own), tmplGroups)
+	var out []string
+	if proxy {
+		out = append(out, "Proxy")
+	}
+	if auto {
+		out = append(out, "Auto")
+	}
+	return out
 }
 
 // ClashTemplateDisablesIPv6 Clash 模板顶层写了 ipv6: false:订阅里有 IPv6 节点时生成的配置会把它改成 true,

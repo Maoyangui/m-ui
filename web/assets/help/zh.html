@@ -945,6 +945,7 @@
       <li><b data-k="set.subEncode">链接订阅 base64 编码</b>、<b data-k="set.subNotice">顶部显示流量提示节点</b>、<b data-k="set.extRefresh">外部订阅刷新间隔(分钟)</b>。</li>
       <li><b data-k="set.subAutoFormat">按客户端自动给格式</b>:默认开;关掉后不带 <code>?format=</code> 的地址一律给通用链接。</li>
       <li>自定义模板:<b data-k="set.subClashExt" class="wrap">Clash 模板(YAML,留空用内置)</b> / <b data-k="set.subSingboxExt" class="wrap">sing-box 模板(JSON,留空用内置)</b>,可以先点 <b data-k="set.tmplFillClash">填入内置 Clash 模板</b> 再照着改;节点和分组由面板填进去,写错了保存时会报错。</li>
+      <li><b data-k="set.subClashDefaultGroups">Clash 自动生成默认策略组</b>:默认开,Clash 订阅里自动加上 Proxy、Auto 和多台服务器线路的测速组;关掉后策略组全由模板来写,模板里还用着的组照样生成(保存时会提示)。</li>
     </ul>
     <div class="pit"><b>常见坑</b>改了订阅的 <b data-k="set.path">路径</b> 或端口,用户已有的订阅地址全部失效,要重新发给用户。</div>
   </section>

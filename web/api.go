@@ -1485,6 +1485,22 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		if v, ok := in["subClashExt"]; ok && sub.ClashTemplateDisablesIPv6(v) {
 			hints = append(hints, "clashIPv6") // 有 IPv6 节点时订阅会把它改成 true,否则 mihomo 连不上这些节点
 		}
+		// 关着「Clash 自动生成默认策略组」,模板(没写就是内置模板)却还用着 Proxy / Auto:订阅里仍会生成用到的组。
+		// 只在这次动了这两项之一时看,别的设置保存时不打扰
+		_, dg := in["subClashDefaultGroups"]
+		_, ct := in["subClashExt"]
+		if dg || ct {
+			off, tmpl := s.setting("subClashDefaultGroups"), s.setting("subClashExt")
+			if dg {
+				off = in["subClashDefaultGroups"]
+			}
+			if ct {
+				tmpl = in["subClashExt"]
+			}
+			if strings.EqualFold(off, "false") && len(sub.ClashTemplateNeedsDefaultGroups(tmpl)) > 0 {
+				hints = append(hints, "clashGroupsRef")
+			}
+		}
 		if v, ok := in["webDomain"]; ok && strings.Contains(v, "*") {
 			badRequest(w, errors.New("面板域名不能写泛域名,要填具体的访问地址,如 hk.example.com"))
 			return
