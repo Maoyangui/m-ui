@@ -258,11 +258,13 @@ func (s *Server) options() Options {
 		Encode:       s.settingBool("subEncode"),
 		ShowNotice:   s.settingBool("subShowNotice"),
 		ClashTmpl:    s.setting("subClashExt"),
-		SingBoxTmpl:  s.setting("subSingboxExt"),
-		Entries:      entries,
-		Insecure:     insecure,
-		TZ:           s.setting("timezone"),
-		Share:        s.shareSelfService(),
+		// 默认 Proxy/Auto 策略组:默认开,没设过(空值)也开,只有明写 false 才关(判法同 supportOnline)。
+		ClashDefaultGroups: !strings.EqualFold(s.setting("subClashDefaultGroups"), "false"),
+		SingBoxTmpl:        s.setting("subSingboxExt"),
+		Entries:            entries,
+		Insecure:           insecure,
+		TZ:                 s.setting("timezone"),
+		Share:              s.shareSelfService(),
 	}
 }
 

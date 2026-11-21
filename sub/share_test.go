@@ -212,7 +212,7 @@ func TestLegacyNullResellerIdStillResolves(t *testing.T) {
 func TestProfileTitleEncoding(t *testing.T) {
 	u := model.User{Name: "alice", Volume: 100, Up: 1, Down: 2}
 
-	h := headers(u, Options{ProfileTitle: "冒央会社", UpdateHours: 12}, "text/plain")
+	h := headers(u, Options{ProfileTitle: "冒央会社", UpdateHours: 12}, "text/plain", ".txt")
 	if h["Profile-Title"] != "base64:5YaS5aSu5Lya56S+" {
 		t.Fatalf("中文标题应 base64 编码: %q", h["Profile-Title"])
 	}
@@ -234,11 +234,11 @@ func TestProfileTitleEncoding(t *testing.T) {
 			}
 		}
 	}
-	if got := headers(u, Options{ProfileTitle: "Maoyang Node"}, "text/plain")["Profile-Title"]; got != "Maoyang Node" {
+	if got := headers(u, Options{ProfileTitle: "Maoyang Node"}, "text/plain", ".txt")["Profile-Title"]; got != "Maoyang Node" {
 		t.Fatalf("纯 ASCII 标题应原样发: %q", got)
 	}
 	// 没配标题时回落到备注 → 用户名
-	if got := headers(model.User{Name: "bob"}, Options{}, "text/plain")["Profile-Title"]; got != "bob" {
+	if got := headers(model.User{Name: "bob"}, Options{}, "text/plain", ".txt")["Profile-Title"]; got != "bob" {
 		t.Fatalf("应回落到用户名: %q", got)
 	}
 }

@@ -52,7 +52,7 @@ func TestNodeOptsAndUserHides(t *testing.T) {
 	eq("别的线路的不要不相干", hosts(GenerateLinksFor(user, []model.Line{line}, fwEntries, nil, LineHides{8: {model.DirectKey(2): true}})), all...)
 
 	// Clash 与 sing-box 订阅同一口径
-	clash, err := BuildClashFor(user, []model.Line{hidden}, fwEntries, "", "", nil, nil, hides)
+	clash, err := BuildClashFor(user, []model.Line{hidden}, fwEntries, "", "", nil, nil, true, hides)
 	if err != nil {
 		t.Fatal(err)
 	}

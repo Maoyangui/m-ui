@@ -70,7 +70,7 @@ func legacySingBox(user model.User, lines []model.Line, opt Options) (Result, er
 			"route":     map[string]interface{}{"final": "direct"},
 		}
 		b, _ := json.MarshalIndent(cfg, "", "  ")
-		return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
+		return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8", ".json")}, nil
 	}
 	outbounds := []map[string]interface{}{
 		{"type": "selector", "tag": "proxy", "outbounds": append([]string{"auto"}, tags...), "default": "auto", "interrupt_exist_connections": true},
@@ -87,7 +87,7 @@ func legacySingBox(user model.User, lines []model.Line, opt Options) (Result, er
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
+	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8", ".json")}, nil
 }
 
 // twoServers 两台服务器 A、B(一主一副),节点名带入口后缀。

@@ -945,6 +945,7 @@
       <li><b data-k="set.subEncode">Base64-encode link subscription</b>, <b data-k="set.subNotice">Show traffic notice node on top</b>, <b data-k="set.extRefresh" class="wrap">External subscription refresh interval (minutes)</b>.</li>
       <li><b data-k="set.subAutoFormat">Pick the format by client</b>: on by default; when off, links without <code>?format=</code> always get plain links.</li>
       <li>Custom templates: <b data-k="set.subClashExt" class="wrap">Clash template (YAML, empty = built-in)</b> / <b data-k="set.subSingboxExt" class="wrap">sing-box template (JSON, empty = built-in)</b>. Start with <b data-k="set.tmplFillClash">Fill in the built-in Clash template</b> and edit it; nodes and groups are filled in by the panel, and mistakes are reported when you save.</li>
+      <li><b data-k="set.subClashDefaultGroups">Generate default Clash groups</b>: on by default, so Clash subscriptions get Proxy, Auto and a url-test group for each line on several servers; when off, your template defines all groups, and any group it still uses is generated anyway (saving tells you so).</li>
     </ul>
     <div class="pit"><b>Common pitfall</b>Changing the subscription <b data-k="set.path">Path</b> or port breaks every existing subscription link; send users their new links.</div>
   </section>

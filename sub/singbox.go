@@ -190,7 +190,7 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 			"route":     map[string]interface{}{"final": "direct"},
 		}
 		b, _ := json.MarshalIndent(cfg, "", "  ")
-		return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
+		return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8", ".json")}, nil
 	}
 
 	var groups []map[string]interface{}
@@ -216,7 +216,7 @@ func BuildSingBoxSub(user model.User, lines []model.Line, opt Options) (Result, 
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
+	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8", ".json")}, nil
 }
 
 // singBoxTmplGroup 模板里叫 tag 的出站能不能直接当这条线路的组:得是 selector / urltest(direct、节点之类当不了,
@@ -279,7 +279,7 @@ func singBoxFromTemplate(user model.User, opt Options, tmpl map[string]interface
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8")}, nil
+	return Result{Body: string(b), Headers: headers(user, opt, "application/json; charset=utf-8", ".json")}, nil
 }
 
 // directDNSTag dns 段里不走代理的服务器:优先系统解析(type local),其次第一个没写 detour 的。

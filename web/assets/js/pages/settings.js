@@ -70,6 +70,7 @@ const groups = () => [
   ]},
   { id: 'subtmpl', title: t('set.subTmpl'), masterOnly: true, extra: `<div class="row" style="margin-top:.6rem;flex-wrap:wrap"><button class="btn sm" data-act="set.tmplDefault" data-id="clash">${t('set.tmplFillClash')}</button><button class="btn sm" data-act="set.tmplDefault" data-id="singbox">${t('set.tmplFillSingbox')}</button></div>`, fields: [
     ['subAutoFormat', t('set.subAutoFormat'), 'boolOn', t('set.subAutoFormatHelp')],
+    ['subClashDefaultGroups', t('set.subClashDefaultGroups'), 'boolOn', t('set.subClashDefaultGroupsHelp')],
     ['subClashExt', t('set.subClashExt'), 'code', t('set.subClashExtHelp')],
     ['subSingboxExt', t('set.subSingboxExt'), 'code', t('set.subSingboxExtHelp')],
   ]},
@@ -407,6 +408,8 @@ async function saveAll() {
     if ('rewardEnabled' in body) refreshReward(); // 顶栏的金币跟着开关走
     // Clash 模板写了 ipv6: false:存下了,但有 IPv6 节点时订阅会改成 true,要让人知道
     if (((r && r.hints) || []).includes('clashIPv6')) await confirm(t('set.clashIPv6Hint'), { title: t('set.saved'), okText: t('node.ack'), notice: true });
+    // 关着「Clash 自动生成默认策略组」,模板却还用着 Proxy / Auto:存下了,但订阅里仍会生成用到的组
+    if (((r && r.hints) || []).includes('clashGroupsRef')) await confirm(t('set.clashGroupsRefHint'), { title: t('set.saved'), okText: t('node.ack'), notice: true });
     saveHA();
   } catch (e) {
     toast(e.message, 'err');
