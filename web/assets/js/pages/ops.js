@@ -85,7 +85,7 @@ export async function render(el, fresh = false) {
           ${row('limits', numIn('ops-nofile', p.noFile, 'min="1024" max="4194304" step="1024" class="w8"', { label: task('limits').title }))}
           ${row('ntp', '')}
           ${row('sysctl', `<button type="button" class="btn sm" data-act="ops.sysctlEdit">${esc(t('ops.sysctlEdit'))}</button>${sysctlEdited ? `<span class="warn-text small">${esc(t('ops.sysctlDirty'))}</span>` : ''}`)}
-          ${row('journal', numIn('ops-jmb', p.journalMb, 'min="20" max="20480" step="10" class="w5"', { pre: t('ops.j.limit'), post: 'MB' }) + numIn('ops-jdays', p.journalDays, 'min="1" max="3650" class="w5"', { pre: t('ops.j.keep'), post: t('ops.j.days') }))}
+          ${row('journal', numIn('ops-jmb', p.journalMb, 'min="20" max="20480" step="10" class="w6"', { pre: t('ops.j.limit'), post: 'MB' }) + numIn('ops-jdays', p.journalDays, 'min="1" max="3650" class="w6"', { pre: t('ops.j.keep'), post: t('ops.j.days') }))}
           ${row('disk-clean', dk && dk.opsAgent ? `<label class="ops-chk"><input type="checkbox" id="ops-opsagent"><span>${esc(t('node.dc.opsAgent'))}</span></label>` : '')}
         </tbody>
       </table></div>

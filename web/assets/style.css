@@ -740,6 +740,8 @@ table.grid.cards.ops-table .ops-ctl { flex-wrap: wrap; }
 .ops-num { display: inline-flex; align-items: center; gap: .4rem; font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
 .ops-num input { width: 5rem; height: var(--ctl-h-sm); }
 .ops-num input.w8 { width: 7.5rem; } .ops-num input.w5 { width: 4.25rem; }
+/* 系统日志的上限(MB,最多 20480)和保留天数(最多 3650):Firefox 的数字框一直显示上下箭头,4.25rem 只剩 33px 放数字,默认的 200 都显示不全(11-21 火狐补测发现) */
+.ops-num input.w6 { width: 5.6rem; }
 .ops-chk { display: inline-flex; align-items: center; gap: .4rem; font-size: var(--fs-xs); color: var(--text-2); max-width: 20rem; cursor: pointer; }
 table.grid.cards.ops-table .ops-ctl { justify-content: flex-end; }
 table.grid.cards.ops-table .ops-name .sub-cell, table.grid.cards.ops-table .ops-cur .sub-cell { max-width: none; }
