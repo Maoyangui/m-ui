@@ -796,7 +796,7 @@ curl -s -X POST "${H[@]}" -d '{"plan":"代理高级月付","mode":"stack","dryRu
 {"event":"login","text":"🔐 面板登录:admin\nIP:203.0.113.8\n2026-10-31 02:57:49","time":1793386669}
 ```
 
-`event` 是事件类别(`login`、`userdisabled`、`userexpiring`、`quota`、`upstream`、`core`、`cert`、`reach`、`rulelimit`、`daily`,测试按钮发的是 `test`),`text` 是和 Telegram 通知同样的文字。填了密钥就带 `X-M-UI-Signature: sha256=<正文的 HMAC-SHA256 十六进制>`,收到后用同一个密钥算一遍比对。10 秒超时、不重试,返回 2xx 才算收到。
+`event` 是事件类别(`login`、`userdisabled`、`userexpiring`、`quota`、`upstream`、`upstreamfollow`、`core`、`cert`、`reach`、`rulelimit`、`daily`,测试按钮发的是 `test`;上游跟随外部节点的变化:跟着改好了是 `upstreamfollow`,跟不上是 `upstream`),`text` 是和 Telegram 通知同样的文字。填了密钥就带 `X-M-UI-Signature: sha256=<正文的 HMAC-SHA256 十六进制>`,收到后用同一个密钥算一遍比对。10 秒超时、不重试,返回 2xx 才算收到。
 
 ## 10. 注意
 

@@ -1415,7 +1415,7 @@ var panelSettings = setOf(
 	"resellerEnabled", "resellerListen", "resellerPort", "resellerPath", "resellerCertFile", "resellerKeyFile",
 	"subPageEnabled", "subShareEnabled", "subPageBrand", "subPageTitle", "subPageSupport", "subPageBuyURL", "subPageNotice",
 	"tgEnabled", "tgToken", "tgChatId", "tgProxy", "tgOnLogin", "tgOnUserDisabled", "tgOnUserExpiring", "tgExpiringDays",
-	"tgOnQuota", "tgQuotaPercent", "tgOnRuleLimit", "tgOnUpstream", "tgOnCore", "tgOnReach", "tgOnCert", "tgDaily", "tgDailyHour",
+	"tgOnQuota", "tgQuotaPercent", "tgOnRuleLimit", "tgOnUpstream", "tgOnUpstreamFollow", "tgOnCore", "tgOnReach", "tgOnCert", "tgDaily", "tgDailyHour",
 	"upstreamCheckMinutes", "upstreamCheckFailThreshold", "reachAuto", "reachMinutes", "reachToken",
 	"certFile", "keyFile", "upstreamTestUrl", "statsBucketSeconds", "trafficAge", "allowPrivate",
 	"nodeMode", "backupHour", "backupKeep", "backupTelegram", "subLogAge", "auditAge",

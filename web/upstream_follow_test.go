@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,6 +97,40 @@ func TestUpstreamFollow(t *testing.T) {
 	defer database.Close(run.DB())
 	s := NewServer(run)
 	db := run.DB()
+	// 通知(用户 11-22「上游跟随订阅变化那个 telegram 提醒不能关闭吗」):Telegram 用假的发送函数收下来。
+	// 「数据面停止 / 恢复」关着也不影响跟随的通知(以前归在它下面,关它就全没了);「上游自动跟随订阅的变化」关着时
+	// 跟着改好的那条不发,跟不上的照样发(归「上游故障 / 恢复」)
+	setSetting := func(k, v string) {
+		db.Where("key = ?", k).Delete(&model.Setting{})
+		db.Create(&model.Setting{Key: k, Value: v})
+	}
+	for k, v := range map[string]string{"tgEnabled": "true", "tgToken": "t", "tgChatId": "1", "tgOnCore": "false", "tgOnUpstreamFollow": "false"} {
+		setSetting(k, v)
+	}
+	var sentMu sync.Mutex
+	var sent []string
+	run.Notifier().SetSender(func(_, _, text string) error {
+		sentMu.Lock()
+		sent = append(sent, text)
+		sentMu.Unlock()
+		return nil
+	})
+	sentWith := func(sub string, wait time.Duration) bool { // 发送是异步的:等一会儿
+		for end := time.Now().Add(wait); ; time.Sleep(20 * time.Millisecond) {
+			sentMu.Lock()
+			for _, m := range sent {
+				if strings.Contains(m, sub) {
+					sentMu.Unlock()
+					return true
+				}
+			}
+			sentMu.Unlock()
+			if time.Now().After(end) {
+				return false
+			}
+		}
+	}
+	const followedMsg, goneMsg = "上游已跟随外部节点的变化", "订阅里也找不到对应的节点"
 	var local model.Node
 	if db.Where("is_local = ?", true).First(&local).Error != nil {
 		local = model.Node{Name: "主机", IsLocal: true, Enabled: true, Sort: 1}
@@ -160,6 +195,9 @@ func TestUpstreamFollow(t *testing.T) {
 	if audits != 1 {
 		t.Fatalf("跟随应该记一条审计: %d", audits)
 	}
+	if sentWith(followedMsg, 400*time.Millisecond) {
+		t.Fatal("关了「上游自动跟随订阅的变化」,跟着改好的那条不该再发")
+	}
 	// 3. 再来一次:订阅里现在这个节点就是上游的样子 → 「订阅里没变」,不改
 	s.followOne(after, now.Unix()+3600)
 	var again model.UpstreamSource
@@ -173,6 +211,9 @@ func TestUpstreamFollow(t *testing.T) {
 	db.First(&again, "upstream_id = ?", upID)
 	if _, port := endpoint(); port != 8443 || again.Note != followGone {
 		t.Fatalf("找不到对应节点时不该改: 端口 %d,结论 %q", port, again.Note)
+	}
+	if !sentWith(goneMsg, 3*time.Second) {
+		t.Fatal("跟不上的要人处理:关着跟随开关、关着数据面开关也要发(归「上游故障 / 恢复」)")
 	}
 	// 5. 订阅抓不下来(订阅类型才去抓):记下,不改
 	db.Model(&model.ExtNode{}).Where("id = ?", e.Id).Updates(map[string]interface{}{"type": "sub", "value": "https://sub.example.net/x"})
@@ -242,6 +283,7 @@ func TestUpstreamFollow(t *testing.T) {
 	if reopened.TriedAt != 0 || reopened.Note != "" || reopened.FollowedAt == 0 {
 		t.Fatalf("重新打开时上次尝试的时间和结论应清掉、跟随过的时间留着: %+v", reopened)
 	}
+	setSetting("tgOnUpstreamFollow", "true") // 打开以后,跟着改好的那条照常发
 	// 8. 订阅里那个节点没变(还是 8443),上游却被手动改成了 9443:重新打开跟随后,它再全部测不通,就换回订阅里的那份
 	db.Model(&model.ExtNode{}).Where("id = ?", e.Id).Updates(map[string]interface{}{"type": "link", "value": link(8443)})
 	s.extRefreshFn = func(uint) error { return nil }
@@ -252,6 +294,9 @@ func TestUpstreamFollow(t *testing.T) {
 	db.First(&reopened, "upstream_id = ?", upID)
 	if reopened.Note != followOK {
 		t.Fatalf("换回订阅的配置应记成跟随了: %q", reopened.Note)
+	}
+	if !sentWith(followedMsg, 3*time.Second) {
+		t.Fatal("打开了「上游自动跟随订阅的变化」,跟着改好的那条应该发")
 	}
 	// 9. 关掉:现在的配置原样留着,来源也留着;跟随的那一轮跳过它(不会被「补记来源」重新认领,也不会被改)
 	if code := source("PUT", `{"follow":false}`); code != 200 || stopOf() != model.FollowStopUser {

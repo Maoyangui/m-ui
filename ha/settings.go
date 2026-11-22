@@ -58,7 +58,7 @@ var globalKeys = setOf(
 	// 决定订阅内容的三项(节点地址用域名还是 IP、带不带"允许不安全"、订阅口限速):换主机后用户拿到的订阅要和以前一样
 	"subServerAddr", "subInsecure", "subRateLimit",
 	"tgEnabled", "tgToken", "tgChatId", "tgProxy", "tgApiBase", "tgBot", "tgOnLogin", "tgOnUserDisabled", "tgOnUserExpiring",
-	"tgExpiringDays", "tgOnQuota", "tgQuotaPercent", "tgOnRuleLimit", "tgOnUpstream", "tgOnCore", "tgOnReach", "tgOnCert",
+	"tgExpiringDays", "tgOnQuota", "tgQuotaPercent", "tgOnRuleLimit", "tgOnUpstream", "tgOnUpstreamFollow", "tgOnCore", "tgOnReach", "tgOnCert",
 	"tgDaily", "tgDailyHour", "webhookUrl", "webhookSecret", "notifyOnce",
 	"reachAuto", "reachMinutes", "reachToken",
 	"statsBucketSeconds", "trafficAge", "subLogAge", "auditAge",

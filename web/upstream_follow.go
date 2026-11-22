@@ -248,7 +248,14 @@ func (s *Server) followOne(src model.UpstreamSource, now int64) {
 				followInvalid:   "⚠️ <b>上游全部测不通,订阅里的新配置用不了</b>\n" + notify.Esc(up.Name) + ":" + notify.Esc(detail),
 			}[note]
 			if text != "" {
-				s.run.Notifier().Event("tgOnCore", text)
+				// 跟着改好了是一条「已经处理」的消息,单独一个开关「上游自动跟随订阅的变化」(用户 11-22:「上游跟随订阅变化那个
+				// telegram 提醒不能关闭吗? 很烦人」);跟不上的(订阅里找不到 / 对不上 / 新配置用不了)要人去处理,归「上游故障 / 恢复」。
+				// 以前全归在「数据面停止 / 恢复」下面:关它就连数据面出事也不报了,等于关不掉
+				key := "tgOnUpstream"
+				if note == followOK {
+					key = "tgOnUpstreamFollow"
+				}
+				s.run.Notifier().Event(key, text)
 			}
 		}
 	}

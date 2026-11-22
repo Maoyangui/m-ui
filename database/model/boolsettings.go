@@ -10,7 +10,7 @@ var BoolSettings = map[string]bool{
 	"resellerEnabled": true, "subPageEnabled": true, "subShareEnabled": true, "subPageBrand": true, "subClashDefaultGroups": true,
 	"uiConcise": true,
 	"tgEnabled": true, "tgBot": true, "tgOnLogin": true, "tgOnUserDisabled": true, "tgOnUserExpiring": true,
-	"tgOnQuota": true, "tgOnRuleLimit": true, "tgOnUpstream": true, "tgOnCore": true, "tgOnReach": true, "tgOnCert": true, "tgDaily": true,
+	"tgOnQuota": true, "tgOnRuleLimit": true, "tgOnUpstream": true, "tgOnUpstreamFollow": true, "tgOnCore": true, "tgOnReach": true, "tgOnCert": true, "tgDaily": true,
 	"reachAuto": true, "allowPrivate": true, "blockBT": true, "nodeMode": true, "backupTelegram": true,
 	"haWitness":     true, // 主机容灾的境外测点见证(在主机容灾设置里改;命令行 m-ui set 写它也规整)
 	"haAllowPlain":  true, // 主机容灾:允许明文链接的副机当备用

@@ -1096,7 +1096,7 @@
       <li><b data-k="set.tgOnLogin">Panel login / repeated failures</b></li>
       <li><b data-k="set.tgOnUserDisabled">User auto-disabled (expired / quota)</b>, <b data-k="set.tgOnUserExpiring">User expiring soon</b> (how early: <b data-k="set.tgExpiringDays">Days before expiry</b>), <b data-k="set.tgOnQuota">User quota warning</b> (at <b data-k="set.tgQuotaPercent">Warn at usage percent</b>)</li>
       <li><b data-k="set.tgOnRuleLimit">Notify when a burst limit triggers</b></li>
-      <li><b data-k="set.tgOnUpstream">Upstream down / recovered</b>, <b data-k="set.tgOnCore">Data plane stopped / recovered</b></li>
+      <li><b data-k="set.tgOnUpstream">Upstream down / recovered</b> (also when an upstream added from external nodes cannot follow its subscription), <b data-k="set.tgOnUpstreamFollow">Upstream followed its subscription</b> (it was updated automatically and this only tells you; switch it off on its own if it is too chatty), <b data-k="set.tgOnCore">Data plane stopped / recovered</b></li>
       <li><b data-k="set.tgOnReach">Mainland reach problem / recovered</b></li>
       <li><b data-k="set.tgOnCert">Certificate issued / renewal / expiry</b> (node certificates are reported by the master too)</li>
       <li><b data-k="set.tgDaily">Daily report</b>, sent at <b data-k="set.tgDailyHour">Daily report hour (0-23, panel time zone)</b></li>
