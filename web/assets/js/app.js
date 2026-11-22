@@ -816,11 +816,13 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) bump
   }, Date.now() < fastUntil ? REFRESH_FAST : REFRESH_SLOW);
 })();
 
-// 顶栏高度(窄屏下标题会折行)写进 --topbar-h:吸附的批量条、表格限高滚动区都按它算
+// 顶栏高度(窄屏下标题会折行)写进 --topbar-h:吸附的批量条、表格限高滚动区、侧栏顶上那一格都按它算。
+// 量带小数的实际高度(offsetHeight 取整,写回去会让读它的地方差零点几像素);顶栏自己的最小高度不用这个变量(见 style.css .topbar),
+// 不然写回去又改了顶栏自己的高度,高过一次就缩不回去
 (() => {
   const bar = document.querySelector('.topbar');
   if (!bar || typeof ResizeObserver === 'undefined') return;
-  new ResizeObserver(() => { if (bar.offsetHeight) document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px'); }).observe(bar);
+  new ResizeObserver(() => { const h = bar.getBoundingClientRect().height; if (h) document.documentElement.style.setProperty('--topbar-h', h + 'px'); }).observe(bar);
 })();
 
 // 链接写 data-act="go.setting" data-id="分区或某一项":跳到设置页的那个位置(见 ui.js openSettingsAt)

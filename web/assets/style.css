@@ -158,7 +158,9 @@ b, strong { font-weight: 600; }
 .sidebar-foot #btn-logout:hover { color: var(--danger-text); }
 .sidebar-version { color: var(--faint); font-size: 11.5px; padding: .55rem .3rem 0; font-family: var(--mono); }
 .main { min-width: 0; display: flex; flex-direction: column; }
-.topbar { display: flex; align-items: center; gap: .6rem; min-height: var(--topbar-h); padding: .55rem 1.5rem; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: saturate(1.4) blur(10px); -webkit-backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+/* 顶栏自己的最小高度用固定值:--topbar-h 是量顶栏实际高度写进去的(app.js),拿它当自己的最小高度,顶栏高过一次(手机上副标题折成两行)
+   就再也缩不回去,换到没有副标题的页面、窗口拉宽以后还空着一截;Safari 还会每页报一次「ResizeObserver loop」 */
+.topbar { display: flex; align-items: center; gap: .6rem; min-height: 3.75rem; padding: .55rem 1.5rem; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: saturate(1.4) blur(10px); -webkit-backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
 .topbar-title { flex: 1; min-width: 0; }
 .topbar-title h1 { font-size: var(--fs-lg); }
 #topbar-right { display: flex; align-items: center; gap: .4rem; }
