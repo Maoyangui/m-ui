@@ -211,6 +211,8 @@ async function loadLogs(more) {
     logCfg = { off: !!r.logOff, days: r.logDays || 7, choices: r.dayChoices || [1, 7, 30, 90] };
     drawLogs();
   } catch (e) {
+    // 「加载更多」没取到:已经列出来的留着,按钮恢复可点,报个错;第一页就没取到才把框里换成出错的原因
+    if (more) { toast(e.message, 'err'); drawLogs(); return; }
     const box = document.getElementById('alog-box');
     if (box) box.innerHTML = `<p class="hint bad">${esc(e.message)}</p>`;
   }
