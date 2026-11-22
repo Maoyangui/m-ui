@@ -205,6 +205,23 @@ export function openSettingsAt(id) {
 const actions = {};
 export function registerActions(map) { Object.assign(actions, map); }
 
+// ---- 表格排成卡片时每格前面的列名(见 app.js fitTables / labelTables)----
+export const CARD_SKIP = '.kv, .api-doc, .conns'; // 键值表、接口文档、连接列表保持原样
+// labelTable 每格补上它那一列的表头(只改属性、不动节点);跨整行的格子标 data-span
+export function labelTable(tb) {
+  if (tb.matches(CARD_SKIP)) return;
+  const heads = [...tb.querySelectorAll('thead th')].map(th => th.textContent.trim());
+  tb.querySelectorAll('tbody tr').forEach(tr => {
+    let col = 0;
+    for (const td of tr.children) {
+      const span = td.colSpan || 1;
+      if (span > 1) td.dataset.span = '';
+      else if (heads[col] && td.dataset.label !== heads[col]) td.dataset.label = heads[col];
+      col += span;
+    }
+  });
+}
+
 // setHTML / setText 安全写入:
 //   1) 元素不在就跳过。异步渲染回来时页面可能已经切走,直接写 null 会抛异常,
 //      而这个异常会被上一次路由的错误处理接住,把报错糊到刚画好的新页面上。
@@ -223,6 +240,9 @@ export function setHTML(target, html) {
   const menus = typeof el.querySelectorAll === 'function' ? [...el.querySelectorAll('details.menu[open]')].map(menuKey).filter(Boolean) : [];
   el.innerHTML = html;
   el.__muiFirst = el.firstChild ?? null;
+  // 表格正文换掉以后当场补上列名(排成卡片时每格前面那个),不等下一帧 app.js 的 labelTables:新画的卡片没有列名时矮一截,
+  // 这一瞬间整页变短,Safari(没有滚动锚定)的滚动位置被夹住、回不去 —— 手机上勾一下就整表重画的页面(用户、线路)列表就跳
+  if (el.tagName === 'TBODY') { const tb = el.closest('table.grid'); if (tb) labelTable(tb); }
   for (const [act, id] of menus) {
     const b = [...el.querySelectorAll('details.menu .menu-list [data-act]')].find(x => x.dataset.act === act && (x.dataset.id || '') === id);
     const d = b && b.closest('details.menu');

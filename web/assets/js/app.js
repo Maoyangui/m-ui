@@ -3,7 +3,7 @@ import { get, post, setUnauthorizedHandler, LONG, abortPageLoads } from './api.j
 import { t, setLang, getLang, langs } from './i18n.js';
 import { trErr } from './errmsg.js';
 import { ICONS } from './icons.js';
-import { toast, confirm, closeModal, closeDrawer, drawerOpen, drawerSeq, esc, setTimezone, fmtDay, registerActions, openSettingsAt } from './ui.js';
+import { toast, confirm, closeModal, closeDrawer, drawerOpen, drawerSeq, esc, setTimezone, fmtDay, registerActions, openSettingsAt, labelTable, CARD_SKIP } from './ui.js';
 import { sortCerts, certSig, sortReach, reachSig, reachHard } from './issues.js';
 import { mountXmasEgg } from './xmas.js';
 import { mountReward } from './reward.js';
@@ -620,8 +620,7 @@ function pageName() {
 //   data-fit="cards:840 p2:960 p3:1160"   容器不到 1160 藏 c-p3 列,不到 960 再藏 c-p2 列,不到 840 排成卡片
 //   rows:930                              (服务器表)不到 930 每台排成两行
 // 没写的档用默认值:卡片 700(抽屉 / 弹框里的表 480,它们本来就按窄容器设计),p2 960,p3 1180。
-const CARD_SKIP = '.kv, .api-doc, .conns'; // 键值表、接口文档、连接列表保持原样
-const FIT_DEFAULT = { p2: 960, p3: 1180, rows: 0 };
+const FIT_DEFAULT = { p2: 960, p3: 1180, rows: 0 }; // 不排的表(键值表、接口文档、连接列表)见 ui.js 的 CARD_SKIP
 function fitTables() {
   document.querySelectorAll('table.grid').forEach(tb => {
     if (tb.matches(CARD_SKIP)) return;
@@ -678,21 +677,10 @@ function fitFill() {
     if (wrap.style.maxHeight !== want) wrap.style.maxHeight = want;
   });
 }
-// 排成卡片时每格前面要有列名:每格补上它那一列的表头(只改属性、不动节点,不会反过来触发自己)。
+// 排成卡片时每格前面要有列名:每格补上它那一列的表头(只改属性、不动节点,不会反过来触发自己;见 ui.js labelTable。
+// 用 setHTML 换表格正文的当场就补了,这里补其余的:整张表一起画的、直接改 innerHTML 的)。
 function labelTables() {
-  document.querySelectorAll('table.grid').forEach(tb => {
-    if (tb.matches(CARD_SKIP)) return;
-    const heads = [...tb.querySelectorAll('thead th')].map(th => th.textContent.trim());
-    tb.querySelectorAll('tbody tr').forEach(tr => {
-      let col = 0;
-      for (const td of tr.children) {
-        const span = td.colSpan || 1;
-        if (span > 1) td.dataset.span = '';
-        else if (heads[col] && td.dataset.label !== heads[col]) td.dataset.label = heads[col];
-        col += span;
-      }
-    });
-  });
+  document.querySelectorAll('table.grid').forEach(labelTable);
   fitTables();
   fitFill();
 }
