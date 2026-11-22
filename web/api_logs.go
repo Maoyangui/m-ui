@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +18,7 @@ import (
 // ---- 外部 API 的调用日志(用户 11-22:「密钥这里 对应的密钥行里增加一个日志 点击可显示查看调用日志(白话版看得懂的
 // 鼠标悬浮显示具体执行指令 代理面板也一样) 可设置不开启日志 / 自动删除 / 一键删除」) ----
 // 每把密钥一份:什么时候、从哪个 IP、调了什么、结果怎样。界面按 Action / Target 拼成大白话,悬停看原始请求(方法、路径、参数、请求体)。
-// 只在本机记:不进主从同步,也不进给备用的容灾副本(ha 的 replicaSkip);请求体里订阅地址、令牌之类的值打码(apiLogBody),响应不记。
+// 只在本机记:不进主从同步,也不进给备用的容灾副本(ha 的 replicaSkip);参数和请求体里订阅地址、令牌之类的值打码(apiLogQuery / apiLogBody),响应不记。
 // 自动删除见 jobs 的 pruneAPIKeyLogs。
 
 const (
@@ -90,7 +91,7 @@ func (s *Server) apiLogStart(w http.ResponseWriter, r *http.Request, sc apiScope
 		}
 		path, parts := apiLogPath(r.URL.Path)
 		row := model.ApiKeyLog{KeyId: sc.keyId, At: start.Unix(), IP: ip, Method: r.Method, Path: path,
-			Query: clipRunes(r.URL.RawQuery, apiLogQueryMax), Body: apiLogBody(body), Status: status,
+			Query: apiLogQuery(r.URL.RawQuery), Body: apiLogBody(body), Status: status,
 			Ms: int(time.Since(start) / time.Millisecond)}
 		row.Action, row.Target = apiLogAction(r.Method, parts, body)
 		if status >= 400 {
@@ -108,7 +109,8 @@ func (s *Server) apiLogPush(row model.ApiKeyLog) {
 		db, ch := s.db, s.apiLogCh
 		safe.Go("web.apiLogWriter", func() {
 			for r := range ch {
-				db.Create(&r)
+				// 每条单独兜住:写某一条出了异常,后面的照常写(整个协程退出的话,队列满了以后日志全丢、看不出来)
+				safe.Do("web.apiLogWrite", func() { db.Create(&r) })
 			}
 		})
 	})
@@ -141,6 +143,25 @@ func apiLogBody(b []byte) string {
 	}
 	out, _ := json.Marshal(maskAPILog(v))
 	return clipRunes(string(out), apiLogBodyMax)
+}
+
+// apiLogQuery 网址里的参数:和请求体一样,敏感键的值换成 ***(现在的接口不从网址收这些,调用方放错了地方也不记下来),
+// 其余照原样(顺序、写法不变),截到 apiLogQueryMax 字。键解不开的(写法不对)值也打码。
+func apiLogQuery(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	parts := strings.Split(raw, "&")
+	for i, p := range parts {
+		k, _, has := strings.Cut(p, "=")
+		if !has {
+			continue
+		}
+		if uk, err := url.QueryUnescape(k); err != nil || apiLogSecretKeys[strings.ToLower(strings.TrimSpace(uk))] {
+			parts[i] = k + "=***"
+		}
+	}
+	return clipRunes(strings.Join(parts, "&"), apiLogQueryMax)
 }
 
 func maskAPILog(v interface{}) interface{} {

@@ -747,7 +747,7 @@ func APILogDays(days int) int {
 
 // ApiKeyLog 外部 API 的一次调用(用户 11-22:密钥那一行点「日志」看调用记录,白话版看得懂,悬停看具体执行的指令;代理面板也一样)。
 // Action / Target 给界面拼成大白话(「新建用户 alice」),Method / Path / Query / Body 是悬停时显示的原始请求
-// (Body 里订阅地址、令牌之类的值打码,见 web 包的 apiLogBody);Status 是返回的 HTTP 状态,Err 是失败时的原因。
+// (Query、Body 里订阅地址、令牌之类的值打码,见 web 包的 apiLogQuery / apiLogBody);Status 是返回的 HTTP 状态,Err 是失败时的原因。
 // 只记在本机,不进主从同步的快照、也不进给备用的容灾副本;按密钥的 LogDays 自动删、每把最多 APILogMaxRows 条(jobs 的清理),删密钥时一起删。
 type ApiKeyLog struct {
 	Id     uint   `json:"id" gorm:"primaryKey"`

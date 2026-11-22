@@ -214,3 +214,23 @@ func TestAPIKeyLogs(t *testing.T) {
 		t.Fatalf("删密钥时日志应一起删: 剩 %d 条", n)
 	}
 }
+
+// 网址里的参数:和请求体同一份敏感键打码(现在的接口不从网址收这些,调用方放错了地方也不记下来);其余原样、顺序不变。
+func TestAPILogQuery(t *testing.T) {
+	for in, want := range map[string]string{
+		"":                      "",
+		"q=alice&state=expired": "q=alice&state=expired",
+		"q=alice&sub=https%3A%2F%2Fp.example%2Fs": "q=alice&sub=***",
+		"Token=t1&limit=5&PASSWORD=x":             "Token=***&limit=5&PASSWORD=***",
+		"su%62=abc&enabled=true":                  "su%62=***&enabled=true", // 键转义过也认得
+		"a%zz=1&q=x":                              "a%zz=***&q=x",           // 键解不开:值也打码
+		"flag&key":                                "flag&key",               // 没有值的照原样
+	} {
+		if got := apiLogQuery(in); got != want {
+			t.Errorf("apiLogQuery(%q) = %q,应为 %q", in, got, want)
+		}
+	}
+	if got := apiLogQuery("q=" + strings.Repeat("长", 400)); len([]rune(got)) != apiLogQueryMax+1 || !strings.HasSuffix(got, "…") {
+		t.Errorf("太长的参数应截到 %d 字: %d", apiLogQueryMax, len([]rune(got)))
+	}
+}
