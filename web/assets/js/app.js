@@ -659,17 +659,33 @@ function fitTables() {
 // (演示条、批量条、工具栏折行)框就伸到窗口外面去:表格里一条滚动条、整页又一条 —— 用户 11-17 截图:「尽量避免双滑条」。
 // 现在量出来:框的上沿在哪、框下面到页面底还有多少,把框正好撑到窗口底 —— 整页不用滚,只剩表格里那一条。
 // 窗口太矮、留给表格的不到几行时反过来:表格不限高,跟着整页滚(也只有一条)。两种情况内容都看得全,不截断。
-// 嵌在别的东西里面的(外部节点展开的面板、抽屉 / 弹框里的表)不归这里管:它上下都还有内容,整页本来就要滚,
+// 嵌在别的东西里面的(抽屉 / 弹框里的表)不归这里管:它上下都还有内容,整页本来就要滚,
 // 它自己很长时还是得有一条 —— 用户也说了「确实容不下的情况可以出现双滑条」,那里只在 CSS 里把高度上限放宽。
+// 外部订阅展开面板里的节点列表例外,见 fitPanelList。
 const FILL_MIN = 240; // 留给表格框的高度不到这么多(约五行)就不在里面滚了
+// fitPanelList 展开面板里的列表(外部订阅的节点;用户 11-22「支持勾选的点开后 上面的操作按钮应该常驻 只是列表滚动」):
+// 面板滚到顶时(展开时会自动滚过去)面板顶上的工具栏、批量栏和这个列表正好一屏 —— 整页不用动,只滚列表,上面的按钮一直在眼前。
+// 量出面板里列表上面那一截有多高(批量栏露出 / 收起、工具栏折行都会变,变了面板跟着变高 / 变矮,#page 的尺寸观察会再叫到这里),
+// 再扣掉顶栏、面板离顶栏的那点距离(.ext-panel 的 scroll-margin-top 比顶栏多的 .5rem)和下面留的一点边。
+function fitPanelList(wrap, panel, vh) {
+  const bar = document.querySelector('.topbar');
+  const above = wrap.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+  const room = vh - (bar ? bar.getBoundingClientRect().height : 0) - 8 - above - 12;
+  const want = Math.max(FILL_MIN, Math.floor(room)) + 'px';
+  if (wrap.style.maxHeight !== want) wrap.style.maxHeight = want;
+}
 function fitFill() {
   const page = document.getElementById('page');
   if (!page) return;
   const vh = window.innerHeight;
   page.querySelectorAll('.table-wrap.fill').forEach(wrap => {
-    if (wrap.closest('td') || !wrap.offsetParent) return;
+    if (!wrap.offsetParent) return;
     const tb = wrap.querySelector(':scope > table.grid');
-    if (tb && (tb.classList.contains('cards') || tb.classList.contains('rows2'))) { wrap.style.maxHeight = ''; return; } // 卡片 / 两行一台:样式里本来就不限高
+    const flat = tb && (tb.classList.contains('cards') || tb.classList.contains('rows2')); // 卡片 / 两行一台:样式里本来就不限高
+    const panel = wrap.closest('.ext-panel');
+    if (panel) { if (flat) wrap.style.maxHeight = ''; else fitPanelList(wrap, panel, vh); return; }
+    if (wrap.closest('td')) return;
+    if (flat) { wrap.style.maxHeight = ''; return; }
     const wr = wrap.getBoundingClientRect(), pr = page.getBoundingClientRect();
     // 框上沿在整页里的位置 + 框下面还有的内容(后面的兄弟、页面的下内边距):这两段和框自己多高无关
     const room = vh - (wr.top + window.scrollY) - Math.max(0, pr.bottom - wr.bottom);

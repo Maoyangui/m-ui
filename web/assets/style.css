@@ -1207,7 +1207,10 @@ td .chips { display: inline-flex; vertical-align: middle; }
 .ext-panel { contain: inline-size; scroll-margin-top: calc(var(--topbar-h) + .5rem); }
 @supports not (contain: inline-size) { .ext-panel { width: 0; min-width: 100%; } }
 .ext-tools { row-gap: .4rem; }
-.ext-tools .ext-row2 { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; flex-basis: 100%; }
+/* 「含已隐藏」「测速全部」靠右;放不下时整组折到下一行,还是靠右 */
+.ext-tools .ext-acts { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-left: auto; }
+/* 节点列表滚到头不带着整页走(用户 11-22「上面的操作按钮应该常驻 只是列表滚动」):列表框的高度见 app.js fitFill */
+.ext-wrap { overscroll-behavior: contain; }
 .ext-grid th.sortable { cursor: pointer; }
 .ext-sum { display: flex; flex-direction: column; align-items: flex-start; gap: .05rem; line-height: 1.25; }
 .ext-sum .sub { font-size: .72rem; color: var(--muted); white-space: nowrap; }

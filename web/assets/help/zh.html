@@ -589,7 +589,7 @@
     <h3>隐藏、改名、排除关键词</h3>
     <p class="lede">机场塞的"剩余流量""官网"之类信息节点,和不想给用户的节点,都可以不输出。</p>
     <ul>
-      <li>点 <b data-k="ext.expand">展开节点</b> 看解析出的全部节点;勾选后点 <b data-k="ext.hideSel">隐藏选中</b> / <b data-k="ext.showSel">显示选中</b>;单个节点可以 <b data-k="ext.rename">改名</b>。</li>
+      <li>点 <b data-k="ext.expand">展开节点</b> 看解析出的全部节点;勾选后节点列表上方出现一排按钮,点 <b data-k="ext.hideSel">隐藏</b> / <b data-k="ext.showSel">显示</b>;单个节点可以 <b data-k="ext.rename">改名</b>。</li>
       <li>隐藏和改名按名字 + 节点指纹(地址、端口、密码等)一起记,机场改名、调顺序后照样认得。</li>
       <li><b data-k="ext.exclude">排除关键词</b>:名字含这些词的节点不输出,逗号分隔,如 <code>官网,到期,剩余流量,套餐</code>;以后新出现的也管用。名字每次刷新都会变的信息节点,用它最合适。</li>
       <li>节点暂时消失时,隐藏 / 改名记录会保留,回来照样生效;确定不要了点 <b data-k="ext.cleanStale">清理</b>。</li>
@@ -601,7 +601,7 @@
     <h3>测速、测大陆连通、作上游</h3>
     <p class="lede">展开节点后可以直接测它们能不能用,也能把好用的节点变成上游。</p>
     <ul>
-      <li><b data-k="ext.testAll">测速全部</b> / <b data-k="ext.testSel">测速选中</b>:从每台启用的服务器真连一次测延迟,代表它作为上游时好不好用;勾 <b data-k="ext.inclHidden">含已隐藏</b> 连隐藏的一起测;随时可以 <b data-k="ext.testStop">停止测速</b>。显示 <b data-k="ext.cellUnsupported">不支持</b> 的是协议转不成本站出站、没法测。</li>
+      <li><b data-k="ext.testAll">测速全部</b>,或勾选后点 <b data-k="ext.testSel">测速</b>:从每台启用的服务器真连一次测延迟,代表它作为上游时好不好用;勾 <b data-k="ext.inclHidden">含已隐藏</b> 连隐藏的一起测;随时可以 <b data-k="ext.testStop">停止测速</b>。显示 <b data-k="ext.cellUnsupported">不支持</b> 的是协议转不成本站出站、没法测。</li>
       <li><b data-k="ext.reachSel">测大陆连通</b>:从大陆三网测点连选中的节点,看有没有被墙;hysteria2、tuic 这类 UDP 协议只能 ping 地址;国内中转入口香港不通属正常。</li>
       <li><b data-k="ext.addUp">添加为上游</b>:勾选节点、各起一个名字,直接变成上游(重名会报错,不会自动改名)。</li>
       <li>这样加的上游记着自己是哪个订阅的哪个节点(上游页名字下面写着)。机场给这个节点换了端口或参数时:上游<b>通着就不动</b>;只有它在所有用它的服务器上都连续测不通,面板才把订阅重新抓一遍、找到这个节点现在的配置,校验通过后换上(上游的名字不变,用它的线路不用动),并在 Telegram 和操作审计里记一笔。订阅里对不上唯一的节点(删了、或者像的不止一个)就不改,在上游页写明,等你处理。点上游名字下面那一行来源,可以把 <b data-k="up.followSwitch">跟随订阅的变化</b> 关掉:现在的配置原样留着,只是不再自动换,随时能再打开。手动改过这条上游的类型或参数,它也会自己停下(名字下面写着 <b data-k="up.followStopped">已停止跟随</b>);重新打开后,它再全部测不通时会换回订阅里的配置。</li>

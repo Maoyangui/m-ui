@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { keep, esc, fmtRelative, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, copy, matches, hostPort } from '../ui.js';
+import { keep, esc, fmtRelative, toast, confirm, openModal, openDrawer, registerActions, badge, field, check, empty, fv, fchk, copy, matches, hostPort, toggleBatchBar } from '../ui.js';
 
 // 外部节点的大陆连通:两边都不通对外部节点就是用不了(服务器巡检里那是"机器自己的问题",给黄色)
 const REACH_TONE = { ok: 'ok', partial: 'warn', blocked: 'danger', ipBlocked: 'danger', portBlocked: 'danger', abroadDown: 'danger', noProbes: '', error: '' };
@@ -173,7 +173,11 @@ async function fillPanel(id) {
   if (focusNext === id) { focusNext = 0; if (again.scrollIntoView) again.scrollIntoView({ block: 'start' }); }
 }
 
-// 工具栏两行:第一行搜索、筛选、视图、服务器列;第二行是动作。子表放在自带滚动区里(表头吸顶、前两列吸左)
+// 工具栏:搜索、筛选、视图、服务器列、计数,右边是「含已隐藏」「测速全部」;勾了节点才在节点列表正上方出现批量栏(已选 N、测速、测大陆连通、
+// 隐藏、显示、添加为上游、取消选择;前面有「已选 N」,按钮用短词,和用户页一样),和其它列表页一样(用户 11-22:「没有勾选的时候不显示那些操作按钮是对的
+// 但是勾选了应该出现在对应列表上方」)。
+// 子表放在自带滚动区里(表头吸顶、前两列吸左);桌面上它的高度让「工具栏 + 批量栏 + 列表」正好一屏(app.js fitFill),只滚列表、按钮一直在眼前;
+// 手机上节点排成卡片、整页滚,批量栏吸在顶栏下面
 const FILTERS = ['all', 'ok', 'bad', 'hidden', 'sel'];
 function panelHTML(id, c) {
   const stale = c.stale ? `<span class="muted small" title="${esc(t('ext.staleHelp'))}">${t('ext.staleN', { n: c.stale })} <a href="#" data-act="ext.cleanStale" data-id="${id}">${t('ext.cleanStale')}</a></span>` : '';
@@ -188,19 +192,21 @@ function panelHTML(id, c) {
       <div class="seg sm">${FILTERS.map(k => `<button data-act="ext.filter" data-id="${id}" data-f="${k}" class="${k === f ? 'active' : ''}">${t('ext.f.' + k)}</button>`).join('')}</div>
       ${servers.length > 1 ? `<div class="seg sm ext-view">${['sum', 'grid'].map(v => `<button data-act="ext.view" data-id="${id}" data-v="${v}" class="${v === view ? 'active' : ''}" title="${esc(t('ext.view.' + v + 'Help'))}">${t('ext.view.' + v)}</button>`).join('')}</div>` : ''}
       ${colMenu}
-      <span class="muted small" id="ext-count-${id}"></span>${stale}<span class="grow"></span>
-      <div class="ext-row2">
-        <span class="badge primary" id="ext-seln-${id}" hidden></span>
-        <button class="btn sm" data-act="ext.testSel" data-id="${id}" data-needs-sel disabled>${t('ext.testSel')}</button>
-        <button class="btn sm" data-act="ext.reachSel" data-id="${id}" title="${esc(t('ext.reachHelp'))}" data-needs-sel disabled>${t('ext.reachSel')}</button>
-        <button class="btn sm" data-act="ext.hideSel" data-id="${id}" title="${esc(t('ext.hideHelp'))}" data-needs-sel disabled>${t('ext.hideSel')}</button>
-        <button class="btn sm" data-act="ext.showSel" data-id="${id}" data-needs-sel disabled>${t('ext.showSel')}</button>
-        <button class="btn sm primary" data-act="ext.addUp" data-id="${id}" data-needs-sel disabled>${t('ext.addUp')}</button>
-        <span class="grow"></span>
+      <span class="muted small" id="ext-count-${id}"></span>${stale}
+      <div class="ext-acts">
         <label class="ext-incl"><input type="checkbox" data-change="ext.inclHidden" data-id="${id}" ${inclHidden[id] ? 'checked' : ''}> ${t('ext.inclHidden')}</label>
         <button class="btn sm" data-act="ext.testAll" data-id="${id}" title="${esc(t('ext.testAllHelp'))}">${t('ext.testAll')}</button>
         <button class="btn sm danger" data-act="ext.testStop" data-id="${id}" id="ext-stop-${id}" ${jobs[id] && jobs[id].job ? '' : 'hidden'}>${t('ext.testStop')}</button>
       </div>
+    </div>
+    <div class="toolbar batch-bar ext-batch" id="ext-batch-${id}" hidden>
+      <span class="badge primary" id="ext-seln-${id}"></span>
+      <button class="btn sm" data-act="ext.testSel" data-id="${id}">${t('ext.testSel')}</button>
+      <button class="btn sm" data-act="ext.reachSel" data-id="${id}" title="${esc(t('ext.reachHelp'))}">${t('ext.reachSel')}</button>
+      <button class="btn sm" data-act="ext.hideSel" data-id="${id}" title="${esc(t('ext.hideHelp'))}">${t('ext.hideSel')}</button>
+      <button class="btn sm" data-act="ext.showSel" data-id="${id}">${t('ext.showSel')}</button>
+      <button class="btn sm primary" data-act="ext.addUp" data-id="${id}">${t('ext.addUp')}</button>
+      <button class="btn sm ghost" data-act="ext.clearSel" data-id="${id}">${t('line.batch.clear')}</button>
     </div>
     <div class="table-wrap fill ext-wrap" id="ext-wrap-${id}" style="--fill-reserve:5rem"></div>
     <div class="ext-more" id="ext-more-${id}" hidden></div>
@@ -238,7 +244,7 @@ function renderTable(id) {
   renderSubBody(id);
 }
 
-// 搜索 → 筛选 → 排序。全选、测速选中都作用于筛选后的全部(不只是画出来的那一批)
+// 搜索 → 筛选 → 排序。全选、批量栏的「测速」都作用于筛选后的全部(不只是画出来的那一批)
 const visible = (id, c) => {
   const q = (query[id] || '').trim(), f = filt[id] || 'all';
   const res = results[id] || {}, sel = picked[id] || new Set(), servers = c.servers || [];
@@ -363,15 +369,16 @@ function renderSubBody(id) {
   updateCount(id);
 }
 
-function updateCount(id) {
+// from:刚勾 / 取消的那个勾选框(批量栏露出 / 收起时让它那一行不跳,见 ui.js toggleBatchBar)
+function updateCount(id, from) {
   const cnt = document.getElementById('ext-count-' + id), c = cache[id];
   if (!cnt || !c) return;
   const sel = picked[id];
-  // 「选中」那几个按钮没勾节点时是灰的(以前一直亮着,点了才弹「先勾选节点」);勾了几个写在最前面
-  const n = sel ? sel.size : 0, bar = cnt.closest ? cnt.closest('.ext-tools') : null;
-  if (bar) bar.querySelectorAll('[data-needs-sel]').forEach(b => { b.disabled = !n; });
+  // 批量栏勾了才出现,在节点列表正上方;「已选 N」先填好再露出
+  const n = sel ? sel.size : 0;
   const chip = document.getElementById('ext-seln-' + id);
-  if (chip) { chip.hidden = !n; chip.textContent = t('user.selected', { n }); }
+  if (chip) chip.textContent = t('user.selected', { n });
+  toggleBatchBar(document.getElementById('ext-batch-' + id), n > 0, from);
   const out = (c.nodes || []).filter(n => !n.hidden).length;
   const shown = (filt[id] || 'all') !== 'all' || (query[id] || '').trim() ? visible(id, c).length : -1;
   cnt.textContent = t('ext.countOut', { n: (c.nodes || []).length, out })
@@ -682,7 +689,8 @@ registerActions({
     renderTable(id);
   },
   'ext.more': id => { id = Number(id); limits[id] = (limits[id] || PAGE) + PAGE; renderSubBody(id); },
-  'ext.pick': (id, el) => { const s = picked[id] || (picked[id] = new Set()); if (el.checked) s.add(el.dataset.key); else s.delete(el.dataset.key); updateCount(Number(id)); },
+  'ext.pick': (id, el) => { const s = picked[id] || (picked[id] = new Set()); if (el.checked) s.add(el.dataset.key); else s.delete(el.dataset.key); updateCount(Number(id), el); },
+  'ext.clearSel': id => { id = Number(id); picked[id] = new Set(); renderSubBody(id); },
   'ext.pickAll': (id, el) => {
     id = Number(id); const c = cache[id]; if (!c) return;
     const s = picked[id] || (picked[id] = new Set());
