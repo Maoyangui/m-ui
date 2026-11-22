@@ -193,7 +193,7 @@ func TestUnauthorizedTellsResellerPanel(t *testing.T) {
 }
 
 // 帮助页是普通的内嵌静态文件:和面板其它前端文件一样经 assetCache 提供。网页和样式不让浏览器存(no-store),
-// 脚本带内容哈希 ETag、要求每次校验;帮助页内容一变 ETag 就变,升级后浏览器不会看到旧说明。
+// 脚本带内容哈希 ETag、要求每次校验(内容一变 ETag 就变):升级后浏览器不会看到旧说明。
 func TestHelpPageServedWithAssets(t *testing.T) {
 	sub, err := fs.Sub(assets, "assets")
 	if err != nil {

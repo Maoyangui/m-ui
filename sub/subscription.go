@@ -41,7 +41,7 @@ type Options struct {
 	// BuyURL 「选购 / 续费」地址,已按 buyURL(rs) 解析过(代理填了用代理的,否则用主面板的)。
 	// 非空时随订阅发一个 Profile-Web-Page-Url 头,客户端就能在订阅卡片上摆一个续费入口。
 	BuyURL string
-	// Download 是浏览器在下载订阅(地址里写明了 ?format=):文件名带上格式的后缀(.yaml / .json / .txt),
+	// Download 是浏览器在下载订阅(地址里写明了 ?format=,或者订阅页关着):文件名带上格式的后缀(.yaml / .json / .txt),
 	// 不然存下来的文件没有扩展名,有的还被下载器起成「3.bin」。只给浏览器:Clash 系客户端拿这个文件名当配置名,
 	// 带了后缀客户端里就显示成「名字.yaml」。
 	Download bool
