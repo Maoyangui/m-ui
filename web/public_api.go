@@ -129,6 +129,23 @@ func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request)
 	s.publicAPI(w, r, sc)
 }
 
+// apiMount 外部 API 挂在「面板路径 + api/v1/」下(server.go、reseller_panel.go:api := base + "api/",再挂 api + "v1/")。
+const apiMount = "/api/v1/"
+
+// apiParts 外部 API 的路径在挂载点之后的部分(rest)和各段(parts);不是外部 API 的路径 ok 为 false。
+// 按最后一个「/api/v1/」切:挂载点之后的合法路径不会再出现它(那得是用户名 api 后面跟一段 v1,不是任何接口),
+// 面板路径自己含 /api/v1/ 也不怕,挂载点总在它后面。以前按最后一个「/v1/」切,用户名正好叫 v1 时
+// 「…/users/v1/traffic」只剩「traffic」,这个用户的子接口(流量、订阅地址、启停、续费……)全部 404(v0.8.1 就有)。
+func apiParts(path string) (rest string, parts []string, ok bool) {
+	full := strings.TrimSuffix(path, "/")
+	idx := strings.LastIndex(full, apiMount)
+	if idx < 0 {
+		return "", nil, false
+	}
+	rest = full[idx+len(apiMount):]
+	return rest, strings.Split(rest, "/"), true
+}
+
 func (s *Server) publicAPI(w http.ResponseWriter, r *http.Request, sc apiScope) {
 	w, finish := s.apiLogStart(w, r, sc) // 这把密钥的调用日志(关了就不记,见 api_logs.go)
 	defer finish()
@@ -138,13 +155,11 @@ func (s *Server) publicAPI(w http.ResponseWriter, r *http.Request, sc apiScope) 
 		return
 	}
 	defer done()
-	full := strings.TrimSuffix(r.URL.Path, "/")
-	idx := strings.LastIndex(full, "/v1/")
-	if idx < 0 {
+	_, parts, isAPI := apiParts(r.URL.Path)
+	if !isAPI {
 		http.NotFound(w, r)
 		return
 	}
-	parts := strings.Split(full[idx+4:], "/")
 	if need := apiPermFor(r.Method, parts); !sc.allowed(need) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "这把密钥没有「" + permTitle(need) + "」权限", "permission": need})
 		return

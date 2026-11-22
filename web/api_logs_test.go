@@ -66,6 +66,11 @@ func TestAPILogAction(t *testing.T) {
 		{"POST", "/app/api/v1/users/bob/plan", `{}`, "user.renew", "bob"},
 		{"POST", "/app/api/v1/users/bob/change", `{}`, "user.change", "bob"},
 		{"GET", "/app/api/v1/what", "", "unknown", ""},
+		// 用户名正好叫 v1 / api、面板路径自己含 /api/v1/:和路由同一个切法(apiParts)
+		{"GET", "/app/api/v1/users/v1/traffic", "", "user.traffic", "v1"},
+		{"POST", "/app/api/v1/users/v1/enable", "", "user.enable", "v1"},
+		{"GET", "/app/api/v1/users/api/sub", "", "user.sub", "api"},
+		{"GET", "/api/v1/api/v1/users/bob", "", "user.get", "bob"},
 	}
 	for _, c := range cases {
 		path, parts := apiLogPath(c.path)

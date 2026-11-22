@@ -120,15 +120,14 @@ func (s *Server) apiLogPush(row model.ApiKeyLog) {
 	}
 }
 
-// apiLogPath 记下的路径从 /api/v1/ 起(前面是面板的路径,本身就是秘密,不进日志),和接口文档里的写法一样;parts 是 /v1/ 之后的各段。
+// apiLogPath 记下的路径从 /api/v1/ 起(前面是面板的路径,本身就是秘密,不进日志),和接口文档里的写法一样;parts 是 /api/v1/ 之后的各段
+// (和路由同一个切法,见 apiParts)。
 func apiLogPath(full string) (string, []string) {
-	full = strings.TrimSuffix(full, "/")
-	idx := strings.LastIndex(full, "/v1/")
-	if idx < 0 {
-		return "/api/v1/", nil
+	rest, parts, ok := apiParts(full)
+	if !ok {
+		return apiMount, nil
 	}
-	rest := full[idx+4:]
-	return "/api/v1/" + rest, strings.Split(rest, "/")
+	return apiMount + rest, parts
 }
 
 // apiLogBody 请求体:JSON 的话把敏感键的值换成 ***(任意层级),再压成一行、截到 apiLogBodyMax 字;不是 JSON 的只记多少字节。
