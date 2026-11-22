@@ -30,6 +30,8 @@
   /* 字号:正文 14px,说明 13px,小字 12px */
   --fs-xs: 12px; --fs-sm: 13px; --fs-base: 14px; --fs-md: 15px; --fs-lg: 17px; --fs-xl: 20px; --fs-2xl: 24px;
   --ctl-h: 34px; --ctl-h-sm: 28px;
+  /* 小数字框的宽度 = 要放下的位数 × 1ch + 这一截(左右内边距 .7rem×2、边框 2px、桌面浏览器数字框的上下箭头留 1.25rem),见 .ops-num */
+  --num-x: calc(2.65rem + 2px);
   --sidebar-w: 204px;
   /* 内容区最宽:列表页随窗口放宽(fluid),表单类页面保持 1600 */
   --page-max: 1600px; --page-max-fluid: 2400px; --topbar-h: 3.75rem;
@@ -750,9 +752,12 @@ table.grid.cards.ops-table .ops-ctl { flex-wrap: wrap; }
 .ops-ctl { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .7rem; }
 .ops-num { display: inline-flex; align-items: center; gap: .4rem; font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; }
 .ops-num input { width: 5rem; height: var(--ctl-h-sm); }
-.ops-num input.w8 { width: 7.5rem; } .ops-num input.w5 { width: 4.25rem; }
+/* 小数字框按最多要放下几位数定宽:Nch 跟着实际用的字体走(Linux、macOS 的数字比 Windows 的宽),再加 --num-x(内边距、边框、上下箭头);
+   外面套 max() 不比原来的宽度窄,Windows 上看着和以前一样。11-22 在测试机上查到:Linux 的字体下「20480」在 5.6rem 的框里被裁掉 5px,
+   同样定死宽度的数字框(下面的端口、备份留几份、套餐 / 服务器的重置天数、线路的握手端口、防火墙规则的小时数)一起按位数改 */
+.ops-num input.w8 { width: max(7.5rem, calc(7ch + var(--num-x))); } .ops-num input.w5 { width: 4.25rem; }
 /* 系统日志的上限(MB,最多 20480)和保留天数(最多 3650):Firefox 的数字框一直显示上下箭头,4.25rem 只剩 33px 放数字,默认的 200 都显示不全(11-21 火狐补测发现) */
-.ops-num input.w6 { width: 5.6rem; }
+.ops-num input.w6 { width: max(5.6rem, calc(5ch + var(--num-x))); }
 .ops-chk { display: inline-flex; align-items: center; gap: .4rem; font-size: var(--fs-xs); color: var(--text-2); max-width: 20rem; cursor: pointer; }
 table.grid.cards.ops-table .ops-ctl { justify-content: flex-end; }
 table.grid.cards.ops-table .ops-name .sub-cell, table.grid.cards.ops-table .ops-cur .sub-cell { max-width: none; }
@@ -764,7 +769,7 @@ textarea.ops-sysctl { width: 100%; min-height: 19rem; margin: .7rem 0 .6rem; fon
 .ops-warp .kv { margin-top: .8rem; align-items: center; }
 .ops-warp .kv .sub-cell { margin-top: .2rem; font-size: var(--fs-xs); color: var(--muted); }
 .ops-port { display: inline-flex; align-items: center; gap: .15rem; }
-.ops-port input { width: 6rem; height: var(--ctl-h-sm); }
+.ops-port input { width: max(6rem, calc(5ch + var(--num-x))); height: var(--ctl-h-sm); }
 .ops-inline { margin-left: .6rem; }
 .ops-warp-foot { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin-top: auto; padding-top: 1rem; }
 .ops-warp .kv + .ops-warp-foot { border-top: 1px solid var(--divider); margin-top: 1rem; }
@@ -797,7 +802,7 @@ textarea.ops-sysctl { width: 100%; min-height: 19rem; margin: .7rem 0 .6rem; fon
 .bk-line { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem .5rem; margin: 0; font-size: var(--fs-base); }
 .bk-line .nw { display: inline-flex; align-items: center; gap: .5rem; white-space: nowrap; }
 .bk-line select { width: auto; min-width: 5.75rem; }
-.bk-line input[type=number] { width: 4.5rem; text-align: center; }
+.bk-line input[type=number] { width: max(4.5rem, calc(3ch + var(--num-x))); text-align: center; } /* 留几份:最多 365 */
 .bk-auto-body > .hint { margin: .45rem 0 0; font-size: var(--fs-xs); }
 .bk-auto-body.off, .bk-tg.off { opacity: .55; }
 .bk-fail { margin: 0 0 .7rem; padding: .45rem .7rem; border-radius: var(--radius-sm); background: var(--danger-soft); color: var(--danger-text); font-size: var(--fs-sm); overflow-wrap: anywhere; }
@@ -1798,7 +1803,7 @@ details.menu .menu-list:has(button > b + span) { min-width: 17rem; }
 .pl-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: .5rem; margin-top: .9rem; }
 .pl-opts .sw-row { background: var(--surface); align-items: center; }
 .pl-every { display: inline-flex; align-items: center; gap: .4rem; flex: none; font-size: var(--fs-sm); color: var(--text-2); white-space: nowrap; }
-.pl-every input { width: 4.6rem; }
+.pl-every input { width: max(4.6rem, calc(4ch + var(--num-x))); } /* 每几天重置:按四位数留 */
 .pl-form > .hint { margin-top: .5rem; }
 @media (max-width: 900px) { .pl-nums { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 700px) { .pl-head { grid-template-columns: minmax(0, 1fr); } .pl-nums { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pl-opts .sw-row { flex-wrap: wrap; } }
@@ -1812,7 +1817,7 @@ details.menu .menu-list:has(button > b + span) { min-width: 17rem; }
 .ln-tls .hint { margin: 0; flex: 1 1 14rem; }
 .ln-hs { flex-wrap: wrap; }
 .ln-hs > input:first-child { flex: 1 1 12rem; min-width: 0; }
-.ln-hs > input[type=number] { flex: 0 0 5.2rem; }
+.ln-hs > input[type=number] { flex: 0 0 max(5.2rem, calc(5ch + var(--num-x))); } /* 握手端口:最多 65535 */
 .ln-adv-proto { margin-bottom: .9rem; }
 .ln-one-fam { margin-top: 1rem; max-width: 24rem; }
 .cert-pick-btn > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -2315,7 +2320,7 @@ pre.doc-ex { max-height: none; }
 .nq-cycle select { flex: 1 1 6.5rem; width: auto; min-width: 0; }
 .nq-cyc { display: inline-flex; flex: none; align-items: center; gap: .35rem; font-size: var(--fs-sm); color: var(--text-2); white-space: nowrap; }
 .nq-cyc[hidden] { display: none; }
-.nq-cyc input { width: 4.4rem; }
+.nq-cyc input { width: max(4.4rem, calc(4ch + var(--num-x))); } /* 每几天重置最多 3650;每月几号和它同宽 */
 .nq-use { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .8rem; margin: 0 0 .9rem; font-size: var(--fs-sm); }
 .nq-use .nq-bar { width: 150px; height: 6px; }
 .nq-use-txt { flex: 1 1 15rem; min-width: 0; font-variant-numeric: tabular-nums; }
@@ -2442,7 +2447,7 @@ table.grid.cards td.wall-def { display: none; }
 .wall-exp { flex-wrap: wrap; }
 .wall-exp select { flex: 1 1 9rem; min-width: 0; }
 .wall-hours { display: inline-flex; align-items: center; gap: .4rem; font-size: var(--fs-sm); color: var(--text-2); }
-.wall-hours input { width: 5.5rem; flex: none; }
+.wall-hours input { width: max(5.5rem, calc(5ch + var(--num-x))); flex: none; } /* 小时数:最多 87600 */
 .wall-scope .node-list[hidden] { display: none; }
 .wall-scope > .hint { margin-top: 0; }
 .wall-scope > .hint:empty { display: none; }
@@ -2971,7 +2976,7 @@ html.rw-lock { overflow: hidden; }
 }
 @media (prefers-reduced-motion: reduce) { .qh-tip, .np-pop { animation: none; } }
 /* 简洁模式的排版(用户 11-21「隐藏文字之后 有的区域是不是可以稍微改善排版 变得简洁紧凑一点 同时要注意整体页面的视觉排版」):
-   对比过三档 —— 只藏文字 / 适度收紧 / 更紧凑(截图在 NEXT2_CHANGELOG D-06),定的是适度收紧:说明收起来以后行距、卡片下边距收一点,
+   对比过三档 —— 只藏文字 / 适度收紧 / 更紧凑,定的是适度收紧:说明收起来以后行距、卡片下边距收一点,
    设置项的名称和控件垂直居中(详细模式下名称下面有说明,靠上对齐才对;简洁模式只剩一行名称,靠上就和输入框里的字错开了),
    (规则弹框里和输入框并排的那格开关另改成开关 + 名称并排、落在输入框那一行,见 .rl-tight) */
 .set-sec > .card-head h2 > .qh { margin-left: -.2rem; } /* 这个标题是弹性布局、自带 .5rem 间距 */
