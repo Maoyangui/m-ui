@@ -223,7 +223,9 @@ func TestSupportPageRendersFully(t *testing.T) {
 	} {
 		w := httptest.NewRecorder()
 		s.handleSupport(w, httptest.NewRequest("GET", "http://panel:2053/app/support?lang="+lang, nil))
-		page := w.Body.String()
+		// 换行先统一成 \n 再比:Windows 上按 core.autocrlf=true 检出时 support.html 是 CRLF,页面整页渲染完了,
+		// 结尾也是「</script>\r\n</body>…」,按 LF 找会误报没渲染完(11-23 第五遍审计 F5-05)
+		page := strings.ReplaceAll(w.Body.String(), "\r\n", "\n")
 		// 联系方式两行:作者 Telegram 与交流群,都能复制、能直接打开(11-14 用户要求加群聊)
 		contacts := []string{`data-copy="@yangweii"`, `href="https://t.me/yangweii"`, `data-copy="https://t.me/godusevpncn"`, `href="https://t.me/godusevpncn"`}
 		for _, frag := range append([]string{want, "support/pledge-check", "var STALE = 30000", "querySelectorAll('[data-copy]')", "</script>\n</body>\n</html>"}, contacts...) {
