@@ -2,7 +2,7 @@ import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del, SLOW, LONG } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { esc, toast, confirm, openModal, closeModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtDate, fmtRelative, chipList, fieldBox } from '../ui.js';
+import { esc, toast, confirm, openModal, closeModal, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, fmtDate, fmtRelative, chipList, fieldBox, toggleBatchBar } from '../ui.js';
 import { upstreamBad } from '../issues.js';
 // 展开着逐台明细的上游 id(数字):平时一格只有状态点和一句结论,点开才逐台列出来(见 detailHTML)
 const expanded = new Set();
@@ -292,11 +292,10 @@ const visibleUps = () => state.upstreams.filter(u => { const o = parseOpts(u.opt
 
 // syncBatch 批量操作条跟着勾选变:选了才出现;「停止 / 恢复跟随」只在选中的里有从外部节点加来的(且有能改的)时才出;
 // 全选框:列出来的全勾上是勾,勾了一部分是半勾
-function syncBatch(rows = visibleUps()) {
+function syncBatch(rows = visibleUps(), from = null) {
   for (const id of [...selected]) if (!state.upstreams.some(u => u.id === id)) selected.delete(id); // 删掉的不再算选中
   const bar = document.getElementById('up-batch-bar');
   if (!bar) return;
-  bar.hidden = selected.size === 0;
   document.getElementById('up-batch-count').textContent = t('line.selected', { n: selected.size });
   const src = state.upstreams.filter(u => selected.has(u.id) && u.source);
   document.getElementById('up-batch-follow').hidden = !src.some(u => u.source.stop);
@@ -307,6 +306,8 @@ function syncBatch(rows = visibleUps()) {
     allBtn.hidden = !left;
     allBtn.textContent = t('up.batch.selVisible', { n: rows.length });
   }
+  // 内容先填好再露出 / 收起(量下面的列表挪了多少时,批量栏已经是最终的高度);刚勾的那一行不跳
+  toggleBatchBar(bar, selected.size > 0, from);
   const all = document.getElementById('up-sel-all');
   if (all) {
     const n = rows.filter(u => selected.has(u.id)).length;
@@ -657,7 +658,7 @@ registerActions({
     cb.checked ? selected.add(Number(id)) : selected.delete(Number(id));
     const tr = cb.closest('tr');
     if (tr) tr.classList.toggle('selected', cb.checked);
-    syncBatch(); // 不整表重画:勾的那个框留着焦点,键盘接着往下勾
+    syncBatch(undefined, cb); // 不整表重画:勾的那个框留着焦点,键盘接着往下勾
   },
   'up.clearSel': () => { selected.clear(); renderRows(); },
   'up.selVisible': () => { visibleUps().forEach(u => selected.add(u.id)); renderRows(); },

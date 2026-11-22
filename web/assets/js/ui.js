@@ -201,6 +201,44 @@ export function openSettingsAt(id) {
   location.hash = '#/settings';
 }
 
+// ---- 批量栏(勾了才出现,在对应列表的正上方;用户 11-22)----
+// 批量栏一露出来 / 收起来,下面的列表就被顶下去 / 拉上来一截,刚勾的那一行跟着跳。这里量出列表挪了多少、往回滚同样多,让那一行留在原处:
+//   - 列表框自己在滚(桌面上的表格框、外部订阅的节点框):滚这个框;框还在最上面时不动(往回滚会把头几行藏到框的上沿外面);
+//   - 整页在滚(手机上排成卡片):滚整页。浏览器自己的滚动锚定(Chrome、Firefox 有,Safari 没有)这一下先临时关掉、两帧后恢复:
+//     勾选后整表重画的页面上它有时抵、有时不抵(它拿来当参照的那一行被换掉了),抵了这里再抵又成了两倍 —— 统一由这里抵。
+// 往回滚完,刚勾的那一个(anchor;不给就看焦点在不在列表里)要是被盖住了 —— 桌面上是藏到了列表框上沿外面,手机上是被吸在顶上的批量栏挡着 ——
+// 再往回挪到它露出来。
+const BOX_MIN = 240; // 表格框最矮多高(同 app.js 的 FILL_MIN)
+let anchorOff = 0;
+export function toggleBatchBar(bar, show, anchor) {
+  if (!bar || bar.hidden === !show) return;
+  let list = bar.nextElementSibling;
+  while (list && !list.matches('.table-wrap')) list = list.nextElementSibling;
+  if (!list) { bar.hidden = !show; return; }
+  const boxScroll = list.scrollHeight > list.clientHeight + 1 && getComputedStyle(list).overflowY !== 'visible';
+  if (!boxScroll && window.scrollY > 0) {
+    const root = document.documentElement, my = ++anchorOff;
+    root.style.overflowAnchor = 'none';
+    requestAnimationFrame(() => requestAnimationFrame(() => { if (my === anchorOff) root.style.overflowAnchor = ''; }));
+  }
+  const y0 = list.getBoundingClientRect().top;
+  bar.hidden = !show;
+  const a = anchor || document.activeElement;
+  const anchored = !!a && a.isConnected && list.contains(a);
+  const dy = list.getBoundingClientRect().top - y0;
+  if (dy) {
+    if (boxScroll) {
+      // 框的限高先让出(或收回)批量栏这么高 —— app.js 的 fitFill 下一帧也是这样算的;先改了,框已经滚到底时才有余地往回滚
+      if (/px$/.test(list.style.maxHeight)) list.style.maxHeight = Math.max(BOX_MIN, Math.round(parseFloat(list.style.maxHeight) - dy)) + 'px';
+      // 知道勾的是哪一行就一定往回滚(它原来在框里看得见,滚回去还看得见);不知道的,框在最上面时不动
+      if (anchored || list.scrollTop > 0) list.scrollTop += dy;
+    } else if (window.scrollY > 0) window.scrollBy(0, dy);
+  }
+  if (!anchored) return;
+  const top = a.getBoundingClientRect().top, edge = Math.max(list.getBoundingClientRect().top, show ? bar.getBoundingClientRect().bottom : -Infinity);
+  if (top < edge) { const d = edge - top + 8; if (boxScroll) list.scrollTop -= d; else window.scrollBy(0, -d); }
+}
+
 // ---- 事件委托:data-act="name" data-id="..." ----
 const actions = {};
 export function registerActions(map) { Object.assign(actions, map); }

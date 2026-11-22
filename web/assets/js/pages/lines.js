@@ -2,7 +2,7 @@ import { state, load } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
-import { keep, esc, toast, confirm, openModal, openDrawer, drawerOpen, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, setText, chipList, fieldBox, fmtBytes, tzOffsetMinutes, switchRow, fmtTime } from '../ui.js';
+import { keep, esc, toast, confirm, openModal, openDrawer, drawerOpen, registerActions, badge, dot, field, check, empty, fv, fchk, matches, debounce, setHTML, setText, chipList, fieldBox, fmtBytes, tzOffsetMinutes, switchRow, fmtTime, toggleBatchBar } from '../ui.js';
 import { barChart, bucketFor } from '../chart.js';
 import { serverOfIP } from '../relayip.js';
 import { openCertDrawer, certLabel } from '../certpicker.js';
@@ -10,6 +10,7 @@ import { editRelayUpstream } from './upstreams.js';
 import { loadReach, reachLoaded, v6Of, v6LineBadge, v6ForLine, groupChip, v6Chip, v6Label, v6Explain, v6Tone, verdictLabel, verdictTone } from '../reach.js';
 
 const selected = new Set(); // 批量设置勾选的线路 id
+let selFrom = null; // 刚勾 / 取消的那个勾选框:批量栏露出 / 收起时让它那一行不跳(见 ui.js toggleBatchBar)
 export const title = () => t('line.title');
 export const subtitle = () => t('line.subtitle');
 let query = '';
@@ -153,7 +154,8 @@ function renderRows() {
   document.getElementById('line-count').textContent = `${rows.length} / ${state.lines.length}`;
   for (const id of [...selected]) if (!state.lines.some(l => l.id === id)) selected.delete(id); // 被删掉的线路不再算选中
   const bar = document.getElementById('line-batch-bar');
-  if (bar) { bar.hidden = selected.size === 0; document.getElementById('line-batch-count').textContent = t('line.selected', { n: selected.size }); }
+  if (bar) { document.getElementById('line-batch-count').textContent = t('line.selected', { n: selected.size }); toggleBatchBar(bar, selected.size > 0, selFrom); } // 先填数字再露出;刚勾的那一行不跳
+  selFrom = null;
   const selAll = document.getElementById('line-sel-all');
   if (selAll) selAll.checked = rows.length > 0 && rows.every(l => selected.has(l.id));
   // 库里一条线路都没有(不是搜索没结果):说清线路是什么,并给出第一步
@@ -1826,7 +1828,7 @@ registerActions({
     document.getElementById('f-hs-res').hidden = true;
   },
   'line.pickCert': () => pickLineCert(),
-  'line.sel': (id, cb) => { cb.checked ? selected.add(Number(id)) : selected.delete(Number(id)); renderRows(); },
+  'line.sel': (id, cb) => { cb.checked ? selected.add(Number(id)) : selected.delete(Number(id)); selFrom = cb; renderRows(); },
   'line.clearSel': () => { selected.clear(); renderRows(); },
   'line.batch': async action => {
     if (!selected.size) return;

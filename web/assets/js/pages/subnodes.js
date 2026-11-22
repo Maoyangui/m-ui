@@ -15,7 +15,7 @@ import { expandByDefault } from '../snfold.js';
 import { state } from '../app.js';
 import { get, put } from '../api.js';
 import { t } from '../i18n.js';
-import { keep, esc, toast, confirm, openModal, registerActions, badge, field, empty, fv, fchk, matches, debounce, setHTML, switchRow } from '../ui.js';
+import { keep, esc, toast, confirm, openModal, registerActions, badge, field, empty, fv, fchk, matches, debounce, setHTML, switchRow, toggleBatchBar } from '../ui.js';
 
 export const title = () => t('sn.title');
 export const subtitle = () => t('sn.subtitle');
@@ -26,6 +26,7 @@ let fLine = 0;    // 只看这条线路(0 = 全部)
 let fServer = 0;  // 只看和这台服务器有关的:它上面的直连,经它中转的、转到它的入口(0 = 全部)
 let fKind = '';   // direct / relay('' = 全部)
 const selected = new Set(); // 勾选的节点:"线路 id:节点键"
+let selFrom = null; // 刚勾 / 取消的那个勾选框:批量栏露出 / 收起时让它那一行不跳(见 ui.js toggleBatchBar)
 const expanded = new Set(); // 展开着的线路 id(节点多时默认都收起,见 seedExpanded)
 let seeded = false;         // 默认的展开状态定过没有(进页面头一次有数据时定一次,之后跟着用户点的走)
 let online = {};            // 各节点此刻在线的用户数,键同上(GET lines/nodes/online;主机汇总本机和各副机报来的)
@@ -236,7 +237,8 @@ function renderRows() {
   const clear = document.getElementById('sn-clear');
   if (clear) clear.hidden = !filtered();
   const bar = document.getElementById('sn-batch-bar');
-  if (bar) { bar.hidden = selected.size === 0; document.getElementById('sn-batch-count').textContent = t('sn.selected', { n: selected.size }); }
+  if (bar) { document.getElementById('sn-batch-count').textContent = t('sn.selected', { n: selected.size }); toggleBatchBar(bar, selected.size > 0, selFrom); } // 先填数字再露出;刚勾的那一行不跳
+  selFrom = null;
   const selAll = document.getElementById('sn-sel-all');
   if (selAll) selAll.checked = shown > 0 && groups.every(g => g.list.every(nd => selected.has(idOf(g.l, nd))));
   if (!state.lines.length) { setHTML(body, `<tr><td colspan="8"><div class="empty-guide"><p>${esc(t('sn.empty'))}</p><a class="btn primary" href="#/lines">${esc(t('sn.goLines'))}</a></div></td></tr>`); return; }
@@ -398,11 +400,12 @@ registerActions({
       toast(e.message, 'err');
     }
   },
-  'sn.sel': (id, cb) => { cb.checked ? selected.add(id) : selected.delete(id); renderRows(); },
+  'sn.sel': (id, cb) => { cb.checked ? selected.add(id) : selected.delete(id); selFrom = cb; renderRows(); },
   // 分组行的勾选框:这条线路现在列出来的节点全选 / 全不选
   'sn.selLine': (id, cb) => {
     const g = visible().find(x => x.l.id === Number(id));
     if (g) for (const nd of g.list) cb.checked ? selected.add(idOf(g.l, nd)) : selected.delete(idOf(g.l, nd));
+    selFrom = cb;
     renderRows();
   },
   'sn.clearSel': () => { selected.clear(); renderRows(); },

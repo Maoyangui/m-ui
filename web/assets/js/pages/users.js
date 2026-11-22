@@ -21,7 +21,7 @@ const pickerNodes = () => (Array.isArray(state.nodes) && state.nodes.length) ? s
 const pickerItems = () => lineItems(state.lines, pickerNodes(), isReseller() ? (state.status.grants || []) : null, { relay: true });
 const refsOf = u => u.lineRefs || (u.lineIds || []).map(id => ({ lineId: id }));
 let picker = null;
-import { tzOffsetMinutes, switchRow } from '../ui.js';
+import { tzOffsetMinutes, switchRow, toggleBatchBar } from '../ui.js';
 
 export const title = () => t('user.title');
 export const subtitle = () => t('user.subtitle');
@@ -30,6 +30,7 @@ let query = '', filter = 'all', drawerUser = null, sortKey = 'id', sortDir = 1;
 let planFilter = 0, only = '';
 // 全选只勾当前页;筛选结果多于一页时,批量条里另给"选中全部 N 个筛选结果"
 const selected = new Set();
+let selFrom = null; // 刚勾 / 取消的那个勾选框:批量栏露出 / 收起时让它那一行不跳(见 ui.js toggleBatchBar)
 // 分页:全部用户 → 搜索 → 筛选 → 排序 → 只渲染当前页。上千用户时不再一次画出整张表。
 const PAGE_SIZES = [25, 50, 100];
 let page = 1, pageSize = 25;
@@ -203,8 +204,6 @@ function renderRows() {
   const rows = pageRows();
   document.getElementById('user-count').textContent = `${total} / ${state.users.length}`;
   setHTML('user-only', only ? `<span class="chip">${esc(t('user.filter.only', { what: only === 'expiring' ? t('user.filter.expiring', { d: expiringDays() }) : t('user.filter.quota', { p: quotaPct() }) }))} <button type="button" class="btn xs ghost" data-act="user.clearOnly" title="${esc(t('user.filter.clear'))}" aria-label="${esc(t('user.filter.clear'))}"><i class="i i-x"></i></button></span>` : '');
-  const bar = document.getElementById('batch-bar');
-  bar.hidden = selected.size === 0;
   document.getElementById('batch-count').textContent = t('user.selected', { n: selected.size });
   // 当前页全选了、筛选结果又不止一页:给一个"选中全部 N 个筛选结果"(筛选结果里还有没勾上的才给)。
   // 手机上表格没有表头、也就没有全选框:勾了任意一个就给,不用先把一页卡片逐个勾满
@@ -217,6 +216,9 @@ function renderRows() {
     allBtn.hidden = !((pageAll || mobile) && total > rows.length && vis.some(u => !selected.has(u.id)));
     allBtn.textContent = t('user.selAllFiltered', { n: total });
   }
+  // 批量栏的内容先填好再露出 / 收起(量下面的列表挪了多少时,批量栏已经是最终的高度);刚勾的那一行不跳(见 ui.js toggleBatchBar)
+  toggleBatchBar(document.getElementById('batch-bar'), selected.size > 0, selFrom);
+  selFrom = null;
   const selAll = document.getElementById('sel-all');
   if (selAll) selAll.checked = rows.length > 0 && rows.every(u => selected.has(u.id));
   renderPager(total);
@@ -801,7 +803,7 @@ registerActions({
       toast(skipped ? done + ' · ' + skipped : done, skipped ? 'warn' : 'ok');
     }, { saveText: t('user.importGo') });
   },
-  'user.sel': (id, cb) => { cb.checked ? selected.add(Number(id)) : selected.delete(Number(id)); renderRows(); },
+  'user.sel': (id, cb) => { cb.checked ? selected.add(Number(id)) : selected.delete(Number(id)); selFrom = cb; renderRows(); },
   'user.clearSel': () => { selected.clear(); renderRows(); },
   'user.batch': async action => {
     const ids = [...selected];
