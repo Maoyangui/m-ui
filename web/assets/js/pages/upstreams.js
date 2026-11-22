@@ -6,6 +6,8 @@ import { esc, toast, confirm, openModal, closeModal, registerActions, badge, dot
 import { upstreamBad } from '../issues.js';
 // 展开着逐台明细的上游 id(数字):平时一格只有状态点和一句结论,点开才逐台列出来(见 detailHTML)
 const expanded = new Set();
+// 勾选着的上游 id(用户 11-22「上游新增可勾选批量选择」):一起测试、组成上游组、停止 / 恢复跟随、删除。换页回来还在,删掉的不再算
+const selected = new Set();
 
 export const title = () => t('up.title');
 export const subtitle = () => t('up.subtitle');
@@ -49,12 +51,26 @@ export async function render(el) {
         <button data-act="up.addGroup"><b>${esc(t('up.addGroup'))}</b><span class="muted small" style="display:block">${esc(t('up.menu.groupHelp'))}</span></button>
       </div></details>
     </div>
-    <div class="table-wrap fill"><table class="grid" data-fit="p3:980 cards:820">
-      <thead><tr><th>${t('common.name')}</th><th>${t('common.type')}</th><th>${t('common.server')}</th><th class="c-p3">${t('up.linesUsing')}</th><th>${t('up.latency')}</th><th></th></tr></thead>
+    <div class="toolbar batch-bar" id="up-batch-bar" hidden>
+      <span class="badge primary" id="up-batch-count"></span>
+      <button class="btn sm" data-act="up.batchTest">${t('common.test')}</button>
+      <button class="btn sm" data-act="up.batchGroup">${t('up.batch.group')}</button>
+      <button class="btn sm" data-act="up.batchFollow" data-id="off" id="up-batch-unfollow" hidden>${t('up.batch.followOff')}</button>
+      <button class="btn sm" data-act="up.batchFollow" data-id="on" id="up-batch-follow" hidden>${t('up.batch.followOn')}</button>
+      <button class="btn sm danger" data-act="up.batchDel">${t('common.delete')}</button>
+      <button class="btn sm ghost" data-act="up.selVisible" id="up-batch-all" hidden></button>
+      <button class="btn sm ghost" data-act="up.clearSel">${t('line.batch.clear')}</button>
+    </div>
+    <div class="table-wrap fill"><table class="grid up-grid" data-fit="p3:980 p2:0 cards:820">
+      <thead><tr><th style="width:1.5rem"><input type="checkbox" id="up-sel-all" aria-label="${esc(t('up.selAll'))}"></th><th>${t('common.name')}</th><th>${t('common.type')}</th><th class="c-p2">${t('common.server')}</th><th class="c-p3">${t('up.linesUsing')}</th><th>${t('up.latency')}</th><th></th></tr></thead>
       <tbody id="up-body"></tbody>
     </table></div>`;
   document.getElementById('up-q').addEventListener('input', debounce(e => { query = e.target.value; renderRows(); }));
   document.getElementById('up-onlybad').addEventListener('change', e => { onlyBad = e.target.checked; renderRows(); });
+  document.getElementById('up-sel-all').addEventListener('change', e => {
+    visibleUps().forEach(u => (e.target.checked ? selected.add(u.id) : selected.delete(u.id)));
+    renderRows();
+  });
   renderRows();
   // 用定时巡检结果填充尚未手动测试过的行
   try {
@@ -271,14 +287,73 @@ function inUseDialog(u, use) {
     { saveText: t('up.inUse.go'), cancelText: t('common.close') });
 }
 
+// visibleUps 现在列出来的上游(搜索、「只看故障」筛过的):全选只选这些
+const visibleUps = () => state.upstreams.filter(u => { const o = parseOpts(u.options); return matches(query, u.name, u.type, o.server) && (!onlyBad || upstreamBad(results[u.id])); });
+
+// syncBatch 批量操作条跟着勾选变:选了才出现;「停止 / 恢复跟随」只在选中的里有从外部节点加来的(且有能改的)时才出;
+// 全选框:列出来的全勾上是勾,勾了一部分是半勾
+function syncBatch(rows = visibleUps()) {
+  for (const id of [...selected]) if (!state.upstreams.some(u => u.id === id)) selected.delete(id); // 删掉的不再算选中
+  const bar = document.getElementById('up-batch-bar');
+  if (!bar) return;
+  bar.hidden = selected.size === 0;
+  document.getElementById('up-batch-count').textContent = t('line.selected', { n: selected.size });
+  const src = state.upstreams.filter(u => selected.has(u.id) && u.source);
+  document.getElementById('up-batch-follow').hidden = !src.some(u => u.source.stop);
+  document.getElementById('up-batch-unfollow').hidden = !src.some(u => !u.source.stop);
+  const allBtn = document.getElementById('up-batch-all');
+  if (allBtn) {
+    const left = rows.filter(u => !selected.has(u.id)).length;
+    allBtn.hidden = !left;
+    allBtn.textContent = t('up.batch.selVisible', { n: rows.length });
+  }
+  const all = document.getElementById('up-sel-all');
+  if (all) {
+    const n = rows.filter(u => selected.has(u.id)).length;
+    all.checked = rows.length > 0 && n === rows.length;
+    all.indeterminate = n > 0 && n < rows.length;
+  }
+}
+
+// batchDelete 先在页面上算好哪些能删、哪些不能(和单条删除、后端同一口径:有线路在用 —— 自己的出站或分流规则指向它 —— 的不删;
+// 在上游组里的,那个组这次也一起删才删),确认框里两样都列出来,不用删完了才知道有几条没删;点了删,后端在一个事务里再判断一遍,以后端为准
+function batchDelete() {
+  const sel = state.upstreams.filter(u => selected.has(u.id));
+  const why = new Map();
+  sel.forEach(u => {
+    const ls = upstreamUsage(u).lines;
+    if (ls.length) why.set(u.id, t('up.batch.whyLines', { n: ls.length, names: ls.slice(0, 3).map(l => l.name).join(t('up.batch.sep')) + (ls.length > 3 ? '…' : '') }));
+  });
+  const goneGroups = new Set(sel.filter(u => u.type === GROUP && !why.has(u.id)).map(u => u.name));
+  sel.forEach(u => {
+    if (why.has(u.id) || u.type === GROUP) return;
+    const g = upstreamUsage(u).groups.find(n => !goneGroups.has(n));
+    if (g) why.set(u.id, t('up.batch.whyGroup', { g }));
+  });
+  const del = sel.filter(u => !why.has(u.id)), keep = sel.filter(u => why.has(u.id));
+  const MAX = 12;
+  const item = u => `<li${why.has(u.id) ? ' class="kept"' : ''}><span class="nm" title="${esc(u.name)}">${esc(u.name)}</span>${u.type === GROUP ? badge(t('up.group'), 'primary') : ''}${why.has(u.id) ? `<span class="why muted small">${esc(why.get(u.id))}</span>` : ''}</li>`;
+  const list = us => `<ul class="up-inuse">${us.slice(0, MAX).map(item).join('')}${us.length > MAX ? `<li class="muted">${esc(t('up.batch.more', { n: us.length - MAX }))}</li>` : ''}</ul>`;
+  const html = (del.length ? `<p class="confirm-text">${esc(t('up.batch.delList'))}</p>${list(del)}` : `<p class="confirm-text">${esc(t('up.batch.noneDeletable'))}</p>`)
+    + (keep.length ? `<p class="confirm-text up-keep">${esc(t('up.batch.skipList'))}</p>${list(keep)}` : '');
+  openModal(del.length ? t('up.batch.delTitle', { n: del.length }) : t('up.batch.delNone'), html, del.length ? async () => {
+    const r = await post('upstreams/batch', { ids: del.map(u => u.id), action: 'delete' });
+    await load('upstreams', 'lines', 'status');
+    renderRows();
+    const skipped = (r.skipped || []).length;
+    toast(skipped ? t('up.batch.deletedSkip', { n: r.deleted, m: skipped }) : t('up.batch.deleted', { n: r.deleted }), skipped ? 'err' : 'ok');
+  } : null, del.length ? { saveText: t('common.delete'), danger: true } : { cancelText: t('common.close') });
+}
+
 function renderRows() {
   const body = document.getElementById('up-body');
   if (!body) return;
   const using = upstreamLines();
   const online = new Set(state.onlines.upstreams || []);
-  const rows = state.upstreams.filter(u => { const o = parseOpts(u.options); return matches(query, u.name, u.type, o.server) && (!onlyBad || upstreamBad(results[u.id])); });
+  const rows = visibleUps();
   document.getElementById('up-count').textContent = `${rows.length} / ${state.upstreams.length}`;
-  if (!rows.length) { setHTML(body, `<tr><td colspan="6">${empty()}</td></tr>`); return; }
+  syncBatch(rows);
+  if (!rows.length) { setHTML(body, `<tr><td colspan="7">${empty()}</td></tr>`); return; }
   setHTML(body, rows.map(u => {
     const o = parseOpts(u.options);
     // 上游组的成员可能有一二十条:收成标签、超过 3 条折起来(+N 点开),不再拼成一长串把这一列撑宽
@@ -287,17 +362,19 @@ function renderRows() {
       : esc(o.server ? o.server + (o.server_port ? ':' + o.server_port : '') : '');
     // 展开着的:下面跟一条通栏(tr.up-sub)放逐台明细;卡片排法时这条通栏藏着,明细在卡片里(resultHTML 里那一份)
     const sub = detailHTML(u.id);
-    return `<tr${sub ? ' class="up-open"' : ''}>
+    const cls = [sub ? 'up-open' : '', selected.has(u.id) ? 'selected' : ''].filter(Boolean).join(' ');
+    return `<tr${cls ? ` class="${cls}"` : ''}>
+      <td><input type="checkbox" class="sel" data-change="up.sel" data-id="${u.id}" ${selected.has(u.id) ? 'checked' : ''} aria-label="${esc(t('up.selOne', { name: u.name }))}"></td>
       <td class="primary-cell">${dot(online.has(u.name))}<span class="pname" title="${esc(u.name)}">${esc(u.name)}</span>${u.fromLine ? `<div class="sub-cell">${esc(relayNames(u))}${u.relayProblem ? ` · <span class="danger">${esc(trErr(u.relayProblem))}</span>` : ''}</div>` : ''}${sourceHTML(u)}</td>
       <td>${typeBadges(u)}</td>
-      <td class="num">${srv}</td>
+      <td class="num c-p2">${srv}</td>
       <td class="num c-p3"${using.has(u.id) ? ` title="${esc([...using.get(u.id)].join('、'))}"` : ''}>${using.has(u.id) ? using.get(u.id).size : 0}</td>
       <td id="up-res-${u.id}">${resultHTML(u.id)}</td>
       <td class="actions">
         <button class="btn sm" data-act="up.test" data-id="${u.id}">${t('common.test')}</button>
         <button class="btn sm" data-act="up.edit" data-id="${u.id}">${t('common.edit')}</button>
         <button class="btn sm danger" data-act="up.del" data-id="${u.id}">${t('common.delete')}</button>
-      </td></tr>${sub ? `<tr class="up-sub" id="up-sub-${u.id}"><td colspan="6">${sub}</td></tr>` : ''}`;
+      </td></tr>${sub ? `<tr class="up-sub" id="up-sub-${u.id}"><td colspan="7">${sub}</td></tr>` : ''}`;
   }).join(''));
 }
 
@@ -509,9 +586,10 @@ export function editRelayUpstream(id, preset) {
 }
 
 // 上游组:选几条上游,内核定时测,用延迟最低的那条能通的,挂了自动换
-function editGroup(id) {
+// preset:新建时先勾上的成员(上游页勾选了几条再点「组成上游组」)
+function editGroup(id, preset = []) {
   const u = id ? state.upstreams.find(x => x.id === id) : {};
-  const cur = new Set(parseOpts(u.options).outbounds || []);
+  const cur = new Set(id ? parseOpts(u.options).outbounds || [] : preset);
   const others = state.upstreams.filter(x => x.type !== GROUP && x.id !== id);
   if (others.length < 2) { toast(t('up.groupNeedTwo'), 'err'); return; }
   openModal(id ? t('up.edit') : t('up.addGroup'), `
@@ -575,6 +653,54 @@ registerActions({
     try { await del('upstreams/' + id); await load('upstreams', 'status'); renderRows(); toast(t('up.deleted'), 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   },
+  'up.sel': (id, cb) => {
+    cb.checked ? selected.add(Number(id)) : selected.delete(Number(id));
+    const tr = cb.closest('tr');
+    if (tr) tr.classList.toggle('selected', cb.checked);
+    syncBatch(); // 不整表重画:勾的那个框留着焦点,键盘接着往下勾
+  },
+  'up.clearSel': () => { selected.clear(); renderRows(); },
+  'up.selVisible': () => { visibleUps().forEach(u => selected.add(u.id)); renderRows(); },
+  // 测试勾选的:逐条调单条测试(每条都要往各台服务器派发),同时最多 4 条,测完一条亮一条
+  'up.batchTest': async (_, btn) => {
+    const ids = state.upstreams.filter(u => selected.has(u.id)).map(u => u.id);
+    if (!ids.length) return;
+    btn.disabled = true;
+    ids.forEach(id => setResult(id, { testing: true }));
+    let next = 0, bad = 0;
+    const worker = async () => {
+      while (next < ids.length) {
+        const id = ids[next++];
+        try {
+          const r = await post(`upstreams/${id}/test`, undefined, SLOW);
+          setResult(id, r);
+          if ((r.servers || []).some(sv => sv.state === 'fail')) bad++;
+        } catch (e) { setResult(id, { servers: [{ name: '—', state: 'fail', error: e.message }] }); bad++; }
+      }
+    };
+    try { await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker)); }
+    finally { btn.disabled = false; }
+    toast(bad ? t('up.testDoneBad', { n: bad }) : t('up.testDone'), bad ? 'err' : 'ok');
+  },
+  'up.batchGroup': () => {
+    const names = state.upstreams.filter(u => selected.has(u.id) && u.type !== GROUP).map(u => u.name);
+    if (names.length < 2) { toast(t('up.batch.groupNeedTwo'), 'err'); return; }
+    editGroup(null, names);
+  },
+  'up.batchFollow': async (dir, btn) => {
+    const on = dir === 'on';
+    const ids = state.upstreams.filter(u => selected.has(u.id) && u.source && !!u.source.stop === on).map(u => u.id);
+    if (!ids.length) return;
+    btn.disabled = true;
+    try {
+      const r = await post('upstreams/batch', { ids, action: on ? 'follow' : 'unfollow' });
+      await load('upstreams');
+      renderRows();
+      toast(t(on ? 'up.batch.followedN' : 'up.batch.unfollowedN', { n: r.changed }), 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+    finally { btn.disabled = false; }
+  },
+  'up.batchDel': () => batchDelete(),
   'up.followInfo': id => { const u = state.upstreams.find(x => x.id === Number(id)); if (u && u.source) followInfo(u); },
   'up.followSet': async (id, el) => {
     const on = el.checked;

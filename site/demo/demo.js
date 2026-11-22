@@ -1168,6 +1168,38 @@ function route(method, path, query, body) {
       if (seg[1] === 'test') return S.upstreams.map(u => ({ id: u.id, servers: demoUpTest(u) }));
       if (seg[1] === 'health') { S.upstreams.forEach(demoUpTest); S.health.lastRun = now(); return ok(); } // 立即巡检
       if (seg[1] === 'parse') return { name: 'Parsed upstream', type: 'shadowsocks', options: { server: '203.0.113.20', server_port: 8388, method: 'aes-256-gcm', password: 'demo' } };
+      if (seg[1] === 'batch') { // 勾选几条一起删、一起停止 / 恢复跟随(和后端同一口径,见 web/upstream_batch.go)
+        const ids = [...new Set((body && body.ids) || [])];
+        if (!ids.length) throw demoErr(400, '没有选中上游');
+        const ups = ids.map(i => S.upstreams.find(x => x.id === i));
+        if (ups.some(x => !x)) throw demoErr(400, '有上游不存在,请刷新后重试');
+        if (body.action === 'follow' || body.action === 'unfollow') {
+          const on = body.action === 'follow';
+          let n = 0;
+          for (const u of ups) {
+            if (!u.source || !u.source.stop === on) continue;
+            if (on) { delete u.source.stop; u.source.note = ''; u.source.detail = ''; u.source.triedAt = 0; } else u.source.stop = 'user';
+            n++;
+          }
+          return { changed: n };
+        }
+        if (body.action !== 'delete') throw demoErr(400, '不认识的批量操作');
+        const rulesOf = l => { let v = l.routeRules; if (typeof v === 'string') { try { v = JSON.parse(v); } catch { v = []; } } return Array.isArray(v) ? v : []; };
+        const optsOf = g => (typeof g.options === 'string' ? JSON.parse(g.options || '{}') : g.options || {});
+        const skipped = [], gone = new Set();
+        for (const u of ups) {
+          const lines = S.lines.filter(l => l.upstreamId === u.id || rulesOf(l).some(r => Number(r.to) === u.id)).map(l => l.name);
+          if (lines.length) skipped.push({ name: u.name, lines }); else gone.add(u.id);
+        }
+        const groups = new Set(ups.filter(u => gone.has(u.id) && u.type === 'urltest').map(u => u.name));
+        for (const u of ups) {
+          if (!gone.has(u.id) || u.type === 'urltest') continue;
+          const g = S.upstreams.find(x => x.type === 'urltest' && x.id !== u.id && (optsOf(x).outbounds || []).includes(u.name) && !groups.has(x.name));
+          if (g) { gone.delete(u.id); skipped.push({ name: u.name, group: g.name }); }
+        }
+        S.upstreams = S.upstreams.filter(x => !gone.has(x.id)); gone.forEach(i => S.upBroken.delete(i));
+        return { deleted: gone.size, skipped };
+      }
       if (method === 'POST' && !seg[1]) { const u = { id: nextId(S.upstreams), sort: S.upstreams.length + 1, ...body }; S.upstreams.push(u); return clone(u); }
       const u = find(S.upstreams, id);
       if (seg[2] === 'test') return { id, servers: demoUpTest(u) };

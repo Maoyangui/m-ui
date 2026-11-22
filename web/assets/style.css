@@ -242,6 +242,8 @@ table.grid:not(.cards):not(.rows2) > * > tr > :last-child { padding-right: var(-
 .grid .primary-cell > a:hover, .grid .primary-cell a.name:hover { color: var(--primary-text); text-decoration: none; }
 /* 名字一行写完(连字符处不折成两行);实在太长才省略,全名在悬停提示里 */
 .grid td.primary-cell > a, .grid td.primary-cell > .pname { display: inline-block; max-width: min(22em, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+/* 上游表多一列勾选框,从订阅里加来的上游名字又常常很长:名字最多 18 个字宽(来源那一行最多 21 个小字宽),全名在悬停 */
+.grid.up-grid td.primary-cell > .pname { max-width: min(18em, 100%); }
 .grid .sub-cell { color: var(--muted); font-size: var(--fs-xs); font-weight: 400; margin-top: 2px; }
 .grid td.num { font-variant-numeric: tabular-nums; font-size: var(--fs-sm); }
 /* 服务器等信息密集的表:不设最小宽度,长文本用省略号,不让整表出横向滚动条 */
@@ -1970,7 +1972,7 @@ body:has(.savebar:not([hidden])) .toast { bottom: 5.4rem; }
 /* ================= 上游页:健康状态一格 =================
    每台服务器一个状态点(绿 = 通,红 = 不通,黄 = 数据过期,灰 = 还没测),后面一句结论;逐台明细点开看 */
 /* 上游名字下面的来源一行(来自哪个外部订阅,一行、放不下省略号,点开看详情)和状态格里那句跟随的结论 */
-.up-srcline { display: flex; align-items: center; gap: .3rem; max-width: 100%; margin-top: 2px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-xs); font-weight: 400; color: var(--muted); cursor: pointer; text-align: left; }
+.up-srcline { display: flex; align-items: center; gap: .3rem; max-width: min(21em, 100%); margin-top: 2px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-xs); font-weight: 400; color: var(--muted); cursor: pointer; text-align: left; }
 .up-srcline > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .up-srcline > .i { flex: none; font-size: 11px; }
 .up-srcline:hover { color: var(--primary-text); }
@@ -1984,6 +1986,9 @@ body:has(.savebar:not([hidden])) .toast { bottom: 5.4rem; }
 .up-inuse li + li { border-top: 1px solid var(--border); }
 .up-inuse .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .up-inuse .grow { flex: 1; }
+/* 批量删除确认框里没删的那几条:名字一行,原因(哪几条线路在用 / 在哪个上游组里)另起一行 */
+.up-inuse li.kept { flex-wrap: wrap; row-gap: 0; padding-block: .4rem; }
+.up-inuse li.kept .why { flex-basis: 100%; min-width: 0; line-height: 1.5; }
 .up-inuse .badge { flex: none; }
 .up-inuse + .confirm-text { margin-top: .8rem; }
 .up-srcline:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 3px; }

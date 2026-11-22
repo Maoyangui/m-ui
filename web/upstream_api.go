@@ -38,11 +38,14 @@ func (s *Server) dryRunLine(line *model.Line) error {
 	return core.ValidateInbound(ib)
 }
 
-// dispatchUpstreamSubroute 处理 /upstreams/test、/upstreams/parse、/upstreams/{id}/test。
+// dispatchUpstreamSubroute 处理 /upstreams/test、/upstreams/parse、/upstreams/batch、/upstreams/{id}/test 等。
 // 返回 true 表示请求已被处理。
 func (s *Server) dispatchUpstreamSubroute(w http.ResponseWriter, r *http.Request) bool {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	switch {
+	case strings.HasSuffix(path, "/upstreams/batch"): // 勾选几条一起删、一起停止 / 恢复跟随(见 upstream_batch.go)
+		s.handleUpstreamBatch(w, r)
+		return true
 	case strings.HasSuffix(path, "/upstreams/test"):
 		s.handleUpstreamTestAll(w, r)
 		return true
@@ -85,20 +88,13 @@ func (s *Server) dispatchUpstreamSubroute(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "上游不存在"})
 			return true
 		}
-		var src model.UpstreamSource
-		if s.db.First(&src, "upstream_id = ?", up.Id).Error != nil {
+		var n int64
+		s.db.Model(&model.UpstreamSource{}).Where("upstream_id = ?", up.Id).Count(&n)
+		if n == 0 {
 			badRequest(w, fmt.Errorf("这条上游不是从外部节点加来的,没有可以跟随的订阅"))
 			return true
 		}
-		upd := map[string]interface{}{"stop": model.FollowStopUser}
-		if follow {
-			// 重新打开:上次尝试的时间清掉(不必等半小时的间隔),结论也清掉(那是停下之前的事)
-			upd = map[string]interface{}{"stop": "", "tried_at": 0, "note": "", "detail": ""}
-		}
-		if (src.Stop == "") != follow {
-			s.db.Model(&model.UpstreamSource{}).Where("upstream_id = ?", up.Id).Updates(upd)
-			s.audit(r, "upstream", map[bool]string{true: "follow:on", false: "follow:off"}[follow], up.Name)
-		}
+		s.setUpstreamFollow(r, up, follow) // 已经是这个状态就不动(见 upstream_batch.go)
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		return true
 	case strings.HasSuffix(path, "/test"):

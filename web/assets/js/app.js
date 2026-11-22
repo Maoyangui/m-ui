@@ -643,6 +643,12 @@ function fitTables() {
       if (tb.getBoundingClientRect().width <= box.clientWidth + 1) break;
       tb.classList.add(cls);
     }
+    // 藏完两档还是比容器宽(名字特别长、英文更宽):排成卡片。以前就这么宽着,框里横向滚,右边的「测试 / 编辑 / 删除」被挤到看不见的地方
+    // (上游页从订阅里加来的上游名字常常很长,880–1230 宽时就是这样)。照样每次从门槛算起,结果只跟当时的宽度和内容有关
+    if (!cards && tb.getBoundingClientRect().width > box.clientWidth + 1) {
+      tb.classList.add('cards');
+      tb.classList.remove('rows2', 'no-p3', 'no-p2');
+    }
     // 跨整行的格子(组名一行、「没有数据」一行)写的是全部列数。藏掉几列以后还按原数跨,表格就多出几列空的:
     // 定宽布局的表会把宽度分给这些空列,右边空出一截、前面几列被挤窄(服务器页就是这样被挤成一字一行的)。按现在露着的列数改
     const cols = [...tb.querySelectorAll(':scope > thead th')].filter(th => getComputedStyle(th).display !== 'none').length;
