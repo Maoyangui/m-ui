@@ -96,8 +96,9 @@ func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 		finish()
 		return
 	}
-	// 副机上的写操作会被主机下一次快照整表覆盖(新号消失、删掉的号复活),调用方却以为成功了;与面板一样只放行只读与踢线
-	if s.role() == "node" && r.Method != http.MethodGet && r.Method != http.MethodHead && !strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/kick") {
+	// 副机上的写操作会被主机下一次快照整表覆盖(新号消失、删掉的号复活),调用方却以为成功了;与面板一样只放行只读与踢线。
+	// 踢线按切出来的各段认(users / 名字 / kick):以前按「路径以 /kick 结尾」认,用户名正好叫 kick 时改 / 删这个用户也被放过去(v0.8.1 就有)
+	if s.role() == "node" && r.Method != http.MethodGet && r.Method != http.MethodHead && !isKickPath(r.URL.Path) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": nodeReadOnly})
 		return
 	}
@@ -144,6 +145,12 @@ func apiParts(path string) (rest string, parts []string, ok bool) {
 	}
 	rest = full[idx+len(apiMount):]
 	return rest, strings.Split(rest, "/"), true
+}
+
+// isKickPath 这是不是踢线接口 POST …/users/{名字|id}/kick(副机上唯一放行的写操作)。
+func isKickPath(path string) bool {
+	_, parts, ok := apiParts(path)
+	return ok && len(parts) == 3 && parts[0] == "users" && parts[1] != "" && parts[2] == "kick"
 }
 
 func (s *Server) publicAPI(w http.ResponseWriter, r *http.Request, sc apiScope) {
