@@ -64,6 +64,7 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 	for _, n := range clashBuiltins {
 		used[n] = true
 	}
+	used["GLOBAL"] = true // GLOBAL 是总组惯用名:订阅起名叫 GLOBAL 时组名改名,不和模板的总组撞名
 	if own, ok := root["proxies"].([]interface{}); ok {
 		for _, p := range own {
 			if m, ok := p.(map[string]interface{}); ok {
@@ -141,27 +142,10 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		})
 	}
 	reserveLineNames(lines, used) // 没出组的线路名也不让给外部节点(见 linegroup.go)
-	// 外部节点:名字去重后追加(撞上线路组名、线路名也是外部节点改名)
-	for _, e := range external {
-		for _, p := range e.Clash {
-			name, _ := p["name"].(string)
-			if name == "" {
-				continue
-			}
-			for i := 2; used[name]; i++ {
-				name = fmt.Sprintf("%s %d", p["name"], i)
-			}
-			used[name] = true
-			q := make(map[string]interface{}, len(p))
-			for k, v := range p {
-				q[k] = v
-			}
-			q["name"] = name
-			proxies = append(proxies, q)
-			proxyNames = append(proxyNames, name)
-			topNames = append(topNames, name)
-		}
-	}
+	// 外部节点:每个订阅生成一个策略组(组名=订阅名,成员=该订阅的节点);组名先登记、节点后追加,
+	// 节点撞组名时节点改名,组成员记改名后的名字。
+	var subGroups []extGroup
+	proxies, proxyNames, topNames, subGroups = appendExternalWithGroups(proxies, proxyNames, topNames, external, used)
 	root["proxies"] = proxies
 	// 有写成 IPv6 地址的节点就得打开 ipv6 总开关:老内核默认关着,关着时 mihomo 连不上这些节点。
 	// 模板里明写了 ipv6: false 也改成 true(以前只在模板没写时才补,自定义模板照抄内置骨架写了 false 的,
@@ -184,7 +168,8 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		map[string]interface{}{"name": "Auto", "type": "url-test", "url": "http://www.gstatic.com/generate_204", "interval": 300, "tolerance": 50, "proxies": proxyNames},
 	}
 	groups = append(groups, lineGroups...)
-	root["proxy-groups"] = mergeClashGroups(groups, root["proxy-groups"])
+	merged := mergeClashGroups(groups, root["proxy-groups"])
+	root["proxy-groups"] = orderClashGroups(merged, subGroups)
 	if _, ok := root["rules"]; !ok { // 模板没写规则:Clash 没规则时全部直连,等于没走代理
 		root["rules"] = []string{"GEOIP,Private,DIRECT", "MATCH,Proxy"}
 	}
@@ -514,4 +499,108 @@ func noticeClashProxy(name string) map[string]interface{} {
 	return map[string]interface{}{
 		"name": name, "type": "ss", "server": "127.0.0.1", "port": 1, "cipher": "aes-128-gcm", "password": "dummy",
 	}
+}
+
+// ---------- 外部订阅 → 策略组 ----------
+// extGroup 是一个外部订阅生成的策略组:组名=订阅名,成员=该订阅节点的最终名字(已去重)。
+type extGroup struct {
+	Name    string
+	Members []string
+}
+
+// reserveName 在 used 里登记 name;撞名就依次试 "name 2"、"name 3"…,返回最终登记的名字。
+// 规则和现有的节点改名一致(见 BuildClashFor 里的本站节点循环)。
+func reserveName(used map[string]bool, name string) string {
+	base := strings.TrimSpace(name)
+	if base == "" {
+		base = "订阅"
+	}
+
+	n := base
+	for i := 2; used[n]; i++ {
+		n = fmt.Sprintf("%s %d", base, i)
+	}
+	used[n] = true
+	return n
+}
+
+// appendExternalWithGroups 追加外部节点,并给每个非空订阅生成一个策略组。
+// 先登记全部组名,再追加节点:组名只和模板名、内置名、线路节点/线路组撞名,撞了组名改名;
+// 外部节点撞组名时节点自己改名,组成员取追加后的最终名字,不会对不上。
+// 节点 map 先复制再改名,不污染多个用户共用的 ExtItem。
+// proxyNames / topNames 照旧追加(Proxy / Auto 组要列全部节点,见 external_test.go)。
+func appendExternalWithGroups(proxies []interface{}, proxyNames, topNames []string, external []ExtItem, used map[string]bool) ([]interface{}, []string, []string, []extGroup) {
+	groupNames := make([]string, len(external))
+	for i, e := range external {
+		if len(e.Clash) == 0 { // 空订阅不生成组
+			continue
+		}
+		groupNames[i] = reserveName(used, e.Name)
+	}
+
+	var out []extGroup
+	for i, e := range external {
+		if len(e.Clash) == 0 {
+			continue
+		}
+		members := make([]string, 0, len(e.Clash))
+		for _, p := range e.Clash {
+			orig, _ := p["name"].(string)
+			if strings.TrimSpace(orig) == "" {
+				continue
+			}
+			cp := make(map[string]interface{}, len(p))
+			for k, v := range p {
+				cp[k] = v
+			}
+			final := reserveName(used, orig)
+			cp["name"] = final
+			proxies = append(proxies, cp)
+			proxyNames = append(proxyNames, final)
+			topNames = append(topNames, final)
+			members = append(members, final) // 最终名字(已去重,不会重复)
+		}
+		if len(members) == 0 {
+			continue // 节点都没有名字,按空订阅处理
+		}
+		out = append(out, extGroup{Name: groupNames[i], Members: members})
+	}
+	return proxies, proxyNames, topNames, out
+}
+
+// clashGroupName 读策略组的 name(和 mergeClashGroups 的 nameOf 同一个约定)。
+func clashGroupName(g interface{}) string {
+	if m, ok := g.(map[string]interface{}); ok {
+		s, _ := m["name"].(string)
+		return s
+	}
+	return ""
+}
+
+// orderClashGroups 排最终的组顺序:GLOBAL(模板里有的话)第一,接着 merge 的结果,最后是订阅组。
+func orderClashGroups(merged []interface{}, subs []extGroup) []interface{} {
+	out := make([]interface{}, 0, len(merged)+len(subs))
+	var global interface{}
+	rest := make([]interface{}, 0, len(merged))
+	for _, g := range merged {
+		if global == nil && clashGroupName(g) == "GLOBAL" {
+			global = g
+			continue
+		}
+		rest = append(rest, g)
+	}
+	if global != nil {
+		out = append(out, global)
+	}
+	out = append(out, rest...)
+	for _, s := range subs {
+		members := make([]interface{}, len(s.Members))
+		for i, n := range s.Members {
+			members[i] = n
+		}
+		out = append(out, map[string]interface{}{
+			"name": s.Name, "type": "select", "proxies": members,
+		})
+	}
+	return out
 }
