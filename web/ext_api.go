@@ -191,14 +191,24 @@ func (s *Server) handleExtItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeUserExts 在调用方的事务里全量替换用户的外部节点分配(重复的 id 只记一次)。
-// noGroupIds 是关了“生成策略组”的订阅 id(nil = 全都生成组)。
+// noGroupIds 是关了「单独成组」的外部订阅 id。传 nil 表示调用方不管这个开关(套餐变更、公开 API、老前端):
+// 留下的订阅沿用原来的开关,新加的默认成组 —— 不然续一次套餐、API 改一次分配,管理员逐个关掉的开关就悄悄全打开了。
 func writeUserExts(tx *gorm.DB, userID uint, extIds []uint, noGroupIds []uint) error {
-	if err := tx.Where("user_id = ?", userID).Delete(&model.UserExt{}).Error; err != nil {
-		return err
-	}
 	noGroup := map[uint]bool{}
+	if noGroupIds == nil {
+		var cur []model.UserExt
+		if err := tx.Where("user_id = ? AND no_group = ?", userID, true).Find(&cur).Error; err != nil {
+			return err
+		}
+		for _, r := range cur {
+			noGroup[r.ExtId] = true
+		}
+	}
 	for _, eid := range noGroupIds {
 		noGroup[eid] = true
+	}
+	if err := tx.Where("user_id = ?", userID).Delete(&model.UserExt{}).Error; err != nil {
+		return err
 	}
 	seen := map[uint]bool{}
 	for _, eid := range extIds {

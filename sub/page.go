@@ -55,7 +55,12 @@ func WantsPage(r *http.Request) bool {
 		nf, _ := NormalizeFormat(f)
 		return nf == "page"
 	}
-	ua := strings.ToLower(r.UserAgent())
+	return isBrowserUA(r.UserAgent())
+}
+
+// isBrowserUA 这个 User-Agent 是不是浏览器(不是代理客户端、命令行工具)。
+func isBrowserUA(ua string) bool {
+	ua = strings.ToLower(ua)
 	if containsAny(ua, clientUATokens) {
 		return false
 	}

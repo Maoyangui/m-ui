@@ -133,10 +133,11 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		}
 	}
 	_, ownProxy := tmplGroups["Proxy"]
-	groupNames := nameLineGroups(pending, used, providers, func(name string) bool {
+	tmplGroup := func(name string) bool { // 模板里叫 name 的组能不能直接拿来用:是个组,且不会顺着成员绕回生成的 Proxy
 		_, ok := tmplGroups[name]
 		return ok && (ownProxy || !reaches(name, "Proxy", func(n string) []string { return tmplGroups[n] }))
-	})
+	}
+	groupNames := nameLineGroups(pending, used, providers, tmplGroup)
 	var lineGroups []interface{}
 	for i, g := range pending {
 		topNames[groupAt[i]] = groupNames[i]
@@ -146,10 +147,11 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 		})
 	}
 	reserveLineNames(lines, used) // 没出组的线路名也不让给外部节点(见 linegroup.go)
-	// 外部节点:每个订阅生成一个策略组(组名=订阅名,成员=该订阅的节点);组名先登记、节点后追加,
-	// 节点撞组名时节点改名,组成员记改名后的名字。
-	var subGroups []extGroup
-	proxies, proxyNames, topNames, subGroups = appendExternalWithGroups(proxies, proxyNames, topNames, external, used)
+	// 外部节点:名字去重后追加(撞上线路组名、线路名也是外部节点改名),和以前一字不差;
+	// 外部订阅各成一个策略组,组名等全部节点定完名再起,撞名时改的是组名(见文件末尾「外部订阅 → 策略组」)
+	proxies, extNames, subGroups := appendExternal(proxies, external, used)
+	proxyNames = append(proxyNames, extNames...)
+	nameExtGroups(subGroups, used, providers, extGroupClaimed(lines, groupNames), tmplGroup)
 	root["proxies"] = proxies
 	// 有写成 IPv6 地址的节点就得打开 ipv6 总开关:老内核默认关着,关着时 mihomo 连不上这些节点。
 	// 模板里明写了 ipv6: false 也改成 true(以前只在模板没写时才补,自定义模板照抄内置骨架写了 false 的,
@@ -167,6 +169,12 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 	}
 	selectList = append(selectList, "Auto")
 	selectList = append(selectList, topNames...)
+	// 外部订阅的组排在本站之后、外部节点之前:在 Proxy 里选「机场A」,再到「机场A」组里挑节点(组不进 Proxy 的话,
+	// 规则模式下在组里怎么选都不起作用)。外部节点照旧平铺在后面:升级前在 Proxy 里直接选过外部节点的客户端,选择不会丢
+	for _, g := range subGroups {
+		selectList = append(selectList, g.Name)
+	}
+	selectList = append(selectList, extNames...)
 	// 开关(subClashDefaultGroups,默认开)关着时不再强制生成 Proxy/Auto:模板作者已经
 	// 自己写了策略组与规则,生成的两个组只会多余(有些客户端的全局模式下 hidden 也藏不住组,
 	// 模板里加 hidden 治标不治本)。但模板还引用着它们时,被引用的那个照旧生成并记一条警告,
@@ -659,74 +667,88 @@ func noticeClashProxy(name string) map[string]interface{} {
 }
 
 // ---------- 外部订阅 → 策略组 ----------
-// extGroup 是一个外部订阅生成的策略组:组名=订阅名,成员=该订阅节点的最终名字(已去重)。
+// 每个外部订阅一个 select 组(组名 = 订阅名,成员 = 这个订阅输出的节点),列在 Proxy 里:外部订阅多了,几十上百个节点平铺在
+// Proxy 里不好找,改成在 Proxy 里选「机场A」、再到「机场A」组里挑节点。不成组的:分享链接(只有一个节点)、用户的外部节点
+// 分配上关了「单独成组」的(两种都是 ExtItem.NoGroup,见 sub/server.go externalFor)、没有节点的(空组让整份配置导入失败)。
+// 组名的规则和线路组一样(见 linegroup.go 开头),只是排在最后,见 nameExtGroups。
+
+// extGroup 一个外部订阅的策略组:Members 是这个订阅里节点的最终名字;own 为真表示模板里写了同名的组,用模板的,不另生成。
 type extGroup struct {
 	Name    string
 	Members []string
+	own     bool
 }
 
-// reserveName 在 used 里登记 name;撞名就依次试 "name 2"、"name 3"…,返回最终登记的名字。
-// 规则和现有的节点改名一致(见 BuildClashFor 里的本站节点循环)。
-func reserveName(used map[string]bool, name string) string {
-	base := strings.TrimSpace(name)
-	if base == "" {
-		base = "订阅"
-	}
-
-	n := base
-	for i := 2; used[n]; i++ {
-		n = fmt.Sprintf("%s %d", base, i)
-	}
-	used[n] = true
-	return n
-}
-
-// appendExternalWithGroups 追加外部节点,并给每个非空订阅生成一个策略组。
-// NoGroup 的订阅只追加节点,不成组(组名也不占位,同名节点不改名)。
-// 先登记全部组名,再追加节点:组名只和模板名、内置名、线路节点/线路组撞名,撞了组名改名;
-// 外部节点撞组名时节点自己改名,组成员取追加后的最终名字,不会对不上。
-// 节点 map 先复制再改名,不污染多个用户共用的 ExtItem。
-// proxyNames / topNames 照旧追加(Proxy / Auto 组要列全部节点,见 external_test.go)。
-func appendExternalWithGroups(proxies []interface{}, proxyNames, topNames []string, external []ExtItem, used map[string]bool) ([]interface{}, []string, []string, []extGroup) {
-	groupNames := make([]string, len(external))
-	for i, e := range external {
-		if len(e.Clash) == 0 || e.NoGroup { // 空订阅 / 关了分组的不生成组
-			continue
-		}
-		groupNames[i] = reserveName(used, e.Name)
-	}
-
-	var out []extGroup
-	for i, e := range external {
-		if len(e.Clash) == 0 {
-			continue
-		}
-		members := make([]string, 0, len(e.Clash))
+// appendExternal 追加外部节点:名字和以前一样按出现顺序去重(撞上前面任何名字就改「X 2」),分组不改任何一个节点的名字。
+// 节点 map 先复制再改名,不污染多个用户共用的 ExtItem。返回追加后的 proxies、全部外部节点的名字(依次,进 Auto 和 Proxy)、
+// 要成组的订阅(组名还没起,见 nameExtGroups)。
+func appendExternal(proxies []interface{}, external []ExtItem, used map[string]bool) ([]interface{}, []string, []extGroup) {
+	var names []string
+	var groups []extGroup
+	for _, e := range external {
+		var members []string
 		for _, p := range e.Clash {
-			orig, _ := p["name"].(string)
-			if strings.TrimSpace(orig) == "" {
+			name, _ := p["name"].(string)
+			if name == "" {
 				continue
 			}
-			cp := make(map[string]interface{}, len(p))
-			for k, v := range p {
-				cp[k] = v
+			for i := 2; used[name]; i++ {
+				name = fmt.Sprintf("%s %d", p["name"], i)
 			}
-			final := reserveName(used, orig)
-			cp["name"] = final
-			proxies = append(proxies, cp)
-			proxyNames = append(proxyNames, final)
-			topNames = append(topNames, final)
-			members = append(members, final) // 最终名字(已去重,不会重复)
+			used[name] = true
+			q := make(map[string]interface{}, len(p))
+			for k, v := range p {
+				q[k] = v
+			}
+			q["name"] = name
+			proxies = append(proxies, q)
+			names = append(names, name)
+			members = append(members, name)
 		}
-		if len(members) == 0 {
-			continue // 节点都没有名字,按空订阅处理
+		if n := strings.TrimSpace(e.Name); !e.NoGroup && n != "" && len(members) > 0 {
+			groups = append(groups, extGroup{Name: n, Members: members})
 		}
-		if e.NoGroup {
-			continue // 关了分组:节点已追加,不成组
-		}
-		out = append(out, extGroup{Name: groupNames[i], Members: members})
 	}
-	return proxies, proxyNames, topNames, out
+	return proxies, names, groups
+}
+
+// nameExtGroups 给订阅组起名。本站节点、线路组、线路名、外部节点到这时都已定名,订阅组撞上谁都是组加序号(「机场A 2」):
+// 已有的节点名一个不变 —— 分组是新加的,不能因为它把客户端里选过的节点悄悄改名(#90 原先是节点让组、节点改名)。
+// 模板里写了同名的组(以前想按订阅分组只能这样手写)就用模板的,不另生成一份,Proxy 里列的就是它(和线路组、Proxy / Auto
+// 一样「写了用模板的」);它会顺着成员绕回生成的 Proxy、已经被线路组拿去用、或者和线路同名时不用它,订阅组加序号另起。
+//   - used:到此为止占用的名字(含模板里写的节点与组);avoid:模板的 proxy-providers(列了成员的组在 mihomo 里还占一个同名 provider);
+//   - claimed:线路组的名字与线路名(模板的一个组只顶替一次;线路名为本站保留);tmplGroup 同 nameLineGroups。
+func nameExtGroups(groups []extGroup, used, avoid, claimed map[string]bool, tmplGroup func(string) bool) {
+	taken := func(n string) bool { return used[n] || avoid[n] || lineGroupReserved[n] }
+	for i := range groups {
+		base := groups[i].Name
+		name := base
+		if taken(name) {
+			if !avoid[name] && !lineGroupReserved[name] && !claimed[name] && tmplGroup(name) {
+				groups[i].own = true
+			} else {
+				for n := 2; taken(name); n++ {
+					name = fmt.Sprintf("%s %d", base, n)
+				}
+			}
+		}
+		used[name], claimed[name] = true, true
+		groups[i].Name = name
+	}
+}
+
+// extGroupClaimed 订阅组不能拿来用的模板组名:线路组已经用了的、线路名(为本站保留,见 reserveLineNames)。
+func extGroupClaimed(lines []model.Line, lineGroupNames []string) map[string]bool {
+	m := make(map[string]bool, len(lineGroupNames)+len(lines))
+	for _, n := range lineGroupNames {
+		m[n] = true
+	}
+	for _, l := range lines {
+		if strings.TrimSpace(l.Name) != "" {
+			m[l.Name] = true
+		}
+	}
+	return m
 }
 
 // clashGroupName 读策略组的 name(和 mergeClashGroups 的 nameOf 同一个约定)。
@@ -738,7 +760,7 @@ func clashGroupName(g interface{}) string {
 	return ""
 }
 
-// orderClashGroups 排最终的组顺序:GLOBAL(模板里有的话)第一,接着 merge 的结果,最后是订阅组。
+// orderClashGroups 排最终的组顺序:GLOBAL(模板里有的话)第一,接着 merge 的结果,最后是订阅组(用模板的那几个已经在 merge 的结果里)。
 func orderClashGroups(merged []interface{}, subs []extGroup) []interface{} {
 	out := make([]interface{}, 0, len(merged)+len(subs))
 	var global interface{}
@@ -755,6 +777,9 @@ func orderClashGroups(merged []interface{}, subs []extGroup) []interface{} {
 	}
 	out = append(out, rest...)
 	for _, s := range subs {
+		if s.own {
+			continue
+		}
 		members := make([]interface{}, len(s.Members))
 		for i, n := range s.Members {
 			members[i] = n

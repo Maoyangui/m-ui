@@ -41,6 +41,10 @@ type Options struct {
 	// BuyURL 「选购 / 续费」地址,已按 buyURL(rs) 解析过(代理填了用代理的,否则用主面板的)。
 	// 非空时随订阅发一个 Profile-Web-Page-Url 头,客户端就能在订阅卡片上摆一个续费入口。
 	BuyURL string
+	// Download 是浏览器在下载订阅(地址里写明了 ?format=):文件名带上格式的后缀(.yaml / .json / .txt),
+	// 不然存下来的文件没有扩展名,有的还被下载器起成「3.bin」。只给浏览器:Clash 系客户端拿这个文件名当配置名,
+	// 带了后缀客户端里就显示成「名字.yaml」。
+	Download bool
 	// Shared 这是临时共享地址(借用者拉的)。借用者那一份里不能有任何看得出本人是谁的东西:m-ui 默认拿用户名当订阅地址,
 	// 知道用户名就能拿到本人的永久订阅和凭据。标题不回落到本人的备注 / 用户名,用量头只给到期时间(审计 MB23)。
 	Shared bool
@@ -51,7 +55,7 @@ type ExtItem struct {
 	Name  string
 	Links []string
 	Clash []map[string]interface{}
-	// NoGroup 不为该订阅生成 Clash 策略组(节点照常追加进 Proxy / Auto)。
+	// NoGroup 这一组在 Clash 里不单独成组(分享链接,或用户的分配上关了「单独成组」);节点照常追加进 Proxy / Auto。
 	NoGroup bool
 }
 
@@ -128,7 +132,7 @@ func headers(user model.User, opt Options, contentType, ext string) map[string]s
 		"Subscription-Userinfo":   userinfo,
 		"Profile-Update-Interval": fmt.Sprintf("%d", opt.UpdateHours),
 		"Profile-Title":           encodeTitle(title),
-		"Content-Disposition":     contentDisposition(title, fallback, ext),
+		"Content-Disposition":     contentDisposition(title, fallback, downloadExt(opt, ext)),
 	}
 	// 「选购 / 续费」地址。Profile-Web-Page-Url 是 Clash 系客户端已有的约定头,
 	// 佛跳墙拿它在订阅卡片上摆续费按钮,别的客户端会显示成「订阅主页」。
@@ -158,10 +162,16 @@ func encodeTitle(title string) string {
 	return "base64:" + base64.StdEncoding.EncodeToString([]byte(title))
 }
 
-// contentDisposition 客户端(Shadowrocket、Clash Verge 等)拿这个头给订阅命名,
-// 浏览器下载时拿它当文件名。文件名按订阅格式带后缀(.yaml/.json/.txt):
-// 不带后缀时浏览器存下来的文件没有扩展名,有的下载器还会自己编一个
-// 像 3.bin 这样的名字。客户端里订阅名会连后缀一起显示,这是有意为之。
+// downloadExt 文件名要带的后缀:只有浏览器下载时才带(见 Options.Download)。
+func downloadExt(opt Options, ext string) string {
+	if !opt.Download {
+		return ""
+	}
+	return ext
+}
+
+// contentDisposition 客户端(Shadowrocket、Clash Verge 等)拿这个头给订阅命名,浏览器下载时拿它当文件名。
+// ext 是浏览器下载时追加的后缀(.yaml / .json / .txt,见 downloadExt);客户端拉订阅时为空,订阅名照旧不带后缀。
 //
 // 关键:标题含中文时**只发 filename*,不要再给 ASCII 的 filename=**。
 // 有些客户端只认它遇到的第一个 filename=,会把那个回退名当订阅名

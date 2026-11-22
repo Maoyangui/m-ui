@@ -1154,6 +1154,9 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			if err := writeUserLineRefs(tx, p.User.Id, refs); err != nil {
 				return err
 			}
+			if scope(r) > 0 { // 外部节点只由主面板分配,代理面板建号 / 改号不碰它
+				return nil
+			}
 			return writeUserExts(tx, p.User.Id, p.ExtIds, p.ExtNoGroupIds)
 		})
 		if err != nil {
@@ -1246,6 +1249,9 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := writeUserLineRefs(tx, id, refs); err != nil {
 				return err
+			}
+			if scope(r) > 0 { // 外部节点只由主面板分配:代理改用户时原样留着(以前会把主面板给这个用户的外部节点清空)
+				return nil
 			}
 			return writeUserExts(tx, id, p.ExtIds, p.ExtNoGroupIds)
 		})

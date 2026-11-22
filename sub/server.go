@@ -280,7 +280,7 @@ func (s *Server) insecure() bool {
 }
 
 // externalFor 取用户被分配的外部节点:单条链接直接用,外部订阅用主机抓取的缓存解析。
-// 分配上的“不生成策略组”开关(ue.no_group)一并带进 ExtItem。
+// Clash 里成不成组:分享链接只有一个节点,不成组;外部订阅看分配上的「单独成组」开关(ue.no_group,默认成组)。
 func (s *Server) externalFor(userID uint) []ExtItem {
 	type extRow struct {
 		model.ExtNode
@@ -295,7 +295,7 @@ func (s *Server) externalFor(userID uint) []ExtItem {
 		if len(it.Nodes) == 0 {
 			continue
 		}
-		out = append(out, ExtItem{Name: r.Name, Links: it.Links(), Clash: it.Clash(), NoGroup: r.NoGroup})
+		out = append(out, ExtItem{Name: r.Name, Links: it.Links(), Clash: it.Clash(), NoGroup: r.NoGroup || r.Type == "link"})
 	}
 	return out
 }
@@ -644,6 +644,8 @@ func (s *Server) handle() http.HandlerFunc {
 		lines = keepLines(lines, links)
 
 		opt := s.options()
+		// 浏览器下载订阅时文件名带后缀(客户端拉的不带,见 Options.Download)
+		opt.Download = isBrowserUA(r.UserAgent())
 		opt.BuyURL = s.buyURL(rs) // 代理填了用代理的,否则用主面板的;随订阅发出去给客户端做续费入口
 		opt.External = s.externalFor(user.Id)
 		opt.LineNodes = lineNodesOf(scopes)

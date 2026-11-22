@@ -273,7 +273,7 @@ func TestClashLineGroupNameClash(t *testing.T) {
 			external: []ExtItem{extNode("hy"), extNode("Auto")},
 			proxies:  []string{"hy-A", "hy-B", "hy 2", "Auto 2"},
 			groups:   map[string][]string{"hy": {"hy-A", "hy-B"}},
-			top:      []string{"Auto", "hy", "hy 2", "Auto 2"},
+			top:      []string{"Auto", "hy", "ext", "ext 2", "hy 2", "Auto 2"}, // 两个外部订阅都叫 ext:各成一组(ext、ext 2),排在外部节点前
 		},
 		{
 			name:     "外部节点和流量提示节点同名",
@@ -283,7 +283,7 @@ func TestClashLineGroupNameClash(t *testing.T) {
 			external: []ExtItem{extNode("00-勿选-流量")},
 			proxies:  []string{"00-勿选-流量", "hy", "00-勿选-流量 2"},
 			groups:   map[string][]string{},
-			top:      []string{"00-勿选-流量", "Auto", "hy", "00-勿选-流量 2"},
+			top:      []string{"00-勿选-流量", "Auto", "hy", "ext", "00-勿选-流量 2"},
 		},
 		{
 			name:    "模板里的节点和线路同名:线路组改名",
