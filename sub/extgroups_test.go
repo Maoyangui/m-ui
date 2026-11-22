@@ -9,7 +9,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// 每个外部订阅一个策略组:组名=订阅名,成员=该订阅的节点;空订阅不生成组;GLOBAL 排第一,订阅组排最后。
+// 每个外部订阅一个策略组:组名=订阅名,成员=该订阅的节点;空订阅不生成组;组的先后和以前一样(生成的 Proxy / Auto 在前,
+// 模板的组照模板的顺序),订阅组排最后。
 // 节点撞组名时改的是组名(「单节点 2」),节点名和没有分组时一字不差;组列在 Proxy 里,在 Proxy 里选得到。
 func TestExternalSubGroups(t *testing.T) {
 	user := model.User{Name: "u", Credentials: []byte(`{"hysteria2":{"password":"p"}}`)}
@@ -60,11 +61,9 @@ rules:
 		byName[n] = m
 		order = append(order, n)
 	}
-	if len(order) == 0 || order[0] != "GLOBAL" {
-		t.Fatalf("GLOBAL 应排第一,实际顺序 %v", order)
-	}
-	if n := len(order); n < 2 || order[n-2] != "机场A" || order[n-1] != "单节点 2" {
-		t.Fatalf("订阅组应排最后(机场A、单节点 2),实际顺序 %v", order)
+	// 模板的 GLOBAL 不挪到第一:生成的 Proxy / Auto 在前,模板的组照模板的顺序,订阅组排最后
+	if want := []string{"Proxy", "Auto", "GLOBAL", "前置-机场", "机场A", "单节点 2"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("组的顺序\n得 %v\n应 %v", order, want)
 	}
 	if _, ok := byName["空订阅"]; ok {
 		t.Fatalf("空订阅不应生成组,实际顺序 %v", order)
@@ -192,8 +191,8 @@ func groupNames(groups []interface{}) []string {
 	return out
 }
 
-// 没有要成组的外部订阅时(没分配外部节点、全是分享链接或都关了分组),订阅和加分组之前一字不差:
-// 拿同一份输入、把外部节点全标成不成组算出来的,和直接不给外部节点时的本站部分比,外部节点只多在 proxies / Auto / Proxy 的末尾。
+// 没有要成组的外部订阅时(分享链接、关了分组的、空订阅),不出订阅组,Proxy 和加分组之前一样:
+// 提示节点、Auto、本站,外部节点平铺在最后。
 func TestExtGroupsNothingToGroupKeepsOutput(t *testing.T) {
 	user := fullUser()
 	lines := []model.Line{{Id: 1, Name: "hy", Protocol: "hysteria2", Port: 443, Tls: raw(map[string]interface{}{"mode": "cert"}), Enabled: true}}
@@ -335,5 +334,30 @@ func TestExtGroupsLegacyClash(t *testing.T) {
 	}
 	if doc.group("全是新协议") != nil {
 		t.Fatal("老内核:一个节点都不剩的订阅不该出组")
+	}
+}
+
+// 模板里的 GLOBAL 组不在第一位:没有要成组的订阅时组的先后和以前(v0.8.1)一样,有订阅组时只在最后多出订阅组。
+func TestExtGroupsKeepTemplateOrder(t *testing.T) {
+	user := fullUser()
+	lines := []model.Line{{Id: 1, Name: "hy", Protocol: "hysteria2", Port: 443, Tls: raw(map[string]interface{}{"mode": "cert"}), Enabled: true}}
+	tmpl := "proxy-groups:\n  - {name: 前置, type: select, proxies: [DIRECT]}\n  - {name: GLOBAL, type: select, proxies: [Proxy, 前置]}\nrules:\n  - MATCH,Proxy\n"
+	order := func(ext []ExtItem) []string {
+		body, err := BuildClashFor(user, lines, twoServers, tmpl, "", ext, nil, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, g := range checkClash(t, body).Groups {
+			names = append(names, g["name"].(string))
+		}
+		return names
+	}
+	if got, want := order(nil), []string{"Proxy", "Auto", "hy", "前置", "GLOBAL"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("没有外部订阅:组的顺序\n得 %v\n应 %v", got, want)
+	}
+	ext := []ExtItem{{Name: "机场A", Clash: []map[string]interface{}{{"name": "A-1", "type": "ss", "server": "198.51.100.1", "port": 1, "cipher": "aes-128-gcm", "password": "x"}}}}
+	if got, want := order(ext), []string{"Proxy", "Auto", "hy", "前置", "GLOBAL", "机场A"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("有外部订阅:组的顺序\n得 %v\n应 %v", got, want)
 	}
 }

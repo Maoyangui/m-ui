@@ -751,31 +751,12 @@ func extGroupClaimed(lines []model.Line, lineGroupNames []string) map[string]boo
 	return m
 }
 
-// clashGroupName 读策略组的 name(和 mergeClashGroups 的 nameOf 同一个约定)。
-func clashGroupName(g interface{}) string {
-	if m, ok := g.(map[string]interface{}); ok {
-		s, _ := m["name"].(string)
-		return s
-	}
-	return ""
-}
-
-// orderClashGroups 排最终的组顺序:GLOBAL(模板里有的话)第一,接着 merge 的结果,最后是订阅组(用模板的那几个已经在 merge 的结果里)。
+// orderClashGroups 排最终的组顺序:merge 的结果原样在前(生成的组在前,模板写的组照模板的顺序,见 mergeClashGroups),
+// 订阅组接在最后(用模板同名组的那几个已经在 merge 的结果里)。模板里的 GLOBAL 组不往前挪:mihomo 不看它排第几,
+// 挪了只会改掉管理员模板里写的顺序(#90 原先挪到第一)。
 func orderClashGroups(merged []interface{}, subs []extGroup) []interface{} {
 	out := make([]interface{}, 0, len(merged)+len(subs))
-	var global interface{}
-	rest := make([]interface{}, 0, len(merged))
-	for _, g := range merged {
-		if global == nil && clashGroupName(g) == "GLOBAL" {
-			global = g
-			continue
-		}
-		rest = append(rest, g)
-	}
-	if global != nil {
-		out = append(out, global)
-	}
-	out = append(out, rest...)
+	out = append(out, merged...)
 	for _, s := range subs {
 		if s.own {
 			continue
