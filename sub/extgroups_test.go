@@ -98,3 +98,91 @@ rules:
 		}
 	}
 }
+
+// 关了“生成策略组”的订阅不成组,但节点照常追加进 Proxy / Auto;
+// 组名不占位,同名节点不改名;没关的订阅照常成组。
+func TestExternalSubNoGroup(t *testing.T) {
+	user := model.User{Name: "u", Credentials: []byte(`{"hysteria2":{"password":"p"}}`)}
+	lines := []model.Line{{Name: "本站", Protocol: "hysteria2", Port: 1, Enabled: true}}
+	entries := []Entry{{Host: "1.2.3.4"}}
+	tmpl := `proxy-groups:
+  - name: GLOBAL
+    type: select
+    proxies: [本站]
+rules:
+  - MATCH,GLOBAL
+`
+	external := []ExtItem{
+		{
+			Name: "机场A",
+			Clash: []map[string]interface{}{
+				{"name": "机场A-1", "type": "ss", "server": "9.9.9.9", "port": 1, "cipher": "aes-128-gcm", "password": "x"},
+			},
+		},
+		{
+			Name:    "德国",
+			NoGroup: true,
+			Clash: []map[string]interface{}{
+				{"name": "德国", "type": "ss", "server": "8.8.8.8", "port": 1, "cipher": "aes-128-gcm", "password": "x"},
+				{"name": "德国-2", "type": "ss", "server": "7.7.7.7", "port": 1, "cipher": "aes-128-gcm", "password": "x"},
+			},
+		},
+	}
+	out, err := BuildClashFull(user, lines, entries, tmpl, "", external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]interface{}
+	if err := yaml.Unmarshal([]byte(out), &root); err != nil {
+		t.Fatalf("订阅 YAML 解析失败: %v\n%s", err, out)
+	}
+	groups, _ := root["proxy-groups"].([]interface{})
+	byName := map[string]map[string]interface{}{}
+	for _, g := range groups {
+		m, _ := g.(map[string]interface{})
+		n, _ := m["name"].(string)
+		byName[n] = m
+	}
+	if _, ok := byName["德国"]; ok {
+		t.Fatalf("关了分组的“德国”不应生成组,实际组 %v", groupNames(groups))
+	}
+	g, ok := byName["机场A"]
+	if !ok {
+		t.Fatalf("没关分组的“机场A”应生成组,实际组 %v", groupNames(groups))
+	}
+	if got := strings.Join(stringList(g["proxies"]), ","); got != "机场A-1" {
+		t.Fatalf("机场A 组成员应为 [机场A-1],实际 [%s]", got)
+	}
+	// 关了分组的节点仍进 Auto 组
+	auto := strings.Join(stringList(byName["Auto"]["proxies"]), ",")
+	for _, want := range []string{"机场A-1", "德国", "德国-2"} {
+		if !strings.Contains(auto, want) {
+			t.Fatalf("Auto 组应含 %q,实际 [%s]", want, auto)
+		}
+	}
+	// 组名没占位:节点“德国”不改名
+	found := false
+	for _, p := range root["proxies"].([]interface{}) {
+		if m, _ := p.(map[string]interface{}); m["name"] == "德国" {
+			found = true
+		}
+		if m, _ := p.(map[string]interface{}); m["name"] == "德国 2" {
+			t.Fatalf("节点“德国”不应改名(组名没占位):\n%s", out)
+		}
+	}
+	if !found {
+		t.Fatalf("节点“德国”应在 proxies 里:\n%s", out)
+	}
+}
+
+func groupNames(groups []interface{}) []string {
+	var out []string
+	for _, g := range groups {
+		if m, ok := g.(map[string]interface{}); ok {
+			if n, _ := m["name"].(string); n != "" {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
+}

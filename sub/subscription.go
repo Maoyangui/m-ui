@@ -48,6 +48,8 @@ type ExtItem struct {
 	Name  string
 	Links []string
 	Clash []map[string]interface{}
+	// NoGroup 不为该订阅生成 Clash 策略组(节点照常追加进 Proxy / Auto)。
+	NoGroup bool
 }
 
 // Result 是一份渲染好的订阅响应。

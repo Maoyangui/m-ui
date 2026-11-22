@@ -191,9 +191,14 @@ func (s *Server) handleExtItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeUserExts 在调用方的事务里全量替换用户的外部节点分配(重复的 id 只记一次)。
-func writeUserExts(tx *gorm.DB, userID uint, extIds []uint) error {
+// noGroupIds 是关了“生成策略组”的订阅 id(nil = 全都生成组)。
+func writeUserExts(tx *gorm.DB, userID uint, extIds []uint, noGroupIds []uint) error {
 	if err := tx.Where("user_id = ?", userID).Delete(&model.UserExt{}).Error; err != nil {
 		return err
+	}
+	noGroup := map[uint]bool{}
+	for _, eid := range noGroupIds {
+		noGroup[eid] = true
 	}
 	seen := map[uint]bool{}
 	for _, eid := range extIds {
@@ -201,7 +206,7 @@ func writeUserExts(tx *gorm.DB, userID uint, extIds []uint) error {
 			continue
 		}
 		seen[eid] = true
-		if err := tx.Create(&model.UserExt{UserId: userID, ExtId: eid}).Error; err != nil {
+		if err := tx.Create(&model.UserExt{UserId: userID, ExtId: eid, NoGroup: noGroup[eid]}).Error; err != nil {
 			return err
 		}
 	}

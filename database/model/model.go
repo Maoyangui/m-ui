@@ -436,6 +436,8 @@ type ExtNode struct {
 type UserExt struct {
 	UserId uint `json:"userId" gorm:"primaryKey;autoIncrement:false"`
 	ExtId  uint `json:"extId" gorm:"primaryKey;autoIncrement:false"`
+	// NoGroup 该订阅不单独生成 Clash 策略组(默认 false = 生成组);节点照常追加。
+	NoGroup bool `json:"noGroup" gorm:"default:false"`
 }
 
 // UserLine 用户-线路 多对多。

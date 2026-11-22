@@ -282,7 +282,7 @@ func legacyClashOnly(lines []model.Line, external []ExtItem) ([]model.Line, []Ex
 			}
 			c = append(c, p)
 		}
-		ext = append(ext, ExtItem{Name: e.Name, Links: e.Links, Clash: c})
+		ext = append(ext, ExtItem{Name: e.Name, Links: e.Links, Clash: c, NoGroup: e.NoGroup})
 	}
 	return keep, ext
 }
@@ -525,6 +525,7 @@ func reserveName(used map[string]bool, name string) string {
 }
 
 // appendExternalWithGroups 追加外部节点,并给每个非空订阅生成一个策略组。
+// NoGroup 的订阅只追加节点,不成组(组名也不占位,同名节点不改名)。
 // 先登记全部组名,再追加节点:组名只和模板名、内置名、线路节点/线路组撞名,撞了组名改名;
 // 外部节点撞组名时节点自己改名,组成员取追加后的最终名字,不会对不上。
 // 节点 map 先复制再改名,不污染多个用户共用的 ExtItem。
@@ -532,7 +533,7 @@ func reserveName(used map[string]bool, name string) string {
 func appendExternalWithGroups(proxies []interface{}, proxyNames, topNames []string, external []ExtItem, used map[string]bool) ([]interface{}, []string, []string, []extGroup) {
 	groupNames := make([]string, len(external))
 	for i, e := range external {
-		if len(e.Clash) == 0 { // 空订阅不生成组
+		if len(e.Clash) == 0 || e.NoGroup { // 空订阅 / 关了分组的不生成组
 			continue
 		}
 		groupNames[i] = reserveName(used, e.Name)
@@ -562,6 +563,9 @@ func appendExternalWithGroups(proxies []interface{}, proxyNames, topNames []stri
 		}
 		if len(members) == 0 {
 			continue // 节点都没有名字,按空订阅处理
+		}
+		if e.NoGroup {
+			continue // 关了分组:节点已追加,不成组
 		}
 		out = append(out, extGroup{Name: groupNames[i], Members: members})
 	}

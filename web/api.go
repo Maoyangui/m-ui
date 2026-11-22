@@ -1037,6 +1037,7 @@ type userPayload struct {
 	LineIds         []uint          `json:"lineIds"`  // 老字段:整条线路(全部服务器)
 	LineRefs        []model.LineRef `json:"lineRefs"` // 新字段:线路 × 服务器;给了它就以它为准
 	ExtIds          []uint          `json:"extIds"`
+	ExtNoGroupIds   []uint          `json:"extNoGroupIds"` // 关了“生成策略组”的订阅 id
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
@@ -1054,15 +1055,16 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 		subBase := s.subBase()
 		type row struct {
 			model.User
-			LineIds      []uint              `json:"lineIds"`
-			LineRefs     []model.LineRef     `json:"lineRefs"`
-			ExtIds       []uint              `json:"extIds"`
-			OnlineIP     []string            `json:"onlineIps"`
-			OnlineOn     map[string][]string `json:"onlineLines"` // 源 IP → 该 IP 正在使用的线路(带服务器后缀)
-			SubURL       string              `json:"subUrl"`
-			ResellerName string              `json:"resellerName,omitempty"` // 归属代理
+			LineIds       []uint              `json:"lineIds"`
+			LineRefs      []model.LineRef     `json:"lineRefs"`
+			ExtIds        []uint              `json:"extIds"`
+			ExtNoGroupIds []uint              `json:"extNoGroupIds"`
+			OnlineIP      []string            `json:"onlineIps"`
+			OnlineOn      map[string][]string `json:"onlineLines"` // 源 IP → 该 IP 正在使用的线路(带服务器后缀)
+			SubURL        string              `json:"subUrl"`
+			ResellerName  string              `json:"resellerName,omitempty"` // 归属代理
 		}
-		refsBy, extIdsBy := s.userLineRefMap(), s.userExtMap() // 两条查询代替每个用户两条
+		refsBy, extIdsBy, noGroupBy := s.userLineRefMap(), s.userExtMap(), s.userExtNoGroupMap() // 三条查询代替每个用户三条
 		rsNames := map[uint]string{}
 		if scope(r) == 0 {
 			var rss []model.Reseller
@@ -1077,12 +1079,16 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			if eids == nil {
 				eids = []uint{}
 			}
+			ngids := noGroupBy[u.Id]
+			if ngids == nil {
+				ngids = []uint{}
+			}
 			if refs == nil {
 				refs = []model.LineRef{}
 			}
 			u.Credentials, u.ShareCreds = nil, nil // 列表不返回凭据
 			out = append(out, row{
-				User: u, LineIds: refIDs(refs), LineRefs: refs, ExtIds: eids,
+				User: u, LineIds: refIDs(refs), LineRefs: refs, ExtIds: eids, ExtNoGroupIds: ngids,
 				OnlineIP:     mergeIPs(localIPs[u.Name], remoteIPs[u.Name]),
 				OnlineOn:     s.onlineLines(u.Name, localName, localLines, remoteLines),
 				SubURL:       subBase + subKey(u),
@@ -1122,6 +1128,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			p.ExtIds = nil // 外部节点只由主面板分配
+			p.ExtNoGroupIds = nil
 		}
 		// 凭据只由服务端生成(前端从不提交,编辑也不经表单覆盖):请求体里自带的一份坏凭据
 		// 会让部署这条线路的每台机器渲染配置失败,热更新从此发不下去。临时共享同理,只能由用户自己生成。
@@ -1147,7 +1154,7 @@ func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
 			if err := writeUserLineRefs(tx, p.User.Id, refs); err != nil {
 				return err
 			}
-			return writeUserExts(tx, p.User.Id, p.ExtIds)
+			return writeUserExts(tx, p.User.Id, p.ExtIds, p.ExtNoGroupIds)
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -1208,6 +1215,7 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			p.ExtIds = nil
+			p.ExtNoGroupIds = nil
 		}
 		// 启停:表单里的开关和库里不一样才算手动决定;一样时按自动规则——超量 / 到期被停的人,配额或到期改回范围内就自动启用
 		if p.User.Enabled != cur.Enabled {
@@ -1239,7 +1247,7 @@ func (s *Server) handleUserItem(w http.ResponseWriter, r *http.Request) {
 			if err := writeUserLineRefs(tx, id, refs); err != nil {
 				return err
 			}
-			return writeUserExts(tx, id, p.ExtIds)
+			return writeUserExts(tx, id, p.ExtIds, p.ExtNoGroupIds)
 		})
 		if err != nil {
 			badRequest(w, err)
@@ -1359,6 +1367,17 @@ func (s *Server) onlineLines(user, localName string, local, remote map[string]ma
 func (s *Server) userExtMap() map[uint][]uint {
 	var rows []model.UserExt
 	s.db.Order("user_id asc, ext_id asc").Find(&rows)
+	out := map[uint][]uint{}
+	for _, r := range rows {
+		out[r.UserId] = append(out[r.UserId], r.ExtId)
+	}
+	return out
+}
+
+// userExtNoGroupMap 关了“生成策略组”的分配,按用户分组(与 userExtMap 同一张表)。
+func (s *Server) userExtNoGroupMap() map[uint][]uint {
+	var rows []model.UserExt
+	s.db.Where("no_group = 1").Order("user_id asc, ext_id asc").Find(&rows)
 	out := map[uint][]uint{}
 	for _, r := range rows {
 		out[r.UserId] = append(out[r.UserId], r.ExtId)

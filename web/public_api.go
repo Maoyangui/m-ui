@@ -789,7 +789,7 @@ func (s *Server) apiCreateOne(req apiUserReq, sc apiScope, key, hash string) (mo
 			return err
 		}
 		if req.ExtIds != nil && sc.rid == 0 { // 外部节点只有主面板能分配
-			return writeUserExts(tx, u.Id, *req.ExtIds)
+			return writeUserExts(tx, u.Id, *req.ExtIds, nil)
 		}
 		return nil
 	})
@@ -1001,7 +1001,7 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 			}
 		}
 		if req.ExtIds != nil && sc.rid == 0 {
-			return writeUserExts(tx, u.Id, *req.ExtIds)
+			return writeUserExts(tx, u.Id, *req.ExtIds, nil)
 		}
 		return nil
 	})

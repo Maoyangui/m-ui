@@ -278,17 +278,22 @@ func (s *Server) insecure() bool {
 }
 
 // externalFor 取用户被分配的外部节点:单条链接直接用,外部订阅用主机抓取的缓存解析。
+// 分配上的“不生成策略组”开关(ue.no_group)一并带进 ExtItem。
 func (s *Server) externalFor(userID uint) []ExtItem {
-	var exts []model.ExtNode
-	s.db.Raw(`SELECT e.* FROM ext_nodes e JOIN user_exts ue ON ue.ext_id = e.id
-		WHERE ue.user_id = ? AND e.enabled = 1 ORDER BY e.sort, e.id`, userID).Scan(&exts)
-	out := make([]ExtItem, 0, len(exts))
-	for _, e := range exts {
-		it := ext.Output(e) // 筛选、改名、前缀:链接侧与 Clash 侧按同一个名字和指纹判定
+	type extRow struct {
+		model.ExtNode
+		NoGroup bool
+	}
+	var rows []extRow
+	s.db.Raw(`SELECT e.*, ue.no_group FROM ext_nodes e JOIN user_exts ue ON ue.ext_id = e.id
+		WHERE ue.user_id = ? AND e.enabled = 1 ORDER BY e.sort, e.id`, userID).Scan(&rows)
+	out := make([]ExtItem, 0, len(rows))
+	for _, r := range rows {
+		it := ext.Output(r.ExtNode) // 筛选、改名、前缀:链接侧与 Clash 侧按同一个名字和指纹判定
 		if len(it.Nodes) == 0 {
 			continue
 		}
-		out = append(out, ExtItem{Name: e.Name, Links: it.Links(), Clash: it.Clash()})
+		out = append(out, ExtItem{Name: r.Name, Links: it.Links(), Clash: it.Clash(), NoGroup: r.NoGroup})
 	}
 	return out
 }
