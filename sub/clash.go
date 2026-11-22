@@ -68,7 +68,10 @@ func BuildClashFor(user model.User, lines []model.Line, entries []Entry, templat
 	for _, n := range clashBuiltins {
 		used[n] = true
 	}
-	used["GLOBAL"] = true // GLOBAL 是总组惯用名:订阅起名叫 GLOBAL 时组名改名,不和模板的总组撞名
+	// 本站节点、外部节点也不叫 GLOBAL(撞了改「GLOBAL 2」):模板没写 GLOBAL 组时 mihomo 自己补一个全局组,
+	// 运行中名字表里的 GLOBAL 就是那个组,叫 GLOBAL 的节点被顶掉 —— 客户端里显示成组、测速测到组上(mihomo 1.19.34 实测);
+	// 模板写了 GLOBAL 组时同名节点整份拒收,那种下面登记模板组名时也会占上。组名让开 GLOBAL 另有 lineGroupReserved
+	used["GLOBAL"] = true
 	if own, ok := root["proxies"].([]interface{}); ok {
 		for _, p := range own {
 			if m, ok := p.(map[string]interface{}); ok {

@@ -361,3 +361,26 @@ func TestExtGroupsKeepTemplateOrder(t *testing.T) {
 		t.Fatalf("有外部订阅:组的顺序\n得 %v\n应 %v", got, want)
 	}
 }
+
+// 节点不叫 GLOBAL:模板没写 GLOBAL 组时 mihomo 自己补一个,运行中叫 GLOBAL 的节点被它顶掉(客户端里显示成组)。
+// 单台服务器的线路叫 GLOBAL(节点就叫线路名)、外部节点叫 GLOBAL,都加序号。
+func TestClashNodeNotNamedGLOBAL(t *testing.T) {
+	user := fullUser()
+	cert := raw(map[string]interface{}{"mode": "cert"})
+	lines := []model.Line{{Id: 1, Name: "GLOBAL", Protocol: "trojan", Port: 9443, Tls: cert, Enabled: true}}
+	ext := []ExtItem{{Name: "链接", NoGroup: true, Clash: []map[string]interface{}{{"name": "GLOBAL", "type": "ss", "server": "198.51.100.9", "port": 1, "cipher": "aes-128-gcm", "password": "x"}}}}
+	body, err := BuildClashFor(user, lines, []Entry{{Host: "1.2.3.4"}}, "", "", ext, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := checkClash(t, body)
+	if got := doc.proxyNames(); !reflect.DeepEqual(got, []string{"GLOBAL 2", "GLOBAL 3"}) {
+		t.Fatalf("节点名应为 [GLOBAL 2 GLOBAL 3],实际 %v", got)
+	}
+	if doc.group("GLOBAL") != nil {
+		t.Fatal("没写 GLOBAL 组的模板,订阅里不该出现叫 GLOBAL 的组")
+	}
+	if got := stringList(doc.group("Proxy")["proxies"]); !reflect.DeepEqual(got, []string{"Auto", "GLOBAL 2", "GLOBAL 3"}) {
+		t.Fatalf("Proxy 应为 [Auto GLOBAL 2 GLOBAL 3],实际 %v", got)
+	}
+}
