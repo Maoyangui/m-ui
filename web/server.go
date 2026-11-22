@@ -2,6 +2,7 @@
 package web
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -14,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -448,6 +450,9 @@ func (s *Server) tlsWatch() *certutil.Watch {
 // assetCache 给内嵌前端加上按内容哈希生成的 ETag,并要求浏览器每次校验(no-cache)。
 // 内嵌文件没有修改时间,浏览器会按启发式长期缓存 ES 模块,升级后就会看到旧界面;
 // 这里用整套资源的哈希做 ETag:未升级时全部 304,升级后立即拿到新文件。
+// 网页和样式例外:不让浏览器存(no-store),gzip 压缩着发。「恢复标签页」「前进后退」时浏览器可以不校验、直接用缓存里的旧文件,
+// 面板升级后就成了新脚本配旧样式 —— 用户 11-22 手机上概览「上游巡检」的对勾没了尺寸限制、撑满整张卡,刷新以后才正常。
+// 样式只有一个文件(压缩后几十 KB),面板一次会话只加载一次;脚本几十个,照旧按 ETag 校验(旧脚本配新样式基本不走样)。
 // panelRouteShape 慢请求日志里面板 / 代理面板请求的路由形状:处理完以后路径已改写到 innerBase 之下,去掉前缀
 // (对外路径本身是秘密,从不写进日志),数字 id 与令牌之类打码,如 /api/lines/:id。
 func panelRouteShape(r *http.Request) string {
@@ -467,6 +472,18 @@ func assetCache(fsys fs.FS, next http.Handler) http.Handler {
 	})
 	etag := `"` + hex.EncodeToString(h.Sum(nil))[:16] + `"`
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if noStoreAsset(r.URL.Path) {
+			w.Header().Set("Cache-Control", "no-store")
+			r.Header.Del("Range") // 整份给(压缩着发时也没法按字节区间给)
+			if r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+				gw := &gzipWriter{ResponseWriter: w}
+				defer gw.Close()
+				next.ServeHTTP(gw, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("ETag", etag)
 		if r.Header.Get("If-None-Match") == etag {
@@ -475,6 +492,56 @@ func assetCache(fsys fs.FS, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// noStoreAsset 不让浏览器存的前端文件:网页(目录即 index.html)和样式(见 assetCache)。
+func noStoreAsset(p string) bool {
+	if strings.HasSuffix(p, "/") {
+		return true
+	}
+	switch strings.ToLower(path.Ext(p)) {
+	case ".html", ".css":
+		return true
+	}
+	return false
+}
+
+// gzipWriter 把 200 的正文 gzip 压缩着写(304、404、跳转之类原样);FileServer 写的 Content-Length 是压缩前的,去掉。
+type gzipWriter struct {
+	http.ResponseWriter
+	gz   *gzip.Writer
+	code int
+}
+
+func (g *gzipWriter) WriteHeader(code int) {
+	if g.code != 0 {
+		return
+	}
+	g.code = code
+	if code == http.StatusOK {
+		h := g.Header()
+		h.Del("Content-Length")
+		h.Set("Content-Encoding", "gzip")
+		h.Add("Vary", "Accept-Encoding")
+		g.gz = gzip.NewWriter(g.ResponseWriter)
+	}
+	g.ResponseWriter.WriteHeader(code)
+}
+
+func (g *gzipWriter) Write(b []byte) (int, error) {
+	if g.code == 0 {
+		g.WriteHeader(http.StatusOK)
+	}
+	if g.gz != nil {
+		return g.gz.Write(b)
+	}
+	return g.ResponseWriter.Write(b)
+}
+
+func (g *gzipWriter) Close() {
+	if g.gz != nil {
+		g.gz.Close()
+	}
 }
 
 func (s *Server) Stop() error {

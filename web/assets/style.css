@@ -1261,19 +1261,16 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
 /* 上游巡检全部正常:卡片正中一个轻量的圆形对勾,下面一句话和上次巡检的时间(用户 N8) */
 #dash-health-card { display: flex; flex-direction: column; }
 #dash-health { flex: 1 1 auto; display: flex; flex-direction: column; }
-.hc-ok { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .7rem; min-height: 8rem; padding: .5rem 0 .25rem; text-align: center; }
+.hc-ok { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .65rem; min-height: 8rem; padding: .5rem 0 .25rem; text-align: center; }
 .hc-txt { display: flex; flex-direction: column; align-items: center; gap: .35rem; max-width: 100%; }
 .hc-txt > b { font-size: var(--fs-md); font-weight: 600; color: var(--text); }
-.hc-ok-ic { display: grid; place-items: center; flex: none; width: 52px; height: 52px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); }
-.hc-ok-ic > svg { width: 28px; height: 28px; }
-/* 一列(手机、窄窗口):卡片高度跟着内容走,不必把一块地方填满 —— 横排:左边小圆标,右边两行字,不留最小高度。
-   用户 11-22:「手机端的概览上游巡查卡片极大 …… 全部正常加个✅的图标半个屏幕」。两列起和同一行的卡片等高,仍是居中的大圆标 */
-@container (max-width: 46.99rem) {
-  #dash-health .hc-ok { flex: 0 0 auto; flex-direction: row; justify-content: flex-start; gap: .85rem; min-height: 0; padding: .15rem 0 .1rem; text-align: left; }
-  #dash-health .hc-ok-ic { width: 38px; height: 38px; }
-  #dash-health .hc-ok-ic > svg { width: 21px; height: 21px; }
-  #dash-health .hc-txt { align-items: flex-start; gap: .2rem; min-width: 0; }
-  #dash-health .hc-bad-list { align-items: flex-start; }
+.hc-ok-ic { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 50%; background: var(--ok-soft); color: var(--ok); }
+.hc-ok-ic > svg { width: 24px; height: 24px; }
+/* 两列起(桌面):卡片和同一行的卡片等高,比手机上高出一截,圆标跟着大一号。用户 11-22:「手机端的大小合适 但是桌面端要偏小了点」
+   (那次手机上「撑满半屏的对勾」是浏览器用了缓存里的旧样式,刷新就好了,见 web/server.go assetCache) */
+@container (min-width: 47rem) {
+  #dash-health .hc-ok-ic { width: 56px; height: 56px; }
+  #dash-health .hc-ok-ic > svg { width: 30px; height: 30px; }
 }
 /* 故障不多时同一个版式:浅红的「!」,标题用危险色,下面一行一条不通的上游 */
 .hc-bad .hc-ok-ic { background: var(--danger-soft); color: var(--danger); }
@@ -2903,6 +2900,10 @@ html.rw-lock { overflow: hidden; }
 :root:not([data-concise]) .qh:not(.qh-always), .qh[hidden] { display: none !important; }
 :root[data-concise] .xp:not([data-qh-none]), .xp.xp-always:not([data-qh-none]) { display: none !important; } /* 先藏;找不到标题挂「?」的(data-qh-none)照常显示 */
 .topbar-title > .qh { margin-left: .4rem; }
+/* 弹窗标题长到正好占满一行时,「?」不单独掉到第二行(设置页伪装站预览的标题带着随机站名,手机宽度上碰到过):
+   有「?」的标题排成一行两格,字在自己那一格里折行,「?」留在第一行的末尾 */
+#modal-title:has(> .qh:not([hidden])) { display: flex; align-items: baseline; }
+#modal-title > .qh { align-self: center; }
 .qh-tip { position: fixed; z-index: 85; max-width: min(24rem, calc(100vw - 16px)); padding: .6rem .8rem; background: var(--surface); color: var(--text-2); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); font-size: var(--fs-sm); font-weight: 400; line-height: 1.6; text-align: left; white-space: normal; overflow-wrap: anywhere; animation: qh-in .12s ease-out; }
 .qh-tip[hidden] { display: none; }
 .qh-tip::before { content: ""; position: absolute; left: calc(var(--qh-x, 16px) - 5px); width: 9px; height: 9px; background: var(--surface); border: 1px solid var(--border); transform: rotate(45deg); }

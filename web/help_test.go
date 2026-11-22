@@ -192,8 +192,8 @@ func TestUnauthorizedTellsResellerPanel(t *testing.T) {
 	}
 }
 
-// 帮助页是普通的内嵌静态文件:和面板其它前端文件一样经 assetCache 提供(带内容哈希 ETag、要求每次校验),
-// 帮助页内容一变 ETag 就变,升级后浏览器不会看到旧说明。
+// 帮助页是普通的内嵌静态文件:和面板其它前端文件一样经 assetCache 提供。网页和样式不让浏览器存(no-store),
+// 脚本带内容哈希 ETag、要求每次校验;帮助页内容一变 ETag 就变,升级后浏览器不会看到旧说明。
 func TestHelpPageServedWithAssets(t *testing.T) {
 	sub, err := fs.Sub(assets, "assets")
 	if err != nil {
@@ -210,7 +210,13 @@ func TestHelpPageServedWithAssets(t *testing.T) {
 		return w
 	}
 	var etag string
-	for _, p := range []string{"/app/help/zh.html", "/app/help/en.html", "/app/help/help.css", "/app/help/help.js", "/app/help/"} {
+	for _, p := range []string{"/app/help/zh.html", "/app/help/en.html", "/app/help/help.css", "/app/help/"} {
+		w := serve(sub, p, "")
+		if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("ETag") != "" {
+			t.Fatalf("%s 应 200、no-store、不带 ETag,得 %d %q %q", p, w.Code, w.Header().Get("Cache-Control"), w.Header().Get("ETag"))
+		}
+	}
+	for _, p := range []string{"/app/help/help.js"} {
 		w := serve(sub, p, "")
 		if w.Code != http.StatusOK {
 			t.Fatalf("%s 应 200,得 %d", p, w.Code)

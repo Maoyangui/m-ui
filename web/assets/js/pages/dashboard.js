@@ -741,7 +741,7 @@ function renderHealth() {
   const badges = `<div class="row wrap" style="margin:.35rem 0 .5rem">${badge(t('dash.health.okN', { n: hs.ok }), 'ok')}${hs.bad.length ? badge(t('dash.health.badN', { n: hs.bad.length }) + (hs.single ? '' : ' · ' + t('dash.health.servers', { n: hs.servers.size })), 'danger') : ''}${hs.pending ? badge(t('dash.health.pendN', { n: hs.pending })) : ''}</div>`;
   // 全部正常:卡片正中一个轻量的圆形对勾,下面一句话和上次巡检的时间(用户 N8:卡片被旁边「当前在线」撑高时,不再是一行字下面一大块空白)
   if (!hs.bad.length) {
-    setHTML(el, `<div class="hc-ok"><span class="hc-ok-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 12.5 3.6 3.6 7.4-8"/></svg></span>
+    setHTML(el, `<div class="hc-ok"><span class="hc-ok-ic" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 12.5 3.6 3.6 7.4-8"/></svg></span>
       <div class="hc-txt"><b>${esc(t('dash.health.allOkN', { n: hs.ok }))}</b>${hs.pending ? `<span class="small muted">${esc(t('dash.health.pendN', { n: hs.pending }))}</span>` : ''}
       <span class="small muted">${esc(t('dash.healthLast'))} ${esc(fmtRelative(hs.lastRun))}${hs.interval ? ' · ' + esc(t('dash.health.every', { n: hs.interval })) : ''}</span></div></div>`);
     return;
@@ -752,7 +752,7 @@ function renderHealth() {
   // 一两条故障时不再是一行字下面一大块空白(用户 N8);多了才用下面的列表
   if (hs.bad.length <= 3) {
     const names = hs.bad.map(b => `<a class="hc-bad-nm" href="#/upstreams?f=bad" title="${esc(b.name + why(b))}"><span class="nm">${esc(b.name)}</span>${hs.single ? '' : `<span class="badge danger" title="${esc(etc(b.fails, 'nodes', 20))}">${esc(t('dash.health.ratio', { bad: b.fails.length, total: b.total }))}</span>`}</a>`).join('');
-    setHTML(el, `<div class="hc-ok hc-bad"><span class="hc-ok-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 7v6"/><path d="M12 17h.01"/></svg></span>
+    setHTML(el, `<div class="hc-ok hc-bad"><span class="hc-ok-ic" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 7v6"/><path d="M12 17h.01"/></svg></span>
       <div class="hc-txt"><b>${esc(t('dash.health.badTitle', { n: hs.bad.length }))}</b><div class="hc-bad-list">${names}</div>
       <span class="small muted">${hs.ok ? esc(t('dash.health.restOk', { n: hs.ok })) + ' · ' : ''}${hs.pending ? esc(t('dash.health.pendN', { n: hs.pending })) + ' · ' : ''}${esc(t('dash.healthLast'))} ${esc(fmtRelative(hs.lastRun))}${hs.interval ? ' · ' + esc(t('dash.health.every', { n: hs.interval })) : ''}</span></div></div>`);
     return;
