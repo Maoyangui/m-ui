@@ -33,6 +33,7 @@ globalThis.fetch = (url, init = {}) => new Promise((resolve, reject) => {
       ? new Promise((res, rej) => { call.body = () => res(data); if (init.signal) init.signal.addEventListener('abort', () => { const e = new Error('aborted'); e.name = 'AbortError'; rej(e); }, { once: true }); })
       : Promise.resolve(data)) });
   };
+  call.fail = e => { call.done = true; reject(e); }; // 连不上:按浏览器的规矩抛 TypeError
   calls.push(call);
 });
 const api = await import(pathToFileURL(path.join(dir, 'api.js')).href);
@@ -108,6 +109,29 @@ test('超时、报错、401 的行为不变', async () => {
   const bad = (await e2).err;
   assert.equal(bad.status, 500);
   assert.equal(bad.message, '坏了');
+});
+
+test('连不上:各家浏览器原话不同的 TypeError 换成一句看得懂的(api.network);上传也一样', async () => {
+  calls.length = 0;
+  for (const msg of ['Failed to fetch', 'Load failed', 'NetworkError when attempting to fetch resource.']) {
+    const p = settle(api.get('x'));
+    await tick();
+    calls[calls.length - 1].fail(new TypeError(msg));
+    const r = await p;
+    assert.ok(r.err instanceof api.ApiError, msg);
+    assert.equal(r.err.status, 0);
+    assert.equal(r.err.message, 'api.network');
+    assert.notEqual(r.err.aborted, true, '连不上不是换页放弃');
+  }
+  const up = settle(api.upload('backup/restore', new File(['x'], 'a.db')));
+  await tick();
+  calls[calls.length - 1].fail(new TypeError('Failed to fetch'));
+  assert.equal((await up).err.message, 'api.network');
+  // 不是网络的错照旧抛原样(不吞别的错误)
+  const other = settle(api.get('y'));
+  await tick();
+  calls[calls.length - 1].fail(new RangeError('别的'));
+  assert.equal((await other).err.message, '别的');
 });
 
 // ---- setHTML ----

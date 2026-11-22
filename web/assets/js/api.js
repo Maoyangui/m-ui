@@ -50,6 +50,9 @@ export async function api(path, opts = {}) {
   } catch (e) {
     if (left) throw abortedError();
     if (e && e.name === 'AbortError') throw new ApiError(0, t('api.timeout'));
+    // 连不上(断网、面板正在重启):fetch 抛 TypeError,各家浏览器的原话不一样(Failed to fetch / Load failed / NetworkError…),
+    // 都是英文技术词,换成一句看得懂的(11-22 实测调用日志「加载更多」断网时看到的)
+    if (e instanceof TypeError) throw new ApiError(0, t('api.network'));
     throw e;
   } finally {
     if (timer) clearTimeout(timer);
@@ -77,7 +80,9 @@ export async function upload(path, file, extra = {}) {
   const fd = new FormData();
   fd.append('file', file, file.name);
   Object.entries(extra).forEach(([k, v]) => fd.append(k, v));
-  const res = await fetch(BASE + path, { method: 'POST', body: fd });
+  let res;
+  try { res = await fetch(BASE + path, { method: 'POST', body: fd }); }
+  catch (e) { throw e instanceof TypeError ? new ApiError(0, t('api.network')) : e; } // 连不上:同 api()
   if (res.status === 401) { onUnauthorized(); throw new ApiError(401, trErr('未登录')); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, trErr(data.error) || t('api.failed', { s: res.status }));
