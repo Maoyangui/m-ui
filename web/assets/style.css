@@ -512,6 +512,15 @@ details.menu .menu-list hr { border: none; border-top: 1px solid var(--divider);
 .drawer.open { transform: none; }
 .drawer.over { z-index: 60; }
 .check-list.one-col { grid-template-columns: 1fr; }
+/* 用户表单的外部节点:一行 = 左边「勾选 · 名字 · 类型 · 节点数」(名字太长省略号,全名在悬停),外部订阅右边一个「单独成组」小开关,
+   没分给这个用户时变灰;分享链接没有开关,右边空着。行与行等高,开关一列对齐 */
+.check-list.ext-list { grid-template-columns: minmax(0, 1fr); gap: .15rem; } /* 列能缩:名字再长也是省略号,不把开关挤到看不见的地方 */
+.check-list .ext-pick { display: flex; align-items: center; gap: .9rem; min-height: 30px; min-width: 0; }
+.check-list .ext-pick .ext-main { flex: 1 1 auto; min-width: 0; }
+.ext-pick .ext-nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext-pick .ext-meta { flex: none; color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; }
+.check-list .ext-pick .ext-grp { flex: none; gap: .45rem; color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
+.check-list .ext-pick .ext-grp:has(input:disabled) { color: var(--muted); cursor: default; }
 tr.ext-hidden .primary-cell a { text-decoration: line-through; opacity: .55; }
 .node-list { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
 .node-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; min-width: 0; }
@@ -1130,9 +1139,9 @@ button.role-chip.k-lost { background: var(--danger-soft); color: var(--danger); 
 .cell-clip { display: inline-block; max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .grid.no-p3 .cell-clip { max-width: 6.5rem; }
 .pc-err { color: var(--danger); font-size: .85rem; padding: .5rem 0; }
-label.switch.sm { width: 28px; height: 16px; vertical-align: middle; }
-label.switch.sm span::before { width: 12px; height: 12px; }
-label.switch.sm input:checked + span::before { transform: translateX(12px); }
+.switch.sm { width: 28px; height: 16px; vertical-align: middle; }
+.switch.sm span::before { width: 12px; height: 12px; }
+.switch.sm input:checked + span::before { transform: translateX(12px); }
 .grid-2.pc-cols { grid-template-columns: 1fr 1fr; }
 @media (max-width: 700px) { .grid-2.pc-cols { grid-template-columns: 1fr; } }
 

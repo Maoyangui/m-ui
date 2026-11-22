@@ -326,7 +326,7 @@ async function showDetail(id) {
       </dl>
     </section>
     <section><h3>${t('user.lines')}</h3>${refChips(refsOf(u), state.lines, pickerNodes(), { key: 'ud-lines-' + u.id, max: 20 }) || `<span class="muted small">${t('common.none')}</span>`}
-      ${(u.extIds || []).length ? `<h3>${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); const noGroup = (u.extNoGroupIds || []).includes(eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span>${noGroup ? ` <span class="muted">· ${esc(t('user.f.extNoGroup'))}</span>` : ''}</span>` : ''; }).join('')}</div>` : ''}</section>
+      ${(u.extIds || []).length ? `<h3>${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); const noGroup = x && x.type === 'sub' && (u.extNoGroupIds || []).includes(eid); return x ? `<span class="chip">${esc(x.name)}&nbsp;<span class="muted">${x.nodeCount || 0}</span>${noGroup ? `&nbsp;<span class="muted">· ${esc(t('user.f.extNoGroup'))}</span>` : ''}</span>` : ''; }).join('')}</div>` : ''}</section>
     <section><h3>${t('pc.history')}</h3><div id="ud-planops"><span class="muted small">${t('common.loading')}</span></div></section>`, { wide: true });
   refreshDrawerLive();
   loadPlanOps(id);
@@ -403,11 +403,18 @@ function editUser(id) {
       ${field(t('user.f.resetDays'), `<input id="f-resetdays" type="number" min="1" value="${u.resetDays || 30}">`)}
       <label class="field check" style="align-self:end;min-height:var(--ctl-h)"><input type="checkbox" id="f-autoreset" ${u.autoReset ? 'checked' : ''}><span>${esc(t('user.f.autoReset'))}</span></label>
     </div>`;
+  // 外部节点:每行左边勾上 = 分给这个用户;外部订阅右边多一个「单独成组」小开关(Clash 订阅里自己成一个策略组,默认开)。
+  // 两个控件各有各的 label,点哪个的字就是哪个(#91 原先把开关塞在分配的 label 里,点「生成策略组」几个字反而把整个订阅取消了);
+  // 没分给他时开关变灰、点不动(开关记在分配上,不分配就无从谈起),再勾上时恢复原来的状态;分享链接只有一个节点,不成组,不给开关。
+  const extRow = x => {
+    const on = (u.extIds || []).includes(x.id), grouped = !(u.extNoGroupIds || []).includes(x.id);
+    const meta = `${x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink')} · ${x.nodeCount || 0}`;
+    const grp = x.type === 'sub' ? `<label class="ext-grp" title="${esc(t('user.f.extGroupTip'))}"><span>${esc(t('user.f.extGenGroup'))}</span><span class="switch sm"><input type="checkbox" class="ext-group-cb" value="${x.id}" ${grouped ? 'checked' : ''} ${on ? '' : 'disabled'}><span></span></span></label>` : '';
+    return `<div class="ext-pick"><label class="ext-main"><input type="checkbox" class="ext-cb" value="${x.id}" ${on ? 'checked' : ''}><span class="ext-nm" title="${esc(x.name)}">${esc(x.name)}</span><span class="ext-meta">${esc(meta)}</span></label>${grp}</div>`;
+  };
   const linesTab = `<div id="f-lines"></div><p class="hint xp">${esc(t('lp.help'))}</p>
       ${(state.exts || []).length ? `<h3 class="form-sec">${esc(t('user.f.exts'))}</h3>
-        <div class="check-list one-col">
-          ${(state.exts || []).map(x => { const noGroup = (u.extNoGroupIds || []).includes(x.id); return `<label><input type="checkbox" class="ext-cb" value="${x.id}" ${(u.extIds || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name)} <span class="muted small">${x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink')} · ${x.nodeCount || 0}</span> <span class="muted small" style="margin-left:8px"><input type="checkbox" class="ext-group-cb" value="${x.id}" ${noGroup ? '' : 'checked'}> ${esc(t('user.f.extGenGroup'))}</span></label>`; }).join('')}
-        </div><p class="hint xp">${esc(t('user.f.extsHelp'))}</p>` : ''}`;
+        <div class="check-list one-col ext-list">${(state.exts || []).map(extRow).join('')}</div><p class="hint xp">${esc(t('user.f.extsHelp'))}</p>` : ''}`;
   openModal(id ? t('user.edit') : t('user.add'), `<div class="edit-2pane">
       <div class="pane"><h3 class="form-sec">${esc(t('user.tab.basic'))}</h3>${basic}<h3 class="form-sec">${esc(t('user.tab.quota'))}</h3>${quota}</div>
       <div class="pane"><h3 class="form-sec">${esc(t('user.tab.lines'))}</h3>${linesTab}</div>
@@ -435,6 +442,10 @@ function editUser(id) {
     // 系统里的第一个用户:直接打开详情抽屉,订阅地址 / 二维码 / 复制就在眼前,不用再找
     if (created && created.id && state.users.length === 1) showDetail(created.id);
   }, { size: 'xl' });
+  document.querySelectorAll('#modal-body .ext-cb').forEach(cb => cb.addEventListener('change', () => {
+    const g = document.querySelector(`#modal-body .ext-group-cb[value="${cb.value}"]`);
+    if (g) g.disabled = !cb.checked;
+  }));
   const items = pickerItems();
   picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refsOf(u), items), keep: refsOf(u) });
   // 新建时选了套餐就直接填好额度;编辑老用户时只是改归属,要填额度再点按钮

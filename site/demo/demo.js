@@ -410,6 +410,8 @@ const tlsOf = l => { try { return typeof l.tls === 'string' ? JSON.parse(l.tls |
 for (const l of S.lines) if (l.name === 'Tokyo-HY2' && tlsOf(l).mode === 'cert') l.tls = JSON.stringify({ ...tlsOf(l), cert: '*.example.net' });
 // 外部订阅(导出实例没有):关键词已排除带"官网"的,展开能隐藏、改名、测大陆连通
 if (!S.exts.length) S.exts.push({ id: 1, name: 'Demo Sub', type: 'sub', value: 'https://sub.example.net/demo', prefix: '', enabled: true, sort: 1, remark: '', lastFetch: now() - 600, lastError: '', nodeCount: 6, nodeTotal: 7, exclude: '官网' });
+// 第一个用户分到这个外部订阅:用户表单「外部节点」那一行右边是「单独成组」开关,详情里列着它
+{ const u0 = S.users[0]; if (u0 && !(u0.extIds || []).length) { u0.extIds = [S.exts[0].id]; u0.extNoGroupIds = []; } }
 // 演示「上游跟随外部节点」:LA-streaming 当作是从外部订阅里加来的,两小时前全部测不通、已经跟着订阅换过一次端口
 {
   const la = S.upstreams.find(u => u.name === 'LA-streaming'), e0 = (S.exts || [])[0];
