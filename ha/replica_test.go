@@ -65,16 +65,29 @@ func openReplicaDB(t *testing.T, zipPath string) (*gorm.DB, ReplicaMeta) {
 	return db, meta
 }
 
-// 副本按列原样拷:json:"-" 的令牌与密码、停用的用户都保留;会话、时序、订阅日志、副机账本不带;审计日志只带最近 7 天;
+// 副本按列原样拷:json:"-" 的令牌与密码、停用的用户都保留;会话、时序、订阅日志、副机账本、外部 API 调用日志不带;审计日志只带最近 7 天;
 // 本机设置不进 settings(主机身份另记在 meta),容灾的私密键一个都不带;内容不变时指纹不变,变了就变。
 func TestBuildReplicaContents(t *testing.T) {
 	s := testService(t, false, map[string]string{KeyEpoch: "1", KeyMode: ModeConfirm})
 	seedMaster(t, s)
+	// 外部 API 的调用日志只在主机本机(密钥本身要带)
+	key := model.ApiKey{Name: "shop", Token: "key-token-0123456789", Perms: "users.read", Enabled: true}
+	if err := s.d.DB.Create(&key).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.d.DB.Create(&model.ApiKeyLog{KeyId: key.Id, At: time.Now().Unix(), Method: "GET", Path: "/api/v1/users", Action: "users.list", Status: 200}).Error; err != nil {
+		t.Fatal(err)
+	}
 	zp, meta, err := s.buildReplica(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	db, m2 := openReplicaDB(t, zp)
+	var keyTok string
+	db.Raw("SELECT token FROM api_keys WHERE name = 'shop'").Scan(&keyTok)
+	if keyTok != "key-token-0123456789" {
+		t.Fatalf("外部 API 的密钥要带上: %q", keyTok)
+	}
 	if m2.Sum != meta.Sum || meta.MasterId == 0 || meta.Epoch != 1 || meta.MaxChangeId != 2 {
 		t.Fatalf("meta 不对: %+v", meta)
 	}
@@ -97,7 +110,7 @@ func TestBuildReplicaContents(t *testing.T) {
 	if up != 100 {
 		t.Fatalf("用户用量要带上: %d", up)
 	}
-	for _, tbl := range []string{"sessions", "stats", "sub_logs", "agent_counters"} {
+	for _, tbl := range []string{"sessions", "stats", "sub_logs", "agent_counters", "api_key_logs"} {
 		var n int64
 		if err := db.Raw("SELECT COUNT(*) FROM " + tbl).Scan(&n).Error; err != nil {
 			t.Fatalf("%s 表要建出来(空的): %v", tbl, err)

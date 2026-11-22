@@ -28,14 +28,17 @@ import (
 // 副本 = 主库的表级拷贝(设计 3.2):不走 JSON 序列化(Node.Token、Admin.Password、代理密钥这些 json:"-" 的字段会丢),
 // 也不走 gorm 的 Create(default:true 的 bool 会把 false 写成 true)—— 按列原样复制每一行。
 //
-// 给备用的副本不带:会话(接任后所有人重新登录)、流量时序与订阅日志(大,每 5 分钟发一次不划算)、副机账本(主机上没有);
-// 审计日志只带最近 7 天。流量时序、订阅日志和更早的审计日志另外低频发一份「历史数据」(见 history.go),接任时并进新库。
+// 给备用的副本不带:会话(接任后所有人重新登录)、流量时序与订阅日志(大,每 5 分钟发一次不划算)、副机账本(主机上没有)、
+// 外部 API 的调用日志(只记在主机本机,备用接任后从空开始记);审计日志只带最近 7 天。
+// 流量时序、订阅日志和更早的审计日志另外低频发一份「历史数据」(见 history.go),接任时并进新库。
 // 设为主机时推过去的是整库(只不带会话;账本是原主机交接途中另记的那本,见 ledger.go)。
 // 设置只带全局的;主机身份(订阅地址、订阅证书、作为副机时怎么连)单独记在 meta.json 里,见 identity.go。
 
 // replicaSkip 给备用的副本不带内容的表(表结构照建,行不拷)。
 // local_totals 是每台机器自己数据面的累计(见 model.LocalTotal):主机的那一行拷给备用就成了备用的累计,不带。
-var replicaSkip = map[string]bool{"sessions": true, "stats": true, "sub_logs": true, "agent_counters": true, "local_totals": true}
+// api_key_logs 是外部 API 每把密钥的调用日志(见 model.ApiKeyLog):每把最多两万条,和订阅日志一样每 5 分钟带一遍不划算,
+// 文档也写明只在主机本机;设为主机推的整库照带。
+var replicaSkip = map[string]bool{"sessions": true, "stats": true, "sub_logs": true, "agent_counters": true, "local_totals": true, "api_key_logs": true}
 
 // bundleSkip 设为主机时整库数据不带的表。账本要带:原主机交接途中另记的那本账此刻的计数(和用户用量同一时刻),
 // 目标组库时记成原主机的游标(见 installFormerLedger)。
