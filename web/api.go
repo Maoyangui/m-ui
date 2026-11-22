@@ -1037,7 +1037,7 @@ type userPayload struct {
 	LineIds         []uint          `json:"lineIds"`  // 老字段:整条线路(全部服务器)
 	LineRefs        []model.LineRef `json:"lineRefs"` // 新字段:线路 × 服务器;给了它就以它为准
 	ExtIds          []uint          `json:"extIds"`
-	ExtNoGroupIds   []uint          `json:"extNoGroupIds"` // 关了“生成策略组”的订阅 id
+	ExtNoGroupIds   []uint          `json:"extNoGroupIds"` // 关了「单独成组」的外部订阅 id(nil = 老前端没传,沿用原来的开关,见 writeUserExts)
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {
@@ -1380,7 +1380,7 @@ func (s *Server) userExtMap() map[uint][]uint {
 	return out
 }
 
-// userExtNoGroupMap 关了“生成策略组”的分配,按用户分组(与 userExtMap 同一张表)。
+// userExtNoGroupMap 关了「单独成组」的分配,按用户分组(与 userExtMap 同一张表)。
 func (s *Server) userExtNoGroupMap() map[uint][]uint {
 	var rows []model.UserExt
 	s.db.Where("no_group = 1").Order("user_id asc, ext_id asc").Find(&rows)
