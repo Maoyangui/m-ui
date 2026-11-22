@@ -326,7 +326,7 @@ async function showDetail(id) {
       </dl>
     </section>
     <section><h3>${t('user.lines')}</h3>${refChips(refsOf(u), state.lines, pickerNodes(), { key: 'ud-lines-' + u.id, max: 20 }) || `<span class="muted small">${t('common.none')}</span>`}
-      ${(u.extIds || []).length ? `<h3>${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span></span>` : ''; }).join('')}</div>` : ''}</section>
+      ${(u.extIds || []).length ? `<h3>${t('user.f.exts')}</h3><div class="chips">${u.extIds.map(eid => { const x = (state.exts || []).find(e => e.id === eid); const noGroup = (u.extNoGroupIds || []).includes(eid); return x ? `<span class="chip">${esc(x.name)} <span class="muted">${x.nodeCount || 0}</span>${noGroup ? ` <span class="muted">· ${esc(t('user.f.extNoGroup'))}</span>` : ''}</span>` : ''; }).join('')}</div>` : ''}</section>
     <section><h3>${t('pc.history')}</h3><div id="ud-planops"><span class="muted small">${t('common.loading')}</span></div></section>`, { wide: true });
   refreshDrawerLive();
   loadPlanOps(id);
@@ -406,7 +406,7 @@ function editUser(id) {
   const linesTab = `<div id="f-lines"></div><p class="hint xp">${esc(t('lp.help'))}</p>
       ${(state.exts || []).length ? `<h3 class="form-sec">${esc(t('user.f.exts'))}</h3>
         <div class="check-list one-col">
-          ${(state.exts || []).map(x => `<label><input type="checkbox" class="ext-cb" value="${x.id}" ${(u.extIds || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name)} <span class="muted small">${x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink')} · ${x.nodeCount || 0}</span></label>`).join('')}
+          ${(state.exts || []).map(x => { const noGroup = (u.extNoGroupIds || []).includes(x.id); return `<label><input type="checkbox" class="ext-cb" value="${x.id}" ${(u.extIds || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name)} <span class="muted small">${x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink')} · ${x.nodeCount || 0}</span> <span class="muted small" style="margin-left:8px"><input type="checkbox" class="ext-group-cb" value="${x.id}" ${noGroup ? '' : 'checked'}> ${esc(t('user.f.extGenGroup'))}</span></label>`; }).join('')}
         </div><p class="hint xp">${esc(t('user.f.extsHelp'))}</p>` : ''}`;
   openModal(id ? t('user.edit') : t('user.add'), `<div class="edit-2pane">
       <div class="pane"><h3 class="form-sec">${esc(t('user.tab.basic'))}</h3>${basic}<h3 class="form-sec">${esc(t('user.tab.quota'))}</h3>${quota}</div>
@@ -424,6 +424,7 @@ function editUser(id) {
       nextReset: u.nextReset || 0, desc: u.desc || '',
       lineRefs: picker.read(), lineIds: picker.read().map(r => r.lineId),
       extIds: [...document.querySelectorAll('.ext-cb:checked')].map(c => Number(c.value)),
+      extNoGroupIds: [...document.querySelectorAll('.ext-cb:checked')].map(c => Number(c.value)).filter(id => { const g = document.querySelector(`.ext-group-cb[value="${id}"]`); return g && !g.checked; }),
     };
     const created = id ? null : await post('users', body);
     if (id) await put('users/' + id, body);

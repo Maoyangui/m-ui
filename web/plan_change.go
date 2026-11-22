@@ -949,7 +949,7 @@ func (s *Server) runPlanOp(sc planScope, uid uint, call planOpCall) (*planResult
 				return err
 			}
 			if p.extIds != nil {
-				if err := writeUserExts(tx, uid, *p.extIds); err != nil {
+				if err := writeUserExts(tx, uid, *p.extIds, nil); err != nil {
 					return err
 				}
 			}
