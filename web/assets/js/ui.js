@@ -224,7 +224,8 @@ export function toggleBatchBar(bar, show, anchor) {
   const y0 = list.getBoundingClientRect().top;
   bar.hidden = !show;
   const a = anchor || document.activeElement;
-  const anchored = !!a && a.isConnected && list.contains(a);
+  // 表头里的全选框不算「刚勾的那一行」:表头吸在框顶上,滚框挪不动它;算了的话框在最上面时也往回滚,头一两行被滚到表头底下
+  const anchored = !!a && a.isConnected && list.contains(a) && !a.closest('thead');
   const dy = list.getBoundingClientRect().top - y0;
   if (dy) {
     if (boxScroll) {
@@ -235,7 +236,10 @@ export function toggleBatchBar(bar, show, anchor) {
     } else if (window.scrollY > 0) window.scrollBy(0, dy);
   }
   if (!anchored) return;
-  const top = a.getBoundingClientRect().top, edge = Math.max(list.getBoundingClientRect().top, show ? bar.getBoundingClientRect().bottom : -Infinity);
+  // 框里滚时上沿是吸顶表头格子的下边(表头不吸顶的页面它就在第一行上面,不影响)
+  const head = boxScroll ? list.querySelector('thead th') : null;
+  const top = a.getBoundingClientRect().top;
+  const edge = Math.max(list.getBoundingClientRect().top, head ? head.getBoundingClientRect().bottom : -Infinity, show ? bar.getBoundingClientRect().bottom : -Infinity);
   if (top < edge) { const d = edge - top + 8; if (boxScroll) list.scrollTop -= d; else window.scrollBy(0, -d); }
 }
 
