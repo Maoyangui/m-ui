@@ -698,7 +698,7 @@ func All() []interface{} {
 		&SubLog{}, &Stats{}, &TrafficCursor{}, &AgentCounter{}, &Change{}, &Session{}, &Rule{}, &LimitState{},
 		&ReachCheck{}, &Cert{}, &NodeDecommission{}, &PlanOp{}, &ApiCreate{}, &PageLogo{}, &ApiKey{},
 		&FwRule{}, &FwBan{}, &FwAllow{}, &UpstreamSource{}, &RewardCounter{},
-		&LocalTotal{}, &NodeQuota{},
+		&LocalTotal{}, &NodeQuota{}, &ApiKeyLog{},
 	}
 }
 
@@ -721,4 +721,46 @@ type ApiKey struct {
 	// IpAllow 限不限来源;IpList 允许的来源 IP / 网段(逗号分隔,见 web 包的 parseIPList)。
 	IpAllow bool   `json:"ipAllow"`
 	IpList  string `json:"ipList"`
+	// LogOff 不记这把密钥的调用日志(默认记);LogDays 调用日志留几天,到期自动删(0 = 默认 APILogDefaultDays)。见 ApiKeyLog
+	LogOff  bool `json:"logOff" gorm:"default:false"`
+	LogDays int  `json:"logDays" gorm:"default:0"`
+}
+
+// 调用日志的保留:每把密钥自己选几天(这几档),没选过按默认;不管选几天,每把最多留 APILogMaxRows 条(高频调用的对接程序不能把库撑大)。
+const (
+	APILogDefaultDays = 7
+	APILogMaxRows     = 20000
+)
+
+// APILogDayChoices 能选的保留天数。
+var APILogDayChoices = []int{1, 7, 30, 90}
+
+// APILogDays 这把密钥的日志实际留几天。
+func APILogDays(days int) int {
+	for _, d := range APILogDayChoices {
+		if d == days {
+			return d
+		}
+	}
+	return APILogDefaultDays
+}
+
+// ApiKeyLog 外部 API 的一次调用(用户 11-22:密钥那一行点「日志」看调用记录,白话版看得懂,悬停看具体执行的指令;代理面板也一样)。
+// Action / Target 给界面拼成大白话(「新建用户 alice」),Method / Path / Query / Body 是悬停时显示的原始请求
+// (Body 里订阅地址、令牌之类的值打码,见 web 包的 apiLogBody);Status 是返回的 HTTP 状态,Err 是失败时的原因。
+// 只记在本机,不进主从同步的快照;按密钥的 LogDays 自动删、每把最多 APILogMaxRows 条(jobs 的清理),删密钥时一起删。
+type ApiKeyLog struct {
+	Id     uint   `json:"id" gorm:"primaryKey"`
+	KeyId  uint   `json:"keyId" gorm:"index:idx_api_key_logs_key,priority:1"`
+	At     int64  `json:"at" gorm:"index:idx_api_key_logs_key,priority:2"`
+	IP     string `json:"ip"`
+	Method string `json:"method"`
+	Path   string `json:"path"`
+	Query  string `json:"query"`
+	Body   string `json:"body"`
+	Status int    `json:"status"`
+	Ms     int    `json:"ms"`
+	Action string `json:"action"`
+	Target string `json:"target"`
+	Err    string `json:"err"`
 }

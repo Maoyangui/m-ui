@@ -1993,6 +1993,26 @@ body:has(.savebar:not([hidden])) .toast { bottom: 5.4rem; }
 .up-inuse li + li { border-top: 1px solid var(--border); }
 .up-inuse .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .up-inuse .grow { flex: 1; }
+/* 外部 API 密钥的调用日志:上面一排设置(记不记、自动删除、条数、清空),下面一条一行 —— 大白话和结果一行,时间、来源 IP、失败原因一行;
+   具体执行的请求在悬停提示里,手机上点一下那一行(它能拿到焦点)在下面展开 */
+.alog-set { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem 1.1rem; padding: .1rem 0 .75rem; }
+.alog-set label { display: inline-flex; align-items: center; gap: .5rem; font-size: var(--fs-sm); cursor: pointer; }
+.alog-set select { width: auto; }
+.alog-set .alog-tot { margin-left: auto; } /* 条数和「清空日志」靠右;窄屏折到第二行时也靠右 */
+.alog-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); max-height: min(56vh, 32rem); overflow: auto; }
+.alog-row { padding: .55rem .8rem; outline: none; cursor: default; }
+.alog-row + .alog-row { border-top: 1px solid var(--divider); }
+.alog-row:hover, .alog-row:focus { background: var(--surface-2); }
+.alog-main { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+.alog-what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--text); }
+.alog-main > .badge { flex: none; }
+.alog-sub { display: flex; flex-wrap: wrap; align-items: baseline; gap: .1rem .9rem; margin-top: .2rem; min-width: 0; }
+.alog-err { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--danger-text); }
+.alog-raw { display: none; margin: .5rem 0 0; padding: .5rem .65rem; border-radius: var(--radius-xs); background: var(--surface); border: 1px solid var(--border); font: var(--fs-xs)/1.55 var(--mono); white-space: pre-wrap; word-break: break-all; color: var(--text-2); }
+.alog-row:focus .alog-raw { display: block; }
+.alog-more { display: flex; justify-content: center; padding: .7rem 0 0; }
+.alog-empty { padding: 2rem 0; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
+table.api-keys td.actions .btn.muted { color: var(--muted); }
 /* 批量删除确认框里没删的那几条:名字一行,原因(哪几条线路在用 / 在哪个上游组里)另起一行 */
 .up-inuse li.kept { flex-wrap: wrap; row-gap: 0; padding-block: .4rem; }
 .up-inuse li.kept .why { flex-basis: 100%; min-width: 0; line-height: 1.5; }

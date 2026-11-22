@@ -352,6 +352,7 @@ const EN = /*BEGIN*/{
 "没有查到可用的发布版本": "No available release found",
 "没有选中线路": "No lines selected",
 "没有选中上游": "No upstreams selected",
+"调用日志只能留 1、7、30 或 90 天": "Call logs can be kept for 1, 7, 30 or 90 days only",
 "有上游不存在,请刷新后重试": "Some upstreams no longer exist; refresh and try again",
 "不认识的批量操作": "Unknown batch action",
 "没有选择节点": "No nodes selected",

@@ -562,6 +562,7 @@
     <p class="lede">面板定时测试上游,出故障和恢复时可以发 Telegram。</p>
     <ul>
       <li>每台服务器只测自己线路用到的上游;没有线路用的标 <b data-k="up.unused">未使用</b>,不测也不告警。</li>
+      <li>勾选每行前面的框(表头的框全选现在列出来的)可以批量操作:<b data-k="common.test">测试</b>、<b data-k="up.batch.group">组成上游组</b>、<b data-k="up.batch.followOff">停止跟随</b> / <b data-k="up.batch.followOn">恢复跟随</b>(选中的里有从外部节点加来的才出现)、<b data-k="common.delete">删除</b>。删除前会列出哪些会删、哪些还在用(有线路用它、或者在不一起删的上游组里)不删。</li>
       <li><b data-k="up.latency">状态 / 延迟</b> 一列:在用这条上游的服务器每台一个点 —— 绿色通、红色不通、黄色是 <b data-k="up.stale">数据过期</b>(那台副机联系不上)、灰色是 <b data-k="up.pending">待测</b>;两台在用就是两个点。点这一行(点、字、箭头都行)在下面展开,每台服务器一行:哪台测的、延迟多少、多久前查的。没测通的原因不占地方 —— 鼠标停在那一行(或上面那句结论)上就能看到,手机上点一下那一行;只有一台时服务器名直接写在延迟后面。</li>
       <li>改了上游,或者线路新用上一条上游、新部署到一台服务器,十来秒后会自动补测一次,不用等下一轮巡检。</li>
       <li><b data-k="nav.settings">设置</b> → <b data-k="set.monitor">上游巡检</b>:<b data-k="set.checkMinutes">巡检间隔(分钟)</b>(0 = 关闭)、<b data-k="set.checkThreshold">连续失败几次判定故障</b>。</li>
@@ -580,6 +581,7 @@
     <ul>
       <li>主机定时抓取,间隔在 <b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> → <b data-k="set.extRefresh">外部订阅刷新间隔(分钟)</b>;抓取失败时保留上次成功的内容,列表里写明错误。</li>
       <li>支持 base64 / 明文链接列表、Clash YAML、sing-box JSON。</li>
+      <li>Clash 订阅里每个外部订阅自己成一个策略组(组名就是订阅名,列在 Proxy 里):用户在 Proxy 里选它,再到组里挑节点;节点照旧也平铺在 Proxy 里,节点名不会因为分组改变。分享链接只有一个节点,不成组。不想让某个订阅单独成组,在用户的编辑框里把那个订阅右边的 <b data-k="user.f.extGenGroup">单独成组</b> 关掉(每个用户、每个订阅各管各的;套餐续期、外部 API 改分配时这个开关原样留着)。模板里已经写了同名的组,就用模板的那个。</li>
     </ul>
   </section>
 
@@ -699,7 +701,7 @@
       <li>有套餐就选 <b data-k="user.plan">所属套餐</b>,点 <b data-k="user.fromPlan">按套餐填写</b> 一键填好额度。没有就手填:<b data-k="user.f.volume">流量配额 GB(0=不限)</b>、<b data-k="user.f.expiry">到期日(留空=不限)</b>、<b data-k="user.f.device">同时在线设备(0=不限)</b>、<b data-k="user.f.up">上行限速 Mbps(0=不限)</b>、<b data-k="user.f.down">下行限速 Mbps(0=不限)</b>。</li>
       <li>按月清零的(月付),勾 <b data-k="user.f.autoReset">周期重置流量</b>,填 <b data-k="user.f.resetDays">重置周期(天)</b>。</li>
       <li>勾 <b data-k="user.f.lines">可用线路</b>。一条线路在几台服务器上就有几个入口,可以只给其中某台(按服务器切换分组勾选,已勾的不会丢)。</li>
-      <li data-scope="admin"><b data-k="user.f.exts">外部节点</b>:勾上的外部节点会追加到他订阅里本站节点的后面。</li>
+      <li data-scope="admin"><b data-k="user.f.exts">外部节点</b>:勾上的外部节点会追加到他订阅里本站节点的后面;外部订阅右边的 <b data-k="user.f.extGenGroup">单独成组</b> 决定它在 Clash 订阅里是不是自己成一个策略组(默认是)。</li>
       <li><b data-k="user.f.remark">备注</b>:记订单号、联系方式之类。注意:<span class="rv-only">你和主面板都</span>没填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b> 和 <b data-k="set.subPageTitle">页面标题</b> 时,客户端里显示的订阅名就是备注(备注也空就用用户名),不想让用户看到的内容别写进备注。</li>
     </ul>
     <div class="tip"><b>发卡、试用</b>填 <b data-k="user.f.activate">首次连接后 N 天到期(0 = 不用)</b>:用户第一次产生流量时才开始计时,不用管到期日。</div>
@@ -1341,6 +1343,7 @@
       <li>七项权限:<b data-k="api.perm.users.read">查看用户</b>、<b data-k="api.perm.users.create">创建用户</b>、<b data-k="api.perm.users.update">修改用户</b>(改字段、启停、清零用量、踢线、重置订阅链接)、<b data-k="api.perm.users.delete">删除用户</b>、<b data-k="api.perm.billing">续费与换套餐</b>、<b data-k="api.perm.plans.read">查看套餐</b>、<b data-k="api.perm.panel.read">面板信息</b>(概况、服务器、线路、在线用户)。没勾的接口调了返回 403,并写明缺哪项。编辑框里有 <b data-k="api.pickAll">全选</b> 和 <b data-k="api.pickRead">只读</b> 两个快捷选法。</li>
       <li><b data-k="api.from">允许的来源</b>:每把密钥单独设,默认 <b data-k="api.fromAny">不限</b>;选 <b data-k="api.fromOnly">只允许指定的 IP</b> 后一行填一个 IP 或网段(IPv4 / IPv6 都行),名单外的来源用这把密钥一律 403。编辑框里会显示你当前的 IP,点 <b data-k="api.ipAddMe">加进去</b> 就行。</li>
       <li>每一行右边的开关可以单独停用 / 启用这一把;<b data-k="common.edit">编辑</b> 里改名字、权限和来源;<b data-k="common.more">更多</b> 里有 <b data-k="api.keyRotate">重新生成</b>(旧的立刻失效)和 <b data-k="common.delete">删除</b>。列表里能看到每把最近一次是什么时候、从哪个 IP 用的。总开关关着时所有密钥都不能用。</li>
+      <li>每一行的 <b data-k="api.log">日志</b>:用这把密钥调过的每一次,写成大白话(「新建用户 alice」「给 bob 续费」),带时间、来源 IP、成功还是失败和原因;鼠标停在一条上看具体执行的请求(手机上点一下)。上面可以关掉 <b data-k="api.log.record">记录调用日志</b>、选 <b data-k="api.log.keep">自动删除</b> 几天前的(1、7、30、90 天,默认 7 天;每把最多留两万条)、<b data-k="api.log.clear">清空日志</b>。订阅地址、令牌之类的值不会记下来;日志只在主服务器本机,删密钥时一起删。</li>
     </ol>
     <div class="tip"><b>推荐</b>商城用一把「查看用户 + 创建用户 + 续费与换套餐 + 查看套餐」,Telegram 机器人用一把只读的「查看用户 + 面板信息」;商城服务器 IP 固定的话,顺手把那一把限成只允许它的 IP。</div>
     <div class="pit"><b>常见坑</b><ul>

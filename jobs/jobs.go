@@ -865,6 +865,38 @@ func (s *Scheduler) runCleanup() {
 		logger.Warning("清理套餐记录失败: ", err)
 	}
 	trimPlanOps(s.d.DB, model.PlanOpMaxRows)
+	pruneAPIKeyLogs(s.d.DB, now)
+}
+
+// pruneAPIKeyLogs 外部 API 的调用日志:每把密钥按自己选的天数清(没选过 = 默认天数),每把最多留 APILogMaxRows 条;
+// 密钥已经删掉的(删密钥时没删干净、代理被删)整份删。
+func pruneAPIKeyLogs(db *gorm.DB, now time.Time) {
+	var keys []model.ApiKey
+	if err := db.Select("id, log_days").Find(&keys).Error; err != nil {
+		logger.Warning("清理外部 API 调用日志失败: ", err)
+		return
+	}
+	ids := make([]uint, 0, len(keys))
+	for _, k := range keys {
+		ids = append(ids, k.Id)
+		cutoff := now.AddDate(0, 0, -model.APILogDays(k.LogDays)).Unix()
+		if err := db.Where("key_id = ? AND at < ?", k.Id, cutoff).Delete(&model.ApiKeyLog{}).Error; err != nil {
+			logger.Warning("清理外部 API 调用日志失败: ", err)
+			return
+		}
+		var n int64
+		db.Model(&model.ApiKeyLog{}).Where("key_id = ?", k.Id).Count(&n)
+		if n > model.APILogMaxRows {
+			db.Exec("DELETE FROM api_key_logs WHERE key_id = ? AND id <= (SELECT id FROM api_key_logs WHERE key_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?)", k.Id, k.Id, model.APILogMaxRows)
+		}
+	}
+	q := db.Where("key_id > 0")
+	if len(ids) > 0 {
+		q = q.Where("key_id NOT IN ?", ids)
+	}
+	if err := q.Delete(&model.ApiKeyLog{}).Error; err != nil {
+		logger.Warning("清理外部 API 调用日志失败: ", err)
+	}
 }
 
 // trimPlanOps 套餐记录按作用域(reseller_id:0 = 主面板,否则是那个代理)各留最新的 keep 条。

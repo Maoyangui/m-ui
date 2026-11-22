@@ -8,6 +8,7 @@ import { get, post, put, del } from './api.js';
 import { t } from './i18n.js';
 import { esc, toast, confirm, openModal, registerActions, field, fieldBox, fv, copy, fmtTime, chipList, setHTML } from './ui.js';
 import { openApiDocs } from './apidoc.js';
+import { trErr } from './errmsg.js';
 
 const PERMS = ['users.read', 'users.create', 'users.update', 'users.delete', 'billing', 'plans.read', 'panel.read'];
 const READ_PERMS = ['users.read', 'plans.read', 'panel.read'];
@@ -48,6 +49,7 @@ function keysTable() {
       <td class="actions">
         <label class="switch sm" title="${esc(t(k.enabled ? 'api.keyOnTip' : 'api.keyOffTip'))}"><input type="checkbox" data-change="apikey.toggle" data-id="${k.id}" ${k.enabled ? 'checked' : ''}><span></span></label>
         <button class="btn sm" data-act="apikey.edit" data-id="${k.id}">${t('common.edit')}</button>
+        <button class="btn sm${k.logOff ? ' muted' : ''}" data-act="apikey.logs" data-id="${k.id}" title="${esc(t(k.logOff ? 'api.logOffTip' : 'api.logTip'))}">${t('api.log')}</button>
         <details class="menu"><summary class="btn sm">${t('common.more')}</summary><div class="menu-list">
           <button data-act="apikey.rotate" data-id="${k.id}">${t('api.keyRotate')}</button>
           <button class="danger" data-act="apikey.del" data-id="${k.id}">${t('common.delete')}</button>
@@ -155,10 +157,84 @@ function editKey(k) {
   });
 }
 
+// ---- 调用日志(用户 11-22:「对应的密钥行里增加一个日志 点击可显示查看调用日志(白话版看得懂的 鼠标悬浮显示具体执行指令
+// 代理面板也一样) 可设置不开启日志 / 自动删除 / 一键删除」) ----
+// 一次调用一行大白话(「新建用户 alice」「给 bob 续费」)、结果和失败原因;鼠标停在一行上看具体执行的请求(方法、路径、参数、请求体),
+// 手机上没有悬停,点一下那一行在下面展开。上面一排是这把密钥的日志设置:记不记、自动删除几天前的、一键清空 —— 改了就存,不用再点保存。
+const LOG_ACTIONS = new Set(['ping', 'overview', 'servers', 'lines', 'onlines', 'plans', 'users.list', 'user.create', 'user.lookup', 'users.batch',
+  'user.get', 'user.update', 'user.delete', 'user.traffic', 'user.sub', 'user.planOps', 'user.enable', 'user.disable', 'user.reset', 'user.kick',
+  'user.rotate', 'user.renew', 'user.change']);
+let logKey = null, logItems = [], logMore = false, logTotal = 0, logCfg = { off: false, days: 7, choices: [1, 7, 30, 90] };
+
+const logText = x => (LOG_ACTIONS.has(x.action) ? t('api.log.a.' + x.action, { name: x.target || t('api.log.noName'), n: x.target || '?' }) : `${x.method} ${x.path}`);
+const logRaw = x => `${x.method} ${x.path}${x.query ? '?' + x.query : ''}${x.body ? '\n' + x.body : ''}\n→ ${x.status} · ${x.ms} ms`;
+function logRow(x) {
+  const ok = x.status < 400, err = x.err ? trErr(x.err) : '';
+  return `<li class="alog-row" tabindex="0" title="${esc(logRaw(x))}">
+    <div class="alog-main"><span class="alog-what">${esc(logText(x))}</span>${ok ? `<span class="badge ok">${esc(t('api.log.ok'))}</span>` : `<span class="badge danger">${esc(t('api.log.fail'))}</span>`}</div>
+    <div class="alog-sub muted small"><span>${esc(fmtTime(x.at))}</span><span class="mono">${esc(x.ip)}</span>${!ok ? `<span class="alog-err">${esc(err || 'HTTP ' + x.status)}</span>` : ''}</div>
+    <pre class="alog-raw">${esc(logRaw(x))}</pre></li>`;
+}
+function logsHTML() {
+  const set = `<div class="alog-set">
+      <label class="alog-on"><span class="switch sm"><input type="checkbox" id="alog-on" ${logCfg.off ? '' : 'checked'}><span></span></span><span>${esc(t('api.log.record'))}</span></label>
+      <label class="alog-days"><span>${esc(t('api.log.keep'))}</span><select id="alog-days" class="sm">${logCfg.choices.map(d => `<option value="${d}" ${d === logCfg.days ? 'selected' : ''}>${esc(t('api.log.days', { n: d }))}</option>`).join('')}</select></label>
+      <span class="alog-tot muted small">${esc(t('api.log.total', { n: logTotal }))}</span>
+      <button class="btn sm danger" data-act="apikey.logsClear" ${logTotal ? '' : 'disabled'}>${esc(t('api.log.clear'))}</button>
+    </div>`;
+  const off = logCfg.off ? `<p class="hint warn-text">${esc(t('api.log.offHint'))}</p>` : '';
+  const list = logItems.length
+    ? `<ul class="alog-list">${logItems.map(logRow).join('')}</ul>${logMore ? `<div class="alog-more"><button class="btn sm" data-act="apikey.logsMore">${esc(t('api.log.more'))}</button></div>` : ''}`
+    : `<div class="alog-empty muted">${esc(t('api.log.empty'))}</div>`;
+  return set + off + list + `<p class="hint xp">${esc(t('api.log.help'))}</p>`;
+}
+function drawLogs() {
+  const box = document.getElementById('alog-box');
+  if (!box) return;
+  box.innerHTML = logsHTML();
+  const putSet = async (body, undo) => {
+    try { await put(`${cfg.prefix}/keys/${logKey.id}/logs`, body); toast(t('api.log.saved'), 'ok'); await loadLogs(false); reload(); }
+    catch (e) { toast(e.message, 'err'); undo(); }
+  };
+  const on = document.getElementById('alog-on'), days = document.getElementById('alog-days');
+  if (on) on.addEventListener('change', () => putSet({ off: !on.checked }, () => { on.checked = !on.checked; }));
+  if (days) days.addEventListener('change', () => { const was = logCfg.days; putSet({ days: Number(days.value) }, () => { days.value = String(was); }); });
+}
+async function loadLogs(more) {
+  if (!logKey) return;
+  const last = more && logItems.length ? logItems[logItems.length - 1].id : 0;
+  try {
+    const r = await get(`${cfg.prefix}/keys/${logKey.id}/logs?limit=50${last ? '&before=' + last : ''}`);
+    logItems = more ? logItems.concat(r.items || []) : (r.items || []);
+    logMore = !!r.more;
+    logTotal = r.total || 0;
+    logCfg = { off: !!r.logOff, days: r.logDays || 7, choices: r.dayChoices || [1, 7, 30, 90] };
+    drawLogs();
+  } catch (e) {
+    const box = document.getElementById('alog-box');
+    if (box) box.innerHTML = `<p class="hint bad">${esc(e.message)}</p>`;
+  }
+}
+function openLogs(k) {
+  logKey = k; logItems = []; logMore = false; logTotal = 0;
+  openModal(t('api.log.title', { name: nameOf(k) }), `<div id="alog-box"><p class="muted small">${esc(t('common.loading'))}</p></div>`, null, { wide: true, cancelText: t('common.close') });
+  loadLogs(false);
+}
+
 registerActions({
   'api.copyUrl': () => copy(cfg.url),
   'api.docs': () => openApiDocs({ base: cfg.url, reseller: cfg.reseller, repo: cfg.repo, keys: cfg.enabled ? keys : [] }),
   'apikey.add': () => editKey(null),
+  'apikey.logs': id => { const k = byId(id); if (k) openLogs(k); },
+  'apikey.logsMore': async (_, btn) => { btn.disabled = true; await loadLogs(true); },
+  // 清空:确认框和日志框是同一个弹窗,确认完再把日志框打开
+  'apikey.logsClear': async () => {
+    const k = logKey;
+    if (!k || !await confirm(t('api.log.clearConfirm', { name: nameOf(k) }), { danger: true, okText: t('api.log.clear') })) { if (k) openLogs(k); return; }
+    try { await del(`${cfg.prefix}/keys/${k.id}/logs`); toast(t('api.log.cleared'), 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+    openLogs(k);
+  },
   'apikey.edit': id => { const k = byId(id); if (k) editKey(k); },
   'apikey.copy': id => { const k = byId(id); if (k) copy(k.token); },
   'apikey.pick': which => {

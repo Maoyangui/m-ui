@@ -92,9 +92,11 @@ type Server struct {
 	quotaMu        sync.Mutex // 串行化服务器流量额度的判定与保存(见 node_quota.go)
 	agentApplyMu   sync.Mutex // 快照落库、重载和确认必须作为同一轮串行完成
 	sessions       map[string]session
-	loginFails     map[string][]int64   // ip → 最近失败时间
-	apiFails       map[string][]int64   // 外部 API 鉴权失败:ip → 最近失败时间(主面板令牌与代理令牌共用,见 body_limit.go)
-	keyUsedAt      map[uint]int64       // 外部 API 密钥 id → 上次把「最近使用」写进库的时间(见 noteKeyUse)
+	loginFails     map[string][]int64 // ip → 最近失败时间
+	apiFails       map[string][]int64 // 外部 API 鉴权失败:ip → 最近失败时间(主面板令牌与代理令牌共用,见 body_limit.go)
+	keyUsedAt      map[uint]int64     // 外部 API 密钥 id → 上次把「最近使用」写进库的时间(见 noteKeyUse)
+	apiLogOnce     sync.Once          // 外部 API 调用日志的写入协程(见 api_logs.go 的 apiLogPush)
+	apiLogCh       chan model.ApiKeyLog
 	upRecheck      map[uint]*time.Timer // 上游 id → 改过之后排着的那次自动复查(见 recheckUpstreamSoon)
 	extRefreshFn   func(id uint) error  // 测试里替换「重新抓一遍外部订阅」;nil = 真去抓(见 refreshExtNow)
 	ops            *ops.Runner

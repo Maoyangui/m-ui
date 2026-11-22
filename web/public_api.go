@@ -67,7 +67,9 @@ type apiScope struct {
 	actor string // 审计里的操作者:api / api:代理名 / api:密钥名 / api:代理名/密钥名
 	// perms 这把密钥的权限(见 api_keys.go);nil = 不按密钥限(面板自己的调用,比如 Telegram 机器人)
 	perms map[string]bool
-	keyId uint // 密钥在表里的 id(记最近使用)
+	keyId uint // 密钥在表里的 id(记最近使用、调用日志)
+	// logOff 这把密钥不记调用日志(见 api_logs.go)
+	logOff bool
 	// 这把密钥限不限来源、允许哪些来源(见 fromAllowed)
 	ipAllow bool
 	ipList  string
@@ -87,11 +89,13 @@ func (s *Server) handlePublicAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
-	if !sc.fromAllowed(s.sourceIP(r)) { // 密钥对、只是来源不在它允许的范围里:不算猜令牌,不计入失败限流
-		writeIPDenied(w)
+	limitJSONBody(w, r, apiBodyLimit)
+	if !sc.fromAllowed(s.sourceIP(r)) { // 密钥对、只是来源不在它允许的范围里:不算猜令牌,不计入失败限流;调用日志里记一笔
+		lw, finish := s.apiLogStart(w, r, sc)
+		writeIPDenied(lw)
+		finish()
 		return
 	}
-	limitJSONBody(w, r, apiBodyLimit)
 	// 副机上的写操作会被主机下一次快照整表覆盖(新号消失、删掉的号复活),调用方却以为成功了;与面板一样只放行只读与踢线
 	if s.role() == "node" && r.Method != http.MethodGet && r.Method != http.MethodHead && !strings.HasSuffix(strings.TrimSuffix(r.URL.Path, "/"), "/kick") {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": nodeReadOnly})
@@ -115,15 +119,19 @@ func (s *Server) handleResellerPublicAPI(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "外部 API 未开启或令牌错误"})
 		return
 	}
+	limitJSONBody(w, r, apiBodyLimit)
 	if !sc.fromAllowed(s.sourceIP(r)) {
-		writeIPDenied(w)
+		lw, finish := s.apiLogStart(w, r, sc)
+		writeIPDenied(lw)
+		finish()
 		return
 	}
-	limitJSONBody(w, r, apiBodyLimit)
 	s.publicAPI(w, r, sc)
 }
 
 func (s *Server) publicAPI(w http.ResponseWriter, r *http.Request, sc apiScope) {
+	w, finish := s.apiLogStart(w, r, sc) // 这把密钥的调用日志(关了就不记,见 api_logs.go)
+	defer finish()
 	done, ok, msg := s.haWrite(r) // 正在设为主机:写操作暂停;没冻结的写登记在途
 	if !ok {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": msg})

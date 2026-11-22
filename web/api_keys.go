@@ -297,8 +297,11 @@ func (s *Server) ensureFirstKey(rid uint) error {
 	return s.setDefaultToken(rid, newAPIKeyToken())
 }
 
-// dropKeys 删掉一个面板的全部密钥记录(代理被删、主面板重置了他的密码);默认密钥的令牌由调用方清。
+// dropKeys 删掉一个面板的全部密钥记录(代理被删、主面板重置了他的密码),连同它们的调用日志;默认密钥的令牌由调用方清。
 func dropKeys(tx *gorm.DB, rid uint) error {
+	if err := tx.Where("key_id IN (SELECT id FROM api_keys WHERE reseller_id = ?)", rid).Delete(&model.ApiKeyLog{}).Error; err != nil {
+		return err
+	}
 	return tx.Where("reseller_id = ?", rid).Delete(&model.ApiKey{}).Error
 }
 
@@ -351,7 +354,7 @@ func keyScope(k model.ApiKey, rsName string) apiScope {
 	case k.Name != "":
 		actor = "api:" + k.Name
 	}
-	return apiScope{rid: k.ResellerId, actor: actor, perms: permSet(k.Perms), keyId: k.Id, ipAllow: k.IpAllow, ipList: k.IpList}
+	return apiScope{rid: k.ResellerId, actor: actor, perms: permSet(k.Perms), keyId: k.Id, ipAllow: k.IpAllow, ipList: k.IpList, logOff: k.LogOff}
 }
 
 // adminAPIAuth 主面板入口:主面板的默认密钥或它名下的其它密钥。known:令牌对得上某把密钥(只是停用了,或总开关关着)——
@@ -454,8 +457,8 @@ func (s *Server) keyByID(rid uint, id uint64) (model.ApiKey, bool) {
 	return k, true
 }
 
-// handleAPIKeys 分发 …/api/keys[/id[/rotate]]。rid 0 = 主面板,>0 = 代理自己。
-// sub 是 "keys"、"keys/3" 或 "keys/3/rotate";audit 记审计。
+// handleAPIKeys 分发 …/api/keys[/id[/rotate|/logs]]。rid 0 = 主面板,>0 = 代理自己。
+// sub 是 "keys"、"keys/3"、"keys/3/rotate" 或 "keys/3/logs"(调用日志,见 api_logs.go);audit 记审计。
 func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request, rid uint, sub string, audit func(action string, obj interface{})) {
 	parts := strings.Split(strings.Trim(sub, "/"), "/")
 	if parts[0] != "keys" || len(parts) > 3 {
@@ -497,6 +500,10 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request, rid uint,
 	k, ok := s.keyByID(rid, id)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "密钥不存在"})
+		return
+	}
+	if len(parts) == 3 && parts[2] == "logs" {
+		s.handleKeyLogs(w, r, k, audit)
 		return
 	}
 	if len(parts) == 3 {
@@ -546,6 +553,7 @@ func (s *Server) handleAPIKeys(w http.ResponseWriter, r *http.Request, rid uint,
 			badRequest(w, err)
 			return
 		}
+		s.db.Where("key_id = ?", k.Id).Delete(&model.ApiKeyLog{}) // 调用日志跟着删(删不掉的定时清理时也会清)
 		audit("api-key:delete", map[string]interface{}{"id": k.Id, "name": k.Name})
 		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
 	default:

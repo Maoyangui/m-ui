@@ -267,12 +267,49 @@ function demoApiKeys(scope, method, id, sub, body) {
   if (!id && method === 'POST') { const k = fill({ id: nextId(list), resellerId: 0, name: 'key', isDefault: false, token: 'demo-' + rnd(32), perms: 'users.read', enabled: true, ipAllow: false, ipList: '', createdAt: Math.floor(Date.now() / 1000), lastUsedAt: 0, lastUsedIp: '' }, body); list.push(k); return view(k); }
   const k = list.find(x => String(x.id) === String(id));
   if (!k) return { error: 'not found' };
+  if (sub === 'logs') { // 调用日志的设置(记不记、留几天)与一键清空
+    if (method === 'DELETE') { const n = demoLogsOf(k).length; k.logs = []; return { ok: true, deleted: n }; }
+    if (body && body.days != null) { if (![1, 7, 30, 90].includes(Number(body.days))) throw demoErr(400, '调用日志只能留 1、7、30 或 90 天'); k.logDays = Number(body.days); }
+    if (body && body.off != null) k.logOff = !!body.off;
+    return ok();
+  }
   if (method === 'DELETE') { list.splice(list.indexOf(k), 1); return ok(); }
   if (sub === 'rotate') { k.token = 'demo-' + rnd(32); return view(k); }
   return view(fill(k, body));
 }
 
 const nextId = list => list.reduce((m, x) => Math.max(m, x.id || 0), 0) + 1;
+// 调用日志(演示):默认密钥是商城在用(续费、建号、换套餐失败一次……),telegram-bot 是机器人(按订阅地址找人、查用户,没权限的被拒)
+function demoLogsOf(k) {
+  if (k.logs) return k.logs;
+  const at = Math.floor(Date.now() / 1000), ip = k.lastUsedIp || '203.0.113.80';
+  const names = (S.users || []).map(u => u.name).concat(['demo-alice', 'demo-bob', 'demo-charlie']);
+  const mk = (i, method, path, action, target, o = {}) => ({ id: 100 * k.id + 50 - i, keyId: k.id, at: at - 95 - i * 2400 - (i * 397) % 900, ip, method, path, query: '', body: '', status: 200, ms: 24 + (i * 37) % 160, action, target, err: '', ...o });
+  k.logs = k.isDefault ? [
+    mk(0, 'POST', '/api/v1/users/' + names[0] + '/renew', 'user.renew', names[0], { body: '{"periods":1}' }),
+    mk(1, 'POST', '/api/v1/users', 'user.create', 'shop-1024', { body: '{"name":"shop-1024","plan":"Pro","days":30}' }),
+    mk(2, 'GET', '/api/v1/users/' + names[1] + '/traffic', 'user.traffic', names[1], { query: 'hours=168' }),
+    mk(3, 'POST', '/api/v1/users/' + names[2] + '/change', 'user.change', names[2], { body: '{"plan":"Team","mode":"replace"}', status: 400, err: '套餐不存在' }),
+    mk(4, 'GET', '/api/v1/users', 'users.list', '', { query: 'q=shop&limit=50' }),
+    mk(5, 'POST', '/api/v1/users/batch', 'users.batch', '5', { body: '{"prefix":"trial","count":5,"plan":"Trial"}' }),
+    mk(6, 'POST', '/api/v1/users/' + names[1] + '/rotate', 'user.rotate', names[1]),
+    mk(7, 'GET', '/api/v1/ping', 'ping', ''),
+  ] : [
+    mk(0, 'POST', '/api/v1/users/lookup', 'user.lookup', '', { body: '{"sub":"***"}' }),
+    mk(1, 'GET', '/api/v1/users/' + names[0], 'user.get', names[0]),
+    mk(2, 'GET', '/api/v1/overview', 'overview', ''),
+    mk(3, 'POST', '/api/v1/users/' + names[1] + '/kick', 'user.kick', names[1], { status: 403, err: '这把密钥没有「修改用户」权限' }),
+    mk(4, 'GET', '/api/v1/servers', 'servers', '', { ip: '203.0.113.99', status: 403, err: '来源 IP 不在这把密钥允许的范围里' }),
+  ];
+  return k.logs;
+}
+function demoKeyLogs(scope, id, query) {
+  const k = (S.apiKeys[scope] || []).find(x => String(x.id) === String(id));
+  if (!k) throw demoErr(404, '密钥不存在');
+  const q = new URLSearchParams(query || ''), limit = Number(q.get('limit')) || 50, before = Number(q.get('before')) || 0;
+  const all = demoLogsOf(k).slice().sort((a, b) => b.id - a.id), rest = before ? all.filter(x => x.id < before) : all;
+  return { items: rest.slice(0, limit), more: rest.length > limit, total: all.length, logOff: !!k.logOff, logDays: k.logDays || 7, dayChoices: [1, 7, 30, 90] };
+}
 // 外部订阅展开:节点明细 / 逐台测速 / 大陆连通 / 隐藏改名 / 添加为上游(GET 与 POST 都走这里)。
 // 和真面板一样按节点指纹(key)认节点;隐藏 / 改名只收增量,带版本号。
 function extNodes(id, seg, method, body) {
@@ -1065,6 +1102,7 @@ function route(method, path, query, body) {
         if (t === 'password') return { password: rnd(Number(new URLSearchParams(query).get('len')) || 16) };
         return { privateKey: 'demo-private-key-' + rnd(24), publicKey: 'demo-public-key-' + rnd(24) }; }
       case 'admin': case 'self':
+        if (seg[1] === 'api' && seg[2] === 'keys' && seg[4] === 'logs') return demoKeyLogs(seg[0], seg[3], query);
         if (seg[1] === 'api' && seg[2] === 'keys') return { keys: S.apiKeys[seg[0]].map(k => demoApiKeys(seg[0], 'GET', k.id)), perms: API_PERMS, you: '203.0.113.5' };
         if (seg[0] === 'admin' && seg[1] === 'info') { // 演示里外部 API 开着:看得到密钥列表(默认密钥和一把只读、限了来源的);两步验证可以走一遍开启流程
           const i = listByPrefix(path) ?? {};
