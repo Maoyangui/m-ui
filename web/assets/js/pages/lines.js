@@ -40,7 +40,7 @@ const parseJ = o => { try { return typeof o === 'string' ? JSON.parse(o) : (o ||
 
 // 协议的显示名:列表、筛选、详情、编辑框的下拉都用它(库里存的是小写的协议 id)
 const PROTO_LABEL = { vless: 'VLESS', vmess: 'VMess', trojan: 'Trojan', hysteria2: 'Hysteria2', tuic: 'TUIC', anytls: 'AnyTLS', shadowsocks: 'Shadowsocks', socks: 'SOCKS5', http: 'HTTP', mixed: 'Mixed' };
-const protoName = p => PROTO_LABEL[p] || p;
+export const protoName = p => PROTO_LABEL[p] || p; // 规则页「忽略部分线路」的线路小块也用它
 // 服务器按分组排:[{name, nodes}],没分组的排最后(name = '');一台都没分组时只有这一段
 function nodeGroups(nodes) {
   const by = new Map();

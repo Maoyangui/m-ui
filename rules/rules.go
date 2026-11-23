@@ -8,6 +8,7 @@ package rules
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -146,6 +147,49 @@ func effectiveDir(own int, states []model.LimitState, val func(model.LimitState)
 		return own
 	}
 	return best
+}
+
+// SkipSet 解出「忽略的线路」(规则或状态的 SkipLineIds);空 = 一条都不忽略。
+func SkipSet(raw json.RawMessage) map[uint]bool {
+	ids := ParseIDs(raw)
+	if len(ids) == 0 {
+		return nil
+	}
+	set := make(map[uint]bool, len(ids))
+	for _, id := range ids {
+		if id != 0 {
+			set[id] = true
+		}
+	}
+	return set
+}
+
+// SkipJSON 把「忽略的线路」规整成去重、从小到大的 json 数组;只留 keep 里有的线路(nil = 不筛);一条都不剩返回 nil。
+// 规则存的、状态抄的都走它:内容一样字节就一样,判定时直接比字节。
+func SkipJSON(set map[uint]bool, keep map[uint]bool) json.RawMessage {
+	ids := make([]uint, 0, len(set))
+	for id := range set {
+		if id != 0 && (keep == nil || keep[id]) {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	b, _ := json.Marshal(ids)
+	return b
+}
+
+// EffectiveOnLine 同 Effective,只算管得着这条线路的状态(状态的 SkipLineIds 里有这条线路的不算)。
+func EffectiveOnLine(ownUp, ownDown int, states []model.LimitState, line uint) (up, down int) {
+	var on []model.LimitState
+	for _, st := range states {
+		if !SkipSet(st.SkipLineIds)[line] {
+			on = append(on, st)
+		}
+	}
+	return Effective(ownUp, ownDown, on)
 }
 
 // Active 只留此刻仍生效的状态(时段状态 Until 为 0;突发状态到期即失效,副机据此在主机失联时也能自行放开)。

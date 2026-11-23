@@ -1790,6 +1790,16 @@ details.menu .menu-list:has(button > b + span) { min-width: 17rem; }
 .day-pill span { display: inline-grid; place-items: center; min-width: 2.4rem; height: var(--ctl-h); padding: 0 .6rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--muted); font-size: var(--fs-sm); font-weight: 500; transition: background .12s, border-color .12s, color .12s; }
 .day-pill input:checked + span { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-text); }
 .day-pill input:focus-visible + span { box-shadow: 0 0 0 3px var(--primary-ring); }
+/* 规则弹框「忽略部分线路」:开关一行(和「不超过用户自己的限速」同一套),打开后下面是线路小块 ——
+   和星期小块同一套样式,只是里面写线路名 + 协议,名字太长省略、悬停看全名;停用的线路虚线框 */
+.rl-skip { display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
+.rl-skip > .help { font-size: var(--fs-xs); color: var(--muted); line-height: 1.5; }
+.line-pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+.line-pill { max-width: 100%; }
+.line-pill span { display: inline-flex; align-items: center; gap: .45rem; max-width: 100%; justify-content: flex-start; }
+.line-pill span b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.line-pill span em { flex: none; font-style: normal; font-size: var(--fs-xs); opacity: .75; }
+.line-pill.off span { border-style: dashed; }
 @media (max-width: 700px) {
   .rl-when, .rl-limit { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .rl-when > .field:first-child, .rl-limit > .rl-tight { grid-column: 1 / -1; }

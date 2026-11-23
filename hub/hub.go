@@ -36,6 +36,7 @@ import (
 	"github.com/Maoyangui/m-ui/logger"
 	"github.com/Maoyangui/m-ui/notify"
 	"github.com/Maoyangui/m-ui/render"
+	"github.com/Maoyangui/m-ui/rules"
 	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/stats"
 
@@ -53,6 +54,10 @@ var SyncedSettings = []string{
 	// 页面伪装:开关、样式、要不要也放在 80 / 443。各台按自己的种子生成伪装站、自己判断端口空不空
 	"camoEnabled", "camoTemplate", "camoPorts", "camoRedirect",
 }
+
+// LineMeterSetting 快照设置里「要不要记用户 × 线路的用量」的键(主机按规则算好下发,不在主机库里存;见 rules.LineMeterWanted)。
+// 老副机不认识,存下来也不用,只是不报 —— 勾了忽略线路的突发规则少算那台的用量,不会多限。
+const LineMeterSetting = "ruleLineMeter"
 
 // MinNodeVersion 副机至少要这个版本才能正确应用当前快照(快照里新增了它必须理解的字段时抬高它)。
 // 0.5.0:用户的停用原因、代理的额度用尽标志、私网屏蔽开关。0.6.0:规则限速状态表(副机要叠加到限速上)。
@@ -150,6 +155,11 @@ func BuildSnapshot(db *gorm.DB, setting func(string) string) (Snapshot, error) {
 	s.Settings = map[string]string{}
 	for _, k := range SyncedSettings {
 		s.Settings[k] = setting(k)
+	}
+	// 要不要记「用户 × 线路」的用量:主机按规则算好下发(副机没有规则表);读不出来按不记
+	s.Settings[LineMeterSetting] = ""
+	if on, err := rules.LineMeterWanted(db); err == nil && on {
+		s.Settings[LineMeterSetting] = "true"
 	}
 	// 主机自己那一行带上自己的面板 / 订阅 / 代理面板端口:副机库里主机那一行因此有端口,接任后新主机给原主机
 	// (回来变成副机)建线路、中转入口时按它避让。主机自己的库里这一行不存端口(没人给主机上报),只在快照里填
@@ -776,6 +786,9 @@ type Report struct {
 	Fw *model.FwState `json:"fw,omitempty"`
 	// Total 这台数据面累计收发的字节(线路入站 + 中转入口,真实字节;老副机不报):主机按它算这台服务器的本期用量(见 model.NodeQuota)
 	Total *model.NodeTotal `json:"total,omitempty"`
+	// LineMeter 这台「用户 × 线路」的累计(只在主机随快照下发的 LineMeterSetting 打开时报;老副机不报):
+	// 勾了「忽略部分线路」的突发规则按它算用量,见 rules.LineUsage
+	LineMeter *model.LineMeter `json:"lineMeter,omitempty"`
 }
 
 // saveNodeCerts 记下副机报上来的证书清单:线路编辑框与订阅的 SNI 用它。老版本副机不报(nil)就不动;
@@ -975,6 +988,8 @@ type Deps struct {
 	OnceDurable func(key string, ttl time.Duration) bool
 	// HA 主机容灾的钩子(见 ha.go);nil = 没有容灾
 	HA HAHooks
+	// LineMeter 副机报上来的「用户 × 线路」累计交给规则判定(rules.LineUsage.Feed;ratio 是那台的流量倍率);nil = 不收
+	LineMeter func(node uint, ratio float64, m model.LineMeter)
 }
 
 type Hub struct {
@@ -1383,6 +1398,9 @@ func (h *Hub) applyResult(r *nodeResult) {
 	mr, err := MergeReport(h.d.DB, r.n.Id, r.n.Name, ledger, time.Now().Unix(), bucket, r.n.Ratio)
 	if mr.NodeGone {
 		return // 副机在这一轮途中被删了:报告整份丢掉,也不再给它记状态
+	}
+	if r.rep.LineMeter != nil && h.d.LineMeter != nil { // 「用户 × 线路」的累计:和账本无关,并账失败也照收
+		h.d.LineMeter(r.n.Id, r.n.Ratio, *r.rep.LineMeter)
 	}
 	if mr.Unmarked > 0 {
 		h.cursorsChanged(r.n.Id) // 下一次推给老副机时重新看要不要打清账标记

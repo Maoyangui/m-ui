@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +26,10 @@ type Engine struct {
 	DB       *gorm.DB
 	Location func() *time.Location // 面板时区(时段规则按它算);nil = 本机
 	Notify   func(text string)     // 突发触发时的通知;nil = 不通知
+	// Usage 「用户 × 线路」的用量(勾了「忽略部分线路」的突发规则按它算,见 LineUsage);nil = 这种规则也按用户总用量算。
+	// 副机报上来的由 Hub 交给它;主机自己的每轮从 LocalMeter 取(nil = 不取)。
+	Usage      *LineUsage
+	LocalMeter func() (node uint, ratio float64, m model.LineMeter, ok bool)
 
 	mu      sync.Mutex
 	windows map[wkey]*window
@@ -35,8 +40,12 @@ type wkey struct{ rule, user uint }
 
 type sample struct{ ts, total int64 }
 
-// window 一个"规则 × 用户"的滑动窗口:最近 span 秒内的用量样本。
-type window struct{ samples []sample }
+// window 一个"规则 × 用户"的滑动窗口:最近 span 秒内的用量样本。sig 是建窗口时规则忽略的线路(规整后的 json):
+// 忽略的线路一变,用量的算法就变了(换了一个累计),旧样本不能和新样本相减,窗口从头算。
+type window struct {
+	samples []sample
+	sig     string
+}
 
 // add 记一个样本,返回窗口内的增量(最新减最早)。用量变小(周期重置 / 手动清零)时窗口作废重来。
 func (w *window) add(ts, total, span int64) int64 {
@@ -77,12 +86,51 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 	}
 	if len(ruleList) == 0 && len(states) == 0 {
 		e.windows = map[wkey]*window{}
+		if e.Usage != nil {
+			e.Usage.SetOn(false)
+		}
 		return false, nil
 	}
 	var users []model.User
 	if len(ruleList) > 0 {
 		if err := e.DB.Select("id, name, reseller_id, plan_id, enabled, up, down").Find(&users).Error; err != nil {
 			return false, err
+		}
+	}
+	// 忽略的线路只认现在还在的线路(线路删掉以后规则里留下的 id 不算数):一条都不剩就当没勾
+	skips := make(map[uint]json.RawMessage, len(ruleList))
+	var lineIDs map[uint]bool
+	meterOn := false
+	for _, rule := range ruleList {
+		set := SkipSet(rule.SkipLineIds)
+		if len(set) == 0 {
+			continue
+		}
+		if lineIDs == nil {
+			var ids []uint
+			if err := e.DB.Model(&model.Line{}).Pluck("id", &ids).Error; err != nil {
+				return false, err
+			}
+			lineIDs = make(map[uint]bool, len(ids))
+			for _, id := range ids {
+				lineIDs[id] = true
+			}
+		}
+		if raw := SkipJSON(set, lineIDs); raw != nil {
+			skips[rule.Id] = raw
+			meterOn = meterOn || rule.Kind == KindBurst
+		}
+	}
+	// 「用户 × 线路」的用量只在有突发规则用得着时才收(主机自己的这一份每轮取一次;副机的随报告由 Hub 交进来)
+	if e.Usage != nil {
+		e.Usage.SetOn(meterOn)
+		if meterOn {
+			if e.LocalMeter != nil {
+				if node, ratio, m, ok := e.LocalMeter(); ok {
+					e.Usage.Feed(node, ratio, m)
+				}
+			}
+			e.Usage.Prune()
 		}
 	}
 	loc := time.Local
@@ -113,6 +161,7 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 	var notes []string
 	for _, rule := range ruleList {
 		targets := Targets(rule, users)
+		skipRaw := skips[rule.Id] // 这条规则忽略的线路(规整过、只剩还在的线路;nil = 不忽略)
 		switch rule.Kind {
 		case KindSchedule:
 			if !InWindow(rule, now, loc) {
@@ -127,22 +176,33 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 				// 原因与 Until 也要跟着规则走:突发规则改成时段规则时,旧行带着惩罚截止时间,过点后被当成已解除(审计 MB12)
 				st.Reason = "时段 " + rule.Start + " 到 " + rule.End
 				st.UserName, st.RuleName, st.UpMbps, st.DownMbps, st.TightenOnly, st.Until = u.Name, rule.Name, rule.UpMbps, rule.DownMbps, rule.TightenOnly, 0
+				st.SkipLineIds = skipRaw
 				desired[k] = st
 			}
 		case KindBurst:
 			span := int64(rule.WindowMin) * 60
+			skip := SkipSet(skipRaw)
 			for _, u := range targets {
 				k := wkey{rule.Id, u.Id}
 				keep[k] = true
 				w := e.windows[k]
 				if w == nil {
-					w = &window{}
+					w = &window{sig: string(skipRaw)}
 					e.windows[k] = w
 				}
-				delta := w.add(nowU, u.Up+u.Down, span)
+				if w.sig != string(skipRaw) { // 忽略的线路改了:用量换了算法,旧样本作废,窗口从头算
+					w.samples, w.sig = nil, string(skipRaw)
+				}
+				// 用量:平常是用户表里的总用量(上下行合计);勾了忽略的线路时只加没被忽略的那些线路上的
+				total := u.Up + u.Down
+				if len(skip) > 0 && e.Usage != nil {
+					total = e.Usage.Sum(u.Name, skip)
+				}
+				delta := w.add(nowU, total, span)
 				if st, ok := existing[k]; ok {
-					if st.Until > nowU { // 惩罚期内:保留,顺手同步规则里可能改过的限值
+					if st.Until > nowU { // 惩罚期内:保留,顺手同步规则里可能改过的限值与忽略的线路
 						st.UserName, st.RuleName, st.UpMbps, st.DownMbps, st.TightenOnly = u.Name, rule.Name, rule.UpMbps, rule.DownMbps, rule.TightenOnly
+						st.SkipLineIds = skipRaw
 						desired[k] = st
 					} else {
 						w.rebase() // 到期解除:之后的增量从现在算
@@ -153,7 +213,8 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 					until := nowU + int64(rule.PenaltyMin)*60
 					reason := fmt.Sprintf("%d 分钟内 %s", rule.WindowMin, HumanBytes(delta))
 					desired[k] = model.LimitState{RuleId: rule.Id, UserId: u.Id, UserName: u.Name, RuleName: rule.Name,
-						UpMbps: rule.UpMbps, DownMbps: rule.DownMbps, TightenOnly: rule.TightenOnly, Since: nowU, Until: until, Reason: reason}
+						UpMbps: rule.UpMbps, DownMbps: rule.DownMbps, TightenOnly: rule.TightenOnly, Since: nowU, Until: until, Reason: reason,
+						SkipLineIds: skipRaw}
 					notes = append(notes, fmt.Sprintf("⏱ <b>突发限速</b>:%s 触发「%s」(%s),%s,%s 解除",
 						escapeHTML(u.Name), escapeHTML(rule.Name), reason, LimitText(rule.UpMbps, rule.DownMbps), time.Unix(until, 0).In(loc).Format("15:04")))
 				}
@@ -174,7 +235,7 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 			continue
 		}
 		if old.UpMbps != st.UpMbps || old.DownMbps != st.DownMbps || old.TightenOnly != st.TightenOnly || old.RuleName != st.RuleName || old.UserName != st.UserName ||
-			old.Until != st.Until || old.Reason != st.Reason {
+			old.Until != st.Until || old.Reason != st.Reason || !bytes.Equal(old.SkipLineIds, st.SkipLineIds) {
 			st.Id = old.Id
 			upd = append(upd, st)
 		}
@@ -191,7 +252,7 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 	sort.Slice(lifted, func(i, j int) bool { return lifted[i].UserId < lifted[j].UserId })
 	err = e.DB.Transaction(func(tx *gorm.DB) error {
 		if len(add) > 0 {
-			// 分批:一行 10 个变量,时段规则选「全部用户」时一条 INSERT 写几千行会超过 SQLite 一条语句 32766 个变量的上限,
+			// 分批:一行 11 个变量,时段规则选「全部用户」时一条 INSERT 写几千行会超过 SQLite 一条语句 32766 个变量的上限,
 			// 整笔失败,规则永远不生效、也不会随快照下发到副机(审计 I4)
 			if err := tx.CreateInBatches(&add, stateBatch).Error; err != nil {
 				return err
@@ -200,7 +261,7 @@ func (e *Engine) Tick(now time.Time) (bool, error) {
 		for _, st := range upd {
 			if err := tx.Model(&model.LimitState{}).Where("id = ?", st.Id).Updates(map[string]interface{}{
 				"user_name": st.UserName, "rule_name": st.RuleName, "up_mbps": st.UpMbps, "down_mbps": st.DownMbps, "tighten_only": st.TightenOnly,
-				"until": st.Until, "reason": st.Reason,
+				"until": st.Until, "reason": st.Reason, "skip_line_ids": st.SkipLineIds,
 			}).Error; err != nil {
 				return err
 			}

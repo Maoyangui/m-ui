@@ -100,9 +100,9 @@ func TestNodeSpeedBuckets(t *testing.T) {
 	a, b := net.Pipe()
 	defer a.Close()
 	defer b.Close()
-	c1 := l.wrapConnNode(a, "alice", "198.51.100.1", spec).(*limitedConn)
-	c2 := l.wrapConnNode(b, "alice", "198.51.100.1", spec).(*limitedConn)
-	c3 := l.wrapConnNode(b, "bob", "198.51.100.2", spec).(*limitedConn)
+	c1 := l.wrapConnNode(a, "alice", "198.51.100.1", "", spec).(*limitedConn)
+	c2 := l.wrapConnNode(b, "alice", "198.51.100.1", "", spec).(*limitedConn)
+	c3 := l.wrapConnNode(b, "bob", "198.51.100.2", "", spec).(*limitedConn)
 	if c1.node == nil || c1.node != c3.node {
 		t.Fatal("同一个节点上的连接应共用节点总限速的桶位")
 	}
@@ -125,7 +125,7 @@ func TestNodeSpeedBuckets(t *testing.T) {
 		t.Fatalf("每用户限速应是 20 Mbps:%v / %v", up, down)
 	}
 	// 没单独设的节点:不挂节点层的桶
-	if c := l.wrapConnNode(a, "alice", "198.51.100.1", NodeSpec{}).(*limitedConn); c.node != nil || c.nodeUser != nil {
+	if c := l.wrapConnNode(a, "alice", "198.51.100.1", "", NodeSpec{}).(*limitedConn); c.node != nil || c.nodeUser != nil {
 		t.Fatal("节点什么都没设时不该挂节点层的桶位")
 	}
 	// 改速率:原来那条连接手里的桶跟着变

@@ -39,7 +39,10 @@ type Limiter struct {
 	mu      sync.Mutex
 	limits  map[string]userLimit
 	entries map[string]*userEntry // 用户桶位:连接持有的是条目而不是桶,改速率原地生效,在线连接立刻变速
-	ips     map[string]map[string]int64
+	// lentries 用户在某条线路上单独的桶位(键 lineEntryKey):生效中的规则忽略了这条线路、这个用户在这条线路上的限速
+	// 和别处不一样时才有(见 UserLimitSpec.Lines)。走这条线路的连接按代数解析该用哪个(见 resolveUser)
+	lentries map[string]*userEntry
+	ips      map[string]map[string]int64
 	// external 是其他机器上该用户当前在线的源 IP(Hub 下发),计入设备数;本机已在线的 IP 不重复计
 	external map[string]map[string]bool
 	// externalAt 上一次收到外部 IP 的时间。主机失联(副机)/ 副机失联(主机)时这份表会一直冻结,
@@ -304,6 +307,7 @@ func NewLimiter() *Limiter {
 	return &Limiter{
 		limits:     map[string]userLimit{},
 		entries:    map[string]*userEntry{},
+		lentries:   map[string]*userEntry{},
 		ips:        map[string]map[string]int64{},
 		idleWindow: 60 * time.Second,
 		userGroup:  map[string]string{},
@@ -345,6 +349,26 @@ func (l *Limiter) SetLimits(limits map[string]UserLimitSpec) {
 			e.down.Store(nil)
 		}
 	}
+	// 线路上单独的桶位:还要的原地改速率,不要的从表里拿掉(挂着它的连接在代数变了之后改回用户的桶位)
+	keep := map[string]bool{}
+	for name, s := range limits {
+		for line, ll := range s.Lines {
+			k := lineEntryKey(name, line)
+			keep[k] = true
+			e := l.lentries[k]
+			if e == nil {
+				e = &userEntry{}
+				l.lentries[k] = e
+			}
+			setRate(&e.up, mbps(ll.UpMbps))
+			setRate(&e.down, mbps(ll.DownMbps))
+		}
+	}
+	for k := range l.lentries {
+		if !keep[k] {
+			delete(l.lentries, k)
+		}
+	}
 	l.gen.Add(1)
 }
 
@@ -354,7 +378,19 @@ type UserLimitSpec struct {
 	DownMbps    int
 	DeviceLimit int
 	Group       string // 所属代理池,空=不属于任何池
+	// Lines 这个用户在某些线路上的限速和上面不一样(生效中的规则忽略了这些线路):线路名(入站 tag)→ 那条线路上的限速。
+	// 没列的线路按上面的;0 = 该方向不限
+	Lines map[string]LineLimit
 }
+
+// LineLimit 一个用户在一条线路上的限速(Mbps,0 = 不限)。
+type LineLimit struct {
+	UpMbps   int
+	DownMbps int
+}
+
+// lineEntryKey lentries 的键:用户名 + 线路名(中间的控制字符两边都不会有)。
+func lineEntryKey(user, line string) string { return user + "\x1f" + line }
 
 // GroupLimitSpec 是 SetGroups 的入参:一个代理池的上限,0=不限。
 type GroupLimitSpec struct {
@@ -677,11 +713,11 @@ func (l *Limiter) groupEntryLocked(g string) *groupEntry {
 // wrapConn 给一条连接挂上用户与所属代理池的桶位,并在有流量时刷新该设备的在线状态。
 // 每条认证过的连接都包装:现在不限速的用户,之后被规则限速时这条连接也要立刻变慢。
 func (l *Limiter) wrapConn(conn net.Conn, user, ip string) net.Conn {
-	return l.wrapConnNode(conn, user, ip, NodeSpec{})
+	return l.wrapConnNode(conn, user, ip, "", NodeSpec{})
 }
 
 func (l *Limiter) wrapPacketConn(conn N.PacketConn, user, ip string) N.PacketConn {
-	return l.wrapPacketConnNode(conn, user, ip, NodeSpec{})
+	return l.wrapPacketConnNode(conn, user, ip, "", NodeSpec{})
 }
 
 // keepaliveFor 返回一个"该设备刚有流量"的回调,按秒节流以免每次读写都抢锁。nodeKey 是这条连接走的节点(空 = 没单独设的节点)。
@@ -734,14 +770,42 @@ type limitedConn struct {
 	net.Conn
 	limiter   *Limiter
 	name      string
-	user      *userEntry  // 用户桶位
+	line      string      // 这条连接走的线路(入站 tag);规则忽略了这条线路时用这个用户在这条线路上单独的桶位
+	user      *userEntry  // 用户桶位;运行期以 currentUser 为准
 	group     *groupEntry // 建连时的代理池桶位(不在池里为 nil);运行期以 currentGroup 为准
 	node      *userEntry  // 这条连接走的节点的总限速桶位(节点什么都没设为 nil)
 	nodeUser  *userEntry  // 这个用户在这个节点上的桶位(同上)
 	keepalive func() bool
 	gen       atomic.Uint64              // 上次解析代理池时的策略代数
 	groupNow  atomic.Pointer[groupEntry] // 按代数缓存的当前代理池
+	ugen      atomic.Uint64              // 上次解析用户桶位时的策略代数
+	userNow   atomic.Pointer[userEntry]  // 按代数缓存的当前用户桶位(nil = 还没解析过)
 	denied    atomic.Bool                // 已被设备上限拒掉:之后所有读写立即失败,不会下一秒又放行
+}
+
+// currentUser 这条连接此刻该过的用户桶位:生效中的规则忽略了它走的线路、这个用户在这条线路上的限速和别处不一样时
+// 是线路上单独的那个,否则是用户的。规则一触发 / 一解除,在线连接也跟着换;和 currentGroup 一样按策略代数缓存,平时不抢锁。
+func (c *limitedConn) currentUser() *userEntry {
+	if c.limiter == nil || c.line == "" {
+		return c.user
+	}
+	return resolveUser(c.limiter, c.name, c.line, c.user, &c.ugen, &c.userNow)
+}
+
+func resolveUser(l *Limiter, name, line string, own *userEntry, gen *atomic.Uint64, cache *atomic.Pointer[userEntry]) *userEntry {
+	g := l.gen.Load()
+	if e := cache.Load(); e != nil && gen.Load() == g {
+		return e
+	}
+	l.mu.Lock()
+	e := l.lentries[lineEntryKey(name, line)]
+	l.mu.Unlock()
+	if e == nil {
+		e = own
+	}
+	cache.Store(e)
+	gen.Store(g)
+	return e
 }
 
 // currentGroup 这条连接此刻所属的代理池。用户被挪到别的代理、或移出代理之后,已有连接要跟着走,
@@ -781,7 +845,7 @@ func (c *limitedConn) Read(p []byte) (int, error) {
 		_ = c.Conn.Close()
 		return 0, errDeviceRecheck
 	}
-	throttle(c.user.up.Load(), n)
+	throttle(c.currentUser().up.Load(), n)
 	if g := c.currentGroup(); g != nil {
 		throttle(g.up.Load(), n)
 	}
@@ -798,7 +862,7 @@ func (c *limitedConn) Write(p []byte) (int, error) {
 		_ = c.Conn.Close()
 		return 0, errDeviceRecheck
 	}
-	throttle(c.user.down.Load(), len(p))
+	throttle(c.currentUser().down.Load(), len(p))
 	if g := c.currentGroup(); g != nil {
 		throttle(g.down.Load(), len(p))
 	}
@@ -818,6 +882,7 @@ type limitedPacketConn struct {
 	N.PacketConn
 	limiter   *Limiter
 	name      string
+	line      string // 见 limitedConn
 	user      *userEntry
 	group     *groupEntry
 	node      *userEntry // 节点层的两个桶位,见 limitedConn
@@ -825,6 +890,8 @@ type limitedPacketConn struct {
 	keepalive func() bool
 	gen       atomic.Uint64
 	groupNow  atomic.Pointer[groupEntry]
+	ugen      atomic.Uint64
+	userNow   atomic.Pointer[userEntry]
 	denied    atomic.Bool
 }
 
@@ -833,6 +900,13 @@ func (c *limitedPacketConn) currentGroup() *groupEntry {
 		return c.group
 	}
 	return resolveGroup(c.limiter, c.name, &c.gen, &c.groupNow)
+}
+
+func (c *limitedPacketConn) currentUser() *userEntry {
+	if c.limiter == nil || c.line == "" {
+		return c.user
+	}
+	return resolveUser(c.limiter, c.name, c.line, c.user, &c.ugen, &c.userNow)
 }
 
 // ReadPacket 被设备上限拒掉的 UDP 流走黑洞:包吞掉、连接不关。关掉的话 hysteria2 / tuic 的服务端会为下一个数据报
@@ -852,7 +926,7 @@ func (c *limitedPacketConn) ReadPacket(b *buf.Buffer) (M.Socksaddr, error) {
 			b.Reset()
 			continue
 		}
-		throttle(c.user.up.Load(), b.Len())
+		throttle(c.currentUser().up.Load(), b.Len())
 		if g := c.currentGroup(); g != nil {
 			throttle(g.up.Load(), b.Len())
 		}
@@ -870,7 +944,7 @@ func (c *limitedPacketConn) WritePacket(b *buf.Buffer, dest M.Socksaddr) error {
 		b.Release() // 这里要接管缓冲区
 		return nil  // 黑洞:吞掉,不报错、不关连接
 	}
-	throttle(c.user.down.Load(), b.Len())
+	throttle(c.currentUser().down.Load(), b.Len())
 	if g := c.currentGroup(); g != nil {
 		throttle(g.down.Load(), b.Len())
 	}

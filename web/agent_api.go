@@ -557,6 +557,10 @@ func (s *Server) handleAgentReport(w http.ResponseWriter, r *http.Request) {
 	}
 	rep.OnlineLines = o.Lines
 	rep.OnlineUpstreams = o.Upstreams // 上游的在线灯按真实出站字节(用户 N5)
+	// 「用户 × 线路」的累计:主机随快照打开了才有(勾了「忽略部分线路」的突发规则按它算用量)
+	if m, ok := s.run.LineMeter(); ok {
+		rep.LineMeter = &m
+	}
 	writeJSON(w, http.StatusOK, rep)
 }
 

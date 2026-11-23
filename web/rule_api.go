@@ -34,6 +34,9 @@ type rulePayload struct {
 	UpMbps      int     `json:"upMbps"`
 	DownMbps    int     `json:"downMbps"`
 	TightenOnly *bool   `json:"tightenOnly"`
+	// SkipLineIds 忽略的线路(界面上「忽略部分线路」勾选的):走这些线路的连接不受这条规则限速,突发规则也不把它们的流量计入用量。
+	// 不给 = 修改时沿用原值、新建时不忽略;给空数组 = 不忽略
+	SkipLineIds *[]uint `json:"skipLineIds"`
 	Remark      string  `json:"remark"`
 	Sort        int     `json:"sort"`
 }
@@ -44,6 +47,7 @@ type ruleView struct {
 	UserIds     []uint  `json:"userIds"`
 	ResellerIds []uint  `json:"resellerIds"`
 	PlanIds     []uint  `json:"planIds"`
+	SkipLineIds []uint  `json:"skipLineIds"`
 	ThresholdGB float64 `json:"thresholdGb"`
 	TargetCount int     `json:"targetCount"`
 	ActiveCount int     `json:"activeCount"`
@@ -128,6 +132,44 @@ func (p rulePayload) toRule(cur *model.Rule) (model.Rule, error) {
 	return r, nil
 }
 
+// skipLines 校验并规整「忽略的线路」。want 为 nil(请求里没给):修改时沿用原值,新建时不忽略。
+// 新勾的线路必须存在;原来勾着、后来被删掉的线路悄悄去掉(规则页的开关是把整条规则原样送回来的,不能因此报错)。
+func (s *Server) skipLines(want *[]uint, cur *model.Rule) (json.RawMessage, error) {
+	if want == nil {
+		if cur == nil {
+			return nil, nil
+		}
+		return cur.SkipLineIds, nil
+	}
+	set := map[uint]bool{}
+	for _, id := range *want {
+		if id != 0 {
+			set[id] = true
+		}
+	}
+	if len(set) == 0 {
+		return nil, nil
+	}
+	var ids []uint
+	if err := s.db.Model(&model.Line{}).Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	have := make(map[uint]bool, len(ids))
+	for _, id := range ids {
+		have[id] = true
+	}
+	var was map[uint]bool
+	if cur != nil {
+		was = rules.SkipSet(cur.SkipLineIds)
+	}
+	for id := range set {
+		if !have[id] && !was[id] {
+			return nil, fmt.Errorf("线路 #%d 不存在", id)
+		}
+	}
+	return rules.SkipJSON(set, have), nil
+}
+
 func (s *Server) ruleViews(list []model.Rule) []ruleView {
 	var users []model.User
 	s.db.Select("id, enabled, reseller_id, plan_id").Find(&users)
@@ -143,7 +185,7 @@ func (s *Server) ruleViews(list []model.Rule) []ruleView {
 	}
 	out := make([]ruleView, 0, len(list))
 	for _, r := range list {
-		v := ruleView{Rule: r, UserIds: rules.ParseIDs(r.UserIds), ResellerIds: rules.ParseIDs(r.ResellerIds), PlanIds: rules.ParseIDs(r.PlanIds),
+		v := ruleView{Rule: r, UserIds: rules.ParseIDs(r.UserIds), ResellerIds: rules.ParseIDs(r.ResellerIds), PlanIds: rules.ParseIDs(r.PlanIds), SkipLineIds: rules.ParseIDs(r.SkipLineIds),
 			ThresholdGB: math.Round(float64(r.ThresholdBytes)/bytesPerGB*100) / 100, ActiveCount: active[r.Id]}
 		if v.UserIds == nil {
 			v.UserIds = []uint{}
@@ -153,6 +195,9 @@ func (s *Server) ruleViews(list []model.Rule) []ruleView {
 		}
 		if v.PlanIds == nil {
 			v.PlanIds = []uint{}
+		}
+		if v.SkipLineIds == nil {
+			v.SkipLineIds = []uint{}
 		}
 		if r.Enabled {
 			v.TargetCount = len(rules.Targets(r, users))
@@ -193,6 +238,9 @@ func (s *Server) handleRules(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rule, err := p.toRule(nil)
+		if err == nil {
+			rule.SkipLineIds, err = s.skipLines(p.SkipLineIds, nil)
+		}
 		if err != nil {
 			badRequest(w, err)
 			return
@@ -249,6 +297,9 @@ func (s *Server) handleRuleItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rule, err := p.toRule(&cur)
+		if err == nil {
+			rule.SkipLineIds, err = s.skipLines(p.SkipLineIds, &cur)
+		}
 		if err != nil {
 			badRequest(w, err)
 			return
@@ -256,7 +307,7 @@ func (s *Server) handleRuleItem(w http.ResponseWriter, r *http.Request) {
 		// plan_ids 以前漏在这张单子外面:改规则时换的套餐目标存不进去(新建时存得进去)
 		if err := s.db.Model(&model.Rule{}).Where("id = ?", id).Select(
 			"name", "enabled", "kind", "all_users", "user_ids", "reseller_ids", "plan_ids", "days", "start", "end",
-			"window_min", "threshold_bytes", "penalty_min", "up_mbps", "down_mbps", "tighten_only", "remark", "sort",
+			"window_min", "threshold_bytes", "penalty_min", "up_mbps", "down_mbps", "tighten_only", "skip_line_ids", "remark", "sort",
 		).Updates(rule).Error; err != nil {
 			badRequest(w, err)
 			return

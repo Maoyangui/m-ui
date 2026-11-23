@@ -263,7 +263,7 @@ func (c *ConnTracker) RoutedConnection(ctx context.Context, conn net.Conn, metad
 
 	wrapped := c.createWrappedConn(conn, connID)
 	if c.limiter != nil {
-		return c.limiter.wrapConnNode(wrapped, owner, ip, node)
+		return c.limiter.wrapConnNode(wrapped, owner, ip, metadata.Inbound, node)
 	}
 	return wrapped
 }
@@ -305,7 +305,7 @@ func (c *ConnTracker) RoutedPacketConnection(ctx context.Context, conn network.P
 
 	wrapped := c.createWrappedPacketConn(conn, connID)
 	if c.limiter != nil {
-		return c.limiter.wrapPacketConnNode(wrapped, owner, ip, node)
+		return c.limiter.wrapPacketConnNode(wrapped, owner, ip, metadata.Inbound, node)
 	}
 	return wrapped
 }
