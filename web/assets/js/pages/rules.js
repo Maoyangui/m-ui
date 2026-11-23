@@ -4,7 +4,7 @@ import { state } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t } from '../i18n.js';
 import { userPicker, targetText } from '../userpicker.js';
-import { esc, toast, confirm, openModal, openDrawer, registerActions, badge, field, empty, fv, fchk, fmtTime, fmtRelative, fieldBox, switchRow } from '../ui.js';
+import { esc, toast, confirm, openModal, openDrawer, registerActions, badge, field, empty, fv, fchk, fmtTime, fmtRelative, fieldBox } from '../ui.js';
 
 export const title = () => t('rule.title');
 export const subtitle = () => t('rule.subtitle');
