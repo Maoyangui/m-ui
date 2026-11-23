@@ -18,7 +18,7 @@ import (
 // 这里扫一遍写审计的地方 —— web 的 s.audit / s.auditAs 和 audit 回调(handleAPIKeys / handleKeyLogs / handlePageLogo)、
 // ha 的 s.audit / auditTo、jobs 和 rules 的 record、直接写的 model.Change{Key, Action} —— 每个对象、每个动作在中英两张表里都要有名字。
 // 动作是「字面量 + 变量」拼出来的(比如 "server:"+op)只能查前缀:前缀自己有名字,或者至少有一个以它开头的整句名字;
-// map[bool]string{…}[x] 这样拼的把每个取值都展开查;整个放在变量里的抄在下面的 dynamicAuditActions 里。
+// map[bool]string{…}[x] 这样拼的把每个取值都展开查;整个放在变量里的抄在下面的 dynamicAuditActions 里(容灾包和 web 包各几处)。
 func TestAuditLabelsExist(t *testing.T) {
 	dict := helpI18n(t)
 	js, err := fs.ReadFile(assets, "assets/js/audit.js")
@@ -52,6 +52,9 @@ func TestAuditLabelsExist(t *testing.T) {
 	named := func(d map[string]string, key, a string, prefix bool) bool {
 		dot := strings.ReplaceAll(a, ":", ".")
 		if !prefix {
+			if key == "user" && strings.HasPrefix(a, "create:plan:") {
+				return d["audit.v.create.plan"] != "" // 外部 API 建号带套餐:audit.js 拼成「新建并套用套餐 · 套餐名」
+			}
 			if key == "user" && userSpecial.MatchString(a) {
 				return true // audit.js 对用户的套餐动作单独拼句子
 			}
@@ -113,6 +116,10 @@ var dynamicAuditActions = []struct {
 	{"ha", []string{"demoted", "yielded"}, "ha/demote.go 变为副机"},
 	{"ha", []string{"takeover", "became-master"}, "ha/promote.go 接任 / 设为主机后成为主机"},
 	{"ha", []string{"takeover", "set-master", "abandon", "pause", "resume", "yield", "reset"}, "ha/cmd.go 命令行(status 不记)"},
+	{"user", []string{"create", "create:plan:月付"}, "web/public_api.go 外部 API 建号、批量建号(带套餐时后面拼套餐名)"},
+	{"user", []string{"enable", "disable"}, "web/public_api.go 外部 API 启停用户"},
+	{"user", []string{"batch:enable", "batch:disable", "batch:delete", "batch:reset", "batch:extend", "batch:plan:bind", "batch:plan:renew:月付", "batch:plan:extend:月付"}, "web/plan_api.go 批量操作"},
+	{"line", []string{"enable", "disable"}, "web/extra_api.go 线路启停"},
 }
 
 type auditRec struct {

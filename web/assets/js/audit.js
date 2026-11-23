@@ -21,6 +21,7 @@ export function auditAction(r) {
   if (key === 'user') {
     if ((m = /^batch:plan:(renew|extend|bind)(?::(.*))?$/.exec(a))) return m[1] === 'bind' ? t('dash.audit.batchBind') : `${t('dash.audit.batch', { op: t('pc.op.' + m[1]) })}${m[2] ? ' · ' + m[2] : ''}`;
     if (a === 'plan:bind') return t('dash.audit.bind'); // 只改所属套餐(也可能是移出套餐),额度和到期不动
+    if ((m = /^create:plan:(.*)$/.exec(a))) return `${t('audit.v.create.plan')} · ${m[1]}`; // 外部 API 建号(含批量建号)时带了套餐
     if ((m = /^plan:(renew|extend):(.*)$/.exec(a))) return `${t('pc.op.' + m[1])} · ${m[2]}`;
     if ((m = /^plan:(replace|stack|prorate):(.*)$/.exec(a))) return `${t('dash.audit.planChange', { mode: t('pc.mode.' + m[1]) })} → ${m[2]}`;
   }
