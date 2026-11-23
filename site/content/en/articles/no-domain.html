@@ -8,7 +8,7 @@
   <p>Only two things: a certificate issued by a public CA (Let's Encrypt validates a name, not an address), and a stable address in subscriptions that survives changing the server. Everything else — TLS itself, Hysteria2, AnyTLS, Trojan, the panel, the landing page — works on an IP.</p>
 
   <h2>Step 1: self-sign</h2>
-  <p><b>Certificate → Self-sign</b> creates a long-lived certificate for the server's IP (and any names you type) and installs it for the data plane. It is one click. The Quick Start card on the dashboard counts it as "certificate ready"; a domain is listed under optional steps.</p>
+  <p><b>Certificate → Self-sign</b> creates a long-lived certificate for the server's IP (and any names you type) and installs it for the data plane. It is one click. The dashboard’s Get started card sets up VLESS + Reality by default, which needs no certificate at all; for Hysteria2, AnyTLS and the like, this self-signed certificate is all you need.</p>
 
   <h2>Step 2: what the subscription tells clients</h2>
   <p>When the certificate is self-signed, m-ui marks every TLS-bearing node in the subscription so clients do not reject it: <code>skip-cert-verify: true</code> in Clash / Mihomo YAML, <code>"insecure": true</code> in sing-box JSON, and the insecure flag each universal-link scheme uses. Users import the link and connect; nothing to toggle by hand.</p>

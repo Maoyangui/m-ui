@@ -780,12 +780,26 @@ textarea.ops-sysctl { width: 100%; min-height: 19rem; margin: .7rem 0 .6rem; fon
 .ops-idle { flex: 1; min-height: 6rem; display: grid; place-items: center; padding: 1rem; border: 1px dashed var(--border); border-radius: var(--radius-sm); color: var(--muted); font-size: var(--fs-sm); text-align: center; line-height: 1.6; }
 
 /* 快速开始 */
-.quickstart { border-color: color-mix(in srgb, var(--primary) 40%, var(--border)); box-shadow: 0 0 0 3px var(--primary-soft); }
-.qs-list { margin: .6rem 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .35rem .9rem; }
-.qs-list li { display: flex; align-items: center; gap: .5rem; padding: .3rem 0; }
-.qs-list li.done a { color: var(--muted); text-decoration: line-through; }
-.qs-mark { width: 1.35rem; height: 1.35rem; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11.5px; background: var(--surface-3); color: var(--muted); font-weight: 600; flex: none; }
-.qs-list li.done .qs-mark { background: var(--ok-soft); color: var(--ok-text); }
+/* 概览「开始使用」(首次安装的指引,用户 11-23):三步,每步一行 —— 序号圈 / 一句话(下面一行小字)/ 这一步的按钮。
+   下一步那一行带底色、按钮是主按钮;做完的打勾、字变淡、虚线框;卡片底下一行写「要当副机?」「用过 m-ui?」两条去路 */
+.guide { border-color: color-mix(in srgb, var(--primary) 40%, var(--border)); box-shadow: 0 0 0 3px var(--primary-soft); }
+.guide-steps { margin: .7rem 0 0; padding: 0; list-style: none; display: grid; gap: .45rem; }
+.guide-steps li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .4rem .85rem; padding: .65rem .8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.guide-steps li.now { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); background: var(--primary-soft); }
+.guide-steps li.done { background: transparent; border-style: dashed; }
+.guide-n { width: 1.75rem; height: 1.75rem; border-radius: 50%; display: inline-grid; place-items: center; background: var(--surface-3); color: var(--muted); font-weight: 650; font-size: var(--fs-sm); }
+.guide-steps li.now .guide-n { background: var(--primary); color: #fff; }
+.guide-steps li.done .guide-n { background: var(--ok-soft); color: var(--ok-text); }
+.guide-t { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.guide-t b { font-weight: 600; font-size: var(--fs-base); color: var(--text); }
+.guide-t span { font-size: var(--fs-sm); color: var(--muted); line-height: 1.45; }
+.guide-steps li.done .guide-t b { color: var(--muted); font-weight: 500; }
+.guide-ok { font-size: var(--fs-sm); color: var(--ok-text); white-space: nowrap; }
+.guide-foot { display: flex; flex-wrap: wrap; gap: .3rem 1.4rem; margin: .75rem 0 0; font-size: var(--fs-sm); color: var(--muted); }
+@media (max-width: 600px) {
+  .guide-steps li { grid-template-columns: auto minmax(0, 1fr); }
+  .guide-steps li > .btn, .guide-steps li > .guide-ok { grid-column: 2; justify-self: start; }
+}
 /* 可排序表头 */
 .grid th.sortable { cursor: pointer; user-select: none; }
 .grid th.sortable:hover { color: var(--text); }

@@ -391,12 +391,15 @@ if healthy 90; then
   [ -z "$FW_NOTE" ] || echo "$FW_NOTE"
   if [ "$FRESH" = 1 ] && [ -z "$RESTORE" ] && [ -z "$IMPORT" ]; then
     echo "  首次安装默认账号: admin / admin  ——  请登录后立即在"管理员"页修改密码"
+    # 新用户照概览页的「开始使用」三步就有一条能用的线路(用户 11-23);要当副机、用过 m-ui 的各有一条去路,不用走这三步
+    echo "  下一步:登录面板,概览页的「开始使用」三步:改密码 → 一键建线路(默认 VLESS + Reality,不用证书和域名)→ 建用户、发订阅"
+    echo "  要当副机:面板「设置」里打开「作为副服务器运行」,再到主服务器的「服务器」页添加这台"
+    echo "  用过 m-ui:面板「备份」页还原以前的备份,或者重装时加 --restore 备份.zip(旧面板的库用 --import)"
   elif [ -n "$IMPORT" ]; then
     echo "  账号沿用旧面板库;忘记密码可执行: m-ui passwd -db $DB"
   elif [ -n "$RESTORE" ]; then
     echo "  账号沿用备份;忘记密码可执行: m-ui passwd -db $DB"
   fi
-  echo "  下一步:登录面板,按概览页“快速开始”完成 证书(有域名就签发,没有就一键自签)→ 线路 → 用户"
   echo "====================================================="
   exit 0
 fi

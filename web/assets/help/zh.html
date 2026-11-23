@@ -64,15 +64,14 @@
   </section>
 
   <section class="sec" id="five-steps" data-scope="admin">
-    <h3>五步开始用</h3>
-    <p class="lede">概览页的 <b data-k="qs.title">快速开始</b> 清单就是这几步,做完前四步就能给人用了。</p>
+    <h3>三步开始用</h3>
+    <p class="lede">概览页的 <b data-k="guide.title">开始使用</b> 就是这三步,点卡片上每一步的按钮直接做,做完就有一条能用的线路。用不着的话点 <b data-k="guide.skip">跳过</b>,以后不再提示。</p>
     <ol class="steps">
       <li><b>改默认密码</b>(见上一节)。</li>
-      <li><b>准备证书</b>:<b data-k="nav.cert">证书</b> 页 → <b data-k="cert.add">添加证书</b>。有域名选 <b data-k="cert.srcAcme">有域名(自动签发)</b> 签一张;没有域名选 <b data-k="cert.srcSelf">无域名(自签)</b>,点 <b data-k="cert.selfsign">生成自签证书</b>。详见 <a href="#cert">证书</a>。</li>
-      <li><b>建线路</b>:<b data-k="nav.lines">线路</b> 页 → <b data-k="line.quick">快速添加</b>,新手选 Hysteria2 或 AnyTLS,保存。详见 <a href="#lines">线路与协议</a>。</li>
-      <li><b>建用户</b>:<b data-k="nav.users">用户</b> 页 → <b data-k="user.add">新增用户</b>,填用户名和额度,勾上 <b data-k="user.f.lines">可用线路</b>,保存。</li>
-      <li><b>发订阅</b>:点用户名打开详情,<b data-k="user.subscription">订阅</b> 下面有两个地址,把不带 <code>?format=</code> 的那个(通用地址)发给用户:用浏览器打开是他自己的落地页,能一键导入客户端;客户端来拉时按类型给格式(见 <a href="#users-sub">订阅地址、二维码与临时共享</a>)。</li>
+      <li><b>建一条线路</b>:点 <b data-k="guide.lineBtn">一键建线路</b>,新建框里已经选好 VLESS + Reality、填好端口和密钥,不用证书也不用域名,直接保存。也可以在 <b data-k="nav.lines">线路</b> 页 → <b data-k="line.quick">快速添加</b> 选别的协议;Hysteria2、AnyTLS 这些要证书:到 <b data-k="nav.cert">证书</b> 页 → <b data-k="cert.add">添加证书</b>,有域名选 <b data-k="cert.srcAcme">有域名(自动签发)</b>,没有域名选 <b data-k="cert.srcSelf">无域名(自签)</b>,点 <b data-k="cert.selfsign">生成自签证书</b>。详见 <a href="#lines">线路与协议</a>、<a href="#cert">证书</a>。</li>
+      <li><b>建用户、发订阅</b>:点 <b data-k="guide.userBtn">建用户</b>,填用户名和额度,勾上 <b data-k="user.f.lines">可用线路</b>,保存。点用户名打开详情,<b data-k="user.subscription">订阅</b> 下面有两个地址,把不带 <code>?format=</code> 的那个(通用地址)发给用户:用浏览器打开是他自己的落地页,能一键导入客户端;客户端来拉时按类型给格式(见 <a href="#users-sub">订阅地址、二维码与临时共享</a>)。</li>
     </ol>
+    <div class="tip"><b>要当副机,或者以前用过 m-ui</b>这台要当副机:在 <b data-k="nav.settings">设置</b> 里打开 <b data-k="set.roleSwitch">作为副服务器运行</b>,再到主机上添加它(见 <a href="#nodes-add">接入一台副机</a>);副机不出这份指引,线路和用户都在主机上建。以前用过 m-ui:到 <b data-k="nav.backup">备份</b> 页 <b data-k="bk.restore">还原</b> 以前的备份,就是原样的一套;安装时也可以直接带上备份(<code>--restore 备份.zip</code>)或旧面板的数据库(<code>--import 旧库.db</code>),线路、用户都在,这份指引不会出现。</div>
     <div class="tip"><b>没有域名也能用</b>自签证书 + 服务器 IP 就行:订阅会自动告诉客户端"允许不安全证书",客户端不用另外设置。以后有了域名签正式证书时注意:已经有用户时添加证书的弹框里 <b data-k="cert.applySub">用于订阅 HTTPS</b> 默认关着;打开的话所有用户的订阅地址都会变成 <code>https://域名…</code>,旧地址立即失效,每个客户端都要重新导入,点签发时会再提示一次(同一句话再点一次才开始)。不开就保持原地址,用户刷新一次订阅即可。</div>
     <div class="pit"><b>常见坑</b>线路的端口要在云服务器安全组和系统防火墙里放行:Hysteria2、TUIC 走 UDP,其它大多走 TCP。没放行是"连不上"最常见的原因。</div>
   </section>

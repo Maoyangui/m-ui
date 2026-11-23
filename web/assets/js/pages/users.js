@@ -126,6 +126,7 @@ export async function render(el) {
   lastPager = '';
   renderRows();
   if (openId) showDetail(openId);
+  else if (hp.has('new')) editUser(null); // 概览「开始使用」的「建用户」:#/users?new=1,直接打开新建框
 }
 export async function tick() { await load('users'); renderRows(); if (drawerUser) refreshDrawerLive(); }
 
