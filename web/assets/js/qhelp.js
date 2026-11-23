@@ -62,14 +62,15 @@ export function anchorFor(xp) {
 const hasText = xp => xp.isConnected && xp.textContent.trim() !== '';
 
 // 标签正好写满一行时「?」不单独掉到下一行:「?」是行内小块,浏览器在它前面总能断行(英文的长标签上实测到)。
-// 这几类标签(宽度由外层决定)把紧挨着「?」的最后一个词和「?」一起包进不断行的 .qh-glue,「?」总跟着最后一个词;
-// 含中文、或者词超过 12 个字时只带最后两个字,免得一长串不能折行把标签撑出去。按固定的选择器认,不按当时的布局:
-// 卡片头、弹窗、顶栏的标题各有自己的排法(见 style.css),不碰。
+// 这几类标签和卡片头的标题把紧挨着「?」的最后一个词和「?」一起包进不断行的 .qh-glue,「?」总跟着最后一个词;
+// 含中文、或者词超过 12 个字时只带最后两个字,免得一长串不能折行把标签撑出去。按固定的选择器认,不按当时的布局。
+// 设置页分区标题自己是弹性布局(包一层会拆成两格、中间多出间距),弹窗、顶栏的标题各有自己的排法(见 style.css),都不碰。
 // (试过给这几类标签加 text-wrap: balance:WebKit 在「?」刚显示出来的那次排版里没把它算进去,单行标签的「?」反而全掉到第二行。)
-const GLUE = '.set-label, .field > .label, .sw-row b, .bk-steps b, .wall-kind-t b';
+const GLUE = '.set-label, .field > .label, .sw-row b, .bk-steps b, .wall-kind-t b, .card-head > h2';
+const NO_GLUE = '.set-sec > .card-head > h2';
 function glue(anchor, b) {
   const t = b.previousSibling;
-  if (!anchor.matches(GLUE) || !t || t.nodeType !== 3) return;
+  if (!anchor.matches(GLUE) || anchor.matches(NO_GLUE) || !t || t.nodeType !== 3) return;
   const m = t.data.match(/(\S+)(\s*)$/);
   if (!m) return;
   const chars = [...m[1]];

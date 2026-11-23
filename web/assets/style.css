@@ -2930,6 +2930,8 @@ html.rw-lock { overflow: hidden; }
 :root:not([data-concise]) .qh:not(.qh-always), .qh[hidden] { display: none !important; }
 :root[data-concise] .xp:not([data-qh-none]), .xp.xp-always:not([data-qh-none]) { display: none !important; } /* 先藏;找不到标题挂「?」的(data-qh-none)照常显示 */
 .topbar-title > .qh { margin-left: .4rem; }
+/* 顶栏标题后面的「?」露着时,标题最多占「整行减去『?』」(18px + .4rem):太长就显示省略号,「?」不换到第二排把顶栏撑高 */
+:root[data-concise] .topbar-title > h1:has(+ .qh:not([hidden])) { max-width: calc(100% - 1.6rem); }
 /* 弹窗标题长到正好占满一行时,「?」不单独掉到第二行(设置页伪装站预览的标题带着随机站名,手机宽度上碰到过):
    有「?」的标题排成一行两格,字在自己那一格里折行,「?」留在第一行的末尾 */
 #modal-title:has(> .qh:not([hidden])) { display: flex; align-items: baseline; }
