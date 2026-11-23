@@ -15,6 +15,7 @@ import { shownConns } from '../fair.js';
 import { openTraffic } from '../traffic.js';
 import { auditAction, auditObject, JOB_ACTORS } from '../audit.js';
 import { attnMuted } from '../attnmute.js';
+import { guideSteps, guideSkipped } from '../guide.js';
 
 export const title = () => t('nav.dashboard');
 // status / onlines 没取到时 app.js 照样调 tick:好在「需要处理」里写明"面板状态没取到"
@@ -83,20 +84,8 @@ function staleMark(id, e, at) {
 const loading = () => `<div class="dash-loading">${esc(t('common.loading'))}</div>`;
 
 // ---- 开始使用(首次安装的指引)/ 配置完成卡 ----
-// 用户 11-23:「旨在为新用户简单明了的运行可用的代理线路 其他的复杂功能让自行探索 可以跳过指引或者设置为副机后没有指引」;
-// 「设域名不是必选项 因为有的没有域名会采用自签」。所以只留三步,每一步都能直接点着做,做完一条线路就能用:
-//   改默认密码 → 一键建线路(默认 VLESS + Reality:不用证书、不用域名)→ 建用户、发订阅。
-// 域名、证书、上游、通知、副机、套餐都不在这里列(用到时在各页自己看)。副机(role = node)不出;
-// 点「跳过」存进面板设置(guideSkipped),换浏览器、换电脑都不再出;以前在这台浏览器里点过「不再显示」的也算跳过。
-function guideSteps() {
-  const s = state.status;
-  return [
-    { ok: !s.defaultPassword, href: '#/admin?pw', key: 'pw' },
-    { ok: (s.lines || 0) > 0, href: '#/lines?new=reality', key: 'line' },
-    { ok: (s.users || 0) > 0, href: '#/users?new=1', key: 'user' },
-  ];
-}
-const guideSkipped = () => String((state.settings || {}).guideSkipped) === 'true' || ls('m-ui.hideQuickStart') === '1';
+// 三步是哪三步、什么时候算跳过见 guide.js(顶栏的奖励气泡也看它)。域名、证书、上游、通知、副机、套餐都不在这里列
+// (用到时在各页自己看)。副机(role = node)不出
 function quickStart() {
   const s = state.status;
   if (s.role === 'node') return '';
