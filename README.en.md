@@ -229,7 +229,7 @@ The dashboard shows a **Get started** card: three steps to a working line, each 
 
 1. **Change the default password**: it is still `admin / admin`, so anyone can log in.
 2. **Create a line**: the dialog already has VLESS + Reality picked with the port and keys filled in, no certificate or domain needed; just save. Open the port in your cloud security group.
-3. **Add a user and share the subscription**: tick the lines they may use (or apply a plan) and save, then copy the subscription link from the user list, or let the user open the landing page in a browser to scan / import.
+3. **Add a user and share the subscription**: enter a name and save (opened from the card, all lines are already ticked; you can also apply a plan), then copy the subscription link from the user list, or let the user open the landing page in a browser to scan / import.
 
 Everything else (domain, certificates, upstreams, notifications, nodes, plans…) is in the sidebar for when you need it; if you don’t need the guide, click **Skip** on the card and it won’t come back. Setting up a node (turn on “Run as node” in Settings) or used m-ui before (restore your backup on the Backup page, or install with `--restore`)? You don’t need these steps, and node panels don’t show the guide.
 

@@ -1388,11 +1388,10 @@ button.ext-sum:hover .sub, button.ext-sum:hover .muted { text-decoration: underl
   .attn .acts { margin-left: auto; }
 }
 
-/* 快速开始做完:和 Star 合成一行 */
+/* 「开始使用」三步都做完:「✓ 已经可以用了」和 Star 一行 */
 .qs-done { display: flex; align-items: center; gap: .5rem .8rem; flex-wrap: wrap; }
 .qs-ok > .i { color: var(--ok); }
 .qs-done .grow { flex: 1; }
-.qs-opt { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; }
 
 /* 当前在线:名字过长省略;展开 / 搜索结果在 18rem 里滚动 */
 #dash-online .chip { display: inline-flex; align-items: center; max-width: 15rem; gap: .15rem; }
