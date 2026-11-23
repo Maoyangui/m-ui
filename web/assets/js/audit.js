@@ -24,6 +24,9 @@ export function auditAction(r) {
     if ((m = /^plan:(renew|extend):(.*)$/.exec(a))) return `${t('pc.op.' + m[1])} · ${m[2]}`;
     if ((m = /^plan:(replace|stack|prorate):(.*)$/.exec(a))) return `${t('dash.audit.planChange', { mode: t('pc.mode.' + m[1]) })} → ${m[2]}`;
   }
+  // 同一个动作名在不同对象下意思不一样的,按「对象.动作」单独起名(容灾命令行的 reset 是重置本机容灾状态,不是用户的重置流量)
+  const own = has('audit.kv.' + key + '.' + a.replace(/:/g, '.'));
+  if (own) return own;
   const whole = has('audit.v.' + a.replace(/:/g, '.'));
   if (whole) return whole;
   if ((m = /^batch:(.+)$/.exec(a))) return t('dash.audit.batch', { op: verb(m[1]) });
