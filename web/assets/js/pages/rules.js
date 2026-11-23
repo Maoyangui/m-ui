@@ -4,7 +4,7 @@ import { state } from '../app.js';
 import { get, post, put, del } from '../api.js';
 import { t, getLang } from '../i18n.js';
 import { userPicker, targetText } from '../userpicker.js';
-import { esc, toast, confirm, openModal, openDrawer, registerActions, badge, field, empty, fv, fchk, fmtTime, fmtRelative, fieldBox } from '../ui.js';
+import { esc, toast, confirm, openModal, openDrawer, registerActions, badge, field, fv, fchk, fmtTime, fmtRelative, fieldBox } from '../ui.js';
 import { protoName } from './lines.js';
 
 export const title = () => t('rule.title');
@@ -31,10 +31,11 @@ async function refresh(withLines) {
 }
 export async function tick() { await refresh(); }
 
-// 取线路;取不到就留着上一份(卡片上「忽略」的线路名不至于一闪就没了)
+// 取线路;取不到就留着上一份(卡片上「忽略」的线路名不至于一闪就没了)。返回这次取到没有
 async function loadLines() {
   const ls = await get('lines').catch(() => null);
   if (ls) lines = ls;
+  return !!ls;
 }
 
 // 星期写成人话:每天;连着三天以上写「周一至周五」;零散的几天才一个个列
@@ -45,9 +46,6 @@ const daysText = days => {
   if (run && list.length >= 3) return t('rule.weekRange', { a: t('rule.day.' + list[0]), b: t('rule.day.' + list[list.length - 1]) });
   return t('rule.weekPrefix') + list.map(d => t('rule.day.' + d)).join('、');
 };
-const condText = r => r.kind === 'burst'
-  ? t('rule.condBurst', { win: r.windowMin, gb: r.thresholdGb, pen: r.penaltyMin })
-  : `${daysText(r.days)} ${r.start} – ${r.end}`;
 // 限到多少,写成半句话;两个方向都没填(都不改)的写一个横线
 function limitText(r) {
   const up = Number(r.upMbps) || 0, down = Number(r.downMbps) || 0;
@@ -95,17 +93,22 @@ function renderRows() {
 }
 
 async function editRule(id) {
-  await loadLines(); // 打开前拿最新的线路(在线路页刚加的线路也要能勾)
+  const fresh = await loadLines(); // 打开前拿最新的线路(在线路页刚加的线路也要能勾)
   const r = id ? state.rules.find(x => x.id === id) : { kind: 'schedule', enabled: true, tightenOnly: true, days: '', start: '19:00', end: '23:00', windowMin: 10, thresholdGb: 1, penaltyMin: 20, upMbps: 0, downMbps: 20, userIds: [], resellerIds: [], planIds: [], skipLineIds: [] };
   let kind = r.kind || 'schedule';
   let picker = null;
   const days = new Set(String(r.days || '').split(',').filter(Boolean).map(Number));
-  // 忽略的线路:只认现在还在的线路(删掉的不显示,保存时也就不再带上);勾了至少一条才算打开
-  const skip = new Set((r.skipLineIds || []).filter(x => lines.some(l => l.id === x)));
+  // 忽略的线路:只认现在还在的线路(删掉的不显示,保存时也就不再带上);勾了至少一条才算打开。
+  // 这次线路列表没取到时,原来勾着、手里这份认不出的线路先原样留着(保存时照带,后端会去掉真删了的):
+  // 不能因为一次网络抖动把勾选悄悄清掉
+  const known = new Set(lines.map(l => l.id));
+  const skip = new Set((r.skipLineIds || []).filter(x => known.has(x)));
+  const keepUnknown = fresh ? [] : (r.skipLineIds || []).filter(x => !known.has(x));
+  const skipOn = skip.size > 0 || keepUnknown.length > 0;
   const linePills = lines.length
     ? lines.map(l => `<label class="day-pill line-pill${l.enabled === false ? ' off' : ''}" title="${esc(l.name + (l.enabled === false ? ' · ' + t('rule.lineOff') : ''))}"><input type="checkbox" class="f-skip-line" value="${l.id}" ${skip.has(l.id) ? 'checked' : ''}><span><b>${esc(l.name)}</b><em>${esc(protoName(l.protocol))}</em></span></label>`).join('')
     : `<p class="muted small">${esc(t('rule.skipLinesEmpty'))}</p>`;
-  // 版式:最上面一行选类型(右边是「启用」开关),下面按一句话的顺序分三段 —— 什么时候限、限到多少、对谁生效。
+  // 版式:最上面一行选类型(右边是「启用」开关),下面按一句话的顺序分四段 —— 什么时候限、限到多少、对谁生效、哪些线路除外。
   // 星期是七个可点的小块(不是七个勾选框排一排);每段的说明只写一遍,放在那一段下面
   openModal(id ? t('rule.edit') : t('rule.add'), `<div class="rl-form">
     <div class="rl-top">
@@ -146,14 +149,14 @@ async function editRule(id) {
     <p class="hint xp">${esc(t('rule.targetsHelp'))}</p>
     <h3 class="form-sec">${t('rule.sec.lines')}</h3>
     <div class="rl-skip">
-      <label class="rl-sw"><span class="switch"><input type="checkbox" id="f-skip" ${skip.size ? 'checked' : ''}><span></span></span><span class="rl-sw-t" id="f-skip-t">${esc(t('rule.skipLines'))}</span></label>
+      <label class="rl-sw"><span class="switch"><input type="checkbox" id="f-skip" ${skipOn ? 'checked' : ''}><span></span></span><span class="rl-sw-t" id="f-skip-t">${esc(t('rule.skipLines'))}</span></label>
       <span class="help xp" data-qh-for="f-skip-t">${esc(t('rule.skipLinesHelp'))}</span>
-      <div class="line-pills" id="f-skip-lines"${skip.size ? '' : ' hidden'}>${linePills}</div>
+      <div class="line-pills" id="f-skip-lines"${skipOn ? '' : ' hidden'}>${linePills}</div>
     </div>
   </div>`, async () => {
-    const skipOn = fchk('f-skip');
-    const skipLineIds = skipOn ? [...document.querySelectorAll('.f-skip-line:checked')].map(x => Number(x.value)) : [];
-    if (skipOn && lines.length && !skipLineIds.length) throw new Error(t('rule.skipLinesPick'));
+    const on = fchk('f-skip');
+    const skipLineIds = on ? [...document.querySelectorAll('.f-skip-line:checked')].map(x => Number(x.value)).concat(keepUnknown) : [];
+    if (on && lines.length && !skipLineIds.length) throw new Error(t('rule.skipLinesPick'));
     const body = {
       name: fv('f-name').trim(), remark: fv('f-remark'), kind, enabled: fchk('f-enabled'), tightenOnly: fchk('f-tighten'),
       upMbps: Number(fv('f-up')), downMbps: Number(fv('f-down')),

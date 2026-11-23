@@ -152,7 +152,7 @@ func (s *Server) skipLines(want *[]uint, cur *model.Rule) (json.RawMessage, erro
 	}
 	var ids []uint
 	if err := s.db.Model(&model.Line{}).Pluck("id", &ids).Error; err != nil {
-		return nil, err
+		return nil, fmt.Errorf("读取线路: %w", err) // 界面按这个前缀翻译(errmsg.js)
 	}
 	have := make(map[uint]bool, len(ids))
 	for _, id := range ids {
