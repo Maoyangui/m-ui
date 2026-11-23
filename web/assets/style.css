@@ -116,7 +116,10 @@ b, strong { font-weight: 600; }
 /* 很窄的屏幕上"帮助说明""建议 / 支持"只留图标、顶栏间距收紧,给页面标题让地方;标题再放不下就省略号收尾,不压到按钮上 */
 @media (max-width: 560px) {
   #btn-help .help-label, #btn-support .support-label, #topbar-right .tb-label { display: none; }
-  #btn-help, #btn-support { padding-left: .5rem; padding-right: .5rem; }
+  /* 只剩图标时和左边的菜单按钮一个样:一样大的方块、图标 19px、一样的颜色和线宽
+     (用户 11-24:原来 14px、偏灰,和旁边的金币、圣诞树比太小、不协调) */
+  #btn-help, #btn-support { width: var(--ctl-h); height: var(--ctl-h); padding: 0; color: var(--text-2); }
+  #btn-help svg, #btn-support svg { width: 19px; height: 19px; stroke-width: 1.8; }
   .main .topbar { gap: .4rem; } /* 比后面的 .topbar 基础规则更具体:这条写在前面也要生效 */
 }
 .topbar-title h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -175,6 +178,7 @@ main#page[data-layout="fluid"] { max-width: var(--page-max-fluid); }
   .shell.nav-open .sidebar { transform: none; }
   .shell.nav-open .backdrop { display: block; }
   #btn-menu { display: inline-flex; margin-left: -.35rem; }
+  #btn-menu svg { width: 19px; height: 19px; } /* 和手机上的「帮助说明」「建议 / 支持」一样大(见上面 560px 那段) */
   main#page { padding: 1rem .85rem 2rem; }
   .topbar { padding: .5rem .85rem; }
 }
