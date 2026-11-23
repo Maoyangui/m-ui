@@ -253,8 +253,9 @@ func (s *Server) handleRuleItem(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
+		// plan_ids 以前漏在这张单子外面:改规则时换的套餐目标存不进去(新建时存得进去)
 		if err := s.db.Model(&model.Rule{}).Where("id = ?", id).Select(
-			"name", "enabled", "kind", "all_users", "user_ids", "reseller_ids", "days", "start", "end",
+			"name", "enabled", "kind", "all_users", "user_ids", "reseller_ids", "plan_ids", "days", "start", "end",
 			"window_min", "threshold_bytes", "penalty_min", "up_mbps", "down_mbps", "tighten_only", "remark", "sort",
 		).Updates(rule).Error; err != nil {
 			badRequest(w, err)
