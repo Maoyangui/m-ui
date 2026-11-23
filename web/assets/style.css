@@ -2934,6 +2934,7 @@ html.rw-lock { overflow: hidden; }
    有「?」的标题排成一行两格,字在自己那一格里折行,「?」留在第一行的末尾 */
 #modal-title:has(> .qh:not([hidden])) { display: flex; align-items: baseline; }
 #modal-title > .qh { align-self: center; }
+.qh-glue { white-space: nowrap; } /* 标签的最后一个词和「?」不分开(见 qhelp.js 的 glue) */
 .qh-tip { position: fixed; z-index: 85; max-width: min(24rem, calc(100vw - 16px)); padding: .6rem .8rem; background: var(--surface); color: var(--text-2); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); font-size: var(--fs-sm); font-weight: 400; line-height: 1.6; text-align: left; white-space: normal; overflow-wrap: anywhere; animation: qh-in .12s ease-out; }
 .qh-tip[hidden] { display: none; }
 .qh-tip::before { content: ""; position: absolute; left: calc(var(--qh-x, 16px) - 5px); width: 9px; height: 9px; background: var(--surface); border: 1px solid var(--border); transform: rotate(45deg); }

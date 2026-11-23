@@ -61,9 +61,30 @@ export function anchorFor(xp) {
 
 const hasText = xp => xp.isConnected && xp.textContent.trim() !== '';
 
+// 标签正好写满一行时「?」不单独掉到下一行:「?」是行内小块,浏览器在它前面总能断行(英文的长标签上实测到)。
+// 这几类标签(宽度由外层决定)把紧挨着「?」的最后一个词和「?」一起包进不断行的 .qh-glue,「?」总跟着最后一个词;
+// 含中文、或者词超过 12 个字时只带最后两个字,免得一长串不能折行把标签撑出去。按固定的选择器认,不按当时的布局:
+// 卡片头、弹窗、顶栏的标题各有自己的排法(见 style.css),不碰。
+// (试过给这几类标签加 text-wrap: balance:WebKit 在「?」刚显示出来的那次排版里没把它算进去,单行标签的「?」反而全掉到第二行。)
+const GLUE = '.set-label, .field > .label, .sw-row b, .bk-steps b, .wall-kind-t b';
+function glue(anchor, b) {
+  const t = b.previousSibling;
+  if (!anchor.matches(GLUE) || !t || t.nodeType !== 3) return;
+  const m = t.data.match(/(\S+)(\s*)$/);
+  if (!m) return;
+  const chars = [...m[1]];
+  const word = /[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/.test(m[1]) || chars.length > 12 ? chars.slice(-2).join('') : m[1];
+  const cut = t.data.length - m[2].length - word.length;
+  const tail = cut > 0 ? t.splitText(cut) : t;
+  const g = document.createElement('span');
+  g.className = 'qh-glue';
+  tail.before(g);
+  g.append(tail, b);
+}
+
 function buttonFor(anchor) {
   const after = anchor.id === 'page-title'; // 顶栏标题每换一页整个重写文字:「?」放在它后面,不放在里面
-  let b = after ? anchor.parentElement.querySelector(':scope > .qh') : anchor.querySelector(':scope > .qh');
+  let b = after ? anchor.parentElement.querySelector(':scope > .qh') : anchor.querySelector(':scope > .qh, :scope > .qh-glue > .qh');
   if (b) return b;
   // 不用 <button>:「?」常在 <label> 里(开关行、表单格),<label> 会把排在前面的 button 当成它的控件,点整行就点到了「?」上
   b = document.createElement('span');
@@ -78,6 +99,7 @@ function buttonFor(anchor) {
   else {
     const stop = [...anchor.children].find(c => c.matches(AFTER_TEXT));
     anchor.insertBefore(b, stop || null);
+    glue(anchor, b);
   }
   return b;
 }
