@@ -1006,7 +1006,10 @@ const EN = /*BEGIN*/{
 "选了「跳转到我的网站」,要填跳转的网址": "\"Redirect to my website\" is selected: enter the address to redirect to",
 "跳转的网址要以 http:// 或 https:// 开头,比如 https://www.example.com": "The redirect address must start with http:// or https://, e.g. https://www.example.com",
 "跳转的网址里没有域名": "The redirect address has no domain",
-"跳转的网址里不能带用户名或密码": "The redirect address cannot contain a user name or password"
+"跳转的网址里不能带用户名或密码": "The redirect address cannot contain a user name or password",
+"extNoGroupIds 里的外部节点 %d 不存在": "External node %d in extNoGroupIds does not exist",
+"extNoGroupIds 里的外部节点 %d 没有分给这个用户(要先放进 extIds)": "External node %d in extNoGroupIds is not assigned to this user (put it in extIds first)",
+"extNoGroupIds 里的外部节点 %d 是分享链接:只有外部订阅能设「单独成组」": "External node %d in extNoGroupIds is a share link: only external subscriptions can have \"Own group\""
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

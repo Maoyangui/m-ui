@@ -430,6 +430,9 @@ type ExtNode struct {
 	RenameKeys json.RawMessage `json:"renameKeys,omitempty"`      // 按指纹改名 {指纹: {from: 改名时的名字, to: 新名}}
 	Exclude    string          `json:"exclude"`                   // 名字含这些关键词的不输出,逗号分隔(官网、到期、剩余流量这类信息节点)
 	PrefsRev   int64           `json:"prefsRev" gorm:"default:0"` // 隐藏 / 改名设置的版本号:面板保存时带上,对不上说明别处改过(乐观锁)
+	// NoGroup 新分给用户时默认不单独成组(只对外部订阅;默认 false = 成组)。只是新分配的初始值:订阅输出看的是每个分配自己的
+	// UserExt.NoGroup,已分配的不跟着变,除非保存时选了同步给已分配的用户(见 web/ext_api.go)。
+	NoGroup bool `json:"noGroup" gorm:"default:false"`
 }
 
 // UserExt 用户-外部节点 多对多。

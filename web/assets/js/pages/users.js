@@ -405,11 +405,12 @@ function editUser(id) {
       ${field(t('user.f.resetDays'), `<input id="f-resetdays" type="number" min="1" value="${u.resetDays || 30}">`)}
       <label class="field check" style="align-self:end;min-height:var(--ctl-h)"><input type="checkbox" id="f-autoreset" ${u.autoReset ? 'checked' : ''}><span>${esc(t('user.f.autoReset'))}</span></label>
     </div>`;
-  // 外部节点:每行左边勾上 = 分给这个用户;外部订阅右边多一个「单独成组」小开关(Clash 订阅里自己成一个策略组,默认开)。
+  // 外部节点:每行左边勾上 = 分给这个用户;外部订阅右边多一个「单独成组」小开关(Clash 订阅里自己成一个策略组;新分配的初始值按外部订阅自己的默认值)。
   // 两个控件各有各的 label,点哪个的字就是哪个(#91 原先把开关塞在分配的 label 里,点「生成策略组」几个字反而把整个订阅取消了);
   // 没分给他时开关变灰、点不动(开关记在分配上,不分配就无从谈起),再勾上时恢复原来的状态;分享链接只有一个节点,不成组,不给开关。
   const extRow = x => {
-    const on = (u.extIds || []).includes(x.id), grouped = !(u.extNoGroupIds || []).includes(x.id);
+    // 没分给他的,开关显示勾上分配以后的样子:外部订阅自己的默认值(外部节点编辑框里的「分给用户时单独成组」)
+    const on = (u.extIds || []).includes(x.id), grouped = on ? !(u.extNoGroupIds || []).includes(x.id) : !x.noGroup;
     const meta = `${x.type === 'sub' ? t('ext.typeSub') : t('ext.typeLink')} · ${x.nodeCount || 0}`;
     const grp = x.type === 'sub' ? `<label class="ext-grp" title="${esc(t('user.f.extGroupTip'))}"><span>${esc(t('user.f.extGenGroup'))}</span><span class="switch sm"><input type="checkbox" class="ext-group-cb" value="${x.id}" ${grouped ? 'checked' : ''} ${on ? '' : 'disabled'}><span></span></span></label>` : '';
     return `<div class="ext-pick"><label class="ext-main"><input type="checkbox" class="ext-cb" value="${x.id}" ${on ? 'checked' : ''}><span class="ext-nm" title="${esc(x.name)}">${esc(x.name)}</span><span class="ext-meta">${esc(meta)}</span></label>${grp}</div>`;

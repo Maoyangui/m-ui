@@ -581,7 +581,7 @@
     <ul>
       <li>主机定时抓取,间隔在 <b data-k="nav.settings">设置</b> → <b data-k="set.sub">订阅</b> → <b data-k="set.extRefresh">外部订阅刷新间隔(分钟)</b>;抓取失败时保留上次成功的内容,列表里写明错误。</li>
       <li>支持 base64 / 明文链接列表、Clash YAML、sing-box JSON。</li>
-      <li>Clash 订阅里每个外部订阅自己成一个策略组(组名就是订阅名,列在 Proxy 里):用户在 Proxy 里选它,再到组里挑节点;节点照旧也平铺在 Proxy 里,节点名不会因为分组改变。分享链接只有一个节点,不成组。不想让某个订阅单独成组,在用户的编辑框里把那个订阅右边的 <b data-k="user.f.extGenGroup">单独成组</b> 关掉(每个用户、每个订阅各管各的;套餐续期、外部 API 改分配时这个开关原样留着)。模板里已经写了同名的组,就用模板的那个。</li>
+      <li>Clash 订阅里每个外部订阅自己成一个策略组(组名就是订阅名,列在 Proxy 里):用户在 Proxy 里选它,再到组里挑节点;节点照旧也平铺在 Proxy 里,节点名不会因为分组改变。分享链接只有一个节点,不成组。成不成组先看外部订阅自己的默认值:在外部节点页编辑这个订阅,<b data-k="ext.groupDefault">分给用户时单独成组</b> 决定新分给用户时的初始值;改了它,还可以顺手勾上「同时改掉已分配的 N 个用户」。具体到某个用户,在他的编辑框里把那个订阅右边的 <b data-k="user.f.extGenGroup">单独成组</b> 开或关(每个用户、每个订阅各管各的;套餐续期、外部 API 只改 extIds 时这个开关原样留着,新加的按订阅的默认值;外部 API 也可以用 extNoGroupIds 直接读写它)。模板里已经写了同名的组,就用模板的那个。</li>
     </ul>
   </section>
 
@@ -701,7 +701,7 @@
       <li>有套餐就选 <b data-k="user.plan">所属套餐</b>,点 <b data-k="user.fromPlan">按套餐填写</b> 一键填好额度。没有就手填:<b data-k="user.f.volume">流量配额 GB(0=不限)</b>、<b data-k="user.f.expiry">到期日(留空=不限)</b>、<b data-k="user.f.device">同时在线设备(0=不限)</b>、<b data-k="user.f.up">上行限速 Mbps(0=不限)</b>、<b data-k="user.f.down">下行限速 Mbps(0=不限)</b>。</li>
       <li>按月清零的(月付),勾 <b data-k="user.f.autoReset">周期重置流量</b>,填 <b data-k="user.f.resetDays">重置周期(天)</b>。</li>
       <li>勾 <b data-k="user.f.lines">可用线路</b>。一条线路在几台服务器上就有几个入口,可以只给其中某台(按服务器切换分组勾选,已勾的不会丢)。</li>
-      <li data-scope="admin"><b data-k="user.f.exts">外部节点</b>:勾上的外部节点会追加到他订阅里本站节点的后面;外部订阅右边的 <b data-k="user.f.extGenGroup">单独成组</b> 决定它在 Clash 订阅里是不是自己成一个策略组(默认是)。</li>
+      <li data-scope="admin"><b data-k="user.f.exts">外部节点</b>:勾上的外部节点会追加到他订阅里本站节点的后面;外部订阅右边的 <b data-k="user.f.extGenGroup">单独成组</b> 决定它在 Clash 订阅里是不是自己成一个策略组(没分给他的那几行,开关显示的是勾上以后的样子:这个订阅自己的默认值)。</li>
       <li><b data-k="user.f.remark">备注</b>:记订单号、联系方式之类。注意:<span class="rv-only">你和主面板都</span>没填 <b data-k="set.subTitle">订阅标题(Profile-Title)</b> 和 <b data-k="set.subPageTitle">页面标题</b> 时,客户端里显示的订阅名就是备注(备注也空就用用户名),不想让用户看到的内容别写进备注。</li>
     </ul>
     <div class="tip"><b>发卡、试用</b>填 <b data-k="user.f.activate">首次连接后 N 天到期(0 = 不用)</b>:用户第一次产生流量时才开始计时,不用管到期日。</div>

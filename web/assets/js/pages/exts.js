@@ -638,15 +638,34 @@ function editExt(id) {
       ${field(t('user.f.remark'), `<input id="f-remark" value="${esc(x.remark || '')}">`)}
       ${field(t('common.sort'), `<input id="f-sort" type="number" value="${x.sort || 0}">`)}
       ${check('f-enabled', t('common.enabled'), x.enabled !== false)}
+      <div id="f-grp-row">${check('f-group', t('ext.groupDefault'), !x.noGroup, t('ext.groupDefaultHelp'))}</div>
+      <label class="field check check-wrap full" id="f-grp-apply-row" hidden><input type="checkbox" id="f-grp-apply"><span id="f-grp-apply-t"></span></label>
     </div>`, async () => {
-    const body = { name: fv('f-name').trim(), type: fv('f-type'), value: fv('f-value').trim(), prefix: fv('f-prefix'), exclude: fv('f-exclude').trim(), remark: fv('f-remark'), sort: Number(fv('f-sort')) || 0, enabled: fchk('f-enabled') };
-    if (id) await put('exts/' + id, body); else await post('exts', body);
+    const sub = fv('f-type') === 'sub';
+    const body = { name: fv('f-name').trim(), type: fv('f-type'), value: fv('f-value').trim(), prefix: fv('f-prefix'), exclude: fv('f-exclude').trim(), remark: fv('f-remark'), sort: Number(fv('f-sort')) || 0, enabled: fchk('f-enabled'),
+      noGroup: sub && !fchk('f-group'), applyNoGroup: sub && !document.getElementById('f-grp-apply-row').hidden && fchk('f-grp-apply') };
+    const r = id ? await put('exts/' + id, body) : await post('exts', body);
     // 地址、关键词可能改了:展开的列表作废、行指纹作废,一定重画(以前只删缓存不重画,面板留着、之后的开关全都不保存)
     delete cache[id];
     rowsSig = '';
     await load('exts'); renderRows();
-    toast(id ? t('ext.updated') : t('ext.created'), 'ok');
+    toast(id ? (r && r.applied ? t('ext.updatedApplied', { n: r.applied }) : t('ext.updated')) : t('ext.created'), 'ok');
   }, { wide: true });
+  // 「分给用户时单独成组」只对外部订阅(分享链接只有一个节点,不成组)。编辑时,已分配的用户里有和这一格不一样的,
+  // 露出「同时改掉已分配的 N 个用户」:改了这一格时默认勾上(多半是想让大家都按新的来),没改时不勾(改别的字段时不冲掉用户各自的设置)
+  const typeSel = document.getElementById('f-type'), grp = document.getElementById('f-group');
+  const sync = () => {
+    const sub = typeSel.value === 'sub', noGroup = !grp.checked;
+    document.getElementById('f-grp-row').hidden = !sub;
+    const n = id && sub ? (noGroup ? (x.userCount || 0) - (x.noGroupCount || 0) : (x.noGroupCount || 0)) : 0;
+    const row = document.getElementById('f-grp-apply-row');
+    row.hidden = n <= 0;
+    document.getElementById('f-grp-apply-t').textContent = n > 0 ? t('ext.groupApply', { n }) : '';
+    document.getElementById('f-grp-apply').checked = n > 0 && noGroup !== !!x.noGroup;
+  };
+  typeSel.addEventListener('change', sync);
+  grp.addEventListener('change', sync);
+  sync();
 }
 
 registerActions({

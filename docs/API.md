@@ -118,7 +118,7 @@ X-API-Key: <令牌>
 | 套餐(`/plans`、`planId` / `plan`) | 主面板的套餐 | 自己建的套餐 |
 | 线路(`lineIds` / `lineRefs`) | 任意 | 只能用主面板授权给他的;授权收窄到了某几台服务器的线路,只能用 `lineRefs` 指定其中的服务器,给整条(全部服务器)返回 400 |
 | 不指定线路时 | 分配全部线路 | 分配授权的全部线路(含服务器范围) |
-| 外部节点 `extIds` | 可用 | 忽略(代理不能分配外部节点) |
+| 外部节点 `extIds` / `extNoGroupIds` | 可用 | 忽略(代理不能分配外部节点) |
 | 用户数上限 | 无 | 达到主面板设的上限后创建返回 400 |
 | 代理流量额度 | 无 | 名下用户全时用量用尽后,创建与修改返回 400 |
 | 单个用户的设备数 / 限速 | 任意 | 任意(不再限制"之和");运行时按代理的设备池 / 带宽池执行 |
@@ -574,7 +574,8 @@ X-API-Key: <令牌>
 | `remark` / `desc` | string | 备注 / 说明(备注会出现在列表搜索里) |
 | `lineIds` | number[] | 可用线路(整条线路 = 它部署到的全部服务器,包括以后新加的) |
 | `lineRefs` | `[{lineId, nodeIds, hide}]` | 线路 × 服务器;`nodeIds` 省略或为空 = 该线路全部服务器。`hide`(可选)= 这条线路里不要的节点,见下。给了它就以它为准,`lineIds` 忽略 |
-| `extIds` | number[] | 可用外部节点(只主面板令牌有效)。整份替换:留下的外部订阅沿用原来的「单独成组」开关,新加的默认成组(这个开关目前只能在面板的用户编辑框里改) |
+| `extIds` | number[] | 可用外部节点(只主面板令牌有效)。整份替换;没同时给 `extNoGroupIds` 时,留下的外部订阅沿用原来的「单独成组」开关,新加的按这个外部订阅自己的默认值(面板「外部节点」里每个订阅的「分给用户时单独成组」,默认成组) |
+| `extNoGroupIds` | number[] | 关掉「单独成组」的外部订阅(只主面板令牌有效;「单独成组」= 这个订阅的节点在 Clash 订阅里自己成一个策略组)。和 `extIds` 一起给:整份替换,列出的关、其余开;只给它:分配不动,只把现有分配的开关改成「列出的关、其余开」。列表里每个 id 都必须是存在的外部订阅(不是分享链接),而且(改完以后)分给了这个用户,否则返回 400 并说明是哪个 |
 | `requestId` | string | 幂等键(也可以用请求头 `Idempotency-Key`):创建时认(同一个键只建一个用户);修改时同时带了 `planId` / `plan` 才认,见[幂等](#幂等重试安全) |
 
 优先级:显式字段 > 套餐。例如 `{"plan": "月付", "days": 60}` 套用月付套餐,但到期按 60 天算、不用套餐自带的天数(创建时自现在起,修改时自原到期起,同 `days` 本身的规则);`{"plan": "月付", "lineIds": [1]}` 用套餐的配额但只给线路 1。
@@ -607,7 +608,7 @@ X-API-Key: <令牌>
   "createdAt": 1756000000, "onlineAt": 1756800000,
   "onlineIps": ["203.0.113.9"],
   "onlineLines": {"203.0.113.9": ["香港1-主机", "香港1-高带宽"]},
-  "lineIds": [1, 2], "lineRefs": [{"lineId": 1}, {"lineId": 2, "nodeIds": [3]}], "extIds": [],
+  "lineIds": [1, 2], "lineRefs": [{"lineId": 1}, {"lineId": 2, "nodeIds": [3]}], "extIds": [3, 5], "extNoGroupIds": [5],
   "activeLimits": [{"rule": "晚高峰", "upMbps": 0, "downMbps": 30, "since": 1758000000, "until": 0, "reason": "时段 19:00 到 23:00"}],
   "subLink": "https://example.com:2056/sub/alice",
   "subClash": "https://example.com:2056/sub/alice?format=clash",
@@ -635,6 +636,7 @@ X-API-Key: <令牌>
 | `onlineLines` | 每个在线 IP 正在使用的线路,名字带服务器后缀 `线路名-服务器名`;没人在线时省略 |
 | `lineIds` / `lineRefs` | 可用线路 / 线路 × 服务器,见上节 |
 | `extIds` | 可用外部节点 id |
+| `extNoGroupIds` | `extIds` 里关了「单独成组」的外部订阅 id(没有时是空数组) |
 | `activeLimits` | 生效中的规则限速(只读,面板"规则"页配置):`rule` 规则名、`upMbps` / `downMbps`(0 = 该方向不改)、`since`、`until`(0 = 时段规则,随时段结束)、`reason`;没有时省略。只给站长的系统看,用户落地页不显示 |
 | `subLink` / `subClash` / `subJson` | 订阅地址(通用 / Clash / sing-box) |
 

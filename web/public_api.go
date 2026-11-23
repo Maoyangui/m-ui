@@ -295,6 +295,7 @@ type apiUserView struct {
 	LineIds        []uint              `json:"lineIds"`
 	LineRefs       []model.LineRef     `json:"lineRefs"`
 	ExtIds         []uint              `json:"extIds"`
+	ExtNoGroupIds  []uint              `json:"extNoGroupIds"` // extIds 里关了「单独成组」的外部订阅
 	SubLink        string              `json:"subLink"`
 	SubClash       string              `json:"subClash"`
 	SubJSON        string              `json:"subJson"` // sing-box 远程配置地址
@@ -329,6 +330,7 @@ type apiSnapshot struct {
 	localLines, remoteLines map[string]map[string][]string
 	localName, subBase      string
 	lineIdsBy, extIdsBy     map[uint][]uint
+	noGroupBy               map[uint][]uint // 用户 → 关了「单独成组」的外部订阅
 	refsBy                  map[uint][]model.LineRef
 }
 
@@ -337,7 +339,7 @@ func (s *Server) apiSnapshot() *apiSnapshot {
 		localIPs: map[string][]string{}, remoteIPs: map[string][]string{},
 		localLines: map[string]map[string][]string{}, remoteLines: map[string]map[string][]string{},
 		localName: s.localNodeName(), subBase: s.subBase(),
-		lineIdsBy: map[uint][]uint{}, extIdsBy: s.userExtMap(), refsBy: s.userLineRefMap(), limitsBy: s.userLimitMap(),
+		lineIdsBy: map[uint][]uint{}, extIdsBy: s.userExtMap(), noGroupBy: s.userExtNoGroupMap(), refsBy: s.userLineRefMap(), limitsBy: s.userLimitMap(),
 	}
 	for uid, refs := range snap.refsBy {
 		snap.lineIdsBy[uid] = refIDs(refs)
@@ -361,6 +363,10 @@ func (s *Server) apiUserWith(u model.User, snap *apiSnapshot) apiUserView {
 	if eids == nil {
 		eids = []uint{}
 	}
+	ngids := snap.noGroupBy[u.Id]
+	if ngids == nil {
+		ngids = []uint{}
+	}
 	if refs == nil {
 		refs = []model.LineRef{}
 	}
@@ -375,7 +381,7 @@ func (s *Server) apiUserWith(u model.User, snap *apiSnapshot) apiUserView {
 		CreatedAt: u.CreatedAt, OnlineAt: u.OnlineAt, DisabledReason: u.DisabledReason, ActiveLimits: snap.limitsBy[u.Id],
 		OnlineIPs:   mergeIPs(snap.localIPs[u.Name], snap.remoteIPs[u.Name]),
 		OnlineLines: s.onlineLines(u.Name, snap.localName, snap.localLines, snap.remoteLines),
-		LineIds:     ids, LineRefs: refs, ExtIds: eids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}
+		LineIds:     ids, LineRefs: refs, ExtIds: eids, ExtNoGroupIds: ngids, SubLink: links["link"], SubClash: links["clash"], SubJSON: links["json"]}
 }
 
 // apiListUsers GET /users:按 id 升序。筛选:q(名字 / 备注)、enabled、state(active / expiring / expired / exhausted / disabled)、
@@ -497,6 +503,8 @@ type apiUserReq struct {
 	LineIds  *[]uint          `json:"lineIds"`
 	LineRefs *[]model.LineRef `json:"lineRefs"` // 线路 × 服务器;给了它就以它为准
 	ExtIds   *[]uint          `json:"extIds"`
+	// ExtNoGroupIds 关掉「单独成组」的外部订阅(只主面板令牌;和 extIds 一起给 = 整份替换,单独给 = 只改现有分配的开关,见 apiWriteUserExts)
+	ExtNoGroupIds *[]uint `json:"extNoGroupIds"`
 	// RequestId 幂等键(也可以用请求头 Idempotency-Key):建号(POST /users)认;修改时同时带了套餐(等同一次续费)才认
 	RequestId string `json:"requestId"`
 }
@@ -818,8 +826,8 @@ func (s *Server) apiCreateOne(req apiUserReq, sc apiScope, key, hash string) (mo
 		if err := writeUserLineRefs(tx, u.Id, refs); err != nil {
 			return err
 		}
-		if req.ExtIds != nil && sc.rid == 0 { // 外部节点只有主面板能分配
-			return writeUserExts(tx, u.Id, *req.ExtIds, nil)
+		if sc.rid == 0 { // 外部节点只有主面板能分配
+			return apiWriteUserExts(tx, u.Id, req.ExtIds, req.ExtNoGroupIds)
 		}
 		return nil
 	})
@@ -1030,8 +1038,8 @@ func (s *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, u model.U
 				return err
 			}
 		}
-		if req.ExtIds != nil && sc.rid == 0 {
-			return writeUserExts(tx, u.Id, *req.ExtIds, nil)
+		if sc.rid == 0 { // 外部节点只有主面板能分配
+			return apiWriteUserExts(tx, u.Id, req.ExtIds, req.ExtNoGroupIds)
 		}
 		return nil
 	})

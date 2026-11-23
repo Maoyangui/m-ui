@@ -948,8 +948,8 @@ func (s *Server) runPlanOp(sc planScope, uid uint, call planOpCall) (*planResult
 			if err := moveUserStats(tx, in.user.Name, res.calc.next.Name); err != nil {
 				return err
 			}
-			if p.extIds != nil {
-				if err := writeUserExts(tx, uid, *p.extIds, nil); err != nil {
+			if p.extIds != nil || p.noGroup != nil {
+				if err := apiWriteUserExts(tx, uid, p.extIds, p.noGroup); err != nil {
 					return err
 				}
 			}
@@ -1343,6 +1343,7 @@ type userPatch struct {
 	refs      []model.LineRef // 请求里显式给的线路(已整理);refsGiven 为假时不看
 	refsGiven bool
 	extIds    *[]uint // 只有主面板令牌能改
+	noGroup   *[]uint // 关掉「单独成组」的外部订阅(只主面板令牌,见 apiWriteUserExts)
 }
 
 // apply 在套餐算好的 next 上盖显式字段;before 是套用前的用户(days 要从套用前的到期起算)。
@@ -1434,8 +1435,8 @@ func (s *Server) apiUpdateUserPlan(w http.ResponseWriter, r *http.Request, u mod
 			return
 		}
 	}
-	if req.ExtIds != nil && sc.rid == 0 {
-		patch.extIds = req.ExtIds
+	if sc.rid == 0 { // 外部节点只有主面板能分配
+		patch.extIds, patch.noGroup = req.ExtIds, req.ExtNoGroupIds
 	}
 	res, err := s.runPlanOp(ps, u.Id, planOpCall{endpoint: "update", opt: planOpOpt{Op: mode, Periods: 1}, target: plan,
 		requestID: key, reqHash: hash, patch: patch, audit: "update:plan:" + plan.Name})

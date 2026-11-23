@@ -414,6 +414,8 @@ S.limitStates = [{ id: 1, ruleId: 2, ruleName: '突发惩罚 Burst penalty', use
 // 选了套餐的规则:Basic 套餐的用户(现有和以后的)晚上限速
 S.rules.push({ ...S.rules[0], id: 3, name: 'Basic 套餐晚间 Basic plan nights', allUsers: false, planIds: [1], downMbps: 50 });
 for (const u of S.users) if (u.name === 'demo-alice' || u.name === 'demo-charlie') u.planId = 1; else if (u.name === 'demo-bob') u.planId = 2;
+// 外部节点列表的一行:和真接口一样带上分给了几个用户、其中几个关了「单独成组」(编辑框里改默认值时算有几个用户会跟着变)
+const extRow = e => { const on = S.users.filter(u => (u.extIds || []).includes(e.id)); return { ...e, userCount: on.length, noGroupCount: on.filter(u => (u.extNoGroupIds || []).includes(e.id)).length }; };
 const planView = p => ({ ...p, userCount: S.users.filter(u => u.planId === p.id).length, ruleIds: S.rules.filter(r => (r.planIds || []).includes(p.id)).map(r => r.id), resellerName: '' });
 const setPlanRules = (planId, ruleIds) => { if (!ruleIds) return; for (const r of S.rules) { const on = ruleIds.includes(r.id); r.planIds = (r.planIds || []).filter(x => x !== planId); if (on) r.planIds.push(planId); } };
 // 证书库(导出实例只有一张自签):一张域名证书给线路默认、面板、订阅用,一张泛域名给单独选了它的线路用,一张自签闲着
@@ -1060,7 +1062,7 @@ function route(method, path, query, body) {
       // 主机容灾(见 haView;没有这一条时界面拿到 {},会把每台都标成「副机」)
       case 'ha': if (seg[1] === 'plan') return haDemoBlock(); if (seg[1]) return notFound();
         return haView(/(^|&)full=1(&|$)/.test(query));
-      case 'exts': if (seg[2] === 'nodes') return extNodes(id, seg, 'GET', null); return clone(S.exts);
+      case 'exts': if (seg[2] === 'nodes') return extNodes(id, seg, 'GET', null); return clone(S.exts.map(extRow));
       case 'onlines': return clone(S.onlines);
       case 'rules': if (seg[2] === 'states') return clone(S.limitStates.filter(s => s.ruleId === id)); if (seg[1]) return ruleView(find(S.rules, id)); return S.rules.map(ruleView);
       case 'limitstates': return clone(S.limitStates);
@@ -1353,13 +1355,27 @@ function route(method, path, query, body) {
       return ok();
     }
     case 'exts': {
-      if (method === 'POST' && !seg[1]) { const e = { id: nextId(S.exts), enabled: true, nodeCount: 3, ...body }; S.exts.push(e); return clone(e); }
+      if (method === 'POST' && !seg[1]) { const e = { id: nextId(S.exts), enabled: true, nodeCount: 3, ...body }; delete e.applyNoGroup; if (e.type !== 'sub') e.noGroup = false; S.exts.push(e); return clone(e); }
       const e = find(S.exts, id);
       if (seg[2] === 'refresh') return { clash: 7, links: 7, total: 7, out: e.nodeCount || 7, unchanged: true };
       if (seg[2] === 'preview') return { nodes: [] };
       if (seg[2] === 'nodes') return extNodes(id, seg, method, body);
       if (method === 'DELETE') { S.exts = S.exts.filter(x => x.id !== id); for (const u of S.upstreams) if (u.source && u.source.extId === id) delete u.source; return ok(); } // 从它加来的上游还在,只是没有订阅可跟了
-      if (method === 'PUT') { Object.assign(e, body, { id }); return clone(e); }
+      if (method === 'PUT') {
+        // 和真接口一样:分享链接没有「单独成组」;勾了同步就把已分配、设置不一样的用户改过来,回改了几个
+        const { applyNoGroup, ...rest } = body;
+        Object.assign(e, rest, { id });
+        if (e.type !== 'sub') e.noGroup = false;
+        let applied = 0;
+        for (const u of S.users) {
+          if (!(u.extIds || []).includes(id)) continue;
+          const was = (u.extNoGroupIds || []).includes(id), want = e.type === 'sub' && applyNoGroup ? !!e.noGroup : (e.type === 'sub' ? was : false);
+          if (was === want) continue;
+          u.extNoGroupIds = want ? [...(u.extNoGroupIds || []), id] : (u.extNoGroupIds || []).filter(x => x !== id);
+          if (e.type === 'sub') applied++;
+        }
+        return { ok: '1', applied };
+      }
       return ok();
     }
     case 'rules': {
