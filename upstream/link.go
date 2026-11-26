@@ -457,12 +457,31 @@ func parseVmess(raw string) (*Parsed, error) {
 		tq.Set("sni", firstNonEmpty(str("sni"), str("host")))
 		tq.Set("alpn", str("alpn"))
 		tq.Set("fp", str("fp"))
-		if _, ok := v["allowInsecure"]; ok {
+		// 「允许不安全」:本站自签证书的 vmess 链接写的是 insecure(见 sub.vmessURI,v2rayN 系认这个键),别家也有写 allowInsecure 的。
+		// 以前只认 allowInsecure、而且有这个键就算:本站自签的 VMess 线路转成 sing-box 订阅后不带 insecure,证书校验不过、连不上;
+		// 别家链接里写着 allowInsecure: false 的反倒被当成允许。现在两个键都认,值是真(1 / true)才算。
+		if truthy(v["insecure"]) || truthy(v["allowInsecure"]) {
 			tq.Set("insecure", "1")
 		}
 		opts["tls"] = clientTLS(tq, host, false)
 	}
 	return &Parsed{Type: "vmess", Name: firstNonEmpty(str("ps"), host), Options: opts}, nil
+}
+
+// truthy vmess 链接 JSON 里的开关值:true、非零数字、"1" / "true" / "yes" 算开。
+func truthy(v interface{}) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case float64:
+		return x != 0
+	case string:
+		switch strings.ToLower(strings.TrimSpace(x)) {
+		case "1", "true", "yes":
+			return true
+		}
+	}
+	return false
 }
 
 // decodeBase64Loose 容忍 URL-safe / 无 padding 的 base64。

@@ -412,13 +412,23 @@
 
   <section class="sec" id="tls">
     <h3>TLS:节点证书、Reality、无</h3>
-    <p class="lede"><b data-k="line.tlsMode">加密方式</b> 决定节点怎么加密和伪装;Hysteria2、TUIC、AnyTLS 必须用 TLS。</p>
+    <p class="lede"><b data-k="line.tlsMode">加密方式</b> 决定节点怎么加密和伪装。不是每个协议三种都能选:配不上的在表单里是灰的,点不动。</p>
     <ul>
       <li><b data-k="line.tls.cert">证书(TLS)</b>:用本机证书,客户端按域名校验。默认用每台服务器证书页设的默认证书,也可以在 <b data-k="line.cert">证书</b> 里给这条线路单独选一张。</li>
       <li><b data-k="line.tls.reality">Reality</b>:不用证书,伪装成 <b data-k="line.reality.server">握手目标(伪装域名)</b> 那个网站的 TLS。点 <b data-k="line.reality.check">检测</b> 看能不能用,点 <b data-k="line.reality.pick">帮我挑</b> 自动测一批常见大站、按延迟列出,点一下就填入。密钥和 Short ID 选到 Reality 时自动生成好了,收在下面那一行里;要换就展开,在 <b data-k="line.reality.private">私钥</b> 旁边点 <b data-k="line.reality.gen">生成密钥对</b>,Short ID 旁边点 <b data-k="line.gen">生成</b>。</li>
       <li><b data-k="line.tls.none">不加密</b>:明文,只用于 CDN 回源或内网。</li>
       <li><b data-k="line.fp">客户端指纹</b> 一般保持默认。</li>
     </ul>
+    <div class="tbl"><table>
+      <thead><tr><th>协议</th><th>能选的加密方式</th><th>为什么</th></tr></thead>
+      <tbody>
+        <tr><td>VLESS、Trojan</td><td>证书、Reality、不加密</td><td>Trojan 选「不加密」时订阅里的节点仍按 TLS 连,只用于前面有 CDN / 反向代理替它做 TLS 的情况。</td></tr>
+        <tr><td>Hysteria2、TUIC</td><td>证书</td><td>这两个走 QUIC(UDP),Reality 只能用在走 TCP 的协议上,配了线路起不来。</td></tr>
+        <tr><td>AnyTLS</td><td>证书</td><td>分享链接没有 Reality 的写法,订阅给出去的节点连不上。</td></tr>
+        <tr><td>VMess、HTTP</td><td>证书、不加密</td><td>同上,配不了 Reality。</td></tr>
+        <tr><td>Shadowsocks、SOCKS、Mixed</td><td>—</td><td>不带 TLS;Shadowsocks 用它自己的加密算法。</td></tr>
+      </tbody>
+    </table></div>
     <div class="pit"><b>常见坑</b><ul>
       <li>Reality 的握手目标要支持 TLS 1.3 和 H2,并且从服务器连得上;线路部署在别的服务器时,检测出的延迟只作参考。</li>
       <li>用自签证书时客户端要允许不安全证书:订阅里会自动带上,一般不用管(设置项是 <b data-k="set.subInsecure">订阅允许不安全证书</b>)。</li>
@@ -432,6 +442,7 @@
       <li><b data-k="line.transport.tcp">TCP(直连)</b>:最快。</li>
       <li>ws、httpupgrade:可以套 CDN。</li>
       <li>grpc:适合配 Reality。</li>
+      <li>Reality 配 ws / httpupgrade / http:只有 sing-box 内核的客户端连得上,Xray 内核的客户端(v2rayN、v2rayNG)的 Reality 只认 TCP 和 gRPC。</li>
       <li>VLESS 建议勾 <b data-k="line.vision" class="wrap">启用 XTLS Vision(仅 TCP + TLS,推荐)</b>。</li>
     </ul>
   </section>

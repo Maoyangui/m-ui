@@ -139,9 +139,14 @@ func BuildConfig(db *gorm.DB, cert NodeCert) ([]byte, error) {
 	self := LocalNodeID(db)
 	lines := make([]model.Line, 0, len(all))
 	for _, l := range all {
-		if LineOnNode(l, self) {
-			lines = append(lines, l)
+		if !LineOnNode(l, self) {
+			continue
 		}
+		if why := Unstartable(l); why != "" { // 入站注定起不来的不渲染,别让它拖垮别的线路(见 combo.go)
+			warnUnstartable(l.Name, why)
+			continue
+		}
+		lines = append(lines, l)
 	}
 	var allUps []model.Upstream
 	if err := db.Order("id asc").Find(&allUps).Error; err != nil {

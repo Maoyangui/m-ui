@@ -14,6 +14,7 @@ import (
 	"github.com/Maoyangui/m-ui/database/model"
 	"github.com/Maoyangui/m-ui/hub"
 	"github.com/Maoyangui/m-ui/logger"
+	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/safe"
 	"github.com/Maoyangui/m-ui/stats"
 
@@ -697,6 +698,10 @@ func (s *Server) dispatchLineSubroute(w http.ResponseWriter, r *http.Request) bo
 		return true
 	}
 	if !line.Enabled { // 启用前复核端口(理由见 handleLineBatch 的 enable)
+		if err := render.CheckCombo(line); err != nil { // 协议和加密方式配不上的启用不了,先改(见 render/combo.go)
+			badRequest(w, err)
+			return true
+		}
 		if err := s.checkServicePorts(line); err != nil {
 			badRequest(w, err)
 			return true

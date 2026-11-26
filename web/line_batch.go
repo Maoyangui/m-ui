@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/Maoyangui/m-ui/database/model"
+	"github.com/Maoyangui/m-ui/render"
 	"github.com/Maoyangui/m-ui/sub"
 
 	"gorm.io/gorm"
@@ -52,6 +53,13 @@ func (s *Server) handleLineBatch(w http.ResponseWriter, r *http.Request) {
 	switch req.Action {
 	case "enable", "disable":
 		for i := range lines {
+			// 协议和加密方式配不上的启用不了(见 render/combo.go),点名是哪一条;本来就启用着的不查 —— 这次没动它
+			if req.Action == "enable" && !lines[i].Enabled {
+				if err := render.CheckCombo(lines[i]); err != nil {
+					badRequest(w, fmt.Errorf("线路「%s」:%w", lines[i].Name, err))
+					return
+				}
+			}
 			lines[i].Enabled = req.Action == "enable"
 		}
 		cols = []string{"enabled"}

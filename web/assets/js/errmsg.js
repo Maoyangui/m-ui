@@ -1012,7 +1012,13 @@ const EN = /*BEGIN*/{
 "跳转的网址里不能带用户名或密码": "The redirect address cannot contain a user name or password",
 "extNoGroupIds 里的外部节点 %d 不存在": "External node %d in extNoGroupIds does not exist",
 "extNoGroupIds 里的外部节点 %d 没有分给这个用户(要先放进 extIds)": "External node %d in extNoGroupIds is not assigned to this user (put it in extIds first)",
-"extNoGroupIds 里的外部节点 %d 是分享链接:只有外部订阅能设「单独成组」": "External node %d in extNoGroupIds is a share link: only external subscriptions can have \"Own group\""
+"extNoGroupIds 里的外部节点 %d 是分享链接:只有外部订阅能设「单独成组」": "External node %d in extNoGroupIds is a share link: only external subscriptions can have \"Own group\"",
+"%s 配不了 Reality:它走 QUIC(UDP),Reality 只能用在走 TCP 的协议上,这样的线路起不来。加密方式请选「证书」;想用 Reality 就把协议换成 VLESS 或 Trojan": "%s cannot use Reality: it runs over QUIC (UDP) and Reality only works with TCP-based protocols, so such a line cannot start. Pick \"Certificate\" as the encryption; to use Reality, switch the protocol to VLESS or Trojan",
+"%s 配不了 Reality:这个协议的分享链接没有 Reality 的写法,订阅给出去的节点连不上。加密方式请选「证书」或「不加密」;想用 Reality 就把协议换成 VLESS 或 Trojan": "%s cannot use Reality: its share links have no way to express Reality, so the nodes handed out by the subscription would not connect. Pick \"Certificate\" or \"None\" as the encryption; to use Reality, switch the protocol to VLESS or Trojan",
+"%s 配不了 Reality:这个协议的分享链接没有 Reality 的写法,订阅给出去的节点连不上。加密方式请选「证书」;想用 Reality 就把协议换成 VLESS 或 Trojan": "%s cannot use Reality: its share links have no way to express Reality, so the nodes handed out by the subscription would not connect. Pick \"Certificate\" as the encryption; to use Reality, switch the protocol to VLESS or Trojan",
+"%s 不带 TLS,加密方式只能是「不加密」": "%s has no TLS layer; the encryption can only be \"None\"",
+"shadowsocks 的 2022-blake3-chacha20-poly1305 不支持多个用户共用一条线路,面板用不了。换成 2022-blake3-aes-128-gcm 或 2022-blake3-aes-256-gcm": "The shadowsocks method 2022-blake3-chacha20-poly1305 does not support several users on one line, so the panel cannot use it. Switch to 2022-blake3-aes-128-gcm or 2022-blake3-aes-256-gcm",
+"shadowsocks 不能选不加密(none),换一个加密算法": "shadowsocks cannot run without encryption (none); pick another method"
 }/*END*/;
 
 // 固定称呼:填进占位里的端口归属、证书文件,以及数据面重载的操作名(noteReload),只做整句查表

@@ -643,7 +643,7 @@ func (s *Server) handle() http.HandlerFunc {
 			WHERE ul.user_id = ? AND l.enabled = 1 ORDER BY l.sort`, user.Id).Scan(&lines)
 		// 代理名下的用户按代理当前授权取交集:授权收回的线路不出现,收窄的只给授权的服务器(与数据面同一口径)
 		links, scopes, _ := render.EffectiveLines(s.db, user.Id)
-		lines = keepLines(lines, links)
+		lines = startable(keepLines(lines, links))
 
 		opt := s.options()
 		// 浏览器下载订阅时文件名带后缀(客户端拉的不带,见 Options.Download)
@@ -829,6 +829,18 @@ func autoFormatOn(v string) bool {
 		return false
 	}
 	return true
+}
+
+// startable 去掉入站注定起不来的线路(走 QUIC 的协议配了 Reality,见 render.Unstartable)。数据面渲染时跳过了它,
+// 订阅里再给这个节点,客户端只是多一个永远连不上的;线路改好之后照常回来。
+func startable(lines []model.Line) []model.Line {
+	out := lines[:0:0]
+	for _, l := range lines {
+		if render.Unstartable(l) == "" {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // pageEnabled 订阅页开关:主面板关掉就都不出;代理可以只关自己的。

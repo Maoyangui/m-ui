@@ -560,6 +560,11 @@ func (s *Server) validateLine(line *model.Line) error {
 			}
 		}
 	}
+	// 协议和加密方式配不上的(Hysteria2 配 Reality 之类)在这里拦:有的入站起不来还连累别的线路,有的订阅给不出能用的节点,
+	// 而保存前的干跑只构造不启动,都查不出来(见 render/combo.go)
+	if err := render.CheckCombo(*line); err != nil {
+		return err
+	}
 	if len(line.Transport) > 0 {
 		var probe map[string]interface{}
 		if err := json.Unmarshal(line.Transport, &probe); err != nil {
@@ -670,6 +675,9 @@ func (s *Server) validateLine(line *model.Line) error {
 		m, _ := probe["method"].(string)
 		if m == "" {
 			return errors.New("shadowsocks 线路必须设置 method")
+		}
+		if err := render.SSMethodProblem(m); err != nil {
+			return err
 		}
 		// 2022 系列需要服务端 PSK(aes-128 为 16 字节,其余 32 字节),留空则自动生成
 		if strings.HasPrefix(m, "2022-") {

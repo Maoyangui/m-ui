@@ -169,3 +169,59 @@ test('测大陆连通的一行:还在测、测不了、IPv6、TCP、UDP 各写�
   const err = v({ state: 'done', verdict: 'error', error: '额度不够', groups });
   assert.deepEqual([err.label, err.chips, err.title], ['reach.v.error', '', 'reach.x.error']);
 });
+
+// ---- 协议 × 加密方式(用户 11-26:「不适配的线路组合…在保存的时候或者选择的时候就应该拦」「在前端选择的时候就隐藏或者灰色不让选」)----
+// i18n 的桩原样返回键名,所以这里比的是「用了哪条文案」;哪些配得上和后端是不是一张表由 web/combo_test.go(Go 那边)核对。
+test('协议配不上的加密方式:表单里置灰;库里存着配不上的换成默认方式并写明', () => {
+  assert.equal(lines.comboWhy('hysteria2', 'reality'), 'line.combo.quic');
+  assert.equal(lines.comboWhy('tuic', 'reality'), 'line.combo.quic');
+  for (const p of ['anytls', 'vmess', 'http']) assert.equal(lines.comboWhy(p, 'reality'), 'line.combo.noLink', p);
+  for (const p of ['hysteria2', 'tuic', 'anytls']) assert.equal(lines.comboWhy(p, 'none'), 'line.combo.needTls', p);
+  for (const p of ['shadowsocks', 'socks', 'mixed']) for (const m of ['cert', 'reality']) assert.equal(lines.comboWhy(p, m), 'line.combo.noTls', p + m);
+  const fits = { vless: ['cert', 'reality', 'none'], trojan: ['cert', 'reality', 'none'], vmess: ['cert', 'none'], http: ['cert', 'none'], hysteria2: ['cert'], tuic: ['cert'], anytls: ['cert'], shadowsocks: ['none'], socks: ['none'], mixed: ['none'] };
+  for (const [p, ms] of Object.entries(fits)) for (const m of ms) assert.equal(lines.comboWhy(p, m), '', p + '+' + m);
+  assert.equal(lines.comboWhy('nope', 'reality'), ''); // 不认识的协议、不认识的方式不归它管
+  assert.equal(lines.comboWhy('vless', 'weird'), '');
+
+  const btn = (html, m) => html.match(new RegExp('<button type="button" data-tls="' + m + '"[^>]*>'))[0];
+  // Hysteria2:三格都在,只有「证书」能点
+  let html = lines.dynSection('hysteria2', {}, {}, {});
+  assert.match(btn(html, 'cert'), /class="active">/);
+  for (const m of ['reality', 'none']) assert.match(btn(html, m), /class="off" aria-disabled="true" title="line\.combo\.(quic|needTls)">/, m);
+  assert.match(html, /id="f-tlsmode" value="cert"/);
+  assert.match(html, /id="f-combo-msg" hidden>/); // 新建:没有「已换成」那句
+  // VLESS:三种都能点
+  html = lines.dynSection('vless', {}, {}, {});
+  for (const m of ['cert', 'reality', 'none']) assert.doesNotMatch(btn(html, m), /off|aria-disabled/, m);
+  assert.match(btn(html, 'reality'), /class="active">/);
+  // 库里存着 Hysteria2 + Reality(以前存得下):换成证书,并写明换了什么
+  html = lines.dynSection('hysteria2', { mode: 'reality', reality: { private_key: 'k' } }, {}, {});
+  assert.match(html, /id="f-tlsmode" value="cert"/);
+  assert.match(btn(html, 'cert'), /class="active">/);
+  assert.match(btn(html, 'reality'), /class="off"/);
+  assert.match(html, /id="f-combo-msg" >line\.combo\.fixed</);
+  // VMess + Reality:换成这个协议默认的「不加密」
+  html = lines.dynSection('vmess', { mode: 'reality' }, {}, {});
+  assert.match(html, /id="f-tlsmode" value="none"/);
+  assert.match(html, /id="f-combo-msg" >line\.combo\.fixed</);
+  // 配得上的原样
+  html = lines.dynSection('trojan', { mode: 'none' }, {}, {});
+  assert.match(html, /id="f-tlsmode" value="none"/);
+  assert.match(html, /id="f-combo-msg" hidden>/);
+});
+
+test('能存、但有的客户端连不上的两种配法常显一句;列表里给配不上的线路挂标;算法下拉不列起不来的', () => {
+  assert.equal(lines.comboNote('trojan', 'none', 'tcp'), 'line.trojanPlain');
+  assert.equal(lines.comboNote('trojan', 'none', 'ws'), 'line.trojanPlain');
+  assert.equal(lines.comboNote('vless', 'reality', 'ws'), 'line.realityTr');
+  assert.equal(lines.comboNote('trojan', 'reality', 'http'), 'line.realityTr');
+  for (const tr of ['tcp', 'grpc', 'httpupgrade']) assert.equal(lines.comboNote('vless', 'reality', tr), '', tr); // httpupgrade 有它自己那句
+  assert.equal(lines.comboNote('vless', 'cert', 'ws'), '');
+  assert.equal(lines.comboNote('vless', 'none', 'ws'), '');
+  assert.match(lines.comboBadge({ protocol: 'hysteria2', tls: { mode: 'reality' } }), /badge danger[^]*line\.combo\.bad/);
+  assert.match(lines.comboBadge({ protocol: 'vmess', tls: '{"mode":"reality"}' }), /line\.combo\.bad/); // 接口里是 JSON 字符串
+  assert.equal(lines.comboBadge({ protocol: 'hysteria2', tls: { mode: 'cert' } }), '');
+  assert.equal(lines.comboBadge({ protocol: 'hysteria2' }), ''); // 没写 = 这个协议的默认方式
+  assert.equal(lines.comboBadge({ protocol: 'vless', tls: { mode: 'reality' } }), '');
+  assert.ok(!lines.SS_METHODS.includes('2022-blake3-chacha20-poly1305') && !lines.SS_METHODS.includes('none'));
+});

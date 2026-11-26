@@ -17,19 +17,23 @@ let query = '';
 let nodeFilter = 0, protoFilter = ''; // 快捷筛选:部署在某台服务器上(部署到全部服务器的也算)、某种协议
 
 // 与后端 render.Protocols 对应:TLS 是否必需、默认模式、是否支持传输层
+// tls:这个协议配得上的加密方式。配不上的(Hysteria2 / TUIC 走 QUIC,配了 Reality 入站起不来;AnyTLS / VMess / HTTP 配 Reality
+// 订阅给不出能连的节点)在表单里置灰,保存、启用时后端也拦。这张表和后端 render/combo.go 的一致,web/combo_test.go 核对
 const PROTOCOLS = {
-  vless: { tlsRequired: false, tlsDefault: 'reality', transport: true },
-  vmess: { tlsRequired: false, tlsDefault: 'none', transport: true },
-  trojan: { tlsRequired: false, tlsDefault: 'cert', transport: true },
-  hysteria2: { tlsRequired: true, tlsDefault: 'cert', transport: false },
-  tuic: { tlsRequired: true, tlsDefault: 'cert', transport: false },
-  anytls: { tlsRequired: true, tlsDefault: 'cert', transport: false },
-  shadowsocks: { tlsRequired: false, tlsDefault: 'none', transport: false, noTls: true },
-  socks: { tlsRequired: false, tlsDefault: 'none', transport: false, noTls: true },
-  http: { tlsRequired: false, tlsDefault: 'cert', transport: false },
-  mixed: { tlsRequired: false, tlsDefault: 'none', transport: false, noTls: true },
+  vless: { tls: ['reality', 'cert', 'none'], tlsDefault: 'reality', transport: true },
+  vmess: { tls: ['none', 'cert'], tlsDefault: 'none', transport: true },
+  trojan: { tls: ['cert', 'reality', 'none'], tlsDefault: 'cert', transport: true },
+  hysteria2: { tls: ['cert'], tlsDefault: 'cert', transport: false },
+  tuic: { tls: ['cert'], tlsDefault: 'cert', transport: false },
+  anytls: { tls: ['cert'], tlsDefault: 'cert', transport: false },
+  shadowsocks: { tls: ['none'], tlsDefault: 'none', transport: false, noTls: true },
+  socks: { tls: ['none'], tlsDefault: 'none', transport: false, noTls: true },
+  http: { tls: ['cert', 'none'], tlsDefault: 'cert', transport: false },
+  mixed: { tls: ['none'], tlsDefault: 'none', transport: false, noTls: true },
 };
-const SS_METHODS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-ietf-poly1305', '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305', 'none'];
+const TLS_MODES = ['cert', 'reality', 'none']; // 表单里三种加密方式的排列顺序
+// 面板的入站都是多用户的:2022-blake3-chacha20-poly1305 和 none 在多用户下起不来(选了也存不下),不列
+const SS_METHODS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-ietf-poly1305', '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm'];
 const FPS = ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', 'random'];
 // 表单接管的 Options 键,其余进"高级参数"
 const OPT_KEYS = {
@@ -117,6 +121,27 @@ function tlsModeOf(l) {
   const tls = parseJ(l.tls);
   return tls.mode || (PROTOCOLS[l.protocol] || {}).tlsDefault || 'none';
 }
+// 这个协议配不了这种加密方式的原因;配得上是空串。表在 PROTOCOLS 的 tls 里,和后端 render.CheckCombo 一致
+function comboWhy(protocol, mode) {
+  const spec = PROTOCOLS[protocol];
+  if (!spec || (spec.tls || TLS_MODES).includes(mode) || !TLS_MODES.includes(mode)) return '';
+  const proto = protoName(protocol);
+  if (spec.noTls) return t('line.combo.noTls', { proto });
+  if (mode === 'none') return t('line.combo.needTls', { proto });
+  return t(protocol === 'hysteria2' || protocol === 'tuic' ? 'line.combo.quic' : 'line.combo.noLink', { proto });
+}
+// 能存、但有的客户端连不上的两种配法:表单里常显一句(说的是「这样配谁连不上」,不是功能介绍)。
+// HTTPUpgrade 自己那句(line.huXray)已经说了 Xray 内核连不上,这里不重复
+function comboNote(protocol, mode, type) {
+  if (protocol === 'trojan' && mode === 'none') return t('line.trojanPlain');
+  if (mode === 'reality' && (type === 'ws' || type === 'http')) return t('line.realityTr', { tr: type === 'ws' ? 'WebSocket' : 'HTTP' });
+  return '';
+}
+// 协议和加密方式配不上的线路(以前存得下):列表里标出来,悬停写原因和怎么改
+function comboBadge(l) {
+  const why = comboWhy(l.protocol, tlsModeOf(l));
+  return why ? ` <span class="badge danger" title="${esc(why + '\n' + t('line.combo.fix'))}">${esc(t('line.combo.bad'))}</span>` : '';
+}
 // 协议一格:协议名一枚,后面小字写加密方式和传输;没加密的标黄;用了哪张证书放在悬停提示里
 function protoCell(l) {
   const mode = tlsModeOf(l), tls = parseJ(l.tls), tr = parseJ(l.transport);
@@ -188,7 +213,7 @@ function renderRows() {
     <tr draggable="${filtering() ? 'false' : 'true'}" data-id="${l.id}" class="${selected.has(l.id) ? 'selected' : ''}">
       <td class="handle" title="${esc(t('line.dragSort'))}"><i class="i i-grip"></i></td>
       <td><input type="checkbox" class="sel" data-change="line.sel" data-id="${l.id}" ${selected.has(l.id) ? 'checked' : ''}></td>
-      <td class="primary-cell">${dot(online.has(l.name))}<a href="#" data-act="line.detail" data-id="${l.id}" title="${esc(l.name)}">${esc(l.name)}</a>${blockedBadge(l)}</td>
+      <td class="primary-cell">${dot(online.has(l.name))}<a href="#" data-act="line.detail" data-id="${l.id}" title="${esc(l.name)}">${esc(l.name)}</a>${blockedBadge(l)}${comboBadge(l)}</td>
       <td>${protoCell(l)}</td>
       <td class="num">${l.port}</td>
       <td class="c-p2">${l.upstreamId ? `<span class="cell-clip" title="${esc(l.upstreamName)}">${esc(l.upstreamName)}</span>` : `<span class="muted">${esc(t('line.directShort'))}</span>`}${rrOf(l).length ? ' ' + badge(t('line.rr.badge', { n: rrOf(l).length }), 'primary') : ''}</td>
@@ -406,7 +431,7 @@ function bindServers() {
   sync();
 }
 // 给前端测试用(web/jstest/lines.test.mjs)
-export { serverFamily, lineUsesV6, formV6Servers, formLine, allServersShown, v6TipsOpen, v6Norm };
+export { serverFamily, lineUsesV6, formV6Servers, formLine, allServersShown, v6TipsOpen, v6Norm, comboWhy, comboNote, comboBadge, dynSection, SS_METHODS };
 // "全部服务器"的线路在列表里列出哪几台:单独选了 IP 版本的,以及这条线路在上面走 IPv6 的(纯 IPv6 机器、"自动地址用 IPv6"、
 // 自定义地址写成这台自己 IPv6 的)—— 它们后面要跟 IPv6 入站结论,以前只列单独选了的,默认给 IPv6 的服务器永远看不到结论
 function allServersShown(l) {
@@ -475,15 +500,19 @@ function dynSection(protocol, tls, tr, o) {
       <div class="span-2">${field(t('line.password'), `<div class="row"><input id="f-sspw" value="${esc(o.password || '')}" spellcheck="false"><button type="button" class="btn" data-act="line.genSsPw">${t('line.gen')}</button></div>`)}</div>
     </div>`;
   }
-  const mode = tls.mode || spec.tlsDefault;
-  const modes = spec.tlsRequired ? ['cert', 'reality'] : ['cert', 'reality', 'none'];
+  // 三种加密方式始终并排;这个协议配不上的置灰、点不动(悬停或点一下,下面写出原因)。
+  // 库里存的那种配不上(以前存得下):换成这个协议默认的,并写明换了什么、为什么
+  const stored = tls.mode || spec.tlsDefault;
+  const mode = (spec.tls || TLS_MODES).includes(stored) ? stored : spec.tlsDefault;
+  const fixed = mode !== stored && TLS_MODES.includes(stored) ? t('line.combo.fixed', { old: t('line.tls.' + stored), why: comboWhy(protocol, stored), now: t('line.tls.' + mode) }) : '';
   const r = tls.reality || {};
   const type = tr.type || 'tcp';
   const host = tr.headers && tr.headers.Host ? (Array.isArray(tr.headers.Host) ? tr.headers.Host[0] : tr.headers.Host) : (Array.isArray(tr.host) ? tr.host.join(',') : (tr.host || ''));
   const trFields = spec.transport ? transportFields(type, tr, host) : '';
   const trTypes = ['tcp', 'ws', 'grpc', 'httpupgrade', 'http'];
   return `<h3 class="form-sec">${t('line.tlsMode')}</h3>
-    <div class="ln-tls"><div class="seg" id="f-tlsseg">${modes.map(m => `<button type="button" data-tls="${m}" class="${m === mode ? 'active' : ''}">${esc(t('line.tls.' + m))}</button>`).join('')}</div><span class="hint xp" id="f-tls-help">${esc(t('line.tlsHelp.' + mode))}</span></div>
+    <div class="ln-tls"><div class="seg" id="f-tlsseg">${TLS_MODES.map(m => { const why = comboWhy(protocol, m); return `<button type="button" data-tls="${m}" class="${why ? 'off' : m === mode ? 'active' : ''}"${why ? ` aria-disabled="true" title="${esc(why)}"` : ''}>${esc(t('line.tls.' + m))}</button>`; }).join('')}</div><span class="hint xp" id="f-tls-help">${esc(t('line.tlsHelp.' + mode))}</span></div>
+    <p class="hint warn ln-combo-msg" id="f-combo-msg" ${fixed ? '' : 'hidden'}>${esc(fixed)}</p>
     <input type="hidden" id="f-tlsmode" value="${esc(mode)}">
     <div class="form-grid cols-4 ln-dyn">
       <div id="f-cert-wrap" class="span-2" ${mode === 'cert' ? '' : 'hidden'}>${fieldBox(t('line.cert'), `<input type="hidden" id="f-cert" value="${esc(tls.cert || '')}"><button type="button" class="btn cert-pick-btn" data-act="line.pickCert" id="f-cert-btn" title="${esc(t('line.certHelp'))}"><span id="f-cert-label">${esc(tls.cert ? certLabel(tls.cert) : t('line.certDefault'))}</span><i class="i i-chev"></i></button>`)}</div>
@@ -491,6 +520,7 @@ function dynSection(protocol, tls, tr, o) {
       <div id="f-fp-wrap" ${mode === 'none' ? 'hidden' : ''}>${field(t('line.fp'), sel('f-fp', ['', ...FPS], tls.fingerprint || '', { '': t('common.default') }))}</div>
       ${spec.transport ? field(t('line.transport.type'), `<select id="f-trtype" title="${esc(t('line.transportHelp'))}">${trTypes.map(x => `<option value="${x}" ${type === x ? 'selected' : ''}>${esc(x === 'tcp' ? t('line.transport.tcp') : x)}</option>`).join('')}</select>`) : ''}
       ${spec.transport ? `<div id="f-tr-fields" class="form-grid cols-2 span-2" ${trFields ? '' : 'hidden'}>${trFields}</div>` : ''}
+      <p class="hint full tr-note" id="f-combo-note" hidden></p>
       <details class="adv full ln-reality" ${mode === 'reality' ? '' : 'hidden'}><summary>${esc(t('line.reality.keys'))}</summary><div class="form-grid cols-4">
         <div class="span-2">${field(t('line.reality.private'), `<div class="row"><input id="f-priv" value="${esc(r.private_key || '')}" spellcheck="false" autocomplete="off"><button type="button" class="btn" data-act="line.genReality">${t('line.reality.gen')}</button></div>`)}</div>
         <div class="span-2">${field(t('line.reality.public'), `<input id="f-pub" value="${esc(r.public_key || '')}" readonly>`)}</div>
@@ -500,6 +530,12 @@ function dynSection(protocol, tls, tr, o) {
 }
 // 切加密方式:只露出这种方式的栏;切到 Reality 还没有密钥就现生成一对
 function setTlsMode(mode) {
+  const why = comboWhy(fv('f-protocol'), mode), msg = document.getElementById('f-combo-msg');
+  if (why) { // 置灰的那种:不切,把原因写在下面(手机上没有悬停)
+    if (msg) { msg.textContent = why; msg.hidden = false; }
+    return;
+  }
+  if (msg) { msg.textContent = ''; msg.hidden = true; }
   document.getElementById('f-tlsmode').value = mode;
   document.querySelectorAll('#f-tlsseg button').forEach(b => b.classList.toggle('active', b.dataset.tls === mode));
   document.querySelectorAll('#f-dyn .ln-reality').forEach(el => { el.hidden = mode !== 'reality'; });
@@ -507,6 +543,16 @@ function setTlsMode(mode) {
   document.getElementById('f-fp-wrap').hidden = mode === 'none';
   setText('f-tls-help', t('line.tlsHelp.' + mode));
   if (mode === 'reality' && !fv('f-priv').trim()) genReality().catch(e => toast(e.message, 'err'));
+  syncComboNote();
+}
+// 现在选的加密方式 + 传输方式有没有「有的客户端连不上」那句要写(见 comboNote)
+function syncComboNote() {
+  const el = document.getElementById('f-combo-note');
+  if (!el) return;
+  const tt = document.getElementById('f-trtype');
+  const s = comboNote(fv('f-protocol'), fv('f-tlsmode'), tt ? tt.value : 'tcp');
+  el.textContent = s;
+  el.hidden = !s;
 }
 async function genReality() {
   const k = await get('keygen?type=reality');
@@ -584,13 +630,16 @@ function renderDynamic(l) {
   document.getElementById('f-adv-proto').innerHTML = advProto(protocol, o);
   document.getElementById('f-extra').value = extraOf(protocol, o);
   const seg = document.getElementById('f-tlsseg');
-  if (seg) seg.addEventListener('click', e => { const b = e.target.closest('[data-tls]'); if (b && b.dataset.tls !== fv('f-tlsmode')) setTlsMode(b.dataset.tls); });
+  // 点已经选中的那格也走一遍(什么都不变,只把上一次点置灰格留下的原因收起来)
+  if (seg) seg.addEventListener('click', e => { const b = e.target.closest('[data-tls]'); if (b) setTlsMode(b.dataset.tls); });
   const tt = document.getElementById('f-trtype');
   if (tt) tt.addEventListener('change', e => {
     const box = document.getElementById('f-tr-fields'), h = transportFields(e.target.value, {}, '');
     box.innerHTML = h;
     box.hidden = !h;
+    syncComboNote();
   });
+  syncComboNote();
   // 新建线路默认就是 Reality:密钥现生成,不用人去点「生成密钥对」
   if (document.getElementById('f-priv') && fv('f-tlsmode') === 'reality' && !fv('f-priv').trim()) genReality().catch(e => toast(e.message, 'err'));
   bindRealityPub();

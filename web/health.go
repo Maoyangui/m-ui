@@ -32,11 +32,12 @@ type healthStatus struct {
 // expectedLines 启用且部署到本机的线路数。
 func (s *Server) expectedLines() int {
 	var lines []model.Line
-	s.db.Select("id, node_ids").Where("enabled = ?", true).Find(&lines)
+	s.db.Select("id, node_ids, protocol, tls").Where("enabled = ?", true).Find(&lines)
 	self := s.localNodeID()
 	n := 0
 	for _, l := range lines {
-		if render.LineOnNode(l, self) {
+		// 入站注定起不来的线路渲染时就跳过了(render.Unstartable),不算进来:不然这台会一直被判成不健康
+		if render.LineOnNode(l, self) && render.Unstartable(l) == "" {
 			n++
 		}
 	}
