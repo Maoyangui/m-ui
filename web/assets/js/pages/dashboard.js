@@ -99,7 +99,7 @@ function quickStart() {
       <p class="hint xp">${esc(t('guide.help'))}</p>
       <ol class="guide-steps">${steps.map((x, i) => `<li class="${x.ok ? 'done' : i === next ? 'now' : ''}">
         <span class="guide-n" aria-hidden="true">${x.ok ? '<i class="i i-check"></i>' : i + 1}</span>
-        <span class="guide-t"><b>${esc(t('guide.' + x.key))}</b><span>${esc(t('guide.' + x.key + 'Sub'))}</span></span>
+        <span class="guide-t"><b>${esc(t('guide.' + x.key))}</b>${x.ok ? '' : `<span>${esc(t('guide.' + x.key + 'Sub'))}</span>`}</span>
         ${x.ok ? `<span class="guide-ok">${esc(t('guide.ok'))}</span>` : `<a class="btn sm${i === next ? ' primary' : ''}" href="${x.href}">${esc(t('guide.' + x.key + 'Btn'))}</a>`}
       </li>`).join('')}</ol>
       <p class="guide-foot"><span>${esc(t('guide.nodeQ'))} <a href="#/settings" data-act="go.setting" data-id="set-nodeMode">${esc(t('guide.nodeLink'))}</a></span>
