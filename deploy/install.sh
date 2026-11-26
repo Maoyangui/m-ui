@@ -178,10 +178,12 @@ if [ -z "$SRC" ] || [ "$SRC" = "latest" ] || [[ "$SRC" == v[0-9]* ]]; then
     *) echo "不支持的架构: $ARCH(仅 amd64 / arm64)"; exit 1;;
   esac
   if [ -z "$SRC" ] || [ "$SRC" = "latest" ]; then
-    # 先走 releases/latest 的重定向拿标签(不经 API,无限流);拿不到再查 API
-    TAG="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" 2>/dev/null | sed -n 's#.*/tag/##p')"
+    # 先走 releases/latest 的重定向拿标签(不经 API,无限流);拿不到再查 API。
+    # 两句末尾的 || true 不能少:脚本开着 set -e 和 pipefail,curl 一报错(GitHub 临时 5xx / 429、超时)这句赋值就会带着
+    # curl 的退出码让整个脚本退出,后一条路和下面那句说明都走不到(实际出过:CI 的安装测试在这里卡两分钟后以 22 退出)
+    TAG="$(curl -fsSL --connect-timeout 10 --max-time 30 -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" 2>/dev/null | sed -n 's#.*/tag/##p' || true)"
     if [ -z "$TAG" ]; then
-      TAG="$(curl -fsSL -H "User-Agent: m-ui-install" ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)"
+      TAG="$(curl -fsSL --connect-timeout 10 --max-time 30 -H "User-Agent: m-ui-install" ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)"
     fi
     [ -n "$TAG" ] || { echo "无法从 GitHub 获取最新版本(网络不通、还没有 Release,或仓库为私有;私有仓库请设置 GITHUB_TOKEN,或直接传压缩包路径 / 下载地址)"; exit 1; }
   else

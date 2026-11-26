@@ -50,4 +50,26 @@ expect 1 "内置公钥不认临时钥匙签的(OpenSSL)" bash "$T/install.sh" --
 echo "三、哪些版本带签名"
 bash -c "source <(sed -n '/^signed_release()/,/^}/p' '$T/install.sh'); for v in v0.8.1 v0.8.2 v0.9.0 v0.10.0 v1.0.0 0.8.1; do signed_release \$v || { echo \"  ✘ \$v 应该带签名\"; exit 1; }; done; for v in v0.8.0 v0.7.17 v0.6.9 ''; do if signed_release \"\$v\"; then echo \"  ✘ \$v 不该要求签名\"; exit 1; fi; done" && echo "  ✔ v0.8.1 起要签名,之前的不要" || fails=$((fails + 1))
 
+echo "四、取最新版本号:github.com 的跳转拿不到时退到 API;两条路都不通给出说明,而不是带着 curl 的退出码没声没响地退出"
+# 假的 curl 放在 PATH 最前面:releases/latest 的跳转一律按 HTTP 出错(退出码 22),API 那条按 FAKE_API 决定;不碰网络
+mkdir -p "$T/fake"
+cat > "$T/fake/curl" <<'FAKECURL'
+#!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in
+    https://github.com/*/releases/latest) exit 22;;
+    https://api.github.com/*) if [ "${FAKE_API:-}" = ok ]; then echo '{"tag_name": "v9.9.9"}'; exit 0; fi; exit 22;;
+  esac
+done
+exit 22
+FAKECURL
+chmod +x "$T/fake/curl"
+latest() { # latest <期望的退出码> <输出里要有的字> <说明> [环境变量…]
+  local want="$1" has="$2" what="$3" rc=0 out; shift 3
+  out="$(env "$@" PATH="$T/fake:$PATH" bash "$T/install.sh" --dry-run 2>&1)" || rc=$?
+  if [ "$rc" = "$want" ] && printf '%s' "$out" | grep -qF "$has"; then echo "  ✔ $what"; else echo "  ✘ $what(退出码 $rc,应为 $want;输出里${has:+应有「$has」}:$(printf '%s' "$out" | tail -2 | tr '\n' ' '))"; fails=$((fails + 1)); fi
+}
+latest 0 "安装 m-ui v9.9.9" "跳转那条路出错:退到 API,拿到版本号接着往下走" FAKE_API=ok
+latest 1 "无法从 GitHub 获取最新版本" "两条路都不通:退出码 1,并说明原因和办法"
+
 if [ "$fails" = 0 ]; then echo "安装脚本验签测试全部通过"; else echo "$fails 项不对"; exit 1; fi
