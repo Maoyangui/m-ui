@@ -28,6 +28,10 @@ func TestNormalizePath(t *testing.T) {
 		"a/b/":       "/a/b/",
 		"/":          "/",
 		"panel-2053": "/panel-2053/",
+		`\app\`:      "/app/", // 反斜杠当斜杠:浏览器发出来的就是斜杠,留着它面板打不开
+		`a\b`:        "/a/b/",
+		`/\h.test`:   "/h.test/", // 不能留下「/\主机名」开头:浏览器会把它当成另一台主机
+		`\\h.test`:   "/h.test/",
 		"/很长的中文路径":   "/很长的中文路径/",
 	}
 	for in, want := range cases {

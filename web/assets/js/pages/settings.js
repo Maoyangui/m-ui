@@ -566,9 +566,9 @@ async function saveAll() {
   list.forEach(f => { body[f.k] = ctlVal(f); });
   // 订阅证书 / 私钥路径一改,订阅可能在 http ↔ https 之间切换:所有用户手里的订阅地址都会变,和证书页一样先确认
   if (('subCertFile' in body || 'subKeyFile' in body) && !await confirmSubScheme({ subCertFile: fv('set-subCertFile').trim(), subKeyFile: fv('set-subKeyFile').trim() })) return;
-  // 和后端 normalizePath(web/server.go)一样整理:去掉两头的空白和引号,空的算 /app/,连续的斜杠并成一个,补上首尾的斜杠。
+  // 和后端 normalizePath(web/server.go)一样整理:去掉两头的空白和引号,空的算 /app/,反斜杠当斜杠,连续的斜杠并成一个,补上首尾的斜杠。
   // 原来没并斜杠:填「//abc」时后端实际是 /abc/,这里却跳到「//abc/」—— 浏览器把它当成另一台主机 abc 的地址
-  const norm = p => { p = String(p || '').trim().replace(/^["']+|["']+$/g, '').trim() || '/app/'; p = p.replace(/\/{2,}/g, '/'); if (!p.startsWith('/')) p = '/' + p; if (!p.endsWith('/')) p += '/'; return p; };
+  const norm = p => { p = String(p || '').trim().replace(/^["']+|["']+$/g, '').trim() || '/app/'; p = p.replace(/\\/g, '/').replace(/\/{2,}/g, '/'); if (!p.startsWith('/')) p = '/' + p; if (!p.endsWith('/')) p += '/'; return p; };
   const pathChanged = 'webPath' in body && norm(body.webPath) !== norm(state.status.webPath);
   const btn = document.querySelector('[data-act="set.saveAll"]');
   if (btn) btn.disabled = true;

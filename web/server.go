@@ -201,8 +201,9 @@ func (s *Server) basePath() string {
 	return normalizePath(s.setting("webPath"), "/app/")
 }
 
-// normalizePath 把用户填的路径规整成 /xxx/ 形式:去掉首尾空白与引号、
-// 补上首尾斜杠、压掉重复斜杠。填 app、/app、app/、"//app//" 都得到 /app/;填 / 就是 /。
+// normalizePath 把用户填的路径规整成 /xxx/ 形式:去掉首尾空白与引号、反斜杠当斜杠、
+// 补上首尾斜杠、压掉重复斜杠。填 app、/app、app/、"//app//"、\app\ 都得到 /app/;填 / 就是 /。
+// 反斜杠:浏览器会把地址里的反斜杠当成斜杠发出来,路径里留着它面板就打不开;「/\主机名」这种开头还会被浏览器当成另一台主机的地址。
 func normalizePath(p, def string) string {
 	p = strings.TrimSpace(p)
 	p = strings.Trim(p, "\"'")
@@ -210,6 +211,7 @@ func normalizePath(p, def string) string {
 	if p == "" {
 		p = def
 	}
+	p = strings.ReplaceAll(p, "\\", "/")
 	for strings.Contains(p, "//") {
 		p = strings.ReplaceAll(p, "//", "/")
 	}
