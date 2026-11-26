@@ -156,8 +156,8 @@ func (l *Limiter) nodeEntriesLocked(user string, spec NodeSpec) (total, mine *us
 	return &st.total, e
 }
 
-// wrapConnNode 同 wrapConn,多挂节点层的桶位。
-func (l *Limiter) wrapConnNode(conn net.Conn, user, ip string, spec NodeSpec) net.Conn {
+// wrapConnNode 同 wrapConn,多挂节点层的桶位;line 是这条连接走的线路(入站 tag,规则忽略了这条线路时换桶位用,可为空)。
+func (l *Limiter) wrapConnNode(conn net.Conn, user, ip, line string, spec NodeSpec) net.Conn {
 	if user == "" {
 		return conn
 	}
@@ -169,10 +169,10 @@ func (l *Limiter) wrapConnNode(conn net.Conn, user, ip string, spec NodeSpec) ne
 	}
 	total, mine := l.nodeEntriesLocked(user, spec)
 	l.mu.Unlock()
-	return &limitedConn{Conn: conn, limiter: l, name: user, user: e, group: g, node: total, nodeUser: mine, keepalive: l.keepaliveFor(user, ip, spec.Key)}
+	return &limitedConn{Conn: conn, limiter: l, name: user, line: line, user: e, group: g, node: total, nodeUser: mine, keepalive: l.keepaliveFor(user, ip, spec.Key)}
 }
 
-func (l *Limiter) wrapPacketConnNode(conn N.PacketConn, user, ip string, spec NodeSpec) N.PacketConn {
+func (l *Limiter) wrapPacketConnNode(conn N.PacketConn, user, ip, line string, spec NodeSpec) N.PacketConn {
 	if user == "" {
 		return conn
 	}
@@ -184,7 +184,7 @@ func (l *Limiter) wrapPacketConnNode(conn N.PacketConn, user, ip string, spec No
 	}
 	total, mine := l.nodeEntriesLocked(user, spec)
 	l.mu.Unlock()
-	return &limitedPacketConn{PacketConn: conn, limiter: l, name: user, user: e, group: g, node: total, nodeUser: mine, keepalive: l.keepaliveFor(user, ip, spec.Key)}
+	return &limitedPacketConn{PacketConn: conn, limiter: l, name: user, line: line, user: e, group: g, node: total, nodeUser: mine, keepalive: l.keepaliveFor(user, ip, spec.Key)}
 }
 
 // NodeUsers 各节点此刻在线的用户(按节点键),给面板显示「在线 / 容量」用;只有单独设了东西的节点才有。

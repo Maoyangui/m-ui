@@ -540,6 +540,8 @@ const EN = /*BEGIN*/{
 "读取管理员: %w": "Reading the admin: %w",
 "读取设置: %w": "Reading settings: %w",
 "读取限速规则状态: %w": "Reading speed limit rule state: %w",
+"读取线路: %w": "Reading lines: %w",
+"线路 #%d 不存在": "Line #%d does not exist",
 "账号状态已变化,请重新登录": "Account state changed; sign in again",
 "跨站请求被拒绝": "Cross-site request rejected",
 "路径无效": "Invalid path",

@@ -114,6 +114,8 @@ type Runner struct {
 	guard  *guard.Guard
 
 	rules *rules.Engine // 限速规则判定器(只在主机跑)
+	// usage 「用户 × 线路」的用量(勾了「忽略部分线路」的突发规则按它算):主机自己的每轮由判定器取,副机的随报告由 Hub 交进来
+	usage *rules.LineUsage
 
 	reloadMu sync.Mutex
 	reload   ReloadStatus // 最近一次重载的结果:面板据此在页面上明说"已保存但没生效"
@@ -272,7 +274,9 @@ func New(dbPath string) (*Runner, error) {
 			logger.Warning("记录通知去重失败: ", err)
 		}
 	})
-	r.rules = &rules.Engine{DB: db, Location: func() *time.Location { return tz.Location(r.setting("timezone")) }, Notify: r.notifyRule}
+	r.usage = &rules.LineUsage{}
+	r.rules = &rules.Engine{DB: db, Location: func() *time.Location { return tz.Location(r.setting("timezone")) }, Notify: r.notifyRule,
+		Usage: r.usage, LocalMeter: r.localLineMeter}
 	r.jobs = jobs.New(jobs.Deps{
 		DB:          db,
 		Box:         func() *core.Box { return r.core.GetInstance() },
@@ -284,6 +288,8 @@ func New(dbPath string) (*Runner, error) {
 		Forget:      r.notifier.Forget,
 		Rules:       r.RulesNow,
 		ApplyLimits: r.ApplyLimits,
+		LineMeterOn: r.lineMeterOn,
+		LineIDs:     r.lineIDsByName,
 		NodeQuota: func() {
 			if fn := r.nodeQuota.Load(); fn != nil {
 				(*fn)()
@@ -335,6 +341,7 @@ func New(dbPath string) (*Runner, error) {
 		LocalGroups:    r.GroupState,
 		CountersMerged: r.jobs.KickDeplete,
 		HA:             r.ha,
+		LineMeter:      r.usage.Feed,
 	})
 	r.ha.SetHub(r.hub)
 	r.ensureAdmin()
@@ -1577,7 +1584,16 @@ func (r *Runner) readLimits() (map[string]core.UserLimitSpec, map[string]core.Gr
 	if err := r.db.Find(&states).Error; err != nil {
 		return nil, nil, fmt.Errorf("读取限速规则状态: %w", err)
 	}
-	specs, groups := limitSpecs(users, resellers, rules.Active(states, time.Now().Unix()))
+	// 规则忽略了哪些线路是按线路 id 记的,数据面认的是线路名(入站 tag)
+	var lines []model.Line
+	if err := r.db.Select("id, name").Find(&lines).Error; err != nil {
+		return nil, nil, fmt.Errorf("读取线路: %w", err)
+	}
+	lineNames := make(map[uint]string, len(lines))
+	for _, l := range lines {
+		lineNames[l.Id] = l.Name
+	}
+	specs, groups := limitSpecs(users, resellers, rules.Active(states, time.Now().Unix()), lineNames)
 	return specs, groups, nil
 }
 
@@ -1599,7 +1615,9 @@ func (r *Runner) restorePendingStats() {
 
 // limitSpecs 把用户表、代理池与生效中的规则限速算成数据面要的策略。
 // 代理池:设备池跨机并集判定,带宽池每台服务器各一份(带宽是单机物理量,和用户限速同一逻辑)。
-func limitSpecs(users []model.User, resellers []model.Reseller, states []model.LimitState) (map[string]core.UserLimitSpec, map[string]core.GroupLimitSpec) {
+// 规则忽略了某些线路(状态的 SkipLineIds)时,这个用户在那些线路上的限速按管得着那条线路的状态另算一份(UserLimitSpec.Lines);
+// lineNames 是线路 id → 线路名(入站 tag),找不到名字的线路(已经删了)不用管。
+func limitSpecs(users []model.User, resellers []model.Reseller, states []model.LimitState, lineNames map[uint]string) (map[string]core.UserLimitSpec, map[string]core.GroupLimitSpec) {
 	groups := map[string]core.GroupLimitSpec{}
 	for _, rs := range resellers {
 		if rs.DeviceLimit > 0 || rs.SpeedUp > 0 || rs.SpeedDown > 0 {
@@ -1612,14 +1630,35 @@ func limitSpecs(users []model.User, resellers []model.Reseller, states []model.L
 	}
 	specs := make(map[string]core.UserLimitSpec, len(users))
 	for _, u := range users {
-		up, down := rules.Effective(u.SpeedUp, u.SpeedDown, statesBy[u.Name])
+		mine := statesBy[u.Name]
+		up, down := rules.Effective(u.SpeedUp, u.SpeedDown, mine)
 		spec := core.UserLimitSpec{UpMbps: up, DownMbps: down, DeviceLimit: u.DeviceLimit}
 		if u.ResellerId > 0 {
 			if g := model.ResellerGroup(u.ResellerId); groups[g].DeviceLimit > 0 || groups[g].UpMbps > 0 || groups[g].DownMbps > 0 {
 				spec.Group = g
 			}
 		}
-		if spec.UpMbps == 0 && spec.DownMbps == 0 && spec.DeviceLimit == 0 && spec.Group == "" {
+		// 生效中的规则忽略的线路:在那条线路上只算管得着它的状态,和上面算出来不一样才单列
+		for _, st := range mine {
+			for id := range rules.SkipSet(st.SkipLineIds) {
+				name := lineNames[id]
+				if name == "" {
+					continue
+				}
+				if _, done := spec.Lines[name]; done {
+					continue
+				}
+				lu, ld := rules.EffectiveOnLine(u.SpeedUp, u.SpeedDown, mine, id)
+				if lu == up && ld == down {
+					continue
+				}
+				if spec.Lines == nil {
+					spec.Lines = map[string]core.LineLimit{}
+				}
+				spec.Lines[name] = core.LineLimit{UpMbps: lu, DownMbps: ld}
+			}
+		}
+		if spec.UpMbps == 0 && spec.DownMbps == 0 && spec.DeviceLimit == 0 && spec.Group == "" && len(spec.Lines) == 0 {
 			continue
 		}
 		specs[u.Name] = spec
@@ -1649,6 +1688,38 @@ func (r *Runner) ApplyLimits() {
 	if err := r.applyLimits(); err != nil {
 		r.markLimitsRetry(err)
 	}
+}
+
+// lineMeterOn 要不要记「用户 × 线路」的用量:主机看规则(有启用的突发规则勾了还在的线路);副机看主机随快照下发的设置。
+func (r *Runner) lineMeterOn() bool {
+	if r.IsNode() {
+		return strings.EqualFold(r.setting(hub.LineMeterSetting), "true")
+	}
+	on, err := rules.LineMeterWanted(r.db)
+	return err == nil && on
+}
+
+// lineIDsByName 线路名(入站 tag)→ 线路 id。
+func (r *Runner) lineIDsByName() map[string]uint {
+	var lines []model.Line
+	r.db.Select("id, name").Find(&lines)
+	out := make(map[string]uint, len(lines))
+	for _, l := range lines {
+		out[l.Name] = l.Id
+	}
+	return out
+}
+
+// LineMeter 本机「用户 × 线路」的累计(副机随报告上报;没在记返回 false)。
+func (r *Runner) LineMeter() (model.LineMeter, bool) { return r.jobs.LineMeter() }
+
+// localLineMeter 主机自己的「用户 × 线路」累计,连同本机在服务器表里的 id 和流量倍率(规则判定每轮取一次)。
+func (r *Runner) localLineMeter() (uint, float64, model.LineMeter, bool) {
+	m, ok := r.jobs.LineMeter()
+	if !ok {
+		return 0, 0, m, false
+	}
+	return r.LocalNodeId(), r.localRatio(), m, true
 }
 
 // notifyRule 突发限速触发的通知:设置里明确打开才发(默认关,免得高峰期刷屏)。

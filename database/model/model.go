@@ -516,14 +516,18 @@ type Rule struct {
 	UpMbps   int `json:"upMbps"`
 	DownMbps int `json:"downMbps"`
 	// TightenOnly 界面叫「不超过用户自己的限速」:结果不会高于用户自己的限速;关掉后规则值直接覆盖(可用于放宽)
-	TightenOnly bool   `json:"tightenOnly"`
-	Remark      string `json:"remark"`
-	Sort        int    `json:"sort"`
-	CreatedAt   int64  `json:"createdAt"`
+	TightenOnly bool `json:"tightenOnly"`
+	// SkipLineIds 这条规则忽略的线路 [3,7](界面上「忽略部分线路」勾选的;空 = 不忽略,默认):
+	// 走这些线路的连接不受这条规则限速;突发规则也不把这些线路上的流量计入用量(见 rules.LineUsage)。
+	SkipLineIds json.RawMessage `json:"skipLineIds,omitempty"`
+	Remark      string          `json:"remark"`
+	Sort        int             `json:"sort"`
+	CreatedAt   int64           `json:"createdAt"`
 }
 
 // LimitState 一条生效中的规则限速:主机写、随快照下发副机,主副机计算限速时叠加到用户自己的限速上。
 // Until 为 0 = 时段规则(随窗口结束删除);突发规则到期即失效,副机据此在主机失联时也能自行放开。
+// SkipLineIds 抄自规则:走这些线路的连接不受这一条状态的限速(老副机不认这个字段,照旧整条生效)。
 type LimitState struct {
 	Id          uint   `json:"id" gorm:"primaryKey;autoIncrement"`
 	RuleId      uint   `json:"ruleId" gorm:"uniqueIndex:idx_limit_rule_user,priority:1"`
@@ -536,6 +540,8 @@ type LimitState struct {
 	Since       int64  `json:"since"`
 	Until       int64  `json:"until"`
 	Reason      string `json:"reason"` // 触发原因,如 "10 分钟内 1.2 GB" / "时段 19:00 到 23:00"
+	// SkipLineIds 这条状态不管的线路(抄自规则的 SkipLineIds;空 = 所有线路都限)
+	SkipLineIds json.RawMessage `json:"skipLineIds,omitempty"`
 }
 
 // SubLog 订阅访问日志。

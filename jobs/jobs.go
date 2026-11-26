@@ -40,6 +40,10 @@ type Deps struct {
 	Rules       func()            // 主机:限速规则判定(时段 / 突发),每轮统计之后跑;可为 nil
 	NodeQuota   func()            // 主机:服务器流量额度的判定(用完 / 到期 / 重置,见 web/node_quota.go);并账后和每分钟各跑一次;可为 nil
 	ApplyLimits func()            // 重新下发限速(副机按到期时间解除规则限速后调用);可为 nil
+	// 「用户 × 线路」的用量(勾了「忽略部分线路」的突发规则用,见 linemeter.go):LineMeterOn 这一轮要不要记,
+	// LineIDs 线路名(入站 tag)→ 线路 id;都可为 nil(= 不记)
+	LineMeterOn func() bool
+	LineIDs     func() map[string]uint
 }
 
 // Onlines 是最近一个统计周期内有流量经过的对象。
@@ -69,6 +73,8 @@ type Scheduler struct {
 	kick      chan struct{}
 	// ledgerFails 流量记账(主机:用户用量;副机:本机账本)连续失败的轮数,成功一次清零。副机随报告上报给主机
 	ledgerFails atomic.Int64
+	// meter 「用户 × 线路」的累计(见 linemeter.go)
+	meter lineMeter
 }
 
 // LedgerFailures 流量记账连续失败了几轮(0 = 正常)。失败期间这段流量还在数据面的内存里,进程重启就丢了。
@@ -286,6 +292,7 @@ const nameBatch = 500
 func (s *Scheduler) runStatsTracker(tracker *core.StatsTracker) (ok bool) {
 	s.statsMu.Lock()
 	defer s.statsMu.Unlock()
+	s.meterRound(tracker) // 「用户 × 线路」的用量:和记账无关,单独取走
 	stats := tracker.SnapshotStats()
 	now := time.Now().Unix()
 
