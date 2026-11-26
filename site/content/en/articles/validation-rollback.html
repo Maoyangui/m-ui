@@ -1,4 +1,4 @@
-<!--meta {"title":"How config validation and rollback work in m-ui","description":"Every save in m-ui is parsed by sing-box inside the database transaction, and a configuration that passes but fails to start is rolled back to the last working one. What is checked, in what order, what still cannot be caught, and how nodes behave.","type":"article","date":"2026-09-29","discussion":true,"summary":"Four layers between a click in the panel and a running sing-box: field checks, port probes, the core's own parser inside the transaction, and rollback on a failed start."} -->
+<!--meta {"title":"How config validation and rollback work in m-ui","description":"Every save in m-ui is parsed by sing-box inside the database transaction, and a configuration that passes but fails to start is rolled back to the last working one. What is checked, in what order, what still cannot be caught, and how nodes behave.","type":"article","date":"2026-09-29","updated":"2026-11-26","discussion":true,"summary":"Four layers between a click in the panel and a running sing-box: field checks, port probes, the core's own parser inside the transaction, and rollback on a failed start."} -->
 <article class="doc">
   <p class="meta">Deep dive · 2026-09-29</p>
   <h1>How config validation and rollback work in m-ui</h1>
@@ -16,6 +16,7 @@
 
   <h2>Layer 4: rollback on a failed start</h2>
   <p>A configuration can parse and still not start: a port grabbed by another process between the probe and the restart, a certificate file that disappeared, a kernel that refuses a socket option. Line changes restart the data plane, so this is where it would hurt. m-ui keeps the previously applied configuration in memory; if the new one fails to come up, it starts the old one again, re-applies per-user limits and port-hopping rules, and reports the error to the panel. Users keep their service on the old configuration while you fix the cause.</p>
+  <p>Rollback cannot help in one case: the bad config is already stored, and after the panel service restarts there is no previous config to return to, so no line on that server starts. Hysteria2 / TUIC with Reality is exactly that: it passes the parser in layer 3 and only fails when the inbound starts. From v0.8.2 such combinations are stopped at layer 1 (greyed out in the form), and lines already stored are skipped at render time while the others keep running; the test of all 73 combinations is in <a href="{{base}}articles/protocol-encryption-combos/">which encryption fits which protocol</a>.</p>
 
   <h2>What still cannot be caught</h2>
   <ul>

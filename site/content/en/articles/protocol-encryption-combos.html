@@ -1,0 +1,79 @@
+<!--meta {"title":"Which encryption fits which protocol: 73 sing-box combinations tested on real servers","description":"Can Hysteria2 use Reality? Can VMess? We created a line for each of 73 protocol × encryption × transport combinations on a sing-box panel, fetched the subscription and connected for real: 44 work, 21 save fine but cannot be used, and one kind takes every other line on the server down with it. Why each fails, and how m-ui v0.8.2 stops them at the form.","type":"article","date":"2026-11-26","discussion":false,"summary":"Not every protocol can use every encryption mode. 73 combinations tested: which connect, which never start, which cannot be handed out by a subscription, and why a pre-save check misses them."} -->
+<article class="doc">
+  <p class="meta">Deep dive · 2026-11-26</p>
+  <h1>Which encryption fits which protocol: 73 combinations, tested</h1>
+  <p class="lead">A line in m-ui has one of three encryption modes: certificate, Reality or none. Until now every protocol offered all three, and all of them could be saved. After a report that Hysteria2 with Reality saves but never connects, we ran every combination on real servers. The result was worse than "does not connect".</p>
+
+  <h2>How we tested</h2>
+  <p>Ten protocols × three encryption modes, times five transports for VLESS / VMess / Trojan (TCP, ws, gRPC, HTTPUpgrade, HTTP), plus seven Shadowsocks methods: 73 combinations. For each one, on a real server:</p>
+  <ol>
+    <li>create the line through the panel API and record whether it saved and what it said;</li>
+    <li>create a user assigned to that line only, wait for the data plane to reload, check whether the port is listening;</li>
+    <li>fetch that user's three subscription formats (share links, Clash, sing-box);</li>
+    <li>take the node from the sing-box subscription and connect with a sing-box client, downloading 50 KB;</li>
+    <li>delete the line and the user, confirm the data plane recovered, move on.</li>
+  </ol>
+  <p>Outcome: <b>44 connect, 8 are rejected on save, and 21 save but cannot be used</b>. Those 21 fall into four groups.</p>
+
+  <h2>The short answer</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Protocol</th><th>Certificate</th><th>Reality</th><th>None</th></tr></thead>
+    <tbody>
+      <tr><td>VLESS</td><td>works</td><td>works</td><td>works</td></tr>
+      <tr><td>Trojan</td><td>works</td><td>works</td><td>only behind a CDN / reverse proxy</td></tr>
+      <tr><td>Hysteria2, TUIC</td><td>works</td><td>cannot start</td><td>protocol requires TLS</td></tr>
+      <tr><td>AnyTLS</td><td>works</td><td>no usable node in subscriptions</td><td>protocol requires TLS</td></tr>
+      <tr><td>VMess</td><td>works</td><td>no usable node in subscriptions</td><td>works</td></tr>
+      <tr><td>HTTP</td><td>works</td><td>no usable node in subscriptions</td><td>works</td></tr>
+      <tr><td>Shadowsocks, SOCKS, Mixed</td><td colspan="2">no TLS layer</td><td>works</td></tr>
+    </tbody>
+  </table></div>
+  <p>In one line: <b>Reality goes with VLESS and Trojan only</b>; the two QUIC protocols take a certificate (self-signed is fine); VMess and HTTP take a certificate or nothing.</p>
+
+  <h2>Group 1: cannot start, and takes other lines down</h2>
+  <p>Hysteria2 and TUIC run over QUIC (UDP). sing-box implements Reality for TLS over TCP only; when the QUIC listener asks it for a standard TLS config, the answer is <code>unsupported usage for reality</code>.</p>
+  <p>The trouble is how late that error shows up. Before saving, the panel hands the whole config to the core for a dry run (see <a href="{{base}}articles/validation-rollback/">validation and rollback</a>), but a dry run only <i>constructs</i> the parts, it does not <i>start</i> them, and this error appears when the inbound starts. So:</p>
+  <ul>
+    <li>the line saves and the panel says "saved";</li>
+    <li>the data plane reloads with it, fails to start and rolls back to the previous config: <b>every user on that server reconnects</b>, and the new port never opens;</li>
+    <li>the line stays in the database, so any later change to any line meets the same fate: restart, fail, roll back;</li>
+    <li>once the panel service itself restarts (an upgrade, a reboot) there is no previous config to return to: <b>no line on that server starts</b>, and the health check answers 503 from then on.</li>
+  </ul>
+  <p>We reproduced the last point exactly on a test server: a healthy VLESS + Reality line serving traffic, a Hysteria2 + Reality line saved next to it, a service restart, and the healthy line's port stops listening.</p>
+
+  <h2>Group 2: the inbound starts, the subscription cannot describe it</h2>
+  <p>AnyTLS, VMess and HTTP with Reality are fine on the core side, and the port listens. The problem is the client: share links for these protocols have no way to express Reality (neither <code>anytls://</code> nor v2rayN's <code>vmess://</code> has a place for the public key and short ID), so the panel can only write the link as plain TLS, and a client using it against a Reality inbound always fails the handshake. Mixed with TLS is the same story: the nodes in the subscription are written without it.</p>
+  <p>Someone writing client configs by hand can make such a line work. But when a panel's own subscription cannot connect to the panel's own line, the combination should not be on offer.</p>
+
+  <h2>Group 3: the combination is fine, the subscription was wrong</h2>
+  <p>VMess with a self-signed certificate: the node in the sing-box subscription fails certificate verification, while Trojan and VLESS with the same certificate connect. The panel could not read its own writing: it wrote "allow insecure" into the vmess link under the key <code>insecure</code> (the one v2rayN reads), but the sing-box subscription is built by parsing that link back into an outbound, and the parser only knew <code>allowInsecure</code>. Not a combination to block, a bug, fixed in v0.8.2: both keys are read, and only a true value counts (before, <code>allowInsecure: false</code> was taken as "allowed").</p>
+  <p>Tested only with real certificates, this would never show up. That is what connecting through every combination buys you.</p>
+
+  <h2>Group 4: selectable, never saveable</h2>
+  <p>The Shadowsocks methods <code>2022-blake3-chacha20-poly1305</code> and <code>none</code>. Inbounds in the panel are always multi-user (one password per user), and the multi-user 2022 implementation in sing-box supports the two AES methods only; anything else returns <code>invalid argument</code>, and <code>none</code> is not supported with several users either. The dry run rejected them on save, but with the core's own words, which do not tell you what to do. v0.8.2 removes both from the list.</p>
+
+  <h2>Saveable, but picky about clients</h2>
+  <ul>
+    <li><b>Reality with ws / HTTP</b>: sing-box based clients connect (tested). Clients on Xray cores do not; their config check says <code>REALITY only supports RAW, XHTTP and gRPC for now</code>. Use TCP or gRPC if you need both.</li>
+    <li><b>HTTPUpgrade</b>: clients on recent Xray cores cannot connect; mihomo and sing-box based ones can.</li>
+    <li><b>Trojan with no encryption</b>: Trojan nodes in the subscription always connect with TLS, so a direct connection fails; behind a CDN or reverse proxy that terminates TLS it works.</li>
+  </ul>
+  <p>These three are not blocked; the form shows a one-line note when you pick them.</p>
+
+  <h2>What v0.8.2 does</h2>
+  <ul>
+    <li><b>When you pick</b>: the three modes always sit side by side; the ones that do not fit the protocol are greyed out. Hover or click one and the reason appears underneath.</li>
+    <li><b>On save and on enable</b>: the backend checks the same table again (API calls included) and the error names the protocol and says what to choose.</li>
+    <li><b>Lines already stored</b>: a QUIC protocol with Reality is skipped at render time: no inbound, not in subscriptions, other lines unaffected, and the list marks it "Invalid combo". Upgrading from a version that still holds such a line brings the data plane back by itself.</li>
+    <li>The frontend and the backend each keep a table, and a test compares them; another test pins the core's behaviour (dry run passes, start fails, a certificate starts). The day sing-box supports Reality over QUIC, that test fails and tells us to lift the block.</li>
+  </ul>
+
+  <h2>If you write sing-box configs yourself</h2>
+  <ul>
+    <li>A passing <code>sing-box check</code> does not mean it starts. Listening ports, TLS for QUIC and certificate files are only settled at start; after a change, look for errors beginning with <code>start inbound</code> in the log.</li>
+    <li>No domain: VLESS + Reality for TCP, Hysteria2 with a self-signed certificate for UDP. Do not try to combine the two.</li>
+    <li>One misconfigured inbound stops the whole process, not just itself. That is why the panel treats each line as something it can drop on its own.</li>
+  </ul>
+
+  <p class="related">Related: <a href="{{base}}articles/validation-rollback/">validation and rollback</a> · <a href="{{base}}articles/line-model/">what a line is</a> · <a href="{{base}}articles/no-domain/">running without a domain</a> · <a href="{{github}}/blob/main/render/combo.go" rel="noopener">render/combo.go</a></p>
+</article>

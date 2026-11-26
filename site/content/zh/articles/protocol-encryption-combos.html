@@ -1,0 +1,79 @@
+<!--meta {"title":"协议配哪种加密方式:73 个组合在真机上跑了一遍","description":"Hysteria2 能不能配 Reality?VMess 呢?把 sing-box 面板里「协议 × 加密方式 × 传输」的 73 个组合逐个建线路、取订阅、真连一次:44 个通,21 个存得下却用不了,其中一种还会让整台服务器的线路跟着起不来。每一类的原因,和 m-ui v0.8.2 怎么在选的时候就拦住。","type":"article","date":"2026-11-26","discussion":false,"summary":"三种加密方式不是每个协议都配得上。实测 73 个组合:哪些通、哪些起不来、哪些订阅给不出节点,以及为什么保存前的校验查不出来。"} -->
+<article class="doc">
+  <p class="meta">深入 · 2026-11-26</p>
+  <h1>协议配哪种加密方式:73 个组合在真机上跑了一遍</h1>
+  <p class="lead">m-ui 的线路有三种加密方式:证书、Reality、不加密。以前这三种对哪个协议都能选,也都存得下。有人反馈 Hysteria2 配 Reality 存下之后连不上,我们干脆把全部组合在真机上跑了一遍 —— 结果比「连不上」严重。</p>
+
+  <h2>怎么测的</h2>
+  <p>10 个协议 × 3 种加密方式,VLESS / VMess / Trojan 再乘 5 种传输(TCP、ws、gRPC、HTTPUpgrade、HTTP),加上 Shadowsocks 的 7 种算法,一共 73 个组合。每个组合在一台真的服务器上走一遍:</p>
+  <ol>
+    <li>经面板接口建线路,记下存没存下、报了什么;</li>
+    <li>建一个只分到这条线路的用户,等数据面重载,看端口有没有在听;</li>
+    <li>取这个用户的三种订阅(分享链接、Clash、sing-box);</li>
+    <li>拿 sing-box 订阅里的节点,用 sing-box 客户端真连一次,下 5 万字节;</li>
+    <li>删掉线路和用户,确认数据面恢复,再测下一个。</li>
+  </ol>
+  <p>结果:<b>44 个连得通,8 个保存时被拒,21 个存得下却用不了</b>。后面这 21 个分成四类。</p>
+
+  <h2>结论先放这里</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>协议</th><th>证书</th><th>Reality</th><th>不加密</th></tr></thead>
+    <tbody>
+      <tr><td>VLESS</td><td>通</td><td>通</td><td>通</td></tr>
+      <tr><td>Trojan</td><td>通</td><td>通</td><td>只能放在 CDN / 反代后面</td></tr>
+      <tr><td>Hysteria2、TUIC</td><td>通</td><td>起不来</td><td>协议要求 TLS</td></tr>
+      <tr><td>AnyTLS</td><td>通</td><td>订阅给不出节点</td><td>协议要求 TLS</td></tr>
+      <tr><td>VMess</td><td>通</td><td>订阅给不出节点</td><td>通</td></tr>
+      <tr><td>HTTP</td><td>通</td><td>订阅给不出节点</td><td>通</td></tr>
+      <tr><td>Shadowsocks、SOCKS、Mixed</td><td colspan="2">不带 TLS</td><td>通</td></tr>
+    </tbody>
+  </table></div>
+  <p>一句话:<b>Reality 只配 VLESS 和 Trojan</b>;走 QUIC 的两个协议用证书(自签的也行);VMess、HTTP 是证书或不加密。</p>
+
+  <h2>第一类:起不来,还连累别的线路</h2>
+  <p>Hysteria2 和 TUIC 走的是 QUIC(UDP)。sing-box 的 Reality 只实现了 TCP 上的 TLS,QUIC 监听器向它要标准 TLS 配置时,得到的是一句 <code>unsupported usage for reality</code>。</p>
+  <p>麻烦在于这句报错出现得很晚。面板保存前会把整份配置交给内核干跑一遍(见<a href="{{base}}zh/articles/validation-rollback/">配置校验与回滚</a>),但干跑只<i>构造</i>各个部件、不<i>启动</i>它们,而这个错误要到入站启动时才冒出来。所以:</p>
+  <ul>
+    <li>线路存得下,面板说「已保存」;</li>
+    <li>数据面带着它重载,启动失败,回滚到上一份配置 —— 这台服务器上<b>所有用户断一次线</b>,新线路的端口没开;</li>
+    <li>这条线路还在库里,之后改任何线路都是同一个下场:重启、失败、回滚;</li>
+    <li>等到面板服务自己重启(升级、重启服务器),没有「上一份配置」可回了:<b>这台服务器上一条线路都起不来</b>,健康检查一直是 503。</li>
+  </ul>
+  <p>最后一条我们在测试机上原样复现了:一条好的 VLESS + Reality 线路正常服务,旁边存一条 Hysteria2 + Reality,重启服务,好线路的端口不再监听。</p>
+
+  <h2>第二类:入站起得来,订阅给不出能用的节点</h2>
+  <p>AnyTLS、VMess、HTTP 配 Reality,内核那边没问题,端口也在听。问题在客户端:这几个协议的分享链接没有 Reality 的写法(<code>anytls://</code>、v2rayN 的 <code>vmess://</code> 都没有放公钥和 Short ID 的位置),面板生成的链接只能按普通 TLS 写,客户端拿它去连一个 Reality 入站,握手必然失败。Mixed 配 TLS 也是一样:订阅里的节点是按不加密写的。</p>
+  <p>手写客户端配置的人可以让这种线路跑起来,但一个面板给出去的订阅连不上自己的线路,这个组合就不该能选。</p>
+
+  <h2>第三类:组合没错,是订阅生成错了</h2>
+  <p>VMess 配证书、证书是自签的,sing-box 订阅里的节点连不上,报证书校验失败;同一张证书的 Trojan、VLESS 都通。原因是自己写的自己读不出来:面板把「允许不安全」写进 vmess 链接时用的键是 <code>insecure</code>(v2rayN 认这个),而 sing-box 订阅是把链接再解析成出站,解析那头只认 <code>allowInsecure</code>。这不是该拦的组合,是一个 bug,v0.8.2 修了:两个键都认,而且值是真才算(以前写着 <code>allowInsecure: false</code> 也被当成允许)。</p>
+  <p>如果只在有正式证书的环境里测,这个问题永远不会出现 —— 逐个组合真连一次的价值就在这儿。</p>
+
+  <h2>第四类:下拉里能选,永远存不下</h2>
+  <p>Shadowsocks 的 <code>2022-blake3-chacha20-poly1305</code> 和 <code>none</code>。面板的入站一律是多用户的(每个用户一份密码),而 sing-box 的 2022 多用户实现只支持两种 AES 算法,别的直接返回 <code>invalid argument</code>;<code>none</code> 在多用户下同样不支持。保存时会被干跑拦下,但报错是内核的原话,看不出该怎么办。v0.8.2 把这两项从下拉里拿掉了。</p>
+
+  <h2>能存、但挑客户端的</h2>
+  <ul>
+    <li><b>Reality 配 ws / HTTP</b>:sing-box 内核的客户端连得通(实测)。Xray 内核的客户端不行 —— 它的配置检查里写着 <code>REALITY only supports RAW, XHTTP and gRPC for now</code>。两边都要照顾就用 TCP 或 gRPC。</li>
+    <li><b>HTTPUpgrade</b>:新版 Xray 内核的客户端连不上,mihomo、sing-box 系正常。</li>
+    <li><b>Trojan 配不加密</b>:订阅里的 Trojan 节点一律按 TLS 连,所以直连连不上;前面有 CDN 或反向代理替它做 TLS 时是通的。</li>
+  </ul>
+  <p>这三种不拦,表单里选到时会常显一行说明。</p>
+
+  <h2>v0.8.2 怎么处理</h2>
+  <ul>
+    <li><b>选的时候</b>:三种加密方式始终并排,这个协议配不上的是灰的、点不动;悬停或点一下,下面写出原因。</li>
+    <li><b>保存、启用的时候</b>:后端按同一张表再拦一次(接口进来的也一样),报错点名协议、说该选什么。</li>
+    <li><b>库里已经有的</b>:走 QUIC 配 Reality 的线路渲染时跳过 —— 不出入站、不进订阅,别的线路照常,列表里标「组合不可用」。从带着这种线路的旧版升级上来,数据面会自己恢复。</li>
+    <li>前端和后端各有一张表,由一个测试核对两边一致;内核的行为也有一个测试钉着(干跑能过、启动失败、换成证书能起来)—— 哪天 sing-box 支持了 QUIC 上的 Reality,那个测试会失败,提醒我们放开。</li>
+  </ul>
+
+  <h2>如果你自己写 sing-box 配置</h2>
+  <ul>
+    <li><code>sing-box check</code> 通过不等于能启动。监听端口、QUIC 的 TLS、证书文件这些要到启动才见分晓,改完配置看一眼日志里有没有 <code>start inbound</code> 开头的错误。</li>
+    <li>没有域名:TCP 用 VLESS + Reality,UDP 用 Hysteria2 + 自签证书,不要试图把两者拼起来。</li>
+    <li>一条配置写错的入站会让整个进程起不来,不只是它自己。面板把每条线路做成可以单独摘掉的,原因就在这儿。</li>
+  </ul>
+
+  <p class="related">相关:<a href="{{base}}zh/articles/validation-rollback/">配置校验与回滚</a> · <a href="{{base}}zh/articles/line-model/">线路是什么</a> · <a href="{{base}}zh/articles/no-domain/">没有域名怎么用</a> · <a href="{{github}}/blob/main/render/combo.go" rel="noopener">render/combo.go</a></p>
+</article>
