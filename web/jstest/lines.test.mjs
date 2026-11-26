@@ -15,7 +15,8 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lines-test-'));
 fs.mkdirSync(path.join(dir, 'pages'));
 fs.copyFileSync(src, path.join(dir, 'pages', 'lines.js'));
 const stub = (name, body) => fs.writeFileSync(path.join(dir, name), body);
-stub('app.js', `export const state = globalThis.__state; export async function load() {}`);
+// takeHashParams:线路页进来时看地址里有没有 ?new=…(概览「开始使用」的「一键建线路」),这里没有参数
+stub('app.js', `export const state = globalThis.__state; export async function load() {} export const takeHashParams = () => new URLSearchParams('');`);
 stub('api.js', `export const SLOW = {}; export const get = async () => ({}); export const post = get; export const put = get; export const del = get;`);
 stub('i18n.js', `export const t = (k) => k;`);
 stub('errmsg.js', `export const trErr = (m) => m;`);
