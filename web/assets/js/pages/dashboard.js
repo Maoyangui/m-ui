@@ -15,6 +15,7 @@ import { shownConns } from '../fair.js';
 import { openTraffic } from '../traffic.js';
 import { auditAction, auditObject, JOB_ACTORS } from '../audit.js';
 import { attnMuted } from '../attnmute.js';
+import { guideSteps, guideSkipped } from '../guide.js';
 
 export const title = () => t('nav.dashboard');
 // status / onlines 没取到时 app.js 照样调 tick:好在「需要处理」里写明"面板状态没取到"
@@ -82,45 +83,36 @@ function staleMark(id, e, at) {
 }
 const loading = () => `<div class="dash-loading">${esc(t('common.loading'))}</div>`;
 
-// ---- 快速开始 / 配置完成卡 ----
-// 必做项没做完:只列没做的项。必做项做完:和 Star 合成一行「✓ 基本配置已完成 · 还可以:…」,两边都没内容就整张不出。
-function qsItems() {
-  const s = state.status;
-  return [
-    { ok: !s.defaultPassword, page: 'admin', text: t('qs.password'), opt: false },
-    { ok: !!s.certExists, page: 'cert', text: s.certExists && s.certSelfSigned ? t('qs.certSelf') : t('qs.cert'), opt: false },
-    { ok: (s.lines || 0) > 0, page: 'lines', text: t('qs.lines'), opt: false },
-    { ok: (s.users || 0) > 0, page: 'users', text: t('qs.users'), opt: false },
-    { ok: !!s.domain, page: 'settings', at: 'set-webDomain', text: t('qs.domain'), opt: true },
-    { ok: (s.upstreams || 0) > 0, page: 'upstreams', text: t('qs.upstreams'), opt: true },
-    { ok: !!s.tgEnabled, page: 'settings', at: 'set-tgEnabled', text: t('qs.telegram'), opt: true },
-    { ok: (s.nodes || 0) > 1, page: 'nodes', text: t('qs.nodes'), opt: true },
-    { ok: (s.plans || 0) > 0, page: 'plans', text: t('qs.plans'), opt: true },
-  ];
-}
+// ---- 开始使用(首次安装的指引)/ 配置完成卡 ----
+// 三步是哪三步、什么时候算跳过见 guide.js(顶栏的奖励气泡也看它)。域名、证书、上游、通知、副机、套餐都不在这里列
+// (用到时在各页自己看)。副机(role = node)不出
 function quickStart() {
   const s = state.status;
   if (s.role === 'node') return '';
-  const items = qsItems(), todo = items.filter(i => !i.ok);
-  const hidden = ls('m-ui.hideQuickStart') === '1';
-  if (!items.filter(i => !i.opt).every(i => i.ok)) {
-    if (hidden) return '';
-    // 必做的在前,可选的带「可选」
-    const list = todo.slice().sort((a, b) => a.opt - b.opt);
-    return `<section class="card quickstart span-all">
-      <div class="card-head"><h2>${esc(t('qs.title'))} <span class="h-count">${esc(t('qs.progress', { done: items.length - todo.length, total: items.length }))}</span></h2><button class="btn ghost sm icon" data-act="dash.hideQs" title="${esc(t('qs.hide'))}" aria-label="${esc(t('qs.hide'))}"><i class="i i-x"></i></button></div>
-      <p class="hint xp">${esc(t('qs.help'))}</p>
-      <ol class="qs-list">${list.map(i => `<li><span class="qs-mark">○</span><a href="#/${i.page}"${i.at ? ` data-act="go.setting" data-id="${i.at}"` : ''}>${esc(i.text)}</a>${i.opt ? `<span class="badge">${esc(t('qs.optional'))}</span>` : ''}</li>`).join('')}</ol>
+  const steps = guideSteps(), done = steps.filter(x => x.ok).length;
+  if (done < steps.length) {
+    if (guideSkipped()) return '';
+    const next = steps.findIndex(x => !x.ok); // 只有下一步亮主按钮,后面的照样能点(先建线路再改密码也行)
+    return `<section class="card guide span-all" id="guide-card">
+      <div class="card-head"><h2>${esc(t('guide.title'))} <span class="h-count">${esc(t('guide.progress', { done, total: steps.length }))}</span></h2>
+        <button class="btn ghost sm" data-act="dash.skipGuide">${esc(t('guide.skip'))}</button></div>
+      <p class="hint xp">${esc(t('guide.help'))}</p>
+      <ol class="guide-steps">${steps.map((x, i) => `<li class="${x.ok ? 'done' : i === next ? 'now' : ''}">
+        <span class="guide-n" aria-hidden="true">${x.ok ? '<i class="i i-check"></i>' : i + 1}</span>
+        <span class="guide-t"><b>${esc(t('guide.' + x.key))}</b><span>${esc(t('guide.' + x.key + 'Sub'))}</span></span>
+        ${x.ok ? `<span class="guide-ok">${esc(t('guide.ok'))}</span>` : `<a class="btn sm${i === next ? ' primary' : ''}" href="${x.href}">${esc(t('guide.' + x.key + 'Btn'))}</a>`}
+      </li>`).join('')}</ol>
+      <p class="guide-foot"><span>${esc(t('guide.nodeQ'))} <a href="#/settings" data-act="go.setting" data-id="set-nodeMode">${esc(t('guide.nodeLink'))}</a></span>
+        <span>${esc(t('guide.oldQ'))} <a href="#/backup">${esc(t('guide.oldLink'))}</a></span></p>
     </section>`;
   }
-  const opt = hidden ? [] : todo;
+  // 三步都做完:只剩一行「✓ 已经可以用了」和 Star(没有 Star 就整张不出);不再列别的功能
   const star = s.repo && ls('m-ui.starDismissed') !== '1';
-  if (!opt.length && !star) return '';
+  if (!star) return '';
   return `<section class="card qs-done span-all" id="star-card">
-    <span class="qs-ok"><i class="i i-check"></i> <b>${esc(t('qs.doneTitle'))}</b>${opt.length ? ` <span class="muted small">${esc(t('qs.alsoCan'))}</span>` : ''}</span>
-    ${opt.length ? `<span class="qs-opt">${opt.slice(0, 3).map(i => `<a class="chip" href="#/${i.page}"${i.at ? ` data-act="go.setting" data-id="${i.at}"` : ''} title="${esc(i.text)}">${esc(i.text.split(/[((::]/)[0].trim())}</a>`).join('')}${opt.length > 3 ? `<span class="muted small">${esc(t('qs.moreN', { n: opt.length, more: opt.length - 3 }))}</span>` : ''}</span>` : ''}
+    <span class="qs-ok"><i class="i i-check"></i> <b>${esc(t('guide.done'))}</b> <span class="muted small">${esc(t('guide.doneSub'))}</span></span>
     <span class="grow"></span>
-    ${star ? `<a class="btn primary sm" href="${esc(s.repo)}" target="_blank" rel="noopener" data-act="dash.starGo" title="${esc(t('star.text'))}"><i class="i i-star"></i>${esc(t('star.btn'))}</a>` : ''}
+    <a class="btn primary sm" href="${esc(s.repo)}" target="_blank" rel="noopener" data-act="dash.starGo" title="${esc(t('star.text'))}"><i class="i i-star"></i>${esc(t('star.btn'))}</a>
     <button class="btn ghost sm icon" data-act="dash.doneHide" title="${esc(t('star.dismiss'))}" aria-label="${esc(t('star.dismiss'))}"><i class="i i-x"></i></button>
   </section>`;
 }
@@ -1031,7 +1023,17 @@ registerActions({
   // 事件委托会拦下链接的默认跳转:这里自己开新标签页
   'dash.starGo': (_, a) => { window.open(a.href, '_blank', 'noopener'); lsSet('m-ui.starDismissed', '1'); document.getElementById('star-card')?.remove(); },
   'dash.doneHide': () => { lsSet('m-ui.starDismissed', '1'); lsSet('m-ui.hideQuickStart', '1'); document.getElementById('star-card')?.remove(); },
-  'dash.hideQs': () => { lsSet('m-ui.hideQuickStart', '1'); document.querySelector('.quickstart')?.remove(); },
+  // 「开始使用」的「跳过」:存进面板设置(guideSkipped),换浏览器、换电脑都不再出;
+  // 存不进去(网络抖动)也照样收起,这台浏览器里记一笔
+  'dash.skipGuide': async () => {
+    document.getElementById('guide-card')?.remove();
+    lsSet('m-ui.hideQuickStart', '1');
+    try {
+      await post('settings', { guideSkipped: 'true' });
+      state.settings = { ...(state.settings || {}), guideSkipped: 'true' };
+    } catch { /* 只是没存到面板设置:这台浏览器里已经记下了 */ }
+    toast(t('guide.skipped'), 'ok');
+  },
   'dash.healthRun': async (_, b) => {
     b.disabled = true;
     try { await post('upstreams/health', undefined, SLOW); await guard('dash-health', fetchHealth); renderAttn(); renderStats(); }

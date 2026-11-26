@@ -18,7 +18,7 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/Maoyangui/m-ui/main/deploy/install.sh)
 ```
 
-Then open `http://<server-ip>:2053/app/`, default login `admin / admin` (change it on the Admin page right after). **No domain needed**: self-sign a certificate with one click → create a line → create a user → send the subscription link — five minutes end to end. See [Installation](#installation) and [Quick start](#quick-start).
+Then open `http://<server-ip>:2053/app/`, default login `admin / admin` (change it on the Admin page right after). **No domain needed**: the dashboard's Get started card takes three steps (change the password → create a line, VLESS + Reality by default, no certificate → add a user and share the subscription), and a few minutes later you have a working line. See [Installation](#installation) and [Quick start](#quick-start).
 
 **Want to look before you install?** The [live demo](https://maoyangui.github.io/m-ui/demo/) is the real panel interface running on sample data: no login, no backend, click anything, refresh to reset. Append `--dry-run` to the install command to see which files it would write first.
 
@@ -225,15 +225,15 @@ The "卸载 m-ui" (uninstall) item of the `m-ui` menu, optionally removing the `
 
 ## Quick start
 
-The dashboard shows a **Quick start** checklist. In order:
+The dashboard shows a **Get started** card: three steps to a working line, each with a button that takes you straight there:
 
-1. **Domain** (optional): Settings → Panel → Domain. Point an A record at the server.
-2. **Certificate**: on the Certificate page enter the domain and issue a Let's Encrypt cert; without a domain click "self-signed" with the server IP. Panel, subscription and data plane share the cert and it renews itself.
-3. **Line**: Lines → Add, pick a protocol (Hysteria2 or AnyTLS recommended), a port and an upstream (direct by default).
-4. **User**: Users → Add, tick the lines the user may use, or apply a plan.
-5. **Hand out the subscription**: copy the subscription link from the user list, or let the user open the landing page in a browser to scan / import.
+1. **Change the default password**: it is still `admin / admin`, so anyone can log in.
+2. **Create a line**: the dialog already has VLESS + Reality picked with the port and keys filled in, no certificate or domain needed; just save. Open the port in your cloud security group.
+3. **Add a user and share the subscription**: enter a name and save (opened from the card, all lines are already ticked; you can also apply a plan), then copy the subscription link from the user list, or let the user open the landing page in a browser to scan / import.
 
-No domain is fine: self-signed cert + IP, and every node in the subscription already carries "allow insecure" (`insecure=1` in links, `skip-cert-verify` in Clash, `insecure` in sing-box), so clients need no extra setting. Issue a real certificate later and users only need to refresh once.
+Everything else (domain, certificates, upstreams, notifications, nodes, plans…) is in the sidebar for when you need it; if you don’t need the guide, click **Skip** on the card and it won’t come back. Setting up a node (turn on “Run as node” in Settings) or used m-ui before (restore your backup on the Backup page, or install with `--restore`)? You don’t need these steps, and node panels don’t show the guide.
+
+For protocols that need a certificate (Hysteria2, AnyTLS…): issue a Let's Encrypt cert on the Certificate page if you have a domain, or self-sign with one click if you don’t. Every node in the subscription then carries "allow insecure" (`insecure=1` in links, `skip-cert-verify` in Clash, `insecure` in sing-box), so clients need no extra setting. Issue a real certificate later and users only need to refresh once.
 
 ## Feature guide
 

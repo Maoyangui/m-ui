@@ -8,7 +8,7 @@ import "strings"
 var BoolSettings = map[string]bool{
 	"supportOnline": true, "subUseUserName": true, "subEncode": true, "subShowNotice": true, "subAutoFormat": true,
 	"resellerEnabled": true, "subPageEnabled": true, "subShareEnabled": true, "subPageBrand": true, "subClashDefaultGroups": true,
-	"uiConcise": true,
+	"uiConcise": true, "guideSkipped": true,
 	"tgEnabled": true, "tgBot": true, "tgOnLogin": true, "tgOnUserDisabled": true, "tgOnUserExpiring": true,
 	"tgOnQuota": true, "tgOnRuleLimit": true, "tgOnUpstream": true, "tgOnUpstreamFollow": true, "tgOnCore": true, "tgOnReach": true, "tgOnCert": true, "tgDaily": true,
 	"reachAuto": true, "allowPrivate": true, "blockBT": true, "nodeMode": true, "backupTelegram": true,

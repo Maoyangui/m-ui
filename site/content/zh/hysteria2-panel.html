@@ -5,7 +5,7 @@
   <nav class="toc"><a href="#cert">1. 证书</a><a href="#line">2. 线路</a><a href="#hop">3. 端口跳跃</a><a href="#users">4. 用户</a><a href="#subs">5. 订阅</a><a href="#multi">6. 多台服务器</a><a href="#ops">运维提示</a></nav>
 
   <h2 id="cert">1. 证书,正式的或自签的</h2>
-  <p>Hysteria2 必须有 TLS。有域名,<b>证书 → 签发</b>拿 Let's Encrypt 证书(HTTP-01 或 Cloudflare DNS-01),自动续期。没有域名,<b>证书 → 自签</b>一键完成;m-ui 会在订阅里标记让客户端允许不安全证书(Clash Meta 的 <code>skip-cert-verify</code>、sing-box 的 <code>insecure</code>)。两条路都是正规路径;概览页的快速开始两种都认。</p>
+  <p>Hysteria2 必须有 TLS。有域名,<b>证书 → 签发</b>拿 Let's Encrypt 证书(HTTP-01 或 Cloudflare DNS-01),自动续期。没有域名,<b>证书 → 自签</b>一键完成;m-ui 会在订阅里标记让客户端允许不安全证书(Clash Meta 的 <code>skip-cert-verify</code>、sing-box 的 <code>insecure</code>)。两条路都是正规路径。</p>
 
   <h2 id="line">2. Hysteria2 线路</h2>
   <p>线路 → 快速添加 → <b>Hysteria2</b>。预设会选好协议、TLS 模式"证书",以及一个没被其它线路、面板和本机任何程序占用的空闲五位 UDP 端口。表单里还有:</p>

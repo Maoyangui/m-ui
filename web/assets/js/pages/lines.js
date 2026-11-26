@@ -1,4 +1,4 @@
-import { state, load } from '../app.js';
+import { state, load, takeHashParams } from '../app.js';
 import { get, post, put, del, SLOW } from '../api.js';
 import { t } from '../i18n.js';
 import { trErr } from '../errmsg.js';
@@ -56,6 +56,7 @@ function nodeGroups(nodes) {
 const hasGroups = nodes => (nodes || []).some(n => String(n.group || '').trim());
 
 export async function render(el) {
+  const hp = takeHashParams('lines'); // 概览「开始使用」的「一键建线路」:#/lines?new=reality
   const nodes = state.nodes || [];
   const opt = n => `<option value="${n.id}" ${n.id === nodeFilter ? 'selected' : ''}>${esc(n.name)}</option>`;
   const nodeOpts = hasGroups(nodes)
@@ -94,6 +95,8 @@ export async function render(el) {
   });
   renderRows();
   loadReach().then(renderRows); // 走 IPv6 的线路标上服务器页那份 IPv6 入站检测结果;拿不到不影响列表
+  // 从「开始使用」点过来:直接打开新建框,用那个预设(端口、密钥都填好了,点保存就行);不认识的预设按 VLESS + Reality —— 不用证书、不用域名
+  if (hp.has('new')) presetLine(PRESETS.some(p => p.id === hp.get('new')) ? hp.get('new') : 'reality');
 }
 const lineNodeIds = l => { const v = l.nodeIds; if (!v) return []; try { return Array.isArray(v) ? v : JSON.parse(v); } catch { return []; } };
 function visibleRows() {

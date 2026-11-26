@@ -19,6 +19,7 @@ import { get, post, rewardQrUrl } from './api.js';
 import { t, getLang } from './i18n.js';
 import { trErr } from './errmsg.js';
 import { openSettingsAt, esc, fmtBytes, toast, registerActions, copy, setHTML, debounce, closeMenus } from './ui.js';
+import { guideOpen } from './guide.js';
 
 let st = null;            // GET reward 的回复;null = 还没拿到
 let slot = null;          // 顶栏里的位置
@@ -123,11 +124,13 @@ function hoverText() {
   return p > 0 ? t('rw.hover.some', { n: pts(p), left: fmtBytes(left(), 1), pct: pct() }) : t('rw.hover.none', { left: fmtBytes(left(), 1), pct: pct() });
 }
 // 气泡只在概览页冒(别的页面右上角常有按钮,不去挡);十几秒后自己收起,点别处也收起 —— 收起后金币上留一个小点。
+// 首次安装的指引(「开始使用」)还开着时也不冒:新用户先把线路建起来(还没有流量,也就没有积分),指引做完或跳过以后再提醒;
+// 这期间金币上照样有那个小点。全新的面板上气泡曾压在指引卡片上,手机宽度下挡住「跳过」(实机 11-23)
 const onDash = () => { const h = location.hash.replace('#', '').replace('/', '').split('?')[0].split('/')[0]; return !h || h === 'dashboard'; };
 const wantsBind = () => !!(st && st.remind && !st.address);
 let tipTimer = 0;
 function tipHTML() {
-  if (!wantsBind() || tipHidden || isOpen || !onDash()) return '';
+  if (!wantsBind() || tipHidden || isOpen || !onDash() || guideOpen()) return '';
   const msg = st.remind === 'tb' ? t('rw.tip.tb', { n: pts(st.points) }) : t('rw.tip.fresh');
   return `<div class="rw-tip" role="status">
 <div class="rw-tip-t">${SOL()}<span>${esc(msg)}</span></div>

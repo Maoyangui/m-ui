@@ -126,6 +126,9 @@ export async function render(el) {
   lastPager = '';
   renderRows();
   if (openId) showDetail(openId);
+  // 概览「开始使用」的「建用户」:#/users?new=1,直接打开新建框,线路默认全勾 ——
+  // 指引先建线路后建用户,线路的「分配给全部用户」只管当时已有的用户;不勾的话照着三步走完订阅是空的(实机 11-23 查出)
+  else if (hp.has('new')) editUser(null, { allLines: true });
 }
 export async function tick() { await load('users'); renderRows(); if (drawerUser) refreshDrawerLive(); }
 
@@ -384,7 +387,8 @@ function fillFromPlan(planId) {
   }
 }
 
-function editUser(id) {
+// allLines:新建时线路默认全勾(只有概览指引的第三步这么开;平常的「新增用户」照旧一条不勾)
+function editUser(id, { allLines = false } = {}) {
   const u = id ? state.users.find(x => x.id === id) : { enabled: true, lineIds: [], resetDays: 30 };
   const expiryVal = u.expiry ? new Date(u.expiry * 1000).toISOString().slice(0, 10) : '';
   // 一页两栏:左边是「基本」和「额度与限速」(各有小标题,两列排),右边整列是线路。一屏看全,不用切换。
@@ -450,7 +454,7 @@ function editUser(id) {
     if (g) g.disabled = !cb.checked;
   }));
   const items = pickerItems();
-  picker = linePicker(document.getElementById('f-lines'), { items, selected: keysFromRefs(refsOf(u), items), keep: refsOf(u) });
+  picker = linePicker(document.getElementById('f-lines'), { items, selected: allLines && !id ? new Set(items.map(it => it.key)) : keysFromRefs(refsOf(u), items), keep: refsOf(u) });
   // 新建时选了套餐就直接填好额度;编辑老用户时只是改归属,要填额度再点按钮
   if (!id) { const sel = document.getElementById('f-plan'); if (sel) sel.addEventListener('change', () => fillFromPlan(sel.value)); }
 }

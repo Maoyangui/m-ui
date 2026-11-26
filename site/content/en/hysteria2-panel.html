@@ -5,7 +5,7 @@
   <nav class="toc"><a href="#cert">1. Certificate</a><a href="#line">2. The line</a><a href="#hop">3. Port hopping</a><a href="#users">4. Users</a><a href="#subs">5. Subscription</a><a href="#multi">6. Several servers</a><a href="#ops">Operations</a></nav>
 
   <h2 id="cert">1. A certificate, real or self-signed</h2>
-  <p>Hysteria2 requires TLS. With a domain, <b>Certificate → Issue</b> gets a Let's Encrypt certificate (HTTP-01 or Cloudflare DNS-01) that renews itself. Without one, <b>Certificate → Self-sign</b> is one click; m-ui then marks the subscription so clients allow the insecure certificate (Clash Meta's <code>skip-cert-verify</code>, sing-box's <code>insecure</code>). Both paths are first-class; the dashboard's Quick Start accepts either.</p>
+  <p>Hysteria2 requires TLS. With a domain, <b>Certificate → Issue</b> gets a Let's Encrypt certificate (HTTP-01 or Cloudflare DNS-01) that renews itself. Without one, <b>Certificate → Self-sign</b> is one click; m-ui then marks the subscription so clients allow the insecure certificate (Clash Meta's <code>skip-cert-verify</code>, sing-box's <code>insecure</code>). Both paths are first-class.</p>
 
   <h2 id="line">2. The Hysteria2 line</h2>
   <p>Lines → Quick add → <b>Hysteria2</b>. The preset selects the protocol, TLS mode "certificate", and a free five-digit UDP port that no other line, the panel or another process on the server is using. The form then offers:</p>

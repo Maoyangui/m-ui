@@ -1421,6 +1421,8 @@ var panelSettings = setOf(
 	"nodeMode", "backupHour", "backupKeep", "backupTelegram", "subLogAge", "auditAge",
 	"fwAutoBan", "fwAutoAllow", "rewardEnabled", "attnMute", "camoEnabled", "camoTemplate", "camoPorts", "camoRedirect",
 	"uiConcise", "uiNavHidden",
+	// 概览「开始使用」点了「跳过」(用户 11-23:必做的几步也能全部跳过、不再提醒):存在面板里,换浏览器、换电脑都一样
+	"guideSkipped",
 )
 
 // hiddenSettings 不发给浏览器的密钥:前端用不到,各自的页面走专门接口(管理员页、配对信息、证书页)。
