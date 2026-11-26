@@ -261,6 +261,7 @@ const EN = /*BEGIN*/{
 "域名格式不对:只能是字母、数字、点与连字符,如 hk.example.com": "Invalid domain: use only letters, digits, dots and hyphens, e.g. hk.example.com",
 "备份不存在": "Backup not found",
 "外部 API 未开启或令牌错误": "External API is off or the token is wrong",
+"面板处理这次调用时出错,调用方没收到完整的回应": "The panel hit an error while handling this call; the caller got no complete response",
 "外部节点不存在": "External node not found",
 "外部订阅地址必须以 http:// 或 https:// 开头": "External subscription URL must start with http:// or https://",
 "大陆连通巡检间隔要在 %d 到 %d 分钟之间": "Mainland reachability check interval must be %d to %d minutes",

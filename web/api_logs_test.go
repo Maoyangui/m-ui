@@ -2,6 +2,8 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -237,5 +239,52 @@ func TestAPILogQuery(t *testing.T) {
 	}
 	if got := apiLogQuery("q=" + strings.Repeat("长", 400)); len([]rune(got)) != apiLogQueryMax+1 || !strings.HasSuffix(got, "…") {
 		t.Errorf("太长的参数应截到 %d 字: %d", apiLogQueryMax, len([]rune(got)))
+	}
+}
+
+// 处理函数 panic:net/http 接住后直接断开连接,调用方收不到回应。日志里要记成 500 和原因(以前没写过回应就按 200 记,看着像成功),
+// panic 原样再抛出去(交回 net/http);已经写出去的错误回应不拿来当原因。正常的调用不受影响。
+func TestAPILogRecordsPanic(t *testing.T) {
+	e := newPCEnv(t)
+	k := e.mkKey(0, "商城", permUsersRead)
+	boom := errors.New("boom")
+	run := func(h func(w http.ResponseWriter)) (got interface{}) {
+		defer func() { got = recover() }()
+		r := httptest.NewRequest("GET", "/app/api/v1/users", nil)
+		w, finish := e.s.apiLogStart(httptest.NewRecorder(), r, apiScope{keyId: k.Id})
+		defer finish()
+		h(w)
+		return nil
+	}
+	const crashed = "面板处理这次调用时出错,调用方没收到完整的回应"
+
+	if got := run(func(http.ResponseWriter) { panic(boom) }); got != boom {
+		t.Fatalf("panic 应原样再抛出去: %v", got)
+	}
+	rows := waitLogs(t, e, k.Id, 1)
+	if len(rows) != 1 || rows[0].Status != 500 || rows[0].Err != crashed || rows[0].Action != "users.list" {
+		t.Fatalf("没写过回应就 panic 的调用应记成 500 和原因: %+v", rows)
+	}
+
+	if got := run(func(w http.ResponseWriter) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+		panic(boom)
+	}); got != boom {
+		t.Fatalf("写过回应再 panic 也应原样抛出去: %v", got)
+	}
+	if rows = waitLogs(t, e, k.Id, 2); len(rows) != 2 || rows[1].Status != 500 || rows[1].Err != crashed {
+		t.Fatalf("写过回应再 panic 的调用应记成 500 和原因: %+v", rows)
+	}
+
+	if got := run(func(http.ResponseWriter) {}); got != nil {
+		t.Fatalf("正常的调用不应有 panic: %v", got)
+	}
+	if got := run(func(w http.ResponseWriter) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "用户不存在"})
+	}); got != nil {
+		t.Fatalf("正常的调用不应有 panic: %v", got)
+	}
+	if rows = waitLogs(t, e, k.Id, 4); len(rows) != 4 || rows[2].Status != 200 || rows[2].Err != "" || rows[3].Status != 404 || rows[3].Err != "用户不存在" {
+		t.Fatalf("正常的调用照旧记: %+v", rows)
 	}
 }

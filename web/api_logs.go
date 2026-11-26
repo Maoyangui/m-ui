@@ -85,19 +85,30 @@ func (s *Server) apiLogStart(w http.ResponseWriter, r *http.Request, sc apiScope
 	rec := &apiLogRec{ResponseWriter: w}
 	ip := s.sourceIP(r)
 	return rec, func() {
+		// 处理函数 panic 了:net/http 会接住、直接断开这条连接,调用方收不到回应。日志里要照实记成出错(以前没写过回应就按 200 记,
+		// 看着像成功),记完原样再抛出去,交回 net/http 处理。收尾函数是 defer 直接调的,这里的 recover 才接得到。
+		crashed := recover()
 		status := rec.status
 		if status == 0 {
 			status = http.StatusOK
+		}
+		if crashed != nil {
+			status = http.StatusInternalServerError
 		}
 		path, parts := apiLogPath(r.URL.Path)
 		row := model.ApiKeyLog{KeyId: sc.keyId, At: start.Unix(), IP: ip, Method: r.Method, Path: path,
 			Query: apiLogQuery(r.URL.RawQuery), Body: apiLogBody(body), Status: status,
 			Ms: int(time.Since(start) / time.Millisecond)}
 		row.Action, row.Target = apiLogAction(r.Method, parts, body)
-		if status >= 400 {
+		if crashed != nil {
+			row.Err = "面板处理这次调用时出错,调用方没收到完整的回应"
+		} else if status >= 400 {
 			row.Err = apiLogErr(rec.errBody)
 		}
 		s.apiLogPush(row)
+		if crashed != nil {
+			panic(crashed)
+		}
 	}
 }
 
