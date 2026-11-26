@@ -67,3 +67,57 @@ func TestExternalForNoGroup(t *testing.T) {
 		t.Fatalf("用户 2 的德国应成组,实际 %+v", got2)
 	}
 }
+
+// 外部订阅自己的「分给用户时单独成组」(ExtNode.NoGroup)只是新分配的默认值:订阅输出只看分配上的开关(UserExt.NoGroup),
+// 两者不一样时以分配上的为准 —— 两列在库里都叫 no_group,查询里要分得开(审查后修正 F8-01)。
+func TestExternalForUsesAssignmentNotSubDefault(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ext2.db")
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{Logger: logger.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sqlDB, err := db.DB(); err == nil {
+		t.Cleanup(func() { sqlDB.Close() })
+	}
+	if err := db.AutoMigrate(&model.ExtNode{}, &model.UserExt{}); err != nil {
+		t.Fatal(err)
+	}
+	mk := func(name string, noGroup bool, sort int) model.ExtNode {
+		e := model.ExtNode{Name: name, Type: "sub", Value: "https://" + name + ".example.com/sub",
+			Cache: "trojan://p@198.51.100.9:443?sni=" + name + ".example.com#" + name + "-1", Enabled: true, Sort: sort, NoGroup: noGroup}
+		if err := db.Create(&e).Error; err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	defOff := mk("def-nogroup", true, 1) // 订阅默认不成组
+	defOn := mk("def-group", false, 2)   // 订阅默认成组
+	both := mk("both-nogroup", true, 3)
+	for _, r := range []model.UserExt{
+		{UserId: 7, ExtId: defOff.Id, NoGroup: false}, // 这个用户的分配上是成组
+		{UserId: 7, ExtId: defOn.Id, NoGroup: true},   // 这个用户的分配上关了成组
+		{UserId: 7, ExtId: both.Id, NoGroup: true},
+	} {
+		if err := db.Create(&r).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	var n int64
+	db.Model(&model.ExtNode{}).Where("no_group = ?", true).Count(&n)
+	if n != 2 {
+		t.Fatalf("前提:库里应有 2 个默认不成组的订阅,实际 %d", n)
+	}
+	got := (&Server{db: db}).externalFor(7)
+	if len(got) != 3 {
+		t.Fatalf("应有 3 个外部订阅,实际 %d", len(got))
+	}
+	if got[0].Name != "def-nogroup" || got[0].NoGroup {
+		t.Fatalf("订阅默认不成组、分配上成组:应成组,实际 %+v", got[0])
+	}
+	if got[1].Name != "def-group" || !got[1].NoGroup {
+		t.Fatalf("订阅默认成组、分配上关了:应不成组,实际 %+v", got[1])
+	}
+	if got[2].Name != "both-nogroup" || !got[2].NoGroup {
+		t.Fatalf("两边都关:应不成组,实际 %+v", got[2])
+	}
+}

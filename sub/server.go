@@ -281,13 +281,15 @@ func (s *Server) insecure() bool {
 
 // externalFor 取用户被分配的外部节点:单条链接直接用,外部订阅用主机抓取的缓存解析。
 // Clash 里成不成组:分享链接只有一个节点,不成组;外部订阅看分配上的「单独成组」开关(ue.no_group,默认成组)。
+// 外部订阅自己也有一列 no_group(新分配的默认值,见 model.ExtNode.NoGroup),订阅输出不看它:分配上的那一列起别名
+// ue_no_group 单独取。以前两列同名都叫 no_group,靠「后一列盖前一列」才碰巧读到分配上的(审查后修正 F8-01)。
 func (s *Server) externalFor(userID uint) []ExtItem {
 	type extRow struct {
 		model.ExtNode
-		NoGroup bool
+		UeNoGroup bool `gorm:"column:ue_no_group"`
 	}
 	var rows []extRow
-	s.db.Raw(`SELECT e.*, ue.no_group FROM ext_nodes e JOIN user_exts ue ON ue.ext_id = e.id
+	s.db.Raw(`SELECT e.*, ue.no_group AS ue_no_group FROM ext_nodes e JOIN user_exts ue ON ue.ext_id = e.id
 		WHERE ue.user_id = ? AND e.enabled = 1 ORDER BY e.sort, e.id`, userID).Scan(&rows)
 	out := make([]ExtItem, 0, len(rows))
 	for _, r := range rows {
@@ -295,7 +297,7 @@ func (s *Server) externalFor(userID uint) []ExtItem {
 		if len(it.Nodes) == 0 {
 			continue
 		}
-		out = append(out, ExtItem{Name: r.Name, Links: it.Links(), Clash: it.Clash(), NoGroup: r.NoGroup || r.Type == "link"})
+		out = append(out, ExtItem{Name: r.Name, Links: it.Links(), Clash: it.Clash(), NoGroup: r.UeNoGroup || r.Type == "link"})
 	}
 	return out
 }
