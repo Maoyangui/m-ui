@@ -1084,7 +1084,6 @@ function route(method, path, query, body) {
       case 'sub-logo': return clone(S.logo || { set: false });
       case 'reach': return clone(S.reach);
       case 'conns': return S.connsOverride || recentConns(); // S.connsOverride:截图场景按生产量级给
-      case 'sub-templates': return { clash: '# 只写想加的部分,节点和分组由面板填\nrules:\n  - DOMAIN-SUFFIX,example.org,DIRECT\n  - MATCH,Proxy\n', singbox: '{\n  "route": {\n    "rules": [{ "domain_suffix": ["example.org"], "outbound": "direct" }],\n    "final": "proxy"\n  }\n}\n' };
       case 'stats': { // 流量图、排行、明细:按请求的范围现算(见 demoSeries)
         const q = new URLSearchParams(query), hours = demoHours(q.get('hours'));
         if (seg[1] === 'top') { const lim = Number(q.get('limit')) || 0; return (S.topOverride || demoTop(hours)).slice(0, lim > 0 && lim <= 100 ? lim : 10); } // S.topOverride:截图场景按生产量级给
@@ -1457,6 +1456,13 @@ function route(method, path, query, body) {
 // 「换一个样子」在两个种子之间切换;入口按演示里的线路数(截图场景可以用 S.camoEntries 换成生产的量),
 // 80 / 443 开着时给一个已放上、一个被线路占着(S.camoPorts 可换)
 let CAMO = null, camoSeedIx = 0;
+// 订阅模板的现成写法(设置页模板框上面的选择框):正文和真面板的接口一字不差(site/demo/sub-templates.json,
+// 由 web/presets_test.go 核对 / 生成;按需读,只有设置页用到)
+let SUBTPL = null;
+async function demoSubTemplates() {
+  if (!SUBTPL) SUBTPL = await (await fetch('js/sub-templates.json')).json();
+  return clone(SUBTPL);
+}
 async function demoCamo(method, query) {
   if (method === 'POST') { camoSeedIx = 1 - camoSeedIx; return ok(); }
   if (!CAMO) CAMO = await (await fetch('js/camo.json')).json();
@@ -1499,7 +1505,7 @@ setTransport(async (rawPath, opts = {}) => {
   const [path, query = ''] = rawPath.split('?');
   let body = null; if (opts.body) { try { body = JSON.parse(opts.body); } catch { body = null; } }
   await new Promise(r => setTimeout(r, 40)); // 像一次真实请求
-  const res = path === 'camo' ? await demoCamo(method, query) : route(method, path, query, body);
+  const res = path === 'camo' ? await demoCamo(method, query) : path === 'sub-templates' ? await demoSubTemplates() : route(method, path, query, body);
   if (method !== 'GET' && !(body && body.dryRun) && !READONLY_POST.test(path)) demoNote();
   return res;
 });

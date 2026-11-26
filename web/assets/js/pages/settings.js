@@ -69,7 +69,7 @@ const groups = () => [
     ['subServerAddr', t('set.subServerAddr'), 'select', t('set.subServerAddrHelp'), [['', t('set.addrIp')], ['domain', t('set.addrDomain')]]],
     ['extRefreshMinutes', t('set.extRefresh'), 'number'],
   ]},
-  { id: 'subtmpl', title: t('set.subTmpl'), masterOnly: true, extra: `<div class="row" style="margin-top:.6rem;flex-wrap:wrap"><button class="btn sm" data-act="set.tmplDefault" data-id="clash">${t('set.tmplFillClash')}</button><button class="btn sm" data-act="set.tmplDefault" data-id="singbox">${t('set.tmplFillSingbox')}</button></div>`, fields: [
+  { id: 'subtmpl', title: t('set.subTmpl'), masterOnly: true, fields: [
     ['subAutoFormat', t('set.subAutoFormat'), 'boolOn', t('set.subAutoFormatHelp')],
     ['subClashDefaultGroups', t('set.subClashDefaultGroups'), 'boolOn', t('set.subClashDefaultGroupsHelp')],
     ['subClashExt', t('set.subClashExt'), 'code', t('set.subClashExtHelp')],
@@ -199,6 +199,10 @@ export async function render(el) {
   };
   main.addEventListener('input', onEdit);
   main.addEventListener('change', onEdit);
+  // 现成模板的选择框:先按「空着 / 有内容」写上,正文取到后再认是哪一套;框里一改就重认
+  main.addEventListener('input', e => { if (e.target && Object.values(TMPL_BOX).includes(e.target.id)) syncTmplPick(); });
+  syncTmplPick();
+  if (document.querySelector('details.pick')) loadTmplPresets().then(syncTmplPick).catch(() => {});
   if (isNode) renderPairing().then(buildNav);
   // 主机容灾:紧跟在角色卡片后面(服务器页角色卡片里的「去设置」跳到这里)
   const haCard = document.createElement('section');
@@ -602,6 +606,41 @@ async function saveAll() {
   }
 }
 
+// ---- 订阅模板的现成写法(用户 11-26)----
+// 「订阅模版加上可一键填充的订阅模版 例如给订阅客户端带配置信息…配置为中国大陆ip直连 受限制的或者非大陆的使用代理」
+// 「注意这个模版的前端样式 可以使用选择框式…不要多种模版按键并排」「默认的保持不变」
+// 每个模板框上面一个选择框(样子和面板里的下拉框一样,展开后每项带名字和一句介绍):选中哪套就把它填进框里,算一处改动、点保存才生效。
+// 框里现在是哪一套,选择框上就写哪一套:空着 = 内置的那套;和哪套都不一样 = 自己写的。正文在后端(sub.Presets),名字和介绍在 i18n。
+const TMPL_KIND = { subClashExt: 'clash', subSingboxExt: 'singbox' };
+const TMPL_BOX = { clash: 'set-subClashExt', singbox: 'set-subSingboxExt' };
+const TMPL_IDS = { clash: ['clash-builtin', 'clash-cn-lite', 'clash-cn-ruleset', 'clash-gfw'], singbox: ['singbox-builtin', 'singbox-cn', 'singbox-gfw'] };
+let tmplPresets = null; // 现成模板的正文(第一次用到时取一回)
+const tmplNorm = s => String(s || '').replace(/\r\n/g, '\n').trim();
+function tmplPicker(kind) {
+  return `<details class="menu pick" data-tmpl="${kind}"><summary class="pick-box" aria-label="${esc(t('set.tmplPick'))}"><span class="pick-k">${esc(t('set.tmplPick'))}</span><span class="pick-v" id="tmpl-cur-${kind}"></span></summary><div class="menu-list">${TMPL_IDS[kind].map(id =>
+    `<button type="button" data-act="set.tmplFill" data-id="${id}"><b>${esc(t('set.tmpl.' + id))}</b><span>${esc(t('set.tmpl.' + id + '.d'))}</span></button>`).join('')}</div></details>`;
+}
+// 框里现在是哪一套:返回现成模板的 id;'' = 自己写的。正文还没取到时只认得出「空着」
+function tmplCurrent(kind, text, presets) {
+  const v = tmplNorm(text);
+  if (!v) return kind + '-builtin';
+  const hit = (presets || []).find(p => p.kind === kind && tmplNorm(p.body) === v);
+  return hit ? hit.id : '';
+}
+function syncTmplPick() {
+  for (const kind of Object.keys(TMPL_BOX)) {
+    const box = document.getElementById(TMPL_BOX[kind]), cur = document.getElementById('tmpl-cur-' + kind);
+    if (!box || !cur) continue;
+    const id = tmplCurrent(kind, box.value, tmplPresets);
+    cur.textContent = id ? t('set.tmpl.' + id) : t('set.tmplCustom');
+    cur.closest('details').querySelectorAll('.menu-list button').forEach(b => b.classList.toggle('on', b.dataset.id === id));
+  }
+}
+async function loadTmplPresets() {
+  if (!tmplPresets) tmplPresets = (await get('sub-templates')).presets || [];
+  return tmplPresets;
+}
+
 // 一项设置一行:左边名称 + 说明,右边控件(开关靠右);长文本框(公告、模板)名称在上、框在下占满。
 // 控件的 id 仍是 set-<键>,保存逻辑不用跟着变
 // 宽屏两列时也各占一整行的:功德箱 / 在线设备数和流量奖励这两个「要不要为它联网」的开关,一上一下放在一起(用户 N15);
@@ -627,7 +666,7 @@ function rowHTML(s, [k, label, type, help, options]) {
     return `<div class="set-row stack">${info}<div class="set-ctl"><input type="hidden" id="${id}" value="${esc(v)}" data-orig="${esc(v)}"><div class="mutes" data-for="${id}">${blocks}</div></div></div>`;
   }
   if (type === 'textarea' || type === 'code') {
-    return `<div class="set-row stack">${info}<div class="set-ctl"><textarea id="${id}" ${type === 'code' ? 'class="code-area" spellcheck="false" autocomplete="off"' : ''}>${esc(s[k] ?? '')}</textarea>${textMax[k] ? charCount(id, textMax[k]) : ''}</div></div>`;
+    return `<div class="set-row stack">${info}<div class="set-ctl">${TMPL_KIND[k] ? tmplPicker(TMPL_KIND[k]) : ''}<textarea id="${id}" ${type === 'code' ? 'class="code-area" spellcheck="false" autocomplete="off"' : ''}>${esc(s[k] ?? '')}</textarea>${textMax[k] ? charCount(id, textMax[k]) : ''}</div></div>`;
   }
   const ctl = type === 'select'
     ? `<select id="${id}">${options.map(([v, l]) => `<option value="${esc(v)}" ${String(s[k] ?? '') === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`
@@ -847,14 +886,16 @@ registerActions({
   'set.barToggle': () => { barOpen = !barOpen; renderBar(); },
   'set.undo': k => { undoOne(k); renderBar(); },
   'set.discard': () => { changes().forEach(c => undoOne(c.k)); barOpen = false; renderBar(); },
-  'set.tmplDefault': async id => {
-    const box = document.getElementById(id === 'clash' ? 'set-subClashExt' : 'set-subSingboxExt');
-    if (box.value.trim() && !await confirm(t('set.tmplOverwrite'))) return;
+  'set.tmplFill': async id => {
     try {
-      const r = await get('sub-templates');
-      box.value = r[id];
+      const p = (await loadTmplPresets()).find(x => x.id === id);
+      const box = p && document.getElementById(TMPL_BOX[p.kind]);
+      if (!box) return;
+      // 框里是自己写的东西才问一句(换掉就没了);空着、或者本来就是某一套现成的,直接换
+      if (tmplCurrent(p.kind, box.value, tmplPresets) === '' && !await confirm(t('set.tmplOverwrite'))) return;
+      box.value = p.body;
       box.dispatchEvent(new Event('input', { bubbles: true })); // 算一处改动:要点保存才生效
-      box.focus();
+      box.scrollTop = 0;
     } catch (e) { toast(e.message, 'err'); }
   },
   'set.restart': async () => {

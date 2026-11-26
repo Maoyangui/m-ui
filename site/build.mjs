@@ -246,6 +246,7 @@ if (existsSync(demoSrc) && existsSync(demoFix)) {
   copyFileSync(join(ROOT, 'demo', 'demo.js'), join(DIST, 'demo', 'js', 'demo.js'));
   copyFileSync(demoFix, join(DIST, 'demo', 'js', 'fixtures.json'));
   copyFileSync(join(ROOT, 'demo', 'camo.json'), join(DIST, 'demo', 'js', 'camo.json')); // 页面伪装的样页(设置页预览用,按需读)
+  copyFileSync(join(ROOT, 'demo', 'sub-templates.json'), join(DIST, 'demo', 'js', 'sub-templates.json')); // 订阅模板的现成写法(设置页的选择框用,按需读)
   buildDemoSupport(join(demoSrc, 'support.html'));
 } else console.warn('没有 site/demo/fixtures.json,跳过 Live Demo');
 

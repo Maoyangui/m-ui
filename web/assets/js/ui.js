@@ -344,6 +344,10 @@ document.addEventListener('toggle', e => {
   if (!list) return;
   if (!d.open) { list.classList.remove('fixed'); list.style.top = list.style.left = list.style.right = ''; return; }
   menuOpenedAt = Date.now();
+  // 选择框式的下拉(见 style.css details.menu.pick)不走下面的固定定位:清单用样式表里的绝对定位贴在框下面、和框一样宽,跟着页面一起滚。
+  // 固定定位在设置页里不能用 —— 卡片是容器查询的容器(container-type),Firefox 里它会成为固定定位的参照,清单整个跑偏(实机测出)。
+  // 清单底下放不下、或者会被底部的保存条盖住时,把页面滚到它整个露出来(留出的空在样式表的 scroll-margin 里)
+  if (d.classList.contains('pick')) { list.scrollIntoView({ block: 'nearest' }); return; }
   const r = d.querySelector('summary').getBoundingClientRect();
   list.classList.add('fixed');
   list.style.top = (r.bottom + 4) + 'px';
@@ -358,7 +362,8 @@ document.addEventListener('toggle', e => {
   if (Date.now() - menuOpenedAt < 300) return;
   // 菜单自己的列表在滚(外部节点的「服务器列」菜单服务器多时限高滚动):不收,不然后面几台勾不到
   if (e && e.target instanceof Element && e.target.closest('details.menu')) return;
-  closeMenus();
+  // 选择框式的下拉跟着页面滚,不用收(手机上清单比屏幕长时要能边滚边看)
+  document.querySelectorAll('details.menu[open]:not(.pick)').forEach(d => d.removeAttribute('open'));
 }, true));
 
 // ---- 剪贴板 ----

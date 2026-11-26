@@ -1786,6 +1786,22 @@ details.menu .menu-list button:has(> b + span) { flex-direction: column; align-i
 details.menu .menu-list button > b { font-weight: 600; }
 details.menu .menu-list button > b + span { font-size: var(--fs-xs); line-height: 1.45; }
 details.menu .menu-list:has(button > b + span) { min-width: 17rem; }
+/* 选择框式的下拉(设置页「现成模板」):收起时和面板里的下拉框一个样子(边框、圆角、右边的小箭头),写着现在是哪一套;
+   展开的清单和框一样宽,每项一行名字、一行介绍,现在这一套前面打勾 */
+details.menu.pick { display: block; max-width: 34rem; }
+details.menu.pick > summary.pick-box { display: flex; align-items: center; gap: .55rem; min-height: var(--ctl-h); padding: .4rem 1.9rem .4rem .7rem; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface) var(--chev) no-repeat right .6rem center / 12px; box-shadow: var(--shadow-xs); font-size: var(--fs-base); line-height: 1.4; transition: border-color .15s, box-shadow .15s; }
+details.menu.pick > summary.pick-box:hover { border-color: color-mix(in srgb, var(--border-strong) 55%, var(--muted)); }
+details.menu.pick[open] > summary.pick-box, details.menu.pick > summary.pick-box:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-ring); }
+.pick-k { flex: none; color: var(--muted); font-size: var(--fs-sm); }
+.pick-k::after { content: ""; display: inline-block; width: 1px; height: .95em; margin-left: .55rem; vertical-align: -.12em; background: var(--border-strong); }
+.pick-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+details.menu.pick .menu-list { left: 0; right: 0; top: calc(100% + 4px); min-width: 0; max-height: min(62vh, 26rem); overflow-y: auto; padding: .35rem; gap: 1px; scroll-margin: 1rem 0 5.5rem; } /* 绝对定位贴在框下面、和框一样宽(不走 ui.js 的固定定位);scroll-margin 的下边给底部的保存条留地方 */
+details.menu.pick .menu-list button { position: relative; padding-left: 2rem; }
+details.menu.pick .menu-list button > b + span { color: var(--muted); }
+details.menu.pick .menu-list button.on { background: var(--primary-soft); }
+details.menu.pick .menu-list button.on > b { color: var(--primary-text); }
+details.menu.pick .menu-list button.on::before { content: ""; position: absolute; left: .7rem; top: .78rem; width: .5rem; height: .28rem; border-left: 2px solid var(--primary); border-bottom: 2px solid var(--primary); transform: rotate(-45deg); }
+.set-ctl > details.menu.pick { margin-bottom: .15rem; }
 /* 带说明文字的工具栏:右边的按钮靠右对齐(说明文字有最大宽度,不能指望它把按钮顶过去) */
 .toolbar.intro > .btn, .toolbar.intro > .row, .toolbar.intro > details.menu { margin-left: auto; }
 /* 代理详情:账号那一段的登录地址和下面的资料之间留点距离 */

@@ -1836,9 +1836,10 @@ func validateSubTemplates(in map[string]string) error {
 	return nil
 }
 
-// handleSubTemplates GET /sub-templates:内置的 Clash / sing-box 模板,设置页「填入内置模板」用。
+// handleSubTemplates GET /sub-templates:订阅模板的现成写法(设置页模板框上面的选择框用,见 sub/presets.go)。
+// clash / singbox 两项是内置模板的正文,老的调用方还在用,留着。
 func (s *Server) handleSubTemplates(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"clash": sub.DefaultClashTemplate(), "singbox": sub.DefaultSingBoxTemplate()})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"clash": sub.DefaultClashTemplate(), "singbox": sub.DefaultSingBoxTemplate(), "presets": sub.Presets()})
 }
 
 // validatePorts 校验这次提交后的面板 / 订阅 / 代理面板端口:必须是 1-65535 且互不相同。
