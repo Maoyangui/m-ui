@@ -1,7 +1,7 @@
 import { state, load, isReseller, takeHashParams } from '../app.js';
 import { get, post, put, del, qrUrl, upload } from '../api.js';
 import { t } from '../i18n.js';
-import { deviceCount, gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtDate, fmtDuration, fmtRelative, daysLeft, toast, confirm, openModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML, setText, chipList, fieldBox } from '../ui.js';
+import { deviceCount, gbValue, gbBytes, esc, fmtBytes, fmtDay, fmtDate, fmtDuration, fmtRelative, daysLeft, toast, confirm, openModal, openDrawer, closeDrawer, registerActions, badge, dot, progress, field, check, empty, fv, fchk, matches, debounce, copy, setHTML, setText, fieldBox } from '../ui.js';
 
 // 生效中的规则限速(主面板才有):列表徽章与详情抽屉都从这里取
 const limitsOf = id => (state.limitStates || []).filter(s => s.userId === id);
@@ -752,12 +752,6 @@ function bulkDialog() {
   }, { size: 'xl' });
   const items = pickerItems();
   picker = linePicker(document.getElementById('f-lines'), { items, selected: new Set(items.map(it => it.key)) });
-}
-
-async function fullUpdate(u, patch) {
-  const body = Object.assign({}, u, patch, { lineIds: u.lineIds || [], extIds: u.extIds || [] });
-  delete body.onlineIps; delete body.subUrl;
-  await put('users/' + u.id, body);
 }
 
 registerActions({
