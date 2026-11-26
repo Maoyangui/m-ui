@@ -113,3 +113,16 @@ test('按在页面别处不算打开菜单:之后的滚动照常收起', async (
   fire('scroll', { target: mkTarget(false) });
   assert.equal(m.open, false);
 });
+
+// 选择框式的下拉(details.menu.pick,设置页「现成模板」):清单是绝对定位、跟着页面走的,滚动时不收起(手机上清单比屏幕长,要能边滚边看);
+// 普通菜单照常收起。这条同时钉住:滚动收起那段用的还是桩认识的 details.menu[open],不是带 :not() 的选择器
+// (CI 上出过:换成 :not(.pick) 以后桩一个也选不到,上面两条「过后的滚动照常收起」挂了)。
+test('滚动时:选择框式的下拉不收起,普通菜单照常收起', async () => {
+  await new Promise(r => setTimeout(r, 320));
+  const plain = mkMenu(), pick = mkMenu();
+  pick.classList = { contains: c => c === 'pick' };
+  fire('scroll', { target: mkTarget(false) });
+  assert.deepEqual([plain.open, pick.open], [false, true]);
+  ui.closeMenus();
+  assert.equal(pick.open, false, 'closeMenus(开弹窗、点别处)照样把它收起');
+});

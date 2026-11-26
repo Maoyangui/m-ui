@@ -363,7 +363,7 @@ document.addEventListener('toggle', e => {
   // 菜单自己的列表在滚(外部节点的「服务器列」菜单服务器多时限高滚动):不收,不然后面几台勾不到
   if (e && e.target instanceof Element && e.target.closest('details.menu')) return;
   // 选择框式的下拉跟着页面滚,不用收(手机上清单比屏幕长时要能边滚边看)
-  document.querySelectorAll('details.menu[open]:not(.pick)').forEach(d => d.removeAttribute('open'));
+  document.querySelectorAll('details.menu[open]').forEach(d => { if (!(d.classList && d.classList.contains('pick'))) d.removeAttribute('open'); });
 }, true));
 
 // ---- 剪贴板 ----
